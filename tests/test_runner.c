@@ -44,6 +44,13 @@ extern int test_30_obj_surfaces_main(void);
 extern int test_31_surface_analysis_main(void);
 extern int test_32_surface_modeling_main(void);
 extern int test_33_advanced_inspection_main(void);
+extern int test_34_surface_patches_main(void);
+extern int test_35_surface_pipe_main(void);
+extern int test_36_surface_loft_main(void);
+extern int test_37_surface_gordon_main(void);
+extern int test_38_surface_offset_main(void);
+extern int test_39_surface_trim_main(void);
+extern int test_40_surface_intersect_main(void);
 
 /* Test registry */
 typedef struct {
@@ -86,6 +93,13 @@ static test_suite const g_test_suites[] = {
 	{"31_surface_analysis", test_31_surface_analysis_main},
 	{"32_surface_modeling", test_32_surface_modeling_main},
 	{"33_advanced_inspection", test_33_advanced_inspection_main},
+	{"34_surface_patches", test_34_surface_patches_main},
+	{"35_surface_pipe", test_35_surface_pipe_main},
+	{"36_surface_loft", test_36_surface_loft_main},
+	{"37_surface_gordon", test_37_surface_gordon_main},
+	{"38_surface_offset", test_38_surface_offset_main},
+	{"39_surface_trim", test_39_surface_trim_main},
+	{"40_surface_intersect", test_40_surface_intersect_main},
 };
 
 int main(void) {

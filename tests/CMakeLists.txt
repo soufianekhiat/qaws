@@ -35,6 +35,13 @@ add_executable(
   31_surface_analysis.c
   32_surface_modeling.c
   33_advanced_inspection.c
+  34_surface_patches.c
+  35_surface_pipe.c
+  36_surface_loft.c
+  37_surface_gordon.c
+  38_surface_offset.c
+  39_surface_trim.c
+  40_surface_intersect.c
 )
 
 target_link_libraries(qaws_tests PRIVATE Qaws::qaws)

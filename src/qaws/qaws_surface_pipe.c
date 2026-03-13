@@ -1,4 +1,4 @@
-#include "qaws_surface_swept.h"
+#include "qaws_surface_pipe.h"
 #include "qaws_eval.h"
 #include "qaws_inspect.h"
 #include "internal/qaws_internal_surface.h"
@@ -8,14 +8,13 @@
 #include <math.h>
 #include "qaws_platform.h"
 
-typedef struct qaws_surface_swept_impl
+typedef struct qaws_surface_pipe_impl
 {
 	qaws_curve const* path;
-	qaws_curve const* profile;
-	qaws_scalar scale;
 	qaws_range path_range;
-	qaws_range prof_range;
-} qaws_surface_swept_impl;
+	qaws_scalar radius_x;
+	qaws_scalar radius_y;
+} qaws_surface_pipe_impl;
 
 static void compute_normal(qaws_vec3 du, qaws_vec3 dv, qaws_vec3* out)
 {
@@ -34,31 +33,33 @@ static void compute_normal(qaws_vec3 du, qaws_vec3 dv, qaws_vec3* out)
 	}
 }
 
-/* Swept surface: S(u,v) = P(u) + scale * [profile_x(v) * N(u) + profile_y(v) * B(u)]
-   u follows the path, v follows the profile cross-section.
-   N, B are Frenet normal and binormal of the path curve.
+/* Pipe surface: S(u,v) = P(u) + rx * cos(theta) * N(u) + ry * sin(theta) * B(u)
+   where theta = 2 * pi * v.
+   u follows the path, v parameterizes the circular/elliptical cross-section.
 
    dS/dv is computed analytically.
    dS/du uses central finite differences (frame derivatives are complex). */
-static qaws_status swept_surface_eval(
+static qaws_status pipe_surface_eval(
 	qaws_surface const* surface,
 	qaws_scalar u,
 	qaws_scalar v,
 	unsigned int eval_flags,
 	qaws_surface_eval_result* out_result)
 {
-	qaws_surface_swept_impl const* impl =
-		(qaws_surface_swept_impl const*)surface->impl;
+	qaws_surface_pipe_impl const* impl =
+		(qaws_surface_pipe_impl const*)surface->impl;
 	qaws_scalar s_path = impl->path_range.max_value - impl->path_range.min_value;
-	qaws_scalar s_prof = impl->prof_range.max_value - impl->prof_range.min_value;
 	qaws_scalar t_path = impl->path_range.min_value + u * s_path;
-	qaws_scalar t_prof = impl->prof_range.min_value + v * s_prof;
-	qaws_scalar scale = impl->scale;
+	qaws_scalar rx = impl->radius_x;
+	qaws_scalar ry = impl->radius_y;
+	qaws_scalar pi = QAWS_LITERAL(3.14159265358979323846);
+	qaws_scalar two_pi = QAWS_LITERAL(2.0) * pi;
+	qaws_scalar theta = two_pi * v;
+	qaws_scalar cos_theta = QAWS_COS(theta);
+	qaws_scalar sin_theta = QAWS_SIN(theta);
 
 	qaws_eval_result_3d path_r;
-	qaws_eval_result_2d prof_r;
 	qaws_vec3 T, N, B, pos;
-	qaws_scalar px, py;
 
 	/* Evaluate path position */
 	memset(&path_r, 0, sizeof(path_r));
@@ -75,27 +76,10 @@ static qaws_status swept_surface_eval(
 		if (s != QAWS_STATUS_OK) return s;
 	}
 
-	/* Evaluate profile (2D) - need position and optionally D1 */
-	{
-		unsigned int pf = QAWS_EVAL_FLAG_POSITION;
-		qaws_status s;
-		if (eval_flags & (QAWS_SURFACE_EVAL_DV | QAWS_SURFACE_EVAL_DVV))
-			pf |= QAWS_EVAL_FLAG_D1;
-		if (eval_flags & QAWS_SURFACE_EVAL_DVV)
-			pf |= QAWS_EVAL_FLAG_D2;
-
-		memset(&prof_r, 0, sizeof(prof_r));
-		s = qaws_curve_evaluate_2d(impl->profile, t_prof, pf, &prof_r);
-		if (s != QAWS_STATUS_OK) return s;
-	}
-
-	px = prof_r.position.x * scale;
-	py = prof_r.position.y * scale;
-
-	/* Position: P(u) + px * N(u) + py * B(u) */
-	pos.x = path_r.position.x + px * N.x + py * B.x;
-	pos.y = path_r.position.y + px * N.y + py * B.y;
-	pos.z = path_r.position.z + px * N.z + py * B.z;
+	/* Position: P(u) + rx * cos(theta) * N(u) + ry * sin(theta) * B(u) */
+	pos.x = path_r.position.x + rx * cos_theta * N.x + ry * sin_theta * B.x;
+	pos.y = path_r.position.y + rx * cos_theta * N.y + ry * sin_theta * B.y;
+	pos.z = path_r.position.z + rx * cos_theta * N.z + ry * sin_theta * B.z;
 
 	if (eval_flags & QAWS_SURFACE_EVAL_POSITION)
 	{
@@ -103,26 +87,26 @@ static qaws_status swept_surface_eval(
 		out_result->valid_flags |= QAWS_SURFACE_EVAL_POSITION;
 	}
 
-	/* dS/dv = s_prof * scale * [profile_x'(v) * N(u) + profile_y'(v) * B(u)] */
+	/* dS/dv = 2*pi * (-rx * sin(theta) * N(u) + ry * cos(theta) * B(u)) */
 	if (eval_flags & QAWS_SURFACE_EVAL_DV)
 	{
-		qaws_scalar dpx = prof_r.d1.x * scale * s_prof;
-		qaws_scalar dpy = prof_r.d1.y * scale * s_prof;
-		out_result->dv.x = dpx * N.x + dpy * B.x;
-		out_result->dv.y = dpx * N.y + dpy * B.y;
-		out_result->dv.z = dpx * N.z + dpy * B.z;
+		qaws_scalar dnx = -rx * sin_theta;
+		qaws_scalar dny = ry * cos_theta;
+		out_result->dv.x = two_pi * (dnx * N.x + dny * B.x);
+		out_result->dv.y = two_pi * (dnx * N.y + dny * B.y);
+		out_result->dv.z = two_pi * (dnx * N.z + dny * B.z);
 		out_result->valid_flags |= QAWS_SURFACE_EVAL_DV;
 	}
 
-	/* dvv = s_prof^2 * scale * [profile_x''(v) * N(u) + profile_y''(v) * B(u)] */
+	/* d2S/dv2 = (2*pi)^2 * (-rx * cos(theta) * N(u) - ry * sin(theta) * B(u)) */
 	if (eval_flags & QAWS_SURFACE_EVAL_DVV)
 	{
-		qaws_scalar sp2 = s_prof * s_prof;
-		qaws_scalar ddpx = prof_r.d2.x * scale * sp2;
-		qaws_scalar ddpy = prof_r.d2.y * scale * sp2;
-		out_result->dvv.x = ddpx * N.x + ddpy * B.x;
-		out_result->dvv.y = ddpx * N.y + ddpy * B.y;
-		out_result->dvv.z = ddpx * N.z + ddpy * B.z;
+		qaws_scalar tp2 = two_pi * two_pi;
+		qaws_scalar ddnx = -rx * cos_theta;
+		qaws_scalar ddny = -ry * sin_theta;
+		out_result->dvv.x = tp2 * (ddnx * N.x + ddny * B.x);
+		out_result->dvv.y = tp2 * (ddnx * N.y + ddny * B.y);
+		out_result->dvv.z = tp2 * (ddnx * N.z + ddny * B.z);
 		out_result->valid_flags |= QAWS_SURFACE_EVAL_DVV;
 	}
 
@@ -148,16 +132,16 @@ static qaws_status swept_surface_eval(
 			memset(&pr, 0, sizeof(pr));
 			qaws_curve_evaluate_3d(impl->path, t_lo, QAWS_EVAL_FLAG_POSITION, &pr);
 			qaws_curve_compute_frenet_frame_3d(impl->path, t_lo, &T_lo, &N_lo, &B_lo);
-			p_lo.x = pr.position.x + px * N_lo.x + py * B_lo.x;
-			p_lo.y = pr.position.y + px * N_lo.y + py * B_lo.y;
-			p_lo.z = pr.position.z + px * N_lo.z + py * B_lo.z;
+			p_lo.x = pr.position.x + rx * cos_theta * N_lo.x + ry * sin_theta * B_lo.x;
+			p_lo.y = pr.position.y + rx * cos_theta * N_lo.y + ry * sin_theta * B_lo.y;
+			p_lo.z = pr.position.z + rx * cos_theta * N_lo.z + ry * sin_theta * B_lo.z;
 
 			memset(&pr, 0, sizeof(pr));
 			qaws_curve_evaluate_3d(impl->path, t_hi, QAWS_EVAL_FLAG_POSITION, &pr);
 			qaws_curve_compute_frenet_frame_3d(impl->path, t_hi, &T_hi, &N_hi, &B_hi);
-			p_hi.x = pr.position.x + px * N_hi.x + py * B_hi.x;
-			p_hi.y = pr.position.y + px * N_hi.y + py * B_hi.y;
-			p_hi.z = pr.position.z + px * N_hi.z + py * B_hi.z;
+			p_hi.x = pr.position.x + rx * cos_theta * N_hi.x + ry * sin_theta * B_hi.x;
+			p_hi.y = pr.position.y + rx * cos_theta * N_hi.y + ry * sin_theta * B_hi.y;
+			p_hi.z = pr.position.z + rx * cos_theta * N_hi.z + ry * sin_theta * B_hi.z;
 		}
 
 		if (eval_flags & QAWS_SURFACE_EVAL_DU)
@@ -185,21 +169,21 @@ static qaws_status swept_surface_eval(
 			qaws_scalar t_lo = impl->path_range.min_value + u_lo * s_path;
 			qaws_scalar t_hi = impl->path_range.min_value + u_hi * s_path;
 			qaws_vec3 T_tmp, N_lo, B_lo, N_hi, B_hi;
-			qaws_scalar dpx = prof_r.d1.x * scale * s_prof;
-			qaws_scalar dpy = prof_r.d1.y * scale * s_prof;
+			qaws_scalar dnx = -rx * sin_theta;
+			qaws_scalar dny = ry * cos_theta;
 			qaws_vec3 dv_lo, dv_hi;
 			qaws_scalar inv2h = QAWS_ONE / (QAWS_LITERAL(2.0) * h);
 
 			qaws_curve_compute_frenet_frame_3d(impl->path, t_lo, &T_tmp, &N_lo, &B_lo);
 			qaws_curve_compute_frenet_frame_3d(impl->path, t_hi, &T_tmp, &N_hi, &B_hi);
 
-			dv_lo.x = dpx * N_lo.x + dpy * B_lo.x;
-			dv_lo.y = dpx * N_lo.y + dpy * B_lo.y;
-			dv_lo.z = dpx * N_lo.z + dpy * B_lo.z;
+			dv_lo.x = two_pi * (dnx * N_lo.x + dny * B_lo.x);
+			dv_lo.y = two_pi * (dnx * N_lo.y + dny * B_lo.y);
+			dv_lo.z = two_pi * (dnx * N_lo.z + dny * B_lo.z);
 
-			dv_hi.x = dpx * N_hi.x + dpy * B_hi.x;
-			dv_hi.y = dpx * N_hi.y + dpy * B_hi.y;
-			dv_hi.z = dpx * N_hi.z + dpy * B_hi.z;
+			dv_hi.x = two_pi * (dnx * N_hi.x + dny * B_hi.x);
+			dv_hi.y = two_pi * (dnx * N_hi.y + dny * B_hi.y);
+			dv_hi.z = two_pi * (dnx * N_hi.z + dny * B_hi.z);
 
 			out_result->duv.x = (dv_hi.x - dv_lo.x) * inv2h;
 			out_result->duv.y = (dv_hi.y - dv_lo.y) * inv2h;
@@ -218,48 +202,50 @@ static qaws_status swept_surface_eval(
 	return QAWS_STATUS_OK;
 }
 
-static void swept_surface_destroy(void* impl, qaws_allocator const* allocator)
+static void pipe_surface_destroy(void* impl, qaws_allocator const* allocator)
 {
 	qaws_internal_dealloc(allocator, impl);
 }
 
-static int swept_surface_is_rational(qaws_surface const* s)
+static int pipe_surface_is_rational(qaws_surface const* s)
 {
 	(void)s;
 	return 0;
 }
 
-static qaws_surface_vtable const swept_surface_vtable = {
-	swept_surface_eval,
-	swept_surface_destroy,
-	swept_surface_is_rational
+static qaws_surface_vtable const pipe_surface_vtable = {
+	pipe_surface_eval,
+	pipe_surface_destroy,
+	pipe_surface_is_rational
 };
 
-qaws_status qaws_surface_create_swept(
-	qaws_surface_swept_desc const* desc,
+qaws_status qaws_surface_create_pipe(
+	qaws_surface_pipe_desc const* desc,
 	qaws_surface** out_surface)
 {
 	qaws_surface* surface;
-	qaws_surface_swept_impl* impl;
+	qaws_surface_pipe_impl* impl;
 	qaws_range u_range, v_range;
+	qaws_scalar ry;
 
 	if (!desc || !out_surface) return QAWS_STATUS_INVALID_ARGUMENT;
-	if (!desc->path || !desc->profile) return QAWS_STATUS_INVALID_ARGUMENT;
+	if (!desc->path) return QAWS_STATUS_INVALID_ARGUMENT;
 	if (qaws_curve_get_dimension(desc->path) != QAWS_DIMENSION_3D)
 		return QAWS_STATUS_INVALID_DIMENSION;
-	if (qaws_curve_get_dimension(desc->profile) != QAWS_DIMENSION_2D)
-		return QAWS_STATUS_INVALID_DIMENSION;
+	if (desc->radius_x <= 0) return QAWS_STATUS_INVALID_ARGUMENT;
+
+	ry = (desc->radius_y > 0) ? desc->radius_y : desc->radius_x;
 
 	u_range.min_value = 0; u_range.max_value = 1;
 	v_range.min_value = 0; v_range.max_value = 1;
 
 	surface = qaws_internal_surface_alloc(
-		QAWS_SURFACE_KIND_SWEPT,
+		QAWS_SURFACE_KIND_PIPE,
 		0, 0, u_range, v_range,
-		&swept_surface_vtable);
+		&pipe_surface_vtable);
 	if (!surface) return QAWS_STATUS_ALLOCATION_FAILURE;
 
-	impl = (qaws_surface_swept_impl*)malloc(sizeof(qaws_surface_swept_impl));
+	impl = (qaws_surface_pipe_impl*)malloc(sizeof(qaws_surface_pipe_impl));
 	if (!impl)
 	{
 		qaws_internal_surface_free(surface);
@@ -267,10 +253,9 @@ qaws_status qaws_surface_create_swept(
 	}
 
 	impl->path = desc->path;
-	impl->profile = desc->profile;
-	impl->scale = (desc->scale > 0) ? desc->scale : QAWS_ONE;
 	impl->path_range = qaws_curve_get_parameter_range(desc->path);
-	impl->prof_range = qaws_curve_get_parameter_range(desc->profile);
+	impl->radius_x = desc->radius_x;
+	impl->radius_y = ry;
 
 	surface->impl = impl;
 	*out_surface = surface;

@@ -72,6 +72,14 @@ set(QAWS_SOURCES
   src/qaws/qaws_surface_coons.c
   src/qaws/qaws_surface_extrusion.c
   src/qaws/qaws_surface_revolution.c
+  src/qaws/qaws_surface_bilinear.c
+  src/qaws/qaws_surface_biquadratic.c
+  src/qaws/qaws_surface_pipe.c
+  src/qaws/qaws_surface_loft.c
+  src/qaws/qaws_surface_gordon.c
+  src/qaws/qaws_surface_offset.c
+  src/qaws/qaws_surface_trim.c
+  src/qaws/qaws_surface_intersect.c
   src/qaws/qaws_inline.c
   src/qaws/qaws_prepare.c
   src/qaws/internal/qaws_internal_curve.c
@@ -241,6 +249,14 @@ if(QAWS_INSTALL)
       src/qaws/qaws_surface_coons.h
       src/qaws/qaws_surface_extrusion.h
       src/qaws/qaws_surface_revolution.h
+      src/qaws/qaws_surface_bilinear.h
+      src/qaws/qaws_surface_biquadratic.h
+      src/qaws/qaws_surface_pipe.h
+      src/qaws/qaws_surface_loft.h
+      src/qaws/qaws_surface_gordon.h
+      src/qaws/qaws_surface_offset.h
+      src/qaws/qaws_surface_trim.h
+      src/qaws/qaws_surface_intersect.h
       src/qaws/qaws_alloc.h
       src/qaws/qaws_inline.h
       src/qaws/qaws_platform.h
