@@ -212,7 +212,6 @@ static void test_sphere_plane_intersection(void)
 static void visual_obj_intersection(void)
 {
 	obj_writer w;
-	qaws_curve* dc0 = NULL, *dc1 = NULL, *dd0 = NULL, *dd1 = NULL;
 	qaws_surface* surf_a = NULL;
 	qaws_surface* surf_b = NULL;
 	qaws_ssi_desc desc;
@@ -225,20 +224,33 @@ static void visual_obj_intersection(void)
 	printf("visual_obj_intersection\n");
 	svg_ensure_output_dir();
 
-	/* Surface A: tall dome Coons patch (-1..1 in x, 0..1 in y, peak z~0.5) */
-	surf_a = make_dome_coons(&dc0, &dc1, &dd0, &dd1);
-	if (!surf_a) goto cleanup_isect;
+	/* Surface A: biquadratic bowl — all boundary CPs at z=0.5, center CP
+	   at z=-1.0.  The z=0.25 plane cuts a closed contour entirely inside
+	   the domain (boundary z is constant 0.5, center dips to ~0.125). */
+	{
+		qaws_surface_biquadratic_desc bd;
+		bd.control_points[0].x = -1; bd.control_points[0].y = -1; bd.control_points[0].z = (qaws_scalar)0.5;
+		bd.control_points[1].x =  0; bd.control_points[1].y = -1; bd.control_points[1].z = (qaws_scalar)0.5;
+		bd.control_points[2].x =  1; bd.control_points[2].y = -1; bd.control_points[2].z = (qaws_scalar)0.5;
+		bd.control_points[3].x = -1; bd.control_points[3].y =  0; bd.control_points[3].z = (qaws_scalar)0.5;
+		bd.control_points[4].x =  0; bd.control_points[4].y =  0; bd.control_points[4].z = (qaws_scalar)-1.0;
+		bd.control_points[5].x =  1; bd.control_points[5].y =  0; bd.control_points[5].z = (qaws_scalar)0.5;
+		bd.control_points[6].x = -1; bd.control_points[6].y =  1; bd.control_points[6].z = (qaws_scalar)0.5;
+		bd.control_points[7].x =  0; bd.control_points[7].y =  1; bd.control_points[7].z = (qaws_scalar)0.5;
+		bd.control_points[8].x =  1; bd.control_points[8].y =  1; bd.control_points[8].z = (qaws_scalar)0.5;
+		s = qaws_surface_create_biquadratic(&bd, &surf_a);
+		if (s != QAWS_STATUS_OK) return;
+	}
 
-	/* Surface B: horizontal plane at z=0.25, clearly slicing through the dome.
-	   Extends well beyond the dome so the overlap is visible. */
+	/* Surface B: horizontal plane at z=0.25 */
 	{
 		qaws_surface_bilinear_desc bd;
-		bd.p00.x = (qaws_scalar)-1.5; bd.p00.y = (qaws_scalar)-0.5; bd.p00.z = (qaws_scalar)0.25;
-		bd.p10.x = (qaws_scalar) 1.5; bd.p10.y = (qaws_scalar)-0.5; bd.p10.z = (qaws_scalar)0.25;
+		bd.p00.x = (qaws_scalar)-1.5; bd.p00.y = (qaws_scalar)-1.5; bd.p00.z = (qaws_scalar)0.25;
+		bd.p10.x = (qaws_scalar) 1.5; bd.p10.y = (qaws_scalar)-1.5; bd.p10.z = (qaws_scalar)0.25;
 		bd.p01.x = (qaws_scalar)-1.5; bd.p01.y = (qaws_scalar) 1.5; bd.p01.z = (qaws_scalar)0.25;
 		bd.p11.x = (qaws_scalar) 1.5; bd.p11.y = (qaws_scalar) 1.5; bd.p11.z = (qaws_scalar)0.25;
 		s = qaws_surface_create_bilinear(&bd, &surf_b);
-		if (s != QAWS_STATUS_OK || !surf_b) goto cleanup_isect;
+		if (s != QAWS_STATUS_OK) { qaws_surface_destroy(surf_a); return; }
 	}
 
 	/* Intersect */
@@ -258,13 +270,13 @@ static void visual_obj_intersection(void)
 	if (!obj_open(&w, OBJ_OUTPUT_DIR "/surface_intersection.obj",
 		OBJ_OUTPUT_DIR "/surface_intersection.mtl")) goto cleanup_isect;
 
-	/* Surface A: dome */
+	/* Surface A: bowl */
 	obj_material(&w, "surf_a", 0.3, 0.6, 0.9);
 	obj_group(&w, "surface_a");
 	obj_use_material(&w, "surf_a");
 	obj_surface_mesh(&w, surf_a, 32, 32);
 
-	/* Surface B: tilted plane */
+	/* Surface B: plane */
 	obj_material(&w, "surf_b", 0.9, 0.8, 0.3);
 	obj_group(&w, "surface_b");
 	obj_use_material(&w, "surf_b");
@@ -275,12 +287,8 @@ static void visual_obj_intersection(void)
 	obj_group(&w, "intersection");
 	obj_use_material(&w, "isect");
 	for (ci = 0; ci < curve_count; ci++)
-	{
 		for (pi = 0; pi < out_curves[ci].point_count; pi++)
-		{
 			obj_sphere(&w, out_curves[ci].points[pi].position, (qaws_scalar)0.03);
-		}
-	}
 
 	obj_close(&w);
 	printf("  -> " OBJ_OUTPUT_DIR "/surface_intersection.obj\n");
@@ -288,10 +296,175 @@ static void visual_obj_intersection(void)
 cleanup_isect:
 	qaws_surface_destroy(surf_a);
 	qaws_surface_destroy(surf_b);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Visual: tilted plane slicing dome at an angle                       */
+/* ------------------------------------------------------------------ */
+static void visual_obj_intersection_tilted(void)
+{
+	obj_writer w;
+	qaws_curve* dc0 = NULL, *dc1 = NULL, *dd0 = NULL, *dd1 = NULL;
+	qaws_surface* surf_a = NULL;
+	qaws_surface* surf_b = NULL;
+	qaws_ssi_desc desc;
+	qaws_ssi_curve out_curves[8];
+	qaws_ssi_point point_buffer[1000];
+	unsigned int curve_count = 0;
+	qaws_status s;
+	unsigned int ci, pi;
+
+	printf("visual_obj_intersection_tilted\n");
+	svg_ensure_output_dir();
+
+	surf_a = make_dome_coons(&dc0, &dc1, &dd0, &dd1);
+	if (!surf_a) goto cleanup_tilt;
+
+	/* Tilted plane cutting through the dome at an angle */
+	{
+		qaws_surface_bilinear_desc bd;
+		bd.p00.x = (qaws_scalar)-1.5; bd.p00.y = (qaws_scalar)-0.5; bd.p00.z = (qaws_scalar)0.0;
+		bd.p10.x = (qaws_scalar) 1.5; bd.p10.y = (qaws_scalar)-0.5; bd.p10.z = (qaws_scalar)0.6;
+		bd.p01.x = (qaws_scalar)-1.5; bd.p01.y = (qaws_scalar) 1.5; bd.p01.z = (qaws_scalar)0.2;
+		bd.p11.x = (qaws_scalar) 1.5; bd.p11.y = (qaws_scalar) 1.5; bd.p11.z = (qaws_scalar)0.8;
+		s = qaws_surface_create_bilinear(&bd, &surf_b);
+		if (s != QAWS_STATUS_OK || !surf_b) goto cleanup_tilt;
+	}
+
+	memset(&desc, 0, sizeof(desc));
+	desc.surface_a = surf_a;
+	desc.surface_b = surf_b;
+	desc.tolerance = (qaws_scalar)1e-4;
+	desc.grid_samples = 20;
+	memset(out_curves, 0, sizeof(out_curves));
+	memset(point_buffer, 0, sizeof(point_buffer));
+	s = qaws_surface_intersect(&desc, out_curves, 8, &curve_count,
+		point_buffer, 1000);
+
+	if (!obj_open(&w, OBJ_OUTPUT_DIR "/intersection_tilted.obj",
+		OBJ_OUTPUT_DIR "/intersection_tilted.mtl")) goto cleanup_tilt;
+
+	obj_material(&w, "dome", 0.3, 0.6, 0.9);
+	obj_material(&w, "plane", 0.9, 0.8, 0.3);
+	obj_material(&w, "isect", 1.0, 0.0, 0.0);
+
+	obj_group(&w, "dome");
+	obj_use_material(&w, "dome");
+	obj_surface_mesh(&w, surf_a, 32, 32);
+
+	obj_group(&w, "tilted_plane");
+	obj_use_material(&w, "plane");
+	obj_surface_mesh(&w, surf_b, 16, 16);
+
+	obj_group(&w, "intersection_curve");
+	obj_use_material(&w, "isect");
+	for (ci = 0; ci < curve_count; ci++)
+		for (pi = 0; pi < out_curves[ci].point_count; pi++)
+			obj_sphere(&w, out_curves[ci].points[pi].position, (qaws_scalar)0.03);
+
+	obj_close(&w);
+	printf("  -> " OBJ_OUTPUT_DIR "/intersection_tilted.obj\n");
+
+cleanup_tilt:
+	qaws_surface_destroy(surf_a);
+	qaws_surface_destroy(surf_b);
 	qaws_curve_destroy(dc0);
 	qaws_curve_destroy(dc1);
 	qaws_curve_destroy(dd0);
 	qaws_curve_destroy(dd1);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Visual: two curved patches intersecting                             */
+/* ------------------------------------------------------------------ */
+static void visual_obj_intersection_patches(void)
+{
+	obj_writer w;
+	qaws_surface* surf_a = NULL;
+	qaws_surface* surf_b = NULL;
+	qaws_ssi_desc desc;
+	qaws_ssi_curve out_curves[8];
+	qaws_ssi_point point_buffer[1000];
+	unsigned int curve_count = 0;
+	qaws_status s;
+	unsigned int ci, pi;
+
+	printf("visual_obj_intersection_patches\n");
+	svg_ensure_output_dir();
+
+	/* Surface A: biquadratic dome rising in Z */
+	{
+		qaws_surface_biquadratic_desc bd;
+		bd.control_points[0].x = -2; bd.control_points[0].y = -2; bd.control_points[0].z = 0;
+		bd.control_points[1].x =  0; bd.control_points[1].y = -2; bd.control_points[1].z = 0;
+		bd.control_points[2].x =  2; bd.control_points[2].y = -2; bd.control_points[2].z = 0;
+		bd.control_points[3].x = -2; bd.control_points[3].y =  0; bd.control_points[3].z = 0;
+		bd.control_points[4].x =  0; bd.control_points[4].y =  0; bd.control_points[4].z = 3;
+		bd.control_points[5].x =  2; bd.control_points[5].y =  0; bd.control_points[5].z = 0;
+		bd.control_points[6].x = -2; bd.control_points[6].y =  2; bd.control_points[6].z = 0;
+		bd.control_points[7].x =  0; bd.control_points[7].y =  2; bd.control_points[7].z = 0;
+		bd.control_points[8].x =  2; bd.control_points[8].y =  2; bd.control_points[8].z = 0;
+		s = qaws_surface_create_biquadratic(&bd, &surf_a);
+		if (s != QAWS_STATUS_OK) return;
+	}
+
+	/* Surface B: biquadratic dome rising in Y, rotated 90 degrees */
+	{
+		qaws_surface_biquadratic_desc bd;
+		bd.control_points[0].x = -2; bd.control_points[0].y = 0; bd.control_points[0].z = -2;
+		bd.control_points[1].x =  0; bd.control_points[1].y = 0; bd.control_points[1].z = -2;
+		bd.control_points[2].x =  2; bd.control_points[2].y = 0; bd.control_points[2].z = -2;
+		bd.control_points[3].x = -2; bd.control_points[3].y = 0; bd.control_points[3].z =  0;
+		bd.control_points[4].x =  0; bd.control_points[4].y = 3; bd.control_points[4].z =  0;
+		bd.control_points[5].x =  2; bd.control_points[5].y = 0; bd.control_points[5].z =  0;
+		bd.control_points[6].x = -2; bd.control_points[6].y = 0; bd.control_points[6].z =  2;
+		bd.control_points[7].x =  0; bd.control_points[7].y = 0; bd.control_points[7].z =  2;
+		bd.control_points[8].x =  2; bd.control_points[8].y = 0; bd.control_points[8].z =  2;
+		s = qaws_surface_create_biquadratic(&bd, &surf_b);
+		if (s != QAWS_STATUS_OK) { qaws_surface_destroy(surf_a); return; }
+	}
+
+	memset(&desc, 0, sizeof(desc));
+	desc.surface_a = surf_a;
+	desc.surface_b = surf_b;
+	desc.tolerance = (qaws_scalar)1e-4;
+	desc.grid_samples = 20;
+	memset(out_curves, 0, sizeof(out_curves));
+	memset(point_buffer, 0, sizeof(point_buffer));
+	s = qaws_surface_intersect(&desc, out_curves, 8, &curve_count,
+		point_buffer, 1000);
+
+	if (!obj_open(&w, OBJ_OUTPUT_DIR "/intersection_patches.obj",
+		OBJ_OUTPUT_DIR "/intersection_patches.mtl"))
+	{
+		qaws_surface_destroy(surf_a);
+		qaws_surface_destroy(surf_b);
+		return;
+	}
+
+	obj_material(&w, "dome_z", 0.3, 0.6, 0.9);
+	obj_material(&w, "dome_y", 0.3, 0.9, 0.4);
+	obj_material(&w, "isect", 1.0, 0.0, 0.0);
+
+	obj_group(&w, "dome_rising_z");
+	obj_use_material(&w, "dome_z");
+	obj_surface_mesh(&w, surf_a, 32, 32);
+
+	obj_group(&w, "dome_rising_y");
+	obj_use_material(&w, "dome_y");
+	obj_surface_mesh(&w, surf_b, 32, 32);
+
+	obj_group(&w, "intersection_curve");
+	obj_use_material(&w, "isect");
+	for (ci = 0; ci < curve_count; ci++)
+		for (pi = 0; pi < out_curves[ci].point_count; pi++)
+			obj_sphere(&w, out_curves[ci].points[pi].position, (qaws_scalar)0.04);
+
+	obj_close(&w);
+	printf("  -> " OBJ_OUTPUT_DIR "/intersection_patches.obj\n");
+
+	qaws_surface_destroy(surf_a);
+	qaws_surface_destroy(surf_b);
 }
 
 /* ------------------------------------------------------------------ */
@@ -307,6 +480,8 @@ int test_40_surface_intersect_main(void)
 
 	/* Visual output */
 	visual_obj_intersection();
+	visual_obj_intersection_tilted();
+	visual_obj_intersection_patches();
 
 	printf("40_surface_intersect: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail > 0 ? 1 : 0;

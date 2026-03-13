@@ -216,14 +216,16 @@ static unsigned int march_direction(
 	qaws_scalar v2 = v2_start;
 	qaws_vec3 pos = pos_start;
 	unsigned int step;
+	unsigned int boundary_streak = 0;
 
 	for (step = 0; step < max_steps && count < point_capacity; ++step)
 	{
 		qaws_surface_eval_result r1, r2;
 		qaws_vec3 T, n1, n2;
-		qaws_scalar t_len;
-		qaws_scalar pred_u1, pred_v1, pred_u2, pred_v2;
-		qaws_vec3 new_pos;
+		qaws_scalar t_len, actual_step;
+		qaws_scalar pred_u1 = u1, pred_v1 = v1, pred_u2 = u2, pred_v2 = v2;
+		qaws_vec3 new_pos = pos;
+		int on_boundary;
 		unsigned int eval_flags = QAWS_SURFACE_EVAL_POSITION
 			| QAWS_SURFACE_EVAL_DU | QAWS_SURFACE_EVAL_DV
 			| QAWS_SURFACE_EVAL_NORMAL;
@@ -242,8 +244,8 @@ static unsigned int march_direction(
 		/* Intersection tangent: T = N1 x N2 */
 		T = vec3_cross(n1, n2);
 		t_len = vec3_length(T);
-		if (t_len < QAWS_LITERAL(1e-10))
-			break; /* surfaces tangent here; can't march */
+		if (t_len < QAWS_LITERAL(1e-14))
+			break; /* surfaces truly tangent; can't march */
 
 		/* Normalize and apply direction */
 		{
@@ -253,83 +255,103 @@ static unsigned int march_direction(
 			T.z *= inv_len;
 		}
 
-		/* Predict new 3D point */
+		/* Adaptive step: reduce near tangency where the intersection
+		   curve has high curvature and needs finer tracking. */
+		actual_step = step_size;
+		if (t_len < QAWS_LITERAL(0.1))
 		{
-			qaws_vec3 pred_pos;
-			pred_pos.x = pos.x + step_size * T.x;
-			pred_pos.y = pos.y + step_size * T.y;
-			pred_pos.z = pos.z + step_size * T.z;
+			actual_step = step_size * (t_len / QAWS_LITERAL(0.1));
+			if (actual_step < step_size * QAWS_LITERAL(0.02))
+				actual_step = step_size * QAWS_LITERAL(0.02);
+		}
 
-			/* Project predicted point back to parameter space on each surface.
-			   pred_params = current_params + J^+ * (pred_pos - current_pos)
-			   where J^+ uses the du, dv tangent vectors. */
+		/* Predict + project + Newton-refine, with retry on failure.
+		   If Newton doesn't converge, halve the step and try again. */
+		{
+			int converged = 0;
+			int retry;
+			qaws_scalar try_step = actual_step;
+
+			for (retry = 0; retry < 4 && !converged; ++retry)
 			{
-				qaws_vec3 dp1;
+				qaws_vec3 pred_pos, dp;
 				qaws_scalar a11, a12, a22, b1_val, b2_val;
 				qaws_scalar dparam_u, dparam_v;
 
-				dp1.x = pred_pos.x - r1.position.x;
-				dp1.y = pred_pos.y - r1.position.y;
-				dp1.z = pred_pos.z - r1.position.z;
+				pred_pos.x = pos.x + try_step * T.x;
+				pred_pos.y = pos.y + try_step * T.y;
+				pred_pos.z = pos.z + try_step * T.z;
 
+				/* Project onto surface 1 tangent plane */
+				dp.x = pred_pos.x - r1.position.x;
+				dp.y = pred_pos.y - r1.position.y;
+				dp.z = pred_pos.z - r1.position.z;
 				a11 = vec3_dot(r1.du, r1.du);
 				a12 = vec3_dot(r1.du, r1.dv);
 				a22 = vec3_dot(r1.dv, r1.dv);
-				b1_val = vec3_dot(r1.du, dp1);
-				b2_val = vec3_dot(r1.dv, dp1);
-
-				if (!solve_2x2(a11, a12, a12, a22, b1_val, b2_val, &dparam_u, &dparam_v))
-					break;
-
+				b1_val = vec3_dot(r1.du, dp);
+				b2_val = vec3_dot(r1.dv, dp);
+				if (!solve_2x2(a11, a12, a12, a22, b1_val, b2_val,
+					&dparam_u, &dparam_v))
+				{
+					try_step *= QAWS_LITERAL(0.5);
+					continue;
+				}
 				pred_u1 = clamp01(u1 + dparam_u);
 				pred_v1 = clamp01(v1 + dparam_v);
-			}
 
-			{
-				qaws_vec3 dp2;
-				qaws_scalar a11, a12, a22, b1_val, b2_val;
-				qaws_scalar dparam_u, dparam_v;
-
-				dp2.x = pred_pos.x - r2.position.x;
-				dp2.y = pred_pos.y - r2.position.y;
-				dp2.z = pred_pos.z - r2.position.z;
-
+				/* Project onto surface 2 tangent plane */
+				dp.x = pred_pos.x - r2.position.x;
+				dp.y = pred_pos.y - r2.position.y;
+				dp.z = pred_pos.z - r2.position.z;
 				a11 = vec3_dot(r2.du, r2.du);
 				a12 = vec3_dot(r2.du, r2.dv);
 				a22 = vec3_dot(r2.dv, r2.dv);
-				b1_val = vec3_dot(r2.du, dp2);
-				b2_val = vec3_dot(r2.dv, dp2);
-
-				if (!solve_2x2(a11, a12, a12, a22, b1_val, b2_val, &dparam_u, &dparam_v))
-					break;
-
+				b1_val = vec3_dot(r2.du, dp);
+				b2_val = vec3_dot(r2.dv, dp);
+				if (!solve_2x2(a11, a12, a12, a22, b1_val, b2_val,
+					&dparam_u, &dparam_v))
+				{
+					try_step *= QAWS_LITERAL(0.5);
+					continue;
+				}
 				pred_u2 = clamp01(u2 + dparam_u);
 				pred_v2 = clamp01(v2 + dparam_v);
+
+				/* Newton-refine */
+				if (newton_refine(sa, sb, &pred_u1, &pred_v1,
+					&pred_u2, &pred_v2, &new_pos, tolerance))
+					converged = 1;
+				else
+					try_step *= QAWS_LITERAL(0.5);
 			}
+			if (!converged)
+				break;
 		}
 
-		/* Newton-refine the predicted parameters */
-		if (!newton_refine(sa, sb, &pred_u1, &pred_v1, &pred_u2, &pred_v2,
-			&new_pos, tolerance))
-			break;
+		/* Check if any parameter is stuck at the domain boundary.
+		   Use a streak counter: near-tangent intersection curves may
+		   run along a boundary for several steps before turning back. */
+		on_boundary = 0;
+		if ((pred_u1 <= QAWS_LITERAL(1e-8) && u1 <= QAWS_LITERAL(1e-8)) ||
+			(pred_u1 >= QAWS_ONE - QAWS_LITERAL(1e-8) && u1 >= QAWS_ONE - QAWS_LITERAL(1e-8)) ||
+			(pred_v1 <= QAWS_LITERAL(1e-8) && v1 <= QAWS_LITERAL(1e-8)) ||
+			(pred_v1 >= QAWS_ONE - QAWS_LITERAL(1e-8) && v1 >= QAWS_ONE - QAWS_LITERAL(1e-8)) ||
+			(pred_u2 <= QAWS_LITERAL(1e-8) && u2 <= QAWS_LITERAL(1e-8)) ||
+			(pred_u2 >= QAWS_ONE - QAWS_LITERAL(1e-8) && u2 >= QAWS_ONE - QAWS_LITERAL(1e-8)) ||
+			(pred_v2 <= QAWS_LITERAL(1e-8) && v2 <= QAWS_LITERAL(1e-8)) ||
+			(pred_v2 >= QAWS_ONE - QAWS_LITERAL(1e-8) && v2 >= QAWS_ONE - QAWS_LITERAL(1e-8)))
+			on_boundary = 1;
 
-		/* Check if any parameter is stuck at the domain boundary */
-		if (pred_u1 <= QAWS_LITERAL(1e-8) && u1 <= QAWS_LITERAL(1e-8))
-			break;
-		if (pred_u1 >= QAWS_ONE - QAWS_LITERAL(1e-8) && u1 >= QAWS_ONE - QAWS_LITERAL(1e-8))
-			break;
-		if (pred_v1 <= QAWS_LITERAL(1e-8) && v1 <= QAWS_LITERAL(1e-8))
-			break;
-		if (pred_v1 >= QAWS_ONE - QAWS_LITERAL(1e-8) && v1 >= QAWS_ONE - QAWS_LITERAL(1e-8))
-			break;
-		if (pred_u2 <= QAWS_LITERAL(1e-8) && u2 <= QAWS_LITERAL(1e-8))
-			break;
-		if (pred_u2 >= QAWS_ONE - QAWS_LITERAL(1e-8) && u2 >= QAWS_ONE - QAWS_LITERAL(1e-8))
-			break;
-		if (pred_v2 <= QAWS_LITERAL(1e-8) && v2 <= QAWS_LITERAL(1e-8))
-			break;
-		if (pred_v2 >= QAWS_ONE - QAWS_LITERAL(1e-8) && v2 >= QAWS_ONE - QAWS_LITERAL(1e-8))
-			break;
+		if (on_boundary)
+		{
+			if (++boundary_streak > 5)
+				break;
+		}
+		else
+		{
+			boundary_streak = 0;
+		}
 
 		/* Store point */
 		out_points[count].u1 = pred_u1;
@@ -349,11 +371,15 @@ static unsigned int march_direction(
 		/* Check if we've returned to start (closed curve) */
 		if (count > 2)
 		{
-			qaws_scalar du1_ret = u1 - u1_start;
-			qaws_scalar dv1_ret = v1 - v1_start;
-			qaws_scalar d_ret = QAWS_SQRT(du1_ret * du1_ret + dv1_ret * dv1_ret);
-			if (d_ret < step_size * QAWS_LITERAL(0.5))
-				break;
+			qaws_scalar d_ret = vec3_dist(pos, pos_start);
+			if (d_ret < step_size * QAWS_LITERAL(1.5))
+			{
+				qaws_scalar du1_ret = u1 - u1_start;
+				qaws_scalar dv1_ret = v1 - v1_start;
+				qaws_scalar dp_ret = QAWS_SQRT(du1_ret * du1_ret + dv1_ret * dv1_ret);
+				if (dp_ret < step_size * QAWS_LITERAL(2.0))
+					break;
+			}
 		}
 	}
 

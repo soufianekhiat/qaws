@@ -56,32 +56,75 @@ static qaws_surface* make_dome_surface(void)
 }
 
 /* ------------------------------------------------------------------ */
-/*  Visual: OBJ dome surface with curvature color map                  */
+/*  Helper: create a wavy revolution surface (sinusoidal profile)      */
+/*  Alternating bulge/waist → positive and negative curvature bands.   */
+/* ------------------------------------------------------------------ */
+static qaws_surface* make_wavy_surface(qaws_curve** out_profile)
+{
+	qaws_surface* surf = NULL;
+	qaws_curve* prof = NULL;
+	qaws_scalar pts[10];
+	qaws_bezier_desc bd;
+	qaws_surface_revolution_desc rd;
+
+	/* Degree-4 Bezier profile approximating a sine wave.
+	   x = radius (2.0 ± 0.8), y = height 0..3.
+	   Bulge at y~0.75, waist at y~2.25. */
+	pts[0] = 2; pts[1] = 0;
+	pts[2] = 3; pts[3] = (qaws_scalar)0.75;
+	pts[4] = 2; pts[5] = (qaws_scalar)1.5;
+	pts[6] = 1; pts[7] = (qaws_scalar)2.25;
+	pts[8] = 2; pts[9] = 3;
+	memset(&bd, 0, sizeof(bd));
+	bd.dimension = QAWS_DIMENSION_2D;
+	bd.degree = 4;
+	bd.control_points = pts;
+	bd.control_point_count = 5;
+	qaws_curve_create_bezier(&bd, &prof);
+	if (!prof) return NULL;
+
+	memset(&rd, 0, sizeof(rd));
+	rd.profile = prof;
+	rd.axis_origin.x = 0; rd.axis_origin.y = 0; rd.axis_origin.z = 0;
+	rd.axis_direction.x = 0; rd.axis_direction.y = 0; rd.axis_direction.z = 1;
+	rd.angle = 0;
+	qaws_surface_create_revolution(&rd, &surf);
+	*out_profile = prof;
+	return surf;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Visual: OBJ wavy surface with per-vertex curvature color           */
 /* ------------------------------------------------------------------ */
 static void visual_obj_dome(void)
 {
 	obj_writer w;
-	qaws_surface* surf = make_dome_surface();
+	qaws_curve* prof = NULL;
+	qaws_surface* surf = make_wavy_surface(&prof);
 
 	printf("visual_obj_dome\n");
 	svg_ensure_output_dir();
-	if (!surf) return;
+	if (!surf) { qaws_curve_destroy(prof); return; }
 
 	if (!obj_open(&w,
 		OBJ_OUTPUT_DIR "/dome_curvature.obj",
 		OBJ_OUTPUT_DIR "/dome_curvature.mtl"))
 	{
 		qaws_surface_destroy(surf);
+		qaws_curve_destroy(prof);
 		return;
 	}
 
-	obj_material(&w, "dome", 0.2, 0.7, 0.9);
-	obj_group(&w, "dome_mesh");
-	obj_use_material(&w, "dome");
-	obj_surface_mesh(&w, surf, 32, 32);
+	obj_material(&w, "curvature", 1.0, 1.0, 1.0);
+	obj_comment(&w, "Per-vertex color = Gaussian curvature");
+	obj_comment(&w, "Blue = negative (saddle), White = zero, Red = positive (dome)");
+	obj_group(&w, "wavy_curvature");
+	obj_use_material(&w, "curvature");
+	obj_surface_mesh_curvature(&w, surf, 48, 48);
 
 	obj_close(&w);
 	qaws_surface_destroy(surf);
+	qaws_curve_destroy(prof);
 	printf("  -> " OBJ_OUTPUT_DIR "/dome_curvature.obj\n");
 }
 
@@ -91,14 +134,17 @@ static void visual_obj_dome(void)
 static void visual_obj_export_api(void)
 {
 	qaws_surface* surf = make_dome_surface();
-	char buf[65536];
+	char* buf;
 	unsigned int length = 0;
 	FILE* fp;
 
 	printf("visual_obj_export_api\n");
 	if (!surf) return;
 
-	if (qaws_surface_export_obj(surf, 32, 32, 1, buf, sizeof(buf), &length)
+	buf = (char*)malloc(262144);
+	if (!buf) { qaws_surface_destroy(surf); return; }
+
+	if (qaws_surface_export_obj(surf, 32, 32, 1, buf, 262144, &length)
 		== QAWS_STATUS_OK)
 	{
 		fp = fopen(OBJ_OUTPUT_DIR "/dome_curvature_api.obj", "w");
@@ -110,6 +156,7 @@ static void visual_obj_export_api(void)
 		}
 	}
 
+	free(buf);
 	qaws_surface_destroy(surf);
 }
 
@@ -222,11 +269,12 @@ static void visual_obj_bounds(void)
 	obj_use_material(&w, "surf");
 	obj_surface_mesh(&w, surf, 24, 24);
 
-	/* Draw bounding box as 12 line edges */
+	/* Draw bounding box as 12 wireframe edges + 6 translucent quad faces */
 	obj_group(&w, "bounding_box");
 	obj_use_material(&w, "bbox");
 	{
 		qaws_vec3 c[8];
+		unsigned int first_bv;
 		unsigned int ei;
 		unsigned int edges[12][2] = {
 			{0,1},{1,3},{3,2},{2,0},
@@ -244,6 +292,18 @@ static void visual_obj_bounds(void)
 
 		for (ei = 0; ei < 12; ei++)
 			obj_line_segment(&w, c[edges[ei][0]], c[edges[ei][1]]);
+
+		/* Box faces as quads (visible in most viewers) */
+		first_bv = w.vertex_count + 1;
+		for (ei = 0; ei < 8; ei++)
+			obj_vertex(&w, c[ei]);
+		/* 6 faces: -Z, +Z, -Y, +Y, -X, +X (outward winding) */
+		fprintf(w.fp, "f %u %u %u %u\n", first_bv+0, first_bv+2, first_bv+3, first_bv+1);
+		fprintf(w.fp, "f %u %u %u %u\n", first_bv+4, first_bv+5, first_bv+7, first_bv+6);
+		fprintf(w.fp, "f %u %u %u %u\n", first_bv+0, first_bv+1, first_bv+5, first_bv+4);
+		fprintf(w.fp, "f %u %u %u %u\n", first_bv+2, first_bv+6, first_bv+7, first_bv+3);
+		fprintf(w.fp, "f %u %u %u %u\n", first_bv+0, first_bv+4, first_bv+6, first_bv+2);
+		fprintf(w.fp, "f %u %u %u %u\n", first_bv+1, first_bv+3, first_bv+7, first_bv+5);
 	}
 
 	obj_close(&w);

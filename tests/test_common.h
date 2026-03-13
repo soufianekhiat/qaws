@@ -417,11 +417,9 @@ static unsigned int obj_curve_polyline(obj_writer* w, qaws_curve const* curve,
 	for (ci = 0; ci < count; ci++)
 		obj_vertex(w, buf[ci]);
 
-	/* Write line strip */
-	fprintf(w->fp, "l");
-	for (ci = 0; ci < count; ci++)
-		fprintf(w->fp, " %u", first_vi + ci);
-	fprintf(w->fp, "\n");
+	/* Write line segments (pairs, not one long polyline — better viewer compat) */
+	for (ci = 0; ci + 1 < count; ci++)
+		fprintf(w->fp, "l %u %u\n", first_vi + ci, first_vi + ci + 1);
 	return first_vi;
 }
 
@@ -772,7 +770,13 @@ static void obj_curvature_comb_surface(obj_writer* w, qaws_curve const* curve,
 	}
 }
 
-/* Write a triangle mesh for a sampled surface grid */
+/* Write a triangle mesh for a sampled surface grid.
+   Auto-detects normal orientation using two heuristics:
+   1) V-closure: if v=0 and v=1 map to the same position (tube/pipe),
+      du x dv points inward, so flip.
+   2) Centroid: if the normal at domain center points toward the centroid
+      of the four corners, the normal points into the concavity, so flip.
+   Both vertex normals and face winding are flipped together. */
 static void obj_surface_mesh(
 	obj_writer* w, qaws_surface const* surf,
 	unsigned int u_samples, unsigned int v_samples)
@@ -784,6 +788,79 @@ static void obj_surface_mesh(
 	unsigned int first_v = w->vertex_count + 1;
 	unsigned int first_n = w->normal_count + 1;
 	unsigned int ui, vi;
+	int flip = 0;
+
+	{
+		qaws_surface_eval_result rc, r00, r10, r01, r11, rv0, rv1;
+		qaws_vec3 centroid;
+		qaws_scalar dx, dy, dz, dot_val, gap, diag;
+
+		memset(&rc, 0, sizeof(rc));
+		memset(&r00, 0, sizeof(r00));
+		memset(&r10, 0, sizeof(r10));
+		memset(&r01, 0, sizeof(r01));
+		memset(&r11, 0, sizeof(r11));
+		memset(&rv0, 0, sizeof(rv0));
+		memset(&rv1, 0, sizeof(rv1));
+
+		qaws_surface_evaluate(surf,
+			u_min + u_len * (qaws_scalar)0.5,
+			v_min + v_len * (qaws_scalar)0.5,
+			QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL, &rc);
+		qaws_surface_evaluate(surf, u_min, v_min,
+			QAWS_SURFACE_EVAL_POSITION, &r00);
+		qaws_surface_evaluate(surf, u_min + u_len, v_min,
+			QAWS_SURFACE_EVAL_POSITION, &r10);
+		qaws_surface_evaluate(surf, u_min, v_min + v_len,
+			QAWS_SURFACE_EVAL_POSITION, &r01);
+		qaws_surface_evaluate(surf, u_min + u_len, v_min + v_len,
+			QAWS_SURFACE_EVAL_POSITION, &r11);
+
+		/* Heuristic 1: V-closure detection.
+		   If S(u_mid, v_min) ~ S(u_mid, v_max), the surface wraps
+		   around in v (pipe, swept). For these, du x dv points inward. */
+		qaws_surface_evaluate(surf,
+			u_min + u_len * (qaws_scalar)0.5, v_min,
+			QAWS_SURFACE_EVAL_POSITION, &rv0);
+		qaws_surface_evaluate(surf,
+			u_min + u_len * (qaws_scalar)0.5, v_min + v_len,
+			QAWS_SURFACE_EVAL_POSITION, &rv1);
+
+		dx = rv1.position.x - rv0.position.x;
+		dy = rv1.position.y - rv0.position.y;
+		dz = rv1.position.z - rv0.position.z;
+		gap = dx * dx + dy * dy + dz * dz;
+
+		dx = r11.position.x - r00.position.x;
+		dy = r11.position.y - r00.position.y;
+		dz = r11.position.z - r00.position.z;
+		diag = dx * dx + dy * dy + dz * dz;
+
+		/* Compare squared distances: gap^2 < (0.01 * diag)^2 = 0.0001 * diag^2 */
+		if (gap < diag * (qaws_scalar)0.0001 || gap < (qaws_scalar)1e-10)
+		{
+			flip = 1;
+		}
+
+		/* Heuristic 2 (for open surfaces): centroid check.
+		   If the normal at center points toward the corner centroid,
+		   the surface faces inward toward its concavity. */
+		if (!flip)
+		{
+			centroid.x = (r00.position.x + r10.position.x + r01.position.x + r11.position.x) * (qaws_scalar)0.25;
+			centroid.y = (r00.position.y + r10.position.y + r01.position.y + r11.position.y) * (qaws_scalar)0.25;
+			centroid.z = (r00.position.z + r10.position.z + r01.position.z + r11.position.z) * (qaws_scalar)0.25;
+
+			dx = centroid.x - rc.position.x;
+			dy = centroid.y - rc.position.y;
+			dz = centroid.z - rc.position.z;
+
+			dot_val = rc.normal.x * dx + rc.normal.y * dy + rc.normal.z * dz;
+
+			if (dot_val > (qaws_scalar)0.01)
+				flip = 1;
+		}
+	}
 
 	/* Emit vertices and normals */
 	for (ui = 0; ui < u_samples; ui++)
@@ -797,11 +874,23 @@ static void obj_surface_mesh(
 			qaws_surface_evaluate(surf, u, v,
 				QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL, &r);
 			obj_vertex(w, r.position);
-			obj_normal(w, r.normal);
+			if (flip)
+			{
+				qaws_vec3 fn;
+				fn.x = -r.normal.x;
+				fn.y = -r.normal.y;
+				fn.z = -r.normal.z;
+				obj_normal(w, fn);
+			}
+			else
+			{
+				obj_normal(w, r.normal);
+			}
 		}
 	}
 
-	/* Emit quad faces (as two triangles each) */
+	/* Emit quad faces (as two triangles each).
+	   Default winding matches du x dv; flipped winding for inverted normals. */
 	for (ui = 0; ui < u_samples - 1; ui++)
 	{
 		for (vi = 0; vi < v_samples - 1; vi++)
@@ -814,10 +903,212 @@ static void obj_surface_mesh(
 			unsigned int n01 = n00 + 1;
 			unsigned int n10 = n00 + v_samples;
 			unsigned int n11 = n10 + 1;
-			fprintf(w->fp, "f %u//%u %u//%u %u//%u\n", v00, n00, v10, n10, v01, n01);
-			fprintf(w->fp, "f %u//%u %u//%u %u//%u\n", v10, n10, v11, n11, v01, n01);
+			if (flip)
+			{
+				fprintf(w->fp, "f %u//%u %u//%u %u//%u\n", v00, n00, v01, n01, v10, n10);
+				fprintf(w->fp, "f %u//%u %u//%u %u//%u\n", v01, n01, v11, n11, v10, n10);
+			}
+			else
+			{
+				fprintf(w->fp, "f %u//%u %u//%u %u//%u\n", v00, n00, v10, n10, v01, n01);
+				fprintf(w->fp, "f %u//%u %u//%u %u//%u\n", v10, n10, v11, n11, v01, n01);
+			}
 		}
 	}
+}
+
+/* Write a single vertex with per-vertex RGB color (OBJ extension), return 1-based index */
+static unsigned int obj_vertex_color(obj_writer* w, qaws_vec3 p,
+	double r, double g, double b)
+{
+	fprintf(w->fp, "v %.6f %.6f %.6f %.4f %.4f %.4f\n",
+		(double)p.x, (double)p.y, (double)p.z, r, g, b);
+	return ++w->vertex_count;
+}
+
+/* Map normalized curvature t in [-1,1] to blue-white-red diverging color */
+static void curvature_color(double t, double* r, double* g, double* b)
+{
+	if (t < -1.0) t = -1.0;
+	if (t > 1.0) t = 1.0;
+	if (t < 0.0)
+	{
+		*r = 1.0 + t;
+		*g = 1.0 + t;
+		*b = 1.0;
+	}
+	else
+	{
+		*r = 1.0;
+		*g = 1.0 - t;
+		*b = 1.0 - t;
+	}
+}
+
+/* Surface mesh with per-vertex Gaussian curvature coloring.
+   Uses the OBJ per-vertex color extension (v x y z r g b).
+   Blue = negative K (saddle), white = zero, red = positive K (dome). */
+static void obj_surface_mesh_curvature(
+	obj_writer* w, qaws_surface const* surf,
+	unsigned int u_samples, unsigned int v_samples)
+{
+	qaws_range ur = qaws_surface_get_u_range(surf);
+	qaws_range vr = qaws_surface_get_v_range(surf);
+	qaws_scalar u_min = ur.min_value, u_len = ur.max_value - ur.min_value;
+	qaws_scalar v_min = vr.min_value, v_len = vr.max_value - vr.min_value;
+	unsigned int first_v, first_n;
+	unsigned int ui, vi, total;
+	int flip = 0;
+	qaws_scalar* kappa = NULL;
+	qaws_scalar max_abs_k = 0;
+
+	total = u_samples * v_samples;
+	kappa = (qaws_scalar*)malloc(total * sizeof(qaws_scalar));
+	if (!kappa) return;
+
+	/* First pass: compute Gaussian curvature at each sample */
+	for (ui = 0; ui < u_samples; ui++)
+	{
+		qaws_scalar u = u_min + u_len * (qaws_scalar)ui / (qaws_scalar)(u_samples - 1);
+		for (vi = 0; vi < v_samples; vi++)
+		{
+			qaws_scalar v = v_min + v_len * (qaws_scalar)vi / (qaws_scalar)(v_samples - 1);
+			qaws_scalar K = 0;
+			unsigned int idx = ui * v_samples + vi;
+			qaws_surface_compute_gaussian_curvature(surf, u, v, &K);
+			kappa[idx] = K;
+			if (fabs((double)K) > (double)max_abs_k)
+				max_abs_k = (qaws_scalar)fabs((double)K);
+		}
+	}
+	if ((double)max_abs_k < 1e-10) max_abs_k = (qaws_scalar)1.0;
+
+	/* Auto-flip detection (same heuristics as obj_surface_mesh) */
+	{
+		qaws_surface_eval_result rc, r00, r10, r01, r11, rv0, rv1;
+		qaws_vec3 centroid;
+		qaws_scalar dx, dy, dz, dot_val, gap, diag;
+
+		memset(&rc, 0, sizeof(rc));
+		memset(&r00, 0, sizeof(r00));
+		memset(&r10, 0, sizeof(r10));
+		memset(&r01, 0, sizeof(r01));
+		memset(&r11, 0, sizeof(r11));
+		memset(&rv0, 0, sizeof(rv0));
+		memset(&rv1, 0, sizeof(rv1));
+
+		qaws_surface_evaluate(surf,
+			u_min + u_len * (qaws_scalar)0.5,
+			v_min + v_len * (qaws_scalar)0.5,
+			QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL, &rc);
+		qaws_surface_evaluate(surf, u_min, v_min,
+			QAWS_SURFACE_EVAL_POSITION, &r00);
+		qaws_surface_evaluate(surf, u_min + u_len, v_min,
+			QAWS_SURFACE_EVAL_POSITION, &r10);
+		qaws_surface_evaluate(surf, u_min, v_min + v_len,
+			QAWS_SURFACE_EVAL_POSITION, &r01);
+		qaws_surface_evaluate(surf, u_min + u_len, v_min + v_len,
+			QAWS_SURFACE_EVAL_POSITION, &r11);
+
+		qaws_surface_evaluate(surf,
+			u_min + u_len * (qaws_scalar)0.5, v_min,
+			QAWS_SURFACE_EVAL_POSITION, &rv0);
+		qaws_surface_evaluate(surf,
+			u_min + u_len * (qaws_scalar)0.5, v_min + v_len,
+			QAWS_SURFACE_EVAL_POSITION, &rv1);
+
+		dx = rv1.position.x - rv0.position.x;
+		dy = rv1.position.y - rv0.position.y;
+		dz = rv1.position.z - rv0.position.z;
+		gap = dx * dx + dy * dy + dz * dz;
+
+		dx = r11.position.x - r00.position.x;
+		dy = r11.position.y - r00.position.y;
+		dz = r11.position.z - r00.position.z;
+		diag = dx * dx + dy * dy + dz * dz;
+
+		if (gap < diag * (qaws_scalar)0.0001 || gap < (qaws_scalar)1e-10)
+			flip = 1;
+
+		if (!flip)
+		{
+			centroid.x = (r00.position.x + r10.position.x + r01.position.x + r11.position.x) * (qaws_scalar)0.25;
+			centroid.y = (r00.position.y + r10.position.y + r01.position.y + r11.position.y) * (qaws_scalar)0.25;
+			centroid.z = (r00.position.z + r10.position.z + r01.position.z + r11.position.z) * (qaws_scalar)0.25;
+
+			dx = centroid.x - rc.position.x;
+			dy = centroid.y - rc.position.y;
+			dz = centroid.z - rc.position.z;
+
+			dot_val = rc.normal.x * dx + rc.normal.y * dy + rc.normal.z * dz;
+			if (dot_val > (qaws_scalar)0.01)
+				flip = 1;
+		}
+	}
+
+	/* Second pass: write colored vertices and normals */
+	first_v = w->vertex_count + 1;
+	first_n = w->normal_count + 1;
+	for (ui = 0; ui < u_samples; ui++)
+	{
+		qaws_scalar u = u_min + u_len * (qaws_scalar)ui / (qaws_scalar)(u_samples - 1);
+		for (vi = 0; vi < v_samples; vi++)
+		{
+			qaws_scalar v = v_min + v_len * (qaws_scalar)vi / (qaws_scalar)(v_samples - 1);
+			qaws_surface_eval_result r;
+			unsigned int idx = ui * v_samples + vi;
+			double cr, cg, cb, t;
+
+			memset(&r, 0, sizeof(r));
+			qaws_surface_evaluate(surf, u, v,
+				QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL, &r);
+
+			t = (double)kappa[idx] / (double)max_abs_k;
+			curvature_color(t, &cr, &cg, &cb);
+			obj_vertex_color(w, r.position, cr, cg, cb);
+
+			if (flip)
+			{
+				qaws_vec3 fn;
+				fn.x = -r.normal.x;
+				fn.y = -r.normal.y;
+				fn.z = -r.normal.z;
+				obj_normal(w, fn);
+			}
+			else
+			{
+				obj_normal(w, r.normal);
+			}
+		}
+	}
+
+	/* Emit faces */
+	for (ui = 0; ui < u_samples - 1; ui++)
+	{
+		for (vi = 0; vi < v_samples - 1; vi++)
+		{
+			unsigned int v00 = first_v + ui * v_samples + vi;
+			unsigned int v01 = v00 + 1;
+			unsigned int v10 = v00 + v_samples;
+			unsigned int v11 = v10 + 1;
+			unsigned int n00 = first_n + ui * v_samples + vi;
+			unsigned int n01 = n00 + 1;
+			unsigned int n10 = n00 + v_samples;
+			unsigned int n11 = n10 + 1;
+			if (flip)
+			{
+				fprintf(w->fp, "f %u//%u %u//%u %u//%u\n", v00, n00, v01, n01, v10, n10);
+				fprintf(w->fp, "f %u//%u %u//%u %u//%u\n", v01, n01, v11, n11, v10, n10);
+			}
+			else
+			{
+				fprintf(w->fp, "f %u//%u %u//%u %u//%u\n", v00, n00, v10, n10, v01, n01);
+				fprintf(w->fp, "f %u//%u %u//%u %u//%u\n", v10, n10, v11, n11, v01, n01);
+			}
+		}
+	}
+
+	free(kappa);
 }
 
 /* Draw control point grid as markers and wireframe */
@@ -840,22 +1131,18 @@ static void obj_surface_cp_grid(
 		for (j = 0; j < v_count; j++)
 			obj_vertex(w, cp[i * v_count + j]);
 
-	/* U-direction lines */
+	/* U-direction lines (pairs for viewer compatibility) */
 	for (i = 0; i < u_count; i++)
-	{
-		fprintf(w->fp, "l");
-		for (j = 0; j < v_count; j++)
-			fprintf(w->fp, " %u", first_v + i * v_count + j);
-		fprintf(w->fp, "\n");
-	}
+		for (j = 0; j + 1 < v_count; j++)
+			fprintf(w->fp, "l %u %u\n",
+				first_v + i * v_count + j,
+				first_v + i * v_count + j + 1);
 	/* V-direction lines */
 	for (j = 0; j < v_count; j++)
-	{
-		fprintf(w->fp, "l");
-		for (i = 0; i < u_count; i++)
-			fprintf(w->fp, " %u", first_v + i * v_count + j);
-		fprintf(w->fp, "\n");
-	}
+		for (i = 0; i + 1 < u_count; i++)
+			fprintf(w->fp, "l %u %u\n",
+				first_v + i * v_count + j,
+				first_v + (i + 1) * v_count + j);
 }
 
 #endif /* QAWS_TEST_COMMON_H */

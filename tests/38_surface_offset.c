@@ -20,26 +20,6 @@ static qaws_curve* make_line_3d(qaws_vec3 a, qaws_vec3 b)
 }
 
 /* ------------------------------------------------------------------ */
-/*  Helper: make a quadratic 3D Bezier curve                           */
-/* ------------------------------------------------------------------ */
-static qaws_curve* make_quad_3d(qaws_vec3 a, qaws_vec3 b, qaws_vec3 c_pt)
-{
-	qaws_curve* crv = NULL;
-	qaws_scalar pts[9];
-	qaws_bezier_desc d;
-	pts[0] = a.x; pts[1] = a.y; pts[2] = a.z;
-	pts[3] = b.x; pts[4] = b.y; pts[5] = b.z;
-	pts[6] = c_pt.x; pts[7] = c_pt.y; pts[8] = c_pt.z;
-	memset(&d, 0, sizeof(d));
-	d.dimension = QAWS_DIMENSION_3D;
-	d.degree = 2;
-	d.control_points = pts;
-	d.control_point_count = 3;
-	qaws_curve_create_bezier(&d, &crv);
-	return crv;
-}
-
-/* ------------------------------------------------------------------ */
 /*  Helper: create a flat Coons patch (rectangle in XY plane)          */
 /* ------------------------------------------------------------------ */
 static qaws_surface* make_flat_coons(
@@ -274,57 +254,163 @@ cleanup_offset:
 
 /* ------------------------------------------------------------------ */
 /*  Visual: OBJ self-intersecting offset                                */
+/*  Hourglass revolution surface with narrow waist (r_min=0.3).         */
+/*  Offset d=0.5 exceeds waist radius, inverting the waist through      */
+/*  the revolution axis.  Mesh triangles near the waist physically      */
+/*  overlap, producing clearly visible self-intersection.               */
 /* ------------------------------------------------------------------ */
 static void visual_obj_offset_selfintersect(void)
 {
 	obj_writer w;
-	qaws_curve* c0 = NULL, *c1 = NULL, *d0 = NULL, *d1 = NULL;
+	qaws_curve* prof = NULL;
 	qaws_surface* base = NULL;
 	qaws_surface* offset = NULL;
 	qaws_surface_offset_desc odesc;
-
-	/* Sharp ridge Coons patch — high curvature along center ridge
-	   so a large offset will self-intersect */
-	qaws_vec3 p00 = {0,0,0}, p10 = {4,0,0}, p01 = {0,3,0}, p11 = {4,3,0};
-	qaws_vec3 m_bot = {2,0,4};   /* tall ridge at center */
-	qaws_vec3 m_top = {2,3,4};
-	qaws_vec3 m_left = {0,(qaws_scalar)1.5,0};
-	qaws_vec3 m_right = {4,(qaws_scalar)1.5,0};
+	qaws_scalar pts[6];
+	qaws_bezier_desc bd;
+	qaws_surface_revolution_desc rd;
 
 	printf("visual_obj_offset_selfintersect\n");
 	svg_ensure_output_dir();
 
-	c0 = make_quad_3d(p00, m_bot, p10);
-	c1 = make_quad_3d(p01, m_top, p11);
-	d0 = make_quad_3d(p00, m_left, p01);
-	d1 = make_quad_3d(p10, m_right, p11);
+	/* Hourglass profile: quadratic Bezier from (2,0) to (2,3)
+	   with CP at (-1.4, 1.5).  Actual min radius at t=0.5:
+	   0.25*2 + 0.5*(-1.4) + 0.25*2 = 0.3.
+	   Profile stays positive everywhere (min 0.3 at waist). */
+	pts[0] = 2;               pts[1] = 0;
+	pts[2] = (qaws_scalar)-1.4; pts[3] = (qaws_scalar)1.5;
+	pts[4] = 2;               pts[5] = 3;
+	memset(&bd, 0, sizeof(bd));
+	bd.dimension = QAWS_DIMENSION_2D;
+	bd.degree = 2;
+	bd.control_points = pts;
+	bd.control_point_count = 3;
+	qaws_curve_create_bezier(&bd, &prof);
+	if (!prof) return;
 
-	{
-		qaws_surface_coons_desc desc;
-		desc.c0 = c0; desc.c1 = c1; desc.d0 = d0; desc.d1 = d1;
-		qaws_surface_create_coons(&desc, &base);
-	}
-	if (!base) goto cleanup_si;
+	memset(&rd, 0, sizeof(rd));
+	rd.profile = prof;
+	rd.axis_origin.x = 0; rd.axis_origin.y = 0; rd.axis_origin.z = 0;
+	rd.axis_direction.x = 0; rd.axis_direction.y = 0; rd.axis_direction.z = 1;
+	rd.angle = 0;
+	qaws_surface_create_revolution(&rd, &base);
+	if (!base) { qaws_curve_destroy(prof); return; }
 
-	/* Large offset exceeds radius of curvature -> self-intersection */
+	/* Offset d=-1.0 (inward): waist at r=0.3 inverts to r=-0.7
+	   (far past axis).  Rims shrink from r=2 to r=1.0.
+	   The inverted waist (r=0.7 on opposite side) clearly
+	   protrudes through the valid outer shell → self-intersection. */
 	odesc.base = base;
-	odesc.distance = (qaws_scalar)2.0;
+	odesc.distance = (qaws_scalar)-1.0;
 	qaws_surface_create_offset(&odesc, &offset);
 	if (!offset) goto cleanup_si;
 
 	if (!obj_open(&w, OBJ_OUTPUT_DIR "/offset_selfintersect.obj",
 		OBJ_OUTPUT_DIR "/offset_selfintersect.mtl")) goto cleanup_si;
 
-	obj_material(&w, "ridge", 0.5, 0.5, 0.8);
+	obj_material(&w, "hourglass", 0.5, 0.5, 0.8);
 	obj_material(&w, "offset", 0.9, 0.3, 0.3);
 
-	obj_group(&w, "base_ridge");
-	obj_use_material(&w, "ridge");
+	obj_group(&w, "base_hourglass");
+	obj_use_material(&w, "hourglass");
 	obj_surface_mesh(&w, base, 32, 32);
 
 	obj_group(&w, "offset_surface");
 	obj_use_material(&w, "offset");
 	obj_surface_mesh(&w, offset, 48, 48);
+
+	/* Red marker rings where the inverted offset surface intersects
+	   the base surface.  Sample both profiles at u=0 (angle zero)
+	   to get (radius, z) curves.  The inverted offset portion has
+	   negative radius; mirroring it gives the radius on the opposite
+	   side where it physically intersects the base shell. */
+	obj_material(&w, "marker", 1.0, 0.0, 0.0);
+	obj_group(&w, "intersection_markers");
+	obj_use_material(&w, "marker");
+	{
+		#define PROF_N 128
+		unsigned int bi, oi;
+		qaws_scalar base_r[PROF_N], base_z[PROF_N];
+		qaws_scalar off_r[PROF_N], off_z[PROF_N];
+		int off_inv[PROF_N];
+		qaws_range vr_b = qaws_surface_get_v_range(base);
+		qaws_range vr_o = qaws_surface_get_v_range(offset);
+		qaws_scalar last_ring_z = (qaws_scalar)-999.0;
+
+		/* Sample base profile */
+		for (bi = 0; bi < PROF_N; bi++)
+		{
+			qaws_surface_eval_result er;
+			qaws_scalar v = vr_b.min_value + (vr_b.max_value - vr_b.min_value)
+				* (qaws_scalar)bi / (qaws_scalar)(PROF_N - 1);
+			memset(&er, 0, sizeof(er));
+			qaws_surface_evaluate(base, (qaws_scalar)0.0, v,
+				QAWS_SURFACE_EVAL_POSITION, &er);
+			base_r[bi] = er.position.x;
+			base_z[bi] = er.position.z;
+		}
+
+		/* Sample offset profile; mirror inverted portion */
+		for (oi = 0; oi < PROF_N; oi++)
+		{
+			qaws_surface_eval_result er;
+			qaws_scalar v = vr_o.min_value + (vr_o.max_value - vr_o.min_value)
+				* (qaws_scalar)oi / (qaws_scalar)(PROF_N - 1);
+			memset(&er, 0, sizeof(er));
+			qaws_surface_evaluate(offset, (qaws_scalar)0.0, v,
+				QAWS_SURFACE_EVAL_POSITION, &er);
+			off_inv[oi] = er.position.x < 0 ? 1 : 0;
+			off_r[oi] = er.position.x < 0 ? -er.position.x : er.position.x;
+			off_z[oi] = er.position.z;
+		}
+
+		/* Segment-segment intersection: base profile vs mirrored offset */
+		for (bi = 0; bi + 1 < PROF_N; bi++)
+		{
+			for (oi = 0; oi + 1 < PROF_N; oi++)
+			{
+				double x1, z1, x2, z2, x3, z3, x4, z4;
+				double denom, t, u_p;
+				qaws_scalar cross_r, cross_z;
+				unsigned int ri;
+				qaws_vec3 sp;
+
+				/* Only test segments in the inverted region */
+				if (!off_inv[oi] && !off_inv[oi + 1]) continue;
+
+				x1 = (double)base_r[bi];     z1 = (double)base_z[bi];
+				x2 = (double)base_r[bi + 1]; z2 = (double)base_z[bi + 1];
+				x3 = (double)off_r[oi];      z3 = (double)off_z[oi];
+				x4 = (double)off_r[oi + 1];  z4 = (double)off_z[oi + 1];
+
+				denom = (x2 - x1) * (z4 - z3) - (z2 - z1) * (x4 - x3);
+				if (fabs(denom) < 1e-12) continue;
+
+				t   = ((x3 - x1) * (z4 - z3) - (z3 - z1) * (x4 - x3)) / denom;
+				u_p = ((x3 - x1) * (z2 - z1) - (z3 - z1) * (x2 - x1)) / denom;
+
+				if (t < 0.0 || t > 1.0 || u_p < 0.0 || u_p > 1.0) continue;
+
+				cross_r = (qaws_scalar)(x1 + t * (x2 - x1));
+				cross_z = (qaws_scalar)(z1 + t * (z2 - z1));
+
+				/* Deduplicate nearby rings */
+				if (fabs((double)(cross_z - last_ring_z)) < 0.3) continue;
+				last_ring_z = cross_z;
+
+				obj_comment(&w, "intersection ring");
+				for (ri = 0; ri < 24; ri++)
+				{
+					double angle = 2.0 * M_PI * (double)ri / 24.0;
+					sp.x = cross_r * (qaws_scalar)cos(angle);
+					sp.y = cross_r * (qaws_scalar)sin(angle);
+					sp.z = cross_z;
+					obj_sphere(&w, sp, (qaws_scalar)0.06);
+				}
+			}
+		}
+		#undef PROF_N
+	}
 
 	obj_close(&w);
 	printf("  -> " OBJ_OUTPUT_DIR "/offset_selfintersect.obj\n");
@@ -332,10 +418,7 @@ static void visual_obj_offset_selfintersect(void)
 cleanup_si:
 	qaws_surface_destroy(offset);
 	qaws_surface_destroy(base);
-	qaws_curve_destroy(c0);
-	qaws_curve_destroy(c1);
-	qaws_curve_destroy(d0);
-	qaws_curve_destroy(d1);
+	qaws_curve_destroy(prof);
 }
 
 /* ------------------------------------------------------------------ */

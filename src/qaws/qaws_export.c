@@ -810,6 +810,7 @@ qaws_status qaws_surface_export_obj(
 	qaws_scalar u_min, u_len, v_min, v_len;
 	unsigned int ui, vi;
 	unsigned int eval_flags;
+	int flip = 0;
 
 	/* --- Validation ---------------------------------------------------- */
 
@@ -836,6 +837,74 @@ qaws_status qaws_surface_export_obj(
 	if (include_normals)
 		eval_flags |= QAWS_SURFACE_EVAL_NORMAL;
 
+	/* --- Auto-detect normal orientation -------------------------------- */
+	if (include_normals)
+	{
+		qaws_surface_eval_result rc, r00, r10, r01, r11, rv0, rv1;
+		qaws_vec3 centroid;
+		qaws_scalar dx, dy, dz, dot_val, gap, diag;
+
+		memset(&rc, 0, sizeof(rc));
+		memset(&r00, 0, sizeof(r00));
+		memset(&r10, 0, sizeof(r10));
+		memset(&r01, 0, sizeof(r01));
+		memset(&r11, 0, sizeof(r11));
+		memset(&rv0, 0, sizeof(rv0));
+		memset(&rv1, 0, sizeof(rv1));
+
+		qaws_surface_evaluate(surface,
+			u_min + u_len * (qaws_scalar)0.5,
+			v_min + v_len * (qaws_scalar)0.5,
+			QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL, &rc);
+		qaws_surface_evaluate(surface, u_min, v_min,
+			QAWS_SURFACE_EVAL_POSITION, &r00);
+		qaws_surface_evaluate(surface, u_min + u_len, v_min,
+			QAWS_SURFACE_EVAL_POSITION, &r10);
+		qaws_surface_evaluate(surface, u_min, v_min + v_len,
+			QAWS_SURFACE_EVAL_POSITION, &r01);
+		qaws_surface_evaluate(surface, u_min + u_len, v_min + v_len,
+			QAWS_SURFACE_EVAL_POSITION, &r11);
+
+		/* V-closure: pipe/swept surfaces wrap in v */
+		qaws_surface_evaluate(surface,
+			u_min + u_len * (qaws_scalar)0.5, v_min,
+			QAWS_SURFACE_EVAL_POSITION, &rv0);
+		qaws_surface_evaluate(surface,
+			u_min + u_len * (qaws_scalar)0.5, v_min + v_len,
+			QAWS_SURFACE_EVAL_POSITION, &rv1);
+
+		dx = rv1.position.x - rv0.position.x;
+		dy = rv1.position.y - rv0.position.y;
+		dz = rv1.position.z - rv0.position.z;
+		gap = dx * dx + dy * dy + dz * dz;
+
+		dx = r11.position.x - r00.position.x;
+		dy = r11.position.y - r00.position.y;
+		dz = r11.position.z - r00.position.z;
+		diag = dx * dx + dy * dy + dz * dz;
+
+		if (gap < diag * (qaws_scalar)0.0001 || gap < (qaws_scalar)1e-10)
+		{
+			flip = 1;
+		}
+
+		/* Centroid heuristic for open surfaces */
+		if (!flip)
+		{
+			centroid.x = (r00.position.x + r10.position.x + r01.position.x + r11.position.x) * (qaws_scalar)0.25;
+			centroid.y = (r00.position.y + r10.position.y + r01.position.y + r11.position.y) * (qaws_scalar)0.25;
+			centroid.z = (r00.position.z + r10.position.z + r01.position.z + r11.position.z) * (qaws_scalar)0.25;
+
+			dx = centroid.x - rc.position.x;
+			dy = centroid.y - rc.position.y;
+			dz = centroid.z - rc.position.z;
+
+			dot_val = rc.normal.x * dx + rc.normal.y * dy + rc.normal.z * dz;
+			if (dot_val > (qaws_scalar)0.01)
+				flip = 1;
+		}
+	}
+
 	/* --- Emit vertices ------------------------------------------------- */
 
 	for (ui = 0; ui < u_samples; ui++)
@@ -856,6 +925,7 @@ qaws_status qaws_surface_export_obj(
 
 	if (include_normals)
 	{
+		qaws_scalar sign = flip ? (qaws_scalar)-1 : (qaws_scalar)1;
 		for (ui = 0; ui < u_samples; ui++)
 		{
 			qaws_scalar u = u_min + u_len * (qaws_scalar)ui / (qaws_scalar)(u_samples - 1);
@@ -867,7 +937,9 @@ qaws_status qaws_surface_export_obj(
 				qaws_surface_evaluate(surface, u, v,
 					QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL, &r);
 				objbuf_append(&b, "vn %.6g %.6g %.6g\n",
-					(double)r.normal.x, (double)r.normal.y, (double)r.normal.z);
+					(double)(r.normal.x * sign),
+					(double)(r.normal.y * sign),
+					(double)(r.normal.z * sign));
 			}
 		}
 	}
@@ -886,16 +958,33 @@ qaws_status qaws_surface_export_obj(
 
 			if (include_normals)
 			{
-				/* Normal indices match vertex indices (same grid order) */
-				objbuf_append(&b, "f %u//%u %u//%u %u//%u\n",
-					v00, v00, v01, v01, v10, v10);
-				objbuf_append(&b, "f %u//%u %u//%u %u//%u\n",
-					v01, v01, v11, v11, v10, v10);
+				if (flip)
+				{
+					objbuf_append(&b, "f %u//%u %u//%u %u//%u\n",
+						v00, v00, v01, v01, v10, v10);
+					objbuf_append(&b, "f %u//%u %u//%u %u//%u\n",
+						v01, v01, v11, v11, v10, v10);
+				}
+				else
+				{
+					objbuf_append(&b, "f %u//%u %u//%u %u//%u\n",
+						v00, v00, v10, v10, v01, v01);
+					objbuf_append(&b, "f %u//%u %u//%u %u//%u\n",
+						v10, v10, v11, v11, v01, v01);
+				}
 			}
 			else
 			{
-				objbuf_append(&b, "f %u %u %u\n", v00, v01, v10);
-				objbuf_append(&b, "f %u %u %u\n", v01, v11, v10);
+				if (flip)
+				{
+					objbuf_append(&b, "f %u %u %u\n", v00, v01, v10);
+					objbuf_append(&b, "f %u %u %u\n", v01, v11, v10);
+				}
+				else
+				{
+					objbuf_append(&b, "f %u %u %u\n", v00, v10, v01);
+					objbuf_append(&b, "f %u %u %u\n", v10, v11, v01);
+				}
 			}
 		}
 	}
@@ -907,5 +996,5 @@ qaws_status qaws_surface_export_obj(
 		b.data[b.capacity - 1] = '\0';
 
 	*out_length = b.pos;
-	return QAWS_STATUS_OK;
+	return (b.pos >= b.capacity) ? QAWS_STATUS_BUFFER_TOO_SMALL : QAWS_STATUS_OK;
 }

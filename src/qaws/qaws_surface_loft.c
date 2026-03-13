@@ -18,10 +18,9 @@ typedef struct qaws_surface_loft_impl
 
 static void compute_normal(qaws_vec3 du, qaws_vec3 dv, qaws_vec3* out)
 {
-	/* dv x du (not du x dv) so normal points outward for tubular surfaces */
-	qaws_scalar nx = dv.y * du.z - dv.z * du.y;
-	qaws_scalar ny = dv.z * du.x - dv.x * du.z;
-	qaws_scalar nz = dv.x * du.y - dv.y * du.x;
+	qaws_scalar nx = du.y * dv.z - du.z * dv.y;
+	qaws_scalar ny = du.z * dv.x - du.x * dv.z;
+	qaws_scalar nz = du.x * dv.y - du.y * dv.x;
 	qaws_scalar len = QAWS_SQRT(nx * nx + ny * ny + nz * nz);
 	if (len > QAWS_LITERAL(1e-12))
 	{
