@@ -48,6 +48,7 @@
 #include "qaws_surface_offset.h"
 #include "qaws_surface_trim.h"
 #include "qaws_surface_intersect.h"
+#include "qaws_boolean_2d.h"
 #include "qaws_alloc.h"
 #include "qaws_inline.h"
 

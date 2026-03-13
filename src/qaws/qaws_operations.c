@@ -9,10 +9,15 @@
 #include "qaws_eval.h"
 #include "qaws_inspect.h"
 #include "qaws_curve.h"
+#include "qaws_composite.h"
+#include "qaws_arc.h"
+#include "qaws_surface.h"
+#include "qaws_platform.h"
 #include "internal/qaws_internal_types.h"
 #include "internal/qaws_internal_basis.h"
 #include "internal/qaws_internal_curve.h"
 #include "internal/qaws_internal_arc_length.h"
+#include "internal/qaws_internal_fit.h"
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -3013,4 +3018,1004 @@ qaws_status qaws_curve_reparameterize_arc_length(
 
 	*out_curve = result;
 	return QAWS_STATUS_OK;
+}
+
+/* ========================================================================== */
+/*  Curve length matching (#23)                                               */
+/* ========================================================================== */
+
+/* A length-match wrapper reuses the reparameterization machinery:
+   it builds arc-length tables for both curves, then maps from
+   curve_a's arc-length domain to curve_b's parameter domain. */
+
+typedef struct qaws_length_match_impl
+{
+	qaws_curve const* source_b;
+	qaws_scalar* table_params_a;
+	qaws_scalar* table_distances_a;
+	unsigned int table_size_a;
+	qaws_scalar total_arc_length_a;
+	qaws_scalar* table_params_b;
+	qaws_scalar* table_distances_b;
+	unsigned int table_size_b;
+	qaws_scalar total_arc_length_b;
+} qaws_length_match_impl;
+
+static qaws_status lm_eval_span_2d(
+	qaws_curve const* curve, unsigned int span_index, qaws_scalar local_t,
+	unsigned int eval_flags, qaws_eval_result_2d* out_result)
+{
+	qaws_length_match_impl const* impl =
+		(qaws_length_match_impl const*)curve->impl;
+	qaws_scalar s, frac, dist_b, src_t;
+
+	(void)span_index;
+
+	/* s is in [0, total_arc_length_a] */
+	s = curve->parameter_range.min_value +
+		local_t * (curve->parameter_range.max_value - curve->parameter_range.min_value);
+
+	/* Map s to fraction of A's length, then to same fraction of B's length */
+	frac = (impl->total_arc_length_a > QAWS_ZERO) ?
+		(s / impl->total_arc_length_a) : QAWS_ZERO;
+	dist_b = frac * impl->total_arc_length_b;
+
+	/* Map distance in B to source parameter */
+	src_t = qaws_internal_distance_to_parameter(
+		impl->table_params_b, impl->table_distances_b,
+		impl->table_size_b, dist_b);
+
+	return qaws_curve_evaluate_2d(impl->source_b, src_t, eval_flags, out_result);
+}
+
+static qaws_status lm_eval_span_3d(
+	qaws_curve const* curve, unsigned int span_index, qaws_scalar local_t,
+	unsigned int eval_flags, qaws_eval_result_3d* out_result)
+{
+	qaws_length_match_impl const* impl =
+		(qaws_length_match_impl const*)curve->impl;
+	qaws_scalar s, frac, dist_b, src_t;
+
+	(void)span_index;
+
+	s = curve->parameter_range.min_value +
+		local_t * (curve->parameter_range.max_value - curve->parameter_range.min_value);
+
+	frac = (impl->total_arc_length_a > QAWS_ZERO) ?
+		(s / impl->total_arc_length_a) : QAWS_ZERO;
+	dist_b = frac * impl->total_arc_length_b;
+
+	src_t = qaws_internal_distance_to_parameter(
+		impl->table_params_b, impl->table_distances_b,
+		impl->table_size_b, dist_b);
+
+	return qaws_curve_evaluate_3d(impl->source_b, src_t, eval_flags, out_result);
+}
+
+static void lm_destroy_impl(void* impl_ptr, qaws_allocator const* allocator)
+{
+	qaws_length_match_impl* impl = (qaws_length_match_impl*)impl_ptr;
+	if (!impl) return;
+	qaws_internal_dealloc(allocator, impl->table_params_a);
+	qaws_internal_dealloc(allocator, impl->table_distances_a);
+	qaws_internal_dealloc(allocator, impl->table_params_b);
+	qaws_internal_dealloc(allocator, impl->table_distances_b);
+	qaws_internal_dealloc(allocator, impl);
+}
+
+static int lm_is_closed(qaws_curve const* curve)
+{
+	qaws_length_match_impl const* impl =
+		(qaws_length_match_impl const*)curve->impl;
+	if (impl->source_b->vtable && impl->source_b->vtable->is_closed)
+		return impl->source_b->vtable->is_closed(impl->source_b);
+	return 0;
+}
+
+static int lm_not(qaws_curve const* curve) { (void)curve; return 0; }
+static qaws_continuity lm_cont(qaws_curve const* curve) { (void)curve; return QAWS_CONTINUITY_C2; }
+
+static qaws_curve_vtable const lm_vtable = {
+	lm_eval_span_2d,
+	lm_eval_span_3d,
+	lm_destroy_impl,
+	lm_is_closed,
+	lm_not, /* is_periodic */
+	lm_not, /* is_rational */
+	lm_cont
+};
+
+qaws_status qaws_curve_match_arc_length(
+	qaws_curve const* curve_a,
+	qaws_curve const* curve_b,
+	unsigned int table_resolution,
+	qaws_curve** out_curve)
+{
+	qaws_length_match_impl* impl = NULL;
+	qaws_curve* result = NULL;
+	qaws_range range;
+	qaws_status status;
+	unsigned int tbl_size;
+
+	if (!curve_a || !curve_b || !out_curve)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+
+	*out_curve = NULL;
+	tbl_size = table_resolution > 0 ? table_resolution : 256;
+
+	impl = (qaws_length_match_impl*)malloc(sizeof(qaws_length_match_impl));
+	if (!impl) return QAWS_STATUS_ALLOCATION_FAILURE;
+	memset(impl, 0, sizeof(*impl));
+
+	impl->source_b = curve_b;
+	impl->table_size_a = tbl_size;
+	impl->table_size_b = tbl_size;
+
+	/* Allocate tables */
+	impl->table_params_a = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (size_t)tbl_size);
+	impl->table_distances_a = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (size_t)tbl_size);
+	impl->table_params_b = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (size_t)tbl_size);
+	impl->table_distances_b = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (size_t)tbl_size);
+
+	if (!impl->table_params_a || !impl->table_distances_a ||
+		!impl->table_params_b || !impl->table_distances_b)
+	{
+		free(impl->table_params_a); free(impl->table_distances_a);
+		free(impl->table_params_b); free(impl->table_distances_b);
+		free(impl);
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	}
+
+	/* Build arc-length tables */
+	status = qaws_internal_build_arc_length_table(
+		curve_a, tbl_size, impl->table_params_a, impl->table_distances_a);
+	if (status != QAWS_STATUS_OK) { lm_destroy_impl(impl, NULL); return status; }
+
+	status = qaws_internal_build_arc_length_table(
+		curve_b, tbl_size, impl->table_params_b, impl->table_distances_b);
+	if (status != QAWS_STATUS_OK) { lm_destroy_impl(impl, NULL); return status; }
+
+	impl->total_arc_length_a = impl->table_distances_a[tbl_size - 1];
+	impl->total_arc_length_b = impl->table_distances_b[tbl_size - 1];
+
+	if (impl->total_arc_length_a <= QAWS_ZERO || impl->total_arc_length_b <= QAWS_ZERO)
+	{
+		lm_destroy_impl(impl, NULL);
+		return QAWS_STATUS_DEGENERATE_CURVE;
+	}
+
+	/* Create wrapper curve with parameter domain [0, arc_length_a] */
+	range.min_value = QAWS_ZERO;
+	range.max_value = impl->total_arc_length_a;
+
+	result = qaws_internal_curve_alloc(
+		QAWS_CURVE_KIND_REPARAMETERIZED,
+		curve_b->dimension,
+		curve_b->degree,
+		1, range, &lm_vtable);
+	if (!result) { lm_destroy_impl(impl, NULL); return QAWS_STATUS_ALLOCATION_FAILURE; }
+
+	result->span_boundaries[0] = QAWS_ZERO;
+	result->span_boundaries[1] = impl->total_arc_length_a;
+	result->impl = impl;
+
+	*out_curve = result;
+	return QAWS_STATUS_OK;
+}
+
+/* ========================================================================== */
+/*  3D curve offsetting (#21)                                                 */
+/* ========================================================================== */
+
+qaws_status qaws_curve_offset_3d(
+	qaws_curve const* curve,
+	qaws_scalar distance,
+	int direction_mode,
+	qaws_vec3 const* direction,
+	qaws_surface const* surface,
+	unsigned int sample_count,
+	qaws_curve** out_curve)
+{
+	unsigned int n_samples;
+	qaws_scalar* params = NULL;
+	qaws_scalar* coords = NULL;
+	qaws_range range;
+	unsigned int i;
+	unsigned int dim = 3;
+	unsigned int n_cp;
+	qaws_status status;
+
+	if (!curve || !out_curve)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	if (qaws_curve_get_dimension(curve) != QAWS_DIMENSION_3D)
+		return QAWS_STATUS_INVALID_DIMENSION;
+	if (direction_mode == 0 && !direction)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	if (direction_mode == 2 && !surface)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+
+	*out_curve = NULL;
+	n_samples = sample_count > 0 ? sample_count : 256;
+	range = qaws_curve_get_parameter_range(curve);
+
+	params = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (size_t)n_samples);
+	coords = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (size_t)n_samples * dim);
+	if (!params || !coords) { free(params); free(coords); return QAWS_STATUS_ALLOCATION_FAILURE; }
+
+	for (i = 0; i < n_samples; i++)
+	{
+		qaws_scalar t = range.min_value + (range.max_value - range.min_value) *
+			(qaws_scalar)i / (qaws_scalar)(n_samples - 1);
+		qaws_eval_result_3d er;
+		qaws_vec3 offset_dir;
+		qaws_scalar dir_len;
+
+		memset(&er, 0, sizeof(er));
+		status = qaws_curve_evaluate_3d(curve, t,
+			QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2, &er);
+		if (status != QAWS_STATUS_OK) { free(params); free(coords); return status; }
+
+		params[i] = t;
+
+		if (direction_mode == 0)
+		{
+			/* Constant direction */
+			offset_dir = *direction;
+		}
+		else if (direction_mode == 1)
+		{
+			/* Frenet normal */
+			qaws_vec3 T_vec, N_vec, B_vec;
+			status = qaws_curve_compute_frenet_frame_3d(curve, t, &T_vec, &N_vec, &B_vec);
+			if (status != QAWS_STATUS_OK)
+			{
+				/* Fallback: use a perpendicular to the tangent */
+				qaws_scalar tx = er.d1.x, ty = er.d1.y, tz = er.d1.z;
+				if (QAWS_FABS(tx) < QAWS_FABS(tz))
+				{ offset_dir.x = QAWS_ZERO; offset_dir.y = -tz; offset_dir.z = ty; }
+				else
+				{ offset_dir.x = -ty; offset_dir.y = tx; offset_dir.z = QAWS_ZERO; }
+			}
+			else
+			{
+				offset_dir = N_vec;
+			}
+		}
+		else /* direction_mode == 2 */
+		{
+			/* Surface normal at closest point */
+			qaws_scalar su, sv;
+			qaws_vec3 closest;
+			qaws_surface_eval_result sr;
+
+			status = qaws_surface_find_closest_point(surface, er.position, &su, &sv, &closest);
+			if (status != QAWS_STATUS_OK) { free(params); free(coords); return status; }
+
+			memset(&sr, 0, sizeof(sr));
+			qaws_surface_evaluate(surface, su, sv, QAWS_SURFACE_EVAL_NORMAL, &sr);
+			offset_dir = sr.normal;
+		}
+
+		/* Normalize direction */
+		dir_len = QAWS_SQRT(offset_dir.x * offset_dir.x +
+			offset_dir.y * offset_dir.y + offset_dir.z * offset_dir.z);
+		if (dir_len > QAWS_LITERAL(1e-12))
+		{
+			offset_dir.x /= dir_len;
+			offset_dir.y /= dir_len;
+			offset_dir.z /= dir_len;
+		}
+
+		coords[i * dim + 0] = er.position.x + distance * offset_dir.x;
+		coords[i * dim + 1] = er.position.y + distance * offset_dir.y;
+		coords[i * dim + 2] = er.position.z + distance * offset_dir.z;
+	}
+
+	/* Fit a B-spline through the offset samples */
+	n_cp = n_samples / 4;
+	if (n_cp < 8) n_cp = 8;
+	if (n_cp > n_samples) n_cp = n_samples;
+
+	status = qaws_internal_fit_bspline(
+		QAWS_DIMENSION_3D, 3,
+		params, coords,
+		n_samples, n_cp,
+		out_curve);
+
+	free(params);
+	free(coords);
+	return status;
+}
+
+/* ========================================================================== */
+/*  Approximate curve merging (#22)                                           */
+/* ========================================================================== */
+
+qaws_status qaws_curve_merge_chain(
+	qaws_curve const* const* curves,
+	unsigned int curve_count,
+	unsigned int target_degree,
+	qaws_scalar tolerance,
+	qaws_curve** out_curves,
+	unsigned int curve_capacity,
+	unsigned int* out_count)
+{
+	unsigned int degree;
+	qaws_dimension dim;
+	unsigned int total_samples = 0;
+	unsigned int samples_per_curve;
+	qaws_scalar* params = NULL;
+	qaws_scalar* coords = NULL;
+	unsigned int dim_count;
+	unsigned int ci, si, idx;
+	qaws_scalar param_offset;
+	unsigned int n_cp;
+	qaws_status status;
+	qaws_curve* merged = NULL;
+	qaws_scalar max_err;
+
+	if (!curves || curve_count == 0 || !out_curves || !out_count)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	if (curve_capacity == 0)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+
+	*out_count = 0;
+	degree = target_degree > 0 ? target_degree : 3;
+	dim = qaws_curve_get_dimension(curves[0]);
+	dim_count = (unsigned int)dim;
+
+	/* Sample all curves densely */
+	samples_per_curve = 64;
+	total_samples = samples_per_curve * curve_count;
+
+	params = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (size_t)total_samples);
+	coords = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (size_t)total_samples * dim_count);
+	if (!params || !coords) { free(params); free(coords); return QAWS_STATUS_ALLOCATION_FAILURE; }
+
+	idx = 0;
+	param_offset = QAWS_ZERO;
+	for (ci = 0; ci < curve_count; ci++)
+	{
+		qaws_range range = qaws_curve_get_parameter_range(curves[ci]);
+		qaws_scalar range_len = range.max_value - range.min_value;
+
+		for (si = 0; si < samples_per_curve; si++)
+		{
+			qaws_scalar frac = (qaws_scalar)si / (qaws_scalar)(samples_per_curve - 1);
+			qaws_scalar t = range.min_value + frac * range_len;
+
+			params[idx] = param_offset + frac * range_len;
+
+			if (dim == QAWS_DIMENSION_3D)
+			{
+				qaws_eval_result_3d er;
+				memset(&er, 0, sizeof(er));
+				qaws_curve_evaluate_3d(curves[ci], t, QAWS_EVAL_FLAG_POSITION, &er);
+				coords[idx * dim_count + 0] = er.position.x;
+				coords[idx * dim_count + 1] = er.position.y;
+				coords[idx * dim_count + 2] = er.position.z;
+			}
+			else
+			{
+				qaws_eval_result_2d er;
+				memset(&er, 0, sizeof(er));
+				qaws_curve_evaluate_2d(curves[ci], t, QAWS_EVAL_FLAG_POSITION, &er);
+				coords[idx * dim_count + 0] = er.position.x;
+				coords[idx * dim_count + 1] = er.position.y;
+			}
+			idx++;
+		}
+		param_offset += range_len;
+	}
+
+	/* Fit a single B-spline through all samples */
+	n_cp = total_samples / 4;
+	if (n_cp < degree + 1) n_cp = degree + 1;
+	if (n_cp > total_samples) n_cp = total_samples;
+
+	status = qaws_internal_fit_bspline(dim, degree, params, coords,
+		total_samples, n_cp, &merged);
+
+	if (status != QAWS_STATUS_OK) { free(params); free(coords); return status; }
+
+	/* Check maximum deviation */
+	max_err = QAWS_ZERO;
+	for (idx = 0; idx < total_samples; idx++)
+	{
+		qaws_scalar err;
+		if (dim == QAWS_DIMENSION_3D)
+		{
+			qaws_eval_result_3d er;
+			memset(&er, 0, sizeof(er));
+			qaws_curve_evaluate_3d(merged, params[idx], QAWS_EVAL_FLAG_POSITION, &er);
+			err = QAWS_SQRT(
+				(er.position.x - coords[idx * dim_count + 0]) * (er.position.x - coords[idx * dim_count + 0]) +
+				(er.position.y - coords[idx * dim_count + 1]) * (er.position.y - coords[idx * dim_count + 1]) +
+				(er.position.z - coords[idx * dim_count + 2]) * (er.position.z - coords[idx * dim_count + 2]));
+		}
+		else
+		{
+			qaws_eval_result_2d er;
+			memset(&er, 0, sizeof(er));
+			qaws_curve_evaluate_2d(merged, params[idx], QAWS_EVAL_FLAG_POSITION, &er);
+			err = QAWS_SQRT(
+				(er.position.x - coords[idx * dim_count + 0]) * (er.position.x - coords[idx * dim_count + 0]) +
+				(er.position.y - coords[idx * dim_count + 1]) * (er.position.y - coords[idx * dim_count + 1]));
+		}
+		if (err > max_err) max_err = err;
+	}
+
+	/* If tolerance exceeded and we have room, try with more control points */
+	if (tolerance > QAWS_ZERO && max_err > tolerance && n_cp < total_samples)
+	{
+		qaws_curve_destroy(merged);
+		merged = NULL;
+		n_cp = total_samples / 2;
+		if (n_cp < degree + 1) n_cp = degree + 1;
+		status = qaws_internal_fit_bspline(dim, degree, params, coords,
+			total_samples, n_cp, &merged);
+		if (status != QAWS_STATUS_OK)
+		{
+			free(params); free(coords);
+			return status;
+		}
+	}
+
+	free(params);
+	free(coords);
+
+	out_curves[0] = merged;
+	*out_count = 1;
+	return QAWS_STATUS_OK;
+}
+
+/* ========================================================================== */
+/*  Fillet and chamfer on 2D curves (#25)                                     */
+/* ========================================================================== */
+
+/* Helper: compute the angle between two 2D vectors */
+static qaws_scalar vec2_angle(qaws_vec2 a, qaws_vec2 b)
+{
+	qaws_scalar dot = a.x * b.x + a.y * b.y;
+	qaws_scalar cross = a.x * b.y - a.y * b.x;
+	return QAWS_ATAN2(cross, dot);
+}
+
+qaws_status qaws_curve_fillet_2d(
+	qaws_curve const* curve,
+	qaws_scalar radius,
+	qaws_curve** out_curve)
+{
+	qaws_curve_kind kind;
+	unsigned int seg_count, total_segs;
+	unsigned int seg_i, ji;
+	qaws_curve** new_segments = NULL;
+	unsigned int new_count = 0;
+	qaws_composite_desc cdesc;
+	qaws_status status = QAWS_STATUS_OK;
+
+	/* Per-junction precomputed data */
+	qaws_scalar* j_setback = NULL;
+	qaws_scalar* j_angle = NULL;
+	qaws_vec2* j_corner = NULL;
+	qaws_vec2* j_tan_out = NULL;
+	qaws_vec2* j_tan_in = NULL;
+	qaws_scalar* j_d_out = NULL;
+	qaws_scalar* j_d_in = NULL;
+	int* j_active = NULL;
+	unsigned int n_junctions;
+
+	if (!curve || !out_curve)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	if (radius <= QAWS_ZERO)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	if (qaws_curve_get_dimension(curve) != QAWS_DIMENSION_2D)
+		return QAWS_STATUS_INVALID_DIMENSION;
+
+	*out_curve = NULL;
+	kind = qaws_curve_get_kind(curve);
+
+	/* For non-composite curves, just clone */
+	if (kind != QAWS_CURVE_KIND_COMPOSITE)
+	{
+		qaws_range range = qaws_curve_get_parameter_range(curve);
+		unsigned int n_samp = 64;
+		qaws_scalar* params = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (size_t)n_samp);
+		qaws_scalar* coords = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (size_t)n_samp * 2);
+		unsigned int i;
+
+		if (!params || !coords) { free(params); free(coords); return QAWS_STATUS_ALLOCATION_FAILURE; }
+
+		for (i = 0; i < n_samp; i++)
+		{
+			qaws_eval_result_2d er;
+			qaws_scalar t = range.min_value + (range.max_value - range.min_value) *
+				(qaws_scalar)i / (qaws_scalar)(n_samp - 1);
+			memset(&er, 0, sizeof(er));
+			qaws_curve_evaluate_2d(curve, t, QAWS_EVAL_FLAG_POSITION, &er);
+			params[i] = t;
+			coords[i * 2] = er.position.x;
+			coords[i * 2 + 1] = er.position.y;
+		}
+		status = qaws_internal_fit_bspline(QAWS_DIMENSION_2D, 3, params, coords, n_samp, 16, out_curve);
+		free(params); free(coords);
+		return status;
+	}
+
+	/* Composite curve: two-pass approach */
+	seg_count = qaws_curve_get_span_count(curve);
+	n_junctions = (seg_count > 1) ? seg_count - 1 : 0;
+
+	/* ---- Pass 1: precompute junction geometry ---- */
+	if (n_junctions > 0)
+	{
+		j_setback = (qaws_scalar*)calloc((size_t)n_junctions, sizeof(qaws_scalar));
+		j_angle   = (qaws_scalar*)calloc((size_t)n_junctions, sizeof(qaws_scalar));
+		j_corner  = (qaws_vec2*)calloc((size_t)n_junctions, sizeof(qaws_vec2));
+		j_tan_out = (qaws_vec2*)calloc((size_t)n_junctions, sizeof(qaws_vec2));
+		j_tan_in  = (qaws_vec2*)calloc((size_t)n_junctions, sizeof(qaws_vec2));
+		j_d_out   = (qaws_scalar*)calloc((size_t)n_junctions, sizeof(qaws_scalar));
+		j_d_in    = (qaws_scalar*)calloc((size_t)n_junctions, sizeof(qaws_scalar));
+		j_active  = (int*)calloc((size_t)n_junctions, sizeof(int));
+		if (!j_setback || !j_angle || !j_corner || !j_tan_out || !j_tan_in
+			|| !j_d_out || !j_d_in || !j_active)
+		{
+			free(j_setback); free(j_angle); free(j_corner);
+			free(j_tan_out); free(j_tan_in); free(j_d_out); free(j_d_in); free(j_active);
+			return QAWS_STATUS_ALLOCATION_FAILURE;
+		}
+
+		for (ji = 0; ji < n_junctions; ji++)
+		{
+			qaws_eval_result_2d er_end, er_start, er_corner;
+			qaws_scalar t_junc = (qaws_scalar)(ji + 1);
+			qaws_scalar half_angle;
+
+			memset(&er_end, 0, sizeof(er_end));
+			memset(&er_start, 0, sizeof(er_start));
+			memset(&er_corner, 0, sizeof(er_corner));
+			qaws_curve_evaluate_2d(curve, t_junc - QAWS_LITERAL(1e-6), QAWS_EVAL_FLAG_D1, &er_end);
+			qaws_curve_evaluate_2d(curve, t_junc + QAWS_LITERAL(1e-6), QAWS_EVAL_FLAG_D1, &er_start);
+			qaws_curve_evaluate_2d(curve, t_junc, QAWS_EVAL_FLAG_POSITION, &er_corner);
+
+			j_tan_out[ji] = er_end.d1;
+			j_tan_in[ji] = er_start.d1;
+			j_corner[ji] = er_corner.position;
+			j_angle[ji] = vec2_angle(er_end.d1, er_start.d1);
+
+			j_d_out[ji] = QAWS_SQRT(j_tan_out[ji].x * j_tan_out[ji].x + j_tan_out[ji].y * j_tan_out[ji].y);
+			j_d_in[ji] = QAWS_SQRT(j_tan_in[ji].x * j_tan_in[ji].x + j_tan_in[ji].y * j_tan_in[ji].y);
+
+			if (QAWS_FABS(j_angle[ji]) > QAWS_LITERAL(0.087)
+				&& j_d_out[ji] > QAWS_LITERAL(1e-12)
+				&& j_d_in[ji] > QAWS_LITERAL(1e-12))
+			{
+				half_angle = QAWS_FABS(j_angle[ji]) * QAWS_LITERAL(0.5);
+				if (QAWS_FABS(QAWS_SIN(half_angle)) > QAWS_LITERAL(1e-10))
+				{
+					j_setback[ji] = radius / QAWS_FABS(QAWS_SIN(half_angle))
+						* QAWS_FABS(QAWS_COS(half_angle));
+					j_active[ji] = 1;
+				}
+			}
+		}
+	}
+
+	/* ---- Pass 2: build trimmed segments and insert arcs ---- */
+	total_segs = seg_count * 3;
+	new_segments = (qaws_curve**)calloc((size_t)total_segs, sizeof(qaws_curve*));
+	if (!new_segments) { status = QAWS_STATUS_ALLOCATION_FAILURE; goto cleanup_fillet; }
+
+	for (seg_i = 0; seg_i < seg_count; seg_i++)
+	{
+		qaws_scalar t_lo = (qaws_scalar)seg_i;
+		qaws_scalar t_hi = (qaws_scalar)(seg_i + 1);
+		qaws_scalar seg_span = t_hi - t_lo;
+		unsigned int n_samp = 32;
+		unsigned int si;
+		qaws_scalar* samp_params;
+		qaws_scalar* samp_coords;
+
+		/* Estimate segment arc length from endpoints */
+		{
+			qaws_eval_result_2d er_lo, er_hi;
+			qaws_scalar seg_len, trim_lo, trim_hi;
+
+			memset(&er_lo, 0, sizeof(er_lo));
+			memset(&er_hi, 0, sizeof(er_hi));
+			qaws_curve_evaluate_2d(curve, t_lo, QAWS_EVAL_FLAG_POSITION, &er_lo);
+			qaws_curve_evaluate_2d(curve, t_hi, QAWS_EVAL_FLAG_POSITION, &er_hi);
+			seg_len = QAWS_SQRT(
+				(er_hi.position.x - er_lo.position.x) * (er_hi.position.x - er_lo.position.x) +
+				(er_hi.position.y - er_lo.position.y) * (er_hi.position.y - er_lo.position.y));
+			if (seg_len < QAWS_LITERAL(1e-12)) seg_len = QAWS_LITERAL(1e-12);
+
+			/* Trim from start (previous junction) */
+			trim_lo = QAWS_ZERO;
+			if (seg_i > 0 && j_active[seg_i - 1])
+				trim_lo = j_setback[seg_i - 1] / seg_len * seg_span;
+
+			/* Trim from end (next junction) */
+			trim_hi = QAWS_ZERO;
+			if (seg_i + 1 < seg_count && j_active[seg_i])
+				trim_hi = j_setback[seg_i] / seg_len * seg_span;
+
+			/* Clamp trims so they don't overlap */
+			if (trim_lo + trim_hi > seg_span * QAWS_LITERAL(0.9))
+			{
+				qaws_scalar scale = seg_span * QAWS_LITERAL(0.9) / (trim_lo + trim_hi);
+				trim_lo *= scale;
+				trim_hi *= scale;
+			}
+
+			t_lo += trim_lo;
+			t_hi -= trim_hi;
+		}
+
+		/* Sample trimmed segment as B-spline copy */
+		samp_params = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (size_t)n_samp);
+		samp_coords = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (size_t)n_samp * 2);
+		if (!samp_params || !samp_coords)
+		{
+			free(samp_params); free(samp_coords);
+			goto cleanup_fillet;
+		}
+
+		for (si = 0; si < n_samp; si++)
+		{
+			qaws_eval_result_2d er;
+			qaws_scalar t = t_lo + (t_hi - t_lo) * (qaws_scalar)si / (qaws_scalar)(n_samp - 1);
+			memset(&er, 0, sizeof(er));
+			qaws_curve_evaluate_2d(curve, t, QAWS_EVAL_FLAG_POSITION, &er);
+			samp_params[si] = (qaws_scalar)si / (qaws_scalar)(n_samp - 1);
+			samp_coords[si * 2] = er.position.x;
+			samp_coords[si * 2 + 1] = er.position.y;
+		}
+
+		{
+			qaws_curve* seg_copy = NULL;
+			status = qaws_internal_fit_bspline(QAWS_DIMENSION_2D, 3, samp_params, samp_coords, n_samp, 10, &seg_copy);
+			free(samp_params); free(samp_coords);
+			if (status != QAWS_STATUS_OK) goto cleanup_fillet;
+			if (new_count >= total_segs) { qaws_curve_destroy(seg_copy); goto cleanup_fillet; }
+			new_segments[new_count++] = seg_copy;
+		}
+
+		/* Insert fillet arc at this segment's end junction */
+		if (seg_i < n_junctions && j_active[seg_i])
+		{
+			qaws_vec2 n_out, n_in, fillet_center;
+			qaws_arc_segment arc_seg;
+			qaws_arc_desc arc_desc;
+			qaws_curve* arc_curve = NULL;
+			qaws_scalar sign, half_angle;
+
+			half_angle = QAWS_FABS(j_angle[seg_i]) * QAWS_LITERAL(0.5);
+			n_out.x = -j_tan_out[seg_i].y / j_d_out[seg_i];
+			n_out.y =  j_tan_out[seg_i].x / j_d_out[seg_i];
+			n_in.x = -j_tan_in[seg_i].y / j_d_in[seg_i];
+			n_in.y =  j_tan_in[seg_i].x / j_d_in[seg_i];
+
+			sign = (j_angle[seg_i] > QAWS_ZERO) ? QAWS_ONE : -QAWS_ONE;
+			{
+				qaws_scalar bx = n_out.x + n_in.x;
+				qaws_scalar by = n_out.y + n_in.y;
+				qaws_scalar blen = QAWS_SQRT(bx * bx + by * by);
+				qaws_scalar offset;
+				if (blen < QAWS_LITERAL(1e-12)) blen = QAWS_LITERAL(1e-12);
+				offset = radius / QAWS_FABS(QAWS_SIN(half_angle));
+				fillet_center.x = j_corner[seg_i].x + sign * offset * bx / blen;
+				fillet_center.y = j_corner[seg_i].y + sign * offset * by / blen;
+			}
+
+			memset(&arc_seg, 0, sizeof(arc_seg));
+			arc_seg.center[0] = fillet_center.x;
+			arc_seg.center[1] = fillet_center.y;
+			arc_seg.radius = radius;
+
+			{
+				qaws_vec2 p_start, p_end;
+				p_start.x = j_corner[seg_i].x - j_setback[seg_i] * j_tan_out[seg_i].x / j_d_out[seg_i];
+				p_start.y = j_corner[seg_i].y - j_setback[seg_i] * j_tan_out[seg_i].y / j_d_out[seg_i];
+				p_end.x = j_corner[seg_i].x + j_setback[seg_i] * j_tan_in[seg_i].x / j_d_in[seg_i];
+				p_end.y = j_corner[seg_i].y + j_setback[seg_i] * j_tan_in[seg_i].y / j_d_in[seg_i];
+
+				arc_seg.angle_start = QAWS_ATAN2(
+					p_start.y - fillet_center.y, p_start.x - fillet_center.x);
+				arc_seg.angle_end = QAWS_ATAN2(
+					p_end.y - fillet_center.y, p_end.x - fillet_center.x);
+			}
+
+			memset(&arc_desc, 0, sizeof(arc_desc));
+			arc_desc.dimension = QAWS_DIMENSION_2D;
+			arc_desc.segments = &arc_seg;
+			arc_desc.segment_count = 1;
+
+			status = qaws_curve_create_arc(&arc_desc, &arc_curve);
+			if (status == QAWS_STATUS_OK && arc_curve && new_count < total_segs)
+				new_segments[new_count++] = arc_curve;
+		}
+	}
+
+	if (new_count == 0)
+	{
+		free(new_segments);
+		status = QAWS_STATUS_DEGENERATE_CURVE;
+		goto cleanup_fillet;
+	}
+
+	/* Create composite from all segments */
+	memset(&cdesc, 0, sizeof(cdesc));
+	cdesc.dimension = QAWS_DIMENSION_2D;
+	cdesc.segments = new_segments;
+	cdesc.segment_count = new_count;
+	status = qaws_curve_create_composite(&cdesc, out_curve);
+
+	if (status != QAWS_STATUS_OK)
+		goto cleanup_fillet;
+
+	free(new_segments);
+	free(j_setback); free(j_angle); free(j_corner);
+	free(j_tan_out); free(j_tan_in); free(j_d_out); free(j_d_in); free(j_active);
+	return QAWS_STATUS_OK;
+
+cleanup_fillet:
+	{
+		unsigned int fi;
+		for (fi = 0; fi < new_count; fi++)
+			qaws_curve_destroy(new_segments[fi]);
+		free(new_segments);
+	}
+	free(j_setback); free(j_angle); free(j_corner);
+	free(j_tan_out); free(j_tan_in); free(j_d_out); free(j_d_in); free(j_active);
+	return status;
+}
+
+qaws_status qaws_curve_chamfer_2d(
+	qaws_curve const* curve,
+	qaws_scalar distance,
+	qaws_curve** out_curve)
+{
+	qaws_curve_kind kind;
+	unsigned int seg_count, total_segs;
+	unsigned int seg_i, ji;
+	qaws_curve** new_segments = NULL;
+	unsigned int new_count = 0;
+	qaws_composite_desc cdesc;
+	qaws_status status = QAWS_STATUS_OK;
+
+	/* Per-junction precomputed data */
+	qaws_scalar* j_angle = NULL;
+	qaws_vec2* j_corner = NULL;
+	qaws_vec2* j_tan_out = NULL;
+	qaws_vec2* j_tan_in = NULL;
+	qaws_scalar* j_d_out = NULL;
+	qaws_scalar* j_d_in = NULL;
+	int* j_active = NULL;
+	unsigned int n_junctions;
+
+	if (!curve || !out_curve)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	if (distance <= QAWS_ZERO)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	if (qaws_curve_get_dimension(curve) != QAWS_DIMENSION_2D)
+		return QAWS_STATUS_INVALID_DIMENSION;
+
+	*out_curve = NULL;
+	kind = qaws_curve_get_kind(curve);
+
+	if (kind != QAWS_CURVE_KIND_COMPOSITE)
+	{
+		/* Non-composite: just copy */
+		qaws_range range = qaws_curve_get_parameter_range(curve);
+		unsigned int n_samp = 64;
+		qaws_scalar* params = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (size_t)n_samp);
+		qaws_scalar* coords = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (size_t)n_samp * 2);
+		unsigned int i;
+
+		if (!params || !coords) { free(params); free(coords); return QAWS_STATUS_ALLOCATION_FAILURE; }
+
+		for (i = 0; i < n_samp; i++)
+		{
+			qaws_eval_result_2d er;
+			qaws_scalar t = range.min_value + (range.max_value - range.min_value) *
+				(qaws_scalar)i / (qaws_scalar)(n_samp - 1);
+			memset(&er, 0, sizeof(er));
+			qaws_curve_evaluate_2d(curve, t, QAWS_EVAL_FLAG_POSITION, &er);
+			params[i] = t;
+			coords[i * 2] = er.position.x;
+			coords[i * 2 + 1] = er.position.y;
+		}
+		status = qaws_internal_fit_bspline(QAWS_DIMENSION_2D, 3, params, coords, n_samp, 16, out_curve);
+		free(params); free(coords);
+		return status;
+	}
+
+	/* Composite curve: two-pass approach */
+	seg_count = qaws_curve_get_span_count(curve);
+	n_junctions = (seg_count > 1) ? seg_count - 1 : 0;
+
+	/* ---- Pass 1: precompute junction geometry ---- */
+	if (n_junctions > 0)
+	{
+		j_angle   = (qaws_scalar*)calloc((size_t)n_junctions, sizeof(qaws_scalar));
+		j_corner  = (qaws_vec2*)calloc((size_t)n_junctions, sizeof(qaws_vec2));
+		j_tan_out = (qaws_vec2*)calloc((size_t)n_junctions, sizeof(qaws_vec2));
+		j_tan_in  = (qaws_vec2*)calloc((size_t)n_junctions, sizeof(qaws_vec2));
+		j_d_out   = (qaws_scalar*)calloc((size_t)n_junctions, sizeof(qaws_scalar));
+		j_d_in    = (qaws_scalar*)calloc((size_t)n_junctions, sizeof(qaws_scalar));
+		j_active  = (int*)calloc((size_t)n_junctions, sizeof(int));
+		if (!j_angle || !j_corner || !j_tan_out || !j_tan_in
+			|| !j_d_out || !j_d_in || !j_active)
+		{
+			free(j_angle); free(j_corner);
+			free(j_tan_out); free(j_tan_in); free(j_d_out); free(j_d_in); free(j_active);
+			return QAWS_STATUS_ALLOCATION_FAILURE;
+		}
+
+		for (ji = 0; ji < n_junctions; ji++)
+		{
+			qaws_eval_result_2d er_end, er_start, er_corner;
+			qaws_scalar t_junc = (qaws_scalar)(ji + 1);
+
+			memset(&er_end, 0, sizeof(er_end));
+			memset(&er_start, 0, sizeof(er_start));
+			memset(&er_corner, 0, sizeof(er_corner));
+			qaws_curve_evaluate_2d(curve, t_junc - QAWS_LITERAL(1e-6), QAWS_EVAL_FLAG_D1, &er_end);
+			qaws_curve_evaluate_2d(curve, t_junc + QAWS_LITERAL(1e-6), QAWS_EVAL_FLAG_D1, &er_start);
+			qaws_curve_evaluate_2d(curve, t_junc, QAWS_EVAL_FLAG_POSITION, &er_corner);
+
+			j_tan_out[ji] = er_end.d1;
+			j_tan_in[ji] = er_start.d1;
+			j_corner[ji] = er_corner.position;
+			j_angle[ji] = vec2_angle(er_end.d1, er_start.d1);
+
+			j_d_out[ji] = QAWS_SQRT(j_tan_out[ji].x * j_tan_out[ji].x + j_tan_out[ji].y * j_tan_out[ji].y);
+			j_d_in[ji] = QAWS_SQRT(j_tan_in[ji].x * j_tan_in[ji].x + j_tan_in[ji].y * j_tan_in[ji].y);
+
+			if (QAWS_FABS(j_angle[ji]) > QAWS_LITERAL(0.087)
+				&& j_d_out[ji] > QAWS_LITERAL(1e-12)
+				&& j_d_in[ji] > QAWS_LITERAL(1e-12))
+			{
+				j_active[ji] = 1;
+			}
+		}
+	}
+
+	/* ---- Pass 2: build trimmed segments and insert chamfer lines ---- */
+	total_segs = seg_count * 2;
+	new_segments = (qaws_curve**)calloc((size_t)total_segs, sizeof(qaws_curve*));
+	if (!new_segments) { status = QAWS_STATUS_ALLOCATION_FAILURE; goto cleanup_chamfer; }
+
+	for (seg_i = 0; seg_i < seg_count; seg_i++)
+	{
+		qaws_scalar t_lo = (qaws_scalar)seg_i;
+		qaws_scalar t_hi = (qaws_scalar)(seg_i + 1);
+		qaws_scalar seg_span = t_hi - t_lo;
+		unsigned int n_samp = 32;
+		unsigned int si;
+		qaws_scalar* samp_params;
+		qaws_scalar* samp_coords;
+
+		/* Trim segment parameter range based on chamfer distance */
+		{
+			qaws_eval_result_2d er_lo, er_hi;
+			qaws_scalar seg_len, trim_lo, trim_hi;
+
+			memset(&er_lo, 0, sizeof(er_lo));
+			memset(&er_hi, 0, sizeof(er_hi));
+			qaws_curve_evaluate_2d(curve, t_lo, QAWS_EVAL_FLAG_POSITION, &er_lo);
+			qaws_curve_evaluate_2d(curve, t_hi, QAWS_EVAL_FLAG_POSITION, &er_hi);
+			seg_len = QAWS_SQRT(
+				(er_hi.position.x - er_lo.position.x) * (er_hi.position.x - er_lo.position.x) +
+				(er_hi.position.y - er_lo.position.y) * (er_hi.position.y - er_lo.position.y));
+			if (seg_len < QAWS_LITERAL(1e-12)) seg_len = QAWS_LITERAL(1e-12);
+
+			trim_lo = QAWS_ZERO;
+			if (seg_i > 0 && j_active[seg_i - 1])
+				trim_lo = distance / seg_len * seg_span;
+
+			trim_hi = QAWS_ZERO;
+			if (seg_i + 1 < seg_count && j_active[seg_i])
+				trim_hi = distance / seg_len * seg_span;
+
+			if (trim_lo + trim_hi > seg_span * QAWS_LITERAL(0.9))
+			{
+				qaws_scalar scale = seg_span * QAWS_LITERAL(0.9) / (trim_lo + trim_hi);
+				trim_lo *= scale;
+				trim_hi *= scale;
+			}
+
+			t_lo += trim_lo;
+			t_hi -= trim_hi;
+		}
+
+		/* Copy trimmed segment as B-spline */
+		samp_params = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (size_t)n_samp);
+		samp_coords = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (size_t)n_samp * 2);
+		if (!samp_params || !samp_coords)
+		{
+			free(samp_params); free(samp_coords);
+			goto cleanup_chamfer;
+		}
+
+		for (si = 0; si < n_samp; si++)
+		{
+			qaws_eval_result_2d er;
+			qaws_scalar t = t_lo + (t_hi - t_lo) * (qaws_scalar)si / (qaws_scalar)(n_samp - 1);
+			memset(&er, 0, sizeof(er));
+			qaws_curve_evaluate_2d(curve, t, QAWS_EVAL_FLAG_POSITION, &er);
+			samp_params[si] = (qaws_scalar)si / (qaws_scalar)(n_samp - 1);
+			samp_coords[si * 2] = er.position.x;
+			samp_coords[si * 2 + 1] = er.position.y;
+		}
+
+		{
+			qaws_curve* seg_copy = NULL;
+			status = qaws_internal_fit_bspline(QAWS_DIMENSION_2D, 3, samp_params, samp_coords, n_samp, 10, &seg_copy);
+			free(samp_params); free(samp_coords);
+			if (status != QAWS_STATUS_OK) goto cleanup_chamfer;
+			if (new_count >= total_segs) { qaws_curve_destroy(seg_copy); goto cleanup_chamfer; }
+			new_segments[new_count++] = seg_copy;
+		}
+
+		/* Insert chamfer line at junction */
+		if (seg_i < n_junctions && j_active[seg_i])
+		{
+			qaws_vec2 p0, p1;
+			qaws_scalar pts[4];
+			qaws_bezier_desc bdesc;
+			qaws_curve* line = NULL;
+
+			p0.x = j_corner[seg_i].x - distance * j_tan_out[seg_i].x / j_d_out[seg_i];
+			p0.y = j_corner[seg_i].y - distance * j_tan_out[seg_i].y / j_d_out[seg_i];
+			p1.x = j_corner[seg_i].x + distance * j_tan_in[seg_i].x / j_d_in[seg_i];
+			p1.y = j_corner[seg_i].y + distance * j_tan_in[seg_i].y / j_d_in[seg_i];
+
+			pts[0] = p0.x; pts[1] = p0.y;
+			pts[2] = p1.x; pts[3] = p1.y;
+
+			memset(&bdesc, 0, sizeof(bdesc));
+			bdesc.dimension = QAWS_DIMENSION_2D;
+			bdesc.degree = 1;
+			bdesc.control_points = pts;
+			bdesc.control_point_count = 2;
+
+			status = qaws_curve_create_bezier(&bdesc, &line);
+			if (status == QAWS_STATUS_OK && line && new_count < total_segs)
+				new_segments[new_count++] = line;
+		}
+	}
+
+	if (new_count == 0)
+	{
+		free(new_segments);
+		status = QAWS_STATUS_DEGENERATE_CURVE;
+		goto cleanup_chamfer;
+	}
+
+	memset(&cdesc, 0, sizeof(cdesc));
+	cdesc.dimension = QAWS_DIMENSION_2D;
+	cdesc.segments = new_segments;
+	cdesc.segment_count = new_count;
+	status = qaws_curve_create_composite(&cdesc, out_curve);
+
+	if (status != QAWS_STATUS_OK)
+		goto cleanup_chamfer;
+
+	free(new_segments);
+	free(j_angle); free(j_corner);
+	free(j_tan_out); free(j_tan_in); free(j_d_out); free(j_d_in); free(j_active);
+	return QAWS_STATUS_OK;
+
+cleanup_chamfer:
+	{
+		unsigned int fi;
+		for (fi = 0; fi < new_count; fi++)
+			qaws_curve_destroy(new_segments[fi]);
+		free(new_segments);
+	}
+	free(j_angle); free(j_corner);
+	free(j_tan_out); free(j_tan_in); free(j_d_out); free(j_d_in); free(j_active);
+	return status;
 }

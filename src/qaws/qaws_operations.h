@@ -3,6 +3,7 @@
 
 #include "qaws_types.h"
 #include "qaws_status.h"
+#include "qaws_surface_types.h"
 
 /* Thread-safe: operates on immutable input curves. */
 
@@ -55,6 +56,75 @@ qaws_status qaws_curve_offset_2d(
 qaws_status qaws_curve_reparameterize_arc_length(
 	qaws_curve const* curve,
 	unsigned int table_resolution,
+	qaws_curve** out_curve);
+
+/*
+ * Offset a 3D curve by a distance along a direction field.
+ *
+ * direction_mode:
+ *   0 = constant direction (uses the direction parameter)
+ *   1 = curve normal (Frenet frame normal)
+ *   2 = surface normal (requires surface parameter)
+ *
+ * For mode 0, direction must be non-NULL.
+ * For mode 2, surface must be non-NULL.
+ * sample_count controls the output resolution (0 = default 256).
+ */
+qaws_status qaws_curve_offset_3d(
+	qaws_curve const* curve,
+	qaws_scalar distance,
+	int direction_mode,
+	qaws_vec3 const* direction,
+	qaws_surface const* surface,
+	unsigned int sample_count,
+	qaws_curve** out_curve);
+
+/*
+ * Merge a chain of curve segments into fewer, higher-quality curves.
+ * The input curves should share endpoints (C0 continuity).
+ *
+ * target_degree: degree of the output B-spline (0 = default 3).
+ * tolerance: maximum allowed deviation from original chain.
+ */
+qaws_status qaws_curve_merge_chain(
+	qaws_curve const* const* curves,
+	unsigned int curve_count,
+	unsigned int target_degree,
+	qaws_scalar tolerance,
+	qaws_curve** out_curves,
+	unsigned int curve_capacity,
+	unsigned int* out_count);
+
+/*
+ * Reparameterize curve_b so both curves traverse the same total arc length.
+ * The result has parameter domain [0, arc_length(curve_a)].
+ * curve_b must outlive the returned wrapper (non-owning reference).
+ * table_resolution controls lookup table size (0 = default 256).
+ */
+qaws_status qaws_curve_match_arc_length(
+	qaws_curve const* curve_a,
+	qaws_curve const* curve_b,
+	unsigned int table_resolution,
+	qaws_curve** out_curve);
+
+/*
+ * Insert circular arc fillets at sharp corners of a 2D composite curve.
+ * radius: fillet arc radius at each corner.
+ * The output is a new composite curve with smooth transitions.
+ */
+qaws_status qaws_curve_fillet_2d(
+	qaws_curve const* curve,
+	qaws_scalar radius,
+	qaws_curve** out_curve);
+
+/*
+ * Insert straight-line chamfers at sharp corners of a 2D composite curve.
+ * distance: chamfer setback distance from each corner.
+ * The output is a new composite curve with chamfered corners.
+ */
+qaws_status qaws_curve_chamfer_2d(
+	qaws_curve const* curve,
+	qaws_scalar distance,
 	qaws_curve** out_curve);
 
 #endif /* QAWS_OPERATIONS_H */

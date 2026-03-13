@@ -42,6 +42,9 @@ add_executable(
   38_surface_offset.c
   39_surface_trim.c
   40_surface_intersect.c
+  41_curve_projection.c
+  42_curve_operations.c
+  43_boolean_2d.c
 )
 
 target_link_libraries(qaws_tests PRIVATE Qaws::qaws)

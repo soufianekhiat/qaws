@@ -80,6 +80,7 @@ set(QAWS_SOURCES
   src/qaws/qaws_surface_offset.c
   src/qaws/qaws_surface_trim.c
   src/qaws/qaws_surface_intersect.c
+  src/qaws/qaws_boolean_2d.c
   src/qaws/qaws_inline.c
   src/qaws/qaws_prepare.c
   src/qaws/internal/qaws_internal_curve.c
@@ -89,6 +90,7 @@ set(QAWS_SOURCES
   src/qaws/internal/qaws_internal_solver.c
   src/qaws/internal/qaws_internal_validation.c
   src/qaws/internal/qaws_internal_surface.c
+  src/qaws/internal/qaws_internal_fit.c
 )
 
 if(QAWS_ENABLE_SIMD)
@@ -257,6 +259,7 @@ if(QAWS_INSTALL)
       src/qaws/qaws_surface_offset.h
       src/qaws/qaws_surface_trim.h
       src/qaws/qaws_surface_intersect.h
+      src/qaws/qaws_boolean_2d.h
       src/qaws/qaws_alloc.h
       src/qaws/qaws_inline.h
       src/qaws/qaws_platform.h

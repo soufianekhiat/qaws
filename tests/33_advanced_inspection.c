@@ -730,19 +730,28 @@ static void visual_svg_surface_curve_intersection(void)
 	unsigned int count = 0;
 	unsigned int i, ui, vi;
 
+	/* Oblique projection constants: screen_x = x + y*CX, screen_y = z + y*CY */
+	qaws_scalar proj_cx = (qaws_scalar)0.45;
+	qaws_scalar proj_cy = (qaws_scalar)0.3;
+
 	printf("visual_svg_surface_curve_intersection\n");
 	svg_ensure_output_dir();
 	if (!surf) return;
 
-	/* Vertical line through dome center */
+	/* Diagonal S-curve piercing the dome */
 	{
-		qaws_scalar pts[] = {1,1,-1, 1,1,5};
+		qaws_scalar pts[] = {
+			(qaws_scalar)0.2,  (qaws_scalar)1.8,  (qaws_scalar)-0.5,
+			(qaws_scalar)0.6,  (qaws_scalar)0.3,  (qaws_scalar) 2.5,
+			(qaws_scalar)1.4,  (qaws_scalar)1.7,  (qaws_scalar) 0.5,
+			(qaws_scalar)1.8,  (qaws_scalar)0.2,  (qaws_scalar) 3.0
+		};
 		qaws_bezier_desc d;
 		memset(&d, 0, sizeof(d));
 		d.dimension = QAWS_DIMENSION_3D;
-		d.degree = 1;
+		d.degree = 3;
 		d.control_points = pts;
-		d.control_point_count = 2;
+		d.control_point_count = 4;
 		qaws_curve_create_bezier(&d, &crv);
 	}
 	if (!crv) { qaws_surface_destroy(surf); return; }
@@ -750,15 +759,15 @@ static void visual_svg_surface_curve_intersection(void)
 	qaws_surface_find_curve_intersections(surf, crv, hits, 16, &count);
 
 	if (!svg_open(&svg, OBJ_OUTPUT_DIR "/surface_curve_intersection.svg",
-		(qaws_scalar)-0.5, (qaws_scalar)-1.5,
-		(qaws_scalar)3.5, (qaws_scalar)7,
-		(qaws_scalar)500, (qaws_scalar)500))
+		(qaws_scalar)-0.5, (qaws_scalar)-1.0,
+		(qaws_scalar)4.0, (qaws_scalar)5.0,
+		(qaws_scalar)550, (qaws_scalar)550))
 	{
 		qaws_curve_destroy(crv); qaws_surface_destroy(surf);
 		return;
 	}
 
-	/* Draw surface iso-u lines (XZ projection, at y=1 slice) */
+	/* Draw surface iso-u lines (oblique projection) */
 	for (ui = 0; ui <= 8; ui++)
 	{
 		qaws_vec2 pts_2d[33];
@@ -769,8 +778,8 @@ static void visual_svg_surface_curve_intersection(void)
 			qaws_surface_eval_result r;
 			memset(&r, 0, sizeof(r));
 			qaws_surface_evaluate(surf, u, v, QAWS_SURFACE_EVAL_POSITION, &r);
-			pts_2d[vi].x = r.position.x;
-			pts_2d[vi].y = r.position.z;
+			pts_2d[vi].x = r.position.x + r.position.y * proj_cx;
+			pts_2d[vi].y = r.position.z + r.position.y * proj_cy;
 		}
 		svg_polyline(&svg, pts_2d, 33, "#5588bb", 1);
 	}
@@ -786,33 +795,40 @@ static void visual_svg_surface_curve_intersection(void)
 			qaws_surface_eval_result r;
 			memset(&r, 0, sizeof(r));
 			qaws_surface_evaluate(surf, u, v, QAWS_SURFACE_EVAL_POSITION, &r);
-			pts_2d[ui].x = r.position.x;
-			pts_2d[ui].y = r.position.z;
+			pts_2d[ui].x = r.position.x + r.position.y * proj_cx;
+			pts_2d[ui].y = r.position.z + r.position.y * proj_cy;
 		}
 		svg_polyline(&svg, pts_2d, 33, "#5588bb", 1);
 	}
 
-	/* Draw curve (XZ projection) */
+	/* Draw curve (oblique projection) */
 	{
-		qaws_vec2 pts_2d[2];
-		qaws_eval_result_3d er;
-		memset(&er, 0, sizeof(er));
-		qaws_curve_evaluate_3d(crv, 0, QAWS_EVAL_FLAG_POSITION, &er);
-		pts_2d[0].x = er.position.x; pts_2d[0].y = er.position.z;
-		memset(&er, 0, sizeof(er));
-		qaws_curve_evaluate_3d(crv, 1, QAWS_EVAL_FLAG_POSITION, &er);
-		pts_2d[1].x = er.position.x; pts_2d[1].y = er.position.z;
-		svg_polyline(&svg, pts_2d, 2, "#ff8800", 2);
+		qaws_vec2 pts_2d[64];
+		unsigned int ci;
+		for (ci = 0; ci < 64; ci++)
+		{
+			qaws_eval_result_3d er;
+			qaws_scalar t = (qaws_scalar)ci / (qaws_scalar)63;
+			memset(&er, 0, sizeof(er));
+			qaws_curve_evaluate_3d(crv, t, QAWS_EVAL_FLAG_POSITION, &er);
+			pts_2d[ci].x = er.position.x + er.position.y * proj_cx;
+			pts_2d[ci].y = er.position.z + er.position.y * proj_cy;
+		}
+		svg_polyline(&svg, pts_2d, 64, "#ff8800", 2);
 	}
 
 	/* Draw intersection points */
 	for (i = 0; i < count; i++)
-		svg_dot(&svg, hits[i].position.x, hits[i].position.z, "#ff2222", 6);
+	{
+		qaws_scalar sx = hits[i].position.x + hits[i].position.y * proj_cx;
+		qaws_scalar sy = hits[i].position.z + hits[i].position.y * proj_cy;
+		svg_dot(&svg, sx, sy, "#ff2222", 6);
+	}
 
 	{
 		char buf[64];
 		sprintf(buf, "%u intersections", count);
-		svg_label(&svg, (qaws_scalar)0.2, (qaws_scalar)5.5, buf, "#ffffff");
+		svg_label(&svg, (qaws_scalar)0.2, (qaws_scalar)3.8, buf, "#ffffff");
 	}
 
 	svg_close(&svg);

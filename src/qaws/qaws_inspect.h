@@ -331,4 +331,33 @@ qaws_status qaws_surface_tessellate(
 	unsigned int index_capacity,
 	unsigned int* out_index_count);
 
+/* Curve projection onto surface */
+
+/* Project a 3D curve onto a surface, producing a 2D curve in (u,v) parameter space.
+   Each point C(t) is mapped to the closest (u,v) on the surface.
+   sample_count controls the projection resolution (0 = default 128).
+   The output is a B-spline curve in 2D with x=u, y=v. */
+qaws_status qaws_surface_project_curve(
+	qaws_surface const* surface,
+	qaws_curve const* curve,
+	unsigned int sample_count,
+	qaws_curve** out_uv_curve);
+
+/* Geodesic curve on surface */
+
+/* Compute a geodesic curve (shortest path) between two points on a surface.
+   Uses a shooting method with RK4 integration of the geodesic ODE.
+   max_iterations controls the shooting refinement (0 = default 20).
+   step_count controls the integration resolution (0 = default 200).
+   The output is a 3D B-spline curve lying on the surface. */
+qaws_status qaws_surface_compute_geodesic(
+	qaws_surface const* surface,
+	qaws_scalar start_u,
+	qaws_scalar start_v,
+	qaws_scalar end_u,
+	qaws_scalar end_v,
+	unsigned int max_iterations,
+	unsigned int step_count,
+	qaws_curve** out_curve);
+
 #endif /* QAWS_INSPECT_H */

@@ -51,6 +51,9 @@ extern int test_37_surface_gordon_main(void);
 extern int test_38_surface_offset_main(void);
 extern int test_39_surface_trim_main(void);
 extern int test_40_surface_intersect_main(void);
+extern int test_41_curve_projection_main(void);
+extern int test_42_curve_operations_main(void);
+extern int test_43_boolean_2d_main(void);
 
 /* Test registry */
 typedef struct {
@@ -100,6 +103,9 @@ static test_suite const g_test_suites[] = {
 	{"38_surface_offset", test_38_surface_offset_main},
 	{"39_surface_trim", test_39_surface_trim_main},
 	{"40_surface_intersect", test_40_surface_intersect_main},
+	{"41_curve_projection", test_41_curve_projection_main},
+	{"42_curve_operations", test_42_curve_operations_main},
+	{"43_boolean_2d", test_43_boolean_2d_main},
 };
 
 int main(void) {

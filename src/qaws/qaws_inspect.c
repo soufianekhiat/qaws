@@ -5,6 +5,7 @@
 #include "internal/qaws_internal_types.h"
 #include "internal/qaws_internal_arc_length.h"
 #include "internal/qaws_internal_solver.h"
+#include "internal/qaws_internal_fit.h"
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -3955,4 +3956,485 @@ qaws_status qaws_surface_tessellate(
 	*out_vertex_count = vert_count;
 	*out_index_count = idx_count;
 	return QAWS_STATUS_OK;
+}
+
+/* ========================================================================== */
+/*  Curve projection onto surface (#20)                                       */
+/* ========================================================================== */
+
+qaws_status qaws_surface_project_curve(
+	qaws_surface const* surface,
+	qaws_curve const* curve,
+	unsigned int sample_count,
+	qaws_curve** out_uv_curve)
+{
+	unsigned int n_samples;
+	qaws_scalar* params = NULL;
+	qaws_scalar* uv_coords = NULL;
+	qaws_range range;
+	unsigned int i;
+	unsigned int n_cp;
+	qaws_status status;
+
+	if (!surface || !curve || !out_uv_curve)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	if (qaws_curve_get_dimension(curve) != QAWS_DIMENSION_3D)
+		return QAWS_STATUS_INVALID_DIMENSION;
+
+	*out_uv_curve = NULL;
+	n_samples = sample_count > 0 ? sample_count : 128;
+	range = qaws_curve_get_parameter_range(curve);
+
+	params = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (size_t)n_samples);
+	uv_coords = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (size_t)n_samples * 2);
+	if (!params || !uv_coords)
+	{
+		free(params); free(uv_coords);
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	}
+
+	for (i = 0; i < n_samples; i++)
+	{
+		qaws_scalar t = range.min_value + (range.max_value - range.min_value) *
+			(qaws_scalar)i / (qaws_scalar)(n_samples - 1);
+		qaws_eval_result_3d er;
+		qaws_scalar u, v;
+		qaws_vec3 closest;
+
+		memset(&er, 0, sizeof(er));
+		status = qaws_curve_evaluate_3d(curve, t, QAWS_EVAL_FLAG_POSITION, &er);
+		if (status != QAWS_STATUS_OK) { free(params); free(uv_coords); return status; }
+
+		status = qaws_surface_find_closest_point(surface, er.position, &u, &v, &closest);
+		if (status != QAWS_STATUS_OK) { free(params); free(uv_coords); return status; }
+
+		params[i] = t;
+		uv_coords[i * 2 + 0] = u;
+		uv_coords[i * 2 + 1] = v;
+	}
+
+	/* Fit a 2D B-spline through the (u,v) samples */
+	n_cp = n_samples / 4;
+	if (n_cp < 6) n_cp = 6;
+	if (n_cp > n_samples) n_cp = n_samples;
+
+	status = qaws_internal_fit_bspline(
+		QAWS_DIMENSION_2D, 3,
+		params, uv_coords,
+		n_samples, n_cp,
+		out_uv_curve);
+
+	free(params);
+	free(uv_coords);
+	return status;
+}
+
+/* ========================================================================== */
+/*  Geodesic curves on surfaces (#24)                                         */
+/* ========================================================================== */
+
+/* Compute Christoffel symbols from the first and second fundamental forms.
+   Given surface eval with position, du, dv, duu, duv, dvv:
+     E = du.du, F = du.dv, G = dv.dv
+     e = N.duu, f = N.duv, g = N.dvv  (second fundamental form)
+   Christoffel symbols (first kind):
+     Gamma^1_{ij} from [E F; F G]^{-1} * coefficients of first fundamental form derivatives.
+   We use the simpler formulation with geodesic equations in terms of metric. */
+
+static void compute_christoffel(
+	qaws_surface const* surface,
+	qaws_scalar u, qaws_scalar v,
+	qaws_scalar gamma[2][2][2])
+{
+	qaws_surface_eval_result r;
+	qaws_scalar E, F, G, det, inv_det;
+	qaws_scalar dEdu, dEdv, dFdu, dFdv, dGdu, dGdv;
+	qaws_surface_eval_result r_du, r_dv;
+	qaws_scalar h = QAWS_LITERAL(1e-5);
+	unsigned int eval_flags = QAWS_SURFACE_EVAL_POSITION
+		| QAWS_SURFACE_EVAL_DU | QAWS_SURFACE_EVAL_DV;
+	int i, j, k;
+
+	memset(gamma, 0, sizeof(qaws_scalar) * 8);
+	memset(&r, 0, sizeof(r));
+	qaws_surface_evaluate(surface, u, v, eval_flags, &r);
+
+	E = r.du.x * r.du.x + r.du.y * r.du.y + r.du.z * r.du.z;
+	F = r.du.x * r.dv.x + r.du.y * r.dv.y + r.du.z * r.dv.z;
+	G = r.dv.x * r.dv.x + r.dv.y * r.dv.y + r.dv.z * r.dv.z;
+
+	det = E * G - F * F;
+	if (QAWS_FABS(det) < QAWS_LITERAL(1e-20)) return;
+	inv_det = QAWS_ONE / det;
+
+	/* Numerical derivatives of metric coefficients */
+	memset(&r_du, 0, sizeof(r_du));
+	memset(&r_dv, 0, sizeof(r_dv));
+
+	{
+		qaws_surface_eval_result rp, rm;
+		qaws_scalar Ep, Fp, Gp, Em, Fm, Gm;
+		qaws_scalar u_clamp;
+
+		/* dE/du, dF/du, dG/du via central difference in u */
+		u_clamp = u + h;
+		if (u_clamp > QAWS_ONE) u_clamp = QAWS_ONE;
+		memset(&rp, 0, sizeof(rp));
+		qaws_surface_evaluate(surface, u_clamp, v, eval_flags, &rp);
+
+		u_clamp = u - h;
+		if (u_clamp < QAWS_ZERO) u_clamp = QAWS_ZERO;
+		memset(&rm, 0, sizeof(rm));
+		qaws_surface_evaluate(surface, u_clamp, v, eval_flags, &rm);
+
+		Ep = rp.du.x * rp.du.x + rp.du.y * rp.du.y + rp.du.z * rp.du.z;
+		Fp = rp.du.x * rp.dv.x + rp.du.y * rp.dv.y + rp.du.z * rp.dv.z;
+		Gp = rp.dv.x * rp.dv.x + rp.dv.y * rp.dv.y + rp.dv.z * rp.dv.z;
+		Em = rm.du.x * rm.du.x + rm.du.y * rm.du.y + rm.du.z * rm.du.z;
+		Fm = rm.du.x * rm.dv.x + rm.du.y * rm.dv.y + rm.du.z * rm.dv.z;
+		Gm = rm.dv.x * rm.dv.x + rm.dv.y * rm.dv.y + rm.dv.z * rm.dv.z;
+
+		dEdu = (Ep - Em) / (QAWS_LITERAL(2.0) * h);
+		dFdu = (Fp - Fm) / (QAWS_LITERAL(2.0) * h);
+		dGdu = (Gp - Gm) / (QAWS_LITERAL(2.0) * h);
+
+		/* dE/dv, dF/dv, dG/dv via central difference in v */
+		u_clamp = v + h;
+		if (u_clamp > QAWS_ONE) u_clamp = QAWS_ONE;
+		memset(&rp, 0, sizeof(rp));
+		qaws_surface_evaluate(surface, u, u_clamp, eval_flags, &rp);
+
+		u_clamp = v - h;
+		if (u_clamp < QAWS_ZERO) u_clamp = QAWS_ZERO;
+		memset(&rm, 0, sizeof(rm));
+		qaws_surface_evaluate(surface, u, u_clamp, eval_flags, &rm);
+
+		Ep = rp.du.x * rp.du.x + rp.du.y * rp.du.y + rp.du.z * rp.du.z;
+		Fp = rp.du.x * rp.dv.x + rp.du.y * rp.dv.y + rp.du.z * rp.dv.z;
+		Gp = rp.dv.x * rp.dv.x + rp.dv.y * rp.dv.y + rp.dv.z * rp.dv.z;
+		Em = rm.du.x * rm.du.x + rm.du.y * rm.du.y + rm.du.z * rm.du.z;
+		Fm = rm.du.x * rm.dv.x + rm.du.y * rm.dv.y + rm.du.z * rm.dv.z;
+		Gm = rm.dv.x * rm.dv.x + rm.dv.y * rm.dv.y + rm.dv.z * rm.dv.z;
+
+		dEdv = (Ep - Em) / (QAWS_LITERAL(2.0) * h);
+		dFdv = (Fp - Fm) / (QAWS_LITERAL(2.0) * h);
+		dGdv = (Gp - Gm) / (QAWS_LITERAL(2.0) * h);
+	}
+
+	/* Christoffel symbols of the second kind:
+	   Gamma^k_{ij} = 0.5 * g^{km} * (dg_{mi}/dq^j + dg_{mj}/dq^i - dg_{ij}/dq^m)
+	   where g = [E F; F G], g^{-1} = inv_det * [G -F; -F E]
+	   and q^0 = u, q^1 = v, g_{00}=E, g_{01}=g_{10}=F, g_{11}=G */
+	{
+		/* dg_{ij}/dq^k stored as dg[i][j][k] */
+		qaws_scalar dg[2][2][2];
+		qaws_scalar ginv[2][2];
+
+		dg[0][0][0] = dEdu; dg[0][0][1] = dEdv;
+		dg[0][1][0] = dFdu; dg[0][1][1] = dFdv;
+		dg[1][0][0] = dFdu; dg[1][0][1] = dFdv;
+		dg[1][1][0] = dGdu; dg[1][1][1] = dGdv;
+
+		ginv[0][0] = G * inv_det;
+		ginv[0][1] = -F * inv_det;
+		ginv[1][0] = -F * inv_det;
+		ginv[1][1] = E * inv_det;
+
+		for (k = 0; k < 2; k++)
+			for (i = 0; i < 2; i++)
+				for (j = 0; j < 2; j++)
+				{
+					int m;
+					qaws_scalar val = QAWS_ZERO;
+					for (m = 0; m < 2; m++)
+						val += ginv[k][m] *
+							(dg[m][i][j] + dg[m][j][i] - dg[i][j][m]);
+					gamma[k][i][j] = val * QAWS_LITERAL(0.5);
+				}
+	}
+}
+
+qaws_status qaws_surface_compute_geodesic(
+	qaws_surface const* surface,
+	qaws_scalar start_u,
+	qaws_scalar start_v,
+	qaws_scalar end_u,
+	qaws_scalar end_v,
+	unsigned int max_iterations,
+	unsigned int step_count,
+	qaws_curve** out_curve)
+{
+	unsigned int max_iter;
+	unsigned int n_steps;
+	qaws_scalar* path_coords = NULL;
+	qaws_scalar* path_params = NULL;
+	unsigned int iter;
+	qaws_scalar du_target, dv_target, dist_target;
+	qaws_scalar best_angle, best_err;
+	qaws_scalar angle_lo, angle_hi;
+	qaws_status status;
+	unsigned int n_cp;
+
+	if (!surface || !out_curve)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+
+	*out_curve = NULL;
+	max_iter = max_iterations > 0 ? max_iterations : 20;
+	n_steps = step_count > 0 ? step_count : 200;
+
+	du_target = end_u - start_u;
+	dv_target = end_v - start_v;
+	dist_target = QAWS_SQRT(du_target * du_target + dv_target * dv_target);
+	if (dist_target < QAWS_LITERAL(1e-10))
+		return QAWS_STATUS_DEGENERATE_CURVE;
+
+	path_coords = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (size_t)(n_steps + 1) * 3);
+	path_params = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (size_t)(n_steps + 1));
+	if (!path_coords || !path_params)
+	{
+		free(path_coords); free(path_params);
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	}
+
+	/* Initial shooting angle: direction from start to end in parameter space */
+	best_angle = QAWS_ATAN2(dv_target, du_target);
+	best_err = QAWS_LITERAL(1e30);
+	angle_lo = best_angle - QAWS_LITERAL(1.0);
+	angle_hi = best_angle + QAWS_LITERAL(1.0);
+
+	/* Shooting method with bisection on the initial angle */
+	for (iter = 0; iter < max_iter; iter++)
+	{
+		qaws_scalar angle = (angle_lo + angle_hi) * QAWS_LITERAL(0.5);
+		qaws_scalar speed = dist_target; /* initial speed in param space */
+		qaws_scalar dt = QAWS_ONE / (qaws_scalar)n_steps;
+		qaws_scalar u = start_u, v = start_v;
+		qaws_scalar udot = speed * QAWS_COS(angle);
+		qaws_scalar vdot = speed * QAWS_SIN(angle);
+		unsigned int step;
+		qaws_scalar final_du, final_dv, err;
+		qaws_scalar cross;
+
+		/* Integrate geodesic ODE with RK4:
+		   u'' = -Gamma^0_{ij} u'^i u'^j
+		   v'' = -Gamma^1_{ij} u'^i u'^j */
+		for (step = 0; step <= n_steps; step++)
+		{
+			/* Store current position */
+			if (step == n_steps || iter == max_iter - 1)
+			{
+				qaws_surface_eval_result sr;
+				memset(&sr, 0, sizeof(sr));
+				qaws_surface_evaluate(surface, qaws_clamp(u, QAWS_ZERO, QAWS_ONE),
+					qaws_clamp(v, QAWS_ZERO, QAWS_ONE),
+					QAWS_SURFACE_EVAL_POSITION, &sr);
+				path_coords[step * 3 + 0] = sr.position.x;
+				path_coords[step * 3 + 1] = sr.position.y;
+				path_coords[step * 3 + 2] = sr.position.z;
+				path_params[step] = (qaws_scalar)step / (qaws_scalar)n_steps;
+			}
+
+			if (step == n_steps) break;
+
+			/* RK4 step */
+			{
+				qaws_scalar gamma[2][2][2];
+				qaws_scalar k1u, k1v, k1ud, k1vd;
+				qaws_scalar k2u, k2v, k2ud, k2vd;
+				qaws_scalar k3u, k3v, k3ud, k3vd;
+				qaws_scalar k4u, k4v, k4ud, k4vd;
+				qaws_scalar tu, tv, tud, tvd;
+				qaws_scalar acc_u, acc_v;
+
+				/* k1 */
+				compute_christoffel(surface,
+					qaws_clamp(u, QAWS_ZERO, QAWS_ONE),
+					qaws_clamp(v, QAWS_ZERO, QAWS_ONE), gamma);
+				acc_u = -(gamma[0][0][0] * udot * udot +
+					QAWS_LITERAL(2.0) * gamma[0][0][1] * udot * vdot +
+					gamma[0][1][1] * vdot * vdot);
+				acc_v = -(gamma[1][0][0] * udot * udot +
+					QAWS_LITERAL(2.0) * gamma[1][0][1] * udot * vdot +
+					gamma[1][1][1] * vdot * vdot);
+				k1u = udot * dt;
+				k1v = vdot * dt;
+				k1ud = acc_u * dt;
+				k1vd = acc_v * dt;
+
+				/* k2 */
+				tu = u + k1u * QAWS_LITERAL(0.5);
+				tv = v + k1v * QAWS_LITERAL(0.5);
+				tud = udot + k1ud * QAWS_LITERAL(0.5);
+				tvd = vdot + k1vd * QAWS_LITERAL(0.5);
+				compute_christoffel(surface,
+					qaws_clamp(tu, QAWS_ZERO, QAWS_ONE),
+					qaws_clamp(tv, QAWS_ZERO, QAWS_ONE), gamma);
+				acc_u = -(gamma[0][0][0] * tud * tud +
+					QAWS_LITERAL(2.0) * gamma[0][0][1] * tud * tvd +
+					gamma[0][1][1] * tvd * tvd);
+				acc_v = -(gamma[1][0][0] * tud * tud +
+					QAWS_LITERAL(2.0) * gamma[1][0][1] * tud * tvd +
+					gamma[1][1][1] * tvd * tvd);
+				k2u = tud * dt;
+				k2v = tvd * dt;
+				k2ud = acc_u * dt;
+				k2vd = acc_v * dt;
+
+				/* k3 */
+				tu = u + k2u * QAWS_LITERAL(0.5);
+				tv = v + k2v * QAWS_LITERAL(0.5);
+				tud = udot + k2ud * QAWS_LITERAL(0.5);
+				tvd = vdot + k2vd * QAWS_LITERAL(0.5);
+				compute_christoffel(surface,
+					qaws_clamp(tu, QAWS_ZERO, QAWS_ONE),
+					qaws_clamp(tv, QAWS_ZERO, QAWS_ONE), gamma);
+				acc_u = -(gamma[0][0][0] * tud * tud +
+					QAWS_LITERAL(2.0) * gamma[0][0][1] * tud * tvd +
+					gamma[0][1][1] * tvd * tvd);
+				acc_v = -(gamma[1][0][0] * tud * tud +
+					QAWS_LITERAL(2.0) * gamma[1][0][1] * tud * tvd +
+					gamma[1][1][1] * tvd * tvd);
+				k3u = tud * dt;
+				k3v = tvd * dt;
+				k3ud = acc_u * dt;
+				k3vd = acc_v * dt;
+
+				/* k4 */
+				tu = u + k3u;
+				tv = v + k3v;
+				tud = udot + k3ud;
+				tvd = vdot + k3vd;
+				compute_christoffel(surface,
+					qaws_clamp(tu, QAWS_ZERO, QAWS_ONE),
+					qaws_clamp(tv, QAWS_ZERO, QAWS_ONE), gamma);
+				acc_u = -(gamma[0][0][0] * tud * tud +
+					QAWS_LITERAL(2.0) * gamma[0][0][1] * tud * tvd +
+					gamma[0][1][1] * tvd * tvd);
+				acc_v = -(gamma[1][0][0] * tud * tud +
+					QAWS_LITERAL(2.0) * gamma[1][0][1] * tud * tvd +
+					gamma[1][1][1] * tvd * tvd);
+				k4u = tud * dt;
+				k4v = tvd * dt;
+				k4ud = acc_u * dt;
+				k4vd = acc_v * dt;
+
+				/* Update state */
+				u += (k1u + QAWS_LITERAL(2.0) * k2u + QAWS_LITERAL(2.0) * k3u + k4u) / QAWS_LITERAL(6.0);
+				v += (k1v + QAWS_LITERAL(2.0) * k2v + QAWS_LITERAL(2.0) * k3v + k4v) / QAWS_LITERAL(6.0);
+				udot += (k1ud + QAWS_LITERAL(2.0) * k2ud + QAWS_LITERAL(2.0) * k3ud + k4ud) / QAWS_LITERAL(6.0);
+				vdot += (k1vd + QAWS_LITERAL(2.0) * k2vd + QAWS_LITERAL(2.0) * k3vd + k4vd) / QAWS_LITERAL(6.0);
+			}
+		}
+
+		/* Check how close we got to the endpoint */
+		final_du = u - end_u;
+		final_dv = v - end_v;
+		err = QAWS_SQRT(final_du * final_du + final_dv * final_dv);
+
+		if (err < best_err)
+		{
+			best_err = err;
+			best_angle = angle;
+		}
+
+		/* Bisect: use cross product to determine which side of target we landed */
+		cross = du_target * final_dv - dv_target * final_du;
+		if (cross > QAWS_ZERO)
+			angle_hi = angle;
+		else
+			angle_lo = angle;
+
+		if (err < dist_target * QAWS_LITERAL(0.01))
+			break;
+	}
+
+	/* Do one final integration at the best angle to get the path */
+	{
+		qaws_scalar dt = QAWS_ONE / (qaws_scalar)n_steps;
+		qaws_scalar u = start_u, v = start_v;
+		qaws_scalar udot = dist_target * QAWS_COS(best_angle);
+		qaws_scalar vdot = dist_target * QAWS_SIN(best_angle);
+		unsigned int step;
+
+		for (step = 0; step <= n_steps; step++)
+		{
+			qaws_surface_eval_result sr;
+			memset(&sr, 0, sizeof(sr));
+			qaws_surface_evaluate(surface, qaws_clamp(u, QAWS_ZERO, QAWS_ONE),
+				qaws_clamp(v, QAWS_ZERO, QAWS_ONE),
+				QAWS_SURFACE_EVAL_POSITION, &sr);
+			path_coords[step * 3 + 0] = sr.position.x;
+			path_coords[step * 3 + 1] = sr.position.y;
+			path_coords[step * 3 + 2] = sr.position.z;
+			path_params[step] = (qaws_scalar)step / (qaws_scalar)n_steps;
+
+			if (step == n_steps) break;
+
+			{
+				qaws_scalar gamma[2][2][2];
+				qaws_scalar acc_u, acc_v;
+				qaws_scalar k1u, k1v, k1ud, k1vd;
+				qaws_scalar k2u, k2v, k2ud, k2vd;
+				qaws_scalar k3u, k3v, k3ud, k3vd;
+				qaws_scalar k4u, k4v, k4ud, k4vd;
+				qaws_scalar tu, tv, tud, tvd;
+
+				compute_christoffel(surface,
+					qaws_clamp(u, QAWS_ZERO, QAWS_ONE),
+					qaws_clamp(v, QAWS_ZERO, QAWS_ONE), gamma);
+				acc_u = -(gamma[0][0][0] * udot * udot +
+					QAWS_LITERAL(2.0) * gamma[0][0][1] * udot * vdot +
+					gamma[0][1][1] * vdot * vdot);
+				acc_v = -(gamma[1][0][0] * udot * udot +
+					QAWS_LITERAL(2.0) * gamma[1][0][1] * udot * vdot +
+					gamma[1][1][1] * vdot * vdot);
+				k1u = udot * dt; k1v = vdot * dt;
+				k1ud = acc_u * dt; k1vd = acc_v * dt;
+
+				tu = u + k1u * QAWS_LITERAL(0.5); tv = v + k1v * QAWS_LITERAL(0.5);
+				tud = udot + k1ud * QAWS_LITERAL(0.5); tvd = vdot + k1vd * QAWS_LITERAL(0.5);
+				compute_christoffel(surface, qaws_clamp(tu, QAWS_ZERO, QAWS_ONE),
+					qaws_clamp(tv, QAWS_ZERO, QAWS_ONE), gamma);
+				acc_u = -(gamma[0][0][0] * tud * tud + QAWS_LITERAL(2.0) * gamma[0][0][1] * tud * tvd + gamma[0][1][1] * tvd * tvd);
+				acc_v = -(gamma[1][0][0] * tud * tud + QAWS_LITERAL(2.0) * gamma[1][0][1] * tud * tvd + gamma[1][1][1] * tvd * tvd);
+				k2u = tud * dt; k2v = tvd * dt; k2ud = acc_u * dt; k2vd = acc_v * dt;
+
+				tu = u + k2u * QAWS_LITERAL(0.5); tv = v + k2v * QAWS_LITERAL(0.5);
+				tud = udot + k2ud * QAWS_LITERAL(0.5); tvd = vdot + k2vd * QAWS_LITERAL(0.5);
+				compute_christoffel(surface, qaws_clamp(tu, QAWS_ZERO, QAWS_ONE),
+					qaws_clamp(tv, QAWS_ZERO, QAWS_ONE), gamma);
+				acc_u = -(gamma[0][0][0] * tud * tud + QAWS_LITERAL(2.0) * gamma[0][0][1] * tud * tvd + gamma[0][1][1] * tvd * tvd);
+				acc_v = -(gamma[1][0][0] * tud * tud + QAWS_LITERAL(2.0) * gamma[1][0][1] * tud * tvd + gamma[1][1][1] * tvd * tvd);
+				k3u = tud * dt; k3v = tvd * dt; k3ud = acc_u * dt; k3vd = acc_v * dt;
+
+				tu = u + k3u; tv = v + k3v;
+				tud = udot + k3ud; tvd = vdot + k3vd;
+				compute_christoffel(surface, qaws_clamp(tu, QAWS_ZERO, QAWS_ONE),
+					qaws_clamp(tv, QAWS_ZERO, QAWS_ONE), gamma);
+				acc_u = -(gamma[0][0][0] * tud * tud + QAWS_LITERAL(2.0) * gamma[0][0][1] * tud * tvd + gamma[0][1][1] * tvd * tvd);
+				acc_v = -(gamma[1][0][0] * tud * tud + QAWS_LITERAL(2.0) * gamma[1][0][1] * tud * tvd + gamma[1][1][1] * tvd * tvd);
+				k4u = tud * dt; k4v = tvd * dt; k4ud = acc_u * dt; k4vd = acc_v * dt;
+
+				u += (k1u + QAWS_LITERAL(2.0) * k2u + QAWS_LITERAL(2.0) * k3u + k4u) / QAWS_LITERAL(6.0);
+				v += (k1v + QAWS_LITERAL(2.0) * k2v + QAWS_LITERAL(2.0) * k3v + k4v) / QAWS_LITERAL(6.0);
+				udot += (k1ud + QAWS_LITERAL(2.0) * k2ud + QAWS_LITERAL(2.0) * k3ud + k4ud) / QAWS_LITERAL(6.0);
+				vdot += (k1vd + QAWS_LITERAL(2.0) * k2vd + QAWS_LITERAL(2.0) * k3vd + k4vd) / QAWS_LITERAL(6.0);
+			}
+		}
+	}
+
+	/* Fit a 3D B-spline through the path */
+	n_cp = (n_steps + 1) / 4;
+	if (n_cp < 6) n_cp = 6;
+	if (n_cp > n_steps + 1) n_cp = n_steps + 1;
+
+	status = qaws_internal_fit_bspline(
+		QAWS_DIMENSION_3D, 3,
+		path_params, path_coords,
+		n_steps + 1, n_cp,
+		out_curve);
+
+	free(path_coords);
+	free(path_params);
+	return status;
 }
