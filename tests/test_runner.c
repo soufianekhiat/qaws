@@ -41,6 +41,9 @@ extern int test_27_svg_analysis_main(void);
 extern int test_28_svg_families_main(void);
 extern int test_29_obj_curves_main(void);
 extern int test_30_obj_surfaces_main(void);
+extern int test_31_surface_analysis_main(void);
+extern int test_32_surface_modeling_main(void);
+extern int test_33_advanced_inspection_main(void);
 
 /* Test registry */
 typedef struct {
@@ -80,6 +83,9 @@ static test_suite const g_test_suites[] = {
 	{"28_svg_families", test_28_svg_families_main},
 	{"29_obj_curves", test_29_obj_curves_main},
 	{"30_obj_surfaces", test_30_obj_surfaces_main},
+	{"31_surface_analysis", test_31_surface_analysis_main},
+	{"32_surface_modeling", test_32_surface_modeling_main},
+	{"33_advanced_inspection", test_33_advanced_inspection_main},
 };
 
 int main(void) {

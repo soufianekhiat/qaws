@@ -3,6 +3,7 @@
 
 #include "qaws_types.h"
 #include "qaws_status.h"
+#include "qaws_surface_types.h"
 
 /* All inspection functions are thread-safe on immutable curves. */
 
@@ -198,5 +199,136 @@ qaws_status qaws_nurbs_get_weights(
 	qaws_scalar* out_weights,
 	unsigned int weight_capacity,
 	unsigned int* out_weight_count);
+
+/* Surface inspection */
+
+qaws_status qaws_surface_compute_bounds(
+	qaws_surface const* surface,
+	qaws_vec3* out_min,
+	qaws_vec3* out_max);
+
+qaws_status qaws_surface_compute_area(
+	qaws_surface const* surface,
+	qaws_scalar* out_area);
+
+qaws_status qaws_surface_compute_gaussian_curvature(
+	qaws_surface const* surface,
+	qaws_scalar u,
+	qaws_scalar v,
+	qaws_scalar* out_curvature);
+
+qaws_status qaws_surface_compute_mean_curvature(
+	qaws_surface const* surface,
+	qaws_scalar u,
+	qaws_scalar v,
+	qaws_scalar* out_curvature);
+
+typedef struct qaws_surface_curvature_result {
+	qaws_scalar gaussian;
+	qaws_scalar mean;
+	qaws_scalar kappa1;
+	qaws_scalar kappa2;
+} qaws_surface_curvature_result;
+
+qaws_status qaws_surface_compute_principal_curvatures(
+	qaws_surface const* surface,
+	qaws_scalar u,
+	qaws_scalar v,
+	qaws_surface_curvature_result* out_result);
+
+/* Hausdorff distance */
+
+qaws_status qaws_curve_compute_hausdorff_distance_2d(
+	qaws_curve const* curve_a,
+	qaws_curve const* curve_b,
+	unsigned int sample_count,
+	qaws_scalar* out_distance);
+
+qaws_status qaws_curve_compute_hausdorff_distance_3d(
+	qaws_curve const* curve_a,
+	qaws_curve const* curve_b,
+	unsigned int sample_count,
+	qaws_scalar* out_distance);
+
+/* Closest point on surface */
+
+/* Find the (u,v) parameters of the point on a surface closest to a given 3D point.
+   Uses Newton iteration on the distance function gradient. */
+qaws_status qaws_surface_find_closest_point(
+	qaws_surface const* surface,
+	qaws_vec3 point,
+	qaws_scalar* out_u,
+	qaws_scalar* out_v,
+	qaws_vec3* out_closest_point);
+
+/* Curve-plane intersection */
+
+/* Plane defined by a point and a normal vector. */
+typedef struct qaws_plane {
+	qaws_vec3 point;
+	qaws_vec3 normal;
+} qaws_plane;
+
+/* Find parameter values where a 3D curve crosses a plane.
+   Uses bisection root-finding on the signed distance function dot(C(t) - plane.point, plane.normal). */
+qaws_status qaws_curve_find_plane_intersections(
+	qaws_curve const* curve,
+	qaws_plane const* plane,
+	qaws_scalar* out_parameters,
+	qaws_vec3* out_positions,
+	unsigned int capacity,
+	unsigned int* out_count);
+
+/* Surface-curve intersection */
+
+/* Find points where a 3D curve pierces a surface.
+   Returns (u,v,t) parameter triples for each intersection.
+   Uses Newton iteration on the system S(u,v) - C(t) = 0. */
+typedef struct qaws_surface_curve_intersection {
+	qaws_scalar u;
+	qaws_scalar v;
+	qaws_scalar t;
+	qaws_vec3 position;
+} qaws_surface_curve_intersection;
+
+qaws_status qaws_surface_find_curve_intersections(
+	qaws_surface const* surface,
+	qaws_curve const* curve,
+	qaws_surface_curve_intersection* out_intersections,
+	unsigned int capacity,
+	unsigned int* out_count);
+
+/* Adaptive tessellation */
+
+/* Adaptive tessellation result: vertex + index buffers for triangle mesh.
+   Caller allocates buffers. out_vertex_count and out_index_count receive
+   the actual counts written.
+
+   max_depth: maximum subdivision depth (0 = default 5).
+   curvature_threshold: subdivide quads where curvature exceeds this (0 = default 0.1).
+   max_edge_length: subdivide edges longer than this in 3D space (0 = disabled). */
+
+typedef struct qaws_tessellation_desc {
+	unsigned int max_depth;
+	qaws_scalar curvature_threshold;
+	qaws_scalar max_edge_length;
+} qaws_tessellation_desc;
+
+typedef struct qaws_tessellation_vertex {
+	qaws_vec3 position;
+	qaws_vec3 normal;
+	qaws_scalar u;
+	qaws_scalar v;
+} qaws_tessellation_vertex;
+
+qaws_status qaws_surface_tessellate(
+	qaws_surface const* surface,
+	qaws_tessellation_desc const* desc,
+	qaws_tessellation_vertex* out_vertices,
+	unsigned int vertex_capacity,
+	unsigned int* out_vertex_count,
+	unsigned int* out_indices,
+	unsigned int index_capacity,
+	unsigned int* out_index_count);
 
 #endif /* QAWS_INSPECT_H */

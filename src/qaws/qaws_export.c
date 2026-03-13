@@ -7,6 +7,8 @@
 #include "qaws_inspect.h"
 #include "qaws_rational_bezier.h"
 #include "qaws_sampling.h"
+#include "qaws_surface.h"
+#include "qaws_surface_types.h"
 #include "internal/qaws_internal_types.h"
 #include "internal/qaws_internal_basis.h"
 #include <stdlib.h>
@@ -754,4 +756,156 @@ qaws_status qaws_polyline_export_3d(
 		*out_count = sample_count;
 		return QAWS_STATUS_OK;
 	}
+}
+
+/* ========================================================================== */
+/*  OBJ surface export                                                         */
+/* ========================================================================== */
+
+/* Safe snprintf into a bounded buffer, advancing the write position. */
+typedef struct obj_buf
+{
+	char* data;
+	unsigned int capacity;
+	unsigned int pos;
+} obj_buf;
+
+static void objbuf_append(obj_buf* b, char const* fmt, ...)
+{
+	va_list ap;
+	int n;
+	unsigned int avail;
+	if (b->pos + 1 >= b->capacity) return; /* need at least 1 byte + null */
+	avail = b->capacity - b->pos;
+	va_start(ap, fmt);
+	n = vsnprintf(b->data + b->pos, (size_t)avail, fmt, ap);
+	va_end(ap);
+	if (n < 0)
+	{
+		/* MSVC: truncation returns -1. Mark buffer as full. */
+		b->pos = b->capacity;
+	}
+	else if ((unsigned int)n >= avail)
+	{
+		/* C99: returns would-be length. Buffer was truncated. */
+		b->pos = b->capacity;
+	}
+	else
+	{
+		b->pos += (unsigned int)n;
+	}
+}
+
+qaws_status qaws_surface_export_obj(
+	qaws_surface const* surface,
+	unsigned int u_samples,
+	unsigned int v_samples,
+	int include_normals,
+	char* out_obj_data,
+	unsigned int capacity,
+	unsigned int* out_length)
+{
+	obj_buf b;
+	qaws_range ur, vr;
+	qaws_scalar u_min, u_len, v_min, v_len;
+	unsigned int ui, vi;
+	unsigned int eval_flags;
+
+	/* --- Validation ---------------------------------------------------- */
+
+	if (!surface || !out_obj_data || !out_length)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	if (u_samples < 2 || v_samples < 2)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	if (capacity == 0)
+		return QAWS_STATUS_BUFFER_TOO_SMALL;
+
+	b.data = out_obj_data;
+	b.capacity = capacity;
+	b.pos = 0;
+	b.data[0] = '\0';
+
+	ur = qaws_surface_get_u_range(surface);
+	vr = qaws_surface_get_v_range(surface);
+	u_min = ur.min_value;
+	u_len = ur.max_value - ur.min_value;
+	v_min = vr.min_value;
+	v_len = vr.max_value - vr.min_value;
+
+	eval_flags = QAWS_SURFACE_EVAL_POSITION;
+	if (include_normals)
+		eval_flags |= QAWS_SURFACE_EVAL_NORMAL;
+
+	/* --- Emit vertices ------------------------------------------------- */
+
+	for (ui = 0; ui < u_samples; ui++)
+	{
+		qaws_scalar u = u_min + u_len * (qaws_scalar)ui / (qaws_scalar)(u_samples - 1);
+		for (vi = 0; vi < v_samples; vi++)
+		{
+			qaws_scalar v = v_min + v_len * (qaws_scalar)vi / (qaws_scalar)(v_samples - 1);
+			qaws_surface_eval_result r;
+			memset(&r, 0, sizeof(r));
+			qaws_surface_evaluate(surface, u, v, eval_flags, &r);
+			objbuf_append(&b, "v %.6g %.6g %.6g\n",
+				(double)r.position.x, (double)r.position.y, (double)r.position.z);
+		}
+	}
+
+	/* --- Emit normals -------------------------------------------------- */
+
+	if (include_normals)
+	{
+		for (ui = 0; ui < u_samples; ui++)
+		{
+			qaws_scalar u = u_min + u_len * (qaws_scalar)ui / (qaws_scalar)(u_samples - 1);
+			for (vi = 0; vi < v_samples; vi++)
+			{
+				qaws_scalar v = v_min + v_len * (qaws_scalar)vi / (qaws_scalar)(v_samples - 1);
+				qaws_surface_eval_result r;
+				memset(&r, 0, sizeof(r));
+				qaws_surface_evaluate(surface, u, v,
+					QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL, &r);
+				objbuf_append(&b, "vn %.6g %.6g %.6g\n",
+					(double)r.normal.x, (double)r.normal.y, (double)r.normal.z);
+			}
+		}
+	}
+
+	/* --- Emit triangle faces ------------------------------------------- */
+
+	for (ui = 0; ui < u_samples - 1; ui++)
+	{
+		for (vi = 0; vi < v_samples - 1; vi++)
+		{
+			/* OBJ is 1-indexed */
+			unsigned int v00 = 1 + ui * v_samples + vi;
+			unsigned int v01 = v00 + 1;
+			unsigned int v10 = v00 + v_samples;
+			unsigned int v11 = v10 + 1;
+
+			if (include_normals)
+			{
+				/* Normal indices match vertex indices (same grid order) */
+				objbuf_append(&b, "f %u//%u %u//%u %u//%u\n",
+					v00, v00, v01, v01, v10, v10);
+				objbuf_append(&b, "f %u//%u %u//%u %u//%u\n",
+					v01, v01, v11, v11, v10, v10);
+			}
+			else
+			{
+				objbuf_append(&b, "f %u %u %u\n", v00, v01, v10);
+				objbuf_append(&b, "f %u %u %u\n", v01, v11, v10);
+			}
+		}
+	}
+
+	/* Null-terminate */
+	if (b.pos < b.capacity)
+		b.data[b.pos] = '\0';
+	else
+		b.data[b.capacity - 1] = '\0';
+
+	*out_length = b.pos;
+	return QAWS_STATUS_OK;
 }

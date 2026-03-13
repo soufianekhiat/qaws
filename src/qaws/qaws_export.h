@@ -3,6 +3,7 @@
 
 #include "qaws_types.h"
 #include "qaws_status.h"
+#include "qaws_surface_types.h"
 
 typedef struct qaws_bspline_fit_desc
 {
@@ -83,5 +84,30 @@ qaws_status qaws_polyline_export_3d(
 	qaws_polyline_sampling sampling,
 	qaws_vec3* out_points,
 	unsigned int* out_count);
+
+/*
+ * OBJ surface export.
+ *
+ * Export a surface as a Wavefront OBJ triangle mesh string.
+ *
+ * The surface is sampled on a u_samples x v_samples grid and triangulated.
+ * Vertex normals are included when include_normals is non-zero.
+ *
+ * surface:         any surface.
+ * u_samples:       grid density in u direction (>= 2).
+ * v_samples:       grid density in v direction (>= 2).
+ * include_normals: non-zero to emit "vn" lines and face normal indices.
+ * out_obj_data:    caller-allocated buffer for the OBJ string.
+ * capacity:        buffer size in bytes (including null terminator).
+ * out_length:      actual string length written (excluding null).
+ */
+qaws_status qaws_surface_export_obj(
+	qaws_surface const* surface,
+	unsigned int u_samples,
+	unsigned int v_samples,
+	int include_normals,
+	char* out_obj_data,
+	unsigned int capacity,
+	unsigned int* out_length);
 
 #endif /* QAWS_EXPORT_H */

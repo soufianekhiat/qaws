@@ -32,6 +32,9 @@ add_executable(
   28_svg_families.c
   29_obj_curves.c
   30_obj_surfaces.c
+  31_surface_analysis.c
+  32_surface_modeling.c
+  33_advanced_inspection.c
 )
 
 target_link_libraries(qaws_tests PRIVATE Qaws::qaws)
@@ -42,4 +45,15 @@ if(MSVC)
   target_compile_definitions(qaws_tests PRIVATE _CRT_SECURE_NO_WARNINGS NOMINMAX)
 endif()
 
+set(QAWS_WORKING_DIR "${PROJECT_SOURCE_DIR}/working_dir")
+file(MAKE_DIRECTORY "${QAWS_WORKING_DIR}")
+
+set_target_properties(qaws_tests PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${QAWS_WORKING_DIR}"
+  RUNTIME_OUTPUT_DIRECTORY_DEBUG "${QAWS_WORKING_DIR}"
+  RUNTIME_OUTPUT_DIRECTORY_RELEASE "${QAWS_WORKING_DIR}"
+  VS_DEBUGGER_WORKING_DIRECTORY "${QAWS_WORKING_DIR}"
+)
+
 add_test(NAME qaws_tests COMMAND qaws_tests)
+set_tests_properties(qaws_tests PROPERTIES WORKING_DIRECTORY "${QAWS_WORKING_DIR}")

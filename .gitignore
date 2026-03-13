@@ -81,3 +81,4 @@ buildsystem/sharpmake/*.dll
 buildsystem/sharpmake/*.json
 *.in
 !buildsystem/cmake/*.in
+build_f64

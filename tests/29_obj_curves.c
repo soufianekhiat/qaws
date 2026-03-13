@@ -660,10 +660,10 @@ static void test_obj_3d_curvature_comb(void)
 			obj_use_material(&w, "curve");
 			obj_tube(&w, crv, 100, 10, (qaws_scalar)0.03);
 
-			/* Curvature comb */
+			/* Curvature comb: ribbon surface + spine markers */
 			obj_group(&w, "curvature_comb");
 			obj_use_material(&w, "comb");
-			obj_curvature_comb(&w, crv, 100, (qaws_scalar)1.0);
+			obj_curvature_comb_surface(&w, crv, 100, (qaws_scalar)1.0);
 
 			/* Control polygon */
 			obj_group(&w, "control_polygon");

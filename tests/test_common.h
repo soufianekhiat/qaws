@@ -706,6 +706,72 @@ static void obj_curvature_comb(obj_writer* w, qaws_curve const* curve,
 	}
 }
 
+/* Write a curvature comb as a visible triangle-strip ribbon surface
+   between the curve and the comb tips.  Each comb spine is also drawn
+   as a chain of small spheres so it renders in all OBJ viewers. */
+static void obj_curvature_comb_surface(obj_writer* w, qaws_curve const* curve,
+	unsigned int sample_count, qaws_scalar scale)
+{
+	qaws_curvature_sample_3d samples[256];
+	unsigned int first_v, ci;
+	if (sample_count > 256) sample_count = 256;
+	if (qaws_curve_compute_curvature_comb_3d(curve, sample_count, samples, 256)
+		!= QAWS_STATUS_OK)
+		return;
+
+	/* Emit pairs of vertices: curve point and comb tip */
+	first_v = w->vertex_count + 1;
+	for (ci = 0; ci < sample_count; ci++)
+	{
+		qaws_vec3 tip;
+		tip.x = samples[ci].position.x + samples[ci].normal.x * samples[ci].curvature * scale;
+		tip.y = samples[ci].position.y + samples[ci].normal.y * samples[ci].curvature * scale;
+		tip.z = samples[ci].position.z + samples[ci].normal.z * samples[ci].curvature * scale;
+		obj_vertex(w, samples[ci].position); /* even index */
+		obj_vertex(w, tip);                  /* odd  index */
+	}
+
+	/* Triangle strip: two triangles per segment connecting consecutive spines */
+	for (ci = 0; ci + 1 < sample_count; ci++)
+	{
+		unsigned int base = first_v + ci * 2;
+		unsigned int next = base + 2;
+		/* base+0 = curve[ci], base+1 = tip[ci]
+		   next+0 = curve[ci+1], next+1 = tip[ci+1] */
+		fprintf(w->fp, "f %u %u %u\n", base, base + 1, next + 1);
+		fprintf(w->fp, "f %u %u %u\n", base, next + 1, next);
+	}
+
+	/* Comb spine spheres (every 4th sample) for visibility */
+	for (ci = 0; ci < sample_count; ci += 4)
+	{
+		qaws_vec3 tip;
+		unsigned int si;
+		tip.x = samples[ci].position.x + samples[ci].normal.x * samples[ci].curvature * scale;
+		tip.y = samples[ci].position.y + samples[ci].normal.y * samples[ci].curvature * scale;
+		tip.z = samples[ci].position.z + samples[ci].normal.z * samples[ci].curvature * scale;
+		for (si = 0; si <= 4; si++)
+		{
+			qaws_scalar f = (qaws_scalar)si / (qaws_scalar)4;
+			qaws_vec3 p;
+			p.x = samples[ci].position.x + f * (tip.x - samples[ci].position.x);
+			p.y = samples[ci].position.y + f * (tip.y - samples[ci].position.y);
+			p.z = samples[ci].position.z + f * (tip.z - samples[ci].position.z);
+			obj_sphere(w, p, (qaws_scalar)0.012);
+		}
+	}
+
+	/* Ridge line: connect comb tips as a tube-like chain */
+	for (ci = 0; ci < sample_count; ci += 2)
+	{
+		qaws_vec3 tip;
+		tip.x = samples[ci].position.x + samples[ci].normal.x * samples[ci].curvature * scale;
+		tip.y = samples[ci].position.y + samples[ci].normal.y * samples[ci].curvature * scale;
+		tip.z = samples[ci].position.z + samples[ci].normal.z * samples[ci].curvature * scale;
+		obj_sphere(w, tip, (qaws_scalar)0.015);
+	}
+}
+
 /* Write a triangle mesh for a sampled surface grid */
 static void obj_surface_mesh(
 	obj_writer* w, qaws_surface const* surf,
@@ -748,8 +814,8 @@ static void obj_surface_mesh(
 			unsigned int n01 = n00 + 1;
 			unsigned int n10 = n00 + v_samples;
 			unsigned int n11 = n10 + 1;
-			fprintf(w->fp, "f %u//%u %u//%u %u//%u\n", v00, n00, v01, n01, v10, n10);
-			fprintf(w->fp, "f %u//%u %u//%u %u//%u\n", v01, n01, v11, n11, v10, n10);
+			fprintf(w->fp, "f %u//%u %u//%u %u//%u\n", v00, n00, v10, n10, v01, n01);
+			fprintf(w->fp, "f %u//%u %u//%u %u//%u\n", v10, n10, v11, n11, v01, n01);
 		}
 	}
 }

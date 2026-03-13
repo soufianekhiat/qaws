@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.20)
 
 project(
   Qaws
-  VERSION 1.0.0
+  VERSION 2.0.0
   DESCRIPTION "Dependency-free C11 curve evaluation and traversal library"
   LANGUAGES C
 )
@@ -69,6 +69,9 @@ set(QAWS_SOURCES
   src/qaws/qaws_surface_nurbs.c
   src/qaws/qaws_surface_swept.c
   src/qaws/qaws_surface_ruled.c
+  src/qaws/qaws_surface_coons.c
+  src/qaws/qaws_surface_extrusion.c
+  src/qaws/qaws_surface_revolution.c
   src/qaws/qaws_inline.c
   src/qaws/qaws_prepare.c
   src/qaws/internal/qaws_internal_curve.c
@@ -235,6 +238,9 @@ if(QAWS_INSTALL)
       src/qaws/qaws_surface_nurbs.h
       src/qaws/qaws_surface_swept.h
       src/qaws/qaws_surface_ruled.h
+      src/qaws/qaws_surface_coons.h
+      src/qaws/qaws_surface_extrusion.h
+      src/qaws/qaws_surface_revolution.h
       src/qaws/qaws_alloc.h
       src/qaws/qaws_inline.h
       src/qaws/qaws_platform.h

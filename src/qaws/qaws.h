@@ -1,11 +1,11 @@
 #ifndef QAWS_H
 #define QAWS_H
 
-#define QAWS_VERSION_MAJOR 1
+#define QAWS_VERSION_MAJOR 2
 #define QAWS_VERSION_MINOR 0
 #define QAWS_VERSION_PATCH 0
 #define QAWS_VERSION ((QAWS_VERSION_MAJOR * 10000) + (QAWS_VERSION_MINOR * 100) + QAWS_VERSION_PATCH)
-#define QAWS_VERSION_STRING "1.0.0"
+#define QAWS_VERSION_STRING "2.0.0"
 
 #include "qaws_types.h"
 #include "qaws_status.h"
@@ -37,6 +37,9 @@
 #include "qaws_surface_nurbs.h"
 #include "qaws_surface_swept.h"
 #include "qaws_surface_ruled.h"
+#include "qaws_surface_coons.h"
+#include "qaws_surface_extrusion.h"
+#include "qaws_surface_revolution.h"
 #include "qaws_alloc.h"
 #include "qaws_inline.h"
 
