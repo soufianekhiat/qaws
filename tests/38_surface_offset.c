@@ -223,8 +223,8 @@ static void visual_obj_offset(void)
 
 	if (!off_pos || !off_neg) goto cleanup_offset;
 
-	if (!obj_open(&w, OBJ_OUTPUT_DIR "/surface_offset.obj",
-		OBJ_OUTPUT_DIR "/surface_offset.mtl")) goto cleanup_offset;
+	if (!obj_open(&w, OBJ_OUTPUT_DIR "/38_surface_offset.obj",
+		OBJ_OUTPUT_DIR "/38_surface_offset.mtl")) goto cleanup_offset;
 
 	obj_material(&w, "base", 0.5, 0.5, 0.8);
 	obj_material(&w, "off_pos", 0.9, 0.3, 0.3);
@@ -243,7 +243,7 @@ static void visual_obj_offset(void)
 	obj_surface_mesh(&w, off_neg, 32, 32);
 
 	obj_close(&w);
-	printf("  -> " OBJ_OUTPUT_DIR "/surface_offset.obj\n");
+	printf("  -> " OBJ_OUTPUT_DIR "/38_surface_offset.obj\n");
 
 cleanup_offset:
 	qaws_surface_destroy(off_neg);
@@ -305,8 +305,8 @@ static void visual_obj_offset_selfintersect(void)
 	qaws_surface_create_offset(&odesc, &offset);
 	if (!offset) goto cleanup_si;
 
-	if (!obj_open(&w, OBJ_OUTPUT_DIR "/offset_selfintersect.obj",
-		OBJ_OUTPUT_DIR "/offset_selfintersect.mtl")) goto cleanup_si;
+	if (!obj_open(&w, OBJ_OUTPUT_DIR "/38_offset_selfintersect.obj",
+		OBJ_OUTPUT_DIR "/38_offset_selfintersect.mtl")) goto cleanup_si;
 
 	obj_material(&w, "hourglass", 0.5, 0.5, 0.8);
 	obj_material(&w, "offset", 0.9, 0.3, 0.3);
@@ -413,7 +413,7 @@ static void visual_obj_offset_selfintersect(void)
 	}
 
 	obj_close(&w);
-	printf("  -> " OBJ_OUTPUT_DIR "/offset_selfintersect.obj\n");
+	printf("  -> " OBJ_OUTPUT_DIR "/38_offset_selfintersect.obj\n");
 
 cleanup_si:
 	qaws_surface_destroy(offset);

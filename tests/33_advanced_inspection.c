@@ -428,7 +428,7 @@ static void visual_obj_tessellation(void)
 			indices, 24576, &idx_count);
 	}
 
-	fp = fopen(OBJ_OUTPUT_DIR "/adaptive_tessellation.obj", "w");
+	fp = fopen(OBJ_OUTPUT_DIR "/33_adaptive_tessellation.obj", "w");
 	if (fp)
 	{
 		unsigned int i;
@@ -450,7 +450,7 @@ static void visual_obj_tessellation(void)
 				indices[i+1]+1, indices[i+1]+1,
 				indices[i+2]+1, indices[i+2]+1);
 		fclose(fp);
-		printf("  -> " OBJ_OUTPUT_DIR "/adaptive_tessellation.obj (%u verts, %u tris)\n",
+		printf("  -> " OBJ_OUTPUT_DIR "/33_adaptive_tessellation.obj (%u verts, %u tris)\n",
 			vert_count, idx_count / 3);
 	}
 
@@ -494,7 +494,7 @@ static void visual_svg_plane_intersection(void)
 	}
 
 	/* Draw XZ projection */
-	if (!svg_open(&svg, OBJ_OUTPUT_DIR "/plane_intersection.svg",
+	if (!svg_open(&svg, OBJ_OUTPUT_DIR "/33_plane_intersection.svg",
 		(qaws_scalar)-1, (qaws_scalar)-4,
 		(qaws_scalar)6, (qaws_scalar)8,
 		(qaws_scalar)600, (qaws_scalar)400))
@@ -534,7 +534,7 @@ static void visual_svg_plane_intersection(void)
 
 	svg_close(&svg);
 	qaws_curve_destroy(crv);
-	printf("  -> " OBJ_OUTPUT_DIR "/plane_intersection.svg (%u hits)\n", count);
+	printf("  -> " OBJ_OUTPUT_DIR "/33_plane_intersection.svg (%u hits)\n", count);
 }
 
 /* ------------------------------------------------------------------ */
@@ -556,8 +556,8 @@ static void visual_obj_closest_point(void)
 	queries[2].x = 2; queries[2].y = 2; queries[2].z = 2;
 	queries[3].x = 1; queries[3].y = (qaws_scalar)0.5; queries[3].z = 4;
 
-	if (!obj_open(&w, OBJ_OUTPUT_DIR "/closest_point.obj",
-		OBJ_OUTPUT_DIR "/closest_point.mtl"))
+	if (!obj_open(&w, OBJ_OUTPUT_DIR "/33_closest_point.obj",
+		OBJ_OUTPUT_DIR "/33_closest_point.mtl"))
 	{
 		qaws_surface_destroy(surf);
 		return;
@@ -634,7 +634,7 @@ static void visual_obj_closest_point(void)
 	}
 
 	obj_close(&w);
-	printf("  -> " OBJ_OUTPUT_DIR "/closest_point.obj\n");
+	printf("  -> " OBJ_OUTPUT_DIR "/33_closest_point.obj\n");
 	qaws_surface_destroy(surf);
 }
 
@@ -674,8 +674,8 @@ static void visual_obj_surface_curve_intersection(void)
 
 	qaws_surface_find_curve_intersections(surf, crv, hits, 16, &count);
 
-	if (!obj_open(&w, OBJ_OUTPUT_DIR "/surface_curve_intersection.obj",
-		OBJ_OUTPUT_DIR "/surface_curve_intersection.mtl"))
+	if (!obj_open(&w, OBJ_OUTPUT_DIR "/33_surface_curve_intersection.obj",
+		OBJ_OUTPUT_DIR "/33_surface_curve_intersection.mtl"))
 	{
 		qaws_curve_destroy(crv); qaws_surface_destroy(surf); return;
 	}
@@ -713,7 +713,7 @@ static void visual_obj_surface_curve_intersection(void)
 	}
 
 	obj_close(&w);
-	printf("  -> " OBJ_OUTPUT_DIR "/surface_curve_intersection.obj (%u hits)\n", count);
+	printf("  -> " OBJ_OUTPUT_DIR "/33_surface_curve_intersection.obj (%u hits)\n", count);
 	qaws_curve_destroy(crv);
 	qaws_surface_destroy(surf);
 }
@@ -758,7 +758,7 @@ static void visual_svg_surface_curve_intersection(void)
 
 	qaws_surface_find_curve_intersections(surf, crv, hits, 16, &count);
 
-	if (!svg_open(&svg, OBJ_OUTPUT_DIR "/surface_curve_intersection.svg",
+	if (!svg_open(&svg, OBJ_OUTPUT_DIR "/33_surface_curve_intersection.svg",
 		(qaws_scalar)-0.5, (qaws_scalar)-1.0,
 		(qaws_scalar)4.0, (qaws_scalar)5.0,
 		(qaws_scalar)550, (qaws_scalar)550))
@@ -832,7 +832,7 @@ static void visual_svg_surface_curve_intersection(void)
 	}
 
 	svg_close(&svg);
-	printf("  -> " OBJ_OUTPUT_DIR "/surface_curve_intersection.svg (%u hits)\n", count);
+	printf("  -> " OBJ_OUTPUT_DIR "/33_surface_curve_intersection.svg (%u hits)\n", count);
 	qaws_curve_destroy(crv);
 	qaws_surface_destroy(surf);
 }
@@ -855,7 +855,7 @@ static void visual_svg_closest_point(void)
 	queries[1].x = (qaws_scalar)0.2; queries[1].y = 1; queries[1].z = 3;
 	queries[2].x = (qaws_scalar)1.8; queries[2].y = 1; queries[2].z = 3;
 
-	if (!svg_open(&svg, OBJ_OUTPUT_DIR "/closest_point.svg",
+	if (!svg_open(&svg, OBJ_OUTPUT_DIR "/33_closest_point.svg",
 		(qaws_scalar)-0.5, (qaws_scalar)-0.5,
 		(qaws_scalar)3.5, (qaws_scalar)6.5,
 		(qaws_scalar)500, (qaws_scalar)500))
@@ -898,7 +898,7 @@ static void visual_svg_closest_point(void)
 
 	svg_label(&svg, (qaws_scalar)0.2, (qaws_scalar)5.8, "red=query green=closest", "#ffffff");
 	svg_close(&svg);
-	printf("  -> " OBJ_OUTPUT_DIR "/closest_point.svg\n");
+	printf("  -> " OBJ_OUTPUT_DIR "/33_closest_point.svg\n");
 	qaws_surface_destroy(surf);
 }
 
@@ -1162,8 +1162,8 @@ static void visual_obj_dual_tessellation(void)
 	}
 
 	/* ---- Phase 4: Write dual mesh OBJ ---- */
-	if (!obj_open(&w, OBJ_OUTPUT_DIR "/dual_tessellation.obj",
-		OBJ_OUTPUT_DIR "/dual_tessellation.mtl"))
+	if (!obj_open(&w, OBJ_OUTPUT_DIR "/33_dual_tessellation.obj",
+		OBJ_OUTPUT_DIR "/33_dual_tessellation.mtl"))
 	{
 		free(leaves); free(corners);
 		qaws_surface_destroy(surf);
@@ -1211,7 +1211,7 @@ static void visual_obj_dual_tessellation(void)
 		unsigned int face_count = 0;
 		for (i = 0; i < corner_count; i++)
 			if (corners[i].count >= 3) face_count++;
-		printf("  -> " OBJ_OUTPUT_DIR "/dual_tessellation.obj (%u leaves, %u dual faces)\n",
+		printf("  -> " OBJ_OUTPUT_DIR "/33_dual_tessellation.obj (%u leaves, %u dual faces)\n",
 			leaf_count, face_count);
 	}
 

@@ -5,7 +5,7 @@ static void test_svg_inflection_points(void)
 	printf("test_svg_inflection_points\n");
 
 	svg_writer svg;
-	if (!svg_open(&svg, SVG_OUTPUT_DIR "/inflection_points.svg",
+	if (!svg_open(&svg, SVG_OUTPUT_DIR "/27_inflection_points.svg",
 		(qaws_scalar)-0.5, (qaws_scalar)-3.0, (qaws_scalar)5.5, (qaws_scalar)8.0,
 		(qaws_scalar)500, (qaws_scalar)600))
 		return;
@@ -44,7 +44,7 @@ static void test_svg_inflection_points(void)
 	svg_label(&svg, (qaws_scalar)-0.3, (qaws_scalar)4.5, "Inflection Points", "#8888aa");
 	svg_close(&svg);
 	qaws_curve_destroy(curve);
-	printf("  -> " SVG_OUTPUT_DIR "/inflection_points.svg\n");
+	printf("  -> " SVG_OUTPUT_DIR "/27_inflection_points.svg\n");
 }
 
 static void test_svg_extrema(void)
@@ -52,7 +52,7 @@ static void test_svg_extrema(void)
 	printf("test_svg_extrema\n");
 
 	svg_writer svg;
-	if (!svg_open(&svg, SVG_OUTPUT_DIR "/extrema.svg",
+	if (!svg_open(&svg, SVG_OUTPUT_DIR "/27_extrema.svg",
 		(qaws_scalar)-0.5, (qaws_scalar)-5.0, (qaws_scalar)5.5, (qaws_scalar)12.0,
 		(qaws_scalar)500, (qaws_scalar)800))
 		return;
@@ -120,7 +120,7 @@ static void test_svg_extrema(void)
 	svg_label(&svg, (qaws_scalar)-0.3, (qaws_scalar)-4.5,
 		"Blue dots=X extrema  Green dots=Y extrema", "#666688");
 	svg_close(&svg);
-	printf("  -> " SVG_OUTPUT_DIR "/extrema.svg\n");
+	printf("  -> " SVG_OUTPUT_DIR "/27_extrema.svg\n");
 }
 
 static void test_svg_curvature_comb(void)
@@ -128,7 +128,7 @@ static void test_svg_curvature_comb(void)
 	printf("test_svg_curvature_comb\n");
 
 	svg_writer svg;
-	if (!svg_open(&svg, SVG_OUTPUT_DIR "/curvature_comb.svg",
+	if (!svg_open(&svg, SVG_OUTPUT_DIR "/27_curvature_comb.svg",
 		(qaws_scalar)-0.5, (qaws_scalar)-2.0, (qaws_scalar)5.0, (qaws_scalar)5.0,
 		(qaws_scalar)600, (qaws_scalar)500))
 		return;
@@ -191,7 +191,7 @@ static void test_svg_curvature_comb(void)
 	svg_label(&svg, (qaws_scalar)-0.3, (qaws_scalar)2.8, "Curvature Comb (teeth = signed curvature)", "#8888aa");
 	svg_close(&svg);
 	qaws_curve_destroy(curve);
-	printf("  -> " SVG_OUTPUT_DIR "/curvature_comb.svg\n");
+	printf("  -> " SVG_OUTPUT_DIR "/27_curvature_comb.svg\n");
 }
 
 static void test_svg_winding_number(void)
@@ -199,7 +199,7 @@ static void test_svg_winding_number(void)
 	printf("test_svg_winding_number\n");
 
 	svg_writer svg;
-	if (!svg_open(&svg, SVG_OUTPUT_DIR "/winding_number.svg",
+	if (!svg_open(&svg, SVG_OUTPUT_DIR "/27_winding_number.svg",
 		(qaws_scalar)-1.0, (qaws_scalar)-1.0, (qaws_scalar)12.0, (qaws_scalar)8.0,
 		(qaws_scalar)750, (qaws_scalar)500))
 		return;
@@ -408,7 +408,7 @@ static void test_svg_winding_number(void)
 	svg_label(&svg, (qaws_scalar)-0.5, (qaws_scalar)6.5,
 		"Green=inside (w!=0)  Red=outside (w=0)", "#666688");
 	svg_close(&svg);
-	printf("  -> " SVG_OUTPUT_DIR "/winding_number.svg\n");
+	printf("  -> " SVG_OUTPUT_DIR "/27_winding_number.svg\n");
 }
 
 static void test_svg_curvature_weighted(void)
@@ -416,7 +416,7 @@ static void test_svg_curvature_weighted(void)
 	printf("test_svg_curvature_weighted\n");
 
 	svg_writer svg;
-	if (!svg_open(&svg, SVG_OUTPUT_DIR "/curvature_weighted.svg",
+	if (!svg_open(&svg, SVG_OUTPUT_DIR "/27_curvature_weighted.svg",
 		(qaws_scalar)-0.5, (qaws_scalar)-3.0, (qaws_scalar)5.5, (qaws_scalar)8.0,
 		(qaws_scalar)500, (qaws_scalar)600))
 		return;
@@ -465,7 +465,7 @@ static void test_svg_curvature_weighted(void)
 		"Curvature-weighted (red) vs Uniform (blue)", "#8888aa");
 	svg_close(&svg);
 	qaws_curve_destroy(curve);
-	printf("  -> " SVG_OUTPUT_DIR "/curvature_weighted.svg\n");
+	printf("  -> " SVG_OUTPUT_DIR "/27_curvature_weighted.svg\n");
 }
 
 static void test_svg_feature_preserving(void)
@@ -473,7 +473,7 @@ static void test_svg_feature_preserving(void)
 	printf("test_svg_feature_preserving\n");
 
 	svg_writer svg;
-	if (!svg_open(&svg, SVG_OUTPUT_DIR "/feature_preserving.svg",
+	if (!svg_open(&svg, SVG_OUTPUT_DIR "/27_feature_preserving.svg",
 		(qaws_scalar)-0.5, (qaws_scalar)-5.0, (qaws_scalar)5.5, (qaws_scalar)11.0,
 		(qaws_scalar)500, (qaws_scalar)600))
 		return;
@@ -533,7 +533,7 @@ static void test_svg_feature_preserving(void)
 		"Feature-preserving (green, adds inflections+extrema)", "#50fa7b");
 	svg_close(&svg);
 	qaws_curve_destroy(curve);
-	printf("  -> " SVG_OUTPUT_DIR "/feature_preserving.svg\n");
+	printf("  -> " SVG_OUTPUT_DIR "/27_feature_preserving.svg\n");
 }
 
 static void test_svg_multi_traversal(void)
@@ -541,7 +541,7 @@ static void test_svg_multi_traversal(void)
 	printf("test_svg_multi_traversal\n");
 
 	svg_writer svg;
-	if (!svg_open(&svg, SVG_OUTPUT_DIR "/multi_traversal.svg",
+	if (!svg_open(&svg, SVG_OUTPUT_DIR "/27_multi_traversal.svg",
 		(qaws_scalar)-0.5, (qaws_scalar)-0.5, (qaws_scalar)5.5, (qaws_scalar)3.0,
 		(qaws_scalar)600, (qaws_scalar)300))
 		return;
@@ -619,7 +619,7 @@ static void test_svg_multi_traversal(void)
 	qaws_curve_destroy(c1);
 	qaws_curve_destroy(c2);
 	qaws_curve_destroy(c3);
-	printf("  -> " SVG_OUTPUT_DIR "/multi_traversal.svg\n");
+	printf("  -> " SVG_OUTPUT_DIR "/27_multi_traversal.svg\n");
 }
 
 static void test_svg_frenet_frame(void)
@@ -627,7 +627,7 @@ static void test_svg_frenet_frame(void)
 	printf("test_svg_frenet_frame\n");
 
 	svg_writer svg;
-	if (!svg_open(&svg, SVG_OUTPUT_DIR "/frenet_frame.svg",
+	if (!svg_open(&svg, SVG_OUTPUT_DIR "/27_frenet_frame.svg",
 		(qaws_scalar)-0.5, (qaws_scalar)-1.5, (qaws_scalar)5.5, (qaws_scalar)5.0,
 		(qaws_scalar)500, (qaws_scalar)500))
 		return;
@@ -682,7 +682,7 @@ static void test_svg_frenet_frame(void)
 		"Frenet Frame (green=T, red=N)", "#8888aa");
 	svg_close(&svg);
 	qaws_curve_destroy(curve);
-	printf("  -> " SVG_OUTPUT_DIR "/frenet_frame.svg\n");
+	printf("  -> " SVG_OUTPUT_DIR "/27_frenet_frame.svg\n");
 }
 
 static void test_svg_self_intersection(void)
@@ -690,7 +690,7 @@ static void test_svg_self_intersection(void)
 	printf("test_svg_self_intersection\n");
 
 	svg_writer svg;
-	if (!svg_open(&svg, SVG_OUTPUT_DIR "/self_intersection.svg",
+	if (!svg_open(&svg, SVG_OUTPUT_DIR "/27_self_intersection.svg",
 		(qaws_scalar)-1.5, (qaws_scalar)-1.0, (qaws_scalar)3.0, (qaws_scalar)2.0,
 		(qaws_scalar)600, (qaws_scalar)400))
 		return;
@@ -748,7 +748,7 @@ static void test_svg_self_intersection(void)
 		"Self-intersection (red dots)", "#8888aa");
 	svg_close(&svg);
 	qaws_curve_destroy(curve);
-	printf("  -> " SVG_OUTPUT_DIR "/self_intersection.svg\n");
+	printf("  -> " SVG_OUTPUT_DIR "/27_self_intersection.svg\n");
 }
 
 static void test_svg_curve_curve_intersection(void)
@@ -756,7 +756,7 @@ static void test_svg_curve_curve_intersection(void)
 	printf("test_svg_curve_curve_intersection\n");
 
 	svg_writer svg;
-	if (!svg_open(&svg, SVG_OUTPUT_DIR "/curve_curve_intersection.svg",
+	if (!svg_open(&svg, SVG_OUTPUT_DIR "/27_curve_curve_intersection.svg",
 		(qaws_scalar)-0.5, (qaws_scalar)-5.0, (qaws_scalar)10.5, (qaws_scalar)11.0,
 		(qaws_scalar)700, (qaws_scalar)700))
 		return;
@@ -944,7 +944,7 @@ static void test_svg_curve_curve_intersection(void)
 		"Red rings = intersection points", "#666688");
 
 	svg_close(&svg);
-	printf("  -> " SVG_OUTPUT_DIR "/curve_curve_intersection.svg\n");
+	printf("  -> " SVG_OUTPUT_DIR "/27_curve_curve_intersection.svg\n");
 }
 
 static void test_svg_offset(void)
@@ -952,7 +952,7 @@ static void test_svg_offset(void)
 	printf("test_svg_offset\n");
 
 	svg_writer svg;
-	if (!svg_open(&svg, SVG_OUTPUT_DIR "/curve_offset.svg",
+	if (!svg_open(&svg, SVG_OUTPUT_DIR "/27_curve_offset.svg",
 		(qaws_scalar)-1.5, (qaws_scalar)-7.0, (qaws_scalar)7.0, (qaws_scalar)11.5,
 		(qaws_scalar)700, (qaws_scalar)1150))
 		return;
@@ -1149,7 +1149,7 @@ row3_end:;
 	}
 
 	svg_close(&svg);
-	printf("  -> " SVG_OUTPUT_DIR "/curve_offset.svg\n");
+	printf("  -> " SVG_OUTPUT_DIR "/27_curve_offset.svg\n");
 }
 
 static void test_svg_offset_closed(void)
@@ -1157,7 +1157,7 @@ static void test_svg_offset_closed(void)
 	printf("test_svg_offset_closed\n");
 
 	svg_writer svg;
-	if (!svg_open(&svg, SVG_OUTPUT_DIR "/offset_closed.svg",
+	if (!svg_open(&svg, SVG_OUTPUT_DIR "/27_offset_closed.svg",
 		(qaws_scalar)-4.5, (qaws_scalar)-3.5, (qaws_scalar)8.0, (qaws_scalar)21.0,
 		(qaws_scalar)600, (qaws_scalar)1600))
 		return;
@@ -1280,7 +1280,7 @@ closed_end:;
 	}
 
 	svg_close(&svg);
-	printf("  -> " SVG_OUTPUT_DIR "/offset_closed.svg\n");
+	printf("  -> " SVG_OUTPUT_DIR "/27_offset_closed.svg\n");
 }
 
 static void test_svg_offset_selfintersect(void)
@@ -1288,7 +1288,7 @@ static void test_svg_offset_selfintersect(void)
 	printf("test_svg_offset_selfintersect\n");
 
 	svg_writer svg;
-	if (!svg_open(&svg, SVG_OUTPUT_DIR "/offset_selfintersect.svg",
+	if (!svg_open(&svg, SVG_OUTPUT_DIR "/27_offset_selfintersect.svg",
 		(qaws_scalar)-4.0, (qaws_scalar)-2.5, (qaws_scalar)8.0, (qaws_scalar)18.0,
 		(qaws_scalar)600, (qaws_scalar)1350))
 		return;
@@ -1397,7 +1397,7 @@ si_end:;
 	}
 
 	svg_close(&svg);
-	printf("  -> " SVG_OUTPUT_DIR "/offset_selfintersect.svg\n");
+	printf("  -> " SVG_OUTPUT_DIR "/27_offset_selfintersect.svg\n");
 }
 
 int test_27_svg_analysis_main(void)

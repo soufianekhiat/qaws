@@ -330,15 +330,15 @@ static void visual_obj_gordon(void)
 	}
 	if (!surf) goto cleanup_gordon;
 
-	if (!obj_open(&w, OBJ_OUTPUT_DIR "/gordon_surface.obj",
-		OBJ_OUTPUT_DIR "/gordon_surface.mtl")) goto cleanup_gordon;
+	if (!obj_open(&w, OBJ_OUTPUT_DIR "/37_gordon_surface.obj",
+		OBJ_OUTPUT_DIR "/37_gordon_surface.mtl")) goto cleanup_gordon;
 
 	obj_material(&w, "gordon", 0.8, 0.5, 0.3);
 	obj_group(&w, "gordon_surface");
 	obj_use_material(&w, "gordon");
 	obj_surface_mesh(&w, surf, 32, 32);
 	obj_close(&w);
-	printf("  -> " OBJ_OUTPUT_DIR "/gordon_surface.obj\n");
+	printf("  -> " OBJ_OUTPUT_DIR "/37_gordon_surface.obj\n");
 
 cleanup_gordon:
 	qaws_surface_destroy(surf);

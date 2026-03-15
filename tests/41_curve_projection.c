@@ -158,8 +158,8 @@ static void visual_obj_geodesic(void)
 		20, 200, &geo);
 	if (s != QAWS_STATUS_OK) { qaws_surface_destroy(surf); return; }
 
-	if (!obj_open(&w, OBJ_OUTPUT_DIR "/geodesic.obj",
-		OBJ_OUTPUT_DIR "/geodesic.mtl"))
+	if (!obj_open(&w, OBJ_OUTPUT_DIR "/41_geodesic.obj",
+		OBJ_OUTPUT_DIR "/41_geodesic.mtl"))
 	{
 		qaws_curve_destroy(geo); qaws_surface_destroy(surf); return;
 	}
@@ -187,7 +187,7 @@ static void visual_obj_geodesic(void)
 	}
 
 	obj_close(&w);
-	printf("  -> " OBJ_OUTPUT_DIR "/geodesic.obj\n");
+	printf("  -> " OBJ_OUTPUT_DIR "/41_geodesic.obj\n");
 
 	qaws_curve_destroy(geo);
 	qaws_surface_destroy(surf);
@@ -248,8 +248,8 @@ static void visual_obj_projection(void)
 		qaws_curve_destroy(curve); qaws_surface_destroy(surf); return;
 	}
 
-	if (!obj_open(&w, OBJ_OUTPUT_DIR "/curve_projection.obj",
-		OBJ_OUTPUT_DIR "/curve_projection.mtl"))
+	if (!obj_open(&w, OBJ_OUTPUT_DIR "/41_curve_projection.obj",
+		OBJ_OUTPUT_DIR "/41_curve_projection.mtl"))
 	{
 		qaws_curve_destroy(uv_curve); qaws_curve_destroy(curve);
 		qaws_surface_destroy(surf); return;
@@ -301,7 +301,7 @@ static void visual_obj_projection(void)
 	}
 
 	obj_close(&w);
-	printf("  -> " OBJ_OUTPUT_DIR "/curve_projection.obj\n");
+	printf("  -> " OBJ_OUTPUT_DIR "/41_curve_projection.obj\n");
 
 	qaws_curve_destroy(uv_curve);
 	qaws_curve_destroy(curve);

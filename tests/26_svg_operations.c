@@ -5,7 +5,7 @@ static void test_svg_curve_reverse(void)
 	printf("test_svg_curve_reverse\n");
 
 	svg_writer svg;
-	if (!svg_open(&svg, SVG_OUTPUT_DIR "/curve_reverse.svg",
+	if (!svg_open(&svg, SVG_OUTPUT_DIR "/26_curve_reverse.svg",
 		(qaws_scalar)-0.5, (qaws_scalar)-3.5, (qaws_scalar)8.0, (qaws_scalar)8.0,
 		(qaws_scalar)600, (qaws_scalar)600))
 		return;
@@ -88,7 +88,7 @@ static void test_svg_curve_reverse(void)
 		"Solid=original  Dashed=reversed  Arrows=direction", "#666688");
 
 	svg_close(&svg);
-	printf("  -> " SVG_OUTPUT_DIR "/curve_reverse.svg\n");
+	printf("  -> " SVG_OUTPUT_DIR "/26_curve_reverse.svg\n");
 }
 
 /* SVG: curve split - split cubic Bezier at t=0.5 */
@@ -117,7 +117,7 @@ static void test_svg_curve_split(void)
 	}
 
 	svg_writer svg;
-	if (!svg_open(&svg, SVG_OUTPUT_DIR "/curve_split.svg",
+	if (!svg_open(&svg, SVG_OUTPUT_DIR "/26_curve_split.svg",
 		(qaws_scalar)-0.5, (qaws_scalar)-3.0, (qaws_scalar)5.5, (qaws_scalar)8.0,
 		(qaws_scalar)600, (qaws_scalar)500))
 	{
@@ -157,7 +157,7 @@ static void test_svg_curve_split(void)
 	svg_label(&svg, (qaws_scalar)-0.3, (qaws_scalar)3.9, "Right (green)", "#50fa7b");
 
 	svg_close(&svg);
-	printf("  -> " SVG_OUTPUT_DIR "/curve_split.svg\n");
+	printf("  -> " SVG_OUTPUT_DIR "/26_curve_split.svg\n");
 	qaws_curve_destroy(curve);
 	qaws_curve_destroy(left);
 	qaws_curve_destroy(right);
@@ -212,7 +212,7 @@ static void test_svg_curve_join(void)
 	}
 
 	svg_writer svg;
-	if (!svg_open(&svg, SVG_OUTPUT_DIR "/curve_join.svg",
+	if (!svg_open(&svg, SVG_OUTPUT_DIR "/26_curve_join.svg",
 		(qaws_scalar)-0.5, (qaws_scalar)-1.0, (qaws_scalar)5.0, (qaws_scalar)4.0,
 		(qaws_scalar)600, (qaws_scalar)400))
 	{
@@ -247,7 +247,7 @@ static void test_svg_curve_join(void)
 	svg_label(&svg, (qaws_scalar)-0.3, (qaws_scalar)2.3, "Joined (green)", "#50fa7b");
 
 	svg_close(&svg);
-	printf("  -> " SVG_OUTPUT_DIR "/curve_join.svg\n");
+	printf("  -> " SVG_OUTPUT_DIR "/26_curve_join.svg\n");
 	qaws_curve_destroy(curve_a);
 	qaws_curve_destroy(curve_b);
 	qaws_curve_destroy(joined);
@@ -278,7 +278,7 @@ static void test_svg_degree_elevation(void)
 	}
 
 	svg_writer svg;
-	if (!svg_open(&svg, SVG_OUTPUT_DIR "/degree_elevation.svg",
+	if (!svg_open(&svg, SVG_OUTPUT_DIR "/26_degree_elevation.svg",
 		(qaws_scalar)-0.5, (qaws_scalar)-0.5, (qaws_scalar)5.0, (qaws_scalar)4.0,
 		(qaws_scalar)600, (qaws_scalar)400))
 	{
@@ -315,7 +315,7 @@ static void test_svg_degree_elevation(void)
 	svg_label(&svg, (qaws_scalar)-0.3, (qaws_scalar)2.9, "Cubic (blue, 4 CPs)", "#6272a4");
 
 	svg_close(&svg);
-	printf("  -> " SVG_OUTPUT_DIR "/degree_elevation.svg\n");
+	printf("  -> " SVG_OUTPUT_DIR "/26_degree_elevation.svg\n");
 	qaws_curve_destroy(curve);
 	qaws_curve_destroy(elevated);
 }
@@ -348,7 +348,7 @@ static void test_svg_family_conversion(void)
 	}
 
 	svg_writer svg;
-	if (!svg_open(&svg, SVG_OUTPUT_DIR "/family_conversion.svg",
+	if (!svg_open(&svg, SVG_OUTPUT_DIR "/26_family_conversion.svg",
 		(qaws_scalar)-0.5, (qaws_scalar)-1.0, (qaws_scalar)5.0, (qaws_scalar)4.0,
 		(qaws_scalar)600, (qaws_scalar)400))
 	{
@@ -385,7 +385,7 @@ static void test_svg_family_conversion(void)
 	svg_label(&svg, (qaws_scalar)-0.3, (qaws_scalar)2.6, "Bezier (blue)", "#6272a4");
 
 	svg_close(&svg);
-	printf("  -> " SVG_OUTPUT_DIR "/family_conversion.svg\n");
+	printf("  -> " SVG_OUTPUT_DIR "/26_family_conversion.svg\n");
 	qaws_curve_destroy(hermite);
 	qaws_curve_destroy(bezier);
 }
@@ -396,7 +396,7 @@ static void test_svg_easing_curves(void)
 	printf("test_svg_easing_curves\n");
 
 	svg_writer svg;
-	if (!svg_open(&svg, SVG_OUTPUT_DIR "/easing_curves.svg",
+	if (!svg_open(&svg, SVG_OUTPUT_DIR "/26_easing_curves.svg",
 		(qaws_scalar)-0.5, (qaws_scalar)-0.5, (qaws_scalar)5.5, (qaws_scalar)7.5,
 		(qaws_scalar)550, (qaws_scalar)750))
 		return;
@@ -485,7 +485,7 @@ static void test_svg_easing_curves(void)
 		"Easing Functions (dot spacing = speed)", "#8888aa");
 
 	svg_close(&svg);
-	printf("  -> " SVG_OUTPUT_DIR "/easing_curves.svg\n");
+	printf("  -> " SVG_OUTPUT_DIR "/26_easing_curves.svg\n");
 	qaws_curve_destroy(line);
 }
 
@@ -507,7 +507,7 @@ static void test_svg_adaptive_sampling(void)
 	if (s != QAWS_STATUS_OK) { printf("  SKIP: create failed\n"); return; }
 
 	svg_writer svg;
-	if (!svg_open(&svg, SVG_OUTPUT_DIR "/adaptive_sampling.svg",
+	if (!svg_open(&svg, SVG_OUTPUT_DIR "/26_adaptive_sampling.svg",
 		(qaws_scalar)-0.5, (qaws_scalar)-1.5, (qaws_scalar)5.0, (qaws_scalar)4.5,
 		(qaws_scalar)600, (qaws_scalar)400))
 	{ qaws_curve_destroy(curve); return; }
@@ -563,7 +563,7 @@ static void test_svg_adaptive_sampling(void)
 	svg_label(&svg, (qaws_scalar)-0.3, (qaws_scalar)2.6, "Adaptive 8+subdivisions (blue, small)", "#6272a4");
 
 	svg_close(&svg);
-	printf("  -> " SVG_OUTPUT_DIR "/adaptive_sampling.svg\n");
+	printf("  -> " SVG_OUTPUT_DIR "/26_adaptive_sampling.svg\n");
 	qaws_curve_destroy(curve);
 }
 
@@ -572,7 +572,7 @@ static void test_svg_bspline_fitting(void)
 	printf("test_svg_bspline_fitting\n");
 
 	svg_writer svg;
-	if (!svg_open(&svg, SVG_OUTPUT_DIR "/bspline_fitting.svg",
+	if (!svg_open(&svg, SVG_OUTPUT_DIR "/26_bspline_fitting.svg",
 		(qaws_scalar)-1.8, (qaws_scalar)-2.0, (qaws_scalar)8.5, (qaws_scalar)5.5,
 		(qaws_scalar)800, (qaws_scalar)520))
 		return;
@@ -688,7 +688,7 @@ static void test_svg_bspline_fitting(void)
 	svg_label(&svg, (qaws_scalar)-1.5, (qaws_scalar)3.3,
 		"B-spline least-squares fitting", "#8888aa");
 	svg_close(&svg);
-	printf("  -> " SVG_OUTPUT_DIR "/bspline_fitting.svg\n");
+	printf("  -> " SVG_OUTPUT_DIR "/26_bspline_fitting.svg\n");
 }
 
 static void test_svg_arc_length_reparam(void)
@@ -696,7 +696,7 @@ static void test_svg_arc_length_reparam(void)
 	printf("test_svg_arc_length_reparam\n");
 
 	svg_writer svg;
-	if (!svg_open(&svg, SVG_OUTPUT_DIR "/arc_length_reparam.svg",
+	if (!svg_open(&svg, SVG_OUTPUT_DIR "/26_arc_length_reparam.svg",
 		(qaws_scalar)-0.5, (qaws_scalar)-0.5, (qaws_scalar)3.0, (qaws_scalar)3.0,
 		(qaws_scalar)500, (qaws_scalar)500))
 		return;
@@ -753,7 +753,7 @@ static void test_svg_arc_length_reparam(void)
 	}
 
 	svg_close(&svg);
-	printf("  -> " SVG_OUTPUT_DIR "/arc_length_reparam.svg\n");
+	printf("  -> " SVG_OUTPUT_DIR "/26_arc_length_reparam.svg\n");
 }
 
 static void test_svg_degree_reduction(void)
@@ -761,7 +761,7 @@ static void test_svg_degree_reduction(void)
 	printf("test_svg_degree_reduction\n");
 
 	svg_writer svg;
-	if (!svg_open(&svg, SVG_OUTPUT_DIR "/degree_reduction.svg",
+	if (!svg_open(&svg, SVG_OUTPUT_DIR "/26_degree_reduction.svg",
 		(qaws_scalar)-0.5, (qaws_scalar)-3.5, (qaws_scalar)5.5, (qaws_scalar)8.0,
 		(qaws_scalar)600, (qaws_scalar)700))
 		return;
@@ -857,7 +857,7 @@ static void test_svg_degree_reduction(void)
 		"Green=original  Cyan/Orange=1st reduce  Pink=2nd reduce", "#666688");
 
 	svg_close(&svg);
-	printf("  -> " SVG_OUTPUT_DIR "/degree_reduction.svg\n");
+	printf("  -> " SVG_OUTPUT_DIR "/26_degree_reduction.svg\n");
 }
 
 int test_26_svg_operations_main(void)

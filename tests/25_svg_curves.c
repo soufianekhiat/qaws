@@ -8,7 +8,7 @@ static void test_svg_circle(void)
 	   We'll draw each quarter as a separate NURBS. */
 	qaws_scalar w = (qaws_scalar)0.70710678118; /* 1/sqrt(2) */
 	svg_writer svg;
-	if (!svg_open(&svg, SVG_OUTPUT_DIR "/circle.svg",
+	if (!svg_open(&svg, SVG_OUTPUT_DIR "/25_circle.svg",
 		(qaws_scalar)-1.5, (qaws_scalar)-1.5, (qaws_scalar)3.0, (qaws_scalar)3.0,
 		(qaws_scalar)500, (qaws_scalar)500))
 		return;
@@ -63,7 +63,7 @@ static void test_svg_circle(void)
 
 	svg_label(&svg, (qaws_scalar)-1.3, (qaws_scalar)1.3, "Circle (4x NURBS quarter-arcs)", "#8888aa");
 	svg_close(&svg);
-	printf("  -> " SVG_OUTPUT_DIR "/circle.svg\n");
+	printf("  -> " SVG_OUTPUT_DIR "/25_circle.svg\n");
 }
 
 static void test_svg_lemniscate(void)
@@ -81,7 +81,7 @@ static void test_svg_lemniscate(void)
 	   a piecewise Bezier (degree-3) approximation by using Hermite
 	   interpolation on several key points per lobe. */
 	svg_writer svg;
-	if (!svg_open(&svg, SVG_OUTPUT_DIR "/lemniscate.svg",
+	if (!svg_open(&svg, SVG_OUTPUT_DIR "/25_lemniscate.svg",
 		(qaws_scalar)-1.5, (qaws_scalar)-0.8, (qaws_scalar)3.0, (qaws_scalar)1.6,
 		(qaws_scalar)600, (qaws_scalar)320))
 		return;
@@ -173,7 +173,7 @@ static void test_svg_lemniscate(void)
 	svg_label(&svg, (qaws_scalar)-1.3, (qaws_scalar)0.65,
 		"Lemniscate (Hermite lobes + parametric ref)", "#8888aa");
 	svg_close(&svg);
-	printf("  -> " SVG_OUTPUT_DIR "/lemniscate.svg\n");
+	printf("  -> " SVG_OUTPUT_DIR "/25_lemniscate.svg\n");
 }
 
 static void test_svg_bezier_s(void)
@@ -181,7 +181,7 @@ static void test_svg_bezier_s(void)
 	printf("test_svg_bezier_s\n");
 
 	svg_writer svg;
-	if (!svg_open(&svg, SVG_OUTPUT_DIR "/bezier_s_curve.svg",
+	if (!svg_open(&svg, SVG_OUTPUT_DIR "/25_bezier_s_curve.svg",
 		(qaws_scalar)-0.5, (qaws_scalar)-0.5, (qaws_scalar)5.0, (qaws_scalar)4.0,
 		(qaws_scalar)500, (qaws_scalar)400))
 		return;
@@ -215,7 +215,7 @@ static void test_svg_bezier_s(void)
 	svg_label(&svg, (qaws_scalar)-0.3, (qaws_scalar)3.5, "Cubic Bezier S-curve", "#8888aa");
 	svg_close(&svg);
 	qaws_curve_destroy(curve);
-	printf("  -> " SVG_OUTPUT_DIR "/bezier_s_curve.svg\n");
+	printf("  -> " SVG_OUTPUT_DIR "/25_bezier_s_curve.svg\n");
 }
 
 static void test_svg_catmull_rom_wave(void)
@@ -223,7 +223,7 @@ static void test_svg_catmull_rom_wave(void)
 	printf("test_svg_catmull_rom_wave\n");
 
 	svg_writer svg;
-	if (!svg_open(&svg, SVG_OUTPUT_DIR "/catmull_rom_wave.svg",
+	if (!svg_open(&svg, SVG_OUTPUT_DIR "/25_catmull_rom_wave.svg",
 		(qaws_scalar)-0.5, (qaws_scalar)-2.0, (qaws_scalar)8.0, (qaws_scalar)4.0,
 		(qaws_scalar)600, (qaws_scalar)300))
 		return;
@@ -261,7 +261,7 @@ static void test_svg_catmull_rom_wave(void)
 	svg_label(&svg, (qaws_scalar)-0.3, (qaws_scalar)1.7, "Catmull-Rom wave (centripetal)", "#8888aa");
 	svg_close(&svg);
 	qaws_curve_destroy(curve);
-	printf("  -> " SVG_OUTPUT_DIR "/catmull_rom_wave.svg\n");
+	printf("  -> " SVG_OUTPUT_DIR "/25_catmull_rom_wave.svg\n");
 }
 
 static void test_svg_bspline(void)
@@ -269,7 +269,7 @@ static void test_svg_bspline(void)
 	printf("test_svg_bspline\n");
 
 	svg_writer svg;
-	if (!svg_open(&svg, SVG_OUTPUT_DIR "/bspline.svg",
+	if (!svg_open(&svg, SVG_OUTPUT_DIR "/25_bspline.svg",
 		(qaws_scalar)-0.5, (qaws_scalar)-0.5, (qaws_scalar)5.0, (qaws_scalar)4.0,
 		(qaws_scalar)500, (qaws_scalar)400))
 		return;
@@ -305,7 +305,7 @@ static void test_svg_bspline(void)
 	svg_label(&svg, (qaws_scalar)-0.3, (qaws_scalar)3.5, "Cubic B-Spline (6 CPs, uniform clamped)", "#8888aa");
 	svg_close(&svg);
 	qaws_curve_destroy(curve);
-	printf("  -> " SVG_OUTPUT_DIR "/bspline.svg\n");
+	printf("  -> " SVG_OUTPUT_DIR "/25_bspline.svg\n");
 }
 
 static void test_svg_nurbs_ellipse(void)
@@ -313,7 +313,7 @@ static void test_svg_nurbs_ellipse(void)
 	printf("test_svg_nurbs_ellipse\n");
 
 	svg_writer svg;
-	if (!svg_open(&svg, SVG_OUTPUT_DIR "/nurbs_ellipse.svg",
+	if (!svg_open(&svg, SVG_OUTPUT_DIR "/25_nurbs_ellipse.svg",
 		(qaws_scalar)-3.0, (qaws_scalar)-2.0, (qaws_scalar)6.0, (qaws_scalar)4.0,
 		(qaws_scalar)500, (qaws_scalar)340))
 		return;
@@ -356,7 +356,7 @@ static void test_svg_nurbs_ellipse(void)
 
 	svg_label(&svg, (qaws_scalar)-2.8, (qaws_scalar)1.7, "Ellipse (4x NURBS, a=2, b=1)", "#8888aa");
 	svg_close(&svg);
-	printf("  -> " SVG_OUTPUT_DIR "/nurbs_ellipse.svg\n");
+	printf("  -> " SVG_OUTPUT_DIR "/25_nurbs_ellipse.svg\n");
 }
 
 static void test_svg_hermite_figure8(void)
@@ -364,7 +364,7 @@ static void test_svg_hermite_figure8(void)
 	printf("test_svg_hermite_figure8\n");
 
 	svg_writer svg;
-	if (!svg_open(&svg, SVG_OUTPUT_DIR "/hermite_figure8.svg",
+	if (!svg_open(&svg, SVG_OUTPUT_DIR "/25_hermite_figure8.svg",
 		(qaws_scalar)-1.5, (qaws_scalar)-1.5, (qaws_scalar)3.0, (qaws_scalar)3.0,
 		(qaws_scalar)500, (qaws_scalar)500))
 		return;
@@ -430,7 +430,7 @@ static void test_svg_hermite_figure8(void)
 	svg_label(&svg, (qaws_scalar)-1.3, (qaws_scalar)1.3, "Figure-8 (Hermite, 5 key points: 0,2,4 at origin)", "#8888aa");
 	svg_close(&svg);
 	qaws_curve_destroy(curve);
-	printf("  -> " SVG_OUTPUT_DIR "/hermite_figure8.svg\n");
+	printf("  -> " SVG_OUTPUT_DIR "/25_hermite_figure8.svg\n");
 }
 
 static void test_svg_all_families(void)
@@ -438,7 +438,7 @@ static void test_svg_all_families(void)
 	printf("test_svg_all_families\n");
 
 	svg_writer svg;
-	if (!svg_open(&svg, SVG_OUTPUT_DIR "/all_families.svg",
+	if (!svg_open(&svg, SVG_OUTPUT_DIR "/25_all_families.svg",
 		(qaws_scalar)-0.5, (qaws_scalar)-1.5, (qaws_scalar)5.0, (qaws_scalar)5.0,
 		(qaws_scalar)500, (qaws_scalar)500))
 		return;
@@ -508,7 +508,7 @@ static void test_svg_all_families(void)
 
 	svg_label(&svg, (qaws_scalar)-0.3, (qaws_scalar)3.7, "All families comparison", "#8888aa");
 	svg_close(&svg);
-	printf("  -> " SVG_OUTPUT_DIR "/all_families.svg\n");
+	printf("  -> " SVG_OUTPUT_DIR "/25_all_families.svg\n");
 }
 
 static void test_svg_yuksel_bezier(void)
@@ -530,7 +530,7 @@ static void test_svg_yuksel_bezier(void)
 	qaws_curve_create_yuksel(&desc, &curve);
 
 	svg_writer svg;
-	if (!svg_open(&svg, SVG_OUTPUT_DIR "/yuksel_bezier.svg",
+	if (!svg_open(&svg, SVG_OUTPUT_DIR "/25_yuksel_bezier.svg",
 		(qaws_scalar)-0.5, (qaws_scalar)-2.0, (qaws_scalar)7.0, (qaws_scalar)5.0,
 		(qaws_scalar)600, (qaws_scalar)400))
 	{ qaws_curve_destroy(curve); return; }
@@ -542,7 +542,7 @@ static void test_svg_yuksel_bezier(void)
 	svg_label(&svg, (qaws_scalar)-0.3, (qaws_scalar)2.8, "Yuksel Bezier", "#e94560");
 
 	svg_close(&svg);
-	printf("  -> " SVG_OUTPUT_DIR "/yuksel_bezier.svg\n");
+	printf("  -> " SVG_OUTPUT_DIR "/25_yuksel_bezier.svg\n");
 	qaws_curve_destroy(curve);
 }
 
@@ -562,7 +562,7 @@ static void test_svg_yuksel_modes(void)
 	}
 
 	svg_writer svg;
-	if (!svg_open(&svg, SVG_OUTPUT_DIR "/yuksel_modes.svg",
+	if (!svg_open(&svg, SVG_OUTPUT_DIR "/25_yuksel_modes.svg",
 		(qaws_scalar)-3.0, (qaws_scalar)-3.0, (qaws_scalar)6.0, (qaws_scalar)6.0,
 		(qaws_scalar)500, (qaws_scalar)500))
 		return;
@@ -601,7 +601,7 @@ static void test_svg_yuksel_modes(void)
 	svg_label(&svg, (qaws_scalar)-2.8, (qaws_scalar)3.2, "Yuksel modes (hexagon)", "#8888aa");
 
 	svg_close(&svg);
-	printf("  -> " SVG_OUTPUT_DIR "/yuksel_modes.svg\n");
+	printf("  -> " SVG_OUTPUT_DIR "/25_yuksel_modes.svg\n");
 }
 
 /* SVG: Yuksel vs Catmull-Rom comparison */
@@ -614,7 +614,7 @@ static void test_svg_yuksel_vs_catmull(void)
 	};
 
 	svg_writer svg;
-	if (!svg_open(&svg, SVG_OUTPUT_DIR "/yuksel_vs_catmull.svg",
+	if (!svg_open(&svg, SVG_OUTPUT_DIR "/25_yuksel_vs_catmull.svg",
 		(qaws_scalar)-0.5, (qaws_scalar)-1.5, (qaws_scalar)5.5, (qaws_scalar)4.5,
 		(qaws_scalar)600, (qaws_scalar)400))
 		return;
@@ -662,7 +662,7 @@ static void test_svg_yuksel_vs_catmull(void)
 	svg_label(&svg, (qaws_scalar)-0.3, (qaws_scalar)2.8, "Yuksel (red) vs Catmull-Rom (green)", "#8888aa");
 
 	svg_close(&svg);
-	printf("  -> " SVG_OUTPUT_DIR "/yuksel_vs_catmull.svg\n");
+	printf("  -> " SVG_OUTPUT_DIR "/25_yuksel_vs_catmull.svg\n");
 }
 
 int test_25_svg_curves_main(void)

@@ -225,7 +225,7 @@ static void test_svg_export_comparison(void)
 
 	printf("test_svg_export_comparison\n");
 
-	if (!svg_open(&svg, SVG_OUTPUT_DIR "/svg_export_comparison.svg",
+	if (!svg_open(&svg, SVG_OUTPUT_DIR "/21_svg_export_comparison.svg",
 		(qaws_scalar)-1.5, (qaws_scalar)-2.0, (qaws_scalar)14.0, (qaws_scalar)18.0,
 		(qaws_scalar)800, (qaws_scalar)1000))
 		return;
@@ -563,7 +563,7 @@ static void test_svg_export_comparison(void)
 	}
 
 	svg_close(&svg);
-	printf("  -> " SVG_OUTPUT_DIR "/svg_export_comparison.svg\n");
+	printf("  -> " SVG_OUTPUT_DIR "/21_svg_export_comparison.svg\n");
 }
 
 static void test_polyline_import(void)

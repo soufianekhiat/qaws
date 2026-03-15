@@ -13,7 +13,7 @@ static void test_svg_batch_eval(void)
 	svg_writer svg;
 	printf("test_svg_batch_eval\n");
 
-	if (!svg_open(&svg, SVG_OUTPUT_DIR "/batch_eval.svg",
+	if (!svg_open(&svg, SVG_OUTPUT_DIR "/23_batch_eval.svg",
 		(qaws_scalar)-0.5, (qaws_scalar)-1.0, (qaws_scalar)6.0, (qaws_scalar)4.0,
 		(qaws_scalar)700, (qaws_scalar)500))
 		return;
@@ -124,7 +124,7 @@ static void test_svg_batch_eval(void)
 	}
 
 	svg_close(&svg);
-	printf("  -> " SVG_OUTPUT_DIR "/batch_eval.svg\n");
+	printf("  -> " SVG_OUTPUT_DIR "/23_batch_eval.svg\n");
 }
 
 static void test_batch_eval(void)

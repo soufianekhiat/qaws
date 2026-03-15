@@ -216,8 +216,8 @@ static void visual_obj_bilinear(void)
 	}
 	if (!surf) return;
 
-	if (!obj_open(&w, OBJ_OUTPUT_DIR "/bilinear_patch.obj",
-		OBJ_OUTPUT_DIR "/bilinear_patch.mtl"))
+	if (!obj_open(&w, OBJ_OUTPUT_DIR "/34_bilinear_patch.obj",
+		OBJ_OUTPUT_DIR "/34_bilinear_patch.mtl"))
 	{
 		qaws_surface_destroy(surf); return;
 	}
@@ -227,7 +227,7 @@ static void visual_obj_bilinear(void)
 	obj_use_material(&w, "bilinear");
 	obj_surface_mesh(&w, surf, 16, 16);
 	obj_close(&w);
-	printf("  -> " OBJ_OUTPUT_DIR "/bilinear_patch.obj\n");
+	printf("  -> " OBJ_OUTPUT_DIR "/34_bilinear_patch.obj\n");
 
 	qaws_surface_destroy(surf);
 }
@@ -259,8 +259,8 @@ static void visual_obj_biquadratic(void)
 	}
 	if (!surf) return;
 
-	if (!obj_open(&w, OBJ_OUTPUT_DIR "/biquadratic_patch.obj",
-		OBJ_OUTPUT_DIR "/biquadratic_patch.mtl"))
+	if (!obj_open(&w, OBJ_OUTPUT_DIR "/34_biquadratic_patch.obj",
+		OBJ_OUTPUT_DIR "/34_biquadratic_patch.mtl"))
 	{
 		qaws_surface_destroy(surf); return;
 	}
@@ -270,7 +270,7 @@ static void visual_obj_biquadratic(void)
 	obj_use_material(&w, "biquad");
 	obj_surface_mesh(&w, surf, 32, 32);
 	obj_close(&w);
-	printf("  -> " OBJ_OUTPUT_DIR "/biquadratic_patch.obj\n");
+	printf("  -> " OBJ_OUTPUT_DIR "/34_biquadratic_patch.obj\n");
 
 	qaws_surface_destroy(surf);
 }

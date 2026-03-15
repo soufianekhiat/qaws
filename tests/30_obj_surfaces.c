@@ -33,8 +33,8 @@ static void test_obj_surface_bezier(void)
 	if (qaws_surface_create_bezier(&desc, &surf) != QAWS_STATUS_OK) return;
 
 	if (!obj_open(&w,
-		OBJ_OUTPUT_DIR "/surface_bezier.obj",
-		OBJ_OUTPUT_DIR "/surface_bezier.mtl"))
+		OBJ_OUTPUT_DIR "/30_surface_bezier.obj",
+		OBJ_OUTPUT_DIR "/30_surface_bezier.mtl"))
 	{
 		qaws_surface_destroy(surf);
 		return;
@@ -53,7 +53,7 @@ static void test_obj_surface_bezier(void)
 
 	obj_close(&w);
 	qaws_surface_destroy(surf);
-	printf("  -> " OBJ_OUTPUT_DIR "/surface_bezier.obj\n");
+	printf("  -> " OBJ_OUTPUT_DIR "/30_surface_bezier.obj\n");
 }
 
 static void test_obj_surface_bspline(void)
@@ -92,8 +92,8 @@ static void test_obj_surface_bspline(void)
 	if (qaws_surface_create_bspline(&desc, &surf) != QAWS_STATUS_OK) return;
 
 	if (!obj_open(&w,
-		OBJ_OUTPUT_DIR "/surface_bspline.obj",
-		OBJ_OUTPUT_DIR "/surface_bspline.mtl"))
+		OBJ_OUTPUT_DIR "/30_surface_bspline.obj",
+		OBJ_OUTPUT_DIR "/30_surface_bspline.mtl"))
 	{
 		qaws_surface_destroy(surf);
 		return;
@@ -112,7 +112,7 @@ static void test_obj_surface_bspline(void)
 
 	obj_close(&w);
 	qaws_surface_destroy(surf);
-	printf("  -> " OBJ_OUTPUT_DIR "/surface_bspline.obj\n");
+	printf("  -> " OBJ_OUTPUT_DIR "/30_surface_bspline.obj\n");
 }
 
 static void test_obj_surface_nurbs(void)
@@ -187,8 +187,8 @@ static void test_obj_surface_nurbs(void)
 	}
 
 	if (!obj_open(&w,
-		OBJ_OUTPUT_DIR "/surface_nurbs.obj",
-		OBJ_OUTPUT_DIR "/surface_nurbs.mtl"))
+		OBJ_OUTPUT_DIR "/30_surface_nurbs.obj",
+		OBJ_OUTPUT_DIR "/30_surface_nurbs.mtl"))
 	{
 		qaws_surface_destroy(surf);
 		return;
@@ -207,7 +207,7 @@ static void test_obj_surface_nurbs(void)
 
 	obj_close(&w);
 	qaws_surface_destroy(surf);
-	printf("  -> " OBJ_OUTPUT_DIR "/surface_nurbs.obj\n");
+	printf("  -> " OBJ_OUTPUT_DIR "/30_surface_nurbs.obj\n");
 }
 
 static void test_obj_surface_gallery(void)
@@ -222,8 +222,8 @@ static void test_obj_surface_gallery(void)
 	printf("test_obj_surface_gallery\n");
 
 	if (!obj_open(&w,
-		OBJ_OUTPUT_DIR "/surface_gallery.obj",
-		OBJ_OUTPUT_DIR "/surface_gallery.mtl"))
+		OBJ_OUTPUT_DIR "/30_surface_gallery.obj",
+		OBJ_OUTPUT_DIR "/30_surface_gallery.mtl"))
 		return;
 
 	obj_material(&w, "bezier", 0.2, 0.5, 1.0);
@@ -324,7 +324,7 @@ static void test_obj_surface_gallery(void)
 	if (bezier_surf) qaws_surface_destroy(bezier_surf);
 	if (bspline_surf) qaws_surface_destroy(bspline_surf);
 	if (nurbs_surf) qaws_surface_destroy(nurbs_surf);
-	printf("  -> " OBJ_OUTPUT_DIR "/surface_gallery.obj\n");
+	printf("  -> " OBJ_OUTPUT_DIR "/30_surface_gallery.obj\n");
 }
 
 static void test_obj_surface_ruled(void)
@@ -371,8 +371,8 @@ static void test_obj_surface_ruled(void)
 	}
 
 	if (!obj_open(&w,
-		OBJ_OUTPUT_DIR "/surface_ruled.obj",
-		OBJ_OUTPUT_DIR "/surface_ruled.mtl"))
+		OBJ_OUTPUT_DIR "/30_surface_ruled.obj",
+		OBJ_OUTPUT_DIR "/30_surface_ruled.mtl"))
 	{
 		qaws_surface_destroy(surf);
 		qaws_curve_destroy(ca);
@@ -401,7 +401,7 @@ static void test_obj_surface_ruled(void)
 	qaws_surface_destroy(surf);
 	qaws_curve_destroy(ca);
 	qaws_curve_destroy(cb);
-	printf("  -> " OBJ_OUTPUT_DIR "/surface_ruled.obj\n");
+	printf("  -> " OBJ_OUTPUT_DIR "/30_surface_ruled.obj\n");
 }
 
 static void test_obj_surface_swept(void)
@@ -485,8 +485,8 @@ static void test_obj_surface_swept(void)
 	}
 
 	if (!obj_open(&w,
-		OBJ_OUTPUT_DIR "/surface_swept.obj",
-		OBJ_OUTPUT_DIR "/surface_swept.mtl"))
+		OBJ_OUTPUT_DIR "/30_surface_swept.obj",
+		OBJ_OUTPUT_DIR "/30_surface_swept.mtl"))
 	{
 		qaws_surface_destroy(surf);
 		qaws_curve_destroy(path);
@@ -510,7 +510,7 @@ static void test_obj_surface_swept(void)
 	qaws_surface_destroy(surf);
 	qaws_curve_destroy(path);
 	qaws_curve_destroy(profile);
-	printf("  -> " OBJ_OUTPUT_DIR "/surface_swept.obj\n");
+	printf("  -> " OBJ_OUTPUT_DIR "/30_surface_swept.obj\n");
 }
 
 int test_30_obj_surfaces_main(void)

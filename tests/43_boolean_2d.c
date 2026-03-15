@@ -226,7 +226,7 @@ static void visual_svg_boolean(void)
 	circle_b = make_circle_2d((qaws_scalar)0.8, 0, (qaws_scalar)1.0);
 	if (!circle_a || !circle_b) goto cleanup_vis;
 
-	if (!svg_open(&svg, SVG_OUTPUT_DIR "/boolean_2d.svg",
+	if (!svg_open(&svg, SVG_OUTPUT_DIR "/43_boolean_2d.svg",
 		(qaws_scalar)-1.5, (qaws_scalar)-1.5, (qaws_scalar)11.0, (qaws_scalar)3.0,
 		(qaws_scalar)900, (qaws_scalar)250))
 		goto cleanup_vis;
@@ -259,7 +259,7 @@ static void visual_svg_boolean(void)
 	svg_label(&svg, (qaws_scalar)6.8, (qaws_scalar)-1.3, "Difference", "#6272a4");
 
 	svg_close(&svg);
-	printf("  -> " SVG_OUTPUT_DIR "/boolean_2d.svg\n");
+	printf("  -> " SVG_OUTPUT_DIR "/43_boolean_2d.svg\n");
 
 cleanup_vis:
 	qaws_curve_destroy(circle_a);

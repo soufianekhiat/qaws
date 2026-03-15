@@ -5,7 +5,7 @@ static void test_svg_rational_bezier(void)
 	printf("test_svg_rational_bezier\n");
 
 	svg_writer svg;
-	if (!svg_open(&svg, SVG_OUTPUT_DIR "/rational_bezier.svg",
+	if (!svg_open(&svg, SVG_OUTPUT_DIR "/28_rational_bezier.svg",
 		(qaws_scalar)-0.5, (qaws_scalar)-0.5, (qaws_scalar)2.5, (qaws_scalar)2.5,
 		(qaws_scalar)500, (qaws_scalar)500))
 		return;
@@ -54,7 +54,7 @@ static void test_svg_rational_bezier(void)
 	svg_label(&svg, (qaws_scalar)-0.3, (qaws_scalar)2.2,
 		"Rational Bezier: w=0.3 0.707 1.0 2.0", "#8888aa");
 	svg_close(&svg);
-	printf("  -> " SVG_OUTPUT_DIR "/rational_bezier.svg\n");
+	printf("  -> " SVG_OUTPUT_DIR "/28_rational_bezier.svg\n");
 }
 
 static void test_svg_composite(void)
@@ -62,7 +62,7 @@ static void test_svg_composite(void)
 	printf("test_svg_composite\n");
 
 	svg_writer svg;
-	if (!svg_open(&svg, SVG_OUTPUT_DIR "/composite.svg",
+	if (!svg_open(&svg, SVG_OUTPUT_DIR "/28_composite.svg",
 		(qaws_scalar)-1.0, (qaws_scalar)-1.5, (qaws_scalar)7.0, (qaws_scalar)5.0,
 		(qaws_scalar)600, (qaws_scalar)430))
 		return;
@@ -146,7 +146,7 @@ static void test_svg_composite(void)
 	svg_label(&svg, (qaws_scalar)-0.5, (qaws_scalar)3.0,
 		"Composite: Bezier + Hermite + Linear", "#8888aa");
 	svg_close(&svg);
-	printf("  -> " SVG_OUTPUT_DIR "/composite.svg\n");
+	printf("  -> " SVG_OUTPUT_DIR "/28_composite.svg\n");
 }
 
 static void test_svg_arc(void)
@@ -154,7 +154,7 @@ static void test_svg_arc(void)
 	printf("test_svg_arc\n");
 
 	svg_writer svg;
-	if (!svg_open(&svg, SVG_OUTPUT_DIR "/arc.svg",
+	if (!svg_open(&svg, SVG_OUTPUT_DIR "/28_arc.svg",
 		(qaws_scalar)-4.0, (qaws_scalar)-4.0, (qaws_scalar)12.0, (qaws_scalar)8.0,
 		(qaws_scalar)750, (qaws_scalar)500))
 		return;
@@ -292,7 +292,7 @@ static void test_svg_arc(void)
 	svg_label(&svg, (qaws_scalar)-3.5, (qaws_scalar)4.2,
 		"Piecewise Circular Arcs", "#8888aa");
 	svg_close(&svg);
-	printf("  -> " SVG_OUTPUT_DIR "/arc.svg\n");
+	printf("  -> " SVG_OUTPUT_DIR "/28_arc.svg\n");
 }
 
 static void test_svg_polynomial(void)
@@ -300,7 +300,7 @@ static void test_svg_polynomial(void)
 	printf("test_svg_polynomial\n");
 
 	svg_writer svg;
-	if (!svg_open(&svg, SVG_OUTPUT_DIR "/polynomial.svg",
+	if (!svg_open(&svg, SVG_OUTPUT_DIR "/28_polynomial.svg",
 		(qaws_scalar)-0.5, (qaws_scalar)-1.5, (qaws_scalar)7.0, (qaws_scalar)4.0,
 		(qaws_scalar)600, (qaws_scalar)350))
 		return;
@@ -364,7 +364,7 @@ static void test_svg_polynomial(void)
 	svg_label(&svg, (qaws_scalar)-0.3, (qaws_scalar)2.2,
 		"Polynomial: cubic wave + parabola", "#8888aa");
 	svg_close(&svg);
-	printf("  -> " SVG_OUTPUT_DIR "/polynomial.svg\n");
+	printf("  -> " SVG_OUTPUT_DIR "/28_polynomial.svg\n");
 }
 
 static void test_svg_clothoid(void)
@@ -372,7 +372,7 @@ static void test_svg_clothoid(void)
 	printf("test_svg_clothoid\n");
 
 	svg_writer svg;
-	if (!svg_open(&svg, SVG_OUTPUT_DIR "/clothoid.svg",
+	if (!svg_open(&svg, SVG_OUTPUT_DIR "/28_clothoid.svg",
 		(qaws_scalar)-1.5, (qaws_scalar)-1.0, (qaws_scalar)4.0, (qaws_scalar)3.5,
 		(qaws_scalar)600, (qaws_scalar)525))
 		return;
@@ -426,7 +426,7 @@ static void test_svg_clothoid(void)
 	svg_label(&svg, (qaws_scalar)-1.2, (qaws_scalar)2.2,
 		"Clothoid / Euler spiral", "#8888aa");
 	svg_close(&svg);
-	printf("  -> " SVG_OUTPUT_DIR "/clothoid.svg\n");
+	printf("  -> " SVG_OUTPUT_DIR "/28_clothoid.svg\n");
 }
 
 static void test_svg_subdivision(void)
@@ -434,7 +434,7 @@ static void test_svg_subdivision(void)
 	printf("test_svg_subdivision\n");
 
 	svg_writer svg;
-	if (!svg_open(&svg, SVG_OUTPUT_DIR "/subdivision.svg",
+	if (!svg_open(&svg, SVG_OUTPUT_DIR "/28_subdivision.svg",
 		(qaws_scalar)-1.0, (qaws_scalar)-1.0, (qaws_scalar)6.0, (qaws_scalar)5.0,
 		(qaws_scalar)600, (qaws_scalar)500))
 		return;
@@ -511,7 +511,7 @@ static void test_svg_subdivision(void)
 	svg_label(&svg, (qaws_scalar)-0.5, (qaws_scalar)4.0,
 		"Subdivision: Chaikin(red) LR3(green) LR4(blue)", "#8888aa");
 	svg_close(&svg);
-	printf("  -> " SVG_OUTPUT_DIR "/subdivision.svg\n");
+	printf("  -> " SVG_OUTPUT_DIR "/28_subdivision.svg\n");
 }
 
 static void test_svg_all_new_families(void)
@@ -519,7 +519,7 @@ static void test_svg_all_new_families(void)
 	printf("test_svg_all_new_families\n");
 
 	svg_writer svg;
-	if (!svg_open(&svg, SVG_OUTPUT_DIR "/all_new_families.svg",
+	if (!svg_open(&svg, SVG_OUTPUT_DIR "/28_all_new_families.svg",
 		(qaws_scalar)-2.5, (qaws_scalar)-2.0, (qaws_scalar)10.0, (qaws_scalar)6.0,
 		(qaws_scalar)800, (qaws_scalar)480))
 		return;
@@ -640,7 +640,7 @@ static void test_svg_all_new_families(void)
 	svg_label(&svg, (qaws_scalar)-2.0, (qaws_scalar)-1.5,
 		"All new curve families", "#8888aa");
 	svg_close(&svg);
-	printf("  -> " SVG_OUTPUT_DIR "/all_new_families.svg\n");
+	printf("  -> " SVG_OUTPUT_DIR "/28_all_new_families.svg\n");
 }
 
 int test_28_svg_families_main(void)

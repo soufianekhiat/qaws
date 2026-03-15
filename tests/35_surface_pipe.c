@@ -188,8 +188,8 @@ static void visual_obj_circular_pipe(void)
 	}
 	if (!surf) { qaws_curve_destroy(path); return; }
 
-	if (!obj_open(&w, OBJ_OUTPUT_DIR "/circular_pipe.obj",
-		OBJ_OUTPUT_DIR "/circular_pipe.mtl"))
+	if (!obj_open(&w, OBJ_OUTPUT_DIR "/35_circular_pipe.obj",
+		OBJ_OUTPUT_DIR "/35_circular_pipe.mtl"))
 	{
 		qaws_surface_destroy(surf); qaws_curve_destroy(path); return;
 	}
@@ -199,7 +199,7 @@ static void visual_obj_circular_pipe(void)
 	obj_use_material(&w, "pipe");
 	obj_surface_mesh(&w, surf, 48, 16);
 	obj_close(&w);
-	printf("  -> " OBJ_OUTPUT_DIR "/circular_pipe.obj\n");
+	printf("  -> " OBJ_OUTPUT_DIR "/35_circular_pipe.obj\n");
 
 	qaws_surface_destroy(surf);
 	qaws_curve_destroy(path);
@@ -236,8 +236,8 @@ static void visual_obj_elliptical_pipe(void)
 	}
 	if (!surf) { qaws_curve_destroy(path); return; }
 
-	if (!obj_open(&w, OBJ_OUTPUT_DIR "/elliptical_pipe.obj",
-		OBJ_OUTPUT_DIR "/elliptical_pipe.mtl"))
+	if (!obj_open(&w, OBJ_OUTPUT_DIR "/35_elliptical_pipe.obj",
+		OBJ_OUTPUT_DIR "/35_elliptical_pipe.mtl"))
 	{
 		qaws_surface_destroy(surf); qaws_curve_destroy(path); return;
 	}
@@ -247,7 +247,7 @@ static void visual_obj_elliptical_pipe(void)
 	obj_use_material(&w, "epipe");
 	obj_surface_mesh(&w, surf, 48, 16);
 	obj_close(&w);
-	printf("  -> " OBJ_OUTPUT_DIR "/elliptical_pipe.obj\n");
+	printf("  -> " OBJ_OUTPUT_DIR "/35_elliptical_pipe.obj\n");
 
 	qaws_surface_destroy(surf);
 	qaws_curve_destroy(path);

@@ -107,8 +107,8 @@ static void visual_obj_dome(void)
 	if (!surf) { qaws_curve_destroy(prof); return; }
 
 	if (!obj_open(&w,
-		OBJ_OUTPUT_DIR "/dome_curvature.obj",
-		OBJ_OUTPUT_DIR "/dome_curvature.mtl"))
+		OBJ_OUTPUT_DIR "/31_dome_curvature.obj",
+		OBJ_OUTPUT_DIR "/31_dome_curvature.mtl"))
 	{
 		qaws_surface_destroy(surf);
 		qaws_curve_destroy(prof);
@@ -125,7 +125,7 @@ static void visual_obj_dome(void)
 	obj_close(&w);
 	qaws_surface_destroy(surf);
 	qaws_curve_destroy(prof);
-	printf("  -> " OBJ_OUTPUT_DIR "/dome_curvature.obj\n");
+	printf("  -> " OBJ_OUTPUT_DIR "/31_dome_curvature.obj\n");
 }
 
 /* ------------------------------------------------------------------ */
@@ -147,12 +147,12 @@ static void visual_obj_export_api(void)
 	if (qaws_surface_export_obj(surf, 32, 32, 1, buf, 262144, &length)
 		== QAWS_STATUS_OK)
 	{
-		fp = fopen(OBJ_OUTPUT_DIR "/dome_curvature_api.obj", "w");
+		fp = fopen(OBJ_OUTPUT_DIR "/31_dome_curvature_api.obj", "w");
 		if (fp)
 		{
 			fwrite(buf, 1, length, fp);
 			fclose(fp);
-			printf("  -> " OBJ_OUTPUT_DIR "/dome_curvature_api.obj\n");
+			printf("  -> " OBJ_OUTPUT_DIR "/31_dome_curvature_api.obj\n");
 		}
 	}
 
@@ -201,7 +201,7 @@ static void visual_svg_hausdorff(void)
 	qaws_curve_compute_hausdorff_distance_2d(ca, cb, n, &dist);
 
 	/* view: x [-1,7], y [-1,8], SVG 700x500 */
-	if (!svg_open(&svg, OBJ_OUTPUT_DIR "/hausdorff_distance.svg",
+	if (!svg_open(&svg, OBJ_OUTPUT_DIR "/31_hausdorff_distance.svg",
 		(qaws_scalar)-1, (qaws_scalar)-1,
 		(qaws_scalar)8, (qaws_scalar)9,
 		(qaws_scalar)700, (qaws_scalar)500))
@@ -237,7 +237,7 @@ static void visual_svg_hausdorff(void)
 	svg_close(&svg);
 	qaws_curve_destroy(ca);
 	qaws_curve_destroy(cb);
-	printf("  -> " OBJ_OUTPUT_DIR "/hausdorff_distance.svg (dist=%.4f)\n", (double)dist);
+	printf("  -> " OBJ_OUTPUT_DIR "/31_hausdorff_distance.svg (dist=%.4f)\n", (double)dist);
 }
 
 /* ------------------------------------------------------------------ */
@@ -255,8 +255,8 @@ static void visual_obj_bounds(void)
 	qaws_surface_compute_bounds(surf, &bmin, &bmax);
 
 	if (!obj_open(&w,
-		OBJ_OUTPUT_DIR "/surface_bounds.obj",
-		OBJ_OUTPUT_DIR "/surface_bounds.mtl"))
+		OBJ_OUTPUT_DIR "/31_surface_bounds.obj",
+		OBJ_OUTPUT_DIR "/31_surface_bounds.mtl"))
 	{
 		qaws_surface_destroy(surf);
 		return;
@@ -308,7 +308,7 @@ static void visual_obj_bounds(void)
 
 	obj_close(&w);
 	qaws_surface_destroy(surf);
-	printf("  -> " OBJ_OUTPUT_DIR "/surface_bounds.obj\n");
+	printf("  -> " OBJ_OUTPUT_DIR "/31_surface_bounds.obj\n");
 }
 
 /* ------------------------------------------------------------------ */

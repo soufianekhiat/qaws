@@ -267,8 +267,8 @@ static void visual_obj_intersection(void)
 		point_buffer, 1000);
 	if (s != QAWS_STATUS_OK) goto cleanup_isect;
 
-	if (!obj_open(&w, OBJ_OUTPUT_DIR "/surface_intersection.obj",
-		OBJ_OUTPUT_DIR "/surface_intersection.mtl")) goto cleanup_isect;
+	if (!obj_open(&w, OBJ_OUTPUT_DIR "/40_surface_intersection.obj",
+		OBJ_OUTPUT_DIR "/40_surface_intersection.mtl")) goto cleanup_isect;
 
 	/* Surface A: bowl */
 	obj_material(&w, "surf_a", 0.3, 0.6, 0.9);
@@ -291,7 +291,7 @@ static void visual_obj_intersection(void)
 			obj_sphere(&w, out_curves[ci].points[pi].position, (qaws_scalar)0.03);
 
 	obj_close(&w);
-	printf("  -> " OBJ_OUTPUT_DIR "/surface_intersection.obj\n");
+	printf("  -> " OBJ_OUTPUT_DIR "/40_surface_intersection.obj\n");
 
 cleanup_isect:
 	qaws_surface_destroy(surf_a);
@@ -341,8 +341,8 @@ static void visual_obj_intersection_tilted(void)
 	s = qaws_surface_intersect(&desc, out_curves, 8, &curve_count,
 		point_buffer, 1000);
 
-	if (!obj_open(&w, OBJ_OUTPUT_DIR "/intersection_tilted.obj",
-		OBJ_OUTPUT_DIR "/intersection_tilted.mtl")) goto cleanup_tilt;
+	if (!obj_open(&w, OBJ_OUTPUT_DIR "/40_intersection_tilted.obj",
+		OBJ_OUTPUT_DIR "/40_intersection_tilted.mtl")) goto cleanup_tilt;
 
 	obj_material(&w, "dome", 0.3, 0.6, 0.9);
 	obj_material(&w, "plane", 0.9, 0.8, 0.3);
@@ -363,7 +363,7 @@ static void visual_obj_intersection_tilted(void)
 			obj_sphere(&w, out_curves[ci].points[pi].position, (qaws_scalar)0.03);
 
 	obj_close(&w);
-	printf("  -> " OBJ_OUTPUT_DIR "/intersection_tilted.obj\n");
+	printf("  -> " OBJ_OUTPUT_DIR "/40_intersection_tilted.obj\n");
 
 cleanup_tilt:
 	qaws_surface_destroy(surf_a);
@@ -434,8 +434,8 @@ static void visual_obj_intersection_patches(void)
 	s = qaws_surface_intersect(&desc, out_curves, 8, &curve_count,
 		point_buffer, 1000);
 
-	if (!obj_open(&w, OBJ_OUTPUT_DIR "/intersection_patches.obj",
-		OBJ_OUTPUT_DIR "/intersection_patches.mtl"))
+	if (!obj_open(&w, OBJ_OUTPUT_DIR "/40_intersection_patches.obj",
+		OBJ_OUTPUT_DIR "/40_intersection_patches.mtl"))
 	{
 		qaws_surface_destroy(surf_a);
 		qaws_surface_destroy(surf_b);
@@ -461,7 +461,7 @@ static void visual_obj_intersection_patches(void)
 			obj_sphere(&w, out_curves[ci].points[pi].position, (qaws_scalar)0.04);
 
 	obj_close(&w);
-	printf("  -> " OBJ_OUTPUT_DIR "/intersection_patches.obj\n");
+	printf("  -> " OBJ_OUTPUT_DIR "/40_intersection_patches.obj\n");
 
 	qaws_surface_destroy(surf_a);
 	qaws_surface_destroy(surf_b);

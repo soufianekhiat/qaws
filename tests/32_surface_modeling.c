@@ -414,15 +414,15 @@ static void visual_obj_coons(void)
 	}
 	if (!surf) goto cleanup_coons;
 
-	if (!obj_open(&w, OBJ_OUTPUT_DIR "/coons_patch.obj",
-		OBJ_OUTPUT_DIR "/coons_patch.mtl")) goto cleanup_coons;
+	if (!obj_open(&w, OBJ_OUTPUT_DIR "/32_coons_patch.obj",
+		OBJ_OUTPUT_DIR "/32_coons_patch.mtl")) goto cleanup_coons;
 
 	obj_material(&w, "coons", 0.2, 0.7, 0.9);
 	obj_group(&w, "coons_surface");
 	obj_use_material(&w, "coons");
 	obj_surface_mesh(&w, surf, 32, 32);
 	obj_close(&w);
-	printf("  -> " OBJ_OUTPUT_DIR "/coons_patch.obj\n");
+	printf("  -> " OBJ_OUTPUT_DIR "/32_coons_patch.obj\n");
 
 cleanup_coons:
 	qaws_surface_destroy(surf);
@@ -465,8 +465,8 @@ static void visual_obj_extrusion(void)
 	}
 	if (!surf) { qaws_curve_destroy(profile); return; }
 
-	if (!obj_open(&w, OBJ_OUTPUT_DIR "/extrusion_surface.obj",
-		OBJ_OUTPUT_DIR "/extrusion_surface.mtl"))
+	if (!obj_open(&w, OBJ_OUTPUT_DIR "/32_extrusion_surface.obj",
+		OBJ_OUTPUT_DIR "/32_extrusion_surface.mtl"))
 	{
 		qaws_surface_destroy(surf); qaws_curve_destroy(profile); return;
 	}
@@ -476,7 +476,7 @@ static void visual_obj_extrusion(void)
 	obj_use_material(&w, "extr");
 	obj_surface_mesh(&w, surf, 32, 8);
 	obj_close(&w);
-	printf("  -> " OBJ_OUTPUT_DIR "/extrusion_surface.obj\n");
+	printf("  -> " OBJ_OUTPUT_DIR "/32_extrusion_surface.obj\n");
 
 	qaws_surface_destroy(surf);
 	qaws_curve_destroy(profile);
@@ -522,8 +522,8 @@ static void visual_obj_revolution(void)
 	}
 	if (!surf) { qaws_curve_destroy(profile); return; }
 
-	if (!obj_open(&w, OBJ_OUTPUT_DIR "/revolution_vase.obj",
-		OBJ_OUTPUT_DIR "/revolution_vase.mtl"))
+	if (!obj_open(&w, OBJ_OUTPUT_DIR "/32_revolution_vase.obj",
+		OBJ_OUTPUT_DIR "/32_revolution_vase.mtl"))
 	{
 		qaws_surface_destroy(surf); qaws_curve_destroy(profile); return;
 	}
@@ -533,7 +533,7 @@ static void visual_obj_revolution(void)
 	obj_use_material(&w, "vase");
 	obj_surface_mesh(&w, surf, 48, 24);
 	obj_close(&w);
-	printf("  -> " OBJ_OUTPUT_DIR "/revolution_vase.obj\n");
+	printf("  -> " OBJ_OUTPUT_DIR "/32_revolution_vase.obj\n");
 
 	qaws_surface_destroy(surf);
 	qaws_curve_destroy(profile);

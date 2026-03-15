@@ -373,8 +373,8 @@ static void visual_obj_3d_offset(void)
 		return;
 	}
 
-	if (!obj_open(&w, OBJ_OUTPUT_DIR "/curve_offset_3d.obj",
-		OBJ_OUTPUT_DIR "/curve_offset_3d.mtl"))
+	if (!obj_open(&w, OBJ_OUTPUT_DIR "/42_curve_offset_3d.obj",
+		OBJ_OUTPUT_DIR "/42_curve_offset_3d.mtl"))
 	{
 		qaws_curve_destroy(helix); qaws_curve_destroy(offset_curve);
 		return;
@@ -414,7 +414,7 @@ static void visual_obj_3d_offset(void)
 	}
 
 	obj_close(&w);
-	printf("  -> " OBJ_OUTPUT_DIR "/curve_offset_3d.obj\n");
+	printf("  -> " OBJ_OUTPUT_DIR "/42_curve_offset_3d.obj\n");
 
 	qaws_curve_destroy(offset_curve);
 	qaws_curve_destroy(helix);
@@ -471,7 +471,7 @@ static void visual_svg_fillet_chamfer(void)
 	qaws_curve_fillet_2d(composite, (qaws_scalar)0.4, &filleted);
 	qaws_curve_chamfer_2d(composite, (qaws_scalar)0.4, &chamfered);
 
-	if (!svg_open(&svg, SVG_OUTPUT_DIR "/fillet_chamfer.svg",
+	if (!svg_open(&svg, SVG_OUTPUT_DIR "/42_fillet_chamfer.svg",
 		(qaws_scalar)-0.5, (qaws_scalar)-0.5, (qaws_scalar)5.0, (qaws_scalar)3.5,
 		(qaws_scalar)600, (qaws_scalar)420))
 		goto cleanup_fc;
@@ -502,7 +502,7 @@ static void visual_svg_fillet_chamfer(void)
 	svg_label(&svg, (qaws_scalar)0.0, (qaws_scalar)3.0, "fillet (red), chamfer (blue)", "#aaaaaa");
 
 	svg_close(&svg);
-	printf("  -> " SVG_OUTPUT_DIR "/fillet_chamfer.svg\n");
+	printf("  -> " SVG_OUTPUT_DIR "/42_fillet_chamfer.svg\n");
 
 cleanup_fc:
 	qaws_curve_destroy(filleted);
@@ -556,7 +556,7 @@ static void visual_svg_length_match(void)
 	s = qaws_curve_match_arc_length(curve_a, curve_b, 256, &matched);
 	if (s != QAWS_STATUS_OK) goto cleanup_lm;
 
-	if (!svg_open(&svg, SVG_OUTPUT_DIR "/length_match.svg",
+	if (!svg_open(&svg, SVG_OUTPUT_DIR "/42_length_match.svg",
 		(qaws_scalar)-0.5, (qaws_scalar)-4.0, (qaws_scalar)7.0, (qaws_scalar)6.0,
 		(qaws_scalar)600, (qaws_scalar)500))
 		goto cleanup_lm;
@@ -612,7 +612,7 @@ static void visual_svg_length_match(void)
 	}
 
 	svg_close(&svg);
-	printf("  -> " SVG_OUTPUT_DIR "/length_match.svg\n");
+	printf("  -> " SVG_OUTPUT_DIR "/42_length_match.svg\n");
 
 cleanup_lm:
 	qaws_curve_destroy(matched);
@@ -664,7 +664,7 @@ static void visual_svg_merge(void)
 	memset(merged, 0, sizeof(merged));
 	s = qaws_curve_merge_chain(chain, 4, 3, (qaws_scalar)0.5, merged, 4, &merged_count);
 
-	if (!svg_open(&svg, SVG_OUTPUT_DIR "/curve_merge.svg",
+	if (!svg_open(&svg, SVG_OUTPUT_DIR "/42_curve_merge.svg",
 		(qaws_scalar)-0.5, (qaws_scalar)-1.0, (qaws_scalar)5.0, (qaws_scalar)4.0,
 		(qaws_scalar)600, (qaws_scalar)400))
 		goto cleanup_merge;
@@ -700,7 +700,7 @@ static void visual_svg_merge(void)
 	svg_label(&svg, (qaws_scalar)0.0, (qaws_scalar)2.0, "segments (grey), merged (red)", "#aaaaaa");
 
 	svg_close(&svg);
-	printf("  -> " SVG_OUTPUT_DIR "/curve_merge.svg\n");
+	printf("  -> " SVG_OUTPUT_DIR "/42_curve_merge.svg\n");
 
 cleanup_merge:
 	for (ci = 0; ci < merged_count; ci++)

@@ -308,8 +308,8 @@ static void visual_obj_trimmed(void)
 	qaws_surface_create_trimmed(&tdesc, &trimmed);
 	if (!trimmed) goto cleanup_trim;
 
-	if (!obj_open(&w, OBJ_OUTPUT_DIR "/trimmed_surface.obj",
-		OBJ_OUTPUT_DIR "/trimmed_surface.mtl")) goto cleanup_trim;
+	if (!obj_open(&w, OBJ_OUTPUT_DIR "/39_trimmed_surface.obj",
+		OBJ_OUTPUT_DIR "/39_trimmed_surface.mtl")) goto cleanup_trim;
 
 	obj_material(&w, "trimmed", 0.3, 0.8, 0.6);
 	obj_group(&w, "trimmed_surface");
@@ -372,7 +372,7 @@ static void visual_obj_trimmed(void)
 	}
 
 	obj_close(&w);
-	printf("  -> " OBJ_OUTPUT_DIR "/trimmed_surface.obj\n");
+	printf("  -> " OBJ_OUTPUT_DIR "/39_trimmed_surface.obj\n");
 
 cleanup_trim:
 	qaws_surface_destroy(trimmed);

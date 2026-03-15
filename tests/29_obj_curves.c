@@ -9,8 +9,8 @@ static void test_obj_helix(void)
 	printf("test_obj_helix\n");
 
 	if (!obj_open(&w,
-		OBJ_OUTPUT_DIR "/helix.obj",
-		OBJ_OUTPUT_DIR "/helix.mtl"))
+		OBJ_OUTPUT_DIR "/29_helix.obj",
+		OBJ_OUTPUT_DIR "/29_helix.mtl"))
 		return;
 
 	obj_material(&w, "curve_line", 1.0, 0.9, 0.3);
@@ -128,7 +128,7 @@ static void test_obj_helix(void)
 	}
 
 	obj_close(&w);
-	printf("  -> " OBJ_OUTPUT_DIR "/helix.obj\n");
+	printf("  -> " OBJ_OUTPUT_DIR "/29_helix.obj\n");
 }
 
 static void test_obj_trefoil_knot(void)
@@ -140,8 +140,8 @@ static void test_obj_trefoil_knot(void)
 	printf("test_obj_trefoil_knot\n");
 
 	if (!obj_open(&w,
-		OBJ_OUTPUT_DIR "/trefoil_knot.obj",
-		OBJ_OUTPUT_DIR "/trefoil_knot.mtl"))
+		OBJ_OUTPUT_DIR "/29_trefoil_knot.obj",
+		OBJ_OUTPUT_DIR "/29_trefoil_knot.mtl"))
 		return;
 
 	obj_material(&w, "knot_tube", 0.9, 0.3, 0.5);
@@ -240,7 +240,7 @@ static void test_obj_trefoil_knot(void)
 	}
 
 	obj_close(&w);
-	printf("  -> " OBJ_OUTPUT_DIR "/trefoil_knot.obj\n");
+	printf("  -> " OBJ_OUTPUT_DIR "/29_trefoil_knot.obj\n");
 }
 
 static void test_obj_3d_intersection(void)
@@ -251,8 +251,8 @@ static void test_obj_3d_intersection(void)
 	printf("test_obj_3d_intersection\n");
 
 	if (!obj_open(&w,
-		OBJ_OUTPUT_DIR "/intersection_3d.obj",
-		OBJ_OUTPUT_DIR "/intersection_3d.mtl"))
+		OBJ_OUTPUT_DIR "/29_intersection_3d.obj",
+		OBJ_OUTPUT_DIR "/29_intersection_3d.mtl"))
 		return;
 
 	obj_material(&w, "tube_a", 0.15, 0.5, 0.8);
@@ -463,7 +463,7 @@ static void test_obj_3d_intersection(void)
 	}
 
 	obj_close(&w);
-	printf("  -> " OBJ_OUTPUT_DIR "/intersection_3d.obj\n");
+	printf("  -> " OBJ_OUTPUT_DIR "/29_intersection_3d.obj\n");
 }
 
 static void test_obj_3d_families(void)
@@ -474,8 +474,8 @@ static void test_obj_3d_families(void)
 	printf("test_obj_3d_families\n");
 
 	if (!obj_open(&w,
-		OBJ_OUTPUT_DIR "/families_3d.obj",
-		OBJ_OUTPUT_DIR "/families_3d.mtl"))
+		OBJ_OUTPUT_DIR "/29_families_3d.obj",
+		OBJ_OUTPUT_DIR "/29_families_3d.mtl"))
 		return;
 
 	obj_material(&w, "bezier", 0.9, 0.3, 0.4);
@@ -615,7 +615,7 @@ static void test_obj_3d_families(void)
 	}
 
 	obj_close(&w);
-	printf("  -> " OBJ_OUTPUT_DIR "/families_3d.obj\n");
+	printf("  -> " OBJ_OUTPUT_DIR "/29_families_3d.obj\n");
 }
 
 static void test_obj_3d_curvature_comb(void)
@@ -626,8 +626,8 @@ static void test_obj_3d_curvature_comb(void)
 	printf("test_obj_3d_curvature_comb\n");
 
 	if (!obj_open(&w,
-		OBJ_OUTPUT_DIR "/curvature_comb_3d.obj",
-		OBJ_OUTPUT_DIR "/curvature_comb_3d.mtl"))
+		OBJ_OUTPUT_DIR "/29_curvature_comb_3d.obj",
+		OBJ_OUTPUT_DIR "/29_curvature_comb_3d.mtl"))
 		return;
 
 	obj_material(&w, "curve", 0.2, 0.7, 1.0);
@@ -689,7 +689,7 @@ static void test_obj_3d_curvature_comb(void)
 	}
 
 	obj_close(&w);
-	printf("  -> " OBJ_OUTPUT_DIR "/curvature_comb_3d.obj\n");
+	printf("  -> " OBJ_OUTPUT_DIR "/29_curvature_comb_3d.obj\n");
 }
 
 static void test_obj_3d_traversal(void)
@@ -701,8 +701,8 @@ static void test_obj_3d_traversal(void)
 	printf("test_obj_3d_traversal\n");
 
 	if (!obj_open(&w,
-		OBJ_OUTPUT_DIR "/traversal_3d.obj",
-		OBJ_OUTPUT_DIR "/traversal_3d.mtl"))
+		OBJ_OUTPUT_DIR "/29_traversal_3d.obj",
+		OBJ_OUTPUT_DIR "/29_traversal_3d.mtl"))
 		return;
 
 	obj_material(&w, "curve", 0.3, 0.6, 1.0);
@@ -780,7 +780,7 @@ static void test_obj_3d_traversal(void)
 	}
 
 	obj_close(&w);
-	printf("  -> " OBJ_OUTPUT_DIR "/traversal_3d.obj\n");
+	printf("  -> " OBJ_OUTPUT_DIR "/29_traversal_3d.obj\n");
 }
 
 static void test_obj_3d_torus_knot(void)
@@ -792,8 +792,8 @@ static void test_obj_3d_torus_knot(void)
 	printf("test_obj_3d_torus_knot\n");
 
 	if (!obj_open(&w,
-		OBJ_OUTPUT_DIR "/torus_knot.obj",
-		OBJ_OUTPUT_DIR "/torus_knot.mtl"))
+		OBJ_OUTPUT_DIR "/29_torus_knot.obj",
+		OBJ_OUTPUT_DIR "/29_torus_knot.mtl"))
 		return;
 
 	obj_material(&w, "knot", 0.1, 0.8, 0.6);
@@ -873,7 +873,7 @@ static void test_obj_3d_torus_knot(void)
 	}
 
 	obj_close(&w);
-	printf("  -> " OBJ_OUTPUT_DIR "/torus_knot.obj\n");
+	printf("  -> " OBJ_OUTPUT_DIR "/29_torus_knot.obj\n");
 }
 
 int test_29_obj_curves_main(void)

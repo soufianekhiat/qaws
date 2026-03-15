@@ -261,15 +261,15 @@ static void visual_obj_loft(void)
 	}
 	if (!surf) goto cleanup_loft;
 
-	if (!obj_open(&w, OBJ_OUTPUT_DIR "/lofted_surface.obj",
-		OBJ_OUTPUT_DIR "/lofted_surface.mtl")) goto cleanup_loft;
+	if (!obj_open(&w, OBJ_OUTPUT_DIR "/36_lofted_surface.obj",
+		OBJ_OUTPUT_DIR "/36_lofted_surface.mtl")) goto cleanup_loft;
 
 	obj_material(&w, "loft", 0.5, 0.8, 0.3);
 	obj_group(&w, "lofted_surface");
 	obj_use_material(&w, "loft");
 	obj_surface_mesh(&w, surf, 32, 32);
 	obj_close(&w);
-	printf("  -> " OBJ_OUTPUT_DIR "/lofted_surface.obj\n");
+	printf("  -> " OBJ_OUTPUT_DIR "/36_lofted_surface.obj\n");
 
 cleanup_loft:
 	qaws_surface_destroy(surf);
