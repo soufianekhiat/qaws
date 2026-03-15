@@ -45,6 +45,7 @@ add_executable(
   41_curve_projection.c
   42_curve_operations.c
   43_boolean_2d.c
+  44_geodesic.c
 )
 
 target_link_libraries(qaws_tests PRIVATE Qaws::qaws)

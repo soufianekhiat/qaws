@@ -91,6 +91,8 @@ set(QAWS_SOURCES
   src/qaws/internal/qaws_internal_validation.c
   src/qaws/internal/qaws_internal_surface.c
   src/qaws/internal/qaws_internal_fit.c
+  src/qaws/internal/qaws_internal_mesh.c
+  src/qaws/internal/qaws_internal_sparse.c
 )
 
 if(QAWS_ENABLE_SIMD)

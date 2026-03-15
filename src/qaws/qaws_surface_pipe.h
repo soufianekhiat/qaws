@@ -8,7 +8,7 @@
    S(u,v) = path(u) + radius_x * cos(2*pi*v) * N(u) + radius_y * sin(2*pi*v) * B(u)
 
    u parameterizes along the path [0,1], v parameterizes around the cross-section [0,1].
-   N(u), B(u) are from the Frenet frame of the path curve.
+   N(u), B(u) are from a parallel transport (Bishop) frame along the path curve.
    For circular pipe, set radius_x = radius_y. */
 
 typedef struct qaws_surface_pipe_desc

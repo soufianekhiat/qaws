@@ -360,4 +360,42 @@ qaws_status qaws_surface_compute_geodesic(
 	unsigned int step_count,
 	qaws_curve** out_curve);
 
+/* Geodesic path via edge flipping (Sharp & Crane, SGP 2020).
+   Tessellates the surface, finds the shortest discrete geodesic on the mesh
+   via Dijkstra + iterative edge-flip shortening, returns a 3D B-spline.
+   tessellation_desc: mesh resolution (NULL = defaults).
+   max_iterations: flip iteration limit (0 = default 1000). */
+qaws_status qaws_surface_compute_geodesic_flip(
+	qaws_surface const* surface,
+	qaws_scalar start_u, qaws_scalar start_v,
+	qaws_scalar end_u, qaws_scalar end_v,
+	qaws_tessellation_desc const* tessellation_desc,
+	unsigned int max_iterations,
+	qaws_curve** out_curve);
+
+/* Geodesic path via heat method (Crane, Weischedel, Wardetzky 2017).
+   Computes geodesic distance from start, traces shortest path to end
+   by gradient descent on the distance field. Returns a 3D B-spline. */
+qaws_status qaws_surface_compute_geodesic_heat(
+	qaws_surface const* surface,
+	qaws_scalar start_u, qaws_scalar start_v,
+	qaws_scalar end_u, qaws_scalar end_v,
+	qaws_tessellation_desc const* tessellation_desc,
+	qaws_curve** out_curve);
+
+/* Geodesic distance field via heat method (Crane, Weischedel, Wardetzky 2017).
+   Tessellates the surface, solves heat diffusion + Poisson on the mesh.
+   Returns per-vertex distances + (u,v) coordinates of mesh vertices.
+   out_distances[i] is the geodesic distance at vertex (out_u[i], out_v[i]).
+   capacity is the size of the output buffers. out_count receives the actual count. */
+qaws_status qaws_surface_compute_geodesic_distance(
+	qaws_surface const* surface,
+	qaws_scalar source_u, qaws_scalar source_v,
+	qaws_tessellation_desc const* tessellation_desc,
+	qaws_scalar* out_u,
+	qaws_scalar* out_v,
+	qaws_scalar* out_distances,
+	unsigned int capacity,
+	unsigned int* out_count);
+
 #endif /* QAWS_INSPECT_H */

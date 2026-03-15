@@ -6,6 +6,8 @@
 #include "internal/qaws_internal_arc_length.h"
 #include "internal/qaws_internal_solver.h"
 #include "internal/qaws_internal_fit.h"
+#include "internal/qaws_internal_mesh.h"
+#include "internal/qaws_internal_sparse.h"
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -3802,7 +3804,20 @@ qaws_status qaws_surface_tessellate(
 			}
 		}
 
-		if (subdivide && stack_top + 4 <= stack_capacity)
+		if (subdivide && stack_top + 4 > stack_capacity)
+		{
+			unsigned int new_cap = stack_capacity * 2;
+			qaws_tess_quad* new_stack = (qaws_tess_quad*)realloc(
+				stack, new_cap * sizeof(qaws_tess_quad));
+			if (!new_stack)
+			{
+				free(stack); free(leaves);
+				return QAWS_STATUS_ALLOCATION_FAILURE;
+			}
+			stack = new_stack;
+			stack_capacity = new_cap;
+		}
+		if (subdivide)
 		{
 			/* Split into 4 sub-quads */
 			stack[stack_top].u0 = quad.u0;
@@ -3835,15 +3850,25 @@ qaws_status qaws_surface_tessellate(
 		}
 		else
 		{
-			/* Store as leaf quad */
-			if (leaf_count < leaf_capacity)
+			/* Store as leaf quad, grow buffer if needed */
+			if (leaf_count >= leaf_capacity)
 			{
-				leaves[leaf_count].u0 = quad.u0;
-				leaves[leaf_count].v0 = quad.v0;
-				leaves[leaf_count].u1 = quad.u1;
-				leaves[leaf_count].v1 = quad.v1;
-				++leaf_count;
+				unsigned int new_cap = leaf_capacity * 2;
+				qaws_tess_leaf* new_leaves = (qaws_tess_leaf*)realloc(
+					leaves, new_cap * sizeof(qaws_tess_leaf));
+				if (!new_leaves)
+				{
+					free(stack); free(leaves);
+					return QAWS_STATUS_ALLOCATION_FAILURE;
+				}
+				leaves = new_leaves;
+				leaf_capacity = new_cap;
 			}
+			leaves[leaf_count].u0 = quad.u0;
+			leaves[leaf_count].v0 = quad.v0;
+			leaves[leaf_count].u1 = quad.u1;
+			leaves[leaf_count].v1 = quad.v1;
+			++leaf_count;
 		}
 	}
 
@@ -4154,6 +4179,138 @@ static void compute_christoffel(
 	}
 }
 
+/* Fit a cubic B-spline through path points with exact endpoint
+   interpolation.  After least-squares fitting, overwrites the first
+   and last control points to guarantee the curve passes through them
+   (clamped knot vector ensures C(0) = CP[0], C(1) = CP[n-1]). */
+static qaws_status create_path_bspline(
+	qaws_scalar const* path_coords,
+	unsigned int point_count,
+	unsigned int max_cp,
+	qaws_curve** out_curve)
+{
+	unsigned int n_cp, i;
+	qaws_status status;
+	qaws_bspline_impl* impl;
+	unsigned int last_cp;
+	qaws_scalar* params = NULL;
+
+	if (point_count < 2)
+		return QAWS_STATUS_DEGENERATE_CURVE;
+
+	n_cp = point_count / 4;
+	if (n_cp < 6) n_cp = 6;
+	if (n_cp > max_cp) n_cp = max_cp;
+	if (n_cp > point_count) n_cp = point_count;
+	/* B-spline of degree 3 needs at least 4 control points */
+	if (n_cp < 4) n_cp = 4;
+	if (n_cp > point_count) n_cp = point_count;
+	if (point_count < 4)
+	{
+		/* Too few points for degree-3 B-spline; duplicate interior points */
+		/* (This path is a fallback and shouldn't happen in normal operation) */
+		return QAWS_STATUS_DEGENERATE_CURVE;
+	}
+
+	/* Generate uniform parameters [0, 1] */
+	params = (qaws_scalar*)malloc(point_count * sizeof(qaws_scalar));
+	if (!params) return QAWS_STATUS_ALLOCATION_FAILURE;
+	for (i = 0; i < point_count; i++)
+		params[i] = (qaws_scalar)i / (qaws_scalar)(point_count - 1);
+
+	status = qaws_internal_fit_bspline(
+		QAWS_DIMENSION_3D, 3,
+		params, path_coords,
+		point_count, n_cp,
+		out_curve);
+	free(params);
+
+	if (status != QAWS_STATUS_OK)
+		return status;
+
+	/* Force exact endpoint interpolation by overwriting first/last CPs.
+	   With clamped knot vector, C(t_min) = CP[0] and C(t_max) = CP[n-1]. */
+	impl = (qaws_bspline_impl*)(*out_curve)->impl;
+	last_cp = impl->control_point_count - 1;
+
+	impl->control_points[0] = path_coords[0];
+	impl->control_points[1] = path_coords[1];
+	impl->control_points[2] = path_coords[2];
+
+	impl->control_points[last_cp * 3 + 0] = path_coords[(point_count - 1) * 3 + 0];
+	impl->control_points[last_cp * 3 + 1] = path_coords[(point_count - 1) * 3 + 1];
+	impl->control_points[last_cp * 3 + 2] = path_coords[(point_count - 1) * 3 + 2];
+
+	return QAWS_STATUS_OK;
+}
+
+/* Single RK4 step for geodesic ODE integration.
+   Updates (u, v, udot, vdot) in place. */
+static void geodesic_rk4_step(
+	qaws_surface const* surface,
+	qaws_scalar* u, qaws_scalar* v,
+	qaws_scalar* udot, qaws_scalar* vdot,
+	qaws_scalar dt)
+{
+	qaws_scalar gamma[2][2][2];
+	qaws_scalar k1u, k1v, k1ud, k1vd;
+	qaws_scalar k2u, k2v, k2ud, k2vd;
+	qaws_scalar k3u, k3v, k3ud, k3vd;
+	qaws_scalar k4u, k4v, k4ud, k4vd;
+	qaws_scalar tu, tv, tud, tvd, au, av;
+
+	compute_christoffel(surface,
+		qaws_clamp(*u, QAWS_ZERO, QAWS_ONE),
+		qaws_clamp(*v, QAWS_ZERO, QAWS_ONE), gamma);
+	au = -(gamma[0][0][0] * *udot * *udot +
+		QAWS_LITERAL(2.0) * gamma[0][0][1] * *udot * *vdot +
+		gamma[0][1][1] * *vdot * *vdot);
+	av = -(gamma[1][0][0] * *udot * *udot +
+		QAWS_LITERAL(2.0) * gamma[1][0][1] * *udot * *vdot +
+		gamma[1][1][1] * *vdot * *vdot);
+	k1u = *udot * dt; k1v = *vdot * dt;
+	k1ud = au * dt; k1vd = av * dt;
+
+	tu = *u + k1u * QAWS_LITERAL(0.5);
+	tv = *v + k1v * QAWS_LITERAL(0.5);
+	tud = *udot + k1ud * QAWS_LITERAL(0.5);
+	tvd = *vdot + k1vd * QAWS_LITERAL(0.5);
+	compute_christoffel(surface,
+		qaws_clamp(tu, QAWS_ZERO, QAWS_ONE),
+		qaws_clamp(tv, QAWS_ZERO, QAWS_ONE), gamma);
+	au = -(gamma[0][0][0]*tud*tud + QAWS_LITERAL(2.0)*gamma[0][0][1]*tud*tvd + gamma[0][1][1]*tvd*tvd);
+	av = -(gamma[1][0][0]*tud*tud + QAWS_LITERAL(2.0)*gamma[1][0][1]*tud*tvd + gamma[1][1][1]*tvd*tvd);
+	k2u = tud * dt; k2v = tvd * dt;
+	k2ud = au * dt; k2vd = av * dt;
+
+	tu = *u + k2u * QAWS_LITERAL(0.5);
+	tv = *v + k2v * QAWS_LITERAL(0.5);
+	tud = *udot + k2ud * QAWS_LITERAL(0.5);
+	tvd = *vdot + k2vd * QAWS_LITERAL(0.5);
+	compute_christoffel(surface,
+		qaws_clamp(tu, QAWS_ZERO, QAWS_ONE),
+		qaws_clamp(tv, QAWS_ZERO, QAWS_ONE), gamma);
+	au = -(gamma[0][0][0]*tud*tud + QAWS_LITERAL(2.0)*gamma[0][0][1]*tud*tvd + gamma[0][1][1]*tvd*tvd);
+	av = -(gamma[1][0][0]*tud*tud + QAWS_LITERAL(2.0)*gamma[1][0][1]*tud*tvd + gamma[1][1][1]*tvd*tvd);
+	k3u = tud * dt; k3v = tvd * dt;
+	k3ud = au * dt; k3vd = av * dt;
+
+	tu = *u + k3u; tv = *v + k3v;
+	tud = *udot + k3ud; tvd = *vdot + k3vd;
+	compute_christoffel(surface,
+		qaws_clamp(tu, QAWS_ZERO, QAWS_ONE),
+		qaws_clamp(tv, QAWS_ZERO, QAWS_ONE), gamma);
+	au = -(gamma[0][0][0]*tud*tud + QAWS_LITERAL(2.0)*gamma[0][0][1]*tud*tvd + gamma[0][1][1]*tvd*tvd);
+	av = -(gamma[1][0][0]*tud*tud + QAWS_LITERAL(2.0)*gamma[1][0][1]*tud*tvd + gamma[1][1][1]*tvd*tvd);
+	k4u = tud * dt; k4v = tvd * dt;
+	k4ud = au * dt; k4vd = av * dt;
+
+	*u += (k1u + QAWS_LITERAL(2.0)*k2u + QAWS_LITERAL(2.0)*k3u + k4u) / QAWS_LITERAL(6.0);
+	*v += (k1v + QAWS_LITERAL(2.0)*k2v + QAWS_LITERAL(2.0)*k3v + k4v) / QAWS_LITERAL(6.0);
+	*udot += (k1ud + QAWS_LITERAL(2.0)*k2ud + QAWS_LITERAL(2.0)*k3ud + k4ud) / QAWS_LITERAL(6.0);
+	*vdot += (k1vd + QAWS_LITERAL(2.0)*k2vd + QAWS_LITERAL(2.0)*k3vd + k4vd) / QAWS_LITERAL(6.0);
+}
+
 qaws_status qaws_surface_compute_geodesic(
 	qaws_surface const* surface,
 	qaws_scalar start_u,
@@ -4167,13 +4324,9 @@ qaws_status qaws_surface_compute_geodesic(
 	unsigned int max_iter;
 	unsigned int n_steps;
 	qaws_scalar* path_coords = NULL;
-	qaws_scalar* path_params = NULL;
-	unsigned int iter;
 	qaws_scalar du_target, dv_target, dist_target;
 	qaws_scalar best_angle, best_err;
-	qaws_scalar angle_lo, angle_hi;
 	qaws_status status;
-	unsigned int n_cp;
 
 	if (!surface || !out_curve)
 		return QAWS_STATUS_INVALID_ARGUMENT;
@@ -4188,253 +4341,1488 @@ qaws_status qaws_surface_compute_geodesic(
 	if (dist_target < QAWS_LITERAL(1e-10))
 		return QAWS_STATUS_DEGENERATE_CURVE;
 
-	path_coords = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (size_t)(n_steps + 1) * 3);
-	path_params = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (size_t)(n_steps + 1));
-	if (!path_coords || !path_params)
-	{
-		free(path_coords); free(path_params);
+	path_coords = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (size_t)(n_steps + 2) * 3);
+	if (!path_coords)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
-	}
 
-	/* Initial shooting angle: direction from start to end in parameter space */
+	/* Shooting: grid search ±60° from direct angle, then golden-section
+	   refinement.  Score = UV distance at closest approach to target.
+	   After finding best angle, integrate final path and trim. */
 	best_angle = QAWS_ATAN2(dv_target, du_target);
 	best_err = QAWS_LITERAL(1e30);
-	angle_lo = best_angle - QAWS_LITERAL(1.0);
-	angle_hi = best_angle + QAWS_LITERAL(1.0);
 
-	/* Shooting method with bisection on the initial angle */
-	for (iter = 0; iter < max_iter; iter++)
+	/* Phase 1: grid search over ±90° from direct angle */
 	{
-		qaws_scalar angle = (angle_lo + angle_hi) * QAWS_LITERAL(0.5);
-		qaws_scalar speed = dist_target; /* initial speed in param space */
-		qaws_scalar dt = QAWS_ONE / (qaws_scalar)n_steps;
-		qaws_scalar u = start_u, v = start_v;
-		qaws_scalar udot = speed * QAWS_COS(angle);
-		qaws_scalar vdot = speed * QAWS_SIN(angle);
-		unsigned int step;
-		qaws_scalar final_du, final_dv, err;
-		qaws_scalar cross;
+		unsigned int gi;
+		unsigned int n_grid = 64;
+		qaws_scalar base = QAWS_ATAN2(dv_target, du_target);
+		qaws_scalar dt_g = QAWS_ONE / (qaws_scalar)n_steps;
+		qaws_scalar half_range = QAWS_LITERAL(1.5708); /* π/2 */
 
-		/* Integrate geodesic ODE with RK4:
-		   u'' = -Gamma^0_{ij} u'^i u'^j
-		   v'' = -Gamma^1_{ij} u'^i u'^j */
-		for (step = 0; step <= n_steps; step++)
+		for (gi = 0; gi <= n_grid; gi++)
 		{
-			/* Store current position */
-			if (step == n_steps || iter == max_iter - 1)
+			qaws_scalar angle = base - half_range +
+				QAWS_LITERAL(2.0) * half_range * (qaws_scalar)gi / (qaws_scalar)n_grid;
+			qaws_scalar u = start_u, v = start_v;
+			qaws_scalar udot = dist_target * QAWS_COS(angle);
+			qaws_scalar vdot = dist_target * QAWS_SIN(angle);
+			unsigned int step;
+			qaws_scalar min_d2 = QAWS_LITERAL(1e30);
+
+			for (step = 0; step < n_steps; step++)
 			{
-				qaws_surface_eval_result sr;
-				memset(&sr, 0, sizeof(sr));
-				qaws_surface_evaluate(surface, qaws_clamp(u, QAWS_ZERO, QAWS_ONE),
-					qaws_clamp(v, QAWS_ZERO, QAWS_ONE),
-					QAWS_SURFACE_EVAL_POSITION, &sr);
-				path_coords[step * 3 + 0] = sr.position.x;
-				path_coords[step * 3 + 1] = sr.position.y;
-				path_coords[step * 3 + 2] = sr.position.z;
-				path_params[step] = (qaws_scalar)step / (qaws_scalar)n_steps;
+				qaws_scalar du2, dv2, d2;
+				geodesic_rk4_step(surface, &u, &v, &udot, &vdot, dt_g);
+				du2 = u - end_u;
+				dv2 = v - end_v;
+				d2 = du2 * du2 + dv2 * dv2;
+				if (d2 < min_d2) min_d2 = d2;
+				if (u < -QAWS_LITERAL(0.05) || u > QAWS_LITERAL(1.05) ||
+					v < -QAWS_LITERAL(0.05) || v > QAWS_LITERAL(1.05))
+					break;
 			}
 
-			if (step == n_steps) break;
-
-			/* RK4 step */
+			if (min_d2 < best_err * best_err)
 			{
-				qaws_scalar gamma[2][2][2];
-				qaws_scalar k1u, k1v, k1ud, k1vd;
-				qaws_scalar k2u, k2v, k2ud, k2vd;
-				qaws_scalar k3u, k3v, k3ud, k3vd;
-				qaws_scalar k4u, k4v, k4ud, k4vd;
-				qaws_scalar tu, tv, tud, tvd;
-				qaws_scalar acc_u, acc_v;
-
-				/* k1 */
-				compute_christoffel(surface,
-					qaws_clamp(u, QAWS_ZERO, QAWS_ONE),
-					qaws_clamp(v, QAWS_ZERO, QAWS_ONE), gamma);
-				acc_u = -(gamma[0][0][0] * udot * udot +
-					QAWS_LITERAL(2.0) * gamma[0][0][1] * udot * vdot +
-					gamma[0][1][1] * vdot * vdot);
-				acc_v = -(gamma[1][0][0] * udot * udot +
-					QAWS_LITERAL(2.0) * gamma[1][0][1] * udot * vdot +
-					gamma[1][1][1] * vdot * vdot);
-				k1u = udot * dt;
-				k1v = vdot * dt;
-				k1ud = acc_u * dt;
-				k1vd = acc_v * dt;
-
-				/* k2 */
-				tu = u + k1u * QAWS_LITERAL(0.5);
-				tv = v + k1v * QAWS_LITERAL(0.5);
-				tud = udot + k1ud * QAWS_LITERAL(0.5);
-				tvd = vdot + k1vd * QAWS_LITERAL(0.5);
-				compute_christoffel(surface,
-					qaws_clamp(tu, QAWS_ZERO, QAWS_ONE),
-					qaws_clamp(tv, QAWS_ZERO, QAWS_ONE), gamma);
-				acc_u = -(gamma[0][0][0] * tud * tud +
-					QAWS_LITERAL(2.0) * gamma[0][0][1] * tud * tvd +
-					gamma[0][1][1] * tvd * tvd);
-				acc_v = -(gamma[1][0][0] * tud * tud +
-					QAWS_LITERAL(2.0) * gamma[1][0][1] * tud * tvd +
-					gamma[1][1][1] * tvd * tvd);
-				k2u = tud * dt;
-				k2v = tvd * dt;
-				k2ud = acc_u * dt;
-				k2vd = acc_v * dt;
-
-				/* k3 */
-				tu = u + k2u * QAWS_LITERAL(0.5);
-				tv = v + k2v * QAWS_LITERAL(0.5);
-				tud = udot + k2ud * QAWS_LITERAL(0.5);
-				tvd = vdot + k2vd * QAWS_LITERAL(0.5);
-				compute_christoffel(surface,
-					qaws_clamp(tu, QAWS_ZERO, QAWS_ONE),
-					qaws_clamp(tv, QAWS_ZERO, QAWS_ONE), gamma);
-				acc_u = -(gamma[0][0][0] * tud * tud +
-					QAWS_LITERAL(2.0) * gamma[0][0][1] * tud * tvd +
-					gamma[0][1][1] * tvd * tvd);
-				acc_v = -(gamma[1][0][0] * tud * tud +
-					QAWS_LITERAL(2.0) * gamma[1][0][1] * tud * tvd +
-					gamma[1][1][1] * tvd * tvd);
-				k3u = tud * dt;
-				k3v = tvd * dt;
-				k3ud = acc_u * dt;
-				k3vd = acc_v * dt;
-
-				/* k4 */
-				tu = u + k3u;
-				tv = v + k3v;
-				tud = udot + k3ud;
-				tvd = vdot + k3vd;
-				compute_christoffel(surface,
-					qaws_clamp(tu, QAWS_ZERO, QAWS_ONE),
-					qaws_clamp(tv, QAWS_ZERO, QAWS_ONE), gamma);
-				acc_u = -(gamma[0][0][0] * tud * tud +
-					QAWS_LITERAL(2.0) * gamma[0][0][1] * tud * tvd +
-					gamma[0][1][1] * tvd * tvd);
-				acc_v = -(gamma[1][0][0] * tud * tud +
-					QAWS_LITERAL(2.0) * gamma[1][0][1] * tud * tvd +
-					gamma[1][1][1] * tvd * tvd);
-				k4u = tud * dt;
-				k4v = tvd * dt;
-				k4ud = acc_u * dt;
-				k4vd = acc_v * dt;
-
-				/* Update state */
-				u += (k1u + QAWS_LITERAL(2.0) * k2u + QAWS_LITERAL(2.0) * k3u + k4u) / QAWS_LITERAL(6.0);
-				v += (k1v + QAWS_LITERAL(2.0) * k2v + QAWS_LITERAL(2.0) * k3v + k4v) / QAWS_LITERAL(6.0);
-				udot += (k1ud + QAWS_LITERAL(2.0) * k2ud + QAWS_LITERAL(2.0) * k3ud + k4ud) / QAWS_LITERAL(6.0);
-				vdot += (k1vd + QAWS_LITERAL(2.0) * k2vd + QAWS_LITERAL(2.0) * k3vd + k4vd) / QAWS_LITERAL(6.0);
+				best_err = QAWS_SQRT(min_d2);
+				best_angle = angle;
 			}
 		}
-
-		/* Check how close we got to the endpoint */
-		final_du = u - end_u;
-		final_dv = v - end_v;
-		err = QAWS_SQRT(final_du * final_du + final_dv * final_dv);
-
-		if (err < best_err)
-		{
-			best_err = err;
-			best_angle = angle;
-		}
-
-		/* Bisect: use cross product to determine which side of target we landed */
-		cross = du_target * final_dv - dv_target * final_du;
-		if (cross > QAWS_ZERO)
-			angle_hi = angle;
-		else
-			angle_lo = angle;
-
-		if (err < dist_target * QAWS_LITERAL(0.01))
-			break;
 	}
 
-	/* Do one final integration at the best angle to get the path */
+	/* Phase 2: golden-section refinement around best angle */
+	{
+		qaws_scalar a = best_angle - QAWS_LITERAL(0.15);
+		qaws_scalar b = best_angle + QAWS_LITERAL(0.15);
+		qaws_scalar gr = QAWS_LITERAL(0.6180339887);
+		unsigned int ri;
+
+		for (ri = 0; ri < max_iter; ri++)
+		{
+			qaws_scalar c = b - gr * (b - a);
+			qaws_scalar d = a + gr * (b - a);
+			qaws_scalar fc, fd;
+
+			/* Evaluate angle c */
+			{
+				qaws_scalar u = start_u, v = start_v;
+				qaws_scalar udot = dist_target * QAWS_COS(c);
+				qaws_scalar vdot = dist_target * QAWS_SIN(c);
+				qaws_scalar dt_g = QAWS_ONE / (qaws_scalar)n_steps;
+				unsigned int step;
+				fc = QAWS_LITERAL(1e30);
+				for (step = 0; step < n_steps; step++)
+				{
+					qaws_scalar du2, dv2, d2;
+					geodesic_rk4_step(surface, &u, &v, &udot, &vdot, dt_g);
+					du2 = u - end_u; dv2 = v - end_v;
+					d2 = du2 * du2 + dv2 * dv2;
+					if (d2 < fc) fc = d2;
+					if (u < -QAWS_LITERAL(0.05) || u > QAWS_LITERAL(1.05) ||
+						v < -QAWS_LITERAL(0.05) || v > QAWS_LITERAL(1.05))
+						break;
+				}
+			}
+
+			/* Evaluate angle d */
+			{
+				qaws_scalar u = start_u, v = start_v;
+				qaws_scalar udot = dist_target * QAWS_COS(d);
+				qaws_scalar vdot = dist_target * QAWS_SIN(d);
+				qaws_scalar dt_g = QAWS_ONE / (qaws_scalar)n_steps;
+				unsigned int step;
+				fd = QAWS_LITERAL(1e30);
+				for (step = 0; step < n_steps; step++)
+				{
+					qaws_scalar du2, dv2, d2;
+					geodesic_rk4_step(surface, &u, &v, &udot, &vdot, dt_g);
+					du2 = u - end_u; dv2 = v - end_v;
+					d2 = du2 * du2 + dv2 * dv2;
+					if (d2 < fd) fd = d2;
+					if (u < -QAWS_LITERAL(0.05) || u > QAWS_LITERAL(1.05) ||
+						v < -QAWS_LITERAL(0.05) || v > QAWS_LITERAL(1.05))
+						break;
+				}
+			}
+
+			if (fc < fd)
+				b = d;
+			else
+				a = c;
+		}
+
+		best_angle = (a + b) * QAWS_LITERAL(0.5);
+	}
+
+	/* Final integration at best angle.  Store both UV and 3D positions,
+	   then trim at closest approach in UV to the target. */
 	{
 		qaws_scalar dt = QAWS_ONE / (qaws_scalar)n_steps;
 		qaws_scalar u = start_u, v = start_v;
 		qaws_scalar udot = dist_target * QAWS_COS(best_angle);
 		qaws_scalar vdot = dist_target * QAWS_SIN(best_angle);
 		unsigned int step;
+		unsigned int actual_count = 0;
+		unsigned int best_pi = 0;
+		qaws_scalar best_d2 = QAWS_LITERAL(1e30);
 
 		for (step = 0; step <= n_steps; step++)
 		{
 			qaws_surface_eval_result sr;
+			qaws_scalar du2, dv2, d2;
+
 			memset(&sr, 0, sizeof(sr));
 			qaws_surface_evaluate(surface, qaws_clamp(u, QAWS_ZERO, QAWS_ONE),
 				qaws_clamp(v, QAWS_ZERO, QAWS_ONE),
 				QAWS_SURFACE_EVAL_POSITION, &sr);
-			path_coords[step * 3 + 0] = sr.position.x;
-			path_coords[step * 3 + 1] = sr.position.y;
-			path_coords[step * 3 + 2] = sr.position.z;
-			path_params[step] = (qaws_scalar)step / (qaws_scalar)n_steps;
+			path_coords[actual_count * 3 + 0] = sr.position.x;
+			path_coords[actual_count * 3 + 1] = sr.position.y;
+			path_coords[actual_count * 3 + 2] = sr.position.z;
 
+			/* Track closest approach in UV */
+			du2 = u - end_u; dv2 = v - end_v;
+			d2 = du2 * du2 + dv2 * dv2;
+			if (d2 < best_d2) { best_d2 = d2; best_pi = actual_count; }
+
+			actual_count++;
 			if (step == n_steps) break;
 
+			geodesic_rk4_step(surface, &u, &v, &udot, &vdot, dt);
+
+			if (u < -QAWS_LITERAL(0.05) || u > QAWS_LITERAL(1.05) ||
+				v < -QAWS_LITERAL(0.05) || v > QAWS_LITERAL(1.05))
 			{
-				qaws_scalar gamma[2][2][2];
-				qaws_scalar acc_u, acc_v;
-				qaws_scalar k1u, k1v, k1ud, k1vd;
-				qaws_scalar k2u, k2v, k2ud, k2vd;
-				qaws_scalar k3u, k3v, k3ud, k3vd;
-				qaws_scalar k4u, k4v, k4ud, k4vd;
-				qaws_scalar tu, tv, tud, tvd;
+				u = qaws_clamp(u, QAWS_ZERO, QAWS_ONE);
+				v = qaws_clamp(v, QAWS_ZERO, QAWS_ONE);
+				{
+					qaws_surface_eval_result sr2;
+					memset(&sr2, 0, sizeof(sr2));
+					qaws_surface_evaluate(surface, u, v,
+						QAWS_SURFACE_EVAL_POSITION, &sr2);
+					path_coords[actual_count * 3 + 0] = sr2.position.x;
+					path_coords[actual_count * 3 + 1] = sr2.position.y;
+					path_coords[actual_count * 3 + 2] = sr2.position.z;
+					du2 = u - end_u; dv2 = v - end_v;
+					d2 = du2 * du2 + dv2 * dv2;
+					if (d2 < best_d2) { best_d2 = d2; best_pi = actual_count; }
+					actual_count++;
+				}
+				break;
+			}
+		}
 
-				compute_christoffel(surface,
-					qaws_clamp(u, QAWS_ZERO, QAWS_ONE),
-					qaws_clamp(v, QAWS_ZERO, QAWS_ONE), gamma);
-				acc_u = -(gamma[0][0][0] * udot * udot +
-					QAWS_LITERAL(2.0) * gamma[0][0][1] * udot * vdot +
-					gamma[0][1][1] * vdot * vdot);
-				acc_v = -(gamma[1][0][0] * udot * udot +
-					QAWS_LITERAL(2.0) * gamma[1][0][1] * udot * vdot +
-					gamma[1][1][1] * vdot * vdot);
-				k1u = udot * dt; k1v = vdot * dt;
-				k1ud = acc_u * dt; k1vd = acc_v * dt;
+		/* Trim at closest approach to target */
+		if (best_pi + 1 < actual_count)
+			actual_count = best_pi + 1;
 
-				tu = u + k1u * QAWS_LITERAL(0.5); tv = v + k1v * QAWS_LITERAL(0.5);
-				tud = udot + k1ud * QAWS_LITERAL(0.5); tvd = vdot + k1vd * QAWS_LITERAL(0.5);
-				compute_christoffel(surface, qaws_clamp(tu, QAWS_ZERO, QAWS_ONE),
-					qaws_clamp(tv, QAWS_ZERO, QAWS_ONE), gamma);
-				acc_u = -(gamma[0][0][0] * tud * tud + QAWS_LITERAL(2.0) * gamma[0][0][1] * tud * tvd + gamma[0][1][1] * tvd * tvd);
-				acc_v = -(gamma[1][0][0] * tud * tud + QAWS_LITERAL(2.0) * gamma[1][0][1] * tud * tvd + gamma[1][1][1] * tvd * tvd);
-				k2u = tud * dt; k2v = tvd * dt; k2ud = acc_u * dt; k2vd = acc_v * dt;
+		/* Append exact target position */
+		{
+			qaws_surface_eval_result end_sr;
+			memset(&end_sr, 0, sizeof(end_sr));
+			qaws_surface_evaluate(surface, end_u, end_v,
+				QAWS_SURFACE_EVAL_POSITION, &end_sr);
+			path_coords[actual_count * 3 + 0] = end_sr.position.x;
+			path_coords[actual_count * 3 + 1] = end_sr.position.y;
+			path_coords[actual_count * 3 + 2] = end_sr.position.z;
+			actual_count++;
+		}
 
-				tu = u + k2u * QAWS_LITERAL(0.5); tv = v + k2v * QAWS_LITERAL(0.5);
-				tud = udot + k2ud * QAWS_LITERAL(0.5); tvd = vdot + k2vd * QAWS_LITERAL(0.5);
-				compute_christoffel(surface, qaws_clamp(tu, QAWS_ZERO, QAWS_ONE),
-					qaws_clamp(tv, QAWS_ZERO, QAWS_ONE), gamma);
-				acc_u = -(gamma[0][0][0] * tud * tud + QAWS_LITERAL(2.0) * gamma[0][0][1] * tud * tvd + gamma[0][1][1] * tvd * tvd);
-				acc_v = -(gamma[1][0][0] * tud * tud + QAWS_LITERAL(2.0) * gamma[1][0][1] * tud * tvd + gamma[1][1][1] * tvd * tvd);
-				k3u = tud * dt; k3v = tvd * dt; k3ud = acc_u * dt; k3vd = acc_v * dt;
+		/* Create clamped B-spline (exact endpoints) */
+		status = create_path_bspline(
+			path_coords, actual_count, 150, out_curve);
+	}
 
-				tu = u + k3u; tv = v + k3v;
-				tud = udot + k3ud; tvd = vdot + k3vd;
-				compute_christoffel(surface, qaws_clamp(tu, QAWS_ZERO, QAWS_ONE),
-					qaws_clamp(tv, QAWS_ZERO, QAWS_ONE), gamma);
-				acc_u = -(gamma[0][0][0] * tud * tud + QAWS_LITERAL(2.0) * gamma[0][0][1] * tud * tvd + gamma[0][1][1] * tvd * tvd);
-				acc_v = -(gamma[1][0][0] * tud * tud + QAWS_LITERAL(2.0) * gamma[1][0][1] * tud * tvd + gamma[1][1][1] * tvd * tvd);
-				k4u = tud * dt; k4v = tvd * dt; k4ud = acc_u * dt; k4vd = acc_v * dt;
+	free(path_coords);
+	return status;
+}
 
-				u += (k1u + QAWS_LITERAL(2.0) * k2u + QAWS_LITERAL(2.0) * k3u + k4u) / QAWS_LITERAL(6.0);
-				v += (k1v + QAWS_LITERAL(2.0) * k2v + QAWS_LITERAL(2.0) * k3v + k4v) / QAWS_LITERAL(6.0);
-				udot += (k1ud + QAWS_LITERAL(2.0) * k2ud + QAWS_LITERAL(2.0) * k3ud + k4ud) / QAWS_LITERAL(6.0);
-				vdot += (k1vd + QAWS_LITERAL(2.0) * k2vd + QAWS_LITERAL(2.0) * k3vd + k4vd) / QAWS_LITERAL(6.0);
+/* ------------------------------------------------------------------ */
+/*  Geodesic: tessellate surface and build mesh helper                 */
+/* ------------------------------------------------------------------ */
+
+static qaws_status geodesic_tessellate_and_build(
+	qaws_surface const* surface,
+	qaws_tessellation_desc const* tessellation_desc,
+	qaws_tessellation_vertex** out_verts,
+	unsigned int** out_indices,
+	unsigned int* out_vert_count,
+	unsigned int* out_idx_count,
+	qaws_scalar** out_positions,
+	qaws_scalar** out_uvs,
+	qaws_internal_mesh* out_mesh)
+{
+	/* Use a regular grid tessellation for PDE quality (uniform triangles,
+	   no degenerate elements from adaptive fan triangulation).
+	   Grid resolution derived from tessellation_desc or defaults. */
+	unsigned int grid_n;
+	unsigned int vert_count, tri_count, idx_count;
+	qaws_tessellation_vertex* verts = NULL;
+	unsigned int* indices = NULL;
+	qaws_scalar* positions = NULL;
+	qaws_scalar* uvs = NULL;
+	qaws_status status;
+	unsigned int i, j;
+	qaws_range u_range, v_range;
+	qaws_scalar u_min, u_max, v_min, v_max;
+
+	u_range = qaws_surface_get_u_range(surface);
+	v_range = qaws_surface_get_v_range(surface);
+	u_min = u_range.min_value; u_max = u_range.max_value;
+	v_min = v_range.min_value; v_max = v_range.max_value;
+
+	/* Determine grid resolution */
+	if (tessellation_desc && tessellation_desc->max_depth > 0)
+		grid_n = 1u << tessellation_desc->max_depth; /* 2^depth */
+	else
+		grid_n = 32; /* default 32x32 grid */
+
+	/* Cap to avoid excessive memory */
+	if (grid_n > 256) grid_n = 256;
+
+	vert_count = (grid_n + 1) * (grid_n + 1);
+	tri_count = grid_n * grid_n * 2;
+	idx_count = tri_count * 3;
+
+	verts = (qaws_tessellation_vertex*)malloc(vert_count * sizeof(qaws_tessellation_vertex));
+	indices = (unsigned int*)malloc(idx_count * sizeof(unsigned int));
+	positions = (qaws_scalar*)malloc(vert_count * 3 * sizeof(qaws_scalar));
+	uvs = (qaws_scalar*)malloc(vert_count * 2 * sizeof(qaws_scalar));
+
+	if (!verts || !indices || !positions || !uvs)
+	{
+		free(verts); free(indices); free(positions); free(uvs);
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	}
+
+	/* Generate grid vertices */
+	for (i = 0; i <= grid_n; i++)
+	{
+		qaws_scalar v = v_min + (v_max - v_min) * (qaws_scalar)i / (qaws_scalar)grid_n;
+		for (j = 0; j <= grid_n; j++)
+		{
+			qaws_scalar u = u_min + (u_max - u_min) * (qaws_scalar)j / (qaws_scalar)grid_n;
+			qaws_surface_eval_result sr;
+			unsigned int idx = i * (grid_n + 1) + j;
+
+			memset(&sr, 0, sizeof(sr));
+			status = qaws_surface_evaluate(surface, u, v,
+				QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL, &sr);
+			if (status != QAWS_STATUS_OK)
+			{
+				free(verts); free(indices); free(positions); free(uvs);
+				return status;
+			}
+
+			verts[idx].position = sr.position;
+			verts[idx].normal = sr.normal;
+			verts[idx].u = u;
+			verts[idx].v = v;
+
+			positions[idx * 3 + 0] = sr.position.x;
+			positions[idx * 3 + 1] = sr.position.y;
+			positions[idx * 3 + 2] = sr.position.z;
+			uvs[idx * 2 + 0] = u;
+			uvs[idx * 2 + 1] = v;
+		}
+	}
+
+	/* Generate triangle indices (2 triangles per grid cell) */
+	{
+		unsigned int ii = 0;
+		for (i = 0; i < grid_n; i++)
+		{
+			for (j = 0; j < grid_n; j++)
+			{
+				unsigned int v00 = i * (grid_n + 1) + j;
+				unsigned int v10 = v00 + 1;
+				unsigned int v01 = v00 + (grid_n + 1);
+				unsigned int v11 = v01 + 1;
+
+				/* Lower-left triangle */
+				indices[ii++] = v00;
+				indices[ii++] = v10;
+				indices[ii++] = v01;
+
+				/* Upper-right triangle */
+				indices[ii++] = v10;
+				indices[ii++] = v11;
+				indices[ii++] = v01;
 			}
 		}
 	}
 
-	/* Fit a 3D B-spline through the path */
-	n_cp = (n_steps + 1) / 4;
-	if (n_cp < 6) n_cp = 6;
-	if (n_cp > n_steps + 1) n_cp = n_steps + 1;
+	/* Build edge-adjacency mesh */
+	status = qaws_internal_mesh_build(out_mesh, positions, uvs,
+		vert_count, indices, idx_count);
 
-	status = qaws_internal_fit_bspline(
-		QAWS_DIMENSION_3D, 3,
-		path_params, path_coords,
-		n_steps + 1, n_cp,
-		out_curve);
+	if (status != QAWS_STATUS_OK)
+	{
+		free(verts); free(indices); free(positions); free(uvs);
+		return status;
+	}
 
-	free(path_coords);
-	free(path_params);
+	*out_verts = verts;
+	*out_indices = indices;
+	*out_vert_count = vert_count;
+	*out_idx_count = idx_count;
+	*out_positions = positions;
+	*out_uvs = uvs;
+	return QAWS_STATUS_OK;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Geodesic via edge flipping (Sharp & Crane SGP 2020)                */
+/* ------------------------------------------------------------------ */
+
+qaws_status qaws_surface_compute_geodesic_flip(
+	qaws_surface const* surface,
+	qaws_scalar start_u, qaws_scalar start_v,
+	qaws_scalar end_u, qaws_scalar end_v,
+	qaws_tessellation_desc const* tessellation_desc,
+	unsigned int max_iterations,
+	qaws_curve** out_curve)
+{
+	qaws_tessellation_vertex* verts = NULL;
+	unsigned int* indices = NULL;
+	unsigned int vert_count = 0, idx_count = 0;
+	qaws_scalar* positions = NULL;
+	qaws_scalar* uvs = NULL;
+	qaws_internal_mesh mesh;
+	unsigned int src_v, dst_v;
+	unsigned int* path = NULL;
+	unsigned int path_count = 0;
+	unsigned int max_iter;
+	qaws_status status;
+
+	if (!surface || !out_curve)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+
+	*out_curve = NULL;
+	max_iter = max_iterations > 0 ? max_iterations : 1000;
+
+	memset(&mesh, 0, sizeof(mesh));
+
+	status = geodesic_tessellate_and_build(surface, tessellation_desc,
+		&verts, &indices, &vert_count, &idx_count,
+		&positions, &uvs, &mesh);
+
+	if (status != QAWS_STATUS_OK)
+		return status;
+
+	/* Find closest vertices to start/end UV */
+	src_v = qaws_internal_mesh_closest_vertex_uv(&mesh, start_u, start_v);
+	dst_v = qaws_internal_mesh_closest_vertex_uv(&mesh, end_u, end_v);
+
+	if (src_v == dst_v)
+	{
+		qaws_internal_mesh_destroy(&mesh);
+		free(verts); free(indices); free(positions); free(uvs);
+		return QAWS_STATUS_DEGENERATE_CURVE;
+	}
+
+	/* Dijkstra shortest path */
+	path = (unsigned int*)malloc(vert_count * sizeof(unsigned int));
+	if (!path)
+	{
+		qaws_internal_mesh_destroy(&mesh);
+		free(verts); free(indices); free(positions); free(uvs);
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	}
+
+	status = qaws_internal_mesh_dijkstra(&mesh, src_v, dst_v, path, &path_count);
+	if (status != QAWS_STATUS_OK || path_count < 2)
+	{
+		free(path);
+		qaws_internal_mesh_destroy(&mesh);
+		free(verts); free(indices); free(positions); free(uvs);
+		return status != QAWS_STATUS_OK ? status : QAWS_STATUS_NUMERICAL_FAILURE;
+	}
+
+	/* Iterative shortening via fan unfolding (simplified Sharp & Crane).
+	   For each interior vertex, unfold the triangle fan between the
+	   incoming and outgoing Dijkstra edges into 2D, then find where the
+	   straight line from predecessor to successor crosses edges.
+	   Multiple passes until converged. */
+	{
+		/* Build a refined point list from the Dijkstra vertex path.
+		   Each point is a 3D position on the mesh.  Interior points
+		   are iteratively shortened by fan unfolding. */
+		unsigned int out_count;
+		unsigned int pass;
+		qaws_scalar* pts = NULL;   /* 3 * out_count */
+		qaws_scalar* uv_pts = NULL; /* 2 * out_count */
+
+		out_count = path_count;
+		pts = (qaws_scalar*)malloc(out_count * 3 * sizeof(qaws_scalar));
+		uv_pts = (qaws_scalar*)malloc(out_count * 2 * sizeof(qaws_scalar));
+		if (!pts || !uv_pts)
+		{
+			free(pts); free(uv_pts);
+			free(path);
+			qaws_internal_mesh_destroy(&mesh);
+			free(verts); free(indices); free(positions); free(uvs);
+			return QAWS_STATUS_ALLOCATION_FAILURE;
+		}
+
+		{
+			unsigned int pi;
+			for (pi = 0; pi < out_count; pi++)
+			{
+				unsigned int vi = path[pi];
+				pts[pi * 3 + 0] = positions[vi * 3 + 0];
+				pts[pi * 3 + 1] = positions[vi * 3 + 1];
+				pts[pi * 3 + 2] = positions[vi * 3 + 2];
+				uv_pts[pi * 2 + 0] = uvs[vi * 2 + 0];
+				uv_pts[pi * 2 + 1] = uvs[vi * 2 + 1];
+			}
+		}
+
+		/* For each interior vertex, try to shortcut via fan unfolding.
+		   Walk the triangle fan around path[i] from edge(path[i-1],path[i])
+		   to edge(path[i],path[i+1]), unfolding into 2D as we go.
+		   Then draw the straight line from p_{i-1} to p_{i+1} in the
+		   unfolded picture and use the midpoint on that line as the
+		   new position for path[i] (evaluated on the surface). */
+		for (pass = 0; pass < max_iter; pass++)
+		{
+			int changed = 0;
+			unsigned int pi;
+			for (pi = 1; pi + 1 < out_count; pi++)
+			{
+				/* Find the edge from path[pi-1] to path[pi] */
+				unsigned int v_prev = path[pi - 1];
+				unsigned int v_cur  = path[pi];
+				unsigned int v_next = path[pi + 1];
+				unsigned int e_in = UINT_MAX, e_out = UINT_MAX;
+				unsigned int ei;
+				unsigned int tri_in = UINT_MAX;
+
+				/* Find incoming/outgoing edges */
+				for (ei = mesh.vert_edge_offset[v_cur];
+					ei < mesh.vert_edge_offset[v_cur + 1]; ei++)
+				{
+					unsigned int eidx = mesh.vert_edges[ei];
+					unsigned int ov = (mesh.edges[eidx].v[0] == v_cur) ?
+						mesh.edges[eidx].v[1] : mesh.edges[eidx].v[0];
+					if (ov == v_prev) e_in = eidx;
+					if (ov == v_next) e_out = eidx;
+				}
+				if (e_in == UINT_MAX || e_out == UINT_MAX) continue;
+				if (e_in == e_out) continue; /* consecutive edges are the same */
+
+				/* Find the triangle on one side of e_in that contains v_cur.
+				   We'll walk CW around v_cur toward e_out. */
+				tri_in = mesh.edges[e_in].tri[0];
+				if (tri_in == UINT_MAX) tri_in = mesh.edges[e_in].tri[1];
+
+				/* Unfold triangle fan from e_in toward e_out.
+				   Layout: v_cur at origin.
+				   v_prev at (l_in, 0) where l_in = edge length of e_in. */
+				{
+					qaws_scalar l_in, prev_2d[2];
+					qaws_scalar dx, dy, dz;
+					unsigned int cur_edge = e_in;
+					unsigned int cur_fan_tri = tri_in;
+					unsigned int fan_steps = 0;
+					unsigned int max_fan = 50;
+					/* Accumulate angle around v_cur */
+					qaws_scalar accum_angle = QAWS_ZERO;
+					qaws_scalar next_2d[2] = {QAWS_ZERO, QAWS_ZERO};
+					int found_out = 0;
+
+					dx = positions[v_prev * 3] - positions[v_cur * 3];
+					dy = positions[v_prev * 3 + 1] - positions[v_cur * 3 + 1];
+					dz = positions[v_prev * 3 + 2] - positions[v_cur * 3 + 2];
+					l_in = QAWS_SQRT(dx * dx + dy * dy + dz * dz);
+					prev_2d[0] = l_in;
+					prev_2d[1] = QAWS_ZERO;
+
+					/* Walk the fan around v_cur.  In each triangle, find the
+					   edge that is NOT cur_edge and NOT opposite v_cur, i.e.
+					   the "next" edge in the fan. */
+					while (fan_steps < max_fan)
+					{
+						int cur_local = -1; /* local index of v_cur */
+						int prev_local = -1; /* local index of v on cur_edge */
+						int third_local;
+						unsigned int v_third;
+						qaws_scalar l_cur_edge, l_third;
+						qaws_scalar tri_angle, cos_angle;
+						unsigned int next_edge;
+						int mi;
+
+						for (mi = 0; mi < 3; mi++)
+						{
+							if (mesh.tris[cur_fan_tri].v[mi] == v_cur) cur_local = mi;
+						}
+						if (cur_local < 0) break;
+
+						/* The edge cur_edge connects v_cur and another vertex.
+						   Find which local index that other vertex has. */
+						{
+							unsigned int ov = (mesh.edges[cur_edge].v[0] == v_cur) ?
+								mesh.edges[cur_edge].v[1] : mesh.edges[cur_edge].v[0];
+							for (mi = 0; mi < 3; mi++)
+								if (mesh.tris[cur_fan_tri].v[mi] == ov) prev_local = mi;
+						}
+						if (prev_local < 0) break;
+
+						/* The third vertex */
+						third_local = 3 - cur_local - prev_local;
+						v_third = mesh.tris[cur_fan_tri].v[third_local];
+
+						/* Edge lengths from v_cur */
+						dx = positions[mesh.tris[cur_fan_tri].v[prev_local] * 3] - positions[v_cur * 3];
+						dy = positions[mesh.tris[cur_fan_tri].v[prev_local] * 3 + 1] - positions[v_cur * 3 + 1];
+						dz = positions[mesh.tris[cur_fan_tri].v[prev_local] * 3 + 2] - positions[v_cur * 3 + 2];
+						l_cur_edge = QAWS_SQRT(dx * dx + dy * dy + dz * dz);
+
+						dx = positions[v_third * 3] - positions[v_cur * 3];
+						dy = positions[v_third * 3 + 1] - positions[v_cur * 3 + 1];
+						dz = positions[v_third * 3 + 2] - positions[v_cur * 3 + 2];
+						l_third = QAWS_SQRT(dx * dx + dy * dy + dz * dz);
+
+						/* Angle at v_cur between cur_edge and edge to v_third */
+						{
+							qaws_scalar l_opp; /* edge opposite v_cur */
+							dx = positions[v_third * 3] - positions[mesh.tris[cur_fan_tri].v[prev_local] * 3];
+							dy = positions[v_third * 3 + 1] - positions[mesh.tris[cur_fan_tri].v[prev_local] * 3 + 1];
+							dz = positions[v_third * 3 + 2] - positions[mesh.tris[cur_fan_tri].v[prev_local] * 3 + 2];
+							l_opp = QAWS_SQRT(dx * dx + dy * dy + dz * dz);
+
+							if (l_cur_edge < QAWS_LITERAL(1e-15) || l_third < QAWS_LITERAL(1e-15))
+								break;
+							cos_angle = (l_cur_edge * l_cur_edge + l_third * l_third
+								- l_opp * l_opp) / (QAWS_LITERAL(2.0) * l_cur_edge * l_third);
+							if (cos_angle > QAWS_ONE) cos_angle = QAWS_ONE;
+							if (cos_angle < -QAWS_ONE) cos_angle = -QAWS_ONE;
+							tri_angle = QAWS_ATAN2(
+								QAWS_SQRT(QAWS_ONE - cos_angle * cos_angle),
+								cos_angle);
+						}
+
+						/* v_third in 2D: rotated by accum_angle + tri_angle from +x */
+						{
+							qaws_scalar total_a = accum_angle + tri_angle;
+							next_2d[0] = l_third * QAWS_COS(total_a);
+							next_2d[1] = l_third * QAWS_SIN(total_a);
+						}
+
+						/* Check if e_out connects v_cur and v_third */
+						next_edge = mesh.tris[cur_fan_tri].edge[prev_local];
+						/* edge[prev_local] is the edge opposite prev_local
+						   = edge connecting v_cur and v_third */
+
+						if (v_third == v_next)
+						{
+							found_out = 1;
+							break;
+						}
+
+						/* Advance to next triangle in fan */
+						accum_angle += tri_angle;
+						cur_edge = next_edge;
+						{
+							unsigned int side = (mesh.edges[next_edge].tri[0] == cur_fan_tri) ? 1u : 0u;
+							cur_fan_tri = mesh.edges[next_edge].tri[side];
+							if (cur_fan_tri == UINT_MAX) break;
+						}
+						fan_steps++;
+					}
+
+					if (!found_out)
+					{
+						/* Try the other direction: walk the fan from e_in
+						   in the opposite direction around v_cur */
+						cur_edge = e_in;
+						cur_fan_tri = mesh.edges[e_in].tri[1];
+						if (cur_fan_tri == UINT_MAX || cur_fan_tri == tri_in)
+							continue;
+						accum_angle = QAWS_ZERO;
+						found_out = 0;
+						fan_steps = 0;
+
+						while (fan_steps < max_fan)
+						{
+							int cur_local = -1;
+							int prev_local = -1;
+							int third_local;
+							unsigned int v_third;
+							qaws_scalar l_cur_edge, l_third;
+							qaws_scalar tri_angle, cos_angle;
+							unsigned int next_edge;
+							int mi;
+
+							for (mi = 0; mi < 3; mi++)
+								if (mesh.tris[cur_fan_tri].v[mi] == v_cur) cur_local = mi;
+							if (cur_local < 0) break;
+
+							{
+								unsigned int ov = (mesh.edges[cur_edge].v[0] == v_cur) ?
+									mesh.edges[cur_edge].v[1] : mesh.edges[cur_edge].v[0];
+								for (mi = 0; mi < 3; mi++)
+									if (mesh.tris[cur_fan_tri].v[mi] == ov) prev_local = mi;
+							}
+							if (prev_local < 0) break;
+
+							third_local = 3 - cur_local - prev_local;
+							v_third = mesh.tris[cur_fan_tri].v[third_local];
+
+							dx = positions[mesh.tris[cur_fan_tri].v[prev_local] * 3] - positions[v_cur * 3];
+							dy = positions[mesh.tris[cur_fan_tri].v[prev_local] * 3 + 1] - positions[v_cur * 3 + 1];
+							dz = positions[mesh.tris[cur_fan_tri].v[prev_local] * 3 + 2] - positions[v_cur * 3 + 2];
+							l_cur_edge = QAWS_SQRT(dx * dx + dy * dy + dz * dz);
+
+							dx = positions[v_third * 3] - positions[v_cur * 3];
+							dy = positions[v_third * 3 + 1] - positions[v_cur * 3 + 1];
+							dz = positions[v_third * 3 + 2] - positions[v_cur * 3 + 2];
+							l_third = QAWS_SQRT(dx * dx + dy * dy + dz * dz);
+
+							{
+								qaws_scalar l_opp;
+								dx = positions[v_third * 3] - positions[mesh.tris[cur_fan_tri].v[prev_local] * 3];
+								dy = positions[v_third * 3 + 1] - positions[mesh.tris[cur_fan_tri].v[prev_local] * 3 + 1];
+								dz = positions[v_third * 3 + 2] - positions[mesh.tris[cur_fan_tri].v[prev_local] * 3 + 2];
+								l_opp = QAWS_SQRT(dx * dx + dy * dy + dz * dz);
+								if (l_cur_edge < QAWS_LITERAL(1e-15) || l_third < QAWS_LITERAL(1e-15))
+									break;
+								cos_angle = (l_cur_edge * l_cur_edge + l_third * l_third
+									- l_opp * l_opp) / (QAWS_LITERAL(2.0) * l_cur_edge * l_third);
+								if (cos_angle > QAWS_ONE) cos_angle = QAWS_ONE;
+								if (cos_angle < -QAWS_ONE) cos_angle = -QAWS_ONE;
+								tri_angle = QAWS_ATAN2(
+								QAWS_SQRT(QAWS_ONE - cos_angle * cos_angle),
+								cos_angle);
+							}
+
+							accum_angle -= tri_angle;
+							next_2d[0] = l_third * QAWS_COS(accum_angle);
+							next_2d[1] = l_third * QAWS_SIN(accum_angle);
+
+							next_edge = mesh.tris[cur_fan_tri].edge[prev_local];
+
+							if (v_third == v_next)
+							{
+								found_out = 1;
+								break;
+							}
+
+							cur_edge = next_edge;
+							{
+								unsigned int side = (mesh.edges[next_edge].tri[0] == cur_fan_tri) ? 1u : 0u;
+								cur_fan_tri = mesh.edges[next_edge].tri[side];
+								if (cur_fan_tri == UINT_MAX) break;
+							}
+							fan_steps++;
+						}
+					}
+
+					if (found_out)
+					{
+						/* In the unfolded picture:
+						   v_cur at (0,0), v_prev at prev_2d, v_next at next_2d.
+						   The geodesic shortcut is the midpoint of the straight
+						   line from prev_2d to next_2d.  Map it back to UV by
+						   interpolating the UV of the edge it lies on.
+						   For simplicity, use the midpoint's distance ratio
+						   to update the vertex position on the surface. */
+						qaws_scalar mid_2d[2], t_along;
+						qaws_scalar new_u, new_v;
+						qaws_surface_eval_result sr;
+
+						mid_2d[0] = (prev_2d[0] + next_2d[0]) * QAWS_LITERAL(0.5);
+						mid_2d[1] = (prev_2d[1] + next_2d[1]) * QAWS_LITERAL(0.5);
+
+						/* Express midpoint as fraction along v_cur's position:
+						   project onto line from v_cur to midpoint.
+						   UV = lerp between prev and next based on
+						   distance ratio from unfolded picture. */
+						{
+							qaws_scalar dp = QAWS_SQRT(prev_2d[0] * prev_2d[0] + prev_2d[1] * prev_2d[1]);
+							qaws_scalar dn = QAWS_SQRT(next_2d[0] * next_2d[0] + next_2d[1] * next_2d[1]);
+							if (dp + dn > QAWS_LITERAL(1e-15))
+								t_along = dp / (dp + dn);
+							else
+								t_along = QAWS_LITERAL(0.5);
+						}
+						new_u = (QAWS_ONE - t_along) * uv_pts[(pi - 1) * 2]
+							+ t_along * uv_pts[(pi + 1) * 2];
+						new_v = (QAWS_ONE - t_along) * uv_pts[(pi - 1) * 2 + 1]
+							+ t_along * uv_pts[(pi + 1) * 2 + 1];
+
+						memset(&sr, 0, sizeof(sr));
+						qaws_surface_evaluate(surface, new_u, new_v,
+							QAWS_SURFACE_EVAL_POSITION, &sr);
+
+						/* Check if new position is closer to the line */
+						{
+							qaws_scalar old_len, new_len;
+							dx = pts[pi * 3] - pts[(pi - 1) * 3];
+							dy = pts[pi * 3 + 1] - pts[(pi - 1) * 3 + 1];
+							dz = pts[pi * 3 + 2] - pts[(pi - 1) * 3 + 2];
+							old_len = QAWS_SQRT(dx * dx + dy * dy + dz * dz);
+							dx = pts[(pi + 1) * 3] - pts[pi * 3];
+							dy = pts[(pi + 1) * 3 + 1] - pts[pi * 3 + 1];
+							dz = pts[(pi + 1) * 3 + 2] - pts[pi * 3 + 2];
+							old_len += QAWS_SQRT(dx * dx + dy * dy + dz * dz);
+
+							dx = (qaws_scalar)sr.position.x - pts[(pi - 1) * 3];
+							dy = (qaws_scalar)sr.position.y - pts[(pi - 1) * 3 + 1];
+							dz = (qaws_scalar)sr.position.z - pts[(pi - 1) * 3 + 2];
+							new_len = QAWS_SQRT(dx * dx + dy * dy + dz * dz);
+							dx = pts[(pi + 1) * 3] - (qaws_scalar)sr.position.x;
+							dy = pts[(pi + 1) * 3 + 1] - (qaws_scalar)sr.position.y;
+							dz = pts[(pi + 1) * 3 + 2] - (qaws_scalar)sr.position.z;
+							new_len += QAWS_SQRT(dx * dx + dy * dy + dz * dz);
+
+							if (new_len < old_len - QAWS_LITERAL(1e-10))
+							{
+								pts[pi * 3 + 0] = sr.position.x;
+								pts[pi * 3 + 1] = sr.position.y;
+								pts[pi * 3 + 2] = sr.position.z;
+								uv_pts[pi * 2 + 0] = new_u;
+								uv_pts[pi * 2 + 1] = new_v;
+								changed = 1;
+							}
+						}
+					}
+				}
+			}
+			if (!changed) break;
+		}
+
+		/* Set exact start/end positions */
+		{
+			qaws_surface_eval_result sr;
+			memset(&sr, 0, sizeof(sr));
+			qaws_surface_evaluate(surface, start_u, start_v,
+				QAWS_SURFACE_EVAL_POSITION, &sr);
+			pts[0] = sr.position.x;
+			pts[1] = sr.position.y;
+			pts[2] = sr.position.z;
+			memset(&sr, 0, sizeof(sr));
+			qaws_surface_evaluate(surface, end_u, end_v,
+				QAWS_SURFACE_EVAL_POSITION, &sr);
+			pts[(out_count - 1) * 3 + 0] = sr.position.x;
+			pts[(out_count - 1) * 3 + 1] = sr.position.y;
+			pts[(out_count - 1) * 3 + 2] = sr.position.z;
+		}
+
+		status = create_path_bspline(pts, out_count, 150, out_curve);
+
+		free(pts);
+		free(uv_pts);
+	}
+
+	free(path);
+	qaws_internal_mesh_destroy(&mesh);
+	free(verts);
+	free(indices);
+	free(positions);
+	free(uvs);
+
+	return status;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Heat method internal solver                                        */
+/* ------------------------------------------------------------------ */
+
+/* Solve heat method on a mesh to compute geodesic distances.
+   Returns allocated distance array via out_distances (caller must free). */
+static qaws_status heat_solve_distances(
+	qaws_internal_mesh const* mesh,
+	qaws_scalar const* positions,
+	unsigned int vert_count,
+	unsigned int src_v,
+	qaws_scalar** out_distances)
+{
+	qaws_internal_csr L, A_minus_tL, L_reg;
+	qaws_scalar* mass_diag = NULL;
+	qaws_scalar* heat = NULL;
+	qaws_scalar* rhs = NULL;
+	qaws_scalar* div_X = NULL;
+	qaws_scalar mean_edge_len, t_heat;
+	unsigned int vi, ti;
+	qaws_status status;
+
+	*out_distances = NULL;
+	memset(&L, 0, sizeof(L));
+	memset(&A_minus_tL, 0, sizeof(A_minus_tL));
+	memset(&L_reg, 0, sizeof(L_reg));
+
+	/* Build Laplacian and mass matrix */
+	mass_diag = (qaws_scalar*)malloc(vert_count * sizeof(qaws_scalar));
+	if (!mass_diag) return QAWS_STATUS_ALLOCATION_FAILURE;
+
+	status = qaws_internal_build_laplacian(mesh, &L, mass_diag);
+	if (status != QAWS_STATUS_OK) { free(mass_diag); return status; }
+
+	/* Compute mean edge length */
+	{
+		qaws_scalar sum = QAWS_ZERO;
+		unsigned int ei;
+		for (ei = 0; ei < mesh->edge_count; ei++)
+			sum += qaws_internal_mesh_edge_length(mesh,
+				mesh->edges[ei].v[0], mesh->edges[ei].v[1]);
+		mean_edge_len = sum / (qaws_scalar)mesh->edge_count;
+	}
+	/* t = h^2 is the standard prescription (Crane et al. 2017) for small meshes.
+	   For large meshes with many edges between source and farthest vertex,
+	   the heat kernel decays as exp(-D^2/(4t)). With t=h^2, this is
+	   exp(-(D/h)^2/4) which vanishes when D >> h.
+	   Fix: ensure t >= D^2 / (4 * 30) so heat stays above ~exp(-30). */
+	t_heat = mean_edge_len * mean_edge_len;
+	{
+		qaws_scalar max_r_sq = QAWS_ZERO;
+		unsigned int vi2;
+		for (vi2 = 0; vi2 < vert_count; vi2++)
+		{
+			qaws_scalar dx = positions[vi2 * 3]     - positions[src_v * 3];
+			qaws_scalar dy = positions[vi2 * 3 + 1] - positions[src_v * 3 + 1];
+			qaws_scalar dz = positions[vi2 * 3 + 2] - positions[src_v * 3 + 2];
+			qaws_scalar r_sq = dx * dx + dy * dy + dz * dz;
+			if (r_sq > max_r_sq) max_r_sq = r_sq;
+		}
+		{
+			qaws_scalar t_min = max_r_sq / QAWS_LITERAL(120.0);
+			if (t_min > t_heat) t_heat = t_min;
+		}
+	}
+
+	/* Step I: Build (A - t*L) and solve (A - t*L) * heat = delta_source */
+	{
+		status = qaws_internal_csr_alloc(&A_minus_tL, vert_count, vert_count, L.nnz);
+		if (status != QAWS_STATUS_OK) goto cleanup;
+
+		memcpy(A_minus_tL.row_ptr, L.row_ptr, (vert_count + 1) * sizeof(unsigned int));
+		memcpy(A_minus_tL.col_idx, L.col_idx, L.nnz * sizeof(unsigned int));
+
+		for (vi = 0; vi < L.nnz; vi++)
+			A_minus_tL.values[vi] = -t_heat * L.values[vi];
+
+		for (vi = 0; vi < vert_count; vi++)
+			A_minus_tL.values[A_minus_tL.row_ptr[vi]] += mass_diag[vi];
+	}
+
+	heat = (qaws_scalar*)calloc(vert_count, sizeof(qaws_scalar));
+	rhs = (qaws_scalar*)calloc(vert_count, sizeof(qaws_scalar));
+	if (!heat || !rhs) { status = QAWS_STATUS_ALLOCATION_FAILURE; goto cleanup; }
+
+	rhs[src_v] = QAWS_ONE;
+
+	status = qaws_internal_cg_solve(&A_minus_tL, rhs, heat, 0, QAWS_ZERO);
+	if (status != QAWS_STATUS_OK) goto cleanup;
+
+	/* Step II: Per-triangle gradient X = -grad(u) / |grad(u)| */
+	/* Step III: Integrated divergence div(X) at each vertex */
+	div_X = (qaws_scalar*)calloc(vert_count, sizeof(qaws_scalar));
+	if (!div_X) { status = QAWS_STATUS_ALLOCATION_FAILURE; goto cleanup; }
+
+	for (ti = 0; ti < mesh->tri_count; ti++)
+	{
+		unsigned int va = mesh->tris[ti].v[0];
+		unsigned int vb = mesh->tris[ti].v[1];
+		unsigned int vc = mesh->tris[ti].v[2];
+		qaws_scalar const* pa = positions + va * 3;
+		qaws_scalar const* pb = positions + vb * 3;
+		qaws_scalar const* pc = positions + vc * 3;
+
+		qaws_scalar e0x = pb[0] - pa[0], e0y = pb[1] - pa[1], e0z = pb[2] - pa[2];
+		qaws_scalar e1x = pc[0] - pa[0], e1y = pc[1] - pa[1], e1z = pc[2] - pa[2];
+
+		qaws_scalar nx = e0y * e1z - e0z * e1y;
+		qaws_scalar ny = e0z * e1x - e0x * e1z;
+		qaws_scalar nz = e0x * e1y - e0y * e1x;
+		qaws_scalar area2 = QAWS_SQRT(nx * nx + ny * ny + nz * nz);
+
+		if (area2 < QAWS_LITERAL(1e-15)) continue;
+
+		{
+			qaws_scalar ea_x = pc[0] - pb[0], ea_y = pc[1] - pb[1], ea_z = pc[2] - pb[2];
+			qaws_scalar eb_x = pa[0] - pc[0], eb_y = pa[1] - pc[1], eb_z = pa[2] - pc[2];
+			qaws_scalar ec_x = pb[0] - pa[0], ec_y = pb[1] - pa[1], ec_z = pb[2] - pa[2];
+
+			qaws_scalar nxa_x = ny * ea_z - nz * ea_y;
+			qaws_scalar nxa_y = nz * ea_x - nx * ea_z;
+			qaws_scalar nxa_z = nx * ea_y - ny * ea_x;
+
+			qaws_scalar nxb_x = ny * eb_z - nz * eb_y;
+			qaws_scalar nxb_y = nz * eb_x - nx * eb_z;
+			qaws_scalar nxb_z = nx * eb_y - ny * eb_x;
+
+			qaws_scalar nxc_x = ny * ec_z - nz * ec_y;
+			qaws_scalar nxc_y = nz * ec_x - nx * ec_z;
+			qaws_scalar nxc_z = nx * ec_y - ny * ec_x;
+
+			qaws_scalar inv_area2 = QAWS_ONE / (area2 * area2);
+
+			qaws_scalar gx = (heat[va] * nxa_x + heat[vb] * nxb_x + heat[vc] * nxc_x) * inv_area2;
+			qaws_scalar gy = (heat[va] * nxa_y + heat[vb] * nxb_y + heat[vc] * nxc_y) * inv_area2;
+			qaws_scalar gz = (heat[va] * nxa_z + heat[vb] * nxb_z + heat[vc] * nxc_z) * inv_area2;
+
+			qaws_scalar glen = QAWS_SQRT(gx * gx + gy * gy + gz * gz);
+			qaws_scalar Xx, Xy, Xz;
+
+			if (glen < QAWS_LITERAL(1e-15))
+			{
+				Xx = QAWS_ZERO; Xy = QAWS_ZERO; Xz = QAWS_ZERO;
+			}
+			else
+			{
+				Xx = -gx / glen;
+				Xy = -gy / glen;
+				Xz = -gz / glen;
+			}
+
+			{
+				qaws_scalar dot_a = e0x * e1x + e0y * e1y + e0z * e1z;
+				qaws_scalar cross_a_x = e0y * e1z - e0z * e1y;
+				qaws_scalar cross_a_y = e0z * e1x - e0x * e1z;
+				qaws_scalar cross_a_z = e0x * e1y - e0y * e1x;
+				qaws_scalar cross_a_mag = QAWS_SQRT(cross_a_x * cross_a_x + cross_a_y * cross_a_y + cross_a_z * cross_a_z);
+				qaws_scalar cot_a = (cross_a_mag > QAWS_LITERAL(1e-15)) ? dot_a / cross_a_mag : QAWS_ZERO;
+
+				qaws_scalar f0x = pa[0] - pb[0], f0y = pa[1] - pb[1], f0z = pa[2] - pb[2];
+				qaws_scalar f1x = pc[0] - pb[0], f1y = pc[1] - pb[1], f1z = pc[2] - pb[2];
+				qaws_scalar dot_b = f0x * f1x + f0y * f1y + f0z * f1z;
+				qaws_scalar cross_b_x = f0y * f1z - f0z * f1y;
+				qaws_scalar cross_b_y = f0z * f1x - f0x * f1z;
+				qaws_scalar cross_b_z = f0x * f1y - f0y * f1x;
+				qaws_scalar cross_b_mag = QAWS_SQRT(cross_b_x * cross_b_x + cross_b_y * cross_b_y + cross_b_z * cross_b_z);
+				qaws_scalar cot_b = (cross_b_mag > QAWS_LITERAL(1e-15)) ? dot_b / cross_b_mag : QAWS_ZERO;
+
+				qaws_scalar g0x = pa[0] - pc[0], g0y = pa[1] - pc[1], g0z = pa[2] - pc[2];
+				qaws_scalar g1x = pb[0] - pc[0], g1y = pb[1] - pc[1], g1z = pb[2] - pc[2];
+				qaws_scalar dot_c = g0x * g1x + g0y * g1y + g0z * g1z;
+				qaws_scalar cross_c_x = g0y * g1z - g0z * g1y;
+				qaws_scalar cross_c_y = g0z * g1x - g0x * g1z;
+				qaws_scalar cross_c_z = g0x * g1y - g0y * g1x;
+				qaws_scalar cross_c_mag = QAWS_SQRT(cross_c_x * cross_c_x + cross_c_y * cross_c_y + cross_c_z * cross_c_z);
+				qaws_scalar cot_c = (cross_c_mag > QAWS_LITERAL(1e-15)) ? dot_c / cross_c_mag : QAWS_ZERO;
+
+				if (cot_a < QAWS_LITERAL(-1e6)) cot_a = QAWS_LITERAL(-1e6);
+				if (cot_a > QAWS_LITERAL(1e6)) cot_a = QAWS_LITERAL(1e6);
+				if (cot_b < QAWS_LITERAL(-1e6)) cot_b = QAWS_LITERAL(-1e6);
+				if (cot_b > QAWS_LITERAL(1e6)) cot_b = QAWS_LITERAL(1e6);
+				if (cot_c < QAWS_LITERAL(-1e6)) cot_c = QAWS_LITERAL(-1e6);
+				if (cot_c > QAWS_LITERAL(1e6)) cot_c = QAWS_LITERAL(1e6);
+
+				div_X[va] += QAWS_LITERAL(0.5) * (
+					cot_c * (ec_x * Xx + ec_y * Xy + ec_z * Xz) +
+					cot_b * (e1x * Xx + e1y * Xy + e1z * Xz));
+
+				div_X[vb] += QAWS_LITERAL(0.5) * (
+					cot_a * (ea_x * Xx + ea_y * Xy + ea_z * Xz) +
+					cot_c * (-ec_x * Xx + -ec_y * Xy + -ec_z * Xz));
+
+				div_X[vc] += QAWS_LITERAL(0.5) * (
+					cot_b * (-e1x * Xx + -e1y * Xy + -e1z * Xz) +
+					cot_a * (-ea_x * Xx + -ea_y * Xy + -ea_z * Xz));
+			}
+		}
+	}
+
+	/* Step IV: Solve Poisson equation for distance.
+	   Our L has negative diagonal: L[i,i] = -Σw, L[i,j] = w.
+	   The standard cotan Laplacian L_c (positive semidefinite) = -L.
+	   Crane's paper: L_c * φ = -div(X).
+	   So: (-L) * φ = -div(X), or (-L + εI) * φ = -div(X). */
+	{
+		qaws_scalar eps = QAWS_LITERAL(1e-6);
+		qaws_scalar min_phi;
+
+		status = qaws_internal_csr_alloc(&L_reg, vert_count, vert_count, L.nnz);
+		if (status != QAWS_STATUS_OK) goto cleanup;
+
+		memcpy(L_reg.row_ptr, L.row_ptr, (vert_count + 1) * sizeof(unsigned int));
+		memcpy(L_reg.col_idx, L.col_idx, L.nnz * sizeof(unsigned int));
+
+		/* -L is positive semidefinite */
+		for (vi = 0; vi < L.nnz; vi++)
+			L_reg.values[vi] = -L.values[vi];
+
+		for (vi = 0; vi < vert_count; vi++)
+			L_reg.values[L_reg.row_ptr[vi]] += eps;
+
+		for (vi = 0; vi < vert_count; vi++)
+			div_X[vi] = -div_X[vi];
+
+		memset(heat, 0, vert_count * sizeof(qaws_scalar));
+		status = qaws_internal_cg_solve(&L_reg, div_X, heat, 0, QAWS_ZERO);
+		if (status != QAWS_STATUS_OK) goto cleanup;
+
+		min_phi = heat[0];
+		for (vi = 1; vi < vert_count; vi++)
+		{
+			if (heat[vi] < min_phi)
+				min_phi = heat[vi];
+		}
+		for (vi = 0; vi < vert_count; vi++)
+			heat[vi] -= min_phi;
+	}
+
+	/* Transfer ownership of distance array */
+	*out_distances = heat;
+	heat = NULL;
+
+cleanup:
+	qaws_internal_csr_free(&L_reg);
+	qaws_internal_csr_free(&A_minus_tL);
+	qaws_internal_csr_free(&L);
+	free(div_X);
+	free(heat);
+	free(rhs);
+	free(mass_diag);
+	return status;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Geodesic distance via heat method (Crane et al. 2017)              */
+/* ------------------------------------------------------------------ */
+
+qaws_status qaws_surface_compute_geodesic_distance(
+	qaws_surface const* surface,
+	qaws_scalar source_u, qaws_scalar source_v,
+	qaws_tessellation_desc const* tessellation_desc,
+	qaws_scalar* out_u,
+	qaws_scalar* out_v,
+	qaws_scalar* out_distances,
+	unsigned int capacity,
+	unsigned int* out_count)
+{
+	qaws_tessellation_vertex* verts = NULL;
+	unsigned int* indices = NULL;
+	unsigned int vert_count = 0, idx_count = 0;
+	qaws_scalar* positions = NULL;
+	qaws_scalar* uvs_buf = NULL;
+	qaws_internal_mesh mesh;
+	unsigned int src_v, vi;
+	qaws_scalar* distances = NULL;
+	qaws_status status;
+
+	if (!surface || !out_distances || !out_count)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+
+	*out_count = 0;
+	memset(&mesh, 0, sizeof(mesh));
+
+	status = geodesic_tessellate_and_build(surface, tessellation_desc,
+		&verts, &indices, &vert_count, &idx_count,
+		&positions, &uvs_buf, &mesh);
+
+	if (status != QAWS_STATUS_OK)
+		return status;
+
+	if (capacity < vert_count)
+	{
+		*out_count = vert_count;
+		qaws_internal_mesh_destroy(&mesh);
+		free(verts); free(indices); free(positions); free(uvs_buf);
+		return QAWS_STATUS_BUFFER_TOO_SMALL;
+	}
+
+	src_v = qaws_internal_mesh_closest_vertex_uv(&mesh, source_u, source_v);
+
+	status = heat_solve_distances(&mesh, positions, vert_count, src_v, &distances);
+	if (status != QAWS_STATUS_OK) goto cleanup;
+
+	for (vi = 0; vi < vert_count; vi++)
+	{
+		out_distances[vi] = distances[vi];
+		if (out_u) out_u[vi] = uvs_buf[vi * 2 + 0];
+		if (out_v) out_v[vi] = uvs_buf[vi * 2 + 1];
+	}
+	*out_count = vert_count;
+
+cleanup:
+	free(distances);
+	qaws_internal_mesh_destroy(&mesh);
+	free(verts);
+	free(indices);
+	free(positions);
+	free(uvs_buf);
+
+	return status;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Geodesic path via heat method + gradient descent                    */
+/* ------------------------------------------------------------------ */
+
+qaws_status qaws_surface_compute_geodesic_heat(
+	qaws_surface const* surface,
+	qaws_scalar start_u, qaws_scalar start_v,
+	qaws_scalar end_u, qaws_scalar end_v,
+	qaws_tessellation_desc const* tessellation_desc,
+	qaws_curve** out_curve)
+{
+	qaws_tessellation_vertex* verts = NULL;
+	unsigned int* indices = NULL;
+	unsigned int vert_count = 0, idx_count = 0;
+	qaws_scalar* positions = NULL;
+	qaws_scalar* uvs_buf = NULL;
+	qaws_internal_mesh mesh;
+	unsigned int src_vi;
+	qaws_scalar* distances = NULL;
+	qaws_status status;
+
+	if (!surface || !out_curve)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+
+	*out_curve = NULL;
+	memset(&mesh, 0, sizeof(mesh));
+
+	status = geodesic_tessellate_and_build(surface, tessellation_desc,
+		&verts, &indices, &vert_count, &idx_count,
+		&positions, &uvs_buf, &mesh);
+	if (status != QAWS_STATUS_OK) return status;
+
+	src_vi = qaws_internal_mesh_closest_vertex_uv(&mesh, start_u, start_v);
+
+	status = heat_solve_distances(&mesh, positions, vert_count, src_vi, &distances);
+	if (status != QAWS_STATUS_OK) goto cleanup;
+
+	/* Trace path from end toward source by continuous gradient descent
+	   through triangle interiors (Crane et al. 2017).
+	   In each triangle, lay out vertices in 2D from 3D edge lengths,
+	   compute gradient of the piecewise-linear distance field, walk
+	   along -gradient until hitting an edge, cross to the adjacent
+	   triangle.  To prevent oscillation, never exit through the edge
+	   we entered from; instead walk to the vertex with minimum
+	   distance. */
+	{
+		unsigned int max_trace = 20000;
+		qaws_scalar* trace_coords = NULL;
+		qaws_scalar* path_coords = NULL;
+		unsigned int trace_count = 0;
+		unsigned int cur_tri;
+		qaws_scalar bary[3];
+		unsigned int entry_edge; /* edge we entered from (UINT_MAX = none) */
+		unsigned int trace_iter;
+
+		trace_coords = (qaws_scalar*)malloc(max_trace * 3 * sizeof(qaws_scalar));
+		if (!trace_coords) { status = QAWS_STATUS_ALLOCATION_FAILURE; goto cleanup; }
+
+		/* Find triangle containing (end_u, end_v) via UV barycentric test */
+		cur_tri = UINT_MAX;
+		{
+			unsigned int ti;
+			for (ti = 0; ti < mesh.tri_count; ti++)
+			{
+				unsigned int a = mesh.tris[ti].v[0], b = mesh.tris[ti].v[1], c = mesh.tris[ti].v[2];
+				qaws_scalar u0 = uvs_buf[a*2], v0 = uvs_buf[a*2+1];
+				qaws_scalar u1 = uvs_buf[b*2], v1 = uvs_buf[b*2+1];
+				qaws_scalar u2 = uvs_buf[c*2], v2 = uvs_buf[c*2+1];
+				qaws_scalar det = (u1-u0)*(v2-v0) - (u2-u0)*(v1-v0);
+				qaws_scalar b1, b2, b0;
+				if (QAWS_FABS(det) < QAWS_LITERAL(1e-15)) continue;
+				b1 = ((end_u-u0)*(v2-v0) - (u2-u0)*(end_v-v0)) / det;
+				b2 = ((u1-u0)*(end_v-v0) - (end_u-u0)*(v1-v0)) / det;
+				b0 = QAWS_ONE - b1 - b2;
+				if (b0 >= QAWS_LITERAL(-1e-4) && b1 >= QAWS_LITERAL(-1e-4) && b2 >= QAWS_LITERAL(-1e-4))
+				{
+					qaws_scalar s;
+					cur_tri = ti;
+					if (b0 < QAWS_ZERO) b0 = QAWS_ZERO;
+					if (b1 < QAWS_ZERO) b1 = QAWS_ZERO;
+					if (b2 < QAWS_ZERO) b2 = QAWS_ZERO;
+					s = b0 + b1 + b2;
+					bary[0] = b0/s; bary[1] = b1/s; bary[2] = b2/s;
+					break;
+				}
+			}
+		}
+		/* Fallback: closest vertex */
+		if (cur_tri == UINT_MAX)
+		{
+			unsigned int cv = qaws_internal_mesh_closest_vertex_uv(&mesh, end_u, end_v);
+			if (cv < vert_count && mesh.vert_edge_offset[cv] < mesh.vert_edge_offset[cv+1])
+			{
+				unsigned int ei = mesh.vert_edges[mesh.vert_edge_offset[cv]];
+				cur_tri = mesh.edges[ei].tri[0];
+				if (cur_tri == UINT_MAX) cur_tri = mesh.edges[ei].tri[1];
+			}
+			if (cur_tri != UINT_MAX)
+			{
+				int mi;
+				bary[0] = bary[1] = bary[2] = QAWS_ZERO;
+				for (mi = 0; mi < 3; mi++)
+					if (mesh.tris[cur_tri].v[mi] == cv) bary[mi] = QAWS_ONE;
+			}
+		}
+		if (cur_tri == UINT_MAX)
+		{
+			free(trace_coords);
+			status = QAWS_STATUS_NUMERICAL_FAILURE;
+			goto cleanup;
+		}
+		entry_edge = UINT_MAX;
+
+		/* Store initial position */
+		{
+			unsigned int a = mesh.tris[cur_tri].v[0], b = mesh.tris[cur_tri].v[1], c = mesh.tris[cur_tri].v[2];
+			trace_coords[0] = bary[0]*positions[a*3] + bary[1]*positions[b*3] + bary[2]*positions[c*3];
+			trace_coords[1] = bary[0]*positions[a*3+1] + bary[1]*positions[b*3+1] + bary[2]*positions[c*3+1];
+			trace_coords[2] = bary[0]*positions[a*3+2] + bary[1]*positions[b*3+2] + bary[2]*positions[c*3+2];
+			trace_count = 1;
+		}
+
+		for (trace_iter = 0; trace_iter < max_trace - 2; trace_iter++)
+		{
+			unsigned int tv[3];
+			qaws_scalar d[3], q[3][2];
+			qaws_scalar l01, l02, l12, cos_a, sin_a;
+			qaws_scalar e0x, e0y, e1x, e1y, e2x, e2y;
+			qaws_scalar area2, gx, gy, gmag;
+			qaws_scalar db[3];
+			qaws_scalar t_exit;
+			int exit_vi, jj, kk;
+			unsigned int edge_idx, adj_tri, adj_side, opp_v;
+			qaws_scalar t_cross;
+
+			tv[0] = mesh.tris[cur_tri].v[0];
+			tv[1] = mesh.tris[cur_tri].v[1];
+			tv[2] = mesh.tris[cur_tri].v[2];
+			d[0] = distances[tv[0]]; d[1] = distances[tv[1]]; d[2] = distances[tv[2]];
+
+			/* Stop if source vertex is in this triangle */
+			if (tv[0] == src_vi || tv[1] == src_vi || tv[2] == src_vi)
+			{
+				trace_coords[trace_count*3+0] = positions[src_vi*3];
+				trace_coords[trace_count*3+1] = positions[src_vi*3+1];
+				trace_coords[trace_count*3+2] = positions[src_vi*3+2];
+				trace_count++;
+				break;
+			}
+
+			/* 2D layout from 3D edge lengths */
+			{
+				qaws_scalar dx, dy, dz;
+				dx = positions[tv[1]*3]-positions[tv[0]*3];
+				dy = positions[tv[1]*3+1]-positions[tv[0]*3+1];
+				dz = positions[tv[1]*3+2]-positions[tv[0]*3+2];
+				l01 = QAWS_SQRT(dx*dx+dy*dy+dz*dz);
+				dx = positions[tv[2]*3]-positions[tv[0]*3];
+				dy = positions[tv[2]*3+1]-positions[tv[0]*3+1];
+				dz = positions[tv[2]*3+2]-positions[tv[0]*3+2];
+				l02 = QAWS_SQRT(dx*dx+dy*dy+dz*dz);
+				dx = positions[tv[2]*3]-positions[tv[1]*3];
+				dy = positions[tv[2]*3+1]-positions[tv[1]*3+1];
+				dz = positions[tv[2]*3+2]-positions[tv[1]*3+2];
+				l12 = QAWS_SQRT(dx*dx+dy*dy+dz*dz);
+			}
+			if (l01 < QAWS_LITERAL(1e-15) || l02 < QAWS_LITERAL(1e-15)) break;
+			q[0][0] = QAWS_ZERO; q[0][1] = QAWS_ZERO;
+			q[1][0] = l01; q[1][1] = QAWS_ZERO;
+			cos_a = (l01*l01 + l02*l02 - l12*l12) / (QAWS_LITERAL(2.0)*l01*l02);
+			if (cos_a > QAWS_ONE) cos_a = QAWS_ONE;
+			if (cos_a < -QAWS_ONE) cos_a = -QAWS_ONE;
+			sin_a = QAWS_SQRT(QAWS_ONE - cos_a*cos_a);
+			q[2][0] = l02*cos_a; q[2][1] = l02*sin_a;
+
+			/* Gradient of distance in 2D */
+			e0x = q[2][0]-q[1][0]; e0y = q[2][1]-q[1][1]; /* edge opp v0 */
+			e1x = q[0][0]-q[2][0]; e1y = q[0][1]-q[2][1]; /* edge opp v1 */
+			e2x = q[1][0]-q[0][0]; e2y = q[1][1]-q[0][1]; /* edge opp v2 */
+			area2 = e2x*(q[2][1]-q[0][1]) - (q[2][0]-q[0][0])*e2y;
+			if (QAWS_FABS(area2) < QAWS_LITERAL(1e-20)) break;
+
+			gx = (d[0]*(-e0y) + d[1]*(-e1y) + d[2]*(-e2y)) / area2;
+			gy = (d[0]*e0x + d[1]*e1x + d[2]*e2x) / area2;
+			gmag = QAWS_SQRT(gx*gx + gy*gy);
+			if (gmag < QAWS_LITERAL(1e-15)) break;
+
+			/* Barycentric displacement for direction -gradient */
+			{
+				qaws_scalar ax = q[0][0]-q[2][0], ay = q[0][1]-q[2][1];
+				qaws_scalar bx = q[1][0]-q[2][0], by = q[1][1]-q[2][1];
+				qaws_scalar det = ax*by - ay*bx;
+				if (QAWS_FABS(det) < QAWS_LITERAL(1e-20)) break;
+				db[0] = (-gx*by - (-gy)*bx) / det;
+				db[1] = (ax*(-gy) - ay*(-gx)) / det;
+				db[2] = -db[0] - db[1];
+			}
+
+			/* Find exit edge (smallest t>0 where bary[i]+t*db[i]=0).
+			   Skip the entry edge to prevent oscillation. */
+			t_exit = QAWS_LITERAL(1e30);
+			exit_vi = -1;
+			{
+				int ki;
+				for (ki = 0; ki < 3; ki++)
+				{
+					if (db[ki] < QAWS_LITERAL(-1e-15))
+					{
+						qaws_scalar t = -bary[ki] / db[ki];
+						if (t > QAWS_LITERAL(1e-12) && t < t_exit)
+						{
+							/* Check if this edge is the entry edge */
+							if (entry_edge != UINT_MAX &&
+								mesh.tris[cur_tri].edge[ki] == entry_edge)
+								continue;
+							t_exit = t;
+							exit_vi = ki;
+						}
+					}
+				}
+			}
+
+			/* If no forward exit, fall back: walk to vertex with min distance,
+			   pick one of its adjacent triangles, and continue. */
+			if (exit_vi < 0)
+			{
+				int best_li = 0;
+				unsigned int best_v;
+				if (d[1] < d[best_li]) best_li = 1;
+				if (d[2] < d[best_li]) best_li = 2;
+				best_v = tv[best_li];
+
+				/* Add vertex position to trace */
+				trace_coords[trace_count*3+0] = positions[best_v*3];
+				trace_coords[trace_count*3+1] = positions[best_v*3+1];
+				trace_coords[trace_count*3+2] = positions[best_v*3+2];
+				trace_count++;
+				if (best_v == src_vi) break;
+
+				/* Pick adjacent triangle: the one with the steepest gradient
+				   away from this vertex */
+				{
+					unsigned int ei_s = mesh.vert_edge_offset[best_v];
+					unsigned int ei_e = mesh.vert_edge_offset[best_v + 1];
+					unsigned int ei2, best_tri = UINT_MAX;
+					qaws_scalar best_d_drop = QAWS_ZERO;
+					for (ei2 = ei_s; ei2 < ei_e; ei2++)
+					{
+						unsigned int eidx = mesh.vert_edges[ei2];
+						unsigned int s;
+						for (s = 0; s < 2; s++)
+						{
+							unsigned int ti = mesh.edges[eidx].tri[s];
+							int li;
+							qaws_scalar d_min;
+							if (ti == UINT_MAX || ti == cur_tri) continue;
+							d_min = distances[best_v];
+							for (li = 0; li < 3; li++)
+								if (distances[mesh.tris[ti].v[li]] < d_min)
+									d_min = distances[mesh.tris[ti].v[li]];
+							if (distances[best_v] - d_min > best_d_drop)
+							{
+								best_d_drop = distances[best_v] - d_min;
+								best_tri = ti;
+							}
+						}
+					}
+					if (best_tri == UINT_MAX) break;
+					cur_tri = best_tri;
+				}
+				/* Set bary to be at best_v in the new triangle */
+				{
+					int mi;
+					bary[0] = bary[1] = bary[2] = QAWS_ZERO;
+					for (mi = 0; mi < 3; mi++)
+						if (mesh.tris[cur_tri].v[mi] == best_v)
+						{ bary[mi] = QAWS_ONE; break; }
+				}
+				entry_edge = UINT_MAX;
+				continue;
+			}
+
+			/* Compute crossing point on exit edge */
+			jj = (exit_vi + 1) % 3;
+			kk = (exit_vi + 2) % 3;
+			{
+				qaws_scalar b_j = bary[jj] + t_exit*db[jj];
+				qaws_scalar b_k = bary[kk] + t_exit*db[kk];
+				qaws_scalar s;
+				if (b_j < QAWS_ZERO) b_j = QAWS_ZERO;
+				if (b_k < QAWS_ZERO) b_k = QAWS_ZERO;
+				s = b_j + b_k;
+				if (s < QAWS_LITERAL(1e-15)) break;
+				t_cross = b_k / s;
+			}
+
+			/* 3D position at crossing */
+			{
+				unsigned int vj = tv[jj], vk = tv[kk];
+				trace_coords[trace_count*3+0] = (QAWS_ONE-t_cross)*positions[vj*3]   + t_cross*positions[vk*3];
+				trace_coords[trace_count*3+1] = (QAWS_ONE-t_cross)*positions[vj*3+1] + t_cross*positions[vk*3+1];
+				trace_coords[trace_count*3+2] = (QAWS_ONE-t_cross)*positions[vj*3+2] + t_cross*positions[vk*3+2];
+				trace_count++;
+			}
+
+			/* Cross to adjacent triangle */
+			edge_idx = mesh.tris[cur_tri].edge[exit_vi];
+			adj_side = (mesh.edges[edge_idx].tri[0] == cur_tri) ? 1u : 0u;
+			adj_tri = mesh.edges[edge_idx].tri[adj_side];
+			if (adj_tri == UINT_MAX) break; /* boundary */
+
+			/* Barycentric coords in adjacent triangle */
+			opp_v = mesh.edges[edge_idx].opposite[adj_side];
+			{
+				int m, opp_l = -1, a_l, b_l;
+				qaws_scalar eps = QAWS_LITERAL(1e-6);
+				for (m = 0; m < 3; m++)
+					if (mesh.tris[adj_tri].v[m] == opp_v) { opp_l = m; break; }
+				if (opp_l < 0) break;
+				a_l = (opp_l + 1) % 3;
+				b_l = (opp_l + 2) % 3;
+				bary[opp_l] = eps;
+				if (mesh.tris[adj_tri].v[a_l] == tv[jj])
+				{ bary[a_l] = (QAWS_ONE-t_cross)*(QAWS_ONE-eps); bary[b_l] = t_cross*(QAWS_ONE-eps); }
+				else
+				{ bary[a_l] = t_cross*(QAWS_ONE-eps); bary[b_l] = (QAWS_ONE-t_cross)*(QAWS_ONE-eps); }
+			}
+			entry_edge = edge_idx;
+			cur_tri = adj_tri;
+		}
+
+		if (trace_count < 2)
+		{
+			free(trace_coords);
+			status = QAWS_STATUS_NUMERICAL_FAILURE;
+			goto cleanup;
+		}
+
+		/* Reverse trace (end→start → start→end), fix exact endpoints */
+		path_coords = (qaws_scalar*)malloc(trace_count * 3 * sizeof(qaws_scalar));
+		if (!path_coords) { free(trace_coords); status = QAWS_STATUS_ALLOCATION_FAILURE; goto cleanup; }
+		{
+			unsigned int pi;
+			for (pi = 0; pi < trace_count; pi++)
+			{
+				path_coords[pi*3+0] = trace_coords[(trace_count-1-pi)*3+0];
+				path_coords[pi*3+1] = trace_coords[(trace_count-1-pi)*3+1];
+				path_coords[pi*3+2] = trace_coords[(trace_count-1-pi)*3+2];
+			}
+		}
+		{
+			qaws_surface_eval_result sr;
+			memset(&sr, 0, sizeof(sr));
+			qaws_surface_evaluate(surface, start_u, start_v, QAWS_SURFACE_EVAL_POSITION, &sr);
+			path_coords[0] = sr.position.x; path_coords[1] = sr.position.y; path_coords[2] = sr.position.z;
+		}
+		{
+			qaws_surface_eval_result sr;
+			memset(&sr, 0, sizeof(sr));
+			qaws_surface_evaluate(surface, end_u, end_v, QAWS_SURFACE_EVAL_POSITION, &sr);
+			path_coords[(trace_count-1)*3+0] = sr.position.x;
+			path_coords[(trace_count-1)*3+1] = sr.position.y;
+			path_coords[(trace_count-1)*3+2] = sr.position.z;
+		}
+
+		status = create_path_bspline(path_coords, trace_count, 50, out_curve);
+		free(trace_coords);
+		free(path_coords);
+	}
+
+cleanup:
+	free(distances);
+	qaws_internal_mesh_destroy(&mesh);
+	free(verts);
+	free(indices);
+	free(positions);
+	free(uvs_buf);
+
 	return status;
 }

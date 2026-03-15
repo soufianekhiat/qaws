@@ -54,6 +54,7 @@ extern int test_40_surface_intersect_main(void);
 extern int test_41_curve_projection_main(void);
 extern int test_42_curve_operations_main(void);
 extern int test_43_boolean_2d_main(void);
+extern int test_44_geodesic_main(void);
 
 /* Test registry */
 typedef struct {
@@ -106,6 +107,7 @@ static test_suite const g_test_suites[] = {
 	{"41_curve_projection", test_41_curve_projection_main},
 	{"42_curve_operations", test_42_curve_operations_main},
 	{"43_boolean_2d", test_43_boolean_2d_main},
+	{"44_geodesic", test_44_geodesic_main},
 };
 
 int main(void) {
