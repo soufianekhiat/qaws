@@ -80,6 +80,10 @@ set(QAWS_SOURCES
   src/qaws/qaws_surface_offset.c
   src/qaws/qaws_surface_trim.c
   src/qaws/qaws_surface_intersect.c
+  src/qaws/qaws_surface_tspline.c
+  src/qaws/qaws_surface_subdiv.c
+  src/qaws/qaws_surface_fillet.c
+  src/qaws/qaws_brep.c
   src/qaws/qaws_boolean_2d.c
   src/qaws/qaws_inline.c
   src/qaws/qaws_prepare.c
@@ -261,6 +265,10 @@ if(QAWS_INSTALL)
       src/qaws/qaws_surface_offset.h
       src/qaws/qaws_surface_trim.h
       src/qaws/qaws_surface_intersect.h
+      src/qaws/qaws_surface_tspline.h
+      src/qaws/qaws_surface_subdiv.h
+      src/qaws/qaws_surface_fillet.h
+      src/qaws/qaws_brep.h
       src/qaws/qaws_boolean_2d.h
       src/qaws/qaws_alloc.h
       src/qaws/qaws_inline.h

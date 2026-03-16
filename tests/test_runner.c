@@ -55,6 +55,10 @@ extern int test_41_curve_projection_main(void);
 extern int test_42_curve_operations_main(void);
 extern int test_43_boolean_2d_main(void);
 extern int test_44_geodesic_main(void);
+extern int test_45_tspline_main(void);
+extern int test_46_subdiv_main(void);
+extern int test_47_brep_main(void);
+extern int test_48_fillet_main(void);
 
 /* Test registry */
 typedef struct {
@@ -108,6 +112,10 @@ static test_suite const g_test_suites[] = {
 	{"42_curve_operations", test_42_curve_operations_main},
 	{"43_boolean_2d", test_43_boolean_2d_main},
 	{"44_geodesic", test_44_geodesic_main},
+	{"45_tspline", test_45_tspline_main},
+	{"46_subdiv", test_46_subdiv_main},
+	{"47_brep", test_47_brep_main},
+	{"48_fillet", test_48_fillet_main},
 };
 
 int main(void) {

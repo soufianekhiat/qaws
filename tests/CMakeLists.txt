@@ -46,6 +46,10 @@ add_executable(
   42_curve_operations.c
   43_boolean_2d.c
   44_geodesic.c
+  45_tspline.c
+  46_subdiv.c
+  47_brep.c
+  48_fillet.c
 )
 
 target_link_libraries(qaws_tests PRIVATE Qaws::qaws)
