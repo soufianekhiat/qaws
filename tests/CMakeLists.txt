@@ -52,7 +52,15 @@ add_executable(
   48_fillet.c
 )
 
-target_link_libraries(qaws_tests PRIVATE Qaws::qaws)
+# The amalgamated library exports exactly the same symbols, so the tests can
+# link it instead and validate the generated qaws.c against the full suite.
+# They keep including the per-file headers for declarations either way.
+if(QAWS_TEST_AMALGAMATION)
+  target_link_libraries(qaws_tests PRIVATE Qaws::amalgam)
+else()
+  target_link_libraries(qaws_tests PRIVATE Qaws::qaws)
+endif()
+
 target_include_directories(qaws_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}" "${PROJECT_SOURCE_DIR}/src/qaws")
 set_target_properties(qaws_tests PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
 

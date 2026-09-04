@@ -1,6 +1,7 @@
 #ifndef QAWS_INTERNAL_SURFACE_H
 #define QAWS_INTERNAL_SURFACE_H
 
+#include "../qaws_platform.h"
 #include "../qaws_surface_types.h"
 
 typedef struct qaws_surface_vtable qaws_surface_vtable;
@@ -90,5 +91,33 @@ unsigned int qaws_internal_surface_uniform_knots(
 	unsigned int num_cp,
 	qaws_scalar* out_knots,
 	unsigned int capacity);
+
+/* Normalize the cross product du x dv into out.
+   Falls back to +Z when the cross product is degenerate. */
+QAWS_INLINE void qaws_internal_surface_normal(qaws_vec3 du, qaws_vec3 dv, qaws_vec3* out)
+{
+	qaws_scalar nx = du.y * dv.z - du.z * dv.y;
+	qaws_scalar ny = du.z * dv.x - du.x * dv.z;
+	qaws_scalar nz = du.x * dv.y - du.y * dv.x;
+	qaws_scalar len = QAWS_SQRT(nx * nx + ny * ny + nz * nz);
+	if (len > QAWS_LITERAL(1e-12))
+	{
+		out->x = nx / len; out->y = ny / len; out->z = nz / len;
+	}
+	else
+	{
+		out->x = 0; out->y = 0; out->z = 1;
+	}
+}
+
+/* Non-uniform Catmull-Rom blend through n_pts points with the given
+   parameter values. out_deriv may be NULL. */
+void qaws_internal_surface_catmull_rom_blend(
+	qaws_vec3 const* pts,
+	qaws_scalar const* params,
+	unsigned int n_pts,
+	qaws_scalar t,
+	qaws_vec3* out_pos,
+	qaws_vec3* out_deriv);
 
 #endif /* QAWS_INTERNAL_SURFACE_H */

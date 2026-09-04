@@ -2,6 +2,31 @@
 
 All notable changes to Qaws are documented here.
 
+## [Unreleased]
+
+### Added
+
+- Single-file amalgamation: `buildsystem/amalgamate.py` collapses the tree into
+  one `qaws.h` and one `qaws.c`, for consumers with no build system. Exposed as
+  the CMake `amalgamate` target and the `QAWS_AMALGAMATION` /
+  `QAWS_TEST_AMALGAMATION` options, and as the Sharpmake `QawsAmalgam` project.
+- `QAWS_UNITY_BUILD` CMake option to compile the library as one translation unit.
+- `examples/amalgam_standalone.c`, a worked no-build-system example.
+- `docs/integration.md` covering integration without CMake, including Xcode/iOS
+  notes on SIMD dispatch.
+- `.github/workflows/permutations.yml` builds every combination of OS, scalar
+  type, SIMD, and translation-unit layout, and compiles the amalgamation
+  standalone on all three platforms.
+
+### Changed
+
+- Deduplicated `compute_normal` (16 identical copies) and `catmull_rom_blend`
+  (2 identical copies) across the surface sources into
+  `internal/qaws_internal_surface.{h,c}`. This removes the only symbol
+  collisions that prevented single-translation-unit builds.
+- CMake compiler settings moved into a shared `qaws_configure_target` function
+  so the per-file and amalgamated libraries cannot drift apart.
+
 ## [1.0.0] - 2026-03-12
 
 First public release.

@@ -21,22 +21,6 @@ typedef struct qaws_surface_tspline_impl
 	unsigned int v_knot_len;     /* 2*v_degree+2 */
 } qaws_surface_tspline_impl;
 
-static void compute_normal(qaws_vec3 du, qaws_vec3 dv, qaws_vec3* out)
-{
-	qaws_scalar nx = du.y * dv.z - du.z * dv.y;
-	qaws_scalar ny = du.z * dv.x - du.x * dv.z;
-	qaws_scalar nz = du.x * dv.y - du.y * dv.x;
-	qaws_scalar len = QAWS_SQRT(nx * nx + ny * ny + nz * nz);
-	if (len > QAWS_LITERAL(1e-12))
-	{
-		out->x = nx / len; out->y = ny / len; out->z = nz / len;
-	}
-	else
-	{
-		out->x = 0; out->y = 0; out->z = 1;
-	}
-}
-
 /* Cox-de Boor recursion for a single B-spline basis function.
    knots: local knot vector of length (degree+2).
    Returns N_{0,degree}(t) defined over knots[0..degree+1]. */
@@ -254,7 +238,7 @@ static qaws_status tspline_surface_eval(
 	/* Normal from cross product du x dv */
 	if (eval_flags & QAWS_SURFACE_EVAL_NORMAL)
 	{
-		compute_normal(out_result->du, out_result->dv, &out_result->normal);
+		qaws_internal_surface_normal(out_result->du, out_result->dv, &out_result->normal);
 		out_result->valid_flags |= QAWS_SURFACE_EVAL_NORMAL;
 	}
 

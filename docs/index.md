@@ -6,6 +6,7 @@
 
 - [Overview](overview.md) -- What Qaws is, design principles, quick start
 - [Building](building.md) -- CMake and Sharpmake build instructions
+- [Integration](integration.md) -- Using Qaws without CMake: dropping the sources in, unity builds, the single-file amalgamation
 - [Curve Families](curve_families.md) -- All curve types with examples
 - [Surfaces](surfaces.md) -- Bezier, B-spline, NURBS, swept, ruled surfaces
 - [Evaluation](evaluation.md) -- Position and derivative evaluation

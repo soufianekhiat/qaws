@@ -16,22 +16,6 @@ typedef struct qaws_surface_bilinear_impl
 	qaws_vec3 p11;
 } qaws_surface_bilinear_impl;
 
-static void compute_normal(qaws_vec3 du, qaws_vec3 dv, qaws_vec3* out)
-{
-	qaws_scalar nx = du.y * dv.z - du.z * dv.y;
-	qaws_scalar ny = du.z * dv.x - du.x * dv.z;
-	qaws_scalar nz = du.x * dv.y - du.y * dv.x;
-	qaws_scalar len = QAWS_SQRT(nx * nx + ny * ny + nz * nz);
-	if (len > QAWS_LITERAL(1e-12))
-	{
-		out->x = nx / len; out->y = ny / len; out->z = nz / len;
-	}
-	else
-	{
-		out->x = 0; out->y = 0; out->z = 1;
-	}
-}
-
 /* Bilinear patch:
    S(u,v) = (1-u)(1-v)P00 + u(1-v)P10 + (1-u)vP01 + uvP11
    dS/du  = (1-v)(P10-P00) + v(P11-P01)
@@ -119,7 +103,7 @@ static qaws_status bilinear_surface_eval(
 	/* Normal */
 	if (eval_flags & QAWS_SURFACE_EVAL_NORMAL)
 	{
-		compute_normal(out_result->du, out_result->dv, &out_result->normal);
+		qaws_internal_surface_normal(out_result->du, out_result->dv, &out_result->normal);
 		out_result->valid_flags |= QAWS_SURFACE_EVAL_NORMAL;
 	}
 

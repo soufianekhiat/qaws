@@ -2,6 +2,7 @@ using Sharpmake;
 
 [module: Sharpmake.Include("common.cs")]
 [module: Sharpmake.Include("QawsLib.cs")]
+[module: Sharpmake.Include("QawsAmalgam.cs")]
 [module: Sharpmake.Include("QawsTests.cs")]
 
 namespace Qaws
@@ -38,6 +39,12 @@ namespace Qaws
 
             // Add unified test project
             conf.AddProject<QawsTestsProject>(target);
+
+            // The single-file build, when a Python 3 interpreter was found.
+            // Building it in every configuration keeps the generated
+            // qaws.h/qaws.c pair from silently rotting.
+            if (Amalgamation.Available)
+                conf.AddProject<QawsAmalgamProject>(target);
         }
 
         [Main]

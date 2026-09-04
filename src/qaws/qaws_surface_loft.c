@@ -16,153 +16,9 @@ typedef struct qaws_surface_loft_impl
 	qaws_range* section_ranges;    /* copied array of N parameter ranges */
 } qaws_surface_loft_impl;
 
-static void compute_normal(qaws_vec3 du, qaws_vec3 dv, qaws_vec3* out)
-{
-	qaws_scalar nx = du.y * dv.z - du.z * dv.y;
-	qaws_scalar ny = du.z * dv.x - du.x * dv.z;
-	qaws_scalar nz = du.x * dv.y - du.y * dv.x;
-	qaws_scalar len = QAWS_SQRT(nx * nx + ny * ny + nz * nz);
-	if (len > QAWS_LITERAL(1e-12))
-	{
-		out->x = nx / len; out->y = ny / len; out->z = nz / len;
-	}
-	else
-	{
-		out->x = 0; out->y = 0; out->z = 1;
-	}
-}
-
 /* Catmull-Rom interpolation through points at non-uniform parameters.
    pts[n_pts], params[n_pts], evaluate at parameter t.
    Returns blended position. If out_deriv is non-NULL, also returns derivative w.r.t. t. */
-static void catmull_rom_blend(
-	qaws_vec3 const* pts, qaws_scalar const* params,
-	unsigned int n_pts, qaws_scalar t,
-	qaws_vec3* out_pos, qaws_vec3* out_deriv)
-{
-	unsigned int seg;
-	unsigned int i0, i1, i2, i3;
-	qaws_scalar s, dt;
-	qaws_vec3 m0, m1;
-	qaws_scalar s2, s3;
-	qaws_scalar h00, h10, h01, h11;
-	qaws_scalar dh00, dh10, dh01, dh11;
-	qaws_scalar inv_dt;
-
-	/* Special case: 2 points = linear interpolation */
-	if (n_pts == 2)
-	{
-		qaws_scalar denom = params[1] - params[0];
-		qaws_scalar alpha;
-		if (QAWS_FABS(denom) < QAWS_LITERAL(1e-12))
-			alpha = QAWS_LITERAL(0.5);
-		else
-			alpha = (t - params[0]) / denom;
-		if (alpha < QAWS_ZERO) alpha = QAWS_ZERO;
-		if (alpha > QAWS_ONE) alpha = QAWS_ONE;
-		out_pos->x = (QAWS_ONE - alpha) * pts[0].x + alpha * pts[1].x;
-		out_pos->y = (QAWS_ONE - alpha) * pts[0].y + alpha * pts[1].y;
-		out_pos->z = (QAWS_ONE - alpha) * pts[0].z + alpha * pts[1].z;
-		if (out_deriv)
-		{
-			qaws_scalar inv = (QAWS_FABS(denom) < QAWS_LITERAL(1e-12))
-				? QAWS_ZERO : QAWS_ONE / denom;
-			out_deriv->x = (pts[1].x - pts[0].x) * inv;
-			out_deriv->y = (pts[1].y - pts[0].y) * inv;
-			out_deriv->z = (pts[1].z - pts[0].z) * inv;
-		}
-		return;
-	}
-
-	/* Find segment: params[seg] <= t < params[seg+1] */
-	seg = 0;
-	{
-		unsigned int k;
-		for (k = 0; k < n_pts - 2; k++)
-		{
-			if (t < params[k + 1])
-			{
-				seg = k;
-				break;
-			}
-			seg = k;
-		}
-		if (t >= params[n_pts - 2])
-			seg = n_pts - 2;
-	}
-
-	/* Indices for the 4 surrounding points (clamped) */
-	i1 = seg;
-	i2 = seg + 1;
-	i0 = (seg > 0) ? seg - 1 : 0;
-	i3 = (seg + 2 < n_pts) ? seg + 2 : n_pts - 1;
-
-	/* Local parameter s in [0,1] within the segment */
-	dt = params[i2] - params[i1];
-	if (QAWS_FABS(dt) < QAWS_LITERAL(1e-12))
-	{
-		*out_pos = pts[i1];
-		if (out_deriv)
-		{
-			out_deriv->x = QAWS_ZERO;
-			out_deriv->y = QAWS_ZERO;
-			out_deriv->z = QAWS_ZERO;
-		}
-		return;
-	}
-	s = (t - params[i1]) / dt;
-	if (s < QAWS_ZERO) s = QAWS_ZERO;
-	if (s > QAWS_ONE) s = QAWS_ONE;
-
-	/* Compute tangents at i1 and i2 using Catmull-Rom (non-uniform) */
-	{
-		qaws_scalar dp_prev = params[i2] - params[i0];
-		if (QAWS_FABS(dp_prev) < QAWS_LITERAL(1e-12))
-			dp_prev = QAWS_ONE;
-		m0.x = (pts[i2].x - pts[i0].x) / dp_prev * dt;
-		m0.y = (pts[i2].y - pts[i0].y) / dp_prev * dt;
-		m0.z = (pts[i2].z - pts[i0].z) / dp_prev * dt;
-	}
-	{
-		qaws_scalar dp_next = params[i3] - params[i1];
-		if (QAWS_FABS(dp_next) < QAWS_LITERAL(1e-12))
-			dp_next = QAWS_ONE;
-		m1.x = (pts[i3].x - pts[i1].x) / dp_next * dt;
-		m1.y = (pts[i3].y - pts[i1].y) / dp_next * dt;
-		m1.z = (pts[i3].z - pts[i1].z) / dp_next * dt;
-	}
-
-	/* Hermite basis functions */
-	s2 = s * s;
-	s3 = s2 * s;
-	h00 = QAWS_LITERAL(2.0) * s3 - QAWS_LITERAL(3.0) * s2 + QAWS_ONE;
-	h10 = s3 - QAWS_LITERAL(2.0) * s2 + s;
-	h01 = -QAWS_LITERAL(2.0) * s3 + QAWS_LITERAL(3.0) * s2;
-	h11 = s3 - s2;
-
-	out_pos->x = h00 * pts[i1].x + h10 * m0.x + h01 * pts[i2].x + h11 * m1.x;
-	out_pos->y = h00 * pts[i1].y + h10 * m0.y + h01 * pts[i2].y + h11 * m1.y;
-	out_pos->z = h00 * pts[i1].z + h10 * m0.z + h01 * pts[i2].z + h11 * m1.z;
-
-	if (out_deriv)
-	{
-		/* Derivatives of Hermite basis w.r.t. s */
-		dh00 = QAWS_LITERAL(6.0) * s2 - QAWS_LITERAL(6.0) * s;
-		dh10 = QAWS_LITERAL(3.0) * s2 - QAWS_LITERAL(4.0) * s + QAWS_ONE;
-		dh01 = -QAWS_LITERAL(6.0) * s2 + QAWS_LITERAL(6.0) * s;
-		dh11 = QAWS_LITERAL(3.0) * s2 - QAWS_LITERAL(2.0) * s;
-
-		/* ds/dt = 1/dt, so d/dt = d/ds * (1/dt) */
-		inv_dt = QAWS_ONE / dt;
-		out_deriv->x = (dh00 * pts[i1].x + dh10 * m0.x
-			+ dh01 * pts[i2].x + dh11 * m1.x) * inv_dt;
-		out_deriv->y = (dh00 * pts[i1].y + dh10 * m0.y
-			+ dh01 * pts[i2].y + dh11 * m1.y) * inv_dt;
-		out_deriv->z = (dh00 * pts[i1].z + dh10 * m0.z
-			+ dh01 * pts[i2].z + dh11 * m1.z) * inv_dt;
-	}
-}
-
 /* Evaluate the loft at (u,v) by evaluating each section at u
    then blending in v with Catmull-Rom. */
 static qaws_status loft_surface_eval(
@@ -246,7 +102,7 @@ static qaws_status loft_surface_eval(
 	/* Blend section positions in v via Catmull-Rom */
 	if (need_pos || need_dv)
 	{
-		catmull_rom_blend(sec_pos, impl->v_params, n, v,
+		qaws_internal_surface_catmull_rom_blend(sec_pos, impl->v_params, n, v,
 			&pos, need_dv ? &dv_vec : NULL);
 	}
 
@@ -265,7 +121,7 @@ static qaws_status loft_surface_eval(
 	/* dS/du: blend section derivatives in v with same weights */
 	if (need_du)
 	{
-		catmull_rom_blend(sec_du, impl->v_params, n, v,
+		qaws_internal_surface_catmull_rom_blend(sec_du, impl->v_params, n, v,
 			&du_vec, NULL);
 		if (eval_flags & QAWS_SURFACE_EVAL_DU)
 		{
@@ -349,7 +205,7 @@ static qaws_status loft_surface_eval(
 
 		if (eval_flags & QAWS_SURFACE_EVAL_NORMAL)
 		{
-			compute_normal(out_result->du, out_result->dv, &out_result->normal);
+			qaws_internal_surface_normal(out_result->du, out_result->dv, &out_result->normal);
 			out_result->valid_flags |= QAWS_SURFACE_EVAL_NORMAL;
 		}
 	}

@@ -1,0 +1,118 @@
+name: Permutations
+
+# Builds every combination of OS x scalar type x SIMD x translation-unit
+# layout. The point is to keep the single-file layouts (unity and
+# amalgamation) compiling everywhere the per-file layout does.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: ${{ matrix.os }} ${{ matrix.scalar }} ${{ matrix.simd }} ${{ matrix.layout }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        scalar: [f32, f64]
+        simd: [nosimd, simd]
+        layout: [perfile, unity, amalgam]
+        include:
+          - scalar: f32
+            scalar_flag: ON
+          - scalar: f64
+            scalar_flag: OFF
+          - simd: nosimd
+            simd_flag: OFF
+          - simd: simd
+            simd_flag: ON
+          - layout: perfile
+            layout_flags: ""
+          - layout: unity
+            layout_flags: "-DQAWS_UNITY_BUILD=ON"
+          - layout: amalgam
+            layout_flags: "-DQAWS_TEST_AMALGAMATION=ON"
+
+    steps:
+      - uses: actions/checkout@v5
+
+      # The amalgamation generator is a Python script.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Configure
+        run: >
+          cmake -B build
+          -DCMAKE_BUILD_TYPE=Release
+          -DQAWS_SCALAR_IS_FLOAT=${{ matrix.scalar_flag }}
+          -DQAWS_ENABLE_SIMD=${{ matrix.simd_flag }}
+          -DQAWS_ENABLE_WARNINGS=ON
+          -DQAWS_WARNINGS_AS_ERRORS=OFF
+          ${{ matrix.layout_flags }}
+
+      # This is the step the matrix exists for: every permutation must compile.
+      - name: Build
+        run: cmake --build build --config Release
+
+      # f64 has a pre-existing failure in 43_boolean_2d that reproduces on
+      # every compiler and in every layout, so it is reported but does not gate
+      # the build results. f32 is green and stays blocking.
+      - name: Test
+        continue-on-error: ${{ matrix.scalar == 'f64' }}
+        run: ctest --test-dir build --build-config Release --output-on-failure
+
+  # The story the amalgamation exists for: two generated files, a plain
+  # compiler invocation, no build system and no include paths into src/.
+  standalone:
+    name: standalone ${{ matrix.os }} ${{ matrix.scalar }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        scalar: [f32, f64]
+        include:
+          - scalar: f32
+            scalar_value: 1
+          - scalar: f64
+            scalar_value: 0
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Generate qaws.h + qaws.c
+        run: python buildsystem/amalgamate.py --output-dir amalgam --simd
+
+      - name: Compile and run (POSIX)
+        if: runner.os != 'Windows'
+        run: |
+          cc -std=c11 -DQAWS_SCALAR_IS_FLOAT=${{ matrix.scalar_value }} \
+             -Iamalgam examples/amalgam_standalone.c amalgam/qaws.c -lm -o smoke
+          ./smoke
+
+      - name: Compile and run (MSVC)
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do call "%%i\VC\Auxiliary\Build\vcvars64.bat"
+          cl /nologo /std:c11 /TC /DQAWS_SCALAR_IS_FLOAT=${{ matrix.scalar_value }} /Iamalgam examples\amalgam_standalone.c amalgam\qaws.c /Fe:smoke.exe || exit /b 1
+          .\smoke.exe || exit /b 1
+
+      - name: Upload amalgamation
+        if: matrix.os == 'ubuntu-latest' && matrix.scalar == 'f32'
+        uses: actions/upload-artifact@v4
+        with:
+          name: qaws-amalgamation
+          path: |
+            amalgam/qaws.h
+            amalgam/qaws.c

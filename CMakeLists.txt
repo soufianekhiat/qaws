@@ -31,6 +31,16 @@ option(QAWS_ENABLE_SIMD "Enable SIMD batch evaluation (auto-detect ISA)" OFF)
 option(QAWS_INSTALL "Enable install rules" ON)
 option(QAWS_INSTALL_PKGCONFIG "Install pkg-config .pc file" ON)
 
+# Single translation unit builds.
+option(QAWS_UNITY_BUILD "Compile the library as one translation unit" OFF)
+option(QAWS_AMALGAMATION "Generate and build the qaws.h + qaws.c amalgamation" OFF)
+option(QAWS_TEST_AMALGAMATION "Run the test suite against the amalgamated library" OFF)
+
+if(QAWS_TEST_AMALGAMATION AND NOT QAWS_AMALGAMATION)
+  set(QAWS_AMALGAMATION ON CACHE BOOL "" FORCE)
+  message(STATUS "QAWS_TEST_AMALGAMATION implies QAWS_AMALGAMATION")
+endif()
+
 set(QAWS_DEBUG_POSTFIX "d" CACHE STRING "Debug postfix for output names (e.g. 'd' -> qawsd)")
 set(QAWS_DEBUG_PREFIX "" CACHE STRING "Debug prefix for output names (e.g. 'dbg_' -> dbg_qaws)")
 
@@ -108,19 +118,120 @@ if(QAWS_ENABLE_SIMD)
   )
 endif()
 
+# ===================================================================
+# Toolchain probing. Done once, then applied to every library target.
+# ===================================================================
+
+if(QAWS_ENABLE_SIMD)
+  include(CheckCSourceCompiles)
+  check_c_source_compiles("
+    #include <immintrin.h>
+    int main() { __m256 v = _mm256_setzero_ps(); (void)v; return 0; }" QAWS_HAS_AVX2)
+  check_c_source_compiles("
+    #include <emmintrin.h>
+    int main() { __m128 v = _mm_setzero_ps(); (void)v; return 0; }" QAWS_HAS_SSE2)
+  check_c_source_compiles("
+    #include <arm_neon.h>
+    int main() { float32x4_t v = vdupq_n_f32(0); (void)v; return 0; }" QAWS_HAS_NEON)
+
+  set(QAWS_SIMD_DEFINE "")
+  set(QAWS_SIMD_OPTIONS "")
+  if(QAWS_HAS_AVX2)
+    set(QAWS_SIMD_DEFINE QAWS_SIMD_AVX2=1)
+    if(MSVC)
+      set(QAWS_SIMD_OPTIONS /arch:AVX2)
+    else()
+      set(QAWS_SIMD_OPTIONS -mavx2 -mfma)
+    endif()
+  elseif(QAWS_HAS_SSE2)
+    set(QAWS_SIMD_DEFINE QAWS_SIMD_SSE2=1)
+  elseif(QAWS_HAS_NEON)
+    set(QAWS_SIMD_DEFINE QAWS_SIMD_NEON=1)
+  endif()
+endif()
+
+if(QAWS_DISABLE_STRICT_ALIASING AND NOT MSVC)
+  check_c_compiler_flag(-fno-strict-aliasing QAWS_HAS_NO_STRICT_ALIASING)
+endif()
+
+# Everything that must hold for both the per-file library and the
+# amalgamated one. Keeping it in a function stops the two drifting apart.
+function(qaws_configure_target target)
+  set_target_properties(
+    ${target}
+    PROPERTIES
+      C_STANDARD 11
+      C_STANDARD_REQUIRED YES
+      C_EXTENSIONS NO
+      POSITION_INDEPENDENT_CODE ON
+  )
+
+  target_compile_definitions(
+    ${target}
+    PUBLIC
+      QAWS_SCALAR_IS_FLOAT=${_QAWS_SCALAR_IS_FLOAT_VALUE}
+  )
+
+  if(MSVC)
+    target_compile_definitions(${target} PRIVATE _CRT_SECURE_NO_WARNINGS NOMINMAX)
+  endif()
+
+  if(NOT WIN32)
+    target_link_libraries(${target} PUBLIC m)
+  endif()
+
+  if(WIN32 AND BUILD_SHARED_LIBS)
+    set_target_properties(${target} PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
+  endif()
+
+  if(QAWS_ENABLE_WARNINGS)
+    if(MSVC)
+      target_compile_options(${target} PRIVATE /W4)
+      if(QAWS_WARNINGS_AS_ERRORS)
+        target_compile_options(${target} PRIVATE /WX)
+      endif()
+    else()
+      target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic)
+      if(QAWS_WARNINGS_AS_ERRORS)
+        target_compile_options(${target} PRIVATE -Werror)
+      endif()
+    endif()
+  endif()
+
+  if(QAWS_ENABLE_SIMD AND QAWS_SIMD_DEFINE)
+    target_compile_definitions(${target} PRIVATE ${QAWS_SIMD_DEFINE})
+    if(QAWS_SIMD_OPTIONS)
+      target_compile_options(${target} PRIVATE ${QAWS_SIMD_OPTIONS})
+    endif()
+  endif()
+
+  if(QAWS_HAS_NO_STRICT_ALIASING)
+    target_compile_options(${target} PRIVATE -fno-strict-aliasing)
+  endif()
+endfunction()
+
 add_library(qaws ${QAWS_SOURCES})
 add_library(Qaws::qaws ALIAS qaws)
+
+qaws_configure_target(qaws)
 
 set_target_properties(
   qaws
   PROPERTIES
-    C_STANDARD 11
-    C_STANDARD_REQUIRED YES
-    C_EXTENSIONS NO
-    POSITION_INDEPENDENT_CODE ON
     VERSION ${PROJECT_VERSION}
     SOVERSION ${PROJECT_VERSION_MAJOR}
 )
+
+if(QAWS_UNITY_BUILD)
+  # BATCH_SIZE 0 folds every source into a single translation unit.
+  set_target_properties(
+    qaws
+    PROPERTIES
+      UNITY_BUILD ON
+      UNITY_BUILD_MODE BATCH
+      UNITY_BUILD_BATCH_SIZE 0
+  )
+endif()
 
 if(QAWS_DEBUG_POSTFIX)
   set_target_properties(qaws PROPERTIES DEBUG_POSTFIX "${QAWS_DEBUG_POSTFIX}")
@@ -136,68 +247,62 @@ target_include_directories(
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 
-target_compile_definitions(
-  qaws
-  PUBLIC
-    QAWS_SCALAR_IS_FLOAT=${_QAWS_SCALAR_IS_FLOAT_VALUE}
-)
+# ===================================================================
+# Amalgamation: qaws.h + qaws.c, for consumers with no build system.
+# ===================================================================
 
-if(MSVC)
-  target_compile_definitions(qaws PRIVATE _CRT_SECURE_NO_WARNINGS NOMINMAX)
-endif()
+set(QAWS_AMALGAMATION_DIR "${CMAKE_CURRENT_BINARY_DIR}/amalgam"
+    CACHE PATH "Directory the generated qaws.h/qaws.c are written to")
 
-if(NOT WIN32)
-  target_link_libraries(qaws PUBLIC m)
-endif()
+find_package(Python3 COMPONENTS Interpreter QUIET)
 
-if(WIN32 AND BUILD_SHARED_LIBS)
-  set_target_properties(qaws PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
-endif()
-
-if(QAWS_ENABLE_WARNINGS)
-  if(MSVC)
-    target_compile_options(qaws PRIVATE /W4)
-    if(QAWS_WARNINGS_AS_ERRORS)
-      target_compile_options(qaws PRIVATE /WX)
-    endif()
-  else()
-    target_compile_options(qaws PRIVATE -Wall -Wextra -Wpedantic)
-    if(QAWS_WARNINGS_AS_ERRORS)
-      target_compile_options(qaws PRIVATE -Werror)
-    endif()
+if(Python3_Interpreter_FOUND)
+  set(_QAWS_AMALGAMATE_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/buildsystem/amalgamate.py")
+  set(_QAWS_AMALGAMATE_ARGS
+    "--source-dir" "${CMAKE_CURRENT_SOURCE_DIR}/src/qaws"
+    "--output-dir" "${QAWS_AMALGAMATION_DIR}"
+  )
+  if(QAWS_ENABLE_SIMD)
+    list(APPEND _QAWS_AMALGAMATE_ARGS "--simd")
   endif()
+
+  set(QAWS_AMALGAMATION_HEADER "${QAWS_AMALGAMATION_DIR}/qaws.h")
+  set(QAWS_AMALGAMATION_SOURCE "${QAWS_AMALGAMATION_DIR}/qaws.c")
+
+  # The generator inlines headers as well as sources, so both must retrigger it.
+  file(GLOB_RECURSE _QAWS_AMALGAMATE_INPUTS CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/qaws/*.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/qaws/*.h"
+  )
+
+  add_custom_command(
+    OUTPUT ${QAWS_AMALGAMATION_HEADER} ${QAWS_AMALGAMATION_SOURCE}
+    COMMAND ${Python3_EXECUTABLE} "${_QAWS_AMALGAMATE_SCRIPT}" ${_QAWS_AMALGAMATE_ARGS}
+    DEPENDS ${_QAWS_AMALGAMATE_SCRIPT} ${_QAWS_AMALGAMATE_INPUTS}
+    COMMENT "Generating amalgamation in ${QAWS_AMALGAMATION_DIR}"
+    VERBATIM
+  )
+
+  # Convenience target: `cmake --build . --target amalgamate` and nothing else.
+  add_custom_target(
+    amalgamate
+    DEPENDS ${QAWS_AMALGAMATION_HEADER} ${QAWS_AMALGAMATION_SOURCE}
+  )
+elseif(QAWS_AMALGAMATION)
+  message(FATAL_ERROR "QAWS_AMALGAMATION requires a Python 3 interpreter")
 endif()
 
-if(QAWS_ENABLE_SIMD)
-  include(CheckCSourceCompiles)
-  check_c_source_compiles("
-    #include <immintrin.h>
-    int main() { __m256 v = _mm256_setzero_ps(); (void)v; return 0; }" QAWS_HAS_AVX2)
-  check_c_source_compiles("
-    #include <emmintrin.h>
-    int main() { __m128 v = _mm_setzero_ps(); (void)v; return 0; }" QAWS_HAS_SSE2)
-  check_c_source_compiles("
-    #include <arm_neon.h>
-    int main() { float32x4_t v = vdupq_n_f32(0); (void)v; return 0; }" QAWS_HAS_NEON)
-  if(QAWS_HAS_AVX2)
-    target_compile_definitions(qaws PRIVATE QAWS_SIMD_AVX2=1)
-    if(MSVC)
-      target_compile_options(qaws PRIVATE /arch:AVX2)
-    else()
-      target_compile_options(qaws PRIVATE -mavx2 -mfma)
-    endif()
-  elseif(QAWS_HAS_SSE2)
-    target_compile_definitions(qaws PRIVATE QAWS_SIMD_SSE2=1)
-  elseif(QAWS_HAS_NEON)
-    target_compile_definitions(qaws PRIVATE QAWS_SIMD_NEON=1)
-  endif()
-endif()
+if(QAWS_AMALGAMATION)
+  add_library(qaws_amalgam ${QAWS_AMALGAMATION_SOURCE})
+  add_library(Qaws::amalgam ALIAS qaws_amalgam)
 
-if(QAWS_DISABLE_STRICT_ALIASING AND NOT MSVC)
-  check_c_compiler_flag(-fno-strict-aliasing QAWS_HAS_NO_STRICT_ALIASING)
-  if(QAWS_HAS_NO_STRICT_ALIASING)
-    target_compile_options(qaws PRIVATE -fno-strict-aliasing)
-  endif()
+  qaws_configure_target(qaws_amalgam)
+
+  # The generated qaws.c includes "qaws.h" from its own directory.
+  target_include_directories(
+    qaws_amalgam
+    PUBLIC $<BUILD_INTERFACE:${QAWS_AMALGAMATION_DIR}>
+  )
 endif()
 
 if(BUILD_TESTING)
