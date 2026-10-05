@@ -42,6 +42,7 @@
 # endif
 
 #elif QAWS_BACKEND == QAWS_BACKEND_HLSL
+  typedef float qaws_scalar;
 # define QAWS_SCALAR_IS_FLOAT 1
 # define QAWS_LITERAL(x) (x)
 # define QAWS_EPSILON 1e-6f
@@ -93,7 +94,7 @@
 #elif QAWS_BACKEND == QAWS_BACKEND_HLSL
 # define QAWS_INLINE     inline
 # define QAWS_CONSTEXPR  static const
-# define QAWS_TYPE_DEF
+# define QAWS_TYPE_DEF   typedef
 # define QAWS_OUT        out
 # define QAWS_INOUT      inout
 

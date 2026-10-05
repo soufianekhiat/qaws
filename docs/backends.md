@@ -188,6 +188,7 @@ Complete working examples are in the `examples/` directory:
 | `eval_cubic_poly.comp` | GLSL | Hermite/CatRom cubic polynomial |
 | `eval_bspline.hlsl` | HLSL | B-spline with knot span search |
 | `eval_bspline.comp` | GLSL | B-spline with knot span search |
+| `diff_bspline_adjoint.hlsl` | HLSL | B-spline tangents, gather adjoint (one thread per control point) and parameter adjoints |
 
 ## See also
 

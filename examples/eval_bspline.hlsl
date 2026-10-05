@@ -23,13 +23,16 @@ void CSMain(uint3 id : SV_DispatchThreadID)
     float t_max = knots[num_cp];
     float t = t_min + (float)id.x / (float)(sample_count - 1) * (t_max - t_min);
 
-    /* Find knot span */
+    /* Find knot span on the full knot vector */
+    float all_knots[QAWS_CORE_MAX_POINTS * 2];
     float local_knots[QAWS_CORE_MAX_POINTS * 2];
     float local_cp[QAWS_CORE_MAX_POINTS * 2];
-    int span = qaws_find_span(local_knots, (int)degree, (int)num_cp, t);
+    int j;
+    for (j = 0; j < QAWS_CORE_MAX_POINTS * 2; j++)
+        all_knots[j] = j < (int)(num_cp + degree + 1) ? knots[j] : 0.0;
+    int span = qaws_find_span(all_knots, (int)degree, (int)num_cp, t);
 
     /* Extract local knot window and control points */
-    int j;
     for (j = 0; j < (int)(2 * (degree + 1)); j++)
         local_knots[j] = knots[span - (int)degree + j];
 

@@ -425,6 +425,7 @@ if(QAWS_INSTALL)
       src/qaws/core/qaws_arc_core.h
       src/qaws/core/qaws_surface_core.h
       src/qaws/core/qaws_dual_core.h
+      src/qaws/core/qaws_bspline_diff_core.h
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/core
   )
 
