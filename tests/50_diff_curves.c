@@ -16,8 +16,8 @@
 #define MAX_PARAMS 64
 #define SAMPLE_COUNT 9
 
-/* Weights are scalar fields; every other field has one value per dimension. */
-#define FIELD_COMPS(f, r) ((f)->fields[r] == QAWS_FIELD_WEIGHTS ? 1u : (f)->dim)
+/* Weights and knots are scalar fields; every other field has one value per dimension. */
+#define FIELD_COMPS(f, r) (((f)->fields[r] == QAWS_FIELD_WEIGHTS || (f)->fields[r] == QAWS_FIELD_KNOTS) ? 1u : (f)->dim)
 
 /* ------------------------------------------------------------------ */
 /*  Family fixtures                                                   */
@@ -57,6 +57,19 @@ static qaws_status create_bspline(family const* f, qaws_scalar const* const* p, 
 	d.control_point_count = f->counts[0];
 	d.knots = f->knots;
 	d.knot_count = f->knot_count;
+	return qaws_curve_create_bspline(&d, out);
+}
+
+static qaws_status create_bspline_knots(family const* f, qaws_scalar const* const* p, qaws_curve** out)
+{
+	qaws_bspline_desc d;
+	memset(&d, 0, sizeof(d));
+	d.dimension = (qaws_dimension)f->dim;
+	d.degree = f->counts[1] - f->counts[0] - 1;
+	d.control_points = p[0];
+	d.control_point_count = f->counts[0];
+	d.knots = p[1];
+	d.knot_count = f->counts[1];
 	return qaws_curve_create_bspline(&d, out);
 }
 
@@ -115,7 +128,7 @@ static void make_families(family* fams, unsigned int* count)
 {
 	unsigned int i;
 	family* f;
-	memset(fams, 0, sizeof(family) * 6);
+	memset(fams, 0, sizeof(family) * 7);
 	diff_seed(2024);
 
 	f = &fams[0];
@@ -199,7 +212,26 @@ static void make_families(family* fams, unsigned int* count)
 	f->create = create_rational_bezier;
 	f->t_min = 0; f->t_max = 1;
 
-	*count = 6;
+
+	/* Knots as a differentiable field: unclamped so every knot can move
+	   both ways, samples kept away from knots (d3 jumps there). */
+	f = &fams[6];
+	f->name = "bspline_knots";
+	f->dim = 2;
+	f->field_count = 2;
+	f->fields[0] = QAWS_FIELD_CONTROL_POINTS;
+	f->fields[1] = QAWS_FIELD_KNOTS;
+	f->counts[0] = 7;
+	f->counts[1] = 11;
+	diff_rand_fill(f->params[0], 7 * 2);
+	{
+		static qaws_scalar const k[11] = { 0.1f, 0.6f, 1.0f, 1.5f, 2.13f, 2.58f, 3.03f, 3.5f, 3.9f, 4.4f, 4.8f };
+		for (i = 0; i < 11; i++) f->params[1][i] = k[i];
+	}
+	f->create = create_bspline_knots;
+	f->t_min = 1.5f; f->t_max = 3.5f;
+
+	*count = 7;
 }
 
 static qaws_curve* family_curve(family const* f, qaws_scalar const (*params)[MAX_PARAMS])
@@ -494,8 +526,11 @@ static void check_tangent2(family const* f, qaws_curve const* c)
 			double fx = (tgp.d[k].x - tgm.d[k].x) / (2 * h);
 			double fy = (tgp.d[k].y - tgm.d[k].y) / (2 * h);
 			double fz = (tgp.d[k].z - tgm.d[k].z) / (2 * h);
-			if (!diff_close(fx, tt.d[k].x, DIFF_TOL * 50) || !diff_close(fy, tt.d[k].y, DIFF_TOL * 50) ||
-			    !diff_close(fz, tt.d[k].z, DIFF_TOL * 50))
+			/* relative to the vector: small components of large jets carry its rounding */
+			double scale = fabs(tt.d[k].x) + fabs(tt.d[k].y) + fabs(tt.d[k].z);
+			if (!diff_close(fx / (1 + scale), tt.d[k].x / (1 + scale), DIFF_TOL * 50) ||
+			    !diff_close(fy / (1 + scale), tt.d[k].y / (1 + scale), DIFF_TOL * 50) ||
+			    !diff_close(fz / (1 + scale), tt.d[k].z / (1 + scale), DIFF_TOL * 50))
 				ok = 0;
 		}
 		qaws_curve_destroy(cp);
@@ -507,7 +542,7 @@ static void check_tangent2(family const* f, qaws_curve const* c)
 
 static void test_curve_families(void)
 {
-	family fams[6];
+	family fams[7];
 	unsigned int n, i;
 	make_families(fams, &n);
 	for (i = 0; i < n; i++)
@@ -682,7 +717,8 @@ static void test_schema(void)
 	TEST_ASSERT(fields[0].field == QAWS_FIELD_CONTROL_POINTS && fields[0].domain == QAWS_DOMAIN_POSITION &&
 		fields[0].count == 7 && fields[0].value_type == QAWS_VALUE_VEC3, "control point schema");
 	TEST_ASSERT(fields[1].field == QAWS_FIELD_KNOTS && fields[1].constraint == QAWS_CONSTRAINT_MONOTONIC &&
-		fields[1].capabilities == 0, "knots are monotonic and not yet differentiable");
+		(fields[1].capabilities & QAWS_CAP_ADJOINT) && !(fields[1].capabilities & QAWS_CAP_LINEAR),
+		"knots are monotonic and differentiable (non-linear)");
 	TEST_ASSERT(qaws_curve_describe_fields(c, fields, 1, &n) == QAWS_STATUS_BUFFER_TOO_SMALL && n == 2,
 		"describe reports required capacity");
 

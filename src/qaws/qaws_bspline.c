@@ -361,7 +361,7 @@ static unsigned int bspline_describe_fields(qaws_curve const *curve, qaws_field_
 	if (capacity >= 2)
 		out[1] = qaws_internal_field_desc(QAWS_FIELD_KNOTS, QAWS_VALUE_SCALAR,
 			impl->knot_count, QAWS_DOMAIN_PARAMETRIC, QAWS_CONSTRAINT_MONOTONIC,
-			QAWS_DIFF_UNSUPPORTED, 0u);
+			QAWS_DIFF_PIECEWISE_SMOOTH, QAWS_CAP_TANGENT | QAWS_CAP_ADJOINT | QAWS_CAP_TANGENT2);
 	return 2;
 }
 

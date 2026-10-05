@@ -3,6 +3,9 @@
 #include "qaws_curve.h"
 #include "qaws_operations.h"
 #include "qaws_convert.h"
+#include "qaws_export.h"
+#include "internal/qaws_internal_basis.h"
+#include <math.h>
 #include "internal/qaws_internal_types.h"
 #include "internal/qaws_internal_curve.h"
 #include "internal/qaws_internal_diff.h"
@@ -680,4 +683,411 @@ qaws_status qaws_curve_reduce_degree_diff(qaws_curve const* curve,
 	if (!curve || !out_reduced)
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	return run_with_map(&curve, 1, 0, out_reduced, 1, construct_reduce, NULL, out_map);
+}
+
+/* ================================================================== */
+/*  Least-squares B-spline fit                                         */
+/*                                                                    */
+/*  The fit solves A Q = r with A = N^T N over interior samples and    */
+/*  r = N^T (D - endpoint terms). One forward sweep per input          */
+/*  direction differentiates parameters, averaged knots, the basis     */
+/*  (Cox-de Boor in dual numbers) and the solve: A dQ = dr - dA Q,     */
+/*  with A factored once. Spans stay at their primal values.           */
+/* ================================================================== */
+
+typedef struct fit_dual
+{
+	double v, d;
+} fit_dual;
+
+/* Basis values and derivatives N[0..p] on a frozen span (Piegl A2.2). */
+static void fit_basis_dual(fit_dual const* knots, unsigned int p, unsigned int span, fit_dual t, fit_dual* N)
+{
+	fit_dual left[QAWS_DIFF_MAX_SUPPORT + 1], right[QAWS_DIFF_MAX_SUPPORT + 1];
+	unsigned int j, r;
+	N[0].v = 1;
+	N[0].d = 0;
+	for (j = 1; j <= p; j++)
+	{
+		fit_dual saved = { 0, 0 };
+		left[j].v = t.v - knots[span + 1 - j].v;
+		left[j].d = t.d - knots[span + 1 - j].d;
+		right[j].v = knots[span + j].v - t.v;
+		right[j].d = knots[span + j].d - t.d;
+		for (r = 0; r < j; r++)
+		{
+			fit_dual den, tmp;
+			den.v = right[r + 1].v + left[j - r].v;
+			den.d = right[r + 1].d + left[j - r].d;
+			tmp.v = N[r].v / den.v;
+			tmp.d = (N[r].d - tmp.v * den.d) / den.v;
+			N[r].v = saved.v + right[r + 1].v * tmp.v;
+			N[r].d = saved.d + right[r + 1].d * tmp.v + right[r + 1].v * tmp.d;
+			saved.v = left[j - r].v * tmp.v;
+			saved.d = left[j - r].d * tmp.v + left[j - r].v * tmp.d;
+		}
+		N[j] = saved;
+	}
+}
+
+typedef struct fit_state
+{
+	unsigned int m, n, p, dim, sys, kc;
+	int chord;
+	double* data;              /* m * dim */
+	qaws_scalar* params;       /* m, as the fit computes them */
+	qaws_scalar* knots;        /* kc */
+	unsigned int* spans;       /* m */
+	unsigned int* knot_src;    /* interior knot p + j averages samples knot_src[j] - 1, knot_src[j] */
+	double* knot_alpha;        /* kc */
+	double* chol;              /* sys * sys lower factor of A */
+	double* q;                 /* n * dim fitted control points */
+	/* per-direction scratch */
+	double *dt, *cum, *dknots, *dr, *dq;
+	fit_dual* kd;
+} fit_state;
+
+/* Directional derivative of the control points (s->dq) and knots
+   (s->dknots) for a data direction dD (m * dim, or NULL) and a parameter
+   direction dt_in (m, or NULL; only used with given parameters). */
+static void fit_directional(fit_state* s, double const* dD, double const* dt_in)
+{
+	unsigned int m = s->m, n = s->n, p = s->p, dim = s->dim, sys = s->sys;
+	unsigned int i, j, k, d;
+	double* dt = s->dt;
+
+	/* Parameters. */
+	for (k = 0; k < m; k++)
+		dt[k] = dt_in && !s->chord ? dt_in[k] : 0.0;
+	if (s->chord && dD)
+	{
+		double total = 0, dtotal = 0;
+		s->cum[0] = 0;
+		for (k = 1; k < m; k++)
+		{
+			double len2 = 0, dlen2 = 0, len;
+			for (d = 0; d < dim; d++)
+			{
+				double a = s->data[k * dim + d] - s->data[(k - 1) * dim + d];
+				double da = dD[k * dim + d] - dD[(k - 1) * dim + d];
+				len2 += a * a;
+				dlen2 += a * da;
+			}
+			len = sqrt(len2);
+			total += len;
+			dtotal += len > 0 ? dlen2 / len : 0.0;
+			s->cum[k] = dtotal;
+		}
+		if (total > 0)
+			for (k = 1; k + 1 < m; k++)
+				dt[k] = (s->cum[k] - (double)s->params[k] * dtotal) / total;
+		dt[0] = 0;
+		dt[m - 1] = 0;
+	}
+
+	/* Averaged knots. */
+	for (j = 0; j < s->kc; j++)
+		s->dknots[j] = 0;
+	for (j = 1; j + p < n; j++)
+		s->dknots[p + j] = (1.0 - s->knot_alpha[j]) * dt[s->knot_src[j] - 1] + s->knot_alpha[j] * dt[s->knot_src[j]];
+	for (j = 0; j < s->kc; j++)
+	{
+		s->kd[j].v = (double)s->knots[j];
+		s->kd[j].d = s->dknots[j];
+	}
+
+	/* dr - dA Q over interior samples: sum_k dN_j (R_k - N Q) + N_j (dR_k - dN Q). */
+	for (i = 0; i < sys * dim; i++)
+		s->dr[i] = 0;
+	for (k = 1; k + 1 < m; k++)
+	{
+		fit_dual N[QAWS_DIFF_MAX_SUPPORT + 1], t;
+		unsigned int span = s->spans[k];
+		t.v = (double)s->params[k];
+		t.d = dt[k];
+		fit_basis_dual(s->kd, p, span, t, N);
+		for (d = 0; d < dim; d++)
+		{
+			double R = s->data[k * dim + d], dR = dD ? dD[k * dim + d] : 0.0;
+			double nq = 0, dnq = 0;
+			for (j = 0; j <= p; j++)
+			{
+				int cp = (int)span - (int)p + (int)j;
+				if (cp == 0)
+				{
+					R -= N[j].v * s->data[d];
+					dR -= N[j].d * s->data[d] + N[j].v * (dD ? dD[d] : 0.0);
+				}
+				else if (cp == (int)(n - 1))
+				{
+					R -= N[j].v * s->data[(m - 1) * dim + d];
+					dR -= N[j].d * s->data[(m - 1) * dim + d] + N[j].v * (dD ? dD[(m - 1) * dim + d] : 0.0);
+				}
+				else
+				{
+					nq += N[j].v * s->q[(unsigned int)cp * dim + d];
+					dnq += N[j].d * s->q[(unsigned int)cp * dim + d];
+				}
+			}
+			for (j = 0; j <= p; j++)
+			{
+				int cp = (int)span - (int)p + (int)j;
+				if (cp < 1 || cp > (int)(n - 2))
+					continue;
+				s->dr[d * sys + (unsigned int)(cp - 1)] += N[j].d * (R - nq) + N[j].v * (dR - dnq);
+			}
+		}
+	}
+
+	/* L L^T x = dr. */
+	for (d = 0; d < dim; d++)
+	{
+		double* b = &s->dr[d * sys];
+		for (i = 0; i < sys; i++)
+		{
+			double v = b[i];
+			for (j = 0; j < i; j++)
+				v -= s->chol[i * sys + j] * b[j];
+			b[i] = v / s->chol[i * sys + i];
+		}
+		for (i = sys; i-- > 0;)
+		{
+			double v = b[i];
+			for (j = i + 1; j < sys; j++)
+				v -= s->chol[j * sys + i] * b[j];
+			b[i] = v / s->chol[i * sys + i];
+		}
+	}
+	for (d = 0; d < dim; d++)
+	{
+		s->dq[d] = dD ? dD[d] : 0.0;
+		s->dq[(n - 1) * dim + d] = dD ? dD[(m - 1) * dim + d] : 0.0;
+		for (i = 0; i < sys; i++)
+			s->dq[(i + 1) * dim + d] = s->dr[d * sys + i];
+	}
+}
+
+static qaws_status fit_emit(qaws_diff_map* m, fit_state const* s, unsigned int in_obj, qaws_diff_field in_field,
+	unsigned int in_elem, unsigned int in_comp)
+{
+	unsigned int j, d;
+	qaws_status st = QAWS_STATUS_OK;
+	for (j = 0; j < s->n && st == QAWS_STATUS_OK; j++)
+		for (d = 0; d < s->dim && st == QAWS_STATUS_OK; d++)
+			if (s->dq[j * s->dim + d] != 0.0)
+				st = map_add(m, 0, QAWS_FIELD_CONTROL_POINTS, j, d, in_obj, in_field, in_elem, in_comp,
+					(qaws_scalar)s->dq[j * s->dim + d]);
+	for (j = 0; j < s->kc && st == QAWS_STATUS_OK; j++)
+		if (s->dknots[j] != 0.0)
+			st = map_add(m, 0, QAWS_FIELD_KNOTS, j, 0, in_obj, in_field, in_elem, in_comp, (qaws_scalar)s->dknots[j]);
+	return st;
+}
+
+/* Parameters, knots, spans and the Cholesky factor of A at the fit. */
+static qaws_status fit_prepare(fit_state* s, struct qaws_bspline_fit_desc const* desc, qaws_curve const* curve,
+	qaws_scalar* cps, double* A)
+{
+	unsigned int i, j, k, d, got;
+	qaws_scalar const* dp = (qaws_scalar const*)desc->data_points;
+	qaws_status st;
+
+	for (i = 0; i < s->m * s->dim; i++)
+		s->data[i] = (double)dp[i];
+	if (desc->parameters)
+		memcpy(s->params, desc->parameters, sizeof(qaws_scalar) * s->m);
+	else
+	{
+		qaws_scalar total = 0;
+		s->params[0] = 0;
+		for (k = 1; k < s->m; k++)
+		{
+			qaws_scalar l2 = 0;
+			for (d = 0; d < s->dim; d++)
+			{
+				qaws_scalar a = dp[k * s->dim + d] - dp[(k - 1) * s->dim + d];
+				l2 += a * a;
+			}
+			total += QAWS_SQRT(l2);
+			s->params[k] = total;
+		}
+		if (total > 0)
+			for (k = 1; k < s->m; k++)
+				s->params[k] /= total;
+		s->params[s->m - 1] = QAWS_ONE;
+	}
+	st = qaws_curve_read_field(curve, QAWS_FIELD_KNOTS, s->knots, s->kc, &got);
+	if (st == QAWS_STATUS_OK)
+		st = qaws_curve_read_field(curve, QAWS_FIELD_CONTROL_POINTS, cps, s->n * s->dim, &got);
+	if (st != QAWS_STATUS_OK)
+		return st;
+	for (i = 0; i < s->n * s->dim; i++)
+		s->q[i] = (double)cps[i];
+	{
+		qaws_scalar dfl = (qaws_scalar)(s->m - 1) / (qaws_scalar)(s->n - s->p);
+		for (j = 1; j + s->p < s->n; j++)
+		{
+			qaws_scalar jd = (qaws_scalar)j * dfl;
+			unsigned int ii = (unsigned int)jd;
+			s->knot_src[j] = ii;
+			s->knot_alpha[j] = (double)(jd - (qaws_scalar)ii);
+		}
+	}
+	for (k = 0; k < s->m; k++)
+		s->spans[k] = qaws_internal_find_knot_span(s->knots, s->kc, s->p, s->n, s->params[k]);
+
+	for (j = 0; j < s->kc; j++)
+	{
+		s->kd[j].v = (double)s->knots[j];
+		s->kd[j].d = 0;
+	}
+	for (i = 0; i < s->sys * s->sys; i++)
+		A[i] = 0;
+	for (k = 1; k + 1 < s->m; k++)
+	{
+		fit_dual N[QAWS_DIFF_MAX_SUPPORT + 1], t;
+		unsigned int a, b;
+		t.v = (double)s->params[k];
+		t.d = 0;
+		fit_basis_dual(s->kd, s->p, s->spans[k], t, N);
+		for (a = 0; a <= s->p; a++)
+		{
+			int ca = (int)s->spans[k] - (int)s->p + (int)a;
+			if (ca < 1 || ca > (int)(s->n - 2))
+				continue;
+			for (b = 0; b <= s->p; b++)
+			{
+				int cb = (int)s->spans[k] - (int)s->p + (int)b;
+				if (cb >= 1 && cb <= (int)(s->n - 2))
+					A[(unsigned int)(ca - 1) * s->sys + (unsigned int)(cb - 1)] += N[a].v * N[b].v;
+			}
+		}
+	}
+	for (i = 0; i < s->sys; i++)
+		for (j = 0; j <= i; j++)
+		{
+			double v = A[i * s->sys + j];
+			for (k = 0; k < j; k++)
+				v -= s->chol[i * s->sys + k] * s->chol[j * s->sys + k];
+			if (i == j)
+			{
+				if (v <= 0)
+					return QAWS_STATUS_NUMERICAL_FAILURE;
+				s->chol[i * s->sys + i] = sqrt(v);
+			}
+			else
+				s->chol[i * s->sys + j] = v / s->chol[j * s->sys + j];
+		}
+	return QAWS_STATUS_OK;
+}
+
+qaws_status qaws_curve_fit_bspline_diff(struct qaws_bspline_fit_desc const* desc, qaws_curve** out_curve,
+	qaws_diff_map** out_map)
+{
+	fit_state s;
+	qaws_diff_map* map = NULL;
+	double *work = NULL, *A, *dD, *dtin;
+	qaws_scalar *scal = NULL, *cps;
+	unsigned int i, k, d;
+	size_t nd;
+	qaws_status st;
+
+	if (!desc || !out_curve)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	if (out_map)
+		*out_map = NULL;
+	st = qaws_curve_fit_bspline(desc, out_curve);
+	if (st != QAWS_STATUS_OK || !out_map)
+		return st;
+
+	memset(&s, 0, sizeof(s));
+	s.m = desc->data_point_count;
+	s.n = desc->control_point_count;
+	s.p = desc->degree;
+	s.dim = desc->dimension == QAWS_DIMENSION_2D ? 2u : 3u;
+	s.sys = s.n - 2;
+	s.kc = s.n + s.p + 1;
+	s.chord = desc->parameters == NULL;
+	if (s.p + 1 > QAWS_DIFF_MAX_SUPPORT)
+	{
+		st = QAWS_STATUS_UNSUPPORTED_OPERATION;
+		goto done;
+	}
+
+	/* doubles: data, dD (m*dim each), dtin, dt, cum (m each), knot_alpha,
+	   dknots (kc each), chol, A (sys^2 each), q, dq (n*dim each), dr (sys*dim),
+	   kd (2 * kc as fit_dual) */
+	nd = (size_t)s.m * s.dim * 2 + (size_t)s.m * 3 + (size_t)s.kc * 4 + (size_t)s.sys * s.sys * 2 +
+		(size_t)s.n * s.dim * 2 + (size_t)s.sys * s.dim + 8;
+	work = (double*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(double) * nd));
+	scal = (qaws_scalar*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_scalar) * (s.m + s.kc + s.n * s.dim + 4) +
+		sizeof(unsigned int) * (s.m + s.kc + 4)));
+	if (!work || !scal)
+	{
+		st = QAWS_STATUS_ALLOCATION_FAILURE;
+		goto done;
+	}
+	s.data = work;
+	dD = s.data + (size_t)s.m * s.dim;
+	dtin = dD + (size_t)s.m * s.dim;
+	s.dt = dtin + s.m;
+	s.cum = s.dt + s.m;
+	s.knot_alpha = s.cum + s.m;
+	s.dknots = s.knot_alpha + s.kc;
+	s.kd = (fit_dual*)(s.dknots + s.kc);
+	s.chol = (double*)(s.kd + s.kc);
+	A = s.chol + (size_t)s.sys * s.sys;
+	s.q = A + (size_t)s.sys * s.sys;
+	s.dq = s.q + (size_t)s.n * s.dim;
+	s.dr = s.dq + (size_t)s.n * s.dim;
+	s.params = scal;
+	s.knots = s.params + s.m;
+	cps = s.knots + s.kc;
+	s.spans = (unsigned int*)(cps + s.n * s.dim + 4);
+	s.knot_src = s.spans + s.m;
+
+	st = fit_prepare(&s, desc, *out_curve, cps, A);
+	if (st != QAWS_STATUS_OK)
+		goto done;
+
+	map = map_create(QAWS_DIFF_MAP_LINEAR_SPARSE, desc->parameters ? 2u : 1u, 1u);
+	if (!map)
+	{
+		st = QAWS_STATUS_ALLOCATION_FAILURE;
+		goto done;
+	}
+	for (i = 0; i < s.m * s.dim; i++)
+		dD[i] = 0;
+	for (i = 0; i < s.m; i++)
+		dtin[i] = 0;
+	for (k = 0; k < s.m && st == QAWS_STATUS_OK; k++)
+		for (d = 0; d < s.dim && st == QAWS_STATUS_OK; d++)
+		{
+			dD[k * s.dim + d] = 1;
+			fit_directional(&s, dD, NULL);
+			dD[k * s.dim + d] = 0;
+			st = fit_emit(map, &s, 0, QAWS_FIELD_POINTS, k, d);
+		}
+	if (desc->parameters)
+		for (k = 0; k < s.m && st == QAWS_STATUS_OK; k++)
+		{
+			dtin[k] = 1;
+			fit_directional(&s, NULL, dtin);
+			dtin[k] = 0;
+			st = fit_emit(map, &s, 1, QAWS_FIELD_PARAMETER, k, 0);
+		}
+	if (st == QAWS_STATUS_OK)
+	{
+		*out_map = map;
+		map = NULL;
+	}
+done:
+	qaws_diff_map_destroy(map);
+	qaws_internal_dealloc(NULL, work);
+	qaws_internal_dealloc(NULL, scal);
+	if (st != QAWS_STATUS_OK && *out_curve)
+	{
+		qaws_curve_destroy(*out_curve);
+		*out_curve = NULL;
+	}
+	return st;
 }

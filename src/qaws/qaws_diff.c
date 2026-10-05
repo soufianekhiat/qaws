@@ -543,6 +543,175 @@ static qaws_status rational_tangent_sample(
 	qaws_diff_views const* views, int want_second,
 	curve_jet_buf* primal, curve_jet_buf* tangent, curve_jet_buf* tangent2);
 
+/* ------------------------------------------------------------------ */
+/*  Knot derivatives (families declaring a differentiable KNOTS field) */
+/*                                                                    */
+/*  The basis rows of range 0 are re-evaluated in dual numbers along   */
+/*  a knot direction; span membership stays frozen.                    */
+/* ------------------------------------------------------------------ */
+
+static int knots_differentiable(qaws_curve const* curve)
+{
+	qaws_curve_diff_vtable const* d = curve_diff(curve);
+	qaws_field_desc fields[8];
+	unsigned int n, i;
+	if (!d || !d->describe_fields)
+		return 0;
+	n = d->describe_fields(curve, fields, 8);
+	for (i = 0; i < n && i < 8; i++)
+		if (fields[i].field == QAWS_FIELD_KNOTS)
+			return (fields[i].capabilities & QAWS_CAP_TANGENT) != 0;
+	return 0;
+}
+
+typedef struct knot_frame
+{
+	qaws_scalar const* knots;
+	unsigned int knot_count, degree, span;
+} knot_frame;
+
+static qaws_status knot_frame_make(qaws_curve const* curve, curve_sample const* s, knot_frame* f)
+{
+	qaws_curve_diff_vtable const* d = curve_diff(curve);
+	unsigned int comps = 0;
+	qaws_status st = d->primal_field(curve, QAWS_FIELD_KNOTS, &f->knots, &f->knot_count, &comps);
+	if (st != QAWS_STATUS_OK)
+		return st;
+	f->degree = curve->degree;
+	f->span = s->support.ranges[0].first + f->degree;
+	if (f->degree > QAWS_INTERNAL_KNOT_MAX_DEGREE || s->support.ranges[0].count != f->degree + 1 ||
+	    f->span + f->degree >= f->knot_count)
+		return QAWS_STATUS_UNSUPPORTED_OPERATION;
+	return QAWS_STATUS_OK;
+}
+
+/* Adds the knot terms of the tangent (and tangent2) of one sample. */
+static qaws_status knot_tangent_sample(
+	qaws_curve const* curve,
+	curve_sample const* s,
+	unsigned int dim,
+	qaws_scalar t,
+	qaws_scalar t_dot,
+	unsigned int channels,
+	unsigned int order,
+	qaws_diff_views const* views,
+	curve_jet_buf* tangent,
+	curve_jet_buf* tangent2)
+{
+	qaws_dual1 ders[(QAWS_DIFF_MAX_ORDER + 1) * (QAWS_INTERNAL_KNOT_MAX_DEGREE + 1)];
+	qaws_scalar kdot[2 * QAWS_INTERNAL_KNOT_MAX_DEGREE];
+	qaws_field_view const* kv = qaws_diff_views_find(views, QAWS_FIELD_KNOTS);
+	qaws_field_view const* pv = qaws_diff_views_find(views, s->support.ranges[0].field);
+	knot_frame f;
+	unsigned int i, j, k, c, stride;
+	int any = 0;
+	qaws_status st;
+
+	if (!kv || !kv->data || !knots_differentiable(curve))
+		return QAWS_STATUS_OK;
+	st = knot_frame_make(curve, s, &f);
+	if (st != QAWS_STATUS_OK)
+		return st;
+	stride = f.degree + 1;
+	for (i = 0; i < 2 * f.degree; i++)
+	{
+		qaws_scalar v = QAWS_ZERO;
+		qaws_internal_view_read(kv, f.span - f.degree + 1 + i, 1, &v);
+		kdot[i] = v;
+		any |= v != QAWS_ZERO;
+	}
+	if (!any)
+		return QAWS_STATUS_OK;
+	if (order > QAWS_DIFF_MAX_ORDER)
+		return QAWS_STATUS_UNSUPPORTED_OPERATION;
+	qaws_internal_bspline_basis_derivs_knot(f.knots, f.degree, f.span, t, kdot, order, ders);
+
+	for (k = 0; k <= QAWS_CURVE_JET_ORDER; k++)
+	{
+		if (!(channels & (1u << k)))
+			continue;
+		for (j = 0; j <= f.degree; j++)
+		{
+			unsigned int e = s->support.ranges[0].first + j;
+			qaws_scalar const* p = s->primal[0] + (size_t)e * dim;
+			qaws_scalar pdot[3] = { 0, 0, 0 };
+			if (pv && pv->data)
+				qaws_internal_view_read(pv, e, dim, pdot);
+			for (c = 0; c < dim; c++)
+				tangent->d[k][c] += ders[k * stride + j].t * p[c];
+			if (tangent2)
+			{
+				/* d2 C_k = dd_u N^(k) P + 2 d_u N^(k) P' + 2 t' d_u N^(k+1) P */
+				for (c = 0; c < dim; c++)
+				{
+					qaws_scalar v = ders[k * stride + j].tt * p[c] + QAWS_LITERAL(2.0) * ders[k * stride + j].t * pdot[c];
+					if (t_dot != QAWS_ZERO)
+						v += QAWS_LITERAL(2.0) * t_dot * ders[(k + 1) * stride + j].t * p[c];
+					tangent2->d[k][c] += v;
+				}
+			}
+		}
+	}
+	return QAWS_STATUS_OK;
+}
+
+/* Knot adjoint entries of one sample: ubar_i = sum_k,j d_ui N_j^(k) <P_j, ybar_k>. */
+static qaws_status knot_adjoint_sample(
+	qaws_curve const* curve,
+	curve_sample const* s,
+	unsigned int dim,
+	qaws_scalar t,
+	unsigned int channels,
+	unsigned int order,
+	curve_jet_buf const* ybar,
+	qaws_diff_entry* entries,
+	unsigned int capacity,
+	unsigned int* n)
+{
+	qaws_dual1 ders[(QAWS_DIFF_MAX_ORDER + 1) * (QAWS_INTERNAL_KNOT_MAX_DEGREE + 1)];
+	qaws_scalar kdot[2 * QAWS_INTERNAL_KNOT_MAX_DEGREE];
+	qaws_scalar py[QAWS_CURVE_JET_ORDER + 1][QAWS_INTERNAL_KNOT_MAX_DEGREE + 1];
+	knot_frame f;
+	unsigned int i, j, k, c, stride;
+	qaws_status st = knot_frame_make(curve, s, &f);
+	if (st != QAWS_STATUS_OK)
+		return st;
+	if (order > QAWS_DIFF_MAX_ORDER)
+		return QAWS_STATUS_UNSUPPORTED_OPERATION;
+	stride = f.degree + 1;
+	for (k = 0; k <= QAWS_CURVE_JET_ORDER; k++)
+		for (j = 0; j <= f.degree; j++)
+		{
+			qaws_scalar const* p = s->primal[0] + (size_t)(s->support.ranges[0].first + j) * dim;
+			py[k][j] = QAWS_ZERO;
+			if (channels & (1u << k))
+				for (c = 0; c < dim; c++)
+					py[k][j] += p[c] * ybar->d[k][c];
+		}
+	for (i = 0; i < 2 * f.degree; i++)
+		kdot[i] = QAWS_ZERO;
+	for (i = 0; i < 2 * f.degree; i++)
+	{
+		qaws_scalar g = QAWS_ZERO;
+		if (*n >= capacity)
+			return QAWS_STATUS_INTERNAL_ERROR;
+		kdot[i] = QAWS_ONE;
+		qaws_internal_bspline_basis_derivs_knot(f.knots, f.degree, f.span, t, kdot, order, ders);
+		kdot[i] = QAWS_ZERO;
+		for (k = 0; k <= QAWS_CURVE_JET_ORDER; k++)
+			if (channels & (1u << k))
+				for (j = 0; j <= f.degree; j++)
+					g += ders[k * stride + j].t * py[k][j];
+		entries[*n].field = QAWS_FIELD_KNOTS;
+		entries[*n].element = f.span - f.degree + 1 + i;
+		entries[*n].g[0] = g;
+		entries[*n].g[1] = QAWS_ZERO;
+		entries[*n].g[2] = QAWS_ZERO;
+		(*n)++;
+	}
+	return QAWS_STATUS_OK;
+}
+
 static qaws_status curve_tangent_sample(
 	qaws_diff_context const* ctx,
 	qaws_curve const* curve,
@@ -609,6 +778,13 @@ static qaws_status curve_tangent_sample(
 			for (c = 0; c < dim; c++)
 				tangent2->d[k][c] = QAWS_LITERAL(2.0) * t_dot * dp[c] + t_dot * t_dot * p2[c];
 		}
+	}
+
+	if (!s.weights)
+	{
+		st = knot_tangent_sample(curve, &s, dim, t, t_dot, channels, order, views, tangent, tangent2);
+		if (st != QAWS_STATUS_OK)
+			return st;
 	}
 
 	qaws_internal_diff_report_note(ctx,
@@ -1322,6 +1498,7 @@ typedef struct curve_adjoint_job
 	void const* jets;
 	jet_reader_fn read_jet;
 	qaws_scalar* t_adjoint;
+	int knots;                    /* knot adjoints requested and supported */
 } curve_adjoint_job;
 
 static qaws_status curve_collect(
@@ -1367,6 +1544,13 @@ static qaws_status curve_collect(
 				adjoint_contribution(&s, r, j, job->dim, job->channels, &ybar, entries[n].g);
 				n++;
 			}
+		}
+		if (job->knots)
+		{
+			st = knot_adjoint_sample(job->curve, &s, job->dim, job->t[i], job->channels, job->order, &ybar,
+				entries, capacity, &n);
+			if (st != QAWS_STATUS_OK)
+				return st;
 		}
 		if (first_pass && job->t_adjoint)
 			job->t_adjoint[i] += coordinate_adjoint(&s, job->dim, job->channels, &ybar);
@@ -1444,9 +1628,13 @@ static qaws_status curve_batch_adjoint(
 	job.jets = jets;
 	job.read_jet = read_jet;
 	job.t_adjoint = t_adjoint;
+	{
+		qaws_field_view const* kv = views ? qaws_diff_views_find(views, QAWS_FIELD_KNOTS) : NULL;
+		job.knots = kv && kv->data && knots_differentiable(curve);
+	}
 
 	return qaws_internal_diff_accumulate(ctx, dim, count,
-		QAWS_DIFF_MAX_RANGES * QAWS_DIFF_MAX_SUPPORT, curve_collect, &job, views);
+		QAWS_DIFF_MAX_RANGES * QAWS_DIFF_MAX_SUPPORT + 2 * QAWS_INTERNAL_KNOT_MAX_DEGREE, curve_collect, &job, views);
 }
 
 /* ------------------------------------------------------------------ */

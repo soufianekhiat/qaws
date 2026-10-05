@@ -75,7 +75,8 @@ void qaws_diff_map_destroy(qaws_diff_map* map);
  *
  * Polynomial families are exact linear maps of their fields; NURBS inputs
  * are linear in homogeneous coordinates and their maps include the
- * projection. The split parameter is differentiable for Bezier curves;
+ * projection. Knots of the inputs are held fixed. The split parameter is
+ * differentiable for Bezier curves;
  * for other families a split parameter tangent is refused.
  * =================================================================== */
 
@@ -119,6 +120,27 @@ qaws_status qaws_curve_elevate_degree_diff(
 qaws_status qaws_curve_reduce_degree_diff(
 	qaws_curve const* curve,
 	qaws_curve** out_reduced,
+	qaws_diff_map** out_map);
+
+/*
+ * Least-squares B-spline fit (qaws_curve_fit_bspline) with the exact
+ * Jacobian of its normal equations.
+ *
+ * inputs:  0 = data points (QAWS_FIELD_POINTS, element = data point)
+ *          1 = sample parameters (QAWS_FIELD_PARAMETER, element = data
+ *              point), present only when desc->parameters is given
+ * outputs: 0 = fitted curve (QAWS_FIELD_CONTROL_POINTS, QAWS_FIELD_KNOTS)
+ *
+ * The derivative follows every smooth stage of the fit: chord-length
+ * parameters (when desc->parameters is NULL they are functions of the
+ * data points), averaged knots, basis functions and the solve. Knot span
+ * membership of each sample is frozen (QAWS_FREEZE_SPAN).
+ */
+struct qaws_bspline_fit_desc;
+
+qaws_status qaws_curve_fit_bspline_diff(
+	struct qaws_bspline_fit_desc const* desc,
+	qaws_curve** out_curve,
 	qaws_diff_map** out_map);
 
 #endif /* QAWS_DIFF_MAP_H */

@@ -34,7 +34,8 @@ static void storage_layout(object_storage* s, qaws_curve const* c)
 	qaws_curve_describe_fields(c, fd, 8, &n);
 	for (i = 0; i < n && s->field_count < MAP_FIELDS; i++)
 	{
-		if (!fd[i].capabilities)
+		/* knots are frozen by these operations */
+		if (!fd[i].capabilities || fd[i].field == QAWS_FIELD_KNOTS)
 			continue;
 		s->fields[s->field_count] = fd[i].field;
 		s->counts[s->field_count] = fd[i].count;
@@ -368,6 +369,147 @@ static void test_clone(void)
 	qaws_curve_destroy(c);
 }
 
+
+/* ------------------------------------------------------------------ */
+/*  Least-squares fit map                                             */
+/* ------------------------------------------------------------------ */
+
+#define FIT_M 14
+#define FIT_N 7
+#define FIT_KC (FIT_N + 3 + 1)
+
+/* Fitted control points and knots after moving data and parameters by h. */
+static void fit_at(qaws_dimension dim, qaws_scalar const* data, qaws_scalar const* params, qaws_scalar const* ddata,
+	qaws_scalar const* dparams, double h, qaws_scalar* cps, qaws_scalar* knots)
+{
+	qaws_scalar d[FIT_M * 3], t[FIT_M];
+	unsigned int i, dc = dim == QAWS_DIMENSION_2D ? 2u : 3u, got;
+	qaws_bspline_fit_desc desc;
+	qaws_curve* c = NULL;
+	for (i = 0; i < FIT_M * dc; i++)
+		d[i] = (qaws_scalar)(data[i] + h * ddata[i]);
+	for (i = 0; i < FIT_M; i++)
+		t[i] = params ? (qaws_scalar)(params[i] + h * dparams[i]) : 0;
+	memset(&desc, 0, sizeof(desc));
+	desc.dimension = dim;
+	desc.data_points = d;
+	desc.data_point_count = FIT_M;
+	desc.degree = 3;
+	desc.control_point_count = FIT_N;
+	desc.parameters = params ? t : NULL;
+	qaws_curve_fit_bspline(&desc, &c);
+	qaws_curve_read_field(c, QAWS_FIELD_CONTROL_POINTS, cps, FIT_N * dc, &got);
+	qaws_curve_read_field(c, QAWS_FIELD_KNOTS, knots, FIT_KC, &got);
+	qaws_curve_destroy(c);
+}
+
+static void check_fit(char const* name, qaws_dimension dim, int with_params)
+{
+	unsigned int dc = dim == QAWS_DIMENSION_2D ? 2u : 3u, i;
+	qaws_scalar data[FIT_M * 3], params[FIT_M], vdata[FIT_M * 3], vparams[FIT_M];
+	qaws_scalar wq[FIT_N * 3], wk[FIT_KC], tq[FIT_N * 3], tk[FIT_KC];
+	qaws_scalar ap[FIT_N * 3], ak[FIT_KC], am[FIT_N * 3], akm[FIT_KC];
+	qaws_scalar bdata[FIT_M * 3], bparams[FIT_M];
+	qaws_field_view in_f[2], out_f[2];
+	qaws_diff_views in_v[2], out_v;
+	qaws_diff_views const* ins[2];
+	qaws_diff_views* outs[1];
+	qaws_diff_views* ins_adj[2];
+	qaws_diff_views const* outs_adj[1];
+	qaws_bspline_fit_desc desc;
+	qaws_curve* c = NULL;
+	qaws_diff_map* map = NULL;
+	double h = DIFF_FD_STEP * 0.1, fd, tan_dot, adj_dot;
+
+	for (i = 0; i < FIT_M; i++)
+	{
+		double s = i / (double)(FIT_M - 1);
+		data[i * dc + 0] = (qaws_scalar)(3.0 * s + 0.2 * sin(7.0 * s));
+		data[i * dc + 1] = (qaws_scalar)(sin(4.0 * s) + 0.3 * s * s);
+		if (dc == 3)
+			data[i * dc + 2] = (qaws_scalar)(0.5 * cos(3.0 * s));
+		params[i] = (qaws_scalar)(s + 0.03 * sin(9.0 * s));
+	}
+	params[0] = 0;
+	params[FIT_M - 1] = 1;
+	diff_rand_fill(vdata, FIT_M * dc);
+	diff_rand_fill(vparams, FIT_M);
+	vparams[0] = vparams[FIT_M - 1] = 0;
+	if (!with_params)
+		for (i = 0; i < FIT_M; i++)
+			vparams[i] = 0;
+	diff_rand_fill(wq, FIT_N * dc);
+	diff_rand_fill(wk, FIT_KC);
+
+	memset(&desc, 0, sizeof(desc));
+	desc.dimension = dim;
+	desc.data_points = data;
+	desc.data_point_count = FIT_M;
+	desc.degree = 3;
+	desc.control_point_count = FIT_N;
+	desc.parameters = with_params ? params : NULL;
+	TEST_ASSERT_STATUS(qaws_curve_fit_bspline_diff(&desc, &c, &map));
+	TEST_ASSERT(qaws_diff_map_input_count(map) == (with_params ? 2u : 1u), "fit map input count");
+
+	/* tangent */
+	in_f[0] = qaws_field_view_make(QAWS_FIELD_POINTS, vdata, FIT_M, dc);
+	in_f[1] = qaws_field_view_make(QAWS_FIELD_PARAMETER, vparams, FIT_M, 1);
+	for (i = 0; i < 2; i++)
+	{
+		in_v[i].fields = &in_f[i];
+		in_v[i].field_count = 1;
+		in_v[i].children = NULL;
+		in_v[i].child_count = 0;
+		ins[i] = &in_v[i];
+	}
+	out_f[0] = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, tq, FIT_N, dc);
+	out_f[1] = qaws_field_view_make(QAWS_FIELD_KNOTS, tk, FIT_KC, 1);
+	out_v.fields = out_f;
+	out_v.field_count = 2;
+	out_v.children = NULL;
+	out_v.child_count = 0;
+	outs[0] = &out_v;
+	TEST_ASSERT_STATUS(qaws_diff_map_tangent(map, NULL, ins, with_params ? 2u : 1u, outs, 1));
+	tan_dot = diff_dot(tq, wq, FIT_N * dc) + diff_dot(tk, wk, FIT_KC);
+
+	/* central difference of the fit itself */
+	fit_at(dim, data, with_params ? params : NULL, vdata, vparams, h, ap, ak);
+	fit_at(dim, data, with_params ? params : NULL, vdata, vparams, -h, am, akm);
+	fd = 0;
+	for (i = 0; i < FIT_N * dc; i++)
+		fd += wq[i] * ((double)ap[i] - am[i]) / (2 * h);
+	for (i = 0; i < FIT_KC; i++)
+		fd += wk[i] * ((double)ak[i] - akm[i]) / (2 * h);
+
+	/* adjoint */
+	memset(bdata, 0, sizeof(bdata));
+	memset(bparams, 0, sizeof(bparams));
+	out_f[0].data = wq;
+	out_f[1].data = wk;
+	outs_adj[0] = &out_v;
+	in_f[0].data = bdata;
+	in_f[1].data = bparams;
+	ins_adj[0] = &in_v[0];
+	ins_adj[1] = &in_v[1];
+	TEST_ASSERT_STATUS(qaws_diff_map_adjoint(map, NULL, outs_adj, 1, ins_adj, with_params ? 2u : 1u));
+	adj_dot = diff_dot(bdata, vdata, FIT_M * dc) + diff_dot(bparams, vparams, FIT_M);
+
+	printf("    %-28s tangent %.9f  fd %.9f  adjoint %.9f\n", name, tan_dot, fd, adj_dot);
+	TEST_ASSERT(diff_close(tan_dot, fd, DIFF_TOL * 20), "fit map tangent matches finite differences of the fit");
+	TEST_ASSERT(diff_close(tan_dot, adj_dot, DIFF_TOL), "fit map adjoint identity");
+	qaws_diff_map_destroy(map);
+	qaws_curve_destroy(c);
+}
+
+static void test_fit_map(void)
+{
+	printf("  fit map\n");
+	check_fit("fit 2d chord-length", QAWS_DIMENSION_2D, 0);
+	check_fit("fit 3d chord-length", QAWS_DIMENSION_3D, 0);
+	check_fit("fit 2d given parameters", QAWS_DIMENSION_2D, 1);
+	check_fit("fit 3d given parameters", QAWS_DIMENSION_3D, 1);
+}
+
 int test_55_diff_maps_main(void)
 {
 	qaws_curve* c[2];
@@ -377,6 +519,7 @@ int test_55_diff_maps_main(void)
 	printf("Test 55: Differential maps of geometry-building operations\n");
 	diff_seed(5555);
 	test_clone();
+	test_fit_map();
 
 	c[0] = make_bezier(5);
 	check_op("split bezier (with parameter)", op_split, (qaws_curve const* const*)c, 1, 2, (qaws_scalar)0.37, (qaws_scalar)0.8);

@@ -351,6 +351,10 @@ qaws_status qaws_curve_functional_hvp(
 	/* Direct HVP needs the jet to be linear in the parameters. */
 	if (!(qaws_curve_get_diff_capabilities(curve) & QAWS_CAP_LINEAR))
 		return QAWS_STATUS_UNSUPPORTED_OPERATION;
+	/* Knots enter non-linearly. */
+	if ((direction && qaws_diff_views_find(direction, QAWS_FIELD_KNOTS)) ||
+	    (out_hv && qaws_diff_views_find(out_hv, QAWS_FIELD_KNOTS)))
+		return QAWS_STATUS_UNSUPPORTED_OPERATION;
 	job.direction = direction;
 	job.sink = out_hv;
 	return curve_quadrature(curve, clamp_rule(quadrature, 6), curve_hvp_point, &job);

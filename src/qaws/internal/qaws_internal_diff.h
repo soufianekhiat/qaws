@@ -6,6 +6,7 @@
 #include "../qaws_surface_types.h"
 #include "qaws_internal_types.h"
 #include "qaws_internal_surface.h"
+#include "../core/qaws_dual_core.h"
 
 /*
  * Differential rules attached to a curve family.
@@ -291,6 +292,21 @@ void qaws_internal_bspline_basis_derivs_any(
 	qaws_scalar t,
 	unsigned int k,
 	qaws_scalar* out_ders);
+
+/* Basis derivatives along a knot direction, as second-order duals:
+   .v = d^r N_j/dt^r, .t = its derivative along kdot, .tt = second
+   derivative. kdot[i] is the rate of knot span - degree + 1 + i
+   (2 * degree entries). out has (k+1) rows of stride (degree+1). */
+#define QAWS_INTERNAL_KNOT_MAX_DEGREE 15
+
+void qaws_internal_bspline_basis_derivs_knot(
+	qaws_scalar const* knots,
+	unsigned int degree,
+	unsigned int span,
+	qaws_scalar t,
+	qaws_scalar const* kdot,
+	unsigned int k,
+	qaws_dual1* out_ders);
 
 /* Bernstein basis derivatives of degree n at t for orders 0..k.
    out[r * (n+1) + i] = d^r B_{i,n}(t) / dt^r. */
