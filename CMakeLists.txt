@@ -309,6 +309,20 @@ if(QAWS_AMALGAMATION)
   )
 endif()
 
+option(QAWS_BUILD_EXAMPLES "Build the C example programs" OFF)
+if(QAWS_BUILD_EXAMPLES)
+  add_executable(qaws_diff_showcase examples/diff_showcase.c)
+  target_link_libraries(qaws_diff_showcase PRIVATE Qaws::qaws)
+  target_include_directories(qaws_diff_showcase PRIVATE "${PROJECT_SOURCE_DIR}/src/qaws")
+  if(MSVC)
+    target_compile_definitions(qaws_diff_showcase PRIVATE _CRT_SECURE_NO_WARNINGS)
+  endif()
+  set_target_properties(qaws_diff_showcase PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/working_dir"
+    RUNTIME_OUTPUT_DIRECTORY_RELEASE "${PROJECT_SOURCE_DIR}/working_dir"
+    RUNTIME_OUTPUT_DIRECTORY_DEBUG "${PROJECT_SOURCE_DIR}/working_dir")
+endif()
+
 if(BUILD_TESTING)
   add_subdirectory(tests)
   add_custom_target(
