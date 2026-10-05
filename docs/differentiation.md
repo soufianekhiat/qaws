@@ -211,5 +211,8 @@ The test suites `49_diff_model` to `56_diff_functionals` check every rule in sin
 4. Non-rigid registration: CMA-ES basin hopping on the pose with gradient refinements inside the fitness.
 5. Hair grooming: 3D strands with fixed roots under length and bending functionals, gravity, head collision and unit-tangent alignment to a combing field.
 6. Hair from a photo (single-view hair modeling): the projected unit tangents of the 3D strands follow the photo orientation field and stay on its hair mask.
+7. Rational patches: NURBS weights freed after the ADMM fit, seams kept closed.
+8. Real haircuts: vector hair strands from six portrait photos (seeded hair mask, orientation field, B-spline strands).
+9. 3D hair from frontal portraits: head placed from the face, visible strands follow the photo, hidden strands follow the 3D priors.
 
 Photos are read as PPM; `examples/photo_to_ppm.ps1` converts any image.
