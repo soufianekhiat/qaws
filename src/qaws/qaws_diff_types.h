@@ -217,6 +217,21 @@ typedef struct qaws_diff_views
 } qaws_diff_views;
 
 /* ===================================================================
+ * Children of derived objects
+ *
+ * A derived object (offset, extrusion, ruled, swept surfaces, ...) chains
+ * its rules into the objects it references. Child i of an object is
+ * addressed as child[i] in parameter keys and views->children[i] in
+ * tangent / adjoint storage. Exactly one pointer is set.
+ * =================================================================== */
+
+typedef struct qaws_diff_child
+{
+	qaws_curve const* curve;
+	struct qaws_surface const* surface;
+} qaws_diff_child;
+
+/* ===================================================================
  * Spatial jets
  *
  * Curve jet: d[k] = d^k C / dt^k, k = 0..3.

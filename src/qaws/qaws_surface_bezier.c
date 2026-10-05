@@ -261,6 +261,9 @@ static qaws_surface_diff_vtable const bezier_surface_diff_vtable = {
 	bezier_surface_describe_fields,
 	bezier_surface_primal_field,
 	bezier_surface_linear_support,
+	NULL,
+	NULL,
+	NULL,
 	NULL
 };
 

@@ -1725,3 +1725,82 @@ qaws_status qaws_curve_build_support_index(
 	(void)data;
 	return QAWS_STATUS_OK;
 }
+
+/* ------------------------------------------------------------------ */
+/*  Child evaluation helpers for derived objects                      */
+/* ------------------------------------------------------------------ */
+
+qaws_diff_views const* qaws_internal_child_views(qaws_diff_views const* views, unsigned int i)
+{
+	if (!views || i >= views->child_count || !views->children)
+		return NULL;
+	return &views->children[i];
+}
+
+static void lift_jet(qaws_curve_jet_2d const* in, qaws_curve_jet_3d* out)
+{
+	unsigned int k;
+	for (k = 0; k <= QAWS_CURVE_JET_ORDER; k++)
+	{
+		out->d[k].x = in->d[k].x;
+		out->d[k].y = in->d[k].y;
+		out->d[k].z = QAWS_ZERO;
+	}
+	out->channels = in->channels;
+}
+
+qaws_status qaws_internal_curve_tangent_any(
+	qaws_diff_context const* ctx,
+	qaws_curve const* curve,
+	qaws_scalar t,
+	qaws_scalar t_dot,
+	unsigned int channels,
+	qaws_diff_views const* views,
+	qaws_curve_jet_3d* primal,
+	qaws_curve_jet_3d* tangent,
+	qaws_curve_jet_3d* tangent2)
+{
+	if (!curve || !primal || !tangent)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	if (curve->dimension == QAWS_DIMENSION_3D)
+		return curve_batch_tangent(ctx, curve, 3, &t, &t_dot, 1, channels, views,
+			primal, tangent, tangent2);
+	{
+		qaws_curve_jet_2d p, tg, tt;
+		qaws_status st = curve_batch_tangent(ctx, curve, 2, &t, &t_dot, 1, channels, views,
+			&p, &tg, tangent2 ? &tt : NULL);
+		if (st != QAWS_STATUS_OK)
+			return st;
+		lift_jet(&p, primal);
+		lift_jet(&tg, tangent);
+		if (tangent2)
+			lift_jet(&tt, tangent2);
+		return QAWS_STATUS_OK;
+	}
+}
+
+qaws_status qaws_internal_curve_adjoint_any(
+	qaws_diff_context const* ctx,
+	qaws_curve const* curve,
+	qaws_scalar t,
+	unsigned int channels,
+	qaws_curve_jet_3d const* jet_adjoint,
+	qaws_diff_views* views,
+	qaws_scalar* t_adjoint)
+{
+	if (!curve || !jet_adjoint)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	if (curve->dimension == QAWS_DIMENSION_3D)
+		return curve_batch_adjoint(ctx, curve, 3, &t, 1, channels, jet_adjoint, read_jet_3d, views, t_adjoint);
+	{
+		qaws_curve_jet_2d j;
+		unsigned int k;
+		for (k = 0; k <= QAWS_CURVE_JET_ORDER; k++)
+		{
+			j.d[k].x = jet_adjoint->d[k].x;
+			j.d[k].y = jet_adjoint->d[k].y;
+		}
+		j.channels = jet_adjoint->channels;
+		return curve_batch_adjoint(ctx, curve, 2, &t, 1, channels, &j, read_jet_2d, views, t_adjoint);
+	}
+}

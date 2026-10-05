@@ -614,6 +614,12 @@ qaws_status qaws_surface_eval_jet(
 		clamp_uv(surface, &u, &v);
 		return d->eval_jet(surface, u, v, channels, out_jet);
 	}
+	if (d && d->tangent)
+	{
+		qaws_surface_jet unused;
+		clamp_uv(surface, &u, &v);
+		return d->tangent(NULL, surface, u, v, QAWS_ZERO, QAWS_ZERO, channels, NULL, out_jet, &unused, NULL);
+	}
 
 	st = surface_prepare(surface, u, v, channel_order(channels), 0, &s);
 	if (st != QAWS_STATUS_OK)
@@ -675,6 +681,27 @@ static qaws_status surface_batch_tangent(
 	if (st != QAWS_STATUS_OK)
 		return st;
 	channels &= (unsigned int)QAWS_SJET_ORDER3;
+
+	if (d->tangent)
+	{
+		/* Derived surface: direct rule chaining into its children. */
+		for (i = 0; i < count; i++)
+		{
+			qaws_surface_jet scratch;
+			qaws_scalar uu = u[i], vv = v[i];
+			clamp_uv(surface, &uu, &vv);
+			st = d->tangent(ctx, surface, uu, vv,
+				u_tangent ? u_tangent[i] : QAWS_ZERO,
+				v_tangent ? v_tangent[i] : QAWS_ZERO,
+				channels, param_tangent,
+				out_primal ? &out_primal[i] : &scratch,
+				&out_tangent[i],
+				out_tangent2 ? &out_tangent2[i] : NULL);
+			if (st != QAWS_STATUS_OK)
+				return st;
+		}
+		return QAWS_STATUS_OK;
+	}
 
 	for (i = 0; i < count; i++)
 	{
@@ -851,6 +878,24 @@ qaws_status qaws_surface_eval_batch_adjoint(
 	if (st != QAWS_STATUS_OK)
 		return st;
 
+	{
+		qaws_surface_diff_vtable const* d = surface_diff(surface);
+		if (d->adjoint)
+		{
+			unsigned int i;
+			for (i = 0; i < count; i++)
+			{
+				qaws_scalar uu = u[i], vv = v[i];
+				clamp_uv(surface, &uu, &vv);
+				st = d->adjoint(ctx, surface, uu, vv, channels & (unsigned int)QAWS_SJET_ORDER3, &out_adjoint[i],
+					param_adjoint, u_adjoint ? &u_adjoint[i] : NULL, v_adjoint ? &v_adjoint[i] : NULL);
+				if (st != QAWS_STATUS_OK)
+					return st;
+			}
+			return QAWS_STATUS_OK;
+		}
+	}
+
 	job.ctx = ctx;
 	job.surface = surface;
 	job.u = u;
@@ -973,4 +1018,24 @@ qaws_status qaws_surface_build_support_index(
 	if (cursor)
 		qaws_internal_dealloc(surface->allocator, cursor);
 	return st;
+}
+
+qaws_status qaws_surface_diff_children(
+	qaws_surface const* surface,
+	qaws_diff_child* out_children,
+	unsigned int capacity,
+	unsigned int* out_count)
+{
+	qaws_surface_diff_vtable const* d = surface_diff(surface);
+	unsigned int n;
+	if (!surface || !out_count)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	*out_count = 0;
+	if (!d)
+		return QAWS_STATUS_UNSUPPORTED_OPERATION;
+	if (!d->children)
+		return QAWS_STATUS_OK;
+	n = d->children(surface, out_children, out_children ? capacity : 0u);
+	*out_count = n;
+	return (out_children && n > capacity) ? QAWS_STATUS_BUFFER_TOO_SMALL : QAWS_STATUS_OK;
 }

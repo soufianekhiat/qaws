@@ -318,6 +318,9 @@ static qaws_surface_diff_vtable const nurbs_surface_diff_vtable = {
 	nurbs_surface_describe_fields,
 	nurbs_surface_primal_field,
 	nurbs_surface_linear_support,
+	NULL,
+	NULL,
+	NULL,
 	NULL
 };
 

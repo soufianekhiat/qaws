@@ -2,6 +2,8 @@
 #include "qaws_eval.h"
 #include "qaws_inspect.h"
 #include "internal/qaws_internal_surface.h"
+#include "internal/qaws_internal_diff.h"
+#include "core/qaws_dual_core.h"
 #include "internal/qaws_internal_curve.h"
 #include <stdlib.h>
 #include <string.h>
@@ -133,11 +135,207 @@ static int ruled_surface_is_rational(qaws_surface const* s)
 	return 0;
 }
 
+/* -------------------------------------------------------------------------- */
+/*  Differential rules                                                        */
+/*                                                                            */
+/*  S(u,v) = (1 - v) A(ta) + v B(tb),  ta = a0 + u sa,  tb = b0 + u sb.       */
+/*  No own fields. Child 0: curve A, child 1: curve B.                        */
+/* -------------------------------------------------------------------------- */
+
+#define RULED_DIFF_CAPS (QAWS_CAP_TANGENT | QAWS_CAP_ADJOINT | QAWS_CAP_TANGENT2)
+
+static unsigned char const g_ruled_jet_a[QAWS_SURFACE_JET_COUNT] = { 0, 1, 0, 2, 1, 0, 3, 2, 1, 0 };
+static unsigned char const g_ruled_jet_b[QAWS_SURFACE_JET_COUNT] = { 0, 0, 1, 0, 1, 2, 0, 1, 2, 3 };
+
+static unsigned int ruled_describe_fields(qaws_surface const* surface,
+	qaws_field_desc* out, unsigned int capacity)
+{
+	(void)surface;
+	(void)out;
+	(void)capacity;
+	return 0;
+}
+
+static qaws_status ruled_primal_field(qaws_surface const* surface, qaws_diff_field field,
+	qaws_scalar const** out_data, unsigned int* out_count, unsigned int* out_components)
+{
+	(void)surface;
+	(void)field;
+	(void)out_data;
+	(void)out_count;
+	(void)out_components;
+	return QAWS_STATUS_INVALID_ARGUMENT;
+}
+
+static unsigned int ruled_children(qaws_surface const* surface, qaws_diff_child* out, unsigned int capacity)
+{
+	qaws_surface_ruled_impl const* impl = (qaws_surface_ruled_impl const*)surface->impl;
+	if (capacity >= 2)
+	{
+		out[0].curve = impl->curve_a;
+		out[0].surface = NULL;
+		out[1].curve = impl->curve_b;
+		out[1].surface = NULL;
+	}
+	return 2;
+}
+
+static qaws_scalar ruled_power(qaws_scalar s, unsigned int a)
+{
+	qaws_scalar r = QAWS_ONE;
+	while (a--)
+		r *= s;
+	return r;
+}
+
+static qaws_status ruled_tangent(
+	qaws_diff_context const* ctx, qaws_surface const* surface,
+	qaws_scalar u, qaws_scalar v, qaws_scalar u_dot, qaws_scalar v_dot,
+	unsigned int channels, qaws_diff_views const* views,
+	qaws_surface_jet* primal, qaws_surface_jet* tangent, qaws_surface_jet* tangent2)
+{
+	qaws_surface_ruled_impl const* impl = (qaws_surface_ruled_impl const*)surface->impl;
+	qaws_scalar sa = impl->range_a.max_value - impl->range_a.min_value;
+	qaws_scalar sb = impl->range_b.max_value - impl->range_b.min_value;
+	qaws_curve_jet_3d ap, at, att, bp, bt, btt;
+	unsigned int ch;
+	qaws_status st;
+
+	st = qaws_internal_curve_tangent_any(ctx, impl->curve_a, impl->range_a.min_value + u * sa, sa * u_dot,
+		0xFu, qaws_internal_child_views(views, 0), &ap, &at, tangent2 ? &att : NULL);
+	if (st != QAWS_STATUS_OK)
+		return st;
+	st = qaws_internal_curve_tangent_any(ctx, impl->curve_b, impl->range_b.min_value + u * sb, sb * u_dot,
+		0xFu, qaws_internal_child_views(views, 1), &bp, &bt, tangent2 ? &btt : NULL);
+	if (st != QAWS_STATUS_OK)
+		return st;
+
+	memset(primal, 0, sizeof(*primal));
+	memset(tangent, 0, sizeof(*tangent));
+	if (tangent2)
+		memset(tangent2, 0, sizeof(*tangent2));
+
+	for (ch = 0; ch < QAWS_SURFACE_JET_COUNT; ch++)
+	{
+		unsigned int a = g_ruled_jet_a[ch], b = g_ruled_jet_b[ch];
+		qaws_scalar pa = ruled_power(sa, a), pb = ruled_power(sb, a);
+		if (!(channels & (1u << ch)) || b > 1)
+			continue;
+		if (b == 0)
+		{
+			/* (1-v) A_a + v B_a; v' couples with the v-derivative B_a - A_a. */
+			qaws_vec3 diff_p = qaws_v3_sub(qaws_v3_scale(bp.d[a], pb), qaws_v3_scale(ap.d[a], pa));
+			qaws_vec3 diff_t = qaws_v3_sub(qaws_v3_scale(bt.d[a], pb), qaws_v3_scale(at.d[a], pa));
+			primal->d[ch] = qaws_v3_add(qaws_v3_scale(ap.d[a], (QAWS_ONE - v) * pa), qaws_v3_scale(bp.d[a], v * pb));
+			tangent->d[ch] = qaws_v3_axpy(qaws_v3_add(qaws_v3_scale(at.d[a], (QAWS_ONE - v) * pa),
+				qaws_v3_scale(bt.d[a], v * pb)), diff_p, v_dot);
+			if (tangent2)
+				tangent2->d[ch] = qaws_v3_axpy(qaws_v3_add(qaws_v3_scale(att.d[a], (QAWS_ONE - v) * pa),
+					qaws_v3_scale(btt.d[a], v * pb)), diff_t, QAWS_LITERAL(2.0) * v_dot);
+		}
+		else
+		{
+			primal->d[ch] = qaws_v3_sub(qaws_v3_scale(bp.d[a], pb), qaws_v3_scale(ap.d[a], pa));
+			tangent->d[ch] = qaws_v3_sub(qaws_v3_scale(bt.d[a], pb), qaws_v3_scale(at.d[a], pa));
+			if (tangent2)
+				tangent2->d[ch] = qaws_v3_sub(qaws_v3_scale(btt.d[a], pb), qaws_v3_scale(att.d[a], pa));
+		}
+	}
+	primal->channels = tangent->channels = channels;
+	if (tangent2)
+		tangent2->channels = channels;
+	return QAWS_STATUS_OK;
+}
+
+static qaws_status ruled_adjoint(
+	qaws_diff_context const* ctx, qaws_surface const* surface,
+	qaws_scalar u, qaws_scalar v, unsigned int channels,
+	qaws_surface_jet const* ybar, qaws_diff_views* views,
+	qaws_scalar* u_adjoint, qaws_scalar* v_adjoint)
+{
+	qaws_surface_ruled_impl const* impl = (qaws_surface_ruled_impl const*)surface->impl;
+	qaws_scalar sa = impl->range_a.max_value - impl->range_a.min_value;
+	qaws_scalar sb = impl->range_b.max_value - impl->range_b.min_value;
+	qaws_scalar ta = impl->range_a.min_value + u * sa;
+	qaws_scalar tb = impl->range_b.min_value + u * sb;
+	qaws_curve_jet_3d abar, bbar;
+	qaws_scalar tabar = QAWS_ZERO, tbbar = QAWS_ZERO;
+	unsigned int ch;
+	qaws_status st;
+
+	memset(&abar, 0, sizeof(abar));
+	memset(&bbar, 0, sizeof(bbar));
+
+	if (v_adjoint)
+	{
+		/* dS_{a,0}/dv = S_{a,1} = B_a sb^a - A_a sa^a */
+		qaws_curve_jet_3d ap, at, bp, bt;
+		st = qaws_internal_curve_tangent_any(ctx, impl->curve_a, ta, QAWS_ZERO, 0xFu, NULL, &ap, &at, NULL);
+		if (st != QAWS_STATUS_OK)
+			return st;
+		st = qaws_internal_curve_tangent_any(ctx, impl->curve_b, tb, QAWS_ZERO, 0xFu, NULL, &bp, &bt, NULL);
+		if (st != QAWS_STATUS_OK)
+			return st;
+		for (ch = 0; ch < QAWS_SURFACE_JET_COUNT; ch++)
+		{
+			unsigned int a = g_ruled_jet_a[ch];
+			if (!(channels & (1u << ch)) || g_ruled_jet_b[ch] != 0)
+				continue;
+			*v_adjoint += qaws_v3_dot(ybar->d[ch],
+				qaws_v3_sub(qaws_v3_scale(bp.d[a], ruled_power(sb, a)), qaws_v3_scale(ap.d[a], ruled_power(sa, a))));
+		}
+	}
+
+	for (ch = 0; ch < QAWS_SURFACE_JET_COUNT; ch++)
+	{
+		unsigned int a = g_ruled_jet_a[ch], b = g_ruled_jet_b[ch];
+		qaws_scalar pa = ruled_power(sa, a), pb = ruled_power(sb, a);
+		if (!(channels & (1u << ch)) || b > 1)
+			continue;
+		if (b == 0)
+		{
+			abar.d[a] = qaws_v3_axpy(abar.d[a], ybar->d[ch], (QAWS_ONE - v) * pa);
+			bbar.d[a] = qaws_v3_axpy(bbar.d[a], ybar->d[ch], v * pb);
+		}
+		else
+		{
+			abar.d[a] = qaws_v3_axpy(abar.d[a], ybar->d[ch], -pa);
+			bbar.d[a] = qaws_v3_axpy(bbar.d[a], ybar->d[ch], pb);
+		}
+		abar.channels |= 1u << a;
+		bbar.channels |= 1u << a;
+	}
+
+	st = qaws_internal_curve_adjoint_any(ctx, impl->curve_a, ta, abar.channels, &abar,
+		(qaws_diff_views*)qaws_internal_child_views(views, 0), u_adjoint ? &tabar : NULL);
+	if (st != QAWS_STATUS_OK)
+		return st;
+	st = qaws_internal_curve_adjoint_any(ctx, impl->curve_b, tb, bbar.channels, &bbar,
+		(qaws_diff_views*)qaws_internal_child_views(views, 1), u_adjoint ? &tbbar : NULL);
+	if (st != QAWS_STATUS_OK)
+		return st;
+	if (u_adjoint)
+		*u_adjoint += sa * tabar + sb * tbbar;
+	return QAWS_STATUS_OK;
+}
+
+static qaws_surface_diff_vtable const ruled_surface_diff_vtable = {
+	RULED_DIFF_CAPS,
+	QAWS_DIFF_PIECEWISE_SMOOTH,
+	ruled_describe_fields,
+	ruled_primal_field,
+	NULL,
+	NULL,
+	ruled_tangent,
+	ruled_adjoint,
+	ruled_children
+};
+
 static qaws_surface_vtable const ruled_surface_vtable = {
 	ruled_surface_eval,
 	ruled_surface_destroy,
 	ruled_surface_is_rational,
-	NULL /* diff */
+	&ruled_surface_diff_vtable
 };
 
 qaws_status qaws_surface_create_ruled(

@@ -262,6 +262,13 @@ qaws_status qaws_surface_read_field(
 	unsigned int capacity,
 	unsigned int* out_scalar_count);
 
+/* Objects the surface rules chain into; child i matches views->children[i]. */
+qaws_status qaws_surface_diff_children(
+	qaws_surface const* surface,
+	qaws_diff_child* out_children,
+	unsigned int capacity,
+	unsigned int* out_count);
+
 qaws_status qaws_surface_local_support(
 	qaws_surface const* surface,
 	qaws_scalar u,

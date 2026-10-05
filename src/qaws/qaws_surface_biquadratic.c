@@ -294,6 +294,9 @@ static qaws_surface_diff_vtable const biquadratic_surface_diff_vtable = {
 	biquadratic_surface_describe_fields,
 	biquadratic_surface_primal_field,
 	biquadratic_surface_linear_support,
+	NULL,
+	NULL,
+	NULL,
 	NULL
 };
 

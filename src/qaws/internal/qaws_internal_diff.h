@@ -2,6 +2,7 @@
 #define QAWS_INTERNAL_DIFF_H
 
 #include "../qaws_diff_types.h"
+#include "../qaws_diff.h"
 #include "../qaws_surface_types.h"
 #include "qaws_internal_types.h"
 #include "qaws_internal_surface.h"
@@ -75,6 +76,39 @@ struct qaws_surface_diff_vtable
 		qaws_scalar v,
 		unsigned int channels,
 		qaws_surface_jet* out);
+
+	/* Direct rules for derived surfaces (NULL for basis families). The
+	   surface's own fields live in views->fields, child i in
+	   views->children[i]. tangent2 may be NULL. */
+	qaws_status (*tangent)(
+		qaws_diff_context const* ctx,
+		qaws_surface const* surface,
+		qaws_scalar u,
+		qaws_scalar v,
+		qaws_scalar u_dot,
+		qaws_scalar v_dot,
+		unsigned int channels,
+		qaws_diff_views const* views,
+		qaws_surface_jet* primal,
+		qaws_surface_jet* tangent,
+		qaws_surface_jet* tangent2);
+
+	qaws_status (*adjoint)(
+		qaws_diff_context const* ctx,
+		qaws_surface const* surface,
+		qaws_scalar u,
+		qaws_scalar v,
+		unsigned int channels,
+		qaws_surface_jet const* jet_adjoint,
+		qaws_diff_views* views,
+		qaws_scalar* u_adjoint,
+		qaws_scalar* v_adjoint);
+
+	/* Children whose parameters the rules reach (curves or surfaces). */
+	unsigned int (*children)(
+		qaws_surface const* surface,
+		qaws_diff_child* out,
+		unsigned int capacity);
 };
 
 /* Fill one field descriptor. */
@@ -167,6 +201,36 @@ unsigned int qaws_internal_field_components(qaws_diff_field field, unsigned int 
 
 /* Every view with data must match qaws_internal_field_components. */
 qaws_status qaws_internal_check_views(qaws_diff_views const* views, unsigned int components);
+
+/* ------------------------------------------------------------------ */
+/*  Child evaluation helpers for derived objects                      */
+/* ------------------------------------------------------------------ */
+
+/* Curve jet of any dimension lifted to 3D (z = 0 for 2D curves). tangent2
+   may be NULL. */
+qaws_status qaws_internal_curve_tangent_any(
+	qaws_diff_context const* ctx,
+	qaws_curve const* curve,
+	qaws_scalar t,
+	qaws_scalar t_dot,
+	unsigned int channels,
+	qaws_diff_views const* views,
+	qaws_curve_jet_3d* primal,
+	qaws_curve_jet_3d* tangent,
+	qaws_curve_jet_3d* tangent2);
+
+/* Adjoint of the lifted jet (z ignored for 2D curves). */
+qaws_status qaws_internal_curve_adjoint_any(
+	qaws_diff_context const* ctx,
+	qaws_curve const* curve,
+	qaws_scalar t,
+	unsigned int channels,
+	qaws_curve_jet_3d const* jet_adjoint,
+	qaws_diff_views* views,
+	qaws_scalar* t_adjoint);
+
+/* views->children[i] or NULL. */
+qaws_diff_views const* qaws_internal_child_views(qaws_diff_views const* views, unsigned int i);
 
 /* B-spline basis derivatives for orders 0..k (k may exceed degree; higher
    rows are zero). out has (k+1) rows of stride (degree+1). */

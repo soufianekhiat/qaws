@@ -190,6 +190,9 @@ static qaws_surface_diff_vtable const bilinear_surface_diff_vtable = {
 	bilinear_surface_describe_fields,
 	bilinear_surface_primal_field,
 	bilinear_surface_linear_support,
+	NULL,
+	NULL,
+	NULL,
 	NULL
 };
 

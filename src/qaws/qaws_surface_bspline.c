@@ -270,6 +270,9 @@ static qaws_surface_diff_vtable const bspline_surface_diff_vtable = {
 	bspline_surface_describe_fields,
 	bspline_surface_primal_field,
 	bspline_surface_linear_support,
+	NULL,
+	NULL,
+	NULL,
 	NULL
 };
 
