@@ -18,23 +18,27 @@
 
 #define DER_SAMPLES 5
 #define DER_MAX 32
+#define DER_FIXTURES 5
 
-/* A derived fixture: up to two child curves plus an own vector field. */
+/* A derived fixture: up to four child curves plus up to two own fields. */
 typedef struct derived_fixture
 {
 	char const* name;
-	int kind; /* 0 extrusion (2D profile), 1 extrusion (3D profile), 2 ruled */
+	int kind; /* 0 extrusion (2D profile), 1 extrusion (3D profile), 2 ruled, 3 revolution, 4 coons */
 	unsigned int child_count;
-	unsigned int child_dim[2];
-	unsigned int child_cp[2];
-	qaws_scalar child_params[2][DER_MAX * 3];
-	unsigned int own_count;      /* scalars of the own field (direction) */
-	qaws_scalar own[3];
+	unsigned int child_dim[4];
+	unsigned int child_cp[4];
+	qaws_scalar child_params[4][DER_MAX * 3];
+	unsigned int own_count;      /* total scalars of the own fields */
+	unsigned int own_nf;
+	qaws_diff_field own_field[2];
+	unsigned int own_comp[2];
+	qaws_scalar own[4];
 } derived_fixture;
 
 typedef struct derived_instance
 {
-	qaws_curve* children[2];
+	qaws_curve* children[4];
 	qaws_surface* surface;
 } derived_instance;
 
@@ -86,13 +90,33 @@ static int instance_build(derived_fixture const* f, qaws_scalar const (*child_pa
 		d.length = 0;
 		qaws_surface_create_extrusion(&d, &out->surface);
 	}
-	else
+	else if (f->kind == 2)
 	{
 		qaws_surface_ruled_desc d;
 		memset(&d, 0, sizeof(d));
 		d.curve_a = out->children[0];
 		d.curve_b = out->children[1];
 		qaws_surface_create_ruled(&d, &out->surface);
+	}
+	else if (f->kind == 3)
+	{
+		qaws_surface_revolution_desc d;
+		memset(&d, 0, sizeof(d));
+		d.profile = out->children[0];
+		d.axis_origin = qaws_v3(own[0], own[1], own[2]);
+		d.axis_direction = qaws_v3(0, 0, 1);
+		d.angle = own[3];
+		qaws_surface_create_revolution(&d, &out->surface);
+	}
+	else
+	{
+		qaws_surface_coons_desc d;
+		memset(&d, 0, sizeof(d));
+		d.c0 = out->children[0];
+		d.c1 = out->children[1];
+		d.d0 = out->children[2];
+		d.d1 = out->children[3];
+		qaws_surface_create_coons(&d, &out->surface);
 	}
 	return out->surface != NULL;
 }
@@ -102,7 +126,7 @@ static void instance_destroy(derived_instance* in)
 	unsigned int i;
 	if (in->surface)
 		qaws_surface_destroy(in->surface);
-	for (i = 0; i < 2; i++)
+	for (i = 0; i < 4; i++)
 		if (in->children[i])
 			qaws_curve_destroy(in->children[i]);
 }
@@ -110,18 +134,19 @@ static void instance_destroy(derived_instance* in)
 /* Direction tangent / adjoint storage plus child storage. */
 typedef struct derived_storage
 {
-	qaws_scalar child[2][DER_MAX * 3];
-	qaws_scalar own[3];
-	qaws_field_view own_view;
-	qaws_field_view child_view[2];
-	qaws_diff_views child_views[2];
+	qaws_scalar child[4][DER_MAX * 3];
+	qaws_scalar own[4];
+	qaws_field_view own_view[2];
+	qaws_field_view child_view[4];
+	qaws_diff_views child_views[4];
 	qaws_diff_views views;
 } derived_storage;
 
 static void storage_bind(derived_fixture const* f, derived_storage* s)
 {
 	unsigned int i;
-	s->own_view = qaws_field_view_make(QAWS_FIELD_DIRECTION, s->own, 1, 3);
+	s->own_view[0] = qaws_field_view_make(f->own_field[0], s->own, 1, f->own_comp[0]);
+	s->own_view[1] = qaws_field_view_make(f->own_field[1], s->own + f->own_comp[0], 1, f->own_comp[1]);
 	for (i = 0; i < f->child_count; i++)
 	{
 		s->child_view[i] = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, s->child[i], f->child_cp[i], f->child_dim[i]);
@@ -130,8 +155,8 @@ static void storage_bind(derived_fixture const* f, derived_storage* s)
 		s->child_views[i].children = NULL;
 		s->child_views[i].child_count = 0;
 	}
-	s->views.fields = &s->own_view;
-	s->views.field_count = f->own_count ? 1u : 0u;
+	s->views.fields = s->own_view;
+	s->views.field_count = f->own_nf;
 	s->views.children = s->child_views;
 	s->views.child_count = f->child_count;
 }
@@ -142,7 +167,7 @@ static void storage_random(derived_fixture const* f, derived_storage* s)
 	memset(s, 0, sizeof(*s));
 	for (i = 0; i < f->child_count; i++)
 		diff_rand_fill(s->child[i], f->child_cp[i] * f->child_dim[i]);
-	diff_rand_fill(s->own, 3);
+	diff_rand_fill(s->own, 4);
 	storage_bind(f, s);
 }
 
@@ -152,20 +177,19 @@ static double storage_dot(derived_fixture const* f, derived_storage const* a, de
 	unsigned int i;
 	for (i = 0; i < f->child_count; i++)
 		r += diff_dot(a->child[i], b->child[i], f->child_cp[i] * f->child_dim[i]);
-	if (f->own_count)
-		r += diff_dot(a->own, b->own, 3);
+	r += diff_dot(a->own, b->own, f->own_count);
 	return r;
 }
 
 static int shifted_build(derived_fixture const* f, derived_storage const* dir, double h, derived_instance* out)
 {
-	qaws_scalar cp[2][DER_MAX * 3], own[3];
+	qaws_scalar cp[4][DER_MAX * 3], own[4];
 	unsigned int i, n;
 	for (i = 0; i < f->child_count; i++)
 		for (n = 0; n < f->child_cp[i] * f->child_dim[i]; n++)
 			cp[i][n] = (qaws_scalar)(f->child_params[i][n] + h * dir->child[i][n]);
-	for (n = 0; n < 3; n++)
-		own[n] = (qaws_scalar)(f->own[n] + (f->own_count ? h * dir->own[n] : 0));
+	for (n = 0; n < 4; n++)
+		own[n] = (qaws_scalar)(f->own[n] + (n < f->own_count ? h * dir->own[n] : 0));
 	return instance_build(f, (qaws_scalar const (*)[DER_MAX * 3])cp, own, out);
 }
 
@@ -184,7 +208,7 @@ static int vclose(qaws_vec3 a, qaws_vec3 b, double tol)
 static void make_fixtures(derived_fixture* fx)
 {
 	unsigned int i;
-	memset(fx, 0, sizeof(derived_fixture) * 3);
+	memset(fx, 0, sizeof(derived_fixture) * DER_FIXTURES);
 	diff_seed(909);
 
 	fx[0].name = "extrusion_2d";
@@ -192,14 +216,12 @@ static void make_fixtures(derived_fixture* fx)
 	fx[0].child_count = 1;
 	fx[0].child_dim[0] = 2;
 	fx[0].child_cp[0] = 5;
-	fx[0].own_count = 3;
 
 	fx[1].name = "extrusion_3d";
 	fx[1].kind = 1;
 	fx[1].child_count = 1;
 	fx[1].child_dim[0] = 3;
 	fx[1].child_cp[0] = 6;
-	fx[1].own_count = 3;
 
 	fx[2].name = "ruled";
 	fx[2].kind = 2;
@@ -221,9 +243,61 @@ static void make_fixtures(derived_fixture* fx)
 				if (fx[i].child_dim[c] == 3)
 					p[2] = diff_rand();
 			}
+		if (fx[i].kind <= 1)
+		{
+			fx[i].own_nf = 1;
+			fx[i].own_field[0] = QAWS_FIELD_DIRECTION;
+			fx[i].own_comp[0] = 3;
+			fx[i].own_count = 3;
+		}
 		fx[i].own[0] = (qaws_scalar)0.2;
 		fx[i].own[1] = (qaws_scalar)0.3;
 		fx[i].own[2] = (qaws_scalar)1.7;
+	}
+
+	/* Revolution: 2D profile (radius, height), own center and angle. */
+	fx[3].name = "revolution";
+	fx[3].kind = 3;
+	fx[3].child_count = 1;
+	fx[3].child_dim[0] = 2;
+	fx[3].child_cp[0] = 5;
+	for (i = 0; i < 5; i++)
+	{
+		fx[3].child_params[0][2 * i] = (qaws_scalar)1.0 + (qaws_scalar)0.4 * diff_rand();
+		fx[3].child_params[0][2 * i + 1] = (qaws_scalar)i * (qaws_scalar)0.6;
+	}
+	fx[3].own_nf = 2;
+	fx[3].own_field[0] = QAWS_FIELD_CENTER;
+	fx[3].own_comp[0] = 3;
+	fx[3].own_field[1] = QAWS_FIELD_ANGLE_END;
+	fx[3].own_comp[1] = 1;
+	fx[3].own_count = 4;
+	fx[3].own[0] = (qaws_scalar)0.1;
+	fx[3].own[1] = (qaws_scalar)-0.2;
+	fx[3].own[2] = (qaws_scalar)0.3;
+	fx[3].own[3] = (qaws_scalar)4.0;
+
+	/* Coons: four boundary curves sharing corners (0,0) (3,0) (0,3) (3,3). */
+	fx[4].name = "coons";
+	fx[4].kind = 4;
+	fx[4].child_count = 4;
+	for (i = 0; i < 4; i++)
+	{
+		unsigned int n;
+		fx[4].child_dim[i] = 3;
+		fx[4].child_cp[i] = 6;
+		for (n = 0; n < 6; n++)
+		{
+			qaws_scalar s = (qaws_scalar)n * (qaws_scalar)0.6;
+			qaws_scalar* p = &fx[4].child_params[i][3 * n];
+			qaws_scalar bump = (n == 0 || n == 5) ? QAWS_ZERO : (qaws_scalar)0.4 * diff_rand();
+			if (i == 0) { p[0] = s; p[1] = 0; }       /* c0: v = 0 */
+			else if (i == 1) { p[0] = s; p[1] = 3; }  /* c1: v = 1 */
+			else if (i == 2) { p[0] = 0; p[1] = s; }  /* d0: u = 0 */
+			else { p[0] = 3; p[1] = s; }              /* d1: u = 1 */
+			p[2] = bump + (i == 1 ? (qaws_scalar)0.5 * (qaws_scalar)n / 5 : QAWS_ZERO)
+			     + (i == 3 ? (qaws_scalar)0.5 * (qaws_scalar)n / 5 : QAWS_ZERO);
+		}
 	}
 }
 
@@ -323,7 +397,7 @@ static void check_fixture(derived_fixture const* f)
 
 static void test_children_api(void)
 {
-	derived_fixture fx[3];
+	derived_fixture fx[DER_FIXTURES];
 	derived_instance in;
 	qaws_diff_child children[4];
 	unsigned int n = 0;
@@ -356,7 +430,7 @@ static void test_children_api(void)
 /* Profile control points -> extrusion -> unit normal: one chain, one identity. */
 static void test_normal_through_extrusion(void)
 {
-	derived_fixture fx[3];
+	derived_fixture fx[DER_FIXTURES];
 	derived_instance in;
 	unsigned int i;
 	int ok = 1;
@@ -592,7 +666,7 @@ static void test_offset(void)
 
 int test_53_diff_derived_main(void)
 {
-	derived_fixture fx[3];
+	derived_fixture fx[DER_FIXTURES];
 	unsigned int i;
 
 	g_pass = 0;
@@ -600,7 +674,7 @@ int test_53_diff_derived_main(void)
 
 	printf("Test 53: Differentiable derived surfaces\n");
 	make_fixtures(fx);
-	for (i = 0; i < 3; i++)
+	for (i = 0; i < DER_FIXTURES; i++)
 		check_fixture(&fx[i]);
 	test_children_api();
 	test_normal_through_extrusion();
