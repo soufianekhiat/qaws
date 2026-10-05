@@ -13,6 +13,7 @@
 - [Sampling](sampling.md) -- Generating point arrays from curves
 - [Traversal](traversal.md) -- Motion profiles, constant-speed, arc-length
 - [Inspection](inspection.md) -- Querying curve properties and analysis
+- [Differentiation](differentiation.md) -- Exact tangents, adjoints and second derivatives of evaluation, geometry, solves, operations and functionals
 - [Backends](backends.md) -- Multi-backend architecture (C, HLSL, GLSL, Halide)
 - [Error Handling](error_handling.md) -- Status codes and error patterns
 
@@ -65,6 +66,10 @@ Per-header documentation with all function signatures and parameters:
 - [qaws_alloc.h](api/alloc.md) -- Custom allocator support
 - [qaws_inline.h](api/inline.md) -- Stack-allocated inline curve initialization
 - [qaws_prepare.h](api/prepare.md) -- Precomputation / preparation utilities
+
+### Differentiation
+
+- [qaws_diff*.h](api/diff.md) -- Fields, views, jets, tangents, adjoints, geometry, implicit operations, differential maps, integral functionals
 
 ### Headers without dedicated doc pages yet
 
