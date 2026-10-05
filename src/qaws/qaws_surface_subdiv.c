@@ -1351,7 +1351,8 @@ static int subdiv_surface_is_rational(qaws_surface const* s)
 static qaws_surface_vtable const subdiv_surface_vtable = {
 	subdiv_surface_eval,
 	subdiv_surface_destroy,
-	subdiv_surface_is_rational
+	subdiv_surface_is_rational,
+	NULL /* diff */
 };
 
 /* -----------------------------------------------------------------------

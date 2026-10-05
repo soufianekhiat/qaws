@@ -167,7 +167,8 @@ static int revolution_surface_is_rational(qaws_surface const* s)
 static qaws_surface_vtable const revolution_surface_vtable = {
 	revolution_surface_eval,
 	revolution_surface_destroy,
-	revolution_surface_is_rational
+	revolution_surface_is_rational,
+	NULL /* diff */
 };
 
 qaws_status qaws_surface_create_revolution(

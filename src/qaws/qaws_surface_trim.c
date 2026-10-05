@@ -159,7 +159,8 @@ static int trimmed_surface_is_rational(qaws_surface const* s)
 static qaws_surface_vtable const trimmed_surface_vtable = {
 	trimmed_surface_eval,
 	trimmed_surface_destroy,
-	trimmed_surface_is_rational
+	trimmed_surface_is_rational,
+	NULL /* diff */
 };
 
 qaws_status qaws_surface_create_trimmed(

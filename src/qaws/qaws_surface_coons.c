@@ -264,7 +264,8 @@ static int coons_surface_is_rational(qaws_surface const* s)
 static qaws_surface_vtable const coons_surface_vtable = {
 	coons_surface_eval,
 	coons_surface_destroy,
-	coons_surface_is_rational
+	coons_surface_is_rational,
+	NULL /* diff */
 };
 
 qaws_status qaws_surface_create_coons(

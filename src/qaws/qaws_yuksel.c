@@ -1016,6 +1016,7 @@ static qaws_curve_vtable const yuksel_vtable = {
 	yuksel_is_periodic,
 	yuksel_is_rational,
 	yuksel_get_continuity,
+	NULL /* diff */
 };
 
 /* ------------------------------------------------------------------ */

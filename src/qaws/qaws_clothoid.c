@@ -190,7 +190,8 @@ static qaws_curve_vtable const clothoid_vtable = {
 	clothoid_is_closed,
 	clothoid_is_periodic,
 	clothoid_is_rational,
-	clothoid_get_continuity
+	clothoid_get_continuity,
+	NULL /* diff */
 };
 
 /* ---------------------------------------------------------------------------

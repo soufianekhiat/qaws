@@ -225,7 +225,8 @@ static int biquadratic_surface_is_rational(qaws_surface const* s)
 static qaws_surface_vtable const biquadratic_surface_vtable = {
 	biquadratic_surface_eval,
 	biquadratic_surface_destroy,
-	biquadratic_surface_is_rational
+	biquadratic_surface_is_rational,
+	NULL /* diff */
 };
 
 qaws_status qaws_surface_create_biquadratic(

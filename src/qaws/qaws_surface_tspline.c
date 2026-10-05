@@ -274,7 +274,8 @@ static int tspline_surface_is_rational(qaws_surface const* s)
 static qaws_surface_vtable const tspline_surface_vtable = {
 	tspline_surface_eval,
 	tspline_surface_destroy,
-	tspline_surface_is_rational
+	tspline_surface_is_rational,
+	NULL /* diff */
 };
 
 qaws_status qaws_surface_create_tspline(

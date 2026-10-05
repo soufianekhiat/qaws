@@ -316,7 +316,8 @@ static qaws_curve_vtable const arc_vtable = {
 	arc_is_closed,
 	arc_is_periodic,
 	arc_is_rational,
-	arc_get_continuity
+	arc_get_continuity,
+	NULL /* diff */
 };
 
 /* ---------------------------------------------------------------------------

@@ -2925,7 +2925,8 @@ static qaws_curve_vtable const reparam_vtable = {
 	reparam_is_closed,
 	reparam_is_periodic,
 	reparam_is_rational,
-	reparam_get_continuity
+	reparam_get_continuity,
+	NULL /* diff */
 };
 
 /* ------------------------------------------------------------------ */
@@ -3122,7 +3123,8 @@ static qaws_curve_vtable const lm_vtable = {
 	lm_is_closed,
 	lm_not, /* is_periodic */
 	lm_not, /* is_rational */
-	lm_cont
+	lm_cont,
+	NULL /* diff */
 };
 
 qaws_status qaws_curve_match_arc_length(

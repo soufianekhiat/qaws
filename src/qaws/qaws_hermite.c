@@ -3,6 +3,7 @@
 #include "qaws_prepare.h"
 #include "internal/qaws_internal_types.h"
 #include "internal/qaws_internal_curve.h"
+#include "internal/qaws_internal_diff.h"
 #include "internal/qaws_internal_basis.h"
 #include "internal/qaws_internal_validation.h"
 #include "core/qaws_cubic_poly_core.h"
@@ -168,6 +169,102 @@ static qaws_continuity hermite_get_continuity(qaws_curve const *curve)
 /*  Vtable                                                                    */
 /* -------------------------------------------------------------------------- */
 
+/* -------------------------------------------------------------------------- */
+/*  Differential rules: linear in points and derivatives                      */
+/* -------------------------------------------------------------------------- */
+
+#define HERMITE_DIFF_CAPS (QAWS_CAP_TANGENT | QAWS_CAP_ADJOINT | QAWS_CAP_TANGENT2 | \
+	QAWS_CAP_LOCAL_SUPPORT | QAWS_CAP_LINEAR)
+
+static unsigned int hermite_describe_fields(qaws_curve const *curve, qaws_field_desc *out, unsigned int capacity)
+{
+	qaws_hermite_impl const *impl = (qaws_hermite_impl const *)curve->impl;
+	if (capacity >= 1)
+		out[0] = qaws_internal_field_desc(QAWS_FIELD_POINTS, (qaws_value_type)curve->dimension,
+			impl->point_count, QAWS_DOMAIN_POSITION, QAWS_CONSTRAINT_NONE,
+			QAWS_DIFF_SMOOTH, HERMITE_DIFF_CAPS);
+	if (capacity >= 2)
+		out[1] = qaws_internal_field_desc(QAWS_FIELD_DERIVATIVES, (qaws_value_type)curve->dimension,
+			impl->point_count, QAWS_DOMAIN_DIRECTION, QAWS_CONSTRAINT_NONE,
+			QAWS_DIFF_SMOOTH, HERMITE_DIFF_CAPS);
+	return 2;
+}
+
+static qaws_status hermite_primal_field(qaws_curve const *curve, qaws_diff_field field,
+	qaws_scalar const **out_data, unsigned int *out_count, unsigned int *out_components)
+{
+	qaws_hermite_impl const *impl = (qaws_hermite_impl const *)curve->impl;
+	if (field == QAWS_FIELD_POINTS)
+		*out_data = impl->points;
+	else if (field == QAWS_FIELD_DERIVATIVES)
+		*out_data = impl->tangents;
+	else
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	*out_count = impl->point_count;
+	*out_components = (unsigned int)curve->dimension;
+	return QAWS_STATUS_OK;
+}
+
+/* Cubic Hermite basis h00, h01 (points) and h10, h11 (derivatives) on a
+   unit span: global and local parameters coincide. */
+static qaws_status hermite_linear_support(qaws_curve const *curve, unsigned int span_index,
+	qaws_scalar local_t, unsigned int order, qaws_local_support *out)
+{
+	qaws_scalar t = local_t, t2 = t * t, t3 = t2 * t;
+	unsigned int r;
+	(void)curve;
+	if (order > QAWS_DIFF_MAX_ORDER)
+		return QAWS_STATUS_UNSUPPORTED_OPERATION;
+
+	out->kind = QAWS_SUPPORT_LOCAL;
+	out->range_count = 2;
+	out->ranges[0].field = QAWS_FIELD_POINTS;
+	out->ranges[0].first = span_index;
+	out->ranges[0].count = 2;
+	out->ranges[1].field = QAWS_FIELD_DERIVATIVES;
+	out->ranges[1].first = span_index;
+	out->ranges[1].count = 2;
+	out->has_weights = 1;
+	out->order = order;
+
+	for (r = 0; r <= order; r++) {
+		qaws_scalar h00, h10, h01, h11;
+		switch (r) {
+		case 0:
+			h00 = 2 * t3 - 3 * t2 + 1; h10 = t3 - 2 * t2 + t;
+			h01 = -2 * t3 + 3 * t2;    h11 = t3 - t2;
+			break;
+		case 1:
+			h00 = 6 * t2 - 6 * t;      h10 = 3 * t2 - 4 * t + 1;
+			h01 = -6 * t2 + 6 * t;     h11 = 3 * t2 - 2 * t;
+			break;
+		case 2:
+			h00 = 12 * t - 6;          h10 = 6 * t - 4;
+			h01 = -12 * t + 6;         h11 = 6 * t - 2;
+			break;
+		case 3:
+			h00 = 12; h10 = 6; h01 = -12; h11 = 6;
+			break;
+		default:
+			h00 = h10 = h01 = h11 = 0;
+			break;
+		}
+		out->weights[0][r][0] = h00;
+		out->weights[0][r][1] = h01;
+		out->weights[1][r][0] = h10;
+		out->weights[1][r][1] = h11;
+	}
+	return QAWS_STATUS_OK;
+}
+
+static qaws_curve_diff_vtable const hermite_diff_vtable = {
+	HERMITE_DIFF_CAPS,
+	QAWS_DIFF_PIECEWISE_SMOOTH,
+	hermite_describe_fields,
+	hermite_primal_field,
+	hermite_linear_support
+};
+
 static qaws_curve_vtable const hermite_vtable = {
 	hermite_eval_span_2d,
 	hermite_eval_span_3d,
@@ -176,6 +273,7 @@ static qaws_curve_vtable const hermite_vtable = {
 	hermite_is_periodic,
 	hermite_is_rational,
 	hermite_get_continuity,
+	&hermite_diff_vtable
 };
 
 /* -------------------------------------------------------------------------- */

@@ -361,7 +361,8 @@ static int pipe_surface_is_rational(qaws_surface const* s)
 static qaws_surface_vtable const pipe_surface_vtable = {
 	pipe_surface_eval,
 	pipe_surface_destroy,
-	pipe_surface_is_rational
+	pipe_surface_is_rational,
+	NULL /* diff */
 };
 
 qaws_status qaws_surface_create_pipe(

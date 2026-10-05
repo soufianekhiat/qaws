@@ -133,7 +133,8 @@ static qaws_continuity inline_c3(qaws_curve const* c) { (void)c; return QAWS_CON
 
 static qaws_curve_vtable const inline_bezier_vtable = {
 	inline_bezier_eval_2d, inline_bezier_eval_3d, inline_noop_destroy,
-	inline_not_closed, inline_not_periodic, inline_not_rational, inline_c3
+	inline_not_closed, inline_not_periodic, inline_not_rational, inline_c3,
+	NULL /* diff */
 };
 
 qaws_status qaws_curve_init_bezier_inline(
@@ -326,7 +327,8 @@ static qaws_status inline_poly_eval_3d(
 
 static qaws_curve_vtable const inline_poly_vtable = {
 	inline_poly_eval_2d, inline_poly_eval_3d, inline_noop_destroy,
-	inline_not_closed, inline_not_periodic, inline_not_rational, inline_c3
+	inline_not_closed, inline_not_periodic, inline_not_rational, inline_c3,
+	NULL /* diff */
 };
 
 qaws_status qaws_curve_init_polynomial_inline(

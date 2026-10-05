@@ -191,7 +191,8 @@ static int bezier_surface_is_rational(qaws_surface const* s)
 static qaws_surface_vtable const bezier_surface_vtable = {
 	bezier_surface_eval,
 	bezier_surface_destroy,
-	bezier_surface_is_rational
+	bezier_surface_is_rational,
+	NULL /* diff */
 };
 
 qaws_status qaws_surface_create_bezier_ex(

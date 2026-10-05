@@ -124,7 +124,8 @@ static int bilinear_surface_is_rational(qaws_surface const* s)
 static qaws_surface_vtable const bilinear_surface_vtable = {
 	bilinear_surface_eval,
 	bilinear_surface_destroy,
-	bilinear_surface_is_rational
+	bilinear_surface_is_rational,
+	NULL /* diff */
 };
 
 qaws_status qaws_surface_create_bilinear(

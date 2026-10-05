@@ -4,6 +4,7 @@
 #include "internal/qaws_internal_curve.h"
 #include "internal/qaws_internal_basis.h"
 #include "internal/qaws_internal_validation.h"
+#include "internal/qaws_internal_diff.h"
 #include "core/qaws_decasteljau_core.h"
 #include "qaws_platform.h"
 #include <stdlib.h>
@@ -117,9 +118,71 @@ static int bezier_is_periodic(qaws_curve const* c)  { (void)c; return 0; }
 static int bezier_is_rational(qaws_curve const* c)  { (void)c; return 0; }
 static qaws_continuity bezier_get_continuity(qaws_curve const* c) { (void)c; return QAWS_CONTINUITY_C3; }
 
+/* -------------------------------------------------------------------------- */
+/*  Differential rules: linear in the control points                          */
+/* -------------------------------------------------------------------------- */
+
+#define BEZIER_DIFF_CAPS (QAWS_CAP_TANGENT | QAWS_CAP_ADJOINT | QAWS_CAP_TANGENT2 | \
+	QAWS_CAP_LOCAL_SUPPORT | QAWS_CAP_LINEAR)
+
+static unsigned int bezier_describe_fields(qaws_curve const* curve, qaws_field_desc* out, unsigned int capacity)
+{
+	qaws_bezier_impl const* impl = (qaws_bezier_impl const*)curve->impl;
+	if (capacity >= 1)
+		out[0] = qaws_internal_field_desc(QAWS_FIELD_CONTROL_POINTS, (qaws_value_type)curve->dimension,
+			impl->control_point_count, QAWS_DOMAIN_POSITION, QAWS_CONSTRAINT_NONE,
+			QAWS_DIFF_SMOOTH, BEZIER_DIFF_CAPS);
+	return 1;
+}
+
+static qaws_status bezier_primal_field(qaws_curve const* curve, qaws_diff_field field,
+	qaws_scalar const** out_data, unsigned int* out_count, unsigned int* out_components)
+{
+	qaws_bezier_impl const* impl = (qaws_bezier_impl const*)curve->impl;
+	if (field != QAWS_FIELD_CONTROL_POINTS)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	*out_data = impl->control_points;
+	*out_count = impl->control_point_count;
+	*out_components = (unsigned int)curve->dimension;
+	return QAWS_STATUS_OK;
+}
+
+static qaws_status bezier_linear_support(qaws_curve const* curve, unsigned int span_index,
+	qaws_scalar local_t, unsigned int order, qaws_local_support* out)
+{
+	qaws_scalar b[(QAWS_DIFF_MAX_ORDER + 1) * QAWS_DIFF_MAX_SUPPORT];
+	unsigned int n = curve->degree, r, j;
+	(void)span_index;
+	if (n + 1 > QAWS_DIFF_MAX_SUPPORT || order > QAWS_DIFF_MAX_ORDER)
+		return QAWS_STATUS_UNSUPPORTED_OPERATION;
+
+	qaws_internal_bernstein_derivs(n, local_t, order, b);
+
+	out->kind = QAWS_SUPPORT_LOCAL;
+	out->range_count = 1;
+	out->ranges[0].field = QAWS_FIELD_CONTROL_POINTS;
+	out->ranges[0].first = 0;
+	out->ranges[0].count = n + 1;
+	out->has_weights = 1;
+	out->order = order;
+	for (r = 0; r <= order; r++)
+		for (j = 0; j <= n; j++)
+			out->weights[0][r][j] = b[r * (n + 1) + j];
+	return QAWS_STATUS_OK;
+}
+
+static qaws_curve_diff_vtable const bezier_diff_vtable = {
+	BEZIER_DIFF_CAPS,
+	QAWS_DIFF_SMOOTH,
+	bezier_describe_fields,
+	bezier_primal_field,
+	bezier_linear_support
+};
+
 static qaws_curve_vtable const bezier_vtable = {
 	bezier_eval_span_2d, bezier_eval_span_3d, bezier_destroy_impl,
-	bezier_is_closed, bezier_is_periodic, bezier_is_rational, bezier_get_continuity
+	bezier_is_closed, bezier_is_periodic, bezier_is_rational, bezier_get_continuity,
+	&bezier_diff_vtable
 };
 
 qaws_status qaws_curve_create_bezier_ex(

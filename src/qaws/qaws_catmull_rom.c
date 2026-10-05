@@ -242,6 +242,7 @@ static qaws_curve_vtable const catmull_rom_vtable = {
 	catmull_rom_is_periodic,
 	catmull_rom_is_rational,
 	catmull_rom_get_continuity,
+	NULL /* diff */
 };
 
 /* -------------------------------------------------------------------------- */

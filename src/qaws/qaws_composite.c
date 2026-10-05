@@ -217,7 +217,8 @@ static qaws_curve_vtable const composite_vtable = {
 	composite_is_closed,
 	composite_is_periodic,
 	composite_is_rational,
-	composite_get_continuity
+	composite_get_continuity,
+	NULL /* diff */
 };
 
 /* ------------------------------------------------------------------ */

@@ -5,6 +5,7 @@
 #include "../qaws_surface_types.h"
 
 typedef struct qaws_surface_vtable qaws_surface_vtable;
+typedef struct qaws_surface_diff_vtable qaws_surface_diff_vtable;
 
 struct qaws_surface
 {
@@ -30,6 +31,9 @@ struct qaws_surface_vtable
 	void (*destroy_impl)(void* impl, qaws_allocator const* allocator);
 
 	int (*is_rational)(qaws_surface const* surface);
+
+	/* Differential rules, NULL when the family is not differentiable yet. */
+	qaws_surface_diff_vtable const* diff;
 };
 
 /* Bezier surface impl */

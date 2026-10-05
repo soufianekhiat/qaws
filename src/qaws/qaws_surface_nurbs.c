@@ -210,7 +210,8 @@ static int nurbs_surface_is_rational(qaws_surface const* s)
 static qaws_surface_vtable const nurbs_surface_vtable = {
 	nurbs_surface_eval,
 	nurbs_surface_destroy,
-	nurbs_surface_is_rational
+	nurbs_surface_is_rational,
+	NULL /* diff */
 };
 
 qaws_status qaws_surface_create_nurbs_ex(

@@ -352,7 +352,8 @@ static qaws_curve_vtable const nurbs_vtable = {
 	nurbs_is_closed,
 	nurbs_is_periodic,
 	nurbs_is_rational,
-	nurbs_get_continuity
+	nurbs_get_continuity,
+	NULL /* diff */
 };
 
 /* ---------------------------------------------------------------------------

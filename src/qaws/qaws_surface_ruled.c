@@ -136,7 +136,8 @@ static int ruled_surface_is_rational(qaws_surface const* s)
 static qaws_surface_vtable const ruled_surface_vtable = {
 	ruled_surface_eval,
 	ruled_surface_destroy,
-	ruled_surface_is_rational
+	ruled_surface_is_rational,
+	NULL /* diff */
 };
 
 qaws_status qaws_surface_create_ruled(

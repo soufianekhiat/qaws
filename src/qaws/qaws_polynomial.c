@@ -3,6 +3,7 @@
 #include "internal/qaws_internal_types.h"
 #include "internal/qaws_internal_curve.h"
 #include "internal/qaws_internal_validation.h"
+#include "internal/qaws_internal_diff.h"
 #include <stdlib.h>
 #include <string.h>
 #include "qaws_platform.h"
@@ -197,6 +198,79 @@ static qaws_continuity polynomial_get_continuity(qaws_curve const* c) { (void)c;
 /*  Vtable                                                                     */
 /* -------------------------------------------------------------------------- */
 
+/* -------------------------------------------------------------------------- */
+/*  Differential rules: linear in the coefficients                            */
+/* -------------------------------------------------------------------------- */
+
+#define POLYNOMIAL_DIFF_CAPS (QAWS_CAP_TANGENT | QAWS_CAP_ADJOINT | QAWS_CAP_TANGENT2 | \
+	QAWS_CAP_LOCAL_SUPPORT | QAWS_CAP_LINEAR)
+
+static unsigned int polynomial_describe_fields(qaws_curve const* curve, qaws_field_desc* out, unsigned int capacity)
+{
+	qaws_polynomial_impl const* impl = (qaws_polynomial_impl const*)curve->impl;
+	if (capacity >= 1)
+		out[0] = qaws_internal_field_desc(QAWS_FIELD_COEFFICIENTS, (qaws_value_type)curve->dimension,
+			impl->coefficient_count, QAWS_DOMAIN_GENERIC, QAWS_CONSTRAINT_NONE,
+			QAWS_DIFF_SMOOTH, POLYNOMIAL_DIFF_CAPS);
+	return 1;
+}
+
+static qaws_status polynomial_primal_field(qaws_curve const* curve, qaws_diff_field field,
+	qaws_scalar const** out_data, unsigned int* out_count, unsigned int* out_components)
+{
+	qaws_polynomial_impl const* impl = (qaws_polynomial_impl const*)curve->impl;
+	if (field != QAWS_FIELD_COEFFICIENTS)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	*out_data = impl->coefficients;
+	*out_count = impl->coefficient_count;
+	*out_components = (unsigned int)curve->dimension;
+	return QAWS_STATUS_OK;
+}
+
+/* d^r/dt^r t^i = i!/(i-r)! t^(i-r) at the global parameter. */
+static qaws_status polynomial_linear_support(qaws_curve const* curve, unsigned int span_index,
+	qaws_scalar local_t, unsigned int order, qaws_local_support* out)
+{
+	qaws_polynomial_impl const* impl = (qaws_polynomial_impl const*)curve->impl;
+	qaws_scalar t_min = curve->parameter_range.min_value;
+	qaws_scalar t_max = curve->parameter_range.max_value;
+	qaws_scalar t = t_min + local_t * (t_max - t_min);
+	unsigned int n = impl->coefficient_count, r, i, q;
+	(void)span_index;
+	if (n > QAWS_DIFF_MAX_SUPPORT || order > QAWS_DIFF_MAX_ORDER)
+		return QAWS_STATUS_UNSUPPORTED_OPERATION;
+
+	out->kind = QAWS_SUPPORT_GLOBAL;
+	out->range_count = 1;
+	out->ranges[0].field = QAWS_FIELD_COEFFICIENTS;
+	out->ranges[0].first = 0;
+	out->ranges[0].count = n;
+	out->has_weights = 1;
+	out->order = order;
+	for (r = 0; r <= order; r++) {
+		for (i = 0; i < n; i++) {
+			qaws_scalar w = QAWS_ZERO;
+			if (i >= r) {
+				w = QAWS_ONE;
+				for (q = 0; q < r; q++)
+					w *= (qaws_scalar)(i - q);
+				for (q = 0; q < i - r; q++)
+					w *= t;
+			}
+			out->weights[0][r][i] = w;
+		}
+	}
+	return QAWS_STATUS_OK;
+}
+
+static qaws_curve_diff_vtable const polynomial_diff_vtable = {
+	POLYNOMIAL_DIFF_CAPS,
+	QAWS_DIFF_SMOOTH,
+	polynomial_describe_fields,
+	polynomial_primal_field,
+	polynomial_linear_support
+};
+
 static qaws_curve_vtable const polynomial_vtable = {
 	polynomial_eval_span_2d,
 	polynomial_eval_span_3d,
@@ -204,7 +278,8 @@ static qaws_curve_vtable const polynomial_vtable = {
 	polynomial_is_closed,
 	polynomial_is_periodic,
 	polynomial_is_rational,
-	polynomial_get_continuity
+	polynomial_get_continuity,
+	&polynomial_diff_vtable
 };
 
 /* -------------------------------------------------------------------------- */

@@ -5,6 +5,7 @@
 #include "../qaws_status.h"
 
 typedef struct qaws_curve_vtable qaws_curve_vtable;
+typedef struct qaws_curve_diff_vtable qaws_curve_diff_vtable;
 
 struct qaws_curve
 {
@@ -41,6 +42,9 @@ struct qaws_curve_vtable
 	int (*is_periodic)(qaws_curve const* curve);
 	int (*is_rational)(qaws_curve const* curve);
 	qaws_continuity (*get_continuity)(qaws_curve const* curve);
+
+	/* Differential rules, NULL when the family is not differentiable yet. */
+	qaws_curve_diff_vtable const* diff;
 };
 
 struct qaws_traversal

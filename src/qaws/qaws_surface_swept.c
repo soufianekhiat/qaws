@@ -215,7 +215,8 @@ static int swept_surface_is_rational(qaws_surface const* s)
 static qaws_surface_vtable const swept_surface_vtable = {
 	swept_surface_eval,
 	swept_surface_destroy,
-	swept_surface_is_rational
+	swept_surface_is_rational,
+	NULL /* diff */
 };
 
 qaws_status qaws_surface_create_swept(

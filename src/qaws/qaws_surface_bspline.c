@@ -172,7 +172,8 @@ static int bspline_surface_is_rational(qaws_surface const* s)
 static qaws_surface_vtable const bspline_surface_vtable = {
 	bspline_surface_eval,
 	bspline_surface_destroy,
-	bspline_surface_is_rational
+	bspline_surface_is_rational,
+	NULL /* diff */
 };
 
 qaws_status qaws_surface_create_bspline_ex(

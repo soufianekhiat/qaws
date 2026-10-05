@@ -236,7 +236,8 @@ static int loft_surface_is_rational(qaws_surface const* s)
 static qaws_surface_vtable const loft_surface_vtable = {
 	loft_surface_eval,
 	loft_surface_destroy,
-	loft_surface_is_rational
+	loft_surface_is_rational,
+	NULL /* diff */
 };
 
 qaws_status qaws_surface_create_loft(

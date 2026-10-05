@@ -97,6 +97,7 @@ set(QAWS_SOURCES
   src/qaws/qaws_boolean_2d.c
   src/qaws/qaws_inline.c
   src/qaws/qaws_prepare.c
+  src/qaws/qaws_diff.c
   src/qaws/internal/qaws_internal_curve.c
   src/qaws/internal/qaws_internal_basis.c
   src/qaws/internal/qaws_internal_span.c
@@ -107,6 +108,7 @@ set(QAWS_SOURCES
   src/qaws/internal/qaws_internal_fit.c
   src/qaws/internal/qaws_internal_mesh.c
   src/qaws/internal/qaws_internal_sparse.c
+  src/qaws/internal/qaws_internal_diff.c
 )
 
 if(QAWS_ENABLE_SIMD)
@@ -377,6 +379,8 @@ if(QAWS_INSTALL)
       src/qaws/qaws_boolean_2d.h
       src/qaws/qaws_alloc.h
       src/qaws/qaws_inline.h
+      src/qaws/qaws_diff.h
+      src/qaws/qaws_diff_types.h
       src/qaws/qaws_platform.h
       src/qaws/qaws_core_types.h
       src/qaws/qaws_prepare.h
@@ -397,6 +401,7 @@ if(QAWS_INSTALL)
       src/qaws/core/qaws_horner_core.h
       src/qaws/core/qaws_arc_core.h
       src/qaws/core/qaws_surface_core.h
+      src/qaws/core/qaws_dual_core.h
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/core
   )
 

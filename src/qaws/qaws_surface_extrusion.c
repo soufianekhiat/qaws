@@ -162,7 +162,8 @@ static int extrusion_surface_is_rational(qaws_surface const* s)
 static qaws_surface_vtable const extrusion_surface_vtable = {
 	extrusion_surface_eval,
 	extrusion_surface_destroy,
-	extrusion_surface_is_rational
+	extrusion_surface_is_rational,
+	NULL /* diff */
 };
 
 qaws_status qaws_surface_create_extrusion(

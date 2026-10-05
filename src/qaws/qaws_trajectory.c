@@ -292,7 +292,8 @@ static qaws_curve_vtable const trajectory_vtable = {
 	trajectory_is_closed,
 	trajectory_is_periodic,
 	trajectory_is_rational,
-	trajectory_get_continuity
+	trajectory_get_continuity,
+	NULL /* diff */
 };
 
 /* ---------------------------------------------------------------------------

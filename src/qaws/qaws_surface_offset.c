@@ -213,7 +213,8 @@ static int offset_surface_is_rational(qaws_surface const* s)
 static qaws_surface_vtable const offset_surface_vtable = {
 	offset_surface_eval,
 	offset_surface_destroy,
-	offset_surface_is_rational
+	offset_surface_is_rational,
+	NULL /* diff */
 };
 
 qaws_status qaws_surface_create_offset(

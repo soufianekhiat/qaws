@@ -287,7 +287,8 @@ static int fillet_surface_is_rational(qaws_surface const* s)
 static qaws_surface_vtable const fillet_surface_vtable = {
 	fillet_surface_eval,
 	fillet_surface_destroy,
-	fillet_surface_is_rational
+	fillet_surface_is_rational,
+	NULL /* diff */
 };
 
 /* ------------------------------------------------------------------ */

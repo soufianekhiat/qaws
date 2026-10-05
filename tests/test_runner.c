@@ -59,6 +59,8 @@ extern int test_45_tspline_main(void);
 extern int test_46_subdiv_main(void);
 extern int test_47_brep_main(void);
 extern int test_48_fillet_main(void);
+extern int test_49_diff_model_main(void);
+extern int test_50_diff_curves_main(void);
 
 /* Test registry */
 typedef struct {
@@ -116,6 +118,8 @@ static test_suite const g_test_suites[] = {
 	{"46_subdiv", test_46_subdiv_main},
 	{"47_brep", test_47_brep_main},
 	{"48_fillet", test_48_fillet_main},
+	{"49_diff_model", test_49_diff_model_main},
+	{"50_diff_curves", test_50_diff_curves_main},
 };
 
 int main(void) {

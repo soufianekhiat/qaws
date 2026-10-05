@@ -287,7 +287,8 @@ static qaws_curve_vtable const rbez_vtable = {
 	rbez_is_closed,
 	rbez_is_periodic,
 	rbez_is_rational,
-	rbez_get_continuity
+	rbez_get_continuity,
+	NULL /* diff */
 };
 
 /* ---------------------------------------------------------------------------

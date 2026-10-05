@@ -375,7 +375,8 @@ static int gordon_surface_is_rational(qaws_surface const* s)
 static qaws_surface_vtable const gordon_surface_vtable = {
 	gordon_surface_eval,
 	gordon_surface_destroy,
-	gordon_surface_is_rational
+	gordon_surface_is_rational,
+	NULL /* diff */
 };
 
 qaws_status qaws_surface_create_gordon(

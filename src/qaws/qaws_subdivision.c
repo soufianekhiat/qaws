@@ -482,6 +482,7 @@ static qaws_curve_vtable const subdivision_vtable = {
 	subdivision_is_periodic,
 	subdivision_is_rational,
 	subdivision_get_continuity,
+	NULL /* diff */
 };
 
 /* -------------------------------------------------------------------------- */
