@@ -115,9 +115,10 @@ static int instance_build(derived_fixture const* f, qaws_scalar const (*child_pa
 		unsigned int k;
 		for (k = 0; k < 4; k++)
 			sections[k] = out->children[k];
+		static qaws_scalar const vparams[4] = { 0, 0.3f, 0.6f, 1 };
 		d.sections = sections;
 		d.section_count = 4;
-		d.v_parameters = NULL;
+		d.v_parameters = vparams; /* away from the sample v values */
 		qaws_surface_create_loft(&d, &out->surface);
 	}
 	else if (f->kind == 6)
