@@ -64,6 +64,7 @@ extern int test_50_diff_curves_main(void);
 extern int test_51_diff_surfaces_main(void);
 extern int test_52_diff_geometry_main(void);
 extern int test_53_diff_derived_main(void);
+extern int test_54_diff_implicit_main(void);
 
 /* Test registry */
 typedef struct {
@@ -126,6 +127,7 @@ static test_suite const g_test_suites[] = {
 	{"51_diff_surfaces", test_51_diff_surfaces_main},
 	{"52_diff_geometry", test_52_diff_geometry_main},
 	{"53_diff_derived", test_53_diff_derived_main},
+	{"54_diff_implicit", test_54_diff_implicit_main},
 };
 
 int main(void) {
