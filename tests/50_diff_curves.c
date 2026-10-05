@@ -28,9 +28,9 @@ typedef struct family
 	char const* name;
 	unsigned int dim;
 	unsigned int field_count;
-	qaws_diff_field fields[2];
-	unsigned int counts[2];
-	qaws_scalar params[2][MAX_PARAMS];
+	qaws_diff_field fields[3];
+	unsigned int counts[3];
+	qaws_scalar params[3][MAX_PARAMS];
 	qaws_status (*create)(struct family const* f, qaws_scalar const* const* params, qaws_curve** out);
 	qaws_scalar t_min, t_max;
 	qaws_scalar knots[16];
@@ -112,6 +112,21 @@ static qaws_status create_nurbs(family const* f, qaws_scalar const* const* p, qa
 	return qaws_curve_create_nurbs(&d, out);
 }
 
+static qaws_status create_nurbs_knots(family const* f, qaws_scalar const* const* p, qaws_curve** out)
+{
+	qaws_nurbs_desc d;
+	memset(&d, 0, sizeof(d));
+	d.dimension = (qaws_dimension)f->dim;
+	d.degree = f->counts[2] - f->counts[0] - 1;
+	d.control_points = p[0];
+	d.control_point_count = f->counts[0];
+	d.weights = p[1];
+	d.weight_count = f->counts[1];
+	d.knots = p[2];
+	d.knot_count = f->counts[2];
+	return qaws_curve_create_nurbs(&d, out);
+}
+
 static qaws_status create_rational_bezier(family const* f, qaws_scalar const* const* p, qaws_curve** out)
 {
 	qaws_rational_bezier_desc d;
@@ -128,7 +143,7 @@ static void make_families(family* fams, unsigned int* count)
 {
 	unsigned int i;
 	family* f;
-	memset(fams, 0, sizeof(family) * 7);
+	memset(fams, 0, sizeof(family) * 8);
 	diff_seed(2024);
 
 	f = &fams[0];
@@ -231,15 +246,39 @@ static void make_families(family* fams, unsigned int* count)
 	f->create = create_bspline_knots;
 	f->t_min = 1.5f; f->t_max = 3.5f;
 
-	*count = 7;
+
+	/* NURBS with weights and knots: the rational quotient carries the
+	   knot terms (3D, unclamped, samples away from knots). */
+	f = &fams[7];
+	f->name = "nurbs_knots";
+	f->dim = 3;
+	f->field_count = 3;
+	f->fields[0] = QAWS_FIELD_CONTROL_POINTS;
+	f->fields[1] = QAWS_FIELD_WEIGHTS;
+	f->fields[2] = QAWS_FIELD_KNOTS;
+	f->counts[0] = 7;
+	f->counts[1] = 7;
+	f->counts[2] = 11;
+	diff_rand_fill(f->params[0], 7 * 3);
+	for (i = 0; i < 7; i++)
+		f->params[1][i] = (qaws_scalar)1.25 + (qaws_scalar)0.75 * diff_rand();
+	{
+		static qaws_scalar const k[11] = { 0.1f, 0.6f, 1.0f, 1.5f, 2.13f, 2.58f, 3.03f, 3.5f, 3.9f, 4.4f, 4.8f };
+		for (i = 0; i < 11; i++) f->params[2][i] = k[i];
+	}
+	f->create = create_nurbs_knots;
+	f->t_min = 1.5f; f->t_max = 3.5f;
+
+	*count = 8;
 }
 
 static qaws_curve* family_curve(family const* f, qaws_scalar const (*params)[MAX_PARAMS])
 {
-	qaws_scalar const* p[2];
+	qaws_scalar const* p[3];
 	qaws_curve* c = NULL;
 	p[0] = params[0];
 	p[1] = params[1];
+	p[2] = params[2];
 	if (f->create(f, p, &c) != QAWS_STATUS_OK)
 		return NULL;
 	return c;
@@ -248,7 +287,7 @@ static qaws_curve* family_curve(family const* f, qaws_scalar const (*params)[MAX
 /* Curve built from params + h * dir. */
 static qaws_curve* family_curve_shifted(family const* f, qaws_scalar const (*dir)[MAX_PARAMS], double h)
 {
-	qaws_scalar p[2][MAX_PARAMS];
+	qaws_scalar p[3][MAX_PARAMS];
 	unsigned int r, i;
 	for (r = 0; r < f->field_count; r++)
 		for (i = 0; i < f->counts[r] * FIELD_COMPS(f, r); i++)
@@ -352,8 +391,8 @@ static void check_primal(family const* f, qaws_curve const* c)
 
 static void check_param_tangent_fd(family const* f, qaws_curve const* c)
 {
-	qaws_scalar dir[2][MAX_PARAMS];
-	qaws_field_view vs[2];
+	qaws_scalar dir[3][MAX_PARAMS];
+	qaws_field_view vs[3];
 	qaws_diff_views views;
 	unsigned int r, i, k;
 	int ok = 1;
@@ -412,14 +451,14 @@ static qaws_status run_adjoint(family const* f, qaws_curve const* c, qaws_diff_a
 	qaws_scalar (*pbar)[MAX_PARAMS], qaws_scalar* tbar)
 {
 	qaws_diff_context ctx;
-	qaws_field_view vs[2];
+	qaws_field_view vs[3];
 	qaws_diff_views views;
 	unsigned int r;
 
 	qaws_diff_context_init(&ctx);
 	ctx.accumulation = acc;
 	ctx.tile_size = tile;
-	for (r = 0; r < 2; r++)
+	for (r = 0; r < 3; r++)
 		memset(pbar[r], 0, sizeof(qaws_scalar) * MAX_PARAMS);
 	memset(tbar, 0, sizeof(qaws_scalar) * SAMPLE_COUNT);
 	family_views(f, pbar, vs, &views);
@@ -433,10 +472,10 @@ static qaws_status run_adjoint(family const* f, qaws_curve const* c, qaws_diff_a
 static void check_adjoint_identity(family const* f, qaws_curve const* c)
 {
 	qaws_scalar ts[SAMPLE_COUNT], tdots[SAMPLE_COUNT], tbar[SAMPLE_COUNT];
-	qaws_scalar dir[2][MAX_PARAMS], pbar[2][MAX_PARAMS];
+	qaws_scalar dir[3][MAX_PARAMS], pbar[3][MAX_PARAMS];
 	qaws_curve_jet_3d ybar3[SAMPLE_COUNT], tan3[SAMPLE_COUNT];
 	qaws_curve_jet_2d ybar2[SAMPLE_COUNT], tan2[SAMPLE_COUNT];
-	qaws_field_view vs[2];
+	qaws_field_view vs[3];
 	qaws_diff_views views;
 	unsigned int i, r;
 	double lhs = 0, rhs = 0;
@@ -475,7 +514,7 @@ static void check_adjoint_identity(family const* f, qaws_curve const* c)
 
 	/* All accumulation strategies agree. */
 	{
-		qaws_scalar pbar_t[2][MAX_PARAMS], pbar_g[2][MAX_PARAMS];
+		qaws_scalar pbar_t[3][MAX_PARAMS], pbar_g[3][MAX_PARAMS];
 		qaws_scalar tbar_t[SAMPLE_COUNT], tbar_g[SAMPLE_COUNT];
 		int ok = 1;
 		unsigned int n;
@@ -498,8 +537,8 @@ static void check_adjoint_identity(family const* f, qaws_curve const* c)
 
 static void check_tangent2(family const* f, qaws_curve const* c)
 {
-	qaws_scalar dir[2][MAX_PARAMS];
-	qaws_field_view vs[2];
+	qaws_scalar dir[3][MAX_PARAMS];
+	qaws_field_view vs[3];
 	qaws_diff_views views;
 	unsigned int r, i, k;
 	int ok = 1;
@@ -542,7 +581,7 @@ static void check_tangent2(family const* f, qaws_curve const* c)
 
 static void test_curve_families(void)
 {
-	family fams[7];
+	family fams[8];
 	unsigned int n, i;
 	make_families(fams, &n);
 	for (i = 0; i < n; i++)

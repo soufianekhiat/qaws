@@ -539,7 +539,7 @@ typedef struct curve_jet_buf
 } curve_jet_buf;
 
 static qaws_status rational_tangent_sample(
-	curve_sample const* s, unsigned int dim, qaws_scalar t_dot, unsigned int channels,
+	qaws_curve const* curve, qaws_scalar t, curve_sample const* s, unsigned int dim, qaws_scalar t_dot, unsigned int channels,
 	qaws_diff_views const* views, int want_second,
 	curve_jet_buf* primal, curve_jet_buf* tangent, curve_jet_buf* tangent2);
 
@@ -655,39 +655,31 @@ static qaws_status knot_tangent_sample(
 	return QAWS_STATUS_OK;
 }
 
-/* Knot adjoint entries of one sample: ubar_i = sum_k,j d_ui N_j^(k) <P_j, ybar_k>. */
-static qaws_status knot_adjoint_sample(
+typedef qaws_scalar knot_row_coeffs[QAWS_CURVE_JET_ORDER + 1][QAWS_INTERNAL_KNOT_MAX_DEGREE + 1];
+
+/* Knot adjoint entries: ubar_i = sum over rows k in `channels` and basis j
+   of d_ui N_j^(k) * py[k][j]. */
+static qaws_status knot_adjoint_rows(
 	qaws_curve const* curve,
 	curve_sample const* s,
-	unsigned int dim,
 	qaws_scalar t,
 	unsigned int channels,
 	unsigned int order,
-	curve_jet_buf const* ybar,
+	knot_row_coeffs py,
 	qaws_diff_entry* entries,
 	unsigned int capacity,
 	unsigned int* n)
 {
 	qaws_dual1 ders[(QAWS_DIFF_MAX_ORDER + 1) * (QAWS_INTERNAL_KNOT_MAX_DEGREE + 1)];
 	qaws_scalar kdot[2 * QAWS_INTERNAL_KNOT_MAX_DEGREE];
-	qaws_scalar py[QAWS_CURVE_JET_ORDER + 1][QAWS_INTERNAL_KNOT_MAX_DEGREE + 1];
 	knot_frame f;
-	unsigned int i, j, k, c, stride;
+	unsigned int i, j, k, stride;
 	qaws_status st = knot_frame_make(curve, s, &f);
 	if (st != QAWS_STATUS_OK)
 		return st;
 	if (order > QAWS_DIFF_MAX_ORDER)
 		return QAWS_STATUS_UNSUPPORTED_OPERATION;
 	stride = f.degree + 1;
-	for (k = 0; k <= QAWS_CURVE_JET_ORDER; k++)
-		for (j = 0; j <= f.degree; j++)
-		{
-			qaws_scalar const* p = s->primal[0] + (size_t)(s->support.ranges[0].first + j) * dim;
-			py[k][j] = QAWS_ZERO;
-			if (channels & (1u << k))
-				for (c = 0; c < dim; c++)
-					py[k][j] += p[c] * ybar->d[k][c];
-		}
 	for (i = 0; i < 2 * f.degree; i++)
 		kdot[i] = QAWS_ZERO;
 	for (i = 0; i < 2 * f.degree; i++)
@@ -710,6 +702,35 @@ static qaws_status knot_adjoint_sample(
 		(*n)++;
 	}
 	return QAWS_STATUS_OK;
+}
+
+/* Polynomial curves: py[k][j] = <P_j, ybar_k>. */
+static qaws_status knot_adjoint_sample(
+	qaws_curve const* curve,
+	curve_sample const* s,
+	unsigned int dim,
+	qaws_scalar t,
+	unsigned int channels,
+	unsigned int order,
+	curve_jet_buf const* ybar,
+	qaws_diff_entry* entries,
+	unsigned int capacity,
+	unsigned int* n)
+{
+	knot_row_coeffs py;
+	unsigned int j, k, c, count = s->support.ranges[0].count;
+	if (count > QAWS_INTERNAL_KNOT_MAX_DEGREE + 1)
+		return QAWS_STATUS_UNSUPPORTED_OPERATION;
+	for (k = 0; k <= QAWS_CURVE_JET_ORDER; k++)
+		for (j = 0; j < count; j++)
+		{
+			qaws_scalar const* p = s->primal[0] + (size_t)(s->support.ranges[0].first + j) * dim;
+			py[k][j] = QAWS_ZERO;
+			if (channels & (1u << k))
+				for (c = 0; c < dim; c++)
+					py[k][j] += p[c] * ybar->d[k][c];
+		}
+	return knot_adjoint_rows(curve, s, t, channels, order, py, entries, capacity, n);
 }
 
 static qaws_status curve_tangent_sample(
@@ -745,7 +766,7 @@ static qaws_status curve_tangent_sample(
 
 	if (s.weights)
 	{
-		st = rational_tangent_sample(&s, dim, t_dot, channels, views, want_second, primal, tangent, tangent2);
+		st = rational_tangent_sample(curve, t, &s, dim, t_dot, channels, views, want_second, primal, tangent, tangent2);
 		if (st != QAWS_STATUS_OK)
 			return st;
 	}
@@ -901,6 +922,8 @@ static qaws_vec3 vec3_from(qaws_scalar const* a, unsigned int dim)
 }
 
 static qaws_status rational_tangent_sample(
+	qaws_curve const* curve,
+	qaws_scalar t,
 	curve_sample const* s,
 	unsigned int dim,
 	qaws_scalar t_dot,
@@ -938,6 +961,57 @@ static qaws_status rational_tangent_sample(
 		W[k].tt = QAWS_LITERAL(2.0) * t_dot * wd1 + t_dot * t_dot * w2;
 	}
 
+	/* Knot direction: d_u N^(k) and d_uu N^(k) enter the homogeneous sums;
+	   second order adds 2 t' d_u N^(k+1) and 2 d_u N^(k) (w' P + w P'). */
+	{
+		qaws_field_view const* kv = views ? qaws_diff_views_find(views, QAWS_FIELD_KNOTS) : NULL;
+		if (kv && kv->data && knots_differentiable(curve))
+		{
+			qaws_dual1 ders[(QAWS_DIFF_MAX_ORDER + 1) * (QAWS_INTERNAL_KNOT_MAX_DEGREE + 1)];
+			qaws_scalar kdot[2 * QAWS_INTERNAL_KNOT_MAX_DEGREE];
+			knot_frame f;
+			unsigned int j, c, stride;
+			int any = 0;
+			qaws_status st = knot_frame_make(curve, s, &f);
+			if (st != QAWS_STATUS_OK)
+				return st;
+			if (rows_needed > QAWS_DIFF_MAX_ORDER)
+				return QAWS_STATUS_UNSUPPORTED_OPERATION;
+			for (i = 0; i < 2 * f.degree; i++)
+			{
+				kdot[i] = QAWS_ZERO;
+				qaws_internal_view_read(kv, f.span - f.degree + 1 + i, 1, &kdot[i]);
+				any |= kdot[i] != QAWS_ZERO;
+			}
+			if (any)
+			{
+				stride = f.degree + 1;
+				qaws_internal_bspline_basis_derivs_knot(f.knots, f.degree, f.span, t, kdot, rows_needed, ders);
+				for (k = 0; k <= kmax; k++)
+					for (j = 0; j <= f.degree; j++)
+					{
+						unsigned int e = s->support.ranges[0].first + j;
+						qaws_scalar w = s->weights[e], wd = QAWS_ZERO;
+						qaws_scalar const* p = s->primal[0] + (size_t)e * dim;
+						qaws_scalar pd[3] = { 0, 0, 0 }, pv3[3] = { 0, 0, 0 };
+						qaws_scalar n1 = ders[k * stride + j].t, n2 = ders[k * stride + j].tt;
+						qaws_scalar n1up = (k + 1 <= rows_needed) ? ders[(k + 1) * stride + j].t : QAWS_ZERO;
+						qaws_scalar sec_w;
+						if (pv) qaws_internal_view_read(pv, e, dim, pd);
+						if (wv) qaws_internal_view_read(wv, e, 1, &wd);
+						for (c = 0; c < dim; c++)
+							pv3[c] = p[c];
+						sec_w = n2 * w + QAWS_LITERAL(2.0) * t_dot * n1up * w;
+						W[k].t += n1 * w;
+						W[k].tt += sec_w + QAWS_LITERAL(2.0) * n1 * wd;
+						A[k].t = qaws_v3_axpy(A[k].t, vec3_from(pv3, dim), n1 * w);
+						A[k].tt = qaws_v3_axpy(A[k].tt, vec3_from(pv3, dim), sec_w + QAWS_LITERAL(2.0) * n1 * wd);
+						A[k].tt = qaws_v3_axpy(A[k].tt, vec3_from(pd, dim), QAWS_LITERAL(2.0) * n1 * w);
+					}
+			}
+		}
+	}
+
 	if (W[0].v < QAWS_LITERAL(1e-15) && W[0].v > -QAWS_LITERAL(1e-15))
 		return QAWS_STATUS_DEGENERATE_CURVE;
 
@@ -972,6 +1046,9 @@ static qaws_status rational_tangent_sample(
 /* Reverse of the quotient recurrence: entries for control points and
    weights plus the coordinate adjoint. */
 static qaws_status rational_adjoint_sample(
+	qaws_curve const* curve,
+	qaws_scalar t,
+	int want_knots,
 	curve_sample const* s,
 	unsigned int dim,
 	unsigned int channels,
@@ -1063,6 +1140,31 @@ static qaws_status rational_adjoint_sample(
 			}
 			ew->g[0] += nk * (pa + Wbar[k]);
 		}
+	}
+	if (want_knots)
+	{
+		/* knots through the homogeneous sums: py[k][j] = w_j (P_j . Abar_k + Wbar_k) */
+		knot_row_coeffs py;
+		qaws_status st;
+		if (rg->count > QAWS_INTERNAL_KNOT_MAX_DEGREE + 1)
+			return QAWS_STATUS_UNSUPPORTED_OPERATION;
+		for (k = 0; k <= QAWS_CURVE_JET_ORDER; k++)
+			for (j = 0; j < rg->count; j++)
+			{
+				unsigned int e = rg->first + j;
+				qaws_scalar const* p = s->primal[0] + (size_t)e * dim;
+				qaws_scalar acc = QAWS_ZERO;
+				if (k <= kmax)
+				{
+					acc = Wbar[k];
+					for (c = 0; c < dim; c++)
+						acc += p[c] * Abar[k][c];
+				}
+				py[k][j] = s->weights[e] * acc;
+			}
+		st = knot_adjoint_rows(curve, s, t, (1u << (kmax + 1)) - 1u, kmax, py, entries, capacity, &n);
+		if (st != QAWS_STATUS_OK)
+			return st;
 	}
 	*out_count = n;
 
@@ -1525,7 +1627,7 @@ static qaws_status curve_collect(
 	{
 		qaws_scalar dummy = 0;
 		int want_t = first_pass && job->t_adjoint != NULL;
-		st = rational_adjoint_sample(&s, job->dim, job->channels, &ybar, want_t,
+		st = rational_adjoint_sample(job->curve, job->t[i], job->knots, &s, job->dim, job->channels, &ybar, want_t,
 			entries, capacity, &n, want_t ? &job->t_adjoint[i] : &dummy);
 		if (st != QAWS_STATUS_OK)
 			return st;
