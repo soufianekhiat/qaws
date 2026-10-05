@@ -393,6 +393,203 @@ static void test_normal_through_extrusion(void)
 	instance_destroy(&in);
 }
 
+/* ------------------------------------------------------------------ */
+/*  Offset surface: own distance + a NURBS base surface as child 0    */
+/* ------------------------------------------------------------------ */
+
+static qaws_scalar const g_off_knots[8] = { 0, 0, 0, 0, 1, 1, 1, 1 };
+
+typedef struct offset_params
+{
+	qaws_scalar cps[48];
+	qaws_scalar w[16];
+	qaws_scalar distance;
+} offset_params;
+
+typedef struct offset_instance
+{
+	qaws_surface* base;
+	qaws_surface* offset;
+} offset_instance;
+
+static int offset_build(offset_params const* p, offset_instance* out)
+{
+	qaws_surface_nurbs_desc d;
+	qaws_surface_offset_desc od;
+	out->base = NULL;
+	out->offset = NULL;
+	d.u_degree = 3;
+	d.v_degree = 3;
+	d.control_points = (qaws_vec3 const*)p->cps;
+	d.u_point_count = 4;
+	d.v_point_count = 4;
+	d.weights = p->w;
+	d.u_knots = g_off_knots;
+	d.u_knot_count = 8;
+	d.v_knots = g_off_knots;
+	d.v_knot_count = 8;
+	if (qaws_surface_create_nurbs(&d, &out->base) != QAWS_STATUS_OK)
+		return 0;
+	od.base = out->base;
+	od.distance = p->distance;
+	return qaws_surface_create_offset(&od, &out->offset) == QAWS_STATUS_OK;
+}
+
+static void offset_destroy(offset_instance* in)
+{
+	if (in->offset) qaws_surface_destroy(in->offset);
+	if (in->base) qaws_surface_destroy(in->base);
+}
+
+typedef struct offset_storage
+{
+	offset_params data;
+	qaws_field_view own_view;
+	qaws_field_view base_views[2];
+	qaws_diff_views child;
+	qaws_diff_views views;
+} offset_storage;
+
+static void offset_bind(offset_storage* s)
+{
+	s->own_view = qaws_field_view_make(QAWS_FIELD_OFFSET_DISTANCE, &s->data.distance, 1, 1);
+	s->base_views[0] = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, s->data.cps, 16, 3);
+	s->base_views[1] = qaws_field_view_make(QAWS_FIELD_WEIGHTS, s->data.w, 16, 1);
+	s->child.fields = s->base_views;
+	s->child.field_count = 2;
+	s->child.children = NULL;
+	s->child.child_count = 0;
+	s->views.fields = &s->own_view;
+	s->views.field_count = 1;
+	s->views.children = &s->child;
+	s->views.child_count = 1;
+}
+
+static double offset_dot(offset_params const* a, offset_params const* b)
+{
+	return diff_dot(a->cps, b->cps, 48) + diff_dot(a->w, b->w, 16) + (double)a->distance * b->distance;
+}
+
+static void offset_shift(offset_params const* p, offset_params const* dir, double h, offset_params* out)
+{
+	unsigned int n;
+	for (n = 0; n < 48; n++) out->cps[n] = (qaws_scalar)(p->cps[n] + h * dir->cps[n]);
+	for (n = 0; n < 16; n++) out->w[n] = (qaws_scalar)(p->w[n] + h * dir->w[n]);
+	out->distance = (qaws_scalar)(p->distance + h * dir->distance);
+}
+
+static void test_offset(void)
+{
+	offset_params base;
+	offset_instance in;
+	unsigned int i, a, b, ch;
+	int ok_pos = 1, ok_fd = 1, ok_t2 = 1, ok_adj = 1;
+	double h = DIFF_FD_STEP;
+
+	diff_seed(515);
+	for (a = 0; a < 4; a++)
+		for (b = 0; b < 4; b++)
+		{
+			qaws_scalar* p = &base.cps[(a * 4 + b) * 3];
+			p[0] = (qaws_scalar)a + diff_rand() * (qaws_scalar)0.1;
+			p[1] = (qaws_scalar)b + diff_rand() * (qaws_scalar)0.1;
+			p[2] = (qaws_scalar)0.3 * ((qaws_scalar)a - (qaws_scalar)1.5) * ((qaws_scalar)b - (qaws_scalar)1.5) + diff_rand() * (qaws_scalar)0.1;
+			base.w[a * 4 + b] = (qaws_scalar)1 + (qaws_scalar)0.25 * diff_rand();
+		}
+	base.distance = (qaws_scalar)0.35;
+	offset_build(&base, &in);
+
+	for (i = 0; i < DER_SAMPLES; i++)
+	{
+		qaws_scalar u, v, udot = diff_rand(), vdot = diff_rand(), ubar = 0, vbar = 0;
+		offset_storage dir, bar;
+		offset_params pp, pm;
+		offset_instance sp, sm;
+		qaws_surface_jet p, t, tt, jp, jm, ybar;
+		double lhs = 0, rhs;
+
+		sample(i, &u, &v);
+
+		/* Position = base + d * base normal; partials consistent with each other. */
+		{
+			qaws_surface_eval_result br;
+			qaws_surface_jet j0, ju1, ju0;
+			qaws_surface_evaluate(in.base, u, v, QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL, &br);
+			qaws_surface_eval_jet(in.offset, u, v, QAWS_SJET_ORDER2, &j0);
+			if (!vclose(j0.d[0], qaws_v3_axpy(br.position, br.normal, base.distance), 1e-6))
+				ok_pos = 0;
+			qaws_surface_eval_jet(in.offset, (qaws_scalar)(u + h), v, QAWS_SJET_ORDER2, &ju1);
+			qaws_surface_eval_jet(in.offset, (qaws_scalar)(u - h), v, QAWS_SJET_ORDER2, &ju0);
+			if (!vclose(qaws_v3_scale(qaws_v3_sub(ju1.d[0], ju0.d[0]), (qaws_scalar)(0.5 / h)), j0.d[1], DIFF_TOL * 100) ||
+			    !vclose(qaws_v3_scale(qaws_v3_sub(ju1.d[1], ju0.d[1]), (qaws_scalar)(0.5 / h)), j0.d[3], DIFF_TOL * 100) ||
+			    !vclose(qaws_v3_scale(qaws_v3_sub(ju1.d[2], ju0.d[2]), (qaws_scalar)(0.5 / h)), j0.d[4], DIFF_TOL * 100))
+				ok_pos = 0;
+		}
+
+		memset(&dir, 0, sizeof(dir));
+		diff_rand_fill(dir.data.cps, 48);
+		diff_rand_fill(dir.data.w, 16);
+		dir.data.distance = diff_rand();
+		offset_bind(&dir);
+		TEST_ASSERT_STATUS(qaws_surface_eval_batch_tangent2(NULL, in.offset, &u, &v, &udot, &vdot, 1,
+			QAWS_SJET_ORDER2, &dir.views, &p, &t, &tt));
+
+		offset_shift(&base, &dir.data, h, &pp);
+		offset_shift(&base, &dir.data, -h, &pm);
+		offset_build(&pp, &sp);
+		offset_build(&pm, &sm);
+		qaws_surface_eval_jet(sp.offset, (qaws_scalar)(u + h * udot), (qaws_scalar)(v + h * vdot), QAWS_SJET_ORDER2, &jp);
+		qaws_surface_eval_jet(sm.offset, (qaws_scalar)(u - h * udot), (qaws_scalar)(v - h * vdot), QAWS_SJET_ORDER2, &jm);
+		for (ch = 0; ch < 6; ch++)
+			if (!vclose(qaws_v3_scale(qaws_v3_sub(jp.d[ch], jm.d[ch]), (qaws_scalar)(0.5 / h)), t.d[ch], DIFF_TOL * 100))
+				ok_fd = 0;
+		{
+			qaws_surface_jet p1, t1, p2, t2;
+			qaws_surface_eval_tangent(NULL, sp.offset, (qaws_scalar)(u + h * udot), (qaws_scalar)(v + h * vdot),
+				udot, vdot, QAWS_SJET_ORDER2, &dir.views, &p1, &t1);
+			qaws_surface_eval_tangent(NULL, sm.offset, (qaws_scalar)(u - h * udot), (qaws_scalar)(v - h * vdot),
+				udot, vdot, QAWS_SJET_ORDER2, &dir.views, &p2, &t2);
+			for (ch = 0; ch < 6; ch++)
+				if (!vclose(qaws_v3_scale(qaws_v3_sub(t1.d[ch], t2.d[ch]), (qaws_scalar)(0.5 / h)), tt.d[ch], DIFF_TOL * 300))
+					ok_t2 = 0;
+		}
+		offset_destroy(&sp);
+		offset_destroy(&sm);
+
+		memset(&ybar, 0, sizeof(ybar));
+		for (ch = 0; ch < 6; ch++)
+		{
+			ybar.d[ch] = diff_rand_vec3();
+			lhs += qaws_v3_dot(ybar.d[ch], t.d[ch]);
+		}
+		ybar.channels = QAWS_SJET_ORDER2;
+		memset(&bar, 0, sizeof(bar));
+		offset_bind(&bar);
+		TEST_ASSERT_STATUS(qaws_surface_eval_adjoint(NULL, in.offset, u, v, QAWS_SJET_ORDER2, &ybar, &bar.views, &ubar, &vbar));
+		rhs = offset_dot(&bar.data, &dir.data) + (double)ubar * udot + (double)vbar * vdot;
+		if (!diff_close(lhs, rhs, DIFF_TOL * 10))
+		{
+			printf("    offset: adjoint mismatch %.9g vs %.9g\n", lhs, rhs);
+			ok_adj = 0;
+		}
+	}
+
+	{
+		qaws_surface_jet p, t;
+		TEST_ASSERT(qaws_surface_eval_tangent(NULL, in.offset, (qaws_scalar)0.5, (qaws_scalar)0.5, 0, 0,
+			QAWS_SJET_ORDER3, NULL, &p, &t) == QAWS_STATUS_UNSUPPORTED_OPERATION,
+			"offset refuses third-order jets instead of approximating");
+	}
+
+	printf("    offset: analytic jets %s, tangent %s, second tangent %s, adjoint %s\n",
+		ok_pos ? "ok" : "NO", ok_fd ? "ok" : "NO", ok_t2 ? "ok" : "NO", ok_adj ? "ok" : "NO");
+	TEST_ASSERT(ok_pos, "offset analytic jets: position and partial consistency");
+	TEST_ASSERT(ok_fd, "offset tangent matches finite differences (distance, base points and weights)");
+	TEST_ASSERT(ok_t2, "offset second tangent matches finite differences");
+	TEST_ASSERT(ok_adj, "offset adjoint identity through the base surface");
+	offset_destroy(&in);
+}
+
 int test_53_diff_derived_main(void)
 {
 	derived_fixture fx[3];
@@ -407,6 +604,7 @@ int test_53_diff_derived_main(void)
 		check_fixture(&fx[i]);
 	test_children_api();
 	test_normal_through_extrusion();
+	test_offset();
 
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
