@@ -8,6 +8,9 @@
  *   4_nurbs_weight.svg     learning a NURBS weight: a parabola becomes a circle
  *   5_surface.svg          height-field fit of a B-spline surface (z only, by
  *                          component mask) and Gaussian curvature sensitivity
+ *   6_vase.svg             surface of revolution fitted to scan points through
+ *                          its profile curve (child views)
+ *   7_coons.svg            Coons patch faired by editing two boundary curves
  *
  * Only the public qaws API is used. No finite differences anywhere: every
  * gradient comes from the library's adjoint rules.
@@ -28,6 +31,15 @@
 #endif
 
 #define PI 3.14159265358979323846
+
+static qaws_vec3 v3(qaws_scalar x, qaws_scalar y, qaws_scalar z)
+{
+	qaws_vec3 r;
+	r.x = x;
+	r.y = y;
+	r.z = z;
+	return r;
+}
 
 /* ================================================================== */
 /*  Minimal SVG writer                                                */
@@ -908,6 +920,411 @@ static void demo_surface(void)
 	printf("5_surface: fit MSE %.4e -> %.4e\n", loss[0], loss[S_ITERS]);
 }
 
+/* ================================================================== */
+/*  Shared projection for 3D figures                                  */
+/* ================================================================== */
+
+typedef struct projection
+{
+	double cx, cy, scale, zscale;
+} projection;
+
+static void project(projection const* p, double x, double y, double z, double* sx, double* sy)
+{
+	*sx = p->cx + (x - y) * 0.866 * p->scale;
+	*sy = p->cy + ((x + y) * 0.5 - z * p->zscale) * p->scale;
+}
+
+typedef double (*quad_value_fn)(void const* user, qaws_scalar u, qaws_scalar v);
+
+/* Draws a (u,v) grid of quads, back to front, colored by value(u,v). */
+static void draw_quads(svg* s, projection const* pr, qaws_surface const* surf, int nu, int nv,
+	quad_value_fn value, void const* user, double lo, double hi)
+{
+	int i, j, k, n = nu * nv, *order;
+	double* depth;
+	char col[32];
+
+	order = (int*)malloc(sizeof(int) * (size_t)n);
+	depth = (double*)malloc(sizeof(double) * (size_t)n);
+	for (k = 0; k < n; k++)
+	{
+		qaws_surface_eval_result r;
+		i = k / nv;
+		j = k % nv;
+		qaws_surface_evaluate(surf, (qaws_scalar)((i + 0.5) / nu), (qaws_scalar)((j + 0.5) / nv), QAWS_SURFACE_EVAL_POSITION, &r);
+		depth[k] = r.position.x + r.position.y;
+		order[k] = k;
+	}
+	/* insertion sort by depth: far (small x+y) first */
+	for (k = 1; k < n; k++)
+	{
+		int key = order[k], m = k - 1;
+		while (m >= 0 && depth[order[m]] > depth[key])
+		{
+			order[m + 1] = order[m];
+			m--;
+		}
+		order[m + 1] = key;
+	}
+	for (k = 0; k < n; k++)
+	{
+		qaws_surface_eval_result r[4];
+		double x[4], y[4];
+		int c;
+		i = order[k] / nv;
+		j = order[k] % nv;
+		qaws_surface_evaluate(surf, (qaws_scalar)(i / (double)nu), (qaws_scalar)(j / (double)nv), QAWS_SURFACE_EVAL_POSITION, &r[0]);
+		qaws_surface_evaluate(surf, (qaws_scalar)((i + 1) / (double)nu), (qaws_scalar)(j / (double)nv), QAWS_SURFACE_EVAL_POSITION, &r[1]);
+		qaws_surface_evaluate(surf, (qaws_scalar)((i + 1) / (double)nu), (qaws_scalar)((j + 1) / (double)nv), QAWS_SURFACE_EVAL_POSITION, &r[2]);
+		qaws_surface_evaluate(surf, (qaws_scalar)(i / (double)nu), (qaws_scalar)((j + 1) / (double)nv), QAWS_SURFACE_EVAL_POSITION, &r[3]);
+		for (c = 0; c < 4; c++)
+			project(pr, r[c].position.x, r[c].position.y, r[c].position.z, &x[c], &y[c]);
+		heat((value(user, (qaws_scalar)((i + 0.5) / nu), (qaws_scalar)((j + 0.5) / nv)) - lo) / (hi - lo), col);
+		fprintf(s->f, "<polygon points=\"%.1f,%.1f %.1f,%.1f %.1f,%.1f %.1f,%.1f\" fill=\"%s\" stroke=\"#ffffff\" stroke-width=\"0.35\" stroke-opacity=\"0.55\"/>\n",
+			x[0], y[0], x[1], y[1], x[2], y[2], x[3], y[3], col);
+	}
+	free(order);
+	free(depth);
+}
+
+/* ================================================================== */
+/*  6. Vase from scanned points: fitting a revolution profile         */
+/* ================================================================== */
+
+#define VASE_CP 7
+#define VASE_RINGS 22
+#define VASE_SPOKES 14
+#define VASE_N (VASE_RINGS * VASE_SPOKES)
+#define VASE_ITERS 500
+
+static double vase_radius(double z)
+{
+	return 0.85 + 0.38 * sin(2.1 * z + 0.3) - 0.08 * z;
+}
+
+static qaws_surface* vase_surface(qaws_curve* profile)
+{
+	qaws_surface_revolution_desc d;
+	qaws_surface* s = NULL;
+	memset(&d, 0, sizeof(d));
+	d.profile = profile;
+	d.axis_origin = v3(0, 0, 0);
+	d.axis_direction = v3(0, 0, 1);
+	d.angle = 0; /* full turn */
+	qaws_surface_create_revolution(&d, &s);
+	return s;
+}
+
+static double vase_height_value(void const* user, qaws_scalar u, qaws_scalar v)
+{
+	(void)user;
+	(void)u;
+	return v;
+}
+
+static void demo_vase(void)
+{
+	qaws_scalar cps[VASE_CP * 2], grad[VASE_CP * 2];
+	qaws_scalar us[VASE_N], vs[VASE_N];
+	qaws_vec3 targets[VASE_N];
+	double loss[VASE_ITERS + 1];
+	qaws_scalar initial[VASE_CP * 2];
+	adam opt;
+	int i, j, it;
+	svg s;
+	char buf[200];
+
+	memset(&opt, 0, sizeof(opt));
+	for (i = 0; i < VASE_CP; i++)
+	{
+		cps[2 * i] = 1.0f;                                  /* radius */
+		cps[2 * i + 1] = (qaws_scalar)(3.0 * i / (VASE_CP - 1)); /* height */
+	}
+	memcpy(initial, cps, sizeof(cps));
+	for (i = 0; i < VASE_RINGS; i++)
+		for (j = 0; j < VASE_SPOKES; j++)
+		{
+			int k = i * VASE_SPOKES + j;
+			double v = (i + 0.5) / VASE_RINGS, u = (j + 0.25 * (i % 2)) / VASE_SPOKES;
+			double z = 3.0 * v, r = vase_radius(z) * (1 + 0.015 * sin(13.0 * k));
+			us[k] = (qaws_scalar)u;
+			vs[k] = (qaws_scalar)v;
+			targets[k] = v3((qaws_scalar)(r * cos(2 * PI * u)), (qaws_scalar)(r * sin(2 * PI * u)), (qaws_scalar)z);
+		}
+
+	for (it = 0; it <= VASE_ITERS; it++)
+	{
+		qaws_curve* profile = bspline_2d(cps, VASE_CP);
+		qaws_surface* vase = vase_surface(profile);
+		static qaws_surface_jet primal[VASE_N], tangent[VASE_N], ybar[VASE_N];
+		qaws_field_view fv;
+		qaws_diff_views child, views;
+		double l = 0;
+
+		qaws_surface_eval_batch_tangent(NULL, vase, us, vs, NULL, NULL, VASE_N, QAWS_SJET_P, NULL, primal, tangent);
+		memset(ybar, 0, sizeof(ybar));
+		for (i = 0; i < VASE_N; i++)
+		{
+			qaws_vec3 d = v3(primal[i].d[0].x - targets[i].x, primal[i].d[0].y - targets[i].y, primal[i].d[0].z - targets[i].z);
+			l += (d.x * d.x + d.y * d.y + d.z * d.z) / VASE_N;
+			ybar[i].d[0] = v3((qaws_scalar)(2 * d.x / VASE_N), (qaws_scalar)(2 * d.y / VASE_N), (qaws_scalar)(2 * d.z / VASE_N));
+		}
+		loss[it] = l;
+
+		/* The revolution has no own fields in this fit; its profile is
+		   child 0, so the profile control point adjoints live there. */
+		memset(grad, 0, sizeof(grad));
+		child = one_field(&fv, QAWS_FIELD_CONTROL_POINTS, grad, VASE_CP, 2);
+		views.fields = NULL;
+		views.field_count = 0;
+		views.children = &child;
+		views.child_count = 1;
+		qaws_surface_eval_batch_adjoint(NULL, vase, us, vs, VASE_N, QAWS_SJET_P, ybar, &views, NULL, NULL);
+		qaws_surface_destroy(vase);
+		qaws_curve_destroy(profile);
+		if (it < VASE_ITERS)
+			adam_step(&opt, cps, grad, VASE_CP * 2, 0.01);
+	}
+
+	svg_open(&s, "showcase/6_vase.svg", 1200, 600, "Vase from scanned points: fitting a surface of revolution",
+		"308 noisy points; the gradient flows surface -> revolution rule -> child[0] (profile B-spline, 7 control points). Color = height parameter.");
+	{
+		viewport a = { 30, 80, 370, 500, 0, 0, 0, 0 };
+		viewport b = { 415, 80, 370, 500, 0, 0, 0, 0 };
+		viewport c = { 800, 80, 370, 280, -0.2, 1.8, -0.2, 3.2 };
+		viewport lv = { 800, 380, 370, 200, 0, 0, 0, 0 };
+		projection pa = { 215, 470, 95, 1.0 }, pb = { 600, 470, 95, 1.0 };
+		qaws_curve* p0 = bspline_2d(initial, VASE_CP);
+		qaws_curve* p1 = bspline_2d(cps, VASE_CP);
+		qaws_surface* s0 = vase_surface(p0);
+		qaws_surface* s1 = vase_surface(p1);
+		double xy[2 * 200];
+
+		svg_panel(&s, &a, "initial profile (cylinder) + scan points");
+		draw_quads(&s, &pa, s0, 28, 16, vase_height_value, NULL, 0, 1);
+		for (i = 0; i < VASE_N; i++)
+		{
+			double x, y;
+			project(&pa, targets[i].x, targets[i].y, targets[i].z, &x, &y);
+			svg_circle(&s, x, y, 1.5, "#24292f", "none");
+		}
+		svg_panel(&s, &b, "fitted vase");
+		draw_quads(&s, &pb, s1, 28, 16, vase_height_value, NULL, 0, 1);
+
+		/* Profile plot: (radius, height). */
+		svg_panel(&s, &c, "profile r(z): dashed initial, blue fitted, green truth");
+		for (i = 0; i < 200; i++)
+		{
+			double z = 3.0 * i / 199.0;
+			xy[2 * i] = vx(&c, vase_radius(z));
+			xy[2 * i + 1] = vy(&c, z);
+		}
+		svg_polyline(&s, xy, 200, "#2da44e", 5, 0.45, 0);
+		curve_polyline(p0, &c, xy, 200);
+		svg_polyline(&s, xy, 200, "#8c959f", 1.6, 1, 1);
+		curve_polyline(p1, &c, xy, 200);
+		svg_polyline(&s, xy, 200, "#0969da", 2.4, 1, 0);
+		control_polygon(&s, &c, cps, VASE_CP, "#0969da");
+		svg_loss_plot(&s, &lv, loss, VASE_ITERS + 1, "#cf222e", "point-to-surface MSE (log)");
+
+		qaws_surface_destroy(s0);
+		qaws_surface_destroy(s1);
+		qaws_curve_destroy(p0);
+		qaws_curve_destroy(p1);
+	}
+	svg_close(&s);
+	sprintf(buf, "%.4e -> %.4e", loss[0], loss[VASE_ITERS]);
+	printf("6_vase: MSE %s\n", buf);
+}
+
+/* ================================================================== */
+/*  7. Coons patch fairing by editing two boundaries                  */
+/* ================================================================== */
+
+#define CB_CP 6
+#define CB_GRID 9
+#define CB_ITERS 400
+
+static qaws_scalar const g_cb_knots[10] = { 0, 0, 0, 0, 1, 2, 3, 3, 3, 3 };
+
+static qaws_curve* cb_curve(qaws_scalar const* p)
+{
+	qaws_bspline_desc d;
+	qaws_curve* c = NULL;
+	memset(&d, 0, sizeof(d));
+	d.dimension = QAWS_DIMENSION_3D;
+	d.degree = 3;
+	d.control_points = p;
+	d.control_point_count = CB_CP;
+	d.knots = g_cb_knots;
+	d.knot_count = 10;
+	qaws_curve_create_bspline(&d, &c);
+	return c;
+}
+
+typedef struct cb_patch
+{
+	qaws_curve* curves[4];
+	qaws_surface* surface;
+} cb_patch;
+
+static void cb_build(qaws_scalar (*p)[CB_CP * 3], cb_patch* out)
+{
+	qaws_surface_coons_desc d;
+	int i;
+	for (i = 0; i < 4; i++)
+		out->curves[i] = cb_curve(p[i]);
+	memset(&d, 0, sizeof(d));
+	d.c0 = out->curves[0];
+	d.c1 = out->curves[1];
+	d.d0 = out->curves[2];
+	d.d1 = out->curves[3];
+	out->surface = NULL;
+	qaws_surface_create_coons(&d, &out->surface);
+}
+
+static void cb_destroy(cb_patch* p)
+{
+	int i;
+	qaws_surface_destroy(p->surface);
+	for (i = 0; i < 4; i++)
+		qaws_curve_destroy(p->curves[i]);
+}
+
+static double cb_abs_mean(void const* user, qaws_scalar u, qaws_scalar v)
+{
+	qaws_surface_jet j;
+	qaws_surface_geometry g;
+	qaws_surface_eval_jet((qaws_surface const*)user, u, v, QAWS_SJET_ORDER2, &j);
+	qaws_surface_geometry_eval(&j, NULL, NULL, &g, NULL, NULL, NULL);
+	return fabs(g.mean);
+}
+
+/* Mean-curvature energy on a grid and its adjoint into boundary views. */
+static double cb_energy(cb_patch const* patch, qaws_diff_views* views)
+{
+	double e = 0;
+	int i, j;
+	for (i = 0; i < CB_GRID; i++)
+		for (j = 0; j < CB_GRID; j++)
+		{
+			qaws_scalar u = (qaws_scalar)((i + 0.5) / CB_GRID), v = (qaws_scalar)((j + 0.5) / CB_GRID);
+			qaws_surface_jet p, ybar;
+			qaws_surface_geometry g, gbar;
+			qaws_surface_eval_jet(patch->surface, u, v, QAWS_SJET_ORDER2, &p);
+			qaws_surface_geometry_eval(&p, NULL, NULL, &g, NULL, NULL, NULL);
+			e += g.mean * g.mean / (CB_GRID * CB_GRID);
+			if (views)
+			{
+				memset(&gbar, 0, sizeof(gbar));
+				gbar.mean = (qaws_scalar)(2 * g.mean / (CB_GRID * CB_GRID));
+				memset(&ybar, 0, sizeof(ybar));
+				qaws_surface_geometry_adjoint(&p, &gbar, &ybar, NULL);
+				qaws_surface_eval_adjoint(NULL, patch->surface, u, v, ybar.channels, &ybar, views, NULL, NULL);
+			}
+		}
+	return e;
+}
+
+static void cb_draw_boundaries(svg* s, projection const* pr, cb_patch const* patch)
+{
+	int i, k;
+	for (i = 0; i < 4; i++)
+	{
+		double xy[2 * 80];
+		qaws_range r = qaws_curve_get_parameter_range(patch->curves[i]);
+		for (k = 0; k < 80; k++)
+		{
+			qaws_eval_result_3d e;
+			qaws_curve_evaluate_3d(patch->curves[i], r.min_value + (r.max_value - r.min_value) * k / (qaws_scalar)79,
+				QAWS_EVAL_FLAG_POSITION, &e);
+			project(pr, e.position.x, e.position.y, e.position.z, &xy[2 * k], &xy[2 * k + 1]);
+		}
+		svg_polyline(s, xy, 80, (i == 1 || i == 3) ? "#cf222e" : "#24292f", (i == 1 || i == 3) ? 3 : 2, 1, 0);
+	}
+}
+
+static void demo_coons(void)
+{
+	qaws_scalar p[4][CB_CP * 3], initial[4][CB_CP * 3];
+	qaws_scalar grad[4][CB_CP * 3];
+	unsigned char interior[CB_CP] = { 0, 1, 1, 1, 1, 0 };
+	double energy[CB_ITERS + 1];
+	adam opt;
+	int i, n, it;
+	svg s;
+	char buf[200];
+
+	memset(&opt, 0, sizeof(opt));
+	for (i = 0; i < 4; i++)
+		for (n = 0; n < CB_CP; n++)
+		{
+			qaws_scalar t = (qaws_scalar)n * (qaws_scalar)0.6;
+			qaws_scalar* q = &p[i][3 * n];
+			qaws_scalar amp = (i == 1 || i == 3) ? (qaws_scalar)0.7 : (qaws_scalar)0.12;
+			qaws_scalar wave = (n == 0 || n == CB_CP - 1) ? (qaws_scalar)0 : (qaws_scalar)(amp * sin(2.3 * n + i));
+			if (i == 0) { q[0] = t; q[1] = 0; }
+			else if (i == 1) { q[0] = t; q[1] = 3; }
+			else if (i == 2) { q[0] = 0; q[1] = t; }
+			else { q[0] = 3; q[1] = t; }
+			q[2] = wave;
+		}
+	memcpy(initial, p, sizeof(p));
+
+	for (it = 0; it <= CB_ITERS; it++)
+	{
+		cb_patch patch;
+		qaws_field_view fv[4];
+		qaws_diff_views child[4], views;
+		cb_build(p, &patch);
+		memset(grad, 0, sizeof(grad));
+		for (i = 0; i < 4; i++)
+		{
+			child[i] = one_field(&fv[i], QAWS_FIELD_CONTROL_POINTS, grad[i], CB_CP, 3);
+			child[i].fields = &fv[i];
+			fv[i].active = interior;          /* end points stay on the corners */
+			fv[i].component_mask = 1u << 2;   /* only heights move */
+		}
+		views.fields = NULL;
+		views.field_count = 0;
+		views.children = child;
+		views.child_count = 4;
+		/* Only boundaries c1 and d1 (children 1 and 3) are editable. */
+		child[0].field_count = 0;
+		child[2].field_count = 0;
+		energy[it] = cb_energy(&patch, &views);
+		cb_destroy(&patch);
+		if (it < CB_ITERS)
+			adam_step(&opt, &p[0][0], &grad[0][0], 4 * CB_CP * 3, 0.01);
+	}
+
+	svg_open(&s, "showcase/7_coons.svg", 1200, 600, "Coons patch fairing by editing two boundaries",
+		"Minimize mean(H^2) over the patch; adjoint: mean curvature -> geometry -> Coons rule -> child curves. Editable: red boundaries, interior heights only (masks).");
+	{
+		viewport a = { 30, 80, 560, 400, 0, 0, 0, 0 };
+		viewport b = { 610, 80, 560, 400, 0, 0, 0, 0 };
+		viewport lv = { 30, 495, 1140, 95, 0, 0, 0, 0 };
+		projection pa = { 310, 250, 72, 1.6 }, pb = { 890, 250, 72, 1.6 };
+		cb_patch before, after;
+		cb_build(initial, &before);
+		cb_build(p, &after);
+		svg_panel(&s, &a, "before: |mean curvature|");
+		draw_quads(&s, &pa, before.surface, 24, 24, cb_abs_mean, before.surface, 0, 0.8);
+		cb_draw_boundaries(&s, &pa, &before);
+		svg_panel(&s, &b, "after: two boundaries edited by the optimizer");
+		draw_quads(&s, &pb, after.surface, 24, 24, cb_abs_mean, after.surface, 0, 0.8);
+		cb_draw_boundaries(&s, &pb, &after);
+		svg_colorbar(&s, b.x0 + b.w - 230, b.y0 + b.h - 26, 200, 8, "|H| = 0", "0.8");
+		svg_loss_plot(&s, &lv, energy, CB_ITERS + 1, "#cf222e", "mean(H^2) (log)");
+		cb_destroy(&before);
+		cb_destroy(&after);
+	}
+	svg_close(&s);
+	sprintf(buf, "%.4e -> %.4e", energy[0], energy[CB_ITERS]);
+	printf("7_coons: mean(H^2) %s\n", buf);
+}
+
 int main(void)
 {
 	setvbuf(stdout, NULL, _IONBF, 0);
@@ -917,5 +1334,7 @@ int main(void)
 	demo_fairing();
 	demo_nurbs_weight();
 	demo_surface();
+	demo_vase();
+	demo_coons();
 	return 0;
 }
