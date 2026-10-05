@@ -99,6 +99,7 @@ set(QAWS_SOURCES
   src/qaws/qaws_prepare.c
   src/qaws/qaws_diff.c
   src/qaws/qaws_diff_surface.c
+  src/qaws/qaws_diff_geometry.c
   src/qaws/internal/qaws_internal_curve.c
   src/qaws/internal/qaws_internal_basis.c
   src/qaws/internal/qaws_internal_span.c
@@ -382,6 +383,7 @@ if(QAWS_INSTALL)
       src/qaws/qaws_inline.h
       src/qaws/qaws_diff.h
       src/qaws/qaws_diff_types.h
+      src/qaws/qaws_diff_geometry.h
       src/qaws/qaws_platform.h
       src/qaws/qaws_core_types.h
       src/qaws/qaws_prepare.h

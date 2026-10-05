@@ -56,5 +56,6 @@
 #include "qaws_alloc.h"
 #include "qaws_inline.h"
 #include "qaws_diff.h"
+#include "qaws_diff_geometry.h"
 
 #endif /* QAWS_H */
