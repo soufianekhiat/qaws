@@ -157,7 +157,7 @@ qaws_diff_map_adjoint(map, NULL, out_adjoints, 2, in_adjoints, 2);  /* in += J^T
 qaws_diff_map_destroy(map);
 ```
 
-Available: split, join, Hermite to Bezier, Bezier to B-spline, B-spline to NURBS, degree elevation and reduction, and the least-squares B-spline fit. Polynomial constructions are exact linear maps; NURBS maps include the homogeneous projection. `qaws_curve_fit_bspline_diff` differentiates the whole fit: chord-length parameters, averaged knots, basis functions and normal equations, with respect to the data points and (when given) the sample parameters. `qaws_diff_map_get_entries` exposes the sparse Jacobian.
+Available: split, join, Hermite to Bezier, Bezier to B-spline, B-spline to NURBS, degree elevation and reduction, the least-squares B-spline fit and the 3D offset (constant direction or Frenet normal; the sample set is frozen). Polynomial constructions are exact linear maps; NURBS maps include the homogeneous projection. `qaws_curve_fit_bspline_diff` differentiates the whole fit: chord-length parameters, averaged knots, basis functions and normal equations, with respect to the data points and (when given) the sample parameters. `qaws_diff_map_get_entries` exposes the sparse Jacobian.
 
 ## Integral functionals
 

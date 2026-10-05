@@ -143,4 +143,28 @@ qaws_status qaws_curve_fit_bspline_diff(
 	qaws_curve** out_curve,
 	qaws_diff_map** out_map);
 
+/*
+ * 3D offset (qaws_curve_offset_3d) with its exact map. The offset samples
+ * C(t_i) + distance * n(t_i) at fixed parameters (the sample set is frozen,
+ * QAWS_FREEZE_SAMPLE_SET) and fits a B-spline through them; the fit is
+ * linear in the samples.
+ *
+ * direction_mode 0 (constant direction) and 1 (Frenet normal) are
+ * supported; mode 1 refuses curves with straight pieces, where the Frenet
+ * normal is undefined. Surface normal offsets (mode 2) are refused.
+ *
+ * inputs:  0 = curve (every differentiable field)
+ *          1 = distance (QAWS_FIELD_PARAMETER, element 0)
+ *          2 = direction (QAWS_FIELD_DIRECTION, element 0; mode 0 only)
+ * outputs: 0 = offset curve (QAWS_FIELD_CONTROL_POINTS)
+ */
+qaws_status qaws_curve_offset_3d_diff(
+	qaws_curve const* curve,
+	qaws_scalar distance,
+	int direction_mode,
+	qaws_vec3 const* direction,
+	unsigned int sample_count,
+	qaws_curve** out_curve,
+	qaws_diff_map** out_map);
+
 #endif /* QAWS_DIFF_MAP_H */

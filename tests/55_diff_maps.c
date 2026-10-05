@@ -510,6 +510,132 @@ static void test_fit_map(void)
 	check_fit("fit 3d given parameters", QAWS_DIMENSION_3D, 1);
 }
 
+
+/* ------------------------------------------------------------------ */
+/*  3D offset map                                                     */
+/* ------------------------------------------------------------------ */
+
+#define OFF_CP 7
+#define OFF_SAMPLES 64
+#define OFF_OUT (OFF_SAMPLES / 4)
+
+static qaws_curve* off_curve(qaws_scalar const* cps)
+{
+	static qaws_scalar const k[OFF_CP + 4] = { 0, 0, 0, 0, 0.8f, 1.7f, 2.4f, 3, 3, 3, 3 };
+	qaws_bspline_desc d;
+	qaws_curve* c = NULL;
+	memset(&d, 0, sizeof(d));
+	d.dimension = QAWS_DIMENSION_3D;
+	d.degree = 3;
+	d.control_points = cps;
+	d.control_point_count = OFF_CP;
+	d.knots = k;
+	d.knot_count = OFF_CP + 4;
+	qaws_curve_create_bspline(&d, &c);
+	return c;
+}
+
+static void off_points(qaws_scalar const* cps, qaws_scalar dist, int mode, qaws_vec3 dir, qaws_scalar* out)
+{
+	qaws_curve* c = off_curve(cps);
+	qaws_curve* o = NULL;
+	unsigned int got = 0;
+	qaws_curve_offset_3d(c, dist, mode, &dir, NULL, OFF_SAMPLES, &o);
+	qaws_curve_read_field(o, QAWS_FIELD_CONTROL_POINTS, out, OFF_OUT * 3, &got);
+	qaws_curve_destroy(o);
+	qaws_curve_destroy(c);
+}
+
+static void check_offset_map(int mode)
+{
+	qaws_scalar cps[OFF_CP * 3], dcp[OFF_CP * 3], pp[OFF_CP * 3], pm[OFF_CP * 3], bar_cp[OFF_CP * 3];
+	qaws_scalar w[OFF_OUT * 3], tq[OFF_OUT * 3], op[OFF_OUT * 3], om[OFF_OUT * 3];
+	qaws_scalar dd = 0, bar_d = 0, ddir[3] = { 0, 0, 0 }, bar_dir[3] = { 0, 0, 0 };
+	qaws_vec3 dir = qaws_v3((qaws_scalar)0.2, (qaws_scalar)-0.3, (qaws_scalar)1);
+	qaws_scalar dist = (qaws_scalar)0.4;
+	qaws_curve *c, *o = NULL;
+	qaws_diff_map* map = NULL;
+	qaws_field_view fin[3], fout, fbar[3];
+	qaws_diff_views vin[3], vout, vbar[3];
+	qaws_diff_views const* ins[3];
+	qaws_diff_views* outs[1];
+	qaws_diff_views* bars[3];
+	qaws_diff_views const* outs_c[1];
+	double h = DIFF_FD_STEP, lhs, fd, adj;
+	unsigned int i, n;
+
+	diff_seed(mode ? 820 : 810);
+	for (n = 0; n < OFF_CP; n++)
+	{
+		cps[3 * n + 0] = (qaws_scalar)(1.4 * cos(0.9 * n));
+		cps[3 * n + 1] = (qaws_scalar)(1.4 * sin(0.9 * n));
+		cps[3 * n + 2] = (qaws_scalar)(0.35 * n);
+	}
+	diff_rand_fill(dcp, OFF_CP * 3);
+	dd = diff_rand();
+	if (mode == 0)
+		diff_rand_fill(ddir, 3);
+	diff_rand_fill(w, OFF_OUT * 3);
+
+	c = off_curve(cps);
+	TEST_ASSERT_STATUS(qaws_curve_offset_3d_diff(c, dist, mode, &dir, OFF_SAMPLES, &o, &map));
+
+	fin[0] = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, dcp, OFF_CP, 3);
+	fin[1] = qaws_field_view_make(QAWS_FIELD_PARAMETER, &dd, 1, 1);
+	fin[2] = qaws_field_view_make(QAWS_FIELD_DIRECTION, ddir, 1, 3);
+	for (i = 0; i < 3; i++)
+	{
+		vin[i].fields = &fin[i]; vin[i].field_count = 1; vin[i].children = NULL; vin[i].child_count = 0;
+		ins[i] = &vin[i];
+	}
+	fout = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, tq, OFF_OUT, 3);
+	vout.fields = &fout; vout.field_count = 1; vout.children = NULL; vout.child_count = 0;
+	outs[0] = &vout;
+	TEST_ASSERT_STATUS(qaws_diff_map_tangent(map, NULL, ins, mode == 0 ? 3u : 2u, outs, 1));
+	lhs = diff_dot(tq, w, OFF_OUT * 3);
+
+	for (i = 0; i < OFF_CP * 3; i++)
+	{
+		pp[i] = (qaws_scalar)(cps[i] + h * dcp[i]);
+		pm[i] = (qaws_scalar)(cps[i] - h * dcp[i]);
+	}
+	off_points(pp, (qaws_scalar)(dist + h * dd), mode,
+		qaws_v3((qaws_scalar)(dir.x + h * ddir[0]), (qaws_scalar)(dir.y + h * ddir[1]), (qaws_scalar)(dir.z + h * ddir[2])), op);
+	off_points(pm, (qaws_scalar)(dist - h * dd), mode,
+		qaws_v3((qaws_scalar)(dir.x - h * ddir[0]), (qaws_scalar)(dir.y - h * ddir[1]), (qaws_scalar)(dir.z - h * ddir[2])), om);
+	fd = 0;
+	for (i = 0; i < OFF_OUT * 3; i++)
+		fd += w[i] * ((double)op[i] - om[i]) / (2 * h);
+
+	memset(bar_cp, 0, sizeof(bar_cp));
+	fbar[0] = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, bar_cp, OFF_CP, 3);
+	fbar[1] = qaws_field_view_make(QAWS_FIELD_PARAMETER, &bar_d, 1, 1);
+	fbar[2] = qaws_field_view_make(QAWS_FIELD_DIRECTION, bar_dir, 1, 3);
+	for (i = 0; i < 3; i++)
+	{
+		vbar[i].fields = &fbar[i]; vbar[i].field_count = 1; vbar[i].children = NULL; vbar[i].child_count = 0;
+		bars[i] = &vbar[i];
+	}
+	fout.data = w;
+	outs_c[0] = &vout;
+	TEST_ASSERT_STATUS(qaws_diff_map_adjoint(map, NULL, outs_c, 1, bars, mode == 0 ? 3u : 2u));
+	adj = diff_dot(bar_cp, dcp, OFF_CP * 3) + bar_d * dd + diff_dot(bar_dir, ddir, 3);
+
+	printf("    offset %s: tangent %.8f fd %.8f adjoint %.8f\n", mode ? "frenet normal" : "constant direction", lhs, fd, adj);
+	TEST_ASSERT(diff_close(lhs, fd, DIFF_TOL * 50), "offset map tangent matches finite differences of the offset");
+	TEST_ASSERT(diff_close(lhs, adj, DIFF_TOL), "offset map adjoint identity");
+	qaws_diff_map_destroy(map);
+	qaws_curve_destroy(o);
+	qaws_curve_destroy(c);
+}
+
+static void test_offset_map(void)
+{
+	printf("  3D offset map\n");
+	check_offset_map(0);
+	check_offset_map(1);
+}
+
 int test_55_diff_maps_main(void)
 {
 	qaws_curve* c[2];
@@ -520,6 +646,7 @@ int test_55_diff_maps_main(void)
 	diff_seed(5555);
 	test_clone();
 	test_fit_map();
+	test_offset_map();
 
 	c[0] = make_bezier(5);
 	check_op("split bezier (with parameter)", op_split, (qaws_curve const* const*)c, 1, 2, (qaws_scalar)0.37, (qaws_scalar)0.8);

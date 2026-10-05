@@ -1790,6 +1790,30 @@ The derivative follows every smooth stage of the fit: chord-length parameters (w
 
 ---
 
+### qaws_curve_offset_3d_diff
+
+```c
+qaws_status qaws_curve_offset_3d_diff(
+	qaws_curve const* curve,
+	qaws_scalar distance,
+	int direction_mode,
+	qaws_vec3 const* direction,
+	unsigned int sample_count,
+	qaws_curve** out_curve,
+	qaws_diff_map** out_map);
+```
+
+Runs `qaws_curve_offset_3d` and returns its exact map. The offset samples `C(t_i) + distance * n(t_i)` at fixed parameters (the sample set is frozen, `QAWS_FREEZE_SAMPLE_SET`) and fits a B-spline through them; the fit is linear in the samples, so each map column is the fit of the sample tangents.
+
+- inputs: 0 = curve (every differentiable field, including knots), 1 = distance (`QAWS_FIELD_PARAMETER`, element 0), 2 = direction (`QAWS_FIELD_DIRECTION`, element 0, three components; `direction_mode` 0 only, otherwise frozen).
+- outputs: 0 = offset curve (`QAWS_FIELD_CONTROL_POINTS`).
+
+`direction_mode` 0 (constant direction, normalized) and 1 (Frenet normal, differentiated through `qaws_curve_geometry_eval_3d`) are supported.
+
+**Returns:** `QAWS_STATUS_OK`; `QAWS_STATUS_INVALID_ARGUMENT` on NULL `curve` or `out_curve`; `QAWS_STATUS_UNSUPPORTED_OPERATION` for `direction_mode` 2 (surface normal) and, in mode 1, for curves with straight pieces where the Frenet normal is undefined; errors of `qaws_curve_offset_3d`. On failure `*out_curve` is NULL.
+
+---
+
 ## Integral functionals
 
 Declared in `qaws_diff_functionals.h`. Integral functionals of curves and surfaces with exact derivatives of their quadrature:

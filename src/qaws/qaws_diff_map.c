@@ -5,6 +5,8 @@
 #include "qaws_convert.h"
 #include "qaws_export.h"
 #include "internal/qaws_internal_basis.h"
+#include "internal/qaws_internal_fit.h"
+#include "qaws_diff_geometry.h"
 #include <math.h>
 #include "internal/qaws_internal_types.h"
 #include "internal/qaws_internal_curve.h"
@@ -1084,6 +1086,244 @@ done:
 	qaws_diff_map_destroy(map);
 	qaws_internal_dealloc(NULL, work);
 	qaws_internal_dealloc(NULL, scal);
+	if (st != QAWS_STATUS_OK && *out_curve)
+	{
+		qaws_curve_destroy(*out_curve);
+		*out_curve = NULL;
+	}
+	return st;
+}
+
+/* ================================================================== */
+/*  3D offset                                                          */
+/*                                                                    */
+/*  The offset samples Q_i = C(t_i) + d n(t_i) at fixed parameters and */
+/*  fits a B-spline through them. The fit is linear in the samples, so */
+/*  each column of the map is the fit of the sample tangents dQ_i.     */
+/* ================================================================== */
+
+typedef struct offset_state
+{
+	qaws_curve const* curve;
+	qaws_scalar distance;
+	int mode;
+	qaws_vec3 dir;             /* mode 0: unit direction */
+	qaws_scalar dir_len;
+	unsigned int n_samples, n_cp;
+	qaws_scalar* params;       /* n_samples */
+	qaws_curve_jet_3d* jets;   /* primal jets at the samples */
+	qaws_vec3* normals;        /* unit offset directions */
+	qaws_curve_jet_3d* tan;    /* scratch: tangent jets */
+	qaws_scalar* dq;           /* scratch: n_samples * 3 */
+	qaws_scalar* cps;          /* scratch: n_cp * 3 */
+} offset_state;
+
+/* Fits dq and adds the control point column for one input scalar. */
+static qaws_status offset_emit(qaws_diff_map* m, offset_state* s, unsigned int in_obj, qaws_diff_field in_field,
+	unsigned int in_elem, unsigned int in_comp)
+{
+	qaws_curve* fit = NULL;
+	unsigned int j, c, got = 0;
+	qaws_status st = qaws_internal_fit_bspline(QAWS_DIMENSION_3D, 3, s->params, s->dq, s->n_samples, s->n_cp, &fit);
+	if (st != QAWS_STATUS_OK)
+		return st;
+	st = qaws_curve_read_field(fit, QAWS_FIELD_CONTROL_POINTS, s->cps, s->n_cp * 3, &got);
+	qaws_curve_destroy(fit);
+	if (st != QAWS_STATUS_OK)
+		return st;
+	for (j = 0; j < s->n_cp && st == QAWS_STATUS_OK; j++)
+		for (c = 0; c < 3 && st == QAWS_STATUS_OK; c++)
+			if (s->cps[j * 3 + c] != QAWS_ZERO)
+				st = map_add(m, 0, QAWS_FIELD_CONTROL_POINTS, j, c, in_obj, in_field, in_elem, in_comp, s->cps[j * 3 + c]);
+	return st;
+}
+
+/* dq for a tangent of the input curve's fields. */
+static qaws_status offset_curve_column(offset_state* s, qaws_diff_views const* views)
+{
+	unsigned int i;
+	qaws_status st = qaws_curve_eval_batch_tangent_3d(NULL, s->curve, s->params, NULL, s->n_samples,
+		QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2 | QAWS_EVAL_FLAG_D3, views, NULL, s->tan);
+	if (st != QAWS_STATUS_OK)
+		return st;
+	for (i = 0; i < s->n_samples; i++)
+	{
+		qaws_vec3 dq = s->tan[i].d[0];
+		if (s->mode == 1)
+		{
+			qaws_curve_geometry_3d g, dg;
+			qaws_diff_validity validity;
+			qaws_curve_geometry_eval_3d(&s->jets[i], &s->tan[i], NULL, &g, &dg, NULL, &validity);
+			dq = qaws_v3_axpy(dq, dg.normal, s->distance);
+		}
+		s->dq[i * 3 + 0] = dq.x;
+		s->dq[i * 3 + 1] = dq.y;
+		s->dq[i * 3 + 2] = dq.z;
+	}
+	return QAWS_STATUS_OK;
+}
+
+qaws_status qaws_curve_offset_3d_diff(
+	qaws_curve const* curve,
+	qaws_scalar distance,
+	int direction_mode,
+	qaws_vec3 const* direction,
+	unsigned int sample_count,
+	qaws_curve** out_curve,
+	qaws_diff_map** out_map)
+{
+	offset_state s;
+	qaws_diff_map* map = NULL;
+	qaws_field_desc fields[MAP_MAX_FIELDS];
+	qaws_range range;
+	unsigned int nf = 0, f, e, c, i;
+	qaws_status st;
+
+	if (!curve || !out_curve)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	if (direction_mode != 0 && direction_mode != 1)
+		return QAWS_STATUS_UNSUPPORTED_OPERATION;
+	if (out_map)
+		*out_map = NULL;
+	st = qaws_curve_offset_3d(curve, distance, direction_mode, direction, NULL, sample_count, out_curve);
+	if (st != QAWS_STATUS_OK || !out_map)
+		return st;
+
+	memset(&s, 0, sizeof(s));
+	s.curve = curve;
+	s.distance = distance;
+	s.mode = direction_mode;
+	s.n_samples = sample_count > 0 ? sample_count : 256;
+	s.n_cp = s.n_samples / 4;
+	if (s.n_cp < 8) s.n_cp = 8;
+	if (s.n_cp > s.n_samples) s.n_cp = s.n_samples;
+	if (direction_mode == 0)
+	{
+		s.dir = *direction;
+		s.dir_len = QAWS_SQRT(qaws_v3_dot(s.dir, s.dir));
+		if (s.dir_len > QAWS_LITERAL(1e-12))
+			s.dir = qaws_v3_scale(s.dir, QAWS_ONE / s.dir_len);
+	}
+	s.params = (qaws_scalar*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_scalar) * (s.n_samples * 4 + s.n_cp * 3 + 4)));
+	s.jets = (qaws_curve_jet_3d*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_curve_jet_3d) * s.n_samples * 2));
+	s.normals = (qaws_vec3*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_vec3) * s.n_samples));
+	if (!s.params || !s.jets || !s.normals)
+	{
+		st = QAWS_STATUS_ALLOCATION_FAILURE;
+		goto done;
+	}
+	s.dq = s.params + s.n_samples;
+	s.cps = s.dq + s.n_samples * 3;
+	s.tan = s.jets + s.n_samples;
+
+	/* Samples and directions exactly as the offset computes them. */
+	range = curve->parameter_range;
+	for (i = 0; i < s.n_samples; i++)
+		s.params[i] = range.min_value + (range.max_value - range.min_value) * (qaws_scalar)i / (qaws_scalar)(s.n_samples - 1);
+	st = qaws_curve_eval_batch_tangent_3d(NULL, curve, s.params, NULL, s.n_samples,
+		QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2 | QAWS_EVAL_FLAG_D3, NULL, s.jets, s.tan);
+	if (st != QAWS_STATUS_OK)
+		goto done;
+	for (i = 0; i < s.n_samples; i++)
+	{
+		if (direction_mode == 1)
+		{
+			qaws_curve_geometry_3d g;
+			qaws_diff_validity validity;
+			qaws_curve_geometry_eval_3d(&s.jets[i], NULL, NULL, &g, NULL, NULL, &validity);
+			if (validity == QAWS_DIFF_INVALID || validity == QAWS_DIFF_ILL_CONDITIONED)
+			{
+				/* straight pieces: the Frenet normal is undefined there */
+				st = QAWS_STATUS_UNSUPPORTED_OPERATION;
+				goto done;
+			}
+			s.normals[i] = g.normal;
+		}
+		else
+			s.normals[i] = s.dir;
+	}
+
+	map = map_create(QAWS_DIFF_MAP_LINEAR_SPARSE, 3u, 1u);
+	if (!map)
+	{
+		st = QAWS_STATUS_ALLOCATION_FAILURE;
+		goto done;
+	}
+
+	/* input 0: every differentiable field of the curve */
+	if (qaws_curve_describe_fields(curve, fields, MAP_MAX_FIELDS, &nf) != QAWS_STATUS_OK)
+		nf = 0;
+	for (f = 0; f < nf && f < MAP_MAX_FIELDS && st == QAWS_STATUS_OK; f++)
+	{
+		unsigned int comps = fields[f].value_type == QAWS_VALUE_SCALAR ? 1u : (unsigned int)fields[f].value_type;
+		qaws_scalar* seed;
+		if (!(fields[f].capabilities & QAWS_CAP_TANGENT))
+			continue;
+		seed = (qaws_scalar*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_scalar) * (fields[f].count * comps + 1)));
+		if (!seed)
+		{
+			st = QAWS_STATUS_ALLOCATION_FAILURE;
+			break;
+		}
+		memset(seed, 0, sizeof(qaws_scalar) * fields[f].count * comps);
+		for (e = 0; e < fields[f].count && st == QAWS_STATUS_OK; e++)
+			for (c = 0; c < comps && st == QAWS_STATUS_OK; c++)
+			{
+				qaws_field_view fv = qaws_field_view_make(fields[f].field, seed, fields[f].count, comps);
+				qaws_diff_views views;
+				views.fields = &fv;
+				views.field_count = 1;
+				views.children = NULL;
+				views.child_count = 0;
+				seed[e * comps + c] = QAWS_ONE;
+				st = offset_curve_column(&s, &views);
+				seed[e * comps + c] = QAWS_ZERO;
+				if (st == QAWS_STATUS_OK)
+					st = offset_emit(map, &s, 0, fields[f].field, e, c);
+			}
+		qaws_internal_dealloc(NULL, seed);
+	}
+
+	/* input 1: the distance */
+	if (st == QAWS_STATUS_OK)
+	{
+		for (i = 0; i < s.n_samples; i++)
+		{
+			s.dq[i * 3 + 0] = s.normals[i].x;
+			s.dq[i * 3 + 1] = s.normals[i].y;
+			s.dq[i * 3 + 2] = s.normals[i].z;
+		}
+		st = offset_emit(map, &s, 1, QAWS_FIELD_PARAMETER, 0, 0);
+	}
+
+	/* input 2: the direction (mode 0): d (I - n n^T) du / |u| */
+	if (direction_mode == 0)
+		for (c = 0; c < 3 && st == QAWS_STATUS_OK; c++)
+		{
+			qaws_vec3 du = qaws_v3_zero(), dn;
+			if (c == 0) du.x = QAWS_ONE; else if (c == 1) du.y = QAWS_ONE; else du.z = QAWS_ONE;
+			dn = qaws_v3_scale(qaws_v3_axpy(du, s.dir, -qaws_v3_dot(s.dir, du)), QAWS_ONE / s.dir_len);
+			for (i = 0; i < s.n_samples; i++)
+			{
+				s.dq[i * 3 + 0] = distance * dn.x;
+				s.dq[i * 3 + 1] = distance * dn.y;
+				s.dq[i * 3 + 2] = distance * dn.z;
+			}
+			st = offset_emit(map, &s, 2, QAWS_FIELD_DIRECTION, 0, c);
+		}
+	else
+		map->frozen_inputs |= 1u << 2;
+
+	if (st == QAWS_STATUS_OK)
+	{
+		*out_map = map;
+		map = NULL;
+	}
+done:
+	qaws_diff_map_destroy(map);
+	qaws_internal_dealloc(NULL, s.params);
+	qaws_internal_dealloc(NULL, s.jets);
+	qaws_internal_dealloc(NULL, s.normals);
 	if (st != QAWS_STATUS_OK && *out_curve)
 	{
 		qaws_curve_destroy(*out_curve);
