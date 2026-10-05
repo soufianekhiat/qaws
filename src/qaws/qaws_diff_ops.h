@@ -17,8 +17,8 @@
  *   residual          relative |g| at the returned solution
  *   branch_gap        distance gap to the best competing local solution
  *   validity          ILL_CONDITIONED near singular dg/dx,
- *                     AMBIGUOUS when a competing solution is within a few
- *                     percent, VALID_LOCALLY (+ FREEZE_ACTIVE_SET) when
+ *                     AMBIGUOUS when a competing solution is within 0.5%
+ *                     of the distance, VALID_LOCALLY (+ FREEZE_ACTIVE_SET) when
  *                     the solution sits on the domain boundary and the
  *                     boundary coordinate is held fixed.
  */

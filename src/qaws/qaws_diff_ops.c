@@ -40,7 +40,7 @@ static qaws_diff_validity implicit_validity(int singular, qaws_scalar gap, qaws_
 	qaws_scalar scale = distance > QAWS_LITERAL(1e-6) ? distance : QAWS_LITERAL(1e-6);
 	if (singular)
 		return QAWS_DIFF_ILL_CONDITIONED;
-	if (gap < QAWS_LITERAL(0.02) * scale)
+	if (gap < QAWS_LITERAL(0.005) * scale)
 		return QAWS_DIFF_AMBIGUOUS;
 	if (frozen)
 		return QAWS_DIFF_VALID_LOCALLY;
@@ -68,29 +68,15 @@ static qaws_status curve_jet_at(qaws_curve const* curve, qaws_scalar t, qaws_cur
 		QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2, NULL, jet, &unused, NULL);
 }
 
-static qaws_status curve_solve(qaws_curve const* curve, qaws_vec3 q, curve_solution* s)
+/* Newton refinement on g(t) = C' . (C - q) starting at t0, so the implicit
+   derivative is taken at an accurate solution. */
+static qaws_status curve_refine(qaws_curve const* curve, qaws_vec3 q, qaws_scalar t0, curve_solution* s)
 {
 	qaws_range range = curve->parameter_range;
-	qaws_scalar eps = (range.max_value - range.min_value) * QAWS_LITERAL(1e-7);
+	unsigned int it;
 	qaws_status st;
-	unsigned int it, i;
 
-	if (curve->dimension == QAWS_DIMENSION_2D)
-	{
-		qaws_vec2 q2;
-		q2.x = q.x;
-		q2.y = q.y;
-		st = qaws_curve_find_closest_parameter_2d(curve, q2, &s->t);
-	}
-	else
-		st = qaws_curve_find_closest_parameter_3d(curve, q, &s->t);
-	if (st != QAWS_STATUS_OK)
-		return st;
-	if (curve->dimension == QAWS_DIMENSION_2D)
-		q.z = QAWS_ZERO;
-
-	/* Newton refinement on g(t) = C' . (C - q) so the implicit derivative
-	   is taken at an accurate solution. */
+	s->t = t0;
 	for (it = 0; it <= OPS_NEWTON_STEPS; it++)
 	{
 		st = curve_jet_at(curve, s->t, &s->jet);
@@ -106,35 +92,85 @@ static qaws_status curve_solve(qaws_curve const* curve, qaws_vec3 q, curve_solut
 		if (s->t > range.max_value) s->t = range.max_value;
 	}
 	s->distance = QAWS_SQRT(qaws_v3_dot(s->r, s->r));
+	return QAWS_STATUS_OK;
+}
+
+static qaws_status curve_solve(qaws_curve const* curve, qaws_vec3 q, curve_solution* s)
+{
+	qaws_range range = curve->parameter_range;
+	qaws_scalar eps = (range.max_value - range.min_value) * QAWS_LITERAL(1e-7);
+	qaws_scalar step = (range.max_value - range.min_value) / (qaws_scalar)(OPS_GAP_SAMPLES - 1);
+	qaws_scalar d[OPS_GAP_SAMPLES], t0;
+	unsigned int i, best = 0;
+	qaws_status st;
+
+	if (curve->dimension == QAWS_DIMENSION_2D)
+	{
+		qaws_vec2 q2;
+		q2.x = q.x;
+		q2.y = q.y;
+		q.z = QAWS_ZERO;
+		st = qaws_curve_find_closest_parameter_2d(curve, q2, &t0);
+	}
+	else
+		st = qaws_curve_find_closest_parameter_3d(curve, q, &t0);
+	if (st != QAWS_STATUS_OK)
+		return st;
+	st = curve_refine(curve, q, t0, s);
+	if (st != QAWS_STATUS_OK)
+		return st;
+
+	/* Global check on a sampled distance profile: when a sampled basin is
+	   closer than the solver's answer, refine from it instead. */
+	for (i = 0; i < OPS_GAP_SAMPLES; i++)
+	{
+		qaws_curve_jet_3d j;
+		qaws_vec3 r;
+		if (curve_jet_at(curve, range.min_value + step * (qaws_scalar)i, &j) != QAWS_STATUS_OK)
+			return QAWS_STATUS_INTERNAL_ERROR;
+		r = qaws_v3_sub(j.d[0], q);
+		d[i] = QAWS_SQRT(qaws_v3_dot(r, r));
+		if (d[i] < d[best])
+			best = i;
+	}
+	if (d[best] < s->distance)
+	{
+		curve_solution alt;
+		st = curve_refine(curve, q, range.min_value + step * (qaws_scalar)best, &alt);
+		if (st != QAWS_STATUS_OK)
+			return st;
+		if (alt.distance < s->distance)
+			*s = alt;
+	}
+
 	s->at_bound = (s->t <= range.min_value + eps) || (s->t >= range.max_value - eps);
 	s->singular = !s->at_bound && !(s->gt > QAWS_LITERAL(1e-8) * qaws_v3_dot(s->jet.d[1], s->jet.d[1]));
 
-	/* Best competing local minimum of the sampled distance. */
+	/* Best competing local minimum: separated from the solution by a ridge. */
+	s->gap = QAWS_DIFF_UNBOUNDED;
+	for (i = 0; i < OPS_GAP_SAMPLES; i++)
 	{
-		qaws_scalar d[OPS_GAP_SAMPLES];
-		qaws_scalar step = (range.max_value - range.min_value) / (qaws_scalar)(OPS_GAP_SAMPLES - 1);
-		s->gap = QAWS_DIFF_UNBOUNDED;
-		for (i = 0; i < OPS_GAP_SAMPLES; i++)
-		{
-			qaws_curve_jet_3d j;
-			qaws_vec3 r;
-			if (curve_jet_at(curve, range.min_value + step * (qaws_scalar)i, &j) != QAWS_STATUS_OK)
-				return QAWS_STATUS_INTERNAL_ERROR;
-			r = qaws_v3_sub(j.d[0], q);
-			d[i] = QAWS_SQRT(qaws_v3_dot(r, r));
-		}
-		for (i = 0; i < OPS_GAP_SAMPLES; i++)
-		{
-			qaws_scalar ti = range.min_value + step * (qaws_scalar)i;
-			int local_min = (i == 0 || d[i] <= d[i - 1]) && (i + 1 == OPS_GAP_SAMPLES || d[i] <= d[i + 1]);
-			if (!local_min || QAWS_FABS(ti - s->t) <= QAWS_LITERAL(2.5) * step)
-				continue;
-			if (d[i] - s->distance < s->gap)
-				s->gap = d[i] - s->distance;
-		}
-		if (s->gap < QAWS_ZERO)
-			s->gap = QAWS_ZERO;
+		qaws_scalar ti = range.min_value + step * (qaws_scalar)i;
+		int local_min = (i == 0 || d[i] <= d[i - 1]) && (i + 1 == OPS_GAP_SAMPLES || d[i] <= d[i + 1]);
+		unsigned int home = (unsigned int)((s->t - range.min_value) / step + QAWS_LITERAL(0.5));
+		unsigned int lo, hi, k;
+		qaws_scalar ridge = QAWS_ZERO;
+		if (!local_min || QAWS_FABS(ti - s->t) <= QAWS_LITERAL(2.5) * step)
+			continue;
+		if (home >= OPS_GAP_SAMPLES)
+			home = OPS_GAP_SAMPLES - 1;
+		lo = i < home ? i : home;
+		hi = i < home ? home : i;
+		for (k = lo; k <= hi; k++)
+			if (d[k] > ridge)
+				ridge = d[k];
+		if (!(ridge > (d[i] > s->distance ? d[i] : s->distance) * (QAWS_ONE + QAWS_LITERAL(1e-6))))
+			continue;
+		if (d[i] - s->distance < s->gap)
+			s->gap = d[i] - s->distance;
 	}
+	if (s->gap < QAWS_ZERO)
+		s->gap = QAWS_ZERO;
 	return QAWS_STATUS_OK;
 }
 
@@ -303,19 +339,18 @@ static int surface_solve_reduced(surface_solution const* s, qaws_scalar const* b
 	}
 }
 
-static qaws_status surface_solve(qaws_surface const* surface, qaws_vec3 q, surface_solution* s)
+/* Newton refinement of the 2x2 optimality system from (u0, v0), holding
+   coordinates that sit on an active boundary. */
+static qaws_status surface_refine(qaws_surface const* surface, qaws_vec3 q, qaws_scalar u0, qaws_scalar v0, surface_solution* s)
 {
 	qaws_range ur = surface->u_range, vr = surface->v_range;
 	qaws_scalar eu = (ur.max_value - ur.min_value) * QAWS_LITERAL(1e-7);
 	qaws_scalar ev = (vr.max_value - vr.min_value) * QAWS_LITERAL(1e-7);
-	qaws_vec3 pt;
-	qaws_status st;
 	unsigned int it;
+	qaws_status st;
 
-	st = qaws_surface_find_closest_point(surface, q, &s->u, &s->v, &pt);
-	if (st != QAWS_STATUS_OK)
-		return st;
-
+	s->u = u0;
+	s->v = v0;
 	for (it = 0; it <= OPS_NEWTON_STEPS; it++)
 	{
 		qaws_scalar x[2];
@@ -335,6 +370,53 @@ static qaws_status surface_solve(qaws_surface const* surface, qaws_vec3 q, surfa
 		if (s->v > vr.max_value) s->v = vr.max_value;
 	}
 	s->distance = QAWS_SQRT(qaws_v3_dot(s->r, s->r));
+	return QAWS_STATUS_OK;
+}
+
+static qaws_status surface_solve(qaws_surface const* surface, qaws_vec3 q, surface_solution* s)
+{
+	static qaws_scalar d[OPS_GAP_GRID][OPS_GAP_GRID];
+	qaws_range ur = surface->u_range, vr = surface->v_range;
+	qaws_scalar du = (ur.max_value - ur.min_value) / (OPS_GAP_GRID - 1);
+	qaws_scalar dv = (vr.max_value - vr.min_value) / (OPS_GAP_GRID - 1);
+	qaws_scalar u0, v0;
+	qaws_vec3 pt;
+	qaws_status st;
+	int i, j, bi = 0, bj = 0;
+
+	st = qaws_surface_find_closest_point(surface, q, &u0, &v0, &pt);
+	if (st != QAWS_STATUS_OK)
+		return st;
+	st = surface_refine(surface, q, u0, v0, s);
+	if (st != QAWS_STATUS_OK)
+		return st;
+
+	/* Global check on a sample grid: refine from a closer basin if any. */
+	for (i = 0; i < OPS_GAP_GRID; i++)
+		for (j = 0; j < OPS_GAP_GRID; j++)
+		{
+			qaws_surface_eval_result e;
+			qaws_vec3 r;
+			qaws_surface_evaluate(surface, ur.min_value + du * (qaws_scalar)i, vr.min_value + dv * (qaws_scalar)j,
+				QAWS_SURFACE_EVAL_POSITION, &e);
+			r = qaws_v3_sub(e.position, q);
+			d[i][j] = QAWS_SQRT(qaws_v3_dot(r, r));
+			if (d[i][j] < d[bi][bj])
+			{
+				bi = i;
+				bj = j;
+			}
+		}
+	if (d[bi][bj] < s->distance)
+	{
+		surface_solution alt;
+		st = surface_refine(surface, q, ur.min_value + du * (qaws_scalar)bi, vr.min_value + dv * (qaws_scalar)bj, &alt);
+		if (st != QAWS_STATUS_OK)
+			return st;
+		if (alt.distance < s->distance)
+			*s = alt;
+	}
+
 	{
 		qaws_scalar dummy[2] = { 0, 0 }, x[2];
 		qaws_scalar metric = qaws_v3_dot(s->jet.d[1], s->jet.d[1]) + qaws_v3_dot(s->jet.d[2], s->jet.d[2]);
@@ -343,46 +425,30 @@ static qaws_status surface_solve(qaws_surface const* surface, qaws_vec3 q, surfa
 			(!s->fixed_u && !s->fixed_v && !(det > QAWS_LITERAL(1e-10) * metric * metric));
 	}
 
-	/* Best competing local minimum on a sample grid. */
-	{
-		static qaws_scalar d[OPS_GAP_GRID][OPS_GAP_GRID];
-		qaws_scalar du = (ur.max_value - ur.min_value) / (OPS_GAP_GRID - 1);
-		qaws_scalar dv = (vr.max_value - vr.min_value) / (OPS_GAP_GRID - 1);
-		int i, j;
-		s->gap = QAWS_DIFF_UNBOUNDED;
-		for (i = 0; i < OPS_GAP_GRID; i++)
-			for (j = 0; j < OPS_GAP_GRID; j++)
-			{
-				qaws_surface_eval_result e;
-				qaws_vec3 r;
-				qaws_surface_evaluate(surface, ur.min_value + du * (qaws_scalar)i, vr.min_value + dv * (qaws_scalar)j,
-					QAWS_SURFACE_EVAL_POSITION, &e);
-				r = qaws_v3_sub(e.position, q);
-				d[i][j] = QAWS_SQRT(qaws_v3_dot(r, r));
-			}
-		for (i = 0; i < OPS_GAP_GRID; i++)
-			for (j = 0; j < OPS_GAP_GRID; j++)
-			{
-				int a, b, local_min = 1;
-				qaws_scalar ui = ur.min_value + du * (qaws_scalar)i, vj = vr.min_value + dv * (qaws_scalar)j;
-				for (a = -1; a <= 1 && local_min; a++)
-					for (b = -1; b <= 1; b++)
+	/* Best competing local minimum on the grid, away from the solution. */
+	s->gap = QAWS_DIFF_UNBOUNDED;
+	for (i = 0; i < OPS_GAP_GRID; i++)
+		for (j = 0; j < OPS_GAP_GRID; j++)
+		{
+			int a, b, local_min = 1;
+			qaws_scalar ui = ur.min_value + du * (qaws_scalar)i, vj = vr.min_value + dv * (qaws_scalar)j;
+			for (a = -1; a <= 1 && local_min; a++)
+				for (b = -1; b <= 1; b++)
+				{
+					int ii = i + a, jj = j + b;
+					if ((a || b) && ii >= 0 && jj >= 0 && ii < OPS_GAP_GRID && jj < OPS_GAP_GRID && d[ii][jj] < d[i][j])
 					{
-						int ii = i + a, jj = j + b;
-						if ((a || b) && ii >= 0 && jj >= 0 && ii < OPS_GAP_GRID && jj < OPS_GAP_GRID && d[ii][jj] < d[i][j])
-						{
-							local_min = 0;
-							break;
-						}
+						local_min = 0;
+						break;
 					}
-				if (!local_min || (QAWS_FABS(ui - s->u) <= QAWS_LITERAL(2.5) * du && QAWS_FABS(vj - s->v) <= QAWS_LITERAL(2.5) * dv))
-					continue;
-				if (d[i][j] - s->distance < s->gap)
-					s->gap = d[i][j] - s->distance;
-			}
-		if (s->gap < QAWS_ZERO)
-			s->gap = QAWS_ZERO;
-	}
+				}
+			if (!local_min || (QAWS_FABS(ui - s->u) <= QAWS_LITERAL(2.5) * du && QAWS_FABS(vj - s->v) <= QAWS_LITERAL(2.5) * dv))
+				continue;
+			if (d[i][j] - s->distance < s->gap)
+				s->gap = d[i][j] - s->distance;
+		}
+	if (s->gap < QAWS_ZERO)
+		s->gap = QAWS_ZERO;
 	return QAWS_STATUS_OK;
 }
 
