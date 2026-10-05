@@ -52,6 +52,7 @@ add_executable(
   48_fillet.c
   49_diff_model.c
   50_diff_curves.c
+  51_diff_surfaces.c
 )
 
 # The amalgamated library exports exactly the same symbols, so the tests can

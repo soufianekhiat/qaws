@@ -65,7 +65,16 @@ struct qaws_surface_diff_vtable
 		qaws_scalar u,
 		qaws_scalar v,
 		unsigned int order,
-		qaws_surface_local_support* out);
+		qaws_surface_support* out);
+
+	/* Primal jet up to third order for non-linear families (NULL when the
+	   jet follows from linear_support). */
+	qaws_status (*eval_jet)(
+		qaws_surface const* surface,
+		qaws_scalar u,
+		qaws_scalar v,
+		unsigned int channels,
+		qaws_surface_jet* out);
 };
 
 /* Fill one field descriptor. */
@@ -97,6 +106,64 @@ QAWS_INLINE qaws_field_desc qaws_internal_field_desc(
 	d.capabilities = capabilities;
 	return d;
 }
+
+/* ------------------------------------------------------------------ */
+/*  Shared adjoint accumulation engine                                */
+/* ------------------------------------------------------------------ */
+
+/* One parameter adjoint contribution of one sample. */
+typedef struct qaws_diff_entry
+{
+	qaws_diff_field field;
+	unsigned int element;
+	qaws_scalar g[3];
+} qaws_diff_entry;
+
+/*
+ * Produce the parameter contributions of `sample`. first_pass is non-zero
+ * exactly once per sample per accumulate call: that is when coordinate
+ * adjoints and report notes must be written.
+ */
+typedef qaws_status (*qaws_diff_collect_fn)(
+	void const* user,
+	unsigned int sample,
+	int first_pass,
+	qaws_diff_entry* entries,
+	unsigned int capacity,
+	unsigned int* out_count);
+
+/* Accumulate (+=) every sample's contributions into views with the
+   strategy selected by ctx (scatter, tiled or gather). */
+qaws_status qaws_internal_diff_accumulate(
+	qaws_diff_context const* ctx,
+	unsigned int components,
+	unsigned int sample_count,
+	unsigned int entry_capacity,
+	qaws_diff_collect_fn collect,
+	void const* user,
+	qaws_diff_views* views);
+
+void qaws_internal_diff_report_note(
+	qaws_diff_context const* ctx,
+	qaws_diff_class diff_class,
+	qaws_diff_validity validity,
+	unsigned int frozen,
+	unsigned int index);
+
+unsigned int qaws_internal_view_stride(qaws_field_view const* v);
+int qaws_internal_view_element_active(qaws_field_view const* v, unsigned int e);
+int qaws_internal_view_component_active(qaws_field_view const* v, unsigned int c);
+
+/* Masked read of one tangent element (zeros when inactive). */
+void qaws_internal_view_read(qaws_field_view const* v, unsigned int e,
+	unsigned int components, qaws_scalar* out);
+
+/* Masked add into one adjoint element. */
+void qaws_internal_view_add(qaws_field_view* v, unsigned int e,
+	unsigned int components, qaws_scalar const* g);
+
+/* Every view with data must have `components` components. */
+qaws_status qaws_internal_check_views(qaws_diff_views const* views, unsigned int components);
 
 /* B-spline basis derivatives for orders 0..k (k may exceed degree; higher
    rows are zero). out has (k+1) rows of stride (degree+1). */

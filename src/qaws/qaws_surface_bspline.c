@@ -1,5 +1,6 @@
 #include "qaws_surface_bspline.h"
 #include "internal/qaws_internal_surface.h"
+#include "internal/qaws_internal_diff.h"
 #include "internal/qaws_internal_basis.h"
 #include "internal/qaws_internal_curve.h"
 #include <stdlib.h>
@@ -169,11 +170,113 @@ static int bspline_surface_is_rational(qaws_surface const* s)
 	return 0;
 }
 
+/* -------------------------------------------------------------------------- */
+/*  Differential rules: linear in the control net                             */
+/* -------------------------------------------------------------------------- */
+
+#define BSPLINE_SURFACE_DIFF_CAPS (QAWS_CAP_TANGENT | QAWS_CAP_ADJOINT | QAWS_CAP_TANGENT2 | \
+	QAWS_CAP_LOCAL_SUPPORT | QAWS_CAP_LINEAR)
+
+static unsigned int bspline_surface_describe_fields(qaws_surface const* surface,
+	qaws_field_desc* out, unsigned int capacity)
+{
+	qaws_surface_bspline_impl const* impl = (qaws_surface_bspline_impl const*)surface->impl;
+	if (capacity >= 1)
+		out[0] = qaws_internal_field_desc(QAWS_FIELD_CONTROL_POINTS, QAWS_VALUE_VEC3,
+			impl->u_count * impl->v_count, QAWS_DOMAIN_POSITION, QAWS_CONSTRAINT_NONE,
+			QAWS_DIFF_SMOOTH, BSPLINE_SURFACE_DIFF_CAPS);
+	if (capacity >= 2)
+		out[1] = qaws_internal_field_desc(QAWS_FIELD_U_KNOTS, QAWS_VALUE_SCALAR,
+			impl->u_knot_count, QAWS_DOMAIN_PARAMETRIC, QAWS_CONSTRAINT_MONOTONIC,
+			QAWS_DIFF_UNSUPPORTED, 0u);
+	if (capacity >= 3)
+		out[2] = qaws_internal_field_desc(QAWS_FIELD_V_KNOTS, QAWS_VALUE_SCALAR,
+			impl->v_knot_count, QAWS_DOMAIN_PARAMETRIC, QAWS_CONSTRAINT_MONOTONIC,
+			QAWS_DIFF_UNSUPPORTED, 0u);
+	return 3;
+}
+
+static qaws_status bspline_surface_primal_field(qaws_surface const* surface, qaws_diff_field field,
+	qaws_scalar const** out_data, unsigned int* out_count, unsigned int* out_components)
+{
+	qaws_surface_bspline_impl const* impl = (qaws_surface_bspline_impl const*)surface->impl;
+	switch (field)
+	{
+	case QAWS_FIELD_CONTROL_POINTS:
+		*out_data = impl->control_points;
+		*out_count = impl->u_count * impl->v_count;
+		*out_components = 3;
+		return QAWS_STATUS_OK;
+	case QAWS_FIELD_U_KNOTS:
+		*out_data = impl->u_knots;
+		*out_count = impl->u_knot_count;
+		*out_components = 1;
+		return QAWS_STATUS_OK;
+	case QAWS_FIELD_V_KNOTS:
+		*out_data = impl->v_knots;
+		*out_count = impl->v_knot_count;
+		*out_components = 1;
+		return QAWS_STATUS_OK;
+	default:
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	}
+}
+
+static qaws_status bspline_surface_linear_support(qaws_surface const* surface,
+	qaws_scalar u, qaws_scalar v, unsigned int order, qaws_surface_support* out)
+{
+	qaws_surface_bspline_impl const* impl = (qaws_surface_bspline_impl const*)surface->impl;
+	qaws_scalar nu[(QAWS_DIFF_MAX_ORDER + 1) * QAWS_DIFF_MAX_SUPPORT];
+	qaws_scalar nv[(QAWS_DIFF_MAX_ORDER + 1) * QAWS_DIFF_MAX_SUPPORT];
+	unsigned int ud = surface->u_degree, vd = surface->v_degree, r, i;
+	unsigned int u_span, v_span;
+
+	if (ud + 1 > QAWS_DIFF_MAX_SUPPORT || vd + 1 > QAWS_DIFF_MAX_SUPPORT || order > QAWS_DIFF_MAX_ORDER)
+		return QAWS_STATUS_UNSUPPORTED_OPERATION;
+
+	/* Same span search as bspline_surface_eval. */
+	u_span = qaws_internal_find_knot_span(impl->u_knots, impl->u_knot_count, ud, impl->u_count, u);
+	v_span = qaws_internal_find_knot_span(impl->v_knots, impl->v_knot_count, vd, impl->v_count, v);
+	qaws_internal_bspline_basis_derivs_any(impl->u_knots, impl->u_knot_count, ud, u_span, u, order, nu);
+	qaws_internal_bspline_basis_derivs_any(impl->v_knots, impl->v_knot_count, vd, v_span, v, order, nv);
+
+	out->kind = QAWS_SUPPORT_LOCAL;
+	out->field = QAWS_FIELD_CONTROL_POINTS;
+	out->u_first = u_span - ud;
+	out->u_count = ud + 1;
+	out->v_first = v_span - vd;
+	out->v_count = vd + 1;
+	out->u_stride = impl->v_count;
+	out->v_stride = 1;
+	out->on_boundary =
+		(u_span > ud && u == impl->u_knots[u_span]) ||
+		(v_span > vd && v == impl->v_knots[v_span]);
+	out->has_weights = 1;
+	out->order = order;
+	for (r = 0; r <= order; r++)
+	{
+		for (i = 0; i <= ud; i++)
+			out->u_weights[r][i] = nu[r * (ud + 1) + i];
+		for (i = 0; i <= vd; i++)
+			out->v_weights[r][i] = nv[r * (vd + 1) + i];
+	}
+	return QAWS_STATUS_OK;
+}
+
+static qaws_surface_diff_vtable const bspline_surface_diff_vtable = {
+	BSPLINE_SURFACE_DIFF_CAPS,
+	QAWS_DIFF_PIECEWISE_SMOOTH,
+	bspline_surface_describe_fields,
+	bspline_surface_primal_field,
+	bspline_surface_linear_support,
+	NULL
+};
+
 static qaws_surface_vtable const bspline_surface_vtable = {
 	bspline_surface_eval,
 	bspline_surface_destroy,
 	bspline_surface_is_rational,
-	NULL /* diff */
+	&bspline_surface_diff_vtable
 };
 
 qaws_status qaws_surface_create_bspline_ex(

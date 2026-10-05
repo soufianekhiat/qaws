@@ -304,19 +304,20 @@ typedef struct qaws_local_support
 
 /* Tensor-product surface support: weight(i,j) = u_weights[a][i] * v_weights[b][j]
    for the partial d^(a+b) S / du^a dv^b. Elements are addressed as
-   (u_first + i) * v_stride + (v_first + j). */
-typedef struct qaws_surface_local_support
+   (u_first + i) * u_stride + (v_first + j) * v_stride. */
+typedef struct qaws_surface_support
 {
 	qaws_support_kind kind;
 	qaws_diff_field field;
 	unsigned int u_first, u_count;
 	unsigned int v_first, v_count;
-	unsigned int v_stride;
+	unsigned int u_stride, v_stride;
+	int on_boundary;              /* (u,v) lies exactly on an interior knot line */
 	int has_weights;
 	unsigned int order;
 	qaws_scalar u_weights[QAWS_DIFF_MAX_ORDER + 1][QAWS_DIFF_MAX_SUPPORT];
 	qaws_scalar v_weights[QAWS_DIFF_MAX_ORDER + 1][QAWS_DIFF_MAX_SUPPORT];
-} qaws_surface_local_support;
+} qaws_surface_support;
 
 /* ===================================================================
  * Context and report

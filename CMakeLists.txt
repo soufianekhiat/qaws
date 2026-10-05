@@ -98,6 +98,7 @@ set(QAWS_SOURCES
   src/qaws/qaws_inline.c
   src/qaws/qaws_prepare.c
   src/qaws/qaws_diff.c
+  src/qaws/qaws_diff_surface.c
   src/qaws/internal/qaws_internal_curve.c
   src/qaws/internal/qaws_internal_basis.c
   src/qaws/internal/qaws_internal_span.c

@@ -34,7 +34,7 @@ void qaws_diff_report_reset(qaws_diff_report* report)
 	report->branch_gap = QAWS_DIFF_UNBOUNDED;
 }
 
-static void report_note(
+void qaws_internal_diff_report_note(
 	qaws_diff_context const* ctx,
 	qaws_diff_class diff_class,
 	qaws_diff_validity validity,
@@ -89,17 +89,17 @@ qaws_field_view* qaws_diff_views_find(
 	return NULL;
 }
 
-static unsigned int view_stride(qaws_field_view const* v)
+unsigned int qaws_internal_view_stride(qaws_field_view const* v)
 {
 	return v->stride ? v->stride : v->components;
 }
 
-static int view_element_active(qaws_field_view const* v, unsigned int e)
+int qaws_internal_view_element_active(qaws_field_view const* v, unsigned int e)
 {
 	return e < v->count && (!v->active || v->active[e]);
 }
 
-static int view_component_active(qaws_field_view const* v, unsigned int c)
+int qaws_internal_view_component_active(qaws_field_view const* v, unsigned int c)
 {
 	return !v->component_mask || ((v->component_mask >> c) & 1u);
 }
@@ -112,15 +112,15 @@ void qaws_diff_views_clear(qaws_diff_views* views)
 	for (i = 0; i < views->field_count; i++)
 	{
 		qaws_field_view* v = &views->fields[i];
-		unsigned int stride = view_stride(v);
+		unsigned int stride = qaws_internal_view_stride(v);
 		if (!v->data)
 			continue;
 		for (e = 0; e < v->count; e++)
 		{
-			if (!view_element_active(v, e))
+			if (!qaws_internal_view_element_active(v, e))
 				continue;
 			for (c = 0; c < v->components; c++)
-				if (view_component_active(v, c))
+				if (qaws_internal_view_component_active(v, c))
 					v->data[e * stride + c] = QAWS_ZERO;
 		}
 	}
@@ -503,15 +503,15 @@ static qaws_status sample_param_tangent(
 			continue;
 		if (v->components != dim)
 			return QAWS_STATUS_INVALID_ARGUMENT;
-		stride = view_stride(v);
+		stride = qaws_internal_view_stride(v);
 		for (j = 0; j < rg->count; j++)
 		{
 			unsigned int e = rg->first + j;
 			qaws_scalar w = s->support.weights[r][k][j];
-			if (!view_element_active(v, e))
+			if (!qaws_internal_view_element_active(v, e))
 				continue;
 			for (c = 0; c < dim; c++)
-				if (view_component_active(v, c))
+				if (qaws_internal_view_component_active(v, c))
 					out[c] += w * v->data[(size_t)e * stride + c];
 		}
 	}
@@ -584,7 +584,7 @@ static qaws_status curve_tangent_sample(
 		}
 	}
 
-	report_note(ctx,
+	qaws_internal_diff_report_note(ctx,
 		has_t ? d->diff_class : QAWS_DIFF_SMOOTH,
 		(has_t && s.at_boundary) ? QAWS_DIFF_AT_BOUNDARY : QAWS_DIFF_VALID,
 		(has_t && d->diff_class == QAWS_DIFF_PIECEWISE_SMOOTH) ? (unsigned int)QAWS_FREEZE_SPAN : 0u,
@@ -637,13 +637,13 @@ static qaws_scalar coordinate_adjoint(
 }
 
 /* Adds g into the view element (masked). */
-static void view_add(qaws_field_view* v, unsigned int e, unsigned int dim, qaws_scalar const* g)
+void qaws_internal_view_add(qaws_field_view* v, unsigned int e, unsigned int dim, qaws_scalar const* g)
 {
-	unsigned int c, stride = view_stride(v);
-	if (!view_element_active(v, e))
+	unsigned int c, stride = qaws_internal_view_stride(v);
+	if (!qaws_internal_view_element_active(v, e))
 		return;
 	for (c = 0; c < dim; c++)
-		if (view_component_active(v, c))
+		if (qaws_internal_view_component_active(v, c))
 			v->data[(size_t)e * stride + c] += g[c];
 }
 
@@ -689,7 +689,7 @@ static void scratch_free(qaws_diff_context const* ctx, void* p)
 	qaws_internal_dealloc(ctx ? ctx->allocator : NULL, p);
 }
 
-static qaws_status check_param_views(qaws_diff_views const* views, unsigned int dim)
+qaws_status qaws_internal_check_views(qaws_diff_views const* views, unsigned int dim)
 {
 	unsigned int i;
 	if (!views)
@@ -700,102 +700,103 @@ static qaws_status check_param_views(qaws_diff_views const* views, unsigned int 
 	return QAWS_STATUS_OK;
 }
 
-/* Strategy: scatter (and the per-sample coordinate adjoint). */
-static qaws_status adjoint_scatter(
-	qaws_diff_context const* ctx,
-	qaws_curve const* curve,
-	unsigned int dim,
-	qaws_scalar const* t,
-	unsigned int count,
-	unsigned int channels,
-	void const* jets,
-	jet_reader_fn read_jet,
-	qaws_diff_views* views,
-	qaws_scalar* t_adjoint)
+/* View read with masks: inactive elements/components read as zero. */
+void qaws_internal_view_read(qaws_field_view const* v, unsigned int e,
+	unsigned int components, qaws_scalar* out)
 {
-	unsigned int i, r, j;
-	unsigned int order = highest_channel(channels) + (t_adjoint ? 1u : 0u);
-	qaws_curve_diff_vtable const* d = curve_diff(curve);
+	unsigned int c, stride = qaws_internal_view_stride(v);
+	for (c = 0; c < components; c++)
+		out[c] = QAWS_ZERO;
+	if (!qaws_internal_view_element_active(v, e))
+		return;
+	for (c = 0; c < components && c < v->components; c++)
+		if (qaws_internal_view_component_active(v, c))
+			out[c] = v->data[(size_t)e * stride + c];
+}
 
+/* ------------------------------------------------------------------ */
+/*  Generic accumulation: scatter, tiled, gather                      */
+/* ------------------------------------------------------------------ */
+
+#define DIFF_MAX_VIEW_FIELDS 16u
+
+static int views_have_data(qaws_diff_views const* views)
+{
+	unsigned int i;
+	if (!views)
+		return 0;
+	for (i = 0; i < views->field_count; i++)
+		if (views->fields[i].data && views->fields[i].count)
+			return 1;
+	return 0;
+}
+
+static int view_index(qaws_diff_views const* views, qaws_diff_field field)
+{
+	unsigned int i;
+	for (i = 0; i < views->field_count; i++)
+		if (views->fields[i].field == field && views->fields[i].data)
+			return (int)i;
+	return -1;
+}
+
+/* Strategy: scatter. Each sample adds into the parameter adjoints. */
+static qaws_status accumulate_scatter(
+	unsigned int components, unsigned int count,
+	qaws_diff_entry* entries, unsigned int capacity,
+	qaws_diff_collect_fn collect, void const* user, qaws_diff_views* views)
+{
+	unsigned int i, n, q;
 	for (i = 0; i < count; i++)
 	{
-		curve_sample s;
-		curve_jet_buf ybar;
-		qaws_status st = curve_prepare(curve, dim, t[i], order, &s);
+		qaws_status st = collect(user, i, 1, entries, capacity, &n);
 		if (st != QAWS_STATUS_OK)
 			return st;
-		read_jet(jets, i, &ybar);
-
-		if (views)
+		for (q = 0; q < n; q++)
 		{
-			for (r = 0; r < s.support.range_count; r++)
-			{
-				qaws_field_view* v = qaws_diff_views_find(views, s.support.ranges[r].field);
-				if (!v)
-					continue;
-				for (j = 0; j < s.support.ranges[r].count; j++)
-				{
-					qaws_scalar g[3];
-					adjoint_contribution(&s, r, j, dim, channels, &ybar, g);
-					view_add(v, s.support.ranges[r].first + j, dim, g);
-				}
-			}
+			int f = view_index(views, entries[q].field);
+			if (f >= 0)
+				qaws_internal_view_add(&views->fields[f], entries[q].element, components, entries[q].g);
 		}
-		if (t_adjoint)
-			t_adjoint[i] += coordinate_adjoint(&s, dim, channels, &ybar);
-
-		report_note(ctx,
-			t_adjoint ? d->diff_class : QAWS_DIFF_SMOOTH,
-			(t_adjoint && s.at_boundary) ? QAWS_DIFF_AT_BOUNDARY : QAWS_DIFF_VALID,
-			(t_adjoint && d->diff_class == QAWS_DIFF_PIECEWISE_SMOOTH) ? (unsigned int)QAWS_FREEZE_SPAN : 0u,
-			i);
 	}
 	return QAWS_STATUS_OK;
 }
 
 /*
- * Strategy: tiled. Every tile accumulates into a dense local buffer
- * (the CPU analogue of workgroup shared memory) and flushes the touched
- * window once. Coordinate adjoints are per sample and need no reduction.
+ * Strategy: tiled. Every tile accumulates into a dense local buffer (the
+ * CPU analogue of workgroup shared memory) and flushes only the touched
+ * window of each field, once per tile.
  */
-static qaws_status adjoint_tiled(
+static qaws_status accumulate_tiled(
 	qaws_diff_context const* ctx,
-	qaws_curve const* curve,
-	unsigned int dim,
-	qaws_scalar const* t,
-	unsigned int count,
-	unsigned int channels,
-	void const* jets,
-	jet_reader_fn read_jet,
-	qaws_diff_views* views,
-	qaws_scalar* t_adjoint)
+	unsigned int components, unsigned int count,
+	qaws_diff_entry* entries, unsigned int capacity,
+	qaws_diff_collect_fn collect, void const* user, qaws_diff_views* views)
 {
 	unsigned int tile = (ctx && ctx->tile_size) ? ctx->tile_size : DIFF_DEFAULT_TILE;
-	unsigned int order = highest_channel(channels) + (t_adjoint ? 1u : 0u);
-	unsigned int f, i, r, j, c, base;
-	qaws_scalar* local[16];
-	unsigned int lo[16], hi[16];
-	unsigned int nf = views ? views->field_count : 0u;
+	qaws_scalar* local[DIFF_MAX_VIEW_FIELDS];
+	unsigned int lo[DIFF_MAX_VIEW_FIELDS], hi[DIFF_MAX_VIEW_FIELDS];
+	unsigned int nf = views->field_count, f, i, q, c, base, n;
 	qaws_status st = QAWS_STATUS_OK;
-	qaws_curve_diff_vtable const* d = curve_diff(curve);
 
-	if (nf > 16)
-		return adjoint_scatter(ctx, curve, dim, t, count, channels, jets, read_jet, views, t_adjoint);
+	if (nf > DIFF_MAX_VIEW_FIELDS)
+		return accumulate_scatter(components, count, entries, capacity, collect, user, views);
 
-	for (f = 0; f < 16; f++)
+	for (f = 0; f < DIFF_MAX_VIEW_FIELDS; f++)
 		local[f] = NULL;
 	for (f = 0; f < nf; f++)
 	{
-		qaws_field_view* v = &views->fields[f];
+		qaws_field_view const* v = &views->fields[f];
+		size_t size = sizeof(qaws_scalar) * (size_t)v->count * components;
 		if (!v->data || !v->count)
 			continue;
-		local[f] = (qaws_scalar*)scratch_alloc(ctx, sizeof(qaws_scalar) * (size_t)v->count * dim);
+		local[f] = (qaws_scalar*)scratch_alloc(ctx, size);
 		if (!local[f])
 		{
 			st = QAWS_STATUS_ALLOCATION_FAILURE;
 			goto cleanup;
 		}
-		memset(local[f], 0, sizeof(qaws_scalar) * (size_t)v->count * dim);
+		memset(local[f], 0, size);
 	}
 
 	for (base = 0; base < count; base += tile)
@@ -809,59 +810,32 @@ static qaws_status adjoint_tiled(
 
 		for (i = base; i < end; i++)
 		{
-			curve_sample s;
-			curve_jet_buf ybar;
-			st = curve_prepare(curve, dim, t[i], order, &s);
+			st = collect(user, i, 1, entries, capacity, &n);
 			if (st != QAWS_STATUS_OK)
 				goto cleanup;
-			read_jet(jets, i, &ybar);
-
-			for (r = 0; r < s.support.range_count; r++)
+			for (q = 0; q < n; q++)
 			{
-				qaws_support_range const* rg = &s.support.ranges[r];
-				for (f = 0; f < nf; f++)
-				{
-					if (!local[f] || views->fields[f].field != rg->field)
-						continue;
-					for (j = 0; j < rg->count; j++)
-					{
-						unsigned int e = rg->first + j;
-						qaws_scalar g[3];
-						if (e >= views->fields[f].count)
-							continue;
-						adjoint_contribution(&s, r, j, dim, channels, &ybar, g);
-						for (c = 0; c < dim; c++)
-							local[f][(size_t)e * dim + c] += g[c];
-					}
-					if (rg->first < lo[f])
-						lo[f] = rg->first;
-					if (rg->first + rg->count > hi[f])
-						hi[f] = rg->first + rg->count;
-					break;
-				}
+				int fi = view_index(views, entries[q].field);
+				unsigned int e = entries[q].element;
+				if (fi < 0 || !local[fi] || e >= views->fields[fi].count)
+					continue;
+				for (c = 0; c < components; c++)
+					local[fi][(size_t)e * components + c] += entries[q].g[c];
+				if (e < lo[fi]) lo[fi] = e;
+				if (e + 1 > hi[fi]) hi[fi] = e + 1;
 			}
-			if (t_adjoint)
-				t_adjoint[i] += coordinate_adjoint(&s, dim, channels, &ybar);
-
-			report_note(ctx,
-				t_adjoint ? d->diff_class : QAWS_DIFF_SMOOTH,
-				(t_adjoint && s.at_boundary) ? QAWS_DIFF_AT_BOUNDARY : QAWS_DIFF_VALID,
-				(t_adjoint && d->diff_class == QAWS_DIFF_PIECEWISE_SMOOTH) ? (unsigned int)QAWS_FREEZE_SPAN : 0u,
-				i);
 		}
 
-		/* Flush the touched window of every field. */
 		for (f = 0; f < nf; f++)
 		{
-			unsigned int e, top;
+			unsigned int e;
 			if (!local[f] || lo[f] == ~0u)
 				continue;
-			top = hi[f] < views->fields[f].count ? hi[f] : views->fields[f].count;
-			for (e = lo[f]; e < top; e++)
+			for (e = lo[f]; e < hi[f]; e++)
 			{
-				view_add(&views->fields[f], e, dim, &local[f][(size_t)e * dim]);
-				for (c = 0; c < dim; c++)
-					local[f][(size_t)e * dim + c] = QAWS_ZERO;
+				qaws_internal_view_add(&views->fields[f], e, components, &local[f][(size_t)e * components]);
+				for (c = 0; c < components; c++)
+					local[f][(size_t)e * components + c] = QAWS_ZERO;
 			}
 		}
 	}
@@ -875,148 +849,230 @@ cleanup:
 
 /*
  * Strategy: gather. Contributions are bucketed per parameter element
- * (counting sort), then every element sums its own samples in sample
- * order. Deterministic and free of write conflicts; this is the layout a
- * GPU control-point-centric kernel consumes (see build_support_index).
+ * (counting sort), then every element sums its own bucket in sample
+ * order. Deterministic and free of write conflicts: the layout a
+ * control-point-centric GPU kernel consumes.
  */
-static qaws_status adjoint_gather(
+static qaws_status accumulate_gather(
 	qaws_diff_context const* ctx,
-	qaws_curve const* curve,
-	unsigned int dim,
-	qaws_scalar const* t,
-	unsigned int count,
-	unsigned int channels,
-	void const* jets,
-	jet_reader_fn read_jet,
-	qaws_diff_views* views,
-	qaws_scalar* t_adjoint)
+	unsigned int components, unsigned int count,
+	qaws_diff_entry* entries, unsigned int capacity,
+	qaws_diff_collect_fn collect, void const* user, qaws_diff_views* views)
 {
-	unsigned int order = highest_channel(channels) + (t_adjoint ? 1u : 0u);
-	unsigned int f, i, r, j, c;
+	unsigned int* offsets[DIFF_MAX_VIEW_FIELDS];
+	unsigned int* cursor[DIFF_MAX_VIEW_FIELDS];
+	qaws_scalar* contrib[DIFF_MAX_VIEW_FIELDS];
+	unsigned int nf = views->field_count, f, i, q, c, n, e;
 	qaws_status st = QAWS_STATUS_OK;
-	qaws_curve_diff_vtable const* d = curve_diff(curve);
-	unsigned int nf = views ? views->field_count : 0u;
 
-	/* Coordinate adjoints first (per sample, no reduction). */
-	if (t_adjoint)
+	if (nf > DIFF_MAX_VIEW_FIELDS)
+		return accumulate_scatter(components, count, entries, capacity, collect, user, views);
+
+	for (f = 0; f < DIFF_MAX_VIEW_FIELDS; f++)
 	{
-		for (i = 0; i < count; i++)
+		offsets[f] = NULL;
+		cursor[f] = NULL;
+		contrib[f] = NULL;
+	}
+	for (f = 0; f < nf; f++)
+	{
+		qaws_field_view const* v = &views->fields[f];
+		size_t size = sizeof(unsigned int) * ((size_t)v->count + 1);
+		if (!v->data || !v->count)
+			continue;
+		offsets[f] = (unsigned int*)scratch_alloc(ctx, size);
+		cursor[f] = (unsigned int*)scratch_alloc(ctx, size);
+		if (!offsets[f] || !cursor[f])
 		{
-			curve_sample s;
-			curve_jet_buf ybar;
-			st = curve_prepare(curve, dim, t[i], order, &s);
-			if (st != QAWS_STATUS_OK)
-				return st;
-			read_jet(jets, i, &ybar);
-			t_adjoint[i] += coordinate_adjoint(&s, dim, channels, &ybar);
+			st = QAWS_STATUS_ALLOCATION_FAILURE;
+			goto cleanup;
+		}
+		memset(offsets[f], 0, size);
+	}
+
+	/* Pass 1: count entries per element (coordinate adjoints written here). */
+	for (i = 0; i < count; i++)
+	{
+		st = collect(user, i, 1, entries, capacity, &n);
+		if (st != QAWS_STATUS_OK)
+			goto cleanup;
+		for (q = 0; q < n; q++)
+		{
+			int fi = view_index(views, entries[q].field);
+			if (fi >= 0 && offsets[fi] && entries[q].element < views->fields[fi].count)
+				offsets[fi][entries[q].element + 1]++;
 		}
 	}
 
 	for (f = 0; f < nf; f++)
 	{
-		qaws_field_view* v = &views->fields[f];
-		unsigned int* offsets = NULL;
-		unsigned int* cursor = NULL;
-		qaws_scalar* contrib = NULL;
-		unsigned int total = 0, e;
-
-		if (!v->data || !v->count)
+		unsigned int total;
+		if (!offsets[f])
 			continue;
-
-		offsets = (unsigned int*)scratch_alloc(ctx, sizeof(unsigned int) * ((size_t)v->count + 1));
-		cursor = (unsigned int*)scratch_alloc(ctx, sizeof(unsigned int) * ((size_t)v->count + 1));
-		if (!offsets || !cursor)
+		for (e = 0; e < views->fields[f].count; e++)
+			offsets[f][e + 1] += offsets[f][e];
+		total = offsets[f][views->fields[f].count];
+		memcpy(cursor[f], offsets[f], sizeof(unsigned int) * ((size_t)views->fields[f].count + 1));
+		contrib[f] = (qaws_scalar*)scratch_alloc(ctx, sizeof(qaws_scalar) * ((size_t)total * components + 1));
+		if (!contrib[f])
 		{
 			st = QAWS_STATUS_ALLOCATION_FAILURE;
-			goto field_cleanup;
+			goto cleanup;
 		}
-		memset(offsets, 0, sizeof(unsigned int) * ((size_t)v->count + 1));
-
-		/* Pass 1: count entries per element. */
-		for (i = 0; i < count; i++)
-		{
-			curve_sample s;
-			st = curve_prepare(curve, dim, t[i], order, &s);
-			if (st != QAWS_STATUS_OK)
-				goto field_cleanup;
-			for (r = 0; r < s.support.range_count; r++)
-			{
-				if (s.support.ranges[r].field != v->field)
-					continue;
-				for (j = 0; j < s.support.ranges[r].count; j++)
-				{
-					e = s.support.ranges[r].first + j;
-					if (e < v->count)
-						offsets[e + 1]++;
-				}
-			}
-		}
-		for (e = 0; e < v->count; e++)
-			offsets[e + 1] += offsets[e];
-		total = offsets[v->count];
-		memcpy(cursor, offsets, sizeof(unsigned int) * ((size_t)v->count + 1));
-
-		contrib = (qaws_scalar*)scratch_alloc(ctx, sizeof(qaws_scalar) * ((size_t)total * dim + 1));
-		if (!contrib)
-		{
-			st = QAWS_STATUS_ALLOCATION_FAILURE;
-			goto field_cleanup;
-		}
-
-		/* Pass 2: store contributions bucketed by element, in sample order. */
-		for (i = 0; i < count; i++)
-		{
-			curve_sample s;
-			curve_jet_buf ybar;
-			st = curve_prepare(curve, dim, t[i], order, &s);
-			if (st != QAWS_STATUS_OK)
-				goto field_cleanup;
-			read_jet(jets, i, &ybar);
-			for (r = 0; r < s.support.range_count; r++)
-			{
-				if (s.support.ranges[r].field != v->field)
-					continue;
-				for (j = 0; j < s.support.ranges[r].count; j++)
-				{
-					e = s.support.ranges[r].first + j;
-					if (e >= v->count)
-						continue;
-					adjoint_contribution(&s, r, j, dim, channels, &ybar, &contrib[(size_t)cursor[e] * dim]);
-					cursor[e]++;
-				}
-			}
-		}
-
-		/* Pass 3: every element gathers its bucket. */
-		for (e = 0; e < v->count; e++)
-		{
-			qaws_scalar g[3] = { 0, 0, 0 };
-			unsigned int q;
-			for (q = offsets[e]; q < offsets[e + 1]; q++)
-				for (c = 0; c < dim; c++)
-					g[c] += contrib[(size_t)q * dim + c];
-			if (offsets[e + 1] > offsets[e])
-				view_add(v, e, dim, g);
-		}
-
-field_cleanup:
-		if (offsets) scratch_free(ctx, offsets);
-		if (cursor) scratch_free(ctx, cursor);
-		if (contrib) scratch_free(ctx, contrib);
-		if (st != QAWS_STATUS_OK)
-			return st;
 	}
 
+	/* Pass 2: store contributions bucketed by element, in sample order. */
 	for (i = 0; i < count; i++)
 	{
-		curve_sample s;
-		st = curve_prepare(curve, dim, t[i], 0, &s);
+		st = collect(user, i, 0, entries, capacity, &n);
 		if (st != QAWS_STATUS_OK)
-			return st;
-		report_note(ctx,
-			t_adjoint ? d->diff_class : QAWS_DIFF_SMOOTH,
-			(t_adjoint && s.at_boundary) ? QAWS_DIFF_AT_BOUNDARY : QAWS_DIFF_VALID,
-			(t_adjoint && d->diff_class == QAWS_DIFF_PIECEWISE_SMOOTH) ? (unsigned int)QAWS_FREEZE_SPAN : 0u,
+			goto cleanup;
+		for (q = 0; q < n; q++)
+		{
+			int fi = view_index(views, entries[q].field);
+			if (fi < 0 || !contrib[fi] || entries[q].element >= views->fields[fi].count)
+				continue;
+			e = entries[q].element;
+			for (c = 0; c < components; c++)
+				contrib[fi][(size_t)cursor[fi][e] * components + c] = entries[q].g[c];
+			cursor[fi][e]++;
+		}
+	}
+
+	/* Pass 3: every element gathers its bucket. */
+	for (f = 0; f < nf; f++)
+	{
+		if (!contrib[f])
+			continue;
+		for (e = 0; e < views->fields[f].count; e++)
+		{
+			qaws_scalar g[3] = { 0, 0, 0 };
+			unsigned int k;
+			if (offsets[f][e + 1] == offsets[f][e])
+				continue;
+			for (k = offsets[f][e]; k < offsets[f][e + 1]; k++)
+				for (c = 0; c < components; c++)
+					g[c] += contrib[f][(size_t)k * components + c];
+			qaws_internal_view_add(&views->fields[f], e, components, g);
+		}
+	}
+
+cleanup:
+	for (f = 0; f < nf; f++)
+	{
+		if (offsets[f]) scratch_free(ctx, offsets[f]);
+		if (cursor[f]) scratch_free(ctx, cursor[f]);
+		if (contrib[f]) scratch_free(ctx, contrib[f]);
+	}
+	return st;
+}
+
+qaws_status qaws_internal_diff_accumulate(
+	qaws_diff_context const* ctx,
+	unsigned int components,
+	unsigned int sample_count,
+	unsigned int entry_capacity,
+	qaws_diff_collect_fn collect,
+	void const* user,
+	qaws_diff_views* views)
+{
+	qaws_diff_entry* entries;
+	qaws_status st;
+	unsigned int i, n;
+
+	entries = (qaws_diff_entry*)scratch_alloc(ctx, sizeof(qaws_diff_entry) * (size_t)(entry_capacity ? entry_capacity : 1u));
+	if (!entries)
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+
+	if (!views_have_data(views))
+	{
+		/* Only coordinate adjoints are requested. */
+		st = QAWS_STATUS_OK;
+		for (i = 0; i < sample_count && st == QAWS_STATUS_OK; i++)
+			st = collect(user, i, 1, entries, entry_capacity, &n);
+	}
+	else
+	{
+		switch (ctx ? ctx->accumulation : QAWS_ACCUMULATE_SCATTER)
+		{
+		case QAWS_ACCUMULATE_TILED:
+			st = accumulate_tiled(ctx, components, sample_count, entries, entry_capacity, collect, user, views);
+			break;
+		case QAWS_ACCUMULATE_GATHER:
+			st = accumulate_gather(ctx, components, sample_count, entries, entry_capacity, collect, user, views);
+			break;
+		case QAWS_ACCUMULATE_SCATTER:
+		default:
+			st = accumulate_scatter(components, sample_count, entries, entry_capacity, collect, user, views);
+			break;
+		}
+	}
+
+	scratch_free(ctx, entries);
+	return st;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Curve adjoint collector                                           */
+/* ------------------------------------------------------------------ */
+
+typedef struct curve_adjoint_job
+{
+	qaws_diff_context const* ctx;
+	qaws_curve const* curve;
+	unsigned int dim;
+	qaws_scalar const* t;
+	unsigned int channels;
+	unsigned int order;
+	void const* jets;
+	jet_reader_fn read_jet;
+	qaws_scalar* t_adjoint;
+} curve_adjoint_job;
+
+static qaws_status curve_collect(
+	void const* user,
+	unsigned int i,
+	int first_pass,
+	qaws_diff_entry* entries,
+	unsigned int capacity,
+	unsigned int* out_count)
+{
+	curve_adjoint_job const* job = (curve_adjoint_job const*)user;
+	curve_sample s;
+	curve_jet_buf ybar;
+	unsigned int r, j, n = 0;
+	qaws_curve_diff_vtable const* d = curve_diff(job->curve);
+	qaws_status st = curve_prepare(job->curve, job->dim, job->t[i], job->order, &s);
+
+	*out_count = 0;
+	if (st != QAWS_STATUS_OK)
+		return st;
+	job->read_jet(job->jets, i, &ybar);
+
+	for (r = 0; r < s.support.range_count; r++)
+	{
+		for (j = 0; j < s.support.ranges[r].count; j++)
+		{
+			if (n >= capacity)
+				return QAWS_STATUS_INTERNAL_ERROR;
+			entries[n].field = s.support.ranges[r].field;
+			entries[n].element = s.support.ranges[r].first + j;
+			entries[n].g[2] = QAWS_ZERO;
+			adjoint_contribution(&s, r, j, job->dim, job->channels, &ybar, entries[n].g);
+			n++;
+		}
+	}
+	*out_count = n;
+
+	if (first_pass)
+	{
+		int has_t = job->t_adjoint != NULL;
+		if (has_t)
+			job->t_adjoint[i] += coordinate_adjoint(&s, job->dim, job->channels, &ybar);
+		qaws_internal_diff_report_note(job->ctx,
+			has_t ? d->diff_class : QAWS_DIFF_SMOOTH,
+			(has_t && s.at_boundary) ? QAWS_DIFF_AT_BOUNDARY : QAWS_DIFF_VALID,
+			(has_t && d->diff_class == QAWS_DIFF_PIECEWISE_SMOOTH) ? (unsigned int)QAWS_FREEZE_SPAN : 0u,
 			i);
 	}
 	return QAWS_STATUS_OK;
@@ -1034,28 +1090,31 @@ static qaws_status curve_batch_adjoint(
 	qaws_diff_views* views,
 	qaws_scalar* t_adjoint)
 {
+	curve_adjoint_job job;
 	qaws_status st;
+
 	if (!curve || !t || !jets)
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	if ((unsigned int)curve->dimension != dim)
 		return QAWS_STATUS_INVALID_DIMENSION;
 	if (!curve_diff(curve))
 		return QAWS_STATUS_UNSUPPORTED_OPERATION;
-	st = check_param_views(views, dim);
+	st = qaws_internal_check_views(views, dim);
 	if (st != QAWS_STATUS_OK)
 		return st;
-	channels &= 0xFu;
 
-	switch (ctx ? ctx->accumulation : QAWS_ACCUMULATE_SCATTER)
-	{
-	case QAWS_ACCUMULATE_TILED:
-		return adjoint_tiled(ctx, curve, dim, t, count, channels, jets, read_jet, views, t_adjoint);
-	case QAWS_ACCUMULATE_GATHER:
-		return adjoint_gather(ctx, curve, dim, t, count, channels, jets, read_jet, views, t_adjoint);
-	case QAWS_ACCUMULATE_SCATTER:
-	default:
-		return adjoint_scatter(ctx, curve, dim, t, count, channels, jets, read_jet, views, t_adjoint);
-	}
+	job.ctx = ctx;
+	job.curve = curve;
+	job.dim = dim;
+	job.t = t;
+	job.channels = channels & 0xFu;
+	job.order = highest_channel(job.channels) + (t_adjoint ? 1u : 0u);
+	job.jets = jets;
+	job.read_jet = read_jet;
+	job.t_adjoint = t_adjoint;
+
+	return qaws_internal_diff_accumulate(ctx, dim, count,
+		QAWS_DIFF_MAX_RANGES * QAWS_DIFF_MAX_SUPPORT, curve_collect, &job, views);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1111,7 +1170,7 @@ static qaws_status curve_batch_tangent(
 		return QAWS_STATUS_UNSUPPORTED_OPERATION;
 	if (out_tangent2 && !(d->capabilities & QAWS_CAP_TANGENT2))
 		return QAWS_STATUS_UNSUPPORTED_OPERATION;
-	st = check_param_views(views, dim);
+	st = qaws_internal_check_views(views, dim);
 	if (st != QAWS_STATUS_OK)
 		return st;
 	channels &= 0xFu;

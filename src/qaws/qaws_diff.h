@@ -242,4 +242,121 @@ qaws_status qaws_curve_eval_adjoint_3d(
 	qaws_diff_views* param_adjoint,
 	qaws_scalar* t_adjoint);
 
+/* ===================================================================
+ * Surface schema
+ * =================================================================== */
+
+unsigned int qaws_surface_get_diff_capabilities(qaws_surface const* surface);
+qaws_diff_class qaws_surface_get_diff_class(qaws_surface const* surface);
+
+qaws_status qaws_surface_describe_fields(
+	qaws_surface const* surface,
+	qaws_field_desc* out_fields,
+	unsigned int capacity,
+	unsigned int* out_count);
+
+qaws_status qaws_surface_read_field(
+	qaws_surface const* surface,
+	qaws_diff_field field,
+	qaws_scalar* out_values,
+	unsigned int capacity,
+	unsigned int* out_scalar_count);
+
+qaws_status qaws_surface_local_support(
+	qaws_surface const* surface,
+	qaws_scalar u,
+	qaws_scalar v,
+	unsigned int order,
+	qaws_surface_support* out_support);
+
+qaws_status qaws_surface_build_support_index(
+	qaws_surface const* surface,
+	qaws_scalar const* u,
+	qaws_scalar const* v,
+	unsigned int count,
+	qaws_diff_field field,
+	unsigned int* out_offsets,
+	unsigned int offset_capacity,
+	unsigned int* out_samples,
+	unsigned int sample_capacity,
+	unsigned int* out_entry_count);
+
+/* ===================================================================
+ * Surface jets and evaluation
+ *
+ * Channels are qaws_surface_jet_channel bits (all partials up to total
+ * order 3). (u, v) are clamped to the surface domain like
+ * qaws_surface_evaluate.
+ * =================================================================== */
+
+/* Primal spatial jet (analytic, no finite differences). */
+qaws_status qaws_surface_eval_jet(
+	qaws_surface const* surface,
+	qaws_scalar u,
+	qaws_scalar v,
+	unsigned int channels,
+	qaws_surface_jet* out_jet);
+
+qaws_status qaws_surface_eval_batch_tangent(
+	qaws_diff_context const* ctx,
+	qaws_surface const* surface,
+	qaws_scalar const* u,
+	qaws_scalar const* v,
+	qaws_scalar const* u_tangent,
+	qaws_scalar const* v_tangent,
+	unsigned int count,
+	unsigned int channels,
+	qaws_diff_views const* param_tangent,
+	qaws_surface_jet* out_primal,
+	qaws_surface_jet* out_tangent);
+
+qaws_status qaws_surface_eval_batch_tangent2(
+	qaws_diff_context const* ctx,
+	qaws_surface const* surface,
+	qaws_scalar const* u,
+	qaws_scalar const* v,
+	qaws_scalar const* u_tangent,
+	qaws_scalar const* v_tangent,
+	unsigned int count,
+	unsigned int channels,
+	qaws_diff_views const* param_tangent,
+	qaws_surface_jet* out_primal,
+	qaws_surface_jet* out_tangent,
+	qaws_surface_jet* out_tangent2);
+
+qaws_status qaws_surface_eval_batch_adjoint(
+	qaws_diff_context const* ctx,
+	qaws_surface const* surface,
+	qaws_scalar const* u,
+	qaws_scalar const* v,
+	unsigned int count,
+	unsigned int channels,
+	qaws_surface_jet const* out_adjoint,
+	qaws_diff_views* param_adjoint,
+	qaws_scalar* u_adjoint,
+	qaws_scalar* v_adjoint);
+
+qaws_status qaws_surface_eval_tangent(
+	qaws_diff_context const* ctx,
+	qaws_surface const* surface,
+	qaws_scalar u,
+	qaws_scalar v,
+	qaws_scalar u_tangent,
+	qaws_scalar v_tangent,
+	unsigned int channels,
+	qaws_diff_views const* param_tangent,
+	qaws_surface_jet* out_primal,
+	qaws_surface_jet* out_tangent);
+
+qaws_status qaws_surface_eval_adjoint(
+	qaws_diff_context const* ctx,
+	qaws_surface const* surface,
+	qaws_scalar u,
+	qaws_scalar v,
+	unsigned int channels,
+	qaws_surface_jet const* out_adjoint,
+	qaws_diff_views* param_adjoint,
+	qaws_scalar* u_adjoint,
+	qaws_scalar* v_adjoint);
+
 #endif /* QAWS_DIFF_H */

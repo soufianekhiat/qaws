@@ -1,5 +1,6 @@
 #include "qaws_surface_bezier.h"
 #include "internal/qaws_internal_surface.h"
+#include "internal/qaws_internal_diff.h"
 #include "internal/qaws_internal_basis.h"
 #include "internal/qaws_internal_curve.h"
 #include <stdlib.h>
@@ -188,11 +189,85 @@ static int bezier_surface_is_rational(qaws_surface const* s)
 	return 0;
 }
 
+/* -------------------------------------------------------------------------- */
+/*  Differential rules: linear in the control net                             */
+/* -------------------------------------------------------------------------- */
+
+#define BEZIER_SURFACE_DIFF_CAPS (QAWS_CAP_TANGENT | QAWS_CAP_ADJOINT | QAWS_CAP_TANGENT2 | \
+	QAWS_CAP_LOCAL_SUPPORT | QAWS_CAP_LINEAR)
+
+static unsigned int bezier_surface_describe_fields(qaws_surface const* surface,
+	qaws_field_desc* out, unsigned int capacity)
+{
+	qaws_surface_bezier_impl const* impl = (qaws_surface_bezier_impl const*)surface->impl;
+	if (capacity >= 1)
+		out[0] = qaws_internal_field_desc(QAWS_FIELD_CONTROL_POINTS, QAWS_VALUE_VEC3,
+			impl->u_count * impl->v_count, QAWS_DOMAIN_POSITION, QAWS_CONSTRAINT_NONE,
+			QAWS_DIFF_SMOOTH, BEZIER_SURFACE_DIFF_CAPS);
+	return 1;
+}
+
+static qaws_status bezier_surface_primal_field(qaws_surface const* surface, qaws_diff_field field,
+	qaws_scalar const** out_data, unsigned int* out_count, unsigned int* out_components)
+{
+	qaws_surface_bezier_impl const* impl = (qaws_surface_bezier_impl const*)surface->impl;
+	if (field != QAWS_FIELD_CONTROL_POINTS)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	*out_data = impl->control_points;
+	*out_count = impl->u_count * impl->v_count;
+	*out_components = 3;
+	return QAWS_STATUS_OK;
+}
+
+static qaws_status bezier_surface_linear_support(qaws_surface const* surface,
+	qaws_scalar u, qaws_scalar v, unsigned int order, qaws_surface_support* out)
+{
+	qaws_surface_bezier_impl const* impl = (qaws_surface_bezier_impl const*)surface->impl;
+	qaws_scalar bu[(QAWS_DIFF_MAX_ORDER + 1) * QAWS_DIFF_MAX_SUPPORT];
+	qaws_scalar bv[(QAWS_DIFF_MAX_ORDER + 1) * QAWS_DIFF_MAX_SUPPORT];
+	unsigned int ud = surface->u_degree, vd = surface->v_degree, r, i;
+
+	if (ud + 1 > QAWS_DIFF_MAX_SUPPORT || vd + 1 > QAWS_DIFF_MAX_SUPPORT || order > QAWS_DIFF_MAX_ORDER)
+		return QAWS_STATUS_UNSUPPORTED_OPERATION;
+
+	qaws_internal_bernstein_derivs(ud, u, order, bu);
+	qaws_internal_bernstein_derivs(vd, v, order, bv);
+
+	out->kind = QAWS_SUPPORT_GLOBAL;
+	out->field = QAWS_FIELD_CONTROL_POINTS;
+	out->u_first = 0;
+	out->u_count = ud + 1;
+	out->v_first = 0;
+	out->v_count = vd + 1;
+	out->u_stride = impl->v_count;
+	out->v_stride = 1;
+	out->on_boundary = 0;
+	out->has_weights = 1;
+	out->order = order;
+	for (r = 0; r <= order; r++)
+	{
+		for (i = 0; i <= ud; i++)
+			out->u_weights[r][i] = bu[r * (ud + 1) + i];
+		for (i = 0; i <= vd; i++)
+			out->v_weights[r][i] = bv[r * (vd + 1) + i];
+	}
+	return QAWS_STATUS_OK;
+}
+
+static qaws_surface_diff_vtable const bezier_surface_diff_vtable = {
+	BEZIER_SURFACE_DIFF_CAPS,
+	QAWS_DIFF_SMOOTH,
+	bezier_surface_describe_fields,
+	bezier_surface_primal_field,
+	bezier_surface_linear_support,
+	NULL
+};
+
 static qaws_surface_vtable const bezier_surface_vtable = {
 	bezier_surface_eval,
 	bezier_surface_destroy,
 	bezier_surface_is_rational,
-	NULL /* diff */
+	&bezier_surface_diff_vtable
 };
 
 qaws_status qaws_surface_create_bezier_ex(
