@@ -35,6 +35,9 @@ typedef struct family
 	qaws_scalar t_min, t_max;
 	qaws_scalar knots[16];
 	unsigned int knot_count;
+	qaws_parameterization cr_param;
+	int cr_closed;
+	int nonlinear;              /* fields enter non-linearly (no QAWS_CAP_LINEAR) */
 } family;
 
 static qaws_status create_bezier(family const* f, qaws_scalar const* const* p, qaws_curve** out)
@@ -127,6 +130,18 @@ static qaws_status create_nurbs_knots(family const* f, qaws_scalar const* const*
 	return qaws_curve_create_nurbs(&d, out);
 }
 
+static qaws_status create_catmull_rom(family const* f, qaws_scalar const* const* p, qaws_curve** out)
+{
+	qaws_catmull_rom_desc d;
+	memset(&d, 0, sizeof(d));
+	d.dimension = (qaws_dimension)f->dim;
+	d.control_points = p[0];
+	d.control_point_count = f->counts[0];
+	d.parameterization = f->cr_param;
+	d.closed = f->cr_closed;
+	return qaws_curve_create_catmull_rom(&d, out);
+}
+
 static qaws_status create_rational_bezier(family const* f, qaws_scalar const* const* p, qaws_curve** out)
 {
 	qaws_rational_bezier_desc d;
@@ -143,7 +158,7 @@ static void make_families(family* fams, unsigned int* count)
 {
 	unsigned int i;
 	family* f;
-	memset(fams, 0, sizeof(family) * 8);
+	memset(fams, 0, sizeof(family) * 11);
 	diff_seed(2024);
 
 	f = &fams[0];
@@ -269,7 +284,54 @@ static void make_families(family* fams, unsigned int* count)
 	f->create = create_nurbs_knots;
 	f->t_min = 1.5f; f->t_max = 3.5f;
 
-	*count = 8;
+
+	/* Catmull-Rom: knot intervals |P_i+1 - P_i|^alpha make centripetal
+	   and chordal curves non-linear in their points. */
+	f = &fams[8];
+	f->name = "catmull_rom_centripetal";
+	f->dim = 2;
+	f->field_count = 1;
+	f->fields[0] = QAWS_FIELD_POINTS;
+	f->counts[0] = 6;
+	diff_rand_fill(f->params[0], 6 * 2);
+	for (i = 0; i < 6; i++)
+		f->params[0][2 * i] += (qaws_scalar)(1.5 * i);
+	f->create = create_catmull_rom;
+	f->cr_param = QAWS_PARAMETERIZATION_CENTRIPETAL;
+	f->nonlinear = 1;
+	f->t_min = 0; f->t_max = 3;
+
+	f = &fams[9];
+	f->name = "catmull_rom_chordal_closed";
+	f->dim = 3;
+	f->field_count = 1;
+	f->fields[0] = QAWS_FIELD_POINTS;
+	f->counts[0] = 5;
+	for (i = 0; i < 5; i++)
+	{
+		f->params[0][3 * i + 0] = (qaws_scalar)(2.0 * cos(1.2566 * i)) + (qaws_scalar)0.2 * diff_rand();
+		f->params[0][3 * i + 1] = (qaws_scalar)(2.0 * sin(1.2566 * i)) + (qaws_scalar)0.2 * diff_rand();
+		f->params[0][3 * i + 2] = (qaws_scalar)0.5 * diff_rand();
+	}
+	f->create = create_catmull_rom;
+	f->cr_param = QAWS_PARAMETERIZATION_CHORDAL;
+	f->cr_closed = 1;
+	f->nonlinear = 1;
+	f->t_min = 0; f->t_max = 5;
+
+	f = &fams[10];
+	f->name = "catmull_rom_uniform";
+	f->dim = 3;
+	f->field_count = 1;
+	f->fields[0] = QAWS_FIELD_POINTS;
+	f->counts[0] = 6;
+	diff_rand_fill(f->params[0], 6 * 3);
+	f->create = create_catmull_rom;
+	f->cr_param = QAWS_PARAMETERIZATION_UNIFORM;
+	f->nonlinear = 1;
+	f->t_min = 0; f->t_max = 3;
+
+	*count = 11;
 }
 
 static qaws_curve* family_curve(family const* f, qaws_scalar const (*params)[MAX_PARAMS])
@@ -581,7 +643,7 @@ static void check_tangent2(family const* f, qaws_curve const* c)
 
 static void test_curve_families(void)
 {
-	family fams[8];
+	family fams[11];
 	unsigned int n, i;
 	make_families(fams, &n);
 	for (i = 0; i < n; i++)
@@ -595,7 +657,7 @@ static void test_curve_families(void)
 			int rational = fams[i].field_count > 1 && fams[i].fields[1] == QAWS_FIELD_WEIGHTS;
 			TEST_ASSERT((caps & (QAWS_CAP_TANGENT | QAWS_CAP_ADJOINT | QAWS_CAP_TANGENT2)) ==
 				(QAWS_CAP_TANGENT | QAWS_CAP_ADJOINT | QAWS_CAP_TANGENT2), "family capabilities");
-			TEST_ASSERT(((caps & QAWS_CAP_LINEAR) != 0) == !rational, "linear flag only for polynomial families");
+			TEST_ASSERT(((caps & QAWS_CAP_LINEAR) != 0) == !(rational || fams[i].nonlinear), "linear flag only for linear families");
 		}
 		check_primal(&fams[i], c);
 		check_param_tangent_fd(&fams[i], c);
@@ -768,21 +830,19 @@ static void test_schema(void)
 
 	{
 		/* Not yet differentiable families report it explicitly. */
-		static qaws_scalar const pts[4 * 3] = { 0, 0, 0, 1, 1, 0, 2, 0, 0, 3, 1, 0 };
-		qaws_catmull_rom_desc d;
-		qaws_curve* cr = NULL;
-		qaws_curve_jet_3d p, tg;
-		d.dimension = QAWS_DIMENSION_3D;
-		d.control_points = pts;
-		d.control_point_count = 4;
-		d.parameterization = QAWS_PARAMETERIZATION_CENTRIPETAL;
-		d.closed = 0;
-		qaws_curve_create_catmull_rom(&d, &cr);
-		TEST_ASSERT(qaws_curve_get_diff_capabilities(cr) == 0, "no capabilities without rules");
-		TEST_ASSERT(qaws_curve_get_diff_class(cr) == QAWS_DIFF_UNSUPPORTED, "unsupported class");
-		TEST_ASSERT(qaws_curve_eval_tangent_3d(NULL, cr, (qaws_scalar)0.5, 0, 1, NULL, &p, &tg)
+		qaws_clothoid_desc d;
+		qaws_curve* cl = NULL;
+		qaws_curve_jet_2d p, tg;
+		memset(&d, 0, sizeof(d));
+		d.start_curvature = (qaws_scalar)0.1;
+		d.end_curvature = (qaws_scalar)0.8;
+		d.length = (qaws_scalar)2.0;
+		qaws_curve_create_clothoid(&d, &cl);
+		TEST_ASSERT(qaws_curve_get_diff_capabilities(cl) == 0, "no capabilities without rules");
+		TEST_ASSERT(qaws_curve_get_diff_class(cl) == QAWS_DIFF_UNSUPPORTED, "unsupported class");
+		TEST_ASSERT(qaws_curve_eval_tangent_2d(NULL, cl, (qaws_scalar)0.5, 0, 1, NULL, &p, &tg)
 			== QAWS_STATUS_UNSUPPORTED_OPERATION, "tangent refused, never approximated");
-		qaws_curve_destroy(cr);
+		qaws_curve_destroy(cl);
 	}
 }
 
