@@ -57,6 +57,7 @@ add_executable(
   53_diff_derived.c
   54_diff_implicit.c
   55_diff_maps.c
+  56_diff_functionals.c
 )
 
 # The amalgamated library exports exactly the same symbols, so the tests can

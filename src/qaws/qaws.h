@@ -59,5 +59,6 @@
 #include "qaws_diff_geometry.h"
 #include "qaws_diff_ops.h"
 #include "qaws_diff_map.h"
+#include "qaws_diff_functionals.h"
 
 #endif /* QAWS_H */
