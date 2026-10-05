@@ -197,6 +197,7 @@ The test suites `49_diff_model` to `56_diff_functionals` check every rule in sin
 10. Soap film: area minimization with Newton steps on HVPs
 11. Parameter correction through the differentiable fit, with knot derivatives
 12. Arch design from intersection and extremum adjoints
+13. Knot placement: fitting a crease by moving surface knots
 
 ## GPU kernels
 
