@@ -209,5 +209,6 @@ The test suites `49_diff_model` to `56_diff_functionals` check every rule in sin
 2. Photo vectorization: isocontours become centripetal Catmull-Rom splines whose interpolation points are optimized onto the contours.
 3. Triangulated mesh to six bicubic patches with ADMM: exact per-patch least squares at foot points (local support weights, thin-plate HVPs), seam control points in consensus.
 4. Non-rigid registration: CMA-ES basin hopping on the pose with gradient refinements inside the fitness.
+5. Hair grooming: 3D strands with fixed roots under length and bending functionals, gravity, head collision and unit-tangent alignment to a combing field.
 
 Photos are read as PPM; `examples/photo_to_ppm.ps1` converts any image.
