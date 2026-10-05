@@ -225,6 +225,234 @@ static void surface_partial_tangent(
 }
 
 /* ------------------------------------------------------------------ */
+/*  Knot derivatives (U_KNOTS / V_KNOTS)                              */
+/*                                                                    */
+/*  A knot direction turns the univariate rows U_a[i], V_b[j] into     */
+/*  dual numbers; tensor weights follow the product rule. Spans stay   */
+/*  frozen.                                                            */
+/* ------------------------------------------------------------------ */
+
+#define SK_DEG (QAWS_INTERNAL_KNOT_MAX_DEGREE + 1)
+
+typedef struct surface_knot_rows
+{
+	int active;
+	unsigned int us, vs;   /* row strides (degree + 1) */
+	qaws_dual1 u[(QAWS_DIFF_MAX_ORDER + 1) * SK_DEG];
+	qaws_dual1 v[(QAWS_DIFF_MAX_ORDER + 1) * SK_DEG];
+} surface_knot_rows;
+
+typedef struct surface_knot_frame
+{
+	qaws_scalar const* uk;
+	qaws_scalar const* vk;
+	unsigned int ukc, vkc, ud, vd, uspan, vspan;
+} surface_knot_frame;
+
+static int surface_field_differentiable(qaws_surface const* surface, qaws_diff_field field)
+{
+	qaws_field_desc fields[8];
+	unsigned int n = 0, i;
+	if (qaws_surface_describe_fields(surface, fields, 8, &n) != QAWS_STATUS_OK)
+		return 0;
+	for (i = 0; i < n && i < 8; i++)
+		if (fields[i].field == field)
+			return (fields[i].capabilities & QAWS_CAP_TANGENT) != 0;
+	return 0;
+}
+
+static qaws_field_view const* surface_knot_view(qaws_surface const* surface, qaws_diff_views const* views, qaws_diff_field field)
+{
+	qaws_field_view const* kv = views ? qaws_diff_views_find(views, field) : NULL;
+	if (!kv || !kv->data || !surface_field_differentiable(surface, field))
+		return NULL;
+	return kv;
+}
+
+static qaws_status surface_knot_frame_make(qaws_surface const* surface, surface_sample const* s, surface_knot_frame* f)
+{
+	qaws_surface_diff_vtable const* d = surface_diff(surface);
+	unsigned int comps = 0;
+	qaws_status st = d->primal_field(surface, QAWS_FIELD_U_KNOTS, &f->uk, &f->ukc, &comps);
+	if (st == QAWS_STATUS_OK)
+		st = d->primal_field(surface, QAWS_FIELD_V_KNOTS, &f->vk, &f->vkc, &comps);
+	if (st != QAWS_STATUS_OK)
+		return st;
+	f->ud = s->support.u_count - 1;
+	f->vd = s->support.v_count - 1;
+	f->uspan = s->support.u_first + f->ud;
+	f->vspan = s->support.v_first + f->vd;
+	if (f->ud > QAWS_INTERNAL_KNOT_MAX_DEGREE || f->vd > QAWS_INTERNAL_KNOT_MAX_DEGREE ||
+	    f->uspan + f->ud >= f->ukc || f->vspan + f->vd >= f->vkc)
+		return QAWS_STATUS_UNSUPPORTED_OPERATION;
+	return QAWS_STATUS_OK;
+}
+
+/* Dual rows along the knot tangents in `views` (inactive when none). */
+static qaws_status surface_knot_rows_make(qaws_surface const* surface, surface_sample const* s,
+	qaws_scalar u, qaws_scalar v, qaws_diff_views const* views, unsigned int order, surface_knot_rows* rows)
+{
+	qaws_field_view const* ukv = surface_knot_view(surface, views, QAWS_FIELD_U_KNOTS);
+	qaws_field_view const* vkv = surface_knot_view(surface, views, QAWS_FIELD_V_KNOTS);
+	qaws_scalar ud[2 * QAWS_INTERNAL_KNOT_MAX_DEGREE], vd[2 * QAWS_INTERNAL_KNOT_MAX_DEGREE];
+	surface_knot_frame f;
+	unsigned int i;
+	int any = 0;
+	qaws_status st;
+
+	rows->active = 0;
+	if (!ukv && !vkv)
+		return QAWS_STATUS_OK;
+	st = surface_knot_frame_make(surface, s, &f);
+	if (st != QAWS_STATUS_OK)
+		return st;
+	if (order > QAWS_DIFF_MAX_ORDER)
+		return QAWS_STATUS_UNSUPPORTED_OPERATION;
+	for (i = 0; i < 2 * f.ud; i++)
+	{
+		ud[i] = QAWS_ZERO;
+		if (ukv) qaws_internal_view_read(ukv, f.uspan - f.ud + 1 + i, 1, &ud[i]);
+		any |= ud[i] != QAWS_ZERO;
+	}
+	for (i = 0; i < 2 * f.vd; i++)
+	{
+		vd[i] = QAWS_ZERO;
+		if (vkv) qaws_internal_view_read(vkv, f.vspan - f.vd + 1 + i, 1, &vd[i]);
+		any |= vd[i] != QAWS_ZERO;
+	}
+	if (!any)
+		return QAWS_STATUS_OK;
+	clamp_uv(surface, &u, &v);
+	qaws_internal_bspline_basis_derivs_knot(f.uk, f.ud, f.uspan, u, ud, order, rows->u);
+	qaws_internal_bspline_basis_derivs_knot(f.vk, f.vd, f.vspan, v, vd, order, rows->v);
+	rows->us = f.ud + 1;
+	rows->vs = f.vd + 1;
+	rows->active = 1;
+	return QAWS_STATUS_OK;
+}
+
+/* Tensor weight U_a[i] V_b[j] as a dual number. */
+static qaws_dual1 knot_weight(surface_knot_rows const* r, unsigned int a, unsigned int i, unsigned int b, unsigned int j)
+{
+	return qaws_dual1_mul(r->u[a * r->us + i], r->v[b * r->vs + j]);
+}
+
+/* sum_ij (U_a V_b)' P_ij */
+static qaws_vec3 knot_partial(surface_sample const* s, surface_knot_rows const* r, unsigned int a, unsigned int b)
+{
+	qaws_surface_support const* sp = &s->support;
+	qaws_vec3 acc = qaws_v3_zero();
+	unsigned int i, j;
+	for (i = 0; i < sp->u_count; i++)
+		for (j = 0; j < sp->v_count; j++)
+		{
+			qaws_scalar const* p = s->primal + (size_t)support_element(sp, i, j) * 3;
+			qaws_scalar n1 = knot_weight(r, a, i, b, j).t;
+			acc = qaws_v3_add(acc, qaws_v3(n1 * p[0], n1 * p[1], n1 * p[2]));
+		}
+	return acc;
+}
+
+/* Polynomial surfaces: knot terms of the tangent and second tangent. */
+static void surface_knot_tangent(surface_sample const* s, surface_knot_rows const* r, unsigned int channels,
+	qaws_scalar u_dot, qaws_scalar v_dot, qaws_field_view const* pview, qaws_surface_jet* tangent, qaws_surface_jet* tangent2)
+{
+	qaws_surface_support const* sp = &s->support;
+	unsigned int ch, i, j;
+	for (ch = 0; ch < QAWS_SURFACE_JET_COUNT; ch++)
+	{
+		unsigned int a = g_surface_jet_a[ch], b = g_surface_jet_b[ch];
+		if (!(channels & (1u << ch)))
+			continue;
+		tangent->d[ch] = qaws_v3_add(tangent->d[ch], knot_partial(s, r, a, b));
+		if (!tangent2)
+			continue;
+		{
+			/* d_uu N P + 2 d_u N P' + 2 u' d_u N_{a+1,b} P + 2 v' d_u N_{a,b+1} P */
+			qaws_vec3 acc = qaws_v3_zero();
+			for (i = 0; i < sp->u_count; i++)
+				for (j = 0; j < sp->v_count; j++)
+				{
+					unsigned int e = support_element(sp, i, j);
+					qaws_scalar const* p = s->primal + (size_t)e * 3;
+					qaws_scalar pd[3] = { 0, 0, 0 };
+					qaws_dual1 n = knot_weight(r, a, i, b, j);
+					if (pview) qaws_internal_view_read(pview, e, 3, pd);
+					acc = qaws_v3_add(acc, qaws_v3(n.tt * p[0] + QAWS_LITERAL(2.0) * n.t * pd[0],
+					                               n.tt * p[1] + QAWS_LITERAL(2.0) * n.t * pd[1],
+					                               n.tt * p[2] + QAWS_LITERAL(2.0) * n.t * pd[2]));
+				}
+			if (u_dot != QAWS_ZERO)
+				acc = qaws_v3_axpy(acc, knot_partial(s, r, a + 1, b), QAWS_LITERAL(2.0) * u_dot);
+			if (v_dot != QAWS_ZERO)
+				acc = qaws_v3_axpy(acc, knot_partial(s, r, a, b + 1), QAWS_LITERAL(2.0) * v_dot);
+			tangent2->d[ch] = qaws_v3_add(tangent2->d[ch], acc);
+		}
+	}
+}
+
+typedef qaws_scalar surface_knot_coeffs[QAWS_SURFACE_JET_COUNT][SK_DEG][SK_DEG];
+
+/* Knot adjoint entries: one dual sweep per knot the span depends on,
+   g = sum_ch sum_ij d(U_a V_b) * coeff[ch][i][j]. */
+static qaws_status surface_knot_adjoint(qaws_surface const* surface, surface_sample const* s, qaws_scalar u, qaws_scalar v,
+	unsigned int channels, unsigned int order, int want_u, int want_v, surface_knot_coeffs coeff,
+	qaws_diff_entry* entries, unsigned int capacity, unsigned int* n)
+{
+	qaws_surface_support const* sp = &s->support;
+	qaws_dual1 rows[(QAWS_DIFF_MAX_ORDER + 1) * SK_DEG];
+	qaws_scalar kdot[2 * QAWS_INTERNAL_KNOT_MAX_DEGREE];
+	surface_knot_frame f;
+	unsigned int dir, q, ch, i, j;
+	qaws_status st = surface_knot_frame_make(surface, s, &f);
+	if (st != QAWS_STATUS_OK)
+		return st;
+	if (order > QAWS_DIFF_MAX_ORDER)
+		return QAWS_STATUS_UNSUPPORTED_OPERATION;
+	clamp_uv(surface, &u, &v);
+	for (dir = 0; dir < 2; dir++)
+	{
+		unsigned int deg = dir == 0 ? f.ud : f.vd;
+		if (!(dir == 0 ? want_u : want_v))
+			continue;
+		for (q = 0; q < 2 * deg; q++)
+			kdot[q] = QAWS_ZERO;
+		for (q = 0; q < 2 * deg; q++)
+		{
+			qaws_scalar g = QAWS_ZERO;
+			if (*n >= capacity)
+				return QAWS_STATUS_INTERNAL_ERROR;
+			kdot[q] = QAWS_ONE;
+			if (dir == 0)
+				qaws_internal_bspline_basis_derivs_knot(f.uk, f.ud, f.uspan, u, kdot, order, rows);
+			else
+				qaws_internal_bspline_basis_derivs_knot(f.vk, f.vd, f.vspan, v, kdot, order, rows);
+			kdot[q] = QAWS_ZERO;
+			for (ch = 0; ch < QAWS_SURFACE_JET_COUNT; ch++)
+			{
+				unsigned int a = g_surface_jet_a[ch], b = g_surface_jet_b[ch];
+				if (!(channels & (1u << ch)))
+					continue;
+				for (i = 0; i < sp->u_count; i++)
+					for (j = 0; j < sp->v_count; j++)
+					{
+						qaws_scalar dn = dir == 0 ? rows[a * (f.ud + 1) + i].t * sp->v_weights[b][j]
+						                          : sp->u_weights[a][i] * rows[b * (f.vd + 1) + j].t;
+						g += dn * coeff[ch][i][j];
+					}
+			}
+			entries[*n].field = dir == 0 ? QAWS_FIELD_U_KNOTS : QAWS_FIELD_V_KNOTS;
+			entries[*n].element = (dir == 0 ? f.uspan - f.ud : f.vspan - f.vd) + 1 + q;
+			entries[*n].g[0] = g;
+			entries[*n].g[1] = QAWS_ZERO;
+			entries[*n].g[2] = QAWS_ZERO;
+			(*n)++;
+		}
+	}
+	return QAWS_STATUS_OK;
+}
+
+/* ------------------------------------------------------------------ */
 /*  Rational surfaces                                                 */
 /*                                                                    */
 /*  A_ab = sum U_a V_b w P,  W_ab = sum U_a V_b w,  S = A / W         */
@@ -248,7 +476,7 @@ static unsigned int jet_index(unsigned int a, unsigned int b)
 typedef struct surface_rational_sums
 {
 	qaws_vec3 A, Ad, Add;
-	qaws_scalar W, Wd;
+	qaws_scalar W, Wd, Wdd;
 } surface_rational_sums;
 
 /* Homogeneous sums of partial (a, b): primal, parameter tangent and the
@@ -259,6 +487,7 @@ static void surface_hom(
 	unsigned int b,
 	qaws_field_view const* pv,
 	qaws_field_view const* wv,
+	surface_knot_rows const* kr,
 	surface_rational_sums* out)
 {
 	qaws_surface_support const* sp = &s->support;
@@ -267,7 +496,7 @@ static void surface_hom(
 	for (i = 0; i < sp->u_count; i++)
 	{
 		qaws_scalar wu = sp->u_weights[a][i];
-		if (wu == QAWS_ZERO)
+		if (wu == QAWS_ZERO && !kr)
 			continue;
 		for (j = 0; j < sp->v_count; j++)
 		{
@@ -287,6 +516,18 @@ static void surface_hom(
 			out->Add = qaws_v3_add(out->Add, qaws_v3(n * QAWS_LITERAL(2.0) * wd * pd[0],
 			                                        n * QAWS_LITERAL(2.0) * wd * pd[1],
 			                                        n * QAWS_LITERAL(2.0) * wd * pd[2]));
+			if (kr)
+			{
+				/* knot direction: N' w P, and N'' w P + 2 N' (w' P + w P') */
+				qaws_dual1 nk = knot_weight(kr, a, i, b, j);
+				qaws_scalar c2 = nk.tt * w + QAWS_LITERAL(2.0) * nk.t * wd;
+				out->Wd += nk.t * w;
+				out->Wdd += c2;
+				out->Ad = qaws_v3_add(out->Ad, qaws_v3(nk.t * w * p[0], nk.t * w * p[1], nk.t * w * p[2]));
+				out->Add = qaws_v3_add(out->Add, qaws_v3(c2 * p[0] + QAWS_LITERAL(2.0) * nk.t * w * pd[0],
+				                                        c2 * p[1] + QAWS_LITERAL(2.0) * nk.t * w * pd[1],
+				                                        c2 * p[2] + QAWS_LITERAL(2.0) * nk.t * w * pd[2]));
+			}
 		}
 	}
 }
@@ -295,6 +536,7 @@ static void surface_hom(
    are formed because the recurrence couples them. */
 static qaws_status surface_rational_tangent(
 	surface_sample const* s,
+	surface_knot_rows const* kr,
 	qaws_scalar u_dot,
 	qaws_scalar v_dot,
 	qaws_diff_views const* views,
@@ -312,32 +554,32 @@ static qaws_status surface_rational_tangent(
 	{
 		unsigned int a = g_surface_jet_a[ch], b = g_surface_jet_b[ch];
 		surface_rational_sums h, hu, hv, huu, huv, hvv;
-		surface_hom(s, a, b, pv, wv, &h);
+		surface_hom(s, a, b, pv, wv, kr, &h);
 		A[ch].v = h.A;
 		A[ch].t = h.Ad;
 		A[ch].tt = h.Add;
 		W[ch].v = h.W;
 		W[ch].t = h.Wd;
-		W[ch].tt = QAWS_ZERO;
+		W[ch].tt = h.Wdd;
 		if (!has_coord)
 			continue;
 
-		surface_hom(s, a + 1, b, pv, wv, &hu);
-		surface_hom(s, a, b + 1, pv, wv, &hv);
+		surface_hom(s, a + 1, b, pv, wv, kr, &hu);
+		surface_hom(s, a, b + 1, pv, wv, kr, &hv);
 		A[ch].t = qaws_v3_axpy(qaws_v3_axpy(A[ch].t, hu.A, u_dot), hv.A, v_dot);
 		W[ch].t += u_dot * hu.W + v_dot * hv.W;
 		if (!want_second)
 			continue;
 
-		surface_hom(s, a + 2, b, pv, wv, &huu);
-		surface_hom(s, a + 1, b + 1, pv, wv, &huv);
-		surface_hom(s, a, b + 2, pv, wv, &hvv);
+		surface_hom(s, a + 2, b, pv, wv, kr, &huu);
+		surface_hom(s, a + 1, b + 1, pv, wv, kr, &huv);
+		surface_hom(s, a, b + 2, pv, wv, kr, &hvv);
 		A[ch].tt = qaws_v3_axpy(A[ch].tt, hu.Ad, QAWS_LITERAL(2.0) * u_dot);
 		A[ch].tt = qaws_v3_axpy(A[ch].tt, hv.Ad, QAWS_LITERAL(2.0) * v_dot);
 		A[ch].tt = qaws_v3_axpy(A[ch].tt, huu.A, u_dot * u_dot);
 		A[ch].tt = qaws_v3_axpy(A[ch].tt, huv.A, QAWS_LITERAL(2.0) * u_dot * v_dot);
 		A[ch].tt = qaws_v3_axpy(A[ch].tt, hvv.A, v_dot * v_dot);
-		W[ch].tt = QAWS_LITERAL(2.0) * u_dot * hu.Wd + QAWS_LITERAL(2.0) * v_dot * hv.Wd
+		W[ch].tt += QAWS_LITERAL(2.0) * u_dot * hu.Wd + QAWS_LITERAL(2.0) * v_dot * hv.Wd
 		         + u_dot * u_dot * huu.W + QAWS_LITERAL(2.0) * u_dot * v_dot * huv.W + v_dot * v_dot * hvv.W;
 	}
 
@@ -367,6 +609,11 @@ static qaws_status surface_rational_tangent(
 /* Reverse of the rational recurrence: control point and weight entries,
    plus coordinate adjoints when requested. */
 static qaws_status surface_rational_adjoint(
+	qaws_surface const* surface,
+	qaws_scalar u,
+	qaws_scalar v,
+	int want_uk,
+	int want_vk,
 	surface_sample const* s,
 	unsigned int channels,
 	qaws_surface_jet const* ybar,
@@ -385,7 +632,7 @@ static qaws_status surface_rational_adjoint(
 	qaws_scalar W0;
 
 	for (ch = 0; ch < QAWS_SURFACE_JET_COUNT; ch++)
-		surface_hom(s, g_surface_jet_a[ch], g_surface_jet_b[ch], NULL, NULL, &h[ch]);
+		surface_hom(s, g_surface_jet_a[ch], g_surface_jet_b[ch], NULL, NULL, NULL, &h[ch]);
 	W0 = h[0].W;
 	if (W0 < QAWS_LITERAL(1e-15) && W0 > -QAWS_LITERAL(1e-15))
 		return QAWS_STATUS_DEGENERATE_CURVE;
@@ -451,6 +698,26 @@ static qaws_status surface_rational_adjoint(
 			entries[n].g[0] = gw; entries[n].g[1] = QAWS_ZERO; entries[n].g[2] = QAWS_ZERO;
 			n++;
 		}
+	if (want_uk || want_vk)
+	{
+		/* knots through the homogeneous sums: w (P . Abar + Wbar) */
+		surface_knot_coeffs coeff;
+		qaws_status st;
+		if (sp->u_count > SK_DEG || sp->v_count > SK_DEG)
+			return QAWS_STATUS_UNSUPPORTED_OPERATION;
+		for (ch = 0; ch < QAWS_SURFACE_JET_COUNT; ch++)
+			for (i = 0; i < sp->u_count; i++)
+				for (j = 0; j < sp->v_count; j++)
+				{
+					unsigned int e = support_element(sp, i, j);
+					qaws_vec3 p = qaws_v3(s->primal[e * 3 + 0], s->primal[e * 3 + 1], s->primal[e * 3 + 2]);
+					coeff[ch][i][j] = s->weights[e] * (qaws_v3_dot(p, Abar[ch]) + Wbar[ch]);
+				}
+		st = surface_knot_adjoint(surface, s, u, v, (unsigned int)QAWS_SJET_ORDER3, 3, want_uk, want_vk, coeff,
+			entries, capacity, &n);
+		if (st != QAWS_STATUS_OK)
+			return st;
+	}
 	*out_count = n;
 
 	if (want_coordinate)
@@ -461,12 +728,12 @@ static qaws_status surface_rational_adjoint(
 			unsigned int a = g_surface_jet_a[ch], b = g_surface_jet_b[ch];
 			if (u_adj)
 			{
-				surface_hom(s, a + 1, b, NULL, NULL, &hu);
+				surface_hom(s, a + 1, b, NULL, NULL, NULL, &hu);
 				*u_adj += qaws_v3_dot(Abar[ch], hu.A) + Wbar[ch] * hu.W;
 			}
 			if (v_adj)
 			{
-				surface_hom(s, a, b + 1, NULL, NULL, &hv);
+				surface_hom(s, a, b + 1, NULL, NULL, NULL, &hv);
 				*v_adj += qaws_v3_dot(Abar[ch], hv.A) + Wbar[ch] * hv.W;
 			}
 		}
@@ -511,6 +778,7 @@ static qaws_status surface_tangent_sample(
 	qaws_surface_jet* tangent2)
 {
 	surface_sample s;
+	surface_knot_rows kr;
 	int has_coord = (u_dot != QAWS_ZERO) || (v_dot != QAWS_ZERO);
 	unsigned int extra = has_coord ? (tangent2 ? 2u : 1u) : 0u;
 	unsigned int ch, c;
@@ -519,6 +787,9 @@ static qaws_status surface_tangent_sample(
 	if (st != QAWS_STATUS_OK)
 		return st;
 	view = views ? qaws_diff_views_find(views, s.support.field) : NULL;
+	st = surface_knot_rows_make(surface, &s, u, v, views, s.support.order, &kr);
+	if (st != QAWS_STATUS_OK)
+		return st;
 
 	if (primal) memset(primal, 0, sizeof(*primal));
 	memset(tangent, 0, sizeof(*tangent));
@@ -527,7 +798,7 @@ static qaws_status surface_tangent_sample(
 	if (s.weights)
 	{
 		qaws_dual3 S[QAWS_SURFACE_JET_COUNT];
-		st = surface_rational_tangent(&s, u_dot, v_dot, views, tangent2 != NULL, S);
+		st = surface_rational_tangent(&s, kr.active ? &kr : NULL, u_dot, v_dot, views, tangent2 != NULL, S);
 		if (st != QAWS_STATUS_OK)
 			return st;
 		for (ch = 0; ch < QAWS_SURFACE_JET_COUNT; ch++)
@@ -581,6 +852,8 @@ static qaws_status surface_tangent_sample(
 			store_vec3(&tangent2->d[ch], acc);
 		}
 	}
+	if (!s.weights && kr.active)
+		surface_knot_tangent(&s, &kr, channels, u_dot, v_dot, view, tangent, tangent2);
 
 	if (primal) primal->channels = channels;
 	tangent->channels = channels;
@@ -628,7 +901,7 @@ qaws_status qaws_surface_eval_jet(
 	if (s.weights)
 	{
 		qaws_dual3 S[QAWS_SURFACE_JET_COUNT];
-		st = surface_rational_tangent(&s, QAWS_ZERO, QAWS_ZERO, NULL, 0, S);
+		st = surface_rational_tangent(&s, NULL, QAWS_ZERO, QAWS_ZERO, NULL, 0, S);
 		if (st != QAWS_STATUS_OK)
 			return st;
 		for (ch = 0; ch < QAWS_SURFACE_JET_COUNT; ch++)
@@ -770,6 +1043,7 @@ typedef struct surface_adjoint_job
 	qaws_surface_jet const* jets;
 	qaws_scalar* u_adjoint;
 	qaws_scalar* v_adjoint;
+	int want_uk, want_vk;          /* knot adjoints requested and supported */
 } surface_adjoint_job;
 
 static qaws_status surface_collect(
@@ -795,7 +1069,8 @@ static qaws_status surface_collect(
 	if (s.weights)
 	{
 		int want = first_pass && (job->u_adjoint || job->v_adjoint);
-		st = surface_rational_adjoint(&s, job->channels, ybar, want, entries, capacity, out_count,
+		st = surface_rational_adjoint(job->surface, job->u[sample], job->v[sample], job->want_uk, job->want_vk,
+			&s, job->channels, ybar, want, entries, capacity, out_count,
 			(want && job->u_adjoint) ? &job->u_adjoint[sample] : NULL,
 			(want && job->v_adjoint) ? &job->v_adjoint[sample] : NULL);
 		if (st != QAWS_STATUS_OK)
@@ -827,6 +1102,24 @@ static qaws_status surface_collect(
 				e->g[2] += w * ybar->d[ch].z;
 			}
 		}
+	}
+	if (job->want_uk || job->want_vk)
+	{
+		surface_knot_coeffs coeff;
+		if (sp->u_count > SK_DEG || sp->v_count > SK_DEG)
+			return QAWS_STATUS_UNSUPPORTED_OPERATION;
+		for (ch = 0; ch < QAWS_SURFACE_JET_COUNT; ch++)
+			for (i = 0; i < sp->u_count; i++)
+				for (j = 0; j < sp->v_count; j++)
+				{
+					qaws_scalar const* p = s.primal + (size_t)support_element(sp, i, j) * 3;
+					coeff[ch][i][j] = (job->channels & (1u << ch))
+						? p[0] * ybar->d[ch].x + p[1] * ybar->d[ch].y + p[2] * ybar->d[ch].z : QAWS_ZERO;
+				}
+		st = surface_knot_adjoint(job->surface, &s, job->u[sample], job->v[sample], job->channels, job->order,
+			job->want_uk, job->want_vk, coeff, entries, capacity, &n);
+		if (st != QAWS_STATUS_OK)
+			return st;
 	}
 	*out_count = n;
 
@@ -905,9 +1198,12 @@ qaws_status qaws_surface_eval_batch_adjoint(
 	job.jets = out_adjoint;
 	job.u_adjoint = u_adjoint;
 	job.v_adjoint = v_adjoint;
+	job.want_uk = surface_knot_view(surface, param_adjoint, QAWS_FIELD_U_KNOTS) != NULL;
+	job.want_vk = surface_knot_view(surface, param_adjoint, QAWS_FIELD_V_KNOTS) != NULL;
 
 	return qaws_internal_diff_accumulate(ctx, 3, count,
-		2 * QAWS_DIFF_MAX_SUPPORT * QAWS_DIFF_MAX_SUPPORT, surface_collect, &job, param_adjoint);
+		2 * QAWS_DIFF_MAX_SUPPORT * QAWS_DIFF_MAX_SUPPORT + 4 * QAWS_INTERNAL_KNOT_MAX_DEGREE,
+		surface_collect, &job, param_adjoint);
 }
 
 qaws_status qaws_surface_eval_adjoint(

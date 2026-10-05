@@ -513,6 +513,237 @@ static void test_bspline_surface_details(void)
 	qaws_surface_destroy(s);
 }
 
+
+/* ------------------------------------------------------------------ */
+/*  Knots of B-spline and NURBS surfaces                              */
+/*                                                                    */
+/*  Unclamped knots so every knot moves both ways; samples sit away    */
+/*  from interior knots (third partials jump there).                   */
+/* ------------------------------------------------------------------ */
+
+#define SK_U 5
+#define SK_V 4
+#define SK_UK (SK_U + 4)
+#define SK_VK (SK_V + 4)
+#define SK_N (SK_U * SK_V * 3 + SK_U * SK_V + SK_UK + SK_VK)
+
+typedef struct knot_surface_params
+{
+	qaws_scalar cps[SK_U * SK_V * 3];
+	qaws_scalar w[SK_U * SK_V];
+	qaws_scalar uk[SK_UK];
+	qaws_scalar vk[SK_VK];
+} knot_surface_params;
+
+static qaws_surface* knot_surface(knot_surface_params const* p, int rational)
+{
+	qaws_surface* s = NULL;
+	if (rational)
+	{
+		qaws_surface_nurbs_desc d;
+		memset(&d, 0, sizeof(d));
+		d.u_degree = 3;
+		d.v_degree = 3;
+		d.control_points = (qaws_vec3 const*)p->cps;
+		d.u_point_count = SK_U;
+		d.v_point_count = SK_V;
+		d.weights = p->w;
+		d.u_knots = p->uk;
+		d.u_knot_count = SK_UK;
+		d.v_knots = p->vk;
+		d.v_knot_count = SK_VK;
+		qaws_surface_create_nurbs(&d, &s);
+	}
+	else
+	{
+		qaws_surface_bspline_desc d;
+		memset(&d, 0, sizeof(d));
+		d.u_degree = 3;
+		d.v_degree = 3;
+		d.control_points = (qaws_vec3 const*)p->cps;
+		d.u_point_count = SK_U;
+		d.v_point_count = SK_V;
+		d.u_knots = p->uk;
+		d.u_knot_count = SK_UK;
+		d.v_knots = p->vk;
+		d.v_knot_count = SK_VK;
+		qaws_surface_create_bspline(&d, &s);
+	}
+	return s;
+}
+
+static void knot_surface_shift(knot_surface_params const* p, knot_surface_params const* d, double h, knot_surface_params* out)
+{
+	qaws_scalar const* a = (qaws_scalar const*)p;
+	qaws_scalar const* b = (qaws_scalar const*)d;
+	qaws_scalar* o = (qaws_scalar*)out;
+	unsigned int i;
+	for (i = 0; i < SK_N; i++)
+		o[i] = (qaws_scalar)(a[i] + h * b[i]);
+}
+
+static qaws_diff_views knot_surface_views(knot_surface_params* p, int rational, qaws_field_view* fv)
+{
+	qaws_diff_views v;
+	unsigned int n = 0;
+	fv[n++] = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, p->cps, SK_U * SK_V, 3);
+	if (rational)
+		fv[n++] = qaws_field_view_make(QAWS_FIELD_WEIGHTS, p->w, SK_U * SK_V, 1);
+	fv[n++] = qaws_field_view_make(QAWS_FIELD_U_KNOTS, p->uk, SK_UK, 1);
+	fv[n++] = qaws_field_view_make(QAWS_FIELD_V_KNOTS, p->vk, SK_VK, 1);
+	v.fields = fv;
+	v.field_count = n;
+	v.children = NULL;
+	v.child_count = 0;
+	return v;
+}
+
+static double knot_param_dot(knot_surface_params const* a, knot_surface_params const* b, int rational)
+{
+	double s = diff_dot(a->cps, b->cps, SK_U * SK_V * 3) + diff_dot(a->uk, b->uk, SK_UK) + diff_dot(a->vk, b->vk, SK_VK);
+	if (rational)
+		s += diff_dot(a->w, b->w, SK_U * SK_V);
+	return s;
+}
+
+static int jet_close_rel(qaws_surface_jet const* a, qaws_surface_jet const* b, double tol)
+{
+	unsigned int k;
+	for (k = 0; k < QAWS_SURFACE_JET_COUNT; k++)
+	{
+		double scale = 1 + fabs(b->d[k].x) + fabs(b->d[k].y) + fabs(b->d[k].z);
+		if (fabs(a->d[k].x - b->d[k].x) > tol * scale || fabs(a->d[k].y - b->d[k].y) > tol * scale ||
+		    fabs(a->d[k].z - b->d[k].z) > tol * scale)
+			return 0;
+	}
+	return 1;
+}
+
+static void check_surface_knots(int rational)
+{
+	static qaws_scalar const uk[SK_UK] = { 0.0f, 0.35f, 0.8f, 1.2f, 1.75f, 2.3f, 2.7f, 3.1f, 3.6f };
+	static qaws_scalar const vk[SK_VK] = { 0.0f, 0.4f, 0.9f, 1.3f, 1.9f, 2.4f, 2.8f, 3.3f };
+	knot_surface_params p, d, pp, pm, bar;
+	qaws_field_view fv[4];
+	qaws_diff_views views;
+	qaws_surface *s, *sp, *sm;
+	qaws_scalar us[6] = { 1.3f, 1.45f, 1.6f, 1.9f, 2.05f, 2.2f }, vs[6] = { 1.38f, 1.47f, 1.56f, 1.64f, 1.73f, 1.82f };
+	qaws_scalar ud[6], vd[6], ubar[6], vbar[6];
+	qaws_surface_jet prim[6], tg[6], tt[6], ybar[6];
+	unsigned int i, a, b;
+	int ok_fd = 1, ok_t2 = 1;
+	double h = DIFF_FD_STEP * 0.5, lhs = 0, rhs;
+	char label[96];
+
+	diff_seed(rational ? 5150 : 5140);
+	for (a = 0; a < SK_U; a++)
+		for (b = 0; b < SK_V; b++)
+		{
+			qaws_scalar* c = &p.cps[(a * SK_V + b) * 3];
+			c[0] = (qaws_scalar)a;
+			c[1] = (qaws_scalar)b;
+			c[2] = (qaws_scalar)(0.4 * sin(1.2 * a + 0.3) * cos(0.8 * b));
+			p.w[a * SK_V + b] = (qaws_scalar)1 + (qaws_scalar)0.25 * diff_rand();
+		}
+	memcpy(p.uk, uk, sizeof(uk));
+	memcpy(p.vk, vk, sizeof(vk));
+	diff_rand_fill((qaws_scalar*)&d, SK_N);
+	for (i = 0; i < SK_UK; i++) d.uk[i] *= (qaws_scalar)0.3;
+	for (i = 0; i < SK_VK; i++) d.vk[i] *= (qaws_scalar)0.3;
+	if (!rational)
+		memset(d.w, 0, sizeof(d.w));
+	for (i = 0; i < 6; i++)
+	{
+		ud[i] = (qaws_scalar)(0.3 * diff_rand());
+		vd[i] = (qaws_scalar)(0.3 * diff_rand());
+		rand_sjet(&ybar[i]);
+	}
+
+	s = knot_surface(&p, rational);
+	knot_surface_shift(&p, &d, h, &pp);
+	knot_surface_shift(&p, &d, -h, &pm);
+	sp = knot_surface(&pp, rational);
+	sm = knot_surface(&pm, rational);
+	views = knot_surface_views(&d, rational, fv);
+
+	/* first order at fixed (u, v) */
+	TEST_ASSERT_STATUS(qaws_surface_eval_batch_tangent(NULL, s, us, vs, NULL, NULL, 6, QAWS_SJET_ORDER3, &views, prim, tg));
+	for (i = 0; i < 6; i++)
+	{
+		qaws_surface_jet jp, jm, fd;
+		unsigned int k;
+		qaws_surface_eval_jet(sp, us[i], vs[i], QAWS_SJET_ORDER3, &jp);
+		qaws_surface_eval_jet(sm, us[i], vs[i], QAWS_SJET_ORDER3, &jm);
+		for (k = 0; k < QAWS_SURFACE_JET_COUNT; k++)
+			fd.d[k] = qaws_v3_scale(qaws_v3_sub(jp.d[k], jm.d[k]), (qaws_scalar)(0.5 / h));
+		if (!jet_close_rel(&tg[i], &fd, DIFF_TOL * 50))
+			ok_fd = 0;
+	}
+
+	/* second order along (u', v', parameters) */
+	TEST_ASSERT_STATUS(qaws_surface_eval_batch_tangent2(NULL, s, us, vs, ud, vd, 6, QAWS_SJET_ORDER2, &views, prim, tg, tt));
+	for (i = 0; i < 6; i++)
+	{
+		qaws_surface_jet p1, t1, p2, t2, fd;
+		qaws_scalar up = (qaws_scalar)(us[i] + h * ud[i]), vp = (qaws_scalar)(vs[i] + h * vd[i]);
+		qaws_scalar um = (qaws_scalar)(us[i] - h * ud[i]), vm = (qaws_scalar)(vs[i] - h * vd[i]);
+		unsigned int k;
+		qaws_surface_eval_batch_tangent(NULL, sp, &up, &vp, &ud[i], &vd[i], 1, QAWS_SJET_ORDER2, &views, &p1, &t1);
+		qaws_surface_eval_batch_tangent(NULL, sm, &um, &vm, &ud[i], &vd[i], 1, QAWS_SJET_ORDER2, &views, &p2, &t2);
+		for (k = 0; k < QAWS_SURFACE_JET_COUNT; k++)
+			fd.d[k] = (QAWS_SJET_ORDER2 & (1u << k)) ? qaws_v3_scale(qaws_v3_sub(t1.d[k], t2.d[k]), (qaws_scalar)(0.5 / h)) : qaws_v3_zero();
+		if (!jet_close_rel(&tt[i], &fd, DIFF_TOL * 100))
+			ok_t2 = 0;
+	}
+
+	/* adjoint identity with coordinate tangents, three strategies */
+	TEST_ASSERT_STATUS(qaws_surface_eval_batch_tangent(NULL, s, us, vs, ud, vd, 6, QAWS_SJET_ORDER3, &views, prim, tg));
+	for (i = 0; i < 6; i++)
+		lhs += sjet_dot(&ybar[i], &tg[i], QAWS_SJET_ORDER3);
+	{
+		qaws_diff_accumulation accs[3] = { QAWS_ACCUMULATE_SCATTER, QAWS_ACCUMULATE_TILED, QAWS_ACCUMULATE_GATHER };
+		unsigned int m;
+		int ok_adj = 1;
+		for (m = 0; m < 3; m++)
+		{
+			qaws_diff_context ctx;
+			qaws_diff_views bv;
+			qaws_field_view bf[4];
+			qaws_diff_context_init(&ctx);
+			ctx.accumulation = accs[m];
+			ctx.tile_size = 2;
+			memset(&bar, 0, sizeof(bar));
+			memset(ubar, 0, sizeof(ubar));
+			memset(vbar, 0, sizeof(vbar));
+			bv = knot_surface_views(&bar, rational, bf);
+			TEST_ASSERT_STATUS(qaws_surface_eval_batch_adjoint(&ctx, s, us, vs, 6, QAWS_SJET_ORDER3, ybar, &bv, ubar, vbar));
+			rhs = knot_param_dot(&bar, &d, rational) + diff_dot(ubar, ud, 6) + diff_dot(vbar, vd, 6);
+			if (m == 0)
+				printf("    %s knots: <ybar, J xdot> = %.9g  <J^T ybar, xdot> = %.9g\n", rational ? "nurbs" : "bspline", lhs, rhs);
+			if (!diff_close(lhs, rhs, DIFF_TOL))
+				ok_adj = 0;
+		}
+		sprintf(label, "%s surface knot adjoint identity (scatter, tiled, gather)", rational ? "nurbs" : "bspline");
+		TEST_ASSERT(ok_adj, label);
+	}
+	printf("    %s knots: tangent matches finite differences: %s, second tangent: %s\n", rational ? "nurbs" : "bspline",
+		ok_fd ? "yes" : "NO", ok_t2 ? "yes" : "NO");
+	sprintf(label, "%s surface knot tangent matches finite differences", rational ? "nurbs" : "bspline");
+	TEST_ASSERT(ok_fd, label);
+	sprintf(label, "%s surface knot second tangent matches finite differences", rational ? "nurbs" : "bspline");
+	TEST_ASSERT(ok_t2, label);
+	qaws_surface_destroy(s);
+	qaws_surface_destroy(sp);
+	qaws_surface_destroy(sm);
+}
+
+static void test_surface_knots(void)
+{
+	printf("  surface knots\n");
+	check_surface_knots(0);
+	check_surface_knots(1);
+}
+
 int test_51_diff_surfaces_main(void)
 {
 	g_pass = 0;
@@ -521,6 +752,7 @@ int test_51_diff_surfaces_main(void)
 	printf("Test 51: Differentiable surface evaluation\n");
 	test_surface_families();
 	test_bspline_surface_details();
+	test_surface_knots();
 
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;

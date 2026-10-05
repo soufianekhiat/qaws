@@ -585,6 +585,14 @@ static qaws_status surface_job_init(surface_job* job, qaws_diff_context const* c
 	return job->f ? QAWS_STATUS_OK : QAWS_STATUS_INVALID_ARGUMENT;
 }
 
+/* Surface quadrature runs on a fixed cell grid over the domain, so knot
+   directions (which move spans and the domain) are not differentiated
+   here. */
+static int surface_knot_terms(qaws_diff_views const* views)
+{
+	return views && (qaws_diff_views_find(views, QAWS_FIELD_U_KNOTS) || qaws_diff_views_find(views, QAWS_FIELD_V_KNOTS));
+}
+
 qaws_status qaws_surface_functional_eval(
 	qaws_diff_context const* ctx, qaws_surface const* surface, qaws_surface_functional functional,
 	unsigned int quadrature, qaws_diff_views const* direction,
@@ -594,6 +602,8 @@ qaws_status qaws_surface_functional_eval(
 	qaws_status st = surface_job_init(&job, ctx, surface, functional);
 	if (st != QAWS_STATUS_OK)
 		return st;
+	if (surface_knot_terms(direction))
+		return QAWS_STATUS_UNSUPPORTED_OPERATION;
 	job.direction = direction;
 	st = surface_quadrature(surface, quadrature ? quadrature : 8u, surface_eval_point, &job);
 	if (st != QAWS_STATUS_OK)
@@ -612,6 +622,8 @@ qaws_status qaws_surface_functional_gradient(
 	qaws_status st = surface_job_init(&job, ctx, surface, functional);
 	if (st != QAWS_STATUS_OK)
 		return st;
+	if (surface_knot_terms(gradient))
+		return QAWS_STATUS_UNSUPPORTED_OPERATION;
 	job.sink = gradient;
 	st = surface_quadrature(surface, quadrature ? quadrature : 8u, surface_gradient_point, &job);
 	if (st == QAWS_STATUS_OK && out_value)
@@ -627,6 +639,8 @@ qaws_status qaws_surface_functional_hvp(
 	qaws_status st = surface_job_init(&job, ctx, surface, functional);
 	if (st != QAWS_STATUS_OK)
 		return st;
+	if (surface_knot_terms(direction) || surface_knot_terms(out_hv))
+		return QAWS_STATUS_UNSUPPORTED_OPERATION;
 	if (!(qaws_surface_get_diff_capabilities(surface) & QAWS_CAP_LINEAR))
 		return QAWS_STATUS_UNSUPPORTED_OPERATION;
 	job.direction = direction;

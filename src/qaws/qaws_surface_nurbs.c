@@ -231,11 +231,11 @@ static unsigned int nurbs_surface_describe_fields(qaws_surface const* surface,
 	if (capacity >= 3)
 		out[2] = qaws_internal_field_desc(QAWS_FIELD_U_KNOTS, QAWS_VALUE_SCALAR,
 			impl->u_knot_count, QAWS_DOMAIN_PARAMETRIC, QAWS_CONSTRAINT_MONOTONIC,
-			QAWS_DIFF_UNSUPPORTED, 0u);
+			QAWS_DIFF_PIECEWISE_SMOOTH, QAWS_CAP_TANGENT | QAWS_CAP_ADJOINT | QAWS_CAP_TANGENT2);
 	if (capacity >= 4)
 		out[3] = qaws_internal_field_desc(QAWS_FIELD_V_KNOTS, QAWS_VALUE_SCALAR,
 			impl->v_knot_count, QAWS_DOMAIN_PARAMETRIC, QAWS_CONSTRAINT_MONOTONIC,
-			QAWS_DIFF_UNSUPPORTED, 0u);
+			QAWS_DIFF_PIECEWISE_SMOOTH, QAWS_CAP_TANGENT | QAWS_CAP_ADJOINT | QAWS_CAP_TANGENT2);
 	return 4;
 }
 
