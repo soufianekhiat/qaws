@@ -214,6 +214,6 @@ The test suites `49_diff_model` to `56_diff_functionals` check every rule in sin
 7. Rational patches: NURBS weights freed after the ADMM fit, seams kept closed.
 8. Real haircuts: vector hair strands from six portrait photos (seeded hair mask, orientation field, B-spline strands).
 9. 3D hair from frontal portraits: head placed from the face, visible strands follow the photo, hidden strands follow the 3D priors.
-10. Single-view hair modeling on plain-background portraits (long, curly, ponytail, profile bob): background flooded from the border, image strands lifted onto a hair volume (head plus inflated silhouette; front, middle and back layers) and fitted as 3D B-splines with projection, surface, collision and bending terms through the batch adjoint.
+10. Single-view hair modeling on plain-background portraits (long, curly, ponytail, profile bob), after Chai et al. 2012/2013 and Hu et al. 2015: background flooded from the border; Gabor orientation (32 angles, refinement pass); image strands lifted onto a hair volume (head plus inflated silhouette) and fitted as 3D B-splines through the batch adjoint; their tangents constrain a voxel orientation-tensor field diffused through the volume; 14k strands grown from the scalp with RK2 (gathered toward a tie for the ponytail), fill strands in empty cells, per-photo curl as helical offsets; a small rasterizer renders them with Kajiya-Kay shading and density self-shadowing.
 
 Photos are read as PPM; `examples/photo_to_ppm.ps1` converts any image (`-Crop "x,y,w,h"` in fractions).

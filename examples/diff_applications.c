@@ -4511,7 +4511,7 @@ static void hv_gabor_field(image const* img, float const* mask, tensor_field* t)
 #define HV_GN 100          /* grid cells per axis (x, y); z has HV_GZ */
 #define HV_GZ 110
 #define HV_GH 0.05         /* cell size, head units */
-#define HV_GROWN_MAX 16000
+#define HV_GROWN_MAX 28000
 #define HV_GROWN_PTS 160
 
 typedef struct hv_volume
@@ -4833,6 +4833,7 @@ typedef struct hv_case
 	double cx, cy, s;    /* head center (pixels) and pixels per head unit */
 	int flat_dark;       /* black clothes touch the hair */
 	double tie[3];       /* ponytail tie: pixel x, y and depth toward the camera (x = 0: none) */
+	double curl[2];      /* curl period and radius, head units (0: straight); set per photo */
 } hv_case;
 
 /* Builds the hair volume and the 3D strands of one portrait. */
@@ -4859,7 +4860,8 @@ static int hv_reconstruct(hv_scene* sc, hv_case const* hc, strand* traced, int* 
 		{
 			/* front: the head (plus a hair layer) or the silhouette inflated with
 			   a circular profile of radius R. back: behind the head; below it,
-			   in a frontal view, a curtain hanging down the back. */
+			   in a frontal view, a curtain hanging down the back, closing in on
+			   the neck as it falls. Hair over the scalp is 0.1 thick. */
 			double d = dist[y * W + x] / s_px, infl, tf, tb, f, b, u, z;
 			if (d > R) d = R;
 			infl = sqrt(fmax(0, 2 * R * d - d * d));
@@ -4868,11 +4870,16 @@ static int hv_reconstruct(hv_scene* sc, hv_case const* hc, strand* traced, int* 
 			f = infl;
 			b = -infl;
 			if (frontal && z < 0.3)
-				b = fmin(b, -0.9 * g_head[1] * sqrt(fmax(0, 1 - u * u / 2.6)));
+			{
+				double depth = 0.9 * g_head[1] * sqrt(fmax(0, 1 - u * u / 2.6));
+				if (z < -0.6)
+					depth = 0.7 + (depth - 0.7) * exp(1.5 * (z + 0.6));
+				b = fmin(b, -depth);
+			}
 			if (hv_head_hit(&sc->cam, x, y, &tf, &tb))
 			{
-				f = fmax(tf + 0.05, f);
-				b = fmin(tb - 0.05, b);
+				f = fmax(tf + 0.1, f);
+				b = fmin(tb - 0.1, b);
 			}
 			sc->surf[0][y * W + x] = (float)f;
 			sc->surf[1][y * W + x] = (float)b;
@@ -5079,23 +5086,23 @@ static hv_case const g_hv_cases[5] = {
 	{ { "plain_wavy", "long, wavy",
 		{ { 85, 120 }, { 90, 250 }, { 260, 200 }, { 270, 280 }, { 150, 60 }, { 200, 55 }, { 70, 330 }, { 290, 340 } }, 8,
 		{ { 175, 160 }, { 175, 205 }, { 150, 330 }, { 180, 400 }, { 330, 400 }, { 40, 300 } }, 6,
-		{ 20, 20, 345, 435 }, { 175, 162, 46, 64 } }, PI, 177, 130, 71, 0, { 0, 0, 0 } },
+		{ 20, 20, 345, 435 }, { 175, 162, 46, 64 } }, PI, 177, 130, 71, 0, { 0, 0, 0 }, { 0.8, 0.045 } },
 	{ { "plain_curly", "curly, voluminous",
 		{ { 80, 150 }, { 60, 250 }, { 300, 250 }, { 310, 330 }, { 170, 40 }, { 240, 60 }, { 90, 380 }, { 280, 400 } }, 8,
 		{ { 190, 200 }, { 190, 250 }, { 160, 160 }, { 220, 160 }, { 210, 460 }, { 190, 330 } }, 6,
-		{ 20, 10, 358, 430 }, { 190, 200, 56, 78 } }, PI, 190, 172, 94, 1, { 0, 0, 0 } },
+		{ 20, 10, 358, 430 }, { 190, 200, 56, 78 } }, PI, 190, 172, 94, 1, { 0, 0, 0 }, { 0.24, 0.06 } },
 	{ { "plain_long", "long, straight",
 		{ { 150, 40 }, { 220, 40 }, { 100, 160 }, { 75, 240 }, { 250, 200 }, { 55, 300 }, { 110, 120 }, { 240, 110 } }, 8,
 		{ { 180, 150 }, { 180, 200 }, { 250, 235 }, { 200, 280 }, { 300, 280 }, { 170, 300 }, { 140, 230 }, { 330, 300 } }, 8,
-		{ 20, 0, 300, 341 }, { 180, 140, 42, 58 } }, PI, 180, 107, 69, 0, { 0, 0, 0 } },
+		{ 20, 0, 300, 341 }, { 180, 140, 42, 58 } }, PI, 180, 107, 69, 0, { 0, 0, 0 }, { 0, 0 } },
 	{ { "plain_ponytail", "high ponytail, held up",
 		{ { 50, 135 }, { 80, 137 }, { 110, 128 }, { 140, 112 }, { 170, 86 }, { 200, 52 }, { 222, 25 }, { 213, 70 } }, 8,
 		{ { 255, 100 }, { 245, 132 }, { 290, 180 }, { 25, 150 }, { 270, 70 } }, 5,
-		{ 15, 0, 300, 152 }, { 255, 100, 32, 45 } }, PI + 0.35, 245, 82, 48, 0, { 212, 22, -0.25 } },
+		{ 15, 0, 300, 152 }, { 255, 100, 32, 45 } }, PI + 0.35, 245, 82, 48, 0, { 212, 22, -0.25 }, { 0, 0 } },
 	{ { "plain_bob_profile", "bob, profile view",
 		{ { 150, 60 }, { 250, 80 }, { 300, 200 }, { 280, 300 }, { 100, 120 }, { 320, 330 }, { 200, 120 } }, 7,
 		{ { 130, 250 }, { 100, 330 }, { 340, 340 }, { 250, 450 }, { 215, 230 } }, 5,
-		{ 40, 15, 360, 380 }, { 125, 260, 70, 90 } }, PI / 2, 195, 185, 130, 0, { 0, 0, 0 } }
+		{ 40, 15, 360, 380 }, { 125, 260, 70, 90 } }, PI / 2, 205, 190, 118, 0, { 0, 0, 0 }, { 0, 0 } }
 };
 
 /* The hair volume (cells between the back and front depth surfaces over the
@@ -5199,21 +5206,243 @@ static void hv_volume_free(hv_volume* v)
 	free(v->occ); free(v->T); free(v->fixed); free(v->dens);
 }
 
-/* Strands grown from scalp roots through the field (RK2, half-cell steps):
-   they leave the scalp along the field (signed by the combing guide, or
-   toward the tie of a ponytail), stay out of the head, and stop when they
-   leave the volume, turn sharply or reach the point budget. Vertex colors
-   come from the photo where the strand is visible, its mean elsewhere. */
-static int hv_grow(hv_scene const* sc, double const* tie, hv_volume* v, hv_grown* out, int cap)
+/* Traces one strand through the field from pos along dir (RK2, half-cell
+   steps): it stays out of the head, gathers toward the tie of a ponytail
+   until it reaches it (then leaves it away from the head), and stops when it
+   leaves the volume, turns sharply or fills max points (kept every 2 steps). */
+static int hv_trace(hv_volume const* v, double const* tie, double* pos, double* dir, float* pts, int max)
 {
-	int W = sc->img.w, H = sc->img.h, cnt = 0, i, a, cand = 4 * cap;
-	double h = 0.5 * HV_GH;
-	for (i = 0; i < cand && cnt < cap; i++)
+	double h = 0.5 * HV_GH, ln;
+	int step, outside = 0, passed = tie ? 0 : 1, free_turn = 0, n = 0, a;
+	for (step = 0; step < 2 * max - 1; step++)
+	{
+		double d1[3], d2[3], mid[3], gp[3], r;
+		int pass;
+		for (pass = 0; pass < 2; pass++)
+		{
+			double const* at = pass ? mid : pos;
+			double* dd = pass ? d2 : d1;
+			hv_field_dir(v, at, pass ? d1 : dir, dd);
+			if (!passed)
+			{
+				/* gather toward the tie */
+				double tv[3] = { tie[0] - at[0], tie[1] - at[1], tie[2] - at[2] };
+				double tl = sqrt(tv[0] * tv[0] + tv[1] * tv[1] + tv[2] * tv[2]) + 1e-12;
+				for (a = 0; a < 3; a++)
+					dd[a] += 1.5 * tv[a] / tl;
+				ln = sqrt(dd[0] * dd[0] + dd[1] * dd[1] + dd[2] * dd[2]) + 1e-12;
+				for (a = 0; a < 3; a++)
+					dd[a] /= ln;
+			}
+			if (!pass)
+				for (a = 0; a < 3; a++)
+					mid[a] = pos[a] + 0.5 * h * d1[a];
+		}
+		if (free_turn > 0)
+			free_turn--;
+		else if (d2[0] * dir[0] + d2[1] * dir[1] + d2[2] * dir[2] < 0.6)
+			break;
+		for (a = 0; a < 3; a++)
+			pos[a] += h * d2[a];
+		r = head_phi(pos, gp);
+		if (r < 1.02)
+		{
+			ln = sqrt(gp[0] * gp[0] + gp[1] * gp[1] + gp[2] * gp[2]) + 1e-12;
+			for (a = 0; a < 3; a++)
+				pos[a] += (1.02 - r) * gp[a] / ln * 1.1;
+		}
+		for (a = 0; a < 3; a++)
+			dir[a] = d2[a];
+		if (!passed)
+		{
+			double dx = pos[0] - tie[0], dy = pos[1] - tie[1], dz = pos[2] - tie[2];
+			if (dx * dx + dy * dy + dz * dz < 0.15 * 0.15)
+			{
+				/* through the tie: follow the tail, away from the head */
+				double e[3];
+				passed = 1;
+				free_turn = 12;
+				hv_field_dir(v, pos, pos, e);
+				for (a = 0; a < 3; a++)
+					dir[a] = e[a];
+			}
+		}
+		if (hv_trilinear(v->occ, 1, 0, pos) < 0.5)
+		{
+			if (++outside > 4)
+				break;
+		}
+		else
+			outside = 0;
+		if (step % 2 == 0 && n < max)
+		{
+			for (a = 0; a < 3; a++)
+				pts[3 * n + a] = (float)pos[a];
+			n++;
+		}
+	}
+	/* trim the samples that left the volume */
+	while (n > 0)
+	{
+		double q[3] = { pts[3 * (n - 1)], pts[3 * (n - 1) + 1], pts[3 * (n - 1) + 2] };
+		if (hv_trilinear(v->occ, 1, 0, q) >= 0.5)
+			break;
+		n--;
+	}
+	return n;
+}
+
+/* Vertex colors (the blurred photo where the vertex is on the visible
+   front, the strand's mean elsewhere) and the density of the shadow grid. */
+static void hv_strand_finish(hv_scene const* sc, float const* rgb_blur, hv_volume* v, hv_grown* s)
+{
+	int W = sc->img.w, H = sc->img.h, k, a;
+	double col[3] = { 0, 0, 0 }, cw = 0;
+	for (k = 0; k < s->n; k++)
+	{
+		double q[3] = { s->p[3 * k], s->p[3 * k + 1], s->p[3 * k + 2] }, px, py, t;
+		int ix, iy, vis = 0;
+		hv_project(&sc->cam, q, &px, &py, &t);
+		ix = (int)px;
+		iy = (int)py;
+		if (ix >= 0 && iy >= 0 && ix < W && iy < H && sc->mask[iy * W + ix] > 0.9f &&
+			t > sample(sc->surf[0], W, H, px, py, NULL, NULL) - 0.25)
+			vis = 1;
+		for (a = 0; a < 3; a++)
+			s->rgb[3 * k + a] = vis ? rgb_blur[3 * (iy * W + ix) + a] : -1.0f;
+		if (vis)
+		{
+			for (a = 0; a < 3; a++)
+				col[a] += s->rgb[3 * k + a];
+			cw++;
+		}
+	}
+	for (a = 0; a < 3; a++)
+		col[a] = cw > 0 ? col[a] / cw : 0.85 * sc->hair_col[a];
+	for (k = 0; k < s->n; k++)
+	{
+		int ci, cj, ck;
+		double q[3] = { s->p[3 * k], s->p[3 * k + 1], s->p[3 * k + 2] };
+		if (s->rgb[3 * k] < 0)
+			for (a = 0; a < 3; a++)
+				s->rgb[3 * k + a] = (float)(0.9 * col[a]);
+		if (hv_cell(q, &ci, &cj, &ck))
+			v->dens[HV_IDX(ci, cj, ck)] += 1;
+	}
+}
+
+/* Curl and fuzz (HairNet, Choe and Ko): the strand is resampled finely
+   enough for its curl, then offset on a parallel-transported frame by a
+   helix of the given period and radius, ramped in from the root, with a
+   random phase and a +-15% period jitter; straight hair only gets a slow
+   random wobble of 0.012. */
+static void hv_curl(hv_grown* s, double const* curl, unsigned int* rng)
+{
+	static float q[3 * HV_GROWN_PTS];
+	double len = 0, ds, period, radius, phase, nrm[3], acc = 0, wob[2];
+	int k, a, m, j = 0;
+	for (k = 1; k < s->n; k++)
+	{
+		double dx = s->p[3 * k] - s->p[3 * k - 3], dy = s->p[3 * k + 1] - s->p[3 * k - 2], dz = s->p[3 * k + 2] - s->p[3 * k - 1];
+		len += sqrt(dx * dx + dy * dy + dz * dz);
+	}
+	*rng = *rng * 1664525u + 1013904223u;
+	phase = 2 * PI * ((*rng >> 8) / 16777216.0);
+	*rng = *rng * 1664525u + 1013904223u;
+	period = curl[0] > 0 ? curl[0] * (0.85 + 0.3 * ((*rng >> 8) / 16777216.0)) : 0.6 + 0.6 * ((*rng >> 8) / 16777216.0);
+	radius = curl[0] > 0 ? curl[1] : 0.012;
+	*rng = *rng * 1664525u + 1013904223u;
+	wob[0] = (*rng >> 8) / 16777216.0;
+	wob[1] = 1 - wob[0];
+	ds = fmin(0.05, period / 7);
+	m = (int)(len / ds) + 1;
+	if (m > HV_GROWN_PTS)
+		m = HV_GROWN_PTS;
+	if (m < 2 || len < 1e-6)
+		return;
+	/* uniform resampling */
+	for (k = 0; k < m; k++)
+	{
+		double target = k * ds, seg;
+		while (j + 2 < s->n)
+		{
+			double dx = s->p[3 * j + 3] - s->p[3 * j], dy = s->p[3 * j + 4] - s->p[3 * j + 1], dz = s->p[3 * j + 5] - s->p[3 * j + 2];
+			seg = sqrt(dx * dx + dy * dy + dz * dz);
+			if (acc + seg >= target)
+				break;
+			acc += seg;
+			j++;
+		}
+		{
+			double dx = s->p[3 * j + 3] - s->p[3 * j], dy = s->p[3 * j + 4] - s->p[3 * j + 1], dz = s->p[3 * j + 5] - s->p[3 * j + 2];
+			double f;
+			seg = sqrt(dx * dx + dy * dy + dz * dz) + 1e-12;
+			f = (target - acc) / seg;
+			if (f > 1) f = 1;
+			if (f < 0) f = 0;
+			for (a = 0; a < 3; a++)
+				q[3 * k + a] = (float)(s->p[3 * j + a] + f * (s->p[3 * j + 3 + a] - s->p[3 * j + a]));
+		}
+	}
+	/* parallel-transported frame and helix offsets */
+	nrm[0] = 1; nrm[1] = 0; nrm[2] = 0;
+	for (k = 0; k < m; k++)
+	{
+		double t[3], b[3], tl, dn, ramp = fmin(1.0, k * ds / 0.3), ang = 2 * PI * k * ds / period + phase, r, c1, c2;
+		int k0 = k > 0 ? k - 1 : 0, k1 = k + 1 < m ? k + 1 : m - 1;
+		for (a = 0; a < 3; a++)
+			t[a] = q[3 * k1 + a] - q[3 * k0 + a];
+		tl = sqrt(t[0] * t[0] + t[1] * t[1] + t[2] * t[2]) + 1e-12;
+		for (a = 0; a < 3; a++)
+			t[a] /= tl;
+		dn = nrm[0] * t[0] + nrm[1] * t[1] + nrm[2] * t[2];
+		for (a = 0; a < 3; a++)
+			nrm[a] -= dn * t[a];
+		tl = sqrt(nrm[0] * nrm[0] + nrm[1] * nrm[1] + nrm[2] * nrm[2]);
+		if (tl < 1e-6)
+		{
+			nrm[0] = t[1]; nrm[1] = -t[0]; nrm[2] = 0;
+			tl = sqrt(nrm[0] * nrm[0] + nrm[1] * nrm[1]) + 1e-12;
+		}
+		for (a = 0; a < 3; a++)
+			nrm[a] /= tl;
+		b[0] = t[1] * nrm[2] - t[2] * nrm[1];
+		b[1] = t[2] * nrm[0] - t[0] * nrm[2];
+		b[2] = t[0] * nrm[1] - t[1] * nrm[0];
+		r = radius * ramp;
+		c1 = curl[0] > 0 ? cos(ang) : wob[0] * sin(ang);
+		c2 = curl[0] > 0 ? sin(ang) : wob[1] * sin(0.7 * ang + 1.3);
+		for (a = 0; a < 3; a++)
+			s->p[3 * k + a] = (float)(q[3 * k + a] + r * (c1 * nrm[a] + c2 * b[a]));
+	}
+	s->n = m;
+}
+
+/* Strands grown from scalp roots (signed by the combing guide, or toward the
+   tie of a ponytail), then fill strands (Chai et al. 2012) seeded in the
+   empty cells of the volume and traced both ways, the higher end as root. */
+static int hv_grow(hv_scene const* sc, double const* tie, double const* curl, hv_volume* v, hv_grown* out, int scalp_cap, int cap,
+	int* scalp_count)
+{
+	int W = sc->img.w, H = sc->img.h, cnt = 0, i, a, cand = 4 * scalp_cap;
+	unsigned int crng = 4242u;
+	size_t N = (size_t)HV_GN * HV_GN * HV_GZ, id;
+	float* rgb_blur = (float*)malloc(sizeof(float) * 3 * (size_t)W * H);
+	float* ch = (float*)malloc(sizeof(float) * (size_t)W * H);
+	for (a = 0; a < 3; a++)
+	{
+		for (i = 0; i < W * H; i++)
+			ch[i] = sc->img.rgb[3 * i + a];
+		blur(ch, W, H, 1.0);
+		for (i = 0; i < W * H; i++)
+			rgb_blur[3 * i + a] = ch[i];
+	}
+	free(ch);
+	for (i = 0; i < cand && cnt < scalp_cap; i++)
 	{
 		double z = 1 - 2 * (i + 0.5) / cand, rad = sqrt(1 - z * z), phi = i * 2.399963229728653;
-		double d[3] = { rad * cos(phi), rad * sin(phi), z }, pos[3], nrm[3], g[3], dir[3], ln, gn, col[3] = { 0, 0, 0 }, cw = 0;
+		double d[3] = { rad * cos(phi), rad * sin(phi), z }, pos[3], nrm[3], g[3], dir[3], ln, gn;
 		hv_grown* s = &out[cnt];
-		int step, outside = 0, passed = 0;
 		if (z < -0.2 || (d[1] > 0.3 && z < 0.62))
 			continue;
 		for (a = 0; a < 3; a++)
@@ -5242,109 +5471,75 @@ static int hv_grow(hv_scene const* sc, double const* tie, hv_volume* v, hv_grown
 		ln = sqrt(dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]) + 1e-12;
 		for (a = 0; a < 3; a++)
 			dir[a] /= ln;
-		s->n = 0;
-		for (step = 0; step < 2 * HV_GROWN_PTS - 1; step++)
-		{
-			double d1[3], d2[3], mid[3], gp[3], r;
-			int pass;
-			for (pass = 0; pass < 2; pass++)
-			{
-				double const* at = pass ? mid : pos;
-				double* dd = pass ? d2 : d1;
-				hv_field_dir(v, at, pass ? d1 : dir, dd);
-				if (tie && !passed)
-				{
-					/* gather toward the tie */
-					double tv[3] = { tie[0] - at[0], tie[1] - at[1], tie[2] - at[2] };
-					double tl = sqrt(tv[0] * tv[0] + tv[1] * tv[1] + tv[2] * tv[2]) + 1e-12;
-					for (a = 0; a < 3; a++)
-						dd[a] += 1.5 * tv[a] / tl;
-					ln = sqrt(dd[0] * dd[0] + dd[1] * dd[1] + dd[2] * dd[2]) + 1e-12;
-					for (a = 0; a < 3; a++)
-						dd[a] /= ln;
-				}
-				if (!pass)
-					for (a = 0; a < 3; a++)
-						mid[a] = pos[a] + 0.5 * h * d1[a];
-			}
-			if (d2[0] * dir[0] + d2[1] * dir[1] + d2[2] * dir[2] < 0.6)
-				break;
-			for (a = 0; a < 3; a++)
-				pos[a] += h * d2[a];
-			r = head_phi(pos, gp);
-			if (r < 1.02)
-			{
-				ln = sqrt(gp[0] * gp[0] + gp[1] * gp[1] + gp[2] * gp[2]) + 1e-12;
-				for (a = 0; a < 3; a++)
-					pos[a] += (1.02 - r) * gp[a] / ln * 1.1;
-			}
-			for (a = 0; a < 3; a++)
-				dir[a] = d2[a];
-			if (tie && !passed)
-			{
-				double dx = pos[0] - tie[0], dy = pos[1] - tie[1], dz = pos[2] - tie[2];
-				if (dx * dx + dy * dy + dz * dz < 0.15 * 0.15)
-					passed = 1;
-			}
-			if (hv_trilinear(v->occ, 1, 0, pos) < 0.5)
-			{
-				if (++outside > 4)
-					break;
-			}
-			else
-				outside = 0;
-			if (step % 2 == 0 && s->n < HV_GROWN_PTS)
-			{
-				for (a = 0; a < 3; a++)
-					s->p[3 * s->n + a] = (float)pos[a];
-				s->n++;
-			}
-		}
-		/* trim the samples that left the volume */
-		while (s->n > 0)
-		{
-			double q[3] = { s->p[3 * (s->n - 1)], s->p[3 * (s->n - 1) + 1], s->p[3 * (s->n - 1) + 2] };
-			if (hv_trilinear(v->occ, 1, 0, q) >= 0.5)
-				break;
-			s->n--;
-		}
+		s->n = hv_trace(v, tie, pos, dir, s->p, HV_GROWN_PTS);
 		if (s->n < 4)
 			continue;
-		/* colors: the photo where the vertex is on the visible front */
-		for (step = 0; step < s->n; step++)
-		{
-			double q[3] = { s->p[3 * step], s->p[3 * step + 1], s->p[3 * step + 2] }, px, py, t;
-			int ix, iy, vis = 0;
-			hv_project(&sc->cam, q, &px, &py, &t);
-			ix = (int)px;
-			iy = (int)py;
-			if (ix >= 0 && iy >= 0 && ix < W && iy < H && sc->mask[iy * W + ix] > 0.5f &&
-				t > sample(sc->surf[0], W, H, px, py, NULL, NULL) - 0.25)
-				vis = 1;
-			for (a = 0; a < 3; a++)
-				s->rgb[3 * step + a] = vis ? sc->img.rgb[3 * (iy * W + ix) + a] : -1.0f;
-			if (vis)
-			{
-				for (a = 0; a < 3; a++)
-					col[a] += s->rgb[3 * step + a];
-				cw++;
-			}
-		}
-		for (a = 0; a < 3; a++)
-			col[a] = cw > 0 ? col[a] / cw : 0.85 * sc->hair_col[a];
-		for (step = 0; step < s->n; step++)
-			if (s->rgb[3 * step] < 0)
-				for (a = 0; a < 3; a++)
-					s->rgb[3 * step + a] = (float)(0.9 * col[a]);
-		for (step = 0; step < s->n; step++)
-		{
-			int ci, cj, ck;
-			double q[3] = { s->p[3 * step], s->p[3 * step + 1], s->p[3 * step + 2] };
-			if (hv_cell(q, &ci, &cj, &ck))
-				v->dens[HV_IDX(ci, cj, ck)] += 1;
-		}
+		hv_curl(s, curl, &crng);
+		hv_strand_finish(sc, rgb_blur, v, s);
 		cnt++;
 	}
+	*scalp_count = cnt;
+	{
+		/* fill: empty cells in a random order */
+		unsigned int rng = 99u;
+		size_t* cells = (size_t*)malloc(sizeof(size_t) * N);
+		size_t nc = 0, q;
+		static float back[3 * HV_GROWN_PTS];
+		for (id = 0; id < N; id++)
+			if (v->occ[id])
+				cells[nc++] = id;
+		for (q = nc; q > 1; q--)
+		{
+			size_t j, tmp;
+			rng = rng * 1664525u + 1013904223u;
+			j = (size_t)(rng % (unsigned int)q);
+			tmp = cells[q - 1]; cells[q - 1] = cells[j]; cells[j] = tmp;
+		}
+		for (q = 0; q < nc && cnt < cap; q++)
+		{
+			double pos[3], dir[3], down[3] = { 0, 0, -1 }, rev[3];
+			int ci, cj, ck, nf, nb, k;
+			hv_grown* s = &out[cnt];
+			id = cells[q];
+			if (v->dens[id] > 0)
+				continue;
+			ci = (int)(id % HV_GN);
+			cj = (int)((id / HV_GN) % HV_GN);
+			ck = (int)(id / ((size_t)HV_GN * HV_GN));
+			pos[0] = g_hv_lo[0] + (ci + 0.5) * HV_GH;
+			pos[1] = g_hv_lo[1] + (cj + 0.5) * HV_GH;
+			pos[2] = g_hv_lo[2] + (ck + 0.5) * HV_GH;
+			if (hv_field_dir(v, pos, down, dir) < 0.2)
+				continue;
+			{
+				double p2[3] = { pos[0], pos[1], pos[2] };
+				for (a = 0; a < 3; a++)
+					rev[a] = -dir[a];
+				nb = hv_trace(v, NULL, p2, rev, back, HV_GROWN_PTS / 2);
+			}
+			nf = hv_trace(v, NULL, pos, dir, s->p + 3 * nb, HV_GROWN_PTS - nb);
+			/* backward part reversed in front */
+			for (k = 0; k < nb; k++)
+				for (a = 0; a < 3; a++)
+					s->p[3 * k + a] = back[3 * (nb - 1 - k) + a];
+			s->n = nb + nf;
+			if (s->n < 8)
+				continue;
+			if (s->p[2] < s->p[3 * (s->n - 1) + 2])
+				for (k = 0; k < s->n / 2; k++)
+					for (a = 0; a < 3; a++)
+					{
+						float tmp = s->p[3 * k + a];
+						s->p[3 * k + a] = s->p[3 * (s->n - 1 - k) + a];
+						s->p[3 * (s->n - 1 - k) + a] = tmp;
+					}
+			hv_curl(s, curl, &crng);
+			hv_strand_finish(sc, rgb_blur, v, s);
+			cnt++;
+		}
+		free(cells);
+	}
+	free(rgb_blur);
 	return cnt;
 }
 
@@ -5500,7 +5695,7 @@ static void app_hair_volume(void)
 	{
 		hv_case const* hc = &g_hv_cases[c];
 		hair_spec const* sp = &hc->spec;
-		int nt = 0, n, ng, v;
+		int nt = 0, n, ng, nscalp, v;
 		double rms, k = 240.0 / 360, ih, angle, coverage, tie[3];
 		sprintf(path, "%s/%s.ppm", g_photos, sp->name);
 		if (!image_load_ppm(path, &sc.img))
@@ -5512,7 +5707,7 @@ static void app_hair_volume(void)
 		hv_volume_build(&sc, hs, n, &vol);
 		if (hc->tie[0] > 0)
 			hv_unproject(&sc.cam, hc->tie[0], hc->tie[1], hc->tie[2], tie);
-		ng = hv_grow(&sc, hc->tie[0] > 0 ? tie : NULL, &vol, grown, HV_GROWN_MAX);
+		ng = hv_grow(&sc, hc->tie[0] > 0 ? tie : NULL, hc->curl, &vol, grown, 14000, HV_GROWN_MAX, &nscalp);
 		hv_grown_stats(&sc, grown, ng, &angle, &coverage);
 		ih = sc.img.h * k;
 		if (ih > 315) ih = 315;
@@ -5541,11 +5736,11 @@ static void app_hair_volume(void)
 			fprintf(s.f, "<image href=\"app10/%s_%d.png\" x=\"%.1f\" y=\"%.1f\" width=\"%d\" height=\"%d\"/>\n",
 				sp->name, v, x0, y0, pw, (int)ih);
 		}
-		sprintf(buf, "%s: %d image strands -> %d fitted -> %d grown strands; projected angle to the photo %.1f deg, hair covered %.0f%%",
-			sp->label, nt, n, ng, angle, 100 * coverage);
+		sprintf(buf, "%s: %d image strands -> %d fitted -> %d strands (%d from the scalp); angle to the photo %.1f deg, hair covered %.0f%%",
+			sp->label, nt, n, ng, nscalp, angle, 100 * coverage);
 		svg_text(&s, 20, y0 + ih + 16, 12, "#0969da", "start", buf);
-		printf("10_hair_volume: %-18s %d image strands, %d fitted (RMS %.2f px), %d grown, angle %.1f deg, coverage %.0f%%\n",
-			sp->name, nt, n, rms, ng, angle, 100 * coverage);
+		printf("10_hair_volume: %-18s %d image strands, %d fitted (RMS %.2f px), %d strands (%d scalp), angle %.1f deg, coverage %.0f%%\n",
+			sp->name, nt, n, rms, ng, nscalp, angle, 100 * coverage);
 		hv_volume_free(&vol);
 		hv_free(&sc, traced, nt);
 		y0 += ih + 32;
