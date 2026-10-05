@@ -1408,6 +1408,31 @@ static qaws_status curve_batch_adjoint(
 	if (st != QAWS_STATUS_OK)
 		return st;
 
+	if (curve_diff(curve)->adjoint_span)
+	{
+		unsigned int i;
+		for (i = 0; i < count; i++)
+		{
+			curve_jet_buf buf;
+			qaws_curve_jet_3d j3;
+			qaws_scalar local_t;
+			unsigned int k, span = qaws_internal_find_span(curve, t[i], &local_t);
+			read_jet(jets, i, &buf);
+			for (k = 0; k <= QAWS_CURVE_JET_ORDER; k++)
+			{
+				j3.d[k].x = buf.d[k][0];
+				j3.d[k].y = buf.d[k][1];
+				j3.d[k].z = dim == 3 ? buf.d[k][2] : QAWS_ZERO;
+			}
+			j3.channels = channels & 0xFu;
+			st = curve_diff(curve)->adjoint_span(ctx, curve, span, local_t, channels & 0xFu, &j3, views,
+				t_adjoint ? &t_adjoint[i] : NULL);
+			if (st != QAWS_STATUS_OK)
+				return st;
+		}
+		return QAWS_STATUS_OK;
+	}
+
 	job.ctx = ctx;
 	job.curve = curve;
 	job.dim = dim;
@@ -1449,6 +1474,17 @@ static void store_jet_3d(qaws_curve_jet_3d* out, curve_jet_buf const* b, unsigne
 	out->channels = channels;
 }
 
+static void store_lifted_2d(qaws_curve_jet_2d* out, qaws_curve_jet_3d const* in)
+{
+	unsigned int k;
+	for (k = 0; k <= QAWS_CURVE_JET_ORDER; k++)
+	{
+		out->d[k].x = in->d[k].x;
+		out->d[k].y = in->d[k].y;
+	}
+	out->channels = in->channels;
+}
+
 static qaws_status curve_batch_tangent(
 	qaws_diff_context const* ctx,
 	qaws_curve const* curve,
@@ -1479,6 +1515,40 @@ static qaws_status curve_batch_tangent(
 	if (st != QAWS_STATUS_OK)
 		return st;
 	channels &= 0xFu;
+
+	if (d->tangent_span)
+	{
+		/* Derived curve: direct rule chaining into its children. */
+		for (i = 0; i < count; i++)
+		{
+			qaws_curve_jet_3d p3, t3, tt3;
+			qaws_scalar local_t;
+			unsigned int span = qaws_internal_find_span(curve, t[i], &local_t);
+			qaws_scalar t_dot = t_tangent ? t_tangent[i] : QAWS_ZERO;
+			qaws_scalar const eps = QAWS_LITERAL(16.0) * QAWS_EPSILON;
+			int boundary = (span > 0 && local_t <= eps) || (span + 1 < curve->span_count && local_t >= QAWS_ONE - eps);
+			st = d->tangent_span(ctx, curve, span, local_t, t_dot, channels, views, &p3, &t3, out_tangent2 ? &tt3 : NULL);
+			if (st != QAWS_STATUS_OK)
+				return st;
+			if (dim == 2)
+			{
+				if (out_primal) store_lifted_2d((qaws_curve_jet_2d*)out_primal + i, &p3);
+				store_lifted_2d((qaws_curve_jet_2d*)out_tangent + i, &t3);
+				if (out_tangent2) store_lifted_2d((qaws_curve_jet_2d*)out_tangent2 + i, &tt3);
+			}
+			else
+			{
+				if (out_primal) ((qaws_curve_jet_3d*)out_primal)[i] = p3;
+				((qaws_curve_jet_3d*)out_tangent)[i] = t3;
+				if (out_tangent2) ((qaws_curve_jet_3d*)out_tangent2)[i] = tt3;
+			}
+			qaws_internal_diff_report_note(ctx,
+				t_dot != QAWS_ZERO ? d->diff_class : QAWS_DIFF_SMOOTH,
+				(t_dot != QAWS_ZERO && boundary) ? QAWS_DIFF_AT_BOUNDARY : QAWS_DIFF_VALID,
+				t_dot != QAWS_ZERO ? (unsigned int)QAWS_FREEZE_SPAN : 0u, i);
+		}
+		return QAWS_STATUS_OK;
+	}
 
 	for (i = 0; i < count; i++)
 	{
@@ -1803,4 +1873,24 @@ qaws_status qaws_internal_curve_adjoint_any(
 		j.channels = jet_adjoint->channels;
 		return curve_batch_adjoint(ctx, curve, 2, &t, 1, channels, &j, read_jet_2d, views, t_adjoint);
 	}
+}
+
+qaws_status qaws_curve_diff_children(
+	qaws_curve const* curve,
+	qaws_diff_child* out_children,
+	unsigned int capacity,
+	unsigned int* out_count)
+{
+	qaws_curve_diff_vtable const* d = curve_diff(curve);
+	unsigned int n;
+	if (!curve || !out_count)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	*out_count = 0;
+	if (!d)
+		return QAWS_STATUS_UNSUPPORTED_OPERATION;
+	if (!d->children)
+		return QAWS_STATUS_OK;
+	n = d->children(curve, out_children, out_children ? capacity : 0u);
+	*out_count = n;
+	return (out_children && n > capacity) ? QAWS_STATUS_BUFFER_TOO_SMALL : QAWS_STATUS_OK;
 }

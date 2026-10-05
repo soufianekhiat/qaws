@@ -177,7 +177,10 @@ static qaws_curve_diff_vtable const bezier_diff_vtable = {
 	QAWS_DIFF_SMOOTH,
 	bezier_describe_fields,
 	bezier_primal_field,
-	bezier_linear_support
+	bezier_linear_support,
+	NULL,
+	NULL,
+	NULL
 };
 
 static qaws_curve_vtable const bezier_vtable = {

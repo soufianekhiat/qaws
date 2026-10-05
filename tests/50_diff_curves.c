@@ -756,6 +756,162 @@ static void test_unit_tangent_composition(void)
 	qaws_curve_destroy(c);
 }
 
+/* ------------------------------------------------------------------ */
+/*  Composite curves: rules chain into the segments (children)        */
+/* ------------------------------------------------------------------ */
+
+typedef struct composite_params
+{
+	qaws_scalar bez[12];   /* cubic Bezier, 4 points */
+	qaws_scalar nrb[21];   /* NURBS, 7 points */
+	qaws_scalar w[7];
+} composite_params;
+
+static qaws_scalar const g_comp_knots[11] = { 0, 0, 0, 0, 0.5f, 1.25f, 2, 3, 3, 3, 3 };
+
+static qaws_curve* composite_build(composite_params const* p)
+{
+	qaws_bezier_desc bd;
+	qaws_nurbs_desc nd;
+	qaws_composite_desc cd;
+	qaws_curve* segs[2] = { NULL, NULL };
+	qaws_curve* c = NULL;
+
+	bd.dimension = QAWS_DIMENSION_3D;
+	bd.degree = 3;
+	bd.control_points = p->bez;
+	bd.control_point_count = 4;
+	qaws_curve_create_bezier(&bd, &segs[0]);
+
+	memset(&nd, 0, sizeof(nd));
+	nd.dimension = QAWS_DIMENSION_3D;
+	nd.degree = 3;
+	nd.control_points = p->nrb;
+	nd.control_point_count = 7;
+	nd.knots = g_comp_knots;
+	nd.knot_count = 11;
+	nd.weights = p->w;
+	nd.weight_count = 7;
+	qaws_curve_create_nurbs(&nd, &segs[1]);
+
+	cd.dimension = QAWS_DIMENSION_3D;
+	cd.segments = segs;
+	cd.segment_count = 2;
+	qaws_curve_create_composite(&cd, &c);
+	return c;
+}
+
+typedef struct composite_storage
+{
+	composite_params data;
+	qaws_field_view v0, v1[2];
+	qaws_diff_views child[2], views;
+} composite_storage;
+
+static void composite_bind(composite_storage* s)
+{
+	s->v0 = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, s->data.bez, 4, 3);
+	s->v1[0] = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, s->data.nrb, 7, 3);
+	s->v1[1] = qaws_field_view_make(QAWS_FIELD_WEIGHTS, s->data.w, 7, 1);
+	s->child[0].fields = &s->v0;
+	s->child[0].field_count = 1;
+	s->child[0].children = NULL;
+	s->child[0].child_count = 0;
+	s->child[1].fields = s->v1;
+	s->child[1].field_count = 2;
+	s->child[1].children = NULL;
+	s->child[1].child_count = 0;
+	s->views.fields = NULL;
+	s->views.field_count = 0;
+	s->views.children = s->child;
+	s->views.child_count = 2;
+}
+
+static double composite_dot(composite_params const* a, composite_params const* b)
+{
+	return diff_dot(a->bez, b->bez, 12) + diff_dot(a->nrb, b->nrb, 21) + diff_dot(a->w, b->w, 7);
+}
+
+static void test_composite(void)
+{
+	composite_params base, pp, pm;
+	qaws_curve* c;
+	unsigned int i, n, k;
+	int ok_jet = 1, ok_fd = 1, ok_t2 = 1, ok_adj = 1;
+	double h = DIFF_FD_STEP;
+	qaws_diff_child kids[2];
+	unsigned int nk = 0;
+
+	diff_seed(321);
+	diff_rand_fill(base.bez, 12);
+	diff_rand_fill(base.nrb, 21);
+	for (n = 0; n < 7; n++)
+		base.w[n] = (qaws_scalar)1.2 + (qaws_scalar)0.5 * diff_rand();
+	c = composite_build(&base);
+	TEST_ASSERT(c != NULL, "composite built");
+	TEST_ASSERT_STATUS(qaws_curve_diff_children(c, kids, 2, &nk));
+	TEST_ASSERT(nk == 2 && kids[0].curve && kids[1].curve, "composite exposes its segments as children");
+
+	for (i = 0; i < 8; i++)
+	{
+		qaws_scalar t = (qaws_scalar)0.13 + (qaws_scalar)0.23 * (qaws_scalar)i;
+		qaws_scalar tdot = diff_rand(), tbar = 0;
+		composite_storage dir, bar;
+		qaws_curve_jet_3d p, tg, tt, ybar;
+		qaws_eval_result_3d r;
+		qaws_curve *cp, *cm;
+		double lhs = 0, rhs;
+
+		qaws_curve_evaluate_3d(c, t, 0xF, &r);
+		memset(&dir, 0, sizeof(dir));
+		diff_rand_fill(dir.data.bez, 12);
+		diff_rand_fill(dir.data.nrb, 21);
+		diff_rand_fill(dir.data.w, 7);
+		composite_bind(&dir);
+		TEST_ASSERT_STATUS(qaws_curve_eval_batch_tangent2_3d(NULL, c, &t, &tdot, 1, 0xF, &dir.views, &p, &tg, &tt));
+		if (!diff_close(p.d[0].x, r.position.x, 1e-5) || !diff_close(p.d[1].y, r.d1.y, 1e-5) ||
+		    !diff_close(p.d[2].z, r.d2.z, 1e-5) || !diff_close(p.d[3].x, r.d3.x, 1e-4))
+			ok_jet = 0;
+
+		for (n = 0; n < 12; n++) { pp.bez[n] = (qaws_scalar)(base.bez[n] + h * dir.data.bez[n]); pm.bez[n] = (qaws_scalar)(base.bez[n] - h * dir.data.bez[n]); }
+		for (n = 0; n < 21; n++) { pp.nrb[n] = (qaws_scalar)(base.nrb[n] + h * dir.data.nrb[n]); pm.nrb[n] = (qaws_scalar)(base.nrb[n] - h * dir.data.nrb[n]); }
+		for (n = 0; n < 7; n++) { pp.w[n] = (qaws_scalar)(base.w[n] + h * dir.data.w[n]); pm.w[n] = (qaws_scalar)(base.w[n] - h * dir.data.w[n]); }
+		cp = composite_build(&pp);
+		cm = composite_build(&pm);
+		{
+			qaws_curve_jet_3d jp, jm, tp, tm;
+			qaws_curve_eval_tangent_3d(NULL, cp, (qaws_scalar)(t + h * tdot), tdot, 0xF, &dir.views, &jp, &tp);
+			qaws_curve_eval_tangent_3d(NULL, cm, (qaws_scalar)(t - h * tdot), tdot, 0xF, &dir.views, &jm, &tm);
+			for (k = 0; k < 4; k++)
+			{
+				if (!diff_close((jp.d[k].x - jm.d[k].x) / (2 * h), tg.d[k].x, DIFF_TOL * 100) ||
+				    !diff_close((jp.d[k].z - jm.d[k].z) / (2 * h), tg.d[k].z, DIFF_TOL * 100))
+					ok_fd = 0;
+				if (!diff_close((tp.d[k].y - tm.d[k].y) / (2 * h), tt.d[k].y, DIFF_TOL * 300))
+					ok_t2 = 0;
+			}
+		}
+		qaws_curve_destroy(cp);
+		qaws_curve_destroy(cm);
+
+		diff_rand_jet3(&ybar);
+		lhs = diff_jet3_dot(&ybar, &tg, 0xF);
+		memset(&bar, 0, sizeof(bar));
+		composite_bind(&bar);
+		TEST_ASSERT_STATUS(qaws_curve_eval_adjoint_3d(NULL, c, t, 0xF, &ybar, &bar.views, &tbar));
+		rhs = composite_dot(&bar.data, &dir.data) + (double)tbar * tdot;
+		if (!diff_close(lhs, rhs, DIFF_TOL * 10))
+			ok_adj = 0;
+	}
+	printf("    composite: jets %s, tangent %s, second tangent %s, adjoint %s\n",
+		ok_jet ? "ok" : "NO", ok_fd ? "ok" : "NO", ok_t2 ? "ok" : "NO", ok_adj ? "ok" : "NO");
+	TEST_ASSERT(ok_jet, "composite jets match evaluate");
+	TEST_ASSERT(ok_fd, "composite tangent matches finite differences through segments");
+	TEST_ASSERT(ok_t2, "composite second tangent matches finite differences");
+	TEST_ASSERT(ok_adj, "composite adjoint identity across Bezier and NURBS segments");
+	qaws_curve_destroy(c);
+}
+
 int test_50_diff_curves_main(void)
 {
 	g_pass = 0;
@@ -768,6 +924,7 @@ int test_50_diff_curves_main(void)
 	test_report();
 	test_schema();
 	test_unit_tangent_composition();
+	test_composite();
 
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;

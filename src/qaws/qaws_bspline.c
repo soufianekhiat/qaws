@@ -426,7 +426,10 @@ static qaws_curve_diff_vtable const bspline_diff_vtable = {
 	QAWS_DIFF_PIECEWISE_SMOOTH,
 	bspline_describe_fields,
 	bspline_primal_field,
-	bspline_linear_support
+	bspline_linear_support,
+	NULL,
+	NULL,
+	NULL
 };
 
 static qaws_curve_vtable const bspline_vtable = {

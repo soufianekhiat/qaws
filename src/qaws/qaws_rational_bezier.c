@@ -350,7 +350,10 @@ static qaws_curve_diff_vtable const rbez_diff_vtable = {
 	QAWS_DIFF_SMOOTH,
 	rbez_describe_fields,
 	rbez_primal_field,
-	rbez_linear_support
+	rbez_linear_support,
+	NULL,
+	NULL,
+	NULL
 };
 
 static qaws_curve_vtable const rbez_vtable = {

@@ -3,6 +3,7 @@
 #include "qaws_eval.h"
 #include "internal/qaws_internal_types.h"
 #include "internal/qaws_internal_curve.h"
+#include "internal/qaws_internal_diff.h"
 #include "internal/qaws_internal_validation.h"
 #include <stdlib.h>
 #include <string.h>
@@ -210,6 +211,116 @@ static qaws_continuity composite_get_continuity(qaws_curve const* curve)
 /*  Vtable                                                             */
 /* ------------------------------------------------------------------ */
 
+/* ------------------------------------------------------------------ */
+/*  Differential rules                                                 */
+/*                                                                     */
+/*  Span i is segment i (child i) on a unit-width span: global         */
+/*  derivative k equals the segment derivative times (b - a)^k.        */
+/* ------------------------------------------------------------------ */
+
+#define COMPOSITE_DIFF_CAPS (QAWS_CAP_TANGENT | QAWS_CAP_ADJOINT | QAWS_CAP_TANGENT2)
+
+static unsigned int composite_describe_fields(qaws_curve const* curve, qaws_field_desc* out, unsigned int capacity)
+{
+	(void)curve; (void)out; (void)capacity;
+	return 0;
+}
+
+static qaws_status composite_primal_field(qaws_curve const* curve, qaws_diff_field field,
+	qaws_scalar const** out_data, unsigned int* out_count, unsigned int* out_components)
+{
+	(void)curve; (void)field; (void)out_data; (void)out_count; (void)out_components;
+	return QAWS_STATUS_INVALID_ARGUMENT;
+}
+
+static unsigned int composite_children(qaws_curve const* curve, qaws_diff_child* out, unsigned int capacity)
+{
+	qaws_composite_impl const* impl = (qaws_composite_impl const*)curve->impl;
+	unsigned int i;
+	for (i = 0; i < impl->segment_count && i < capacity; i++)
+	{
+		out[i].curve = impl->segments[i];
+		out[i].surface = NULL;
+	}
+	return impl->segment_count;
+}
+
+static void composite_scale_jet(qaws_curve_jet_3d* j, qaws_scalar scale)
+{
+	qaws_scalar f = scale;
+	unsigned int k;
+	for (k = 1; k <= QAWS_CURVE_JET_ORDER; k++)
+	{
+		j->d[k].x *= f;
+		j->d[k].y *= f;
+		j->d[k].z *= f;
+		f *= scale;
+	}
+}
+
+static qaws_status composite_tangent_span(
+	qaws_diff_context const* ctx, qaws_curve const* curve,
+	unsigned int span_index, qaws_scalar local_t, qaws_scalar t_dot,
+	unsigned int channels, qaws_diff_views const* views,
+	qaws_curve_jet_3d* primal, qaws_curve_jet_3d* tangent, qaws_curve_jet_3d* tangent2)
+{
+	qaws_composite_impl const* impl = (qaws_composite_impl const*)curve->impl;
+	qaws_curve const* seg;
+	qaws_scalar seg_t, scale;
+	qaws_status st;
+
+	if (span_index >= impl->segment_count)
+		return QAWS_STATUS_OUT_OF_RANGE;
+	seg = impl->segments[span_index];
+	composite_map_parameter(seg, local_t, &seg_t, &scale);
+	/* Each composite span has unit width, so dt_segment = scale * dt. */
+	st = qaws_internal_curve_tangent_any(ctx, seg, seg_t, scale * t_dot, channels,
+		qaws_internal_child_views(views, span_index), primal, tangent, tangent2);
+	if (st != QAWS_STATUS_OK)
+		return st;
+	composite_scale_jet(primal, scale);
+	composite_scale_jet(tangent, scale);
+	if (tangent2)
+		composite_scale_jet(tangent2, scale);
+	return QAWS_STATUS_OK;
+}
+
+static qaws_status composite_adjoint_span(
+	qaws_diff_context const* ctx, qaws_curve const* curve,
+	unsigned int span_index, qaws_scalar local_t, unsigned int channels,
+	qaws_curve_jet_3d const* jet_adjoint, qaws_diff_views* views, qaws_scalar* t_adjoint)
+{
+	qaws_composite_impl const* impl = (qaws_composite_impl const*)curve->impl;
+	qaws_curve const* seg;
+	qaws_scalar seg_t, scale, seg_bar = 0;
+	qaws_curve_jet_3d j = *jet_adjoint;
+	qaws_status st;
+
+	if (span_index >= impl->segment_count)
+		return QAWS_STATUS_OUT_OF_RANGE;
+	seg = impl->segments[span_index];
+	composite_map_parameter(seg, local_t, &seg_t, &scale);
+	composite_scale_jet(&j, scale);
+	st = qaws_internal_curve_adjoint_any(ctx, seg, seg_t, channels, &j,
+		(qaws_diff_views*)qaws_internal_child_views(views, span_index), t_adjoint ? &seg_bar : NULL);
+	if (st != QAWS_STATUS_OK)
+		return st;
+	if (t_adjoint)
+		*t_adjoint += scale * seg_bar;
+	return QAWS_STATUS_OK;
+}
+
+static qaws_curve_diff_vtable const composite_diff_vtable = {
+	COMPOSITE_DIFF_CAPS,
+	QAWS_DIFF_PIECEWISE_SMOOTH,
+	composite_describe_fields,
+	composite_primal_field,
+	NULL,
+	composite_tangent_span,
+	composite_adjoint_span,
+	composite_children
+};
+
 static qaws_curve_vtable const composite_vtable = {
 	composite_eval_span_2d,
 	composite_eval_span_3d,
@@ -218,7 +329,7 @@ static qaws_curve_vtable const composite_vtable = {
 	composite_is_periodic,
 	composite_is_rational,
 	composite_get_continuity,
-	NULL /* diff */
+	&composite_diff_vtable
 };
 
 /* ------------------------------------------------------------------ */

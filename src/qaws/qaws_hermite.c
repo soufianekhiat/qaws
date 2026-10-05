@@ -263,7 +263,10 @@ static qaws_curve_diff_vtable const hermite_diff_vtable = {
 	QAWS_DIFF_PIECEWISE_SMOOTH,
 	hermite_describe_fields,
 	hermite_primal_field,
-	hermite_linear_support
+	hermite_linear_support,
+	NULL,
+	NULL,
+	NULL
 };
 
 static qaws_curve_vtable const hermite_vtable = {

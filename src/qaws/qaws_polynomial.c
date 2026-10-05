@@ -269,7 +269,10 @@ static qaws_curve_diff_vtable const polynomial_diff_vtable = {
 	QAWS_DIFF_SMOOTH,
 	polynomial_describe_fields,
 	polynomial_primal_field,
-	polynomial_linear_support
+	polynomial_linear_support,
+	NULL,
+	NULL,
+	NULL
 };
 
 static qaws_curve_vtable const polynomial_vtable = {

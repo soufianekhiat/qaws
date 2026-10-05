@@ -42,6 +42,36 @@ struct qaws_curve_diff_vtable
 		qaws_scalar local_t,
 		unsigned int order,
 		qaws_local_support* out);
+
+	/* Direct rules for derived curves (NULL for basis families). Jets are
+	   lifted to 3D; t_dot and t_adjoint use the global parameter. Child i
+	   lives in views->children[i]. */
+	qaws_status (*tangent_span)(
+		qaws_diff_context const* ctx,
+		qaws_curve const* curve,
+		unsigned int span_index,
+		qaws_scalar local_t,
+		qaws_scalar t_dot,
+		unsigned int channels,
+		qaws_diff_views const* views,
+		qaws_curve_jet_3d* primal,
+		qaws_curve_jet_3d* tangent,
+		qaws_curve_jet_3d* tangent2);
+
+	qaws_status (*adjoint_span)(
+		qaws_diff_context const* ctx,
+		qaws_curve const* curve,
+		unsigned int span_index,
+		qaws_scalar local_t,
+		unsigned int channels,
+		qaws_curve_jet_3d const* jet_adjoint,
+		qaws_diff_views* views,
+		qaws_scalar* t_adjoint);
+
+	unsigned int (*children)(
+		qaws_curve const* curve,
+		qaws_diff_child* out,
+		unsigned int capacity);
 };
 
 struct qaws_surface_diff_vtable

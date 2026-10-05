@@ -98,6 +98,14 @@ qaws_status qaws_curve_read_field(
 	unsigned int capacity,
 	unsigned int* out_scalar_count);
 
+/* Objects a derived curve chains into (composite segments, ...);
+   child i matches views->children[i]. */
+qaws_status qaws_curve_diff_children(
+	qaws_curve const* curve,
+	qaws_diff_child* out_children,
+	unsigned int capacity,
+	unsigned int* out_count);
+
 /* Parameters influencing the evaluation at t. For QAWS_CAP_LINEAR curves
    the weights are exact basis derivatives for orders 0..order. */
 qaws_status qaws_curve_local_support(

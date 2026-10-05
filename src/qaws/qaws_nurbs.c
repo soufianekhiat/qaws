@@ -438,7 +438,10 @@ static qaws_curve_diff_vtable const nurbs_diff_vtable = {
 	QAWS_DIFF_PIECEWISE_SMOOTH,
 	nurbs_describe_fields,
 	nurbs_primal_field,
-	nurbs_linear_support
+	nurbs_linear_support,
+	NULL,
+	NULL,
+	NULL
 };
 
 static qaws_curve_vtable const nurbs_vtable = {
