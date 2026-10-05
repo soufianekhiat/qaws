@@ -196,3 +196,112 @@ void qaws_internal_surface_catmull_rom_blend(
 			+ dh01 * pts[i2].z + dh11 * m1.z) * inv_dt;
 	}
 }
+
+unsigned int qaws_internal_catmull_rom_weights(
+	qaws_scalar const* params,
+	unsigned int n_pts,
+	qaws_scalar t,
+	unsigned int* out_index,
+	qaws_scalar (*out_w)[4])
+{
+	unsigned int seg = 0, i0, i1, i2, i3, r, k;
+	qaws_scalar dt, s, c0, c1, inv = QAWS_ONE;
+	qaws_scalar h[4][4]; /* h[r][basis] for basis h00, h10, h01, h11 */
+
+	for (r = 0; r < QAWS_INTERNAL_CR_ROWS; r++)
+		for (k = 0; k < 4; k++)
+			out_w[r][k] = QAWS_ZERO;
+
+	/* Same cases as qaws_internal_surface_catmull_rom_blend. */
+	if (n_pts == 2)
+	{
+		qaws_scalar denom = params[1] - params[0];
+		qaws_scalar alpha, d;
+		out_index[0] = out_index[2] = 0;
+		out_index[1] = out_index[3] = 1;
+		if (QAWS_FABS(denom) < QAWS_LITERAL(1e-12))
+		{
+			out_w[0][0] = out_w[0][1] = QAWS_LITERAL(0.5);
+			return 4;
+		}
+		alpha = (t - params[0]) / denom;
+		d = QAWS_ONE / denom;
+		if (alpha < QAWS_ZERO) { alpha = QAWS_ZERO; d = QAWS_ZERO; }
+		if (alpha > QAWS_ONE) { alpha = QAWS_ONE; d = QAWS_ZERO; }
+		out_w[0][0] = QAWS_ONE - alpha;
+		out_w[0][1] = alpha;
+		out_w[1][0] = -d;
+		out_w[1][1] = d;
+		return 4;
+	}
+
+	for (k = 0; k < n_pts - 2; k++)
+	{
+		if (t < params[k + 1])
+		{
+			seg = k;
+			break;
+		}
+		seg = k;
+	}
+	if (t >= params[n_pts - 2])
+		seg = n_pts - 2;
+
+	i1 = seg;
+	i2 = seg + 1;
+	i0 = (seg > 0) ? seg - 1 : 0;
+	i3 = (seg + 2 < n_pts) ? seg + 2 : n_pts - 1;
+	out_index[0] = i0;
+	out_index[1] = i1;
+	out_index[2] = i2;
+	out_index[3] = i3;
+
+	dt = params[i2] - params[i1];
+	if (QAWS_FABS(dt) < QAWS_LITERAL(1e-12))
+	{
+		out_w[0][1] = QAWS_ONE;
+		return 4;
+	}
+	s = (t - params[i1]) / dt;
+	if (s < QAWS_ZERO || s > QAWS_ONE)
+	{
+		/* Clamped outside the parameter span: constant in t. */
+		s = s < QAWS_ZERO ? QAWS_ZERO : QAWS_ONE;
+		inv = QAWS_ZERO;
+	}
+	else
+		inv = QAWS_ONE / dt;
+
+	{
+		qaws_scalar dp_prev = params[i2] - params[i0];
+		qaws_scalar dp_next = params[i3] - params[i1];
+		if (QAWS_FABS(dp_prev) < QAWS_LITERAL(1e-12)) dp_prev = QAWS_ONE;
+		if (QAWS_FABS(dp_next) < QAWS_LITERAL(1e-12)) dp_next = QAWS_ONE;
+		c0 = dt / dp_prev;
+		c1 = dt / dp_next;
+	}
+
+	/* Hermite basis and its s-derivatives. */
+	h[0][0] = 2 * s * s * s - 3 * s * s + 1;  h[0][1] = s * s * s - 2 * s * s + s;
+	h[0][2] = -2 * s * s * s + 3 * s * s;     h[0][3] = s * s * s - s * s;
+	h[1][0] = 6 * s * s - 6 * s;              h[1][1] = 3 * s * s - 4 * s + 1;
+	h[1][2] = -6 * s * s + 6 * s;             h[1][3] = 3 * s * s - 2 * s;
+	h[2][0] = 12 * s - 6;                     h[2][1] = 6 * s - 4;
+	h[2][2] = -12 * s + 6;                    h[2][3] = 6 * s - 2;
+	h[3][0] = 12;                             h[3][1] = 6;
+	h[3][2] = -12;                            h[3][3] = 6;
+
+	{
+		qaws_scalar scale = QAWS_ONE;
+		for (r = 0; r < 4; r++)
+		{
+			/* Q = h00 P1 + h10 c0 (P2 - P0) + h01 P2 + h11 c1 (P3 - P1) */
+			out_w[r][0] = -h[r][1] * c0 * scale;
+			out_w[r][1] = (h[r][0] - h[r][3] * c1) * scale;
+			out_w[r][2] = (h[r][2] + h[r][1] * c0) * scale;
+			out_w[r][3] = h[r][3] * c1 * scale;
+			scale *= inv;
+		}
+	}
+	return 4;
+}

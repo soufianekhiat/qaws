@@ -114,6 +114,19 @@ QAWS_INLINE void qaws_internal_surface_normal(qaws_vec3 du, qaws_vec3 dv, qaws_v
 	}
 }
 
+/* Rows of qaws_internal_catmull_rom_weights: derivative orders 0..5. */
+#define QAWS_INTERNAL_CR_ROWS 6
+
+/* The Catmull-Rom blend as explicit weights: blend(t) = sum_k out_w[r][k] *
+   pts[out_index[k]] for the r-th derivative with respect to t (indices may
+   repeat at the ends). Matches qaws_internal_surface_catmull_rom_blend. */
+unsigned int qaws_internal_catmull_rom_weights(
+	qaws_scalar const* params,
+	unsigned int n_pts,
+	qaws_scalar t,
+	unsigned int* out_index,
+	qaws_scalar (*out_w)[4]);
+
 /* Non-uniform Catmull-Rom blend through n_pts points with the given
    parameter values. out_deriv may be NULL. */
 void qaws_internal_surface_catmull_rom_blend(

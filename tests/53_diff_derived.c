@@ -18,17 +18,17 @@
 
 #define DER_SAMPLES 5
 #define DER_MAX 32
-#define DER_FIXTURES 5
+#define DER_FIXTURES 7
 
 /* A derived fixture: up to four child curves plus up to two own fields. */
 typedef struct derived_fixture
 {
 	char const* name;
-	int kind; /* 0 extrusion (2D profile), 1 extrusion (3D profile), 2 ruled, 3 revolution, 4 coons */
+	int kind; /* 0 extrusion (2D), 1 extrusion (3D), 2 ruled, 3 revolution, 4 coons, 5 loft, 6 gordon */
 	unsigned int child_count;
-	unsigned int child_dim[4];
-	unsigned int child_cp[4];
-	qaws_scalar child_params[4][DER_MAX * 3];
+	unsigned int child_dim[6];
+	unsigned int child_cp[6];
+	qaws_scalar child_params[6][DER_MAX * 3];
 	unsigned int own_count;      /* total scalars of the own fields */
 	unsigned int own_nf;
 	qaws_diff_field own_field[2];
@@ -38,7 +38,7 @@ typedef struct derived_fixture
 
 typedef struct derived_instance
 {
-	qaws_curve* children[4];
+	qaws_curve* children[6];
 	qaws_surface* surface;
 } derived_instance;
 
@@ -108,6 +108,38 @@ static int instance_build(derived_fixture const* f, qaws_scalar const (*child_pa
 		d.angle = own[3];
 		qaws_surface_create_revolution(&d, &out->surface);
 	}
+	else if (f->kind == 5)
+	{
+		qaws_surface_loft_desc d;
+		qaws_curve const* sections[4];
+		unsigned int k;
+		for (k = 0; k < 4; k++)
+			sections[k] = out->children[k];
+		d.sections = sections;
+		d.section_count = 4;
+		d.v_parameters = NULL;
+		qaws_surface_create_loft(&d, &out->surface);
+	}
+	else if (f->kind == 6)
+	{
+		static qaws_scalar const params[3] = { 0, 0.5f, 1 };
+		qaws_surface_gordon_desc d;
+		qaws_curve const* uc[3];
+		qaws_curve const* vc[3];
+		unsigned int k;
+		for (k = 0; k < 3; k++)
+		{
+			uc[k] = out->children[k];
+			vc[k] = out->children[3 + k];
+		}
+		d.u_curves = uc;
+		d.u_curve_count = 3;
+		d.v_params = params;
+		d.v_curves = vc;
+		d.v_curve_count = 3;
+		d.u_params = params;
+		qaws_surface_create_gordon(&d, &out->surface);
+	}
 	else
 	{
 		qaws_surface_coons_desc d;
@@ -126,7 +158,7 @@ static void instance_destroy(derived_instance* in)
 	unsigned int i;
 	if (in->surface)
 		qaws_surface_destroy(in->surface);
-	for (i = 0; i < 4; i++)
+	for (i = 0; i < 6; i++)
 		if (in->children[i])
 			qaws_curve_destroy(in->children[i]);
 }
@@ -134,11 +166,11 @@ static void instance_destroy(derived_instance* in)
 /* Direction tangent / adjoint storage plus child storage. */
 typedef struct derived_storage
 {
-	qaws_scalar child[4][DER_MAX * 3];
+	qaws_scalar child[6][DER_MAX * 3];
 	qaws_scalar own[4];
 	qaws_field_view own_view[2];
-	qaws_field_view child_view[4];
-	qaws_diff_views child_views[4];
+	qaws_field_view child_view[6];
+	qaws_diff_views child_views[6];
 	qaws_diff_views views;
 } derived_storage;
 
@@ -183,7 +215,7 @@ static double storage_dot(derived_fixture const* f, derived_storage const* a, de
 
 static int shifted_build(derived_fixture const* f, derived_storage const* dir, double h, derived_instance* out)
 {
-	qaws_scalar cp[4][DER_MAX * 3], own[4];
+	qaws_scalar cp[6][DER_MAX * 3], own[4];
 	unsigned int i, n;
 	for (i = 0; i < f->child_count; i++)
 		for (n = 0; n < f->child_cp[i] * f->child_dim[i]; n++)
@@ -297,6 +329,44 @@ static void make_fixtures(derived_fixture* fx)
 			else { p[0] = 3; p[1] = s; }              /* d1: u = 1 */
 			p[2] = bump + (i == 1 ? (qaws_scalar)0.5 * (qaws_scalar)n / 5 : QAWS_ZERO)
 			     + (i == 3 ? (qaws_scalar)0.5 * (qaws_scalar)n / 5 : QAWS_ZERO);
+		}
+	}
+
+	/* Loft through four sections at uniform v. */
+	fx[5].name = "loft";
+	fx[5].kind = 5;
+	fx[5].child_count = 4;
+	for (i = 0; i < 4; i++)
+	{
+		unsigned int n;
+		fx[5].child_dim[i] = 3;
+		fx[5].child_cp[i] = 6;
+		for (n = 0; n < 6; n++)
+		{
+			qaws_scalar* p = &fx[5].child_params[i][3 * n];
+			p[0] = (qaws_scalar)n * (qaws_scalar)0.6;
+			p[1] = (qaws_scalar)i + (qaws_scalar)0.1 * diff_rand();
+			p[2] = (qaws_scalar)0.5 * diff_rand();
+		}
+	}
+
+	/* Gordon network: three u-curves and three v-curves on a smooth height field. */
+	fx[6].name = "gordon";
+	fx[6].kind = 6;
+	fx[6].child_count = 6;
+	for (i = 0; i < 6; i++)
+	{
+		unsigned int n;
+		fx[6].child_dim[i] = 3;
+		fx[6].child_cp[i] = 6;
+		for (n = 0; n < 6; n++)
+		{
+			qaws_scalar s = (qaws_scalar)n * (qaws_scalar)0.6;
+			qaws_scalar fixed = (qaws_scalar)(i % 3) * (qaws_scalar)1.5;
+			qaws_scalar* p = &fx[6].child_params[i][3 * n];
+			if (i < 3) { p[0] = s; p[1] = fixed; }
+			else { p[0] = fixed; p[1] = s; }
+			p[2] = (qaws_scalar)0.3 * (qaws_scalar)sin(p[0]) * (qaws_scalar)cos(p[1]) + (qaws_scalar)0.1 * diff_rand();
 		}
 	}
 }
