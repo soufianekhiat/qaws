@@ -5,6 +5,7 @@
 #include "internal/qaws_internal_surface.h"
 #include "internal/qaws_internal_diff.h"
 #include "core/qaws_dual_core.h"
+#include "internal/qaws_internal_basis.h"
 #include <string.h>
 
 /* ================================================================== */
@@ -191,27 +192,14 @@ static integrand_fn curve_integrand(qaws_curve_functional f)
 
 #define CURVE_CHANNELS (QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2)
 
-/* Visits quadrature points: callback(t, weight). */
-typedef qaws_status (*curve_point_fn)(void* user, qaws_scalar t, qaws_scalar weight);
-
-static qaws_status curve_quadrature(qaws_curve const* curve, unsigned int n, curve_point_fn fn, void* user)
-{
-	double x[8], w[8];
-	unsigned int s, q;
-	gauss_rule(n, x, w);
-	for (s = 0; s < curve->span_count; s++)
-	{
-		double a = curve->span_boundaries[s], b = curve->span_boundaries[s + 1];
-		for (q = 0; q < n; q++)
-		{
-			qaws_status st = fn(user, (qaws_scalar)(0.5 * (a + b) + 0.5 * (b - a) * x[q]), (qaws_scalar)(0.5 * (b - a) * w[q]));
-			if (st != QAWS_STATUS_OK)
-				return st;
-		}
-	}
-	return QAWS_STATUS_OK;
-}
-
+/*
+ * Knots as parameters: span boundaries are knot values, so moving a knot
+ * also moves the quadrature nodes and weights of the spans it bounds.
+ * With a = knot[left], b = knot[left + 1], node t = a (1-x)/2 + b (1+x)/2
+ * and weight W = (b - a) w / 2, the quadrature differentiates exactly as
+ *   dQ/da += -w/2 f + W f_t (1-x)/2,   dQ/db += w/2 f + W f_t (1+x)/2
+ * on top of the fixed-node knot derivative of f.
+ */
 typedef struct curve_job
 {
 	qaws_diff_context const* ctx;
@@ -220,7 +208,96 @@ typedef struct curve_job
 	qaws_diff_views const* direction;
 	qaws_diff_views* sink;
 	double value, tangent, tangent2;
+	/* knot terms (NULL when knots are not among the parameters) */
+	qaws_field_view const* knot_in;
+	qaws_field_view* knot_out;
+	qaws_scalar* knots;
+	unsigned int knot_count, cp_count;
+	/* current node */
+	unsigned int left_knot;
+	double x, w;
 } curve_job;
+
+typedef qaws_status (*curve_point_fn)(curve_job* job, qaws_scalar t, qaws_scalar weight);
+
+static qaws_status curve_quadrature(curve_job* job, unsigned int n, curve_point_fn fn)
+{
+	qaws_curve const* curve = job->curve;
+	double x[8], w[8];
+	unsigned int s, q;
+	gauss_rule(n, x, w);
+	for (s = 0; s < curve->span_count; s++)
+	{
+		double a = curve->span_boundaries[s], b = curve->span_boundaries[s + 1];
+		if (job->knots)
+			job->left_knot = qaws_internal_find_knot_span(job->knots, job->knot_count, curve->degree, job->cp_count,
+				(qaws_scalar)(0.5 * (a + b)));
+		for (q = 0; q < n; q++)
+		{
+			qaws_status st;
+			job->x = x[q];
+			job->w = w[q];
+			st = fn(job, (qaws_scalar)(0.5 * (a + b) + 0.5 * (b - a) * x[q]), (qaws_scalar)(0.5 * (b - a) * w[q]));
+			if (st != QAWS_STATUS_OK)
+				return st;
+		}
+	}
+	return QAWS_STATUS_OK;
+}
+
+/* Sets up knot terms when `views` carries a knot field the curve can
+   differentiate. */
+static qaws_status curve_job_knots(curve_job* job, qaws_diff_views const* views)
+{
+	qaws_field_desc fields[8];
+	qaws_field_view const* kv;
+	unsigned int n = 0, i, got = 0;
+	int ok = 0;
+	if (!views)
+		return QAWS_STATUS_OK;
+	kv = qaws_diff_views_find(views, QAWS_FIELD_KNOTS);
+	if (!kv || !kv->data)
+		return QAWS_STATUS_OK;
+	if (qaws_curve_describe_fields(job->curve, fields, 8, &n) != QAWS_STATUS_OK)
+		return QAWS_STATUS_OK;
+	for (i = 0; i < n && i < 8; i++)
+	{
+		if (fields[i].field == QAWS_FIELD_KNOTS && (fields[i].capabilities & QAWS_CAP_TANGENT))
+		{
+			ok = 1;
+			job->knot_count = fields[i].count;
+		}
+		if (fields[i].field == QAWS_FIELD_CONTROL_POINTS)
+			job->cp_count = fields[i].count;
+	}
+	if (!ok)
+		return QAWS_STATUS_OK;
+	job->knots = (qaws_scalar*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_scalar) * (job->knot_count + 1)));
+	if (!job->knots)
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	if (qaws_curve_read_field(job->curve, QAWS_FIELD_KNOTS, job->knots, job->knot_count, &got) != QAWS_STATUS_OK)
+	{
+		qaws_internal_dealloc(NULL, job->knots);
+		job->knots = NULL;
+		return QAWS_STATUS_OK;
+	}
+	job->knot_in = kv;
+	return QAWS_STATUS_OK;
+}
+
+/* Rates of the node and weight along the knot direction. */
+static void curve_node_rates(curve_job const* job, double* t_dot, double* w_dot)
+{
+	qaws_scalar da = QAWS_ZERO, db = QAWS_ZERO;
+	*t_dot = 0;
+	*w_dot = 0;
+	if (!job->knots || !job->knot_in)
+		return;
+	qaws_internal_view_read(job->knot_in, job->left_knot, 1, &da);
+	qaws_internal_view_read(job->knot_in, job->left_knot + 1, 1, &db);
+	*t_dot = 0.5 * (1 - job->x) * da + 0.5 * (1 + job->x) * db;
+	*w_dot = 0.5 * job->w * ((double)db - da);
+}
 
 static void curve_jet_values(qaws_curve_jet_3d const* j, qaws_vec3* y)
 {
@@ -229,14 +306,16 @@ static void curve_jet_values(qaws_curve_jet_3d const* j, qaws_vec3* y)
 	y[2] = j->d[2];
 }
 
-static qaws_status curve_eval_point(void* user, qaws_scalar t, qaws_scalar weight)
+static qaws_status curve_eval_point(curve_job* job, qaws_scalar t, qaws_scalar weight)
 {
-	curve_job* job = (curve_job*)user;
 	qaws_curve_jet_3d p, tg, tt;
 	qaws_dual3 y[3];
 	qaws_dual1 v;
 	unsigned int k;
-	qaws_status st = qaws_internal_curve_tangent_any(job->ctx, job->curve, t, QAWS_ZERO, CURVE_CHANNELS,
+	double t_dot, w_dot;
+	qaws_status st;
+	curve_node_rates(job, &t_dot, &w_dot);
+	st = qaws_internal_curve_tangent_any(job->ctx, job->curve, t, (qaws_scalar)t_dot, CURVE_CHANNELS,
 		job->direction, &p, &tg, job->direction ? &tt : NULL);
 	if (st != QAWS_STATUS_OK)
 		return st;
@@ -244,17 +323,18 @@ static qaws_status curve_eval_point(void* user, qaws_scalar t, qaws_scalar weigh
 		y[k] = qaws_dual3_make(p.d[k], job->direction ? tg.d[k] : qaws_v3_zero(),
 			job->direction ? tt.d[k] : qaws_v3_zero());
 	v = job->f(y);
+	/* (W f)' = W f' + W' f,  (W f)'' = W f'' + 2 W' f'  (W is linear in the knots) */
 	job->value += (double)weight * v.v;
-	job->tangent += (double)weight * v.t;
-	job->tangent2 += (double)weight * v.tt;
+	job->tangent += (double)weight * v.t + w_dot * v.v;
+	job->tangent2 += (double)weight * v.tt + 2.0 * w_dot * v.t;
 	return QAWS_STATUS_OK;
 }
 
-static qaws_status curve_gradient_point(void* user, qaws_scalar t, qaws_scalar weight)
+static qaws_status curve_gradient_point(curve_job* job, qaws_scalar t, qaws_scalar weight)
 {
-	curve_job* job = (curve_job*)user;
 	qaws_curve_jet_3d p, tg, bar;
 	qaws_vec3 y[3], g[3];
+	qaws_scalar fv, t_adj = QAWS_ZERO;
 	unsigned int k;
 	qaws_status st = qaws_internal_curve_tangent_any(job->ctx, job->curve, t, QAWS_ZERO, CURVE_CHANNELS, NULL, &p, &tg, NULL);
 	if (st != QAWS_STATUS_OK)
@@ -264,19 +344,30 @@ static qaws_status curve_gradient_point(void* user, qaws_scalar t, qaws_scalar w
 		qaws_dual3 yy[3];
 		for (k = 0; k < 3; k++)
 			yy[k] = qaws_dual3_const(y[k]);
-		job->value += (double)weight * job->f(yy).v;
+		fv = job->f(yy).v;
+		job->value += (double)weight * fv;
 	}
 	integrand_gradient(job->f, y, 3, g);
 	memset(&bar, 0, sizeof(bar));
 	for (k = 0; k < 3; k++)
 		bar.d[k] = qaws_v3_scale(g[k], weight);
 	bar.channels = CURVE_CHANNELS;
-	return qaws_internal_curve_adjoint_any(job->ctx, job->curve, t, CURVE_CHANNELS, &bar, job->sink, NULL);
+	st = qaws_internal_curve_adjoint_any(job->ctx, job->curve, t, CURVE_CHANNELS, &bar, job->sink,
+		job->knot_out ? &t_adj : NULL);
+	if (st != QAWS_STATUS_OK || !job->knot_out)
+		return st;
+	{
+		/* moving span boundaries: t_adj = W f_t */
+		qaws_scalar ga = (qaws_scalar)(-0.5 * job->w * fv + 0.5 * (1 - job->x) * t_adj);
+		qaws_scalar gb = (qaws_scalar)(0.5 * job->w * fv + 0.5 * (1 + job->x) * t_adj);
+		qaws_internal_view_add(job->knot_out, job->left_knot, 1, &ga);
+		qaws_internal_view_add(job->knot_out, job->left_knot + 1, 1, &gb);
+	}
+	return QAWS_STATUS_OK;
 }
 
-static qaws_status curve_hvp_point(void* user, qaws_scalar t, qaws_scalar weight)
+static qaws_status curve_hvp_point(curve_job* job, qaws_scalar t, qaws_scalar weight)
 {
-	curve_job* job = (curve_job*)user;
 	qaws_curve_jet_3d p, tg, bar;
 	qaws_vec3 y[3], yd[3], hv[3];
 	unsigned int k;
@@ -316,7 +407,10 @@ qaws_status qaws_curve_functional_eval(
 	if (st != QAWS_STATUS_OK)
 		return st;
 	job.direction = direction;
-	st = curve_quadrature(curve, clamp_rule(quadrature, 6), curve_eval_point, &job);
+	st = curve_job_knots(&job, direction);
+	if (st == QAWS_STATUS_OK)
+		st = curve_quadrature(&job, clamp_rule(quadrature, 6), curve_eval_point);
+	qaws_internal_dealloc(NULL, job.knots);
 	if (st != QAWS_STATUS_OK)
 		return st;
 	if (out_value) *out_value = (qaws_scalar)job.value;
@@ -334,7 +428,11 @@ qaws_status qaws_curve_functional_gradient(
 	if (st != QAWS_STATUS_OK)
 		return st;
 	job.sink = gradient;
-	st = curve_quadrature(curve, clamp_rule(quadrature, 6), curve_gradient_point, &job);
+	st = curve_job_knots(&job, gradient);
+	job.knot_out = (qaws_field_view*)job.knot_in;
+	if (st == QAWS_STATUS_OK)
+		st = curve_quadrature(&job, clamp_rule(quadrature, 6), curve_gradient_point);
+	qaws_internal_dealloc(NULL, job.knots);
 	if (st == QAWS_STATUS_OK && out_value)
 		*out_value = (qaws_scalar)job.value;
 	return st;
@@ -357,7 +455,7 @@ qaws_status qaws_curve_functional_hvp(
 		return QAWS_STATUS_UNSUPPORTED_OPERATION;
 	job.direction = direction;
 	job.sink = out_hv;
-	return curve_quadrature(curve, clamp_rule(quadrature, 6), curve_hvp_point, &job);
+	return curve_quadrature(&job, clamp_rule(quadrature, 6), curve_hvp_point);
 }
 
 /* ================================================================== */

@@ -279,6 +279,124 @@ static void check_surface_functional(qaws_surface_functional f, char const* name
 	qaws_surface_destroy(s);
 }
 
+
+/* ------------------------------------------------------------------ */
+/*  Knots as parameters of curve functionals                          */
+/*                                                                    */
+/*  Unclamped knots so every knot moves freely; the quadratic case     */
+/*  has a bending integrand that jumps at knots, so the moving span    */
+/*  boundaries contribute.                                             */
+/* ------------------------------------------------------------------ */
+
+static qaws_curve* knot_curve(unsigned int degree, qaws_scalar const* cps, qaws_scalar const* knots)
+{
+	qaws_bspline_desc d;
+	qaws_curve* c = NULL;
+	memset(&d, 0, sizeof(d));
+	d.dimension = QAWS_DIMENSION_3D;
+	d.degree = degree;
+	d.control_points = cps;
+	d.control_point_count = 6;
+	d.knots = knots;
+	d.knot_count = 6 + degree + 1;
+	qaws_curve_create_bspline(&d, &c);
+	return c;
+}
+
+static double knot_value(unsigned int degree, qaws_scalar const* cps, qaws_scalar const* knots,
+	qaws_scalar const* dk, double h, qaws_curve_functional f)
+{
+	qaws_scalar k[16];
+	qaws_scalar v = 0;
+	unsigned int i;
+	qaws_curve* c;
+	for (i = 0; i < 6 + degree + 1; i++)
+		k[i] = (qaws_scalar)(knots[i] + h * dk[i]);
+	c = knot_curve(degree, cps, k);
+	qaws_curve_functional_eval(NULL, c, f, 0, NULL, &v, NULL, NULL);
+	qaws_curve_destroy(c);
+	return v;
+}
+
+static void check_knot_functional(unsigned int degree, qaws_curve_functional f, char const* name)
+{
+	static qaws_scalar const k3[10] = { 0, 0.4f, 0.9f, 1.5f, 2.1f, 2.6f, 3.2f, 3.6f, 4.1f, 4.5f };
+	static qaws_scalar const k2[9] = { 0, 0.5f, 1.1f, 1.6f, 2.3f, 2.9f, 3.4f, 4.0f, 4.4f };
+	qaws_scalar const* knots = degree == 3 ? k3 : k2;
+	unsigned int kc = 6 + degree + 1, i;
+	qaws_scalar cps[18], dk[16], gk[16], gc[18], v = 0, tan = 0, tan2 = 0, tp = 0, tm = 0;
+	qaws_field_view fv[2];
+	qaws_diff_views dir, grad;
+	qaws_curve* c;
+	double h = DIFF_FD_STEP * 0.5, fd, fd2, gdot;
+	char label[96];
+
+	for (i = 0; i < 6; i++)
+	{
+		cps[3 * i] = (qaws_scalar)i;
+		cps[3 * i + 1] = (qaws_scalar)(0.8 * sin(1.3 * i));
+		cps[3 * i + 2] = (qaws_scalar)(0.3 * cos(0.9 * i));
+	}
+	diff_rand_fill(dk, kc);
+	for (i = 0; i < kc; i++)
+		dk[i] *= (qaws_scalar)0.3;
+	c = knot_curve(degree, cps, knots);
+
+	fv[0] = qaws_field_view_make(QAWS_FIELD_KNOTS, dk, kc, 1);
+	dir.fields = fv;
+	dir.field_count = 1;
+	dir.children = NULL;
+	dir.child_count = 0;
+	TEST_ASSERT_STATUS(qaws_curve_functional_eval(NULL, c, f, 0, &dir, &v, &tan, &tan2));
+
+	fd = (knot_value(degree, cps, knots, dk, h, f) - knot_value(degree, cps, knots, dk, -h, f)) / (2 * h);
+	{
+		/* second derivative from tangents at shifted knots */
+		qaws_scalar ks[16];
+		qaws_curve* cs;
+		for (i = 0; i < kc; i++) ks[i] = (qaws_scalar)(knots[i] + h * dk[i]);
+		cs = knot_curve(degree, cps, ks);
+		qaws_curve_functional_eval(NULL, cs, f, 0, &dir, NULL, &tp, NULL);
+		qaws_curve_destroy(cs);
+		for (i = 0; i < kc; i++) ks[i] = (qaws_scalar)(knots[i] - h * dk[i]);
+		cs = knot_curve(degree, cps, ks);
+		qaws_curve_functional_eval(NULL, cs, f, 0, &dir, NULL, &tm, NULL);
+		qaws_curve_destroy(cs);
+		fd2 = ((double)tp - tm) / (2 * h);
+	}
+
+	memset(gk, 0, sizeof(gk));
+	memset(gc, 0, sizeof(gc));
+	fv[0] = qaws_field_view_make(QAWS_FIELD_KNOTS, gk, kc, 1);
+	fv[1] = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, gc, 6, 3);
+	grad.fields = fv;
+	grad.field_count = 2;
+	grad.children = NULL;
+	grad.child_count = 0;
+	TEST_ASSERT_STATUS(qaws_curve_functional_gradient(NULL, c, f, 0, &grad, NULL));
+	gdot = diff_dot(gk, dk, kc);
+
+	printf("    degree %u %-18s tangent %.8f fd %.8f gradient %.8f | tangent2 %.6f fd %.6f\n",
+		degree, name, (double)tan, fd, gdot, (double)tan2, fd2);
+	sprintf(label, "knot tangent of %s matches finite differences", name);
+	TEST_ASSERT(diff_close(tan, fd, DIFF_TOL * 50), label);
+	sprintf(label, "knot gradient of %s matches its tangent", name);
+	TEST_ASSERT(diff_close(tan, gdot, DIFF_TOL * 10), label);
+	sprintf(label, "knot tangent2 of %s matches finite differences", name);
+	TEST_ASSERT(diff_close(tan2, fd2, DIFF_TOL * 100), label);
+	qaws_curve_destroy(c);
+}
+
+static void test_knot_functionals(void)
+{
+	printf("  knots as parameters\n");
+	check_knot_functional(3, QAWS_FUNCTIONAL_LENGTH, "length");
+	check_knot_functional(3, QAWS_FUNCTIONAL_BENDING, "bending");
+	check_knot_functional(3, QAWS_FUNCTIONAL_CURVATURE_SQUARED, "curvature squared");
+	check_knot_functional(2, QAWS_FUNCTIONAL_LENGTH, "length");
+	check_knot_functional(2, QAWS_FUNCTIONAL_BENDING, "bending");
+}
+
 int test_56_diff_functionals_main(void)
 {
 	g_pass = 0;
@@ -289,6 +407,7 @@ int test_56_diff_functionals_main(void)
 	check_curve_functional(QAWS_FUNCTIONAL_LENGTH, "length");
 	check_curve_functional(QAWS_FUNCTIONAL_BENDING, "bending");
 	check_curve_functional(QAWS_FUNCTIONAL_CURVATURE_SQUARED, "curvature squared");
+	test_knot_functionals();
 	test_surface_values();
 	check_surface_functional(QAWS_FUNCTIONAL_AREA, "area");
 	check_surface_functional(QAWS_FUNCTIONAL_THIN_PLATE, "thin plate");
