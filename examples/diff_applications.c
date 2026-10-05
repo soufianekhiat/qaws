@@ -4,8 +4,9 @@
  *   1. Hair strands from a photo: orientation field (structure tensor),
  *      evenly spaced streamlines, B-spline strands optimized to follow the
  *      field through unit-tangent adjoints (qaws_diff_geometry.h).
- *   2. Photo vectorization: isocontours become centripetal Catmull-Rom
- *      splines whose interpolation points are optimized onto the contours.
+ *   2. Photo vectorization: isocontours become interpolating splines
+ *      (centripetal Catmull-Rom and Yuksel C2) whose points are optimized
+ *      onto the contours; curvature combs compare the two families.
  *   3. Triangulated mesh to six bicubic patches with ADMM: exact per-patch
  *      least squares at foot points, seam control points in consensus.
  *   4. Non-rigid registration of a template curve to a scan: CMA-ES on the
@@ -696,6 +697,7 @@ typedef struct contour
 	int np;                /* interpolation points */
 	qaws_scalar pts[VZ_MAX_PTS * 2];
 	qaws_scalar init[VZ_MAX_PTS * 2];
+	int family;            /* 0: centripetal Catmull-Rom, 1: Yuksel C2 */
 	float color[3];
 } contour;
 
@@ -877,6 +879,18 @@ static qaws_curve* contour_curve(contour const* c, qaws_scalar const* pts)
 {
 	qaws_catmull_rom_desc d;
 	qaws_curve* cr = NULL;
+	if (c->family == 1)
+	{
+		qaws_yuksel_desc y;
+		memset(&y, 0, sizeof(y));
+		y.dimension = QAWS_DIMENSION_2D;
+		y.control_points = pts;
+		y.control_point_count = (unsigned int)c->np;
+		y.mode = QAWS_YUKSEL_MODE_BEZIER;
+		y.closed = c->closed;
+		qaws_curve_create_yuksel(&y, &cr);
+		return cr;
+	}
 	memset(&d, 0, sizeof(d));
 	d.dimension = QAWS_DIMENSION_2D;
 	d.control_points = pts;
@@ -946,6 +960,174 @@ static void contour_svg(svg* s, imgmap const* m, qaws_curve const* c, char const
 	}
 	svg_polyline(s, xy, n, color, width, 1.0, 0);
 	free(xy);
+}
+
+/* Signed curvature of a 2D curve at t. */
+static double curve_kappa(qaws_curve const* c, double t)
+{
+	qaws_eval_result_2d e;
+	double s;
+	qaws_curve_evaluate_2d(c, (qaws_scalar)t, QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2, &e);
+	s = sqrt(e.d1.x * e.d1.x + e.d1.y * e.d1.y);
+	return s > 1e-12 ? (e.d1.x * e.d2.y - e.d1.y * e.d2.x) / (s * s * s) : 0;
+}
+
+/* Mean |curvature jump| across the interpolation points (1/px). */
+static double curvature_jumps(qaws_curve const* c, int* count)
+{
+	qaws_range r = qaws_curve_get_parameter_range(c);
+	int k, n = (int)(r.max_value + 0.5);
+	double acc = 0;
+	*count = 0;
+	for (k = 1; k < n; k++)
+	{
+		acc += fabs(curve_kappa(c, k - 1e-4) - curve_kappa(c, k + 1e-4));
+		(*count)++;
+	}
+	return acc;
+}
+
+/* Curve plus its curvature comb (normals scaled by curvature). */
+static void comb_svg(svg* s, imgmap const* m, qaws_curve const* c, double comb_scale, char const* color, char const* comb_color)
+{
+	qaws_range r = qaws_curve_get_parameter_range(c);
+	int n = (int)(r.max_value * 12) + 1, k;
+	double* tips = (double*)malloc(sizeof(double) * 2 * (size_t)n);
+	for (k = 0; k < n; k++)
+	{
+		qaws_eval_result_2d e;
+		double t = r.max_value * k / (n - 1), sp, nx, ny, kap, x0, y0;
+		qaws_curve_evaluate_2d(c, (qaws_scalar)t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2, &e);
+		sp = sqrt(e.d1.x * e.d1.x + e.d1.y * e.d1.y) + 1e-12;
+		nx = -e.d1.y / sp;
+		ny = e.d1.x / sp;
+		kap = (e.d1.x * e.d2.y - e.d1.y * e.d2.x) / (sp * sp * sp);
+		/* clamp the comb length so tight turns do not swamp the figure */
+		if (comb_scale * kap > 9) kap = 9 / comb_scale;
+		if (comb_scale * kap < -9) kap = -9 / comb_scale;
+		map_pt(m, e.position.x, e.position.y, &x0, &y0);
+		map_pt(m, e.position.x - comb_scale * kap * nx, e.position.y - comb_scale * kap * ny, &tips[2 * k], &tips[2 * k + 1]);
+		svg_line(s, x0, y0, tips[2 * k], tips[2 * k + 1], comb_color, 0.7, 0.55);
+	}
+	svg_polyline(s, tips, n, comb_color, 1.0, 0.9, 0);
+	contour_svg(s, m, c, color, 2.0);
+	free(tips);
+}
+
+/* Same contours, same points, same energy: centripetal Catmull-Rom (C1)
+   against Yuksel C2 interpolating splines. */
+static void yuksel_compare(contour* cs, int nc, float const* f, image const* img)
+{
+	static contour ys[VZ_MAX_CURVES];
+	double dist_cr = 0, dist_yk = 0, jump_cr = 0, jump_yk = 0;
+	int ncr = 0, nyk = 0, i, it;
+	svg s;
+	char buf[256];
+
+	for (i = 0; i < nc; i++)
+	{
+		contour* c = &ys[i];
+		qaws_scalar g[VZ_MAX_PTS * 2];
+		adam opt;
+		double dd;
+		int cnt;
+		*c = cs[i];
+		c->family = 1;
+		if (!c->closed)
+		{
+			/* interpolating splines through the real points: drop the phantoms */
+			c->np -= 2;
+			memmove(c->pts, cs[i].init + 2, sizeof(qaws_scalar) * 2 * (size_t)c->np);
+			memcpy(c->init, c->pts, sizeof(qaws_scalar) * 2 * (size_t)c->np);
+		}
+		else
+		{
+			memcpy(c->pts, cs[i].init, sizeof(qaws_scalar) * 2 * (size_t)c->np);
+		}
+		memset(&opt, 0, sizeof(opt));
+		for (it = 0; it < VZ_ITERS; it++)
+		{
+			contour_energy(f, img->w, img->h, c, c->pts, g, NULL);
+			adam_step(&opt, c->pts, g, 2 * c->np, 0.25 * (1.0 - 0.8 * it / (double)VZ_ITERS));
+		}
+		contour_energy(f, img->w, img->h, c, c->pts, NULL, &dd);
+		dist_yk += dd;
+		contour_energy(f, img->w, img->h, &cs[i], cs[i].pts, NULL, &dd);
+		dist_cr += dd;
+		{
+			qaws_curve* a = contour_curve(&cs[i], cs[i].pts);
+			qaws_curve* b = contour_curve(c, c->pts);
+			jump_cr += curvature_jumps(a, &cnt);
+			ncr += cnt;
+			jump_yk += curvature_jumps(b, &cnt);
+			nyk += cnt;
+			qaws_curve_destroy(a);
+			qaws_curve_destroy(b);
+		}
+	}
+
+	svg_open(&s, "showcase/app2b_yuksel_vs_catmull_rom.svg", 1240, 700, "Interpolating splines: Catmull-Rom vs Yuksel C2",
+		"Same isocontours, same interpolation points, same optimization; curvature combs show C1 kinks of centripetal "
+		"Catmull-Rom against the C2 Yuksel splines (curvature peaks at the points).");
+	{
+		double zx0 = 170, zy0 = 105, zs = 5.2, zw = 112, zh = 84;
+		imgmap ma = { 20, 100, zx0, zy0, zs }, mb = { 640, 100, zx0, zy0, zs };
+		double zpw = zw * zs, zph = zh * zs;
+		int p;
+		for (p = 0; p < 2; p++)
+		{
+			imgmap const* m = p ? &mb : &ma;
+			fprintf(s.f, "<text x=\"%.1f\" y=\"92\" font-size=\"13\" font-weight=\"600\" fill=\"%s\">%s</text>\n", m->x0,
+				p ? "#0969da" : "#9a6700", p ? "Yuksel C2 (Bezier mode), optimized through its new adjoints"
+				: "centripetal Catmull-Rom (C1), optimized");
+			fprintf(s.f, "<clipPath id=\"ykclip%d\"><rect x=\"%.1f\" y=\"%.1f\" width=\"%.1f\" height=\"%.1f\"/></clipPath>\n",
+				p, m->x0, m->y0, zpw, zph);
+			fprintf(s.f, "<g clip-path=\"url(#ykclip%d)\">\n", p);
+			fprintf(s.f, "<image href=\"../%s/folds.png\" x=\"%.1f\" y=\"%.1f\" width=\"%.1f\" height=\"%.1f\" opacity=\"0.35\"/>\n",
+				g_photos, m->x0 - zx0 * zs, m->y0 - zy0 * zs, img->w * zs, img->h * zs);
+			for (i = 0; i < nc; i++)
+			{
+				contour const* c = p ? &ys[i] : &cs[i];
+				qaws_curve* cv;
+				int k, inside = 0, rank = 0, j;
+				/* only the 5 contours with the most points in the crop */
+				for (k = 0; k < cs[i].np; k++)
+					inside += cs[i].init[2 * k] > zx0 && cs[i].init[2 * k] < zx0 + zw &&
+						cs[i].init[2 * k + 1] > zy0 && cs[i].init[2 * k + 1] < zy0 + zh;
+				for (j = 0; j < nc; j++)
+				{
+					int in2 = 0;
+					for (k = 0; k < cs[j].np; k++)
+						in2 += cs[j].init[2 * k] > zx0 && cs[j].init[2 * k] < zx0 + zw &&
+							cs[j].init[2 * k + 1] > zy0 && cs[j].init[2 * k + 1] < zy0 + zh;
+					rank += in2 > inside || (in2 == inside && j < i);
+				}
+				if (rank >= 5 || inside == 0)
+					continue;
+				cv = contour_curve(c, c->pts);
+				comb_svg(&s, m, cv, 260.0, p ? "#0969da" : "#9a6700", p ? "#54aeff" : "#d4a72c");
+				for (k = 0; k < c->np; k++)
+				{
+					double sx, sy;
+					map_pt(m, c->pts[2 * k], c->pts[2 * k + 1], &sx, &sy);
+					svg_circle(&s, sx, sy, 2.4, "#ffffff", "#24292f");
+				}
+				qaws_curve_destroy(cv);
+			}
+			fprintf(s.f, "</g>\n");
+			fprintf(s.f, "<rect x=\"%.1f\" y=\"%.1f\" width=\"%.1f\" height=\"%.1f\" fill=\"none\" stroke=\"#d0d7de\"/>\n", m->x0, m->y0, zpw, zph);
+		}
+		sprintf(buf, "mean curvature jump at the points: Catmull-Rom %.4f / px, Yuksel %.2e / px", jump_cr / ncr, jump_yk / nyk);
+		svg_text(&s, 20, 100 + zph + 34, 15, "#24292f", "start", buf);
+		sprintf(buf, "mean distance to the isocontour after optimization: Catmull-Rom %.3f px, Yuksel %.3f px", dist_cr / nc, dist_yk / nc);
+		svg_text(&s, 20, 100 + zph + 60, 15, "#0969da", "start", buf);
+		svg_text(&s, 20, 100 + zph + 90, 13, "#57606a", "start",
+			"Yuksel adjoints: implicit derivative of the max-curvature parameter (cubic root), dual-number P1, sub-curve "
+			"reparameterization and trigonometric blend");
+	}
+	svg_close(&s);
+	printf("2b_yuksel: curvature jump CR %.4f vs Yuksel %.2e /px, distance CR %.3f vs Yuksel %.3f px\n",
+		jump_cr / ncr, jump_yk / nyk, dist_cr / nc, dist_yk / nc);
 }
 
 static void app_vectorize(void)
@@ -1088,6 +1270,7 @@ static void app_vectorize(void)
 		}
 	}
 	svg_close(&s);
+	yuksel_compare(cs, nc, f, &img);
 	printf("2_vectorize: %d curves, %d polyline vertices -> %d points, distance %.3f -> %.3f px\n",
 		nc, total_poly, total_pts, d0 / nc, d1 / nc);
 	for (i = 0; i < nc; i++)
