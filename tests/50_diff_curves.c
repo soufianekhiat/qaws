@@ -142,6 +142,18 @@ static qaws_status create_catmull_rom(family const* f, qaws_scalar const* const*
 	return qaws_curve_create_catmull_rom(&d, out);
 }
 
+static qaws_status create_yuksel(family const* f, qaws_scalar const* const* p, qaws_curve** out)
+{
+	qaws_yuksel_desc d;
+	memset(&d, 0, sizeof(d));
+	d.dimension = (qaws_dimension)f->dim;
+	d.control_points = p[0];
+	d.control_point_count = f->counts[0];
+	d.mode = QAWS_YUKSEL_MODE_BEZIER;
+	d.closed = f->cr_closed;
+	return qaws_curve_create_yuksel(&d, out);
+}
+
 static qaws_status create_rational_bezier(family const* f, qaws_scalar const* const* p, qaws_curve** out)
 {
 	qaws_rational_bezier_desc d;
@@ -158,7 +170,7 @@ static void make_families(family* fams, unsigned int* count)
 {
 	unsigned int i;
 	family* f;
-	memset(fams, 0, sizeof(family) * 11);
+	memset(fams, 0, sizeof(family) * 13);
 	diff_seed(2024);
 
 	f = &fams[0];
@@ -331,7 +343,40 @@ static void make_families(family* fams, unsigned int* count)
 	f->nonlinear = 1;
 	f->t_min = 0; f->t_max = 3;
 
-	*count = 11;
+
+	/* Yuksel C2 interpolating splines (Bezier mode): the sub-curve
+	   parameter is the root of a cubic in the points. */
+	f = &fams[11];
+	f->name = "yuksel_open";
+	f->dim = 2;
+	f->field_count = 1;
+	f->fields[0] = QAWS_FIELD_POINTS;
+	f->counts[0] = 6;
+	diff_rand_fill(f->params[0], 6 * 2);
+	for (i = 0; i < 6; i++)
+		f->params[0][2 * i] += (qaws_scalar)(1.4 * i);
+	f->create = create_yuksel;
+	f->nonlinear = 1;
+	f->t_min = 0; f->t_max = 5;
+
+	f = &fams[12];
+	f->name = "yuksel_closed";
+	f->dim = 3;
+	f->field_count = 1;
+	f->fields[0] = QAWS_FIELD_POINTS;
+	f->counts[0] = 5;
+	for (i = 0; i < 5; i++)
+	{
+		f->params[0][3 * i + 0] = (qaws_scalar)(2.0 * cos(1.2566 * i)) + (qaws_scalar)0.3 * diff_rand();
+		f->params[0][3 * i + 1] = (qaws_scalar)(2.0 * sin(1.2566 * i)) + (qaws_scalar)0.3 * diff_rand();
+		f->params[0][3 * i + 2] = (qaws_scalar)0.5 * diff_rand();
+	}
+	f->create = create_yuksel;
+	f->cr_closed = 1;
+	f->nonlinear = 1;
+	f->t_min = 0; f->t_max = 5;
+
+	*count = 13;
 }
 
 static qaws_curve* family_curve(family const* f, qaws_scalar const (*params)[MAX_PARAMS])
@@ -643,7 +688,7 @@ static void check_tangent2(family const* f, qaws_curve const* c)
 
 static void test_curve_families(void)
 {
-	family fams[11];
+	family fams[13];
 	unsigned int n, i;
 	make_families(fams, &n);
 	for (i = 0; i < n; i++)

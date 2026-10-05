@@ -3,6 +3,8 @@
 #include "internal/qaws_internal_types.h"
 #include "internal/qaws_internal_curve.h"
 #include "internal/qaws_internal_validation.h"
+#include "internal/qaws_internal_diff.h"
+#include "core/qaws_dual_core.h"
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -140,15 +142,32 @@ static qaws_scalar max_curvature_t(qaws_scalar const* p0, qaws_scalar const* pin
 	qaws_scalar const* p2, unsigned int dim)
 {
 	qaws_scalar v0[3], v2[3];
-	qaws_scalar c;
+	qaws_scalar c, q0, q1, q2, q3, t;
+	int it;
 	vsub(v0, p0, pin, dim);
 	vsub(v2, p2, pin, dim);
 	c = vdot(v0, v2, dim);
-	return cubic_root(
-		-vdot(v0, v0, dim),
-		-c / (qaws_scalar)3,
-		c / (qaws_scalar)3,
-		vdot(v2, v2, dim));
+	q0 = -vdot(v0, v0, dim);
+	q1 = -c / (qaws_scalar)3;
+	q2 = c / (qaws_scalar)3;
+	q3 = vdot(v2, v2, dim);
+	t = cubic_root(q0, q1, q2, q3);
+	/* Newton polish: the bisection stops at |F| < 1e-6; the polished root
+	   is a smooth function of the points (and differentiable). */
+	for (it = 0; it < 4; it++)
+	{
+		qaws_scalar u = (qaws_scalar)1 - t;
+		qaws_scalar f = u * u * u * q0 + (qaws_scalar)3 * u * u * t * q1 + (qaws_scalar)3 * u * t * t * q2 + t * t * t * q3;
+		qaws_scalar fp = (qaws_scalar)3 * (u * u * (q1 - q0) + (qaws_scalar)2 * u * t * (q2 - q1) + t * t * (q3 - q2));
+		qaws_scalar tn;
+		if (!(fp > (qaws_scalar)1e-30 || fp < (qaws_scalar)-1e-30))
+			break;
+		tn = t - f / fp;
+		if (tn < (qaws_scalar)0 || tn > (qaws_scalar)1)
+			break;
+		t = tn;
+	}
+	return t;
 }
 
 /* ------------------------------------------------------------------ */
@@ -757,6 +776,7 @@ static void yuksel_blend_eval(
 	qaws_scalar p1[3], p2[3];
 	qaws_scalar dp1[3], dp2[3];
 	qaws_scalar d2p1[3], d2p2[3];
+	qaws_scalar d3p1[3], d3p2[3];
 	qaws_scalar dt_sc1, dt_sc2;
 	unsigned int d;
 	int need_d1, need_d2;
@@ -813,13 +833,38 @@ static void yuksel_blend_eval(
 		}
 	}
 
+	/* Third derivatives of the sub-curves: zero for quadratics, the arc's
+	   otherwise, chained like the lower orders. */
+	{
+		qaws_yuksel_subcurve const* scs[2];
+		qaws_scalar ts[2], dts[2];
+		qaws_scalar* outs[2];
+		int q;
+		scs[0] = sc1; scs[1] = sc2;
+		ts[0] = t_sc1; ts[1] = t_sc2;
+		dts[0] = dt_sc1; dts[1] = dt_sc2;
+		outs[0] = d3p1; outs[1] = d3p2;
+		for (q = 0; q < 2; q++) {
+			for (d = 0; d < 3; d++)
+				outs[q][d] = (qaws_scalar)0;
+			if (out_d3 && scs[q]->use_arc) {
+				qaws_scalar da = scs[q]->angle_end - scs[q]->angle_start;
+				qaws_scalar ang = scs[q]->angle_start + ts[q] * da;
+				qaws_scalar k3 = da * da * da * dts[q] * dts[q] * dts[q];
+				for (d = 0; d < dim; d++)
+					outs[q][d] = (scs[q]->radius * (qaws_scalar)sin((double)ang) * scs[q]->axis_u[d]
+						- scs[q]->radius_b * (qaws_scalar)cos((double)ang) * scs[q]->axis_v[d]) * k3;
+			}
+		}
+	}
+
 	/* For first/last open-curve spans, use single sub-curve unblended */
 	if (is_first_span && !impl->closed) {
 		/* Use sc2 only (the curve at P[1] from its left half) */
 		if (out_pos) { for (d = 0; d < dim; d++) out_pos[d] = p2[d]; }
 		if (out_d1 && need_d1) { for (d = 0; d < dim; d++) out_d1[d] = dp2[d]; }
 		if (out_d2 && need_d2) { for (d = 0; d < dim; d++) out_d2[d] = d2p2[d]; }
-		if (out_d3) { for (d = 0; d < dim; d++) out_d3[d] = (qaws_scalar)0; }
+		if (out_d3) { for (d = 0; d < dim; d++) out_d3[d] = is_first_span ? d3p2[d] : d3p1[d]; }
 		return;
 	}
 
@@ -828,7 +873,7 @@ static void yuksel_blend_eval(
 		if (out_pos) { for (d = 0; d < dim; d++) out_pos[d] = p1[d]; }
 		if (out_d1 && need_d1) { for (d = 0; d < dim; d++) out_d1[d] = dp1[d]; }
 		if (out_d2 && need_d2) { for (d = 0; d < dim; d++) out_d2[d] = d2p1[d]; }
-		if (out_d3) { for (d = 0; d < dim; d++) out_d3[d] = (qaws_scalar)0; }
+		if (out_d3) { for (d = 0; d < dim; d++) out_d3[d] = is_first_span ? d3p2[d] : d3p1[d]; }
 		return;
 	}
 
@@ -870,11 +915,14 @@ static void yuksel_blend_eval(
 				+ d2w2 * p2[d] + (qaws_scalar)2 * dw2 * dp2[d] + s2 * d2p2[d];
 	}
 
-	/* D3: set to zero for now (sub-curves are quadratic, so d3 of sub-curve is 0,
-	   but weight d3 is not. For practical use this is sufficient.) */
+	/* Third derivative: d3w1 = pi^3/2 sin(pi t), d3w2 = -d3w1 */
 	if (out_d3) {
+		qaws_scalar dw1 = -QAWS_PI * c_val * s_val;
+		qaws_scalar d2w1 = -QAWS_PI * QAWS_PI / (qaws_scalar)2 * (qaws_scalar)cos((double)(QAWS_PI * t));
+		qaws_scalar d3w1 = QAWS_PI * QAWS_PI * QAWS_PI / (qaws_scalar)2 * (qaws_scalar)sin((double)(QAWS_PI * t));
 		for (d = 0; d < dim; d++)
-			out_d3[d] = (qaws_scalar)0;
+			out_d3[d] = d3w1 * (p1[d] - p2[d]) + (qaws_scalar)3 * d2w1 * (dp1[d] - dp2[d])
+				+ (qaws_scalar)3 * dw1 * (d2p1[d] - d2p2[d]) + c2 * d3p1[d] + s2 * d3p2[d];
 	}
 }
 
@@ -1008,6 +1056,364 @@ static qaws_continuity yuksel_get_continuity(qaws_curve const* curve)
 /*  Vtable                                                             */
 /* ------------------------------------------------------------------ */
 
+/* ------------------------------------------------------------------ */
+/*  Differential rules (Bezier mode)                                   */
+/*                                                                    */
+/*  Each sub-curve passes through P[i] at the parameter t1 where its   */
+/*  curvature peaks: the root of a cubic whose coefficients depend on  */
+/*  the three points. t1 is differentiated implicitly (first and       */
+/*  second order); P1, the sub-curve reparameterization and the        */
+/*  trigonometric blend follow in second-order dual numbers.           */
+/* ------------------------------------------------------------------ */
+
+#define YK_DIFF_CAPS (QAWS_CAP_TANGENT | QAWS_CAP_ADJOINT | QAWS_CAP_TANGENT2)
+
+/* Point tangents: a masked view, or one unit seed (index, coordinate). */
+typedef struct yk_seed
+{
+	qaws_field_view const* view;
+	unsigned int index, coord;
+	int unit;
+} yk_seed;
+
+static void yk_pdot(yk_seed const* sd, unsigned int i, unsigned int dim, qaws_scalar* out)
+{
+	out[0] = out[1] = out[2] = (qaws_scalar)0;
+	if (sd->unit)
+	{
+		if (i == sd->index)
+			out[sd->coord] = (qaws_scalar)1;
+	}
+	else if (sd->view)
+		qaws_internal_view_read(sd->view, i, dim, out);
+}
+
+static qaws_dual1 yk_mul_s(qaws_dual1 a, qaws_scalar s)
+{
+	return qaws_dual1_make(a.v * s, a.t * s, a.tt * s);
+}
+
+/* Bernstein cubic with coefficients q[0..3] at T. */
+static qaws_dual1 yk_cubic(qaws_dual1 const* q, qaws_dual1 T)
+{
+	qaws_dual1 one = qaws_dual1_const((qaws_scalar)1), u = qaws_dual1_sub(one, T);
+	qaws_dual1 u2 = qaws_dual1_mul(u, u), t2 = qaws_dual1_mul(T, T);
+	qaws_dual1 r = qaws_dual1_mul(qaws_dual1_mul(u2, u), q[0]);
+	r = qaws_dual1_add(r, yk_mul_s(qaws_dual1_mul(qaws_dual1_mul(u2, T), q[1]), (qaws_scalar)3));
+	r = qaws_dual1_add(r, yk_mul_s(qaws_dual1_mul(qaws_dual1_mul(u, t2), q[2]), (qaws_scalar)3));
+	return qaws_dual1_add(r, qaws_dual1_mul(qaws_dual1_mul(t2, T), q[3]));
+}
+
+typedef struct yk_sub_dual
+{
+	qaws_dual1 p0[3], p1[3], p2[3];
+	qaws_dual1 t1;
+} yk_sub_dual;
+
+static void yk_subcurve_dual(qaws_yuksel_impl const* impl, unsigned int dim, unsigned int i, yk_seed const* sd, yk_sub_dual* o)
+{
+	unsigned int n = impl->control_point_count, j, k, c;
+	qaws_dual1 Pj[3], Pi[3], Pk[3];
+	qaws_scalar dj[3], di[3], dk[3];
+	if (impl->closed)
+	{
+		j = (i + n - 1) % n;
+		k = (i + 1) % n;
+	}
+	else
+	{
+		j = (i > 0) ? i - 1 : 0;
+		k = (i < n - 1) ? i + 1 : n - 1;
+	}
+	yk_pdot(sd, j, dim, dj);
+	yk_pdot(sd, i, dim, di);
+	yk_pdot(sd, k, dim, dk);
+	for (c = 0; c < 3; c++)
+	{
+		int in = c < dim;
+		Pj[c] = qaws_dual1_make(in ? impl->control_points[j * dim + c] : (qaws_scalar)0, dj[c], (qaws_scalar)0);
+		Pi[c] = qaws_dual1_make(in ? impl->control_points[i * dim + c] : (qaws_scalar)0, di[c], (qaws_scalar)0);
+		Pk[c] = qaws_dual1_make(in ? impl->control_points[k * dim + c] : (qaws_scalar)0, dk[c], (qaws_scalar)0);
+		o->p0[c] = Pj[c];
+		o->p2[c] = Pk[c];
+	}
+	if (j == i || k == i)
+	{
+		for (c = 0; c < 3; c++)
+			o->p1[c] = Pi[c];
+		o->t1 = qaws_dual1_const((qaws_scalar)0.5);
+		return;
+	}
+	{
+		qaws_scalar ts = impl->subcurves[i].t1;
+		if (ts <= (qaws_scalar)0.01 || ts >= (qaws_scalar)0.99)
+			o->t1 = qaws_dual1_const(ts);   /* clamped: held fixed */
+		else
+		{
+			/* F(t; q(P)) = 0: t' = -F_p / F_t, then t'' from the second
+			   directional derivative with t moving along t'. */
+			qaws_dual1 q[4], v00 = qaws_dual1_const(0), v22 = qaws_dual1_const(0), v02 = qaws_dual1_const(0), R;
+			qaws_scalar Ft, u = (qaws_scalar)1 - ts;
+			for (c = 0; c < 3; c++)
+			{
+				qaws_dual1 a = qaws_dual1_sub(Pj[c], Pi[c]), b = qaws_dual1_sub(Pk[c], Pi[c]);
+				v00 = qaws_dual1_add(v00, qaws_dual1_mul(a, a));
+				v22 = qaws_dual1_add(v22, qaws_dual1_mul(b, b));
+				v02 = qaws_dual1_add(v02, qaws_dual1_mul(a, b));
+			}
+			q[0] = yk_mul_s(v00, (qaws_scalar)-1);
+			q[1] = yk_mul_s(v02, (qaws_scalar)(-1.0 / 3.0));
+			q[2] = yk_mul_s(v02, (qaws_scalar)(1.0 / 3.0));
+			q[3] = v22;
+			Ft = (qaws_scalar)3 * (u * u * (q[1].v - q[0].v) + (qaws_scalar)2 * u * ts * (q[2].v - q[1].v) + ts * ts * (q[3].v - q[2].v));
+			if (!(Ft > (qaws_scalar)1e-12 || Ft < (qaws_scalar)-1e-12))
+				o->t1 = qaws_dual1_const(ts);
+			else
+			{
+				qaws_scalar t1d, t1dd;
+				R = yk_cubic(q, qaws_dual1_const(ts));
+				t1d = -R.t / Ft;
+				R = yk_cubic(q, qaws_dual1_make(ts, t1d, (qaws_scalar)0));
+				t1dd = -R.tt / Ft;
+				o->t1 = qaws_dual1_make(ts, t1d, t1dd);
+			}
+		}
+	}
+	{
+		/* P1 = (P_i - (1-t)^2 P_j - t^2 P_k) / (2 (1-t) t) */
+		qaws_dual1 omt = qaws_dual1_sub(qaws_dual1_const((qaws_scalar)1), o->t1);
+		qaws_dual1 den = yk_mul_s(qaws_dual1_mul(omt, o->t1), (qaws_scalar)2);
+		qaws_dual1 a = qaws_dual1_mul(omt, omt), b = qaws_dual1_mul(o->t1, o->t1);
+		for (c = 0; c < 3; c++)
+			o->p1[c] = qaws_dual1_div(qaws_dual1_sub(qaws_dual1_sub(Pi[c], qaws_dual1_mul(a, Pj[c])), qaws_dual1_mul(b, Pk[c])), den);
+	}
+}
+
+/* g[k][c] = d^k/du^k Q(a + b u), k = 0..5 (zero above 2). */
+static void yk_sub_jet(yk_sub_dual const* s, qaws_dual1 a, qaws_dual1 b, qaws_scalar u, qaws_dual1 g[6][3])
+{
+	qaws_dual1 one = qaws_dual1_const((qaws_scalar)1);
+	qaws_dual1 sp = qaws_dual1_add(a, yk_mul_s(b, u));
+	qaws_dual1 om = qaws_dual1_sub(one, sp);
+	qaws_dual1 b2 = qaws_dual1_mul(b, b);
+	unsigned int c, k;
+	for (c = 0; c < 3; c++)
+	{
+		qaws_dual1 q0 = qaws_dual1_add(qaws_dual1_add(qaws_dual1_mul(qaws_dual1_mul(om, om), s->p0[c]),
+			yk_mul_s(qaws_dual1_mul(qaws_dual1_mul(om, sp), s->p1[c]), (qaws_scalar)2)), qaws_dual1_mul(qaws_dual1_mul(sp, sp), s->p2[c]));
+		/* Q' = 2 ((s-1) P0 + (1-2s) P1 + s P2) */
+		qaws_dual1 q1 = yk_mul_s(qaws_dual1_add(qaws_dual1_add(qaws_dual1_mul(qaws_dual1_sub(sp, one), s->p0[c]),
+			qaws_dual1_mul(qaws_dual1_sub(one, yk_mul_s(sp, (qaws_scalar)2)), s->p1[c])), qaws_dual1_mul(sp, s->p2[c])), (qaws_scalar)2);
+		qaws_dual1 q2 = yk_mul_s(qaws_dual1_add(qaws_dual1_sub(s->p0[c], yk_mul_s(s->p1[c], (qaws_scalar)2)), s->p2[c]), (qaws_scalar)2);
+		g[0][c] = q0;
+		g[1][c] = qaws_dual1_mul(b, q1);
+		g[2][c] = qaws_dual1_mul(b2, q2);
+		for (k = 3; k < 6; k++)
+			g[k][c] = qaws_dual1_const((qaws_scalar)0);
+	}
+}
+
+/* C^(k), k = 0..5, of a span in dual numbers along the seed. */
+static void yk_span_jet(qaws_yuksel_impl const* impl, unsigned int dim, unsigned int span, qaws_scalar u, yk_seed const* sd,
+	qaws_dual1 C[6][3])
+{
+	unsigned int n = impl->control_point_count, i1, i2, k, j, c;
+	yk_sub_dual s1, s2;
+	qaws_dual1 g1[6][3], g2[6][3];
+	static qaws_scalar const binom[6][6] = {
+		{ 1, 0, 0, 0, 0, 0 }, { 1, 1, 0, 0, 0, 0 }, { 1, 2, 1, 0, 0, 0 },
+		{ 1, 3, 3, 1, 0, 0 }, { 1, 4, 6, 4, 1, 0 }, { 1, 5, 10, 10, 5, 1 } };
+	i1 = impl->closed ? span % n : span;
+	i2 = impl->closed ? (span + 1) % n : span + 1;
+	yk_subcurve_dual(impl, dim, i1, sd, &s1);
+	yk_subcurve_dual(impl, dim, i2, sd, &s2);
+	/* sc1 on its right half: s = t1 + (1 - t1) u; sc2 on its left: s = t1 u */
+	yk_sub_jet(&s1, s1.t1, qaws_dual1_sub(qaws_dual1_const((qaws_scalar)1), s1.t1), u, g1);
+	yk_sub_jet(&s2, qaws_dual1_const((qaws_scalar)0), s2.t1, u, g2);
+	if (!impl->closed && span == 0)
+	{
+		memcpy(C, g2, sizeof(g2));
+		return;
+	}
+	if (!impl->closed && span == n - 2)
+	{
+		memcpy(C, g1, sizeof(g1));
+		return;
+	}
+	for (k = 0; k < 6; k++)
+		for (c = 0; c < 3; c++)
+		{
+			qaws_dual1 acc = qaws_dual1_const((qaws_scalar)0);
+			for (j = 0; j <= k; j++)
+			{
+				/* w1 = (1 + cos pi u) / 2, w2 = 1 - w1 */
+				unsigned int m = k - j;
+				qaws_scalar w1 = m == 0 ? (qaws_scalar)(0.5 * (1 + cos(QAWS_PI * u)))
+					: (qaws_scalar)(0.5 * pow((double)QAWS_PI, (double)m) * cos(QAWS_PI * u + m * QAWS_PI_2));
+				qaws_scalar w2 = m == 0 ? (qaws_scalar)1 - w1 : -w1;
+				acc = qaws_dual1_add(acc, yk_mul_s(qaws_dual1_add(yk_mul_s(g1[j][c], w1), yk_mul_s(g2[j][c], w2)), binom[k][j]));
+			}
+			C[k][c] = acc;
+		}
+}
+
+static void yk_set(qaws_vec3* v, unsigned int c, qaws_scalar x)
+{
+	if (c == 0) v->x = x; else if (c == 1) v->y = x; else v->z = x;
+}
+
+static qaws_scalar yk_get(qaws_vec3 const* v, unsigned int c)
+{
+	return c == 0 ? v->x : (c == 1 ? v->y : v->z);
+}
+
+static qaws_status yuksel_tangent_span(
+	qaws_diff_context const* ctx, qaws_curve const* curve, unsigned int span_index, qaws_scalar local_t,
+	qaws_scalar t_dot, unsigned int channels, qaws_diff_views const* views,
+	qaws_curve_jet_3d* primal, qaws_curve_jet_3d* tangent, qaws_curve_jet_3d* tangent2)
+{
+	qaws_yuksel_impl const* impl = (qaws_yuksel_impl const*)curve->impl;
+	unsigned int dim = (unsigned int)curve->dimension, k, c;
+	yk_seed sd;
+	qaws_dual1 C[6][3];
+	(void)ctx;
+	memset(&sd, 0, sizeof(sd));
+	sd.view = views ? qaws_diff_views_find(views, QAWS_FIELD_POINTS) : NULL;
+	yk_span_jet(impl, dim, span_index, local_t, &sd, C);
+	memset(primal, 0, sizeof(*primal));
+	memset(tangent, 0, sizeof(*tangent));
+	if (tangent2)
+		memset(tangent2, 0, sizeof(*tangent2));
+	for (k = 0; k <= QAWS_CURVE_JET_ORDER; k++)
+	{
+		if (!(channels & (1u << k)))
+			continue;
+		for (c = 0; c < dim; c++)
+		{
+			yk_set(&primal->d[k], c, C[k][c].v);
+			yk_set(&tangent->d[k], c, C[k][c].t + t_dot * C[k + 1][c].v);
+			if (tangent2)
+				yk_set(&tangent2->d[k], c, C[k][c].tt + (qaws_scalar)2 * t_dot * C[k + 1][c].t + t_dot * t_dot * C[k + 2][c].v);
+		}
+	}
+	primal->channels = tangent->channels = channels;
+	if (tangent2)
+		tangent2->channels = channels;
+	return QAWS_STATUS_OK;
+}
+
+static qaws_status yuksel_adjoint_span(
+	qaws_diff_context const* ctx, qaws_curve const* curve, unsigned int span_index, qaws_scalar local_t,
+	unsigned int channels, qaws_curve_jet_3d const* jet_adjoint, qaws_diff_views* views, qaws_scalar* t_adjoint)
+{
+	qaws_yuksel_impl const* impl = (qaws_yuksel_impl const*)curve->impl;
+	qaws_field_view* pv = views ? qaws_diff_views_find(views, QAWS_FIELD_POINTS) : NULL;
+	unsigned int dim = (unsigned int)curve->dimension, n = impl->control_point_count, k, c, cc, q, nidx = 0;
+	unsigned int idx[4];
+	yk_seed sd;
+	qaws_dual1 C[6][3];
+	(void)ctx;
+	memset(&sd, 0, sizeof(sd));
+	if (t_adjoint)
+	{
+		yk_span_jet(impl, dim, span_index, local_t, &sd, C);
+		for (k = 0; k <= QAWS_CURVE_JET_ORDER; k++)
+			if (channels & (1u << k))
+				for (c = 0; c < dim; c++)
+					*t_adjoint += yk_get(&jet_adjoint->d[k], c) * C[k + 1][c].v;
+	}
+	if (!pv)
+		return QAWS_STATUS_OK;
+	/* points that reach this span: neighbours of both sub-curves */
+	for (q = 0; q < 4; q++)
+	{
+		int r = (int)span_index - 1 + (int)q;
+		unsigned int id, m;
+		int dup = 0;
+		if (impl->closed)
+			id = (unsigned int)((r % (int)n + (int)n) % (int)n);
+		else
+		{
+			if (r < 0 || r >= (int)n)
+				continue;
+			id = (unsigned int)r;
+		}
+		for (m = 0; m < nidx; m++)
+			dup |= idx[m] == id;
+		if (!dup)
+			idx[nidx++] = id;
+	}
+	sd.unit = 1;
+	for (q = 0; q < nidx; q++)
+		for (c = 0; c < dim; c++)
+		{
+			qaws_scalar g[3] = { 0, 0, 0 };
+			sd.index = idx[q];
+			sd.coord = c;
+			yk_span_jet(impl, dim, span_index, local_t, &sd, C);
+			for (k = 0; k <= QAWS_CURVE_JET_ORDER; k++)
+				if (channels & (1u << k))
+					for (cc = 0; cc < dim; cc++)
+						g[c] += yk_get(&jet_adjoint->d[k], cc) * C[k][cc].t;
+			qaws_internal_view_add(pv, idx[q], dim, g);
+		}
+	return QAWS_STATUS_OK;
+}
+
+static unsigned int yuksel_describe_fields(qaws_curve const* curve, qaws_field_desc* out, unsigned int capacity)
+{
+	qaws_yuksel_impl const* impl = (qaws_yuksel_impl const*)curve->impl;
+	if (capacity >= 1)
+		out[0] = qaws_internal_field_desc(QAWS_FIELD_POINTS, (qaws_value_type)curve->dimension,
+			impl->control_point_count, QAWS_DOMAIN_POSITION, QAWS_CONSTRAINT_NONE, QAWS_DIFF_SMOOTH, YK_DIFF_CAPS);
+	return 1;
+}
+
+static qaws_status yuksel_primal_field(qaws_curve const* curve, qaws_diff_field field,
+	qaws_scalar const** out_data, unsigned int* out_count, unsigned int* out_components)
+{
+	qaws_yuksel_impl const* impl = (qaws_yuksel_impl const*)curve->impl;
+	if (field != QAWS_FIELD_POINTS)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	*out_data = impl->control_points;
+	*out_count = impl->control_point_count;
+	*out_components = (unsigned int)curve->dimension;
+	return QAWS_STATUS_OK;
+}
+
+static qaws_status yuksel_rebuild(qaws_curve const* curve, qaws_diff_views const* values, qaws_curve** out_curve)
+{
+	qaws_yuksel_impl const* impl = (qaws_yuksel_impl const*)curve->impl;
+	qaws_yuksel_desc d;
+	qaws_scalar const* pts = NULL;
+	qaws_scalar* owned = NULL;
+	qaws_status st = qaws_internal_field_override(values, QAWS_FIELD_POINTS, impl->control_points,
+		impl->control_point_count, (unsigned int)curve->dimension, &pts, &owned);
+	if (st != QAWS_STATUS_OK)
+		return st;
+	memset(&d, 0, sizeof(d));
+	d.dimension = curve->dimension;
+	d.control_points = pts;
+	d.control_point_count = impl->control_point_count;
+	d.mode = (qaws_yuksel_mode)impl->mode;
+	d.closed = impl->closed;
+	st = qaws_curve_create_yuksel(&d, out_curve);
+	qaws_internal_dealloc(NULL, owned);
+	return st;
+}
+
+static qaws_curve_diff_vtable const yuksel_diff_vtable = {
+	YK_DIFF_CAPS,
+	QAWS_DIFF_PIECEWISE_SMOOTH,
+	yuksel_describe_fields,
+	yuksel_primal_field,
+	NULL,
+	yuksel_tangent_span,
+	yuksel_adjoint_span,
+	NULL,
+	yuksel_rebuild
+};
+
 static qaws_curve_vtable const yuksel_vtable = {
 	yuksel_eval_span_2d,
 	yuksel_eval_span_3d,
@@ -1017,6 +1423,18 @@ static qaws_curve_vtable const yuksel_vtable = {
 	yuksel_is_rational,
 	yuksel_get_continuity,
 	NULL /* diff */
+};
+
+/* Bezier mode carries differential rules; arc modes do not (yet). */
+static qaws_curve_vtable const yuksel_bezier_vtable = {
+	yuksel_eval_span_2d,
+	yuksel_eval_span_3d,
+	yuksel_destroy_impl,
+	yuksel_is_closed,
+	yuksel_is_periodic,
+	yuksel_is_rational,
+	yuksel_get_continuity,
+	&yuksel_diff_vtable
 };
 
 /* ------------------------------------------------------------------ */
@@ -1070,7 +1488,7 @@ qaws_status qaws_curve_create_yuksel(
 		2, /* degree (quadratic sub-curves) */
 		span_count,
 		range,
-		&yuksel_vtable);
+		desc->mode == QAWS_YUKSEL_MODE_BEZIER ? &yuksel_bezier_vtable : &yuksel_vtable);
 	if (!curve)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 
