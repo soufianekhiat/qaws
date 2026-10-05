@@ -103,6 +103,7 @@ set(QAWS_SOURCES
   src/qaws/qaws_diff_ops.c
   src/qaws/qaws_diff_map.c
   src/qaws/qaws_diff_functionals.c
+  src/qaws/qaws_diff_sampling.c
   src/qaws/internal/qaws_internal_curve.c
   src/qaws/internal/qaws_internal_basis.c
   src/qaws/internal/qaws_internal_span.c
@@ -414,6 +415,7 @@ if(QAWS_INSTALL)
       src/qaws/qaws_diff_ops.h
       src/qaws/qaws_diff_map.h
       src/qaws/qaws_diff_functionals.h
+      src/qaws/qaws_diff_sampling.h
       src/qaws/qaws_platform.h
       src/qaws/qaws_core_types.h
       src/qaws/qaws_prepare.h

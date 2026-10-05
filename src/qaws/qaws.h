@@ -60,5 +60,6 @@
 #include "qaws_diff_ops.h"
 #include "qaws_diff_map.h"
 #include "qaws_diff_functionals.h"
+#include "qaws_diff_sampling.h"
 
 #endif /* QAWS_H */

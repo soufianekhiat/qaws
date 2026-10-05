@@ -1,8 +1,8 @@
 # API Reference: qaws_diff*.h
 
-Differentiation of curves, surfaces, geometric quantities, implicit operations, geometry-building operations and integral functionals.
+Differentiation of curves, surfaces, geometric quantities, implicit operations, geometry-building operations, integral functionals and constant-speed sampling.
 
-Headers: `qaws_diff_types.h`, `qaws_diff.h`, `qaws_diff_geometry.h`, `qaws_diff_ops.h`, `qaws_diff_map.h`, `qaws_diff_functionals.h`.
+Headers: `qaws_diff_types.h`, `qaws_diff.h`, `qaws_diff_geometry.h`, `qaws_diff_ops.h`, `qaws_diff_map.h`, `qaws_diff_functionals.h`, `qaws_diff_sampling.h`.
 
 - [Types](#types)
 - [Context and reports](#context-and-reports)
@@ -13,6 +13,7 @@ Headers: `qaws_diff_types.h`, `qaws_diff.h`, `qaws_diff_geometry.h`, `qaws_diff_
 - [Implicit operations](#implicit-operations)
 - [Differential maps](#differential-maps)
 - [Integral functionals](#integral-functionals)
+- [Constant-speed sampling](#constant-speed-sampling)
 
 ---
 
@@ -1941,3 +1942,89 @@ qaws_status qaws_surface_functional_hvp(
 Accumulates (`+=`) the Hessian-vector product into `out_hv`.
 
 **Returns:** `QAWS_STATUS_OK`; `QAWS_STATUS_UNSUPPORTED_OPERATION` if the surface is not `QAWS_CAP_LINEAR` or a knot view is present in `direction` or `out_hv`.
+
+---
+
+## Constant-speed sampling
+
+`qaws_diff_sampling.h`: samples at prescribed arc lengths with exact first and second order derivatives, forward and backward. A target asks for the point at arc length `sigma = distance + fraction * L_total` from the start: `fraction` 0 is an absolute distance, `distance` 0 a normalized one (`i / (n - 1)` gives `n` constant-speed samples), `distance = -d, fraction = 1` a distance from the end. The parameter `t` solves `L(t) = sigma`; the length integral uses a composite Gauss-Legendre rule (every span and the last partial span split into 4 pieces of `quadrature` points, 0 = 8), and every derivative differentiates that same relation:
+
+```
+t'  = (sigma' - L'(t)) / |C'(t)|
+t'' = (sigma'' - L''(t) - 2 g(t) t' - (C'.C''/|C'|) t'^2) / |C'(t)|,   g = C'.dC'/|C'|
+p'  = dC + C' t'
+p'' = d2C + 2 dC' t' + C'' t'^2 + C' t''
+```
+
+Knots move the quadrature spans and are refused as parameters (`QAWS_STATUS_UNSUPPORTED_OPERATION`). Samples where `|C'|` vanishes are reported as `QAWS_DIFF_ILL_CONDITIONED` with zero derivatives. 2D curves are lifted (z = 0).
+
+### qaws_arc_length_target / qaws_arc_length_sample
+
+```c
+typedef struct qaws_arc_length_target
+{
+	qaws_scalar distance;    /* arc length from the start */
+	qaws_scalar fraction;    /* plus this fraction of the total length */
+} qaws_arc_length_target;
+
+typedef struct qaws_arc_length_sample
+{
+	qaws_scalar t;           /* curve parameter */
+	qaws_vec3 position;
+} qaws_arc_length_sample;
+```
+
+### qaws_curve_arc_length_sample_tangent
+
+```c
+qaws_status qaws_curve_arc_length_sample_tangent(
+	qaws_diff_context const* ctx,
+	qaws_curve const* curve,
+	qaws_arc_length_target const* targets,
+	qaws_scalar const* distance_tangent,
+	unsigned int count,
+	unsigned int quadrature,
+	qaws_diff_views const* param_tangent,
+	qaws_arc_length_sample* out_value,
+	qaws_arc_length_sample* out_tangent,
+	qaws_arc_length_sample* out_tangent2,
+	qaws_scalar* out_total_length);
+```
+
+Solves every target and writes the samples (`out_value`), their first (`out_tangent`) and second (`out_tangent2`) directional derivatives along `param_tangent` and the per-target distance rates `distance_tangent`. Any of `distance_tangent`, `param_tangent` and the outputs may be NULL.
+
+**Returns:** `QAWS_STATUS_OK`; `QAWS_STATUS_INVALID_ARGUMENT` on a NULL curve or NULL targets; `QAWS_STATUS_UNSUPPORTED_OPERATION` for a knot view or when second order is asked of a family without `QAWS_CAP_TANGENT2`.
+
+### qaws_curve_arc_length_sample_adjoint
+
+```c
+qaws_status qaws_curve_arc_length_sample_adjoint(
+	qaws_diff_context const* ctx,
+	qaws_curve const* curve,
+	qaws_arc_length_target const* targets,
+	unsigned int count,
+	unsigned int quadrature,
+	qaws_arc_length_sample const* adjoint,
+	qaws_diff_views* param_adjoint,
+	qaws_scalar* distance_adjoint);
+```
+
+Accumulates (`+=`) the pullback of the sample adjoints `(t_bar, p_bar)`: `J^T p_bar + lambda (fraction grad L_total - grad L(t))` into `param_adjoint`, `lambda = (t_bar + p_bar . C') / |C'|` into `distance_adjoint`. The length gradients of the whole batch are one quadrature pass with suffix-summed weights: the cost is O(spans + samples) quadrature nodes.
+
+### qaws_curve_arc_length_sample_hvp
+
+```c
+qaws_status qaws_curve_arc_length_sample_hvp(
+	qaws_diff_context const* ctx,
+	qaws_curve const* curve,
+	qaws_arc_length_target const* targets,
+	unsigned int count,
+	unsigned int quadrature,
+	qaws_arc_length_sample const* adjoint,
+	qaws_diff_views const* direction,
+	qaws_diff_views* out_hv);
+```
+
+Accumulates (`+=`) `H * direction`, `H` the Hessian with respect to the parameters of `sum_i (t_bar_i t_i + p_bar_i . p_i)`, by differentiating the adjoint along the direction (forward over reverse).
+
+**Returns:** `QAWS_STATUS_OK`; `QAWS_STATUS_UNSUPPORTED_OPERATION` if the curve is not `QAWS_CAP_LINEAR` (compose from tangents and adjoints instead) or for knot views.

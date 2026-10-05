@@ -168,18 +168,23 @@ Available: split, join, Hermite to Bezier, Bezier to B-spline, B-spline to NURBS
 
 Each has eval (value, tangent, tangent2), gradient (accumulated into views) and HVP.
 
+## Constant-speed sampling
+
+`qaws_diff_sampling.h` differentiates arc-length sampling: the sample at `sigma = distance + fraction * L_total` has a parameter `t` defined by `L(t) = sigma`, differentiated implicitly to first and second order (`tangent`, `tangent2`), pulled back as an adjoint (one quadrature pass for a whole batch, plus distance adjoints) and as a Hessian-vector product for linear families. It is the inverse CDF of the arc-length measure, the building block of constant-speed and density-driven sampling.
+
 ## Context and reports
 
 `qaws_diff_context` carries the accumulation strategy, tile size, scratch allocator and an optional `qaws_diff_report`. Initialize with `qaws_diff_context_init` and reset the report with `qaws_diff_report_reset`. The report collects, over all samples of a call, the worst `diff_class` and `validity`, the frozen discrete states the result relies on (`frozen_used`), the largest condition number and residual, the smallest branch gap and the index of the worst sample. A result that relies on a frozen state is exact for that state; the report tells the caller when the state matters.
 
 ## Verification
 
-The test suites `49_diff_model` to `56_diff_functionals` check every rule in single and double precision:
+The test suites `49_diff_model` to `58_diff_sampling` check every rule in single and double precision:
 
 - tangents against central differences of rebuilt objects (finite differences appear only in tests);
 - adjoints through the identity `<ybar, J xdot> = <J^T ybar, xdot>`, for all three accumulation strategies;
 - second tangents against differences of tangents;
 - implicit solves against re-solved perturbed problems.
+- analytic ground truth from Mathematica where a closed derivation exists (`tests/reference/*.wls`, 30 digits): the arc-length samples, their first and second tangents, gradient and HVP match to 1e-11.
 
 ## Examples
 
@@ -198,6 +203,7 @@ The test suites `49_diff_model` to `56_diff_functionals` check every rule in sin
 11. Parameter correction through the differentiable fit, with knot derivatives
 12. Arch design from intersection and extremum adjoints
 13. Knot placement: fitting a crease by moving surface knots
+14. Constant-speed sampling: first and second order sample tangents, and a fit of the samples by Newton-CG with exact Hessian-vector products
 
 ## GPU kernels
 
