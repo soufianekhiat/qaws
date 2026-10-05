@@ -202,3 +202,12 @@ The test suites `49_diff_model` to `56_diff_functionals` check every rule in sin
 ## GPU kernels
 
 `core/qaws_bspline_diff_core.h` provides the B-spline tangent and adjoint kernels for every backend (C, HLSL, GLSL, Halide): `qaws_bspline_tangent_3d`, `qaws_bspline_adjoint_cp_3d` (the per-element term of a gather pass) and `qaws_bspline_adjoint_t_3d`. `examples/diff_bspline_adjoint.hlsl` runs them as compute shaders: one thread per sample for tangents and parameter adjoints, and one thread per control point for the control point adjoints. The gather pass loops over the samples listed by `qaws_curve_build_support_index`, so it needs no atomics and its result is deterministic. Test `57_diff_core` checks the kernels against the C runtime.
+
+`examples/diff_applications.c` (target `qaws_diff_applications`) applies the API to real data:
+
+1. Hair strands from a photo: structure-tensor orientation field, evenly spaced streamlines, B-spline strands aligned through unit-tangent adjoints.
+2. Photo vectorization: isocontours become centripetal Catmull-Rom splines whose interpolation points are optimized onto the contours.
+3. Triangulated mesh to six bicubic patches with ADMM: exact per-patch least squares at foot points (local support weights, thin-plate HVPs), seam control points in consensus.
+4. Non-rigid registration: CMA-ES basin hopping on the pose with gradient refinements inside the fitness.
+
+Photos are read as PPM; `examples/photo_to_ppm.ps1` converts any image.
