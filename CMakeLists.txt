@@ -324,6 +324,16 @@ if(QAWS_BUILD_EXAMPLES)
     RUNTIME_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/working_dir"
     RUNTIME_OUTPUT_DIRECTORY_RELEASE "${PROJECT_SOURCE_DIR}/working_dir"
     RUNTIME_OUTPUT_DIRECTORY_DEBUG "${PROJECT_SOURCE_DIR}/working_dir")
+  add_executable(qaws_diff_applications examples/diff_applications.c)
+  target_link_libraries(qaws_diff_applications PRIVATE Qaws::qaws)
+  target_include_directories(qaws_diff_applications PRIVATE "${PROJECT_SOURCE_DIR}/src/qaws")
+  if(MSVC)
+    target_compile_definitions(qaws_diff_applications PRIVATE _CRT_SECURE_NO_WARNINGS)
+  endif()
+  set_target_properties(qaws_diff_applications PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/working_dir"
+    RUNTIME_OUTPUT_DIRECTORY_RELEASE "${PROJECT_SOURCE_DIR}/working_dir"
+    RUNTIME_OUTPUT_DIRECTORY_DEBUG "${PROJECT_SOURCE_DIR}/working_dir")
 endif()
 
 if(BUILD_TESTING)
