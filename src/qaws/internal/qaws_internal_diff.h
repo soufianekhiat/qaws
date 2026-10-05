@@ -162,7 +162,10 @@ void qaws_internal_view_read(qaws_field_view const* v, unsigned int e,
 void qaws_internal_view_add(qaws_field_view* v, unsigned int e,
 	unsigned int components, qaws_scalar const* g);
 
-/* Every view with data must have `components` components. */
+/* Components of a field: 1 for scalar fields (weights, knots, radius...), else dim. */
+unsigned int qaws_internal_field_components(qaws_diff_field field, unsigned int dim);
+
+/* Every view with data must match qaws_internal_field_components. */
 qaws_status qaws_internal_check_views(qaws_diff_views const* views, unsigned int components);
 
 /* B-spline basis derivatives for orders 0..k (k may exceed degree; higher

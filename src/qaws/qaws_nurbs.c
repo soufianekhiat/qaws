@@ -4,6 +4,7 @@
 #include "internal/qaws_internal_curve.h"
 #include "internal/qaws_internal_basis.h"
 #include "internal/qaws_internal_validation.h"
+#include "internal/qaws_internal_diff.h"
 #include <stdlib.h>
 #include <string.h>
 #include "qaws_platform.h"
@@ -345,6 +346,101 @@ static qaws_continuity nurbs_get_continuity(qaws_curve const *curve)
  * Vtable definition
  * ------------------------------------------------------------------------- */
 
+/* ---------------------------------------------------------------------------
+ * Differential rules: rational in control points and weights
+ * ------------------------------------------------------------------------- */
+
+#define NURBS_DIFF_CAPS (QAWS_CAP_TANGENT | QAWS_CAP_ADJOINT | QAWS_CAP_TANGENT2 | \
+	QAWS_CAP_LOCAL_SUPPORT)
+
+static unsigned int nurbs_describe_fields(qaws_curve const *curve, qaws_field_desc *out, unsigned int capacity)
+{
+	qaws_nurbs_impl const *impl = (qaws_nurbs_impl const *)curve->impl;
+	if (capacity >= 1)
+		out[0] = qaws_internal_field_desc(QAWS_FIELD_CONTROL_POINTS, (qaws_value_type)curve->dimension,
+			impl->control_point_count, QAWS_DOMAIN_POSITION, QAWS_CONSTRAINT_NONE,
+			QAWS_DIFF_SMOOTH, NURBS_DIFF_CAPS);
+	if (capacity >= 2)
+		out[1] = qaws_internal_field_desc(QAWS_FIELD_WEIGHTS, QAWS_VALUE_SCALAR,
+			impl->control_point_count, QAWS_DOMAIN_WEIGHT, QAWS_CONSTRAINT_POSITIVE,
+			QAWS_DIFF_SMOOTH, NURBS_DIFF_CAPS);
+	if (capacity >= 3)
+		out[2] = qaws_internal_field_desc(QAWS_FIELD_KNOTS, QAWS_VALUE_SCALAR,
+			impl->knot_count, QAWS_DOMAIN_PARAMETRIC, QAWS_CONSTRAINT_MONOTONIC,
+			QAWS_DIFF_UNSUPPORTED, 0u);
+	return 3;
+}
+
+static qaws_status nurbs_primal_field(qaws_curve const *curve, qaws_diff_field field,
+	qaws_scalar const **out_data, unsigned int *out_count, unsigned int *out_components)
+{
+	qaws_nurbs_impl const *impl = (qaws_nurbs_impl const *)curve->impl;
+	switch (field)
+	{
+	case QAWS_FIELD_CONTROL_POINTS:
+		*out_data = impl->control_points;
+		*out_count = impl->control_point_count;
+		*out_components = (unsigned int)curve->dimension;
+		return QAWS_STATUS_OK;
+	case QAWS_FIELD_WEIGHTS:
+		*out_data = impl->weights;
+		*out_count = impl->control_point_count;
+		*out_components = 1;
+		return QAWS_STATUS_OK;
+	case QAWS_FIELD_KNOTS:
+		*out_data = impl->knots;
+		*out_count = impl->knot_count;
+		*out_components = 1;
+		return QAWS_STATUS_OK;
+	default:
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	}
+}
+
+/* Homogeneous B-spline basis: the engine applies the quotient rule. */
+static qaws_status nurbs_linear_support(qaws_curve const *curve, unsigned int span_index,
+	qaws_scalar local_t, unsigned int order, qaws_local_support *out)
+{
+	qaws_nurbs_impl const *impl = (qaws_nurbs_impl const *)curve->impl;
+	qaws_scalar ders[(QAWS_DIFF_MAX_ORDER + 1) * QAWS_DIFF_MAX_SUPPORT];
+	unsigned int degree = curve->degree;
+	unsigned int knot_span, r, j;
+	qaws_scalar t;
+
+	if (degree + 1 > QAWS_DIFF_MAX_SUPPORT || order > QAWS_DIFF_MAX_ORDER)
+		return QAWS_STATUS_UNSUPPORTED_OPERATION;
+
+	/* Same parameter mapping and span search as nurbs_eval_span_*. */
+	t = curve->span_boundaries[span_index]
+	  + local_t * (curve->span_boundaries[span_index + 1]
+	             - curve->span_boundaries[span_index]);
+	knot_span = qaws_internal_find_knot_span(
+		impl->knots, impl->knot_count, degree, impl->control_point_count, t);
+	qaws_internal_bspline_basis_derivs_any(
+		impl->knots, impl->knot_count, degree, knot_span, t, order, ders);
+
+	out->kind = QAWS_SUPPORT_LOCAL;
+	out->range_count = 1;
+	out->ranges[0].field = QAWS_FIELD_CONTROL_POINTS;
+	out->ranges[0].first = knot_span - degree;
+	out->ranges[0].count = degree + 1;
+	out->weight_field = QAWS_FIELD_WEIGHTS;
+	out->has_weights = 1;
+	out->order = order;
+	for (r = 0; r <= order; r++)
+		for (j = 0; j <= degree; j++)
+			out->weights[0][r][j] = ders[r * (degree + 1) + j];
+	return QAWS_STATUS_OK;
+}
+
+static qaws_curve_diff_vtable const nurbs_diff_vtable = {
+	NURBS_DIFF_CAPS,
+	QAWS_DIFF_PIECEWISE_SMOOTH,
+	nurbs_describe_fields,
+	nurbs_primal_field,
+	nurbs_linear_support
+};
+
 static qaws_curve_vtable const nurbs_vtable = {
 	nurbs_eval_span_2d,
 	nurbs_eval_span_3d,
@@ -353,7 +449,7 @@ static qaws_curve_vtable const nurbs_vtable = {
 	nurbs_is_periodic,
 	nurbs_is_rational,
 	nurbs_get_continuity,
-	NULL /* diff */
+	&nurbs_diff_vtable
 };
 
 /* ---------------------------------------------------------------------------

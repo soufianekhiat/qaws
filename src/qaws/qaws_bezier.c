@@ -163,6 +163,7 @@ static qaws_status bezier_linear_support(qaws_curve const* curve, unsigned int s
 	out->ranges[0].field = QAWS_FIELD_CONTROL_POINTS;
 	out->ranges[0].first = 0;
 	out->ranges[0].count = n + 1;
+	out->weight_field = QAWS_FIELD_NONE;
 	out->has_weights = 1;
 	out->order = order;
 	for (r = 0; r <= order; r++)

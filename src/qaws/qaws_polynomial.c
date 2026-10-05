@@ -245,6 +245,7 @@ static qaws_status polynomial_linear_support(qaws_curve const* curve, unsigned i
 	out->ranges[0].field = QAWS_FIELD_COEFFICIENTS;
 	out->ranges[0].first = 0;
 	out->ranges[0].count = n;
+	out->weight_field = QAWS_FIELD_NONE;
 	out->has_weights = 1;
 	out->order = order;
 	for (r = 0; r <= order; r++) {

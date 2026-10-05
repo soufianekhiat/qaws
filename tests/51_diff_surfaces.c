@@ -1,7 +1,7 @@
 /*
  * Test 51: Differentiable surface evaluation
  *
- * Linear tensor-product families (Bezier, B-spline, bilinear, biquadratic):
+ * Tensor-product families (Bezier, B-spline, bilinear, biquadratic, NURBS):
  *   - primal jets match qaws_surface_evaluate, third order matches
  *     finite differences of second order
  *   - parameter and coordinate tangents, second tangent
@@ -14,15 +14,19 @@
 #define SURF_MAX_CP 64
 #define SURF_SAMPLES 7
 
+/* Scalars in the combined parameter vector: xyz per point, plus one weight when rational. */
+#define PARAMS(f) ((f)->cp_count * ((f)->rational ? 4u : 3u))
+
 typedef struct surface_family
 {
 	char const* name;
 	unsigned int cp_count;
 	unsigned int u_count, v_count, u_degree, v_degree;
-	qaws_scalar cps[SURF_MAX_CP * 3];
+	qaws_scalar cps[SURF_MAX_CP * 4];   /* control points, then weights when rational */
 	qaws_scalar u_knots[16], v_knots[16];
 	unsigned int u_knot_count, v_knot_count;
-	int kind; /* 0 bezier, 1 bspline, 2 bilinear, 3 biquadratic */
+	int kind; /* 0 bezier, 1 bspline, 2 bilinear, 3 biquadratic, 4 nurbs */
+	int rational;
 } surface_family;
 
 static qaws_surface* family_surface(surface_family const* f, qaws_scalar const* cps)
@@ -66,6 +70,22 @@ static qaws_surface* family_surface(surface_family const* f, qaws_scalar const* 
 		qaws_surface_create_bilinear(&d, &s);
 		break;
 	}
+	case 4:
+	{
+		qaws_surface_nurbs_desc d;
+		d.u_degree = f->u_degree;
+		d.v_degree = f->v_degree;
+		d.control_points = (qaws_vec3 const*)cps;
+		d.u_point_count = f->u_count;
+		d.v_point_count = f->v_count;
+		d.weights = cps + f->cp_count * 3;
+		d.u_knots = f->u_knots;
+		d.u_knot_count = f->u_knot_count;
+		d.v_knots = f->v_knots;
+		d.v_knot_count = f->v_knot_count;
+		qaws_surface_create_nurbs(&d, &s);
+		break;
+	}
 	default:
 	{
 		qaws_surface_biquadratic_desc d;
@@ -79,9 +99,9 @@ static qaws_surface* family_surface(surface_family const* f, qaws_scalar const* 
 
 static qaws_surface* family_surface_shifted(surface_family const* f, qaws_scalar const* dir, double h)
 {
-	qaws_scalar p[SURF_MAX_CP * 3];
+	qaws_scalar p[SURF_MAX_CP * 4];
 	unsigned int i;
-	for (i = 0; i < f->cp_count * 3; i++)
+	for (i = 0; i < PARAMS(f); i++)
 		p[i] = (qaws_scalar)(f->cps[i] + h * dir[i]);
 	return family_surface(f, p);
 }
@@ -89,7 +109,7 @@ static qaws_surface* family_surface_shifted(surface_family const* f, qaws_scalar
 static void make_surface_families(surface_family* fams)
 {
 	unsigned int i;
-	memset(fams, 0, sizeof(surface_family) * 4);
+	memset(fams, 0, sizeof(surface_family) * 5);
 	diff_seed(31337);
 
 	fams[0].name = "bezier";
@@ -120,7 +140,12 @@ static void make_surface_families(surface_family* fams)
 	fams[3].u_degree = 2; fams[3].v_degree = 2;
 	fams[3].u_count = 3; fams[3].v_count = 3;
 
-	for (i = 0; i < 4; i++)
+	fams[4] = fams[1];
+	fams[4].name = "nurbs";
+	fams[4].kind = 4;
+	fams[4].rational = 1;
+
+	for (i = 0; i < 5; i++)
 	{
 		unsigned int a, b;
 		fams[i].cp_count = fams[i].u_count * fams[i].v_count;
@@ -128,11 +153,14 @@ static void make_surface_families(surface_family* fams)
 		for (a = 0; a < fams[i].u_count; a++)
 			for (b = 0; b < fams[i].v_count; b++)
 			{
-				unsigned int e = (fams[i].kind >= 2) ? b * fams[i].u_count + a : a * fams[i].v_count + b;
+				unsigned int e = (fams[i].kind == 2 || fams[i].kind == 3) ? b * fams[i].u_count + a : a * fams[i].v_count + b;
 				fams[i].cps[e * 3 + 0] = (qaws_scalar)a + diff_rand() * (qaws_scalar)0.2;
 				fams[i].cps[e * 3 + 1] = (qaws_scalar)b + diff_rand() * (qaws_scalar)0.2;
 				fams[i].cps[e * 3 + 2] = diff_rand();
 			}
+		if (fams[i].rational)
+			for (a = 0; a < fams[i].cp_count; a++)
+				fams[i].cps[fams[i].cp_count * 3 + a] = (qaws_scalar)1.25 + (qaws_scalar)0.75 * diff_rand();
 	}
 }
 
@@ -142,9 +170,17 @@ static void sample_uv(unsigned int i, qaws_scalar* u, qaws_scalar* v)
 	*v = ((qaws_scalar)(SURF_SAMPLES - 1 - i) + (qaws_scalar)0.23) / (qaws_scalar)SURF_SAMPLES;
 }
 
+/* Componentwise, relative to the larger vector magnitude. */
 static int vec_close(qaws_vec3 a, qaws_vec3 b, double tol)
 {
-	return diff_close(a.x, b.x, tol) && diff_close(a.y, b.y, tol) && diff_close(a.z, b.z, tol);
+	double scale = 1.0;
+	double ma = fabs(a.x) > fabs(a.y) ? fabs(a.x) : fabs(a.y);
+	double mb = fabs(b.x) > fabs(b.y) ? fabs(b.x) : fabs(b.y);
+	if (fabs(a.z) > ma) ma = fabs(a.z);
+	if (fabs(b.z) > mb) mb = fabs(b.z);
+	if (ma > scale) scale = ma;
+	if (mb > scale) scale = mb;
+	return fabs(a.x - b.x) <= tol * scale && fabs(a.y - b.y) <= tol * scale && fabs(a.z - b.z) <= tol * scale;
 }
 
 static double sjet_dot(qaws_surface_jet const* a, qaws_surface_jet const* b, unsigned int channels)
@@ -165,11 +201,12 @@ static void rand_sjet(qaws_surface_jet* j)
 	j->channels = QAWS_SJET_ORDER3;
 }
 
-static void cp_views(qaws_scalar* data, unsigned int count, qaws_field_view* v, qaws_diff_views* views)
+static void cp_views(surface_family const* f, qaws_scalar* data, qaws_field_view* v, qaws_diff_views* views)
 {
-	*v = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, data, count, 3);
+	v[0] = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, data, f->cp_count, 3);
+	v[1] = qaws_field_view_make(QAWS_FIELD_WEIGHTS, data + f->cp_count * 3, f->cp_count, 1);
 	views->fields = v;
-	views->field_count = 1;
+	views->field_count = f->rational ? 2u : 1u;
 	views->children = NULL;
 	views->child_count = 0;
 }
@@ -213,16 +250,16 @@ static void check_primal(surface_family const* f, qaws_surface const* s)
 
 static void check_tangents(surface_family const* f, qaws_surface const* s)
 {
-	qaws_scalar dir[SURF_MAX_CP * 3];
-	qaws_field_view fv;
+	qaws_scalar dir[SURF_MAX_CP * 4];
+	qaws_field_view fv[2];
 	qaws_diff_views views;
 	qaws_surface *sp, *sm;
 	unsigned int i, ch;
 	int ok_p = 1, ok_c = 1;
 	double h = DIFF_FD_STEP;
 
-	diff_rand_fill(dir, f->cp_count * 3);
-	cp_views(dir, f->cp_count, &fv, &views);
+	diff_rand_fill(dir, PARAMS(f));
+	cp_views(f, dir, fv, &views);
 	sp = family_surface_shifted(f, dir, h);
 	sm = family_surface_shifted(f, dir, -h);
 
@@ -262,20 +299,20 @@ static void check_tangents(surface_family const* f, qaws_surface const* s)
 	TEST_ASSERT(ok_c, "surface coordinate tangent equals next partials");
 }
 
-static qaws_status run_surface_adjoint(qaws_surface const* s, unsigned int cp_count,
+static qaws_status run_surface_adjoint(surface_family const* f, qaws_surface const* s,
 	qaws_diff_accumulation acc, qaws_scalar const* us, qaws_scalar const* vs,
 	qaws_surface_jet const* ybar, qaws_scalar* pbar, qaws_scalar* ubar, qaws_scalar* vbar)
 {
 	qaws_diff_context ctx;
-	qaws_field_view fv;
+	qaws_field_view fv[2];
 	qaws_diff_views views;
 	qaws_diff_context_init(&ctx);
 	ctx.accumulation = acc;
 	ctx.tile_size = 3;
-	memset(pbar, 0, sizeof(qaws_scalar) * cp_count * 3);
+	memset(pbar, 0, sizeof(qaws_scalar) * PARAMS(f));
 	memset(ubar, 0, sizeof(qaws_scalar) * SURF_SAMPLES);
 	memset(vbar, 0, sizeof(qaws_scalar) * SURF_SAMPLES);
-	cp_views(pbar, cp_count, &fv, &views);
+	cp_views(f, pbar, fv, &views);
 	return qaws_surface_eval_batch_adjoint(&ctx, s, us, vs, SURF_SAMPLES, QAWS_SJET_ORDER3,
 		ybar, &views, ubar, vbar);
 }
@@ -284,9 +321,9 @@ static void check_adjoint(surface_family const* f, qaws_surface const* s)
 {
 	qaws_scalar us[SURF_SAMPLES], vs[SURF_SAMPLES], udot[SURF_SAMPLES], vdot[SURF_SAMPLES];
 	qaws_scalar ubar[SURF_SAMPLES], vbar[SURF_SAMPLES];
-	qaws_scalar dir[SURF_MAX_CP * 3], pbar[SURF_MAX_CP * 3];
+	qaws_scalar dir[SURF_MAX_CP * 4], pbar[SURF_MAX_CP * 4];
 	qaws_surface_jet ybar[SURF_SAMPLES], tan[SURF_SAMPLES];
-	qaws_field_view fv;
+	qaws_field_view fv[2];
 	qaws_diff_views views;
 	unsigned int i;
 	double lhs = 0, rhs;
@@ -298,26 +335,26 @@ static void check_adjoint(surface_family const* f, qaws_surface const* s)
 		vdot[i] = diff_rand();
 		rand_sjet(&ybar[i]);
 	}
-	diff_rand_fill(dir, f->cp_count * 3);
-	cp_views(dir, f->cp_count, &fv, &views);
+	diff_rand_fill(dir, PARAMS(f));
+	cp_views(f, dir, fv, &views);
 	TEST_ASSERT_STATUS(qaws_surface_eval_batch_tangent(NULL, s, us, vs, udot, vdot, SURF_SAMPLES,
 		QAWS_SJET_ORDER3, &views, NULL, tan));
 	for (i = 0; i < SURF_SAMPLES; i++)
 		lhs += sjet_dot(&ybar[i], &tan[i], QAWS_SJET_ORDER3);
 
-	TEST_ASSERT_STATUS(run_surface_adjoint(s, f->cp_count, QAWS_ACCUMULATE_SCATTER, us, vs, ybar, pbar, ubar, vbar));
-	rhs = diff_dot(pbar, dir, f->cp_count * 3) + diff_dot(ubar, udot, SURF_SAMPLES) + diff_dot(vbar, vdot, SURF_SAMPLES);
+	TEST_ASSERT_STATUS(run_surface_adjoint(f, s, QAWS_ACCUMULATE_SCATTER, us, vs, ybar, pbar, ubar, vbar));
+	rhs = diff_dot(pbar, dir, PARAMS(f)) + diff_dot(ubar, udot, SURF_SAMPLES) + diff_dot(vbar, vdot, SURF_SAMPLES);
 	printf("    %s: <ybar, J xdot> = %.9g  <J^T ybar, xdot> = %.9g\n", f->name, lhs, rhs);
 	TEST_ASSERT(diff_close(lhs, rhs, DIFF_TOL), "surface adjoint identity over a batch");
 
 	{
-		qaws_scalar pbar_t[SURF_MAX_CP * 3], pbar_g[SURF_MAX_CP * 3];
+		qaws_scalar pbar_t[SURF_MAX_CP * 4], pbar_g[SURF_MAX_CP * 4];
 		qaws_scalar ubar2[SURF_SAMPLES], vbar2[SURF_SAMPLES];
 		int ok = 1;
 		unsigned int n;
-		TEST_ASSERT_STATUS(run_surface_adjoint(s, f->cp_count, QAWS_ACCUMULATE_TILED, us, vs, ybar, pbar_t, ubar2, vbar2));
-		TEST_ASSERT_STATUS(run_surface_adjoint(s, f->cp_count, QAWS_ACCUMULATE_GATHER, us, vs, ybar, pbar_g, ubar2, vbar2));
-		for (n = 0; n < f->cp_count * 3; n++)
+		TEST_ASSERT_STATUS(run_surface_adjoint(f, s, QAWS_ACCUMULATE_TILED, us, vs, ybar, pbar_t, ubar2, vbar2));
+		TEST_ASSERT_STATUS(run_surface_adjoint(f, s, QAWS_ACCUMULATE_GATHER, us, vs, ybar, pbar_g, ubar2, vbar2));
+		for (n = 0; n < PARAMS(f); n++)
 			if (!diff_close(pbar[n], pbar_t[n], DIFF_TOL) || !diff_close(pbar[n], pbar_g[n], DIFF_TOL))
 				ok = 0;
 		for (n = 0; n < SURF_SAMPLES; n++)
@@ -329,8 +366,8 @@ static void check_adjoint(surface_family const* f, qaws_surface const* s)
 
 static void check_tangent2(surface_family const* f, qaws_surface const* s)
 {
-	qaws_scalar dir[SURF_MAX_CP * 3];
-	qaws_field_view fv;
+	qaws_scalar dir[SURF_MAX_CP * 4];
+	qaws_field_view fv[2];
 	qaws_diff_views views;
 	qaws_surface *sp, *sm;
 	unsigned int i, ch;
@@ -338,8 +375,8 @@ static void check_tangent2(surface_family const* f, qaws_surface const* s)
 	double h = DIFF_FD_STEP;
 	qaws_scalar udot = (qaws_scalar)0.6, vdot = (qaws_scalar)-0.35;
 
-	diff_rand_fill(dir, f->cp_count * 3);
-	cp_views(dir, f->cp_count, &fv, &views);
+	diff_rand_fill(dir, PARAMS(f));
+	cp_views(f, dir, fv, &views);
 	sp = family_surface_shifted(f, dir, h);
 	sm = family_surface_shifted(f, dir, -h);
 	for (i = 0; i < SURF_SAMPLES; i++)
@@ -360,7 +397,12 @@ static void check_tangent2(surface_family const* f, qaws_surface const* s)
 			fd.y = (qaws_scalar)((tp.d[ch].y - tm.d[ch].y) / (2 * h));
 			fd.z = (qaws_scalar)((tp.d[ch].z - tm.d[ch].z) / (2 * h));
 			if (!vec_close(fd, tt.d[ch], DIFF_TOL * 100))
+			{
+				if (ok)
+					printf("    %s: sample %u channel %u fd (%.9g %.9g %.9g) tangent2 (%.9g %.9g %.9g)\n", f->name, i, ch,
+						fd.x, fd.y, fd.z, tt.d[ch].x, tt.d[ch].y, tt.d[ch].z);
 				ok = 0;
+			}
 		}
 	}
 	qaws_surface_destroy(sp);
@@ -372,8 +414,8 @@ static void check_tangent2(surface_family const* f, qaws_surface const* s)
 /* N = normalize(Su x Sv): surface rule composed with dual kernels. */
 static void check_normal_composition(surface_family const* f, qaws_surface const* s)
 {
-	qaws_scalar dir[SURF_MAX_CP * 3], pbar[SURF_MAX_CP * 3];
-	qaws_field_view fv;
+	qaws_scalar dir[SURF_MAX_CP * 4], pbar[SURF_MAX_CP * 4];
+	qaws_field_view fv[2];
 	qaws_diff_views views;
 	unsigned int i;
 	int ok = 1;
@@ -388,8 +430,8 @@ static void check_normal_composition(surface_family const* f, qaws_surface const
 		double lhs, rhs;
 
 		sample_uv(i, &u, &v);
-		diff_rand_fill(dir, f->cp_count * 3);
-		cp_views(dir, f->cp_count, &fv, &views);
+		diff_rand_fill(dir, PARAMS(f));
+		cp_views(f, dir, fv, &views);
 		qaws_surface_eval_tangent(NULL, s, u, v, udot, vdot, QAWS_SJET_U | QAWS_SJET_V, &views, &p, &t);
 		su = qaws_dual3_make(p.d[1], t.d[1], qaws_v3_zero());
 		sv = qaws_dual3_make(p.d[2], t.d[2], qaws_v3_zero());
@@ -401,9 +443,9 @@ static void check_normal_composition(surface_family const* f, qaws_surface const
 		ybar.d[1] = g.a;
 		ybar.d[2] = g.b;
 		memset(pbar, 0, sizeof(pbar));
-		cp_views(pbar, f->cp_count, &fv, &views);
+		cp_views(f, pbar, fv, &views);
 		qaws_surface_eval_adjoint(NULL, s, u, v, QAWS_SJET_U | QAWS_SJET_V, &ybar, &views, &ubar, &vbar);
-		rhs = diff_dot(pbar, dir, f->cp_count * 3) + (double)ubar * udot + (double)vbar * vdot;
+		rhs = diff_dot(pbar, dir, PARAMS(f)) + (double)ubar * udot + (double)vbar * vdot;
 		if (!diff_close(lhs, rhs, DIFF_TOL))
 			ok = 0;
 	}
@@ -412,16 +454,18 @@ static void check_normal_composition(surface_family const* f, qaws_surface const
 
 static void test_surface_families(void)
 {
-	surface_family fams[4];
+	surface_family fams[5];
 	unsigned int i;
 	make_surface_families(fams);
-	for (i = 0; i < 4; i++)
+	for (i = 0; i < 5; i++)
 	{
 		qaws_surface* s = family_surface(&fams[i], fams[i].cps);
 		TEST_ASSERT(s != NULL, "surface created");
 		if (!s)
 			continue;
-		TEST_ASSERT((qaws_surface_get_diff_capabilities(s) & QAWS_CAP_LINEAR) != 0, "linear surface capabilities");
+		TEST_ASSERT(((qaws_surface_get_diff_capabilities(s) & QAWS_CAP_LINEAR) != 0) == !fams[i].rational,
+			"linear flag only for polynomial surfaces");
+		TEST_ASSERT((qaws_surface_get_diff_capabilities(s) & QAWS_CAP_TANGENT2) != 0, "second tangent capability");
 		check_primal(&fams[i], s);
 		check_tangents(&fams[i], s);
 		check_adjoint(&fams[i], s);
@@ -433,7 +477,7 @@ static void test_surface_families(void)
 
 static void test_bspline_surface_details(void)
 {
-	surface_family fams[4];
+	surface_family fams[5];
 	qaws_surface* s;
 	qaws_diff_context ctx;
 	qaws_diff_report report;

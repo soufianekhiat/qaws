@@ -3,6 +3,7 @@
 #include "internal/qaws_internal_curve.h"
 #include "internal/qaws_internal_span.h"
 #include "internal/qaws_internal_diff.h"
+#include "core/qaws_dual_core.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -411,6 +412,7 @@ typedef struct curve_sample
 {
 	qaws_local_support support;
 	qaws_scalar const* primal[QAWS_DIFF_MAX_RANGES];
+	qaws_scalar const* weights;   /* rational weights (range 0), NULL when polynomial */
 	int at_boundary;
 } curve_sample;
 
@@ -454,6 +456,18 @@ static qaws_status curve_prepare(
 			return st;
 		if (components != dim ||
 		    s->support.ranges[r].first + s->support.ranges[r].count > count)
+			return QAWS_STATUS_INTERNAL_ERROR;
+	}
+
+	s->weights = NULL;
+	if (s->support.weight_field != QAWS_FIELD_NONE)
+	{
+		unsigned int count = 0, components = 0;
+		st = d->primal_field(curve, s->support.weight_field, &s->weights, &count, &components);
+		if (st != QAWS_STATUS_OK)
+			return st;
+		if (components != 1 || s->support.range_count != 1 ||
+		    s->support.ranges[0].first + s->support.ranges[0].count > count)
 			return QAWS_STATUS_INTERNAL_ERROR;
 	}
 
@@ -523,6 +537,11 @@ typedef struct curve_jet_buf
 	qaws_scalar d[QAWS_CURVE_JET_ORDER + 1][3];
 } curve_jet_buf;
 
+static qaws_status rational_tangent_sample(
+	curve_sample const* s, unsigned int dim, qaws_scalar t_dot, unsigned int channels,
+	qaws_diff_views const* views, int want_second,
+	curve_jet_buf* primal, curve_jet_buf* tangent, curve_jet_buf* tangent2);
+
 static qaws_status curve_tangent_sample(
 	qaws_diff_context const* ctx,
 	qaws_curve const* curve,
@@ -554,6 +573,13 @@ static qaws_status curve_tangent_sample(
 	if (tangent2)
 		memset(tangent2, 0, sizeof(*tangent2));
 
+	if (s.weights)
+	{
+		st = rational_tangent_sample(&s, dim, t_dot, channels, views, want_second, primal, tangent, tangent2);
+		if (st != QAWS_STATUS_OK)
+			return st;
+	}
+	else
 	for (k = 0; k <= QAWS_CURVE_JET_ORDER; k++)
 	{
 		qaws_scalar dp[3], p1[3], p2[3];
@@ -636,6 +662,247 @@ static qaws_scalar coordinate_adjoint(
 	return acc;
 }
 
+/* ------------------------------------------------------------------ */
+/*  Rational curves: homogeneous sums and the quotient recurrence     */
+/*                                                                    */
+/*  A^(k) = sum N^(k) w P,  W^(k) = sum N^(k) w,  C = A / W           */
+/*  C^(k) = (A^(k) - sum_{i=1..k} binom(k,i) W^(i) C^(k-i)) / W^(0)   */
+/* ------------------------------------------------------------------ */
+
+static qaws_scalar const g_binom[4][4] = {
+	{ 1, 0, 0, 0 },
+	{ 1, 1, 0, 0 },
+	{ 1, 2, 1, 0 },
+	{ 1, 3, 3, 1 }
+};
+
+/* Homogeneous sums of one basis row: primal, parameter tangent, and the
+   parameter-only second derivative (2 w' P'). */
+typedef struct rational_row
+{
+	qaws_scalar A[3], W;
+	qaws_scalar Ad[3], Wd;
+	qaws_scalar Add[3];
+} rational_row;
+
+static void rational_sums(
+	curve_sample const* s,
+	unsigned int dim,
+	unsigned int r,
+	qaws_field_view const* pv,
+	qaws_field_view const* wv,
+	rational_row* out)
+{
+	qaws_support_range const* rg = &s->support.ranges[0];
+	unsigned int j, c;
+	memset(out, 0, sizeof(*out));
+	for (j = 0; j < rg->count; j++)
+	{
+		unsigned int e = rg->first + j;
+		qaws_scalar n = s->support.weights[0][r][j];
+		qaws_scalar w = s->weights[e];
+		qaws_scalar const* p = s->primal[0] + (size_t)e * dim;
+		qaws_scalar pd[3] = { 0, 0, 0 }, wd = 0;
+		if (n == QAWS_ZERO)
+			continue;
+		if (pv) qaws_internal_view_read(pv, e, dim, pd);
+		if (wv) qaws_internal_view_read(wv, e, 1, &wd);
+		out->W += n * w;
+		out->Wd += n * wd;
+		for (c = 0; c < dim; c++)
+		{
+			out->A[c] += n * w * p[c];
+			out->Ad[c] += n * (wd * p[c] + w * pd[c]);
+			out->Add[c] += n * QAWS_LITERAL(2.0) * wd * pd[c];
+		}
+	}
+}
+
+static qaws_vec3 vec3_from(qaws_scalar const* a, unsigned int dim)
+{
+	return qaws_v3(a[0], a[1], dim > 2 ? a[2] : QAWS_ZERO);
+}
+
+static qaws_status rational_tangent_sample(
+	curve_sample const* s,
+	unsigned int dim,
+	qaws_scalar t_dot,
+	unsigned int channels,
+	qaws_diff_views const* views,
+	int want_second,
+	curve_jet_buf* primal,
+	curve_jet_buf* tangent,
+	curve_jet_buf* tangent2)
+{
+	qaws_field_view const* pv = views ? qaws_diff_views_find(views, s->support.ranges[0].field) : NULL;
+	qaws_field_view const* wv = views ? qaws_diff_views_find(views, s->support.weight_field) : NULL;
+	rational_row rows[QAWS_DIFF_MAX_ORDER + 1];
+	qaws_dual3 A[QAWS_CURVE_JET_ORDER + 1], C[QAWS_CURVE_JET_ORDER + 1];
+	qaws_dual1 W[QAWS_CURVE_JET_ORDER + 1];
+	unsigned int kmax = highest_channel(channels), k, i, r;
+	unsigned int rows_needed = kmax + (t_dot != QAWS_ZERO ? (want_second ? 2u : 1u) : 0u);
+	(void)tangent2;
+
+	for (r = 0; r <= rows_needed; r++)
+		rational_sums(s, dim, r, pv, wv, &rows[r]);
+
+	for (k = 0; k <= kmax; k++)
+	{
+		qaws_vec3 a1 = qaws_v3_zero(), ad1 = qaws_v3_zero(), a2 = qaws_v3_zero();
+		qaws_scalar w1 = 0, wd1 = 0, w2 = 0;
+		if (k + 1 <= rows_needed) { a1 = vec3_from(rows[k + 1].A, dim); ad1 = vec3_from(rows[k + 1].Ad, dim); w1 = rows[k + 1].W; wd1 = rows[k + 1].Wd; }
+		if (k + 2 <= rows_needed) { a2 = vec3_from(rows[k + 2].A, dim); w2 = rows[k + 2].W; }
+
+		A[k].v = vec3_from(rows[k].A, dim);
+		A[k].t = qaws_v3_axpy(vec3_from(rows[k].Ad, dim), a1, t_dot);
+		A[k].tt = qaws_v3_axpy(qaws_v3_axpy(vec3_from(rows[k].Add, dim), ad1, QAWS_LITERAL(2.0) * t_dot), a2, t_dot * t_dot);
+		W[k].v = rows[k].W;
+		W[k].t = rows[k].Wd + t_dot * w1;
+		W[k].tt = QAWS_LITERAL(2.0) * t_dot * wd1 + t_dot * t_dot * w2;
+	}
+
+	if (W[0].v < QAWS_LITERAL(1e-15) && W[0].v > -QAWS_LITERAL(1e-15))
+		return QAWS_STATUS_DEGENERATE_CURVE;
+
+	for (k = 0; k <= kmax; k++)
+	{
+		qaws_dual3 num = A[k];
+		for (i = 1; i <= k; i++)
+			num = qaws_dual3_sub(num, qaws_dual3_mul_const(qaws_dual3_scale(C[k - i], W[i]), g_binom[k][i]));
+		C[k] = qaws_dual3_div(num, W[0]);
+	}
+
+	for (k = 0; k <= QAWS_CURVE_JET_ORDER; k++)
+	{
+		if (!(channels & (1u << k)))
+			continue;
+		primal->d[k][0] = C[k].v.x; primal->d[k][1] = C[k].v.y; primal->d[k][2] = C[k].v.z;
+		tangent->d[k][0] = C[k].t.x; tangent->d[k][1] = C[k].t.y; tangent->d[k][2] = C[k].t.z;
+		if (tangent2)
+		{
+			tangent2->d[k][0] = C[k].tt.x; tangent2->d[k][1] = C[k].tt.y; tangent2->d[k][2] = C[k].tt.z;
+		}
+	}
+	if (dim == 2)
+		for (k = 0; k <= QAWS_CURVE_JET_ORDER; k++)
+		{
+			primal->d[k][2] = tangent->d[k][2] = QAWS_ZERO;
+			if (tangent2) tangent2->d[k][2] = QAWS_ZERO;
+		}
+	return QAWS_STATUS_OK;
+}
+
+/* Reverse of the quotient recurrence: entries for control points and
+   weights plus the coordinate adjoint. */
+static qaws_status rational_adjoint_sample(
+	curve_sample const* s,
+	unsigned int dim,
+	unsigned int channels,
+	curve_jet_buf const* ybar,
+	int want_coordinate,
+	qaws_diff_entry* entries,
+	unsigned int capacity,
+	unsigned int* out_count,
+	qaws_scalar* out_t_adjoint)
+{
+	rational_row rows[QAWS_CURVE_JET_ORDER + 2];
+	qaws_scalar C[QAWS_CURVE_JET_ORDER + 1][3];
+	qaws_scalar Cbar[QAWS_CURVE_JET_ORDER + 1][3];
+	qaws_scalar Abar[QAWS_CURVE_JET_ORDER + 1][3];
+	qaws_scalar Wbar[QAWS_CURVE_JET_ORDER + 1];
+	qaws_support_range const* rg = &s->support.ranges[0];
+	unsigned int kmax = highest_channel(channels), k, i, c, j, n = 0;
+	qaws_scalar W0;
+
+	for (k = 0; k <= kmax + (want_coordinate ? 1u : 0u); k++)
+		rational_sums(s, dim, k, NULL, NULL, &rows[k]);
+	W0 = rows[0].W;
+	if (W0 < QAWS_LITERAL(1e-15) && W0 > -QAWS_LITERAL(1e-15))
+		return QAWS_STATUS_DEGENERATE_CURVE;
+
+	for (k = 0; k <= kmax; k++)
+	{
+		for (c = 0; c < dim; c++)
+		{
+			qaws_scalar num = rows[k].A[c];
+			for (i = 1; i <= k; i++)
+				num -= g_binom[k][i] * rows[i].W * C[k - i][c];
+			C[k][c] = num / W0;
+		}
+	}
+
+	memset(Abar, 0, sizeof(Abar));
+	memset(Wbar, 0, sizeof(Wbar));
+	for (k = 0; k <= kmax; k++)
+		for (c = 0; c < dim; c++)
+			Cbar[k][c] = (channels & (1u << k)) ? ybar->d[k][c] : QAWS_ZERO;
+
+	for (k = kmax + 1; k-- > 0;)
+	{
+		qaws_scalar g[3], gc = 0;
+		for (c = 0; c < dim; c++)
+		{
+			g[c] = Cbar[k][c] / W0;
+			Abar[k][c] += g[c];
+			gc += g[c] * C[k][c];
+		}
+		Wbar[0] -= gc;
+		for (i = 1; i <= k; i++)
+		{
+			qaws_scalar dot = 0;
+			for (c = 0; c < dim; c++)
+				dot += g[c] * C[k - i][c];
+			Wbar[i] -= g_binom[k][i] * dot;
+			for (c = 0; c < dim; c++)
+				Cbar[k - i][c] -= g_binom[k][i] * rows[i].W * g[c];
+		}
+	}
+
+	for (j = 0; j < rg->count; j++)
+	{
+		unsigned int e = rg->first + j;
+		qaws_scalar w = s->weights[e];
+		qaws_scalar const* p = s->primal[0] + (size_t)e * dim;
+		qaws_diff_entry* ep;
+		qaws_diff_entry* ew;
+		if (n + 2 > capacity)
+			return QAWS_STATUS_INTERNAL_ERROR;
+		ep = &entries[n++];
+		ew = &entries[n++];
+		ep->field = rg->field;
+		ep->element = e;
+		ep->g[0] = ep->g[1] = ep->g[2] = QAWS_ZERO;
+		ew->field = s->support.weight_field;
+		ew->element = e;
+		ew->g[0] = ew->g[1] = ew->g[2] = QAWS_ZERO;
+		for (k = 0; k <= kmax; k++)
+		{
+			qaws_scalar nk = s->support.weights[0][k][j];
+			qaws_scalar pa = 0;
+			for (c = 0; c < dim; c++)
+			{
+				ep->g[c] += nk * w * Abar[k][c];
+				pa += p[c] * Abar[k][c];
+			}
+			ew->g[0] += nk * (pa + Wbar[k]);
+		}
+	}
+	*out_count = n;
+
+	if (want_coordinate)
+	{
+		qaws_scalar acc = 0;
+		for (k = 0; k <= kmax; k++)
+		{
+			for (c = 0; c < dim; c++)
+				acc += Abar[k][c] * rows[k + 1].A[c];
+			acc += Wbar[k] * rows[k + 1].W;
+		}
+		*out_t_adjoint += acc;
+	}
+	return QAWS_STATUS_OK;
+}
+
 /* Adds g into the view element (masked). */
 void qaws_internal_view_add(qaws_field_view* v, unsigned int e, unsigned int dim, qaws_scalar const* g)
 {
@@ -689,13 +956,37 @@ static void scratch_free(qaws_diff_context const* ctx, void* p)
 	qaws_internal_dealloc(ctx ? ctx->allocator : NULL, p);
 }
 
+unsigned int qaws_internal_field_components(qaws_diff_field field, unsigned int dim)
+{
+	switch (field)
+	{
+	case QAWS_FIELD_WEIGHTS:
+	case QAWS_FIELD_KNOTS:
+	case QAWS_FIELD_U_KNOTS:
+	case QAWS_FIELD_V_KNOTS:
+	case QAWS_FIELD_KEY_TIMES:
+	case QAWS_FIELD_RADIUS:
+	case QAWS_FIELD_RADIUS_B:
+	case QAWS_FIELD_ANGLE_START:
+	case QAWS_FIELD_ANGLE_END:
+	case QAWS_FIELD_OFFSET_DISTANCE:
+	case QAWS_FIELD_SCALE:
+	case QAWS_FIELD_CURVATURE:
+	case QAWS_FIELD_CURVATURE_RATE:
+		return 1;
+	default:
+		return dim;
+	}
+}
+
 qaws_status qaws_internal_check_views(qaws_diff_views const* views, unsigned int dim)
 {
 	unsigned int i;
 	if (!views)
 		return QAWS_STATUS_OK;
 	for (i = 0; i < views->field_count; i++)
-		if (views->fields[i].data && views->fields[i].components != dim)
+		if (views->fields[i].data &&
+		    views->fields[i].components != qaws_internal_field_components(views->fields[i].field, dim))
 			return QAWS_STATUS_INVALID_ARGUMENT;
 	return QAWS_STATUS_OK;
 }
@@ -742,7 +1033,7 @@ static int view_index(qaws_diff_views const* views, qaws_diff_field field)
 
 /* Strategy: scatter. Each sample adds into the parameter adjoints. */
 static qaws_status accumulate_scatter(
-	unsigned int components, unsigned int count,
+	unsigned int count,
 	qaws_diff_entry* entries, unsigned int capacity,
 	qaws_diff_collect_fn collect, void const* user, qaws_diff_views* views)
 {
@@ -756,7 +1047,7 @@ static qaws_status accumulate_scatter(
 		{
 			int f = view_index(views, entries[q].field);
 			if (f >= 0)
-				qaws_internal_view_add(&views->fields[f], entries[q].element, components, entries[q].g);
+				qaws_internal_view_add(&views->fields[f], entries[q].element, views->fields[f].components, entries[q].g);
 		}
 	}
 	return QAWS_STATUS_OK;
@@ -769,7 +1060,7 @@ static qaws_status accumulate_scatter(
  */
 static qaws_status accumulate_tiled(
 	qaws_diff_context const* ctx,
-	unsigned int components, unsigned int count,
+	unsigned int count,
 	qaws_diff_entry* entries, unsigned int capacity,
 	qaws_diff_collect_fn collect, void const* user, qaws_diff_views* views)
 {
@@ -780,14 +1071,14 @@ static qaws_status accumulate_tiled(
 	qaws_status st = QAWS_STATUS_OK;
 
 	if (nf > DIFF_MAX_VIEW_FIELDS)
-		return accumulate_scatter(components, count, entries, capacity, collect, user, views);
+		return accumulate_scatter(count, entries, capacity, collect, user, views);
 
 	for (f = 0; f < DIFF_MAX_VIEW_FIELDS; f++)
 		local[f] = NULL;
 	for (f = 0; f < nf; f++)
 	{
 		qaws_field_view const* v = &views->fields[f];
-		size_t size = sizeof(qaws_scalar) * (size_t)v->count * components;
+		size_t size = sizeof(qaws_scalar) * (size_t)v->count * v->components;
 		if (!v->data || !v->count)
 			continue;
 		local[f] = (qaws_scalar*)scratch_alloc(ctx, size);
@@ -819,8 +1110,8 @@ static qaws_status accumulate_tiled(
 				unsigned int e = entries[q].element;
 				if (fi < 0 || !local[fi] || e >= views->fields[fi].count)
 					continue;
-				for (c = 0; c < components; c++)
-					local[fi][(size_t)e * components + c] += entries[q].g[c];
+				for (c = 0; c < views->fields[fi].components; c++)
+					local[fi][(size_t)e * views->fields[fi].components + c] += entries[q].g[c];
 				if (e < lo[fi]) lo[fi] = e;
 				if (e + 1 > hi[fi]) hi[fi] = e + 1;
 			}
@@ -833,9 +1124,9 @@ static qaws_status accumulate_tiled(
 				continue;
 			for (e = lo[f]; e < hi[f]; e++)
 			{
-				qaws_internal_view_add(&views->fields[f], e, components, &local[f][(size_t)e * components]);
-				for (c = 0; c < components; c++)
-					local[f][(size_t)e * components + c] = QAWS_ZERO;
+				qaws_internal_view_add(&views->fields[f], e, views->fields[f].components, &local[f][(size_t)e * views->fields[f].components]);
+				for (c = 0; c < views->fields[f].components; c++)
+					local[f][(size_t)e * views->fields[f].components + c] = QAWS_ZERO;
 			}
 		}
 	}
@@ -855,7 +1146,7 @@ cleanup:
  */
 static qaws_status accumulate_gather(
 	qaws_diff_context const* ctx,
-	unsigned int components, unsigned int count,
+	unsigned int count,
 	qaws_diff_entry* entries, unsigned int capacity,
 	qaws_diff_collect_fn collect, void const* user, qaws_diff_views* views)
 {
@@ -866,7 +1157,7 @@ static qaws_status accumulate_gather(
 	qaws_status st = QAWS_STATUS_OK;
 
 	if (nf > DIFF_MAX_VIEW_FIELDS)
-		return accumulate_scatter(components, count, entries, capacity, collect, user, views);
+		return accumulate_scatter(count, entries, capacity, collect, user, views);
 
 	for (f = 0; f < DIFF_MAX_VIEW_FIELDS; f++)
 	{
@@ -913,7 +1204,7 @@ static qaws_status accumulate_gather(
 			offsets[f][e + 1] += offsets[f][e];
 		total = offsets[f][views->fields[f].count];
 		memcpy(cursor[f], offsets[f], sizeof(unsigned int) * ((size_t)views->fields[f].count + 1));
-		contrib[f] = (qaws_scalar*)scratch_alloc(ctx, sizeof(qaws_scalar) * ((size_t)total * components + 1));
+		contrib[f] = (qaws_scalar*)scratch_alloc(ctx, sizeof(qaws_scalar) * ((size_t)total * views->fields[f].components + 1));
 		if (!contrib[f])
 		{
 			st = QAWS_STATUS_ALLOCATION_FAILURE;
@@ -933,8 +1224,8 @@ static qaws_status accumulate_gather(
 			if (fi < 0 || !contrib[fi] || entries[q].element >= views->fields[fi].count)
 				continue;
 			e = entries[q].element;
-			for (c = 0; c < components; c++)
-				contrib[fi][(size_t)cursor[fi][e] * components + c] = entries[q].g[c];
+			for (c = 0; c < views->fields[fi].components; c++)
+				contrib[fi][(size_t)cursor[fi][e] * views->fields[fi].components + c] = entries[q].g[c];
 			cursor[fi][e]++;
 		}
 	}
@@ -951,9 +1242,9 @@ static qaws_status accumulate_gather(
 			if (offsets[f][e + 1] == offsets[f][e])
 				continue;
 			for (k = offsets[f][e]; k < offsets[f][e + 1]; k++)
-				for (c = 0; c < components; c++)
-					g[c] += contrib[f][(size_t)k * components + c];
-			qaws_internal_view_add(&views->fields[f], e, components, g);
+				for (c = 0; c < views->fields[f].components; c++)
+					g[c] += contrib[f][(size_t)k * views->fields[f].components + c];
+			qaws_internal_view_add(&views->fields[f], e, views->fields[f].components, g);
 		}
 	}
 
@@ -980,6 +1271,8 @@ qaws_status qaws_internal_diff_accumulate(
 	qaws_status st;
 	unsigned int i, n;
 
+	(void)components;
+
 	entries = (qaws_diff_entry*)scratch_alloc(ctx, sizeof(qaws_diff_entry) * (size_t)(entry_capacity ? entry_capacity : 1u));
 	if (!entries)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
@@ -996,14 +1289,14 @@ qaws_status qaws_internal_diff_accumulate(
 		switch (ctx ? ctx->accumulation : QAWS_ACCUMULATE_SCATTER)
 		{
 		case QAWS_ACCUMULATE_TILED:
-			st = accumulate_tiled(ctx, components, sample_count, entries, entry_capacity, collect, user, views);
+			st = accumulate_tiled(ctx, sample_count, entries, entry_capacity, collect, user, views);
 			break;
 		case QAWS_ACCUMULATE_GATHER:
-			st = accumulate_gather(ctx, components, sample_count, entries, entry_capacity, collect, user, views);
+			st = accumulate_gather(ctx, sample_count, entries, entry_capacity, collect, user, views);
 			break;
 		case QAWS_ACCUMULATE_SCATTER:
 		default:
-			st = accumulate_scatter(components, sample_count, entries, entry_capacity, collect, user, views);
+			st = accumulate_scatter(sample_count, entries, entry_capacity, collect, user, views);
 			break;
 		}
 	}
@@ -1049,26 +1342,38 @@ static qaws_status curve_collect(
 		return st;
 	job->read_jet(job->jets, i, &ybar);
 
-	for (r = 0; r < s.support.range_count; r++)
+	if (s.weights)
 	{
-		for (j = 0; j < s.support.ranges[r].count; j++)
+		qaws_scalar dummy = 0;
+		int want_t = first_pass && job->t_adjoint != NULL;
+		st = rational_adjoint_sample(&s, job->dim, job->channels, &ybar, want_t,
+			entries, capacity, &n, want_t ? &job->t_adjoint[i] : &dummy);
+		if (st != QAWS_STATUS_OK)
+			return st;
+	}
+	else
+	{
+		for (r = 0; r < s.support.range_count; r++)
 		{
-			if (n >= capacity)
-				return QAWS_STATUS_INTERNAL_ERROR;
-			entries[n].field = s.support.ranges[r].field;
-			entries[n].element = s.support.ranges[r].first + j;
-			entries[n].g[2] = QAWS_ZERO;
-			adjoint_contribution(&s, r, j, job->dim, job->channels, &ybar, entries[n].g);
-			n++;
+			for (j = 0; j < s.support.ranges[r].count; j++)
+			{
+				if (n >= capacity)
+					return QAWS_STATUS_INTERNAL_ERROR;
+				entries[n].field = s.support.ranges[r].field;
+				entries[n].element = s.support.ranges[r].first + j;
+				entries[n].g[2] = QAWS_ZERO;
+				adjoint_contribution(&s, r, j, job->dim, job->channels, &ybar, entries[n].g);
+				n++;
+			}
 		}
+		if (first_pass && job->t_adjoint)
+			job->t_adjoint[i] += coordinate_adjoint(&s, job->dim, job->channels, &ybar);
 	}
 	*out_count = n;
 
 	if (first_pass)
 	{
 		int has_t = job->t_adjoint != NULL;
-		if (has_t)
-			job->t_adjoint[i] += coordinate_adjoint(&s, job->dim, job->channels, &ybar);
 		qaws_internal_diff_report_note(job->ctx,
 			has_t ? d->diff_class : QAWS_DIFF_SMOOTH,
 			(has_t && s.at_boundary) ? QAWS_DIFF_AT_BOUNDARY : QAWS_DIFF_VALID,

@@ -271,6 +271,9 @@ typedef struct qaws_surface_jet
  * For linear families (QAWS_CAP_LINEAR) the weights are exact:
  *   d^k C / dt^k = sum_j weights[r][k][j] * field_r[first_r + j]
  * Weights are given for derivative orders 0..order.
+ * For rational families (weight_field != QAWS_FIELD_NONE) the weights are
+ * the homogeneous basis: A^(k) = sum_j weights * w_j * P_j and
+ * W^(k) = sum_j weights * w_j, with C = A / W.
  * =================================================================== */
 
 typedef enum qaws_support_kind
@@ -297,6 +300,7 @@ typedef struct qaws_local_support
 	qaws_support_kind kind;
 	unsigned int range_count;
 	qaws_support_range ranges[QAWS_DIFF_MAX_RANGES];
+	qaws_diff_field weight_field;      /* QAWS_FIELD_WEIGHTS for rational curves, else NONE */
 	int has_weights;
 	unsigned int order;
 	qaws_scalar weights[QAWS_DIFF_MAX_RANGES][QAWS_DIFF_MAX_ORDER + 1][QAWS_DIFF_MAX_SUPPORT];
@@ -313,6 +317,7 @@ typedef struct qaws_surface_support
 	unsigned int v_first, v_count;
 	unsigned int u_stride, v_stride;
 	int on_boundary;              /* (u,v) lies exactly on an interior knot line */
+	qaws_diff_field weight_field;      /* QAWS_FIELD_WEIGHTS for rational surfaces, else NONE */
 	int has_weights;
 	unsigned int order;
 	qaws_scalar u_weights[QAWS_DIFF_MAX_ORDER + 1][QAWS_DIFF_MAX_SUPPORT];

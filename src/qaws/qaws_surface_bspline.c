@@ -251,6 +251,7 @@ static qaws_status bspline_surface_linear_support(qaws_surface const* surface,
 	out->on_boundary =
 		(u_span > ud && u == impl->u_knots[u_span]) ||
 		(v_span > vd && v == impl->v_knots[v_span]);
+	out->weight_field = QAWS_FIELD_NONE;
 	out->has_weights = 1;
 	out->order = order;
 	for (r = 0; r <= order; r++)

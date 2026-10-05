@@ -2,6 +2,7 @@
 #include "internal/qaws_internal_surface.h"
 #include "internal/qaws_internal_curve.h"
 #include "internal/qaws_internal_diff.h"
+#include "core/qaws_dual_core.h"
 #include <string.h>
 
 /* Jet slot i holds d^(a+b) S / du^a dv^b with (a, b) below. */
@@ -85,6 +86,7 @@ typedef struct surface_sample
 {
 	qaws_surface_support support;
 	qaws_scalar const* primal;
+	qaws_scalar const* weights;   /* rational weights, NULL when polynomial */
 } surface_sample;
 
 static void clamp_uv(qaws_surface const* surface, qaws_scalar* u, qaws_scalar* v)
@@ -109,15 +111,20 @@ static unsigned int channel_order(unsigned int channels)
 	return order;
 }
 
+/* base_order: highest single-direction order of the requested channels;
+   extra: additional orders for coordinate tangents (1) or second
+   tangents (2). Rational surfaces always need every partial up to order
+   three because the quotient recurrence couples them. */
 static qaws_status surface_prepare(
 	qaws_surface const* surface,
 	qaws_scalar u,
 	qaws_scalar v,
-	unsigned int order,
+	unsigned int base_order,
+	unsigned int extra,
 	surface_sample* s)
 {
 	qaws_surface_diff_vtable const* d = surface_diff(surface);
-	unsigned int count = 0, components = 0, last;
+	unsigned int count = 0, components = 0, last, order = base_order + extra;
 	qaws_surface_support const* sp = &s->support;
 	qaws_status st;
 
@@ -130,6 +137,13 @@ static qaws_status surface_prepare(
 	st = d->linear_support(surface, u, v, order, &s->support);
 	if (st != QAWS_STATUS_OK)
 		return st;
+	if (sp->weight_field != QAWS_FIELD_NONE && order < 3 + extra)
+	{
+		order = 3 + extra;
+		st = d->linear_support(surface, u, v, order, &s->support);
+		if (st != QAWS_STATUS_OK)
+			return st;
+	}
 	if (!sp->has_weights || sp->order < order || !sp->u_count || !sp->v_count)
 		return QAWS_STATUS_INTERNAL_ERROR;
 
@@ -139,6 +153,17 @@ static qaws_status surface_prepare(
 	last = (sp->u_first + sp->u_count - 1) * sp->u_stride + (sp->v_first + sp->v_count - 1) * sp->v_stride;
 	if (components != 3 || last >= count)
 		return QAWS_STATUS_INTERNAL_ERROR;
+
+	s->weights = NULL;
+	if (sp->weight_field != QAWS_FIELD_NONE)
+	{
+		unsigned int wcount = 0, wcomp = 0;
+		st = d->primal_field(surface, sp->weight_field, &s->weights, &wcount, &wcomp);
+		if (st != QAWS_STATUS_OK)
+			return st;
+		if (wcomp != 1 || last >= wcount)
+			return QAWS_STATUS_INTERNAL_ERROR;
+	}
 	return QAWS_STATUS_OK;
 }
 
@@ -199,6 +224,256 @@ static void surface_partial_tangent(
 	}
 }
 
+/* ------------------------------------------------------------------ */
+/*  Rational surfaces                                                 */
+/*                                                                    */
+/*  A_ab = sum U_a V_b w P,  W_ab = sum U_a V_b w,  S = A / W         */
+/*  S_kl = (A_kl - sum_{(i,j) != (0,0)} C(k,i) C(l,j) W_ij S_{k-i,l-j})*/
+/*         / W_00                                                     */
+/* ------------------------------------------------------------------ */
+
+static qaws_scalar const g_surface_binom[4][4] = {
+	{ 1, 0, 0, 0 },
+	{ 1, 1, 0, 0 },
+	{ 1, 2, 1, 0 },
+	{ 1, 3, 3, 1 }
+};
+
+static unsigned int jet_index(unsigned int a, unsigned int b)
+{
+	unsigned int t = a + b;
+	return t * (t + 1) / 2 + b;
+}
+
+typedef struct surface_rational_sums
+{
+	qaws_vec3 A, Ad, Add;
+	qaws_scalar W, Wd;
+} surface_rational_sums;
+
+/* Homogeneous sums of partial (a, b): primal, parameter tangent and the
+   parameter-only second derivative 2 w' P'. */
+static void surface_hom(
+	surface_sample const* s,
+	unsigned int a,
+	unsigned int b,
+	qaws_field_view const* pv,
+	qaws_field_view const* wv,
+	surface_rational_sums* out)
+{
+	qaws_surface_support const* sp = &s->support;
+	unsigned int i, j;
+	memset(out, 0, sizeof(*out));
+	for (i = 0; i < sp->u_count; i++)
+	{
+		qaws_scalar wu = sp->u_weights[a][i];
+		if (wu == QAWS_ZERO)
+			continue;
+		for (j = 0; j < sp->v_count; j++)
+		{
+			unsigned int e = support_element(sp, i, j);
+			qaws_scalar n = wu * sp->v_weights[b][j];
+			qaws_scalar w = s->weights[e];
+			qaws_scalar const* p = s->primal + (size_t)e * 3;
+			qaws_scalar pd[3] = { 0, 0, 0 }, wd = 0;
+			if (pv) qaws_internal_view_read(pv, e, 3, pd);
+			if (wv) qaws_internal_view_read(wv, e, 1, &wd);
+			out->W += n * w;
+			out->Wd += n * wd;
+			out->A = qaws_v3_add(out->A, qaws_v3(n * w * p[0], n * w * p[1], n * w * p[2]));
+			out->Ad = qaws_v3_add(out->Ad, qaws_v3(n * (wd * p[0] + w * pd[0]),
+			                                      n * (wd * p[1] + w * pd[1]),
+			                                      n * (wd * p[2] + w * pd[2])));
+			out->Add = qaws_v3_add(out->Add, qaws_v3(n * QAWS_LITERAL(2.0) * wd * pd[0],
+			                                        n * QAWS_LITERAL(2.0) * wd * pd[1],
+			                                        n * QAWS_LITERAL(2.0) * wd * pd[2]));
+		}
+	}
+}
+
+/* Rational tangent along (u', v', parameter tangent). All ten partials
+   are formed because the recurrence couples them. */
+static qaws_status surface_rational_tangent(
+	surface_sample const* s,
+	qaws_scalar u_dot,
+	qaws_scalar v_dot,
+	qaws_diff_views const* views,
+	int want_second,
+	qaws_dual3* out_S)
+{
+	qaws_field_view const* pv = views ? qaws_diff_views_find(views, s->support.field) : NULL;
+	qaws_field_view const* wv = views ? qaws_diff_views_find(views, s->support.weight_field) : NULL;
+	qaws_dual3 A[QAWS_SURFACE_JET_COUNT];
+	qaws_dual1 W[QAWS_SURFACE_JET_COUNT];
+	unsigned int ch, k, l, i, j;
+	int has_coord = (u_dot != QAWS_ZERO) || (v_dot != QAWS_ZERO);
+
+	for (ch = 0; ch < QAWS_SURFACE_JET_COUNT; ch++)
+	{
+		unsigned int a = g_surface_jet_a[ch], b = g_surface_jet_b[ch];
+		surface_rational_sums h, hu, hv, huu, huv, hvv;
+		surface_hom(s, a, b, pv, wv, &h);
+		A[ch].v = h.A;
+		A[ch].t = h.Ad;
+		A[ch].tt = h.Add;
+		W[ch].v = h.W;
+		W[ch].t = h.Wd;
+		W[ch].tt = QAWS_ZERO;
+		if (!has_coord)
+			continue;
+
+		surface_hom(s, a + 1, b, pv, wv, &hu);
+		surface_hom(s, a, b + 1, pv, wv, &hv);
+		A[ch].t = qaws_v3_axpy(qaws_v3_axpy(A[ch].t, hu.A, u_dot), hv.A, v_dot);
+		W[ch].t += u_dot * hu.W + v_dot * hv.W;
+		if (!want_second)
+			continue;
+
+		surface_hom(s, a + 2, b, pv, wv, &huu);
+		surface_hom(s, a + 1, b + 1, pv, wv, &huv);
+		surface_hom(s, a, b + 2, pv, wv, &hvv);
+		A[ch].tt = qaws_v3_axpy(A[ch].tt, hu.Ad, QAWS_LITERAL(2.0) * u_dot);
+		A[ch].tt = qaws_v3_axpy(A[ch].tt, hv.Ad, QAWS_LITERAL(2.0) * v_dot);
+		A[ch].tt = qaws_v3_axpy(A[ch].tt, huu.A, u_dot * u_dot);
+		A[ch].tt = qaws_v3_axpy(A[ch].tt, huv.A, QAWS_LITERAL(2.0) * u_dot * v_dot);
+		A[ch].tt = qaws_v3_axpy(A[ch].tt, hvv.A, v_dot * v_dot);
+		W[ch].tt = QAWS_LITERAL(2.0) * u_dot * hu.Wd + QAWS_LITERAL(2.0) * v_dot * hv.Wd
+		         + u_dot * u_dot * huu.W + QAWS_LITERAL(2.0) * u_dot * v_dot * huv.W + v_dot * v_dot * hvv.W;
+	}
+
+	if (W[0].v < QAWS_LITERAL(1e-15) && W[0].v > -QAWS_LITERAL(1e-15))
+		return QAWS_STATUS_DEGENERATE_CURVE;
+
+	for (ch = 0; ch < QAWS_SURFACE_JET_COUNT; ch++)
+	{
+		qaws_dual3 num = A[ch];
+		k = g_surface_jet_a[ch];
+		l = g_surface_jet_b[ch];
+		for (i = 0; i <= k; i++)
+			for (j = 0; j <= l; j++)
+			{
+				qaws_scalar bc;
+				if (i == 0 && j == 0)
+					continue;
+				bc = g_surface_binom[k][i] * g_surface_binom[l][j];
+				num = qaws_dual3_sub(num, qaws_dual3_mul_const(
+					qaws_dual3_scale(out_S[jet_index(k - i, l - j)], W[jet_index(i, j)]), bc));
+			}
+		out_S[ch] = qaws_dual3_div(num, W[0]);
+	}
+	return QAWS_STATUS_OK;
+}
+
+/* Reverse of the rational recurrence: control point and weight entries,
+   plus coordinate adjoints when requested. */
+static qaws_status surface_rational_adjoint(
+	surface_sample const* s,
+	unsigned int channels,
+	qaws_surface_jet const* ybar,
+	int want_coordinate,
+	qaws_diff_entry* entries,
+	unsigned int capacity,
+	unsigned int* out_count,
+	qaws_scalar* u_adj,
+	qaws_scalar* v_adj)
+{
+	qaws_surface_support const* sp = &s->support;
+	surface_rational_sums h[QAWS_SURFACE_JET_COUNT];
+	qaws_vec3 S[QAWS_SURFACE_JET_COUNT], Sbar[QAWS_SURFACE_JET_COUNT], Abar[QAWS_SURFACE_JET_COUNT];
+	qaws_scalar Wbar[QAWS_SURFACE_JET_COUNT];
+	unsigned int ch, k, l, i, j, n = 0;
+	qaws_scalar W0;
+
+	for (ch = 0; ch < QAWS_SURFACE_JET_COUNT; ch++)
+		surface_hom(s, g_surface_jet_a[ch], g_surface_jet_b[ch], NULL, NULL, &h[ch]);
+	W0 = h[0].W;
+	if (W0 < QAWS_LITERAL(1e-15) && W0 > -QAWS_LITERAL(1e-15))
+		return QAWS_STATUS_DEGENERATE_CURVE;
+
+	for (ch = 0; ch < QAWS_SURFACE_JET_COUNT; ch++)
+	{
+		qaws_vec3 num = h[ch].A;
+		k = g_surface_jet_a[ch];
+		l = g_surface_jet_b[ch];
+		for (i = 0; i <= k; i++)
+			for (j = 0; j <= l; j++)
+				if (i || j)
+					num = qaws_v3_sub(num, qaws_v3_scale(S[jet_index(k - i, l - j)],
+						g_surface_binom[k][i] * g_surface_binom[l][j] * h[jet_index(i, j)].W));
+		S[ch] = qaws_v3_scale(num, QAWS_ONE / W0);
+		Sbar[ch] = (channels & (1u << ch)) ? ybar->d[ch] : qaws_v3_zero();
+		Abar[ch] = qaws_v3_zero();
+		Wbar[ch] = QAWS_ZERO;
+	}
+
+	for (ch = QAWS_SURFACE_JET_COUNT; ch-- > 0;)
+	{
+		qaws_vec3 g = qaws_v3_scale(Sbar[ch], QAWS_ONE / W0);
+		k = g_surface_jet_a[ch];
+		l = g_surface_jet_b[ch];
+		Abar[ch] = qaws_v3_add(Abar[ch], g);
+		Wbar[0] -= qaws_v3_dot(g, S[ch]);
+		for (i = 0; i <= k; i++)
+			for (j = 0; j <= l; j++)
+			{
+				qaws_scalar bc;
+				unsigned int lower = jet_index(k - i, l - j), wij = jet_index(i, j);
+				if (i == 0 && j == 0)
+					continue;
+				bc = g_surface_binom[k][i] * g_surface_binom[l][j];
+				Wbar[wij] -= bc * qaws_v3_dot(g, S[lower]);
+				Sbar[lower] = qaws_v3_axpy(Sbar[lower], g, -bc * h[wij].W);
+			}
+	}
+
+	for (i = 0; i < sp->u_count; i++)
+		for (j = 0; j < sp->v_count; j++)
+		{
+			unsigned int e = support_element(sp, i, j);
+			qaws_scalar w = s->weights[e];
+			qaws_vec3 p = qaws_v3(s->primal[e * 3 + 0], s->primal[e * 3 + 1], s->primal[e * 3 + 2]);
+			qaws_vec3 gp = qaws_v3_zero();
+			qaws_scalar gw = QAWS_ZERO;
+			if (n + 2 > capacity)
+				return QAWS_STATUS_INTERNAL_ERROR;
+			for (ch = 0; ch < QAWS_SURFACE_JET_COUNT; ch++)
+			{
+				qaws_scalar nab = sp->u_weights[g_surface_jet_a[ch]][i] * sp->v_weights[g_surface_jet_b[ch]][j];
+				gp = qaws_v3_axpy(gp, Abar[ch], nab * w);
+				gw += nab * (qaws_v3_dot(p, Abar[ch]) + Wbar[ch]);
+			}
+			entries[n].field = sp->field;
+			entries[n].element = e;
+			entries[n].g[0] = gp.x; entries[n].g[1] = gp.y; entries[n].g[2] = gp.z;
+			n++;
+			entries[n].field = sp->weight_field;
+			entries[n].element = e;
+			entries[n].g[0] = gw; entries[n].g[1] = QAWS_ZERO; entries[n].g[2] = QAWS_ZERO;
+			n++;
+		}
+	*out_count = n;
+
+	if (want_coordinate)
+	{
+		for (ch = 0; ch < QAWS_SURFACE_JET_COUNT; ch++)
+		{
+			surface_rational_sums hu, hv;
+			unsigned int a = g_surface_jet_a[ch], b = g_surface_jet_b[ch];
+			if (u_adj)
+			{
+				surface_hom(s, a + 1, b, NULL, NULL, &hu);
+				*u_adj += qaws_v3_dot(Abar[ch], hu.A) + Wbar[ch] * hu.W;
+			}
+			if (v_adj)
+			{
+				surface_hom(s, a, b + 1, NULL, NULL, &hv);
+				*v_adj += qaws_v3_dot(Abar[ch], hv.A) + Wbar[ch] * hv.W;
+			}
+		}
+	}
+	return QAWS_STATUS_OK;
+}
+
 static void store_vec3(qaws_vec3* dst, qaws_scalar const* src)
 {
 	dst->x = src[0];
@@ -237,10 +512,10 @@ static qaws_status surface_tangent_sample(
 {
 	surface_sample s;
 	int has_coord = (u_dot != QAWS_ZERO) || (v_dot != QAWS_ZERO);
-	unsigned int order = channel_order(channels) + (has_coord ? (tangent2 ? 2u : 1u) : 0u);
+	unsigned int extra = has_coord ? (tangent2 ? 2u : 1u) : 0u;
 	unsigned int ch, c;
 	qaws_field_view const* view;
-	qaws_status st = surface_prepare(surface, u, v, order, &s);
+	qaws_status st = surface_prepare(surface, u, v, channel_order(channels), extra, &s);
 	if (st != QAWS_STATUS_OK)
 		return st;
 	view = views ? qaws_diff_views_find(views, s.support.field) : NULL;
@@ -249,6 +524,22 @@ static qaws_status surface_tangent_sample(
 	memset(tangent, 0, sizeof(*tangent));
 	if (tangent2) memset(tangent2, 0, sizeof(*tangent2));
 
+	if (s.weights)
+	{
+		qaws_dual3 S[QAWS_SURFACE_JET_COUNT];
+		st = surface_rational_tangent(&s, u_dot, v_dot, views, tangent2 != NULL, S);
+		if (st != QAWS_STATUS_OK)
+			return st;
+		for (ch = 0; ch < QAWS_SURFACE_JET_COUNT; ch++)
+		{
+			if (!(channels & (1u << ch)))
+				continue;
+			if (primal) primal->d[ch] = S[ch].v;
+			tangent->d[ch] = S[ch].t;
+			if (tangent2) tangent2->d[ch] = S[ch].tt;
+		}
+	}
+	else
 	for (ch = 0; ch < QAWS_SURFACE_JET_COUNT; ch++)
 	{
 		unsigned int a = g_surface_jet_a[ch], b = g_surface_jet_b[ch];
@@ -324,10 +615,22 @@ qaws_status qaws_surface_eval_jet(
 		return d->eval_jet(surface, u, v, channels, out_jet);
 	}
 
-	st = surface_prepare(surface, u, v, channel_order(channels), &s);
+	st = surface_prepare(surface, u, v, channel_order(channels), 0, &s);
 	if (st != QAWS_STATUS_OK)
 		return st;
 	memset(out_jet, 0, sizeof(*out_jet));
+	if (s.weights)
+	{
+		qaws_dual3 S[QAWS_SURFACE_JET_COUNT];
+		st = surface_rational_tangent(&s, QAWS_ZERO, QAWS_ZERO, NULL, 0, S);
+		if (st != QAWS_STATUS_OK)
+			return st;
+		for (ch = 0; ch < QAWS_SURFACE_JET_COUNT; ch++)
+			if (channels & (1u << ch))
+				out_jet->d[ch] = S[ch].v;
+		out_jet->channels = channels;
+		return QAWS_STATUS_OK;
+	}
 	for (ch = 0; ch < QAWS_SURFACE_JET_COUNT; ch++)
 	{
 		qaws_scalar p[3];
@@ -455,12 +758,26 @@ static qaws_status surface_collect(
 	surface_sample s;
 	qaws_surface_support const* sp;
 	unsigned int i, j, ch, n = 0;
-	qaws_status st = surface_prepare(job->surface, job->u[sample], job->v[sample], job->order, &s);
+	qaws_status st = surface_prepare(job->surface, job->u[sample], job->v[sample], job->order, (job->u_adjoint || job->v_adjoint) ? 1u : 0u, &s);
 
 	*out_count = 0;
 	if (st != QAWS_STATUS_OK)
 		return st;
 	sp = &s.support;
+
+	if (s.weights)
+	{
+		int want = first_pass && (job->u_adjoint || job->v_adjoint);
+		st = surface_rational_adjoint(&s, job->channels, ybar, want, entries, capacity, out_count,
+			(want && job->u_adjoint) ? &job->u_adjoint[sample] : NULL,
+			(want && job->v_adjoint) ? &job->v_adjoint[sample] : NULL);
+		if (st != QAWS_STATUS_OK)
+			return st;
+		if (first_pass)
+			report_surface(job->ctx, job->surface, &s, job->u_adjoint || job->v_adjoint, sample);
+		return QAWS_STATUS_OK;
+	}
+
 	if (sp->u_count * sp->v_count > capacity)
 		return QAWS_STATUS_INTERNAL_ERROR;
 
@@ -539,13 +856,13 @@ qaws_status qaws_surface_eval_batch_adjoint(
 	job.u = u;
 	job.v = v;
 	job.channels = channels & (unsigned int)QAWS_SJET_ORDER3;
-	job.order = channel_order(job.channels) + ((u_adjoint || v_adjoint) ? 1u : 0u);
+	job.order = channel_order(job.channels);
 	job.jets = out_adjoint;
 	job.u_adjoint = u_adjoint;
 	job.v_adjoint = v_adjoint;
 
 	return qaws_internal_diff_accumulate(ctx, 3, count,
-		QAWS_DIFF_MAX_SUPPORT * QAWS_DIFF_MAX_SUPPORT, surface_collect, &job, param_adjoint);
+		2 * QAWS_DIFF_MAX_SUPPORT * QAWS_DIFF_MAX_SUPPORT, surface_collect, &job, param_adjoint);
 }
 
 qaws_status qaws_surface_eval_adjoint(

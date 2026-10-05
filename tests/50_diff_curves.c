@@ -1,7 +1,7 @@
 /*
  * Test 50: Differentiable curve evaluation
  *
- * Linear families (Bezier, B-spline, Hermite, polynomial):
+ * Families (Bezier, B-spline, Hermite, polynomial, NURBS, rational Bezier):
  *   - primal jets match qaws_curve_evaluate_*
  *   - parameter tangents match finite differences
  *   - coordinate tangents match the next spatial derivative
@@ -15,6 +15,9 @@
 
 #define MAX_PARAMS 64
 #define SAMPLE_COUNT 9
+
+/* Weights are scalar fields; every other field has one value per dimension. */
+#define FIELD_COMPS(f, r) ((f)->fields[r] == QAWS_FIELD_WEIGHTS ? 1u : (f)->dim)
 
 /* ------------------------------------------------------------------ */
 /*  Family fixtures                                                   */
@@ -81,11 +84,38 @@ static qaws_status create_polynomial(family const* f, qaws_scalar const* const* 
 	return qaws_curve_create_polynomial(&d, out);
 }
 
+static qaws_status create_nurbs(family const* f, qaws_scalar const* const* p, qaws_curve** out)
+{
+	qaws_nurbs_desc d;
+	memset(&d, 0, sizeof(d));
+	d.dimension = (qaws_dimension)f->dim;
+	d.degree = f->knot_count - f->counts[0] - 1;
+	d.control_points = p[0];
+	d.control_point_count = f->counts[0];
+	d.knots = f->knots;
+	d.knot_count = f->knot_count;
+	d.weights = p[1];
+	d.weight_count = f->counts[1];
+	return qaws_curve_create_nurbs(&d, out);
+}
+
+static qaws_status create_rational_bezier(family const* f, qaws_scalar const* const* p, qaws_curve** out)
+{
+	qaws_rational_bezier_desc d;
+	d.dimension = (qaws_dimension)f->dim;
+	d.degree = f->counts[0] - 1;
+	d.control_points = p[0];
+	d.control_point_count = f->counts[0];
+	d.weights = p[1];
+	d.weight_count = f->counts[1];
+	return qaws_curve_create_rational_bezier(&d, out);
+}
+
 static void make_families(family* fams, unsigned int* count)
 {
 	unsigned int i;
 	family* f;
-	memset(fams, 0, sizeof(family) * 4);
+	memset(fams, 0, sizeof(family) * 6);
 	diff_seed(2024);
 
 	f = &fams[0];
@@ -136,7 +166,40 @@ static void make_families(family* fams, unsigned int* count)
 	f->create = create_polynomial;
 	f->t_min = -1; f->t_max = 2;
 
-	*count = 4;
+	f = &fams[4];
+	f->name = "nurbs";
+	f->dim = 3;
+	f->field_count = 2;
+	f->fields[0] = QAWS_FIELD_CONTROL_POINTS;
+	f->fields[1] = QAWS_FIELD_WEIGHTS;
+	f->counts[0] = 7;
+	f->counts[1] = 7;
+	diff_rand_fill(f->params[0], 7 * 3);
+	for (i = 0; i < 7; i++)
+		f->params[1][i] = (qaws_scalar)1.25 + (qaws_scalar)0.75 * diff_rand();
+	f->create = create_nurbs;
+	{
+		static qaws_scalar const k[11] = { 0, 0, 0, 0, 0.5f, 1.25f, 2, 3, 3, 3, 3 };
+		for (i = 0; i < 11; i++) f->knots[i] = k[i];
+		f->knot_count = 11;
+	}
+	f->t_min = 0; f->t_max = 3;
+
+	f = &fams[5];
+	f->name = "rational_bezier";
+	f->dim = 2;
+	f->field_count = 2;
+	f->fields[0] = QAWS_FIELD_CONTROL_POINTS;
+	f->fields[1] = QAWS_FIELD_WEIGHTS;
+	f->counts[0] = 5;
+	f->counts[1] = 5;
+	diff_rand_fill(f->params[0], 5 * 2);
+	for (i = 0; i < 5; i++)
+		f->params[1][i] = (qaws_scalar)1.25 + (qaws_scalar)0.75 * diff_rand();
+	f->create = create_rational_bezier;
+	f->t_min = 0; f->t_max = 1;
+
+	*count = 6;
 }
 
 static qaws_curve* family_curve(family const* f, qaws_scalar const (*params)[MAX_PARAMS])
@@ -156,7 +219,7 @@ static qaws_curve* family_curve_shifted(family const* f, qaws_scalar const (*dir
 	qaws_scalar p[2][MAX_PARAMS];
 	unsigned int r, i;
 	for (r = 0; r < f->field_count; r++)
-		for (i = 0; i < f->counts[r] * f->dim; i++)
+		for (i = 0; i < f->counts[r] * FIELD_COMPS(f, r); i++)
 			p[r][i] = (qaws_scalar)(f->params[r][i] + h * dir[r][i]);
 	return family_curve(f, (qaws_scalar const (*)[MAX_PARAMS])p);
 }
@@ -166,7 +229,7 @@ static void family_views(family const* f, qaws_scalar (*storage)[MAX_PARAMS],
 {
 	unsigned int r;
 	for (r = 0; r < f->field_count; r++)
-		views_storage[r] = qaws_field_view_make(f->fields[r], storage[r], f->counts[r], f->dim);
+		views_storage[r] = qaws_field_view_make(f->fields[r], storage[r], f->counts[r], FIELD_COMPS(f, r));
 	views->fields = views_storage;
 	views->field_count = f->field_count;
 	views->children = NULL;
@@ -266,7 +329,7 @@ static void check_param_tangent_fd(family const* f, qaws_curve const* c)
 	qaws_curve *cp, *cm;
 
 	for (r = 0; r < f->field_count; r++)
-		diff_rand_fill(dir[r], f->counts[r] * f->dim);
+		diff_rand_fill(dir[r], f->counts[r] * FIELD_COMPS(f, r));
 	family_views(f, dir, vs, &views);
 
 	cp = family_curve_shifted(f, (qaws_scalar const (*)[MAX_PARAMS])dir, h);
@@ -356,7 +419,7 @@ static void check_adjoint_identity(family const* f, qaws_curve const* c)
 		diff_rand_jet2(&ybar2[i]);
 	}
 	for (r = 0; r < f->field_count; r++)
-		diff_rand_fill(dir[r], f->counts[r] * f->dim);
+		diff_rand_fill(dir[r], f->counts[r] * FIELD_COMPS(f, r));
 	family_views(f, dir, vs, &views);
 
 	if (f->dim == 3)
@@ -372,7 +435,7 @@ static void check_adjoint_identity(family const* f, qaws_curve const* c)
 		(f->dim == 3) ? (void const*)ybar3 : (void const*)ybar2, pbar, tbar);
 	TEST_ASSERT_STATUS(st);
 	for (r = 0; r < f->field_count; r++)
-		rhs += diff_dot(pbar[r], dir[r], f->counts[r] * f->dim);
+		rhs += diff_dot(pbar[r], dir[r], f->counts[r] * FIELD_COMPS(f, r));
 	rhs += diff_dot(tbar, tdots, SAMPLE_COUNT);
 
 	printf("    %s: <ybar, J xdot> = %.9g  <J^T ybar, xdot> = %.9g\n", f->name, lhs, rhs);
@@ -391,7 +454,7 @@ static void check_adjoint_identity(family const* f, qaws_curve const* c)
 			(f->dim == 3) ? (void const*)ybar3 : (void const*)ybar2, pbar_g, tbar_g);
 		TEST_ASSERT_STATUS(st);
 		for (r = 0; r < f->field_count; r++)
-			for (n = 0; n < f->counts[r] * f->dim; n++)
+			for (n = 0; n < f->counts[r] * FIELD_COMPS(f, r); n++)
 				if (!diff_close(pbar[r][n], pbar_t[r][n], DIFF_TOL) || !diff_close(pbar[r][n], pbar_g[r][n], DIFF_TOL))
 					ok = 0;
 		for (n = 0; n < SAMPLE_COUNT; n++)
@@ -412,7 +475,7 @@ static void check_tangent2(family const* f, qaws_curve const* c)
 
 	memset(dir, 0, sizeof(dir));
 	for (r = 0; r < f->field_count; r++)
-		diff_rand_fill(dir[r], f->counts[r] * f->dim);
+		diff_rand_fill(dir[r], f->counts[r] * FIELD_COMPS(f, r));
 	family_views(f, dir, vs, &views);
 
 	for (i = 0; i < SAMPLE_COUNT; i++)
@@ -442,9 +505,9 @@ static void check_tangent2(family const* f, qaws_curve const* c)
 	TEST_ASSERT(ok, "second tangent matches finite difference of the tangent");
 }
 
-static void test_linear_families(void)
+static void test_curve_families(void)
 {
-	family fams[4];
+	family fams[6];
 	unsigned int n, i;
 	make_families(fams, &n);
 	for (i = 0; i < n; i++)
@@ -453,8 +516,13 @@ static void test_linear_families(void)
 		TEST_ASSERT(c != NULL, "family curve created");
 		if (!c)
 			continue;
-		TEST_ASSERT((qaws_curve_get_diff_capabilities(c) & (QAWS_CAP_TANGENT | QAWS_CAP_ADJOINT | QAWS_CAP_LINEAR))
-			== (QAWS_CAP_TANGENT | QAWS_CAP_ADJOINT | QAWS_CAP_LINEAR), "linear family capabilities");
+		{
+			unsigned int caps = qaws_curve_get_diff_capabilities(c);
+			int rational = fams[i].field_count > 1 && fams[i].fields[1] == QAWS_FIELD_WEIGHTS;
+			TEST_ASSERT((caps & (QAWS_CAP_TANGENT | QAWS_CAP_ADJOINT | QAWS_CAP_TANGENT2)) ==
+				(QAWS_CAP_TANGENT | QAWS_CAP_ADJOINT | QAWS_CAP_TANGENT2), "family capabilities");
+			TEST_ASSERT(((caps & QAWS_CAP_LINEAR) != 0) == !rational, "linear flag only for polynomial families");
+		}
 		check_primal(&fams[i], c);
 		check_param_tangent_fd(&fams[i], c);
 		check_coordinate_tangent(&fams[i], c);
@@ -694,7 +762,7 @@ int test_50_diff_curves_main(void)
 	g_fail = 0;
 
 	printf("Test 50: Differentiable curve evaluation\n");
-	test_linear_families();
+	test_curve_families();
 	test_masks();
 	test_support();
 	test_report();

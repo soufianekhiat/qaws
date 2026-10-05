@@ -171,6 +171,7 @@ static qaws_status bilinear_surface_linear_support(qaws_surface const* surface,
 	out->u_stride = 1;
 	out->v_stride = 2;
 	out->on_boundary = 0;
+	out->weight_field = QAWS_FIELD_NONE;
 	out->has_weights = 1;
 	out->order = order;
 	for (r = 0; r <= order; r++)

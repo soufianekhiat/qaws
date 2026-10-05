@@ -224,6 +224,7 @@ static qaws_status hermite_linear_support(qaws_curve const *curve, unsigned int 
 	out->ranges[1].field = QAWS_FIELD_DERIVATIVES;
 	out->ranges[1].first = span_index;
 	out->ranges[1].count = 2;
+	out->weight_field = QAWS_FIELD_NONE;
 	out->has_weights = 1;
 	out->order = order;
 

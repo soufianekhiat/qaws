@@ -276,6 +276,7 @@ static qaws_status biquadratic_surface_linear_support(qaws_surface const* surfac
 	out->u_stride = 1;
 	out->v_stride = 3;
 	out->on_boundary = 0;
+	out->weight_field = QAWS_FIELD_NONE;
 	out->has_weights = 1;
 	out->order = order;
 	for (r = 0; r <= order; r++)

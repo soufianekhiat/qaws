@@ -1,5 +1,6 @@
 #include "qaws_surface_nurbs.h"
 #include "internal/qaws_internal_surface.h"
+#include "internal/qaws_internal_diff.h"
 #include "internal/qaws_internal_basis.h"
 #include "internal/qaws_internal_curve.h"
 #include <stdlib.h>
@@ -207,11 +208,124 @@ static int nurbs_surface_is_rational(qaws_surface const* s)
 	return 1;
 }
 
+/* -------------------------------------------------------------------------- */
+/*  Differential rules: rational in the control net and weights               */
+/* -------------------------------------------------------------------------- */
+
+#define NURBS_SURFACE_DIFF_CAPS (QAWS_CAP_TANGENT | QAWS_CAP_ADJOINT | QAWS_CAP_TANGENT2 | \
+	QAWS_CAP_LOCAL_SUPPORT)
+
+static unsigned int nurbs_surface_describe_fields(qaws_surface const* surface,
+	qaws_field_desc* out, unsigned int capacity)
+{
+	qaws_surface_nurbs_impl const* impl = (qaws_surface_nurbs_impl const*)surface->impl;
+	unsigned int count = impl->u_count * impl->v_count;
+	if (capacity >= 1)
+		out[0] = qaws_internal_field_desc(QAWS_FIELD_CONTROL_POINTS, QAWS_VALUE_VEC3,
+			count, QAWS_DOMAIN_POSITION, QAWS_CONSTRAINT_NONE,
+			QAWS_DIFF_SMOOTH, NURBS_SURFACE_DIFF_CAPS);
+	if (capacity >= 2)
+		out[1] = qaws_internal_field_desc(QAWS_FIELD_WEIGHTS, QAWS_VALUE_SCALAR,
+			count, QAWS_DOMAIN_WEIGHT, QAWS_CONSTRAINT_POSITIVE,
+			QAWS_DIFF_SMOOTH, NURBS_SURFACE_DIFF_CAPS);
+	if (capacity >= 3)
+		out[2] = qaws_internal_field_desc(QAWS_FIELD_U_KNOTS, QAWS_VALUE_SCALAR,
+			impl->u_knot_count, QAWS_DOMAIN_PARAMETRIC, QAWS_CONSTRAINT_MONOTONIC,
+			QAWS_DIFF_UNSUPPORTED, 0u);
+	if (capacity >= 4)
+		out[3] = qaws_internal_field_desc(QAWS_FIELD_V_KNOTS, QAWS_VALUE_SCALAR,
+			impl->v_knot_count, QAWS_DOMAIN_PARAMETRIC, QAWS_CONSTRAINT_MONOTONIC,
+			QAWS_DIFF_UNSUPPORTED, 0u);
+	return 4;
+}
+
+static qaws_status nurbs_surface_primal_field(qaws_surface const* surface, qaws_diff_field field,
+	qaws_scalar const** out_data, unsigned int* out_count, unsigned int* out_components)
+{
+	qaws_surface_nurbs_impl const* impl = (qaws_surface_nurbs_impl const*)surface->impl;
+	switch (field)
+	{
+	case QAWS_FIELD_CONTROL_POINTS:
+		*out_data = impl->control_points;
+		*out_count = impl->u_count * impl->v_count;
+		*out_components = 3;
+		return QAWS_STATUS_OK;
+	case QAWS_FIELD_WEIGHTS:
+		*out_data = impl->weights;
+		*out_count = impl->u_count * impl->v_count;
+		*out_components = 1;
+		return QAWS_STATUS_OK;
+	case QAWS_FIELD_U_KNOTS:
+		*out_data = impl->u_knots;
+		*out_count = impl->u_knot_count;
+		*out_components = 1;
+		return QAWS_STATUS_OK;
+	case QAWS_FIELD_V_KNOTS:
+		*out_data = impl->v_knots;
+		*out_count = impl->v_knot_count;
+		*out_components = 1;
+		return QAWS_STATUS_OK;
+	default:
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	}
+}
+
+/* Homogeneous tensor-product basis: the engine applies the quotient rule. */
+static qaws_status nurbs_surface_linear_support(qaws_surface const* surface,
+	qaws_scalar u, qaws_scalar v, unsigned int order, qaws_surface_support* out)
+{
+	qaws_surface_nurbs_impl const* impl = (qaws_surface_nurbs_impl const*)surface->impl;
+	qaws_scalar nu[(QAWS_DIFF_MAX_ORDER + 1) * QAWS_DIFF_MAX_SUPPORT];
+	qaws_scalar nv[(QAWS_DIFF_MAX_ORDER + 1) * QAWS_DIFF_MAX_SUPPORT];
+	unsigned int ud = surface->u_degree, vd = surface->v_degree, r, i;
+	unsigned int u_span, v_span;
+
+	if (ud + 1 > QAWS_DIFF_MAX_SUPPORT || vd + 1 > QAWS_DIFF_MAX_SUPPORT || order > QAWS_DIFF_MAX_ORDER)
+		return QAWS_STATUS_UNSUPPORTED_OPERATION;
+
+	u_span = qaws_internal_find_knot_span(impl->u_knots, impl->u_knot_count, ud, impl->u_count, u);
+	v_span = qaws_internal_find_knot_span(impl->v_knots, impl->v_knot_count, vd, impl->v_count, v);
+	qaws_internal_bspline_basis_derivs_any(impl->u_knots, impl->u_knot_count, ud, u_span, u, order, nu);
+	qaws_internal_bspline_basis_derivs_any(impl->v_knots, impl->v_knot_count, vd, v_span, v, order, nv);
+
+	out->kind = QAWS_SUPPORT_LOCAL;
+	out->field = QAWS_FIELD_CONTROL_POINTS;
+	out->u_first = u_span - ud;
+	out->u_count = ud + 1;
+	out->v_first = v_span - vd;
+	out->v_count = vd + 1;
+	out->u_stride = impl->v_count;
+	out->v_stride = 1;
+	out->on_boundary =
+		(u_span > ud && u == impl->u_knots[u_span]) ||
+		(v_span > vd && v == impl->v_knots[v_span]);
+	out->weight_field = QAWS_FIELD_WEIGHTS;
+	out->has_weights = 1;
+	out->order = order;
+	for (r = 0; r <= order; r++)
+	{
+		for (i = 0; i <= ud; i++)
+			out->u_weights[r][i] = nu[r * (ud + 1) + i];
+		for (i = 0; i <= vd; i++)
+			out->v_weights[r][i] = nv[r * (vd + 1) + i];
+	}
+	return QAWS_STATUS_OK;
+}
+
+static qaws_surface_diff_vtable const nurbs_surface_diff_vtable = {
+	NURBS_SURFACE_DIFF_CAPS,
+	QAWS_DIFF_PIECEWISE_SMOOTH,
+	nurbs_surface_describe_fields,
+	nurbs_surface_primal_field,
+	nurbs_surface_linear_support,
+	NULL
+};
+
 static qaws_surface_vtable const nurbs_surface_vtable = {
 	nurbs_surface_eval,
 	nurbs_surface_destroy,
 	nurbs_surface_is_rational,
-	NULL /* diff */
+	&nurbs_surface_diff_vtable
 };
 
 qaws_status qaws_surface_create_nurbs_ex(
