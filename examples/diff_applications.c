@@ -3890,6 +3890,889 @@ static void app_hair3d(void)
 	svg_close(&s);
 }
 
+/* ================================================================== */
+/*  10. Single-view hair modeling: strands lifted onto a hair volume  */
+/*      and fitted in 3D with projection adjoints                      */
+/* ================================================================== */
+
+#define HV_MAXCP 20
+#define HV_MAX (3 * HS_MAX_STRANDS)
+#define HV_ITERS 40
+
+typedef struct hv_cam
+{
+	double cx, cy, s, yaw;      /* orthographic camera, pitch 0 */
+} hv_cam;
+
+/* world -> pixel and depth toward the camera */
+static void hv_project(hv_cam const* c, double const* x, double* px, double* py, double* t)
+{
+	double cw = cos(c->yaw), sw = sin(c->yaw);
+	*px = c->cx + c->s * (cw * x[0] - sw * x[1]);
+	*py = c->cy - c->s * x[2];
+	*t = -(sw * x[0] + cw * x[1]);
+}
+
+static void hv_unproject(hv_cam const* c, double px, double py, double t, double* x)
+{
+	double cw = cos(c->yaw), sw = sin(c->yaw), u = (px - c->cx) / c->s;
+	x[0] = cw * u - sw * t;
+	x[1] = -sw * u - cw * t;
+	x[2] = (c->cy - py) / c->s;
+}
+
+/* Depths (toward the camera) where the pixel ray meets the head; 0 if missed. */
+static int hv_head_hit(hv_cam const* c, double px, double py, double* t_front, double* t_back)
+{
+	double p0[3], p1[3], A = 0, B = 0, C = -1, disc;
+	int a;
+	hv_unproject(c, px, py, 0, p0);
+	hv_unproject(c, px, py, 1, p1);
+	for (a = 0; a < 3; a++)
+	{
+		double d = p1[a] - p0[a], h2 = g_head[a] * g_head[a];
+		A += d * d / h2;
+		B += 2 * p0[a] * d / h2;
+		C += p0[a] * p0[a] / h2;
+	}
+	disc = B * B - 4 * A * C;
+	if (disc < 0 || A <= 0)
+		return 0;
+	*t_front = (-B + sqrt(disc)) / (2 * A);
+	*t_back = (-B - sqrt(disc)) / (2 * A);
+	return 1;
+}
+
+/* Two-pass chamfer distance (pixels) to the outside of the mask. */
+static float* hv_distance(float const* mask, int w, int h)
+{
+	float* d = (float*)malloc(sizeof(float) * (size_t)w * h);
+	int x, y;
+	for (y = 0; y < h; y++)
+		for (x = 0; x < w; x++)
+			d[y * w + x] = mask[y * w + x] > 0.5f ? 1e6f : 0.0f;
+	for (y = 0; y < h; y++)
+		for (x = 0; x < w; x++)
+		{
+			float v = d[y * w + x];
+			if (x > 0 && d[y * w + x - 1] + 1 < v) v = d[y * w + x - 1] + 1;
+			if (y > 0 && d[(y - 1) * w + x] + 1 < v) v = d[(y - 1) * w + x] + 1;
+			if (x > 0 && y > 0 && d[(y - 1) * w + x - 1] + 1.4142f < v) v = d[(y - 1) * w + x - 1] + 1.4142f;
+			if (x + 1 < w && y > 0 && d[(y - 1) * w + x + 1] + 1.4142f < v) v = d[(y - 1) * w + x + 1] + 1.4142f;
+			d[y * w + x] = v;
+		}
+	for (y = h - 1; y >= 0; y--)
+		for (x = w - 1; x >= 0; x--)
+		{
+			float v = d[y * w + x];
+			if (x + 1 < w && d[y * w + x + 1] + 1 < v) v = d[y * w + x + 1] + 1;
+			if (y + 1 < h && d[(y + 1) * w + x] + 1 < v) v = d[(y + 1) * w + x] + 1;
+			if (x + 1 < w && y + 1 < h && d[(y + 1) * w + x + 1] + 1.4142f < v) v = d[(y + 1) * w + x + 1] + 1.4142f;
+			if (x > 0 && y + 1 < h && d[(y + 1) * w + x - 1] + 1.4142f < v) v = d[(y + 1) * w + x - 1] + 1.4142f;
+			d[y * w + x] = v;
+		}
+	return d;
+}
+
+typedef struct hv_strand
+{
+	int ncp, layer;             /* 0 front, 1 back, 2 middle */
+	qaws_scalar cps[3 * HV_MAXCP];
+	qaws_scalar knots[HV_MAXCP + 4];
+	double color[3];
+	strand const* src;          /* traced 2D strand */
+} hv_strand;
+
+static qaws_curve* hv_curve(hv_strand const* s, qaws_scalar const* cps)
+{
+	qaws_bspline_desc d;
+	qaws_curve* c = NULL;
+	memset(&d, 0, sizeof(d));
+	d.dimension = QAWS_DIMENSION_3D;
+	d.degree = 3;
+	d.control_points = cps;
+	d.control_point_count = (unsigned int)s->ncp;
+	d.knots = s->knots;
+	d.knot_count = (unsigned int)s->ncp + 4;
+	qaws_curve_create_bspline(&d, &c);
+	return c;
+}
+
+typedef struct hv_scene
+{
+	image img;
+	tensor_field tf;
+	float* mask;
+	float* surf[3];      /* depth toward the camera of the front, back and middle hair surfaces */
+	double hair_col[3];  /* mean hair color */
+	float* scalp;        /* the hair mask, blurred: where the scalp takes the hair color */
+	int frontal;
+	hv_cam cam;
+} hv_scene;
+
+/* E = projection fit to the traced strand + distance to the strand's hair
+   surface + head collision + bending. Exact gradient through the 3D batch
+   adjoint and the bending functional. */
+static double hv_energy(hv_scene const* sc, hv_strand const* s, qaws_scalar const* cps, qaws_scalar* grad)
+{
+	enum { MAXS = HV_MAXCP * 4 + 8 };
+	qaws_curve* c = hv_curve(s, cps);
+	qaws_range r = qaws_curve_get_parameter_range(c);
+	qaws_scalar ts[MAXS];
+	qaws_curve_jet_3d prim[MAXS], tan[MAXS], bar[MAXS];
+	qaws_field_view fv;
+	qaws_diff_views views = one_field(&fv, QAWS_FIELD_CONTROL_POINTS, grad, (unsigned int)s->ncp, 3);
+	int m = s->ncp * 4 + 8, k, a, W = sc->img.w, H = sc->img.h;
+	double e = 0, cw = cos(sc->cam.yaw), sw = sin(sc->cam.yaw), S = sc->cam.s;
+	double w_proj = 1.0, w_depth = 2.0, w_col = 200, w_bend = 0.02;
+	float const* surf = sc->surf[s->layer];
+
+	for (k = 0; k < m; k++)
+		ts[k] = (qaws_scalar)(r.min_value + (r.max_value - r.min_value) * (k + 0.5) / m);
+	qaws_curve_eval_batch_tangent_3d(NULL, c, ts, NULL, (unsigned int)m, QAWS_EVAL_FLAG_POSITION, NULL, prim, tan);
+	memset(bar, 0, sizeof(qaws_curve_jet_3d) * (size_t)m);
+	memset(grad, 0, sizeof(qaws_scalar) * 3 * (size_t)s->ncp);
+	for (k = 0; k < m; k++)
+	{
+		double x[3] = { prim[k].d[0].x, prim[k].d[0].y, prim[k].d[0].z }, px, py, t, gphi[3], rr;
+		double f = (k + 0.5) / m * (s->src->n - 1), wq, qx, qy, dpx[3], dpy[3], dt[3], g[3] = { 0, 0, 0 };
+		int i0 = (int)f, i1;
+		i1 = i0 + 1 < s->src->n ? i0 + 1 : i0;
+		wq = f - i0;
+		qx = s->src->xy[2 * i0] * (1 - wq) + s->src->xy[2 * i1] * wq;
+		qy = s->src->xy[2 * i0 + 1] * (1 - wq) + s->src->xy[2 * i1 + 1] * wq;
+		hv_project(&sc->cam, x, &px, &py, &t);
+		dpx[0] = S * cw; dpx[1] = -S * sw; dpx[2] = 0;
+		dpy[0] = 0; dpy[1] = 0; dpy[2] = -S;
+		dt[0] = -sw; dt[1] = -cw; dt[2] = 0;
+		/* projection: |(p - q) / S|^2 */
+		{
+			double ex = (px - qx) / S, ey = (py - qy) / S;
+			e += w_proj * (ex * ex + ey * ey) / m;
+			for (a = 0; a < 3; a++)
+				g[a] += w_proj * 2 * (ex * dpx[a] + ey * dpy[a]) / S / m;
+		}
+		/* surface: (t - D(p))^2 */
+		if (px > 1 && py > 1 && px < W - 2 && py < H - 2)
+		{
+			double gx, gy, D = sample(surf, W, H, px, py, &gx, &gy), ed = t - D;
+			e += w_depth * ed * ed / m;
+			for (a = 0; a < 3; a++)
+				g[a] += w_depth * 2 * ed * (dt[a] - gx * dpx[a] - gy * dpy[a]) / m;
+		}
+		/* head collision */
+		rr = head_phi(x, gphi);
+		if (rr < 1.02)
+		{
+			double pen = 1.02 - rr;
+			e += w_col * pen * pen / m;
+			for (a = 0; a < 3; a++)
+				g[a] -= w_col * 2 * pen * gphi[a] / m;
+		}
+		bar[k].d[0] = v3((qaws_scalar)g[0], (qaws_scalar)g[1], (qaws_scalar)g[2]);
+		bar[k].channels = QAWS_EVAL_FLAG_POSITION;
+	}
+	qaws_curve_eval_batch_adjoint_3d(NULL, c, ts, (unsigned int)m, QAWS_EVAL_FLAG_POSITION, bar, &views, NULL);
+	{
+		/* bending, scaled by the strand length so short strands may curl */
+		qaws_scalar bg[3 * HV_MAXCP], bend = 0;
+		qaws_field_view bf;
+		qaws_diff_views bv = one_field(&bf, QAWS_FIELD_CONTROL_POINTS, bg, (unsigned int)s->ncp, 3);
+		double L = s->src->n * 1.0 / S + 1e-3, scale = w_bend / (L * L * L);
+		memset(bg, 0, sizeof(bg));
+		qaws_curve_functional_gradient(NULL, c, QAWS_FUNCTIONAL_BENDING, 0, &bv, &bend);
+		e += scale * bend;
+		for (k = 0; k < 3 * s->ncp; k++)
+			grad[k] += (qaws_scalar)(scale * bg[k]);
+	}
+	qaws_curve_destroy(c);
+	return e;
+}
+
+/* Under the hair, the scalp takes the hair color: the head point projects
+   into the photo's hair mask, or (frontal photos) lies on the hidden back
+   half above the nape. */
+static int hv_scalp(hv_scene const* sc, double const* x)
+{
+	double px, py, t;
+	int ix, iy;
+	hv_project(&sc->cam, x, &px, &py, &t);
+	if (sc->frontal && t < 0 && x[2] > -0.45)
+		return 1;
+	ix = (int)px;
+	iy = (int)py;
+	if (ix < 0 || iy < 0 || ix >= sc->img.w || iy >= sc->img.h)
+		return 0;
+	return sc->scalp[iy * sc->img.w + ix] > 0.25f;
+}
+
+/* Hair segments and head / neck quads, depth sorted; photo colors per
+   strand. draw_head: 0 none, 1 shaded, 2 white (an occluder over a white
+   panel, front-layer strands only). The light follows the view: from the
+   camera side, above, right. With sc, the scalp under the hair is tinted. */
+static void hv_render(svg* s, view3 const* v, hv_scene const* sc, hv_strand const* hs, int n, int draw_head, double width)
+{
+	int nh = 64, cap = nh * nh + 200 + n * 16, np = 0, i, j, k;
+	prim3* pr = (prim3*)malloc(sizeof(prim3) * (size_t)cap);
+	double light[3], eye[3], ln;
+	double cyw = cos(v->yaw), syw = sin(v->yaw), cp = cos(v->pitch), sp = sin(v->pitch);
+	eye[0] = -syw * cp; eye[1] = -cyw * cp; eye[2] = sp;
+	light[0] = 0.7 * eye[0] + 0.35 * cyw;
+	light[1] = 0.7 * eye[1] - 0.35 * syw;
+	light[2] = 0.7 * eye[2] + 0.55;
+	ln = sqrt(light[0] * light[0] + light[1] * light[1] + light[2] * light[2]);
+	for (k = 0; k < 3; k++) light[k] /= ln;
+	if (draw_head)
+		for (i = 0; i < nh; i++)
+			for (j = 0; j < nh; j++)
+			{
+				double p[4][3], dsum = 0, nrm[3], d, cen[3] = { 0, 0, 0 };
+				int c;
+				double th[2] = { PI * i / nh, PI * (i + 1) / nh }, ph[2] = { 2 * PI * j / nh, 2 * PI * (j + 1) / nh };
+				int idx[4][2] = { { 0, 0 }, { 1, 0 }, { 1, 1 }, { 0, 1 } };
+				for (c = 0; c < 4; c++)
+				{
+					double t = th[idx[c][0]], f = ph[idx[c][1]];
+					p[c][0] = g_head[0] * sin(t) * cos(f);
+					p[c][1] = g_head[1] * sin(t) * sin(f);
+					p[c][2] = g_head[2] * cos(t);
+					view_xform(v, p[c], &pr[np].xy[2 * c], &pr[np].xy[2 * c + 1], &d);
+					dsum += d;
+					for (k = 0; k < 3; k++) cen[k] += p[c][k] / 4;
+				}
+				head_phi(cen, nrm);
+				ln = sqrt(nrm[0] * nrm[0] + nrm[1] * nrm[1] + nrm[2] * nrm[2]);
+				for (k = 0; k < 3; k++) nrm[k] /= ln;
+				if (nrm[0] * eye[0] + nrm[1] * eye[1] + nrm[2] * eye[2] < -0.05)
+					continue;
+				{
+					double dif = nrm[0] * light[0] + nrm[1] * light[1] + nrm[2] * light[2], kk = 0.35 + 0.65 * (dif > 0 ? dif : 0);
+					if (draw_head == 2)
+						sprintf(pr[np].color, "#ffffff");
+					else if (sc && hv_scalp(sc, cen))
+						sprintf(pr[np].color, "rgb(%d,%d,%d)", (int)(255 * 0.8 * kk * sc->hair_col[0]),
+							(int)(255 * 0.8 * kk * sc->hair_col[1]), (int)(255 * 0.8 * kk * sc->hair_col[2]));
+					else
+						sprintf(pr[np].color, "rgb(%d,%d,%d)", (int)(232 * kk), (int)(196 * kk), (int)(172 * kk));
+				}
+				pr[np].n = 4;
+				pr[np].depth = dsum / 4 + 0.08;   /* hair lying on the scalp stays in front */
+				pr[np].width = 0.4;
+				np++;
+			}
+	if (draw_head)
+		/* neck: an elliptic cylinder under the head */
+		for (i = 0; i < 6; i++)
+			for (j = 0; j < 24; j++)
+			{
+				double z[2] = { -0.7 - 0.32 * i, -0.7 - 0.32 * (i + 1) }, f[2] = { 2 * PI * j / 24, 2 * PI * (j + 1) / 24 };
+				double p[3], d, dsum = 0, nrm[3], fm = PI * (2 * j + 1) / 24, dif, kk;
+				int c, idx[4][2] = { { 0, 0 }, { 1, 0 }, { 1, 1 }, { 0, 1 } };
+				nrm[0] = cos(fm); nrm[1] = sin(fm); nrm[2] = 0;
+				if (nrm[0] * eye[0] + nrm[1] * eye[1] < -0.05)
+					continue;
+				for (c = 0; c < 4; c++)
+				{
+					p[0] = 0.42 * cos(f[idx[c][1]]);
+					p[1] = -0.12 + 0.45 * sin(f[idx[c][1]]);
+					p[2] = z[idx[c][0]];
+					view_xform(v, p, &pr[np].xy[2 * c], &pr[np].xy[2 * c + 1], &d);
+					dsum += d;
+				}
+				dif = nrm[0] * light[0] + nrm[1] * light[1];
+				kk = 0.35 + 0.6 * (dif > 0 ? dif : 0);
+				if (draw_head == 2)
+					sprintf(pr[np].color, "#ffffff");
+				else
+					sprintf(pr[np].color, "rgb(%d,%d,%d)", (int)(232 * kk), (int)(196 * kk), (int)(172 * kk));
+				pr[np].n = 4;
+				pr[np].depth = dsum / 4 + 0.08;
+				pr[np].width = 0.4;
+				np++;
+			}
+	for (i = 0; i < n && np < cap - 16; i++)
+	{
+		qaws_curve* c = hv_curve(&hs[i], hs[i].cps);
+		qaws_range r = qaws_curve_get_parameter_range(c);
+		double ps[2] = { 0, 0 }, pd = 0, jit = 0.88 + 0.24 * ((((unsigned int)i * 2654435761u) >> 24) / 255.0);
+		int m = 14;
+		if (draw_head == 2 && hs[i].layer != 0)
+		{
+			qaws_curve_destroy(c);
+			continue;
+		}
+		for (k = 0; k <= m; k++)
+		{
+			qaws_eval_result_3d e;
+			double x[3], sx, sy, d;
+			qaws_curve_evaluate_3d(c, (qaws_scalar)(r.min_value + (r.max_value - r.min_value) * k / m), QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &e);
+			x[0] = e.position.x; x[1] = e.position.y; x[2] = e.position.z;
+			view_xform(v, x, &sx, &sy, &d);
+			if (k > 0)
+			{
+				/* Kajiya-Kay: diffuse from the tangent, a narrow specular band */
+				double t[3] = { e.d1.x, e.d1.y, e.d1.z }, tl = sqrt(t[0] * t[0] + t[1] * t[1] + t[2] * t[2]) + 1e-12;
+				double h[3], tdl, tdh, dif, spec, kk;
+				for (j = 0; j < 3; j++) { t[j] /= tl; h[j] = light[j] + eye[j]; }
+				ln = sqrt(h[0] * h[0] + h[1] * h[1] + h[2] * h[2]);
+				tdl = t[0] * light[0] + t[1] * light[1] + t[2] * light[2];
+				tdh = (t[0] * h[0] + t[1] * h[1] + t[2] * h[2]) / ln;
+				dif = sqrt(fabs(1 - tdl * tdl));
+				spec = pow(sqrt(fabs(1 - tdh * tdh)), 80.0);
+				kk = (0.5 + 0.5 * dif) * jit;
+				sprintf(pr[np].color, "rgb(%d,%d,%d)",
+					(int)fmin(255, 255 * (hs[i].color[0] * kk + 0.30 * spec)),
+					(int)fmin(255, 255 * (hs[i].color[1] * kk + 0.27 * spec)),
+					(int)fmin(255, 255 * (hs[i].color[2] * kk + 0.22 * spec)));
+				pr[np].n = 2;
+				pr[np].xy[0] = ps[0]; pr[np].xy[1] = ps[1]; pr[np].xy[2] = sx; pr[np].xy[3] = sy;
+				pr[np].depth = 0.5 * (pd + d) - 0.01;
+				pr[np].width = width;
+				np++;
+			}
+			ps[0] = sx; ps[1] = sy; pd = d;
+		}
+		qaws_curve_destroy(c);
+	}
+	qsort(pr, (size_t)np, sizeof(prim3), prim3_cmp);
+	for (i = 0; i < np; i++)
+	{
+		if (pr[i].n == 4)
+			fprintf(s->f, "<polygon points=\"%.1f,%.1f %.1f,%.1f %.1f,%.1f %.1f,%.1f\" fill=\"%s\" stroke=\"%s\" stroke-width=\"0.4\"/>\n",
+				pr[i].xy[0], pr[i].xy[1], pr[i].xy[2], pr[i].xy[3], pr[i].xy[4], pr[i].xy[5], pr[i].xy[6], pr[i].xy[7], pr[i].color, pr[i].color);
+		else
+			fprintf(s->f, "<line x1=\"%.1f\" y1=\"%.1f\" x2=\"%.1f\" y2=\"%.1f\" stroke=\"%s\" stroke-width=\"%.2f\" stroke-linecap=\"round\" stroke-opacity=\"0.85\"/>\n",
+				pr[i].xy[0], pr[i].xy[1], pr[i].xy[2], pr[i].xy[3], pr[i].color, pr[i].width);
+	}
+	free(pr);
+}
+
+static int g_hv_flat_dark = 0;   /* reject flat dark pixels (a black jacket next to black hair) */
+
+/* Hair mask for a plain background: the background is flooded from the
+   border pixels near the border's median color (small steps, bounded drift
+   from the starting color); the remaining pixels are hair when their color
+   is nearer a hair seed than a skin / clothes seed, inside the box, off the
+   face, connected to the hair seeds; a closing fills the holes. */
+static float* hv_mask(image const* img, hair_spec const* sp)
+{
+	int w = img->w, h = img->h, n = w * h, i, k, q, top = 0;
+	float* avg = (float*)malloc(sizeof(float) * 3 * (size_t)n);
+	float* m = (float*)calloc((size_t)n, sizeof(float));
+	unsigned char* lab = (unsigned char*)calloc((size_t)n, 1);   /* 1 background, 2 hair, 3 other, 4 hair candidate */
+	int* stack = (int*)malloc(sizeof(int) * (size_t)n);
+	int* origin = (int*)malloc(sizeof(int) * (size_t)n);
+	double hc[8][3], nc[8][3], bgc[3];
+	int hs[8][2];
+	float *lm = NULL, *lv = NULL;
+	for (k = 0; k < 3; k++)
+	{
+		float* ch = (float*)malloc(sizeof(float) * (size_t)n);
+		for (i = 0; i < n; i++)
+			ch[i] = img->rgb[3 * i + k];
+		blur(ch, w, h, 1.2);
+		for (i = 0; i < n; i++)
+			avg[3 * i + k] = ch[i];
+		free(ch);
+	}
+#define HV_D2(a, b) ((avg[3 * (a)] - avg[3 * (b)]) * (avg[3 * (a)] - avg[3 * (b)]) + \
+	(avg[3 * (a) + 1] - avg[3 * (b) + 1]) * (avg[3 * (a) + 1] - avg[3 * (b) + 1]) + \
+	(avg[3 * (a) + 2] - avg[3 * (b) + 2]) * (avg[3 * (a) + 2] - avg[3 * (b) + 2]))
+	{
+		/* the background color: per-channel median of the border; hair and
+		   clothes touching the border must not seed the flood */
+		int nb = 2 * (w + h), cnt[3][256], c;
+		memset(cnt, 0, sizeof(cnt));
+		for (i = 0; i < n; i++)
+		{
+			int x = i % w, y = i / w;
+			if (x == 0 || y == 0 || x == w - 1 || y == h - 1)
+				for (q = 0; q < 3; q++)
+					cnt[q][(int)(255 * fmin(1, fmax(0, avg[3 * i + q])))]++;
+		}
+		for (q = 0; q < 3; q++)
+		{
+			int acc = 0;
+			for (c = 0; c < 256 && acc < nb / 2; c++)
+				acc += cnt[q][c];
+			bgc[q] = c / 255.0;
+		}
+	}
+	for (i = 0; i < n; i++)
+	{
+		int x = i % w, y = i / w;
+		double db = 0;
+		for (q = 0; q < 3; q++)
+			db += (avg[3 * i + q] - bgc[q]) * (avg[3 * i + q] - bgc[q]);
+		if ((x == 0 || y == 0 || x == w - 1 || y == h - 1) && db < 0.02)
+		{
+			lab[i] = 1;
+			origin[i] = i;
+			stack[top++] = i;
+		}
+	}
+	while (top > 0)
+	{
+		int p = stack[--top], x = p % w, y = p / w;
+		int nb[4] = { x > 0 ? p - 1 : -1, x < w - 1 ? p + 1 : -1, y > 0 ? p - w : -1, y < h - 1 ? p + w : -1 };
+		for (q = 0; q < 4; q++)
+		{
+			int r = nb[q];
+			if (r < 0 || lab[r])
+				continue;
+			if (HV_D2(r, p) < 0.0012 && HV_D2(r, origin[p]) < 0.03)
+			{
+				lab[r] = 1;
+				origin[r] = origin[p];
+				stack[top++] = r;
+			}
+		}
+	}
+#undef HV_D2
+	/* hair seeds that landed on the background move to the nearby pixel
+	   farthest from the background color */
+	for (k = 0; k < sp->nhair; k++)
+	{
+		int bx = sp->hair[k][0], by = sp->hair[k][1], dx, dy;
+		double best = -1;
+		hs[k][0] = bx;
+		hs[k][1] = by;
+		if (lab[by * w + bx] != 1)
+			continue;
+		for (dy = -10; dy <= 10; dy++)
+			for (dx = -10; dx <= 10; dx++)
+			{
+				int x = bx + dx, y = by + dy;
+				double db = 0;
+				if (x < 0 || y < 0 || x >= w || y >= h || lab[y * w + x] == 1)
+					continue;
+				for (q = 0; q < 3; q++)
+					db += (avg[3 * (y * w + x) + q] - bgc[q]) * (avg[3 * (y * w + x) + q] - bgc[q]);
+				if (db > best)
+				{
+					best = db;
+					hs[k][0] = x;
+					hs[k][1] = y;
+				}
+			}
+	}
+	for (k = 0; k < sp->nhair; k++)
+		for (q = 0; q < 3; q++)
+			hc[k][q] = avg[3 * (hs[k][1] * w + hs[k][0]) + q];
+	for (k = 0; k < sp->nnon; k++)
+		for (q = 0; q < 3; q++)
+			nc[k][q] = avg[3 * (sp->non[k][1] * w + sp->non[k][0]) + q];
+	if (g_hv_flat_dark)
+	{
+		/* local luminance mean and variance: flat dark cloth is not hair */
+		lm = (float*)malloc(sizeof(float) * (size_t)n);
+		lv = (float*)malloc(sizeof(float) * (size_t)n);
+		for (i = 0; i < n; i++)
+		{
+			lm[i] = (float)((avg[3 * i] + avg[3 * i + 1] + avg[3 * i + 2]) / 3);
+			lv[i] = lm[i] * lm[i];
+		}
+		blur(lm, w, h, 2.5);
+		blur(lv, w, h, 2.5);
+	}
+	for (i = 0; i < n; i++)
+	{
+		int x = i % w, y = i / w;
+		double dh = 1e9, dn = 1e9, fx, fy;
+		if (lab[i] == 1)
+			continue;
+		lab[i] = 3;
+		if (x < sp->box[0] || x > sp->box[2] || y < sp->box[1] || y > sp->box[3])
+			continue;
+		fx = (x - sp->face[0]) / (double)sp->face[2];
+		fy = (y - sp->face[1]) / (double)sp->face[3];
+		if (fx * fx + fy * fy < 1)
+			continue;
+		for (k = 0; k < sp->nhair; k++)
+		{
+			double d = 0;
+			for (q = 0; q < 3; q++)
+				d += (avg[3 * i + q] - hc[k][q]) * (avg[3 * i + q] - hc[k][q]);
+			if (d < dh) dh = d;
+		}
+		for (k = 0; k < sp->nnon; k++)
+		{
+			double d = 0;
+			for (q = 0; q < 3; q++)
+				d += (avg[3 * i + q] - nc[k][q]) * (avg[3 * i + q] - nc[k][q]);
+			if (d < dn) dn = d;
+		}
+		if (dh < dn && !(lm && lm[i] < 0.18 && lv[i] - lm[i] * lm[i] < 0.0005))
+			lab[i] = 4;
+	}
+	/* keep the candidates connected to a hair seed */
+	top = 0;
+	for (k = 0; k < sp->nhair; k++)
+	{
+		int p = hs[k][1] * w + hs[k][0];
+		if (lab[p] == 4)
+		{
+			lab[p] = 2;
+			stack[top++] = p;
+		}
+	}
+	while (top > 0)
+	{
+		int p = stack[--top], x = p % w, y = p / w;
+		int nb[4] = { x > 0 ? p - 1 : -1, x < w - 1 ? p + 1 : -1, y > 0 ? p - w : -1, y < h - 1 ? p + w : -1 };
+		for (q = 0; q < 4; q++)
+			if (nb[q] >= 0 && lab[nb[q]] == 4)
+			{
+				lab[nb[q]] = 2;
+				stack[top++] = nb[q];
+			}
+	}
+	/* closing: fill the holes of the hair region (highlights, dark gaps),
+	   never into the background */
+	for (i = 0; i < n; i++)
+		m[i] = lab[i] == 2 ? 1.0f : 0.0f;
+	blur(m, w, h, 5.0);
+	for (i = 0; i < n; i++)
+		m[i] = (m[i] > 0.3f && lab[i] != 1) || lab[i] == 2 ? 1.0f : 0.0f;
+	blur(m, w, h, 1.0);
+	free(avg);
+	free(lab);
+	free(stack);
+	free(origin);
+	free(lm);
+	free(lv);
+	return m;
+}
+
+typedef struct hv_case
+{
+	hair_spec spec;
+	double yaw;          /* camera yaw: PI = frontal, PI / 2 = left profile */
+	double cx, cy, s;    /* head center (pixels) and pixels per head unit */
+	int flat_dark;       /* black clothes touch the hair */
+} hv_case;
+
+/* Builds the hair volume and the 3D strands of one portrait. */
+static int hv_reconstruct(hv_scene* sc, hv_case const* hc, strand* traced, int* ntraced, hv_strand* hs, double* proj_rms)
+{
+	hair_spec const* sp = &hc->spec;
+	int W = sc->img.w, H = sc->img.h, x, y, i, n = 0, it, nt, nreal, l;
+	float* dist;
+	double s_px = hc->s, R = 0.6, err = 0, hair_col[3] = { 0, 0, 0 }, wsum = 0;
+	int cnt = 0, frontal = fabs(hc->yaw - PI) < 0.6;
+	sc->cam.cx = hc->cx;
+	sc->cam.cy = hc->cy;
+	sc->cam.s = s_px;
+	sc->cam.yaw = hc->yaw;
+	g_hv_flat_dark = hc->flat_dark;
+	sc->mask = hv_mask(&sc->img, sp);
+	tensor_build(&sc->img, 1.0, 2.0, &sc->tf);
+	dist = hv_distance(sc->mask, W, H);
+	for (l = 0; l < 3; l++)
+		sc->surf[l] = (float*)malloc(sizeof(float) * (size_t)W * H);
+	for (y = 0; y < H; y++)
+		for (x = 0; x < W; x++)
+		{
+			/* front: the head (plus a hair layer) or the silhouette inflated with
+			   a circular profile of radius R. back: behind the head; below it,
+			   in a frontal view, a curtain hanging down the back. */
+			double d = dist[y * W + x] / s_px, infl, tf, tb, f, b, u, z;
+			if (d > R) d = R;
+			infl = sqrt(fmax(0, 2 * R * d - d * d));
+			u = (x - hc->cx) / s_px;
+			z = (hc->cy - y) / s_px;
+			f = infl;
+			b = -infl;
+			if (frontal && z < 0.3)
+				b = fmin(b, -0.9 * g_head[1] * sqrt(fmax(0, 1 - u * u / 2.6)));
+			if (hv_head_hit(&sc->cam, x, y, &tf, &tb))
+			{
+				f = fmax(tf + 0.05, f);
+				b = fmin(tb - 0.05, b);
+			}
+			sc->surf[0][y * W + x] = (float)f;
+			sc->surf[1][y * W + x] = (float)b;
+			sc->surf[2][y * W + x] = (float)(0.5 * (f + b));
+			if (sc->mask[y * W + x] > 0.5)
+			{
+				for (l = 0; l < 3; l++)
+					hair_col[l] += sc->img.rgb[3 * (y * W + x) + l];
+				wsum++;
+			}
+		}
+	for (l = 0; l < 3; l++)
+	{
+		blur(sc->surf[l], W, H, 2.0);
+		hair_col[l] /= wsum + 1e-9;
+		sc->hair_col[l] = hair_col[l];
+	}
+	sc->frontal = frontal;
+	sc->scalp = (float*)malloc(sizeof(float) * (size_t)W * H);
+	memcpy(sc->scalp, sc->mask, sizeof(float) * (size_t)W * H);
+	blur(sc->scalp, W, H, 6.0);
+	free(dist);
+	{
+		image masked = sc->img;
+		masked.lum = sc->mask;
+		nt = trace_strands(&masked, &sc->tf, 1.0, 0.12, 0.5, traced, HS_MAX_STRANDS);
+	}
+	nreal = nt;
+	/* The face hides the back of the head: in a frontal view, comb synthetic
+	   strands down the back, from the top of the hair in each column to the
+	   hair's lower end on the left and right of the face. */
+	if (frontal)
+	{
+		int bl = 0, br = 0, x0 = (int)(hc->cx - 0.95 * s_px), x1 = (int)(hc->cx + 0.95 * s_px);
+		unsigned int rng = 77u;
+		for (y = 0; y < H; y++)
+			for (x = 0; x < W; x++)
+				if (sc->mask[y * W + x] > 0.5)
+				{
+					if (x < hc->cx - 0.6 * s_px && y > bl) bl = y;
+					if (x > hc->cx + 0.6 * s_px && y > br) br = y;
+				}
+		for (x = x0 < 1 ? 1 : x0; x <= x1 && x < W - 1 && nt < HS_MAX_STRANDS; x += 2)
+		{
+			int top = -1, bot, k, np;
+			double f = (x - x0) / (double)(x1 - x0 + 1), amp, freq, phase;
+			for (y = 0; y < H && top < 0; y++)
+				if (sc->mask[y * W + x] > 0.5)
+					top = y;
+			if (top < 0)
+				continue;
+			bot = (int)(bl * (1 - f) + br * f);
+			if (bot > H - 2) bot = H - 2;
+			/* a random sway so the strands do not run parallel */
+			rng = rng * 1664525u + 1013904223u;
+			amp = 1.0 + 3.0 * ((rng >> 8) / 16777216.0);
+			rng = rng * 1664525u + 1013904223u;
+			freq = 0.02 + 0.05 * ((rng >> 8) / 16777216.0);
+			phase = (rng & 1023) * 0.01;
+			top += (int)((rng >> 12) % 6);
+			np = bot - top;
+			if (np < 8)
+				continue;
+			traced[nt].n = np;
+			traced[nt].xy = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 2 * (size_t)np);
+			traced[nt].fit = traced[nt].opt = NULL;
+			for (k = 0; k < np; k++)
+			{
+				traced[nt].xy[2 * k] = (qaws_scalar)(x + amp * sin(freq * k + phase));
+				traced[nt].xy[2 * k + 1] = (qaws_scalar)(top + k);
+			}
+			nt++;
+		}
+	}
+	*ntraced = nt;
+	/* lift, fit and optimize: front, back and middle copies of the traced
+	   strands (middle only off the head), back copies of the synthetic ones */
+	for (i = 0; i < nt; i++)
+	{
+		strand const* st = &traced[i];
+		int layer;
+		for (layer = 0; layer < 3 && n < HV_MAX; layer++)
+		{
+			hv_strand* h = &hs[n];
+			qaws_scalar* pts;
+			qaws_bspline_fit_desc d;
+			qaws_curve* c = NULL;
+			unsigned int got = 0;
+			int k, mid = st->n / 2;
+			double tf, tb;
+			adam opt;
+			if (i >= nreal && layer != 1)
+				continue;
+			if (layer == 2 && hv_head_hit(&sc->cam, st->xy[2 * mid], st->xy[2 * mid + 1], &tf, &tb))
+				continue;
+			pts = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * (size_t)st->n);
+			for (k = 0; k < st->n; k++)
+			{
+				double p[3], px = st->xy[2 * k], py = st->xy[2 * k + 1];
+				double t = sample(sc->surf[layer], W, H, px, py, NULL, NULL);
+				hv_unproject(&sc->cam, px, py, t, p);
+				pts[3 * k] = (qaws_scalar)p[0]; pts[3 * k + 1] = (qaws_scalar)p[1]; pts[3 * k + 2] = (qaws_scalar)p[2];
+			}
+			h->ncp = st->n / 14 + 3;
+			if (h->ncp < 4) h->ncp = 4;
+			if (h->ncp > HV_MAXCP) h->ncp = HV_MAXCP;
+			h->layer = layer;
+			h->src = st;
+			memset(&d, 0, sizeof(d));
+			d.dimension = QAWS_DIMENSION_3D;
+			d.data_points = pts;
+			d.data_point_count = (unsigned int)st->n;
+			d.degree = 3;
+			d.control_point_count = (unsigned int)h->ncp;
+			if (qaws_curve_fit_bspline(&d, &c) != QAWS_STATUS_OK)
+			{
+				free(pts);
+				continue;
+			}
+			qaws_curve_read_field(c, QAWS_FIELD_CONTROL_POINTS, h->cps, 3 * h->ncp, &got);
+			qaws_curve_read_field(c, QAWS_FIELD_KNOTS, h->knots, h->ncp + 4, &got);
+			qaws_curve_destroy(c);
+			free(pts);
+			memset(&opt, 0, sizeof(opt));
+			for (it = 0; it < HV_ITERS; it++)
+			{
+				qaws_scalar g[3 * HV_MAXCP];
+				hv_energy(sc, h, h->cps, g);
+				adam_step(&opt, h->cps, g, 3 * h->ncp, 0.01 * (1.0 - 0.7 * it / (double)HV_ITERS));
+			}
+			{
+				/* color: the photo under the strand's hair pixels; residual projection error */
+				double col[3] = { 0, 0, 0 }, cw = 0, shade = layer == 0 ? 1.0 : (layer == 1 ? 0.7 : 0.8);
+				int q;
+				for (k = 0; k < st->n; k++)
+				{
+					int ix = (int)st->xy[2 * k], iy = (int)st->xy[2 * k + 1], j = iy * W + ix;
+					if (ix < 0 || iy < 0 || ix >= W || iy >= H || sc->mask[j] < 0.8)
+						continue;
+					for (q = 0; q < 3; q++)
+						col[q] += sc->img.rgb[3 * j + q];
+					cw++;
+				}
+				for (q = 0; q < 3; q++)
+					h->color[q] = shade * (cw > 3 ? col[q] / cw : hair_col[q]);
+				if (layer == 0)
+				{
+					qaws_curve* cc = hv_curve(h, h->cps);
+					qaws_range rr = qaws_curve_get_parameter_range(cc);
+					for (k = 0; k < 16; k++)
+					{
+						qaws_eval_result_3d e;
+						double p[3], px, py, t, f = (k + 0.5) / 16 * (st->n - 1);
+						int i0 = (int)f;
+						qaws_curve_evaluate_3d(cc, (qaws_scalar)(rr.min_value + (rr.max_value - rr.min_value) * (k + 0.5) / 16), QAWS_EVAL_FLAG_POSITION, &e);
+						p[0] = e.position.x; p[1] = e.position.y; p[2] = e.position.z;
+						hv_project(&sc->cam, p, &px, &py, &t);
+						err += (px - st->xy[2 * i0]) * (px - st->xy[2 * i0]) + (py - st->xy[2 * i0 + 1]) * (py - st->xy[2 * i0 + 1]);
+						cnt++;
+					}
+					qaws_curve_destroy(cc);
+				}
+			}
+			n++;
+		}
+	}
+	if (getenv("QAWS_HV_DEBUG"))
+	{
+		/* the hair mask in red over the photo */
+		char name[256];
+		FILE* f;
+		sprintf(name, "showcase/hv_mask_%s.ppm", sp->name);
+		f = fopen(name, "wb");
+		if (f)
+		{
+			fprintf(f, "P6\n%d %d\n255\n", W, H);
+			for (i = 0; i < W * H; i++)
+				for (l = 0; l < 3; l++)
+					fputc((int)(255 * (l == 0 ? 0.5 * sc->img.rgb[3 * i] + 0.5 * sc->mask[i] : sc->img.rgb[3 * i + l] * (1 - 0.5 * sc->mask[i]))), f);
+			fclose(f);
+		}
+	}
+	*proj_rms = cnt ? sqrt(err / cnt) : 0;
+	return n;
+}
+
+static void hv_free(hv_scene* sc, strand* traced, int nt)
+{
+	int i;
+	for (i = 0; i < nt; i++)
+		free(traced[i].xy);
+	free(sc->mask); free(sc->scalp); free(sc->surf[0]); free(sc->surf[1]); free(sc->surf[2]);
+	free(sc->tf.xx); free(sc->tf.xy); free(sc->tf.yy);
+	image_free(&sc->img);
+}
+
+static hv_case const g_hv_cases[5] = {
+	{ { "plain_wavy", "long, wavy",
+		{ { 85, 120 }, { 90, 250 }, { 260, 200 }, { 270, 280 }, { 150, 60 }, { 200, 55 }, { 70, 330 }, { 290, 340 } }, 8,
+		{ { 175, 160 }, { 175, 205 }, { 150, 330 }, { 180, 400 }, { 330, 400 }, { 40, 300 } }, 6,
+		{ 20, 20, 345, 435 }, { 175, 162, 46, 64 } }, PI, 177, 130, 71, 0 },
+	{ { "plain_curly", "curly, voluminous",
+		{ { 80, 150 }, { 60, 250 }, { 300, 250 }, { 310, 330 }, { 170, 40 }, { 240, 60 }, { 90, 380 }, { 280, 400 } }, 8,
+		{ { 190, 200 }, { 190, 250 }, { 160, 160 }, { 220, 160 }, { 210, 460 }, { 190, 330 } }, 6,
+		{ 20, 10, 358, 430 }, { 190, 200, 56, 78 } }, PI, 190, 172, 94, 1 },
+	{ { "plain_long", "long, straight",
+		{ { 150, 40 }, { 220, 40 }, { 100, 160 }, { 75, 240 }, { 250, 200 }, { 55, 300 }, { 110, 120 }, { 240, 110 } }, 8,
+		{ { 180, 150 }, { 180, 200 }, { 250, 235 }, { 200, 280 }, { 300, 280 }, { 170, 300 }, { 140, 230 }, { 330, 300 } }, 8,
+		{ 20, 0, 300, 341 }, { 180, 140, 42, 58 } }, PI, 180, 107, 69, 0 },
+	{ { "plain_ponytail", "high ponytail, held up",
+		{ { 50, 135 }, { 80, 137 }, { 110, 128 }, { 140, 112 }, { 170, 86 }, { 200, 52 }, { 222, 25 }, { 213, 70 } }, 8,
+		{ { 255, 100 }, { 245, 132 }, { 290, 180 }, { 25, 150 }, { 270, 70 } }, 5,
+		{ 15, 0, 300, 152 }, { 255, 100, 32, 45 } }, PI + 0.35, 245, 82, 48, 0 },
+	{ { "plain_bob_profile", "bob, profile view",
+		{ { 150, 60 }, { 250, 80 }, { 300, 200 }, { 280, 300 }, { 100, 120 }, { 320, 330 }, { 200, 120 } }, 7,
+		{ { 130, 250 }, { 100, 330 }, { 340, 340 }, { 250, 450 }, { 215, 230 } }, 5,
+		{ 40, 15, 360, 380 }, { 125, 260, 70, 90 } }, PI / 2, 195, 185, 130, 0 }
+};
+
+static void app_hair_volume(void)
+{
+	static strand traced[HS_MAX_STRANDS];
+	static hv_strand hs[HV_MAX];
+	static hv_scene sc;
+	int c;
+	double y0 = 80;
+	svg s;
+	char buf[256], path[512];
+
+	svg_open(&s, "showcase/app10_hair_volume.svg", 1230, 1560, "Single-view hair modeling",
+		"Plain-background portraits. Image strands are lifted onto a hair volume (head + inflated silhouette; front, middle and "
+		"back layers), fitted as 3D B-splines whose projections reproduce the photo (projection adjoints), shown from new views.");
+	for (c = 0; c < 5; c++)
+	{
+		hv_case const* hc = &g_hv_cases[c];
+		hair_spec const* sp = &hc->spec;
+		int nt = 0, n;
+		double rms, k = 240.0 / 360, ih;
+		sprintf(path, "%s/%s.ppm", g_photos, sp->name);
+		if (!image_load_ppm(path, &sc.img))
+		{
+			printf("10_hair_volume: %s missing\n", path);
+			continue;
+		}
+		n = hv_reconstruct(&sc, hc, traced, &nt, hs, &rms);
+		ih = sc.img.h * k;
+		if (ih > 315) ih = 315;
+		if (ih < 200) ih = 200;
+		fprintf(s.f, "<clipPath id=\"hvr%d\"><rect x=\"20\" y=\"%.1f\" width=\"1190\" height=\"%.1f\"/></clipPath><g clip-path=\"url(#hvr%d)\">\n",
+			c, y0, ih, c);
+		/* 1. photo */
+		fprintf(s.f, "<image href=\"../%s/%s.png\" x=\"20\" y=\"%.1f\" width=\"240\" height=\"%.1f\"/>\n", g_photos, sp->name, y0, sc.img.h * k);
+		/* 2. reconstruction seen from the photo camera, head as a white occluder */
+		{
+			view3 vc;
+			vc.cx = 270 + sc.cam.cx * k; vc.cy = y0 + sc.cam.cy * k; vc.scale = sc.cam.s * k; vc.yaw = sc.cam.yaw; vc.pitch = 0;
+			fprintf(s.f, "<rect x=\"270\" y=\"%.1f\" width=\"240\" height=\"%.1f\" fill=\"#ffffff\"/>\n", y0, ih);
+			hv_render(&s, &vc, NULL, hs, n, 2, 0.8);
+		}
+		/* 3. new views around the head */
+		{
+			double yaws[3] = { hc->yaw - 0.9, hc->yaw + PI / 2, hc->yaw + PI };
+			int v;
+			for (v = 0; v < 3; v++)
+			{
+				double x0 = 520 + v * 230;
+				view3 vn;
+				vn.cx = x0 + 110; vn.cy = y0 + ih * 0.36; vn.scale = ih / 6.2; vn.yaw = yaws[v]; vn.pitch = 0.12;
+				fprintf(s.f, "<rect x=\"%.1f\" y=\"%.1f\" width=\"220\" height=\"%.1f\" fill=\"#f3f1ee\"/>\n", x0, y0, ih);
+				hv_render(&s, &vn, &sc, hs, n, 1, 0.45);
+			}
+		}
+		fprintf(s.f, "</g>\n");
+		sprintf(buf, "%s: %d image strands -> %d 3D strands, projection RMS %.2f px", sp->label, nt, n, rms);
+		svg_text(&s, 20, y0 + ih + 16, 12, "#0969da", "start", buf);
+		printf("10_hair_volume: %-18s %d image strands -> %d 3D strands, projection RMS %.2f px\n", sp->name, nt, n, rms);
+		hv_free(&sc, traced, nt);
+		y0 += ih + 32;
+	}
+	svg_text(&s, 20, y0 + 8, 11, "#57606a", "start",
+		"Columns: photo; 3D strands from the photo camera; three new views. Photos: Wikimedia Commons (see photos/CREDITS.txt).");
+	svg_close(&s);
+}
+
 int main(int argc, char** argv)
 {
 	setvbuf(stdout, NULL, _IONBF, 0);
@@ -3909,6 +4792,7 @@ int main(int argc, char** argv)
 		if (!pick || pick == 7) app_rational_patches();
 		if (!pick || pick == 8) app_haircuts();
 		if (!pick || pick == 9) app_hair3d();
+		if (!pick || pick == 10) app_hair_volume();
 	}
 	return 0;
 }

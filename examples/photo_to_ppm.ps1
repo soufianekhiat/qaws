@@ -1,22 +1,30 @@
 # Converts a photo (jpg, png, bmp, ...) to a binary PPM (P6) the examples
 # can read, plus a PNG of the same resized image for figure backgrounds.
 #
-#   powershell -File photo_to_ppm.ps1 -In photo.jpg -Out photo.ppm [-Width 480]
+#   powershell -File photo_to_ppm.ps1 -In photo.jpg -Out photo.ppm [-Width 480] [-Crop x,y,w,h]
+#
+# -Crop takes "x,y,w,h" as fractions of the source image (0..1).
 #
 param(
     [Parameter(Mandatory = $true)][string]$In,
     [Parameter(Mandatory = $true)][string]$Out,
-    [int]$Width = 480
+    [int]$Width = 480,
+    [string]$Crop = "0,0,1,1"
 )
 
 Add-Type -AssemblyName System.Drawing
 
 $src = [System.Drawing.Image]::FromFile((Resolve-Path $In))
-$height = [int][math]::Round($src.Height * $Width / $src.Width)
+$frac = $Crop.Split(",") | ForEach-Object { [double]::Parse($_, [System.Globalization.CultureInfo]::InvariantCulture) }
+$cx = [int]($frac[0] * $src.Width)
+$cy = [int]($frac[1] * $src.Height)
+$cw = [int]($frac[2] * $src.Width)
+$ch = [int]($frac[3] * $src.Height)
+$height = [int][math]::Round($ch * $Width / $cw)
 $bmp = New-Object System.Drawing.Bitmap $Width, $height, ([System.Drawing.Imaging.PixelFormat]::Format24bppRgb)
 $g = [System.Drawing.Graphics]::FromImage($bmp)
 $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
-$g.DrawImage($src, 0, 0, $Width, $height)
+$g.DrawImage($src, (New-Object System.Drawing.Rectangle 0, 0, $Width, $height), $cx, $cy, $cw, $ch, [System.Drawing.GraphicsUnit]::Pixel)
 $g.Dispose()
 $src.Dispose()
 

@@ -214,5 +214,6 @@ The test suites `49_diff_model` to `56_diff_functionals` check every rule in sin
 7. Rational patches: NURBS weights freed after the ADMM fit, seams kept closed.
 8. Real haircuts: vector hair strands from six portrait photos (seeded hair mask, orientation field, B-spline strands).
 9. 3D hair from frontal portraits: head placed from the face, visible strands follow the photo, hidden strands follow the 3D priors.
+10. Single-view hair modeling on plain-background portraits (long, curly, ponytail, profile bob): background flooded from the border, image strands lifted onto a hair volume (head plus inflated silhouette; front, middle and back layers) and fitted as 3D B-splines with projection, surface, collision and bending terms through the batch adjoint.
 
-Photos are read as PPM; `examples/photo_to_ppm.ps1` converts any image.
+Photos are read as PPM; `examples/photo_to_ppm.ps1` converts any image (`-Crop "x,y,w,h"` in fractions).
