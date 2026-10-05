@@ -345,6 +345,30 @@ static qaws_status rbez_linear_support(qaws_curve const* curve, unsigned int spa
 	return QAWS_STATUS_OK;
 }
 
+static qaws_status rbez_rebuild(qaws_curve const* curve, qaws_diff_views const* values, qaws_curve** out_curve)
+{
+	qaws_rational_bezier_impl const* impl = (qaws_rational_bezier_impl const*)curve->impl;
+	qaws_rational_bezier_desc d;
+	qaws_scalar const *cps = NULL, *w = NULL;
+	qaws_scalar *owned_cps = NULL, *owned_w = NULL;
+	qaws_status st = qaws_internal_field_override(values, QAWS_FIELD_CONTROL_POINTS, impl->control_points,
+		impl->control_point_count, (unsigned int)curve->dimension, &cps, &owned_cps);
+	if (st == QAWS_STATUS_OK)
+		st = qaws_internal_field_override(values, QAWS_FIELD_WEIGHTS, impl->weights, impl->control_point_count, 1, &w, &owned_w);
+	if (st == QAWS_STATUS_OK) {
+		d.dimension = curve->dimension;
+		d.degree = curve->degree;
+		d.control_points = cps;
+		d.control_point_count = impl->control_point_count;
+		d.weights = w;
+		d.weight_count = impl->control_point_count;
+		st = qaws_curve_create_rational_bezier(&d, out_curve);
+	}
+	qaws_internal_dealloc(NULL, owned_cps);
+	qaws_internal_dealloc(NULL, owned_w);
+	return st;
+}
+
 static qaws_curve_diff_vtable const rbez_diff_vtable = {
 	RBEZ_DIFF_CAPS,
 	QAWS_DIFF_SMOOTH,
@@ -353,7 +377,8 @@ static qaws_curve_diff_vtable const rbez_diff_vtable = {
 	rbez_linear_support,
 	NULL,
 	NULL,
-	NULL
+	NULL,
+	rbez_rebuild
 };
 
 static qaws_curve_vtable const rbez_vtable = {

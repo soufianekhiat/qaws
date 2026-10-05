@@ -942,15 +942,19 @@ static qaws_status boehm_insert_knot_nurbs(
 			else
 				alpha = (t - knots[i]) / denom;
 
-			for (d = 0; d < dim_count; d++)
+			/* Blend in homogeneous space (w P, w), then project back:
+			   blending Euclidean points would change a rational curve. */
 			{
-				new_cps[i * dim_count + d] =
-					alpha * cps[i * dim_count + d] +
-					((qaws_scalar)1.0 - alpha) * cps[(i - 1) * dim_count + d];
+				qaws_scalar wa = alpha * weights[i];
+				qaws_scalar wb = ((qaws_scalar)1.0 - alpha) * weights[i - 1];
+				new_weights[i] = wa + wb;
+				for (d = 0; d < dim_count; d++)
+				{
+					new_cps[i * dim_count + d] =
+						(wa * cps[i * dim_count + d] +
+						 wb * cps[(i - 1) * dim_count + d]) / new_weights[i];
+				}
 			}
-			new_weights[i] =
-				alpha * weights[i] +
-				((qaws_scalar)1.0 - alpha) * weights[i - 1];
 		}
 	}
 

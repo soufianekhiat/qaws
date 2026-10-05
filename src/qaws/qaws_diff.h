@@ -98,6 +98,14 @@ qaws_status qaws_curve_read_field(
 	unsigned int capacity,
 	unsigned int* out_scalar_count);
 
+/* New curve of the same family with fields replaced by the values in the
+   views (absent fields are copied unchanged). Typical use: apply an
+   optimizer step. QAWS_STATUS_UNSUPPORTED_OPERATION for derived curves. */
+qaws_status qaws_curve_clone_with_fields(
+	qaws_curve const* curve,
+	qaws_diff_views const* values,
+	qaws_curve** out_curve);
+
 /* Objects a derived curve chains into (composite segments, ...);
    child i matches views->children[i]. */
 qaws_status qaws_curve_diff_children(

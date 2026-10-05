@@ -433,6 +433,36 @@ static qaws_status nurbs_linear_support(qaws_curve const *curve, unsigned int sp
 	return QAWS_STATUS_OK;
 }
 
+static qaws_status nurbs_rebuild(qaws_curve const *curve, qaws_diff_views const *values, qaws_curve **out_curve)
+{
+	qaws_nurbs_impl const *impl = (qaws_nurbs_impl const *)curve->impl;
+	qaws_nurbs_desc d;
+	qaws_scalar const *cps = NULL, *w = NULL, *knots = NULL;
+	qaws_scalar *owned_cps = NULL, *owned_w = NULL, *owned_knots = NULL;
+	qaws_status st = qaws_internal_field_override(values, QAWS_FIELD_CONTROL_POINTS, impl->control_points,
+		impl->control_point_count, (unsigned int)curve->dimension, &cps, &owned_cps);
+	if (st == QAWS_STATUS_OK)
+		st = qaws_internal_field_override(values, QAWS_FIELD_WEIGHTS, impl->weights, impl->control_point_count, 1, &w, &owned_w);
+	if (st == QAWS_STATUS_OK)
+		st = qaws_internal_field_override(values, QAWS_FIELD_KNOTS, impl->knots, impl->knot_count, 1, &knots, &owned_knots);
+	if (st == QAWS_STATUS_OK) {
+		memset(&d, 0, sizeof(d));
+		d.dimension = curve->dimension;
+		d.degree = curve->degree;
+		d.control_points = cps;
+		d.control_point_count = impl->control_point_count;
+		d.knots = knots;
+		d.knot_count = impl->knot_count;
+		d.weights = w;
+		d.weight_count = impl->control_point_count;
+		st = qaws_curve_create_nurbs(&d, out_curve);
+	}
+	qaws_internal_dealloc(NULL, owned_cps);
+	qaws_internal_dealloc(NULL, owned_w);
+	qaws_internal_dealloc(NULL, owned_knots);
+	return st;
+}
+
 static qaws_curve_diff_vtable const nurbs_diff_vtable = {
 	NURBS_DIFF_CAPS,
 	QAWS_DIFF_PIECEWISE_SMOOTH,
@@ -441,7 +471,8 @@ static qaws_curve_diff_vtable const nurbs_diff_vtable = {
 	nurbs_linear_support,
 	NULL,
 	NULL,
-	NULL
+	NULL,
+	nurbs_rebuild
 };
 
 static qaws_curve_vtable const nurbs_vtable = {

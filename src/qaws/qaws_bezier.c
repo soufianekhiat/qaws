@@ -172,6 +172,25 @@ static qaws_status bezier_linear_support(qaws_curve const* curve, unsigned int s
 	return QAWS_STATUS_OK;
 }
 
+static qaws_status bezier_rebuild(qaws_curve const* curve, qaws_diff_views const* values, qaws_curve** out_curve)
+{
+	qaws_bezier_impl const* impl = (qaws_bezier_impl const*)curve->impl;
+	qaws_bezier_desc d;
+	qaws_scalar const* cps;
+	qaws_scalar* owned;
+	qaws_status st = qaws_internal_field_override(values, QAWS_FIELD_CONTROL_POINTS, impl->control_points,
+		impl->control_point_count, (unsigned int)curve->dimension, &cps, &owned);
+	if (st != QAWS_STATUS_OK)
+		return st;
+	d.dimension = curve->dimension;
+	d.degree = curve->degree;
+	d.control_points = cps;
+	d.control_point_count = impl->control_point_count;
+	st = qaws_curve_create_bezier(&d, out_curve);
+	qaws_internal_dealloc(NULL, owned);
+	return st;
+}
+
 static qaws_curve_diff_vtable const bezier_diff_vtable = {
 	BEZIER_DIFF_CAPS,
 	QAWS_DIFF_SMOOTH,
@@ -180,7 +199,8 @@ static qaws_curve_diff_vtable const bezier_diff_vtable = {
 	bezier_linear_support,
 	NULL,
 	NULL,
-	NULL
+	NULL,
+	bezier_rebuild
 };
 
 static qaws_curve_vtable const bezier_vtable = {

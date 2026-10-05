@@ -56,6 +56,7 @@ typedef enum qaws_diff_field
 	QAWS_FIELD_CURVATURE = 19,
 	QAWS_FIELD_CURVATURE_RATE = 20,
 	QAWS_FIELD_DIRECTION = 21,
+	QAWS_FIELD_PARAMETER = 22,       /* an operation input parameter (split parameter, ...) */
 	QAWS_FIELD_COUNT
 } qaws_diff_field;
 

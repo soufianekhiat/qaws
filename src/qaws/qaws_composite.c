@@ -318,7 +318,8 @@ static qaws_curve_diff_vtable const composite_diff_vtable = {
 	NULL,
 	composite_tangent_span,
 	composite_adjoint_span,
-	composite_children
+	composite_children,
+	NULL
 };
 
 static qaws_curve_vtable const composite_vtable = {

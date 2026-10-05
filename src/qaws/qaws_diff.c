@@ -155,7 +155,8 @@ static char const* const g_field_names[QAWS_FIELD_COUNT] = {
 	"scale",
 	"curvature",
 	"curvature_rate",
-	"direction"
+	"direction",
+	"parameter"
 };
 
 char const* qaws_diff_field_name(qaws_diff_field field)
@@ -973,6 +974,7 @@ unsigned int qaws_internal_field_components(qaws_diff_field field, unsigned int 
 	case QAWS_FIELD_SCALE:
 	case QAWS_FIELD_CURVATURE:
 	case QAWS_FIELD_CURVATURE_RATE:
+	case QAWS_FIELD_PARAMETER:
 		return 1;
 	default:
 		return dim;
@@ -1893,4 +1895,49 @@ qaws_status qaws_curve_diff_children(
 	n = d->children(curve, out_children, out_children ? capacity : 0u);
 	*out_count = n;
 	return (out_children && n > capacity) ? QAWS_STATUS_BUFFER_TOO_SMALL : QAWS_STATUS_OK;
+}
+
+qaws_status qaws_internal_field_override(
+	qaws_diff_views const* values,
+	qaws_diff_field field,
+	qaws_scalar const* fallback,
+	unsigned int count,
+	unsigned int components,
+	qaws_scalar const** out_values,
+	qaws_scalar** out_owned)
+{
+	qaws_field_view const* v = values ? qaws_diff_views_find(values, field) : NULL;
+	unsigned int e, c, stride;
+	qaws_scalar* buf;
+
+	*out_owned = NULL;
+	*out_values = fallback;
+	if (!v)
+		return QAWS_STATUS_OK;
+	if (v->count != count || v->components != components)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	buf = (qaws_scalar*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_scalar) * (size_t)count * components + 1));
+	if (!buf)
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	stride = qaws_internal_view_stride(v);
+	for (e = 0; e < count; e++)
+		for (c = 0; c < components; c++)
+			buf[(size_t)e * components + c] = v->data[(size_t)e * stride + c];
+	*out_owned = buf;
+	*out_values = buf;
+	return QAWS_STATUS_OK;
+}
+
+qaws_status qaws_curve_clone_with_fields(
+	qaws_curve const* curve,
+	qaws_diff_views const* values,
+	qaws_curve** out_curve)
+{
+	qaws_curve_diff_vtable const* d = curve_diff(curve);
+	if (!curve || !out_curve)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	*out_curve = NULL;
+	if (!d || !d->rebuild)
+		return QAWS_STATUS_UNSUPPORTED_OPERATION;
+	return d->rebuild(curve, values, out_curve);
 }

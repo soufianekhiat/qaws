@@ -72,6 +72,13 @@ struct qaws_curve_diff_vtable
 		qaws_curve const* curve,
 		qaws_diff_child* out,
 		unsigned int capacity);
+
+	/* New curve of the same family with some fields replaced (values taken
+	   from the views; absent fields are copied). NULL when unsupported. */
+	qaws_status (*rebuild)(
+		qaws_curve const* curve,
+		qaws_diff_views const* values,
+		qaws_curve** out_curve);
 };
 
 struct qaws_surface_diff_vtable
@@ -261,6 +268,18 @@ qaws_status qaws_internal_curve_adjoint_any(
 
 /* views->children[i] or NULL. */
 qaws_diff_views const* qaws_internal_child_views(qaws_diff_views const* views, unsigned int i);
+
+/* Contiguous values of a field for rebuilding: the view's values when the
+   field is present in `values` (copied into *out_owned, to be freed with
+   qaws_internal_dealloc(NULL, ...)), otherwise `fallback`. */
+qaws_status qaws_internal_field_override(
+	qaws_diff_views const* values,
+	qaws_diff_field field,
+	qaws_scalar const* fallback,
+	unsigned int count,
+	unsigned int components,
+	qaws_scalar const** out_values,
+	qaws_scalar** out_owned);
 
 /* B-spline basis derivatives for orders 0..k (k may exceed degree; higher
    rows are zero). out has (k+1) rows of stride (degree+1). */

@@ -264,6 +264,27 @@ static qaws_status polynomial_linear_support(qaws_curve const* curve, unsigned i
 	return QAWS_STATUS_OK;
 }
 
+static qaws_status polynomial_rebuild(qaws_curve const* curve, qaws_diff_views const* values, qaws_curve** out_curve)
+{
+	qaws_polynomial_impl const* impl = (qaws_polynomial_impl const*)curve->impl;
+	qaws_polynomial_desc d;
+	qaws_scalar const* coeffs;
+	qaws_scalar* owned;
+	qaws_status st = qaws_internal_field_override(values, QAWS_FIELD_COEFFICIENTS, impl->coefficients,
+		impl->coefficient_count, (unsigned int)curve->dimension, &coeffs, &owned);
+	if (st != QAWS_STATUS_OK)
+		return st;
+	d.dimension = curve->dimension;
+	d.degree = impl->coefficient_count - 1;
+	d.coefficients = coeffs;
+	d.coefficient_count = impl->coefficient_count;
+	d.t_min = curve->parameter_range.min_value;
+	d.t_max = curve->parameter_range.max_value;
+	st = qaws_curve_create_polynomial(&d, out_curve);
+	qaws_internal_dealloc(NULL, owned);
+	return st;
+}
+
 static qaws_curve_diff_vtable const polynomial_diff_vtable = {
 	POLYNOMIAL_DIFF_CAPS,
 	QAWS_DIFF_SMOOTH,
@@ -272,7 +293,8 @@ static qaws_curve_diff_vtable const polynomial_diff_vtable = {
 	polynomial_linear_support,
 	NULL,
 	NULL,
-	NULL
+	NULL,
+	polynomial_rebuild
 };
 
 static qaws_curve_vtable const polynomial_vtable = {

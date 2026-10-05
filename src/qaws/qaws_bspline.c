@@ -421,6 +421,32 @@ static qaws_status bspline_linear_support(qaws_curve const *curve, unsigned int 
 	return QAWS_STATUS_OK;
 }
 
+static qaws_status bspline_rebuild(qaws_curve const *curve, qaws_diff_views const *values, qaws_curve **out_curve)
+{
+	qaws_bspline_impl const *impl = (qaws_bspline_impl const *)curve->impl;
+	qaws_bspline_desc d;
+	qaws_scalar const *cps = NULL, *knots = NULL;
+	qaws_scalar *owned_cps = NULL, *owned_knots = NULL;
+	qaws_status st = qaws_internal_field_override(values, QAWS_FIELD_CONTROL_POINTS, impl->control_points,
+		impl->control_point_count, (unsigned int)curve->dimension, &cps, &owned_cps);
+	if (st != QAWS_STATUS_OK)
+		return st;
+	st = qaws_internal_field_override(values, QAWS_FIELD_KNOTS, impl->knots, impl->knot_count, 1, &knots, &owned_knots);
+	if (st == QAWS_STATUS_OK) {
+		memset(&d, 0, sizeof(d));
+		d.dimension = curve->dimension;
+		d.degree = curve->degree;
+		d.control_points = cps;
+		d.control_point_count = impl->control_point_count;
+		d.knots = knots;
+		d.knot_count = impl->knot_count;
+		st = qaws_curve_create_bspline(&d, out_curve);
+	}
+	qaws_internal_dealloc(NULL, owned_cps);
+	qaws_internal_dealloc(NULL, owned_knots);
+	return st;
+}
+
 static qaws_curve_diff_vtable const bspline_diff_vtable = {
 	BSPLINE_DIFF_CAPS,
 	QAWS_DIFF_PIECEWISE_SMOOTH,
@@ -429,7 +455,8 @@ static qaws_curve_diff_vtable const bspline_diff_vtable = {
 	bspline_linear_support,
 	NULL,
 	NULL,
-	NULL
+	NULL,
+	bspline_rebuild
 };
 
 static qaws_curve_vtable const bspline_vtable = {

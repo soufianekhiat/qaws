@@ -258,6 +258,31 @@ static qaws_status hermite_linear_support(qaws_curve const *curve, unsigned int 
 	return QAWS_STATUS_OK;
 }
 
+static qaws_status hermite_rebuild(qaws_curve const *curve, qaws_diff_views const *values, qaws_curve **out_curve)
+{
+	qaws_hermite_impl const *impl = (qaws_hermite_impl const *)curve->impl;
+	qaws_hermite_desc d;
+	qaws_scalar const *pts = NULL, *ders = NULL;
+	qaws_scalar *owned_pts = NULL, *owned_ders = NULL;
+	unsigned int dim = (unsigned int)curve->dimension;
+	qaws_status st = qaws_internal_field_override(values, QAWS_FIELD_POINTS, impl->points, impl->point_count, dim, &pts, &owned_pts);
+	if (st != QAWS_STATUS_OK)
+		return st;
+	st = qaws_internal_field_override(values, QAWS_FIELD_DERIVATIVES, impl->tangents, impl->point_count, dim, &ders, &owned_ders);
+	if (st == QAWS_STATUS_OK) {
+		d.dimension = curve->dimension;
+		d.degree = 3;
+		d.points = pts;
+		d.derivatives = ders;
+		d.point_count = impl->point_count;
+		d.derivative_count = impl->point_count;
+		st = qaws_curve_create_hermite(&d, out_curve);
+	}
+	qaws_internal_dealloc(NULL, owned_pts);
+	qaws_internal_dealloc(NULL, owned_ders);
+	return st;
+}
+
 static qaws_curve_diff_vtable const hermite_diff_vtable = {
 	HERMITE_DIFF_CAPS,
 	QAWS_DIFF_PIECEWISE_SMOOTH,
@@ -266,7 +291,8 @@ static qaws_curve_diff_vtable const hermite_diff_vtable = {
 	hermite_linear_support,
 	NULL,
 	NULL,
-	NULL
+	NULL,
+	hermite_rebuild
 };
 
 static qaws_curve_vtable const hermite_vtable = {
