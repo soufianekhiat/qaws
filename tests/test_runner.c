@@ -75,6 +75,7 @@ extern int test_61_diff_surface_functional_core_main(void);
 extern int test_62_diff_surface_sampling_core_main(void);
 extern int test_63_exact_int_main(void);
 extern int test_64_exact_predicates_main(void);
+extern int test_65_exact_bezier_main(void);
 
 /* Test registry */
 typedef struct {
@@ -148,6 +149,7 @@ static test_suite const g_test_suites[] = {
 	{"62_diff_surface_sampling_core", test_62_diff_surface_sampling_core_main},
 	{"63_exact_int", test_63_exact_int_main},
 	{"64_exact_predicates", test_64_exact_predicates_main},
+	{"65_exact_bezier", test_65_exact_bezier_main},
 };
 
 int main(void) {

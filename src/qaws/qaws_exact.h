@@ -17,6 +17,7 @@
  */
 
 #include "qaws_status.h"
+#include "qaws_types.h"
 
 typedef enum qaws_exact_sign
 {
@@ -42,5 +43,74 @@ qaws_status qaws_exact_orient3d(double const a[3], double const b[3], double con
 
 /* Sign of a / b - c / d (b, d non-zero). */
 qaws_status qaws_exact_compare_ratio(double a, double b, double c, double d, qaws_exact_sign* out_sign, qaws_exact_path* out_path);
+
+/* ===================================================================
+ * Exact curves
+ *
+ * A curve is prepared once into integer homogeneous Bezier data:
+ * coordinates are quantized onto the lattice x = i 2^space_exp2 (round to
+ * nearest, ties to even; |i| below 2^coord_bits), weights are scaled by a
+ * common power of two to weight_bits (a common factor cancels in the
+ * rational curve; integer weights stay exact), and parameters onto
+ * t = T 2^-param_bits. After that boundary nothing rounds: evaluation is
+ * division-free De Casteljau on multi-limb integers, derivatives come from
+ * integer derivative polygons and the exact quotient rule, and every value
+ * is converted to double once, correctly rounded.
+ *
+ * Supported: Bezier and rational Bezier, 2D and 3D, degrees up to the
+ * integer budget (QAWS_STATUS_EXACT_RANGE_EXCEEDED past it). Other families
+ * return QAWS_STATUS_EXACT_UNSUPPORTED for now.
+ * =================================================================== */
+
+typedef struct qaws_exact_curve qaws_exact_curve;
+
+typedef enum qaws_numeric_quality
+{
+	QAWS_NUMERIC_APPROXIMATE = 0,
+	QAWS_NUMERIC_CERTIFIED,
+	QAWS_NUMERIC_EXACT_RATIONAL,
+	QAWS_NUMERIC_UNSUPPORTED
+} qaws_numeric_quality;
+
+typedef enum qaws_exact_flag
+{
+	QAWS_EXACT_FLAG_NONE = 0,
+	QAWS_EXACT_FLAG_INPUT_QUANTIZED = 1 << 0,   /* inputs were rounded onto the lattices */
+	QAWS_EXACT_FLAG_PREP_QUANTIZED = 1 << 1     /* an approximate preparation was frozen */
+} qaws_exact_flag;
+
+typedef struct qaws_exact_desc
+{
+	int space_exp2;              /* lattice step 2^space_exp2 world units */
+	unsigned int coord_bits;     /* usable coordinate magnitude bits (default 26) */
+	unsigned int param_bits;     /* parameter lattice bits (default 24) */
+	unsigned int weight_bits;    /* weight bits (default 24) */
+} qaws_exact_desc;
+
+typedef struct qaws_exact_report
+{
+	qaws_numeric_quality quality;
+	unsigned int flags;
+	unsigned int storage_bits;               /* widest homogeneous control value */
+	double max_position_quantization_error;  /* world units */
+	double max_weight_quantization_error;    /* relative */
+	double parameter_quantization_error;     /* last evaluation */
+} qaws_exact_report;
+
+/* Defaults: 2^-20 world units, 26 coordinate bits, 24 parameter and weight bits. */
+void qaws_exact_desc_default(qaws_exact_desc* desc);
+
+qaws_status qaws_exact_curve_prepare(qaws_exact_desc const* desc, qaws_curve const* curve, qaws_exact_curve** out_curve,
+	qaws_exact_report* out_report);
+void qaws_exact_curve_destroy(qaws_exact_curve* curve);
+
+/*
+ * Position and derivatives at t (quantized onto the parameter lattice),
+ * evaluated exactly and rounded once: out receives (order + 1) points of
+ * `dimension` doubles, C, C', ..., C^(order), order <= 3. out_report (may be
+ * NULL) receives the parameter quantization error.
+ */
+qaws_status qaws_exact_curve_evaluate(qaws_exact_curve const* curve, double t, unsigned int order, double* out,
+	qaws_exact_report* out_report);
 
 #endif /* QAWS_EXACT_H */

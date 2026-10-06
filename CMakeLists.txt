@@ -224,6 +224,7 @@ if(QAWS_ENABLE_EXACT)
   list(APPEND QAWS_SOURCES
     src/qaws/exact/qaws_exact_int.c
     src/qaws/exact/qaws_exact_predicates.c
+    src/qaws/exact/qaws_exact_curve.c
   )
 endif()
 

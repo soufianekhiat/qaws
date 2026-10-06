@@ -66,6 +66,7 @@ add_executable(
   62_diff_surface_sampling_core.c
   63_exact_int.c
   64_exact_predicates.c
+  65_exact_bezier.c
 )
 
 # The amalgamated library exports exactly the same symbols, so the tests can

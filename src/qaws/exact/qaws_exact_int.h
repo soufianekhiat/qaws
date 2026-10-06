@@ -59,6 +59,11 @@ qaws_status qaws_exact_int_divexact_u32(qaws_exact_int* r, qaws_exact_int const*
 /* Nearest double (ties to even); +-HUGE_VAL past the double range. */
 double qaws_exact_int_to_double(qaws_exact_int const* x);
 
+/* Nearest double of num / den (den != 0), correctly rounded through a
+   64-bit long division with a sticky remainder bit (subnormal results may
+   round twice). */
+double qaws_exact_ratio_to_double(qaws_exact_int const* num, qaws_exact_int const* den);
+
 /*
  * A finite double is exactly m * 2^e with integer m: m odd (or zero), |m|
  * below 2^53. Returns 0 for infinities and NaN.
