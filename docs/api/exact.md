@@ -253,6 +253,48 @@ others have shrunk. A root on a shared face is reported once.
 out: a tangency, the curve lying on the surface, or crossings closer than
 the subdivision can separate.
 
+## Certified surface / surface intersection curves
+
+```c
+qaws_status qaws_exact_surface_surface_hits(qaws_exact_surface const* a, qaws_exact_surface const* b, unsigned int min_depth, qaws_exact_ssi_point* out_points, unsigned int point_capacity, unsigned int* out_point_count, qaws_exact_ssi_branch* out_branches, unsigned int branch_capacity, unsigned int* out_branch_count);
+```
+
+Per patch pair, the three equations `X^a_c W^b - X^b_c W^a = 0` in
+(u1, v1, u2, v2) have exact integer Bernstein coefficients. The 4D box is
+subdivided exactly. The cuts fall at 7/16 of a box rather than its
+middle, so symmetric and dyadic positions of a curve do not fall on box
+edges.
+
+- **Excluded boxes:** one equation keeps a strict sign.
+- **Regular boxes:** a 3 x 3 minor of the interval Jacobian has an exact
+  interval determinant that excludes 0. By the implicit function theorem,
+  every solution arc in the box is then a monotone graph over the
+  remaining variable, so it has two distinct ends on the box boundary and
+  cannot close inside.
+- **Face points:** the arcs' ends are the solutions of three equations in
+  three unknowns on each face, certified by the same solver as curve /
+  surface intersections.
+- **Topology:** a regular box with no face point holds no arc. With one,
+  the curve only touches the box. With two, it holds exactly one arc
+  joining them. Anything else is subdivided again.
+
+Branches chain these points across boxes and patch pairs. Points on a
+closed surface's seam (a NURBS conic tube, for example) are identified at
+both parameter ends. Between consecutive points of a branch lies exactly
+one smooth intersection arc, and every intersection curve is covered.
+`min_depth` subdivides regular boxes further to give more points.
+Tangential contact, overlapping surfaces and singular intersection points
+return `QAWS_STATUS_CERTIFICATION_FAILED`.
+
+While building this, two soundness details of the 3-equation solver were
+fixed:
+- **Invertible preconditioner:** the integer preconditioner Y is now scaled
+  row by row and must have a non-zero exact determinant before its
+  Miranda test counts. A singular Y could certify a box without a root.
+- **Roots on a cut:** a root sitting exactly on a cut is certified in the
+  middle [1/4, 3/4]^3 of the box, and that region is then marked as
+  covered.
+
 ## Certified 2D Booleans
 
 ```c
@@ -289,7 +331,7 @@ Tangencies and overlaps return `QAWS_STATUS_CERTIFICATION_FAILED`.
 | polynomial | exact rational (dyadic coefficients taken as given, no quantization) |
 | composites | exact rational (segment spans moved to [i, i + 1]; non-dyadic bounds reported as a parameter quantization) |
 | chordal / centripetal Catmull-Rom | exact relative to the runtime's frozen preparation (QAWS_EXACT_FLAG_PREP_QUANTIZED) |
-| Yuksel curves | planned (frozen preparation) |
+| Yuksel curves | not rational (trigonometric blend of sub-curves) |
 | arcs, clothoids (sin/cos, Fresnel) | not rational |
 | unit normals, curvature, arc length (sqrt) | not rational |
 | Bezier, B-spline, NURBS surfaces: S, Su, Sv, Suu, Suv, Svv, Su x Sv | exact rational |
@@ -301,9 +343,9 @@ Tangencies and overlaps return `QAWS_STATUS_CERTIFICATION_FAILED`.
 | line / surface intersections (ray casting) | certified: u, v and t enclosed, per patch Bezout elimination |
 | 2D Boolean operations (union, intersection, difference) | certified: pieces of the source curves, cut at certified crossings, classified by exact winding |
 | curve / surface intersections | certified: exact Bernstein subdivision, Miranda existence, diagonal-dominance uniqueness |
-| surface / surface intersections | planned (curves of solutions: certified topology) |
+| surface / surface intersections | certified topology: branches of certified points, one smooth arc between consecutive points (seams identified) |
 
 Tests: 63 (integers), 64 (predicates), 65 (Bezier), 66 (winding), 67
-(B-spline / NURBS), 68 (Hermite, Catmull-Rom, polynomial), 69 (surfaces), 70 (line / plane hits), 71 (curve / curve hits), 72 (3D curve / curve), 73 (self-intersections), 74 (line / surface), 75 (Booleans), 76 (composites, frozen Catmull-Rom), 77 (curve / surface), all against
+(B-spline / NURBS), 68 (Hermite, Catmull-Rom, polynomial), 69 (surfaces), 70 (line / plane hits), 71 (curve / curve hits), 72 (3D curve / curve), 73 (self-intersections), 74 (line / surface), 75 (Booleans), 76 (composites, frozen Catmull-Rom), 77 (curve / surface), 78 (surface / surface), all against
 Mathematica exact references. Figures:
 `examples/exact_showcase.c`.

@@ -57,4 +57,22 @@ void qaws_exact_ratio_enclose(qaws_exact_int const* num, qaws_exact_int const* d
 qaws_status qaws_exact_solve_system(qaws_exact_poly const* R, qaws_exact_poly const* C00, qaws_exact_poly const* C01,
 	qaws_exact_constraint const* cons, unsigned int ncons, qaws_exact_local_hit* out, unsigned int capacity, unsigned int* count, int* common);
 
+/* A box of the unit cube: [lo, hi] 2^-dep per direction. */
+typedef struct qaws_exact_box3
+{
+	uint64_t lo[3], hi[3];
+	int dep[3];
+} qaws_exact_box3;
+
+/*
+ * Every root of three polynomial equations on the unit cube, F given as
+ * three tensors of integer Bernstein coefficients of degrees n[0..2]
+ * (index ((a (n1 + 1) + b) (n2 + 1) + k), tensor c at c * size), each root
+ * certified (exactly one, by Miranda and diagonal dominance after an
+ * integer preconditioning) and shrunk; a root on a cut is reported once.
+ * QAWS_STATUS_CERTIFICATION_FAILED past max_boxes or the depth budget.
+ */
+qaws_status qaws_exact_solve3(unsigned int const n[3], qaws_exact_int const* F, qaws_exact_box3* out, unsigned int capacity, unsigned int* out_count,
+	unsigned int max_boxes);
+
 #endif /* QAWS_EXACT_SOLVE_H */

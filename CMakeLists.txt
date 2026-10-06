@@ -235,6 +235,7 @@ if(QAWS_ENABLE_EXACT)
     src/qaws/exact/qaws_exact_surface_hits.c
     src/qaws/exact/qaws_exact_boolean.c
     src/qaws/exact/qaws_exact_curve_surface.c
+    src/qaws/exact/qaws_exact_ssi.c
   )
 endif()
 

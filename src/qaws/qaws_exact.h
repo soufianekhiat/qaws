@@ -328,6 +328,41 @@ typedef struct qaws_exact_curve_surface_hit
 qaws_status qaws_exact_curve_surface_hits(qaws_exact_curve const* curve, qaws_exact_surface const* surface, qaws_exact_curve_surface_hit* out_hits,
 	unsigned int capacity, unsigned int* out_count);
 
+/* A point of a surface / surface intersection curve: (u1, v1) on a, (u2, v2) on b, enclosed. */
+typedef struct qaws_exact_ssi_point
+{
+	double u1_lo, u1_hi, v1_lo, v1_hi;
+	double u2_lo, u2_hi, v2_lo, v2_hi;
+} qaws_exact_ssi_point;
+
+/* A branch: points[first .. first + count - 1]; closed when the last joins the first. */
+typedef struct qaws_exact_ssi_branch
+{
+	unsigned int first, count;
+	int closed;
+} qaws_exact_ssi_branch;
+
+/*
+ * Certified surface / surface intersection curves (one exact space). Per
+ * patch pair, the three equations X^a_c W^b - X^b_c W^a = 0 in
+ * (u1, v1, u2, v2) have exact integer Bernstein coefficients; the 4D box
+ * is subdivided exactly until each box is excluded or regular: a 3 x 3
+ * minor of its interval Jacobian keeps one strict sign, so every solution
+ * arc in it is a monotone graph over the remaining variable and ends on
+ * the box boundary. The arcs' end points on the box faces are certified
+ * points (three equations in three unknowns); a regular box with none
+ * holds no curve, one with two holds exactly one arc joining them.
+ * min_depth (0..10) subdivides regular boxes at least that many times per
+ * direction: more points along the curves, still certified.
+ * Branches chain those points: between consecutive points lies exactly
+ * one smooth intersection arc, and every intersection curve is covered.
+ * QAWS_STATUS_CERTIFICATION_FAILED for tangential contact, overlapping
+ * surfaces or a singular intersection point (the budget runs out).
+ */
+qaws_status qaws_exact_surface_surface_hits(qaws_exact_surface const* a, qaws_exact_surface const* b, unsigned int min_depth, qaws_exact_ssi_point* out_points,
+	unsigned int point_capacity, unsigned int* out_point_count, qaws_exact_ssi_branch* out_branches, unsigned int branch_capacity,
+	unsigned int* out_branch_count);
+
 /* Patches along u and v (one exact rational Bezier patch each). */
 void qaws_exact_surface_patch_count(qaws_exact_surface const* surface, unsigned int* out_u_count, unsigned int* out_v_count);
 

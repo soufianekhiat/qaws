@@ -79,6 +79,7 @@ add_executable(
   75_exact_boolean.c
   76_exact_composite.c
   77_exact_curve_surface.c
+  78_exact_ssi.c
 )
 
 # The amalgamated library exports exactly the same symbols, so the tests can

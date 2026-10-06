@@ -233,22 +233,46 @@ static int invert3(double const A[3][3], double Y[3][3])
  */
 static qaws_status precondition_test(cs_ctx const* cx, qaws_exact_int const* F, int want_unique, int* out)
 {
-	double J[3][3], Y[3][3], ymax = 0;
+	double J[3][3], Y[3][3];
+	int64_t Yi[3][3];
 	unsigned int shift[3], smax = 0, i, c, j, o;
-	int ys;
 	qaws_exact_int* G;
 	qaws_status st = QAWS_STATUS_OK;
 	*out = 0;
 	center_jacobian(cx, F, J, shift);
 	if (!invert3(J, Y))
 		return QAWS_STATUS_OK;
+	/* integer Y, each row on its own scale (a row's small entries must not all round away) */
 	for (i = 0; i < 3; i++)
 	{
+		double ymax = 0;
+		int ys;
 		if (shift[i] > smax) smax = shift[i];
 		for (j = 0; j < 3; j++)
 			if (fabs(Y[i][j]) > ymax) ymax = fabs(Y[i][j]);
+		frexp(ymax, &ys);
+		for (j = 0; j < 3; j++)
+			Yi[i][j] = (int64_t)nearbyint(ldexp(Y[i][j], 30 - ys));
 	}
-	frexp(ymax, &ys);
+	/* the existence and uniqueness tests hold for G = Y F only with Y invertible: check det Y != 0 exactly */
+	{
+		qaws_exact_int det, t, u;
+		static unsigned int const perm[6][3] = { { 0, 1, 2 }, { 1, 2, 0 }, { 2, 0, 1 }, { 0, 2, 1 }, { 2, 1, 0 }, { 1, 0, 2 } };
+		unsigned int p;
+		qaws_exact_int_zero(&det);
+		for (p = 0; p < 6; p++)
+		{
+			qaws_exact_int_from_i64(&t, Yi[0][perm[p][0]]);
+			qaws_exact_int_mul_i64(&t, &t, Yi[1][perm[p][1]]);
+			qaws_exact_int_mul_i64(&u, &t, Yi[2][perm[p][2]]);
+			if (p < 3)
+				qaws_exact_int_add(&det, &det, &u);
+			else
+				qaws_exact_int_sub(&det, &det, &u);
+		}
+		if (qaws_exact_int_is_zero(&det))
+			want_unique = -1;   /* still usable for exclusion only */
+	}
 	G = (qaws_exact_int*)cs_alloc(sizeof(qaws_exact_int) * 3 * cx->size);
 	if (!G)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
@@ -259,7 +283,7 @@ static qaws_status precondition_test(cs_ctx const* cx, qaws_exact_int const* F, 
 			for (c = 0; c < 3 && st == QAWS_STATUS_OK; c++)
 			{
 				qaws_exact_int t;
-				int64_t y = (int64_t)nearbyint(ldexp(Y[i][c], 30 - ys));
+				int64_t y = Yi[i][c];
 				if (y == 0)
 					continue;
 				st = qaws_exact_int_mul_i64(&t, &F[c * cx->size + o], y);
@@ -284,6 +308,9 @@ static qaws_status precondition_test(cs_ctx const* cx, qaws_exact_int const* F, 
 				return QAWS_STATUS_OK;
 			}
 		}
+		/* a singular integer Y proves nothing about F's roots */
+		if (want_unique < 0)
+			ok = 0;
 		/* Miranda: G_i against the faces of direction i */
 		for (i = 0; i < 3 && ok; i++)
 		{
@@ -500,150 +527,313 @@ static int overlap(double a0, double a1, double b0, double b1)
 	return a0 <= b1 && b0 <= a1;
 }
 
+
+/* Is the box B inside the box O (both dyadic [lo, hi] 2^-dep per direction)? Exact. */
+static int box_inside(cs_box const* B, qaws_exact_box3 const* O)
+{
+	unsigned int k;
+	for (k = 0; k < 3; k++)
+	{
+		/* O.lo / 2^od <= B.lo / 2^bd and B.hi / 2^bd <= O.hi / 2^od */
+		qaws_exact_int x, y;
+		qaws_exact_int_from_i64(&x, (int64_t)O->lo[k]);
+		qaws_exact_int_from_i64(&y, (int64_t)B->lo[k]);
+		qaws_exact_int_shl(&x, &x, (unsigned int)B->dep[k]);
+		qaws_exact_int_shl(&y, &y, (unsigned int)O->dep[k]);
+		if (qaws_exact_int_cmp(&x, &y) > 0)
+			return 0;
+		qaws_exact_int_from_i64(&x, (int64_t)B->hi[k]);
+		qaws_exact_int_from_i64(&y, (int64_t)O->hi[k]);
+		qaws_exact_int_shl(&x, &x, (unsigned int)O->dep[k]);
+		qaws_exact_int_shl(&y, &y, (unsigned int)B->dep[k]);
+		if (qaws_exact_int_cmp(&x, &y) > 0)
+			return 0;
+	}
+	return 1;
+}
+
+/* Do two local boxes (dyadic [lo, hi] 2^-dep per direction) intersect? Exact. */
+static int box_overlap(qaws_exact_box3 const* a, qaws_exact_box3 const* b)
+{
+	unsigned int k;
+	for (k = 0; k < 3; k++)
+	{
+		/* a.lo / 2^da <= b.hi / 2^db and b.lo / 2^db <= a.hi / 2^da */
+		qaws_exact_int x, y;
+		qaws_exact_int_from_i64(&x, (int64_t)a->lo[k]);
+		qaws_exact_int_from_i64(&y, (int64_t)b->hi[k]);
+		qaws_exact_int_shl(&x, &x, (unsigned int)b->dep[k]);
+		qaws_exact_int_shl(&y, &y, (unsigned int)a->dep[k]);
+		if (qaws_exact_int_cmp(&x, &y) > 0)
+			return 0;
+		qaws_exact_int_from_i64(&x, (int64_t)b->lo[k]);
+		qaws_exact_int_from_i64(&y, (int64_t)a->hi[k]);
+		qaws_exact_int_shl(&x, &x, (unsigned int)a->dep[k]);
+		qaws_exact_int_shl(&y, &y, (unsigned int)b->dep[k]);
+		if (qaws_exact_int_cmp(&x, &y) > 0)
+			return 0;
+	}
+	return 1;
+}
+
+qaws_status qaws_exact_solve3(unsigned int const n[3], qaws_exact_int const* F, qaws_exact_box3* out, unsigned int capacity, unsigned int* out_count,
+	unsigned int max_boxes)
+{
+	cs_ctx cx;
+	unsigned int nstack, boxes = 0, depth_cap = CS_MAX_SPLITS, count = 0, c, ncov = 0;
+	cs_box* stack = NULL;
+	qaws_exact_int* store = NULL;
+	qaws_exact_int* tstore = NULL;
+	qaws_exact_int* mstore = NULL;
+	qaws_exact_box3 cov[256];
+	cs_box tmpL, tmpR;
+	qaws_status st = QAWS_STATUS_OK;
+	*out_count = 0;
+	cx.n[0] = n[0];
+	cx.n[1] = n[1];
+	cx.n[2] = n[2];
+	cx.size = (n[0] + 1) * (n[1] + 1) * (n[2] + 1);
+	cx.stride[2] = 1;
+	cx.stride[1] = n[2] + 1;
+	cx.stride[0] = (n[1] + 1) * (n[2] + 1);
+	if (cx.size > CS_MAX_SIZE || n[0] > 16 || n[1] > 16 || n[2] > 16)
+		return QAWS_STATUS_EXACT_UNSUPPORTED;
+	stack = (cs_box*)cs_alloc(sizeof(cs_box) * (2 * depth_cap + 4));
+	store = (qaws_exact_int*)cs_alloc(sizeof(qaws_exact_int) * 3 * cx.size * (2 * depth_cap + 4));
+	tstore = (qaws_exact_int*)cs_alloc(sizeof(qaws_exact_int) * 3 * cx.size * 2);
+	mstore = (qaws_exact_int*)cs_alloc(sizeof(qaws_exact_int) * 3 * cx.size);
+	if (!stack || !store || !tstore || !mstore)
+		st = QAWS_STATUS_ALLOCATION_FAILURE;
+	if (st == QAWS_STATUS_OK)
+	{
+		tmpL.F = tstore;
+		tmpR.F = tstore + 3 * cx.size;
+		memcpy(store, F, sizeof(qaws_exact_int) * 3 * cx.size);
+		for (c = 0; c < 3 && st == QAWS_STATUS_OK; c++)
+			st = normalize(&store[c * cx.size], cx.size);
+		nstack = 1;
+		stack[0].F = store;
+		stack[0].lo[0] = stack[0].lo[1] = stack[0].lo[2] = 0;
+		stack[0].hi[0] = stack[0].hi[1] = stack[0].hi[2] = 1;
+		stack[0].dep[0] = stack[0].dep[1] = stack[0].dep[2] = 0;
+		while (st == QAWS_STATUS_OK && nstack > 0)
+		{
+			cs_box B = stack[--nstack];
+			int ok = 0;
+			if (++boxes > max_boxes)
+			{
+				st = QAWS_STATUS_CERTIFICATION_FAILED;
+				break;
+			}
+			if (excluded(&cx, B.F))
+				continue;
+			{
+				/* inside a region already holding exactly one (recorded) root */
+				unsigned int q;
+				int inside = 0;
+				for (q = 0; q < ncov && !inside; q++)
+					inside = box_inside(&B, &cov[q]);
+				if (inside)
+					continue;
+			}
+			st = precondition_test(&cx, B.F, 1, &ok);
+			if (st != QAWS_STATUS_OK)
+				break;
+			if (ok == -1)
+				continue;   /* proven empty after preconditioning */
+			if (ok == 1)
+			{
+				/* one root: shrink it in place, then record once (a root on a cut is found twice) */
+				qaws_exact_box3 b;
+				unsigned int q, dup = 0, k;
+				st = refine(&cx, &B, &tmpL, &tmpR);
+				if (st != QAWS_STATUS_OK)
+					break;
+				for (k = 0; k < 3; k++)
+				{
+					b.lo[k] = B.lo[k];
+					b.hi[k] = B.hi[k];
+					b.dep[k] = B.dep[k];
+				}
+				for (q = 0; q < count && !dup; q++)
+					dup = box_overlap(&out[q], &b);
+				if (dup)
+					continue;
+				if (count >= capacity)
+				{
+					st = QAWS_STATUS_BUFFER_TOO_SMALL;
+					break;
+				}
+				out[count++] = b;
+				continue;
+			}
+			if ((unsigned int)(B.dep[0] + B.dep[1] + B.dep[2]) >= depth_cap)
+			{
+				st = QAWS_STATUS_CERTIFICATION_FAILED;   /* a tangency or an overlap */
+				break;
+			}
+			if (B.dep[0] + B.dep[1] + B.dep[2] >= 3 && ncov < 256)
+			{
+				/* a root sitting on one of B's cuts (a symmetric or exactly dyadic position)
+				   never certifies in the halves: try B's middle [1/4, 3/4]^3, where it is well inside */
+				cs_box M;
+				unsigned int k;
+				int okm = 0;
+				M.F = mstore;
+				memcpy(M.F, B.F, sizeof(qaws_exact_int) * 3 * cx.size);
+				for (k = 0; k < 3 && st == QAWS_STATUS_OK; k++)
+					for (c = 0; c < 3 && st == QAWS_STATUS_OK; c++)
+					{
+						st = split_dir_at(&cx, &M.F[c * cx.size], k, 1, 4, 1);
+						if (st == QAWS_STATUS_OK) st = split_dir_at(&cx, &M.F[c * cx.size], k, 2, 3, 0);
+						if (st == QAWS_STATUS_OK) st = normalize(&M.F[c * cx.size], cx.size);
+					}
+				if (st == QAWS_STATUS_EXACT_RANGE_EXCEEDED)
+					st = QAWS_STATUS_OK;
+				else if (st == QAWS_STATUS_OK)
+				{
+					for (k = 0; k < 3; k++)
+					{
+						M.lo[k] = 3 * B.lo[k] + B.hi[k];
+						M.hi[k] = B.lo[k] + 3 * B.hi[k];
+						M.dep[k] = B.dep[k] + 2;
+					}
+					st = precondition_test(&cx, M.F, 1, &okm);
+					if (st == QAWS_STATUS_OK && okm == 1)
+					{
+						/* exactly one root in M: record it; descendants inside M are covered */
+						qaws_exact_box3 b;
+						unsigned int q, dup = 0;
+						for (k = 0; k < 3; k++)
+						{
+							cov[ncov].lo[k] = M.lo[k];
+							cov[ncov].hi[k] = M.hi[k];
+							cov[ncov].dep[k] = M.dep[k];
+						}
+						ncov++;
+						st = refine(&cx, &M, &tmpL, &tmpR);
+						for (k = 0; k < 3; k++)
+						{
+							b.lo[k] = M.lo[k];
+							b.hi[k] = M.hi[k];
+							b.dep[k] = M.dep[k];
+						}
+						for (q = 0; q < count && !dup; q++)
+							dup = box_overlap(&out[q], &b);
+						if (st == QAWS_STATUS_OK && !dup)
+						{
+							if (count >= capacity)
+								st = QAWS_STATUS_BUFFER_TOO_SMALL;
+							else
+								out[count++] = b;
+						}
+					}
+				}
+				if (st != QAWS_STATUS_OK)
+					break;
+			}
+			{
+				/* the children go back on the stack, each in its own slot */
+				unsigned int d = shallowest(&B), slot = nstack;
+				cs_box L, R;
+				L.F = store + 3 * cx.size * (slot + 1);
+				R.F = store + 3 * cx.size * (slot + 2);
+				st = split_box(&cx, &B, d, &L, &R);
+				if (st != QAWS_STATUS_OK)
+					break;
+				memmove(store + 3 * cx.size * slot, R.F, sizeof(qaws_exact_int) * 3 * cx.size);
+				R.F = store + 3 * cx.size * slot;
+				stack[nstack++] = R;
+				stack[nstack++] = L;
+			}
+		}
+	}
+	cs_free(stack);
+	cs_free(store);
+	cs_free(tstore);
+	cs_free(mstore);
+	*out_count = count;
+	return st;
+}
+
 qaws_status qaws_exact_curve_surface_hits(qaws_exact_curve const* curve, qaws_exact_surface const* surface, qaws_exact_curve_surface_hit* out_hits,
 	unsigned int capacity, unsigned int* out_count)
 {
-	cs_ctx cx;
-	unsigned int ks, iu, iv, count = 0, nstack, boxes = 0, depth_cap = CS_MAX_SPLITS;
-	cs_box* stack = NULL;
-	qaws_exact_int* store = NULL;
-	cs_box tmpL, tmpR;
-	qaws_exact_int* tstore = NULL;
+	unsigned int ks, iu, iv, count = 0;
+	qaws_exact_int* F = NULL;
+	qaws_exact_box3* boxes = NULL;
 	qaws_status st = QAWS_STATUS_OK;
 	if (!curve || !surface || !out_count || (!out_hits && capacity) || curve->dimension != 3)
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	*out_count = 0;
 	if (curve->space_exp2 != surface->space_exp2)
 		return QAWS_STATUS_EXACT_INCOMPATIBLE_SPACE;
+	F = (qaws_exact_int*)cs_alloc(sizeof(qaws_exact_int) * 3 * CS_MAX_SIZE);
+	boxes = (qaws_exact_box3*)cs_alloc(sizeof(qaws_exact_box3) * 64);
+	if (!F || !boxes)
+		st = QAWS_STATUS_ALLOCATION_FAILURE;
 	for (ks = 0; ks < curve->span_count && st == QAWS_STATUS_OK; ks++)
 	{
 		qaws_exact_span const* cs = &curve->spans[ks];
-		cx.n[0] = surface->p;
-		cx.n[1] = surface->q;
-		cx.n[2] = cs->degree;
-		cx.size = (cx.n[0] + 1) * (cx.n[1] + 1) * (cx.n[2] + 1);
-		cx.stride[2] = 1;
-		cx.stride[1] = cx.n[2] + 1;
-		cx.stride[0] = (cx.n[1] + 1) * (cx.n[2] + 1);
-		if (cx.size > CS_MAX_SIZE || cx.n[2] > 16 || cx.n[0] > 16 || cx.n[1] > 16)
+		unsigned int n[3], size;
+		n[0] = surface->p;
+		n[1] = surface->q;
+		n[2] = cs->degree;
+		size = (n[0] + 1) * (n[1] + 1) * (n[2] + 1);
+		if (size > CS_MAX_SIZE)
 		{
 			st = QAWS_STATUS_EXACT_UNSUPPORTED;
 			break;
 		}
-		cs_free(stack);
-		cs_free(store);
-		cs_free(tstore);
-		stack = (cs_box*)cs_alloc(sizeof(cs_box) * (2 * depth_cap + 4));
-		store = (qaws_exact_int*)cs_alloc(sizeof(qaws_exact_int) * 3 * cx.size * (2 * depth_cap + 4));
-		tstore = (qaws_exact_int*)cs_alloc(sizeof(qaws_exact_int) * 3 * cx.size * 2);
-		if (!stack || !store || !tstore)
-		{
-			st = QAWS_STATUS_ALLOCATION_FAILURE;
-			break;
-		}
-		tmpL.F = tstore;
-		tmpR.F = tstore + 3 * cx.size;
 		for (iu = 0; iu < surface->nu && st == QAWS_STATUS_OK; iu++)
 			for (iv = 0; iv < surface->nv && st == QAWS_STATUS_OK; iv++)
 			{
 				qaws_exact_int const* h = surface->patch[iu * surface->nv + iv];
-				unsigned int a, b, k, c, slot;
-				/* the root box: F_c[a][b][k] = X_c[a][b] w_k - C_c[k] W[a][b] */
-				nstack = 1;
-				stack[0].F = store;
-				stack[0].lo[0] = stack[0].lo[1] = stack[0].lo[2] = 0;
-				stack[0].hi[0] = stack[0].hi[1] = stack[0].hi[2] = 1;
-				stack[0].dep[0] = stack[0].dep[1] = stack[0].dep[2] = 0;
+				unsigned int a, b, k, c, nb = 0, q;
+				/* F_c[a][b][k] = X_c[a][b] w_k - C_c[k] W[a][b] */
 				for (c = 0; c < 3 && st == QAWS_STATUS_OK; c++)
-				{
-					for (a = 0; a <= cx.n[0] && st == QAWS_STATUS_OK; a++)
-						for (b = 0; b <= cx.n[1] && st == QAWS_STATUS_OK; b++)
-							for (k = 0; k <= cx.n[2] && st == QAWS_STATUS_OK; k++)
+					for (a = 0; a <= n[0] && st == QAWS_STATUS_OK; a++)
+						for (b = 0; b <= n[1] && st == QAWS_STATUS_OK; b++)
+							for (k = 0; k <= n[2] && st == QAWS_STATUS_OK; k++)
 							{
 								qaws_exact_int t1, t2;
-								unsigned int ab = a * (cx.n[1] + 1) + b;
-								qaws_exact_int* f = &store[c * cx.size + ab * (cx.n[2] + 1) + k];
+								unsigned int ab = a * (n[1] + 1) + b;
 								st = qaws_exact_int_mul(&t1, &h[ab * 4 + c], &cs->h[k * 4 + 3]);
 								if (st == QAWS_STATUS_OK) st = qaws_exact_int_mul(&t2, &cs->h[k * 4 + c], &h[ab * 4 + 3]);
-								if (st == QAWS_STATUS_OK) st = qaws_exact_int_sub(f, &t1, &t2);
+								if (st == QAWS_STATUS_OK) st = qaws_exact_int_sub(&F[c * size + ab * (n[2] + 1) + k], &t1, &t2);
 							}
-					if (st == QAWS_STATUS_OK)
-						st = normalize(&store[c * cx.size], cx.size);
-				}
-				while (st == QAWS_STATUS_OK && nstack > 0)
+				if (st == QAWS_STATUS_OK)
+					st = qaws_exact_solve3(n, F, boxes, 64, &nb, CS_MAX_BOXES);
+				for (q = 0; q < nb && st == QAWS_STATUS_OK; q++)
 				{
-					cs_box B = stack[--nstack];
-					int ok = 0;
-					if (++boxes > CS_MAX_BOXES)
-					{
-						st = QAWS_STATUS_CERTIFICATION_FAILED;
-						break;
-					}
-					if (excluded(&cx, B.F))
-						continue;
-					st = precondition_test(&cx, B.F, 1, &ok);
+					qaws_exact_curve_surface_hit hit = { 0, 0, 0, 0, 0, 0 };
+					unsigned int r, dup = 0;
+					st = local_to_param(surface->ub[iu], surface->ub[iu + 1], surface->u_shift, boxes[q].lo[0], boxes[q].hi[0], boxes[q].dep[0], &hit.u_lo,
+						&hit.u_hi);
+					if (st == QAWS_STATUS_OK)
+						st = local_to_param(surface->vb[iv], surface->vb[iv + 1], surface->v_shift, boxes[q].lo[1], boxes[q].hi[1], boxes[q].dep[1],
+							&hit.v_lo, &hit.v_hi);
+					if (st == QAWS_STATUS_OK)
+						st = local_to_param(cs->a, cs->b, curve->param_shift, boxes[q].lo[2], boxes[q].hi[2], boxes[q].dep[2], &hit.t_lo, &hit.t_hi);
 					if (st != QAWS_STATUS_OK)
 						break;
-					if (ok == -1)
-						continue;   /* proven empty after preconditioning */
-					if (ok == 1)
-					{
-						/* one intersection: shrink it in place, then record */
-						qaws_exact_curve_surface_hit hit = { 0, 0, 0, 0, 0, 0 };
-						unsigned int q, dup = 0;
-						st = refine(&cx, &B, &tmpL, &tmpR);
-						if (st == QAWS_STATUS_OK)
-							st = local_to_param(surface->ub[iu], surface->ub[iu + 1], surface->u_shift, B.lo[0], B.hi[0], B.dep[0], &hit.u_lo, &hit.u_hi);
-						if (st == QAWS_STATUS_OK)
-							st = local_to_param(surface->vb[iv], surface->vb[iv + 1], surface->v_shift, B.lo[1], B.hi[1], B.dep[1], &hit.v_lo, &hit.v_hi);
-						if (st == QAWS_STATUS_OK)
-							st = local_to_param(cs->a, cs->b, curve->param_shift, B.lo[2], B.hi[2], B.dep[2], &hit.t_lo, &hit.t_hi);
-						if (st != QAWS_STATUS_OK)
-							break;
-						/* a root on a shared face (cut, patch or span edge) is found twice: once */
-						for (q = 0; q < count && !dup; q++)
-							dup = overlap(out_hits[q].t_lo, out_hits[q].t_hi, hit.t_lo, hit.t_hi) &&
-							      overlap(out_hits[q].u_lo, out_hits[q].u_hi, hit.u_lo, hit.u_hi) &&
-							      overlap(out_hits[q].v_lo, out_hits[q].v_hi, hit.v_lo, hit.v_hi);
-						if (dup)
-							continue;
-						if (count >= capacity)
-						{
-							st = QAWS_STATUS_BUFFER_TOO_SMALL;
-							break;
-						}
-						out_hits[count++] = hit;
+					/* a root on a patch or span edge is found by both: once */
+					for (r = 0; r < count && !dup; r++)
+						dup = overlap(out_hits[r].t_lo, out_hits[r].t_hi, hit.t_lo, hit.t_hi) && overlap(out_hits[r].u_lo, out_hits[r].u_hi, hit.u_lo, hit.u_hi) &&
+						      overlap(out_hits[r].v_lo, out_hits[r].v_hi, hit.v_lo, hit.v_hi);
+					if (dup)
 						continue;
-					}
-					if ((unsigned int)(B.dep[0] + B.dep[1] + B.dep[2]) >= depth_cap)
+					if (count >= capacity)
 					{
-						st = QAWS_STATUS_CERTIFICATION_FAILED;   /* a tangency or an overlap */
+						st = QAWS_STATUS_BUFFER_TOO_SMALL;
 						break;
 					}
-					{
-						/* the children go back on the stack, each in its own slot */
-						unsigned int d = shallowest(&B);
-						cs_box L, R;
-						slot = nstack;
-						L.F = store + 3 * cx.size * (slot + 1);
-						R.F = store + 3 * cx.size * (slot + 2);
-						/* B's tensor may sit in slot nstack: the children use the slots after it */
-						st = split_box(&cx, &B, d, &L, &R);
-						if (st != QAWS_STATUS_OK)
-							break;
-						/* compact: the right child into slot nstack, the left into nstack + 1 */
-						memmove(store + 3 * cx.size * slot, R.F, sizeof(qaws_exact_int) * 3 * cx.size);
-						R.F = store + 3 * cx.size * slot;
-						stack[nstack++] = R;
-						stack[nstack++] = L;
-						(void)L;
-					}
+					out_hits[count++] = hit;
 				}
 			}
 	}
-	cs_free(stack);
-	cs_free(store);
-	cs_free(tstore);
+	cs_free(F);
+	cs_free(boxes);
 	*out_count = count;
 	return st;
 }
