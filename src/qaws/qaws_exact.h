@@ -242,6 +242,30 @@ void qaws_exact_surface_destroy(qaws_exact_surface* surface);
 qaws_status qaws_exact_surface_evaluate(qaws_exact_surface const* surface, double u, double v, unsigned int order, double* out,
 	double* out_normal);
 
+/* A line / surface intersection: patch parameters and the line parameter, enclosed. */
+typedef struct qaws_exact_surface_hit
+{
+	qaws_exact_hit_kind kind;   /* POINT: u, v and t exact (lo == hi); CROSSING: enclosures */
+	double u_lo, u_hi;
+	double v_lo, v_hi;
+	double t_lo, t_hi;          /* x = p0 + t (p1 - p0) */
+} qaws_exact_surface_hit;
+
+/*
+ * Certified intersections of the line through the double points p0 != p1
+ * with an exact surface (exact ray casting: keep t >= 0 for a ray). Per
+ * patch, the line is the meet of two planes; their equations in (u, v)
+ * are eliminated exactly (a Bezout matrix in u with polynomial entries in
+ * v, product of the degrees bounded by the root budget), the roots in v
+ * isolated, u recovered from the cofactors and proven in [0, 1]; t is
+ * enclosed over the exact sub-patch. Every intersection is reported once,
+ * sorted by t. QAWS_STATUS_CERTIFICATION_FAILED for a tangent line, a line
+ * lying on the surface, or a hit on a patch edge at an irrational
+ * parameter.
+ */
+qaws_status qaws_exact_surface_line_hits(qaws_exact_surface const* surface, double const p0[3], double const p1[3], qaws_exact_surface_hit* out_hits,
+	unsigned int capacity, unsigned int* out_count);
+
 /* Patches along u and v (one exact rational Bezier patch each). */
 void qaws_exact_surface_patch_count(qaws_exact_surface const* surface, unsigned int* out_u_count, unsigned int* out_v_count);
 

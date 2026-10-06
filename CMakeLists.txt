@@ -231,6 +231,8 @@ if(QAWS_ENABLE_EXACT)
     src/qaws/exact/qaws_exact_intersect.c
     src/qaws/exact/qaws_exact_curve_curve.c
     src/qaws/exact/qaws_exact_poly.c
+    src/qaws/exact/qaws_exact_solve.c
+    src/qaws/exact/qaws_exact_surface_hits.c
   )
 endif()
 

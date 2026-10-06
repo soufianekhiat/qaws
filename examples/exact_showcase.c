@@ -45,6 +45,7 @@
 #include "exact_showcase/07_hits.c"
 #include "exact_showcase/08_curve_hits.c"
 #include "exact_showcase/09_self_hits.c"
+#include "exact_showcase/10_ray_cast.c"
 
 int main(void)
 {
@@ -59,5 +60,6 @@ int main(void)
 	demo_hits();
 	demo_curve_hits();
 	demo_self_hits();
+	demo_ray_cast();
 	return 0;
 }

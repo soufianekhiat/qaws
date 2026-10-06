@@ -195,6 +195,31 @@ Self-intersections are pairs a < b with C(a) = C(b), in 2D or 3D:
   touch at their ends are fine; an overlap is refused.
 - **Refused:** an irrational cusp, and a span folding back on itself.
 
+## Certified line / surface intersections (exact ray casting)
+
+```c
+qaws_status qaws_exact_surface_line_hits(qaws_exact_surface const* surface, double const p0[3], double const p1[3], qaws_exact_surface_hit* out_hits, unsigned int capacity, unsigned int* out_count);
+```
+
+The line `x = p0 + t (p1 - p0)` is computed per patch:
+
+1. The line is the meet of two planes, with normals `d x e_k` and
+   `d x (d x e_k)`, exact in dyadics.
+2. On a patch, each plane gives an integer polynomial in (u, v).
+3. One parameter is eliminated with a Bezout matrix whose entries are
+   polynomials in the other: the lower degree first, the other when the
+   resultant vanishes. A degree-1 elimination is solved directly.
+4. The roots are isolated, and the eliminated parameter is recovered from
+   the cofactors and proven in [0, 1].
+5. The line parameter t is enclosed over the exact sub-patch: the patch is
+   restricted to the (u, v) box by integer De Casteljau at rational cut
+   points, and t is the range of `d . (X - p0 W) / (W |d|^2)` over its
+   control net (the weights are positive).
+
+Hits are sorted by t, and a hit on a patch edge is reported once. A
+tangent ray or a line lying on the surface returns
+`QAWS_STATUS_CERTIFICATION_FAILED`.
+
 ## Capability matrix
 
 | quantity | status |
@@ -216,8 +241,10 @@ Self-intersections are pairs a < b with C(a) = C(b), in 2D or 3D:
 | curve / line (2D), curve / plane (3D) intersections | certified: exact points, one-root intervals, overlaps; non-dyadic tangencies refused |
 | curve / curve intersections (2D, 3D) | certified: implicitization of the lower-degree span, root isolation, exact inversion; 3D: exact zero test of the third coordinate |
 | self-intersections (2D, 3D) | certified: divided differences inside spans, span pairs, knots and closing points excluded, spans on one conic told apart |
+| line / surface intersections (ray casting) | certified: u, v and t enclosed, per patch Bezout elimination |
+| curve / surface, surface / surface intersections | planned |
 
 Tests: 63 (integers), 64 (predicates), 65 (Bezier), 66 (winding), 67
-(B-spline / NURBS), 68 (Hermite, Catmull-Rom, polynomial), 69 (surfaces), 70 (line / plane hits), 71 (curve / curve hits), 72 (3D curve / curve), 73 (self-intersections), all against
+(B-spline / NURBS), 68 (Hermite, Catmull-Rom, polynomial), 69 (surfaces), 70 (line / plane hits), 71 (curve / curve hits), 72 (3D curve / curve), 73 (self-intersections), 74 (line / surface), all against
 Mathematica exact references. Figures:
 `examples/exact_showcase.c`.
