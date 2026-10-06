@@ -25,6 +25,8 @@
  *  10. Single-view hair modeling on plain-background portraits: Gabor
  *      orientation, a diffused 3D orientation field, strands grown from
  *      the scalp, rendered by a small rasterizer (photos/plain_*.ppm).
+ *  11. Font outlines: glyph traces fitted by closed cubic B-splines with
+ *      triple knots at corners (photos/glyph_*.ppm, glyph_to_ppm.ps1).
  *
  * Each application lives in diff_applications/NN_*.c; they are compiled as
  * one translation unit, in order (later applications reuse the helpers of
@@ -63,6 +65,7 @@ static char const* g_photos = "photos";
 #include "diff_applications/08_haircuts.c"
 #include "diff_applications/09_hair3d.c"
 #include "diff_applications/10_hair_volume.c"
+#include "diff_applications/11_font_outlines.c"
 
 int main(int argc, char** argv)
 {
@@ -84,6 +87,7 @@ int main(int argc, char** argv)
 		if (!pick || pick == 8) app_haircuts();
 		if (!pick || pick == 9) app_hair3d();
 		if (!pick || pick == 10) app_hair_volume();
+		if (!pick || pick == 11) app_font_outlines();
 	}
 	return 0;
 }
