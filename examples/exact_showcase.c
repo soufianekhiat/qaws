@@ -7,6 +7,8 @@
  *                         where f64 is wrong, and where the filter needed
  *                         the exact fallback (Kettner et al., "Classroom
  *                         examples of robustness problems")
+ *   exact2_bezier.svg     a degree-16 rational Bezier evaluated exactly, the
+ *                         reference for f32 and f64 errors (position, C', C'', C''')
  *
  * Each figure lives in exact_showcase/NN_*.c, compiled as one translation
  * unit.
@@ -30,11 +32,13 @@
 #include "example_svg.h"
 
 #include "exact_showcase/01_orient2d.c"
+#include "exact_showcase/02_exact_bezier.c"
 
 int main(void)
 {
 	setvbuf(stdout, NULL, _IONBF, 0);
 	MAKE_DIR("showcase");
 	demo_orient2d();
+	demo_exact_bezier();
 	return 0;
 }
