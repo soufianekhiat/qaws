@@ -1799,6 +1799,7 @@ qaws_status qaws_curve_offset_3d_diff(
 	qaws_scalar distance,
 	int direction_mode,
 	qaws_vec3 const* direction,
+	qaws_surface const* surface,
 	unsigned int sample_count,
 	qaws_curve** out_curve,
 	qaws_diff_map** out_map);
@@ -1806,12 +1807,12 @@ qaws_status qaws_curve_offset_3d_diff(
 
 Runs `qaws_curve_offset_3d` and returns its exact map. The offset samples `C(t_i) + distance * n(t_i)` at fixed parameters (the sample set is frozen, `QAWS_FREEZE_SAMPLE_SET`) and fits a B-spline through them; the fit is linear in the samples, so each map column is the fit of the sample tangents.
 
-- inputs: 0 = curve (every differentiable field, including knots), 1 = distance (`QAWS_FIELD_PARAMETER`, element 0), 2 = direction (`QAWS_FIELD_DIRECTION`, element 0, three components; `direction_mode` 0 only, otherwise frozen).
+- inputs: 0 = curve (every differentiable field, including knots), 1 = distance (`QAWS_FIELD_PARAMETER`, element 0), 2 = direction (`QAWS_FIELD_DIRECTION`, element 0, three components; `direction_mode` 0 only, otherwise frozen), 3 = surface (every differentiable field but knots; `direction_mode` 2 only).
 - outputs: 0 = offset curve (`QAWS_FIELD_CONTROL_POINTS`).
 
-`direction_mode` 0 (constant direction, normalized) and 1 (Frenet normal, differentiated through `qaws_curve_geometry_eval_3d`) are supported.
+`direction_mode` 0 (constant direction, normalized), 1 (Frenet normal, differentiated through `qaws_curve_geometry_eval_3d`) and 2 (normal of `surface` at the closest point of each sample) are supported. In mode 2 the closest point `(u, v)` is differentiated through its optimality conditions `S_u . (S - q) = S_v . (S - q) = 0` at the points the offset itself finds, so `(u', v') = -H^-1 g'`, and the normal through `normalize(S_u x S_v)` (oriented like the evaluated normal); the curve moves the query `q`, the surface fields move `S`, `S_u`, `S_v`.
 
-**Returns:** `QAWS_STATUS_OK`; `QAWS_STATUS_INVALID_ARGUMENT` on NULL `curve` or `out_curve`; `QAWS_STATUS_UNSUPPORTED_OPERATION` for `direction_mode` 2 (surface normal) and, in mode 1, for curves with straight pieces where the Frenet normal is undefined; errors of `qaws_curve_offset_3d`. On failure `*out_curve` is NULL.
+**Returns:** `QAWS_STATUS_OK`; `QAWS_STATUS_INVALID_ARGUMENT` on NULL `curve` or `out_curve`, or a NULL `surface` in mode 2; `QAWS_STATUS_UNSUPPORTED_OPERATION` for an unknown mode, in mode 1 for curves with straight pieces where the Frenet normal is undefined, and in mode 2 where the closest-point Hessian is singular; errors of `qaws_curve_offset_3d`. On failure `*out_curve` is NULL.
 
 ---
 

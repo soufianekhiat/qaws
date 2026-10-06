@@ -7,6 +7,8 @@
 #include "internal/qaws_internal_basis.h"
 #include "internal/qaws_internal_fit.h"
 #include "qaws_diff_geometry.h"
+#include "qaws_inspect.h"
+#include "qaws_surface.h"
 #include <math.h>
 #include "internal/qaws_internal_types.h"
 #include "internal/qaws_internal_curve.h"
@@ -1116,7 +1118,82 @@ typedef struct offset_state
 	qaws_curve_jet_3d* tan;    /* scratch: tangent jets */
 	qaws_scalar* dq;           /* scratch: n_samples * 3 */
 	qaws_scalar* cps;          /* scratch: n_cp * 3 */
+	/* mode 2: the surface, closest points, jets there, inverse Jacobians of
+	   the optimality conditions and the orientation of the offset normal */
+	qaws_surface const* surface;
+	qaws_scalar* uv;           /* n_samples * 2 */
+	qaws_surface_jet* sjets;   /* n_samples */
+	qaws_scalar* hinv;         /* n_samples * 4 */
+	qaws_scalar* nsign;        /* n_samples */
 } offset_state;
+
+/* Mode 2: rate of the unit surface normal at the closest point of sample i
+   when the query moves at qdot and the surface fields move with the tangent
+   jet stan at (u, v) (NULL: fixed). The closest point solves
+   g = (S_u . (S - q), S_v . (S - q)) = 0, so (u', v') = -H^-1 g'. */
+static qaws_vec3 offset_surface_rate(offset_state const* s, unsigned int i, qaws_vec3 qdot, qaws_surface_jet const* stan)
+{
+	qaws_surface_jet const* j = &s->sjets[i];
+	qaws_vec3 r = qaws_v3_sub(j->d[0], s->jets[i].d[0]), Su_t, Sv_t;
+	qaws_scalar g1 = -qaws_v3_dot(j->d[1], qdot), g2 = -qaws_v3_dot(j->d[2], qdot), ud, vd;
+	qaws_scalar const* h = &s->hinv[4 * i];
+	qaws_dual1 len;
+	qaws_dual3 n;
+	if (stan)
+	{
+		g1 += qaws_v3_dot(stan->d[1], r) + qaws_v3_dot(j->d[1], stan->d[0]);
+		g2 += qaws_v3_dot(stan->d[2], r) + qaws_v3_dot(j->d[2], stan->d[0]);
+	}
+	ud = -(h[0] * g1 + h[1] * g2);
+	vd = -(h[2] * g1 + h[3] * g2);
+	Su_t = qaws_v3_axpy(qaws_v3_scale(j->d[3], ud), j->d[4], vd);
+	Sv_t = qaws_v3_axpy(qaws_v3_scale(j->d[4], ud), j->d[5], vd);
+	if (stan)
+	{
+		Su_t = qaws_v3_add(Su_t, stan->d[1]);
+		Sv_t = qaws_v3_add(Sv_t, stan->d[2]);
+	}
+	n = qaws_dual3_cross(qaws_dual3_make(j->d[1], Su_t, qaws_v3_zero()), qaws_dual3_make(j->d[2], Sv_t, qaws_v3_zero()));
+	len = qaws_dual3_length(n);
+	n = qaws_dual3_div(n, len);
+	return qaws_v3_scale(n.t, s->nsign[i]);
+}
+
+/* Mode 2 setup of sample i: closest point (as the offset finds it), jets
+   and the inverse of H = [S_u.S_u + S_uu.r, S_u.S_v + S_uv.r; ...]. */
+static qaws_status offset_surface_setup(offset_state* s, unsigned int i)
+{
+	qaws_vec3 closest, r, cr;
+	qaws_scalar su = QAWS_ZERO, sv = QAWS_ZERO, a, b, d, det;
+	qaws_surface_jet* j = &s->sjets[i];
+	qaws_surface_eval_result sr;
+	qaws_status st = qaws_surface_find_closest_point(s->surface, s->jets[i].d[0], &su, &sv, &closest);
+	if (st != QAWS_STATUS_OK)
+		return st;
+	st = qaws_surface_eval_jet(s->surface, su, sv, QAWS_SJET_ORDER2, j);
+	if (st != QAWS_STATUS_OK)
+		return st;
+	s->uv[2 * i] = su;
+	s->uv[2 * i + 1] = sv;
+	r = qaws_v3_sub(j->d[0], s->jets[i].d[0]);
+	a = qaws_v3_dot(j->d[1], j->d[1]) + qaws_v3_dot(j->d[3], r);
+	b = qaws_v3_dot(j->d[1], j->d[2]) + qaws_v3_dot(j->d[4], r);
+	d = qaws_v3_dot(j->d[2], j->d[2]) + qaws_v3_dot(j->d[5], r);
+	det = a * d - b * b;
+	if (!(QAWS_FABS(det) > QAWS_LITERAL(1e-14)))
+		return QAWS_STATUS_UNSUPPORTED_OPERATION;
+	s->hinv[4 * i + 0] = d / det;
+	s->hinv[4 * i + 1] = -b / det;
+	s->hinv[4 * i + 2] = -b / det;
+	s->hinv[4 * i + 3] = a / det;
+	/* the offset uses the evaluated normal: match its orientation */
+	memset(&sr, 0, sizeof(sr));
+	qaws_surface_evaluate(s->surface, su, sv, QAWS_SURFACE_EVAL_NORMAL, &sr);
+	cr = qaws_v3_cross(j->d[1], j->d[2]);
+	s->nsign[i] = qaws_v3_dot(cr, sr.normal) < QAWS_ZERO ? -QAWS_ONE : QAWS_ONE;
+	s->normals[i] = sr.normal;
+	return QAWS_STATUS_OK;
+}
 
 /* Fits dq and adds the control point column for one input scalar. */
 static qaws_status offset_emit(qaws_diff_map* m, offset_state* s, unsigned int in_obj, qaws_diff_field in_field,
@@ -1156,6 +1233,8 @@ static qaws_status offset_curve_column(offset_state* s, qaws_diff_views const* v
 			qaws_curve_geometry_eval_3d(&s->jets[i], &s->tan[i], NULL, &g, &dg, NULL, &validity);
 			dq = qaws_v3_axpy(dq, dg.normal, s->distance);
 		}
+		else if (s->mode == 2)
+			dq = qaws_v3_axpy(dq, offset_surface_rate(s, i, s->tan[i].d[0], NULL), s->distance);
 		s->dq[i * 3 + 0] = dq.x;
 		s->dq[i * 3 + 1] = dq.y;
 		s->dq[i * 3 + 2] = dq.z;
@@ -1168,6 +1247,7 @@ qaws_status qaws_curve_offset_3d_diff(
 	qaws_scalar distance,
 	int direction_mode,
 	qaws_vec3 const* direction,
+	qaws_surface const* surf,
 	unsigned int sample_count,
 	qaws_curve** out_curve,
 	qaws_diff_map** out_map)
@@ -1181,11 +1261,13 @@ qaws_status qaws_curve_offset_3d_diff(
 
 	if (!curve || !out_curve)
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	if (direction_mode != 0 && direction_mode != 1)
+	if (direction_mode < 0 || direction_mode > 2)
 		return QAWS_STATUS_UNSUPPORTED_OPERATION;
+	if (direction_mode == 2 && !surf)
+		return QAWS_STATUS_INVALID_ARGUMENT;
 	if (out_map)
 		*out_map = NULL;
-	st = qaws_curve_offset_3d(curve, distance, direction_mode, direction, NULL, sample_count, out_curve);
+	st = qaws_curve_offset_3d(curve, distance, direction_mode, direction, surf, sample_count, out_curve);
 	if (st != QAWS_STATUS_OK || !out_map)
 		return st;
 
@@ -1193,6 +1275,7 @@ qaws_status qaws_curve_offset_3d_diff(
 	s.curve = curve;
 	s.distance = distance;
 	s.mode = direction_mode;
+	s.surface = surf;
 	s.n_samples = sample_count > 0 ? sample_count : 256;
 	s.n_cp = s.n_samples / 4;
 	if (s.n_cp < 8) s.n_cp = 8;
@@ -1207,7 +1290,12 @@ qaws_status qaws_curve_offset_3d_diff(
 	s.params = (qaws_scalar*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_scalar) * (s.n_samples * 4 + s.n_cp * 3 + 4)));
 	s.jets = (qaws_curve_jet_3d*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_curve_jet_3d) * s.n_samples * 2));
 	s.normals = (qaws_vec3*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_vec3) * s.n_samples));
-	if (!s.params || !s.jets || !s.normals)
+	if (direction_mode == 2)
+	{
+		s.uv = (qaws_scalar*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_scalar) * s.n_samples * 7));
+		s.sjets = (qaws_surface_jet*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_surface_jet) * s.n_samples));
+	}
+	if (!s.params || !s.jets || !s.normals || (direction_mode == 2 && (!s.uv || !s.sjets)))
 	{
 		st = QAWS_STATUS_ALLOCATION_FAILURE;
 		goto done;
@@ -1215,6 +1303,11 @@ qaws_status qaws_curve_offset_3d_diff(
 	s.dq = s.params + s.n_samples;
 	s.cps = s.dq + s.n_samples * 3;
 	s.tan = s.jets + s.n_samples;
+	if (direction_mode == 2)
+	{
+		s.hinv = s.uv + 2 * s.n_samples;
+		s.nsign = s.hinv + 4 * s.n_samples;
+	}
 
 	/* Samples and directions exactly as the offset computes them. */
 	range = curve->parameter_range;
@@ -1239,11 +1332,17 @@ qaws_status qaws_curve_offset_3d_diff(
 			}
 			s.normals[i] = g.normal;
 		}
+		else if (direction_mode == 2)
+		{
+			st = offset_surface_setup(&s, i);
+			if (st != QAWS_STATUS_OK)
+				goto done;
+		}
 		else
 			s.normals[i] = s.dir;
 	}
 
-	map = map_create(QAWS_DIFF_MAP_LINEAR_SPARSE, 3u, 1u);
+	map = map_create(QAWS_DIFF_MAP_LINEAR_SPARSE, direction_mode == 2 ? 4u : 3u, 1u);
 	if (!map)
 	{
 		st = QAWS_STATUS_ALLOCATION_FAILURE;
@@ -1314,6 +1413,58 @@ qaws_status qaws_curve_offset_3d_diff(
 	else
 		map->frozen_inputs |= 1u << 2;
 
+	/* input 3: the surf (mode 2): every differentiable field moves the
+	   closest points and the normals there */
+	if (direction_mode == 2 && st == QAWS_STATUS_OK)
+	{
+		qaws_field_desc sf[MAP_MAX_FIELDS];
+		unsigned int ns = 0;
+		if (qaws_surface_describe_fields(surf, sf, MAP_MAX_FIELDS, &ns) != QAWS_STATUS_OK)
+			ns = 0;
+		for (f = 0; f < ns && f < MAP_MAX_FIELDS && st == QAWS_STATUS_OK; f++)
+		{
+			unsigned int comps = sf[f].value_type == QAWS_VALUE_SCALAR ? 1u : (unsigned int)sf[f].value_type;
+			qaws_scalar* seed;
+			if (!(sf[f].capabilities & QAWS_CAP_TANGENT) || sf[f].field == QAWS_FIELD_U_KNOTS || sf[f].field == QAWS_FIELD_V_KNOTS)
+				continue;
+			seed = (qaws_scalar*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_scalar) * (sf[f].count * comps + 1)));
+			if (!seed)
+			{
+				st = QAWS_STATUS_ALLOCATION_FAILURE;
+				break;
+			}
+			memset(seed, 0, sizeof(qaws_scalar) * sf[f].count * comps);
+			for (e = 0; e < sf[f].count && st == QAWS_STATUS_OK; e++)
+				for (c = 0; c < comps && st == QAWS_STATUS_OK; c++)
+				{
+					qaws_field_view fv = qaws_field_view_make(sf[f].field, seed, sf[f].count, comps);
+					qaws_diff_views views;
+					views.fields = &fv;
+					views.field_count = 1;
+					views.children = NULL;
+					views.child_count = 0;
+					seed[e * comps + c] = QAWS_ONE;
+					for (i = 0; i < s.n_samples && st == QAWS_STATUS_OK; i++)
+					{
+						qaws_surface_jet p, tg;
+						qaws_vec3 dn;
+						st = qaws_surface_eval_tangent(NULL, surf, s.uv[2 * i], s.uv[2 * i + 1], QAWS_ZERO, QAWS_ZERO,
+							QAWS_SJET_ORDER1, &views, &p, &tg);
+						if (st != QAWS_STATUS_OK)
+							break;
+						dn = offset_surface_rate(&s, i, qaws_v3_zero(), &tg);
+						s.dq[i * 3 + 0] = distance * dn.x;
+						s.dq[i * 3 + 1] = distance * dn.y;
+						s.dq[i * 3 + 2] = distance * dn.z;
+					}
+					seed[e * comps + c] = QAWS_ZERO;
+					if (st == QAWS_STATUS_OK)
+						st = offset_emit(map, &s, 3, sf[f].field, e, c);
+				}
+			qaws_internal_dealloc(NULL, seed);
+		}
+	}
+
 	if (st == QAWS_STATUS_OK)
 	{
 		*out_map = map;
@@ -1324,6 +1475,8 @@ done:
 	qaws_internal_dealloc(NULL, s.params);
 	qaws_internal_dealloc(NULL, s.jets);
 	qaws_internal_dealloc(NULL, s.normals);
+	qaws_internal_dealloc(NULL, s.uv);
+	qaws_internal_dealloc(NULL, s.sjets);
 	if (st != QAWS_STATUS_OK && *out_curve)
 	{
 		qaws_curve_destroy(*out_curve);

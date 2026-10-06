@@ -2,6 +2,7 @@
 #define QAWS_DIFF_MAP_H
 
 #include "qaws_diff_types.h"
+#include "qaws_surface_types.h"
 
 /*
  * Differential maps of geometry-building operations.
@@ -149,13 +150,18 @@ qaws_status qaws_curve_fit_bspline_diff(
  * QAWS_FREEZE_SAMPLE_SET) and fits a B-spline through them; the fit is
  * linear in the samples.
  *
- * direction_mode 0 (constant direction) and 1 (Frenet normal) are
- * supported; mode 1 refuses curves with straight pieces, where the Frenet
- * normal is undefined. Surface normal offsets (mode 2) are refused.
+ * direction_mode 0 (constant direction), 1 (Frenet normal) and 2 (surface
+ * normal at the closest point of `surface`) are supported; mode 1 refuses
+ * curves with straight pieces, where the Frenet normal is undefined. In
+ * mode 2 the closest points are differentiated through their optimality
+ * conditions S_u . (S - q) = S_v . (S - q) = 0 (implicit function theorem,
+ * at the points the offset finds) and the normal through
+ * normalize(S_u x S_v).
  *
  * inputs:  0 = curve (every differentiable field)
  *          1 = distance (QAWS_FIELD_PARAMETER, element 0)
  *          2 = direction (QAWS_FIELD_DIRECTION, element 0; mode 0 only)
+ *          3 = surface (every differentiable field but knots; mode 2 only)
  * outputs: 0 = offset curve (QAWS_FIELD_CONTROL_POINTS)
  */
 qaws_status qaws_curve_offset_3d_diff(
@@ -163,6 +169,7 @@ qaws_status qaws_curve_offset_3d_diff(
 	qaws_scalar distance,
 	int direction_mode,
 	qaws_vec3 const* direction,
+	qaws_surface const* surface,
 	unsigned int sample_count,
 	qaws_curve** out_curve,
 	qaws_diff_map** out_map);

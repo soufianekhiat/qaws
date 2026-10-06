@@ -578,7 +578,7 @@ static void check_offset_map(int mode)
 	diff_rand_fill(w, OFF_OUT * 3);
 
 	c = off_curve(cps);
-	TEST_ASSERT_STATUS(qaws_curve_offset_3d_diff(c, dist, mode, &dir, OFF_SAMPLES, &o, &map));
+	TEST_ASSERT_STATUS(qaws_curve_offset_3d_diff(c, dist, mode, &dir, NULL, OFF_SAMPLES, &o, &map));
 
 	fin[0] = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, dcp, OFF_CP, 3);
 	fin[1] = qaws_field_view_make(QAWS_FIELD_PARAMETER, &dd, 1, 1);
@@ -629,11 +629,147 @@ static void check_offset_map(int mode)
 	qaws_curve_destroy(c);
 }
 
+/* Mode 2: offset along the normal of a patch at the closest points. The
+   curve, the distance and the patch's control points all move. */
+static qaws_surface* off_patch(qaws_scalar const* p)
+{
+	qaws_surface_bezier_desc d;
+	qaws_surface* s = NULL;
+	d.u_degree = 3;
+	d.v_degree = 3;
+	d.control_points = (qaws_vec3 const*)p;
+	d.u_point_count = 4;
+	d.v_point_count = 4;
+	qaws_surface_create_bezier(&d, &s);
+	return s;
+}
+
+static void off_surface_points(qaws_scalar const* cps, qaws_scalar dist, qaws_scalar const* sp, qaws_scalar* out)
+{
+	qaws_curve* c = off_curve(cps);
+	qaws_surface* s = off_patch(sp);
+	qaws_curve* o = NULL;
+	unsigned int got = 0;
+	qaws_curve_offset_3d(c, dist, 2, NULL, s, OFF_SAMPLES, &o);
+	qaws_curve_read_field(o, QAWS_FIELD_CONTROL_POINTS, out, OFF_OUT * 3, &got);
+	qaws_curve_destroy(o);
+	qaws_surface_destroy(s);
+	qaws_curve_destroy(c);
+}
+
+static void check_offset_surface_map(void)
+{
+	qaws_scalar cps[OFF_CP * 3], dcp[OFF_CP * 3], pp[OFF_CP * 3], pm[OFF_CP * 3], bar_cp[OFF_CP * 3];
+	qaws_scalar sp[48], dsp[48], spp[48], spm[48], bar_sp[48];
+	qaws_scalar w[OFF_OUT * 3], tq[OFF_OUT * 3], op[OFF_OUT * 3], om[OFF_OUT * 3];
+	qaws_scalar dd, bar_d = 0, ddir[3] = { 0, 0, 0 }, bar_dir[3] = { 0, 0, 0 };
+	qaws_scalar dist = (qaws_scalar)0.3;
+	qaws_curve *c, *o = NULL;
+	qaws_surface* s;
+	qaws_diff_map* map = NULL;
+	qaws_field_view fin[4], fout, fbar[4];
+	qaws_diff_views vin[4], vout, vbar[4];
+	qaws_diff_views const* ins[4];
+	qaws_diff_views* outs[1];
+	qaws_diff_views* bars[4];
+	qaws_diff_views const* outs_c[1];
+	double h = DIFF_FD_STEP, lhs, fd, adj;
+	unsigned int i, j, n;
+
+	diff_seed(830);
+	for (i = 0; i < 4; i++)
+		for (j = 0; j < 4; j++)
+		{
+			sp[3 * (i * 4 + j) + 0] = (qaws_scalar)j;
+			sp[3 * (i * 4 + j) + 1] = (qaws_scalar)i;
+			sp[3 * (i * 4 + j) + 2] = (qaws_scalar)(0.4 * sin(1.1 * i + 0.8 * j));
+		}
+	/* a curve hovering over the inside of the patch */
+	for (n = 0; n < OFF_CP; n++)
+	{
+		cps[3 * n + 0] = (qaws_scalar)(0.5 + 0.33 * n);
+		cps[3 * n + 1] = (qaws_scalar)(1.5 + 0.6 * sin(0.9 * n));
+		cps[3 * n + 2] = (qaws_scalar)(0.6 + 0.1 * cos(1.3 * n));
+	}
+	diff_rand_fill(dcp, OFF_CP * 3);
+	diff_rand_fill(dsp, 48);
+	for (i = 0; i < 48; i++)
+		dsp[i] *= (qaws_scalar)0.3;
+	dd = diff_rand();
+	diff_rand_fill(w, OFF_OUT * 3);
+
+	c = off_curve(cps);
+	s = off_patch(sp);
+	TEST_ASSERT_STATUS(qaws_curve_offset_3d_diff(c, dist, 2, NULL, s, OFF_SAMPLES, &o, &map));
+	if (!map)
+	{
+		qaws_surface_destroy(s);
+		qaws_curve_destroy(c);
+		return;
+	}
+	fin[0] = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, dcp, OFF_CP, 3);
+	fin[1] = qaws_field_view_make(QAWS_FIELD_PARAMETER, &dd, 1, 1);
+	fin[2] = qaws_field_view_make(QAWS_FIELD_DIRECTION, ddir, 1, 3);
+	fin[3] = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, dsp, 16, 3);
+	for (i = 0; i < 4; i++)
+	{
+		vin[i].fields = &fin[i]; vin[i].field_count = 1; vin[i].children = NULL; vin[i].child_count = 0;
+		ins[i] = &vin[i];
+	}
+	ins[2] = NULL;   /* the direction input is frozen in mode 2 */
+	fout = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, tq, OFF_OUT, 3);
+	vout.fields = &fout; vout.field_count = 1; vout.children = NULL; vout.child_count = 0;
+	outs[0] = &vout;
+	TEST_ASSERT_STATUS(qaws_diff_map_tangent(map, NULL, ins, 4u, outs, 1));
+	lhs = diff_dot(tq, w, OFF_OUT * 3);
+
+	for (i = 0; i < OFF_CP * 3; i++)
+	{
+		pp[i] = (qaws_scalar)(cps[i] + h * dcp[i]);
+		pm[i] = (qaws_scalar)(cps[i] - h * dcp[i]);
+	}
+	for (i = 0; i < 48; i++)
+	{
+		spp[i] = (qaws_scalar)(sp[i] + h * dsp[i]);
+		spm[i] = (qaws_scalar)(sp[i] - h * dsp[i]);
+	}
+	off_surface_points(pp, (qaws_scalar)(dist + h * dd), spp, op);
+	off_surface_points(pm, (qaws_scalar)(dist - h * dd), spm, om);
+	fd = 0;
+	for (i = 0; i < OFF_OUT * 3; i++)
+		fd += w[i] * ((double)op[i] - om[i]) / (2 * h);
+
+	memset(bar_cp, 0, sizeof(bar_cp));
+	memset(bar_sp, 0, sizeof(bar_sp));
+	fbar[0] = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, bar_cp, OFF_CP, 3);
+	fbar[1] = qaws_field_view_make(QAWS_FIELD_PARAMETER, &bar_d, 1, 1);
+	fbar[2] = qaws_field_view_make(QAWS_FIELD_DIRECTION, bar_dir, 1, 3);
+	fbar[3] = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, bar_sp, 16, 3);
+	for (i = 0; i < 4; i++)
+	{
+		vbar[i].fields = &fbar[i]; vbar[i].field_count = 1; vbar[i].children = NULL; vbar[i].child_count = 0;
+		bars[i] = &vbar[i];
+	}
+	fout.data = w;
+	outs_c[0] = &vout;
+	TEST_ASSERT_STATUS(qaws_diff_map_adjoint(map, NULL, outs_c, 1, bars, 4u));
+	adj = diff_dot(bar_cp, dcp, OFF_CP * 3) + bar_d * dd + diff_dot(bar_sp, dsp, 48);
+
+	printf("    offset surface normal: tangent %.8f fd %.8f adjoint %.8f\n", lhs, fd, adj);
+	TEST_ASSERT(diff_close(lhs, fd, DIFF_TOL * 50), "surface-normal offset map tangent matches finite differences");
+	TEST_ASSERT(diff_close(lhs, adj, DIFF_TOL), "surface-normal offset map adjoint identity");
+	qaws_diff_map_destroy(map);
+	qaws_curve_destroy(o);
+	qaws_surface_destroy(s);
+	qaws_curve_destroy(c);
+}
+
 static void test_offset_map(void)
 {
 	printf("  3D offset map\n");
 	check_offset_map(0);
 	check_offset_map(1);
+	check_offset_surface_map();
 }
 
 int test_55_diff_maps_main(void)
