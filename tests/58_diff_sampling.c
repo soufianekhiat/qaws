@@ -375,12 +375,7 @@ static void test_finite_differences(int kind, char const* name)
 		qaws_status st;
 		memset(hv, 0, sizeof(hv));
 		st = qaws_curve_cdf_sample_hvp(NULL, c, MEAS, g_sm_targets, SM_SAMPLES, 0, adj, &vd, &vh);
-		if (kind == 1)
-		{
-			sprintf(msg, "%s: HVP refused for a rational curve", name);
-			TEST_ASSERT(st == QAWS_STATUS_UNSUPPORTED_OPERATION, msg);
-		}
-		else
+		/* rational curves (weights) polarize the second order forward pass */
 		{
 			qaws_curve* cp;
 			qaws_curve* cm;
@@ -561,9 +556,33 @@ static void test_knots(int kind, char const* name)
 		sprintf(msg, "%s: knot adjoint identity (%.12g vs %.12g)", name, lhs, rhs);
 		TEST_ASSERT(diff_close(lhs, rhs, QAWS_SCALAR_IS_FLOAT ? 2e-3 : 1e-10), msg);
 	}
-	sprintf(msg, "%s: HVP refuses knots", name);
-	TEST_ASSERT(qaws_curve_cdf_sample_hvp(NULL, c, MEAS, g_sm_targets, SM_SAMPLES, 0, adj, &vd, &vg) ==
-		QAWS_STATUS_UNSUPPORTED_OPERATION, msg);
+	{
+		/* HVP against central differences of the knot gradient */
+		qaws_scalar hv[10], gp[10], gm[10];
+		qaws_field_view fh, fp, fm;
+		qaws_diff_views vh, vgp, vgm;
+		int okh = 1;
+		fh = qaws_field_view_make(QAWS_FIELD_KNOTS, hv, 10, 1);
+		fp = qaws_field_view_make(QAWS_FIELD_KNOTS, gp, 10, 1);
+		fm = qaws_field_view_make(QAWS_FIELD_KNOTS, gm, 10, 1);
+		vh.fields = &fh;
+		vgp.fields = &fp;
+		vgm.fields = &fm;
+		vh.field_count = vgp.field_count = vgm.field_count = 1;
+		vh.children = vgp.children = vgm.children = NULL;
+		vh.child_count = vgp.child_count = vgm.child_count = 0;
+		memset(hv, 0, sizeof(hv));
+		memset(gp, 0, sizeof(gp));
+		memset(gm, 0, sizeof(gm));
+		sprintf(msg, "%s: knot HVP", name);
+		TEST_ASSERT(qaws_curve_cdf_sample_hvp(NULL, c, MEAS, g_sm_targets, SM_SAMPLES, 0, adj, &vd, &vh) == QAWS_STATUS_OK, msg);
+		qaws_curve_cdf_sample_adjoint(NULL, cp, MEAS, g_sm_targets, SM_SAMPLES, 0, adj, &vgp, NULL);
+		qaws_curve_cdf_sample_adjoint(NULL, cm, MEAS, g_sm_targets, SM_SAMPLES, 0, adj, &vgm, NULL);
+		for (i = 0; i < 10; i++)
+			okh &= diff_close(hv[i], (gp[i] - gm[i]) / (2 * h), QAWS_SCALAR_IS_FLOAT ? 5e-2 : 1e-5);
+		sprintf(msg, "%s: knot HVP matches finite differences of the knot gradient", name);
+		TEST_ASSERT(okh, msg);
+	}
 	qaws_curve_destroy(c);
 	qaws_curve_destroy(cp);
 	qaws_curve_destroy(cm);

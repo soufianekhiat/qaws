@@ -79,6 +79,100 @@ static qaws_scalar v3_get(qaws_vec3 const* v, unsigned int c)
 	return c == 0 ? v->x : (c == 1 ? v->y : v->z);
 }
 
+/* ------------------------------------------------------------------ */
+/*  HVP by polarization of a second order forward pass                */
+/* ------------------------------------------------------------------ */
+
+/* q(x) = x^T H x: the second directional derivative of the scalar
+   objective along the parameter direction x. */
+typedef qaws_status (*hvp_quadratic_fn)(void const* user, qaws_diff_views const* x, double* out);
+
+/*
+ * e_j^T H d = (q(d + e_j) - q(d) - q(e_j)) / 2 for every active component j
+ * of out_hv (added): exact, for any parameters the forward pass
+ * differentiates to second order (knots, weights), at about two passes per
+ * parameter. Views with children are refused.
+ */
+static qaws_status hvp_polarize(void const* user, hvp_quadratic_fn q, qaws_diff_views const* direction, qaws_diff_views* out_hv)
+{
+	qaws_field_view* fields;
+	qaws_diff_views dv;
+	qaws_scalar *data, *keep;
+	unsigned int f, total = 0, off, e, c;
+	double q_d = 0;
+	qaws_status st;
+	if (out_hv->child_count || direction->child_count)
+		return QAWS_STATUS_UNSUPPORTED_OPERATION;
+	for (f = 0; f < out_hv->field_count; f++)
+		total += out_hv->fields[f].count * out_hv->fields[f].components;
+	fields = (qaws_field_view*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_field_view) * (out_hv->field_count + 1)));
+	data = (qaws_scalar*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_scalar) * 2 * (total + 1)));
+	if (!fields || !data)
+	{
+		qaws_internal_dealloc(NULL, fields);
+		qaws_internal_dealloc(NULL, data);
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	}
+	keep = data + total + 1;
+	/* the direction laid out like out_hv */
+	off = 0;
+	for (f = 0; f < out_hv->field_count; f++)
+	{
+		qaws_field_view const* src = qaws_diff_views_find(direction, out_hv->fields[f].field);
+		unsigned int comps = out_hv->fields[f].components;
+		fields[f] = qaws_field_view_make(out_hv->fields[f].field, data + off, out_hv->fields[f].count, comps);
+		for (e = 0; e < out_hv->fields[f].count; e++)
+		{
+			qaws_scalar tmp[3] = { 0, 0, 0 };
+			if (src)
+				qaws_internal_view_read(src, e, comps, tmp);
+			for (c = 0; c < comps; c++)
+				data[off + e * comps + c] = tmp[c];
+		}
+		off += out_hv->fields[f].count * comps;
+	}
+	memcpy(keep, data, sizeof(qaws_scalar) * total);
+	dv.fields = fields;
+	dv.field_count = out_hv->field_count;
+	dv.children = NULL;
+	dv.child_count = 0;
+	st = q(user, &dv, &q_d);
+	off = 0;
+	for (f = 0; f < out_hv->field_count && st == QAWS_STATUS_OK; f++)
+	{
+		qaws_field_view* ov = &out_hv->fields[f];
+		unsigned int comps = ov->components;
+		for (e = 0; e < ov->count && st == QAWS_STATUS_OK; e++)
+		{
+			if (!qaws_internal_view_element_active(ov, e))
+				continue;
+			for (c = 0; c < comps && st == QAWS_STATUS_OK; c++)
+			{
+				double q_sum = 0, q_e = 0;
+				qaws_scalar g[3] = { 0, 0, 0 };
+				unsigned int k = off + e * comps + c;
+				if (!qaws_internal_view_component_active(ov, c))
+					continue;
+				/* q(d + e_j) */
+				data[k] = keep[k] + QAWS_ONE;
+				st = q(user, &dv, &q_sum);
+				/* q(e_j) */
+				memset(data, 0, sizeof(qaws_scalar) * total);
+				data[k] = QAWS_ONE;
+				if (st == QAWS_STATUS_OK)
+					st = q(user, &dv, &q_e);
+				memcpy(data, keep, sizeof(qaws_scalar) * total);
+				g[c] = (qaws_scalar)(0.5 * (q_sum - q_d - q_e));
+				qaws_internal_view_add(ov, e, comps, g);
+			}
+		}
+		off += ov->count * comps;
+	}
+	qaws_internal_dealloc(NULL, fields);
+	qaws_internal_dealloc(NULL, data);
+	return st;
+}
+
 /* Shared state of one call. */
 typedef struct cdf_job
 {
@@ -807,6 +901,32 @@ qaws_status qaws_curve_cdf_sample_adjoint(
  * with grad' M the integral of J_y^T H_m ydot, lambda' = (p_bar . dC'(t, t')
  * - lambda m') / m and m' the rate of m along (t', direction).
  */
+/* The quadratic form q(x) = sum adjoint . sample''(x) of curve sampling. */
+typedef struct cdf_quadratic
+{
+	qaws_diff_context const* ctx;
+	qaws_curve const* curve;
+	qaws_sample_measure_desc const* measure;
+	qaws_cdf_target const* targets;
+	unsigned int count, quadrature;
+	qaws_cdf_sample const* adjoint;
+	qaws_cdf_sample* scratch;
+} cdf_quadratic;
+
+static qaws_status cdf_second(void const* user, qaws_diff_views const* dir, double* out)
+{
+	cdf_quadratic const* a = (cdf_quadratic const*)user;
+	unsigned int i;
+	qaws_status st = qaws_curve_cdf_sample_tangent(a->ctx, a->curve, a->measure, a->targets, NULL, NULL, a->count, a->quadrature, dir,
+		NULL, NULL, a->scratch, NULL);
+	*out = 0;
+	if (st != QAWS_STATUS_OK)
+		return st;
+	for (i = 0; i < a->count; i++)
+		*out += (double)a->adjoint[i].t * a->scratch[i].t + v3_dot(a->adjoint[i].position, a->scratch[i].position);
+	return QAWS_STATUS_OK;
+}
+
 qaws_status qaws_curve_cdf_sample_hvp(
 	qaws_diff_context const* ctx,
 	qaws_curve const* curve,
@@ -828,10 +948,28 @@ qaws_status qaws_curve_cdf_sample_hvp(
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	if (!curve)
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	if (!(qaws_curve_get_diff_capabilities(curve) & QAWS_CAP_LINEAR))
-		return QAWS_STATUS_UNSUPPORTED_OPERATION;
 	if (!direction || !out_hv)
 		return QAWS_STATUS_OK;
+	if (!(qaws_curve_get_diff_capabilities(curve) & QAWS_CAP_LINEAR) || qaws_diff_views_find(direction, QAWS_FIELD_KNOTS) ||
+	    qaws_diff_views_find(out_hv, QAWS_FIELD_KNOTS))
+	{
+		/* knots move the quadrature spans and rational families depend on
+		   their weights nonlinearly: polarize the second order forward pass */
+		cdf_quadratic a;
+		a.ctx = ctx;
+		a.curve = curve;
+		a.measure = measure;
+		a.targets = targets;
+		a.count = count;
+		a.quadrature = quadrature;
+		a.adjoint = adjoint;
+		a.scratch = (qaws_cdf_sample*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_cdf_sample) * (count + 1)));
+		if (!a.scratch)
+			return QAWS_STATUS_ALLOCATION_FAILURE;
+		st = hvp_polarize(&a, cdf_second, direction, out_hv);
+		qaws_internal_dealloc(NULL, a.scratch);
+		return st;
+	}
 	st = cdf_job_init(&job, ctx, curve, measure, quadrature, direction, out_hv, 0);
 	if (st != QAWS_STATUS_OK)
 		return st;
@@ -1652,27 +1790,36 @@ qaws_status qaws_surface_cdf_sample_adjoint(
 	return st;
 }
 
-/* Second directional derivative of sum(adjoint . sample) along dir. */
-static qaws_status scdf_second(qaws_diff_context const* ctx, qaws_surface const* surface, qaws_sample_measure_desc const* measure,
-	qaws_scalar const* xi, unsigned int count, unsigned int cells, unsigned int quadrature,
-	qaws_surface_cdf_sample const* adjoint, qaws_diff_views const* dir, qaws_surface_cdf_sample* scratch, double* out)
+/* The quadratic form q(x) = sum adjoint . sample''(x) of the surface warp. */
+typedef struct scdf_quadratic
 {
+	qaws_diff_context const* ctx;
+	qaws_surface const* surface;
+	qaws_sample_measure_desc const* measure;
+	qaws_scalar const* xi;
+	unsigned int count, cells, quadrature;
+	qaws_surface_cdf_sample const* adjoint;
+	qaws_surface_cdf_sample* scratch;
+} scdf_quadratic;
+
+static qaws_status scdf_second(void const* user, qaws_diff_views const* dir, double* out)
+{
+	scdf_quadratic const* a = (scdf_quadratic const*)user;
 	unsigned int i;
-	qaws_status st = qaws_surface_cdf_sample_tangent(ctx, surface, measure, xi, NULL, count, cells, quadrature, dir, NULL, NULL,
-		scratch, NULL);
+	qaws_status st = qaws_surface_cdf_sample_tangent(a->ctx, a->surface, a->measure, a->xi, NULL, a->count, a->cells, a->quadrature, dir,
+		NULL, NULL, a->scratch, NULL);
 	*out = 0;
 	if (st != QAWS_STATUS_OK)
 		return st;
-	for (i = 0; i < count; i++)
-		*out += (double)adjoint[i].u * scratch[i].u + (double)adjoint[i].v * scratch[i].v +
-			v3_dot(adjoint[i].position, scratch[i].position);
+	for (i = 0; i < a->count; i++)
+		*out += (double)a->adjoint[i].u * a->scratch[i].u + (double)a->adjoint[i].v * a->scratch[i].v +
+			v3_dot(a->adjoint[i].position, a->scratch[i].position);
 	return QAWS_STATUS_OK;
 }
 
 /* HVP. Families linear in their fields differentiate the backward pass
    along the direction (forward over reverse, one pass). Others polarize the
-   second order forward pass: e_j^T H d = (q(d + e_j) - q(d) - q(e_j)) / 2,
-   q(x) = x^T H x. */
+   second order forward pass (hvp_polarize). */
 qaws_status qaws_surface_cdf_sample_hvp(
 	qaws_diff_context const* ctx,
 	qaws_surface const* surface,
@@ -1685,12 +1832,7 @@ qaws_status qaws_surface_cdf_sample_hvp(
 	qaws_diff_views const* direction,
 	qaws_diff_views* out_hv)
 {
-	qaws_field_view* fields;
-	qaws_diff_views dv;
-	qaws_surface_cdf_sample* scratch;
-	qaws_scalar *data, *keep;
-	unsigned int f, total = 0, off, e, c;
-	double q_d = 0;
+	scdf_quadratic a;
 	qaws_status st;
 	if ((!xi || !adjoint) && count)
 		return QAWS_STATUS_INVALID_ARGUMENT;
@@ -1715,75 +1857,18 @@ qaws_status qaws_surface_cdf_sample_hvp(
 		scdf_job_free(&job);
 		return st;
 	}
-	for (f = 0; f < out_hv->field_count; f++)
-		total += out_hv->fields[f].count * out_hv->fields[f].components;
-	fields = (qaws_field_view*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_field_view) * (out_hv->field_count + 1)));
-	data = (qaws_scalar*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_scalar) * 2 * (total + 1)));
-	scratch = (qaws_surface_cdf_sample*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_surface_cdf_sample) * (count + 1)));
-	if (!fields || !data || !scratch)
-	{
-		qaws_internal_dealloc(NULL, fields);
-		qaws_internal_dealloc(NULL, data);
-		qaws_internal_dealloc(NULL, scratch);
+	a.ctx = ctx;
+	a.surface = surface;
+	a.measure = measure;
+	a.xi = xi;
+	a.count = count;
+	a.cells = cells;
+	a.quadrature = quadrature;
+	a.adjoint = adjoint;
+	a.scratch = (qaws_surface_cdf_sample*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_surface_cdf_sample) * (count + 1)));
+	if (!a.scratch)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
-	}
-	keep = data + total + 1;
-	/* the direction laid out like out_hv */
-	off = 0;
-	for (f = 0; f < out_hv->field_count; f++)
-	{
-		qaws_field_view const* src = qaws_diff_views_find(direction, out_hv->fields[f].field);
-		unsigned int comps = out_hv->fields[f].components;
-		fields[f] = qaws_field_view_make(out_hv->fields[f].field, data + off, out_hv->fields[f].count, comps);
-		for (e = 0; e < out_hv->fields[f].count; e++)
-		{
-			qaws_scalar tmp[3] = { 0, 0, 0 };
-			if (src)
-				qaws_internal_view_read(src, e, comps, tmp);
-			for (c = 0; c < comps; c++)
-				data[off + e * comps + c] = tmp[c];
-		}
-		off += out_hv->fields[f].count * comps;
-	}
-	memcpy(keep, data, sizeof(qaws_scalar) * total);
-	dv.fields = fields;
-	dv.field_count = out_hv->field_count;
-	dv.children = NULL;
-	dv.child_count = 0;
-	st = scdf_second(ctx, surface, measure, xi, count, cells, quadrature, adjoint, &dv, scratch, &q_d);
-	off = 0;
-	for (f = 0; f < out_hv->field_count && st == QAWS_STATUS_OK; f++)
-	{
-		qaws_field_view* ov = &out_hv->fields[f];
-		unsigned int comps = ov->components;
-		for (e = 0; e < ov->count && st == QAWS_STATUS_OK; e++)
-		{
-			if (!qaws_internal_view_element_active(ov, e))
-				continue;
-			for (c = 0; c < comps && st == QAWS_STATUS_OK; c++)
-			{
-				double q_sum = 0, q_e = 0;
-				qaws_scalar g[3] = { 0, 0, 0 };
-				unsigned int k = off + e * comps + c;
-				if (!qaws_internal_view_component_active(ov, c))
-					continue;
-				/* q(d + e_j) */
-				data[k] = keep[k] + QAWS_ONE;
-				st = scdf_second(ctx, surface, measure, xi, count, cells, quadrature, adjoint, &dv, scratch, &q_sum);
-				/* q(e_j) */
-				memset(data, 0, sizeof(qaws_scalar) * total);
-				data[k] = QAWS_ONE;
-				if (st == QAWS_STATUS_OK)
-					st = scdf_second(ctx, surface, measure, xi, count, cells, quadrature, adjoint, &dv, scratch, &q_e);
-				memcpy(data, keep, sizeof(qaws_scalar) * total);
-				g[c] = (qaws_scalar)(0.5 * (q_sum - q_d - q_e));
-				qaws_internal_view_add(ov, e, comps, g);
-			}
-		}
-		off += ov->count * comps;
-	}
-	qaws_internal_dealloc(NULL, fields);
-	qaws_internal_dealloc(NULL, data);
-	qaws_internal_dealloc(NULL, scratch);
+	st = hvp_polarize(&a, scdf_second, direction, out_hv);
+	qaws_internal_dealloc(NULL, a.scratch);
 	return st;
 }

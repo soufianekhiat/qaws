@@ -1965,7 +1965,7 @@ p'  = dC + C' t'
 p'' = d2C + 2 dC' t' + C'' t'^2 + C' t''
 ```
 
-`m_e` is the rate of the integrand along the parameter direction at fixed `t`, `m_t` its `t`-derivative (the curvature measure reads `C'''` for it). Knots are parameters of the tangent and the adjoint: a knot moves the basis at fixed `t`, and the span boundaries it bounds move the quadrature nodes `t = a (1 - s) + b s` and weights `W = (b - a) c`, so the cumulative measures differentiate as `(W m)' = W m' + W' m`, `(W m)'' = W m'' + 2 W' m'`. The partial span `[a_k, t]` moves with its start knot only (`t` is held for `M'`), which also covers the moving start of the domain. The HVP refuses knot views (`QAWS_STATUS_UNSUPPORTED_OPERATION`). Samples where `m` vanishes are reported as `QAWS_DIFF_ILL_CONDITIONED` with zero derivatives. 2D curves are lifted (z = 0).
+`m_e` is the rate of the integrand along the parameter direction at fixed `t`, `m_t` its `t`-derivative (the curvature measure reads `C'''` for it). Knots are parameters of the tangent and the adjoint: a knot moves the basis at fixed `t`, and the span boundaries it bounds move the quadrature nodes `t = a (1 - s) + b s` and weights `W = (b - a) c`, so the cumulative measures differentiate as `(W m)' = W m' + W' m`, `(W m)'' = W m'' + 2 W' m'`. The partial span `[a_k, t]` moves with its start knot only (`t` is held for `M'`), which also covers the moving start of the domain. The HVP takes knot views by polarizing this second order forward pass. Samples where `m` vanishes are reported as `QAWS_DIFF_ILL_CONDITIONED` with zero derivatives. 2D curves are lifted (z = 0).
 
 ### qaws_sample_measure_desc
 
@@ -2062,9 +2062,9 @@ qaws_status qaws_curve_cdf_sample_hvp(
 	qaws_diff_views* out_hv);
 ```
 
-Accumulates (`+=`) `H * direction`, `H` the Hessian with respect to the parameters of `sum_i (t_bar_i t_i + p_bar_i . p_i)`, by differentiating the adjoint along the direction (forward over reverse); the integrand's Hessian enters by polarization of its dual second derivative.
+Accumulates (`+=`) `H * direction`, `H` the Hessian with respect to the parameters of `sum_i (t_bar_i t_i + p_bar_i . p_i)`. For families linear in their fields (`QAWS_CAP_LINEAR`) it differentiates the adjoint along the direction (forward over reverse); the integrand's Hessian enters by polarization of its dual second derivative. When `direction` or `out_hv` holds knots, or the family is rational, it polarizes the exact second order forward pass instead: `e_j^T H d = (q(d + e_j) - q(d) - q(e_j)) / 2` with `q(x)` the second derivative of the objective along `x`, about two forward passes per parameter of `out_hv`.
 
-**Returns:** `QAWS_STATUS_OK`; `QAWS_STATUS_UNSUPPORTED_OPERATION` if the curve is not `QAWS_CAP_LINEAR` (compose from tangents and adjoints instead) or for knot views.
+**Returns:** `QAWS_STATUS_OK`; `QAWS_STATUS_UNSUPPORTED_OPERATION` for views with children on the polarized path.
 
 ### qaws_traversal_cdf_targets
 

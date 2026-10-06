@@ -42,12 +42,13 @@
  *   tangent  : values, first and (optionally) second directional derivatives
  *   adjoint  : gradient (+=) into parameter views and distance adjoints
  *   hvp      : Hessian-vector product (+=) of sum(t_bar t + p_bar . p);
- *              direct for families linear in their fields (QAWS_CAP_LINEAR),
- *              QAWS_STATUS_UNSUPPORTED_OPERATION otherwise
+ *              forward over reverse for families linear in their fields
+ *              (QAWS_CAP_LINEAR); knot views and rational families
+ *              polarize the second order forward pass (about two passes
+ *              per parameter of out_hv)
  *
- * measure may be NULL (arc length). Knots are parameters of tangent and
- * adjoint: they move the basis, the quadrature spans and the start of the
- * domain; hvp refuses them (QAWS_STATUS_UNSUPPORTED_OPERATION). 2D curves work too (z of the outputs
+ * measure may be NULL (arc length). Knots are parameters: they move the
+ * basis, the quadrature spans and the start of the domain. 2D curves work too (z of the outputs
  * is zero; a density then reads z = 0). Samples where m vanishes are
  * reported as QAWS_DIFF_ILL_CONDITIONED through ctx->report.
  */
