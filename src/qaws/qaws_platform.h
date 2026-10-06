@@ -80,6 +80,18 @@
 #define QAWS_ZERO QAWS_LITERAL(0.0)
 #define QAWS_ONE  QAWS_LITERAL(1.0)
 
+/* int <-> scalar conversions (GLSL has constructor casts only) */
+#if QAWS_BACKEND == QAWS_BACKEND_GLSL
+# define QAWS_ITOF(n) float(n)
+# define QAWS_FTOI(x) int(x)
+#elif QAWS_BACKEND == QAWS_BACKEND_HALIDE
+# define QAWS_ITOF(n) qaws_scalar((double)(n))
+# define QAWS_FTOI(x) Halide::cast<int>(x)
+#else
+# define QAWS_ITOF(n) ((qaws_scalar)(n))
+# define QAWS_FTOI(x) ((int)(x))
+#endif
+
 /* ===================================================================
  * Qualifier macros
  * =================================================================== */

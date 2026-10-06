@@ -244,6 +244,16 @@ Test `60_diff_sampling_core` drives the kernels the same way on the C backend. I
 
 `examples/diff_surface_functionals.hlsl` runs them as compute passes. Test `61_diff_surface_functional_core` reproduces the runtime values, tangents and gradients to round-off.
 
+`core/qaws_bspline_surface_sampling_core.h` warps points of the unit square onto a B-spline surface by its area measure. It is the GPU form of `qaws_surface_cdf_sample_*` with `QAWS_MEASURE_AREA`. The curvature measure needs fourth derivatives, beyond the kernels' `QAWS_CORE_MAX_DERIV`; the density measure needs a callback. The whole control grid is passed, since a v-line crosses several knot spans. The kernels are:
+
+- `qaws_patch_cell_mass`: the u cells, followed by a prefix sum.
+- `qaws_patch_cdf_solve`: the samples, with a fixed iteration count.
+- `qaws_patch_cdf_tangent`: first and second tangents along the control point and xi tangents, by dual Newton steps on the discrete equations.
+- `qaws_patch_cdf_multipliers`: lambda, mu and the xi adjoints.
+- `qaws_patch_line_adjoint_cp`: the per-line term of the control point gather. The lines are the sample's conditional lines, the lines of its partial u cell and those of the full cells, with the area gradient `dw/dS_u = S_v x n`, `dw/dS_v = n x S_u`.
+
+`examples/diff_surface_sampling.hlsl` runs them as compute passes. Test `62_diff_surface_sampling_core` reproduces the runtime samples, tangents and adjoints to round-off.
+
 `examples/diff_applications.c` (target `qaws_diff_applications`) applies the API to real data:
 
 1. Hair strands from a photo: structure-tensor orientation field, evenly spaced streamlines, B-spline strands aligned through unit-tangent adjoints.

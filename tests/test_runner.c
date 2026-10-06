@@ -72,6 +72,7 @@ extern int test_58_diff_sampling_main(void);
 extern int test_59_diff_surface_sampling_main(void);
 extern int test_60_diff_sampling_core_main(void);
 extern int test_61_diff_surface_functional_core_main(void);
+extern int test_62_diff_surface_sampling_core_main(void);
 
 /* Test registry */
 typedef struct {
@@ -142,6 +143,7 @@ static test_suite const g_test_suites[] = {
 	{"59_diff_surface_sampling", test_59_diff_surface_sampling_main},
 	{"60_diff_sampling_core", test_60_diff_sampling_core_main},
 	{"61_diff_surface_functional_core", test_61_diff_surface_functional_core_main},
+	{"62_diff_surface_sampling_core", test_62_diff_surface_sampling_core_main},
 };
 
 int main(void) {
