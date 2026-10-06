@@ -255,12 +255,146 @@ static void test_surface(int kind, qaws_sample_measure_desc const* m, char const
 	qaws_surface_destroy(s);
 }
 
+/* ------------------------------------------------------------------ */
+/*  Mathematica reference (tests/reference/59_surface_sampling.wls)   */
+/* ------------------------------------------------------------------ */
+
+#include "reference/59_surface_sampling.h"
+
+typedef struct ss_ref
+{
+	char const* name;
+	qaws_sample_measure_desc const* measure;
+	double const* total;
+	double const* value[SS_SAMPLES];
+	double const* tangent[SS_SAMPLES];
+	double const* tangent2[SS_SAMPLES];
+	double const* grad[SS_SAMPLES];
+	double const* hvp[SS_SAMPLES];
+} ss_ref;
+
+static ss_ref const g_ss_refs[2] = {
+	{ "area", NULL, ref_area_total, { ref_area_value0, ref_area_value1, ref_area_value2 },
+		{ ref_area_tangent0, ref_area_tangent1, ref_area_tangent2 },
+		{ ref_area_tangent2_0, ref_area_tangent2_1, ref_area_tangent2_2 }, { ref_area_grad0, ref_area_grad1, ref_area_grad2 },
+		{ ref_area_hvp0, ref_area_hvp1, ref_area_hvp2 } },
+	{ "density", &g_ss_density, ref_dens_total, { ref_dens_value0, ref_dens_value1, ref_dens_value2 },
+		{ ref_dens_tangent0, ref_dens_tangent1, ref_dens_tangent2 },
+		{ ref_dens_tangent2_0, ref_dens_tangent2_1, ref_dens_tangent2_2 }, { ref_dens_grad0, ref_dens_grad1, ref_dens_grad2 },
+		{ ref_dens_hvp0, ref_dens_hvp1, ref_dens_hvp2 } }
+};
+
+static double ref_err(double a, double b)
+{
+	double scale = 1.0;
+	if (fabs(a) > scale) scale = fabs(a);
+	if (fabs(b) > scale) scale = fabs(b);
+	return fabs(a - b) / scale;
+}
+
+static double ref_sample_err(qaws_surface_cdf_sample const* s, double const* ref)
+{
+	double e = ref_err(s->u, ref[0]);
+	e = fmax(e, ref_err(s->v, ref[1]));
+	e = fmax(e, ref_err(s->position.x, ref[2]));
+	e = fmax(e, ref_err(s->position.y, ref[3]));
+	return fmax(e, ref_err(s->position.z, ref[4]));
+}
+
+/* Largest errors of { total and samples, tangents, tangent2, gradient, HVP }
+   of the bicubic Bezier patch of the script with `cells` x `cells` cells. */
+static void ref_errors(ss_ref const* r, unsigned int cells, unsigned int quadrature, double* e)
+{
+	static double const xi_d[2 * SS_SAMPLES] = { 0.3, 0.6, 0.75, 0.2, 0.5, 0.9 };
+	qaws_scalar x[48], dir[48], xi[2 * SS_SAMPLES], grad[48], hv[48], total = 0;
+	qaws_field_view fd[2], fg[2], fh[2];
+	qaws_diff_views vd, vg, vh;
+	qaws_surface_cdf_sample val[SS_SAMPLES], t1[SS_SAMPLES], t2[SS_SAMPLES], adj[SS_SAMPLES];
+	qaws_surface* s;
+	unsigned int i, j, k;
+	for (i = 0; i < 4; i++)
+		for (j = 0; j < 4; j++)
+		{
+			x[3 * (i * 4 + j)] = (qaws_scalar)j;
+			x[3 * (i * 4 + j) + 1] = (qaws_scalar)i;
+			x[3 * (i * 4 + j) + 2] = (qaws_scalar)(((double)((i + 2 * j) % 4) - 1.5) / 5.0);
+		}
+	for (k = 0; k < 48; k++)
+		dir[k] = (qaws_scalar)(((double)((7 * k + 3) % 11) - 5.0) / 10.0);
+	for (k = 0; k < 2 * SS_SAMPLES; k++)
+		xi[k] = (qaws_scalar)xi_d[k];
+	/* ybar[k] = (((5 k + 2) mod 9) - 4) / 10 over (u, v, x, y, z) per sample */
+	for (i = 0; i < SS_SAMPLES; i++)
+	{
+		qaws_scalar b[5];
+		for (k = 0; k < 5; k++)
+			b[k] = (qaws_scalar)(((double)((5 * (5 * i + k) + 2) % 9) - 4.0) / 10.0);
+		adj[i].u = b[0];
+		adj[i].v = b[1];
+		adj[i].position = qaws_v3(b[2], b[3], b[4]);
+	}
+	vd = ss_views(0, fd, dir);
+	vg = ss_views(0, fg, grad);
+	vh = ss_views(0, fh, hv);
+	s = ss_surface(0, x);
+	memset(e, 0, sizeof(double) * 5);
+	memset(grad, 0, sizeof(grad));
+	memset(hv, 0, sizeof(hv));
+	TEST_ASSERT_STATUS(qaws_surface_cdf_sample_tangent(NULL, s, r->measure, xi, NULL, SS_SAMPLES, cells, quadrature, &vd, val, t1, t2,
+		&total));
+	TEST_ASSERT_STATUS(qaws_surface_cdf_sample_adjoint(NULL, s, r->measure, xi, SS_SAMPLES, cells, quadrature, adj, &vg, NULL));
+	TEST_ASSERT_STATUS(qaws_surface_cdf_sample_hvp(NULL, s, r->measure, xi, SS_SAMPLES, cells, quadrature, adj, &vd, &vh));
+	e[0] = ref_err(total, r->total[0]);
+	for (i = 0; i < SS_SAMPLES; i++)
+	{
+		e[0] = fmax(e[0], ref_sample_err(&val[i], r->value[i]));
+		e[1] = fmax(e[1], ref_sample_err(&t1[i], r->tangent[i]));
+		e[2] = fmax(e[2], ref_sample_err(&t2[i], r->tangent2[i]));
+	}
+	/* the reference splits the gradient and the HVP per sample */
+	for (k = 0; k < 48; k++)
+	{
+		double gk = 0, hk = 0;
+		for (i = 0; i < SS_SAMPLES; i++)
+		{
+			gk += r->grad[i][k];
+			hk += r->hvp[i][k];
+		}
+		e[3] = fmax(e[3], ref_err(grad[k], gk));
+		e[4] = fmax(e[4], ref_err(hv[k], hk));
+	}
+	qaws_surface_destroy(s);
+}
+
+static void test_reference(ss_ref const* r)
+{
+	static unsigned int const cells[3] = { 4, 8, 16 };
+	double e[3][5], tol = QAWS_SCALAR_IS_FLOAT ? 5e-3 : 1e-11;
+	char msg[160];
+	int c, k;
+	for (c = 0; c < 3; c++)
+		ref_errors(r, cells[c], 8, e[c]);
+	printf("    reference %s, 8 x 8 Gauss points per cell (cells 4 / 8 / 16):\n", r->name);
+	printf("      samples %.1e / %.1e / %.1e, tangents %.1e / %.1e / %.1e, tangent2 %.1e / %.1e / %.1e\n",
+		e[0][0], e[1][0], e[2][0], e[0][1], e[1][1], e[2][1], e[0][2], e[1][2], e[2][2]);
+	printf("      gradient %.1e / %.1e / %.1e, HVP %.1e / %.1e / %.1e\n", e[0][3], e[1][3], e[2][3], e[0][4], e[1][4], e[2][4]);
+	for (k = 0; k < 5; k++)
+	{
+		static char const* const what[5] = { "total and samples", "tangents", "second tangents", "gradient",
+			"Hessian-vector product" };
+		sprintf(msg, "reference (%s, 16 x 16 cells): %s", r->name, what[k]);
+		TEST_ASSERT(e[2][k] <= (k == 2 || k == 4 ? 10 : 1) * tol, msg);
+	}
+}
+
 int test_59_diff_surface_sampling_main(void)
 {
 	g_pass = 0;
 	g_fail = 0;
 	printf("Test 59: Surface inverse-CDF sampling derivatives\n");
 	test_flat();
+	test_reference(&g_ss_refs[0]);
+	test_reference(&g_ss_refs[1]);
 	test_surface(0, NULL, "Bezier patch, area");
 	test_surface(0, &g_ss_density, "Bezier patch, density");
 	test_surface(1, NULL, "NURBS patch, area");
