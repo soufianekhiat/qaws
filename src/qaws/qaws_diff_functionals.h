@@ -16,10 +16,10 @@
  *                             QAWS_STATUS_UNSUPPORTED_OPERATION and the
  *                             caller composes HVPs from tangents/adjoints.
  *
- * Curves integrate span by span with Gauss-Legendre points
- * (quadrature = points per span, 0 = 6). Surfaces integrate a grid of
- * cells with Gauss points (quadrature = cells per direction, 0 = 8;
- * 4 x 4 points per cell).
+ * Curves integrate span by span with a composite Gauss-Legendre rule:
+ * every span is split into 8 pieces of `quadrature` points (0 = 6).
+ * Surfaces integrate a grid of cells with Gauss points (quadrature = cells
+ * per direction, 0 = 8; 4 x 4 points per cell).
  */
 
 typedef enum qaws_curve_functional

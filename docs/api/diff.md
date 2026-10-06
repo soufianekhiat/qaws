@@ -1823,7 +1823,7 @@ Declared in `qaws_diff_functionals.h`. Integral functionals of curves and surfac
 - gradient, accumulated (`+=`) into parameter views;
 - Hessian-vector product (`+=`), direct for families linear in their fields (`QAWS_CAP_LINEAR`); other families return `QAWS_STATUS_UNSUPPORTED_OPERATION` and the caller composes Hessian-vector products from tangents and adjoints.
 
-Curves integrate span by span with Gauss-Legendre points (`quadrature` = points per span, 0 = 6; clamped to 2..8). Surfaces integrate a grid of cells with Gauss points (`quadrature` = cells per direction, 0 = 8; 4 x 4 points per cell).
+Curves integrate span by span with a composite Gauss-Legendre rule: every span is split into 8 pieces of `quadrature` points (0 = 6; clamped to 2..8), so the length (a square root of the speed) is exact to about 1e-12. Surfaces integrate a grid of cells with Gauss points (`quadrature` = cells per direction, 0 = 8; 4 x 4 points per cell).
 
 ### qaws_curve_functional
 

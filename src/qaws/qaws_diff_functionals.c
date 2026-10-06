@@ -193,13 +193,19 @@ static integrand_fn curve_integrand(qaws_curve_functional f)
 #define CURVE_CHANNELS (QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2)
 
 /*
+ * Composite rule: every span is split into CURVE_PIECES equal pieces of n
+ * Gauss points (square roots of polynomials such as the speed are then
+ * integrated to near machine precision).
+ *
  * Knots as parameters: span boundaries are knot values, so moving a knot
  * also moves the quadrature nodes and weights of the spans it bounds.
- * With a = knot[left], b = knot[left + 1], node t = a (1-x)/2 + b (1+x)/2
- * and weight W = (b - a) w / 2, the quadrature differentiates exactly as
- *   dQ/da += -w/2 f + W f_t (1-x)/2,   dQ/db += w/2 f + W f_t (1+x)/2
+ * With a = knot[left], b = knot[left + 1], a node at fraction s of the span,
+ * t = a (1 - s) + b s, and weight W = (b - a) c, the quadrature
+ * differentiates exactly as
+ *   dQ/da += -c f + W f_t (1 - s),   dQ/db += c f + W f_t s
  * on top of the fixed-node knot derivative of f.
  */
+#define CURVE_PIECES 8
 typedef struct curve_job
 {
 	qaws_diff_context const* ctx;
@@ -213,9 +219,9 @@ typedef struct curve_job
 	qaws_field_view* knot_out;
 	qaws_scalar* knots;
 	unsigned int knot_count, cp_count;
-	/* current node */
+	/* current node: fraction s of its span, weight W = (b - a) c */
 	unsigned int left_knot;
-	double x, w;
+	double s, c;
 } curve_job;
 
 typedef qaws_status (*curve_point_fn)(curve_job* job, qaws_scalar t, qaws_scalar weight);
@@ -232,12 +238,12 @@ static qaws_status curve_quadrature(curve_job* job, unsigned int n, curve_point_
 		if (job->knots)
 			job->left_knot = qaws_internal_find_knot_span(job->knots, job->knot_count, curve->degree, job->cp_count,
 				(qaws_scalar)(0.5 * (a + b)));
-		for (q = 0; q < n; q++)
+		for (q = 0; q < n * CURVE_PIECES; q++)
 		{
 			qaws_status st;
-			job->x = x[q];
-			job->w = w[q];
-			st = fn(job, (qaws_scalar)(0.5 * (a + b) + 0.5 * (b - a) * x[q]), (qaws_scalar)(0.5 * (b - a) * w[q]));
+			job->s = ((q / n) + 0.5 * (1 + x[q % n])) / CURVE_PIECES;
+			job->c = 0.5 * w[q % n] / CURVE_PIECES;
+			st = fn(job, (qaws_scalar)(a + (b - a) * job->s), (qaws_scalar)((b - a) * job->c));
 			if (st != QAWS_STATUS_OK)
 				return st;
 		}
@@ -295,8 +301,8 @@ static void curve_node_rates(curve_job const* job, double* t_dot, double* w_dot)
 		return;
 	qaws_internal_view_read(job->knot_in, job->left_knot, 1, &da);
 	qaws_internal_view_read(job->knot_in, job->left_knot + 1, 1, &db);
-	*t_dot = 0.5 * (1 - job->x) * da + 0.5 * (1 + job->x) * db;
-	*w_dot = 0.5 * job->w * ((double)db - da);
+	*t_dot = (1 - job->s) * da + job->s * db;
+	*w_dot = job->c * ((double)db - da);
 }
 
 static void curve_jet_values(qaws_curve_jet_3d const* j, qaws_vec3* y)
@@ -358,8 +364,8 @@ static qaws_status curve_gradient_point(curve_job* job, qaws_scalar t, qaws_scal
 		return st;
 	{
 		/* moving span boundaries: t_adj = W f_t */
-		qaws_scalar ga = (qaws_scalar)(-0.5 * job->w * fv + 0.5 * (1 - job->x) * t_adj);
-		qaws_scalar gb = (qaws_scalar)(0.5 * job->w * fv + 0.5 * (1 + job->x) * t_adj);
+		qaws_scalar ga = (qaws_scalar)(-job->c * fv + (1 - job->s) * t_adj);
+		qaws_scalar gb = (qaws_scalar)(job->c * fv + job->s * t_adj);
 		qaws_internal_view_add(job->knot_out, job->left_knot, 1, &ga);
 		qaws_internal_view_add(job->knot_out, job->left_knot + 1, 1, &gb);
 	}

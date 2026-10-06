@@ -17,6 +17,7 @@
 
 #include "test_diff.h"
 #include "qaws_diff_sampling.h"
+#include "qaws_diff_functionals.h"
 
 #define SM_SAMPLES 3
 #define SM_PARAMS 24     /* 6 control points x 3 + 6 weights */
@@ -240,6 +241,13 @@ static void test_reference(sm_ref const* r)
 	REF_ASSERT(qaws_curve_cdf_sample_tangent(NULL, c, MEAS, g_sm_targets, NULL, SM_SAMPLES, 0, &vd, val, tan1, tan2, &total)
 		== QAWS_STATUS_OK, "forward");
 	REF_ASSERT(diff_close(total, r->total[0], tol), "total length");
+	if (!MEAS)
+	{
+		/* the length functional integrates with the same accuracy */
+		qaws_scalar len = 0;
+		qaws_curve_functional_eval(NULL, c, QAWS_FUNCTIONAL_LENGTH, 8, NULL, &len, NULL, NULL);
+		REF_ASSERT(diff_close(len, r->total[0], tol), "length functional");
+	}
 	for (i = 0; i < SM_SAMPLES; i++)
 	{
 		ok_v &= diff_close(val[i].t, r->t[i], tol) && diff_close(val[i].position.x, r->p[3 * i], tol) &&
