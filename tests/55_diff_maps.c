@@ -7,6 +7,10 @@
  *     to rebuilt inputs (qaws_curve_clone_with_fields)
  *   - adjoint identity <ybar, J xdot> = <J^T ybar, xdot>
  * plus the Bezier split parameter and the refusal for other families.
+ * Mathematica ground truth (tests/reference/55_maps.wls): the Bezier split
+ * map (control points and parameter) from the de Casteljau polynomials,
+ * and the least-squares fit map (2D chord length, 3D given parameters)
+ * from first order series through every stage of the fit.
  */
 
 #include "test_diff.h"
@@ -772,6 +776,214 @@ static void test_offset_map(void)
 	check_offset_surface_map();
 }
 
+/* ------------------------------------------------------------------ */
+/*  Mathematica reference (tests/reference/55_maps.wls)               */
+/* ------------------------------------------------------------------ */
+
+#include "reference/55_maps.h"
+
+/* direction[k] = (((7 k + 3) mod 11) - 5) / 10 */
+static qaws_scalar ref_dir(unsigned int k)
+{
+	return (qaws_scalar)(((double)((7 * k + 3) % 11) - 5.0) / 10.0);
+}
+
+/* output weights: (((5 k + 2) mod 9) - 4) / 10 and (((2 k + 1) mod 5) - 2) / 10 */
+static qaws_scalar ref_wq(unsigned int k)
+{
+	return (qaws_scalar)(((double)((5 * k + 2) % 9) - 4.0) / 10.0);
+}
+
+static qaws_scalar ref_wk(unsigned int k)
+{
+	return (qaws_scalar)(((double)((2 * k + 1) % 5) - 2.0) / 10.0);
+}
+
+static double ref_err(double a, double b)
+{
+	double scale = 1.0;
+	if (fabs(a) > scale) scale = fabs(a);
+	if (fabs(b) > scale) scale = fabs(b);
+	return fabs(a - b) / scale;
+}
+
+static double ref_max_err(qaws_scalar const* x, double const* ref, unsigned int n)
+{
+	double e = 0;
+	unsigned int i;
+	for (i = 0; i < n; i++)
+		e = fmax(e, ref_err(x[i], ref[i]));
+	return e;
+}
+
+static qaws_diff_views ref_views(qaws_field_view* fv, unsigned int count)
+{
+	qaws_diff_views v;
+	v.fields = fv;
+	v.field_count = count;
+	v.children = NULL;
+	v.child_count = 0;
+	return v;
+}
+
+static void ref_report(char const* name, double ev, double et, double ea)
+{
+	double tol = QAWS_SCALAR_IS_FLOAT ? 5e-3 : 1e-11;
+	char msg[160];
+	printf("    reference %-24s value %.1e, tangent %.1e, adjoint %.1e\n", name, ev, et, ea);
+	sprintf(msg, "reference (%s): output", name);
+	TEST_ASSERT(ev <= tol, msg);
+	sprintf(msg, "reference (%s): map tangent", name);
+	TEST_ASSERT(et <= tol, msg);
+	sprintf(msg, "reference (%s): map adjoint", name);
+	TEST_ASSERT(ea <= tol, msg);
+}
+
+static void ref_split(void)
+{
+	static double const ps[18] = { 0.2, -0.3, 0.5, 1, 0.5, -0.2, 1.5, -0.5, 0.3, 2.5, 0.6, 0, 3, -0.2, -0.4, 4, 0.1, 0.2 };
+	qaws_scalar cps[18], dir[18], pdot = (qaws_scalar)0.8, val[36], tan[36], wl[18], wr[18], bar[19];
+	qaws_field_view fin[2], fout[2], fadj[2];
+	qaws_diff_views vin[2], vout[2], vadj[2];
+	qaws_diff_views const* ins[2];
+	qaws_diff_views* outs[2];
+	qaws_diff_views const* outs_c[2];
+	qaws_diff_views* ins_m[2];
+	qaws_bezier_desc d;
+	qaws_curve *c = NULL, *l = NULL, *r = NULL;
+	qaws_diff_map* map = NULL;
+	unsigned int k, got;
+	for (k = 0; k < 18; k++)
+	{
+		cps[k] = (qaws_scalar)ps[k];
+		dir[k] = ref_dir(k);
+		wl[k] = ref_wq(k);
+		wr[k] = ref_wk(k);
+	}
+	d.dimension = QAWS_DIMENSION_3D;
+	d.degree = 5;
+	d.control_points = cps;
+	d.control_point_count = 6;
+	qaws_curve_create_bezier(&d, &c);
+	TEST_ASSERT_STATUS(qaws_curve_split_diff(c, (qaws_scalar)0.37, &l, &r, &map));
+	qaws_curve_read_field(l, QAWS_FIELD_CONTROL_POINTS, val, 18, &got);
+	qaws_curve_read_field(r, QAWS_FIELD_CONTROL_POINTS, val + 18, 18, &got);
+
+	fin[0] = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, dir, 6, 3);
+	fin[1] = qaws_field_view_make(QAWS_FIELD_PARAMETER, &pdot, 1, 1);
+	vin[0] = ref_views(&fin[0], 1);
+	vin[1] = ref_views(&fin[1], 1);
+	ins[0] = &vin[0];
+	ins[1] = &vin[1];
+	fout[0] = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, tan, 6, 3);
+	fout[1] = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, tan + 18, 6, 3);
+	vout[0] = ref_views(&fout[0], 1);
+	vout[1] = ref_views(&fout[1], 1);
+	outs[0] = &vout[0];
+	outs[1] = &vout[1];
+	TEST_ASSERT_STATUS(qaws_diff_map_tangent(map, NULL, ins, 2, outs, 2));
+
+	fout[0] = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, wl, 6, 3);
+	fout[1] = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, wr, 6, 3);
+	outs_c[0] = &vout[0];
+	outs_c[1] = &vout[1];
+	memset(bar, 0, sizeof(bar));
+	fadj[0] = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, bar, 6, 3);
+	fadj[1] = qaws_field_view_make(QAWS_FIELD_PARAMETER, bar + 18, 1, 1);
+	vadj[0] = ref_views(&fadj[0], 1);
+	vadj[1] = ref_views(&fadj[1], 1);
+	ins_m[0] = &vadj[0];
+	ins_m[1] = &vadj[1];
+	TEST_ASSERT_STATUS(qaws_diff_map_adjoint(map, NULL, outs_c, 2, ins_m, 2));
+	ref_report("Bezier split", ref_max_err(val, ref_split_value, 36), ref_max_err(tan, ref_split_tangent, 36),
+		ref_max_err(bar, ref_split_adjoint, 19));
+	qaws_diff_map_destroy(map);
+	qaws_curve_destroy(l);
+	qaws_curve_destroy(r);
+	qaws_curve_destroy(c);
+}
+
+/* Least-squares fit of 14 points with 7 control points: 2D chord-length
+   parameters, or 3D given parameters (the script's rationals). */
+static void ref_fit(unsigned int dim, int with_params)
+{
+	enum { M = 14, N = 7, KC = 11 };
+	qaws_scalar data[M * 3], params[M], ddata[M * 3], dparams[M], val[N * 3 + KC], tan[N * 3 + KC], wts[N * 3 + KC];
+	qaws_scalar bdata[M * 3], bparams[M];
+	qaws_field_view fin[2], fout[2];
+	qaws_diff_views vin[2], vout;
+	qaws_diff_views const* ins[2];
+	qaws_diff_views* outs[1];
+	qaws_diff_views const* outs_c[1];
+	qaws_diff_views* ins_m[2];
+	qaws_bspline_fit_desc desc;
+	qaws_curve* c = NULL;
+	qaws_diff_map* map = NULL;
+	unsigned int i, k, got, nq = N * dim, nin = with_params ? 2u : 1u;
+	double ea;
+	for (i = 0; i < M; i++)
+	{
+		double xyz[3];
+		xyz[0] = (60.0 * i + 13.0 * ((double)((3 * i) % 5) - 2.0)) / 260.0;
+		xyz[1] = ((double)((5 * i) % 7) - 3.0) / 5.0;
+		xyz[2] = ((double)((2 * i) % 5) - 2.0) / 10.0;
+		for (k = 0; k < dim; k++)
+			data[dim * i + k] = (qaws_scalar)xyz[k];
+		params[i] = (qaws_scalar)(i == 0 || i == M - 1 ? i / 13.0 : (200.0 * i + 13.0 * ((double)((4 * i) % 7) - 3.0)) / 2600.0);
+		dparams[i] = (qaws_scalar)(i == 0 || i == M - 1 ? 0.0 : ((double)((3 * i + 1) % 7) - 3.0) / 10.0);
+	}
+	for (k = 0; k < M * dim; k++)
+		ddata[k] = ref_dir(k);
+	for (k = 0; k < nq; k++)
+		wts[k] = ref_wq(k);
+	for (k = 0; k < KC; k++)
+		wts[nq + k] = ref_wk(k);
+	memset(&desc, 0, sizeof(desc));
+	desc.dimension = dim == 2 ? QAWS_DIMENSION_2D : QAWS_DIMENSION_3D;
+	desc.data_points = data;
+	desc.data_point_count = M;
+	desc.degree = 3;
+	desc.control_point_count = N;
+	desc.parameters = with_params ? params : NULL;
+	TEST_ASSERT_STATUS(qaws_curve_fit_bspline_diff(&desc, &c, &map));
+	qaws_curve_read_field(c, QAWS_FIELD_CONTROL_POINTS, val, nq, &got);
+	qaws_curve_read_field(c, QAWS_FIELD_KNOTS, val + nq, KC, &got);
+
+	fin[0] = qaws_field_view_make(QAWS_FIELD_POINTS, ddata, M, dim);
+	fin[1] = qaws_field_view_make(QAWS_FIELD_PARAMETER, dparams, M, 1);
+	vin[0] = ref_views(&fin[0], 1);
+	vin[1] = ref_views(&fin[1], 1);
+	ins[0] = &vin[0];
+	ins[1] = &vin[1];
+	fout[0] = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, tan, N, dim);
+	fout[1] = qaws_field_view_make(QAWS_FIELD_KNOTS, tan + nq, KC, 1);
+	vout = ref_views(fout, 2);
+	outs[0] = &vout;
+	TEST_ASSERT_STATUS(qaws_diff_map_tangent(map, NULL, ins, nin, outs, 1));
+
+	fout[0] = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, wts, N, dim);
+	fout[1] = qaws_field_view_make(QAWS_FIELD_KNOTS, wts + nq, KC, 1);
+	outs_c[0] = &vout;
+	memset(bdata, 0, sizeof(bdata));
+	memset(bparams, 0, sizeof(bparams));
+	fin[0] = qaws_field_view_make(QAWS_FIELD_POINTS, bdata, M, dim);
+	fin[1] = qaws_field_view_make(QAWS_FIELD_PARAMETER, bparams, M, 1);
+	ins_m[0] = &vin[0];
+	ins_m[1] = &vin[1];
+	TEST_ASSERT_STATUS(qaws_diff_map_adjoint(map, NULL, outs_c, 1, ins_m, nin));
+	if (with_params)
+	{
+		ea = fmax(ref_max_err(bdata, ref_fit3_adjoint_points, M * dim), ref_max_err(bparams, ref_fit3_adjoint_parameters, M));
+		ref_report("fit, 3D given parameters", ref_max_err(val, ref_fit3_value, nq + KC), ref_max_err(tan, ref_fit3_tangent, nq + KC),
+			ea);
+	}
+	else
+		ref_report("fit, 2D chord length", ref_max_err(val, ref_fit2_value, nq + KC), ref_max_err(tan, ref_fit2_tangent, nq + KC),
+			ref_max_err(bdata, ref_fit2_adjoint_points, M * dim));
+	qaws_diff_map_destroy(map);
+	qaws_curve_destroy(c);
+}
+
 int test_55_diff_maps_main(void)
 {
 	qaws_curve* c[2];
@@ -783,6 +995,10 @@ int test_55_diff_maps_main(void)
 	test_clone();
 	test_fit_map();
 	test_offset_map();
+	printf("  Mathematica reference\n");
+	ref_split();
+	ref_fit(2, 0);
+	ref_fit(3, 1);
 
 	c[0] = make_bezier(5);
 	check_op("split bezier (with parameter)", op_split, (qaws_curve const* const*)c, 1, 2, (qaws_scalar)0.37, (qaws_scalar)0.8);
