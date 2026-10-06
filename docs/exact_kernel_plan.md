@@ -142,3 +142,21 @@ Boolean pipeline keeping source span pieces instead of refitting.
   exact), kept in sync slice by slice.
 - Each slice ends with: tests green in f32 and f64, a showcase figure, a
   commit.
+
+## Status (2026-10-06)
+
+| slice | state | commits |
+|---|---|---|
+| A integers | done: add/sub/mul/shift/div/gcd, nearest double, 2048 bits | cda00e7, 95bd5c9 |
+| B predicates on doubles | done: orient2d, orient3d, ratio compare | 5c3402e |
+| C exact Bezier | done: rational Bezier, degrees 1..16, C..C''' | a78d309 (fix 9d451c8) |
+| D consumer | done: certified winding numbers | c3b8199 |
+| F B-spline / NURBS | done: exact blossom extraction; budget measured | 95bd5c9, c3226b1 |
+| E other families | next | |
+| G surfaces | planned | |
+| H intersections | planned | |
+
+Extraction width turned out linear in the degree (about 85 bits per
+degree at full precision, gcd/lcm reduction), not p^2 T: every degree up to
+16 extracts; the derivative order is what the 2048-bit budget limits (see
+docs/api/exact.md).
