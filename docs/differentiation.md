@@ -168,9 +168,11 @@ Available: split, join, Hermite to Bezier, Bezier to B-spline, B-spline to NURBS
 
 Each has eval (value, tangent, tangent2), gradient (accumulated into views) and HVP.
 
-## Constant-speed sampling
+## Inverse-CDF sampling
 
-`qaws_diff_sampling.h` differentiates arc-length sampling: the sample at `sigma = distance + fraction * L_total` has a parameter `t` defined by `L(t) = sigma`, differentiated implicitly to first and second order (`tangent`, `tangent2`), pulled back as an adjoint (one quadrature pass for a whole batch, plus distance adjoints) and as a Hessian-vector product for linear families. It is the inverse CDF of the arc-length measure, the building block of constant-speed and density-driven sampling.
+`qaws_diff_sampling.h` samples a curve by inverting a measure `M(t) = int rho |C'|`: arc length (constant speed), curvature-weighted (`rho = sqrt(floor^2 + kappa^2)`) or a user density field in space. The sample at `sigma = distance + fraction * M_total` has a parameter `t` defined by `M(t) = sigma`, differentiated implicitly to first and second order (`tangent`, `tangent2`), pulled back as an adjoint (one quadrature pass for a whole batch, plus distance adjoints) and as a Hessian-vector product for linear families.
+
+Surfaces warp points of the unit square by the marginal and conditional inverse CDFs of `rho(S) |S_u x S_v|` (area or a density field): stratified or blue-noise points stay stratified on the surface. The forward pass solves the discrete equations in dual numbers (first and second order), the adjoint pulls back through the conditional then the marginal equation, and the HVP polarizes the second order forward pass.
 
 ## Context and reports
 
@@ -178,13 +180,13 @@ Each has eval (value, tangent, tangent2), gradient (accumulated into views) and 
 
 ## Verification
 
-The test suites `49_diff_model` to `58_diff_sampling` check every rule in single and double precision:
+The test suites `49_diff_model` to `59_diff_surface_sampling` check every rule in single and double precision:
 
 - tangents against central differences of rebuilt objects (finite differences appear only in tests);
 - adjoints through the identity `<ybar, J xdot> = <J^T ybar, xdot>`, for all three accumulation strategies;
 - second tangents against differences of tangents;
 - implicit solves against re-solved perturbed problems.
-- analytic ground truth from Mathematica where a closed derivation exists (`tests/reference/*.wls`, 30 digits): the arc-length samples, their first and second tangents, gradient and HVP match to 1e-11.
+- analytic ground truth from Mathematica where a closed derivation exists (`tests/reference/*.wls`, 30 digits): the inverse-CDF samples (arc length, curvature, density), their first and second tangents, gradient and HVP match to 1e-11.
 
 ## Examples
 
@@ -204,6 +206,8 @@ The test suites `49_diff_model` to `58_diff_sampling` check every rule in single
 12. Arch design from intersection and extremum adjoints
 13. Knot placement: fitting a crease by moving surface knots
 14. Constant-speed sampling: first and second order sample tangents, and a fit of the samples by Newton-CG with exact Hessian-vector products
+15. Inverse-CDF sampling under arc length, curvature and a density field, with the sample tangents
+16. Surfaces: stratified points warped onto a patch by the area and density inverse CDFs
 
 ## GPU kernels
 

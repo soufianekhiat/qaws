@@ -1,6 +1,6 @@
 # API Reference: qaws_diff*.h
 
-Differentiation of curves, surfaces, geometric quantities, implicit operations, geometry-building operations, integral functionals and constant-speed sampling.
+Differentiation of curves, surfaces, geometric quantities, implicit operations, geometry-building operations, integral functionals and inverse-CDF sampling.
 
 Headers: `qaws_diff_types.h`, `qaws_diff.h`, `qaws_diff_geometry.h`, `qaws_diff_ops.h`, `qaws_diff_map.h`, `qaws_diff_functionals.h`, `qaws_diff_sampling.h`.
 
@@ -13,7 +13,7 @@ Headers: `qaws_diff_types.h`, `qaws_diff.h`, `qaws_diff_geometry.h`, `qaws_diff_
 - [Implicit operations](#implicit-operations)
 - [Differential maps](#differential-maps)
 - [Integral functionals](#integral-functionals)
-- [Constant-speed sampling](#constant-speed-sampling)
+- [Inverse-CDF sampling](#inverse-cdf-sampling)
 
 ---
 
@@ -1945,86 +1945,159 @@ Accumulates (`+=`) the Hessian-vector product into `out_hv`.
 
 ---
 
-## Constant-speed sampling
+## Inverse-CDF sampling
 
-`qaws_diff_sampling.h`: samples at prescribed arc lengths with exact first and second order derivatives, forward and backward. A target asks for the point at arc length `sigma = distance + fraction * L_total` from the start: `fraction` 0 is an absolute distance, `distance` 0 a normalized one (`i / (n - 1)` gives `n` constant-speed samples), `distance = -d, fraction = 1` a distance from the end. The parameter `t` solves `L(t) = sigma`; the length integral uses a composite Gauss-Legendre rule (every span and the last partial span split into 4 pieces of `quadrature` points, 0 = 8), and every derivative differentiates that same relation:
+`qaws_diff_sampling.h`: samples at prescribed values of a measure along the curve, with exact first and second order derivatives, forward and backward. The measure `M(t) = int m dt`, `m = rho |C'|`, acts as a CDF:
+
+| kind | `rho` | use |
+|---|---|---|
+| `QAWS_MEASURE_ARC_LENGTH` | 1 | constant-speed sampling |
+| `QAWS_MEASURE_CURVATURE` | `sqrt(floor^2 + kappa^2)` | samples gather where the curve bends; `floor > 0` sets the share of plain arc length and keeps `m` smooth |
+| `QAWS_MEASURE_DENSITY` | `density(C(t))` | a positive field in space with gradient and Hessian (importance maps, distance fields) |
+
+A target asks for the point at `sigma = distance + fraction * M_total`: `fraction` 0 is an absolute measure, `distance` 0 a normalized one (`i / (n - 1)` gives `n` equidistributed samples), `distance = -d, fraction = 1` a measure from the end. The parameter `t` solves `M(t) = sigma`; `M` uses a composite Gauss-Legendre rule (every span and the last partial span split into 8 pieces of `quadrature` points, 0 = 8), and every derivative differentiates that same relation:
 
 ```
-t'  = (sigma' - L'(t)) / |C'(t)|
-t'' = (sigma'' - L''(t) - 2 g(t) t' - (C'.C''/|C'|) t'^2) / |C'(t)|,   g = C'.dC'/|C'|
+t'  = (sigma' - M'(t)) / m(t)
+t'' = (sigma'' - M''(t) - 2 m_e(t) t' - m_t(t) t'^2) / m(t)
 p'  = dC + C' t'
 p'' = d2C + 2 dC' t' + C'' t'^2 + C' t''
 ```
 
-Knots move the quadrature spans and are refused as parameters (`QAWS_STATUS_UNSUPPORTED_OPERATION`). Samples where `|C'|` vanishes are reported as `QAWS_DIFF_ILL_CONDITIONED` with zero derivatives. 2D curves are lifted (z = 0).
+`m_e` is the rate of the integrand along the parameter direction at fixed `t`, `m_t` its `t`-derivative (the curvature measure reads `C'''` for it). Knots move the quadrature spans and are refused as parameters (`QAWS_STATUS_UNSUPPORTED_OPERATION`). Samples where `m` vanishes are reported as `QAWS_DIFF_ILL_CONDITIONED` with zero derivatives. 2D curves are lifted (z = 0).
 
-### qaws_arc_length_target / qaws_arc_length_sample
+### qaws_sample_measure_desc
 
 ```c
-typedef struct qaws_arc_length_target
+typedef enum qaws_sample_measure
 {
-	qaws_scalar distance;    /* arc length from the start */
-	qaws_scalar fraction;    /* plus this fraction of the total length */
-} qaws_arc_length_target;
+	QAWS_MEASURE_ARC_LENGTH = 0,
+	QAWS_MEASURE_CURVATURE,
+	QAWS_MEASURE_DENSITY
+} qaws_sample_measure;
 
-typedef struct qaws_arc_length_sample
+typedef qaws_scalar (*qaws_density_fn)(qaws_vec3 position, void* user_data, qaws_vec3* out_gradient,
+	qaws_scalar* out_hessian);   /* hessian: xx, xy, xz, yy, yz, zz */
+
+typedef struct qaws_sample_measure_desc
+{
+	qaws_sample_measure kind;
+	qaws_scalar curvature_floor;     /* QAWS_MEASURE_CURVATURE, > 0 */
+	qaws_density_fn density;         /* QAWS_MEASURE_DENSITY */
+	void* density_user_data;
+} qaws_sample_measure_desc;
+```
+
+A NULL measure is arc length. An invalid measure (non-positive floor, missing density) returns `QAWS_STATUS_INVALID_ARGUMENT`.
+
+### qaws_cdf_target / qaws_cdf_sample
+
+```c
+typedef struct qaws_cdf_target
+{
+	qaws_scalar distance;    /* measure from the start */
+	qaws_scalar fraction;    /* plus this fraction of the total measure */
+} qaws_cdf_target;
+
+typedef struct qaws_cdf_sample
 {
 	qaws_scalar t;           /* curve parameter */
 	qaws_vec3 position;
-} qaws_arc_length_sample;
+} qaws_cdf_sample;
 ```
 
-### qaws_curve_arc_length_sample_tangent
+### qaws_curve_cdf_sample_tangent
 
 ```c
-qaws_status qaws_curve_arc_length_sample_tangent(
+qaws_status qaws_curve_cdf_sample_tangent(
 	qaws_diff_context const* ctx,
 	qaws_curve const* curve,
-	qaws_arc_length_target const* targets,
+	qaws_sample_measure_desc const* measure,
+	qaws_cdf_target const* targets,
 	qaws_scalar const* distance_tangent,
 	unsigned int count,
 	unsigned int quadrature,
 	qaws_diff_views const* param_tangent,
-	qaws_arc_length_sample* out_value,
-	qaws_arc_length_sample* out_tangent,
-	qaws_arc_length_sample* out_tangent2,
-	qaws_scalar* out_total_length);
+	qaws_cdf_sample* out_value,
+	qaws_cdf_sample* out_tangent,
+	qaws_cdf_sample* out_tangent2,
+	qaws_scalar* out_total);
 ```
 
-Solves every target and writes the samples (`out_value`), their first (`out_tangent`) and second (`out_tangent2`) directional derivatives along `param_tangent` and the per-target distance rates `distance_tangent`. Any of `distance_tangent`, `param_tangent` and the outputs may be NULL.
+Solves every target and writes the samples (`out_value`), their first (`out_tangent`) and second (`out_tangent2`) directional derivatives along `param_tangent` and the per-target distance rates `distance_tangent`, and the total measure. Any of `distance_tangent`, `param_tangent` and the outputs may be NULL.
 
-**Returns:** `QAWS_STATUS_OK`; `QAWS_STATUS_INVALID_ARGUMENT` on a NULL curve or NULL targets; `QAWS_STATUS_UNSUPPORTED_OPERATION` for a knot view or when second order is asked of a family without `QAWS_CAP_TANGENT2`.
+**Returns:** `QAWS_STATUS_OK`; `QAWS_STATUS_INVALID_ARGUMENT` on a NULL curve, NULL targets or an invalid measure; `QAWS_STATUS_UNSUPPORTED_OPERATION` for a knot view or when second order is asked of a family without `QAWS_CAP_TANGENT2`.
 
-### qaws_curve_arc_length_sample_adjoint
+### qaws_curve_cdf_sample_adjoint
 
 ```c
-qaws_status qaws_curve_arc_length_sample_adjoint(
+qaws_status qaws_curve_cdf_sample_adjoint(
 	qaws_diff_context const* ctx,
 	qaws_curve const* curve,
-	qaws_arc_length_target const* targets,
+	qaws_sample_measure_desc const* measure,
+	qaws_cdf_target const* targets,
 	unsigned int count,
 	unsigned int quadrature,
-	qaws_arc_length_sample const* adjoint,
+	qaws_cdf_sample const* adjoint,
 	qaws_diff_views* param_adjoint,
 	qaws_scalar* distance_adjoint);
 ```
 
-Accumulates (`+=`) the pullback of the sample adjoints `(t_bar, p_bar)`: `J^T p_bar + lambda (fraction grad L_total - grad L(t))` into `param_adjoint`, `lambda = (t_bar + p_bar . C') / |C'|` into `distance_adjoint`. The length gradients of the whole batch are one quadrature pass with suffix-summed weights: the cost is O(spans + samples) quadrature nodes.
+Accumulates (`+=`) the pullback of the sample adjoints `(t_bar, p_bar)`: `J^T p_bar + lambda (fraction grad M_total - grad M(t))` into `param_adjoint`, `lambda = (t_bar + p_bar . C') / m` into `distance_adjoint`. The measure gradients of the whole batch are one quadrature pass with suffix-summed weights, pulling `dm/d(C, C', C'')` back through the curve jets.
 
-### qaws_curve_arc_length_sample_hvp
+### qaws_curve_cdf_sample_hvp
 
 ```c
-qaws_status qaws_curve_arc_length_sample_hvp(
+qaws_status qaws_curve_cdf_sample_hvp(
 	qaws_diff_context const* ctx,
 	qaws_curve const* curve,
-	qaws_arc_length_target const* targets,
+	qaws_sample_measure_desc const* measure,
+	qaws_cdf_target const* targets,
 	unsigned int count,
 	unsigned int quadrature,
-	qaws_arc_length_sample const* adjoint,
+	qaws_cdf_sample const* adjoint,
 	qaws_diff_views const* direction,
 	qaws_diff_views* out_hv);
 ```
 
-Accumulates (`+=`) `H * direction`, `H` the Hessian with respect to the parameters of `sum_i (t_bar_i t_i + p_bar_i . p_i)`, by differentiating the adjoint along the direction (forward over reverse).
+Accumulates (`+=`) `H * direction`, `H` the Hessian with respect to the parameters of `sum_i (t_bar_i t_i + p_bar_i . p_i)`, by differentiating the adjoint along the direction (forward over reverse); the integrand's Hessian enters by polarization of its dual second derivative.
 
 **Returns:** `QAWS_STATUS_OK`; `QAWS_STATUS_UNSUPPORTED_OPERATION` if the curve is not `QAWS_CAP_LINEAR` (compose from tangents and adjoints instead) or for knot views.
+
+### Surfaces: qaws_surface_cdf_sample_*
+
+```c
+#define QAWS_MEASURE_AREA QAWS_MEASURE_ARC_LENGTH
+
+typedef struct qaws_surface_cdf_sample
+{
+	qaws_scalar u;
+	qaws_scalar v;
+	qaws_vec3 position;
+} qaws_surface_cdf_sample;
+
+qaws_status qaws_surface_cdf_sample_tangent(
+	qaws_diff_context const* ctx, qaws_surface const* surface, qaws_sample_measure_desc const* measure,
+	qaws_scalar const* xi, qaws_scalar const* xi_tangent, unsigned int count,
+	unsigned int cells, unsigned int quadrature, qaws_diff_views const* param_tangent,
+	qaws_surface_cdf_sample* out_value, qaws_surface_cdf_sample* out_tangent,
+	qaws_surface_cdf_sample* out_tangent2, qaws_scalar* out_total);
+
+qaws_status qaws_surface_cdf_sample_adjoint(
+	qaws_diff_context const* ctx, qaws_surface const* surface, qaws_sample_measure_desc const* measure,
+	qaws_scalar const* xi, unsigned int count, unsigned int cells, unsigned int quadrature,
+	qaws_surface_cdf_sample const* adjoint, qaws_diff_views* param_adjoint, qaws_scalar* xi_adjoint);
+
+qaws_status qaws_surface_cdf_sample_hvp(
+	qaws_diff_context const* ctx, qaws_surface const* surface, qaws_sample_measure_desc const* measure,
+	qaws_scalar const* xi, unsigned int count, unsigned int cells, unsigned int quadrature,
+	qaws_surface_cdf_sample const* adjoint, qaws_diff_views const* direction, qaws_diff_views* out_hv);
+```
+
+Warps points `xi` of the unit square (stratified, blue noise, low discrepancy...) onto a surface by the inverse CDFs of the measure `w = rho(S) |S_u x S_v|` (`QAWS_MEASURE_AREA` or `QAWS_MEASURE_DENSITY`): `u` solves the marginal `A(u) = xi_u A_total`, `v` the conditional `B(v; u) = xi_v B(v1; u)`, so samples follow the measure and keep the stratification of `xi`. The integrals use a grid of `cells x cells` cells (0 = 6) with `quadrature` Gauss points per cell and direction (0 = 8).
+
+- **tangent**: the forward pass solves the discrete equations in dual numbers (the unknown and the quadrature nodes moving with it carry first and second order rates; one dual Newton step per order), so the derivatives are exact for the discretization, cross terms included. `xi_tangent` (2 per point) differentiates with respect to the points.
+- **adjoint**: pulls back through the conditional equation (`mu = v_bar / G_v`) then the marginal one (`lambda = u_bar / F_u`); `xi_adjoint` receives `lambda A_total` and `mu B(v1; u)`. The full cells of the marginal integral are pulled back once for the batch.
+- **hvp**: polarizes the second order forward pass over the parameters of `out_hv` (`e_j^T H d = (q(d + e_j) - q(d) - q(e_j)) / 2`, about two passes per parameter). Works for rational patches too; views with children are refused.
+
+**Returns:** `QAWS_STATUS_OK`; `QAWS_STATUS_INVALID_ARGUMENT` for a NULL surface or points, `QAWS_MEASURE_CURVATURE` or a missing density; `QAWS_STATUS_UNSUPPORTED_OPERATION` without `QAWS_CAP_TANGENT2` or for knot views. Points where the measure vanishes are reported as `QAWS_DIFF_ILL_CONDITIONED` with zero derivatives.

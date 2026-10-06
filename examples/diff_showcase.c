@@ -13,6 +13,10 @@
  *   7_coons.svg            Coons patch faired by editing two boundary curves
  *   14_arc_length.svg      constant-speed samples: first and second order
  *                          tangents, and a fit by Newton-CG on exact HVPs
+ *   15_cdf_measures.svg    inverse-CDF samples under arc length, curvature and
+ *                          a density field, with their sample tangents
+ *   16_surface_cdf.svg     stratified points warped onto a patch by the area
+ *                          and density inverse CDFs
  *
  * Only the public qaws API is used. No finite differences anywhere: every
  * gradient comes from the library's adjoint rules.
@@ -2533,17 +2537,17 @@ static void al_targets(double* q)
 	}
 }
 
-static qaws_arc_length_target g_al_targets[AL_N];
+static qaws_cdf_target g_al_targets[AL_N];
 
 /* E = sum |p_i - q_i|^2 over the constant-speed samples; gradient through
    the sample adjoint (p_bar = 2 (p - q)) when g is given. */
-static double al_energy(qaws_scalar const* cps, double const* q, qaws_scalar* g, qaws_arc_length_sample* adj_out)
+static double al_energy(qaws_scalar const* cps, double const* q, qaws_scalar* g, qaws_cdf_sample* adj_out)
 {
 	qaws_curve* c = bspline_2d(cps, AL_CP);
-	qaws_arc_length_sample s[AL_N], adj[AL_N];
+	qaws_cdf_sample s[AL_N], adj[AL_N];
 	double e = 0;
 	int i;
-	qaws_curve_arc_length_sample_tangent(NULL, c, g_al_targets, NULL, AL_N, 0, NULL, s, NULL, NULL, NULL);
+	qaws_curve_cdf_sample_tangent(NULL, c, NULL, g_al_targets, NULL, AL_N, 0, NULL, s, NULL, NULL, NULL);
 	for (i = 0; i < AL_N; i++)
 	{
 		double dx = s[i].position.x - q[2 * i], dy = s[i].position.y - q[2 * i + 1];
@@ -2556,7 +2560,7 @@ static double al_energy(qaws_scalar const* cps, double const* q, qaws_scalar* g,
 		qaws_field_view fv;
 		qaws_diff_views views = one_field(&fv, QAWS_FIELD_CONTROL_POINTS, g, AL_CP, 2);
 		memset(g, 0, sizeof(qaws_scalar) * AL_P);
-		qaws_curve_arc_length_sample_adjoint(NULL, c, g_al_targets, AL_N, 0, adj, &views, NULL);
+		qaws_curve_cdf_sample_adjoint(NULL, c, NULL, g_al_targets, AL_N, 0, adj, &views, NULL);
 	}
 	if (adj_out)
 		memcpy(adj_out, adj, sizeof(adj));
@@ -2567,10 +2571,10 @@ static double al_energy(qaws_scalar const* cps, double const* q, qaws_scalar* g,
 /* Exact Hessian-vector product of E: J^T (2 J v) (first order forward then
    backward) plus the second order term of the samples (sample HVP with
    p_bar = 2 (p - q)). */
-static void al_hvp(qaws_scalar const* cps, qaws_arc_length_sample const* adj, qaws_scalar const* v, qaws_scalar* out)
+static void al_hvp(qaws_scalar const* cps, qaws_cdf_sample const* adj, qaws_scalar const* v, qaws_scalar* out)
 {
 	qaws_curve* c = bspline_2d(cps, AL_CP);
-	qaws_arc_length_sample jv[AL_N], w[AL_N];
+	qaws_cdf_sample jv[AL_N], w[AL_N];
 	qaws_scalar vv[AL_P];
 	qaws_field_view fv, fo;
 	qaws_diff_views vin, vout;
@@ -2579,14 +2583,14 @@ static void al_hvp(qaws_scalar const* cps, qaws_arc_length_sample const* adj, qa
 	vin = one_field(&fv, QAWS_FIELD_CONTROL_POINTS, vv, AL_CP, 2);
 	vout = one_field(&fo, QAWS_FIELD_CONTROL_POINTS, out, AL_CP, 2);
 	memset(out, 0, sizeof(qaws_scalar) * AL_P);
-	qaws_curve_arc_length_sample_tangent(NULL, c, g_al_targets, NULL, AL_N, 0, &vin, NULL, jv, NULL, NULL);
+	qaws_curve_cdf_sample_tangent(NULL, c, NULL, g_al_targets, NULL, AL_N, 0, &vin, NULL, jv, NULL, NULL);
 	for (i = 0; i < AL_N; i++)
 	{
 		w[i].t = 0;
 		w[i].position = v3(2 * jv[i].position.x, 2 * jv[i].position.y, 0);
 	}
-	qaws_curve_arc_length_sample_adjoint(NULL, c, g_al_targets, AL_N, 0, w, &vout, NULL);
-	qaws_curve_arc_length_sample_hvp(NULL, c, g_al_targets, AL_N, 0, adj, &vin, &vout);
+	qaws_curve_cdf_sample_adjoint(NULL, c, NULL, g_al_targets, AL_N, 0, w, &vout, NULL);
+	qaws_curve_cdf_sample_hvp(NULL, c, NULL, g_al_targets, AL_N, 0, adj, &vin, &vout);
 	qaws_curve_destroy(c);
 }
 
@@ -2644,7 +2648,7 @@ static void demo_arc_length(void)
 	{
 		qaws_curve* c = bspline_2d(wiggle, AL_CP);
 		qaws_range r = qaws_curve_get_parameter_range(c);
-		qaws_arc_length_sample val[AL_N], t1[AL_N], t2[AL_N];
+		qaws_cdf_sample val[AL_N], t1[AL_N], t2[AL_N];
 		qaws_scalar dir[AL_P];
 		qaws_field_view fv;
 		qaws_diff_views views;
@@ -2672,7 +2676,7 @@ static void demo_arc_length(void)
 		memset(dir, 0, sizeof(dir));
 		dir[2 * k_star] = 1;
 		views = one_field(&fv, QAWS_FIELD_CONTROL_POINTS, dir, AL_CP, 2);
-		qaws_curve_arc_length_sample_tangent(NULL, c, g_al_targets, NULL, AL_N, 0, &views, val, t1, t2, NULL);
+		qaws_curve_cdf_sample_tangent(NULL, c, NULL, g_al_targets, NULL, AL_N, 0, &views, val, t1, t2, NULL);
 		for (i = 0; i < AL_N; i++)
 		{
 			double x0 = vx(&a, val[i].position.x), y0 = vy(&a, val[i].position.y);
@@ -2718,7 +2722,7 @@ static void demo_arc_length(void)
 	{
 		/* Newton-CG with the exact HVP (Steihaug truncation on negative curvature) */
 		qaws_scalar g[AL_P];
-		qaws_arc_length_sample adj[AL_N];
+		qaws_cdf_sample adj[AL_N];
 		double e = al_energy(nt, q, g, adj);
 		loss_nt[0] = e;
 		for (it = 1; it <= n_nt; it++)
@@ -2772,12 +2776,12 @@ static void demo_arc_length(void)
 	{
 		qaws_curve* cg = bspline_2d(gd, AL_CP);
 		qaws_curve* cn = bspline_2d(nt, AL_CP);
-		qaws_arc_length_sample sn[AL_N];
+		qaws_cdf_sample sn[AL_N];
 		curve_polyline(cg, &b, xy, 400);
 		svg_polyline(&s, xy, 400, "#d4a72c", 2, 0.9, 1);
 		curve_polyline(cn, &b, xy, 400);
 		svg_polyline(&s, xy, 400, "#1a7f37", 2.4, 1, 0);
-		qaws_curve_arc_length_sample_tangent(NULL, cn, g_al_targets, NULL, AL_N, 0, NULL, sn, NULL, NULL, NULL);
+		qaws_curve_cdf_sample_tangent(NULL, cn, NULL, g_al_targets, NULL, AL_N, 0, NULL, sn, NULL, NULL, NULL);
 		for (i = 0; i < AL_N; i++)
 		{
 			svg_line(&s, vx(&b, q[2 * i]), vy(&b, q[2 * i + 1]), vx(&b, sn[i].position.x), vy(&b, sn[i].position.y), "#cf222e", 1, 0.8);
@@ -2817,6 +2821,227 @@ static void demo_arc_length(void)
 		n_nt, loss_nt[n_nt]);
 }
 
+/* ================================================================== */
+/*  15. Inverse-CDF sampling: arc length, curvature, density          */
+/* ================================================================== */
+
+#define CDF_N 40
+
+/* rho = 0.25 + 3 exp(-|x - c|^2 / (2 s^2)): a bright spot in the plane */
+static qaws_scalar cdf_spot(qaws_vec3 p, void* user, qaws_vec3* g, qaws_scalar* H)
+{
+	double cx = 4.2, cy = 1.0, s2 = 0.55 * 0.55, dx = p.x - cx, dy = p.y - cy;
+	double e = 3.0 * exp(-(dx * dx + dy * dy) / (2 * s2));
+	(void)user;
+	g->x = (qaws_scalar)(-e * dx / s2);
+	g->y = (qaws_scalar)(-e * dy / s2);
+	g->z = 0;
+	H[0] = (qaws_scalar)(e * (dx * dx / s2 - 1) / s2);
+	H[1] = (qaws_scalar)(e * dx * dy / (s2 * s2));
+	H[2] = 0;
+	H[3] = (qaws_scalar)(e * (dy * dy / s2 - 1) / s2);
+	H[4] = 0;
+	H[5] = 0;
+	return (qaws_scalar)(0.25 + e);
+}
+
+static void demo_cdf_measures(void)
+{
+	static qaws_scalar const cps[2 * 10] = { 0.0, 0.3, 0.6, 1.5, 0.9, 0.2, 1.3, 1.6, 2.6, 1.7, 3.4, 0.1, 4.6, 0.4, 5.2, 1.7, 6.4, 1.2, 7.2, 0.4 };
+	qaws_sample_measure_desc curv = { QAWS_MEASURE_CURVATURE, (qaws_scalar)0.4, NULL, NULL };
+	qaws_sample_measure_desc dens = { QAWS_MEASURE_DENSITY, 0, cdf_spot, NULL };
+	qaws_sample_measure_desc const* ms[3] = { NULL, &curv, &dens };
+	char const* names[3] = { "arc length: rho = 1", "curvature: rho = sqrt(0.4^2 + kappa^2)", "density field: rho(C), a bright spot" };
+	qaws_cdf_target tg[CDF_N];
+	qaws_curve* c = bspline_2d(cps, 10);
+	double xy[2 * 400];
+	char buf[160];
+	int m, i;
+	svg s;
+	for (i = 0; i < CDF_N; i++)
+	{
+		tg[i].distance = 0;
+		tg[i].fraction = (qaws_scalar)((double)i / (CDF_N - 1));
+	}
+	svg_open(&s, "showcase/15_cdf_measures.svg", 1200, 560, "Inverse-CDF sampling of a curve under three measures",
+		"40 samples at equal measure, t solving M(t) = i/39 M_total; arrows: first order sample tangents for the red control point moving up.");
+	for (m = 0; m < 3; m++)
+	{
+		viewport v = { 30 + m * 390, 80, 370, 440, -0.4, 7.6, -0.6, 2.4 };
+		qaws_cdf_sample val[CDF_N], t1[CDF_N];
+		qaws_scalar dir[20], total = 0;
+		qaws_field_view fv;
+		qaws_diff_views views;
+		unsigned int k_star = 5;
+		svg_panel(&s, &v, names[m]);
+		if (m == 2)
+		{
+			/* the density as a heat background, clipped to the panel */
+			int gx, gy;
+			fprintf(s.f, "<clipPath id=\"cdfclip\"><rect x=\"%.1f\" y=\"%.1f\" width=\"%.1f\" height=\"%.1f\"/></clipPath><g clip-path=\"url(#cdfclip)\">\n",
+				v.x0, v.y0 + 28, v.w, v.h - 28);
+			for (gy = 0; gy < 40; gy++)
+				for (gx = 0; gx < 40; gx++)
+				{
+					qaws_vec3 p, g;
+					qaws_scalar H[6];
+					double x0 = v.xmin + (v.xmax - v.xmin) * gx / 40.0, y0 = v.ymin + (v.ymax - v.ymin) * gy / 40.0, r;
+					char col[32];
+					p = v3((qaws_scalar)(x0 + 0.1), (qaws_scalar)(y0 + 0.037), 0);
+					r = cdf_spot(p, NULL, &g, H);
+					if (r < 0.3)
+						continue;
+					heat((r - 0.25) / 3.0, col);
+					fprintf(s.f, "<rect x=\"%.1f\" y=\"%.1f\" width=\"%.1f\" height=\"%.1f\" fill=\"%s\" opacity=\"0.35\"/>\n",
+						vx(&v, x0), vy(&v, y0 + (v.ymax - v.ymin) / 40.0), v.w / 40.0 + 0.5, v.h / 40.0 + 0.5, col);
+				}
+			fprintf(s.f, "</g>\n");
+		}
+		curve_polyline(c, &v, xy, 400);
+		svg_polyline(&s, xy, 400, "#57606a", 2, 1, 0);
+		memset(dir, 0, sizeof(dir));
+		dir[2 * k_star + 1] = 1;
+		views = one_field(&fv, QAWS_FIELD_CONTROL_POINTS, dir, 10, 2);
+		qaws_curve_cdf_sample_tangent(NULL, c, ms[m], tg, NULL, CDF_N, 0, &views, val, t1, NULL, &total);
+		for (i = 0; i < CDF_N; i++)
+		{
+			double x0 = vx(&v, val[i].position.x), y0 = vy(&v, val[i].position.y), k1 = 0.5 * v.w / (v.xmax - v.xmin);
+			svg_line(&s, x0, y0, x0 + k1 * t1[i].position.x, y0 - k1 * t1[i].position.y, "#0969da", 1.4, 0.85);
+			svg_circle(&s, x0, y0, 3.2, "#cf222e", "#ffffff");
+		}
+		svg_circle(&s, vx(&v, cps[2 * k_star]), vy(&v, cps[2 * k_star + 1]), 5, "#cf222e", "#24292f");
+		sprintf(buf, "total measure %.3f", (double)total);
+		svg_text(&s, v.x0 + 12, v.y0 + v.h - 12, 12, "#57606a", "start", buf);
+	}
+	svg_close(&s);
+	qaws_curve_destroy(c);
+	printf("15_cdf_measures: written\n");
+}
+
+/* ================================================================== */
+/*  16. Surfaces: stratified points warped by area and density       */
+/* ================================================================== */
+
+#define SW_GRID 18
+#define SW_N (SW_GRID * SW_GRID)
+
+/* rho = 0.2 + 4 exp(-|x - c|^2 / (2 s^2)) around a point of the patch */
+static qaws_scalar sw_spot(qaws_vec3 p, void* user, qaws_vec3* g, qaws_scalar* H)
+{
+	double cx = 2.1, cy = 1.0, s2 = 0.45 * 0.45, dx = p.x - cx, dy = p.y - cy;
+	double e = 4.0 * exp(-(dx * dx + dy * dy) / (2 * s2));
+	(void)user;
+	g->x = (qaws_scalar)(-e * dx / s2);
+	g->y = (qaws_scalar)(-e * dy / s2);
+	g->z = 0;
+	H[0] = (qaws_scalar)(e * (dx * dx / s2 - 1) / s2);
+	H[1] = (qaws_scalar)(e * dx * dy / (s2 * s2));
+	H[2] = 0;
+	H[3] = (qaws_scalar)(e * (dy * dy / s2 - 1) / s2);
+	H[4] = 0;
+	H[5] = 0;
+	return (qaws_scalar)(0.2 + e);
+}
+
+static void sw_draw_patch(svg* s, projection const* pr, qaws_surface const* surf)
+{
+	int i, k;
+	for (i = 0; i <= 10; i++)
+	{
+		double xy[2 * 41];
+		int dirn;
+		for (dirn = 0; dirn < 2; dirn++)
+		{
+			for (k = 0; k <= 40; k++)
+			{
+				qaws_surface_jet j;
+				qaws_scalar u = (qaws_scalar)(dirn ? i / 10.0 : k / 40.0), v = (qaws_scalar)(dirn ? k / 40.0 : i / 10.0);
+				qaws_surface_eval_jet(surf, u, v, QAWS_SJET_P, &j);
+				project(pr, j.d[0].x, j.d[0].y, j.d[0].z, &xy[2 * k], &xy[2 * k + 1]);
+			}
+			svg_polyline(s, xy, 41, "#8c959f", 0.8, 0.8, 0);
+		}
+	}
+}
+
+static void demo_surface_cdf(void)
+{
+	/* columns crowded toward x = 0 in parameter space: uniform (u, v) bunches up there */
+	static double const colx[4] = { 0.0, 0.15, 0.6, 3.0 };
+	qaws_scalar cps[48], xi[2 * SW_N];
+	qaws_sample_measure_desc dens = { QAWS_MEASURE_DENSITY, 0, sw_spot, NULL };
+	qaws_surface_bezier_desc d;
+	qaws_surface* surf = NULL;
+	qaws_surface_cdf_sample out[SW_N];
+	unsigned int rng = 2026u;
+	char buf[160];
+	int i, j, panel;
+	svg s;
+	for (i = 0; i < 4; i++)
+		for (j = 0; j < 4; j++)
+		{
+			cps[3 * (i * 4 + j)] = (qaws_scalar)colx[j];
+			cps[3 * (i * 4 + j) + 1] = (qaws_scalar)(i * 0.7);
+			cps[3 * (i * 4 + j) + 2] = (qaws_scalar)(0.5 * sin(1.1 * i + 0.9 * j));
+		}
+	d.u_degree = 3;
+	d.v_degree = 3;
+	d.control_points = (qaws_vec3 const*)cps;
+	d.u_point_count = 4;
+	d.v_point_count = 4;
+	qaws_surface_create_bezier(&d, &surf);
+	/* jittered stratified points */
+	for (i = 0; i < SW_GRID; i++)
+		for (j = 0; j < SW_GRID; j++)
+		{
+			rng = rng * 1664525u + 1013904223u;
+			xi[2 * (i * SW_GRID + j)] = (qaws_scalar)((i + (rng >> 8) / 16777216.0) / SW_GRID);
+			rng = rng * 1664525u + 1013904223u;
+			xi[2 * (i * SW_GRID + j) + 1] = (qaws_scalar)((j + (rng >> 8) / 16777216.0) / SW_GRID);
+		}
+	svg_open(&s, "showcase/16_surface_cdf.svg", 1200, 520, "Surfaces: stratified points warped by inverse CDFs",
+		"324 jittered points of the unit square: used as (u, v) directly, then warped by the area and by a density field (marginal and conditional CDFs).");
+	for (panel = 0; panel < 3; panel++)
+	{
+		viewport v = { 30 + panel * 390, 80, 370, 420, 0, 1, 0, 1 };
+		projection pr;
+		pr.cx = v.x0 + 165;
+		pr.cy = v.y0 + 150;
+		pr.scale = 82;
+		pr.zscale = 1.0;
+		svg_panel(&s, &v, panel == 0 ? "(u, v) = xi: crowded where the parameterization is" :
+			(panel == 1 ? "area measure: even on the surface" : "density measure: a bright spot"));
+		sw_draw_patch(&s, &pr, surf);
+		if (panel == 0)
+		{
+			for (i = 0; i < SW_N; i++)
+			{
+				qaws_surface_jet jt;
+				double sx, sy;
+				qaws_surface_eval_jet(surf, xi[2 * i], xi[2 * i + 1], QAWS_SJET_P, &jt);
+				project(&pr, jt.d[0].x, jt.d[0].y, jt.d[0].z, &sx, &sy);
+				svg_circle(&s, sx, sy, 2.1, "#cf222e", "#cf222e");
+			}
+		}
+		else
+		{
+			qaws_scalar total = 0;
+			qaws_surface_cdf_sample_tangent(NULL, surf, panel == 2 ? &dens : NULL, xi, NULL, SW_N, 0, 0, NULL, out, NULL, NULL, &total);
+			for (i = 0; i < SW_N; i++)
+			{
+				double sx, sy;
+				project(&pr, out[i].position.x, out[i].position.y, out[i].position.z, &sx, &sy);
+				svg_circle(&s, sx, sy, 2.1, panel == 2 ? "#8250df" : "#1a7f37", panel == 2 ? "#8250df" : "#1a7f37");
+			}
+			sprintf(buf, "total measure %.3f", (double)total);
+			svg_text(&s, v.x0 + 12, v.y0 + v.h - 12, 12, "#57606a", "start", buf);
+		}
+	}
+	svg_close(&s);
+	qaws_surface_destroy(surf);
+	printf("16_surface_cdf: written\n");
+}
+
 int main(void)
 {
 	setvbuf(stdout, NULL, _IONBF, 0);
@@ -2835,5 +3060,7 @@ int main(void)
 	demo_arch();
 	demo_knot_placement();
 	demo_arc_length();
+	demo_cdf_measures();
+	demo_surface_cdf();
 	return 0;
 }
