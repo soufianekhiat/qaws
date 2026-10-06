@@ -26,7 +26,7 @@ static qaws_status normalize(qaws_exact_int* c, unsigned int n)
  * De Casteljau points, so left_i = d_0^i 2^(n-i) and right_j = d_j^(n-j) 2^j
  * share the scale 2^n (a positive factor: signs and roots are kept).
  */
-static qaws_status split_half(qaws_exact_int const* c, unsigned int n, qaws_exact_int* left, qaws_exact_int* right)
+static qaws_status split_half_raw(qaws_exact_int const* c, unsigned int n, qaws_exact_int* left, qaws_exact_int* right)
 {
 	qaws_exact_int d[QAWS_EXACT_ROOTS_MAX_DEGREE + 1];
 	unsigned int r, i;
@@ -44,6 +44,14 @@ static qaws_status split_half(qaws_exact_int const* c, unsigned int n, qaws_exac
 	}
 	TRY(qaws_exact_int_shl(&left[0], &left[0], n));
 	TRY(qaws_exact_int_shl(&right[n], &right[n], n));
+	return QAWS_STATUS_OK;
+}
+
+/* The halves, each divided by its own gcd. */
+static qaws_status split_half(qaws_exact_int const* c, unsigned int n, qaws_exact_int* left, qaws_exact_int* right)
+{
+	qaws_status st;
+	TRY(split_half_raw(c, n, left, right));
 	TRY(normalize(left, n));
 	return normalize(right, n);
 }
@@ -66,7 +74,7 @@ static unsigned int variations(qaws_exact_int const* c, unsigned int n)
 }
 
 /* Coefficients of p on (index, index + 1) / 2^depth, by halvings along the bits of index. */
-static qaws_status restrict_to(qaws_exact_int const* b, unsigned int n, uint64_t index, int depth, qaws_exact_int* out)
+qaws_status qaws_exact_bernstein_restrict(qaws_exact_int const* b, unsigned int n, uint64_t index, int depth, qaws_exact_int* out)
 {
 	qaws_exact_int left[QAWS_EXACT_ROOTS_MAX_DEGREE + 1], right[QAWS_EXACT_ROOTS_MAX_DEGREE + 1];
 	unsigned int i;
@@ -83,6 +91,44 @@ static qaws_status restrict_to(qaws_exact_int const* b, unsigned int n, uint64_t
 	return QAWS_STATUS_OK;
 }
 
+
+/* Both halves of b1 and b2 at once, divided by one common gcd. */
+qaws_status qaws_exact_bernstein_restrict_pair(qaws_exact_int const* b1, qaws_exact_int const* b2, unsigned int n, uint64_t index, int depth,
+	qaws_exact_int* out1, qaws_exact_int* out2)
+{
+	qaws_exact_int left[QAWS_EXACT_ROOTS_MAX_DEGREE + 1], right[QAWS_EXACT_ROOTS_MAX_DEGREE + 1], g;
+	unsigned int i;
+	int k;
+	qaws_status st;
+	for (i = 0; i <= n; i++)
+	{
+		out1[i] = b1[i];
+		out2[i] = b2[i];
+	}
+	for (k = depth - 1; k >= 0; k--)
+	{
+		int right_half = (int)((index >> k) & 1);
+		TRY(split_half_raw(out1, n, left, right));
+		for (i = 0; i <= n; i++)
+			out1[i] = right_half ? right[i] : left[i];
+		TRY(split_half_raw(out2, n, left, right));
+		for (i = 0; i <= n; i++)
+			out2[i] = right_half ? right[i] : left[i];
+		qaws_exact_int_zero(&g);
+		for (i = 0; i <= n; i++)
+		{
+			qaws_exact_int_gcd(&g, &g, &out1[i]);
+			qaws_exact_int_gcd(&g, &g, &out2[i]);
+		}
+		if (qaws_exact_int_bits(&g) > 1)
+			for (i = 0; i <= n; i++)
+			{
+				TRY(qaws_exact_int_divmod(&out1[i], NULL, &out1[i], &g));
+				TRY(qaws_exact_int_divmod(&out2[i], NULL, &out2[i], &g));
+			}
+	}
+	return QAWS_STATUS_OK;
+}
 typedef struct root_item
 {
 	uint64_t index;
@@ -216,7 +262,7 @@ qaws_status qaws_exact_bernstein_refine(qaws_exact_int const* b, unsigned int n,
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	if (root->exact || root->depth >= depth)
 		return QAWS_STATUS_OK;
-	TRY(restrict_to(b, n, root->index, root->depth, c));
+	TRY(qaws_exact_bernstein_restrict(b, n, root->index, root->depth, c));
 	/* the sign just right of the left end: its first non-zero coefficient
 	   (the left end may itself be an exact root) */
 	s0 = 0;

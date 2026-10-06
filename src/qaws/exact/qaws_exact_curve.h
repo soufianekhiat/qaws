@@ -64,6 +64,9 @@ qaws_status qaws_exact_blossom(qaws_exact_hfrac const* local, int64_t const* K, 
 /* b[0..p] over their lcm into integers h[(p + 1) D], divided by the common gcd. */
 qaws_status qaws_exact_clear_denominators(qaws_exact_hfrac* b, unsigned int p, unsigned int D, qaws_exact_int* h);
 
+/* t = (a 2^depth + (b - a) index) 2^-(depth + shift): the nearest double and whether it is exact. */
+qaws_status qaws_exact_span_param_to_double(qaws_exact_span const* sp, int shift, uint64_t index, int depth, double* out, int* exact);
+
 /* d^j H / ds^j of the span at s = x / (b - a), scaled by (b - a)^degree. */
 qaws_status qaws_exact_homogeneous_derivative(qaws_exact_span const* sp, unsigned int D, int64_t x, unsigned int j,
 	qaws_exact_int* out);

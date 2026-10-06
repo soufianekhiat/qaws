@@ -70,7 +70,7 @@ static unsigned int ctz_int(qaws_exact_int const* x)
 }
 
 /* t = (a 2^d + (b - a) index) 2^-(d + shift): nearest double, and whether it is exact. */
-static qaws_status lattice_to_double(qaws_exact_span const* sp, int shift, uint64_t index, int depth, double* out, int* exact)
+qaws_status qaws_exact_span_param_to_double(qaws_exact_span const* sp, int shift, uint64_t index, int depth, double* out, int* exact)
 {
 	qaws_exact_int num, t;
 	qaws_status st;
@@ -149,8 +149,8 @@ static qaws_status hyperplane_hits(qaws_exact_curve const* curve, dyadic const* 
 				zero = 0;
 			}
 		}
-		TRY(lattice_to_double(sp, curve->param_shift, 0, 0, &t_a, &ex));
-		TRY(lattice_to_double(sp, curve->param_shift, 1, 0, &t_b, &ex));
+		TRY(qaws_exact_span_param_to_double(sp, curve->param_shift, 0, 0, &t_a, &ex));
+		TRY(qaws_exact_span_param_to_double(sp, curve->param_shift, 1, 0, &t_b, &ex));
 		if (zero)
 		{
 			/* the whole span lies on the hyperplane: merge with an overlap or a point that ends at t_a */
@@ -196,7 +196,7 @@ static qaws_status hyperplane_hits(qaws_exact_curve const* curve, dyadic const* 
 				}
 				TRY(qaws_exact_bernstein_refine(b, n, &rt, depth));
 			}
-			TRY(lattice_to_double(sp, curve->param_shift, rt.index, rt.depth, &lo, &ex_lo));
+			TRY(qaws_exact_span_param_to_double(sp, curve->param_shift, rt.index, rt.depth, &lo, &ex_lo));
 			if (rt.exact)
 			{
 				hi = lo;
@@ -209,7 +209,7 @@ static qaws_status hyperplane_hits(qaws_exact_curve const* curve, dyadic const* 
 			}
 			else
 			{
-				TRY(lattice_to_double(sp, curve->param_shift, rt.index + 1, rt.depth, &hi, &ex_hi));
+				TRY(qaws_exact_span_param_to_double(sp, curve->param_shift, rt.index + 1, rt.depth, &hi, &ex_hi));
 				if (!ex_lo) lo = nextafter(lo, -HUGE_VAL);
 				if (!ex_hi) hi = nextafter(hi, HUGE_VAL);
 				st = emit(out, capacity, &count, QAWS_EXACT_HIT_CROSSING, lo, hi);

@@ -229,6 +229,7 @@ if(QAWS_ENABLE_EXACT)
     src/qaws/exact/qaws_exact_surface.c
     src/qaws/exact/qaws_exact_roots.c
     src/qaws/exact/qaws_exact_intersect.c
+    src/qaws/exact/qaws_exact_curve_curve.c
   )
 endif()
 

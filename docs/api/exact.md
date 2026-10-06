@@ -133,6 +133,38 @@ cannot tell from two close crossings, so it returns
 `QAWS_STATUS_CERTIFICATION_FAILED` instead of a guess. Two crossings
 2^-40 apart are still separated.
 
+```c
+qaws_status qaws_exact_curve_curve_hits(qaws_exact_curve const* a, qaws_exact_curve const* b, qaws_exact_pair* out_pairs, unsigned int capacity, unsigned int* out_count);
+```
+
+Two 2D curves are compared span against span:
+
+1. The lower-degree span I (degree n from 2 to 6) is implicitized
+   exactly. With `Bez(P, Q)` the Bezout matrix of two of its homogeneous
+   polynomials,
+   `M(x, y, w) = x Bez(Y, W) + y Bez(W, X) + w Bez(X, Y)` is singular
+   exactly on its curve.
+2. The other span S is substituted: `g(r) = det M(S(r))` is an integer
+   polynomial of degree `n m <= 64`, and its roots are isolated as above.
+3. At a root, the kernel of the symmetric `M` is `(1, s, s^2, ...)`, and
+   I's own parameter is `s = C01 / C00` (cofactors, polynomials in r). A
+   root is kept only when `0 <= s <= 1` is proven by the signs of `C00`,
+   `C01` and `C00 - C01` on its interval, refining until they settle.
+   The bound on s is the range of the coefficient ratios.
+4. Segments against segments are solved directly. A degenerate span (a
+   line traced by a quadratic, for example) is retried with the roles
+   swapped.
+
+`QAWS_STATUS_CERTIFICATION_FAILED` is returned for:
+- tangencies;
+- a common component (overlapping curves);
+- crossings through a singular point;
+- a hit on a span end at an irrational parameter.
+
+All curves share one exact space: the coordinate lattice decides what
+"touching" means, and a 2^-k gap below the lattice step is quantized
+away.
+
 ## Capability matrix
 
 | quantity | status |
@@ -152,9 +184,9 @@ cannot tell from two close crossings, so it returns
 | unit surface normal, curvatures (sqrt) | not rational |
 | other surface families (sweeps, lofts, offsets, ...) | planned or not rational |
 | curve / line (2D), curve / plane (3D) intersections | certified: exact points, one-root intervals, overlaps; non-dyadic tangencies refused |
-| curve / curve intersections | planned (implicitization, then the same isolation) |
+| curve / curve intersections (2D) | certified: implicitization of the lower-degree span, root isolation, exact inversion |
 
 Tests: 63 (integers), 64 (predicates), 65 (Bezier), 66 (winding), 67
-(B-spline / NURBS), 68 (Hermite, Catmull-Rom, polynomial), 69 (surfaces), 70 (intersections), all against
+(B-spline / NURBS), 68 (Hermite, Catmull-Rom, polynomial), 69 (surfaces), 70 (line / plane hits), 71 (curve / curve hits), all against
 Mathematica exact references. Figures:
 `examples/exact_showcase.c`.

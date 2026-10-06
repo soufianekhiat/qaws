@@ -43,6 +43,7 @@
 #include "exact_showcase/05_families.c"
 #include "exact_showcase/06_surface.c"
 #include "exact_showcase/07_hits.c"
+#include "exact_showcase/08_curve_hits.c"
 
 int main(void)
 {
@@ -55,5 +56,6 @@ int main(void)
 	demo_families();
 	demo_surface();
 	demo_hits();
+	demo_curve_hits();
 	return 0;
 }

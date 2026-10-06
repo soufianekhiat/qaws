@@ -177,6 +177,29 @@ qaws_status qaws_exact_curve_line_hits(qaws_exact_curve const* curve, double con
 qaws_status qaws_exact_curve_plane_hits(qaws_exact_curve const* curve, double const point[3], double const normal[3], double width,
 	qaws_exact_hit* out_hits, unsigned int capacity, unsigned int* out_count);
 
+/* An intersection of two curves: curve a's parameter in [a_lo, a_hi], curve b's in [b_lo, b_hi]. */
+typedef struct qaws_exact_pair
+{
+	qaws_exact_hit_kind kind;   /* POINT: both parameters exact (lo == hi); CROSSING: enclosures */
+	double a_lo, a_hi;
+	double b_lo, b_hi;
+} qaws_exact_pair;
+
+/*
+ * Certified intersections of two 2D exact curves sharing one exact space.
+ * Span against span, the lower-degree span (degree <= 6, product of the
+ * degrees <= 64) is implicitized exactly (its Bezout matrix), the other is
+ * substituted: the roots of the resulting integer polynomial are isolated
+ * and each is kept only if the implicitized span's own parameter,
+ * recovered exactly from the matrix cofactors, is proven inside [0, 1].
+ * Every intersection is reported, each crossing enclosure holding exactly
+ * one. QAWS_STATUS_CERTIFICATION_FAILED for tangencies, a common component
+ * (overlapping curves), a crossing through a singular point, or an
+ * intersection on a span end at an irrational parameter.
+ */
+qaws_status qaws_exact_curve_curve_hits(qaws_exact_curve const* a, qaws_exact_curve const* b, qaws_exact_pair* out_pairs, unsigned int capacity,
+	unsigned int* out_count);
+
 /* ===================================================================
  * Exact tensor-product surfaces
  *

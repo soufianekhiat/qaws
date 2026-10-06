@@ -34,6 +34,13 @@ typedef struct qaws_exact_root
 qaws_status qaws_exact_bernstein_isolate(qaws_exact_int const* b, unsigned int n, qaws_exact_root* out, unsigned int capacity,
 	unsigned int* out_count);
 
+/* Coefficients of p on [index, index + 1] / 2^depth (scaled by a positive factor). */
+qaws_status qaws_exact_bernstein_restrict(qaws_exact_int const* b, unsigned int n, uint64_t index, int depth, qaws_exact_int* out);
+
+/* Two polynomials of degree n restricted together: one common positive factor (their ratio is kept). */
+qaws_status qaws_exact_bernstein_restrict_pair(qaws_exact_int const* b1, qaws_exact_int const* b2, unsigned int n, uint64_t index, int depth,
+	qaws_exact_int* out1, qaws_exact_int* out2);
+
 /* Shrinks an isolating interval to `depth` (by sign bisection); it may land on the exact root. */
 qaws_status qaws_exact_bernstein_refine(qaws_exact_int const* b, unsigned int n, qaws_exact_root* root, int depth);
 
