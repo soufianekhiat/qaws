@@ -54,11 +54,11 @@ static qaws_status rbez_eval_span_2d(
 	/* Homogeneous evaluation buffers */
 	qaws_scalar hbuf[3]; /* hdim components */
 	qaws_scalar d1p[RBEZ_STACK_BUF], d2p[RBEZ_STACK_BUF], d3p[RBEZ_STACK_BUF];
-	qaws_scalar hd1[3], hd2[3], hd3[3];
+	qaws_scalar hd1[3] = { 0, 0, 0 }, hd2[3], hd3[3];
 
 	/* Rational results */
 	qaws_scalar w0, inv_w0;
-	qaws_scalar C[2], C1[2], C2[2];
+	qaws_scalar C[2], C1[2] = { 0, 0 }, C2[2];
 
 	(void)span_index;
 	memset(out_result, 0, sizeof(*out_result));
@@ -99,11 +99,16 @@ static qaws_status rbez_eval_span_2d(
 	}
 
 	/* --- Second derivative --- */
-	if ((eval_flags & (QAWS_EVAL_FLAG_D2 | QAWS_EVAL_FLAG_D3))
-		&& degree >= 2)
+	/* The homogeneous derivatives vanish above the degree, but the rational
+	   ones do not (a weighted line still has C'' != 0): the quotient rule
+	   runs at every degree. */
+	if (eval_flags & (QAWS_EVAL_FLAG_D2 | QAWS_EVAL_FLAG_D3))
 	{
-		qaws_internal_bezier_derivative_points(d1p, degree - 1, hdim, d2p);
-		qaws_internal_decasteljau(d2p, degree - 2, hdim, local_t, hd2);
+		hd2[0] = hd2[1] = hd2[2] = QAWS_ZERO;
+		if (degree >= 2) {
+			qaws_internal_bezier_derivative_points(d1p, degree - 1, hdim, d2p);
+			qaws_internal_decasteljau(d2p, degree - 2, hdim, local_t, hd2);
+		}
 
 		/* C'' = (P'' - 2*C'*w' - C*w'') / w */
 		C2[0] = (hd2[0] - QAWS_LITERAL(2.0) * C1[0] * hd1[dim_count]
@@ -119,10 +124,13 @@ static qaws_status rbez_eval_span_2d(
 	}
 
 	/* --- Third derivative --- */
-	if ((eval_flags & QAWS_EVAL_FLAG_D3) && degree >= 3)
+	if (eval_flags & QAWS_EVAL_FLAG_D3)
 	{
-		qaws_internal_bezier_derivative_points(d2p, degree - 2, hdim, d3p);
-		qaws_internal_decasteljau(d3p, degree - 3, hdim, local_t, hd3);
+		hd3[0] = hd3[1] = hd3[2] = QAWS_ZERO;
+		if (degree >= 3) {
+			qaws_internal_bezier_derivative_points(d2p, degree - 2, hdim, d3p);
+			qaws_internal_decasteljau(d3p, degree - 3, hdim, local_t, hd3);
+		}
 
 		/* C''' = (P''' - 3*C''*w' - 3*C'*w'' - C*w''') / w */
 		out_result->d3.x = (hd3[0]
@@ -157,11 +165,11 @@ static qaws_status rbez_eval_span_3d(
 	/* Homogeneous evaluation buffers */
 	qaws_scalar hbuf[4]; /* hdim components */
 	qaws_scalar d1p[RBEZ_STACK_BUF], d2p[RBEZ_STACK_BUF], d3p[RBEZ_STACK_BUF];
-	qaws_scalar hd1[4], hd2[4], hd3[4];
+	qaws_scalar hd1[4] = { 0, 0, 0, 0 }, hd2[4], hd3[4];
 
 	/* Rational results */
 	qaws_scalar w0, inv_w0;
-	qaws_scalar C[3], C1[3], C2[3];
+	qaws_scalar C[3], C1[3] = { 0, 0, 0 }, C2[3];
 
 	(void)span_index;
 	memset(out_result, 0, sizeof(*out_result));
@@ -206,11 +214,16 @@ static qaws_status rbez_eval_span_3d(
 	}
 
 	/* --- Second derivative --- */
-	if ((eval_flags & (QAWS_EVAL_FLAG_D2 | QAWS_EVAL_FLAG_D3))
-		&& degree >= 2)
+	/* The homogeneous derivatives vanish above the degree, but the rational
+	   ones do not (a weighted line still has C'' != 0): the quotient rule
+	   runs at every degree. */
+	if (eval_flags & (QAWS_EVAL_FLAG_D2 | QAWS_EVAL_FLAG_D3))
 	{
-		qaws_internal_bezier_derivative_points(d1p, degree - 1, hdim, d2p);
-		qaws_internal_decasteljau(d2p, degree - 2, hdim, local_t, hd2);
+		hd2[0] = hd2[1] = hd2[2] = hd2[3] = QAWS_ZERO;
+		if (degree >= 2) {
+			qaws_internal_bezier_derivative_points(d1p, degree - 1, hdim, d2p);
+			qaws_internal_decasteljau(d2p, degree - 2, hdim, local_t, hd2);
+		}
 
 		/* C'' = (P'' - 2*C'*w' - C*w'') / w */
 		C2[0] = (hd2[0] - QAWS_LITERAL(2.0) * C1[0] * hd1[dim_count]
@@ -229,10 +242,13 @@ static qaws_status rbez_eval_span_3d(
 	}
 
 	/* --- Third derivative --- */
-	if ((eval_flags & QAWS_EVAL_FLAG_D3) && degree >= 3)
+	if (eval_flags & QAWS_EVAL_FLAG_D3)
 	{
-		qaws_internal_bezier_derivative_points(d2p, degree - 2, hdim, d3p);
-		qaws_internal_decasteljau(d3p, degree - 3, hdim, local_t, hd3);
+		hd3[0] = hd3[1] = hd3[2] = hd3[3] = QAWS_ZERO;
+		if (degree >= 3) {
+			qaws_internal_bezier_derivative_points(d2p, degree - 2, hdim, d3p);
+			qaws_internal_decasteljau(d3p, degree - 3, hdim, local_t, hd3);
+		}
 
 		/* C''' = (P''' - 3*C''*w' - 3*C'*w'' - C*w''') / w */
 		out_result->d3.x = (hd3[0]
