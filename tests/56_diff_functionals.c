@@ -10,6 +10,10 @@
  *   - second tangent equals <direction, H direction>
  *   - HVP matches finite differences of the gradient, and is symmetric
  *   - HVP refused for families that are not linear in their fields
+ *   - Mathematica ground truth (tests/reference/56_functionals.wls): value,
+ *     tangent, second tangent, gradient and HVP of a cubic B-spline curve
+ *     and of a bicubic B-spline surface, from symbolic derivatives of the
+ *     integrands at 30 digits; the surface error is reported per cell count
  */
 
 #include "test_diff.h"
@@ -171,6 +175,161 @@ static void check_curve_functional(qaws_curve_functional f, char const* name)
 		TEST_ASSERT(diff_close(diff_dot(e, hv, 18), diff_dot(d, he, 18), DIFF_TOL * 10), "HVP is symmetric");
 	}
 	qaws_curve_destroy(c);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Mathematica reference (tests/reference/56_functionals.wls)        */
+/* ------------------------------------------------------------------ */
+
+#include "reference/56_functionals.h"
+
+/* |a - b| / max(1, |a|, |b|), the measure diff_close bounds */
+static double ref_err(double a, double b)
+{
+	double scale = 1.0;
+	if (fabs(a) > scale) scale = fabs(a);
+	if (fabs(b) > scale) scale = fabs(b);
+	return fabs(a - b) / scale;
+}
+
+static double ref_max_err(qaws_scalar const* x, double const* ref, unsigned int n)
+{
+	double e = 0;
+	unsigned int i;
+	for (i = 0; i < n; i++)
+		if (ref_err(x[i], ref[i]) > e)
+			e = ref_err(x[i], ref[i]);
+	return e;
+}
+
+static qaws_scalar const g_fn_ref_p[18] = { 0, 0, 0, 1, 2, 0.5f, 2.5f, 2, -0.5f, 3.5f, 0.5f, 1, 5, 1, 0, 6, 3, 0.5f };
+static double const g_fn_ref_v[18] = { 0.2, -0.3, 0.1, -0.25, 0.2, 0.3, 0.1, 0.1, -0.2, 0.3, -0.2, 0.25,
+	-0.2, 0.3, -0.1, 0.1, -0.25, 0.2 };
+
+/* Errors of value/tangent/tangent2, gradient and HVP with `quadrature`
+   points per piece. vals = { value, tangent, tangent2 } along g_fn_ref_v. */
+static void ref_curve_errs(qaws_curve_functional f, unsigned int quadrature, double const* vals, double const* grad,
+	double const* hvp, double* e)
+{
+	qaws_scalar dir[18], g[18], hv[18], got[3];
+	qaws_field_view fd, fg, fh;
+	qaws_diff_views vd, vg, vh;
+	qaws_curve* c = fn_curve(g_fn_ref_p);
+	unsigned int i;
+	for (i = 0; i < 18; i++)
+		dir[i] = (qaws_scalar)g_fn_ref_v[i];
+	memset(g, 0, sizeof(g));
+	memset(hv, 0, sizeof(hv));
+	vd = one_view(&fd, dir, 6, 3);
+	vg = one_view(&fg, g, 6, 3);
+	vh = one_view(&fh, hv, 6, 3);
+	TEST_ASSERT_STATUS(qaws_curve_functional_eval(NULL, c, f, quadrature, &vd, &got[0], &got[1], &got[2]));
+	TEST_ASSERT_STATUS(qaws_curve_functional_gradient(NULL, c, f, quadrature, &vg, NULL));
+	TEST_ASSERT_STATUS(qaws_curve_functional_hvp(NULL, c, f, quadrature, &vd, &vh));
+	e[0] = ref_max_err(got, vals, 3);
+	e[1] = ref_max_err(g, grad, 18);
+	e[2] = ref_max_err(hv, hvp, 18);
+	qaws_curve_destroy(c);
+}
+
+/* The default rule (6 points x 8 pieces per span) is reported; the check
+   uses the 8-point rule, the curvature squared integrand |C'|^-5 being the
+   least smooth. */
+static void test_reference_curve(qaws_curve_functional f, char const* name, double const* vals, double const* grad,
+	double const* hvp)
+{
+	double tol = QAWS_SCALAR_IS_FLOAT ? 5e-3 : 1e-11, e6[3], e8[3];
+	char msg[160];
+	ref_curve_errs(f, 0, vals, grad, hvp, e6);
+	ref_curve_errs(f, 8, vals, grad, hvp, e8);
+	printf("    reference %-18s value/tangents %.1e, gradient %.1e, HVP %.1e (8 points: %.1e, %.1e, %.1e)\n", name,
+		e6[0], e6[1], e6[2], e8[0], e8[1], e8[2]);
+	sprintf(msg, "reference (%s): value, tangent and second tangent", name);
+	TEST_ASSERT(e8[0] <= tol, msg);
+	sprintf(msg, "reference (%s): gradient", name);
+	TEST_ASSERT(e8[1] <= tol, msg);
+	sprintf(msg, "reference (%s): Hessian-vector product", name);
+	TEST_ASSERT(e8[2] <= tol, msg);
+}
+
+/* Bicubic B-spline, 5 x 5 control points, knots { 0, 0, 0, 0, 1, 2, 2, 2, 2 }
+   in both directions: four polynomial patches on [0, 2]^2. An even number
+   of cells keeps the quadrature cells inside the patches. */
+static qaws_surface* ref_surface(qaws_scalar const* p)
+{
+	static qaws_scalar const knots[9] = { 0, 0, 0, 0, 1, 2, 2, 2, 2 };
+	qaws_surface_bspline_desc d;
+	qaws_surface* s = NULL;
+	d.u_degree = 3;
+	d.v_degree = 3;
+	d.control_points = (qaws_vec3 const*)p;
+	d.u_point_count = 5;
+	d.v_point_count = 5;
+	d.u_knots = knots;
+	d.u_knot_count = 9;
+	d.v_knots = knots;
+	d.v_knot_count = 9;
+	qaws_surface_create_bspline(&d, &s);
+	return s;
+}
+
+/* The exact rationals of the script, row-major P[i][j]. */
+static void ref_surface_data(qaws_scalar* p, qaws_scalar* v)
+{
+	unsigned int i, j, c;
+	for (i = 0; i < 5; i++)
+		for (j = 0; j < 5; j++)
+		{
+			qaws_scalar* q = &p[(i * 5 + j) * 3];
+			q[0] = (qaws_scalar)((10.0 * i + (double)((2 * i + 3 * j) % 5) - 2.0) / 20.0);
+			q[1] = (qaws_scalar)((10.0 * j + (double)((3 * i + j) % 5) - 2.0) / 20.0);
+			q[2] = (qaws_scalar)(((double)((3 * i + 5 * j) % 7) - 3.0) / 10.0);
+			for (c = 0; c < 3; c++)
+				v[(i * 5 + j) * 3 + c] = (qaws_scalar)(((double)((7 * i + 3 * j + 5 * c) % 11) - 5.0) / 10.0);
+		}
+}
+
+/* Largest relative error over value, tangents, gradient and HVP with
+   `cells` quadrature cells per direction. */
+static double ref_surface_err(qaws_surface_functional f, unsigned int cells, double const* vals, double const* grad,
+	double const* hvp, double* e_parts)
+{
+	qaws_scalar p[75], dir[75], g[75], hv[75], got[3];
+	qaws_field_view fd, fg, fh;
+	qaws_diff_views vd, vg, vh;
+	qaws_surface* s;
+	ref_surface_data(p, dir);
+	s = ref_surface(p);
+	memset(g, 0, sizeof(g));
+	memset(hv, 0, sizeof(hv));
+	vd = one_view(&fd, dir, 25, 3);
+	vg = one_view(&fg, g, 25, 3);
+	vh = one_view(&fh, hv, 25, 3);
+	qaws_surface_functional_eval(NULL, s, f, cells, &vd, &got[0], &got[1], &got[2]);
+	qaws_surface_functional_gradient(NULL, s, f, cells, &vg, NULL);
+	qaws_surface_functional_hvp(NULL, s, f, cells, &vd, &vh);
+	qaws_surface_destroy(s);
+	e_parts[0] = ref_max_err(got, vals, 3);
+	e_parts[1] = ref_max_err(g, grad, 75);
+	e_parts[2] = ref_max_err(hv, hvp, 75);
+	return e_parts[0] > e_parts[1] ? (e_parts[0] > e_parts[2] ? e_parts[0] : e_parts[2])
+		: (e_parts[1] > e_parts[2] ? e_parts[1] : e_parts[2]);
+}
+
+static void test_reference_surface(qaws_surface_functional f, char const* name, double const* vals, double const* grad,
+	double const* hvp)
+{
+	/* 4 x 4 Gauss points per cell: the error falls as cells^-8 */
+	static unsigned int const cells[5] = { 8, 16, 32, 64, 128 };
+	double e[5], parts[3], tol = QAWS_SCALAR_IS_FLOAT ? 5e-3 : 1e-11;
+	char msg[160];
+	int k;
+	for (k = 0; k < 5; k++)
+		e[k] = ref_surface_err(f, cells[k], vals, grad, hvp, parts);
+	printf("    reference %-10s cells 8: %.1e, 16: %.1e, 32: %.1e, 64: %.1e, 128: %.1e\n", name, e[0], e[1], e[2], e[3], e[4]);
+	printf("      with 128 cells: value/tangents %.1e, gradient %.1e, HVP %.1e\n", parts[0], parts[1], parts[2]);
+	sprintf(msg, "reference (%s): value, tangents, gradient and HVP with 128 x 128 cells", name);
+	TEST_ASSERT(e[4] <= tol, msg);
 }
 
 /* ------------------------------------------------------------------ */
@@ -408,6 +567,16 @@ int test_56_diff_functionals_main(void)
 	check_curve_functional(QAWS_FUNCTIONAL_BENDING, "bending");
 	check_curve_functional(QAWS_FUNCTIONAL_CURVATURE_SQUARED, "curvature squared");
 	test_knot_functionals();
+	test_reference_curve(QAWS_FUNCTIONAL_LENGTH, "length", ref_curve_length, ref_curve_grad_length, ref_curve_hvp_length);
+	test_reference_curve(QAWS_FUNCTIONAL_BENDING, "bending", ref_curve_bending, ref_curve_grad_bending,
+		ref_curve_hvp_bending);
+	test_reference_curve(QAWS_FUNCTIONAL_CURVATURE_SQUARED, "curvature squared", ref_curve_curv2, ref_curve_grad_curv2,
+		ref_curve_hvp_curv2);
+	test_reference_surface(QAWS_FUNCTIONAL_AREA, "area", ref_surface_area, ref_surface_grad_area, ref_surface_hvp_area);
+	test_reference_surface(QAWS_FUNCTIONAL_THIN_PLATE, "thin plate", ref_surface_plate, ref_surface_grad_plate,
+		ref_surface_hvp_plate);
+	test_reference_surface(QAWS_FUNCTIONAL_WILLMORE, "willmore", ref_surface_willmore, ref_surface_grad_willmore,
+		ref_surface_hvp_willmore);
 	test_surface_values();
 	check_surface_functional(QAWS_FUNCTIONAL_AREA, "area");
 	check_surface_functional(QAWS_FUNCTIONAL_THIN_PLATE, "thin plate");
