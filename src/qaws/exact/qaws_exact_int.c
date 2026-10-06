@@ -6,6 +6,16 @@
 /*  Magnitudes                                                        */
 /* ------------------------------------------------------------------ */
 
+/* x = y, copying only the used limbs (an assignment would copy all of them). */
+static void copy_int(qaws_exact_int* x, qaws_exact_int const* y)
+{
+	if (x == y)
+		return;
+	memcpy(x->limb, y->limb, sizeof(uint32_t) * (size_t)y->size);
+	x->size = y->size;
+	x->sign = y->sign;
+}
+
 static void normalize(qaws_exact_int* x)
 {
 	while (x->size > 0 && x->limb[x->size - 1] == 0)
@@ -140,7 +150,7 @@ unsigned int qaws_exact_int_bits(qaws_exact_int const* x)
 void qaws_exact_int_neg(qaws_exact_int* r, qaws_exact_int const* a)
 {
 	if (r != a)
-		*r = *a;
+		copy_int(r, a);
 	r->sign = -r->sign;
 }
 
@@ -152,13 +162,13 @@ static qaws_status add_signed(qaws_exact_int* r, qaws_exact_int const* a, qaws_e
 	if (b->sign == 0)
 	{
 		if (r != a)
-			*r = *a;
+			copy_int(r, a);
 		return QAWS_STATUS_OK;
 	}
 	if (a->sign == 0)
 	{
 		if (r != b)
-			*r = *b;
+			copy_int(r, b);
 		r->sign = bs;
 		return QAWS_STATUS_OK;
 	}
@@ -240,15 +250,78 @@ qaws_status qaws_exact_int_mul(qaws_exact_int* r, qaws_exact_int const* a, qaws_
 	t.size = n;
 	t.sign = a->sign * b->sign;
 	normalize(&t);
-	*r = t;
+	copy_int(r, &t);
 	return QAWS_STATUS_OK;
 }
 
 qaws_status qaws_exact_int_mul_i64(qaws_exact_int* r, qaws_exact_int const* a, int64_t s)
 {
-	qaws_exact_int b;
-	qaws_exact_int_from_i64(&b, s);
-	return qaws_exact_int_mul(r, a, &b);
+	uint64_t m = s < 0 ? (uint64_t)0 - (uint64_t)s : (uint64_t)s;
+	int sign = s < 0 ? -a->sign : a->sign;
+	if (a->sign == 0 || s == 0)
+	{
+		qaws_exact_int_zero(r);
+		return QAWS_STATUS_OK;
+	}
+	if (m <= 0xFFFFFFFFu)
+	{
+		/* one limb: a single pass, in place */
+		uint64_t carry = 0;
+		int i, n = a->size;
+		for (i = 0; i < n; i++)
+		{
+			uint64_t cur = (uint64_t)a->limb[i] * m + carry;
+			r->limb[i] = (uint32_t)cur;
+			carry = cur >> 32;
+		}
+		if (carry)
+		{
+			if (n >= QAWS_EXACT_LIMBS)
+				return QAWS_STATUS_EXACT_RANGE_EXCEEDED;
+			r->limb[n++] = (uint32_t)carry;
+		}
+		r->size = n;
+		r->sign = sign;
+		return QAWS_STATUS_OK;
+	}
+	{
+		/* two limbs: two passes into a temporary */
+		uint32_t t[QAWS_EXACT_LIMBS + 2];
+		uint64_t m0 = m & 0xFFFFFFFFu, m1 = m >> 32, carry;
+		int i, n = a->size;
+		if (n + 2 > QAWS_EXACT_LIMBS + 1)
+		{
+			qaws_exact_int b;
+			qaws_exact_int_from_i64(&b, s);
+			return qaws_exact_int_mul(r, a, &b);
+		}
+		carry = 0;
+		for (i = 0; i < n; i++)
+		{
+			uint64_t cur = (uint64_t)a->limb[i] * m0 + carry;
+			t[i] = (uint32_t)cur;
+			carry = cur >> 32;
+		}
+		t[n] = (uint32_t)carry;
+		t[n + 1] = 0;
+		carry = 0;
+		for (i = 0; i < n; i++)
+		{
+			uint64_t cur = (uint64_t)a->limb[i] * m1 + t[i + 1] + carry;
+			t[i + 1] = (uint32_t)cur;
+			carry = cur >> 32;
+		}
+		t[n + 1] = (uint32_t)((uint64_t)t[n + 1] + carry);
+		n += 2;
+		while (n > 0 && t[n - 1] == 0)
+			n--;
+		if (n > QAWS_EXACT_LIMBS)
+			return QAWS_STATUS_EXACT_RANGE_EXCEEDED;
+		memcpy(r->limb, t, sizeof(uint32_t) * (size_t)n);
+		r->size = n;
+		r->sign = sign;
+		return QAWS_STATUS_OK;
+	}
 }
 
 qaws_status qaws_exact_int_shl(qaws_exact_int* r, qaws_exact_int const* a, unsigned int k)
@@ -279,7 +352,7 @@ qaws_status qaws_exact_int_shl(qaws_exact_int* r, qaws_exact_int const* a, unsig
 		t.size = n;
 		t.sign = a->sign;
 		normalize(&t);
-		*r = t;
+		copy_int(r, &t);
 	}
 	return QAWS_STATUS_OK;
 }
@@ -303,7 +376,7 @@ void qaws_exact_int_shr(qaws_exact_int* r, qaws_exact_int const* a, unsigned int
 	t.size = n;
 	t.sign = a->sign;
 	normalize(&t);
-	*r = t;
+	copy_int(r, &t);
 }
 
 qaws_status qaws_exact_int_divexact_u32(qaws_exact_int* r, qaws_exact_int const* a, uint32_t d)
@@ -316,7 +389,7 @@ qaws_status qaws_exact_int_divexact_u32(qaws_exact_int* r, qaws_exact_int const*
 		return QAWS_STATUS_INTERNAL_ERROR;
 	if (t.size)
 		t.sign = sign;
-	*r = t;
+	copy_int(r, &t);
 	return QAWS_STATUS_OK;
 }
 
@@ -443,8 +516,8 @@ qaws_status qaws_exact_int_divmod(qaws_exact_int* q, qaws_exact_int* r, qaws_exa
 		quo.sign = as * bs;
 	if (rem.size)
 		rem.sign = as;
-	if (q) *q = quo;
-	if (r) *r = rem;
+	if (q) copy_int(q, &quo);
+	if (r) copy_int(r, &rem);
 	return QAWS_STATUS_OK;
 }
 
