@@ -217,6 +217,41 @@ qaws_status qaws_exact_curve_curve_hits(qaws_exact_curve const* a, qaws_exact_cu
 qaws_status qaws_exact_curve_self_hits(qaws_exact_curve const* curve, qaws_exact_pair* out_pairs, unsigned int capacity, unsigned int* out_count);
 
 /* ===================================================================
+ * Certified 2D Boolean operations
+ * =================================================================== */
+
+/* A piece of an input boundary: curve a (region 0) or b (region 1) between two parameters. */
+typedef struct qaws_exact_piece
+{
+	unsigned int region;    /* 0: a, 1: b */
+	double t0_lo, t0_hi;    /* where the piece starts along its traversal (an enclosure; lo == hi when exact) */
+	double t1_lo, t1_hi;    /* where it ends */
+	int reversed;           /* traversed against the curve's parameter */
+} qaws_exact_piece;
+
+/* A result loop: pieces[first .. first + count - 1], each ending where the next starts. */
+typedef struct qaws_exact_loop
+{
+	unsigned int first, count;
+} qaws_exact_loop;
+
+/*
+ * Certified Boolean of two regions bounded by closed, simple 2D exact
+ * curves (operation: QAWS_BOOLEAN_UNION, _INTERSECTION or _DIFFERENCE,
+ * a minus b). The result boundary is made of pieces of the inputs
+ * themselves (nothing is refitted): the boundaries are cut at their
+ * certified crossings, each piece is classified by the certified winding
+ * number of the other boundary around an exact rational point inside it
+ * (non-zero: inside), and the kept pieces are linked into loops (two kept
+ * pieces meet at a crossing; at a touching point the same curve goes on).
+ * Loops are traced in the direction of their first piece.
+ * QAWS_STATUS_CERTIFICATION_FAILED when a crossing cannot be certified
+ * (a tangency, an overlap) or a boundary is not simple.
+ */
+qaws_status qaws_exact_boolean_2d(qaws_exact_curve const* a, qaws_exact_curve const* b, unsigned int operation, qaws_exact_piece* out_pieces,
+	unsigned int piece_capacity, unsigned int* out_piece_count, qaws_exact_loop* out_loops, unsigned int loop_capacity, unsigned int* out_loop_count);
+
+/* ===================================================================
  * Exact tensor-product surfaces
  *
  * Bezier, B-spline and NURBS surfaces are prepared into one integer

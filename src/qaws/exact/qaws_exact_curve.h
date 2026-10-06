@@ -64,6 +64,10 @@ qaws_status qaws_exact_blossom(qaws_exact_hfrac const* local, int64_t const* K, 
 /* b[0..p] over their lcm into integers h[(p + 1) D], divided by the common gcd. */
 qaws_status qaws_exact_clear_denominators(qaws_exact_hfrac* b, unsigned int p, unsigned int D, qaws_exact_int* h);
 
+/* Certified winding number of a closed loop of 2D exact curves around the rational point (P0 / P2, P1 / P2)
+   in lattice units (P2 > 0); the loop is assumed already validated. */
+qaws_status qaws_exact_winding_2d_hom(qaws_exact_curve const* const* pieces, unsigned int count, qaws_exact_int const* P, int* out_winding);
+
 /* t = (a 2^depth + (b - a) index) 2^-(depth + shift): the nearest double and whether it is exact. */
 qaws_status qaws_exact_span_param_to_double(qaws_exact_span const* sp, int shift, uint64_t index, int depth, double* out, int* exact);
 

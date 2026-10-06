@@ -220,6 +220,29 @@ Hits are sorted by t, and a hit on a patch edge is reported once. A
 tangent ray or a line lying on the surface returns
 `QAWS_STATUS_CERTIFICATION_FAILED`.
 
+## Certified 2D Booleans
+
+```c
+qaws_status qaws_exact_boolean_2d(qaws_exact_curve const* a, qaws_exact_curve const* b, unsigned int operation, qaws_exact_piece* out_pieces, unsigned int piece_capacity, unsigned int* out_piece_count, qaws_exact_loop* out_loops, unsigned int loop_capacity, unsigned int* out_loop_count);
+```
+
+Regions are bounded by closed, simple 2D exact curves; the operation is
+`QAWS_BOOLEAN_UNION`, `_INTERSECTION` or `_DIFFERENCE` (a minus b). The
+result is made of pieces of the inputs, never refitted. Each piece is
+`(region, start, end, reversed)`, with its start and end as parameter
+enclosures.
+
+1. Both boundaries are checked to be simple (certified self-intersections).
+2. They are cut at their certified crossings.
+3. Each piece is classified by the certified winding number of the other
+   boundary around an exact rational point inside it (integer De
+   Casteljau at a rational parameter).
+4. Pieces are kept by the operation and linked into loops. Two kept
+   pieces meet at each crossing; at a touching point the same curve goes
+   on.
+
+Tangencies and overlaps return `QAWS_STATUS_CERTIFICATION_FAILED`.
+
 ## Capability matrix
 
 | quantity | status |
@@ -242,9 +265,10 @@ tangent ray or a line lying on the surface returns
 | curve / curve intersections (2D, 3D) | certified: implicitization of the lower-degree span, root isolation, exact inversion; 3D: exact zero test of the third coordinate |
 | self-intersections (2D, 3D) | certified: divided differences inside spans, span pairs, knots and closing points excluded, spans on one conic told apart |
 | line / surface intersections (ray casting) | certified: u, v and t enclosed, per patch Bezout elimination |
+| 2D Boolean operations (union, intersection, difference) | certified: pieces of the source curves, cut at certified crossings, classified by exact winding |
 | curve / surface, surface / surface intersections | planned |
 
 Tests: 63 (integers), 64 (predicates), 65 (Bezier), 66 (winding), 67
-(B-spline / NURBS), 68 (Hermite, Catmull-Rom, polynomial), 69 (surfaces), 70 (line / plane hits), 71 (curve / curve hits), 72 (3D curve / curve), 73 (self-intersections), 74 (line / surface), all against
+(B-spline / NURBS), 68 (Hermite, Catmull-Rom, polynomial), 69 (surfaces), 70 (line / plane hits), 71 (curve / curve hits), 72 (3D curve / curve), 73 (self-intersections), 74 (line / surface), 75 (Booleans), all against
 Mathematica exact references. Figures:
 `examples/exact_showcase.c`.

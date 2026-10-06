@@ -218,16 +218,36 @@ qaws_status qaws_exact_winding_2d(qaws_exact_curve const* const* pieces, unsigne
 	}
 	if (kscale > 1500)
 		return QAWS_STATUS_EXACT_RANGE_EXCEEDED;
-	for (c = 0; c < 2; c++)
 	{
-		qaws_exact_int_from_i64(&P[c], m[c]);
-		if (m[c] != 0)
+		qaws_exact_int H[3];
+		for (c = 0; c < 2; c++)
 		{
-			st = qaws_exact_int_shl(&P[c], &P[c], (unsigned int)(e[c] + kscale));
-			if (st != QAWS_STATUS_OK)
-				return st;
+			qaws_exact_int_from_i64(&P[c], m[c]);
+			if (m[c] != 0)
+			{
+				st = qaws_exact_int_shl(&P[c], &P[c], (unsigned int)(e[c] + kscale));
+				if (st != QAWS_STATUS_OK)
+					return st;
+			}
+			H[c] = P[c];
 		}
+		qaws_exact_int_from_i64(&H[2], 1);
+		st = qaws_exact_int_shl(&H[2], &H[2], (unsigned int)kscale);
+		if (st != QAWS_STATUS_OK)
+			return st;
+		(void)total;
+		(void)i;
+		return qaws_exact_winding_2d_hom(pieces, count, H, out_winding);
 	}
+}
+
+qaws_status qaws_exact_winding_2d_hom(qaws_exact_curve const* const* pieces, unsigned int count, qaws_exact_int const* P, int* out_winding)
+{
+	unsigned int k, i;
+	int total = 0;
+	qaws_status st;
+	if (qaws_exact_int_sign(&P[2]) <= 0)
+		return QAWS_STATUS_INVALID_ARGUMENT;
 	/* every span of every piece is one integer homogeneous Bezier */
 	for (k = 0; k < count; k++)
 	{
@@ -241,11 +261,11 @@ qaws_status qaws_exact_winding_2d(qaws_exact_curve const* const* pieces, unsigne
 			for (i = 0; i <= sp->degree; i++)
 			{
 				qaws_exact_int x, y, t;
-				/* f_i = Y_i 2^k - P_y W_i, g_i = X_i 2^k - P_x W_i */
-				st = qaws_exact_int_shl(&y, &sp->h[i * 3 + 1], (unsigned int)kscale);
+				/* f_i = Y_i P_w - P_y W_i, g_i = X_i P_w - P_x W_i (P_w > 0) */
+				st = qaws_exact_int_mul(&y, &sp->h[i * 3 + 1], &P[2]);
 				if (st == QAWS_STATUS_OK) st = qaws_exact_int_mul(&t, &P[1], &sp->h[i * 3 + 2]);
 				if (st == QAWS_STATUS_OK) st = qaws_exact_int_sub(&w.c[0][i], &y, &t);
-				if (st == QAWS_STATUS_OK) st = qaws_exact_int_shl(&x, &sp->h[i * 3], (unsigned int)kscale);
+				if (st == QAWS_STATUS_OK) st = qaws_exact_int_mul(&x, &sp->h[i * 3], &P[2]);
 				if (st == QAWS_STATUS_OK) st = qaws_exact_int_mul(&t, &P[0], &sp->h[i * 3 + 2]);
 				if (st == QAWS_STATUS_OK) st = qaws_exact_int_sub(&w.c[1][i], &x, &t);
 				if (st != QAWS_STATUS_OK)
