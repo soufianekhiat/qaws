@@ -61,6 +61,7 @@ add_executable(
   57_diff_core.c
   58_diff_sampling.c
   59_diff_surface_sampling.c
+  60_diff_sampling_core.c
 )
 
 # The amalgamated library exports exactly the same symbols, so the tests can

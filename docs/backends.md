@@ -189,6 +189,7 @@ Complete working examples are in the `examples/` directory:
 | `eval_bspline.hlsl` | HLSL | B-spline with knot span search |
 | `eval_bspline.comp` | GLSL | B-spline with knot span search |
 | `diff_bspline_adjoint.hlsl` | HLSL | B-spline tangents, gather adjoint (one thread per control point) and parameter adjoints |
+| `diff_cdf_sampling.hlsl` | HLSL | Inverse-CDF sampling of a B-spline (arc length or curvature measure): span measures, solved samples with first and second tangents, adjoint multipliers and a gather adjoint per control point |
 
 ## See also
 

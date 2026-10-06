@@ -218,6 +218,24 @@ The test suites `49_diff_model` to `59_diff_surface_sampling` check every rule i
 
 `core/qaws_bspline_diff_core.h` provides the B-spline tangent and adjoint kernels for every backend (C, HLSL, GLSL, Halide): `qaws_bspline_tangent_3d`, `qaws_bspline_adjoint_cp_3d` (the per-element term of a gather pass) and `qaws_bspline_adjoint_t_3d`. `examples/diff_bspline_adjoint.hlsl` runs them as compute shaders: one thread per sample for tangents and parameter adjoints, and one thread per control point for the control point adjoints. The gather pass loops over the samples listed by `qaws_curve_build_support_index`, so it needs no atomics and its result is deterministic. Test `57_diff_core` checks the kernels against the C runtime.
 
+`core/qaws_bspline_sampling_core.h` does the same for inverse-CDF sampling and integral functionals of B-spline curves. The integrands are the arc-length and curvature measures and the length, bending and curvature-squared functionals, all on second order dual numbers along the control point tangents. The kernels are:
+
+- `qaws_bspline_integrate`: integral over one span, with its first and second rates (the default composite rule).
+- `qaws_bspline_cdf_solve`: safeguarded Newton with a fixed iteration count, branch free.
+- `qaws_bspline_cdf_tangent`: first and second sample tangents by the implicit function theorem.
+- `qaws_bspline_cdf_lambda`: the adjoint multiplier.
+- `qaws_bspline_node_adjoint_cp`: the per-node term of a gather over control points.
+
+`examples/diff_cdf_sampling.hlsl` chains them as compute passes:
+
+1. One thread per span computes the measures.
+2. A prefix sum combines them.
+3. One thread per sample solves it and computes its first and second tangents.
+4. One thread per sample computes its multiplier.
+5. One thread per control point gathers the adjoint over the nodes and samples of the spans it supports.
+
+Test `60_diff_sampling_core` drives the kernels the same way on the C backend. It reproduces the runtime samples, tangents, adjoints, functional values and gradients to round-off.
+
 `examples/diff_applications.c` (target `qaws_diff_applications`) applies the API to real data:
 
 1. Hair strands from a photo: structure-tensor orientation field, evenly spaced streamlines, B-spline strands aligned through unit-tangent adjoints.
