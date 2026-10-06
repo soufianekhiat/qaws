@@ -186,19 +186,35 @@ typedef struct qaws_exact_pair
 } qaws_exact_pair;
 
 /*
- * Certified intersections of two 2D exact curves sharing one exact space.
- * Span against span, the lower-degree span (degree <= 6, product of the
- * degrees <= 64) is implicitized exactly (its Bezout matrix), the other is
- * substituted: the roots of the resulting integer polynomial are isolated
- * and each is kept only if the implicitized span's own parameter,
- * recovered exactly from the matrix cofactors, is proven inside [0, 1].
- * Every intersection is reported, each crossing enclosure holding exactly
- * one. QAWS_STATUS_CERTIFICATION_FAILED for tangencies, a common component
+ * Certified intersections of two exact curves (both 2D or both 3D)
+ * sharing one exact space. Span against span, the lower-degree span
+ * (degree <= 6, product of the degrees <= 64) is implicitized exactly (its
+ * Bezout matrix, in a coordinate plane for 3D), the other is substituted:
+ * the roots of the resulting integer polynomial are isolated and each is
+ * kept only if the implicitized span's own parameter, recovered exactly
+ * from the matrix cofactors, is proven inside [0, 1]. In 3D the remaining
+ * coordinate must agree: an exact zero test (a modular gcd proved by
+ * division). Every intersection is reported once (a knot point by the
+ * span ending there), each crossing enclosure holding exactly one.
+ * QAWS_STATUS_CERTIFICATION_FAILED for tangencies, a common component
  * (overlapping curves), a crossing through a singular point, or an
  * intersection on a span end at an irrational parameter.
  */
 qaws_status qaws_exact_curve_curve_hits(qaws_exact_curve const* a, qaws_exact_curve const* b, qaws_exact_pair* out_pairs, unsigned int capacity,
 	unsigned int* out_count);
+
+/*
+ * Certified self-intersections of a 2D or 3D exact curve: pairs a < b with
+ * C(a) = C(b) (a_lo..a_hi, b_lo..b_hi enclosures). Inside a span, the
+ * divided differences (X(s) W(t) - X(t) W(s)) / (s - t) are eliminated the
+ * same way (spans proven monotone along a direction are skipped); spans
+ * against spans as for two curves. Shared knots and the closing point of a
+ * closed curve are not self-intersections; spans on one algebraic curve
+ * (a NURBS circle) are told apart exactly (touching ends) or refused
+ * (overlap). QAWS_STATUS_CERTIFICATION_FAILED as above, and for an
+ * irrational cusp or a span folding back on itself.
+ */
+qaws_status qaws_exact_curve_self_hits(qaws_exact_curve const* curve, qaws_exact_pair* out_pairs, unsigned int capacity, unsigned int* out_count);
 
 /* ===================================================================
  * Exact tensor-product surfaces

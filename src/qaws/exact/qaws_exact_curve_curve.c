@@ -1,5 +1,6 @@
 #include "qaws_exact_curve.h"
 #include "qaws_exact_roots.h"
+#include "qaws_exact_poly.h"
 #include "../internal/qaws_internal_types.h"
 #include "../internal/qaws_internal_curve.h"
 #include <math.h>
@@ -7,140 +8,30 @@
 
 #define TRY(x) do { st = (x); if (st != QAWS_STATUS_OK) return st; } while (0)
 #define CC_MAX_IMPLICIT 6
-#define CC_MAX_COEF (QAWS_EXACT_ROOTS_MAX_DEGREE + 1)
+#define CC_COEF QAWS_EXACT_POLY_COEF
 #define CC_MAX_ROOTS (QAWS_EXACT_ROOTS_MAX_DEGREE + 2)
 
-/* ------------------------------------------------------------------ */
-/*  Integer polynomials in the power basis                             */
-/* ------------------------------------------------------------------ */
+typedef qaws_exact_poly poly;
 
-typedef struct poly
+static void* cc_alloc(size_t bytes)
 {
-	unsigned int deg;
-	qaws_exact_int c[CC_MAX_COEF];
-} poly;
-
-static void poly_zero(poly* p, unsigned int deg)
-{
-	unsigned int i;
-	p->deg = deg;
-	for (i = 0; i <= deg; i++)
-		qaws_exact_int_zero(&p->c[i]);
+	return qaws_internal_alloc(NULL, (unsigned long)bytes);
 }
 
-static qaws_status poly_mul(poly* r, poly const* a, poly const* b)
+static void cc_free(void* p)
 {
-	qaws_exact_int t;
-	unsigned int i, j;
-	qaws_status st;
-	if (a->deg + b->deg >= CC_MAX_COEF)
-		return QAWS_STATUS_EXACT_RANGE_EXCEEDED;
-	poly_zero(r, a->deg + b->deg);
-	for (i = 0; i <= a->deg; i++)
-	{
-		if (qaws_exact_int_is_zero(&a->c[i]))
-			continue;
-		for (j = 0; j <= b->deg; j++)
-		{
-			TRY(qaws_exact_int_mul(&t, &a->c[i], &b->c[j]));
-			TRY(qaws_exact_int_add(&r->c[i + j], &r->c[i + j], &t));
-		}
-	}
-	return QAWS_STATUS_OK;
-}
-
-/* r += sign a (r's degree grows to a's) */
-static qaws_status poly_acc(poly* r, poly const* a, int sign)
-{
-	unsigned int i;
-	qaws_status st;
-	while (r->deg < a->deg)
-		qaws_exact_int_zero(&r->c[++r->deg]);
-	for (i = 0; i <= a->deg; i++)
-		TRY(sign > 0 ? qaws_exact_int_add(&r->c[i], &r->c[i], &a->c[i]) : qaws_exact_int_sub(&r->c[i], &r->c[i], &a->c[i]));
-	return QAWS_STATUS_OK;
-}
-
-static int poly_is_zero(poly const* p)
-{
-	unsigned int i;
-	for (i = 0; i <= p->deg; i++)
-		if (!qaws_exact_int_is_zero(&p->c[i]))
-			return 0;
-	return 1;
-}
-
-static int64_t binom64(unsigned int n, unsigned int k)
-{
-	int64_t r = 1;
-	unsigned int i;
-	if (k > n)
-		return 0;
-	if (k > n - k)
-		k = n - k;
-	for (i = 1; i <= k; i++)
-		r = r * (int64_t)(n - k + i) / (int64_t)i;
-	return r;
-}
-
-/* Bernstein h_i (stride D, component c) on [0, 1] -> power basis. */
-static qaws_status bernstein_to_power(qaws_exact_int const* h, unsigned int n, unsigned int D, unsigned int c, poly* out)
-{
-	qaws_exact_int t;
-	unsigned int i, k;
-	qaws_status st;
-	poly_zero(out, n);
-	for (k = 0; k <= n; k++)
-		for (i = 0; i <= k; i++)
-		{
-			int64_t f = binom64(n, i) * binom64(n - i, k - i) * (((k - i) & 1) ? -1 : 1);
-			TRY(qaws_exact_int_mul_i64(&t, &h[i * D + c], f));
-			TRY(qaws_exact_int_add(&out->c[k], &out->c[k], &t));
-		}
-	return QAWS_STATUS_OK;
-}
-
-/* Power basis -> Bernstein of degree N = p->deg, times L = lcm_j C(N, j): b_i = sum_{j <= i} C(i, j) (L / C(N, j)) p_j. */
-static qaws_status power_to_bernstein(poly const* p, qaws_exact_int* b)
-{
-	qaws_exact_int L, g, q, t, cj;
-	unsigned int N = p->deg, i, j;
-	qaws_status st;
-	qaws_exact_int_from_i64(&L, 1);
-	for (j = 0; j <= N; j++)
-	{
-		qaws_exact_int_from_i64(&cj, binom64(N, j));
-		qaws_exact_int_gcd(&g, &L, &cj);
-		TRY(qaws_exact_int_divmod(&q, NULL, &cj, &g));
-		TRY(qaws_exact_int_mul(&L, &L, &q));
-	}
-	for (i = 0; i <= N; i++)
-		qaws_exact_int_zero(&b[i]);
-	for (j = 0; j <= N; j++)
-	{
-		if (qaws_exact_int_is_zero(&p->c[j]))
-			continue;
-		qaws_exact_int_from_i64(&cj, binom64(N, j));
-		TRY(qaws_exact_int_divmod(&q, NULL, &L, &cj));
-		TRY(qaws_exact_int_mul(&q, &q, &p->c[j]));
-		for (i = j; i <= N; i++)
-		{
-			TRY(qaws_exact_int_mul_i64(&t, &q, binom64(i, j)));
-			TRY(qaws_exact_int_add(&b[i], &b[i], &t));
-		}
-	}
-	return QAWS_STATUS_OK;
+	qaws_internal_dealloc(NULL, p);
 }
 
 /* ------------------------------------------------------------------ */
-/*  Implicitization                                                    */
+/*  Bezout matrices                                                    */
 /* ------------------------------------------------------------------ */
 
 /*
- * Bezout matrix of P, Q (degree n, power basis):
+ * Bezout matrix of P, Q (degree n, integer coefficients):
  * (P(t) Q(s) - P(s) Q(t)) / (t - s) = sum B_ij t^i s^j. A term
  * c_ab (t^a s^b - t^b s^a), a > b, c_ab = p_a q_b - p_b q_a, divides into
- * t^b s^b sum_{k < a - b} t^(a-b-1-k) s^k.
+ * t^b s^b sum_{k < a - b} t^(a-b-1-k) s^k. Symmetric.
  */
 static qaws_status bezout(poly const* P, poly const* Q, unsigned int n, qaws_exact_int* B)
 {
@@ -158,63 +49,104 @@ static qaws_status bezout(poly const* P, poly const* Q, unsigned int n, qaws_exa
 			if (qaws_exact_int_is_zero(&c))
 				continue;
 			for (k = 0; k + b < a; k++)
-			{
-				unsigned int i = a - 1 - k, j = b + k;
-				TRY(qaws_exact_int_add(&B[i * n + j], &B[i * n + j], &c));
-			}
+				TRY(qaws_exact_int_add(&B[(a - 1 - k) * n + b + k], &B[(a - 1 - k) * n + b + k], &c));
 		}
 	return QAWS_STATUS_OK;
 }
 
-/* Laplace expansion over rows row..n-1 and the columns outside mask. */
-static qaws_status det_rec(poly const* M, unsigned int n, unsigned int row, unsigned int mask, poly* out)
+/* The same with polynomial coefficients: P, Q of degree k in s, P[i] the coefficient of s^i. */
+static qaws_status bezout_poly(poly const* P, poly const* Q, unsigned int k, poly* E)
 {
-	poly* sub;
 	poly* t;
-	unsigned int j;
-	int sign = 1;
+	unsigned int a, b, j;
 	qaws_status st = QAWS_STATUS_OK;
-	if (row == n)
-	{
-		poly_zero(out, 0);
-		qaws_exact_int_from_i64(&out->c[0], 1);
-		return QAWS_STATUS_OK;
-	}
-	sub = (poly*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(poly) * 2));
-	if (!sub)
+	t = (poly*)cc_alloc(sizeof(poly) * 2);
+	if (!t)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
-	t = sub + 1;
-	poly_zero(out, 0);
+	for (a = 0; a < k * k; a++)
+		qaws_exact_poly_zero(&E[a], 0);
+	for (a = 1; a <= k && st == QAWS_STATUS_OK; a++)
+		for (b = 0; b < a && st == QAWS_STATUS_OK; b++)
+		{
+			st = qaws_exact_poly_mul(&t[0], &P[a], &Q[b]);
+			if (st == QAWS_STATUS_OK) st = qaws_exact_poly_mul(&t[1], &P[b], &Q[a]);
+			if (st == QAWS_STATUS_OK) st = qaws_exact_poly_acc(&t[0], &t[1], -1);
+			for (j = 0; j + b < a && st == QAWS_STATUS_OK; j++)
+				st = qaws_exact_poly_acc(&E[(a - 1 - j) * k + b + j], &t[0], 1);
+		}
+	cc_free(t);
+	return st;
+}
+
+/* det, and the row-0 cofactors C00 and C01 (C01 = -minor_01). */
+static qaws_status det_cofactors(poly const* M, unsigned int n, poly* det, poly* C00, poly* C01)
+{
+	poly* minor;
+	unsigned int j, k;
+	qaws_status st = QAWS_STATUS_OK;
+	minor = (poly*)cc_alloc(sizeof(poly) * 2);
+	if (!minor)
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	qaws_exact_poly_zero(det, 0);
 	for (j = 0; j < n && st == QAWS_STATUS_OK; j++)
 	{
-		if (mask & (1u << j))
-			continue;
-		st = det_rec(M, n, row + 1, mask | (1u << j), sub);
-		if (st == QAWS_STATUS_OK)
-			st = poly_mul(t, &M[row * n + j], sub);
-		if (st == QAWS_STATUS_OK)
-			st = poly_acc(out, t, sign);
-		sign = -sign;
+		st = qaws_exact_poly_det(M, n, 1, 1u << j, &minor[0]);
+		if (st == QAWS_STATUS_OK && j == 0)
+			*C00 = minor[0];
+		if (st == QAWS_STATUS_OK && j == 1)
+		{
+			*C01 = minor[0];
+			for (k = 0; k <= C01->deg; k++)
+				qaws_exact_int_neg(&C01->c[k], &C01->c[k]);
+		}
+		if (st == QAWS_STATUS_OK) st = qaws_exact_poly_mul(&minor[1], &M[j], &minor[0]);
+		if (st == QAWS_STATUS_OK) st = qaws_exact_poly_acc(det, &minor[1], (j & 1) ? -1 : 1);
 	}
-	qaws_internal_dealloc(NULL, sub);
+	cc_free(minor);
+	return st;
+}
+
+/* out = sum_i H[i] p^i q^(k - i) (the substitution s = p / q, times q^k) */
+static qaws_status substitute(poly const* H, unsigned int k, poly const* p, poly const* q, poly* out)
+{
+	poly* pw;   /* p^0..p^k, q^0..q^k, scratch */
+	unsigned int i;
+	qaws_status st = QAWS_STATUS_OK;
+	pw = (poly*)cc_alloc(sizeof(poly) * (2 * (k + 1) + 1));
+	if (!pw)
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	qaws_exact_poly_const(&pw[0], 1);
+	qaws_exact_poly_const(&pw[k + 1], 1);
+	for (i = 1; i <= k && st == QAWS_STATUS_OK; i++)
+	{
+		st = qaws_exact_poly_mul(&pw[i], &pw[i - 1], p);
+		if (st == QAWS_STATUS_OK) st = qaws_exact_poly_mul(&pw[k + 1 + i], &pw[k + i], q);
+	}
+	qaws_exact_poly_zero(out, 0);
+	for (i = 0; i <= k && st == QAWS_STATUS_OK; i++)
+	{
+		poly* t = &pw[2 * (k + 1)];
+		st = qaws_exact_poly_mul(t, &pw[i], &pw[k + 1 + (k - i)]);
+		if (st == QAWS_STATUS_OK) st = qaws_exact_poly_mul(t, t, &H[i]);
+		if (st == QAWS_STATUS_OK) st = qaws_exact_poly_acc(out, t, 1);
+	}
+	cc_free(pw);
 	return st;
 }
 
 /* ------------------------------------------------------------------ */
-/*  Span against span                                                  */
+/*  Root processing                                                    */
 /* ------------------------------------------------------------------ */
 
-/* Signs on the root interval: +1 / -1 when every coefficient there has that strict sign, 0 otherwise. */
+/* Sign on the root interval (+1 / -1 when every coefficient there has it, else 0); at an exact root, the exact sign. */
 static qaws_status sign_on(qaws_exact_int const* b, unsigned int n, qaws_exact_root const* r, int* out)
 {
-	qaws_exact_int c[CC_MAX_COEF];
+	qaws_exact_int c[CC_COEF];
 	unsigned int i;
 	int s;
 	qaws_status st;
 	if (r->exact)
 	{
-		/* the value at the point (a positive multiple): the first coefficient of
-		   the interval starting there, or the last of the one ending at s = 1 */
 		int at_end = r->index == ((uint64_t)1 << r->depth);
 		TRY(qaws_exact_bernstein_restrict(b, n, r->index - (uint64_t)at_end, r->depth, c));
 		*out = qaws_exact_int_sign(&c[at_end ? n : 0]);
@@ -229,19 +161,40 @@ static qaws_status sign_on(qaws_exact_int const* b, unsigned int n, qaws_exact_r
 	return QAWS_STATUS_OK;
 }
 
-/* Enclosure of the rational num / den (den != 0) by doubles; exact when dyadic and representable. */
+/* Sign variations on the (open) root interval. */
+static qaws_status variations_on(qaws_exact_int const* b, unsigned int n, qaws_exact_root const* r, unsigned int* out)
+{
+	qaws_exact_int c[CC_COEF];
+	unsigned int i, v = 0;
+	int last = 0;
+	qaws_status st;
+	TRY(qaws_exact_bernstein_restrict(b, n, r->index, r->depth, c));
+	for (i = 0; i <= n; i++)
+	{
+		int s = qaws_exact_int_sign(&c[i]);
+		if (s == 0)
+			continue;
+		if (last != 0 && s != last)
+			v++;
+		last = s;
+	}
+	*out = v;
+	return QAWS_STATUS_OK;
+}
+
+/* Enclosure of num / den (den != 0) by doubles; exact when dyadic and representable. */
 static void ratio_enclose(qaws_exact_int const* num, qaws_exact_int const* den, double* lo, double* hi, int* exact)
 {
-	qaws_exact_int g, n2, d2;
+	qaws_exact_int g, n2, d2, p2;
 	double v;
 	unsigned int db;
-	qaws_exact_int_gcd(&g, num, den);
 	if (qaws_exact_int_is_zero(num))
 	{
 		*lo = *hi = 0;
 		*exact = 1;
 		return;
 	}
+	qaws_exact_int_gcd(&g, num, den);
 	qaws_exact_int_divmod(&n2, NULL, num, &g);
 	qaws_exact_int_divmod(&d2, NULL, den, &g);
 	if (qaws_exact_int_sign(&d2) < 0)
@@ -251,368 +204,1293 @@ static void ratio_enclose(qaws_exact_int const* num, qaws_exact_int const* den, 
 	}
 	v = qaws_exact_ratio_to_double(&n2, &d2);
 	db = qaws_exact_int_bits(&d2);
-	{
-		/* den a power of two and the numerator within 53 bits */
-		qaws_exact_int p2;
-		qaws_exact_int_from_i64(&p2, 1);
-		qaws_exact_int_shl(&p2, &p2, db - 1);
-		*exact = qaws_exact_int_cmp_abs(&p2, &d2) == 0 && qaws_exact_int_bits(&n2) <= 53 && fabs(v) >= 2.2250738585072014e-308;
-	}
+	qaws_exact_int_from_i64(&p2, 1);
+	qaws_exact_int_shl(&p2, &p2, db - 1);
+	*exact = qaws_exact_int_cmp(&p2, &d2) == 0 && qaws_exact_int_bits(&n2) <= 53 && fabs(v) >= 2.2250738585072014e-308;
 	*lo = *exact ? v : nextafter(v, -HUGE_VAL);
 	*hi = *exact ? v : nextafter(v, HUGE_VAL);
 }
 
-/* Local s in [s_lo, s_hi] of a span -> the curve parameter, rounded outward. */
-static void span_param_enclose(qaws_exact_span const* sp, int shift, double s_lo, double s_hi, int exact, double* t_lo, double* t_hi)
+/* A solution in local parameters: r (a root of R) and s = C01 / C00 there. */
+typedef struct local_hit
 {
-	double a = ldexp((double)sp->a, -shift), L = ldexp((double)(sp->b - sp->a), -shift);
-	*t_lo = a + L * s_lo;
-	*t_hi = a + L * s_hi;
-	if (!exact)
-	{
-		*t_lo = nextafter(nextafter(*t_lo, -HUGE_VAL), -HUGE_VAL);
-		*t_hi = nextafter(nextafter(*t_hi, HUGE_VAL), HUGE_VAL);
-	}
-}
+	qaws_exact_root r;
+	int s_exact;
+	qaws_exact_int s_num, s_den;   /* s exactly, when s_exact */
+	double s_lo, s_hi;             /* otherwise its enclosure */
+} local_hit;
 
-typedef struct span_hit
+enum
 {
-	double imp_lo, imp_hi;   /* implicitized span's parameter */
-	double sub_lo, sub_hi;   /* substituted span's parameter */
-	int exact;
-} span_hit;
+	CON_SIGN_OF_C00 = 1,   /* H~(r) has the sign of C00(r): (s - r) > 0 for H~ = C01 - r C00 */
+	CON_ZERO = 2           /* H~(r) == 0 */
+};
+
+typedef struct constraint
+{
+	int kind;
+	poly const* H;
+} constraint;
+
+typedef struct sys_work
+{
+	poly R, C0, C1, D, G[2];
+	qaws_exact_int bR[CC_COEF], b0[CC_COEF], b1[CC_COEF], bD[CC_COEF], bH[2][CC_COEF], bG[2][CC_COEF];
+	unsigned int dH[2], dG[2];
+	int hzero[2], gconst[2];
+} sys_work;
 
 /*
- * Intersections of span I (implicitized, degree n >= 2) with span S
- * (substituted, degree m): g(r) = det M(S(r)) and the parameter of I at a
- * root, s = C01 / C00 (the adjugate's first column is the kernel
- * (1, s, s^2, ...) of the symmetric Bezout matrix).
+ * Roots r in [0, 1] of R with s = C01 / C00 proven in [0, 1] and every
+ * constraint proven, refined to the narrowest interval. *common is set
+ * (with QAWS_STATUS_CERTIFICATION_FAILED) when R vanishes identically.
  */
-static qaws_status span_pair(qaws_exact_curve const* ci, unsigned int si, qaws_exact_curve const* cs, unsigned int ss, int skip_sub_start,
-	int skip_imp_start, span_hit* out, unsigned int capacity, unsigned int* count)
+static qaws_status solve_system(poly const* R0, poly const* C00, poly const* C01, constraint const* cons, unsigned int ncons, local_hit* out,
+	unsigned int capacity, unsigned int* count, int* common)
 {
-	qaws_exact_span const* I = &ci->spans[si];
-	qaws_exact_span const* S = &cs->spans[ss];
-	unsigned int n = I->degree, m = S->degree, i, j, k, nr = 0, N, N1;
-	poly XI, YI, WI, XS, YS, WS;
-	qaws_exact_int BYW[CC_MAX_IMPLICIT * CC_MAX_IMPLICIT], BWX[CC_MAX_IMPLICIT * CC_MAX_IMPLICIT], BXY[CC_MAX_IMPLICIT * CC_MAX_IMPLICIT];
-	poly* M = NULL;
-	poly* g = NULL;
-	poly* C = NULL;   /* C[0] = C00, C[1] = C01, C[2] = C00 - C01 */
-	qaws_exact_int* bg = NULL;
-	qaws_exact_int* bc = NULL;   /* 3 rows of CC_MAX_COEF */
+	sys_work* w;
 	qaws_exact_root roots[CC_MAX_ROOTS];
+	unsigned int N, N1, nr = 0, k, c;
 	qaws_status st = QAWS_STATUS_OK;
-	if (n < 2 || n > CC_MAX_IMPLICIT || n * m > QAWS_EXACT_ROOTS_MAX_DEGREE)
-		return QAWS_STATUS_EXACT_UNSUPPORTED;
-	TRY(bernstein_to_power(I->h, n, 3, 0, &XI));
-	TRY(bernstein_to_power(I->h, n, 3, 1, &YI));
-	TRY(bernstein_to_power(I->h, n, 3, 2, &WI));
-	TRY(bernstein_to_power(S->h, m, 3, 0, &XS));
-	TRY(bernstein_to_power(S->h, m, 3, 1, &YS));
-	TRY(bernstein_to_power(S->h, m, 3, 2, &WS));
-	TRY(bezout(&YI, &WI, n, BYW));
-	TRY(bezout(&WI, &XI, n, BWX));
-	TRY(bezout(&XI, &YI, n, BXY));
-	M = (poly*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(poly) * (n * n + 1 + 3)));
-	bg = (qaws_exact_int*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_exact_int) * CC_MAX_COEF * 4));
-	if (!M || !bg)
-	{
-		qaws_internal_dealloc(NULL, M);
-		qaws_internal_dealloc(NULL, bg);
+	*count = 0;
+	*common = 0;
+	w = (sys_work*)cc_alloc(sizeof(sys_work));
+	if (!w)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
-	}
-	g = M + n * n;
-	C = g + 1;
-	bc = bg + CC_MAX_COEF;
-	/* M_ij(r) = X(r) BYW_ij + Y(r) BWX_ij + W(r) BXY_ij */
-	for (i = 0; i < n * n && st == QAWS_STATUS_OK; i++)
+	w->R = *R0;
+	qaws_exact_poly_trim(&w->R);
+	if (qaws_exact_poly_is_zero(&w->R))
 	{
-		poly_zero(&M[i], m);
-		for (k = 0; k <= m && st == QAWS_STATUS_OK; k++)
-		{
-			qaws_exact_int t;
-			st = qaws_exact_int_mul(&t, &XS.c[k], &BYW[i]);
-			if (st == QAWS_STATUS_OK) st = qaws_exact_int_add(&M[i].c[k], &M[i].c[k], &t);
-			if (st == QAWS_STATUS_OK) st = qaws_exact_int_mul(&t, &YS.c[k], &BWX[i]);
-			if (st == QAWS_STATUS_OK) st = qaws_exact_int_add(&M[i].c[k], &M[i].c[k], &t);
-			if (st == QAWS_STATUS_OK) st = qaws_exact_int_mul(&t, &WS.c[k], &BXY[i]);
-			if (st == QAWS_STATUS_OK) st = qaws_exact_int_add(&M[i].c[k], &M[i].c[k], &t);
-		}
+		*common = 1;
+		cc_free(w);
+		return QAWS_STATUS_CERTIFICATION_FAILED;
 	}
-	/* cofactors of row 0 and the determinant */
+	N = w->R.deg;
+	if (N == 0 || N > QAWS_EXACT_ROOTS_MAX_DEGREE)
+	{
+		cc_free(w);
+		return N == 0 ? QAWS_STATUS_OK : QAWS_STATUS_EXACT_UNSUPPORTED;
+	}
+	w->C0 = *C00;
+	w->C1 = *C01;
+	N1 = w->C0.deg > w->C1.deg ? w->C0.deg : w->C1.deg;
+	st = qaws_exact_poly_pad(&w->C0, N1);
+	if (st == QAWS_STATUS_OK) st = qaws_exact_poly_pad(&w->C1, N1);
 	if (st == QAWS_STATUS_OK)
 	{
-		poly* minor = (poly*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(poly) * 2));
-		if (!minor)
-			st = QAWS_STATUS_ALLOCATION_FAILURE;
-		else
+		w->D = w->C0;
+		st = qaws_exact_poly_acc(&w->D, &w->C1, -1);
+	}
+	if (st == QAWS_STATUS_OK && N1 > QAWS_EXACT_ROOTS_MAX_DEGREE)
+		st = QAWS_STATUS_EXACT_UNSUPPORTED;
+	if (st == QAWS_STATUS_OK) st = qaws_exact_poly_to_bernstein(&w->R, w->bR);
+	if (st == QAWS_STATUS_OK) st = qaws_exact_poly_to_bernstein(&w->C0, w->b0);
+	if (st == QAWS_STATUS_OK) st = qaws_exact_poly_to_bernstein(&w->C1, w->b1);
+	if (st == QAWS_STATUS_OK) st = qaws_exact_poly_to_bernstein(&w->D, w->bD);
+	for (c = 0; c < ncons && st == QAWS_STATUS_OK; c++)
+	{
+		poly h = *cons[c].H;
+		qaws_exact_poly_trim(&h);
+		w->hzero[c] = qaws_exact_poly_is_zero(&h);
+		w->gconst[c] = 0;
+		w->dH[c] = h.deg;
+		if (w->hzero[c])
+			continue;
+		if (h.deg > QAWS_EXACT_ROOTS_MAX_DEGREE)
+			st = QAWS_STATUS_EXACT_UNSUPPORTED;
+		if (st == QAWS_STATUS_OK) st = qaws_exact_poly_to_bernstein(&h, w->bH[c]);
+		if (st == QAWS_STATUS_OK && cons[c].kind == CON_ZERO)
 		{
-			poly_zero(g, 0);
-			for (j = 0; j < n && st == QAWS_STATUS_OK; j++)
+			st = qaws_exact_poly_gcd(&w->R, &h, &w->G[c]);
+			if (st == QAWS_STATUS_OK)
 			{
-				st = det_rec(M, n, 1, 1u << j, &minor[0]);
-				if (st == QAWS_STATUS_OK && j < 2)
-				{
-					C[j] = minor[0];
-					if (j == 1)
-						for (k = 0; k <= C[1].deg; k++)
-							qaws_exact_int_neg(&C[1].c[k], &C[1].c[k]);
-				}
-				if (st == QAWS_STATUS_OK) st = poly_mul(&minor[1], &M[j], &minor[0]);
-				if (st == QAWS_STATUS_OK) st = poly_acc(g, &minor[1], (j & 1) ? -1 : 1);
+				w->dG[c] = w->G[c].deg;
+				w->gconst[c] = w->G[c].deg == 0;
+				if (!w->gconst[c])
+					st = qaws_exact_poly_to_bernstein(&w->G[c], w->bG[c]);
 			}
-			qaws_internal_dealloc(NULL, minor);
 		}
 	}
 	if (st == QAWS_STATUS_OK)
-	{
-		C[2] = C[0];
-		st = poly_acc(&C[2], &C[1], -1);
-	}
-	if (st == QAWS_STATUS_OK && poly_is_zero(g))
-		st = QAWS_STATUS_CERTIFICATION_FAILED;   /* a common component */
-	/* fixed degrees: g to n m, the cofactors to (n - 1) m */
-	N = n * m;
-	N1 = (n - 1) * m;
-	for (k = 0; k < 3 && st == QAWS_STATUS_OK; k++)
-		while (C[k].deg < N1)
-			qaws_exact_int_zero(&C[k].c[++C[k].deg]);
-	while (st == QAWS_STATUS_OK && g->deg < N)
-		qaws_exact_int_zero(&g->c[++g->deg]);
-	if (st == QAWS_STATUS_OK && (g->deg != N || C[0].deg != N1))
-		st = QAWS_STATUS_INTERNAL_ERROR;
-	if (st == QAWS_STATUS_OK) st = power_to_bernstein(g, bg);
-	for (k = 0; k < 3 && st == QAWS_STATUS_OK; k++)
-		st = power_to_bernstein(&C[k], &bc[k * CC_MAX_COEF]);
-	if (st == QAWS_STATUS_OK)
-		st = qaws_exact_bernstein_isolate(bg, N, roots, CC_MAX_ROOTS, &nr);
+		st = qaws_exact_bernstein_isolate(w->bR, N, roots, CC_MAX_ROOTS, &nr);
 
 	for (k = 0; k < nr && st == QAWS_STATUS_OK; k++)
 	{
 		qaws_exact_root rt = roots[k];
-		int s00 = 0, s01 = 0, sd = 0, inside = -1;
-		if (rt.exact && rt.index == 0 && skip_sub_start)
-			continue;
-		/* decide 0 <= C01 / C00 <= 1, refining until the signs settle */
-		while (st == QAWS_STATUS_OK && inside < 0)
+		int s00 = 0, s01 = 0, sd = 0, inside = -1, cst[2] = { -1, -1 }, accept = -1;
+		while (st == QAWS_STATUS_OK && accept < 0)
 		{
-			st = sign_on(&bc[0], N1, &rt, &s00);
-			if (st == QAWS_STATUS_OK) st = sign_on(&bc[CC_MAX_COEF], N1, &rt, &s01);
-			if (st == QAWS_STATUS_OK) st = sign_on(&bc[2 * CC_MAX_COEF], N1, &rt, &sd);
+			int undecided = 0;
+			if (inside < 0)
+			{
+				st = sign_on(w->b0, N1, &rt, &s00);
+				if (st == QAWS_STATUS_OK) st = sign_on(w->b1, N1, &rt, &s01);
+				if (st == QAWS_STATUS_OK) st = sign_on(w->bD, N1, &rt, &sd);
+				if (st != QAWS_STATUS_OK)
+					break;
+				if (s00 != 0 && ((s01 != 0 && s01 != s00) || (sd != 0 && sd != s00)))
+					inside = 0;
+				else if (s00 != 0 && (s01 == s00 || (rt.exact && s01 == 0)) && (sd == s00 || (rt.exact && sd == 0)))
+					inside = 1;
+			}
+			if (inside == 0)
+			{
+				accept = 0;
+				break;
+			}
+			for (c = 0; c < ncons && st == QAWS_STATUS_OK; c++)
+			{
+				if (cst[c] >= 0)
+					continue;
+				if (cons[c].kind == CON_SIGN_OF_C00)
+				{
+					int sh = 0;
+					if (w->hzero[c])
+						cst[c] = 0;
+					else if (s00 != 0)
+					{
+						st = sign_on(w->bH[c], w->dH[c], &rt, &sh);
+						if (rt.exact)
+							cst[c] = sh == s00;
+						else if (sh != 0)
+							cst[c] = sh == s00;
+					}
+				}
+				else
+				{
+					if (w->hzero[c])
+						cst[c] = 1;
+					else if (w->gconst[c])
+						cst[c] = 0;
+					else if (rt.exact)
+					{
+						int sg = 0;
+						st = sign_on(w->bG[c], w->dG[c], &rt, &sg);
+						cst[c] = sg == 0;
+					}
+					else
+					{
+						unsigned int v = 0;
+						st = variations_on(w->bG[c], w->dG[c], &rt, &v);
+						if (v == 0)
+							cst[c] = 0;
+						else if (v == 1)
+							cst[c] = 1;   /* G | R and R has one root here: it is G's */
+					}
+				}
+			}
 			if (st != QAWS_STATUS_OK)
 				break;
-			if (s00 != 0 && ((s01 != 0 && s01 != s00) || (sd != 0 && sd != s00)))
-				inside = 0;
-			else if (s00 != 0 && (s01 == s00 || (rt.exact && s01 == 0)) && (sd == s00 || (rt.exact && sd == 0)))
-				inside = 1;
-			else if (rt.exact || rt.depth >= QAWS_EXACT_ROOTS_MAX_DEPTH)
-				st = QAWS_STATUS_CERTIFICATION_FAILED;   /* singular point, or a span end at an irrational root */
+			for (c = 0; c < ncons; c++)
+			{
+				if (cst[c] == 0)
+					accept = 0;
+				if (cst[c] < 0)
+					undecided = 1;
+			}
+			if (accept == 0)
+				break;
+			if (inside == 1 && !undecided)
+			{
+				accept = 1;
+				break;
+			}
+			if (rt.exact || rt.depth >= QAWS_EXACT_ROOTS_MAX_DEPTH)
+				st = QAWS_STATUS_CERTIFICATION_FAILED;   /* singular point, tangency, span end at an irrational root, cusp */
 			else
-				st = qaws_exact_bernstein_refine(bg, N, &rt, rt.depth + 1);
+				st = qaws_exact_bernstein_refine(w->bR, N, &rt, rt.depth + 1);
 		}
-		if (st != QAWS_STATUS_OK || inside != 1)
+		if (st != QAWS_STATUS_OK || accept != 1)
 			continue;
 		if (!rt.exact)
-			st = qaws_exact_bernstein_refine(bg, N, &rt, QAWS_EXACT_ROOTS_MAX_DEPTH);
-		if (st != QAWS_STATUS_OK)
-			break;
 		{
-			span_hit h;
-			qaws_exact_int c00[CC_MAX_COEF], c01[CC_MAX_COEF];
-			double s_lo = HUGE_VAL, s_hi = -HUGE_VAL, r_lo, r_hi = 0;
-			int ex_lo, ex_hi = 1, s_exact = 0, at_end = rt.exact && rt.index == ((uint64_t)1 << rt.depth);
-			/* at an exact root: the interval starting there (ending there at r = 1) */
-			st = qaws_exact_bernstein_restrict_pair(&bc[0], &bc[CC_MAX_COEF], N1, rt.index - (uint64_t)at_end, rt.depth, c00, c01);
+			/* tighten; past the integer budget the certified interval stays wider */
+			qaws_exact_root keep = rt;
+			st = qaws_exact_bernstein_refine(w->bR, N, &rt, QAWS_EXACT_ROOTS_MAX_DEPTH);
+			if (st == QAWS_STATUS_EXACT_RANGE_EXCEEDED)
+			{
+				st = QAWS_STATUS_OK;
+				if (rt.depth < keep.depth)
+					rt = keep;
+			}
+		}
+		if (st == QAWS_STATUS_OK && *count >= capacity)
+			st = QAWS_STATUS_BUFFER_TOO_SMALL;
+		if (st == QAWS_STATUS_OK)
+		{
+			local_hit* h = &out[*count];
+			qaws_exact_int c00[CC_COEF], c01[CC_COEF];
+			int at_end = rt.exact && rt.index == ((uint64_t)1 << rt.depth);
+			unsigned int i;
+			h->r = rt;
+			st = qaws_exact_bernstein_restrict_pair(w->b0, w->b1, N1, rt.index - (uint64_t)at_end, rt.depth, c00, c01);
 			if (st != QAWS_STATUS_OK)
 				break;
 			if (rt.exact)
 			{
 				unsigned int e = at_end ? N1 : 0;
-				ratio_enclose(&c01[e], &c00[e], &s_lo, &s_hi, &s_exact);
-				if (skip_imp_start && qaws_exact_int_is_zero(&c01[e]))
-					continue;   /* s = 0: the end of the previous implicitized span */
+				h->s_exact = 1;
+				h->s_num = c01[e];
+				h->s_den = c00[e];
+				if (qaws_exact_int_sign(&h->s_den) < 0)
+				{
+					qaws_exact_int_neg(&h->s_num, &h->s_num);
+					qaws_exact_int_neg(&h->s_den, &h->s_den);
+				}
 			}
 			else
+			{
 				/* s = sum c01_i B_i / sum c00_i B_i, c00 of one sign: within the coefficient ratios */
+				h->s_exact = 0;
+				h->s_lo = HUGE_VAL;
+				h->s_hi = -HUGE_VAL;
 				for (i = 0; i <= N1; i++)
 				{
 					double lo, hi;
 					int ex;
 					ratio_enclose(&c01[i], &c00[i], &lo, &hi, &ex);
-					if (lo < s_lo) s_lo = lo;
-					if (hi > s_hi) s_hi = hi;
+					if (lo < h->s_lo) h->s_lo = lo;
+					if (hi > h->s_hi) h->s_hi = hi;
 				}
-			if (s_lo < 0) s_lo = 0;
-			if (s_hi > 1) s_hi = 1;
-			span_param_enclose(I, ci->param_shift, s_lo, s_hi, s_exact, &h.imp_lo, &h.imp_hi);
-			st = qaws_exact_span_param_to_double(S, cs->param_shift, rt.index, rt.depth, &r_lo, &ex_lo);
-			if (st == QAWS_STATUS_OK && !rt.exact)
-				st = qaws_exact_span_param_to_double(S, cs->param_shift, rt.index + 1, rt.depth, &r_hi, &ex_hi);
-			if (st != QAWS_STATUS_OK)
-				break;
-			if (rt.exact)
-			{
-				r_hi = r_lo;
-				if (!ex_lo)
-				{
-					r_lo = nextafter(r_lo, -HUGE_VAL);
-					r_hi = nextafter(r_hi, HUGE_VAL);
-				}
+				if (h->s_lo < 0) h->s_lo = 0;
+				if (h->s_hi > 1) h->s_hi = 1;
 			}
-			else
-			{
-				if (!ex_lo) r_lo = nextafter(r_lo, -HUGE_VAL);
-				if (!ex_hi) r_hi = nextafter(r_hi, HUGE_VAL);
-			}
-			h.sub_lo = r_lo;
-			h.sub_hi = r_hi;
-			h.exact = rt.exact && ex_lo && s_exact;
-			if (*count >= capacity)
-				st = QAWS_STATUS_BUFFER_TOO_SMALL;
-			else
-				out[(*count)++] = h;
+			(*count)++;
 		}
 	}
-	qaws_internal_dealloc(NULL, M);
-	qaws_internal_dealloc(NULL, bg);
+	cc_free(w);
 	return st;
 }
 
-/* Two segments (degree-1 spans, homogeneous): the exact linear roots. */
-static qaws_status segment_pair(qaws_exact_curve const* ca, unsigned int sa, qaws_exact_curve const* cb, unsigned int sb, int skip_a, int skip_b,
-	span_hit* out, unsigned int capacity, unsigned int* count)
+/* ------------------------------------------------------------------ */
+/*  Parameters                                                         */
+/* ------------------------------------------------------------------ */
+
+static qaws_status map_r(qaws_exact_span const* sp, int shift, qaws_exact_root const* rt, double* lo, double* hi, int* exact)
 {
-	qaws_exact_span const* A = &ca->spans[sa];
-	qaws_exact_span const* B = &cb->spans[sb];
-	qaws_exact_int fa[2], fb[2], num, den, t1, t2;
-	unsigned int e, c;
-	int sa_ex, sb_ex;
-	double a_lo, a_hi, b_lo, b_hi, s_lo, s_hi, r_lo, r_hi;
+	int ex_lo, ex_hi;
 	qaws_status st;
-	/* f(Q) = det(A0, A1, Q) (homogeneous): zero on A's line. fb_e = f(B_e), fa_e likewise. */
-	for (e = 0; e < 2; e++)
+	TRY(qaws_exact_span_param_to_double(sp, shift, rt->index, rt->depth, lo, &ex_lo));
+	if (rt->exact)
 	{
-		qaws_exact_int const* P0 = &A->h[0];
-		qaws_exact_int const* P1 = &A->h[3];
-		qaws_exact_int const* Q = &B->h[e * 3];
-		qaws_exact_int_zero(&fb[e]);
-		for (c = 0; c < 3; c++)
+		*hi = *lo;
+		if (!ex_lo)
 		{
-			unsigned int c1 = (c + 1) % 3, c2 = (c + 2) % 3;
-			TRY(qaws_exact_int_mul(&t1, &P0[c1], &P1[c2]));
-			TRY(qaws_exact_int_mul(&t2, &P0[c2], &P1[c1]));
-			TRY(qaws_exact_int_sub(&t1, &t1, &t2));
-			TRY(qaws_exact_int_mul(&t1, &t1, &Q[c]));
-			TRY(qaws_exact_int_add(&fb[e], &fb[e], &t1));
+			*lo = nextafter(*lo, -HUGE_VAL);
+			*hi = nextafter(*hi, HUGE_VAL);
 		}
-		P0 = &B->h[0];
-		P1 = &B->h[3];
-		Q = &A->h[e * 3];
-		qaws_exact_int_zero(&fa[e]);
-		for (c = 0; c < 3; c++)
+		*exact = ex_lo;
+		return QAWS_STATUS_OK;
+	}
+	TRY(qaws_exact_span_param_to_double(sp, shift, rt->index + 1, rt->depth, hi, &ex_hi));
+	if (!ex_lo) *lo = nextafter(*lo, -HUGE_VAL);
+	if (!ex_hi) *hi = nextafter(*hi, HUGE_VAL);
+	*exact = 0;
+	return QAWS_STATUS_OK;
+}
+
+/* t = (a + (b - a) s) 2^-shift for the local s of a hit, rounded outward (exact when it is a double). */
+static qaws_status map_s(qaws_exact_span const* sp, int shift, local_hit const* h, double* lo, double* hi, int* exact)
+{
+	if (h->s_exact)
+	{
+		qaws_exact_int num, den, t;
+		qaws_status st;
+		TRY(qaws_exact_int_mul_i64(&num, &h->s_den, sp->a));
+		TRY(qaws_exact_int_mul_i64(&t, &h->s_num, sp->b - sp->a));
+		TRY(qaws_exact_int_add(&num, &num, &t));
+		TRY(qaws_exact_int_shl(&den, &h->s_den, (unsigned int)shift));
+		ratio_enclose(&num, &den, lo, hi, exact);
+		return QAWS_STATUS_OK;
+	}
+	{
+		double a = ldexp((double)sp->a, -shift), L = ldexp((double)(sp->b - sp->a), -shift);
+		*lo = nextafter(nextafter(a + L * h->s_lo, -HUGE_VAL), -HUGE_VAL);
+		*hi = nextafter(nextafter(a + L * h->s_hi, HUGE_VAL), HUGE_VAL);
+		*exact = 0;
+	}
+	return QAWS_STATUS_OK;
+}
+
+static int s_is(local_hit const* h, int v)
+{
+	if (!h->s_exact)
+		return 0;
+	return v == 0 ? qaws_exact_int_is_zero(&h->s_num) : qaws_exact_int_cmp(&h->s_num, &h->s_den) == 0;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Systems                                                            */
+/* ------------------------------------------------------------------ */
+
+/* Components of a projection: the plane (c0, c1), the weight w, and the checked coordinate cz (-1: none). */
+typedef struct proj
+{
+	unsigned int c0, c1, w;
+	int cz;
+} proj;
+
+static unsigned int projections(unsigned int dim, proj* out)
+{
+	if (dim == 2)
+	{
+		out[0].c0 = 0; out[0].c1 = 1; out[0].w = 2; out[0].cz = -1;
+		return 1;
+	}
+	out[0].c0 = 0; out[0].c1 = 1; out[0].w = 3; out[0].cz = 2;
+	out[1].c0 = 0; out[1].c1 = 2; out[1].w = 3; out[1].cz = 1;
+	out[2].c0 = 1; out[2].c1 = 2; out[2].w = 3; out[2].cz = 0;
+	return 3;
+}
+
+/*
+ * Span I implicitized in the projection, span S substituted:
+ * M(x, y, w) = x Bez(Y, W) + y Bez(W, X) + w Bez(X, Y) is singular on I's
+ * curve; R(r) = det M(S(r)), s = C01 / C00 (the kernel (1, s, s^2, ...) of
+ * the symmetric M). H (3D): Z_I(s) W_S(r) - Z_S(r) W_I(s) times C00^n at s.
+ */
+static qaws_status build_cross(qaws_exact_span const* I, qaws_exact_span const* S, unsigned int D, proj const* pj, poly* R, poly* C00, poly* C01,
+	poly* H)
+{
+	unsigned int n = I->degree, m = S->degree, i, k;
+	poly* P;   /* XI YI WI XS YS WS ZI ZS, then M (n n), then Hc (n + 1) */
+	qaws_exact_int* B;
+	qaws_status st = QAWS_STATUS_OK;
+	P = (poly*)cc_alloc(sizeof(poly) * (8 + n * n + n + 1));
+	B = (qaws_exact_int*)cc_alloc(sizeof(qaws_exact_int) * 3 * n * n);
+	if (!P || !B)
+	{
+		cc_free(P);
+		cc_free(B);
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	}
+	st = qaws_exact_poly_from_bernstein(I->h, n, D, pj->c0, &P[0]);
+	if (st == QAWS_STATUS_OK) st = qaws_exact_poly_from_bernstein(I->h, n, D, pj->c1, &P[1]);
+	if (st == QAWS_STATUS_OK) st = qaws_exact_poly_from_bernstein(I->h, n, D, pj->w, &P[2]);
+	if (st == QAWS_STATUS_OK) st = qaws_exact_poly_from_bernstein(S->h, m, D, pj->c0, &P[3]);
+	if (st == QAWS_STATUS_OK) st = qaws_exact_poly_from_bernstein(S->h, m, D, pj->c1, &P[4]);
+	if (st == QAWS_STATUS_OK) st = qaws_exact_poly_from_bernstein(S->h, m, D, pj->w, &P[5]);
+	if (st == QAWS_STATUS_OK) st = bezout(&P[1], &P[2], n, &B[0]);
+	if (st == QAWS_STATUS_OK) st = bezout(&P[2], &P[0], n, &B[n * n]);
+	if (st == QAWS_STATUS_OK) st = bezout(&P[0], &P[1], n, &B[2 * n * n]);
+	for (i = 0; i < n * n && st == QAWS_STATUS_OK; i++)
+	{
+		poly* Mi = &P[8 + i];
+		qaws_exact_poly_zero(Mi, m);
+		for (k = 0; k <= m && st == QAWS_STATUS_OK; k++)
 		{
-			unsigned int c1 = (c + 1) % 3, c2 = (c + 2) % 3;
-			TRY(qaws_exact_int_mul(&t1, &P0[c1], &P1[c2]));
-			TRY(qaws_exact_int_mul(&t2, &P0[c2], &P1[c1]));
-			TRY(qaws_exact_int_sub(&t1, &t1, &t2));
-			TRY(qaws_exact_int_mul(&t1, &t1, &Q[c]));
-			TRY(qaws_exact_int_add(&fa[e], &fa[e], &t1));
+			qaws_exact_int t;
+			st = qaws_exact_int_mul(&t, &P[3].c[k], &B[i]);
+			if (st == QAWS_STATUS_OK) st = qaws_exact_int_add(&Mi->c[k], &Mi->c[k], &t);
+			if (st == QAWS_STATUS_OK) st = qaws_exact_int_mul(&t, &P[4].c[k], &B[n * n + i]);
+			if (st == QAWS_STATUS_OK) st = qaws_exact_int_add(&Mi->c[k], &Mi->c[k], &t);
+			if (st == QAWS_STATUS_OK) st = qaws_exact_int_mul(&t, &P[5].c[k], &B[2 * n * n + i]);
+			if (st == QAWS_STATUS_OK) st = qaws_exact_int_add(&Mi->c[k], &Mi->c[k], &t);
 		}
 	}
-	/* f along a span is (1 - u) f_0 + u f_1 (homogeneous Bernstein): root u = f0 / (f0 - f1) */
-	if (qaws_exact_int_is_zero(&fb[0]) && qaws_exact_int_is_zero(&fb[1]))
-		return QAWS_STATUS_CERTIFICATION_FAILED;   /* collinear */
-	if (qaws_exact_int_sign(&fb[0]) * qaws_exact_int_sign(&fb[1]) > 0 || qaws_exact_int_sign(&fa[0]) * qaws_exact_int_sign(&fa[1]) > 0)
+	if (st == QAWS_STATUS_OK)
+		st = det_cofactors(&P[8], n, R, C00, C01);
+	if (st == QAWS_STATUS_OK && pj->cz >= 0 && H)
+	{
+		/* H_i(r) = zI_i WS(r) - wI_i ZS(r) */
+		poly* Hc = &P[8 + n * n];
+		st = qaws_exact_poly_from_bernstein(I->h, n, D, (unsigned int)pj->cz, &P[6]);
+		if (st == QAWS_STATUS_OK) st = qaws_exact_poly_from_bernstein(S->h, m, D, (unsigned int)pj->cz, &P[7]);
+		for (i = 0; i <= n && st == QAWS_STATUS_OK; i++)
+		{
+			poly t;
+			st = qaws_exact_poly_scale(&Hc[i], &P[5], &P[6].c[i]);
+			if (st == QAWS_STATUS_OK) st = qaws_exact_poly_scale(&t, &P[7], &P[2].c[i]);
+			if (st == QAWS_STATUS_OK) st = qaws_exact_poly_acc(&Hc[i], &t, -1);
+		}
+		if (st == QAWS_STATUS_OK)
+			st = substitute(Hc, n, C01, C00, H);
+	}
+	cc_free(P);
+	cc_free(B);
+	return st;
+}
+
+/*
+ * Self-intersections inside one span: s != t with C(s) = C(t). The divided
+ * differences P(s, t) = (X(s) W(t) - X(t) W(s)) / (s - t) = sum Bez(X, W)_ij
+ * s^i t^j (and Q from Y) vanish there; their Bezout matrix in s (entries
+ * polynomials in t) gives R(t) and s = C01 / C00. Hgt = C01 - t C00 has the
+ * sign of C00 exactly when s > t; Hz the third divided difference (3D).
+ */
+static qaws_status build_self(qaws_exact_span const* sp, unsigned int D, proj const* pj, poly* R, poly* C00, poly* C01, poly* Hgt, poly* Hz)
+{
+	unsigned int n = sp->degree, k = n - 1, i, j;
+	poly* P;   /* X Y W Z, then Ps (k + 1), Qs (k + 1), Zs (k + 1), E (k k) */
+	qaws_exact_int* B;
+	qaws_status st = QAWS_STATUS_OK;
+	P = (poly*)cc_alloc(sizeof(poly) * (4 + 3 * (k + 1) + k * k));
+	B = (qaws_exact_int*)cc_alloc(sizeof(qaws_exact_int) * 3 * n * n);
+	if (!P || !B)
+	{
+		cc_free(P);
+		cc_free(B);
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	}
+	st = qaws_exact_poly_from_bernstein(sp->h, n, D, pj->c0, &P[0]);
+	if (st == QAWS_STATUS_OK) st = qaws_exact_poly_from_bernstein(sp->h, n, D, pj->c1, &P[1]);
+	if (st == QAWS_STATUS_OK) st = qaws_exact_poly_from_bernstein(sp->h, n, D, pj->w, &P[2]);
+	if (st == QAWS_STATUS_OK) st = bezout(&P[0], &P[2], n, &B[0]);
+	if (st == QAWS_STATUS_OK) st = bezout(&P[1], &P[2], n, &B[n * n]);
+	if (st == QAWS_STATUS_OK && pj->cz >= 0)
+	{
+		st = qaws_exact_poly_from_bernstein(sp->h, n, D, (unsigned int)pj->cz, &P[3]);
+		if (st == QAWS_STATUS_OK) st = bezout(&P[3], &P[2], n, &B[2 * n * n]);
+	}
+	/* coefficient of s^i: polynomials in t of degree k */
+	for (i = 0; i <= k && st == QAWS_STATUS_OK; i++)
+	{
+		poly* Ps = &P[4 + i];
+		poly* Qs = &P[4 + (k + 1) + i];
+		poly* Zs = &P[4 + 2 * (k + 1) + i];
+		qaws_exact_poly_zero(Ps, k);
+		qaws_exact_poly_zero(Qs, k);
+		qaws_exact_poly_zero(Zs, k);
+		for (j = 0; j <= k; j++)
+		{
+			Ps->c[j] = B[i * n + j];
+			Qs->c[j] = B[n * n + i * n + j];
+			if (pj->cz >= 0)
+				Zs->c[j] = B[2 * n * n + i * n + j];
+		}
+	}
+	if (st == QAWS_STATUS_OK)
+		st = bezout_poly(&P[4], &P[4 + (k + 1)], k, &P[4 + 3 * (k + 1)]);
+	if (st == QAWS_STATUS_OK)
+		st = det_cofactors(&P[4 + 3 * (k + 1)], k, R, C00, C01);
+	if (st == QAWS_STATUS_OK)
+	{
+		/* Hgt = C01 - t C00 */
+		poly tq;
+		qaws_exact_poly_zero(&tq, 0);
+		st = qaws_exact_poly_pad(&tq, C00->deg + 1);
+		for (i = 0; i <= C00->deg && st == QAWS_STATUS_OK; i++)
+			tq.c[i + 1] = C00->c[i];
+		*Hgt = *C01;
+		if (st == QAWS_STATUS_OK) st = qaws_exact_poly_acc(Hgt, &tq, -1);
+	}
+	if (st == QAWS_STATUS_OK && pj->cz >= 0 && Hz)
+		st = substitute(&P[4 + 2 * (k + 1)], k, C01, C00, Hz);
+	cc_free(P);
+	cc_free(B);
+	return st;
+}
+
+/* Is some coordinate (or the sum / difference of two) strictly monotone on the span? Then it cannot self-intersect. */
+static qaws_status span_monotone(qaws_exact_span const* sp, unsigned int dim, int* out)
+{
+	unsigned int n = sp->degree, D = dim + 1, c, d, i;
+	poly* P;   /* X_0.. X_dim-1, W, dX_c (dim), dW, N_c (dim), comb, scratch */
+	qaws_exact_int b[CC_COEF];
+	qaws_status st = QAWS_STATUS_OK;
+	*out = 0;
+	if (n <= 1)
+	{
+		*out = 1;
 		return QAWS_STATUS_OK;
-	TRY(qaws_exact_int_sub(&den, &fb[0], &fb[1]));
-	ratio_enclose(&fb[0], &den, &r_lo, &r_hi, &sb_ex);
-	if (skip_b && qaws_exact_int_is_zero(&fb[0]))
+	}
+	if (2 * n - 1 > QAWS_EXACT_ROOTS_MAX_DEGREE)
 		return QAWS_STATUS_OK;
-	num = fa[0];
-	TRY(qaws_exact_int_sub(&den, &fa[0], &fa[1]));
-	ratio_enclose(&num, &den, &s_lo, &s_hi, &sa_ex);
-	if (skip_a && qaws_exact_int_is_zero(&fa[0]))
-		return QAWS_STATUS_OK;
-	span_param_enclose(A, ca->param_shift, s_lo, s_hi, sa_ex, &a_lo, &a_hi);
-	span_param_enclose(B, cb->param_shift, r_lo, r_hi, sb_ex, &b_lo, &b_hi);
+	P = (poly*)cc_alloc(sizeof(poly) * (3 * dim + 4));
+	if (!P)
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	for (c = 0; c <= dim && st == QAWS_STATUS_OK; c++)
+		st = qaws_exact_poly_from_bernstein(sp->h, n, D, c, &P[c]);   /* P[dim] = W */
+	/* N_c = X_c' W - X_c W' */
+	{
+		poly* dW = &P[2 * dim + 1];
+		qaws_exact_poly_zero(dW, n - 1);
+		for (i = 1; i <= n && st == QAWS_STATUS_OK; i++)
+			st = qaws_exact_int_mul_i64(&dW->c[i - 1], &P[dim].c[i], (int64_t)i);
+		for (c = 0; c < dim && st == QAWS_STATUS_OK; c++)
+		{
+			poly* dX = &P[dim + 1 + c];
+			poly* Nc = &P[2 * dim + 2 + c];
+			poly t;
+			qaws_exact_poly_zero(dX, n - 1);
+			for (i = 1; i <= n && st == QAWS_STATUS_OK; i++)
+				st = qaws_exact_int_mul_i64(&dX->c[i - 1], &P[c].c[i], (int64_t)i);
+			if (st == QAWS_STATUS_OK) st = qaws_exact_poly_mul(Nc, dX, &P[dim]);
+			if (st == QAWS_STATUS_OK) st = qaws_exact_poly_mul(&t, &P[c], dW);
+			if (st == QAWS_STATUS_OK) st = qaws_exact_poly_acc(Nc, &t, -1);
+			if (st == QAWS_STATUS_OK) st = qaws_exact_poly_pad(Nc, 2 * n - 1);
+		}
+	}
+	/* candidate directions: each coordinate (d == c), then sums and differences of two */
+	for (c = 0; c < dim && st == QAWS_STATUS_OK && !*out; c++)
+		for (d = c; d < dim && st == QAWS_STATUS_OK && !*out; d++)
+		{
+			int sgn;
+			for (sgn = (d == c ? 1 : -1); sgn <= 1 && st == QAWS_STATUS_OK && !*out; sgn += 2)
+			{
+				poly* comb = &P[3 * dim + 2];
+				int neg = 0, pos = 0;
+				*comb = P[2 * dim + 2 + c];
+				if (d != c)
+					st = qaws_exact_poly_acc(comb, &P[2 * dim + 2 + d], sgn);
+				if (st == QAWS_STATUS_OK) st = qaws_exact_poly_to_bernstein(comb, b);
+				for (i = 0; i <= comb->deg && st == QAWS_STATUS_OK; i++)
+				{
+					int s = qaws_exact_int_sign(&b[i]);
+					if (s < 0) neg = 1;
+					if (s > 0) pos = 1;
+				}
+				/* one strict sign, the rest zero: a non-zero polynomial of one sign, the coordinate strictly monotone */
+				if (neg != pos)
+					*out = 1;
+			}
+		}
+	cc_free(P);
+	return st;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Span against span                                                  */
+/* ------------------------------------------------------------------ */
+
+typedef struct span_hit
+{
+	double a_lo, a_hi, b_lo, b_hi;   /* parameters on the first and second span */
+	int exact;
+	int a_exact_end, b_exact_start;  /* a exactly at its span's end / b exactly at its start, a exactly at start, b at end */
+	int a_exact_start, b_exact_end;
+} span_hit;
+
+static qaws_status emit_cross(qaws_exact_span const* I, int ishift, qaws_exact_span const* S, int sshift, local_hit const* lh, int i_is_a,
+	span_hit* out, unsigned int capacity, unsigned int* count)
+{
+	double s_lo, s_hi, r_lo, r_hi;
+	int s_ex, r_ex;
+	span_hit h;
+	qaws_status st;
+	TRY(map_s(I, ishift, lh, &s_lo, &s_hi, &s_ex));
+	TRY(map_r(S, sshift, &lh->r, &r_lo, &r_hi, &r_ex));
+	h.exact = s_ex && r_ex && lh->s_exact && lh->r.exact;
+	if (i_is_a)
+	{
+		h.a_lo = s_lo; h.a_hi = s_hi; h.b_lo = r_lo; h.b_hi = r_hi;
+		h.a_exact_start = s_is(lh, 0);
+		h.a_exact_end = s_is(lh, 1);
+		h.b_exact_start = lh->r.exact && lh->r.index == 0;
+		h.b_exact_end = lh->r.exact && lh->r.index == ((uint64_t)1 << lh->r.depth);
+	}
+	else
+	{
+		h.a_lo = r_lo; h.a_hi = r_hi; h.b_lo = s_lo; h.b_hi = s_hi;
+		h.a_exact_start = lh->r.exact && lh->r.index == 0;
+		h.a_exact_end = lh->r.exact && lh->r.index == ((uint64_t)1 << lh->r.depth);
+		h.b_exact_start = s_is(lh, 0);
+		h.b_exact_end = s_is(lh, 1);
+	}
 	if (*count >= capacity)
 		return QAWS_STATUS_BUFFER_TOO_SMALL;
-	out[*count].imp_lo = a_lo;
-	out[*count].imp_hi = a_hi;
-	out[*count].sub_lo = b_lo;
-	out[*count].sub_hi = b_hi;
-	out[*count].exact = sa_ex && sb_ex;
-	(*count)++;
+	out[(*count)++] = h;
+	return QAWS_STATUS_OK;
+}
+
+/* Implicitize I, substitute S, over the projections until one is not degenerate. */
+static qaws_status cross_spans(qaws_exact_span const* I, int ishift, qaws_exact_span const* S, int sshift, unsigned int dim, int i_is_a, span_hit* out,
+	unsigned int capacity, unsigned int* count, int* common)
+{
+	proj pj[3];
+	unsigned int np = projections(dim, pj), p, nl = 0, k;
+	poly* sys;   /* R C00 C01 H */
+	local_hit* lh;
+	qaws_status st = QAWS_STATUS_CERTIFICATION_FAILED;
+	*common = 1;
+	if (I->degree < 2 || I->degree > CC_MAX_IMPLICIT || I->degree * S->degree > QAWS_EXACT_ROOTS_MAX_DEGREE)
+	{
+		*common = 0;
+		return QAWS_STATUS_EXACT_UNSUPPORTED;
+	}
+	sys = (poly*)cc_alloc(sizeof(poly) * 4);
+	lh = (local_hit*)cc_alloc(sizeof(local_hit) * CC_MAX_ROOTS);
+	if (!sys || !lh)
+	{
+		cc_free(sys);
+		cc_free(lh);
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	}
+	for (p = 0; p < np; p++)
+	{
+		constraint con;
+		int com = 0;
+		st = build_cross(I, S, dim + 1, &pj[p], &sys[0], &sys[1], &sys[2], &sys[3]);
+		if (st != QAWS_STATUS_OK)
+		{
+			*common = 0;
+			break;
+		}
+		con.kind = CON_ZERO;
+		con.H = &sys[3];
+		st = solve_system(&sys[0], &sys[1], &sys[2], &con, pj[p].cz >= 0 ? 1u : 0u, lh, CC_MAX_ROOTS, &nl, &com);
+		if (com)
+			continue;   /* this projection is degenerate (or shared): the next one */
+		*common = 0;
+		for (k = 0; k < nl && st == QAWS_STATUS_OK; k++)
+			st = emit_cross(I, ishift, S, sshift, &lh[k], i_is_a, out, capacity, count);
+		break;
+	}
+	cc_free(sys);
+	cc_free(lh);
+	return st;
+}
+
+/* Two segments: the exact linear roots in a projection where they are not parallel, the remaining coordinate checked exactly. */
+static qaws_status cross_segments(qaws_exact_span const* A, int ashift, qaws_exact_span const* B, int bshift, unsigned int dim, span_hit* out,
+	unsigned int capacity, unsigned int* count, int* common)
+{
+	proj pj[3];
+	unsigned int np = projections(dim, pj), p, D = dim + 1, e, c;
+	qaws_status st;
+	*common = 1;
+	for (p = 0; p < np; p++)
+	{
+		unsigned int idx[3];
+		qaws_exact_int fa[2], fb[2], den, t1, t2;
+		local_hit ha, hb;
+		idx[0] = pj[p].c0;
+		idx[1] = pj[p].c1;
+		idx[2] = pj[p].w;
+		/* f(Q) = det(P0, P1, Q) in the projection: zero on the other segment's line */
+		for (e = 0; e < 2; e++)
+		{
+			unsigned int side;
+			for (side = 0; side < 2; side++)
+			{
+				qaws_exact_span const* L = side == 0 ? A : B;
+				qaws_exact_span const* T = side == 0 ? B : A;
+				qaws_exact_int* f = side == 0 ? &fb[e] : &fa[e];
+				qaws_exact_int_zero(f);
+				for (c = 0; c < 3; c++)
+				{
+					unsigned int c1 = idx[(c + 1) % 3], c2 = idx[(c + 2) % 3];
+					TRY(qaws_exact_int_mul(&t1, &L->h[c1], &L->h[D + c2]));
+					TRY(qaws_exact_int_mul(&t2, &L->h[c2], &L->h[D + c1]));
+					TRY(qaws_exact_int_sub(&t1, &t1, &t2));
+					TRY(qaws_exact_int_mul(&t1, &t1, &T->h[e * D + idx[c]]));
+					TRY(qaws_exact_int_add(f, f, &t1));
+				}
+			}
+		}
+		if (qaws_exact_int_is_zero(&fb[0]) && qaws_exact_int_is_zero(&fb[1]))
+			continue;   /* collinear in this projection */
+		*common = 0;
+		if (qaws_exact_int_sign(&fb[0]) * qaws_exact_int_sign(&fb[1]) > 0 || qaws_exact_int_sign(&fa[0]) * qaws_exact_int_sign(&fa[1]) > 0)
+			return QAWS_STATUS_OK;
+		/* r on B: f0 / (f0 - f1); s on A likewise */
+		memset(&ha, 0, sizeof(ha));
+		memset(&hb, 0, sizeof(hb));
+		hb.s_exact = 1;
+		hb.s_num = fb[0];
+		TRY(qaws_exact_int_sub(&den, &fb[0], &fb[1]));
+		hb.s_den = den;
+		ha.s_exact = 1;
+		ha.s_num = fa[0];
+		TRY(qaws_exact_int_sub(&den, &fa[0], &fa[1]));
+		ha.s_den = den;
+		if (qaws_exact_int_sign(&ha.s_den) < 0) { qaws_exact_int_neg(&ha.s_num, &ha.s_num); qaws_exact_int_neg(&ha.s_den, &ha.s_den); }
+		if (qaws_exact_int_sign(&hb.s_den) < 0) { qaws_exact_int_neg(&hb.s_num, &hb.s_num); qaws_exact_int_neg(&hb.s_den, &hb.s_den); }
+		if (pj[p].cz >= 0)
+		{
+			/* the remaining coordinate: Z_A(s) W_B(r) == Z_B(r) W_A(s) with homogeneous s = sn : (sd - sn) */
+			qaws_exact_int za, wa, zb, wb, l, r, u;
+			unsigned int z = (unsigned int)pj[p].cz, w = pj[p].w;
+			TRY(qaws_exact_int_sub(&u, &ha.s_den, &ha.s_num));
+			TRY(qaws_exact_int_mul(&za, &A->h[z], &u));
+			TRY(qaws_exact_int_mul(&t1, &A->h[D + z], &ha.s_num));
+			TRY(qaws_exact_int_add(&za, &za, &t1));
+			TRY(qaws_exact_int_mul(&wa, &A->h[w], &u));
+			TRY(qaws_exact_int_mul(&t1, &A->h[D + w], &ha.s_num));
+			TRY(qaws_exact_int_add(&wa, &wa, &t1));
+			TRY(qaws_exact_int_sub(&u, &hb.s_den, &hb.s_num));
+			TRY(qaws_exact_int_mul(&zb, &B->h[z], &u));
+			TRY(qaws_exact_int_mul(&t1, &B->h[D + z], &hb.s_num));
+			TRY(qaws_exact_int_add(&zb, &zb, &t1));
+			TRY(qaws_exact_int_mul(&wb, &B->h[w], &u));
+			TRY(qaws_exact_int_mul(&t1, &B->h[D + w], &hb.s_num));
+			TRY(qaws_exact_int_add(&wb, &wb, &t1));
+			TRY(qaws_exact_int_mul(&l, &za, &wb));
+			TRY(qaws_exact_int_mul(&r, &zb, &wa));
+			if (qaws_exact_int_cmp(&l, &r) != 0)
+				return QAWS_STATUS_OK;
+		}
+		{
+			span_hit h;
+			int ea = 0, eb = 0;
+			TRY(map_s(A, ashift, &ha, &h.a_lo, &h.a_hi, &ea));
+			TRY(map_s(B, bshift, &hb, &h.b_lo, &h.b_hi, &eb));
+			h.exact = ea && eb;
+			h.a_exact_start = s_is(&ha, 0);
+			h.a_exact_end = s_is(&ha, 1);
+			h.b_exact_start = s_is(&hb, 0);
+			h.b_exact_end = s_is(&hb, 1);
+			if (*count >= capacity)
+				return QAWS_STATUS_BUFFER_TOO_SMALL;
+			out[(*count)++] = h;
+		}
+		return QAWS_STATUS_OK;
+	}
+	return QAWS_STATUS_CERTIFICATION_FAILED;   /* collinear in every projection */
+}
+
+/* Span A against span B (any degrees): implicitize the lower degree, the other on failure. */
+static qaws_status span_pair(qaws_exact_span const* A, int ashift, qaws_exact_span const* B, int bshift, unsigned int dim, span_hit* out,
+	unsigned int capacity, unsigned int* count, int* common)
+{
+	unsigned int na = A->degree, nb = B->degree, start = *count;
+	int a_first, com2 = 0;
+	qaws_status st;
+	if (na == 1 && nb == 1)
+		return cross_segments(A, ashift, B, bshift, dim, out, capacity, count, common);
+	a_first = na >= 2 && (na <= nb || nb < 2);
+	st = a_first ? cross_spans(A, ashift, B, bshift, dim, 1, out, capacity, count, common)
+	             : cross_spans(B, bshift, A, ashift, dim, 0, out, capacity, count, common);
+	if ((st == QAWS_STATUS_CERTIFICATION_FAILED || st == QAWS_STATUS_EXACT_UNSUPPORTED) && (a_first ? nb : na) >= 2)
+	{
+		qaws_status st2;
+		*count = start;
+		st2 = a_first ? cross_spans(B, bshift, A, ashift, dim, 0, out, capacity, count, &com2)
+		              : cross_spans(A, ashift, B, bshift, dim, 1, out, capacity, count, &com2);
+		if (st2 == QAWS_STATUS_OK)
+		{
+			*common = 0;
+			return st2;
+		}
+		*common = *common && com2;
+		*count = start;
+	}
+	return st;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Point inversion (for spans on one algebraic curve)                 */
+/* ------------------------------------------------------------------ */
+
+/* Homogeneous point of a span at local s = 0, 1 or 1/2 (times a positive factor). */
+static qaws_status span_point(qaws_exact_span const* sp, unsigned int D, int which, qaws_exact_int* P)
+{
+	unsigned int n = sp->degree, i, c;
+	qaws_exact_int t;
+	qaws_status st;
+	for (c = 0; c < D; c++)
+	{
+		if (which == 0)
+			P[c] = sp->h[c];
+		else if (which == 1)
+			P[c] = sp->h[n * D + c];
+		else
+		{
+			qaws_exact_int_zero(&P[c]);
+			for (i = 0; i <= n; i++)
+			{
+				TRY(qaws_exact_int_mul_i64(&t, &sp->h[i * D + c], qaws_exact_binom64(n, i)));
+				TRY(qaws_exact_int_add(&P[c], &P[c], &t));
+			}
+		}
+	}
+	return QAWS_STATUS_OK;
+}
+
+/*
+ * The local parameter of the point E on span I's curve: s = num / den.
+ * *on = 0 when E is not on the curve. Segments: E = l I0 + m I1, s = m / (l + m);
+ * higher degrees: the cofactors of M(E). QAWS_STATUS_CERTIFICATION_FAILED at
+ * a singular point.
+ */
+static qaws_status invert_point(qaws_exact_span const* I, unsigned int dim, qaws_exact_int const* E, qaws_exact_int* num, qaws_exact_int* den, int* on)
+{
+	unsigned int D = dim + 1, n = I->degree, i, c;
+	proj pj[3];
+	unsigned int np = projections(dim, pj), p;
+	qaws_status st = QAWS_STATUS_OK;
+	*on = 0;
+	if (n == 1)
+	{
+		/* in a (c, w) plane where I0, I1 differ: l = det(E, I1), m = det(I0, E) */
+		for (c = 0; c < dim; c++)
+		{
+			qaws_exact_int d, l, m, t1, t2;
+			TRY(qaws_exact_int_mul(&t1, &I->h[c], &I->h[D + dim]));
+			TRY(qaws_exact_int_mul(&t2, &I->h[dim], &I->h[D + c]));
+			TRY(qaws_exact_int_sub(&d, &t1, &t2));
+			if (qaws_exact_int_is_zero(&d))
+				continue;
+			TRY(qaws_exact_int_mul(&t1, &E[c], &I->h[D + dim]));
+			TRY(qaws_exact_int_mul(&t2, &E[dim], &I->h[D + c]));
+			TRY(qaws_exact_int_sub(&l, &t1, &t2));
+			TRY(qaws_exact_int_mul(&t1, &I->h[c], &E[dim]));
+			TRY(qaws_exact_int_mul(&t2, &I->h[dim], &E[c]));
+			TRY(qaws_exact_int_sub(&m, &t1, &t2));
+			/* every component: d E == l I0 + m I1 */
+			for (i = 0; i < D; i++)
+			{
+				qaws_exact_int lhs, rhs;
+				TRY(qaws_exact_int_mul(&lhs, &d, &E[i]));
+				TRY(qaws_exact_int_mul(&rhs, &l, &I->h[i]));
+				TRY(qaws_exact_int_mul(&t1, &m, &I->h[D + i]));
+				TRY(qaws_exact_int_add(&rhs, &rhs, &t1));
+				if (qaws_exact_int_cmp(&lhs, &rhs) != 0)
+					return QAWS_STATUS_OK;
+			}
+			TRY(qaws_exact_int_add(den, &l, &m));
+			*num = m;
+			if (qaws_exact_int_is_zero(den))
+				return QAWS_STATUS_OK;   /* the point at infinity of the line */
+			if (qaws_exact_int_sign(den) < 0)
+			{
+				qaws_exact_int_neg(num, num);
+				qaws_exact_int_neg(den, den);
+			}
+			*on = 1;
+			return QAWS_STATUS_OK;
+		}
+		return QAWS_STATUS_CERTIFICATION_FAILED;
+	}
+	for (p = 0; p < np; p++)
+	{
+		poly* M;
+		qaws_exact_int* B;
+		poly* sys;
+		M = (poly*)cc_alloc(sizeof(poly) * (n * n + 3 + 3));
+		B = (qaws_exact_int*)cc_alloc(sizeof(qaws_exact_int) * 3 * n * n);
+		if (!M || !B)
+		{
+			cc_free(M);
+			cc_free(B);
+			return QAWS_STATUS_ALLOCATION_FAILURE;
+		}
+		sys = &M[n * n];
+		st = qaws_exact_poly_from_bernstein(I->h, n, D, pj[p].c0, &sys[3]);
+		if (st == QAWS_STATUS_OK) st = qaws_exact_poly_from_bernstein(I->h, n, D, pj[p].c1, &sys[4]);
+		if (st == QAWS_STATUS_OK) st = qaws_exact_poly_from_bernstein(I->h, n, D, pj[p].w, &sys[5]);
+		if (st == QAWS_STATUS_OK) st = bezout(&sys[4], &sys[5], n, &B[0]);
+		if (st == QAWS_STATUS_OK) st = bezout(&sys[5], &sys[3], n, &B[n * n]);
+		if (st == QAWS_STATUS_OK) st = bezout(&sys[3], &sys[4], n, &B[2 * n * n]);
+		for (i = 0; i < n * n && st == QAWS_STATUS_OK; i++)
+		{
+			qaws_exact_int t;
+			qaws_exact_poly_zero(&M[i], 0);
+			st = qaws_exact_int_mul(&t, &E[pj[p].c0], &B[i]);
+			if (st == QAWS_STATUS_OK) st = qaws_exact_int_add(&M[i].c[0], &M[i].c[0], &t);
+			if (st == QAWS_STATUS_OK) st = qaws_exact_int_mul(&t, &E[pj[p].c1], &B[n * n + i]);
+			if (st == QAWS_STATUS_OK) st = qaws_exact_int_add(&M[i].c[0], &M[i].c[0], &t);
+			if (st == QAWS_STATUS_OK) st = qaws_exact_int_mul(&t, &E[pj[p].w], &B[2 * n * n + i]);
+			if (st == QAWS_STATUS_OK) st = qaws_exact_int_add(&M[i].c[0], &M[i].c[0], &t);
+		}
+		if (st == QAWS_STATUS_OK)
+			st = det_cofactors(M, n, &sys[0], &sys[1], &sys[2]);
+		if (st == QAWS_STATUS_OK)
+		{
+			int degenerate = 1;
+			for (i = 0; i < n * n && degenerate; i++)
+				if (!qaws_exact_int_is_zero(&B[i]) || !qaws_exact_int_is_zero(&B[n * n + i]) || !qaws_exact_int_is_zero(&B[2 * n * n + i]))
+					degenerate = 0;
+			if (!qaws_exact_int_is_zero(&sys[0].c[0]))
+			{
+				/* not on the curve's projection */
+				cc_free(M);
+				cc_free(B);
+				return QAWS_STATUS_OK;
+			}
+			if (qaws_exact_int_is_zero(&sys[1].c[0]))
+			{
+				/* kernel (0, ..., 0, 1): the parameter's point at infinity, on the curve but off
+				   the span. M's last row and column vanish, adj(M) is a multiple of e e^T and its
+				   one non-zero entry is the leading (n - 1) x (n - 1) minor. */
+				int at_inf = 0;
+				if (!degenerate && n >= 2)
+				{
+					poly* sub = (poly*)cc_alloc(sizeof(poly) * ((n - 1) * (n - 1) + 1));
+					unsigned int r2, c2;
+					if (sub)
+					{
+						for (r2 = 0; r2 + 1 < n; r2++)
+							for (c2 = 0; c2 + 1 < n; c2++)
+								sub[r2 * (n - 1) + c2] = M[r2 * n + c2];
+						if (qaws_exact_poly_det(sub, n - 1, 0, 0, &sub[(n - 1) * (n - 1)]) == QAWS_STATUS_OK &&
+						    !qaws_exact_int_is_zero(&sub[(n - 1) * (n - 1)].c[0]))
+						{
+							/* and the last column of M is zero: e_(n-1) is the kernel */
+							at_inf = 1;
+							for (r2 = 0; r2 < n; r2++)
+								if (!qaws_exact_int_is_zero(&M[r2 * n + n - 1].c[0]))
+									at_inf = 0;
+						}
+						cc_free(sub);
+					}
+				}
+				cc_free(M);
+				cc_free(B);
+				if (at_inf)
+				{
+					qaws_exact_int_from_i64(num, 1);
+					qaws_exact_int_zero(den);
+					*on = 1;
+					return QAWS_STATUS_OK;
+				}
+				if (degenerate && p + 1 < np)
+					continue;
+				return QAWS_STATUS_CERTIFICATION_FAILED;   /* singular point, or a degenerate span */
+			}
+			*num = sys[2].c[0];
+			*den = sys[1].c[0];
+			if (qaws_exact_int_sign(den) < 0)
+			{
+				qaws_exact_int_neg(num, num);
+				qaws_exact_int_neg(den, den);
+			}
+			/* 3D: the remaining coordinate at s, exactly: Z(s) W_E == Z_E W(s) */
+			if (pj[p].cz >= 0)
+			{
+				qaws_exact_int z, w, pw, t, l, r;
+				poly Zp;
+				unsigned int k;
+				st = qaws_exact_poly_from_bernstein(I->h, n, D, (unsigned int)pj[p].cz, &Zp);
+				qaws_exact_int_zero(&z);
+				qaws_exact_int_zero(&w);
+				for (k = 0; k <= n && st == QAWS_STATUS_OK; k++)
+				{
+					/* num^k den^(n - k) */
+					unsigned int j;
+					qaws_exact_int_from_i64(&pw, 1);
+					for (j = 0; j < k && st == QAWS_STATUS_OK; j++) st = qaws_exact_int_mul(&pw, &pw, num);
+					for (j = k; j < n && st == QAWS_STATUS_OK; j++) st = qaws_exact_int_mul(&pw, &pw, den);
+					if (st == QAWS_STATUS_OK) st = qaws_exact_int_mul(&t, &Zp.c[k], &pw);
+					if (st == QAWS_STATUS_OK) st = qaws_exact_int_add(&z, &z, &t);
+					if (st == QAWS_STATUS_OK) st = qaws_exact_int_mul(&t, &sys[5].c[k], &pw);
+					if (st == QAWS_STATUS_OK) st = qaws_exact_int_add(&w, &w, &t);
+				}
+				if (st == QAWS_STATUS_OK) st = qaws_exact_int_mul(&l, &z, &E[pj[p].w]);
+				if (st == QAWS_STATUS_OK) st = qaws_exact_int_mul(&r, &E[pj[p].cz], &w);
+				if (st == QAWS_STATUS_OK && qaws_exact_int_cmp(&l, &r) != 0)
+				{
+					cc_free(M);
+					cc_free(B);
+					return QAWS_STATUS_OK;
+				}
+			}
+			*on = st == QAWS_STATUS_OK;
+		}
+		cc_free(M);
+		cc_free(B);
+		return st;
+	}
+	return QAWS_STATUS_CERTIFICATION_FAILED;
+}
+
+/* where in [0, 1]: -1 outside, 0 at 0, 1 inside, 2 at 1 */
+static int classify01(qaws_exact_int const* num, qaws_exact_int const* den)
+{
+	int s = qaws_exact_int_sign(num), c = qaws_exact_int_cmp(num, den);
+	if (qaws_exact_int_is_zero(den))
+		return -1;   /* the parameter at infinity */
+	if (s < 0 || c > 0)
+		return -1;
+	if (s == 0)
+		return 0;
+	return c == 0 ? 2 : 1;
+}
+
+/*
+ * Two spans on one algebraic curve: they overlap, or touch at endpoints.
+ * Each endpoint of one is inverted on the other; an inversion strictly
+ * inside is an overlap (QAWS_STATUS_CERTIFICATION_FAILED), endpoint-to-
+ * endpoint contacts are hits. When every endpoint lands on an endpoint the
+ * arcs coincide or complete each other: B's midpoint decides.
+ */
+static qaws_status common_spans(qaws_exact_span const* A, int ashift, qaws_exact_span const* B, int bshift, unsigned int dim, span_hit* out,
+	unsigned int capacity, unsigned int* count)
+{
+	unsigned int D = dim + 1, e;
+	qaws_exact_int P[4], num, den;
+	int on, cls, all_ends = 1;
+	qaws_status st;
+	/* endpoints of B on A */
+	for (e = 0; e < 2; e++)
+	{
+		TRY(span_point(B, D, (int)e, P));
+		st = invert_point(A, dim, P, &num, &den, &on);
+		if (st != QAWS_STATUS_OK) return st;
+		if (!on)
+		{
+			all_ends = 0;
+			continue;
+		}
+		cls = classify01(&num, &den);
+		if (cls == 1)
+			return QAWS_STATUS_CERTIFICATION_FAILED;   /* overlap */
+		if (cls < 0)
+		{
+			all_ends = 0;
+			continue;
+		}
+		{
+			span_hit h;
+			memset(&h, 0, sizeof(h));
+			h.a_lo = h.a_hi = ldexp((double)(cls == 0 ? A->a : A->b), -ashift);
+			h.b_lo = h.b_hi = ldexp((double)(e == 0 ? B->a : B->b), -bshift);
+			h.exact = 1;
+			h.a_exact_start = cls == 0;
+			h.a_exact_end = cls == 2;
+			h.b_exact_start = e == 0;
+			h.b_exact_end = e == 1;
+			if (*count >= capacity)
+				return QAWS_STATUS_BUFFER_TOO_SMALL;
+			out[(*count)++] = h;
+		}
+	}
+	/* endpoints of A strictly inside B: overlap */
+	for (e = 0; e < 2; e++)
+	{
+		TRY(span_point(A, D, (int)e, P));
+		st = invert_point(B, dim, P, &num, &den, &on);
+		if (st != QAWS_STATUS_OK) return st;
+		if (on && classify01(&num, &den) == 1)
+			return QAWS_STATUS_CERTIFICATION_FAILED;
+	}
+	if (all_ends)
+	{
+		TRY(span_point(B, D, 2, P));
+		st = invert_point(A, dim, P, &num, &den, &on);
+		if (st != QAWS_STATUS_OK) return st;
+		if (on && classify01(&num, &den) == 1)
+			return QAWS_STATUS_CERTIFICATION_FAILED;   /* the same arc */
+	}
+	return QAWS_STATUS_OK;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Public                                                             */
+/* ------------------------------------------------------------------ */
+
+static void sort_pairs(qaws_exact_pair* p, unsigned int n)
+{
+	unsigned int i;
+	for (i = 1; i < n; i++)
+	{
+		qaws_exact_pair key = p[i];
+		int j = (int)i - 1;
+		while (j >= 0 && (p[j].a_lo > key.a_lo || (p[j].a_lo == key.a_lo && p[j].b_lo > key.b_lo)))
+		{
+			p[j + 1] = p[j];
+			j--;
+		}
+		p[j + 1] = key;
+	}
+}
+
+static qaws_status push_pair(qaws_exact_pair* out, unsigned int capacity, unsigned int* count, span_hit const* h, int swap)
+{
+	qaws_exact_pair p;
+	if (*count >= capacity)
+		return QAWS_STATUS_BUFFER_TOO_SMALL;
+	p.kind = h->exact ? QAWS_EXACT_HIT_POINT : QAWS_EXACT_HIT_CROSSING;
+	p.a_lo = swap ? h->b_lo : h->a_lo;
+	p.a_hi = swap ? h->b_hi : h->a_hi;
+	p.b_lo = swap ? h->a_lo : h->b_lo;
+	p.b_hi = swap ? h->a_hi : h->b_hi;
+	out[(*count)++] = p;
 	return QAWS_STATUS_OK;
 }
 
 qaws_status qaws_exact_curve_curve_hits(qaws_exact_curve const* a, qaws_exact_curve const* b, qaws_exact_pair* out_pairs, unsigned int capacity,
 	unsigned int* out_count)
 {
-	unsigned int ia, ib, k, count = 0;
+	unsigned int ia, ib, k, count = 0, dim;
+	span_hit* hits;
 	qaws_status st = QAWS_STATUS_OK;
-	span_hit hits[CC_MAX_ROOTS];
-	if (!a || !b || !out_count || (!out_pairs && capacity) || a->dimension != 2 || b->dimension != 2)
+	if (!a || !b || !out_count || (!out_pairs && capacity) || a->dimension != b->dimension || (a->dimension != 2 && a->dimension != 3))
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	*out_count = 0;
 	if (a->space_exp2 != b->space_exp2)
 		return QAWS_STATUS_EXACT_INCOMPATIBLE_SPACE;
+	dim = (unsigned int)a->dimension;
+	hits = (span_hit*)cc_alloc(sizeof(span_hit) * CC_MAX_ROOTS);
+	if (!hits)
+		return QAWS_STATUS_ALLOCATION_FAILURE;
 	for (ia = 0; ia < a->span_count && st == QAWS_STATUS_OK; ia++)
 		for (ib = 0; ib < b->span_count && st == QAWS_STATUS_OK; ib++)
 		{
-			unsigned int na = a->spans[ia].degree, nb = b->spans[ib].degree, nh = 0;
-			int swap;
-			if (na == 1 && nb == 1)
+			unsigned int nh = 0;
+			int common = 0;
+			st = span_pair(&a->spans[ia], a->param_shift, &b->spans[ib], b->param_shift, dim, hits, CC_MAX_ROOTS, &nh, &common);
+			if (st == QAWS_STATUS_CERTIFICATION_FAILED && common)
+				st = QAWS_STATUS_CERTIFICATION_FAILED;   /* a common component: the curves overlap or share their support */
+			for (k = 0; k < nh && st == QAWS_STATUS_OK; k++)
 			{
-				st = segment_pair(a, ia, b, ib, ia > 0, ib > 0, hits, CC_MAX_ROOTS, &nh);
-				swap = 0;
+				/* a knot point is reported by the span it ends */
+				if ((ib > 0 && hits[k].b_exact_start) || (ia > 0 && hits[k].a_exact_start))
+					continue;
+				st = push_pair(out_pairs, capacity, &count, &hits[k], 0);
 			}
-			else
+		}
+	cc_free(hits);
+	sort_pairs(out_pairs, count);
+	*out_count = count;
+	return st;
+}
+
+/* Is the curve closed (its start and end the same point, exactly)? */
+static int curve_closed(qaws_exact_curve const* c)
+{
+	unsigned int D = (unsigned int)c->dimension + 1, i;
+	qaws_exact_span const* f = &c->spans[0];
+	qaws_exact_span const* l = &c->spans[c->span_count - 1];
+	qaws_exact_int x, y;
+	for (i = 0; i < D - 1; i++)
+	{
+		/* f0_i l_w == l_i f0_w */
+		if (qaws_exact_int_mul(&x, &f->h[i], &l->h[l->degree * D + D - 1]) != QAWS_STATUS_OK ||
+		    qaws_exact_int_mul(&y, &l->h[l->degree * D + i], &f->h[D - 1]) != QAWS_STATUS_OK)
+			return 0;
+		if (qaws_exact_int_cmp(&x, &y) != 0)
+			return 0;
+	}
+	return 1;
+}
+
+qaws_status qaws_exact_curve_self_hits(qaws_exact_curve const* curve, qaws_exact_pair* out_pairs, unsigned int capacity, unsigned int* out_count)
+{
+	unsigned int i, j, k, count = 0, dim;
+	span_hit* hits;
+	poly* sys;
+	local_hit* lh;
+	int closed;
+	double t_start, t_end;
+	qaws_status st = QAWS_STATUS_OK;
+	if (!curve || !out_count || (!out_pairs && capacity) || (curve->dimension != 2 && curve->dimension != 3))
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	*out_count = 0;
+	dim = (unsigned int)curve->dimension;
+	closed = curve_closed(curve);
+	t_start = ldexp((double)curve->spans[0].a, -curve->param_shift);
+	t_end = ldexp((double)curve->spans[curve->span_count - 1].b, -curve->param_shift);
+	hits = (span_hit*)cc_alloc(sizeof(span_hit) * CC_MAX_ROOTS);
+	sys = (poly*)cc_alloc(sizeof(poly) * 5);
+	lh = (local_hit*)cc_alloc(sizeof(local_hit) * CC_MAX_ROOTS);
+	if (!hits || !sys || !lh)
+	{
+		cc_free(hits);
+		cc_free(sys);
+		cc_free(lh);
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	}
+	for (i = 0; i < curve->span_count && st == QAWS_STATUS_OK; i++)
+	{
+		qaws_exact_span const* sp = &curve->spans[i];
+		int mono = 0;
+		/* inside the span */
+		st = span_monotone(sp, dim, &mono);
+		if (st == QAWS_STATUS_OK && !mono)
+		{
+			if (sp->degree == 2)
 			{
-				/* implicitize the lower degree (at least 2); when that span is
-				   degenerate (its image of lower degree, e.g. a line traced by a
-				   quadratic: a zero or squared implicit form), the other one */
-				swap = !(na >= 2 && (na <= nb || nb < 2));
-				st = swap ? span_pair(b, ib, a, ia, ia > 0, ib > 0, hits, CC_MAX_ROOTS, &nh)
-				          : span_pair(a, ia, b, ib, ib > 0, ia > 0, hits, CC_MAX_ROOTS, &nh);
-				if ((st == QAWS_STATUS_CERTIFICATION_FAILED || st == QAWS_STATUS_EXACT_UNSUPPORTED) && (swap ? na : nb) >= 2)
+				/* a conic arc is injective unless it is a line folding back */
+				int on_line = 0;
+				poly R0;
+				qaws_exact_poly_zero(&R0, 0);
 				{
-					qaws_status st2;
-					nh = 0;
-					swap = !swap;
-					st2 = swap ? span_pair(b, ib, a, ia, ia > 0, ib > 0, hits, CC_MAX_ROOTS, &nh)
-					           : span_pair(a, ia, b, ib, ib > 0, ia > 0, hits, CC_MAX_ROOTS, &nh);
-					if (st2 == QAWS_STATUS_OK)
-						st = st2;
+					qaws_exact_int P[4], num, den;
+					int on;
+					qaws_exact_span seg;
+					qaws_exact_int segh[8];
+					unsigned int c, D = dim + 1;
+					for (c = 0; c < D; c++)
+					{
+						segh[c] = sp->h[c];
+						segh[D + c] = sp->h[2 * D + c];
+					}
+					seg.degree = 1;
+					seg.a = 0;
+					seg.b = 1;
+					seg.h = segh;
+					for (c = 0; c < D; c++)
+						P[c] = sp->h[D + c];
+					st = invert_point(&seg, dim, P, &num, &den, &on);
+					/* a failed inversion: equal ends, the arc goes out and back */
+					on_line = st == QAWS_STATUS_CERTIFICATION_FAILED || (st == QAWS_STATUS_OK && on);
+					if (st == QAWS_STATUS_CERTIFICATION_FAILED)
+						st = QAWS_STATUS_OK;
 				}
+				if (on_line)
+					st = QAWS_STATUS_CERTIFICATION_FAILED;   /* a degenerate arc overlapping itself */
+			}
+			else if (sp->degree >= 3)
+			{
+				proj pj[3];
+				unsigned int np = projections(dim, pj), p, nl = 0;
+				int com = 1;
+				if (sp->degree - 1 > CC_MAX_IMPLICIT)
+					st = QAWS_STATUS_EXACT_UNSUPPORTED;
+				for (p = 0; p < np && com && st == QAWS_STATUS_OK; p++)
+				{
+					constraint con[2];
+					st = build_self(sp, dim + 1, &pj[p], &sys[0], &sys[1], &sys[2], &sys[3], &sys[4]);
+					if (st != QAWS_STATUS_OK)
+						break;
+					con[0].kind = CON_SIGN_OF_C00;
+					con[0].H = &sys[3];
+					con[1].kind = CON_ZERO;
+					con[1].H = &sys[4];
+					st = solve_system(&sys[0], &sys[1], &sys[2], con, pj[p].cz >= 0 ? 2u : 1u, lh, CC_MAX_ROOTS, &nl, &com);
+					if (com)
+						st = QAWS_STATUS_OK;
+				}
+				if (st == QAWS_STATUS_OK && com)
+					st = QAWS_STATUS_CERTIFICATION_FAILED;
+				for (k = 0; k < nl && st == QAWS_STATUS_OK; k++)
+				{
+					/* r = t (the smaller parameter), s the larger */
+					span_hit h;
+					int ea = 0, eb = 0;
+					st = map_r(sp, curve->param_shift, &lh[k].r, &h.a_lo, &h.a_hi, &ea);
+					if (st == QAWS_STATUS_OK) st = map_s(sp, curve->param_shift, &lh[k], &h.b_lo, &h.b_hi, &eb);
+					h.exact = ea && eb && lh[k].r.exact && lh[k].s_exact;
+					if (st == QAWS_STATUS_OK)
+					{
+						if (closed && h.exact && h.a_lo == t_start && h.b_lo == t_end)
+							continue;
+						if (i > 0 && lh[k].r.exact && lh[k].r.index == 0)
+							continue;   /* a knot point: reported by the previous span */
+						st = push_pair(out_pairs, capacity, &count, &h, 0);
+					}
+				}
+			}
+		}
+		/* against the later spans */
+		for (j = i + 1; j < curve->span_count && st == QAWS_STATUS_OK; j++)
+		{
+			unsigned int nh = 0;
+			int common = 0;
+			st = span_pair(sp, curve->param_shift, &curve->spans[j], curve->param_shift, dim, hits, CC_MAX_ROOTS, &nh, &common);
+			if (st == QAWS_STATUS_CERTIFICATION_FAILED && common)
+			{
+				nh = 0;
+				st = common_spans(sp, curve->param_shift, &curve->spans[j], curve->param_shift, dim, hits, CC_MAX_ROOTS, &nh);
 			}
 			for (k = 0; k < nh && st == QAWS_STATUS_OK; k++)
 			{
-				qaws_exact_pair p;
-				p.kind = hits[k].exact ? QAWS_EXACT_HIT_POINT : QAWS_EXACT_HIT_CROSSING;
-				p.a_lo = swap ? hits[k].sub_lo : hits[k].imp_lo;
-				p.a_hi = swap ? hits[k].sub_hi : hits[k].imp_hi;
-				p.b_lo = swap ? hits[k].imp_lo : hits[k].sub_lo;
-				p.b_hi = swap ? hits[k].imp_hi : hits[k].sub_hi;
-				if (count >= capacity)
-					st = QAWS_STATUS_BUFFER_TOO_SMALL;
-				else
-					out_pairs[count++] = p;
+				span_hit const* h = &hits[k];
+				if (h->exact && h->a_lo == h->b_lo)
+					continue;   /* the shared knot point */
+				if (closed && h->exact && h->a_lo == t_start && h->b_lo == t_end)
+					continue;   /* the closing point */
+				if ((h->a_exact_start && i > 0) || h->b_exact_start)
+					continue;   /* a knot point: reported by the span ending there */
+				st = push_pair(out_pairs, capacity, &count, h, 0);
 			}
 		}
-	/* sort by a's parameter */
-	for (ia = 1; ia < count; ia++)
-	{
-		qaws_exact_pair key = out_pairs[ia];
-		int j = (int)ia - 1;
-		while (j >= 0 && out_pairs[j].a_lo > key.a_lo)
-		{
-			out_pairs[j + 1] = out_pairs[j];
-			j--;
-		}
-		out_pairs[j + 1] = key;
 	}
+	cc_free(hits);
+	cc_free(sys);
+	cc_free(lh);
+	sort_pairs(out_pairs, count);
 	*out_count = count;
 	return st;
 }

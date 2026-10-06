@@ -73,6 +73,8 @@ add_executable(
   69_exact_surface.c
   70_exact_hits.c
   71_exact_curve_hits.c
+  72_exact_curve_hits_3d.c
+  73_exact_self_hits.c
 )
 
 # The amalgamated library exports exactly the same symbols, so the tests can

@@ -83,6 +83,8 @@ extern int test_68_exact_families_main(void);
 extern int test_69_exact_surface_main(void);
 extern int test_70_exact_hits_main(void);
 extern int test_71_exact_curve_hits_main(void);
+extern int test_72_exact_curve_hits_3d_main(void);
+extern int test_73_exact_self_hits_main(void);
 
 /* Test registry */
 typedef struct {
@@ -163,6 +165,8 @@ static test_suite const g_test_suites[] = {
 	{"69_exact_surface", test_69_exact_surface_main},
 	{"70_exact_hits", test_70_exact_hits_main},
 	{"71_exact_curve_hits", test_71_exact_curve_hits_main},
+	{"72_exact_curve_hits_3d", test_72_exact_curve_hits_3d_main},
+	{"73_exact_self_hits", test_73_exact_self_hits_main},
 };
 
 int main(void) {

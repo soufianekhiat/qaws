@@ -165,6 +165,36 @@ All curves share one exact space: the coordinate lattice decides what
 "touching" means, and a 2^-k gap below the lattice step is quantized
 away.
 
+In 3D, the system is solved in a coordinate plane where the projected
+curves do not share a component (curves in a vertical plane use another
+one). Each projected root must also satisfy the remaining coordinate's
+equation, `H(s(r), r) = 0`, which is an exact zero test at an algebraic
+number:
+- the gcd of R and H is computed by Brown's modular algorithm (gcds
+  modulo 31-bit primes, Chinese remaindering, then exact trial division
+  of both polynomials as the proof);
+- a constant gcd proves that no projected crossing is a 3D intersection;
+- otherwise the gcd's sign variations on the isolating interval decide.
+
+```c
+qaws_status qaws_exact_curve_self_hits(qaws_exact_curve const* curve, qaws_exact_pair* out_pairs, unsigned int capacity, unsigned int* out_count);
+```
+
+Self-intersections are pairs a < b with C(a) = C(b), in 2D or 3D:
+
+- **Inside a span:** the divided differences
+  `(X(s) W(t) - X(t) W(s)) / (s - t)` are eliminated with a Bezout matrix
+  whose entries are polynomials in t. The constraint s > t is the sign of
+  `C01 - t C00`. Spans proven monotone along a coordinate (or the sum or
+  difference of two) are skipped.
+- **Across spans:** the span pairs are compared as above.
+- **Not reported:** shared knots and the closing point of a closed curve.
+- **Spans on one algebraic curve** (the arcs of a NURBS conic) give a
+  zero resultant. They are separated by inverting their endpoints
+  exactly, including the conic parameter's point at infinity. Arcs that
+  touch at their ends are fine; an overlap is refused.
+- **Refused:** an irrational cusp, and a span folding back on itself.
+
 ## Capability matrix
 
 | quantity | status |
@@ -184,9 +214,10 @@ away.
 | unit surface normal, curvatures (sqrt) | not rational |
 | other surface families (sweeps, lofts, offsets, ...) | planned or not rational |
 | curve / line (2D), curve / plane (3D) intersections | certified: exact points, one-root intervals, overlaps; non-dyadic tangencies refused |
-| curve / curve intersections (2D) | certified: implicitization of the lower-degree span, root isolation, exact inversion |
+| curve / curve intersections (2D, 3D) | certified: implicitization of the lower-degree span, root isolation, exact inversion; 3D: exact zero test of the third coordinate |
+| self-intersections (2D, 3D) | certified: divided differences inside spans, span pairs, knots and closing points excluded, spans on one conic told apart |
 
 Tests: 63 (integers), 64 (predicates), 65 (Bezier), 66 (winding), 67
-(B-spline / NURBS), 68 (Hermite, Catmull-Rom, polynomial), 69 (surfaces), 70 (line / plane hits), 71 (curve / curve hits), all against
+(B-spline / NURBS), 68 (Hermite, Catmull-Rom, polynomial), 69 (surfaces), 70 (line / plane hits), 71 (curve / curve hits), 72 (3D curve / curve), 73 (self-intersections), all against
 Mathematica exact references. Figures:
 `examples/exact_showcase.c`.
