@@ -320,38 +320,125 @@ qaws_status qaws_exact_int_divexact_u32(qaws_exact_int* r, qaws_exact_int const*
 	return QAWS_STATUS_OK;
 }
 
+static unsigned int nlz32(uint32_t x)
+{
+	unsigned int n = 0;
+	if (x == 0)
+		return 32;
+	while (!(x & 0x80000000u))
+	{
+		x <<= 1;
+		n++;
+	}
+	return n;
+}
+
+/*
+ * Magnitudes: quo = |a| / |b|, rem = |a| mod |b| (Knuth, TAOCP 4.3.1,
+ * algorithm D, on 32-bit limbs). |b| != 0.
+ */
+static void mag_divmod(qaws_exact_int* quo, qaws_exact_int* rem, qaws_exact_int const* a, qaws_exact_int const* b)
+{
+	uint32_t un[QAWS_EXACT_LIMBS + 1], vn[QAWS_EXACT_LIMBS];
+	int m = a->size, n = b->size, i, j;
+	unsigned int s;
+	if (mag_cmp(a, b) < 0)
+	{
+		qaws_exact_int_zero(quo);
+		*rem = *a;
+		rem->sign = rem->size ? 1 : 0;
+		return;
+	}
+	if (n == 1)
+	{
+		/* one limb: short division */
+		uint64_t r = 0, d = b->limb[0];
+		for (i = m - 1; i >= 0; i--)
+		{
+			uint64_t cur = (r << 32) | a->limb[i];
+			quo->limb[i] = (uint32_t)(cur / d);
+			r = cur % d;
+		}
+		quo->size = m;
+		quo->sign = 1;
+		normalize(quo);
+		rem->limb[0] = (uint32_t)r;
+		rem->size = 1;
+		rem->sign = 1;
+		normalize(rem);
+		return;
+	}
+	/* normalize: the divisor's top bit set */
+	s = nlz32(b->limb[n - 1]);
+	for (i = n - 1; i > 0; i--)
+		vn[i] = (b->limb[i] << s) | (s ? (uint32_t)((uint64_t)b->limb[i - 1] >> (32 - s)) : 0u);
+	vn[0] = b->limb[0] << s;
+	un[m] = s ? (uint32_t)((uint64_t)a->limb[m - 1] >> (32 - s)) : 0u;
+	for (i = m - 1; i > 0; i--)
+		un[i] = (a->limb[i] << s) | (s ? (uint32_t)((uint64_t)a->limb[i - 1] >> (32 - s)) : 0u);
+	un[0] = a->limb[0] << s;
+	for (j = m - n; j >= 0; j--)
+	{
+		uint64_t num = ((uint64_t)un[j + n] << 32) | un[j + n - 1];
+		uint64_t qhat = num / vn[n - 1], rhat = num % vn[n - 1];
+		int64_t t, k;
+		while (qhat >= ((uint64_t)1 << 32) || qhat * vn[n - 2] > ((rhat << 32) | un[j + n - 2]))
+		{
+			qhat--;
+			rhat += vn[n - 1];
+			if (rhat >= ((uint64_t)1 << 32))
+				break;
+		}
+		/* multiply and subtract */
+		k = 0;
+		for (i = 0; i < n; i++)
+		{
+			uint64_t p = qhat * vn[i];
+			t = (int64_t)un[i + j] - k - (int64_t)(p & 0xFFFFFFFFu);
+			un[i + j] = (uint32_t)t;
+			k = (int64_t)(p >> 32) - (t >> 32);
+		}
+		t = (int64_t)un[j + n] - k;
+		un[j + n] = (uint32_t)t;
+		quo->limb[j] = (uint32_t)qhat;
+		if (t < 0)
+		{
+			/* qhat was one too large: add back */
+			uint64_t c = 0;
+			quo->limb[j]--;
+			for (i = 0; i < n; i++)
+			{
+				uint64_t sum = (uint64_t)un[i + j] + vn[i] + c;
+				un[i + j] = (uint32_t)sum;
+				c = sum >> 32;
+			}
+			un[j + n] = (uint32_t)((uint64_t)un[j + n] + c);
+		}
+	}
+	quo->size = m - n + 1;
+	quo->sign = 1;
+	normalize(quo);
+	/* unnormalize the remainder */
+	for (i = 0; i < n; i++)
+		rem->limb[i] = (un[i] >> s) | (s ? (uint32_t)((uint64_t)un[i + 1] << (32 - s)) : 0u);
+	rem->size = n;
+	rem->sign = 1;
+	normalize(rem);
+}
+
 qaws_status qaws_exact_int_divmod(qaws_exact_int* q, qaws_exact_int* r, qaws_exact_int const* a, qaws_exact_int const* b)
 {
-	qaws_exact_int rem, step, quo;
-	int shift, i, as = a->sign, bs = b->sign;
+	qaws_exact_int quo, rem;
+	int as = a->sign, bs = b->sign;
 	if (b->sign == 0)
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	rem = *a;
-	rem.sign = rem.size ? 1 : 0;
-	qaws_exact_int_zero(&quo);
-	shift = (int)qaws_exact_int_bits(a) - (int)qaws_exact_int_bits(b);
-	if (shift >= 0)
+	if (a->sign == 0)
 	{
-		/* binary long division: subtract |b| 2^i from the top bit down */
-		step = *b;
-		step.sign = 1;
-		if (qaws_exact_int_shl(&step, &step, (unsigned int)shift) != QAWS_STATUS_OK)
-			return QAWS_STATUS_INTERNAL_ERROR;
-		memset(quo.limb, 0, sizeof(uint32_t) * (size_t)(shift / 32 + 1));
-		quo.size = shift / 32 + 1;
-		for (i = shift; i >= 0; i--)
-		{
-			if (rem.size && mag_cmp(&rem, &step) >= 0)
-			{
-				mag_sub(&rem, &rem, &step);
-				normalize(&rem);
-				quo.limb[i / 32] |= 1u << (i % 32);
-			}
-			qaws_exact_int_shr(&step, &step, 1);
-		}
-		quo.sign = 1;
-		normalize(&quo);
+		qaws_exact_int_zero(&quo);
+		qaws_exact_int_zero(&rem);
 	}
+	else
+		mag_divmod(&quo, &rem, a, b);
 	if (quo.size)
 		quo.sign = as * bs;
 	if (rem.size)
@@ -361,20 +448,68 @@ qaws_status qaws_exact_int_divmod(qaws_exact_int* q, qaws_exact_int* r, qaws_exa
 	return QAWS_STATUS_OK;
 }
 
+/* Trailing zero bits of a non-zero magnitude. */
+static unsigned int mag_ctz(qaws_exact_int const* x)
+{
+	unsigned int i, b;
+	for (i = 0; i < (unsigned int)x->size; i++)
+		if (x->limb[i])
+		{
+			uint32_t v = x->limb[i];
+			for (b = 0; !(v & 1u); b++)
+				v >>= 1;
+			return 32 * i + b;
+		}
+	return 0;
+}
+
 void qaws_exact_int_gcd(qaws_exact_int* g, qaws_exact_int const* a, qaws_exact_int const* b)
 {
-	/* Euclid on magnitudes */
-	qaws_exact_int x = *a, y = *b, r;
-	x.sign = x.size ? 1 : 0;
-	y.sign = y.size ? 1 : 0;
-	while (y.size)
+	/* binary gcd (Stein) on magnitudes: shifts and subtractions only */
+	qaws_exact_int x, y;
+	unsigned int k, kx, ky;
+	if (a->sign == 0 || b->sign == 0)
 	{
-		qaws_exact_int_divmod(NULL, &r, &x, &y);
-		x = y;
-		y = r;
-		y.sign = y.size ? 1 : 0;
+		*g = a->sign == 0 ? *b : *a;
+		g->sign = g->size ? 1 : 0;
+		return;
 	}
-	*g = x;
+	x = *a;
+	y = *b;
+	x.sign = 1;
+	y.sign = 1;
+	/* a one-limb operand: Euclid in machine words after one reduction */
+	kx = mag_ctz(&x);
+	ky = mag_ctz(&y);
+	k = kx < ky ? kx : ky;
+	qaws_exact_int_shr(&x, &x, kx);
+	for (;;)
+	{
+		qaws_exact_int_shr(&y, &y, mag_ctz(&y));
+		if (x.size == 1 && y.size == 1)
+		{
+			uint32_t u = x.limb[0], v = y.limb[0];
+			while (v)
+			{
+				uint32_t t = u % v;
+				u = v;
+				v = t;
+			}
+			qaws_exact_int_from_i64(&x, (int64_t)u);
+			break;
+		}
+		if (mag_cmp(&x, &y) > 0)
+		{
+			qaws_exact_int t = x;
+			x = y;
+			y = t;
+		}
+		mag_sub(&y, &y, &x);
+		normalize(&y);
+		if (y.size == 0)
+			break;
+	}
+	qaws_exact_int_shl(g, &x, k);
 }
 
 /* ------------------------------------------------------------------ */
