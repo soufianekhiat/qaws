@@ -40,18 +40,28 @@ static void ss_free(void* p)
 	qaws_internal_dealloc(NULL, p);
 }
 
+/*
+ * Divides a tensor by the common power of two of its coefficients (a
+ * positive factor: signs and roots are kept). Subdivision only ever
+ * introduces powers of two (2^n halving, 16^n the 7/16 cut), so this keeps
+ * the integers as small as a full gcd would, at the cost of a shift.
+ */
 static qaws_status normalize(qaws_exact_int* T, unsigned int size)
 {
-	qaws_exact_int g;
-	unsigned int i;
-	qaws_status st;
-	qaws_exact_int_zero(&g);
+	unsigned int i, k = ~0u;
 	for (i = 0; i < size; i++)
-		qaws_exact_int_gcd(&g, &g, &T[i]);
-	if (qaws_exact_int_bits(&g) <= 1)
+		if (!qaws_exact_int_is_zero(&T[i]))
+		{
+			unsigned int z = qaws_exact_int_ctz(&T[i]);
+			if (z < k)
+				k = z;
+			if (k == 0)
+				return QAWS_STATUS_OK;
+		}
+	if (k == ~0u)
 		return QAWS_STATUS_OK;
 	for (i = 0; i < size; i++)
-		TRY(qaws_exact_int_divmod(&T[i], NULL, &T[i], &g));
+		qaws_exact_int_shr(&T[i], &T[i], k);
 	return QAWS_STATUS_OK;
 }
 

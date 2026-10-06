@@ -449,7 +449,7 @@ qaws_status qaws_exact_int_divmod(qaws_exact_int* q, qaws_exact_int* r, qaws_exa
 }
 
 /* Trailing zero bits of a non-zero magnitude. */
-static unsigned int mag_ctz(qaws_exact_int const* x)
+unsigned int qaws_exact_int_ctz(qaws_exact_int const* x)
 {
 	unsigned int i, b;
 	for (i = 0; i < (unsigned int)x->size; i++)
@@ -479,13 +479,13 @@ void qaws_exact_int_gcd(qaws_exact_int* g, qaws_exact_int const* a, qaws_exact_i
 	x.sign = 1;
 	y.sign = 1;
 	/* a one-limb operand: Euclid in machine words after one reduction */
-	kx = mag_ctz(&x);
-	ky = mag_ctz(&y);
+	kx = qaws_exact_int_ctz(&x);
+	ky = qaws_exact_int_ctz(&y);
 	k = kx < ky ? kx : ky;
 	qaws_exact_int_shr(&x, &x, kx);
 	for (;;)
 	{
-		qaws_exact_int_shr(&y, &y, mag_ctz(&y));
+		qaws_exact_int_shr(&y, &y, qaws_exact_int_ctz(&y));
 		if (x.size == 1 && y.size == 1)
 		{
 			uint32_t u = x.limb[0], v = y.limb[0];

@@ -8,16 +8,21 @@
 /* Divides every coefficient by their common gcd (keeps every sign). */
 static qaws_status normalize(qaws_exact_int* c, unsigned int n)
 {
-	qaws_exact_int g;
-	unsigned int i;
-	qaws_status st;
-	qaws_exact_int_zero(&g);
+	/* halving introduces only powers of two: strip the common one (a shift, no gcd) */
+	unsigned int i, k = ~0u;
 	for (i = 0; i <= n; i++)
-		qaws_exact_int_gcd(&g, &g, &c[i]);
-	if (qaws_exact_int_bits(&g) <= 1)
+		if (!qaws_exact_int_is_zero(&c[i]))
+		{
+			unsigned int z = qaws_exact_int_ctz(&c[i]);
+			if (z < k)
+				k = z;
+			if (k == 0)
+				return QAWS_STATUS_OK;
+		}
+	if (k == ~0u)
 		return QAWS_STATUS_OK;
 	for (i = 0; i <= n; i++)
-		TRY(qaws_exact_int_divmod(&c[i], NULL, &c[i], &g));
+		qaws_exact_int_shr(&c[i], &c[i], k);
 	return QAWS_STATUS_OK;
 }
 
@@ -73,15 +78,107 @@ static unsigned int variations(qaws_exact_int const* c, unsigned int n)
 	return v;
 }
 
-/* Coefficients of p on (index, index + 1) / 2^depth, by halvings along the bits of index. */
+/*
+ * c restricted to [x, 1] (keep_right) or [0, x], x = a / b (0 < a < b, b <= 2^62):
+ * integer De Casteljau with the weights (b - a, a), in place; every point
+ * comes out times b^n.
+ */
+static qaws_status split_ratio(qaws_exact_int* c, unsigned int n, int64_t a, int64_t b, int keep_right)
+{
+	qaws_exact_int d[QAWS_EXACT_ROOTS_MAX_DEGREE + 1], out[QAWS_EXACT_ROOTS_MAX_DEGREE + 1], t1, t2;
+	unsigned int r, i, k;
+	qaws_status st;
+	for (i = 0; i <= n; i++)
+		d[i] = c[i];
+	if (keep_right)
+		out[n] = d[n];
+	else
+		out[0] = d[0];
+	for (r = 1; r <= n; r++)
+	{
+		for (i = 0; i + r <= n; i++)
+		{
+			TRY(qaws_exact_int_mul_i64(&t1, &d[i], b - a));
+			TRY(qaws_exact_int_mul_i64(&t2, &d[i + 1], a));
+			TRY(qaws_exact_int_add(&d[i], &t1, &t2));
+		}
+		if (keep_right)
+			out[n - r] = d[n - r];
+		else
+			out[r] = d[0];
+	}
+	for (i = 0; i <= n; i++)
+	{
+		unsigned int lev = keep_right ? n - i : i;
+		for (k = lev; k < n; k++)
+			TRY(qaws_exact_int_mul_i64(&out[i], &out[i], b));
+		c[i] = out[i];
+	}
+	return QAWS_STATUS_OK;
+}
+
+/* Divides two arrays by the gcd of all their entries (a positive factor). */
+static qaws_status normalize_two(qaws_exact_int* c1, qaws_exact_int* c2, unsigned int n)
+{
+	qaws_exact_int g;
+	unsigned int i;
+	qaws_status st;
+	qaws_exact_int_zero(&g);
+	for (i = 0; i <= n; i++)
+	{
+		qaws_exact_int_gcd(&g, &g, &c1[i]);
+		if (c2)
+			qaws_exact_int_gcd(&g, &g, &c2[i]);
+	}
+	if (qaws_exact_int_bits(&g) <= 1)
+		return QAWS_STATUS_OK;
+	for (i = 0; i <= n; i++)
+	{
+		TRY(qaws_exact_int_divmod(&c1[i], NULL, &c1[i], &g));
+		if (c2)
+			TRY(qaws_exact_int_divmod(&c2[i], NULL, &c2[i], &g));
+	}
+	return QAWS_STATUS_OK;
+}
+
+/*
+ * Direct restriction to [index, index + 1] / 2^depth: two rational cuts
+ * instead of depth halvings (when the intermediate integers stay well in
+ * the budget), then one gcd.
+ */
+static qaws_status restrict_direct(qaws_exact_int* c1, qaws_exact_int* c2, unsigned int n, uint64_t index, int depth)
+{
+	int64_t den = (int64_t)1 << depth, rest = den - (int64_t)index;
+	qaws_status st;
+	if (index > 0)
+	{
+		TRY(split_ratio(c1, n, (int64_t)index, den, 1));   /* [index / 2^depth, 1] */
+		if (c2) TRY(split_ratio(c2, n, (int64_t)index, den, 1));
+	}
+	if (rest > 1)
+	{
+		TRY(split_ratio(c1, n, 1, rest, 0));   /* its first 1 / rest */
+		if (c2) TRY(split_ratio(c2, n, 1, rest, 0));
+	}
+	return normalize_two(c1, c2, n);
+}
+
+/* Coefficients of p on (index, index + 1) / 2^depth. */
 qaws_status qaws_exact_bernstein_restrict(qaws_exact_int const* b, unsigned int n, uint64_t index, int depth, qaws_exact_int* out)
 {
 	qaws_exact_int left[QAWS_EXACT_ROOTS_MAX_DEGREE + 1], right[QAWS_EXACT_ROOTS_MAX_DEGREE + 1];
-	unsigned int i;
+	unsigned int i, maxb = 0;
 	int k;
 	qaws_status st;
 	for (i = 0; i <= n; i++)
+	{
 		out[i] = b[i];
+		if (qaws_exact_int_bits(&b[i]) > maxb)
+			maxb = qaws_exact_int_bits(&b[i]);
+	}
+	if (depth > 0 && depth <= 62 && maxb + 2 * n * (unsigned int)depth + 64 < QAWS_EXACT_MAX_BITS)
+		return restrict_direct(out, NULL, n, index, depth);
+	/* by halvings along the bits of index (each normalized: the integers stay small) */
 	for (k = depth - 1; k >= 0; k--)
 	{
 		TRY(split_half(out, n, left, right));
@@ -97,14 +194,18 @@ qaws_status qaws_exact_bernstein_restrict_pair(qaws_exact_int const* b1, qaws_ex
 	qaws_exact_int* out1, qaws_exact_int* out2)
 {
 	qaws_exact_int left[QAWS_EXACT_ROOTS_MAX_DEGREE + 1], right[QAWS_EXACT_ROOTS_MAX_DEGREE + 1], g;
-	unsigned int i;
+	unsigned int i, maxb = 0;
 	int k;
 	qaws_status st;
 	for (i = 0; i <= n; i++)
 	{
 		out1[i] = b1[i];
 		out2[i] = b2[i];
+		if (qaws_exact_int_bits(&b1[i]) > maxb) maxb = qaws_exact_int_bits(&b1[i]);
+		if (qaws_exact_int_bits(&b2[i]) > maxb) maxb = qaws_exact_int_bits(&b2[i]);
 	}
+	if (depth > 0 && depth <= 62 && maxb + 2 * n * (unsigned int)depth + 64 < QAWS_EXACT_MAX_BITS)
+		return restrict_direct(out1, out2, n, index, depth);
 	for (k = depth - 1; k >= 0; k--)
 	{
 		int right_half = (int)((index >> k) & 1);
@@ -252,6 +353,150 @@ qaws_status qaws_exact_bernstein_isolate(qaws_exact_int const* b, unsigned int n
 	return QAWS_STATUS_OK;
 }
 
+/*
+ * The sign of c (Bernstein on [0, 1]) at x = j / 2^k, exactly: De Casteljau
+ * with the weights (2^k - j, j) (the value times 2^(k n), a positive factor).
+ */
+static qaws_status sign_at(qaws_exact_int const* c, unsigned int n, uint64_t j, int k, int* out)
+{
+	qaws_exact_int d[QAWS_EXACT_ROOTS_MAX_DEGREE + 1], t1, t2;
+	int64_t den = (int64_t)1 << k, a = (int64_t)j;
+	unsigned int r, i;
+	qaws_status st;
+	for (i = 0; i <= n; i++)
+		d[i] = c[i];
+	if (a == 0)
+	{
+		*out = qaws_exact_int_sign(&d[0]);
+		return QAWS_STATUS_OK;
+	}
+	if (a == den)
+	{
+		*out = qaws_exact_int_sign(&d[n]);
+		return QAWS_STATUS_OK;
+	}
+	for (r = 1; r <= n; r++)
+		for (i = 0; i + r <= n; i++)
+		{
+			TRY(qaws_exact_int_mul_i64(&t1, &d[i], den - a));
+			TRY(qaws_exact_int_mul_i64(&t2, &d[i + 1], a));
+			TRY(qaws_exact_int_add(&d[i], &t1, &t2));
+		}
+	*out = qaws_exact_int_sign(&d[0]);
+	return QAWS_STATUS_OK;
+}
+
+/* Value and derivative of a double Bernstein polynomial at x. */
+static void eval_double(double const* c, unsigned int n, double x, double* v, double* dv)
+{
+	double d[QAWS_EXACT_ROOTS_MAX_DEGREE + 1], e[QAWS_EXACT_ROOTS_MAX_DEGREE + 1];
+	unsigned int r, i;
+	for (i = 0; i <= n; i++)
+		d[i] = c[i];
+	for (i = 0; i < n; i++)
+		e[i] = (double)n * (c[i + 1] - c[i]);
+	for (r = 1; r <= n; r++)
+		for (i = 0; i + r <= n; i++)
+			d[i] = (1 - x) * d[i] + x * d[i + 1];
+	for (r = 1; r + 1 <= n; r++)
+		for (i = 0; i + r < n; i++)
+			e[i] = (1 - x) * e[i] + x * e[i + 1];
+	*v = d[0];
+	*dv = n > 0 ? e[0] : 0;
+}
+
+/*
+ * The root of c in (0, 1) is unique and simple (an isolating interval):
+ * sign s0 left of it, -s0 right of it. Newton in doubles gives x; the cell
+ * [j, j + 1] / 2^k around it holds the root when the exact signs at its
+ * ends are s0 and -s0 (a zero there: the exact root). A few neighbouring
+ * cells are tried; *found = 0 leaves the caller's bisection to it.
+ */
+static qaws_status newton_bracket(qaws_exact_int const* c, unsigned int n, int s0, qaws_exact_root* root, int depth, int* found)
+{
+	double cd[QAWS_EXACT_ROOTS_MAX_DEGREE + 1], x = 0.5;
+	unsigned int i, maxb = 0, it;
+	int k = depth - root->depth, tries;
+	uint64_t cells, j;
+	qaws_status st;
+	*found = 0;
+	if (k <= 0 || k > 60 || s0 == 0)
+		return QAWS_STATUS_OK;
+	for (i = 0; i <= n; i++)
+		if (qaws_exact_int_bits(&c[i]) > maxb)
+			maxb = qaws_exact_int_bits(&c[i]);
+	if (maxb + n * (unsigned int)k + 64 >= QAWS_EXACT_MAX_BITS)
+		return QAWS_STATUS_OK;
+	for (i = 0; i <= n; i++)
+	{
+		qaws_exact_int t;
+		qaws_exact_int_shr(&t, &c[i], maxb > 900 ? maxb - 900 : 0);
+		cd[i] = qaws_exact_int_to_double(&t);
+	}
+	/* Newton, kept inside (0, 1) (bisection steps on the double signs when it leaves) */
+	{
+		double lo = 0, hi = 1;
+		for (it = 0; it < 80; it++)
+		{
+			double v, dv, nx;
+			eval_double(cd, n, x, &v, &dv);
+			if (v == 0)
+				break;
+			if ((v > 0) == (s0 > 0))
+				lo = x;
+			else
+				hi = x;
+			nx = dv != 0 ? x - v / dv : 0.5 * (lo + hi);
+			if (!(nx > lo && nx < hi))
+				nx = 0.5 * (lo + hi);
+			if (nx == x)
+				break;
+			x = nx;
+		}
+	}
+	cells = (uint64_t)1 << k;
+	j = (uint64_t)(x * (double)cells);
+	if (j >= cells)
+		j = cells - 1;
+	for (tries = 0; tries < 6; tries++)
+	{
+		int sl = 0, sr = 0;
+		TRY(sign_at(c, n, j, k, &sl));
+		TRY(sign_at(c, n, j + 1, k, &sr));
+		/* the ends of [0, 1] carry the signs just inside them */
+		if (j == 0 && sl == 0) sl = s0;
+		if (j + 1 == cells && sr == 0) sr = -s0;
+		if (sl == 0 || sr == 0)
+		{
+			root->index = (root->index << k) + (sl == 0 ? j : j + 1);
+			root->depth = depth;
+			root->exact = 1;
+			/* in lowest terms, as the bisection would have found it */
+			while (root->depth > 0 && !(root->index & 1))
+			{
+				root->index >>= 1;
+				root->depth--;
+			}
+			*found = 1;
+			return QAWS_STATUS_OK;
+		}
+		if (sl == s0 && sr == -s0)
+		{
+			root->index = (root->index << k) + j;
+			root->depth = depth;
+			*found = 1;
+			return QAWS_STATUS_OK;
+		}
+		if (sl == -s0 && j > 0)
+			j--;   /* the root lies left of the cell */
+		else if (sr == s0 && j + 1 < cells)
+			j++;
+		else
+			break;
+	}
+	return QAWS_STATUS_OK;
+}
+
 qaws_status qaws_exact_bernstein_refine(qaws_exact_int const* b, unsigned int n, qaws_exact_root* root, int depth)
 {
 	qaws_exact_int c[QAWS_EXACT_ROOTS_MAX_DEGREE + 1], left[QAWS_EXACT_ROOTS_MAX_DEGREE + 1], right[QAWS_EXACT_ROOTS_MAX_DEGREE + 1];
@@ -268,6 +513,13 @@ qaws_status qaws_exact_bernstein_refine(qaws_exact_int const* b, unsigned int n,
 	s0 = 0;
 	for (i = 0; i <= n && s0 == 0; i++)
 		s0 = qaws_exact_int_sign(&c[i]);
+	{
+		/* fast path: a double Newton estimate, then a target-width bracket certified by two exact signs */
+		int found = 0;
+		TRY(newton_bracket(c, n, s0, root, depth, &found));
+		if (found)
+			return QAWS_STATUS_OK;
+	}
 	while (root->depth < depth)
 	{
 		int sm;

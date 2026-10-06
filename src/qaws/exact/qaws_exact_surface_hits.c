@@ -397,6 +397,25 @@ static qaws_status patch_hits(qaws_exact_surface const* s, unsigned int iu, unsi
 		st = QAWS_STATUS_ALLOCATION_FAILURE;
 	if (st == QAWS_STATUS_OK) st = plane_net(s, h, L->n1, L->P, &F[0]);
 	if (st == QAWS_STATUS_OK) st = plane_net(s, h, L->n2, L->P, &F[n]);
+	if (st == QAWS_STATUS_OK)
+	{
+		/* a plane with the whole control net strictly on one side: the line misses the patch */
+		unsigned int e, k2;
+		for (e = 0; e < 2; e++)
+		{
+			int s0 = qaws_exact_int_sign(&F[e * n]);
+			for (k2 = 1; k2 < n && s0 != 0; k2++)
+				if (qaws_exact_int_sign(&F[e * n + k2]) != s0)
+					s0 = 0;
+			if (s0 != 0)
+			{
+				sh_free(F);
+				sh_free(sys);
+				sh_free(lh);
+				return QAWS_STATUS_OK;
+			}
+		}
+	}
 	for (attempt = 0; attempt < 2 && st == QAWS_STATUS_OK && common; attempt++, elim_u = !elim_u)
 	{
 		unsigned int kk = elim_u ? p : q;

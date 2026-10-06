@@ -60,6 +60,9 @@ qaws_status qaws_exact_int_divmod(qaws_exact_int* q, qaws_exact_int* r, qaws_exa
 /* gcd(|a|, |b|) >= 0 (gcd(0, 0) = 0). */
 void qaws_exact_int_gcd(qaws_exact_int* g, qaws_exact_int const* a, qaws_exact_int const* b);
 
+/* Trailing zero bits of x (0 for zero). */
+unsigned int qaws_exact_int_ctz(qaws_exact_int const* x);
+
 /* Nearest double (ties to even); +-HUGE_VAL past the double range. */
 double qaws_exact_int_to_double(qaws_exact_int const* x);
 
