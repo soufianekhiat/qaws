@@ -27,6 +27,10 @@
  *      the scalp, rendered by a small rasterizer (photos/plain_*.ppm).
  *  11. Font outlines: glyph traces fitted by closed cubic B-splines with
  *      triple knots at corners (photos/glyph_*.ppm, glyph_to_ppm.ps1).
+ *  12. Shape optimization: 2D vesicles (bending energy at fixed length and
+ *      area) by Newton-CG on exact Hessian-vector products.
+ *  13. CAD reverse engineering: the six-patch scan fit refined to G1 seams
+ *      (normal agreement through the surface adjoint), zebra stripes.
  *
  * Each application lives in diff_applications/NN_*.c; they are compiled as
  * one translation unit, in order (later applications reuse the helpers of
@@ -66,6 +70,8 @@ static char const* g_photos = "photos";
 #include "diff_applications/09_hair3d.c"
 #include "diff_applications/10_hair_volume.c"
 #include "diff_applications/11_font_outlines.c"
+#include "diff_applications/12_vesicles.c"
+#include "diff_applications/13_cad_g1.c"
 
 int main(int argc, char** argv)
 {
@@ -88,6 +94,8 @@ int main(int argc, char** argv)
 		if (!pick || pick == 9) app_hair3d();
 		if (!pick || pick == 10) app_hair_volume();
 		if (!pick || pick == 11) app_font_outlines();
+		if (!pick || pick == 12) app_vesicles();
+		if (!pick || pick == 13) app_cad_g1();
 	}
 	return 0;
 }
