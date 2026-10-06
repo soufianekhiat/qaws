@@ -113,6 +113,18 @@ void qaws_exact_curve_destroy(qaws_exact_curve* curve);
 qaws_status qaws_exact_curve_evaluate(qaws_exact_curve const* curve, double t, unsigned int order, double* out,
 	qaws_exact_report* out_report);
 
+/* Number of spans (one exact rational Bezier each). */
+unsigned int qaws_exact_curve_span_count(qaws_exact_curve const* curve);
+
+/*
+ * Span s as a rational Bezier, rounded once: out_degree, its parameter
+ * interval [t0, t1], `dimension` coordinates per control point (world
+ * units) and weights relative to the largest one (any of the outputs may
+ * be NULL; points and weights hold degree + 1 entries).
+ */
+qaws_status qaws_exact_curve_span_bezier(qaws_exact_curve const* curve, unsigned int s, unsigned int* out_degree, double* out_t0,
+	double* out_t1, double* out_points, double* out_weights);
+
 /*
  * Certified winding number of a closed 2D loop of exact curves (each
  * piece's end equal to the next one's start, exactly) around the double

@@ -11,6 +11,8 @@
  *                         reference for f32 and f64 errors (position, C', C'', C''')
  *   exact3_winding.svg    point-in-region near a loop of rational conics:
  *                         sampled winding against the certified one
+ *   exact4_nurbs.svg      a NURBS split exactly into integer rational Bezier
+ *                         spans, and the integer budget per degree
  *
  * Each figure lives in exact_showcase/NN_*.c, compiled as one translation
  * unit.
@@ -19,6 +21,7 @@
 #include "qaws.h"
 #include "qaws_exact.h"
 #include <math.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -36,6 +39,7 @@
 #include "exact_showcase/01_orient2d.c"
 #include "exact_showcase/02_exact_bezier.c"
 #include "exact_showcase/03_winding.c"
+#include "exact_showcase/04_nurbs_extraction.c"
 
 int main(void)
 {
@@ -44,5 +48,6 @@ int main(void)
 	demo_orient2d();
 	demo_exact_bezier();
 	demo_winding();
+	demo_nurbs_extraction();
 	return 0;
 }

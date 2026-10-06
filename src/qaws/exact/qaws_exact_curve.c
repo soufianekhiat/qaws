@@ -494,3 +494,38 @@ qaws_status qaws_exact_curve_evaluate(qaws_exact_curve const* curve, double t, u
 	}
 	return QAWS_STATUS_OK;
 }
+
+unsigned int qaws_exact_curve_span_count(qaws_exact_curve const* curve)
+{
+	return curve ? curve->span_count : 0;
+}
+
+qaws_status qaws_exact_curve_span_bezier(qaws_exact_curve const* curve, unsigned int s, unsigned int* out_degree, double* out_t0,
+	double* out_t1, double* out_points, double* out_weights)
+{
+	qaws_exact_span const* sp;
+	unsigned int D, i, c, dim;
+	double scale;
+	qaws_exact_int wmax;
+	if (!curve || s >= curve->span_count)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	sp = &curve->spans[s];
+	dim = (unsigned int)curve->dimension;
+	D = dim + 1;
+	scale = ldexp(1.0, curve->space_exp2);
+	if (out_degree) *out_degree = sp->degree;
+	if (out_t0) *out_t0 = ldexp((double)sp->a, -curve->param_shift);
+	if (out_t1) *out_t1 = ldexp((double)sp->b, -curve->param_shift);
+	wmax = sp->h[dim];
+	for (i = 1; i <= sp->degree; i++)
+		if (qaws_exact_int_cmp(&sp->h[i * D + dim], &wmax) > 0)
+			wmax = sp->h[i * D + dim];
+	for (i = 0; i <= sp->degree; i++)
+	{
+		for (c = 0; c < dim && out_points; c++)
+			out_points[i * dim + c] = qaws_exact_ratio_to_double(&sp->h[i * D + c], &sp->h[i * D + dim]) * scale;
+		if (out_weights)
+			out_weights[i] = qaws_exact_ratio_to_double(&sp->h[i * D + dim], &wmax);
+	}
+	return QAWS_STATUS_OK;
+}
