@@ -234,6 +234,141 @@ static void test_hvp_paths(qaws_sample_measure_desc const* m, char const* name)
 	qaws_surface_destroy(sn);
 }
 
+/* Knots as parameters: interior knots change the basis, end knots move the
+   domain, its cell grid and every quadrature node. Every knot moves. */
+#define SK_N 5
+static qaws_scalar const g_sk_uk[9] = { 0, 0, 0, 0, 0.4f, 1, 1, 1, 1 };
+static qaws_scalar const g_sk_vk[9] = { 0, 0, 0, 0, 0.6f, 1, 1, 1, 1 };
+static double const g_sk_du[9] = { 0.05, 0.05, 0.05, 0.05, -0.15, -0.1, -0.1, -0.1, -0.1 };
+static double const g_sk_dv[9] = { -0.08, -0.08, -0.08, -0.08, 0.12, 0.07, 0.07, 0.07, 0.07 };
+
+static qaws_surface* sk_surface(qaws_scalar const* cps, double s)
+{
+	qaws_scalar uk[9], vk[9];
+	qaws_surface_bspline_desc d;
+	qaws_surface* srf = NULL;
+	int i;
+	for (i = 0; i < 9; i++)
+	{
+		uk[i] = (qaws_scalar)(g_sk_uk[i] + s * g_sk_du[i]);
+		vk[i] = (qaws_scalar)(g_sk_vk[i] + s * g_sk_dv[i]);
+	}
+	memset(&d, 0, sizeof(d));
+	d.u_degree = 3;
+	d.v_degree = 3;
+	d.control_points = (qaws_vec3 const*)cps;
+	d.u_point_count = SK_N;
+	d.v_point_count = SK_N;
+	d.u_knots = uk;
+	d.u_knot_count = 9;
+	d.v_knots = vk;
+	d.v_knot_count = 9;
+	qaws_surface_create_bspline(&d, &srf);
+	return srf;
+}
+
+static qaws_diff_views sk_views(qaws_field_view* fv, qaws_scalar* u, qaws_scalar* v)
+{
+	qaws_diff_views views;
+	fv[0] = qaws_field_view_make(QAWS_FIELD_U_KNOTS, u, 9, 1);
+	fv[1] = qaws_field_view_make(QAWS_FIELD_V_KNOTS, v, 9, 1);
+	views.fields = fv;
+	views.field_count = 2;
+	views.children = NULL;
+	views.child_count = 0;
+	return views;
+}
+
+static void test_knots(qaws_sample_measure_desc const* m, char const* name)
+{
+	qaws_scalar cps[SK_N * SK_N * 3], du[9], dv[9], gu[9], gv[9], hu[9], hv[9], gpu[9], gpv[9], gmu[9], gmv[9];
+	qaws_surface_cdf_sample t1[SS_SAMPLES], t2[SS_SAMPLES], vp[SS_SAMPLES], vm[SS_SAMPLES], t1p[SS_SAMPLES], t1m[SS_SAMPLES],
+		adj[SS_SAMPLES];
+	qaws_field_view fd[2], fg[2], fh[2], fp[2], fm[2];
+	qaws_diff_views vd, vg, vh, vgp, vgm;
+	qaws_surface *s, *sp, *sm;
+	double h = QAWS_SCALAR_IS_FLOAT ? 1e-2 : 1e-5, tol = QAWS_SCALAR_IS_FLOAT ? 5e-2 : 1e-6;
+	int ok1 = 1, ok2 = 1, okh = 1;
+	unsigned int i, j;
+	char msg[160];
+	diff_seed(5960u);
+	for (i = 0; i < SK_N; i++)
+		for (j = 0; j < SK_N; j++)
+		{
+			qaws_scalar* p = &cps[(i * SK_N + j) * 3];
+			p[0] = (qaws_scalar)(0.75 * j);
+			p[1] = (qaws_scalar)(0.75 * i);
+			p[2] = (qaws_scalar)(0.35 * sin(1.2 * i + 0.8 * j) + 0.15 * i * (4 - j) / 4.0);
+		}
+	for (i = 0; i < 9; i++)
+	{
+		du[i] = (qaws_scalar)g_sk_du[i];
+		dv[i] = (qaws_scalar)g_sk_dv[i];
+	}
+	vd = sk_views(fd, du, dv);
+	vg = sk_views(fg, gu, gv);
+	vh = sk_views(fh, hu, hv);
+	vgp = sk_views(fp, gpu, gpv);
+	vgm = sk_views(fm, gmu, gmv);
+	s = sk_surface(cps, 0);
+	sp = sk_surface(cps, h);
+	sm = sk_surface(cps, -h);
+	sprintf(msg, "%s: knot tangents", name);
+	TEST_ASSERT(qaws_surface_cdf_sample_tangent(NULL, s, m, g_ss_xi, NULL, SS_SAMPLES, SS_CELLS, SS_QUAD, &vd, NULL, t1, t2, NULL) ==
+		QAWS_STATUS_OK, msg);
+	qaws_surface_cdf_sample_tangent(NULL, sp, m, g_ss_xi, NULL, SS_SAMPLES, SS_CELLS, SS_QUAD, &vd, vp, t1p, NULL, NULL);
+	qaws_surface_cdf_sample_tangent(NULL, sm, m, g_ss_xi, NULL, SS_SAMPLES, SS_CELLS, SS_QUAD, &vd, vm, t1m, NULL, NULL);
+	for (i = 0; i < SS_SAMPLES; i++)
+	{
+		ok1 &= diff_close(t1[i].u, (vp[i].u - vm[i].u) / (2 * h), tol) && diff_close(t1[i].v, (vp[i].v - vm[i].v) / (2 * h), tol);
+		ok1 &= diff_close(t1[i].position.x, (vp[i].position.x - vm[i].position.x) / (2 * h), tol);
+		ok1 &= diff_close(t1[i].position.y, (vp[i].position.y - vm[i].position.y) / (2 * h), tol);
+		ok1 &= diff_close(t1[i].position.z, (vp[i].position.z - vm[i].position.z) / (2 * h), tol);
+		ok2 &= diff_close(t2[i].u, (t1p[i].u - t1m[i].u) / (2 * h), tol) && diff_close(t2[i].v, (t1p[i].v - t1m[i].v) / (2 * h), tol);
+		ok2 &= diff_close(t2[i].position.x, (t1p[i].position.x - t1m[i].position.x) / (2 * h), tol);
+		ok2 &= diff_close(t2[i].position.y, (t1p[i].position.y - t1m[i].position.y) / (2 * h), tol);
+		ok2 &= diff_close(t2[i].position.z, (t1p[i].position.z - t1m[i].position.z) / (2 * h), tol);
+	}
+	sprintf(msg, "%s: knot tangents match finite differences", name);
+	TEST_ASSERT(ok1, msg);
+	sprintf(msg, "%s: second order knot tangents match finite differences of the tangents", name);
+	TEST_ASSERT(ok2, msg);
+
+	for (i = 0; i < SS_SAMPLES; i++)
+	{
+		adj[i].u = diff_rand();
+		adj[i].v = diff_rand();
+		adj[i].position = diff_rand_vec3();
+	}
+	memset(gu, 0, sizeof(gu));
+	memset(gv, 0, sizeof(gv));
+	TEST_ASSERT_STATUS(qaws_surface_cdf_sample_adjoint(NULL, s, m, g_ss_xi, SS_SAMPLES, SS_CELLS, SS_QUAD, adj, &vg, NULL));
+	{
+		double lhs = ss_dot(adj, t1, SS_SAMPLES), rhs = diff_dot(gu, du, 9) + diff_dot(gv, dv, 9);
+		sprintf(msg, "%s: knot adjoint identity (%.12g vs %.12g)", name, lhs, rhs);
+		TEST_ASSERT(diff_close(lhs, rhs, QAWS_SCALAR_IS_FLOAT ? 2e-3 : 1e-10), msg);
+	}
+
+	memset(hu, 0, sizeof(hu));
+	memset(hv, 0, sizeof(hv));
+	memset(gpu, 0, sizeof(gpu));
+	memset(gpv, 0, sizeof(gpv));
+	memset(gmu, 0, sizeof(gmu));
+	memset(gmv, 0, sizeof(gmv));
+	sprintf(msg, "%s: knot HVP", name);
+	TEST_ASSERT(qaws_surface_cdf_sample_hvp(NULL, s, m, g_ss_xi, SS_SAMPLES, SS_CELLS, SS_QUAD, adj, &vd, &vh) == QAWS_STATUS_OK, msg);
+	qaws_surface_cdf_sample_adjoint(NULL, sp, m, g_ss_xi, SS_SAMPLES, SS_CELLS, SS_QUAD, adj, &vgp, NULL);
+	qaws_surface_cdf_sample_adjoint(NULL, sm, m, g_ss_xi, SS_SAMPLES, SS_CELLS, SS_QUAD, adj, &vgm, NULL);
+	for (i = 0; i < 9; i++)
+		okh &= diff_close(hu[i], (gpu[i] - gmu[i]) / (2 * h), QAWS_SCALAR_IS_FLOAT ? 5e-2 : 1e-5) &&
+			diff_close(hv[i], (gpv[i] - gmv[i]) / (2 * h), QAWS_SCALAR_IS_FLOAT ? 5e-2 : 1e-5);
+	sprintf(msg, "%s: knot HVP matches finite differences of the knot gradient", name);
+	TEST_ASSERT(okh, msg);
+	qaws_surface_destroy(s);
+	qaws_surface_destroy(sp);
+	qaws_surface_destroy(sm);
+}
+
 static void ss_values(int kind, qaws_sample_measure_desc const* m, qaws_scalar const* x, qaws_scalar const* xi,
 	qaws_diff_views const* dir, qaws_scalar const* xid, qaws_surface_cdf_sample* val, qaws_surface_cdf_sample* t1)
 {
@@ -496,6 +631,9 @@ int test_59_diff_surface_sampling_main(void)
 	test_hvp_paths(NULL, "area");
 	test_hvp_paths(&g_ss_density, "density");
 	test_hvp_paths(&g_ss_curvature, "curvature");
+	test_knots(NULL, "B-spline knots, area");
+	test_knots(&g_ss_density, "B-spline knots, density");
+	test_knots(&g_ss_curvature, "B-spline knots, curvature");
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
 }

@@ -176,7 +176,11 @@ qaws_status qaws_traversal_cdf_targets(
  * families linear in their fields; other families polarize the second order
  * forward pass over the parameters of out_hv (about two passes per
  * parameter).
- * Requires QAWS_CAP_TANGENT2; knots are refused as parameters.
+ * Requires QAWS_CAP_TANGENT2. U / V knots are parameters: interior knots change
+ * the basis, the end knots move the domain, its cell grid and every
+ * quadrature node (the forward pass carries them in dual numbers; the
+ * adjoint fills knot views by one forward pass per knot entry; the HVP
+ * polarizes for knot views).
  * =================================================================== */
 
 #define QAWS_MEASURE_AREA QAWS_MEASURE_ARC_LENGTH

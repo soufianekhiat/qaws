@@ -1035,6 +1035,9 @@ typedef struct scdf_job
 	unsigned int cells, n;
 	double x[8], w[8];
 	double u0, u1, v0, v1, hu, hv;
+	/* rates of the domain end knots along the direction: the grid of
+	   cells and every quadrature node move with them */
+	double du0, du1, dv0, dv1;
 	qaws_dual1* cumA;                   /* cells + 1: marginal measure of the full u cells, along direction */
 } scdf_job;
 
@@ -1047,6 +1050,28 @@ static qaws_dual1 dual_c(double v)
 static qaws_dual1 dual_axpy(double a, qaws_dual1 x, double b)
 {
 	return qaws_dual1_make((qaws_scalar)(a * x.v + b), (qaws_scalar)(a * x.t), (qaws_scalar)(a * x.tt));
+}
+
+/* a x + y */
+static qaws_dual1 dual_lin(double a, qaws_dual1 x, qaws_dual1 y)
+{
+	return qaws_dual1_make((qaws_scalar)(a * x.v + y.v), (qaws_scalar)(a * x.t + y.t), (qaws_scalar)(a * x.tt + y.tt));
+}
+
+/* Start and cell size of the u (or v) grid, moving with the end knots when
+   `on` (knots are linear in the direction: no second rates). */
+static void scdf_grid(scdf_job const* job, int v_dir, int on, qaws_dual1* start, qaws_dual1* step)
+{
+	double a = v_dir ? job->v0 : job->u0, h = v_dir ? job->hv : job->hu;
+	double da = on ? (v_dir ? job->dv0 : job->du0) : 0, db = on ? (v_dir ? job->dv1 : job->du1) : 0;
+	*start = qaws_dual1_make((qaws_scalar)a, (qaws_scalar)da, 0);
+	*step = qaws_dual1_make((qaws_scalar)h, (qaws_scalar)((db - da) / job->cells), 0);
+}
+
+/* The end of the v domain, moving with its knot when `on`. */
+static qaws_dual1 scdf_v1(scdf_job const* job, int on)
+{
+	return qaws_dual1_make((qaws_scalar)job->v1, (qaws_scalar)(on ? job->dv1 : 0), 0);
 }
 
 /* Jet entries the measure reads: (S, S_u, S_v), plus (S_uu, S_uv, S_vv)
@@ -1111,25 +1136,25 @@ static qaws_dual1 scdf_w(scdf_job const* job, qaws_dual3 const* y)
 static qaws_status scdf_B(scdf_job const* job, qaws_dual1 u, qaws_dual1 b, qaws_diff_views const* dir, qaws_dual1* out)
 {
 	unsigned int c, q, k = (unsigned int)((b.v - job->v0) / job->hv);
-	qaws_dual1 sum = dual_c(0), len;
+	qaws_dual1 sum = dual_c(0), len, v0, hv, vk;
 	qaws_dual3 y[SCDF_Y];
 	qaws_status st;
-	double vk;
 	if (k >= job->cells)
 		k = job->cells - 1;
+	scdf_grid(job, 1, dir != NULL, &v0, &hv);
 	for (c = 0; c < k; c++)
 		for (q = 0; q < job->n; q++)
 		{
-			st = scdf_jet(job, u, dual_c(job->v0 + job->hv * (c + 0.5 + 0.5 * job->x[q])), dir, y);
+			st = scdf_jet(job, u, dual_lin(c + 0.5 + 0.5 * job->x[q], hv, v0), dir, y);
 			if (st != QAWS_STATUS_OK)
 				return st;
-			sum = qaws_dual1_add(sum, dual_axpy(0.5 * job->hv * job->w[q], scdf_w(job, y), 0));
+			sum = qaws_dual1_add(sum, qaws_dual1_mul(dual_axpy(0.5 * job->w[q], hv, 0), scdf_w(job, y)));
 		}
-	vk = job->v0 + job->hv * k;
-	len = dual_axpy(1, b, -vk);
+	vk = dual_lin(k, hv, v0);
+	len = qaws_dual1_sub(b, vk);
 	for (q = 0; q < job->n; q++)
 	{
-		st = scdf_jet(job, u, dual_axpy(0.5 * (1 + job->x[q]), len, vk), dir, y);
+		st = scdf_jet(job, u, dual_lin(0.5 * (1 + job->x[q]), len, vk), dir, y);
 		if (st != QAWS_STATUS_OK)
 			return st;
 		sum = qaws_dual1_add(sum, qaws_dual1_mul(dual_axpy(0.5 * job->w[q], len, 0), scdf_w(job, y)));
@@ -1143,17 +1168,17 @@ static qaws_status scdf_B(scdf_job const* job, qaws_dual1 u, qaws_dual1 b, qaws_
 static qaws_status scdf_A(scdf_job const* job, qaws_dual1 u, int use_dir, qaws_dual1* out)
 {
 	unsigned int q, k = (unsigned int)((u.v - job->u0) / job->hu);
-	double uk;
-	qaws_dual1 sum, len;
+	qaws_dual1 sum, len, u0, hu, uk, v1 = scdf_v1(job, use_dir);
 	if (k >= job->cells)
 		k = job->cells - 1;
-	uk = job->u0 + job->hu * k;
+	scdf_grid(job, 0, use_dir, &u0, &hu);
+	uk = dual_lin(k, hu, u0);
 	sum = use_dir ? job->cumA[k] : dual_c(job->cumA[k].v);
-	len = dual_axpy(1, u, -uk);
+	len = qaws_dual1_sub(u, uk);
 	for (q = 0; q < job->n; q++)
 	{
 		qaws_dual1 b1;
-		qaws_status st = scdf_B(job, dual_axpy(0.5 * (1 + job->x[q]), len, uk), dual_c(job->v1), use_dir ? job->direction : NULL, &b1);
+		qaws_status st = scdf_B(job, dual_lin(0.5 * (1 + job->x[q]), len, uk), v1, use_dir ? job->direction : NULL, &b1);
 		if (st != QAWS_STATUS_OK)
 			return st;
 		sum = qaws_dual1_add(sum, qaws_dual1_mul(dual_axpy(0.5 * job->w[q], len, 0), b1));
@@ -1180,7 +1205,7 @@ static qaws_status scdf_G(scdf_job const* job, qaws_dual1 u, qaws_dual1 v, qaws_
 	qaws_diff_views const* dir = use_dir ? job->direction : NULL;
 	qaws_status st = scdf_B(job, u, v, dir, &b);
 	if (st == QAWS_STATUS_OK)
-		st = scdf_B(job, u, dual_c(job->v1), dir, &b1);
+		st = scdf_B(job, u, scdf_v1(job, use_dir), dir, &b1);
 	if (st != QAWS_STATUS_OK)
 		return st;
 	*out = qaws_dual1_sub(b, qaws_dual1_mul(xi, b1));
@@ -1211,9 +1236,36 @@ static qaws_status scdf_job_init(scdf_job* job, qaws_diff_context const* ctx, qa
 	}
 	if (!(qaws_surface_get_diff_capabilities(surface) & QAWS_CAP_TANGENT2))
 		return QAWS_STATUS_UNSUPPORTED_OPERATION;
-	if ((direction && (qaws_diff_views_find(direction, QAWS_FIELD_U_KNOTS) || qaws_diff_views_find(direction, QAWS_FIELD_V_KNOTS))) ||
-	    (other && (qaws_diff_views_find(other, QAWS_FIELD_U_KNOTS) || qaws_diff_views_find(other, QAWS_FIELD_V_KNOTS))))
+	/* knot sinks are filled by the callers (forward passes per knot) */
+	if (other && (qaws_diff_views_find(other, QAWS_FIELD_U_KNOTS) || qaws_diff_views_find(other, QAWS_FIELD_V_KNOTS)))
 		return QAWS_STATUS_UNSUPPORTED_OPERATION;
+	if (direction)
+	{
+		/* rates of the domain end knots: u_knots[p] and u_knots[n_u] */
+		qaws_field_view const* uv = qaws_diff_views_find(direction, QAWS_FIELD_U_KNOTS);
+		qaws_field_view const* vv = qaws_diff_views_find(direction, QAWS_FIELD_V_KNOTS);
+		qaws_field_desc fields[8];
+		unsigned int nf = 0, f, nu = 0, nv = 0;
+		if ((uv || vv) && qaws_surface_describe_fields(surface, fields, 8, &nf) == QAWS_STATUS_OK)
+		{
+			qaws_scalar r = QAWS_ZERO;
+			for (f = 0; f < nf && f < 8; f++)
+			{
+				if (fields[f].field == QAWS_FIELD_U_KNOTS) nu = fields[f].count;
+				if (fields[f].field == QAWS_FIELD_V_KNOTS) nv = fields[f].count;
+			}
+			if (uv && nu > surface->u_degree + 1)
+			{
+				qaws_internal_view_read(uv, surface->u_degree, 1, &r); job->du0 = r;
+				qaws_internal_view_read(uv, nu - surface->u_degree - 1, 1, &r); job->du1 = r;
+			}
+			if (vv && nv > surface->v_degree + 1)
+			{
+				qaws_internal_view_read(vv, surface->v_degree, 1, &r); job->dv0 = r;
+				qaws_internal_view_read(vv, nv - surface->v_degree - 1, 1, &r); job->dv1 = r;
+			}
+		}
+	}
 	job->ctx = ctx;
 	job->surface = surface;
 	job->direction = direction;
@@ -1230,21 +1282,25 @@ static qaws_status scdf_job_init(scdf_job* job, qaws_diff_context const* ctx, qa
 	if (!job->cumA)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	job->cumA[0] = dual_c(0);
-	for (c = 0; c < job->cells; c++)
 	{
-		qaws_dual1 sum = job->cumA[c];
-		for (q = 0; q < job->n; q++)
+		qaws_dual1 u0, hu, v1 = scdf_v1(job, direction != NULL);
+		scdf_grid(job, 0, direction != NULL, &u0, &hu);
+		for (c = 0; c < job->cells; c++)
 		{
-			qaws_dual1 b1;
-			qaws_status st = scdf_B(job, dual_c(job->u0 + job->hu * (c + 0.5 + 0.5 * job->x[q])), dual_c(job->v1), direction, &b1);
-			if (st != QAWS_STATUS_OK)
+			qaws_dual1 sum = job->cumA[c];
+			for (q = 0; q < job->n; q++)
 			{
-				scdf_job_free(job);
-				return st;
+				qaws_dual1 b1;
+				qaws_status st = scdf_B(job, dual_lin(c + 0.5 + 0.5 * job->x[q], hu, u0), v1, direction, &b1);
+				if (st != QAWS_STATUS_OK)
+				{
+					scdf_job_free(job);
+					return st;
+				}
+				sum = qaws_dual1_add(sum, qaws_dual1_mul(dual_axpy(0.5 * job->w[q], hu, 0), b1));
 			}
-			sum = qaws_dual1_add(sum, dual_axpy(0.5 * job->hu * job->w[q], b1, 0));
+			job->cumA[c + 1] = sum;
 		}
-		job->cumA[c + 1] = sum;
 	}
 	return QAWS_STATUS_OK;
 }
@@ -1776,17 +1832,77 @@ qaws_status qaws_surface_cdf_sample_adjoint(
 {
 	scdf_job job;
 	scdf_pass ps;
+	qaws_diff_views rest;
+	qaws_field_view kept[16];
+	unsigned int f;
 	qaws_status st;
 	if ((!xi || !adjoint) && count)
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	st = scdf_job_init(&job, ctx, surface, measure, cells, quadrature, NULL, param_adjoint);
+	/* the reverse pass takes every field but the knots */
+	if (param_adjoint)
+	{
+		rest = *param_adjoint;
+		rest.fields = kept;
+		rest.field_count = 0;
+		for (f = 0; f < param_adjoint->field_count && rest.field_count < 16; f++)
+			if (param_adjoint->fields[f].field != QAWS_FIELD_U_KNOTS && param_adjoint->fields[f].field != QAWS_FIELD_V_KNOTS)
+				kept[rest.field_count++] = param_adjoint->fields[f];
+	}
+	st = scdf_job_init(&job, ctx, surface, measure, cells, quadrature, NULL, param_adjoint ? &rest : NULL);
 	if (st != QAWS_STATUS_OK)
 		return st;
 	ps.job = &job;
-	ps.sink = param_adjoint;
+	ps.sink = param_adjoint ? &rest : NULL;
 	ps.hvp = 0;
 	st = scdf_backward(&ps, xi, count, adjoint, xi_adjoint);
 	scdf_job_free(&job);
+	/*
+	 * Knots move the cell grid and every quadrature node with the domain
+	 * ends: their adjoints are exact forward passes, one per knot entry
+	 * (sum adjoint . sample' along e_j), knots being few.
+	 */
+	for (f = 0; param_adjoint && f < param_adjoint->field_count && st == QAWS_STATUS_OK; f++)
+	{
+		qaws_field_view* kv = &param_adjoint->fields[f];
+		qaws_surface_cdf_sample* t1;
+		qaws_scalar* unit;
+		qaws_field_view dv;
+		qaws_diff_views dir;
+		unsigned int e, i;
+		if (kv->field != QAWS_FIELD_U_KNOTS && kv->field != QAWS_FIELD_V_KNOTS)
+			continue;
+		t1 = (qaws_surface_cdf_sample*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_surface_cdf_sample) * (count + 1)));
+		unit = (qaws_scalar*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_scalar) * (kv->count + 1)));
+		if (!t1 || !unit)
+		{
+			qaws_internal_dealloc(NULL, t1);
+			qaws_internal_dealloc(NULL, unit);
+			return QAWS_STATUS_ALLOCATION_FAILURE;
+		}
+		memset(unit, 0, sizeof(qaws_scalar) * kv->count);
+		dv = qaws_field_view_make(kv->field, unit, kv->count, 1);
+		dir.fields = &dv;
+		dir.field_count = 1;
+		dir.children = NULL;
+		dir.child_count = 0;
+		for (e = 0; e < kv->count && st == QAWS_STATUS_OK; e++)
+		{
+			double g = 0;
+			qaws_scalar gs;
+			if (!qaws_internal_view_element_active(kv, e))
+				continue;
+			unit[e] = QAWS_ONE;
+			st = qaws_surface_cdf_sample_tangent(ctx, surface, measure, xi, NULL, count, cells, quadrature, &dir, NULL, t1, NULL, NULL);
+			unit[e] = QAWS_ZERO;
+			for (i = 0; i < count && st == QAWS_STATUS_OK; i++)
+				g += (double)adjoint[i].u * t1[i].u + (double)adjoint[i].v * t1[i].v + v3_dot(adjoint[i].position, t1[i].position);
+			gs = (qaws_scalar)g;
+			if (st == QAWS_STATUS_OK)
+				qaws_internal_view_add(kv, e, 1, &gs);
+		}
+		qaws_internal_dealloc(NULL, t1);
+		qaws_internal_dealloc(NULL, unit);
+	}
 	return st;
 }
 
@@ -1842,7 +1958,9 @@ qaws_status qaws_surface_cdf_sample_hvp(
 		return QAWS_STATUS_OK;
 	if (out_hv->child_count || direction->child_count)
 		return QAWS_STATUS_UNSUPPORTED_OPERATION;
-	if (qaws_surface_get_diff_capabilities(surface) & QAWS_CAP_LINEAR)
+	if ((qaws_surface_get_diff_capabilities(surface) & QAWS_CAP_LINEAR) &&
+	    !qaws_diff_views_find(direction, QAWS_FIELD_U_KNOTS) && !qaws_diff_views_find(direction, QAWS_FIELD_V_KNOTS) &&
+	    !qaws_diff_views_find(out_hv, QAWS_FIELD_U_KNOTS) && !qaws_diff_views_find(out_hv, QAWS_FIELD_V_KNOTS))
 	{
 		/* forward over reverse: one differentiated backward pass */
 		scdf_job job;
