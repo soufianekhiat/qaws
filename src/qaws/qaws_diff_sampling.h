@@ -45,9 +45,9 @@
  *              direct for families linear in their fields (QAWS_CAP_LINEAR),
  *              QAWS_STATUS_UNSUPPORTED_OPERATION otherwise
  *
- * measure may be NULL (arc length). Knots move the span boundaries of the
- * quadrature and are not supported as parameters here
- * (QAWS_STATUS_UNSUPPORTED_OPERATION). 2D curves work too (z of the outputs
+ * measure may be NULL (arc length). Knots are parameters of tangent and
+ * adjoint: they move the basis, the quadrature spans and the start of the
+ * domain; hvp refuses them (QAWS_STATUS_UNSUPPORTED_OPERATION). 2D curves work too (z of the outputs
  * is zero; a density then reads z = 0). Samples where m vanishes are
  * reported as QAWS_DIFF_ILL_CONDITIONED through ctx->report.
  */

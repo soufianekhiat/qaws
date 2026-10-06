@@ -1910,9 +1910,9 @@ qaws_status qaws_surface_functional_eval(
 	qaws_scalar* out_tangent2);
 ```
 
-Surface counterpart of `qaws_curve_functional_eval`. The quadrature runs on a fixed cell grid over the domain, so knot directions are refused.
+Surface counterpart of `qaws_curve_functional_eval`. The quadrature runs on a cell grid over the domain; `U_KNOTS` / `V_KNOTS` directions change the integrand at fixed nodes, and the domain end knots also move every node and scale the weights.
 
-**Returns:** `QAWS_STATUS_OK`; `QAWS_STATUS_INVALID_ARGUMENT` on NULL `surface` or an unknown functional; `QAWS_STATUS_UNSUPPORTED_OPERATION` if `direction` contains a `U_KNOTS` or `V_KNOTS` view.
+**Returns:** `QAWS_STATUS_OK`; `QAWS_STATUS_INVALID_ARGUMENT` on NULL `surface` or an unknown functional.
 
 ### qaws_surface_functional_gradient
 
@@ -1965,7 +1965,7 @@ p'  = dC + C' t'
 p'' = d2C + 2 dC' t' + C'' t'^2 + C' t''
 ```
 
-`m_e` is the rate of the integrand along the parameter direction at fixed `t`, `m_t` its `t`-derivative (the curvature measure reads `C'''` for it). Knots move the quadrature spans and are refused as parameters (`QAWS_STATUS_UNSUPPORTED_OPERATION`). Samples where `m` vanishes are reported as `QAWS_DIFF_ILL_CONDITIONED` with zero derivatives. 2D curves are lifted (z = 0).
+`m_e` is the rate of the integrand along the parameter direction at fixed `t`, `m_t` its `t`-derivative (the curvature measure reads `C'''` for it). Knots are parameters of the tangent and the adjoint: a knot moves the basis at fixed `t`, and the span boundaries it bounds move the quadrature nodes `t = a (1 - s) + b s` and weights `W = (b - a) c`, so the cumulative measures differentiate as `(W m)' = W m' + W' m`, `(W m)'' = W m'' + 2 W' m'`. The partial span `[a_k, t]` moves with its start knot only (`t` is held for `M'`), which also covers the moving start of the domain. The HVP refuses knot views (`QAWS_STATUS_UNSUPPORTED_OPERATION`). Samples where `m` vanishes are reported as `QAWS_DIFF_ILL_CONDITIONED` with zero derivatives. 2D curves are lifted (z = 0).
 
 ### qaws_sample_measure_desc
 

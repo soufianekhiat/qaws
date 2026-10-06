@@ -5,6 +5,7 @@
 #include "internal/qaws_internal_surface.h"
 #include "internal/qaws_internal_diff.h"
 #include "core/qaws_dual_core.h"
+#include "internal/qaws_internal_basis.h"
 #include <math.h>
 #include <string.h>
 
@@ -91,6 +92,10 @@ typedef struct cdf_job
 	double* cum;      /* cum[k]: measure of spans [0, k) */
 	double* cum1;     /* first directional derivative of cum */
 	double* cum2;     /* second directional derivative of cum */
+	/* knot terms (NULL when knots are not among the parameters) */
+	qaws_field_view const* knot_in;
+	qaws_field_view* knot_out;
+	unsigned int* left;   /* left[k]: knot index of span k's start */
 } cdf_job;
 
 /* ------------------------------------------------------------------ */
@@ -222,12 +227,28 @@ static void measure_hess_vec(cdf_job const* job, qaws_curve_jet_3d const* p, qaw
 /* ------------------------------------------------------------------ */
 
 /* Node q (0 .. n * CDF_PIECES - 1) of [a, b] and its weight. */
-static void cdf_node(cdf_job const* job, double a, double b, unsigned int q, double* t, double* W)
+/* Node q of [a, b]: t = a + s (b - a), W = (b - a) c (s, c may be NULL). */
+static void cdf_node(cdf_job const* job, double a, double b, unsigned int q, double* t, double* W, double* s, double* c)
 {
 	unsigned int piece = q / job->n, k = q % job->n;
 	double h = (b - a) / CDF_PIECES, lo = a + piece * h;
 	*t = lo + 0.5 * h * (1 + job->x[k]);
 	*W = 0.5 * h * job->w[k];
+	if (s) *s = (piece + 0.5 * (1 + job->x[k])) / CDF_PIECES;
+	if (c) *c = 0.5 * job->w[k] / CDF_PIECES;
+}
+
+/* Rates of the start and end knots of span k along the knot direction. */
+static void cdf_span_rates(cdf_job const* job, unsigned int k, double* da, double* db)
+{
+	qaws_scalar ra = QAWS_ZERO, rb = QAWS_ZERO;
+	if (job->left && job->knot_in)
+	{
+		qaws_internal_view_read(job->knot_in, job->left[k], 1, &ra);
+		qaws_internal_view_read(job->knot_in, job->left[k] + 1, 1, &rb);
+	}
+	*da = ra;
+	*db = rb;
 }
 
 /* Jets at t moving at rate t_dot, along direction; tangent2 may be NULL. */
@@ -239,8 +260,11 @@ static qaws_status cdf_jets(cdf_job const* job, double t, double t_dot, qaws_dif
 }
 
 /* Measure of [a, b] and its first and second directional derivatives along
-   the job direction (d1, d2 may be NULL). */
-static qaws_status cdf_integrate(cdf_job const* job, double a, double b, double* v, double* d1, double* d2)
+   the job direction (d1, d2 may be NULL); da, db are the rates of a and b
+   when they are knots: the nodes then move at (1 - s) da + s db and the
+   weights at c (db - da), so (W m)' = W m' + W' m, (W m)'' = W m'' + 2 W' m'. */
+static qaws_status cdf_integrate(cdf_job const* job, double a, double b, double da, double db,
+	double* v, double* d1, double* d2)
 {
 	unsigned int q;
 	*v = 0;
@@ -250,20 +274,21 @@ static qaws_status cdf_integrate(cdf_job const* job, double a, double b, double*
 		return QAWS_STATUS_OK;
 	for (q = 0; q < job->n * CDF_PIECES; q++)
 	{
-		double t, W;
+		double t, W, s, c, wd;
 		qaws_curve_jet_3d p, tg, tt;
 		qaws_dual3 y[3];
 		qaws_dual1 m;
 		qaws_status st;
-		cdf_node(job, a, b, q, &t, &W);
-		st = cdf_jets(job, t, 0, job->direction, &p, &tg, job->direction ? &tt : NULL);
+		cdf_node(job, a, b, q, &t, &W, &s, &c);
+		wd = d1 ? c * (db - da) : 0;
+		st = cdf_jets(job, t, d1 ? (1 - s) * da + s * db : 0, job->direction, &p, &tg, job->direction ? &tt : NULL);
 		if (st != QAWS_STATUS_OK)
 			return st;
 		jets_to_dual(&p, job->direction ? &tg : NULL, job->direction ? &tt : NULL, y);
 		m = measure_eval(job, y);
 		*v += W * m.v;
-		if (d1) *d1 += W * m.t;
-		if (d2) *d2 += W * m.tt;
+		if (d1) *d1 += W * m.t + wd * m.v;
+		if (d2) *d2 += W * m.tt + 2 * wd * m.t;
 	}
 	return QAWS_STATUS_OK;
 }
@@ -271,14 +296,63 @@ static qaws_status cdf_integrate(cdf_job const* job, double a, double b, double*
 static void cdf_job_free(cdf_job* job)
 {
 	qaws_internal_dealloc(NULL, job->cum);
+	qaws_internal_dealloc(NULL, job->left);
 	job->cum = NULL;
+	job->left = NULL;
 }
 
-/* Validates the measure, rejects knot views (they move the span
-   boundaries) and builds the cumulative span measures. */
+/* Finds the left knot of every span when `views` carries a knot field the
+   curve differentiates (other curves ignore the view). */
+static qaws_status cdf_job_knots(cdf_job* job, qaws_diff_views const* views)
+{
+	qaws_field_desc fields[8];
+	qaws_field_view const* kv = views ? qaws_diff_views_find(views, QAWS_FIELD_KNOTS) : NULL;
+	qaws_scalar* knots;
+	unsigned int n = 0, i, k, got = 0, knot_count = 0, cp_count = 0;
+	int ok = 0;
+	if (!kv || !kv->data)
+		return QAWS_STATUS_OK;
+	if (qaws_curve_describe_fields(job->curve, fields, 8, &n) != QAWS_STATUS_OK)
+		return QAWS_STATUS_OK;
+	for (i = 0; i < n && i < 8; i++)
+	{
+		if (fields[i].field == QAWS_FIELD_KNOTS && (fields[i].capabilities & QAWS_CAP_TANGENT))
+		{
+			ok = 1;
+			knot_count = fields[i].count;
+		}
+		if (fields[i].field == QAWS_FIELD_CONTROL_POINTS)
+			cp_count = fields[i].count;
+	}
+	if (!ok || knot_count < 2)
+		return QAWS_STATUS_OK;
+	knots = (qaws_scalar*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_scalar) * knot_count));
+	job->left = (unsigned int*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(unsigned int) * job->spans));
+	if (!knots || !job->left)
+	{
+		qaws_internal_dealloc(NULL, knots);
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	}
+	if (qaws_curve_read_field(job->curve, QAWS_FIELD_KNOTS, knots, knot_count, &got) != QAWS_STATUS_OK)
+	{
+		qaws_internal_dealloc(NULL, knots);
+		qaws_internal_dealloc(NULL, job->left);
+		job->left = NULL;
+		return QAWS_STATUS_OK;
+	}
+	for (k = 0; k < job->spans; k++)
+		job->left[k] = qaws_internal_find_knot_span(knots, knot_count, job->curve->degree, cp_count,
+			(qaws_scalar)(0.5 * ((double)job->curve->span_boundaries[k] + job->curve->span_boundaries[k + 1])));
+	qaws_internal_dealloc(NULL, knots);
+	return QAWS_STATUS_OK;
+}
+
+/* Validates the measure, finds the knot terms (knot views move the span
+   boundaries; `knots` = 0 rejects them) and builds the cumulative span
+   measures. */
 static qaws_status cdf_job_init(cdf_job* job, qaws_diff_context const* ctx, qaws_curve const* curve,
 	qaws_sample_measure_desc const* measure, unsigned int quadrature, qaws_diff_views const* direction,
-	qaws_diff_views const* other)
+	qaws_diff_views* other, int knots)
 {
 	unsigned int k;
 	qaws_status st;
@@ -293,8 +367,8 @@ static qaws_status cdf_job_init(cdf_job* job, qaws_diff_context const* ctx, qaws
 		    (unsigned int)measure->kind > (unsigned int)QAWS_MEASURE_DENSITY)
 			return QAWS_STATUS_INVALID_ARGUMENT;
 	}
-	if ((direction && qaws_diff_views_find(direction, QAWS_FIELD_KNOTS)) ||
-	    (other && qaws_diff_views_find(other, QAWS_FIELD_KNOTS)))
+	if (!knots && ((direction && qaws_diff_views_find(direction, QAWS_FIELD_KNOTS)) ||
+	    (other && qaws_diff_views_find(other, QAWS_FIELD_KNOTS))))
 		return QAWS_STATUS_UNSUPPORTED_OPERATION;
 	job->ctx = ctx;
 	job->curve = curve;
@@ -304,16 +378,30 @@ static qaws_status cdf_job_init(cdf_job* job, qaws_diff_context const* ctx, qaws
 	job->n = quadrature == 0 ? 8 : (quadrature < 2 ? 2 : (quadrature > 8 ? 8 : quadrature));
 	sampling_gauss_rule(job->n, job->x, job->w);
 	job->spans = curve->span_count;
+	if (knots)
+	{
+		st = cdf_job_knots(job, direction ? direction : other);
+		if (st != QAWS_STATUS_OK)
+			return st;
+		if (job->left && direction)
+			job->knot_in = qaws_diff_views_find(direction, QAWS_FIELD_KNOTS);
+		else if (job->left)
+			job->knot_out = (qaws_field_view*)qaws_diff_views_find(other, QAWS_FIELD_KNOTS);
+	}
 	job->cum = (double*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(double) * 3 * (job->spans + 1)));
 	if (!job->cum)
+	{
+		cdf_job_free(job);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
+	}
 	job->cum1 = job->cum + job->spans + 1;
 	job->cum2 = job->cum1 + job->spans + 1;
 	job->cum[0] = job->cum1[0] = job->cum2[0] = 0;
 	for (k = 0; k < job->spans; k++)
 	{
-		double v, d1, d2;
-		st = cdf_integrate(job, curve->span_boundaries[k], curve->span_boundaries[k + 1], &v, &d1, &d2);
+		double v, d1, d2, da, db;
+		cdf_span_rates(job, k, &da, &db);
+		st = cdf_integrate(job, curve->span_boundaries[k], curve->span_boundaries[k + 1], da, db, &v, &d1, &d2);
 		if (st != QAWS_STATUS_OK)
 		{
 			cdf_job_free(job);
@@ -354,7 +442,7 @@ static qaws_status cdf_solve(cdf_job const* job, double sigma, double* out_t, un
 	{
 		qaws_curve_jet_3d p, tg;
 		double v, f, m;
-		qaws_status st = cdf_integrate(job, a, t, &v, NULL, NULL);
+		qaws_status st = cdf_integrate(job, a, t, 0, 0, &v, NULL, NULL);
 		if (st != QAWS_STATUS_OK)
 			return st;
 		f = job->cum[k] + v - sigma;
@@ -405,7 +493,7 @@ qaws_status qaws_curve_cdf_sample_tangent(
 	qaws_status st;
 	if (!targets && count)
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	st = cdf_job_init(&job, ctx, curve, measure, quadrature, param_tangent, NULL);
+	st = cdf_job_init(&job, ctx, curve, measure, quadrature, param_tangent, NULL, 1);
 	if (st != QAWS_STATUS_OK)
 		return st;
 	if (out_total)
@@ -443,7 +531,12 @@ qaws_status qaws_curve_cdf_sample_tangent(
 			continue;
 		}
 		qaws_internal_diff_report_note(ctx, QAWS_DIFF_SMOOTH, QAWS_DIFF_VALID, 0, i);
-		st = cdf_integrate(&job, curve->span_boundaries[k], t, &v, &M1, &M2);
+		{
+			/* [a_k, t] at fixed t: only its start knot moves */
+			double da, db;
+			cdf_span_rates(&job, k, &da, &db);
+			st = cdf_integrate(&job, curve->span_boundaries[k], t, da, 0, &v, &M1, &M2);
+		}
 		if (st != QAWS_STATUS_OK)
 			break;
 		M1 += job.cum1[k];
@@ -485,7 +578,8 @@ typedef struct cdf_sample
 	qaws_vec3 g[3];       /* gradient of m with respect to (C, C', C'') at t */
 } cdf_sample;
 
-static qaws_status cdf_add_jet(cdf_job const* job, double t, qaws_vec3 const* bar3, qaws_diff_views* sink)
+static qaws_status cdf_add_jet(cdf_job const* job, double t, qaws_vec3 const* bar3, qaws_diff_views* sink,
+	qaws_scalar* t_adj)
 {
 	qaws_curve_jet_3d bar;
 	memset(&bar, 0, sizeof(bar));
@@ -493,19 +587,35 @@ static qaws_status cdf_add_jet(cdf_job const* job, double t, qaws_vec3 const* ba
 	bar.d[1] = bar3[1];
 	bar.d[2] = bar3[2];
 	bar.channels = JET_CHANNELS;
-	return qaws_internal_curve_adjoint_any(job->ctx, job->curve, (qaws_scalar)t, JET_CHANNELS, &bar, sink, NULL);
+	return qaws_internal_curve_adjoint_any(job->ctx, job->curve, (qaws_scalar)t, JET_CHANNELS, &bar, sink, t_adj);
 }
 
-/* Pullback of c1 * dm/dy + c2 * H_m ydot at the node t, weight W. */
-static qaws_status cdf_node_pullback(cdf_job const* job, double t, double W, double c1, double c2, qaws_diff_views* sink)
+/* Quadrature node of span `span` at fraction s with W = (b - a) c; `full`
+   when its end b is a knot too (a partial span ends at a sample). */
+typedef struct cdf_knot_node
+{
+	unsigned int span;
+	double s, c;
+	int full;
+} cdf_knot_node;
+
+/* Pullback of c1 * dm/dy + c2 * H_m ydot at the node t, weight W; with knot
+   adjoints, the moving node and weight add
+     a_bar += c1 (-c m + (1 - s) W m_t),  b_bar += c1 (c m + s W m_t). */
+static qaws_status cdf_node_pullback(cdf_job const* job, double t, double W, double c1, double c2,
+	cdf_knot_node const* node, qaws_diff_views* sink)
 {
 	qaws_curve_jet_3d p, tg;
 	qaws_vec3 g[3], hv[3], bar[3];
 	unsigned int k;
+	double m;
+	qaws_scalar t_adj = QAWS_ZERO;
+	int knots = job->knot_out && node && c2 == 0;
 	qaws_status st = cdf_jets(job, t, 0, c2 != 0 ? job->direction : NULL, &p, &tg, NULL);
 	if (st != QAWS_STATUS_OK)
 		return st;
-	if (!(measure_value(job, &p) > QAWS_EPSILON))
+	m = measure_value(job, &p);
+	if (!(m > QAWS_EPSILON))
 		return QAWS_STATUS_OK;
 	measure_gradient(job, &p, g);
 	for (k = 0; k < 3; k++)
@@ -519,7 +629,17 @@ static qaws_status cdf_node_pullback(cdf_job const* job, double t, double W, dou
 		for (k = 0; k < 3; k++)
 			bar[k] = v3_axpy(W * c2, hv[k], bar[k]);
 	}
-	return cdf_add_jet(job, t, bar, sink);
+	st = cdf_add_jet(job, t, bar, sink, knots ? &t_adj : NULL);
+	if (st != QAWS_STATUS_OK || !knots)
+		return st;
+	{
+		qaws_scalar ga = (qaws_scalar)(-c1 * node->c * m + (1 - node->s) * t_adj);
+		qaws_scalar gb = (qaws_scalar)(c1 * node->c * m + node->s * t_adj);
+		qaws_internal_view_add(job->knot_out, job->left[node->span], 1, &ga);
+		if (node->full)
+			qaws_internal_view_add(job->knot_out, job->left[node->span] + 1, 1, &gb);
+	}
+	return QAWS_STATUS_OK;
 }
 
 /*
@@ -559,8 +679,11 @@ static qaws_status cdf_pullback_measure(cdf_job const* job, cdf_sample const* sm
 		for (q = 0; q < job->n * CDF_PIECES && st == QAWS_STATUS_OK; q++)
 		{
 			double t, W;
-			cdf_node(job, a, b, q, &t, &W);
-			st = cdf_node_pullback(job, t, W, w1, w2, sink);
+			cdf_knot_node node;
+			node.span = k;
+			node.full = 1;
+			cdf_node(job, a, b, q, &t, &W, &node.s, &node.c);
+			st = cdf_node_pullback(job, t, W, w1, w2, &node, sink);
 		}
 	}
 	for (i = 0; i < count && st == QAWS_STATUS_OK; i++)
@@ -571,8 +694,11 @@ static qaws_status cdf_pullback_measure(cdf_job const* job, cdf_sample const* sm
 		for (q = 0; q < job->n * CDF_PIECES && st == QAWS_STATUS_OK; q++)
 		{
 			double t, W;
-			cdf_node(job, a, b, q, &t, &W);
-			st = cdf_node_pullback(job, t, W, -c1[i], c2 ? -c2[i] : 0, sink);
+			cdf_knot_node node;
+			node.span = smp[i].span;
+			node.full = 0;
+			cdf_node(job, a, b, q, &t, &W, &node.s, &node.c);
+			st = cdf_node_pullback(job, t, W, -c1[i], c2 ? -c2[i] : 0, &node, sink);
 		}
 	}
 	qaws_internal_dealloc(NULL, beyond);
@@ -644,7 +770,7 @@ qaws_status qaws_curve_cdf_sample_adjoint(
 	qaws_status st;
 	if ((!targets || !adjoint) && count)
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	st = cdf_job_init(&job, ctx, curve, measure, quadrature, NULL, param_adjoint);
+	st = cdf_job_init(&job, ctx, curve, measure, quadrature, NULL, param_adjoint, 1);
 	if (st != QAWS_STATUS_OK)
 		return st;
 	smp = (cdf_sample*)qaws_internal_alloc(NULL, (unsigned long)((sizeof(cdf_sample) + sizeof(double)) * (count + 1)));
@@ -706,7 +832,7 @@ qaws_status qaws_curve_cdf_sample_hvp(
 		return QAWS_STATUS_UNSUPPORTED_OPERATION;
 	if (!direction || !out_hv)
 		return QAWS_STATUS_OK;
-	st = cdf_job_init(&job, ctx, curve, measure, quadrature, direction, out_hv);
+	st = cdf_job_init(&job, ctx, curve, measure, quadrature, direction, out_hv, 0);
 	if (st != QAWS_STATUS_OK)
 		return st;
 	smp = (cdf_sample*)qaws_internal_alloc(NULL, (unsigned long)((sizeof(cdf_sample) + 2 * sizeof(double)) * (count + 1)));
@@ -728,7 +854,7 @@ qaws_status qaws_curve_cdf_sample_hvp(
 		c1[i] = c2[i] = 0;
 		if (!(a->m > QAWS_EPSILON))
 			continue;
-		st = cdf_integrate(&job, curve->span_boundaries[a->span], a->t, &v, &M1, NULL);
+		st = cdf_integrate(&job, curve->span_boundaries[a->span], a->t, 0, 0, &v, &M1, NULL);
 		if (st != QAWS_STATUS_OK)
 			break;
 		M1 += job.cum1[a->span];
@@ -749,7 +875,7 @@ qaws_status qaws_curve_cdf_sample_hvp(
 			bar[k] = v3_make(-a->lambda * a->t_dot * a->g[k].x, -a->lambda * a->t_dot * a->g[k].y,
 				-a->lambda * a->t_dot * a->g[k].z);
 		bar[1] = v3_axpy(a->t_dot, adjoint[i].position, bar[1]);
-		st = cdf_add_jet(&job, a->t, bar, out_hv);
+		st = cdf_add_jet(&job, a->t, bar, out_hv, NULL);
 	}
 	if (st == QAWS_STATUS_OK)
 		st = cdf_pullback_measure(&job, smp, count, c1, c2, F1, F2, out_hv);

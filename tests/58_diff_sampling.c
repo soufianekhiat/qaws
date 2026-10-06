@@ -23,7 +23,9 @@
 #define SM_SAMPLES 3
 #define SM_PARAMS 24     /* 6 control points x 3 + 6 weights */
 
-static qaws_scalar const g_sm_knots[10] = { 0, 0, 0, 0, 1, 2, 3, 3, 3, 3 };
+static qaws_scalar const g_sm_knots0[10] = { 0, 0, 0, 0, 1, 2, 3, 3, 3, 3 };
+/* knots of the curves sm_curve builds (the knot test moves them) */
+static qaws_scalar const* g_sm_knots = g_sm_knots0;
 
 static qaws_cdf_target const g_sm_targets[SM_SAMPLES] = {
 	{ (qaws_scalar)0, (qaws_scalar)0.35 }, { (qaws_scalar)1.7, (qaws_scalar)0 }, { (qaws_scalar)-0.5, (qaws_scalar)1 }
@@ -494,23 +496,86 @@ static void test_traversal(void)
 	qaws_curve_destroy(c);
 }
 
+/* Knots as parameters: they move the quadrature spans, the start of the
+   domain and the basis. Every knot moves, the domain ends included. */
+static void test_knots(int kind, char const* name)
+{
+	static double const dk[10] = { 0.1, 0.1, 0.1, 0.1, -0.2, 0.15, -0.05, -0.05, -0.05, -0.05 };
+	qaws_scalar x[SM_PARAMS], kd[10], kp[10], km[10], grad[10], adj_d[SM_SAMPLES];
+	qaws_cdf_sample t1[SM_SAMPLES], t2[SM_SAMPLES], vp[SM_SAMPLES], vm[SM_SAMPLES], t1p[SM_SAMPLES], t1m[SM_SAMPLES],
+		adj[SM_SAMPLES];
+	qaws_field_view fd, fg;
+	qaws_diff_views vd, vg;
+	qaws_curve* c;
+	qaws_curve* cp;
+	qaws_curve* cm;
+	double h = QAWS_SCALAR_IS_FLOAT ? 1e-2 : 1e-5, tol = QAWS_SCALAR_IS_FLOAT ? 5e-2 : 1e-6;
+	int ok1 = 1, ok2 = 1;
+	unsigned int i;
+	char msg[160];
+	sm_base(kind, x);
+	for (i = 0; i < 10; i++)
+	{
+		kd[i] = (qaws_scalar)dk[i];
+		kp[i] = (qaws_scalar)(g_sm_knots0[i] + h * dk[i]);
+		km[i] = (qaws_scalar)(g_sm_knots0[i] - h * dk[i]);
+	}
+	fd = qaws_field_view_make(QAWS_FIELD_KNOTS, kd, 10, 1);
+	fg = qaws_field_view_make(QAWS_FIELD_KNOTS, grad, 10, 1);
+	vd.fields = &fd;
+	vg.fields = &fg;
+	vd.field_count = vg.field_count = 1;
+	vd.children = vg.children = NULL;
+	vd.child_count = vg.child_count = 0;
+	c = sm_curve(kind, x);
+	g_sm_knots = kp;
+	cp = sm_curve(kind, x);
+	g_sm_knots = km;
+	cm = sm_curve(kind, x);
+	g_sm_knots = g_sm_knots0;
+	TEST_ASSERT_STATUS(qaws_curve_cdf_sample_tangent(NULL, c, MEAS, g_sm_targets, NULL, NULL, SM_SAMPLES, 0, &vd, NULL, t1, t2, NULL));
+	qaws_curve_cdf_sample_tangent(NULL, cp, MEAS, g_sm_targets, NULL, NULL, SM_SAMPLES, 0, &vd, vp, t1p, NULL, NULL);
+	qaws_curve_cdf_sample_tangent(NULL, cm, MEAS, g_sm_targets, NULL, NULL, SM_SAMPLES, 0, &vd, vm, t1m, NULL, NULL);
+	for (i = 0; i < SM_SAMPLES; i++)
+	{
+		ok1 &= diff_close(t1[i].t, (vp[i].t - vm[i].t) / (2 * h), tol);
+		ok1 &= diff_close(t1[i].position.x, (vp[i].position.x - vm[i].position.x) / (2 * h), tol);
+		ok1 &= diff_close(t1[i].position.y, (vp[i].position.y - vm[i].position.y) / (2 * h), tol);
+		ok1 &= diff_close(t1[i].position.z, (vp[i].position.z - vm[i].position.z) / (2 * h), tol);
+		ok2 &= diff_close(t2[i].t, (t1p[i].t - t1m[i].t) / (2 * h), tol);
+		ok2 &= diff_close(t2[i].position.x, (t1p[i].position.x - t1m[i].position.x) / (2 * h), tol);
+		ok2 &= diff_close(t2[i].position.y, (t1p[i].position.y - t1m[i].position.y) / (2 * h), tol);
+		ok2 &= diff_close(t2[i].position.z, (t1p[i].position.z - t1m[i].position.z) / (2 * h), tol);
+	}
+	sprintf(msg, "%s: knot tangents match finite differences", name);
+	TEST_ASSERT(ok1, msg);
+	sprintf(msg, "%s: second order knot tangents match finite differences of the tangents", name);
+	TEST_ASSERT(ok2, msg);
+
+	sm_rand_adjoint(adj, SM_SAMPLES);
+	memset(grad, 0, sizeof(grad));
+	memset(adj_d, 0, sizeof(adj_d));
+	TEST_ASSERT_STATUS(qaws_curve_cdf_sample_adjoint(NULL, c, MEAS, g_sm_targets, SM_SAMPLES, 0, adj, &vg, adj_d));
+	{
+		double lhs = sm_sample_dot(adj, t1, SM_SAMPLES), rhs = diff_dot(grad, kd, 10);
+		sprintf(msg, "%s: knot adjoint identity (%.12g vs %.12g)", name, lhs, rhs);
+		TEST_ASSERT(diff_close(lhs, rhs, QAWS_SCALAR_IS_FLOAT ? 2e-3 : 1e-10), msg);
+	}
+	sprintf(msg, "%s: HVP refuses knots", name);
+	TEST_ASSERT(qaws_curve_cdf_sample_hvp(NULL, c, MEAS, g_sm_targets, SM_SAMPLES, 0, adj, &vd, &vg) ==
+		QAWS_STATUS_UNSUPPORTED_OPERATION, msg);
+	qaws_curve_destroy(c);
+	qaws_curve_destroy(cp);
+	qaws_curve_destroy(cm);
+}
+
 static void test_refusals(void)
 {
-	qaws_scalar x[SM_PARAMS], k[10];
-	qaws_field_view fk;
-	qaws_diff_views vk;
+	qaws_scalar x[SM_PARAMS];
 	qaws_cdf_sample s[SM_SAMPLES];
 	qaws_curve* c;
 	sm_base(0, x);
 	c = sm_curve(0, x);
-	memset(k, 0, sizeof(k));
-	fk = qaws_field_view_make(QAWS_FIELD_KNOTS, k, 10, 1);
-	vk.fields = &fk;
-	vk.field_count = 1;
-	vk.children = NULL;
-	vk.child_count = 0;
-	TEST_ASSERT(qaws_curve_cdf_sample_tangent(NULL, c, MEAS, g_sm_targets, NULL, NULL, SM_SAMPLES, 0, &vk, s, s, NULL, NULL) ==
-		QAWS_STATUS_UNSUPPORTED_OPERATION, "knots move the quadrature spans: refused");
 	TEST_ASSERT(qaws_curve_cdf_sample_tangent(NULL, NULL, MEAS, g_sm_targets, NULL, NULL, SM_SAMPLES, 0, NULL, s, NULL, NULL, NULL) ==
 		QAWS_STATUS_INVALID_ARGUMENT, "NULL curve");
 	qaws_curve_destroy(c);
@@ -544,6 +609,20 @@ int test_58_diff_sampling_main(void)
 				g_sm_measure = measures[m];
 				sprintf(name, "%s, %s", knames[kind], mnames[m]);
 				test_finite_differences(kind, name);
+			}
+		g_sm_measure = NULL;
+	}
+	{
+		static qaws_sample_measure_desc const* const measures[3] = { NULL, &g_sm_curvature, &g_sm_density };
+		static char const* const mnames[3] = { "arc length", "curvature", "density" };
+		char name[96];
+		int m, kind;
+		for (m = 0; m < 3; m++)
+			for (kind = 0; kind < 2; kind++)
+			{
+				g_sm_measure = measures[m];
+				sprintf(name, "%s knots, %s", kind ? "NURBS" : "B-spline", mnames[m]);
+				test_knots(kind, name);
 			}
 		g_sm_measure = NULL;
 	}
