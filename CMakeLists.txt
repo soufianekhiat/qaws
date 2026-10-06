@@ -223,6 +223,7 @@ option(QAWS_ENABLE_EXACT "Enable exact/certified CPU geometry" ON)
 if(QAWS_ENABLE_EXACT)
   list(APPEND QAWS_SOURCES
     src/qaws/exact/qaws_exact_int.c
+    src/qaws/exact/qaws_exact_predicates.c
   )
 endif()
 
@@ -346,6 +347,18 @@ if(QAWS_BUILD_EXAMPLES)
     RUNTIME_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/working_dir"
     RUNTIME_OUTPUT_DIRECTORY_RELEASE "${PROJECT_SOURCE_DIR}/working_dir"
     RUNTIME_OUTPUT_DIRECTORY_DEBUG "${PROJECT_SOURCE_DIR}/working_dir")
+  if(QAWS_ENABLE_EXACT)
+    add_executable(qaws_exact_showcase examples/exact_showcase.c)
+    target_link_libraries(qaws_exact_showcase PRIVATE Qaws::qaws)
+    target_include_directories(qaws_exact_showcase PRIVATE "${PROJECT_SOURCE_DIR}/src/qaws")
+    if(MSVC)
+      target_compile_definitions(qaws_exact_showcase PRIVATE _CRT_SECURE_NO_WARNINGS)
+    endif()
+    set_target_properties(qaws_exact_showcase PROPERTIES
+      RUNTIME_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/working_dir"
+      RUNTIME_OUTPUT_DIRECTORY_RELEASE "${PROJECT_SOURCE_DIR}/working_dir"
+      RUNTIME_OUTPUT_DIRECTORY_DEBUG "${PROJECT_SOURCE_DIR}/working_dir")
+  endif()
 endif()
 
 if(BUILD_TESTING)

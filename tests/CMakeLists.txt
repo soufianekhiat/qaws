@@ -65,6 +65,7 @@ add_executable(
   61_diff_surface_functional_core.c
   62_diff_surface_sampling_core.c
   63_exact_int.c
+  64_exact_predicates.c
 )
 
 # The amalgamated library exports exactly the same symbols, so the tests can
