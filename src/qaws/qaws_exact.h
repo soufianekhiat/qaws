@@ -57,7 +57,8 @@ qaws_status qaws_exact_compare_ratio(double a, double b, double c, double d, qaw
  * integer derivative polygons and the exact quotient rule, and every value
  * is converted to double once, correctly rounded.
  *
- * Supported: Bezier and rational Bezier, 2D and 3D, degrees up to the
+ * Supported: Bezier, rational Bezier, B-spline, NURBS, cubic Hermite,
+ * uniform Catmull-Rom and polynomial curves, 2D and 3D, degrees up to the
  * integer budget (QAWS_STATUS_EXACT_RANGE_EXCEEDED past it). Other families
  * return QAWS_STATUS_EXACT_UNSUPPORTED for now.
  * =================================================================== */

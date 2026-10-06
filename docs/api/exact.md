@@ -53,6 +53,13 @@ De Casteljau on the k-th integer derivative polygon. The exact quotient rule
 gives `C^(k)` as one rational per component. Span selection: `a <= T < b`,
 the last span at the domain end.
 
+Cubic Hermite and uniform Catmull-Rom spans become integer cubic Beziers
+with one common factor (3 and 6). Polynomial coefficients are decoded
+exactly as dyadics, re-expanded around the quantized domain start and
+converted to Bernstein form over one integer denominator; only the domain
+ends are quantized. Chordal and centripetal Catmull-Rom need square roots
+and return `QAWS_STATUS_EXACT_UNSUPPORTED`.
+
 The report gives the quality (`QAWS_NUMERIC_EXACT_RATIONAL`), whether
 inputs were quantized, the widest stored integer and the quantization
 errors.
@@ -88,7 +95,9 @@ subdivision. The loop must close exactly and share one exact space.
 | B-spline, NURBS: position, C', C'', C''' | exact rational (budget above) |
 | span selection | exact (integer knots) |
 | winding number of a closed loop | certified |
-| Hermite, polynomial, uniform Catmull-Rom, composites | planned |
+| Hermite (cubic), uniform Catmull-Rom (open, closed) | exact rational (lattice points and tangents) |
+| polynomial | exact rational (dyadic coefficients taken as given, no quantization) |
+| composites | planned |
 | chordal / centripetal Catmull-Rom, Yuksel | exact only after a frozen preparation (planned) |
 | arcs, clothoids (sin/cos, Fresnel) | not rational |
 | unit normals, curvature, arc length (sqrt) | not rational |
@@ -96,5 +105,6 @@ subdivision. The loop must close exactly and share one exact space.
 | curve intersections | certified root intervals planned (roots are algebraic in general) |
 
 Tests: 63 (integers), 64 (predicates), 65 (Bezier), 66 (winding), 67
-(B-spline / NURBS), all against Mathematica exact references. Figures:
+(B-spline / NURBS), 68 (Hermite, Catmull-Rom, polynomial), all against
+Mathematica exact references. Figures:
 `examples/exact_showcase.c`.

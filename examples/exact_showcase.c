@@ -40,6 +40,7 @@
 #include "exact_showcase/02_exact_bezier.c"
 #include "exact_showcase/03_winding.c"
 #include "exact_showcase/04_nurbs_extraction.c"
+#include "exact_showcase/05_families.c"
 
 int main(void)
 {
@@ -49,5 +50,6 @@ int main(void)
 	demo_exact_bezier();
 	demo_winding();
 	demo_nurbs_extraction();
+	demo_families();
 	return 0;
 }
