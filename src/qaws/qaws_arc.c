@@ -52,6 +52,8 @@ static qaws_status arc_eval_span_2d(
 	qaws_arc_impl *impl = (qaws_arc_impl *)curve->impl;
 	qaws_arc_segment const *seg = &impl->segments[span_index];
 	qaws_scalar sweep = seg->angle_end - seg->angle_start;
+	/* local_t is normalized on the span; the curve parameter is arc length */
+	qaws_scalar inv_len = QAWS_ONE / (seg->radius * QAWS_FABS(sweep));
 	qaws_vec2 center, axis_u, axis_v;
 	qaws_eval_2d core;
 
@@ -86,15 +88,15 @@ static qaws_status arc_eval_span_2d(
 
 	if (eval_flags & (QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2 | QAWS_EVAL_FLAG_D3))
 	{
-		out_result->d1.x = core.d1.x;
-		out_result->d1.y = core.d1.y;
+		out_result->d1.x = core.d1.x * inv_len;
+		out_result->d1.y = core.d1.y * inv_len;
 		out_result->valid_flags |= QAWS_EVAL_FLAG_D1;
 	}
 
 	if (eval_flags & (QAWS_EVAL_FLAG_D2 | QAWS_EVAL_FLAG_D3))
 	{
-		out_result->d2.x = core.d2.x;
-		out_result->d2.y = core.d2.y;
+		out_result->d2.x = core.d2.x * inv_len * inv_len;
+		out_result->d2.y = core.d2.y * inv_len * inv_len;
 		out_result->valid_flags |= QAWS_EVAL_FLAG_D2;
 	}
 
@@ -104,7 +106,7 @@ static qaws_status arc_eval_span_2d(
 		qaws_scalar theta = seg->angle_start + local_t * sweep;
 		qaws_scalar ct = QAWS_COS(theta);
 		qaws_scalar st = QAWS_SIN(theta);
-		qaws_scalar sweep3 = sweep * sweep * sweep;
+		qaws_scalar sweep3 = sweep * sweep * sweep * inv_len * inv_len * inv_len;
 		out_result->d3.x = seg->radius * st * sweep3;
 		out_result->d3.y = seg->radius * (-ct) * sweep3;
 		out_result->valid_flags |= QAWS_EVAL_FLAG_D3;
@@ -134,6 +136,8 @@ static qaws_status arc_eval_span_3d(
 	qaws_arc_impl *impl = (qaws_arc_impl *)curve->impl;
 	qaws_arc_segment const *seg = &impl->segments[span_index];
 	qaws_scalar sweep = seg->angle_end - seg->angle_start;
+	/* local_t is normalized on the span; the curve parameter is arc length */
+	qaws_scalar inv_len = QAWS_ONE / (seg->radius * QAWS_FABS(sweep));
 	qaws_vec3 center, axis_u, axis_v;
 	qaws_eval_3d core;
 
@@ -175,17 +179,17 @@ static qaws_status arc_eval_span_3d(
 
 	if (eval_flags & (QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2 | QAWS_EVAL_FLAG_D3))
 	{
-		out_result->d1.x = core.d1.x;
-		out_result->d1.y = core.d1.y;
-		out_result->d1.z = core.d1.z;
+		out_result->d1.x = core.d1.x * inv_len;
+		out_result->d1.y = core.d1.y * inv_len;
+		out_result->d1.z = core.d1.z * inv_len;
 		out_result->valid_flags |= QAWS_EVAL_FLAG_D1;
 	}
 
 	if (eval_flags & (QAWS_EVAL_FLAG_D2 | QAWS_EVAL_FLAG_D3))
 	{
-		out_result->d2.x = core.d2.x;
-		out_result->d2.y = core.d2.y;
-		out_result->d2.z = core.d2.z;
+		out_result->d2.x = core.d2.x * inv_len * inv_len;
+		out_result->d2.y = core.d2.y * inv_len * inv_len;
+		out_result->d2.z = core.d2.z * inv_len * inv_len;
 		out_result->valid_flags |= QAWS_EVAL_FLAG_D2;
 	}
 
@@ -195,7 +199,7 @@ static qaws_status arc_eval_span_3d(
 		qaws_scalar theta = seg->angle_start + local_t * sweep;
 		qaws_scalar ct = QAWS_COS(theta);
 		qaws_scalar st = QAWS_SIN(theta);
-		qaws_scalar sweep3 = sweep * sweep * sweep;
+		qaws_scalar sweep3 = sweep * sweep * sweep * inv_len * inv_len * inv_len;
 		out_result->d3.x = seg->radius * (st * seg->axis_u[0] - ct * seg->axis_v[0]) * sweep3;
 		out_result->d3.y = seg->radius * (st * seg->axis_u[1] - ct * seg->axis_v[1]) * sweep3;
 		out_result->d3.z = seg->radius * (st * seg->axis_u[2] - ct * seg->axis_v[2]) * sweep3;

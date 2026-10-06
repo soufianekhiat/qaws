@@ -184,12 +184,58 @@ static void test_arc(void)
 	}
 }
 
+/* The parameter of an arc is arc length: D1 is the unit tangent, D2 the
+   curvature normal (|D2| = 1/r), and both match differences of the
+   positions. A wrong scale here broke Newton refinement of intersections
+   (and so boolean operations) in double precision. */
+static void test_arc_derivatives(void)
+{
+	qaws_arc_segment seg;
+	qaws_arc_desc desc;
+	qaws_curve* crv = NULL;
+	qaws_eval_result_2d e, ep, em;
+	qaws_scalar t = (qaws_scalar)1.3, r = (qaws_scalar)1.7;
+	double h = 1e-4, speed, fd1x, fd1y, fd2x, fd2y;
+	qaws_scalar len = 0;
+	qaws_range range;
+
+	memset(&seg, 0, sizeof(seg));
+	seg.center[0] = (qaws_scalar)0.4;
+	seg.center[1] = (qaws_scalar)-0.2;
+	seg.radius = r;
+	seg.angle_start = (qaws_scalar)0.3;
+	seg.angle_end = (qaws_scalar)2.9;
+	memset(&desc, 0, sizeof(desc));
+	desc.dimension = QAWS_DIMENSION_2D;
+	desc.segments = &seg;
+	desc.segment_count = 1;
+	TEST_ASSERT_STATUS(qaws_curve_create_arc(&desc, &crv));
+
+	qaws_curve_evaluate_2d(crv, t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2, &e);
+	qaws_curve_evaluate_2d(crv, (qaws_scalar)(t + h), QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &ep);
+	qaws_curve_evaluate_2d(crv, (qaws_scalar)(t - h), QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &em);
+	speed = sqrt((double)e.d1.x * e.d1.x + (double)e.d1.y * e.d1.y);
+	fd1x = (ep.position.x - em.position.x) / (2 * h);
+	fd1y = (ep.position.y - em.position.y) / (2 * h);
+	fd2x = (ep.d1.x - em.d1.x) / (2 * h);
+	fd2y = (ep.d1.y - em.d1.y) / (2 * h);
+	TEST_ASSERT(approx_eq_loose((qaws_scalar)speed, 1), "arc d1 is a unit tangent (arc-length parameter)");
+	TEST_ASSERT(approx_eq_loose(e.d1.x, (qaws_scalar)fd1x) && approx_eq_loose(e.d1.y, (qaws_scalar)fd1y), "arc d1 matches differences");
+	TEST_ASSERT(approx_eq_loose(e.d2.x, (qaws_scalar)fd2x) && approx_eq_loose(e.d2.y, (qaws_scalar)fd2y), "arc d2 matches differences");
+	TEST_ASSERT(approx_eq_loose((qaws_scalar)sqrt((double)e.d2.x * e.d2.x + (double)e.d2.y * e.d2.y), 1 / r), "arc |d2| = 1/r");
+	range = qaws_curve_get_parameter_range(crv);
+	qaws_curve_compute_arc_length(crv, range.min_value, range.max_value, &len);
+	TEST_ASSERT(approx_eq_loose(len, (qaws_scalar)(r * 2.6)), "arc length = r * sweep");
+	qaws_curve_destroy(crv);
+}
+
 int test_09_arc_main(void)
 {
 	g_pass = 0;
 	g_fail = 0;
 
 	test_arc();
+	test_arc_derivatives();
 
 	printf("09_arc: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail > 0 ? 1 : 0;
