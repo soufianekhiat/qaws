@@ -220,6 +220,39 @@ Hits are sorted by t, and a hit on a patch edge is reported once. A
 tangent ray or a line lying on the surface returns
 `QAWS_STATUS_CERTIFICATION_FAILED`.
 
+## Certified curve / surface intersections
+
+```c
+qaws_status qaws_exact_curve_surface_hits(qaws_exact_curve const* curve, qaws_exact_surface const* surface, qaws_exact_curve_surface_hit* out_hits, unsigned int capacity, unsigned int* out_count);
+```
+
+Resultant elimination would be far past the integer budget here (degree
+around 650 for a cubic curve against a bicubic patch), so this uses
+certified subdivision. Per curve span and surface patch, the three
+equations `X_c(u, v) W_C(t) - C_c(t) W(u, v) = 0` have exact integer
+coefficients in the product Bernstein basis over the (u, v, t) box. The
+boxes are subdivided exactly (integer De Casteljau, gcd-normalized), and
+each box is tested:
+
+- **Exclusion:** some equation, or some preconditioned combination
+  `G_i = sum_c Y_ic F_c`, has one strict sign on the box, so it holds no
+  root.
+- **Exactly one root:** G passes the Poincare-Miranda sign test on the
+  box faces (existence), and its interval Jacobian, bounded by Bernstein
+  derivative coefficients, is strictly diagonally dominant (G is
+  injective, so the root is unique). Y is an approximate inverse Jacobian
+  rounded to integers; any Y keeps the test exact.
+
+Certified boxes are shrunk by bisection to about 2^-44. Each step keeps
+the half that is proven to hold the root, either because the other half
+is excluded or because Miranda holds. When the root sits on a cut, the
+middle half [1/4, 3/4] is tried, and a stuck direction waits until the
+others have shrunk. A root on a shared face is reported once.
+
+`QAWS_STATUS_CERTIFICATION_FAILED` is returned when the box budget runs
+out: a tangency, the curve lying on the surface, or crossings closer than
+the subdivision can separate.
+
 ## Certified 2D Booleans
 
 ```c
@@ -267,9 +300,10 @@ Tangencies and overlaps return `QAWS_STATUS_CERTIFICATION_FAILED`.
 | self-intersections (2D, 3D) | certified: divided differences inside spans, span pairs, knots and closing points excluded, spans on one conic told apart |
 | line / surface intersections (ray casting) | certified: u, v and t enclosed, per patch Bezout elimination |
 | 2D Boolean operations (union, intersection, difference) | certified: pieces of the source curves, cut at certified crossings, classified by exact winding |
-| curve / surface, surface / surface intersections | planned |
+| curve / surface intersections | certified: exact Bernstein subdivision, Miranda existence, diagonal-dominance uniqueness |
+| surface / surface intersections | planned (curves of solutions: certified topology) |
 
 Tests: 63 (integers), 64 (predicates), 65 (Bezier), 66 (winding), 67
-(B-spline / NURBS), 68 (Hermite, Catmull-Rom, polynomial), 69 (surfaces), 70 (line / plane hits), 71 (curve / curve hits), 72 (3D curve / curve), 73 (self-intersections), 74 (line / surface), 75 (Booleans), 76 (composites, frozen Catmull-Rom), all against
+(B-spline / NURBS), 68 (Hermite, Catmull-Rom, polynomial), 69 (surfaces), 70 (line / plane hits), 71 (curve / curve hits), 72 (3D curve / curve), 73 (self-intersections), 74 (line / surface), 75 (Booleans), 76 (composites, frozen Catmull-Rom), 77 (curve / surface), all against
 Mathematica exact references. Figures:
 `examples/exact_showcase.c`.

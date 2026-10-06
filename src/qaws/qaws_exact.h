@@ -301,6 +301,33 @@ typedef struct qaws_exact_surface_hit
 qaws_status qaws_exact_surface_line_hits(qaws_exact_surface const* surface, double const p0[3], double const p1[3], qaws_exact_surface_hit* out_hits,
 	unsigned int capacity, unsigned int* out_count);
 
+/* A curve / surface intersection: the curve's parameter and the surface's, enclosed. */
+typedef struct qaws_exact_curve_surface_hit
+{
+	double t_lo, t_hi;   /* curve parameter */
+	double u_lo, u_hi;
+	double v_lo, v_hi;
+} qaws_exact_curve_surface_hit;
+
+/*
+ * Certified intersections of a 3D exact curve with an exact surface (one
+ * exact space). Per span and patch, the three equations
+ * X_c(u, v) W_C(t) - C_c(t) W(u, v) = 0 have exact integer Bernstein
+ * coefficients on the (u, v, t) box; boxes are subdivided exactly and
+ *   - excluded when one equation's coefficients all have one strict sign;
+ *   - certified to hold exactly one intersection when, after an
+ *     approximate-inverse preconditioning G = Y F (any Y is valid: the
+ *     test is exact), G passes the Poincare-Miranda sign test on the box
+ *     faces (existence) and its interval Jacobian, bounded by Bernstein
+ *     coefficients, is strictly diagonally dominant (G injective: unique).
+ * Certified boxes are then shrunk by bisection (about 2^-40). Every
+ * intersection is reported once. QAWS_STATUS_CERTIFICATION_FAILED when the
+ * subdivision budget runs out (a tangency, the curve lying on the
+ * surface, or crossings closer than the budget separates).
+ */
+qaws_status qaws_exact_curve_surface_hits(qaws_exact_curve const* curve, qaws_exact_surface const* surface, qaws_exact_curve_surface_hit* out_hits,
+	unsigned int capacity, unsigned int* out_count);
+
 /* Patches along u and v (one exact rational Bezier patch each). */
 void qaws_exact_surface_patch_count(qaws_exact_surface const* surface, unsigned int* out_u_count, unsigned int* out_v_count);
 

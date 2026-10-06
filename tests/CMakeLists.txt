@@ -78,6 +78,7 @@ add_executable(
   74_exact_surface_hits.c
   75_exact_boolean.c
   76_exact_composite.c
+  77_exact_curve_surface.c
 )
 
 # The amalgamated library exports exactly the same symbols, so the tests can

@@ -25,6 +25,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #ifdef _WIN32
 #include <direct.h>
@@ -47,6 +48,7 @@
 #include "exact_showcase/09_self_hits.c"
 #include "exact_showcase/10_ray_cast.c"
 #include "exact_showcase/11_boolean.c"
+#include "exact_showcase/12_curve_surface.c"
 
 int main(void)
 {
@@ -62,6 +64,7 @@ int main(void)
 	demo_curve_hits();
 	demo_self_hits();
 	demo_ray_cast();
+	demo_curve_surface();
 	demo_boolean();
 	return 0;
 }
