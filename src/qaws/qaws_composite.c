@@ -12,11 +12,6 @@
 /*  Impl struct                                                        */
 /* ------------------------------------------------------------------ */
 
-typedef struct qaws_composite_impl
-{
-	qaws_curve** segments;           /* owned segment curves */
-	unsigned int segment_count;
-} qaws_composite_impl;
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */

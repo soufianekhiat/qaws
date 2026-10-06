@@ -8,7 +8,7 @@
  *   - the rounded-once doubles against the f64 evaluator of each family
  *     (which also pins the Catmull-Rom span convention)
  *   - polynomial coefficients are taken exactly (no quantization reported)
- *   - non-uniform Catmull-Rom is reported unsupported
+ *   (chordal / centripetal Catmull-Rom: test 76, frozen preparation)
  */
 
 #include "test_common.h"
@@ -158,25 +158,6 @@ static void test_reference(void)
 	TEST_ASSERT(ok_float, "rounded-once values agree with each family's f64 evaluator");
 }
 
-static void test_unsupported(void)
-{
-	qaws_scalar pts[5 * 2] = { 0, 0, 1, 2, 3, 2, 4, 0, 6, 1 };
-	qaws_catmull_rom_desc d;
-	qaws_curve* c = NULL;
-	qaws_exact_curve* e = NULL;
-	qaws_exact_desc desc;
-	memset(&d, 0, sizeof(d));
-	d.dimension = QAWS_DIMENSION_2D;
-	d.control_points = pts;
-	d.control_point_count = 5;
-	d.parameterization = QAWS_PARAMETERIZATION_CENTRIPETAL;
-	qaws_curve_create_catmull_rom(&d, &c);
-	qaws_exact_desc_default(&desc);
-	TEST_ASSERT(qaws_exact_curve_prepare(&desc, c, &e, NULL) == QAWS_STATUS_EXACT_UNSUPPORTED,
-		"centripetal Catmull-Rom (square roots) is reported unsupported");
-	qaws_exact_curve_destroy(e);
-	qaws_curve_destroy(c);
-}
 
 int test_68_exact_families_main(void)
 {
@@ -184,7 +165,7 @@ int test_68_exact_families_main(void)
 	g_fail = 0;
 	printf("Test 68: Exact Hermite, uniform Catmull-Rom and polynomial curves\n");
 	test_reference();
-	test_unsupported();
+
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
 }

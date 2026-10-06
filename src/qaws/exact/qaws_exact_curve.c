@@ -397,6 +397,214 @@ static qaws_status prepare_polynomial(qaws_exact_desc const* d, qaws_curve const
 	return QAWS_STATUS_OK;
 }
 
+/*
+ * Chordal / centripetal Catmull-Rom: the knot spacing needs square roots,
+ * so the runtime's own preparation (per segment cubics a s^3 + b s^2 + c s
+ * + d, unit spans) is frozen and taken exactly: in Bernstein form times 3,
+ * (3d, 3d + c, 3d + 2c + b, 3 (a + b + c + d)), W = 3, on a common power of
+ * two. QAWS_EXACT_FLAG_PREP_QUANTIZED: exact relative to that preparation.
+ */
+static qaws_status prepare_cr_frozen(qaws_exact_desc const* d, qaws_curve const* curve, qaws_exact_curve** out)
+{
+	qaws_catmull_rom_impl const* impl = (qaws_catmull_rom_impl const*)curve->impl;
+	unsigned int dim = (unsigned int)curve->dimension, D = dim + 1, n = impl->control_point_count, spans, s, c, i;
+	int kpow = 0, first = 1;
+	qaws_exact_curve* ec;
+	qaws_status st = QAWS_STATUS_OK;
+	spans = impl->closed ? n : (n >= 4 ? n - 3 : 0);
+	if (spans == 0 || !impl->segment_coeffs || (dim != 2 && dim != 3))
+		return QAWS_STATUS_EXACT_UNSUPPORTED;
+	/* the common scale: every coefficient m 2^e as an integer in lattice units times 2^kpow */
+	for (i = 0; i < spans * dim * 4; i++)
+	{
+		int64_t m;
+		int e;
+		if (!qaws_exact_split_double((double)impl->segment_coeffs[i], &m, &e))
+			return QAWS_STATUS_EXACT_UNSUPPORTED;
+		if (m != 0 && (first || -(e - d->space_exp2) > kpow))
+		{
+			if (-(e - d->space_exp2) > kpow)
+				kpow = -(e - d->space_exp2);
+			first = 0;
+		}
+	}
+	if (kpow > 1500)
+		return QAWS_STATUS_EXACT_RANGE_EXCEEDED;
+	ec = exact_curve_alloc(d, dim, spans, 3);
+	if (!ec)
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	ec->param_shift = qaws_exact_param_shift_for((double)spans, d->param_bits);
+	for (s = 0; s < spans && st == QAWS_STATUS_OK; s++)
+	{
+		qaws_exact_span* sp = &ec->spans[s];
+		sp->a = (int64_t)s << ec->param_shift;
+		sp->b = (int64_t)(s + 1) << ec->param_shift;
+		for (c = 0; c < dim && st == QAWS_STATUS_OK; c++)
+		{
+			qaws_exact_int k[4], t;   /* a, b, c, d */
+			for (i = 0; i < 4 && st == QAWS_STATUS_OK; i++)
+			{
+				int64_t m;
+				int e;
+				qaws_exact_split_double((double)impl->segment_coeffs[(s * dim + c) * 4 + i], &m, &e);
+				qaws_exact_int_from_i64(&k[i], m);
+				if (m != 0)
+					st = qaws_exact_int_shl(&k[i], &k[i], (unsigned int)(e - d->space_exp2 + kpow));
+			}
+			if (st != QAWS_STATUS_OK)
+				break;
+			/* H0 = 3d, H1 = 3d + c, H2 = 3d + 2c + b, H3 = 3 (a + b + c + d) */
+			st = qaws_exact_int_mul_i64(&sp->h[c], &k[3], 3);
+			if (st == QAWS_STATUS_OK) st = qaws_exact_int_add(&sp->h[D + c], &sp->h[c], &k[2]);
+			if (st == QAWS_STATUS_OK) st = qaws_exact_int_add(&sp->h[2 * D + c], &sp->h[D + c], &k[2]);
+			if (st == QAWS_STATUS_OK) st = qaws_exact_int_add(&sp->h[2 * D + c], &sp->h[2 * D + c], &k[1]);
+			if (st == QAWS_STATUS_OK) st = qaws_exact_int_add(&t, &k[0], &k[1]);
+			if (st == QAWS_STATUS_OK) st = qaws_exact_int_add(&t, &t, &k[2]);
+			if (st == QAWS_STATUS_OK) st = qaws_exact_int_add(&t, &t, &k[3]);
+			if (st == QAWS_STATUS_OK) st = qaws_exact_int_mul_i64(&sp->h[3 * D + c], &t, 3);
+		}
+		for (i = 0; i < 4 && st == QAWS_STATUS_OK; i++)
+		{
+			qaws_exact_int_from_i64(&sp->h[i * D + dim], 3);
+			st = qaws_exact_int_shl(&sp->h[i * D + dim], &sp->h[i * D + dim], (unsigned int)kpow);
+		}
+	}
+	if (st != QAWS_STATUS_OK)
+	{
+		exact_curve_free(ec);
+		return st;
+	}
+	*out = ec;
+	return QAWS_STATUS_OK;
+}
+
+/*
+ * Composite: segment i occupies [i, i + 1]. Each segment is prepared
+ * exactly; a span's integer Bezier does not depend on its parameter
+ * interval, so the spans are kept as they are and only their bounds move:
+ * x on the segment's lattice maps to T = i 2^S + (x - a0) 2^S / (bN - a0).
+ * Bounds that are not on the composite lattice are rounded (the geometry
+ * stays exact; the parameterization error is reported).
+ */
+static qaws_status prepare_composite(qaws_exact_desc const* d, qaws_curve const* curve, qaws_exact_curve** out, qaws_exact_report* rep)
+{
+	qaws_composite_impl const* impl = (qaws_composite_impl const*)curve->impl;
+	qaws_exact_curve** seg = NULL;
+	qaws_exact_curve* ec = NULL;
+	unsigned int i, k, total = 0, idx = 0;
+	int S;
+	double perr = 0;
+	qaws_status st = QAWS_STATUS_OK;
+	if (!impl || impl->segment_count == 0)
+		return QAWS_STATUS_EXACT_UNSUPPORTED;
+	seg = (qaws_exact_curve**)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_exact_curve*) * impl->segment_count));
+	if (!seg)
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	memset(seg, 0, sizeof(qaws_exact_curve*) * impl->segment_count);
+	if (rep)
+		memset(rep, 0, sizeof(*rep));
+	for (i = 0; i < impl->segment_count && st == QAWS_STATUS_OK; i++)
+	{
+		qaws_exact_report r;
+		st = qaws_exact_curve_prepare(d, impl->segments[i], &seg[i], &r);
+		if (st == QAWS_STATUS_OK && seg[i]->dimension != curve->dimension)
+			st = QAWS_STATUS_INVALID_ARGUMENT;
+		if (st == QAWS_STATUS_OK)
+		{
+			total += seg[i]->span_count;
+			if (rep)
+			{
+				rep->flags |= r.flags;
+				if (r.storage_bits > rep->storage_bits) rep->storage_bits = r.storage_bits;
+				if (r.max_position_quantization_error > rep->max_position_quantization_error)
+					rep->max_position_quantization_error = r.max_position_quantization_error;
+				if (r.max_weight_quantization_error > rep->max_weight_quantization_error)
+					rep->max_weight_quantization_error = r.max_weight_quantization_error;
+				if (r.parameter_quantization_error > rep->parameter_quantization_error)
+					rep->parameter_quantization_error = r.parameter_quantization_error;
+			}
+		}
+	}
+	if (st == QAWS_STATUS_OK)
+	{
+		ec = (qaws_exact_curve*)qaws_internal_alloc(NULL, (unsigned long)sizeof(qaws_exact_curve));
+		if (ec)
+		{
+			memset(ec, 0, sizeof(*ec));
+			ec->spans = (qaws_exact_span*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_exact_span) * total));
+		}
+		if (!ec || !ec->spans)
+			st = QAWS_STATUS_ALLOCATION_FAILURE;
+	}
+	if (st == QAWS_STATUS_OK)
+	{
+		ec->dimension = curve->dimension;
+		ec->space_exp2 = d->space_exp2;
+		ec->desc = *d;
+		S = qaws_exact_param_shift_for((double)impl->segment_count, d->param_bits);
+		ec->param_shift = S;
+		for (i = 0; i < impl->segment_count && st == QAWS_STATUS_OK; i++)
+		{
+			qaws_exact_curve* s = seg[i];
+			int64_t a0 = s->spans[0].a, len = s->spans[s->span_count - 1].b - a0;
+			for (k = 0; k < s->span_count && st == QAWS_STATUS_OK; k++)
+			{
+				qaws_exact_span* sp = &ec->spans[idx];
+				int64_t bound[2];
+				unsigned int e;
+				for (e = 0; e < 2; e++)
+				{
+					/* (x - a0) 2^S / len, rounded to nearest; exact when it divides */
+					int64_t x = (e == 0 ? s->spans[k].a : s->spans[k].b) - a0;
+					double q = ldexp((double)x, S) / (double)len, r = nearbyint(q);
+					qaws_exact_int num, den, quo, rem;
+					qaws_exact_int_from_i64(&num, x);
+					qaws_exact_int_shl(&num, &num, (unsigned int)S);
+					qaws_exact_int_from_i64(&den, len);
+					qaws_exact_int_divmod(&quo, &rem, &num, &den);
+					if (!qaws_exact_int_is_zero(&rem))
+					{
+						double err = fabs(q - r) * ldexp(1.0, -S);
+						if (err > perr) perr = err;
+					}
+					else
+						r = qaws_exact_int_to_double(&quo);
+					bound[e] = ((int64_t)i << S) + (int64_t)r;
+				}
+				if (bound[1] <= bound[0] || (idx > 0 && bound[0] != ec->spans[idx - 1].b))
+					st = QAWS_STATUS_EXACT_RANGE_EXCEEDED;   /* a span collapsed on the composite lattice */
+				sp->degree = s->spans[k].degree;
+				sp->a = bound[0];
+				sp->b = bound[1];
+				sp->h = s->spans[k].h;   /* moved */
+				s->spans[k].h = NULL;
+				idx++;
+				ec->span_count = idx;
+			}
+		}
+	}
+	for (i = 0; i < impl->segment_count; i++)
+		exact_curve_free(seg[i]);
+	qaws_internal_dealloc(NULL, seg);
+	if (st != QAWS_STATUS_OK)
+	{
+		exact_curve_free(ec);
+		return st;
+	}
+	if (rep)
+	{
+		rep->quality = QAWS_NUMERIC_EXACT_RATIONAL;
+		if (perr > 0)
+		{
+			rep->flags |= QAWS_EXACT_FLAG_INPUT_QUANTIZED;
+			if (perr > rep->parameter_quantization_error)
+				rep->parameter_quantization_error = perr;
+		}
+	}
+	*out = ec;
+	return QAWS_STATUS_OK;
+}
+
 qaws_status qaws_exact_curve_prepare(qaws_exact_desc const* desc, qaws_curve const* curve, qaws_exact_curve** out_curve,
 	qaws_exact_report* out_report)
 {
@@ -421,6 +629,28 @@ qaws_status qaws_exact_curve_prepare(qaws_exact_desc const* desc, qaws_curve con
 	if (d.param_bits == 0 || d.param_bits > 56 || d.coord_bits == 0 || d.coord_bits > 32 || d.weight_bits == 0 || d.weight_bits > 30)
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	kind = qaws_curve_get_kind(curve);
+	if (kind == QAWS_CURVE_KIND_COMPOSITE)
+		return prepare_composite(&d, curve, out_curve, out_report);
+	if (kind == QAWS_CURVE_KIND_CATMULL_ROM && ((qaws_catmull_rom_impl const*)curve->impl)->parameterization != QAWS_PARAMETERIZATION_UNIFORM)
+	{
+		qaws_exact_curve* ec2 = NULL;
+		qaws_status st2 = prepare_cr_frozen(&d, curve, &ec2);
+		unsigned int s2, i2;
+		if (st2 != QAWS_STATUS_OK)
+			return st2;
+		if (out_report)
+		{
+			memset(out_report, 0, sizeof(*out_report));
+			out_report->quality = QAWS_NUMERIC_EXACT_RATIONAL;
+			out_report->flags = QAWS_EXACT_FLAG_PREP_QUANTIZED;
+			for (s2 = 0; s2 < ec2->span_count; s2++)
+				for (i2 = 0; i2 < 4 * (unsigned int)(ec2->dimension + 1); i2++)
+					if (qaws_exact_int_bits(&ec2->spans[s2].h[i2]) > out_report->storage_bits)
+						out_report->storage_bits = qaws_exact_int_bits(&ec2->spans[s2].h[i2]);
+		}
+		*out_curve = ec2;
+		return QAWS_STATUS_OK;
+	}
 	if (kind == QAWS_CURVE_KIND_HERMITE || kind == QAWS_CURVE_KIND_CATMULL_ROM || kind == QAWS_CURVE_KIND_POLYNOMIAL)
 	{
 		double qpos = 0, qpar = 0;

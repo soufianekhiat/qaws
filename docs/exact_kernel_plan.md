@@ -152,7 +152,7 @@ Boolean pipeline keeping source span pieces instead of refitting.
 | C exact Bezier | done: rational Bezier, degrees 1..16, C..C''' | a78d309 (fix 9d451c8) |
 | D consumer | done: certified winding numbers | c3b8199 |
 | F B-spline / NURBS | done: exact blossom extraction; budget measured | 95bd5c9, c3226b1 |
-| E other families | done: Hermite, uniform Catmull-Rom, polynomial (composites later) | 056ec05 |
+| E other families | done: Hermite, uniform Catmull-Rom, polynomial and composites; chordal / centripetal Catmull-Rom frozen | 056ec05 |
 | G surfaces | done: Bezier, B-spline, NURBS; partials to order 2, exact normal | 8055381 (NURBS surface fix) |
 | H intersections | done: curve / line, curve / plane, curve / curve (2D, 3D), self-intersections, line / surface, 2D Booleans certified | ad3f14d, f1c073d |
 

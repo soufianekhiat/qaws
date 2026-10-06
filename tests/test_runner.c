@@ -87,6 +87,7 @@ extern int test_72_exact_curve_hits_3d_main(void);
 extern int test_73_exact_self_hits_main(void);
 extern int test_74_exact_surface_hits_main(void);
 extern int test_75_exact_boolean_main(void);
+extern int test_76_exact_composite_main(void);
 
 /* Test registry */
 typedef struct {
@@ -171,6 +172,7 @@ static test_suite const g_test_suites[] = {
 	{"73_exact_self_hits", test_73_exact_self_hits_main},
 	{"74_exact_surface_hits", test_74_exact_surface_hits_main},
 	{"75_exact_boolean", test_75_exact_boolean_main},
+	{"76_exact_composite", test_76_exact_composite_main},
 };
 
 int main(void) {

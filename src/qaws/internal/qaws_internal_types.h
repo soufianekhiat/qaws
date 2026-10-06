@@ -94,6 +94,12 @@ typedef struct qaws_catmull_rom_impl
 	qaws_scalar* segment_coeffs;
 } qaws_catmull_rom_impl;
 
+typedef struct qaws_composite_impl
+{
+	qaws_curve** segments;           /* owned segment curves */
+	unsigned int segment_count;
+} qaws_composite_impl;
+
 typedef struct qaws_bspline_impl
 {
 	qaws_scalar* control_points;

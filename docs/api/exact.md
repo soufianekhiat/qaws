@@ -254,8 +254,9 @@ Tangencies and overlaps return `QAWS_STATUS_CERTIFICATION_FAILED`.
 | winding number of a closed loop | certified |
 | Hermite (cubic), uniform Catmull-Rom (open, closed) | exact rational (lattice points and tangents) |
 | polynomial | exact rational (dyadic coefficients taken as given, no quantization) |
-| composites | planned |
-| chordal / centripetal Catmull-Rom, Yuksel | exact only after a frozen preparation (planned) |
+| composites | exact rational (segment spans moved to [i, i + 1]; non-dyadic bounds reported as a parameter quantization) |
+| chordal / centripetal Catmull-Rom | exact relative to the runtime's frozen preparation (QAWS_EXACT_FLAG_PREP_QUANTIZED) |
+| Yuksel curves | planned (frozen preparation) |
 | arcs, clothoids (sin/cos, Fresnel) | not rational |
 | unit normals, curvature, arc length (sqrt) | not rational |
 | Bezier, B-spline, NURBS surfaces: S, Su, Sv, Suu, Suv, Svv, Su x Sv | exact rational |
@@ -269,6 +270,6 @@ Tangencies and overlaps return `QAWS_STATUS_CERTIFICATION_FAILED`.
 | curve / surface, surface / surface intersections | planned |
 
 Tests: 63 (integers), 64 (predicates), 65 (Bezier), 66 (winding), 67
-(B-spline / NURBS), 68 (Hermite, Catmull-Rom, polynomial), 69 (surfaces), 70 (line / plane hits), 71 (curve / curve hits), 72 (3D curve / curve), 73 (self-intersections), 74 (line / surface), 75 (Booleans), all against
+(B-spline / NURBS), 68 (Hermite, Catmull-Rom, polynomial), 69 (surfaces), 70 (line / plane hits), 71 (curve / curve hits), 72 (3D curve / curve), 73 (self-intersections), 74 (line / surface), 75 (Booleans), 76 (composites, frozen Catmull-Rom), all against
 Mathematica exact references. Figures:
 `examples/exact_showcase.c`.
