@@ -18,7 +18,13 @@ typedef enum qaws_status
 	QAWS_STATUS_NUMERICAL_FAILURE,
 	QAWS_STATUS_BUFFER_TOO_SMALL,
 	QAWS_STATUS_ALLOCATION_FAILURE,
-	QAWS_STATUS_INTERNAL_ERROR
+	QAWS_STATUS_INTERNAL_ERROR,
+	/* exact kernel: operation outside the rational domain, integer budget
+	   exceeded, exact spaces that do not match, sign not certified */
+	QAWS_STATUS_EXACT_UNSUPPORTED,
+	QAWS_STATUS_EXACT_RANGE_EXCEEDED,
+	QAWS_STATUS_EXACT_INCOMPATIBLE_SPACE,
+	QAWS_STATUS_CERTIFICATION_FAILED
 } qaws_status;
 
 char const* qaws_status_to_string(qaws_status status);

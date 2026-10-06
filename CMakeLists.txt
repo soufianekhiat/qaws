@@ -218,8 +218,19 @@ function(qaws_configure_target target)
   endif()
 endfunction()
 
+# Exact/certified CPU geometry (C only; independent of QAWS_SCALAR_IS_FLOAT).
+option(QAWS_ENABLE_EXACT "Enable exact/certified CPU geometry" ON)
+if(QAWS_ENABLE_EXACT)
+  list(APPEND QAWS_SOURCES
+    src/qaws/exact/qaws_exact_int.c
+  )
+endif()
+
 add_library(qaws ${QAWS_SOURCES})
 add_library(Qaws::qaws ALIAS qaws)
+if(QAWS_ENABLE_EXACT)
+  target_compile_definitions(qaws PUBLIC QAWS_ENABLE_EXACT=1)
+endif()
 
 qaws_configure_target(qaws)
 
