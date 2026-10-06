@@ -225,6 +225,7 @@ if(QAWS_ENABLE_EXACT)
     src/qaws/exact/qaws_exact_int.c
     src/qaws/exact/qaws_exact_predicates.c
     src/qaws/exact/qaws_exact_curve.c
+    src/qaws/exact/qaws_exact_winding.c
   )
 endif()
 

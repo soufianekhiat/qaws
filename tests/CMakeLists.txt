@@ -67,6 +67,7 @@ add_executable(
   63_exact_int.c
   64_exact_predicates.c
   65_exact_bezier.c
+  66_exact_winding.c
 )
 
 # The amalgamated library exports exactly the same symbols, so the tests can

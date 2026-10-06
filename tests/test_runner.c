@@ -8,6 +8,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 /* Forward declarations of test main functions */
 extern int test_00_status_main(void);
@@ -76,6 +77,7 @@ extern int test_62_diff_surface_sampling_core_main(void);
 extern int test_63_exact_int_main(void);
 extern int test_64_exact_predicates_main(void);
 extern int test_65_exact_bezier_main(void);
+extern int test_66_exact_winding_main(void);
 
 /* Test registry */
 typedef struct {
@@ -150,9 +152,14 @@ static test_suite const g_test_suites[] = {
 	{"63_exact_int", test_63_exact_int_main},
 	{"64_exact_predicates", test_64_exact_predicates_main},
 	{"65_exact_bezier", test_65_exact_bezier_main},
+	{"66_exact_winding", test_66_exact_winding_main},
 };
 
 int main(void) {
+	/* unbuffered, so a crash shows where it happened; QAWS_TEST=substring
+	   runs only the matching suites */
+	char const* only = getenv("QAWS_TEST");
+	setvbuf(stdout, NULL, _IONBF, 0);
 	printf("========================================\n");
 	printf("Qaws Unit Test Runner\n");
 	printf("========================================\n\n");
@@ -162,6 +169,8 @@ int main(void) {
 	size_t const num_suites = sizeof(g_test_suites) / sizeof(g_test_suites[0]);
 
 	for (size_t i = 0; i < num_suites; i++) {
+		if (only && !strstr(g_test_suites[i].name, only))
+			continue;
 		printf("\n");
 		printf("========================================\n");
 		printf("Running test suite: %s\n", g_test_suites[i].name);

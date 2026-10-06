@@ -113,4 +113,16 @@ void qaws_exact_curve_destroy(qaws_exact_curve* curve);
 qaws_status qaws_exact_curve_evaluate(qaws_exact_curve const* curve, double t, unsigned int order, double* out,
 	qaws_exact_report* out_report);
 
+/*
+ * Certified winding number of a closed 2D loop of exact curves (each
+ * piece's end equal to the next one's start, exactly) around the double
+ * point p: the signed crossings of the ray x > p_x, decided on exact
+ * integer Bernstein coefficients by subdivision. The loop must share one
+ * exact space (QAWS_STATUS_EXACT_INCOMPATIBLE_SPACE otherwise).
+ * QAWS_STATUS_CERTIFICATION_FAILED when p lies on the curve (or within
+ * 2^-max_depth of it in parameter, past the subdivision budget): the
+ * winding number is then undefined, never guessed.
+ */
+qaws_status qaws_exact_winding_2d(qaws_exact_curve const* const* pieces, unsigned int count, double const p[2], int* out_winding);
+
 #endif /* QAWS_EXACT_H */

@@ -5,24 +5,24 @@
 #define OR_N 256
 
 /* One map, run-length encoded per row: value -> color. */
-static void or_map(svg* s, double x0, double y0, double cell, signed char const* v, char const* const* colors, char const* title)
+static void or_map(svg* s, double x0, double y0, double cell, int N, signed char const* v, char const* const* colors, char const* title)
 {
 	int i, j;
 	fprintf(s->f, "<text x=\"%.1f\" y=\"%.1f\" font-size=\"14\" font-weight=\"600\" fill=\"#24292f\">%s</text>\n", x0, y0 - 10, title);
-	for (j = 0; j < OR_N; j++)
+	for (j = 0; j < N; j++)
 	{
 		int start = 0;
-		for (i = 1; i <= OR_N; i++)
-			if (i == OR_N || v[j * OR_N + i] != v[j * OR_N + start])
+		for (i = 1; i <= N; i++)
+			if (i == N || v[j * N + i] != v[j * N + start])
 			{
 				/* row j is drawn top-down from the largest y */
 				fprintf(s->f, "<rect x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" fill=\"%s\" shape-rendering=\"crispEdges\"/>\n",
-					x0 + start * cell, y0 + (OR_N - 1 - j) * cell, (i - start) * cell + 0.5, cell + 0.5, colors[v[j * OR_N + start] + 1]);
+					x0 + start * cell, y0 + (N - 1 - j) * cell, (i - start) * cell + 0.5, cell + 0.5, colors[v[j * N + start] + 1]);
 				start = i;
 			}
 	}
-	fprintf(s->f, "<rect x=\"%.1f\" y=\"%.1f\" width=\"%.1f\" height=\"%.1f\" fill=\"none\" stroke=\"#8c959f\"/>\n", x0, y0, OR_N * cell,
-		OR_N * cell);
+	fprintf(s->f, "<rect x=\"%.1f\" y=\"%.1f\" width=\"%.1f\" height=\"%.1f\" fill=\"none\" stroke=\"#8c959f\"/>\n", x0, y0, N * cell,
+		N * cell);
 }
 
 static void demo_orient2d(void)
@@ -56,10 +56,10 @@ static void demo_orient2d(void)
 		}
 	svg_open(&s, "showcase/exact1_orient2d.svg", 1270, 470, "Certified orientation: points one ulp apart near a line",
 		"a = (0.5 + i u, 0.5 + j u), u = 2^-53, 0 &lt;= i, j &lt; 256; sign of orient2d(a, (12, 12), (24, 24)). Blue: left, orange: right, black: on the line.");
-	or_map(&s, 20, 100, 1.15, naive, sign_colors, "naive f64 determinant");
-	or_map(&s, 330, 100, 1.15, exact, sign_colors, "qaws_exact_orient2d (certified)");
-	or_map(&s, 640, 100, 1.15, wrong, wrong_colors, "cells where f64 is wrong");
-	or_map(&s, 950, 100, 1.15, path, path_colors, "decided by the exact fallback");
+	or_map(&s, 20, 100, 1.15, OR_N, naive, sign_colors, "naive f64 determinant");
+	or_map(&s, 330, 100, 1.15, OR_N, exact, sign_colors, "qaws_exact_orient2d (certified)");
+	or_map(&s, 640, 100, 1.15, OR_N, wrong, wrong_colors, "cells where f64 is wrong");
+	or_map(&s, 950, 100, 1.15, OR_N, path, path_colors, "decided by the exact fallback");
 	sprintf(buf, "%d of %d cells: f64 sign wrong on %d (%.1f %%); %d points exactly on the line; the f64 filter proved %d signs, the exact path decided %d",
 		OR_N * OR_N, OR_N * OR_N, n_wrong, 100.0 * n_wrong / (OR_N * OR_N), n_zero, OR_N * OR_N - n_exact, n_exact);
 	svg_text(&s, 20, 440, 13, "#57606a", "start", buf);

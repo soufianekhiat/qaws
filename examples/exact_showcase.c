@@ -9,6 +9,8 @@
  *                         examples of robustness problems")
  *   exact2_bezier.svg     a degree-16 rational Bezier evaluated exactly, the
  *                         reference for f32 and f64 errors (position, C', C'', C''')
+ *   exact3_winding.svg    point-in-region near a loop of rational conics:
+ *                         sampled winding against the certified one
  *
  * Each figure lives in exact_showcase/NN_*.c, compiled as one translation
  * unit.
@@ -33,6 +35,7 @@
 
 #include "exact_showcase/01_orient2d.c"
 #include "exact_showcase/02_exact_bezier.c"
+#include "exact_showcase/03_winding.c"
 
 int main(void)
 {
@@ -40,5 +43,6 @@ int main(void)
 	MAKE_DIR("showcase");
 	demo_orient2d();
 	demo_exact_bezier();
+	demo_winding();
 	return 0;
 }
