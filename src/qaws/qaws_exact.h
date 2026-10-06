@@ -18,6 +18,7 @@
 
 #include "qaws_status.h"
 #include "qaws_types.h"
+#include "qaws_surface_types.h"
 
 typedef enum qaws_exact_sign
 {
@@ -137,5 +138,42 @@ qaws_status qaws_exact_curve_span_bezier(qaws_exact_curve const* curve, unsigned
  * winding number is then undefined, never guessed.
  */
 qaws_status qaws_exact_winding_2d(qaws_exact_curve const* const* pieces, unsigned int count, double const p[2], int* out_winding);
+
+/* ===================================================================
+ * Exact tensor-product surfaces
+ *
+ * Bezier, B-spline and NURBS surfaces are prepared into one integer
+ * homogeneous Bezier patch per non-empty knot rectangle, with the same
+ * lattices as the curves (coordinates, weights, knots). Partial
+ * derivatives up to second order come from integer derivative nets and
+ * the exact bivariate quotient rule; the normal Su x Sv is exact too
+ * (unnormalized: its unit length needs a square root).
+ * =================================================================== */
+
+typedef struct qaws_exact_surface qaws_exact_surface;
+
+qaws_status qaws_exact_surface_prepare(qaws_exact_desc const* desc, qaws_surface const* surface, qaws_exact_surface** out_surface,
+	qaws_exact_report* out_report);
+void qaws_exact_surface_destroy(qaws_exact_surface* surface);
+
+/*
+ * Values at (u, v) (quantized onto the parameter lattices), exact and
+ * rounded once, as vec3 entries: order 0 gives S; order 1 adds Su, Sv;
+ * order 2 adds Suu, Suv, Svv (out holds 3, 9 or 18 doubles).
+ * out_normal (may be NULL) receives Su x Sv, rounded once.
+ */
+qaws_status qaws_exact_surface_evaluate(qaws_exact_surface const* surface, double u, double v, unsigned int order, double* out,
+	double* out_normal);
+
+/* Patches along u and v (one exact rational Bezier patch each). */
+void qaws_exact_surface_patch_count(qaws_exact_surface const* surface, unsigned int* out_u_count, unsigned int* out_v_count);
+
+/*
+ * Patch (iu, iv) rounded once: degrees, parameter rectangle, control
+ * points (row-major, (p + 1) (q + 1) vec3, u index major) and weights
+ * relative to the largest (any output may be NULL).
+ */
+qaws_status qaws_exact_surface_patch_bezier(qaws_exact_surface const* surface, unsigned int iu, unsigned int iv, unsigned int* out_p,
+	unsigned int* out_q, double out_rect[4], double* out_points, double* out_weights);
 
 #endif /* QAWS_EXACT_H */

@@ -37,4 +37,35 @@ struct qaws_exact_curve
 qaws_status qaws_exact_curve_eval_rational(qaws_exact_curve const* curve, int64_t T, unsigned int k, qaws_exact_int* num,
 	qaws_exact_int* den);
 
+/* ------------------------------------------------------------------
+ * Shared with the exact surfaces
+ * ------------------------------------------------------------------ */
+
+#define QAWS_EXACT_MAX_KNOTS 256
+
+/* A homogeneous point as fractions num[0..D) / den, den > 0. */
+typedef struct qaws_exact_hfrac
+{
+	qaws_exact_int num[4];
+	qaws_exact_int den;
+} qaws_exact_hfrac;
+
+/* x -> nearest lattice integer i (x ~ i 2^exp2, ties to even), |i| < 2^bits. */
+qaws_status qaws_exact_quantize(double x, int exp2, unsigned int bits, int64_t* out, double* err);
+
+/* Parameter shift of a domain whose largest magnitude is tmax. */
+int qaws_exact_param_shift_for(double tmax, unsigned int param_bits);
+
+/* Bezier control point j of the degree-p B-spline span s (knots K, local
+   points local[0..p] = P_(s-p)..P_s), exactly. */
+qaws_status qaws_exact_blossom(qaws_exact_hfrac const* local, int64_t const* K, unsigned int s, unsigned int p, unsigned int j,
+	unsigned int D, qaws_exact_hfrac* out);
+
+/* b[0..p] over their lcm into integers h[(p + 1) D], divided by the common gcd. */
+qaws_status qaws_exact_clear_denominators(qaws_exact_hfrac* b, unsigned int p, unsigned int D, qaws_exact_int* h);
+
+/* d^j H / ds^j of the span at s = x / (b - a), scaled by (b - a)^degree. */
+qaws_status qaws_exact_homogeneous_derivative(qaws_exact_span const* sp, unsigned int D, int64_t x, unsigned int j,
+	qaws_exact_int* out);
+
 #endif /* QAWS_EXACT_CURVE_H */

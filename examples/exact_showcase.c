@@ -41,6 +41,7 @@
 #include "exact_showcase/03_winding.c"
 #include "exact_showcase/04_nurbs_extraction.c"
 #include "exact_showcase/05_families.c"
+#include "exact_showcase/06_surface.c"
 
 int main(void)
 {
@@ -51,5 +52,6 @@ int main(void)
 	demo_winding();
 	demo_nurbs_extraction();
 	demo_families();
+	demo_surface();
 	return 0;
 }

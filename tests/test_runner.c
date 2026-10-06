@@ -80,6 +80,7 @@ extern int test_65_exact_bezier_main(void);
 extern int test_66_exact_winding_main(void);
 extern int test_67_exact_spline_main(void);
 extern int test_68_exact_families_main(void);
+extern int test_69_exact_surface_main(void);
 
 /* Test registry */
 typedef struct {
@@ -157,6 +158,7 @@ static test_suite const g_test_suites[] = {
 	{"66_exact_winding", test_66_exact_winding_main},
 	{"67_exact_spline", test_67_exact_spline_main},
 	{"68_exact_families", test_68_exact_families_main},
+	{"69_exact_surface", test_69_exact_surface_main},
 };
 
 int main(void) {

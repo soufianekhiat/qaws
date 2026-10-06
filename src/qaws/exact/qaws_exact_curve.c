@@ -6,8 +6,6 @@
 #include <math.h>
 #include <string.h>
 
-#define QAWS_EXACT_MAX_KNOTS 256
-
 void qaws_exact_desc_default(qaws_exact_desc* desc)
 {
 	desc->space_exp2 = -20;
@@ -19,7 +17,7 @@ void qaws_exact_desc_default(qaws_exact_desc* desc)
 #define TRY(x) do { st = (x); if (st != QAWS_STATUS_OK) return st; } while (0)
 
 /* x -> nearest lattice integer (ties to even) and its rounding error. */
-static qaws_status quantize(double x, int exp2, unsigned int bits, int64_t* out, double* err)
+qaws_status qaws_exact_quantize(double x, int exp2, unsigned int bits, int64_t* out, double* err)
 {
 	double v = ldexp(x, -exp2), r = nearbyint(v);
 	if (!(fabs(r) < ldexp(1.0, (int)bits)))
@@ -33,14 +31,8 @@ static qaws_status quantize(double x, int exp2, unsigned int bits, int64_t* out,
 /*  Fractions of homogeneous points: num[0..D) / den, den > 0          */
 /* ------------------------------------------------------------------ */
 
-typedef struct hfrac
-{
-	qaws_exact_int num[4];
-	qaws_exact_int den;
-} hfrac;
-
 /* Divides every numerator and the denominator by their gcd. */
-static qaws_status hfrac_reduce(hfrac* f, unsigned int D)
+static qaws_status hfrac_reduce(qaws_exact_hfrac* f, unsigned int D)
 {
 	qaws_exact_int g;
 	unsigned int c;
@@ -57,10 +49,10 @@ static qaws_status hfrac_reduce(hfrac* f, unsigned int D)
 }
 
 /* r = ((dd - nu) x + nu y) / dd for integers nu, dd > 0 */
-static qaws_status hfrac_lerp(hfrac* r, hfrac const* x, hfrac const* y, int64_t nu, int64_t dd, unsigned int D)
+static qaws_status hfrac_lerp(qaws_exact_hfrac* r, qaws_exact_hfrac const* x, qaws_exact_hfrac const* y, int64_t nu, int64_t dd, unsigned int D)
 {
 	qaws_exact_int t1, t2, den;
-	hfrac out;
+	qaws_exact_hfrac out;
 	unsigned int c;
 	qaws_status st;
 	for (c = 0; c < D; c++)
@@ -86,10 +78,10 @@ static qaws_status hfrac_lerp(hfrac* r, hfrac const* x, hfrac const* y, int64_t 
  *   alpha = (t_r - u_i) / (u_(i+p+1-r) - u_i),  i = s - p + r .. s.
  * These are the Bezier control points of the span (j = 0..p).
  */
-static qaws_status blossom(hfrac const* local, int64_t const* K, unsigned int s, unsigned int p, unsigned int j, unsigned int D,
-	hfrac* out)
+qaws_status qaws_exact_blossom(qaws_exact_hfrac const* local, int64_t const* K, unsigned int s, unsigned int p, unsigned int j, unsigned int D,
+	qaws_exact_hfrac* out)
 {
-	hfrac d[QAWS_EXACT_MAX_DEGREE + 1];
+	qaws_exact_hfrac d[QAWS_EXACT_MAX_DEGREE + 1];
 	unsigned int r, i;
 	qaws_status st;
 	for (i = 0; i <= p; i++)
@@ -108,7 +100,7 @@ static qaws_status blossom(hfrac const* local, int64_t const* K, unsigned int s,
 }
 
 /* Clears the denominators of the span's Bezier points with their lcm. */
-static qaws_status clear_denominators(hfrac* b, unsigned int p, unsigned int D, qaws_exact_int* h)
+qaws_status qaws_exact_clear_denominators(qaws_exact_hfrac* b, unsigned int p, unsigned int D, qaws_exact_int* h)
 {
 	qaws_exact_int lcm, g, q;
 	unsigned int j, c;
@@ -189,7 +181,7 @@ static qaws_exact_curve* exact_curve_alloc(qaws_exact_desc const* d, unsigned in
 }
 
 /* Parameter shift of a domain whose largest magnitude is tmax. */
-static int param_shift_for(double tmax, unsigned int param_bits)
+int qaws_exact_param_shift_for(double tmax, unsigned int param_bits)
 {
 	int e = 0;
 	frexp(tmax > 0 ? tmax : 1.0, &e);
@@ -237,11 +229,11 @@ static qaws_status prepare_cubic_family(qaws_exact_desc const* d, qaws_curve con
 	for (i = 0; i < n * dim; i++)
 	{
 		double err;
-		TRY(quantize((double)pts[i], d->space_exp2, d->coord_bits, &P[i], &err));
+		TRY(qaws_exact_quantize((double)pts[i], d->space_exp2, d->coord_bits, &P[i], &err));
 		if (err > *max_pos) *max_pos = err;
 		if (kind == QAWS_CURVE_KIND_HERMITE)
 		{
-			TRY(quantize((double)tan[i], d->space_exp2, d->coord_bits, &M[i], &err));
+			TRY(qaws_exact_quantize((double)tan[i], d->space_exp2, d->coord_bits, &M[i], &err));
 			if (err > *max_pos) *max_pos = err;
 		}
 	}
@@ -251,7 +243,7 @@ static qaws_status prepare_cubic_family(qaws_exact_desc const* d, qaws_curve con
 	ec = exact_curve_alloc(d, dim, spans, 3);
 	if (!ec)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
-	ec->param_shift = param_shift_for((double)spans, d->param_bits);
+	ec->param_shift = qaws_exact_param_shift_for((double)spans, d->param_bits);
 	for (s = 0; s < spans; s++)
 	{
 		qaws_exact_span* sp = &ec->spans[s];
@@ -337,10 +329,10 @@ static qaws_status prepare_polynomial(qaws_exact_desc const* d, qaws_curve const
 		if (m[i] != 0)
 			TRY(qaws_exact_int_shl(&A[i], &A[i], (unsigned int)(e[i] + F)));
 	}
-	S = param_shift_for(fabs(t0) > fabs(t1) ? fabs(t0) : fabs(t1), d->param_bits);
-	TRY(quantize(t0, -S, d->param_bits + 1, &T0, &err));
+	S = qaws_exact_param_shift_for(fabs(t0) > fabs(t1) ? fabs(t0) : fabs(t1), d->param_bits);
+	TRY(qaws_exact_quantize(t0, -S, d->param_bits + 1, &T0, &err));
 	*max_param = err;
-	TRY(quantize(t1, -S, d->param_bits + 1, &T1, &err));
+	TRY(qaws_exact_quantize(t1, -S, d->param_bits + 1, &T1, &err));
 	if (err > *max_param) *max_param = err;
 	L = T1 - T0;
 	if (L <= 0)
@@ -416,7 +408,7 @@ qaws_status qaws_exact_curve_prepare(qaws_exact_desc const* desc, qaws_curve con
 	unsigned int nf = 0, f, n = 0, nk = 0, got = 0, i, c, dim, D, p, storage = 0, s;
 	int rational, spline, wexp = 0;
 	double max_pos = 0, max_w = 0, max_k = 0, wmax = 0;
-	hfrac* local = NULL;
+	qaws_exact_hfrac* local = NULL;
 	qaws_exact_curve* ec;
 	qaws_status st = QAWS_STATUS_OK;
 	if (!curve || !out_curve)
@@ -518,7 +510,7 @@ qaws_status qaws_exact_curve_prepare(qaws_exact_desc const* desc, qaws_curve con
 			for (i = 0; i < nk; i++)
 			{
 				double err;
-				if (quantize((double)kn[i], -ec->param_shift, d.param_bits + 1, &K[i], &err) != QAWS_STATUS_OK)
+				if (qaws_exact_quantize((double)kn[i], -ec->param_shift, d.param_bits + 1, &K[i], &err) != QAWS_STATUS_OK)
 				{
 					exact_curve_free(ec);
 					return QAWS_STATUS_EXACT_RANGE_EXCEEDED;
@@ -528,7 +520,7 @@ qaws_status qaws_exact_curve_prepare(qaws_exact_desc const* desc, qaws_curve con
 	}
 
 	/* homogeneous integer control points */
-	local = (hfrac*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(hfrac) * n));
+	local = (qaws_exact_hfrac*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_exact_hfrac) * n));
 	if (!local)
 	{
 		exact_curve_free(ec);
@@ -549,7 +541,7 @@ qaws_status qaws_exact_curve_prepare(qaws_exact_desc const* desc, qaws_curve con
 		}
 		for (c = 0; c < dim && st == QAWS_STATUS_OK; c++)
 		{
-			st = quantize((double)cps[i * dim + c], d.space_exp2, d.coord_bits, &X, &err);
+			st = qaws_exact_quantize((double)cps[i * dim + c], d.space_exp2, d.coord_bits, &X, &err);
 			if (err > max_pos) max_pos = err;
 			qaws_exact_int_from_i64(&local[i].num[c], W * X);
 		}
@@ -598,14 +590,14 @@ qaws_status qaws_exact_curve_prepare(qaws_exact_desc const* desc, qaws_curve con
 			}
 			else
 			{
-				hfrac b[QAWS_EXACT_MAX_DEGREE + 1];
+				qaws_exact_hfrac b[QAWS_EXACT_MAX_DEGREE + 1];
 				unsigned int j;
 				sp->a = K[s];
 				sp->b = K[s + 1];
 				for (j = 0; j <= p && st == QAWS_STATUS_OK; j++)
-					st = blossom(&local[s - p], K, s, p, j, D, &b[j]);
+					st = qaws_exact_blossom(&local[s - p], K, s, p, j, D, &b[j]);
 				if (st == QAWS_STATUS_OK)
-					st = clear_denominators(b, p, D, sp->h);
+					st = qaws_exact_clear_denominators(b, p, D, sp->h);
 			}
 			for (i = 0; i < (p + 1) * D && st == QAWS_STATUS_OK; i++)
 				if (qaws_exact_int_bits(&sp->h[i]) > storage)
@@ -654,7 +646,7 @@ static qaws_exact_span const* find_span(qaws_exact_curve const* ec, int64_t* T)
  * division-free De Casteljau Q_i <- (L - x) Q_i + x Q_(i+1), which leaves
  * L^(n-j); a factor L^j brings it to L^n.
  */
-static qaws_status homogeneous_derivative(qaws_exact_span const* sp, unsigned int D, int64_t x, unsigned int j, qaws_exact_int* out)
+qaws_status qaws_exact_homogeneous_derivative(qaws_exact_span const* sp, unsigned int D, int64_t x, unsigned int j, qaws_exact_int* out)
 {
 	qaws_exact_int pts[(QAWS_EXACT_MAX_DEGREE + 1) * 4], t1, t2;
 	unsigned int n = sp->degree, i, r, c, m;
@@ -708,7 +700,7 @@ qaws_status qaws_exact_curve_eval_rational(qaws_exact_curve const* curve, int64_
 	D = dim + 1;
 	sp = find_span(curve, &T);
 	for (j = 0; j <= k; j++)
-		TRY(homogeneous_derivative(sp, D, T - sp->a, j, H[j]));
+		TRY(qaws_exact_homogeneous_derivative(sp, D, T - sp->a, j, H[j]));
 	qaws_exact_int_from_i64(&Wp[0], 1);
 	for (p = 1; p <= k + 1; p++)
 		TRY(qaws_exact_int_mul(&Wp[p], &Wp[p - 1], &H[0][dim]));

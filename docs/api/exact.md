@@ -86,6 +86,26 @@ The ray crossings `x > p_x` are decided on the exact integer Bernstein
 coefficients of `Y - p_y W` and `X - p_x W`, with exact halving
 subdivision. The loop must close exactly and share one exact space.
 
+## Exact surfaces
+
+```c
+qaws_status qaws_exact_surface_prepare(qaws_exact_desc const* desc, qaws_surface const* surface, qaws_exact_surface** out_surface, qaws_exact_report* out_report);
+void qaws_exact_surface_destroy(qaws_exact_surface* surface);
+qaws_status qaws_exact_surface_evaluate(qaws_exact_surface const* surface, double u, double v, unsigned int order, double* out, double* out_normal);
+void qaws_exact_surface_patch_count(qaws_exact_surface const* surface, unsigned int* out_u_count, unsigned int* out_v_count);
+qaws_status qaws_exact_surface_patch_bezier(qaws_exact_surface const* surface, unsigned int iu, unsigned int iv, unsigned int* out_p, unsigned int* out_q, double out_rect[4], double* out_points, double* out_weights);
+```
+
+Bezier, B-spline and NURBS surfaces become one integer homogeneous Bezier
+patch per non-empty knot rectangle: exact blossoms along u on each control
+column, then along v on each row, one lcm for the net. `order` 0, 1, 2
+returns S; then Su, Sv; then Suu, Suv, Svv. They come from integer
+derivative nets (rows, then the column) and the bivariate quotient rule,
+for example `Suv = (Xuv W^2 - Wuv X W - Wu Nv - Wv Nu) / W^3` with
+`Nu = Xu W - X Wu`. `out_normal` is `Su x Sv` with exact components, so
+its sign along any lattice direction is certified. The unit normal needs a
+square root and is not exact.
+
 ## Capability matrix
 
 | quantity | status |
@@ -101,10 +121,12 @@ subdivision. The loop must close exactly and share one exact space.
 | chordal / centripetal Catmull-Rom, Yuksel | exact only after a frozen preparation (planned) |
 | arcs, clothoids (sin/cos, Fresnel) | not rational |
 | unit normals, curvature, arc length (sqrt) | not rational |
-| tensor-product surfaces | planned |
+| Bezier, B-spline, NURBS surfaces: S, Su, Sv, Suu, Suv, Svv, Su x Sv | exact rational |
+| unit surface normal, curvatures (sqrt) | not rational |
+| other surface families (sweeps, lofts, offsets, ...) | planned or not rational |
 | curve intersections | certified root intervals planned (roots are algebraic in general) |
 
 Tests: 63 (integers), 64 (predicates), 65 (Bezier), 66 (winding), 67
-(B-spline / NURBS), 68 (Hermite, Catmull-Rom, polynomial), all against
+(B-spline / NURBS), 68 (Hermite, Catmull-Rom, polynomial), 69 (surfaces), all against
 Mathematica exact references. Figures:
 `examples/exact_showcase.c`.
