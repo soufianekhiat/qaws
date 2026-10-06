@@ -71,6 +71,7 @@ add_executable(
   67_exact_spline.c
   68_exact_families.c
   69_exact_surface.c
+  70_exact_hits.c
 )
 
 # The amalgamated library exports exactly the same symbols, so the tests can

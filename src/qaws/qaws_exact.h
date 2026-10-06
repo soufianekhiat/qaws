@@ -140,6 +140,44 @@ qaws_status qaws_exact_curve_span_bezier(qaws_exact_curve const* curve, unsigned
 qaws_status qaws_exact_winding_2d(qaws_exact_curve const* const* pieces, unsigned int count, double const p[2], int* out_winding);
 
 /* ===================================================================
+ * Certified intersections
+ *
+ * An intersection parameter is in general algebraic, not rational, so it
+ * is returned as a certified enclosure: each crossing interval holds
+ * exactly one intersection, a transversal one, and no intersection lies
+ * outside the reported hits. The roots are isolated on exact integer
+ * Bernstein coefficients (subdivision and Descartes' rule of signs).
+ * =================================================================== */
+
+typedef enum qaws_exact_hit_kind
+{
+	QAWS_EXACT_HIT_CROSSING = 0,   /* (t_lo, t_hi) holds exactly one transversal intersection */
+	QAWS_EXACT_HIT_POINT,          /* an intersection at t_lo == t_hi exactly (enclosed when not a double) */
+	QAWS_EXACT_HIT_OVERLAP         /* the curve lies in the line / plane on [t_lo, t_hi] */
+} qaws_exact_hit_kind;
+
+typedef struct qaws_exact_hit
+{
+	qaws_exact_hit_kind kind;
+	double t_lo, t_hi;   /* curve parameters; the true value is inside, rounded outward */
+} qaws_exact_hit;
+
+/*
+ * Intersections of a 2D exact curve with the infinite line through the
+ * double points p0 != p1, crossing intervals shrunk to width <= width
+ * (0: the narrowest the parameter lattice gives, about 2^-60 of a span).
+ * QAWS_STATUS_CERTIFICATION_FAILED at a tangency (a multiple root cannot be
+ * told from two close crossings by signs), QAWS_STATUS_BUFFER_TOO_SMALL
+ * past capacity (out_count holds the number found so far).
+ */
+qaws_status qaws_exact_curve_line_hits(qaws_exact_curve const* curve, double const p0[2], double const p1[2], double width,
+	qaws_exact_hit* out_hits, unsigned int capacity, unsigned int* out_count);
+
+/* The same for a 3D exact curve and the plane through `point` with normal `normal` (doubles, taken exactly). */
+qaws_status qaws_exact_curve_plane_hits(qaws_exact_curve const* curve, double const point[3], double const normal[3], double width,
+	qaws_exact_hit* out_hits, unsigned int capacity, unsigned int* out_count);
+
+/* ===================================================================
  * Exact tensor-product surfaces
  *
  * Bezier, B-spline and NURBS surfaces are prepared into one integer

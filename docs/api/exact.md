@@ -106,6 +106,33 @@ for example `Suv = (Xuv W^2 - Wuv X W - Wu Nv - Wv Nu) / W^3` with
 its sign along any lattice direction is certified. The unit normal needs a
 square root and is not exact.
 
+## Certified intersections
+
+```c
+qaws_status qaws_exact_curve_line_hits(qaws_exact_curve const* curve, double const p0[2], double const p1[2], double width, qaws_exact_hit* out_hits, unsigned int capacity, unsigned int* out_count);
+qaws_status qaws_exact_curve_plane_hits(qaws_exact_curve const* curve, double const point[3], double const normal[3], double width, qaws_exact_hit* out_hits, unsigned int capacity, unsigned int* out_count);
+```
+
+On each span, `W N . (C - P)` is an integer Bernstein polynomial (the line
+or plane is taken exactly from its doubles). Its roots are isolated by
+subdivision at midpoints, counting sign variations of the coefficients:
+zero variations, no root; one, exactly one simple root. Hits are sorted
+and come in three kinds:
+
+- `QAWS_EXACT_HIT_POINT`: an exact intersection parameter (a dyadic root,
+  found when a subdivision or refinement point lands on it);
+- `QAWS_EXACT_HIT_CROSSING`: `(t_lo, t_hi)` holds exactly one transversal
+  intersection, refined by sign bisection down to `width` (0: about 2^-60
+  of a span), with the bounds rounded outward;
+- `QAWS_EXACT_HIT_OVERLAP`: the curve lies in the line or plane on
+  `[t_lo, t_hi]`, merged across spans.
+
+No intersection lies outside the hits, and a hit on a knot is reported
+once. A tangency at a non-dyadic parameter is a multiple root that signs
+cannot tell from two close crossings, so it returns
+`QAWS_STATUS_CERTIFICATION_FAILED` instead of a guess. Two crossings
+2^-40 apart are still separated.
+
 ## Capability matrix
 
 | quantity | status |
@@ -124,9 +151,10 @@ square root and is not exact.
 | Bezier, B-spline, NURBS surfaces: S, Su, Sv, Suu, Suv, Svv, Su x Sv | exact rational |
 | unit surface normal, curvatures (sqrt) | not rational |
 | other surface families (sweeps, lofts, offsets, ...) | planned or not rational |
-| curve intersections | certified root intervals planned (roots are algebraic in general) |
+| curve / line (2D), curve / plane (3D) intersections | certified: exact points, one-root intervals, overlaps; non-dyadic tangencies refused |
+| curve / curve intersections | planned (implicitization, then the same isolation) |
 
 Tests: 63 (integers), 64 (predicates), 65 (Bezier), 66 (winding), 67
-(B-spline / NURBS), 68 (Hermite, Catmull-Rom, polynomial), 69 (surfaces), all against
+(B-spline / NURBS), 68 (Hermite, Catmull-Rom, polynomial), 69 (surfaces), 70 (intersections), all against
 Mathematica exact references. Figures:
 `examples/exact_showcase.c`.
