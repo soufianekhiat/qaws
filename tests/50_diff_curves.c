@@ -16,8 +16,11 @@
 #define MAX_PARAMS 64
 #define SAMPLE_COUNT 9
 
-/* Weights and knots are scalar fields; every other field has one value per dimension. */
-#define FIELD_COMPS(f, r) (((f)->fields[r] == QAWS_FIELD_WEIGHTS || (f)->fields[r] == QAWS_FIELD_KNOTS) ? 1u : (f)->dim)
+/* Weights, knots, angles and curvatures are scalar fields; every other field
+   has one value per dimension. */
+#define FIELD_COMPS(f, r) (((f)->fields[r] == QAWS_FIELD_WEIGHTS || (f)->fields[r] == QAWS_FIELD_KNOTS || \
+	(f)->fields[r] == QAWS_FIELD_ANGLE_START || (f)->fields[r] == QAWS_FIELD_CURVATURE || \
+	(f)->fields[r] == QAWS_FIELD_CURVATURE_RATE) ? 1u : (f)->dim)
 
 /* ------------------------------------------------------------------ */
 /*  Family fixtures                                                   */
@@ -28,9 +31,9 @@ typedef struct family
 	char const* name;
 	unsigned int dim;
 	unsigned int field_count;
-	qaws_diff_field fields[3];
-	unsigned int counts[3];
-	qaws_scalar params[3][MAX_PARAMS];
+	qaws_diff_field fields[4];
+	unsigned int counts[4];
+	qaws_scalar params[4][MAX_PARAMS];
 	qaws_status (*create)(struct family const* f, qaws_scalar const* const* params, qaws_curve** out);
 	qaws_scalar t_min, t_max;
 	qaws_scalar knots[16];
@@ -166,11 +169,25 @@ static qaws_status create_rational_bezier(family const* f, qaws_scalar const* co
 	return qaws_curve_create_rational_bezier(&d, out);
 }
 
+/* The length is the domain t_max; the curve at fixed s does not depend on it. */
+static qaws_status create_clothoid(family const* f, qaws_scalar const* const* p, qaws_curve** out)
+{
+	qaws_clothoid_desc d;
+	memset(&d, 0, sizeof(d));
+	d.origin_x = p[0][0];
+	d.origin_y = p[0][1];
+	d.start_angle = p[1][0];
+	d.start_curvature = p[2][0];
+	d.end_curvature = p[2][0] + p[3][0] * f->t_max;
+	d.length = f->t_max;
+	return qaws_curve_create_clothoid(&d, out);
+}
+
 static void make_families(family* fams, unsigned int* count)
 {
 	unsigned int i;
 	family* f;
-	memset(fams, 0, sizeof(family) * 13);
+	memset(fams, 0, sizeof(family) * 14);
 	diff_seed(2024);
 
 	f = &fams[0];
@@ -376,16 +393,36 @@ static void make_families(family* fams, unsigned int* count)
 	f->nonlinear = 1;
 	f->t_min = 0; f->t_max = 5;
 
-	*count = 13;
+	/* Clothoid: origin, start angle, curvature and its rate (analytic, non-linear) */
+	f = &fams[13];
+	f->name = "clothoid";
+	f->dim = 2;
+	f->field_count = 4;
+	f->fields[0] = QAWS_FIELD_CENTER;
+	f->fields[1] = QAWS_FIELD_ANGLE_START;
+	f->fields[2] = QAWS_FIELD_CURVATURE;
+	f->fields[3] = QAWS_FIELD_CURVATURE_RATE;
+	f->counts[0] = f->counts[1] = f->counts[2] = f->counts[3] = 1;
+	f->params[0][0] = (qaws_scalar)0.4;
+	f->params[0][1] = (qaws_scalar)-0.3;
+	f->params[1][0] = (qaws_scalar)0.35;
+	f->params[2][0] = (qaws_scalar)0.2;
+	f->params[3][0] = (qaws_scalar)0.45;
+	f->create = create_clothoid;
+	f->nonlinear = 1;
+	f->t_min = 0; f->t_max = 3;
+
+	*count = 14;
 }
 
 static qaws_curve* family_curve(family const* f, qaws_scalar const (*params)[MAX_PARAMS])
 {
-	qaws_scalar const* p[3];
+	qaws_scalar const* p[4];
 	qaws_curve* c = NULL;
 	p[0] = params[0];
 	p[1] = params[1];
 	p[2] = params[2];
+	p[3] = params[3];
 	if (f->create(f, p, &c) != QAWS_STATUS_OK)
 		return NULL;
 	return c;
@@ -394,7 +431,7 @@ static qaws_curve* family_curve(family const* f, qaws_scalar const (*params)[MAX
 /* Curve built from params + h * dir. */
 static qaws_curve* family_curve_shifted(family const* f, qaws_scalar const (*dir)[MAX_PARAMS], double h)
 {
-	qaws_scalar p[3][MAX_PARAMS];
+	qaws_scalar p[4][MAX_PARAMS];
 	unsigned int r, i;
 	for (r = 0; r < f->field_count; r++)
 		for (i = 0; i < f->counts[r] * FIELD_COMPS(f, r); i++)
@@ -498,8 +535,8 @@ static void check_primal(family const* f, qaws_curve const* c)
 
 static void check_param_tangent_fd(family const* f, qaws_curve const* c)
 {
-	qaws_scalar dir[3][MAX_PARAMS];
-	qaws_field_view vs[3];
+	qaws_scalar dir[4][MAX_PARAMS];
+	qaws_field_view vs[4];
 	qaws_diff_views views;
 	unsigned int r, i, k;
 	int ok = 1;
@@ -558,14 +595,14 @@ static qaws_status run_adjoint(family const* f, qaws_curve const* c, qaws_diff_a
 	qaws_scalar (*pbar)[MAX_PARAMS], qaws_scalar* tbar)
 {
 	qaws_diff_context ctx;
-	qaws_field_view vs[3];
+	qaws_field_view vs[4];
 	qaws_diff_views views;
 	unsigned int r;
 
 	qaws_diff_context_init(&ctx);
 	ctx.accumulation = acc;
 	ctx.tile_size = tile;
-	for (r = 0; r < 3; r++)
+	for (r = 0; r < 4; r++)
 		memset(pbar[r], 0, sizeof(qaws_scalar) * MAX_PARAMS);
 	memset(tbar, 0, sizeof(qaws_scalar) * SAMPLE_COUNT);
 	family_views(f, pbar, vs, &views);
@@ -579,10 +616,10 @@ static qaws_status run_adjoint(family const* f, qaws_curve const* c, qaws_diff_a
 static void check_adjoint_identity(family const* f, qaws_curve const* c)
 {
 	qaws_scalar ts[SAMPLE_COUNT], tdots[SAMPLE_COUNT], tbar[SAMPLE_COUNT];
-	qaws_scalar dir[3][MAX_PARAMS], pbar[3][MAX_PARAMS];
+	qaws_scalar dir[4][MAX_PARAMS], pbar[4][MAX_PARAMS];
 	qaws_curve_jet_3d ybar3[SAMPLE_COUNT], tan3[SAMPLE_COUNT];
 	qaws_curve_jet_2d ybar2[SAMPLE_COUNT], tan2[SAMPLE_COUNT];
-	qaws_field_view vs[3];
+	qaws_field_view vs[4];
 	qaws_diff_views views;
 	unsigned int i, r;
 	double lhs = 0, rhs = 0;
@@ -621,7 +658,7 @@ static void check_adjoint_identity(family const* f, qaws_curve const* c)
 
 	/* All accumulation strategies agree. */
 	{
-		qaws_scalar pbar_t[3][MAX_PARAMS], pbar_g[3][MAX_PARAMS];
+		qaws_scalar pbar_t[4][MAX_PARAMS], pbar_g[4][MAX_PARAMS];
 		qaws_scalar tbar_t[SAMPLE_COUNT], tbar_g[SAMPLE_COUNT];
 		int ok = 1;
 		unsigned int n;
@@ -644,8 +681,8 @@ static void check_adjoint_identity(family const* f, qaws_curve const* c)
 
 static void check_tangent2(family const* f, qaws_curve const* c)
 {
-	qaws_scalar dir[3][MAX_PARAMS];
-	qaws_field_view vs[3];
+	qaws_scalar dir[4][MAX_PARAMS];
+	qaws_field_view vs[4];
 	qaws_diff_views views;
 	unsigned int r, i, k;
 	int ok = 1;
@@ -688,7 +725,7 @@ static void check_tangent2(family const* f, qaws_curve const* c)
 
 static void test_curve_families(void)
 {
-	family fams[13];
+	family fams[14];
 	unsigned int n, i;
 	make_families(fams, &n);
 	for (i = 0; i < n; i++)
@@ -875,14 +912,18 @@ static void test_schema(void)
 
 	{
 		/* Not yet differentiable families report it explicitly. */
-		qaws_clothoid_desc d;
+		qaws_arc_segment seg;
+		qaws_arc_desc d;
 		qaws_curve* cl = NULL;
 		qaws_curve_jet_2d p, tg;
+		memset(&seg, 0, sizeof(seg));
+		seg.radius = (qaws_scalar)1.0;
+		seg.angle_end = (qaws_scalar)2.0;
 		memset(&d, 0, sizeof(d));
-		d.start_curvature = (qaws_scalar)0.1;
-		d.end_curvature = (qaws_scalar)0.8;
-		d.length = (qaws_scalar)2.0;
-		qaws_curve_create_clothoid(&d, &cl);
+		d.dimension = QAWS_DIMENSION_2D;
+		d.segments = &seg;
+		d.segment_count = 1;
+		qaws_curve_create_arc(&d, &cl);
 		TEST_ASSERT(qaws_curve_get_diff_capabilities(cl) == 0, "no capabilities without rules");
 		TEST_ASSERT(qaws_curve_get_diff_class(cl) == QAWS_DIFF_UNSUPPORTED, "unsupported class");
 		TEST_ASSERT(qaws_curve_eval_tangent_2d(NULL, cl, (qaws_scalar)0.5, 0, 1, NULL, &p, &tg)

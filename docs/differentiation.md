@@ -106,6 +106,8 @@ Adjoints are batch first. `qaws_diff_context.accumulation` selects how sample co
 | Bezier, Hermite, polynomial | control points, points and derivatives, coefficients (linear) |
 | B-spline curve | control points (linear), knots |
 | NURBS curve, rational Bezier | control points, weights (quotient rule), knots (NURBS) |
+| Catmull-Rom (uniform, chordal, centripetal), Yuksel C2 (Bezier mode) | interpolated points (non-linear: parameterization and sub-curve parameter) |
+| Clothoid | origin (`CENTER`), start angle, start curvature and curvature rate; the position integral is differentiated exactly in dual numbers |
 | Composite | its segments as children |
 | Bezier, B-spline, bilinear, biquadratic surfaces | control points (linear); B-spline also U and V knots |
 | NURBS surface | control points, weights, U and V knots |
