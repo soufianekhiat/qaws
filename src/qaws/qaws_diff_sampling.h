@@ -170,9 +170,11 @@ qaws_status qaws_traversal_cdf_targets(
  * Derivatives are exact for these discrete equations: the forward pass
  * solves them in dual numbers (the unknown and the quadrature nodes that
  * move with it carry first and second order rates), the adjoint pulls back
- * through the conditional then the marginal equation, and the HVP polarizes
- * the second order forward pass over the parameters of out_hv (about one
- * pass per parameter; works for rational families too).
+ * through the conditional then the marginal equation, and the HVP differentiates
+ * the backward pass along the direction (forward over reverse, one pass) for
+ * families linear in their fields; other families polarize the second order
+ * forward pass over the parameters of out_hv (about two passes per
+ * parameter).
  * Requires QAWS_CAP_TANGENT2; knots are refused as parameters.
  * =================================================================== */
 

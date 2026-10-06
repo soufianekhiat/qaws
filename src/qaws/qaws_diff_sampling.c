@@ -1336,18 +1336,70 @@ qaws_status qaws_surface_cdf_sample_tangent(
 	return st;
 }
 
-/* Pullback c dw/dy at (u, v). */
-static qaws_status scdf_node_pullback(scdf_job const* job, double u, double v, double c, qaws_diff_views* sink)
+/*
+ * Backward pass. Every coefficient is a dual number whose rate is its
+ * derivative along the job direction; the plain adjoint reads the values
+ * only. With `hvp` set, the pass is differentiated instead (forward over
+ * reverse, for families linear in their fields): a node at the moving point
+ * (u, v) pulling back C dw/dy adds
+ *   J^T (C' dw/dy + C H_w ydot) + (J_u^T u' + J_v^T v') C dw/dy,
+ * the last term being the same pullback shifted to the next jet channels.
+ */
+typedef struct scdf_pass
 {
+	scdf_job const* job;
+	qaws_diff_views* sink;
+	int hvp;
+} scdf_pass;
+
+/* jet index of the u and v derivatives of entry k */
+static unsigned char const g_scdf_du[6] = { 1, 3, 4, 6, 7, 8 };
+static unsigned char const g_scdf_dv[6] = { 2, 4, 5, 7, 8, 9 };
+
+/* Channels of a pullback of the entries (S, S_u, S_v[, S_uu, S_uv, S_vv]),
+   one order more when shifted for the HVP. */
+static unsigned int scdf_channels(scdf_job const* job, int shifted)
+{
+	unsigned int order = (scdf_y_count(job) > 3 ? 2u : 1u) + (shifted ? 1u : 0u);
+	return order >= 3 ? QAWS_SJET_ORDER3 : (order == 2 ? QAWS_SJET_ORDER2 : QAWS_SJET_ORDER1);
+}
+
+/* zdot^T H_w zdot along the jet values y (z may be NULL: zero). */
+static double scdf_w_quad(scdf_job const* job, qaws_dual3 const* y, qaws_vec3 const* z, unsigned int i, unsigned int comp)
+{
+	qaws_dual3 s[SCDF_Y];
+	unsigned int k, n = scdf_y_count(job);
+	for (k = 0; k < n; k++)
+		s[k] = qaws_dual3_make(y[k].v, z ? z[k] : qaws_v3_zero(), qaws_v3_zero());
+	if (i < n)
+		v3_set(&s[i].t, comp, v3_get(&s[i].t, comp) + QAWS_ONE);
+	return scdf_w(job, s).tt;
+}
+
+/* Pullback of C dw/dy at the node (u, v); C, u, v carry their rates. */
+static qaws_status scdf_node_pullback(scdf_pass const* ps, qaws_dual1 u, qaws_dual1 v, qaws_dual1 C)
+{
+	scdf_job const* job = ps->job;
 	qaws_dual3 y[SCDF_Y], s[SCDF_Y];
+	qaws_vec3 g[SCDF_Y], yd[SCDF_Y];
 	qaws_surface_jet bar;
-	unsigned int i, k, comp, n = scdf_y_count(job), ch = n > 3 ? QAWS_SJET_ORDER2 : QAWS_SJET_ORDER1;
+	unsigned int i, k, comp, n = scdf_y_count(job), ch;
+	double q_d = 0;
 	qaws_status st;
-	if (c == 0)
+	if (C.v == 0 && (!ps->hvp || C.t == 0))
 		return QAWS_STATUS_OK;
-	st = scdf_jet(job, dual_c(u), dual_c(v), NULL, y);
+	if (!ps->hvp)
+	{
+		u = dual_c(u.v);
+		v = dual_c(v.v);
+	}
+	st = scdf_jet(job, u, v, ps->hvp ? job->direction : NULL, y);
 	if (st != QAWS_STATUS_OK)
 		return st;
+	for (k = 0; k < n; k++)
+		yd[k] = y[k].t;
+	if (ps->hvp)
+		q_d = scdf_w_quad(job, y, yd, SCDF_Y, 0);
 	memset(&bar, 0, sizeof(bar));
 	for (i = 0; i < n; i++)
 	{
@@ -1355,30 +1407,86 @@ static qaws_status scdf_node_pullback(scdf_job const* job, double u, double v, d
 			continue;
 		for (comp = 0; comp < 3; comp++)
 		{
+			double gi;
 			for (k = 0; k < n; k++)
 				s[k] = qaws_dual3_const(y[k].v);
 			v3_set(&s[i].t, comp, QAWS_ONE);
-			v3_set(&bar.d[i], comp, (qaws_scalar)(c * scdf_w(job, s).t));
+			gi = scdf_w(job, s).t;
+			v3_set(&g[i], comp, (qaws_scalar)gi);
+			if (!ps->hvp)
+				v3_set(&bar.d[i], comp, (qaws_scalar)(C.v * gi));
+			else
+			{
+				/* (H_w ydot)_j by polarization */
+				double hj = 0.5 * (scdf_w_quad(job, y, yd, i, comp) - q_d - scdf_w_quad(job, y, NULL, i, comp));
+				v3_set(&bar.d[i], comp, (qaws_scalar)(C.t * gi + C.v * hj));
+			}
 		}
 	}
+	ch = scdf_channels(job, 0);
+	if (ps->hvp)
+	{
+		for (i = 0; i < n; i++)
+		{
+			if (i == 0 && job->measure.kind != QAWS_MEASURE_DENSITY)
+				continue;
+			bar.d[g_scdf_du[i]] = v3_axpy(C.v * u.t, g[i], bar.d[g_scdf_du[i]]);
+			bar.d[g_scdf_dv[i]] = v3_axpy(C.v * v.t, g[i], bar.d[g_scdf_dv[i]]);
+		}
+		ch = scdf_channels(job, 1);
+	}
 	bar.channels = ch;
-	return qaws_surface_eval_adjoint(job->ctx, job->surface, (qaws_scalar)u, (qaws_scalar)v, ch, &bar, sink, NULL, NULL);
+	return qaws_surface_eval_adjoint(job->ctx, job->surface, (qaws_scalar)u.v, (qaws_scalar)v.v, ch, &bar, ps->sink, NULL, NULL);
 }
 
-/* Pullback c grad B(b; u), b real. */
-static qaws_status scdf_pullback_B(scdf_job const* job, double u, double b, double c, qaws_diff_views* sink)
+/* Pullback c grad B(b; u): the full v cells, then the partial cell whose
+   nodes and weights move with b. */
+static qaws_status scdf_pullback_B(scdf_pass const* ps, qaws_dual1 u, qaws_dual1 b, qaws_dual1 c)
 {
-	unsigned int cc, q, k = (unsigned int)((b - job->v0) / job->hv);
+	scdf_job const* job = ps->job;
+	unsigned int cc, q, k = (unsigned int)((b.v - job->v0) / job->hv);
+	qaws_dual1 len;
 	double vk;
 	qaws_status st = QAWS_STATUS_OK;
 	if (k >= job->cells)
 		k = job->cells - 1;
 	for (cc = 0; cc < k && st == QAWS_STATUS_OK; cc++)
 		for (q = 0; q < job->n && st == QAWS_STATUS_OK; q++)
-			st = scdf_node_pullback(job, u, job->v0 + job->hv * (cc + 0.5 + 0.5 * job->x[q]), c * 0.5 * job->hv * job->w[q], sink);
+			st = scdf_node_pullback(ps, u, dual_c(job->v0 + job->hv * (cc + 0.5 + 0.5 * job->x[q])),
+				dual_axpy(0.5 * job->hv * job->w[q], c, 0));
 	vk = job->v0 + job->hv * k;
+	len = dual_axpy(1, b, -vk);
 	for (q = 0; q < job->n && st == QAWS_STATUS_OK; q++)
-		st = scdf_node_pullback(job, u, vk + 0.5 * (b - vk) * (1 + job->x[q]), c * 0.5 * (b - vk) * job->w[q], sink);
+		st = scdf_node_pullback(ps, u, dual_axpy(0.5 * (1 + job->x[q]), len, vk),
+			qaws_dual1_mul(c, dual_axpy(0.5 * job->w[q], len, 0)));
+	return st;
+}
+
+/* Slope of an equation along one unknown (`which` 0: u, 1: v) and, for the
+   HVP, its rate along (u', v', direction) by polarization of second order
+   passes: (q(e + x) - q(x) - q(e)) / 2 + q-free terms, q the tt part. */
+static qaws_status scdf_slope(scdf_job const* job, int eq, int which, double u, double v, double ud, double vd, double xi,
+	int hvp, qaws_dual1* out)
+{
+	qaws_dual1 r = dual_c(0), a = dual_c(0), b = dual_c(0);
+	double eu = which == 0 ? 1 : 0, ev = which == 1 ? 1 : 0;
+	qaws_status st;
+#define SCDF_EVAL(uu, vv, dir, res) \
+	(eq == 0 ? scdf_F(job, qaws_dual1_make((qaws_scalar)u, (qaws_scalar)(uu), 0), dual_c(xi), dir, res) \
+	         : scdf_G(job, qaws_dual1_make((qaws_scalar)u, (qaws_scalar)(uu), 0), qaws_dual1_make((qaws_scalar)v, (qaws_scalar)(vv), 0), \
+	                  dual_c(xi), dir, res))
+	st = SCDF_EVAL(eu, ev, 0, &r);
+	if (st != QAWS_STATUS_OK || !hvp)
+	{
+		*out = dual_c(r.t);
+		return st;
+	}
+	st = SCDF_EVAL(ud + eu, vd + ev, 1, &a);
+	if (st == QAWS_STATUS_OK)
+		st = SCDF_EVAL(ud, vd, 1, &b);
+#undef SCDF_EVAL
+	/* a.tt - b.tt = q(e) + 2 e^T H x, so the rate e^T H x = (a.tt - b.tt - r.tt) / 2 */
+	*out = qaws_dual1_make(r.t, (qaws_scalar)(0.5 * ((double)a.tt - b.tt - r.tt)), 0);
 	return st;
 }
 
@@ -1390,6 +1498,132 @@ static qaws_status scdf_pullback_B(scdf_job const* job, double u, double b, doub
  * grad F, xi_u: lambda A_total). The full u cells of grad A of the whole
  * batch are pulled back once with summed weights.
  */
+static qaws_status scdf_backward(scdf_pass const* ps, qaws_scalar const* xi, unsigned int count,
+	qaws_surface_cdf_sample const* adjoint, qaws_scalar* xi_adjoint)
+{
+	scdf_job const* job = ps->job;
+	qaws_dual1* cellw;
+	double total = job->cumA[job->cells].v;
+	unsigned int i, c, q;
+	qaws_status st = QAWS_STATUS_OK;
+	cellw = (qaws_dual1*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_dual1) * (job->cells + 1)));
+	if (!cellw)
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	for (c = 0; c <= job->cells; c++)
+		cellw[c] = dual_c(0);
+	for (i = 0; i < count && st == QAWS_STATUS_OK; i++)
+	{
+		double u, v, xu = xi[2 * i], xv = xi[2 * i + 1];
+		qaws_dual1 ud, vd, ub, vb, Fu = dual_c(0), Gv = dual_c(0), Gu = dual_c(0), mu, lambda;
+		qaws_surface_cdf_sample rate;
+		unsigned int ku;
+		st = scdf_solve(job, xu, xv, &u, &v);
+		if (st != QAWS_STATUS_OK)
+			break;
+		memset(&rate, 0, sizeof(rate));
+		if (ps->hvp)
+		{
+			st = scdf_rates(job, u, v, xu, xv, NULL, &rate, NULL);
+			if (st == QAWS_STATUS_NUMERICAL_FAILURE)
+			{
+				st = QAWS_STATUS_OK;
+				continue;
+			}
+			if (st != QAWS_STATUS_OK)
+				break;
+		}
+		ud = qaws_dual1_make((qaws_scalar)u, rate.u, 0);
+		vd = qaws_dual1_make((qaws_scalar)v, rate.v, 0);
+		/* the position term */
+		{
+			qaws_surface_jet bar;
+			qaws_scalar ua = QAWS_ZERO, va = QAWS_ZERO;
+			memset(&bar, 0, sizeof(bar));
+			if (!ps->hvp)
+			{
+				bar.d[0] = adjoint[i].position;
+				bar.channels = QAWS_SJET_P;
+				st = qaws_surface_eval_adjoint(job->ctx, job->surface, (qaws_scalar)u, (qaws_scalar)v, QAWS_SJET_P, &bar, ps->sink, &ua, &va);
+				ub = dual_c((double)adjoint[i].u + ua);
+				vb = dual_c((double)adjoint[i].v + va);
+			}
+			else
+			{
+				qaws_dual3 y[SCDF_Y];
+				bar.d[1] = qaws_v3_scale(adjoint[i].position, rate.u);
+				bar.d[2] = qaws_v3_scale(adjoint[i].position, rate.v);
+				bar.channels = QAWS_SJET_ORDER1;
+				st = qaws_surface_eval_adjoint(job->ctx, job->surface, (qaws_scalar)u, (qaws_scalar)v, QAWS_SJET_ORDER1, &bar, ps->sink,
+					NULL, NULL);
+				if (st == QAWS_STATUS_OK)
+					st = scdf_jet(job, ud, vd, job->direction, y);
+				ub = qaws_dual1_make((qaws_scalar)((double)adjoint[i].u + v3_dot(adjoint[i].position, y[1].v)),
+					(qaws_scalar)v3_dot(adjoint[i].position, y[1].t), 0);
+				vb = qaws_dual1_make((qaws_scalar)((double)adjoint[i].v + v3_dot(adjoint[i].position, y[2].v)),
+					(qaws_scalar)v3_dot(adjoint[i].position, y[2].t), 0);
+			}
+			if (st != QAWS_STATUS_OK)
+				break;
+		}
+		st = scdf_slope(job, 0, 0, u, v, rate.u, rate.v, xu, ps->hvp, &Fu);
+		if (st == QAWS_STATUS_OK)
+			st = scdf_slope(job, 1, 1, u, v, rate.u, rate.v, xv, ps->hvp, &Gv);
+		if (st == QAWS_STATUS_OK)
+			st = scdf_slope(job, 1, 0, u, v, rate.u, rate.v, xv, ps->hvp, &Gu);
+		if (st != QAWS_STATUS_OK)
+			break;
+		if (!(Fu.v > QAWS_EPSILON) || !(Gv.v > QAWS_EPSILON))
+		{
+			qaws_internal_diff_report_note(job->ctx, QAWS_DIFF_SMOOTH, QAWS_DIFF_ILL_CONDITIONED, 0, i);
+			continue;
+		}
+		qaws_internal_diff_report_note(job->ctx, QAWS_DIFF_SMOOTH, QAWS_DIFF_VALID, 0, i);
+		/* conditional equation */
+		mu = qaws_dual1_div(vb, Gv);
+		ub = qaws_dual1_sub(ub, qaws_dual1_mul(mu, Gu));
+		if (xi_adjoint)
+		{
+			qaws_dual1 B1;
+			st = scdf_B(job, dual_c(u), dual_c(job->v1), NULL, &B1);
+			if (st != QAWS_STATUS_OK)
+				break;
+			xi_adjoint[2 * i + 1] += (qaws_scalar)(mu.v * B1.v);
+		}
+		if (ps->sink)
+		{
+			st = scdf_pullback_B(ps, ud, vd, dual_axpy(-1, mu, 0));
+			if (st == QAWS_STATUS_OK)
+				st = scdf_pullback_B(ps, ud, dual_c(job->v1), dual_axpy(xv, mu, 0));
+			if (st != QAWS_STATUS_OK)
+				break;
+		}
+		/* marginal equation */
+		lambda = qaws_dual1_div(ub, Fu);
+		if (xi_adjoint)
+			xi_adjoint[2 * i] += (qaws_scalar)(lambda.v * total);
+		if (!ps->sink)
+			continue;
+		ku = (unsigned int)((u - job->u0) / job->hu);
+		if (ku >= job->cells)
+			ku = job->cells - 1;
+		for (c = 0; c < job->cells; c++)
+			cellw[c] = qaws_dual1_add(cellw[c], dual_axpy(xu - (c < ku ? 1.0 : 0.0), lambda, 0));
+		{
+			double uk = job->u0 + job->hu * ku;
+			qaws_dual1 len = dual_axpy(1, ud, -uk);
+			for (q = 0; q < job->n && st == QAWS_STATUS_OK; q++)
+				st = scdf_pullback_B(ps, dual_axpy(0.5 * (1 + job->x[q]), len, uk), dual_c(job->v1),
+					qaws_dual1_mul(dual_axpy(-1, lambda, 0), dual_axpy(0.5 * job->w[q], len, 0)));
+		}
+	}
+	for (c = 0; c < job->cells && st == QAWS_STATUS_OK && ps->sink; c++)
+		for (q = 0; q < job->n && st == QAWS_STATUS_OK; q++)
+			st = scdf_pullback_B(ps, dual_c(job->u0 + job->hu * (c + 0.5 + 0.5 * job->x[q])), dual_c(job->v1),
+				dual_axpy(0.5 * job->hu * job->w[q], cellw[c], 0));
+	qaws_internal_dealloc(NULL, cellw);
+	return st;
+}
+
 qaws_status qaws_surface_cdf_sample_adjoint(
 	qaws_diff_context const* ctx,
 	qaws_surface const* surface,
@@ -1403,98 +1637,17 @@ qaws_status qaws_surface_cdf_sample_adjoint(
 	qaws_scalar* xi_adjoint)
 {
 	scdf_job job;
-	double* cellw;
-	double total;
-	unsigned int i, c, q;
+	scdf_pass ps;
 	qaws_status st;
 	if ((!xi || !adjoint) && count)
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	st = scdf_job_init(&job, ctx, surface, measure, cells, quadrature, NULL, param_adjoint);
 	if (st != QAWS_STATUS_OK)
 		return st;
-	total = job.cumA[job.cells].v;
-	cellw = (double*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(double) * (job.cells + 1)));
-	if (!cellw)
-	{
-		scdf_job_free(&job);
-		return QAWS_STATUS_ALLOCATION_FAILURE;
-	}
-	memset(cellw, 0, sizeof(double) * (job.cells + 1));
-	for (i = 0; i < count && st == QAWS_STATUS_OK; i++)
-	{
-		double u, v, xu = xi[2 * i], xv = xi[2 * i + 1], ub, vb, Fu, Gv, Gu, mu, lambda, b1;
-		qaws_scalar ua = QAWS_ZERO, va = QAWS_ZERO;
-		qaws_dual1 F = dual_c(0), G = dual_c(0), B1 = dual_c(0);
-		qaws_surface_jet bar;
-		unsigned int ku;
-		st = scdf_solve(&job, xu, xv, &u, &v);
-		if (st != QAWS_STATUS_OK)
-			break;
-		memset(&bar, 0, sizeof(bar));
-		bar.d[0] = adjoint[i].position;
-		bar.channels = QAWS_SJET_P;
-		st = qaws_surface_eval_adjoint(ctx, surface, (qaws_scalar)u, (qaws_scalar)v, QAWS_SJET_P, &bar, param_adjoint, &ua, &va);
-		if (st != QAWS_STATUS_OK)
-			break;
-		ub = (double)adjoint[i].u + ua;
-		vb = (double)adjoint[i].v + va;
-		st = scdf_F(&job, qaws_dual1_make((qaws_scalar)u, 1, 0), dual_c(xu), 0, &F);
-		if (st == QAWS_STATUS_OK)
-			st = scdf_G(&job, dual_c(u), qaws_dual1_make((qaws_scalar)v, 1, 0), dual_c(xv), 0, &G);
-		if (st != QAWS_STATUS_OK)
-			break;
-		Fu = F.t;
-		Gv = G.t;
-		st = scdf_G(&job, qaws_dual1_make((qaws_scalar)u, 1, 0), dual_c(v), dual_c(xv), 0, &G);
-		if (st == QAWS_STATUS_OK)
-			st = scdf_B(&job, dual_c(u), dual_c(job.v1), NULL, &B1);
-		if (st != QAWS_STATUS_OK)
-			break;
-		Gu = G.t;
-		b1 = B1.v;
-		if (!(Fu > QAWS_EPSILON) || !(Gv > QAWS_EPSILON))
-		{
-			qaws_internal_diff_report_note(ctx, QAWS_DIFF_SMOOTH, QAWS_DIFF_ILL_CONDITIONED, 0, i);
-			continue;
-		}
-		qaws_internal_diff_report_note(ctx, QAWS_DIFF_SMOOTH, QAWS_DIFF_VALID, 0, i);
-		/* conditional equation */
-		mu = vb / Gv;
-		ub -= mu * Gu;
-		if (xi_adjoint)
-			xi_adjoint[2 * i + 1] += (qaws_scalar)(mu * b1);
-		if (param_adjoint)
-		{
-			st = scdf_pullback_B(&job, u, v, -mu, param_adjoint);
-			if (st == QAWS_STATUS_OK)
-				st = scdf_pullback_B(&job, u, job.v1, mu * xv, param_adjoint);
-			if (st != QAWS_STATUS_OK)
-				break;
-		}
-		/* marginal equation */
-		lambda = ub / Fu;
-		if (xi_adjoint)
-			xi_adjoint[2 * i] += (qaws_scalar)(lambda * total);
-		if (!param_adjoint)
-			continue;
-		ku = (unsigned int)((u - job.u0) / job.hu);
-		if (ku >= job.cells)
-			ku = job.cells - 1;
-		for (c = 0; c < job.cells; c++)
-			cellw[c] += lambda * xu - (c < ku ? lambda : 0);
-		{
-			double uk = job.u0 + job.hu * ku;
-			for (q = 0; q < job.n && st == QAWS_STATUS_OK; q++)
-				st = scdf_pullback_B(&job, uk + 0.5 * (u - uk) * (1 + job.x[q]), job.v1, -lambda * 0.5 * (u - uk) * job.w[q],
-					param_adjoint);
-		}
-	}
-	for (c = 0; c < job.cells && st == QAWS_STATUS_OK && param_adjoint; c++)
-		for (q = 0; q < job.n && st == QAWS_STATUS_OK; q++)
-			if (cellw[c] != 0)
-				st = scdf_pullback_B(&job, job.u0 + job.hu * (c + 0.5 + 0.5 * job.x[q]), job.v1, cellw[c] * 0.5 * job.hu * job.w[q],
-					param_adjoint);
-	qaws_internal_dealloc(NULL, cellw);
+	ps.job = &job;
+	ps.sink = param_adjoint;
+	ps.hvp = 0;
+	st = scdf_backward(&ps, xi, count, adjoint, xi_adjoint);
 	scdf_job_free(&job);
 	return st;
 }
@@ -1516,8 +1669,10 @@ static qaws_status scdf_second(qaws_diff_context const* ctx, qaws_surface const*
 	return QAWS_STATUS_OK;
 }
 
-/* HVP by polarization of the second order forward pass:
-   e_j^T H d = (q(d + e_j) - q(d) - q(e_j)) / 2, q(x) = x^T H x. */
+/* HVP. Families linear in their fields differentiate the backward pass
+   along the direction (forward over reverse, one pass). Others polarize the
+   second order forward pass: e_j^T H d = (q(d + e_j) - q(d) - q(e_j)) / 2,
+   q(x) = x^T H x. */
 qaws_status qaws_surface_cdf_sample_hvp(
 	qaws_diff_context const* ctx,
 	qaws_surface const* surface,
@@ -1545,6 +1700,21 @@ qaws_status qaws_surface_cdf_sample_hvp(
 		return QAWS_STATUS_OK;
 	if (out_hv->child_count || direction->child_count)
 		return QAWS_STATUS_UNSUPPORTED_OPERATION;
+	if (qaws_surface_get_diff_capabilities(surface) & QAWS_CAP_LINEAR)
+	{
+		/* forward over reverse: one differentiated backward pass */
+		scdf_job job;
+		scdf_pass ps;
+		st = scdf_job_init(&job, ctx, surface, measure, cells, quadrature, direction, out_hv);
+		if (st != QAWS_STATUS_OK)
+			return st;
+		ps.job = &job;
+		ps.sink = out_hv;
+		ps.hvp = 1;
+		st = scdf_backward(&ps, xi, count, adjoint, NULL);
+		scdf_job_free(&job);
+		return st;
+	}
 	for (f = 0; f < out_hv->field_count; f++)
 		total += out_hv->fields[f].count * out_hv->fields[f].components;
 	fields = (qaws_field_view*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_field_view) * (out_hv->field_count + 1)));

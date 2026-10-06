@@ -188,6 +188,52 @@ static void test_cylinder(void)
 	qaws_surface_destroy(s);
 }
 
+/* The forward-over-reverse HVP of a Bezier patch (linear family) against
+   the polarized HVP of the same patch as a NURBS with unit weights. */
+static void test_hvp_paths(qaws_sample_measure_desc const* m, char const* name)
+{
+	qaws_scalar x[SS_PARAMS], dir[48], hb[48], hn[SS_PARAMS];
+	qaws_surface_cdf_sample adj[SS_SAMPLES];
+	qaws_field_view fd, fb, fn[2];
+	qaws_diff_views vd, vb, vn;
+	qaws_surface* sb;
+	qaws_surface* sn;
+	unsigned int i;
+	int ok = 1;
+	char msg[160];
+	diff_seed(77u);
+	ss_base(0, x);
+	for (i = 0; i < SS_CP; i++)
+		x[48 + i] = 1;
+	diff_rand_fill(dir, 48);
+	for (i = 0; i < SS_SAMPLES; i++)
+	{
+		adj[i].u = diff_rand();
+		adj[i].v = diff_rand();
+		adj[i].position = diff_rand_vec3();
+	}
+	sb = ss_surface(0, x);
+	sn = ss_surface(1, x);
+	fd = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, dir, SS_CP, 3);
+	fb = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, hb, SS_CP, 3);
+	vd.fields = &fd;
+	vb.fields = &fb;
+	vd.field_count = vb.field_count = 1;
+	vd.children = vb.children = NULL;
+	vd.child_count = vb.child_count = 0;
+	vn = ss_views(1, fn, hn);
+	memset(hb, 0, sizeof(hb));
+	memset(hn, 0, sizeof(hn));
+	TEST_ASSERT_STATUS(qaws_surface_cdf_sample_hvp(NULL, sb, m, g_ss_xi, SS_SAMPLES, SS_CELLS, SS_QUAD, adj, &vd, &vb));
+	TEST_ASSERT_STATUS(qaws_surface_cdf_sample_hvp(NULL, sn, m, g_ss_xi, SS_SAMPLES, SS_CELLS, SS_QUAD, adj, &vd, &vn));
+	for (i = 0; i < 48; i++)
+		ok &= diff_close(hb[i], hn[i], QAWS_SCALAR_IS_FLOAT ? 5e-3 : 1e-9);
+	sprintf(msg, "%s: forward-over-reverse HVP matches the polarized HVP", name);
+	TEST_ASSERT(ok, msg);
+	qaws_surface_destroy(sb);
+	qaws_surface_destroy(sn);
+}
+
 static void ss_values(int kind, qaws_sample_measure_desc const* m, qaws_scalar const* x, qaws_scalar const* xi,
 	qaws_diff_views const* dir, qaws_scalar const* xid, qaws_surface_cdf_sample* val, qaws_surface_cdf_sample* t1)
 {
@@ -313,6 +359,9 @@ int test_59_diff_surface_sampling_main(void)
 	test_surface(0, &g_ss_curvature, "Bezier patch, curvature");
 	test_surface(1, &g_ss_curvature, "NURBS patch, curvature");
 	test_cylinder();
+	test_hvp_paths(NULL, "area");
+	test_hvp_paths(&g_ss_density, "density");
+	test_hvp_paths(&g_ss_curvature, "curvature");
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
 }
