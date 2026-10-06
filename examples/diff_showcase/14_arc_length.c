@@ -40,7 +40,7 @@ static double al_energy(qaws_scalar const* cps, double const* q, qaws_scalar* g,
 	qaws_cdf_sample s[AL_N], adj[AL_N];
 	double e = 0;
 	int i;
-	qaws_curve_cdf_sample_tangent(NULL, c, NULL, g_al_targets, NULL, AL_N, 0, NULL, s, NULL, NULL, NULL);
+	qaws_curve_cdf_sample_tangent(NULL, c, NULL, g_al_targets, NULL, NULL, AL_N, 0, NULL, s, NULL, NULL, NULL);
 	for (i = 0; i < AL_N; i++)
 	{
 		double dx = s[i].position.x - q[2 * i], dy = s[i].position.y - q[2 * i + 1];
@@ -76,7 +76,7 @@ static void al_hvp(qaws_scalar const* cps, qaws_cdf_sample const* adj, qaws_scal
 	vin = one_field(&fv, QAWS_FIELD_CONTROL_POINTS, vv, AL_CP, 2);
 	vout = one_field(&fo, QAWS_FIELD_CONTROL_POINTS, out, AL_CP, 2);
 	memset(out, 0, sizeof(qaws_scalar) * AL_P);
-	qaws_curve_cdf_sample_tangent(NULL, c, NULL, g_al_targets, NULL, AL_N, 0, &vin, NULL, jv, NULL, NULL);
+	qaws_curve_cdf_sample_tangent(NULL, c, NULL, g_al_targets, NULL, NULL, AL_N, 0, &vin, NULL, jv, NULL, NULL);
 	for (i = 0; i < AL_N; i++)
 	{
 		w[i].t = 0;
@@ -169,7 +169,7 @@ static void demo_arc_length(void)
 		memset(dir, 0, sizeof(dir));
 		dir[2 * k_star] = 1;
 		views = one_field(&fv, QAWS_FIELD_CONTROL_POINTS, dir, AL_CP, 2);
-		qaws_curve_cdf_sample_tangent(NULL, c, NULL, g_al_targets, NULL, AL_N, 0, &views, val, t1, t2, NULL);
+		qaws_curve_cdf_sample_tangent(NULL, c, NULL, g_al_targets, NULL, NULL, AL_N, 0, &views, val, t1, t2, NULL);
 		for (i = 0; i < AL_N; i++)
 		{
 			double x0 = vx(&a, val[i].position.x), y0 = vy(&a, val[i].position.y);
@@ -274,7 +274,7 @@ static void demo_arc_length(void)
 		svg_polyline(&s, xy, 400, "#d4a72c", 2, 0.9, 1);
 		curve_polyline(cn, &b, xy, 400);
 		svg_polyline(&s, xy, 400, "#1a7f37", 2.4, 1, 0);
-		qaws_curve_cdf_sample_tangent(NULL, cn, NULL, g_al_targets, NULL, AL_N, 0, NULL, sn, NULL, NULL, NULL);
+		qaws_curve_cdf_sample_tangent(NULL, cn, NULL, g_al_targets, NULL, NULL, AL_N, 0, NULL, sn, NULL, NULL, NULL);
 		for (i = 0; i < AL_N; i++)
 		{
 			svg_line(&s, vx(&b, q[2 * i]), vy(&b, q[2 * i + 1]), vx(&b, sn[i].position.x), vy(&b, sn[i].position.y), "#cf222e", 1, 0.8);

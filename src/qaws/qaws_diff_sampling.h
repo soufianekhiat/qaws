@@ -85,15 +85,18 @@ typedef struct qaws_cdf_sample
 } qaws_cdf_sample;
 
 /* Solves every target and returns the samples with their tangents along
-   param_tangent (may be NULL) and distance_tangent (per target, may be
-   NULL). out_tangent and out_tangent2 may be NULL; out_total (may be NULL)
-   receives M_total. */
+   param_tangent (may be NULL) and the per-target distance rates
+   distance_tangent / distance_tangent2 (first and second derivative of the
+   target distance along the same path, may be NULL; time traversal gives
+   them, see qaws_traversal_cdf_targets). out_tangent and out_tangent2 may be
+   NULL; out_total (may be NULL) receives M_total. */
 qaws_status qaws_curve_cdf_sample_tangent(
 	qaws_diff_context const* ctx,
 	qaws_curve const* curve,
 	qaws_sample_measure_desc const* measure,
 	qaws_cdf_target const* targets,
 	qaws_scalar const* distance_tangent,
+	qaws_scalar const* distance_tangent2,
 	unsigned int count,
 	unsigned int quadrature,
 	qaws_diff_views const* param_tangent,
@@ -127,6 +130,26 @@ qaws_status qaws_curve_cdf_sample_hvp(
 	qaws_cdf_sample const* adjoint,
 	qaws_diff_views const* direction,
 	qaws_diff_views* out_hv);
+
+/* Traversal inputs as arc-length targets: the distance of each input (time
+   through easing and motion profile, or arc length) after the wrap mode,
+   written as distance + fraction * L_total so that the derivatives of the
+   total length are carried (loop: fraction -k, ping-pong: (s, -2k) going
+   out and (-s, 2k + 2) coming back, clamp: (0, 1) past the end).
+   out_rate / out_rate2 (may be NULL) receive the first and second
+   derivatives of the target distance with respect to the input (speed and
+   acceleration of the profile through the easing); pass them as
+   distance_tangent / distance_tangent2 scaled by the input rate. Sampling
+   then goes through qaws_curve_cdf_sample_* with a NULL measure (exact
+   arc length, where the traversal itself reads a table). Parameter-mode and
+   multi-curve traversals are refused (QAWS_STATUS_UNSUPPORTED_OPERATION). */
+qaws_status qaws_traversal_cdf_targets(
+	qaws_traversal const* traversal,
+	qaws_scalar const* inputs,
+	unsigned int count,
+	qaws_cdf_target* out_targets,
+	qaws_scalar* out_rate,
+	qaws_scalar* out_rate2);
 
 /* ===================================================================
  * Surfaces: inverse-CDF warping of the unit square

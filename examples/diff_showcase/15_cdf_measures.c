@@ -79,7 +79,7 @@ static void demo_cdf_measures(void)
 		memset(dir, 0, sizeof(dir));
 		dir[2 * k_star + 1] = 1;
 		views = one_field(&fv, QAWS_FIELD_CONTROL_POINTS, dir, 10, 2);
-		qaws_curve_cdf_sample_tangent(NULL, c, ms[m], tg, NULL, CDF_N, 0, &views, val, t1, NULL, &total);
+		qaws_curve_cdf_sample_tangent(NULL, c, ms[m], tg, NULL, NULL, CDF_N, 0, &views, val, t1, NULL, &total);
 		for (i = 0; i < CDF_N; i++)
 		{
 			double x0 = vx(&v, val[i].position.x), y0 = vy(&v, val[i].position.y), k1 = 0.5 * v.w / (v.xmax - v.xmin);

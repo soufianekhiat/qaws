@@ -172,6 +172,8 @@ Each has eval (value, tangent, tangent2), gradient (accumulated into views) and 
 
 `qaws_diff_sampling.h` samples a curve by inverting a measure `M(t) = int rho |C'|`: arc length (constant speed), curvature-weighted (`rho = sqrt(floor^2 + kappa^2)`) or a user density field in space. The sample at `sigma = distance + fraction * M_total` has a parameter `t` defined by `M(t) = sigma`, differentiated implicitly to first and second order (`tangent`, `tangent2`), pulled back as an adjoint (one quadrature pass for a whole batch, plus distance adjoints) and as a Hessian-vector product for linear families.
 
+Time traversal maps onto the same machinery: `qaws_traversal_cdf_targets` turns times (easing, motion profile, wrap mode) into arc-length targets with their speed and acceleration, so samples of a traversal have exact first and second derivatives in time and in the curve parameters.
+
 Surfaces warp points of the unit square by the marginal and conditional inverse CDFs of `rho(S) |S_u x S_v|` (area or a density field): stratified or blue-noise points stay stratified on the surface. The forward pass solves the discrete equations in dual numbers (first and second order), the adjoint pulls back through the conditional then the marginal equation, and the HVP polarizes the second order forward pass.
 
 ## Context and reports

@@ -1,4 +1,5 @@
 #include "qaws_traversal.h"
+#include "qaws_diff_sampling.h"
 #include "qaws_eval.h"
 #include "internal/qaws_internal_types.h"
 #include "internal/qaws_internal_arc_length.h"
@@ -109,9 +110,12 @@ static qaws_scalar apply_wrap(qaws_wrap_mode mode, qaws_scalar distance, qaws_sc
  * Motion profile: map time to distance
  * ------------------------------------------------------------------------- */
 
-static qaws_scalar scurve_map_time_to_distance(
+/* S-curve profile: distance, speed and acceleration at a time. */
+static qaws_scalar scurve_eval(
 	qaws_traversal_desc const *desc,
-	qaws_scalar time)
+	qaws_scalar time,
+	qaws_scalar *out_speed,
+	qaws_scalar *out_accel)
 {
 	qaws_scalar dt;
 	qaws_scalar total_time;
@@ -128,8 +132,11 @@ static qaws_scalar scurve_map_time_to_distance(
 	qaws_scalar local_t = (qaws_scalar)0.0;
 	qaws_scalar v_at_start;
 	qaws_scalar d_at_start;
+	qaws_scalar lt;
 	int seg;
 
+	*out_speed = (qaws_scalar)0.0;
+	*out_accel = (qaws_scalar)0.0;
 	dt = time - desc->start_time;
 	total_time = desc->end_time - desc->start_time;
 
@@ -268,40 +275,57 @@ static qaws_scalar scurve_map_time_to_distance(
 
 	v_at_start = seg_v[seg];
 	d_at_start = seg_d[seg];
+	lt = local_t;
 
 	switch (seg)
 	{
 	case 0: /* Segment 1: jerk = +J */
-		return d_at_start + J * local_t * local_t * local_t / (qaws_scalar)6.0;
+		*out_speed = J * lt * lt / (qaws_scalar)2.0;
+		*out_accel = J * lt;
+		return d_at_start + J * lt * lt * lt / (qaws_scalar)6.0;
 
 	case 1: /* Segment 2: constant acceleration A */
-		return d_at_start + v_at_start * local_t
-			+ A * local_t * local_t / (qaws_scalar)2.0;
+		*out_speed = v_at_start + A * lt;
+		*out_accel = A;
+		return d_at_start + v_at_start * lt + A * lt * lt / (qaws_scalar)2.0;
 
 	case 2: /* Segment 3: jerk = -J */
-		return d_at_start + v_at_start * local_t
-			+ A * local_t * local_t / (qaws_scalar)2.0
-			- J * local_t * local_t * local_t / (qaws_scalar)6.0;
+		*out_speed = v_at_start + A * lt - J * lt * lt / (qaws_scalar)2.0;
+		*out_accel = A - J * lt;
+		return d_at_start + v_at_start * lt + A * lt * lt / (qaws_scalar)2.0
+			- J * lt * lt * lt / (qaws_scalar)6.0;
 
 	case 3: /* Segment 4: cruise */
-		return d_at_start + v_at_start * local_t;
+		*out_speed = v_at_start;
+		return d_at_start + v_at_start * lt;
 
 	case 4: /* Segment 5: jerk = -J (begin decel) */
-		return d_at_start + v_at_start * local_t
-			- J * local_t * local_t * local_t / (qaws_scalar)6.0;
+		*out_speed = v_at_start - J * lt * lt / (qaws_scalar)2.0;
+		*out_accel = -J * lt;
+		return d_at_start + v_at_start * lt - J * lt * lt * lt / (qaws_scalar)6.0;
 
 	case 5: /* Segment 6: constant deceleration -A */
-		return d_at_start + v_at_start * local_t
-			- A * local_t * local_t / (qaws_scalar)2.0;
+		*out_speed = v_at_start - A * lt;
+		*out_accel = -A;
+		return d_at_start + v_at_start * lt - A * lt * lt / (qaws_scalar)2.0;
 
 	case 6: /* Segment 7: jerk = +J (end decel) */
-		return d_at_start + v_at_start * local_t
-			- A * local_t * local_t / (qaws_scalar)2.0
-			+ J * local_t * local_t * local_t / (qaws_scalar)6.0;
+		*out_speed = v_at_start - A * lt + J * lt * lt / (qaws_scalar)2.0;
+		*out_accel = -A + J * lt;
+		return d_at_start + v_at_start * lt - A * lt * lt / (qaws_scalar)2.0
+			+ J * lt * lt * lt / (qaws_scalar)6.0;
 
 	default:
 		return seg_d[7];
 	}
+}
+
+static qaws_scalar scurve_map_time_to_distance(
+	qaws_traversal_desc const *desc,
+	qaws_scalar time)
+{
+	qaws_scalar v, a;
+	return scurve_eval(desc, time, &v, &a);
 }
 
 static qaws_scalar custom_speed_map_time_to_distance(
@@ -1250,5 +1274,202 @@ qaws_status qaws_traversal_reset(qaws_traversal *traversal)
 		return QAWS_STATUS_INVALID_ARGUMENT;
 
 	traversal->current_distance = (qaws_scalar)0.0;
+	return QAWS_STATUS_OK;
+}
+
+/* ---------------------------------------------------------------------------
+ * Differentiable sampling: traversal inputs as arc-length targets
+ * ------------------------------------------------------------------------- */
+
+/* Easing g(n) with g'(n) and g''(n) on [0, 1]. */
+static double easing_eval(qaws_easing easing, double n, double* g1, double* g2)
+{
+	double h = 0.5 * 3.14159265358979323846, inv = 1 - n;
+	switch (easing)
+	{
+	case QAWS_EASING_QUAD_IN:
+		*g1 = 2 * n; *g2 = 2;
+		return n * n;
+	case QAWS_EASING_QUAD_OUT:
+		*g1 = 2 * inv; *g2 = -2;
+		return 1 - inv * inv;
+	case QAWS_EASING_QUAD_IN_OUT:
+		if (n < 0.5) { *g1 = 4 * n; *g2 = 4; return 2 * n * n; }
+		*g1 = 4 * inv; *g2 = -4;
+		return 1 - 2 * inv * inv;
+	case QAWS_EASING_CUBIC_IN:
+		*g1 = 3 * n * n; *g2 = 6 * n;
+		return n * n * n;
+	case QAWS_EASING_CUBIC_OUT:
+		*g1 = 3 * inv * inv; *g2 = -6 * inv;
+		return 1 - inv * inv * inv;
+	case QAWS_EASING_CUBIC_IN_OUT:
+		if (n < 0.5) { *g1 = 12 * n * n; *g2 = 24 * n; return 4 * n * n * n; }
+		*g1 = 12 * inv * inv; *g2 = -24 * inv;
+		return 1 - 4 * inv * inv * inv;
+	case QAWS_EASING_SINE_IN:
+		*g1 = h * sin(n * h); *g2 = h * h * cos(n * h);
+		return 1 - cos(n * h);
+	case QAWS_EASING_SINE_OUT:
+		*g1 = h * cos(n * h); *g2 = -h * h * sin(n * h);
+		return sin(n * h);
+	case QAWS_EASING_SINE_IN_OUT:
+		*g1 = h * sin(2 * h * n); *g2 = 2 * h * h * cos(2 * h * n);
+		return 0.5 * (1 - cos(2 * h * n));
+	default:
+		*g1 = 1; *g2 = 0;
+		return n;
+	}
+}
+
+/* Distance of the motion profile at a time, with its speed and acceleration
+   (the same branches as traversal_map_time_to_distance). */
+static double profile_eval(qaws_traversal const* traversal, qaws_scalar time, double* v, double* a)
+{
+	qaws_traversal_desc const* desc = &traversal->desc;
+	double dt = (double)time - desc->start_time, total_time = (double)desc->end_time - desc->start_time;
+	*v = 0;
+	*a = 0;
+	if (desc->motion_profile == QAWS_MOTION_PROFILE_CUSTOM && traversal->custom_table_size > 0)
+	{
+		qaws_scalar const* tt = traversal->custom_time_table;
+		qaws_scalar const* dd = traversal->custom_dist_table;
+		unsigned int n = traversal->custom_table_size, lo = 0, hi = n - 1;
+		if (time <= tt[0] || time >= tt[n - 1])
+			return custom_speed_map_time_to_distance(traversal, time);
+		while (hi - lo > 1)
+		{
+			unsigned int mid = (lo + hi) / 2;
+			if (tt[mid] <= time) lo = mid; else hi = mid;
+		}
+		if (tt[hi] > tt[lo])
+			*v = ((double)dd[hi] - dd[lo]) / ((double)tt[hi] - tt[lo]);
+		return custom_speed_map_time_to_distance(traversal, time);
+	}
+	switch (desc->motion_profile)
+	{
+	case QAWS_MOTION_PROFILE_CONSTANT_SPEED:
+		*v = desc->speed;
+		return desc->speed * dt;
+	case QAWS_MOTION_PROFILE_CONSTANT_ACCELERATION:
+		*v = desc->speed + desc->acceleration * dt;
+		*a = desc->acceleration;
+		return desc->speed * dt + 0.5 * desc->acceleration * dt * dt;
+	case QAWS_MOTION_PROFILE_TRAPEZOIDAL_SPEED:
+	{
+		double accel = desc->acceleration > 0 ? desc->acceleration : 1.0, t_ramp;
+		if (total_time <= 0)
+			return 0;
+		t_ramp = desc->max_speed / accel;
+		if (2 * t_ramp > total_time)
+			t_ramp = total_time / 2;
+		if (dt <= t_ramp)
+		{
+			*v = accel * dt;
+			*a = accel;
+			return 0.5 * accel * dt * dt;
+		}
+		if (dt <= total_time - t_ramp)
+		{
+			*v = desc->max_speed;
+			return 0.5 * accel * t_ramp * t_ramp + desc->max_speed * (dt - t_ramp);
+		}
+		{
+			double dd2 = total_time - dt, d_accel = 0.5 * accel * t_ramp * t_ramp;
+			*v = accel * dd2;
+			*a = -accel;
+			return 2 * d_accel + desc->max_speed * (total_time - 2 * t_ramp) - 0.5 * accel * dd2 * dd2;
+		}
+	}
+	case QAWS_MOTION_PROFILE_S_CURVE:
+	{
+		qaws_scalar sv, sa, d = scurve_eval(desc, time, &sv, &sa);
+		*v = sv;
+		*a = sa;
+		return d;
+	}
+	default:
+		*v = 1;
+		return time;
+	}
+}
+
+qaws_status qaws_traversal_cdf_targets(
+	qaws_traversal const* traversal,
+	qaws_scalar const* inputs,
+	unsigned int count,
+	qaws_cdf_target* out_targets,
+	qaws_scalar* out_rate,
+	qaws_scalar* out_rate2)
+{
+	unsigned int i;
+	double L;
+	if (!traversal || ((!inputs || !out_targets) && count))
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	if (traversal->desc.traversal_mode == QAWS_TRAVERSAL_MODE_PARAMETER || traversal->chain_count > 0)
+		return QAWS_STATUS_UNSUPPORTED_OPERATION;
+	L = traversal->total_arc_length;
+	for (i = 0; i < count; i++)
+	{
+		double s, r1 = 1, r2 = 0, dist, frac = 0, sign = 1;
+		if (traversal->desc.traversal_mode == QAWS_TRAVERSAL_MODE_TIME)
+		{
+			qaws_traversal_desc const* desc = &traversal->desc;
+			double te = inputs[i], e1 = 1, e2 = 0, span = (double)desc->end_time - desc->start_time, v, a;
+			if (desc->easing != QAWS_EASING_LINEAR && span > 0)
+			{
+				double n = ((double)inputs[i] - desc->start_time) / span, g1, g2, g;
+				if (n < 0 || n > 1)
+				{
+					n = n < 0 ? 0 : 1;
+					g = easing_eval(desc->easing, n, &g1, &g2);
+					e1 = e2 = 0;
+				}
+				else
+				{
+					g = easing_eval(desc->easing, n, &g1, &g2);
+					e1 = g1;
+					e2 = g2 / span;
+				}
+				te = desc->start_time + g * span;
+			}
+			s = profile_eval(traversal, (qaws_scalar)te, &v, &a);
+			r1 = v * e1;
+			r2 = a * e1 * e1 + v * e2;
+		}
+		else
+			s = inputs[i];
+		dist = s;
+		if (L > 0)
+			switch (traversal->desc.wrap_mode)
+			{
+			case QAWS_WRAP_CLAMP:
+				if (s < 0) { dist = 0; r1 = r2 = 0; }
+				else if (s > L) { dist = 0; frac = 1; r1 = r2 = 0; }
+				break;
+			case QAWS_WRAP_LOOP:
+				frac = -floor(s / L);
+				break;
+			case QAWS_WRAP_PING_PONG:
+			{
+				double k = floor(s / (2 * L)), w = s - 2 * k * L;
+				if (w <= L)
+					frac = -2 * k;
+				else
+				{
+					dist = -s;
+					frac = 2 * k + 2;
+					sign = -1;
+				}
+				break;
+			}
+			default:
+				break;
+			}
+		out_targets[i].distance = (qaws_scalar)dist;
+		out_targets[i].fraction = (qaws_scalar)frac;
+		if (out_rate) out_rate[i] = (qaws_scalar)(sign * r1);
+		if (out_rate2) out_rate2[i] = (qaws_scalar)(sign * r2);
+	}
 	return QAWS_STATUS_OK;
 }

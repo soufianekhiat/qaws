@@ -391,6 +391,7 @@ qaws_status qaws_curve_cdf_sample_tangent(
 	qaws_sample_measure_desc const* measure,
 	qaws_cdf_target const* targets,
 	qaws_scalar const* distance_tangent,
+	qaws_scalar const* distance_tangent2,
 	unsigned int count,
 	unsigned int quadrature,
 	qaws_diff_views const* param_tangent,
@@ -448,7 +449,7 @@ qaws_status qaws_curve_cdf_sample_tangent(
 		M1 += job.cum1[k];
 		M2 += job.cum2[k];
 		sig1 = (distance_tangent ? (double)distance_tangent[i] : 0) + (double)targets[i].fraction * job.cum1[job.spans];
-		sig2 = (double)targets[i].fraction * job.cum2[job.spans];
+		sig2 = (distance_tangent2 ? (double)distance_tangent2[i] : 0) + (double)targets[i].fraction * job.cum2[job.spans];
 		td = (sig1 - M1) / m;
 		mt = out_tangent2 ? measure_rate_t(&job, &p) : 0;
 		tdd = (sig2 - M2 - 2 * me * td - mt * td * td) / m;

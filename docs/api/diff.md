@@ -2015,6 +2015,7 @@ qaws_status qaws_curve_cdf_sample_tangent(
 	qaws_sample_measure_desc const* measure,
 	qaws_cdf_target const* targets,
 	qaws_scalar const* distance_tangent,
+	qaws_scalar const* distance_tangent2,
 	unsigned int count,
 	unsigned int quadrature,
 	qaws_diff_views const* param_tangent,
@@ -2024,7 +2025,7 @@ qaws_status qaws_curve_cdf_sample_tangent(
 	qaws_scalar* out_total);
 ```
 
-Solves every target and writes the samples (`out_value`), their first (`out_tangent`) and second (`out_tangent2`) directional derivatives along `param_tangent` and the per-target distance rates `distance_tangent`, and the total measure. Any of `distance_tangent`, `param_tangent` and the outputs may be NULL.
+Solves every target and writes the samples (`out_value`), their first (`out_tangent`) and second (`out_tangent2`) directional derivatives along `param_tangent` and the per-target distance rates `distance_tangent` and `distance_tangent2` (first and second derivative of the target distance along the same path), and the total measure. Any of the rates, `param_tangent` and the outputs may be NULL.
 
 **Returns:** `QAWS_STATUS_OK`; `QAWS_STATUS_INVALID_ARGUMENT` on a NULL curve, NULL targets or an invalid measure; `QAWS_STATUS_UNSUPPORTED_OPERATION` for a knot view or when second order is asked of a family without `QAWS_CAP_TANGENT2`.
 
@@ -2063,6 +2064,22 @@ qaws_status qaws_curve_cdf_sample_hvp(
 Accumulates (`+=`) `H * direction`, `H` the Hessian with respect to the parameters of `sum_i (t_bar_i t_i + p_bar_i . p_i)`, by differentiating the adjoint along the direction (forward over reverse); the integrand's Hessian enters by polarization of its dual second derivative.
 
 **Returns:** `QAWS_STATUS_OK`; `QAWS_STATUS_UNSUPPORTED_OPERATION` if the curve is not `QAWS_CAP_LINEAR` (compose from tangents and adjoints instead) or for knot views.
+
+### qaws_traversal_cdf_targets
+
+```c
+qaws_status qaws_traversal_cdf_targets(
+	qaws_traversal const* traversal,
+	qaws_scalar const* inputs,
+	unsigned int count,
+	qaws_cdf_target* out_targets,
+	qaws_scalar* out_rate,
+	qaws_scalar* out_rate2);
+```
+
+Turns traversal inputs (time through easing and motion profile, or arc length) into arc-length targets after the wrap mode, written as `distance + fraction * L_total` so that the derivatives of the total length are carried: loop gives fraction `-k`, ping-pong `(s, -2k)` going out and `(-s, 2k + 2)` coming back, clamp `(0, 1)` past the end. `out_rate` / `out_rate2` (may be NULL) receive the first and second derivatives of the target distance with respect to the input: the profile speed and acceleration through the easing. Passed (scaled by the input rate) as `distance_tangent` / `distance_tangent2` of `qaws_curve_cdf_sample_tangent` with a NULL measure, they give exact first and second time derivatives of the traversal samples; the adjoint and the HVP of `qaws_curve_cdf_sample_*` apply unchanged. The samples match `qaws_traversal_evaluate_*` to the accuracy of the traversal's table.
+
+**Returns:** `QAWS_STATUS_OK`; `QAWS_STATUS_INVALID_ARGUMENT` on NULL arguments; `QAWS_STATUS_UNSUPPORTED_OPERATION` for parameter-mode and multi-curve traversals.
 
 ### Surfaces: qaws_surface_cdf_sample_*
 

@@ -18,6 +18,7 @@
 #include "test_diff.h"
 #include "qaws_diff_sampling.h"
 #include "qaws_diff_functionals.h"
+#include "qaws_traversal.h"
 
 #define SM_SAMPLES 3
 #define SM_PARAMS 24     /* 6 control points x 3 + 6 weights */
@@ -138,7 +139,7 @@ static void sm_values(int kind, qaws_scalar const* x, qaws_scalar const* dist_sh
 		if (dist_shift)
 			tg[i].distance += dist_shift[i];
 	}
-	qaws_curve_cdf_sample_tangent(NULL, c, MEAS, tg, NULL, SM_SAMPLES, 0, NULL, out, NULL, NULL, NULL);
+	qaws_curve_cdf_sample_tangent(NULL, c, MEAS, tg, NULL, NULL, SM_SAMPLES, 0, NULL, out, NULL, NULL, NULL);
 	qaws_curve_destroy(c);
 }
 
@@ -186,7 +187,7 @@ static void test_straight(void)
 		tg[i].distance = 0;
 		tg[i].fraction = (qaws_scalar)(i / 4.0);
 	}
-	TEST_ASSERT(qaws_curve_cdf_sample_tangent(NULL, c, MEAS, tg, NULL, 5, 0, NULL, s, NULL, NULL, &total) == QAWS_STATUS_OK,
+	TEST_ASSERT(qaws_curve_cdf_sample_tangent(NULL, c, MEAS, tg, NULL, NULL, 5, 0, NULL, s, NULL, NULL, &total) == QAWS_STATUS_OK,
 		"straight segment samples");
 	TEST_ASSERT(approx_eq(total, 3), "segment length");
 	for (i = 0; i < 5; i++)
@@ -238,7 +239,7 @@ static void test_reference(sm_ref const* r)
 	vh = sm_views(0, fh, hv);
 	(void)vx;
 	c = sm_curve(0, x);
-	REF_ASSERT(qaws_curve_cdf_sample_tangent(NULL, c, MEAS, g_sm_targets, NULL, SM_SAMPLES, 0, &vd, val, tan1, tan2, &total)
+	REF_ASSERT(qaws_curve_cdf_sample_tangent(NULL, c, MEAS, g_sm_targets, NULL, NULL, SM_SAMPLES, 0, &vd, val, tan1, tan2, &total)
 		== QAWS_STATUS_OK, "forward");
 	REF_ASSERT(diff_close(total, r->total[0], tol), "total length");
 	if (!MEAS)
@@ -303,7 +304,7 @@ static void test_finite_differences(int kind, char const* name)
 	vd = sm_views(kind, fd, dir);
 	vg = sm_views(kind, fg, grad);
 	c = sm_curve(kind, x);
-	qaws_curve_cdf_sample_tangent(NULL, c, MEAS, g_sm_targets, ddir, SM_SAMPLES, 0, &vd, val, t1, t2, NULL);
+	qaws_curve_cdf_sample_tangent(NULL, c, MEAS, g_sm_targets, ddir, NULL, SM_SAMPLES, 0, &vd, val, t1, t2, NULL);
 	for (i = 0; i < np; i++)
 	{
 		xp[i] = (qaws_scalar)(x[i] + h * dir[i]);
@@ -328,8 +329,8 @@ static void test_finite_differences(int kind, char const* name)
 			tp[i].distance += sp[i];
 			tm[i].distance += smn[i];
 		}
-		qaws_curve_cdf_sample_tangent(NULL, cp, MEAS, tp, ddir, SM_SAMPLES, 0, &vd, NULL, t1p, NULL, NULL);
-		qaws_curve_cdf_sample_tangent(NULL, cm, MEAS, tm, ddir, SM_SAMPLES, 0, &vd, NULL, t1m, NULL, NULL);
+		qaws_curve_cdf_sample_tangent(NULL, cp, MEAS, tp, ddir, NULL, SM_SAMPLES, 0, &vd, NULL, t1p, NULL, NULL);
+		qaws_curve_cdf_sample_tangent(NULL, cm, MEAS, tm, ddir, NULL, SM_SAMPLES, 0, &vd, NULL, t1m, NULL, NULL);
 		qaws_curve_destroy(cp);
 		qaws_curve_destroy(cm);
 	}
@@ -415,6 +416,84 @@ static void test_finite_differences(int kind, char const* name)
 	qaws_curve_destroy(c);
 }
 
+/* Time traversal through motion profiles, easing and wrap modes: the
+   targets reproduce the traversal's own samples (it reads a table), and the
+   speed / acceleration rates give the first and second time derivatives of
+   the samples. */
+static void test_traversal(void)
+{
+	static qaws_motion_profile const profiles[3] = { QAWS_MOTION_PROFILE_S_CURVE, QAWS_MOTION_PROFILE_CONSTANT_ACCELERATION,
+		QAWS_MOTION_PROFILE_TRAPEZOIDAL_SPEED };
+	static qaws_wrap_mode const wraps[3] = { QAWS_WRAP_PING_PONG, QAWS_WRAP_LOOP, QAWS_WRAP_CLAMP };
+	static qaws_easing const easings[3] = { QAWS_EASING_SINE_IN_OUT, QAWS_EASING_QUAD_IN, QAWS_EASING_CUBIC_OUT };
+	static char const* const names[3] = { "S-curve, ping-pong, sine easing", "constant acceleration, loop, quad easing",
+		"trapezoidal, clamp, cubic easing" };
+	static double const times[SM_SAMPLES] = { 1.3, 3.1, 4.6 };
+	qaws_scalar x[SM_PARAMS];
+	qaws_curve* c;
+	int p;
+	sm_base(0, x);
+	c = sm_curve(0, x);
+	for (p = 0; p < 3; p++)
+	{
+		qaws_traversal_desc d;
+		qaws_traversal* tr = NULL;
+		qaws_cdf_target tg[SM_SAMPLES], tp[SM_SAMPLES], tm[SM_SAMPLES];
+		qaws_scalar tin[SM_SAMPLES], tpl[SM_SAMPLES], tmi[SM_SAMPLES], r1[SM_SAMPLES], r2[SM_SAMPLES];
+		qaws_cdf_sample val[SM_SAMPLES], t1[SM_SAMPLES], t2[SM_SAMPLES], vp[SM_SAMPLES], vm[SM_SAMPLES];
+		double h = QAWS_SCALAR_IS_FLOAT ? 1e-2 : 1e-4, tol = QAWS_SCALAR_IS_FLOAT ? 5e-2 : 1e-6;
+		int ok_v = 1, ok_1 = 1, ok_2 = 1;
+		unsigned int i;
+		char msg[160];
+		memset(&d, 0, sizeof(d));
+		d.traversal_mode = QAWS_TRAVERSAL_MODE_TIME;
+		d.motion_profile = profiles[p];
+		d.speed = (qaws_scalar)1.2;
+		d.acceleration = (qaws_scalar)(p == 1 ? 0.6 : 2.0);
+		d.max_speed = (qaws_scalar)2.5;
+		d.jerk = (qaws_scalar)3.0;
+		d.start_time = 0;
+		d.end_time = (qaws_scalar)6.0;
+		d.easing = easings[p];
+		d.wrap_mode = wraps[p];
+		TEST_ASSERT_STATUS(qaws_traversal_create(c, &d, &tr));
+		for (i = 0; i < SM_SAMPLES; i++)
+		{
+			tin[i] = (qaws_scalar)times[i];
+			tpl[i] = (qaws_scalar)(times[i] + h);
+			tmi[i] = (qaws_scalar)(times[i] - h);
+		}
+		TEST_ASSERT_STATUS(qaws_traversal_cdf_targets(tr, tin, SM_SAMPLES, tg, r1, r2));
+		qaws_traversal_cdf_targets(tr, tpl, SM_SAMPLES, tp, NULL, NULL);
+		qaws_traversal_cdf_targets(tr, tmi, SM_SAMPLES, tm, NULL, NULL);
+		/* time direction 1: the distance moves at r1 and accelerates at r2 */
+		qaws_curve_cdf_sample_tangent(NULL, c, NULL, tg, r1, r2, SM_SAMPLES, 0, NULL, val, t1, t2, NULL);
+		qaws_curve_cdf_sample_tangent(NULL, c, NULL, tp, NULL, NULL, SM_SAMPLES, 0, NULL, vp, NULL, NULL, NULL);
+		qaws_curve_cdf_sample_tangent(NULL, c, NULL, tm, NULL, NULL, SM_SAMPLES, 0, NULL, vm, NULL, NULL, NULL);
+		for (i = 0; i < SM_SAMPLES; i++)
+		{
+			qaws_eval_result_3d e;
+			qaws_traversal_evaluate_3d(tr, tin[i], QAWS_EVAL_FLAG_POSITION, &e);
+			ok_v &= diff_close(val[i].position.x, e.position.x, 1e-3) && diff_close(val[i].position.y, e.position.y, 1e-3) &&
+				diff_close(val[i].position.z, e.position.z, 1e-3);
+			ok_1 &= diff_close(t1[i].position.x, (vp[i].position.x - vm[i].position.x) / (2 * h), tol) &&
+				diff_close(t1[i].position.y, (vp[i].position.y - vm[i].position.y) / (2 * h), tol) &&
+				diff_close(t1[i].t, (vp[i].t - vm[i].t) / (2 * h), tol);
+			ok_2 &= diff_close(t2[i].position.x, (vp[i].position.x - 2 * val[i].position.x + vm[i].position.x) / (h * h), 100 * tol) &&
+				diff_close(t2[i].position.y, (vp[i].position.y - 2 * val[i].position.y + vm[i].position.y) / (h * h), 100 * tol) &&
+				diff_close(t2[i].t, (vp[i].t - 2 * val[i].t + vm[i].t) / (h * h), 100 * tol);
+		}
+		sprintf(msg, "traversal (%s): samples match the traversal", names[p]);
+		TEST_ASSERT(ok_v, msg);
+		sprintf(msg, "traversal (%s): first time derivative", names[p]);
+		TEST_ASSERT(ok_1, msg);
+		sprintf(msg, "traversal (%s): second time derivative", names[p]);
+		TEST_ASSERT(ok_2, msg);
+		qaws_traversal_destroy(tr);
+	}
+	qaws_curve_destroy(c);
+}
+
 static void test_refusals(void)
 {
 	qaws_scalar x[SM_PARAMS], k[10];
@@ -430,9 +509,9 @@ static void test_refusals(void)
 	vk.field_count = 1;
 	vk.children = NULL;
 	vk.child_count = 0;
-	TEST_ASSERT(qaws_curve_cdf_sample_tangent(NULL, c, MEAS, g_sm_targets, NULL, SM_SAMPLES, 0, &vk, s, s, NULL, NULL) ==
+	TEST_ASSERT(qaws_curve_cdf_sample_tangent(NULL, c, MEAS, g_sm_targets, NULL, NULL, SM_SAMPLES, 0, &vk, s, s, NULL, NULL) ==
 		QAWS_STATUS_UNSUPPORTED_OPERATION, "knots move the quadrature spans: refused");
-	TEST_ASSERT(qaws_curve_cdf_sample_tangent(NULL, NULL, MEAS, g_sm_targets, NULL, SM_SAMPLES, 0, NULL, s, NULL, NULL, NULL) ==
+	TEST_ASSERT(qaws_curve_cdf_sample_tangent(NULL, NULL, MEAS, g_sm_targets, NULL, NULL, SM_SAMPLES, 0, NULL, s, NULL, NULL, NULL) ==
 		QAWS_STATUS_INVALID_ARGUMENT, "NULL curve");
 	qaws_curve_destroy(c);
 }
@@ -468,6 +547,7 @@ int test_58_diff_sampling_main(void)
 			}
 		g_sm_measure = NULL;
 	}
+	test_traversal();
 	test_refusals();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
