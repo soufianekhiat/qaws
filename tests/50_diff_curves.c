@@ -9,6 +9,10 @@
  *   - second tangent matches the finite difference of the tangent
  *   - activity masks, local support, support index, report, schema
  *   - composition with a dual kernel (unit tangent)
+ *   - Mathematica ground truth (tests/reference/50_curves.wls): jets,
+ *     tangents, second tangents and adjoints of a 2D B-spline and a 3D
+ *     NURBS along control points, weights, knots and t, from a symbolic
+ *     Cox-de Boor recursion at 30 digits
  */
 
 #include "test_diff.h"
@@ -1092,6 +1096,208 @@ static void test_composite(void)
 	qaws_curve_destroy(c);
 }
 
+/* ------------------------------------------------------------------ */
+/*  Mathematica reference (tests/reference/50_curves.wls)             */
+/* ------------------------------------------------------------------ */
+
+#include "reference/50_curves.h"
+
+static double ref_err(double a, double b)
+{
+	double scale = 1.0;
+	if (fabs(a) > scale) scale = fabs(a);
+	if (fabs(b) > scale) scale = fabs(b);
+	return fabs(a - b) / scale;
+}
+
+static double ref_max_err(double const* x, double const* ref, unsigned int n)
+{
+	double e = 0;
+	unsigned int i;
+	for (i = 0; i < n; i++)
+		if (ref_err(x[i], ref[i]) > e)
+			e = ref_err(x[i], ref[i]);
+	return e;
+}
+
+static double const* const g_ref_bk[4][3] = {
+	{ ref_bk_value0, ref_bk_value1, ref_bk_value2 },
+	{ ref_bk_tangent0, ref_bk_tangent1, ref_bk_tangent2 },
+	{ ref_bk_tangent2_0, ref_bk_tangent2_1, ref_bk_tangent2_2 },
+	{ ref_bk_adjoint0, ref_bk_adjoint1, ref_bk_adjoint2 }
+};
+static double const* const g_ref_nk[4][3] = {
+	{ ref_nk_value0, ref_nk_value1, ref_nk_value2 },
+	{ ref_nk_tangent0, ref_nk_tangent1, ref_nk_tangent2 },
+	{ ref_nk_tangent2_0, ref_nk_tangent2_1, ref_nk_tangent2_2 },
+	{ ref_nk_adjoint0, ref_nk_adjoint1, ref_nk_adjoint2 }
+};
+
+/* Position, D1 and D2 of a jet as dim-component rows. */
+static void ref_flat_jet(qaws_curve_jet_3d const* j, unsigned int dim, double* out)
+{
+	unsigned int k;
+	for (k = 0; k < 3; k++)
+	{
+		out[dim * k] = j->d[k].x;
+		out[dim * k + 1] = j->d[k].y;
+		if (dim == 3)
+			out[dim * k + 2] = j->d[k].z;
+	}
+}
+
+static void ref_jet_2d_to_3d(qaws_curve_jet_2d const* a, qaws_curve_jet_3d* b)
+{
+	unsigned int k;
+	memset(b, 0, sizeof(*b));
+	for (k = 0; k < 4; k++)
+	{
+		b->d[k].x = a->d[k].x;
+		b->d[k].y = a->d[k].y;
+	}
+}
+
+/* Unclamped cubic with distinct knots; nurbs = 0: 2D B-spline (control
+   points, knots), nurbs = 1: 3D NURBS (control points, weights, knots). */
+static void test_reference_knots(int nurbs)
+{
+	static double const knots_d[11] = { 0.1, 0.6, 1, 1.5, 2.1, 2.6, 3, 3.5, 3.9, 4.4, 4.8 };
+	static double const ts[3] = { 1.7, 2.3, 3.3 };
+	static double const tdots[3] = { 0.5, -0.2, 0.3 };
+	static double const pb[14] = { 0, 0, 1, 1, 2, -0.5, 3, 1.5, 4, 0, 5, 1, 6, -1 };
+	static double const pn[21] = { 0, 0, 0, 1, 1.5, 0.5, 2, -0.5, 1, 3, 1, -0.5, 4, 2, 0, 5, -1, 0.5, 6, 0.5, 1 };
+	static double const wn[7] = { 1, 1.5, 0.8, 1.2, 1, 0.7, 1.25 };
+	unsigned int dim = nurbs ? 3u : 2u, np = 7 * dim, nw = nurbs ? 7u : 0u, nall = np + nw + 11 + 1;
+	double const* const (*ref)[3] = nurbs ? g_ref_nk : g_ref_bk;
+	qaws_scalar cps[21], w[7], knots[11], dir[40], bar[40];
+	qaws_field_view fv[3];
+	qaws_diff_views views;
+	qaws_curve* c = NULL;
+	double e[4] = { 0, 0, 0, 0 }, a[40], tol = QAWS_SCALAR_IS_FLOAT ? 5e-3 : 1e-11;
+	unsigned int i, k, n;
+	char const* name = nurbs ? "NURBS knots" : "B-spline knots";
+	char msg[160];
+
+	/* the exact rationals of the script */
+	for (i = 0; i < np; i++)
+		cps[i] = (qaws_scalar)(nurbs ? pn[i] : pb[i]);
+	for (i = 0; i < 7; i++)
+	{
+		w[i] = (qaws_scalar)wn[i];
+		for (k = 0; k < dim; k++)
+			dir[dim * i + k] = (qaws_scalar)(((double)((3 * i + 5 * k + 1) % 7) - 3.0) / 10.0);
+		if (nurbs)
+			dir[np + i] = (qaws_scalar)(((double)((2 * i + 1) % 5) - 2.0) / 20.0);
+	}
+	for (i = 0; i < 11; i++)
+	{
+		knots[i] = (qaws_scalar)knots_d[i];
+		dir[np + nw + i] = (qaws_scalar)(((double)((4 * i + 1) % 7) - 3.0) / 20.0);
+	}
+	if (nurbs)
+	{
+		qaws_nurbs_desc d;
+		memset(&d, 0, sizeof(d));
+		d.dimension = QAWS_DIMENSION_3D;
+		d.degree = 3;
+		d.control_points = cps;
+		d.control_point_count = 7;
+		d.weights = w;
+		d.weight_count = 7;
+		d.knots = knots;
+		d.knot_count = 11;
+		qaws_curve_create_nurbs(&d, &c);
+	}
+	else
+	{
+		qaws_bspline_desc d;
+		memset(&d, 0, sizeof(d));
+		d.dimension = QAWS_DIMENSION_2D;
+		d.degree = 3;
+		d.control_points = cps;
+		d.control_point_count = 7;
+		d.knots = knots;
+		d.knot_count = 11;
+		qaws_curve_create_bspline(&d, &c);
+	}
+
+	for (i = 0; i < 3; i++)
+	{
+		qaws_scalar t = (qaws_scalar)ts[i], tdot = (qaws_scalar)tdots[i], tbar = 0;
+		qaws_curve_jet_3d p, tg, tt;
+		unsigned int r = 0;
+		fv[r++] = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, dir, 7, dim);
+		if (nurbs)
+			fv[r++] = qaws_field_view_make(QAWS_FIELD_WEIGHTS, dir + np, 7, 1);
+		fv[r++] = qaws_field_view_make(QAWS_FIELD_KNOTS, dir + np + nw, 11, 1);
+		views.fields = fv;
+		views.field_count = r;
+		views.children = NULL;
+		views.child_count = 0;
+		if (nurbs)
+			TEST_ASSERT_STATUS(qaws_curve_eval_batch_tangent2_3d(NULL, c, &t, &tdot, 1, 0x7, &views, &p, &tg, &tt));
+		else
+		{
+			qaws_curve_jet_2d p2, tg2, tt2;
+			TEST_ASSERT_STATUS(qaws_curve_eval_batch_tangent2_2d(NULL, c, &t, &tdot, 1, 0x7, &views, &p2, &tg2, &tt2));
+			ref_jet_2d_to_3d(&p2, &p);
+			ref_jet_2d_to_3d(&tg2, &tg);
+			ref_jet_2d_to_3d(&tt2, &tt);
+		}
+		ref_flat_jet(&p, dim, a);
+		e[0] = fmax(e[0], ref_max_err(a, ref[0][i], 3 * dim));
+		ref_flat_jet(&tg, dim, a);
+		e[1] = fmax(e[1], ref_max_err(a, ref[1][i], 3 * dim));
+		ref_flat_jet(&tt, dim, a);
+		e[2] = fmax(e[2], ref_max_err(a, ref[2][i], 3 * dim));
+
+		/* ybar = (((3 ch + 2 c + i + 1) mod 5) - 2) / 5 for channel ch, component c */
+		memset(bar, 0, sizeof(bar));
+		r = 0;
+		fv[r++] = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, bar, 7, dim);
+		if (nurbs)
+			fv[r++] = qaws_field_view_make(QAWS_FIELD_WEIGHTS, bar + np, 7, 1);
+		fv[r++] = qaws_field_view_make(QAWS_FIELD_KNOTS, bar + np + nw, 11, 1);
+		{
+			qaws_curve_jet_3d y3;
+			qaws_curve_jet_2d y2;
+			qaws_scalar yb[3][3];
+			unsigned int ch, cc;
+			for (ch = 0; ch < 3; ch++)
+				for (cc = 0; cc < 3; cc++)
+					yb[ch][cc] = (qaws_scalar)(((double)((3 * ch + 2 * cc + i + 1) % 5) - 2.0) / 5.0);
+			memset(&y3, 0, sizeof(y3));
+			memset(&y2, 0, sizeof(y2));
+			for (ch = 0; ch < 3; ch++)
+			{
+				y3.d[ch] = qaws_v3(yb[ch][0], yb[ch][1], yb[ch][2]);
+				y2.d[ch].x = yb[ch][0];
+				y2.d[ch].y = yb[ch][1];
+			}
+			y3.channels = 0x7;
+			y2.channels = 0x7;
+			if (nurbs)
+				TEST_ASSERT_STATUS(qaws_curve_eval_adjoint_3d(NULL, c, t, 0x7, &y3, &views, &tbar));
+			else
+				TEST_ASSERT_STATUS(qaws_curve_eval_adjoint_2d(NULL, c, t, 0x7, &y2, &views, &tbar));
+		}
+		for (n = 0; n + 1 < nall; n++)
+			a[n] = bar[n];
+		a[nall - 1] = tbar;
+		e[3] = fmax(e[3], ref_max_err(a, ref[3][i], nall));
+	}
+	printf("    reference %-15s value %.1e, tangent %.1e, tangent2 %.1e, adjoint %.1e\n", name, e[0], e[1], e[2], e[3]);
+	sprintf(msg, "reference (%s): jets", name);
+	TEST_ASSERT(e[0] <= tol, msg);
+	sprintf(msg, "reference (%s): tangents along points, weights, knots and t", name);
+	TEST_ASSERT(e[1] <= tol, msg);
+	sprintf(msg, "reference (%s): second tangents", name);
+	TEST_ASSERT(e[2] <= 10 * tol, msg);
+	sprintf(msg, "reference (%s): adjoints to points, weights, knots and t", name);
+	TEST_ASSERT(e[3] <= tol, msg);
+	qaws_curve_destroy(c);
+}
+
 int test_50_diff_curves_main(void)
 {
 	g_pass = 0;
@@ -1105,6 +1311,8 @@ int test_50_diff_curves_main(void)
 	test_schema();
 	test_unit_tangent_composition();
 	test_composite();
+	test_reference_knots(0);
+	test_reference_knots(1);
 
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
