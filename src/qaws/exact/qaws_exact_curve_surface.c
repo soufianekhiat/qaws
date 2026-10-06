@@ -590,7 +590,7 @@ qaws_status qaws_exact_solve3(unsigned int const n[3], qaws_exact_int const* F, 
 	unsigned int max_boxes)
 {
 	cs_ctx cx;
-	unsigned int nstack, boxes = 0, depth_cap = CS_MAX_SPLITS, count = 0, c, ncov = 0;
+	unsigned int nstack, boxes = 0, depth_cap = CS_MAX_SPLITS, count = 0, c, ncov = 0, cap = 16;
 	cs_box* stack = NULL;
 	qaws_exact_int* store = NULL;
 	qaws_exact_int* tstore = NULL;
@@ -608,8 +608,8 @@ qaws_status qaws_exact_solve3(unsigned int const n[3], qaws_exact_int const* F, 
 	cx.stride[0] = (n[1] + 1) * (n[2] + 1);
 	if (cx.size > CS_MAX_SIZE || n[0] > 16 || n[1] > 16 || n[2] > 16)
 		return QAWS_STATUS_EXACT_UNSUPPORTED;
-	stack = (cs_box*)cs_alloc(sizeof(cs_box) * (2 * depth_cap + 4));
-	store = (qaws_exact_int*)cs_alloc(sizeof(qaws_exact_int) * 3 * cx.size * (2 * depth_cap + 4));
+	stack = (cs_box*)cs_alloc(sizeof(cs_box) * cap);
+	store = (qaws_exact_int*)cs_alloc(sizeof(qaws_exact_int) * 3 * cx.size * cap);
 	tstore = (qaws_exact_int*)cs_alloc(sizeof(qaws_exact_int) * 3 * cx.size * 2);
 	mstore = (qaws_exact_int*)cs_alloc(sizeof(qaws_exact_int) * 3 * cx.size);
 	if (!stack || !store || !tstore || !mstore)
@@ -746,6 +746,30 @@ qaws_status qaws_exact_solve3(unsigned int const n[3], qaws_exact_int const* F, 
 				/* the children go back on the stack, each in its own slot */
 				unsigned int d = shallowest(&B), slot = nstack;
 				cs_box L, R;
+				if (slot + 3 > cap)
+				{
+					/* grow the stack and its tensor slots (box i keeps slot i); B sits in slot nstack */
+					unsigned int ncap = cap * 2, q;
+					cs_box* nstk = (cs_box*)cs_alloc(sizeof(cs_box) * ncap);
+					qaws_exact_int* nsto = (qaws_exact_int*)cs_alloc(sizeof(qaws_exact_int) * 3 * cx.size * ncap);
+					if (!nstk || !nsto)
+					{
+						cs_free(nstk);
+						cs_free(nsto);
+						st = QAWS_STATUS_ALLOCATION_FAILURE;
+						break;
+					}
+					memcpy(nsto, store, sizeof(qaws_exact_int) * 3 * cx.size * (slot + 1));
+					memcpy(nstk, stack, sizeof(cs_box) * nstack);
+					for (q = 0; q < nstack; q++)
+						nstk[q].F = nsto + 3 * cx.size * q;
+					B.F = nsto + 3 * cx.size * slot;
+					cs_free(stack);
+					cs_free(store);
+					stack = nstk;
+					store = nsto;
+					cap = ncap;
+				}
 				L.F = store + 3 * cx.size * (slot + 1);
 				R.F = store + 3 * cx.size * (slot + 2);
 				st = split_box(&cx, &B, d, &L, &R);

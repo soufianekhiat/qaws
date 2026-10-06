@@ -126,10 +126,24 @@ typedef struct wind_item
    sibling per level). */
 static qaws_status crossings(wind_poly const* p0, int* out)
 {
-	wind_item* stack = (wind_item*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(wind_item) * (QAWS_WIND_MAX_DEPTH + 2)));
+	wind_item* stack;
+	unsigned int cap;
 	unsigned int top = 0;
 	qaws_status st = QAWS_STATUS_OK;
 	*out = 0;
+	/* most pieces are decided without subdividing: no stack for them */
+	{
+		unsigned int n = p0->n;
+		if (all_sign(p0->c[0], n, 1) || all_sign(p0->c[0], n, -1) || all_sign(p0->c[1], n, -1))
+			return QAWS_STATUS_OK;
+		if (all_sign(p0->c[1], n, 1))
+		{
+			*out = up(&p0->c[0][n]) - up(&p0->c[0][0]);
+			return QAWS_STATUS_OK;
+		}
+	}
+	cap = 16;
+	stack = (wind_item*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(wind_item) * cap));
 	if (!stack)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	stack[top].p = *p0;
@@ -153,6 +167,21 @@ static qaws_status crossings(wind_poly const* p0, int* out)
 		{
 			st = QAWS_STATUS_CERTIFICATION_FAILED;
 			break;
+		}
+		if (top + 2 > cap)
+		{
+			/* grow the stack (depth-first: at most one pending sibling per level) */
+			wind_item* bigger = (wind_item*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(wind_item) * cap * 2));
+			if (!bigger)
+			{
+				st = QAWS_STATUS_ALLOCATION_FAILURE;
+				break;
+			}
+			memcpy(bigger, stack, sizeof(wind_item) * (top + 1));
+			qaws_internal_dealloc(NULL, stack);
+			stack = bigger;
+			cap *= 2;
+			p = &stack[top].p;
 		}
 		{
 			/* the halves replace the item: right below, left on top */

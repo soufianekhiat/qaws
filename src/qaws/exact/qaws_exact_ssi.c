@@ -445,7 +445,7 @@ static qaws_status patch_pair(ssi_pair const* pr, unsigned int min_depth, ssi_ou
 	ssi_ctx cx;
 	qaws_exact_int const* ha = pr->a->patch[pr->iu1 * pr->a->nv + pr->iv1];
 	qaws_exact_int const* hb = pr->b->patch[pr->iu2 * pr->b->nv + pr->iv2];
-	unsigned int nstack = 0, a1, b1, a2, b2, c, slots = 2 * (SSI_MAX_SPLITS + 4 * min_depth) + 4;
+	unsigned int nstack = 0, a1, b1, a2, b2, c, cap = 16;
 	ssi_box* stack = NULL;
 	qaws_exact_int* store = NULL;
 	qaws_exact_int* face = NULL;
@@ -461,8 +461,8 @@ static qaws_status patch_pair(ssi_pair const* pr, unsigned int min_depth, ssi_ou
 	cx.stride[0] = (cx.n[1] + 1) * cx.stride[1];
 	if (cx.size > SSI_MAX_SIZE)
 		return QAWS_STATUS_EXACT_UNSUPPORTED;
-	stack = (ssi_box*)ss_alloc(sizeof(ssi_box) * slots);
-	store = (qaws_exact_int*)ss_alloc(sizeof(qaws_exact_int) * 3 * cx.size * slots);
+	stack = (ssi_box*)ss_alloc(sizeof(ssi_box) * cap);
+	store = (qaws_exact_int*)ss_alloc(sizeof(qaws_exact_int) * 3 * cx.size * cap);
 	face = (qaws_exact_int*)ss_alloc(sizeof(qaws_exact_int) * 3 * cx.size);
 	if (!stack || !store || !face)
 		st = QAWS_STATUS_ALLOCATION_FAILURE;
@@ -552,6 +552,30 @@ static qaws_status patch_pair(ssi_pair const* pr, unsigned int min_depth, ssi_ou
 		{
 			unsigned int d = shallowest(&B), slot = nstack, k;
 			ssi_box L, R;
+			if (slot + 3 > cap)
+			{
+				/* grow the stack and its tensor slots (box i keeps slot i); B sits in slot nstack */
+				unsigned int ncap = cap * 2, q;
+				ssi_box* nstk = (ssi_box*)ss_alloc(sizeof(ssi_box) * ncap);
+				qaws_exact_int* nsto = (qaws_exact_int*)ss_alloc(sizeof(qaws_exact_int) * 3 * cx.size * ncap);
+				if (!nstk || !nsto)
+				{
+					ss_free(nstk);
+					ss_free(nsto);
+					st = QAWS_STATUS_ALLOCATION_FAILURE;
+					break;
+				}
+				memcpy(nsto, store, sizeof(qaws_exact_int) * 3 * cx.size * (slot + 1));
+				memcpy(nstk, stack, sizeof(ssi_box) * nstack);
+				for (q = 0; q < nstack; q++)
+					nstk[q].F = nsto + 3 * cx.size * q;
+				B.F = nsto + 3 * cx.size * slot;
+				ss_free(stack);
+				ss_free(store);
+				stack = nstk;
+				store = nsto;
+				cap = ncap;
+			}
 			L.F = store + 3 * cx.size * (slot + 1);
 			R.F = store + 3 * cx.size * (slot + 2);
 			for (c = 0; c < 3 && st == QAWS_STATUS_OK; c++)
