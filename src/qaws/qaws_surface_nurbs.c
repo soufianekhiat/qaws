@@ -147,7 +147,7 @@ static qaws_status nurbs_surface_eval(
 
 		/* Second partial duu: Suu = (A[2][0] - 2*Su*W[1][0] - S*W[2][0]) / W[0][0] */
 		Suu.x = Suu.y = Suu.z = 0;
-		if ((eval_flags & QAWS_SURFACE_EVAL_DUU) && max_u_deriv >= 2)
+		if (eval_flags & QAWS_SURFACE_EVAL_DUU)
 		{
 			Suu.x = (A[2][0][0] - QAWS_LITERAL(2.0) * Su.x * W[1][0] - S00.x * W[2][0]) * inv_w0;
 			Suu.y = (A[2][0][1] - QAWS_LITERAL(2.0) * Su.y * W[1][0] - S00.y * W[2][0]) * inv_w0;
@@ -158,7 +158,7 @@ static qaws_status nurbs_surface_eval(
 
 		/* Second partial dvv: Svv = (A[0][2] - 2*Sv*W[0][1] - S*W[0][2]) / W[0][0] */
 		Svv.x = Svv.y = Svv.z = 0;
-		if ((eval_flags & QAWS_SURFACE_EVAL_DVV) && max_v_deriv >= 2)
+		if (eval_flags & QAWS_SURFACE_EVAL_DVV)
 		{
 			Svv.x = (A[0][2][0] - QAWS_LITERAL(2.0) * Sv.x * W[0][1] - S00.x * W[0][2]) * inv_w0;
 			Svv.y = (A[0][2][1] - QAWS_LITERAL(2.0) * Sv.y * W[0][1] - S00.y * W[0][2]) * inv_w0;
