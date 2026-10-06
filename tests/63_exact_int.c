@@ -29,7 +29,7 @@ static int ei_equal_text(qaws_exact_int const* x, char const* expect)
 static void test_reference(void)
 {
 	unsigned int n = (unsigned int)(sizeof(g_ref_exact_int) / sizeof(g_ref_exact_int[0])), i;
-	int ok_parse = 1, ok_add = 1, ok_sub = 1, ok_mul = 1, ok_cmp = 1, ok_shl = 1, ok_shr = 1, ok_dbl = 1;
+	int ok_parse = 1, ok_add = 1, ok_sub = 1, ok_mul = 1, ok_cmp = 1, ok_shl = 1, ok_shr = 1, ok_dbl = 1, ok_div = 1, ok_gcd = 1;
 	char msg[160];
 	for (i = 0; i < n; i++)
 	{
@@ -46,6 +46,14 @@ static void test_reference(void)
 		ok_shr &= ei_equal_text(&x, r->shr);
 		/* nearest double, bit for bit (strtod rounds the 40-digit text) */
 		ok_dbl &= qaws_exact_int_to_double(&a) == strtod(r->nearest, NULL);
+		/* truncated division and gcd */
+		if (b.sign != 0)
+		{
+			qaws_exact_int q, rem;
+			ok_div &= qaws_exact_int_divmod(&q, &rem, &a, &b) == QAWS_STATUS_OK && ei_equal_text(&q, r->quo) && ei_equal_text(&rem, r->rem);
+		}
+		qaws_exact_int_gcd(&x, &a, &b);
+		ok_gcd &= ei_equal_text(&x, r->gcd);
 	}
 	sprintf(msg, "Mathematica reference: %u rows parsed and printed back", n);
 	TEST_ASSERT(ok_parse, msg);
@@ -56,6 +64,8 @@ static void test_reference(void)
 	TEST_ASSERT(ok_shl, "Mathematica reference: a * 2^k");
 	TEST_ASSERT(ok_shr, "Mathematica reference: sign(a) floor(|a| / 2^k)");
 	TEST_ASSERT(ok_dbl, "Mathematica reference: nearest double, bit for bit");
+	TEST_ASSERT(ok_div, "Mathematica reference: truncated quotient and remainder");
+	TEST_ASSERT(ok_gcd, "Mathematica reference: gcd");
 }
 
 /* xorshift64 */

@@ -320,6 +320,63 @@ qaws_status qaws_exact_int_divexact_u32(qaws_exact_int* r, qaws_exact_int const*
 	return QAWS_STATUS_OK;
 }
 
+qaws_status qaws_exact_int_divmod(qaws_exact_int* q, qaws_exact_int* r, qaws_exact_int const* a, qaws_exact_int const* b)
+{
+	qaws_exact_int rem, step, quo;
+	int shift, i, as = a->sign, bs = b->sign;
+	if (b->sign == 0)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	rem = *a;
+	rem.sign = rem.size ? 1 : 0;
+	qaws_exact_int_zero(&quo);
+	shift = (int)qaws_exact_int_bits(a) - (int)qaws_exact_int_bits(b);
+	if (shift >= 0)
+	{
+		/* binary long division: subtract |b| 2^i from the top bit down */
+		step = *b;
+		step.sign = 1;
+		if (qaws_exact_int_shl(&step, &step, (unsigned int)shift) != QAWS_STATUS_OK)
+			return QAWS_STATUS_INTERNAL_ERROR;
+		memset(quo.limb, 0, sizeof(uint32_t) * (size_t)(shift / 32 + 1));
+		quo.size = shift / 32 + 1;
+		for (i = shift; i >= 0; i--)
+		{
+			if (rem.size && mag_cmp(&rem, &step) >= 0)
+			{
+				mag_sub(&rem, &rem, &step);
+				normalize(&rem);
+				quo.limb[i / 32] |= 1u << (i % 32);
+			}
+			qaws_exact_int_shr(&step, &step, 1);
+		}
+		quo.sign = 1;
+		normalize(&quo);
+	}
+	if (quo.size)
+		quo.sign = as * bs;
+	if (rem.size)
+		rem.sign = as;
+	if (q) *q = quo;
+	if (r) *r = rem;
+	return QAWS_STATUS_OK;
+}
+
+void qaws_exact_int_gcd(qaws_exact_int* g, qaws_exact_int const* a, qaws_exact_int const* b)
+{
+	/* Euclid on magnitudes */
+	qaws_exact_int x = *a, y = *b, r;
+	x.sign = x.size ? 1 : 0;
+	y.sign = y.size ? 1 : 0;
+	while (y.size)
+	{
+		qaws_exact_int_divmod(NULL, &r, &x, &y);
+		x = y;
+		y = r;
+		y.sign = y.size ? 1 : 0;
+	}
+	*g = x;
+}
+
 /* ------------------------------------------------------------------ */
 /*  Conversions                                                       */
 /* ------------------------------------------------------------------ */

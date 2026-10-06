@@ -193,12 +193,18 @@ qaws_status qaws_exact_winding_2d(qaws_exact_curve const* const* pieces, unsigne
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	for (k = 0; k < count; k++)
 	{
-		if (!pieces[k] || pieces[k]->dimension != 2)
+		qaws_exact_curve const* a;
+		qaws_exact_curve const* b;
+		qaws_exact_span const* last;
+		if (!pieces[k] || pieces[k]->dimension != 2 || pieces[k]->span_count == 0)
 			return QAWS_STATUS_INVALID_ARGUMENT;
 		if (pieces[k]->space_exp2 != pieces[0]->space_exp2)
 			return QAWS_STATUS_EXACT_INCOMPATIBLE_SPACE;
 		/* closed: the end of piece k is the start of piece k + 1 */
-		if (!same_point(&pieces[k]->h[pieces[k]->degree * 3], &pieces[(k + 1) % count]->h[0]))
+		a = pieces[k];
+		b = pieces[(k + 1) % count];
+		last = &a->spans[a->span_count - 1];
+		if (!b->spans || b->span_count == 0 || !same_point(&last->h[last->degree * 3], &b->spans[0].h[0]))
 			return QAWS_STATUS_INVALID_ARGUMENT;
 	}
 	/* p in lattice units m 2^(e - s); a common 2^kscale makes it integral */
@@ -222,29 +228,34 @@ qaws_status qaws_exact_winding_2d(qaws_exact_curve const* const* pieces, unsigne
 				return st;
 		}
 	}
+	/* every span of every piece is one integer homogeneous Bezier */
 	for (k = 0; k < count; k++)
 	{
-		qaws_exact_curve const* pc = pieces[k];
-		wind_poly w;
-		int cr;
-		w.n = pc->degree;
-		for (i = 0; i <= pc->degree; i++)
+		unsigned int s;
+		for (s = 0; s < pieces[k]->span_count; s++)
 		{
-			qaws_exact_int x, y, t;
-			/* f_i = Y_i 2^k - P_y W_i, g_i = X_i 2^k - P_x W_i */
-			st = qaws_exact_int_shl(&y, &pc->h[i * 3 + 1], (unsigned int)kscale);
-			if (st == QAWS_STATUS_OK) st = qaws_exact_int_mul(&t, &P[1], &pc->h[i * 3 + 2]);
-			if (st == QAWS_STATUS_OK) st = qaws_exact_int_sub(&w.c[0][i], &y, &t);
-			if (st == QAWS_STATUS_OK) st = qaws_exact_int_shl(&x, &pc->h[i * 3], (unsigned int)kscale);
-			if (st == QAWS_STATUS_OK) st = qaws_exact_int_mul(&t, &P[0], &pc->h[i * 3 + 2]);
-			if (st == QAWS_STATUS_OK) st = qaws_exact_int_sub(&w.c[1][i], &x, &t);
+			qaws_exact_span const* sp = &pieces[k]->spans[s];
+			wind_poly w;
+			int cr;
+			w.n = sp->degree;
+			for (i = 0; i <= sp->degree; i++)
+			{
+				qaws_exact_int x, y, t;
+				/* f_i = Y_i 2^k - P_y W_i, g_i = X_i 2^k - P_x W_i */
+				st = qaws_exact_int_shl(&y, &sp->h[i * 3 + 1], (unsigned int)kscale);
+				if (st == QAWS_STATUS_OK) st = qaws_exact_int_mul(&t, &P[1], &sp->h[i * 3 + 2]);
+				if (st == QAWS_STATUS_OK) st = qaws_exact_int_sub(&w.c[0][i], &y, &t);
+				if (st == QAWS_STATUS_OK) st = qaws_exact_int_shl(&x, &sp->h[i * 3], (unsigned int)kscale);
+				if (st == QAWS_STATUS_OK) st = qaws_exact_int_mul(&t, &P[0], &sp->h[i * 3 + 2]);
+				if (st == QAWS_STATUS_OK) st = qaws_exact_int_sub(&w.c[1][i], &x, &t);
+				if (st != QAWS_STATUS_OK)
+					return st;
+			}
+			st = crossings(&w, &cr);
 			if (st != QAWS_STATUS_OK)
 				return st;
+			total += cr;
 		}
-		st = crossings(&w, &cr);
-		if (st != QAWS_STATUS_OK)
-			return st;
-		total += cr;
 	}
 	*out_winding = total;
 	return QAWS_STATUS_OK;

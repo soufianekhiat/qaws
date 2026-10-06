@@ -55,6 +55,10 @@ qaws_status qaws_exact_int_shl(qaws_exact_int* r, qaws_exact_int const* a, unsig
 void qaws_exact_int_shr(qaws_exact_int* r, qaws_exact_int const* a, unsigned int k);
 /* a / d for a divisor d != 0 that divides a exactly; INTERNAL_ERROR otherwise. */
 qaws_status qaws_exact_int_divexact_u32(qaws_exact_int* r, qaws_exact_int const* a, uint32_t d);
+/* Truncated division: a = q b + r, |r| < |b|, r of the sign of a (q, r may be NULL). */
+qaws_status qaws_exact_int_divmod(qaws_exact_int* q, qaws_exact_int* r, qaws_exact_int const* a, qaws_exact_int const* b);
+/* gcd(|a|, |b|) >= 0 (gcd(0, 0) = 0). */
+void qaws_exact_int_gcd(qaws_exact_int* g, qaws_exact_int const* a, qaws_exact_int const* b);
 
 /* Nearest double (ties to even); +-HUGE_VAL past the double range. */
 double qaws_exact_int_to_double(qaws_exact_int const* x);
