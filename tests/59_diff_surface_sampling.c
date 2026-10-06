@@ -11,6 +11,7 @@
 
 #include "test_diff.h"
 #include "qaws_diff_sampling.h"
+#include <time.h>
 
 #define SS_SAMPLES 3
 #define SS_CP 16
@@ -369,6 +370,70 @@ static void test_knots(qaws_sample_measure_desc const* m, char const* name)
 	qaws_surface_destroy(sm);
 }
 
+/* Second derivative of sum adjoint . sample along x (the quadratic form). */
+static double ss_quadratic(qaws_surface const* s, qaws_sample_measure_desc const* m, qaws_surface_cdf_sample const* adj,
+	qaws_diff_views const* x)
+{
+	qaws_surface_cdf_sample t2[SS_SAMPLES];
+	qaws_surface_cdf_sample_tangent(NULL, s, m, g_ss_xi, NULL, SS_SAMPLES, SS_CELLS, SS_QUAD, x, NULL, NULL, t2, NULL);
+	return ss_dot(adj, t2, SS_SAMPLES);
+}
+
+/* The one-pass HVP of a rational patch (dual projection of the homogeneous
+   jets) against a polarization of the second order forward pass computed
+   here through the public API. */
+static void test_rational_hvp(qaws_sample_measure_desc const* m, char const* name)
+{
+	qaws_scalar x[SS_PARAMS], dir[SS_PARAMS], hv[SS_PARAMS], e[SS_PARAMS], de[SS_PARAMS];
+	qaws_surface_cdf_sample adj[SS_SAMPLES];
+	qaws_field_view fd[2], fh[2], fe[2], fde[2];
+	qaws_diff_views vd, vh, ve, vde;
+	qaws_surface* s;
+	double qd, t0, t_fast, t_pol;
+	unsigned int i, k;
+	int ok = 1;
+	char msg[200];
+	diff_seed(5961u);
+	ss_base(1, x);
+	diff_rand_fill(dir, SS_PARAMS);
+	for (i = 0; i < SS_SAMPLES; i++)
+	{
+		adj[i].u = diff_rand();
+		adj[i].v = diff_rand();
+		adj[i].position = diff_rand_vec3();
+	}
+	s = ss_surface(1, x);
+	vd = ss_views(1, fd, dir);
+	vh = ss_views(1, fh, hv);
+	ve = ss_views(1, fe, e);
+	vde = ss_views(1, fde, de);
+	memset(hv, 0, sizeof(hv));
+	t0 = (double)clock();
+	TEST_ASSERT_STATUS(qaws_surface_cdf_sample_hvp(NULL, s, m, g_ss_xi, SS_SAMPLES, SS_CELLS, SS_QUAD, adj, &vd, &vh));
+	t_fast = ((double)clock() - t0) / CLOCKS_PER_SEC;
+	t0 = (double)clock();
+	qd = ss_quadratic(s, m, adj, &vd);
+	/* eight components spread over control points and weights */
+	for (k = 0; k < SS_PARAMS; k += 9)
+	{
+		double qe, qde, ref;
+		memset(e, 0, sizeof(e));
+		e[k] = 1;
+		for (i = 0; i < SS_PARAMS; i++)
+			de[i] = dir[i] + e[i];
+		qe = ss_quadratic(s, m, adj, &ve);
+		qde = ss_quadratic(s, m, adj, &vde);
+		ref = 0.5 * (qde - qd - qe);
+		ok &= diff_close(hv[k], ref, QAWS_SCALAR_IS_FLOAT ? 5e-3 : 1e-9);
+	}
+	t_pol = ((double)clock() - t0) / CLOCKS_PER_SEC;
+	printf("    %s: one-pass rational HVP %.3f s (all %u parameters), polarized %.3f s (8 of them)\n", name, t_fast,
+		(unsigned int)SS_PARAMS, t_pol);
+	sprintf(msg, "%s: one-pass rational HVP matches the polarized forward pass", name);
+	TEST_ASSERT(ok, msg);
+	qaws_surface_destroy(s);
+}
+
 static void ss_values(int kind, qaws_sample_measure_desc const* m, qaws_scalar const* x, qaws_scalar const* xi,
 	qaws_diff_views const* dir, qaws_scalar const* xid, qaws_surface_cdf_sample* val, qaws_surface_cdf_sample* t1)
 {
@@ -631,6 +696,9 @@ int test_59_diff_surface_sampling_main(void)
 	test_hvp_paths(NULL, "area");
 	test_hvp_paths(&g_ss_density, "density");
 	test_hvp_paths(&g_ss_curvature, "curvature");
+	test_rational_hvp(NULL, "NURBS, area");
+	test_rational_hvp(&g_ss_density, "NURBS, density");
+	test_rational_hvp(&g_ss_curvature, "NURBS, curvature");
 	test_knots(NULL, "B-spline knots, area");
 	test_knots(&g_ss_density, "B-spline knots, density");
 	test_knots(&g_ss_curvature, "B-spline knots, curvature");

@@ -173,7 +173,9 @@ qaws_status qaws_traversal_cdf_targets(
  * move with it carry first and second order rates), the adjoint pulls back
  * through the conditional then the marginal equation, and the HVP differentiates
  * the backward pass along the direction (forward over reverse, one pass) for
- * families linear in their fields; other families polarize the second order
+ * families linear in their fields and for rational tensor patches (the
+ * homogeneous jets projected in dual numbers); knot views and other
+ * families polarize the second order
  * forward pass over the parameters of out_hv (about two passes per
  * parameter).
  * Requires QAWS_CAP_TANGENT2. U / V knots are parameters: interior knots change

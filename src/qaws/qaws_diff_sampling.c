@@ -1039,6 +1039,13 @@ typedef struct scdf_job
 	   cells and every quadrature node move with them */
 	double du0, du1, dv0, dv1;
 	qaws_dual1* cumA;                   /* cells + 1: marginal measure of the full u cells, along direction */
+	/* rational tensor patches (HVP): control points, weights and their
+	   rates along the direction, indexed like the support elements */
+	int rational;
+	qaws_scalar* rp;
+	qaws_scalar* rw;
+	qaws_scalar* rpd;
+	qaws_scalar* rwd;
 } scdf_job;
 
 static qaws_dual1 dual_c(double v)
@@ -1215,7 +1222,56 @@ static qaws_status scdf_G(scdf_job const* job, qaws_dual1 u, qaws_dual1 v, qaws_
 static void scdf_job_free(scdf_job* job)
 {
 	qaws_internal_dealloc(NULL, job->cumA);
+	qaws_internal_dealloc(NULL, job->rp);
 	job->cumA = NULL;
+	job->rp = NULL;
+}
+
+/* Rational tensor patch (NURBS): its local support carries homogeneous
+   basis weights. Loads the control points, weights and their rates along
+   the job direction. Returns 0 for other families. */
+static int scdf_rational_setup(scdf_job* job)
+{
+	qaws_surface_support sup;
+	qaws_field_desc fields[8];
+	qaws_field_view const* pv;
+	qaws_field_view const* wv;
+	unsigned int nf = 0, f, ncp = 0, nw = 0, got = 0, e;
+	if (qaws_surface_local_support(job->surface, (qaws_scalar)(0.5 * (job->u0 + job->u1)), (qaws_scalar)(0.5 * (job->v0 + job->v1)), 1,
+		&sup) != QAWS_STATUS_OK || sup.kind != QAWS_SUPPORT_LOCAL || !sup.has_weights || sup.weight_field != QAWS_FIELD_WEIGHTS)
+		return 0;
+	if (qaws_surface_describe_fields(job->surface, fields, 8, &nf) != QAWS_STATUS_OK)
+		return 0;
+	for (f = 0; f < nf && f < 8; f++)
+	{
+		if (fields[f].field == QAWS_FIELD_CONTROL_POINTS) ncp = fields[f].count;
+		if (fields[f].field == QAWS_FIELD_WEIGHTS) nw = fields[f].count;
+	}
+	if (!ncp || nw != ncp)
+		return 0;
+	job->rp = (qaws_scalar*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_scalar) * 8 * ncp));
+	if (!job->rp)
+		return 0;
+	job->rw = job->rp + 3 * ncp;
+	job->rpd = job->rw + ncp;
+	job->rwd = job->rpd + 3 * ncp;
+	memset(job->rp, 0, sizeof(qaws_scalar) * 8 * ncp);
+	if (qaws_surface_read_field(job->surface, QAWS_FIELD_CONTROL_POINTS, job->rp, 3 * ncp, &got) != QAWS_STATUS_OK ||
+	    qaws_surface_read_field(job->surface, QAWS_FIELD_WEIGHTS, job->rw, ncp, &got) != QAWS_STATUS_OK)
+	{
+		qaws_internal_dealloc(NULL, job->rp);
+		job->rp = NULL;
+		return 0;
+	}
+	pv = job->direction ? qaws_diff_views_find(job->direction, QAWS_FIELD_CONTROL_POINTS) : NULL;
+	wv = job->direction ? qaws_diff_views_find(job->direction, QAWS_FIELD_WEIGHTS) : NULL;
+	for (e = 0; e < ncp; e++)
+	{
+		if (pv) qaws_internal_view_read(pv, e, 3, &job->rpd[3 * e]);
+		if (wv) qaws_internal_view_read(wv, e, 1, &job->rwd[e]);
+	}
+	job->rational = 1;
+	return 1;
 }
 
 static qaws_status scdf_job_init(scdf_job* job, qaws_diff_context const* ctx, qaws_surface const* surface,
@@ -1570,6 +1626,158 @@ static double scdf_w_quad(scdf_job const* job, qaws_dual3 const* y, qaws_vec3 co
 	return scdf_w(job, s).tt;
 }
 
+static qaws_dual1 d1_scale(double a, qaws_dual1 x)
+{
+	return dual_axpy(a, x, 0);
+}
+
+/*
+ * Rate of the pullback J^T ybar on a rational tensor patch (HVP). With the
+ * homogeneous jets h_ab = sum N_a N_b Q, Q = (w P, w), the projection
+ *   S = X/W, S_u = (X_u - S W_u)/W, S_uu = (X_uu - 2 S_u W_u - S W_uu)/W,
+ *   S_uv = (X_uv - S_u W_v - S_v W_u - S W_uv)/W, ...
+ * is reversed in dual numbers (h and ybar both moving along the path:
+ * control points and weights at their direction rates, u and v at theirs),
+ * the basis rows shift with u', v', and P_bar = w Q_bar_x,
+ * w_bar = P . Q_bar_x + Q_bar_w by the product rule. Only the rates are
+ * added to the sink. ybar holds the n jet entries (S, S_u, S_v[, S_uu, S_uv,
+ * S_vv]).
+ */
+static qaws_status scdf_rational_pullback(scdf_pass const* ps, qaws_dual1 u, qaws_dual1 v, unsigned int n, qaws_dual3 const* ybar)
+{
+	scdf_job const* job = ps->job;
+	qaws_surface_support sup;
+	qaws_dual3 X[3][3], Xb[3][3], S, Su, Sv, Suu, Suv, Svv, Sb, Sub, Svb, Suub, Suvb, Svvb;
+	qaws_dual1 W[3][3], Wb[3][3], iw;
+	qaws_field_view* pv = (qaws_field_view*)qaws_diff_views_find(ps->sink, QAWS_FIELD_CONTROL_POINTS);
+	qaws_field_view* wv = (qaws_field_view*)qaws_diff_views_find(ps->sink, QAWS_FIELD_WEIGHTS);
+	unsigned int kmax = n > 3 ? 2u : 1u, a, b, i, j;
+	qaws_dual3 zero3 = qaws_dual3_const(qaws_v3_zero());
+	qaws_status st = qaws_surface_local_support(job->surface, u.v, v.v, kmax + 1, &sup);
+	if (st != QAWS_STATUS_OK)
+		return st;
+	/* homogeneous jets along the path */
+	for (a = 0; a <= 2; a++)
+		for (b = 0; b <= 2; b++)
+		{
+			X[a][b] = zero3;
+			Xb[a][b] = zero3;
+			W[a][b] = dual_c(0);
+			Wb[a][b] = dual_c(0);
+		}
+	for (a = 0; a <= kmax; a++)
+		for (b = 0; a + b <= kmax; b++)
+			for (i = 0; i < sup.u_count; i++)
+				for (j = 0; j < sup.v_count; j++)
+				{
+					unsigned int e = (sup.u_first + i) * sup.u_stride + (sup.v_first + j) * sup.v_stride;
+					double N = (double)sup.u_weights[a][i] * sup.v_weights[b][j];
+					double Nd = (double)sup.u_weights[a + 1][i] * sup.v_weights[b][j] * u.t + (double)sup.u_weights[a][i] * sup.v_weights[b + 1][j] * v.t;
+					double w = job->rw[e], wd = job->rwd[e];
+					qaws_vec3 P = v3_make(job->rp[3 * e], job->rp[3 * e + 1], job->rp[3 * e + 2]);
+					qaws_vec3 Pd = v3_make(job->rpd[3 * e], job->rpd[3 * e + 1], job->rpd[3 * e + 2]);
+					qaws_vec3 Q = v3_make(w * P.x, w * P.y, w * P.z);
+					qaws_vec3 Qd = v3_axpy(wd, P, v3_make(w * Pd.x, w * Pd.y, w * Pd.z));
+					X[a][b].v = v3_axpy(N, Q, X[a][b].v);
+					X[a][b].t = v3_axpy(N, Qd, v3_axpy(Nd, Q, X[a][b].t));
+					W[a][b] = qaws_dual1_make((qaws_scalar)(W[a][b].v + N * w), (qaws_scalar)(W[a][b].t + N * wd + Nd * w), 0);
+				}
+	/* projection */
+	iw = qaws_dual1_div(dual_c(1), W[0][0]);
+	S = qaws_dual3_scale(X[0][0], iw);
+	Su = qaws_dual3_scale(qaws_dual3_sub(X[1][0], qaws_dual3_scale(S, W[1][0])), iw);
+	Sv = qaws_dual3_scale(qaws_dual3_sub(X[0][1], qaws_dual3_scale(S, W[0][1])), iw);
+	Suu = Suv = Svv = zero3;
+	if (kmax > 1)
+	{
+		Suu = qaws_dual3_scale(qaws_dual3_sub(qaws_dual3_sub(X[2][0], qaws_dual3_scale(Su, d1_scale(2, W[1][0]))), qaws_dual3_scale(S, W[2][0])), iw);
+		Suv = qaws_dual3_scale(qaws_dual3_sub(qaws_dual3_sub(qaws_dual3_sub(X[1][1], qaws_dual3_scale(Su, W[0][1])), qaws_dual3_scale(Sv, W[1][0])),
+			qaws_dual3_scale(S, W[1][1])), iw);
+		Svv = qaws_dual3_scale(qaws_dual3_sub(qaws_dual3_sub(X[0][2], qaws_dual3_scale(Sv, d1_scale(2, W[0][1]))), qaws_dual3_scale(S, W[0][2])), iw);
+	}
+	/* reverse of the projection, in dual numbers */
+	Sb = ybar[0];
+	Sub = n > 1 ? ybar[1] : zero3;
+	Svb = n > 2 ? ybar[2] : zero3;
+	Suub = n > 3 ? ybar[3] : zero3;
+	Suvb = n > 4 ? ybar[4] : zero3;
+	Svvb = n > 5 ? ybar[5] : zero3;
+	if (kmax > 1)
+	{
+		/* S_vv = (X02 - 2 S_v W01 - S W02) / W */
+		Xb[0][2] = qaws_dual3_add(Xb[0][2], qaws_dual3_scale(Svvb, iw));
+		Svb = qaws_dual3_sub(Svb, qaws_dual3_scale(Svvb, qaws_dual1_mul(d1_scale(2, W[0][1]), iw)));
+		Wb[0][1] = qaws_dual1_sub(Wb[0][1], qaws_dual1_mul(d1_scale(2, qaws_dual3_dot(Sv, Svvb)), iw));
+		Sb = qaws_dual3_sub(Sb, qaws_dual3_scale(Svvb, qaws_dual1_mul(W[0][2], iw)));
+		Wb[0][2] = qaws_dual1_sub(Wb[0][2], qaws_dual1_mul(qaws_dual3_dot(S, Svvb), iw));
+		Wb[0][0] = qaws_dual1_sub(Wb[0][0], qaws_dual1_mul(qaws_dual3_dot(Svv, Svvb), iw));
+		/* S_uv = (X11 - S_u W01 - S_v W10 - S W11) / W */
+		Xb[1][1] = qaws_dual3_add(Xb[1][1], qaws_dual3_scale(Suvb, iw));
+		Sub = qaws_dual3_sub(Sub, qaws_dual3_scale(Suvb, qaws_dual1_mul(W[0][1], iw)));
+		Wb[0][1] = qaws_dual1_sub(Wb[0][1], qaws_dual1_mul(qaws_dual3_dot(Su, Suvb), iw));
+		Svb = qaws_dual3_sub(Svb, qaws_dual3_scale(Suvb, qaws_dual1_mul(W[1][0], iw)));
+		Wb[1][0] = qaws_dual1_sub(Wb[1][0], qaws_dual1_mul(qaws_dual3_dot(Sv, Suvb), iw));
+		Sb = qaws_dual3_sub(Sb, qaws_dual3_scale(Suvb, qaws_dual1_mul(W[1][1], iw)));
+		Wb[1][1] = qaws_dual1_sub(Wb[1][1], qaws_dual1_mul(qaws_dual3_dot(S, Suvb), iw));
+		Wb[0][0] = qaws_dual1_sub(Wb[0][0], qaws_dual1_mul(qaws_dual3_dot(Suv, Suvb), iw));
+		/* S_uu = (X20 - 2 S_u W10 - S W20) / W */
+		Xb[2][0] = qaws_dual3_add(Xb[2][0], qaws_dual3_scale(Suub, iw));
+		Sub = qaws_dual3_sub(Sub, qaws_dual3_scale(Suub, qaws_dual1_mul(d1_scale(2, W[1][0]), iw)));
+		Wb[1][0] = qaws_dual1_sub(Wb[1][0], qaws_dual1_mul(d1_scale(2, qaws_dual3_dot(Su, Suub)), iw));
+		Sb = qaws_dual3_sub(Sb, qaws_dual3_scale(Suub, qaws_dual1_mul(W[2][0], iw)));
+		Wb[2][0] = qaws_dual1_sub(Wb[2][0], qaws_dual1_mul(qaws_dual3_dot(S, Suub), iw));
+		Wb[0][0] = qaws_dual1_sub(Wb[0][0], qaws_dual1_mul(qaws_dual3_dot(Suu, Suub), iw));
+	}
+	/* S_v = (X01 - S W01) / W */
+	Xb[0][1] = qaws_dual3_add(Xb[0][1], qaws_dual3_scale(Svb, iw));
+	Sb = qaws_dual3_sub(Sb, qaws_dual3_scale(Svb, qaws_dual1_mul(W[0][1], iw)));
+	Wb[0][1] = qaws_dual1_sub(Wb[0][1], qaws_dual1_mul(qaws_dual3_dot(S, Svb), iw));
+	Wb[0][0] = qaws_dual1_sub(Wb[0][0], qaws_dual1_mul(qaws_dual3_dot(Sv, Svb), iw));
+	/* S_u = (X10 - S W10) / W */
+	Xb[1][0] = qaws_dual3_add(Xb[1][0], qaws_dual3_scale(Sub, iw));
+	Sb = qaws_dual3_sub(Sb, qaws_dual3_scale(Sub, qaws_dual1_mul(W[1][0], iw)));
+	Wb[1][0] = qaws_dual1_sub(Wb[1][0], qaws_dual1_mul(qaws_dual3_dot(S, Sub), iw));
+	Wb[0][0] = qaws_dual1_sub(Wb[0][0], qaws_dual1_mul(qaws_dual3_dot(Su, Sub), iw));
+	/* S = X / W */
+	Xb[0][0] = qaws_dual3_add(Xb[0][0], qaws_dual3_scale(Sb, iw));
+	Wb[0][0] = qaws_dual1_sub(Wb[0][0], qaws_dual1_mul(qaws_dual3_dot(S, Sb), iw));
+	/* homogeneous adjoints to control points and weights (rates only) */
+	for (i = 0; i < sup.u_count; i++)
+		for (j = 0; j < sup.v_count; j++)
+		{
+			unsigned int e = (sup.u_first + i) * sup.u_stride + (sup.v_first + j) * sup.v_stride;
+			qaws_vec3 qx = qaws_v3_zero(), qxd = qaws_v3_zero();
+			double qw = 0, qwd = 0, w = job->rw[e], wd = job->rwd[e];
+			qaws_vec3 P = v3_make(job->rp[3 * e], job->rp[3 * e + 1], job->rp[3 * e + 2]);
+			qaws_vec3 Pd = v3_make(job->rpd[3 * e], job->rpd[3 * e + 1], job->rpd[3 * e + 2]);
+			for (a = 0; a <= kmax; a++)
+				for (b = 0; a + b <= kmax; b++)
+				{
+					double N = (double)sup.u_weights[a][i] * sup.v_weights[b][j];
+					double Nd = (double)sup.u_weights[a + 1][i] * sup.v_weights[b][j] * u.t + (double)sup.u_weights[a][i] * sup.v_weights[b + 1][j] * v.t;
+					qx = v3_axpy(N, Xb[a][b].v, qx);
+					qxd = v3_axpy(N, Xb[a][b].t, v3_axpy(Nd, Xb[a][b].v, qxd));
+					qw += N * Wb[a][b].v;
+					qwd += N * Wb[a][b].t + Nd * Wb[a][b].v;
+				}
+			if (pv)
+			{
+				qaws_vec3 g = v3_axpy(wd, qx, v3_make(w * qxd.x, w * qxd.y, w * qxd.z));
+				qaws_scalar gs[3];
+				gs[0] = g.x;
+				gs[1] = g.y;
+				gs[2] = g.z;
+				qaws_internal_view_add(pv, e, 3, gs);
+			}
+			if (wv)
+			{
+				qaws_scalar gw = (qaws_scalar)(v3_dot(Pd, qx) + v3_dot(P, qxd) + qwd);
+				qaws_internal_view_add(wv, e, 1, &gw);
+			}
+		}
+	return QAWS_STATUS_OK;
+}
+
 /* Pullback of C dw/dy at the node (u, v); C, u, v carry their rates. */
 static qaws_status scdf_node_pullback(scdf_pass const* ps, qaws_dual1 u, qaws_dual1 v, qaws_dual1 C)
 {
@@ -1618,6 +1826,18 @@ static qaws_status scdf_node_pullback(scdf_pass const* ps, qaws_dual1 u, qaws_du
 		}
 	}
 	ch = scdf_channels(job, 0);
+	if (ps->hvp && job->rational)
+	{
+		/* the moving pullback itself is rational: dual projection */
+		qaws_dual3 yb[SCDF_Y];
+		for (i = 0; i < n; i++)
+		{
+			int skip = i == 0 && job->measure.kind != QAWS_MEASURE_DENSITY;
+			yb[i] = qaws_dual3_make(skip ? qaws_v3_zero() : v3_make(C.v * g[i].x, C.v * g[i].y, C.v * g[i].z),
+				skip ? qaws_v3_zero() : bar.d[i], qaws_v3_zero());
+		}
+		return scdf_rational_pullback(ps, u, v, n, yb);
+	}
 	if (ps->hvp)
 	{
 		for (i = 0; i < n; i++)
@@ -1744,11 +1964,21 @@ static qaws_status scdf_backward(scdf_pass const* ps, qaws_scalar const* xi, uns
 			else
 			{
 				qaws_dual3 y[SCDF_Y];
-				bar.d[1] = qaws_v3_scale(adjoint[i].position, rate.u);
-				bar.d[2] = qaws_v3_scale(adjoint[i].position, rate.v);
-				bar.channels = QAWS_SJET_ORDER1;
-				st = qaws_surface_eval_adjoint(job->ctx, job->surface, (qaws_scalar)u, (qaws_scalar)v, QAWS_SJET_ORDER1, &bar, ps->sink,
-					NULL, NULL);
+				if (job->rational)
+				{
+					/* rate of J_P^T p_bar at the moving point */
+					qaws_dual3 yb[1];
+					yb[0] = qaws_dual3_const(adjoint[i].position);
+					st = scdf_rational_pullback(ps, ud, vd, 1, yb);
+				}
+				else
+				{
+					bar.d[1] = qaws_v3_scale(adjoint[i].position, rate.u);
+					bar.d[2] = qaws_v3_scale(adjoint[i].position, rate.v);
+					bar.channels = QAWS_SJET_ORDER1;
+					st = qaws_surface_eval_adjoint(job->ctx, job->surface, (qaws_scalar)u, (qaws_scalar)v, QAWS_SJET_ORDER1, &bar, ps->sink,
+						NULL, NULL);
+				}
 				if (st == QAWS_STATUS_OK)
 					st = scdf_jet(job, ud, vd, job->direction, y);
 				ub = qaws_dual1_make((qaws_scalar)((double)adjoint[i].u + v3_dot(adjoint[i].position, y[1].v)),
@@ -1958,22 +2188,31 @@ qaws_status qaws_surface_cdf_sample_hvp(
 		return QAWS_STATUS_OK;
 	if (out_hv->child_count || direction->child_count)
 		return QAWS_STATUS_UNSUPPORTED_OPERATION;
-	if ((qaws_surface_get_diff_capabilities(surface) & QAWS_CAP_LINEAR) &&
-	    !qaws_diff_views_find(direction, QAWS_FIELD_U_KNOTS) && !qaws_diff_views_find(direction, QAWS_FIELD_V_KNOTS) &&
+	if (!qaws_diff_views_find(direction, QAWS_FIELD_U_KNOTS) && !qaws_diff_views_find(direction, QAWS_FIELD_V_KNOTS) &&
 	    !qaws_diff_views_find(out_hv, QAWS_FIELD_U_KNOTS) && !qaws_diff_views_find(out_hv, QAWS_FIELD_V_KNOTS))
 	{
-		/* forward over reverse: one differentiated backward pass */
+		/* forward over reverse: one differentiated backward pass, for
+		   linear patches and for rational tensor patches (control points
+		   and weights) */
+		int linear = (qaws_surface_get_diff_capabilities(surface) & QAWS_CAP_LINEAR) != 0, ok = 1;
+		unsigned int f;
 		scdf_job job;
 		scdf_pass ps;
-		st = scdf_job_init(&job, ctx, surface, measure, cells, quadrature, direction, out_hv);
-		if (st != QAWS_STATUS_OK)
+		for (f = 0; f < out_hv->field_count && !linear; f++)
+			if (out_hv->fields[f].field != QAWS_FIELD_CONTROL_POINTS && out_hv->fields[f].field != QAWS_FIELD_WEIGHTS)
+				ok = 0;
+		st = ok ? scdf_job_init(&job, ctx, surface, measure, cells, quadrature, direction, out_hv) : QAWS_STATUS_UNSUPPORTED_OPERATION;
+		if (st == QAWS_STATUS_OK && (linear || scdf_rational_setup(&job)))
+		{
+			ps.job = &job;
+			ps.sink = out_hv;
+			ps.hvp = 1;
+			st = scdf_backward(&ps, xi, count, adjoint, NULL);
+			scdf_job_free(&job);
 			return st;
-		ps.job = &job;
-		ps.sink = out_hv;
-		ps.hvp = 1;
-		st = scdf_backward(&ps, xi, count, adjoint, NULL);
-		scdf_job_free(&job);
-		return st;
+		}
+		if (st == QAWS_STATUS_OK)
+			scdf_job_free(&job);
 	}
 	a.ctx = ctx;
 	a.surface = surface;
