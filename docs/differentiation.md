@@ -236,6 +236,14 @@ The test suites `49_diff_model` to `59_diff_surface_sampling` check every rule i
 
 Test `60_diff_sampling_core` drives the kernels the same way on the C backend. It reproduces the runtime samples, tangents, adjoints, functional values and gradients to round-off.
 
+`core/qaws_bspline_surface_functional_core.h` covers the area, thin-plate and Willmore functionals of B-spline surfaces. The runtime integrates on a uniform grid of cells with 4 x 4 Gauss points each, and the cells need not align with the knots, so every node is evaluated on the knot window of its own spans:
+
+- `qaws_surface_cell_node` gives a node's parameters and weight.
+- `qaws_bspline_surface_node` gives the weighted integrand with its first and second rates along the control point tangents. One thread per node, then a sum.
+- `qaws_bspline_surface_node_adjoint_cp` is the per-node term of a gather over control points.
+
+`examples/diff_surface_functionals.hlsl` runs them as compute passes. Test `61_diff_surface_functional_core` reproduces the runtime values, tangents and gradients to round-off.
+
 `examples/diff_applications.c` (target `qaws_diff_applications`) applies the API to real data:
 
 1. Hair strands from a photo: structure-tensor orientation field, evenly spaced streamlines, B-spline strands aligned through unit-tangent adjoints.
