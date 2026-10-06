@@ -32,7 +32,8 @@ QAWS_INLINE Halide::Expr qaws_find_span(
     int i;
 
     for (i = degree; i < n; i++) {
-        span = Halide::select(t >= knots[i + 1],
+        /* spans starting at the domain end are empty */
+        span = Halide::select(t >= knots[i + 1] && knots[i + 1] < knots[n + 1],
                               Halide::Expr(i + 1), span);
     }
 
@@ -52,12 +53,24 @@ QAWS_INLINE int qaws_find_span(
     qaws_scalar t)
 {
     int n = num_cp - 1;
-    int low, high, mid, iter;
+    int low, high, mid, iter, s;
 
-    if (t >= knots[n + 1])
-        return n;
-    if (t <= knots[degree])
-        return degree;
+    /* at the domain ends, the nearest non-empty span (a knot repeated at
+       the end of an unclamped vector leaves empty spans there) */
+    if (t >= knots[n + 1]) {
+        s = n;
+        for (iter = 0; iter < QAWS_CORE_MAX_POINTS; iter++)
+            if (s > degree && knots[s] >= knots[n + 1])
+                s--;
+        return s;
+    }
+    if (t <= knots[degree]) {
+        s = degree;
+        for (iter = 0; iter < QAWS_CORE_MAX_POINTS; iter++)
+            if (s < n && knots[s + 1] <= knots[degree])
+                s++;
+        return s;
+    }
 
     low = degree;
     high = n;

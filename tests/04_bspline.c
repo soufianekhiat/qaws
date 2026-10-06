@@ -70,10 +70,50 @@ static void test_bspline_custom_knots(void)
 	qaws_curve_destroy(curve);
 }
 
+/* Unclamped knot vectors with a knot repeated at a domain end leave empty
+   spans there: evaluation at the end must use the nearest non-empty span
+   (the curve then passes through a control point). */
+static void test_bspline_repeated_end_knots(void)
+{
+	static qaws_scalar const knots_start[10] = { 0, 1, 2, 3, 3, 3, 4, 5, 6, 7 };
+	static qaws_scalar const knots_end[10] = { 0, 1, 2, 3, 4, 4, 4, 5, 6, 7 };
+	qaws_vec2 points[] = { {0, 0}, {1, 2}, {3, 2}, {4, 0}, {6, 1}, {7, 3} };
+	int which;
+	printf("test_bspline_repeated_end_knots\n");
+	for (which = 0; which < 2; which++)
+	{
+		qaws_bspline_desc desc;
+		qaws_curve* curve = NULL;
+		qaws_eval_result_2d at, near;
+		qaws_range range;
+		qaws_scalar t, inside;
+		memset(&desc, 0, sizeof(desc));
+		desc.dimension = QAWS_DIMENSION_2D;
+		desc.degree = 3;
+		desc.control_points = points;
+		desc.control_point_count = 6;
+		desc.knots = which ? knots_end : knots_start;
+		desc.knot_count = 10;
+		TEST_ASSERT_STATUS(qaws_curve_create_bspline(&desc, &curve));
+		range = qaws_curve_get_parameter_range(curve);
+		t = which ? range.max_value : range.min_value;
+		inside = which ? t - (qaws_scalar)1e-4 : t + (qaws_scalar)1e-4;
+		TEST_ASSERT_STATUS(qaws_curve_evaluate_2d(curve, t, QAWS_EVAL_FLAG_POSITION, &at));
+		TEST_ASSERT_STATUS(qaws_curve_evaluate_2d(curve, inside, QAWS_EVAL_FLAG_POSITION, &near));
+		TEST_ASSERT(fabs(at.position.x - near.position.x) < 1e-2 && fabs(at.position.y - near.position.y) < 1e-2,
+			which ? "triple knot at the domain end: finite and continuous" : "triple knot at the domain start: finite and continuous");
+		/* the triple knot interpolates a control point */
+		TEST_ASSERT(approx_eq(at.position.x, which ? (qaws_scalar)4.0 : (qaws_scalar)3.0) &&
+			approx_eq(at.position.y, which ? (qaws_scalar)0.0 : (qaws_scalar)2.0), "triple knot interpolates its control point (P2 at the start, P3 at the end)");
+		qaws_curve_destroy(curve);
+	}
+}
+
 int test_04_bspline_main(void)
 {
 	g_pass = 0; g_fail = 0;
 	test_bspline();
 	test_bspline_custom_knots();
+	test_bspline_repeated_end_knots();
 	return g_fail > 0 ? 1 : 0;
 }

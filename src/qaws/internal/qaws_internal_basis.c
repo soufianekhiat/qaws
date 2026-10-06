@@ -96,10 +96,20 @@ unsigned int qaws_internal_find_knot_span(
 
 	(void)knot_count;
 
-	if (t >= knots[n + 1])
-		return n;
-	if (t <= knots[degree])
-		return degree;
+	/* at the domain ends, the nearest non-empty span (a knot repeated at the
+	   end of an unclamped vector leaves empty spans there) */
+	if (t >= knots[n + 1]) {
+		unsigned int s = n;
+		while (s > degree && knots[s] >= knots[n + 1])
+			s--;
+		return s;
+	}
+	if (t <= knots[degree]) {
+		unsigned int s = degree;
+		while (s < n && knots[s + 1] <= knots[degree])
+			s++;
+		return s;
+	}
 
 	unsigned int low = degree;
 	unsigned int high = n;
