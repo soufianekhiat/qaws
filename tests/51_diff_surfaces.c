@@ -7,6 +7,10 @@
  *   - parameter and coordinate tangents, second tangent
  *   - batch adjoint identity and accumulation equivalence
  *   - knot-line report, support index, normal composition
+ *   - Mathematica ground truth (tests/reference/51_surfaces.wls): third
+ *     order jets, tangents, second tangents and adjoints of a B-spline and
+ *     a NURBS surface along control points, weights, u and v knots, u and v,
+ *     from a symbolic Cox-de Boor recursion at 30 digits
  */
 
 #include "test_diff.h"
@@ -744,6 +748,136 @@ static void test_surface_knots(void)
 	check_surface_knots(1);
 }
 
+/* ------------------------------------------------------------------ */
+/*  Mathematica reference (tests/reference/51_surfaces.wls)           */
+/* ------------------------------------------------------------------ */
+
+#include "reference/51_surfaces.h"
+
+static double ref_err(double a, double b)
+{
+	double scale = 1.0;
+	if (fabs(a) > scale) scale = fabs(a);
+	if (fabs(b) > scale) scale = fabs(b);
+	return fabs(a - b) / scale;
+}
+
+static double ref_jet_err(qaws_surface_jet const* j, double const* ref, unsigned int channels)
+{
+	double e = 0;
+	unsigned int k;
+	for (k = 0; k < channels; k++)
+	{
+		if (ref_err(j->d[k].x, ref[3 * k]) > e) e = ref_err(j->d[k].x, ref[3 * k]);
+		if (ref_err(j->d[k].y, ref[3 * k + 1]) > e) e = ref_err(j->d[k].y, ref[3 * k + 1]);
+		if (ref_err(j->d[k].z, ref[3 * k + 2]) > e) e = ref_err(j->d[k].z, ref[3 * k + 2]);
+	}
+	return e;
+}
+
+static double const* const g_ref_bs[4][3] = {
+	{ ref_bs_value0, ref_bs_value1, ref_bs_value2 },
+	{ ref_bs_tangent0, ref_bs_tangent1, ref_bs_tangent2 },
+	{ ref_bs_tangent2_0, ref_bs_tangent2_1, ref_bs_tangent2_2 },
+	{ ref_bs_adjoint0, ref_bs_adjoint1, ref_bs_adjoint2 }
+};
+static double const* const g_ref_nr[4][3] = {
+	{ ref_nr_value0, ref_nr_value1, ref_nr_value2 },
+	{ ref_nr_tangent0, ref_nr_tangent1, ref_nr_tangent2 },
+	{ ref_nr_tangent2_0, ref_nr_tangent2_1, ref_nr_tangent2_2 },
+	{ ref_nr_adjoint0, ref_nr_adjoint1, ref_nr_adjoint2 }
+};
+
+/* The knot surfaces above with the script's exact rationals: points
+   (a, b, (((2 a + 3 b) mod 5) - 2) / 5), weights 1 + (2 ((a + 2 b) mod 4) - 3) / 10. */
+static void test_reference_knots(int rational)
+{
+	static double const uk[SK_UK] = { 0, 0.35, 0.8, 1.2, 1.75, 2.3, 2.7, 3.1, 3.6 };
+	static double const vk[SK_VK] = { 0, 0.4, 0.9, 1.3, 1.9, 2.4, 2.8, 3.3 };
+	static double const uv[3][4] = { { 1.3, 1.4, 0.2, -0.3 }, { 1.6, 1.5, -0.1, 0.2 }, { 2.1, 1.8, 0.3, 0.1 } };
+	double const* const (*ref)[3] = rational ? g_ref_nr : g_ref_bs;
+	knot_surface_params p, d, bar;
+	qaws_field_view fv[4], bf[4];
+	qaws_diff_views views, bv;
+	qaws_surface* s;
+	qaws_scalar* flat = (qaws_scalar*)&d;
+	double e[4] = { 0, 0, 0, 0 }, tol = QAWS_SCALAR_IS_FLOAT ? 5e-3 : 1e-11;
+	unsigned int i, a, b, k, n = 0;
+	char const* name = rational ? "NURBS knots" : "B-spline knots";
+	char msg[160];
+
+	for (a = 0; a < SK_U; a++)
+		for (b = 0; b < SK_V; b++)
+		{
+			qaws_scalar* c = &p.cps[(a * SK_V + b) * 3];
+			c[0] = (qaws_scalar)a;
+			c[1] = (qaws_scalar)b;
+			c[2] = (qaws_scalar)(((double)((2 * a + 3 * b) % 5) - 2.0) / 5.0);
+			p.w[a * SK_V + b] = rational ? (qaws_scalar)(1.0 + (2.0 * ((a + 2 * b) % 4) - 3.0) / 10.0) : 1;
+		}
+	for (i = 0; i < SK_UK; i++)
+		p.uk[i] = (qaws_scalar)uk[i];
+	for (i = 0; i < SK_VK; i++)
+		p.vk[i] = (qaws_scalar)vk[i];
+	/* theta_dot over (points, weights when rational, u knots, v knots) */
+	memset(&d, 0, sizeof(d));
+	for (i = 0; i < SK_N; i++)
+	{
+		if (!rational && i >= SK_U * SK_V * 3 && i < SK_U * SK_V * 4)
+			continue;
+		flat[i] = (qaws_scalar)(((double)((7 * n + 3) % 11) - 5.0) / 10.0);
+		n++;
+	}
+	s = knot_surface(&p, rational);
+	views = knot_surface_views(&d, rational, fv);
+	for (i = 0; i < 3; i++)
+	{
+		qaws_scalar u = (qaws_scalar)uv[i][0], v = (qaws_scalar)uv[i][1];
+		qaws_scalar ud = (qaws_scalar)uv[i][2], vd = (qaws_scalar)uv[i][3], ubar = 0, vbar = 0;
+		qaws_surface_jet prim, tg, tt, ybar;
+		qaws_scalar* fb = (qaws_scalar*)&bar;
+		double adj[SK_N + 2], err = 0;
+		unsigned int m = 0;
+		TEST_ASSERT_STATUS(qaws_surface_eval_batch_tangent(NULL, s, &u, &v, &ud, &vd, 1, QAWS_SJET_ORDER3, &views, &prim, &tg));
+		e[0] = fmax(e[0], ref_jet_err(&prim, ref[0][i], 10));
+		e[1] = fmax(e[1], ref_jet_err(&tg, ref[1][i], 10));
+		TEST_ASSERT_STATUS(qaws_surface_eval_batch_tangent2(NULL, s, &u, &v, &ud, &vd, 1, QAWS_SJET_ORDER2, &views, &prim, &tg, &tt));
+		e[2] = fmax(e[2], ref_jet_err(&tt, ref[2][i], 6));
+
+		/* ybar[k] = (((5 k + 2 + i) mod 9) - 4) / 10 over the 10 channels */
+		memset(&ybar, 0, sizeof(ybar));
+		for (k = 0; k < 10; k++)
+			ybar.d[k] = qaws_v3((qaws_scalar)(((double)((5 * (3 * k) + 2 + i) % 9) - 4.0) / 10.0),
+				(qaws_scalar)(((double)((5 * (3 * k + 1) + 2 + i) % 9) - 4.0) / 10.0),
+				(qaws_scalar)(((double)((5 * (3 * k + 2) + 2 + i) % 9) - 4.0) / 10.0));
+		ybar.channels = QAWS_SJET_ORDER3;
+		memset(&bar, 0, sizeof(bar));
+		bv = knot_surface_views(&bar, rational, bf);
+		TEST_ASSERT_STATUS(qaws_surface_eval_batch_adjoint(NULL, s, &u, &v, 1, QAWS_SJET_ORDER3, &ybar, &bv, &ubar, &vbar));
+		for (k = 0; k < SK_N; k++)
+		{
+			if (!rational && k >= SK_U * SK_V * 3 && k < SK_U * SK_V * 4)
+				continue;
+			adj[m++] = fb[k];
+		}
+		adj[m++] = ubar;
+		adj[m++] = vbar;
+		for (k = 0; k < m; k++)
+			err = fmax(err, ref_err(adj[k], ref[3][i][k]));
+		e[3] = fmax(e[3], err);
+	}
+	printf("    reference %-15s value %.1e, tangent %.1e, tangent2 %.1e, adjoint %.1e\n", name, e[0], e[1], e[2], e[3]);
+	sprintf(msg, "reference (%s): third order jets", name);
+	TEST_ASSERT(e[0] <= tol, msg);
+	sprintf(msg, "reference (%s): tangents along points, weights, knots, u and v", name);
+	TEST_ASSERT(e[1] <= tol, msg);
+	sprintf(msg, "reference (%s): second tangents", name);
+	TEST_ASSERT(e[2] <= 10 * tol, msg);
+	sprintf(msg, "reference (%s): adjoints to points, weights, knots, u and v", name);
+	TEST_ASSERT(e[3] <= tol, msg);
+	qaws_surface_destroy(s);
+}
+
 int test_51_diff_surfaces_main(void)
 {
 	g_pass = 0;
@@ -753,6 +887,8 @@ int test_51_diff_surfaces_main(void)
 	test_surface_families();
 	test_bspline_surface_details();
 	test_surface_knots();
+	test_reference_knots(0);
+	test_reference_knots(1);
 
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
