@@ -503,6 +503,17 @@ static qaws_status surface_quadrature(qaws_surface const* surface, unsigned int 
 	return QAWS_STATUS_OK;
 }
 
+/*
+ * Knots as surface parameters. Interior knots change the integrand at fixed
+ * nodes (the surface jet rules carry them). The domain is
+ * [u_knots[p], u_knots[n_u]] x [v_knots[q], v_knots[n_v]]: moving those end
+ * knots moves every node, u = u0 + a (u1 - u0) at fraction a, and scales
+ * the weights W = (u1 - u0)(v1 - v0) c, so
+ *   (W f)'  = W f' + W' f,  (W f)'' = W f'' + 2 W' f' + W'' f,
+ *   W' / W = (u1' - u0') / (u1 - u0) + (v1' - v0') / (v1 - v0),
+ *   W'' / W = 2 (u1' - u0')(v1' - v0') / ((u1 - u0)(v1 - v0)),
+ * with the node rates (1 - a) u0' + a u1' passed as coordinate tangents.
+ */
 typedef struct surface_job
 {
 	qaws_diff_context const* ctx;
@@ -511,7 +522,64 @@ typedef struct surface_job
 	qaws_diff_views const* direction;
 	qaws_diff_views* sink;
 	double value, tangent, tangent2;
+	/* domain knots (indices of the end knots, their rates or adjoint views) */
+	int knots;
+	unsigned int u_lo, u_hi, v_lo, v_hi;
+	double du0, du1, dv0, dv1;
+	qaws_field_view* uk_out;
+	qaws_field_view* vk_out;
 } surface_job;
+
+/* Finds the domain knots of the U / V knot views (forward rates when
+   `rates`, adjoint views otherwise). */
+static void surface_job_knots(surface_job* job, qaws_diff_views const* views, int rates)
+{
+	qaws_field_view const* uv = views ? qaws_diff_views_find(views, QAWS_FIELD_U_KNOTS) : NULL;
+	qaws_field_view const* vv = views ? qaws_diff_views_find(views, QAWS_FIELD_V_KNOTS) : NULL;
+	qaws_field_desc fields[8];
+	unsigned int n = 0, i, nu = 0, nv = 0;
+	if (!uv && !vv)
+		return;
+	if (qaws_surface_describe_fields(job->surface, fields, 8, &n) != QAWS_STATUS_OK)
+		return;
+	for (i = 0; i < n && i < 8; i++)
+	{
+		if (fields[i].field == QAWS_FIELD_U_KNOTS) nu = fields[i].count;
+		if (fields[i].field == QAWS_FIELD_V_KNOTS) nv = fields[i].count;
+	}
+	job->knots = 1;
+	job->u_lo = job->surface->u_degree;
+	job->u_hi = nu > job->surface->u_degree ? nu - job->surface->u_degree - 1 : 0;
+	job->v_lo = job->surface->v_degree;
+	job->v_hi = nv > job->surface->v_degree ? nv - job->surface->v_degree - 1 : 0;
+	if (rates)
+	{
+		qaws_scalar r = QAWS_ZERO;
+		if (uv && nu)
+		{
+			qaws_internal_view_read(uv, job->u_lo, 1, &r); job->du0 = r;
+			qaws_internal_view_read(uv, job->u_hi, 1, &r); job->du1 = r;
+		}
+		if (vv && nv)
+		{
+			qaws_internal_view_read(vv, job->v_lo, 1, &r); job->dv0 = r;
+			qaws_internal_view_read(vv, job->v_hi, 1, &r); job->dv1 = r;
+		}
+	}
+	else
+	{
+		job->uk_out = nu ? (qaws_field_view*)uv : NULL;
+		job->vk_out = nv ? (qaws_field_view*)vv : NULL;
+	}
+}
+
+static void surface_fractions(surface_job const* job, qaws_scalar u, qaws_scalar v, double* au, double* av, double* lu, double* lv)
+{
+	*lu = (double)job->surface->u_range.max_value - job->surface->u_range.min_value;
+	*lv = (double)job->surface->v_range.max_value - job->surface->v_range.min_value;
+	*au = ((double)u - job->surface->u_range.min_value) / *lu;
+	*av = ((double)v - job->surface->v_range.min_value) / *lv;
+}
 
 static qaws_status surface_eval_point(void* user, qaws_scalar u, qaws_scalar v, qaws_scalar weight)
 {
@@ -519,11 +587,21 @@ static qaws_status surface_eval_point(void* user, qaws_scalar u, qaws_scalar v, 
 	qaws_surface_jet p, tg, tt;
 	qaws_dual3 y[6];
 	qaws_dual1 r;
-	qaws_scalar zero = QAWS_ZERO;
+	qaws_scalar ut = QAWS_ZERO, vt = QAWS_ZERO;
+	double wd = 0, wdd = 0;
 	unsigned int k;
 	qaws_status st;
+	if (job->knots)
+	{
+		double au, av, lu, lv;
+		surface_fractions(job, u, v, &au, &av, &lu, &lv);
+		ut = (qaws_scalar)((1 - au) * job->du0 + au * job->du1);
+		vt = (qaws_scalar)((1 - av) * job->dv0 + av * job->dv1);
+		wd = (double)weight * ((job->du1 - job->du0) / lu + (job->dv1 - job->dv0) / lv);
+		wdd = (double)weight * 2 * (job->du1 - job->du0) * (job->dv1 - job->dv0) / (lu * lv);
+	}
 	if (job->direction)
-		st = qaws_surface_eval_batch_tangent2(job->ctx, job->surface, &u, &v, &zero, &zero, 1, QAWS_SJET_ORDER2,
+		st = qaws_surface_eval_batch_tangent2(job->ctx, job->surface, &u, &v, &ut, &vt, 1, QAWS_SJET_ORDER2,
 			job->direction, &p, &tg, &tt);
 	else
 		st = qaws_surface_eval_jet(job->surface, u, v, QAWS_SJET_ORDER2, &p);
@@ -533,8 +611,8 @@ static qaws_status surface_eval_point(void* user, qaws_scalar u, qaws_scalar v, 
 		y[k] = qaws_dual3_make(p.d[k], job->direction ? tg.d[k] : qaws_v3_zero(), job->direction ? tt.d[k] : qaws_v3_zero());
 	r = job->f(y);
 	job->value += (double)weight * r.v;
-	job->tangent += (double)weight * r.t;
-	job->tangent2 += (double)weight * r.tt;
+	job->tangent += (double)weight * r.t + wd * r.v;
+	job->tangent2 += (double)weight * r.tt + 2 * wd * r.t + wdd * r.v;
 	return QAWS_STATUS_OK;
 }
 
@@ -543,6 +621,8 @@ static qaws_status surface_gradient_point(void* user, qaws_scalar u, qaws_scalar
 	surface_job* job = (surface_job*)user;
 	qaws_surface_jet p, bar;
 	qaws_vec3 g[6];
+	qaws_scalar ua = QAWS_ZERO, va = QAWS_ZERO;
+	double fv;
 	unsigned int k;
 	qaws_status st = qaws_surface_eval_jet(job->surface, u, v, QAWS_SJET_ORDER2, &p);
 	if (st != QAWS_STATUS_OK)
@@ -551,14 +631,39 @@ static qaws_status surface_gradient_point(void* user, qaws_scalar u, qaws_scalar
 		qaws_dual3 yy[6];
 		for (k = 0; k < 6; k++)
 			yy[k] = qaws_dual3_const(p.d[k]);
-		job->value += (double)weight * job->f(yy).v;
+		fv = job->f(yy).v;
+		job->value += (double)weight * fv;
 	}
 	integrand_gradient(job->f, p.d, 6, g);
 	memset(&bar, 0, sizeof(bar));
 	for (k = 0; k < 6; k++)
 		bar.d[k] = qaws_v3_scale(g[k], weight);
 	bar.channels = QAWS_SJET_ORDER2;
-	return qaws_surface_eval_adjoint(job->ctx, job->surface, u, v, QAWS_SJET_ORDER2, &bar, job->sink, NULL, NULL);
+	st = qaws_surface_eval_adjoint(job->ctx, job->surface, u, v, QAWS_SJET_ORDER2, &bar, job->sink,
+		job->knots ? &ua : NULL, job->knots ? &va : NULL);
+	if (st != QAWS_STATUS_OK || !job->knots)
+		return st;
+	{
+		/* moving domain: node motion (W f_u, W f_v) and weight scaling */
+		double au, av, lu, lv, wf = (double)weight * fv;
+		qaws_scalar g0, g1;
+		surface_fractions(job, u, v, &au, &av, &lu, &lv);
+		if (job->uk_out)
+		{
+			g0 = (qaws_scalar)(-wf / lu + (1 - au) * ua);
+			g1 = (qaws_scalar)(wf / lu + au * ua);
+			qaws_internal_view_add(job->uk_out, job->u_lo, 1, &g0);
+			qaws_internal_view_add(job->uk_out, job->u_hi, 1, &g1);
+		}
+		if (job->vk_out)
+		{
+			g0 = (qaws_scalar)(-wf / lv + (1 - av) * va);
+			g1 = (qaws_scalar)(wf / lv + av * va);
+			qaws_internal_view_add(job->vk_out, job->v_lo, 1, &g0);
+			qaws_internal_view_add(job->vk_out, job->v_hi, 1, &g1);
+		}
+	}
+	return QAWS_STATUS_OK;
 }
 
 static qaws_status surface_hvp_point(void* user, qaws_scalar u, qaws_scalar v, qaws_scalar weight)
@@ -591,9 +696,8 @@ static qaws_status surface_job_init(surface_job* job, qaws_diff_context const* c
 	return job->f ? QAWS_STATUS_OK : QAWS_STATUS_INVALID_ARGUMENT;
 }
 
-/* Surface quadrature runs on a fixed cell grid over the domain, so knot
-   directions (which move spans and the domain) are not differentiated
-   here. */
+/* Knots enter the surface functionals non-linearly: no direct HVP for
+   knot views (as for curves). */
 static int surface_knot_terms(qaws_diff_views const* views)
 {
 	return views && (qaws_diff_views_find(views, QAWS_FIELD_U_KNOTS) || qaws_diff_views_find(views, QAWS_FIELD_V_KNOTS));
@@ -608,8 +712,7 @@ qaws_status qaws_surface_functional_eval(
 	qaws_status st = surface_job_init(&job, ctx, surface, functional);
 	if (st != QAWS_STATUS_OK)
 		return st;
-	if (surface_knot_terms(direction))
-		return QAWS_STATUS_UNSUPPORTED_OPERATION;
+	surface_job_knots(&job, direction, 1);
 	job.direction = direction;
 	st = surface_quadrature(surface, quadrature ? quadrature : 8u, surface_eval_point, &job);
 	if (st != QAWS_STATUS_OK)
@@ -628,9 +731,8 @@ qaws_status qaws_surface_functional_gradient(
 	qaws_status st = surface_job_init(&job, ctx, surface, functional);
 	if (st != QAWS_STATUS_OK)
 		return st;
-	if (surface_knot_terms(gradient))
-		return QAWS_STATUS_UNSUPPORTED_OPERATION;
 	job.sink = gradient;
+	surface_job_knots(&job, gradient, 0);
 	st = surface_quadrature(surface, quadrature ? quadrature : 8u, surface_gradient_point, &job);
 	if (st == QAWS_STATUS_OK && out_value)
 		*out_value = (qaws_scalar)job.value;

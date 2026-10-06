@@ -117,7 +117,7 @@ Rational families use homogeneous jets and the quotient recurrence `C^(k) = (A^(
 
 ### Knots
 
-Knots are differentiable fields of B-spline and NURBS curves and surfaces. A knot direction re-evaluates the basis rows in dual numbers (first and second order), so tangents, second tangents and adjoints include knots. The knot span containing each sample is frozen (`QAWS_FREEZE_SPAN`): moving a knot past a sample is a discrete event. Curve functionals differentiate their quadrature exactly as a function of the knots, including the motion of span boundaries; surface functionals integrate on a fixed cell grid and refuse knot directions. Operations returning differential maps hold the knots of their inputs fixed.
+Knots are differentiable fields of B-spline and NURBS curves and surfaces. A knot direction re-evaluates the basis rows in dual numbers (first and second order), so tangents, second tangents and adjoints include knots. The knot span containing each sample is frozen (`QAWS_FREEZE_SPAN`): moving a knot past a sample is a discrete event. Curve functionals differentiate their quadrature exactly as a function of the knots, including the motion of span boundaries; surface functionals integrate on a cell grid over the domain, so interior knots change the integrand at fixed nodes while the end knots of the domain move every node and scale the weights (value, tangent, second tangent and gradient; no direct HVP for knots). Operations returning differential maps hold the knots of their inputs fixed.
 
 ## Geometry
 

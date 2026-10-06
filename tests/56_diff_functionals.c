@@ -397,6 +397,100 @@ static void test_knot_functionals(void)
 	check_knot_functional(2, QAWS_FUNCTIONAL_BENDING, "bending");
 }
 
+/* Surface knots: interior knots change the integrand, the end knots of the
+   domain move the whole cell grid and scale its weights. */
+#define SK_N 5
+#define SK_KN (SK_N + 4)
+
+static qaws_surface* sk_surface(qaws_scalar const* cps, qaws_scalar const* uk, qaws_scalar const* vk)
+{
+	qaws_surface_bspline_desc d;
+	qaws_surface* s = NULL;
+	memset(&d, 0, sizeof(d));
+	d.u_degree = 3;
+	d.v_degree = 3;
+	d.control_points = (qaws_vec3 const*)cps;
+	d.u_point_count = SK_N;
+	d.v_point_count = SK_N;
+	d.u_knots = uk;
+	d.u_knot_count = SK_KN;
+	d.v_knots = vk;
+	d.v_knot_count = SK_KN;
+	qaws_surface_create_bspline(&d, &s);
+	return s;
+}
+
+static void sk_shift(qaws_scalar const* k, qaws_scalar const* dk, double h, qaws_scalar* out)
+{
+	unsigned int i;
+	for (i = 0; i < SK_KN; i++)
+		out[i] = (qaws_scalar)(k[i] + h * dk[i]);
+}
+
+static void check_surface_knot_functional(qaws_surface_functional f, char const* name)
+{
+	static qaws_scalar const uk[SK_KN] = { 0, 0, 0, 0, 1.3f, 3, 3, 3, 3 };
+	static qaws_scalar const vk[SK_KN] = { 0, 0, 0, 0, 1.1f, 2.5f, 2.5f, 2.5f, 2.5f };
+	qaws_scalar cps[SK_N * SK_N * 3], duk[SK_KN], dvk[SK_KN], ukp[SK_KN], vkp[SK_KN], ukm[SK_KN], vkm[SK_KN];
+	qaws_scalar gu[SK_KN], gv[SK_KN], value, t1, t2, vp, vm, tp, tm;
+	qaws_field_view fv[2], fg[2];
+	qaws_diff_views vd, vg;
+	qaws_surface *s, *sp, *sm;
+	double h = QAWS_SCALAR_IS_FLOAT ? 1e-3 : 1e-5, tol = QAWS_SCALAR_IS_FLOAT ? 3e-2 : 1e-6;
+	unsigned int i, j;
+	char msg[128];
+	for (i = 0; i < SK_N; i++)
+		for (j = 0; j < SK_N; j++)
+		{
+			cps[3 * (i * SK_N + j) + 0] = (qaws_scalar)(0.75 * j);
+			cps[3 * (i * SK_N + j) + 1] = (qaws_scalar)(0.6 * i);
+			cps[3 * (i * SK_N + j) + 2] = (qaws_scalar)(0.3 * sin(1.3 * i + 0.7 * j));
+		}
+	diff_rand_fill(duk, SK_KN);
+	diff_rand_fill(dvk, SK_KN);
+	for (i = 0; i < SK_KN; i++)
+	{
+		duk[i] *= (qaws_scalar)0.2;
+		dvk[i] *= (qaws_scalar)0.2;
+	}
+	fv[0] = qaws_field_view_make(QAWS_FIELD_U_KNOTS, duk, SK_KN, 1);
+	fv[1] = qaws_field_view_make(QAWS_FIELD_V_KNOTS, dvk, SK_KN, 1);
+	vd.fields = fv; vd.field_count = 2; vd.children = NULL; vd.child_count = 0;
+	memset(gu, 0, sizeof(gu));
+	memset(gv, 0, sizeof(gv));
+	fg[0] = qaws_field_view_make(QAWS_FIELD_U_KNOTS, gu, SK_KN, 1);
+	fg[1] = qaws_field_view_make(QAWS_FIELD_V_KNOTS, gv, SK_KN, 1);
+	vg.fields = fg; vg.field_count = 2; vg.children = NULL; vg.child_count = 0;
+
+	s = sk_surface(cps, uk, vk);
+	sk_shift(uk, duk, h, ukp); sk_shift(vk, dvk, h, vkp);
+	sk_shift(uk, duk, -h, ukm); sk_shift(vk, dvk, -h, vkm);
+	sp = sk_surface(cps, ukp, vkp);
+	sm = sk_surface(cps, ukm, vkm);
+	TEST_ASSERT_STATUS(qaws_surface_functional_eval(NULL, s, f, 6, &vd, &value, &t1, &t2));
+	qaws_surface_functional_eval(NULL, sp, f, 6, &vd, &vp, &tp, NULL);
+	qaws_surface_functional_eval(NULL, sm, f, 6, &vd, &vm, &tm, NULL);
+	TEST_ASSERT_STATUS(qaws_surface_functional_gradient(NULL, s, f, 6, &vg, NULL));
+	printf("    %s: tangent %.10g fd %.10g, tangent2 %.10g fd %.10g\n", name, t1, (vp - vm) / (2 * h), t2, (tp - tm) / (2 * h));
+	sprintf(msg, "surface %s: knot tangent matches finite differences", name);
+	TEST_ASSERT(diff_close(t1, (vp - vm) / (2 * h), tol), msg);
+	sprintf(msg, "surface %s: knot second tangent matches differences of tangents", name);
+	TEST_ASSERT(diff_close(t2, (tp - tm) / (2 * h), 10 * tol), msg);
+	sprintf(msg, "surface %s: <knot gradient, direction> = tangent", name);
+	TEST_ASSERT(diff_close(diff_dot(gu, duk, SK_KN) + diff_dot(gv, dvk, SK_KN), t1, QAWS_SCALAR_IS_FLOAT ? 2e-3 : 1e-10), msg);
+	qaws_surface_destroy(s);
+	qaws_surface_destroy(sp);
+	qaws_surface_destroy(sm);
+}
+
+static void test_surface_knot_functionals(void)
+{
+	printf("  surface knots as parameters\n");
+	check_surface_knot_functional(QAWS_FUNCTIONAL_AREA, "area");
+	check_surface_knot_functional(QAWS_FUNCTIONAL_THIN_PLATE, "thin plate");
+	check_surface_knot_functional(QAWS_FUNCTIONAL_WILLMORE, "willmore");
+}
+
 int test_56_diff_functionals_main(void)
 {
 	g_pass = 0;
@@ -408,6 +502,7 @@ int test_56_diff_functionals_main(void)
 	check_curve_functional(QAWS_FUNCTIONAL_BENDING, "bending");
 	check_curve_functional(QAWS_FUNCTIONAL_CURVATURE_SQUARED, "curvature squared");
 	test_knot_functionals();
+	test_surface_knot_functionals();
 	test_surface_values();
 	check_surface_functional(QAWS_FUNCTIONAL_AREA, "area");
 	check_surface_functional(QAWS_FUNCTIONAL_THIN_PLATE, "thin plate");
