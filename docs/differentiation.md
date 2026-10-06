@@ -208,6 +208,7 @@ The test suites `49_diff_model` to `59_diff_surface_sampling` check every rule i
 14. Constant-speed sampling: first and second order sample tangents, and a fit of the samples by Newton-CG with exact Hessian-vector products
 15. Inverse-CDF sampling under arc length, curvature and a density field, with the sample tangents
 16. Surfaces: stratified points warped onto a patch by the area and density inverse CDFs
+17. Blue noise on a patch: Gaussian repulsion of the warped samples descended through the xi adjoints of the warp
 
 ## GPU kernels
 
