@@ -22,6 +22,9 @@
  *                          and density inverse CDFs
  *   17_blue_noise.svg      blue noise on a patch: repulsion of the warped samples
  *                          descended through the xi adjoints of the warp
+ *   18_knot_sampling.svg   knot tangents of arc-length samples, and interior
+ *                          knots moved by the knot adjoint toward arc-length
+ *                          parameters
  *
  * Each figure lives in diff_showcase/NN_*.c; they are compiled as one
  * translation unit, in order (later figures reuse earlier helpers).
@@ -63,6 +66,7 @@
 #include "diff_showcase/15_cdf_measures.c"
 #include "diff_showcase/16_surface_cdf.c"
 #include "diff_showcase/17_blue_noise.c"
+#include "diff_showcase/18_knot_sampling.c"
 
 int main(void)
 {
@@ -85,5 +89,6 @@ int main(void)
 	demo_cdf_measures();
 	demo_surface_cdf();
 	demo_blue_noise();
+	demo_knot_sampling();
 	return 0;
 }
