@@ -34,6 +34,7 @@ static void test_traversal(void)
 	TEST_ASSERT_STATUS(s);
 
 	qaws_traversal_desc tdesc;
+	memset(&tdesc, 0, sizeof(tdesc));
 	tdesc.traversal_mode = QAWS_TRAVERSAL_MODE_TIME;
 	tdesc.motion_profile = QAWS_MOTION_PROFILE_CONSTANT_SPEED;
 	tdesc.speed = (qaws_scalar)5.0;
@@ -79,6 +80,7 @@ static void test_traversal_mappings(void)
 	TEST_ASSERT_STATUS(s);
 
 	qaws_traversal_desc tdesc;
+	memset(&tdesc, 0, sizeof(tdesc));
 	tdesc.traversal_mode = QAWS_TRAVERSAL_MODE_TIME;
 	tdesc.motion_profile = QAWS_MOTION_PROFILE_CONSTANT_SPEED;
 	tdesc.speed = (qaws_scalar)5.0;
@@ -130,6 +132,7 @@ static void test_traversal_arc_length_mode(void)
 	TEST_ASSERT_STATUS(s);
 
 	qaws_traversal_desc tdesc;
+	memset(&tdesc, 0, sizeof(tdesc));
 	tdesc.traversal_mode = QAWS_TRAVERSAL_MODE_ARC_LENGTH;
 	tdesc.motion_profile = QAWS_MOTION_PROFILE_NONE;
 	tdesc.speed = 0;
@@ -169,6 +172,7 @@ static void test_traversal_3d(void)
 	TEST_ASSERT_STATUS(s);
 
 	qaws_traversal_desc tdesc;
+	memset(&tdesc, 0, sizeof(tdesc));
 	tdesc.traversal_mode = QAWS_TRAVERSAL_MODE_TIME;
 	tdesc.motion_profile = QAWS_MOTION_PROFILE_CONSTANT_SPEED;
 	tdesc.speed = (qaws_scalar)10.0;
@@ -212,6 +216,7 @@ static void test_easing(void)
 	/* Linear easing: same as no easing */
 	{
 		qaws_traversal_desc tdesc;
+		memset(&tdesc, 0, sizeof(tdesc));
 		qaws_traversal *trav = NULL;
 		qaws_eval_result_2d r_linear, r_eased;
 
@@ -255,6 +260,7 @@ static void test_easing(void)
 	/* Sine easing endpoints: at t=0 should be start, at t=1 should be end */
 	{
 		qaws_traversal_desc tdesc;
+		memset(&tdesc, 0, sizeof(tdesc));
 		qaws_traversal *trav = NULL;
 		qaws_eval_result_2d r_start, r_end;
 
@@ -319,6 +325,7 @@ static void test_easing(void)
 		for (mi = 0; mi < mode_count; ++mi)
 		{
 			qaws_traversal_desc etdesc;
+			memset(&etdesc, 0, sizeof(etdesc));
 			qaws_traversal *etrav = NULL;
 			qaws_eval_result_2d r_t0, r_t1;
 			char msg[128];
@@ -361,6 +368,7 @@ static void test_easing(void)
 	/* QUAD_IN_OUT symmetry: at t=0.5, should be at midpoint position */
 	{
 		qaws_traversal_desc qdesc;
+		memset(&qdesc, 0, sizeof(qdesc));
 		qaws_traversal *qtrav = NULL;
 		qaws_eval_result_2d r_linear_mid, r_qio_mid;
 		qaws_traversal *ltrav = NULL;
@@ -421,6 +429,7 @@ static void test_wrap_modes(void)
 	/* Loop mode: going past end wraps around */
 	{
 		qaws_traversal_desc tdesc;
+		memset(&tdesc, 0, sizeof(tdesc));
 		qaws_traversal *trav = NULL;
 		qaws_eval_result_2d r_a, r_b;
 		qaws_scalar total_len;
@@ -457,6 +466,7 @@ static void test_wrap_modes(void)
 	/* Ping-pong mode: d=eps and d=2*total_len+eps should match */
 	{
 		qaws_traversal_desc tdesc;
+		memset(&tdesc, 0, sizeof(tdesc));
 		qaws_traversal *trav = NULL;
 		qaws_eval_result_2d r_a, r_b;
 		qaws_scalar total_len;
@@ -492,6 +502,7 @@ static void test_wrap_modes(void)
 	/* CLAMP mode: negative distance clamps to start, huge distance clamps to end */
 	{
 		qaws_traversal_desc tdesc;
+		memset(&tdesc, 0, sizeof(tdesc));
 		qaws_traversal *trav = NULL;
 		qaws_eval_result_2d r_neg, r_huge, r_start, r_end;
 		qaws_scalar total_len;
@@ -540,6 +551,7 @@ static void test_wrap_modes(void)
 	/* Negative values in LOOP mode: should wrap correctly */
 	{
 		qaws_traversal_desc tdesc;
+		memset(&tdesc, 0, sizeof(tdesc));
 		qaws_traversal *trav = NULL;
 		qaws_eval_result_2d r_neg, r_pos;
 		qaws_scalar total_len;
@@ -595,6 +607,7 @@ static void test_traversal_advance(void)
 
 	{
 		qaws_traversal_desc tdesc;
+		memset(&tdesc, 0, sizeof(tdesc));
 		qaws_traversal *trav = NULL;
 		qaws_eval_result_2d r1, r2, r3;
 
@@ -715,6 +728,7 @@ static void test_multi_curve_traversal(void)
 		qaws_curve* c2 = NULL;
 		qaws_curve const* curves[2];
 		qaws_traversal_desc tdesc;
+		memset(&tdesc, 0, sizeof(tdesc));
 		qaws_traversal* trav = NULL;
 		qaws_status s;
 		qaws_eval_result_2d r;
@@ -793,6 +807,7 @@ static void test_multi_curve_traversal(void)
 		qaws_curve* c = NULL;
 		qaws_curve const* curves[1];
 		qaws_traversal_desc tdesc;
+		memset(&tdesc, 0, sizeof(tdesc));
 		qaws_traversal* trav = NULL;
 		qaws_status s;
 		qaws_eval_result_2d r;
@@ -833,6 +848,7 @@ static void test_multi_curve_traversal(void)
 		qaws_curve* c = NULL;
 		qaws_curve const* curves[1];
 		qaws_traversal_desc tdesc;
+		memset(&tdesc, 0, sizeof(tdesc));
 		qaws_traversal* trav = NULL;
 		qaws_status s;
 
@@ -880,6 +896,7 @@ static void test_scurve_profile(void)
 		qaws_bezier_desc bdesc;
 		qaws_curve* curve = NULL;
 		qaws_traversal_desc tdesc;
+		memset(&tdesc, 0, sizeof(tdesc));
 		qaws_traversal* trav = NULL;
 		qaws_status s;
 		qaws_eval_result_2d r;
@@ -943,6 +960,7 @@ static void test_scurve_profile(void)
 		qaws_bezier_desc bdesc;
 		qaws_curve* curve = NULL;
 		qaws_traversal_desc tdesc;
+		memset(&tdesc, 0, sizeof(tdesc));
 		qaws_traversal* trav = NULL;
 		qaws_status s;
 		qaws_eval_result_2d r;
@@ -989,6 +1007,7 @@ static void test_custom_speed(void)
 		qaws_bezier_desc bdesc;
 		qaws_curve* curve = NULL;
 		qaws_traversal_desc tdesc;
+		memset(&tdesc, 0, sizeof(tdesc));
 		qaws_traversal* trav = NULL;
 		qaws_status s;
 		qaws_eval_result_2d r0, r1, r2;
@@ -1050,6 +1069,7 @@ static void test_custom_speed(void)
 		qaws_bezier_desc bdesc;
 		qaws_curve* curve = NULL;
 		qaws_traversal_desc tdesc;
+		memset(&tdesc, 0, sizeof(tdesc));
 		qaws_traversal* trav = NULL;
 		qaws_status s;
 		qaws_eval_result_2d r;
@@ -1098,6 +1118,7 @@ static void test_custom_speed(void)
 		qaws_bezier_desc bdesc;
 		qaws_curve* curve = NULL;
 		qaws_traversal_desc tdesc;
+		memset(&tdesc, 0, sizeof(tdesc));
 		qaws_traversal* trav = NULL;
 		qaws_status s;
 		qaws_eval_result_2d r;

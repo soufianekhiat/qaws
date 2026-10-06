@@ -90,32 +90,31 @@ static qaws_status clothoid_eval_span_2d(
 	cos_theta = (qaws_scalar)cos((double)theta);
 	sin_theta = (qaws_scalar)sin((double)theta);
 
-	/* D1 w.r.t. local_t: ds/d(local_t) = L, so D1 = L * (cos, sin) */
+	/* Derivatives with respect to the curve parameter, the arc length s
+	   (local_t only locates the point): D1 = (cos, sin) */
 	if (eval_flags & (QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2 | QAWS_EVAL_FLAG_D3))
 	{
-		out_result->d1.x = L * cos_theta;
-		out_result->d1.y = L * sin_theta;
+		out_result->d1.x = cos_theta;
+		out_result->d1.y = sin_theta;
 		out_result->valid_flags |= QAWS_EVAL_FLAG_D1;
 	}
 
-	/* D2 w.r.t. local_t: L^2 * kappa * (-sin, cos) */
+	/* D2 = kappa (-sin, cos) */
 	if (eval_flags & (QAWS_EVAL_FLAG_D2 | QAWS_EVAL_FLAG_D3))
 	{
-		qaws_scalar L2 = L * L;
 		kappa = impl->kappa_0 + (impl->kappa_1 - impl->kappa_0) * s / L;
-		out_result->d2.x = L2 * kappa * (-sin_theta);
-		out_result->d2.y = L2 * kappa * cos_theta;
+		out_result->d2.x = kappa * (-sin_theta);
+		out_result->d2.y = kappa * cos_theta;
 		out_result->valid_flags |= QAWS_EVAL_FLAG_D2;
 	}
 
-	/* D3 w.r.t. local_t: L^3 * [kappa' * (-sin, cos) + kappa^2 * (-cos, -sin)] */
+	/* D3 = kappa' (-sin, cos) + kappa^2 (-cos, -sin) */
 	if (eval_flags & QAWS_EVAL_FLAG_D3)
 	{
-		qaws_scalar L3 = L * L * L;
 		kappa = impl->kappa_0 + (impl->kappa_1 - impl->kappa_0) * s / L;
 		kappa_prime = (impl->kappa_1 - impl->kappa_0) / L;
-		out_result->d3.x = L3 * (kappa_prime * (-sin_theta) + kappa * kappa * (-cos_theta));
-		out_result->d3.y = L3 * (kappa_prime * cos_theta + kappa * kappa * (-sin_theta));
+		out_result->d3.x = kappa_prime * (-sin_theta) + kappa * kappa * (-cos_theta);
+		out_result->d3.y = kappa_prime * cos_theta + kappa * kappa * (-sin_theta);
 		out_result->valid_flags |= QAWS_EVAL_FLAG_D3;
 	}
 

@@ -38,9 +38,10 @@ static void test_clothoid(void)
 				"clothoid straight line end");
 		}
 
-		/* D1 for straight line: constant (L*cos(0), L*sin(0)) = (2, 0) */
+		/* D1 for straight line: the unit tangent (cos(0), sin(0)) = (1, 0)
+		   (the parameter is arc length) */
 		qaws_curve_evaluate_2d(crv, 0, QAWS_EVAL_FLAG_D1, &r);
-		TEST_ASSERT(approx_eq(r.d1.x, 2), "clothoid straight d1.x");
+		TEST_ASSERT(approx_eq(r.d1.x, 1), "clothoid straight d1.x");
 		TEST_ASSERT(approx_eq(r.d1.y, 0), "clothoid straight d1.y");
 
 		qaws_curve_destroy(crv);
@@ -71,10 +72,10 @@ static void test_clothoid(void)
 			TEST_ASSERT(approx_eq(r.position.y, 1), "clothoid circle y");
 		}
 
-		/* D1 at start = L * (cos(0), sin(0)) = (pi/2, 0) */
+		/* D1 at start = (cos(0), sin(0)) = (1, 0): the unit tangent */
 		qaws_curve_evaluate_2d(crv, 0,
 			QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2 | QAWS_EVAL_FLAG_D3, &r);
-		TEST_ASSERT(approx_eq(r.d1.x, pi_half), "clothoid d1.x at start");
+		TEST_ASSERT(approx_eq(r.d1.x, 1), "clothoid d1.x at start");
 		TEST_ASSERT(approx_eq(r.d1.y, 0), "clothoid d1.y at start");
 		TEST_ASSERT(r.valid_flags & QAWS_EVAL_FLAG_D2, "clothoid d2 valid");
 		TEST_ASSERT(r.valid_flags & QAWS_EVAL_FLAG_D3, "clothoid d3 valid");
