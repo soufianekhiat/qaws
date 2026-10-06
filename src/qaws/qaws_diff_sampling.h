@@ -154,8 +154,10 @@ qaws_status qaws_traversal_cdf_targets(
 /* ===================================================================
  * Surfaces: inverse-CDF warping of the unit square
  *
- * The measure w = rho(S) |S_u x S_v| (QAWS_MEASURE_AREA: rho = 1, or
- * QAWS_MEASURE_DENSITY) over the parameter domain gives a marginal CDF in u
+ * The measure w = rho(S) |S_u x S_v| (QAWS_MEASURE_AREA: rho = 1,
+ * QAWS_MEASURE_DENSITY, or QAWS_MEASURE_CURVATURE: rho = sqrt(floor^2 +
+ * k1^2 + k2^2) from the principal curvatures, whose rates read the third and
+ * fourth derivatives of the patch) over the parameter domain gives a marginal CDF in u
  * and a conditional CDF in v. A point xi = (xi_u, xi_v) of the unit square
  * (stratified, blue noise, low discrepancy ...) maps to the sample (u, v):
  *
@@ -171,8 +173,7 @@ qaws_status qaws_traversal_cdf_targets(
  * through the conditional then the marginal equation, and the HVP polarizes
  * the second order forward pass over the parameters of out_hv (about one
  * pass per parameter; works for rational families too).
- * Requires QAWS_CAP_TANGENT2. QAWS_MEASURE_CURVATURE is not defined on
- * surfaces (QAWS_STATUS_INVALID_ARGUMENT); knots are refused as parameters.
+ * Requires QAWS_CAP_TANGENT2; knots are refused as parameters.
  * =================================================================== */
 
 #define QAWS_MEASURE_AREA QAWS_MEASURE_ARC_LENGTH

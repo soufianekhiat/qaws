@@ -18,8 +18,8 @@
  *                          tangents, and a fit by Newton-CG on exact HVPs
  *   15_cdf_measures.svg    inverse-CDF samples under arc length, curvature and
  *                          a density field, with their sample tangents
- *   16_surface_cdf.svg     stratified points warped onto a patch by the area
- *                          and density inverse CDFs
+ *   16_surface_cdf.svg     stratified points warped onto a patch by the area,
+ *                          density and curvature inverse CDFs
  *   17_blue_noise.svg      blue noise on a patch: repulsion of the warped samples
  *                          descended through the xi adjoints of the warp
  *   18_knot_sampling.svg   knot tangents of arc-length samples, and interior

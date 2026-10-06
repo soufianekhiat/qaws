@@ -911,29 +911,60 @@ static qaws_dual1 dual_axpy(double a, qaws_dual1 x, double b)
 	return qaws_dual1_make((qaws_scalar)(a * x.v + b), (qaws_scalar)(a * x.t), (qaws_scalar)(a * x.tt));
 }
 
-/* Dual jets (S, S_u, S_v) at the dual point (u, v) along dir: the first and
-   second rates of u and v enter as the straight-path tangents plus the
-   second order corrections S_u u'' + S_v v''. */
+/* Jet entries the measure reads: (S, S_u, S_v), plus (S_uu, S_uv, S_vv)
+   for the curvature measure. */
+#define SCDF_Y 6
+
+static unsigned int scdf_y_count(scdf_job const* job)
+{
+	return job->measure.kind == QAWS_MEASURE_CURVATURE ? 6u : 3u;
+}
+
+/* Dual jets y at the dual point (u, v) along dir: the first and second
+   rates of u and v enter as the straight-path tangents plus the second
+   order corrections y_u u'' + y_v v''. */
 static qaws_status scdf_jet(scdf_job const* job, qaws_dual1 u, qaws_dual1 v, qaws_diff_views const* dir, qaws_dual3* y)
 {
+	/* jet index of the u and v derivatives of entry k */
+	static unsigned char const du[6] = { 1, 3, 4, 6, 7, 8 };
+	static unsigned char const dv[6] = { 2, 4, 5, 7, 8, 9 };
 	qaws_surface_jet p, tg, tt;
 	qaws_scalar uu = u.v, vv = v.v, ut = u.t, vt = v.t;
-	qaws_status st = qaws_surface_eval_batch_tangent2(job->ctx, job->surface, &uu, &vv, &ut, &vt, 1, QAWS_SJET_ORDER2, dir,
-		&p, &tg, &tt);
+	unsigned int k, n = scdf_y_count(job);
+	qaws_status st = qaws_surface_eval_batch_tangent2(job->ctx, job->surface, &uu, &vv, &ut, &vt, 1,
+		n > 3 ? QAWS_SJET_ORDER3 : QAWS_SJET_ORDER2, dir, &p, &tg, &tt);
 	if (st != QAWS_STATUS_OK)
 		return st;
-	y[0] = qaws_dual3_make(p.d[0], tg.d[0], v3_axpy(v.tt, p.d[2], v3_axpy(u.tt, p.d[1], tt.d[0])));
-	y[1] = qaws_dual3_make(p.d[1], tg.d[1], v3_axpy(v.tt, p.d[4], v3_axpy(u.tt, p.d[3], tt.d[1])));
-	y[2] = qaws_dual3_make(p.d[2], tg.d[2], v3_axpy(v.tt, p.d[5], v3_axpy(u.tt, p.d[4], tt.d[2])));
+	for (k = 0; k < n; k++)
+		y[k] = qaws_dual3_make(p.d[k], tg.d[k], v3_axpy(v.tt, p.d[dv[k]], v3_axpy(u.tt, p.d[du[k]], tt.d[k])));
 	return QAWS_STATUS_OK;
 }
 
-/* w = rho(S) |S_u x S_v| */
+/*
+ * w = rho |S_u x S_v|. The curvature measure takes rho = sqrt(floor^2 +
+ * k1^2 + k2^2) with k1^2 + k2^2 = 4 H^2 - 2 K; with D = E G - F^2 and the
+ * second form on the unnormalized normal n = S_u x S_v (L = S_uu . n, ...):
+ *   4 H^2 = (E N - 2 F M + G L)^2 / D^3,  K = (L N - M^2) / D^2.
+ */
 static qaws_dual1 scdf_w(scdf_job const* job, qaws_dual3 const* y)
 {
-	qaws_dual1 a = qaws_dual3_length(qaws_dual3_cross(y[1], y[2]));
+	qaws_dual3 n = qaws_dual3_cross(y[1], y[2]);
+	qaws_dual1 a = qaws_dual3_length(n);
 	if (job->measure.kind == QAWS_MEASURE_DENSITY)
 		a = qaws_dual1_mul(density_dual(&job->measure, y[0]), a);
+	else if (job->measure.kind == QAWS_MEASURE_CURVATURE)
+	{
+		qaws_dual1 E = qaws_dual3_dot(y[1], y[1]), F = qaws_dual3_dot(y[1], y[2]), G = qaws_dual3_dot(y[2], y[2]);
+		qaws_dual1 L = qaws_dual3_dot(y[3], n), M = qaws_dual3_dot(y[4], n), N = qaws_dual3_dot(y[5], n);
+		qaws_dual1 D = qaws_dual1_sub(qaws_dual1_mul(E, G), qaws_dual1_mul(F, F));
+		qaws_dual1 D2 = qaws_dual1_mul(D, D);
+		qaws_dual1 h = qaws_dual1_add(qaws_dual1_sub(qaws_dual1_mul(E, N), dual_axpy(2, qaws_dual1_mul(F, M), 0)),
+			qaws_dual1_mul(G, L));
+		qaws_dual1 k = qaws_dual1_sub(qaws_dual1_mul(L, N), qaws_dual1_mul(M, M));
+		qaws_dual1 c2 = qaws_dual1_sub(qaws_dual1_div(qaws_dual1_mul(h, h), qaws_dual1_mul(D2, D)), dual_axpy(2, qaws_dual1_div(k, D2), 0));
+		double f = job->measure.curvature_floor;
+		a = qaws_dual1_mul(qaws_dual1_sqrt(dual_axpy(1, c2, f * f)), a);
+	}
 	return a;
 }
 
@@ -943,7 +974,7 @@ static qaws_status scdf_B(scdf_job const* job, qaws_dual1 u, qaws_dual1 b, qaws_
 {
 	unsigned int c, q, k = (unsigned int)((b.v - job->v0) / job->hv);
 	qaws_dual1 sum = dual_c(0), len;
-	qaws_dual3 y[3];
+	qaws_dual3 y[SCDF_Y];
 	qaws_status st;
 	double vk;
 	if (k >= job->cells)
@@ -1035,7 +1066,8 @@ static qaws_status scdf_job_init(scdf_job* job, qaws_diff_context const* ctx, qa
 	if (measure)
 	{
 		job->measure = *measure;
-		if (measure->kind == QAWS_MEASURE_CURVATURE || (measure->kind == QAWS_MEASURE_DENSITY && !measure->density) ||
+		if ((measure->kind == QAWS_MEASURE_CURVATURE && !(measure->curvature_floor > 0)) ||
+		    (measure->kind == QAWS_MEASURE_DENSITY && !measure->density) ||
 		    (unsigned int)measure->kind > (unsigned int)QAWS_MEASURE_DENSITY)
 			return QAWS_STATUS_INVALID_ARGUMENT;
 	}
@@ -1183,7 +1215,7 @@ static qaws_status scdf_rates(scdf_job const* job, double u, double v, double xu
 	qaws_dual1 xiu = qaws_dual1_make((qaws_scalar)xu, (qaws_scalar)(xd ? xd[0] : 0), 0);
 	qaws_dual1 xiv = qaws_dual1_make((qaws_scalar)xv, (qaws_scalar)(xd ? xd[1] : 0), 0);
 	double Fu, Gv, u1, u2 = 0, v1, v2 = 0;
-	qaws_dual3 y[3];
+	qaws_dual3 y[SCDF_Y];
 	qaws_status st;
 	/* slopes of the discrete equations */
 	st = scdf_F(job, qaws_dual1_make((qaws_scalar)u, 1, 0), dual_c(xu), 0, &F);
@@ -1304,12 +1336,12 @@ qaws_status qaws_surface_cdf_sample_tangent(
 	return st;
 }
 
-/* Pullback c dw/d(S, S_u, S_v) at (u, v). */
+/* Pullback c dw/dy at (u, v). */
 static qaws_status scdf_node_pullback(scdf_job const* job, double u, double v, double c, qaws_diff_views* sink)
 {
-	qaws_dual3 y[3], s[3];
+	qaws_dual3 y[SCDF_Y], s[SCDF_Y];
 	qaws_surface_jet bar;
-	unsigned int i, k, comp;
+	unsigned int i, k, comp, n = scdf_y_count(job), ch = n > 3 ? QAWS_SJET_ORDER2 : QAWS_SJET_ORDER1;
 	qaws_status st;
 	if (c == 0)
 		return QAWS_STATUS_OK;
@@ -1317,20 +1349,20 @@ static qaws_status scdf_node_pullback(scdf_job const* job, double u, double v, d
 	if (st != QAWS_STATUS_OK)
 		return st;
 	memset(&bar, 0, sizeof(bar));
-	for (i = 0; i < 3; i++)
+	for (i = 0; i < n; i++)
 	{
 		if (i == 0 && job->measure.kind != QAWS_MEASURE_DENSITY)
 			continue;
 		for (comp = 0; comp < 3; comp++)
 		{
-			for (k = 0; k < 3; k++)
+			for (k = 0; k < n; k++)
 				s[k] = qaws_dual3_const(y[k].v);
 			v3_set(&s[i].t, comp, QAWS_ONE);
 			v3_set(&bar.d[i], comp, (qaws_scalar)(c * scdf_w(job, s).t));
 		}
 	}
-	bar.channels = QAWS_SJET_ORDER1;
-	return qaws_surface_eval_adjoint(job->ctx, job->surface, (qaws_scalar)u, (qaws_scalar)v, QAWS_SJET_ORDER1, &bar, sink, NULL, NULL);
+	bar.channels = ch;
+	return qaws_surface_eval_adjoint(job->ctx, job->surface, (qaws_scalar)u, (qaws_scalar)v, ch, &bar, sink, NULL, NULL);
 }
 
 /* Pullback c grad B(b; u), b real. */

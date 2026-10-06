@@ -1,5 +1,5 @@
 /* ================================================================== */
-/*  16. Surfaces: stratified points warped by area and density       */
+/*  16. Surfaces: stratified points warped by area, density, curvature */
 /* ================================================================== */
 
 #define SW_GRID 18
@@ -50,6 +50,9 @@ static void demo_surface_cdf(void)
 	static double const colx[4] = { 0.0, 0.15, 0.6, 3.0 };
 	qaws_scalar cps[48], xi[2 * SW_N];
 	qaws_sample_measure_desc dens = { QAWS_MEASURE_DENSITY, 0, sw_spot, NULL };
+	qaws_sample_measure_desc curv = { QAWS_MEASURE_CURVATURE, (qaws_scalar)0.3, NULL, NULL };
+	qaws_sample_measure_desc const* ms[4] = { NULL, NULL, &dens, &curv };
+	char const* cols[4] = { "#cf222e", "#1a7f37", "#8250df", "#bc4c00" };
 	qaws_surface_bezier_desc d;
 	qaws_surface* surf = NULL;
 	qaws_surface_cdf_sample out[SW_N];
@@ -79,9 +82,9 @@ static void demo_surface_cdf(void)
 			rng = rng * 1664525u + 1013904223u;
 			xi[2 * (i * SW_GRID + j) + 1] = (qaws_scalar)((j + (rng >> 8) / 16777216.0) / SW_GRID);
 		}
-	svg_open(&s, "showcase/16_surface_cdf.svg", 1200, 520, "Surfaces: stratified points warped by inverse CDFs",
-		"324 jittered points of the unit square: used as (u, v) directly, then warped by the area and by a density field (marginal and conditional CDFs).");
-	for (panel = 0; panel < 3; panel++)
+	svg_open(&s, "showcase/16_surface_cdf.svg", 1590, 520, "Surfaces: stratified points warped by inverse CDFs",
+		"324 jittered points of the unit square: used as (u, v) directly, then warped by the area, a density field and the curvature sqrt(0.3^2 + k1^2 + k2^2) (marginal and conditional CDFs).");
+	for (panel = 0; panel < 4; panel++)
 	{
 		viewport v = { 30 + panel * 390, 80, 370, 420, 0, 1, 0, 1 };
 		projection pr;
@@ -90,7 +93,7 @@ static void demo_surface_cdf(void)
 		pr.scale = 82;
 		pr.zscale = 1.0;
 		svg_panel(&s, &v, panel == 0 ? "(u, v) = xi: crowded where the parameterization is" :
-			(panel == 1 ? "area measure: even on the surface" : "density measure: a bright spot"));
+			(panel == 1 ? "area measure: even on the surface" : (panel == 2 ? "density measure: a bright spot" : "curvature measure: gathers where the patch bends")));
 		sw_draw_patch(&s, &pr, surf);
 		if (panel == 0)
 		{
@@ -106,12 +109,12 @@ static void demo_surface_cdf(void)
 		else
 		{
 			qaws_scalar total = 0;
-			qaws_surface_cdf_sample_tangent(NULL, surf, panel == 2 ? &dens : NULL, xi, NULL, SW_N, 0, 0, NULL, out, NULL, NULL, &total);
+			qaws_surface_cdf_sample_tangent(NULL, surf, ms[panel], xi, NULL, SW_N, 0, 0, NULL, out, NULL, NULL, &total);
 			for (i = 0; i < SW_N; i++)
 			{
 				double sx, sy;
 				project(&pr, out[i].position.x, out[i].position.y, out[i].position.z, &sx, &sy);
-				svg_circle(&s, sx, sy, 2.1, panel == 2 ? "#8250df" : "#1a7f37", panel == 2 ? "#8250df" : "#1a7f37");
+				svg_circle(&s, sx, sy, 2.1, cols[panel], cols[panel]);
 			}
 			sprintf(buf, "total measure %.3f", (double)total);
 			svg_text(&s, v.x0 + 12, v.y0 + v.h - 12, 12, "#57606a", "start", buf);

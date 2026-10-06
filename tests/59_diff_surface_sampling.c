@@ -34,6 +34,7 @@ static qaws_scalar ss_density(qaws_vec3 p, void* user, qaws_vec3* g, qaws_scalar
 }
 
 static qaws_sample_measure_desc const g_ss_density = { QAWS_MEASURE_DENSITY, 0, ss_density, NULL };
+static qaws_sample_measure_desc const g_ss_curvature = { QAWS_MEASURE_CURVATURE, (qaws_scalar)0.5, NULL, NULL };
 
 /* kind 0: Bezier bicubic, 1: NURBS bicubic (weights in x[48..63]) */
 static qaws_surface* ss_surface(int kind, qaws_scalar const* x)
@@ -140,6 +141,50 @@ static void test_flat(void)
 	for (i = 0; i < SS_SAMPLES; i++)
 		ok &= diff_close(out[i].u, g_ss_xi[2 * i], 1e3 * DIFF_TOL) && diff_close(out[i].v, g_ss_xi[2 * i + 1], 1e3 * DIFF_TOL);
 	TEST_ASSERT(ok, "flat square: (u, v) are the points xi");
+	/* no curvature: the curvature measure is the floor times the area */
+	TEST_ASSERT(qaws_surface_cdf_sample_tangent(NULL, s, &g_ss_curvature, g_ss_xi, NULL, SS_SAMPLES, SS_CELLS, SS_QUAD, NULL, out,
+		NULL, NULL, &total) == QAWS_STATUS_OK, "flat square: curvature samples");
+	TEST_ASSERT(diff_close(total, 9 * 0.5, 1e3 * DIFF_TOL), "flat square: curvature measure 0.5 x 9");
+	qaws_surface_destroy(s);
+}
+
+/* Quarter cylinder of radius 2 and height 3 (exact NURBS): the principal
+   curvatures are 1/2 and 0, so the curvature measure is sqrt(f^2 + 1/4)
+   times the area 3 pi. */
+static void test_cylinder(void)
+{
+	double const r = 2, hgt = 3, c = sqrt(0.5);
+	qaws_vec3 cps[9];
+	qaws_scalar w[9], total = 0;
+	qaws_surface_nurbs_desc d;
+	qaws_surface* s = NULL;
+	qaws_surface_cdf_sample out[SS_SAMPLES];
+	unsigned int i, j;
+	double expect = sqrt(0.25 + 0.25) * 3 * 3.14159265358979323846;
+	for (i = 0; i < 3; i++)       /* u: around the circle */
+		for (j = 0; j < 3; j++)   /* v: along the axis */
+		{
+			qaws_vec3* p = &cps[i * 3 + j];
+			p->x = (qaws_scalar)(i == 0 ? r : (i == 1 ? r : 0));
+			p->y = (qaws_scalar)(i == 0 ? 0 : r);
+			p->z = (qaws_scalar)(hgt * j / 2.0);
+			w[i * 3 + j] = (qaws_scalar)(i == 1 ? c : 1.0);
+		}
+	memset(&d, 0, sizeof(d));
+	d.u_degree = 2;
+	d.v_degree = 2;
+	d.control_points = cps;
+	d.u_point_count = 3;
+	d.v_point_count = 3;
+	d.weights = w;
+	TEST_ASSERT_STATUS(qaws_surface_create_nurbs(&d, &s));
+	TEST_ASSERT(qaws_surface_cdf_sample_tangent(NULL, s, &g_ss_curvature, g_ss_xi, NULL, SS_SAMPLES, 8, 8, NULL, out, NULL, NULL,
+		&total) == QAWS_STATUS_OK, "quarter cylinder: curvature samples");
+	{
+		char msg[128];
+		sprintf(msg, "quarter cylinder: curvature measure sqrt(1/2) x 3 pi (%.12g vs %.12g)", (double)total, expect);
+		TEST_ASSERT(diff_close(total, expect, QAWS_SCALAR_IS_FLOAT ? 1e-4 : 1e-10), msg);
+	}
 	qaws_surface_destroy(s);
 }
 
@@ -265,6 +310,9 @@ int test_59_diff_surface_sampling_main(void)
 	test_surface(0, &g_ss_density, "Bezier patch, density");
 	test_surface(1, NULL, "NURBS patch, area");
 	test_surface(1, &g_ss_density, "NURBS patch, density");
+	test_surface(0, &g_ss_curvature, "Bezier patch, curvature");
+	test_surface(1, &g_ss_curvature, "NURBS patch, curvature");
+	test_cylinder();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
 }
