@@ -139,4 +139,48 @@ qaws_status qaws_curve_set_find_surface_intersections(
 	unsigned int* out_count,
 	qaws_surface_batch_stats* out_stats);
 
+/*
+ * Closest points on surfaces: for every query point, the nearest point over
+ * M surfaces at once. One grid over the flattened patches is searched ring
+ * by ring outward; a patch is refined while its box can beat the nearest
+ * true surface point seen (patch corners, then refined points), by Newton
+ * on (S - p) . S_u = (S - p) . S_v = 0 clamped to the domain, from the
+ * nearest point of the patch's two triangles. The nearest wins (the lower
+ * surface index on a tie). Local minima of the distance inside one patch
+ * that the seed does not reach are not reported: the flatness bound keeps
+ * patches close to planar.
+ */
+typedef struct qaws_surface_batch_closest_desc
+{
+	qaws_surface const* const* surfaces;
+	unsigned int surface_count;
+	qaws_scalar const* points;          /* point_count points of 3 scalars */
+	unsigned int point_count;
+	qaws_scalar max_distance;           /* 0 = no limit */
+	qaws_scalar flatness;               /* 0 = 2^-9 of the extent */
+} qaws_surface_batch_closest_desc;
+
+typedef struct qaws_surface_batch_closest
+{
+	unsigned int surface;               /* QAWS_CURVE_BATCH_NONE: none within max_distance */
+	qaws_scalar u, v;
+	qaws_scalar distance;
+	qaws_vec3 position;
+} qaws_surface_batch_closest;
+
+/* out_points receives point_count results; out_stats may be NULL
+   (candidate_count: patches refined, hit_count: points with a surface). */
+qaws_status qaws_surface_batch_find_closest(
+	qaws_surface_batch_closest_desc const* desc,
+	qaws_surface_batch_closest* out_points,
+	qaws_surface_batch_stats* out_stats);
+
+qaws_status qaws_surface_set_find_closest(
+	qaws_surface_set const* set,
+	qaws_scalar const* points,
+	unsigned int point_count,
+	qaws_scalar max_distance,
+	qaws_surface_batch_closest* out_points,
+	qaws_surface_batch_stats* out_stats);
+
 #endif /* QAWS_SURFACE_BATCH_H */

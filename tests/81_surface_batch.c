@@ -696,6 +696,104 @@ static void test_surface_sets(void)
 		qaws_surface_destroy(par[k]);
 }
 
+#define SBT_CQ 400
+#define SBT_CS (SBT_SURF + 2)
+
+/* closest points on paraboloids and tilted planes */
+static void test_surface_closest(void)
+{
+	static double const ph[2] = { 2.5, -0.3 }, ps[2] = { 0.2, -0.1 };
+	qaws_surface* sf[SBT_CS];
+	static qaws_scalar pts[3 * SBT_CQ];
+	static qaws_surface_batch_closest out[SBT_CQ], outs[SBT_CQ];
+	qaws_surface_batch_closest_desc d;
+	qaws_surface_batch_stats st;
+	qaws_surface_set* set = NULL;
+	qaws_surface_batch_desc sd;
+	unsigned int i, k, a, b, never_worse = 0, close = 0, same = 1, pair_worse = 0;
+	double t0, tb, tp, worst_gain = 0;
+	char msg[200];
+	for (k = 0; k < SBT_SURF; k++)
+		sf[k] = sbt_paraboloid(sbt_lift(k));
+	for (k = 0; k < 2; k++)
+		sf[SBT_SURF + k] = sbt_plane(ph[k], ps[k]);
+	for (i = 0; i < SBT_CQ; i++)
+	{
+		pts[3 * i] = (qaws_scalar)(-1.1 + 2.2 * sbt_rand());
+		pts[3 * i + 1] = (qaws_scalar)(-1.1 + 2.2 * sbt_rand());
+		pts[3 * i + 2] = (qaws_scalar)(-0.4 + 3.6 * sbt_rand());
+	}
+	memset(&d, 0, sizeof(d));
+	d.surfaces = (qaws_surface const* const*)sf;
+	d.surface_count = SBT_CS;
+	d.points = pts;
+	d.point_count = SBT_CQ;
+	t0 = sbt_now();
+	qaws_surface_batch_find_closest(&d, out, &st);
+	tb = sbt_now() - t0;
+	for (i = 0; i < SBT_CQ; i++)
+	{
+		double x = pts[3 * i], y = pts[3 * i + 1], z = pts[3 * i + 2], ref = 1e30;
+		/* planes: the orthogonal distance (the projection stays inside the patch) */
+		for (k = 0; k < 2; k++)
+		{
+			double dd = fabs(z - ph[k] - ps[k] * x) / sqrt(1 + ps[k] * ps[k]);
+			if (dd < ref)
+				ref = dd;
+		}
+		/* paraboloids: dense sampling of [-1, 1]^2 */
+		for (k = 0; k < SBT_SURF; k++)
+			for (a = 0; a <= 160; a++)
+				for (b = 0; b <= 160; b++)
+				{
+					double px = -1 + 2.0 * a / 160, py = -1 + 2.0 * b / 160, pz = px * px + py * py + sbt_lift(k);
+					double dd = sqrt((px - x) * (px - x) + (py - y) * (py - y) + (pz - z) * (pz - z));
+					if (dd < ref)
+						ref = dd;
+				}
+		never_worse += out[i].surface != QAWS_CURVE_BATCH_NONE && out[i].distance <= ref + (QAWS_SCALAR_IS_FLOAT ? 2e-5 : 1e-9);
+		close += ref - out[i].distance < 2e-2;   /* the sampling step on the steep flanks */
+		if (ref - out[i].distance > worst_gain)
+			worst_gain = ref - out[i].distance;
+	}
+	/* the prepared set gives the same answers */
+	memset(&sd, 0, sizeof(sd));
+	sd.surfaces = (qaws_surface const* const*)sf;
+	sd.surface_count = SBT_CS;
+	qaws_surface_set_create(&sd, &set);
+	qaws_surface_set_find_closest(set, pts, SBT_CQ, 0, outs, NULL);
+	for (i = 0; i < SBT_CQ; i++)
+		same &= outs[i].surface == out[i].surface && fabs(outs[i].distance - out[i].distance) < 1e-12;
+	qaws_surface_set_destroy(set);
+	/* every point against every surface with the pairwise call */
+	t0 = sbt_now();
+	for (i = 0; i < SBT_CQ; i++)
+	{
+		qaws_vec3 q, c;
+		double best = 1e30;
+		q.x = pts[3 * i]; q.y = pts[3 * i + 1]; q.z = pts[3 * i + 2];
+		for (k = 0; k < SBT_CS; k++)
+		{
+			qaws_scalar u = 0, v = 0;
+			if (qaws_surface_find_closest_point(sf[k], q, &u, &v, &c) == QAWS_STATUS_OK)
+			{
+				double dd = sqrt((c.x - q.x) * (c.x - q.x) + (c.y - q.y) * (c.y - q.y) + (c.z - q.z) * (c.z - q.z));
+				if (dd < best)
+					best = dd;
+			}
+		}
+		pair_worse += best > out[i].distance + 1e-6;
+	}
+	tp = sbt_now() - t0;
+	printf("    closest on surfaces: %u points x %u surfaces in %.4f s (%u patches, %u refined); never worse than dense sampling %u, within its resolution %u (largest gain %.1e); pairwise %.3f s, farther on %u points\n",
+		SBT_CQ, SBT_CS, tb, st.patch_count, st.candidate_count, never_worse, close, worst_gain, tp, pair_worse);
+	sprintf(msg, "closest points on surfaces: never farther than a dense sampling (%u of %u) and within its resolution", never_worse, SBT_CQ);
+	TEST_ASSERT(never_worse == SBT_CQ && close == SBT_CQ, msg);
+	TEST_ASSERT(same, "the prepared surface set gives the same closest points");
+	for (k = 0; k < SBT_CS; k++)
+		qaws_surface_destroy(sf[k]);
+}
+
 int test_81_surface_batch_main(void)
 {
 	g_pass = 0;
@@ -707,6 +805,7 @@ int test_81_surface_batch_main(void)
 	test_ssi();
 	test_exact_ssi();
 	test_surface_sets();
+	test_surface_closest();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
 }

@@ -146,3 +146,40 @@ the grid, the narrow phase and the chaining:
 Sets keep pointers to their surfaces, so the surfaces must outlive them
 unchanged. At equal flatness, the results equal the one-shot calls curve
 for curve and point for point (test 81).
+
+## Closest points on surfaces
+
+```c
+typedef struct qaws_surface_batch_closest_desc {
+	qaws_surface const* const* surfaces; unsigned int surface_count;
+	qaws_scalar const* points; unsigned int point_count;   /* 3 scalars per point */
+	qaws_scalar max_distance;                              /* 0 = no limit */
+	qaws_scalar flatness;
+} qaws_surface_batch_closest_desc;
+
+typedef struct qaws_surface_batch_closest {
+	unsigned int surface;             /* QAWS_CURVE_BATCH_NONE: none within max_distance */
+	qaws_scalar u, v, distance;
+	qaws_vec3 position;
+} qaws_surface_batch_closest;
+
+qaws_status qaws_surface_batch_find_closest(qaws_surface_batch_closest_desc const* desc,
+	qaws_surface_batch_closest* out_points, qaws_surface_batch_stats* out_stats);
+qaws_status qaws_surface_set_find_closest(qaws_surface_set const* set, qaws_scalar const* points, unsigned int point_count,
+	qaws_scalar max_distance, qaws_surface_batch_closest* out_points, qaws_surface_batch_stats* out_stats);
+```
+
+This returns, for every query point, the nearest point over all surfaces.
+
+1. One grid over the flattened patches is searched ring by ring outward
+   from the point. Patch corners lie on the surface and bound the search.
+2. Patches are refined nearest box first, while a box can beat the best
+   point. Each is seeded at the nearest point of its two triangles.
+3. Newton runs on (S − p) · S_u = (S − p) · S_v = 0 with the full
+   Hessian. Gauss-Newton is used where the Hessian is not positive.
+4. On the domain boundary, the parameter that would leave stays on its
+   bound and the other takes the 1D step along that edge.
+
+Test 81 runs 400 points against three paraboloids and two planes. No
+answer is farther than a 160 × 160 sampling of the surfaces, while the
+pairwise `qaws_surface_find_closest_point` lands farther on 32 of them.
