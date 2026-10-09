@@ -790,71 +790,132 @@ qaws_status qaws_exact_solve3(unsigned int const n[3], qaws_exact_int const* F, 
 	return st;
 }
 
+void qaws_exact_patch_box(qaws_exact_surface const* s, unsigned int iu, unsigned int iv, double lo[3], double hi[3])
+{
+	qaws_exact_int const* h = s->patch[iu * s->nv + iv];
+	unsigned int n = (s->p + 1) * (s->q + 1), j, k;
+	for (k = 0; k < 3; k++)
+	{
+		lo[k] = HUGE_VAL;
+		hi[k] = -HUGE_VAL;
+	}
+	for (j = 0; j < n; j++)
+		if (qaws_exact_int_sign(&h[j * 4 + 3]) <= 0)
+			return;   /* unbounded */
+	for (j = 0; j < n; j++)
+		for (k = 0; k < 3; k++)
+		{
+			/* correctly rounded (twice at worst, for subnormals): two ulps out are sound */
+			double v = qaws_exact_ratio_to_double(&h[j * 4 + k], &h[j * 4 + 3]);
+			double l = nextafter(nextafter(v, -HUGE_VAL), -HUGE_VAL), u = nextafter(nextafter(v, HUGE_VAL), HUGE_VAL);
+			if (l < lo[k]) lo[k] = l;
+			if (u > hi[k]) hi[k] = u;
+		}
+}
+
+qaws_status qaws_exact_span_patch_hits(qaws_exact_curve const* curve, unsigned int ks, qaws_exact_surface const* surface, unsigned int iu,
+	unsigned int iv, qaws_exact_curve_surface_hit* out, unsigned int capacity, unsigned int* count)
+{
+	qaws_exact_span const* cs = &curve->spans[ks];
+	qaws_exact_int const* h = surface->patch[iu * surface->nv + iv];
+	qaws_exact_int* F;
+	qaws_exact_box3* boxes;
+	unsigned int n[3], size, a, b, k, c, nb = 0, q;
+	qaws_status st = QAWS_STATUS_OK;
+	n[0] = surface->p;
+	n[1] = surface->q;
+	n[2] = cs->degree;
+	size = (n[0] + 1) * (n[1] + 1) * (n[2] + 1);
+	if (size > CS_MAX_SIZE)
+		return QAWS_STATUS_EXACT_UNSUPPORTED;
+	F = (qaws_exact_int*)cs_alloc(sizeof(qaws_exact_int) * 3 * size);
+	boxes = (qaws_exact_box3*)cs_alloc(sizeof(qaws_exact_box3) * 64);
+	if (!F || !boxes)
+		st = QAWS_STATUS_ALLOCATION_FAILURE;
+	/* F_c[a][b][k] = X_c[a][b] w_k - C_c[k] W[a][b] */
+	for (c = 0; c < 3 && st == QAWS_STATUS_OK; c++)
+		for (a = 0; a <= n[0] && st == QAWS_STATUS_OK; a++)
+			for (b = 0; b <= n[1] && st == QAWS_STATUS_OK; b++)
+				for (k = 0; k <= n[2] && st == QAWS_STATUS_OK; k++)
+				{
+					qaws_exact_int t1, t2;
+					unsigned int ab = a * (n[1] + 1) + b;
+					st = qaws_exact_int_mul(&t1, &h[ab * 4 + c], &cs->h[k * 4 + 3]);
+					if (st == QAWS_STATUS_OK) st = qaws_exact_int_mul(&t2, &cs->h[k * 4 + c], &h[ab * 4 + 3]);
+					if (st == QAWS_STATUS_OK) st = qaws_exact_int_sub(&F[c * size + ab * (n[2] + 1) + k], &t1, &t2);
+				}
+	if (st == QAWS_STATUS_OK)
+		st = qaws_exact_solve3(n, F, boxes, 64, &nb, CS_MAX_BOXES);
+	for (q = 0; q < nb && st == QAWS_STATUS_OK; q++)
+	{
+		qaws_exact_curve_surface_hit hit = { 0, 0, 0, 0, 0, 0 };
+		st = local_to_param(surface->ub[iu], surface->ub[iu + 1], surface->u_shift, boxes[q].lo[0], boxes[q].hi[0], boxes[q].dep[0], &hit.u_lo,
+			&hit.u_hi);
+		if (st == QAWS_STATUS_OK)
+			st = local_to_param(surface->vb[iv], surface->vb[iv + 1], surface->v_shift, boxes[q].lo[1], boxes[q].hi[1], boxes[q].dep[1],
+				&hit.v_lo, &hit.v_hi);
+		if (st == QAWS_STATUS_OK)
+			st = local_to_param(cs->a, cs->b, curve->param_shift, boxes[q].lo[2], boxes[q].hi[2], boxes[q].dep[2], &hit.t_lo, &hit.t_hi);
+		if (st != QAWS_STATUS_OK)
+			break;
+		if (*count >= capacity)
+		{
+			st = QAWS_STATUS_BUFFER_TOO_SMALL;
+			break;
+		}
+		out[(*count)++] = hit;
+	}
+	cs_free(F);
+	cs_free(boxes);
+	return st;
+}
+
+int qaws_exact_curve_surface_hits_overlap(qaws_exact_curve_surface_hit const* a, qaws_exact_curve_surface_hit const* b)
+{
+	return overlap(a->t_lo, a->t_hi, b->t_lo, b->t_hi) && overlap(a->u_lo, a->u_hi, b->u_lo, b->u_hi) && overlap(a->v_lo, a->v_hi, b->v_lo, b->v_hi);
+}
+
 qaws_status qaws_exact_curve_surface_hits(qaws_exact_curve const* curve, qaws_exact_surface const* surface, qaws_exact_curve_surface_hit* out_hits,
 	unsigned int capacity, unsigned int* out_count)
 {
-	unsigned int ks, iu, iv, count = 0;
-	qaws_exact_int* F = NULL;
-	qaws_exact_box3* boxes = NULL;
+	unsigned int ks, iu, iv, count = 0, k;
+	qaws_exact_curve_surface_hit tmp[64];
+	double (*pbox)[2][3] = NULL;
 	qaws_status st = QAWS_STATUS_OK;
 	if (!curve || !surface || !out_count || (!out_hits && capacity) || curve->dimension != 3)
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	*out_count = 0;
 	if (curve->space_exp2 != surface->space_exp2)
 		return QAWS_STATUS_EXACT_INCOMPATIBLE_SPACE;
-	F = (qaws_exact_int*)cs_alloc(sizeof(qaws_exact_int) * 3 * CS_MAX_SIZE);
-	boxes = (qaws_exact_box3*)cs_alloc(sizeof(qaws_exact_box3) * 64);
-	if (!F || !boxes)
-		st = QAWS_STATUS_ALLOCATION_FAILURE;
+	/* control boxes of the patches: a span and a patch with disjoint boxes cannot meet */
+	pbox = (double (*)[2][3])cs_alloc(sizeof(double) * 6 * surface->nu * surface->nv);
+	if (!pbox)
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	for (iu = 0; iu < surface->nu; iu++)
+		for (iv = 0; iv < surface->nv; iv++)
+			qaws_exact_patch_box(surface, iu, iv, pbox[iu * surface->nv + iv][0], pbox[iu * surface->nv + iv][1]);
 	for (ks = 0; ks < curve->span_count && st == QAWS_STATUS_OK; ks++)
 	{
-		qaws_exact_span const* cs = &curve->spans[ks];
-		unsigned int n[3], size;
-		n[0] = surface->p;
-		n[1] = surface->q;
-		n[2] = cs->degree;
-		size = (n[0] + 1) * (n[1] + 1) * (n[2] + 1);
-		if (size > CS_MAX_SIZE)
-		{
-			st = QAWS_STATUS_EXACT_UNSUPPORTED;
-			break;
-		}
+		double slo[3], shi[3];
+		qaws_exact_span_box(&curve->spans[ks], 3, slo, shi);
 		for (iu = 0; iu < surface->nu && st == QAWS_STATUS_OK; iu++)
 			for (iv = 0; iv < surface->nv && st == QAWS_STATUS_OK; iv++)
 			{
-				qaws_exact_int const* h = surface->patch[iu * surface->nv + iv];
-				unsigned int a, b, k, c, nb = 0, q;
-				/* F_c[a][b][k] = X_c[a][b] w_k - C_c[k] W[a][b] */
-				for (c = 0; c < 3 && st == QAWS_STATUS_OK; c++)
-					for (a = 0; a <= n[0] && st == QAWS_STATUS_OK; a++)
-						for (b = 0; b <= n[1] && st == QAWS_STATUS_OK; b++)
-							for (k = 0; k <= n[2] && st == QAWS_STATUS_OK; k++)
-							{
-								qaws_exact_int t1, t2;
-								unsigned int ab = a * (n[1] + 1) + b;
-								st = qaws_exact_int_mul(&t1, &h[ab * 4 + c], &cs->h[k * 4 + 3]);
-								if (st == QAWS_STATUS_OK) st = qaws_exact_int_mul(&t2, &cs->h[k * 4 + c], &h[ab * 4 + 3]);
-								if (st == QAWS_STATUS_OK) st = qaws_exact_int_sub(&F[c * size + ab * (n[2] + 1) + k], &t1, &t2);
-							}
-				if (st == QAWS_STATUS_OK)
-					st = qaws_exact_solve3(n, F, boxes, 64, &nb, CS_MAX_BOXES);
-				for (q = 0; q < nb && st == QAWS_STATUS_OK; q++)
+				double const* plo = pbox[iu * surface->nv + iv][0];
+				double const* phi = pbox[iu * surface->nv + iv][1];
+				unsigned int nt = 0, c, disjoint = 0;
+				for (c = 0; c < 3; c++)
+					if (slo[c] <= shi[c] && plo[c] <= phi[c] && (shi[c] < plo[c] || phi[c] < slo[c]))
+						disjoint = 1;
+				if (disjoint)
+					continue;
+				st = qaws_exact_span_patch_hits(curve, ks, surface, iu, iv, tmp, 64, &nt);
+				for (k = 0; k < nt && st == QAWS_STATUS_OK; k++)
 				{
-					qaws_exact_curve_surface_hit hit = { 0, 0, 0, 0, 0, 0 };
-					unsigned int r, dup = 0;
-					st = local_to_param(surface->ub[iu], surface->ub[iu + 1], surface->u_shift, boxes[q].lo[0], boxes[q].hi[0], boxes[q].dep[0], &hit.u_lo,
-						&hit.u_hi);
-					if (st == QAWS_STATUS_OK)
-						st = local_to_param(surface->vb[iv], surface->vb[iv + 1], surface->v_shift, boxes[q].lo[1], boxes[q].hi[1], boxes[q].dep[1],
-							&hit.v_lo, &hit.v_hi);
-					if (st == QAWS_STATUS_OK)
-						st = local_to_param(cs->a, cs->b, curve->param_shift, boxes[q].lo[2], boxes[q].hi[2], boxes[q].dep[2], &hit.t_lo, &hit.t_hi);
-					if (st != QAWS_STATUS_OK)
-						break;
 					/* a root on a patch or span edge is found by both: once */
-					for (r = 0; r < count && !dup; r++)
-						dup = overlap(out_hits[r].t_lo, out_hits[r].t_hi, hit.t_lo, hit.t_hi) && overlap(out_hits[r].u_lo, out_hits[r].u_hi, hit.u_lo, hit.u_hi) &&
-						      overlap(out_hits[r].v_lo, out_hits[r].v_hi, hit.v_lo, hit.v_hi);
+					unsigned int r, dup = 0;
+					for (r = 0; r < count && r < capacity && !dup; r++)
+						dup = qaws_exact_curve_surface_hits_overlap(&out_hits[r], &tmp[k]);
 					if (dup)
 						continue;
 					if (count >= capacity)
@@ -862,12 +923,11 @@ qaws_status qaws_exact_curve_surface_hits(qaws_exact_curve const* curve, qaws_ex
 						st = QAWS_STATUS_BUFFER_TOO_SMALL;
 						break;
 					}
-					out_hits[count++] = hit;
+					out_hits[count++] = tmp[k];
 				}
 			}
 	}
-	cs_free(F);
-	cs_free(boxes);
+	cs_free(pbox);
 	*out_count = count;
 	return st;
 }

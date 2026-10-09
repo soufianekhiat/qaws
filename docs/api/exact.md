@@ -289,6 +289,24 @@ others have shrunk. A root on a shared face is reported once.
 out: a tangency, the curve lying on the surface, or crossings closer than
 the subdivision can separate.
 
+### Curves x surfaces at once
+
+```c
+qaws_status qaws_exact_curve_surface_batch_hits(qaws_exact_surface_batch_desc const* desc, qaws_exact_curve_surface_batch_hit* out_hits,
+	unsigned int capacity, unsigned int* out_count, qaws_exact_batch_stats* out_stats);
+```
+
+The call takes N 3D exact curves and M exact surfaces in one exact space.
+Every span and patch gets a sound box from its control points: the
+correctly rounded ratios widened by two ulps, or an unbounded box when a
+weight is not positive. One grid gives the span / patch pairs whose boxes
+overlap, and each is certified as by `qaws_exact_curve_surface_hits`.
+
+A root on a span or patch edge is reported once. A curve / surface pair
+that fails certification is counted in `stats.uncertified_count`, and the
+call returns `QAWS_STATUS_CERTIFICATION_FAILED` after reporting every
+other pair.
+
 ## Certified surface / surface intersection curves
 
 ```c
@@ -376,6 +394,7 @@ Tangencies and overlaps return `QAWS_STATUS_CERTIFICATION_FAILED`.
 | curve / line (2D), curve / plane (3D) intersections | certified: exact points, one-root intervals, overlaps; non-dyadic tangencies refused |
 | curve / curve intersections (2D, 3D) | certified: implicitization of the lower-degree span, root isolation, exact inversion (span ends at irrational roots by a gcd test); 3D: exact zero test of the third coordinate |
 | N curves at once (2D, 3D) | certified: one grid over sound span boxes, only overlapping span pairs certified, families, uncertified pairs counted |
+| N curves x M surfaces at once | certified: one grid over sound span and patch boxes, only overlapping span / patch pairs certified |
 | self-intersections (2D, 3D) | certified: divided differences inside spans, span pairs, knots and closing points excluded, spans on one conic told apart |
 | line / surface intersections (ray casting) | certified: u, v and t enclosed, per patch Bezout elimination |
 | 2D Boolean operations (union, intersection, difference) | certified: pieces of the source curves, cut at certified crossings, classified by exact winding |

@@ -255,6 +255,7 @@ typedef struct qaws_exact_batch_stats
 	unsigned int candidate_count;   /* span pairs whose boxes overlap */
 	unsigned int uncertified_count; /* curve pairs that failed certification */
 	unsigned int hit_count;
+	unsigned int patch_count;       /* surface patches (curve / surface batch) */
 } qaws_exact_batch_stats;
 
 qaws_status qaws_exact_curve_batch_hits(qaws_exact_batch_desc const* desc, qaws_exact_batch_hit* out_hits, unsigned int capacity,
@@ -371,6 +372,36 @@ typedef struct qaws_exact_curve_surface_hit
  */
 qaws_status qaws_exact_curve_surface_hits(qaws_exact_curve const* curve, qaws_exact_surface const* surface, qaws_exact_curve_surface_hit* out_hits,
 	unsigned int capacity, unsigned int* out_count);
+
+/*
+ * Certified intersections of N 3D exact curves with M exact surfaces at
+ * once (one exact space). Every curve span and surface patch gets a sound
+ * box from its control points; one grid over all of them gives the
+ * span / patch pairs that may meet, and only those are certified as by
+ * qaws_exact_curve_surface_hits. Hits are sorted by (curve, surface, t_lo),
+ * a root on a span or patch edge reported once. A curve / surface pair that
+ * cannot be certified contributes no hits and is counted in
+ * stats.uncertified_count (the call then returns
+ * QAWS_STATUS_CERTIFICATION_FAILED); past `capacity`,
+ * QAWS_STATUS_BUFFER_TOO_SMALL. stats.span_count / patch_count count the pieces.
+ */
+typedef struct qaws_exact_surface_batch_desc
+{
+	qaws_exact_curve const* const* curves;
+	unsigned int curve_count;
+	qaws_exact_surface const* const* surfaces;
+	unsigned int surface_count;
+} qaws_exact_surface_batch_desc;
+
+typedef struct qaws_exact_curve_surface_batch_hit
+{
+	unsigned int curve;
+	unsigned int surface;
+	qaws_exact_curve_surface_hit hit;
+} qaws_exact_curve_surface_batch_hit;
+
+qaws_status qaws_exact_curve_surface_batch_hits(qaws_exact_surface_batch_desc const* desc, qaws_exact_curve_surface_batch_hit* out_hits,
+	unsigned int capacity, unsigned int* out_count, qaws_exact_batch_stats* out_stats);
 
 /* A point of a surface / surface intersection curve: (u1, v1) on a, (u2, v2) on b, enclosed. */
 typedef struct qaws_exact_ssi_point

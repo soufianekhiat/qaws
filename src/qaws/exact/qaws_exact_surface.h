@@ -31,4 +31,17 @@ qaws_status qaws_exact_surface_eval_rational(qaws_exact_surface const* s, int64_
 qaws_status qaws_exact_surface_normal_rational(qaws_exact_surface const* s, int64_t U, int64_t V, qaws_exact_int* num,
 	qaws_exact_int* den);
 
+/* Box of patch (iu, iv) in lattice units from its control net: sound (two
+   ulps outward) when every weight is positive, otherwise unbounded. */
+void qaws_exact_patch_box(qaws_exact_surface const* s, unsigned int iu, unsigned int iv, double lo[3], double hi[3]);
+
+/* Certified intersections of span ks of a 3D curve with patch (iu, iv),
+   appended to out without deduplication (a root on a span or patch edge is
+   found by both neighbours). */
+qaws_status qaws_exact_span_patch_hits(qaws_exact_curve const* curve, unsigned int ks, qaws_exact_surface const* surface, unsigned int iu,
+	unsigned int iv, qaws_exact_curve_surface_hit* out, unsigned int capacity, unsigned int* count);
+
+/* do two hits' enclosures overlap in t, u and v (the same root)? */
+int qaws_exact_curve_surface_hits_overlap(qaws_exact_curve_surface_hit const* a, qaws_exact_curve_surface_hit const* b);
+
 #endif /* QAWS_EXACT_SURFACE_H */
