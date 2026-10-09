@@ -176,3 +176,43 @@ Example: 128 parabola gradient lines against 128 levels of x² + 2y² give
 the 32768 crossings of the batch with contour curves, in 0.010 s instead of
 0.074 s. On the Gaussian heightfield of `qaws_batch_showcase` they are
 3 to 5 times faster than the batch against the traced contour curves.
+
+## Closest points
+
+```c
+typedef struct qaws_closest_desc {
+	qaws_curve const* const* curves; unsigned int curve_count;   /* all 2D or all 3D */
+	qaws_scalar const* points; unsigned int point_count;         /* 2 or 3 scalars per point */
+	qaws_scalar max_distance;                                    /* 0 = no limit */
+	qaws_scalar flatness;
+} qaws_closest_desc;
+
+typedef struct qaws_closest_point {
+	unsigned int curve;               /* QAWS_CURVE_BATCH_NONE: none within max_distance */
+	qaws_scalar parameter, distance;
+	qaws_vec3 position;
+} qaws_closest_point;
+
+qaws_status qaws_curve_batch_find_closest(qaws_closest_desc const* desc, qaws_closest_point* out_points,
+	qaws_curve_batch_stats* out_stats);
+qaws_status qaws_curve_set_find_closest(qaws_curve_set const* set, qaws_scalar const* points, unsigned int point_count,
+	qaws_scalar max_distance, qaws_closest_point* out_points, qaws_curve_batch_stats* out_stats);
+```
+
+This returns, for every query point, the nearest point over all curves.
+
+1. One grid over the flattened segments of every curve is searched ring by
+   ring outward from the point.
+2. A segment is kept while its chord distance minus its inflation can beat
+   the best chord distance plus inflation seen so far. The search stops
+   when the next ring is farther than that bound.
+3. The surviving segments are refined by Newton on (C(t) − p) · C'(t) = 0,
+   clamped to the curve's domain. The nearest true point wins, and the
+   lower curve index wins a tie.
+
+With `max_distance`, points farther than it from every curve get
+`QAWS_CURVE_BATCH_NONE`.
+
+Example: 2000 points against 40 concentric NURBS circles take 0.004 s,
+against about 0.31 s for `qaws_curve_find_closest_parameter_2d` on every
+curve. The distances match the closed form to about 1e-15 in 2D and 3D.

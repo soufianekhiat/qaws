@@ -547,6 +547,132 @@ static void test_levels(void)
 	}
 }
 
+#define CBT_RINGS 40
+#define CBT_QUERIES 2000
+
+/* nearest of concentric circles of radii 0.05 k: min |rho - r_k| */
+static void test_closest(void)
+{
+	qaws_curve* cs[CBT_RINGS];
+	qaws_curve* cs3[CBT_RINGS];
+	static qaws_scalar pts[CBT_QUERIES * 3], pts3[CBT_QUERIES * 3];
+	static qaws_closest_point out[CBT_QUERIES], out3[CBT_QUERIES], outs[CBT_QUERIES];
+	qaws_closest_desc d;
+	qaws_curve_batch_stats st;
+	qaws_curve_set* set = NULL;
+	qaws_curve_batch_desc sd;
+	unsigned int i, k, ok = 0, ok3 = 0, none_ok = 0, nfar = 0, same_set = 1, brute_ok = 0;
+	double worst = 0, worst3 = 0, t0, tb, tp, tol = QAWS_SCALAR_IS_FLOAT ? 1e-5 : 1e-9;
+	char msg[200];
+	for (k = 0; k < CBT_RINGS; k++)
+	{
+		double r = 0.05 * (k + 1);
+		cs[k] = cbt_ellipse(r, r, 0, 0);
+		cs3[k] = cbt_ellipse(r, r, 1, 0);
+	}
+	for (i = 0; i < CBT_QUERIES; i++)
+	{
+		double a = 2 * CBT_PI * cbt_rand(), rho = 2.2 * cbt_rand();
+		pts[2 * i] = (qaws_scalar)(rho * cos(a));
+		pts[2 * i + 1] = (qaws_scalar)(rho * sin(a));
+		pts3[3 * i] = pts[2 * i];
+		pts3[3 * i + 1] = pts[2 * i + 1];
+		pts3[3 * i + 2] = (qaws_scalar)(0.2 * (cbt_rand() - 0.5));
+	}
+	memset(&d, 0, sizeof(d));
+	d.curves = (qaws_curve const* const*)cs;
+	d.curve_count = CBT_RINGS;
+	d.points = pts;
+	d.point_count = CBT_QUERIES;
+	t0 = cbt_now();
+	qaws_curve_batch_find_closest(&d, out, &st);
+	tb = cbt_now() - t0;
+	for (i = 0; i < CBT_QUERIES; i++)
+	{
+		double rho = hypot(pts[2 * i], pts[2 * i + 1]), best = 1e30;
+		unsigned int bk = 0;
+		for (k = 0; k < CBT_RINGS; k++)
+			if (fabs(rho - 0.05 * (k + 1)) < best)
+			{
+				best = fabs(rho - 0.05 * (k + 1));
+				bk = k;
+			}
+		/* a point midway between two circles may go to either */
+		if (out[i].curve != QAWS_CURVE_BATCH_NONE && fabs(out[i].distance - best) < tol && (out[i].curve == bk || fabs(fabs(rho - 0.05 * (out[i].curve + 1)) - best) < tol))
+			ok++;
+		if (fabs(out[i].distance - best) > worst)
+			worst = fabs(out[i].distance - best);
+	}
+	/* 3D: the circles in z = 0, points off the plane: sqrt((rho - r)^2 + z^2) */
+	d.curves = (qaws_curve const* const*)cs3;
+	d.points = pts3;
+	qaws_curve_batch_find_closest(&d, out3, NULL);
+	for (i = 0; i < CBT_QUERIES; i++)
+	{
+		double rho = hypot(pts3[3 * i], pts3[3 * i + 1]), z = pts3[3 * i + 2], best = 1e30;
+		for (k = 0; k < CBT_RINGS; k++)
+			if (hypot(rho - 0.05 * (k + 1), z) < best)
+				best = hypot(rho - 0.05 * (k + 1), z);
+		ok3 += out3[i].curve != QAWS_CURVE_BATCH_NONE && fabs(out3[i].distance - best) < tol;
+		if (fabs(out3[i].distance - best) > worst3)
+			worst3 = fabs(out3[i].distance - best);
+	}
+	/* max_distance: beyond 2.0 + 0.1 no circle is near */
+	d.curves = (qaws_curve const* const*)cs;
+	d.points = pts;
+	d.max_distance = (qaws_scalar)0.1;
+	qaws_curve_batch_find_closest(&d, out3, NULL);
+	for (i = 0; i < CBT_QUERIES; i++)
+	{
+		double rho = hypot(pts[2 * i], pts[2 * i + 1]);
+		if (rho > 2.1 + 1e-9)
+		{
+			nfar++;
+			none_ok += out3[i].curve == QAWS_CURVE_BATCH_NONE;
+		}
+	}
+	/* the prepared set gives the same answers */
+	memset(&sd, 0, sizeof(sd));
+	sd.curves = (qaws_curve const* const*)cs;
+	sd.curve_count = CBT_RINGS;
+	qaws_curve_set_create(&sd, &set);
+	qaws_curve_set_find_closest(set, pts, CBT_QUERIES, 0, outs, NULL);
+	for (i = 0; i < CBT_QUERIES; i++)
+		same_set &= outs[i].curve == out[i].curve && fabs(outs[i].distance - out[i].distance) < 1e-12;
+	qaws_curve_set_destroy(set);
+	/* every point against every curve with the pairwise call (a tenth of the points) */
+	t0 = cbt_now();
+	for (i = 0; i < CBT_QUERIES / 10; i++)
+	{
+		qaws_vec2 q;
+		double best = 1e30;
+		q.x = pts[2 * i];
+		q.y = pts[2 * i + 1];
+		for (k = 0; k < CBT_RINGS; k++)
+		{
+			qaws_scalar t = 0;
+			qaws_eval_result_2d e;
+			qaws_curve_find_closest_parameter_2d(cs[k], q, &t);
+			qaws_curve_evaluate_2d(cs[k], t, QAWS_EVAL_FLAG_POSITION, &e);
+			if (hypot(e.position.x - q.x, e.position.y - q.y) < best)
+				best = hypot(e.position.x - q.x, e.position.y - q.y);
+		}
+		brute_ok += fabs(best - out[i].distance) < 1e-6;
+	}
+	tp = (cbt_now() - t0) * 10;
+	printf("    closest points: %u queries x %u circles in %.4f s (%u segments, %u refined); 3D worst %.1e; pairwise calls (extrapolated) %.3f s, agreeing on %u of %u\n",
+		CBT_QUERIES, CBT_RINGS, tb, st.segment_count, st.candidate_count, worst3, tp, brute_ok, CBT_QUERIES / 10);
+	sprintf(msg, "closest points: all %u queries at the closed-form distance (worst %.1e), in 2D and 3D", CBT_QUERIES, worst);
+	TEST_ASSERT(ok == CBT_QUERIES && ok3 == CBT_QUERIES && worst < tol && worst3 < tol, msg);
+	TEST_ASSERT(nfar > 0 && none_ok == nfar, "max_distance: points farther than it from every curve get none");
+	TEST_ASSERT(same_set, "the prepared set gives the same closest points");
+	for (k = 0; k < CBT_RINGS; k++)
+	{
+		qaws_curve_destroy(cs[k]);
+		qaws_curve_destroy(cs3[k]);
+	}
+}
+
 int test_79_curve_batch_main(void)
 {
 	g_pass = 0;
@@ -559,6 +685,7 @@ int test_79_curve_batch_main(void)
 	test_timing();
 	test_sets();
 	test_levels();
+	test_closest();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
 }

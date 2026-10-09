@@ -124,6 +124,42 @@ qaws_status qaws_curve_batch_find_level_crossings(
 	unsigned int* out_count);
 
 /*
+ * Closest points: for every query point, the nearest point over N curves
+ * at once. One grid over the flattened segments of all curves is searched
+ * ring by ring outward from each point, a segment kept while its chord
+ * distance minus its inflation can beat the best chord distance plus
+ * inflation seen; the survivors are refined by Newton on
+ * (C(t) - p) . C'(t) = 0 (clamped to the curve's domain) and the nearest
+ * true point wins (the lower curve index on a tie).
+ */
+#define QAWS_CURVE_BATCH_NONE 0xFFFFFFFFu
+
+typedef struct qaws_closest_desc
+{
+	qaws_curve const* const* curves;    /* all 2D or all 3D */
+	unsigned int curve_count;
+	qaws_scalar const* points;          /* point_count points of 2 or 3 scalars */
+	unsigned int point_count;
+	qaws_scalar max_distance;           /* 0 = no limit */
+	qaws_scalar flatness;               /* 0 = 2^-10 of the extent */
+} qaws_closest_desc;
+
+typedef struct qaws_closest_point
+{
+	unsigned int curve;                 /* QAWS_CURVE_BATCH_NONE: no curve within max_distance */
+	qaws_scalar parameter;
+	qaws_scalar distance;
+	qaws_vec3 position;                 /* z = 0 for 2D */
+} qaws_closest_point;
+
+/* out_points receives point_count results. out_stats may be NULL
+   (candidate_count: segments refined, hit_count: points with a curve). */
+qaws_status qaws_curve_batch_find_closest(
+	qaws_closest_desc const* desc,
+	qaws_closest_point* out_points,
+	qaws_curve_batch_stats* out_stats);
+
+/*
  * Prepared sets: the flattening (the costly part: curve evaluations) done
  * once, for curves queried again and again, e.g. fixed contour lines
  * against gradient lines that change. A set keeps pointers to its curves:
@@ -146,6 +182,15 @@ qaws_status qaws_curve_set_find_intersections_2d(
 	qaws_curve_batch_hit_2d* out_hits,
 	unsigned int hit_capacity,
 	unsigned int* out_count,
+	qaws_curve_batch_stats* out_stats);
+
+/* closest points of a prepared set (its own flatness) */
+qaws_status qaws_curve_set_find_closest(
+	qaws_curve_set const* set,
+	qaws_scalar const* points,
+	unsigned int point_count,
+	qaws_scalar max_distance,
+	qaws_closest_point* out_points,
 	qaws_curve_batch_stats* out_stats);
 
 qaws_status qaws_curve_set_find_intersections_3d(
