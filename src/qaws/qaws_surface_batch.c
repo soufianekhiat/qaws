@@ -674,25 +674,18 @@ static void ss_emit(ss_out* o, unsigned int a, unsigned int b, qaws_ssi_point co
 	o->npoint += n;
 }
 
-/* chains the segments [s0, s1) of one surface pair into polylines */
-static qaws_status ss_chain(ss_ctx* x, unsigned int s0, unsigned int s1, ss_out* o)
+/* Nodes of the segment graph in parent (union-find over the 2 m end points):
+   end points that coincide are joined, then each dangling end is bridged
+   to its nearest dangling partner within the bridge distance, one to one,
+   so runs of short segments never collapse. deg receives the final degree
+   of every root. */
+static qaws_status ss_nodes(ss_ctx const* x, ss_seg const* segs, unsigned int m, ss_end* ends, unsigned int* parent, unsigned int* deg)
 {
-	unsigned int m = s1 - s0, ne = 2 * m, i, j;
+	unsigned int ne = 2 * m, i, j;
 	qaws_scalar tight = 64 * x->pos_tol, bridge = 4 * x->flat + 16 * x->pos_tol;
-	ss_end* ends = (ss_end*)malloc(ne * sizeof(ss_end));
-	unsigned int* parent = (unsigned int*)malloc(ne * sizeof(unsigned int));
-	unsigned int* deg = (unsigned int*)calloc(ne, sizeof(unsigned int));
-	unsigned int* adj_start = (unsigned int*)calloc(ne + 1, sizeof(unsigned int));
-	unsigned int* adj = (unsigned int*)malloc(ne * sizeof(unsigned int));
-	unsigned char* used = (unsigned char*)calloc(m ? m : 1, 1);
-	qaws_ssi_point const** line = (qaws_ssi_point const**)malloc((m + 2) * sizeof(qaws_ssi_point*));
 	qaws_status st = QAWS_STATUS_OK;
-#define SS_PT(e) (&x->segs[s0 + (e) / 2].p[(e) % 2])
-	if (!ends || !parent || !deg || !adj_start || !adj || !used || !line)
-	{
-		st = QAWS_STATUS_ALLOCATION_FAILURE;
-		goto done;
-	}
+#define SS_PT(e) (&segs[(e) / 2].p[(e) % 2])
+	memset(deg, 0, ne * sizeof(unsigned int));
 	/* 1. end points that coincide (neighbouring triangle pairs compute the
 	   same edge / plane point): a tight union, along a sweep in x */
 	for (i = 0; i < ne; i++)
@@ -770,6 +763,215 @@ static qaws_status ss_chain(ss_ctx* x, unsigned int s0, unsigned int s1, ss_out*
 		}
 		free(br);
 	}
+	/* final degrees */
+	memset(deg, 0, ne * sizeof(unsigned int));
+	for (i = 0; i < m; i++)
+	{
+		unsigned int u = ss_find(parent, 2 * i), v = ss_find(parent, 2 * i + 1);
+		if (u != v)
+		{
+			deg[u]++;
+			deg[v]++;
+		}
+	}
+done:
+#undef SS_PT
+	return st;
+}
+
+/* is the point on a parameter boundary of either surface (a true open end)? */
+static int ss_on_boundary(qaws_surface const* sa, qaws_surface const* sb, qaws_ssi_point const* p)
+{
+	qaws_range r[4];
+	qaws_scalar v[4];
+	int k;
+	r[0] = qaws_surface_get_u_range(sa); r[1] = qaws_surface_get_v_range(sa);
+	r[2] = qaws_surface_get_u_range(sb); r[3] = qaws_surface_get_v_range(sb);
+	v[0] = p->u1; v[1] = p->v1; v[2] = p->u2; v[3] = p->v2;
+	for (k = 0; k < 4; k++)
+	{
+		qaws_scalar e = (r[k].max_value - r[k].min_value) * SB_PAR_REL;
+		if (v[k] <= r[k].min_value + e || v[k] >= r[k].max_value - e)
+			return 1;
+	}
+	return 0;
+}
+
+static qaws_status ss_append(ss_seg** L, unsigned int* m, unsigned int* cap, unsigned int a, unsigned int b, qaws_ssi_point const* p, qaws_ssi_point const* q)
+{
+	if (*m == *cap)
+	{
+		unsigned int c = *cap ? *cap * 2 : 64;
+		ss_seg* g = (ss_seg*)realloc(*L, c * sizeof(ss_seg));
+		if (!g)
+			return QAWS_STATUS_ALLOCATION_FAILURE;
+		*L = g;
+		*cap = c;
+	}
+	(*L)[*m].a = a;
+	(*L)[*m].b = b;
+	(*L)[*m].p[0] = *p;
+	(*L)[*m].p[1] = *q;
+	(*m)++;
+	return QAWS_STATUS_OK;
+}
+
+/* one predictor step of length h along T = n_a x n_b (oriented by dir),
+   corrected onto both surfaces */
+static int ss_step(ss_ctx* x, qaws_surface const* sa, qaws_surface const* sb, qaws_ssi_point* p, qaws_scalar* dir, qaws_scalar h)
+{
+	unsigned int flags = QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_DU | QAWS_SURFACE_EVAL_DV;
+	qaws_surface_eval_result ra, rb;
+	qaws_scalar au[3], av[3], bu[3], bv[3], na[3], nb[3], t[3], l, d[3];
+	qaws_surface_eval_result const* rr[2];
+	qaws_scalar const* uu[2];
+	qaws_scalar const* vv[2];
+	qaws_scalar delta[2][2];
+	int k, s;
+	if (qaws_surface_evaluate(sa, p->u1, p->v1, flags, &ra) != QAWS_STATUS_OK || qaws_surface_evaluate(sb, p->u2, p->v2, flags, &rb) != QAWS_STATUS_OK)
+		return 0;
+	au[0] = ra.du.x; au[1] = ra.du.y; au[2] = ra.du.z; av[0] = ra.dv.x; av[1] = ra.dv.y; av[2] = ra.dv.z;
+	bu[0] = rb.du.x; bu[1] = rb.du.y; bu[2] = rb.du.z; bv[0] = rb.dv.x; bv[1] = rb.dv.y; bv[2] = rb.dv.z;
+	sb_cross(au, av, na);
+	sb_cross(bu, bv, nb);
+	sb_cross(na, nb, t);
+	l = (qaws_scalar)sqrt(sb_dot(t, t));
+	if (!(l > 0))
+		return 0;
+	if (sb_dot(t, dir) < 0)
+		l = -l;
+	for (k = 0; k < 3; k++)
+		d[k] = h * t[k] / l;
+	/* parameter moves of each surface for the move d (least squares) */
+	rr[0] = &ra; rr[1] = &rb;
+	uu[0] = au; vv[0] = av; uu[1] = bu; vv[1] = bv;
+	for (s = 0; s < 2; s++)
+	{
+		qaws_scalar m00 = sb_dot(uu[s], uu[s]), m01 = sb_dot(uu[s], vv[s]), m11 = sb_dot(vv[s], vv[s]);
+		qaws_scalar g0 = sb_dot(uu[s], d), g1 = sb_dot(vv[s], d), det = m00 * m11 - m01 * m01;
+		if (!(det > 0))
+			return 0;
+		delta[s][0] = (m11 * g0 - m01 * g1) / det;
+		delta[s][1] = (m00 * g1 - m01 * g0) / det;
+	}
+	(void)rr;
+	p->u1 += delta[0][0]; p->v1 += delta[0][1];
+	p->u2 += delta[1][0]; p->v2 += delta[1][1];
+	for (k = 0; k < 3; k++)
+		dir[k] = d[k];
+	return ss_newton(x, sa, sb, p);
+}
+
+#define SS_MARCH_STEPS 96
+
+/* Gaps where the flattened triangles missed (a shallow crossing angle):
+   from every dangling end off the surface boundaries, march along the
+   intersection curve until another dangling end is within reach; the new
+   segments are appended to *L. */
+static qaws_status ss_close_gaps(ss_ctx* x, ss_seg** L, unsigned int* m, unsigned int* cap)
+{
+	unsigned int n0 = *m, ne = 2 * n0, i;
+	qaws_scalar h = 2 * x->flat;
+	qaws_surface const* sa = x->desc->surfaces[(*L)[0].a];
+	qaws_surface const* sb = x->desc->surfaces[(*L)[0].b];
+	unsigned int a = (*L)[0].a, b = (*L)[0].b;
+	ss_end* ends = (ss_end*)malloc(ne * sizeof(ss_end));
+	unsigned int* parent = (unsigned int*)malloc(ne * sizeof(unsigned int));
+	unsigned int* deg = (unsigned int*)calloc(ne, sizeof(unsigned int));
+	unsigned char* dangling = (unsigned char*)calloc(ne, 1);
+	qaws_status st = QAWS_STATUS_OK;
+#define SG_PT(e) (&(*L)[(e) / 2].p[(e) % 2])
+	if (!ends || !parent || !deg || !dangling)
+	{
+		st = QAWS_STATUS_ALLOCATION_FAILURE;
+		goto done;
+	}
+	/* the nodes after joining and bridging: only real gaps remain */
+	st = ss_nodes(x, *L, n0, ends, parent, deg);
+	if (st != QAWS_STATUS_OK)
+		goto done;
+	/* dangling: a node of degree 1 off the boundaries, marked on the end
+	   point whose segment leaves the node (it gives the outward direction) */
+	for (i = 0; i < ne; i++)
+	{
+		unsigned int r = ss_find(parent, i);
+		if (deg[r] == 1 && ss_find(parent, i ^ 1u) != r && !ss_on_boundary(sa, sb, SG_PT(i)))
+			dangling[i] = 1;
+	}
+	for (i = 0; i < ne && st == QAWS_STATUS_OK; i++)
+	{
+		qaws_ssi_point cur, nxt;
+		qaws_scalar dir[3];
+		unsigned int k, e = i;
+		if (!dangling[i])
+			continue;
+		dangling[i] = 0;
+		/* the end of the segment holding the root point i */
+		cur = *SG_PT(e);
+		{
+			qaws_ssi_point const* q = &(*L)[e / 2].p[1 - e % 2];
+			dir[0] = cur.position.x - q->position.x;
+			dir[1] = cur.position.y - q->position.y;
+			dir[2] = cur.position.z - q->position.z;
+		}
+		for (k = 0; k < SS_MARCH_STEPS && st == QAWS_STATUS_OK; k++)
+		{
+			unsigned int t, hit = ne;
+			nxt = cur;
+			if (!ss_step(x, sa, sb, &nxt, dir, h))
+				break;
+			/* another dangling end within reach closes the gap */
+			for (t = 0; t < ne; t++)
+				if (dangling[t] && ss_dist2(&nxt, SG_PT(t)) <= (qaws_scalar)2.25 * h * h)
+				{
+					hit = t;
+					break;
+				}
+			if (hit < ne)
+			{
+				qaws_ssi_point target = *SG_PT(hit);
+				st = ss_append(L, m, cap, a, b, &cur, &nxt);
+				if (st == QAWS_STATUS_OK)
+					st = ss_append(L, m, cap, a, b, &nxt, &target);
+				dangling[hit] = 0;
+				break;
+			}
+			st = ss_append(L, m, cap, a, b, &cur, &nxt);
+			if (ss_on_boundary(sa, sb, &nxt))
+				break;
+			cur = nxt;
+		}
+	}
+#undef SG_PT
+done:
+	free(ends);
+	free(parent);
+	free(deg);
+	free(dangling);
+	return st;
+}
+
+/* chains the m segments of one surface pair into polylines */
+static qaws_status ss_chain(ss_ctx* x, ss_seg const* segs, unsigned int m, ss_out* o)
+{
+	unsigned int ne = 2 * m, i;
+	ss_end* ends = (ss_end*)malloc(ne * sizeof(ss_end));
+	unsigned int* parent = (unsigned int*)malloc(ne * sizeof(unsigned int));
+	unsigned int* deg = (unsigned int*)calloc(ne, sizeof(unsigned int));
+	unsigned int* adj_start = (unsigned int*)calloc(ne + 1, sizeof(unsigned int));
+	unsigned int* adj = (unsigned int*)malloc(ne * sizeof(unsigned int));
+	unsigned char* used = (unsigned char*)calloc(m ? m : 1, 1);
+	qaws_ssi_point const** line = (qaws_ssi_point const**)malloc((m + 2) * sizeof(qaws_ssi_point*));
+	qaws_status st = QAWS_STATUS_OK;
+#define SS_PT(e) (&segs[(e) / 2].p[(e) % 2])
+	if (!ends || !parent || !deg || !adj_start || !adj || !used || !line)
+	{
+		st = QAWS_STATUS_ALLOCATION_FAILURE;
+		goto done;
+	}
+	st = ss_nodes(x, segs, m, ends, parent, deg);
+	if (st != QAWS_STATUS_OK)
+		goto done;
 	memset(deg, 0, ne * sizeof(unsigned int));
 	/* graph on the root nodes: segment s joins root(2s) and root(2s + 1) */
 	for (i = 0; i < m; i++)
@@ -830,7 +1032,7 @@ static qaws_status ss_chain(ss_ctx* x, unsigned int s0, unsigned int s1, ss_out*
 						if (s == (unsigned int)-1)
 							break;
 					}
-					ss_emit(o, x->segs[s0].a, x->segs[s0].b, line, n, closed);
+					ss_emit(o, segs[0].a, segs[0].b, line, n, closed);
 				}
 			}
 	}
@@ -911,7 +1113,19 @@ qaws_status qaws_surface_batch_find_intersections(
 		for (i = 1; i <= x.nseg && s == QAWS_STATUS_OK; i++)
 			if (i == x.nseg || x.segs[i].a != x.segs[g].a || x.segs[i].b != x.segs[g].b)
 			{
-				s = ss_chain(&x, g, i, &o);
+				/* the group's segments, gaps closed by marching, then chained */
+				unsigned int m = i - g, cap = m;
+				ss_seg* L = (ss_seg*)malloc(m * sizeof(ss_seg));
+				if (!L)
+				{
+					s = QAWS_STATUS_ALLOCATION_FAILURE;
+					break;
+				}
+				memcpy(L, x.segs + g, m * sizeof(ss_seg));
+				s = ss_close_gaps(&x, &L, &m, &cap);
+				if (s == QAWS_STATUS_OK)
+					s = ss_chain(&x, L, m, &o);
+				free(L);
 				g = i;
 			}
 		*out_curve_count = o.ncurve;

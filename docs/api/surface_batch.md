@@ -79,7 +79,12 @@ are processed in four steps:
 3. End points that coincide are joined. Each dangling end is then bridged
    to its nearest dangling partner within four flatness bounds, one to one,
    so runs of short segments never collapse.
-4. The segments are walked into open or closed polylines.
+4. Ends still dangling away from the surface boundaries mark real gaps,
+   where the triangles missed at a shallow crossing angle. From each one,
+   the call marches along the curve tangent n_a × n_b in steps of two
+   flatness bounds. Each step is corrected onto both surfaces, until
+   another dangling end is in reach.
+5. The segments are walked into open or closed polylines.
 
 A curve or point that does not fit in the buffers is not written, and the
 counts are the totals.
@@ -103,5 +108,11 @@ These are f64 timings from test 81 and `qaws_batch_showcase` (Release build).
 |---|---|---|
 | 300 lines × 3 paraboloids | 383 hits (closed form), 0.007 s | 385 (2 duplicates), 0.44 s |
 | 3 paraboloids × 6 planes | 19 curves, every circle closed / every arc, 0.009 s | marching: 6 curves, 0.18 s |
-| B-spline terrain × 16 planes (contours) | 32 curves, 0.013 s | marching: 5 curves, 0.16 s |
+| B-spline terrain × 16 planes (contours) | 31 curves (the certified count), 0.014 s | marching: 5 curves, 0.17 s |
 | 150 arcs × terrain | 129 impacts, 0.003 s | 129, 0.073 s |
+
+`qaws_exact_surface_batch_hits` gives certified intersection curves of N
+exact surfaces. It grids sound patch boxes, then runs each surface pair's
+certified solve on its overlapping patch pairs only. On the B-spline
+terrain against 16 planes it certifies 31 contour branches in 0.85 s. The
+float batch gives the same branch count on all 16 levels.

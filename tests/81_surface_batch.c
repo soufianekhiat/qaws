@@ -498,6 +498,98 @@ static void test_ssi(void)
 		qaws_surface_destroy(sf[k]);
 }
 
+#define SBT_EPLANES 7
+
+/* the certified surface batch: dyadic paraboloids x dyadic horizontal planes */
+static void test_exact_ssi(void)
+{
+	static double const ph[SBT_EPLANES] = { 0.25, 0.5, 1.0625, 1.25, 1.5, 1.6875, 1.9375 };
+	qaws_surface* sf[SBT_SURF + SBT_EPLANES];
+	qaws_exact_surface* es[SBT_SURF + SBT_EPLANES];
+	unsigned int fam[SBT_SURF + SBT_EPLANES], i, k, np = 0, nb = 0, closed_expected = 0, closed_ok = 0, outside = 0, same = 1, pair_points = 0;
+	static qaws_exact_ssi_point pts[1 << 14], pp[1 << 13];
+	static qaws_exact_ssi_batch_branch br[512];
+	static qaws_exact_ssi_branch pb[64];
+	qaws_exact_ssi_batch_desc d;
+	qaws_exact_batch_stats st;
+	qaws_exact_desc ed;
+	double t0, tb, tp;
+	qaws_status s;
+	char msg[240];
+	qaws_exact_desc_default(&ed);
+	ed.space_exp2 = -10;
+	for (k = 0; k < SBT_SURF + SBT_EPLANES; k++)
+	{
+		sf[k] = k < SBT_SURF ? sbt_paraboloid(sbt_lift(k)) : sbt_plane(ph[k - SBT_SURF], 0);
+		fam[k] = k >= SBT_SURF;
+		qaws_exact_surface_prepare(&ed, sf[k], &es[k], NULL);
+	}
+	memset(&d, 0, sizeof(d));
+	d.surfaces = (qaws_exact_surface const* const*)es;
+	d.surface_count = SBT_SURF + SBT_EPLANES;
+	d.families = fam;
+	t0 = sbt_now();
+	s = qaws_exact_surface_batch_hits(&d, pts, 1 << 14, &np, br, 512, &nb, &st);
+	tb = sbt_now() - t0;
+	for (i = 0; i < SBT_SURF; i++)
+		for (k = 0; k < SBT_EPLANES; k++)
+		{
+			double r2 = ph[k] - sbt_lift(i);
+			unsigned int c, nbr = 0, nclosed = 0, a;
+			for (c = 0; c < nb; c++)
+			{
+				if (br[c].surface_a != i || br[c].surface_b != SBT_SURF + k)
+					continue;
+				nbr++;
+				nclosed += br[c].branch.closed != 0;
+				for (a = 0; a < br[c].branch.count; a++)
+				{
+					/* x = 2 u - 1, y = 2 v - 1 on the paraboloid: x^2 + y^2 must reach r^2 */
+					qaws_exact_ssi_point const* p = &pts[br[c].branch.first + a];
+					double x0 = 2 * p->u1_lo - 1, x1 = 2 * p->u1_hi - 1, y0 = 2 * p->v1_lo - 1, y1 = 2 * p->v1_hi - 1;
+					double xl = x0 <= 0 && x1 >= 0 ? 0 : fmin(x0 * x0, x1 * x1), xh = fmax(x0 * x0, x1 * x1);
+					double yl = y0 <= 0 && y1 >= 0 ? 0 : fmin(y0 * y0, y1 * y1), yh = fmax(y0 * y0, y1 * y1);
+					if (xl + yl > r2 + 1e-9 || xh + yh < r2 - 1e-9)
+						outside++;
+				}
+			}
+			if (r2 > 0 && r2 < 0.95)
+			{
+				closed_expected++;
+				closed_ok += nbr == 1 && nclosed == 1;
+			}
+		}
+	/* pair by pair, every paraboloid / plane pair */
+	t0 = sbt_now();
+	for (i = 0; i < SBT_SURF; i++)
+		for (k = 0; k < SBT_EPLANES; k++)
+		{
+			unsigned int n = 0, m = 0, c, bp = 0, bb = 0;
+			qaws_status s2 = qaws_exact_surface_surface_hits(es[i], es[SBT_SURF + k], 0, pp, 1 << 13, &n, pb, 64, &m);
+			if (s2 != QAWS_STATUS_OK)
+				continue;
+			pair_points += n;
+			for (c = 0; c < nb; c++)
+				if (br[c].surface_a == i && br[c].surface_b == SBT_SURF + k)
+				{
+					bb++;
+					bp += br[c].branch.count;
+				}
+			same &= bb == m && bp == n;
+		}
+	tp = sbt_now() - t0;
+	printf("    exact: %u paraboloids x %u planes: %u patches, %u candidate patch pairs; %u branches, %u certified points in %.3f s (status %d, %u uncertified pair); pairwise exact %u points in %.3f s\n",
+		SBT_SURF, SBT_EPLANES, st.patch_count, st.candidate_count, nb, np, tb, (int)s, st.uncertified_count, pair_points, tp);
+	sprintf(msg, "certified surface batch: %u of %u interior circles one closed branch, every point box on its circle, the tangent pair alone uncertified", closed_ok, closed_expected);
+	TEST_ASSERT(s == QAWS_STATUS_CERTIFICATION_FAILED && st.uncertified_count == 1 && closed_ok == closed_expected && outside == 0, msg);
+	TEST_ASSERT(same && pair_points == np, "the same branches and points as the pairwise certified call");
+	for (k = 0; k < SBT_SURF + SBT_EPLANES; k++)
+	{
+		qaws_exact_surface_destroy(es[k]);
+		qaws_surface_destroy(sf[k]);
+	}
+}
+
 int test_81_surface_batch_main(void)
 {
 	g_pass = 0;
@@ -507,6 +599,7 @@ int test_81_surface_batch_main(void)
 	test_cubics();
 	test_exact();
 	test_ssi();
+	test_exact_ssi();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
 }
