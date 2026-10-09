@@ -10,6 +10,7 @@
  *   batch3_terrain.svg       the field as a B-spline terrain: contours as
  *                            intersections with planes, ballistic impacts
  *   batch4_exact_terrain.svg the terrain contours certified by the exact batch
+ *   batch5_closest.svg       points snapped to the nearest contour line
  *
  * Each figure lives in batch_showcase/NN_*.c, compiled as one translation
  * unit.
@@ -38,6 +39,7 @@
 #include "batch_showcase/02_exact_heightfield.c"
 #include "batch_showcase/03_terrain.c"
 #include "batch_showcase/04_exact_terrain.c"
+#include "batch_showcase/05_closest.c"
 
 int main(void)
 {
@@ -47,5 +49,6 @@ int main(void)
 	demo_exact_heightfield();
 	demo_terrain();
 	demo_exact_terrain();
+	demo_closest();
 	return 0;
 }
