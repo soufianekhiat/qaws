@@ -369,6 +369,10 @@ if(QAWS_BUILD_EXAMPLES)
   add_executable(qaws_batch_showcase examples/batch_showcase.c)
   target_link_libraries(qaws_batch_showcase PRIVATE Qaws::qaws)
   target_include_directories(qaws_batch_showcase PRIVATE "${PROJECT_SOURCE_DIR}/src/qaws")
+  if(NOT WIN32)
+    find_package(Threads REQUIRED)
+    target_link_libraries(qaws_batch_showcase PRIVATE Threads::Threads)
+  endif()
   if(MSVC)
     target_compile_definitions(qaws_batch_showcase PRIVATE _CRT_SECURE_NO_WARNINGS)
   endif()
@@ -434,6 +438,7 @@ if(QAWS_INSTALL)
       src/qaws/qaws_traversal.h
       src/qaws/qaws_inspect.h
       src/qaws/qaws_curve_batch.h
+      src/qaws/qaws_batch_executor.h
       src/qaws/qaws_surface_batch.h
       src/qaws/qaws_operations.h
       src/qaws/qaws_convert.h

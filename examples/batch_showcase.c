@@ -13,6 +13,7 @@
  *   batch5_closest.svg       points snapped to the nearest contour line
  *   batch6_surface_closest.svg points snapped to the nearest terrain point
  *   batch7_raytrace.svg      the terrain ray traced: camera and shadow rays
+ *   batch8_threads.svg       every batch on 1 to 16 threads of the caller
  *
  * Each figure lives in batch_showcase/NN_*.c, compiled as one translation
  * unit.
@@ -44,6 +45,7 @@
 #include "batch_showcase/05_closest.c"
 #include "batch_showcase/06_surface_closest.c"
 #include "batch_showcase/07_raytrace.c"
+#include "batch_showcase/08_threads.c"
 
 int main(void)
 {
@@ -56,5 +58,6 @@ int main(void)
 	demo_closest();
 	demo_surface_closest();
 	demo_raytrace();
+	demo_threads();
 	return 0;
 }

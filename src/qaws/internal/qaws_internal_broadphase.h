@@ -61,4 +61,17 @@ double qaws_internal_grid_ring(qaws_bp_grid const* grid, double const* p, unsign
 int qaws_internal_grid_ray(qaws_bp_grid const* grid, double const* o, double const* d, double tmax,
 	int (*visit)(void* user, unsigned int const* items, unsigned int count, double t_exit), void* user);
 
+/*
+ * The pair walk of qaws_internal_broadphase over a built grid, its cells in
+ * chunks run through the executor (any order, any thread): visit gets the
+ * chunk of the cell it runs in, one of qaws_internal_grid_pair_chunks(grid),
+ * for per-chunk storage. out_candidates (may be NULL): the pairs visited.
+ */
+struct qaws_batch_executor;
+unsigned int qaws_internal_grid_cells(qaws_bp_grid const* grid);
+unsigned int qaws_internal_grid_pair_chunks(qaws_bp_grid const* grid);
+qaws_status qaws_internal_grid_pairs(qaws_bp_grid const* grid, qaws_bp_box const* boxes, qaws_bp_accept accept, void* accept_user,
+	qaws_status (*visit)(void* user, unsigned int chunk, unsigned int i, unsigned int j), void* visit_user, struct qaws_batch_executor const* executor,
+	unsigned int* out_candidates);
+
 #endif /* QAWS_INTERNAL_BROADPHASE_H */

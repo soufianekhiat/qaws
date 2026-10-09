@@ -1,4 +1,5 @@
 #include "qaws_internal_broadphase.h"
+#include "qaws_internal_parallel.h"
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -181,35 +182,20 @@ done:
 	return QAWS_STATUS_ALLOCATION_FAILURE;
 }
 
-qaws_status qaws_internal_broadphase(
-	qaws_bp_box const* boxes,
-	unsigned int count,
-	unsigned int dim,
-	qaws_bp_accept accept,
-	qaws_bp_visit visit,
-	void* user,
-	qaws_bp_stats* out_stats)
+/* the pairs of cells [c0, c1), each in the cell holding the low corner of the overlap */
+static qaws_status bp_cells(struct qaws_bp_grid const* GR, qaws_bp_box const* boxes, qaws_bp_accept accept, void* accept_user,
+	qaws_status (*visit)(void* user, unsigned int chunk, unsigned int i, unsigned int j), void* user, unsigned int chunk, unsigned int c0,
+	unsigned int c1, unsigned int* candidates)
 {
-	struct qaws_bp_grid GR;
-	unsigned int i, k;
-	qaws_status s;
-	if (out_stats)
-		memset(out_stats, 0, sizeof(*out_stats));
-	if (count < 2)
-		return QAWS_STATUS_OK;
-	s = bp_build(boxes, count, dim, &GR);
-	if (s != QAWS_STATUS_OK)
-		return s;
-	if (out_stats)
-		out_stats->cell_count = GR.ncell;
-	/* pairs, each in the cell holding the low corner of the overlap */
-	for (i = 0; i < GR.ncell && s == QAWS_STATUS_OK; i++)
+	unsigned int i, k, dim = GR->dim;
+	qaws_status s = QAWS_STATUS_OK;
+	for (i = c0; i < c1 && s == QAWS_STATUS_OK; i++)
 	{
 		unsigned int e, f;
-		for (e = GR.start[i]; e < GR.start[i + 1] && s == QAWS_STATUS_OK; e++)
-			for (f = e + 1; f < GR.start[i + 1] && s == QAWS_STATUS_OK; f++)
+		for (e = GR->start[i]; e < GR->start[i + 1] && s == QAWS_STATUS_OK; e++)
+			for (f = e + 1; f < GR->start[i + 1] && s == QAWS_STATUS_OK; f++)
 			{
-				unsigned int p = GR.items[e], q = GR.items[f], lo_i = p < q ? p : q, hi_i = p < q ? q : p;
+				unsigned int p = GR->items[e], q = GR->items[f], lo_i = p < q ? p : q, hi_i = p < q ? q : p;
 				qaws_bp_box const* A = &boxes[p];
 				qaws_bp_box const* B = &boxes[q];
 				int ua = bp_unbounded(A, dim), ub = bp_unbounded(B, dim), over = 1;
@@ -232,20 +218,63 @@ qaws_status qaws_internal_broadphase(
 						c = A->lo[k] > B->lo[k] ? A->lo[k] : B->lo[k];
 					}
 					else if (ua && ub)
-						c = GR.G.lo[k];
+						c = GR->G.lo[k];
 					else
 						c = ua ? B->lo[k] : A->lo[k];
-					cell[k] = bp_cell(&GR.G, c, k);
+					cell[k] = bp_cell(&GR->G, c, k);
 				}
-				if (!over || (cell[2] * GR.G.g[1] + cell[1]) * GR.G.g[0] + cell[0] != i)
+				if (!over || (cell[2] * GR->G.g[1] + cell[1]) * GR->G.g[0] + cell[0] != i)
 					continue;
-				if (accept && !accept(user, lo_i, hi_i))
+				if (accept && !accept(accept_user, lo_i, hi_i))
 					continue;
-				if (out_stats)
-					out_stats->candidate_count++;
-				s = visit(user, lo_i, hi_i);
+				(*candidates)++;
+				s = visit(user, chunk, lo_i, hi_i);
 			}
 	}
+	return s;
+}
+
+typedef struct bp_serial
+{
+	qaws_bp_visit visit;
+	void* user;
+} bp_serial;
+
+static qaws_status bp_serial_visit(void* user, unsigned int chunk, unsigned int i, unsigned int j)
+{
+	bp_serial const* b = (bp_serial const*)user;
+	(void)chunk;
+	return b->visit(b->user, i, j);
+}
+
+
+qaws_status qaws_internal_broadphase(
+	qaws_bp_box const* boxes,
+	unsigned int count,
+	unsigned int dim,
+	qaws_bp_accept accept,
+	qaws_bp_visit visit,
+	void* user,
+	qaws_bp_stats* out_stats)
+{
+	struct qaws_bp_grid GR;
+	bp_serial b;
+	unsigned int candidates = 0;
+	qaws_status s;
+	if (out_stats)
+		memset(out_stats, 0, sizeof(*out_stats));
+	if (count < 2)
+		return QAWS_STATUS_OK;
+	s = bp_build(boxes, count, dim, &GR);
+	if (s != QAWS_STATUS_OK)
+		return s;
+	if (out_stats)
+		out_stats->cell_count = GR.ncell;
+	b.visit = visit;
+	b.user = user;
+	s = bp_cells(&GR, boxes, accept, user, bp_serial_visit, &b, 0, 0, GR.ncell, &candidates);
+	if (out_stats)
+		out_stats->candidate_count = candidates;
 	free(GR.start);
 	free(GR.items);
 	return s;
@@ -393,4 +422,60 @@ int qaws_internal_grid_ray(qaws_bp_grid const* g, double const* o, double const*
 			return 0;
 		tnext[a] += tstep[a];
 	}
+}
+
+#define BP_PAIR_GRAIN 64   /* cells per chunk */
+
+unsigned int qaws_internal_grid_pair_chunks(qaws_bp_grid const* grid)
+{
+	return qaws_internal_chunk_count(grid->ncell, BP_PAIR_GRAIN);
+}
+
+typedef struct bp_par
+{
+	struct qaws_bp_grid const* GR;
+	qaws_bp_box const* boxes;
+	qaws_bp_accept accept;
+	void* accept_user;
+	qaws_status (*visit)(void* user, unsigned int chunk, unsigned int i, unsigned int j);
+	void* visit_user;
+	unsigned int* candidates;    /* one per chunk */
+} bp_par;
+
+static qaws_status bp_par_job(void* ctx, unsigned int chunk, unsigned int begin, unsigned int end)
+{
+	bp_par const* P = (bp_par const*)ctx;
+	return bp_cells(P->GR, P->boxes, P->accept, P->accept_user, P->visit, P->visit_user, chunk, begin, end, &P->candidates[chunk]);
+}
+
+qaws_status qaws_internal_grid_pairs(qaws_bp_grid const* grid, qaws_bp_box const* boxes, qaws_bp_accept accept, void* accept_user,
+	qaws_status (*visit)(void* user, unsigned int chunk, unsigned int i, unsigned int j), void* visit_user, qaws_batch_executor const* executor,
+	unsigned int* out_candidates)
+{
+	bp_par P;
+	unsigned int k, n = qaws_internal_grid_pair_chunks(grid);
+	qaws_status s;
+	if (out_candidates)
+		*out_candidates = 0;
+	if (n == 0)
+		return QAWS_STATUS_OK;
+	P.GR = grid;
+	P.boxes = boxes;
+	P.accept = accept;
+	P.accept_user = accept_user;
+	P.visit = visit;
+	P.visit_user = visit_user;
+	P.candidates = (unsigned int*)calloc(n, sizeof(unsigned int));
+	if (!P.candidates)
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	s = qaws_internal_parallel(executor, grid->ncell, BP_PAIR_GRAIN, bp_par_job, &P);
+	for (k = 0; k < n && out_candidates; k++)
+		*out_candidates += P.candidates[k];
+	free(P.candidates);
+	return s;
+}
+
+unsigned int qaws_internal_grid_cells(qaws_bp_grid const* grid)
+{
+	return grid->ncell;
 }

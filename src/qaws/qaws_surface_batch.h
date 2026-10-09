@@ -28,6 +28,7 @@ typedef struct qaws_curve_surface_batch_desc
 	qaws_surface const* const* surfaces;
 	unsigned int surface_count;
 	qaws_scalar flatness;                   /* deviation bound; 0 = 2^-9 of the scene extent */
+	qaws_batch_executor const* executor;   /* optional: runs the work in parallel */
 } qaws_curve_surface_batch_desc;
 
 /* sorted by (curve, surface, t) */

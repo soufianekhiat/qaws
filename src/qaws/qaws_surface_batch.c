@@ -211,10 +211,59 @@ static int sb_accept(void* user, unsigned int i, unsigned int j)
 	return i < x->nseg && j >= x->nseg;
 }
 
-static qaws_status sb_visit(void* user, unsigned int i, unsigned int j)
+static qaws_status sb_visit_chunk(void* user, unsigned int chunk, unsigned int i, unsigned int j)
 {
-	sb_ctx* x = (sb_ctx*)user;
-	return sb_pair(x, &x->segs[i], &x->patches[j - x->nseg]);
+	sb_ctx* c = &((sb_ctx*)user)[chunk];
+	return sb_pair(c, &c->segs[i], &c->patches[j - c->nseg]);
+}
+
+/* the segment / patch pairs, cells in chunks with their own hit lists */
+static qaws_status sb_pairs(sb_ctx* x, qaws_bp_box const* boxes, unsigned int n)
+{
+	qaws_bp_grid* grid = NULL;
+	sb_ctx* ch = NULL;
+	unsigned int k, nch = 0, cand = 0;
+	qaws_status s = qaws_internal_grid_create(boxes, n, 3, &grid);
+	if (s == QAWS_STATUS_OK)
+		nch = qaws_internal_grid_pair_chunks(grid);
+	if (s == QAWS_STATUS_OK && nch)
+	{
+		ch = (sb_ctx*)malloc(nch * sizeof(sb_ctx));
+		if (!ch)
+			s = QAWS_STATUS_ALLOCATION_FAILURE;
+		for (k = 0; s == QAWS_STATUS_OK && k < nch; k++)
+		{
+			ch[k] = *x;
+			ch[k].hits = NULL;
+			ch[k].nhit = ch[k].caphit = 0;
+			memset(&ch[k].stats, 0, sizeof(ch[k].stats));
+		}
+		if (s == QAWS_STATUS_OK)
+			s = qaws_internal_grid_pairs(grid, boxes, sb_accept, x, sb_visit_chunk, ch, x->desc->executor, &cand);
+		for (k = 0; ch && k < nch; k++)
+		{
+			if (s == QAWS_STATUS_OK && ch[k].nhit)
+			{
+				sb_hit* g = (sb_hit*)realloc(x->hits, (x->nhit + ch[k].nhit) * sizeof(sb_hit));
+				if (!g)
+					s = QAWS_STATUS_ALLOCATION_FAILURE;
+				else
+				{
+					memcpy(g + x->nhit, ch[k].hits, ch[k].nhit * sizeof(sb_hit));
+					x->hits = g;
+					x->nhit += ch[k].nhit;
+					x->caphit = x->nhit;
+				}
+			}
+			x->stats.newton_count += ch[k].stats.newton_count;
+			free(ch[k].hits);
+		}
+	}
+	x->stats.cell_count = grid ? qaws_internal_grid_cells(grid) : 0;
+	x->stats.candidate_count = cand;
+	free(ch);
+	qaws_internal_grid_destroy(grid);
+	return s;
 }
 
 static int sb_cmp(void const* p, void const* q)
@@ -257,7 +306,6 @@ static void sb_merge(sb_ctx* x)
 static qaws_status sb_solve(sb_ctx* x, qaws_curve_surface_batch_hit* out_hits, unsigned int hit_capacity, unsigned int* out_count)
 {
 	qaws_bp_box* boxes = NULL;
-	qaws_bp_stats bs;
 	unsigned int i, k, n;
 	qaws_status s = QAWS_STATUS_OK;
 	x->stats.segment_count = x->nseg;
@@ -273,9 +321,7 @@ static qaws_status sb_solve(sb_ctx* x, qaws_curve_surface_batch_hit* out_hits, u
 				boxes[i].lo[k] = (double)(i < x->nseg ? x->segs[i].lo[k] : x->patches[i - x->nseg].lo[k]);
 				boxes[i].hi[k] = (double)(i < x->nseg ? x->segs[i].hi[k] : x->patches[i - x->nseg].hi[k]);
 			}
-		s = qaws_internal_broadphase(boxes, x->nseg + x->npatch, 3, sb_accept, sb_visit, x, &bs);
-		x->stats.cell_count = bs.cell_count;
-		x->stats.candidate_count = bs.candidate_count;
+		s = sb_pairs(x, boxes, x->nseg + x->npatch);
 		free(boxes);
 	}
 	if (s != QAWS_STATUS_OK)
@@ -420,6 +466,7 @@ qaws_status qaws_curve_set_find_surface_intersections(
 	d.curve_count = curves->desc.curve_count;
 	d.surfaces = surfaces->desc.surfaces;
 	d.surface_count = surfaces->desc.surface_count;
+	d.executor = curves->desc.executor;
 	memset(&x, 0, sizeof(x));
 	x.desc = &d;
 	/* the prepared pieces as they are */
@@ -699,10 +746,60 @@ static int ss_accept(void* user, unsigned int i, unsigned int j)
 	return a != b && (!x->desc->families || x->desc->families[a] != x->desc->families[b]);
 }
 
-static qaws_status ss_visit(void* user, unsigned int i, unsigned int j)
+static qaws_status ss_visit_chunk(void* user, unsigned int chunk, unsigned int i, unsigned int j)
 {
-	ss_ctx* x = (ss_ctx*)user;
-	return ss_pair(x, &x->patches[i], &x->patches[j]);
+	ss_ctx* c = &((ss_ctx*)user)[chunk];
+	return ss_pair(c, &c->patches[i], &c->patches[j]);
+}
+
+/* the patch pairs, cells in chunks with their own segment lists (merged in
+   chunk order: the result does not depend on the executor) */
+static qaws_status ss_pairs(ss_ctx* x, qaws_bp_box const* boxes, unsigned int n)
+{
+	qaws_bp_grid* grid = NULL;
+	ss_ctx* ch = NULL;
+	unsigned int k, nch = 0, cand = 0;
+	qaws_status s = qaws_internal_grid_create(boxes, n, 3, &grid);
+	if (s == QAWS_STATUS_OK)
+		nch = qaws_internal_grid_pair_chunks(grid);
+	if (s == QAWS_STATUS_OK && nch)
+	{
+		ch = (ss_ctx*)malloc(nch * sizeof(ss_ctx));
+		if (!ch)
+			s = QAWS_STATUS_ALLOCATION_FAILURE;
+		for (k = 0; s == QAWS_STATUS_OK && k < nch; k++)
+		{
+			ch[k] = *x;
+			ch[k].segs = NULL;
+			ch[k].nseg = ch[k].capseg = 0;
+			memset(&ch[k].stats, 0, sizeof(ch[k].stats));
+		}
+		if (s == QAWS_STATUS_OK)
+			s = qaws_internal_grid_pairs(grid, boxes, ss_accept, x, ss_visit_chunk, ch, x->desc->executor, &cand);
+		for (k = 0; ch && k < nch; k++)
+		{
+			if (s == QAWS_STATUS_OK && ch[k].nseg)
+			{
+				ss_seg* g = (ss_seg*)realloc(x->segs, (x->nseg + ch[k].nseg) * sizeof(ss_seg));
+				if (!g)
+					s = QAWS_STATUS_ALLOCATION_FAILURE;
+				else
+				{
+					memcpy(g + x->nseg, ch[k].segs, ch[k].nseg * sizeof(ss_seg));
+					x->segs = g;
+					x->nseg += ch[k].nseg;
+					x->capseg = x->nseg;
+				}
+			}
+			x->stats.newton_count += ch[k].stats.newton_count;
+			free(ch[k].segs);
+		}
+	}
+	x->stats.cell_count = grid ? qaws_internal_grid_cells(grid) : 0;
+	x->stats.candidate_count = cand;
+	free(ch);
+	qaws_internal_grid_destroy(grid);
+	return s;
 }
 
 static int ss_cmp_seg(void const* p, void const* q)
@@ -1159,7 +1256,6 @@ done:
 static qaws_status ss_solve(ss_ctx* x, ss_out* o)
 {
 	qaws_bp_box* boxes;
-	qaws_bp_stats bs;
 	unsigned int i, k, g = 0;
 	qaws_status s = QAWS_STATUS_OK;
 	x->stats.patch_count = x->npatch;
@@ -1174,9 +1270,7 @@ static qaws_status ss_solve(ss_ctx* x, ss_out* o)
 				boxes[i].lo[k] = (double)x->patches[i].lo[k];
 				boxes[i].hi[k] = (double)x->patches[i].hi[k];
 			}
-		s = qaws_internal_broadphase(boxes, x->npatch, 3, ss_accept, ss_visit, x, &bs);
-		x->stats.cell_count = bs.cell_count;
-		x->stats.candidate_count = bs.candidate_count;
+		s = ss_pairs(x, boxes, x->npatch);
 		free(boxes);
 	}
 	if (s != QAWS_STATUS_OK)
@@ -1320,6 +1414,7 @@ qaws_status qaws_surface_set_find_intersections(
 		d.surfaces = surfs;
 		d.surface_count = na + nb;
 		d.families = fam;
+		d.executor = set->desc.executor;
 		x.desc = &d;
 		x.patches = patches;
 		x.npatch = set->npatch + other->npatch;

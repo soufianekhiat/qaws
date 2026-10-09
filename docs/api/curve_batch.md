@@ -231,19 +231,36 @@ qaws has no threads of its own. Every batch desc ends with an optional
 `qaws_batch_executor const* executor`. Prepared sets copy it from the desc
 they are created with.
 
-- The batch splits its independent work into at most 256 chunks it owns.
-  The work is query points, rays, or segments for level crossings.
+- The batch splits its independent work into at most 256 chunks it owns:
+  query points or rays (closest points, ray casting, the certified ones
+  too), segments (level crossings), the cells of the broad-phase grid
+  (curve, curve x surface and surface x surface intersections, float and
+  certified), or the surface pairs of the certified surface batch.
 - The executor's `parallel_for` must call `task(ctx, begin, end)` over
   ranges covering `[0, count)` exactly once, on any threads in any order,
-  and return when all are done.
-- Each chunk has its own scratch memory and statistics, so the results are
-  identical whatever the executor does.
+  and return when all are done. A chunk left out makes the batch return
+  `QAWS_STATUS_INTERNAL_ERROR`.
+- Each chunk has its own scratch memory, hit lists and statistics, merged
+  in chunk order afterwards, so the results are identical whatever the
+  executor does.
 - Without an executor, the work runs on the calling thread.
 
-It currently covers closest points on curves and surfaces, ray casting
-and level crossings.
+The grid build and the final merge and sort stay on the calling thread.
+That bounds the speedup of the intersection batches, whose pair walk is
+short. The query batches and the certified batches scale further.
 
-Test 81 runs 20000 surface closest points, 20000 rays, 20000 curve closest
-points and level crossings. A scrambled single-threaded executor and a
-4-thread executor (Win32 threads, or pthreads) both give the serial
-results bit for bit, the threads 3.3 times faster.
+Test 81 runs every batch, float and certified, serially, on a scrambled
+single-threaded executor and on 4 threads (Win32 threads, or pthreads);
+all give the serial results bit for bit. Figure 8 of the batch showcase
+(`batch8_threads.svg`) times them on 1 to 16 threads of a 20-core machine
+with a small executor whose threads take chunks from a shared counter:
+
+| batch | serial | 16 threads |
+|---|---|---|
+| curve intersections (contours x gradient lines) | 208 ms | x2.3 |
+| closest points on curves (20000 points) | 84 ms | x7.0 |
+| closest points on a surface (20000 points) | 1.88 s | x7.9 |
+| ray casting (36000 rays) | 161 ms | x8.2 |
+| certified surface intersections (terrain x 16 planes) | 641 ms | x4.3 |
+| certified closest points (128 points) | 4.93 s | x8.7 |
+| certified rays (128 rays) | 2.74 s | x7.6 |

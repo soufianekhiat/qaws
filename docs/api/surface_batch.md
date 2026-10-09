@@ -100,6 +100,10 @@ spans and patches in one grid, then certifies every candidate span / patch
 pair as `qaws_exact_curve_surface_hits` does. That call now skips disjoint
 span / patch boxes too.
 
+Every desc here, float and exact, takes an optional `executor` that runs the
+grid cells (or the query chunks) on the caller's threads; see
+[curve_batch.md](curve_batch.md#parallel-execution).
+
 ## Numbers
 
 These are f64 timings from test 81 and `qaws_batch_showcase` (Release build).

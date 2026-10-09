@@ -246,12 +246,6 @@ static int cb_accept(void* user, unsigned int i, unsigned int j)
 	return cb_allowed(x, &x->segs[i], &x->segs[j]);
 }
 
-static qaws_status cb_visit(void* user, unsigned int i, unsigned int j)
-{
-	cb_ctx* x = (cb_ctx*)user;
-	return cb_pair(x, &x->segs[i], &x->segs[j]);
-}
-
 static int cb_cmp_hit(void const* p, void const* q)
 {
 	cb_hit const* a = (cb_hit const*)p;
@@ -316,12 +310,21 @@ static qaws_status cb_flatten_all(cb_ctx* x, qaws_scalar* out_ext)
 }
 
 /* 2-5. one grid over every segment; each overlapping allowed pair refined; merge */
+static qaws_status cb_visit_chunk(void* user, unsigned int chunk, unsigned int i, unsigned int j)
+{
+	cb_ctx* ch = &((cb_ctx*)user)[chunk];
+	return cb_pair(ch, &ch->segs[i], &ch->segs[j]);
+}
+
+/* 2-5. one grid over every segment; each overlapping allowed pair refined
+   (cells in chunks, each chunk with its own hit list); merge */
 static qaws_status cb_solve(cb_ctx* x)
 {
-	unsigned int i, k;
+	unsigned int i, k, n, cand = 0;
 	qaws_status s;
 	qaws_bp_box* boxes;
-	qaws_bp_stats bs;
+	qaws_bp_grid* grid = NULL;
+	cb_ctx* ch = NULL;
 	x->stats.segment_count = x->nseg;
 	if (x->nseg == 0)
 		return QAWS_STATUS_OK;
@@ -334,10 +337,46 @@ static qaws_status cb_solve(cb_ctx* x)
 			boxes[i].lo[k] = (double)x->segs[i].lo[k];
 			boxes[i].hi[k] = (double)x->segs[i].hi[k];
 		}
-	s = qaws_internal_broadphase(boxes, x->nseg, x->dim, cb_accept, cb_visit, x, &bs);
+	s = qaws_internal_grid_create(boxes, x->nseg, x->dim, &grid);
+	n = s == QAWS_STATUS_OK ? qaws_internal_grid_pair_chunks(grid) : 0;
+	if (s == QAWS_STATUS_OK && n)
+	{
+		ch = (cb_ctx*)malloc(n * sizeof(cb_ctx));
+		if (!ch)
+			s = QAWS_STATUS_ALLOCATION_FAILURE;
+		for (k = 0; s == QAWS_STATUS_OK && k < n; k++)
+		{
+			ch[k] = *x;
+			ch[k].hits = NULL;
+			ch[k].nhit = ch[k].caphit = 0;
+			memset(&ch[k].stats, 0, sizeof(ch[k].stats));
+		}
+		if (s == QAWS_STATUS_OK)
+			s = qaws_internal_grid_pairs(grid, boxes, cb_accept, x, cb_visit_chunk, ch, x->desc->executor, &cand);
+		for (k = 0; ch && k < n; k++)
+		{
+			if (s == QAWS_STATUS_OK && ch[k].nhit)
+			{
+				cb_hit* g = (cb_hit*)realloc(x->hits, (x->nhit + ch[k].nhit) * sizeof(cb_hit));
+				if (!g)
+					s = QAWS_STATUS_ALLOCATION_FAILURE;
+				else
+				{
+					memcpy(g + x->nhit, ch[k].hits, ch[k].nhit * sizeof(cb_hit));
+					x->hits = g;
+					x->nhit += ch[k].nhit;
+					x->caphit = x->nhit;
+				}
+			}
+			x->stats.newton_count += ch[k].stats.newton_count;
+			free(ch[k].hits);
+		}
+	}
+	x->stats.cell_count = grid ? qaws_internal_grid_cells(grid) : 0;
+	x->stats.candidate_count = cand;
+	free(ch);
 	free(boxes);
-	x->stats.cell_count = bs.cell_count;
-	x->stats.candidate_count = bs.candidate_count;
+	qaws_internal_grid_destroy(grid);
 	if (s == QAWS_STATUS_OK)
 		cb_merge(x);
 	return s;
@@ -562,6 +601,7 @@ static qaws_status cs_find(qaws_curve_set const* a, qaws_curve_set const* b, uns
 		d.curves = curves;
 		d.curve_count = na + nb;
 		d.families = fam;
+		d.executor = a->desc.executor;
 		x.desc = &d;
 		x.segs = segs;
 		x.nseg = a->nseg + b->nseg;
