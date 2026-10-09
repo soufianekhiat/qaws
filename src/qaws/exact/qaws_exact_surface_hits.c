@@ -2,6 +2,8 @@
 #include "qaws_exact_solve.h"
 #include "../internal/qaws_internal_types.h"
 #include "../internal/qaws_internal_curve.h"
+#include "../internal/qaws_internal_broadphase.h"
+#include <stdlib.h>
 #include <math.h>
 #include <string.h>
 
@@ -515,25 +517,21 @@ static qaws_status patch_hits(qaws_exact_surface const* s, unsigned int iu, unsi
 	return st;
 }
 
-qaws_status qaws_exact_surface_line_hits(qaws_exact_surface const* surface, double const p0[3], double const p1[3], qaws_exact_surface_hit* out_hits,
-	unsigned int capacity, unsigned int* out_count)
+/* the line through p0 and p1 as two exact planes */
+static qaws_status line_setup(double const p0[3], double const p1[3], line_ctx* L)
 {
-	line_ctx L;
 	dyadic q1[3], e[3];
-	unsigned int c, k, iu, iv, count = 0;
+	unsigned int c, k;
 	double ad[3];
-	qaws_status st = QAWS_STATUS_OK;
-	if (!surface || !p0 || !p1 || !out_count || (!out_hits && capacity))
-		return QAWS_STATUS_INVALID_ARGUMENT;
-	*out_count = 0;
+	qaws_status st;
 	for (c = 0; c < 3; c++)
 	{
-		TRY(dy_from_double(&L.P[c], p0[c]));
+		TRY(dy_from_double(&L->P[c], p0[c]));
 		TRY(dy_from_double(&q1[c], p1[c]));
-		TRY(dy_add(&L.d[c], &q1[c], &L.P[c], -1));
+		TRY(dy_add(&L->d[c], &q1[c], &L->P[c], -1));
 		ad[c] = fabs(p1[c] - p0[c]);
 	}
-	if (qaws_exact_int_is_zero(&L.d[0].m) && qaws_exact_int_is_zero(&L.d[1].m) && qaws_exact_int_is_zero(&L.d[2].m))
+	if (qaws_exact_int_is_zero(&L->d[0].m) && qaws_exact_int_is_zero(&L->d[1].m) && qaws_exact_int_is_zero(&L->d[2].m))
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	/* n1 = d x e_k (k: the smallest |d_k|), n2 = d x n1 */
 	k = ad[0] <= ad[1] && ad[0] <= ad[2] ? 0 : (ad[1] <= ad[2] ? 1 : 2);
@@ -546,41 +544,275 @@ qaws_status qaws_exact_surface_line_hits(qaws_exact_surface const* surface, doub
 	{
 		unsigned int c1 = (c + 1) % 3, c2 = (c + 2) % 3;
 		dyadic t1, t2;
-		TRY(dy_mul(&t1, &L.d[c1], &e[c2]));
-		TRY(dy_mul(&t2, &L.d[c2], &e[c1]));
-		TRY(dy_add(&L.n1[c], &t1, &t2, -1));
+		TRY(dy_mul(&t1, &L->d[c1], &e[c2]));
+		TRY(dy_mul(&t2, &L->d[c2], &e[c1]));
+		TRY(dy_add(&L->n1[c], &t1, &t2, -1));
 	}
 	for (c = 0; c < 3; c++)
 	{
 		unsigned int c1 = (c + 1) % 3, c2 = (c + 2) % 3;
 		dyadic t1, t2;
-		TRY(dy_mul(&t1, &L.d[c1], &L.n1[c2]));
-		TRY(dy_mul(&t2, &L.d[c2], &L.n1[c1]));
-		TRY(dy_add(&L.n2[c], &t1, &t2, -1));
+		TRY(dy_mul(&t1, &L->d[c1], &L->n1[c2]));
+		TRY(dy_mul(&t2, &L->d[c2], &L->n1[c1]));
+		TRY(dy_add(&L->n2[c], &t1, &t2, -1));
 	}
-	qaws_exact_int_zero(&L.dd.m);
-	L.dd.e = 0;
+	qaws_exact_int_zero(&L->dd.m);
+	L->dd.e = 0;
 	for (c = 0; c < 3; c++)
 	{
 		dyadic t;
-		TRY(dy_mul(&t, &L.d[c], &L.d[c]));
-		TRY(dy_add(&L.dd, &L.dd, &t, 1));
+		TRY(dy_mul(&t, &L->d[c], &L->d[c]));
+		TRY(dy_add(&L->dd, &L->dd, &t, 1));
 	}
+	return QAWS_STATUS_OK;
+}
+
+static void sort_by_t(qaws_exact_surface_hit* h, unsigned int count)
+{
+	unsigned int i;
+	for (i = 1; i < count; i++)
+	{
+		qaws_exact_surface_hit key = h[i];
+		int j = (int)i - 1;
+		while (j >= 0 && h[j].t_lo > key.t_lo)
+		{
+			h[j + 1] = h[j];
+			j--;
+		}
+		h[j + 1] = key;
+	}
+}
+
+qaws_status qaws_exact_surface_line_hits(qaws_exact_surface const* surface, double const p0[3], double const p1[3], qaws_exact_surface_hit* out_hits,
+	unsigned int capacity, unsigned int* out_count)
+{
+	line_ctx L;
+	unsigned int iu, iv, count = 0;
+	qaws_status st = QAWS_STATUS_OK;
+	if (!surface || !p0 || !p1 || !out_count || (!out_hits && capacity))
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	*out_count = 0;
+	TRY(line_setup(p0, p1, &L));
 	for (iu = 0; iu < surface->nu && st == QAWS_STATUS_OK; iu++)
 		for (iv = 0; iv < surface->nv && st == QAWS_STATUS_OK; iv++)
 			st = patch_hits(surface, iu, iv, &L, out_hits, capacity, &count);
-	/* sort by t */
-	for (iu = 1; iu < count; iu++)
-	{
-		qaws_exact_surface_hit key = out_hits[iu];
-		int j = (int)iu - 1;
-		while (j >= 0 && out_hits[j].t_lo > key.t_lo)
-		{
-			out_hits[j + 1] = out_hits[j];
-			j--;
-		}
-		out_hits[j + 1] = key;
-	}
+	sort_by_t(out_hits, count < capacity ? count : capacity);
 	*out_count = count;
+	return st;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Certified ray casting over many surfaces                           */
+/* ------------------------------------------------------------------ */
+
+typedef struct er_patch
+{
+	unsigned int surface, iu, iv;
+	double lo[3], hi[3];
+} er_patch;
+
+typedef struct er_ctx
+{
+	qaws_exact_ssi_batch_desc const* desc;
+	er_patch const* patches;
+	unsigned int* stamp;
+	unsigned int ray;
+	line_ctx L;
+	double o[3], d[3], max_t;
+	qaws_exact_surface_hit tmp[16];
+	/* the best hit and the bounds certification needs */
+	int have;
+	unsigned int best_surface;
+	qaws_exact_surface_hit best;
+	double other_lo;            /* smallest t_lo of the other hits in front */
+	double failed_lo;           /* smallest entry t of a patch that failed */
+	qaws_status st;
+	qaws_exact_batch_stats* stats;
+} er_ctx;
+
+/* the ray's entry t into a box (0 when it starts inside), rounded down */
+static double er_entry(double const* o, double const* d, double const* lo, double const* hi)
+{
+	double t0 = 0;
+	unsigned int k;
+	for (k = 0; k < 3; k++)
+	{
+		double ta, tb;
+		if (!(lo[k] <= hi[k]))
+			return 0;
+		if (d[k] == 0)
+			continue;
+		ta = (lo[k] - o[k]) / d[k];
+		tb = (hi[k] - o[k]) / d[k];
+		if (ta > tb) { double s = ta; ta = tb; tb = s; }
+		if (ta > t0) t0 = ta;
+	}
+	return nextafter(t0, -HUGE_VAL) - 1e-12 * (1 + fabs(t0));
+}
+
+static int er_visit(void* user, unsigned int const* items, unsigned int count, double t_exit)
+{
+	er_ctx* x = (er_ctx*)user;
+	unsigned int i, k;
+	for (i = 0; i < count && x->st == QAWS_STATUS_OK; i++)
+	{
+		er_patch const* P = &x->patches[items[i]];
+		unsigned int n = 0;
+		qaws_status s;
+		if (x->stamp[items[i]] == x->ray)
+			continue;
+		x->stamp[items[i]] = x->ray;
+		x->stats->candidate_count++;
+		s = patch_hits(x->desc->surfaces[P->surface], P->iu, P->iv, &x->L, x->tmp, 16, &n);
+		if (s == QAWS_STATUS_ALLOCATION_FAILURE)
+		{
+			x->st = s;
+			return 1;
+		}
+		if (s != QAWS_STATUS_OK)
+		{
+			/* a hit of this patch could lie anywhere it meets the ray */
+			double te = er_entry(x->o, x->d, P->lo, P->hi);
+			if (te < x->failed_lo)
+				x->failed_lo = te;
+			continue;
+		}
+		for (k = 0; k < n; k++)
+		{
+			qaws_exact_surface_hit const* h = &x->tmp[k];
+			if (h->t_hi < 0 || (x->max_t > 0 && h->t_lo > x->max_t))
+				continue;
+			if (!x->have || h->t_lo < x->best.t_lo)
+			{
+				if (x->have && x->best.t_lo < x->other_lo)
+					x->other_lo = x->best.t_lo;
+				x->best = *h;
+				x->best_surface = P->surface;
+				x->have = 1;
+			}
+			else if (h->t_lo < x->other_lo)
+				x->other_lo = h->t_lo;
+		}
+	}
+	/* nothing in a later cell can come before a hit inside this one */
+	return x->have && x->best.t_hi <= t_exit;
+}
+
+qaws_status qaws_exact_surface_batch_raycast(qaws_exact_ssi_batch_desc const* desc, double const* p0, double const* p1, unsigned int ray_count,
+	double max_t, qaws_exact_ray_hit* out_hits, qaws_exact_batch_stats* out_stats)
+{
+	qaws_exact_batch_stats stats;
+	er_ctx x;
+	er_patch* patches = NULL;
+	qaws_bp_box* boxes = NULL;
+	qaws_bp_grid* grid = NULL;
+	unsigned int i, k, npatch = 0, iu, iv, c;
+	qaws_status st = QAWS_STATUS_OK;
+	memset(&stats, 0, sizeof(stats));
+	memset(&x, 0, sizeof(x));
+	if (out_stats)
+		*out_stats = stats;
+	if (!desc || (desc->surface_count && !desc->surfaces) || (ray_count && (!p0 || !p1 || !out_hits)))
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	for (i = 0; i < ray_count; i++)
+	{
+		memset(&out_hits[i], 0, sizeof(out_hits[i]));
+		out_hits[i].surface = QAWS_EXACT_CLOSEST_NONE;
+	}
+	if (!desc->surface_count || !ray_count)
+		return QAWS_STATUS_OK;
+	for (i = 0; i < desc->surface_count; i++)
+	{
+		if (!desc->surfaces[i])
+			return QAWS_STATUS_INVALID_ARGUMENT;
+		npatch += desc->surfaces[i]->nu * desc->surfaces[i]->nv;
+	}
+	patches = (er_patch*)malloc(npatch * sizeof(er_patch));
+	boxes = (qaws_bp_box*)malloc(npatch * sizeof(qaws_bp_box));
+	x.stamp = (unsigned int*)malloc(npatch * sizeof(unsigned int));
+	if (!patches || !boxes || !x.stamp)
+	{
+		st = QAWS_STATUS_ALLOCATION_FAILURE;
+		goto done;
+	}
+	/* the sound control boxes in world units */
+	npatch = 0;
+	for (i = 0; i < desc->surface_count; i++)
+	{
+		double scale = ldexp(1.0, desc->surfaces[i]->space_exp2);
+		for (iu = 0; iu < desc->surfaces[i]->nu; iu++)
+			for (iv = 0; iv < desc->surfaces[i]->nv; iv++, npatch++)
+			{
+				er_patch* P = &patches[npatch];
+				P->surface = i;
+				P->iu = iu;
+				P->iv = iv;
+				qaws_exact_patch_box(desc->surfaces[i], iu, iv, P->lo, P->hi);
+				for (c = 0; c < 3; c++)
+				{
+					if (P->lo[c] <= P->hi[c])
+					{
+						/* scaling by a power of two is exact */
+						P->lo[c] *= scale;
+						P->hi[c] *= scale;
+					}
+					boxes[npatch].lo[c] = P->lo[c];
+					boxes[npatch].hi[c] = P->hi[c];
+				}
+				x.stamp[npatch] = ~0u;
+			}
+	}
+	stats.patch_count = npatch;
+	st = qaws_internal_grid_create(boxes, npatch, 3, &grid);
+	x.desc = desc;
+	x.patches = patches;
+	x.max_t = max_t;
+	x.stats = &stats;
+	for (i = 0; i < ray_count && st == QAWS_STATUS_OK; i++)
+	{
+		qaws_exact_ray_hit* o = &out_hits[i];
+		for (k = 0; k < 3; k++)
+		{
+			x.o[k] = p0[3 * i + k];
+			x.d[k] = p1[3 * i + k] - p0[3 * i + k];   /* for the walk only; the line is exact */
+		}
+		st = line_setup(p0 + 3 * i, p1 + 3 * i, &x.L);
+		if (st != QAWS_STATUS_OK)
+			break;
+		x.ray = i;
+		x.have = 0;
+		x.other_lo = HUGE_VAL;
+		x.failed_lo = HUGE_VAL;
+		x.st = QAWS_STATUS_OK;
+		qaws_internal_grid_ray(grid, x.o, x.d, max_t > 0 ? max_t : HUGE_VAL, er_visit, &x);
+		st = x.st;
+		if (st != QAWS_STATUS_OK)
+			break;
+		if (x.have)
+		{
+			o->surface = x.best_surface;
+			o->hit = x.best;
+			/* first: in front, before every other hit and every patch that failed */
+			o->certified = x.best.t_lo >= 0 && x.best.t_hi < x.other_lo && x.best.t_hi < x.failed_lo;
+			stats.hit_count++;
+			if (!o->certified)
+				stats.uncertified_count++;
+		}
+		else if (x.failed_lo < HUGE_VAL)
+		{
+			/* no certified hit, but a patch that failed may hold one */
+			o->certified = 0;
+			stats.uncertified_count++;
+		}
+		else
+			o->certified = 1;   /* proven to miss */
+	}
+done:
+	if (out_stats)
+		*out_stats = stats;
+	qaws_internal_grid_destroy(grid);
+	free(patches);
+	free(boxes);
+	free(x.stamp);
 	return st;
 }

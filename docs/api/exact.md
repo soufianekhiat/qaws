@@ -298,6 +298,34 @@ enclosure, and the run takes 1.0 s. A point midway between two planes is
 reported as a tie. The comparison also exposed a float edge bug, now
 fixed (see [surface_batch.md](surface_batch.md)).
 
+### Ray casting over many surfaces
+
+```c
+qaws_status qaws_exact_surface_batch_raycast(qaws_exact_ssi_batch_desc const* desc, double const* p0, double const* p1, unsigned int ray_count,
+	double max_t, qaws_exact_ray_hit* out_hits, qaws_exact_batch_stats* out_stats);
+```
+
+The call returns the certified first hit of every ray x = p0 + t (p1 − p0)
+with t ≥ 0. Rays are exact pairs of points, so the certified line is
+exactly the one given.
+
+1. The rays walk one grid over the sound patch control boxes (world units),
+   cell by cell.
+2. Every patch met is solved as by `qaws_exact_surface_line_hits`.
+3. The walk stops once the best hit's t enclosure ends before the current
+   cell's exit.
+
+The hit is `certified` when its enclosure lies at t ≥ 0 and below every
+other hit found. It must also lie below the entry into any patch whose
+solve failed (a tangency). A ray with no hit is a certified miss unless it
+met such a patch.
+
+Test 81: 300 dyadic rays against three paraboloids and a plane give every
+first hit at the closed-form t, all certified. Upward rays are certified
+misses. On a 9 × 9-patch bicubic surface the batch finds the same first
+hits as the single-ray call in about the same time, because that call
+already culls patches cheaply.
+
 ## Certified line / surface intersections (exact ray casting)
 
 ```c
@@ -487,6 +515,7 @@ Tangencies and overlaps return `QAWS_STATUS_CERTIFICATION_FAILED`.
 | N curves at once (2D, 3D) | certified: one grid over sound span boxes, only overlapping span pairs certified, families, uncertified pairs counted |
 | closest points over N curves | certified: roots of the distance derivative isolated exactly, distance enclosures, unique nearest proven or a tie reported |
 | closest points over M surfaces | certified: interior stationary points by the 3D solver on boxes localised by branch and bound, edges as exact curves, unique nearest proven or a tie reported |
+| rays over M surfaces (first hit) | certified: per-patch line elimination on the patches the ray walks through, first hit or miss proven |
 | N curves x M surfaces at once | certified: one grid over sound span and patch boxes, only overlapping span / patch pairs certified |
 | N surfaces at once (intersection curves) | certified: one grid over sound patch boxes, each surface pair solved on its overlapping patch pairs only |
 | self-intersections (2D, 3D) | certified: divided differences inside spans, span pairs, knots and closing points excluded, spans on one conic told apart |

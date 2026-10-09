@@ -1016,6 +1016,166 @@ static void test_raycast(void)
 		qaws_surface_destroy(sf[k]);
 }
 
+#define SBT_ERAYS 300
+
+/* certified ray casting: dyadic rays against the exact paraboloids and plane */
+static void test_exact_raycast(void)
+{
+	qaws_surface* sf[SBT_SURF + 1];
+	qaws_exact_surface* es[SBT_SURF + 1];
+	static double p0[3 * SBT_ERAYS], p1[3 * SBT_ERAYS], t_ref[SBT_ERAYS];
+	static int s_ref[SBT_ERAYS];
+	static qaws_exact_ray_hit h[SBT_ERAYS];
+	qaws_exact_surface_hit sh[16];
+	qaws_exact_ssi_batch_desc d;
+	qaws_exact_batch_stats st;
+	qaws_exact_desc ed;
+	unsigned int i, k, ok = 0, certified = 0, misses = 0, pair_ok = 0;
+	double t0, tb, tp;
+	qaws_status s;
+	char msg[200];
+	for (k = 0; k < SBT_SURF; k++)
+		sf[k] = sbt_paraboloid(sbt_lift(k));
+	sf[SBT_SURF] = sbt_plane(-0.25, 0);
+	qaws_exact_desc_default(&ed);
+	ed.space_exp2 = -16;
+	for (k = 0; k <= SBT_SURF; k++)
+		qaws_exact_surface_prepare(&ed, sf[k], &es[k], NULL);
+	for (i = 0; i < SBT_ERAYS; i++)
+		for (;;)
+		{
+			double o[3], dv[3];
+			o[0] = ldexp(nearbyint(ldexp(-1.4 + 2.8 * sbt_rand(), 10)), -10);
+			o[1] = ldexp(nearbyint(ldexp(-1.4 + 2.8 * sbt_rand(), 10)), -10);
+			o[2] = 4.5;
+			dv[0] = ldexp(nearbyint(ldexp(0.8 * (sbt_rand() - 0.5), 10)), -10);
+			dv[1] = ldexp(nearbyint(ldexp(0.8 * (sbt_rand() - 0.5), 10)), -10);
+			dv[2] = -1;
+			if (!sbt_first_hit(o, dv, &t_ref[i], &s_ref[i]))
+				continue;
+			for (k = 0; k < 3; k++)
+			{
+				p0[3 * i + k] = o[k];
+				p1[3 * i + k] = o[k] + dv[k];   /* exact: dyadic */
+			}
+			break;
+		}
+	memset(&d, 0, sizeof(d));
+	d.surfaces = (qaws_exact_surface const* const*)es;
+	d.surface_count = SBT_SURF + 1;
+	t0 = sbt_now();
+	s = qaws_exact_surface_batch_raycast(&d, p0, p1, SBT_ERAYS, 0, h, &st);
+	tb = sbt_now() - t0;
+	for (i = 0; i < SBT_ERAYS; i++)
+	{
+		certified += h[i].certified != 0;
+		if (s_ref[i] < 0)
+		{
+			misses++;
+			ok += h[i].surface == QAWS_EXACT_CLOSEST_NONE;
+		}
+		else
+			ok += h[i].surface == (unsigned int)s_ref[i] && h[i].hit.t_lo - 1e-12 <= t_ref[i] && t_ref[i] <= h[i].hit.t_hi + 1e-12;
+	}
+	/* every surface with the single-ray call, a third of the rays */
+	t0 = sbt_now();
+	for (i = 0; i < SBT_ERAYS / 3; i++)
+	{
+		double best = 1e30;
+		for (k = 0; k <= SBT_SURF; k++)
+		{
+			unsigned int n = 0, j;
+			qaws_exact_surface_line_hits(es[k], p0 + 3 * i, p1 + 3 * i, sh, 16, &n);
+			for (j = 0; j < n && j < 16; j++)
+				if (sh[j].t_hi >= 0 && sh[j].t_lo < best)
+					best = sh[j].t_lo;
+		}
+		pair_ok += s_ref[i] < 0 ? best > 1e29 : fabs(best - t_ref[i]) < 1e-9;
+	}
+	tp = (sbt_now() - t0) * 3;
+	printf("    certified ray casting: %u rays (%u misses) x %u surfaces in %.3f s, %u patches solved; first hit right on %u, certified %u; single-ray calls (extrapolated) %.3f s\n",
+		SBT_ERAYS, misses, SBT_SURF + 1, tb, st.candidate_count, ok, certified, tp);
+	sprintf(msg, "certified ray casting: every first hit right and certified (%u, %u of %u); the single-ray calls agree on %u of %u", ok, certified, SBT_ERAYS,
+		pair_ok, SBT_ERAYS / 3);
+	TEST_ASSERT(s == QAWS_STATUS_OK && ok == SBT_ERAYS && certified == SBT_ERAYS && pair_ok == SBT_ERAYS / 3, msg);
+	/* many patches: a bicubic height surface of 9 x 9 patches, the batch against the single-ray call */
+	{
+		static qaws_vec3 cp[12 * 12];
+		qaws_surface_bspline_desc bd;
+		qaws_surface* hs = NULL;
+		qaws_exact_surface* ehs = NULL;
+		qaws_exact_surface const* one[1];
+		static double r0[300], r1[300];
+		static qaws_exact_ray_hit hr[100];
+		unsigned int a, b, nsame = 0, ncert = 0;
+		double tb2, ts2;
+		for (a = 0; a < 12; a++)
+			for (b = 0; b < 12; b++)
+			{
+				cp[a * 12 + b].x = (qaws_scalar)(-1.5 + 3.0 * a / 11);
+				cp[a * 12 + b].y = (qaws_scalar)(-1.5 + 3.0 * b / 11);
+				cp[a * 12 + b].z = (qaws_scalar)ldexp(nearbyint(ldexp(0.4 * sin(1.7 * a) * cos(1.3 * b), 8)), -8);
+			}
+		memset(&bd, 0, sizeof(bd));
+		bd.u_degree = 3;
+		bd.v_degree = 3;
+		bd.control_points = cp;
+		bd.u_point_count = 12;
+		bd.v_point_count = 12;
+		qaws_surface_create_bspline(&bd, &hs);
+		qaws_exact_surface_prepare(&ed, hs, &ehs, NULL);
+		for (i = 0; i < 100; i++)
+		{
+			r0[3 * i] = ldexp(nearbyint(ldexp(-1.2 + 2.4 * sbt_rand(), 10)), -10);
+			r0[3 * i + 1] = ldexp(nearbyint(ldexp(-1.2 + 2.4 * sbt_rand(), 10)), -10);
+			r0[3 * i + 2] = 2;
+			r1[3 * i] = r0[3 * i] + ldexp(nearbyint(ldexp(0.4 * (sbt_rand() - 0.5), 10)), -10);
+			r1[3 * i + 1] = r0[3 * i + 1] + ldexp(nearbyint(ldexp(0.4 * (sbt_rand() - 0.5), 10)), -10);
+			r1[3 * i + 2] = 1;
+		}
+		one[0] = ehs;
+		d.surfaces = one;
+		d.surface_count = 1;
+		t0 = sbt_now();
+		qaws_exact_surface_batch_raycast(&d, r0, r1, 100, 0, hr, &st);
+		tb2 = sbt_now() - t0;
+		t0 = sbt_now();
+		for (i = 0; i < 100; i++)
+		{
+			unsigned int n = 0, j;
+			double best = 1e30;
+			qaws_exact_surface_line_hits(ehs, r0 + 3 * i, r1 + 3 * i, sh, 16, &n);
+			for (j = 0; j < n && j < 16; j++)
+				if (sh[j].t_hi >= 0 && sh[j].t_lo < best)
+					best = sh[j].t_lo;
+			/* the same first hit, or both miss */
+			nsame += best > 1e29 ? hr[i].surface == QAWS_EXACT_CLOSEST_NONE : (hr[i].surface == 0 && hr[i].hit.t_lo == best);
+			ncert += hr[i].certified != 0;
+		}
+		ts2 = sbt_now() - t0;
+		printf("    certified rays on a %u-patch bicubic surface: 100 rays in %.3f s (%u patches solved), single-ray calls %.3f s; same first hit %u, certified %u\n",
+			st.patch_count, tb2, st.candidate_count, ts2, nsame, ncert);
+		TEST_ASSERT(nsame == 100 && ncert == 100, "many patches: the batch finds the single-ray call's first hit, certified, solving only the patches met");
+		qaws_exact_surface_destroy(ehs);
+		qaws_surface_destroy(hs);
+		d.surfaces = (qaws_exact_surface const* const*)es;
+		d.surface_count = SBT_SURF + 1;
+	}
+	/* rays upward from above everything: certified misses */
+	{
+		double q0[6] = { 0.25, -0.5, 4.5, -1.25, 0.75, 4.5 }, q1[6] = { 0.375, -0.5, 5.5, -1.25, 1.0, 5.5 };
+		qaws_exact_ray_hit m[2];
+		s = qaws_exact_surface_batch_raycast(&d, q0, q1, 2, 0, m, NULL);
+		TEST_ASSERT(s == QAWS_STATUS_OK && m[0].surface == QAWS_EXACT_CLOSEST_NONE && m[1].surface == QAWS_EXACT_CLOSEST_NONE && m[0].certified && m[1].certified,
+			"rays leaving the surfaces: certified misses");
+	}
+	for (k = 0; k <= SBT_SURF; k++)
+	{
+		qaws_exact_surface_destroy(es[k]);
+		qaws_surface_destroy(sf[k]);
+	}
+}
+
 int test_81_surface_batch_main(void)
 {
 	g_pass = 0;
@@ -1030,6 +1190,7 @@ int test_81_surface_batch_main(void)
 	test_surface_closest();
 	test_exact_surface_closest();
 	test_raycast();
+	test_exact_raycast();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
 }

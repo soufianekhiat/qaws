@@ -525,6 +525,29 @@ typedef struct qaws_exact_surface_closest_point
 qaws_status qaws_exact_surface_batch_closest(qaws_exact_ssi_batch_desc const* desc, double const* points, unsigned int point_count,
 	qaws_exact_surface_closest_point* out_points, qaws_exact_batch_stats* out_stats);
 
+/*
+ * Certified ray casting: the first hit of every ray x = p0 + t (p1 - p0),
+ * t >= 0 (t <= max_t when max_t > 0), over the exact surfaces of desc
+ * (families and min_depth ignored). The rays walk one grid over the sound
+ * patch control boxes cell by cell; every patch met is solved as by
+ * qaws_exact_surface_line_hits, and the walk stops once the best hit's t
+ * enclosure ends before the current cell's exit. The hit is certified
+ * when its enclosure lies at t >= 0 and below every other hit's and below
+ * the entry into any patch whose solve failed (a tangency); a ray with no
+ * hit is certified to miss unless such a patch was met.
+ */
+typedef struct qaws_exact_ray_hit
+{
+	unsigned int surface;           /* QAWS_EXACT_CLOSEST_NONE: no hit */
+	qaws_exact_surface_hit hit;     /* u, v and t enclosures (t along p0 -> p1) */
+	int certified;                  /* the first hit (or the miss) is proven */
+} qaws_exact_ray_hit;
+
+/* p0, p1: ray_count points of 3 doubles. stats: patch_count, candidate_count
+   (patches solved), hit_count, uncertified_count. */
+qaws_status qaws_exact_surface_batch_raycast(qaws_exact_ssi_batch_desc const* desc, double const* p0, double const* p1, unsigned int ray_count,
+	double max_t, qaws_exact_ray_hit* out_hits, qaws_exact_batch_stats* out_stats);
+
 /* Patches along u and v (one exact rational Bezier patch each). */
 void qaws_exact_surface_patch_count(qaws_exact_surface const* surface, unsigned int* out_u_count, unsigned int* out_v_count);
 
