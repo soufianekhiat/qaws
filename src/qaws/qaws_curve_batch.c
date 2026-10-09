@@ -4,6 +4,7 @@
 #include "internal/qaws_internal_types.h"
 #include "internal/qaws_internal_broadphase.h"
 #include "internal/qaws_internal_flatten.h"
+#include "internal/qaws_internal_batch.h"
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -430,16 +431,6 @@ qaws_status qaws_curve_batch_find_intersections_3d(
 /* ------------------------------------------------------------------ */
 /*  Prepared sets                                                      */
 /* ------------------------------------------------------------------ */
-
-struct qaws_curve_set
-{
-	qaws_curve_batch_desc desc;     /* curves and families owned by the set */
-	unsigned int dim;
-	qaws_flat_seg* segs;
-	unsigned int nseg;
-	unsigned int* seg_count;
-	qaws_scalar flat, ext, pos_tol;
-};
 
 qaws_status qaws_curve_set_create(qaws_curve_batch_desc const* desc, qaws_curve_set** out_set)
 {

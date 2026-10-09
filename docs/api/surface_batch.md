@@ -116,3 +116,33 @@ exact surfaces. It grids sound patch boxes, then runs each surface pair's
 certified solve on its overlapping patch pairs only. On the B-spline
 terrain against 16 planes it certifies 31 contour branches in 0.85 s. The
 float batch gives the same branch count on all 16 levels.
+
+## Prepared sets
+
+```c
+qaws_status qaws_surface_set_create(qaws_surface_batch_desc const* desc, qaws_surface_set** out_set);
+void qaws_surface_set_destroy(qaws_surface_set* set);
+unsigned int qaws_surface_set_get_patch_count(qaws_surface_set const* set);
+
+qaws_status qaws_surface_set_find_intersections(qaws_surface_set const* set, qaws_surface_set const* other,
+	qaws_surface_batch_curve* out_curves, unsigned int curve_capacity, unsigned int* out_curve_count,
+	qaws_ssi_point* out_points, unsigned int point_capacity, unsigned int* out_point_count, qaws_surface_batch_stats* out_stats);
+
+qaws_status qaws_curve_set_find_surface_intersections(qaws_curve_set const* curves, qaws_surface_set const* surfaces,
+	qaws_curve_surface_batch_hit* out_hits, unsigned int hit_capacity, unsigned int* out_count, qaws_surface_batch_stats* out_stats);
+```
+
+A surface set flattens its surfaces once, for example a terrain queried
+against changing planes, curves or other surfaces. A query re-runs only
+the grid, the narrow phase and the chaining:
+
+- `other == NULL` intersects the set with itself, using its families.
+- Otherwise every surface of `set` is intersected with every surface of
+  `other`. `surface_a` indexes `set` and `surface_b` indexes `other`.
+- A prepared 3D curve set (`qaws_curve_set`, see
+  [curve_batch.md](curve_batch.md)) can be queried against a prepared
+  surface set.
+
+Sets keep pointers to their surfaces, so the surfaces must outlive them
+unchanged. At equal flatness, the results equal the one-shot calls curve
+for curve and point for point (test 81).

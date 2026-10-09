@@ -5,6 +5,7 @@
 #include "qaws_status.h"
 #include "qaws_surface_types.h"
 #include "qaws_surface_intersect.h"
+#include "qaws_curve_batch.h"
 
 /*
  * Intersections of N 3D curves with M surfaces at once.
@@ -98,6 +99,44 @@ qaws_status qaws_surface_batch_find_intersections(
 	qaws_ssi_point* out_points,
 	unsigned int point_capacity,
 	unsigned int* out_point_count,
+	qaws_surface_batch_stats* out_stats);
+
+
+/*
+ * Prepared surface sets: the flattening done once, for surfaces queried
+ * again and again (a terrain against changing planes, curves or other
+ * surfaces). A set keeps pointers to its surfaces: they must outlive it
+ * and stay unchanged.
+ *
+ * qaws_surface_set_find_intersections(set, NULL, ...) intersects a set with
+ * itself by its desc (families) as the one-shot call; (set, other, ...)
+ * every surface of set with every surface of other: surface_a indexes
+ * set, surface_b other. qaws_curve_set_find_surface_intersections takes a
+ * prepared set of 3D curves against a prepared surface set.
+ */
+typedef struct qaws_surface_set qaws_surface_set;
+
+qaws_status qaws_surface_set_create(qaws_surface_batch_desc const* desc, qaws_surface_set** out_set);
+void qaws_surface_set_destroy(qaws_surface_set* set);
+unsigned int qaws_surface_set_get_patch_count(qaws_surface_set const* set);
+
+qaws_status qaws_surface_set_find_intersections(
+	qaws_surface_set const* set,
+	qaws_surface_set const* other,
+	qaws_surface_batch_curve* out_curves,
+	unsigned int curve_capacity,
+	unsigned int* out_curve_count,
+	qaws_ssi_point* out_points,
+	unsigned int point_capacity,
+	unsigned int* out_point_count,
+	qaws_surface_batch_stats* out_stats);
+
+qaws_status qaws_curve_set_find_surface_intersections(
+	qaws_curve_set const* curves,
+	qaws_surface_set const* surfaces,
+	qaws_curve_surface_batch_hit* out_hits,
+	unsigned int hit_capacity,
+	unsigned int* out_count,
 	qaws_surface_batch_stats* out_stats);
 
 #endif /* QAWS_SURFACE_BATCH_H */

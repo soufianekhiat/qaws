@@ -590,6 +590,112 @@ static void test_exact_ssi(void)
 	}
 }
 
+#define SBT_FRAMES 4
+
+/* paraboloids prepared once, against planes that change and lines */
+static void test_surface_sets(void)
+{
+	qaws_surface* par[SBT_SURF];
+	qaws_surface* all[SBT_SURF + SBT_PLANES];
+	unsigned int fam[SBT_SURF + SBT_PLANES], i, k, f, same = 1, same_cs, total = 0;
+	static qaws_surface_batch_curve cs1[256], cs2[256];
+	static qaws_ssi_point ps1[1 << 15], ps2[1 << 15];
+	qaws_surface_set* pset = NULL;
+	qaws_surface_batch_desc d;
+	char msg[200];
+	for (k = 0; k < SBT_SURF; k++)
+		par[k] = sbt_paraboloid(sbt_lift(k));
+	memset(&d, 0, sizeof(d));
+	d.surfaces = (qaws_surface const* const*)par;
+	d.surface_count = SBT_SURF;
+	d.flatness = (qaws_scalar)0.01;
+	qaws_surface_set_create(&d, &pset);
+	for (f = 0; f < SBT_FRAMES; f++)
+	{
+		qaws_surface* pl[SBT_PLANES];
+		qaws_surface_set* qset = NULL;
+		qaws_surface_batch_desc qd;
+		unsigned int n1 = 0, p1 = 0, n2 = 0, p2 = 0, c;
+		for (k = 0; k < SBT_PLANES; k++)
+			pl[k] = sbt_plane(0.3 + 0.25 * k + 0.07 * f, 0.1 * f - 0.15);
+		memset(&qd, 0, sizeof(qd));
+		qd.surfaces = (qaws_surface const* const*)pl;
+		qd.surface_count = SBT_PLANES;
+		qd.flatness = (qaws_scalar)0.01;
+		qaws_surface_set_create(&qd, &qset);
+		qaws_surface_set_find_intersections(pset, qset, cs1, 256, &n1, ps1, 1 << 15, &p1, NULL);
+		/* the one-shot call on everything, two families */
+		for (i = 0; i < SBT_SURF + SBT_PLANES; i++)
+		{
+			all[i] = i < SBT_SURF ? par[i] : pl[i - SBT_SURF];
+			fam[i] = i >= SBT_SURF;
+		}
+		memset(&qd, 0, sizeof(qd));
+		qd.surfaces = (qaws_surface const* const*)all;
+		qd.surface_count = SBT_SURF + SBT_PLANES;
+		qd.families = fam;
+		qd.flatness = (qaws_scalar)0.01;
+		qaws_surface_batch_find_intersections(&qd, cs2, 256, &n2, ps2, 1 << 15, &p2, NULL);
+		same &= n1 == n2 && p1 == p2;
+		for (c = 0; c < n1 && c < n2 && same; c++)
+			same &= cs1[c].surface_a == cs2[c].surface_a && cs1[c].surface_b + SBT_SURF == cs2[c].surface_b && cs1[c].count == cs2[c].count
+				&& cs1[c].closed == cs2[c].closed;
+		for (c = 0; c < p1 && c < p2 && same; c++)
+			same &= fabs(ps1[c].position.x - ps2[c].position.x) < 1e-12 && fabs(ps1[c].position.z - ps2[c].position.z) < 1e-12;
+		total += n1;
+		qaws_surface_set_destroy(qset);
+		for (k = 0; k < SBT_PLANES; k++)
+			qaws_surface_destroy(pl[k]);
+	}
+	/* prepared lines against the prepared paraboloids */
+	{
+		qaws_curve* ln[40];
+		qaws_curve_set* cset = NULL;
+		qaws_curve_batch_desc cd;
+		qaws_curve_surface_batch_desc od;
+		static qaws_curve_surface_batch_hit h1[512], h2[512];
+		unsigned int n1 = 0, n2 = 0, c;
+		for (i = 0; i < 40; i++)
+		{
+			double p[3], q[3];
+			unsigned int k2;
+			for (k2 = 0; k2 < 3; k2++)
+			{
+				p[k2] = k2 < 2 ? -1.3 + 2.6 * sbt_rand() : -0.5 + 4.5 * sbt_rand();
+				q[k2] = k2 < 2 ? -1.3 + 2.6 * sbt_rand() : -0.5 + 4.5 * sbt_rand();
+			}
+			ln[i] = sbt_segment(p, q);
+		}
+		memset(&cd, 0, sizeof(cd));
+		cd.curves = (qaws_curve const* const*)ln;
+		cd.curve_count = 40;
+		cd.flatness = (qaws_scalar)0.01;
+		qaws_curve_set_create(&cd, &cset);
+		qaws_curve_set_find_surface_intersections(cset, pset, h1, 512, &n1, NULL);
+		memset(&od, 0, sizeof(od));
+		od.curves = (qaws_curve const* const*)ln;
+		od.curve_count = 40;
+		od.surfaces = (qaws_surface const* const*)par;
+		od.surface_count = SBT_SURF;
+		od.flatness = (qaws_scalar)0.01;
+		qaws_curve_surface_batch_find_intersections(&od, h2, 512, &n2, NULL);
+		same_cs = n1 == n2;
+		for (c = 0; c < n1 && c < n2; c++)
+			same_cs &= h1[c].curve == h2[c].curve && h1[c].surface == h2[c].surface && fabs(h1[c].t - h2[c].t) < 1e-12;
+		printf("    prepared paraboloids (%u patches): %u frames of %u planes, %u curves as the one-shot calls: %s; prepared lines x paraboloids %u hits (one-shot %u)\n",
+			qaws_surface_set_get_patch_count(pset), SBT_FRAMES, SBT_PLANES, total, same ? "yes" : "no", n1, n2);
+		qaws_curve_set_destroy(cset);
+		for (i = 0; i < 40; i++)
+			qaws_curve_destroy(ln[i]);
+	}
+	sprintf(msg, "prepared surface sets equal the one-shot surface batch on all %u frames", SBT_FRAMES);
+	TEST_ASSERT(same && total > 0, msg);
+	TEST_ASSERT(same_cs, "a prepared curve set against a prepared surface set equals the one-shot curve / surface batch");
+	qaws_surface_set_destroy(pset);
+	for (k = 0; k < SBT_SURF; k++)
+		qaws_surface_destroy(par[k]);
+}
+
 int test_81_surface_batch_main(void)
 {
 	g_pass = 0;
@@ -600,6 +706,7 @@ int test_81_surface_batch_main(void)
 	test_exact();
 	test_ssi();
 	test_exact_ssi();
+	test_surface_sets();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
 }

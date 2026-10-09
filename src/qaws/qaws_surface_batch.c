@@ -4,6 +4,7 @@
 #include "internal/qaws_internal_types.h"
 #include "internal/qaws_internal_broadphase.h"
 #include "internal/qaws_internal_flatten.h"
+#include "internal/qaws_internal_batch.h"
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -249,6 +250,47 @@ static void sb_merge(sb_ctx* x)
 	x->nhit = n;
 }
 
+/* the grid over the prepared segments and patches, refinement, merge, output */
+static qaws_status sb_solve(sb_ctx* x, qaws_curve_surface_batch_hit* out_hits, unsigned int hit_capacity, unsigned int* out_count)
+{
+	qaws_bp_box* boxes = NULL;
+	qaws_bp_stats bs;
+	unsigned int i, k, n;
+	qaws_status s = QAWS_STATUS_OK;
+	x->stats.segment_count = x->nseg;
+	x->stats.patch_count = x->npatch;
+	if (x->nseg && x->npatch)
+	{
+		boxes = (qaws_bp_box*)malloc((x->nseg + x->npatch) * sizeof(qaws_bp_box));
+		if (!boxes)
+			return QAWS_STATUS_ALLOCATION_FAILURE;
+		for (i = 0; i < x->nseg + x->npatch; i++)
+			for (k = 0; k < 3; k++)
+			{
+				boxes[i].lo[k] = (double)(i < x->nseg ? x->segs[i].lo[k] : x->patches[i - x->nseg].lo[k]);
+				boxes[i].hi[k] = (double)(i < x->nseg ? x->segs[i].hi[k] : x->patches[i - x->nseg].hi[k]);
+			}
+		s = qaws_internal_broadphase(boxes, x->nseg + x->npatch, 3, sb_accept, sb_visit, x, &bs);
+		x->stats.cell_count = bs.cell_count;
+		x->stats.candidate_count = bs.candidate_count;
+		free(boxes);
+	}
+	if (s != QAWS_STATUS_OK)
+		return s;
+	sb_merge(x);
+	for (n = 0; n < x->nhit && n < hit_capacity; n++)
+	{
+		sb_hit const* h = &x->hits[n];
+		qaws_curve_surface_batch_hit* o = &out_hits[n];
+		o->curve = h->curve; o->surface = h->surface;
+		o->t = h->t; o->u = h->u; o->v = h->v;
+		o->position.x = h->p[0]; o->position.y = h->p[1]; o->position.z = h->p[2];
+	}
+	*out_count = x->nhit;
+	x->stats.hit_count = x->nhit;
+	return QAWS_STATUS_OK;
+}
+
 qaws_status qaws_curve_surface_batch_find_intersections(
 	qaws_curve_surface_batch_desc const* desc,
 	qaws_curve_surface_batch_hit* out_hits,
@@ -257,10 +299,8 @@ qaws_status qaws_curve_surface_batch_find_intersections(
 	qaws_surface_batch_stats* out_stats)
 {
 	sb_ctx x;
-	qaws_bp_box* boxes = NULL;
-	qaws_bp_stats bs;
 	qaws_scalar ext;
-	unsigned int i, k, n;
+	unsigned int i;
 	qaws_status s = QAWS_STATUS_OK;
 	if (out_stats)
 		memset(out_stats, 0, sizeof(*out_stats));
@@ -286,45 +326,109 @@ qaws_status qaws_curve_surface_batch_find_intersections(
 		s = qaws_internal_flatten_curve(desc->curves[i], 3, x.flat, i, &x.segs, &x.nseg, &x.capseg);
 	for (i = 0; i < desc->surface_count && s == QAWS_STATUS_OK; i++)
 		s = qaws_internal_flatten_surface(desc->surfaces[i], x.flat, i, &x.patches, &x.npatch, &x.cappatch);
-	x.stats.segment_count = x.nseg;
-	x.stats.patch_count = x.npatch;
-	if (s == QAWS_STATUS_OK && x.nseg && x.npatch)
-	{
-		boxes = (qaws_bp_box*)malloc((x.nseg + x.npatch) * sizeof(qaws_bp_box));
-		if (!boxes)
-			s = QAWS_STATUS_ALLOCATION_FAILURE;
-		for (i = 0; s == QAWS_STATUS_OK && i < x.nseg + x.npatch; i++)
-			for (k = 0; k < 3; k++)
-			{
-				boxes[i].lo[k] = (double)(i < x.nseg ? x.segs[i].lo[k] : x.patches[i - x.nseg].lo[k]);
-				boxes[i].hi[k] = (double)(i < x.nseg ? x.segs[i].hi[k] : x.patches[i - x.nseg].hi[k]);
-			}
-		if (s == QAWS_STATUS_OK)
-		{
-			s = qaws_internal_broadphase(boxes, x.nseg + x.npatch, 3, sb_accept, sb_visit, &x, &bs);
-			x.stats.cell_count = bs.cell_count;
-			x.stats.candidate_count = bs.candidate_count;
-		}
-	}
 	if (s == QAWS_STATUS_OK)
-	{
-		sb_merge(&x);
-		for (n = 0; n < x.nhit && n < hit_capacity; n++)
-		{
-			sb_hit const* h = &x.hits[n];
-			qaws_curve_surface_batch_hit* o = &out_hits[n];
-			o->curve = h->curve; o->surface = h->surface;
-			o->t = h->t; o->u = h->u; o->v = h->v;
-			o->position.x = h->p[0]; o->position.y = h->p[1]; o->position.z = h->p[2];
-		}
-		*out_count = x.nhit;
-		x.stats.hit_count = x.nhit;
-	}
+		s = sb_solve(&x, out_hits, hit_capacity, out_count);
 	if (out_stats)
 		*out_stats = x.stats;
-	free(boxes);
 	free(x.segs);
 	free(x.patches);
+	free(x.hits);
+	return s;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Prepared surface sets                                              */
+/* ------------------------------------------------------------------ */
+
+qaws_status qaws_surface_set_create(qaws_surface_batch_desc const* desc, qaws_surface_set** out_set)
+{
+	qaws_surface_set* set;
+	unsigned int i, n, cap = 0;
+	qaws_status s = QAWS_STATUS_OK;
+	if (!desc || !out_set || (desc->surface_count && !desc->surfaces))
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	*out_set = NULL;
+	n = desc->surface_count;
+	for (i = 0; i < n; i++)
+		if (!desc->surfaces[i])
+			return QAWS_STATUS_INVALID_ARGUMENT;
+	set = (qaws_surface_set*)calloc(1, sizeof(qaws_surface_set));
+	if (!set)
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	set->desc = *desc;
+	set->desc.surfaces = (qaws_surface const* const*)malloc((n ? n : 1) * sizeof(qaws_surface*));
+	set->desc.families = desc->families ? (unsigned int const*)malloc((n ? n : 1) * sizeof(unsigned int)) : NULL;
+	if (!set->desc.surfaces || (desc->families && !set->desc.families))
+	{
+		qaws_surface_set_destroy(set);
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	}
+	memcpy((void*)set->desc.surfaces, desc->surfaces, n * sizeof(qaws_surface*));
+	if (desc->families)
+		memcpy((void*)set->desc.families, desc->families, n * sizeof(unsigned int));
+	set->ext = qaws_internal_flatten_extent(NULL, 0, 3, desc->surfaces, n);
+	set->flat = desc->flatness > 0 ? desc->flatness : set->ext / 512;
+	for (i = 0; i < n && s == QAWS_STATUS_OK; i++)
+		s = qaws_internal_flatten_surface(desc->surfaces[i], set->flat, i, &set->patches, &set->npatch, &cap);
+	if (s != QAWS_STATUS_OK)
+	{
+		qaws_surface_set_destroy(set);
+		return s;
+	}
+	*out_set = set;
+	return QAWS_STATUS_OK;
+}
+
+void qaws_surface_set_destroy(qaws_surface_set* set)
+{
+	if (!set)
+		return;
+	free((void*)set->desc.surfaces);
+	free((void*)set->desc.families);
+	free(set->patches);
+	free(set);
+}
+
+unsigned int qaws_surface_set_get_patch_count(qaws_surface_set const* set)
+{
+	return set ? set->npatch : 0;
+}
+
+qaws_status qaws_curve_set_find_surface_intersections(
+	qaws_curve_set const* curves,
+	qaws_surface_set const* surfaces,
+	qaws_curve_surface_batch_hit* out_hits,
+	unsigned int hit_capacity,
+	unsigned int* out_count,
+	qaws_surface_batch_stats* out_stats)
+{
+	sb_ctx x;
+	qaws_curve_surface_batch_desc d;
+	qaws_status s;
+	if (out_stats)
+		memset(out_stats, 0, sizeof(*out_stats));
+	if (!curves || !surfaces || !out_count || (!out_hits && hit_capacity))
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	*out_count = 0;
+	if (curves->desc.curve_count && curves->dim != 3)
+		return QAWS_STATUS_INVALID_DIMENSION;
+	memset(&d, 0, sizeof(d));
+	d.curves = curves->desc.curves;
+	d.curve_count = curves->desc.curve_count;
+	d.surfaces = surfaces->desc.surfaces;
+	d.surface_count = surfaces->desc.surface_count;
+	memset(&x, 0, sizeof(x));
+	x.desc = &d;
+	/* the prepared pieces as they are */
+	x.segs = curves->segs;
+	x.nseg = curves->nseg;
+	x.patches = surfaces->patches;
+	x.npatch = surfaces->npatch;
+	x.flat = curves->flat > surfaces->flat ? curves->flat : surfaces->flat;
+	x.pos_tol = (curves->ext > surfaces->ext ? curves->ext : surfaces->ext) * SB_POS_REL;
+	s = sb_solve(&x, out_hits, hit_capacity, out_count);
+	if (out_stats)
+		*out_stats = x.stats;
 	free(x.hits);
 	return s;
 }
@@ -1048,6 +1152,62 @@ done:
 	return st;
 }
 
+/* the grid over the prepared patches, segments, gap closing, chaining */
+static qaws_status ss_solve(ss_ctx* x, ss_out* o)
+{
+	qaws_bp_box* boxes;
+	qaws_bp_stats bs;
+	unsigned int i, k, g = 0;
+	qaws_status s = QAWS_STATUS_OK;
+	x->stats.patch_count = x->npatch;
+	if (x->npatch > 1)
+	{
+		boxes = (qaws_bp_box*)malloc(x->npatch * sizeof(qaws_bp_box));
+		if (!boxes)
+			return QAWS_STATUS_ALLOCATION_FAILURE;
+		for (i = 0; i < x->npatch; i++)
+			for (k = 0; k < 3; k++)
+			{
+				boxes[i].lo[k] = (double)x->patches[i].lo[k];
+				boxes[i].hi[k] = (double)x->patches[i].hi[k];
+			}
+		s = qaws_internal_broadphase(boxes, x->npatch, 3, ss_accept, ss_visit, x, &bs);
+		x->stats.cell_count = bs.cell_count;
+		x->stats.candidate_count = bs.candidate_count;
+		free(boxes);
+	}
+	if (s != QAWS_STATUS_OK)
+		return s;
+	qsort(x->segs, x->nseg, sizeof(ss_seg), ss_cmp_seg);
+	for (i = 1; i <= x->nseg && s == QAWS_STATUS_OK; i++)
+		if (i == x->nseg || x->segs[i].a != x->segs[g].a || x->segs[i].b != x->segs[g].b)
+		{
+			/* the group's segments, gaps closed by marching, then chained */
+			unsigned int m = i - g, cap = m;
+			ss_seg* L = (ss_seg*)malloc(m * sizeof(ss_seg));
+			if (!L)
+				return QAWS_STATUS_ALLOCATION_FAILURE;
+			memcpy(L, x->segs + g, m * sizeof(ss_seg));
+			s = ss_close_gaps(x, &L, &m, &cap);
+			if (s == QAWS_STATUS_OK)
+				s = ss_chain(x, L, m, o);
+			free(L);
+			g = i;
+		}
+	x->stats.hit_count = o->npoint;
+	return s;
+}
+
+static qaws_status ss_check_out(unsigned int* out_curve_count, unsigned int* out_point_count, qaws_surface_batch_curve* out_curves,
+	unsigned int curve_capacity, qaws_ssi_point* out_points, unsigned int point_capacity)
+{
+	if (!out_curve_count || !out_point_count || (!out_curves && curve_capacity) || (!out_points && point_capacity))
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	*out_curve_count = 0;
+	*out_point_count = 0;
+	return QAWS_STATUS_OK;
+}
+
 qaws_status qaws_surface_batch_find_intersections(
 	qaws_surface_batch_desc const* desc,
 	qaws_surface_batch_curve* out_curves,
@@ -1060,18 +1220,14 @@ qaws_status qaws_surface_batch_find_intersections(
 {
 	ss_ctx x;
 	ss_out o;
-	qaws_bp_box* boxes = NULL;
-	qaws_bp_stats bs;
 	qaws_scalar ext;
-	unsigned int i, k;
-	qaws_status s = QAWS_STATUS_OK;
+	unsigned int i;
+	qaws_status s;
 	if (out_stats)
 		memset(out_stats, 0, sizeof(*out_stats));
-	if (!desc || !out_curve_count || !out_point_count || (!out_curves && curve_capacity) || (!out_points && point_capacity)
-		|| (desc->surface_count && !desc->surfaces))
-		return QAWS_STATUS_INVALID_ARGUMENT;
-	*out_curve_count = 0;
-	*out_point_count = 0;
+	s = ss_check_out(out_curve_count, out_point_count, out_curves, curve_capacity, out_points, point_capacity);
+	if (s != QAWS_STATUS_OK || !desc || (desc->surface_count && !desc->surfaces))
+		return s != QAWS_STATUS_OK ? s : QAWS_STATUS_INVALID_ARGUMENT;
 	for (i = 0; i < desc->surface_count; i++)
 		if (!desc->surfaces[i])
 			return QAWS_STATUS_INVALID_ARGUMENT;
@@ -1083,59 +1239,110 @@ qaws_status qaws_surface_batch_find_intersections(
 	x.pos_tol = ext * SB_POS_REL;
 	for (i = 0; i < desc->surface_count && s == QAWS_STATUS_OK; i++)
 		s = qaws_internal_flatten_surface(desc->surfaces[i], x.flat, i, &x.patches, &x.npatch, &x.cappatch);
-	x.stats.patch_count = x.npatch;
-	if (s == QAWS_STATUS_OK && x.npatch > 1)
-	{
-		boxes = (qaws_bp_box*)malloc(x.npatch * sizeof(qaws_bp_box));
-		if (!boxes)
-			s = QAWS_STATUS_ALLOCATION_FAILURE;
-		for (i = 0; s == QAWS_STATUS_OK && i < x.npatch; i++)
-			for (k = 0; k < 3; k++)
-			{
-				boxes[i].lo[k] = (double)x.patches[i].lo[k];
-				boxes[i].hi[k] = (double)x.patches[i].hi[k];
-			}
-		if (s == QAWS_STATUS_OK)
-		{
-			s = qaws_internal_broadphase(boxes, x.npatch, 3, ss_accept, ss_visit, &x, &bs);
-			x.stats.cell_count = bs.cell_count;
-			x.stats.candidate_count = bs.candidate_count;
-		}
-	}
+	o.curves = out_curves;
+	o.curve_cap = curve_capacity;
+	o.points = out_points;
+	o.point_cap = point_capacity;
+	if (s == QAWS_STATUS_OK)
+		s = ss_solve(&x, &o);
 	if (s == QAWS_STATUS_OK)
 	{
-		unsigned int g = 0;
-		o.curves = out_curves;
-		o.curve_cap = curve_capacity;
-		o.points = out_points;
-		o.point_cap = point_capacity;
-		qsort(x.segs, x.nseg, sizeof(ss_seg), ss_cmp_seg);
-		for (i = 1; i <= x.nseg && s == QAWS_STATUS_OK; i++)
-			if (i == x.nseg || x.segs[i].a != x.segs[g].a || x.segs[i].b != x.segs[g].b)
-			{
-				/* the group's segments, gaps closed by marching, then chained */
-				unsigned int m = i - g, cap = m;
-				ss_seg* L = (ss_seg*)malloc(m * sizeof(ss_seg));
-				if (!L)
-				{
-					s = QAWS_STATUS_ALLOCATION_FAILURE;
-					break;
-				}
-				memcpy(L, x.segs + g, m * sizeof(ss_seg));
-				s = ss_close_gaps(&x, &L, &m, &cap);
-				if (s == QAWS_STATUS_OK)
-					s = ss_chain(&x, L, m, &o);
-				free(L);
-				g = i;
-			}
 		*out_curve_count = o.ncurve;
 		*out_point_count = o.npoint;
-		x.stats.hit_count = o.npoint;
 	}
 	if (out_stats)
 		*out_stats = x.stats;
-	free(boxes);
 	free(x.patches);
 	free(x.segs);
+	return s;
+}
+
+qaws_status qaws_surface_set_find_intersections(
+	qaws_surface_set const* set,
+	qaws_surface_set const* other,
+	qaws_surface_batch_curve* out_curves,
+	unsigned int curve_capacity,
+	unsigned int* out_curve_count,
+	qaws_ssi_point* out_points,
+	unsigned int point_capacity,
+	unsigned int* out_point_count,
+	qaws_surface_batch_stats* out_stats)
+{
+	ss_ctx x;
+	ss_out o;
+	qaws_surface_batch_desc d;
+	qaws_surface const** surfs = NULL;
+	unsigned int* fam = NULL;
+	qaws_flat_patch* patches = NULL;
+	unsigned int na, nb, i;
+	qaws_status s;
+	if (out_stats)
+		memset(out_stats, 0, sizeof(*out_stats));
+	s = ss_check_out(out_curve_count, out_point_count, out_curves, curve_capacity, out_points, point_capacity);
+	if (s != QAWS_STATUS_OK || !set)
+		return s != QAWS_STATUS_OK ? s : QAWS_STATUS_INVALID_ARGUMENT;
+	memset(&x, 0, sizeof(x));
+	memset(&o, 0, sizeof(o));
+	na = set->desc.surface_count;
+	nb = other ? other->desc.surface_count : 0;
+	if (!other)
+	{
+		/* the prepared patches as they are */
+		x.desc = &set->desc;
+		x.patches = set->patches;
+		x.npatch = set->npatch;
+		x.flat = set->flat;
+		x.pos_tol = set->ext * SB_POS_REL;
+	}
+	else
+	{
+		/* both sets side by side: other's surfaces numbered after set's, in another family */
+		surfs = (qaws_surface const**)malloc((na + nb ? na + nb : 1) * sizeof(qaws_surface*));
+		fam = (unsigned int*)malloc((na + nb ? na + nb : 1) * sizeof(unsigned int));
+		patches = (qaws_flat_patch*)malloc((set->npatch + other->npatch ? set->npatch + other->npatch : 1) * sizeof(qaws_flat_patch));
+		if (!surfs || !fam || !patches)
+		{
+			s = QAWS_STATUS_ALLOCATION_FAILURE;
+			goto done;
+		}
+		memcpy((void*)surfs, set->desc.surfaces, na * sizeof(qaws_surface*));
+		memcpy((void*)(surfs + na), other->desc.surfaces, nb * sizeof(qaws_surface*));
+		for (i = 0; i < na + nb; i++)
+			fam[i] = i >= na;
+		memcpy(patches, set->patches, set->npatch * sizeof(qaws_flat_patch));
+		memcpy(patches + set->npatch, other->patches, other->npatch * sizeof(qaws_flat_patch));
+		for (i = set->npatch; i < set->npatch + other->npatch; i++)
+			patches[i].owner += na;
+		memset(&d, 0, sizeof(d));
+		d.surfaces = surfs;
+		d.surface_count = na + nb;
+		d.families = fam;
+		x.desc = &d;
+		x.patches = patches;
+		x.npatch = set->npatch + other->npatch;
+		x.flat = set->flat > other->flat ? set->flat : other->flat;
+		x.pos_tol = (set->ext > other->ext ? set->ext : other->ext) * SB_POS_REL;
+	}
+	o.curves = out_curves;
+	o.curve_cap = curve_capacity;
+	o.points = out_points;
+	o.point_cap = point_capacity;
+	s = ss_solve(&x, &o);
+	if (s == QAWS_STATUS_OK)
+	{
+		/* across two sets, surface_b indexes other */
+		if (other)
+			for (i = 0; i < o.ncurve && i < curve_capacity; i++)
+				out_curves[i].surface_b -= na;
+		*out_curve_count = o.ncurve;
+		*out_point_count = o.npoint;
+	}
+done:
+	if (out_stats)
+		*out_stats = x.stats;
+	free(x.segs);
+	free((void*)surfs);
+	free(fam);
+	free(patches);
 	return s;
 }
