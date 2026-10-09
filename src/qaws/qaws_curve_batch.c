@@ -287,20 +287,19 @@ static void cb_merge(cb_ctx* x)
 	x->nhit = n;
 }
 
-static qaws_status cb_run(cb_ctx* x)
+/* 1. flatten every curve; segment counts per curve for the self-intersection rule */
+static qaws_status cb_flatten_all(cb_ctx* x, qaws_scalar* out_ext)
 {
 	qaws_curve_batch_desc const* d = x->desc;
 	qaws_scalar ext;
-	unsigned int i, k;
+	unsigned int i;
 	qaws_status s = QAWS_STATUS_OK;
-
 	/* scene extent from a cheap sampling of every curve, to scale the defaults */
 	ext = qaws_internal_flatten_extent(d->curves, d->curve_count, x->dim, NULL, 0);
 	x->flat = d->flatness > 0 ? d->flatness : ext / 1024;
 	x->pos_tol = ext * CB_POS_REL;
-
-	/* 1. flatten; segment counts per curve for the self-intersection rule */
-	x->seg_count = (unsigned int*)calloc(d->curve_count, sizeof(unsigned int));
+	*out_ext = ext;
+	x->seg_count = (unsigned int*)calloc(d->curve_count ? d->curve_count : 1, sizeof(unsigned int));
 	if (!x->seg_count)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	for (i = 0; i < d->curve_count && s == QAWS_STATUS_OK; i++)
@@ -309,77 +308,97 @@ static qaws_status cb_run(cb_ctx* x)
 		s = qaws_internal_flatten_curve(d->curves[i], x->dim, x->flat, i, &x->segs, &x->nseg, &x->capseg);
 		x->seg_count[i] = x->nseg - before;
 	}
-	if (s != QAWS_STATUS_OK || x->nseg == 0)
-		return s;
+	return s;
+}
+
+/* 2-5. one grid over every segment; each overlapping allowed pair refined; merge */
+static qaws_status cb_solve(cb_ctx* x)
+{
+	unsigned int i, k;
+	qaws_status s;
+	qaws_bp_box* boxes;
+	qaws_bp_stats bs;
 	x->stats.segment_count = x->nseg;
-
-	/* 2-3. one grid over every segment; each overlapping allowed pair once */
-	{
-		qaws_bp_box* boxes = (qaws_bp_box*)malloc(x->nseg * sizeof(qaws_bp_box));
-		qaws_bp_stats bs;
-		if (!boxes)
-			return QAWS_STATUS_ALLOCATION_FAILURE;
-		for (i = 0; i < x->nseg; i++)
-			for (k = 0; k < 3; k++)
-			{
-				boxes[i].lo[k] = (double)x->segs[i].lo[k];
-				boxes[i].hi[k] = (double)x->segs[i].hi[k];
-			}
-		s = qaws_internal_broadphase(boxes, x->nseg, x->dim, cb_accept, cb_visit, x, &bs);
-		free(boxes);
-		x->stats.cell_count = bs.cell_count;
-		x->stats.candidate_count = bs.candidate_count;
-	}
-
-	/* 5. merge */
+	if (x->nseg == 0)
+		return QAWS_STATUS_OK;
+	boxes = (qaws_bp_box*)malloc(x->nseg * sizeof(qaws_bp_box));
+	if (!boxes)
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	for (i = 0; i < x->nseg; i++)
+		for (k = 0; k < 3; k++)
+		{
+			boxes[i].lo[k] = (double)x->segs[i].lo[k];
+			boxes[i].hi[k] = (double)x->segs[i].hi[k];
+		}
+	s = qaws_internal_broadphase(boxes, x->nseg, x->dim, cb_accept, cb_visit, x, &bs);
+	free(boxes);
+	x->stats.cell_count = bs.cell_count;
+	x->stats.candidate_count = bs.candidate_count;
 	if (s == QAWS_STATUS_OK)
 		cb_merge(x);
 	return s;
+}
+
+/* hits out; curve_b is moved back by b_offset (pairs across two sets) */
+static void cb_emit(cb_ctx* x, unsigned int dim, void* out, unsigned int capacity, unsigned int* out_count, unsigned int b_offset)
+{
+	unsigned int i;
+	for (i = 0; i < x->nhit && i < capacity; i++)
+	{
+		cb_hit const* h = &x->hits[i];
+		if (dim == 2)
+		{
+			qaws_curve_batch_hit_2d* o = (qaws_curve_batch_hit_2d*)out + i;
+			o->curve_a = h->a; o->curve_b = h->b - b_offset;
+			o->parameter_a = h->ta; o->parameter_b = h->tb;
+			o->position.x = h->p[0]; o->position.y = h->p[1];
+		}
+		else
+		{
+			qaws_curve_batch_hit_3d* o = (qaws_curve_batch_hit_3d*)out + i;
+			o->curve_a = h->a; o->curve_b = h->b - b_offset;
+			o->parameter_a = h->ta; o->parameter_b = h->tb;
+			o->position.x = h->p[0]; o->position.y = h->p[1]; o->position.z = h->p[2];
+		}
+	}
+	*out_count = x->nhit;
+	x->stats.hit_count = x->nhit;
+}
+
+static qaws_status cb_check(qaws_curve_batch_desc const* desc, unsigned int dim)
+{
+	unsigned int i;
+	if (!desc || (desc->curve_count && !desc->curves))
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	for (i = 0; i < desc->curve_count; i++)
+	{
+		if (!desc->curves[i])
+			return QAWS_STATUS_INVALID_ARGUMENT;
+		if (dim && desc->curves[i]->dimension != (dim == 2 ? QAWS_DIMENSION_2D : QAWS_DIMENSION_3D))
+			return QAWS_STATUS_INVALID_DIMENSION;
+	}
+	return QAWS_STATUS_OK;
 }
 
 static qaws_status cb_find(qaws_curve_batch_desc const* desc, unsigned int dim, void* out, unsigned int capacity,
 	unsigned int* out_count, qaws_curve_batch_stats* out_stats)
 {
 	cb_ctx x;
-	qaws_status s;
-	unsigned int i;
-	if (!desc || !out_count || (!out && capacity) || (desc->curve_count && !desc->curves))
+	qaws_scalar ext;
+	qaws_status s = cb_check(desc, dim);
+	if (s != QAWS_STATUS_OK)
+		return s;
+	if (!out_count || (!out && capacity))
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	for (i = 0; i < desc->curve_count; i++)
-	{
-		if (!desc->curves[i])
-			return QAWS_STATUS_INVALID_ARGUMENT;
-		if (desc->curves[i]->dimension != (dim == 2 ? QAWS_DIMENSION_2D : QAWS_DIMENSION_3D))
-			return QAWS_STATUS_INVALID_DIMENSION;
-	}
 	*out_count = 0;
 	memset(&x, 0, sizeof(x));
 	x.desc = desc;
 	x.dim = dim;
-	s = cb_run(&x);
+	s = cb_flatten_all(&x, &ext);
 	if (s == QAWS_STATUS_OK)
-	{
-		for (i = 0; i < x.nhit && i < capacity; i++)
-		{
-			cb_hit const* h = &x.hits[i];
-			if (dim == 2)
-			{
-				qaws_curve_batch_hit_2d* o = (qaws_curve_batch_hit_2d*)out + i;
-				o->curve_a = h->a; o->curve_b = h->b;
-				o->parameter_a = h->ta; o->parameter_b = h->tb;
-				o->position.x = h->p[0]; o->position.y = h->p[1];
-			}
-			else
-			{
-				qaws_curve_batch_hit_3d* o = (qaws_curve_batch_hit_3d*)out + i;
-				o->curve_a = h->a; o->curve_b = h->b;
-				o->parameter_a = h->ta; o->parameter_b = h->tb;
-				o->position.x = h->p[0]; o->position.y = h->p[1]; o->position.z = h->p[2];
-			}
-		}
-		*out_count = x.nhit;
-		x.stats.hit_count = x.nhit;
-	}
+		s = cb_solve(&x);
+	if (s == QAWS_STATUS_OK)
+		cb_emit(&x, dim, out, capacity, out_count, 0);
 	if (out_stats)
 		*out_stats = x.stats;
 	free(x.segs);
@@ -406,4 +425,178 @@ qaws_status qaws_curve_batch_find_intersections_3d(
 	qaws_curve_batch_stats* out_stats)
 {
 	return cb_find(desc, 3, out_hits, hit_capacity, out_count, out_stats);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Prepared sets                                                      */
+/* ------------------------------------------------------------------ */
+
+struct qaws_curve_set
+{
+	qaws_curve_batch_desc desc;     /* curves and families owned by the set */
+	unsigned int dim;
+	qaws_flat_seg* segs;
+	unsigned int nseg;
+	unsigned int* seg_count;
+	qaws_scalar flat, ext, pos_tol;
+};
+
+qaws_status qaws_curve_set_create(qaws_curve_batch_desc const* desc, qaws_curve_set** out_set)
+{
+	qaws_curve_set* set;
+	cb_ctx x;
+	qaws_scalar ext;
+	unsigned int n, dim;
+	qaws_status s = cb_check(desc, 0);
+	if (s != QAWS_STATUS_OK)
+		return s;
+	if (!out_set)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	*out_set = NULL;
+	n = desc->curve_count;
+	dim = n ? (desc->curves[0]->dimension == QAWS_DIMENSION_2D ? 2 : 3) : 2;
+	s = cb_check(desc, dim);
+	if (s != QAWS_STATUS_OK)
+		return s;
+	set = (qaws_curve_set*)calloc(1, sizeof(qaws_curve_set));
+	if (!set)
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	set->desc = *desc;
+	set->dim = dim;
+	set->desc.curves = (qaws_curve const* const*)malloc((n ? n : 1) * sizeof(qaws_curve*));
+	set->desc.families = desc->families ? (unsigned int const*)malloc((n ? n : 1) * sizeof(unsigned int)) : NULL;
+	if (!set->desc.curves || (desc->families && !set->desc.families))
+	{
+		qaws_curve_set_destroy(set);
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	}
+	memcpy((void*)set->desc.curves, desc->curves, n * sizeof(qaws_curve*));
+	if (desc->families)
+		memcpy((void*)set->desc.families, desc->families, n * sizeof(unsigned int));
+	memset(&x, 0, sizeof(x));
+	x.desc = &set->desc;
+	x.dim = dim;
+	s = cb_flatten_all(&x, &ext);
+	set->segs = x.segs;
+	set->nseg = x.nseg;
+	set->seg_count = x.seg_count;
+	set->flat = x.flat;
+	set->ext = ext;
+	set->pos_tol = x.pos_tol;
+	if (s != QAWS_STATUS_OK)
+	{
+		qaws_curve_set_destroy(set);
+		return s;
+	}
+	*out_set = set;
+	return QAWS_STATUS_OK;
+}
+
+void qaws_curve_set_destroy(qaws_curve_set* set)
+{
+	if (!set)
+		return;
+	free((void*)set->desc.curves);
+	free((void*)set->desc.families);
+	free(set->segs);
+	free(set->seg_count);
+	free(set);
+}
+
+unsigned int qaws_curve_set_get_segment_count(qaws_curve_set const* set)
+{
+	return set ? set->nseg : 0;
+}
+
+/* one set with itself (b NULL), or every pair across a and b */
+static qaws_status cs_find(qaws_curve_set const* a, qaws_curve_set const* b, unsigned int dim, void* out, unsigned int capacity,
+	unsigned int* out_count, qaws_curve_batch_stats* out_stats)
+{
+	cb_ctx x;
+	qaws_curve_batch_desc d;
+	qaws_curve const** curves = NULL;
+	unsigned int* fam = NULL;
+	qaws_flat_seg* segs = NULL;
+	unsigned int* counts = NULL;
+	unsigned int na, nb = 0, i;
+	qaws_status s = QAWS_STATUS_OK;
+	if (out_stats)
+		memset(out_stats, 0, sizeof(*out_stats));
+	if (!a || !out_count || (!out && capacity))
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	*out_count = 0;
+	if ((a->desc.curve_count && a->dim != dim) || (b && b->desc.curve_count && b->dim != dim))
+		return QAWS_STATUS_INVALID_DIMENSION;
+	memset(&x, 0, sizeof(x));
+	x.dim = dim;
+	na = a->desc.curve_count;
+	if (!b)
+	{
+		/* the prepared segments as they are */
+		x.desc = &a->desc;
+		x.segs = a->segs;
+		x.nseg = a->nseg;
+		x.seg_count = a->seg_count;
+		x.flat = a->flat;
+		x.pos_tol = a->pos_tol;
+	}
+	else
+	{
+		/* both sets side by side: b's curves numbered after a's, in another family */
+		nb = b->desc.curve_count;
+		curves = (qaws_curve const**)malloc((na + nb ? na + nb : 1) * sizeof(qaws_curve*));
+		fam = (unsigned int*)malloc((na + nb ? na + nb : 1) * sizeof(unsigned int));
+		segs = (qaws_flat_seg*)malloc((a->nseg + b->nseg ? a->nseg + b->nseg : 1) * sizeof(qaws_flat_seg));
+		counts = (unsigned int*)malloc((na + nb ? na + nb : 1) * sizeof(unsigned int));
+		if (!curves || !fam || !segs || !counts)
+		{
+			s = QAWS_STATUS_ALLOCATION_FAILURE;
+			goto done;
+		}
+		memcpy((void*)curves, a->desc.curves, na * sizeof(qaws_curve*));
+		memcpy((void*)(curves + na), b->desc.curves, nb * sizeof(qaws_curve*));
+		for (i = 0; i < na + nb; i++)
+		{
+			fam[i] = i >= na;
+			counts[i] = i < na ? a->seg_count[i] : b->seg_count[i - na];
+		}
+		memcpy(segs, a->segs, a->nseg * sizeof(qaws_flat_seg));
+		memcpy(segs + a->nseg, b->segs, b->nseg * sizeof(qaws_flat_seg));
+		for (i = a->nseg; i < a->nseg + b->nseg; i++)
+			segs[i].owner += na;
+		memset(&d, 0, sizeof(d));
+		d.curves = curves;
+		d.curve_count = na + nb;
+		d.families = fam;
+		x.desc = &d;
+		x.segs = segs;
+		x.nseg = a->nseg + b->nseg;
+		x.seg_count = counts;
+		x.flat = a->flat > b->flat ? a->flat : b->flat;
+		x.pos_tol = (a->ext > b->ext ? a->ext : b->ext) * CB_POS_REL;
+	}
+	s = cb_solve(&x);
+	if (s == QAWS_STATUS_OK)
+		cb_emit(&x, dim, out, capacity, out_count, b ? na : 0);
+done:
+	if (out_stats)
+		*out_stats = x.stats;
+	free(x.hits);
+	free((void*)curves);
+	free(fam);
+	free(segs);
+	free(counts);
+	return s;
+}
+
+qaws_status qaws_curve_set_find_intersections_2d(qaws_curve_set const* set, qaws_curve_set const* other, qaws_curve_batch_hit_2d* out_hits,
+	unsigned int hit_capacity, unsigned int* out_count, qaws_curve_batch_stats* out_stats)
+{
+	return cs_find(set, other, 2, out_hits, hit_capacity, out_count, out_stats);
+}
+
+qaws_status qaws_curve_set_find_intersections_3d(qaws_curve_set const* set, qaws_curve_set const* other, qaws_curve_batch_hit_3d* out_hits,
+	unsigned int hit_capacity, unsigned int* out_count, qaws_curve_batch_stats* out_stats)
+{
+	return cs_find(set, other, 3, out_hits, hit_capacity, out_count, out_stats);
 }

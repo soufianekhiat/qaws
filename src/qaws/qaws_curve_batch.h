@@ -78,4 +78,37 @@ qaws_status qaws_curve_batch_find_intersections_3d(
 	unsigned int* out_count,
 	qaws_curve_batch_stats* out_stats);
 
+/*
+ * Prepared sets: the flattening (the costly part: curve evaluations) done
+ * once, for curves queried again and again, e.g. fixed contour lines
+ * against gradient lines that change. A set keeps pointers to its curves:
+ * they must outlive it and stay unchanged.
+ *
+ * qaws_curve_set_find_intersections_*(set, NULL, ...) intersects a set
+ * with itself, by its desc (families, flags) as the one-shot call;
+ * (set, other, ...) intersects every curve of set with every curve of
+ * other: curve_a indexes set, curve_b other.
+ */
+typedef struct qaws_curve_set qaws_curve_set;
+
+qaws_status qaws_curve_set_create(qaws_curve_batch_desc const* desc, qaws_curve_set** out_set);
+void qaws_curve_set_destroy(qaws_curve_set* set);
+unsigned int qaws_curve_set_get_segment_count(qaws_curve_set const* set);
+
+qaws_status qaws_curve_set_find_intersections_2d(
+	qaws_curve_set const* set,
+	qaws_curve_set const* other,
+	qaws_curve_batch_hit_2d* out_hits,
+	unsigned int hit_capacity,
+	unsigned int* out_count,
+	qaws_curve_batch_stats* out_stats);
+
+qaws_status qaws_curve_set_find_intersections_3d(
+	qaws_curve_set const* set,
+	qaws_curve_set const* other,
+	qaws_curve_batch_hit_3d* out_hits,
+	unsigned int hit_capacity,
+	unsigned int* out_count,
+	qaws_curve_batch_stats* out_stats);
+
 #endif /* QAWS_CURVE_BATCH_H */

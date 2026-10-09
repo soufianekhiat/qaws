@@ -333,6 +333,97 @@ static void test_timing(void)
 	}
 }
 
+#define CBT_SET_N 64
+#define CBT_FRAMES 6
+#define CBT_SET_FLAT 0.004   /* one flatness for both paths */
+
+/* fixed contours prepared once, queried against gradient lines that change */
+static void test_sets(void)
+{
+	qaws_curve* contours[CBT_SET_N];
+	qaws_curve* grads[CBT_SET_N];
+	qaws_curve* all[2 * CBT_SET_N];
+	unsigned int fam[2 * CBT_SET_N], i, f, same = 1, total = 0, self_same;
+	qaws_curve_set* cset = NULL;
+	qaws_curve_batch_desc d;
+	qaws_curve_batch_hit_2d* hs = (qaws_curve_batch_hit_2d*)malloc(8192 * sizeof(qaws_curve_batch_hit_2d));
+	qaws_curve_batch_hit_2d* ho = (qaws_curve_batch_hit_2d*)malloc(8192 * sizeof(qaws_curve_batch_hit_2d));
+	double R = sqrt(0.25 + 0.5 * (CBT_SET_N - 1)) * 1.05, t0, t_set = 0, t_once = 0;
+	char msg[200];
+	for (i = 0; i < CBT_SET_N; i++)
+	{
+		double L = 0.25 + 0.5 * i;
+		contours[i] = cbt_ellipse(sqrt(L), sqrt(L / 2), 0, 0);
+	}
+	memset(&d, 0, sizeof(d));
+	d.curves = (qaws_curve const* const*)contours;
+	d.curve_count = CBT_SET_N;
+	d.flatness = (qaws_scalar)CBT_SET_FLAT;
+	t0 = cbt_now();
+	qaws_curve_set_create(&d, &cset);
+	t_set += cbt_now() - t0;
+	for (f = 0; f < CBT_FRAMES; f++)
+	{
+		qaws_curve_set* gset = NULL;
+		qaws_curve_batch_desc gd;
+		unsigned int ns = 0, no = 0, k;
+		for (i = 0; i < CBT_SET_N; i++)
+			grads[i] = cbt_gradient(tan(CBT_PI * ((i + 0.37 * f) / CBT_SET_N - 0.5) * 0.9) * 0.6, 0, R, 0);
+		memset(&gd, 0, sizeof(gd));
+		gd.curves = (qaws_curve const* const*)grads;
+		gd.curve_count = CBT_SET_N;
+		gd.flatness = (qaws_scalar)CBT_SET_FLAT;
+		/* the prepared contours against this frame's gradient lines */
+		t0 = cbt_now();
+		qaws_curve_set_create(&gd, &gset);
+		qaws_curve_set_find_intersections_2d(cset, gset, hs, 8192, &ns, NULL);
+		t_set += cbt_now() - t0;
+		/* the one-shot call on everything, two families */
+		for (i = 0; i < CBT_SET_N; i++)
+		{
+			all[i] = contours[i];
+			all[CBT_SET_N + i] = grads[i];
+			fam[i] = 0;
+			fam[CBT_SET_N + i] = 1;
+		}
+		memset(&gd, 0, sizeof(gd));
+		gd.curves = (qaws_curve const* const*)all;
+		gd.curve_count = 2 * CBT_SET_N;
+		gd.families = fam;
+		gd.flatness = (qaws_scalar)CBT_SET_FLAT;
+		t0 = cbt_now();
+		qaws_curve_batch_find_intersections_2d(&gd, ho, 8192, &no, NULL);
+		t_once += cbt_now() - t0;
+		same &= ns == no;
+		for (k = 0; k < ns && k < no && same; k++)
+			same &= hs[k].curve_a == ho[k].curve_a && hs[k].curve_b + CBT_SET_N == ho[k].curve_b
+				&& fabs(hs[k].parameter_a - ho[k].parameter_a) < 1e-9 && fabs(hs[k].parameter_b - ho[k].parameter_b) < 1e-9;
+		total += ns;
+		qaws_curve_set_destroy(gset);
+		for (i = 0; i < CBT_SET_N; i++)
+			qaws_curve_destroy(grads[i]);
+	}
+	/* a set with itself: the one-shot call on the same curves */
+	{
+		unsigned int ns = 0, no = 0, k;
+		qaws_curve_set_find_intersections_2d(cset, NULL, hs, 8192, &ns, NULL);
+		qaws_curve_batch_find_intersections_2d(&d, ho, 8192, &no, NULL);
+		self_same = ns == no;
+		for (k = 0; k < ns && k < no; k++)
+			self_same &= hs[k].curve_a == ho[k].curve_a && hs[k].curve_b == ho[k].curve_b;
+	}
+	printf("    prepared contours (%u segments) x %u frames of %u gradient lines: %u hits, %.3f s; one-shot calls %.3f s\n",
+		qaws_curve_set_get_segment_count(cset), CBT_FRAMES, CBT_SET_N, total, t_set, t_once);
+	sprintf(msg, "prepared set queries equal the one-shot batch on all %u frames (%u hits)", CBT_FRAMES, total);
+	TEST_ASSERT(same && total == CBT_FRAMES * 2 * CBT_SET_N * CBT_SET_N, msg);
+	TEST_ASSERT(self_same, "a set with itself equals the one-shot call");
+	qaws_curve_set_destroy(cset);
+	for (i = 0; i < CBT_SET_N; i++)
+		qaws_curve_destroy(contours[i]);
+	free(hs);
+	free(ho);
+}
+
 int test_79_curve_batch_main(void)
 {
 	g_pass = 0;
@@ -343,6 +434,7 @@ int test_79_curve_batch_main(void)
 	test_against_pairwise();
 	test_self();
 	test_timing();
+	test_sets();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
 }

@@ -104,3 +104,30 @@ These are f64 timings from test 79 and `qaws_batch_showcase` (Release build).
 for exact curves. It uses the same grid over sound span boxes, then
 certifies every candidate span pair. On the 72-curve heightfield it takes
 0.23 s, where pairwise exact calls take 2.1 s.
+
+## Prepared sets
+
+```c
+qaws_status qaws_curve_set_create(qaws_curve_batch_desc const* desc, qaws_curve_set** out_set);
+void qaws_curve_set_destroy(qaws_curve_set* set);
+unsigned int qaws_curve_set_get_segment_count(qaws_curve_set const* set);
+
+qaws_status qaws_curve_set_find_intersections_2d(qaws_curve_set const* set, qaws_curve_set const* other,
+	qaws_curve_batch_hit_2d* out_hits, unsigned int hit_capacity, unsigned int* out_count, qaws_curve_batch_stats* out_stats);
+/* and _3d */
+```
+
+A set flattens its curves once. A query re-runs only the grid and the
+narrow phase:
+
+- `other == NULL` intersects the set with itself, using its families and
+  flags, exactly as the one-shot call.
+- Otherwise every curve of `set` is intersected with every curve of
+  `other`. `curve_a` indexes `set` and `curve_b` indexes `other`.
+
+The set keeps pointers to its curves, so they must outlive it unchanged.
+
+Example: 64 fixed contours queried against 6 frames of 64 gradient lines
+give the same 49152 hits as the one-shot calls, in 0.085 s instead of
+0.097 s at equal flatness. Newton on the crossings dominates there. The
+saving grows with the size and span count of the fixed set.
