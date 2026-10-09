@@ -313,12 +313,57 @@ static void hf_time(hf_scene const* sc, int pairwise, double* tb, double* tp, un
 	*tp = hf_now() - t0;
 }
 
+static qaws_scalar hf_field(void* user, qaws_scalar const* p, qaws_scalar* g)
+{
+	double gx, gy, h = hf_height((double)p[0], (double)p[1], &gx, &gy);
+	(void)user;
+	if (g)
+	{
+		g[0] = (qaws_scalar)gx;
+		g[1] = (qaws_scalar)gy;
+	}
+	return (qaws_scalar)h;
+}
+
+/* the gradient lines of the scene against its n contour levels, without
+   contour curves: the field itself */
+static void hf_levels_time(hf_scene const* sc, unsigned int n, double* t, unsigned int* count)
+{
+	qaws_curve const** g = (qaws_curve const**)malloc(sc->count * sizeof(qaws_curve*));
+	qaws_scalar* lv = (qaws_scalar*)malloc(n * sizeof(qaws_scalar));
+	qaws_level_crossing* out = (qaws_level_crossing*)malloc((1 << 16) * sizeof(qaws_level_crossing));
+	qaws_level_crossing_desc d;
+	unsigned int i, ng = 0, reps = 0;
+	double t0;
+	for (i = 0; i < sc->count; i++)
+		if (sc->family[i] == 1)
+			g[ng++] = sc->curves[i];
+	for (i = 0; i < n; i++)
+		lv[i] = (qaws_scalar)(-0.65 + 1.55 * (i + 0.5) / n);
+	memset(&d, 0, sizeof(d));
+	d.curves = g;
+	d.curve_count = ng;
+	d.field = hf_field;
+	d.levels = lv;
+	d.level_count = n;
+	t0 = hf_now();
+	do
+	{
+		qaws_curve_batch_find_level_crossings(&d, out, 1 << 16, count);
+		reps++;
+	} while (hf_now() - t0 < 0.05);
+	*t = (hf_now() - t0) / reps;
+	free((void*)g);
+	free(lv);
+	free(out);
+}
+
 static void demo_heightfield(void)
 {
 	static double f[(HF_GRID + 1) * (HF_GRID + 1)];
 	unsigned int const sizes[5] = { 6, 12, 24, 48, 96 };
-	double tb[5], tp[5], fig_tb, fig_tp;
-	unsigned int curves[5], i, j, k;
+	double tb[5], tp[5], tl[5], fig_tb, fig_tp;
+	unsigned int curves[5], nl[5], i, j, k;
 	hf_scene sc;
 	qaws_curve_batch_hit_2d* hits = NULL;
 	qaws_curve_batch_stats st;
@@ -339,12 +384,13 @@ static void demo_heightfield(void)
 		qaws_curve_batch_stats st2;
 		hf_build(&sc, sizes[k], f);
 		hf_time(&sc, sizes[k] <= 48, &tb[k], &tp[k], &nb, &np, &h, &st2);
+		hf_levels_time(&sc, sizes[k], &tl[k], &nl[k]);
 		curves[k] = sc.count;
 		printf("    heightfield %2u levels: %4u curves, batch %6u hits %.5f s (%u segments, %u candidates)", sizes[k], sc.count, nb, tb[k],
 			st2.segment_count, st2.candidate_count);
 		if (sizes[k] <= 48)
 			printf(", pairwise %6u hits %.3f s, x%.0f", np, tp[k], tp[k] / (tb[k] > 1e-4 ? tb[k] : 1e-4));
-		printf("\n");
+		printf("; level crossings %u in %.5f s\n", nl[k], tl[k]);
 		free(h);
 		hf_free(&sc);
 	}
@@ -419,6 +465,18 @@ static void demo_heightfield(void)
 			svg_circle(&s, pb[2 * k], pb[2 * k + 1], 4, "#1a7f37", "#ffffff");
 		svg_text(&s, p.x0 + 20, p.y0 + 46, 13, "#8250df", "start", "pairwise: every contour / gradient pair");
 		svg_text(&s, p.x0 + 20, p.y0 + 66, 13, "#1a7f37", "start", "batch: one flattening + one grid for all curves");
+		{
+			double pl[10];
+			for (k = 0; k < 5; k++)
+			{
+				pl[2 * k] = vx(&p, log10((double)curves[k]));
+				pl[2 * k + 1] = vy(&p, log10(tl[k] > 1e-4 ? tl[k] : 1e-4));
+			}
+			svg_polyline(&s, pl, 5, "#bc4c00", 2.2, 1, 0);
+			for (k = 0; k < 5; k++)
+				svg_circle(&s, pl[2 * k], pl[2 * k + 1], 4, "#bc4c00", "#ffffff");
+			svg_text(&s, p.x0 + 20, p.y0 + 86, 13, "#bc4c00", "start", "level crossings: gradient lines x the field's levels, no contour curves");
+		}
 		k = 3;
 		sprintf(buf, "%u curves: x%.0f faster", curves[k], tp[k] / (tb[k] > 1e-4 ? tb[k] : 1e-4));
 		svg_text(&s, pb[2 * k] + 8, pb[2 * k + 1] + 18, 12, "#1a7f37", "start", buf);

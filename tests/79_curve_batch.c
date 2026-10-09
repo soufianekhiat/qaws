@@ -424,6 +424,129 @@ static void test_sets(void)
 	free(ho);
 }
 
+static qaws_scalar cbt_field(void* user, qaws_scalar const* p, qaws_scalar* g)
+{
+	(void)user;
+	if (g)
+	{
+		g[0] = 2 * p[0];
+		g[1] = 4 * p[1];
+	}
+	return p[0] * p[0] + 2 * p[1] * p[1];
+}
+
+static qaws_scalar cbt_field_no_gradient(void* user, qaws_scalar const* p, qaws_scalar* g)
+{
+	(void)user;
+	(void)g;
+	return p[0] * p[0] + 2 * p[1] * p[1];
+}
+
+/* the gradient lines against the levels of h = x^2 + 2 y^2, without contour curves */
+static void test_levels(void)
+{
+	qaws_curve* cs[CBT_LINES];
+	qaws_scalar lv[CBT_LEVELS];
+	static qaws_level_crossing lc[1024];
+	qaws_level_crossing_desc d;
+	unsigned int i, j, pass, n[2] = { 0, 0 }, matched[2] = { 0, 0 }, expected = 0;
+	double worst[2] = { 0, 0 }, R = sqrt(cbt_level(CBT_LEVELS - 1)) * 1.05;
+	char msg[200];
+	for (i = 0; i < CBT_LEVELS; i++)
+		lv[i] = (qaws_scalar)cbt_level(i);
+	for (j = 0; j < CBT_LINES; j++)
+		cs[j] = cbt_gradient(cbt_slope(j), j == CBT_LINES - 1, R, 0);
+	for (pass = 0; pass < 2; pass++)
+	{
+		memset(&d, 0, sizeof(d));
+		d.curves = (qaws_curve const* const*)cs;
+		d.curve_count = CBT_LINES;
+		d.field = pass ? cbt_field_no_gradient : cbt_field;
+		d.levels = lv;
+		d.level_count = CBT_LEVELS;
+		qaws_curve_batch_find_level_crossings(&d, lc, 1024, &n[pass]);
+		expected = 0;
+		for (i = 0; i < CBT_LEVELS; i++)
+			for (j = 0; j < CBT_LINES; j++)
+			{
+				double x, y;
+				int side;
+				cbt_expect(cbt_level(i), j, &x, &y);
+				for (side = 0; side < 2; side++)
+				{
+					double ex = j == CBT_LINES - 1 ? 0 : (side ? -x : x), ey = j == CBT_LINES - 1 ? (side ? -y : y) : y, best = 1e30;
+					unsigned int k, hits = 0;
+					expected++;
+					for (k = 0; k < n[pass] && k < 1024; k++)
+						if (lc[k].curve == j && lc[k].level == i)
+						{
+							double dd = hypot(lc[k].position.x - ex, lc[k].position.y - ey);
+							if (dd < 1e-3)
+								hits++;
+							if (dd < best)
+								best = dd;
+						}
+					matched[pass] += hits == 1;
+					if (best > worst[pass])
+						worst[pass] = best;
+				}
+			}
+	}
+	printf("    level crossings, %u gradient lines x %u levels: %u with the gradient (worst %.1e), %u without (worst %.1e)\n", CBT_LINES, CBT_LEVELS,
+		n[0], worst[0], n[1], worst[1]);
+	sprintf(msg, "every one of the %u level crossings found once, with and without the gradient", expected);
+	TEST_ASSERT(n[0] == expected && n[1] == expected && matched[0] == expected && matched[1] == expected, msg);
+	TEST_ASSERT(worst[0] < (QAWS_SCALAR_IS_FLOAT ? 1e-3 : 1e-9) && worst[1] < (QAWS_SCALAR_IS_FLOAT ? 1e-3 : 1e-9), "level crossings agree with the closed form");
+	for (j = 0; j < CBT_LINES; j++)
+		qaws_curve_destroy(cs[j]);
+	/* timing: 128 gradient lines x 128 levels against the batch with contour curves */
+	{
+		unsigned int nn = 128, nb = 0, nl = 0;
+		qaws_curve** g = (qaws_curve**)malloc(2 * nn * sizeof(qaws_curve*));
+		qaws_scalar* lv2 = (qaws_scalar*)malloc(nn * sizeof(qaws_scalar));
+		unsigned int* fam = (unsigned int*)malloc(2 * nn * sizeof(unsigned int));
+		qaws_level_crossing* out = (qaws_level_crossing*)malloc(4 * nn * nn * sizeof(qaws_level_crossing));
+		qaws_curve_batch_hit_2d* hb = (qaws_curve_batch_hit_2d*)malloc(4 * nn * nn * sizeof(qaws_curve_batch_hit_2d));
+		qaws_curve_batch_desc bd;
+		double t0, tl, tb, R2 = sqrt(0.25 + 0.5 * (nn - 1)) * 1.05;
+		for (i = 0; i < nn; i++)
+		{
+			double L = 0.25 + 0.5 * i;
+			lv2[i] = (qaws_scalar)L;
+			g[i] = cbt_gradient(tan(CBT_PI * ((double)i / nn - 0.5) * 0.9) * 0.6, 0, R2, 0);
+			g[nn + i] = cbt_ellipse(sqrt(L), sqrt(L / 2), 0, 0);
+			fam[i] = 1;
+			fam[nn + i] = 0;
+		}
+		memset(&d, 0, sizeof(d));
+		d.curves = (qaws_curve const* const*)g;
+		d.curve_count = nn;
+		d.field = cbt_field;
+		d.levels = lv2;
+		d.level_count = nn;
+		t0 = cbt_now();
+		qaws_curve_batch_find_level_crossings(&d, out, 4 * nn * nn, &nl);
+		tl = cbt_now() - t0;
+		memset(&bd, 0, sizeof(bd));
+		bd.curves = (qaws_curve const* const*)g;
+		bd.curve_count = 2 * nn;
+		bd.families = fam;
+		t0 = cbt_now();
+		qaws_curve_batch_find_intersections_2d(&bd, hb, 4 * nn * nn, &nb, NULL);
+		tb = cbt_now() - t0;
+		printf("    %u gradient lines x %u levels: level crossings %u in %.3f s; batch against %u contour curves %u in %.3f s\n", nn, nn, nl, tl, nn, nb, tb);
+		sprintf(msg, "%u x %u: the level crossings equal the batch with contour curves (%u)", nn, nn, nb);
+		TEST_ASSERT(nl == nb && nl == 2 * nn * nn, msg);
+		for (i = 0; i < 2 * nn; i++)
+			qaws_curve_destroy(g[i]);
+		free(g);
+		free(lv2);
+		free(fam);
+		free(out);
+		free(hb);
+	}
+}
+
 int test_79_curve_batch_main(void)
 {
 	g_pass = 0;
@@ -435,6 +558,7 @@ int test_79_curve_batch_main(void)
 	test_self();
 	test_timing();
 	test_sets();
+	test_levels();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
 }

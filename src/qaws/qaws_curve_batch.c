@@ -600,3 +600,248 @@ qaws_status qaws_curve_set_find_intersections_3d(qaws_curve_set const* set, qaws
 {
 	return cs_find(set, other, 3, out_hits, hit_capacity, out_count, out_stats);
 }
+
+/* ------------------------------------------------------------------ */
+/*  Level crossings                                                    */
+/* ------------------------------------------------------------------ */
+
+#define LC_MAX_DEPTH 16
+#define LC_ITERS 64
+
+typedef struct lc_ctx
+{
+	qaws_level_crossing_desc const* desc;
+	unsigned int dim, curve;
+	int has_gradient;
+	qaws_scalar htol, ftol;
+	qaws_level_crossing* out;
+	unsigned int n, cap;
+} lc_ctx;
+
+/* h at the curve point of t, and dh/dt when wanted (the gradient dotted with dC/dt) */
+static qaws_status lc_eval(lc_ctx* x, qaws_scalar t, qaws_scalar* p, qaws_scalar* h, qaws_scalar* dh)
+{
+	qaws_curve const* c = x->desc->curves[x->curve];
+	qaws_scalar d[3], g[3];
+	qaws_status s = qaws_internal_curve_point(c, x->dim, t, QAWS_EVAL_FLAG_POSITION | (dh ? QAWS_EVAL_FLAG_D1 : 0), p, dh ? d : NULL);
+	if (s != QAWS_STATUS_OK)
+		return s;
+	g[0] = g[1] = g[2] = 0;
+	*h = x->desc->field(x->desc->user, p, dh && x->has_gradient ? g : NULL);
+	if (dh)
+		*dh = g[0] * d[0] + g[1] * d[1] + g[2] * d[2];
+	return QAWS_STATUS_OK;
+}
+
+static qaws_status lc_push(lc_ctx* x, unsigned int level, qaws_scalar t, qaws_scalar const* p)
+{
+	qaws_level_crossing* o;
+	if (x->n == x->cap)
+	{
+		unsigned int cap = x->cap ? x->cap * 2 : 256;
+		qaws_level_crossing* g = (qaws_level_crossing*)realloc(x->out, cap * sizeof(qaws_level_crossing));
+		if (!g)
+			return QAWS_STATUS_ALLOCATION_FAILURE;
+		x->out = g;
+		x->cap = cap;
+	}
+	o = &x->out[x->n++];
+	o->curve = x->curve;
+	o->level = level;
+	o->parameter = t;
+	o->position.x = p[0];
+	o->position.y = p[1];
+	o->position.z = p[2];
+	return QAWS_STATUS_OK;
+}
+
+/* h(C(t)) = L on [ta, tb], fa = h - L at ta and fb at tb of opposite signs
+   (or fa = 0): Newton (secant without a gradient) kept inside the bracket */
+static qaws_status lc_solve(lc_ctx* x, unsigned int level, qaws_scalar ta, qaws_scalar fa, qaws_scalar tb, qaws_scalar fb)
+{
+	qaws_scalar L = x->desc->levels[level], t, p[3], h, dh = 0, f;
+	unsigned int it;
+	int side = 0;
+	qaws_status s;
+	if (fa == 0)
+	{
+		s = lc_eval(x, ta, p, &h, NULL);
+		return s == QAWS_STATUS_OK ? lc_push(x, level, ta, p) : s;
+	}
+	t = ta + (tb - ta) * fa / (fa - fb);
+	for (it = 0; it < LC_ITERS; it++)
+	{
+		qaws_scalar tn, lo, hi;
+		s = lc_eval(x, t, p, &h, x->has_gradient ? &dh : NULL);
+		if (s != QAWS_STATUS_OK)
+			return s;
+		f = h - L;
+		if (fabs(f) <= x->ftol)
+			break;
+		/* shrink the bracket (Illinois weights for the secant) */
+		if ((f < 0) == (fa < 0))
+		{
+			ta = t;
+			fa = f;
+			if (side == -1) fb /= 2;
+			side = -1;
+		}
+		else
+		{
+			tb = t;
+			fb = f;
+			if (side == 1) fa /= 2;
+			side = 1;
+		}
+		lo = ta < tb ? ta : tb;
+		hi = ta < tb ? tb : ta;
+		if (!(hi - lo > (fabs(lo) + fabs(hi)) * (qaws_scalar)1e-16))
+			break;
+		tn = x->has_gradient && dh != 0 ? t - f / dh : ta + (tb - ta) * fa / (fa - fb);
+		if (!(tn > lo && tn < hi))
+			tn = (lo + hi) / 2;
+		t = tn;
+	}
+	return lc_push(x, level, t, p);
+}
+
+/* first level index with levels[i] >= v */
+static unsigned int lc_lower(qaws_scalar const* lv, unsigned int n, qaws_scalar v)
+{
+	unsigned int lo = 0, hi = n;
+	while (lo < hi)
+	{
+		unsigned int mid = (lo + hi) / 2;
+		if (lv[mid] < v)
+			lo = mid + 1;
+		else
+			hi = mid;
+	}
+	return lo;
+}
+
+/* piece [t0, t1] with field values h0, h1: split while h is not close to
+   linear along it, then every level in [min, max) is crossed once */
+static qaws_status lc_piece(lc_ctx* x, qaws_scalar t0, qaws_scalar h0, qaws_scalar t1, qaws_scalar h1, unsigned int depth)
+{
+	qaws_scalar const* lv = x->desc->levels;
+	unsigned int n = x->desc->level_count, i, i0, i1;
+	qaws_scalar lo = h0 < h1 ? h0 : h1, hi = h0 < h1 ? h1 : h0, tm = (t0 + t1) / 2, p[3], hm;
+	qaws_status s;
+	if (depth < LC_MAX_DEPTH)
+	{
+		s = lc_eval(x, tm, p, &hm, NULL);
+		if (s != QAWS_STATUS_OK)
+			return s;
+		if (fabs(hm - (h0 + h1) / 2) > x->htol)
+		{
+			s = lc_piece(x, t0, h0, tm, hm, depth + 1);
+			return s == QAWS_STATUS_OK ? lc_piece(x, tm, hm, t1, h1, depth + 1) : s;
+		}
+	}
+	/* levels in [lo, hi): a value exactly on a level belongs to the piece
+	   where it is the lower end, so a crossing through it is counted once */
+	i0 = lc_lower(lv, n, lo);
+	i1 = lc_lower(lv, n, hi);
+	for (i = 0; i < i1 - i0; i++)
+	{
+		/* in the order of t */
+		unsigned int k = h0 <= h1 ? i0 + i : i1 - 1 - i;
+		s = lc_solve(x, k, t0, h0 - lv[k], t1, h1 - lv[k]);
+		if (s != QAWS_STATUS_OK)
+			return s;
+	}
+	return QAWS_STATUS_OK;
+}
+
+static int lc_cmp(void const* p, void const* q)
+{
+	qaws_level_crossing const* a = (qaws_level_crossing const*)p;
+	qaws_level_crossing const* b = (qaws_level_crossing const*)q;
+	if (a->curve != b->curve) return a->curve < b->curve ? -1 : 1;
+	if (a->parameter != b->parameter) return a->parameter < b->parameter ? -1 : 1;
+	return 0;
+}
+
+qaws_status qaws_curve_batch_find_level_crossings(
+	qaws_level_crossing_desc const* desc,
+	qaws_level_crossing* out_crossings,
+	unsigned int capacity,
+	unsigned int* out_count)
+{
+	lc_ctx x;
+	qaws_flat_seg* segs = NULL;
+	unsigned int nseg = 0, capseg = 0, i, k;
+	qaws_scalar ext, flat, hmin = (qaws_scalar)HUGE_VAL, hmax = -(qaws_scalar)HUGE_VAL, dl = (qaws_scalar)HUGE_VAL, g[3];
+	qaws_status s = QAWS_STATUS_OK;
+	if (!desc || !desc->field || !out_count || (!out_crossings && capacity) || (desc->curve_count && !desc->curves) || (desc->level_count && !desc->levels))
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	*out_count = 0;
+	for (i = 1; i < desc->level_count; i++)
+	{
+		if (!(desc->levels[i] > desc->levels[i - 1]))
+			return QAWS_STATUS_INVALID_ARGUMENT;
+		if (desc->levels[i] - desc->levels[i - 1] < dl)
+			dl = desc->levels[i] - desc->levels[i - 1];
+	}
+	for (i = 0; i < desc->curve_count; i++)
+	{
+		if (!desc->curves[i])
+			return QAWS_STATUS_INVALID_ARGUMENT;
+		if (desc->curves[i]->dimension != desc->curves[0]->dimension)
+			return QAWS_STATUS_INVALID_DIMENSION;
+	}
+	if (!desc->curve_count || !desc->level_count)
+		return QAWS_STATUS_OK;
+	memset(&x, 0, sizeof(x));
+	x.desc = desc;
+	x.dim = desc->curves[0]->dimension == QAWS_DIMENSION_2D ? 2 : 3;
+	ext = qaws_internal_flatten_extent(desc->curves, desc->curve_count, x.dim, NULL, 0);
+	flat = desc->flatness > 0 ? desc->flatness : ext / 1024;
+	/* does the field fill the gradient? */
+	{
+		qaws_scalar p[3] = { 0, 0, 0 };
+		qaws_internal_curve_point(desc->curves[0], x.dim, desc->curves[0]->parameter_range.min_value, QAWS_EVAL_FLAG_POSITION, p, NULL);
+		g[0] = g[1] = g[2] = (qaws_scalar)HUGE_VAL;
+		desc->field(desc->user, p, g);
+		x.has_gradient = g[0] != (qaws_scalar)HUGE_VAL && g[1] != (qaws_scalar)HUGE_VAL;
+	}
+	for (i = 0; i < desc->curve_count && s == QAWS_STATUS_OK; i++)
+	{
+		unsigned int first = nseg;
+		s = qaws_internal_flatten_curve(desc->curves[i], x.dim, flat, i, &segs, &nseg, &capseg);
+		/* field range over the segment ends: scales the tolerances */
+		for (k = first; k < nseg && s == QAWS_STATUS_OK; k++)
+		{
+			qaws_scalar h = desc->field(desc->user, segs[k].p0, NULL);
+			if (h < hmin) hmin = h;
+			if (h > hmax) hmax = h;
+		}
+	}
+	if (s == QAWS_STATUS_OK && nseg)
+	{
+		qaws_scalar hr = hmax > hmin ? hmax - hmin : 1, scale = hr + (qaws_scalar)fabs(desc->levels[0]) + (qaws_scalar)fabs(desc->levels[desc->level_count - 1]);
+		x.htol = (dl < hr ? dl : hr) / 8;
+		x.ftol = scale * (QAWS_SCALAR_IS_FLOAT ? (qaws_scalar)1e-6 : (qaws_scalar)1e-14);
+		for (k = 0; k < nseg && s == QAWS_STATUS_OK; k++)
+		{
+			qaws_scalar p[3], h0 = 0, h1 = 0;
+			x.curve = segs[k].owner;
+			s = lc_eval(&x, segs[k].t0, p, &h0, NULL);
+			if (s == QAWS_STATUS_OK)
+				s = lc_eval(&x, segs[k].t1, p, &h1, NULL);
+			if (s == QAWS_STATUS_OK)
+				s = lc_piece(&x, segs[k].t0, h0, segs[k].t1, h1, 0);
+		}
+	}
+	if (s == QAWS_STATUS_OK)
+	{
+		qsort(x.out, x.n, sizeof(qaws_level_crossing), lc_cmp);
+		for (i = 0; i < x.n && i < capacity; i++)
+			out_crossings[i] = x.out[i];
+		*out_count = x.n;
+	}
+	free(segs);
+	free(x.out);
+	return s;
+}

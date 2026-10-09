@@ -79,6 +79,51 @@ qaws_status qaws_curve_batch_find_intersections_3d(
 	qaws_curve_batch_stats* out_stats);
 
 /*
+ * Level crossings: where N curves cross the level sets h = L of a scalar
+ * field, for every level at once, without building the level curves. For
+ * a heightfield, the gradient lines against the contour levels: the
+ * crossings of every contour with every gradient line.
+ *
+ * Each curve is flattened once; along each segment the field values at its
+ * ends bracket the levels it crosses (a segment is split where h is not
+ * close to linear along it, so a level crossed twice inside it is not
+ * missed); each bracket is solved for h(C(t)) = L by Newton with
+ * bisection safeguards (Newton needs the gradient; without it, secant).
+ * A curve touching a level without crossing it is not reported.
+ */
+typedef qaws_scalar (*qaws_scalar_field_fn)(
+	void* user,
+	qaws_scalar const* point,       /* x, y (, z) */
+	qaws_scalar* gradient);         /* NULL, or receives dh/dx, dh/dy (, dh/dz) */
+
+typedef struct qaws_level_crossing_desc
+{
+	qaws_curve const* const* curves;    /* all 2D or all 3D */
+	unsigned int curve_count;
+	qaws_scalar_field_fn field;
+	void* user;
+	qaws_scalar const* levels;          /* strictly ascending */
+	unsigned int level_count;
+	qaws_scalar flatness;               /* geometric, as for the batch; 0 = 2^-10 of the extent */
+} qaws_level_crossing_desc;
+
+/* sorted by (curve, parameter) */
+typedef struct qaws_level_crossing
+{
+	unsigned int curve;
+	unsigned int level;
+	qaws_scalar parameter;
+	qaws_vec3 position;                 /* z = 0 for 2D */
+} qaws_level_crossing;
+
+/* Writes min(count, capacity) crossings; *out_count is the total. */
+qaws_status qaws_curve_batch_find_level_crossings(
+	qaws_level_crossing_desc const* desc,
+	qaws_level_crossing* out_crossings,
+	unsigned int capacity,
+	unsigned int* out_count);
+
+/*
  * Prepared sets: the flattening (the costly part: curve evaluations) done
  * once, for curves queried again and again, e.g. fixed contour lines
  * against gradient lines that change. A set keeps pointers to its curves:

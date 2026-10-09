@@ -131,3 +131,48 @@ Example: 64 fixed contours queried against 6 frames of 64 gradient lines
 give the same 49152 hits as the one-shot calls, in 0.085 s instead of
 0.097 s at equal flatness. Newton on the crossings dominates there. The
 saving grows with the size and span count of the fixed set.
+
+## Level crossings
+
+```c
+typedef qaws_scalar (*qaws_scalar_field_fn)(void* user, qaws_scalar const* point, qaws_scalar* gradient);
+
+typedef struct qaws_level_crossing_desc {
+	qaws_curve const* const* curves; unsigned int curve_count;   /* all 2D or all 3D */
+	qaws_scalar_field_fn field; void* user;
+	qaws_scalar const* levels; unsigned int level_count;         /* strictly ascending */
+	qaws_scalar flatness;
+} qaws_level_crossing_desc;
+
+typedef struct qaws_level_crossing {
+	unsigned int curve, level;
+	qaws_scalar parameter;
+	qaws_vec3 position;
+} qaws_level_crossing;            /* sorted by (curve, parameter) */
+
+qaws_status qaws_curve_batch_find_level_crossings(qaws_level_crossing_desc const* desc,
+	qaws_level_crossing* out_crossings, unsigned int capacity, unsigned int* out_count);
+```
+
+This finds where curves cross the level sets h = L of a scalar field, for
+every level at once, without building the level curves. For a heightfield,
+the curves are the gradient lines and the levels are the contour heights,
+so each crossing of a gradient line with a contour is found directly.
+
+1. Each curve is flattened once.
+2. The field values at a segment's ends bracket the levels it crosses (a
+   binary search in the sorted levels). A segment is split while h is not
+   close to linear along it, so a level crossed twice inside it is not
+   missed. A value exactly on a level belongs to the piece where it is the
+   lower end, so each crossing is counted once.
+3. Each bracket is solved for h(C(t)) = L. With the gradient this uses
+   Newton (gradient · C'); without it, Illinois secant. Both are kept inside
+   the bracket.
+
+The field may leave `gradient` untouched when it has none. A curve that
+touches a level without crossing it is not reported.
+
+Example: 128 parabola gradient lines against 128 levels of x² + 2y² give
+the 32768 crossings of the batch with contour curves, in 0.010 s instead of
+0.074 s. On the Gaussian heightfield of `qaws_batch_showcase` they are
+3 to 5 times faster than the batch against the traced contour curves.
