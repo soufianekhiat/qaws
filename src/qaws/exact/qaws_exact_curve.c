@@ -197,13 +197,10 @@ int qaws_exact_param_shift_for(double tmax, unsigned int param_bits)
  * Points and tangents are quantized onto the space lattice (tangents per
  * unit parameter).
  */
-static qaws_status prepare_cubic_family(qaws_exact_desc const* d, qaws_curve const* curve, qaws_curve_kind kind, qaws_exact_curve** out,
-	double* max_pos)
+static qaws_status prepare_cubic_points(qaws_exact_desc const* d, qaws_curve const* curve, qaws_curve_kind kind, unsigned int n, qaws_scalar* pts,
+	qaws_scalar* tan, int64_t* P, int64_t* M, qaws_exact_curve** out, double* max_pos)
 {
-	qaws_field_desc fields[8];
-	qaws_scalar pts[QAWS_EXACT_MAX_KNOTS * 3], tan[QAWS_EXACT_MAX_KNOTS * 3];
-	int64_t P[QAWS_EXACT_MAX_KNOTS * 3], M[QAWS_EXACT_MAX_KNOTS * 3];
-	unsigned int nf = 0, f, n = 0, got = 0, dim = (unsigned int)curve->dimension, D = dim + 1, spans, s, i, c;
+	unsigned int got = 0, dim = (unsigned int)curve->dimension, D = dim + 1, spans, s, i, c;
 	int closed = 0;
 	qaws_exact_curve* ec;
 	qaws_status st;
@@ -214,13 +211,6 @@ static qaws_status prepare_cubic_family(qaws_exact_desc const* d, qaws_curve con
 			return QAWS_STATUS_EXACT_UNSUPPORTED;   /* distances: sqrt */
 		closed = impl->closed;
 	}
-	if (qaws_curve_describe_fields(curve, fields, 8, &nf) != QAWS_STATUS_OK)
-		return QAWS_STATUS_EXACT_UNSUPPORTED;
-	for (f = 0; f < nf && f < 8; f++)
-		if (fields[f].field == QAWS_FIELD_POINTS)
-			n = fields[f].count;
-	if (n < 2 || n > QAWS_EXACT_MAX_KNOTS || (dim != 2 && dim != 3))
-		return QAWS_STATUS_EXACT_RANGE_EXCEEDED;
 	if (qaws_curve_read_field(curve, QAWS_FIELD_POINTS, pts, n * dim, &got) != QAWS_STATUS_OK)
 		return QAWS_STATUS_EXACT_UNSUPPORTED;
 	if (kind == QAWS_CURVE_KIND_HERMITE &&
@@ -280,6 +270,33 @@ static qaws_status prepare_cubic_family(qaws_exact_desc const* d, qaws_curve con
 	}
 	*out = ec;
 	return QAWS_STATUS_OK;
+}
+
+/* Points (and Hermite tangents) read into buffers sized by their count. */
+static qaws_status prepare_cubic_family(qaws_exact_desc const* d, qaws_curve const* curve, qaws_curve_kind kind, qaws_exact_curve** out,
+	double* max_pos)
+{
+	qaws_field_desc fields[8];
+	unsigned int nf = 0, f, n = 0, dim = (unsigned int)curve->dimension;
+	qaws_scalar* pts;
+	int64_t* P;
+	qaws_status st;
+	if (qaws_curve_describe_fields(curve, fields, 8, &nf) != QAWS_STATUS_OK)
+		return QAWS_STATUS_EXACT_UNSUPPORTED;
+	for (f = 0; f < nf && f < 8; f++)
+		if (fields[f].field == QAWS_FIELD_POINTS)
+			n = fields[f].count;
+	if (n < 2 || (dim != 2 && dim != 3))
+		return QAWS_STATUS_EXACT_RANGE_EXCEEDED;
+	pts = (qaws_scalar*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_scalar) * 2 * n * dim));
+	P = (int64_t*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(int64_t) * 2 * n * dim));
+	if (pts && P)
+		st = prepare_cubic_points(d, curve, kind, n, pts, pts + n * dim, P, P + n * dim, out, max_pos);
+	else
+		st = QAWS_STATUS_ALLOCATION_FAILURE;
+	qaws_internal_dealloc(NULL, pts);
+	qaws_internal_dealloc(NULL, P);
+	return st;
 }
 
 /*
@@ -605,93 +622,18 @@ static qaws_status prepare_composite(qaws_exact_desc const* d, qaws_curve const*
 	return QAWS_STATUS_OK;
 }
 
-qaws_status qaws_exact_curve_prepare(qaws_exact_desc const* desc, qaws_curve const* curve, qaws_exact_curve** out_curve,
-	qaws_exact_report* out_report)
+/* Bezier, rational Bezier, B-spline or NURBS from its control net (n points,
+   nk knots), the buffers sized by the caller. */
+static qaws_status prepare_net(qaws_exact_desc const* dp, qaws_curve const* curve, unsigned int n, unsigned int nk, unsigned int p, int rational,
+	int spline, qaws_scalar* cps, qaws_scalar* ws, qaws_scalar* kn, int64_t* K, qaws_exact_curve** out_curve, qaws_exact_report* out_report)
 {
-	qaws_exact_desc d;
-	qaws_curve_kind kind;
-	qaws_field_desc fields[8];
-	qaws_scalar cps[QAWS_EXACT_MAX_KNOTS * 3], ws[QAWS_EXACT_MAX_KNOTS], kn[QAWS_EXACT_MAX_KNOTS];
-	int64_t K[QAWS_EXACT_MAX_KNOTS];
-	unsigned int nf = 0, f, n = 0, nk = 0, got = 0, i, c, dim, D, p, storage = 0, s;
-	int rational, spline, wexp = 0;
+	qaws_exact_desc d = *dp;
+	unsigned int got = 0, i, c, dim = (unsigned int)curve->dimension, D = dim + 1, storage = 0, s;
+	int wexp = 0;
 	double max_pos = 0, max_w = 0, max_k = 0, wmax = 0;
 	qaws_exact_hfrac* local = NULL;
 	qaws_exact_curve* ec;
 	qaws_status st = QAWS_STATUS_OK;
-	if (!curve || !out_curve)
-		return QAWS_STATUS_INVALID_ARGUMENT;
-	*out_curve = NULL;
-	if (desc)
-		d = *desc;
-	else
-		qaws_exact_desc_default(&d);
-	if (d.param_bits == 0 || d.param_bits > 56 || d.coord_bits == 0 || d.coord_bits > 32 || d.weight_bits == 0 || d.weight_bits > 30)
-		return QAWS_STATUS_INVALID_ARGUMENT;
-	kind = qaws_curve_get_kind(curve);
-	if (kind == QAWS_CURVE_KIND_COMPOSITE)
-		return prepare_composite(&d, curve, out_curve, out_report);
-	if (kind == QAWS_CURVE_KIND_CATMULL_ROM && ((qaws_catmull_rom_impl const*)curve->impl)->parameterization != QAWS_PARAMETERIZATION_UNIFORM)
-	{
-		qaws_exact_curve* ec2 = NULL;
-		qaws_status st2 = prepare_cr_frozen(&d, curve, &ec2);
-		unsigned int s2, i2;
-		if (st2 != QAWS_STATUS_OK)
-			return st2;
-		if (out_report)
-		{
-			memset(out_report, 0, sizeof(*out_report));
-			out_report->quality = QAWS_NUMERIC_EXACT_RATIONAL;
-			out_report->flags = QAWS_EXACT_FLAG_PREP_QUANTIZED;
-			for (s2 = 0; s2 < ec2->span_count; s2++)
-				for (i2 = 0; i2 < 4 * (unsigned int)(ec2->dimension + 1); i2++)
-					if (qaws_exact_int_bits(&ec2->spans[s2].h[i2]) > out_report->storage_bits)
-						out_report->storage_bits = qaws_exact_int_bits(&ec2->spans[s2].h[i2]);
-		}
-		*out_curve = ec2;
-		return QAWS_STATUS_OK;
-	}
-	if (kind == QAWS_CURVE_KIND_HERMITE || kind == QAWS_CURVE_KIND_CATMULL_ROM || kind == QAWS_CURVE_KIND_POLYNOMIAL)
-	{
-		double qpos = 0, qpar = 0;
-		qaws_exact_curve* ec2 = NULL;
-		qaws_status st2 = kind == QAWS_CURVE_KIND_POLYNOMIAL ? prepare_polynomial(&d, curve, &ec2, &qpar)
-		                                                     : prepare_cubic_family(&d, curve, kind, &ec2, &qpos);
-		if (st2 != QAWS_STATUS_OK)
-			return st2;
-		if (out_report)
-		{
-			unsigned int s2, i2;
-			memset(out_report, 0, sizeof(*out_report));
-			out_report->quality = QAWS_NUMERIC_EXACT_RATIONAL;
-			out_report->flags = (qpos > 0 || qpar > 0) ? QAWS_EXACT_FLAG_INPUT_QUANTIZED : QAWS_EXACT_FLAG_NONE;
-			out_report->max_position_quantization_error = qpos;
-			out_report->parameter_quantization_error = qpar;
-			for (s2 = 0; s2 < ec2->span_count; s2++)
-				for (i2 = 0; i2 < (ec2->spans[s2].degree + 1) * (unsigned int)(ec2->dimension + 1); i2++)
-					if (qaws_exact_int_bits(&ec2->spans[s2].h[i2]) > out_report->storage_bits)
-						out_report->storage_bits = qaws_exact_int_bits(&ec2->spans[s2].h[i2]);
-		}
-		*out_curve = ec2;
-		return QAWS_STATUS_OK;
-	}
-	rational = kind == QAWS_CURVE_KIND_RATIONAL_BEZIER || kind == QAWS_CURVE_KIND_NURBS;
-	spline = kind == QAWS_CURVE_KIND_BSPLINE || kind == QAWS_CURVE_KIND_NURBS;
-	if (kind != QAWS_CURVE_KIND_BEZIER && kind != QAWS_CURVE_KIND_RATIONAL_BEZIER && !spline)
-		return QAWS_STATUS_EXACT_UNSUPPORTED;
-	if (qaws_curve_describe_fields(curve, fields, 8, &nf) != QAWS_STATUS_OK)
-		return QAWS_STATUS_EXACT_UNSUPPORTED;
-	for (f = 0; f < nf && f < 8; f++)
-	{
-		if (fields[f].field == QAWS_FIELD_CONTROL_POINTS) n = fields[f].count;
-		if (fields[f].field == QAWS_FIELD_KNOTS) nk = fields[f].count;
-	}
-	dim = (unsigned int)curve->dimension;
-	D = dim + 1;
-	p = spline ? curve->degree : n - 1;
-	if (n < 1 || n > QAWS_EXACT_MAX_KNOTS || p > QAWS_EXACT_MAX_DEGREE || (dim != 2 && dim != 3) ||
-	    (spline && (nk != n + p + 1 || nk > QAWS_EXACT_MAX_KNOTS)))
-		return QAWS_STATUS_EXACT_RANGE_EXCEEDED;
 	if (qaws_curve_read_field(curve, QAWS_FIELD_CONTROL_POINTS, cps, n * dim, &got) != QAWS_STATUS_OK)
 		return QAWS_STATUS_EXACT_UNSUPPORTED;
 	for (i = 0; i < n; i++)
@@ -852,6 +794,100 @@ qaws_status qaws_exact_curve_prepare(qaws_exact_desc const* desc, qaws_curve con
 	}
 	*out_curve = ec;
 	return QAWS_STATUS_OK;
+}
+
+qaws_status qaws_exact_curve_prepare(qaws_exact_desc const* desc, qaws_curve const* curve, qaws_exact_curve** out_curve,
+	qaws_exact_report* out_report)
+{
+	qaws_exact_desc d;
+	qaws_curve_kind kind;
+	qaws_field_desc fields[8];
+	unsigned int nf = 0, f, n = 0, nk = 0, dim, p;
+	int rational, spline;
+	qaws_status st = QAWS_STATUS_OK;
+	if (!curve || !out_curve)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	*out_curve = NULL;
+	if (desc)
+		d = *desc;
+	else
+		qaws_exact_desc_default(&d);
+	if (d.param_bits == 0 || d.param_bits > 56 || d.coord_bits == 0 || d.coord_bits > 32 || d.weight_bits == 0 || d.weight_bits > 30)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	kind = qaws_curve_get_kind(curve);
+	if (kind == QAWS_CURVE_KIND_COMPOSITE)
+		return prepare_composite(&d, curve, out_curve, out_report);
+	if (kind == QAWS_CURVE_KIND_CATMULL_ROM && ((qaws_catmull_rom_impl const*)curve->impl)->parameterization != QAWS_PARAMETERIZATION_UNIFORM)
+	{
+		qaws_exact_curve* ec2 = NULL;
+		qaws_status st2 = prepare_cr_frozen(&d, curve, &ec2);
+		unsigned int s2, i2;
+		if (st2 != QAWS_STATUS_OK)
+			return st2;
+		if (out_report)
+		{
+			memset(out_report, 0, sizeof(*out_report));
+			out_report->quality = QAWS_NUMERIC_EXACT_RATIONAL;
+			out_report->flags = QAWS_EXACT_FLAG_PREP_QUANTIZED;
+			for (s2 = 0; s2 < ec2->span_count; s2++)
+				for (i2 = 0; i2 < 4 * (unsigned int)(ec2->dimension + 1); i2++)
+					if (qaws_exact_int_bits(&ec2->spans[s2].h[i2]) > out_report->storage_bits)
+						out_report->storage_bits = qaws_exact_int_bits(&ec2->spans[s2].h[i2]);
+		}
+		*out_curve = ec2;
+		return QAWS_STATUS_OK;
+	}
+	if (kind == QAWS_CURVE_KIND_HERMITE || kind == QAWS_CURVE_KIND_CATMULL_ROM || kind == QAWS_CURVE_KIND_POLYNOMIAL)
+	{
+		double qpos = 0, qpar = 0;
+		qaws_exact_curve* ec2 = NULL;
+		qaws_status st2 = kind == QAWS_CURVE_KIND_POLYNOMIAL ? prepare_polynomial(&d, curve, &ec2, &qpar)
+		                                                     : prepare_cubic_family(&d, curve, kind, &ec2, &qpos);
+		if (st2 != QAWS_STATUS_OK)
+			return st2;
+		if (out_report)
+		{
+			unsigned int s2, i2;
+			memset(out_report, 0, sizeof(*out_report));
+			out_report->quality = QAWS_NUMERIC_EXACT_RATIONAL;
+			out_report->flags = (qpos > 0 || qpar > 0) ? QAWS_EXACT_FLAG_INPUT_QUANTIZED : QAWS_EXACT_FLAG_NONE;
+			out_report->max_position_quantization_error = qpos;
+			out_report->parameter_quantization_error = qpar;
+			for (s2 = 0; s2 < ec2->span_count; s2++)
+				for (i2 = 0; i2 < (ec2->spans[s2].degree + 1) * (unsigned int)(ec2->dimension + 1); i2++)
+					if (qaws_exact_int_bits(&ec2->spans[s2].h[i2]) > out_report->storage_bits)
+						out_report->storage_bits = qaws_exact_int_bits(&ec2->spans[s2].h[i2]);
+		}
+		*out_curve = ec2;
+		return QAWS_STATUS_OK;
+	}
+	rational = kind == QAWS_CURVE_KIND_RATIONAL_BEZIER || kind == QAWS_CURVE_KIND_NURBS;
+	spline = kind == QAWS_CURVE_KIND_BSPLINE || kind == QAWS_CURVE_KIND_NURBS;
+	if (kind != QAWS_CURVE_KIND_BEZIER && kind != QAWS_CURVE_KIND_RATIONAL_BEZIER && !spline)
+		return QAWS_STATUS_EXACT_UNSUPPORTED;
+	if (qaws_curve_describe_fields(curve, fields, 8, &nf) != QAWS_STATUS_OK)
+		return QAWS_STATUS_EXACT_UNSUPPORTED;
+	for (f = 0; f < nf && f < 8; f++)
+	{
+		if (fields[f].field == QAWS_FIELD_CONTROL_POINTS) n = fields[f].count;
+		if (fields[f].field == QAWS_FIELD_KNOTS) nk = fields[f].count;
+	}
+	dim = (unsigned int)curve->dimension;
+	p = spline ? curve->degree : n - 1;
+	if (n < 1 || p > QAWS_EXACT_MAX_DEGREE || (dim != 2 && dim != 3) || (spline && nk != n + p + 1))
+		return QAWS_STATUS_EXACT_RANGE_EXCEEDED;
+	{
+		size_t nkk = spline ? nk : 1;
+		qaws_scalar* buf = (qaws_scalar*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_scalar) * (n * (dim + 1) + nkk)));
+		int64_t* K = (int64_t*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(int64_t) * nkk));
+		if (buf && K)
+			st = prepare_net(&d, curve, n, nk, p, rational, spline, buf, buf + n * dim, buf + n * (dim + 1), K, out_curve, out_report);
+		else
+			st = QAWS_STATUS_ALLOCATION_FAILURE;
+		qaws_internal_dealloc(NULL, buf);
+		qaws_internal_dealloc(NULL, K);
+		return st;
+	}
 }
 
 /* ------------------------------------------------------------------ */
