@@ -52,4 +52,13 @@ qaws_status qaws_internal_grid_create(qaws_bp_box const* boxes, unsigned int cou
 void qaws_internal_grid_destroy(qaws_bp_grid* grid);
 double qaws_internal_grid_ring(qaws_bp_grid const* grid, double const* p, unsigned int r, void (*visit)(void* user, unsigned int item), void* user);
 
+/*
+ * The cells crossed by the ray o + t d, t in [0, tmax], in order (clipped to
+ * the grid's box): visit gets each non-empty cell's items and the t where
+ * the ray leaves the cell, and returns non-zero to stop. Returns 1 when
+ * stopped by visit.
+ */
+int qaws_internal_grid_ray(qaws_bp_grid const* grid, double const* o, double const* d, double tmax,
+	int (*visit)(void* user, unsigned int const* items, unsigned int count, double t_exit), void* user);
+
 #endif /* QAWS_INTERNAL_BROADPHASE_H */

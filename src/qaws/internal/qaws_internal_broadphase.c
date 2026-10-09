@@ -311,3 +311,86 @@ double qaws_internal_grid_ring(qaws_bp_grid const* g, double const* p, unsigned 
 	/* every point of a cell r rings away is at least (r - 1) cells from p */
 	return r > 1 ? (r - 1) * g->hmin : 0;
 }
+
+int qaws_internal_grid_ray(qaws_bp_grid const* g, double const* o, double const* d, double tmax,
+	int (*visit)(void* user, unsigned int const* items, unsigned int count, double t_exit), void* user)
+{
+	double t0 = 0, t1 = tmax, tnext[3], tstep[3], hi;
+	int cell[3], step[3], n[3];
+	unsigned int k;
+	/* clip to the grid's box (axes past dim have one cell) */
+	for (k = 0; k < 3; k++)
+	{
+		n[k] = (int)g->G.g[k];
+		if (k >= g->dim || g->G.inv[k] <= 0)
+			continue;
+		hi = g->G.lo[k] + n[k] / g->G.inv[k];
+		if (d[k] == 0)
+		{
+			if (o[k] < g->G.lo[k] || o[k] > hi)
+				return 0;
+			continue;
+		}
+		{
+			double ta = (g->G.lo[k] - o[k]) / d[k], tb = (hi - o[k]) / d[k];
+			if (ta > tb) { double s = ta; ta = tb; tb = s; }
+			if (ta > t0) t0 = ta;
+			if (tb < t1) t1 = tb;
+		}
+	}
+	if (!(t0 <= t1))
+		return 0;
+	/* the entry cell and the steps */
+	for (k = 0; k < 3; k++)
+	{
+		if (k >= g->dim || g->G.inv[k] <= 0)
+		{
+			cell[k] = 0;
+			step[k] = 0;
+			tnext[k] = HUGE_VAL;
+			tstep[k] = HUGE_VAL;
+			continue;
+		}
+		cell[k] = (int)bp_cell(&g->G, o[k] + t0 * d[k], k);
+		if (d[k] > 0)
+		{
+			step[k] = 1;
+			tnext[k] = (g->G.lo[k] + (cell[k] + 1) / g->G.inv[k] - o[k]) / d[k];
+			tstep[k] = 1 / (g->G.inv[k] * d[k]);
+		}
+		else if (d[k] < 0)
+		{
+			step[k] = -1;
+			tnext[k] = (g->G.lo[k] + cell[k] / g->G.inv[k] - o[k]) / d[k];
+			tstep[k] = -1 / (g->G.inv[k] * d[k]);
+		}
+		else
+		{
+			step[k] = 0;
+			tnext[k] = HUGE_VAL;
+			tstep[k] = HUGE_VAL;
+		}
+	}
+	for (;;)
+	{
+		unsigned int c = ((unsigned int)cell[2] * g->G.g[1] + (unsigned int)cell[1]) * g->G.g[0] + (unsigned int)cell[0];
+		double texit = tnext[0];
+		unsigned int a = 0;
+		for (k = 1; k < 3; k++)
+			if (tnext[k] < texit)
+			{
+				texit = tnext[k];
+				a = k;
+			}
+		if (texit > t1)
+			texit = t1;
+		if (g->start[c + 1] > g->start[c] && visit(user, g->items + g->start[c], g->start[c + 1] - g->start[c], texit))
+			return 1;
+		if (texit >= t1)
+			return 0;
+		cell[a] += step[a];
+		if (cell[a] < 0 || cell[a] >= n[a])
+			return 0;
+		tnext[a] += tstep[a];
+	}
+}

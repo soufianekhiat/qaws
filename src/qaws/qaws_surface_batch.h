@@ -175,6 +175,48 @@ qaws_status qaws_surface_batch_find_closest(
 	qaws_surface_batch_closest* out_points,
 	qaws_surface_batch_stats* out_stats);
 
+/*
+ * Ray casting: the first hit of every ray o + t d (t >= 0, t <= max_t) over
+ * M surfaces at once. The rays walk one grid over the flattened patches
+ * cell by cell (Amanatides-Woo); a patch met is seeded by the ray against
+ * its two triangles and refined by Newton on S(u, v) = o + t d; the walk
+ * stops once the best hit lies before the current cell's exit. Tangential
+ * grazes are not reported.
+ */
+typedef struct qaws_surface_ray_desc
+{
+	qaws_surface const* const* surfaces;
+	unsigned int surface_count;
+	qaws_scalar const* origins;         /* 3 scalars per ray */
+	qaws_scalar const* directions;      /* 3 scalars per ray; t is in units of each */
+	unsigned int ray_count;
+	qaws_scalar max_t;                  /* 0 = no limit */
+	qaws_scalar flatness;               /* 0 = 2^-9 of the extent */
+} qaws_surface_ray_desc;
+
+typedef struct qaws_surface_ray_hit
+{
+	unsigned int surface;               /* QAWS_CURVE_BATCH_NONE: no hit */
+	qaws_scalar t, u, v;
+	qaws_vec3 position;
+} qaws_surface_ray_hit;
+
+/* out_hits receives ray_count results; out_stats may be NULL
+   (candidate_count: patches met, newton_count: refined, hit_count: rays that hit). */
+qaws_status qaws_surface_batch_raycast(
+	qaws_surface_ray_desc const* desc,
+	qaws_surface_ray_hit* out_hits,
+	qaws_surface_batch_stats* out_stats);
+
+qaws_status qaws_surface_set_raycast(
+	qaws_surface_set const* set,
+	qaws_scalar const* origins,
+	qaws_scalar const* directions,
+	unsigned int ray_count,
+	qaws_scalar max_t,
+	qaws_surface_ray_hit* out_hits,
+	qaws_surface_batch_stats* out_stats);
+
 qaws_status qaws_surface_set_find_closest(
 	qaws_surface_set const* set,
 	qaws_scalar const* points,

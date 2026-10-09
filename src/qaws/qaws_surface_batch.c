@@ -1725,3 +1725,258 @@ qaws_status qaws_surface_set_find_closest(
 		*out_stats = st;
 	return s;
 }
+
+/* ------------------------------------------------------------------ */
+/*  Ray casting                                                        */
+/* ------------------------------------------------------------------ */
+
+typedef struct sr_ctx
+{
+	qaws_surface const* const* surfaces;
+	qaws_flat_patch const* patches;
+	unsigned int* stamp;
+	unsigned int ray;
+	qaws_scalar o[3], d[3], tmax, pos_tol;
+	qaws_scalar best_t, best_u, best_v, best_p[3];
+	unsigned int best_s;
+	qaws_surface_batch_stats* stats;
+} sr_ctx;
+
+/* Newton on F(t, u, v) = S(u, v) - (o + t d), J = [-d, Su, Sv], t kept in [0, tmax] */
+static int sr_newton(sr_ctx const* x, qaws_surface const* s, qaws_scalar* t, qaws_scalar* u, qaws_scalar* v, qaws_scalar* pos)
+{
+	qaws_range ur = qaws_surface_get_u_range(s), vr = qaws_surface_get_v_range(s);
+	unsigned int it, polish = 0;
+	qaws_scalar a[3];
+	a[0] = -x->d[0]; a[1] = -x->d[1]; a[2] = -x->d[2];
+	for (it = 0; it < SB_NEWTON_ITERS; it++)
+	{
+		qaws_surface_eval_result r;
+		qaws_scalar f[3], su[3], sv[3], det;
+		if (qaws_surface_evaluate(s, *u, *v, QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_DU | QAWS_SURFACE_EVAL_DV, &r) != QAWS_STATUS_OK)
+			return 0;
+		f[0] = r.position.x - x->o[0] - *t * x->d[0];
+		f[1] = r.position.y - x->o[1] - *t * x->d[1];
+		f[2] = r.position.z - x->o[2] - *t * x->d[2];
+		su[0] = r.du.x; su[1] = r.du.y; su[2] = r.du.z;
+		sv[0] = r.dv.x; sv[1] = r.dv.y; sv[2] = r.dv.z;
+		if (sqrt(sb_dot(f, f)) <= x->pos_tol && polish++ == 2)
+		{
+			pos[0] = r.position.x; pos[1] = r.position.y; pos[2] = r.position.z;
+			return 1;
+		}
+		det = sb_det3(a, su, sv);
+		if (!(fabs(det) > (qaws_scalar)1e-12 * sqrt(sb_dot(a, a) * sb_dot(su, su) * sb_dot(sv, sv))))
+		{
+			if (!polish)
+				return 0;
+			pos[0] = r.position.x; pos[1] = r.position.y; pos[2] = r.position.z;
+			return 1;
+		}
+		*t -= sb_det3(f, su, sv) / det;
+		*u -= sb_det3(a, f, sv) / det;
+		*v -= sb_det3(a, su, f) / det;
+		if (*t < 0) *t = 0;
+		if (x->tmax > 0 && *t > x->tmax) *t = x->tmax;
+		if (*u < ur.min_value) *u = ur.min_value;
+		if (*u > ur.max_value) *u = ur.max_value;
+		if (*v < vr.min_value) *v = vr.min_value;
+		if (*v > vr.max_value) *v = vr.max_value;
+	}
+	return 0;
+}
+
+/* the ray against triangle (q0, q1, q2): t and barycentrics, with slack */
+static int sr_tri(qaws_scalar const* o, qaws_scalar const* d, qaws_scalar const* q0, qaws_scalar const* q1, qaws_scalar const* q2, qaws_scalar eps,
+	qaws_scalar* t, qaws_scalar* b1, qaws_scalar* b2)
+{
+	qaws_scalar e1[3], e2[3], h[3], w[3], q[3], det;
+	int k;
+	for (k = 0; k < 3; k++)
+	{
+		e1[k] = q1[k] - q0[k];
+		e2[k] = q2[k] - q0[k];
+		w[k] = o[k] - q0[k];
+	}
+	sb_cross(d, e2, h);
+	det = sb_dot(e1, h);
+	if (!(fabs(det) > (qaws_scalar)1e-14 * sqrt(sb_dot(d, d) * sb_dot(e1, e1) * sb_dot(e2, e2))))
+		return 0;
+	*b1 = sb_dot(w, h) / det;
+	sb_cross(w, e1, q);
+	*b2 = sb_dot(d, q) / det;
+	*t = sb_dot(e2, q) / det;
+	return *b1 >= -eps && *b2 >= -eps && *b1 + *b2 <= 1 + eps;
+}
+
+static int sr_visit(void* user, unsigned int const* items, unsigned int count, double t_exit)
+{
+	static int const tri[2][3] = { { 0, 1, 3 }, { 0, 3, 2 } };
+	sr_ctx* x = (sr_ctx*)user;
+	unsigned int i;
+	qaws_scalar dl = (qaws_scalar)sqrt(sb_dot(x->d, x->d));
+	for (i = 0; i < count; i++)
+	{
+		qaws_flat_patch const* P = &x->patches[items[i]];
+		qaws_scalar uc[4], vc[4], dd[3], size;
+		int k, j;
+		if (x->stamp[items[i]] == x->ray)
+			continue;
+		x->stamp[items[i]] = x->ray;
+		x->stats->candidate_count++;
+		uc[0] = P->u0; vc[0] = P->v0; uc[1] = P->u1; vc[1] = P->v0; uc[2] = P->u0; vc[2] = P->v1; uc[3] = P->u1; vc[3] = P->v1;
+		for (j = 0; j < 3; j++)
+			dd[j] = P->p[3][j] - P->p[0][j];
+		size = (qaws_scalar)sqrt(sb_dot(dd, dd));
+		for (k = 0; k < 2; k++)
+		{
+			qaws_scalar t, b1, b2, u, v, pos[3], eps = size > 0 ? 2 * (P->r + x->pos_tol) / size : 1;
+			if (!sr_tri(x->o, x->d, P->p[tri[k][0]], P->p[tri[k][1]], P->p[tri[k][2]], eps, &t, &b1, &b2))
+				continue;
+			/* behind the origin, past max_t or past the best, beyond the slack */
+			if (t < -(P->r + x->pos_tol) / (dl > 0 ? dl : 1) || (x->tmax > 0 && t > x->tmax + (P->r + x->pos_tol) / dl) || t > x->best_t + (P->r + x->pos_tol) / dl)
+				continue;
+			x->stats->newton_count++;
+			if (t < 0) t = 0;
+			u = (1 - b1 - b2) * uc[tri[k][0]] + b1 * uc[tri[k][1]] + b2 * uc[tri[k][2]];
+			v = (1 - b1 - b2) * vc[tri[k][0]] + b1 * vc[tri[k][1]] + b2 * vc[tri[k][2]];
+			if (sr_newton(x, x->surfaces[P->owner], &t, &u, &v, pos) && (t < x->best_t || (t == x->best_t && P->owner < x->best_s)))
+			{
+				x->best_t = t;
+				x->best_u = u;
+				x->best_v = v;
+				x->best_s = P->owner;
+				x->best_p[0] = pos[0]; x->best_p[1] = pos[1]; x->best_p[2] = pos[2];
+			}
+		}
+	}
+	/* nothing in a later cell can come before a hit inside this one */
+	return x->best_s != QAWS_CURVE_BATCH_NONE && (double)x->best_t <= t_exit;
+}
+
+static qaws_status sr_run(qaws_surface const* const* surfaces, qaws_flat_patch const* patches, unsigned int npatch, qaws_scalar const* origins,
+	qaws_scalar const* directions, unsigned int ray_count, qaws_scalar max_t, qaws_scalar ext, qaws_surface_ray_hit* out, qaws_surface_batch_stats* stats)
+{
+	sr_ctx x;
+	qaws_bp_box* boxes;
+	qaws_bp_grid* grid = NULL;
+	unsigned int i, k;
+	qaws_status s;
+	memset(&x, 0, sizeof(x));
+	stats->patch_count = npatch;
+	for (i = 0; i < ray_count; i++)
+	{
+		memset(&out[i], 0, sizeof(out[i]));
+		out[i].surface = QAWS_CURVE_BATCH_NONE;
+	}
+	if (!npatch || !ray_count)
+		return QAWS_STATUS_OK;
+	boxes = (qaws_bp_box*)malloc(npatch * sizeof(qaws_bp_box));
+	x.stamp = (unsigned int*)malloc(npatch * sizeof(unsigned int));
+	if (!boxes || !x.stamp)
+	{
+		free(boxes);
+		free(x.stamp);
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	}
+	for (i = 0; i < npatch; i++)
+	{
+		x.stamp[i] = ~0u;
+		for (k = 0; k < 3; k++)
+		{
+			boxes[i].lo[k] = (double)patches[i].lo[k];
+			boxes[i].hi[k] = (double)patches[i].hi[k];
+		}
+	}
+	s = qaws_internal_grid_create(boxes, npatch, 3, &grid);
+	free(boxes);
+	stats->cell_count = 0;
+	x.surfaces = surfaces;
+	x.patches = patches;
+	x.tmax = max_t;
+	x.pos_tol = ext * SB_POS_REL;
+	x.stats = stats;
+	for (i = 0; i < ray_count && s == QAWS_STATUS_OK; i++)
+	{
+		double od[3], ddv[3];
+		for (k = 0; k < 3; k++)
+		{
+			x.o[k] = origins[3 * i + k];
+			x.d[k] = directions[3 * i + k];
+			od[k] = (double)x.o[k];
+			ddv[k] = (double)x.d[k];
+		}
+		if (!(sb_dot(x.d, x.d) > 0))
+			continue;
+		x.ray = i;
+		x.best_t = (qaws_scalar)HUGE_VAL;
+		x.best_s = QAWS_CURVE_BATCH_NONE;
+		qaws_internal_grid_ray(grid, od, ddv, max_t > 0 ? (double)max_t : HUGE_VAL, sr_visit, &x);
+		if (x.best_s != QAWS_CURVE_BATCH_NONE)
+		{
+			out[i].surface = x.best_s;
+			out[i].t = x.best_t;
+			out[i].u = x.best_u;
+			out[i].v = x.best_v;
+			out[i].position.x = x.best_p[0];
+			out[i].position.y = x.best_p[1];
+			out[i].position.z = x.best_p[2];
+			stats->hit_count++;
+		}
+	}
+	qaws_internal_grid_destroy(grid);
+	free(x.stamp);
+	return s;
+}
+
+qaws_status qaws_surface_batch_raycast(
+	qaws_surface_ray_desc const* desc,
+	qaws_surface_ray_hit* out_hits,
+	qaws_surface_batch_stats* out_stats)
+{
+	qaws_surface_batch_stats st;
+	qaws_flat_patch* patches = NULL;
+	unsigned int npatch = 0, cap = 0, i;
+	qaws_scalar ext, flat;
+	qaws_status s = QAWS_STATUS_OK;
+	memset(&st, 0, sizeof(st));
+	if (out_stats)
+		*out_stats = st;
+	if (!desc || (desc->surface_count && !desc->surfaces) || (desc->ray_count && (!desc->origins || !desc->directions || !out_hits)))
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	for (i = 0; i < desc->surface_count; i++)
+		if (!desc->surfaces[i])
+			return QAWS_STATUS_INVALID_ARGUMENT;
+	ext = qaws_internal_flatten_extent(NULL, 0, 3, desc->surfaces, desc->surface_count);
+	flat = desc->flatness > 0 ? desc->flatness : ext / 512;
+	for (i = 0; i < desc->surface_count && s == QAWS_STATUS_OK; i++)
+		s = qaws_internal_flatten_surface(desc->surfaces[i], flat, i, &patches, &npatch, &cap);
+	if (s == QAWS_STATUS_OK)
+		s = sr_run(desc->surfaces, patches, npatch, desc->origins, desc->directions, desc->ray_count, desc->max_t, ext, out_hits, &st);
+	if (out_stats)
+		*out_stats = st;
+	free(patches);
+	return s;
+}
+
+qaws_status qaws_surface_set_raycast(
+	qaws_surface_set const* set,
+	qaws_scalar const* origins,
+	qaws_scalar const* directions,
+	unsigned int ray_count,
+	qaws_scalar max_t,
+	qaws_surface_ray_hit* out_hits,
+	qaws_surface_batch_stats* out_stats)
+{
+	qaws_surface_batch_stats st;
+	qaws_status s;
+	memset(&st, 0, sizeof(st));
+	if (out_stats)
+		*out_stats = st;
+	if (!set || (ray_count && (!origins || !directions || !out_hits)))
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	s = sr_run(set->desc.surfaces, set->patches, set->npatch, origins, directions, ray_count, max_t, set->ext, out_hits, &st);
+	if (out_stats)
+		*out_stats = st;
+	return s;
+}

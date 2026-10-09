@@ -184,3 +184,44 @@ This returns, for every query point, the nearest point over all surfaces.
 Test 81 runs 400 points against three paraboloids and two planes. No
 answer is farther than a 160 × 160 sampling of the surfaces, while the
 pairwise `qaws_surface_find_closest_point` lands farther on 32 of them.
+
+## Ray casting
+
+```c
+typedef struct qaws_surface_ray_desc {
+	qaws_surface const* const* surfaces; unsigned int surface_count;
+	qaws_scalar const* origins;          /* 3 scalars per ray */
+	qaws_scalar const* directions;       /* 3 scalars per ray; t in units of each */
+	unsigned int ray_count;
+	qaws_scalar max_t;                   /* 0 = no limit */
+	qaws_scalar flatness;
+} qaws_surface_ray_desc;
+
+typedef struct qaws_surface_ray_hit {
+	unsigned int surface;                /* QAWS_CURVE_BATCH_NONE: no hit */
+	qaws_scalar t, u, v;
+	qaws_vec3 position;
+} qaws_surface_ray_hit;
+
+qaws_status qaws_surface_batch_raycast(qaws_surface_ray_desc const* desc, qaws_surface_ray_hit* out_hits,
+	qaws_surface_batch_stats* out_stats);
+qaws_status qaws_surface_set_raycast(qaws_surface_set const* set, qaws_scalar const* origins, qaws_scalar const* directions,
+	unsigned int ray_count, qaws_scalar max_t, qaws_surface_ray_hit* out_hits, qaws_surface_batch_stats* out_stats);
+```
+
+This returns the first hit of every ray o + t d, with 0 ≤ t ≤ max_t.
+
+1. Each ray walks the grid over the flattened patches cell by cell
+   (Amanatides–Woo).
+2. A patch met is tested against its two triangles, with slack from its
+   inflation, and the result seeds Newton on S(u, v) = o + t d.
+3. The walk stops once the best hit lies before the current cell's exit,
+   because any patch hit earlier along the ray overlaps a cell already
+   visited.
+
+Tangential grazes are not reported.
+
+Test 81 casts 1000 rays against three paraboloids and a plane. Every
+first hit matches the closed form, with t error under 4e-13, in 0.007 s.
+The pairwise curve / surface call on segment curves would take about
+1.8 s, and it misses one ray in 100.

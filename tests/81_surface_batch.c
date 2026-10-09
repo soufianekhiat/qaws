@@ -873,6 +873,149 @@ static void test_exact_surface_closest(void)
 	}
 }
 
+#define SBT_RAYS 1000
+
+/* first hit of a ray: the paraboloids z = x^2 + y^2 + c on [-1, 1]^2 and the
+   plane z = -0.25 on [-1.5, 1.5]^2; 0 when a hit is too close to a border,
+   a tangency or another surface's hit (ambiguous for a test) */
+static int sbt_first_hit(double const* o, double const* d, double* t_out, int* s_out)
+{
+	double best = 1e30;
+	int bs = -1, k;
+	double second = 1e30;
+	for (k = 0; k < SBT_SURF; k++)
+	{
+		double c = sbt_lift((unsigned int)k), A = d[0] * d[0] + d[1] * d[1], B = 2 * (o[0] * d[0] + o[1] * d[1]) - d[2];
+		double C = o[0] * o[0] + o[1] * o[1] + c - o[2], disc = B * B - 4 * A * C, r[2];
+		int j;
+		if (fabs(disc) < 1e-6)
+			return 0;
+		if (disc < 0)
+			continue;
+		r[0] = (-B - sqrt(disc)) / (2 * A);
+		r[1] = (-B + sqrt(disc)) / (2 * A);
+		for (j = 0; j < 2; j++)
+		{
+			double x = o[0] + r[j] * d[0], y = o[1] + r[j] * d[1];
+			if (r[j] < 0)
+				continue;
+			if (fabs(fabs(x) - 1) < 1e-4 || fabs(fabs(y) - 1) < 1e-4)
+				return 0;
+			if (fabs(x) < 1 && fabs(y) < 1)
+			{
+				if (r[j] < best) { second = best; best = r[j]; bs = k; }
+				else if (r[j] < second) second = r[j];
+			}
+		}
+	}
+	{
+		double t = (-0.25 - o[2]) / d[2], x = o[0] + t * d[0], y = o[1] + t * d[1];
+		if (t >= 0 && fabs(x) < 1.5 && fabs(y) < 1.5)
+		{
+			if (fabs(fabs(x) - 1.5) < 1e-4 || fabs(fabs(y) - 1.5) < 1e-4)
+				return 0;
+			if (t < best) { second = best; best = t; bs = SBT_SURF; }
+			else if (t < second) second = t;
+		}
+	}
+	if (second - best < 1e-4)
+		return 0;
+	*t_out = best;
+	*s_out = bs;
+	return 1;
+}
+
+static void test_raycast(void)
+{
+	qaws_surface* sf[SBT_SURF + 1];
+	static qaws_scalar org[3 * SBT_RAYS], dir[3 * SBT_RAYS];
+	static double t_ref[SBT_RAYS];
+	static int s_ref[SBT_RAYS];
+	static qaws_surface_ray_hit h[SBT_RAYS], hs[SBT_RAYS];
+	qaws_surface_ray_desc d;
+	qaws_surface_batch_stats st;
+	qaws_surface_set* set = NULL;
+	qaws_surface_batch_desc sd;
+	unsigned int i, k, ok = 0, same = 1, pair_ok = 0;
+	double worst = 0, t0, tb, tp, tol = QAWS_SCALAR_IS_FLOAT ? 1e-4 : 1e-9;
+	char msg[200];
+	for (k = 0; k < SBT_SURF; k++)
+		sf[k] = sbt_paraboloid(sbt_lift(k));
+	sf[SBT_SURF] = sbt_plane(-0.25, 0);
+	for (i = 0; i < SBT_RAYS; i++)
+		for (;;)
+		{
+			double o[3], dv[3];
+			o[0] = -1.4 + 2.8 * sbt_rand(); o[1] = -1.4 + 2.8 * sbt_rand(); o[2] = 4.5;
+			dv[0] = 0.6 * (sbt_rand() - 0.5); dv[1] = 0.6 * (sbt_rand() - 0.5); dv[2] = -1;
+			if (!sbt_first_hit(o, dv, &t_ref[i], &s_ref[i]))
+				continue;
+			for (k = 0; k < 3; k++)
+			{
+				org[3 * i + k] = (qaws_scalar)o[k];
+				dir[3 * i + k] = (qaws_scalar)dv[k];
+			}
+			break;
+		}
+	memset(&d, 0, sizeof(d));
+	d.surfaces = (qaws_surface const* const*)sf;
+	d.surface_count = SBT_SURF + 1;
+	d.origins = org;
+	d.directions = dir;
+	d.ray_count = SBT_RAYS;
+	t0 = sbt_now();
+	qaws_surface_batch_raycast(&d, h, &st);
+	tb = sbt_now() - t0;
+	for (i = 0; i < SBT_RAYS; i++)
+	{
+		int good = s_ref[i] < 0 ? h[i].surface == QAWS_CURVE_BATCH_NONE : (h[i].surface == (unsigned int)s_ref[i] && fabs(h[i].t - t_ref[i]) < tol);
+		ok += good;
+		if (s_ref[i] >= 0 && h[i].surface == (unsigned int)s_ref[i] && fabs(h[i].t - t_ref[i]) > worst)
+			worst = fabs(h[i].t - t_ref[i]);
+	}
+	/* the prepared set gives the same hits */
+	memset(&sd, 0, sizeof(sd));
+	sd.surfaces = (qaws_surface const* const*)sf;
+	sd.surface_count = SBT_SURF + 1;
+	qaws_surface_set_create(&sd, &set);
+	qaws_surface_set_raycast(set, org, dir, SBT_RAYS, 0, hs, NULL);
+	for (i = 0; i < SBT_RAYS; i++)
+		same &= hs[i].surface == h[i].surface && (h[i].surface == QAWS_CURVE_BATCH_NONE || fabs(hs[i].t - h[i].t) < 1e-12);
+	qaws_surface_set_destroy(set);
+	/* the pairwise curve / surface call on segment curves, a tenth of the rays */
+	t0 = sbt_now();
+	for (i = 0; i < SBT_RAYS / 10; i++)
+	{
+		double p[3], q[3], best = 1e30;
+		qaws_curve* seg;
+		for (k = 0; k < 3; k++)
+		{
+			p[k] = org[3 * i + k];
+			q[k] = org[3 * i + k] + 10 * dir[3 * i + k];
+		}
+		seg = sbt_segment(p, q);
+		for (k = 0; k < SBT_SURF + 1; k++)
+		{
+			qaws_surface_curve_intersection buf[8];
+			unsigned int m = 0, j;
+			qaws_surface_find_curve_intersections(sf[k], seg, buf, 8, &m);
+			for (j = 0; j < m && j < 8; j++)
+				if (10 * buf[j].t < best)
+					best = 10 * buf[j].t;
+		}
+		pair_ok += s_ref[i] < 0 ? best > 1e29 : fabs(best - t_ref[i]) < 1e-6;
+		qaws_curve_destroy(seg);
+	}
+	tp = (sbt_now() - t0) * 10;
+	printf("    ray casting: %u rays x %u surfaces in %.4f s (%u patches, %u met, %u refined), first hit right on %u (worst t error %.1e); pairwise (extrapolated) %.3f s, right on %u of %u\n",
+		SBT_RAYS, SBT_SURF + 1, tb, st.patch_count, st.candidate_count, st.newton_count, ok, worst, tp, pair_ok, SBT_RAYS / 10);
+	sprintf(msg, "ray casting: the first hit of all %u rays (surface and closed-form t)", SBT_RAYS);
+	TEST_ASSERT(ok == SBT_RAYS, msg);
+	TEST_ASSERT(same, "the prepared surface set casts the same rays");
+	for (k = 0; k <= SBT_SURF; k++)
+		qaws_surface_destroy(sf[k]);
+}
+
 int test_81_surface_batch_main(void)
 {
 	g_pass = 0;
@@ -886,6 +1029,7 @@ int test_81_surface_batch_main(void)
 	test_surface_sets();
 	test_surface_closest();
 	test_exact_surface_closest();
+	test_raycast();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
 }
