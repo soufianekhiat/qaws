@@ -241,6 +241,7 @@ if(QAWS_ENABLE_EXACT)
     src/qaws/exact/qaws_exact_curve_surface.c
     src/qaws/exact/qaws_exact_ssi.c
     src/qaws/exact/qaws_exact_batch.c
+    src/qaws/exact/qaws_exact_closest.c
   )
 endif()
 

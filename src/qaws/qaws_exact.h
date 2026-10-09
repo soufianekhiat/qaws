@@ -261,6 +261,35 @@ typedef struct qaws_exact_batch_stats
 qaws_status qaws_exact_curve_batch_hits(qaws_exact_batch_desc const* desc, qaws_exact_batch_hit* out_hits, unsigned int capacity,
 	unsigned int* out_count, qaws_exact_batch_stats* out_stats);
 
+/*
+ * Certified closest points: for every query point (exact doubles, world
+ * units), the nearest point over the exact curves of desc (families and
+ * flags ignored). On a span C = X / W the squared distance to p = P / Q is
+ * stationary at the roots of the integer polynomial
+ *   g(s) = sum_c (Q X_c - P_c W)(X_c' W - X_c W')
+ * (degree 3n - 2); its roots, isolated exactly, and the span ends are the
+ * candidates, each with an enclosure of its distance. Spans come from one
+ * grid over their sound control boxes, nearest first, while they can still
+ * win. The result is certified when the winner's distance enclosure lies
+ * below every other candidate's (otherwise the nearest candidate is still
+ * reported, certified = 0: an exact tie, e.g. the centre of a circle, or
+ * candidates closer than the refinement can separate).
+ */
+#define QAWS_EXACT_CLOSEST_NONE 0xFFFFFFFFu
+
+typedef struct qaws_exact_closest_point
+{
+	unsigned int curve;             /* QAWS_EXACT_CLOSEST_NONE without curves */
+	double t_lo, t_hi;              /* the nearest point's parameter (lo == hi: exact) */
+	double distance_lo, distance_hi;/* its distance, world units */
+	int certified;                  /* the nearest point is proven unique */
+} qaws_exact_closest_point;
+
+/* points: point_count points of the curves' dimension. stats: span_count,
+   candidate_count (spans solved), hit_count, uncertified_count. */
+qaws_status qaws_exact_curve_batch_closest(qaws_exact_batch_desc const* desc, double const* points, unsigned int point_count,
+	qaws_exact_closest_point* out_points, qaws_exact_batch_stats* out_stats);
+
 /* ===================================================================
  * Certified 2D Boolean operations
  * =================================================================== */

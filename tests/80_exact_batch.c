@@ -283,6 +283,117 @@ static void test_boxes(void)
 	TEST_ASSERT(total > 0 && out == 0, "every sampled point of a span lies in its control box");
 }
 
+#define EBT_PARAB 8
+#define EBT_POINTS 300
+
+static qaws_curve* ebt_line(double x0, double y0, double x1, double y1)
+{
+	qaws_scalar cp[4];
+	qaws_bezier_desc d;
+	qaws_curve* c = NULL;
+	cp[0] = (qaws_scalar)x0; cp[1] = (qaws_scalar)y0; cp[2] = (qaws_scalar)x1; cp[3] = (qaws_scalar)y1;
+	memset(&d, 0, sizeof(d));
+	d.dimension = QAWS_DIMENSION_2D;
+	d.degree = 1;
+	d.control_points = cp;
+	d.control_point_count = 2;
+	qaws_curve_create_bezier(&d, &c);
+	return c;
+}
+
+/* certified closest points on dyadic parabolas and segments, against the float batch */
+static void test_closest(void)
+{
+	qaws_curve* cs[EBT_PARAB + 2];
+	qaws_exact_curve* ec[EBT_PARAB + 2];
+	static double pts[2 * EBT_POINTS];
+	static qaws_scalar fpts[2 * EBT_POINTS];
+	static qaws_exact_closest_point eo[EBT_POINTS];
+	static qaws_closest_point fo[EBT_POINTS];
+	qaws_exact_batch_desc d;
+	qaws_exact_batch_stats st;
+	qaws_closest_desc fd;
+	qaws_exact_desc ed;
+	unsigned int i, n = EBT_PARAB + 2, agree = 0, certified = 0;
+	double widest = 0, t0, te;
+	qaws_status s;
+	char msg[200];
+	unsigned long long state = 0xA0761D6478BD642Full;
+	for (i = 0; i < EBT_PARAB; i++)
+	{
+		/* y = a x^2 + b, a and b dyadic, x in [-1, 1] */
+		qaws_scalar co[6] = { 0, 0, 1, 0, 0, 0 };
+		qaws_polynomial_desc pd;
+		co[1] = (qaws_scalar)(-0.75 + 0.25 * i);
+		co[5] = (qaws_scalar)(i % 2 ? 0.5 : -0.5);
+		memset(&pd, 0, sizeof(pd));
+		pd.dimension = QAWS_DIMENSION_2D;
+		pd.degree = 2;
+		pd.coefficients = co;
+		pd.coefficient_count = 3;
+		pd.t_min = -1;
+		pd.t_max = 1;
+		cs[i] = NULL;
+		qaws_curve_create_polynomial(&pd, &cs[i]);
+	}
+	cs[EBT_PARAB] = ebt_line(-1.5, 1.25, 1.5, 1.25);
+	cs[EBT_PARAB + 1] = ebt_line(-1.5, -1.25, 1.5, -1.25);
+	qaws_exact_desc_default(&ed);
+	ed.space_exp2 = -16;
+	for (i = 0; i < n; i++)
+		qaws_exact_curve_prepare(&ed, cs[i], &ec[i], NULL);
+	for (i = 0; i < 2 * EBT_POINTS; i++)
+	{
+		state ^= state << 13; state ^= state >> 7; state ^= state << 17;
+		pts[i] = ldexp(nearbyint(ldexp(-1.4 + 2.8 * (double)(state >> 11) / 9007199254740992.0, 12)), -12);
+		fpts[i] = (qaws_scalar)pts[i];
+	}
+	memset(&d, 0, sizeof(d));
+	d.curves = (qaws_exact_curve const* const*)ec;
+	d.curve_count = n;
+	t0 = ebt_now();
+	s = qaws_exact_curve_batch_closest(&d, pts, EBT_POINTS, eo, &st);
+	te = ebt_now() - t0;
+	memset(&fd, 0, sizeof(fd));
+	fd.curves = (qaws_curve const* const*)cs;
+	fd.curve_count = n;
+	fd.points = fpts;
+	fd.point_count = EBT_POINTS;
+	qaws_curve_batch_find_closest(&fd, fo, NULL);
+	for (i = 0; i < EBT_POINTS; i++)
+	{
+		double tol = QAWS_SCALAR_IS_FLOAT ? 1e-5 : 1e-10;
+		certified += eo[i].certified != 0;
+		if (eo[i].distance_hi - eo[i].distance_lo > widest)
+			widest = eo[i].distance_hi - eo[i].distance_lo;
+		if (eo[i].curve == fo[i].curve && fo[i].distance >= eo[i].distance_lo - tol && fo[i].distance <= eo[i].distance_hi + tol
+			&& fo[i].parameter >= eo[i].t_lo - 1e-6 && fo[i].parameter <= eo[i].t_hi + 1e-6)
+			agree++;
+	}
+	printf("    certified closest points: %u points x %u curves, %u spans solved, %u certified, widest distance enclosure %.1e, in %.3f s; float batch inside %u\n",
+		EBT_POINTS, n, st.candidate_count, certified, widest, te, agree);
+	sprintf(msg, "certified closest points: every float answer inside its certified enclosure (%u of %u), all certified", agree, EBT_POINTS);
+	TEST_ASSERT(s == QAWS_STATUS_OK && agree == EBT_POINTS && certified == EBT_POINTS && widest < 1e-12, msg);
+	/* a point midway between the two lines (and far from the parabolas' reach): a tie */
+	{
+		double p[2] = { 1.375, 0 };
+		qaws_exact_curve const* lines[2];
+		qaws_exact_closest_point o;
+		lines[0] = ec[EBT_PARAB];
+		lines[1] = ec[EBT_PARAB + 1];
+		d.curves = lines;
+		d.curve_count = 2;
+		s = qaws_exact_curve_batch_closest(&d, p, 1, &o, NULL);
+		TEST_ASSERT(s == QAWS_STATUS_OK && !o.certified && o.distance_lo <= 1.25 && o.distance_hi >= 1.25 && o.distance_hi - o.distance_lo < 1e-12,
+			"a point midway between two lines: a tie, reported uncertified at the exact distance");
+	}
+	for (i = 0; i < n; i++)
+	{
+		qaws_exact_curve_destroy(ec[i]);
+		qaws_curve_destroy(cs[i]);
+	}
+}
+
 int test_80_exact_batch_main(void)
 {
 	g_pass = 0;
@@ -292,6 +403,7 @@ int test_80_exact_batch_main(void)
 	test_uncertified();
 	test_self();
 	test_boxes();
+	test_closest();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
 }

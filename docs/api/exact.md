@@ -231,6 +231,39 @@ Example: on the 72-curve Gaussian heightfield of `qaws_batch_showcase`
 The pairwise exact call over every contour / gradient pair takes 2.1 s, and
 the float batch takes 0.014 s.
 
+### Closest points
+
+```c
+qaws_status qaws_exact_curve_batch_closest(qaws_exact_batch_desc const* desc, double const* points, unsigned int point_count,
+	qaws_exact_closest_point* out_points, qaws_exact_batch_stats* out_stats);
+```
+
+For every query point (exact doubles, world units), the call returns the
+nearest point over the exact curves, with its curve, a parameter enclosure,
+a distance enclosure and a `certified` flag.
+
+- The query point becomes P / Q on the lattice, with Q a power of two.
+- On a span C = X / W, the squared distance is stationary at the roots of
+  the integer polynomial g(s) = Σ (Q X_c − P_c W)(X_c' W − X_c W'), of
+  degree 3n − 2.
+- Its roots in (0, 1), isolated exactly, and the span ends are the
+  candidates. A knot counts once, and the start of a closed curve once.
+- Each candidate's squared distance E / V, with E = Σ (Q X_c − P_c W)²
+  and V = (Q W)², is enclosed by the ratios of their Bernstein coefficients
+  restricted together to its interval.
+- Spans come from one grid over their sound control boxes, nearest box
+  first, while a box can still win.
+- The winner is certified when its enclosure lies below every other
+  candidate's. Overlapping root intervals are refined first.
+
+A span whose roots do not isolate (a double root, or g ≡ 0) enters as one
+candidate covering the whole span. An exact tie, such as a point midway
+between two lines, is reported with `certified = 0`.
+
+Test 80: 300 dyadic points against dyadic parabolas and segments are all
+certified, with distance enclosures at most 1.1e-16 wide, in 0.04 s.
+Every answer of the float batch lies inside its enclosure.
+
 ## Certified line / surface intersections (exact ray casting)
 
 ```c
@@ -418,6 +451,7 @@ Tangencies and overlaps return `QAWS_STATUS_CERTIFICATION_FAILED`.
 | curve / line (2D), curve / plane (3D) intersections | certified: exact points, one-root intervals, overlaps; non-dyadic tangencies refused |
 | curve / curve intersections (2D, 3D) | certified: implicitization of the lower-degree span, root isolation, exact inversion (span ends at irrational roots by a gcd test); 3D: exact zero test of the third coordinate |
 | N curves at once (2D, 3D) | certified: one grid over sound span boxes, only overlapping span pairs certified, families, uncertified pairs counted |
+| closest points over N curves | certified: roots of the distance derivative isolated exactly, distance enclosures, unique nearest proven or a tie reported |
 | N curves x M surfaces at once | certified: one grid over sound span and patch boxes, only overlapping span / patch pairs certified |
 | N surfaces at once (intersection curves) | certified: one grid over sound patch boxes, each surface pair solved on its overlapping patch pairs only |
 | self-intersections (2D, 3D) | certified: divided differences inside spans, span pairs, knots and closing points excluded, spans on one conic told apart |
