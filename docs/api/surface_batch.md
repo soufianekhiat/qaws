@@ -177,8 +177,9 @@ This returns, for every query point, the nearest point over all surfaces.
    point. Each is seeded at the nearest point of its two triangles.
 3. Newton runs on (S − p) · S_u = (S − p) · S_v = 0 with the full
    Hessian. Gauss-Newton is used where the Hessian is not positive.
-4. On the domain boundary, the parameter that would leave stays on its
-   bound and the other takes the 1D step along that edge.
+4. A parameter on its bound with the descent pointing out of the domain
+   stays there while the other takes the 1D step along that edge; a
+   parameter the 2D step would take out stops on its bound the same way.
 
 Test 81 runs 400 points against three paraboloids and two planes. No
 answer is farther than a 160 × 160 sampling of the surfaces, while the

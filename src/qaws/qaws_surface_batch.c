@@ -1433,9 +1433,28 @@ static qaws_scalar sc_refine(qaws_surface const* s, qaws_scalar const* p, qaws_s
 			if (!(det > 0))
 				break;
 		}
+		/* active set: a parameter on its bound with the descent pointing out
+		   stays there and the other one takes the 1D step along that edge */
+		{
+			int hold_u = (*u <= ur.min_value && g0 > 0) || (*u >= ur.max_value && g0 < 0);
+			int hold_v = (*v <= vr.min_value && g1 > 0) || (*v >= vr.max_value && g1 < 0);
+			if (hold_u && hold_v)
+				break;   /* a corner where the distance grows inward */
+			if (hold_u || hold_v)
+			{
+				qaws_scalar e = hold_v ? sb_dot(su, su) + sb_dot(w, suu) : sb_dot(sv, sv) + sb_dot(w, svv);
+				if (!(e > 0))
+					e = hold_v ? sb_dot(su, su) : sb_dot(sv, sv);
+				if (!(e > 0))
+					break;
+				du = hold_v ? g0 / e : 0;
+				dv = hold_u ? g1 / e : 0;
+				goto step;
+			}
+		}
 		du = (h11 * g0 - h01 * g1) / det;
 		dv = (h00 * g1 - h01 * g0) / det;
-		/* active set: a parameter that would leave the domain stays on its
+		/* a parameter the step would take out of the domain stops on its
 		   bound and the other one takes the 1D step along that edge */
 		if ((*u - du < ur.min_value || *u - du > ur.max_value) && h11 > 0)
 		{
@@ -1449,6 +1468,7 @@ static qaws_scalar sc_refine(qaws_surface const* s, qaws_scalar const* p, qaws_s
 			dv = *v - vb;
 			du = g0 / h00;
 		}
+	step:
 		*u -= du;
 		*v -= dv;
 		if (*u < ur.min_value) *u = ur.min_value;
