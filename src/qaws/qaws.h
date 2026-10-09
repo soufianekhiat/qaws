@@ -52,6 +52,7 @@
 #include "qaws_surface_tspline.h"
 #include "qaws_surface_subdiv.h"
 #include "qaws_surface_fillet.h"
+#include "qaws_surface_batch.h"
 #include "qaws_brep.h"
 #include "qaws_boolean_2d.h"
 #include "qaws_alloc.h"

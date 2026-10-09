@@ -57,6 +57,7 @@ set(QAWS_SOURCES
   src/qaws/qaws_traversal.c
   src/qaws/qaws_inspect.c
   src/qaws/qaws_curve_batch.c
+  src/qaws/qaws_surface_batch.c
   src/qaws/qaws_bezier.c
   src/qaws/qaws_hermite.c
   src/qaws/qaws_catmull_rom.c
@@ -117,6 +118,7 @@ set(QAWS_SOURCES
   src/qaws/internal/qaws_internal_sparse.c
   src/qaws/internal/qaws_internal_diff.c
   src/qaws/internal/qaws_internal_broadphase.c
+  src/qaws/internal/qaws_internal_flatten.c
 )
 
 if(QAWS_ENABLE_SIMD)
@@ -430,6 +432,7 @@ if(QAWS_INSTALL)
       src/qaws/qaws_traversal.h
       src/qaws/qaws_inspect.h
       src/qaws/qaws_curve_batch.h
+      src/qaws/qaws_surface_batch.h
       src/qaws/qaws_operations.h
       src/qaws/qaws_convert.h
       src/qaws/qaws_export.h

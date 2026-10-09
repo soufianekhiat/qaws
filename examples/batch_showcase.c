@@ -7,6 +7,8 @@
  *                            and its time against all pairs
  *   batch2_exact_heightfield.svg  the same crossings certified by the exact
  *                            batch, against the pairwise exact call
+ *   batch3_terrain.svg       the field as a B-spline terrain: contours as
+ *                            intersections with planes, ballistic impacts
  *
  * Each figure lives in batch_showcase/NN_*.c, compiled as one translation
  * unit.
@@ -33,6 +35,7 @@
 
 #include "batch_showcase/01_heightfield.c"
 #include "batch_showcase/02_exact_heightfield.c"
+#include "batch_showcase/03_terrain.c"
 
 int main(void)
 {
@@ -40,5 +43,6 @@ int main(void)
 	MAKE_DIR("showcase");
 	demo_heightfield();
 	demo_exact_heightfield();
+	demo_terrain();
 	return 0;
 }

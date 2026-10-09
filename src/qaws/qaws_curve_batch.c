@@ -3,6 +3,7 @@
 #include "qaws_inspect.h"
 #include "internal/qaws_internal_types.h"
 #include "internal/qaws_internal_broadphase.h"
+#include "internal/qaws_internal_flatten.h"
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -25,7 +26,6 @@
  *      sorted by (curve_a, curve_b, parameter_a).
  */
 
-#define CB_MAX_DEPTH   22
 #define CB_NEWTON_ITERS 24
 
 #if QAWS_SCALAR_IS_FLOAT
@@ -35,16 +35,6 @@
 #define CB_POS_REL   ((qaws_scalar)1e-10)
 #define CB_PAR_REL   ((qaws_scalar)1e-7)
 #endif
-
-typedef struct cb_seg
-{
-	qaws_scalar t0, t1;
-	qaws_scalar p0[3], p1[3];
-	qaws_scalar lo[3], hi[3];   /* inflated box */
-	qaws_scalar r;              /* inflation */
-	unsigned int curve;
-	unsigned int index;         /* position along its curve */
-} cb_seg;
 
 typedef struct cb_hit
 {
@@ -57,7 +47,7 @@ typedef struct cb_ctx
 {
 	qaws_curve_batch_desc const* desc;
 	unsigned int dim;
-	cb_seg* segs;
+	qaws_flat_seg* segs;
 	unsigned int nseg, capseg;
 	unsigned int* seg_count;    /* per curve */
 	cb_hit* hits;
@@ -67,129 +57,13 @@ typedef struct cb_ctx
 	qaws_curve_batch_stats stats;
 } cb_ctx;
 
-static qaws_status cb_eval(qaws_curve const* c, unsigned int dim, qaws_scalar t, unsigned int flags, qaws_scalar* p, qaws_scalar* d)
-{
-	qaws_status s;
-	if (dim == 2)
-	{
-		qaws_eval_result_2d r;
-		s = qaws_curve_evaluate_2d(c, t, flags, &r);
-		p[0] = r.position.x; p[1] = r.position.y; p[2] = 0;
-		if (d) { d[0] = r.d1.x; d[1] = r.d1.y; d[2] = 0; }
-	}
-	else
-	{
-		qaws_eval_result_3d r;
-		s = qaws_curve_evaluate_3d(c, t, flags, &r);
-		p[0] = r.position.x; p[1] = r.position.y; p[2] = r.position.z;
-		if (d) { d[0] = r.d1.x; d[1] = r.d1.y; d[2] = r.d1.z; }
-	}
-	return s;
-}
-
 static qaws_scalar cb_dot(qaws_scalar const* a, qaws_scalar const* b)
 {
 	return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 }
 
-/* distance from m to the segment [a, b] */
-static qaws_scalar cb_point_segment(qaws_scalar const* m, qaws_scalar const* a, qaws_scalar const* b)
-{
-	qaws_scalar ab[3], am[3], l2, u, d[3];
-	int k;
-	for (k = 0; k < 3; k++) { ab[k] = b[k] - a[k]; am[k] = m[k] - a[k]; }
-	l2 = cb_dot(ab, ab);
-	u = l2 > 0 ? cb_dot(am, ab) / l2 : 0;
-	if (u < 0) u = 0;
-	if (u > 1) u = 1;
-	for (k = 0; k < 3; k++) d[k] = am[k] - u * ab[k];
-	return (qaws_scalar)sqrt(cb_dot(d, d));
-}
-
-static qaws_status cb_push_seg(cb_ctx* x, unsigned int curve, qaws_scalar t0, qaws_scalar const* p0, qaws_scalar t1, qaws_scalar const* p1, qaws_scalar dev)
-{
-	cb_seg* s;
-	int k;
-	if (x->nseg == x->capseg)
-	{
-		unsigned int cap = x->capseg ? x->capseg * 2 : 1024;
-		cb_seg* g = (cb_seg*)realloc(x->segs, cap * sizeof(cb_seg));
-		if (!g)
-			return QAWS_STATUS_ALLOCATION_FAILURE;
-		x->segs = g;
-		x->capseg = cap;
-	}
-	s = &x->segs[x->nseg];
-	s->t0 = t0; s->t1 = t1;
-	s->r = 2 * dev;
-	for (k = 0; k < 3; k++)
-	{
-		s->p0[k] = p0[k];
-		s->p1[k] = p1[k];
-		s->lo[k] = (p0[k] < p1[k] ? p0[k] : p1[k]) - s->r;
-		s->hi[k] = (p0[k] > p1[k] ? p0[k] : p1[k]) + s->r;
-	}
-	s->curve = curve;
-	s->index = x->seg_count[curve]++;
-	x->nseg++;
-	return QAWS_STATUS_OK;
-}
-
-/* piece [t0, t1] with its known midpoint: the midpoint and both quarter
-   points must lie within the flatness bound of the chord */
-static qaws_status cb_flatten(cb_ctx* x, unsigned int curve, qaws_scalar t0, qaws_scalar const* p0, qaws_scalar tm, qaws_scalar const* pm,
-	qaws_scalar t1, qaws_scalar const* p1, unsigned int depth)
-{
-	qaws_curve const* c = x->desc->curves[curve];
-	qaws_scalar ta = (t0 + tm) / 2, tb = (tm + t1) / 2, pa[3], pb[3], dev, d;
-	qaws_status s = cb_eval(c, x->dim, ta, QAWS_EVAL_FLAG_POSITION, pa, NULL);
-	if (s == QAWS_STATUS_OK)
-		s = cb_eval(c, x->dim, tb, QAWS_EVAL_FLAG_POSITION, pb, NULL);
-	if (s != QAWS_STATUS_OK)
-		return s;
-	dev = cb_point_segment(pm, p0, p1);
-	d = cb_point_segment(pa, p0, p1);
-	if (d > dev) dev = d;
-	d = cb_point_segment(pb, p0, p1);
-	if (d > dev) dev = d;
-	if (depth >= CB_MAX_DEPTH || dev <= x->flat)
-		return cb_push_seg(x, curve, t0, p0, t1, p1, dev);
-	s = cb_flatten(x, curve, t0, p0, ta, pa, tm, pm, depth + 1);
-	if (s != QAWS_STATUS_OK)
-		return s;
-	return cb_flatten(x, curve, tm, pm, tb, pb, t1, p1, depth + 1);
-}
-
-static qaws_status cb_flatten_curve(cb_ctx* x, unsigned int curve)
-{
-	qaws_curve const* c = x->desc->curves[curve];
-	qaws_scalar p0[3], p1[3], pm[3];
-	unsigned int k, have = 0;
-	for (k = 0; k < c->span_count; k++)
-	{
-		qaws_scalar t0 = c->span_boundaries[k], t1 = c->span_boundaries[k + 1], tm = (t0 + t1) / 2;
-		qaws_status s = QAWS_STATUS_OK;
-		if (!(t1 > t0))
-			continue;
-		/* a span starts where the previous one ended */
-		if (!have)
-			s = cb_eval(c, x->dim, t0, QAWS_EVAL_FLAG_POSITION, p0, NULL);
-		if (s == QAWS_STATUS_OK)
-			s = cb_eval(c, x->dim, t1, QAWS_EVAL_FLAG_POSITION, p1, NULL);
-		if (s == QAWS_STATUS_OK)
-			s = cb_eval(c, x->dim, tm, QAWS_EVAL_FLAG_POSITION, pm, NULL);
-		if (s == QAWS_STATUS_OK)
-			s = cb_flatten(x, curve, t0, p0, tm, pm, t1, p1, 0);
-		if (s != QAWS_STATUS_OK)
-			return s;
-		memcpy(p0, p1, sizeof(p0));
-		have = 1;
-	}
-	return QAWS_STATUS_OK;
-}
-
 /* closest points of the chords P(u) = a0 + u (a1 - a0), Q(v) = b0 + v (b1 - b0) */
-static qaws_scalar cb_chords(cb_seg const* A, cb_seg const* B, qaws_scalar* u, qaws_scalar* v)
+static qaws_scalar cb_chords(qaws_flat_seg const* A, qaws_flat_seg const* B, qaws_scalar* u, qaws_scalar* v)
 {
 	qaws_scalar d1[3], d2[3], r[3], a, e, f, c, b, den, s, t, w[3];
 	int k;
@@ -255,8 +129,8 @@ static int cb_newton(cb_ctx* x, qaws_curve const* ca, qaws_curve const* cb, qaws
 	{
 		qaws_scalar pa[3], da[3], pb[3], db[3], f[3], m00, m01, m11, g0, g1, det, dta, dtb;
 		int k;
-		if (cb_eval(ca, x->dim, *ta, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, pa, da) != QAWS_STATUS_OK
-			|| cb_eval(cb, x->dim, *tb, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, pb, db) != QAWS_STATUS_OK)
+		if (qaws_internal_curve_point(ca, x->dim, *ta, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, pa, da) != QAWS_STATUS_OK
+			|| qaws_internal_curve_point(cb, x->dim, *tb, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, pb, db) != QAWS_STATUS_OK)
 			return 0;
 		for (k = 0; k < 3; k++)
 			f[k] = pa[k] - pb[k];
@@ -323,10 +197,10 @@ static qaws_scalar cb_par_tol(qaws_curve const* c)
 	return (c->parameter_range.max_value - c->parameter_range.min_value) * CB_PAR_REL;
 }
 
-static qaws_status cb_pair(cb_ctx* x, cb_seg const* A, cb_seg const* B)
+static qaws_status cb_pair(cb_ctx* x, qaws_flat_seg const* A, qaws_flat_seg const* B)
 {
-	qaws_curve const* ca = x->desc->curves[A->curve];
-	qaws_curve const* cb = x->desc->curves[B->curve];
+	qaws_curve const* ca = x->desc->curves[A->owner];
+	qaws_curve const* cb = x->desc->curves[B->owner];
 	qaws_scalar u, v, ta, tb, pos[3];
 	if (cb_chords(A, B, &u, &v) > A->r + B->r + x->pos_tol)
 		return QAWS_STATUS_OK;
@@ -336,16 +210,16 @@ static qaws_status cb_pair(cb_ctx* x, cb_seg const* A, cb_seg const* B)
 	if (!cb_newton(x, ca, cb, &ta, &tb, pos))
 		return QAWS_STATUS_OK;
 	/* a curve meets itself trivially at ta == tb */
-	if (A->curve == B->curve && fabs(ta - tb) <= 64 * cb_par_tol(ca))
+	if (A->owner == B->owner && fabs(ta - tb) <= 64 * cb_par_tol(ca))
 		return QAWS_STATUS_OK;
-	return cb_push_hit(x, A->curve, B->curve, ta, tb, pos);
+	return cb_push_hit(x, A->owner, B->owner, ta, tb, pos);
 }
 
 /* may segments i and j meet as a pair to report? */
-static int cb_allowed(cb_ctx const* x, cb_seg const* A, cb_seg const* B)
+static int cb_allowed(cb_ctx const* x, qaws_flat_seg const* A, qaws_flat_seg const* B)
 {
 	qaws_curve_batch_desc const* d = x->desc;
-	if (A->curve == B->curve)
+	if (A->owner == B->owner)
 	{
 		unsigned int n, lo, hi;
 		if (!(d->flags & QAWS_CURVE_BATCH_SELF))
@@ -354,12 +228,12 @@ static int cb_allowed(cb_ctx const* x, cb_seg const* A, cb_seg const* B)
 		hi = A->index < B->index ? B->index : A->index;
 		if (hi - lo <= 1)
 			return 0;
-		n = x->seg_count[A->curve];
-		if (lo == 0 && hi == n - 1 && qaws_curve_is_closed(d->curves[A->curve]))
+		n = x->seg_count[A->owner];
+		if (lo == 0 && hi == n - 1 && qaws_curve_is_closed(d->curves[A->owner]))
 			return 0;
 		return 1;
 	}
-	return !d->families || d->families[A->curve] != d->families[B->curve];
+	return !d->families || d->families[A->owner] != d->families[B->owner];
 }
 
 static int cb_accept(void* user, unsigned int i, unsigned int j)
@@ -416,43 +290,25 @@ static void cb_merge(cb_ctx* x)
 static qaws_status cb_run(cb_ctx* x)
 {
 	qaws_curve_batch_desc const* d = x->desc;
-	qaws_scalar lo[3], hi[3], ext = 0;
+	qaws_scalar ext;
 	unsigned int i, k;
 	qaws_status s = QAWS_STATUS_OK;
 
 	/* scene extent from a cheap sampling of every curve, to scale the defaults */
-	for (k = 0; k < 3; k++) { lo[k] = (qaws_scalar)HUGE_VAL; hi[k] = -(qaws_scalar)HUGE_VAL; }
-	for (i = 0; i < d->curve_count; i++)
-	{
-		qaws_curve const* c = d->curves[i];
-		unsigned int j;
-		for (j = 0; j <= 16; j++)
-		{
-			qaws_scalar t = c->parameter_range.min_value + (c->parameter_range.max_value - c->parameter_range.min_value) * (qaws_scalar)j / 16, p[3];
-			s = cb_eval(c, x->dim, t, QAWS_EVAL_FLAG_POSITION, p, NULL);
-			if (s != QAWS_STATUS_OK)
-				return s;
-			for (k = 0; k < 3; k++)
-			{
-				if (p[k] < lo[k]) lo[k] = p[k];
-				if (p[k] > hi[k]) hi[k] = p[k];
-			}
-		}
-	}
-	for (k = 0; k < 3; k++)
-		if (hi[k] - lo[k] > ext)
-			ext = hi[k] - lo[k];
-	if (!(ext > 0))
-		ext = 1;
+	ext = qaws_internal_flatten_extent(d->curves, d->curve_count, x->dim, NULL, 0);
 	x->flat = d->flatness > 0 ? d->flatness : ext / 1024;
 	x->pos_tol = ext * CB_POS_REL;
 
-	/* 1. flatten */
+	/* 1. flatten; segment counts per curve for the self-intersection rule */
 	x->seg_count = (unsigned int*)calloc(d->curve_count, sizeof(unsigned int));
 	if (!x->seg_count)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	for (i = 0; i < d->curve_count && s == QAWS_STATUS_OK; i++)
-		s = cb_flatten_curve(x, i);
+	{
+		unsigned int before = x->nseg;
+		s = qaws_internal_flatten_curve(d->curves[i], x->dim, x->flat, i, &x->segs, &x->nseg, &x->capseg);
+		x->seg_count[i] = x->nseg - before;
+	}
 	if (s != QAWS_STATUS_OK || x->nseg == 0)
 		return s;
 	x->stats.segment_count = x->nseg;

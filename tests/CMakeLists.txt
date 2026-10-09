@@ -82,6 +82,7 @@ add_executable(
   78_exact_ssi.c
   79_curve_batch.c
   80_exact_batch.c
+  81_surface_batch.c
 )
 
 # The amalgamated library exports exactly the same symbols, so the tests can
