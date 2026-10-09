@@ -209,11 +209,47 @@ void qaws_exact_ratio_enclose(qaws_exact_int const* num, qaws_exact_int const* d
 
 typedef struct sys_work
 {
-	poly R, C0, C1, D, G[2];
-	qaws_exact_int bR[CC_COEF], b0[CC_COEF], b1[CC_COEF], bD[CC_COEF], bH[2][CC_COEF], bG[2][CC_COEF];
+	poly R, C0, C1, D, G[2], Z[2];
+	qaws_exact_int bR[CC_COEF], b0[CC_COEF], b1[CC_COEF], bD[CC_COEF], bH[2][CC_COEF], bG[2][CC_COEF], bZ[2][CC_COEF];
 	unsigned int dH[2], dG[2];
-	int hzero[2], gconst[2];
+	int hzero[2], gconst[2], zstate[2];
 } sys_work;
+
+/*
+ * Is C01 (which 0: s = 0) or C00 - C01 (which 1: s = 1) exactly zero at the
+ * irrational root isolated by rt? Z = gcd(R, .) divides R, which has one root
+ * there: an odd number of sign variations of Z on the interval means the
+ * root is Z's (*out 1), an even one that it is not (*out 0, the refinement
+ * then decides the sign); -1 while undecided.
+ */
+static qaws_status zero_at(sys_work* w, int which, qaws_exact_root const* rt, int* out)
+{
+	unsigned int v = 0;
+	qaws_status st = QAWS_STATUS_OK;
+	*out = -1;
+	if (w->zstate[which] < 0)
+	{
+		poly h = which ? w->D : w->C1;
+		qaws_exact_poly_trim(&h);
+		st = qaws_exact_poly_gcd(&w->R, &h, &w->Z[which]);
+		if (st != QAWS_STATUS_OK)
+			return st;
+		w->zstate[which] = w->Z[which].deg > 0;
+		if (w->zstate[which])
+			TRY(qaws_exact_poly_to_bernstein(&w->Z[which], w->bZ[which]));
+	}
+	if (!w->zstate[which])
+	{
+		*out = 0;
+		return QAWS_STATUS_OK;
+	}
+	TRY(variations_on(w->bZ[which], w->Z[which].deg, rt, &v));
+	if (v == 1)
+		*out = 1;
+	else if (v == 0)
+		*out = 0;
+	return QAWS_STATUS_OK;
+}
 
 /*
  * Roots r in [0, 1] of R with s = C01 / C00 proven in [0, 1] and every
@@ -233,6 +269,7 @@ qaws_status qaws_exact_solve_system(poly const* R0, poly const* C00, poly const*
 	if (!w)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	w->R = *R0;
+	w->zstate[0] = w->zstate[1] = -1;
 	qaws_exact_poly_trim(&w->R);
 	if (qaws_exact_poly_is_zero(&w->R))
 	{
@@ -292,7 +329,7 @@ qaws_status qaws_exact_solve_system(poly const* R0, poly const* C00, poly const*
 	for (k = 0; k < nr && st == QAWS_STATUS_OK; k++)
 	{
 		qaws_exact_root rt = roots[k];
-		int s00 = 0, s01 = 0, sd = 0, inside = -1, cst[2] = { -1, -1 }, accept = -1;
+		int s00 = 0, s01 = 0, sd = 0, inside = -1, cst[2] = { -1, -1 }, accept = -1, s_end = -1;
 		while (st == QAWS_STATUS_OK && accept < 0)
 		{
 			int undecided = 0;
@@ -307,6 +344,19 @@ qaws_status qaws_exact_solve_system(poly const* R0, poly const* C00, poly const*
 					inside = 0;
 				else if (s00 != 0 && (s01 == s00 || (rt.exact && s01 == 0)) && (sd == s00 || (rt.exact && sd == 0)))
 					inside = 1;
+				else if (s00 != 0 && !rt.exact && (s01 == 0) != (sd == 0))
+				{
+					/* s on a span end at an irrational root: an exact zero test */
+					int z = -1;
+					st = zero_at(w, s01 == 0 ? 0 : 1, &rt, &z);
+					if (st != QAWS_STATUS_OK)
+						break;
+					if (z == 1 && (s01 == 0 ? sd == s00 : s01 == s00))
+					{
+						inside = 1;
+						s_end = s01 == 0 ? 0 : 1;
+					}
+				}
 			}
 			if (inside == 0)
 			{
@@ -401,7 +451,13 @@ qaws_status qaws_exact_solve_system(poly const* R0, poly const* C00, poly const*
 			st = qaws_exact_bernstein_restrict_pair(w->b0, w->b1, N1, rt.index - (uint64_t)at_end, rt.depth, c00, c01);
 			if (st != QAWS_STATUS_OK)
 				break;
-			if (rt.exact)
+			if (s_end >= 0)
+			{
+				h->s_exact = 1;
+				qaws_exact_int_from_i64(&h->s_num, s_end);
+				qaws_exact_int_from_i64(&h->s_den, 1);
+			}
+			else if (rt.exact)
 			{
 				unsigned int e = at_end ? N1 : 0;
 				h->s_exact = 1;
