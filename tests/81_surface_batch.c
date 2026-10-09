@@ -1176,6 +1176,227 @@ static void test_exact_raycast(void)
 	}
 }
 
+/* an executor running the chunks one by one in a scrambled order */
+static void sbt_shuffle_for(void* user, unsigned int count, qaws_batch_task_fn task, void* ctx)
+{
+	unsigned int k, step = 7;
+	(void)user;
+	while (count > 1 && count % step == 0)
+		step += 2;
+	for (k = 0; k < count; k++)
+	{
+		unsigned int c = (k * step + 3) % count;
+		task(ctx, c, c + 1);
+	}
+}
+
+#define SBT_THREADS 4
+
+typedef struct sbt_thr
+{
+	qaws_batch_task_fn task;
+	void* ctx;
+	unsigned int begin, end;
+} sbt_thr;
+
+#ifdef _WIN32
+#include <windows.h>
+#include <process.h>
+static unsigned __stdcall sbt_thr_main(void* p)
+{
+	sbt_thr* a = (sbt_thr*)p;
+	a->task(a->ctx, a->begin, a->end);
+	return 0;
+}
+#else
+#include <pthread.h>
+static void* sbt_thr_main(void* p)
+{
+	sbt_thr* a = (sbt_thr*)p;
+	a->task(a->ctx, a->begin, a->end);
+	return NULL;
+}
+#endif
+
+/* a real executor: SBT_THREADS threads, contiguous ranges */
+static void sbt_threads_for(void* user, unsigned int count, qaws_batch_task_fn task, void* ctx)
+{
+	sbt_thr arg[SBT_THREADS];
+	unsigned int t;
+#ifdef _WIN32
+	HANDLE h[SBT_THREADS];
+#else
+	pthread_t h[SBT_THREADS];
+#endif
+	(void)user;
+	for (t = 0; t < SBT_THREADS; t++)
+	{
+		arg[t].task = task;
+		arg[t].ctx = ctx;
+		arg[t].begin = count * t / SBT_THREADS;
+		arg[t].end = count * (t + 1) / SBT_THREADS;
+	}
+	for (t = 1; t < SBT_THREADS; t++)
+#ifdef _WIN32
+		h[t] = (HANDLE)_beginthreadex(NULL, 0, sbt_thr_main, &arg[t], 0, NULL);
+#else
+		pthread_create(&h[t], NULL, sbt_thr_main, &arg[t]);
+#endif
+	task(ctx, arg[0].begin, arg[0].end);
+	for (t = 1; t < SBT_THREADS; t++)
+	{
+#ifdef _WIN32
+		WaitForSingleObject(h[t], INFINITE);
+		CloseHandle(h[t]);
+#else
+		pthread_join(h[t], NULL);
+#endif
+	}
+}
+
+static qaws_scalar sbt_field(void* user, qaws_scalar const* p, qaws_scalar* g)
+{
+	(void)user;
+	if (g)
+	{
+		g[0] = 2 * p[0];
+		g[1] = 4 * p[1];
+	}
+	return p[0] * p[0] + 2 * p[1] * p[1];
+}
+
+/* every executor gives the serial results; threads give them faster */
+static void test_executors(void)
+{
+	qaws_surface* sf[SBT_SURF + 1];
+	qaws_curve* ring[24];
+	unsigned int n = 20000, i, k, e, same[2] = { 1, 1 };
+	qaws_scalar* pts = (qaws_scalar*)malloc(3 * n * sizeof(qaws_scalar));
+	qaws_scalar* org = (qaws_scalar*)malloc(3 * n * sizeof(qaws_scalar));
+	qaws_scalar* dir = (qaws_scalar*)malloc(3 * n * sizeof(qaws_scalar));
+	qaws_scalar* pts2 = (qaws_scalar*)malloc(2 * n * sizeof(qaws_scalar));
+	qaws_scalar lv[16];
+	qaws_surface_batch_closest* sc[3];
+	qaws_surface_ray_hit* rh[3];
+	qaws_closest_point* cc[3];
+	qaws_level_crossing* lc[3];
+	unsigned int nlc[3];
+	double tser = 0, tthr = 0;
+	qaws_batch_executor ex[2];
+	char msg[200];
+	ex[0].parallel_for = sbt_shuffle_for; ex[0].user = NULL;
+	ex[1].parallel_for = sbt_threads_for; ex[1].user = NULL;
+	for (k = 0; k < SBT_SURF; k++)
+		sf[k] = sbt_paraboloid(sbt_lift(k));
+	sf[SBT_SURF] = sbt_plane(-0.25, 0);
+	for (k = 0; k < 24; k++)
+	{
+		/* parabolas y = x^2 + c, c from -1.15 up */
+		qaws_scalar co[6] = { 0, 0, 1, 0, 0, 0 };
+		qaws_polynomial_desc pd;
+		co[5] = (qaws_scalar)(-1.15 + 0.1 * k);
+		memset(&pd, 0, sizeof(pd));
+		pd.dimension = QAWS_DIMENSION_2D;
+		pd.degree = 2;
+		pd.coefficients = co;
+		pd.coefficient_count = 3;
+		pd.t_min = -1.5;
+		pd.t_max = 1.5;
+		ring[k] = NULL;
+		qaws_curve_create_polynomial(&pd, &ring[k]);
+	}
+	for (i = 0; i < 16; i++)
+		lv[i] = (qaws_scalar)(0.1 + 0.2 * i);
+	for (i = 0; i < n; i++)
+	{
+		pts[3 * i] = (qaws_scalar)(-1.1 + 2.2 * sbt_rand());
+		pts[3 * i + 1] = (qaws_scalar)(-1.1 + 2.2 * sbt_rand());
+		pts[3 * i + 2] = (qaws_scalar)(-0.4 + 3.6 * sbt_rand());
+		org[3 * i] = (qaws_scalar)(-1.3 + 2.6 * sbt_rand());
+		org[3 * i + 1] = (qaws_scalar)(-1.3 + 2.6 * sbt_rand());
+		org[3 * i + 2] = (qaws_scalar)4.5;
+		dir[3 * i] = (qaws_scalar)(0.6 * (sbt_rand() - 0.5));
+		dir[3 * i + 1] = (qaws_scalar)(0.6 * (sbt_rand() - 0.5));
+		dir[3 * i + 2] = -1;
+		pts2[2 * i] = pts[3 * i];
+		pts2[2 * i + 1] = pts[3 * i + 1];
+	}
+	for (e = 0; e < 3; e++)
+	{
+		qaws_surface_batch_closest_desc cd;
+		qaws_surface_ray_desc rd;
+		qaws_closest_desc kd;
+		qaws_level_crossing_desc ld;
+		qaws_batch_executor const* x = e == 0 ? NULL : &ex[e - 1];
+		double t0 = sbt_now();
+		sc[e] = (qaws_surface_batch_closest*)malloc(n * sizeof(qaws_surface_batch_closest));
+		rh[e] = (qaws_surface_ray_hit*)malloc(n * sizeof(qaws_surface_ray_hit));
+		cc[e] = (qaws_closest_point*)malloc(n * sizeof(qaws_closest_point));
+		lc[e] = (qaws_level_crossing*)malloc(4096 * sizeof(qaws_level_crossing));
+		memset(&cd, 0, sizeof(cd));
+		cd.surfaces = (qaws_surface const* const*)sf;
+		cd.surface_count = SBT_SURF + 1;
+		cd.points = pts;
+		cd.point_count = n;
+		cd.executor = x;
+		qaws_surface_batch_find_closest(&cd, sc[e], NULL);
+		memset(&rd, 0, sizeof(rd));
+		rd.surfaces = (qaws_surface const* const*)sf;
+		rd.surface_count = SBT_SURF + 1;
+		rd.origins = org;
+		rd.directions = dir;
+		rd.ray_count = n;
+		rd.executor = x;
+		qaws_surface_batch_raycast(&rd, rh[e], NULL);
+		memset(&kd, 0, sizeof(kd));
+		kd.curves = (qaws_curve const* const*)ring;
+		kd.curve_count = 24;
+		kd.points = pts2;
+		kd.point_count = n;
+		kd.executor = x;
+		qaws_curve_batch_find_closest(&kd, cc[e], NULL);
+		memset(&ld, 0, sizeof(ld));
+		ld.curves = (qaws_curve const* const*)ring;
+		ld.curve_count = 24;
+		ld.field = sbt_field;
+		ld.levels = lv;
+		ld.level_count = 16;
+		ld.executor = x;
+		qaws_curve_batch_find_level_crossings(&ld, lc[e], 4096, &nlc[e]);
+		if (e == 0) tser = sbt_now() - t0;
+		if (e == 2) tthr = sbt_now() - t0;
+		if (e > 0)
+		{
+			int ok = nlc[e] == nlc[0];
+			for (i = 0; i < n && ok; i++)
+				ok = sc[e][i].surface == sc[0][i].surface && sc[e][i].distance == sc[0][i].distance && rh[e][i].surface == rh[0][i].surface
+					&& rh[e][i].t == rh[0][i].t && cc[e][i].curve == cc[0][i].curve && cc[e][i].distance == cc[0][i].distance;
+			for (i = 0; i < nlc[e] && i < 4096 && ok; i++)
+				ok = lc[e][i].curve == lc[0][i].curve && lc[e][i].level == lc[0][i].level && lc[e][i].parameter == lc[0][i].parameter;
+			same[e - 1] = ok;
+		}
+	}
+	printf("    executors: %u points + %u rays + %u curve points + %u level crossings; serial %.3f s, %u threads %.3f s (x%.1f); shuffled order identical %d, threads identical %d\n",
+		n, n, n, nlc[0], tser, SBT_THREADS, tthr, tser / (tthr > 1e-6 ? tthr : 1e-6), same[0], same[1]);
+	sprintf(msg, "a scrambled executor and %u threads give the serial results bit for bit", SBT_THREADS);
+	TEST_ASSERT(same[0] && same[1], msg);
+	for (e = 0; e < 3; e++)
+	{
+		free(sc[e]);
+		free(rh[e]);
+		free(cc[e]);
+		free(lc[e]);
+	}
+	for (k = 0; k <= SBT_SURF; k++)
+		qaws_surface_destroy(sf[k]);
+	for (k = 0; k < 24; k++)
+		qaws_curve_destroy(ring[k]);
+	free(pts);
+	free(org);
+	free(dir);
+	free(pts2);
+}
+
 int test_81_surface_batch_main(void)
 {
 	g_pass = 0;
@@ -1191,6 +1412,7 @@ int test_81_surface_batch_main(void)
 	test_exact_surface_closest();
 	test_raycast();
 	test_exact_raycast();
+	test_executors();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
 }

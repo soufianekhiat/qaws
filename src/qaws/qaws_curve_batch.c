@@ -5,6 +5,7 @@
 #include "internal/qaws_internal_broadphase.h"
 #include "internal/qaws_internal_flatten.h"
 #include "internal/qaws_internal_batch.h"
+#include "internal/qaws_internal_parallel.h"
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -32,9 +33,11 @@
 #if QAWS_SCALAR_IS_FLOAT
 #define CB_POS_REL   ((qaws_scalar)2e-5)
 #define CB_PAR_REL   ((qaws_scalar)1e-4)
+#define CB_STEP_REL  ((qaws_scalar)1e-7)   /* Newton steps below it: converged */
 #else
 #define CB_POS_REL   ((qaws_scalar)1e-10)
 #define CB_PAR_REL   ((qaws_scalar)1e-7)
+#define CB_STEP_REL  ((qaws_scalar)1e-15)
 #endif
 
 typedef struct cb_hit
@@ -745,6 +748,36 @@ static qaws_status lc_piece(lc_ctx* x, qaws_scalar t0, qaws_scalar h0, qaws_scal
 	return QAWS_STATUS_OK;
 }
 
+#define LC_GRAIN 64
+
+typedef struct lc_job
+{
+	qaws_flat_seg const* segs;
+	lc_ctx* ctx;                /* one per chunk */
+	unsigned int nchunk;
+} lc_job;
+
+static qaws_status lc_chunk(void* ctx, unsigned int chunk, unsigned int begin, unsigned int end)
+{
+	lc_job const* J = (lc_job const*)ctx;
+	lc_ctx* x = &J->ctx[chunk];
+	unsigned int k;
+	qaws_status s = QAWS_STATUS_OK;
+	x->out = NULL;
+	x->n = x->cap = 0;
+	for (k = begin; k < end && s == QAWS_STATUS_OK; k++)
+	{
+		qaws_scalar p[3], h0 = 0, h1 = 0;
+		x->curve = J->segs[k].owner;
+		s = lc_eval(x, J->segs[k].t0, p, &h0, NULL);
+		if (s == QAWS_STATUS_OK)
+			s = lc_eval(x, J->segs[k].t1, p, &h1, NULL);
+		if (s == QAWS_STATUS_OK)
+			s = lc_piece(x, J->segs[k].t0, h0, J->segs[k].t1, h1, 0);
+	}
+	return s;
+}
+
 static int lc_cmp(void const* p, void const* q)
 {
 	qaws_level_crossing const* a = (qaws_level_crossing const*)p;
@@ -812,18 +845,46 @@ qaws_status qaws_curve_batch_find_level_crossings(
 	if (s == QAWS_STATUS_OK && nseg)
 	{
 		qaws_scalar hr = hmax > hmin ? hmax - hmin : 1, scale = hr + (qaws_scalar)fabs(desc->levels[0]) + (qaws_scalar)fabs(desc->levels[desc->level_count - 1]);
+		lc_job J;
 		x.htol = (dl < hr ? dl : hr) / 8;
 		x.ftol = scale * (QAWS_SCALAR_IS_FLOAT ? (qaws_scalar)1e-6 : (qaws_scalar)1e-14);
-		for (k = 0; k < nseg && s == QAWS_STATUS_OK; k++)
+		/* segments in chunks, each with its own copy of the context and list */
+		J.segs = segs;
+		J.nchunk = qaws_internal_chunk_count(nseg, LC_GRAIN);
+		J.ctx = (lc_ctx*)malloc(J.nchunk * sizeof(lc_ctx));
+		if (!J.ctx)
+			s = QAWS_STATUS_ALLOCATION_FAILURE;
+		for (k = 0; s == QAWS_STATUS_OK && k < J.nchunk; k++)
+			J.ctx[k] = x;
+		if (s == QAWS_STATUS_OK)
+			s = qaws_internal_parallel(desc->executor, nseg, LC_GRAIN, lc_chunk, &J);
+		/* the chunks' lists together */
+		for (k = 0; J.ctx && k < J.nchunk; k++)
 		{
-			qaws_scalar p[3], h0 = 0, h1 = 0;
-			x.curve = segs[k].owner;
-			s = lc_eval(&x, segs[k].t0, p, &h0, NULL);
-			if (s == QAWS_STATUS_OK)
-				s = lc_eval(&x, segs[k].t1, p, &h1, NULL);
-			if (s == QAWS_STATUS_OK)
-				s = lc_piece(&x, segs[k].t0, h0, segs[k].t1, h1, 0);
+			if (s == QAWS_STATUS_OK && J.ctx[k].n)
+			{
+				unsigned int m;
+				for (m = 0; m < J.ctx[k].n && s == QAWS_STATUS_OK; m++)
+				{
+					x.curve = J.ctx[k].out[m].curve;
+					if (x.n == x.cap)
+					{
+						unsigned int cap = x.cap ? x.cap * 2 : 256;
+						qaws_level_crossing* grown = (qaws_level_crossing*)realloc(x.out, cap * sizeof(qaws_level_crossing));
+						if (!grown)
+						{
+							s = QAWS_STATUS_ALLOCATION_FAILURE;
+							break;
+						}
+						x.out = grown;
+						x.cap = cap;
+					}
+					x.out[x.n++] = J.ctx[k].out[m];
+				}
+			}
+			free(J.ctx[k].out);
 		}
+		free(J.ctx);
 	}
 	if (s == QAWS_STATUS_OK)
 	{
@@ -960,7 +1021,7 @@ static qaws_scalar cp_refine(qaws_curve const* c, unsigned int dim, qaws_scalar 
 		*t -= step;
 		if (*t < tmin) *t = tmin;
 		if (*t > tmax) *t = tmax;
-		if (fabs(step) <= (tmax - tmin) * (qaws_scalar)1e-15)
+		if (fabs(step) <= (tmax - tmin) * CB_STEP_REL)
 			break;
 	}
 	qaws_internal_curve_point(c, dim, *t, QAWS_EVAL_FLAG_POSITION, P, NULL);
@@ -972,64 +1033,55 @@ static qaws_scalar cp_refine(qaws_curve const* c, unsigned int dim, qaws_scalar 
 	return (qaws_scalar)sqrt(cb_dot(w, w));
 }
 
-static qaws_status cp_run(qaws_curve const* const* curves, unsigned int dim, qaws_flat_seg const* segs, unsigned int nseg, qaws_scalar const* points,
-	unsigned int point_count, qaws_scalar max_distance, qaws_closest_point* out, qaws_curve_batch_stats* stats)
+#define CP_GRAIN 64
+
+/* the shared state of a closest-point run; every chunk has its own scratch and statistics */
+typedef struct cp_job
 {
+	qaws_curve const* const* curves;
+	qaws_flat_seg const* segs;
+	unsigned int nseg, dim;
+	qaws_bp_grid* grid;
+	qaws_scalar const* points;
+	qaws_scalar max_distance;
+	qaws_closest_point* out;
+	qaws_curve_batch_stats* stats;   /* one per chunk */
+} cp_job;
+
+static qaws_status cp_chunk(void* ctx, unsigned int chunk, unsigned int begin, unsigned int end)
+{
+	cp_job const* J = (cp_job const*)ctx;
+	qaws_curve_batch_stats* stats = &J->stats[chunk];
+	unsigned int dim = J->dim, i;
 	cp_ctx x;
-	qaws_bp_box* boxes;
-	qaws_bp_grid* grid = NULL;
-	unsigned int i, k;
-	qaws_status s;
+	qaws_status s = QAWS_STATUS_OK;
 	memset(&x, 0, sizeof(x));
-	stats->segment_count = nseg;
-	for (i = 0; i < point_count; i++)
-	{
-		out[i].curve = QAWS_CURVE_BATCH_NONE;
-		out[i].parameter = out[i].distance = 0;
-		out[i].position.x = out[i].position.y = out[i].position.z = 0;
-	}
-	if (!nseg || !point_count)
-		return QAWS_STATUS_OK;
-	boxes = (qaws_bp_box*)malloc(nseg * sizeof(qaws_bp_box));
-	x.stamp = (unsigned int*)malloc(nseg * sizeof(unsigned int));
-	if (!boxes || !x.stamp)
-	{
-		free(boxes);
-		free(x.stamp);
+	x.stamp = (unsigned int*)malloc(J->nseg * sizeof(unsigned int));
+	if (!x.stamp)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
-	}
-	for (i = 0; i < nseg; i++)
-	{
+	for (i = 0; i < J->nseg; i++)
 		x.stamp[i] = ~0u;
-		for (k = 0; k < 3; k++)
-		{
-			boxes[i].lo[k] = (double)segs[i].lo[k];
-			boxes[i].hi[k] = (double)segs[i].hi[k];
-		}
-	}
-	s = qaws_internal_grid_create(boxes, nseg, dim, &grid);
-	free(boxes);
-	x.curves = curves;
-	x.segs = segs;
+	x.curves = J->curves;
+	x.segs = J->segs;
 	x.dim = dim;
-	for (i = 0; i < point_count && s == QAWS_STATUS_OK; i++)
+	for (i = begin; i < end && s == QAWS_STATUS_OK; i++)
 	{
 		qaws_scalar p[3], best = (qaws_scalar)HUGE_VAL, pos[3];
 		unsigned int r, c, best_curve = QAWS_CURVE_BATCH_NONE;
 		qaws_scalar best_t = 0, best_pos[3] = { 0, 0, 0 };
-		p[0] = points[i * dim];
-		p[1] = points[i * dim + 1];
-		p[2] = dim == 3 ? points[i * dim + 2] : 0;
+		p[0] = J->points[i * dim];
+		p[1] = J->points[i * dim + 1];
+		p[2] = dim == 3 ? J->points[i * dim + 2] : 0;
 		x.query = i;
 		x.p = p;
-		x.best_ub = max_distance > 0 ? max_distance : (qaws_scalar)HUGE_VAL;
+		x.best_ub = J->max_distance > 0 ? J->max_distance : (qaws_scalar)HUGE_VAL;
 		x.ncand = 0;
 		/* rings outward until the next ring cannot beat the best bound */
 		for (r = 0;; r++)
 		{
 			double pd[3], bound;
 			pd[0] = (double)p[0]; pd[1] = (double)p[1]; pd[2] = (double)p[2];
-			bound = qaws_internal_grid_ring(grid, pd, r, cp_visit, &x);
+			bound = qaws_internal_grid_ring(J->grid, pd, r, cp_visit, &x);
 			if (x.failed)
 			{
 				s = QAWS_STATUS_ALLOCATION_FAILURE;
@@ -1041,7 +1093,7 @@ static qaws_status cp_run(qaws_curve const* const* curves, unsigned int dim, qaw
 		/* refine the survivors */
 		for (c = 0; c < x.ncand && s == QAWS_STATUS_OK; c++)
 		{
-			qaws_flat_seg const* sg = &segs[x.cand[c].seg];
+			qaws_flat_seg const* sg = &J->segs[x.cand[c].seg];
 			qaws_scalar u, t, d;
 			if (x.cand[c].lb > x.best_ub)
 				continue;
@@ -1049,7 +1101,7 @@ static qaws_status cp_run(qaws_curve const* const* curves, unsigned int dim, qaw
 			stats->newton_count++;
 			cp_chord(sg, p, &u);
 			t = sg->t0 + u * (sg->t1 - sg->t0);
-			d = cp_refine(curves[sg->owner], dim, p, &t, pos);
+			d = cp_refine(J->curves[sg->owner], dim, p, &t, pos);
 			if (d < best || (d == best && sg->owner < best_curve))
 			{
 				best = d;
@@ -1058,20 +1110,74 @@ static qaws_status cp_run(qaws_curve const* const* curves, unsigned int dim, qaw
 				best_pos[0] = pos[0]; best_pos[1] = pos[1]; best_pos[2] = pos[2];
 			}
 		}
-		if (best_curve != QAWS_CURVE_BATCH_NONE && (max_distance <= 0 || best <= max_distance))
+		if (best_curve != QAWS_CURVE_BATCH_NONE && (J->max_distance <= 0 || best <= J->max_distance))
 		{
-			out[i].curve = best_curve;
-			out[i].parameter = best_t;
-			out[i].distance = best;
-			out[i].position.x = best_pos[0];
-			out[i].position.y = best_pos[1];
-			out[i].position.z = best_pos[2];
+			qaws_closest_point* o = &J->out[i];
+			o->curve = best_curve;
+			o->parameter = best_t;
+			o->distance = best;
+			o->position.x = best_pos[0];
+			o->position.y = best_pos[1];
+			o->position.z = best_pos[2];
 			stats->hit_count++;
 		}
 	}
-	qaws_internal_grid_destroy(grid);
 	free(x.stamp);
 	free(x.cand);
+	return s;
+}
+
+static qaws_status cp_run(qaws_curve const* const* curves, unsigned int dim, qaws_flat_seg const* segs, unsigned int nseg, qaws_scalar const* points,
+	unsigned int point_count, qaws_scalar max_distance, qaws_batch_executor const* executor, qaws_closest_point* out, qaws_curve_batch_stats* stats)
+{
+	cp_job J;
+	qaws_bp_box* boxes;
+	unsigned int i, k, nchunk;
+	qaws_status s;
+	memset(&J, 0, sizeof(J));
+	stats->segment_count = nseg;
+	for (i = 0; i < point_count; i++)
+	{
+		out[i].curve = QAWS_CURVE_BATCH_NONE;
+		out[i].parameter = out[i].distance = 0;
+		out[i].position.x = out[i].position.y = out[i].position.z = 0;
+	}
+	if (!nseg || !point_count)
+		return QAWS_STATUS_OK;
+	boxes = (qaws_bp_box*)malloc(nseg * sizeof(qaws_bp_box));
+	nchunk = qaws_internal_chunk_count(point_count, CP_GRAIN);
+	J.stats = (qaws_curve_batch_stats*)calloc(nchunk, sizeof(qaws_curve_batch_stats));
+	if (!boxes || !J.stats)
+	{
+		free(boxes);
+		free(J.stats);
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	}
+	for (i = 0; i < nseg; i++)
+		for (k = 0; k < 3; k++)
+		{
+			boxes[i].lo[k] = (double)segs[i].lo[k];
+			boxes[i].hi[k] = (double)segs[i].hi[k];
+		}
+	s = qaws_internal_grid_create(boxes, nseg, dim, &J.grid);
+	free(boxes);
+	J.curves = curves;
+	J.segs = segs;
+	J.nseg = nseg;
+	J.dim = dim;
+	J.points = points;
+	J.max_distance = max_distance;
+	J.out = out;
+	if (s == QAWS_STATUS_OK)
+		s = qaws_internal_parallel(executor, point_count, CP_GRAIN, cp_chunk, &J);
+	for (k = 0; k < nchunk; k++)
+	{
+		stats->candidate_count += J.stats[k].candidate_count;
+		stats->newton_count += J.stats[k].newton_count;
+		stats->hit_count += J.stats[k].hit_count;
+	}
+	qaws_internal_grid_destroy(J.grid);
+	free(J.stats);
 	return s;
 }
 
@@ -1103,7 +1209,7 @@ qaws_status qaws_curve_batch_find_closest(
 	for (i = 0; i < desc->curve_count && s == QAWS_STATUS_OK; i++)
 		s = qaws_internal_flatten_curve(desc->curves[i], dim, flat, i, &segs, &nseg, &capseg);
 	if (s == QAWS_STATUS_OK)
-		s = cp_run(desc->curves, dim, segs, nseg, desc->points, desc->point_count, desc->max_distance, out_points, &st);
+		s = cp_run(desc->curves, dim, segs, nseg, desc->points, desc->point_count, desc->max_distance, desc->executor, out_points, &st);
 	if (out_stats)
 		*out_stats = st;
 	free(segs);
@@ -1125,7 +1231,7 @@ qaws_status qaws_curve_set_find_closest(
 		*out_stats = st;
 	if (!set || (point_count && (!points || !out_points)))
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	s = cp_run(set->desc.curves, set->dim, set->segs, set->nseg, points, point_count, max_distance, out_points, &st);
+	s = cp_run(set->desc.curves, set->dim, set->segs, set->nseg, points, point_count, max_distance, set->desc.executor, out_points, &st);
 	if (out_stats)
 		*out_stats = st;
 	return s;

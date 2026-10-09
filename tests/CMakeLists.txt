@@ -95,6 +95,12 @@ else()
 endif()
 
 target_include_directories(qaws_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}" "${PROJECT_SOURCE_DIR}/src/qaws")
+
+# test 81 runs the batches on a few threads (an example executor)
+if(NOT WIN32)
+  find_package(Threads REQUIRED)
+  target_link_libraries(qaws_tests PRIVATE Threads::Threads)
+endif()
 set_target_properties(qaws_tests PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
 
 if(MSVC)

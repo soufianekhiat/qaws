@@ -216,3 +216,34 @@ With `max_distance`, points farther than it from every curve get
 Example: 2000 points against 40 concentric NURBS circles take 0.004 s,
 against about 0.31 s for `qaws_curve_find_closest_parameter_2d` on every
 curve. The distances match the closed form to about 1e-15 in 2D and 3D.
+
+## Parallel execution
+
+```c
+typedef void (*qaws_batch_task_fn)(void* ctx, unsigned int begin, unsigned int end);
+typedef struct qaws_batch_executor {
+	void (*parallel_for)(void* user, unsigned int count, qaws_batch_task_fn task, void* ctx);
+	void* user;
+} qaws_batch_executor;
+```
+
+qaws has no threads of its own. Every batch desc ends with an optional
+`qaws_batch_executor const* executor`. Prepared sets copy it from the desc
+they are created with.
+
+- The batch splits its independent work into at most 256 chunks it owns.
+  The work is query points, rays, or segments for level crossings.
+- The executor's `parallel_for` must call `task(ctx, begin, end)` over
+  ranges covering `[0, count)` exactly once, on any threads in any order,
+  and return when all are done.
+- Each chunk has its own scratch memory and statistics, so the results are
+  identical whatever the executor does.
+- Without an executor, the work runs on the calling thread.
+
+It currently covers closest points on curves and surfaces, ray casting
+and level crossings.
+
+Test 81 runs 20000 surface closest points, 20000 rays, 20000 curve closest
+points and level crossings. A scrambled single-threaded executor and a
+4-thread executor (Win32 threads, or pthreads) both give the serial
+results bit for bit, the threads 3.3 times faster.

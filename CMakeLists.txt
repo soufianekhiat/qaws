@@ -119,6 +119,7 @@ set(QAWS_SOURCES
   src/qaws/internal/qaws_internal_diff.c
   src/qaws/internal/qaws_internal_broadphase.c
   src/qaws/internal/qaws_internal_flatten.c
+  src/qaws/internal/qaws_internal_parallel.c
 )
 
 if(QAWS_ENABLE_SIMD)

@@ -5,6 +5,7 @@
 #include "internal/qaws_internal_broadphase.h"
 #include "internal/qaws_internal_flatten.h"
 #include "internal/qaws_internal_batch.h"
+#include "internal/qaws_internal_parallel.h"
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -28,9 +29,11 @@
 #if QAWS_SCALAR_IS_FLOAT
 #define SB_POS_REL ((qaws_scalar)2e-5)
 #define SB_PAR_REL ((qaws_scalar)1e-4)
+#define SB_STEP_REL ((qaws_scalar)1e-7)   /* Newton steps below it: converged */
 #else
 #define SB_POS_REL ((qaws_scalar)1e-10)
 #define SB_PAR_REL ((qaws_scalar)1e-7)
+#define SB_STEP_REL ((qaws_scalar)1e-15)
 #endif
 
 typedef struct sb_hit
@@ -1475,7 +1478,7 @@ static qaws_scalar sc_refine(qaws_surface const* s, qaws_scalar const* p, qaws_s
 		if (*u > ur.max_value) *u = ur.max_value;
 		if (*v < vr.min_value) *v = vr.min_value;
 		if (*v > vr.max_value) *v = vr.max_value;
-		if (fabs(du) <= (ur.max_value - ur.min_value) * (qaws_scalar)1e-15 && fabs(dv) <= (vr.max_value - vr.min_value) * (qaws_scalar)1e-15)
+		if (fabs(du) <= (ur.max_value - ur.min_value) * SB_STEP_REL && fabs(dv) <= (vr.max_value - vr.min_value) * SB_STEP_REL)
 			break;
 	}
 	qaws_surface_evaluate(s, *u, *v, QAWS_SURFACE_EVAL_POSITION, &r);
@@ -1552,58 +1555,49 @@ static int sc_cmp(void const* a, void const* b)
 	return x < y ? -1 : (x > y ? 1 : 0);
 }
 
-static qaws_status sc_run(qaws_surface const* const* surfaces, qaws_flat_patch const* patches, unsigned int npatch, qaws_scalar const* points,
-	unsigned int point_count, qaws_scalar max_distance, qaws_surface_batch_closest* out, qaws_surface_batch_stats* stats)
+#define SC_GRAIN 32
+
+typedef struct sc_job
+{
+	qaws_surface const* const* surfaces;
+	qaws_flat_patch const* patches;
+	unsigned int npatch;
+	qaws_bp_grid* grid;
+	qaws_scalar const* points;
+	qaws_scalar max_distance;
+	qaws_surface_batch_closest* out;
+	qaws_surface_batch_stats* stats;   /* one per chunk */
+} sc_job;
+
+static qaws_status sc_chunk(void* ctx, unsigned int chunk, unsigned int begin, unsigned int end)
 {
 	static int const tri[2][3] = { { 0, 1, 3 }, { 0, 3, 2 } };
+	sc_job const* J = (sc_job const*)ctx;
+	qaws_surface_batch_stats* stats = &J->stats[chunk];
 	sc_ctx x;
-	qaws_bp_box* boxes;
-	qaws_bp_grid* grid = NULL;
 	unsigned int i, k;
-	qaws_status s;
+	qaws_status s = QAWS_STATUS_OK;
 	memset(&x, 0, sizeof(x));
-	stats->patch_count = npatch;
-	for (i = 0; i < point_count; i++)
-	{
-		memset(&out[i], 0, sizeof(out[i]));
-		out[i].surface = QAWS_CURVE_BATCH_NONE;
-	}
-	if (!npatch || !point_count)
-		return QAWS_STATUS_OK;
-	boxes = (qaws_bp_box*)malloc(npatch * sizeof(qaws_bp_box));
-	x.stamp = (unsigned int*)malloc(npatch * sizeof(unsigned int));
-	if (!boxes || !x.stamp)
-	{
-		free(boxes);
-		free(x.stamp);
+	x.stamp = (unsigned int*)malloc(J->npatch * sizeof(unsigned int));
+	if (!x.stamp)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
-	}
-	for (i = 0; i < npatch; i++)
-	{
+	for (i = 0; i < J->npatch; i++)
 		x.stamp[i] = ~0u;
-		for (k = 0; k < 3; k++)
-		{
-			boxes[i].lo[k] = (double)patches[i].lo[k];
-			boxes[i].hi[k] = (double)patches[i].hi[k];
-		}
-	}
-	s = qaws_internal_grid_create(boxes, npatch, 3, &grid);
-	free(boxes);
-	x.patches = patches;
-	for (i = 0; i < point_count && s == QAWS_STATUS_OK; i++)
+	x.patches = J->patches;
+	for (i = begin; i < end && s == QAWS_STATUS_OK; i++)
 	{
-		qaws_scalar const* p = points + 3 * i;
+		qaws_scalar const* p = J->points + 3 * i;
 		qaws_scalar best = (qaws_scalar)HUGE_VAL, bu = 0, bv = 0, bp[3] = { 0, 0, 0 };
 		unsigned int r, c, bsurf = QAWS_CURVE_BATCH_NONE;
 		double pd[3];
 		x.query = i;
 		x.p = p;
-		x.best_ub = max_distance > 0 ? max_distance : (qaws_scalar)HUGE_VAL;
+		x.best_ub = J->max_distance > 0 ? J->max_distance : (qaws_scalar)HUGE_VAL;
 		x.ncand = 0;
 		pd[0] = (double)p[0]; pd[1] = (double)p[1]; pd[2] = (double)p[2];
 		for (r = 0;; r++)
 		{
-			double b = qaws_internal_grid_ring(grid, pd, r, sc_visit, &x);
+			double b = qaws_internal_grid_ring(J->grid, pd, r, sc_visit, &x);
 			if (x.failed)
 			{
 				s = QAWS_STATUS_ALLOCATION_FAILURE;
@@ -1618,7 +1612,7 @@ static qaws_status sc_run(qaws_surface const* const* surfaces, qaws_flat_patch c
 		qsort(x.cand, x.ncand, sizeof(sc_cand), sc_cmp);
 		for (c = 0; c < x.ncand; c++)
 		{
-			qaws_flat_patch const* P = &patches[x.cand[c].patch];
+			qaws_flat_patch const* P = &J->patches[x.cand[c].patch];
 			qaws_scalar uc[4], vc[4], wb[3], u, v, d, pos[3], seed_d = (qaws_scalar)HUGE_VAL;
 			int t, ts = 0;
 			qaws_scalar wsel[3] = { 1, 0, 0 };
@@ -1647,7 +1641,7 @@ static qaws_status sc_run(qaws_surface const* const* surfaces, qaws_flat_patch c
 			}
 			u = wsel[0] * uc[tri[ts][0]] + wsel[1] * uc[tri[ts][1]] + wsel[2] * uc[tri[ts][2]];
 			v = wsel[0] * vc[tri[ts][0]] + wsel[1] * vc[tri[ts][1]] + wsel[2] * vc[tri[ts][2]];
-			d = sc_refine(surfaces[P->owner], p, &u, &v, pos);
+			d = sc_refine(J->surfaces[P->owner], p, &u, &v, pos);
 			if (d < best || (d == best && P->owner < bsurf))
 			{
 				best = d;
@@ -1657,21 +1651,72 @@ static qaws_status sc_run(qaws_surface const* const* surfaces, qaws_flat_patch c
 				bp[0] = pos[0]; bp[1] = pos[1]; bp[2] = pos[2];
 			}
 		}
-		if (bsurf != QAWS_CURVE_BATCH_NONE && (max_distance <= 0 || best <= max_distance))
+		if (bsurf != QAWS_CURVE_BATCH_NONE && (J->max_distance <= 0 || best <= J->max_distance))
 		{
-			out[i].surface = bsurf;
-			out[i].u = bu;
-			out[i].v = bv;
-			out[i].distance = best;
-			out[i].position.x = bp[0];
-			out[i].position.y = bp[1];
-			out[i].position.z = bp[2];
+			J->out[i].surface = bsurf;
+			J->out[i].u = bu;
+			J->out[i].v = bv;
+			J->out[i].distance = best;
+			J->out[i].position.x = bp[0];
+			J->out[i].position.y = bp[1];
+			J->out[i].position.z = bp[2];
 			stats->hit_count++;
 		}
 	}
-	qaws_internal_grid_destroy(grid);
 	free(x.stamp);
 	free(x.cand);
+	return s;
+}
+
+static qaws_status sc_run(qaws_surface const* const* surfaces, qaws_flat_patch const* patches, unsigned int npatch, qaws_scalar const* points,
+	unsigned int point_count, qaws_scalar max_distance, qaws_batch_executor const* executor, qaws_surface_batch_closest* out, qaws_surface_batch_stats* stats)
+{
+	sc_job J;
+	qaws_bp_box* boxes;
+	unsigned int i, k, nchunk;
+	qaws_status s;
+	memset(&J, 0, sizeof(J));
+	stats->patch_count = npatch;
+	for (i = 0; i < point_count; i++)
+	{
+		memset(&out[i], 0, sizeof(out[i]));
+		out[i].surface = QAWS_CURVE_BATCH_NONE;
+	}
+	if (!npatch || !point_count)
+		return QAWS_STATUS_OK;
+	boxes = (qaws_bp_box*)malloc(npatch * sizeof(qaws_bp_box));
+	nchunk = qaws_internal_chunk_count(point_count, SC_GRAIN);
+	J.stats = (qaws_surface_batch_stats*)calloc(nchunk, sizeof(qaws_surface_batch_stats));
+	if (!boxes || !J.stats)
+	{
+		free(boxes);
+		free(J.stats);
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	}
+	for (i = 0; i < npatch; i++)
+		for (k = 0; k < 3; k++)
+		{
+			boxes[i].lo[k] = (double)patches[i].lo[k];
+			boxes[i].hi[k] = (double)patches[i].hi[k];
+		}
+	s = qaws_internal_grid_create(boxes, npatch, 3, &J.grid);
+	free(boxes);
+	J.surfaces = surfaces;
+	J.patches = patches;
+	J.npatch = npatch;
+	J.points = points;
+	J.max_distance = max_distance;
+	J.out = out;
+	if (s == QAWS_STATUS_OK)
+		s = qaws_internal_parallel(executor, point_count, SC_GRAIN, sc_chunk, &J);
+	for (k = 0; k < nchunk; k++)
+	{
+		stats->candidate_count += J.stats[k].candidate_count;
+		stats->newton_count += J.stats[k].newton_count;
+		stats->hit_count += J.stats[k].hit_count;
+	}
+	qaws_internal_grid_destroy(J.grid);
+	free(J.stats);
 	return s;
 }
 
@@ -1698,7 +1743,7 @@ qaws_status qaws_surface_batch_find_closest(
 	for (i = 0; i < desc->surface_count && s == QAWS_STATUS_OK; i++)
 		s = qaws_internal_flatten_surface(desc->surfaces[i], flat, i, &patches, &npatch, &cap);
 	if (s == QAWS_STATUS_OK)
-		s = sc_run(desc->surfaces, patches, npatch, desc->points, desc->point_count, desc->max_distance, out_points, &st);
+		s = sc_run(desc->surfaces, patches, npatch, desc->points, desc->point_count, desc->max_distance, desc->executor, out_points, &st);
 	if (out_stats)
 		*out_stats = st;
 	free(patches);
@@ -1720,7 +1765,7 @@ qaws_status qaws_surface_set_find_closest(
 		*out_stats = st;
 	if (!set || (point_count && (!points || !out_points)))
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	s = sc_run(set->desc.surfaces, set->patches, set->npatch, points, point_count, max_distance, out_points, &st);
+	s = sc_run(set->desc.surfaces, set->patches, set->npatch, points, point_count, max_distance, set->desc.executor, out_points, &st);
 	if (out_stats)
 		*out_stats = st;
 	return s;
@@ -1854,15 +1899,79 @@ static int sr_visit(void* user, unsigned int const* items, unsigned int count, d
 	return x->best_s != QAWS_CURVE_BATCH_NONE && (double)x->best_t <= t_exit;
 }
 
-static qaws_status sr_run(qaws_surface const* const* surfaces, qaws_flat_patch const* patches, unsigned int npatch, qaws_scalar const* origins,
-	qaws_scalar const* directions, unsigned int ray_count, qaws_scalar max_t, qaws_scalar ext, qaws_surface_ray_hit* out, qaws_surface_batch_stats* stats)
+#define SR_GRAIN 64
+
+typedef struct sr_job
 {
+	qaws_surface const* const* surfaces;
+	qaws_flat_patch const* patches;
+	unsigned int npatch;
+	qaws_bp_grid* grid;
+	qaws_scalar const* origins;
+	qaws_scalar const* directions;
+	qaws_scalar max_t, pos_tol;
+	qaws_surface_ray_hit* out;
+	qaws_surface_batch_stats* stats;   /* one per chunk */
+} sr_job;
+
+static qaws_status sr_chunk(void* ctx, unsigned int chunk, unsigned int begin, unsigned int end)
+{
+	sr_job const* J = (sr_job const*)ctx;
 	sr_ctx x;
-	qaws_bp_box* boxes;
-	qaws_bp_grid* grid = NULL;
 	unsigned int i, k;
-	qaws_status s;
 	memset(&x, 0, sizeof(x));
+	x.stamp = (unsigned int*)malloc(J->npatch * sizeof(unsigned int));
+	if (!x.stamp)
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	for (i = 0; i < J->npatch; i++)
+		x.stamp[i] = ~0u;
+	x.surfaces = J->surfaces;
+	x.patches = J->patches;
+	x.tmax = J->max_t;
+	x.pos_tol = J->pos_tol;
+	x.stats = &J->stats[chunk];
+	for (i = begin; i < end; i++)
+	{
+		double od[3], ddv[3];
+		for (k = 0; k < 3; k++)
+		{
+			x.o[k] = J->origins[3 * i + k];
+			x.d[k] = J->directions[3 * i + k];
+			od[k] = (double)x.o[k];
+			ddv[k] = (double)x.d[k];
+		}
+		if (!(sb_dot(x.d, x.d) > 0))
+			continue;
+		x.ray = i;
+		x.best_t = (qaws_scalar)HUGE_VAL;
+		x.best_s = QAWS_CURVE_BATCH_NONE;
+		qaws_internal_grid_ray(J->grid, od, ddv, J->max_t > 0 ? (double)J->max_t : HUGE_VAL, sr_visit, &x);
+		if (x.best_s != QAWS_CURVE_BATCH_NONE)
+		{
+			qaws_surface_ray_hit* o = &J->out[i];
+			o->surface = x.best_s;
+			o->t = x.best_t;
+			o->u = x.best_u;
+			o->v = x.best_v;
+			o->position.x = x.best_p[0];
+			o->position.y = x.best_p[1];
+			o->position.z = x.best_p[2];
+			x.stats->hit_count++;
+		}
+	}
+	free(x.stamp);
+	return QAWS_STATUS_OK;
+}
+
+static qaws_status sr_run(qaws_surface const* const* surfaces, qaws_flat_patch const* patches, unsigned int npatch, qaws_scalar const* origins,
+	qaws_scalar const* directions, unsigned int ray_count, qaws_scalar max_t, qaws_scalar ext, qaws_batch_executor const* executor, qaws_surface_ray_hit* out,
+	qaws_surface_batch_stats* stats)
+{
+	sr_job J;
+	qaws_bp_box* boxes;
+	unsigned int i, k, nchunk;
+	qaws_status s;
+	memset(&J, 0, sizeof(J));
 	stats->patch_count = npatch;
 	for (i = 0; i < ray_count; i++)
 	{
@@ -1872,60 +1981,40 @@ static qaws_status sr_run(qaws_surface const* const* surfaces, qaws_flat_patch c
 	if (!npatch || !ray_count)
 		return QAWS_STATUS_OK;
 	boxes = (qaws_bp_box*)malloc(npatch * sizeof(qaws_bp_box));
-	x.stamp = (unsigned int*)malloc(npatch * sizeof(unsigned int));
-	if (!boxes || !x.stamp)
+	nchunk = qaws_internal_chunk_count(ray_count, SR_GRAIN);
+	J.stats = (qaws_surface_batch_stats*)calloc(nchunk, sizeof(qaws_surface_batch_stats));
+	if (!boxes || !J.stats)
 	{
 		free(boxes);
-		free(x.stamp);
+		free(J.stats);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 	for (i = 0; i < npatch; i++)
-	{
-		x.stamp[i] = ~0u;
 		for (k = 0; k < 3; k++)
 		{
 			boxes[i].lo[k] = (double)patches[i].lo[k];
 			boxes[i].hi[k] = (double)patches[i].hi[k];
 		}
-	}
-	s = qaws_internal_grid_create(boxes, npatch, 3, &grid);
+	s = qaws_internal_grid_create(boxes, npatch, 3, &J.grid);
 	free(boxes);
-	stats->cell_count = 0;
-	x.surfaces = surfaces;
-	x.patches = patches;
-	x.tmax = max_t;
-	x.pos_tol = ext * SB_POS_REL;
-	x.stats = stats;
-	for (i = 0; i < ray_count && s == QAWS_STATUS_OK; i++)
+	J.surfaces = surfaces;
+	J.patches = patches;
+	J.npatch = npatch;
+	J.origins = origins;
+	J.directions = directions;
+	J.max_t = max_t;
+	J.pos_tol = ext * SB_POS_REL;
+	J.out = out;
+	if (s == QAWS_STATUS_OK)
+		s = qaws_internal_parallel(executor, ray_count, SR_GRAIN, sr_chunk, &J);
+	for (k = 0; k < nchunk; k++)
 	{
-		double od[3], ddv[3];
-		for (k = 0; k < 3; k++)
-		{
-			x.o[k] = origins[3 * i + k];
-			x.d[k] = directions[3 * i + k];
-			od[k] = (double)x.o[k];
-			ddv[k] = (double)x.d[k];
-		}
-		if (!(sb_dot(x.d, x.d) > 0))
-			continue;
-		x.ray = i;
-		x.best_t = (qaws_scalar)HUGE_VAL;
-		x.best_s = QAWS_CURVE_BATCH_NONE;
-		qaws_internal_grid_ray(grid, od, ddv, max_t > 0 ? (double)max_t : HUGE_VAL, sr_visit, &x);
-		if (x.best_s != QAWS_CURVE_BATCH_NONE)
-		{
-			out[i].surface = x.best_s;
-			out[i].t = x.best_t;
-			out[i].u = x.best_u;
-			out[i].v = x.best_v;
-			out[i].position.x = x.best_p[0];
-			out[i].position.y = x.best_p[1];
-			out[i].position.z = x.best_p[2];
-			stats->hit_count++;
-		}
+		stats->candidate_count += J.stats[k].candidate_count;
+		stats->newton_count += J.stats[k].newton_count;
+		stats->hit_count += J.stats[k].hit_count;
 	}
-	qaws_internal_grid_destroy(grid);
-	free(x.stamp);
+	qaws_internal_grid_destroy(J.grid);
+	free(J.stats);
 	return s;
 }
 
@@ -1952,7 +2041,7 @@ qaws_status qaws_surface_batch_raycast(
 	for (i = 0; i < desc->surface_count && s == QAWS_STATUS_OK; i++)
 		s = qaws_internal_flatten_surface(desc->surfaces[i], flat, i, &patches, &npatch, &cap);
 	if (s == QAWS_STATUS_OK)
-		s = sr_run(desc->surfaces, patches, npatch, desc->origins, desc->directions, desc->ray_count, desc->max_t, ext, out_hits, &st);
+		s = sr_run(desc->surfaces, patches, npatch, desc->origins, desc->directions, desc->ray_count, desc->max_t, ext, desc->executor, out_hits, &st);
 	if (out_stats)
 		*out_stats = st;
 	free(patches);
@@ -1975,7 +2064,7 @@ qaws_status qaws_surface_set_raycast(
 		*out_stats = st;
 	if (!set || (ray_count && (!origins || !directions || !out_hits)))
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	s = sr_run(set->desc.surfaces, set->patches, set->npatch, origins, directions, ray_count, max_t, set->ext, out_hits, &st);
+	s = sr_run(set->desc.surfaces, set->patches, set->npatch, origins, directions, ray_count, max_t, set->ext, set->desc.executor, out_hits, &st);
 	if (out_stats)
 		*out_stats = st;
 	return s;

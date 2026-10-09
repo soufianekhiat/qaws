@@ -22,6 +22,23 @@
  * Thread-safe on immutable curves.
  */
 
+/*
+ * Parallel execution: qaws has no threads of its own. A batch splits its
+ * independent work (query points, rays, curves) into chunks it owns and
+ * hands them to the caller's executor: parallel_for(user, count, task, ctx)
+ * must call task(ctx, begin, end) over ranges covering [0, count) exactly
+ * once, on any threads in any order, and return when all are done. The
+ * results do not depend on the executor. Without one the work runs on the
+ * calling thread.
+ */
+typedef void (*qaws_batch_task_fn)(void* ctx, unsigned int begin, unsigned int end);
+
+typedef struct qaws_batch_executor
+{
+	void (*parallel_for)(void* user, unsigned int count, qaws_batch_task_fn task, void* ctx);
+	void* user;
+} qaws_batch_executor;
+
 #define QAWS_CURVE_BATCH_SELF 1u   /* also intersect each curve with itself */
 
 typedef struct qaws_curve_batch_desc
@@ -31,6 +48,7 @@ typedef struct qaws_curve_batch_desc
 	unsigned int const* families;   /* optional, one id per curve */
 	unsigned int flags;             /* QAWS_CURVE_BATCH_* */
 	qaws_scalar flatness;           /* chord deviation bound; 0 = 2^-10 of the scene extent */
+	qaws_batch_executor const* executor;   /* optional: runs the work in parallel */
 } qaws_curve_batch_desc;
 
 /* curve_a < curve_b, or curve_a == curve_b with parameter_a < parameter_b
@@ -105,6 +123,7 @@ typedef struct qaws_level_crossing_desc
 	qaws_scalar const* levels;          /* strictly ascending */
 	unsigned int level_count;
 	qaws_scalar flatness;               /* geometric, as for the batch; 0 = 2^-10 of the extent */
+	qaws_batch_executor const* executor;   /* optional: runs the work in parallel */
 } qaws_level_crossing_desc;
 
 /* sorted by (curve, parameter) */
@@ -142,6 +161,7 @@ typedef struct qaws_closest_desc
 	unsigned int point_count;
 	qaws_scalar max_distance;           /* 0 = no limit */
 	qaws_scalar flatness;               /* 0 = 2^-10 of the extent */
+	qaws_batch_executor const* executor;   /* optional: runs the work in parallel */
 } qaws_closest_desc;
 
 typedef struct qaws_closest_point

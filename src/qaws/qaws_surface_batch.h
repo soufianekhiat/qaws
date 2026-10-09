@@ -77,6 +77,7 @@ typedef struct qaws_surface_batch_desc
 	unsigned int surface_count;
 	unsigned int const* families;   /* optional, one id per surface */
 	qaws_scalar flatness;           /* deviation bound; 0 = 2^-9 of the scene extent */
+	qaws_batch_executor const* executor;   /* optional: runs the work in parallel */
 } qaws_surface_batch_desc;
 
 /* points[first .. first + count - 1] of the point buffer; closed when the
@@ -158,6 +159,7 @@ typedef struct qaws_surface_batch_closest_desc
 	unsigned int point_count;
 	qaws_scalar max_distance;           /* 0 = no limit */
 	qaws_scalar flatness;               /* 0 = 2^-9 of the extent */
+	qaws_batch_executor const* executor;   /* optional: runs the work in parallel */
 } qaws_surface_batch_closest_desc;
 
 typedef struct qaws_surface_batch_closest
@@ -192,6 +194,7 @@ typedef struct qaws_surface_ray_desc
 	unsigned int ray_count;
 	qaws_scalar max_t;                  /* 0 = no limit */
 	qaws_scalar flatness;               /* 0 = 2^-9 of the extent */
+	qaws_batch_executor const* executor;   /* optional: runs the work in parallel */
 } qaws_surface_ray_desc;
 
 typedef struct qaws_surface_ray_hit
