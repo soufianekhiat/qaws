@@ -56,6 +56,7 @@ set(QAWS_SOURCES
   src/qaws/qaws_sampling.c
   src/qaws/qaws_traversal.c
   src/qaws/qaws_inspect.c
+  src/qaws/qaws_curve_batch.c
   src/qaws/qaws_bezier.c
   src/qaws/qaws_hermite.c
   src/qaws/qaws_catmull_rom.c
@@ -359,6 +360,16 @@ if(QAWS_BUILD_EXAMPLES)
     RUNTIME_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/working_dir"
     RUNTIME_OUTPUT_DIRECTORY_RELEASE "${PROJECT_SOURCE_DIR}/working_dir"
     RUNTIME_OUTPUT_DIRECTORY_DEBUG "${PROJECT_SOURCE_DIR}/working_dir")
+  add_executable(qaws_batch_showcase examples/batch_showcase.c)
+  target_link_libraries(qaws_batch_showcase PRIVATE Qaws::qaws)
+  target_include_directories(qaws_batch_showcase PRIVATE "${PROJECT_SOURCE_DIR}/src/qaws")
+  if(MSVC)
+    target_compile_definitions(qaws_batch_showcase PRIVATE _CRT_SECURE_NO_WARNINGS)
+  endif()
+  set_target_properties(qaws_batch_showcase PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/working_dir"
+    RUNTIME_OUTPUT_DIRECTORY_RELEASE "${PROJECT_SOURCE_DIR}/working_dir"
+    RUNTIME_OUTPUT_DIRECTORY_DEBUG "${PROJECT_SOURCE_DIR}/working_dir")
   if(QAWS_ENABLE_EXACT)
     add_executable(qaws_exact_showcase examples/exact_showcase.c)
     target_link_libraries(qaws_exact_showcase PRIVATE Qaws::qaws)
@@ -416,6 +427,7 @@ if(QAWS_INSTALL)
       src/qaws/qaws_sampling.h
       src/qaws/qaws_traversal.h
       src/qaws/qaws_inspect.h
+      src/qaws/qaws_curve_batch.h
       src/qaws/qaws_operations.h
       src/qaws/qaws_convert.h
       src/qaws/qaws_export.h

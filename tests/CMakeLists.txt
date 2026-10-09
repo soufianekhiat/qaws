@@ -80,6 +80,7 @@ add_executable(
   76_exact_composite.c
   77_exact_curve_surface.c
   78_exact_ssi.c
+  79_curve_batch.c
 )
 
 # The amalgamated library exports exactly the same symbols, so the tests can
