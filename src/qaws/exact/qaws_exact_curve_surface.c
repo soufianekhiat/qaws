@@ -25,6 +25,7 @@ typedef struct cs_box
 typedef struct cs_ctx
 {
 	unsigned int n[3], size, stride[3];
+	int target[3];           /* refinement depth per direction */
 } cs_ctx;
 
 static void* cs_alloc(size_t b)
@@ -443,7 +444,7 @@ static qaws_status refine(cs_ctx const* cx, cs_box* B, cs_box* L, cs_box* R)
 		cs_box* keep;
 		/* the shallowest direction that is not stuck */
 		for (k = 0; k < 3; k++)
-			if (!stuck[k] && B->dep[k] < CS_TARGET_DEPTH && (d == 3 || B->dep[k] < B->dep[d]))
+			if (!stuck[k] && B->dep[k] < cx->target[k] && (d == 3 || B->dep[k] < B->dep[d]))
 				d = k;
 		if (d == 3)
 			return QAWS_STATUS_OK;
@@ -589,6 +590,13 @@ static int box_overlap(qaws_exact_box3 const* a, qaws_exact_box3 const* b)
 qaws_status qaws_exact_solve3(unsigned int const n[3], qaws_exact_int const* F, qaws_exact_box3* out, unsigned int capacity, unsigned int* out_count,
 	unsigned int max_boxes)
 {
+	static unsigned int const target[3] = { CS_TARGET_DEPTH, CS_TARGET_DEPTH, CS_TARGET_DEPTH };
+	return qaws_exact_solve3_to(n, F, out, capacity, out_count, max_boxes, target);
+}
+
+qaws_status qaws_exact_solve3_to(unsigned int const n[3], qaws_exact_int const* F, qaws_exact_box3* out, unsigned int capacity, unsigned int* out_count,
+	unsigned int max_boxes, unsigned int const target[3])
+{
 	cs_ctx cx;
 	unsigned int nstack, boxes = 0, depth_cap = CS_MAX_SPLITS, count = 0, c, ncov = 0, cap = 16;
 	cs_box* stack = NULL;
@@ -602,6 +610,9 @@ qaws_status qaws_exact_solve3(unsigned int const n[3], qaws_exact_int const* F, 
 	cx.n[0] = n[0];
 	cx.n[1] = n[1];
 	cx.n[2] = n[2];
+	cx.target[0] = (int)target[0];
+	cx.target[1] = (int)target[1];
+	cx.target[2] = (int)target[2];
 	cx.size = (n[0] + 1) * (n[1] + 1) * (n[2] + 1);
 	cx.stride[2] = 1;
 	cx.stride[1] = n[2] + 1;

@@ -794,6 +794,85 @@ static void test_surface_closest(void)
 		qaws_surface_destroy(sf[k]);
 }
 
+#define SBT_ECQ 120
+
+/* certified closest points on the dyadic paraboloids and two planes, against the float batch */
+static void test_exact_surface_closest(void)
+{
+	qaws_surface* sf[SBT_SURF + 2];
+	qaws_exact_surface* es[SBT_SURF + 2];
+	static double pts[3 * SBT_ECQ];
+	static qaws_scalar fpts[3 * SBT_ECQ];
+	static qaws_exact_surface_closest_point eo[SBT_ECQ];
+	static qaws_surface_batch_closest fo[SBT_ECQ];
+	qaws_exact_ssi_batch_desc d;
+	qaws_exact_batch_stats st;
+	qaws_surface_batch_closest_desc fd;
+	qaws_exact_desc ed;
+	unsigned int i, k, n = SBT_SURF + 2, agree = 0, certified = 0;
+	double widest = 0, t0, te, tol = QAWS_SCALAR_IS_FLOAT ? 2e-5 : 1e-9;
+	qaws_status s;
+	char msg[200];
+	for (k = 0; k < SBT_SURF; k++)
+		sf[k] = sbt_paraboloid(sbt_lift(k));
+	sf[SBT_SURF] = sbt_plane(-0.5, 0);
+	sf[SBT_SURF + 1] = sbt_plane(3.75, 0);
+	qaws_exact_desc_default(&ed);
+	ed.space_exp2 = -16;
+	for (k = 0; k < n; k++)
+		qaws_exact_surface_prepare(&ed, sf[k], &es[k], NULL);
+	for (i = 0; i < SBT_ECQ; i++)
+	{
+		pts[3 * i] = ldexp(nearbyint(ldexp(-1.1 + 2.2 * sbt_rand(), 10)), -10);
+		pts[3 * i + 1] = ldexp(nearbyint(ldexp(-1.1 + 2.2 * sbt_rand(), 10)), -10);
+		pts[3 * i + 2] = ldexp(nearbyint(ldexp(-0.4 + 3.6 * sbt_rand(), 10)), -10);
+		for (k = 0; k < 3; k++)
+			fpts[3 * i + k] = (qaws_scalar)pts[3 * i + k];
+	}
+	memset(&d, 0, sizeof(d));
+	d.surfaces = (qaws_exact_surface const* const*)es;
+	d.surface_count = n;
+	t0 = sbt_now();
+	s = qaws_exact_surface_batch_closest(&d, pts, SBT_ECQ, eo, &st);
+	te = sbt_now() - t0;
+	memset(&fd, 0, sizeof(fd));
+	fd.surfaces = (qaws_surface const* const*)sf;
+	fd.surface_count = n;
+	fd.points = fpts;
+	fd.point_count = SBT_ECQ;
+	qaws_surface_batch_find_closest(&fd, fo, NULL);
+	for (i = 0; i < SBT_ECQ; i++)
+	{
+		certified += eo[i].certified != 0;
+		if (eo[i].distance_hi - eo[i].distance_lo > widest)
+			widest = eo[i].distance_hi - eo[i].distance_lo;
+		if (eo[i].surface == fo[i].surface && fo[i].distance >= eo[i].distance_lo - tol && fo[i].distance <= eo[i].distance_hi + tol)
+			agree++;
+	}
+	printf("    certified closest on surfaces: %u points x %u surfaces, %u patches solved, %u certified, widest enclosure %.1e, in %.3f s (status %d); float batch inside %u\n",
+		SBT_ECQ, n, st.candidate_count, certified, widest, te, (int)s, agree);
+	sprintf(msg, "certified closest points on surfaces: every float answer inside its enclosure (%u of %u), all certified", agree, SBT_ECQ);
+	TEST_ASSERT(s == QAWS_STATUS_OK && agree == SBT_ECQ && certified == SBT_ECQ && widest < 1e-9, msg);
+	/* midway between the two planes: a tie */
+	{
+		double p[3] = { 0.25, -0.125, 1.625 };
+		qaws_exact_surface const* planes[2];
+		qaws_exact_surface_closest_point o;
+		planes[0] = es[SBT_SURF];
+		planes[1] = es[SBT_SURF + 1];
+		d.surfaces = planes;
+		d.surface_count = 2;
+		s = qaws_exact_surface_batch_closest(&d, p, 1, &o, NULL);
+		TEST_ASSERT(s == QAWS_STATUS_OK && !o.certified && o.distance_lo <= 2.125 && o.distance_hi >= 2.125,
+			"a point midway between two planes: a tie, reported uncertified at the exact distance");
+	}
+	for (k = 0; k < n; k++)
+	{
+		qaws_exact_surface_destroy(es[k]);
+		qaws_surface_destroy(sf[k]);
+	}
+}
+
 int test_81_surface_batch_main(void)
 {
 	g_pass = 0;
@@ -806,6 +885,7 @@ int test_81_surface_batch_main(void)
 	test_exact_ssi();
 	test_surface_sets();
 	test_surface_closest();
+	test_exact_surface_closest();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
 }

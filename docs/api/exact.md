@@ -264,6 +264,40 @@ Test 80: 300 dyadic points against dyadic parabolas and segments are all
 certified, with distance enclosures at most 1.1e-16 wide, in 0.04 s.
 Every answer of the float batch lies inside its enclosure.
 
+### Closest points on surfaces
+
+```c
+qaws_status qaws_exact_surface_batch_closest(qaws_exact_ssi_batch_desc const* desc, double const* points, unsigned int point_count,
+	qaws_exact_surface_closest_point* out_points, qaws_exact_batch_stats* out_stats);
+```
+
+For every query point, the call returns the nearest point over the exact
+surfaces (up to bicubic patches): its surface, (u, v) enclosures, a
+distance enclosure and a `certified` flag. On a patch S = X / W the
+squared distance to p = P / Q is stationary where G_u = G_v = 0, with
+G_u = Σ (Q X_c − P_c W)(X_c,u W − X_c W_u) and G_v likewise.
+
+- **Localising the interior.** Branch and bound on E / V over quarter
+  boxes keeps only the boxes that can beat the best distance. The corners
+  of each box are exact surface points, so their distances tighten that
+  bound as the search goes.
+- **Solving.** On each surviving box, G_u and G_v are restricted exactly
+  (integer de Casteljau to any dyadic interval). The system with
+  3w − 1 = 0 goes to the certified 3D solver, refined only to 2⁻²² in u
+  and v.
+- **Edges and corners.** These are exact curves, solved by the curve
+  method. Each edge and corner counts once over the surface.
+- **Certification.** Every candidate gets a distance enclosure, and the
+  nearest is certified when its enclosure lies below every other
+  candidate's. A pruned box is proven farther than an actual surface
+  point, so the nearest point is always among the candidates.
+
+Test 81 runs 120 dyadic points against three paraboloids and two planes.
+All are certified, every answer of the float batch lies inside its
+enclosure, and the run takes 1.0 s. A point midway between two planes is
+reported as a tie. The comparison also exposed a float edge bug, now
+fixed (see [surface_batch.md](surface_batch.md)).
+
 ## Certified line / surface intersections (exact ray casting)
 
 ```c
@@ -452,6 +486,7 @@ Tangencies and overlaps return `QAWS_STATUS_CERTIFICATION_FAILED`.
 | curve / curve intersections (2D, 3D) | certified: implicitization of the lower-degree span, root isolation, exact inversion (span ends at irrational roots by a gcd test); 3D: exact zero test of the third coordinate |
 | N curves at once (2D, 3D) | certified: one grid over sound span boxes, only overlapping span pairs certified, families, uncertified pairs counted |
 | closest points over N curves | certified: roots of the distance derivative isolated exactly, distance enclosures, unique nearest proven or a tie reported |
+| closest points over M surfaces | certified: interior stationary points by the 3D solver on boxes localised by branch and bound, edges as exact curves, unique nearest proven or a tie reported |
 | N curves x M surfaces at once | certified: one grid over sound span and patch boxes, only overlapping span / patch pairs certified |
 | N surfaces at once (intersection curves) | certified: one grid over sound patch boxes, each surface pair solved on its overlapping patch pairs only |
 | self-intersections (2D, 3D) | certified: divided differences inside spans, span pairs, knots and closing points excluded, spans on one conic told apart |

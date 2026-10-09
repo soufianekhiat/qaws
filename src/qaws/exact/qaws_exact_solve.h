@@ -75,4 +75,9 @@ typedef struct qaws_exact_box3
 qaws_status qaws_exact_solve3(unsigned int const n[3], qaws_exact_int const* F, qaws_exact_box3* out, unsigned int capacity, unsigned int* out_count,
 	unsigned int max_boxes);
 
+/* The same, each certified root box shrunk only to depth target[k] in
+   direction k (qaws_exact_solve3: 44 in every direction). */
+qaws_status qaws_exact_solve3_to(unsigned int const n[3], qaws_exact_int const* F, qaws_exact_box3* out, unsigned int capacity, unsigned int* out_count,
+	unsigned int max_boxes, unsigned int const target[3]);
+
 #endif /* QAWS_EXACT_SOLVE_H */

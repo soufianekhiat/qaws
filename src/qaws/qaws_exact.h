@@ -499,6 +499,32 @@ qaws_status qaws_exact_surface_batch_hits(qaws_exact_ssi_batch_desc const* desc,
 	unsigned int* out_point_count, qaws_exact_ssi_batch_branch* out_branches, unsigned int branch_capacity, unsigned int* out_branch_count,
 	qaws_exact_batch_stats* out_stats);
 
+/*
+ * Certified closest points on surfaces: for every query point (exact
+ * doubles, world units), the nearest point over the exact surfaces of desc
+ * (families and min_depth ignored). On a patch S = X / W the squared
+ * distance to p = P / Q is stationary where
+ *   G_u = sum_c (Q X_c - P_c W)(X_c,u W - X_c W_u) = 0,
+ *   G_v = sum_c (Q X_c - P_c W)(X_c,v W - X_c W_v) = 0;
+ * with 3w - 1 = 0 the certified 3D solver isolates its interior roots,
+ * and the patch edges, exact curves, add theirs and the corners (each edge
+ * and corner once over the surface). Every candidate gets an enclosure of
+ * its distance; the nearest is certified when its enclosure lies below
+ * every other one (a tie, e.g. the centre of a sphere, stays uncertified).
+ * Patches up to bicubic.
+ */
+typedef struct qaws_exact_surface_closest_point
+{
+	unsigned int surface;           /* QAWS_EXACT_CLOSEST_NONE without surfaces */
+	double u_lo, u_hi, v_lo, v_hi;  /* the nearest point's parameters */
+	double distance_lo, distance_hi;/* its distance, world units */
+	int certified;
+} qaws_exact_surface_closest_point;
+
+/* stats: patch_count, candidate_count (patches solved), hit_count, uncertified_count */
+qaws_status qaws_exact_surface_batch_closest(qaws_exact_ssi_batch_desc const* desc, double const* points, unsigned int point_count,
+	qaws_exact_surface_closest_point* out_points, qaws_exact_batch_stats* out_stats);
+
 /* Patches along u and v (one exact rational Bezier patch each). */
 void qaws_exact_surface_patch_count(qaws_exact_surface const* surface, unsigned int* out_u_count, unsigned int* out_v_count);
 
