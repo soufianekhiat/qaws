@@ -197,8 +197,8 @@ typedef struct qaws_exact_pair
  * division). Every intersection is reported once (a knot point by the
  * span ending there), each crossing enclosure holding exactly one.
  * QAWS_STATUS_CERTIFICATION_FAILED for tangencies, a common component
- * (overlapping curves), a crossing through a singular point, or an
- * intersection on a span end at an irrational parameter.
+ * (overlapping curves) or a crossing through a singular point; a hit on a
+ * span end at an irrational root is decided by an exact gcd test.
  */
 qaws_status qaws_exact_curve_curve_hits(qaws_exact_curve const* a, qaws_exact_curve const* b, qaws_exact_pair* out_pairs, unsigned int capacity,
 	unsigned int* out_count);
@@ -215,6 +215,50 @@ qaws_status qaws_exact_curve_curve_hits(qaws_exact_curve const* a, qaws_exact_cu
  * irrational cusp or a span folding back on itself.
  */
 qaws_status qaws_exact_curve_self_hits(qaws_exact_curve const* curve, qaws_exact_pair* out_pairs, unsigned int capacity, unsigned int* out_count);
+
+/*
+ * Certified intersections of N exact curves at once (all 2D or all 3D, one
+ * exact space). Every span of every curve gets a sound box from its control
+ * points; one grid over all of them gives the span pairs that may meet, and
+ * only those are certified as by qaws_exact_curve_curve_hits. `families`
+ * (optional) skips the pairs of curves with the same id; with
+ * QAWS_EXACT_BATCH_SELF each curve's self-intersections are added.
+ *
+ * Hits are sorted by (curve_a, curve_b, a_lo, b_lo), curve_a < curve_b
+ * (curve_a == curve_b for a self-intersection). A curve pair that cannot be
+ * certified (tangency, common component, ...) contributes no hits and is
+ * counted in stats.uncertified_count; the call then completes every other
+ * pair and returns QAWS_STATUS_CERTIFICATION_FAILED. *out_count is the
+ * total; past `capacity` the call returns QAWS_STATUS_BUFFER_TOO_SMALL.
+ */
+#define QAWS_EXACT_BATCH_SELF 1u
+
+typedef struct qaws_exact_batch_desc
+{
+	qaws_exact_curve const* const* curves;
+	unsigned int curve_count;
+	unsigned int const* families;   /* optional, one id per curve */
+	unsigned int flags;             /* QAWS_EXACT_BATCH_* */
+} qaws_exact_batch_desc;
+
+typedef struct qaws_exact_batch_hit
+{
+	unsigned int curve_a;
+	unsigned int curve_b;
+	qaws_exact_pair pair;           /* a_* on curve_a, b_* on curve_b */
+} qaws_exact_batch_hit;
+
+typedef struct qaws_exact_batch_stats
+{
+	unsigned int span_count;        /* spans over all curves */
+	unsigned int cell_count;        /* grid cells */
+	unsigned int candidate_count;   /* span pairs whose boxes overlap */
+	unsigned int uncertified_count; /* curve pairs that failed certification */
+	unsigned int hit_count;
+} qaws_exact_batch_stats;
+
+qaws_status qaws_exact_curve_batch_hits(qaws_exact_batch_desc const* desc, qaws_exact_batch_hit* out_hits, unsigned int capacity,
+	unsigned int* out_count, qaws_exact_batch_stats* out_stats);
 
 /* ===================================================================
  * Certified 2D Boolean operations

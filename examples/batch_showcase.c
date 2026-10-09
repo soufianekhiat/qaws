@@ -5,12 +5,15 @@
  *   batch1_heightfield.svg   contour lines and gradient lines of a
  *                            heightfield, every crossing in one batched call,
  *                            and its time against all pairs
+ *   batch2_exact_heightfield.svg  the same crossings certified by the exact
+ *                            batch, against the pairwise exact call
  *
  * Each figure lives in batch_showcase/NN_*.c, compiled as one translation
  * unit.
  */
 
 #include "qaws.h"
+#include "qaws_exact.h"
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -29,11 +32,13 @@
 #include "example_svg.h"
 
 #include "batch_showcase/01_heightfield.c"
+#include "batch_showcase/02_exact_heightfield.c"
 
 int main(void)
 {
 	setvbuf(stdout, NULL, _IONBF, 0);
 	MAKE_DIR("showcase");
 	demo_heightfield();
+	demo_exact_heightfield();
 	return 0;
 }

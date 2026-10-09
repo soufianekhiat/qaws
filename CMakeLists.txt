@@ -116,6 +116,7 @@ set(QAWS_SOURCES
   src/qaws/internal/qaws_internal_mesh.c
   src/qaws/internal/qaws_internal_sparse.c
   src/qaws/internal/qaws_internal_diff.c
+  src/qaws/internal/qaws_internal_broadphase.c
 )
 
 if(QAWS_ENABLE_SIMD)
@@ -237,6 +238,7 @@ if(QAWS_ENABLE_EXACT)
     src/qaws/exact/qaws_exact_boolean.c
     src/qaws/exact/qaws_exact_curve_surface.c
     src/qaws/exact/qaws_exact_ssi.c
+    src/qaws/exact/qaws_exact_batch.c
   )
 endif()
 

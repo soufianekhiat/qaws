@@ -97,3 +97,10 @@ These are f64 timings from test 79 and `qaws_batch_showcase` (Release build).
 | 128 × 128 of the same | 0.09 s, 32768 hits | 1.3 s, 27498 hits (misses) | ×14 |
 | Gaussian heightfield, 72 B-spline curves | 0.010 s, 375 hits | 3.2 s, 375 hits | ×317 |
 | Gaussian heightfield, 143 B-spline curves | 0.032 s, 1446 hits | 15.6 s, 1446 hits | ×489 |
+
+## Certified version
+
+`qaws_exact_curve_batch_hits` (see [exact.md](exact.md)) does the same
+for exact curves. It uses the same grid over sound span boxes, then
+certifies every candidate span pair. On the 72-curve heightfield it takes
+0.23 s, where pairwise exact calls take 2.1 s.

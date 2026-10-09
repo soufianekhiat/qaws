@@ -862,11 +862,73 @@ static qaws_status push_pair(qaws_exact_pair* out, unsigned int capacity, unsign
 	return QAWS_STATUS_OK;
 }
 
+static int curve_closed(qaws_exact_curve const* c);
+
+void qaws_exact_span_box(qaws_exact_span const* sp, unsigned int dim, double lo[3], double hi[3])
+{
+	unsigned int D = dim + 1, j, k;
+	for (k = 0; k < 3; k++)
+	{
+		lo[k] = k < dim ? HUGE_VAL : 0;
+		hi[k] = k < dim ? -HUGE_VAL : 0;
+	}
+	for (j = 0; j <= sp->degree; j++)
+		if (qaws_exact_int_sign(&sp->h[j * D + dim]) <= 0)
+		{
+			for (k = 0; k < dim; k++)
+			{
+				lo[k] = HUGE_VAL;
+				hi[k] = -HUGE_VAL;
+			}
+			return;
+		}
+	for (j = 0; j <= sp->degree; j++)
+		for (k = 0; k < dim; k++)
+		{
+			/* correctly rounded (twice at worst, for subnormals): two ulps out are sound */
+			double v = qaws_exact_ratio_to_double(&sp->h[j * D + k], &sp->h[j * D + dim]);
+			double l = nextafter(nextafter(v, -HUGE_VAL), -HUGE_VAL), h = nextafter(nextafter(v, HUGE_VAL), HUGE_VAL);
+			if (l < lo[k]) lo[k] = l;
+			if (h > hi[k]) hi[k] = h;
+		}
+}
+
+static int box_disjoint(double const* alo, double const* ahi, double const* blo, double const* bhi, unsigned int dim)
+{
+	unsigned int k;
+	for (k = 0; k < dim; k++)
+		if (alo[k] <= ahi[k] && blo[k] <= bhi[k] && (ahi[k] < blo[k] || bhi[k] < alo[k]))
+			return 1;
+	return 0;
+}
+
+qaws_status qaws_exact_span_pair_hits(qaws_exact_curve const* a, unsigned int ia, qaws_exact_curve const* b, unsigned int ib,
+	qaws_exact_pair* out, unsigned int capacity, unsigned int* count, int* common)
+{
+	unsigned int nh = 0, k, dim = (unsigned int)a->dimension;
+	span_hit* hits = (span_hit*)cc_alloc(sizeof(span_hit) * CC_MAX_ROOTS);
+	qaws_status st;
+	if (!hits)
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	*common = 0;
+	st = span_pair(&a->spans[ia], a->param_shift, &b->spans[ib], b->param_shift, dim, hits, CC_MAX_ROOTS, &nh, common);
+	for (k = 0; k < nh && st == QAWS_STATUS_OK; k++)
+	{
+		/* a knot point is reported by the span it ends, the start of a
+		   closed curve by its last span */
+		if ((hits[k].b_exact_start && (ib > 0 || curve_closed(b))) || (hits[k].a_exact_start && (ia > 0 || curve_closed(a))))
+			continue;
+		st = push_pair(out, capacity, count, &hits[k], 0);
+	}
+	cc_free(hits);
+	return st;
+}
+
 qaws_status qaws_exact_curve_curve_hits(qaws_exact_curve const* a, qaws_exact_curve const* b, qaws_exact_pair* out_pairs, unsigned int capacity,
 	unsigned int* out_count)
 {
-	unsigned int ia, ib, k, count = 0, dim;
-	span_hit* hits;
+	unsigned int ia, ib, count = 0, dim;
+	double (*box)[2][3];
 	qaws_status st = QAWS_STATUS_OK;
 	if (!a || !b || !out_count || (!out_pairs && capacity) || a->dimension != b->dimension || (a->dimension != 2 && a->dimension != 3))
 		return QAWS_STATUS_INVALID_ARGUMENT;
@@ -874,26 +936,27 @@ qaws_status qaws_exact_curve_curve_hits(qaws_exact_curve const* a, qaws_exact_cu
 	if (a->space_exp2 != b->space_exp2)
 		return QAWS_STATUS_EXACT_INCOMPATIBLE_SPACE;
 	dim = (unsigned int)a->dimension;
-	hits = (span_hit*)cc_alloc(sizeof(span_hit) * CC_MAX_ROOTS);
-	if (!hits)
+	/* control boxes of b's spans: span pairs with disjoint boxes cannot meet */
+	box = (double (*)[2][3])cc_alloc(sizeof(double) * 6 * (b->span_count + 1));
+	if (!box)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
+	for (ib = 0; ib < b->span_count; ib++)
+		qaws_exact_span_box(&b->spans[ib], dim, box[ib][0], box[ib][1]);
 	for (ia = 0; ia < a->span_count && st == QAWS_STATUS_OK; ia++)
+	{
+		double alo[3], ahi[3];
+		qaws_exact_span_box(&a->spans[ia], dim, alo, ahi);
 		for (ib = 0; ib < b->span_count && st == QAWS_STATUS_OK; ib++)
 		{
-			unsigned int nh = 0;
 			int common = 0;
-			st = span_pair(&a->spans[ia], a->param_shift, &b->spans[ib], b->param_shift, dim, hits, CC_MAX_ROOTS, &nh, &common);
+			if (box_disjoint(alo, ahi, box[ib][0], box[ib][1], dim))
+				continue;
+			st = qaws_exact_span_pair_hits(a, ia, b, ib, out_pairs, capacity, &count, &common);
 			if (st == QAWS_STATUS_CERTIFICATION_FAILED && common)
 				st = QAWS_STATUS_CERTIFICATION_FAILED;   /* a common component: the curves overlap or share their support */
-			for (k = 0; k < nh && st == QAWS_STATUS_OK; k++)
-			{
-				/* a knot point is reported by the span it ends */
-				if ((ib > 0 && hits[k].b_exact_start) || (ia > 0 && hits[k].a_exact_start))
-					continue;
-				st = push_pair(out_pairs, capacity, &count, &hits[k], 0);
-			}
 		}
-	cc_free(hits);
+	}
+	cc_free(box);
 	sort_pairs(out_pairs, count);
 	*out_count = count;
 	return st;

@@ -91,6 +91,7 @@ extern int test_76_exact_composite_main(void);
 extern int test_77_exact_curve_surface_main(void);
 extern int test_78_exact_ssi_main(void);
 extern int test_79_curve_batch_main(void);
+extern int test_80_exact_batch_main(void);
 
 /* Test registry */
 typedef struct {
@@ -179,6 +180,7 @@ static test_suite const g_test_suites[] = {
 	{"77_exact_curve_surface", test_77_exact_curve_surface_main},
 	{"78_exact_ssi", test_78_exact_ssi_main},
 	{"79_curve_batch", test_79_curve_batch_main},
+	{"80_exact_batch", test_80_exact_batch_main},
 };
 
 int main(void) {

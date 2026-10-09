@@ -2,6 +2,7 @@
 #include "qaws_eval.h"
 #include "qaws_inspect.h"
 #include "internal/qaws_internal_types.h"
+#include "internal/qaws_internal_broadphase.h"
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -26,7 +27,6 @@
 
 #define CB_MAX_DEPTH   22
 #define CB_NEWTON_ITERS 24
-#define CB_MAX_CELLS   (1u << 22)
 
 #if QAWS_SCALAR_IS_FLOAT
 #define CB_POS_REL   ((qaws_scalar)2e-5)
@@ -362,6 +362,18 @@ static int cb_allowed(cb_ctx const* x, cb_seg const* A, cb_seg const* B)
 	return !d->families || d->families[A->curve] != d->families[B->curve];
 }
 
+static int cb_accept(void* user, unsigned int i, unsigned int j)
+{
+	cb_ctx const* x = (cb_ctx const*)user;
+	return cb_allowed(x, &x->segs[i], &x->segs[j]);
+}
+
+static qaws_status cb_visit(void* user, unsigned int i, unsigned int j)
+{
+	cb_ctx* x = (cb_ctx*)user;
+	return cb_pair(x, &x->segs[i], &x->segs[j]);
+}
+
 static int cb_cmp_hit(void const* p, void const* q)
 {
 	cb_hit const* a = (cb_hit const*)p;
@@ -404,9 +416,8 @@ static void cb_merge(cb_ctx* x)
 static qaws_status cb_run(cb_ctx* x)
 {
 	qaws_curve_batch_desc const* d = x->desc;
-	qaws_scalar lo[3], hi[3], ext = 0, h = 0;
-	unsigned int g[3], i, k, ncell;
-	unsigned int *start = NULL, *items = NULL, *fill = NULL;
+	qaws_scalar lo[3], hi[3], ext = 0;
+	unsigned int i, k;
 	qaws_status s = QAWS_STATUS_OK;
 
 	/* scene extent from a cheap sampling of every curve, to scale the defaults */
@@ -446,121 +457,27 @@ static qaws_status cb_run(cb_ctx* x)
 		return s;
 	x->stats.segment_count = x->nseg;
 
-	/* 2. grid: about one segment per cell */
-	for (k = 0; k < 3; k++) { lo[k] = (qaws_scalar)HUGE_VAL; hi[k] = -(qaws_scalar)HUGE_VAL; }
-	for (i = 0; i < x->nseg; i++)
-		for (k = 0; k < 3; k++)
-		{
-			if (x->segs[i].lo[k] < lo[k]) lo[k] = x->segs[i].lo[k];
-			if (x->segs[i].hi[k] > hi[k]) hi[k] = x->segs[i].hi[k];
-		}
+	/* 2-3. one grid over every segment; each overlapping allowed pair once */
 	{
-		double vol = 1;
-		unsigned int axes = 0;
-		for (k = 0; k < x->dim; k++)
-			if (hi[k] - lo[k] > ext * 1e-9)
+		qaws_bp_box* boxes = (qaws_bp_box*)malloc(x->nseg * sizeof(qaws_bp_box));
+		qaws_bp_stats bs;
+		if (!boxes)
+			return QAWS_STATUS_ALLOCATION_FAILURE;
+		for (i = 0; i < x->nseg; i++)
+			for (k = 0; k < 3; k++)
 			{
-				vol *= (double)(hi[k] - lo[k]);
-				axes++;
+				boxes[i].lo[k] = (double)x->segs[i].lo[k];
+				boxes[i].hi[k] = (double)x->segs[i].hi[k];
 			}
-		h = axes ? (qaws_scalar)pow(vol / x->nseg, 1.0 / axes) : ext;
-	}
-	ncell = 1;
-	for (k = 0; k < 3; k++)
-	{
-		double n = k < x->dim && h > 0 ? ceil((double)(hi[k] - lo[k]) / h) : 1;
-		g[k] = n < 1 ? 1 : (n > 4096 ? 4096 : (unsigned int)n);
-	}
-	while ((double)g[0] * g[1] * g[2] > CB_MAX_CELLS)
-		for (k = 0; k < 3; k++)
-			g[k] = (g[k] + 1) / 2;
-	ncell = g[0] * g[1] * g[2];
-	x->stats.cell_count = ncell;
-	{
-		qaws_scalar inv[3];
-		unsigned int total = 0;
-		for (k = 0; k < 3; k++)
-			inv[k] = hi[k] > lo[k] ? (qaws_scalar)g[k] / (hi[k] - lo[k]) : 0;
-#define CB_CELL(v, k) ((unsigned int)((v) - lo[k] >= 0 ? (((v) - lo[k]) * inv[k] < (qaws_scalar)g[k] ? ((v) - lo[k]) * inv[k] : (qaws_scalar)(g[k] - 1)) : 0))
-		start = (unsigned int*)calloc((size_t)ncell + 1, sizeof(unsigned int));
-		fill = (unsigned int*)malloc(((size_t)ncell + 1) * sizeof(unsigned int));
-		if (!start || !fill)
-		{
-			s = QAWS_STATUS_ALLOCATION_FAILURE;
-			goto done;
-		}
-		/* count, prefix, fill */
-		for (i = 0; i < x->nseg; i++)
-		{
-			cb_seg const* sg = &x->segs[i];
-			unsigned int a0 = CB_CELL(sg->lo[0], 0), a1 = CB_CELL(sg->hi[0], 0);
-			unsigned int b0 = CB_CELL(sg->lo[1], 1), b1 = CB_CELL(sg->hi[1], 1);
-			unsigned int c0 = CB_CELL(sg->lo[2], 2), c1 = CB_CELL(sg->hi[2], 2), ia, ib, ic;
-			for (ic = c0; ic <= c1; ic++)
-				for (ib = b0; ib <= b1; ib++)
-					for (ia = a0; ia <= a1; ia++)
-						start[(ic * g[1] + ib) * g[0] + ia]++;
-		}
-		for (i = 0; i < ncell; i++)
-		{
-			unsigned int c = start[i];
-			start[i] = total;
-			total += c;
-		}
-		start[ncell] = total;
-		memcpy(fill, start, ((size_t)ncell + 1) * sizeof(unsigned int));
-		items = (unsigned int*)malloc((size_t)(total ? total : 1) * sizeof(unsigned int));
-		if (!items)
-		{
-			s = QAWS_STATUS_ALLOCATION_FAILURE;
-			goto done;
-		}
-		for (i = 0; i < x->nseg; i++)
-		{
-			cb_seg const* sg = &x->segs[i];
-			unsigned int a0 = CB_CELL(sg->lo[0], 0), a1 = CB_CELL(sg->hi[0], 0);
-			unsigned int b0 = CB_CELL(sg->lo[1], 1), b1 = CB_CELL(sg->hi[1], 1);
-			unsigned int c0 = CB_CELL(sg->lo[2], 2), c1 = CB_CELL(sg->hi[2], 2), ia, ib, ic;
-			for (ic = c0; ic <= c1; ic++)
-				for (ib = b0; ib <= b1; ib++)
-					for (ia = a0; ia <= a1; ia++)
-						items[fill[(ic * g[1] + ib) * g[0] + ia]++] = i;
-		}
-
-		/* 3. pairs, each in the cell holding the low corner of the overlap */
-		for (i = 0; i < ncell && s == QAWS_STATUS_OK; i++)
-		{
-			unsigned int e, f;
-			for (e = start[i]; e < start[i + 1] && s == QAWS_STATUS_OK; e++)
-				for (f = e + 1; f < start[i + 1] && s == QAWS_STATUS_OK; f++)
-				{
-					cb_seg const* A = &x->segs[items[e]];
-					cb_seg const* B = &x->segs[items[f]];
-					qaws_scalar c[3];
-					int over = 1;
-					for (k = 0; k < 3 && over; k++)
-					{
-						over = A->lo[k] <= B->hi[k] && B->lo[k] <= A->hi[k];
-						c[k] = A->lo[k] > B->lo[k] ? A->lo[k] : B->lo[k];
-					}
-					if (!over || !cb_allowed(x, A, B))
-						continue;
-					if ((CB_CELL(c[2], 2) * g[1] + CB_CELL(c[1], 1)) * g[0] + CB_CELL(c[0], 0) != i)
-						continue;
-					x->stats.candidate_count++;
-					s = cb_pair(x, A, B);
-				}
-		}
-#undef CB_CELL
+		s = qaws_internal_broadphase(boxes, x->nseg, x->dim, cb_accept, cb_visit, x, &bs);
+		free(boxes);
+		x->stats.cell_count = bs.cell_count;
+		x->stats.candidate_count = bs.candidate_count;
 	}
 
 	/* 5. merge */
 	if (s == QAWS_STATUS_OK)
 		cb_merge(x);
-done:
-	free(start);
-	free(fill);
-	free(items);
 	return s;
 }
 

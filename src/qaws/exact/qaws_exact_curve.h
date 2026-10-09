@@ -75,4 +75,16 @@ qaws_status qaws_exact_span_param_to_double(qaws_exact_span const* sp, int shift
 qaws_status qaws_exact_homogeneous_derivative(qaws_exact_span const* sp, unsigned int D, int64_t x, unsigned int j,
 	qaws_exact_int* out);
 
+/* Box of a span in lattice units, from its control points: sound (two ulps
+   outward) when every weight is positive; otherwise unbounded (lo = +inf,
+   hi = -inf) on every axis. z is 0 for 2D. */
+void qaws_exact_span_box(qaws_exact_span const* sp, unsigned int dim, double lo[3], double hi[3]);
+
+/* Certified intersections of span ia of a with span ib of b, appended to out
+   (curve a's parameter first); a point exactly at a knot is reported only by
+   the span it ends. *common is set when the spans failed on a common
+   component. Returns BUFFER_TOO_SMALL past capacity. */
+qaws_status qaws_exact_span_pair_hits(qaws_exact_curve const* a, unsigned int ia, qaws_exact_curve const* b, unsigned int ib,
+	qaws_exact_pair* out, unsigned int capacity, unsigned int* count, int* common);
+
 #endif /* QAWS_EXACT_CURVE_H */

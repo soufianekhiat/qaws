@@ -150,7 +150,12 @@ Two 2D curves are compared span against span:
    I's own parameter is `s = C01 / C00` (cofactors, polynomials in r). A
    root is kept only when `0 <= s <= 1` is proven by the signs of `C00`,
    `C01` and `C00 - C01` on its interval, refining until they settle.
-   The bound on s is the range of the coefficient ratios.
+   The bound on s is the range of the coefficient ratios. When s lies
+   exactly on the span end at an irrational root (a gradient line through
+   a knot of a contour), `C01` (or `C00 - C01`) never settles: then
+   `gcd(R, C01)` (or `gcd(R, C00 - C01)`) decides it: one sign variation
+   of the gcd on the root's interval means the root is the gcd's, and s is
+   exactly 0 (or 1); none means it is not; otherwise the interval is refined.
 4. Segments against segments are solved directly. A degenerate span (a
    line traced by a quadratic, for example) is retried with the roles
    swapped.
@@ -158,8 +163,7 @@ Two 2D curves are compared span against span:
 `QAWS_STATUS_CERTIFICATION_FAILED` is returned for:
 - tangencies;
 - a common component (overlapping curves);
-- crossings through a singular point;
-- a hit on a span end at an irrational parameter.
+- crossings through a singular point.
 
 All curves share one exact space: the coordinate lattice decides what
 "touching" means, and a 2^-k gap below the lattice step is quantized
@@ -194,6 +198,38 @@ Self-intersections are pairs a < b with C(a) = C(b), in 2D or 3D:
   exactly, including the conic parameter's point at infinity. Arcs that
   touch at their ends are fine; an overlap is refused.
 - **Refused:** an irrational cusp, and a span folding back on itself.
+
+## Certified batched curve intersections
+
+```c
+qaws_status qaws_exact_curve_batch_hits(qaws_exact_batch_desc const* desc, qaws_exact_batch_hit* out_hits, unsigned int capacity,
+	unsigned int* out_count, qaws_exact_batch_stats* out_stats);
+```
+
+N exact curves at once (all 2D or all 3D, one exact space):
+
+1. Every span gets a box from its control points. When all its weights are
+   positive the span lies in the hull, and the correctly rounded ratios
+   widened by two ulps make the box sound. A span with a non-positive weight
+   gets an unbounded box.
+2. One uniform grid over all span boxes (the broad phase shared with the
+   float batch) gives the span pairs of different curves whose boxes
+   overlap.
+3. Only those pairs are certified, exactly as `qaws_exact_curve_curve_hits`
+   does. That call now skips span pairs with disjoint boxes too.
+
+`families` skips the pairs of curves with the same id, and
+`QAWS_EXACT_BATCH_SELF` adds each curve's self-intersections. A curve pair
+that fails certification contributes no hits and is counted in
+`stats.uncertified_count`. Every other pair is still reported, and the call
+returns `QAWS_STATUS_CERTIFICATION_FAILED`.
+
+On a closed curve, a hit at its start is reported once, by its last span.
+
+Example: on the 72-curve Gaussian heightfield of `qaws_batch_showcase`
+(8267 spans), all 375 contour / gradient crossings are certified in 0.23 s.
+The pairwise exact call over every contour / gradient pair takes 2.1 s, and
+the float batch takes 0.014 s.
 
 ## Certified line / surface intersections (exact ray casting)
 
@@ -338,7 +374,8 @@ Tangencies and overlaps return `QAWS_STATUS_CERTIFICATION_FAILED`.
 | unit surface normal, curvatures (sqrt) | not rational |
 | other surface families (sweeps, lofts, offsets, ...) | planned or not rational |
 | curve / line (2D), curve / plane (3D) intersections | certified: exact points, one-root intervals, overlaps; non-dyadic tangencies refused |
-| curve / curve intersections (2D, 3D) | certified: implicitization of the lower-degree span, root isolation, exact inversion; 3D: exact zero test of the third coordinate |
+| curve / curve intersections (2D, 3D) | certified: implicitization of the lower-degree span, root isolation, exact inversion (span ends at irrational roots by a gcd test); 3D: exact zero test of the third coordinate |
+| N curves at once (2D, 3D) | certified: one grid over sound span boxes, only overlapping span pairs certified, families, uncertified pairs counted |
 | self-intersections (2D, 3D) | certified: divided differences inside spans, span pairs, knots and closing points excluded, spans on one conic told apart |
 | line / surface intersections (ray casting) | certified: u, v and t enclosed, per patch Bezout elimination |
 | 2D Boolean operations (union, intersection, difference) | certified: pieces of the source curves, cut at certified crossings, classified by exact winding |
@@ -346,6 +383,6 @@ Tangencies and overlaps return `QAWS_STATUS_CERTIFICATION_FAILED`.
 | surface / surface intersections | certified topology: branches of certified points, one smooth arc between consecutive points (seams identified) |
 
 Tests: 63 (integers), 64 (predicates), 65 (Bezier), 66 (winding), 67
-(B-spline / NURBS), 68 (Hermite, Catmull-Rom, polynomial), 69 (surfaces), 70 (line / plane hits), 71 (curve / curve hits), 72 (3D curve / curve), 73 (self-intersections), 74 (line / surface), 75 (Booleans), 76 (composites, frozen Catmull-Rom), 77 (curve / surface), 78 (surface / surface), all against
+(B-spline / NURBS), 68 (Hermite, Catmull-Rom, polynomial), 69 (surfaces), 70 (line / plane hits), 71 (curve / curve hits), 72 (3D curve / curve), 73 (self-intersections), 74 (line / surface), 75 (Booleans), 76 (composites, frozen Catmull-Rom), 77 (curve / surface), 78 (surface / surface), 80 (batched curves, against the float batch), all against
 Mathematica exact references. Figures:
 `examples/exact_showcase.c`.
