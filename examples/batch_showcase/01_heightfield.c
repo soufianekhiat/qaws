@@ -407,7 +407,7 @@ static void demo_heightfield(void)
 	for (j = 0; j < 66; j++)
 		for (i = 0; i < 66; i++)
 		{
-			char col[16];
+			char col[32];
 			double x = -1 + 2.0 * (i + 0.5) / 66, y = -1 + 2.0 * (j + 0.5) / 66, t = (hf_height(x, y, NULL, NULL) + 0.75) / 1.75;
 			heat(t < 0 ? 0 : (t > 1 ? 1 : t), col);
 			fprintf(s.f, "<rect x=\"%.2f\" y=\"%.2f\" width=\"10.3\" height=\"10.3\" fill=\"%s\" fill-opacity=\"0.28\"/>\n",

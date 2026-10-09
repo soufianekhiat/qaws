@@ -71,7 +71,7 @@ static void demo_closest(void)
 	}
 	for (i = 0; i < CL_POINTS; i++)
 	{
-		char col[16];
+		char col[32];
 		double t = cp[i].distance / 0.08;
 		if (cp[i].curve == QAWS_CURVE_BATCH_NONE)
 			continue;

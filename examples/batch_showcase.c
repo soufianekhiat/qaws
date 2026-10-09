@@ -12,6 +12,7 @@
  *   batch4_exact_terrain.svg the terrain contours certified by the exact batch
  *   batch5_closest.svg       points snapped to the nearest contour line
  *   batch6_surface_closest.svg points snapped to the nearest terrain point
+ *   batch7_raytrace.svg      the terrain ray traced: camera and shadow rays
  *
  * Each figure lives in batch_showcase/NN_*.c, compiled as one translation
  * unit.
@@ -42,6 +43,7 @@
 #include "batch_showcase/04_exact_terrain.c"
 #include "batch_showcase/05_closest.c"
 #include "batch_showcase/06_surface_closest.c"
+#include "batch_showcase/07_raytrace.c"
 
 int main(void)
 {
@@ -53,5 +55,6 @@ int main(void)
 	demo_exact_terrain();
 	demo_closest();
 	demo_surface_closest();
+	demo_raytrace();
 	return 0;
 }
