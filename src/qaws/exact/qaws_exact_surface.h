@@ -44,4 +44,11 @@ qaws_status qaws_exact_span_patch_hits(qaws_exact_curve const* curve, unsigned i
 /* do two hits' enclosures overlap in t, u and v (the same root)? */
 int qaws_exact_curve_surface_hits_overlap(qaws_exact_curve_surface_hit const* a, qaws_exact_curve_surface_hit const* b);
 
+/* qaws_exact_surface_surface_hits over the listed patch pairs only
+   (pairs[4 k .. 4 k + 3] = iu1, iv1, iu2, iv2); the others must be proven
+   apart by the caller. */
+qaws_status qaws_exact_ssi_solve(qaws_exact_surface const* a, qaws_exact_surface const* b, unsigned int min_depth, unsigned int const* pairs,
+	unsigned int pair_count, qaws_exact_ssi_point* out_points, unsigned int point_capacity, unsigned int* out_point_count,
+	qaws_exact_ssi_branch* out_branches, unsigned int branch_capacity, unsigned int* out_branch_count);
+
 #endif /* QAWS_EXACT_SURFACE_H */

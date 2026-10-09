@@ -349,6 +349,30 @@ fixed:
   middle [1/4, 3/4]^3 of the box, and that region is then marked as
   covered.
 
+### Surfaces x surfaces at once
+
+```c
+qaws_status qaws_exact_surface_batch_hits(qaws_exact_ssi_batch_desc const* desc, qaws_exact_ssi_point* out_points, unsigned int point_capacity,
+	unsigned int* out_point_count, qaws_exact_ssi_batch_branch* out_branches, unsigned int branch_capacity, unsigned int* out_branch_count,
+	qaws_exact_batch_stats* out_stats);
+```
+
+The call takes N exact surfaces in one exact space, with optional families
+and `min_depth`. Every patch gets a sound box from its control net, and one
+grid gives the patch pairs of different surfaces whose boxes overlap. Each
+surface pair with at least one such pair is solved as by
+`qaws_exact_surface_surface_hits` (certified 4D subdivision, chained
+branches), on those patch pairs only. The pairwise call now skips disjoint
+patch boxes too.
+
+Branches carry their surface pair, and their points index one shared
+buffer. A surface pair that fails certification (tangency, overlap) is
+counted and skipped, and the call then returns
+`QAWS_STATUS_CERTIFICATION_FAILED`.
+
+Example: a B-spline terrain (457 patches) against 16 planes gives 31
+certified contour branches (763 points, enclosures about 3e-15) in 0.85 s.
+
 ## Certified 2D Booleans
 
 ```c
@@ -395,6 +419,7 @@ Tangencies and overlaps return `QAWS_STATUS_CERTIFICATION_FAILED`.
 | curve / curve intersections (2D, 3D) | certified: implicitization of the lower-degree span, root isolation, exact inversion (span ends at irrational roots by a gcd test); 3D: exact zero test of the third coordinate |
 | N curves at once (2D, 3D) | certified: one grid over sound span boxes, only overlapping span pairs certified, families, uncertified pairs counted |
 | N curves x M surfaces at once | certified: one grid over sound span and patch boxes, only overlapping span / patch pairs certified |
+| N surfaces at once (intersection curves) | certified: one grid over sound patch boxes, each surface pair solved on its overlapping patch pairs only |
 | self-intersections (2D, 3D) | certified: divided differences inside spans, span pairs, knots and closing points excluded, spans on one conic told apart |
 | line / surface intersections (ray casting) | certified: u, v and t enclosed, per patch Bezout elimination |
 | 2D Boolean operations (union, intersection, difference) | certified: pieces of the source curves, cut at certified crossings, classified by exact winding |

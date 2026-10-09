@@ -438,6 +438,38 @@ qaws_status qaws_exact_surface_surface_hits(qaws_exact_surface const* a, qaws_ex
 	unsigned int point_capacity, unsigned int* out_point_count, qaws_exact_ssi_branch* out_branches, unsigned int branch_capacity,
 	unsigned int* out_branch_count);
 
+/*
+ * Certified intersection curves of N exact surfaces at once (one exact
+ * space). Every patch gets a sound box from its control net; one grid over
+ * all patches gives the patch pairs of different surfaces (and families,
+ * when given) whose boxes overlap, and each surface pair with any is
+ * solved as by qaws_exact_surface_surface_hits on those patch pairs only.
+ * Branches are grouped by (surface_a, surface_b), surface_a < surface_b;
+ * their points index the shared point buffer. A surface pair that cannot be
+ * certified contributes nothing and is counted in stats.uncertified_count
+ * (the call then returns QAWS_STATUS_CERTIFICATION_FAILED); when the
+ * buffers run out the call stops with QAWS_STATUS_BUFFER_TOO_SMALL.
+ * stats.patch_count counts the patches, candidate_count the patch pairs.
+ */
+typedef struct qaws_exact_ssi_batch_desc
+{
+	qaws_exact_surface const* const* surfaces;
+	unsigned int surface_count;
+	unsigned int const* families;   /* optional, one id per surface */
+	unsigned int min_depth;         /* as for qaws_exact_surface_surface_hits */
+} qaws_exact_ssi_batch_desc;
+
+typedef struct qaws_exact_ssi_batch_branch
+{
+	unsigned int surface_a;
+	unsigned int surface_b;
+	qaws_exact_ssi_branch branch;   /* first indexes the shared point buffer */
+} qaws_exact_ssi_batch_branch;
+
+qaws_status qaws_exact_surface_batch_hits(qaws_exact_ssi_batch_desc const* desc, qaws_exact_ssi_point* out_points, unsigned int point_capacity,
+	unsigned int* out_point_count, qaws_exact_ssi_batch_branch* out_branches, unsigned int branch_capacity, unsigned int* out_branch_count,
+	qaws_exact_batch_stats* out_stats);
+
 /* Patches along u and v (one exact rational Bezier patch each). */
 void qaws_exact_surface_patch_count(qaws_exact_surface const* surface, unsigned int* out_u_count, unsigned int* out_v_count);
 

@@ -609,7 +609,8 @@ static qaws_status patch_pair(ssi_pair const* pr, unsigned int min_depth, ssi_ou
 	return st;
 }
 
-qaws_status qaws_exact_surface_surface_hits(qaws_exact_surface const* a, qaws_exact_surface const* b, unsigned int min_depth, qaws_exact_ssi_point* out_points,
+qaws_status qaws_exact_ssi_solve(qaws_exact_surface const* a, qaws_exact_surface const* b, unsigned int min_depth, unsigned int const* pairs, unsigned int pair_count,
+	qaws_exact_ssi_point* out_points,
 	unsigned int point_capacity, unsigned int* out_point_count, qaws_exact_ssi_branch* out_branches, unsigned int branch_capacity,
 	unsigned int* out_branch_count)
 {
@@ -648,11 +649,15 @@ qaws_status qaws_exact_surface_surface_hits(qaws_exact_surface const* a, qaws_ex
 		st = QAWS_STATUS_ALLOCATION_FAILURE;
 	pr.a = a;
 	pr.b = b;
-	for (pr.iu1 = 0; pr.iu1 < a->nu && st == QAWS_STATUS_OK; pr.iu1++)
-		for (pr.iv1 = 0; pr.iv1 < a->nv && st == QAWS_STATUS_OK; pr.iv1++)
-			for (pr.iu2 = 0; pr.iu2 < b->nu && st == QAWS_STATUS_OK; pr.iu2++)
-				for (pr.iv2 = 0; pr.iv2 < b->nv && st == QAWS_STATUS_OK; pr.iv2++)
-					st = patch_pair(&pr, min_depth, &o, &boxes);
+	/* only the listed patch pairs: the others are proven apart */
+	for (i = 0; i < pair_count && st == QAWS_STATUS_OK; i++)
+	{
+		pr.iu1 = pairs[4 * i];
+		pr.iv1 = pairs[4 * i + 1];
+		pr.iu2 = pairs[4 * i + 2];
+		pr.iv2 = pairs[4 * i + 3];
+		st = patch_pair(&pr, min_depth, &o, &boxes);
+	}
 	/* chain the arcs: points of degree 1 end branches, degree 2 continue them */
 	if (st == QAWS_STATUS_OK)
 	{
@@ -730,5 +735,53 @@ qaws_status qaws_exact_surface_surface_hits(qaws_exact_surface const* a, qaws_ex
 	ss_free(used);
 	*out_point_count = np;
 	*out_branch_count = nb;
+	return st;
+}
+
+qaws_status qaws_exact_surface_surface_hits(qaws_exact_surface const* a, qaws_exact_surface const* b, unsigned int min_depth, qaws_exact_ssi_point* out_points,
+	unsigned int point_capacity, unsigned int* out_point_count, qaws_exact_ssi_branch* out_branches, unsigned int branch_capacity,
+	unsigned int* out_branch_count)
+{
+	unsigned int na, nb, i, j, k, n = 0;
+	unsigned int* pairs;
+	double (*box)[2][3];
+	qaws_status st;
+	if (!a || !b || !out_point_count || !out_branch_count || (!out_points && point_capacity) || (!out_branches && branch_capacity))
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	na = a->nu * a->nv;
+	nb = b->nu * b->nv;
+	/* patch pairs whose control boxes overlap */
+	pairs = (unsigned int*)ss_alloc(sizeof(unsigned int) * 4 * na * nb + 4);
+	box = (double (*)[2][3])ss_alloc(sizeof(double) * 6 * (na + nb));
+	if (!pairs || !box)
+	{
+		ss_free(pairs);
+		ss_free(box);
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	}
+	for (i = 0; i < na; i++)
+		qaws_exact_patch_box(a, i / a->nv, i % a->nv, box[i][0], box[i][1]);
+	for (j = 0; j < nb; j++)
+		qaws_exact_patch_box(b, j / b->nv, j % b->nv, box[na + j][0], box[na + j][1]);
+	for (i = 0; i < na; i++)
+		for (j = 0; j < nb; j++)
+		{
+			double const* P = box[i][0];
+			double const* Q = box[na + j][0];
+			int apart = 0;
+			for (k = 0; k < 3; k++)
+				if (P[k] <= box[i][1][k] && Q[k] <= box[na + j][1][k] && (box[i][1][k] < Q[k] || box[na + j][1][k] < P[k]))
+					apart = 1;
+			if (apart)
+				continue;
+			pairs[4 * n] = i / a->nv;
+			pairs[4 * n + 1] = i % a->nv;
+			pairs[4 * n + 2] = j / b->nv;
+			pairs[4 * n + 3] = j % b->nv;
+			n++;
+		}
+	st = qaws_exact_ssi_solve(a, b, min_depth, pairs, n, out_points, point_capacity, out_point_count, out_branches, branch_capacity, out_branch_count);
+	ss_free(pairs);
+	ss_free(box);
 	return st;
 }
