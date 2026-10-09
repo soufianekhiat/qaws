@@ -3,6 +3,7 @@
 #include "../internal/qaws_internal_types.h"
 #include "../internal/qaws_internal_curve.h"
 #include "../internal/qaws_internal_broadphase.h"
+#include "../internal/qaws_internal_parallel.h"
 #include <stdlib.h>
 #include <math.h>
 #include <string.h>
@@ -698,18 +699,98 @@ static int er_visit(void* user, unsigned int const* items, unsigned int count, d
 	return x->have && x->best.t_hi <= t_exit;
 }
 
+#define ER_GRAIN 4
+
+/* the shared state of a certified ray batch */
+typedef struct er_job
+{
+	qaws_exact_ssi_batch_desc const* desc;
+	er_patch const* patches;
+	qaws_bp_grid const* grid;
+	unsigned int npatch;
+	double max_t;
+	double const* p0;
+	double const* p1;
+	qaws_exact_ray_hit* out_hits;
+	qaws_exact_batch_stats* chunk_stats;
+} er_job;
+
+/* a chunk of rays: its own walk state and patch stamps */
+static qaws_status er_chunk(void* ctx, unsigned int chunk, unsigned int begin, unsigned int end)
+{
+	er_job const* J = (er_job const*)ctx;
+	double const* p0 = J->p0;
+	double const* p1 = J->p1;
+	double max_t = J->max_t;
+	qaws_exact_batch_stats stats;
+	er_ctx x;
+	unsigned int i, k;
+	qaws_status st = QAWS_STATUS_OK;
+	memset(&stats, 0, sizeof(stats));
+	memset(&x, 0, sizeof(x));
+	x.stamp = (unsigned int*)malloc((J->npatch ? J->npatch : 1) * sizeof(unsigned int));
+	if (!x.stamp)
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	for (i = 0; i < J->npatch; i++)
+		x.stamp[i] = ~0u;
+	x.desc = J->desc;
+	x.patches = J->patches;
+	x.max_t = max_t;
+	x.stats = &stats;
+	for (i = begin; i < end && st == QAWS_STATUS_OK; i++)
+	{
+		qaws_exact_ray_hit* o = &J->out_hits[i];
+		for (k = 0; k < 3; k++)
+		{
+			x.o[k] = p0[3 * i + k];
+			x.d[k] = p1[3 * i + k] - p0[3 * i + k];   /* for the walk only; the line is exact */
+		}
+		st = line_setup(p0 + 3 * i, p1 + 3 * i, &x.L);
+		if (st != QAWS_STATUS_OK)
+			break;
+		x.ray = i;
+		x.have = 0;
+		x.other_lo = HUGE_VAL;
+		x.failed_lo = HUGE_VAL;
+		x.st = QAWS_STATUS_OK;
+		qaws_internal_grid_ray(J->grid, x.o, x.d, max_t > 0 ? max_t : HUGE_VAL, er_visit, &x);
+		st = x.st;
+		if (st != QAWS_STATUS_OK)
+			break;
+		if (x.have)
+		{
+			o->surface = x.best_surface;
+			o->hit = x.best;
+			/* first: in front, before every other hit and every patch that failed */
+			o->certified = x.best.t_lo >= 0 && x.best.t_hi < x.other_lo && x.best.t_hi < x.failed_lo;
+			stats.hit_count++;
+			if (!o->certified)
+				stats.uncertified_count++;
+		}
+		else if (x.failed_lo < HUGE_VAL)
+		{
+			/* no certified hit, but a patch that failed may hold one */
+			o->certified = 0;
+			stats.uncertified_count++;
+		}
+		else
+			o->certified = 1;   /* proven to miss */
+	}
+	J->chunk_stats[chunk] = stats;
+	free(x.stamp);
+	return st;
+}
+
 qaws_status qaws_exact_surface_batch_raycast(qaws_exact_ssi_batch_desc const* desc, double const* p0, double const* p1, unsigned int ray_count,
 	double max_t, qaws_exact_ray_hit* out_hits, qaws_exact_batch_stats* out_stats)
 {
 	qaws_exact_batch_stats stats;
-	er_ctx x;
 	er_patch* patches = NULL;
 	qaws_bp_box* boxes = NULL;
 	qaws_bp_grid* grid = NULL;
-	unsigned int i, k, npatch = 0, iu, iv, c;
+	unsigned int i, npatch = 0, iu, iv, c;
 	qaws_status st = QAWS_STATUS_OK;
 	memset(&stats, 0, sizeof(stats));
-	memset(&x, 0, sizeof(x));
 	if (out_stats)
 		*out_stats = stats;
 	if (!desc || (desc->surface_count && !desc->surfaces) || (ray_count && (!p0 || !p1 || !out_hits)))
@@ -729,8 +810,7 @@ qaws_status qaws_exact_surface_batch_raycast(qaws_exact_ssi_batch_desc const* de
 	}
 	patches = (er_patch*)malloc(npatch * sizeof(er_patch));
 	boxes = (qaws_bp_box*)malloc(npatch * sizeof(qaws_bp_box));
-	x.stamp = (unsigned int*)malloc(npatch * sizeof(unsigned int));
-	if (!patches || !boxes || !x.stamp)
+	if (!patches || !boxes)
 	{
 		st = QAWS_STATUS_ALLOCATION_FAILURE;
 		goto done;
@@ -759,53 +839,34 @@ qaws_status qaws_exact_surface_batch_raycast(qaws_exact_ssi_batch_desc const* de
 					boxes[npatch].lo[c] = P->lo[c];
 					boxes[npatch].hi[c] = P->hi[c];
 				}
-				x.stamp[npatch] = ~0u;
 			}
 	}
 	stats.patch_count = npatch;
 	st = qaws_internal_grid_create(boxes, npatch, 3, &grid);
-	x.desc = desc;
-	x.patches = patches;
-	x.max_t = max_t;
-	x.stats = &stats;
-	for (i = 0; i < ray_count && st == QAWS_STATUS_OK; i++)
+	if (st == QAWS_STATUS_OK)
 	{
-		qaws_exact_ray_hit* o = &out_hits[i];
-		for (k = 0; k < 3; k++)
-		{
-			x.o[k] = p0[3 * i + k];
-			x.d[k] = p1[3 * i + k] - p0[3 * i + k];   /* for the walk only; the line is exact */
-		}
-		st = line_setup(p0 + 3 * i, p1 + 3 * i, &x.L);
-		if (st != QAWS_STATUS_OK)
-			break;
-		x.ray = i;
-		x.have = 0;
-		x.other_lo = HUGE_VAL;
-		x.failed_lo = HUGE_VAL;
-		x.st = QAWS_STATUS_OK;
-		qaws_internal_grid_ray(grid, x.o, x.d, max_t > 0 ? max_t : HUGE_VAL, er_visit, &x);
-		st = x.st;
-		if (st != QAWS_STATUS_OK)
-			break;
-		if (x.have)
-		{
-			o->surface = x.best_surface;
-			o->hit = x.best;
-			/* first: in front, before every other hit and every patch that failed */
-			o->certified = x.best.t_lo >= 0 && x.best.t_hi < x.other_lo && x.best.t_hi < x.failed_lo;
-			stats.hit_count++;
-			if (!o->certified)
-				stats.uncertified_count++;
-		}
-		else if (x.failed_lo < HUGE_VAL)
-		{
-			/* no certified hit, but a patch that failed may hold one */
-			o->certified = 0;
-			stats.uncertified_count++;
-		}
+		er_job J;
+		unsigned int nchunk = qaws_internal_chunk_count(ray_count, ER_GRAIN), ch;
+		J.desc = desc;
+		J.patches = patches;
+		J.grid = grid;
+		J.npatch = npatch;
+		J.max_t = max_t;
+		J.p0 = p0;
+		J.p1 = p1;
+		J.out_hits = out_hits;
+		J.chunk_stats = (qaws_exact_batch_stats*)calloc(nchunk ? nchunk : 1, sizeof(qaws_exact_batch_stats));
+		if (!J.chunk_stats)
+			st = QAWS_STATUS_ALLOCATION_FAILURE;
 		else
-			o->certified = 1;   /* proven to miss */
+			st = qaws_internal_parallel(desc->executor, ray_count, ER_GRAIN, er_chunk, &J);
+		for (ch = 0; J.chunk_stats && ch < nchunk; ch++)
+		{
+			stats.candidate_count += J.chunk_stats[ch].candidate_count;
+			stats.hit_count += J.chunk_stats[ch].hit_count;
+			stats.uncertified_count += J.chunk_stats[ch].uncertified_count;
+		}
+		free(J.chunk_stats);
 	}
 done:
 	if (out_stats)
@@ -813,6 +874,5 @@ done:
 	qaws_internal_grid_destroy(grid);
 	free(patches);
 	free(boxes);
-	free(x.stamp);
 	return st;
 }

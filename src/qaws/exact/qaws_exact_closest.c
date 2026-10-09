@@ -2,6 +2,7 @@
 #include "qaws_exact_poly.h"
 #include "qaws_exact_solve.h"
 #include "../internal/qaws_internal_broadphase.h"
+#include "../internal/qaws_internal_parallel.h"
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -356,80 +357,58 @@ static qaws_status cl_query_make(double const* p, unsigned int dim, int space_ex
 	return QAWS_STATUS_OK;
 }
 
-qaws_status qaws_exact_curve_batch_closest(qaws_exact_batch_desc const* desc, double const* points, unsigned int point_count,
-	qaws_exact_closest_point* out_points, qaws_exact_batch_stats* out_stats)
+#define CL_GRAIN 4   /* certified queries are costly: small chunks balance */
+
+/* the shared state of a certified closest-point run (curves) */
+typedef struct ecl_job
 {
+	qaws_exact_batch_desc const* desc;
+	int const* closed;
+	qaws_bp_grid const* grid;
+	cl_span const* all;
+	double (*box)[2][3];
+	unsigned int nspan, dim;
+	int space;
+	double scale;
+	double const* points;
+	qaws_exact_closest_point* out_points;
+	qaws_exact_batch_stats* chunk_stats;
+} ecl_job;
+
+/* a chunk of query points: its own ring scratch, candidate list and work space */
+static qaws_status ecl_chunk(void* ctx, unsigned int chunk, unsigned int begin, unsigned int end)
+{
+	ecl_job const* J = (ecl_job const*)ctx;
+	qaws_exact_batch_desc const* desc = J->desc;
+	int const* closed = J->closed;
+	qaws_bp_grid const* grid = J->grid;
+	double const* points = J->points;
+	qaws_exact_closest_point* out_points = J->out_points;
+	unsigned int dim = J->dim, i;
+	int space = J->space;
+	double scale = J->scale;
 	qaws_exact_batch_stats stats;
 	cl_ring R;
 	cl_list L;
-	cl_work* w = NULL;
-	qaws_bp_box* boxes = NULL;
-	qaws_bp_grid* grid = NULL;
-	int* closed = NULL;
-	unsigned int i, k, nspan = 0, dim;
-	int space;
-	double scale;
+	cl_work* w;
 	qaws_status st = QAWS_STATUS_OK;
 	memset(&stats, 0, sizeof(stats));
 	memset(&R, 0, sizeof(R));
 	memset(&L, 0, sizeof(L));
-	if (out_stats)
-		*out_stats = stats;
-	if (!desc || (desc->curve_count && !desc->curves) || (point_count && (!points || !out_points)))
-		return QAWS_STATUS_INVALID_ARGUMENT;
-	for (i = 0; i < point_count; i++)
-	{
-		memset(&out_points[i], 0, sizeof(out_points[i]));
-		out_points[i].curve = QAWS_EXACT_CLOSEST_NONE;
-	}
-	if (!desc->curve_count || !point_count)
-		return QAWS_STATUS_OK;
-	for (i = 0; i < desc->curve_count; i++)
-	{
-		qaws_exact_curve const* c = desc->curves[i];
-		if (!c || (c->dimension != 2 && c->dimension != 3) || c->dimension != desc->curves[0]->dimension)
-			return QAWS_STATUS_INVALID_ARGUMENT;
-		if (c->space_exp2 != desc->curves[0]->space_exp2)
-			return QAWS_STATUS_EXACT_INCOMPATIBLE_SPACE;
-		nspan += c->span_count;
-	}
-	dim = (unsigned int)desc->curves[0]->dimension;
-	space = desc->curves[0]->space_exp2;
-	scale = ldexp(1.0, space);
-	R.desc = desc;
 	R.dim = dim;
-	R.all = (cl_span*)malloc(nspan * sizeof(cl_span));
-	R.box = (double (*)[2][3])malloc(nspan * sizeof(double) * 6);
-	R.stamp = (unsigned int*)malloc(nspan * sizeof(unsigned int));
-	boxes = (qaws_bp_box*)malloc(nspan * sizeof(qaws_bp_box));
-	closed = (int*)malloc(desc->curve_count * sizeof(int));
+	R.all = (cl_span*)J->all;
+	R.box = J->box;
+	R.stamp = (unsigned int*)malloc((J->nspan ? J->nspan : 1) * sizeof(unsigned int));
 	w = (cl_work*)malloc(sizeof(cl_work));
-	if (!R.all || !R.box || !R.stamp || !boxes || !closed || !w)
+	if (!R.stamp || !w)
 	{
-		st = QAWS_STATUS_ALLOCATION_FAILURE;
-		goto done;
+		free(R.stamp);
+		free(w);
+		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
-	nspan = 0;
-	for (i = 0; i < desc->curve_count; i++)
-	{
-		closed[i] = cl_closed(desc->curves[i]);
-		for (k = 0; k < desc->curves[i]->span_count; k++, nspan++)
-		{
-			unsigned int c;
-			R.all[nspan].curve = i;
-			R.all[nspan].index = k;
-			R.stamp[nspan] = ~0u;
-			qaws_exact_span_box(&desc->curves[i]->spans[k], dim, R.box[nspan][0], R.box[nspan][1]);
-			for (c = 0; c < 3; c++)
-			{
-				boxes[nspan].lo[c] = R.box[nspan][0][c];
-				boxes[nspan].hi[c] = R.box[nspan][1][c];
-			}
-		}
-	}
-	stats.span_count = nspan;
-	st = qaws_internal_grid_create(boxes, nspan, dim, &grid);
-	for (i = 0; i < point_count && st == QAWS_STATUS_OK; i++)
+	for (i = 0; i < J->nspan; i++)
+		R.stamp[i] = ~0u;
+	for (i = begin; i < end && st == QAWS_STATUS_OK; i++)
 	{
 		cl_query q;
 		double best_hi = HUGE_VAL;
@@ -544,6 +523,114 @@ qaws_status qaws_exact_curve_batch_closest(qaws_exact_batch_desc const* desc, do
 			if (!sure)
 				stats.uncertified_count++;
 		}
+	}
+	J->chunk_stats[chunk] = stats;
+	free(R.stamp);
+	free(R.got);
+	free(L.c);
+	free(w);
+	return st;
+}
+
+qaws_status qaws_exact_curve_batch_closest(qaws_exact_batch_desc const* desc, double const* points, unsigned int point_count,
+	qaws_exact_closest_point* out_points, qaws_exact_batch_stats* out_stats)
+{
+	qaws_exact_batch_stats stats;
+	cl_ring R;
+	cl_list L;
+	cl_work* w = NULL;
+	qaws_bp_box* boxes = NULL;
+	qaws_bp_grid* grid = NULL;
+	int* closed = NULL;
+	unsigned int i, k, nspan = 0, dim;
+	int space;
+	double scale;
+	qaws_status st = QAWS_STATUS_OK;
+	memset(&stats, 0, sizeof(stats));
+	memset(&R, 0, sizeof(R));
+	memset(&L, 0, sizeof(L));
+	if (out_stats)
+		*out_stats = stats;
+	if (!desc || (desc->curve_count && !desc->curves) || (point_count && (!points || !out_points)))
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	for (i = 0; i < point_count; i++)
+	{
+		memset(&out_points[i], 0, sizeof(out_points[i]));
+		out_points[i].curve = QAWS_EXACT_CLOSEST_NONE;
+	}
+	if (!desc->curve_count || !point_count)
+		return QAWS_STATUS_OK;
+	for (i = 0; i < desc->curve_count; i++)
+	{
+		qaws_exact_curve const* c = desc->curves[i];
+		if (!c || (c->dimension != 2 && c->dimension != 3) || c->dimension != desc->curves[0]->dimension)
+			return QAWS_STATUS_INVALID_ARGUMENT;
+		if (c->space_exp2 != desc->curves[0]->space_exp2)
+			return QAWS_STATUS_EXACT_INCOMPATIBLE_SPACE;
+		nspan += c->span_count;
+	}
+	dim = (unsigned int)desc->curves[0]->dimension;
+	space = desc->curves[0]->space_exp2;
+	scale = ldexp(1.0, space);
+	R.desc = desc;
+	R.dim = dim;
+	R.all = (cl_span*)malloc(nspan * sizeof(cl_span));
+	R.box = (double (*)[2][3])malloc(nspan * sizeof(double) * 6);
+	R.stamp = (unsigned int*)malloc(nspan * sizeof(unsigned int));
+	boxes = (qaws_bp_box*)malloc(nspan * sizeof(qaws_bp_box));
+	closed = (int*)malloc(desc->curve_count * sizeof(int));
+	w = (cl_work*)malloc(sizeof(cl_work));
+	if (!R.all || !R.box || !R.stamp || !boxes || !closed || !w)
+	{
+		st = QAWS_STATUS_ALLOCATION_FAILURE;
+		goto done;
+	}
+	nspan = 0;
+	for (i = 0; i < desc->curve_count; i++)
+	{
+		closed[i] = cl_closed(desc->curves[i]);
+		for (k = 0; k < desc->curves[i]->span_count; k++, nspan++)
+		{
+			unsigned int c;
+			R.all[nspan].curve = i;
+			R.all[nspan].index = k;
+			R.stamp[nspan] = ~0u;
+			qaws_exact_span_box(&desc->curves[i]->spans[k], dim, R.box[nspan][0], R.box[nspan][1]);
+			for (c = 0; c < 3; c++)
+			{
+				boxes[nspan].lo[c] = R.box[nspan][0][c];
+				boxes[nspan].hi[c] = R.box[nspan][1][c];
+			}
+		}
+	}
+	stats.span_count = nspan;
+	st = qaws_internal_grid_create(boxes, nspan, dim, &grid);
+	{
+		ecl_job J;
+		unsigned int nchunk = qaws_internal_chunk_count(point_count, CL_GRAIN), ch;
+		J.desc = desc;
+		J.closed = closed;
+		J.grid = grid;
+		J.all = R.all;
+		J.box = R.box;
+		J.nspan = nspan;
+		J.dim = dim;
+		J.space = space;
+		J.scale = scale;
+		J.points = points;
+		J.out_points = out_points;
+		J.chunk_stats = (qaws_exact_batch_stats*)calloc(nchunk ? nchunk : 1, sizeof(qaws_exact_batch_stats));
+		if (!J.chunk_stats)
+			st = QAWS_STATUS_ALLOCATION_FAILURE;
+		if (st == QAWS_STATUS_OK)
+			st = qaws_internal_parallel(desc->executor, point_count, CL_GRAIN, ecl_chunk, &J);
+		for (ch = 0; J.chunk_stats && ch < nchunk; ch++)
+		{
+			stats.candidate_count += J.chunk_stats[ch].candidate_count;
+			stats.hit_count += J.chunk_stats[ch].hit_count;
+			stats.uncertified_count += J.chunk_stats[ch].uncertified_count;
+		}
+		free(J.chunk_stats);
 	}
 done:
 	if (out_stats)
@@ -1133,74 +1220,54 @@ static qaws_status sc_patch_candidates(qaws_exact_surface const* S, unsigned int
 	return QAWS_STATUS_OK;
 }
 
-qaws_status qaws_exact_surface_batch_closest(qaws_exact_ssi_batch_desc const* desc, double const* points, unsigned int point_count,
-	qaws_exact_surface_closest_point* out_points, qaws_exact_batch_stats* out_stats)
+/* the shared state of a certified closest-point run (surfaces) */
+typedef struct esc_job
 {
+	qaws_exact_ssi_batch_desc const* desc;
+	qaws_bp_grid const* grid;
+	cl_span const* all;
+	double (*box)[2][3];
+	unsigned int npatch;
+	int space;
+	double scale;
+	double const* points;
+	qaws_exact_surface_closest_point* out_points;
+	qaws_exact_batch_stats* chunk_stats;
+} esc_job;
+
+/* a chunk of query points: its own ring scratch, candidate list and work space */
+static qaws_status esc_chunk(void* ctx, unsigned int chunk, unsigned int begin, unsigned int end)
+{
+	esc_job const* J = (esc_job const*)ctx;
+	qaws_exact_ssi_batch_desc const* desc = J->desc;
+	qaws_bp_grid const* grid = J->grid;
+	double const* points = J->points;
+	qaws_exact_surface_closest_point* out_points = J->out_points;
+	unsigned int i, k;
+	int space = J->space;
+	double scale = J->scale;
 	qaws_exact_batch_stats stats;
 	cl_ring R;
 	sc_list L;
-	sc_work* w = NULL;
-	qaws_bp_box* boxes = NULL;
-	qaws_bp_grid* grid = NULL;
-	unsigned int i, k, npatch = 0, iu, iv;
-	int space;
-	double scale;
+	sc_work* w;
 	qaws_status st = QAWS_STATUS_OK;
 	memset(&stats, 0, sizeof(stats));
 	memset(&R, 0, sizeof(R));
 	memset(&L, 0, sizeof(L));
-	if (out_stats)
-		*out_stats = stats;
-	if (!desc || (desc->surface_count && !desc->surfaces) || (point_count && (!points || !out_points)))
-		return QAWS_STATUS_INVALID_ARGUMENT;
-	for (i = 0; i < point_count; i++)
-	{
-		memset(&out_points[i], 0, sizeof(out_points[i]));
-		out_points[i].surface = QAWS_EXACT_CLOSEST_NONE;
-	}
-	if (!desc->surface_count || !point_count)
-		return QAWS_STATUS_OK;
-	for (i = 0; i < desc->surface_count; i++)
-	{
-		if (!desc->surfaces[i])
-			return QAWS_STATUS_INVALID_ARGUMENT;
-		if (desc->surfaces[i]->space_exp2 != desc->surfaces[0]->space_exp2)
-			return QAWS_STATUS_EXACT_INCOMPATIBLE_SPACE;
-		npatch += desc->surfaces[i]->nu * desc->surfaces[i]->nv;
-	}
-	space = desc->surfaces[0]->space_exp2;
-	scale = ldexp(1.0, space);
 	R.dim = 3;
-	R.all = (cl_span*)malloc(npatch * sizeof(cl_span));
-	R.box = (double (*)[2][3])malloc(npatch * sizeof(double) * 6);
-	R.stamp = (unsigned int*)malloc(npatch * sizeof(unsigned int));
-	boxes = (qaws_bp_box*)malloc(npatch * sizeof(qaws_bp_box));
+	R.all = (cl_span*)J->all;
+	R.box = J->box;
+	R.stamp = (unsigned int*)malloc((J->npatch ? J->npatch : 1) * sizeof(unsigned int));
 	w = (sc_work*)calloc(1, sizeof(sc_work));
-	if (!R.all || !R.box || !R.stamp || !boxes || !w)
+	if (!R.stamp || !w)
 	{
-		st = QAWS_STATUS_ALLOCATION_FAILURE;
-		goto done;
+		free(R.stamp);
+		free(w);
+		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
-	/* cl_span reused: curve = surface, index = iu nv + iv */
-	npatch = 0;
-	for (i = 0; i < desc->surface_count; i++)
-		for (iu = 0; iu < desc->surfaces[i]->nu; iu++)
-			for (iv = 0; iv < desc->surfaces[i]->nv; iv++, npatch++)
-			{
-				unsigned int c;
-				R.all[npatch].curve = i;
-				R.all[npatch].index = iu * desc->surfaces[i]->nv + iv;
-				R.stamp[npatch] = ~0u;
-				qaws_exact_patch_box(desc->surfaces[i], iu, iv, R.box[npatch][0], R.box[npatch][1]);
-				for (c = 0; c < 3; c++)
-				{
-					boxes[npatch].lo[c] = R.box[npatch][0][c];
-					boxes[npatch].hi[c] = R.box[npatch][1][c];
-				}
-			}
-	stats.patch_count = npatch;
-	st = qaws_internal_grid_create(boxes, npatch, 3, &grid);
-	for (i = 0; i < point_count && st == QAWS_STATUS_OK; i++)
+	for (i = 0; i < J->npatch; i++)
+		R.stamp[i] = ~0u;
+	for (i = begin; i < end && st == QAWS_STATUS_OK; i++)
 	{
 		cl_query q;
 		double best_hi = HUGE_VAL;
@@ -1293,6 +1360,104 @@ qaws_status qaws_exact_surface_batch_closest(qaws_exact_ssi_batch_desc const* de
 				stats.uncertified_count++;
 		}
 	}
+	J->chunk_stats[chunk] = stats;
+	free(R.stamp);
+	free(R.got);
+	free(L.c);
+	free(w->cl.c);
+	free(w);
+	return st;
+}
+
+qaws_status qaws_exact_surface_batch_closest(qaws_exact_ssi_batch_desc const* desc, double const* points, unsigned int point_count,
+	qaws_exact_surface_closest_point* out_points, qaws_exact_batch_stats* out_stats)
+{
+	qaws_exact_batch_stats stats;
+	cl_ring R;
+	qaws_bp_box* boxes = NULL;
+	qaws_bp_grid* grid = NULL;
+	unsigned int i, npatch = 0, iu, iv;
+	int space;
+	double scale;
+	qaws_status st = QAWS_STATUS_OK;
+	memset(&stats, 0, sizeof(stats));
+	memset(&R, 0, sizeof(R));
+	if (out_stats)
+		*out_stats = stats;
+	if (!desc || (desc->surface_count && !desc->surfaces) || (point_count && (!points || !out_points)))
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	for (i = 0; i < point_count; i++)
+	{
+		memset(&out_points[i], 0, sizeof(out_points[i]));
+		out_points[i].surface = QAWS_EXACT_CLOSEST_NONE;
+	}
+	if (!desc->surface_count || !point_count)
+		return QAWS_STATUS_OK;
+	for (i = 0; i < desc->surface_count; i++)
+	{
+		if (!desc->surfaces[i])
+			return QAWS_STATUS_INVALID_ARGUMENT;
+		if (desc->surfaces[i]->space_exp2 != desc->surfaces[0]->space_exp2)
+			return QAWS_STATUS_EXACT_INCOMPATIBLE_SPACE;
+		npatch += desc->surfaces[i]->nu * desc->surfaces[i]->nv;
+	}
+	space = desc->surfaces[0]->space_exp2;
+	scale = ldexp(1.0, space);
+	R.dim = 3;
+	R.all = (cl_span*)malloc(npatch * sizeof(cl_span));
+	R.box = (double (*)[2][3])malloc(npatch * sizeof(double) * 6);
+	R.stamp = (unsigned int*)malloc(npatch * sizeof(unsigned int));
+	boxes = (qaws_bp_box*)malloc(npatch * sizeof(qaws_bp_box));
+	if (!R.all || !R.box || !R.stamp || !boxes)
+	{
+		st = QAWS_STATUS_ALLOCATION_FAILURE;
+		goto done;
+	}
+	/* cl_span reused: curve = surface, index = iu nv + iv */
+	npatch = 0;
+	for (i = 0; i < desc->surface_count; i++)
+		for (iu = 0; iu < desc->surfaces[i]->nu; iu++)
+			for (iv = 0; iv < desc->surfaces[i]->nv; iv++, npatch++)
+			{
+				unsigned int c;
+				R.all[npatch].curve = i;
+				R.all[npatch].index = iu * desc->surfaces[i]->nv + iv;
+				R.stamp[npatch] = ~0u;
+				qaws_exact_patch_box(desc->surfaces[i], iu, iv, R.box[npatch][0], R.box[npatch][1]);
+				for (c = 0; c < 3; c++)
+				{
+					boxes[npatch].lo[c] = R.box[npatch][0][c];
+					boxes[npatch].hi[c] = R.box[npatch][1][c];
+				}
+			}
+	stats.patch_count = npatch;
+	st = qaws_internal_grid_create(boxes, npatch, 3, &grid);
+	if (st == QAWS_STATUS_OK)
+	{
+		esc_job J;
+		unsigned int nchunk = qaws_internal_chunk_count(point_count, CL_GRAIN), ch;
+		J.desc = desc;
+		J.grid = grid;
+		J.all = R.all;
+		J.box = R.box;
+		J.npatch = npatch;
+		J.space = space;
+		J.scale = scale;
+		J.points = points;
+		J.out_points = out_points;
+		J.chunk_stats = (qaws_exact_batch_stats*)calloc(nchunk ? nchunk : 1, sizeof(qaws_exact_batch_stats));
+		if (!J.chunk_stats)
+			st = QAWS_STATUS_ALLOCATION_FAILURE;
+		else
+			st = qaws_internal_parallel(desc->executor, point_count, CL_GRAIN, esc_chunk, &J);
+		for (ch = 0; J.chunk_stats && ch < nchunk; ch++)
+		{
+			stats.candidate_count += J.chunk_stats[ch].candidate_count;
+			stats.hit_count += J.chunk_stats[ch].hit_count;
+			stats.uncertified_count += J.chunk_stats[ch].uncertified_count;
+		}
+		free(J.chunk_stats);
+	}
 done:
 	if (out_stats)
 		*out_stats = stats;
@@ -1301,10 +1466,6 @@ done:
 	free(R.box);
 	free(R.stamp);
 	free(R.got);
-	free(L.c);
 	free(boxes);
-	if (w)
-		free(w->cl.c);
-	free(w);
 	return st;
 }

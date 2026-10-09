@@ -19,6 +19,7 @@
 #include "qaws_status.h"
 #include "qaws_types.h"
 #include "qaws_surface_types.h"
+#include "qaws_batch_executor.h"
 
 typedef enum qaws_exact_sign
 {
@@ -239,6 +240,7 @@ typedef struct qaws_exact_batch_desc
 	unsigned int curve_count;
 	unsigned int const* families;   /* optional, one id per curve */
 	unsigned int flags;             /* QAWS_EXACT_BATCH_* */
+	qaws_batch_executor const* executor;   /* optional: runs independent work in parallel */
 } qaws_exact_batch_desc;
 
 typedef struct qaws_exact_batch_hit
@@ -420,6 +422,7 @@ typedef struct qaws_exact_surface_batch_desc
 	unsigned int curve_count;
 	qaws_exact_surface const* const* surfaces;
 	unsigned int surface_count;
+	qaws_batch_executor const* executor;   /* optional: runs independent work in parallel */
 } qaws_exact_surface_batch_desc;
 
 typedef struct qaws_exact_curve_surface_batch_hit
@@ -486,6 +489,7 @@ typedef struct qaws_exact_ssi_batch_desc
 	unsigned int surface_count;
 	unsigned int const* families;   /* optional, one id per surface */
 	unsigned int min_depth;         /* as for qaws_exact_surface_surface_hits */
+	qaws_batch_executor const* executor;   /* optional: runs independent work in parallel */
 } qaws_exact_ssi_batch_desc;
 
 typedef struct qaws_exact_ssi_batch_branch

@@ -326,6 +326,16 @@ misses. On a 9 × 9-patch bicubic surface the batch finds the same first
 hits as the single-ray call in about the same time, because that call
 already culls patches cheaply.
 
+### Parallel execution
+
+The exact batch descs (`qaws_exact_batch_desc`, `qaws_exact_surface_batch_desc`,
+`qaws_exact_ssi_batch_desc`) take the optional `executor` of the float
+batches ([curve_batch.md](curve_batch.md#parallel-execution)). The pair
+batches run their grid cells in chunks; the surface batch solves its
+surface pairs in parallel, and the closest-point and ray batches run
+query chunks of 4. The kernel has no mutable globals, and the results
+are bit-identical whatever the executor does.
+
 ## Certified line / surface intersections (exact ray casting)
 
 ```c
