@@ -371,7 +371,7 @@ counted and skipped, and the call then returns
 `QAWS_STATUS_CERTIFICATION_FAILED`.
 
 Example: a B-spline terrain (457 patches) against 16 planes gives 31
-certified contour branches (763 points, enclosures about 3e-15) in 0.85 s.
+certified contour branches (763 points, enclosures about 3e-15) in 0.5 s. A face shared by two neighbouring patch-pair boxes is solved once.
 
 ## Certified 2D Booleans
 

@@ -114,7 +114,7 @@ These are f64 timings from test 81 and `qaws_batch_showcase` (Release build).
 `qaws_exact_surface_batch_hits` gives certified intersection curves of N
 exact surfaces. It grids sound patch boxes, then runs each surface pair's
 certified solve on its overlapping patch pairs only. On the B-spline
-terrain against 16 planes it certifies 31 contour branches in 0.85 s. The
+terrain against 16 planes it certifies 31 contour branches in 0.5 s. The
 float batch gives the same branch count on all 16 levels.
 
 ## Prepared sets

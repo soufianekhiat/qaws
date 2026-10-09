@@ -253,10 +253,23 @@ static int same_point(qaws_exact_ssi_point const* a, qaws_exact_ssi_point const*
 	       ov(a->v2_lo, a->v2_hi, b->v2_lo, b->v2_hi);
 }
 
+/* The certified points of one face of an unsplit patch-pair box. Adjacent
+   patches join exactly, so the face is the same three equations over the
+   same region for both boxes that share it: solved once. */
+typedef struct ssi_face
+{
+	unsigned int key[5];      /* direction, boundary index along it, the other three patch indices; key[0] = ~0u: empty */
+	qaws_status status;
+	unsigned int npts;
+	qaws_exact_ssi_point pts[8];
+} ssi_face;
+
 typedef struct ssi_out
 {
 	qaws_exact_ssi_point* pts;
 	unsigned int npts;
+	ssi_face* faces;           /* open addressing, face_cap a power of two */
+	unsigned int face_cap, face_count;
 	unsigned int (*arcs)[2];
 	unsigned int narcs, arc_cap;
 	int seam[4];               /* the parameter (u1, v1, u2, v2) wraps around: its two ends are one place */
@@ -346,27 +359,95 @@ typedef struct ssi_pair
 	unsigned int iu1, iv1, iu2, iv2;
 } ssi_pair;
 
+static unsigned int face_hash(unsigned int const* key)
+{
+	unsigned int h = 2166136261u, i;
+	for (i = 0; i < 5; i++)
+		h = (h ^ key[i]) * 16777619u;
+	return h;
+}
+
+/* the cached face, or the empty slot where it goes (NULL when out of memory) */
+static ssi_face* face_slot(ssi_out* o, unsigned int const* key)
+{
+	unsigned int i, mask;
+	if (2 * (o->face_count + 1) > o->face_cap)
+	{
+		/* grow and rehash */
+		unsigned int ncap = o->face_cap ? 2 * o->face_cap : 256, j;
+		ssi_face* nf = (ssi_face*)ss_alloc(sizeof(ssi_face) * ncap);
+		if (!nf)
+			return NULL;
+		for (j = 0; j < ncap; j++)
+			nf[j].key[0] = ~0u;
+		for (j = 0; j < o->face_cap; j++)
+			if (o->faces[j].key[0] != ~0u)
+			{
+				unsigned int m = face_hash(o->faces[j].key) & (ncap - 1);
+				while (nf[m].key[0] != ~0u)
+					m = (m + 1) & (ncap - 1);
+				nf[m] = o->faces[j];
+			}
+		ss_free(o->faces);
+		o->faces = nf;
+		o->face_cap = ncap;
+	}
+	mask = o->face_cap - 1;
+	for (i = face_hash(key) & mask;; i = (i + 1) & mask)
+	{
+		ssi_face* f = &o->faces[i];
+		if (f->key[0] == ~0u || memcmp(f->key, key, sizeof(f->key)) == 0)
+			return f;
+	}
+}
+
 /*
  * The certified points where solution arcs cross the faces of a regular
  * box: on each face, three equations in the other three variables.
  */
-static qaws_status face_points(ssi_ctx const* cx, ssi_box const* B, ssi_pair const* pr, qaws_exact_ssi_point* pts, unsigned int* npts, qaws_exact_int* face)
+static qaws_status face_points(ssi_ctx const* cx, ssi_box const* B, ssi_pair const* pr, ssi_out* out, qaws_exact_ssi_point* pts, unsigned int* npts,
+	qaws_exact_int* face)
 {
 	qaws_exact_box3 fb[32];
-	unsigned int k, side, i;
+	unsigned int k, side, i, idx[4];
+	int unsplit = B->dep[0] == 0 && B->dep[1] == 0 && B->dep[2] == 0 && B->dep[3] == 0;
 	qaws_status st = QAWS_STATUS_OK;
 	*npts = 0;
+	idx[0] = pr->iu1;
+	idx[1] = pr->iv1;
+	idx[2] = pr->iu2;
+	idx[3] = pr->iv2;
 	for (k = 0; k < 4 && st == QAWS_STATUS_OK; k++)
 		for (side = 0; side < 2 && st == QAWS_STATUS_OK; side++)
 		{
-			unsigned int n3[3], m = 0, o, c, fsize = 1, nf = 0, q, dims[3];
+			unsigned int n3[3], m = 0, o, c, fsize = 1, nf = 0, q, key[5], nfp = 0;
+			qaws_exact_ssi_point fp[8];
+			ssi_face* cached = NULL;
 			for (i = 0; i < 4; i++)
 				if (i != k)
 				{
-					dims[m] = i;
 					n3[m++] = cx->n[i];
 					fsize *= cx->n[i] + 1;
 				}
+			if (unsplit)
+			{
+				key[0] = k;
+				key[1] = idx[k] + side;
+				for (i = 0, m = 2; i < 4; i++)
+					if (i != k)
+						key[m++] = idx[i];
+				cached = face_slot(out, key);
+				if (!cached)
+					return QAWS_STATUS_ALLOCATION_FAILURE;
+				if (cached->key[0] != ~0u)
+				{
+					/* solved by the neighbouring box */
+					st = cached->status;
+					nfp = cached->npts;
+					memcpy(fp, cached->pts, sizeof(qaws_exact_ssi_point) * nfp);
+					goto add;
+				}
+			}
 			/* slice: index_k fixed at 0 or n_k, the rest in order */
 			for (c = 0; c < 3; c++)
 			{
@@ -382,7 +463,6 @@ static qaws_status face_points(ssi_ctx const* cx, ssi_box const* B, ssi_pair con
 				uint64_t lo4[4], hi4[4];
 				int dep4[4];
 				qaws_exact_ssi_point p;
-				unsigned int r, dup = 0;
 				for (i = 0; i < 4; i++)
 				{
 					if (i == k)
@@ -409,21 +489,36 @@ static qaws_status face_points(ssi_ctx const* cx, ssi_box const* B, ssi_pair con
 						dep4[i] = B->dep[i] + fd;
 					}
 				}
-				(void)dims;
 				st = to_param(pr->a->ub[pr->iu1], pr->a->ub[pr->iu1 + 1], pr->a->u_shift, lo4[0], hi4[0], dep4[0], &p.u1_lo, &p.u1_hi);
 				if (st == QAWS_STATUS_OK) st = to_param(pr->a->vb[pr->iv1], pr->a->vb[pr->iv1 + 1], pr->a->v_shift, lo4[1], hi4[1], dep4[1], &p.v1_lo, &p.v1_hi);
 				if (st == QAWS_STATUS_OK) st = to_param(pr->b->ub[pr->iu2], pr->b->ub[pr->iu2 + 1], pr->b->u_shift, lo4[2], hi4[2], dep4[2], &p.u2_lo, &p.u2_hi);
 				if (st == QAWS_STATUS_OK) st = to_param(pr->b->vb[pr->iv2], pr->b->vb[pr->iv2 + 1], pr->b->v_shift, lo4[3], hi4[3], dep4[3], &p.v2_lo, &p.v2_hi);
 				if (st != QAWS_STATUS_OK)
 					break;
-				/* a point on an edge or corner of the box belongs to several faces: once */
+				if (nfp >= 8)
+					return QAWS_STATUS_OK;   /* too many: the caller subdivides */
+				fp[nfp++] = p;
+			}
+			if (cached && st != QAWS_STATUS_ALLOCATION_FAILURE)
+			{
+				memcpy(cached->key, key, sizeof(key));
+				cached->status = st;
+				cached->npts = nfp;
+				memcpy(cached->pts, fp, sizeof(qaws_exact_ssi_point) * nfp);
+				out->face_count++;
+			}
+		add:
+			/* a point on an edge or corner of the box belongs to several faces: once */
+			for (q = 0; q < nfp && st == QAWS_STATUS_OK; q++)
+			{
+				unsigned int r, dup = 0;
 				for (r = 0; r < *npts && !dup; r++)
-					dup = same_point(&pts[r], &p);
+					dup = same_point(&pts[r], &fp[q]);
 				if (!dup)
 				{
 					if (*npts >= 8)
 						return QAWS_STATUS_OK;   /* too many: the caller subdivides */
-					pts[(*npts)++] = p;
+					pts[(*npts)++] = fp[q];
 				}
 			}
 		}
@@ -515,7 +610,7 @@ static qaws_status patch_pair(ssi_pair const* pr, unsigned int min_depth, ssi_ou
 		{
 			qaws_exact_ssi_point pts[8];
 			unsigned int np = 0;
-			qaws_status fs = face_points(&cx, &B, pr, pts, &np, face);
+			qaws_status fs = face_points(&cx, &B, pr, out, pts, &np, face);
 			if (fs == QAWS_STATUS_OK && np <= 2)   /* one point: the curve only touches the box (an arc needs two distinct ends) */
 			{
 				if (np == 2)
@@ -730,6 +825,7 @@ qaws_status qaws_exact_ssi_solve(qaws_exact_surface const* a, qaws_exact_surface
 			nb++;
 		}
 	ss_free(o.pts);
+	ss_free(o.faces);
 	ss_free(o.arcs);
 	ss_free(deg);
 	ss_free(used);
