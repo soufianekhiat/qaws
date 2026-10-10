@@ -105,6 +105,7 @@ extern int test_90_offset_curves_main(void);
 extern int test_91_triangulate_main(void);
 extern int test_92_stack_mesh_main(void);
 extern int test_93_offset_parity_main(void);
+extern int test_94_polytree_main(void);
 
 /* Test registry */
 typedef struct {
@@ -207,6 +208,7 @@ static test_suite const g_test_suites[] = {
 	{"91_triangulate", test_91_triangulate_main},
 	{"92_stack_mesh", test_92_stack_mesh_main},
 	{"93_offset_parity", test_93_offset_parity_main},
+	{"94_polytree", test_94_polytree_main},
 };
 
 int main(void) {
