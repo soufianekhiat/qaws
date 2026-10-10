@@ -173,3 +173,41 @@ Test 90 checks:
   of figure 7, against the distance oracle, in f64 and f32.
 
 `qaws_better2d_showcase` (figure 4) runs 12 offset series in 0.04 s.
+
+## int64 paths (Clipper2's ClipperOffset)
+
+```c
+typedef struct qaws_offset64_group { qaws_path64 const* paths; unsigned int path_count; qaws_join_type join_type; qaws_end_type end_type; } qaws_offset64_group;
+typedef struct qaws_offset64_desc {
+	qaws_offset64_group const* groups; unsigned int group_count;
+	double delta;
+	double miter_limit;       /* x |delta|; 0 = 2 */
+	double arc_tolerance;     /* 0 = |delta| / 500 */
+	unsigned int flags;       /* QAWS_CLIP_PRESERVE_COLLINEAR, QAWS_CLIP_REVERSE_SOLUTION */
+} qaws_offset64_desc;
+qaws_status qaws_offset64_execute(desc, qaws_clip64_result** out_result);
+qaws_status qaws_offset64_paths(paths, path_count, delta, join_type, end_type, out_result);   /* InflatePaths */
+```
+
+This is Clipper2's `ClipperOffset` algorithm, ported to C (Angus Johnson,
+Boost licence). The result matches Clipper2's own:
+- every point is rounded to the integer grid as Clipper2 rounds it;
+- round joins and ends are arcs of straight steps within the arc
+  tolerance;
+- at a concave corner the path runs through the vertex itself;
+- miter, square and bevel joins follow Clipper2's rules, including its
+  case for nearly straight joins.
+
+The clean-up is one exact union (`qaws_clip64`): positive, or negative for
+a reversed group. The result keeps the input's orientation unless the
+reverse flag is set.
+
+Test 93 runs Clipper2's TestOffsets.cpp and TestOffsetOrientation.cpp in C,
+with Clipper2's own expectations:
+- the Offsets.txt corpus: exactly one outer path, on int64 paths and on
+  curves (`qaws_offset`);
+- the regression issues #405, #424, #448, #456, #482, #593, #715, #724,
+  #733, #873 and #965: vertex counts, distances within the arc tolerance,
+  orientation, over-shrunk paths vanishing, and an area of exactly 122.
+
+All 15 checks pass.

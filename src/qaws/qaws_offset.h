@@ -80,4 +80,39 @@ qaws_status qaws_offset_execute(qaws_offset_desc const* desc, qaws_clip_result**
 qaws_status qaws_offset_paths(qaws_path_2d const* paths, unsigned int path_count, qaws_scalar delta,
 	qaws_join_type join_type, qaws_end_type end_type, qaws_clip_result** out_result);
 
+/*
+ * Offsetting int64 polygons and polylines (Clipper2's ClipperOffset on
+ * Paths64, algorithm ported from Clipper2 by Angus Johnson, Boost licence):
+ * every point rounded to the integer grid as Clipper2 rounds it, round
+ * joins and ends as arcs of straight steps within arc_tolerance, then one
+ * exact union (qaws_clip64) with the positive fill rule (negative for a
+ * reversed group) removes the overlaps. Same join and end types, miter
+ * limit, orientation rules and reverse flag as Clipper2.
+ */
+#include "qaws_clip64.h"
+
+typedef struct qaws_offset64_group
+{
+	qaws_path64 const* paths;
+	unsigned int path_count;
+	qaws_join_type join_type;
+	qaws_end_type end_type;
+} qaws_offset64_group;
+
+typedef struct qaws_offset64_desc
+{
+	qaws_offset64_group const* groups;
+	unsigned int group_count;
+	double delta;
+	double miter_limit;               /* in multiples of |delta|; 0 = 2 */
+	double arc_tolerance;             /* round joins' deviation; 0 = |delta| / 500 */
+	unsigned int flags;               /* QAWS_CLIP_PRESERVE_COLLINEAR, QAWS_CLIP_REVERSE_SOLUTION */
+} qaws_offset64_desc;
+
+qaws_status qaws_offset64_execute(qaws_offset64_desc const* desc, qaws_clip64_result** out_result);
+
+/* One group, miter limit 2, the default arc tolerance (Clipper2's InflatePaths). */
+qaws_status qaws_offset64_paths(qaws_path64 const* paths, unsigned int path_count, double delta,
+	qaws_join_type join_type, qaws_end_type end_type, qaws_clip64_result** out_result);
+
 #endif /* QAWS_OFFSET_H */
