@@ -364,7 +364,7 @@ the local checkout `C:\git\dunya\extern\clipper2` and compares results and timin
 | 6. Exact curves | next |
 | 7. Offsets | float done (`qaws_offset.h`): every join and end type, miter limit, delta callback, lines and arcs exact; other curves after Levien and Uguray (Euler-spiral cuts, exact cusps of the offset, evolute through backward runs, G1 cubics by Gauss-Newton, round joins at cusps of the curve); the paper's hard cases pass a distance oracle in f64 and f32 (test 90); int64 offsets (Clipper2's ClipperOffset on qaws_clip64) pass every Clipper2 offset test |
 | 8. RectClip, Minkowski | done (`qaws_rectclip.h`): rect clip and rect clip lines, Minkowski sum / difference, float and int64 |
-| 9. Batching, 2.5D | stacks done (`qaws_stack.h`): matched and distance-field sections, cubic blend, Booleans level by level on the executor; batch jobs for independent clips pending |
+| 9. Batching, 2.5D | stacks done (`qaws_stack.h`): matched and distance-field sections, cubic blend, Booleans level by level on the executor; batch jobs (`qaws_clip_execute_batch`, clip64, offset, offset64) in parallel with results equal to one call each |
 | 10. Triangulation | done (`qaws_triangulate.h`): constrained Delaunay with exact predicates on a lattice, boundary sampled on the true curves, constraint curves (crossing ones split at their exact crossing), Ruppert refinement with boundary splits on the curves, Botsch-Kobbelt remeshing keeping features on their curves, quadrangulation (greedy plus augmenting paths, all-quads split, convex smoothing); contour stitching between stack levels into closed surface meshes (`qaws_stack_mesh_3d`) |
 
 Decisions made on the way:

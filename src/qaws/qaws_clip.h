@@ -87,6 +87,12 @@ typedef struct qaws_clip_desc
 typedef struct qaws_clip_result qaws_clip_result;
 
 qaws_status qaws_clip_execute(qaws_clip_desc const* desc, qaws_clip_result** out_result);
+
+/* Many independent clips in one call, in parallel through the executor (each
+   job's own executor is not used: the jobs are the parallel part); results
+   in order, the same as one call each; on a failure none is kept. */
+qaws_status qaws_clip_execute_batch(qaws_clip_desc const* descs, unsigned int count, qaws_batch_executor const* executor,
+	qaws_clip_result** out_results);
 void qaws_clip_result_destroy(qaws_clip_result* result);
 
 /* Closed paths. The views stay valid until the result is destroyed. */

@@ -96,6 +96,7 @@ add_executable(
   92_stack_mesh.c
   93_offset_parity.c
   94_polytree.c
+  95_jobs.c
 )
 
 # The amalgamated library exports exactly the same symbols, so the tests can

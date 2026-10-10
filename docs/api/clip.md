@@ -137,3 +137,23 @@ Test 84 checks these against closed forms:
 
 `qaws_better2d_showcase` (figure 2) runs 12 operations on polygons, NURBS
 ellipses and cubic B-spline blobs in 12 ms.
+
+## Batches
+
+```c
+qaws_status qaws_clip_execute_batch(qaws_clip_desc const* descs, unsigned int count, qaws_batch_executor const* executor, qaws_clip_result** out_results);
+qaws_status qaws_clip64_execute_batch(qaws_clip64_desc const* descs, unsigned int count, qaws_batch_executor const* executor, qaws_clip64_result** out_results);
+qaws_status qaws_offset_execute_batch(qaws_offset_desc const* descs, unsigned int count, qaws_batch_executor const* executor, qaws_clip_result** out_results);
+qaws_status qaws_offset64_execute_batch(qaws_offset64_desc const* descs, unsigned int count, qaws_batch_executor const* executor, qaws_clip64_result** out_results);
+```
+
+These run many independent jobs in one call, in parallel through the
+executor.
+- Each job runs serially; its own `executor` field is not used, because
+  the jobs are the parallel part.
+- The results come back in order, identical to one call each, whatever
+  order the executor runs them in.
+- If a job fails, its status is returned and no result is kept.
+
+Test 95 runs 48 jobs of each kind serially, backwards, and interleaved,
+and checks every result vertex for vertex.

@@ -72,6 +72,7 @@ set(QAWS_SOURCES
   src/qaws/qaws_clip64.c
   src/qaws/qaws_offset.c
 src/qaws/qaws_offset64.c
+src/qaws/qaws_jobs.c
   src/qaws/qaws_rectclip.c
   src/qaws/qaws_stack.c
 src/qaws/qaws_stack_mesh.c

@@ -53,6 +53,9 @@ typedef struct qaws_clip64_desc
 typedef struct qaws_clip64_result qaws_clip64_result;
 
 qaws_status qaws_clip64_execute(qaws_clip64_desc const* desc, qaws_clip64_result** out_result);
+/* Many independent clips in one call (see qaws_clip_execute_batch). */
+qaws_status qaws_clip64_execute_batch(qaws_clip64_desc const* descs, unsigned int count, qaws_batch_executor const* executor,
+	qaws_clip64_result** out_results);
 void qaws_clip64_result_destroy(qaws_clip64_result* result);
 
 /* Closed paths, rounded to integers (x, y pairs). */
