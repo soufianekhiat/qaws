@@ -35,6 +35,17 @@ typedef struct qaws_curve_batch_desc
 	qaws_batch_executor const* executor;   /* optional: runs the work in parallel */
 } qaws_curve_batch_desc;
 
+/* Hit kinds. A CROSSING passes from one side to the other (transversal, or
+   tangent with an odd contact such as at an inflection); a TOUCH meets
+   without crossing (an even tangency); an OVERLAP is a stretch the two
+   curves share: [parameter_a, parameter_a_end] on curve_a (increasing) and
+   [parameter_b, parameter_b_end] on curve_b (decreasing when they run
+   opposite ways), from `position` to the end point. 3D hits are CROSSING or
+   OVERLAP. */
+#define QAWS_CURVE_HIT_CROSSING 0u
+#define QAWS_CURVE_HIT_TOUCH    1u
+#define QAWS_CURVE_HIT_OVERLAP  2u
+
 /* curve_a < curve_b, or curve_a == curve_b with parameter_a < parameter_b
    for a self-intersection. Sorted by (curve_a, curve_b, parameter_a). */
 typedef struct qaws_curve_batch_hit_2d
@@ -44,6 +55,9 @@ typedef struct qaws_curve_batch_hit_2d
 	qaws_scalar parameter_a;
 	qaws_scalar parameter_b;
 	qaws_vec2 position;
+	unsigned int kind;              /* QAWS_CURVE_HIT_* */
+	qaws_scalar parameter_a_end;    /* OVERLAP: other end of the shared stretch; else parameter_a */
+	qaws_scalar parameter_b_end;    /* OVERLAP: other end on curve_b; else parameter_b */
 } qaws_curve_batch_hit_2d;
 
 typedef struct qaws_curve_batch_hit_3d
@@ -53,6 +67,9 @@ typedef struct qaws_curve_batch_hit_3d
 	qaws_scalar parameter_a;
 	qaws_scalar parameter_b;
 	qaws_vec3 position;
+	unsigned int kind;              /* QAWS_CURVE_HIT_* */
+	qaws_scalar parameter_a_end;    /* OVERLAP: other end of the shared stretch; else parameter_a */
+	qaws_scalar parameter_b_end;    /* OVERLAP: other end on curve_b; else parameter_b */
 } qaws_curve_batch_hit_3d;
 
 typedef struct qaws_curve_batch_stats

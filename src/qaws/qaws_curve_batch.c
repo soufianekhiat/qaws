@@ -40,10 +40,21 @@
 #define CB_STEP_REL  ((qaws_scalar)1e-15)
 #endif
 
+#define CB_PARALLEL_SIN ((qaws_scalar)0.25)  /* chords this parallel may overlap */
+#define CB_TANGENT_SIN  ((qaws_scalar)1e-6)  /* hits this tangent are classified by their sides */
+#if QAWS_SCALAR_IS_FLOAT
+#define CB_SIDE_MAX     ((qaws_scalar)1e-1)  /* farthest step off a contact to see its sides, and widest zone */
+#else
+#define CB_SIDE_MAX     ((qaws_scalar)1e-2)
+#endif
+
 typedef struct cb_hit
 {
-	unsigned int a, b;
+	unsigned int a, b, kind;
 	qaws_scalar ta, tb;
+	qaws_scalar ta1, tb1;       /* overlap ends; ta, tb for a point */
+	qaws_scalar s2;             /* squared sine of the tangent angle at a point hit */
+	qaws_scalar zlo, zhi;       /* contact zone on curve a around a point hit */
 	qaws_scalar p[3];
 } cb_hit;
 
@@ -123,8 +134,10 @@ static qaws_scalar cb_chords(qaws_flat_seg const* A, qaws_flat_seg const* B, qaw
 	return (qaws_scalar)sqrt(cb_dot(w, w));
 }
 
-/* Newton on C_a(ta) = C_b(tb); in 3D the 3x2 system by its normal equations */
-static int cb_newton(cb_ctx* x, qaws_curve const* ca, qaws_curve const* cb, qaws_scalar* ta, qaws_scalar* tb, qaws_scalar* pos)
+/* Newton on C_a(ta) = C_b(tb); in 3D the 3x2 system by its normal equations.
+   *sin2 receives the squared sine of the angle between the tangents. */
+static int cb_newton(cb_ctx* x, qaws_curve const* ca, qaws_curve const* cb, qaws_scalar* ta, qaws_scalar* tb, qaws_scalar* pos,
+	qaws_scalar* sin2)
 {
 	qaws_scalar amin = ca->parameter_range.min_value, amax = ca->parameter_range.max_value;
 	qaws_scalar bmin = cb->parameter_range.min_value, bmax = cb->parameter_range.max_value;
@@ -138,6 +151,12 @@ static int cb_newton(cb_ctx* x, qaws_curve const* ca, qaws_curve const* cb, qaws
 			return 0;
 		for (k = 0; k < 3; k++)
 			f[k] = pa[k] - pb[k];
+		/* J = [da, -db]; solve (J^T J) d = J^T f */
+		m00 = cb_dot(da, da);
+		m01 = -cb_dot(da, db);
+		m11 = cb_dot(db, db);
+		det = m00 * m11 - m01 * m01;
+		*sin2 = m00 * m11 > 0 ? det / (m00 * m11) : 0;
 		/* converged: two more steps take a shallow crossing to rounding level */
 		if (sqrt(cb_dot(f, f)) <= x->pos_tol && polish++ == 2)
 		{
@@ -145,13 +164,8 @@ static int cb_newton(cb_ctx* x, qaws_curve const* ca, qaws_curve const* cb, qaws
 				pos[k] = (pa[k] + pb[k]) / 2;
 			return 1;
 		}
-		/* J = [da, -db]; solve (J^T J) d = J^T f */
-		m00 = cb_dot(da, da);
-		m01 = -cb_dot(da, db);
-		m11 = cb_dot(db, db);
 		g0 = cb_dot(da, f);
 		g1 = -cb_dot(db, f);
-		det = m00 * m11 - m01 * m01;
 		if (!(det > (m00 * m11) * (qaws_scalar)1e-12))
 		{
 			if (!polish)
@@ -172,7 +186,8 @@ static int cb_newton(cb_ctx* x, qaws_curve const* ca, qaws_curve const* cb, qaws
 	return 0;
 }
 
-static qaws_status cb_push_hit(cb_ctx* x, unsigned int a, unsigned int b, qaws_scalar ta, qaws_scalar tb, qaws_scalar const* p)
+static qaws_status cb_push(cb_ctx* x, unsigned int a, unsigned int b, unsigned int kind,
+	qaws_scalar ta, qaws_scalar tb, qaws_scalar ta1, qaws_scalar tb1, qaws_scalar const* p)
 {
 	cb_hit* h;
 	if (x->nhit == x->caphit)
@@ -185,13 +200,22 @@ static qaws_status cb_push_hit(cb_ctx* x, unsigned int a, unsigned int b, qaws_s
 		x->caphit = cap;
 	}
 	h = &x->hits[x->nhit++];
-	if (a > b || (a == b && ta > tb))
+	if (a > b || (a == b && (ta < ta1 ? ta : ta1) > (tb < tb1 ? tb : tb1)))
 	{
-		unsigned int ti = a; qaws_scalar tt = ta;
+		unsigned int ti = a; qaws_scalar tt = ta, tt1 = ta1;
 		a = b; b = ti;
 		ta = tb; tb = tt;
+		ta1 = tb1; tb1 = tt1;
 	}
-	h->a = a; h->b = b; h->ta = ta; h->tb = tb;
+	if (ta1 < ta)
+	{
+		/* an overlap runs up curve a */
+		qaws_scalar t = ta; ta = ta1; ta1 = t;
+		t = tb; tb = tb1; tb1 = t;
+	}
+	h->a = a; h->b = b; h->kind = kind; h->s2 = 0;
+	h->zlo = h->zhi = ta;
+	h->ta = ta; h->tb = tb; h->ta1 = ta1; h->tb1 = tb1;
 	h->p[0] = p[0]; h->p[1] = p[1]; h->p[2] = p[2];
 	return QAWS_STATUS_OK;
 }
@@ -201,24 +225,132 @@ static qaws_scalar cb_par_tol(qaws_curve const* c)
 	return (c->parameter_range.max_value - c->parameter_range.min_value) * CB_PAR_REL;
 }
 
+/* closest point of c on [lo, hi] to q, by Gauss-Newton on (C - q).C' = 0 from
+   *t; returns the distance, or -1 when the curve cannot be evaluated */
+static qaws_scalar cb_project(cb_ctx const* x, qaws_curve const* c, qaws_scalar const* q,
+	qaws_scalar lo, qaws_scalar hi, qaws_scalar* t)
+{
+	qaws_scalar p[3], d[3], f[3];
+	unsigned int it, k;
+	for (it = 0; it < CB_NEWTON_ITERS; it++)
+	{
+		qaws_scalar dd, step;
+		if (qaws_internal_curve_point(c, x->dim, *t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, p, d) != QAWS_STATUS_OK)
+			return -1;
+		for (k = 0; k < 3; k++)
+			f[k] = p[k] - q[k];
+		dd = cb_dot(d, d);
+		if (!(dd > 0))
+			break;
+		step = cb_dot(f, d) / dd;
+		*t -= step;
+		if (*t < lo) *t = lo;
+		if (*t > hi) *t = hi;
+		if (fabs(step) <= (hi - lo) * CB_STEP_REL)
+			break;
+	}
+	if (qaws_internal_curve_point(c, x->dim, *t, QAWS_EVAL_FLAG_POSITION, p, NULL) != QAWS_STATUS_OK)
+		return -1;
+	for (k = 0; k < 3; k++)
+		f[k] = p[k] - q[k];
+	return (qaws_scalar)sqrt(cb_dot(f, f));
+}
+
+/* Do the curves of nearly parallel segments A and B share a stretch? Its
+   ends are segment ends lying on the other curve; three points between them
+   must lie on the other curve too. Returns 1 and pushes the overlap. */
+static int cb_overlap(cb_ctx* x, qaws_flat_seg const* A, qaws_flat_seg const* B, qaws_status* st)
+{
+	qaws_curve const* ca = x->desc->curves[A->owner];
+	qaws_curve const* cb = x->desc->curves[B->owner];
+	qaws_scalar da[3], db[3], cr[3], na, nb, tol = 16 * x->pos_tol;
+	qaws_scalar cta[4], ctb[4], sp[3], ep[3], gap[3];
+	unsigned int nc = 0, lo = 0, hi = 0, i, k;
+	for (k = 0; k < 3; k++)
+	{
+		da[k] = A->p1[k] - A->p0[k];
+		db[k] = B->p1[k] - B->p0[k];
+	}
+	cr[0] = da[1] * db[2] - da[2] * db[1];
+	cr[1] = da[2] * db[0] - da[0] * db[2];
+	cr[2] = da[0] * db[1] - da[1] * db[0];
+	na = (qaws_scalar)sqrt(cb_dot(da, da));
+	nb = (qaws_scalar)sqrt(cb_dot(db, db));
+	if (!(na > 0 && nb > 0) || (qaws_scalar)sqrt(cb_dot(cr, cr)) > CB_PARALLEL_SIN * na * nb)
+		return 0;
+	/* segment ends lying on the other curve */
+	for (i = 0; i < 4; i++)
+	{
+		qaws_flat_seg const* S = i < 2 ? A : B;
+		qaws_flat_seg const* O = i < 2 ? B : A;
+		qaws_curve const* oc = i < 2 ? cb : ca;
+		qaws_scalar const* q = (i & 1) ? S->p1 : S->p0;
+		qaws_scalar w[3], u, t, dist;
+		for (k = 0; k < 3; k++)
+			w[k] = q[k] - O->p0[k];
+		u = cb_dot(w, i < 2 ? db : da) / (i < 2 ? nb * nb : na * na);
+		u = u < 0 ? 0 : (u > 1 ? 1 : u);
+		t = O->t0 + u * (O->t1 - O->t0);
+		dist = cb_project(x, oc, q, O->t0 < O->t1 ? O->t0 : O->t1, O->t0 < O->t1 ? O->t1 : O->t0, &t);
+		if (dist < 0 || dist > tol)
+			continue;
+		cta[nc] = i < 2 ? ((i & 1) ? A->t1 : A->t0) : t;
+		ctb[nc] = i < 2 ? t : ((i & 1) ? B->t1 : B->t0);
+		nc++;
+	}
+	if (nc < 2)
+		return 0;
+	for (i = 1; i < nc; i++)
+	{
+		if (cta[i] < cta[lo]) lo = i;
+		if (cta[i] > cta[hi]) hi = i;
+	}
+	if (qaws_internal_curve_point(ca, x->dim, cta[lo], QAWS_EVAL_FLAG_POSITION, sp, NULL) != QAWS_STATUS_OK ||
+		qaws_internal_curve_point(ca, x->dim, cta[hi], QAWS_EVAL_FLAG_POSITION, ep, NULL) != QAWS_STATUS_OK)
+		return 0;
+	for (k = 0; k < 3; k++)
+		gap[k] = ep[k] - sp[k];
+	if ((qaws_scalar)sqrt(cb_dot(gap, gap)) <= 4 * tol)
+		return 0;
+	/* the stretch between must lie on curve b */
+	for (i = 1; i <= 3; i++)
+	{
+		qaws_scalar f = (qaws_scalar)i / 4, q[3];
+		qaws_scalar t = ctb[lo] + f * (ctb[hi] - ctb[lo]), dist;
+		qaws_scalar blo = ctb[lo] < ctb[hi] ? ctb[lo] : ctb[hi], bhi = ctb[lo] < ctb[hi] ? ctb[hi] : ctb[lo];
+		if (qaws_internal_curve_point(ca, x->dim, cta[lo] + f * (cta[hi] - cta[lo]), QAWS_EVAL_FLAG_POSITION, q, NULL) != QAWS_STATUS_OK)
+			return 0;
+		dist = cb_project(x, cb, q, blo, bhi, &t);
+		if (dist < 0 || dist > tol)
+			return 0;
+	}
+	*st = cb_push(x, A->owner, B->owner, QAWS_CURVE_HIT_OVERLAP, cta[lo], ctb[lo], cta[hi], ctb[hi], sp);
+	return 1;
+}
+
 static qaws_status cb_pair(cb_ctx* x, qaws_flat_seg const* A, qaws_flat_seg const* B)
 {
 	qaws_curve const* ca = x->desc->curves[A->owner];
 	qaws_curve const* cb = x->desc->curves[B->owner];
-	qaws_scalar u, v, ta, tb, pos[3];
+	qaws_scalar u, v, ta, tb, pos[3], s2 = 0;
+	qaws_status st = QAWS_STATUS_OK;
 	if (cb_chords(A, B, &u, &v) > A->r + B->r + x->pos_tol)
 		return QAWS_STATUS_OK;
+	if (cb_overlap(x, A, B, &st))
+		return st;
 	x->stats.newton_count++;
 	ta = A->t0 + u * (A->t1 - A->t0);
 	tb = B->t0 + v * (B->t1 - B->t0);
-	if (!cb_newton(x, ca, cb, &ta, &tb, pos))
+	if (!cb_newton(x, ca, cb, &ta, &tb, pos, &s2))
 		return QAWS_STATUS_OK;
 	/* a curve meets itself trivially at ta == tb */
 	if (A->owner == B->owner && fabs(ta - tb) <= 64 * cb_par_tol(ca))
 		return QAWS_STATUS_OK;
-	return cb_push_hit(x, A->owner, B->owner, ta, tb, pos);
+	st = cb_push(x, A->owner, B->owner, QAWS_CURVE_HIT_CROSSING, ta, tb, ta, tb, pos);
+	if (st == QAWS_STATUS_OK)
+		x->hits[x->nhit - 1].s2 = s2;
+	return st;
 }
-
 /* may segments i and j meet as a pair to report? */
 static int cb_allowed(cb_ctx const* x, qaws_flat_seg const* A, qaws_flat_seg const* B)
 {
@@ -257,32 +389,202 @@ static int cb_cmp_hit(void const* p, void const* q)
 	return 0;
 }
 
-/* keep one hit per point of each curve pair */
-static void cb_merge(cb_ctx* x)
+/* signed distance of point q from curve c, searched from parameter t (left
+   of the tangent is positive); 0 when it cannot be evaluated */
+static qaws_scalar cb_side(cb_ctx const* x, qaws_curve const* c, qaws_scalar t, qaws_scalar const* q)
 {
-	unsigned int i, n = 0, group = 0;
-	qsort(x->hits, x->nhit, sizeof(cb_hit), cb_cmp_hit);
-	for (i = 0; i < x->nhit; i++)
+	qaws_scalar p[3], d[3], lo = c->parameter_range.min_value, hi = c->parameter_range.max_value, n;
+	if (cb_project(x, c, q, lo, hi, &t) < 0 ||
+		qaws_internal_curve_point(c, x->dim, t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, p, d) != QAWS_STATUS_OK)
+		return 0;
+	n = (qaws_scalar)sqrt(d[0] * d[0] + d[1] * d[1]);
+	return n > 0 ? (d[0] * (q[1] - p[1]) - d[1] * (q[0] - p[0])) / n : 0;
+}
+
+static int cb_at_open_end(qaws_curve const* c, qaws_scalar t, qaws_scalar tol)
+{
+	return (t <= c->parameter_range.min_value + tol || t >= c->parameter_range.max_value - tol) && !qaws_curve_is_closed(c);
+}
+
+/* 2D point hits. The end of an open curve lying on the other touches it.
+   A transversal hit crosses. At a tangency, or across a stretch where the
+   curves stay within tolerance (the zone [zlo, zhi] on curve a), step along
+   curve a off both ends until it leaves the tolerance and compare the sides
+   of curve b it lies on. */
+static unsigned int cb_classify(cb_ctx const* x, cb_hit const* h)
+{
+	qaws_curve const* ca = x->desc->curves[h->a];
+	qaws_curve const* cb = x->desc->curves[h->b];
+	qaws_scalar da[3], q[3], la, ext = x->pos_tol / CB_POS_REL, side[2];
+	qaws_scalar alo = ca->parameter_range.min_value, ahi = ca->parameter_range.max_value;
+	int s;
+	if (x->dim != 2)
+		return QAWS_CURVE_HIT_CROSSING;
+	if (cb_at_open_end(ca, h->ta, cb_par_tol(ca)) || cb_at_open_end(cb, h->tb, cb_par_tol(cb)))
+		return QAWS_CURVE_HIT_TOUCH;
+	if (h->zlo == h->zhi && h->s2 > CB_TANGENT_SIN * CB_TANGENT_SIN)
+		return QAWS_CURVE_HIT_CROSSING;
+	if (qaws_internal_curve_point(ca, 2, h->ta, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, q, da) != QAWS_STATUS_OK)
+		return QAWS_CURVE_HIT_CROSSING;
+	la = (qaws_scalar)sqrt(da[0] * da[0] + da[1] * da[1]);
+	if (!(la > 0))
+		return QAWS_CURVE_HIT_TOUCH;
+	for (s = 0; s < 2; s++)
 	{
-		cb_hit const* h = &x->hits[i];
-		qaws_scalar pa = cb_par_tol(x->desc->curves[h->a]), pb = cb_par_tol(x->desc->curves[h->b]);
-		unsigned int j;
-		int dup = 0;
-		if (n == 0 || x->hits[n - 1].a != h->a || x->hits[n - 1].b != h->b)
-			group = n;
-		for (j = group; j < n && !dup; j++)
+		qaws_scalar dist = ext * (qaws_scalar)1e-6 > 64 * x->pos_tol ? ext * (qaws_scalar)1e-6 : 64 * x->pos_tol;
+		side[s] = 0;
+		for (; dist <= ext * CB_SIDE_MAX; dist *= 2)
 		{
-			cb_hit const* k = &x->hits[j];
-			qaws_scalar d[3];
-			int c;
-			for (c = 0; c < 3; c++)
-				d[c] = k->p[c] - h->p[c];
-			dup = (fabs(k->ta - h->ta) <= pa && fabs(k->tb - h->tb) <= pb) || sqrt(cb_dot(d, d)) <= 16 * x->pos_tol;
+			qaws_scalar t = s ? h->zhi + dist / la : h->zlo - dist / la;
+			if (t < alo || t > ahi)
+			{
+				/* closed curve a: wrap; open: one side only */
+				if (!qaws_curve_is_closed(ca))
+					return QAWS_CURVE_HIT_TOUCH;
+				t += t < alo ? ahi - alo : alo - ahi;
+			}
+			if (qaws_internal_curve_point(ca, 2, t, QAWS_EVAL_FLAG_POSITION, q, NULL) != QAWS_STATUS_OK)
+				return QAWS_CURVE_HIT_CROSSING;
+			side[s] = cb_side(x, cb, h->tb, q);
+			if (fabs(side[s]) > 4 * x->pos_tol)
+				break;
 		}
-		if (!dup)
+	}
+	return fabs(side[0]) > 4 * x->pos_tol && fabs(side[1]) > 4 * x->pos_tol && (side[0] < 0) != (side[1] < 0)
+		? QAWS_CURVE_HIT_CROSSING : QAWS_CURVE_HIT_TOUCH;
+}
+
+/* do the curves of hits g and h (one pair, g.ta < h.ta) stay within
+   tolerance between them? */
+static int cb_same_zone(cb_ctx* x, cb_hit const* g, cb_hit const* h)
+{
+	qaws_curve const* ca = x->desc->curves[g->a];
+	qaws_curve const* cb = x->desc->curves[g->b];
+	qaws_scalar d[3], ext = x->pos_tol / CB_POS_REL;
+	unsigned int i, k;
+	for (k = 0; k < 3; k++)
+		d[k] = h->p[k] - g->p[k];
+	if (sqrt(cb_dot(d, d)) > ext * CB_SIDE_MAX)
+		return 0;
+	for (i = 1; i <= 3; i++)
+	{
+		qaws_scalar f = (qaws_scalar)i / 4, q[3], t = g->tb + f * (h->tb - g->tb), dist;
+		qaws_scalar blo = g->tb < h->tb ? g->tb : h->tb, bhi = g->tb < h->tb ? h->tb : g->tb;
+		if (qaws_internal_curve_point(ca, x->dim, g->zhi + f * (h->ta - g->zhi), QAWS_EVAL_FLAG_POSITION, q, NULL) != QAWS_STATUS_OK)
+			return 0;
+		dist = cb_project(x, cb, q, blo, bhi, &t);
+		if (dist < 0 || dist > 16 * x->pos_tol)
+			return 0;
+	}
+	return 1;
+}
+
+/* is t within [lo, hi] (tolerance tol), also across the seam of a closed curve? */
+static int cb_in(qaws_curve const* c, int closed, qaws_scalar t, qaws_scalar lo, qaws_scalar hi, qaws_scalar tol)
+{
+	qaws_scalar len = c->parameter_range.max_value - c->parameter_range.min_value;
+	if (t >= lo - tol && t <= hi + tol)
+		return 1;
+	return closed && ((t + len >= lo - tol && t + len <= hi + tol) || (t - len >= lo - tol && t - len <= hi + tol));
+}
+
+/* overlaps of one curve pair joined into maximal stretches; point hits kept
+   once per point and per contact zone, dropped on a stretch, and classified */
+static qaws_status cb_merge(cb_ctx* x)
+{
+	unsigned int i, n = 0, start = 0;
+	cb_hit* src;
+	qsort(x->hits, x->nhit, sizeof(cb_hit), cb_cmp_hit);
+	src = (cb_hit*)malloc((x->nhit ? x->nhit : 1) * sizeof(cb_hit));
+	if (!src)
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	memcpy(src, x->hits, x->nhit * sizeof(cb_hit));
+	while (start < x->nhit)
+	{
+		unsigned int end = start, j, novl = 0, first, group;
+		qaws_curve const* ca = x->desc->curves[src[start].a];
+		qaws_curve const* cb = x->desc->curves[src[start].b];
+		qaws_scalar pa = cb_par_tol(ca), pb = cb_par_tol(cb);
+		int closed_a = 0, closed_b = 0;
+		while (end < x->nhit && src[end].a == src[start].a && src[end].b == src[start].b)
+			end++;
+		/* 1. overlaps, joined while they meet on curve a */
+		first = n;
+		for (j = start; j < end; j++)
+		{
+			cb_hit const* h = &src[j];
+			if (h->kind != QAWS_CURVE_HIT_OVERLAP)
+				continue;
+			if (novl && h->ta <= x->hits[n - 1].ta1 + pa)
+			{
+				cb_hit* g = &x->hits[n - 1];
+				if (h->ta1 > g->ta1)
+				{
+					g->ta1 = h->ta1;
+					g->tb1 = h->tb1;
+				}
+				continue;
+			}
 			x->hits[n++] = *h;
+			novl++;
+		}
+		if (novl)
+		{
+			closed_a = qaws_curve_is_closed(ca);
+			closed_b = qaws_curve_is_closed(cb);
+		}
+		/* 2. point hits: none on a stretch, once per point, once per zone */
+		group = n;
+		for (j = start; j < end; j++)
+		{
+			cb_hit h = src[j];
+			unsigned int k;
+			int drop = 0;
+			if (h.kind == QAWS_CURVE_HIT_OVERLAP)
+				continue;
+			h.zlo = h.zhi = h.ta;
+			for (k = first; k < first + novl && !drop; k++)
+			{
+				cb_hit const* o = &x->hits[k];
+				qaws_scalar blo = o->tb < o->tb1 ? o->tb : o->tb1, bhi = o->tb < o->tb1 ? o->tb1 : o->tb;
+				drop = cb_in(ca, closed_a, h.ta, o->ta, o->ta1, pa) && cb_in(cb, closed_b, h.tb, blo, bhi, pb);
+			}
+			for (k = group; k < n && !drop; k++)
+			{
+				cb_hit const* g = &x->hits[k];
+				qaws_scalar d[3];
+				int c;
+				for (c = 0; c < 3; c++)
+					d[c] = g->p[c] - h.p[c];
+				drop = (fabs(g->ta - h.ta) <= pa && fabs(g->tb - h.tb) <= pb) || sqrt(cb_dot(d, d)) <= 16 * x->pos_tol;
+			}
+			if (drop)
+				continue;
+			if (x->dim == 2 && n > group && cb_same_zone(x, &x->hits[n - 1], &h))
+			{
+				/* one contact: keep the hit nearest the middle of the zone */
+				cb_hit* g = &x->hits[n - 1];
+				qaws_scalar mid = (g->zlo + h.ta) / 2;
+				if (fabs(h.ta - mid) < fabs(g->ta - mid))
+				{
+					qaws_scalar zlo = g->zlo;
+					*g = h;
+					g->zlo = zlo;
+				}
+				g->zhi = h.ta;
+				continue;
+			}
+			x->hits[n++] = h;
+		}
+		start = end;
 	}
 	x->nhit = n;
+	for (i = 0; i < n; i++)
+		if (x->hits[i].kind != QAWS_CURVE_HIT_OVERLAP)
+			x->hits[i].kind = cb_classify(x, &x->hits[i]);
+	qsort(x->hits, x->nhit, sizeof(cb_hit), cb_cmp_hit);
+	free(src);
+	return QAWS_STATUS_OK;
 }
 
 /* 1. flatten every curve; segment counts per curve for the self-intersection rule */
@@ -378,7 +680,7 @@ static qaws_status cb_solve(cb_ctx* x)
 	free(boxes);
 	qaws_internal_grid_destroy(grid);
 	if (s == QAWS_STATUS_OK)
-		cb_merge(x);
+		s = cb_merge(x);
 	return s;
 }
 
@@ -394,6 +696,7 @@ static void cb_emit(cb_ctx* x, unsigned int dim, void* out, unsigned int capacit
 			qaws_curve_batch_hit_2d* o = (qaws_curve_batch_hit_2d*)out + i;
 			o->curve_a = h->a; o->curve_b = h->b - b_offset;
 			o->parameter_a = h->ta; o->parameter_b = h->tb;
+			o->kind = h->kind; o->parameter_a_end = h->ta1; o->parameter_b_end = h->tb1;
 			o->position.x = h->p[0]; o->position.y = h->p[1];
 		}
 		else
@@ -401,6 +704,7 @@ static void cb_emit(cb_ctx* x, unsigned int dim, void* out, unsigned int capacit
 			qaws_curve_batch_hit_3d* o = (qaws_curve_batch_hit_3d*)out + i;
 			o->curve_a = h->a; o->curve_b = h->b - b_offset;
 			o->parameter_a = h->ta; o->parameter_b = h->tb;
+			o->kind = h->kind; o->parameter_a_end = h->ta1; o->parameter_b_end = h->tb1;
 			o->position.x = h->p[0]; o->position.y = h->p[1]; o->position.z = h->p[2];
 		}
 	}

@@ -673,6 +673,128 @@ static void test_closest(void)
 	}
 }
 
+
+/* crossing, touch and overlap kinds */
+static qaws_curve* cbt_poly(qaws_scalar const* xy, unsigned int n)
+{
+	qaws_bspline_desc d;
+	qaws_curve* c = NULL;
+	memset(&d, 0, sizeof(d));
+	d.dimension = QAWS_DIMENSION_2D; d.degree = 1; d.control_points = xy; d.control_point_count = n;
+	qaws_curve_create_bspline(&d, &c);
+	return c;
+}
+
+static qaws_curve* cbt_circle(double cx, double cy, double r)
+{
+	static double const ux[9] = { 1, 1, 0, -1, -1, -1, 0, 1, 1 }, uy[9] = { 0, 1, 1, 1, 0, -1, -1, -1, 0 };
+	qaws_scalar cps[18], ws[9], kn[12] = { 0, 0, 0, (qaws_scalar)0.25, (qaws_scalar)0.25, (qaws_scalar)0.5,
+		(qaws_scalar)0.5, (qaws_scalar)0.75, (qaws_scalar)0.75, 1, 1, 1 };
+	qaws_nurbs_desc d;
+	qaws_curve* c = NULL;
+	unsigned int i;
+	for (i = 0; i < 9; i++)
+	{
+		cps[2 * i] = (qaws_scalar)(cx + r * ux[i]);
+		cps[2 * i + 1] = (qaws_scalar)(cy + r * uy[i]);
+		ws[i] = (qaws_scalar)(i % 2 ? sqrt(0.5) : 1);
+	}
+	memset(&d, 0, sizeof(d));
+	d.dimension = QAWS_DIMENSION_2D; d.degree = 2; d.control_points = cps; d.control_point_count = 9;
+	d.knots = kn; d.knot_count = 12; d.weights = ws; d.weight_count = 9;
+	qaws_curve_create_nurbs(&d, &c);
+	return c;
+}
+
+static unsigned int cbt_kinds_of(qaws_curve const* a, qaws_curve const* b, qaws_curve_batch_hit_2d* h, unsigned int cap)
+{
+	qaws_curve const* cs[2];
+	unsigned int fam[2] = { 0, 1 }, n = 0;
+	qaws_curve_batch_desc d;
+	cs[0] = a; cs[1] = b;
+	memset(&d, 0, sizeof(d));
+	d.curves = cs; d.curve_count = 2; d.families = fam;
+	qaws_curve_batch_find_intersections_2d(&d, h, cap, &n, NULL);
+	return n;
+}
+
+static void test_kinds(void)
+{
+	qaws_curve_batch_hit_2d h[16];
+	unsigned int n;
+	char msg[200];
+	/* two squares sharing part of an edge: [0,2]^2 and [1,3] x [-1,0] (their
+	   edges on y = 0 overlap on x in [1, 2], running opposite ways) */
+	{
+		qaws_scalar sa[] = { 0, 0, 2, 0, 2, 2, 0, 2, 0, 0 };
+		qaws_scalar sb[] = { 1, 0, 1, -1, 3, -1, 3, 0, 1, 0 };
+		qaws_curve *a = cbt_poly(sa, 5), *b = cbt_poly(sb, 5);
+		int ok;
+		n = cbt_kinds_of(a, b, h, 16);
+		ok = n == 1 && h[0].kind == QAWS_CURVE_HIT_OVERLAP &&
+			fabs(h[0].parameter_a - 0.5) < 1e-6 && fabs(h[0].parameter_a_end - 1.0) < 1e-6 &&
+			fabs(h[0].parameter_b - 4.0) < 1e-6 && fabs(h[0].parameter_b_end - 3.5) < 1e-6;
+		sprintf(msg, "polygons sharing an edge stretch: one OVERLAP, ends on both (%u hits, kind %u, a [%.4f, %.4f], b [%.4f, %.4f])",
+			n, n ? h[0].kind : 9, n ? (double)h[0].parameter_a : 0.0, n ? (double)h[0].parameter_a_end : 0.0,
+			n ? (double)h[0].parameter_b : 0.0, n ? (double)h[0].parameter_b_end : 0.0);
+		TEST_ASSERT(ok, msg);
+		qaws_curve_destroy(a);
+		qaws_curve_destroy(b);
+	}
+	/* a circle and the same circle's arc as a different kind: overlap with a
+	   non-linear parameter map */
+	{
+		qaws_arc_segment s;
+		qaws_arc_desc ad;
+		qaws_curve *circle = cbt_circle(0, 0, 2), *arc = NULL;
+		memset(&s, 0, sizeof(s));
+		s.radius = 2; s.angle_start = (qaws_scalar)0.5; s.angle_end = (qaws_scalar)2.0;
+		memset(&ad, 0, sizeof(ad));
+		ad.dimension = QAWS_DIMENSION_2D; ad.segments = &s; ad.segment_count = 1;
+		qaws_curve_create_arc(&ad, &arc);
+		n = cbt_kinds_of(circle, arc, h, 16);
+		sprintf(msg, "an arc lying on a circle: one OVERLAP over the whole arc (%u hits, kind %u, arc [%.4f, %.4f] of 3)",
+			n, n ? h[0].kind : 9, n ? (double)h[0].parameter_b : 0.0, n ? (double)h[0].parameter_b_end : 0.0);
+		TEST_ASSERT(n == 1 && h[0].kind == QAWS_CURVE_HIT_OVERLAP &&
+			fabs(h[0].parameter_b) < 1e-6 && fabs(h[0].parameter_b_end - 3.0) < 1e-6, msg);
+		qaws_curve_destroy(circle);
+		qaws_curve_destroy(arc);
+	}
+	/* tangencies: circles touching outside, a line tangent to a circle,
+	   and y = x^3 against the x axis (tangent, but crossing) */
+	{
+		qaws_curve *c1 = cbt_circle(0, 0, 1), *c2 = cbt_circle(3, 0, 2);
+		qaws_scalar ln[] = { -2, 1, 2, 1 };
+		qaws_scalar cu[] = { -1, -1, (qaws_scalar)(-1.0 / 3), 1, (qaws_scalar)(1.0 / 3), -1, 1, 1 };
+		qaws_scalar ax[] = { -2, 0, 2, 0 };
+		qaws_curve *line = cbt_poly(ln, 2), *axis = cbt_poly(ax, 2), *cubic = NULL;
+		qaws_bezier_desc bd;
+		unsigned int n1, n2, n3, k1, k2, k3;
+		memset(&bd, 0, sizeof(bd));
+		bd.dimension = QAWS_DIMENSION_2D; bd.degree = 3; bd.control_points = cu; bd.control_point_count = 4;
+		qaws_curve_create_bezier(&bd, &cubic);
+		n1 = cbt_kinds_of(c1, c2, h, 16); k1 = n1 ? h[0].kind : 9;
+		n2 = cbt_kinds_of(c1, line, h, 16); k2 = n2 ? h[0].kind : 9;
+		n3 = cbt_kinds_of(cubic, axis, h, 16); k3 = n3 ? h[0].kind : 9;
+		sprintf(msg, "tangent circles TOUCH (%u, kind %u), tangent line TOUCH (%u, kind %u), y = x^3 on its inflection tangent CROSSING (%u, kind %u)",
+			n1, k1, n2, k2, n3, k3);
+		TEST_ASSERT(n1 == 1 && k1 == QAWS_CURVE_HIT_TOUCH && n2 == 1 && k2 == QAWS_CURVE_HIT_TOUCH &&
+			n3 == 1 && k3 == QAWS_CURVE_HIT_CROSSING, msg);
+		/* a transversal crossing, and an end lying on another curve */
+		{
+			qaws_scalar l1[] = { -2, -2, 2, 2 }, l2[] = { 0, 0, 1, -3 };
+			qaws_curve *d1 = cbt_poly(l1, 2), *d2 = cbt_poly(l2, 2);
+			unsigned int n4 = cbt_kinds_of(d1, axis, h, 16), k4 = n4 ? h[0].kind : 9;
+			unsigned int n5 = cbt_kinds_of(axis, d2, h, 16), k5 = n5 ? h[0].kind : 9;
+			sprintf(msg, "transversal lines CROSSING (%u, kind %u); a line ending on another TOUCH (%u, kind %u)", n4, k4, n5, k5);
+			TEST_ASSERT(n4 == 1 && k4 == QAWS_CURVE_HIT_CROSSING && n5 == 1 && k5 == QAWS_CURVE_HIT_TOUCH, msg);
+			qaws_curve_destroy(d1);
+			qaws_curve_destroy(d2);
+		}
+		qaws_curve_destroy(c1); qaws_curve_destroy(c2);
+		qaws_curve_destroy(line); qaws_curve_destroy(axis); qaws_curve_destroy(cubic);
+	}
+}
 int test_79_curve_batch_main(void)
 {
 	g_pass = 0;
@@ -686,6 +808,7 @@ int test_79_curve_batch_main(void)
 	test_sets();
 	test_levels();
 	test_closest();
+	test_kinds();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
 }

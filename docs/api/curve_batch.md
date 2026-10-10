@@ -50,10 +50,17 @@ typedef struct qaws_curve_batch_desc {
 	qaws_scalar flatness;           /* chord deviation bound; 0 = 2^-10 of the scene extent */
 } qaws_curve_batch_desc;
 
+#define QAWS_CURVE_HIT_CROSSING 0u
+#define QAWS_CURVE_HIT_TOUCH    1u
+#define QAWS_CURVE_HIT_OVERLAP  2u
+
 typedef struct qaws_curve_batch_hit_2d {   /* _3d: qaws_vec3 position */
 	unsigned int curve_a, curve_b;          /* curve_a < curve_b, or equal for a self-intersection */
 	qaws_scalar parameter_a, parameter_b;   /* parameter_a < parameter_b when curve_a == curve_b */
 	qaws_vec2 position;
+	unsigned int kind;                      /* QAWS_CURVE_HIT_* */
+	qaws_scalar parameter_a_end;            /* OVERLAP: other end of the shared stretch; else parameter_a */
+	qaws_scalar parameter_b_end;            /* OVERLAP: other end on curve_b; else parameter_b */
 } qaws_curve_batch_hit_2d;
 
 typedef struct qaws_curve_batch_stats {
@@ -83,9 +90,39 @@ Every curve must have the function's dimension, or the call returns
 `QAWS_STATUS_INVALID_DIMENSION`. The functions are thread-safe on immutable
 curves.
 
-Tangential contacts are not reported, because Newton's Jacobian is singular
-there. The pairwise `qaws_curve_find_intersections_*` calls have the same
-limit.
+## Hit kinds
+
+Every hit says how the two curves meet:
+
+- **CROSSING**: they pass from one side to the other. This covers
+  transversal hits, and tangent hits with an odd contact, such as y = x³
+  against its inflection tangent.
+- **TOUCH**: they meet without crossing. Examples are tangent circles, a
+  line tangent to a circle, and the end of an open curve lying on another
+  curve.
+- **OVERLAP**: they share a stretch. It runs over `[parameter_a,
+  parameter_a_end]` on curve a, always increasing, and over `[parameter_b,
+  parameter_b_end]` on curve b, decreasing when the curves run opposite
+  ways. Two polygons sharing part of an edge give one overlap, and so does an
+  arc lying on a NURBS circle, even though the parameters map non-linearly.
+
+How each kind is found:
+
+- **Overlaps.** Nearly parallel chords trigger the overlap test. Segment
+  ends that lie on the other curve, within 16 times the position tolerance,
+  bound a candidate stretch. Three points between them must lie on the
+  other curve too. Overlaps of one curve pair that meet are joined into one
+  maximal stretch, and point hits on a stretch are dropped. The seam of a
+  closed curve counts as the same point from both sides.
+- **Tangencies.** Newton converges slowly there, and a flat contact (y = x³
+  near 0) stays within tolerance over a short stretch. Hits of one pair
+  joined by such a stretch become one hit, placed at its middle. To
+  classify a tangent hit, the test steps off both ends of the stretch along
+  curve a until it leaves the tolerance. It goes up to 1% of the scene
+  extent, or 10% in float builds, then compares which side of curve b each
+  end lies on.
+
+3D hits are CROSSING or OVERLAP.
 
 ## Numbers
 
