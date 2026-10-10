@@ -38,6 +38,7 @@
 #include "internal/qaws_internal_types.h"
 #include "internal/qaws_internal_flatten.h"
 #include "internal/qaws_internal_path.h"
+#include "internal/qaws_internal_broadphase.h"
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -423,12 +424,6 @@ typedef struct cl_lseg
 	unsigned int src;
 } cl_lseg;
 
-static int cl_cmp_lseg(void const* p, void const* q)
-{
-	double a = ((cl_lseg const*)p)->lo[0], b = ((cl_lseg const*)q)->lo[0];
-	return a < b ? -1 : (a > b ? 1 : 0);
-}
-
 static int cl_is_line_src(cl_ctx const* x, unsigned int i)
 {
 	qaws_curve const* c = x->src[i].c;
@@ -496,6 +491,20 @@ static qaws_status cl_line_pair(cl_ctx* x, cl_lseg const* A, cl_lseg const* B)
 	}
 }
 
+typedef struct cl_line_ctx
+{
+	cl_ctx* x;
+	cl_lseg const* L;
+} cl_line_ctx;
+
+static qaws_status cl_line_visit(void* user, unsigned int i, unsigned int j)
+{
+	cl_line_ctx* c = (cl_line_ctx*)user;
+	cl_lseg const* A = &c->L[i];
+	cl_lseg const* B = &c->L[j];
+	return A->src < B->src ? cl_line_pair(c->x, A, B) : cl_line_pair(c->x, B, A);
+}
+
 static qaws_status cl_line_hits(cl_ctx* x)
 {
 	unsigned int n = 0, i, j;
@@ -519,15 +528,24 @@ static qaws_status cl_line_hits(cl_ctx* x)
 		g->hi[1] = g->a[1] < g->b[1] ? g->b[1] : g->a[1];
 		g->src = i;
 	}
-	/* sweep in x: each line against the ones starting before it ends */
-	qsort(L, n, sizeof(cl_lseg), cl_cmp_lseg);
-	for (i = 0; i < n && s == QAWS_STATUS_OK; i++)
-		for (j = i + 1; j < n && L[j].lo[0] <= L[i].hi[0] && s == QAWS_STATUS_OK; j++)
+	/* the pairs of overlapping boxes, from the shared uniform grid */
+	if (n > 1)
+	{
+		qaws_bp_box* boxes = (qaws_bp_box*)malloc(sizeof(qaws_bp_box) * n);
+		cl_line_ctx lc;
+		if (!boxes) { free(L); return QAWS_STATUS_ALLOCATION_FAILURE; }
+		for (i = 0; i < n; i++)
 		{
-			if (L[j].lo[1] > L[i].hi[1] || L[j].hi[1] < L[i].lo[1])
-				continue;
-			s = L[i].src < L[j].src ? cl_line_pair(x, &L[i], &L[j]) : cl_line_pair(x, &L[j], &L[i]);
+			boxes[i].lo[0] = L[i].lo[0]; boxes[i].hi[0] = L[i].hi[0];
+			boxes[i].lo[1] = L[i].lo[1]; boxes[i].hi[1] = L[i].hi[1];
+			boxes[i].lo[2] = boxes[i].hi[2] = 0;
 		}
+		lc.x = x;
+		lc.L = L;
+		s = qaws_internal_broadphase(boxes, n, 2, NULL, cl_line_visit, &lc, NULL);
+		free(boxes);
+	}
+	(void)j;
 	free(L);
 	return s;
 }

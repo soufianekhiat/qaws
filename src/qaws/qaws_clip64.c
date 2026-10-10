@@ -24,6 +24,7 @@
 
 #include "qaws_clip64.h"
 #include "internal/qaws_internal_wide.h"
+#include "internal/qaws_internal_broadphase.h"
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -152,6 +153,18 @@ static int c64_cmp_t(c64_cut const* a, c64_cut const* b)
 	return c64_cmp_coord(&a->tn, &a->td, &b->tn, &b->td);
 }
 
+/* sign of ax by - ay bx for int64 components: in double when the result is
+   farther from zero than its rounding error, exactly otherwise */
+static int c64_cross_sign(int64_t ax, int64_t ay, int64_t bx, int64_t by)
+{
+	double p = (double)ax * (double)by, q = (double)ay * (double)bx, d = p - q;
+	qaws_wide c;
+	if (fabs(d) > 8e-16 * (fabs(p) + fabs(q)) + 1e-300)
+		return d > 0 ? 1 : -1;
+	c = qaws_wide_cross(ax, ay, bx, by);
+	return qaws_wide_sign(&c);
+}
+
 /* merge sort of indices with a context comparator (qsort has no context) */
 typedef int (*c64_cmp_fn)(void const* ctx, unsigned int a, unsigned int b);
 
@@ -264,10 +277,31 @@ static qaws_status c64_pair(c64_ctx* x, unsigned int ia, unsigned int ib)
 	c64_seg const* B = &x->seg[ib];
 	int64_t rx = A->bx - A->ax, ry = A->by - A->ay, sx = B->bx - B->ax, sy = B->by - B->ay;
 	int64_t wx = B->ax - A->ax, wy = B->ay - A->ay;
-	qaws_wide den = qaws_wide_cross(rx, ry, sx, sy), zero = qaws_wide_from_i64(0), one = qaws_wide_from_i64(1);
+	qaws_wide den, zero, one;
 	qaws_status st;
 	if (A->operand == 2 && B->operand == 2)
 		return QAWS_STATUS_OK;
+	/* filter in double: the products are exact to a relative 2^-52 each, so
+	   a cross product off zero by more than its error bound has its sign;
+	   pairs that clearly miss are dropped without the exact arithmetic */
+	{
+		double drx = (double)rx, dry = (double)ry, dsx = (double)sx, dsy = (double)sy, dwx = (double)wx, dwy = (double)wy;
+		double fden = drx * dsy - dry * dsx, eden = 4e-16 * (fabs(drx * dsy) + fabs(dry * dsx));
+		double ftn = dwx * dsy - dwy * dsx, etn = 4e-16 * (fabs(dwx * dsy) + fabs(dwy * dsx));
+		double fun = dwx * dry - dwy * drx, eun = 4e-16 * (fabs(dwx * dry) + fabs(dwy * drx));
+		if (fabs(fden) > eden)
+		{
+			/* t = tn / den and u = un / den must both lie in [0, 1] */
+			double sden = fden > 0 ? 1.0 : -1.0, tn = ftn * sden, un = fun * sden, ad = fabs(fden);
+			if (tn < -etn || un < -eun || tn - ad > etn + eden || un - ad > eun + eden)
+				return QAWS_STATUS_OK;
+		}
+		else if (fabs(fun) > eun)
+			return QAWS_STATUS_OK;   /* parallel, not collinear */
+	}
+	den = qaws_wide_cross(rx, ry, sx, sy);
+	zero = qaws_wide_from_i64(0);
+	one = qaws_wide_from_i64(1);
 	if (qaws_wide_sign(&den) != 0)
 	{
 		qaws_wide tn = qaws_wide_cross(wx, wy, sx, sy), un = qaws_wide_cross(wx, wy, rx, ry);
@@ -346,20 +380,27 @@ static qaws_status c64_pair(c64_ctx* x, unsigned int ia, unsigned int ib)
 	return QAWS_STATUS_OK;
 }
 
-static int c64_cmp_seg_lox(void const* ctx, unsigned int a, unsigned int b)
+static qaws_status c64_visit(void* user, unsigned int i, unsigned int j)
 {
-	c64_ctx const* x = (c64_ctx const*)ctx;
-	int64_t p = x->seg[a].lox, q = x->seg[b].lox;
-	return p < q ? -1 : (p > q ? 1 : 0);
+	c64_ctx* x = (c64_ctx*)user;
+	c64_seg const* A = &x->seg[i];
+	c64_seg const* B = &x->seg[j];
+	/* the grid's boxes are a hair wide (doubles); the exact boxes decide */
+	if (B->lox > A->hix || B->hix < A->lox || B->loy > A->hiy || B->hiy < A->loy)
+		return QAWS_STATUS_OK;
+	return c64_pair(x, i, j);
 }
+
+static double c64_down(int64_t v) { double d = (double)v; return d - fabs(d) * 4e-16 - 1e-300; }
+static double c64_up(int64_t v) { double d = (double)v; return d + fabs(d) * 4e-16 + 1e-300; }
 
 static qaws_status c64_hits(c64_ctx* x)
 {
-	unsigned int* idx = (unsigned int*)malloc(sizeof(unsigned int) * 2 * (x->nseg + 1));
-	unsigned int i, j;
+	qaws_bp_box* boxes = (qaws_bp_box*)malloc(sizeof(qaws_bp_box) * (x->nseg + 1));
+	unsigned int i;
 	qaws_status s = QAWS_STATUS_OK;
 	qaws_wide zero = qaws_wide_from_i64(0), one = qaws_wide_from_i64(1);
-	if (!idx)
+	if (!boxes)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	/* every segment's end points */
 	for (i = 0; i < x->nseg && s == QAWS_STATUS_OK; i++)
@@ -369,21 +410,14 @@ static qaws_status c64_hits(c64_ctx* x)
 		if (s == QAWS_STATUS_OK) s = c64_add_cut(x, i, &zero, &one, p);
 		if (s == QAWS_STATUS_OK) s = c64_add_point(x, x->seg[i].bx, x->seg[i].by, &p);
 		if (s == QAWS_STATUS_OK) s = c64_add_cut(x, i, &one, &one, p);
+		boxes[i].lo[0] = c64_down(x->seg[i].lox); boxes[i].hi[0] = c64_up(x->seg[i].hix);
+		boxes[i].lo[1] = c64_down(x->seg[i].loy); boxes[i].hi[1] = c64_up(x->seg[i].hiy);
+		boxes[i].lo[2] = boxes[i].hi[2] = 0;
 	}
-	for (i = 0; i < x->nseg; i++) idx[i] = i;
-	c64_sort(idx, idx + x->nseg, x->nseg, c64_cmp_seg_lox, x);
-	for (i = 0; i < x->nseg && s == QAWS_STATUS_OK; i++)
-	{
-		c64_seg const* A = &x->seg[idx[i]];
-		for (j = i + 1; j < x->nseg && x->seg[idx[j]].lox <= A->hix && s == QAWS_STATUS_OK; j++)
-		{
-			c64_seg const* B = &x->seg[idx[j]];
-			if (B->loy > A->hiy || B->hiy < A->loy)
-				continue;
-			s = idx[i] < idx[j] ? c64_pair(x, idx[i], idx[j]) : c64_pair(x, idx[j], idx[i]);
-		}
-	}
-	free(idx);
+	/* the pairs of overlapping boxes, from the shared uniform grid */
+	if (s == QAWS_STATUS_OK && x->nseg > 1)
+		s = qaws_internal_broadphase(boxes, x->nseg, 2, NULL, c64_visit, x, NULL);
+	free(boxes);
 	return s;
 }
 
@@ -524,15 +558,13 @@ static int c64_before(c64_ctx const* x, unsigned int a, unsigned int b)
 {
 	int64_t ax, ay, bx, by;
 	int ha, hb;
-	qaws_wide c;
 	c64_dir(x, a, &ax, &ay);
 	c64_dir(x, b, &bx, &by);
 	ha = (ay > 0 || (ay == 0 && ax > 0)) ? 0 : 1;
 	hb = (by > 0 || (by == 0 && bx > 0)) ? 0 : 1;
 	if (ha != hb)
 		return ha < hb;
-	c = qaws_wide_cross(ax, ay, bx, by);
-	return qaws_wide_sign(&c) > 0;
+	return c64_cross_sign(ax, ay, bx, by) > 0;
 }
 
 static qaws_status c64_graph(c64_ctx* x)
@@ -678,12 +710,10 @@ static qaws_status c64_faces(c64_ctx* x, unsigned int* out_faces)
 		{
 			unsigned int prev = low, g = x->h[low].next;
 			int64_t ix, iy, ox, oy;
-			qaws_wide cr;
 			while (g != low) { prev = g; g = x->h[g].next; }
 			c64_dir(x, prev, &ix, &iy);
 			c64_dir(x, low, &ox, &oy);
-			cr = qaws_wide_cross(ix, iy, ox, oy);
-			c.ccw = qaws_wide_sign(&cr) > 0;
+			c.ccw = c64_cross_sign(ix, iy, ox, oy) > 0;
 		}
 		if (ncyc == capc)
 		{
@@ -798,6 +828,10 @@ static int64_t c64_round(qaws_wide const* n, qaws_wide const* d)
 	double approx = qaws_wide_to_double(n) / qaws_wide_to_double(d);
 	int64_t c = (int64_t)floor(approx + 0.5);
 	int k;
+	/* the double is good to a few ulps: far from a half and well inside
+	   2^52, its rounding is the exact one */
+	if (fabs(approx) < 4503599627370496.0 / 1024 && fabs(approx - floor(approx) - 0.5) > 1e-6)
+		return c;
 	/* correct the double guess: |2 (n - c d)| <= d */
 	for (k = 0; k < 4; k++)
 	{
@@ -1028,11 +1062,9 @@ static qaws_status c64_output(c64_ctx* x, unsigned int nfaces, int const* inside
 				{
 					unsigned int prev = low == from ? top - 1 : low - 1;
 					int64_t ix, iy, ox, oy;
-					qaws_wide cr;
 					c64_dir(x, st[prev], &ix, &iy);
 					c64_dir(x, st[low], &ox, &oy);
-					cr = qaws_wide_cross(ix, iy, ox, oy);
-					ccw = qaws_wide_sign(&cr) > 0;
+					ccw = c64_cross_sign(ix, iy, ox, oy) > 0;
 				}
 				verts = (unsigned int*)malloc(sizeof(unsigned int) * (len + 1));
 				if (!verts) { s = QAWS_STATUS_ALLOCATION_FAILURE; goto done; }

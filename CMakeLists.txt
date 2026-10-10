@@ -402,6 +402,28 @@ if(QAWS_BUILD_EXAMPLES)
   endif()
 endif()
 
+
+# Clipper2 comparison (optional; Clipper2 is compiled into the benchmark only).
+option(QAWS_BUILD_CLIPPER2_BENCH "Build the Clipper2 comparison benchmark" OFF)
+set(QAWS_CLIPPER2_DIR "" CACHE PATH "A Clipper2 checkout (the directory holding CPP/Clipper2Lib)")
+if(QAWS_BUILD_CLIPPER2_BENCH)
+  if(NOT EXISTS "${QAWS_CLIPPER2_DIR}/CPP/Clipper2Lib/src/clipper.engine.cpp")
+    message(FATAL_ERROR "QAWS_CLIPPER2_DIR must point at a Clipper2 checkout")
+  endif()
+  enable_language(CXX)
+  add_executable(qaws_clipper2_compare
+    bench/clipper2_compare.cpp
+    "${QAWS_CLIPPER2_DIR}/CPP/Clipper2Lib/src/clipper.engine.cpp"
+    "${QAWS_CLIPPER2_DIR}/CPP/Clipper2Lib/src/clipper.offset.cpp"
+    "${QAWS_CLIPPER2_DIR}/CPP/Clipper2Lib/src/clipper.rectclip.cpp")
+  target_include_directories(qaws_clipper2_compare PRIVATE
+    "${QAWS_CLIPPER2_DIR}/CPP/Clipper2Lib/include" "${PROJECT_SOURCE_DIR}/src/qaws")
+  target_link_libraries(qaws_clipper2_compare PRIVATE Qaws::qaws)
+  set_target_properties(qaws_clipper2_compare PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES
+    RUNTIME_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/working_dir"
+    RUNTIME_OUTPUT_DIRECTORY_RELEASE "${PROJECT_SOURCE_DIR}/working_dir"
+    RUNTIME_OUTPUT_DIRECTORY_DEBUG "${PROJECT_SOURCE_DIR}/working_dir")
+endif()
 if(BUILD_TESTING)
   add_subdirectory(tests)
   add_custom_target(

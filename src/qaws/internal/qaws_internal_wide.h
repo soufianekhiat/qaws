@@ -3,7 +3,7 @@
 
 /*
  * Fixed-width signed integers for exact predicates on int64 coordinates:
- * qaws_wide holds 512 bits in eight 64-bit limbs (two's complement), enough
+ * qaws_wide holds 384 bits in six 64-bit limbs (two's complement), enough
  * for products of a 64-bit coordinate, two 128-bit cross products and their
  * comparisons. Header-only; the 64 x 64 -> 128 multiply uses the compiler's
  * intrinsic where there is one.
@@ -16,7 +16,7 @@
 #include <intrin.h>
 #endif
 
-#define QAWS_WIDE_LIMBS 8
+#define QAWS_WIDE_LIMBS 6
 
 typedef struct qaws_wide
 {
@@ -95,7 +95,8 @@ QAWS_INLINE qaws_wide qaws_wide_sub(qaws_wide a, qaws_wide const* b)
 	return qaws_wide_add(a, &nb);
 }
 
-/* a * b, truncated to 512 bits (callers stay well inside) */
+/* a * b, truncated to 384 bits (callers stay inside: the largest product
+   in the int64 engine is about 2^375) */
 QAWS_INLINE qaws_wide qaws_wide_mul(qaws_wide const* a, qaws_wide const* b)
 {
 	qaws_wide x = *a, y = *b, r;
