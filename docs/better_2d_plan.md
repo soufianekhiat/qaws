@@ -349,3 +349,29 @@ the local checkout `C:\git\dunya\extern\clipper2` and compares results and timin
 - Correspondence matching between stack levels (which contour goes to which, start
   point alignment) is where the 2.5D results can surprise; the distance-field blend
   is the fallback and the matching is reported.
+
+---
+
+## 8. Status (2026-10-10)
+
+| Item | State |
+|---|---|
+| 1. Foundations | done: `qaws_curve_extract` (exact pieces of every kind), reverse for every kind, geometric `is_closed`, Hermite interior split fixed, hit kinds CROSSING / TOUCH / OVERLAP in the curve batch, CMake amalgamation (no Python) with the single-file build fixed |
+| 2. Paths and utilities | float done (`qaws_path.h`: area, bounds, point location with fill rules, winding, transforms, ellipse, polyline, Clipper2's strip / trim / simplify / RDP); exact counterparts come with the int64 types (`qaws_path64_area2` so far) |
+| 3. Float engine | done: `qaws_clip.h` (every clip type and fill rule, open subjects, nesting, z callback, reverse / preserve collinear); `qaws_boolean_2d` wraps it |
+| 4. Parity corpus | Polygons.txt and Lines.txt in test 85: 195 / 195 and 16 / 16, oracle clean in f64 and f32; PolytreeHoleOwner and Offsets.txt pending (with offsets) |
+| 5. Exact polylines | done: `qaws_clip64.h` (rational vertices, exact predicates, 195 / 195 on the corpus with an exact oracle); benchmark against Clipper2 in `bench/`; lazy exact arithmetic pending (9-23 times slower than Clipper2 today) |
+| 6-10 | next |
+
+Decisions made on the way:
+
+- The float engine splits polylines and composites into one source per
+  segment, so every corner is a vertex and doubled-back stretches meet as
+  overlaps; line x line hits are computed in double from the end points
+  (one rounding), lines evaluated in double whatever the scalar type.
+- Loops are cut where they pass a vertex twice (parts touching at a point),
+  as Clipper2 does.
+- Clipper2's stored path counts depend on its integer rounding; parity is
+  checked as: areas within Clipper2's tolerances, its count between ours
+  with touching pieces joined (slivers under a unit dropped) and ours, and
+  every result checked against the definition by an oracle.
