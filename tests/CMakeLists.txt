@@ -85,6 +85,7 @@ add_executable(
   81_surface_batch.c
   82_curve_extract.c
   83_path.c
+  84_clip.c
 )
 
 # The amalgamated library exports exactly the same symbols, so the tests can

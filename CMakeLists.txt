@@ -68,6 +68,7 @@ set(QAWS_SOURCES
   src/qaws/qaws_operations.c
   src/qaws/qaws_extract.c
   src/qaws/qaws_path.c
+  src/qaws/qaws_clip.c
   src/qaws/qaws_convert.c
   src/qaws/qaws_export.c
   src/qaws/qaws_import.c
@@ -474,6 +475,7 @@ if(QAWS_INSTALL)
       src/qaws/qaws_brep.h
       src/qaws/qaws_boolean_2d.h
       src/qaws/qaws_path.h
+      src/qaws/qaws_clip.h
       src/qaws/qaws_alloc.h
       src/qaws/qaws_inline.h
       src/qaws/qaws_diff.h

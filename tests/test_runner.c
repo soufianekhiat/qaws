@@ -95,6 +95,7 @@ extern int test_80_exact_batch_main(void);
 extern int test_81_surface_batch_main(void);
 extern int test_82_curve_extract_main(void);
 extern int test_83_path_main(void);
+extern int test_84_clip_main(void);
 
 /* Test registry */
 typedef struct {
@@ -187,6 +188,7 @@ static test_suite const g_test_suites[] = {
 	{"81_surface_batch", test_81_surface_batch_main},
 	{"82_curve_extract", test_82_curve_extract_main},
 	{"83_path", test_83_path_main},
+	{"84_clip", test_84_clip_main},
 };
 
 int main(void) {

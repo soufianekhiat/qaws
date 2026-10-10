@@ -20,6 +20,7 @@
 #include "internal/qaws_internal_types.h"
 #include "internal/qaws_internal_kinds.h"
 #include "internal/qaws_internal_flatten.h"
+#include "internal/qaws_internal_path.h"
 #if defined(QAWS_ENABLE_EXACT) && QAWS_ENABLE_EXACT
 #include "qaws_exact.h"
 #endif
@@ -498,7 +499,8 @@ static qaws_status pt_area_piece(qaws_curve const* c, double a, double b, double
 	qaws_status s = pt_gauss(c, a, b, 0, &g8);
 	if (s == QAWS_STATUS_OK) s = pt_gauss(c, a, b, 1, &g16);
 	if (s != QAWS_STATUS_OK) return s;
-	if (fabs(g16 - g8) <= tol || depth >= 24)
+	/* agreed, or agreed to rounding of the value itself */
+	if (fabs(g16 - g8) <= tol || fabs(g16 - g8) <= PT_AREA_REL * 10 * (fabs(g16) + fabs(g8)) || depth >= 24)
 	{
 		*out = g16;
 		return QAWS_STATUS_OK;
@@ -1160,5 +1162,26 @@ qaws_status qaws_polyline_rdp_2d(qaws_scalar const* points, unsigned int count, 
 		}
 	free(keep);
 	*out_count = m;
+	return QAWS_STATUS_OK;
+}
+
+qaws_status qaws_internal_curve_area_2d(qaws_curve const* c, double t0, double t1, double tol, double* out)
+{
+	double lo = t0 < t1 ? t0 : t1, hi = t0 < t1 ? t1 : t0, sum = 0.0;
+	unsigned int s;
+	for (s = 0; s < c->span_count; s++)
+	{
+		double a = c->span_boundaries[s], b = c->span_boundaries[s + 1], v = 0.0;
+		qaws_status st;
+		if (a < lo) a = lo;
+		if (b > hi) b = hi;
+		if (!(b > a))
+			continue;
+		st = pt_area_piece(c, a, b, tol / (c->span_count + 1), 0, &v);
+		if (st != QAWS_STATUS_OK)
+			return st;
+		sum += v;
+	}
+	*out = t0 < t1 ? sum : -sum;
 	return QAWS_STATUS_OK;
 }

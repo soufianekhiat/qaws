@@ -4,6 +4,8 @@
  * Writes SVG figures into ./showcase/:
  *   b2d1_extract.svg   the exact piece of a curve of every kind between two
  *                      parameters, as a new curve, over its source
+ *   b2d2_boolean.svg   Boolean operations on polygons, NURBS and B-spline
+ *                      regions, fill rules, nesting, open paths
  *
  * Each figure lives in better2d_showcase/NN_*.c, compiled as one translation
  * unit.
@@ -14,6 +16,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #ifdef _WIN32
 #include <direct.h>
@@ -26,11 +29,13 @@
 #include "example_svg.h"
 
 #include "better2d_showcase/01_extract.c"
+#include "better2d_showcase/02_boolean.c"
 
 int main(void)
 {
 	setvbuf(stdout, NULL, _IONBF, 0);
 	MAKE_DIR("showcase");
 	demo_extract();
+	demo_boolean();
 	return 0;
 }
