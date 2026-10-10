@@ -654,6 +654,45 @@ static int cl_cmp_cut(void const* a, void const* b)
 	return ta < tb ? -1 : (ta > tb ? 1 : 0);
 }
 
+/* the cuts of one source by t: insertion sort for runs of 16, then merges (stable, inline compare) */
+static void cl_sort_cuts(cl_cut* c, unsigned int n)
+{
+	unsigned int a, b, w;
+	cl_cut* tmp;
+	for (a = 0; a < n; a += 16)
+	{
+		unsigned int e = a + 16 < n ? a + 16 : n, i;
+		for (i = a + 1; i < e; i++)
+		{
+			cl_cut key = c[i];
+			for (b = i; b > a && c[b - 1].t > key.t; b--)
+				c[b] = c[b - 1];
+			c[b] = key;
+		}
+	}
+	if (n <= 16)
+		return;
+	tmp = (cl_cut*)malloc(sizeof(cl_cut) * n);
+	if (!tmp)
+	{
+		qsort(c, n, sizeof(cl_cut), cl_cmp_cut);
+		return;
+	}
+	for (w = 16; w < n; w *= 2)
+	{
+		for (a = 0; a < n; a += 2 * w)
+		{
+			unsigned int i = a, im = a + w < n ? a + w : n, j = im, jm = a + 2 * w < n ? a + 2 * w : n, k = a;
+			while (i < im && j < jm)
+				tmp[k++] = c[j].t < c[i].t ? c[j++] : c[i++];
+			while (i < im) tmp[k++] = c[i++];
+			while (j < jm) tmp[k++] = c[j++];
+		}
+		memcpy(c, tmp, sizeof(cl_cut) * n);
+	}
+	free(tmp);
+}
+
 /* distance from q to the curve of an edge (Gauss-Newton on its range) */
 static double cl_dist_to_edge(cl_ctx const* x, cl_edge const* e, double const* q)
 {
@@ -806,6 +845,40 @@ static int cl_cmp_key(void const* a, void const* b)
 	return p->e < q->e ? -1 : (p->e > q->e ? 1 : 0);
 }
 
+/* the keys by (lo, hi, e): a counting sort on lo (a vertex), then each
+   vertex's few keys by insertion */
+static qaws_status cl_sort_keys(cl_pair_key* k, unsigned int n, unsigned int nv)
+{
+	unsigned int* start = (unsigned int*)calloc(nv + 2, sizeof(unsigned int));
+	cl_pair_key* tmp = (cl_pair_key*)malloc(sizeof(cl_pair_key) * (n ? n : 1));
+	unsigned int i, v;
+	if (!start || !tmp)
+	{
+		free(start);
+		free(tmp);
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	}
+	for (i = 0; i < n; i++) start[k[i].lo + 1]++;
+	for (v = 0; v < nv; v++) start[v + 1] += start[v];
+	for (i = 0; i < n; i++) tmp[start[k[i].lo]++] = k[i];
+	for (v = 0, i = 0; v < nv; v++)
+	{
+		unsigned int e = start[v], a, b;
+		for (a = i + 1; a < e; a++)
+		{
+			cl_pair_key key = tmp[a];
+			for (b = a; b > i && cl_cmp_key(&tmp[b - 1], &key) > 0; b--)
+				tmp[b] = tmp[b - 1];
+			tmp[b] = key;
+		}
+		i = e;
+	}
+	memcpy(k, tmp, sizeof(cl_pair_key) * n);
+	free(start);
+	free(tmp);
+	return QAWS_STATUS_OK;
+}
+
 static qaws_status cl_merge_edges(cl_ctx* x)
 {
 	cl_pair_key* k = (cl_pair_key*)malloc(sizeof(cl_pair_key) * (x->ne ? x->ne : 1));
@@ -818,7 +891,11 @@ static qaws_status cl_merge_edges(cl_ctx* x)
 		k[i].hi = x->e[i].v0 < x->e[i].v1 ? x->e[i].v1 : x->e[i].v0;
 		k[i].e = i;
 	}
-	qsort(k, x->ne, sizeof(cl_pair_key), cl_cmp_key);
+	if (cl_sort_keys(k, x->ne, x->nv) != QAWS_STATUS_OK)
+	{
+		free(k);
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	}
 	for (i = 0; i < x->ne; i = j)
 	{
 		for (j = i + 1; j < x->ne && k[j].lo == k[i].lo && k[j].hi == k[i].hi; j++)
