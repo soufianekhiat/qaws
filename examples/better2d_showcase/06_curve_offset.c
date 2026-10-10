@@ -204,7 +204,7 @@ static void demo_curve_offset(void)
 			svg_panel(&s, &v, "parabola, offset 1 toward its focus");
 			co_parallel(&s, &v, parabola, -1);
 			co_curve(&s, &v, parabola, "#57606a", 2.0, 0.9, 0);
-			qaws_internal_offset_curve(parabola, -1, 2e-6, &ch, &nk, cusps, 8, &nc);
+			qaws_internal_offset_curve(parabola, -1, 2e-6, &ch, 1, &nk, cusps, 8, &nc);
 			if (ch)
 			{
 				co_curve(&s, &v, ch, "#cf222e", 2.2, 0.95, 0);
@@ -228,7 +228,7 @@ static void demo_curve_offset(void)
 				double cusps[8], d = side ? -0.6 : 0.6;
 				unsigned int nk = 0;
 				co_parallel(&s, &v, scurve, d);
-				qaws_internal_offset_curve(scurve, d, 4e-6, &ch, &nk, cusps, 8, &ncs[side]);
+				qaws_internal_offset_curve(scurve, d, 4e-6, &ch, 1, &nk, cusps, 8, &ncs[side]);
 				if (ch)
 				{
 					co_curve(&s, &v, ch, side ? "#bc4c00" : "#0969da", 2.2, 0.95, 0);
@@ -254,7 +254,7 @@ static void demo_curve_offset(void)
 			p.curves = &cc; p.curve_count = 1; p.closed = 1;
 			co_view(&v, x0, y0, pw, ph, 0, 0, 9.2);
 			svg_panel(&s, &v, k == 2 ? "star grown by 1: raw chain, then the union" : "star shrunk by 0.45: raw chain, then the union");
-			qaws_internal_offset_curve(star, d, 1e-5, &ch, &nk, cusps, 64, &nc);
+			qaws_internal_offset_curve(star, d, 1e-5, &ch, 1, &nk, cusps, 64, &nc);
 			if (qaws_offset_paths(&p, 1, (qaws_scalar)d, QAWS_JOIN_ROUND, QAWS_END_POLYGON, &r) == QAWS_STATUS_OK)
 				co_result(&s, &v, r, k == 2 ? "#c8e1ff" : "#dafbe1", k == 2 ? "#0969da" : "#1a7f37", &cub, 0);
 			if (ch) co_curve(&s, &v, ch, "#cf222e", 0.9, 0.85, 0);

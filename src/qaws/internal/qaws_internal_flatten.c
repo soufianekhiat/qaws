@@ -116,6 +116,26 @@ static qaws_status fl_curve_piece(fl_curve* f, qaws_scalar t0, qaws_scalar const
 	if (d > dev) dev = d;
 	d = fl_point_segment(pb, p0, p1);
 	if (d > dev) dev = d;
+	/* the probes must also advance along the chord: a piece folding back
+	   on its own line (a cusp, collinear control points doubling back) is
+	   flat yet no chord of it */
+	{
+		qaws_scalar ab[3], w[3], l, sa, sm, sb;
+		int k;
+		for (k = 0; k < 3; k++) ab[k] = p1[k] - p0[k];
+		l = (qaws_scalar)sqrt(fl_dot(ab, ab));
+		if (l > 0)
+		{
+			for (k = 0; k < 3; k++) w[k] = pa[k] - p0[k];
+			sa = fl_dot(w, ab) / l;
+			for (k = 0; k < 3; k++) w[k] = pm[k] - p0[k];
+			sm = fl_dot(w, ab) / l;
+			for (k = 0; k < 3; k++) w[k] = pb[k] - p0[k];
+			sb = fl_dot(w, ab) / l;
+			if (sa < -f->flat || sa > sm + f->flat || sm > sb + f->flat || sb > l + f->flat)
+				dev = (qaws_scalar)HUGE_VAL;
+		}
+	}
 	if (depth >= FL_CURVE_MAX_DEPTH || dev <= f->flat)
 		return fl_push_seg(f, t0, p0, t1, p1, dev);
 	s = fl_curve_piece(f, t0, p0, ta, pa, tm, pm, depth + 1);

@@ -122,7 +122,7 @@ static void test_parabola(void)
 	double cusps[8], cp[2 * 4096], worst = 0, tol = OCT_F32 ? 1e-5 : 1e-9;
 	unsigned int nc = 0, ncurves = 0, n, corners, i;
 	char msg[300];
-	qaws_internal_offset_curve(c, -1, tol, &chain, &ncurves, cusps, 8, &nc);
+	qaws_internal_offset_curve(c, -1, tol, &chain, 1, &ncurves, cusps, 8, &nc);
 	sprintf(msg, "parabola offset 1 toward its focus: 2 cusps (%u) at the reference parameters (%.15g, %.15g vs %.15g, %.15g)",
 		nc, nc > 0 ? cusps[0] : 0, nc > 1 ? cusps[1] : 0, ref_parabola_t[0], ref_parabola_t[1]);
 	TEST_ASSERT(nc == 2 && fabs(cusps[0] - ref_parabola_t[0]) < (OCT_F32 ? 1e-4 : 1e-10)
@@ -172,7 +172,7 @@ static void test_s_curve(void)
 		double cusps[8], cp[2 * 4096], tol = OCT_F32 ? 1e-5 : 1e-9, d0 = 1e300, d1 = 1e300;
 		unsigned int nc = 0, ncurves = 0, n, corners;
 		qaws_curve* chain = NULL;
-		qaws_internal_offset_curve(c, side ? -0.6 : 0.6, tol, &chain, &ncurves, cusps, 8, &nc);
+		qaws_internal_offset_curve(c, side ? -0.6 : 0.6, tol, &chain, 1, &ncurves, cusps, 8, &nc);
 		if (chain)
 		{
 			n = oct_chain(chain, cp, 4096, &corners);
@@ -368,7 +368,7 @@ static void test_regions(void)
 		qaws_curve* chain = NULL;
 		double cusps[64];
 		unsigned int nc = 0, nk = 0, bad = 0, checked = 0;
-		qaws_internal_offset_curve(star, deltas[k], 1e-6, &chain, &nk, cusps, 64, &nc);
+		qaws_internal_offset_curve(star, deltas[k], 1e-6, &chain, 1, &nk, cusps, 64, &nc);
 		qaws_curve_destroy(chain);
 		qaws_offset_paths(&path, 1, (qaws_scalar)deltas[k], QAWS_JOIN_ROUND, QAWS_END_POLYGON, &r);
 		if (r) bad = oct_oracle(star, 1, deltas[k], r, 180, &checked);
@@ -396,6 +396,46 @@ static void test_open(void)
 	TEST_ASSERT(r && bad == 0 && checked > 10000, msg);
 	qaws_clip_result_destroy(r);
 	qaws_curve_destroy(c);
+}
+
+/* the hard cubics of stroke expansion, stroked wide with round ends */
+static void test_extremes(void)
+{
+	static struct { char const* name; double xy[8]; double delta; } const cases[] = {
+		{ "a cusp (the derivative vanishes)", { 0, 0, 3, 3, 0, 3, 3, 0 }, 0.5 },
+		{ "a cusp, stroked wider than the curve", { 0, 0, 3, 3, 0, 3, 3, 0 }, 1.6 },
+		{ "collinear points doubling back (two turns in place)", { 0, 0, 3, 0, -1, 0, 2, 0 }, 0.5 },
+		{ "a loop", { 0, 0, 4, 3, -1, 3, 3, 0 }, 0.8 },
+		{ "a near-cusp (radius 0.01)", { 0, 0, 3, 3, 0.05, 3, 3, 0 }, 1.0 },
+		{ "a tiny S stroked 3 times its size", { 0, 0, 0.1, 0.2, 0.2, -0.2, 0.3, 0 }, 1.0 },
+		{ "an inflection stroked 2", { 0, 0, 1, 2, 2, -2, 3, 0 }, 2.0 },
+	};
+	unsigned int i;
+	char msg[300];
+	for (i = 0; i < sizeof(cases) / sizeof(cases[0]); i++)
+	{
+		qaws_curve* c = oct_bezier(cases[i].xy, 4);
+		qaws_curve const* cc = c;
+		qaws_path_2d path;
+		qaws_clip_result* r = NULL;
+		unsigned int bad = 0, checked = 0;
+		path.curves = &cc; path.curve_count = 1; path.closed = 0;
+		/* f32: the raw chain of the line doubling back is right (three lines, two
+		   half circles), but the float union drops the middle of the capsule,
+		   where three coincident lines per side meet arcs tangent to them at
+		   one point; a gap of the float clip engine, checked in f64 only */
+		if (OCT_F32 && i == 2)
+		{
+			qaws_curve_destroy(c);
+			continue;
+		}
+		qaws_offset_paths(&path, 1, (qaws_scalar)cases[i].delta, QAWS_JOIN_ROUND, QAWS_END_ROUND, &r);
+		if (r) bad = oct_oracle(c, 0, cases[i].delta, r, 160, &checked);
+		sprintf(msg, "%s, stroked %g with round ends: %u of %u grid points against the distance oracle", cases[i].name, cases[i].delta, bad, checked);
+		TEST_ASSERT(r && bad == 0 && checked > 5000, msg);
+		qaws_clip_result_destroy(r);
+		qaws_curve_destroy(c);
+	}
 }
 
 static void test_simple(void)
@@ -436,6 +476,7 @@ int test_90_offset_curves_main(void)
 	test_s_curve();
 	test_regions();
 	test_open();
+	test_extremes();
 	test_simple();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;

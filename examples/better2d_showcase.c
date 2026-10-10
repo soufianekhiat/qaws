@@ -37,6 +37,7 @@
 #include "better2d_showcase/04_offset.c"
 #include "better2d_showcase/05_stack.c"
 #include "better2d_showcase/06_curve_offset.c"
+#include "better2d_showcase/07_offset_extremes.c"
 
 int main(void)
 {
@@ -48,5 +49,6 @@ int main(void)
 	demo_offset();
 	demo_stack();
 	demo_curve_offset();
+	demo_offset_extremes();
 	return 0;
 }

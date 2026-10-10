@@ -1343,18 +1343,38 @@ static qaws_status cp_eval2(qaws_curve const* c, unsigned int dim, qaws_scalar t
 	return s;
 }
 
-/* Newton on g(t) = (C(t) - p) . C'(t) from t, clamped to the domain */
+/* Newton on g(t) = (C(t) - p) . C'(t) from t, clamped to the domain. g also
+   vanishes where C' = 0 (a cusp, a curve doubling back), which need not be
+   nearest: a step that lands farther from p is halved back toward the
+   nearest point so far, and that point is the answer (never worse than the
+   start) */
 static qaws_scalar cp_refine(qaws_curve const* c, unsigned int dim, qaws_scalar const* p, qaws_scalar* t, qaws_scalar* pos)
 {
 	qaws_scalar tmin = c->parameter_range.min_value, tmax = c->parameter_range.max_value, P[3], D1[3], D2[3], w[3];
+	qaws_scalar best_t = *t, best_d = (qaws_scalar)HUGE_VAL;
 	unsigned int it, k;
 	for (it = 0; it < CP_ITERS; it++)
 	{
-		qaws_scalar g, gp, step;
+		qaws_scalar g, gp, step, d;
 		if (cp_eval2(c, dim, *t, P, D1, D2) != QAWS_STATUS_OK)
 			break;
 		for (k = 0; k < 3; k++)
 			w[k] = P[k] - p[k];
+		d = cb_dot(w, w);
+		/* not clearly farther (beyond the rounding of the squared distance) */
+		if (d <= best_d + (sizeof(qaws_scalar) == 4 ? 1e-5 : 1e-13) * (best_d + cb_dot(P, P) * (sizeof(qaws_scalar) == 4 ? 1e-6 : 1e-14)))
+		{
+			best_d = d;
+			best_t = *t;
+		}
+		else
+		{
+			step = *t - best_t;
+			*t = best_t + (qaws_scalar)0.5 * step;
+			if (fabs(step) <= (tmax - tmin) * CB_STEP_REL)
+				break;
+			continue;
+		}
 		g = cb_dot(w, D1);
 		gp = cb_dot(D1, D1) + cb_dot(w, D2);
 		if (!(gp > 0))
@@ -1368,6 +1388,7 @@ static qaws_scalar cp_refine(qaws_curve const* c, unsigned int dim, qaws_scalar 
 		if (fabs(step) <= (tmax - tmin) * CB_STEP_REL)
 			break;
 	}
+	*t = best_t;
 	qaws_internal_curve_point(c, dim, *t, QAWS_EVAL_FLAG_POSITION, P, NULL);
 	for (k = 0; k < 3; k++)
 	{

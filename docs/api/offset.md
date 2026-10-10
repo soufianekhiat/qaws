@@ -36,11 +36,12 @@ vertices as the Boolean operations (see [clip.md](clip.md)).
    composites by segment, arcs by arc segment.
    - A line is translated by delta along its normal.
    - An arc becomes the concentric arc of radius r ± delta.
-   - Any other curve becomes a cubic B-spline through the true offset
-     C(t) + delta N(t), in pieces. Each piece is the cubic through four
-     offset points, split until three probes lie within the tolerance.
-     Only the direction of C' is used, so every kind of parameterization
-     works.
+   - Any other curve becomes G1 cubics fitted to the true offset
+     C(t) + delta N(t). See [Curves](#curves) below. Only the direction of
+     C' is used, so every kind of parameterization works.
+   - Under a delta callback, the offset varies along the curve. Cubics are
+     then put through four offset points, and each is split until three
+     probes lie within the tolerance.
 2. **Corners.**
    - On the outer side of a corner, the join is placed between the two
      offsets:
@@ -67,6 +68,81 @@ outermost path, the one with the lowest point, runs clockwise is offset
 the other way. Its loops are turned round for the union, and the result
 keeps the input's orientation, as Clipper2 does.
 
+## Curves
+
+This follows "Fast GPU stroke expansion" (Levien and Uguray, HPG 2024),
+which Dear Widgets ports from Rust. The paper outputs line segments for a
+GPU rasterizer; qaws outputs curves.
+
+1. **Euler cuts.** Each smooth span is cut, in travel order, wherever it
+   stops looking like an Euler spiral (clothoid). The test is:
+   - the paper's error estimate on the end points and derivatives;
+   - plus the gap at the middle to the Hermite cubic of those ends, for
+     curve kinds that are not cubics;
+   - and a check that the tangent at the middle does not turn back from
+     either end.
+
+   Between two cuts, the curvature k is then close to linear.
+2. **Cusps of the offset.** The offset O = C + d n has
+   O' = |C'| (1 + d k) T. It runs forward where 1 + d k > 0 and backward
+   where 1 + d k < 0, with a cusp at each root. With k close to linear
+   between cuts, each root lies between two cuts of opposite sign. It is
+   then polished on the true curve by Illinois steps. Test 90 checks the
+   cusps against Mathematica to 1e-10.
+3. **Forward runs** become cubics with their ends and end tangents held,
+   so neighbouring cubics meet G1. The two arm lengths come from the
+   closer of two starting guesses:
+   - least squares on samples;
+   - the Hermite arms from the true speed, which vanishes at a cusp, so
+     the cubic's end is a cusp too.
+
+   Gauss-Newton on the samples' distances then refines the arms. A cubic
+   is split in two while it misses the offset by more than the tolerance.
+   A NURBS circle grown by 1 takes 16 cubics, the minimum for that
+   tolerance. The old fit took 64.
+4. **Backward runs** become the evolute E = C − n / k, the centres of
+   curvature. The offset meets the evolute at its cusps. The chain runs:
+   - along O up to the cusp,
+   - along E to the next cusp,
+   - then along O again.
+
+   This is the smooth form of Clipper's link through an inner corner, and
+   in the limit of a sharp corner it is exactly that link. For one side,
+   the backward run alone already winds with the sign of delta, so the
+   positive union would be right without the evolute. The evolute is used
+   because it is smooth where the backward run ends in two cusps: a
+   parabola offset toward its focus at 1e-9 takes 30 cubics, against 54
+   with the backward run. E has its own cusps where k peaks, and its
+   cubics are cut there too.
+5. **Cusps of the curve** (C' = 0, where the tangent turns back between
+   two of the finest cuts) split the run. There the offset jumps from
+   C + d n to C − d n, and the true offset is the half circle between
+   them, which a round join supplies. Collinear control points that double
+   back, the paper's `do_linear` case, are handled the same way.
+6. **Output.** Straight pieces become lines and runs of curved pieces
+   become cubic B-splines. Coincident straight edges then merge exactly in
+   the union.
+
+Figure 6 of `qaws_better2d_showcase` shows the raw chains, the cusps and
+the evolutes. Figure 7 shows the hard cases from the paper:
+- a cusp, at two widths;
+- a straight line doubling back;
+- a loop;
+- a near-cusp of radius 0.01;
+- a tight parabola;
+- a tiny S under a stroke three times its size;
+- a wide inflection.
+
+Test 90 checks each of these against a distance oracle on a grid: a point
+lies in the stroke if and only if its distance to the curve is below
+delta.
+
+One case is open in f32. The line doubling back has a correct raw chain,
+but the float union drops the middle of the capsule. There, three
+coincident lines per side meet arcs that touch them tangentially at the
+same point. This is a gap in the float Boolean engine, and test 90
+checks that case in f64 only.
+
 ## Numbers
 
 Test 87 checks these closed forms:
@@ -92,5 +168,14 @@ Test 87 checks these closed forms:
 - **An open Bézier with round ends:** 2dL + πd².
 - **A thin triangle with miter joins:** the apex is cut within 2 deltas.
 - **A constant delta callback** equals the plain offset.
+
+Test 90 checks:
+
+- the offset's cusps against Mathematica (a parabola and both sides of a
+  cubic S), each one a joint of the chain;
+- the chain lies on the true offset or the evolute;
+- the chain is G1 except at the cusps;
+- stars grown and shrunk past their radii of curvature, and the hard cases
+  of figure 7, against the distance oracle, in f64 and f32.
 
 `qaws_better2d_showcase` (figure 4) runs 12 offset series in 0.04 s.
