@@ -9,12 +9,12 @@
 #define CC_MAX_ROOTS QAWS_EXACT_SOLVE_MAX_ROOTS
 
 typedef qaws_exact_poly poly;
-static void* cc_alloc(size_t bytes)
+static void* sv_alloc(size_t bytes)
 {
 	return qaws_internal_alloc(NULL, (unsigned long)bytes);
 }
 
-static void cc_free(void* p)
+static void sv_free(void* p)
 {
 	qaws_internal_dealloc(NULL, p);
 }
@@ -56,7 +56,7 @@ qaws_status qaws_exact_bezout_poly(poly const* P, poly const* Q, unsigned int k,
 	poly* t;
 	unsigned int a, b, j;
 	qaws_status st = QAWS_STATUS_OK;
-	t = (poly*)cc_alloc(sizeof(poly) * 2);
+	t = (poly*)sv_alloc(sizeof(poly) * 2);
 	if (!t)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	for (a = 0; a < k * k; a++)
@@ -70,7 +70,7 @@ qaws_status qaws_exact_bezout_poly(poly const* P, poly const* Q, unsigned int k,
 			for (j = 0; j + b < a && st == QAWS_STATUS_OK; j++)
 				st = qaws_exact_poly_acc(&E[(a - 1 - j) * k + b + j], &t[0], 1);
 		}
-	cc_free(t);
+	sv_free(t);
 	return st;
 }
 
@@ -80,7 +80,7 @@ qaws_status qaws_exact_det_cofactors(poly const* M, unsigned int n, poly* det, p
 	poly* minor;
 	unsigned int j, k;
 	qaws_status st = QAWS_STATUS_OK;
-	minor = (poly*)cc_alloc(sizeof(poly) * 2);
+	minor = (poly*)sv_alloc(sizeof(poly) * 2);
 	if (!minor)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	qaws_exact_poly_zero(det, 0);
@@ -98,7 +98,7 @@ qaws_status qaws_exact_det_cofactors(poly const* M, unsigned int n, poly* det, p
 		if (st == QAWS_STATUS_OK) st = qaws_exact_poly_mul(&minor[1], &M[j], &minor[0]);
 		if (st == QAWS_STATUS_OK) st = qaws_exact_poly_acc(det, &minor[1], (j & 1) ? -1 : 1);
 	}
-	cc_free(minor);
+	sv_free(minor);
 	return st;
 }
 
@@ -108,7 +108,7 @@ qaws_status qaws_exact_substitute(poly const* H, unsigned int k, poly const* p, 
 	poly* pw;   /* p^0..p^k, q^0..q^k, scratch */
 	unsigned int i;
 	qaws_status st = QAWS_STATUS_OK;
-	pw = (poly*)cc_alloc(sizeof(poly) * (2 * (k + 1) + 1));
+	pw = (poly*)sv_alloc(sizeof(poly) * (2 * (k + 1) + 1));
 	if (!pw)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	qaws_exact_poly_const(&pw[0], 1);
@@ -126,7 +126,7 @@ qaws_status qaws_exact_substitute(poly const* H, unsigned int k, poly const* p, 
 		if (st == QAWS_STATUS_OK) st = qaws_exact_poly_mul(t, t, &H[i]);
 		if (st == QAWS_STATUS_OK) st = qaws_exact_poly_acc(out, t, 1);
 	}
-	cc_free(pw);
+	sv_free(pw);
 	return st;
 }
 
@@ -265,7 +265,7 @@ qaws_status qaws_exact_solve_system(poly const* R0, poly const* C00, poly const*
 	qaws_status st = QAWS_STATUS_OK;
 	*count = 0;
 	*common = 0;
-	w = (sys_work*)cc_alloc(sizeof(sys_work));
+	w = (sys_work*)sv_alloc(sizeof(sys_work));
 	if (!w)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	w->R = *R0;
@@ -274,13 +274,13 @@ qaws_status qaws_exact_solve_system(poly const* R0, poly const* C00, poly const*
 	if (qaws_exact_poly_is_zero(&w->R))
 	{
 		*common = 1;
-		cc_free(w);
+		sv_free(w);
 		return QAWS_STATUS_CERTIFICATION_FAILED;
 	}
 	N = w->R.deg;
 	if (N == 0 || N > QAWS_EXACT_ROOTS_MAX_DEGREE)
 	{
-		cc_free(w);
+		sv_free(w);
 		return N == 0 ? QAWS_STATUS_OK : QAWS_STATUS_EXACT_UNSUPPORTED;
 	}
 	w->C0 = *C00;
@@ -489,6 +489,6 @@ qaws_status qaws_exact_solve_system(poly const* R0, poly const* C00, poly const*
 			(*count)++;
 		}
 	}
-	cc_free(w);
+	sv_free(w);
 	return st;
 }

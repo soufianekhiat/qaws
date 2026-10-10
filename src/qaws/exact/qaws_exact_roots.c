@@ -6,7 +6,7 @@
 #define TRY(x) do { st = (x); if (st != QAWS_STATUS_OK) return st; } while (0)
 
 /* Divides every coefficient by their common gcd (keeps every sign). */
-static qaws_status normalize(qaws_exact_int* c, unsigned int n)
+static qaws_status rt_normalize(qaws_exact_int* c, unsigned int n)
 {
 	/* halving introduces only powers of two: strip the common one (a shift, no gcd) */
 	unsigned int i, k = ~0u;
@@ -53,12 +53,12 @@ static qaws_status split_half_raw(qaws_exact_int const* c, unsigned int n, qaws_
 }
 
 /* The halves, each divided by its own gcd. */
-static qaws_status split_half(qaws_exact_int const* c, unsigned int n, qaws_exact_int* left, qaws_exact_int* right)
+static qaws_status rt_split_half(qaws_exact_int const* c, unsigned int n, qaws_exact_int* left, qaws_exact_int* right)
 {
 	qaws_status st;
 	TRY(split_half_raw(c, n, left, right));
-	TRY(normalize(left, n));
-	return normalize(right, n);
+	TRY(rt_normalize(left, n));
+	return rt_normalize(right, n);
 }
 
 /* Sign variations, zeros ignored. */
@@ -181,7 +181,7 @@ qaws_status qaws_exact_bernstein_restrict(qaws_exact_int const* b, unsigned int 
 	/* by halvings along the bits of index (each normalized: the integers stay small) */
 	for (k = depth - 1; k >= 0; k--)
 	{
-		TRY(split_half(out, n, left, right));
+		TRY(rt_split_half(out, n, left, right));
 		for (i = 0; i <= n; i++)
 			out[i] = ((index >> k) & 1) ? right[i] : left[i];
 	}
@@ -309,7 +309,7 @@ qaws_status qaws_exact_bernstein_isolate(qaws_exact_int const* b, unsigned int n
 			st = QAWS_STATUS_CERTIFICATION_FAILED;
 			break;
 		}
-		st = split_half(c, n, left, right);
+		st = rt_split_half(c, n, left, right);
 		if (st != QAWS_STATUS_OK)
 			break;
 		/* the midpoint value is right[0] (= left[n] up to the common scale) */
@@ -523,7 +523,7 @@ qaws_status qaws_exact_bernstein_refine(qaws_exact_int const* b, unsigned int n,
 	while (root->depth < depth)
 	{
 		int sm;
-		TRY(split_half(c, n, left, right));
+		TRY(rt_split_half(c, n, left, right));
 		sm = qaws_exact_int_sign(&right[0]);
 		if (sm == 0)
 		{

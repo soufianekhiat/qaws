@@ -28,7 +28,7 @@ cmake --build .
 | `QAWS_INSTALL_PKGCONFIG` | `ON` | Install the `qaws.pc` pkg-config file |
 | `BUILD_TESTING` | `ON` | Build test suite |
 | `QAWS_UNITY_BUILD` | `OFF` | Compile the library as a single translation unit |
-| `QAWS_AMALGAMATION` | `OFF` | Generate and build the `qaws.h` + `qaws.c` amalgamation. Requires Python 3 |
+| `QAWS_AMALGAMATION` | `OFF` | Generate and build the `qaws.h` + `qaws.c` amalgamation (with `cmake -P`) |
 | `QAWS_TEST_AMALGAMATION` | `OFF` | Run the test suite against the amalgamated library. Implies `QAWS_AMALGAMATION` |
 | `QAWS_AMALGAMATION_DIR` | `<build>/amalgam` | Where the generated `qaws.h`/`qaws.c` are written |
 
@@ -154,8 +154,8 @@ generate_projects.bat
 Generation also adds a `QawsAmalgam` static library built from the generated
 single-file `qaws.c`. It produces the SIMD and non-SIMD variants up front,
 compiles whichever matches each configuration's `SimdMode`, and regenerates
-before every build. It is skipped with a warning if no Python 3 interpreter is
-found. See [integration.md](integration.md).
+before every build with `cmake -P buildsystem/amalgamate.cmake`. It is skipped
+with a warning if `cmake` is not on PATH. See [integration.md](integration.md).
 
 ## Compiler compatibility
 

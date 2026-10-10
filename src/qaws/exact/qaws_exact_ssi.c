@@ -46,7 +46,7 @@ static void ss_free(void* p)
  * introduces powers of two (2^n halving, 16^n the 7/16 cut), so this keeps
  * the integers as small as a full gcd would, at the cost of a shift.
  */
-static qaws_status normalize(qaws_exact_int* T, unsigned int size)
+static qaws_status ssi_normalize(qaws_exact_int* T, unsigned int size)
 {
 	unsigned int i, k = ~0u;
 	for (i = 0; i < size; i++)
@@ -75,7 +75,7 @@ static qaws_status normalize(qaws_exact_int* T, unsigned int size)
 #define SSI_CUT_BITS 4
 
 /* Splits T along d at a / b (integer De Casteljau, weights (b - a, a)): both parts times b^n. */
-static qaws_status split_dir(ssi_ctx const* cx, qaws_exact_int const* T, unsigned int d, qaws_exact_int* L, qaws_exact_int* R)
+static qaws_status ssi_split_dir(ssi_ctx const* cx, qaws_exact_int const* T, unsigned int d, qaws_exact_int* L, qaws_exact_int* R)
 {
 	unsigned int n = cx->n[d], sd = cx->stride[d], i, r, o, k;
 	qaws_exact_int line[17], t1, t2;
@@ -110,7 +110,7 @@ static qaws_status split_dir(ssi_ctx const* cx, qaws_exact_int const* T, unsigne
 	return QAWS_STATUS_OK;
 }
 
-static int excluded(ssi_ctx const* cx, qaws_exact_int const* F)
+static int ssi_excluded(ssi_ctx const* cx, qaws_exact_int const* F)
 {
 	unsigned int c, i;
 	for (c = 0; c < 3; c++)
@@ -172,7 +172,7 @@ static qaws_status iv_acc(ival* r, ival const* a, int sign)
  * Regular box: some 3 x 3 minor of the interval Jacobian (rows: the
  * equations, columns: the four local variables, bounded by Bernstein
  * derivative coefficients) has an interval determinant not containing 0.
- * Returns the free variable (the excluded column), or -1.
+ * Returns the free variable (the ssi_excluded column), or -1.
  */
 static qaws_status regular_var(ssi_ctx const* cx, qaws_exact_int const* F, int* out)
 {
@@ -247,7 +247,7 @@ static int ov(double a0, double a1, double b0, double b1)
 	return a0 <= b1 && b0 <= a1;
 }
 
-static int same_point(qaws_exact_ssi_point const* a, qaws_exact_ssi_point const* b)
+static int ssi_same_point(qaws_exact_ssi_point const* a, qaws_exact_ssi_point const* b)
 {
 	return ov(a->u1_lo, a->u1_hi, b->u1_lo, b->u1_hi) && ov(a->v1_lo, a->v1_hi, b->v1_lo, b->v1_hi) && ov(a->u2_lo, a->u2_hi, b->u2_lo, b->u2_hi) &&
 	       ov(a->v2_lo, a->v2_hi, b->v2_lo, b->v2_hi);
@@ -513,7 +513,7 @@ static qaws_status face_points(ssi_ctx const* cx, ssi_box const* B, ssi_pair con
 			{
 				unsigned int r, dup = 0;
 				for (r = 0; r < *npts && !dup; r++)
-					dup = same_point(&pts[r], &fp[q]);
+					dup = ssi_same_point(&pts[r], &fp[q]);
 				if (!dup)
 				{
 					if (*npts >= 8)
@@ -525,7 +525,7 @@ static qaws_status face_points(ssi_ctx const* cx, ssi_box const* B, ssi_pair con
 	return st;
 }
 
-static unsigned int shallowest(ssi_box const* B)
+static unsigned int ssi_shallowest(ssi_box const* B)
 {
 	unsigned int d = 0, k;
 	for (k = 1; k < 4; k++)
@@ -577,7 +577,7 @@ static qaws_status patch_pair(ssi_pair const* pr, unsigned int min_depth, ssi_ou
 						if (st == QAWS_STATUS_OK) st = qaws_exact_int_sub(&store[c * cx.size + o], &t1, &t2);
 					}
 		if (st == QAWS_STATUS_OK)
-			st = normalize(&store[c * cx.size], cx.size);
+			st = ssi_normalize(&store[c * cx.size], cx.size);
 	}
 	if (st == QAWS_STATUS_OK)
 	{
@@ -600,7 +600,7 @@ static qaws_status patch_pair(ssi_pair const* pr, unsigned int min_depth, ssi_ou
 			st = QAWS_STATUS_CERTIFICATION_FAILED;
 			break;
 		}
-		if (excluded(&cx, B.F))
+		if (ssi_excluded(&cx, B.F))
 			continue;
 		st = regular_var(&cx, B.F, &fv);
 		if (st != QAWS_STATUS_OK)
@@ -645,7 +645,7 @@ static qaws_status patch_pair(ssi_pair const* pr, unsigned int min_depth, ssi_ou
 			break;
 		}
 		{
-			unsigned int d = shallowest(&B), slot = nstack, k;
+			unsigned int d = ssi_shallowest(&B), slot = nstack, k;
 			ssi_box L, R;
 			if (slot + 3 > cap)
 			{
@@ -675,9 +675,9 @@ static qaws_status patch_pair(ssi_pair const* pr, unsigned int min_depth, ssi_ou
 			R.F = store + 3 * cx.size * (slot + 2);
 			for (c = 0; c < 3 && st == QAWS_STATUS_OK; c++)
 			{
-				st = split_dir(&cx, &B.F[c * cx.size], d, &L.F[c * cx.size], &R.F[c * cx.size]);
-				if (st == QAWS_STATUS_OK) st = normalize(&L.F[c * cx.size], cx.size);
-				if (st == QAWS_STATUS_OK) st = normalize(&R.F[c * cx.size], cx.size);
+				st = ssi_split_dir(&cx, &B.F[c * cx.size], d, &L.F[c * cx.size], &R.F[c * cx.size]);
+				if (st == QAWS_STATUS_OK) st = ssi_normalize(&L.F[c * cx.size], cx.size);
+				if (st == QAWS_STATUS_OK) st = ssi_normalize(&R.F[c * cx.size], cx.size);
 			}
 			if (st != QAWS_STATUS_OK)
 				break;

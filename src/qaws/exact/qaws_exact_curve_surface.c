@@ -45,7 +45,7 @@ static void cs_free(void* p)
  * introduces powers of two (2^n halving, 16^n the 7/16 cut), so this keeps
  * the integers as small as a full gcd would, at the cost of a shift.
  */
-static qaws_status normalize(qaws_exact_int* T, unsigned int size)
+static qaws_status cs_normalize(qaws_exact_int* T, unsigned int size)
 {
 	unsigned int i, k = ~0u;
 	for (i = 0; i < size; i++)
@@ -406,8 +406,8 @@ static qaws_status split_box(cs_ctx const* cx, cs_box const* B, unsigned int d, 
 	for (c = 0; c < 3; c++)
 	{
 		TRY(split_dir(cx, &B->F[c * cx->size], d, &L->F[c * cx->size], &R->F[c * cx->size]));
-		TRY(normalize(&L->F[c * cx->size], cx->size));
-		TRY(normalize(&R->F[c * cx->size], cx->size));
+		TRY(cs_normalize(&L->F[c * cx->size], cx->size));
+		TRY(cs_normalize(&R->F[c * cx->size], cx->size));
 	}
 	for (k = 0; k < 3; k++)
 	{
@@ -485,7 +485,7 @@ static qaws_status refine(cs_ctx const* cx, cs_box* B, cs_box* L, cs_box* R)
 				{
 					st = split_dir_at(cx, &L->F[c * cx->size], d, 1, 4, 1);   /* [1/4, 1] */
 					if (st == QAWS_STATUS_OK) st = split_dir_at(cx, &L->F[c * cx->size], d, 2, 3, 0);   /* its [0, 2/3]: [1/4, 3/4] */
-					if (st == QAWS_STATUS_OK) st = normalize(&L->F[c * cx->size], cx->size);
+					if (st == QAWS_STATUS_OK) st = cs_normalize(&L->F[c * cx->size], cx->size);
 					if (st != QAWS_STATUS_OK)
 						return st == QAWS_STATUS_EXACT_RANGE_EXCEEDED ? QAWS_STATUS_OK : st;
 				}
@@ -631,7 +631,7 @@ qaws_status qaws_exact_solve3_to(unsigned int const n[3], qaws_exact_int const* 
 		tmpR.F = tstore + 3 * cx.size;
 		memcpy(store, F, sizeof(qaws_exact_int) * 3 * cx.size);
 		for (c = 0; c < 3 && st == QAWS_STATUS_OK; c++)
-			st = normalize(&store[c * cx.size], cx.size);
+			st = cs_normalize(&store[c * cx.size], cx.size);
 		nstack = 1;
 		stack[0].F = store;
 		stack[0].lo[0] = stack[0].lo[1] = stack[0].lo[2] = 0;
@@ -707,7 +707,7 @@ qaws_status qaws_exact_solve3_to(unsigned int const n[3], qaws_exact_int const* 
 					{
 						st = split_dir_at(&cx, &M.F[c * cx.size], k, 1, 4, 1);
 						if (st == QAWS_STATUS_OK) st = split_dir_at(&cx, &M.F[c * cx.size], k, 2, 3, 0);
-						if (st == QAWS_STATUS_OK) st = normalize(&M.F[c * cx.size], cx.size);
+						if (st == QAWS_STATUS_OK) st = cs_normalize(&M.F[c * cx.size], cx.size);
 					}
 				if (st == QAWS_STATUS_EXACT_RANGE_EXCEEDED)
 					st = QAWS_STATUS_OK;

@@ -40,7 +40,7 @@ namespace Qaws
             // Add unified test project
             conf.AddProject<QawsTestsProject>(target);
 
-            // The single-file build, when a Python 3 interpreter was found.
+            // The single-file build, when cmake was found on PATH.
             // Building it in every configuration keeps the generated
             // qaws.h/qaws.c pair from silently rotting.
             if (Amalgamation.Available)

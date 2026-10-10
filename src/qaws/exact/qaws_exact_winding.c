@@ -40,7 +40,7 @@ static int all_sign(qaws_exact_int const* c, unsigned int n, int s)
 }
 
 /* Halves at 1/2 into left and right, both scaled by 2^n, then reduced. */
-static qaws_status split_half(wind_poly const* p, wind_poly* left, wind_poly* right)
+static qaws_status wn_split_half(wind_poly const* p, wind_poly* left, wind_poly* right)
 {
 	qaws_exact_int tri[QAWS_EXACT_MAX_DEGREE + 1];
 	unsigned int n = p->n, k, r, i;
@@ -186,7 +186,7 @@ static qaws_status crossings(wind_poly const* p0, int* out)
 		{
 			/* the halves replace the item: right below, left on top */
 			wind_poly whole = *p;
-			st = split_half(&whole, &stack[top + 1].p, &stack[top].p);
+			st = wn_split_half(&whole, &stack[top + 1].p, &stack[top].p);
 			stack[top].depth = depth + 1;
 			stack[top + 1].depth = depth + 1;
 			top += 2;
@@ -197,7 +197,7 @@ static qaws_status crossings(wind_poly const* p0, int* out)
 }
 
 /* Homogeneous endpoints equal: X1 W2 = X2 W1, Y1 W2 = Y2 W1. */
-static int same_point(qaws_exact_int const* a, qaws_exact_int const* b)
+static int wn_same_point(qaws_exact_int const* a, qaws_exact_int const* b)
 {
 	qaws_exact_int l, r;
 	int c;
@@ -233,7 +233,7 @@ qaws_status qaws_exact_winding_2d(qaws_exact_curve const* const* pieces, unsigne
 		a = pieces[k];
 		b = pieces[(k + 1) % count];
 		last = &a->spans[a->span_count - 1];
-		if (!b->spans || b->span_count == 0 || !same_point(&last->h[last->degree * 3], &b->spans[0].h[0]))
+		if (!b->spans || b->span_count == 0 || !wn_same_point(&last->h[last->degree * 3], &b->spans[0].h[0]))
 			return QAWS_STATUS_INVALID_ARGUMENT;
 	}
 	/* p in lattice units m 2^(e - s); a common 2^kscale makes it integral */

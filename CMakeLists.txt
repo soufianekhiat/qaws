@@ -294,43 +294,37 @@ target_include_directories(
 set(QAWS_AMALGAMATION_DIR "${CMAKE_CURRENT_BINARY_DIR}/amalgam"
     CACHE PATH "Directory the generated qaws.h/qaws.c are written to")
 
-find_package(Python3 COMPONENTS Interpreter QUIET)
-
-if(Python3_Interpreter_FOUND)
-  set(_QAWS_AMALGAMATE_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/buildsystem/amalgamate.py")
-  set(_QAWS_AMALGAMATE_ARGS
-    "--source-dir" "${CMAKE_CURRENT_SOURCE_DIR}/src/qaws"
-    "--output-dir" "${QAWS_AMALGAMATION_DIR}"
-  )
-  if(QAWS_ENABLE_SIMD)
-    list(APPEND _QAWS_AMALGAMATE_ARGS "--simd")
-  endif()
-
-  set(QAWS_AMALGAMATION_HEADER "${QAWS_AMALGAMATION_DIR}/qaws.h")
-  set(QAWS_AMALGAMATION_SOURCE "${QAWS_AMALGAMATION_DIR}/qaws.c")
-
-  # The generator inlines headers as well as sources, so both must retrigger it.
-  file(GLOB_RECURSE _QAWS_AMALGAMATE_INPUTS CONFIGURE_DEPENDS
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/qaws/*.c"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/qaws/*.h"
-  )
-
-  add_custom_command(
-    OUTPUT ${QAWS_AMALGAMATION_HEADER} ${QAWS_AMALGAMATION_SOURCE}
-    COMMAND ${Python3_EXECUTABLE} "${_QAWS_AMALGAMATE_SCRIPT}" ${_QAWS_AMALGAMATE_ARGS}
-    DEPENDS ${_QAWS_AMALGAMATE_SCRIPT} ${_QAWS_AMALGAMATE_INPUTS}
-    COMMENT "Generating amalgamation in ${QAWS_AMALGAMATION_DIR}"
-    VERBATIM
-  )
-
-  # Convenience target: `cmake --build . --target amalgamate` and nothing else.
-  add_custom_target(
-    amalgamate
-    DEPENDS ${QAWS_AMALGAMATION_HEADER} ${QAWS_AMALGAMATION_SOURCE}
-  )
-elseif(QAWS_AMALGAMATION)
-  message(FATAL_ERROR "QAWS_AMALGAMATION requires a Python 3 interpreter")
+set(_QAWS_AMALGAMATE_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/buildsystem/amalgamate.cmake")
+set(_QAWS_AMALGAMATE_ARGS
+  "-DQAWS_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/src/qaws"
+  "-DQAWS_OUTPUT_DIR=${QAWS_AMALGAMATION_DIR}"
+)
+if(QAWS_ENABLE_SIMD)
+  list(APPEND _QAWS_AMALGAMATE_ARGS "-DQAWS_SIMD=ON")
 endif()
+
+set(QAWS_AMALGAMATION_HEADER "${QAWS_AMALGAMATION_DIR}/qaws.h")
+set(QAWS_AMALGAMATION_SOURCE "${QAWS_AMALGAMATION_DIR}/qaws.c")
+
+# The generator inlines headers as well as sources, so both must retrigger it.
+file(GLOB_RECURSE _QAWS_AMALGAMATE_INPUTS CONFIGURE_DEPENDS
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/qaws/*.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/qaws/*.h"
+)
+
+add_custom_command(
+  OUTPUT ${QAWS_AMALGAMATION_HEADER} ${QAWS_AMALGAMATION_SOURCE}
+  COMMAND ${CMAKE_COMMAND} ${_QAWS_AMALGAMATE_ARGS} -P "${_QAWS_AMALGAMATE_SCRIPT}"
+  DEPENDS ${_QAWS_AMALGAMATE_SCRIPT} ${_QAWS_AMALGAMATE_INPUTS}
+  COMMENT "Generating amalgamation in ${QAWS_AMALGAMATION_DIR}"
+  VERBATIM
+)
+
+# Convenience target: `cmake --build . --target amalgamate` and nothing else.
+add_custom_target(
+  amalgamate
+  DEPENDS ${QAWS_AMALGAMATION_HEADER} ${QAWS_AMALGAMATION_SOURCE}
+)
 
 if(QAWS_AMALGAMATION)
   add_library(qaws_amalgam ${QAWS_AMALGAMATION_SOURCE})

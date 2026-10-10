@@ -6,8 +6,9 @@ using Sharpmake;
 
 namespace Qaws
 {
-    // Drives buildsystem/amalgamate.py, which folds the whole tree into a
-    // single qaws.h + qaws.c pair for consumers that have no build system.
+    // Drives buildsystem/amalgamate.cmake (run with cmake -P), which folds the
+    // whole tree into a single qaws.h + qaws.c pair for consumers that have no
+    // build system.
     //
     // Two variants are produced, mirroring the SimdMode fragment: the SIMD one
     // also folds in the batch/ sources. Both are generated up front so the
@@ -22,7 +23,7 @@ namespace Qaws
         public static string OutputRoot { get; private set; }
         public static string SourceDir { get; private set; }
         public static string Script { get; private set; }
-        public static string Python { get; private set; }
+        public static string CMake { get; private set; }
 
         static Amalgamation()
         {
@@ -35,18 +36,18 @@ namespace Qaws
             }
 
             SourceDir = Path.Combine(RepoRoot, "src", "qaws");
-            Script = Path.Combine(RepoRoot, "buildsystem", "amalgamate.py");
+            Script = Path.Combine(RepoRoot, "buildsystem", "amalgamate.cmake");
             OutputRoot = Path.Combine(RepoRoot, "tmp", "amalgam");
 
             Directory.CreateDirectory(Path.Combine(OutputRoot, SimdDir));
             Directory.CreateDirectory(Path.Combine(OutputRoot, NoSimdDir));
 
-            Python = FindPython();
-            if (Python == null)
+            CMake = FindCMake();
+            if (CMake == null)
             {
                 Builder.Instance.LogWarningLine(
-                    "Amalgamation: no Python 3 interpreter found; QawsAmalgam is disabled. "
-                    + "Install Python 3 and re-run generate_projects.bat to build it.");
+                    "Amalgamation: cmake not found on PATH; QawsAmalgam is disabled. "
+                    + "Install CMake and re-run generate_projects.bat to build it.");
                 return;
             }
 
@@ -66,51 +67,27 @@ namespace Qaws
             return null;
         }
 
-        private static string FindPython()
+        private static string FindCMake()
         {
-            // "py" is the Windows launcher; the others cover PATH installs.
-            string[][] candidates =
+            try
             {
-                new[] { "py", "-3" },
-                new[] { "python3", null },
-                new[] { "python", null },
-            };
-
-            foreach (string[] candidate in candidates)
+                if (Execute("cmake", "--version", null) == 0)
+                    return "cmake";
+            }
+            catch (Exception)
             {
-                string args = candidate[1] == null ? "--version" : candidate[1] + " --version";
-                try
-                {
-                    if (Execute(candidate[0], args, null) == 0)
-                        return candidate[1] == null ? candidate[0] : candidate[0] + " " + candidate[1];
-                }
-                catch (Exception)
-                {
-                    // Not on PATH; try the next one.
-                }
+                // Not on PATH.
             }
             return null;
         }
 
         private static bool Run(string variant, bool simd)
         {
-            string arguments = BuildArguments(variant, simd);
-            string exe = Python;
-            string prefix = "";
-
-            // Python may be "py -3"; split the launcher flag back off.
-            int space = exe.IndexOf(' ');
-            if (space >= 0)
-            {
-                prefix = exe.Substring(space + 1) + " ";
-                exe = exe.Substring(0, space);
-            }
-
-            int code = Execute(exe, prefix + arguments, RepoRoot);
+            int code = Execute(CMake, BuildArguments(variant, simd), RepoRoot);
             if (code != 0)
             {
                 Builder.Instance.LogWarningLine(
-                    "Amalgamation: amalgamate.py failed for the '{0}' variant (exit {1}).", variant, code);
+                    "Amalgamation: amalgamate.cmake failed for the '{0}' variant (exit {1}).", variant, code);
                 return false;
             }
             return true;
@@ -118,18 +95,15 @@ namespace Qaws
 
         private static string BuildArguments(string variant, bool simd)
         {
-            string args = string.Format(
-                "\"{0}\" --source-dir \"{1}\" --output-dir \"{2}\"",
-                Script, SourceDir, Path.Combine(OutputRoot, variant));
-            if (simd)
-                args += " --simd";
-            return args;
+            return string.Format(
+                "\"-DQAWS_SOURCE_DIR={0}\" \"-DQAWS_OUTPUT_DIR={1}\" -DQAWS_SIMD={2} -P \"{3}\"",
+                SourceDir, Path.Combine(OutputRoot, variant), simd ? "ON" : "OFF", Script);
         }
 
         // The command a build step runs to refresh one variant in place.
         public static string RefreshCommand(string variant, bool simd)
         {
-            return Python + " " + BuildArguments(variant, simd);
+            return CMake + " " + BuildArguments(variant, simd);
         }
 
         private static int Execute(string exe, string arguments, string workingDir)

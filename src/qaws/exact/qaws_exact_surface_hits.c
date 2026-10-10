@@ -26,13 +26,13 @@ static void sh_free(void* p)
 /*  Dyadic rationals m 2^e                                             */
 /* ------------------------------------------------------------------ */
 
-typedef struct dyadic
+typedef struct sh_dyadic
 {
 	qaws_exact_int m;
 	int e;
-} dyadic;
+} sh_dyadic;
 
-static qaws_status dy_from_double(dyadic* r, double x)
+static qaws_status sh_dy_from_double(sh_dyadic* r, double x)
 {
 	int64_t m;
 	if (!(x - x == 0.0))
@@ -44,7 +44,7 @@ static qaws_status dy_from_double(dyadic* r, double x)
 	return QAWS_STATUS_OK;
 }
 
-static qaws_status dy_add(dyadic* r, dyadic const* a, dyadic const* b, int sign)
+static qaws_status sh_dy_add(sh_dyadic* r, sh_dyadic const* a, sh_dyadic const* b, int sign)
 {
 	qaws_exact_int x = a->m, y = b->m;
 	int e = a->e < b->e ? a->e : b->e;
@@ -61,7 +61,7 @@ static qaws_status dy_add(dyadic* r, dyadic const* a, dyadic const* b, int sign)
 	return sign > 0 ? qaws_exact_int_add(&r->m, &x, &y) : qaws_exact_int_sub(&r->m, &x, &y);
 }
 
-static qaws_status dy_mul(dyadic* r, dyadic const* a, dyadic const* b)
+static qaws_status sh_dy_mul(sh_dyadic* r, sh_dyadic const* a, sh_dyadic const* b)
 {
 	r->e = a->e + b->e;
 	return qaws_exact_int_mul(&r->m, &a->m, &b->m);
@@ -76,13 +76,13 @@ static qaws_status dy_mul(dyadic* r, dyadic const* a, dyadic const* b)
  * Bernstein coefficients F_ab = sum_c N_c (H_abc 2^E - P_c W_ab), brought to
  * one exponent.
  */
-static qaws_status plane_net(qaws_exact_surface const* s, qaws_exact_int const* h, dyadic const* N, dyadic const* P, qaws_exact_int* F)
+static qaws_status plane_net(qaws_exact_surface const* s, qaws_exact_int const* h, sh_dyadic const* N, sh_dyadic const* P, qaws_exact_int* F)
 {
 	unsigned int n = (s->p + 1) * (s->q + 1), i, c;
-	dyadic* g;
+	sh_dyadic* g;
 	int emin = 0, any = 0;
 	qaws_status st = QAWS_STATUS_OK;
-	g = (dyadic*)sh_alloc(sizeof(dyadic) * n);
+	g = (sh_dyadic*)sh_alloc(sizeof(sh_dyadic) * n);
 	if (!g)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	for (i = 0; i < n && st == QAWS_STATUS_OK; i++)
@@ -91,16 +91,16 @@ static qaws_status plane_net(qaws_exact_surface const* s, qaws_exact_int const* 
 		g[i].e = 0;
 		for (c = 0; c < 3 && st == QAWS_STATUS_OK; c++)
 		{
-			dyadic hx, w, t1, t2;
+			sh_dyadic hx, w, t1, t2;
 			hx.m = h[i * 4 + c];
 			hx.e = s->space_exp2;
 			w.m = h[i * 4 + 3];
 			w.e = 0;
-			st = dy_mul(&t1, &N[c], &hx);
-			if (st == QAWS_STATUS_OK) st = dy_mul(&t2, &N[c], &P[c]);
-			if (st == QAWS_STATUS_OK) st = dy_mul(&t2, &t2, &w);
-			if (st == QAWS_STATUS_OK) st = dy_add(&t1, &t1, &t2, -1);
-			if (st == QAWS_STATUS_OK) st = dy_add(&g[i], &g[i], &t1, 1);
+			st = sh_dy_mul(&t1, &N[c], &hx);
+			if (st == QAWS_STATUS_OK) st = sh_dy_mul(&t2, &N[c], &P[c]);
+			if (st == QAWS_STATUS_OK) st = sh_dy_mul(&t2, &t2, &w);
+			if (st == QAWS_STATUS_OK) st = sh_dy_add(&t1, &t1, &t2, -1);
+			if (st == QAWS_STATUS_OK) st = sh_dy_add(&g[i], &g[i], &t1, 1);
 		}
 		if (st == QAWS_STATUS_OK && !qaws_exact_int_is_zero(&g[i].m))
 		{
@@ -249,7 +249,7 @@ static qaws_status restrict_curve(qaws_exact_int* Q, unsigned int n, unsigned in
 	return QAWS_STATUS_OK;
 }
 
-/* double (a dyadic) -> num / den with den a power of two */
+/* double (a sh_dyadic) -> num / den with den a power of two */
 static qaws_status double_ratio(double x, qaws_exact_int* num, qaws_exact_int* den)
 {
 	int64_t m;
@@ -272,7 +272,7 @@ static qaws_status double_ratio(double x, qaws_exact_int* num, qaws_exact_int* d
 
 typedef struct line_ctx
 {
-	dyadic P[3], d[3], n1[3], n2[3], dd;   /* dd = |d|^2 */
+	sh_dyadic P[3], d[3], n1[3], n2[3], dd;   /* dd = |d|^2 */
 } line_ctx;
 
 /* t enclosure over the sub-patch [u_lo, u_hi] x [v_lo, v_hi] (local, rationals): t = d . (S - P) / |d|^2 */
@@ -298,7 +298,7 @@ static qaws_status t_enclose(qaws_exact_surface const* s, qaws_exact_int const* 
 	*exact = 1;
 	for (i = 0; i < n && st == QAWS_STATUS_OK; i++)
 	{
-		dyadic num, den = { { { 0 }, 0, 0 }, 0 }, w;
+		sh_dyadic num, den = { { { 0 }, 0, 0 }, 0 }, w;
 		qaws_exact_int nn, dn;
 		double lo, hi;
 		int ex;
@@ -308,16 +308,16 @@ static qaws_status t_enclose(qaws_exact_surface const* s, qaws_exact_int const* 
 		w.e = 0;
 		for (c = 0; c < 3 && st == QAWS_STATUS_OK; c++)
 		{
-			dyadic hx, t1, t2;
+			sh_dyadic hx, t1, t2;
 			hx.m = net[i * 4 + c];
 			hx.e = s->space_exp2;
-			st = dy_mul(&t1, &L->d[c], &hx);
-			if (st == QAWS_STATUS_OK) st = dy_mul(&t2, &L->d[c], &L->P[c]);
-			if (st == QAWS_STATUS_OK) st = dy_mul(&t2, &t2, &w);
-			if (st == QAWS_STATUS_OK) st = dy_add(&t1, &t1, &t2, -1);
-			if (st == QAWS_STATUS_OK) st = dy_add(&num, &num, &t1, 1);
+			st = sh_dy_mul(&t1, &L->d[c], &hx);
+			if (st == QAWS_STATUS_OK) st = sh_dy_mul(&t2, &L->d[c], &L->P[c]);
+			if (st == QAWS_STATUS_OK) st = sh_dy_mul(&t2, &t2, &w);
+			if (st == QAWS_STATUS_OK) st = sh_dy_add(&t1, &t1, &t2, -1);
+			if (st == QAWS_STATUS_OK) st = sh_dy_add(&num, &num, &t1, 1);
 		}
-		if (st == QAWS_STATUS_OK) st = dy_mul(&den, &w, &L->dd);
+		if (st == QAWS_STATUS_OK) st = sh_dy_mul(&den, &w, &L->dd);
 		if (st != QAWS_STATUS_OK)
 			break;
 		/* num / den = (nm / dm) 2^(ne - de) */
@@ -521,15 +521,15 @@ static qaws_status patch_hits(qaws_exact_surface const* s, unsigned int iu, unsi
 /* the line through p0 and p1 as two exact planes */
 static qaws_status line_setup(double const p0[3], double const p1[3], line_ctx* L)
 {
-	dyadic q1[3], e[3];
+	sh_dyadic q1[3], e[3];
 	unsigned int c, k;
 	double ad[3];
 	qaws_status st;
 	for (c = 0; c < 3; c++)
 	{
-		TRY(dy_from_double(&L->P[c], p0[c]));
-		TRY(dy_from_double(&q1[c], p1[c]));
-		TRY(dy_add(&L->d[c], &q1[c], &L->P[c], -1));
+		TRY(sh_dy_from_double(&L->P[c], p0[c]));
+		TRY(sh_dy_from_double(&q1[c], p1[c]));
+		TRY(sh_dy_add(&L->d[c], &q1[c], &L->P[c], -1));
 		ad[c] = fabs(p1[c] - p0[c]);
 	}
 	if (qaws_exact_int_is_zero(&L->d[0].m) && qaws_exact_int_is_zero(&L->d[1].m) && qaws_exact_int_is_zero(&L->d[2].m))
@@ -544,26 +544,26 @@ static qaws_status line_setup(double const p0[3], double const p1[3], line_ctx* 
 	for (c = 0; c < 3; c++)
 	{
 		unsigned int c1 = (c + 1) % 3, c2 = (c + 2) % 3;
-		dyadic t1, t2;
-		TRY(dy_mul(&t1, &L->d[c1], &e[c2]));
-		TRY(dy_mul(&t2, &L->d[c2], &e[c1]));
-		TRY(dy_add(&L->n1[c], &t1, &t2, -1));
+		sh_dyadic t1, t2;
+		TRY(sh_dy_mul(&t1, &L->d[c1], &e[c2]));
+		TRY(sh_dy_mul(&t2, &L->d[c2], &e[c1]));
+		TRY(sh_dy_add(&L->n1[c], &t1, &t2, -1));
 	}
 	for (c = 0; c < 3; c++)
 	{
 		unsigned int c1 = (c + 1) % 3, c2 = (c + 2) % 3;
-		dyadic t1, t2;
-		TRY(dy_mul(&t1, &L->d[c1], &L->n1[c2]));
-		TRY(dy_mul(&t2, &L->d[c2], &L->n1[c1]));
-		TRY(dy_add(&L->n2[c], &t1, &t2, -1));
+		sh_dyadic t1, t2;
+		TRY(sh_dy_mul(&t1, &L->d[c1], &L->n1[c2]));
+		TRY(sh_dy_mul(&t2, &L->d[c2], &L->n1[c1]));
+		TRY(sh_dy_add(&L->n2[c], &t1, &t2, -1));
 	}
 	qaws_exact_int_zero(&L->dd.m);
 	L->dd.e = 0;
 	for (c = 0; c < 3; c++)
 	{
-		dyadic t;
-		TRY(dy_mul(&t, &L->d[c], &L->d[c]));
-		TRY(dy_add(&L->dd, &L->dd, &t, 1));
+		sh_dyadic t;
+		TRY(sh_dy_mul(&t, &L->d[c], &L->d[c]));
+		TRY(sh_dy_add(&L->dd, &L->dd, &t, 1));
 	}
 	return QAWS_STATUS_OK;
 }

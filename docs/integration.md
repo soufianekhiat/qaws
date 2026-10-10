@@ -81,11 +81,11 @@ The most self-contained option: collapse the entire library into one header and
 one implementation file.
 
 ```bash
-python buildsystem/amalgamate.py --output-dir amalgam        # scalar only
-python buildsystem/amalgamate.py --output-dir amalgam --simd # with batch/
+cmake -DQAWS_OUTPUT_DIR=amalgam -P buildsystem/amalgamate.cmake                # scalar only
+cmake -DQAWS_OUTPUT_DIR=amalgam -DQAWS_SIMD=ON -P buildsystem/amalgamate.cmake # with batch/
 ```
 
-That writes `amalgam/qaws.h` (~79 KiB) and `amalgam/qaws.c` (~1 MiB). Those two
+That writes `amalgam/qaws.h` (~160 KiB) and `amalgam/qaws.c` (~2.1 MiB). Those two
 files are the whole library. Compile them with no include paths, no library and
 no build system:
 
@@ -128,7 +128,7 @@ cmake -B build -DQAWS_TEST_AMALGAMATION=ON && ctest --test-dir build
 | `QAWS_AMALGAMATION_DIR` | `<build>/amalgam` | Where the generated pair is written |
 
 `QAWS_AMALGAMATION` follows `QAWS_ENABLE_SIMD`: with SIMD on, the `batch/`
-sources are folded in too. Generating requires a Python 3 interpreter;
+sources are folded in too. Generating needs only CMake (`cmake -P`);
 consuming the result does not.
 
 ### From Sharpmake
@@ -136,8 +136,8 @@ consuming the result does not.
 `generate_projects.bat` adds a `QawsAmalgam` static library project alongside
 `Qaws` and `QawsTests`. It generates both variants up front, compiles the one
 matching each configuration's `SimdMode`, and regenerates on every build so the
-pair cannot go stale after an edit under `src/qaws/`. If no Python 3
-interpreter is found the project is skipped with a warning and the rest of the
+pair cannot go stale after an edit under `src/qaws/`. If `cmake` is not on
+PATH, the project is skipped with a warning and the rest of the
 solution generates as before.
 
 ## What CI checks

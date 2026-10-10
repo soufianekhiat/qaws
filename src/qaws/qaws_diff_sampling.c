@@ -53,7 +53,7 @@ static double v3_dot(qaws_vec3 a, qaws_vec3 b)
 	return (double)a.x * b.x + (double)a.y * b.y + (double)a.z * b.z;
 }
 
-static qaws_vec3 v3_make(double x, double y, double z)
+static qaws_vec3 ds_v3_make(double x, double y, double z)
 {
 	qaws_vec3 r;
 	r.x = (qaws_scalar)x;
@@ -64,7 +64,7 @@ static qaws_vec3 v3_make(double x, double y, double z)
 
 static qaws_vec3 v3_axpy(double a, qaws_vec3 x, qaws_vec3 y)
 {
-	return v3_make(a * x.x + y.x, a * x.y + y.y, a * x.z + y.z);
+	return ds_v3_make(a * x.x + y.x, a * x.y + y.y, a * x.z + y.z);
 }
 
 static void v3_set(qaws_vec3* v, unsigned int c, qaws_scalar x)
@@ -713,7 +713,7 @@ static qaws_status cdf_node_pullback(cdf_job const* job, double t, double W, dou
 		return QAWS_STATUS_OK;
 	measure_gradient(job, &p, g);
 	for (k = 0; k < 3; k++)
-		bar[k] = v3_make(W * c1 * g[k].x, W * c1 * g[k].y, W * c1 * g[k].z);
+		bar[k] = ds_v3_make(W * c1 * g[k].x, W * c1 * g[k].y, W * c1 * g[k].z);
 	if (c2 != 0)
 	{
 		qaws_vec3 yd[3];
@@ -1010,7 +1010,7 @@ qaws_status qaws_curve_cdf_sample_hvp(
 		F2 += a->lambda * (double)targets[i].fraction;
 		/* moving evaluation point: J_D1^T p_bar t' - lambda J_y^T dm/dy t' */
 		for (k = 0; k < 3; k++)
-			bar[k] = v3_make(-a->lambda * a->t_dot * a->g[k].x, -a->lambda * a->t_dot * a->g[k].y,
+			bar[k] = ds_v3_make(-a->lambda * a->t_dot * a->g[k].x, -a->lambda * a->t_dot * a->g[k].y,
 				-a->lambda * a->t_dot * a->g[k].z);
 		bar[1] = v3_axpy(a->t_dot, adjoint[i].position, bar[1]);
 		st = cdf_add_jet(&job, a->t, bar, out_hv, NULL);
@@ -1674,10 +1674,10 @@ static qaws_status scdf_rational_pullback(scdf_pass const* ps, qaws_dual1 u, qaw
 					double N = (double)sup.u_weights[a][i] * sup.v_weights[b][j];
 					double Nd = (double)sup.u_weights[a + 1][i] * sup.v_weights[b][j] * u.t + (double)sup.u_weights[a][i] * sup.v_weights[b + 1][j] * v.t;
 					double w = job->rw[e], wd = job->rwd[e];
-					qaws_vec3 P = v3_make(job->rp[3 * e], job->rp[3 * e + 1], job->rp[3 * e + 2]);
-					qaws_vec3 Pd = v3_make(job->rpd[3 * e], job->rpd[3 * e + 1], job->rpd[3 * e + 2]);
-					qaws_vec3 Q = v3_make(w * P.x, w * P.y, w * P.z);
-					qaws_vec3 Qd = v3_axpy(wd, P, v3_make(w * Pd.x, w * Pd.y, w * Pd.z));
+					qaws_vec3 P = ds_v3_make(job->rp[3 * e], job->rp[3 * e + 1], job->rp[3 * e + 2]);
+					qaws_vec3 Pd = ds_v3_make(job->rpd[3 * e], job->rpd[3 * e + 1], job->rpd[3 * e + 2]);
+					qaws_vec3 Q = ds_v3_make(w * P.x, w * P.y, w * P.z);
+					qaws_vec3 Qd = v3_axpy(wd, P, ds_v3_make(w * Pd.x, w * Pd.y, w * Pd.z));
 					X[a][b].v = v3_axpy(N, Q, X[a][b].v);
 					X[a][b].t = v3_axpy(N, Qd, v3_axpy(Nd, Q, X[a][b].t));
 					W[a][b] = qaws_dual1_make((qaws_scalar)(W[a][b].v + N * w), (qaws_scalar)(W[a][b].t + N * wd + Nd * w), 0);
@@ -1748,8 +1748,8 @@ static qaws_status scdf_rational_pullback(scdf_pass const* ps, qaws_dual1 u, qaw
 			unsigned int e = (sup.u_first + i) * sup.u_stride + (sup.v_first + j) * sup.v_stride;
 			qaws_vec3 qx = qaws_v3_zero(), qxd = qaws_v3_zero();
 			double qw = 0, qwd = 0, w = job->rw[e], wd = job->rwd[e];
-			qaws_vec3 P = v3_make(job->rp[3 * e], job->rp[3 * e + 1], job->rp[3 * e + 2]);
-			qaws_vec3 Pd = v3_make(job->rpd[3 * e], job->rpd[3 * e + 1], job->rpd[3 * e + 2]);
+			qaws_vec3 P = ds_v3_make(job->rp[3 * e], job->rp[3 * e + 1], job->rp[3 * e + 2]);
+			qaws_vec3 Pd = ds_v3_make(job->rpd[3 * e], job->rpd[3 * e + 1], job->rpd[3 * e + 2]);
 			for (a = 0; a <= kmax; a++)
 				for (b = 0; a + b <= kmax; b++)
 				{
@@ -1762,7 +1762,7 @@ static qaws_status scdf_rational_pullback(scdf_pass const* ps, qaws_dual1 u, qaw
 				}
 			if (pv)
 			{
-				qaws_vec3 g = v3_axpy(wd, qx, v3_make(w * qxd.x, w * qxd.y, w * qxd.z));
+				qaws_vec3 g = v3_axpy(wd, qx, ds_v3_make(w * qxd.x, w * qxd.y, w * qxd.z));
 				qaws_scalar gs[3];
 				gs[0] = g.x;
 				gs[1] = g.y;
@@ -1833,7 +1833,7 @@ static qaws_status scdf_node_pullback(scdf_pass const* ps, qaws_dual1 u, qaws_du
 		for (i = 0; i < n; i++)
 		{
 			int skip = i == 0 && job->measure.kind != QAWS_MEASURE_DENSITY;
-			yb[i] = qaws_dual3_make(skip ? qaws_v3_zero() : v3_make(C.v * g[i].x, C.v * g[i].y, C.v * g[i].z),
+			yb[i] = qaws_dual3_make(skip ? qaws_v3_zero() : ds_v3_make(C.v * g[i].x, C.v * g[i].y, C.v * g[i].z),
 				skip ? qaws_v3_zero() : bar.d[i], qaws_v3_zero());
 		}
 		return scdf_rational_pullback(ps, u, v, n, yb);
