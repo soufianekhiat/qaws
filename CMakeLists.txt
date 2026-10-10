@@ -70,6 +70,7 @@ set(QAWS_SOURCES
   src/qaws/qaws_path.c
   src/qaws/qaws_clip.c
   src/qaws/qaws_clip64.c
+  src/qaws/qaws_clip_exact.c
   src/qaws/qaws_offset.c
 src/qaws/qaws_offset64.c
 src/qaws/qaws_jobs.c
@@ -507,6 +508,7 @@ if(QAWS_INSTALL)
       src/qaws/qaws_path.h
       src/qaws/qaws_clip.h
       src/qaws/qaws_clip64.h
+      src/qaws/qaws_clip_exact.h
       src/qaws/qaws_offset.h
       src/qaws/qaws_rectclip.h
       src/qaws/qaws_stack.h

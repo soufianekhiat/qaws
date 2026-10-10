@@ -1357,3 +1357,54 @@ qaws_status qaws_exact_curve_self_hits(qaws_exact_curve const* curve, qaws_exact
 	*out_count = count;
 	return st;
 }
+
+qaws_status qaws_exact_span_invert(qaws_exact_span const* I, unsigned int dim, qaws_exact_int const* E, qaws_exact_int* num, qaws_exact_int* den, int* on)
+{
+	return invert_point(I, dim, E, num, den, on);
+}
+
+qaws_status qaws_exact_span_implicit_on(qaws_exact_span const* I, qaws_exact_span const* S, qaws_exact_poly* R)
+{
+	qaws_status st;
+	if (I->degree == 1)
+	{
+		/* det(I0, I1, S(s)) = c . S(s), c = I0 x I1 (homogeneous) */
+		qaws_exact_int c[3], t1, t2;
+		qaws_exact_poly comp;
+		unsigned int k;
+		for (k = 0; k < 3; k++)
+		{
+			unsigned int k1 = (k + 1) % 3, k2 = (k + 2) % 3;
+			TRY(qaws_exact_int_mul(&t1, &I->h[k1], &I->h[3 + k2]));
+			TRY(qaws_exact_int_mul(&t2, &I->h[k2], &I->h[3 + k1]));
+			TRY(qaws_exact_int_sub(&c[k], &t1, &t2));
+		}
+		qaws_exact_poly_zero(R, 0);
+		for (k = 0; k < 3; k++)
+		{
+			qaws_exact_poly sc;
+			TRY(qaws_exact_poly_from_bernstein(S->h, S->degree, 3, k, &comp));
+			TRY(qaws_exact_poly_scale(&sc, &comp, &c[k]));
+			TRY(qaws_exact_poly_acc(R, &sc, 1));
+		}
+		qaws_exact_poly_trim(R);
+		return QAWS_STATUS_OK;
+	}
+	if (I->degree > CC_MAX_IMPLICIT || I->degree * S->degree > QAWS_EXACT_ROOTS_MAX_DEGREE)
+		return QAWS_STATUS_EXACT_UNSUPPORTED;
+	{
+		proj pj[3];
+		poly* sys = (poly*)cc_alloc(sizeof(poly) * 4);
+		if (!sys)
+			return QAWS_STATUS_ALLOCATION_FAILURE;
+		projections(2, pj);
+		st = build_cross(I, S, 3, &pj[0], &sys[0], &sys[1], &sys[2], &sys[3]);
+		if (st == QAWS_STATUS_OK)
+		{
+			*R = sys[0];
+			qaws_exact_poly_trim(R);
+		}
+		cc_free(sys);
+		return st;
+	}
+}

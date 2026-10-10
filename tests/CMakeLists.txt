@@ -98,6 +98,7 @@ add_executable(
   94_polytree.c
   95_jobs.c
   96_exact_contacts.c
+  97_clip_exact.c
 )
 
 # The amalgamated library exports exactly the same symbols, so the tests can

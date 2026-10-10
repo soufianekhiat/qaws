@@ -11,6 +11,7 @@
  */
 
 #include "test_common.h"
+#include "qaws_clip_exact.h"
 #include <math.h>
 #include <string.h>
 #include <stdlib.h>
@@ -821,6 +822,160 @@ static void test_polygons64(void)
 	TEST_ASSERT(total >= 190 && ok == total && wrong == 0, msg);
 }
 
+/* every closed record through the exact curve engine (polylines on the
+   integer lattice): its area against qaws_clip64's exact vertices */
+static void test_polygons_exact_curves(void)
+{
+	FILE* f = fopen(QAWS_TEST_DATA_DIR "/clipper2/Polygons.txt", "r");
+	char* buf = NULL;
+	size_t cap = 0;
+	int pending = 0, total = 0, ok = 0, failed = 0, slivers = 0;
+	double worst = 0;
+	c2_test t;
+	char msg[256];
+	qaws_exact_desc ed;
+	if (!f)
+	{
+		TEST_ASSERT(0, "Polygons.txt found");
+		return;
+	}
+	qaws_exact_desc_default(&ed);
+	ed.space_exp2 = 0;
+	while (c2_next(f, &t, &buf, &cap, &pending))
+	{
+		qaws_path_2d* sp = (qaws_path_2d*)calloc(t.subj.count + 1, sizeof(qaws_path_2d));
+		qaws_path_2d* cp = (qaws_path_2d*)calloc(t.clip.count + 1, sizeof(qaws_path_2d));
+		qaws_curve const** sv = (qaws_curve const**)calloc(t.subj.count + 1, sizeof(qaws_curve*));
+		qaws_curve const** cv = (qaws_curve const**)calloc(t.clip.count + 1, sizeof(qaws_curve*));
+		unsigned int ns = 0, nc = 0, k, i;
+		qaws_curve** sc = c2_curves(&t.subj, 1, sp, sv, &ns);
+		qaws_curve** cc = c2_curves(&t.clip, 1, cp, cv, &nc);
+		if (!t.open.count)
+		{
+			qaws_clip_exact_desc d;
+			qaws_clip_result* r = NULL;
+			qaws_clip64_desc d64;
+			qaws_clip64_result* r64 = NULL;
+			int64_t *ss = NULL, *cs = NULL;
+			qaws_path64* sp64 = c2_paths64(&t.subj, &ss);
+			qaws_path64* cp64 = c2_paths64(&t.clip, &cs);
+			qaws_status st;
+			double area = 0, want = 0, fwant = 0;
+			memset(&d, 0, sizeof(d));
+			d.subjects = sp; d.subject_count = ns;
+			d.clips = cp; d.clip_count = nc;
+			d.clip_type = t.ct; d.fill_rule = t.fr;
+			d.exact = &ed;
+			st = qaws_clip_exact_execute(&d, &r, NULL);
+			memset(&d64, 0, sizeof(d64));
+			d64.subjects = sp64; d64.subject_count = t.subj.count;
+			d64.clips = cp64; d64.clip_count = t.clip.count;
+			d64.clip_type = t.ct; d64.fill_rule = t.fr;
+			qaws_clip64_execute(&d64, &r64);
+			total++;
+			/* qaws_clip64 drops paths that round to nothing (slivers under a
+			   unit): the float engine keeps them, so it is the second reference */
+			{
+				qaws_clip_desc fd;
+				qaws_clip_result* fr = NULL;
+				memset(&fd, 0, sizeof(fd));
+				fd.subjects = sp; fd.subject_count = ns;
+				fd.clips = cp; fd.clip_count = nc;
+				fd.clip_type = t.ct; fd.fill_rule = t.fr;
+				if (qaws_clip_execute(&fd, &fr) == QAWS_STATUS_OK)
+					for (k = 0; k < qaws_clip_result_get_path_count(fr); k++)
+					{
+						qaws_path_2d p;
+						qaws_scalar a = 0;
+						qaws_clip_result_get_path(fr, k, &p);
+						qaws_path_compute_area_2d(&p, &a);
+						fwant += (double)a;
+					}
+				qaws_clip_result_destroy(fr);
+			}
+			for (k = 0; r64 && k < qaws_clip64_result_get_path_count(r64); k++)
+			{
+				double const* p;
+				unsigned int m;
+				qaws_clip64_result_get_path_exact(r64, k, &p, &m);
+				for (i = 0; i < m; i++)
+					want += 0.5 * (p[2 * i] * p[2 * ((i + 1) % m) + 1] - p[2 * ((i + 1) % m)] * p[2 * i + 1]);
+			}
+			if (st == QAWS_STATUS_OK)
+			{
+				for (k = 0; k < qaws_clip_result_get_path_count(r); k++)
+				{
+					qaws_path_2d p;
+					qaws_scalar a = 0;
+					qaws_clip_result_get_path(r, k, &p);
+					qaws_path_compute_area_2d(&p, &a);
+					area += (double)a;
+				}
+				if (getenv("QAWS_C2_DUMPX") && atoi(getenv("QAWS_C2_DUMPX")) == t.number)
+				{
+					c2_dump_paths("subject", &t.subj);
+					c2_dump_paths("clip", &t.clip);
+					printf("      ct %d fr %d\n", (int)t.ct, (int)t.fr);
+					for (k = 0; k < qaws_clip_result_get_path_count(r); k++)
+					{
+						qaws_path_2d p;
+						unsigned int j;
+						qaws_clip_result_get_path(r, k, &p);
+						printf("      exact-curve result %u:", k);
+						for (j = 0; j < p.curve_count; j++)
+						{
+							qaws_scalar cpt[512];
+							unsigned int m = 0, q;
+							qaws_curve_get_control_points(p.curves[j], cpt, 256, &m);
+							for (q = 0; q < m; q++) printf(" %.4f,%.4f", (double)cpt[2 * q], (double)cpt[2 * q + 1]);
+							printf(" |");
+						}
+						printf("\n");
+					}
+					for (k = 0; r64 && k < qaws_clip64_result_get_path_count(r64); k++)
+					{
+						double const* p;
+						unsigned int m, j;
+						qaws_clip64_result_get_path_exact(r64, k, &p, &m);
+						printf("      clip64 result %u:", k);
+						for (j = 0; j < m; j++) printf(" %.4f,%.4f", p[2 * j], p[2 * j + 1]);
+						printf("\n");
+					}
+				}
+				if (fabs(area - want) <= 1e-9 * (1 + fabs(want)))
+					ok++;
+				else if (fabs(area - fwant) <= 1e-7 * (1 + fabs(fwant)))
+				{
+					ok++;
+					slivers++;
+				}
+				else
+					printf("    exact curves, test %d: area %.6f, qaws_clip64 %.6f, qaws_clip %.6f\n", t.number, area, want, fwant);
+				if (fabs(area - fwant) / (1 + fabs(fwant)) > worst)
+					worst = fabs(area - fwant) / (1 + fabs(fwant));
+			}
+			else
+			{
+				failed++;
+				printf("    exact curves, test %d (%d, fill %d): status %d\n", t.number, (int)t.ct, (int)t.fr, (int)st);
+			}
+			qaws_clip_result_destroy(r);
+			qaws_clip64_result_destroy(r64);
+			free(sp64); free(cp64); free(ss); free(cs);
+		}
+		for (k = 0; k < ns; k++) qaws_curve_destroy(sc[k]);
+		for (k = 0; k < nc; k++) qaws_curve_destroy(cc[k]);
+		free(sc); free(cc); free(sp); free(cp); free((void*)sv); free((void*)cv);
+		c2_paths_free(&t.subj); c2_paths_free(&t.open); c2_paths_free(&t.clip);
+	}
+	fclose(f);
+	free(buf);
+	printf("    exact curve engine on Polygons.txt: %d of %d records with the exact area (%d with slivers qaws_clip64 rounds away; worst %.1e from qaws_clip), %d uncertified\n",
+		ok, total, slivers, worst, failed);
+	sprintf(msg, "qaws_clip_exact on Clipper2's Polygons.txt: every record certified with the exact area (%d of %d, %d uncertified)", ok, total, failed);
+	TEST_ASSERT(total >= 190 && ok == total, msg);
+}
+
 int test_85_clipper2_parity_main(void)
 {
 	g_pass = 0;
@@ -829,6 +984,7 @@ int test_85_clipper2_parity_main(void)
 	test_polygons();
 	test_lines();
 	test_polygons64();
+	test_polygons_exact_curves();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
 }

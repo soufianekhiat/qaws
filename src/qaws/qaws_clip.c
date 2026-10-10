@@ -2142,3 +2142,82 @@ qaws_status qaws_internal_clip_result_append(qaws_clip_result* dst, qaws_clip_re
 		dst->views[i] = dst->curves[i];
 	return QAWS_STATUS_OK;
 }
+
+qaws_status qaws_internal_clip_output_arrangement(qaws_internal_arrangement const* a, qaws_clip_result* result)
+{
+	cl_ctx x;
+	unsigned int i, k, nh = 2 * a->edge_count;
+	qaws_status s;
+	memset(&x, 0, sizeof(x));
+	x.d = a->desc;
+	x.r = result;
+	x.tol = a->tolerance;
+	x.ext = a->extent;
+	x.src = (cl_src*)malloc(sizeof(cl_src) * (a->source_count + 1));
+	x.v = (cl_vertex*)malloc(sizeof(cl_vertex) * (a->vertex_count + 1));
+	x.e = (cl_edge*)malloc(sizeof(cl_edge) * (a->edge_count + 1));
+	x.h = (cl_half*)calloc(nh + 1, sizeof(cl_half));
+	x.vout = (unsigned int*)malloc(sizeof(unsigned int) * (nh + 1));
+	if (!x.src || !x.v || !x.e || !x.h || !x.vout)
+	{
+		cl_free_ctx(&x);
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	}
+	for (i = 0; i < a->source_count; i++)
+	{
+		x.src[i].c = a->sources[i].curve;
+		x.src[i].operand = a->sources[i].operand;
+		x.src[i].path = a->sources[i].path;
+		x.src[i].curve = a->sources[i].index;
+		x.src[i].base = a->sources[i].base;
+		x.src[i].scale = a->sources[i].scale;
+	}
+	x.nsrc = a->source_count;
+	for (i = 0; i < a->vertex_count; i++)
+	{
+		cl_vertex* v = &x.v[i];
+		v->p[0] = a->vertices[i].p[0];
+		v->p[1] = a->vertices[i].p[1];
+		v->sa = a->vertices[i].sa;
+		v->sb = a->vertices[i].sb;
+		v->ta = a->vertices[i].ta;
+		v->tb = a->vertices[i].tb;
+		v->first = a->vertices[i].first;
+		v->count = a->vertices[i].count;
+	}
+	x.nv = a->vertex_count;
+	for (i = 0; i < a->edge_count; i++)
+	{
+		cl_edge* e = &x.e[i];
+		e->src = a->edges[i].src;
+		e->t0 = a->edges[i].t0;
+		e->t1 = a->edges[i].t1;
+		e->v0 = a->edges[i].v0;
+		e->v1 = a->edges[i].v1;
+		e->ds = a->edges[i].ds;
+		e->dc = a->edges[i].dc;
+		e->alive = 1;
+	}
+	x.ne = a->edge_count;
+	for (i = 0; i < nh; i++)
+	{
+		x.vout[i] = a->out[i];
+		x.h[i].face = a->half_face[i];
+	}
+	for (i = 0; i < a->vertex_count; i++)
+		for (k = 0; k < a->vertices[i].count; k++)
+			x.h[x.vout[a->vertices[i].first + k]].pos = k;
+	s = cl_output(&x, a->face_count, a->inside);
+	cl_free_ctx(&x);
+	/* const views of the curves for the path views */
+	if (s == QAWS_STATUS_OK)
+	{
+		qaws_curve const** views = (qaws_curve const**)realloc((void*)result->views, sizeof(qaws_curve*) * (result->curve_count + 1));
+		if (!views)
+			return QAWS_STATUS_ALLOCATION_FAILURE;
+		result->views = views;
+		for (i = 0; i < result->curve_count; i++)
+			result->views[i] = result->curves[i];
+	}
+	return s;
+}

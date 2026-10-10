@@ -40,6 +40,7 @@
 #include "better2d_showcase/07_offset_extremes.c"
 #include "better2d_showcase/08_triangulate.c"
 #include "better2d_showcase/09_stack_mesh.c"
+#include "better2d_showcase/10_clip_exact.c"
 
 int main(void)
 {
@@ -54,5 +55,6 @@ int main(void)
 	demo_offset_extremes();
 	demo_triangulate();
 	demo_stack_mesh();
+	demo_clip_exact();
 	return 0;
 }

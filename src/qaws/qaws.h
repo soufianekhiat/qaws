@@ -58,6 +58,7 @@
 #include "qaws_path.h"
 #include "qaws_clip.h"
 #include "qaws_clip64.h"
+#include "qaws_clip_exact.h"
 #include "qaws_offset.h"
 #include "qaws_rectclip.h"
 #include "qaws_stack.h"

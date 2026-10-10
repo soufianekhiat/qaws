@@ -91,4 +91,16 @@ qaws_status qaws_exact_span_pair_hits(qaws_exact_curve const* a, unsigned int ia
    inside an overlap dropped; returns the new count (order kept otherwise). */
 unsigned int qaws_exact_merge_overlaps(qaws_exact_pair* pairs, unsigned int count);
 
+/* Is the homogeneous point E (dim + 1 integers, lattice units) on span I's
+   curve (*on), and at which local parameter num / den (den 0: I's parameter
+   at infinity)? QAWS_STATUS_CERTIFICATION_FAILED at a singular point. */
+qaws_status qaws_exact_span_invert(qaws_exact_span const* I, unsigned int dim, qaws_exact_int const* E, qaws_exact_int* num, qaws_exact_int* den, int* on);
+
+struct qaws_exact_poly;
+
+/* R(s): the implicit equation of 2D span I (degree 1 to 6) on 2D span S, a
+   polynomial in S's local parameter whose roots are where S meets I's
+   algebraic curve (zero when S lies on it). */
+qaws_status qaws_exact_span_implicit_on(qaws_exact_span const* I, qaws_exact_span const* S, struct qaws_exact_poly* R);
+
 #endif /* QAWS_EXACT_CURVE_H */

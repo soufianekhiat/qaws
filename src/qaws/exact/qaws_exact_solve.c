@@ -231,12 +231,24 @@ static qaws_status zero_at(sys_work* w, int which, qaws_exact_root const* rt, in
 	{
 		poly h = which ? w->D : w->C1;
 		qaws_exact_poly_trim(&h);
+		if (qaws_exact_poly_is_zero(&h))
+		{
+			/* s is the span end all along: zero at every root */
+			w->zstate[which] = 2;
+			*out = 1;
+			return QAWS_STATUS_OK;
+		}
 		st = qaws_exact_poly_gcd(&w->R, &h, &w->Z[which]);
 		if (st != QAWS_STATUS_OK)
 			return st;
 		w->zstate[which] = w->Z[which].deg > 0;
 		if (w->zstate[which])
 			TRY(qaws_exact_poly_to_bernstein(&w->Z[which], w->bZ[which]));
+	}
+	if (w->zstate[which] == 2)
+	{
+		*out = 1;
+		return QAWS_STATUS_OK;
 	}
 	if (!w->zstate[which])
 	{
