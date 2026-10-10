@@ -13,6 +13,29 @@ qaws_status qaws_curve_split(
 	qaws_curve** out_left,
 	qaws_curve** out_right);
 
+/*
+ * The piece of a curve between parameters t0 and t1, as a new curve that lies
+ * exactly on the source (t0 > t1: the piece reversed). The new curve is of the
+ * simplest kind that represents the piece exactly:
+ *
+ *   Bezier, rational Bezier, B-spline, NURBS, polynomial, arc, clothoid:
+ *     the same kind (B-spline and NURBS keep the source parameters);
+ *   Hermite, Catmull-Rom, trajectory, subdivision:
+ *     a cubic Bezier (one span) or cubic B-spline whose knots are the
+ *     source parameters;
+ *   composite: the piece of one segment, or a composite of pieces;
+ *   reparameterized: the piece of its source.
+ *
+ * Yuksel curves have no polynomial form; their pieces are cubic B-splines
+ * fitted to 1e-9 (1e-5 in float builds) of the piece's extent.
+ * Parameters within rounding of the domain are clamped onto it.
+ */
+qaws_status qaws_curve_extract(
+	qaws_curve const* curve,
+	qaws_scalar t0,
+	qaws_scalar t1,
+	qaws_curve** out_curve);
+
 qaws_status qaws_curve_join(
 	qaws_curve const* curve_a,
 	qaws_curve const* curve_b,

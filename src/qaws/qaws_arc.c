@@ -1,6 +1,7 @@
 #include "qaws_arc.h"
 #include "qaws_curve.h"
 #include "internal/qaws_internal_types.h"
+#include "internal/qaws_internal_kinds.h"
 #include "internal/qaws_internal_curve.h"
 #include "internal/qaws_internal_validation.h"
 #include <stdlib.h>
@@ -13,11 +14,6 @@
  * Impl struct
  * ------------------------------------------------------------------------- */
 
-typedef struct qaws_arc_impl
-{
-	qaws_arc_segment* segments;
-	unsigned int segment_count;
-} qaws_arc_impl;
 
 /* ---------------------------------------------------------------------------
  * Helpers

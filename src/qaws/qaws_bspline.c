@@ -1,6 +1,7 @@
 #include "qaws_bspline.h"
 #include "qaws_curve.h"
 #include "internal/qaws_internal_types.h"
+#include "internal/qaws_internal_kinds.h"
 #include "internal/qaws_internal_curve.h"
 #include "internal/qaws_internal_basis.h"
 #include "internal/qaws_internal_validation.h"
@@ -311,8 +312,7 @@ static void bspline_destroy_impl(void *impl, qaws_allocator const* allocator)
 
 static int bspline_is_closed(qaws_curve const *curve)
 {
-	(void)curve;
-	return 0;
+	return qaws_internal_curve_ends_meet(curve);
 }
 
 static int bspline_is_periodic(qaws_curve const *curve)

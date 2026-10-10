@@ -6,6 +6,14 @@
 #include "qaws_nurbs.h"
 #include "qaws_trajectory.h"
 #include "qaws_yuksel.h"
+#include "qaws_rational_bezier.h"
+#include "qaws_polynomial.h"
+#include "qaws_arc.h"
+#include "qaws_clothoid.h"
+#include "qaws_composite.h"
+#include "qaws_eval.h"
+#include "qaws_operations.h"
+#include "internal/qaws_internal_kinds.h"
 #include "internal/qaws_internal_types.h"
 #include "internal/qaws_internal_curve.h"
 #include <stdlib.h>
@@ -134,10 +142,12 @@ static qaws_status reverse_catmull_rom(
 	if (!rev_cp)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 
-	for (i = 0; i < n; i++)
-		memcpy(&rev_cp[i * dim],
-		       &impl->control_points[(n - 1 - i) * dim],
+	/* a closed curve keeps its start point: p0, p[n-1], ..., p1 */
+	for (i = 0; i < n; i++) {
+		unsigned int src = impl->closed ? (n - i) % n : n - 1 - i;
+		memcpy(&rev_cp[i * dim], &impl->control_points[src * dim],
 		       sizeof(qaws_scalar) * dim);
+	}
 
 	desc.dimension = curve->dimension;
 	desc.control_points = rev_cp;
@@ -390,6 +400,14 @@ static qaws_status reverse_yuksel(
 	qaws_status status;
 	unsigned int i;
 
+	/* only the quadratic mode traces the same curve with its points
+	   reversed; the arc modes pick their arcs from the point order */
+	if (impl->mode != QAWS_YUKSEL_MODE_BEZIER)
+		return qaws_curve_extract(curve,
+			curve->parameter_range.max_value,
+			curve->parameter_range.min_value,
+			out_reversed);
+
 	rev_cp = (qaws_scalar *)malloc(sizeof(qaws_scalar) * (size_t)(n * dim));
 	if (!rev_cp)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
@@ -408,6 +426,191 @@ static qaws_status reverse_yuksel(
 	status = qaws_curve_create_yuksel(&desc, out_reversed);
 	free(rev_cp);
 	return status;
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Reverse: rational Bezier, polynomial, arc, clothoid, composite            */
+/* -------------------------------------------------------------------------- */
+
+static qaws_status reverse_rational_bezier(
+	qaws_curve const *curve,
+	qaws_curve **out_reversed)
+{
+	qaws_rational_bezier_impl const *impl =
+		(qaws_rational_bezier_impl const *)curve->impl;
+	unsigned int dim = (unsigned int)curve->dimension;
+	unsigned int n = impl->control_point_count;
+	qaws_scalar *buf;
+	qaws_rational_bezier_desc desc;
+	qaws_status status;
+	unsigned int i;
+
+	buf = (qaws_scalar *)malloc(sizeof(qaws_scalar) * (size_t)(n * (dim + 1)));
+	if (!buf)
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+
+	for (i = 0; i < n; i++) {
+		memcpy(&buf[i * dim],
+		       &impl->control_points[(n - 1 - i) * dim],
+		       sizeof(qaws_scalar) * dim);
+		buf[n * dim + i] = impl->weights[n - 1 - i];
+	}
+
+	memset(&desc, 0, sizeof(desc));
+	desc.dimension = curve->dimension;
+	desc.degree = curve->degree;
+	desc.control_points = buf;
+	desc.control_point_count = n;
+	desc.weights = &buf[n * dim];
+	desc.weight_count = n;
+
+	status = qaws_curve_create_rational_bezier(&desc, out_reversed);
+	free(buf);
+	return status;
+}
+
+static qaws_status reverse_polynomial(
+	qaws_curve const *curve,
+	qaws_curve **out_reversed)
+{
+	/* q(t) = p(a + b - t): shift the origin to a + b, then negate odd terms */
+	qaws_polynomial_impl const *impl =
+		(qaws_polynomial_impl const *)curve->impl;
+	unsigned int dim = (unsigned int)curve->dimension;
+	unsigned int n = curve->degree;
+	qaws_scalar c = curve->parameter_range.min_value + curve->parameter_range.max_value;
+	qaws_scalar *co;
+	qaws_polynomial_desc desc;
+	qaws_status status;
+	unsigned int i, j, k;
+
+	co = (qaws_scalar *)malloc(sizeof(qaws_scalar) * (size_t)((n + 1) * dim));
+	if (!co)
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	memcpy(co, impl->coefficients, sizeof(qaws_scalar) * (size_t)((n + 1) * dim));
+
+	for (i = 0; i < n; i++)
+		for (j = n; j-- > i;)
+			for (k = 0; k < dim; k++)
+				co[j * dim + k] += c * co[(j + 1) * dim + k];
+	for (i = 1; i <= n; i += 2)
+		for (k = 0; k < dim; k++)
+			co[i * dim + k] = -co[i * dim + k];
+
+	memset(&desc, 0, sizeof(desc));
+	desc.dimension = curve->dimension;
+	desc.degree = n;
+	desc.coefficients = co;
+	desc.coefficient_count = n + 1;
+	desc.t_min = curve->parameter_range.min_value;
+	desc.t_max = curve->parameter_range.max_value;
+
+	status = qaws_curve_create_polynomial(&desc, out_reversed);
+	free(co);
+	return status;
+}
+
+static qaws_status reverse_arc(
+	qaws_curve const *curve,
+	qaws_curve **out_reversed)
+{
+	qaws_arc_impl const *impl = (qaws_arc_impl const *)curve->impl;
+	unsigned int n = impl->segment_count;
+	qaws_arc_segment *seg;
+	qaws_arc_desc desc;
+	qaws_status status;
+	unsigned int i;
+
+	seg = (qaws_arc_segment *)malloc(sizeof(qaws_arc_segment) * (size_t)n);
+	if (!seg)
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+
+	for (i = 0; i < n; i++) {
+		seg[i] = impl->segments[n - 1 - i];
+		seg[i].angle_start = impl->segments[n - 1 - i].angle_end;
+		seg[i].angle_end = impl->segments[n - 1 - i].angle_start;
+	}
+
+	memset(&desc, 0, sizeof(desc));
+	desc.dimension = curve->dimension;
+	desc.segments = seg;
+	desc.segment_count = n;
+
+	status = qaws_curve_create_arc(&desc, out_reversed);
+	free(seg);
+	return status;
+}
+
+static qaws_status reverse_clothoid(
+	qaws_curve const *curve,
+	qaws_curve **out_reversed)
+{
+	qaws_clothoid_impl const *impl = (qaws_clothoid_impl const *)curve->impl;
+	qaws_scalar L = impl->length;
+	qaws_eval_result_2d end;
+	qaws_clothoid_desc desc;
+	qaws_status status;
+
+	status = qaws_curve_evaluate_2d(curve, L, QAWS_EVAL_FLAG_POSITION, &end);
+	if (status != QAWS_STATUS_OK)
+		return status;
+
+	memset(&desc, 0, sizeof(desc));
+	desc.origin_x = end.position.x;
+	desc.origin_y = end.position.y;
+	desc.start_angle = impl->start_angle + impl->kappa_0 * L
+		+ impl->rate * L * L * (qaws_scalar)0.5 + (qaws_scalar)3.14159265358979323846;
+	desc.start_curvature = -impl->kappa_1;
+	desc.end_curvature = -impl->kappa_0;
+	desc.length = L;
+
+	return qaws_curve_create_clothoid(&desc, out_reversed);
+}
+
+static qaws_status reverse_composite(
+	qaws_curve const *curve,
+	qaws_curve **out_reversed)
+{
+	qaws_composite_impl const *impl = (qaws_composite_impl const *)curve->impl;
+	unsigned int n = impl->segment_count;
+	qaws_curve **seg;
+	qaws_composite_desc desc;
+	qaws_status status = QAWS_STATUS_OK;
+	unsigned int i, made = 0;
+
+	seg = (qaws_curve **)malloc(sizeof(qaws_curve *) * (size_t)n);
+	if (!seg)
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+
+	for (i = 0; i < n && status == QAWS_STATUS_OK; i++) {
+		status = qaws_curve_reverse(impl->segments[n - 1 - i], &seg[i]);
+		if (status == QAWS_STATUS_OK)
+			made++;
+	}
+
+	if (status == QAWS_STATUS_OK) {
+		memset(&desc, 0, sizeof(desc));
+		desc.dimension = curve->dimension;
+		desc.segments = seg;
+		desc.segment_count = n;
+		status = qaws_curve_create_composite(&desc, out_reversed);
+	}
+	if (status != QAWS_STATUS_OK)
+		for (i = 0; i < made; i++)
+			qaws_curve_destroy(seg[i]);
+	free(seg);
+	return status;
+}
+
+static qaws_status reverse_by_extract(
+	qaws_curve const *curve,
+	qaws_curve **out_reversed)
+{
+	/* no reversible description: the reversed exact piece of the whole curve */
+	return qaws_curve_extract(curve,
+		curve->parameter_range.max_value,
+		curve->parameter_range.min_value,
+		out_reversed);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -439,13 +642,18 @@ qaws_status qaws_curve_reverse(
 	case QAWS_CURVE_KIND_YUKSEL:
 		return reverse_yuksel(curve, out_reversed);
 	case QAWS_CURVE_KIND_RATIONAL_BEZIER:
+		return reverse_rational_bezier(curve, out_reversed);
 	case QAWS_CURVE_KIND_COMPOSITE:
+		return reverse_composite(curve, out_reversed);
 	case QAWS_CURVE_KIND_ARC:
+		return reverse_arc(curve, out_reversed);
 	case QAWS_CURVE_KIND_POLYNOMIAL:
+		return reverse_polynomial(curve, out_reversed);
 	case QAWS_CURVE_KIND_CLOTHOID:
+		return reverse_clothoid(curve, out_reversed);
 	case QAWS_CURVE_KIND_SUBDIVISION:
 	case QAWS_CURVE_KIND_REPARAMETERIZED:
-		return QAWS_STATUS_UNSUPPORTED_OPERATION;
+		return reverse_by_extract(curve, out_reversed);
 	default:
 		return QAWS_STATUS_UNSUPPORTED_OPERATION;
 	}

@@ -26,6 +26,44 @@ Splits a curve at the given parameter into two sub-curves.
 
 **Returns:** `QAWS_STATUS_OK` on success.
 
+Every kind can be split. Bezier, B-spline, NURBS and cubic trajectories
+split into two curves of their own kind, as does a Hermite or Catmull-Rom
+curve at a span boundary. Everywhere else the halves come from
+`qaws_curve_extract` below, so a cut inside a Hermite span gives two exact
+cubic B-splines.
+
+---
+
+## qaws_curve_extract
+
+```c
+qaws_status qaws_curve_extract(
+    qaws_curve const* curve,
+    qaws_scalar t0,
+    qaws_scalar t1,
+    qaws_curve** out_curve);
+```
+
+Returns the piece of `curve` between `t0` and `t1` as a new curve that lies
+exactly on the source. With `t0 > t1` the piece is reversed. Parameters
+within rounding of the domain are clamped onto it.
+
+| Source kind | Piece |
+|---|---|
+| Bezier, rational Bezier | same kind, de Casteljau (homogeneous for rational), domain [0, 1] |
+| B-spline, NURBS | same kind, knot insertion; the source parameters are kept |
+| Polynomial | same kind, domain narrowed to [t0, t1] |
+| Arc | arc with new start and end angles |
+| Clothoid | clothoid starting at C(t0) with the heading and curvatures there |
+| Hermite, Catmull-Rom (any parameterization), trajectory, subdivision | each cubic span rebuilt as a Bezier span: one span gives a cubic Bezier, more give a cubic B-spline whose knots are the source parameters |
+| Composite | the piece of one segment, or a composite of pieces |
+| Reparameterized | the piece of its source |
+| Yuksel | no polynomial form: cubic spans fitted to 1e-9 of the piece's extent (1e-5 in float builds) |
+
+Test 82 extracts 8 parameter pairs from a curve of each kind. Every piece
+starts at C(t0), ends at C(t1), and stays within 1e-9 of the extent from the
+source, both ways (f64; 1e-5 in float builds).
+
 ---
 
 ## qaws_curve_join

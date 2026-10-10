@@ -1,6 +1,7 @@
 #include "qaws_bezier.h"
 #include "qaws_curve.h"
 #include "internal/qaws_internal_types.h"
+#include "internal/qaws_internal_kinds.h"
 #include "internal/qaws_internal_curve.h"
 #include "internal/qaws_internal_basis.h"
 #include "internal/qaws_internal_validation.h"
@@ -113,7 +114,7 @@ static void bezier_destroy_impl(void* impl, qaws_allocator const* allocator)
 	if (bi) { qaws_internal_dealloc(allocator, bi->control_points); qaws_internal_dealloc(allocator, bi); }
 }
 
-static int bezier_is_closed(qaws_curve const* c)   { (void)c; return 0; }
+static int bezier_is_closed(qaws_curve const* c)   { return qaws_internal_curve_ends_meet(c); }
 static int bezier_is_periodic(qaws_curve const* c)  { (void)c; return 0; }
 static int bezier_is_rational(qaws_curve const* c)  { (void)c; return 0; }
 static qaws_continuity bezier_get_continuity(qaws_curve const* c) { (void)c; return QAWS_CONTINUITY_C3; }

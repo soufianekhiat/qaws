@@ -2,6 +2,7 @@
 #include "qaws_curve.h"
 #include "qaws_prepare.h"
 #include "internal/qaws_internal_types.h"
+#include "internal/qaws_internal_kinds.h"
 #include "internal/qaws_internal_curve.h"
 #include "internal/qaws_internal_diff.h"
 #include "internal/qaws_internal_basis.h"
@@ -143,8 +144,7 @@ static void hermite_destroy_impl(void *impl, qaws_allocator const* allocator)
 
 static int hermite_is_closed(qaws_curve const *curve)
 {
-	(void)curve;
-	return 0;
+	return qaws_internal_curve_ends_meet(curve);
 }
 
 static int hermite_is_periodic(qaws_curve const *curve)

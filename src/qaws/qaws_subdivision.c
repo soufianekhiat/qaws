@@ -1,6 +1,7 @@
 #include "qaws_subdivision.h"
 #include "qaws_curve.h"
 #include "internal/qaws_internal_types.h"
+#include "internal/qaws_internal_kinds.h"
 #include "internal/qaws_internal_curve.h"
 #include "internal/qaws_internal_validation.h"
 #include <stdlib.h>
@@ -11,14 +12,6 @@
 /*  Impl struct                                                               */
 /* -------------------------------------------------------------------------- */
 
-typedef struct qaws_subdivision_impl
-{
-	qaws_scalar* refined_points;      /* refined_count * dim_count */
-	unsigned int refined_count;
-	int closed;
-	qaws_scalar* segment_coeffs;      /* uniform Catmull-Rom cubic coefficients */
-	qaws_subdivision_scheme scheme;
-} qaws_subdivision_impl;
 
 /* -------------------------------------------------------------------------- */
 /*  Subdivision algorithms                                                    */

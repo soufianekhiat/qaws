@@ -18,6 +18,8 @@
 #include "internal/qaws_internal_curve.h"
 #include "internal/qaws_internal_arc_length.h"
 #include "internal/qaws_internal_fit.h"
+#include "internal/qaws_internal_kinds.h"
+#include "internal/qaws_internal_span.h"
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -71,6 +73,24 @@ static qaws_status join_catmull_rom(
 	qaws_curve const *a, qaws_curve const *b,
 	qaws_curve **out_joined);
 
+/* Split through qaws_curve_extract: two exact pieces, possibly of a simpler kind. */
+static qaws_status split_by_extract(
+	qaws_curve const *curve, qaws_scalar t,
+	qaws_curve **out_left, qaws_curve **out_right)
+{
+	qaws_status status = qaws_curve_extract(curve,
+		curve->parameter_range.min_value, t, out_left);
+	if (status != QAWS_STATUS_OK)
+		return status;
+	status = qaws_curve_extract(curve, t,
+		curve->parameter_range.max_value, out_right);
+	if (status != QAWS_STATUS_OK) {
+		qaws_curve_destroy(*out_left);
+		*out_left = NULL;
+	}
+	return status;
+}
+
 /* ========================================================================== */
 /*  Public API: qaws_curve_split                                              */
 /* ========================================================================== */
@@ -103,6 +123,9 @@ qaws_status qaws_curve_split(
 		return split_bezier(curve, parameter, out_left, out_right);
 
 	case QAWS_CURVE_KIND_HERMITE:
+		/* a Hermite span cannot be cut inside and stay a uniform Hermite */
+		if (parameter != (qaws_scalar)floor((double)parameter))
+			return split_by_extract(curve, parameter, out_left, out_right);
 		return split_hermite(curve, parameter, out_left, out_right);
 
 	case QAWS_CURVE_KIND_BSPLINE:
@@ -112,7 +135,12 @@ qaws_status qaws_curve_split(
 		return split_nurbs(curve, parameter, out_left, out_right);
 
 	case QAWS_CURVE_KIND_CATMULL_ROM:
-		return split_catmull_rom(curve, parameter, out_left, out_right);
+	{
+		qaws_status status = split_catmull_rom(curve, parameter, out_left, out_right);
+		if (status == QAWS_STATUS_UNSUPPORTED_OPERATION)
+			return split_by_extract(curve, parameter, out_left, out_right);
+		return status;
+	}
 
 	case QAWS_CURVE_KIND_TRAJECTORY:
 		return split_trajectory(curve, parameter, out_left, out_right);
@@ -125,7 +153,7 @@ qaws_status qaws_curve_split(
 	case QAWS_CURVE_KIND_CLOTHOID:
 	case QAWS_CURVE_KIND_SUBDIVISION:
 	case QAWS_CURVE_KIND_REPARAMETERIZED:
-		return QAWS_STATUS_UNSUPPORTED_OPERATION;
+		return split_by_extract(curve, parameter, out_left, out_right);
 
 	default:
 		return QAWS_STATUS_INVALID_ARGUMENT;
@@ -3130,6 +3158,40 @@ static qaws_curve_vtable const lm_vtable = {
 	lm_cont,
 	NULL /* diff */
 };
+
+int qaws_internal_reparam_source(
+	qaws_curve const* curve,
+	qaws_scalar t,
+	qaws_curve const** out_source,
+	qaws_scalar* out_source_t)
+{
+	qaws_scalar local_t;
+	if (curve->vtable == &reparam_vtable)
+	{
+		qaws_arc_reparam_impl const* impl = (qaws_arc_reparam_impl const*)curve->impl;
+		qaws_internal_find_span(curve, t, &local_t);
+		*out_source = impl->source;
+		*out_source_t = qaws_internal_distance_to_parameter(
+			impl->table_params, impl->table_distances, impl->table_size,
+			local_t * impl->total_arc_length);
+		return 1;
+	}
+	if (curve->vtable == &lm_vtable)
+	{
+		qaws_length_match_impl const* impl = (qaws_length_match_impl const*)curve->impl;
+		qaws_scalar s, frac;
+		qaws_internal_find_span(curve, t, &local_t);
+		s = curve->parameter_range.min_value +
+			local_t * (curve->parameter_range.max_value - curve->parameter_range.min_value);
+		frac = (impl->total_arc_length_a > QAWS_ZERO) ? (s / impl->total_arc_length_a) : QAWS_ZERO;
+		*out_source = impl->source_b;
+		*out_source_t = qaws_internal_distance_to_parameter(
+			impl->table_params_b, impl->table_distances_b, impl->table_size_b,
+			frac * impl->total_arc_length_b);
+		return 1;
+	}
+	return 0;
+}
 
 qaws_status qaws_curve_match_arc_length(
 	qaws_curve const* curve_a,

@@ -41,3 +41,8 @@ Creates a new curve that traces the same path as the input but in the opposite d
 **Semantics:**
 - The returned curve is a new allocation and must be destroyed with `qaws_curve_destroy`.
 - Evaluating the reversed curve at parameter `t` yields the same position as evaluating the original at `t_max - t + t_min`.
+- Every kind can be reversed. Bezier, Hermite, Catmull-Rom (closed ones keep
+  their start point), B-spline, NURBS, trajectory, quadratic Yuksel, rational
+  Bezier, polynomial, arc, clothoid and composite curves come back as their own
+  kind. Subdivision, reparameterized and arc-mode Yuksel curves come back as
+  the reversed `qaws_curve_extract` of their whole domain.

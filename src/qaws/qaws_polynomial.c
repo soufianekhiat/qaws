@@ -1,6 +1,7 @@
 #include "qaws_polynomial.h"
 #include "qaws_curve.h"
 #include "internal/qaws_internal_types.h"
+#include "internal/qaws_internal_kinds.h"
 #include "internal/qaws_internal_curve.h"
 #include "internal/qaws_internal_validation.h"
 #include "internal/qaws_internal_diff.h"
@@ -9,11 +10,6 @@
 #include "qaws_platform.h"
 #include "core/qaws_horner_core.h"
 
-typedef struct qaws_polynomial_impl
-{
-	qaws_scalar* coefficients;         /* (degree+1) * dim_count scalars */
-	unsigned int coefficient_count;
-} qaws_polynomial_impl;
 
 /* -------------------------------------------------------------------------- */
 /*  Horner evaluation helpers                                                  */
@@ -189,7 +185,7 @@ static void polynomial_destroy_impl(void* impl, qaws_allocator const* allocator)
 	if (pi) { qaws_internal_dealloc(allocator, pi->coefficients); qaws_internal_dealloc(allocator, pi); }
 }
 
-static int polynomial_is_closed(qaws_curve const* c)    { (void)c; return 0; }
+static int polynomial_is_closed(qaws_curve const* c)    { return qaws_internal_curve_ends_meet(c); }
 static int polynomial_is_periodic(qaws_curve const* c)   { (void)c; return 0; }
 static int polynomial_is_rational(qaws_curve const* c)   { (void)c; return 0; }
 static qaws_continuity polynomial_get_continuity(qaws_curve const* c) { (void)c; return QAWS_CONTINUITY_C3; }

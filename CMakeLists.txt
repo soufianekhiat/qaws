@@ -66,6 +66,7 @@ set(QAWS_SOURCES
   src/qaws/qaws_trajectory.c
   src/qaws/qaws_yuksel.c
   src/qaws/qaws_operations.c
+  src/qaws/qaws_extract.c
   src/qaws/qaws_convert.c
   src/qaws/qaws_export.c
   src/qaws/qaws_import.c

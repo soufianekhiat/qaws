@@ -1,6 +1,7 @@
 #include "qaws_clothoid.h"
 #include "qaws_curve.h"
 #include "internal/qaws_internal_types.h"
+#include "internal/qaws_internal_kinds.h"
 #include "internal/qaws_internal_curve.h"
 #include "internal/qaws_internal_diff.h"
 #include "core/qaws_dual_core.h"
@@ -13,16 +14,6 @@
  * Impl struct
  * ------------------------------------------------------------------------- */
 
-typedef struct qaws_clothoid_impl
-{
-	qaws_scalar origin_x, origin_y;
-	qaws_scalar start_angle;
-	qaws_scalar kappa_0;             /* start curvature */
-	qaws_scalar kappa_1;             /* end curvature */
-	qaws_scalar length;              /* total arc length */
-	qaws_scalar origin[2];           /* origin, contiguous (CENTER field) */
-	qaws_scalar rate;                /* (kappa_1 - kappa_0) / length (CURVATURE_RATE field) */
-} qaws_clothoid_impl;
 
 /* ---------------------------------------------------------------------------
  * Helpers
@@ -35,26 +26,37 @@ static qaws_scalar clothoid_theta(qaws_clothoid_impl const *impl, qaws_scalar s)
 	return impl->start_angle + impl->kappa_0 * s + kd * s * s * (qaws_scalar)0.5;
 }
 
-/* Compute position at arc-length s using Simpson's rule integration */
+/* Compute position at arc-length s: composite 10-point Gauss-Legendre, with
+   enough panels that the heading turns at most half a radian per panel. */
 static void clothoid_position(qaws_clothoid_impl const *impl, qaws_scalar s,
 	qaws_scalar *out_x, qaws_scalar *out_y)
 {
-	unsigned int n = 64; /* Simpson panels (must be even) */
-	qaws_scalar h = s / (qaws_scalar)n;
-	qaws_scalar sum_x = 0, sum_y = 0;
-	qaws_scalar kd = (impl->kappa_1 - impl->kappa_0) / impl->length;
-	unsigned int i;
+	static double const gx[5] = { 0.1488743389816312, 0.4333953941292472, 0.6794095682990244,
+		0.8650633666889845, 0.9739065285171717 };
+	static double const gw[5] = { 0.2955242247147529, 0.2692667143361318, 0.2190863625159820,
+		0.1494513491505806, 0.0666713443086881 };
+	double kd = ((double)impl->kappa_1 - (double)impl->kappa_0) / (double)impl->length;
+	double k0 = fabs((double)impl->kappa_0), k1 = fabs((double)impl->kappa_0 + kd * (double)s);
+	double turn = fabs((double)s) * (k0 > k1 ? k0 : k1);
+	unsigned int panels = 1 + (unsigned int)(turn * 2.0), p, i;
+	double h = (double)s / (double)panels, sum_x = 0.0, sum_y = 0.0;
 
-	for (i = 0; i <= n; i++)
+	if (panels > 4096)
+		panels = 4096, h = (double)s / 4096.0;
+	for (p = 0; p < panels; p++)
 	{
-		qaws_scalar u = (qaws_scalar)i * h;
-		qaws_scalar theta = impl->start_angle + impl->kappa_0 * u + kd * u * u * (qaws_scalar)0.5;
-		qaws_scalar w = (i == 0 || i == n) ? (qaws_scalar)1 : (i % 2 == 1) ? (qaws_scalar)4 : (qaws_scalar)2;
-		sum_x += w * (qaws_scalar)cos((double)theta);
-		sum_y += w * (qaws_scalar)sin((double)theta);
+		double mid = h * ((double)p + 0.5);
+		for (i = 0; i < 10; i++)
+		{
+			double u = mid + 0.5 * h * (i < 5 ? -gx[i] : gx[i - 5]);
+			double theta = (double)impl->start_angle + (double)impl->kappa_0 * u + kd * u * u * 0.5;
+			double w = gw[i < 5 ? i : i - 5];
+			sum_x += w * cos(theta);
+			sum_y += w * sin(theta);
+		}
 	}
-	*out_x = impl->origin_x + sum_x * h / (qaws_scalar)3;
-	*out_y = impl->origin_y + sum_y * h / (qaws_scalar)3;
+	*out_x = impl->origin_x + (qaws_scalar)(sum_x * h * 0.5);
+	*out_y = impl->origin_y + (qaws_scalar)(sum_y * h * 0.5);
 }
 
 /* ---------------------------------------------------------------------------
@@ -161,8 +163,7 @@ static void clothoid_destroy_impl(void *impl, qaws_allocator const* allocator)
 
 static int clothoid_is_closed(qaws_curve const *curve)
 {
-	(void)curve;
-	return 0;
+	return qaws_internal_curve_ends_meet(curve);
 }
 
 static int clothoid_is_periodic(qaws_curve const *curve)
