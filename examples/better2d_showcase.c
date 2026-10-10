@@ -6,6 +6,7 @@
  *                      parameters, as a new curve, over its source
  *   b2d2_boolean.svg   Boolean operations on polygons, NURBS and B-spline
  *                      regions, fill rules, nesting, open paths
+ *   b2d3_clipper2.svg  Clipper2's own test records through qaws_clip
  *
  * Each figure lives in better2d_showcase/NN_*.c, compiled as one translation
  * unit.
@@ -30,6 +31,7 @@
 
 #include "better2d_showcase/01_extract.c"
 #include "better2d_showcase/02_boolean.c"
+#include "better2d_showcase/03_clipper2.c"
 
 int main(void)
 {
@@ -37,5 +39,6 @@ int main(void)
 	MAKE_DIR("showcase");
 	demo_extract();
 	demo_boolean();
+	demo_clipper2();
 	return 0;
 }
