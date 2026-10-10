@@ -78,7 +78,7 @@ typedef struct qaws_clip_desc
 	qaws_clip_type clip_type;
 	qaws_fill_rule fill_rule;
 	unsigned int flags;                     /* QAWS_CLIP_* */
-	qaws_scalar tolerance;                  /* points this close are one vertex; 0 = 64e-10 of the extent (1.3e-3 in float) */
+	qaws_scalar tolerance;                  /* points this close are one vertex; 0 = 6.4e-9 of the extent (1e-4 in float) */
 	qaws_batch_executor const* executor;    /* optional, for the batched intersection */
 	qaws_clip_z_fn z_fn;                    /* optional */
 	void* z_user;

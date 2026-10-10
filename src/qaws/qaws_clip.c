@@ -33,6 +33,7 @@
 #include "qaws_rational_bezier.h"
 #include "qaws_bspline.h"
 #include "qaws_nurbs.h"
+#include "qaws_composite.h"
 #include "qaws_platform.h"
 #include "internal/qaws_internal_types.h"
 #include "internal/qaws_internal_flatten.h"
@@ -42,7 +43,7 @@
 #include <math.h>
 
 #if QAWS_SCALAR_IS_FLOAT
-#define CL_TOL_REL 1.3e-3
+#define CL_TOL_REL 1e-4
 #define CL_AREA_REL 1e-6
 #else
 #define CL_TOL_REL 6.4e-9
@@ -60,6 +61,7 @@ typedef struct cl_src
 {
 	qaws_curve const* c;
 	unsigned int operand, path, curve;   /* operand 0 subject, 1 clip, 2 open subject */
+	double base, scale;                  /* input curve parameter = base + scale t */
 } cl_src;
 
 typedef struct cl_point
@@ -129,8 +131,8 @@ typedef struct cl_ctx
 	qaws_clip_desc const* d;
 	cl_src* src;
 	unsigned int nsrc, capsrc;
-	qaws_curve** temp;                   /* closing lines we made */
-	unsigned int ntemp;
+	qaws_curve** temp;                   /* lines we made (polyline segments, closing lines) */
+	unsigned int ntemp, captemp;
 	cl_point* pts;
 	unsigned int npts, cappts;
 	cl_vertex* v;
@@ -153,7 +155,20 @@ typedef struct cl_ctx
 static qaws_status cl_eval(qaws_curve const* c, double t, double* p, double* d)
 {
 	qaws_eval_result_2d r;
-	qaws_status s = qaws_curve_evaluate_2d(c, (qaws_scalar)t, d ? QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 : QAWS_EVAL_FLAG_POSITION, &r);
+	qaws_status s;
+	if (c->kind == QAWS_CURVE_KIND_BEZIER && c->degree == 1)
+	{
+		/* lines in double whatever the scalar type */
+		qaws_scalar const* cp = ((qaws_bezier_impl const*)c->impl)->control_points;
+		double ax = cp[0], ay = cp[1], bx = cp[2], by = cp[3];
+		p[0] = ax + t * (bx - ax);
+		p[1] = ay + t * (by - ay);
+		if (t <= 0) { p[0] = ax; p[1] = ay; }
+		if (t >= 1) { p[0] = bx; p[1] = by; }
+		if (d) { d[0] = bx - ax; d[1] = by - ay; }
+		return QAWS_STATUS_OK;
+	}
+	s = qaws_curve_evaluate_2d(c, (qaws_scalar)t, d ? QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 : QAWS_EVAL_FLAG_POSITION, &r);
 	p[0] = r.position.x; p[1] = r.position.y;
 	if (d) { d[0] = r.d1.x; d[1] = r.d1.y; }
 	return s;
@@ -166,12 +181,89 @@ static double cl_tmax(qaws_curve const* c) { return c->parameter_range.max_value
 /*  1. Sources                                                              */
 /* ======================================================================== */
 
+static qaws_status cl_temp(cl_ctx* x, qaws_curve* c)
+{
+	CL_GROW(x->temp, x->ntemp, x->captemp, qaws_curve*);
+	x->temp[x->ntemp++] = c;
+	return QAWS_STATUS_OK;
+}
+
+static qaws_status cl_line(cl_ctx* x, double const* a, double const* b, qaws_curve** out)
+{
+	qaws_scalar cp[4];
+	qaws_bezier_desc bd;
+	qaws_status s;
+	cp[0] = (qaws_scalar)a[0]; cp[1] = (qaws_scalar)a[1];
+	cp[2] = (qaws_scalar)b[0]; cp[3] = (qaws_scalar)b[1];
+	memset(&bd, 0, sizeof(bd));
+	bd.dimension = QAWS_DIMENSION_2D; bd.degree = 1; bd.control_points = cp; bd.control_point_count = 2;
+	s = qaws_curve_create_bezier(&bd, out);
+	if (s == QAWS_STATUS_OK)
+		s = cl_temp(x, *out);
+	return s;
+}
+
+/* A source curve. Polylines (degree-1 B-splines) are split into one line
+   per segment and composites into their segments, so every corner is a
+   vertex and a path doubling back on itself meets itself as two sources;
+   (base, scale) maps a source's parameter back to the input curve's. */
+static qaws_status cl_add_curve(cl_ctx* x, qaws_curve const* c, unsigned int operand, unsigned int path, unsigned int curve,
+	double base, double scale)
+{
+	if (c->kind == QAWS_CURVE_KIND_BSPLINE && c->degree == 1)
+	{
+		qaws_bspline_impl const* impl = (qaws_bspline_impl const*)c->impl;
+		unsigned int k;
+		for (k = 0; k + 1 < impl->control_point_count; k++)
+		{
+			double a[2], b[2], t0 = impl->knots[k + 1], t1 = impl->knots[k + 2];
+			qaws_curve* line = NULL;
+			qaws_status s;
+			a[0] = impl->control_points[2 * k]; a[1] = impl->control_points[2 * k + 1];
+			b[0] = impl->control_points[2 * k + 2]; b[1] = impl->control_points[2 * k + 3];
+			if ((a[0] == b[0] && a[1] == b[1]) || !(t1 > t0))
+				continue;
+			s = cl_line(x, a, b, &line);
+			if (s == QAWS_STATUS_OK)
+				s = cl_add_curve(x, line, operand, path, curve, base + scale * t0, scale * (t1 - t0));
+			if (s != QAWS_STATUS_OK)
+				return s;
+		}
+		return QAWS_STATUS_OK;
+	}
+	if (c->kind == QAWS_CURVE_KIND_COMPOSITE)
+	{
+		qaws_composite_impl const* impl = (qaws_composite_impl const*)c->impl;
+		unsigned int k;
+		for (k = 0; k < impl->segment_count; k++)
+		{
+			qaws_curve const* g = impl->segments[k];
+			double a = cl_tmin(g), b = cl_tmax(g);
+			/* composite parameter k + (t - a) / (b - a) */
+			qaws_status s = cl_add_curve(x, g, operand, path, curve, base + scale * (k - a / (b - a)), scale / (b - a));
+			if (s != QAWS_STATUS_OK)
+				return s;
+		}
+		return QAWS_STATUS_OK;
+	}
+	CL_GROW(x->src, x->nsrc, x->capsrc, cl_src);
+	x->src[x->nsrc].c = c;
+	x->src[x->nsrc].operand = operand;
+	x->src[x->nsrc].path = path;
+	x->src[x->nsrc].curve = curve;
+	x->src[x->nsrc].base = base;
+	x->src[x->nsrc].scale = scale;
+	x->nsrc++;
+	return QAWS_STATUS_OK;
+}
+
 static qaws_status cl_add_paths(cl_ctx* x, qaws_path_2d const* paths, unsigned int count, unsigned int operand)
 {
 	unsigned int i, j;
 	for (i = 0; i < count; i++)
 	{
 		qaws_path_2d const* p = &paths[i];
+		qaws_status s;
 		if (p->curve_count && !p->curves)
 			return QAWS_STATUS_INVALID_ARGUMENT;
 		for (j = 0; j < p->curve_count; j++)
@@ -180,12 +272,9 @@ static qaws_status cl_add_paths(cl_ctx* x, qaws_path_2d const* paths, unsigned i
 				return QAWS_STATUS_INVALID_ARGUMENT;
 			if (p->curves[j]->dimension != QAWS_DIMENSION_2D)
 				return QAWS_STATUS_INVALID_DIMENSION;
-			CL_GROW(x->src, x->nsrc, x->capsrc, cl_src);
-			x->src[x->nsrc].c = p->curves[j];
-			x->src[x->nsrc].operand = operand;
-			x->src[x->nsrc].path = i;
-			x->src[x->nsrc].curve = j;
-			x->nsrc++;
+			s = cl_add_curve(x, p->curves[j], operand, i, j, 0.0, 1.0);
+			if (s != QAWS_STATUS_OK)
+				return s;
 		}
 		/* a region's path that does not close gets the line back to its start */
 		if (operand < 2 && p->curve_count)
@@ -197,24 +286,12 @@ static qaws_status cl_add_paths(cl_ctx* x, qaws_path_2d const* paths, unsigned i
 			cl_eval(l, cl_tmax(l), b, NULL);
 			if (hypot(a[0] - b[0], a[1] - b[1]) > x->tol)
 			{
-				qaws_scalar cp[4];
-				qaws_bezier_desc bd;
 				qaws_curve* line = NULL;
-				qaws_status s;
-				cp[0] = (qaws_scalar)b[0]; cp[1] = (qaws_scalar)b[1];
-				cp[2] = (qaws_scalar)a[0]; cp[3] = (qaws_scalar)a[1];
-				memset(&bd, 0, sizeof(bd));
-				bd.dimension = QAWS_DIMENSION_2D; bd.degree = 1; bd.control_points = cp; bd.control_point_count = 2;
-				s = qaws_curve_create_bezier(&bd, &line);
+				s = cl_line(x, b, a, &line);
+				if (s == QAWS_STATUS_OK)
+					s = cl_add_curve(x, line, operand, i, p->curve_count, 0.0, 1.0);
 				if (s != QAWS_STATUS_OK)
 					return s;
-				x->temp[x->ntemp++] = line;
-				CL_GROW(x->src, x->nsrc, x->capsrc, cl_src);
-				x->src[x->nsrc].c = line;
-				x->src[x->nsrc].operand = operand;
-				x->src[x->nsrc].path = i;
-				x->src[x->nsrc].curve = p->curve_count;
-				x->nsrc++;
 			}
 		}
 	}
@@ -334,33 +411,177 @@ static qaws_status cl_cluster(cl_ctx* x)
 	return QAWS_STATUS_OK;
 }
 
+/* ------------------------------------------------------------------------ */
+/*  Line x line hits, in double: from float or integer inputs the cross     */
+/*  products are exact, so each hit is one rounding away; collinear lines   */
+/*  overlap exactly                                                         */
+/* ------------------------------------------------------------------------ */
+
+typedef struct cl_lseg
+{
+	double a[2], b[2], lo[2], hi[2];
+	unsigned int src;
+} cl_lseg;
+
+static int cl_cmp_lseg(void const* p, void const* q)
+{
+	double a = ((cl_lseg const*)p)->lo[0], b = ((cl_lseg const*)q)->lo[0];
+	return a < b ? -1 : (a > b ? 1 : 0);
+}
+
+static int cl_is_line_src(cl_ctx const* x, unsigned int i)
+{
+	qaws_curve const* c = x->src[i].c;
+	return c->kind == QAWS_CURVE_KIND_BEZIER && c->degree == 1;
+}
+
+static double cl_cross(double ax, double ay, double bx, double by)
+{
+	return ax * by - ay * bx;
+}
+
+/* the line's parameter at its end points t = 0 and 1 (a Bezier: [0, 1]) */
+static qaws_status cl_line_pair(cl_ctx* x, cl_lseg const* A, cl_lseg const* B)
+{
+	double d1[2] = { A->b[0] - A->a[0], A->b[1] - A->a[1] }, d2[2] = { B->b[0] - B->a[0], B->b[1] - B->a[1] };
+	double w[2] = { B->a[0] - A->a[0], B->a[1] - A->a[1] };
+	double den = cl_cross(d1[0], d1[1], d2[0], d2[1]);
+	double l1 = d1[0] * d1[0] + d1[1] * d1[1];
+	int a_open = x->src[A->src].operand == 2, b_open = x->src[B->src].operand == 2;
+	if (a_open && b_open)
+		return QAWS_STATUS_OK;
+	if (den != 0)
+	{
+		double t = cl_cross(w[0], w[1], d2[0], d2[1]) / den, u = cl_cross(w[0], w[1], d1[0], d1[1]) / den, p[2];
+		if (t < 0 || t > 1 || u < 0 || u > 1)
+			return QAWS_STATUS_OK;
+		/* both at their ends: a corner or a junction, already a point */
+		if ((t == 0 || t == 1) && (u == 0 || u == 1))
+			return QAWS_STATUS_OK;
+		p[0] = A->a[0] + t * d1[0];
+		p[1] = A->a[1] + t * d1[1];
+		/* an end exactly on the other line stays exact */
+		if (t == 0) { p[0] = A->a[0]; p[1] = A->a[1]; }
+		else if (t == 1) { p[0] = A->b[0]; p[1] = A->b[1]; }
+		else if (u == 0) { p[0] = B->a[0]; p[1] = B->a[1]; }
+		else if (u == 1) { p[0] = B->b[0]; p[1] = B->b[1]; }
+		return cl_point_add(x, p, A->src, t, B->src, u);
+	}
+	/* parallel: collinear lines overlap on the projections of their ends */
+	if (cl_cross(w[0], w[1], d1[0], d1[1]) != 0 || !(l1 > 0))
+		return QAWS_STATUS_OK;
+	{
+		double sc = (B->a[0] - A->a[0]) * d1[0] + (B->a[1] - A->a[1]) * d1[1];
+		double sd = (B->b[0] - A->a[0]) * d1[0] + (B->b[1] - A->a[1]) * d1[1];
+		double s0 = sc / l1, s1 = sd / l1, lo = s0 < s1 ? s0 : s1, hi = s0 < s1 ? s1 : s0;
+		double ta, tb, ua, ub, pa[2], pb[2];
+		qaws_status s;
+		if (lo < 0) lo = 0;
+		if (hi > 1) hi = 1;
+		if (!(hi >= lo))
+			return QAWS_STATUS_OK;
+		/* B's parameters at the overlap's ends: u = (s - s0) / (s1 - s0) */
+		ta = lo; tb = hi;
+		ua = (lo - s0) / (s1 - s0); ub = (hi - s0) / (s1 - s0);
+		pa[0] = A->a[0] + ta * d1[0]; pa[1] = A->a[1] + ta * d1[1];
+		pb[0] = A->a[0] + tb * d1[0]; pb[1] = A->a[1] + tb * d1[1];
+		if (ta == 0) { pa[0] = A->a[0]; pa[1] = A->a[1]; }
+		if (tb == 1) { pb[0] = A->b[0]; pb[1] = A->b[1]; }
+		if (ua == 0 || ua == 1) { pa[0] = ua == 0 ? B->a[0] : B->b[0]; pa[1] = ua == 0 ? B->a[1] : B->b[1]; }
+		if (ub == 0 || ub == 1) { pb[0] = ub == 0 ? B->a[0] : B->b[0]; pb[1] = ub == 0 ? B->a[1] : B->b[1]; }
+		s = cl_point_add(x, pa, A->src, ta, B->src, ua);
+		if (s == QAWS_STATUS_OK && hi > lo)
+			s = cl_point_add(x, pb, A->src, tb, B->src, ub);
+		return s;
+	}
+}
+
+static qaws_status cl_line_hits(cl_ctx* x)
+{
+	unsigned int n = 0, i, j;
+	cl_lseg* L = (cl_lseg*)malloc(sizeof(cl_lseg) * (x->nsrc ? x->nsrc : 1));
+	qaws_status s = QAWS_STATUS_OK;
+	if (!L)
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	for (i = 0; i < x->nsrc; i++)
+	{
+		qaws_bezier_impl const* impl;
+		cl_lseg* g;
+		if (!cl_is_line_src(x, i))
+			continue;
+		impl = (qaws_bezier_impl const*)x->src[i].c->impl;
+		g = &L[n++];
+		g->a[0] = impl->control_points[0]; g->a[1] = impl->control_points[1];
+		g->b[0] = impl->control_points[2]; g->b[1] = impl->control_points[3];
+		g->lo[0] = g->a[0] < g->b[0] ? g->a[0] : g->b[0];
+		g->lo[1] = g->a[1] < g->b[1] ? g->a[1] : g->b[1];
+		g->hi[0] = g->a[0] < g->b[0] ? g->b[0] : g->a[0];
+		g->hi[1] = g->a[1] < g->b[1] ? g->b[1] : g->a[1];
+		g->src = i;
+	}
+	/* sweep in x: each line against the ones starting before it ends */
+	qsort(L, n, sizeof(cl_lseg), cl_cmp_lseg);
+	for (i = 0; i < n && s == QAWS_STATUS_OK; i++)
+		for (j = i + 1; j < n && L[j].lo[0] <= L[i].hi[0] && s == QAWS_STATUS_OK; j++)
+		{
+			if (L[j].lo[1] > L[i].hi[1] || L[j].hi[1] < L[i].lo[1])
+				continue;
+			s = L[i].src < L[j].src ? cl_line_pair(x, &L[i], &L[j]) : cl_line_pair(x, &L[j], &L[i]);
+		}
+	free(L);
+	return s;
+}
+
 static qaws_status cl_hits(cl_ctx* x)
 {
 	qaws_curve const** curves = (qaws_curve const**)malloc(sizeof(qaws_curve*) * (x->nsrc ? x->nsrc : 1));
+	unsigned int* fam = (unsigned int*)malloc(sizeof(unsigned int) * (x->nsrc ? x->nsrc : 1));
 	qaws_curve_batch_desc bd;
 	qaws_curve_batch_hit_2d* hits = NULL;
-	unsigned int n = 0, cap = 0, i;
-	qaws_status s;
-	if (!curves)
+	unsigned int n = 0, cap = 0, i, ncurved = 0;
+	qaws_status s = QAWS_STATUS_OK;
+	if (!curves || !fam)
+	{
+		free((void*)curves); free(fam);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
+	}
+	/* lines meet lines below (exactly); the batch takes every pair with a
+	   curve in it: all lines in one family, each curve in its own */
 	for (i = 0; i < x->nsrc; i++)
+	{
 		curves[i] = x->src[i].c;
+		fam[i] = cl_is_line_src(x, i) ? 0u : i + 1;
+		ncurved += fam[i] != 0;
+	}
 	memset(&bd, 0, sizeof(bd));
 	bd.curves = curves;
 	bd.curve_count = x->nsrc;
+	bd.families = fam;
 	bd.flags = QAWS_CURVE_BATCH_SELF;
 	bd.executor = x->d->executor;
-	s = qaws_curve_batch_find_intersections_2d(&bd, NULL, 0, &n, NULL);
-	if (s == QAWS_STATUS_OK && n)
+	if (ncurved)
 	{
-		cap = n;
+		cap = 4 * x->nsrc + 64;
 		hits = (qaws_curve_batch_hit_2d*)malloc(sizeof(qaws_curve_batch_hit_2d) * cap);
 		if (!hits)
 			s = QAWS_STATUS_ALLOCATION_FAILURE;
 		else
 			s = qaws_curve_batch_find_intersections_2d(&bd, hits, cap, &n, NULL);
+		if (s == QAWS_STATUS_OK && n > cap)
+		{
+			/* more than guessed: once more with room for all */
+			free(hits);
+			cap = n;
+			hits = (qaws_curve_batch_hit_2d*)malloc(sizeof(qaws_curve_batch_hit_2d) * cap);
+			if (!hits)
+				s = QAWS_STATUS_ALLOCATION_FAILURE;
+			else
+				s = qaws_curve_batch_find_intersections_2d(&bd, hits, cap, &n, NULL);
+		}
 		if (n > cap) n = cap;
 	}
+	if (s == QAWS_STATUS_OK)
+		s = cl_line_hits(x);
 	/* curve ends */
 	for (i = 0; s == QAWS_STATUS_OK && i < x->nsrc; i++)
 	{
@@ -380,6 +601,12 @@ static qaws_status cl_hits(cl_ctx* x)
 		/* open subjects are not cut by each other */
 		if (x->src[h->curve_a].operand == 2 && x->src[h->curve_b].operand == 2)
 			continue;
+		/* two sources meeting at their ends (a corner, a junction): the ends
+		   are points already */
+		if (h->kind != QAWS_CURVE_HIT_OVERLAP &&
+			(h->parameter_a <= cl_tmin(x->src[h->curve_a].c) || h->parameter_a >= cl_tmax(x->src[h->curve_a].c)) &&
+			(h->parameter_b <= cl_tmin(x->src[h->curve_b].c) || h->parameter_b >= cl_tmax(x->src[h->curve_b].c)))
+			continue;
 		p[0] = h->position.x; p[1] = h->position.y;
 		s = cl_point_add(x, p, h->curve_a, h->parameter_a, h->curve_b, h->parameter_b);
 		if (s == QAWS_STATUS_OK && h->kind == QAWS_CURVE_HIT_OVERLAP)
@@ -390,6 +617,7 @@ static qaws_status cl_hits(cl_ctx* x)
 	}
 	free(hits);
 	free((void*)curves);
+	free(fam);
 	return s == QAWS_STATUS_OK ? cl_cluster(x) : s;
 }
 
@@ -762,6 +990,14 @@ static double cl_half_area(cl_ctx const* x, unsigned int h)
 {
 	cl_edge const* e = &x->e[h >> 1];
 	double a = 0.0;
+	if (cl_is_line_src(x, e->src))
+	{
+		/* a line from p to q: (x_p + x_q) / 2 (y_q - y_p), in double */
+		double p[2], q[2];
+		cl_eval(x->src[e->src].c, (h & 1) ? e->t1 : e->t0, p, NULL);
+		cl_eval(x->src[e->src].c, (h & 1) ? e->t0 : e->t1, q, NULL);
+		return 0.5 * (p[0] + q[0]) * (q[1] - p[1]);
+	}
 	qaws_internal_curve_area_2d(x->src[e->src].c, (h & 1) ? e->t1 : e->t0, (h & 1) ? e->t0 : e->t1,
 		x->ext * x->ext * CL_AREA_REL, &a);
 	return a;
@@ -1015,12 +1251,12 @@ static void cl_vertex_record(cl_ctx const* x, unsigned int vi, qaws_clip_vertex*
 	if (v->sa != CL_NONE)
 	{
 		o->operand_a = x->src[v->sa].operand; o->path_a = x->src[v->sa].path; o->curve_a = x->src[v->sa].curve;
-		o->parameter_a = (qaws_scalar)v->ta;
+		o->parameter_a = (qaws_scalar)(x->src[v->sa].base + x->src[v->sa].scale * v->ta);
 	}
 	if (v->sb != CL_NONE)
 	{
 		o->operand_b = x->src[v->sb].operand; o->path_b = x->src[v->sb].path; o->curve_b = x->src[v->sb].curve;
-		o->parameter_b = (qaws_scalar)v->tb;
+		o->parameter_b = (qaws_scalar)(x->src[v->sb].base + x->src[v->sb].scale * v->tb);
 		if (x->d->z_fn)
 			o->z = x->d->z_fn(x->d->z_user, o);
 	}
@@ -1106,14 +1342,19 @@ typedef struct cl_piece
 	unsigned int src;
 	double ta, tb;
 	unsigned int va, vb;
+	unsigned int h;                      /* the half-edge (closed loops) */
+	double area;                         /* its integral of x dy */
 } cl_piece;
 
-static int cl_sign_orient(double const* a, double const* b, double const* c)
+/* b within tol of the line through a and c (a spike back along it too) */
+static int cl_collinear(double const* a, double const* b, double const* c, double tol)
 {
-	double v = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
-	return v > 0 ? 1 : (v < 0 ? -1 : 0);
+	double dx = c[0] - a[0], dy = c[1] - a[1], l = hypot(dx, dy);
+	double cr = (b[0] - a[0]) * dy - (b[1] - a[1]) * dx;
+	if (!(l > 0))
+		return 1;
+	return fabs(cr) <= tol * l;
 }
-
 /* corners of a degree-1 source strictly between parameters ta and tb, in order */
 static unsigned int cl_line_corners(qaws_curve const* c, double ta, double tb, double* out, unsigned int cap)
 {
@@ -1233,7 +1474,7 @@ static qaws_status cl_emit_pieces(cl_ctx* x, cl_piece const* pc, unsigned int n,
 							int ends = !whole && (a == 0 || a == np - 1);
 							double const* pp = whole ? &pts[2 * ((a + np - 1) % np)] : (a ? &pts[2 * (a - 1)] : NULL);
 							double const* nn = whole ? &pts[2 * ((a + 1) % np)] : (a + 1 < np ? &pts[2 * (a + 1)] : NULL);
-							if (!ends && pp && nn && cl_sign_orient(pp, &pts[2 * a], nn) == 0)
+							if (!ends && pp && nn && cl_collinear(pp, &pts[2 * a], nn, x->tol))
 							{
 								changed = 1;
 								continue;
@@ -1313,7 +1554,8 @@ static qaws_status cl_output(cl_ctx* x, unsigned int nfaces, int const* inside)
 	unsigned int* comp_outer = (unsigned int*)malloc(sizeof(unsigned int) * (nfaces + 1));
 	unsigned int* comp_hole = (unsigned int*)malloc(sizeof(unsigned int) * (nfaces + 1));
 	cl_piece* pc = NULL;
-	unsigned int cappc = 0;
+	unsigned int cappc = 0, capst = 0, *vpos = NULL;
+	cl_piece* st = NULL;
 	unsigned int* loop_left = NULL;
 	unsigned int* loop_right = NULL;
 	double* loop_area = NULL;
@@ -1340,20 +1582,22 @@ static qaws_status cl_output(cl_ctx* x, unsigned int nfaces, int const* inside)
 	for (i = 0; i < nfaces; i++)
 		comp_outer[i] = comp_hole[i] = CL_NONE;
 	/* loops: from an output half-edge, the next output one clockwise round
-	   its target from its twin */
+	   its target from its twin; a loop through one vertex twice (two parts
+	   touching at a point) is cut there into simple loops */
+	vpos = (unsigned int*)malloc(sizeof(unsigned int) * (x->nv + 1));
+	if (!vpos) { s = QAWS_STATUS_ALLOCATION_FAILURE; goto done; }
+	for (i = 0; i < x->nv; i++) vpos[i] = CL_NONE;
 	for (i = 0; i < nh && s == QAWS_STATUS_OK; i++)
 	{
-		unsigned int h = i, np = 0;
-		double area = 0.0;
-		struct cl_out_path op;
+		unsigned int h = i, np = 0, top = 0, k;
 		if (!x->h[i].out || loop_of[i] != CL_NONE)
 			continue;
 		do
 		{
 			cl_edge const* e = &x->e[h >> 1];
 			cl_vertex const* v;
-			unsigned int tw, p, k, g = CL_NONE;
-			loop_of[h] = nloop;
+			unsigned int tw, p, g = CL_NONE;
+			loop_of[h] = 1;
 			if (np == cappc)
 			{
 				unsigned int nc = cappc ? 2 * cappc : 64;
@@ -1366,8 +1610,9 @@ static qaws_status cl_output(cl_ctx* x, unsigned int nfaces, int const* inside)
 			pc[np].tb = (h & 1) ? e->t0 : e->t1;
 			pc[np].va = cl_origin(x, h);
 			pc[np].vb = cl_target(x, h);
+			pc[np].h = h;
+			pc[np].area = cl_half_area(x, h);
 			np++;
-			area += cl_half_area(x, h);
 			tw = h ^ 1;
 			v = &x->v[cl_origin(x, tw)];
 			p = x->h[tw].pos;
@@ -1379,45 +1624,75 @@ static qaws_status cl_output(cl_ctx* x, unsigned int nfaces, int const* inside)
 			if (g == CL_NONE) { s = QAWS_STATUS_INTERNAL_ERROR; goto done; }
 			h = g;
 		} while (h != i && loop_of[h] == CL_NONE);
+		/* cut at repeated vertices: pieces are pushed in order; when one
+		   ends at a vertex some earlier piece on the stack starts from, the
+		   pieces from there on are a simple loop */
+		if (np > capst)
 		{
-			void* g1 = realloc(loop_left, sizeof(unsigned int) * (nloop + 1));
-			void* g2 = g1 ? realloc(loop_right, sizeof(unsigned int) * (nloop + 1)) : NULL;
-			void* g3 = g2 ? realloc(loop_area, sizeof(double) * (nloop + 1)) : NULL;
-			if (g1) loop_left = (unsigned int*)g1;
-			if (g2) loop_right = (unsigned int*)g2;
-			if (g3) loop_area = (double*)g3;
-			if (!g3) { s = QAWS_STATUS_ALLOCATION_FAILURE; goto done; }
+			cl_piece* g = (cl_piece*)realloc(st, sizeof(cl_piece) * np);
+			if (!g) { s = QAWS_STATUS_ALLOCATION_FAILURE; goto done; }
+			st = g; capst = np;
 		}
-		loop_left[nloop] = cl_vfind(fcomp, x->h[i].face);
-		loop_right[nloop] = cl_vfind(fcomp, x->h[i ^ 1].face);
-		loop_area[nloop] = area;
-		if (area > 0)
-			comp_outer[loop_left[nloop]] = nloop;
-		else
-			comp_hole[loop_right[nloop]] = nloop;
-		if (x->d->flags & QAWS_CLIP_REVERSE_SOLUTION)
+		for (k = 0; k < np && s == QAWS_STATUS_OK; k++)
 		{
-			/* traverse backwards */
-			unsigned int a;
-			for (a = 0; a < np / 2; a++)
+			unsigned int from;
+			if (vpos[pc[k].va] == CL_NONE)
+				vpos[pc[k].va] = top;
+			st[top++] = pc[k];
+			from = vpos[pc[k].vb];
+			if (from == CL_NONE)
+				continue;
 			{
-				cl_piece t = pc[a];
-				pc[a] = pc[np - 1 - a];
-				pc[np - 1 - a] = t;
-			}
-			for (a = 0; a < np; a++)
-			{
-				double t = pc[a].ta; unsigned int vv = pc[a].va;
-				pc[a].ta = pc[a].tb; pc[a].tb = t;
-				pc[a].va = pc[a].vb; pc[a].vb = vv;
+				unsigned int n = top - from, a;
+				double area = 0.0;
+				struct cl_out_path op;
+				cl_piece* lp = &st[from];
+				for (a = 0; a < n; a++)
+				{
+					area += lp[a].area;
+					vpos[lp[a].va] = CL_NONE;
+				}
+				{
+					void* g1 = realloc(loop_left, sizeof(unsigned int) * (nloop + 1));
+					void* g2 = g1 ? realloc(loop_right, sizeof(unsigned int) * (nloop + 1)) : NULL;
+					void* g3 = g2 ? realloc(loop_area, sizeof(double) * (nloop + 1)) : NULL;
+					if (g1) loop_left = (unsigned int*)g1;
+					if (g2) loop_right = (unsigned int*)g2;
+					if (g3) loop_area = (double*)g3;
+					if (!g3) { s = QAWS_STATUS_ALLOCATION_FAILURE; goto done; }
+				}
+				loop_left[nloop] = cl_vfind(fcomp, x->h[lp[0].h].face);
+				loop_right[nloop] = cl_vfind(fcomp, x->h[lp[0].h ^ 1].face);
+				loop_area[nloop] = area;
+				if (area > 0)
+					comp_outer[loop_left[nloop]] = nloop;
+				else
+					comp_hole[loop_right[nloop]] = nloop;
+				if (x->d->flags & QAWS_CLIP_REVERSE_SOLUTION)
+				{
+					/* traverse backwards */
+					for (a = 0; a < n / 2; a++)
+					{
+						cl_piece t = lp[a];
+						lp[a] = lp[n - 1 - a];
+						lp[n - 1 - a] = t;
+					}
+					for (a = 0; a < n; a++)
+					{
+						double t = lp[a].ta; unsigned int vv = lp[a].va;
+						lp[a].ta = lp[a].tb; lp[a].tb = t;
+						lp[a].va = lp[a].vb; lp[a].vb = vv;
+					}
+				}
+				memset(&op, 0, sizeof(op));
+				op.hole = area < 0;
+				s = cl_emit_pieces(x, lp, n, 1, &op);
+				if (s == QAWS_STATUS_OK)
+					s = cl_push_path(x->r, 0, &op);
+				nloop++;
+				top = from;
 			}
 		}
-		memset(&op, 0, sizeof(op));
-		op.hole = area < 0;
-		s = cl_emit_pieces(x, pc, np, 1, &op);
-		if (s == QAWS_STATUS_OK)
-			s = cl_push_path(x->r, 0, &op);
-		nloop++;
 	}
 	/* nesting: a hole's parent is the outer loop of the inside part on its
 	   left; an outer loop's parent is the hole around the outside part on
@@ -1442,7 +1717,7 @@ static qaws_status cl_output(cl_ctx* x, unsigned int nfaces, int const* inside)
 	}
 done:
 	free(loop_of); free(fcomp); free(comp_outer); free(comp_hole);
-	free(pc); free(loop_left); free(loop_right); free(loop_area);
+	free(pc); free(loop_left); free(loop_right); free(loop_area); free(st); free(vpos);
 	return s;
 }
 
@@ -1551,10 +1826,10 @@ qaws_status qaws_clip_execute(qaws_clip_desc const* desc, qaws_clip_result** out
 	x.d = desc;
 	x.r = (qaws_clip_result*)calloc(1, sizeof(qaws_clip_result));
 	npaths = desc->subject_count + desc->clip_count;
-	x.temp = (qaws_curve**)malloc(sizeof(qaws_curve*) * (npaths + 1));
-	if (!x.r || !x.temp)
+	(void)npaths;
+	if (!x.r)
 	{
-		free(x.r); free(x.temp);
+		free(x.r);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 	/* the extent and the tolerance, from the curves' sampling */
@@ -1581,6 +1856,16 @@ qaws_status qaws_clip_execute(qaws_clip_desc const* desc, qaws_clip_result** out
 	s = cl_add_paths(&x, desc->subjects, desc->subject_count, 0);
 	if (s == QAWS_STATUS_OK) s = cl_add_paths(&x, desc->clips, desc->clip_count, 1);
 	if (s == QAWS_STATUS_OK) s = cl_add_paths(&x, desc->open_subjects, desc->open_subject_count, 2);
+	/* lines only: every hit is computed in double from the end points, one
+	   rounding away, so vertices need only a rounding-sized tolerance */
+	if (s == QAWS_STATUS_OK && !(desc->tolerance > 0))
+	{
+		unsigned int lines = 0;
+		for (i = 0; i < x.nsrc; i++)
+			lines += cl_is_line_src(&x, i);
+		if (lines == x.nsrc)
+			x.tol = x.ext * 1e-11;
+	}
 	if (s == QAWS_STATUS_OK && desc->clip_type != QAWS_CLIP_NONE && x.nsrc)
 	{
 		s = cl_hits(&x);

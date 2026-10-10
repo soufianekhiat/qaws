@@ -86,6 +86,7 @@ add_executable(
   82_curve_extract.c
   83_path.c
   84_clip.c
+  85_clipper2_parity.c
 )
 
 # The amalgamated library exports exactly the same symbols, so the tests can
@@ -109,6 +110,7 @@ set_target_properties(qaws_tests PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED YE
 if(MSVC)
   target_compile_definitions(qaws_tests PRIVATE _CRT_SECURE_NO_WARNINGS NOMINMAX)
 endif()
+target_compile_definitions(qaws_tests PRIVATE QAWS_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data")
 
 set(QAWS_WORKING_DIR "${PROJECT_SOURCE_DIR}/working_dir")
 file(MAKE_DIRECTORY "${QAWS_WORKING_DIR}")
