@@ -530,6 +530,9 @@ qaws_status qaws_boolean_2d(
 		region_a, region_b, isects, BOOL_MAX_ISECT, &isect_count);
 	if (status != QAWS_STATUS_OK)
 		return status;
+	/* the count is the total found; only the buffer's worth was written */
+	if (isect_count > BOOL_MAX_ISECT)
+		return QAWS_STATUS_BUFFER_TOO_SMALL;
 
 	range_a = qaws_curve_get_parameter_range(region_a);
 	range_b = qaws_curve_get_parameter_range(region_b);
