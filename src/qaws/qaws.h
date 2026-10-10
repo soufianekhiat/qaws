@@ -55,6 +55,7 @@
 #include "qaws_surface_batch.h"
 #include "qaws_brep.h"
 #include "qaws_boolean_2d.h"
+#include "qaws_path.h"
 #include "qaws_alloc.h"
 #include "qaws_inline.h"
 #include "qaws_diff.h"

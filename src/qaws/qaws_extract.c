@@ -751,3 +751,8 @@ qaws_status qaws_curve_extract(
 		return QAWS_STATUS_UNSUPPORTED_OPERATION;
 	}
 }
+
+qaws_status qaws_internal_curve_fit_cubic(qaws_curve const* curve, qaws_scalar t0, qaws_scalar t1, qaws_curve** out_curve)
+{
+	return ex_cubic_kind(curve, t0, t1, 1, out_curve);
+}

@@ -47,6 +47,10 @@ int qaws_internal_reparam_source(
 	qaws_curve const** out_source,
 	qaws_scalar* out_source_t);
 
+/* The curve on [t0, t1] as a cubic B-spline (or Bezier) fitted span by span
+   to 1e-9 of its extent (1e-5 in float builds); exact for cubic spans. */
+qaws_status qaws_internal_curve_fit_cubic(qaws_curve const* curve, qaws_scalar t0, qaws_scalar t1, qaws_curve** out_curve);
+
 /* 1 when the curve's two ends coincide, relative to the size of the curve. */
 int qaws_internal_curve_ends_meet(qaws_curve const* curve);
 
