@@ -97,6 +97,7 @@ extern int test_82_curve_extract_main(void);
 extern int test_83_path_main(void);
 extern int test_84_clip_main(void);
 extern int test_85_clipper2_parity_main(void);
+extern int test_86_clip64_main(void);
 
 /* Test registry */
 typedef struct {
@@ -191,6 +192,7 @@ static test_suite const g_test_suites[] = {
 	{"83_path", test_83_path_main},
 	{"84_clip", test_84_clip_main},
 	{"85_clipper2_parity", test_85_clipper2_parity_main},
+	{"86_clip64", test_86_clip64_main},
 };
 
 int main(void) {

@@ -447,6 +447,9 @@ static void c2_execute(c2_test const* t, c2_run* out)
 	free((void*)sv); free((void*)ov); free((void*)cv);
 }
 
+/* the exact (float) engine's path count per record, the int64 run's upper bound */
+static long long g_c2_exact_count[1024];
+
 static void test_polygons(void)
 {
 	FILE* f = fopen(QAWS_TEST_DATA_DIR "/clipper2/Polygons.txt", "r");
@@ -477,6 +480,7 @@ static void test_polygons(void)
 		else
 		{
 			long long count = r.closed_count + r.open_count, tol = c2_count_tol(t.number);
+			if (t.number > 0 && t.number < 1024) g_c2_exact_count[t.number] = count;
 			int count_ok = 1, area_ok = 1;
 			oracle_samples += r.samples;
 			oracle_wrong += r.wrong;
@@ -565,6 +569,258 @@ static void test_lines(void)
 	TEST_ASSERT(total >= 16 && ok == total, msg);
 }
 
+/* ------------------------------------------------------------------------ */
+/*  The same records through the exact int64 engine                         */
+/* ------------------------------------------------------------------------ */
+
+static qaws_path64* c2_paths64(c2_paths const* p, int64_t** store)
+{
+	qaws_path64* out = (qaws_path64*)calloc(p->count + 1, sizeof(qaws_path64));
+	unsigned int i, k;
+	*store = (int64_t*)malloc(sizeof(int64_t) * 2 * (p->npts + 1));
+	for (k = 0; k < 2 * p->npts; k++)
+		(*store)[k] = (int64_t)floor(p->xy[k] + 0.5);
+	for (i = 0; i < p->count; i++)
+	{
+		out[i].points = *store + 2 * p->start[i];
+		out[i].point_count = p->start[i + 1] - p->start[i];
+	}
+	return out;
+}
+
+/* a set of int64 paths (or, exact, of double paths) as a winding test */
+static int c2_in_set64(double const* const* paths, unsigned int const* counts, unsigned int n, qaws_fill_rule fr,
+	double qx, double qy, int* on)
+{
+	int w = 0;
+	unsigned int i, k;
+	for (i = 0; i < n; i++)
+	{
+		double const* p = paths[i];
+		unsigned int m = counts[i];
+		for (k = 0; k < m; k++)
+		{
+			double ax = p[2 * k], ay = p[2 * k + 1], bx = p[2 * ((k + 1) % m)], by = p[2 * ((k + 1) % m) + 1];
+			double cr = (bx - ax) * (qy - ay) - (by - ay) * (qx - ax), l = hypot(bx - ax, by - ay);
+			double u = l > 0 ? ((qx - ax) * (bx - ax) + (qy - ay) * (by - ay)) / (l * l) : 0;
+			if (l > 0 && fabs(cr) <= 1e-9 * l * (fabs(ax) + fabs(bx) + 1) && u >= -1e-9 && u <= 1 + 1e-9)
+				*on = 1;
+			if (ay <= qy) { if (by > qy && cr > 0) w++; }
+			else if (by <= qy && cr < 0) w--;
+		}
+	}
+	return qaws_fill_rule_inside(fr, w);
+}
+
+static void test_polygons64(void)
+{
+	FILE* f = fopen(QAWS_TEST_DATA_DIR "/clipper2/Polygons.txt", "r");
+	char* buf = NULL;
+	size_t cap = 0;
+	int pending = 0, total = 0, ok = 0, exact_count = 0;
+	unsigned int samples = 0, wrong = 0;
+	c2_test t;
+	char msg[256];
+	if (!f)
+	{
+		TEST_ASSERT(0, "Polygons.txt found");
+		return;
+	}
+	while (c2_next(f, &t, &buf, &cap, &pending))
+	{
+		int64_t *ss = NULL, *cs = NULL, *os = NULL;
+		qaws_path64* sp = c2_paths64(&t.subj, &ss);
+		qaws_path64* cp = c2_paths64(&t.clip, &cs);
+		qaws_path64* op = c2_paths64(&t.open, &os);
+		qaws_clip64_desc d;
+		qaws_clip64_result* r = NULL;
+		qaws_status st;
+		int good = 1;
+		memset(&d, 0, sizeof(d));
+		d.subjects = sp; d.subject_count = t.subj.count;
+		d.clips = cp; d.clip_count = t.clip.count;
+		d.open_subjects = op; d.open_subject_count = t.open.count;
+		d.clip_type = t.ct; d.fill_rule = t.fr;
+		st = qaws_clip64_execute(&d, &r);
+		total++;
+		if (st != QAWS_STATUS_OK)
+		{
+			printf("    int64 test %d: status %d\n", t.number, (int)st);
+			good = 0;
+		}
+		else
+		{
+			unsigned int n = qaws_clip64_result_get_path_count(r), k, i, j, wrong0 = wrong;
+			long long count = n + qaws_clip64_result_get_open_path_count(r), tol = c2_count_tol(t.number);
+			double area = 0.0;
+			double const** ex = (double const**)malloc(sizeof(double*) * (n + 1));
+			unsigned int* exn = (unsigned int*)malloc(sizeof(unsigned int) * (n + 1));
+			double** inp = (double**)malloc(sizeof(double*) * (t.subj.count + t.clip.count + 1));
+			unsigned int* inn = (unsigned int*)malloc(sizeof(unsigned int) * (t.subj.count + t.clip.count + 1));
+			for (k = 0; k < n; k++)
+			{
+				int64_t const* p;
+				unsigned int m;
+				qaws_clip64_result_get_path(r, k, &p, &m);
+				area += 0.5 * qaws_path64_area2(p, m);
+				qaws_clip64_result_get_path_exact(r, k, &ex[k], &exn[k]);
+			}
+			for (k = 0; k < t.subj.count + t.clip.count; k++)
+			{
+				c2_paths const* src = k < t.subj.count ? &t.subj : &t.clip;
+				unsigned int pi = k < t.subj.count ? k : k - t.subj.count, a = src->start[pi], b = src->start[pi + 1];
+				inp[k] = (double*)malloc(sizeof(double) * 2 * (b - a + 1));
+				for (i = 0; i < 2 * (b - a); i++) inp[k][i] = (double)src->xy[2 * a + i];
+				inn[k] = b - a;
+			}
+			/* oracle on the exact vertices: a grid away from every boundary */
+			/* not where Clipper2 itself allows half the area: rounding there drops
+			   whole paths, so the exact boundary is not all in the result */
+			if (!t.open.count && c2_area_tol(t.number) < 0.5)
+			{
+				double box[4] = { 1e300, 1e300, -1e300, -1e300 };
+				for (k = 0; k < t.subj.npts + t.clip.npts; k++)
+				{
+					double px = k < t.subj.npts ? t.subj.xy[2 * k] : t.clip.xy[2 * (k - t.subj.npts)];
+					double py = k < t.subj.npts ? t.subj.xy[2 * k + 1] : t.clip.xy[2 * (k - t.subj.npts) + 1];
+					if (px < box[0]) box[0] = px;
+					if (py < box[1]) box[1] = py;
+					if (px > box[2]) box[2] = px;
+					if (py > box[3]) box[3] = py;
+				}
+				for (i = 0; i < 24; i++)
+					for (j = 0; j < 24; j++)
+					{
+						double qx = box[0] + (box[2] - box[0]) * (i + 0.37) / 24, qy = box[1] + (box[3] - box[1]) * (j + 0.61) / 24;
+						int on = 0, s, c, want, got;
+						s = c2_in_set64((double const* const*)inp, inn, t.subj.count, t.fr, qx, qy, &on);
+						c = c2_in_set64((double const* const*)(inp + t.subj.count), inn + t.subj.count, t.clip.count, t.fr, qx, qy, &on);
+						got = c2_in_set64(ex, exn, n, QAWS_FILL_NON_ZERO, qx, qy, &on);
+						if (on) continue;
+						want = t.ct == QAWS_CLIP_INTERSECTION ? (s && c) : t.ct == QAWS_CLIP_UNION ? (s || c) :
+							t.ct == QAWS_CLIP_DIFFERENCE ? (s && !c) : (s != c);
+						samples++;
+						if (want != got) { wrong++; good = 0; }
+					}
+			}
+			/* 62: the exact union is one polygon (see the float run); Clipper2 stores 2 */
+			if (t.number == 62)
+			{
+				if (count != 1) good = 0;
+			}
+			else if (t.count > 0)
+			{
+				/* as for the float engine: Clipper2's count lies between ours
+				   with touching pieces joined (slivers under a unit dropped)
+				   and ours */
+				long long joined = 0;
+				unsigned int* par = (unsigned int*)malloc(sizeof(unsigned int) * (n + 1));
+				unsigned char* big = (unsigned char*)calloc(n + 1, 1);
+				unsigned int a, b, u, v;
+				for (k = 0; k < n; k++) par[k] = k;
+				for (a = 0; a < n; a++)
+					for (b = a + 1; b < n; b++)
+					{
+						int64_t const *pa, *pb;
+						unsigned int ma, mb;
+						int touch = 0;
+						qaws_clip64_result_get_path(r, a, &pa, &ma);
+						qaws_clip64_result_get_path(r, b, &pb, &mb);
+						for (u = 0; u < ma && !touch; u++)
+							for (v = 0; v < mb && !touch; v++)
+								touch = pa[2 * u] == pb[2 * v] && pa[2 * u + 1] == pb[2 * v + 1];
+						if (touch)
+						{
+							unsigned int ra = a, rb = b;
+							while (par[ra] != ra) ra = par[ra];
+							while (par[rb] != rb) rb = par[rb];
+							par[ra > rb ? ra : rb] = ra < rb ? ra : rb;
+						}
+					}
+				for (k = 0; k < n; k++)
+				{
+					int64_t const* p;
+					unsigned int m, ra = k;
+					double lx = 1e300, ly = 1e300, hx = -1e300, hy = -1e300, ar;
+					qaws_clip64_result_get_path(r, k, &p, &m);
+					for (u = 0; u < m; u++)
+					{
+						if (p[2 * u] < lx) lx = (double)p[2 * u];
+						if (p[2 * u] > hx) hx = (double)p[2 * u];
+						if (p[2 * u + 1] < ly) ly = (double)p[2 * u + 1];
+						if (p[2 * u + 1] > hy) hy = (double)p[2 * u + 1];
+					}
+					ar = 0.5 * fabs(qaws_path64_area2(p, m));
+					while (par[ra] != ra) ra = par[ra];
+					if (2 * ar / (hypot(hx - lx, hy - ly) + 1e-300) >= 1) big[ra] = 1;
+				}
+				for (k = 0; k < n; k++)
+					joined += par[k] == k && big[k];
+				joined += qaws_clip64_result_get_open_path_count(r);
+				free(par); free(big);
+				if (c2_area_tol(t.number) >= 0.5) tol += 2;
+				{
+					long long hi = count;
+					if (t.number > 0 && t.number < 1024 && g_c2_exact_count[t.number] > hi) hi = g_c2_exact_count[t.number];
+					if (t.count < (joined < count ? joined : count) - tol || t.count > hi + tol) good = 0;
+				}
+				if (count == t.count) exact_count++;
+			}
+			else
+				exact_count++;
+			{
+				/* rounding moves each crossing by half a unit at most: the area
+				   may move by up to the perimeter */
+				double perim = 0.0;
+				for (k = 0; k < n; k++)
+				{
+					int64_t const* p;
+					unsigned int m;
+					qaws_clip64_result_get_path(r, k, &p, &m);
+					for (i = 0; i < m; i++)
+						perim += hypot((double)(p[2 * ((i + 1) % m)] - p[2 * i]), (double)(p[2 * ((i + 1) % m) + 1] - p[2 * i + 1]));
+				}
+				if (t.area > 0 && fabs(area - t.area) > c2_area_tol(t.number) * fabs(area) && fabs(area - t.area) > 16 &&
+					fabs(area - t.area) > perim)
+					good = 0;
+			}
+			if (!good)
+				printf("    int64 test %d (%d, fill %d): count %lld (Clipper2 %lld), area %.1f (Clipper2 %.1f), oracle %u wrong\n",
+					t.number, (int)t.ct, (int)t.fr, count, t.count, area, t.area, wrong - wrong0);
+			if (getenv("QAWS_C2_DUMP") && atoi(getenv("QAWS_C2_DUMP")) == t.number)
+			{
+				c2_dump_paths("subject", &t.subj);
+				c2_dump_paths("clip", &t.clip);
+				for (k = 0; k < n; k++)
+				{
+					int64_t const* p;
+					unsigned int m;
+					qaws_clip64_result_get_path(r, k, &p, &m);
+					printf("      int64 result %u (exact):", k);
+					for (i = 0; i < exn[k]; i++)
+						printf(" %.4f,%.4f", ex[k][2 * i], ex[k][2 * i + 1]);
+					printf("\n      rounded:");
+					for (i = 0; i < m; i++)
+						printf(" %lld,%lld", (long long)p[2 * i], (long long)p[2 * i + 1]);
+					printf("\n");
+				}
+			}
+			for (k = 0; k < t.subj.count + t.clip.count; k++) free(inp[k]);
+			free(inp); free(inn); free((void*)ex); free(exn);
+		}
+		ok += good;
+		qaws_clip64_result_destroy(r);
+		free(sp); free(cp); free(op); free(ss); free(cs); free(os);
+		c2_paths_free(&t.subj); c2_paths_free(&t.open); c2_paths_free(&t.clip);
+	}
+	fclose(f);
+	free(buf);
+	printf("    int64 Polygons.txt: %d of %d records within Clipper2's tolerances, %d with its exact path count; oracle %u points, %u wrong\n",
+		ok, total, exact_count, samples, wrong);
+	sprintf(msg, "qaws_clip64 on Clipper2's Polygons.txt: every record within its tolerances (%d of %d), exact result everywhere (%u wrong)", ok, total, wrong);
+	TEST_ASSERT(total >= 190 && ok == total && wrong == 0, msg);
+}
+
 int test_85_clipper2_parity_main(void)
 {
 	g_pass = 0;
@@ -572,6 +828,7 @@ int test_85_clipper2_parity_main(void)
 	printf("Test 85: Clipper2 parity on Clipper2's own test files\n");
 	test_polygons();
 	test_lines();
+	test_polygons64();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
 }

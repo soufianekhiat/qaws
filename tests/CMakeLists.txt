@@ -87,6 +87,7 @@ add_executable(
   83_path.c
   84_clip.c
   85_clipper2_parity.c
+  86_clip64.c
 )
 
 # The amalgamated library exports exactly the same symbols, so the tests can
