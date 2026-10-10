@@ -137,12 +137,6 @@ Test 90 checks each of these against a distance oracle on a grid: a point
 lies in the stroke if and only if its distance to the curve is below
 delta.
 
-One case is open in f32. The line doubling back has a correct raw chain,
-but the float union drops the middle of the capsule. There, three
-coincident lines per side meet arcs that touch them tangentially at the
-same point. This is a gap in the float Boolean engine, and test 90
-checks that case in f64 only.
-
 ## Numbers
 
 Test 87 checks these closed forms:

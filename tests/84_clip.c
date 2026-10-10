@@ -354,6 +354,71 @@ static void test_open_and_z(void)
 	qaws_curve_destroy(sq); qaws_curve_destroy(other); qaws_curve_destroy(line);
 }
 
+/* the raw stroke loop of a line doubling back (an offset of collinear
+   control points): lines and half circles tangent to each other at the turn
+   points, where an arc leaves along -x and its float tangent angle wraps
+   from pi to -pi; the fan must still order it beside the line it touches */
+static qaws_curve* clt_seg(double x0, double y0, double x1, double y1)
+{
+	qaws_scalar p[4];
+	qaws_bezier_desc d;
+	qaws_curve* c = NULL;
+	p[0] = (qaws_scalar)x0; p[1] = (qaws_scalar)y0; p[2] = (qaws_scalar)x1; p[3] = (qaws_scalar)y1;
+	memset(&d, 0, sizeof(d));
+	d.dimension = QAWS_DIMENSION_2D; d.degree = 1; d.control_points = p; d.control_point_count = 2;
+	qaws_curve_create_bezier(&d, &c);
+	return c;
+}
+
+static qaws_curve* clt_half(double cx, double a0)
+{
+	qaws_arc_segment g;
+	qaws_arc_desc ad;
+	qaws_curve* c = NULL;
+	memset(&g, 0, sizeof(g));
+	g.center[0] = (qaws_scalar)cx; g.radius = (qaws_scalar)0.5;
+	g.angle_start = (qaws_scalar)a0; g.angle_end = (qaws_scalar)(a0 + CLT_PI);
+	memset(&ad, 0, sizeof(ad));
+	ad.dimension = QAWS_DIMENSION_2D; ad.segments = &g; ad.segment_count = 1;
+	qaws_curve_create_arc(&ad, &c);
+	return c;
+}
+
+static void test_tangent_fan(void)
+{
+	double const A = 1.188982, B = 0.811018, H = CLT_PI / 2;
+	qaws_curve* c[12];
+	qaws_path_2d p;
+	qaws_clip_desc cd;
+	qaws_clip_result* r = NULL;
+	double area = 0;
+	unsigned int i, n = 0;
+	char msg[200];
+	c[0] = clt_seg(0, -0.5, A, -0.5);  c[1] = clt_half(A, -H);
+	c[2] = clt_seg(A, 0.5, B, 0.5);    c[3] = clt_half(B, H);
+	c[4] = clt_seg(B, -0.5, 2, -0.5);  c[5] = clt_half(2, -H);
+	c[6] = clt_seg(2, 0.5, B, 0.5);    c[7] = clt_half(B, H);
+	c[8] = clt_seg(B, -0.5, A, -0.5);  c[9] = clt_half(A, -H);
+	c[10] = clt_seg(A, 0.5, 0, 0.5);   c[11] = clt_half(0, H);
+	p.curves = (qaws_curve const**)c; p.curve_count = 12; p.closed = 1;
+	memset(&cd, 0, sizeof(cd));
+	cd.subjects = &p; cd.subject_count = 1; cd.clip_type = QAWS_CLIP_UNION; cd.fill_rule = QAWS_FILL_POSITIVE;
+	qaws_clip_execute(&cd, &r);
+	for (i = 0; r && i < qaws_clip_result_get_path_count(r); i++)
+	{
+		qaws_path_2d q;
+		qaws_scalar a = 0;
+		qaws_clip_result_get_path(r, i, &q);
+		qaws_path_compute_area_2d(&q, &a);
+		area += a;
+	}
+	n = r ? qaws_clip_result_get_path_count(r) : 0;
+	sprintf(msg, "tangent arcs and lines doubling back: one capsule (%u paths), area 2 + pi/4 (%.6f vs %.6f)", n, area, 2 + CLT_PI / 4);
+	TEST_ASSERT(n == 1 && fabs(area - (2 + CLT_PI / 4)) < CLT_TOL * 10, msg);
+	qaws_clip_result_destroy(r);
+	for (i = 0; i < 12; i++) qaws_curve_destroy(c[i]);
+}
+
 int test_84_clip_main(void)
 {
 	g_pass = 0;
@@ -365,6 +430,7 @@ int test_84_clip_main(void)
 	test_nesting();
 	test_circles();
 	test_open_and_z();
+	test_tangent_fan();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
 }

@@ -361,7 +361,11 @@ the local checkout `C:\git\dunya\extern\clipper2` and compares results and timin
 | 3. Float engine | done: `qaws_clip.h` (every clip type and fill rule, open subjects, nesting, z callback, reverse / preserve collinear); `qaws_boolean_2d` wraps it |
 | 4. Parity corpus | Polygons.txt and Lines.txt in test 85: 195 / 195 and 16 / 16, oracle clean in f64 and f32; PolytreeHoleOwner and Offsets.txt pending (with offsets) |
 | 5. Exact polylines | done: `qaws_clip64.h` (rational vertices, exact predicates, 195 / 195 on the corpus with an exact oracle); benchmark against Clipper2 in `bench/`; lazy exact arithmetic pending (9-23 times slower than Clipper2 today) |
-| 6-10 | next |
+| 6. Exact curves | next |
+| 7. Offsets | float done (`qaws_offset.h`): every join and end type, miter limit, delta callback, lines and arcs exact; other curves after Levien and Uguray (Euler-spiral cuts, exact cusps of the offset, evolute through backward runs, G1 cubics by Gauss-Newton, round joins at cusps of the curve); the paper's hard cases pass a distance oracle in f64 and f32 (test 90); exact clean-up and Offsets.txt pending |
+| 8. RectClip, Minkowski | done (`qaws_rectclip.h`): rect clip and rect clip lines, Minkowski sum / difference, float and int64 |
+| 9. Batching, 2.5D | stacks done (`qaws_stack.h`): matched and distance-field sections, cubic blend, Booleans level by level on the executor; batch jobs for independent clips pending |
+| 10. Triangulation | next |
 
 Decisions made on the way:
 

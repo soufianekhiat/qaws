@@ -47,9 +47,13 @@
 #if QAWS_SCALAR_IS_FLOAT
 #define CL_TOL_REL 1e-4
 #define CL_AREA_REL 1e-6
+#define CL_ANG_TIE 1e-5     /* tangent angles this close are a tie (float tangents) */
+#define CL_PROBE_REL 1e-2   /* tie probes this far along the shorter edge: bending beats rounding */
 #else
 #define CL_TOL_REL 6.4e-9
 #define CL_AREA_REL 1e-12
+#define CL_ANG_TIE 1e-9
+#define CL_PROBE_REL 1e-4
 #endif
 
 #define CL_PI 3.14159265358979323846
@@ -914,6 +918,10 @@ static void cl_half_setup(cl_ctx* x, unsigned int h)
 	hh->dir[0] = n > 0 ? d[0] / n : 1;
 	hh->dir[1] = n > 0 ? d[1] / n : 0;
 	hh->ang = atan2(hh->dir[1], hh->dir[0]);
+	/* a direction along -x may come out at -pi or at pi by rounding: one side
+	   of the cut, so tangent edges there tie instead of sorting apart */
+	if (hh->ang <= -CL_PI + CL_ANG_TIE)
+		hh->ang += 2 * CL_PI;
 	hh->next = hh->face = CL_NONE;
 	hh->out = hh->seen = 0;
 }
@@ -925,10 +933,10 @@ static int cl_before(cl_ctx const* x, unsigned int a, unsigned int b)
 	cl_half const* ha = &x->h[a];
 	cl_half const* hb = &x->h[b];
 	double da = ha->ang - hb->ang;
-	if (fabs(da) > 1e-9)
+	if (fabs(da) > CL_ANG_TIE)
 		return da < 0;
 	{
-		double s = 1e-4 * (ha->len < hb->len ? ha->len : hb->len), qa[2], qb[2], o[2], ca, cb;
+		double s = CL_PROBE_REL * (ha->len < hb->len ? ha->len : hb->len), qa[2], qb[2], o[2], ca, cb;
 		unsigned int v = cl_origin(x, a);
 		o[0] = x->v[v].p[0]; o[1] = x->v[v].p[1];
 		if (!(s > 0)) s = 1e-6 * x->ext;

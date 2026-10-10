@@ -420,15 +420,6 @@ static void test_extremes(void)
 		qaws_clip_result* r = NULL;
 		unsigned int bad = 0, checked = 0;
 		path.curves = &cc; path.curve_count = 1; path.closed = 0;
-		/* f32: the raw chain of the line doubling back is right (three lines, two
-		   half circles), but the float union drops the middle of the capsule,
-		   where three coincident lines per side meet arcs tangent to them at
-		   one point; a gap of the float clip engine, checked in f64 only */
-		if (OCT_F32 && i == 2)
-		{
-			qaws_curve_destroy(c);
-			continue;
-		}
 		qaws_offset_paths(&path, 1, (qaws_scalar)cases[i].delta, QAWS_JOIN_ROUND, QAWS_END_ROUND, &r);
 		if (r) bad = oct_oracle(c, 0, cases[i].delta, r, 160, &checked);
 		sprintf(msg, "%s, stroked %g with round ends: %u of %u grid points against the distance oracle", cases[i].name, cases[i].delta, bad, checked);

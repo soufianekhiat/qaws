@@ -49,6 +49,12 @@ any kind.
 4. **Graph.**
    - The half-edges are sorted around each vertex by tangent angle. When
      tangents tie, the curve that bends left first goes first.
+     - A tie is within 1e-9 rad, or 1e-5 rad in f32. It is decided by
+       probing each curve a short way along: 1e-4 of the shorter edge, or
+       1e-2 in f32, so that bending beats rounding.
+     - A direction along −x can come out at −π or at π by rounding, so
+       angles that close to −π count as π. Tangent edges there then tie,
+       instead of sorting to opposite ends of the fan.
    - A face is a cycle of "turn clockwise at the next vertex".
    - Each counter-clockwise cycle bounds a face. A clockwise cycle is the
      outside of a connected part, and belongs to the smallest face of
