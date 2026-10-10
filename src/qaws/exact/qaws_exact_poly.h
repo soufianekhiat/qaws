@@ -46,4 +46,18 @@ qaws_status qaws_exact_poly_det(qaws_exact_poly const* M, unsigned int n, unsign
  */
 qaws_status qaws_exact_poly_gcd(qaws_exact_poly const* a, qaws_exact_poly const* b, qaws_exact_poly* out);
 
+qaws_status qaws_exact_poly_derivative(qaws_exact_poly const* a, qaws_exact_poly* out);
+
+/* q = a / g when g divides a over the integers (QAWS_STATUS_INVALID_ARGUMENT otherwise); q may be a. */
+qaws_status qaws_exact_poly_div_exact(qaws_exact_poly const* a, qaws_exact_poly const* g, qaws_exact_poly* q);
+
+/*
+ * Square-free decomposition (Yun): a = c * prod factors[k]^mult[k], the
+ * factors primitive, square-free and pairwise coprime, so every real root
+ * of factors[k] is a root of a of multiplicity exactly mult[k] (and a
+ * simple root of factors[k]: Descartes isolates it). A constant a gives no
+ * factors.
+ */
+qaws_status qaws_exact_poly_squarefree(qaws_exact_poly const* a, qaws_exact_poly* factors, unsigned int* mult, unsigned int capacity, unsigned int* count);
+
 #endif /* QAWS_EXACT_POLY_H */

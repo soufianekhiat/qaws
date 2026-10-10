@@ -6,8 +6,8 @@
  *     float batch lies in exactly one certified enclosure, and the counts agree
  *   - the same pairs as qaws_exact_curve_curve_hits over every contour /
  *     gradient pair, with timing
- *   - a duplicated (overlapping) curve in another family: that pair is
- *     uncertified and counted, every other pair still reported
+ *   - a duplicated (overlapping) curve in another family: that pair gives
+ *     one overlap over the whole contour, every other pair still reported
  *   - self-intersections of a looped cubic: (1/2, 3/7) at t = (7 -+ sqrt 21) / 14
  *   - span boxes are sound: random points of every span inside its box
  */
@@ -201,12 +201,27 @@ static void test_uncertified(void)
 	d.curve_count = EBT_N + 1;
 	d.families = fam;
 	s = qaws_exact_curve_batch_hits(&d, he, 512, &ne, &st);
-	for (i = 0; i < ne; i++)
-		dup += he[i].curve_b == EBT_N;
-	printf("    with an overlapping duplicate: status %d, %u uncertified curve pair(s), %u hits (%u on the duplicate)\n", (int)s, st.uncertified_count, ne, dup);
-	/* the duplicate is nested with the other contours and in the gradient family: no hits of its own */
-	TEST_ASSERT(s == QAWS_STATUS_CERTIFICATION_FAILED && st.uncertified_count == 1 && ne == 2 * EBT_LEVELS * EBT_LINES
-		&& dup == 0, "an overlapping pair is refused and counted; the other pairs are still certified");
+	{
+		unsigned int ov = 0;
+		double lo = 1e300, hi = -1e300;
+		for (i = 0; i < ne; i++)
+			if (he[i].curve_b == EBT_N)
+			{
+				dup++;
+				if (he[i].pair.kind == QAWS_EXACT_HIT_OVERLAP)
+				{
+					ov++;
+					if (he[i].pair.a_lo < lo) lo = he[i].pair.a_lo;
+					if (he[i].pair.a_hi > hi) hi = he[i].pair.a_hi;
+				}
+			}
+		printf("    with an overlapping duplicate: status %d, %u uncertified curve pair(s), %u hits (%u on the duplicate, %u overlaps over [%g, %g])\n",
+			(int)s, st.uncertified_count, ne, dup, ov, lo, hi);
+		/* the duplicate overlaps contour 2 all round (one overlap, its whole range); no other hits of its own */
+		TEST_ASSERT(s == QAWS_STATUS_OK && st.uncertified_count == 0 && ne == 2 * EBT_LEVELS * EBT_LINES + 1 && dup == 1 && ov == 1 &&
+			lo == qaws_curve_get_parameter_range(cs[EBT_N]).min_value && hi == qaws_curve_get_parameter_range(cs[EBT_N]).max_value,
+			"an overlapping pair gives one overlap over the whole contour; the other pairs are still certified");
+	}
 	for (i = 0; i <= EBT_N; i++)
 	{
 		qaws_exact_curve_destroy(ec[i]);

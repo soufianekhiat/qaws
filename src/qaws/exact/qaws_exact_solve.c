@@ -251,80 +251,63 @@ static qaws_status zero_at(sys_work* w, int which, qaws_exact_root const* rt, in
 	return QAWS_STATUS_OK;
 }
 
-/*
- * Roots r in [0, 1] of R with s = C01 / C00 proven in [0, 1] and every
- * constraint proven, refined to the narrowest interval. *common is set
- * (with QAWS_STATUS_CERTIFICATION_FAILED) when R vanishes identically.
- */
-qaws_status qaws_exact_solve_system(poly const* R0, poly const* C00, poly const* C01, qaws_exact_constraint const* cons, unsigned int ncons, qaws_exact_local_hit* out,
-	unsigned int capacity, unsigned int* count, int* common)
+/* the multiplicity of the exact root rt of b (degree n): the zero
+   coefficients of b restricted next to it, counted from the root's side */
+static qaws_status exact_mult(qaws_exact_int const* b, unsigned int n, qaws_exact_root const* rt, unsigned int* out)
 {
-	sys_work* w;
+	qaws_exact_int c[CC_COEF];
+	int at_end = rt->index == ((uint64_t)1 << rt->depth);
+	unsigned int m = 0;
+	qaws_status st;
+	TRY(qaws_exact_bernstein_restrict(b, n, rt->index - (uint64_t)at_end, rt->depth, c));
+	while (m <= n && qaws_exact_int_is_zero(&c[at_end ? n - m : m]))
+		m++;
+	*out = m ? m : 1;
+	return QAWS_STATUS_OK;
+}
+
+/*
+ * The roots of w->R with their s, as for qaws_exact_solve_system: w->R is
+ * one square-free factor of multiplicity mult, or (mult 0) the whole R,
+ * when *cluster tells that its roots do not isolate (a multiple root).
+ */
+static qaws_status solve_poly(sys_work* w, unsigned int N1, unsigned int mult, qaws_exact_constraint const* cons, unsigned int ncons, qaws_exact_local_hit* out,
+	unsigned int capacity, unsigned int* count, int* cluster)
+{
 	qaws_exact_root roots[CC_MAX_ROOTS];
-	unsigned int N, N1, nr = 0, k, c;
+	unsigned int N, nr = 0, k, c;
 	qaws_status st = QAWS_STATUS_OK;
-	*count = 0;
-	*common = 0;
-	w = (sys_work*)sv_alloc(sizeof(sys_work));
-	if (!w)
-		return QAWS_STATUS_ALLOCATION_FAILURE;
-	w->R = *R0;
-	w->zstate[0] = w->zstate[1] = -1;
+	*cluster = 0;
 	qaws_exact_poly_trim(&w->R);
-	if (qaws_exact_poly_is_zero(&w->R))
-	{
-		*common = 1;
-		sv_free(w);
-		return QAWS_STATUS_CERTIFICATION_FAILED;
-	}
 	N = w->R.deg;
-	if (N == 0 || N > QAWS_EXACT_ROOTS_MAX_DEGREE)
+	if (N == 0)
+		return QAWS_STATUS_OK;
+	if (N > QAWS_EXACT_ROOTS_MAX_DEGREE)
+		return QAWS_STATUS_EXACT_UNSUPPORTED;
+	w->zstate[0] = w->zstate[1] = -1;
+	TRY(qaws_exact_poly_to_bernstein(&w->R, w->bR));
+	for (c = 0; c < ncons; c++)
 	{
-		sv_free(w);
-		return N == 0 ? QAWS_STATUS_OK : QAWS_STATUS_EXACT_UNSUPPORTED;
-	}
-	w->C0 = *C00;
-	w->C1 = *C01;
-	N1 = w->C0.deg > w->C1.deg ? w->C0.deg : w->C1.deg;
-	st = qaws_exact_poly_pad(&w->C0, N1);
-	if (st == QAWS_STATUS_OK) st = qaws_exact_poly_pad(&w->C1, N1);
-	if (st == QAWS_STATUS_OK)
-	{
-		w->D = w->C0;
-		st = qaws_exact_poly_acc(&w->D, &w->C1, -1);
-	}
-	if (st == QAWS_STATUS_OK && N1 > QAWS_EXACT_ROOTS_MAX_DEGREE)
-		st = QAWS_STATUS_EXACT_UNSUPPORTED;
-	if (st == QAWS_STATUS_OK) st = qaws_exact_poly_to_bernstein(&w->R, w->bR);
-	if (st == QAWS_STATUS_OK) st = qaws_exact_poly_to_bernstein(&w->C0, w->b0);
-	if (st == QAWS_STATUS_OK) st = qaws_exact_poly_to_bernstein(&w->C1, w->b1);
-	if (st == QAWS_STATUS_OK) st = qaws_exact_poly_to_bernstein(&w->D, w->bD);
-	for (c = 0; c < ncons && st == QAWS_STATUS_OK; c++)
-	{
-		poly h = *cons[c].H;
-		qaws_exact_poly_trim(&h);
-		w->hzero[c] = qaws_exact_poly_is_zero(&h);
+		poly h;
 		w->gconst[c] = 0;
-		w->dH[c] = h.deg;
-		if (w->hzero[c])
+		if (w->hzero[c] || cons[c].kind != QAWS_EXACT_CON_ZERO)
 			continue;
-		if (h.deg > QAWS_EXACT_ROOTS_MAX_DEGREE)
-			st = QAWS_STATUS_EXACT_UNSUPPORTED;
-		if (st == QAWS_STATUS_OK) st = qaws_exact_poly_to_bernstein(&h, w->bH[c]);
-		if (st == QAWS_STATUS_OK && cons[c].kind == QAWS_EXACT_CON_ZERO)
-		{
-			st = qaws_exact_poly_gcd(&w->R, &h, &w->G[c]);
-			if (st == QAWS_STATUS_OK)
-			{
-				w->dG[c] = w->G[c].deg;
-				w->gconst[c] = w->G[c].deg == 0;
-				if (!w->gconst[c])
-					st = qaws_exact_poly_to_bernstein(&w->G[c], w->bG[c]);
-			}
-		}
+		h = *cons[c].H;
+		qaws_exact_poly_trim(&h);
+		TRY(qaws_exact_poly_gcd(&w->R, &h, &w->G[c]));
+		w->dG[c] = w->G[c].deg;
+		w->gconst[c] = w->G[c].deg == 0;
+		if (!w->gconst[c])
+			TRY(qaws_exact_poly_to_bernstein(&w->G[c], w->bG[c]));
 	}
-	if (st == QAWS_STATUS_OK)
-		st = qaws_exact_bernstein_isolate(w->bR, N, roots, CC_MAX_ROOTS, &nr);
+	st = qaws_exact_bernstein_isolate(w->bR, N, roots, CC_MAX_ROOTS, &nr);
+	if (st == QAWS_STATUS_CERTIFICATION_FAILED && mult == 0)
+	{
+		*cluster = 1;
+		return QAWS_STATUS_OK;
+	}
+	if (st != QAWS_STATUS_OK)
+		return st;
 
 	for (k = 0; k < nr && st == QAWS_STATUS_OK; k++)
 	{
@@ -448,6 +431,12 @@ qaws_status qaws_exact_solve_system(poly const* R0, poly const* C00, poly const*
 			int at_end = rt.exact && rt.index == ((uint64_t)1 << rt.depth);
 			unsigned int i;
 			h->r = rt;
+			h->multiplicity = mult;
+			if (!mult)
+			{
+				h->multiplicity = 1;
+				if (rt.exact) st = exact_mult(w->bR, N, &rt, &h->multiplicity);
+			}
 			st = qaws_exact_bernstein_restrict_pair(w->b0, w->b1, N1, rt.index - (uint64_t)at_end, rt.depth, c00, c01);
 			if (st != QAWS_STATUS_OK)
 				break;
@@ -489,6 +478,97 @@ qaws_status qaws_exact_solve_system(poly const* R0, poly const* C00, poly const*
 			(*count)++;
 		}
 	}
+	return st;
+}
+
+static qaws_status solve_any(poly const* R0, poly const* C00, poly const* C01, qaws_exact_constraint const* cons, unsigned int ncons, qaws_exact_local_hit* out,
+	unsigned int capacity, unsigned int* count, int* common, int multiple)
+{
+	sys_work* w;
+	unsigned int N1, c;
+	int cluster = 0;
+	qaws_status st = QAWS_STATUS_OK;
+	*count = 0;
+	*common = 0;
+	w = (sys_work*)sv_alloc(sizeof(sys_work));
+	if (!w)
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	w->R = *R0;
+	qaws_exact_poly_trim(&w->R);
+	if (qaws_exact_poly_is_zero(&w->R))
+	{
+		*common = 1;
+		sv_free(w);
+		return QAWS_STATUS_CERTIFICATION_FAILED;
+	}
+	if (w->R.deg == 0 || w->R.deg > QAWS_EXACT_ROOTS_MAX_DEGREE)
+	{
+		sv_free(w);
+		return w->R.deg == 0 ? QAWS_STATUS_OK : QAWS_STATUS_EXACT_UNSUPPORTED;
+	}
+	w->C0 = *C00;
+	w->C1 = *C01;
+	N1 = w->C0.deg > w->C1.deg ? w->C0.deg : w->C1.deg;
+	st = qaws_exact_poly_pad(&w->C0, N1);
+	if (st == QAWS_STATUS_OK) st = qaws_exact_poly_pad(&w->C1, N1);
+	if (st == QAWS_STATUS_OK)
+	{
+		w->D = w->C0;
+		st = qaws_exact_poly_acc(&w->D, &w->C1, -1);
+	}
+	if (st == QAWS_STATUS_OK && N1 > QAWS_EXACT_ROOTS_MAX_DEGREE)
+		st = QAWS_STATUS_EXACT_UNSUPPORTED;
+	if (st == QAWS_STATUS_OK) st = qaws_exact_poly_to_bernstein(&w->C0, w->b0);
+	if (st == QAWS_STATUS_OK) st = qaws_exact_poly_to_bernstein(&w->C1, w->b1);
+	if (st == QAWS_STATUS_OK) st = qaws_exact_poly_to_bernstein(&w->D, w->bD);
+	for (c = 0; c < ncons && st == QAWS_STATUS_OK; c++)
+	{
+		poly h = *cons[c].H;
+		qaws_exact_poly_trim(&h);
+		w->hzero[c] = qaws_exact_poly_is_zero(&h);
+		w->dH[c] = h.deg;
+		if (w->hzero[c])
+			continue;
+		if (h.deg > QAWS_EXACT_ROOTS_MAX_DEGREE)
+			st = QAWS_STATUS_EXACT_UNSUPPORTED;
+		if (st == QAWS_STATUS_OK) st = qaws_exact_poly_to_bernstein(&h, w->bH[c]);
+	}
+	if (st == QAWS_STATUS_OK)
+		st = solve_poly(w, N1, 0, cons, ncons, out, capacity, count, &cluster);
+	if (st == QAWS_STATUS_OK && cluster)
+	{
+		/* a multiple root: each square-free factor alone, its roots carry its multiplicity */
+		if (!multiple)
+			st = QAWS_STATUS_CERTIFICATION_FAILED;
+		else
+		{
+			unsigned int nf = 0, mult[QAWS_EXACT_POLY_COEF], f;
+			poly* fac = (poly*)sv_alloc(sizeof(poly) * (R0->deg + 1));
+			if (!fac)
+				st = QAWS_STATUS_ALLOCATION_FAILURE;
+			if (st == QAWS_STATUS_OK)
+				st = qaws_exact_poly_squarefree(R0, fac, mult, R0->deg + 1, &nf);
+			for (f = 0; f < nf && st == QAWS_STATUS_OK; f++)
+			{
+				int again = 0;
+				w->R = fac[f];
+				st = solve_poly(w, N1, mult[f], cons, ncons, out, capacity, count, &again);
+			}
+			sv_free(fac);
+		}
+	}
 	sv_free(w);
 	return st;
+}
+
+qaws_status qaws_exact_solve_system(poly const* R0, poly const* C00, poly const* C01, qaws_exact_constraint const* cons, unsigned int ncons, qaws_exact_local_hit* out,
+	unsigned int capacity, unsigned int* count, int* common)
+{
+	return solve_any(R0, C00, C01, cons, ncons, out, capacity, count, common, 0);
+}
+
+qaws_status qaws_exact_solve_system_multiple(poly const* R0, poly const* C00, poly const* C01, qaws_exact_constraint const* cons, unsigned int ncons,
+	qaws_exact_local_hit* out, unsigned int capacity, unsigned int* count, int* common)
+{
+	return solve_any(R0, C00, C01, cons, ncons, out, capacity, count, common, 1);
 }

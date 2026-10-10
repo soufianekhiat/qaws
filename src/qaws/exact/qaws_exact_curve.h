@@ -87,4 +87,8 @@ void qaws_exact_span_box(qaws_exact_span const* sp, unsigned int dim, double lo[
 qaws_status qaws_exact_span_pair_hits(qaws_exact_curve const* a, unsigned int ia, qaws_exact_curve const* b, unsigned int ib,
 	qaws_exact_pair* out, unsigned int capacity, unsigned int* count, int* common);
 
+/* The pairs of one curve pair: overlaps of neighbouring spans joined, points
+   inside an overlap dropped; returns the new count (order kept otherwise). */
+unsigned int qaws_exact_merge_overlaps(qaws_exact_pair* pairs, unsigned int count);
+
 #endif /* QAWS_EXACT_CURVE_H */

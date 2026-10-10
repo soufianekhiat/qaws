@@ -455,3 +455,154 @@ qaws_status qaws_exact_poly_gcd(qaws_exact_poly const* a, qaws_exact_poly const*
 	qaws_internal_dealloc(NULL, A);
 	return st;
 }
+
+qaws_status qaws_exact_poly_derivative(qaws_exact_poly const* a, qaws_exact_poly* out)
+{
+	unsigned int i;
+	qaws_status st;
+	if (a->deg == 0)
+	{
+		qaws_exact_poly_zero(out, 0);
+		return QAWS_STATUS_OK;
+	}
+	out->deg = a->deg - 1;
+	for (i = 1; i <= a->deg; i++)
+		TRY(qaws_exact_int_mul_i64(&out->c[i - 1], &a->c[i], (int64_t)i));
+	return QAWS_STATUS_OK;
+}
+
+/* a / g with the remainder in w[0] and the divisor in w[1] (q may alias a or g) */
+static qaws_status div_exact_in(qaws_exact_poly const* a, qaws_exact_poly const* g, qaws_exact_poly* q, qaws_exact_poly* w)
+{
+	qaws_exact_poly* r = w;
+	qaws_exact_poly* d = w + 1;
+	qaws_exact_int rem, t;
+	int k;
+	unsigned int i;
+	qaws_status st;
+	*r = *a;
+	*d = *g;
+	qaws_exact_poly_trim(r);
+	qaws_exact_poly_trim(d);
+	if (qaws_exact_poly_is_zero(d))
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	if (qaws_exact_poly_is_zero(r))
+	{
+		qaws_exact_poly_zero(q, 0);
+		return QAWS_STATUS_OK;
+	}
+	if (d->deg > r->deg)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	qaws_exact_poly_zero(q, r->deg - d->deg);
+	for (k = (int)(r->deg - d->deg); k >= 0; k--)
+	{
+		qaws_exact_int* lead = &r->c[(unsigned int)k + d->deg];
+		if (qaws_exact_int_is_zero(lead))
+			continue;
+		TRY(qaws_exact_int_divmod(&q->c[k], &rem, lead, &d->c[d->deg]));
+		if (!qaws_exact_int_is_zero(&rem))
+			return QAWS_STATUS_INVALID_ARGUMENT;
+		for (i = 0; i <= d->deg; i++)
+		{
+			TRY(qaws_exact_int_mul(&t, &q->c[k], &d->c[i]));
+			TRY(qaws_exact_int_sub(&r->c[(unsigned int)k + i], &r->c[(unsigned int)k + i], &t));
+		}
+	}
+	return qaws_exact_poly_is_zero(r) ? QAWS_STATUS_OK : QAWS_STATUS_INVALID_ARGUMENT;
+}
+
+qaws_status qaws_exact_poly_div_exact(qaws_exact_poly const* a, qaws_exact_poly const* g, qaws_exact_poly* q)
+{
+	qaws_exact_poly* w = (qaws_exact_poly*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_exact_poly) * 2));
+	qaws_status st;
+	if (!w)
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	st = div_exact_in(a, g, q, w);
+	qaws_internal_dealloc(NULL, w);
+	return st;
+}
+
+/* gcd(a, b) allowing b = 0 (then a's primitive part) */
+static qaws_status gcd0(qaws_exact_poly const* a, qaws_exact_poly const* b, qaws_exact_poly* out)
+{
+	qaws_exact_poly x = *b;
+	qaws_exact_poly_trim(&x);
+	if (qaws_exact_poly_is_zero(&x))
+	{
+		*out = *a;
+		return primitive(out);
+	}
+	return qaws_exact_poly_gcd(a, b, out);
+}
+
+qaws_status qaws_exact_poly_squarefree(qaws_exact_poly const* a, qaws_exact_poly* factors, unsigned int* mult, unsigned int capacity, unsigned int* count)
+{
+	qaws_exact_poly* w = (qaws_exact_poly*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_exact_poly) * 7));
+	qaws_exact_poly *A, *dA, *g, *b, *c, *d, *e;
+	unsigned int i = 1;
+	qaws_status st;
+	*count = 0;
+	if (!w)
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	A = w; dA = w + 1; g = w + 2; b = w + 3; c = w + 4; d = w + 5; e = w + 6;
+	*A = *a;
+	st = primitive(A);
+	if (st == QAWS_STATUS_OK && (qaws_exact_poly_is_zero(A) || A->deg == 0))
+	{
+		qaws_internal_dealloc(NULL, w);
+		return qaws_exact_poly_is_zero(A) ? QAWS_STATUS_INVALID_ARGUMENT : QAWS_STATUS_OK;
+	}
+	/* Yun: b1 = A / g, c1 = A' / g, d1 = c1 - b1'; a_i = gcd(b_i, d_i), b_(i+1) = b_i / a_i, c_(i+1) = d_i / a_i */
+	if (st == QAWS_STATUS_OK) st = qaws_exact_poly_derivative(A, dA);
+	if (st == QAWS_STATUS_OK) st = qaws_exact_poly_gcd(A, dA, g);
+	if (st == QAWS_STATUS_OK) st = qaws_exact_poly_div_exact(A, g, b);
+	if (st == QAWS_STATUS_OK) st = qaws_exact_poly_div_exact(dA, g, c);
+	if (st == QAWS_STATUS_OK) st = qaws_exact_poly_derivative(b, d);
+	if (st == QAWS_STATUS_OK) { qaws_exact_poly_pad(c, c->deg > d->deg ? c->deg : d->deg); st = qaws_exact_poly_acc(c, d, -1); *d = *c; }
+	while (st == QAWS_STATUS_OK)
+	{
+		qaws_exact_poly_trim(b);
+		if (b->deg == 0)
+			break;
+		st = gcd0(b, d, g);
+		if (st != QAWS_STATUS_OK)
+			break;
+		qaws_exact_poly_trim(g);
+		if (g->deg > 0)
+		{
+			if (*count >= capacity)
+			{
+				st = QAWS_STATUS_BUFFER_TOO_SMALL;
+				break;
+			}
+			factors[*count] = *g;
+			mult[*count] = i;
+			(*count)++;
+			st = qaws_exact_poly_div_exact(b, g, b);
+			if (st == QAWS_STATUS_OK)
+			{
+				qaws_exact_poly_trim(d);
+				if (qaws_exact_poly_is_zero(d))
+					qaws_exact_poly_zero(c, 0);
+				else
+					st = qaws_exact_poly_div_exact(d, g, c);
+			}
+		}
+		else
+			*c = *d;
+		/* d_(i+1) = c_(i+1) - b_(i+1)' */
+		if (st == QAWS_STATUS_OK) st = qaws_exact_poly_derivative(b, d);
+		if (st == QAWS_STATUS_OK)
+		{
+			*e = *c;
+			qaws_exact_poly_pad(e, e->deg > d->deg ? e->deg : d->deg);
+			st = qaws_exact_poly_acc(e, d, -1);
+			*d = *e;
+		}
+		i++;
+		if (i > QAWS_EXACT_POLY_COEF)
+			st = QAWS_STATUS_CERTIFICATION_FAILED;
+	}
+	qaws_internal_dealloc(NULL, w);
+	return st;
+}

@@ -19,6 +19,7 @@ typedef struct qaws_exact_local_hit
 	int s_exact;
 	qaws_exact_int s_num, s_den;   /* s exactly (s_den > 0), when s_exact */
 	double s_lo, s_hi;             /* otherwise its enclosure */
+	unsigned int multiplicity;     /* of r as a root of R (1: simple) */
 } qaws_exact_local_hit;
 
 enum
@@ -55,6 +56,15 @@ void qaws_exact_ratio_enclose(qaws_exact_int const* num, qaws_exact_int const* d
  * vanishes identically.
  */
 qaws_status qaws_exact_solve_system(qaws_exact_poly const* R, qaws_exact_poly const* C00, qaws_exact_poly const* C01,
+	qaws_exact_constraint const* cons, unsigned int ncons, qaws_exact_local_hit* out, unsigned int capacity, unsigned int* count, int* common);
+
+/*
+ * The same accepting multiple roots of R: when R's roots do not isolate,
+ * its square-free factors are solved one by one and each root carries its
+ * multiplicity (an even one is a tangency of the two curves, an odd one
+ * above 1 a crossing with contact).
+ */
+qaws_status qaws_exact_solve_system_multiple(qaws_exact_poly const* R, qaws_exact_poly const* C00, qaws_exact_poly const* C01,
 	qaws_exact_constraint const* cons, unsigned int ncons, qaws_exact_local_hit* out, unsigned int capacity, unsigned int* count, int* common);
 
 /* A box of the unit cube: [lo, hi] 2^-dep per direction. */

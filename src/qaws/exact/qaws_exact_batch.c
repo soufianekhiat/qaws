@@ -266,6 +266,42 @@ qaws_status qaws_exact_curve_batch_hits(qaws_exact_batch_desc const* desc, qaws_
 	}
 	x.nhit = n;
 	qsort(x.hits, x.nhit, sizeof(qaws_exact_batch_hit), eb_cmp_hit);
+	/* overlaps of neighbouring spans joined, per curve pair */
+	for (i = 0, n = 0; i < x.nhit;)
+	{
+		unsigned int e = i, g, m;
+		qaws_exact_pair* tmp;
+		while (e < x.nhit && x.hits[e].curve_a == x.hits[i].curve_a && x.hits[e].curve_b == x.hits[i].curve_b)
+			e++;
+		for (g = i; g < e && x.hits[g].pair.kind != QAWS_EXACT_HIT_OVERLAP; g++)
+			;
+		if (g == e)
+		{
+			memmove(&x.hits[n], &x.hits[i], (e - i) * sizeof(qaws_exact_batch_hit));
+			n += e - i;
+			i = e;
+			continue;
+		}
+		tmp = (qaws_exact_pair*)malloc((e - i) * sizeof(qaws_exact_pair));
+		if (!tmp)
+		{
+			st = QAWS_STATUS_ALLOCATION_FAILURE;
+			goto done;
+		}
+		for (g = i; g < e; g++)
+			tmp[g - i] = x.hits[g].pair;
+		m = qaws_exact_merge_overlaps(tmp, e - i);
+		for (g = 0; g < m; g++)
+		{
+			x.hits[n + g].curve_a = x.hits[i].curve_a;
+			x.hits[n + g].curve_b = x.hits[i].curve_b;
+			x.hits[n + g].pair = tmp[g];
+		}
+		free(tmp);
+		n += m;
+		i = e;
+	}
+	x.nhit = n;
 	for (i = 0; i < x.nhit && i < capacity; i++)
 		out_hits[i] = x.hits[i];
 	*out_count = x.nhit;

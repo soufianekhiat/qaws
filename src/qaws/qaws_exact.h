@@ -178,12 +178,20 @@ qaws_status qaws_exact_curve_line_hits(qaws_exact_curve const* curve, double con
 qaws_status qaws_exact_curve_plane_hits(qaws_exact_curve const* curve, double const point[3], double const normal[3], double width,
 	qaws_exact_hit* out_hits, unsigned int capacity, unsigned int* out_count);
 
-/* An intersection of two curves: curve a's parameter in [a_lo, a_hi], curve b's in [b_lo, b_hi]. */
+/*
+ * An intersection of two curves: curve a's parameter in [a_lo, a_hi], curve
+ * b's in [b_lo, b_hi]. POINT: both parameters exact (lo == hi); CROSSING:
+ * enclosures of one intersection; OVERLAP: the curves coincide over a's
+ * [a_lo, a_hi] and b's [b_lo, b_hi] (ends rounded outward), b running from
+ * b_hi to b_lo as a goes up when `opposite`.
+ */
 typedef struct qaws_exact_pair
 {
-	qaws_exact_hit_kind kind;   /* POINT: both parameters exact (lo == hi); CROSSING: enclosures */
+	qaws_exact_hit_kind kind;
 	double a_lo, a_hi;
 	double b_lo, b_hi;
+	unsigned int multiplicity;  /* of the contact: 1 transversal, even a touch (the curves stay on one side), 0 not determined */
+	int opposite;               /* OVERLAP only */
 } qaws_exact_pair;
 
 /*
@@ -197,9 +205,16 @@ typedef struct qaws_exact_pair
  * coordinate must agree: an exact zero test (a modular gcd proved by
  * division). Every intersection is reported once (a knot point by the
  * span ending there), each crossing enclosure holding exactly one.
- * QAWS_STATUS_CERTIFICATION_FAILED for tangencies, a common component
- * (overlapping curves) or a crossing through a singular point; a hit on a
- * span end at an irrational root is decided by an exact gcd test.
+ *
+ * Tangencies: when the roots do not isolate, the resultant is split into
+ * its square-free factors (Yun, with exact modular gcds) and every root
+ * reports its multiplicity: even, the curves touch; odd, they cross.
+ * Overlaps: two spans on one algebraic curve (a common component) give an
+ * OVERLAP pair whose ends are exact rationals (span ends inverted on the
+ * other span), merged across knots.
+ * QAWS_STATUS_CERTIFICATION_FAILED for a contact through a singular point
+ * of the implicitized span (both implicitizations tried); a hit on a span
+ * end at an irrational root is decided by an exact gcd test.
  */
 qaws_status qaws_exact_curve_curve_hits(qaws_exact_curve const* a, qaws_exact_curve const* b, qaws_exact_pair* out_pairs, unsigned int capacity,
 	unsigned int* out_count);
@@ -209,11 +224,13 @@ qaws_status qaws_exact_curve_curve_hits(qaws_exact_curve const* a, qaws_exact_cu
  * C(a) = C(b) (a_lo..a_hi, b_lo..b_hi enclosures). Inside a span, the
  * divided differences (X(s) W(t) - X(t) W(s)) / (s - t) are eliminated the
  * same way (spans proven monotone along a direction are skipped); spans
- * against spans as for two curves. Shared knots and the closing point of a
- * closed curve are not self-intersections; spans on one algebraic curve
- * (a NURBS circle) are told apart exactly (touching ends) or refused
- * (overlap). QAWS_STATUS_CERTIFICATION_FAILED as above, and for an
- * irrational cusp or a span folding back on itself.
+ * against spans as for two curves, with tangencies (multiplicity) and
+ * overlaps (a stretch traced twice: an OVERLAP pair with exact ends). Span
+ * pairs come from a sweep over their sound boxes. Shared knots and the
+ * closing point of a closed curve are not self-intersections; spans on one
+ * algebraic curve (a NURBS circle) touching at their ends are told apart
+ * exactly. QAWS_STATUS_CERTIFICATION_FAILED for a contact through a
+ * singular point, an irrational cusp or a span folding back on itself.
  */
 qaws_status qaws_exact_curve_self_hits(qaws_exact_curve const* curve, qaws_exact_pair* out_pairs, unsigned int capacity, unsigned int* out_count);
 
@@ -226,8 +243,9 @@ qaws_status qaws_exact_curve_self_hits(qaws_exact_curve const* curve, qaws_exact
  * QAWS_EXACT_BATCH_SELF each curve's self-intersections are added.
  *
  * Hits are sorted by (curve_a, curve_b, a_lo, b_lo), curve_a < curve_b
- * (curve_a == curve_b for a self-intersection). A curve pair that cannot be
- * certified (tangency, common component, ...) contributes no hits and is
+ * (curve_a == curve_b for a self-intersection); tangencies carry their
+ * multiplicity, overlaps are joined across spans. A curve pair that cannot
+ * be certified (a contact through a singular point, ...) contributes no hits and is
  * counted in stats.uncertified_count; the call then completes every other
  * pair and returns QAWS_STATUS_CERTIFICATION_FAILED. *out_count is the
  * total; past `capacity` the call returns QAWS_STATUS_BUFFER_TOO_SMALL.

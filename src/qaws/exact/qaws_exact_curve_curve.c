@@ -322,6 +322,8 @@ typedef struct span_hit
 	int exact;
 	int a_exact_end, b_exact_start;  /* a exactly at its span's end / b exactly at its start, a exactly at start, b at end */
 	int a_exact_start, b_exact_end;
+	unsigned int mult;                /* multiplicity of the contact (0: not determined) */
+	int overlap, opposite;           /* an overlap [a_lo, a_hi] x [b_lo, b_hi], b running down when opposite */
 } span_hit;
 
 static qaws_status emit_cross(qaws_exact_span const* I, int ishift, qaws_exact_span const* S, int sshift, qaws_exact_local_hit const* lh, int i_is_a,
@@ -334,6 +336,8 @@ static qaws_status emit_cross(qaws_exact_span const* I, int ishift, qaws_exact_s
 	TRY(map_s(I, ishift, lh, &s_lo, &s_hi, &s_ex));
 	TRY(map_r(S, sshift, &lh->r, &r_lo, &r_hi, &r_ex));
 	h.exact = s_ex && r_ex && lh->s_exact && lh->r.exact;
+	h.mult = lh->multiplicity;
+	h.overlap = h.opposite = 0;
 	if (i_is_a)
 	{
 		h.a_lo = s_lo; h.a_hi = s_hi; h.b_lo = r_lo; h.b_hi = r_hi;
@@ -391,7 +395,7 @@ static qaws_status cross_spans(qaws_exact_span const* I, int ishift, qaws_exact_
 		}
 		con.kind = QAWS_EXACT_CON_ZERO;
 		con.H = &sys[3];
-		st = qaws_exact_solve_system(&sys[0], &sys[1], &sys[2], &con, pj[p].cz >= 0 ? 1u : 0u, lh, CC_MAX_ROOTS, &nl, &com);
+		st = qaws_exact_solve_system_multiple(&sys[0], &sys[1], &sys[2], &con, pj[p].cz >= 0 ? 1u : 0u, lh, CC_MAX_ROOTS, &nl, &com);
 		if (com)
 			continue;   /* this projection is degenerate (or shared): the next one */
 		*common = 0;
@@ -488,6 +492,8 @@ static qaws_status cross_segments(qaws_exact_span const* A, int ashift, qaws_exa
 			int ea = 0, eb = 0;
 			TRY(map_s(A, ashift, &ha, &h.a_lo, &h.a_hi, &ea));
 			TRY(map_s(B, bshift, &hb, &h.b_lo, &h.b_hi, &eb));
+			h.mult = 1;
+			h.overlap = h.opposite = 0;
 			h.exact = ea && eb;
 			h.a_exact_start = s_is(&ha, 0);
 			h.a_exact_end = s_is(&ha, 1);
@@ -760,72 +766,204 @@ static int classify01(qaws_exact_int const* num, qaws_exact_int const* den)
 	return c == 0 ? 2 : 1;
 }
 
+/* A rational n / d (d > 0) and where it comes from: an end of span A (0, 1) or of span B (2, 3). */
+typedef struct cc_rat
+{
+	qaws_exact_int n, d;
+	int tag;
+} cc_rat;
+
+static qaws_status rat_cmp(cc_rat const* a, cc_rat const* b, int* out)
+{
+	qaws_exact_int l, r;
+	qaws_status st;
+	TRY(qaws_exact_int_mul(&l, &a->n, &b->d));
+	TRY(qaws_exact_int_mul(&r, &b->n, &a->d));
+	*out = qaws_exact_int_cmp(&l, &r);
+	return QAWS_STATUS_OK;
+}
+
+static void rat_int(cc_rat* q, int v, int tag)
+{
+	qaws_exact_int_from_i64(&q->n, v);
+	qaws_exact_int_from_i64(&q->d, 1);
+	q->tag = tag;
+}
+
+static qaws_status rat_hit(qaws_exact_span const* sp, int shift, cc_rat const* q, double* lo, double* hi, int* exact)
+{
+	qaws_exact_local_hit h;
+	memset(&h, 0, sizeof(h));
+	h.s_exact = 1;
+	h.s_num = q->n;
+	h.s_den = q->d;
+	return map_s(sp, shift, &h, lo, hi, exact);
+}
+
+static int rat_is(cc_rat const* q, int v)
+{
+	return v == 0 ? qaws_exact_int_is_zero(&q->n) : qaws_exact_int_cmp(&q->n, &q->d) == 0;
+}
+
 /*
- * Two spans on one algebraic curve: they overlap, or touch at endpoints.
- * Each endpoint of one is inverted on the other; an inversion strictly
- * inside is an overlap (QAWS_STATUS_CERTIFICATION_FAILED), endpoint-to-
- * endpoint contacts are hits. When every endpoint lands on an endpoint the
- * arcs coincide or complete each other: B's midpoint decides.
+ * The part of A's [0, 1] in front of (u0, u1): an overlap, or a single point
+ * when u0 == u1; b0, b1 the matching parameters on B (from the tags).
  */
-static qaws_status common_spans(qaws_exact_span const* A, int ashift, qaws_exact_span const* B, int bshift, unsigned int dim, span_hit* out,
+static qaws_status emit_overlap(qaws_exact_span const* A, int ashift, qaws_exact_span const* B, int bshift, cc_rat const* u0, cc_rat const* u1,
+	cc_rat const* qa, span_hit* out, unsigned int capacity, unsigned int* count)
+{
+	cc_rat b[2];
+	cc_rat const* u[2];
+	span_hit h;
+	int c, e, ex[4];
+	double alo[2], ahi[2], blo[2], bhi[2];
+	qaws_status st;
+	TRY(rat_cmp(u0, u1, &c));
+	if (c > 0)
+		return QAWS_STATUS_OK;
+	u[0] = u0;
+	u[1] = u1;
+	for (e = 0; e < 2; e++)
+	{
+		/* the tag says which end the point is: A's (its parameter on B inverted) or B's (0 or 1) */
+		if (u[e]->tag == 0 || u[e]->tag == 1)
+			b[e] = qa[u[e]->tag];
+		else
+			rat_int(&b[e], u[e]->tag - 2, u[e]->tag);
+		TRY(rat_hit(A, ashift, u[e], &alo[e], &ahi[e], &ex[e]));
+		TRY(rat_hit(B, bshift, &b[e], &blo[e], &bhi[e], &ex[2 + e]));
+	}
+	memset(&h, 0, sizeof(h));
+	h.a_exact_start = rat_is(u[0], 0);
+	h.a_exact_end = rat_is(u[1], 1);
+	if (c == 0)
+	{
+		/* one point: the arcs only touch */
+		h.a_lo = alo[0]; h.a_hi = ahi[0];
+		h.b_lo = blo[0]; h.b_hi = bhi[0];
+		h.exact = ex[0] && ex[2];
+		h.a_exact_end = rat_is(u[0], 1);
+		h.b_exact_start = rat_is(&b[0], 0);
+		h.b_exact_end = rat_is(&b[0], 1);
+	}
+	else
+	{
+		int o;
+		TRY(rat_cmp(&b[0], &b[1], &o));
+		h.overlap = 1;
+		h.opposite = o > 0;
+		h.a_lo = alo[0]; h.a_hi = ahi[1];
+		h.b_lo = h.opposite ? blo[1] : blo[0];
+		h.b_hi = h.opposite ? bhi[0] : bhi[1];
+		h.exact = ex[0] && ex[1] && ex[2] && ex[3];
+	}
+	if (*count >= capacity)
+		return QAWS_STATUS_BUFFER_TOO_SMALL;
+	out[(*count)++] = h;
+	return QAWS_STATUS_OK;
+}
+
+/* The image [L, H] of B on A's parameter line (L, H at infinity when lo_inf / hi_inf) meeting [0, 1]. */
+static qaws_status emit_meet(qaws_exact_span const* A, int ashift, qaws_exact_span const* B, int bshift, cc_rat const* L, int lo_inf, cc_rat const* H,
+	int hi_inf, cc_rat const* qa, span_hit* out, unsigned int capacity, unsigned int* count)
+{
+	cc_rat zero, one;
+	cc_rat const* u0;
+	cc_rat const* u1;
+	int c;
+	qaws_status st;
+	rat_int(&zero, 0, 0);
+	rat_int(&one, 1, 1);
+	u0 = &zero;
+	u1 = &one;
+	if (!lo_inf)
+	{
+		TRY(rat_cmp(L, &zero, &c));
+		if (c > 0) u0 = L;
+	}
+	if (!hi_inf)
+	{
+		TRY(rat_cmp(H, &one, &c));
+		if (c < 0) u1 = H;
+	}
+	/* an end of A in front of B: its parameter on B must be finite */
+	if ((u0->tag == 0 || u1->tag == 1) && ((u0->tag == 0 && qaws_exact_int_is_zero(&qa[0].d)) || (u1->tag == 1 && qaws_exact_int_is_zero(&qa[1].d))))
+	{
+		TRY(rat_cmp(u0, u1, &c));
+		if (c <= 0)
+			return QAWS_STATUS_CERTIFICATION_FAILED;
+		return QAWS_STATUS_OK;
+	}
+	return emit_overlap(A, ashift, B, bshift, u0, u1, qa, out, capacity, count);
+}
+
+/*
+ * Two spans on one algebraic curve (a common component): B's parameter maps
+ * onto A's projective parameter line by a Moebius map, so B's [0, 1] lands
+ * between the images of B's ends, or on the complement when the image of
+ * B's middle is outside them (through A's parameter at infinity, which is
+ * a point of the curve too). Its meet with [0, 1] is reported: overlaps, or
+ * single points where the arcs only touch. Every end is an exact rational
+ * (a span end inverted on the other span).
+ */
+static qaws_status overlap_spans(qaws_exact_span const* A, int ashift, qaws_exact_span const* B, int bshift, unsigned int dim, span_hit* out,
 	unsigned int capacity, unsigned int* count)
 {
 	unsigned int D = dim + 1, e;
-	qaws_exact_int P[4], num, den;
-	int on, cls, all_ends = 1;
+	qaws_exact_int P[4];
+	cc_rat qb[3], qa[2];
+	int on, c, inf[3];
 	qaws_status st;
-	/* endpoints of B on A */
-	for (e = 0; e < 2; e++)
+	for (e = 0; e < 3; e++)
 	{
 		TRY(span_point(B, D, (int)e, P));
-		st = invert_point(A, dim, P, &num, &den, &on);
-		if (st != QAWS_STATUS_OK) return st;
+		TRY(invert_point(A, dim, P, &qb[e].n, &qb[e].d, &on));
 		if (!on)
-		{
-			all_ends = 0;
-			continue;
-		}
-		cls = classify01(&num, &den);
-		if (cls == 1)
-			return QAWS_STATUS_CERTIFICATION_FAILED;   /* overlap */
-		if (cls < 0)
-		{
-			all_ends = 0;
-			continue;
-		}
-		{
-			span_hit h;
-			memset(&h, 0, sizeof(h));
-			h.a_lo = h.a_hi = ldexp((double)(cls == 0 ? A->a : A->b), -ashift);
-			h.b_lo = h.b_hi = ldexp((double)(e == 0 ? B->a : B->b), -bshift);
-			h.exact = 1;
-			h.a_exact_start = cls == 0;
-			h.a_exact_end = cls == 2;
-			h.b_exact_start = e == 0;
-			h.b_exact_end = e == 1;
-			if (*count >= capacity)
-				return QAWS_STATUS_BUFFER_TOO_SMALL;
-			out[(*count)++] = h;
-		}
+			return QAWS_STATUS_CERTIFICATION_FAILED;
+		qb[e].tag = 2 + (int)e;
+		inf[e] = qaws_exact_int_is_zero(&qb[e].d);
 	}
-	/* endpoints of A strictly inside B: overlap */
 	for (e = 0; e < 2; e++)
 	{
 		TRY(span_point(A, D, (int)e, P));
-		st = invert_point(B, dim, P, &num, &den, &on);
-		if (st != QAWS_STATUS_OK) return st;
-		if (on && classify01(&num, &den) == 1)
+		TRY(invert_point(B, dim, P, &qa[e].n, &qa[e].d, &on));
+		if (!on)
 			return QAWS_STATUS_CERTIFICATION_FAILED;
 	}
-	if (all_ends)
+	if (inf[0] || inf[1])
 	{
-		TRY(span_point(B, D, 2, P));
-		st = invert_point(A, dim, P, &num, &den, &on);
-		if (st != QAWS_STATUS_OK) return st;
-		if (on && classify01(&num, &den) == 1)
-			return QAWS_STATUS_CERTIFICATION_FAILED;   /* the same arc */
+		/* a ray from the finite end, on the side of the middle */
+		cc_rat const* f = inf[0] ? &qb[1] : &qb[0];
+		if (inf[0] && inf[1])
+			return QAWS_STATUS_CERTIFICATION_FAILED;
+		TRY(rat_cmp(&qb[2], f, &c));
+		if (inf[2] || c == 0)
+			return QAWS_STATUS_CERTIFICATION_FAILED;
+		return c > 0 ? emit_meet(A, ashift, B, bshift, f, 0, NULL, 1, qa, out, capacity, count)
+		             : emit_meet(A, ashift, B, bshift, NULL, 1, f, 0, qa, out, capacity, count);
 	}
-	return QAWS_STATUS_OK;
+	{
+		cc_rat const* lo;
+		cc_rat const* hi;
+		int between = 0;
+		TRY(rat_cmp(&qb[0], &qb[1], &c));
+		if (c == 0)
+			return QAWS_STATUS_CERTIFICATION_FAILED;   /* B closes on itself */
+		lo = c < 0 ? &qb[0] : &qb[1];
+		hi = c < 0 ? &qb[1] : &qb[0];
+		if (!inf[2])
+		{
+			int l, h;
+			TRY(rat_cmp(lo, &qb[2], &l));
+			TRY(rat_cmp(&qb[2], hi, &h));
+			between = l < 0 && h < 0;
+		}
+		if (between)
+			return emit_meet(A, ashift, B, bshift, lo, 0, hi, 0, qa, out, capacity, count);
+		/* through infinity: (-inf, lo] and [hi, inf) */
+		TRY(emit_meet(A, ashift, B, bshift, NULL, 1, lo, 0, qa, out, capacity, count));
+		return emit_meet(A, ashift, B, bshift, hi, 0, NULL, 1, qa, out, capacity, count);
+	}
 }
 
 /* ------------------------------------------------------------------ */
@@ -853,7 +991,9 @@ static qaws_status push_pair(qaws_exact_pair* out, unsigned int capacity, unsign
 	qaws_exact_pair p;
 	if (*count >= capacity)
 		return QAWS_STATUS_BUFFER_TOO_SMALL;
-	p.kind = h->exact ? QAWS_EXACT_HIT_POINT : QAWS_EXACT_HIT_CROSSING;
+	p.kind = h->overlap ? QAWS_EXACT_HIT_OVERLAP : (h->exact ? QAWS_EXACT_HIT_POINT : QAWS_EXACT_HIT_CROSSING);
+	p.multiplicity = h->mult;
+	p.opposite = h->opposite;
 	p.a_lo = swap ? h->b_lo : h->a_lo;
 	p.a_hi = swap ? h->b_hi : h->a_hi;
 	p.b_lo = swap ? h->a_lo : h->b_lo;
@@ -912,16 +1052,66 @@ qaws_status qaws_exact_span_pair_hits(qaws_exact_curve const* a, unsigned int ia
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	*common = 0;
 	st = span_pair(&a->spans[ia], a->param_shift, &b->spans[ib], b->param_shift, dim, hits, CC_MAX_ROOTS, &nh, common);
+	if (st == QAWS_STATUS_CERTIFICATION_FAILED && *common)
+	{
+		/* one algebraic curve: the overlap, exactly */
+		nh = 0;
+		st = overlap_spans(&a->spans[ia], a->param_shift, &b->spans[ib], b->param_shift, dim, hits, CC_MAX_ROOTS, &nh);
+		if (st == QAWS_STATUS_OK)
+			*common = 0;
+	}
 	for (k = 0; k < nh && st == QAWS_STATUS_OK; k++)
 	{
 		/* a knot point is reported by the span it ends, the start of a
 		   closed curve by its last span */
-		if ((hits[k].b_exact_start && (ib > 0 || curve_closed(b))) || (hits[k].a_exact_start && (ia > 0 || curve_closed(a))))
+		if (!hits[k].overlap && ((hits[k].b_exact_start && (ib > 0 || curve_closed(b))) || (hits[k].a_exact_start && (ia > 0 || curve_closed(a)))))
 			continue;
 		st = push_pair(out, capacity, count, &hits[k], 0);
 	}
 	cc_free(hits);
 	return st;
+}
+
+/*
+ * Overlaps of neighbouring spans joined (one ends where the next starts on
+ * both curves, in the same sense), and points inside an overlap dropped:
+ * pairs sorted by a_lo.
+ */
+unsigned int qaws_exact_merge_overlaps(qaws_exact_pair* p, unsigned int n)
+{
+	unsigned int i, j, m = 0;
+	for (i = 0; i < n; i++)
+	{
+		qaws_exact_pair* q = &p[i];
+		if (q->kind != QAWS_EXACT_HIT_OVERLAP)
+			continue;
+		for (j = 0; j < n; j++)
+		{
+			qaws_exact_pair* r = &p[j];
+			if (j == i || r->kind != QAWS_EXACT_HIT_OVERLAP || r->opposite != q->opposite || r->a_lo > q->a_hi || r->a_hi < q->a_hi || r->a_lo < q->a_lo)
+				continue;
+			/* r starts where q ends (enclosures meet) */
+			if (q->opposite ? (r->b_hi >= q->b_lo && r->b_lo <= q->b_lo) : (r->b_lo <= q->b_hi && r->b_hi >= q->b_hi))
+			{
+				q->a_hi = r->a_hi;
+				if (q->opposite) q->b_lo = r->b_lo; else q->b_hi = r->b_hi;
+				r->kind = (qaws_exact_hit_kind)-1;
+				j = (unsigned int)-1;   /* again, for the next span */
+			}
+		}
+	}
+	for (i = 0; i < n; i++)
+	{
+		qaws_exact_pair* q = &p[i];
+		int drop = (int)q->kind == -1;
+		if (!drop && q->kind != QAWS_EXACT_HIT_OVERLAP)
+			for (j = 0; j < n && !drop; j++)
+				if (p[j].kind == QAWS_EXACT_HIT_OVERLAP && q->a_hi >= p[j].a_lo && q->a_lo <= p[j].a_hi && q->b_hi >= p[j].b_lo && q->b_lo <= p[j].b_hi)
+					drop = 1;
+		if (!drop)
+			p[m++] = *q;
+	}
+	return m;
 }
 
 qaws_status qaws_exact_curve_curve_hits(qaws_exact_curve const* a, qaws_exact_curve const* b, qaws_exact_pair* out_pairs, unsigned int capacity,
@@ -958,6 +1148,7 @@ qaws_status qaws_exact_curve_curve_hits(qaws_exact_curve const* a, qaws_exact_cu
 	}
 	cc_free(box);
 	sort_pairs(out_pairs, count);
+	count = qaws_exact_merge_overlaps(out_pairs, count);
 	*out_count = count;
 	return st;
 }
@@ -1078,6 +1269,8 @@ qaws_status qaws_exact_curve_self_hits(qaws_exact_curve const* curve, qaws_exact
 					st = map_r(sp, curve->param_shift, &lh[k].r, &h.a_lo, &h.a_hi, &ea);
 					if (st == QAWS_STATUS_OK) st = map_s(sp, curve->param_shift, &lh[k], &h.b_lo, &h.b_hi, &eb);
 					h.exact = ea && eb && lh[k].r.exact && lh[k].s_exact;
+					h.mult = 1;
+					h.overlap = h.opposite = 0;
 					if (st == QAWS_STATUS_OK)
 					{
 						if (closed && h.exact && h.a_lo == t_start && h.b_lo == t_end)
@@ -1089,34 +1282,78 @@ qaws_status qaws_exact_curve_self_hits(qaws_exact_curve const* curve, qaws_exact
 				}
 			}
 		}
-		/* against the later spans */
-		for (j = i + 1; j < curve->span_count && st == QAWS_STATUS_OK; j++)
+	}
+	/* span against later span, the pairs whose boxes meet: a sweep along x */
+	if (st == QAWS_STATUS_OK && curve->span_count > 1)
+	{
+		unsigned int n = curve->span_count, u, v;
+		double (*box)[2][3] = (double (*)[2][3])cc_alloc(sizeof(double) * 6 * n);
+		unsigned int* order = (unsigned int*)cc_alloc(sizeof(unsigned int) * n);
+		if (!box || !order)
+			st = QAWS_STATUS_ALLOCATION_FAILURE;
+		for (u = 0; st == QAWS_STATUS_OK && u < n; u++)
 		{
-			unsigned int nh = 0;
-			int common = 0;
-			st = span_pair(sp, curve->param_shift, &curve->spans[j], curve->param_shift, dim, hits, CC_MAX_ROOTS, &nh, &common);
-			if (st == QAWS_STATUS_CERTIFICATION_FAILED && common)
-			{
-				nh = 0;
-				st = common_spans(sp, curve->param_shift, &curve->spans[j], curve->param_shift, dim, hits, CC_MAX_ROOTS, &nh);
-			}
-			for (k = 0; k < nh && st == QAWS_STATUS_OK; k++)
-			{
-				span_hit const* h = &hits[k];
-				if (h->exact && h->a_lo == h->b_lo)
-					continue;   /* the shared knot point */
-				if (closed && h->exact && h->a_lo == t_start && h->b_lo == t_end)
-					continue;   /* the closing point */
-				if ((h->a_exact_start && i > 0) || h->b_exact_start)
-					continue;   /* a knot point: reported by the span ending there */
-				st = push_pair(out_pairs, capacity, &count, h, 0);
-			}
+			unsigned int c;
+			qaws_exact_span_box(&curve->spans[u], dim, box[u][0], box[u][1]);
+			if (box[u][0][0] > box[u][1][0])
+				for (c = 0; c < 3; c++)
+				{
+					/* no sound box (a weight not positive): it may meet anything */
+					box[u][0][c] = -HUGE_VAL;
+					box[u][1][c] = HUGE_VAL;
+				}
+			order[u] = u;
 		}
+		for (u = 1; st == QAWS_STATUS_OK && u < n; u++)
+		{
+			unsigned int key = order[u];
+			int w = (int)u - 1;
+			while (w >= 0 && box[order[w]][0][0] > box[key][0][0])
+			{
+				order[w + 1] = order[w];
+				w--;
+			}
+			order[w + 1] = key;
+		}
+		for (u = 0; st == QAWS_STATUS_OK && u < n; u++)
+			for (v = u + 1; v < n && st == QAWS_STATUS_OK && box[order[v]][0][0] <= box[order[u]][1][0]; v++)
+			{
+				unsigned int nh = 0;
+				int common = 0;
+				i = order[u] < order[v] ? order[u] : order[v];
+				j = order[u] < order[v] ? order[v] : order[u];
+				if (box_disjoint(box[i][0], box[i][1], box[j][0], box[j][1], dim))
+					continue;
+				st = span_pair(&curve->spans[i], curve->param_shift, &curve->spans[j], curve->param_shift, dim, hits, CC_MAX_ROOTS, &nh, &common);
+				if (st == QAWS_STATUS_CERTIFICATION_FAILED && common)
+				{
+					/* one algebraic curve: where the arcs overlap or touch */
+					nh = 0;
+					st = overlap_spans(&curve->spans[i], curve->param_shift, &curve->spans[j], curve->param_shift, dim, hits, CC_MAX_ROOTS, &nh);
+				}
+				for (k = 0; k < nh && st == QAWS_STATUS_OK; k++)
+				{
+					span_hit const* h = &hits[k];
+					if (!h->overlap)
+					{
+						if (h->exact && h->a_lo == h->b_lo)
+							continue;   /* the shared knot point */
+						if (closed && h->exact && h->a_lo == t_start && h->b_lo == t_end)
+							continue;   /* the closing point */
+						if ((h->a_exact_start && i > 0) || h->b_exact_start)
+							continue;   /* a knot point: reported by the span ending there */
+					}
+					st = push_pair(out_pairs, capacity, &count, h, 0);
+				}
+			}
+		cc_free(box);
+		cc_free(order);
 	}
 	cc_free(hits);
 	cc_free(sys);
 	cc_free(lh);
 	sort_pairs(out_pairs, count);
+	count = qaws_exact_merge_overlaps(out_pairs, count);
 	*out_count = count;
 	return st;
 }

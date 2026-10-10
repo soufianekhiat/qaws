@@ -6,7 +6,7 @@
  *     space curves in 3D, B-splines and NURBS of degree 1..3 (crossings
  *     inside spans, across spans, on knots), a closed B-spline
  *   - a closed NURBS ellipse of three arcs on one conic: no self-intersection
- *     (the arcs touch at their ends); a doubled arc is refused (overlap)
+ *     (the arcs touch at their ends); a doubled arc gives one overlap, exact ends
  */
 
 #include "test_common.h"
@@ -149,8 +149,15 @@ static void test_conic(void)
 	e = NULL;
 	qaws_curve_create_nurbs(&d, &c);
 	qaws_exact_curve_prepare(NULL, c, &e, NULL);
-	TEST_ASSERT(qaws_exact_curve_self_hits(e, hits, 8, &count) == QAWS_STATUS_CERTIFICATION_FAILED,
-		"an arc traced twice overlaps itself: refused, not guessed");
+	{
+		char msg[300];
+		qaws_status st = qaws_exact_curve_self_hits(e, hits, 8, &count);
+		sprintf(msg, "an arc traced twice: one overlap of [0, 1] with [3, 4] (status %d, %u pairs, kind %d, a %g..%g, b %g..%g, opposite %d)", (int)st, count,
+			count ? (int)hits[0].kind : -1, count ? hits[0].a_lo : -1, count ? hits[0].a_hi : -1, count ? hits[0].b_lo : -1, count ? hits[0].b_hi : -1,
+			count ? hits[0].opposite : -1);
+		TEST_ASSERT(st == QAWS_STATUS_OK && count == 1 && hits[0].kind == QAWS_EXACT_HIT_OVERLAP && hits[0].a_lo == 0 && hits[0].a_hi == 1 &&
+			hits[0].b_lo == 3 && hits[0].b_hi == 4 && !hits[0].opposite, msg);
+	}
 	qaws_exact_curve_destroy(e);
 	qaws_curve_destroy(c);
 }

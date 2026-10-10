@@ -6,7 +6,6 @@
 #include <string.h>
 
 #define TRY(x) do { st = (x); if (st != QAWS_STATUS_OK) return st; } while (0)
-#define BO_MAX_CROSSINGS 256
 
 /* Is the curve closed (start and end the same point, exactly)? */
 static int is_closed(qaws_exact_curve const* c)
@@ -89,11 +88,11 @@ typedef struct bo_side
 {
 	qaws_exact_curve const* c;
 	unsigned int n;                        /* crossings */
-	unsigned int order[BO_MAX_CROSSINGS];  /* crossing indices sorted along this curve */
-	unsigned int pos[BO_MAX_CROSSINGS];    /* crossing -> its rank along this curve */
-	int inside[BO_MAX_CROSSINGS];          /* piece j (from order[j] to order[j + 1]) inside the other region */
-	int keep[BO_MAX_CROSSINGS];
-	int used[BO_MAX_CROSSINGS];
+	unsigned int* order;   /* crossing indices sorted along this curve */
+	unsigned int* pos;     /* crossing -> its rank along this curve */
+	int* inside;           /* piece j (from order[j] to order[j + 1]) inside the other region */
+	int* keep;
+	int* used;
 } bo_side;
 
 typedef struct bo_cross
@@ -177,6 +176,8 @@ qaws_status qaws_exact_boolean_2d(qaws_exact_curve const* a, qaws_exact_curve co
 	bo_cross* x;
 	bo_side* sd;
 	unsigned int np = 0, i, j, s, npieces = 0, nloops = 0;
+	unsigned int cap = 256;
+	int* ints = NULL;
 	qaws_status st = QAWS_STATUS_OK;
 	if (!a || !b || !out_piece_count || !out_loop_count || (!out_pieces && piece_capacity) || (!out_loops && loop_capacity) || a->dimension != 2 ||
 	    b->dimension != 2 || operation > QAWS_BOOLEAN_DIFFERENCE)
@@ -185,20 +186,57 @@ qaws_status qaws_exact_boolean_2d(qaws_exact_curve const* a, qaws_exact_curve co
 	*out_loop_count = 0;
 	if (!is_closed(a) || !is_closed(b))
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	pairs = (qaws_exact_pair*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_exact_pair) * BO_MAX_CROSSINGS));
-	x = (bo_cross*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(bo_cross) * BO_MAX_CROSSINGS));
+	pairs = NULL;
+	x = NULL;
 	sd = (bo_side*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(bo_side) * 2));
-	if (!pairs || !x || !sd)
-		st = QAWS_STATUS_ALLOCATION_FAILURE;
+	if (!sd)
+		return QAWS_STATUS_ALLOCATION_FAILURE;
 	/* both boundaries simple */
 	for (s = 0; s < 2 && st == QAWS_STATUS_OK; s++)
 	{
-		st = qaws_exact_curve_self_hits(s == 0 ? a : b, pairs, BO_MAX_CROSSINGS, &np);
-		if (st == QAWS_STATUS_OK && np > 0)
+		qaws_exact_pair one;
+		st = qaws_exact_curve_self_hits(s == 0 ? a : b, &one, 1, &np);
+		if ((st == QAWS_STATUS_OK && np > 0) || st == QAWS_STATUS_BUFFER_TOO_SMALL)
 			st = QAWS_STATUS_CERTIFICATION_FAILED;
 	}
+	/* the crossings, as many as there are */
+	for (;;)
+	{
+		if (st != QAWS_STATUS_OK)
+			break;
+		qaws_internal_dealloc(NULL, pairs);
+		pairs = (qaws_exact_pair*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_exact_pair) * cap));
+		if (!pairs)
+		{
+			st = QAWS_STATUS_ALLOCATION_FAILURE;
+			break;
+		}
+		st = qaws_exact_curve_curve_hits(a, b, pairs, cap, &np);
+		if (st != QAWS_STATUS_BUFFER_TOO_SMALL)
+			break;
+		st = QAWS_STATUS_OK;
+		cap *= 4;
+	}
+	/* contacts other than crossings (touching points, overlaps) are not handled here */
+	for (i = 0; st == QAWS_STATUS_OK && i < np; i++)
+		if (pairs[i].kind == QAWS_EXACT_HIT_OVERLAP || (pairs[i].multiplicity != 1 && pairs[i].multiplicity % 2 == 0))
+			st = QAWS_STATUS_CERTIFICATION_FAILED;
 	if (st == QAWS_STATUS_OK)
-		st = qaws_exact_curve_curve_hits(a, b, pairs, BO_MAX_CROSSINGS, &np);
+	{
+		x = (bo_cross*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(bo_cross) * (np + 1)));
+		ints = (int*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(int) * 10 * (np + 1)));
+		if (!x || !ints)
+			st = QAWS_STATUS_ALLOCATION_FAILURE;
+		for (s = 0; s < 2 && st == QAWS_STATUS_OK; s++)
+		{
+			int* base = ints + 5 * (np + 1) * s;
+			sd[s].order = (unsigned int*)base;
+			sd[s].pos = (unsigned int*)(base + (np + 1));
+			sd[s].inside = base + 2 * (np + 1);
+			sd[s].keep = base + 3 * (np + 1);
+			sd[s].used = base + 4 * (np + 1);
+		}
+	}
 	if (st == QAWS_STATUS_OK)
 	{
 		double t_end[2], t_start[2];
@@ -336,6 +374,7 @@ qaws_status qaws_exact_boolean_2d(qaws_exact_curve const* a, qaws_exact_curve co
 	}
 	qaws_internal_dealloc(NULL, pairs);
 	qaws_internal_dealloc(NULL, x);
+	qaws_internal_dealloc(NULL, ints);
 	qaws_internal_dealloc(NULL, sd);
 	*out_piece_count = npieces;
 	*out_loop_count = nloops;

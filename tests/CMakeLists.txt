@@ -97,6 +97,7 @@ add_executable(
   93_offset_parity.c
   94_polytree.c
   95_jobs.c
+  96_exact_contacts.c
 )
 
 # The amalgamated library exports exactly the same symbols, so the tests can

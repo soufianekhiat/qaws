@@ -5,7 +5,7 @@
  *     intersection of two Bezier / rational Bezier curves (degrees 1..4)
  *     is found, both parameters enclosed, dyadic ones exact
  *   - B-spline against B-spline: a crossing on a knot is reported once
- *   - overlapping curves are refused (a common component)
+ *   - overlapping curves (a common component): one overlap, exact ends
  */
 
 #include "test_common.h"
@@ -154,9 +154,16 @@ static void test_splines(void)
 	qaws_exact_curve_prepare(NULL, sb, &esb, NULL);
 	TEST_ASSERT(qaws_exact_curve_curve_hits(esa, esb, hits, 8, &count) == QAWS_STATUS_OK && count == 1 && hits[0].kind == QAWS_EXACT_HIT_POINT &&
 		hits[0].a_lo == 0.5 && hits[0].b_lo == 1, "segment / segment: the exact point (2, 2) at s = 1/2, r = 1");
-	/* a curve against itself: a common component */
-	TEST_ASSERT(qaws_exact_curve_curve_hits(ea, ea, hits, 8, &count) == QAWS_STATUS_CERTIFICATION_FAILED,
-		"overlapping curves (a common component) are refused");
+	/* a curve against itself: a common component, one overlap over the whole range */
+	{
+		char msg[300];
+		double t0 = qaws_curve_get_parameter_range(ca).min_value, t1 = qaws_curve_get_parameter_range(ca).max_value;
+		qaws_status st = qaws_exact_curve_curve_hits(ea, ea, hits, 8, &count);
+		sprintf(msg, "a curve against itself: one overlap [%g, %g] x [%g, %g] (opposite %d), %u pairs, status %d", count ? hits[0].a_lo : -1,
+			count ? hits[0].a_hi : -1, count ? hits[0].b_lo : -1, count ? hits[0].b_hi : -1, count ? hits[0].opposite : -1, count, (int)st);
+		TEST_ASSERT(st == QAWS_STATUS_OK && count == 1 && hits[0].kind == QAWS_EXACT_HIT_OVERLAP && !hits[0].opposite && hits[0].a_lo == t0 &&
+			hits[0].a_hi == t1 && hits[0].b_lo == t0 && hits[0].b_hi == t1, msg);
+	}
 	qaws_exact_curve_destroy(ea);
 	qaws_exact_curve_destroy(eb);
 	qaws_exact_curve_destroy(esa);
