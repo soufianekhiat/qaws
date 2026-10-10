@@ -89,6 +89,7 @@ add_executable(
   85_clipper2_parity.c
   86_clip64.c
   87_offset.c
+  88_rectclip.c
 )
 
 # The amalgamated library exports exactly the same symbols, so the tests can

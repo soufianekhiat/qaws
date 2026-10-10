@@ -39,6 +39,7 @@
 #include "internal/qaws_internal_flatten.h"
 #include "internal/qaws_internal_path.h"
 #include "internal/qaws_internal_broadphase.h"
+#include "internal/qaws_internal_clip.h"
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -2016,4 +2017,54 @@ qaws_status qaws_clip_boolean(qaws_clip_type clip_type, qaws_fill_rule fill_rule
 	d.clip_type = clip_type;
 	d.fill_rule = fill_rule;
 	return qaws_clip_execute(&d, out_result);
+}
+
+/* ======================================================================== */
+/*  Internal: results put together                                          */
+/* ======================================================================== */
+
+qaws_status qaws_internal_clip_result_empty(qaws_clip_result** out)
+{
+	*out = (qaws_clip_result*)calloc(1, sizeof(qaws_clip_result));
+	return *out ? QAWS_STATUS_OK : QAWS_STATUS_ALLOCATION_FAILURE;
+}
+
+qaws_status qaws_internal_clip_result_append(qaws_clip_result* dst, qaws_clip_result* src)
+{
+	unsigned int coff = dst->curve_count, voff = dst->vertex_count, poff = dst->path_count, i;
+	qaws_curve const** views;
+	for (i = 0; i < src->curve_count; i++)
+	{
+		if (cl_res_curve(dst, src->curves[i]) != QAWS_STATUS_OK)
+			return QAWS_STATUS_ALLOCATION_FAILURE;
+	}
+	src->curve_count = 0;   /* moved */
+	for (i = 0; i < src->vertex_count; i++)
+		if (cl_res_vertex(dst, &src->vertices[i]) != QAWS_STATUS_OK)
+			return QAWS_STATUS_ALLOCATION_FAILURE;
+	for (i = 0; i < src->path_count; i++)
+	{
+		struct cl_out_path p = src->paths[i];
+		p.first += coff;
+		p.vfirst += voff;
+		if (p.parent != CL_NONE) p.parent += poff;
+		if (cl_push_path(dst, 0, &p) != QAWS_STATUS_OK)
+			return QAWS_STATUS_ALLOCATION_FAILURE;
+	}
+	for (i = 0; i < src->open_count; i++)
+	{
+		struct cl_out_path p = src->open_paths[i];
+		p.first += coff;
+		p.vfirst += voff;
+		if (cl_push_path(dst, 1, &p) != QAWS_STATUS_OK)
+			return QAWS_STATUS_ALLOCATION_FAILURE;
+	}
+	qaws_clip_result_destroy(src);
+	views = (qaws_curve const**)realloc((void*)dst->views, sizeof(qaws_curve*) * (dst->curve_count ? dst->curve_count : 1));
+	if (!views)
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	dst->views = views;
+	for (i = 0; i < dst->curve_count; i++)
+		dst->views[i] = dst->curves[i];
+	return QAWS_STATUS_OK;
 }

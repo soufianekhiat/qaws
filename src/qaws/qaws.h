@@ -59,6 +59,7 @@
 #include "qaws_clip.h"
 #include "qaws_clip64.h"
 #include "qaws_offset.h"
+#include "qaws_rectclip.h"
 #include "qaws_alloc.h"
 #include "qaws_inline.h"
 #include "qaws_diff.h"

@@ -25,6 +25,7 @@
 #include "qaws_clip64.h"
 #include "internal/qaws_internal_wide.h"
 #include "internal/qaws_internal_broadphase.h"
+#include "internal/qaws_internal_clip.h"
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -1367,5 +1368,56 @@ qaws_status qaws_clip64_result_get_open_path(qaws_clip64_result const* r, unsign
 	if (!r || !out || !n || i >= r->open_count) return QAWS_STATUS_INVALID_ARGUMENT;
 	*out = r->pts + 2 * r->open_paths[i].first;
 	*n = r->open_paths[i].count;
+	return QAWS_STATUS_OK;
+}
+
+/* ======================================================================== */
+/*  Internal: results put together                                          */
+/* ======================================================================== */
+
+qaws_status qaws_internal_clip64_result_empty(qaws_clip64_result** out)
+{
+	*out = (qaws_clip64_result*)calloc(1, sizeof(qaws_clip64_result));
+	return *out ? QAWS_STATUS_OK : QAWS_STATUS_ALLOCATION_FAILURE;
+}
+
+qaws_status qaws_internal_clip64_result_append(qaws_clip64_result* dst, qaws_clip64_result* src)
+{
+	unsigned int ptoff = dst->npts, exoff = dst->nex, poff = dst->path_count, i;
+	for (i = 0; i < src->npts; i++)
+		if (c64_out_point(dst, src->pts[2 * i], src->pts[2 * i + 1], src->exact[2 * i], src->exact[2 * i + 1]) != QAWS_STATUS_OK)
+			return QAWS_STATUS_ALLOCATION_FAILURE;
+	for (i = 0; i < src->nex; i++)
+	{
+		if (dst->nex == dst->capex)
+		{
+			unsigned int nc = dst->capex ? 2 * dst->capex : 256;
+			double* g = (double*)realloc(dst->ex, sizeof(double) * 2 * nc);
+			if (!g) return QAWS_STATUS_ALLOCATION_FAILURE;
+			dst->ex = g;
+			dst->capex = nc;
+		}
+		dst->ex[2 * dst->nex] = src->ex[2 * i];
+		dst->ex[2 * dst->nex + 1] = src->ex[2 * i + 1];
+		dst->nex++;
+	}
+	for (i = 0; i < src->path_count; i++)
+	{
+		struct c64_out p = src->paths[i];
+		p.first += ptoff;
+		p.efirst += exoff;
+		if (p.parent != C64_NONE) p.parent += poff;
+		if (c64_push(dst, 0, &p) != QAWS_STATUS_OK)
+			return QAWS_STATUS_ALLOCATION_FAILURE;
+	}
+	for (i = 0; i < src->open_count; i++)
+	{
+		struct c64_out p = src->open_paths[i];
+		p.first += ptoff;
+		p.efirst += exoff;
+		if (c64_push(dst, 1, &p) != QAWS_STATUS_OK)
+			return QAWS_STATUS_ALLOCATION_FAILURE;
+	}
+	qaws_clip64_result_destroy(src);
 	return QAWS_STATUS_OK;
 }
