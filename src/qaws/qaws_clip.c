@@ -1123,6 +1123,24 @@ static qaws_status cl_nest_visit(void* user, unsigned int i, unsigned int j)
 	return QAWS_STATUS_OK;
 }
 
+/* the positive cycles whose boxes hold query q's point: from the grid cell holding it */
+typedef struct cl_nest_ring
+{
+	cl_nest* n;
+	qaws_bp_box const* boxes;
+	unsigned int q;
+	double p[3];
+} cl_nest_ring;
+
+static void cl_nest_ring_visit(void* user, unsigned int item)
+{
+	cl_nest_ring* r = (cl_nest_ring*)user;
+	qaws_bp_box const* b = &r->boxes[item];
+	if (r->p[0] < b->lo[0] || r->p[0] > b->hi[0] || r->p[1] < b->lo[1] || r->p[1] > b->hi[1])
+		return;
+	cl_nest_visit(r->n, item, r->n->npos + r->q);
+}
+
 static qaws_status cl_faces(cl_ctx* x, unsigned int* out_faces, unsigned int** out_cycle_face, cl_cycle** out_cycles,
 	unsigned int* out_ncycles)
 {
@@ -1238,7 +1256,28 @@ static qaws_status cl_faces(cl_ctx* x, unsigned int* out_faces, unsigned int** o
 				nq++;
 			}
 		if (nq && n.npos)
-			qaws_internal_broadphase(boxes, n.npos + nq, 2, cl_nest_accept, cl_nest_visit, &n, NULL);
+		{
+			/* point location: a grid over the positive cycles, each query in its own cell */
+			qaws_bp_grid* grid = NULL;
+			if (qaws_internal_grid_create(boxes, n.npos, 2, &grid) == QAWS_STATUS_OK)
+			{
+				cl_nest_ring rg;
+				rg.n = &n;
+				rg.boxes = boxes;
+				for (i = 0; i < nq; i++)
+				{
+					qaws_bp_box const* b = &boxes[n.npos + i];
+					rg.q = i;
+					rg.p[0] = b->lo[0];
+					rg.p[1] = b->lo[1];
+					rg.p[2] = 0;
+					qaws_internal_grid_ring(grid, rg.p, 0, cl_nest_ring_visit, &rg);
+				}
+				qaws_internal_grid_destroy(grid);
+			}
+			else
+				qaws_internal_broadphase(boxes, n.npos + nq, 2, cl_nest_accept, cl_nest_visit, &n, NULL);
+		}
 		for (i = 0; i < nq; i++)
 		{
 			unsigned int c = n.cyc_of[n.npos + i];

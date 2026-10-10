@@ -57,6 +57,7 @@ struct qaws_bp_grid
 {
 	bp_grid G;
 	unsigned int dim, ncell;
+	unsigned int count;          /* boxes */
 	unsigned int* start;        /* ncell + 1 */
 	unsigned int* items;
 	double hmin;                /* smallest cell side over the axes with extent */
@@ -165,6 +166,7 @@ static qaws_status bp_build(qaws_bp_box const* boxes, unsigned int count, unsign
 	free(fill);
 	B->G = G;
 	B->dim = dim;
+	B->count = count;
 	B->ncell = ncell;
 	B->start = start;
 	B->items = items;
@@ -234,6 +236,140 @@ static qaws_status bp_cells(struct qaws_bp_grid const* GR, qaws_bp_box const* bo
 	return s;
 }
 
+/* ------------------------------------------------------------------ */
+/*  Sweep and prune: better than the grid when boxes span many cells   */
+/* ------------------------------------------------------------------ */
+
+typedef struct bp_key
+{
+	double lo;
+	unsigned int i;
+} bp_key;
+
+static int bp_cmp_key(void const* a, void const* b)
+{
+	double x = ((bp_key const*)a)->lo, y = ((bp_key const*)b)->lo;
+	return x < y ? -1 : (x > y ? 1 : 0);
+}
+
+/* the axis with the largest extent of the bounded boxes */
+static unsigned int bp_axis(qaws_bp_box const* boxes, unsigned int count, unsigned int dim)
+{
+	double lo[3] = { HUGE_VAL, HUGE_VAL, HUGE_VAL }, hi[3] = { -HUGE_VAL, -HUGE_VAL, -HUGE_VAL }, best = -1;
+	unsigned int i, k, axis = 0;
+	for (i = 0; i < count; i++)
+		if (!bp_unbounded(&boxes[i], dim))
+			for (k = 0; k < dim; k++)
+			{
+				if (boxes[i].lo[k] < lo[k]) lo[k] = boxes[i].lo[k];
+				if (boxes[i].hi[k] > hi[k]) hi[k] = boxes[i].hi[k];
+			}
+	for (k = 0; k < dim; k++)
+		if (hi[k] - lo[k] > best)
+		{
+			best = hi[k] - lo[k];
+			axis = k;
+		}
+	return axis;
+}
+
+/* bounded boxes sorted by their low end on the axis (unbounded ones counted apart) */
+static bp_key* bp_sorted(qaws_bp_box const* boxes, unsigned int count, unsigned int dim, unsigned int axis, unsigned int* out_n)
+{
+	bp_key* keys = (bp_key*)malloc(sizeof(bp_key) * (count ? count : 1));
+	unsigned int i, n = 0;
+	if (!keys)
+		return NULL;
+	for (i = 0; i < count; i++)
+		if (!bp_unbounded(&boxes[i], dim))
+		{
+			keys[n].lo = boxes[i].lo[axis];
+			keys[n].i = i;
+			n++;
+		}
+	qsort(keys, n, sizeof(bp_key), bp_cmp_key);
+	*out_n = n;
+	return keys;
+}
+
+/* pairs overlapping on the axis (what the sweep tests), by binary search */
+static double bp_sweep_cost(qaws_bp_box const* boxes, bp_key const* keys, unsigned int n, unsigned int axis)
+{
+	double cost = 0;
+	unsigned int a;
+	for (a = 0; a < n; a++)
+	{
+		double h = boxes[keys[a].i].hi[axis];
+		unsigned int lo = a + 1, hi = n;
+		while (lo < hi)
+		{
+			unsigned int m = (lo + hi) / 2;
+			if (keys[m].lo <= h) lo = m + 1; else hi = m;
+		}
+		cost += lo - a - 1;
+	}
+	return cost;
+}
+
+/* pair tests the grid would make: every cell's pairs */
+static double bp_grid_cost(struct qaws_bp_grid const* GR)
+{
+	double cost = 0;
+	unsigned int c;
+	for (c = 0; c < GR->ncell; c++)
+	{
+		double m = GR->start[c + 1] - GR->start[c];
+		cost += 0.5 * m * (m - 1);
+	}
+	return cost;
+}
+
+static qaws_status bp_sweep(qaws_bp_box const* boxes, unsigned int count, unsigned int dim, unsigned int axis, bp_key const* keys, unsigned int n,
+	qaws_bp_accept accept, void* accept_user, qaws_status (*visit)(void* user, unsigned int chunk, unsigned int i, unsigned int j), void* user,
+	unsigned int* candidates)
+{
+	unsigned int a, b, k;
+	qaws_status s = QAWS_STATUS_OK;
+	for (a = 0; a < n && s == QAWS_STATUS_OK; a++)
+	{
+		qaws_bp_box const* A = &boxes[keys[a].i];
+		double h = A->hi[axis];
+		for (b = a + 1; b < n && keys[b].lo <= h && s == QAWS_STATUS_OK; b++)
+		{
+			qaws_bp_box const* B = &boxes[keys[b].i];
+			unsigned int p = keys[a].i, q = keys[b].i;
+			int over = 1;
+			for (k = 0; k < dim; k++)
+				if (k != axis && !(A->lo[k] <= B->hi[k] && B->lo[k] <= A->hi[k]))
+				{
+					over = 0;
+					break;
+				}
+			if (!over)
+				continue;
+			if (p > q) { unsigned int t = p; p = q; q = t; }
+			if (accept && !accept(accept_user, p, q))
+				continue;
+			(*candidates)++;
+			s = visit(user, 0, p, q);
+		}
+	}
+	/* unbounded boxes meet everything */
+	for (a = 0; a < count && s == QAWS_STATUS_OK; a++)
+		if (bp_unbounded(&boxes[a], dim))
+			for (b = 0; b < count && s == QAWS_STATUS_OK; b++)
+			{
+				unsigned int p = a < b ? a : b, q = a < b ? b : a;
+				if (b == a || (bp_unbounded(&boxes[b], dim) && b < a))
+					continue;
+				if (accept && !accept(accept_user, p, q))
+					continue;
+				(*candidates)++;
+				s = visit(user, 0, p, q);
+			}
+	return s;
+}
+
 typedef struct bp_serial
 {
 	qaws_bp_visit visit;
@@ -272,7 +408,16 @@ qaws_status qaws_internal_broadphase(
 		out_stats->cell_count = GR.ncell;
 	b.visit = visit;
 	b.user = user;
-	s = bp_cells(&GR, boxes, accept, user, bp_serial_visit, &b, 0, 0, GR.ncell, &candidates);
+	{
+		/* the sweep when it tests fewer pairs than the grid (boxes spanning many cells) */
+		unsigned int axis = bp_axis(boxes, count, dim), n = 0;
+		bp_key* keys = bp_sorted(boxes, count, dim, axis, &n);
+		if (keys && bp_sweep_cost(boxes, keys, n, axis) < bp_grid_cost(&GR))
+			s = bp_sweep(boxes, count, dim, axis, keys, n, accept, user, bp_serial_visit, &b, &candidates);
+		else
+			s = bp_cells(&GR, boxes, accept, user, bp_serial_visit, &b, 0, 0, GR.ncell, &candidates);
+		free(keys);
+	}
 	if (out_stats)
 		out_stats->candidate_count = candidates;
 	free(GR.start);
@@ -468,7 +613,16 @@ qaws_status qaws_internal_grid_pairs(qaws_bp_grid const* grid, qaws_bp_box const
 	P.candidates = (unsigned int*)calloc(n, sizeof(unsigned int));
 	if (!P.candidates)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
-	s = qaws_internal_parallel(executor, grid->ncell, BP_PAIR_GRAIN, bp_par_job, &P);
+	{
+		/* the sweep (serial, chunk 0) when it tests fewer pairs than the grid */
+		unsigned int axis = bp_axis(boxes, grid->count, grid->dim), nk = 0;
+		bp_key* keys = bp_sorted(boxes, grid->count, grid->dim, axis, &nk);
+		if (keys && bp_sweep_cost(boxes, keys, nk, axis) < bp_grid_cost(grid))
+			s = bp_sweep(boxes, grid->count, grid->dim, axis, keys, nk, accept, accept_user, visit, visit_user, &P.candidates[0]);
+		else
+			s = qaws_internal_parallel(executor, grid->ncell, BP_PAIR_GRAIN, bp_par_job, &P);
+		free(keys);
+	}
 	for (k = 0; k < n && out_candidates; k++)
 		*out_candidates += P.candidates[k];
 	free(P.candidates);

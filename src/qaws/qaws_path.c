@@ -511,6 +511,21 @@ static qaws_status pt_area_piece(qaws_curve const* c, double a, double b, double
 	return s;
 }
 
+/* a straight piece (a degree 1 span): its integral of x dy from its ends, exactly */
+static int pt_linear(qaws_curve const* c)
+{
+	return c->degree == 1 && (c->kind == QAWS_CURVE_KIND_BEZIER || c->kind == QAWS_CURVE_KIND_BSPLINE);
+}
+
+static qaws_status pt_line_area(qaws_curve const* c, double a, double b, double* out)
+{
+	double p[2], q[2];
+	qaws_status s = pt_eval(c, a, QAWS_EVAL_FLAG_POSITION, p, NULL);
+	if (s == QAWS_STATUS_OK) s = pt_eval(c, b, QAWS_EVAL_FLAG_POSITION, q, NULL);
+	*out = 0.5 * (p[0] + q[0]) * (q[1] - p[1]);
+	return s;
+}
+
 /* rough size of a path, from its bounds */
 static double pt_extent(qaws_path_2d const* path)
 {
@@ -522,12 +537,10 @@ static double pt_extent(qaws_path_2d const* path)
 
 qaws_status qaws_path_compute_area_2d(qaws_path_2d const* path, qaws_scalar* out_area)
 {
-	double area = 0.0, ext, tol;
+	double area = 0.0, ext, tol = -1.0;
 	unsigned int i, s;
 	if (!pt_check_path(path) || !out_area)
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	ext = pt_extent(path);
-	tol = ext * ext * PT_AREA_REL;
 	for (i = 0; i < path->curve_count; i++)
 	{
 		qaws_curve const* c = path->curves[i];
@@ -536,7 +549,18 @@ qaws_status qaws_path_compute_area_2d(qaws_path_2d const* path, qaws_scalar* out
 			double a = c->span_boundaries[s], b = c->span_boundaries[s + 1], v;
 			qaws_status st;
 			if (!(b > a)) continue;
-			st = pt_area_piece(c, a, b, tol / (c->span_count + 1), 0, &v);
+			if (pt_linear(c))
+				st = pt_line_area(c, a, b, &v);
+			else
+			{
+				/* the tolerance from the path's size, once a curved piece needs it */
+				if (tol < 0)
+				{
+					ext = pt_extent(path);
+					tol = ext * ext * PT_AREA_REL;
+				}
+				st = pt_area_piece(c, a, b, tol / (c->span_count + 1), 0, &v);
+			}
 			if (st != QAWS_STATUS_OK) return st;
 			area += v;
 		}
@@ -1222,7 +1246,7 @@ qaws_status qaws_internal_curve_area_2d(qaws_curve const* c, double t0, double t
 		if (b > hi) b = hi;
 		if (!(b > a))
 			continue;
-		st = pt_area_piece(c, a, b, tol / (c->span_count + 1), 0, &v);
+		st = pt_linear(c) ? pt_line_area(c, a, b, &v) : pt_area_piece(c, a, b, tol / (c->span_count + 1), 0, &v);
 		if (st != QAWS_STATUS_OK)
 			return st;
 		sum += v;
