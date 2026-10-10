@@ -578,21 +578,66 @@ int qaws_path_is_positive_2d(qaws_path_2d const* path)
 	return qaws_path_compute_area_2d(path, &a) == QAWS_STATUS_OK && a >= 0;
 }
 
+/* |C'| over [a, b] with n-point Gauss-Legendre (n = 8 or 16) */
+static qaws_status pt_gauss_len(qaws_curve const* c, double a, double b, int sixteen, double* out)
+{
+	double mid = 0.5 * (a + b), half = 0.5 * (b - a), sum = 0.0;
+	unsigned int i, n = sixteen ? 8 : 4;
+	for (i = 0; i < n; i++)
+	{
+		double xi = sixteen ? pt_g16x[i] : pt_g8x[i], wi = sixteen ? pt_g16w[i] : pt_g8w[i];
+		int sg;
+		for (sg = -1; sg <= 1; sg += 2)
+		{
+			double p[2], d[2];
+			qaws_status s = pt_eval(c, mid + sg * half * xi, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, p, d);
+			if (s != QAWS_STATUS_OK) return s;
+			sum += wi * hypot(d[0], d[1]);
+		}
+	}
+	*out = sum * half;
+	return QAWS_STATUS_OK;
+}
+
+static qaws_status pt_len_piece(qaws_curve const* c, double a, double b, double tol, unsigned int depth, double* out)
+{
+	double g8 = 0.0, g16 = 0.0, l = 0.0, r = 0.0;
+	qaws_status s = pt_gauss_len(c, a, b, 0, &g8);
+	if (s == QAWS_STATUS_OK) s = pt_gauss_len(c, a, b, 1, &g16);
+	if (s != QAWS_STATUS_OK) return s;
+	if (fabs(g16 - g8) <= tol || fabs(g16 - g8) <= PT_AREA_REL * 10 * (fabs(g16) + fabs(g8)) || depth >= 24)
+	{
+		*out = g16;
+		return QAWS_STATUS_OK;
+	}
+	s = pt_len_piece(c, a, 0.5 * (a + b), tol * 0.5, depth + 1, &l);
+	if (s == QAWS_STATUS_OK) s = pt_len_piece(c, 0.5 * (a + b), b, tol * 0.5, depth + 1, &r);
+	*out = l + r;
+	return s;
+}
+
 qaws_status qaws_path_compute_length_2d(qaws_path_2d const* path, qaws_scalar* out_length)
 {
-	qaws_scalar sum = 0;
-	unsigned int i;
+	double sum = 0.0, tol;
+	unsigned int i, k;
 	if (!pt_check_path(path) || !out_length)
 		return QAWS_STATUS_INVALID_ARGUMENT;
+	tol = pt_extent(path) * PT_AREA_REL;
+	/* the integral of |C'|, span by span, adaptive Gauss-Legendre */
 	for (i = 0; i < path->curve_count; i++)
 	{
 		qaws_curve const* c = path->curves[i];
-		qaws_scalar l;
-		qaws_status s = qaws_curve_compute_arc_length(c, c->parameter_range.min_value, c->parameter_range.max_value, &l);
-		if (s != QAWS_STATUS_OK) return s;
-		sum += l;
+		for (k = 0; k < c->span_count; k++)
+		{
+			double a = c->span_boundaries[k], b = c->span_boundaries[k + 1], v = 0.0;
+			qaws_status s;
+			if (!(b > a)) continue;
+			s = pt_len_piece(c, a, b, tol / (c->span_count + 1), 0, &v);
+			if (s != QAWS_STATUS_OK) return s;
+			sum += v;
+		}
 	}
-	*out_length = sum;
+	*out_length = (qaws_scalar)sum;
 	return QAWS_STATUS_OK;
 }
 

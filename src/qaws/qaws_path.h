@@ -89,7 +89,8 @@ qaws_status qaws_region_compute_area_2d(qaws_path_2d const* paths, unsigned int 
 /* 1 when the closed path's signed area is >= 0 (Clipper2's IsPositive). */
 int qaws_path_is_positive_2d(qaws_path_2d const* path);
 
-/* Arc length of a path. */
+/* Arc length of a path: the integral of the speed by adaptive Gauss-Legendre
+   per span (exact for lines, to rounding for the other kinds). */
 qaws_status qaws_path_compute_length_2d(qaws_path_2d const* path, qaws_scalar* out_length);
 
 /* Tight bounds of a path: the end points and every point where a
