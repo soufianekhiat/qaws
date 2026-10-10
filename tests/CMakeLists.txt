@@ -93,6 +93,7 @@ add_executable(
   89_stack.c
   90_offset_curves.c
   91_triangulate.c
+  92_stack_mesh.c
 )
 
 # The amalgamated library exports exactly the same symbols, so the tests can

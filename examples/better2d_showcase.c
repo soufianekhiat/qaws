@@ -39,6 +39,7 @@
 #include "better2d_showcase/06_curve_offset.c"
 #include "better2d_showcase/07_offset_extremes.c"
 #include "better2d_showcase/08_triangulate.c"
+#include "better2d_showcase/09_stack_mesh.c"
 
 int main(void)
 {
@@ -52,5 +53,6 @@ int main(void)
 	demo_curve_offset();
 	demo_offset_extremes();
 	demo_triangulate();
+	demo_stack_mesh();
 	return 0;
 }

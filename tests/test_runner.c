@@ -103,6 +103,7 @@ extern int test_88_rectclip_main(void);
 extern int test_89_stack_main(void);
 extern int test_90_offset_curves_main(void);
 extern int test_91_triangulate_main(void);
+extern int test_92_stack_mesh_main(void);
 
 /* Test registry */
 typedef struct {
@@ -203,6 +204,7 @@ static test_suite const g_test_suites[] = {
 	{"89_stack", test_89_stack_main},
 	{"90_offset_curves", test_90_offset_curves_main},
 	{"91_triangulate", test_91_triangulate_main},
+	{"92_stack_mesh", test_92_stack_mesh_main},
 };
 
 int main(void) {

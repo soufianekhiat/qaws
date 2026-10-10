@@ -91,3 +91,59 @@ Test 89 checks:
   lens of the two discs. The result is identical on a reversed executor.
 
 Figure 5 of `qaws_better2d_showcase` draws these stacks.
+
+## Surface meshes
+
+```c
+typedef struct qaws_stack_mesh_desc {
+	qaws_stack_2d const* stack;
+	qaws_scalar spacing;        /* target distance between contour samples; 0 = 1/64 of the extent */
+	unsigned int sections;      /* extra sections between two levels; 0 = none */
+	int caps;                   /* close the first and last sections */
+	qaws_batch_executor const* executor;
+} qaws_stack_mesh_desc;
+
+qaws_status qaws_stack_mesh_3d(qaws_stack_mesh_desc const* desc, qaws_mesh_3d** out_mesh);
+/* qaws_mesh_3d_get_vertex_count / get_vertex (qaws_vec3), get_triangle_count / get_triangle, destroy */
+```
+
+This builds the stack's surface as a 3D triangle mesh.
+
+1. **Heights.** One section at every level, plus `sections` more between
+   two levels so that a cubic profile is followed. The sections are
+   computed in parallel on the executor.
+2. **Samples.** Each section's contours are sampled on their curves by arc
+   length.
+3. **Pairing.** Contours are paired between neighbouring heights: outer
+   with outer, hole with hole, by overlapping boxes and mutually nearest
+   centres, one to one.
+4. **Chains.** Paired contours form chains up the stack, and a chain shares
+   one sample count (the largest its members want). Neighbouring bands then
+   meet vertex for vertex.
+5. **Bands.** Each pair is stitched: the upper contour is rotated to the
+   least squared distance, and each quad is split along its shorter
+   diagonal.
+6. **Tips, splits and ends.**
+   - A contour with nothing at the next height (a cone's tip, a sphere's
+     pole) closes in a fan to its centre there.
+   - A contour left unpaired where the next height has other contours (a
+     split, a merge) gets a flat cap at its own height.
+   - With `caps`, the first and last sections are closed by flat faces,
+     triangulated (`qaws_triangulate`) on the same samples.
+
+Triangles turn counter-clockwise seen from outside. The mesh is closed;
+across a split or a merge, the cap and the continuing band may cross.
+
+Test 92 checks that every directed edge has its reverse exactly once, and
+that the volume by the divergence theorem matches the closed form:
+
+| Shape | Volume |
+|---|---|
+| cylinder | 2π |
+| cone from a circle and a point | π/3 |
+| tube with a hole | 3π |
+| sphere from 17 circles with point poles, cubic | 4π/3, within 0.6% |
+
+The test also checks that an ellipse splitting into two circles stays
+closed, and that an executor gives the same mesh. Figure 9 of
+`qaws_better2d_showcase` renders six such meshes.

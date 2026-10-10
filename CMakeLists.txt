@@ -73,6 +73,7 @@ set(QAWS_SOURCES
   src/qaws/qaws_offset.c
   src/qaws/qaws_rectclip.c
   src/qaws/qaws_stack.c
+src/qaws/qaws_stack_mesh.c
 src/qaws/qaws_triangulate.c
   src/qaws/qaws_convert.c
   src/qaws/qaws_export.c

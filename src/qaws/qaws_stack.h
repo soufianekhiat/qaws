@@ -86,4 +86,38 @@ unsigned int qaws_stack_result_get_level_count(qaws_stack_result const* result);
 qaws_scalar qaws_stack_result_get_z(qaws_stack_result const* result, unsigned int level);
 qaws_clip_result const* qaws_stack_result_get_level(qaws_stack_result const* result, unsigned int level);
 
+/*
+ * The surface of a stack as a 3D triangle mesh: its sections at every level
+ * (and `sections` more between two levels, to follow a cubic profile) are
+ * sampled on their curves by arc length, contours paired between
+ * neighbouring heights (outer with outer, hole with hole, nearest centres,
+ * one to one) and each pair stitched by a band of triangles (the shorter
+ * diagonal of each quad). Paired contours form chains up the stack that
+ * share one sample count, so neighbouring bands meet vertex for vertex. A
+ * contour with nothing at the next height (a cone's tip, a sphere's pole)
+ * closes in a fan to its centre there; one left unpaired where the next
+ * height has other contours (a split, a merge) gets a flat cap at its own
+ * height. With caps, the first and last sections are closed by flat faces
+ * triangulated on the same samples: the mesh is then closed except where a
+ * split or merge leaves a cap through the surface. Triangles turn
+ * counter-clockwise seen from outside.
+ */
+typedef struct qaws_mesh_3d qaws_mesh_3d;
+
+typedef struct qaws_stack_mesh_desc
+{
+	qaws_stack_2d const* stack;
+	qaws_scalar spacing;                /* target distance between contour samples; 0 = 1/64 of the extent */
+	unsigned int sections;              /* extra sections between two levels; 0 = none */
+	int caps;                           /* close the first and last sections */
+	qaws_batch_executor const* executor;   /* optional: the sections in parallel */
+} qaws_stack_mesh_desc;
+
+qaws_status qaws_stack_mesh_3d(qaws_stack_mesh_desc const* desc, qaws_mesh_3d** out_mesh);
+void qaws_mesh_3d_destroy(qaws_mesh_3d* mesh);
+unsigned int qaws_mesh_3d_get_vertex_count(qaws_mesh_3d const* mesh);
+qaws_vec3 qaws_mesh_3d_get_vertex(qaws_mesh_3d const* mesh, unsigned int vertex);
+unsigned int qaws_mesh_3d_get_triangle_count(qaws_mesh_3d const* mesh);
+void qaws_mesh_3d_get_triangle(qaws_mesh_3d const* mesh, unsigned int triangle, unsigned int out_vertices[3]);
+
 #endif /* QAWS_STACK_H */
