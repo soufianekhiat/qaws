@@ -480,6 +480,48 @@ qaws_status qaws_bezier_get_control_points(
 	return QAWS_STATUS_OK;
 }
 
+qaws_status qaws_curve_get_control_points(
+	qaws_curve const *curve,
+	void *out_control_points,
+	unsigned int point_capacity,
+	unsigned int *out_point_count)
+{
+	qaws_scalar const *cps;
+	unsigned int count;
+
+	if (!curve || !out_control_points || !out_point_count)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+
+	switch (curve->kind)
+	{
+	case QAWS_CURVE_KIND_BEZIER:
+		cps = ((qaws_bezier_impl const *)curve->impl)->control_points;
+		count = ((qaws_bezier_impl const *)curve->impl)->control_point_count;
+		break;
+	case QAWS_CURVE_KIND_RATIONAL_BEZIER:
+		cps = ((qaws_rational_bezier_impl const *)curve->impl)->control_points;
+		count = ((qaws_rational_bezier_impl const *)curve->impl)->control_point_count;
+		break;
+	case QAWS_CURVE_KIND_BSPLINE:
+		cps = ((qaws_bspline_impl const *)curve->impl)->control_points;
+		count = ((qaws_bspline_impl const *)curve->impl)->control_point_count;
+		break;
+	case QAWS_CURVE_KIND_NURBS:
+		cps = ((qaws_nurbs_impl const *)curve->impl)->control_points;
+		count = ((qaws_nurbs_impl const *)curve->impl)->control_point_count;
+		break;
+	default:
+		return QAWS_STATUS_UNSUPPORTED_OPERATION;
+	}
+
+	*out_point_count = count;
+	if (point_capacity < count)
+		return QAWS_STATUS_BUFFER_TOO_SMALL;
+	memcpy(out_control_points, cps,
+		(size_t)count * (size_t)curve->dimension * sizeof(qaws_scalar));
+	return QAWS_STATUS_OK;
+}
+
 /* ------------------------------------------------------------------ */
 /*  Family-specific inspection: B-Spline knots                         */
 /* ------------------------------------------------------------------ */

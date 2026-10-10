@@ -188,6 +188,15 @@ qaws_status qaws_bezier_get_control_points(
 	unsigned int point_capacity,
 	unsigned int* out_point_count);
 
+/* Control points of a Bezier, rational Bezier, B-spline or NURBS curve
+   (Cartesian, dimension scalars each; weights through qaws_nurbs_get_weights
+   or the rational Bezier desc). Other kinds: UNSUPPORTED_OPERATION. */
+qaws_status qaws_curve_get_control_points(
+	qaws_curve const* curve,
+	void* out_control_points,
+	unsigned int point_capacity,
+	unsigned int* out_point_count);
+
 qaws_status qaws_bspline_get_knots(
 	qaws_curve const* curve,
 	qaws_scalar* out_knots,
