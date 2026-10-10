@@ -72,6 +72,7 @@ set(QAWS_SOURCES
   src/qaws/qaws_clip64.c
   src/qaws/qaws_offset.c
   src/qaws/qaws_rectclip.c
+  src/qaws/qaws_stack.c
   src/qaws/qaws_convert.c
   src/qaws/qaws_export.c
   src/qaws/qaws_import.c
@@ -504,6 +505,7 @@ if(QAWS_INSTALL)
       src/qaws/qaws_clip64.h
       src/qaws/qaws_offset.h
       src/qaws/qaws_rectclip.h
+      src/qaws/qaws_stack.h
       src/qaws/qaws_alloc.h
       src/qaws/qaws_inline.h
       src/qaws/qaws_diff.h

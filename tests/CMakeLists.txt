@@ -90,6 +90,7 @@ add_executable(
   86_clip64.c
   87_offset.c
   88_rectclip.c
+  89_stack.c
 )
 
 # The amalgamated library exports exactly the same symbols, so the tests can

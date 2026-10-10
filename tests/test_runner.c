@@ -100,6 +100,7 @@ extern int test_85_clipper2_parity_main(void);
 extern int test_86_clip64_main(void);
 extern int test_87_offset_main(void);
 extern int test_88_rectclip_main(void);
+extern int test_89_stack_main(void);
 
 /* Test registry */
 typedef struct {
@@ -197,6 +198,7 @@ static test_suite const g_test_suites[] = {
 	{"86_clip64", test_86_clip64_main},
 	{"87_offset", test_87_offset_main},
 	{"88_rectclip", test_88_rectclip_main},
+	{"89_stack", test_89_stack_main},
 };
 
 int main(void) {

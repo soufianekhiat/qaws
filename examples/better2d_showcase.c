@@ -8,6 +8,7 @@
  *                      regions, fill rules, nesting, open paths
  *   b2d3_clipper2.svg  Clipper2's own test records through qaws_clip
  *   b2d4_offset.svg    offsets with every join and end type, curves and holes
+ *   b2d5_stack.svg     2.5D stacks: interpolated sections, splits, Booleans by level
  *
  * Each figure lives in better2d_showcase/NN_*.c, compiled as one translation
  * unit.
@@ -34,6 +35,7 @@
 #include "better2d_showcase/02_boolean.c"
 #include "better2d_showcase/03_clipper2.c"
 #include "better2d_showcase/04_offset.c"
+#include "better2d_showcase/05_stack.c"
 
 int main(void)
 {
@@ -43,5 +45,6 @@ int main(void)
 	demo_boolean();
 	demo_clipper2();
 	demo_offset();
+	demo_stack();
 	return 0;
 }
