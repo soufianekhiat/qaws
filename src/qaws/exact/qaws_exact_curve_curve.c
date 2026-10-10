@@ -416,6 +416,33 @@ static qaws_status cross_segments(qaws_exact_span const* A, int ashift, qaws_exa
 	unsigned int np = projections(dim, pj), p, D = dim + 1, e, c;
 	qaws_status st;
 	*common = 1;
+	if (dim == 2)
+	{
+		/* in double first (each end correctly rounded): both ends of one
+		   segment clearly on one side of the other, no hit and no exact work */
+		double a0[2], a1[2], b0[2], b1[2], rx, ry, sx, sy, la, lb, tol, o0, o1, o2, o3;
+		for (c = 0; c < 2; c++)
+		{
+			a0[c] = qaws_exact_ratio_to_double(&A->h[c], &A->h[2]);
+			a1[c] = qaws_exact_ratio_to_double(&A->h[D + c], &A->h[D + 2]);
+			b0[c] = qaws_exact_ratio_to_double(&B->h[c], &B->h[2]);
+			b1[c] = qaws_exact_ratio_to_double(&B->h[D + c], &B->h[D + 2]);
+		}
+		rx = a1[0] - a0[0]; ry = a1[1] - a0[1];
+		sx = b1[0] - b0[0]; sy = b1[1] - b0[1];
+		la = fabs(rx) + fabs(ry) + fabs(a0[0]) + fabs(a0[1]);
+		lb = fabs(sx) + fabs(sy) + fabs(b0[0]) + fabs(b0[1]);
+		tol = 1e-12 * la * lb + 1e-300;
+		o0 = rx * (b0[1] - a0[1]) - ry * (b0[0] - a0[0]);
+		o1 = rx * (b1[1] - a0[1]) - ry * (b1[0] - a0[0]);
+		o2 = sx * (a0[1] - b0[1]) - sy * (a0[0] - b0[0]);
+		o3 = sx * (a1[1] - b0[1]) - sy * (a1[0] - b0[0]);
+		if ((o0 > tol && o1 > tol) || (o0 < -tol && o1 < -tol) || (o2 > tol && o3 > tol) || (o2 < -tol && o3 < -tol))
+		{
+			*common = 0;
+			return QAWS_STATUS_OK;
+		}
+	}
 	for (p = 0; p < np; p++)
 	{
 		unsigned int idx[3];

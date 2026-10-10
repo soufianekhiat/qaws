@@ -100,6 +100,7 @@ typedef struct c64_ctx
 	unsigned int* vid;               /* point -> vertex */
 	unsigned int nv;
 	unsigned int* vrep;              /* vertex -> a representative point */
+	double* vf;                      /* vertex -> its point as doubles (x, y), compact */
 	c64_edge* e;
 	unsigned int ne, cape;
 	c64_edge* oe;                    /* open-subject edges */
@@ -166,39 +167,122 @@ static int c64_cross_sign(int64_t ax, int64_t ay, int64_t bx, int64_t by)
 	return qaws_wide_sign(&c);
 }
 
-/* merge sort of indices with a context comparator (qsort has no context) */
-typedef int (*c64_cmp_fn)(void const* ctx, unsigned int a, unsigned int b);
+/* compact sort keys: two doubles (compared within a tolerance first) and the item */
+typedef struct c64_skey
+{
+	double a, b;
+	unsigned int i;
+} c64_skey;
 
-static void c64_sort(unsigned int* idx, unsigned int* tmp, unsigned int n, c64_cmp_fn cmp, void const* ctx)
+typedef int (*c64_skey_fn)(void const* ctx, c64_skey const* p, c64_skey const* q);
+
+/* merge sort of keys (insertion below 16): contiguous, so the comparisons stay in cache */
+static void c64_sort_keys(c64_skey* k, c64_skey* tmp, unsigned int n, c64_skey_fn cmp, void const* ctx)
 {
 	unsigned int w, i;
-	for (w = 1; w < n; w *= 2)
+	for (i = 0; i < n; i += 16)
+	{
+		unsigned int e = i + 16 < n ? i + 16 : n, a, b;
+		for (a = i + 1; a < e; a++)
+		{
+			c64_skey key = k[a];
+			for (b = a; b > i && cmp(ctx, &k[b - 1], &key) > 0; b--)
+				k[b] = k[b - 1];
+			k[b] = key;
+		}
+	}
+	for (w = 16; w < n; w *= 2)
 	{
 		for (i = 0; i < n; i += 2 * w)
 		{
-			unsigned int a = i, am = i + w < n ? i + w : n, b = am, bm = i + 2 * w < n ? i + 2 * w : n, k = i;
+			unsigned int a = i, am = i + w < n ? i + w : n, b = am, bm = i + 2 * w < n ? i + 2 * w : n, j = i;
+			if (am >= bm || cmp(ctx, &k[am - 1], &k[am]) <= 0)
+			{
+				memcpy(&tmp[i], &k[i], sizeof(c64_skey) * (bm - i));
+				continue;
+			}
 			while (a < am && b < bm)
-				tmp[k++] = cmp(ctx, idx[a], idx[b]) <= 0 ? idx[a++] : idx[b++];
-			while (a < am) tmp[k++] = idx[a++];
-			while (b < bm) tmp[k++] = idx[b++];
+				tmp[j++] = cmp(ctx, &k[a], &k[b]) <= 0 ? k[a++] : k[b++];
+			while (a < am) tmp[j++] = k[a++];
+			while (b < bm) tmp[j++] = k[b++];
 		}
-		memcpy(idx, tmp, sizeof(unsigned int) * n);
+		memcpy(k, tmp, sizeof(c64_skey) * n);
 	}
 }
 
-static int c64_cmp_pt_idx(void const* ctx, unsigned int a, unsigned int b)
+static int c64_skey_pt(void const* ctx, c64_skey const* p, c64_skey const* q)
 {
 	c64_ctx const* x = (c64_ctx const*)ctx;
-	return c64_cmp_pt(&x->pt[a], &x->pt[b]);
+	double ty = 1e-9 * (fabs(p->a) + fabs(q->a) + 1);
+	if (p->a < q->a - ty) return -1;
+	if (p->a > q->a + ty) return 1;
+	return c64_cmp_pt(&x->pt[p->i], &x->pt[q->i]);
 }
 
-static int c64_cmp_cut_idx(void const* ctx, unsigned int a, unsigned int b)
+static int c64_skey_t(void const* ctx, c64_skey const* p, c64_skey const* q)
 {
 	c64_ctx const* x = (c64_ctx const*)ctx;
-	c64_cut const* p = &x->cut[a];
-	c64_cut const* q = &x->cut[b];
-	if (p->seg != q->seg) return p->seg < q->seg ? -1 : 1;
-	return c64_cmp_t(p, q);
+	if (p->a < q->a - 1e-9) return -1;
+	if (p->a > q->a + 1e-9) return 1;
+	return c64_cmp_t(&x->cut[p->i], &x->cut[q->i]);
+}
+
+/* the points sorted (y, then x), as indices */
+static qaws_status c64_sort_points(c64_ctx* x, unsigned int* idx)
+{
+	c64_skey* k = (c64_skey*)malloc(sizeof(c64_skey) * 2 * (x->npt + 1));
+	unsigned int i;
+	if (!k)
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	for (i = 0; i < x->npt; i++)
+	{
+		k[i].a = x->pt[i].fy;
+		k[i].b = x->pt[i].fx;
+		k[i].i = i;
+	}
+	c64_sort_keys(k, k + x->npt, x->npt, c64_skey_pt, x);
+	for (i = 0; i < x->npt; i++)
+		idx[i] = k[i].i;
+	free(k);
+	return QAWS_STATUS_OK;
+}
+
+/* the cuts by segment (counting sort), then along each segment by t */
+static qaws_status c64_sort_cuts(c64_ctx* x, unsigned int* idx)
+{
+	unsigned int* start = (unsigned int*)calloc(x->nseg + 2, sizeof(unsigned int));
+	c64_skey* k = (c64_skey*)malloc(sizeof(c64_skey) * 2 * (x->ncut + 1));
+	unsigned int i, s;
+	if (!start || !k)
+	{
+		free(start);
+		free(k);
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	}
+	for (i = 0; i < x->ncut; i++)
+		start[x->cut[i].seg + 1]++;
+	for (s = 0; s < x->nseg; s++)
+		start[s + 1] += start[s];
+	for (i = 0; i < x->ncut; i++)
+	{
+		unsigned int p = start[x->cut[i].seg]++;
+		k[p].a = x->cut[i].ft;
+		k[p].b = 0;
+		k[p].i = i;
+	}
+	/* start[s] is now the end of segment s's run */
+	for (s = 0, i = 0; s < x->nseg; s++)
+	{
+		unsigned int e = start[s];
+		if (e - i > 1)
+			c64_sort_keys(k + i, k + x->ncut + i, e - i, c64_skey_t, x);
+		i = e;
+	}
+	for (i = 0; i < x->ncut; i++)
+		idx[i] = k[i].i;
+	free(start);
+	free(k);
+	return QAWS_STATUS_OK;
 }
 
 /* ======================================================================== */
@@ -381,29 +465,88 @@ static qaws_status c64_pair(c64_ctx* x, unsigned int ia, unsigned int ib)
 	return QAWS_STATUS_OK;
 }
 
-static qaws_status c64_visit(void* user, unsigned int i, unsigned int j)
-{
-	c64_ctx* x = (c64_ctx*)user;
-	c64_seg const* A = &x->seg[i];
-	c64_seg const* B = &x->seg[j];
-	/* the grid's boxes are a hair wide (doubles); the exact boxes decide */
-	if (B->lox > A->hix || B->hix < A->lox || B->loy > A->hiy || B->hiy < A->loy)
-		return QAWS_STATUS_OK;
-	return c64_pair(x, i, j);
-}
-
 static double c64_down(int64_t v) { double d = (double)v; return d - fabs(d) * 4e-16 - 1e-300; }
 static double c64_up(int64_t v) { double d = (double)v; return d + fabs(d) * 4e-16 + 1e-300; }
+
+/* might segments ia and ib meet? The double filter of c64_pair alone (0: proven apart) */
+static int c64_maybe(c64_ctx const* x, unsigned int ia, unsigned int ib)
+{
+	c64_seg const* A = &x->seg[ia];
+	c64_seg const* B = &x->seg[ib];
+	int64_t rx = A->bx - A->ax, ry = A->by - A->ay, sx = B->bx - B->ax, sy = B->by - B->ay;
+	int64_t wx = B->ax - A->ax, wy = B->ay - A->ay;
+	double drx = (double)rx, dry = (double)ry, dsx = (double)sx, dsy = (double)sy, dwx = (double)wx, dwy = (double)wy;
+	double fden = drx * dsy - dry * dsx, eden = 4e-16 * (fabs(drx * dsy) + fabs(dry * dsx));
+	double ftn = dwx * dsy - dwy * dsx, etn = 4e-16 * (fabs(dwx * dsy) + fabs(dwy * dsx));
+	double fun = dwx * dry - dwy * drx, eun = 4e-16 * (fabs(dwx * dry) + fabs(dwy * drx));
+	if (A->operand == 2 && B->operand == 2)
+		return 0;
+	if (B->lox > A->hix || B->hix < A->lox || B->loy > A->hiy || B->hiy < A->loy)
+		return 0;
+	if (fabs(fden) > eden)
+	{
+		double sden = fden > 0 ? 1.0 : -1.0, tn = ftn * sden, un = fun * sden, ad = fabs(fden);
+		return !(tn < -etn || un < -eun || tn - ad > etn + eden || un - ad > eun + eden);
+	}
+	return !(fabs(fun) > eun);
+}
+
+typedef struct c64_pairs
+{
+	c64_ctx* x;
+	unsigned int* p;
+	unsigned int n, cap;
+} c64_pairs;
+
+static qaws_status c64_visit(void* user, unsigned int i, unsigned int j)
+{
+	c64_pairs* P = (c64_pairs*)user;
+	if (!c64_maybe(P->x, i, j))
+		return QAWS_STATUS_OK;
+	if (P->n + 2 > P->cap)
+	{
+		unsigned int nc = P->cap ? 2 * P->cap : 4096;
+		unsigned int* g = (unsigned int*)realloc(P->p, sizeof(unsigned int) * nc);
+		if (!g) return QAWS_STATUS_ALLOCATION_FAILURE;
+		P->p = g;
+		P->cap = nc;
+	}
+	P->p[P->n++] = i;
+	P->p[P->n++] = j;
+	return QAWS_STATUS_OK;
+}
+
+/* room for n more cuts and m more points, once */
+static qaws_status c64_reserve(c64_ctx* x, unsigned int n, unsigned int m)
+{
+	if (x->ncut + n > x->capcut)
+	{
+		c64_cut* g = (c64_cut*)realloc(x->cut, sizeof(c64_cut) * (x->ncut + n));
+		if (!g) return QAWS_STATUS_ALLOCATION_FAILURE;
+		x->cut = g;
+		x->capcut = x->ncut + n;
+	}
+	if (x->npt + m > x->cappt)
+	{
+		c64_pt* g = (c64_pt*)realloc(x->pt, sizeof(c64_pt) * (x->npt + m));
+		if (!g) return QAWS_STATUS_ALLOCATION_FAILURE;
+		x->pt = g;
+		x->cappt = x->npt + m;
+	}
+	return QAWS_STATUS_OK;
+}
 
 static qaws_status c64_hits(c64_ctx* x)
 {
 	qaws_bp_box* boxes = (qaws_bp_box*)malloc(sizeof(qaws_bp_box) * (x->nseg + 1));
 	unsigned int i;
-	qaws_status s = QAWS_STATUS_OK;
+	c64_pairs P;
+	qaws_status s;
 	qaws_wide zero = qaws_wide_from_i64(0), one = qaws_wide_from_i64(1);
 	if (!boxes)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	/* every segment's end points */
+	s = c64_reserve(x, 2 * x->nseg, 2 * x->nseg);
 	for (i = 0; i < x->nseg && s == QAWS_STATUS_OK; i++)
 	{
 		unsigned int p;
@@ -415,10 +558,17 @@ static qaws_status c64_hits(c64_ctx* x)
 		boxes[i].lo[1] = c64_down(x->seg[i].loy); boxes[i].hi[1] = c64_up(x->seg[i].hiy);
 		boxes[i].lo[2] = boxes[i].hi[2] = 0;
 	}
-	/* the pairs of overlapping boxes, from the shared uniform grid */
+	/* the pairs that may meet (boxes, then the double filter), then exactly with the room reserved */
+	memset(&P, 0, sizeof(P));
+	P.x = x;
 	if (s == QAWS_STATUS_OK && x->nseg > 1)
-		s = qaws_internal_broadphase(boxes, x->nseg, 2, NULL, c64_visit, x, NULL);
+		s = qaws_internal_broadphase(boxes, x->nseg, 2, NULL, c64_visit, &P, NULL);
 	free(boxes);
+	if (s == QAWS_STATUS_OK)
+		s = c64_reserve(x, P.n, P.n / 2);
+	for (i = 0; i < P.n && s == QAWS_STATUS_OK; i += 2)
+		s = c64_pair(x, P.p[i], P.p[i + 1]);
+	free(P.p);
 	return s;
 }
 
@@ -439,8 +589,11 @@ static qaws_status c64_vertices(c64_ctx* x)
 		free(idx);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
-	for (i = 0; i < x->npt; i++) idx[i] = i;
-	c64_sort(idx, idx + x->npt, x->npt, c64_cmp_pt_idx, x);
+	if (c64_sort_points(x, idx) != QAWS_STATUS_OK)
+	{
+		free(idx);
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	}
 	x->nv = 0;
 	for (i = 0; i < x->npt; i++)
 	{
@@ -449,6 +602,14 @@ static qaws_status c64_vertices(c64_ctx* x)
 		x->vid[idx[i]] = x->nv - 1;
 	}
 	free(idx);
+	x->vf = (double*)malloc(sizeof(double) * 2 * (x->nv + 1));
+	if (!x->vf)
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	for (i = 0; i < x->nv; i++)
+	{
+		x->vf[2 * i] = x->pt[x->vrep[i]].fx;
+		x->vf[2 * i + 1] = x->pt[x->vrep[i]].fy;
+	}
 	return QAWS_STATUS_OK;
 }
 
@@ -474,8 +635,11 @@ static qaws_status c64_edges(c64_ctx* x)
 	c64_key* k;
 	if (!idx)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
-	for (i = 0; i < x->ncut; i++) idx[i] = i;
-	c64_sort(idx, idx + x->ncut, x->ncut, c64_cmp_cut_idx, x);
+	if (c64_sort_cuts(x, idx) != QAWS_STATUS_OK)
+	{
+		free(idx);
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	}
 	for (i = 0; i < x->ncut; i = j)
 	{
 		unsigned int sg = x->cut[idx[i]].seg, prev = C64_NONE;
@@ -628,6 +792,43 @@ typedef struct c64_cycle
 	double lo[2], hi[2];
 } c64_cycle;
 
+static int c64_winding(c64_ctx const* x, unsigned int h0, c64_pt const* q);
+
+/* the outside of a part: candidates for the cycle holding its lowest vertex */
+typedef struct c64_nest_ring
+{
+	c64_ctx const* x;
+	c64_cycle const* cyc;
+	qaws_bp_box const* boxes;
+	unsigned int const* of;      /* box -> cycle */
+	unsigned int i;              /* the outer cycle */
+	c64_pt const* q;             /* its lowest vertex */
+	double p[3];
+	unsigned int best;
+	double best_size;
+} c64_nest_ring;
+
+static void c64_nest_visit(void* user, unsigned int item)
+{
+	c64_nest_ring* r = (c64_nest_ring*)user;
+	unsigned int j = r->of[item];
+	c64_cycle const* C = &r->cyc[j];
+	double size;
+	if (C->comp == r->cyc[r->i].comp)
+		return;
+	if (r->p[0] < C->lo[0] || r->p[0] > C->hi[0] || r->p[1] < C->lo[1] || r->p[1] > C->hi[1])
+		return;
+	size = (C->hi[0] - C->lo[0]) + (C->hi[1] - C->lo[1]);
+	/* the smallest wins, the lower cycle on a tie (the order of a plain scan) */
+	if (size > r->best_size || (size == r->best_size && j > r->best))
+		return;
+	if (c64_winding(r->x, C->h0, r->q) != 0)
+	{
+		r->best = j;
+		r->best_size = size;
+	}
+}
+
 static unsigned int c64_find(unsigned int* p, unsigned int i)
 {
 	while (p[i] != i) { p[i] = p[p[i]]; i = p[i]; }
@@ -688,31 +889,43 @@ static qaws_status c64_faces(c64_ctx* x, unsigned int* out_faces)
 	for (i = 0; i < nh; i++) hcyc[i] = C64_NONE;
 	for (i = 0; i < nh; i++)
 	{
-		unsigned int h = i, low = i;
+		unsigned int h = i, low = i, low_prev = C64_NONE, last = C64_NONE;
 		c64_cycle c;
 		if (hcyc[i] != C64_NONE) continue;
 		c.lo[0] = c.lo[1] = 1e300; c.hi[0] = c.hi[1] = -1e300;
 		do
 		{
-			c64_pt const* p = &x->pt[x->vrep[c64_origin(x, h)]];
+			unsigned int v = c64_origin(x, h);
+			double const* p = &x->vf[2 * v];
 			hcyc[h] = ncyc;
-			if (p->fx < c.lo[0]) c.lo[0] = p->fx;
-			if (p->fy < c.lo[1]) c.lo[1] = p->fy;
-			if (p->fx > c.hi[0]) c.hi[0] = p->fx;
-			if (p->fy > c.hi[1]) c.hi[1] = p->fy;
-			if (h != i && c64_cmp_pt(p, &x->pt[x->vrep[c64_origin(x, low)]]) < 0)
-				low = h;
+			if (p[0] < c.lo[0]) c.lo[0] = p[0];
+			if (p[1] < c.lo[1]) c.lo[1] = p[1];
+			if (p[0] > c.hi[0]) c.hi[0] = p[0];
+			if (p[1] > c.hi[1]) c.hi[1] = p[1];
+			if (h != i)
+			{
+				/* the lowest vertex (y, then x): doubles first, exactly when they tie */
+				unsigned int lv = c64_origin(x, low);
+				double const* q = &x->vf[2 * lv];
+				double ty = 1e-9 * (fabs(p[1]) + fabs(q[1]) + 1);
+				if (p[1] < q[1] - ty || (p[1] <= q[1] + ty && c64_cmp_pt(&x->pt[x->vrep[v]], &x->pt[x->vrep[lv]]) < 0))
+				{
+					low = h;
+					low_prev = last;
+				}
+			}
+			last = h;
 			h = x->h[h].next;
 		} while (h != i);
+		if (low_prev == C64_NONE)
+			low_prev = last;
 		c.h0 = i;
 		c.low_h = low;
 		c.comp = c64_find(vcomp, c64_origin(x, i));
 		/* at the lowest vertex the cycle turns left iff it runs counter-clockwise */
 		{
-			unsigned int prev = low, g = x->h[low].next;
 			int64_t ix, iy, ox, oy;
-			while (g != low) { prev = g; g = x->h[g].next; }
-			c64_dir(x, prev, &ix, &iy);
+			c64_dir(x, low_prev, &ix, &iy);
 			c64_dir(x, low, &ox, &oy);
 			c.ccw = c64_cross_sign(ix, iy, ox, oy) > 0;
 		}
@@ -735,31 +948,62 @@ static qaws_status c64_faces(c64_ctx* x, unsigned int* out_faces)
 		cface[i] = cyc[i].ccw ? nfaces++ : C64_NONE;
 	/* a part's outside: the smallest counter-clockwise cycle of another part
 	   winding round its lowest vertex (smallest: nested in all the others,
-	   so the one with the smallest box) */
-	for (i = 0; i < ncyc; i++)
+	   so the one with the smallest box); the candidates from a grid over the
+	   counter-clockwise cycles' boxes, in the cell holding the vertex */
 	{
-		unsigned int j, best = C64_NONE;
-		double best_size = 1e300;
-		c64_pt const* q;
-		if (cface[i] != C64_NONE) continue;
-		q = &x->pt[x->vrep[c64_origin(x, cyc[i].low_h)]];
-		for (j = 0; j < ncyc; j++)
+		unsigned int nccw = 0, *of = NULL;
+		qaws_bp_box* boxes = NULL;
+		qaws_bp_grid* grid = NULL;
+		c64_nest_ring rg;
+		for (i = 0; i < ncyc; i++) nccw += cyc[i].ccw;
+		if (nccw)
 		{
-			double size;
-			if (!cyc[j].ccw || cyc[j].comp == cyc[i].comp)
-				continue;
-			if (q->fx < cyc[j].lo[0] || q->fx > cyc[j].hi[0] || q->fy < cyc[j].lo[1] || q->fy > cyc[j].hi[1])
-				continue;
-			size = (cyc[j].hi[0] - cyc[j].lo[0]) + (cyc[j].hi[1] - cyc[j].lo[1]);
-			if (size >= best_size)
-				continue;
-			if (c64_winding(x, cyc[j].h0, q) != 0)
+			boxes = (qaws_bp_box*)malloc(sizeof(qaws_bp_box) * nccw);
+			of = (unsigned int*)malloc(sizeof(unsigned int) * nccw);
+			if (!boxes || !of)
 			{
-				best = j;
-				best_size = size;
+				free(boxes); free(of); free(cyc); free(hcyc); free(vcomp); free(cface);
+				return QAWS_STATUS_ALLOCATION_FAILURE;
 			}
+			nccw = 0;
+			for (i = 0; i < ncyc; i++)
+				if (cyc[i].ccw)
+				{
+					boxes[nccw].lo[0] = cyc[i].lo[0]; boxes[nccw].lo[1] = cyc[i].lo[1];
+					boxes[nccw].hi[0] = cyc[i].hi[0]; boxes[nccw].hi[1] = cyc[i].hi[1];
+					boxes[nccw].lo[2] = boxes[nccw].hi[2] = 0;
+					of[nccw++] = i;
+				}
+			if (qaws_internal_grid_create(boxes, nccw, 2, &grid) != QAWS_STATUS_OK)
+				grid = NULL;
 		}
-		cface[i] = best == C64_NONE ? 0 : cface[best];
+		rg.x = x;
+		rg.cyc = cyc;
+		rg.boxes = boxes;
+		rg.of = of;
+		for (i = 0; i < ncyc; i++)
+		{
+			if (cface[i] != C64_NONE) continue;
+			rg.i = i;
+			rg.q = &x->pt[x->vrep[c64_origin(x, cyc[i].low_h)]];
+			rg.p[0] = rg.q->fx;
+			rg.p[1] = rg.q->fy;
+			rg.p[2] = 0;
+			rg.best = C64_NONE;
+			rg.best_size = 1e300;
+			if (grid)
+				qaws_internal_grid_ring(grid, rg.p, 0, c64_nest_visit, &rg);
+			else
+			{
+				unsigned int j;
+				for (j = 0; j < nccw; j++)
+					c64_nest_visit(&rg, j);
+			}
+			cface[i] = rg.best == C64_NONE ? 0 : cface[rg.best];
+		}
+		qaws_internal_grid_destroy(grid);
+		free(boxes);
+		free(of);
 	}
 	for (i = 0; i < nh; i++)
 		x->h[i].face = cface[hcyc[i]];
@@ -1250,7 +1494,7 @@ double qaws_path64_area2(int64_t const* p, unsigned int n)
 
 static void c64_free(c64_ctx* x)
 {
-	free(x->seg); free(x->pt); free(x->cut); free(x->vid); free(x->vrep); free(x->e); free(x->oe);
+	free(x->seg); free(x->pt); free(x->cut); free(x->vid); free(x->vrep); free(x->vf); free(x->e); free(x->oe);
 	free(x->h); free(x->vfirst); free(x->vcount); free(x->vout); free(x->vround);
 }
 

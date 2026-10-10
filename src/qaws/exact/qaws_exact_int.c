@@ -623,9 +623,9 @@ double qaws_exact_int_to_double(qaws_exact_int const* x)
 
 double qaws_exact_ratio_to_double(qaws_exact_int const* num, qaws_exact_int const* den)
 {
-	qaws_exact_int n = *num, d = *den, step;
-	int nb, db, k, i, sign;
-	uint64_t q = 0;
+	qaws_exact_int n = *num, d = *den, q, r;
+	int nb, db, k, sign;
+	uint64_t qq;
 	if (den->sign == 0)
 		return NAN;
 	if (num->sign == 0)
@@ -633,9 +633,12 @@ double qaws_exact_ratio_to_double(qaws_exact_int const* num, qaws_exact_int cons
 	sign = num->sign * den->sign;
 	n.sign = 1;
 	d.sign = 1;
-	/* scale so that the quotient has 63 or 64 bits: q in [2^62, 2^64) */
 	nb = (int)qaws_exact_int_bits(&n);
 	db = (int)qaws_exact_int_bits(&d);
+	/* both exact doubles: one correctly rounded division */
+	if (nb <= 53 && db <= 53)
+		return (double)sign * (qaws_exact_int_to_double(&n) / qaws_exact_int_to_double(&d));
+	/* scale so that the quotient has 63 or 64 bits: q in [2^62, 2^64), one division, the remainder sticky */
 	k = 63 + db - nb;
 	if (k > 0)
 	{
@@ -644,22 +647,12 @@ double qaws_exact_ratio_to_double(qaws_exact_int const* num, qaws_exact_int cons
 	}
 	else if (k < 0 && qaws_exact_int_shl(&d, &d, (unsigned int)-k) != QAWS_STATUS_OK)
 		return (double)sign * (qaws_exact_int_to_double(num) / qaws_exact_int_to_double(den));
-	/* binary long division over the 64 possible quotient bits */
-	if (qaws_exact_int_shl(&step, &d, 63) != QAWS_STATUS_OK)
+	if (qaws_exact_int_divmod(&q, &r, &n, &d) != QAWS_STATUS_OK)
 		return (double)sign * (qaws_exact_int_to_double(num) / qaws_exact_int_to_double(den));
-	for (i = 63; i >= 0; i--)
-	{
-		if (mag_cmp(&n, &step) >= 0)
-		{
-			mag_sub(&n, &n, &step);
-			normalize(&n);
-			q |= (uint64_t)1 << i;
-		}
-		qaws_exact_int_shr(&step, &step, 1);
-	}
-	if (n.sign != 0)
-		q |= 1u;   /* sticky: far below the rounding position */
-	return (double)sign * ldexp((double)q, -k);
+	qq = (q.size > 0 ? (uint64_t)q.limb[0] : 0) | (q.size > 1 ? (uint64_t)q.limb[1] << 32 : 0);
+	if (r.sign != 0)
+		qq |= 1u;   /* sticky: far below the rounding position */
+	return (double)sign * ldexp((double)qq, -k);
 }
 
 int qaws_exact_split_double(double d, int64_t* m, int* e)

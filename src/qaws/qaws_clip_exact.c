@@ -32,6 +32,7 @@
 #include "internal/qaws_internal_types.h"
 #include "internal/qaws_internal_clip.h"
 #include "internal/qaws_internal_path.h"
+#include "internal/qaws_internal_broadphase.h"
 #include "exact/qaws_exact_curve.h"
 #include "exact/qaws_exact_poly.h"
 #include "exact/qaws_exact_roots.h"
@@ -59,6 +60,8 @@ typedef struct cx_src
 	unsigned int first_cut, cut_count;  /* its cuts, sorted along it */
 	unsigned int first_edge;            /* its edges: first_edge + k between cut k and k + 1 */
 	double lo[2], hi[2];                /* box, world units */
+	int is_line;                        /* one straight span: a, b its ends (world units) */
+	double la[2], lb[2];
 } cx_src;
 
 /* A homogeneous point (x, y, w), w > 0, lattice units. */
@@ -114,10 +117,14 @@ typedef struct cx_ctx
 	unsigned int ntemp, captemp;
 	cx_pt* pts;
 	unsigned int npts, cappts;
+	double* ptf;                        /* the points as doubles (x, y), lattice units */
+	unsigned int capptf;
 	cx_rat* rats;
 	unsigned int nrats, caprats;
 	cx_event* ev;
 	unsigned int nev, capev;
+	unsigned int* sev_first;            /* source s's events: sev[sev_first[s] .. sev_first[s + 1]) */
+	unsigned int* sev;
 	qaws_exact_batch_hit* hits;
 	unsigned int nhits;
 	cx_cut* cuts;
@@ -221,15 +228,17 @@ static qaws_status cx_pow(xint* out, xint const* b, unsigned int e)
  */
 static qaws_status cx_split(xint const* h, unsigned int n, xint const* num, xint const* den, xint* L, xint* R)
 {
-	xint* w = (xint*)malloc(sizeof(xint) * 3 * (n + 1));
-	xint* pw = (xint*)malloc(sizeof(xint) * (n + 1));
+	/* low degrees on the stack */
+	xint wbuf[3 * 8], pwbuf[8];
+	xint* w = n < 8 ? wbuf : (xint*)malloc(sizeof(xint) * 3 * (n + 1));
+	xint* pw = n < 8 ? pwbuf : (xint*)malloc(sizeof(xint) * (n + 1));
 	xint om, t1, t2;
 	unsigned int i, k, c;
 	qaws_status st = QAWS_STATUS_OK;
 	if (!w || !pw)
 	{
-		free(w);
-		free(pw);
+		if (w != wbuf) free(w);
+		if (pw != pwbuf) free(pw);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 	memcpy(w, h, sizeof(xint) * 3 * (n + 1));
@@ -257,8 +266,8 @@ static qaws_status cx_split(xint const* h, unsigned int n, xint const* num, xint
 			if (R && st == QAWS_STATUS_OK) st = qaws_exact_int_mul(&R[3 * (n - k) + c], &w[3 * (n - k) + c], &pw[n - k]);
 		}
 	}
-	free(w);
-	free(pw);
+	if (w != wbuf) free(w);
+	if (pw != pwbuf) free(pw);
 	return st;
 }
 
@@ -282,7 +291,8 @@ static void cx_reduce(xint* v, unsigned int count)
 static qaws_status cx_span_point(qaws_exact_span const* sp, xint const* num, xint const* den, cx_pt* out)
 {
 	unsigned int n = sp->degree;
-	xint* R = (xint*)malloc(sizeof(xint) * 3 * (n + 1));
+	xint rbuf[3 * 8];
+	xint* R = n < 8 ? rbuf : (xint*)malloc(sizeof(xint) * 3 * (n + 1));
 	qaws_status st;
 	if (!R)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
@@ -295,7 +305,7 @@ static qaws_status cx_span_point(qaws_exact_span const* sp, xint const* num, xin
 		cx_reduce(&out->x, 3);
 		st = cx_pt_norm(out);
 	}
-	free(R);
+	if (R != rbuf) free(R);
 	return st;
 }
 
@@ -428,6 +438,15 @@ static qaws_status cx_add_curve(cx_ctx* x, qaws_curve const* c, unsigned int ope
 	s->t0 = cx_tmin(c);
 	s->t1 = cx_tmax(c);
 	TRY(qaws_exact_curve_prepare(&x->ed, c, &s->e, NULL));
+	if (s->e->span_count == 1 && s->e->spans[0].degree == 1)
+	{
+		xint const* h = s->e->spans[0].h;
+		s->is_line = 1;
+		s->la[0] = ldexp(qaws_exact_ratio_to_double(&h[0], &h[2]), x->ed.space_exp2);
+		s->la[1] = ldexp(qaws_exact_ratio_to_double(&h[1], &h[2]), x->ed.space_exp2);
+		s->lb[0] = ldexp(qaws_exact_ratio_to_double(&h[3], &h[5]), x->ed.space_exp2);
+		s->lb[1] = ldexp(qaws_exact_ratio_to_double(&h[4], &h[5]), x->ed.space_exp2);
+	}
 	x->nsrc++;
 	return QAWS_STATUS_OK;
 }
@@ -523,6 +542,16 @@ static qaws_status cx_event_add(cx_ctx* x, unsigned int src, double lo, double h
 
 static qaws_status cx_pt_add(cx_ctx* x, cx_pt const* p, unsigned int* out)
 {
+	if (2 * x->npts + 2 > x->capptf)
+	{
+		unsigned int nc = x->capptf ? 2 * x->capptf : 256;
+		double* g = (double*)realloc(x->ptf, sizeof(double) * nc);
+		if (!g) return QAWS_STATUS_ALLOCATION_FAILURE;
+		x->ptf = g;
+		x->capptf = nc;
+	}
+	x->ptf[2 * x->npts] = qaws_exact_ratio_to_double(&p->x, &p->w);
+	x->ptf[2 * x->npts + 1] = qaws_exact_ratio_to_double(&p->y, &p->w);
 	CX_GROW(x->pts, x->npts, x->cappts, cx_pt);
 	x->pts[x->npts] = *p;
 	*out = x->npts++;
@@ -779,9 +808,53 @@ static qaws_status cx_hits(cx_ctx* x)
 	return QAWS_STATUS_OK;
 }
 
+/* every source's events, by a counting sort */
+static qaws_status cx_bucket(cx_ctx* x)
+{
+	unsigned int i, s;
+	free(x->sev_first);
+	free(x->sev);
+	x->sev_first = (unsigned int*)calloc(x->nsrc + 2, sizeof(unsigned int));
+	x->sev = (unsigned int*)malloc(sizeof(unsigned int) * (x->nev + 1));
+	if (!x->sev_first || !x->sev)
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	for (i = 0; i < x->nev; i++)
+		x->sev_first[x->ev[i].src + 1]++;
+	for (s = 0; s < x->nsrc; s++)
+		x->sev_first[s + 1] += x->sev_first[s];
+	for (i = 0; i < x->nev; i++)
+		x->sev[x->sev_first[x->ev[i].src]++] = i;
+	for (s = x->nsrc; s > 0; s--)
+		x->sev_first[s] = x->sev_first[s - 1];
+	x->sev_first[0] = 0;
+	return QAWS_STATUS_OK;
+}
+
 /* ======================================================================== */
 /*  4. Vertices                                                             */
 /* ======================================================================== */
+
+/* points a and b (indices) ordered by x, then y: their doubles (correctly
+   rounded) when they are clearly apart, exactly otherwise */
+static qaws_status cx_pt_cmp_idx(cx_ctx const* x, unsigned int a, unsigned int b, int* out)
+{
+	double const* p = &x->ptf[2 * a];
+	double const* q = &x->ptf[2 * b];
+	double tx = 1e-12 * (fabs(p[0]) + fabs(q[0])) + 1e-300, ty = 1e-12 * (fabs(p[1]) + fabs(q[1])) + 1e-300;
+	if (p[0] < q[0] - tx) { *out = -1; return QAWS_STATUS_OK; }
+	if (p[0] > q[0] + tx) { *out = 1; return QAWS_STATUS_OK; }
+	if (fabs(p[0] - q[0]) <= tx && 0)
+		return QAWS_STATUS_OK;
+	{
+		qaws_status st;
+		TRY(cx_pt_cmp1(&x->pts[a], &x->pts[b], 0, out));
+		if (*out)
+			return QAWS_STATUS_OK;
+	}
+	if (p[1] < q[1] - ty) { *out = -1; return QAWS_STATUS_OK; }
+	if (p[1] > q[1] + ty) { *out = 1; return QAWS_STATUS_OK; }
+	return cx_pt_cmp1(&x->pts[a], &x->pts[b], 1, out);
+}
 
 /* sort events by their exact points (merge sort; insertion below 32) */
 static qaws_status cx_sort_by_point(cx_ctx* x, unsigned int* idx, unsigned int n)
@@ -801,7 +874,7 @@ static qaws_status cx_sort_by_point(cx_ctx* x, unsigned int* idx, unsigned int n
 		{
 			if (a < h && b < n)
 			{
-				st = cx_pt_cmp(&x->pts[x->ev[idx[a]].pt], &x->pts[x->ev[idx[b]].pt], &c);
+				st = cx_pt_cmp_idx(x, x->ev[idx[a]].pt, x->ev[idx[b]].pt, &c);
 				tmp[k++] = c <= 0 ? idx[a++] : idx[b++];
 			}
 			else
@@ -817,7 +890,7 @@ static qaws_status cx_sort_by_point(cx_ctx* x, unsigned int* idx, unsigned int n
 		unsigned int key = idx[i];
 		for (j = (int)i - 1; j >= 0; j--)
 		{
-			TRY(cx_pt_cmp(&x->pts[x->ev[idx[j]].pt], &x->pts[x->ev[key].pt], &c));
+			TRY(cx_pt_cmp_idx(x, x->ev[idx[j]].pt, x->ev[key].pt, &c));
 			if (c <= 0)
 				break;
 			idx[j + 1] = idx[j];
@@ -1111,9 +1184,8 @@ static qaws_status cx_vertices(cx_ctx* x)
 	for (s = 0; s < x->nsrc && st == QAWS_STATUS_OK; s++)
 	{
 		unsigned int m = 0, a, b;
-		for (i = 0; i < x->nev; i++)
-			if (x->ev[i].src == s)
-				idx[m++] = i;
+		for (i = x->sev_first[s]; i < x->sev_first[s + 1]; i++)
+			idx[m++] = x->sev[i];
 		/* by the middle of the enclosure */
 		for (a = 1; a < m; a++)
 		{
@@ -1185,9 +1257,8 @@ static qaws_status cx_edges(cx_ctx* x)
 	for (s = 0; s < x->nsrc && st == QAWS_STATUS_OK; s++)
 	{
 		unsigned int m = 0, a, b, first = x->ncuts;
-		for (i = 0; i < x->nev; i++)
-			if (x->ev[i].src == s)
-				idx[m++] = i;
+		for (i = x->sev_first[s]; i < x->sev_first[s + 1]; i++)
+			idx[m++] = x->sev[i];
 		for (a = 1; a < m; a++)
 		{
 			unsigned int key = idx[a];
@@ -1769,6 +1840,40 @@ static qaws_status cx_sort_fan(cx_ctx* x, unsigned int* fan, unsigned int n, uns
 /*  7-8. Faces, windings, output                                            */
 /* ======================================================================== */
 
+/* the sources a ray may meet, from the grid over their boxes (each once) */
+typedef struct cx_raycol
+{
+	unsigned int* list;
+	unsigned int n, cap;
+	unsigned int* stamp;
+	unsigned int gen;
+	int failed;
+} cx_raycol;
+
+static int cx_raycol_visit(void* user, unsigned int const* items, unsigned int count, double t_exit)
+{
+	cx_raycol* r = (cx_raycol*)user;
+	unsigned int k;
+	(void)t_exit;
+	for (k = 0; k < count; k++)
+	{
+		unsigned int s = items[k];
+		if (r->stamp[s] == r->gen)
+			continue;
+		r->stamp[s] = r->gen;
+		if (r->n == r->cap)
+		{
+			unsigned int nc = r->cap ? 2 * r->cap : 256;
+			unsigned int* g = (unsigned int*)realloc(r->list, sizeof(unsigned int) * nc);
+			if (!g) { r->failed = 1; return 1; }
+			r->list = g;
+			r->cap = nc;
+		}
+		r->list[r->n++] = s;
+	}
+	return 0;
+}
+
 typedef struct cx_graph
 {
 	qaws_internal_arr_source* src;
@@ -1787,13 +1892,17 @@ typedef struct cx_graph
 	int* vexact;                        /* the vertex is exactly the double point vxy */
 	double* vxy;
 	unsigned int* vcomp;                /* each vertex's part */
+	unsigned int* cvfirst;              /* part (root vertex) r's vertices: cvlist[cvfirst[r] .. cvfirst[r + 1]) */
+	unsigned int* cvlist;
+	qaws_bp_grid* sgrid;                /* the sources' boxes, for rays */
+	cx_raycol ray;
 	unsigned int ne, nv, ncyc;
 } cx_graph;
 
 static void cx_graph_free(cx_graph* g)
 {
 	free(g->src); free(g->v); free(g->e); free(g->emap); free(g->out); free(g->pos); free(g->next); free(g->cyc);
-	free(g->face); free(g->h_ev); free(g->h_fwd); free(g->area); free(g->cyc_comp); free(g->vexact); free(g->vxy);
+	free(g->face); free(g->h_ev); free(g->h_fwd); free(g->area); free(g->cyc_comp); free(g->vexact); free(g->vxy); free(g->cvfirst); free(g->cvlist); qaws_internal_grid_destroy(g->sgrid); free(g->ray.list); free(g->ray.stamp);
 }
 
 static unsigned int cx_vfind(unsigned int* p, unsigned int i)
@@ -1881,7 +1990,7 @@ typedef struct cx_xing
 static qaws_status cx_locate(cx_ctx* x, cx_graph* g, unsigned int comp, unsigned int const* cface, unsigned int* out_face)
 {
 	static double const dirs[4][2] = { { 1, 0.29296875 }, { -0.4140625, 1 }, { -1, -0.33984375 }, { 0.44921875, -1 } };
-	unsigned int vi, capk = 64, capx = 64;
+	unsigned int kv, capk = 64, capx = 64;
 	qaws_exact_hit* hk = (qaws_exact_hit*)malloc(sizeof(qaws_exact_hit) * capk);
 	cx_xing* xs = (cx_xing*)malloc(sizeof(cx_xing) * capx);
 	unsigned char* skip = (unsigned char*)calloc(g->nv + 1, 1);
@@ -1893,11 +2002,11 @@ static qaws_status cx_locate(cx_ctx* x, cx_graph* g, unsigned int comp, unsigned
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 	*out_face = 0;
-	for (vi = 0; vi < g->nv && st == QAWS_STATUS_OK; vi++)
+	for (kv = g->cvfirst[comp]; kv < g->cvfirst[comp + 1] && st == QAWS_STATUS_OK; kv++)
 	{
-		unsigned int di, s;
+		unsigned int di, s, si, vi = g->cvlist[kv];
 		double const* p = &g->vxy[2 * vi];
-		if (g->v[vi].count == 0 || !g->vexact[vi] || x->e[g->emap[g->out[g->v[vi].first] >> 1]].comp != comp)
+		if (g->v[vi].count == 0 || !g->vexact[vi])
 			continue;
 		for (di = 0; di < 4 && st == QAWS_STATUS_OK; di++)
 		{
@@ -1909,17 +2018,54 @@ static qaws_status cx_locate(cx_ctx* x, cx_graph* g, unsigned int comp, unsigned
 			/* the direction the doubles give */
 			dir[0] = p1[0] - p[0];
 			dir[1] = p1[1] - p[1];
-			for (s = 0; s < x->nsrc && !bad && st == QAWS_STATUS_OK; s++)
+			/* the sources along the ray */
+			g->ray.n = 0;
+			g->ray.gen++;
+			if (g->sgrid)
+				qaws_internal_grid_ray(g->sgrid, p, dir, HUGE_VAL, cx_raycol_visit, &g->ray);
+			else
+				for (s = 0; s < x->nsrc; s++)
+					cx_raycol_visit(&g->ray, &s, 1, 0);
+			if (g->ray.failed)
+				st = QAWS_STATUS_ALLOCATION_FAILURE;
+			for (si = 0; si < g->ray.n && !bad && st == QAWS_STATUS_OK; si++)
 			{
-				cx_src const* sr = &x->src[s];
+				cx_src const* sr = &x->src[s = g->ray.list[si]];
 				unsigned int nh = 0, j;
 				qaws_status ls;
 				/* sources of the part itself, and those the ray cannot meet */
 				if (cx_src_in(x, s, comp) || !cx_ray_box(p, dir, sr->lo, sr->hi, margin))
 					continue;
+				if (sr->is_line)
+				{
+					/* a straight source: the crossing in double (the ray is located with a margin anyway) */
+					double ddx = sr->lb[0] - sr->la[0], ddy = sr->lb[1] - sr->la[1], ax = sr->la[0] - p[0], ay = sr->la[1] - p[1];
+					double den = dir[0] * ddy - dir[1] * ddx, u;
+					ls = QAWS_STATUS_OK;
+					if (fabs(den) <= 1e-12 * hypot(dir[0], dir[1]) * hypot(ddx, ddy))
+					{
+						/* parallel: along the ray spoils it */
+						if (fabs(ax * dir[1] - ay * dir[0]) <= margin * hypot(dir[0], dir[1]))
+							ls = QAWS_STATUS_CERTIFICATION_FAILED;
+					}
+					else
+					{
+						u = (ax * dir[1] - ay * dir[0]) / den;
+						if (u >= -1e-12 && u <= 1 + 1e-12)
+						{
+							double t = sr->t0 + u * (sr->t1 - sr->t0), w = 1e-12 * (sr->t1 - sr->t0);
+							hk[0].kind = QAWS_EXACT_HIT_CROSSING;
+							hk[0].t_lo = t - w;
+							hk[0].t_hi = t + w;
+							nh = 1;
+						}
+					}
+				}
+				else
 				for (;;)
 				{
-					ls = qaws_exact_curve_line_hits(sr->e, p, p1, 0.0, hk, capk, &nh);
+					/* a coarse enclosure is enough to find the edge and the distance */
+					ls = qaws_exact_curve_line_hits(sr->e, p, p1, 1e-9 * (sr->t1 - sr->t0), hk, capk, &nh);
 					if (ls != QAWS_STATUS_BUFFER_TOO_SMALL)
 						break;
 					capk *= 4;
@@ -1942,7 +2088,15 @@ static qaws_status cx_locate(cx_ctx* x, cx_graph* g, unsigned int comp, unsigned
 					unsigned int c, ei, r, live;
 					int f, own = 0;
 					if (hk[j].kind == QAWS_EXACT_HIT_OVERLAP) { bad = 1; break; }
-					if (qaws_exact_curve_evaluate(sr->e, tm, 1, pd, NULL) != QAWS_STATUS_OK) { bad = 1; break; }
+					if (sr->is_line)
+					{
+						double u = (tm - sr->t0) / (sr->t1 - sr->t0);
+						pd[0] = sr->la[0] + u * (sr->lb[0] - sr->la[0]);
+						pd[1] = sr->la[1] + u * (sr->lb[1] - sr->la[1]);
+						pd[2] = sr->lb[0] - sr->la[0];
+						pd[3] = sr->lb[1] - sr->la[1];
+					}
+					else if (qaws_exact_curve_evaluate(sr->e, tm, 1, pd, NULL) != QAWS_STATUS_OK) { bad = 1; break; }
 					dist = ((pd[0] - p[0]) * dir[0] + (pd[1] - p[1]) * dir[1]) / hypot(dir[0], dir[1]);
 					if (dist < -margin)
 						continue;
@@ -2006,6 +2160,14 @@ static qaws_status cx_locate(cx_ctx* x, cx_graph* g, unsigned int comp, unsigned
 						b--;
 					}
 					xs[b] = key;
+				}
+				/* sources merged into one edge (an overlap) cross the ray there once */
+				{
+					unsigned int m = 0;
+					for (a = 0; a < nx; a++)
+						if (m == 0 || (xs[a].half >> 1) != (xs[m - 1].half >> 1) || xs[a].dist - xs[m - 1].dist > margin)
+							xs[m++] = xs[a];
+					nx = m;
 				}
 				for (a = 1; a < nx && !bad; a++)
 					if (xs[a].dist - xs[a - 1].dist <= margin)
@@ -2186,6 +2348,19 @@ static qaws_status cx_build(cx_ctx* x, qaws_clip_result* result)
 	for (i = 0; i < g.ne; i++)
 		x->e[g.emap[i]].comp = cx_vfind(vcomp, g.e[i].v0);
 	g.vcomp = vcomp;
+	/* each part's vertices */
+	g.cvfirst = (unsigned int*)calloc(g.nv + 2, sizeof(unsigned int));
+	g.cvlist = (unsigned int*)malloc(sizeof(unsigned int) * (g.nv + 1));
+	if (!g.cvfirst || !g.cvlist) { st = QAWS_STATUS_ALLOCATION_FAILURE; goto done; }
+	for (i = 0; i < g.nv; i++)
+		g.cvfirst[cx_vfind(vcomp, i) + 1]++;
+	for (i = 0; i < g.nv; i++)
+		g.cvfirst[i + 1] += g.cvfirst[i];
+	for (i = 0; i < g.nv; i++)
+		g.cvlist[g.cvfirst[cx_vfind(vcomp, i)]++] = i;
+	for (i = g.nv; i > 0; i--)
+		g.cvfirst[i] = g.cvfirst[i - 1];
+	g.cvfirst[0] = 0;
 	/* the comp of merged / dropped edges: their representative's */
 	for (i = 0; i < x->ne; i++)
 	{
@@ -2244,6 +2419,22 @@ static qaws_status cx_build(cx_ctx* x, qaws_clip_result* result)
 				st = QAWS_STATUS_CERTIFICATION_FAILED;   /* no cycle turns clockwise round the part */
 		for (i = 0; i < nh; i++)
 			g.face[i] = cface[g.cyc[i]];
+		/* the sources' boxes in a grid, for the rays */
+		{
+			qaws_bp_box* sb = (qaws_bp_box*)malloc(sizeof(qaws_bp_box) * (x->nsrc + 1));
+			g.ray.stamp = (unsigned int*)calloc(x->nsrc + 1, sizeof(unsigned int));
+			if (!sb || !g.ray.stamp)
+				st = QAWS_STATUS_ALLOCATION_FAILURE;
+			for (i = 0; st == QAWS_STATUS_OK && i < x->nsrc; i++)
+			{
+				sb[i].lo[0] = x->src[i].lo[0]; sb[i].lo[1] = x->src[i].lo[1];
+				sb[i].hi[0] = x->src[i].hi[0]; sb[i].hi[1] = x->src[i].hi[1];
+				sb[i].lo[2] = sb[i].hi[2] = 0;
+			}
+			if (st == QAWS_STATUS_OK && qaws_internal_grid_create(sb, x->nsrc, 2, &g.sgrid) != QAWS_STATUS_OK)
+				g.sgrid = NULL;
+			free(sb);
+		}
 		/* where each part lies among the others */
 		{
 			unsigned int* pface = (unsigned int*)malloc(sizeof(unsigned int) * (g.nv + 1));
@@ -2333,7 +2524,7 @@ static void cx_free(cx_ctx* x)
 		qaws_exact_curve_destroy(x->src[i].e);
 	for (i = 0; i < x->ntemp; i++)
 		qaws_curve_destroy(x->temp[i]);
-	free(x->src); free(x->temp); free(x->pts); free(x->rats); free(x->ev); free(x->hits); free(x->cuts); free(x->e);
+	free(x->src); free(x->temp); free(x->pts); free(x->ptf); free(x->sev_first); free(x->sev); free(x->rats); free(x->ev); free(x->hits); free(x->cuts); free(x->e);
 }
 
 qaws_status qaws_clip_exact_execute(qaws_clip_exact_desc const* desc, qaws_clip_result** out_result, qaws_clip_exact_stats* out_stats)
@@ -2393,6 +2584,7 @@ qaws_status qaws_clip_exact_execute(qaws_clip_exact_desc const* desc, qaws_clip_
 	if (st == QAWS_STATUS_OK && x.nsrc)
 	{
 		st = cx_hits(&x);
+		if (st == QAWS_STATUS_OK) st = cx_bucket(&x);
 		if (st == QAWS_STATUS_OK) st = cx_vertices(&x);
 		if (st == QAWS_STATUS_OK) st = cx_edges(&x);
 		if (st == QAWS_STATUS_OK) st = cx_merge(&x);
