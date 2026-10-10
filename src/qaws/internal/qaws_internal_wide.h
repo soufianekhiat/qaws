@@ -104,20 +104,32 @@ QAWS_INLINE qaws_wide qaws_wide_mul(qaws_wide const* a, qaws_wide const* b)
 	if (qaws_wide_sign(&x) < 0) { x = qaws_wide_neg(x); neg = !neg; }
 	if (qaws_wide_sign(&y) < 0) { y = qaws_wide_neg(y); neg = !neg; }
 	memset(&r, 0, sizeof(r));
-	for (i = 0; i < QAWS_WIDE_LIMBS; i++)
 	{
-		uint64_t carry = 0;
-		if (!x.l[i]) continue;
-		for (j = 0; i + j < QAWS_WIDE_LIMBS; j++)
+		/* only y's limbs up to its highest non-zero one (most operands are
+		   one or two limbs), then the carry */
+		int ny = QAWS_WIDE_LIMBS;
+		while (ny > 0 && !y.l[ny - 1]) ny--;
+		for (i = 0; i < QAWS_WIDE_LIMBS; i++)
 		{
-			uint64_t hi, lo, s;
-			qaws_mul_u64(x.l[i], y.l[j], &hi, &lo);
-			s = r.l[i + j] + lo;
-			hi += s < lo;
-			s += carry;
-			hi += s < carry;
-			r.l[i + j] = s;
-			carry = hi;
+			uint64_t carry = 0;
+			if (!x.l[i]) continue;
+			for (j = 0; j < ny && i + j < QAWS_WIDE_LIMBS; j++)
+			{
+				uint64_t hi, lo, s;
+				qaws_mul_u64(x.l[i], y.l[j], &hi, &lo);
+				s = r.l[i + j] + lo;
+				hi += s < lo;
+				s += carry;
+				hi += s < carry;
+				r.l[i + j] = s;
+				carry = hi;
+			}
+			for (j = i + ny; carry && j < QAWS_WIDE_LIMBS; j++)
+			{
+				uint64_t s = r.l[j] + carry;
+				carry = s < carry;
+				r.l[j] = s;
+			}
 		}
 	}
 	return neg ? qaws_wide_neg(r) : r;

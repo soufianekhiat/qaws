@@ -1019,10 +1019,10 @@ static double cl_half_area(cl_ctx const* x, unsigned int h)
 	double a = 0.0;
 	if (cl_is_line_src(x, e->src))
 	{
-		/* a line from p to q: (x_p + x_q) / 2 (y_q - y_p), in double */
-		double p[2], q[2];
-		cl_eval(x->src[e->src].c, (h & 1) ? e->t1 : e->t0, p, NULL);
-		cl_eval(x->src[e->src].c, (h & 1) ? e->t0 : e->t1, q, NULL);
+		/* a line from p to q: (x_p + x_q) / 2 (y_q - y_p), in double, on the
+		   vertices (the points the graph is built on) */
+		double const* p = x->v[cl_origin(x, h)].p;
+		double const* q = x->v[cl_origin(x, h ^ 1)].p;
 		return 0.5 * (p[0] + q[0]) * (q[1] - p[1]);
 	}
 	qaws_internal_curve_area_2d(x->src[e->src].c, (h & 1) ? e->t1 : e->t0, (h & 1) ? e->t0 : e->t1,
@@ -1087,6 +1087,42 @@ static unsigned int cl_vfind(unsigned int* p, unsigned int i)
 /* faces: CCW cycles; each CW cycle belongs to the face around it (the
    smallest CCW cycle of another component that winds around it), or to the
    unbounded face 0. Writes x->h[].face and returns the face count. */
+/* nesting of outer cycles: boxes [0, npos) are positive cycles, the rest
+   the outer cycles' first vertices */
+typedef struct cl_nest
+{
+	cl_ctx const* x;
+	cl_cycle const* cyc;
+	unsigned int npos;
+	unsigned int* cyc_of;       /* box -> cycle */
+	unsigned int* best;         /* per query: the smallest positive cycle round it */
+	double* best_area;
+} cl_nest;
+
+static int cl_nest_accept(void* user, unsigned int i, unsigned int j)
+{
+	cl_nest const* n = (cl_nest const*)user;
+	return i < n->npos && j >= n->npos;
+}
+
+static qaws_status cl_nest_visit(void* user, unsigned int i, unsigned int j)
+{
+	cl_nest* n = (cl_nest*)user;
+	unsigned int c = n->cyc_of[i], q = j - n->npos, o = n->cyc_of[j];
+	cl_cycle const* C = &n->cyc[c];
+	double const* p;
+	if (C->comp == n->cyc[o].comp) return QAWS_STATUS_OK;
+	/* the smallest wins, the lower cycle on a tie (the order of a plain scan) */
+	if (C->area > n->best_area[q] || (C->area == n->best_area[q] && c > n->best[q])) return QAWS_STATUS_OK;
+	p = n->x->v[cl_origin(n->x, n->cyc[o].h0)].p;
+	if (cl_cycle_winding(n->x, C->h0, p) != 0)
+	{
+		n->best[q] = c;
+		n->best_area[q] = C->area;
+	}
+	return QAWS_STATUS_OK;
+}
+
 static qaws_status cl_faces(cl_ctx* x, unsigned int* out_faces, unsigned int** out_cycle_face, cl_cycle** out_cycles,
 	unsigned int* out_ncycles)
 {
@@ -1126,7 +1162,9 @@ static qaws_status cl_faces(cl_ctx* x, unsigned int* out_faces, unsigned int** o
 			if (p[1] < c.lo[1]) c.lo[1] = p[1];
 			if (p[0] > c.hi[0]) c.hi[0] = p[0];
 			if (p[1] > c.hi[1]) c.hi[1] = p[1];
-			/* the box of the curve between, roughly: its middle */
+			/* the box of the curve between, roughly: its middle (a line's ends
+			   are its box) */
+			if (!cl_is_line_src(x, x->e[h >> 1].src))
 			{
 				cl_edge const* e = &x->e[h >> 1];
 				double m[2];
@@ -1159,26 +1197,54 @@ static qaws_status cl_faces(cl_ctx* x, unsigned int* out_faces, unsigned int** o
 	}
 	for (i = 0; i < ncyc; i++)
 		cface[i] = cyc[i].area > 0 ? nfaces++ : CL_NONE;
-	for (i = 0; i < ncyc; i++)
+	/* each outer cycle (negative) lies in the smallest positive cycle of
+	   another part that winds round its first vertex: the candidates from
+	   the grid (positive cycles' boxes against the query points) */
 	{
-		unsigned int j, best = CL_NONE;
-		double q[2], best_area = 1e300;
-		if (cface[i] != CL_NONE) continue;
-		q[0] = x->v[cl_origin(x, cyc[i].h0)].p[0];
-		q[1] = x->v[cl_origin(x, cyc[i].h0)].p[1];
-		for (j = 0; j < ncyc; j++)
+		cl_nest n;
+		unsigned int npos = 0, nq = 0;
+		qaws_bp_box* boxes;
+		memset(&n, 0, sizeof(n));
+		for (i = 0; i < ncyc; i++) { if (cface[i] != CL_NONE) npos++; else nq++; }
+		boxes = (qaws_bp_box*)malloc(sizeof(qaws_bp_box) * (npos + nq + 1));
+		n.cyc_of = (unsigned int*)malloc(sizeof(unsigned int) * (npos + nq + 1));
+		n.best = (unsigned int*)malloc(sizeof(unsigned int) * (nq + 1));
+		n.best_area = (double*)malloc(sizeof(double) * (nq + 1));
+		if (!boxes || !n.cyc_of || !n.best || !n.best_area)
 		{
-			if (!(cyc[j].area > 0) || cyc[j].comp == cyc[i].comp || cyc[j].area >= best_area)
-				continue;
-			if (q[0] < cyc[j].lo[0] || q[0] > cyc[j].hi[0] || q[1] < cyc[j].lo[1] || q[1] > cyc[j].hi[1])
-				continue;
-			if (cl_cycle_winding(x, cyc[j].h0, q) != 0)
-			{
-				best = j;
-				best_area = cyc[j].area;
-			}
+			free(boxes); free(n.cyc_of); free(n.best); free(n.best_area);
+			free(cyc); free(cface); free(vcomp); free(hcyc);
+			return QAWS_STATUS_ALLOCATION_FAILURE;
 		}
-		cface[i] = best == CL_NONE ? 0 : cface[best];
+		n.x = x; n.cyc = cyc; n.npos = npos;
+		npos = nq = 0;
+		for (i = 0; i < ncyc; i++)
+			if (cface[i] != CL_NONE)
+			{
+				boxes[npos].lo[0] = cyc[i].lo[0]; boxes[npos].lo[1] = cyc[i].lo[1];
+				boxes[npos].hi[0] = cyc[i].hi[0]; boxes[npos].hi[1] = cyc[i].hi[1];
+				boxes[npos].lo[2] = boxes[npos].hi[2] = 0;
+				n.cyc_of[npos++] = i;
+			}
+		for (i = 0; i < ncyc; i++)
+			if (cface[i] == CL_NONE)
+			{
+				double const* p = x->v[cl_origin(x, cyc[i].h0)].p;
+				qaws_bp_box* b = &boxes[n.npos + nq];
+				b->lo[0] = b->hi[0] = p[0]; b->lo[1] = b->hi[1] = p[1]; b->lo[2] = b->hi[2] = 0;
+				n.cyc_of[n.npos + nq] = i;
+				n.best[nq] = CL_NONE;
+				n.best_area[nq] = 1e300;
+				nq++;
+			}
+		if (nq && n.npos)
+			qaws_internal_broadphase(boxes, n.npos + nq, 2, cl_nest_accept, cl_nest_visit, &n, NULL);
+		for (i = 0; i < nq; i++)
+		{
+			unsigned int c = n.cyc_of[n.npos + i];
+			cface[c] = n.best[i] == CL_NONE ? 0 : cface[n.best[i]];
+		}
+		free(boxes); free(n.cyc_of); free(n.best); free(n.best_area);
 	}
 	for (i = 0; i < nh; i++)
 		x->h[i].face = cface[hcyc[i]];
