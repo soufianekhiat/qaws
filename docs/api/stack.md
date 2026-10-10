@@ -112,27 +112,44 @@ This builds the stack's surface as a 3D triangle mesh.
 1. **Heights.** One section at every level, plus `sections` more between
    two levels so that a cubic profile is followed. The sections are
    computed in parallel on the executor.
-2. **Samples.** Each section's contours are sampled on their curves by arc
-   length.
-3. **Pairing.** Contours are paired between neighbouring heights: outer
-   with outer, hole with hole, by overlapping boxes and mutually nearest
-   centres, one to one.
-4. **Chains.** Paired contours form chains up the stack, and a chain shares
-   one sample count (the largest its members want). Neighbouring bands then
-   meet vertex for vertex.
-5. **Bands.** Each pair is stitched: the upper contour is rotated to the
-   least squared distance, and each quad is split along its shorter
-   diagonal.
-6. **Tips, splits and ends.**
-   - A contour with nothing at the next height (a cone's tip, a sphere's
-     pole) closes in a fan to its centre there.
-   - A contour left unpaired where the next height has other contours (a
-     split, a merge) gets a flat cap at its own height.
-   - With `caps`, the first and last sections are closed by flat faces,
-     triangulated (`qaws_triangulate`) on the same samples.
+2. **Samples.** Each contour is sampled on its curves, with its own count
+   (its length over `spacing`, at least 8). Corners are always samples:
+   where pieces meet at an angle or a polyline kinks (a turn over about
+   25°). The arc length between corners is shared out evenly.
+3. **Linking.** Between neighbouring heights, contours of the same
+   orientation that overlap in plan are grouped:
+   - **One to one:** a band.
+   - **One to several (a split) or several to one (a merge):** the single
+     contour's samples go to their nearest partner. Each run becomes a loop,
+     closed across the neck by a bridge that the next loop shares. Each loop
+     is banded to its partner. With three partners or more, the polygon of
+     the cut points is filled.
+   - **Anything else:** pairs by nearest centres.
+4. **Bands.** Two contours with the same number of corners are stitched
+   corner to corner, so creases run straight up the stack. The corner
+   pairing is the rotation with the least total distance, since creases
+   often come as close twins. Otherwise the upper contour starts at the
+   sample nearest the lower one's start. In both cases the stitch is
+   greedy, taking the shorter diagonal first, so the two sample counts
+   need not match.
+5. **Tips and ends.**
+   - A contour left without a partner on one side closes in a fan to a
+     tip when it is shrinking to a point: a cone's tip, a sphere's pole,
+     a cone's tip inside a Boolean. The pace of shrinking comes from its
+     partner on the other side. The tip sits where the size would reach
+     zero, at most at the next height.
+   - Otherwise it gets a flat cap at its own height, such as a cube's top
+     face when the stack goes on above it, empty.
+   - With `caps`, the first and last sections are closed by flat faces.
+   - Caps are triangulated (`qaws_triangulate`) on the same samples. A
+     cap edge that the triangulation merged across a straight run is split
+     again through those samples, so caps meet bands edge for edge.
 
-Triangles turn counter-clockwise seen from outside. The mesh is closed;
-across a split or a merge, the cap and the continuing band may cross.
+Triangles turn counter-clockwise seen from outside. The mesh is closed.
+
+The levels of a stack Boolean (`qaws_stack_boolean_2d`) can be meshed
+directly with `sections = 0`. Its contours merge, split and end level by
+level.
 
 Test 92 checks that every directed edge has its reverse exactly once, and
 that the volume by the divergence theorem matches the closed form:
@@ -143,7 +160,13 @@ that the volume by the divergence theorem matches the closed form:
 | cone from a circle and a point | π/3 |
 | tube with a hole | 3π |
 | sphere from 17 circles with point poles, cubic | 4π/3, within 0.6% |
+| box from two squares (corners kept) | 8 |
+| two unit spheres united level by level (merge, then split) | the union's, within 3% |
 
 The test also checks that an ellipse splitting into two circles stays
 closed, and that an executor gives the same mesh. Figure 9 of
-`qaws_better2d_showcase` renders six such meshes.
+`qaws_better2d_showcase` renders nine such meshes on a 3x3 grid:
+
+- cone, sphere, drifting tube;
+- ellipse split, cone ∪ sphere, twisting star;
+- cube − sphere, two spheres ∪, cube ∩ sphere.

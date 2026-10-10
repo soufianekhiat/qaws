@@ -183,153 +183,218 @@ static qaws_curve* sm3_circle(double x, double y, double r, int hole)
 	return rv;
 }
 
+/* the Boolean of two stacks, level by level, as a stack of the results'
+   levels (the paths stay owned by the result) */
+typedef struct sm3_bool
+{
+	qaws_stack_result* r;
+	qaws_path_2d paths[96][16];
+	qaws_stack_level levels[96];
+	unsigned int count;
+} sm3_bool;
+
+static void sm3_boolean(qaws_clip_type ct, qaws_stack_2d const* a, qaws_stack_2d const* b, sm3_bool* out)
+{
+	unsigned int i;
+	out->r = NULL;
+	out->count = 0;
+	if (qaws_stack_boolean_2d(ct, a, b, NULL, &out->r) != QAWS_STATUS_OK) return;
+	for (i = 0; i < qaws_stack_result_get_level_count(out->r) && i < 96; i++)
+	{
+		qaws_clip_result const* lr = qaws_stack_result_get_level(out->r, i);
+		unsigned int j, np = qaws_clip_result_get_path_count(lr);
+		for (j = 0; j < np && j < 16; j++) qaws_clip_result_get_path(lr, j, &out->paths[i][j]);
+		out->levels[i].z = qaws_stack_result_get_z(out->r, i);
+		out->levels[i].paths = out->paths[i];
+		out->levels[i].path_count = np < 16 ? np : 16;
+	}
+	out->count = i;
+}
+
+/* a sphere as n + 1 circles (point poles) */
+static void sm3_sphere(sm3_stack* s, double cx, double cy, double cz, double r, unsigned int n)
+{
+	unsigned int i;
+	for (i = 0; i <= n; i++)
+	{
+		double th = CO_PI * (n - i) / n;
+		qaws_curve* c = sm3_circle(cx, cy, r * sin(th), 0);
+		sm3_level(s, cz + r * cos(th), &c, 1);
+	}
+}
+
+static qaws_curve* sm3_square(double cx, double cy, double h)
+{
+	qaws_scalar p[8];
+	qaws_curve* c = NULL;
+	p[0] = (qaws_scalar)(cx - h); p[1] = (qaws_scalar)(cy - h);
+	p[2] = (qaws_scalar)(cx + h); p[3] = (qaws_scalar)(cy - h);
+	p[4] = (qaws_scalar)(cx + h); p[5] = (qaws_scalar)(cy + h);
+	p[6] = (qaws_scalar)(cx - h); p[7] = (qaws_scalar)(cy + h);
+	qaws_curve_create_polyline_2d(p, 4, 1, &c);
+	return c;
+}
+
+static qaws_stack_2d sm3_make(sm3_stack* s, qaws_stack_interp in)
+{
+	qaws_stack_2d d;
+	memset(&d, 0, sizeof(d));
+	d.levels = s->l; d.level_count = s->nl; d.fill_rule = QAWS_FILL_NON_ZERO; d.interp = in;
+	return d;
+}
+
 static void demo_stack_mesh(void)
 {
-	int const cols = 3, rows = 2, pw = 420, ph = 380, gap = 16, top = 84;
+	int const cols = 3, rows = 3, pw = 420, ph = 380, gap = 16, top = 84;
 	int const W = cols * pw + (cols + 1) * gap, H = top + rows * (ph + gap) + 8;
 	svg s;
 	int k;
 	double t0;
 	char label[200];
 	if (!svg_open(&s, "showcase/b2d9_stack_mesh.svg", W, H, "Stacks of contours as surface meshes",
-		"qaws_stack_mesh_3d: sections sampled on their curves, contours paired up the stack and stitched; fans at tips, caps at the ends and where contours split; closed meshes"))
+		"qaws_stack_mesh_3d: contours paired up the stack and stitched; splits and merges branched across the neck; fans at tips; Booleans solved level by level, then meshed; closed meshes"))
 		return;
 	t0 = (double)clock() / CLOCKS_PER_SEC;
-	for (k = 0; k < 6; k++)
+	for (k = 0; k < 9; k++)
 	{
 		sm3_view w;
-		sm3_stack st;
-		qaws_stack_2d sd;
+		sm3_stack st, a, b;
+		sm3_bool bo;
+		qaws_stack_2d sd, sa, sb;
 		qaws_stack_mesh_desc d;
 		qaws_mesh_3d* m = NULL;
-		qaws_stack_result* br = NULL;
 		qaws_curve* cs[3];
-		unsigned int i, sections = 0;
+		unsigned int i, sections = 0, levels = 0;
 		double col[3] = { 0.45, 0.65, 0.95 };
 		char const* title = "";
-		memset(&st, 0, sizeof(st));
+		memset(&st, 0, sizeof(st)); memset(&a, 0, sizeof(a)); memset(&b, 0, sizeof(b));
+		memset(&bo, 0, sizeof(bo));
 		memset(&sd, 0, sizeof(sd));
 		memset(&w, 0, sizeof(w));
 		w.v.x0 = gap + (k % cols) * (pw + gap); w.v.y0 = top + (k / cols) * (ph + gap); w.v.w = pw; w.v.h = ph;
 		w.az = 0.55; w.el = 0.42; w.scale = 62; w.cz = 1.1;
 		sd.fill_rule = QAWS_FILL_NON_ZERO;
-		if (k == 0)
+		switch (k)
 		{
+		case 0:
 			cs[0] = sm3_circle(0, 0, 1.7, 0); sm3_level(&st, 0, cs, 1);
 			cs[0] = sm3_circle(0, 0, 0, 0); sm3_level(&st, 2.6, cs, 1);
+			sd = sm3_make(&st, QAWS_STACK_LINEAR);
 			title = "a cone: a circle and a point";
 			w.cz = 1.3;
-		}
-		else if (k == 1)
-		{
-			for (i = 0; i <= 8; i++)
-			{
-				double th = CO_PI * (8 - i) / 8;
-				cs[0] = sm3_circle(0, 0, 1.6 * sin(th), 0);
-				sm3_level(&st, 1.6 + 1.6 * cos(th), cs, 1);
-			}
-			sd.interp = QAWS_STACK_CUBIC;
+			break;
+		case 1:
+			sm3_sphere(&st, 0, 0, 1.6, 1.6, 8);
+			sd = sm3_make(&st, QAWS_STACK_CUBIC);
 			sections = 4;
 			title = "a sphere from 9 circles, cubic, 4 sections between";
 			w.cz = 1.6; col[0] = 0.4; col[1] = 0.8; col[2] = 0.5;
-		}
-		else if (k == 2)
-		{
+			break;
+		case 2:
 			for (i = 0; i <= 6; i++)
 			{
-				double z = 0.45 * i, a = 0.9 * i;
+				double ang = 0.9 * i;
 				cs[0] = sm3_circle(0, 0, 1.8 - 0.08 * i, 0);
-				cs[1] = sm3_circle(0.7 * cos(a), 0.7 * sin(a), 0.6, 1);
-				sm3_level(&st, z, cs, 2);
+				cs[1] = sm3_circle(0.7 * cos(ang), 0.7 * sin(ang), 0.6, 1);
+				sm3_level(&st, 0.45 * i, cs, 2);
 			}
-			sd.interp = QAWS_STACK_CUBIC;
+			sd = sm3_make(&st, QAWS_STACK_CUBIC);
 			sections = 3;
 			title = "a tube whose hole drifts round";
 			w.cz = 1.35; col[0] = 0.95; col[1] = 0.7; col[2] = 0.35;
-		}
-		else if (k == 3)
+			break;
+		case 3:
 		{
 			qaws_curve* e = NULL;
 			qaws_curve_create_ellipse_2d((qaws_scalar)0.2, 0, (qaws_scalar)2.2, (qaws_scalar)1.0, 0, &e);
 			cs[0] = e; sm3_level(&st, 0, cs, 1);
 			cs[0] = sm3_circle(-1.2, 0, 0.7, 0); cs[1] = sm3_circle(1.6, 0, 0.9, 0); sm3_level(&st, 2.2, cs, 2);
-			sd.blend = QAWS_STACK_BLEND_DISTANCE; sd.grid = 120;
-			sections = 10;
-			title = "an ellipse splitting into two circles";
+			sd = sm3_make(&st, QAWS_STACK_LINEAR);
+			sd.blend = QAWS_STACK_BLEND_DISTANCE; sd.grid = 160;
+			sections = 16;
+			title = "an ellipse splitting into two circles (branched)";
 			w.cz = 1.1; col[0] = 0.75; col[1] = 0.55; col[2] = 0.95;
+			break;
 		}
-		else if (k == 4)
-		{
-			/* cone + sphere, the Boolean level by level, then meshed */
-			sm3_stack a, b;
-			qaws_stack_2d sa, sb;
-			memset(&a, 0, sizeof(a)); memset(&b, 0, sizeof(b));
-			memset(&sa, 0, sizeof(sa)); memset(&sb, 0, sizeof(sb));
+		case 4:
+			/* cone + sphere */
 			cs[0] = sm3_circle(0, 0, 1.5, 0); sm3_level(&a, 0, cs, 1);
 			cs[0] = sm3_circle(0, 0, 0, 0); sm3_level(&a, 2.6, cs, 1);
-			for (i = 0; i <= 12; i++)
-			{
-				double th = CO_PI * (12 - i) / 12;
-				cs[0] = sm3_circle(0.9, 0, 1.0 * sin(th), 0);
-				sm3_level(&b, 1.3 + 1.0 * cos(th), cs, 1);
-			}
-			sa.levels = a.l; sa.level_count = a.nl; sa.fill_rule = QAWS_FILL_NON_ZERO;
-			sb.levels = b.l; sb.level_count = b.nl; sb.fill_rule = QAWS_FILL_NON_ZERO; sb.interp = QAWS_STACK_CUBIC;
-			if (qaws_stack_boolean_2d(QAWS_CLIP_UNION, &sa, &sb, NULL, &br) == QAWS_STATUS_OK)
-			{
-				/* the result's levels as a stack (matched by distance) */
-				static qaws_path_2d rp[64][8];
-				for (i = 0; i < qaws_stack_result_get_level_count(br) && i < 64; i++)
-				{
-					qaws_clip_result const* lr = qaws_stack_result_get_level(br, i);
-					unsigned int j, np = qaws_clip_result_get_path_count(lr);
-					for (j = 0; j < np && j < 8; j++) qaws_clip_result_get_path(lr, j, &rp[i][j]);
-					st.l[i].z = qaws_stack_result_get_z(br, i);
-					st.l[i].paths = rp[i];
-					st.l[i].path_count = np < 8 ? np : 8;
-				}
-				st.nl = i;
-			}
-			sm3_free(&a); sm3_free(&b);
-			sd.blend = QAWS_STACK_BLEND_DISTANCE; sd.grid = 120;
-			sections = 2;
-			title = "cone + sphere: the Boolean level by level, meshed";
+			sm3_sphere(&b, 0.9, 0, 1.3, 1.0, 24);
+			sa = sm3_make(&a, QAWS_STACK_LINEAR); sb = sm3_make(&b, QAWS_STACK_CUBIC);
+			sm3_boolean(QAWS_CLIP_UNION, &sa, &sb, &bo);
+			title = "cone + sphere, level by level";
 			w.cz = 1.3; col[0] = 0.95; col[1] = 0.5; col[2] = 0.45;
-		}
-		else
-		{
-			/* a star twisting as it rises: matched contours of one structure */
+			break;
+		case 5:
 			for (i = 0; i <= 6; i++)
 			{
-				double z = 0.42 * i, sc = 1.0 - 0.05 * i, a = 0.18 * i;
+				double sc = 1.0 - 0.05 * i, ang = 0.18 * i;
 				qaws_curve* star = co_star(10, 1.9 * sc, 1.0 * sc, 0, 0);
 				qaws_curve* rot = NULL;
 				qaws_scalar mtx[6];
-				mtx[0] = (qaws_scalar)cos(a); mtx[1] = (qaws_scalar)-sin(a); mtx[2] = 0;
-				mtx[3] = (qaws_scalar)sin(a); mtx[4] = (qaws_scalar)cos(a); mtx[5] = 0;
+				mtx[0] = (qaws_scalar)cos(ang); mtx[1] = (qaws_scalar)-sin(ang); mtx[2] = 0;
+				mtx[3] = (qaws_scalar)sin(ang); mtx[4] = (qaws_scalar)cos(ang); mtx[5] = 0;
 				qaws_curve_transform_2d(star, mtx, &rot);
 				qaws_curve_destroy(star);
 				cs[0] = rot;
-				sm3_level(&st, z, cs, 1);
+				sm3_level(&st, 0.42 * i, cs, 1);
 			}
-			sd.interp = QAWS_STACK_CUBIC;
+			sd = sm3_make(&st, QAWS_STACK_CUBIC);
 			sections = 3;
 			title = "a star twisting as it rises (matched contours)";
 			w.cz = 1.25; col[0] = 0.45; col[1] = 0.85; col[2] = 0.9;
+			break;
+		case 6:
+			/* cube - sphere: a bite out of the top */
+			cs[0] = sm3_square(0, 0, 1.4); sm3_level(&a, 0, cs, 1);
+			cs[0] = sm3_square(0, 0, 1.4); sm3_level(&a, 2.4, cs, 1);
+			sm3_sphere(&b, 1.4, -0.2, 2.4, 1.15, 32);
+			sa = sm3_make(&a, QAWS_STACK_LINEAR); sb = sm3_make(&b, QAWS_STACK_CUBIC);
+			sm3_boolean(QAWS_CLIP_DIFFERENCE, &sa, &sb, &bo);
+			title = "cube - sphere: a bite out of an edge";
+			w.cz = 1.2; col[0] = 0.85; col[1] = 0.75; col[2] = 0.5;
+			break;
+		case 7:
+			/* two spheres united: their contours merge going up and split going on */
+			sm3_sphere(&a, -0.8, 0, 1.3, 1.2, 24);
+			sm3_sphere(&b, 0.8, 0.2, 1.6, 1.1, 24);
+			sa = sm3_make(&a, QAWS_STACK_CUBIC); sb = sm3_make(&b, QAWS_STACK_CUBIC);
+			sm3_boolean(QAWS_CLIP_UNION, &sa, &sb, &bo);
+			title = "two spheres united (merge and split, branched)";
+			w.cz = 1.45; col[0] = 0.55; col[1] = 0.6; col[2] = 0.95;
+			break;
+		default:
+			/* cube x sphere: a rounded cube */
+			cs[0] = sm3_square(0, 0, 1.3); sm3_level(&a, 0, cs, 1);
+			cs[0] = sm3_square(0, 0, 1.3); sm3_level(&a, 2.6, cs, 1);
+			sm3_sphere(&b, 0, 0, 1.3, 1.65, 32);
+			sa = sm3_make(&a, QAWS_STACK_LINEAR); sb = sm3_make(&b, QAWS_STACK_CUBIC);
+			sm3_boolean(QAWS_CLIP_INTERSECTION, &sa, &sb, &bo);
+			title = "cube x sphere: a rounded cube";
+			w.cz = 1.3; col[0] = 0.5; col[1] = 0.85; col[2] = 0.6;
+			break;
 		}
-		sd.levels = st.l; sd.level_count = st.nl;
+		if (bo.r)
+		{
+			/* the result's own levels are dense: meshed as they are */
+			memset(&sd, 0, sizeof(sd));
+			sd.levels = bo.levels; sd.level_count = bo.count; sd.fill_rule = QAWS_FILL_NON_ZERO;
+			sections = 0;
+		}
+		levels = sd.level_count;
 		memset(&d, 0, sizeof(d));
 		d.stack = &sd; d.sections = sections; d.caps = 1;
 		svg_panel(&s, &w.v, title);
-		if (qaws_stack_mesh_3d(&d, &m) == QAWS_STATUS_OK)
+		if (sd.level_count && qaws_stack_mesh_3d(&d, &m) == QAWS_STATUS_OK)
 			sm3_draw(&s, &w, m, col[0], col[1], col[2]);
 		sprintf(label, "%u vertices, %u triangles, %u levels%s", m ? qaws_mesh_3d_get_vertex_count(m) : 0, m ? qaws_mesh_3d_get_triangle_count(m) : 0,
-			st.nl, sections ? ", sections between" : "");
+			levels, sections ? ", sections between" : "");
 		svg_text(&s, w.v.x0 + 10, w.v.y0 + ph - 12, 11, "#57606a", "start", label);
 		qaws_mesh_3d_destroy(m);
-		qaws_stack_result_destroy(br);
-		sm3_free(&st);
+		qaws_stack_result_destroy(bo.r);
+		sm3_free(&st); sm3_free(&a); sm3_free(&b);
 	}
 	svg_close(&s);
-	printf("    stack mesh: 6 panels in %.3f s\n", (double)clock() / CLOCKS_PER_SEC - t0);
+	printf("    stack mesh: 9 panels in %.3f s\n", (double)clock() / CLOCKS_PER_SEC - t0);
 }

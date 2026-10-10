@@ -7,6 +7,9 @@
  *     3 pi, a sphere from 17 circles with point poles 4 pi / 3
  *   - a split (an ellipse into two circles) stays closed
  *   - the same mesh on an executor
+ *   - a box from two squares keeps its corners: volume 8
+ *   - two spheres united level by level (their circles merge, then split):
+ *     closed, the volume of the union
  */
 
 #include "test_common.h"
@@ -231,6 +234,76 @@ int test_92_stack_mesh_main(void)
 		TEST_ASSERT(m && open == 0 && vol > 2 * SMT_PI && vol < 3.6 * SMT_PI, msg);
 		qaws_mesh_3d_destroy(m);
 		smt_free(&s);
+	}
+	{
+		/* a box from two squares: the corners are samples, the volume exact */
+		smt_stack s;
+		qaws_scalar p[8] = { -1, -1, 1, -1, 1, 1, -1, 1 };
+		qaws_curve *a = NULL, *b = NULL;
+		memset(&s, 0, sizeof(s));
+		qaws_curve_create_polyline_2d(p, 4, 1, &a);
+		qaws_curve_create_polyline_2d(p, 4, 1, &b);
+		smt_level(&s, 0, a, NULL);
+		smt_level(&s, 2, b, NULL);
+		smt_done(&s, QAWS_STACK_LINEAR, QAWS_STACK_BLEND_AUTO);
+		smt_case("box 2 x 2 x 2 from two squares (corners kept)", &s.st, 0, 8, 1e-4);
+		smt_free(&s);
+	}
+	{
+		/* two unit spheres 1.2 apart, united level by level: their circles
+		   merge and split again; the union's levels meshed as they are */
+		smt_stack s[2];
+		qaws_stack_result* r = NULL;
+		unsigned int i, k;
+		memset(s, 0, sizeof(s));
+		for (k = 0; k < 2; k++)
+		{
+			for (i = 0; i <= 24; i++)
+			{
+				double th = SMT_PI * (24 - i) / 24;
+				smt_level(&s[k], k * 0.3 + cos(th), smt_circle(k ? 0.6 : -0.6, 0, sin(th)), NULL);
+			}
+			smt_done(&s[k], QAWS_STACK_CUBIC, QAWS_STACK_BLEND_AUTO);
+		}
+		if (qaws_stack_boolean_2d(QAWS_CLIP_UNION, &s[0].st, &s[1].st, NULL, &r) == QAWS_STATUS_OK && r)
+		{
+			static qaws_path_2d paths[64][4];
+			static qaws_stack_level levels[64];
+			qaws_stack_2d st;
+			unsigned int nl = qaws_stack_result_get_level_count(r), merged = 0;
+			qaws_mesh_3d* m;
+			unsigned int open = 0;
+			double vol = 0, want = 2 * 4 * SMT_PI / 3;
+			for (i = 0; i < nl && i < 64; i++)
+			{
+				qaws_clip_result const* lr = qaws_stack_result_get_level(r, i);
+				unsigned int j, np = qaws_clip_result_get_path_count(lr);
+				for (j = 0; j < np && j < 4; j++) qaws_clip_result_get_path(lr, j, &paths[i][j]);
+				levels[i].z = qaws_stack_result_get_z(r, i);
+				levels[i].paths = paths[i];
+				levels[i].path_count = np < 4 ? np : 4;
+				if (np == 1 && i > 0 && levels[i - 1].path_count == 2) merged++;
+			}
+			memset(&st, 0, sizeof(st));
+			st.levels = levels; st.level_count = i; st.fill_rule = QAWS_FILL_NON_ZERO;
+			m = smt_mesh(&st, 0, NULL);
+			if (m) smt_check(m, &open, &vol);
+			/* the union of two unit spheres: twice 4 pi / 3, less the lens (two
+			   caps of height 1 - d / 2 between centres sqrt(1.2^2 + 0.3^2) apart) */
+			{
+				double d = sqrt(1.2 * 1.2 + 0.3 * 0.3);
+				want -= SMT_PI * (4 + d) * (2 - d) * (2 - d) / 12;
+			}
+			sprintf(msg, "two spheres united (%u merges): %u triangles, %u open edges, volume %.4f (%.4f)",
+				merged, m ? qaws_mesh_3d_get_triangle_count(m) : 0, open, vol, want);
+			TEST_ASSERT(m && merged >= 1 && open == 0 && fabs(vol - want) < 0.03 * want, msg);
+			qaws_mesh_3d_destroy(m);
+		}
+		else
+			TEST_ASSERT(0, "two spheres united: the Boolean failed");
+		qaws_stack_result_destroy(r);
+		smt_free(&s[0]);
+		smt_free(&s[1]);
 	}
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
