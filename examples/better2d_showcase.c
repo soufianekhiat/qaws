@@ -36,6 +36,7 @@
 #include "better2d_showcase/03_clipper2.c"
 #include "better2d_showcase/04_offset.c"
 #include "better2d_showcase/05_stack.c"
+#include "better2d_showcase/06_curve_offset.c"
 
 int main(void)
 {
@@ -46,5 +47,6 @@ int main(void)
 	demo_clipper2();
 	demo_offset();
 	demo_stack();
+	demo_curve_offset();
 	return 0;
 }

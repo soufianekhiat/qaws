@@ -17,6 +17,7 @@
 #include "internal/qaws_internal_kinds.h"
 #include "internal/qaws_internal_flatten.h"
 #include "internal/qaws_internal_span.h"
+#include "internal/qaws_internal_offset.h"
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -311,7 +312,14 @@ typedef struct os_fit
 	qaws_scalar* cp;      /* 3 count + 1 points */
 	unsigned int count, cap;
 	int status;
+	int pend;             /* a link from the evolute back to the offset, held at a span end */
+	double pe[2], po[2];
 } os_fit;
+
+static void os_fit_push(os_fit* f, double const* b);
+static void os_link_flush(os_fit* f);
+static qaws_status os_join(os_ctx* x, qaws_join_type jt, double const* v, double const* tin, double const* tout,
+	double const* P, double const* Q, double delta);
 
 /* the cubic through the offset at ta, ta + h/3, ta + 2h/3, tb, split while a
    probe between misses the true offset by more than the tolerance */
@@ -351,6 +359,360 @@ static void os_fit_piece(os_ctx const* x, os_elem const* e, double delta, double
 			return;
 		}
 	}
+	os_fit_push(f, b);
+}
+
+/* the chain of cubics as one cubic B-spline (knots 0..count, multiplicity
+   3), kept; the chain is emptied */
+static qaws_status os_fit_emit(os_ctx* x, os_fit* f)
+{
+	qaws_status st;
+	os_link_flush(f);
+	st = f->status;
+	if (st == QAWS_STATUS_OK && f->count)
+	{
+		unsigned int np = 3 * f->count + 1, kc = 0, i;
+		qaws_scalar* kn = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (np + 4));
+		qaws_bspline_desc d;
+		qaws_curve* c = NULL;
+		if (!kn) st = QAWS_STATUS_ALLOCATION_FAILURE;
+		else
+		{
+			for (i = 0; i < 4; i++) kn[kc++] = 0;
+			for (i = 1; i < f->count; i++) { kn[kc++] = (qaws_scalar)i; kn[kc++] = (qaws_scalar)i; kn[kc++] = (qaws_scalar)i; }
+			for (i = 0; i < 4; i++) kn[kc++] = (qaws_scalar)f->count;
+			memset(&d, 0, sizeof(d));
+			d.dimension = QAWS_DIMENSION_2D; d.degree = 3; d.control_points = f->cp; d.control_point_count = np;
+			d.knots = kn; d.knot_count = kc;
+			st = qaws_curve_create_bspline(&d, &c);
+			if (st == QAWS_STATUS_OK)
+				st = os_keep(x, c);
+			free(kn);
+		}
+	}
+	free(f->cp);
+	memset(f, 0, sizeof(*f));
+	f->status = QAWS_STATUS_OK;
+	return st;
+}
+
+/* the offset of a curve element under a variable delta: cubics through the
+   offset points, span by span */
+static qaws_status os_fit_elem(os_ctx* x, os_elem const* e, double delta)
+{
+	os_fit f;
+	double lo = e->t0 < e->t1 ? e->t0 : e->t1, hi = e->t0 < e->t1 ? e->t1 : e->t0;
+	unsigned int n;
+	memset(&f, 0, sizeof(f));
+	f.status = QAWS_STATUS_OK;
+	/* span by span, in travel order */
+	for (n = 0; n < e->c->span_count; n++)
+	{
+		unsigned int k = e->t1 >= e->t0 ? n : e->c->span_count - 1 - n;
+		double a = e->c->span_boundaries[k], b = e->c->span_boundaries[k + 1];
+		if (a < lo) a = lo;
+		if (b > hi) b = hi;
+		if (!(b > a)) continue;
+		if (e->t1 >= e->t0) os_fit_piece(x, e, delta, a, b, k, &f, 0);
+		else os_fit_piece(x, e, delta, b, a, k, &f, 0);
+	}
+	return os_fit_emit(x, &f);
+}
+
+/* ======================================================================== */
+/*  Offsets of curves at a constant delta                                   */
+/* ======================================================================== */
+
+/*
+ * After "Fast GPU stroke expansion" (Levien and Uguray, HPG 2024), with
+ * curves out instead of line segments.
+ *
+ * Each smooth span is cut, in travel order, wherever it stops looking like
+ * an Euler spiral: the paper's estimate on the end points and derivatives
+ * (as it converts cubics to Euler spirals), plus the gap at the middle to
+ * the Hermite cubic of those ends, for kinds that are not cubics. Between
+ * two cuts the curvature k is then close to linear.
+ *
+ * The offset O = C + delta n (n the right normal) has O' = |C'| g T with
+ * g = 1 + delta k: it runs forward where g > 0, backward where g < 0, and
+ * has a cusp at each root of g. With k linear between cuts, each root is
+ * bracketed by two cuts of opposite sign, then polished on the true curve.
+ *
+ * Forward runs become cubics fitted to the true offset: the ends and their
+ * tangents (T) held, so neighbouring cubics meet G1. The two arm lengths
+ * start from least squares on samples or from the Hermite arms (the true
+ * speed |C'| |g| per unit of the curve's parameter, which vanishes at a
+ * cusp: the cubic's end is then a cusp too, where free arms along unit
+ * tangents would need many short cubics), whichever is closer, then
+ * Gauss-Newton on the samples' distances. A cubic is split while it misses
+ * the offset by more than the tolerance.
+ *
+ * A backward run is replaced by the evolute E = C - n / k, the centres of
+ * curvature, which the offset meets at its cusps (g = 0 there). The chain
+ * runs O up to the cusp, along E, then on along O from the next cusp: the
+ * smooth form of Clipper's link through an inner corner, and that link in
+ * the limit of a sharp corner. A backward run alone already winds with the
+ * sign of delta, so the positive union of one side would be right without
+ * the evolute; the evolute is smooth where the backward run ends in two
+ * cusps, so it takes fewer cubics (a parabola toward its focus at 1e-9:
+ * 30 cubics, 54 with the backward run). E' = n k' / k^2 runs along the
+ * normal and has its own cusps where k peaks; its cubics are cut there.
+ */
+
+#define OS_ES_DEPTH 22          /* finest Euler cut: 2^-22 of a span */
+#define OS_FIT_SAMPLES 10       /* least-squares samples per cubic */
+
+typedef struct os_run
+{
+	qaws_curve const* c;
+	unsigned int span;
+	double a, b;            /* span-local parameters, travelled from a to b */
+	double scale;           /* the evaluator's derivatives per unit of the local parameter */
+	double delta;
+	double* cusps;          /* optional: the offset's cusps, as curve parameters */
+	unsigned int cusp_cap, *cusp_count;
+} os_run;
+
+typedef struct os_geo
+{
+	double p[2], t[2], n[2];    /* point, unit travel tangent, right normal */
+	double k;                   /* curvature, positive turning left along travel */
+	double q[2];                /* derivative along travel per unit of tau */
+} os_geo;
+
+static void os_geo_raw(os_run const* r, double tau, os_geo* g)
+{
+	qaws_eval_result_2d e;
+	double s = r->b - r->a, local = r->a + tau * s, q2[2], v;
+	if (local < 0) local = 0;
+	if (local > 1) local = 1;
+	r->c->vtable->eval_span_2d(r->c, r->span, (qaws_scalar)local,
+		QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2, &e);
+	g->p[0] = e.position.x; g->p[1] = e.position.y;
+	g->q[0] = e.d1.x * r->scale * s; g->q[1] = e.d1.y * r->scale * s;
+	q2[0] = e.d2.x * r->scale * r->scale * s * s; q2[1] = e.d2.y * r->scale * r->scale * s * s;
+	v = hypot(g->q[0], g->q[1]);
+	g->t[0] = v > 0 ? g->q[0] / v : 0;
+	g->t[1] = v > 0 ? g->q[1] / v : 0;
+	g->n[0] = g->t[1]; g->n[1] = -g->t[0];
+	g->k = v > 0 ? (g->q[0] * q2[1] - g->q[1] * q2[0]) / (v * v * v) : 0;
+}
+
+/* the geometry at tau in [0, 1]; where the derivative vanishes (a cusp of
+   the curve) the tangent and curvature of a point just inside */
+static void os_geo_at(os_run const* r, double tau, os_geo* g)
+{
+	os_geo_raw(r, tau, g);
+	if (!(hypot(g->q[0], g->q[1]) > 1e-13 * (fabs(g->p[0]) + fabs(g->p[1]) + 1)))
+	{
+		os_geo h;
+		double p[2] = { g->p[0], g->p[1] };
+		os_geo_raw(r, tau + (tau < 0.5 ? 1e-7 : -1e-7), &h);
+		*g = h;
+		g->p[0] = p[0]; g->p[1] = p[1];
+	}
+}
+
+/* the paper's estimate (CubicParams::from_points_derivs, est_euler_err) of
+   how far the cubic with these ends and end derivatives (per unit of the
+   piece) is from an Euler spiral, times the chord */
+static double os_euler_err(double const* p0, double const* p1, double const* q0, double const* q1)
+{
+	double ch[2] = { p1[0] - p0[0], p1[1] - p0[1] }, ch2 = ch[0] * ch[0] + ch[1] * ch[1], sc;
+	double h0x, h0y, h1x, h1y, th0, th1, d0, d1, e0, e1, s0, s1, s01, amin, a, sym, asym, dist, s2;
+	if (!(ch2 > 0))
+		return hypot(q0[0], q0[1]) + hypot(q1[0], q1[1]);
+	/* the cubic's arms are the derivatives / 3 */
+	sc = 1.0 / (3.0 * ch2);
+	h0x = q0[0] * ch[0] + q0[1] * ch[1]; h0y = q0[1] * ch[0] - q0[0] * ch[1];
+	h1x = q1[0] * ch[0] + q1[1] * ch[1]; h1y = q1[0] * ch[1] - q1[1] * ch[0];
+	th0 = atan2(h0y, h0x); d0 = hypot(h0x, h0y) * sc;
+	th1 = atan2(h1y, h1x); d1 = hypot(h1x, h1y) * sc;
+	e0 = (2.0 / 3.0) / fmax(1e-6, 1 + cos(th0));
+	e1 = (2.0 / 3.0) / fmax(1e-6, 1 + cos(th1));
+	s0 = sin(th0); s1 = sin(th1); s01 = sin(th0 + th1);
+	amin = 0.15 * (2 * e0 * s0 + 2 * e1 * s1 - e0 * e1 * s01);
+	a = 0.15 * (2 * d0 * s0 + 2 * d1 * s1 - d0 * d1 * s01);
+	sym = fabs(th0 + th1); asym = fabs(th0 - th1);
+	dist = hypot(d0 - e0, d1 - e1);
+	s2 = sym * sym;
+	return sqrt(ch2) * (1.25 * (3.7e-6 * s2 * s2 * sym + 6e-3 * asym * s2) + 1.55 * fabs(a - amin) + 5e-3 * sym * dist + 7e-2 * asym * dist);
+}
+
+typedef struct os_cuts
+{
+	double* t;
+	os_geo* g;
+	unsigned int n, cap;
+} os_cuts;
+
+static int os_cut_push(os_cuts* c, double t, os_geo const* g)
+{
+	if (c->n == c->cap)
+	{
+		unsigned int nc = c->cap ? 2 * c->cap : 32;
+		double* a = (double*)realloc(c->t, sizeof(double) * nc);
+		os_geo* b;
+		if (!a) return 0;
+		c->t = a;
+		b = (os_geo*)realloc(c->g, sizeof(os_geo) * nc);
+		if (!b) return 0;
+		c->g = b;
+		c->cap = nc;
+	}
+	c->t[c->n] = t;
+	c->g[c->n] = *g;
+	c->n++;
+	return 1;
+}
+
+/* the Euler cuts of a run (the paper's dyadic walk: halve until the piece
+   passes, then step on, doubling back up when aligned) */
+static int os_euler_cuts(os_run const* r, double es_tol, os_cuts* out)
+{
+	os_geo L, G, M;
+	double lt = 0, dt = 1;
+	unsigned long long t0u = 0;
+	unsigned int depth = 0;
+	os_geo_at(r, 0, &L);
+	if (!os_cut_push(out, 0, &L)) return 0;
+	while ((double)t0u * dt < 1)
+	{
+		double t0 = (double)t0u * dt, t1 = t0 + dt, w, err, h[2];
+		if (t1 > 1) t1 = 1;
+		os_geo_at(r, t1, &G);
+		w = t1 - lt;
+		{
+			double q0[2] = { L.q[0] * w, L.q[1] * w }, q1[2] = { G.q[0] * w, G.q[1] * w };
+			err = os_euler_err(L.p, G.p, q0, q1);
+			/* the Hermite cubic of these ends at the middle, against the curve */
+			os_geo_at(r, 0.5 * (lt + t1), &M);
+			h[0] = 0.5 * (L.p[0] + G.p[0]) + (q0[0] - q1[0]) / 8;
+			h[1] = 0.5 * (L.p[1] + G.p[1]) + (q0[1] - q1[1]) / 8;
+			err += hypot(M.p[0] - h[0], M.p[1] - h[1]);
+		}
+		if (err <= es_tol || depth >= OS_ES_DEPTH)
+		{
+			if (!os_cut_push(out, t1, &G)) return 0;
+			L = G;
+			lt = t1;
+			t0u++;
+			while (depth > 0 && (t0u & 1) == 0) { t0u >>= 1; dt *= 2; depth--; }
+		}
+		else
+		{
+			t0u *= 2;
+			dt *= 0.5;
+			depth++;
+		}
+	}
+	return 1;
+}
+
+static double os_g(os_run const* r, double tau)
+{
+	os_geo g;
+	os_geo_at(r, tau, &g);
+	return 1 + r->delta * g.k;
+}
+
+/* the root of g in [ta, tb] (g(ta) ga, g(tb) gb of opposite signs):
+   Illinois steps from the linear guess (the Euler spiral's exact root) */
+static double os_g_root(os_run const* r, double ta, double ga, double tb, double gb)
+{
+	unsigned int i;
+	int side = 0;
+	for (i = 0; i < 100 && tb - ta > 1e-15; i++)
+	{
+		double t = (ta * gb - tb * ga) / (gb - ga), gt;
+		if (!(t > ta && t < tb)) t = 0.5 * (ta + tb);
+		gt = os_g(r, t);
+		if (gt == 0) return t;
+		if ((gt > 0) == (gb > 0))
+		{
+			tb = t; gb = gt;
+			if (side == -1) ga *= 0.5;
+			side = -1;
+		}
+		else
+		{
+			ta = t; ga = gt;
+			if (side == 1) gb *= 0.5;
+			side = 1;
+		}
+	}
+	return 0.5 * (ta + tb);
+}
+
+/* the extremum of k in [ta, tb] (golden section; maximum or minimum) */
+static double os_k_peak(os_run const* r, double ta, double tb, int maximum)
+{
+	double const ig = 0.6180339887498949;
+	double c = tb - ig * (tb - ta), d = ta + ig * (tb - ta), kc, kd;
+	os_geo g;
+	unsigned int i;
+	os_geo_at(r, c, &g); kc = maximum ? g.k : -g.k;
+	os_geo_at(r, d, &g); kd = maximum ? g.k : -g.k;
+	for (i = 0; i < 80 && tb - ta > 1e-14; i++)
+	{
+		if (kc > kd)
+		{
+			tb = d; d = c; kd = kc;
+			c = tb - ig * (tb - ta);
+			os_geo_at(r, c, &g); kc = maximum ? g.k : -g.k;
+		}
+		else
+		{
+			ta = c; c = d; kc = kd;
+			d = ta + ig * (tb - ta);
+			os_geo_at(r, d, &g); kd = maximum ? g.k : -g.k;
+		}
+	}
+	return 0.5 * (ta + tb);
+}
+
+/* a point and the unit direction of travel of the offset (mode 0) or of the
+   evolute (mode 1, sgn the sign of k' on the piece) */
+static void os_track(os_run const* r, int mode, double sgn, double tau, double* p, double* d)
+{
+	os_geo g;
+	os_geo_at(r, tau, &g);
+	if (mode == 0)
+	{
+		p[0] = g.p[0] + r->delta * g.n[0];
+		p[1] = g.p[1] + r->delta * g.n[1];
+		d[0] = g.t[0]; d[1] = g.t[1];
+	}
+	else
+	{
+		double rho = g.k != 0 ? -1.0 / g.k : -r->delta;
+		p[0] = g.p[0] + rho * g.n[0];
+		p[1] = g.p[1] + rho * g.n[1];
+		d[0] = sgn * g.n[0]; d[1] = sgn * g.n[1];
+	}
+}
+
+/* the speed of the offset (|C'| |g|) or of the evolute (|k'| / k^2) per unit
+   of tau */
+static double os_speed(os_run const* r, int mode, double tau)
+{
+	os_geo g;
+	os_geo_at(r, tau, &g);
+	if (mode == 0)
+		return hypot(g.q[0], g.q[1]) * fabs(1 + r->delta * g.k);
+	{
+		double h = 1e-6, a = tau - h < 0 ? 0 : tau - h, b = tau + h > 1 ? 1 : tau + h;
+		os_geo ga, gb;
+		os_geo_at(r, a, &ga);
+		os_geo_at(r, b, &gb);
+		return g.k != 0 ? fabs((gb.k - ga.k) / (b - a)) / (g.k * g.k) : 0;
+	}
+}
+
+static void os_fit_push(os_fit* f, double const* b)
+{
+	unsigned int k;
+	if (f->status != QAWS_STATUS_OK) return;
 	if (3 * (f->count + 1) + 1 > f->cap)
 	{
 		unsigned int nc = f->cap ? 2 * f->cap : 64;
@@ -371,52 +733,452 @@ static void os_fit_piece(os_ctx const* x, os_elem const* e, double delta, double
 	f->count++;
 }
 
-/* the offset of a curve element: a cubic B-spline (knots 0..count, multiplicity 3) */
-static qaws_status os_fit_elem(os_ctx* x, os_elem const* e, double delta)
+/* a straight piece of the chain (a degenerate cubic) */
+static void os_push_line(os_fit* f, double const* a, double const* b)
+{
+	double c[8];
+	c[0] = a[0]; c[1] = a[1];
+	c[2] = (2 * a[0] + b[0]) / 3; c[3] = (2 * a[1] + b[1]) / 3;
+	c[4] = (a[0] + 2 * b[0]) / 3; c[5] = (a[1] + 2 * b[1]) / 3;
+	c[6] = b[0]; c[7] = b[1];
+	os_fit_push(f, c);
+}
+
+/* the held link, if any, into the chain */
+static void os_link_flush(os_fit* f)
+{
+	if (f->pend)
+	{
+		f->pend = 0;
+		os_push_line(f, f->pe, f->po);
+	}
+}
+
+static void os_bez(double const* b, double u, double* p, double* d)
+{
+	double v = 1 - u;
+	unsigned int i;
+	for (i = 0; i < 2; i++)
+	{
+		p[i] = v * v * v * b[i] + 3 * u * v * v * b[2 + i] + 3 * u * u * v * b[4 + i] + u * u * u * b[6 + i];
+		if (d) d[i] = 3 * (v * v * (b[2 + i] - b[i]) + 2 * u * v * (b[4 + i] - b[2 + i]) + u * u * (b[6 + i] - b[4 + i]));
+	}
+}
+
+/* u on cubic b nearest q, from u (Newton on (B - q) . B' = 0) */
+static double os_bez_project(double const* b, double const* q, double u, unsigned int steps)
+{
+	unsigned int i;
+	for (i = 0; i < steps; i++)
+	{
+		double p[2], d[2], v = 1 - u, dd[2], num, den;
+		unsigned int k;
+		os_bez(b, u, p, d);
+		for (k = 0; k < 2; k++)
+			dd[k] = 6 * (v * (b[4 + k] - 2 * b[2 + k] + b[k]) + u * (b[6 + k] - 2 * b[4 + k] + b[2 + k]));
+		num = (p[0] - q[0]) * d[0] + (p[1] - q[1]) * d[1];
+		den = d[0] * d[0] + d[1] * d[1] + (p[0] - q[0]) * dd[0] + (p[1] - q[1]) * dd[1];
+		if (!(den > 0)) break;
+		u -= num / den;
+		if (u < 0) u = 0;
+		if (u > 1) u = 1;
+	}
+	return u;
+}
+
+/* the signed distances of points X to cubic b (their parameters u refined
+   in place), and their sum of squares */
+static double os_bez_resid(double const* b, double const (*X)[2], double* u, unsigned int n, double* res)
+{
+	unsigned int i;
+	double s = 0;
+	for (i = 0; i < n; i++)
+	{
+		double p[2], d[2], l;
+		u[i] = os_bez_project(b, X[i], u[i], 4);
+		os_bez(b, u[i], p, d);
+		l = hypot(d[0], d[1]);
+		res[i] = l > 0 ? ((X[i][0] - p[0]) * -d[1] + (X[i][1] - p[1]) * d[0]) / l : hypot(X[i][0] - p[0], X[i][1] - p[1]);
+		/* off the ends, the distance itself */
+		if (u[i] <= 0 || u[i] >= 1)
+		{
+			double e = hypot(X[i][0] - p[0], X[i][1] - p[1]);
+			res[i] = res[i] < 0 ? -e : e;
+		}
+		s += res[i] * res[i];
+	}
+	return s;
+}
+
+/* the cubic from ta to tb along the offset or the evolute: ends and end
+   directions held, arms by least squares, split while off by more than tol */
+static void os_g1(os_ctx const* x, os_run const* r, int mode, double sgn, double ta, double tb, os_fit* f, unsigned int depth)
+{
+	double P0[2], D0[2], P3[2], D3[2], Q[OS_FIT_SAMPLES + 1][2], U[OS_FIT_SAMPLES + 1], M[OS_FIT_SAMPLES][2];
+	double b[8], L, err = 0, al = 0, be = 0, acc = 0, flat = 0;
+	unsigned int j, it, m = OS_FIT_SAMPLES;
+	if (f->status != QAWS_STATUS_OK) return;
+	os_track(r, mode, sgn, ta, P0, D0);
+	os_track(r, mode, sgn, tb, P3, D3);
+	L = hypot(P3[0] - P0[0], P3[1] - P0[1]);
+	/* samples Q_1..Q_m-1, and probes M_j halfway between */
+	for (j = 1; j < m; j++)
+	{
+		double d[2];
+		os_track(r, mode, sgn, ta + (tb - ta) * j / m, Q[j], d);
+	}
+	for (j = 0; j < m; j++)
+	{
+		double d[2];
+		os_track(r, mode, sgn, ta + (tb - ta) * (j + 0.5) / m, M[j], d);
+	}
+	/* straight within the tolerance: a line */
+	for (j = 1; j < m; j++)
+	{
+		double e = L > 0 ? fabs((Q[j][0] - P0[0]) * (P3[1] - P0[1]) - (Q[j][1] - P0[1]) * (P3[0] - P0[0])) / L
+			: hypot(Q[j][0] - P0[0], Q[j][1] - P0[1]);
+		if (e > flat) flat = e;
+	}
+	for (j = 0; j < m; j++)
+	{
+		double e = L > 0 ? fabs((M[j][0] - P0[0]) * (P3[1] - P0[1]) - (M[j][1] - P0[1]) * (P3[0] - P0[0])) / L
+			: hypot(M[j][0] - P0[0], M[j][1] - P0[1]);
+		if (e > flat) flat = e;
+	}
+	if (flat <= x->tol)
+	{
+		/* and monotone along the chord (no doubling back) */
+		int mono = 1;
+		double last = 0;
+		for (j = 1; j < m && mono; j++)
+		{
+			double s = (Q[j][0] - P0[0]) * (P3[0] - P0[0]) + (Q[j][1] - P0[1]) * (P3[1] - P0[1]);
+			if (s < last - x->tol * L) mono = 0;
+			last = s;
+		}
+		if (mono && last <= L * L + x->tol * L)
+		{
+			os_push_line(f, P0, P3);
+			return;
+		}
+	}
+	/* chord-length parameters */
+	U[0] = 0;
+	{
+		double prev[2] = { P0[0], P0[1] };
+		for (j = 1; j < m; j++)
+		{
+			acc += hypot(Q[j][0] - prev[0], Q[j][1] - prev[1]);
+			U[j] = acc;
+			prev[0] = Q[j][0]; prev[1] = Q[j][1];
+		}
+		acc += hypot(P3[0] - prev[0], P3[1] - prev[1]);
+		for (j = 1; j < m; j++) U[j] = acc > 0 ? U[j] / acc : (double)j / m;
+	}
+	b[0] = P0[0]; b[1] = P0[1]; b[6] = P3[0]; b[7] = P3[1];
+	for (it = 0; it < 4; it++)
+	{
+		double s11 = 0, s12 = 0, s22 = 0, r1 = 0, r2 = 0, c = D0[0] * D3[0] + D0[1] * D3[1], det;
+		for (j = 1; j < m; j++)
+		{
+			double u = U[j], v = 1 - u, b0 = v * v * v, b1 = 3 * u * v * v, b2 = 3 * u * u * v, b3 = u * u * u, A[2], R[2];
+			A[0] = (b0 + b1) * P0[0] + (b2 + b3) * P3[0];
+			A[1] = (b0 + b1) * P0[1] + (b2 + b3) * P3[1];
+			R[0] = Q[j][0] - A[0]; R[1] = Q[j][1] - A[1];
+			s11 += b1 * b1; s22 += b2 * b2; s12 += b1 * b2;
+			r1 += b1 * (D0[0] * R[0] + D0[1] * R[1]);
+			r2 += b2 * (D3[0] * R[0] + D3[1] * R[1]);
+		}
+		/* al s11 - be c s12 = r1, al c s12 - be s22 = r2 */
+		det = -s11 * s22 + c * c * s12 * s12;
+		if (fabs(det) > 1e-12 * s11 * s22)
+		{
+			al = (r1 * -s22 - (-c * s12) * r2) / det;
+			be = (s11 * r2 - c * s12 * r1) / det;
+		}
+		else
+			al = be = -1;
+		if (!(al > 0) || !(be > 0) || al > 4 * L + acc || be > 4 * L + acc)
+			al = be = (acc > 0 ? acc : L) / 3;
+		b[2] = P0[0] + al * D0[0]; b[3] = P0[1] + al * D0[1];
+		b[4] = P3[0] - be * D3[0]; b[5] = P3[1] - be * D3[1];
+		for (j = 1; j < m; j++)
+			U[j] = os_bez_project(b, Q[j], U[j], 2);
+	}
+	/* Gauss-Newton on the two arms, on the distances of all the points
+	   (samples and probes, in order) to the cubic */
+	{
+		double X[2 * OS_FIT_SAMPLES][2], ux[2 * OS_FIT_SAMPLES], uh[2 * OS_FIT_SAMPLES];
+		double r0[2 * OS_FIT_SAMPLES], ra[2 * OS_FIT_SAMPLES], rb[2 * OS_FIT_SAMPLES], cost, h = 1e-7 * (L + acc) + 1e-300;
+		unsigned int nx = 0, k;
+		U[m] = 1;
+		for (j = 0; j < m; j++)
+		{
+			X[nx][0] = M[j][0]; X[nx][1] = M[j][1]; ux[nx++] = 0.5 * (U[j] + U[j + 1]);
+			if (j + 1 < m) { X[nx][0] = Q[j + 1][0]; X[nx][1] = Q[j + 1][1]; ux[nx++] = U[j + 1]; }
+		}
+		cost = os_bez_resid(b, X, ux, nx, r0);
+		/* the Hermite start: arms from the true speeds per unit of tau, which
+		   vanish at a cusp (there the cubic's end is a cusp too) */
+		{
+			double ha = os_speed(r, mode, ta) * (tb - ta) / 3, hb = os_speed(r, mode, tb) * (tb - ta) / 3, c[8], hc;
+			double uh2[2 * OS_FIT_SAMPLES], rh[2 * OS_FIT_SAMPLES];
+			memcpy(c, b, sizeof(c));
+			c[2] = P0[0] + ha * D0[0]; c[3] = P0[1] + ha * D0[1];
+			c[4] = P3[0] - hb * D3[0]; c[5] = P3[1] - hb * D3[1];
+			for (k = 0; k < nx; k++) uh2[k] = (k + 1) / (2.0 * m);
+			hc = os_bez_resid(c, X, uh2, nx, rh);
+			if (hc < cost)
+			{
+				memcpy(b, c, sizeof(c));
+				memcpy(ux, uh2, sizeof(double) * nx);
+				memcpy(r0, rh, sizeof(double) * nx);
+				al = ha; be = hb; cost = hc;
+			}
+		}
+		for (it = 0; it < 12; it++)
+		{
+			double c[8], jaa = 0, jab = 0, jbb = 0, ga = 0, gb = 0, det, da, db, step = 1;
+			memcpy(c, b, sizeof(c));
+			c[2] = P0[0] + (al + h) * D0[0]; c[3] = P0[1] + (al + h) * D0[1];
+			memcpy(uh, ux, sizeof(double) * nx);
+			os_bez_resid(c, X, uh, nx, ra);
+			memcpy(c, b, sizeof(c));
+			c[4] = P3[0] - (be + h) * D3[0]; c[5] = P3[1] - (be + h) * D3[1];
+			memcpy(uh, ux, sizeof(double) * nx);
+			os_bez_resid(c, X, uh, nx, rb);
+			for (k = 0; k < nx; k++)
+			{
+				double a1 = (ra[k] - r0[k]) / h, b1 = (rb[k] - r0[k]) / h;
+				jaa += a1 * a1; jab += a1 * b1; jbb += b1 * b1;
+				ga += a1 * r0[k]; gb += b1 * r0[k];
+			}
+			det = jaa * jbb - jab * jab;
+			if (!(fabs(det) > 1e-30 * (jaa * jbb + 1e-300))) break;
+			da = -(jbb * ga - jab * gb) / det;
+			db = -(jaa * gb - jab * ga) / det;
+			for (k = 0; k < 6; k++, step *= 0.5)
+			{
+				double na = al + step * da, nb = be + step * db, nc;
+				if (!(na >= 0) || !(nb >= 0)) continue;
+				memcpy(c, b, sizeof(c));
+				c[2] = P0[0] + na * D0[0]; c[3] = P0[1] + na * D0[1];
+				c[4] = P3[0] - nb * D3[0]; c[5] = P3[1] - nb * D3[1];
+				memcpy(uh, ux, sizeof(double) * nx);
+				nc = os_bez_resid(c, X, uh, nx, ra);
+				if (nc < cost)
+				{
+					memcpy(b, c, sizeof(c));
+					memcpy(ux, uh, sizeof(double) * nx);
+					memcpy(r0, ra, sizeof(double) * nx);
+					al = na; be = nb; cost = nc;
+					break;
+				}
+			}
+			if (k == 6 || fabs(step * da) + fabs(step * db) < 1e-13 * (L + acc)) break;
+		}
+		for (k = 0; k < nx; k++)
+			if (fabs(r0[k]) > err) err = fabs(r0[k]);
+	}
+	if (err > x->tol && depth < OS_FIT_DEPTH && tb - ta > 1e-13)
+	{
+		double tm = 0.5 * (ta + tb);
+		os_g1(x, r, mode, sgn, ta, tm, f, depth + 1);
+		os_g1(x, r, mode, sgn, tm, tb, f, depth + 1);
+		return;
+	}
+	os_fit_push(f, b);
+}
+
+static void os_record_cusp(os_run const* r, double tau)
+{
+	if (r->cusps && *r->cusp_count < r->cusp_cap)
+	{
+		double a = r->c->span_boundaries[r->span], b = r->c->span_boundaries[r->span + 1];
+		r->cusps[*r->cusp_count] = a + (r->a + tau * (r->b - r->a)) * (b - a);
+	}
+	if (r->cusp_count) (*r->cusp_count)++;
+}
+
+/* a backward run [ta, tb]: O(ta) to E(ta), E to tb cut at the peaks of k,
+   E(tb) to O(tb) (the links vanish at cusps) */
+static void os_evolute_run(os_ctx const* x, os_run const* r, os_cuts const* cuts, double ta, double tb, os_fit* f)
+{
+	double cut[64], o[2], e[2], d[2];
+	unsigned int nc = 0, i, j;
+	os_geo ga, gb;
+	os_geo_at(r, ta, &ga);
+	os_geo_at(r, tb, &gb);
+	/* the peaks of k between cuts of the run (k' changes sign) */
+	cut[nc++] = ta;
+	{
+		double kt[66], tt[66];
+		unsigned int n = 0;
+		tt[n] = ta; kt[n++] = ga.k;
+		for (i = 0; i < cuts->n && n < 65; i++)
+			if (cuts->t[i] > ta && cuts->t[i] < tb) { tt[n] = cuts->t[i]; kt[n++] = cuts->g[i].k; }
+		tt[n] = tb; kt[n++] = gb.k;
+		for (j = 1; j + 1 < n && nc < 62; j++)
+		{
+			double l = kt[j] - kt[j - 1], rr = kt[j + 1] - kt[j];
+			if (l * rr < 0)
+				cut[nc++] = os_k_peak(r, tt[j - 1], tt[j + 1], l > 0);
+		}
+	}
+	cut[nc++] = tb;
+	os_track(r, 0, 1, ta, o, d);
+	os_track(r, 1, 1, ta, e, d);
+	if (f->pend && ta == 0 && hypot(e[0] - f->pe[0], e[1] - f->pe[1]) <= x->tol)
+		f->pend = 0;    /* the run goes on across a span boundary: no link out and back */
+	else
+	{
+		os_link_flush(f);
+		if (hypot(o[0] - e[0], o[1] - e[1]) > x->tol)
+			os_push_line(f, o, e);
+	}
+	for (i = 0; i + 1 < nc; i++)
+	{
+		os_geo g0, g1;
+		double sgn;
+		if (!(cut[i + 1] > cut[i])) continue;
+		os_geo_at(r, cut[i], &g0);
+		os_geo_at(r, cut[i + 1], &g1);
+		sgn = g1.k > g0.k ? 1.0 : -1.0;
+		os_g1(x, r, 1, sgn, cut[i], cut[i + 1], f, 0);
+	}
+	os_track(r, 1, 1, tb, e, d);
+	os_track(r, 0, 1, tb, o, d);
+	if (hypot(o[0] - e[0], o[1] - e[1]) > x->tol)
+	{
+		if (tb >= 1)
+		{
+			f->pend = 1;
+			f->pe[0] = e[0]; f->pe[1] = e[1];
+			f->po[0] = o[0]; f->po[1] = o[1];
+		}
+		else
+			os_push_line(f, e, o);
+	}
+}
+
+/* the chain of one run: forward runs fitted, backward runs through the evolute */
+static qaws_status os_run_chain(os_ctx const* x, os_run const* r, os_fit* f)
+{
+	os_cuts cuts;
+	double es_tol = x->tol > 1e-4 * fabs(r->delta) ? x->tol : 1e-4 * fabs(r->delta);
+	double bound[256];
+	unsigned int nb = 0, i;
+	memset(&cuts, 0, sizeof(cuts));
+	if (!os_euler_cuts(r, es_tol, &cuts))
+	{
+		free(cuts.t); free(cuts.g);
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	}
+	bound[nb++] = 0;
+	for (i = 0; i + 1 < cuts.n && nb < 254; i++)
+	{
+		double g0 = 1 + r->delta * cuts.g[i].k, g1 = 1 + r->delta * cuts.g[i + 1].k;
+		if (g0 * g1 < 0)
+		{
+			double t = os_g_root(r, cuts.t[i], g0, cuts.t[i + 1], g1);
+			if (t > bound[nb - 1])
+			{
+				bound[nb++] = t;
+				os_record_cusp(r, t);
+			}
+		}
+	}
+	bound[nb++] = 1;
+	for (i = 0; i + 1 < nb; i++)
+	{
+		double ta = bound[i], tb = bound[i + 1];
+		if (!(tb > ta)) continue;
+		if (os_g(r, 0.5 * (ta + tb)) >= 0)
+		{
+			os_link_flush(f);
+			os_g1(x, r, 0, 1, ta, tb, f, 0);
+		}
+		else
+			os_evolute_run(x, r, &cuts, ta, tb, f);
+	}
+	free(cuts.t);
+	free(cuts.g);
+	return f->status;
+}
+
+/* the evaluator's derivative scale on a span: a central difference against
+   the first derivative at the middle */
+static double os_span_scale(qaws_curve const* c, unsigned int span)
+{
+	qaws_eval_result_2d e0, e1, em;
+	double h = 1e-4, d, v;
+	c->vtable->eval_span_2d(c, span, (qaws_scalar)(0.5 - h), QAWS_EVAL_FLAG_POSITION, &e0);
+	c->vtable->eval_span_2d(c, span, (qaws_scalar)(0.5 + h), QAWS_EVAL_FLAG_POSITION, &e1);
+	c->vtable->eval_span_2d(c, span, (qaws_scalar)0.5, QAWS_EVAL_FLAG_D1, &em);
+	d = hypot(e1.position.x - e0.position.x, e1.position.y - e0.position.y) / (2 * h);
+	v = hypot(em.d1.x, em.d1.y);
+	return v > 0 && d > 0 ? d / v : 1.0;
+}
+
+/* the offset of a curve element at a constant delta: one chain per run of
+   smooth spans; a corner between spans gets the join */
+static qaws_status os_curve_elem(os_ctx* x, os_elem const* e, double delta, qaws_join_type jt,
+	double* cusps, unsigned int cusp_cap, unsigned int* cusp_count)
 {
 	os_fit f;
 	double lo = e->t0 < e->t1 ? e->t0 : e->t1, hi = e->t0 < e->t1 ? e->t1 : e->t0;
-	unsigned int n;
+	double last_o[2] = { 0, 0 }, last_t[2] = { 0, 0 }, last_p[2] = { 0, 0 };
+	unsigned int n, started = 0;
 	qaws_status st = QAWS_STATUS_OK;
 	memset(&f, 0, sizeof(f));
 	f.status = QAWS_STATUS_OK;
-	/* span by span, in travel order */
-	for (n = 0; n < e->c->span_count; n++)
+	for (n = 0; n < e->c->span_count && st == QAWS_STATUS_OK; n++)
 	{
 		unsigned int k = e->t1 >= e->t0 ? n : e->c->span_count - 1 - n;
-		double a = e->c->span_boundaries[k], b = e->c->span_boundaries[k + 1];
-		if (a < lo) a = lo;
-		if (b > hi) b = hi;
-		if (!(b > a)) continue;
-		if (e->t1 >= e->t0) os_fit_piece(x, e, delta, a, b, k, &f, 0);
-		else os_fit_piece(x, e, delta, b, a, k, &f, 0);
+		double a = e->c->span_boundaries[k], b = e->c->span_boundaries[k + 1], w = b - a, la, lb;
+		os_run r;
+		os_geo g0, g1;
+		double o0[2];
+		if (!(w > 0)) continue;
+		la = ((a < lo ? lo : a) - a) / w;
+		lb = ((b > hi ? hi : b) - a) / w;
+		if (!(lb > la)) continue;
+		memset(&r, 0, sizeof(r));
+		r.c = e->c; r.span = k; r.delta = delta;
+		r.a = e->t1 >= e->t0 ? la : lb;
+		r.b = e->t1 >= e->t0 ? lb : la;
+		r.scale = os_span_scale(e->c, k);
+		r.cusps = cusps; r.cusp_cap = cusp_cap; r.cusp_count = cusp_count;
+		os_geo_at(&r, 0, &g0);
+		o0[0] = g0.p[0] + delta * g0.n[0];
+		o0[1] = g0.p[1] + delta * g0.n[1];
+		if (started && hypot(o0[0] - last_o[0], o0[1] - last_o[1]) > x->tol)
+		{
+			/* a corner inside the element (a gap within the tolerance is rounding
+			   between spans: the chain runs on) */
+			st = os_fit_emit(x, &f);
+			if (st == QAWS_STATUS_OK)
+				st = os_join(x, jt, last_p, last_t, g0.t, last_o, o0, delta);
+			if (st != QAWS_STATUS_OK) break;
+		}
+		st = os_run_chain(x, &r, &f);
+		os_geo_at(&r, 1, &g1);
+		last_o[0] = g1.p[0] + delta * g1.n[0];
+		last_o[1] = g1.p[1] + delta * g1.n[1];
+		last_t[0] = g1.t[0]; last_t[1] = g1.t[1];
+		last_p[0] = g1.p[0]; last_p[1] = g1.p[1];
+		started = 1;
 	}
-	if (f.status == QAWS_STATUS_OK && f.count)
+	if (st != QAWS_STATUS_OK)
 	{
-		unsigned int np = 3 * f.count + 1, kc = 0, i;
-		qaws_scalar* kn = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (np + 4));
-		qaws_bspline_desc d;
-		qaws_curve* c = NULL;
-		if (!kn) { free(f.cp); return QAWS_STATUS_ALLOCATION_FAILURE; }
-		for (i = 0; i < 4; i++) kn[kc++] = 0;
-		for (i = 1; i < f.count; i++) { kn[kc++] = (qaws_scalar)i; kn[kc++] = (qaws_scalar)i; kn[kc++] = (qaws_scalar)i; }
-		for (i = 0; i < 4; i++) kn[kc++] = (qaws_scalar)f.count;
-		memset(&d, 0, sizeof(d));
-		d.dimension = QAWS_DIMENSION_2D; d.degree = 3; d.control_points = f.cp; d.control_point_count = np;
-		d.knots = kn; d.knot_count = kc;
-		st = qaws_curve_create_bspline(&d, &c);
-		if (st == QAWS_STATUS_OK)
-			st = os_keep(x, c);
-		free(kn);
+		free(f.cp);
+		return st;
 	}
-	else
-		st = f.status;
-	free(f.cp);
-	return st;
+	return os_fit_emit(x, &f);
 }
 
 /* the offset of an element; *s, *e receive its start and end points */
-static qaws_status os_offset_elem(os_ctx* x, os_elem const* el, double delta, double* sp, double* ep)
+static qaws_status os_offset_elem(os_ctx* x, os_elem const* el, double delta, qaws_join_type jt, double* sp, double* ep)
 {
 	double n0[2], n1[2], d0, d1;
 	os_right(el->d0, n0);
@@ -448,7 +1210,9 @@ static qaws_status os_offset_elem(os_ctx* x, os_elem const* el, double delta, do
 		}
 		qaws_curve_destroy(piece);
 	}
-	return os_fit_elem(x, el, delta);
+	if (x->d->delta_fn)
+		return os_fit_elem(x, el, delta);
+	return os_curve_elem(x, el, delta, jt, NULL, 0, NULL);
 }
 
 /* ======================================================================== */
@@ -575,7 +1339,7 @@ static qaws_status os_closed_loop(os_ctx* x, os_elem const* e, unsigned int n, d
 	for (i = 0; i < n && s == QAWS_STATUS_OK; i++)
 	{
 		double sp[2], ep[2], q[2];
-		s = os_offset_elem(x, &e[i], delta, sp, ep);
+		s = os_offset_elem(x, &e[i], delta, jt, sp, ep);
 		if (s != QAWS_STATUS_OK) break;
 		os_start(x, &e[(i + 1) % n], delta, q);
 		s = os_join(x, jt, e[i].p1, e[i].d1, e[(i + 1) % n].d0, ep, q, delta);
@@ -676,7 +1440,7 @@ static qaws_status os_path(os_ctx* x, qaws_path_2d const* p, double delta, qaws_
 			/* offsets, joins between them, caps at the two turnarounds */
 			for (i = 0; s == QAWS_STATUS_OK && i < 2 * n; i++)
 			{
-				s = os_offset_elem(x, &both[i], fabs(delta), &se[4 * i], &se[4 * i + 2]);
+				s = os_offset_elem(x, &both[i], fabs(delta), jt, &se[4 * i], &se[4 * i + 2]);
 				if (s != QAWS_STATUS_OK) break;
 				if (i + 1 == n || i + 1 == 2 * n)
 					s = os_cap_points(x, et, both[i].p1, both[i].d1, &se[4 * i + 2], delta);
@@ -840,4 +1604,41 @@ qaws_status qaws_offset_paths(qaws_path_2d const* paths, unsigned int path_count
 	d.group_count = 1;
 	d.delta = delta;
 	return qaws_offset_execute(&d, out_result);
+}
+
+qaws_status qaws_internal_offset_curve(qaws_curve const* curve, double delta, double tolerance,
+	qaws_curve** out_chain, unsigned int* out_curve_count,
+	double* cusps, unsigned int cusp_capacity, unsigned int* cusp_count)
+{
+	os_ctx x;
+	qaws_offset_desc d;
+	os_elems q;
+	unsigned int i, nc = 0;
+	qaws_status s;
+	if (!curve || !out_chain || curve->dimension != QAWS_DIMENSION_2D)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	*out_chain = NULL;
+	if (cusp_count) *cusp_count = 0;
+	memset(&x, 0, sizeof(x));
+	memset(&d, 0, sizeof(d));
+	memset(&q, 0, sizeof(q));
+	x.d = &d;
+	x.tol = tolerance;
+	s = os_elem_make(curve, curve->parameter_range.min_value, curve->parameter_range.max_value, 0, 0, &q);
+	if (s == QAWS_STATUS_OK && q.n)
+		s = os_curve_elem(&x, &q.e[0], delta, QAWS_JOIN_ROUND, cusps, cusp_capacity, cusp_count ? cusp_count : &nc);
+	if (s == QAWS_STATUS_OK && x.ncurves)
+	{
+		*out_chain = x.curves[0];
+		for (i = 1; i < x.ncurves; i++)
+			qaws_curve_destroy(x.curves[i]);
+	}
+	else
+		for (i = 0; i < x.ncurves; i++)
+			qaws_curve_destroy(x.curves[i]);
+	if (out_curve_count) *out_curve_count = x.ncurves;
+	free(x.curves);
+	free(x.loop_first);
+	free(q.e);
+	return s;
 }

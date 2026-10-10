@@ -11,8 +11,12 @@
  * curves).
  *
  * Each path is offset piece by piece: a line by translation, an arc by a
- * concentric arc (both exact), any other curve by a cubic B-spline through
- * the true offset C(t) + d N(t), refined until it is within the tolerance.
+ * concentric arc (both exact), any other curve by G1 cubics fitted to the
+ * true offset C(t) + d N(t) within the tolerance. Where the offset turns
+ * back (1 + d k < 0, k the curvature) its cusps are found exactly and the
+ * backward run is replaced by the evolute (the centres of curvature), after
+ * "Fast GPU stroke expansion" (Levien and Uguray, HPG 2024); a variable
+ * delta (delta_fn) fits cubics through offset points instead.
  * Corners get the join type on their outer side; on the inner side the two
  * offsets are linked through the corner (as Clipper2 does) and the loops
  * that makes are removed by the final union. Open paths get the end type.
