@@ -203,15 +203,89 @@ qaws_status qaws_exact_int_sub(qaws_exact_int* r, qaws_exact_int const* a, qaws_
 	return add_signed(r, a, b, -1);
 }
 
+#if (defined(_MSC_VER) && defined(_M_X64)) || defined(__SIZEOF_INT128__)
+#define QAWS_EXACT_MUL64 1
+#if defined(_MSC_VER) && defined(_M_X64)
+#include <intrin.h>
+#endif
+/* 64 x 64 -> 128 */
+static void ei_mul64(uint64_t a, uint64_t b, uint64_t* hi, uint64_t* lo)
+{
+#if defined(_MSC_VER) && defined(_M_X64)
+	*lo = _umul128(a, b, hi);
+#else
+	unsigned __int128 p = (unsigned __int128)a * b;
+	*lo = (uint64_t)p;
+	*hi = (uint64_t)(p >> 64);
+#endif
+}
+
+/*
+ * The magnitudes multiplied over 64-bit words (pairs of limbs), a quarter
+ * of the limb products of the 32-bit loop; the words are rebuilt from the
+ * limbs (the limbs past size are not kept zero).
+ */
+static qaws_status ei_mul_words(qaws_exact_int* t, qaws_exact_int const* a, qaws_exact_int const* b)
+{
+	uint64_t aw[QAWS_EXACT_LIMBS / 2 + 1], bw[QAWS_EXACT_LIMBS / 2 + 1], pw[QAWS_EXACT_LIMBS + 2];
+	int na = (a->size + 1) / 2, nb = (b->size + 1) / 2, i, j, n;
+	for (i = 0; i < na; i++)
+		aw[i] = (uint64_t)a->limb[2 * i] | (2 * i + 1 < a->size ? (uint64_t)a->limb[2 * i + 1] << 32 : 0);
+	for (i = 0; i < nb; i++)
+		bw[i] = (uint64_t)b->limb[2 * i] | (2 * i + 1 < b->size ? (uint64_t)b->limb[2 * i + 1] << 32 : 0);
+	memset(pw, 0, sizeof(uint64_t) * (size_t)(na + nb));
+	for (i = 0; i < na; i++)
+	{
+		uint64_t carry = 0, ai = aw[i];
+		if (!ai)
+			continue;
+		for (j = 0; j < nb; j++)
+		{
+			uint64_t hi, lo, s;
+			ei_mul64(ai, bw[j], &hi, &lo);
+			s = pw[i + j] + lo;
+			hi += s < lo;
+			s += carry;
+			hi += s < carry;
+			pw[i + j] = s;
+			carry = hi;
+		}
+		pw[i + nb] = carry;
+	}
+	/* back to limbs, the top zeros dropped, within the capacity */
+	n = 2 * (na + nb);
+	while (n > 0 && !(uint32_t)(pw[(n - 1) / 2] >> (((n - 1) & 1) * 32)))
+		n--;
+	if (n > QAWS_EXACT_LIMBS)
+		return QAWS_STATUS_EXACT_RANGE_EXCEEDED;
+	for (i = 0; i < n; i++)
+		t->limb[i] = (uint32_t)(pw[i / 2] >> ((i & 1) * 32));
+	t->size = n;
+	return QAWS_STATUS_OK;
+}
+#endif
+
 qaws_status qaws_exact_int_mul(qaws_exact_int* r, qaws_exact_int const* a, qaws_exact_int const* b)
 {
 	qaws_exact_int t;
+#ifndef QAWS_EXACT_MUL64
 	int i, j, n;
+#endif
 	if (a->sign == 0 || b->sign == 0)
 	{
 		qaws_exact_int_zero(r);
 		return QAWS_STATUS_OK;
 	}
+#ifdef QAWS_EXACT_MUL64
+	{
+		qaws_status st = ei_mul_words(&t, a, b);
+		if (st != QAWS_STATUS_OK)
+			return st;
+		t.sign = a->sign * b->sign;
+		copy_int(r, &t);
+		return QAWS_STATUS_OK;
+	}
+#else
 	n = a->size + b->size;
 	if (n > QAWS_EXACT_LIMBS)
 	{
@@ -252,6 +326,7 @@ qaws_status qaws_exact_int_mul(qaws_exact_int* r, qaws_exact_int const* a, qaws_
 	normalize(&t);
 	copy_int(r, &t);
 	return QAWS_STATUS_OK;
+#endif
 }
 
 qaws_status qaws_exact_int_mul_i64(qaws_exact_int* r, qaws_exact_int const* a, int64_t s)

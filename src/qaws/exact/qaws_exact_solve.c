@@ -181,30 +181,35 @@ static qaws_status variations_on(qaws_exact_int const* b, unsigned int n, qaws_e
 /* Enclosure of num / den (den != 0) by doubles; exact when dyadic and representable. */
 void qaws_exact_ratio_enclose(qaws_exact_int const* num, qaws_exact_int const* den, double* lo, double* hi, int* exact)
 {
-	qaws_exact_int g, n2, d2, p2;
+	qaws_exact_int l, r;
 	double v;
-	unsigned int db;
+	int64_t m = 0;
+	int e = 0, ok;
 	if (qaws_exact_int_is_zero(num))
 	{
 		*lo = *hi = 0;
 		*exact = 1;
 		return;
 	}
-	qaws_exact_int_gcd(&g, num, den);
-	qaws_exact_int_divmod(&n2, NULL, num, &g);
-	qaws_exact_int_divmod(&d2, NULL, den, &g);
-	if (qaws_exact_int_sign(&d2) < 0)
+	/* correctly rounded; exact when v den == num (no gcd: v = m 2^e, compared in integers) */
+	v = qaws_exact_ratio_to_double(num, den);
+	ok = fabs(v) >= 2.2250738585072014e-308 && fabs(v) < HUGE_VAL && qaws_exact_split_double(v, &m, &e);
+	if (ok && qaws_exact_int_mul_i64(&l, den, m) != QAWS_STATUS_OK)
+		ok = 0;
+	if (ok)
 	{
-		qaws_exact_int_neg(&n2, &n2);
-		qaws_exact_int_neg(&d2, &d2);
+		if (e >= 0)
+		{
+			r = *num;
+			ok = qaws_exact_int_shl(&l, &l, (unsigned int)e) == QAWS_STATUS_OK;
+		}
+		else
+			ok = qaws_exact_int_shl(&r, num, (unsigned int)-e) == QAWS_STATUS_OK;
+		ok = ok && qaws_exact_int_cmp(&l, &r) == 0;
 	}
-	v = qaws_exact_ratio_to_double(&n2, &d2);
-	db = qaws_exact_int_bits(&d2);
-	qaws_exact_int_from_i64(&p2, 1);
-	qaws_exact_int_shl(&p2, &p2, db - 1);
-	*exact = qaws_exact_int_cmp(&p2, &d2) == 0 && qaws_exact_int_bits(&n2) <= 53 && fabs(v) >= 2.2250738585072014e-308;
-	*lo = *exact ? v : nextafter(v, -HUGE_VAL);
-	*hi = *exact ? v : nextafter(v, HUGE_VAL);
+	*exact = ok;
+	*lo = ok ? v : nextafter(v, -HUGE_VAL);
+	*hi = ok ? v : nextafter(v, HUGE_VAL);
 }
 
 typedef struct sys_work

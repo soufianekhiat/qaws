@@ -695,6 +695,38 @@ static qaws_status cx_overlap_end(cx_ctx* x, unsigned int sa, double ta, unsigne
 	return QAWS_STATUS_OK;
 }
 
+/* room for the events, points and parameters the hits and the sources' ends will make, once */
+static qaws_status cx_reserve(cx_ctx* x, unsigned int n)
+{
+	if (n > x->capev)
+	{
+		cx_event* g = (cx_event*)realloc(x->ev, sizeof(cx_event) * n);
+		if (!g) return QAWS_STATUS_ALLOCATION_FAILURE;
+		x->ev = g;
+		x->capev = n;
+	}
+	if (n > x->cappts)
+	{
+		cx_pt* g = (cx_pt*)realloc(x->pts, sizeof(cx_pt) * n);
+		double* gf;
+		if (!g) return QAWS_STATUS_ALLOCATION_FAILURE;
+		x->pts = g;
+		x->cappts = n;
+		gf = (double*)realloc(x->ptf, sizeof(double) * 2 * n);
+		if (!gf) return QAWS_STATUS_ALLOCATION_FAILURE;
+		x->ptf = gf;
+		x->capptf = 2 * n;
+	}
+	if (n > x->caprats)
+	{
+		cx_rat* g = (cx_rat*)realloc(x->rats, sizeof(cx_rat) * n);
+		if (!g) return QAWS_STATUS_ALLOCATION_FAILURE;
+		x->rats = g;
+		x->caprats = n;
+	}
+	return QAWS_STATUS_OK;
+}
+
 static qaws_status cx_hits(cx_ctx* x)
 {
 	qaws_exact_batch_desc bd;
@@ -727,6 +759,7 @@ static qaws_status cx_hits(cx_ctx* x)
 		return st;
 	x->nhits = n;
 	x->stats.hit_count = n;
+	TRY(cx_reserve(x, 4 * n + 2 * x->nsrc + 16));
 	/* events */
 	for (i = 0; i < n; i++)
 	{
@@ -1573,6 +1606,26 @@ static qaws_status cx_direction(cx_ctx* x, unsigned int ev, int forward, cx_dir*
 			return QAWS_STATUS_CERTIFICATION_FAILED;
 	}
 	n = e->spans[k].degree;
+	if (n == 1)
+	{
+		/* a straight span: one direction everywhere, no bending */
+		st = cx_diff(e->spans[k].h, 0, 1, out->lo);
+		if (st != QAWS_STATUS_OK)
+			return st;
+		if (qaws_exact_int_is_zero(&out->lo[0]) && qaws_exact_int_is_zero(&out->lo[1]))
+			return QAWS_STATUS_CERTIFICATION_FAILED;
+		if (!forward)
+		{
+			qaws_exact_int_neg(&out->lo[0], &out->lo[0]);
+			qaws_exact_int_neg(&out->lo[1], &out->lo[1]);
+		}
+		out->hi[0] = out->lo[0];
+		out->hi[1] = out->lo[1];
+		out->exact = 1;
+		out->has_kappa = 1;
+		out->kappa_sign = 0;
+		return QAWS_STATUS_OK;
+	}
 	nq = n + 1;
 	Q = (xint*)malloc(sizeof(xint) * 3 * nq * 2);
 	if (!Q)
