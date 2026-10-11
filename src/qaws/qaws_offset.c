@@ -1714,25 +1714,58 @@ static qaws_status os_erode_path(os_ctx* x, qaws_path_2d const* p, double delta,
 		/* the span's flat-ended stroke, counter-clockwise */
 		if (l > 0)
 		{
-			double nx = -dy / l * w, ny = dx / l * w;
-			corner[0] = a[0] - nx; corner[1] = a[1] - ny; corner[2] = b[0] - nx; corner[3] = b[1] - ny;
-			corner[4] = b[0] + nx; corner[5] = b[1] + ny; corner[6] = a[0] + nx; corner[7] = a[1] + ny;
+			/* a few units longer at both ends: neighbours' corners round apart */
+			double nx = -dy / l * w, ny = dx / l * w, ex = dx / l * 8 / scale, ey = dy / l * 8 / scale;
+			corner[0] = a[0] - ex - nx; corner[1] = a[1] - ey - ny; corner[2] = b[0] + ex - nx; corner[3] = b[1] + ey - ny;
+			corner[4] = b[0] + ex + nx; corner[5] = b[1] + ey + ny; corner[6] = a[0] - ex + nx; corner[7] = a[1] - ey + ny;
 			pieces[np].points = &all[used];
 			pieces[np].point_count = 4;
 			for (k = 0; k < 8; k++)
 				all[used++] = (int64_t)floor((corner[k] - org[k & 1]) * scale + 0.5);
 			np++;
 		}
-		/* the disc at its start */
-		pieces[np].points = &all[used];
-		pieces[np].point_count = nsides;
-		for (k = 0; k < nsides; k++)
+		/* where the path turns away from the interior, the wedge between the
+		   two strokes: a sector of the disc round the corner, from one inward
+		   normal to the other, the half disc ahead of a spike's tip (at a
+		   corner turning toward the interior the strokes already cover the
+		   inside) */
 		{
-			double t = 2 * OS_PI * k / nsides;
-			all[used++] = (int64_t)floor((a[0] + R * cos(t) - org[0]) * scale + 0.5);
-			all[used++] = (int64_t)floor((a[1] + R * sin(t) - org[1]) * scale + 0.5);
+			double const* z = &path.xy[2 * ((i + n - 1) % n)];
+			double px = a[0] - z[0], py = a[1] - z[1], pl = sqrt(px * px + py * py);
+			double turn = px * dy - py * dx, dot = px * dx + py * dy, sg = ccw ? 1.0 : -1.0, t0, ds, d;
+			unsigned int m, j;
+			int reversal;
+			if (!(l > 0 && pl > 0))
+				continue;
+			/* a reversal (a spike, or a crack into the interior) reads its side
+			   from rounding: it takes the half disc whichever way it turns */
+			reversal = dot < 0 && fabs(turn) <= 1e-6 * pl * l;
+			if (!reversal && (sg * turn > 0 || (turn == 0 && dot >= 0)))
+				continue;
+			ds = reversal ? OS_PI : fabs(atan2(turn, dot));
+			/* from the next span's inward normal round to the previous one's
+			   (left of travel for a counter-clockwise path) */
+			t0 = atan2(sg * px, -sg * py);
+			if (ccw)
+				t0 -= ds;
+			/* into the strokes on both sides: their shared edges round apart */
+			t0 -= 2 * OS_PI / nsides;
+			ds += 4 * OS_PI / nsides;
+			d = 2 * OS_PI / nsides;
+			m = (unsigned int)ceil(ds / d);
+			if (m < 1) m = 1;
+			pieces[np].points = &all[used];
+			pieces[np].point_count = m + 2;
+			all[used++] = (int64_t)floor((a[0] - org[0]) * scale + 0.5);
+			all[used++] = (int64_t)floor((a[1] - org[1]) * scale + 0.5);
+			for (j = 0; j <= m; j++)
+			{
+				double t = t0 + ds * j / m;
+				all[used++] = (int64_t)floor((a[0] + R * cos(t) - org[0]) * scale + 0.5);
+				all[used++] = (int64_t)floor((a[1] + R * sin(t) - org[1]) * scale + 0.5);
+			}
+			np++;
 		}
-		np++;
 	}
 	/* the band, then the interior minus it */
 	if (s == QAWS_STATUS_OK)
