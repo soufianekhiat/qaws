@@ -77,7 +77,7 @@ static void csk_path_curves(svg* s, viewport const* v, qaws_path_2d const* p, un
 				continue;
 			}
 			qaws_range rg = qaws_curve_get_parameter_range(c);
-			unsigned int m = qaws_curve_get_kind(c) == QAWS_CURVE_KIND_ARC ? 48 : 1;
+			unsigned int m = 48;
 			for (j = (k == 0 ? 0 : 1); j <= m; j++)
 			{
 				qaws_eval_result_2d e;

@@ -375,6 +375,11 @@ together wherever the item applies to both.
       solve for edge, split and terminal events. Vertices travel on lines (line-line),
       parabolas (line-arc) or hyperbolas / ellipses (arc-arc). Skeleton arcs come
       out as exact rational quadratic Beziers.
+    - Done (qaws_skeleton.h, test 99, docs/api/skeleton.md, figures 12 to 14):
+      the three steps below, in f64 and f32. Random curved regions (bulged
+      polygons with round holes) complete exactly in about 4 of 5 cases at
+      sigma = 2 pi and 9 of 10 at sigma = pi; the rest fail with a status, at
+      events among near-tangent circles.
     - Plan:
       1. Polygons with holes, weighted (per-edge speeds), via the generalised
          intersection event: f64 with clustered coincident events. Wavefront at

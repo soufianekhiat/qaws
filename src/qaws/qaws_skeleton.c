@@ -60,6 +60,7 @@ typedef struct sk_sup
 	int s;
 	double w;                   /* speed: 1 for circles */
 	unsigned int na, nb;        /* the input edge's nodes; a splice circle: its centre's, twice */
+	double start[2];            /* the input edge's start, in full precision */
 	double a0, sweep;           /* an input arc: start angle and signed sweep */
 	unsigned int path, curve, span;
 	int input;
@@ -656,6 +657,8 @@ static double sk_tend(sk_run const* r, sk_corner const* c)
 	return best;
 }
 
+static int sk_same_circle(sk_run const* r, sk_sup const* a, sk_sup const* b);
+
 /* a new corner at p, time t, between supports in and out, linked between
    prev and next (SK_NONE: itself); *spike when its supports are coincident
    and opposite */
@@ -726,6 +729,13 @@ static unsigned int sk_corner_new(sk_run* r, double const* p, double t, unsigned
 			c->v[0] = (a->w * b->n[1] - a->n[1] * b->w) / det;
 			c->v[1] = (a->n[0] * b->w - a->w * b->n[0]) / det;
 		}
+	}
+	else if (a->kind == SK_CIRCLE && b->kind == SK_CIRCLE && a->s == b->s && sk_same_circle(r, a, b))
+	{
+		/* one circle on both sides: a marker on it */
+		double x = p[0] - a->m[0], y = p[1] - a->m[1], l = hypot(x, y);
+		c->smooth = 1;
+		if (l > 0) { c->v[0] = -a->s * x / l; c->v[1] = -a->s * y / l; }
 	}
 	else if (sk_opposite(a, b, t, r->eps))
 		*spike = 1;
@@ -1053,6 +1063,15 @@ static int sk_curved(sk_run const* r, sk_corner const* c)
 	return r->sup[c->in].kind == SK_CIRCLE || r->sup[c->out].kind == SK_CIRCLE;
 }
 
+/* two supports on one circle (to the rounding of a fit: circles this close
+   only meet tangentially, and their crossings mean nothing) */
+static int sk_same_circle(sk_run const* r, sk_sup const* a, sk_sup const* b)
+{
+	double tol = r->eps_r + 1e-6 * (fabs(a->r0) + fabs(b->r0));
+	return a->kind == SK_CIRCLE && b->kind == SK_CIRCLE && a->s == b->s &&
+		hypot(a->m[0] - b->m[0], a->m[1] - b->m[1]) <= tol && fabs(a->r0 - b->r0) <= tol;
+}
+
 /* corner c is at p at time t: by its position, or, with a circle among its
    supports, by both supports passing through p (near a tangency the
    position is ill-conditioned: it moves like a square root of the time,
@@ -1064,8 +1083,11 @@ static int sk_at(sk_run const* r, sk_corner const* c, double const* p, double t)
 	d = hypot(q[0] - p[0], q[1] - p[1]);
 	if (d <= r->eps)
 		return 1;
-	if (d > r->far || c->in == c->out || (r->sup[c->in].kind == SK_LINE && r->sup[c->out].kind == SK_LINE))
-		return 0;           /* a marker's one circle passes everywhere round it */
+	if (c->in == c->out || sk_same_circle(r, &r->sup[c->in], &r->sup[c->out]))
+		return d <= r->rad;  /* on one circle: the residual says nothing, the position is well
+		                        conditioned (moving radially); to a fit's rounding */
+	if (d > r->far || (r->sup[c->in].kind == SK_LINE && r->sup[c->out].kind == SK_LINE))
+		return 0;
 	return fabs(sk_resid(&r->sup[c->in], p, t)) <= r->eps_r && fabs(sk_resid(&r->sup[c->out], p, t)) <= r->eps_r;
 }
 
@@ -1800,8 +1822,8 @@ static qaws_status sk_simulate(qaws_skeleton* s, int record, double stop, sk_run
 			unsigned int in = i == f ? g - 1 : i - 1, ci;
 			double p[2];
 			int sp;
-			p[0] = (double)s->nodes[s->sup[i].na].position.x;
-			p[1] = (double)s->nodes[s->sup[i].na].position.y;
+			p[0] = s->sup[i].start[0];
+			p[1] = s->sup[i].start[1];
 			ci = sk_corner_new(r, p, 0, in, i, i == f ? SK_NONE : r->nc - 1, SK_NONE, s->sup[i].na, &sp);
 			if (ci == SK_NONE)
 				break;
@@ -2102,12 +2124,215 @@ static qaws_status sk_faces(qaws_skeleton* s)
 	return QAWS_STATUS_OK;
 }
 
+/* ------------------------------------------------------------------------ */
+/*  Free-form curves: G1 arc splines (biarcs)                               */
+/* ------------------------------------------------------------------------ */
+
+typedef struct sk_prim
+{
+	int arc;                    /* else a line from a to b */
+	double a[2], b[2];
+	double m[2], r, a0, sweep;
+} sk_prim;
+
+/* the arc (or line) leaving a along the unit tangent ta and ending at b */
+static void sk_arc_from(double const* a, double const* ta, double const* b, sk_prim* o)
+{
+	double c[2], cr, cc, dt, k;
+	c[0] = b[0] - a[0]; c[1] = b[1] - a[1];
+	cr = ta[0] * c[1] - ta[1] * c[0];
+	dt = ta[0] * c[0] + ta[1] * c[1];
+	cc = c[0] * c[0] + c[1] * c[1];
+	o->a[0] = a[0]; o->a[1] = a[1]; o->b[0] = b[0]; o->b[1] = b[1];
+	if (!(cc > 0) || fabs(cr) <= 1e-12 * cc)
+	{
+		o->arc = 0;
+		return;
+	}
+	k = 2 * cr / cc;
+	o->arc = 1;
+	o->m[0] = a[0] - ta[1] / k;
+	o->m[1] = a[1] + ta[0] / k;
+	o->r = 1 / fabs(k);
+	o->a0 = atan2(a[1] - o->m[1], a[0] - o->m[0]);
+	o->sweep = 2 * atan2(cr, dt);
+}
+
+/* the distance from p to a line or arc */
+static double sk_prim_dist(sk_prim const* g, double const* p)
+{
+	if (!g->arc)
+	{
+		double d[2], l2, s;
+		d[0] = g->b[0] - g->a[0]; d[1] = g->b[1] - g->a[1];
+		l2 = d[0] * d[0] + d[1] * d[1];
+		s = l2 > 0 ? ((p[0] - g->a[0]) * d[0] + (p[1] - g->a[1]) * d[1]) / l2 : 0;
+		if (s < 0) s = 0;
+		if (s > 1) s = 1;
+		return hypot(g->a[0] + s * d[0] - p[0], g->a[1] + s * d[1] - p[1]);
+	}
+	{
+		double ang = atan2(p[1] - g->m[1], p[0] - g->m[0]) - g->a0, two = 2 * SK_PI;
+		/* the angle from the arc's start in its sweep's direction */
+		if (g->sweep < 0) ang = -ang;
+		while (ang < 0) ang += two;
+		while (ang >= two) ang -= two;
+		if (ang <= fabs(g->sweep))
+			return fabs(hypot(p[0] - g->m[0], p[1] - g->m[1]) - g->r);
+		return fmin(hypot(p[0] - g->a[0], p[1] - g->a[1]), hypot(p[0] - g->b[0], p[1] - g->b[1]));
+	}
+}
+
+/* the point and unit tangent of the curve at t (the chord's direction where
+   the derivative vanishes) */
+static int sk_point_tangent(qaws_curve const* c, double t, double tother, double* p, double* tg)
+{
+	qaws_eval_result_2d e, f;
+	double l;
+	if (qaws_curve_evaluate_2d(c, (qaws_scalar)t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &e) != QAWS_STATUS_OK)
+		return 0;
+	p[0] = (double)e.position.x; p[1] = (double)e.position.y;
+	tg[0] = (double)e.d1.x; tg[1] = (double)e.d1.y;
+	l = hypot(tg[0], tg[1]);
+	if (!(l > 1e-300))
+	{
+		if (qaws_curve_evaluate_2d(c, (qaws_scalar)(t + 1e-6 * (tother - t)), QAWS_EVAL_FLAG_POSITION, &f) != QAWS_STATUS_OK)
+			return 0;
+		tg[0] = (double)f.position.x - p[0]; tg[1] = (double)f.position.y - p[1];
+		if (tother < t) { tg[0] = -tg[0]; tg[1] = -tg[1]; }
+		l = hypot(tg[0], tg[1]);
+		if (!(l > 0))
+			return 0;
+	}
+	tg[0] /= l; tg[1] /= l;
+	return 1;
+}
+
+/* the equal-tangent biarc from (p0, t0) to (p1, t1); 0 when it does not exist */
+static int sk_biarc(double const* p0, double const* t0, double const* p1, double const* t1, sk_prim* o)
+{
+	double v[2], vt, tt, d, q1[2], q2[2], j[2], jt[2], l;
+	v[0] = p1[0] - p0[0]; v[1] = p1[1] - p0[1];
+	vt = v[0] * (t0[0] + t1[0]) + v[1] * (t0[1] + t1[1]);
+	tt = 1 - (t0[0] * t1[0] + t0[1] * t1[1]);
+	if (tt < 1e-12)
+	{
+		double den = 4 * (v[0] * t1[0] + v[1] * t1[1]);
+		if (!(den > 0))
+			return 0;
+		d = (v[0] * v[0] + v[1] * v[1]) / den;
+	}
+	else
+		d = (-vt + sqrt(vt * vt + 2 * tt * (v[0] * v[0] + v[1] * v[1]))) / (2 * tt);
+	if (!(d > 0))
+		return 0;
+	q1[0] = p0[0] + d * t0[0]; q1[1] = p0[1] + d * t0[1];
+	q2[0] = p1[0] - d * t1[0]; q2[1] = p1[1] - d * t1[1];
+	j[0] = 0.5 * (q1[0] + q2[0]); j[1] = 0.5 * (q1[1] + q2[1]);
+	jt[0] = q2[0] - q1[0]; jt[1] = q2[1] - q1[1];
+	l = hypot(jt[0], jt[1]);
+	if (!(l > 0))
+	{
+		jt[0] = t0[0]; jt[1] = t0[1];
+	}
+	else
+	{
+		jt[0] /= l; jt[1] /= l;
+	}
+	sk_arc_from(p0, t0, j, &o[0]);
+	sk_arc_from(j, jt, p1, &o[1]);
+	return 1;
+}
+
+typedef struct sk_prims
+{
+	sk_prim* g;
+	unsigned int n, cap;
+} sk_prims;
+
+/* the piece [ta, tb] of c as biarcs within tol, halved until it fits */
+static qaws_status sk_fit(qaws_curve const* c, double ta, double tb, double tol, unsigned int depth, sk_prims* out)
+{
+	double p0[2], p1[2], t0[2], t1[2], worst = 0;
+	sk_prim g[2];
+	unsigned int k, i;
+	int ok = sk_point_tangent(c, ta, tb, p0, t0) && sk_point_tangent(c, tb, ta, p1, t1) && sk_biarc(p0, t0, p1, t1, g);
+	if (ok)
+	{
+		for (k = 1; k < 16 && worst <= tol; k++)
+		{
+			qaws_eval_result_2d e;
+			double q[2], d0, d1;
+			if (qaws_curve_evaluate_2d(c, (qaws_scalar)(ta + (tb - ta) * k / 16), QAWS_EVAL_FLAG_POSITION, &e) != QAWS_STATUS_OK)
+				return QAWS_STATUS_NUMERICAL_FAILURE;
+			q[0] = (double)e.position.x; q[1] = (double)e.position.y;
+			d0 = sk_prim_dist(&g[0], q);
+			d1 = sk_prim_dist(&g[1], q);
+			if ((d0 < d1 ? d0 : d1) > worst) worst = d0 < d1 ? d0 : d1;
+		}
+	}
+	if ((!ok || worst > tol) && depth < 24 && tb - ta > 1e-12 * (fabs(ta) + fabs(tb) + 1))
+	{
+		qaws_status st = sk_fit(c, ta, 0.5 * (ta + tb), tol, depth + 1, out);
+		if (st == QAWS_STATUS_OK)
+			st = sk_fit(c, 0.5 * (ta + tb), tb, tol, depth + 1, out);
+		return st;
+	}
+	if (!ok)
+	{
+		/* a chord where no biarc exists (a vanishing piece) */
+		g[0].arc = 0;
+		g[0].a[0] = p0[0]; g[0].a[1] = p0[1]; g[0].b[0] = p1[0]; g[0].b[1] = p1[1];
+		g[1] = g[0];
+		g[1].a[0] = p1[0]; g[1].a[1] = p1[1];
+	}
+	for (i = 0; i < 2; i++)
+	{
+		if (hypot(g[i].b[0] - g[i].a[0], g[i].b[1] - g[i].a[1]) <= 1e-12 * tol + 1e-300)
+			continue;
+		if (out->n && g[i].arc && out->g[out->n - 1].arc)
+		{
+			/* on the circle of the arc before (a biarc of a circular piece): one arc */
+			sk_prim* h = &out->g[out->n - 1];
+			if (hypot(h->m[0] - g[i].m[0], h->m[1] - g[i].m[1]) <= 1e-9 * (h->r + g[i].r) && fabs(h->r - g[i].r) <= 1e-9 * (h->r + g[i].r) &&
+				(h->sweep > 0) == (g[i].sweep > 0))
+			{
+				h->b[0] = g[i].b[0]; h->b[1] = g[i].b[1];
+				h->sweep += g[i].sweep;
+				continue;
+			}
+		}
+		if (!sk_grow((void**)&out->g, &out->cap, out->n + 1, sizeof(sk_prim)))
+			return QAWS_STATUS_ALLOCATION_FAILURE;
+		out->g[out->n++] = g[i];
+	}
+	return QAWS_STATUS_OK;
+}
+
+/* a whole curve as biarcs: span by span (a span's end can be a corner) */
+static qaws_status sk_fit_curve(qaws_curve const* c, double tol, sk_prims* out)
+{
+	qaws_range rg = qaws_curve_get_parameter_range(c);
+	unsigned int k, n = c->span_count ? c->span_count : 1;
+	qaws_status st = QAWS_STATUS_OK;
+	for (k = 0; k < n && st == QAWS_STATUS_OK; k++)
+	{
+		double a = c->span_count ? (double)c->span_boundaries[k] : (double)rg.min_value;
+		double b = c->span_count ? (double)c->span_boundaries[k + 1] : (double)rg.max_value;
+		if (b > a)
+			st = sk_fit(c, a, b, tol, 0, out);
+	}
+	return st;
+}
+
 static qaws_status sk_add_support(qaws_skeleton* s, unsigned int* cap, sk_sup const* e, double const* start)
 {
 	if (!sk_grow((void**)&s->sup, cap, s->nsup + 1, sizeof(sk_sup)) ||
 		!sk_grow((void**)&s->nodes, &s->capnodes, s->nnodes + 1, sizeof(qaws_skeleton_node)))
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	s->sup[s->nsup] = *e;
+	s->sup[s->nsup].start[0] = start[0];
+	s->sup[s->nsup].start[1] = start[1];
 	s->nodes[s->nnodes].position.x = (qaws_scalar)start[0];
 	s->nodes[s->nnodes].position.y = (qaws_scalar)start[1];
 	s->nodes[s->nnodes].time = 0;
@@ -2147,7 +2372,8 @@ qaws_status qaws_skeleton_create(qaws_skeleton_desc const* desc, qaws_skeleton**
 	qaws_clip_result* region = NULL;
 	qaws_status st;
 	unsigned int np, pi, capsup = 0;
-	double lo[2] = { 1e300, 1e300 }, hi[2] = { -1e300, -1e300 };
+	double lo[2] = { 1e300, 1e300 }, hi[2] = { -1e300, -1e300 }, fit_tol;
+	int fitted = 0;
 	sk_run r;
 	if (!desc || !out || (desc->path_count && !desc->paths))
 		return QAWS_STATUS_INVALID_ARGUMENT;
@@ -2165,6 +2391,19 @@ qaws_status qaws_skeleton_create(qaws_skeleton_desc const* desc, qaws_skeleton**
 	}
 	s->sigma = desc->splice_angle != 0 ? (double)desc->splice_angle : 2 * SK_PI;
 	np = qaws_clip_result_get_path_count(region);
+	{
+		/* the free-form curves' fit tolerance, of the region's extent */
+		double ext0 = 0;
+		for (pi = 0; pi < np; pi++)
+		{
+			qaws_path_2d path;
+			qaws_vec2 a, b;
+			qaws_clip_result_get_path(region, pi, &path);
+			if (qaws_path_compute_bounds_2d(&path, &a, &b) == QAWS_STATUS_OK && hypot((double)b.x - a.x, (double)b.y - a.y) > ext0)
+				ext0 = hypot((double)b.x - a.x, (double)b.y - a.y);
+		}
+		fit_tol = desc->curve_tolerance > 0 ? (double)desc->curve_tolerance : 1e-4 * (ext0 > 0 ? ext0 : 1);
+	}
 	s->loop_first = (unsigned int*)malloc(sizeof(unsigned int) * (np + 1));
 	if (!s->loop_first)
 		st = QAWS_STATUS_ALLOCATION_FAILURE;
@@ -2274,7 +2513,46 @@ qaws_status qaws_skeleton_create(qaws_skeleton_desc const* desc, qaws_skeleton**
 				}
 			}
 			else
-				st = QAWS_STATUS_UNSUPPORTED_OPERATION;
+			{
+				/* any other curve: G1 arc splines within the curve tolerance */
+				sk_prims pr;
+				unsigned int j;
+				memset(&pr, 0, sizeof(pr));
+				fitted = 1;
+				st = sk_fit_curve(c, fit_tol, &pr);
+				for (j = 0; j < pr.n && st == QAWS_STATUS_OK; j++)
+				{
+					sk_prim const* g = &pr.g[j];
+					sk_sup e;
+					memset(&e, 0, sizeof(e));
+					if (!g->arc)
+					{
+						double len = hypot(g->b[0] - g->a[0], g->b[1] - g->a[1]);
+						e.kind = SK_LINE;
+						e.n[0] = -(g->b[1] - g->a[1]) / len;
+						e.n[1] = (g->b[0] - g->a[0]) / len;
+						e.d = e.n[0] * g->a[0] + e.n[1] * g->a[1];
+					}
+					else
+					{
+						e.kind = SK_CIRCLE;
+						e.m[0] = g->m[0]; e.m[1] = g->m[1];
+						e.r0 = g->r;
+						e.s = g->sweep > 0 ? 1 : -1;
+						e.a0 = g->a0;
+						e.sweep = g->sweep;
+					}
+					e.w = 1;
+					e.input = 1;
+					e.path = sp; e.curve = sc; e.span = j;
+					st = sk_add_support(s, &capsup, &e, g->a);
+					if (g->a[0] < lo[0]) lo[0] = g->a[0];
+					if (g->a[1] < lo[1]) lo[1] = g->a[1];
+					if (g->a[0] > hi[0]) hi[0] = g->a[0];
+					if (g->a[1] > hi[1]) hi[1] = g->a[1];
+				}
+				free(pr.g);
+			}
 		}
 		/* a full circle is one support; a polygon needs three */
 		for (k = first; k < s->nsup && s->sup[k].kind != SK_CIRCLE; k++) {}
@@ -2296,7 +2574,9 @@ qaws_status qaws_skeleton_create(qaws_skeleton_desc const* desc, qaws_skeleton**
 	{
 		double ext = hypot(hi[0] - lo[0], hi[1] - lo[1]);
 		s->loop_first[s->nloops] = s->nsup;
-		s->tol = desc->tolerance > 0 ? (double)desc->tolerance : SK_TOL_REL * (ext > 0 ? ext : 1);
+		/* fitted arcs are exact doubles: events among them resolve to the
+		   double default even where float vertices need the float one */
+		s->tol = desc->tolerance > 0 ? (double)desc->tolerance : (fitted ? 1e-9 : SK_TOL_REL) * (ext > 0 ? ext : 1);
 		s->ext = ext > 0 ? ext : 1;
 		/* the input's edges as curves, for the faces */
 		s->edges = (qaws_curve**)calloc(s->ninput + 1, sizeof(qaws_curve*));

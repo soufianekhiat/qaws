@@ -35,8 +35,20 @@ qaws_skeleton_destroy(s);
 
 1. **Region.** The paths are united under the fill rule (`qaws_clip`), so
    outer boundaries run counter-clockwise and holes clockwise, with the
-   interior on the left. The curves must be lines (degree 1 Béziers or
-   B-splines, polylines) or circular arcs (`qaws_curve_create_arc`).
+   interior on the left. Lines (degree 1 Béziers or B-splines, polylines)
+   and circular arcs (`qaws_curve_create_arc`) are taken exactly. Any other
+   curve (Béziers, NURBS such as ellipses, B-splines, ...) becomes a G1 arc
+   spline:
+   - each span is fitted with an equal-tangent biarc, which is halved until
+     its distance to the curve is within `curve_tolerance` (default 1e-4 of
+     the extent);
+   - consecutive arcs on one circle merge;
+   - the joints are smooth and carry no skeleton.
+
+   The skeleton is exact for the spline. Where curvature peaks (a petal's
+   tip), the spline's piecewise-constant curvature ends the branch in a
+   short segment between the centres of adjacent arcs, instead of at one
+   centre of curvature.
 2. **Supports in space-time.** Each edge's carrier is a surface over
    (x, y, t):
    - a line n · p = d at time t is on n · p = d + w t: a plane;
@@ -108,7 +120,9 @@ The arcs with neither flag are the pure skeleton, clear of the boundary.
 ## Precision
 
 - **Tolerance.** Events within the tolerance are one. It defaults to 1e-9
-  of the extent, or 1e-6 in float builds for the input's rounding.
+  of the extent. In float builds it is 1e-6 for the vertices' rounding,
+  except when free-form curves are fitted: the fitted arcs are exact
+  doubles, so their events keep the double default.
   Arithmetic is in double precision throughout.
 - **Weights.** Weights apply to lines and must be > 0; arcs move at speed 1.
   Consecutive collinear lines with different weights are ambiguous
@@ -168,3 +182,10 @@ Curved shapes:
 - a square with a round bump, mitered (it pinches off as a bubble) and at
   sigma = pi;
 - the medial axes of an L, a comb and a star.
+
+**Free-form**, at both sigma: an ellipse (NURBS), an ellipse with a round
+hole, and a blob of four cubics.
+- Arcs lie exactly on their supports.
+- The faces tile the region.
+- At sigma = pi, every skeleton point is within twice the fit tolerance of
+  its time, measured against the true curves, not the spline.

@@ -39,9 +39,12 @@
  * at once) collapse along it.
  *
  * The region is the paths united under the fill rule (qaws_clip), so outer
- * boundaries run counter-clockwise and holes clockwise. Its curves must be
- * lines (degree 1 Beziers or B-splines, polylines) or circular arcs
- * (qaws_curve_create_arc). Line weights must be > 0 (arcs move at speed
+ * boundaries run counter-clockwise and holes clockwise. Lines (degree 1
+ * Beziers or B-splines, polylines) and circular arcs (qaws_curve_create_arc)
+ * are taken exactly; any other curve (Beziers, NURBS, ellipses, ...) as a G1
+ * arc spline: equal-tangent biarcs, halved until within the curve tolerance,
+ * whose smooth joints carry no skeleton. The skeleton is then exact for
+ * that spline. Line weights must be > 0 (arcs move at speed
  * 1); consecutive collinear lines with different weights are ambiguous
  * (Biedl et al., CGTA 2015), and their vertex moves at the average speed.
  *
@@ -61,8 +64,9 @@ typedef struct qaws_skeleton_desc
 	qaws_fill_rule fill_rule;
 	qaws_skeleton_weight_fn weight_fn;   /* optional: NULL = every weight 1 */
 	void* weight_user;
-	qaws_scalar tolerance;          /* events this close are one; 0 = 1e-9 of the extent (1e-6 in float) */
+	qaws_scalar tolerance;          /* events this close are one; 0 = 1e-9 of the extent (in float 1e-6, for the vertices' rounding, unless free-form curves are fitted) */
 	qaws_scalar splice_angle;       /* sigma in [pi, 2 pi]; 0 = 2 pi (mitered); pi: the medial axis */
+	qaws_scalar curve_tolerance;    /* free-form curves as G1 arc splines within this; 0 = 1e-4 of the extent */
 } qaws_skeleton_desc;
 
 /* A skeleton node: where wavefront vertices start (the input's corners, at

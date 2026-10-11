@@ -740,6 +740,129 @@ static void test_curved(void)
 	}
 }
 
+/* ------------------------------------------------------------------------ */
+/*  Free-form curves: through G1 arc splines                                */
+/* ------------------------------------------------------------------------ */
+
+static qaws_curve* skt_cubic(double x0, double y0, double x1, double y1, double x2, double y2, double x3, double y3)
+{
+	qaws_scalar cp[8];
+	qaws_bezier_desc d;
+	qaws_curve* c = NULL;
+	cp[0] = (qaws_scalar)x0; cp[1] = (qaws_scalar)y0; cp[2] = (qaws_scalar)x1; cp[3] = (qaws_scalar)y1;
+	cp[4] = (qaws_scalar)x2; cp[5] = (qaws_scalar)y2; cp[6] = (qaws_scalar)x3; cp[7] = (qaws_scalar)y3;
+	memset(&d, 0, sizeof(d));
+	d.dimension = QAWS_DIMENSION_2D; d.degree = 3; d.control_points = cp; d.control_point_count = 4;
+	qaws_curve_create_bezier(&d, &c);
+	return c;
+}
+
+/* every skeleton arc on its faces' supports; at sigma = pi each point at
+   distance t from the true curves (within the fit); the faces tile the
+   region of the spline */
+static void skt_check_freeform(char const* name, qaws_curve* const* cs, unsigned int ncs, qaws_path_2d const* p, unsigned int np, double sigma)
+{
+	qaws_skeleton_desc d;
+	qaws_skeleton* s = NULL;
+	qaws_status st;
+	unsigned int i, k, missing = 0;
+	double area = 0, size, worst_dist = 0, worst_axis = 0, faces = 0, fit;
+	char msg[400];
+	{
+		qaws_clip_result* u = NULL;
+		if (qaws_clip_boolean(QAWS_CLIP_UNION, QAWS_FILL_NON_ZERO, p, np, NULL, 0, &u) == QAWS_STATUS_OK)
+			area = skt_result_area(u);
+		qaws_clip_result_destroy(u);
+	}
+	size = sqrt(fabs(area));
+	fit = 1e-4 * 2 * size;
+	memset(&d, 0, sizeof(d));
+	d.paths = p; d.path_count = np; d.fill_rule = QAWS_FILL_NON_ZERO;
+	d.splice_angle = (qaws_scalar)sigma;
+	d.curve_tolerance = (qaws_scalar)fit;
+	st = qaws_skeleton_create(&d, &s);
+	sprintf(msg, "%s: created (status %d)", name, (int)st);
+	TEST_ASSERT(st == QAWS_STATUS_OK && s, msg);
+	if (!s)
+		return;
+	for (i = 0; i < qaws_skeleton_get_arc_count(s); i++)
+	{
+		qaws_skeleton_arc a;
+		qaws_skeleton_face fa, fb;
+		qaws_skeleton_get_arc(s, i, &a);
+		qaws_skeleton_get_face(s, a.face_a, &fa);
+		qaws_skeleton_get_face(s, a.face_b, &fb);
+		for (k = 0; k <= 8; k++)
+		{
+			qaws_vec2 q;
+			qaws_scalar t;
+			double e1, e2;
+			qaws_skeleton_evaluate_arc(s, i, (qaws_scalar)(k / 8.0), &q, &t);
+			e1 = fabs(skt_face_resid(&fa, q.x, q.y, t));
+			e2 = fabs(skt_face_resid(&fb, q.x, q.y, t));
+			if (e1 > worst_dist) worst_dist = e1;
+			if (e2 > worst_dist) worst_dist = e2;
+			if (sigma == SKT_PI && !a.smooth)
+			{
+				double e = fabs(skt_boundary_dist(cs, ncs, q.x, q.y) - (double)t);
+				if (e > worst_axis) worst_axis = e;
+			}
+		}
+	}
+	for (i = 0; i < qaws_skeleton_get_face_count(s); i++)
+		faces += skt_face_area(s, i, &missing);
+	sprintf(msg, "%s (sigma %.3f, fit %.2g): %u faces, %u arcs, max time %.6f; supports' error %.2g, distance to the true curves %.2g, faces %.6f (region %.6f, %u gaps)",
+		name, sigma, fit, qaws_skeleton_get_face_count(s), qaws_skeleton_get_arc_count(s), (double)qaws_skeleton_get_max_time(s),
+		worst_dist, worst_axis, faces, area, missing);
+	TEST_ASSERT(worst_dist <= (SKT_F32 ? 1e-4 : 1e-8) * size && worst_axis <= 2 * fit && missing == 0 &&
+		fabs(faces - area) <= 1e-3 * area, msg);
+	if (g_verbose_skt) printf("    %s\n", msg);
+	qaws_skeleton_destroy(s);
+}
+
+static void test_freeform(void)
+{
+	qaws_curve* cs[8];
+	qaws_curve const* cv[8];
+	qaws_path_2d p[2];
+	unsigned int i, k;
+	double const pi = SKT_PI;
+	for (k = 0; k < 2; k++)
+	{
+		double sigma = k ? pi : 0;
+		/* an ellipse: one exact rational NURBS */
+		qaws_curve_create_ellipse_2d(0.1, -0.2, 1.5, 0.8, 0.3, &cs[0]);
+		cv[0] = cs[0];
+		p[0].curves = cv; p[0].curve_count = 1; p[0].closed = 1;
+		skt_check_freeform("ellipse (NURBS)", cs, 1, p, 1, sigma);
+		/* an ellipse with an off-centre round hole */
+		{
+			qaws_arc_segment g;
+			qaws_arc_desc d;
+			memset(&g, 0, sizeof(g));
+			g.center[0] = (qaws_scalar)0.5; g.center[1] = (qaws_scalar)-0.1; g.radius = (qaws_scalar)0.3;
+			g.angle_start = (qaws_scalar)(2 * pi); g.angle_end = 0;
+			memset(&d, 0, sizeof(d));
+			d.dimension = QAWS_DIMENSION_2D; d.segments = &g; d.segment_count = 1;
+			qaws_curve_create_arc(&d, &cs[1]);
+			cv[1] = cs[1];
+			p[1].curves = &cv[1]; p[1].curve_count = 1; p[1].closed = 1;
+			skt_check_freeform("ellipse with a round hole", cs, 2, p, 2, sigma);
+			qaws_curve_destroy(cs[1]);
+		}
+		qaws_curve_destroy(cs[0]);
+		/* a blob of four cubic Beziers, with a dent */
+		cs[0] = skt_cubic(0, 0, 1, -0.9, 2.4, -0.5, 2.2, 0.6);
+		cs[1] = skt_cubic(2.2, 0.6, 2, 1.6, 1.4, 1.1, 1, 1);
+		cs[2] = skt_cubic(1, 1, 0.6, 0.9, 0.2, 1.8, -0.5, 1.2);
+		cs[3] = skt_cubic(-0.5, 1.2, -1.2, 0.6, -0.6, 0.2, 0, 0);
+		for (i = 0; i < 4; i++) cv[i] = cs[i];
+		p[0].curves = cv; p[0].curve_count = 4; p[0].closed = 1;
+		skt_check_freeform("blob of four cubics", cs, 4, p, 1, sigma);
+		for (i = 0; i < 4; i++) qaws_curve_destroy(cs[i]);
+	}
+}
+
 int test_99_skeleton_main(void)
 {
 	g_pass = 0;
@@ -749,6 +872,7 @@ int test_99_skeleton_main(void)
 	test_closed_forms();
 	test_shapes();
 	test_curved();
+	test_freeform();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
 }
