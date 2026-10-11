@@ -322,6 +322,24 @@ together wherever the item applies to both.
     curves to a tolerance; Delaunay refinement (minimum angle, maximum area, size
     field); isotropic remeshing (split, collapse, flip, smooth with boundary vertices
     kept on their curves); contour stitching between stack levels into a surface mesh.
+11. **Uniform sampling of curved regions, analytically (no meshing)**: points
+    uniform in area over any region of `qaws_path_2d` (concave, with holes, every
+    curve kind), from the boundary alone.
+    - Inverse CDF from Green's theorem: the area left of `x`, A(x), is a piecewise
+      analytic function of `x` between the boundary's critical abscissas (curve
+      ends, x-extrema, self hits). Invert it (Newton on the exact integral, seeded
+      from the piece table), then sample `y` uniformly in the union of the vertical
+      chords at `x` (the boundary's roots at `x`, sorted, paired by winding). Holes
+      and concavities are just more chords; the fill rule picks the pairs.
+    - Stratified and low-discrepancy variants (Sobol / Halton pushed through the
+      same map), batched on the executor, deterministic per seed; float and exact
+      areas where the curves allow.
+    - Generalized barycentric coordinates for curved domains (mean value and
+      harmonic coordinates extended from polygons to curved boundaries) as the
+      second map: smooth, cage-driven sampling and interpolation over the region.
+    - Ground truth from Mathematica (`tests/reference/*.wls`): A(x) in closed form,
+      region areas and moments, chi-square / Kolmogorov-Smirnov uniformity tests
+      against `RandomPoint` on the same regions.
 
 Benchmarks against Clipper2 on its own random-polygon benchmark go in once item 5 is
 in, as an optional C++ program outside the library (the library stays C) that links
