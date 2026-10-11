@@ -19,6 +19,7 @@
 #include "internal/qaws_internal_types.h"
 #include "internal/qaws_internal_path.h"
 #include "internal/qaws_internal_flatten.h"
+#include "internal/qaws_internal_parallel.h"
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -55,12 +56,15 @@ struct qaws_region_sampler
 	/* the density, and its table: slab k's panels pfirst[k] .. pfirst[k + 1],
 	   uniform in s where x = x_k + w (3 s^2 - 2 s^3) (flat at the slab's ends,
 	   where chords grow like square roots); pmass[p] the mass left of panel
-	   p's start */
+	   p's start; pcoef[8 p ..] the integrand over panel p in Legendre
+	   polynomials, from its 8 Gauss values (the map inverts this interpolant) */
 	qaws_scalar (*rho)(void* user, qaws_scalar x, qaws_scalar y);
 	void* rho_user;
 	unsigned int* pfirst;
 	double* pmass;
+	double* pcoef;
 	double mass, rhomax;
+	qaws_batch_executor const* executor;
 };
 
 static qaws_status rs_eval(qaws_curve const* c, double t, double* p, double* d)
@@ -224,6 +228,7 @@ void qaws_region_sampler_destroy(qaws_region_sampler* s)
 	free(s->active);
 	free(s->pfirst);
 	free(s->pmass);
+	free(s->pcoef);
 	free(s);
 }
 
@@ -286,6 +291,7 @@ qaws_status qaws_region_sampler_create(qaws_region_sampler_desc const* desc, qaw
 				}
 				h = s->yhi > s->ylo ? s->yhi - s->ylo : 1;
 				s->tol = desc->tolerance > 0 ? (double)desc->tolerance : RS_AREA_REL * (s->ext > 0 ? s->ext : 1) * h;
+				s->executor = desc->executor;
 			}
 			eps = RS_MERGE_REL * (s->ext > 0 ? s->ext : 1);
 			for (i = 0; i < nraw; i++)
@@ -452,25 +458,128 @@ static rs_cross* rs_crossings(qaws_region_sampler const* s, unsigned int k, doub
 	return cr;
 }
 
+/* Legendre coefficients (times r, the interval's half width) of the degree 7
+   polynomial through the values f at the 8 Gauss nodes: its integral over
+   the interval is the Gauss sum */
+static void rs_legendre(double const* f, double r, double* c)
+{
+	unsigned int n, g;
+	for (n = 0; n < 8; n++) c[n] = 0;
+	for (g = 0; g < 8; g++)
+	{
+		double p0 = 1, p1 = rs_gx[g], wf = rs_gw[g] * f[g] * r;
+		c[0] += wf;
+		c[1] += wf * p1;
+		for (n = 2; n < 8; n++)
+		{
+			double p2 = ((2 * n - 1) * rs_gx[g] * p1 - (n - 1) * p0) / n;
+			c[n] += wf * p2;
+			p0 = p1;
+			p1 = p2;
+		}
+	}
+	for (n = 0; n < 8; n++) c[n] *= 0.5 * (2 * n + 1);
+}
+
+/* the polynomial's integral from -1 to xi (the integral of P_n is
+   (P_n+1 - P_n-1) / (2 n + 1)), and its value at xi */
+static double rs_legendre_cum(double const* c, double xi, double* d)
+{
+	double p[9], sum = c[0] * (xi + 1), dv = c[0];
+	unsigned int n;
+	p[0] = 1;
+	p[1] = xi;
+	for (n = 1; n < 8; n++) p[n + 1] = ((2 * n + 1) * xi * p[n] - n * p[n - 1]) / (n + 1);
+	for (n = 1; n < 8; n++)
+	{
+		sum += c[n] * (p[n + 1] - p[n - 1]) / (2 * n + 1);
+		dv += c[n] * p[n];
+	}
+	if (d) *d = dv;
+	return sum;
+}
+
+/* xi in [-1, 1] where the integral from -1 reaches target: Newton, bisection
+   when it leaves the bracket */
+static double rs_legendre_solve(double const* c, double target)
+{
+	double lo = -1, hi = 1, total = rs_legendre_cum(c, 1, NULL), xi;
+	unsigned int it;
+	xi = total > 0 ? -1 + 2 * target / total : 0;
+	if (xi < -1) xi = -1;
+	if (xi > 1) xi = 1;
+	for (it = 0; it < 80; it++)
+	{
+		double d, f = rs_legendre_cum(c, xi, &d) - target, nx;
+		if (f == 0)
+			break;
+		if (f > 0) hi = xi; else lo = xi;
+		nx = d > 0 ? xi - f / d : 0.5 * (lo + hi);
+		if (!(nx > lo && nx < hi))
+			nx = 0.5 * (lo + hi);
+		if (fabs(nx - xi) <= 1e-15 || hi - lo <= 1e-15)
+		{
+			xi = nx;
+			break;
+		}
+		xi = nx;
+	}
+	return xi;
+}
+
+/* the density's integral over [c0, c1] at x (8-point Gauss), its values at
+   the nodes in f */
+static double rs_rho_seg(qaws_region_sampler const* s, double x, double c0, double c1, double* rmax, double* f)
+{
+	double m = 0.5 * (c0 + c1), r = 0.5 * (c1 - c0), sum = 0;
+	unsigned int g;
+	for (g = 0; g < 8; g++)
+	{
+		double v = (double)s->rho(s->rho_user, (qaws_scalar)x, (qaws_scalar)(m + r * rs_gx[g]));
+		if (rmax && v > *rmax) *rmax = v;
+		if (f) f[g] = v;
+		sum += rs_gw[g] * r * v;
+	}
+	return sum;
+}
+
 /* the density's integral over [a, b] at x, composite Gauss by the region's height */
 static double rs_rho_line(qaws_region_sampler const* s, double x, double a, double b, double* rmax)
 {
 	double h = (s->yhi - s->ylo) / RS_YSEGS, sum = 0;
-	unsigned int n = (unsigned int)ceil((b - a) / h), i, g;
+	unsigned int n = (unsigned int)ceil((b - a) / h), i;
 	if (!(b > a))
 		return 0;
 	if (n < 1) n = 1;
 	for (i = 0; i < n; i++)
-	{
-		double c0 = a + (b - a) * i / n, c1 = a + (b - a) * (i + 1) / n, m = 0.5 * (c0 + c1), r = 0.5 * (c1 - c0);
-		for (g = 0; g < 8; g++)
-		{
-			double v = (double)s->rho(s->rho_user, (qaws_scalar)x, (qaws_scalar)(m + r * rs_gx[g]));
-			if (rmax && v > *rmax) *rmax = v;
-			sum += rs_gw[g] * r * v;
-		}
-	}
+		sum += rs_rho_seg(s, x, a + (b - a) * i / n, a + (b - a) * (i + 1) / n, rmax, NULL);
 	return sum;
+}
+
+/* y in [a, b] with the density's integral from a to y equal to target: the
+   segment of rs_rho_line holding it, then its interpolant inverted */
+static double rs_rho_solve(qaws_region_sampler const* s, double x, double a, double b, double target)
+{
+	double h = (s->yhi - s->ylo) / RS_YSEGS;
+	unsigned int n = (unsigned int)ceil((b - a) / h), i;
+	if (!(b > a))
+		return a;
+	if (n < 1) n = 1;
+	for (i = 0; i < n; i++)
+	{
+		double c0 = a + (b - a) * i / n, c1 = a + (b - a) * (i + 1) / n, f[8], c[8], m;
+		m = rs_rho_seg(s, x, c0, c1, NULL, f);
+		if (target > m && i + 1 < n)
+		{
+			target -= m;
+			continue;
+		}
+		if (!(m > 0))
+			return 0.5 * (c0 + c1);
+		rs_legendre(f, 0.5 * (c1 - c0), c);
+		return 0.5 * (c0 + c1) + 0.5 * (c1 - c0) * rs_legendre_solve(c, target < m ? target : m);
+	}
+	return b;
 }
 
 /* g(x): the density along the chords at x (slab k) */
@@ -516,23 +625,64 @@ static double rs_sx(qaws_region_sampler const* s, unsigned int k, double x)
 	return t;
 }
 
-/* the mass of slab k between the parameters ta < tb: Gauss on the smooth integrand */
-static double rs_mass_between(qaws_region_sampler const* s, unsigned int k, double ta, double tb, double* rmax)
+/* the mass of slab k between the parameters ta < tb: Gauss on the smooth
+   integrand, its values at the nodes in f */
+static double rs_mass_between(qaws_region_sampler const* s, unsigned int k, double ta, double tb, double* rmax, double* f)
 {
 	double m = 0.5 * (ta + tb), r = 0.5 * (tb - ta), sum = 0;
 	unsigned int g;
 	for (g = 0; g < 8; g++)
 	{
-		double dx, x = rs_xs(s, k, m + r * rs_gx[g], &dx);
-		sum += rs_gw[g] * r * rs_g(s, k, x, rmax) * dx;
+		double dx, x = rs_xs(s, k, m + r * rs_gx[g], &dx), v = rs_g(s, k, x, rmax) * dx;
+		if (f) f[g] = v;
+		sum += rs_gw[g] * r * v;
 	}
 	return sum;
+}
+
+/* the slab of panel p */
+static unsigned int rs_panel_slab(qaws_region_sampler const* s, unsigned int p)
+{
+	unsigned int c = 0, d = s->nxs - 2;
+	while (c < d)
+	{
+		unsigned int m = (c + d + 1) / 2;
+		if (s->pfirst[m] <= p) c = m; else d = m - 1;
+	}
+	return c;
+}
+
+typedef struct rs_build_ctx
+{
+	qaws_region_sampler* s;
+	double rmax[256];           /* per chunk */
+} rs_build_ctx;
+
+/* panels [b, e): their masses in pmass[p + 1], their interpolants */
+static qaws_status rs_build_job(void* ctx, unsigned int chunk, unsigned int b, unsigned int e)
+{
+	rs_build_ctx* c = (rs_build_ctx*)ctx;
+	qaws_region_sampler* s = c->s;
+	unsigned int p, k = b < e ? rs_panel_slab(s, b) : 0;
+	for (p = b; p < e; p++)
+	{
+		unsigned int np, i;
+		double f[8];
+		while (s->pfirst[k + 1] <= p) k++;
+		np = s->pfirst[k + 1] - s->pfirst[k];
+		i = p - s->pfirst[k];
+		s->pmass[p + 1] = rs_mass_between(s, k, (double)i / np, (double)(i + 1) / np, &c->rmax[chunk], f);
+		rs_legendre(f, 0.5 / np, s->pcoef + 8 * p);
+	}
+	return QAWS_STATUS_OK;
 }
 
 static qaws_status rs_build_density(qaws_region_sampler* s)
 {
 	unsigned int nslab = s->nxs - 1, k, total = 0, p;
 	double width = s->xs[s->nxs - 1] - s->xs[0], rmax = 0;
+	rs_build_ctx* c;
+	qaws_status st;
 	s->pfirst = (unsigned int*)malloc(sizeof(unsigned int) * (nslab + 1));
 	if (!s->pfirst)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
@@ -544,15 +694,24 @@ static qaws_status rs_build_density(qaws_region_sampler* s)
 	}
 	s->pfirst[nslab] = total;
 	s->pmass = (double*)malloc(sizeof(double) * (total + 1));
-	if (!s->pmass)
-		return QAWS_STATUS_ALLOCATION_FAILURE;
-	s->pmass[0] = 0;
-	for (k = 0; k < nslab; k++)
+	s->pcoef = (double*)malloc(sizeof(double) * 8 * total);
+	c = (rs_build_ctx*)calloc(1, sizeof(rs_build_ctx));
+	if (!s->pmass || !s->pcoef || !c)
 	{
-		unsigned int np = s->pfirst[k + 1] - s->pfirst[k];
-		for (p = 0; p < np; p++)
-			s->pmass[s->pfirst[k] + p + 1] = s->pmass[s->pfirst[k] + p] + rs_mass_between(s, k, (double)p / np, (double)(p + 1) / np, &rmax);
+		free(c);
+		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
+	/* the panels in parallel, then their masses summed in order */
+	c->s = s;
+	st = qaws_internal_parallel(s->executor, total, 2, rs_build_job, c);
+	for (k = 0; k < 256; k++)
+		if (c->rmax[k] > rmax) rmax = c->rmax[k];
+	free(c);
+	if (st != QAWS_STATUS_OK)
+		return st;
+	s->pmass[0] = 0;
+	for (p = 0; p < total; p++)
+		s->pmass[p + 1] += s->pmass[p];
 	s->mass = s->pmass[total];
 	/* the density's bound for rejection: the largest value met, and a grid
 	   over the box, with a margin */
@@ -575,7 +734,7 @@ static double rs_mass_at(qaws_region_sampler const* s, unsigned int k, double t)
 {
 	unsigned int np = s->pfirst[k + 1] - s->pfirst[k], p = (unsigned int)(t * np);
 	if (p >= np) p = np - 1;
-	return s->pmass[s->pfirst[k] + p] + rs_mass_between(s, k, (double)p / np, t, NULL);
+	return s->pmass[s->pfirst[k] + p] + rs_mass_between(s, k, (double)p / np, t, NULL, NULL);
 }
 
 qaws_scalar qaws_region_sampler_get_mass(qaws_region_sampler const* s)
@@ -598,11 +757,11 @@ qaws_status qaws_region_sampler_mass_left(qaws_region_sampler const* s, qaws_sca
 	return QAWS_STATUS_OK;
 }
 
-/* the mass-keeping map */
+/* the mass-keeping map: x by the panels' interpolants, y by the chords' */
 static qaws_status rs_map_mass(qaws_region_sampler const* s, double u, double v, qaws_vec2* out)
 {
-	double target = u * s->mass, lo, hi, t, t0, x, f, dx;
-	unsigned int a, b, p, k, np, it;
+	double target = u * s->mass, x;
+	unsigned int a, b, p, k, np;
 	if (target < 0) target = 0;
 	if (target > s->mass) target = s->mass;
 	/* the panel holding the target, then its slab */
@@ -613,48 +772,30 @@ static qaws_status rs_map_mass(qaws_region_sampler const* s, double u, double v,
 		if (s->pmass[m] <= target) a = m; else b = m - 1;
 	}
 	p = a;
-	{
-		unsigned int c = 0, d = s->nxs - 2;
-		while (c < d)
-		{
-			unsigned int m = (c + d + 1) / 2;
-			if (s->pfirst[m] <= p) c = m; else d = m - 1;
-		}
-		k = c;
-	}
+	k = rs_panel_slab(s, p);
 	np = s->pfirst[k + 1] - s->pfirst[k];
-	lo = (double)(p - s->pfirst[k]) / np;
-	hi = (double)(p - s->pfirst[k] + 1) / np;
-	t0 = lo;
-	t = s->pmass[p + 1] > s->pmass[p] ? lo + (hi - lo) * (target - s->pmass[p]) / (s->pmass[p + 1] - s->pmass[p]) : 0.5 * (lo + hi);
-	/* t: Newton on the mass, its derivative g(x(t)) x'(t), in the panel */
-	for (it = 0; it < 60; it++)
-	{
-		double nt, d;
-		f = s->pmass[p] + rs_mass_between(s, k, t0, t, NULL) - target;
-		if (fabs(f) <= s->tol * (s->mass / s->area))
-			break;
-		if (f > 0) hi = t; else lo = t;
-		x = rs_xs(s, k, t, &dx);
-		d = rs_g(s, k, x, NULL) * dx;
-		nt = d > 0 ? t - f / d : 0.5 * (lo + hi);
-		if (!(nt > lo && nt < hi))
-			nt = 0.5 * (lo + hi);
-		if (hi - lo <= 1e-15)
-			break;
-		t = nt;
-	}
-	x = rs_xs(s, k, t, NULL);
+	x = rs_xs(s, k, (p - s->pfirst[k] + 0.5 * (1 + rs_legendre_solve(s->pcoef + 8 * p, target - s->pmass[p]))) / np, NULL);
 	/* y: the mass along the chords at x */
 	{
 		rs_cross stack[64], *cr;
+		double mstack[64], *mm = mstack;
 		unsigned int n, j;
 		double w = 0, total = 0, yt;
 		cr = rs_crossings(s, k, x, stack, &n);
+		if (n > 64)
+		{
+			mm = (double*)malloc(sizeof(double) * n);
+			if (!mm)
+			{
+				if (cr != stack) free(cr);
+				return QAWS_STATUS_ALLOCATION_FAILURE;
+			}
+		}
 		for (j = 0; j + 1 < n; j++)
 		{
 			w += cr[j].sigma;
-			if (w > 0) total += rs_rho_line(s, x, cr[j].y, cr[j + 1].y, NULL);
+			mm[j] = w > 0 ? rs_rho_line(s, x, cr[j].y, cr[j + 1].y, NULL) : 0;
+			total += mm[j];
 		}
 		yt = v * total;
 		out->x = (qaws_scalar)x;
@@ -662,37 +803,19 @@ static qaws_status rs_map_mass(qaws_region_sampler const* s, double u, double v,
 		w = 0;
 		for (j = 0; j + 1 < n; j++)
 		{
-			double ya, yb, m, ylo, yhi, y;
 			w += cr[j].sigma;
 			if (!(w > 0))
 				continue;
-			ya = cr[j].y; yb = cr[j + 1].y;
-			m = rs_rho_line(s, x, ya, yb, NULL);
-			if (yt > m && j + 2 < n)
+			if (yt > mm[j] && j + 2 < n)
 			{
-				yt -= m;
-				out->y = (qaws_scalar)yb;
+				yt -= mm[j];
+				out->y = (qaws_scalar)cr[j + 1].y;
 				continue;
 			}
-			/* y in [ya, yb]: Newton on the mass from ya, its derivative the density */
-			ylo = ya; yhi = yb;
-			y = m > 0 ? ya + (yb - ya) * (yt < m ? yt : m) / m : 0.5 * (ya + yb);
-			for (it = 0; it < 60; it++)
-			{
-				double fy = rs_rho_line(s, x, ya, y, NULL) - yt, r = (double)s->rho(s->rho_user, (qaws_scalar)x, (qaws_scalar)y), ny;
-				if (fabs(fy) <= 1e-14 * (m > 0 ? m : 1))
-					break;
-				if (fy > 0) yhi = y; else ylo = y;
-				ny = r > 0 ? y - fy / r : 0.5 * (ylo + yhi);
-				if (!(ny > ylo && ny < yhi))
-					ny = 0.5 * (ylo + yhi);
-				if (yhi - ylo <= 1e-15 * (s->yhi - s->ylo))
-					break;
-				y = ny;
-			}
-			out->y = (qaws_scalar)y;
+			out->y = (qaws_scalar)rs_rho_solve(s, x, cr[j].y, cr[j + 1].y, yt);
 			break;
 		}
+		if (mm != mstack) free(mm);
 		if (cr != stack) free(cr);
 	}
 	return QAWS_STATUS_OK;
@@ -786,24 +909,17 @@ qaws_status qaws_region_sampler_map(qaws_region_sampler const* s, qaws_scalar u,
 	return s->rho ? rs_map_mass(s, (double)u, (double)v, out) : rs_map_area(s, u, v, out);
 }
 
-qaws_status qaws_region_sampler_map_many(qaws_region_sampler const* s, qaws_vec2 const* uv, unsigned int count, qaws_vec2* out)
+/* splitmix64: the value after z, and the next of a state */
+static unsigned long long rs_mix(unsigned long long z)
 {
-	unsigned int i;
-	qaws_status st = QAWS_STATUS_OK;
-	if (!s || (count && (!uv || !out)))
-		return QAWS_STATUS_INVALID_ARGUMENT;
-	for (i = 0; i < count && st == QAWS_STATUS_OK; i++)
-		st = qaws_region_sampler_map(s, uv[i].x, uv[i].y, &out[i]);
-	return st;
-}
-
-/* splitmix64 */
-static unsigned long long rs_next(unsigned long long* st)
-{
-	unsigned long long z = (*st += 0x9E3779B97F4A7C15ull);
 	z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
 	z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
 	return z ^ (z >> 31);
+}
+
+static unsigned long long rs_next(unsigned long long* st)
+{
+	return rs_mix(*st += 0x9E3779B97F4A7C15ull);
 }
 
 static double rs_unit(unsigned long long r)
@@ -918,7 +1034,7 @@ static void rs_pattern_init(rs_pattern* q, unsigned int kind, unsigned int count
 	}
 }
 
-static void rs_pattern_point(rs_pattern* q, unsigned int i, double* u, double* v)
+static void rs_pattern_point(rs_pattern const* q, unsigned int i, double* u, double* v)
 {
 	switch (q->kind)
 	{
@@ -955,12 +1071,88 @@ static void rs_pattern_point(rs_pattern* q, unsigned int i, double* u, double* v
 		break;
 	}
 	default:
-		*u = rs_unit(rs_next(&q->state));
-		*v = rs_unit(rs_next(&q->state));
+		/* the stream from the seed, point i its draws 2 i + 1 and 2 i + 2 */
+		*u = rs_unit(rs_mix(q->state + (2ull * i + 1) * 0x9E3779B97F4A7C15ull));
+		*v = rs_unit(rs_mix(q->state + (2ull * i + 2) * 0x9E3779B97F4A7C15ull));
 		break;
 	}
 	if (*u >= 1) *u = 1 - 1e-16;
 	if (*v >= 1) *v = 1 - 1e-16;
+}
+
+/* ------------------------------------------------------------------------ */
+/*  Batches: chunks of points through the executor, each point a function   */
+/*  of its index alone, so the result does not depend on the executor        */
+/* ------------------------------------------------------------------------ */
+
+#define RS_GRAIN 64              /* points per chunk */
+
+typedef struct rs_batch
+{
+	qaws_region_sampler const* s;
+	rs_pattern const* q;        /* the points' (u, v): the pattern's from index first, */
+	qaws_vec2 const* uv;        /* or given */
+	unsigned int first;
+	double box[4];              /* x0, w, y0, h: the pattern over the box */
+	qaws_vec2* out;             /* mapped points */
+	unsigned char* keep;        /* over the box: kept or not */
+	double* rad;                /* blue noise: the radii at out, rmax given in rad0 */
+	double rad0;
+} rs_batch;
+
+static int rs_keep(qaws_region_sampler const* s, double x, double y, unsigned int i, unsigned int p);
+
+static qaws_status rs_batch_job(void* ctx, unsigned int chunk, unsigned int b, unsigned int e)
+{
+	rs_batch const* c = (rs_batch const*)ctx;
+	unsigned int i;
+	qaws_status st = QAWS_STATUS_OK;
+	(void)chunk;
+	for (i = b; i < e && st == QAWS_STATUS_OK; i++)
+	{
+		double u, v;
+		if (c->rad)
+		{
+			/* radii as 1 / sqrt(rho), rmax at the mean, within a factor of 4 */
+			double r = (double)c->s->rho(c->s->rho_user, c->out[i].x, c->out[i].y), f;
+			f = r > 0 ? sqrt(c->s->mass / c->s->area / r) : 4;
+			if (f > 4) f = 4;
+			if (f < 0.25) f = 0.25;
+			c->rad[i] = c->rad0 * f;
+			continue;
+		}
+		if (c->uv) { u = (double)c->uv[i].x; v = (double)c->uv[i].y; }
+		else rs_pattern_point(c->q, c->first + i, &u, &v);
+		if (c->keep)
+			c->keep[i] = (unsigned char)rs_keep(c->s, c->box[0] + c->box[1] * u, c->box[2] + c->box[3] * v, c->first + i, c->q->p);
+		else
+			st = qaws_region_sampler_map(c->s, (qaws_scalar)u, (qaws_scalar)v, &c->out[i]);
+	}
+	return st;
+}
+
+static qaws_status rs_batch_run(rs_batch const* c, unsigned int count)
+{
+	return qaws_internal_parallel(c->s->executor, count, RS_GRAIN, rs_batch_job, (void*)c);
+}
+
+/* count pattern points (or given uv) through the map */
+static qaws_status rs_map_batch(qaws_region_sampler const* s, rs_pattern const* q, qaws_vec2 const* uv, unsigned int count, qaws_vec2* out)
+{
+	rs_batch c;
+	memset(&c, 0, sizeof(c));
+	c.s = s;
+	c.q = q;
+	c.uv = uv;
+	c.out = out;
+	return rs_batch_run(&c, count);
+}
+
+qaws_status qaws_region_sampler_map_many(qaws_region_sampler const* s, qaws_vec2 const* uv, unsigned int count, qaws_vec2* out)
+{
+	if (!s || (count && (!uv || !out)))
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	return rs_map_batch(s, NULL, uv, count, out);
 }
 
 /* ------------------------------------------------------------------------ */
@@ -1078,19 +1270,24 @@ static qaws_status rs_eliminate(qaws_region_sampler const* s, qaws_vec2 const* c
 	   a factor of 4 of it; the grid sized by the largest */
 	if (s->rho)
 	{
-		double mean = s->mass / s->area, big = 0;
+		rs_batch c;
+		double big = 0;
 		e.rad = (double*)malloc(sizeof(double) * (ncand + 1));
 		if (!e.rad)
 			return QAWS_STATUS_ALLOCATION_FAILURE;
-		for (i = 0; i < ncand; i++)
+		memset(&c, 0, sizeof(c));
+		c.s = s;
+		c.out = (qaws_vec2*)cand;
+		c.rad = e.rad;
+		c.rad0 = e.rmax;
+		st = rs_batch_run(&c, ncand);
+		if (st != QAWS_STATUS_OK)
 		{
-			double r = (double)s->rho(s->rho_user, cand[i].x, cand[i].y), f;
-			f = r > 0 ? sqrt(mean / r) : 4;
-			if (f > 4) f = 4;
-			if (f < 0.25) f = 0.25;
-			e.rad[i] = e.rmax * f;
-			if (e.rad[i] > big) big = e.rad[i];
+			free(e.rad);
+			return st;
 		}
+		for (i = 0; i < ncand; i++)
+			if (e.rad[i] > big) big = e.rad[i];
 		e.cs = 2 * big;
 	}
 	e.lo[0] = e.lo[1] = 1e300; hi[0] = hi[1] = -1e300;
@@ -1154,19 +1351,14 @@ static qaws_status rs_eliminate(qaws_region_sampler const* s, qaws_vec2 const* c
 /* blue noise: 5 n candidates uniform over the region, eliminated to n */
 static qaws_status rs_blue_noise(qaws_region_sampler const* s, unsigned int count, unsigned long long seed, qaws_vec2* out)
 {
-	unsigned int ncand = 5 * count, i;
+	unsigned int ncand = 5 * count;
 	qaws_vec2* cand = (qaws_vec2*)malloc(sizeof(qaws_vec2) * (ncand + 1));
 	rs_pattern q;
 	qaws_status st = QAWS_STATUS_OK;
 	if (!cand)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	rs_pattern_init(&q, QAWS_REGION_SAMPLE_RANDOM, ncand, seed);
-	for (i = 0; i < ncand && st == QAWS_STATUS_OK; i++)
-	{
-		double u, v;
-		rs_pattern_point(&q, i, &u, &v);
-		st = qaws_region_sampler_map(s, (qaws_scalar)u, (qaws_scalar)v, &cand[i]);
-	}
+	st = rs_map_batch(s, &q, NULL, ncand, cand);
 	if (st == QAWS_STATUS_OK)
 		st = rs_eliminate(s, cand, ncand, count, out);
 	free(cand);
@@ -1211,16 +1403,51 @@ static int rs_keep(qaws_region_sampler const* s, double x, double y, unsigned in
 	return rs_hashfloat(i, p ^ 0x5bd1e995u) * s->rhomax < (double)s->rho(s->rho_user, (qaws_scalar)x, (qaws_scalar)y);
 }
 
+/* the pattern of total points (of kind and seed) over the box: which are
+   kept, in keep (grown to total), and how many */
+static qaws_status rs_box_count(qaws_region_sampler const* s, unsigned int kind, unsigned int total, unsigned long long seed,
+	double const* box, rs_pattern* q, unsigned char** keep, unsigned int* cap, unsigned int* got)
+{
+	rs_batch c;
+	unsigned int i;
+	qaws_status st;
+	if (total > *cap)
+	{
+		unsigned char* k = (unsigned char*)realloc(*keep, total);
+		if (!k)
+			return QAWS_STATUS_ALLOCATION_FAILURE;
+		*keep = k;
+		*cap = total;
+	}
+	rs_pattern_init(q, kind, total, seed);
+	memset(&c, 0, sizeof(c));
+	c.s = s;
+	c.q = q;
+	memcpy(c.box, box, sizeof(c.box));
+	c.keep = *keep;
+	st = rs_batch_run(&c, total);
+	*got = 0;
+	for (i = 0; i < total; i++)
+		*got += (*keep)[i];
+	return st;
+}
+
 /* the pattern over the region's box, the points outside dropped: the
    pattern's own spacing, the same in every direction. A sequence runs
-   until count points fall inside; the multi-jitter grid is sized by the
-   box's share of the area, and grown when it falls short. */
+   until count points fall inside, in blocks; the multi-jitter grid is sized
+   by the box's share of the area, and grown when it falls short. */
 static qaws_status rs_box(qaws_region_sampler const* s, unsigned int count, unsigned int kind, unsigned long long seed, qaws_vec2* out)
 {
-	double x0 = s->xs[0], w = s->xs[s->nxs - 1] - s->xs[0], y0 = s->ylo, h = s->yhi - s->ylo;
-	double ratio = s->rho ? w * h * s->rhomax / s->mass : w * h / s->area;
-	unsigned int got = 0, i;
+	double box[4], ratio;
+	unsigned int got = 0, i, cap = 0;
+	unsigned char* keep = NULL;
 	rs_pattern q;
+	qaws_status st = QAWS_STATUS_OK;
+	box[0] = s->xs[0];
+	box[1] = s->xs[s->nxs - 1] - s->xs[0];
+	box[2] = s->ylo;
+	box[3] = s->yhi - s->ylo;
+	ratio = s->rho ? box[1] * box[3] * s->rhomax / s->mass : box[1] * box[3] / s->area;
 	if (!(ratio >= 1) || ratio > 1e6)
 		return QAWS_STATUS_DEGENERATE_CURVE;
 	if (kind == QAWS_REGION_SAMPLE_STRATIFIED)
@@ -1230,18 +1457,11 @@ static qaws_status rs_box(qaws_region_sampler const* s, unsigned int count, unsi
 		   is searched until the strata inside number count, or a few more;
 		   those few go at random. */
 		unsigned int total = (unsigned int)ceil(count * ratio), best_total = 0, best_got = 0, tries;
-		qaws_vec2* in = NULL;
-		for (tries = 0; tries < 24; tries++)
+		memset(&q, 0, sizeof(q));
+		for (tries = 0; tries < 24 && st == QAWS_STATUS_OK; tries++)
 		{
 			long step;
-			got = 0;
-			rs_pattern_init(&q, kind, total, seed);
-			for (i = 0; i < total; i++)
-			{
-				double u, v;
-				rs_pattern_point(&q, i, &u, &v);
-				got += rs_keep(s, x0 + w * u, y0 + h * v, i, q.p);
-			}
+			st = rs_box_count(s, kind, total, seed, box, &q, &keep, &cap, &got);
 			if (got >= count && (best_got == 0 || got < best_got))
 			{
 				best_got = got;
@@ -1254,65 +1474,90 @@ static qaws_status rs_box(qaws_region_sampler const* s, unsigned int count, unsi
 			if ((long)total + step < (long)count) step = (long)count - (long)total;
 			total = (unsigned int)((long)total + step);
 		}
-		while (best_got == 0)
+		while (st == QAWS_STATUS_OK && best_got == 0)
 		{
 			/* never enough: grow until there are */
 			total += total / 8 + 1;
-			got = 0;
-			rs_pattern_init(&q, kind, total, seed);
-			for (i = 0; i < total; i++)
-			{
-				double u, v;
-				rs_pattern_point(&q, i, &u, &v);
-				got += rs_keep(s, x0 + w * u, y0 + h * v, i, q.p);
-			}
+			st = rs_box_count(s, kind, total, seed, box, &q, &keep, &cap, &got);
 			if (got >= count) { best_got = got; best_total = total; }
 		}
-		in = (qaws_vec2*)malloc(sizeof(qaws_vec2) * (best_got + 1));
-		if (!in)
-			return QAWS_STATUS_ALLOCATION_FAILURE;
-		rs_pattern_init(&q, kind, best_total, seed);
-		got = 0;
-		for (i = 0; i < best_total; i++)
+		if (st == QAWS_STATUS_OK && total != best_total)
+			st = rs_box_count(s, kind, best_total, seed, box, &q, &keep, &cap, &got);
+		if (st == QAWS_STATUS_OK)
 		{
-			double u, v;
-			rs_pattern_point(&q, i, &u, &v);
-			if (rs_keep(s, x0 + w * u, y0 + h * v, i, q.p))
+			/* the surplus at random: a hashed permutation's first count of
+			   the kept, in order */
+			unsigned int* in = (unsigned int*)malloc(sizeof(unsigned int) * (got + 1));
+			if (!in)
+				st = QAWS_STATUS_ALLOCATION_FAILURE;
+			else
 			{
-				in[got].x = (qaws_scalar)(x0 + w * u);
-				in[got].y = (qaws_scalar)(y0 + h * v);
-				got++;
+				unsigned int k = 0;
+				for (i = 0; i < best_total; i++)
+					if (keep[i]) in[k++] = i;
+				for (i = 0; i < count; i++)
+				{
+					double u, v;
+					rs_pattern_point(&q, in[got == count ? i : rs_permute(i, got, q.p * 0x2545f491u)], &u, &v);
+					out[i].x = (qaws_scalar)(box[0] + box[1] * u);
+					out[i].y = (qaws_scalar)(box[2] + box[3] * v);
+				}
+				free(in);
 			}
 		}
-		/* the surplus at random: a hashed permutation's first count */
-		for (i = 0; i < count; i++)
-			out[i] = in[got == count ? i : rs_permute(i, got, q.p * 0x2545f491u)];
-		free(in);
-		return QAWS_STATUS_OK;
+		free(keep);
+		return st;
 	}
 	rs_pattern_init(&q, kind, count, seed);
-	for (i = 0; got < count; i++)
+	for (i = 0; got < count && st == QAWS_STATUS_OK;)
 	{
-		double u, v;
-		if (i > 4000000000u)
-			return QAWS_STATUS_DEGENERATE_CURVE;
-		rs_pattern_point(&q, i, &u, &v);
-		if (rs_keep(s, x0 + w * u, y0 + h * v, i, q.p))
+		/* a block of the sequence, its flags in parallel, the kept in order */
+		rs_batch c;
+		double want = (count - got) * ratio * 1.1 + 256;
+		unsigned int n = want > 16777216 ? 16777216u : (unsigned int)want, j;
+		if (n > 4000000000u - i)
 		{
-			out[got].x = (qaws_scalar)(x0 + w * u);
-			out[got].y = (qaws_scalar)(y0 + h * v);
-			got++;
+			st = QAWS_STATUS_DEGENERATE_CURVE;
+			break;
 		}
+		if (n > cap)
+		{
+			unsigned char* k = (unsigned char*)realloc(keep, n);
+			if (!k)
+			{
+				st = QAWS_STATUS_ALLOCATION_FAILURE;
+				break;
+			}
+			keep = k;
+			cap = n;
+		}
+		memset(&c, 0, sizeof(c));
+		c.s = s;
+		c.q = &q;
+		c.first = i;
+		memcpy(c.box, box, sizeof(c.box));
+		c.keep = keep;
+		st = rs_batch_run(&c, n);
+		for (j = 0; j < n && got < count && st == QAWS_STATUS_OK; j++)
+			if (keep[j])
+			{
+				double u, v;
+				rs_pattern_point(&q, i + j, &u, &v);
+				out[got].x = (qaws_scalar)(box[0] + box[1] * u);
+				out[got].y = (qaws_scalar)(box[2] + box[3] * v);
+				got++;
+			}
+		i += n;
 	}
-	return QAWS_STATUS_OK;
+	free(keep);
+	return st;
 }
 
 qaws_status qaws_region_sampler_generate(qaws_region_sampler const* s, unsigned int count, unsigned int kind,
 	unsigned long long seed, qaws_vec2* out)
 {
 	rs_pattern q;
-	unsigned int i, base = kind & ~QAWS_REGION_SAMPLE_BOX;
-	qaws_status r = QAWS_STATUS_OK;
+	unsigned int base = kind & ~QAWS_REGION_SAMPLE_BOX;
 	if (!s || (count && !out) || base > QAWS_REGION_SAMPLE_BLUE_NOISE)
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	if (count == 0)
@@ -1321,13 +1566,6 @@ qaws_status qaws_region_sampler_generate(qaws_region_sampler const* s, unsigned 
 		return rs_blue_noise(s, count, seed, out);
 	if (kind & QAWS_REGION_SAMPLE_BOX)
 		return rs_box(s, count, base, seed, out);
-	kind = base;
-	rs_pattern_init(&q, kind, count, seed);
-	for (i = 0; i < count && r == QAWS_STATUS_OK; i++)
-	{
-		double u, v;
-		rs_pattern_point(&q, i, &u, &v);
-		r = qaws_region_sampler_map(s, (qaws_scalar)u, (qaws_scalar)v, &out[i]);
-	}
-	return r;
+	rs_pattern_init(&q, base, count, seed);
+	return rs_map_batch(s, &q, NULL, count, out);
 }

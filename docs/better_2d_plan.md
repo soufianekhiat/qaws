@@ -325,8 +325,11 @@ together wherever the item applies to both.
 11. **Uniform sampling of curved regions, analytically (no meshing)**: points
     uniform in area over any region of `qaws_path_2d` (concave, with holes, every
     curve kind), from the boundary alone.
-    - Done (qaws_region_sample.h, test 98, docs/api/region_sample.md): the map below,
-      RANDOM and SOBOL generators, f64 and f32, against Mathematica.
+    - Done (qaws_region_sample.h, test 98, docs/api/region_sample.md): the map below;
+      random, Owen-scrambled Sobol, stratified, Halton, R2 and blue noise, through
+      the map or over the bounding box; density (importance) sampling with the map
+      inverting per-panel interpolants; batched on the executor, deterministic per
+      seed; f64 and f32, against Mathematica and Green's theorem.
     - Inverse CDF from Green's theorem: the area left of `x`, A(x), is a piecewise
       analytic function of `x` between the boundary's critical abscissas (curve
       ends, x-extrema, self hits). Invert it (Newton on the exact integral, seeded

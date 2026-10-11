@@ -20,6 +20,8 @@
  *   - the density 1 + x^2 + y over the three regions, against Mathematica:
  *     the mass, the mass left of x, the map keeping mass, every pattern's
  *     weighted centroid
+ *   - executors: chunks backwards and on threads give the serial points bit
+ *     for bit
  */
 
 #include "test_common.h"
@@ -817,6 +819,143 @@ static void test_density(void)
 	free(pts);
 }
 
+/* ------------------------------------------------------------------------ */
+/*  Executors: the points do not depend on how the chunks run               */
+/* ------------------------------------------------------------------------ */
+
+/* one thread, the chunks backwards in uneven ranges */
+static void rst_backwards_for(void* user, unsigned int count, qaws_batch_task_fn task, void* ctx)
+{
+	unsigned int e = count;
+	(void)user;
+	while (e > 0)
+	{
+		unsigned int b = e > 3 ? e - 3 : 0;
+		task(ctx, b, e);
+		e = b;
+	}
+}
+
+#define RST_THREADS 4
+
+typedef struct rst_thr
+{
+	qaws_batch_task_fn task;
+	void* ctx;
+	unsigned int begin, end;
+} rst_thr;
+
+#ifdef _WIN32
+#include <windows.h>
+#include <process.h>
+static unsigned __stdcall rst_thr_main(void* p)
+{
+	rst_thr* a = (rst_thr*)p;
+	a->task(a->ctx, a->begin, a->end);
+	return 0;
+}
+#else
+#include <pthread.h>
+static void* rst_thr_main(void* p)
+{
+	rst_thr* a = (rst_thr*)p;
+	a->task(a->ctx, a->begin, a->end);
+	return NULL;
+}
+#endif
+
+/* RST_THREADS threads, contiguous ranges */
+static void rst_threads_for(void* user, unsigned int count, qaws_batch_task_fn task, void* ctx)
+{
+	rst_thr arg[RST_THREADS];
+	unsigned int t;
+#ifdef _WIN32
+	HANDLE h[RST_THREADS];
+#else
+	pthread_t h[RST_THREADS];
+#endif
+	(void)user;
+	for (t = 0; t < RST_THREADS; t++)
+	{
+		arg[t].task = task;
+		arg[t].ctx = ctx;
+		arg[t].begin = count * t / RST_THREADS;
+		arg[t].end = count * (t + 1) / RST_THREADS;
+	}
+	for (t = 1; t < RST_THREADS; t++)
+#ifdef _WIN32
+		h[t] = (HANDLE)_beginthreadex(NULL, 0, rst_thr_main, &arg[t], 0, NULL);
+#else
+		pthread_create(&h[t], NULL, rst_thr_main, &arg[t]);
+#endif
+	task(ctx, arg[0].begin, arg[0].end);
+	for (t = 1; t < RST_THREADS; t++)
+	{
+#ifdef _WIN32
+		WaitForSingleObject(h[t], INFINITE);
+		CloseHandle(h[t]);
+#else
+		pthread_join(h[t], NULL);
+#endif
+	}
+}
+
+static void test_executor(void)
+{
+	static unsigned int const kinds[9] = { QAWS_REGION_SAMPLE_RANDOM, QAWS_REGION_SAMPLE_SOBOL, QAWS_REGION_SAMPLE_STRATIFIED,
+		QAWS_REGION_SAMPLE_HALTON, QAWS_REGION_SAMPLE_R2, QAWS_REGION_SAMPLE_RANDOM | QAWS_REGION_SAMPLE_BOX,
+		QAWS_REGION_SAMPLE_SOBOL | QAWS_REGION_SAMPLE_BOX, QAWS_REGION_SAMPLE_STRATIFIED | QAWS_REGION_SAMPLE_BOX, QAWS_REGION_SAMPLE_BLUE_NOISE };
+	unsigned int n = 3000, e, d, k, i, differ = 0, failed = 0;
+	qaws_batch_executor ex[2];
+	qaws_curve* cs[2];
+	qaws_curve const* cv[2];
+	qaws_path_2d p[2];
+	qaws_vec2* a = (qaws_vec2*)malloc(sizeof(qaws_vec2) * n);
+	qaws_vec2* b = (qaws_vec2*)malloc(sizeof(qaws_vec2) * n);
+	qaws_vec2* uv = (qaws_vec2*)malloc(sizeof(qaws_vec2) * n);
+	char msg[200];
+	ex[0].parallel_for = rst_backwards_for; ex[0].user = NULL;
+	ex[1].parallel_for = rst_threads_for; ex[1].user = NULL;
+	/* the crescent */
+	cs[0] = rst_circle(0, 0, 1, 1);
+	cs[1] = rst_circle(0.45, 0.1, 0.7, 0);
+	for (i = 0; i < 2; i++) { cv[i] = cs[i]; p[i].curves = &cv[i]; p[i].curve_count = 1; p[i].closed = 1; }
+	for (i = 0; i < n; i++) { uv[i].x = (qaws_scalar)((i * 0.6180339887498949) - floor(i * 0.6180339887498949)); uv[i].y = (qaws_scalar)((i + 0.5) / n); }
+	for (d = 0; d < 2; d++)
+	{
+		qaws_region_sampler_desc desc;
+		qaws_region_sampler* s0 = NULL;
+		memset(&desc, 0, sizeof(desc));
+		desc.paths = p; desc.path_count = 2; desc.fill_rule = QAWS_FILL_POSITIVE;
+		desc.density = d ? rst_rho : NULL;
+		if (qaws_region_sampler_create(&desc, &s0) != QAWS_STATUS_OK) { failed++; continue; }
+		for (e = 0; e < 2; e++)
+		{
+			qaws_region_sampler* s1 = NULL;
+			desc.executor = &ex[e];
+			if (qaws_region_sampler_create(&desc, &s1) != QAWS_STATUS_OK) { failed++; continue; }
+			if (qaws_region_sampler_get_mass(s1) != qaws_region_sampler_get_mass(s0)) differ++;
+			for (k = 0; k < 9; k++)
+			{
+				if (qaws_region_sampler_generate(s0, n, kinds[k], 11, a) != QAWS_STATUS_OK ||
+					qaws_region_sampler_generate(s1, n, kinds[k], 11, b) != QAWS_STATUS_OK) { failed++; continue; }
+				if (memcmp(a, b, sizeof(qaws_vec2) * n)) differ++;
+			}
+			if (qaws_region_sampler_map_many(s0, uv, n, a) != QAWS_STATUS_OK || qaws_region_sampler_map_many(s1, uv, n, b) != QAWS_STATUS_OK)
+				failed++;
+			else if (memcmp(a, b, sizeof(qaws_vec2) * n))
+				differ++;
+			qaws_region_sampler_destroy(s1);
+		}
+		qaws_region_sampler_destroy(s0);
+	}
+	sprintf(msg, "executors (chunks backwards, %d threads), uniform and density, 9 kinds and map_many: %u results differ from serial, %u failed",
+		RST_THREADS, differ, failed);
+	TEST_ASSERT(differ == 0 && failed == 0, msg);
+	for (i = 0; i < 2; i++) qaws_curve_destroy(cs[i]);
+	free(a); free(b); free(uv);
+}
+
 int test_98_region_sample_main(void)
 {
 	g_pass = 0;
@@ -826,6 +965,7 @@ int test_98_region_sample_main(void)
 	test_bean();
 	test_xor();
 	test_density();
+	test_executor();
 	test_sweep();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;

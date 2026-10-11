@@ -41,6 +41,9 @@ typedef struct qaws_region_sampler_desc
 	   uniform. Called from any thread the sampler is used on. */
 	qaws_scalar (*density)(void* user, qaws_scalar x, qaws_scalar y);
 	void* density_user;
+	/* optional: builds the density's table and maps the points in parallel
+	   (generate, map_many); the points do not depend on it */
+	qaws_batch_executor const* executor;
 } qaws_region_sampler_desc;
 
 /* Sampling patterns. The first five are point sets of the unit square sent

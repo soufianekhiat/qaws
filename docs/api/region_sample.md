@@ -7,6 +7,7 @@ there is no mesh.
 ```c
 qaws_region_sampler_desc d = { paths, path_count, QAWS_FILL_NON_ZERO, 0 };
 d.density = rho; d.density_user = user;                 /* optional: importance sampling */
+d.executor = &executor;                                 /* optional: parallel table and points */
 qaws_region_sampler* s;
 qaws_region_sampler_create(&d, &s);
 
@@ -88,8 +89,16 @@ qaws_region_sampler_destroy(s);
 - **Blue noise.** This works on the points themselves, so they come out
   evenly spaced: the closest pair is above half the hexagonal packing radius
   of n points over the area.
-- **Determinism.** The same seed gives the same points.
+- **Determinism.** The same seed gives the same points, with or without an
+  executor: every point is a function of its index (random included: point
+  i takes draws 2i + 1 and 2i + 2 of the seed's splitmix64 stream).
 - **Thread safety.** `map` is thread-safe on one sampler.
+- **Executor.** With `desc.executor` (`qaws_batch_executor`), creation
+  tabulates the density's panels in chunks, and `generate` and `map_many`
+  map points in chunks of 64. Over the box, a sequence's inside tests run
+  in parallel blocks, and the points are then kept in index order. Blue
+  noise maps its candidates and computes their radii in parallel; the
+  elimination itself is serial.
 
 ## Density (importance sampling)
 
@@ -107,8 +116,15 @@ integral over the region and over the part left of x.
     are uniform in s, with x = x_k + w (3s² − 2s³) in each slab: where the
     boundary turns vertical, chords grow like sqrt(x − x_k), and the
     smoothstep makes the integrand smooth again.
-  - x and y then come from safeguarded Newton (the derivatives are g and
-    rho).
+  - Each panel also keeps its integrand as a degree-7 polynomial: the
+    Legendre series through its 8 Gauss values, whose integral is the
+    panel's Gauss sum. x inverts this polynomial by safeguarded Newton,
+    with no density call. Along the chords, y finds the Gauss segment
+    holding its share, then inverts that segment's polynomial the same
+    way: one pass of density calls along the chords, and one more over the
+    segment.
+  - `mass_left` keeps exact Gauss on the partial panel; the map agrees with
+    it to about 1e-15 of the mass on smooth densities.
   - Every unit-square pattern follows the density, with its structure.
 - **Over the box.** A candidate is kept when it is inside and a hash of its
   index falls under rho / rho_max. rho_max is the largest value met while
@@ -124,8 +140,14 @@ integral over the region and over the part left of x.
 - **Tolerance.** The area tolerance defaults to 1e-13 of the box's area,
   or 1e-6 in f32. A(x) and the area match Mathematica to about 1e-12 in f64.
 - **Cost.** Creation is one union plus one integral per piece and slab.
-  A point costs a few Newton steps, each one integral per piece crossing
-  its slab: about 30 µs on the test regions.
+  A uniform point costs a few Newton steps, each one integral per piece
+  crossing its slab: about 30 µs on the test regions.
+- **Density cost.** Creation is 256 panels x 8 chord integrals (a few ms).
+  On the crescent, 20,000 Sobol points took 2 to 3 µs each, against 35 to
+  57 µs with Newton on the integrals before the interpolants. With 8
+  threads it was 0.4 to 0.6 µs. Under a narrow bump, the old Newton along
+  the chords also missed the chord fraction v by up to 0.19; the
+  interpolants hit it.
 
 ## Tests
 
@@ -173,5 +195,8 @@ digits):
   regions, the mass, the mass left of x at eight abscissas, the map keeping
   mass, and every pattern's weighted centroid (this needs the third-order
   moments, which the reference script also gives).
+- **Executors:** chunks run backwards in uneven ranges, and on 4 threads.
+  Uniform and with a density, every pattern's points and `map_many` are
+  identical bit for bit to the serial run.
 
 It runs in f64 and f32.
