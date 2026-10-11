@@ -9,6 +9,8 @@
  *   b2d3_clipper2.svg  Clipper2's own test records through qaws_clip
  *   b2d4_offset.svg    offsets with every join and end type, curves and holes
  *   b2d5_stack.svg     2.5D stacks: interpolated sections, splits, Booleans by level
+ *   b2d11_region_sample.svg  points uniform or by a density over Boolean
+ *                      results of lines, arcs and Beziers (qaws_region_sampler)
  *
  * Each figure lives in better2d_showcase/NN_*.c, compiled as one translation
  * unit.
@@ -41,6 +43,7 @@
 #include "better2d_showcase/08_triangulate.c"
 #include "better2d_showcase/09_stack_mesh.c"
 #include "better2d_showcase/10_clip_exact.c"
+#include "better2d_showcase/11_region_sample.c"
 
 int main(void)
 {
@@ -56,5 +59,6 @@ int main(void)
 	demo_triangulate();
 	demo_stack_mesh();
 	demo_clip_exact();
+	demo_region_sample();
 	return 0;
 }
