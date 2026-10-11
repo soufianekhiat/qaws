@@ -231,6 +231,11 @@ static qaws_status os_arc(os_ctx* x, double const* center, double r, double a0, 
 	g.radius = (qaws_scalar)r;
 	g.angle_start = (qaws_scalar)a0;
 	g.angle_end = (qaws_scalar)(a0 + sw);
+	/* the sweep as stored: below the scalars' step at a0 (an almost straight
+	   corner in float), the join is the point it already is at this
+	   precision, and an arc of no sweep is not a curve */
+	if (QAWS_FABS(g.angle_end - g.angle_start) < QAWS_LITERAL(1e-15))
+		return QAWS_STATUS_OK;
 	memset(&d, 0, sizeof(d));
 	d.dimension = QAWS_DIMENSION_2D; d.segments = &g; d.segment_count = 1;
 	s = qaws_curve_create_arc(&d, &c);

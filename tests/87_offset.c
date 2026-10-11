@@ -12,6 +12,8 @@
  *   - a thin spike with miter joins stays within the miter limit
  *   - a clockwise group grows like a counter-clockwise one
  *   - the delta callback, constant, gives the plain offset
+ *   - an almost straight corner (a few 1e-8 rad, as rounding leaves on a
+ *     split edge) shrunk and grown with each join: no degenerate round join
  */
 
 #include "test_common.h"
@@ -252,6 +254,57 @@ static void test_miter_and_callback(void)
 	qaws_curve_destroy(c);
 }
 
+/* a user's case: an almost straight corner, as rounding leaves on a straight
+   edge split in two, bends by a few 1e-8 rad. Its round join's sweep is
+   below the scalars' step at its angle, so the arc's two angles are one
+   value (in float): the join is skipped, not an error. Their polygon (a
+   reflex corner, shrunk), and a convex corner found the same way (grown). */
+static void test_near_straight(void)
+{
+	double xy[8] = { 0.209918812, -5.63191128, 0.25, -5.62916517, 0.290081203, -5.62641907, 0.25, -5.4 };
+	static qaws_join_type const joins[3] = { QAWS_JOIN_ROUND, QAWS_JOIN_MITER, QAWS_JOIN_SQUARE };
+	static char const* const names[3] = { "round", "miter", "square" };
+	unsigned int c, j, k;
+	char msg[240];
+	for (c = 0; c < 2; c++)
+	{
+		double delta = c ? 0.02 : -0.02, turn = 0;
+		if (c)
+		{
+			/* a corner on the bottom edge bending left by under 3e-8 rad: a
+			   point of the edge's line, rounded to the scalars */
+			double ax = (qaws_scalar)xy[0], ay = (qaws_scalar)xy[1], bx = (qaws_scalar)xy[4], by = (qaws_scalar)xy[5];
+			for (k = 0; k < 100000; k++)
+			{
+				double t = 0.3 + 0.4 * k / 100000.0;
+				double mx = (qaws_scalar)(ax + t * (bx - ax)), my = (qaws_scalar)(ay + t * (by - ay));
+				double ux = mx - ax, uy = my - ay, vx = bx - mx, vy = by - my;
+				turn = (ux * vy - uy * vx) / (sqrt(ux * ux + uy * uy) * sqrt(vx * vx + vy * vy));
+				if (turn > 0 && turn < 3e-8)
+				{
+					xy[2] = mx; xy[3] = my;
+					break;
+				}
+			}
+		}
+		for (j = 0; j < 3; j++)
+		{
+			qaws_curve* p = ost_poly(xy, 4, 1);
+			qaws_curve const* pv = p;
+			qaws_path_2d path;
+			qaws_clip_result* r = NULL;
+			qaws_status s;
+			path.curves = &pv; path.curve_count = 1; path.closed = 1;
+			s = qaws_offset_paths(&path, 1, (qaws_scalar)delta, joins[j], QAWS_END_POLYGON, &r);
+			sprintf(msg, "an almost straight %s corner %s by 0.02, %s joins: status %d, %u loops (its turn %.3g rad)",
+				c ? "convex" : "reflex", c ? "grown" : "shrunk", names[j], (int)s, r ? qaws_clip_result_get_path_count(r) : 0, turn);
+			TEST_ASSERT(s == QAWS_STATUS_OK && r && qaws_clip_result_get_path_count(r) == 1, msg);
+			qaws_clip_result_destroy(r);
+			qaws_curve_destroy(p);
+		}
+	}
+}
+
 int test_87_offset_main(void)
 {
 	g_pass = 0;
@@ -262,6 +315,7 @@ int test_87_offset_main(void)
 	test_open();
 	test_curves();
 	test_miter_and_callback();
+	test_near_straight();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
 }
