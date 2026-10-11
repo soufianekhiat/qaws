@@ -1,21 +1,33 @@
 # API Reference: qaws_skeleton.h
 
-The straight skeleton of a region: the boundary moves inwards, each edge
-parallel to itself at its own speed (its weight), and the skeleton is the
-trace of the moving boundary's vertices. Each input edge sweeps one face, and
-the time a point is swept is the roof's height there.
+Straight and curved skeletons of a region. The boundary moves inwards, each
+edge at its own speed (its weight), and the skeleton is the trace of the
+moving boundary's vertices. Each edge sweeps one face, and the time a point
+is swept is the roof's height there.
+
+- **Straight lines** move parallel to themselves: the straight skeleton.
+- **Circular arcs** shrink or grow about their centres, and the vertices
+  between them travel on conics: the mitered skeleton of circular arc
+  polygons.
+- **The splice angle sigma** controls reflex vertices. sigma = 2 pi (the
+  default) keeps them mitered; sigma = pi rounds every one at once, which
+  gives the medial axis and the classical offsets, for polygons as well as
+  for arcs.
 
 ```c
 qaws_skeleton_desc d = { paths, path_count, QAWS_FILL_NON_ZERO };
-d.weight_fn = speed; d.weight_user = user;               /* optional: weighted skeleton */
+d.weight_fn = speed; d.weight_user = user;   /* optional: weighted (lines) */
+d.splice_angle = 3.14159265358979;           /* optional: the medial axis */
 qaws_skeleton* s;
 qaws_skeleton_create(&d, &s);
 
-qaws_skeleton_get_node(s, i, &node);       /* position and time */
-qaws_skeleton_get_arc(s, i, &arc);         /* node_a -> node_b, between face_a and face_b */
-qaws_skeleton_get_face(s, i, &face);       /* the input edge (nodes 0, 1), then the skeleton back */
-qaws_skeleton_get_max_time(s);             /* the roof's top */
-qaws_skeleton_offset(s, t, &result);       /* the wavefront at time t, as a qaws_clip result */
+qaws_skeleton_get_node(s, i, &node);         /* position and time */
+qaws_skeleton_get_arc(s, i, &arc);           /* node_a -> node_b, faces, smooth, boundary */
+qaws_skeleton_evaluate_arc(s, i, u, &p, &t); /* exact point and time along it */
+qaws_skeleton_get_arc_curve(s, i, &curve);   /* a line, a circular arc, or the exact conic (NURBS) */
+qaws_skeleton_get_face(s, i, &face);         /* the edge, then the skeleton back; its support */
+qaws_skeleton_get_max_time(s);               /* the roof's top */
+qaws_skeleton_offset(s, t, &result);         /* the wavefront at time t: lines and arcs */
 qaws_skeleton_destroy(s);
 ```
 
@@ -23,84 +35,136 @@ qaws_skeleton_destroy(s);
 
 1. **Region.** The paths are united under the fill rule (`qaws_clip`), so
    outer boundaries run counter-clockwise and holes clockwise, with the
-   interior on the left. The curves must be straight (degree 1 Béziers or
-   B-splines, polylines).
-2. **Planes.** Each edge on the line n · p = d (n the inward unit normal)
-   lies at time t on n · p = d + w t: a plane over (x, y, t).
-   - A wavefront vertex is two planes meeting. It moves at a constant
-     velocity, the solution of n_a · v = w_a, n_b · v = w_b.
-   - Every event is three planes meeting at a point, so one 3 x 3 solve
-     covers edge, split and vertex events.
-3. **Events.** Each new vertex queues the times it meets its two
-   neighbours. A reflex vertex also queues the time it reaches every
-   plane it is closing on. A heap orders them by time.
-4. **The generalised intersection event** (Kelly and Wonka, *Interactive
+   interior on the left. The curves must be lines (degree 1 Béziers or
+   B-splines, polylines) or circular arcs (`qaws_curve_create_arc`).
+2. **Supports in space-time.** Each edge's carrier is a surface over
+   (x, y, t):
+   - a line n · p = d at time t is on n · p = d + w t: a plane;
+   - an arc |p − m| = r is on |p − m| = r − s t (s = +1 when the region is
+     inside its circle, so it shrinks; −1 when outside, so it grows): a
+     cone.
+
+   Every event is three supports meeting at a point. The difference of two
+   cones is a plane, so each event is a linear system and at most one
+   quadratic.
+3. **Corners.** A corner between two lines, or between two supports that
+   stay tangent (a smooth joint), moves at a constant velocity. Any other
+   corner is one of the two crossings of its supports (its branch), moving
+   on a conic.
+4. **Events**, in a heap by time:
+   - a corner meets a support (its neighbour's, or any support when it can
+     split an edge);
+   - two supports touch (squeeze);
+   - an arc's two ends meet round its circle (bubble), and it becomes a loop
+     of its own;
+   - a circle shrinks to its centre;
+   - a reflex corner's angle reaches sigma, or its supports turn tangent: it
+     splices, opening a circle that grows from its point (Weiß, Jüttler and
+     Aurenhammer, *Mitered offsets and straight skeletons for circular arc
+     polygons*, EuroCG 2018 / IJCGA 2020).
+5. **The generalised intersection event** (Kelly and Wonka, *Interactive
    architectural modeling with procedural extrusions*, TOG 2011; their
    implementation is twak/campskeleton). At a popped point and time,
-   every live vertex there and every wavefront edge through it is taken at
-   once:
-   - Runs of consecutive vertices there are chains. An edge through the
+   every live corner there and every edge through it is taken at once:
+   - Runs of consecutive corners there are chains. An edge through the
      point is a chain of its own, which it splits.
    - The edges inside a chain end at the point. A loop entirely there
      closes.
    - The chains, sorted by the angle of their first edge round the point,
      are joined: each chain's last edge to the next chain's first, by a new
-     vertex.
+     corner.
 
-   Edge events, split events, vertex events and any number of them
-   coinciding are all this one case.
-5. **Antiparallel edges.** A new vertex between antiparallel edges sits
-   where they lie on one line, as when a corridor of constant width closes
-   all at once. It runs along that line to the nearer end, or to both
-   when they are as near, and the skeleton gets that stretch. If other
-   vertices are already where it lands, they make one event with it.
-6. **Faces.** Each plane's arcs are walked from its edge's end back to
-   its start.
-7. **Offsets.** `qaws_skeleton_offset` reruns the events up to t. It
-   returns the loops of the vertices' positions at t, united with the
-   positive fill rule.
+   Edge, split and vertex events, and any number of them coinciding, are
+   all this one case.
+6. **Antiparallel edges.** Coincident opposite supports (lines, or
+   concentric circles of one radius) leave a corner that runs along them
+   to the nearer end. A corridor of constant width closing all at once
+   therefore collapses along its middle.
+7. **Near tangencies.** Three measures handle them:
+   - A corner with a circle among its supports counts as at an event's
+     point when both its supports pass through the point. Its position
+     there moves like a square root of the time, so position alone is
+     ill-conditioned.
+   - Events among circles within the tolerances of one another are one
+     event, because their times are near-double roots and good to only
+     half the digits.
+   - A corner born at its supports' tangency is classified just after it.
+8. **Faces.** Each support's arcs are walked from its edge's end back to its
+   start, turning so the face stays on the left. A face is entered along
+   a smooth path (a slit) and left back along it.
+9. **Offsets.** `qaws_skeleton_offset` reruns the events up to t. It
+   returns the loops of lines and arcs at t, united with the positive
+   fill rule.
+
+## Pure skeleton
+
+Each arc carries two flags:
+- `smooth`: it is a smooth joint's path. Such paths are part of the
+  faces' boundaries, not of the skeleton proper.
+- `boundary`: it has an end on the input (time 0).
+
+The arcs with neither flag are the pure skeleton, clear of the boundary.
 
 ## Precision
 
-- **Tolerance.** Events within the tolerance (default 1e-9 of the
-  extent, 1e-6 in float builds for the input's rounding) are one.
+- **Tolerance.** Events within the tolerance are one. It defaults to 1e-9
+  of the extent, or 1e-6 in float builds for the input's rounding.
   Arithmetic is in double precision throughout.
-- **Weights.** Weights must be > 0. Consecutive collinear edges with
-  different weights are ambiguous (Biedl, Held, Huber, Kaaser and
-  Palfrader, CGTA 2015), and their vertex moves at the average speed.
-- **Cost.** Each reflex vertex is checked against every live plane, and
-  each event scans the live vertices, so the cost is quadratic. A random
-  star-shaped polygon takes 0.5 ms with 64 vertices, 80 ms with 1,024 and
-  2 s with 4,096.
+- **Weights.** Weights apply to lines and must be > 0; arcs move at speed 1.
+  Consecutive collinear lines with different weights are ambiguous
+  (Biedl, Held, Huber, Kaaser and Palfrader, CGTA 2015), and their vertex
+  moves at the average speed.
+- **Cost.** Each splitting corner is checked against every live support,
+  and each event scans the live corners, so the cost is quadratic. A
+  random star-shaped polygon takes 0.5 ms with 64 vertices, 90 ms with
+  1,024 and 2.3 s with 4,096.
+- **Robustness.**
+  - Polygons are robust: 1,000 random unions of grid rectangles, whose
+    events are almost all degenerate, all tile their regions.
+  - Curved regions pass every structured case in the tests. On random
+    star-shaped regions whose edges are random bulging arcs, with or
+    without a round hole, about three in four complete with exact arcs.
+  - The rest stop with QAWS_STATUS_NUMERICAL_FAILURE (a loop that never
+    closed), or in a few cases come out with an arc off its supports by up
+    to 1e-2. Most of these are at sigma = 2 pi. This is being worked on.
 
 ## Tests
 
-Test 99 (`tests/99_skeleton.c`) checks every shape three ways:
+Test 99 (`tests/99_skeleton.c`) runs in f64 and f32.
 
+**Polygons.** Every shape is checked three ways:
 - **Distance.** Both ends of every arc lie at weighted distance w t from
   both faces' edges.
-- **Tiling.** The faces' areas sum to the region's (the paths united by
-  `qaws_clip`).
+- **Tiling.** The faces' areas sum to the region's.
 - **Wavefront.** At five times, the wavefront's area (a separate run of
-  the events) equals the faces' unswept parts: each face clipped by its
-  edge's line moved to w t.
+  the events) equals the faces' unswept parts.
 
 Closed forms:
+- the square and the 3 x 1 rectangle (its ridge);
+- regular polygons: one centre node at the inradius;
+- a square with a centred square hole: every event at one time;
+- a weighted rectangle.
 
-- the 2 x 2 square: 5 nodes, 4 arcs, top at 1;
-- the 3 x 1 rectangle: a ridge of 2 at time 0.5;
-- regular 3-, 10-, 17- and 24-gons: one centre node at the inradius;
-- a 4 x 4 square with a centred 2 x 2 hole: every event at time 0.5;
-- a 3 x 1 rectangle with its short sides at speed 2: a ridge of 1.
+Shapes: an L, a comb, a plus, a floor plan, an orthogonal spiral, stars,
+random star-shaped polygons with holes, and unions of grid rectangles.
 
-Shapes:
+**Curved.** These checks apply:
+- **Supports.** Arcs sampled along their length (exactly, with
+  `qaws_skeleton_evaluate_arc`) lie on both faces' supports at their
+  times.
+- **Medial axis.** At sigma = pi, every point off the smooth paths is at
+  distance t from the input boundary, by qaws's closest-point queries.
+- **Tiling.** The faces, sampled along their edges and arcs, tile the
+  region.
+- **Wavefront.** Where nothing reflex is kept mitered, the wavefront's area
+  equals the round inward offset (`qaws_offset`, round joins). For a disc
+  with an off-centre hole it is checked against the closed form instead.
 
-- an L, a comb, a plus (every event degenerate), a floor plan, an
-  orthogonal spiral of equal-width corridors;
-- a 7-point star and random star-shaped polygons, with and without holes;
-- twelve unions of random rectangles on an integer grid.
-
-On a further 1,000 random grid unions, outside the suite, every face set
-tiled its region.
-
-It runs in f64 and f32.
+Curved shapes:
+- a disc, a stadium, a rounded rectangle (smooth joints), a half disc, a
+  lens;
+- a disc with an off-centre hole (squeeze, then an elliptic skeleton);
+- a square with a round bite;
+- a square with a round bump, mitered (it pinches off as a bubble) and at
+  sigma = pi;
+- the medial axes of an L, a comb and a star.

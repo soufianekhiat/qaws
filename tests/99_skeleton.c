@@ -406,6 +406,340 @@ static void test_shapes(void)
 	}
 }
 
+/* ------------------------------------------------------------------------ */
+/*  Curved: lines and circular arcs                                         */
+/* ------------------------------------------------------------------------ */
+
+typedef struct skt_seg
+{
+	int arc;                    /* line: x0 y0 x1 y1; arc: cx cy r a0 a1 */
+	double a[5];
+} skt_seg;
+
+typedef struct skt_cshape
+{
+	char const* name;
+	unsigned int nloops;
+	unsigned int count[8];
+	skt_seg seg[64];
+	double sigma;
+	int round;                  /* the wavefront is the round offset (no reflex vertex kept) */
+	double (*exact)(double t);  /* the wavefront's area in closed form, in place of the round offset */
+	double exact_until;         /* the closed form holds up to this time */
+} skt_cshape;
+
+static void skt_cline(skt_cshape* sh, unsigned int* n, double x0, double y0, double x1, double y1)
+{
+	skt_seg* g = &sh->seg[(*n)++];
+	g->arc = 0; g->a[0] = x0; g->a[1] = y0; g->a[2] = x1; g->a[3] = y1;
+}
+
+static void skt_carc(skt_cshape* sh, unsigned int* n, double cx, double cy, double r, double a0, double a1)
+{
+	skt_seg* g = &sh->seg[(*n)++];
+	g->arc = 1; g->a[0] = cx; g->a[1] = cy; g->a[2] = r; g->a[3] = a0; g->a[4] = a1;
+}
+
+static qaws_curve* skt_seg_curve(skt_seg const* g)
+{
+	qaws_curve* c = NULL;
+	if (!g->arc)
+	{
+		qaws_scalar cp[4];
+		qaws_bezier_desc d;
+		cp[0] = (qaws_scalar)g->a[0]; cp[1] = (qaws_scalar)g->a[1]; cp[2] = (qaws_scalar)g->a[2]; cp[3] = (qaws_scalar)g->a[3];
+		memset(&d, 0, sizeof(d));
+		d.dimension = QAWS_DIMENSION_2D; d.degree = 1; d.control_points = cp; d.control_point_count = 2;
+		qaws_curve_create_bezier(&d, &c);
+	}
+	else
+	{
+		qaws_arc_segment s;
+		qaws_arc_desc d;
+		memset(&s, 0, sizeof(s));
+		s.center[0] = (qaws_scalar)g->a[0]; s.center[1] = (qaws_scalar)g->a[1]; s.radius = (qaws_scalar)g->a[2];
+		s.angle_start = (qaws_scalar)g->a[3]; s.angle_end = (qaws_scalar)g->a[4];
+		memset(&d, 0, sizeof(d));
+		d.dimension = QAWS_DIMENSION_2D; d.segments = &s; d.segment_count = 1;
+		qaws_curve_create_arc(&d, &c);
+	}
+	return c;
+}
+
+/* the support's residual at (p, t): 0 on it */
+static double skt_face_resid(qaws_skeleton_face const* f, double x, double y, double t)
+{
+	if (f->circle)
+		return f->side * ((double)f->radius - hypot(x - f->center.x, y - f->center.y)) - t;
+	return (double)f->normal.x * x + (double)f->normal.y * y - (double)f->offset - (double)f->weight * t;
+}
+
+/* the distance from p to the nearest of the curves */
+static double skt_boundary_dist(qaws_curve* const* cs, unsigned int n, double x, double y)
+{
+	double best = 1e300;
+	unsigned int i;
+	for (i = 0; i < n; i++)
+	{
+		qaws_vec2 q;
+		qaws_scalar t = 0;
+		qaws_eval_result_2d e;
+		double dd;
+		q.x = (qaws_scalar)x; q.y = (qaws_scalar)y;
+		qaws_curve_find_closest_parameter_2d(cs[i], q, &t);
+		qaws_curve_evaluate_2d(cs[i], t, QAWS_EVAL_FLAG_POSITION, &e);
+		dd = hypot((double)e.position.x - x, (double)e.position.y - y);
+		if (dd < best) best = dd;
+	}
+	return best;
+}
+
+/* a face's area: its edge, then its arcs, sampled */
+static double skt_face_area(qaws_skeleton const* s, unsigned int fi, unsigned int* missing)
+{
+	qaws_skeleton_face f;
+	double area = 0, px = 0, py = 0;
+	int have = 0;
+	unsigned int k, na, i, m = 256, start;
+	unsigned char* used = (unsigned char*)calloc(qaws_skeleton_get_arc_count(s) + 1, 1);
+	qaws_skeleton_get_face(s, fi, &f);
+	na = f.node_count;
+#define SKT_PT(X, Y) do { double xx_ = (X), yy_ = (Y); if (have) area += px * yy_ - xx_ * py; px = xx_; py = yy_; have = 1; } while (0)
+	{
+		qaws_skeleton_node a;
+		qaws_skeleton_get_node(s, f.nodes[0], &a);
+		SKT_PT(a.position.x, a.position.y);
+	}
+	start = 0;
+	if (f.edge)
+	{
+		qaws_range rg = qaws_curve_get_parameter_range(f.edge);
+		for (k = 1; k <= m; k++)
+		{
+			qaws_eval_result_2d e;
+			qaws_curve_evaluate_2d(f.edge, (qaws_scalar)(rg.min_value + (rg.max_value - rg.min_value) * k / m), QAWS_EVAL_FLAG_POSITION, &e);
+			SKT_PT(e.position.x, e.position.y);
+		}
+		{
+			/* a closed edge ends where it starts: the arcs start at node 0 */
+			qaws_eval_result_2d e0, e1;
+			qaws_curve_evaluate_2d(f.edge, rg.min_value, QAWS_EVAL_FLAG_POSITION, &e0);
+			qaws_curve_evaluate_2d(f.edge, rg.max_value, QAWS_EVAL_FLAG_POSITION, &e1);
+			start = (na > 1 && hypot((double)e1.position.x - e0.position.x, (double)e1.position.y - e0.position.y) > (SKT_F32 ? 1e-5 : 1e-9)) ? 1 : 0;
+		}
+	}
+	for (k = start; k < na; k++)
+	{
+		unsigned int a = f.nodes[k], b = f.nodes[(k + 1) % na], found = 0, pass;
+		/* an unused arc first; a slit (a ray in and out) goes back along one */
+		for (pass = 0; pass < 2 && !found; pass++)
+		for (i = 0; i < qaws_skeleton_get_arc_count(s) && !found; i++)
+		{
+			qaws_skeleton_arc ar;
+			qaws_skeleton_get_arc(s, i, &ar);
+			if ((used[i] && pass == 0) || (ar.face_a != fi && ar.face_b != fi))
+				continue;
+			if ((ar.node_a == a && ar.node_b == b) || (ar.node_a == b && ar.node_b == a))
+			{
+				unsigned int j;
+				int rev = ar.node_a != a;
+				used[i] = 1;
+				found = 1;
+				for (j = 1; j <= 64; j++)
+				{
+					qaws_vec2 q;
+					qaws_scalar tt;
+					qaws_skeleton_evaluate_arc(s, i, (qaws_scalar)(rev ? 1 - j / 64.0 : j / 64.0), &q, &tt);
+					SKT_PT(q.x, q.y);
+				}
+			}
+		}
+		if (!found) (*missing)++;
+	}
+#undef SKT_PT
+	free(used);
+	return 0.5 * area;
+}
+
+static void skt_check_curved(skt_cshape const* sh)
+{
+	qaws_curve* cs[64];
+	qaws_curve const* cv[64];
+	qaws_path_2d p[8];
+	qaws_skeleton_desc d;
+	qaws_skeleton* s = NULL;
+	qaws_status st;
+	unsigned int l, i, k, off = 0, ns = 0, missing = 0;
+	double area = 0, size, worst_dist = 0, worst_axis = 0, worst_round = 0, faces = 0, tmax;
+	char msg[500];
+	for (l = 0; l < sh->nloops; l++)
+	{
+		for (i = 0; i < sh->count[l]; i++) { cs[off + i] = skt_seg_curve(&sh->seg[off + i]); cv[off + i] = cs[off + i]; }
+		p[l].curves = cv + off; p[l].curve_count = sh->count[l]; p[l].closed = 1;
+		off += sh->count[l];
+	}
+	ns = off;
+	{
+		qaws_clip_result* u = NULL;
+		if (qaws_clip_boolean(QAWS_CLIP_UNION, QAWS_FILL_NON_ZERO, p, sh->nloops, NULL, 0, &u) == QAWS_STATUS_OK)
+			area = skt_result_area(u);
+		qaws_clip_result_destroy(u);
+	}
+	size = sqrt(fabs(area));
+	memset(&d, 0, sizeof(d));
+	d.paths = p; d.path_count = sh->nloops; d.fill_rule = QAWS_FILL_NON_ZERO;
+	d.splice_angle = (qaws_scalar)sh->sigma;
+	st = qaws_skeleton_create(&d, &s);
+	sprintf(msg, "%s: created (status %d)", sh->name, (int)st);
+	TEST_ASSERT(st == QAWS_STATUS_OK && s, msg);
+	if (!s)
+	{
+		for (i = 0; i < ns; i++) qaws_curve_destroy(cs[i]);
+		return;
+	}
+	tmax = (double)qaws_skeleton_get_max_time(s);
+	/* every arc's points on both faces' supports at their times; at sigma =
+	   pi, the non-smooth ones at distance t from the boundary */
+	for (i = 0; i < qaws_skeleton_get_arc_count(s); i++)
+	{
+		qaws_skeleton_arc a;
+		qaws_skeleton_face fa, fb;
+		qaws_skeleton_get_arc(s, i, &a);
+		qaws_skeleton_get_face(s, a.face_a, &fa);
+		qaws_skeleton_get_face(s, a.face_b, &fb);
+		for (k = 0; k <= 8; k++)
+		{
+			qaws_vec2 q;
+			qaws_scalar t;
+			double e1, e2;
+			qaws_skeleton_evaluate_arc(s, i, (qaws_scalar)(k / 8.0), &q, &t);
+			e1 = fabs(skt_face_resid(&fa, q.x, q.y, t));
+			e2 = fabs(skt_face_resid(&fb, q.x, q.y, t));
+			if (e1 > worst_dist) worst_dist = e1;
+			if (e2 > worst_dist) worst_dist = e2;
+			if (sh->sigma == SKT_PI && !a.smooth)
+			{
+				double e = fabs(skt_boundary_dist(cs, ns, q.x, q.y) - (double)t);
+				if (e > worst_axis) worst_axis = e;
+			}
+		}
+	}
+	/* the faces tile the region */
+	for (i = 0; i < qaws_skeleton_get_face_count(s); i++)
+		faces += skt_face_area(s, i, &missing);
+	/* the wavefront against the round offset */
+	if (sh->round)
+		for (k = 1; k <= 5; k++)
+		{
+			double t = tmax * k / 6, a1, a2;
+			qaws_clip_result* r1 = NULL;
+			qaws_clip_result* r2 = NULL;
+			if (sh->exact && t > sh->exact_until)
+				continue;
+			qaws_skeleton_offset(s, (qaws_scalar)t, &r1);
+			if (!sh->exact)
+				qaws_offset_paths(p, sh->nloops, (qaws_scalar)-t, QAWS_JOIN_ROUND, QAWS_END_POLYGON, &r2);
+			a1 = skt_result_area(r1);
+			a2 = sh->exact ? sh->exact(t) : skt_result_area(r2);
+			if (fabs(a1 - a2) > worst_round) worst_round = fabs(a1 - a2);
+			if (g_verbose_skt && fabs(a1 - a2) > 1e-3) printf("      t %.6f: skeleton offset %.9f, round offset %.9f\n", t, a1, a2);
+			qaws_clip_result_destroy(r1);
+			qaws_clip_result_destroy(r2);
+		}
+	sprintf(msg, "%s (sigma %.3f): %u nodes, %u arcs, max time %.9f; supports' error %.2g, medial axis' distance error %.2g, faces %.9f (region %.9f, %u gaps), round offset area error %.2g",
+		sh->name, sh->sigma, qaws_skeleton_get_node_count(s), qaws_skeleton_get_arc_count(s), tmax, worst_dist, worst_axis, faces, area, missing, worst_round);
+	TEST_ASSERT(worst_dist <= (SKT_F32 ? 1e-4 : 1e-8) * size && worst_axis <= (SKT_F32 ? 1e-4 : 1e-7) * size &&
+		missing == 0 && fabs(faces - area) <= 2e-4 * area && worst_round <= (SKT_F32 ? 1e-3 : 1e-5) * area, msg);
+	if (g_verbose_skt) printf("    %s\n", msg);
+	qaws_skeleton_destroy(s);
+	for (i = 0; i < ns; i++) qaws_curve_destroy(cs[i]);
+}
+
+/* the disc of radius 1 less the hole of radius 0.35, both moved by t, until
+   the circles touch */
+static double skt_holed_area(double t)
+{
+	return SKT_PI * ((1 - t) * (1 - t) - (0.35 + t) * (0.35 + t));
+}
+
+static void test_curved(void)
+{
+	skt_cshape sh;
+	unsigned int n;
+	double const pi = SKT_PI;
+	/* a disc */
+	memset(&sh, 0, sizeof(sh)); n = 0; sh.name = "disc"; sh.round = 1;
+	skt_carc(&sh, &n, 0.2, -0.1, 1, 0, 2 * pi); sh.count[0] = n; sh.nloops = 1;
+	skt_check_curved(&sh);
+	/* a stadium */
+	memset(&sh, 0, sizeof(sh)); n = 0; sh.name = "stadium"; sh.round = 1;
+	skt_cline(&sh, &n, -1, -1, 1, -1); skt_carc(&sh, &n, 1, 0, 1, -pi / 2, pi / 2);
+	skt_cline(&sh, &n, 1, 1, -1, 1); skt_carc(&sh, &n, -1, 0, 1, pi / 2, 3 * pi / 2);
+	sh.count[0] = n; sh.nloops = 1;
+	skt_check_curved(&sh);
+	/* a rounded rectangle: smooth joints */
+	memset(&sh, 0, sizeof(sh)); n = 0; sh.name = "rounded rectangle"; sh.round = 1;
+	skt_cline(&sh, &n, 0.4, 0, 2.6, 0); skt_carc(&sh, &n, 2.6, 0.4, 0.4, -pi / 2, 0);
+	skt_cline(&sh, &n, 3, 0.4, 3, 1.6); skt_carc(&sh, &n, 2.6, 1.6, 0.4, 0, pi / 2);
+	skt_cline(&sh, &n, 2.6, 2, 0.4, 2); skt_carc(&sh, &n, 0.4, 1.6, 0.4, pi / 2, pi);
+	skt_cline(&sh, &n, 0, 1.6, 0, 0.4); skt_carc(&sh, &n, 0.4, 0.4, 0.4, pi, 3 * pi / 2);
+	sh.count[0] = n; sh.nloops = 1;
+	skt_check_curved(&sh);
+	/* a half disc */
+	memset(&sh, 0, sizeof(sh)); n = 0; sh.name = "half disc"; sh.round = 1;
+	skt_cline(&sh, &n, -1, 0, 1, 0); skt_carc(&sh, &n, 0, 0, 1, 0, pi); sh.count[0] = n; sh.nloops = 1;
+	skt_check_curved(&sh);
+	/* a lens: two convex arcs */
+	memset(&sh, 0, sizeof(sh)); n = 0; sh.name = "lens"; sh.round = 1;
+	skt_carc(&sh, &n, 0, 0.6, 1, pi + atan2(0.6, 0.8), 2 * pi - atan2(0.6, 0.8));
+	skt_carc(&sh, &n, 0, -0.6, 1, atan2(0.6, 0.8), pi - atan2(0.6, 0.8));
+	sh.count[0] = n; sh.nloops = 1;
+	skt_check_curved(&sh);
+	/* a disc with an off-centre hole: the circles squeeze */
+	memset(&sh, 0, sizeof(sh)); n = 0; sh.name = "disc with an off-centre hole"; sh.round = 1;
+	sh.exact = skt_holed_area;
+	sh.exact_until = (1 - 0.35 - hypot(0.3, 0.1)) / 2;      /* the circles touch */
+	skt_carc(&sh, &n, 0, 0, 1, 0, 2 * pi); sh.count[0] = 1;
+	skt_carc(&sh, &n, 0.3, 0.1, 0.35, 2 * pi, 0); sh.count[1] = 1; sh.nloops = 2;
+	skt_check_curved(&sh);
+	/* a square with a round bite (concave arc, convex corners) */
+	memset(&sh, 0, sizeof(sh)); n = 0; sh.name = "square with a round bite"; sh.round = 1;
+	skt_cline(&sh, &n, 0, 0, 2, 0); skt_cline(&sh, &n, 2, 0, 2, 2); skt_cline(&sh, &n, 2, 2, 1.6, 2);
+	skt_carc(&sh, &n, 1, 2, 0.6, 0, -pi); skt_cline(&sh, &n, 0.4, 2, 0, 2); skt_cline(&sh, &n, 0, 2, 0, 0);
+	sh.count[0] = n; sh.nloops = 1;
+	skt_check_curved(&sh);
+	/* a square with a round bump: reflex corners, mitered then round */
+	memset(&sh, 0, sizeof(sh)); n = 0; sh.name = "square with a round bump, mitered";
+	skt_cline(&sh, &n, 0, 0, 2, 0); skt_cline(&sh, &n, 2, 0, 2, 2); skt_cline(&sh, &n, 2, 2, 1.6, 2);
+	skt_carc(&sh, &n, 1, 2, 0.6, 0, pi); skt_cline(&sh, &n, 0.4, 2, 0, 2); skt_cline(&sh, &n, 0, 2, 0, 0);
+	sh.count[0] = n; sh.nloops = 1;
+	skt_check_curved(&sh);
+	sh.name = "square with a round bump, medial axis"; sh.sigma = pi; sh.round = 1;
+	skt_check_curved(&sh);
+	/* polygons' medial axes (sigma = pi): parabolic arcs at reflex corners */
+	{
+		static double const ell[12] = { 0, 0, 4, 0, 4, 1, 1, 1, 1, 3, 0, 3 };
+		static double const comb[24] = { 0, 0, 7, 0, 7, 3, 6, 3, 6, 1, 5, 1, 5, 3, 3, 3, 3, 1, 1, 1, 1, 3, 0, 3 };
+		unsigned int i;
+		memset(&sh, 0, sizeof(sh)); n = 0; sh.name = "L, medial axis"; sh.sigma = pi; sh.round = 1;
+		for (i = 0; i < 6; i++) skt_cline(&sh, &n, ell[2 * i], ell[2 * i + 1], ell[2 * ((i + 1) % 6)], ell[2 * ((i + 1) % 6) + 1]);
+		sh.count[0] = n; sh.nloops = 1;
+		skt_check_curved(&sh);
+		memset(&sh, 0, sizeof(sh)); n = 0; sh.name = "comb, medial axis"; sh.sigma = pi; sh.round = 1;
+		for (i = 0; i < 12; i++) skt_cline(&sh, &n, comb[2 * i], comb[2 * i + 1], comb[2 * ((i + 1) % 12)], comb[2 * ((i + 1) % 12) + 1]);
+		sh.count[0] = n; sh.nloops = 1;
+		skt_check_curved(&sh);
+		memset(&sh, 0, sizeof(sh)); n = 0; sh.name = "7-point star, medial axis"; sh.sigma = pi; sh.round = 1;
+		for (i = 0; i < 14; i++)
+		{
+			double a0 = 2 * pi * i / 14, a1 = 2 * pi * (i + 1) / 14, r0 = (i & 1) ? 0.45 : 1.0, r1 = ((i + 1) & 1) ? 0.45 : 1.0;
+			skt_cline(&sh, &n, r0 * cos(a0), r0 * sin(a0), r1 * cos(a1), r1 * sin(a1));
+		}
+		sh.count[0] = n; sh.nloops = 1;
+		skt_check_curved(&sh);
+	}
+}
+
 int test_99_skeleton_main(void)
 {
 	g_pass = 0;
@@ -414,6 +748,7 @@ int test_99_skeleton_main(void)
 	printf("Test 99: straight skeletons\n");
 	test_closed_forms();
 	test_shapes();
+	test_curved();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
 }
