@@ -345,6 +345,55 @@ together wherever the item applies to both.
     - Ground truth from Mathematica (`tests/reference/*.wls`): A(x) in closed form,
       region areas and moments, chi-square / Kolmogorov-Smirnov uniformity tests
       against `RandomPoint` on the same regions.
+12. **Straight and curved skeletons (2D)**: the skeleton of a region of
+    `qaws_path_2d` as the trace of its wavefront's vertices, for polygons and for
+    curved boundaries.
+    - References:
+      - Aichholzer and Aurenhammer, straight skeletons of polygons (1995/96).
+      - Felkel and Obdržálek's event algorithm (1998).
+      - CGAL's builder (Cacciola: exact event predicates, inexact constructions).
+      - Kelly and Wonka, "Interactive architectural modeling with procedural
+        extrusions" (TOG 2011) and Kelly's thesis (Glasgow 2014). Their robust
+        implementation is twak/campskeleton (Java, Apache-2.0): the weighted
+        skeleton with the *generalised intersection event*, which merges every
+        coincident event into chains, re-links each chain internally, then the
+        chains by angle round the point. This needs no edge, split or vertex cases
+        and is robust to degeneracy.
+      - Biedl, Held, Huber, Kaaser and Palfrader, the weighted skeleton's
+        ambiguities (CGTA 2015).
+      - Weiß, Jüttler and Aurenhammer, "Mitered offsets and straight skeletons
+        for circular arc polygons" (EuroCG 2018; IJCGA 2020): arcs shrink
+        co-circularly, lines move parallel, vertices travel on conics. Their
+        events are vanish, terminal, split, squeeze, bubble and *splice* (a
+        reflex vertex whose edges turn tangent opens a growing semicircle). A
+        splice angle sigma in [pi, 2 pi] runs from the medial axis (pi) to the
+        mitered skeleton (2 pi).
+    - Space-time form: each wavefront edge is a surface over (x, y, t). A line is
+      the plane n . p = c + w t; an arc the cone |p - m| = r -+ w t. Every event is
+      three of these meeting at a point. The cones' differences are planes, so an
+      event is a linear system plus at most one quadratic: closed form, the same
+      solve for edge, split and terminal events. Vertices travel on lines (line-line),
+      parabolas (line-arc) or hyperbolas / ellipses (arc-arc). Skeleton arcs come
+      out as exact rational quadratic Beziers.
+    - Plan:
+      1. Polygons with holes, weighted (per-edge speeds), via the generalised
+         intersection event: f64 with clustered coincident events. Wavefront at
+         any time as exact paths; faces per input edge; roof heights. Exact
+         rational predicates later.
+      2. Lines and circular arcs, after Weiß et al.: conic vertex paths, the
+         cones' events, splice with the angle sigma (sigma = pi gives the medial
+         axis of lines and arcs).
+      3. Free-form curves (Bezier, NURBS, ...): G1 arc splines (biarcs) fitted to
+         the tolerance, then step 2. Their smooth joints carry no skeleton.
+    - Tests:
+      - Every node and skeleton point lies at weighted distance t from its faces'
+        edges.
+      - The area swept by time t equals the integral of the weighted perimeter.
+      - Faces tile the region and are monotone along their edge.
+      - Closed forms on convex and regular polygons; degenerate stacks (regular
+        n-gons, squares in squares, collinear runs).
+      - At sigma = pi, every medial-axis point is equidistant from its two
+        nearest boundary points, against qaws's own distance queries.
 
 Benchmarks against Clipper2 on its own random-polygon benchmark go in once item 5 is
 in, as an optional C++ program outside the library (the library stays C) that links
