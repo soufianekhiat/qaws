@@ -106,6 +106,7 @@ typedef struct cl_half
 	double ang;                          /* tangent angle leaving the origin */
 	double dir[2];
 	double len;                          /* chord length of the edge */
+	double area;                         /* integral of x dy along it (NAN until computed) */
 	unsigned int next, face, pos;
 	int out, seen;
 } cl_half;
@@ -769,7 +770,7 @@ static qaws_status cl_edges(cl_ctx* x)
 		cl_cut* c = &cuts[start[s]];
 		unsigned int n = count[s], k, m = 0;
 		int open = x->src[s].operand == 2;
-		qsort(c, n, sizeof(cl_cut), cl_cmp_cut);
+		cl_sort_cuts(c, n);
 		/* cuts of one vertex next to each other are one cut, unless the curve
 		   leaves the vertex between them (a closed curve's two ends) */
 		for (k = 0; k < n; k++)
@@ -979,9 +980,21 @@ static void cl_half_setup(cl_ctx* x, unsigned int h)
 	qaws_curve const* c = x->src[e->src].c;
 	double p[2], d[2], q[2], n;
 	cl_half* hh = &x->h[h];
-	cl_eval(c, (h & 1) ? e->t1 : e->t0, p, d);
-	if (h & 1) { d[0] = -d[0]; d[1] = -d[1]; }
-	cl_eval(c, (h & 1) ? e->t0 : e->t1, q, NULL);
+	if (cl_is_line_src(x, e->src))
+	{
+		/* a straight edge: its vertices give the direction and the length */
+		double const* a = x->v[cl_origin(x, h)].p;
+		double const* b = x->v[cl_origin(x, h ^ 1)].p;
+		p[0] = a[0]; p[1] = a[1];
+		q[0] = b[0]; q[1] = b[1];
+		d[0] = q[0] - p[0]; d[1] = q[1] - p[1];
+	}
+	else
+	{
+		cl_eval(c, (h & 1) ? e->t1 : e->t0, p, d);
+		if (h & 1) { d[0] = -d[0]; d[1] = -d[1]; }
+		cl_eval(c, (h & 1) ? e->t0 : e->t1, q, NULL);
+	}
 	hh->len = hypot(q[0] - p[0], q[1] - p[1]);
 	n = hypot(d[0], d[1]);
 	if (!(n > 0))
@@ -994,13 +1007,21 @@ static void cl_half_setup(cl_ctx* x, unsigned int h)
 	}
 	hh->dir[0] = n > 0 ? d[0] / n : 1;
 	hh->dir[1] = n > 0 ? d[1] / n : 0;
+	hh->ang = 0;   /* set when its fan is sorted (cl_half_angle) */
+	hh->area = NAN;
+	hh->next = hh->face = CL_NONE;
+	hh->out = hh->seen = 0;
+}
+
+/* the tangent angle, for the fans that are sorted (three edges and more) */
+static void cl_half_angle(cl_ctx* x, unsigned int h)
+{
+	cl_half* hh = &x->h[h];
 	hh->ang = atan2(hh->dir[1], hh->dir[0]);
 	/* a direction along -x may come out at -pi or at pi by rounding: one side
 	   of the cut, so tangent edges there tie instead of sorting apart */
 	if (hh->ang <= -CL_PI + CL_ANG_TIE)
 		hh->ang += 2 * CL_PI;
-	hh->next = hh->face = CL_NONE;
-	hh->out = hh->seen = 0;
 }
 
 /* CCW order of half-edges leaving one vertex: by tangent angle; tangent ties
@@ -1063,6 +1084,9 @@ static qaws_status cl_graph(cl_ctx* x)
 	{
 		unsigned int* f = &x->vout[x->v[i].first];
 		unsigned int n = x->v[i].count, a, b;
+		if (n >= 3)
+			for (a = 0; a < n; a++)
+				cl_half_angle(x, f[a]);
 		for (a = 1; a < n; a++)
 		{
 			unsigned int key = f[a];
@@ -1252,7 +1276,9 @@ static qaws_status cl_faces(cl_ctx* x, unsigned int* out_faces, unsigned int** o
 		{
 			double const* p = x->v[cl_origin(x, h)].p;
 			hcyc[h] = ncyc;
-			c.area += cl_half_area(x, h);
+			if (x->h[h].area != x->h[h].area)
+				x->h[h].area = cl_half_area(x, h);
+			c.area += x->h[h].area;
 			if (p[0] < c.lo[0]) c.lo[0] = p[0];
 			if (p[1] < c.lo[1]) c.lo[1] = p[1];
 			if (p[0] > c.hi[0]) c.hi[0] = p[0];
@@ -1820,7 +1846,9 @@ static qaws_status cl_output(cl_ctx* x, unsigned int nfaces, int const* inside)
 			pc[np].va = cl_origin(x, h);
 			pc[np].vb = cl_target(x, h);
 			pc[np].h = h;
-			pc[np].area = cl_half_area(x, h);
+			if (x->h[h].area != x->h[h].area)
+				x->h[h].area = cl_half_area(x, h);
+			pc[np].area = x->h[h].area;
 			np++;
 			tw = h ^ 1;
 			v = &x->v[cl_origin(x, tw)];
@@ -2319,6 +2347,7 @@ qaws_status qaws_internal_clip_output_arrangement(qaws_internal_arrangement cons
 	{
 		x.vout[i] = a->out[i];
 		x.h[i].face = a->half_face[i];
+		x.h[i].area = NAN;
 	}
 	for (i = 0; i < a->vertex_count; i++)
 		for (k = 0; k < a->vertices[i].count; k++)
