@@ -23,7 +23,9 @@
  *      whose boxes overlap. A pair is handled only in the cell holding the
  *      low corner of the two boxes' overlap, so it is seen once.
  *   4. refine: chords closer than their two inflations seed Newton on the
- *      true curves (least squares in 3D).
+ *      true curves (least squares in 3D); a bent piece running along the
+ *      other within its deviation (a line through a shallow arc, two
+ *      crossings in one pair) is seeded again from the segment ends.
  *   5. merge: hits of one curve pair that coincide are kept once; output is
  *      sorted by (curve_a, curve_b, parameter_a).
  */
@@ -43,8 +45,10 @@
 #define CB_PARALLEL_SIN ((qaws_scalar)0.25)  /* chords this parallel may overlap */
 #define CB_TANGENT_SIN  ((qaws_scalar)1e-6)  /* hits this tangent are classified by their sides */
 #if QAWS_SCALAR_IS_FLOAT
+#define CB_MORE_SIN2    ((qaws_scalar)2.5e-3) /* squared sine: the extra seeds keep only crossings this clear (above a tangent contact's noise) */
 #define CB_SIDE_MAX     ((qaws_scalar)1e-1)  /* farthest step off a contact to see its sides, and widest zone */
 #else
+#define CB_MORE_SIN2    ((qaws_scalar)1e-6)
 #define CB_SIDE_MAX     ((qaws_scalar)1e-2)
 #endif
 
@@ -328,6 +332,66 @@ static int cb_overlap(cb_ctx* x, qaws_flat_seg const* A, qaws_flat_seg const* B,
 	return 1;
 }
 
+/* A bent piece running along the other within its deviation may meet it
+   twice inside one pair of segments (a line through a shallow arc): Newton
+   once more from each segment end; the merge keeps coinciding hits once. */
+static qaws_status cb_pair_more(cb_ctx* x, qaws_flat_seg const* A, qaws_flat_seg const* B)
+{
+	qaws_curve const* ca = x->desc->curves[A->owner];
+	qaws_curve const* cb = x->desc->curves[B->owner];
+	qaws_scalar da[3], db[3], cr[3], na, nb, lmin;
+	unsigned int k, e;
+	if (!(A->r > 0 || B->r > 0))
+		return QAWS_STATUS_OK;
+	for (k = 0; k < 3; k++)
+	{
+		da[k] = A->p1[k] - A->p0[k];
+		db[k] = B->p1[k] - B->p0[k];
+	}
+	cr[0] = da[1] * db[2] - da[2] * db[1];
+	cr[1] = da[2] * db[0] - da[0] * db[2];
+	cr[2] = da[0] * db[1] - da[1] * db[0];
+	na = (qaws_scalar)sqrt(cb_dot(da, da));
+	nb = (qaws_scalar)sqrt(cb_dot(db, db));
+	if (!(na > 0 && nb > 0))
+		return QAWS_STATUS_OK;
+	lmin = na < nb ? na : nb;
+	/* crossing at an angle, the chords part faster than the pieces bend */
+	if ((qaws_scalar)sqrt(cb_dot(cr, cr)) / (na * nb) * lmin > 4 * (A->r + B->r))
+		return QAWS_STATUS_OK;
+	for (e = 0; e < 4; e++)
+	{
+		qaws_flat_seg const* S = e < 2 ? A : B;
+		qaws_flat_seg const* O = e < 2 ? B : A;
+		qaws_scalar const* q = (e & 1) ? S->p1 : S->p0;
+		qaws_scalar const* dd = e < 2 ? db : da;
+		qaws_scalar w[3], u, ts, to, ta, tb, pos[3], s2 = 0, nn = e < 2 ? nb * nb : na * na;
+		qaws_status st;
+		for (k = 0; k < 3; k++)
+			w[k] = q[k] - O->p0[k];
+		u = cb_dot(w, dd) / nn;
+		u = u < 0 ? 0 : (u > 1 ? 1 : u);
+		ts = (e & 1) ? S->t1 : S->t0;
+		to = O->t0 + u * (O->t1 - O->t0);
+		ta = e < 2 ? ts : to;
+		tb = e < 2 ? to : ts;
+		x->stats.newton_count++;
+		if (!cb_newton(x, ca, cb, &ta, &tb, pos, &s2))
+			continue;
+		if (A->owner == B->owner && fabs(ta - tb) <= 64 * cb_par_tol(ca))
+			continue;
+		/* curves running along each other meet anywhere on their stretch:
+		   only clear crossings */
+		if (!(s2 > CB_MORE_SIN2))
+			continue;
+		st = cb_push(x, A->owner, B->owner, QAWS_CURVE_HIT_CROSSING, ta, tb, ta, tb, pos);
+		if (st != QAWS_STATUS_OK)
+			return st;
+		x->hits[x->nhit - 1].s2 = s2;
+	}
+	return QAWS_STATUS_OK;
+}
+
 static qaws_status cb_pair(cb_ctx* x, qaws_flat_seg const* A, qaws_flat_seg const* B)
 {
 	qaws_curve const* ca = x->desc->curves[A->owner];
@@ -342,13 +406,15 @@ static qaws_status cb_pair(cb_ctx* x, qaws_flat_seg const* A, qaws_flat_seg cons
 	ta = A->t0 + u * (A->t1 - A->t0);
 	tb = B->t0 + v * (B->t1 - B->t0);
 	if (!cb_newton(x, ca, cb, &ta, &tb, pos, &s2))
-		return QAWS_STATUS_OK;
+		return cb_pair_more(x, A, B);
 	/* a curve meets itself trivially at ta == tb */
 	if (A->owner == B->owner && fabs(ta - tb) <= 64 * cb_par_tol(ca))
 		return QAWS_STATUS_OK;
 	st = cb_push(x, A->owner, B->owner, QAWS_CURVE_HIT_CROSSING, ta, tb, ta, tb, pos);
 	if (st == QAWS_STATUS_OK)
 		x->hits[x->nhit - 1].s2 = s2;
+	if (st == QAWS_STATUS_OK)
+		st = cb_pair_more(x, A, B);
 	return st;
 }
 /* may segments i and j meet as a pair to report? */

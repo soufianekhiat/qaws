@@ -6,7 +6,8 @@
  *      gets a closing line)
  *   2. hits: one batched intersection of all sources, self-intersections
  *      included; crossings, touches and shared stretches
- *   3. vertices: curve ends and hits, clustered within the tolerance
+ *   3. vertices: curve ends and hits, clustered within the tolerance; a
+ *      vertex within the tolerance of a line cuts it there (snap rounding)
  *   4. edges: each source cut at its vertices; edges of closed operands that
  *      run along each other merged, their winding steps summed; edges whose
  *      steps cancel dropped
@@ -47,13 +48,15 @@
 #if QAWS_SCALAR_IS_FLOAT
 #define CL_TOL_REL 1e-4
 #define CL_AREA_REL 1e-6
-#define CL_ANG_TIE 1e-5     /* tangent angles this close are a tie (float tangents) */
-#define CL_PROBE_REL 1e-2   /* tie probes this far along the shorter edge: bending beats rounding */
+#define CL_ANG_TIE 5e-3     /* tangent angles this close are a tie: a tangent contact's noise, the root of 2e-5 */
+#define CL_TANGENT_SIN 1e-2 /* hits this tangent may lie a tangent contact's reach off */
+#define CL_PROBE_REL 0.25   /* tie probes this far along the shorter edge: bending beats rounding */
 #else
 #define CL_TOL_REL 6.4e-9
 #define CL_AREA_REL 1e-12
-#define CL_ANG_TIE 1e-9
-#define CL_PROBE_REL 1e-4
+#define CL_ANG_TIE 1e-5     /* a tangent contact's angles carry the square root of the hits' 1e-10 */
+#define CL_TANGENT_SIN 1e-3
+#define CL_PROBE_REL 1e-2
 #endif
 
 #define CL_PI 3.14159265358979323846
@@ -441,6 +444,38 @@ static double cl_cross(double ax, double ay, double bx, double by)
 	return ax * by - ay * bx;
 }
 
+/* an end of one line within the tolerance of the other line's inside cuts it
+   there, though the rounded crossing missed */
+static qaws_status cl_line_near_end(cl_ctx* x, cl_lseg const* A, cl_lseg const* B, double l1, double l2)
+{
+	cl_lseg const* S[2] = { A, B };
+	double L[2] = { l1, l2 };
+	unsigned int k, e;
+	for (k = 0; k < 2; k++)
+	{
+		cl_lseg const* P = S[k];      /* the line cut */
+		cl_lseg const* Q = S[1 - k];  /* the line whose end is near */
+		double d[2] = { P->b[0] - P->a[0], P->b[1] - P->a[1] };
+		if (!(L[k] > 0))
+			continue;
+		for (e = 0; e < 2; e++)
+		{
+			double const* q = e ? Q->b : Q->a;
+			double t = ((q[0] - P->a[0]) * d[0] + (q[1] - P->a[1]) * d[1]) / L[k], c;
+			qaws_status s;
+			if (!(t > 0 && t < 1))
+				continue;
+			c = cl_cross(q[0] - P->a[0], q[1] - P->a[1], d[0], d[1]);
+			if (c * c > x->tol * x->tol * L[k])
+				continue;
+			s = k == 0 ? cl_point_add(x, q, A->src, t, B->src, (double)e) : cl_point_add(x, q, A->src, (double)e, B->src, t);
+			if (s != QAWS_STATUS_OK)
+				return s;
+		}
+	}
+	return QAWS_STATUS_OK;
+}
+
 /* the line's parameter at its end points t = 0 and 1 (a Bezier: [0, 1]) */
 static qaws_status cl_line_pair(cl_ctx* x, cl_lseg const* A, cl_lseg const* B)
 {
@@ -448,14 +483,27 @@ static qaws_status cl_line_pair(cl_ctx* x, cl_lseg const* A, cl_lseg const* B)
 	double w[2] = { B->a[0] - A->a[0], B->a[1] - A->a[1] };
 	double den = cl_cross(d1[0], d1[1], d2[0], d2[1]);
 	double l1 = d1[0] * d1[0] + d1[1] * d1[1];
+	double l2 = d2[0] * d2[0] + d2[1] * d2[1];
 	int a_open = x->src[A->src].operand == 2, b_open = x->src[B->src].operand == 2;
+	int collinear;
 	if (a_open && b_open)
 		return QAWS_STATUS_OK;
-	if (den != 0)
+	/* lines whose ends lie within the tolerance of the other's line are
+	   collinear: an almost parallel crossing lands anywhere along them */
+	{
+		double tl = x->tol;
+		double ea = cl_cross(w[0], w[1], d1[0], d1[1]);
+		double eb = cl_cross(B->b[0] - A->a[0], B->b[1] - A->a[1], d1[0], d1[1]);
+		double fa = cl_cross(A->a[0] - B->a[0], A->a[1] - B->a[1], d2[0], d2[1]);
+		double fb = cl_cross(A->b[0] - B->a[0], A->b[1] - B->a[1], d2[0], d2[1]);
+		collinear = (l1 > 0 && ea * ea <= tl * tl * l1 && eb * eb <= tl * tl * l1) ||
+			(l2 > 0 && fa * fa <= tl * tl * l2 && fb * fb <= tl * tl * l2);
+	}
+	if (den != 0 && !collinear)
 	{
 		double t = cl_cross(w[0], w[1], d2[0], d2[1]) / den, u = cl_cross(w[0], w[1], d1[0], d1[1]) / den, p[2];
 		if (t < 0 || t > 1 || u < 0 || u > 1)
-			return QAWS_STATUS_OK;
+			return cl_line_near_end(x, A, B, l1, l2);
 		/* both at their ends: a corner or a junction, already a point */
 		if ((t == 0 || t == 1) && (u == 0 || u == 1))
 			return QAWS_STATUS_OK;
@@ -469,7 +517,7 @@ static qaws_status cl_line_pair(cl_ctx* x, cl_lseg const* A, cl_lseg const* B)
 		return cl_point_add(x, p, A->src, t, B->src, u);
 	}
 	/* parallel: collinear lines overlap on the projections of their ends */
-	if (cl_cross(w[0], w[1], d1[0], d1[1]) != 0 || !(l1 > 0))
+	if (!collinear || !(l1 > 0) || !(l2 > 0))
 		return QAWS_STATUS_OK;
 	{
 		double sc = (B->a[0] - A->a[0]) * d1[0] + (B->a[1] - A->a[1]) * d1[1];
@@ -556,6 +604,147 @@ static qaws_status cl_line_hits(cl_ctx* x)
 	return s;
 }
 
+/* snap rounding: a vertex within the tolerance of a line's inside cuts the
+   line there, so no line passes a vertex that clustering moved onto it */
+typedef struct cl_vsnap
+{
+	cl_ctx* x;
+	unsigned int const* line_src;
+	unsigned int v;
+	qaws_status s;
+} cl_vsnap;
+
+static void cl_snap_visit(void* user, unsigned int item)
+{
+	cl_vsnap* sn = (cl_vsnap*)user;
+	cl_ctx* x = sn->x;
+	unsigned int src = sn->line_src[item];
+	qaws_scalar const* cp = ((qaws_bezier_impl const*)x->src[src].c->impl)->control_points;
+	double a[4];
+	double const* q = x->v[sn->v].p;
+	double d[2], l, t, c;
+	a[0] = cp[0]; a[1] = cp[1]; a[2] = cp[2]; a[3] = cp[3];
+	d[0] = a[2] - a[0]; d[1] = a[3] - a[1];
+	l = d[0] * d[0] + d[1] * d[1];
+	if (sn->s != QAWS_STATUS_OK || !(l > 0))
+		return;
+	t = ((q[0] - a[0]) * d[0] + (q[1] - a[1]) * d[1]) / l;
+	if (!(t > 0 && t < 1))
+		return;
+	c = cl_cross(q[0] - a[0], q[1] - a[1], d[0], d[1]);
+	if (c * c > x->tol * x->tol * l)
+		return;
+	sn->s = cl_point_add(x, q, src, t, CL_NONE, 0);
+	if (sn->s == QAWS_STATUS_OK)
+		x->pts[x->npts - 1].parent = sn->v;
+}
+
+static qaws_status cl_snap_lines(cl_ctx* x)
+{
+	unsigned int n = 0, i;
+	unsigned int* line_src = (unsigned int*)malloc(sizeof(unsigned int) * (x->nsrc ? x->nsrc : 1));
+	qaws_bp_box* boxes = (qaws_bp_box*)malloc(sizeof(qaws_bp_box) * (x->nsrc ? x->nsrc : 1));
+	qaws_bp_grid* grid = NULL;
+	cl_vsnap sn;
+	if (!line_src || !boxes)
+	{
+		free(line_src); free(boxes);
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	}
+	for (i = 0; i < x->nsrc; i++)
+	{
+		qaws_scalar const* a;
+		if (!cl_is_line_src(x, i))
+			continue;
+		a = ((qaws_bezier_impl const*)x->src[i].c->impl)->control_points;
+		boxes[n].lo[0] = (a[0] < a[2] ? a[0] : a[2]) - x->tol;
+		boxes[n].hi[0] = (a[0] < a[2] ? a[2] : a[0]) + x->tol;
+		boxes[n].lo[1] = (a[1] < a[3] ? a[1] : a[3]) - x->tol;
+		boxes[n].hi[1] = (a[1] < a[3] ? a[3] : a[1]) + x->tol;
+		boxes[n].lo[2] = boxes[n].hi[2] = 0;
+		line_src[n++] = i;
+	}
+	sn.x = x;
+	sn.line_src = line_src;
+	sn.s = QAWS_STATUS_OK;
+	if (n && x->nv && qaws_internal_grid_create(boxes, n, 2, &grid) == QAWS_STATUS_OK)
+	{
+		for (i = 0; i < x->nv && sn.s == QAWS_STATUS_OK; i++)
+		{
+			double p[3];
+			p[0] = x->v[i].p[0]; p[1] = x->v[i].p[1]; p[2] = 0;
+			sn.v = i;
+			qaws_internal_grid_ring(grid, p, 0, cl_snap_visit, &sn);
+		}
+		qaws_internal_grid_destroy(grid);
+	}
+	free(line_src); free(boxes);
+	return sn.s;
+}
+
+/* the parameter of src nearest q, by Gauss-Newton from t on its range */
+static double cl_project(cl_ctx const* x, unsigned int src, double const* q, double t)
+{
+	qaws_curve const* c = x->src[src].c;
+	double lo = cl_tmin(c), hi = cl_tmax(c), p[2], d[2];
+	unsigned int it;
+	for (it = 0; it < 30; it++)
+	{
+		double dd, step;
+		cl_eval(c, t, p, d);
+		dd = d[0] * d[0] + d[1] * d[1];
+		if (!(dd > 0))
+			break;
+		step = ((p[0] - q[0]) * d[0] + (p[1] - q[1]) * d[1]) / dd;
+		t -= step;
+		if (t < lo) t = lo;
+		if (t > hi) t = hi;
+		if (fabs(step) <= (hi - lo) * 1e-15)
+			break;
+	}
+	return t;
+}
+
+/* a tangent contact is found anywhere within sqrt(r * tolerance) of the
+   true one (the curves part only quadratically there): one that near a
+   source's end is at that end, where the sources meet at a corner */
+static void cl_tangent_snap(cl_ctx const* x, unsigned int sa, unsigned int sb, double* ta, double* tb, double* p)
+{
+	double pa[2], da[2], pb[2], db[2], na, nb, reach, best;
+	unsigned int k, e;
+	int which = -1;
+	cl_eval(x->src[sa].c, *ta, pa, da);
+	cl_eval(x->src[sb].c, *tb, pb, db);
+	na = hypot(da[0], da[1]);
+	nb = hypot(db[0], db[1]);
+	if (!(na > 0 && nb > 0) || fabs(cl_cross(da[0], da[1], db[0], db[1])) > CL_TANGENT_SIN * na * nb)
+		return;
+	reach = sqrt(x->ext * x->tol);
+	best = reach;
+	for (k = 0; k < 2; k++)
+		for (e = 0; e < 2; e++)
+		{
+			qaws_curve const* c = x->src[k ? sb : sa].c;
+			double q[2], d;
+			cl_eval(c, e ? cl_tmax(c) : cl_tmin(c), q, NULL);
+			d = hypot(q[0] - p[0], q[1] - p[1]);
+			if (d <= best)
+			{
+				best = d;
+				which = (int)(2 * k + e);
+			}
+		}
+	if (which < 0)
+		return;
+	{
+		qaws_curve const* c = x->src[which >= 2 ? sb : sa].c;
+		double t = (which & 1) ? cl_tmax(c) : cl_tmin(c);
+		cl_eval(c, t, p, NULL);
+		if (which >= 2) { *tb = t; *ta = cl_project(x, sa, p, *ta); }
+		else { *ta = t; *tb = cl_project(x, sb, p, *tb); }
+	}
+}
+
 static qaws_status cl_hits(cl_ctx* x)
 {
 	qaws_curve const** curves = (qaws_curve const**)malloc(sizeof(qaws_curve*) * (x->nsrc ? x->nsrc : 1));
@@ -622,6 +811,7 @@ static qaws_status cl_hits(cl_ctx* x)
 	{
 		qaws_curve_batch_hit_2d const* h = &hits[i];
 		double p[2];
+		double ta, tb;
 		/* open subjects are not cut by each other */
 		if (x->src[h->curve_a].operand == 2 && x->src[h->curve_b].operand == 2)
 			continue;
@@ -632,7 +822,10 @@ static qaws_status cl_hits(cl_ctx* x)
 			(h->parameter_b <= cl_tmin(x->src[h->curve_b].c) || h->parameter_b >= cl_tmax(x->src[h->curve_b].c)))
 			continue;
 		p[0] = h->position.x; p[1] = h->position.y;
-		s = cl_point_add(x, p, h->curve_a, h->parameter_a, h->curve_b, h->parameter_b);
+		ta = h->parameter_a; tb = h->parameter_b;
+		if (h->kind != QAWS_CURVE_HIT_OVERLAP)
+			cl_tangent_snap(x, h->curve_a, h->curve_b, &ta, &tb, p);
+		s = cl_point_add(x, p, h->curve_a, ta, h->curve_b, tb);
 		if (s == QAWS_STATUS_OK && h->kind == QAWS_CURVE_HIT_OVERLAP)
 		{
 			cl_eval(x->src[h->curve_a].c, h->parameter_a_end, p, NULL);
@@ -642,7 +835,9 @@ static qaws_status cl_hits(cl_ctx* x)
 	free(hits);
 	free((void*)curves);
 	free(fam);
-	return s == QAWS_STATUS_OK ? cl_cluster(x) : s;
+	if (s == QAWS_STATUS_OK)
+		s = cl_cluster(x);
+	return s == QAWS_STATUS_OK ? cl_snap_lines(x) : s;
 }
 
 /* ======================================================================== */
@@ -1128,6 +1323,16 @@ static double cl_half_area(cl_ctx const* x, unsigned int h)
 	}
 	qaws_internal_curve_area_2d(x->src[e->src].c, (h & 1) ? e->t1 : e->t0, (h & 1) ? e->t0 : e->t1,
 		x->ext * x->ext * CL_AREA_REL, &a);
+	/* the curve's ends lie within the tolerance of the vertices: chords from
+	   and to the vertices close it, else each gap weighs |x| times its size */
+	{
+		double const* p = x->v[cl_origin(x, h)].p;
+		double const* q = x->v[cl_origin(x, h ^ 1)].p;
+		double c0[2], c1[2];
+		cl_eval(x->src[e->src].c, (h & 1) ? e->t1 : e->t0, c0, NULL);
+		cl_eval(x->src[e->src].c, (h & 1) ? e->t0 : e->t1, c1, NULL);
+		a += 0.5 * (p[0] + c0[0]) * (c0[1] - p[1]) + 0.5 * (c1[0] + q[0]) * (q[1] - c1[1]);
+	}
 	return a;
 }
 

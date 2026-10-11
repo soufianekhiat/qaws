@@ -12,6 +12,9 @@
 #include "qaws_bspline.h"
 #include "qaws_arc.h"
 #include "qaws_composite.h"
+#include "qaws_curve_batch.h"
+#include "qaws_clip.h"
+#include "qaws_clip64.h"
 #include "qaws_platform.h"
 #include "internal/qaws_internal_types.h"
 #include "internal/qaws_internal_kinds.h"
@@ -1557,7 +1560,447 @@ static qaws_status os_path(os_ctx* x, qaws_path_2d const* p, double delta, qaws_
 	return s;
 }
 
-qaws_status qaws_offset_execute(qaws_offset_desc const* desc, qaws_clip_result** out_result)
+#if !QAWS_SCALAR_IS_FLOAT
+/* the curves of a result's paths appended to x as loops (each turned round when `reverse`) */
+static qaws_status os_append_loops(os_ctx* x, qaws_clip_result const* r, int reverse)
+{
+	unsigned int i, k;
+	qaws_status s = QAWS_STATUS_OK;
+	for (i = 0; r && i < qaws_clip_result_get_path_count(r) && s == QAWS_STATUS_OK; i++)
+	{
+		qaws_path_2d p;
+		unsigned int first = x->ncurves;
+		qaws_clip_result_get_path(r, i, &p);
+		for (k = 0; k < p.curve_count && s == QAWS_STATUS_OK; k++)
+		{
+			qaws_curve const* c = p.curves[reverse ? p.curve_count - 1 - k : k];
+			qaws_curve* cp = NULL;
+			s = reverse ? qaws_curve_reverse(c, &cp)
+			            : qaws_curve_extract(c, c->parameter_range.min_value, c->parameter_range.max_value, &cp);
+			if (s == QAWS_STATUS_OK)
+				s = os_keep(x, cp);
+		}
+		if (s == QAWS_STATUS_OK)
+			s = os_loop_end(x, first);
+	}
+	return s;
+}
+
+#endif
+
+#if QAWS_SCALAR_IS_FLOAT
+/*
+ * In float the band is built and cut in integers (qaws_clip64): its
+ * hundreds of strokes and discs meet in features far finer than a float
+ * arrangement's tolerance. The path is flattened to the fit tolerance, the
+ * discs are polygons round their circles (so no point comes nearer than
+ * |delta|), and the loops come back as polylines.
+ */
+typedef struct os_poly
+{
+	double* xy;
+	unsigned int n, cap;
+} os_poly;
+
+static qaws_status os_poly_push(os_poly* q, double px, double py)
+{
+	if (q->n == q->cap)
+	{
+		unsigned int nc = q->cap ? 2 * q->cap : 256;
+		double* g = (double*)realloc(q->xy, sizeof(double) * 2 * nc);
+		if (!g)
+			return QAWS_STATUS_ALLOCATION_FAILURE;
+		q->xy = g;
+		q->cap = nc;
+	}
+	q->xy[2 * q->n] = px;
+	q->xy[2 * q->n + 1] = py;
+	q->n++;
+	return QAWS_STATUS_OK;
+}
+
+/* the piece (t0, t1] split while its middle lies farther than tol from the chord */
+static qaws_status os_poly_span(os_poly* q, qaws_curve const* c, double t0, double t1, double const* p0, double const* p1,
+	double tol, unsigned int depth)
+{
+	double pm[2], dx = p1[0] - p0[0], dy = p1[1] - p0[1], l = sqrt(dx * dx + dy * dy), dev;
+	qaws_status s = os_eval(c, 0.5 * (t0 + t1), pm, NULL, NULL);
+	if (s != QAWS_STATUS_OK)
+		return s;
+	dev = l > 0 ? fabs((pm[0] - p0[0]) * dy - (pm[1] - p0[1]) * dx) / l : sqrt((pm[0] - p0[0]) * (pm[0] - p0[0]) + (pm[1] - p0[1]) * (pm[1] - p0[1]));
+	if (dev > tol && depth < 16)
+	{
+		s = os_poly_span(q, c, t0, 0.5 * (t0 + t1), p0, pm, tol, depth + 1);
+		return s == QAWS_STATUS_OK ? os_poly_span(q, c, 0.5 * (t0 + t1), t1, pm, p1, tol, depth + 1) : s;
+	}
+	return os_poly_push(q, p1[0], p1[1]);
+}
+
+static qaws_status os_poly_path64(os_poly const* q, double const* org, double scale, int64_t** pts, qaws_path64* out)
+{
+	unsigned int i;
+	*pts = (int64_t*)malloc(sizeof(int64_t) * 2 * (q->n + 1));
+	if (!*pts)
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	for (i = 0; i < q->n; i++)
+	{
+		(*pts)[2 * i] = (int64_t)floor((q->xy[2 * i] - org[0]) * scale + 0.5);
+		(*pts)[2 * i + 1] = (int64_t)floor((q->xy[2 * i + 1] - org[1]) * scale + 0.5);
+	}
+	out->points = *pts;
+	out->point_count = q->n;
+	return QAWS_STATUS_OK;
+}
+
+static qaws_status os_erode_path(os_ctx* x, qaws_path_2d const* p, double delta, qaws_join_type jt, int ccw)
+{
+	double w = fabs(delta), tol = x->tol, org[2], lo[2] = { 1e300, 1e300 }, hi[2] = { -1e300, -1e300 }, scale;
+	os_poly path, piece;
+	int64_t* ppts = NULL;
+	int64_t* all = NULL;
+	qaws_path64 pp64, *pieces = NULL, *bands = NULL;
+	qaws_clip64_result *band = NULL, *res = NULL;
+	unsigned int i, k, n, nsides, np = 0, used = 0, nb = 0;
+	qaws_status s = QAWS_STATUS_OK;
+	(void)jt;
+	memset(&path, 0, sizeof(path));
+	memset(&piece, 0, sizeof(piece));
+	/* the path flattened */
+	for (i = 0; i < p->curve_count && s == QAWS_STATUS_OK; i++)
+	{
+		qaws_curve const* c = p->curves[i];
+		for (k = 0; k < c->span_count && s == QAWS_STATUS_OK; k++)
+		{
+			double t0 = c->span_boundaries[k], t1 = c->span_boundaries[k + 1], p0[2], p1[2];
+			if (!(t1 > t0))
+				continue;
+			s = os_eval(c, t0, p0, NULL, NULL);
+			if (s == QAWS_STATUS_OK) s = os_eval(c, t1, p1, NULL, NULL);
+			if (s == QAWS_STATUS_OK && path.n == 0) s = os_poly_push(&path, p0[0], p0[1]);
+			if (s == QAWS_STATUS_OK) s = os_poly_span(&path, c, t0, t1, p0, p1, tol, 0);
+		}
+	}
+	if (path.n > 1 && path.xy[0] == path.xy[2 * (path.n - 1)] && path.xy[1] == path.xy[2 * (path.n - 1) + 1])
+		path.n--;
+	n = path.n;
+	if (s != QAWS_STATUS_OK || n < 3)
+	{
+		free(path.xy);
+		return s;
+	}
+	for (i = 0; i < n; i++)
+		for (k = 0; k < 2; k++)
+		{
+			if (path.xy[2 * i + k] < lo[k]) lo[k] = path.xy[2 * i + k];
+			if (path.xy[2 * i + k] > hi[k]) hi[k] = path.xy[2 * i + k];
+		}
+	org[0] = 0.5 * (lo[0] + hi[0]);
+	org[1] = 0.5 * (lo[1] + hi[1]);
+	scale = 1073741824.0 / ((hi[0] - lo[0] > hi[1] - lo[1] ? hi[0] - lo[0] : hi[1] - lo[1]) + 2 * w);
+	/* discs: polygons round the circles, sides by the tolerance */
+	nsides = tol < w ? (unsigned int)ceil(OS_PI / acos(1 - tol / w)) : 8;
+	if (nsides < 8) nsides = 8;
+	if (nsides > 1024) nsides = 1024;
+	pieces = (qaws_path64*)malloc(sizeof(qaws_path64) * 2 * n);
+	all = (int64_t*)malloc(sizeof(int64_t) * 2 * n * (4 + nsides));
+	if (!pieces || !all)
+		s = QAWS_STATUS_ALLOCATION_FAILURE;
+	for (i = 0; s == QAWS_STATUS_OK && i < n; i++)
+	{
+		double const* a = &path.xy[2 * i];
+		double const* b = &path.xy[2 * ((i + 1) % n)];
+		double dx = b[0] - a[0], dy = b[1] - a[1], l = sqrt(dx * dx + dy * dy), R = w / cos(OS_PI / nsides);
+		double corner[8];
+		/* the span's flat-ended stroke, counter-clockwise */
+		if (l > 0)
+		{
+			double nx = -dy / l * w, ny = dx / l * w;
+			corner[0] = a[0] - nx; corner[1] = a[1] - ny; corner[2] = b[0] - nx; corner[3] = b[1] - ny;
+			corner[4] = b[0] + nx; corner[5] = b[1] + ny; corner[6] = a[0] + nx; corner[7] = a[1] + ny;
+			pieces[np].points = &all[used];
+			pieces[np].point_count = 4;
+			for (k = 0; k < 8; k++)
+				all[used++] = (int64_t)floor((corner[k] - org[k & 1]) * scale + 0.5);
+			np++;
+		}
+		/* the disc at its start */
+		pieces[np].points = &all[used];
+		pieces[np].point_count = nsides;
+		for (k = 0; k < nsides; k++)
+		{
+			double t = 2 * OS_PI * k / nsides;
+			all[used++] = (int64_t)floor((a[0] + R * cos(t) - org[0]) * scale + 0.5);
+			all[used++] = (int64_t)floor((a[1] + R * sin(t) - org[1]) * scale + 0.5);
+		}
+		np++;
+	}
+	/* the band, then the interior minus it */
+	if (s == QAWS_STATUS_OK)
+	{
+		qaws_clip64_desc cd;
+		memset(&cd, 0, sizeof(cd));
+		cd.subjects = pieces;
+		cd.subject_count = np;
+		cd.clip_type = QAWS_CLIP_UNION;
+		cd.fill_rule = QAWS_FILL_NON_ZERO;
+		s = qaws_clip64_execute(&cd, &band);
+	}
+	if (s == QAWS_STATUS_OK)
+		s = os_poly_path64(&path, org, scale, &ppts, &pp64);
+	if (s == QAWS_STATUS_OK)
+	{
+		qaws_clip64_desc cd;
+		nb = qaws_clip64_result_get_path_count(band);
+		bands = (qaws_path64*)malloc(sizeof(qaws_path64) * (nb + 1));
+		if (!bands)
+			s = QAWS_STATUS_ALLOCATION_FAILURE;
+		for (i = 0; s == QAWS_STATUS_OK && i < nb; i++)
+		{
+			int64_t const* bp;
+			unsigned int m;
+			qaws_clip64_result_get_path(band, i, &bp, &m);
+			bands[i].points = bp;
+			bands[i].point_count = m;
+		}
+		if (s == QAWS_STATUS_OK)
+		{
+			memset(&cd, 0, sizeof(cd));
+			cd.subjects = &pp64;
+			cd.subject_count = 1;
+			cd.clips = bands;
+			cd.clip_count = nb;
+			cd.clip_type = QAWS_CLIP_DIFFERENCE;
+			cd.fill_rule = QAWS_FILL_NON_ZERO;
+			s = qaws_clip64_execute(&cd, &res);
+		}
+	}
+	/* the loops back as closed polylines, as the path runs */
+	for (i = 0; s == QAWS_STATUS_OK && res && i < qaws_clip64_result_get_path_count(res); i++)
+	{
+		int64_t const* rp;
+		unsigned int m, j, first = x->ncurves;
+		qaws_scalar* fp;
+		qaws_curve* c = NULL;
+		qaws_clip64_result_get_path(res, i, &rp, &m);
+		if (m < 3)
+			continue;
+		fp = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 2 * m);
+		if (!fp) { s = QAWS_STATUS_ALLOCATION_FAILURE; break; }
+		for (j = 0; j < m; j++)
+		{
+			unsigned int q = ccw ? j : m - 1 - j;
+			fp[2 * j] = (qaws_scalar)((double)rp[2 * q] / scale + org[0]);
+			fp[2 * j + 1] = (qaws_scalar)((double)rp[2 * q + 1] / scale + org[1]);
+		}
+		s = qaws_curve_create_polyline_2d(fp, m, 1, &c);
+		free(fp);
+		if (s == QAWS_STATUS_OK) s = os_keep(x, c);
+		if (s == QAWS_STATUS_OK) s = os_loop_end(x, first);
+	}
+	qaws_clip64_result_destroy(res);
+	qaws_clip64_result_destroy(band);
+	free(bands); free(ppts); free(all); free(pieces);
+	free(path.xy); free(piece.xy);
+	return s;
+}
+#else
+/*
+ * The offset of a closed path that shrinks its own interior, from the
+ * definition: no point of it is closer than |delta| to the path, so it is
+ * the interior minus the band within |delta| of the path. The band is the
+ * union of every span stroked alone with flat ends and a disc at every
+ * span's start (no links through corners, so a lobe narrower than |delta|
+ * leaves no gaps; no two arcs of one circle, which the union handles
+ * badly); the corners come out round. Appended to x as the raw offset would
+ * run: as the path runs.
+ */
+static qaws_status os_erode_path(os_ctx* x, qaws_path_2d const* p, double delta, qaws_join_type jt, int ccw)
+{
+	os_ctx b;
+	qaws_clip_result *band = NULL, *res = NULL;
+	qaws_path_2d* bp = NULL;
+	qaws_path_2d* loops = NULL;
+	qaws_curve const** views = NULL;
+	unsigned int nb = 0, i, k;
+	qaws_status s = QAWS_STATUS_OK;
+	(void)jt;
+	memset(&b, 0, sizeof(b));
+	b.d = x->d;
+	b.tol = x->tol;
+	b.miter_lim = x->miter_lim;
+	/* a flat-ended stroke of every span and a disc at its start */
+	for (i = 0; i < p->curve_count && s == QAWS_STATUS_OK; i++)
+	{
+		qaws_curve const* c = p->curves[i];
+		for (k = 0; k < c->span_count && s == QAWS_STATUS_OK; k++)
+		{
+			double t0 = c->span_boundaries[k], t1 = c->span_boundaries[k + 1];
+			qaws_curve* piece = NULL;
+			qaws_curve const* pv;
+			qaws_path_2d pp;
+			if (!(t1 > t0))
+				continue;
+			s = qaws_curve_extract(c, (qaws_scalar)t0, (qaws_scalar)t1, &piece);
+			if (s != QAWS_STATUS_OK)
+				break;
+			pv = piece;
+			pp.curves = &pv;
+			pp.curve_count = 1;
+			pp.closed = 0;
+			/* the span stroked with flat ends (neighbours' ends cancel), and a disc at its start (the corners): no two arcs on one circle */
+			s = os_path(&b, &pp, fabs(delta), QAWS_JOIN_ROUND, QAWS_END_BUTT);
+			if (s == QAWS_STATUS_OK)
+			{
+				double c0[2];
+				unsigned int first = b.ncurves;
+				os_eval(piece, piece->parameter_range.min_value, c0, NULL, NULL);
+				s = os_arc(&b, c0, fabs(delta), 0, 2 * OS_PI);
+				if (s == QAWS_STATUS_OK) s = os_loop_end(&b, first);
+			}
+			qaws_curve_destroy(piece);
+		}
+	}
+	/* their union: the band */
+	if (s == QAWS_STATUS_OK)
+	{
+		qaws_clip_desc cd;
+		loops = (qaws_path_2d*)malloc(sizeof(qaws_path_2d) * (b.nloops + 1));
+		views = (qaws_curve const**)malloc(sizeof(qaws_curve*) * (b.ncurves + 1));
+		if (!loops || !views)
+			s = QAWS_STATUS_ALLOCATION_FAILURE;
+		else
+		{
+			for (i = 0; i < b.ncurves; i++) views[i] = b.curves[i];
+			for (i = 0; i < b.nloops; i++)
+			{
+				loops[i].curves = views + b.loop_first[i];
+				loops[i].curve_count = b.loop_first[i + 1] - b.loop_first[i];
+				loops[i].closed = 1;
+			}
+			memset(&cd, 0, sizeof(cd));
+			cd.subjects = loops;
+			cd.subject_count = b.nloops;
+			cd.clip_type = QAWS_CLIP_UNION;
+			cd.fill_rule = QAWS_FILL_POSITIVE;
+			cd.executor = x->d->executor;
+			s = qaws_clip_execute(&cd, &band);
+		}
+	}
+	/* the interior minus the band */
+	if (s == QAWS_STATUS_OK)
+	{
+		nb = qaws_clip_result_get_path_count(band);
+		bp = (qaws_path_2d*)malloc(sizeof(qaws_path_2d) * (nb + 1));
+		if (!bp)
+			s = QAWS_STATUS_ALLOCATION_FAILURE;
+		for (i = 0; s == QAWS_STATUS_OK && i < nb; i++)
+			qaws_clip_result_get_path(band, i, &bp[i]);
+	}
+	if (s == QAWS_STATUS_OK)
+		s = qaws_clip_boolean(QAWS_CLIP_DIFFERENCE, QAWS_FILL_NON_ZERO, p, 1, bp, nb, &res);
+	if (s == QAWS_STATUS_OK)
+		s = os_append_loops(x, res, !ccw);
+	qaws_clip_result_destroy(res);
+	qaws_clip_result_destroy(band);
+	for (i = 0; i < b.ncurves; i++)
+		qaws_curve_destroy(b.curves[i]);
+	free(b.curves);
+	free(b.loop_first);
+	free(loops);
+	free((void*)views);
+	free(bp);
+	return s;
+}
+#endif
+
+#if !QAWS_SCALAR_IS_FLOAT
+/*
+ * Is every point of the result at least |delta| from the inputs (less the
+ * fit's tolerance)? A true offset's boundary never comes closer; a lobe
+ * shrunk past its radius can leave loops or pull points back onto the
+ * input through the links at inner corners.
+ */
+static qaws_status os_check(qaws_offset_desc const* desc, qaws_clip_result const* r, double tol, int* ok)
+{
+	unsigned int g, k, j, n = 0, np = 0, capp = 0, i;
+	qaws_curve const** in;
+	qaws_scalar* pts = NULL;
+	qaws_closest_point* cl = NULL;
+	qaws_closest_desc cd;
+	double d = fabs((double)desc->delta);
+	qaws_status s = QAWS_STATUS_OK;
+	*ok = 1;
+	for (g = 0; g < desc->group_count; g++)
+		for (k = 0; k < desc->groups[g].path_count; k++)
+			n += desc->groups[g].paths[k].curve_count;
+	in = (qaws_curve const**)malloc(sizeof(qaws_curve*) * (n + 1));
+	if (!in)
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	n = 0;
+	for (g = 0; g < desc->group_count; g++)
+		for (k = 0; k < desc->groups[g].path_count; k++)
+			for (j = 0; j < desc->groups[g].paths[k].curve_count; j++)
+				if (desc->groups[g].paths[k].curves[j])
+					in[n++] = desc->groups[g].paths[k].curves[j];
+	/* points along the result: every span's ends and middle */
+	for (i = 0; i < qaws_clip_result_get_path_count(r) && s == QAWS_STATUS_OK; i++)
+	{
+		qaws_path_2d p;
+		qaws_clip_result_get_path(r, i, &p);
+		for (k = 0; k < p.curve_count && s == QAWS_STATUS_OK; k++)
+		{
+			qaws_curve const* c = p.curves[k];
+			unsigned int m = 2 * c->span_count, q;
+			for (q = 0; q < m; q++)
+			{
+				qaws_eval_result_2d e;
+				double t = c->parameter_range.min_value + (c->parameter_range.max_value - c->parameter_range.min_value) * q / m;
+				if (np == capp)
+				{
+					unsigned int nc = capp ? 2 * capp : 1024;
+					qaws_scalar* gp = (qaws_scalar*)realloc(pts, sizeof(qaws_scalar) * 2 * nc);
+					if (!gp) { s = QAWS_STATUS_ALLOCATION_FAILURE; break; }
+					pts = gp;
+					capp = nc;
+				}
+				qaws_curve_evaluate_2d(c, (qaws_scalar)t, QAWS_EVAL_FLAG_POSITION, &e);
+				pts[2 * np] = e.position.x;
+				pts[2 * np + 1] = e.position.y;
+				np++;
+			}
+		}
+	}
+	if (s == QAWS_STATUS_OK && np && n)
+	{
+		cl = (qaws_closest_point*)malloc(sizeof(qaws_closest_point) * np);
+		if (!cl)
+			s = QAWS_STATUS_ALLOCATION_FAILURE;
+		else
+		{
+			memset(&cd, 0, sizeof(cd));
+			cd.curves = in;
+			cd.curve_count = n;
+			cd.points = pts;
+			cd.point_count = np;
+			cd.max_distance = (qaws_scalar)(2 * d + tol);
+			cd.executor = desc->executor;
+			s = qaws_curve_batch_find_closest(&cd, cl, NULL);
+			for (i = 0; s == QAWS_STATUS_OK && i < np; i++)
+				if (cl[i].curve != QAWS_CURVE_BATCH_NONE && (double)cl[i].distance < d - tol)
+				{
+					*ok = 0;
+					break;
+				}
+		}
+	}
+	free((void*)in);
+	free(pts);
+	free(cl);
+	return s;
+}
+#endif
+
+static qaws_status os_execute(qaws_offset_desc const* desc, qaws_clip_result** out_result, int robust)
 {
 	os_ctx x;
 	qaws_status s = QAWS_STATUS_OK;
@@ -1621,7 +2064,17 @@ qaws_status qaws_offset_execute(qaws_offset_desc const* desc, qaws_clip_result**
 		for (i = 0; i < gr->path_count && s == QAWS_STATUS_OK; i++)
 		{
 			x.path = i;
-			s = os_path(&x, &gr->paths[i], delta, gr->join_type, gr->end_type);
+			if (robust && gr->end_type == QAWS_END_POLYGON && gr->paths[i].curve_count)
+			{
+				/* a path whose offset shrinks its interior (right of travel is inside for a clockwise one) */
+				int ccw = qaws_path_is_positive_2d(&gr->paths[i]);
+				if ((ccw && delta < 0) || (!ccw && delta > 0))
+					s = os_erode_path(&x, &gr->paths[i], delta, gr->join_type, ccw);
+				else
+					s = os_path(&x, &gr->paths[i], delta, gr->join_type, gr->end_type);
+			}
+			else
+				s = os_path(&x, &gr->paths[i], delta, gr->join_type, gr->end_type);
 		}
 		/* a reversed group's loops run clockwise: turn them round for the union */
 		if (reversed && s == QAWS_STATUS_OK)
@@ -1682,6 +2135,69 @@ qaws_status qaws_offset_execute(qaws_offset_desc const* desc, qaws_clip_result**
 	free(loops);
 	free((void*)views);
 	return s;
+}
+
+#if !QAWS_SCALAR_IS_FLOAT
+/* how much closer than |delta| a point may be: the fits' tolerance and the scalars' rounding */
+static double os_check_tolerance(qaws_offset_desc const* desc)
+{
+	unsigned int n = 0, g, k, j;
+	double ext = 1.0, fit;
+	qaws_curve const** all;
+	for (g = 0; g < desc->group_count; g++)
+		for (k = 0; k < desc->groups[g].path_count; k++)
+			n += desc->groups[g].paths[k].curve_count;
+	all = (qaws_curve const**)malloc(sizeof(qaws_curve*) * (n + 1));
+	if (all)
+	{
+		n = 0;
+		for (g = 0; g < desc->group_count; g++)
+			for (k = 0; k < desc->groups[g].path_count; k++)
+				for (j = 0; j < desc->groups[g].paths[k].curve_count; j++)
+					if (desc->groups[g].paths[k].curves[j])
+						all[n++] = desc->groups[g].paths[k].curves[j];
+		if (n) ext = (double)qaws_internal_flatten_extent(all, n, 2, NULL, 0);
+		free((void*)all);
+	}
+	fit = desc->tolerance > 0 ? (double)desc->tolerance : 1e-6 * (fabs((double)desc->delta) > ext ? fabs((double)desc->delta) : ext);
+	return fmax(10 * fit, 1e-7 * ext);
+}
+#endif
+
+qaws_status qaws_offset_execute(qaws_offset_desc const* desc, qaws_clip_result** out_result)
+{
+#if QAWS_SCALAR_IS_FLOAT
+	/* float: the raw loops of a shrinking path meet in features finer than a
+	   float arrangement holds (whole lobes lost, which no distance check
+	   sees); such paths are always rebuilt, in integers */
+	return os_execute(desc, out_result, !desc->delta_fn);
+#else
+	qaws_status s = os_execute(desc, out_result, 0);
+	double tol;
+	int ok = 1;
+	unsigned int g;
+	if (s != QAWS_STATUS_OK || desc->delta_fn || desc->delta == 0)
+		return s;
+	/* cut ends reach the input: the check's rule holds for closed paths and
+	   round or joined ends only */
+	for (g = 0; g < desc->group_count; g++)
+		if (desc->groups[g].end_type == QAWS_END_BUTT || desc->groups[g].end_type == QAWS_END_SQUARE)
+			return s;
+	/* the check: where it fails, the paths that shrink rebuilt from the definition */
+	tol = os_check_tolerance(desc);
+	s = os_check(desc, *out_result, tol, &ok);
+	if (s == QAWS_STATUS_OK && !ok)
+	{
+		qaws_clip_result* r = NULL;
+		s = os_execute(desc, &r, 1);
+		if (s == QAWS_STATUS_OK)
+		{
+			qaws_clip_result_destroy(*out_result);
+			*out_result = r;
+		}
+	}
+	return s;
+#endif
 }
 
 qaws_status qaws_offset_paths(qaws_path_2d const* paths, unsigned int path_count, qaws_scalar delta,

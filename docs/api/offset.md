@@ -62,6 +62,26 @@ vertices as the Boolean operations (see [clip.md](clip.md)).
 4. **Clean-up.** Every raw loop goes through one union with the positive
    fill rule (`qaws_clip`). That removes self-overlaps, the cusps of
    curve offsets, and anything that shrank past nothing.
+5. **Check.** No point of a true offset is closer to the input than
+   |delta|. The result is sampled (two points per span) against the input;
+   if any point is closer, by more than the fits' tolerance, the closed paths
+   that shrink are rebuilt from the definition: the interior minus the band
+   within |delta| of the path. The band is the union of every span stroked
+   with flat ends and a disc at every span's start. That removes the loops
+   the corner links leave where a lobe shrinks past its radius, and points
+   pulled back onto the input. Rebuilt corners are round whatever the join
+   type. Calls with butt or square ends, or a `delta_fn`, are not checked
+   (cut ends reach the input).
+
+   In f32 there is no check: a float arrangement cannot hold the raw loops
+   of a shrinking path (whole lobes can be lost, which no distance check
+   sees), so such paths are always rebuilt, and in integers
+   (`qaws_clip64`): the path flattened to the fit tolerance, the discs as
+   polygons round their circles, the loops returned as polylines.
+
+   Overlapping paths are offset each on its own, then united (Clipper2's
+   rule), so near their junctions the result is the union of the shrunk
+   paths, not their union shrunk.
 
 **Orientation.** Positive deltas grow regions. A closed group whose
 outermost path, the one with the lowest point, runs clockwise is offset

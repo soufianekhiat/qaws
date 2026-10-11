@@ -19,7 +19,12 @@ costs about N² / 2 pair tests. The batch shares the work:
    whose boxes overlap. Each pair is handled once, in the cell holding the
    low corner of the two boxes' overlap.
 4. **Refine.** Chords closer than their two inflations seed Newton on the true
-   curves (Gauss-Newton in 3D), polished to rounding level.
+   curves (Gauss-Newton in 3D), polished to rounding level. A bent piece
+   running along the other within its deviation, such as a line cutting a
+   shallow cap off an arc, can hold two crossings in one pair of segments:
+   Newton is then seeded again from each segment end, keeping the crossings
+   clearer than 1e-3 rad (curves running along each other meet anywhere on
+   their stretch).
 5. **Merge.** Coincident hits of one curve pair are kept once. Output is sorted
    by `(curve_a, curve_b, parameter_a)`.
 

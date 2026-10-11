@@ -39,6 +39,15 @@ any kind.
    self-intersections, gives crossings, touches and shared stretches (see
    [curve_batch.md](curve_batch.md#hit-kinds)).
 2. **Vertices.** Hits and curve ends within the tolerance are one vertex.
+   - Lines whose ends lie within the tolerance of each other's line are
+     collinear: their crossing would land anywhere along them, so they
+     overlap instead. An end within the tolerance of another line's inside
+     cuts it there.
+   - A vertex within the tolerance of a line cuts the line there (snap
+     rounding), so no line passes a vertex that clustering moved.
+   - A tangent contact is only known to within about the square root of
+     the hits' precision. One that near a curve's end is moved onto the end,
+     where the curves meet at a corner.
 3. **Edges.**
    - Each curve is cut at its vertices.
    - Edges joining the same vertices that run along each other become one
@@ -49,9 +58,9 @@ any kind.
 4. **Graph.**
    - The half-edges are sorted around each vertex by tangent angle. When
      tangents tie, the curve that bends left first goes first.
-     - A tie is within 1e-9 rad, or 1e-5 rad in f32. It is decided by
-       probing each curve a short way along: 1e-4 of the shorter edge, or
-       1e-2 in f32, so that bending beats rounding.
+     - A tie is within 1e-5 rad, the noise of a tangent contact's angles.
+       It is decided by probing each curve 1e-2 of the shorter edge along,
+       so that bending beats rounding.
      - A direction along −x can come out at −π or at π by rounding, so
        angles that close to −π count as π. Tangent edges there then tie,
        instead of sorting to opposite ends of the fan.
@@ -60,7 +69,9 @@ any kind.
      outside of a connected part, and belongs to the smallest face of
      another part that winds around it.
 5. **Windings.** Faces get their subject and clip winding numbers by walking
-   from the unbounded face (0, 0) across edges.
+   from the unbounded face (0, 0) across edges. A curve's area is closed to
+   its vertices with chords, so a sliver's orientation is not lost to the
+   gaps between the curve's ends and the vertices.
 6. **Truth tables.** A face is inside the result by Clipper2's tables, with
    *in* meaning the fill rule holds:
 

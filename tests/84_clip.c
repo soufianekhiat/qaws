@@ -14,6 +14,7 @@
  */
 
 #include "test_common.h"
+#include "qaws_clip64.h"
 #include <math.h>
 #include <string.h>
 
@@ -419,6 +420,72 @@ static void test_tangent_fan(void)
 	for (i = 0; i < 12; i++) qaws_curve_destroy(c[i]);
 }
 
+/* butt strokes of a regular 96-gon wider than its radius: the side of stroke
+   k at its first corner and the side of stroke k + 48 at its last corner lie
+   on one line, which in float they miss by a rounding (lines almost
+   parallel, their crossing anywhere along them). Even-odd counts every
+   winding, so the areas must match clip64's on the same points. */
+static void test_collinear_strokes(void)
+{
+	enum { N = 96 };
+	double const cx = -0.7, cy = -0.75, R = 0.6, w = 0.7, scale = 1e9;
+	qaws_curve* c[N];
+	qaws_curve const* cv[N];
+	qaws_path_2d p[N];
+	int64_t ip[N * 8];
+	qaws_path64 p64[N];
+	unsigned int k, f;
+	char msg[240];
+	for (k = 0; k < N; k++)
+	{
+		double x0 = cx + R * cos(2 * CLT_PI * k / N), y0 = cy + R * sin(2 * CLT_PI * k / N);
+		double x1 = cx + R * cos(2 * CLT_PI * (k + 1) / N), y1 = cy + R * sin(2 * CLT_PI * (k + 1) / N);
+		double tx = x1 - x0, ty = y1 - y0, l = sqrt(tx * tx + ty * ty), nx = -ty / l * w, ny = tx / l * w;
+		double xy[8];
+		unsigned int j;
+		xy[0] = x0 - nx; xy[1] = y0 - ny; xy[2] = x1 - nx; xy[3] = y1 - ny;
+		xy[4] = x1 + nx; xy[5] = y1 + ny; xy[6] = x0 + nx; xy[7] = y0 + ny;
+		c[k] = clt_poly(xy, 4);
+		cv[k] = c[k];
+		p[k].curves = &cv[k]; p[k].curve_count = 1; p[k].closed = 1;
+		/* clip64 on the float points as they are, scaled */
+		{
+			qaws_scalar cp[16];
+			unsigned int ncp = 0;
+			qaws_curve_get_control_points(c[k], cp, 8, &ncp);
+			for (j = 0; j < 8; j++)
+				ip[8 * k + j] = (int64_t)floor((double)cp[j] * scale + 0.5);
+		}
+		p64[k].points = &ip[8 * k]; p64[k].point_count = 4;
+	}
+	for (f = 0; f < 2; f++)
+	{
+		qaws_fill_rule fr = f ? QAWS_FILL_EVEN_ODD : QAWS_FILL_NON_ZERO;
+		qaws_clip_result* r = NULL;
+		qaws_clip64_desc d64;
+		qaws_clip64_result* r64 = NULL;
+		double a = 0, a64 = 0;
+		unsigned int z;
+		qaws_clip_boolean(QAWS_CLIP_UNION, fr, p, N, NULL, 0, &r);
+		if (r) a = clt_area(r);
+		memset(&d64, 0, sizeof(d64));
+		d64.subjects = p64; d64.subject_count = N; d64.clip_type = QAWS_CLIP_UNION; d64.fill_rule = fr;
+		qaws_clip64_execute(&d64, &r64);
+		for (z = 0; r64 && z < qaws_clip64_result_get_path_count(r64); z++)
+		{
+			int64_t const* pp;
+			unsigned int m;
+			qaws_clip64_result_get_path(r64, z, &pp, &m);
+			a64 += 0.5 * qaws_path64_area2(pp, m) / (scale * scale);
+		}
+		sprintf(msg, "strokes of a 96-gon on collinear sides, %s: area %.9f (clip64 %.9f)", f ? "even-odd" : "non-zero", a, a64);
+		TEST_ASSERT(r && r64 && fabs(a - a64) < CLT_TOL * 100, msg);
+		qaws_clip_result_destroy(r);
+		qaws_clip64_result_destroy(r64);
+	}
+	for (k = 0; k < N; k++) qaws_curve_destroy(c[k]);
+}
+
 int test_84_clip_main(void)
 {
 	g_pass = 0;
@@ -431,6 +498,7 @@ int test_84_clip_main(void)
 	test_circles();
 	test_open_and_z();
 	test_tangent_fan();
+	test_collinear_strokes();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
 }

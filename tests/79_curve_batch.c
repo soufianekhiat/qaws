@@ -21,6 +21,8 @@
 #include <time.h>
 
 #define CBT_PI 3.14159265358979323846
+/* the shallow cap: 0.001 deep, 0.004 in f32 (its crossings clear of a tangent contact's noise) */
+#define CBT_CAP_R (sizeof(qaws_scalar) == 4 ? 0.996 : 0.999)
 
 static qaws_curve* cbt_ellipse(double a, double b, int lift, double z)
 {
@@ -795,6 +797,49 @@ static void test_kinds(void)
 		qaws_curve_destroy(line); qaws_curve_destroy(axis); qaws_curve_destroy(cubic);
 	}
 }
+/* a line cutting a shallow cap off a circle: both crossings lie inside one
+   chord of the circle's flattening, each must still be found */
+static void test_shallow_cap(void)
+{
+	unsigned int k, missed = 0, total = 0;
+	char msg[200];
+	qaws_arc_segment g;
+	qaws_arc_desc ad;
+	qaws_curve* circle = NULL;
+	memset(&g, 0, sizeof(g));
+	g.radius = 1;
+	g.angle_start = 0; g.angle_end = (qaws_scalar)(2 * CBT_PI);
+	memset(&ad, 0, sizeof(ad));
+	ad.dimension = QAWS_DIMENSION_2D; ad.segments = &g; ad.segment_count = 1;
+	qaws_curve_create_arc(&ad, &circle);
+	for (k = 0; k < 64; k++)
+	{
+		/* the line at distance CBT_CAP_R from the centre, normal at angle a:
+		   crossings at a +- acos(CBT_CAP_R) */
+		double a = 2 * CBT_PI * (k + 0.37) / 64, r = CBT_CAP_R, c = cos(a), s = sin(a);
+		qaws_scalar lp[4];
+		qaws_curve* line = NULL;
+		qaws_curve const* cs[2];
+		unsigned int fam[2] = { 0, 1 }, n = 0;
+		qaws_curve_batch_desc bd;
+		qaws_curve_batch_hit_2d hits[8];
+		lp[0] = (qaws_scalar)(r * c + 0.5 * s); lp[1] = (qaws_scalar)(r * s - 0.5 * c);
+		lp[2] = (qaws_scalar)(r * c - 0.5 * s); lp[3] = (qaws_scalar)(r * s + 0.5 * c);
+		qaws_curve_create_polyline_2d(lp, 2, 0, &line);
+		cs[0] = line; cs[1] = circle;
+		memset(&bd, 0, sizeof(bd));
+		bd.curves = cs; bd.curve_count = 2; bd.families = fam;
+		bd.flatness = (qaws_scalar)0.02;
+		qaws_curve_batch_find_intersections_2d(&bd, hits, 8, &n, NULL);
+		total++;
+		if (n != 2) missed++;
+		qaws_curve_destroy(line);
+	}
+	sprintf(msg, "a line %.3f inside a circle, flattened to 0.02: both crossings found at %u of %u angles", 1 - CBT_CAP_R, total - missed, total);
+	TEST_ASSERT(missed == 0, msg);
+	qaws_curve_destroy(circle);
+}
+
 int test_79_curve_batch_main(void)
 {
 	g_pass = 0;
@@ -809,6 +854,7 @@ int test_79_curve_batch_main(void)
 	test_levels();
 	test_closest();
 	test_kinds();
+	test_shallow_cap();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
 }

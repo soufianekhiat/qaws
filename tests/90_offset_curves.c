@@ -12,6 +12,9 @@
  *     curve with round ends, against a grid oracle: a point is in the
  *     offset iff its distance to the region (or curve) is below delta
  *   - few cubics: a NURBS circle grown by 1
+ *   - lobes shrunk past their radii (a user's case): three discs as
+ *     96-gons, united and as overlapping paths; no point nearer the input
+ *     than the distance, no leftover loops
  */
 
 #include "test_common.h"
@@ -19,6 +22,7 @@
 #include "reference/90_offset_curves.h"
 #include <math.h>
 #include <string.h>
+#include <stdlib.h>
 
 #define OCT_PI 3.14159265358979323846
 #define OCT_F32 (sizeof(qaws_scalar) == 4)
@@ -259,14 +263,30 @@ static void oct_rings(qaws_path_2d const* paths, unsigned int n, oct_ring* o)
 		{
 			qaws_curve const* c = paths[i].curves[k];
 			qaws_range rg = qaws_curve_get_parameter_range(c);
-			unsigned int m = 256 * qaws_curve_get_span_count(c);
-			for (j = 0; j < m; j++)
+			unsigned int ns = qaws_curve_get_span_count(c), s;
+			for (s = 0; s < ns; s++)
 			{
-				qaws_eval_result_2d e;
-				qaws_curve_evaluate_2d(c, (qaws_scalar)(rg.min_value + (rg.max_value - rg.min_value) * j / m), QAWS_EVAL_FLAG_POSITION, &e);
-				o->xy[2 * o->count] = e.position.x;
-				o->xy[2 * o->count + 1] = e.position.y;
-				o->count++;
+				/* a straight span needs only its first point */
+				double t0 = rg.min_value + (rg.max_value - rg.min_value) * s / ns, t1 = rg.min_value + (rg.max_value - rg.min_value) * (s + 1) / ns;
+				qaws_eval_result_2d e0, e1, eq;
+				unsigned int m = 1, q;
+				qaws_curve_evaluate_2d(c, (qaws_scalar)t0, QAWS_EVAL_FLAG_POSITION, &e0);
+				qaws_curve_evaluate_2d(c, (qaws_scalar)t1, QAWS_EVAL_FLAG_POSITION, &e1);
+				for (q = 1; q < 4 && m == 1; q++)
+				{
+					double dx = e1.position.x - e0.position.x, dy = e1.position.y - e0.position.y, l = hypot(dx, dy);
+					qaws_curve_evaluate_2d(c, (qaws_scalar)(t0 + (t1 - t0) * q / 4), QAWS_EVAL_FLAG_POSITION, &eq);
+					if (!(l > 0) || fabs((eq.position.x - e0.position.x) * dy - (eq.position.y - e0.position.y) * dx) > (OCT_F32 ? 1e-5 : 1e-9) * l)
+						m = 256;
+				}
+				for (j = 0; j < m; j++)
+				{
+					qaws_eval_result_2d e;
+					qaws_curve_evaluate_2d(c, (qaws_scalar)(t0 + (t1 - t0) * j / m), QAWS_EVAL_FLAG_POSITION, &e);
+					o->xy[2 * o->count] = e.position.x;
+					o->xy[2 * o->count + 1] = e.position.y;
+					o->count++;
+				}
 			}
 		}
 	}
@@ -458,6 +478,243 @@ static void test_simple(void)
 	qaws_curve_destroy(c);
 }
 
+/* a 96-gon of the circle (cx, cy, r) */
+static qaws_curve* oct_ngon(double cx, double cy, double r)
+{
+	qaws_scalar p[2 * 96];
+	qaws_curve* c = NULL;
+	unsigned int i;
+	for (i = 0; i < 96; i++)
+	{
+		p[2 * i] = (qaws_scalar)(cx + r * cos(2 * OCT_PI * i / 96));
+		p[2 * i + 1] = (qaws_scalar)(cy + r * sin(2 * OCT_PI * i / 96));
+	}
+	qaws_curve_create_polyline_2d(p, 96, 1, &c);
+	return c;
+}
+
+/* the smallest distance from the points of the offset's paths (sampled) to the rings of the input */
+static double oct_min_dist(qaws_clip_result const* r, oct_ring const* in, double* worst_xy)
+{
+	unsigned int i, np = qaws_clip_result_get_path_count(r), a;
+	double best = 1e300;
+	qaws_path_2d* res = (qaws_path_2d*)malloc(sizeof(qaws_path_2d) * (np + 1));
+	oct_ring rr;
+	for (i = 0; i < np; i++) qaws_clip_result_get_path(r, i, &res[i]);
+	oct_rings(res, np, &rr);
+	for (a = 0; a < rr.count; a++)
+	{
+		double px = rr.xy[2 * a], py = rr.xy[2 * a + 1];
+		unsigned int k;
+		for (k = 0; k < in->rings; k++)
+		{
+			unsigned int s = in->start[k], e = in->start[k + 1], b;
+			for (b = s; b < e; b++)
+			{
+				unsigned int c = b + 1 < e ? b + 1 : s;
+				double ax = in->xy[2 * b], ay = in->xy[2 * b + 1], dx = in->xy[2 * c] - ax, dy = in->xy[2 * c + 1] - ay;
+				double t = ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy + 1e-300), d;
+				if (t < 0) t = 0;
+				if (t > 1) t = 1;
+				d = hypot(px - ax - t * dx, py - ay - t * dy);
+				if (d < best)
+				{
+					best = d;
+					worst_xy[0] = px;
+					worst_xy[1] = py;
+				}
+			}
+		}
+	}
+	free(rr.xy); free(rr.start);
+	free(res);
+	return best;
+}
+
+/* the reference for overlapping paths: each path offset alone, the pieces
+   united (a path offset alone has no other path's strokes to cross) */
+static double oct_single_union(qaws_path_2d const* paths, unsigned int n, double delta, unsigned int* loops)
+{
+	qaws_clip_result** rs = (qaws_clip_result**)calloc(n + 1, sizeof(qaws_clip_result*));
+	qaws_path_2d* all = NULL;
+	unsigned int i, j, na = 0, cap = 0;
+	qaws_clip_result* u = NULL;
+	double area = 0;
+	for (i = 0; i < n; i++)
+	{
+		qaws_offset_paths(&paths[i], 1, (qaws_scalar)delta, QAWS_JOIN_ROUND, QAWS_END_POLYGON, &rs[i]);
+		cap += rs[i] ? qaws_clip_result_get_path_count(rs[i]) : 0;
+	}
+	all = (qaws_path_2d*)malloc(sizeof(qaws_path_2d) * (cap + 1));
+	for (i = 0; i < n; i++)
+		for (j = 0; rs[i] && j < qaws_clip_result_get_path_count(rs[i]); j++)
+			qaws_clip_result_get_path(rs[i], j, &all[na++]);
+	qaws_clip_boolean(QAWS_CLIP_UNION, QAWS_FILL_POSITIVE, all, na, NULL, 0, &u);
+	*loops = u ? qaws_clip_result_get_path_count(u) : 0;
+	for (i = 0; u && i < *loops; i++)
+	{
+		qaws_path_2d p;
+		qaws_scalar a = 0;
+		qaws_clip_result_get_path(u, i, &p);
+		qaws_path_compute_area_2d(&p, &a);
+		area += a;
+	}
+	qaws_clip_result_destroy(u);
+	for (i = 0; i < n; i++) qaws_clip_result_destroy(rs[i]);
+	free(rs); free(all);
+	return area;
+}
+
+static double oct_area(qaws_clip_result const* r)
+{
+	unsigned int i;
+	double area = 0;
+	for (i = 0; r && i < qaws_clip_result_get_path_count(r); i++)
+	{
+		qaws_path_2d p;
+		qaws_scalar a = 0;
+		qaws_clip_result_get_path(r, i, &p);
+		qaws_path_compute_area_2d(&p, &a);
+		area += a;
+	}
+	return area;
+}
+
+/* lobes shrunk past their radii (a user's case: leftover loops, and points
+   pulled back onto the input): three discs as 96-gons, their union and the
+   three overlapping paths themselves, offset inward with round joins. No
+   point of the offset is nearer the input than the distance, the grid
+   oracle agrees, and the overlapping paths shrink as their union does. */
+static void test_lobes(void)
+{
+	static struct { int overlapping; double delta; unsigned int loops; } const cases[] = {   /* loops of the united cases */
+		{ 0, -0.39, 1 },     /* the reported case */
+		{ 0, -0.70, 2 },     /* the small lobe gone, the large one cut off */
+		{ 1, -0.05, 0 },     /* overlapping paths: the strokes of each cross the others */
+		{ 1, -0.39, 0 },
+	};
+	qaws_curve* d[3];
+	qaws_curve const* dv[3];
+	qaws_path_2d dp[3], *up;
+	qaws_clip_result* u = NULL;
+	unsigned int i, nu, k;
+	char msg[400];
+	d[0] = oct_ngon(0, 0, 1);
+	d[1] = oct_ngon(0.95, 0.45, 0.75);
+	d[2] = oct_ngon(-0.7, -0.75, 0.6);
+	for (i = 0; i < 3; i++)
+	{
+		dv[i] = d[i];
+		dp[i].curves = &dv[i]; dp[i].curve_count = 1; dp[i].closed = 1;
+	}
+	qaws_clip_boolean(QAWS_CLIP_UNION, QAWS_FILL_NON_ZERO, dp, 3, NULL, 0, &u);
+	nu = u ? qaws_clip_result_get_path_count(u) : 0;
+	up = (qaws_path_2d*)malloc(sizeof(qaws_path_2d) * (nu + 1));
+	for (i = 0; i < nu; i++) qaws_clip_result_get_path(u, i, &up[i]);
+	for (k = 0; k < sizeof(cases) / sizeof(cases[0]); k++)
+	{
+		double delta = cases[k].delta, worst[2] = { 0, 0 }, mind = 0;
+		qaws_clip_result* r = NULL;
+		unsigned int np = 0, bad = 0, checked = 0;
+		oct_ring in;
+		qaws_offset_paths(cases[k].overlapping ? dp : up, cases[k].overlapping ? 3 : nu, (qaws_scalar)delta, QAWS_JOIN_ROUND, QAWS_END_POLYGON, &r);
+		if (r)
+		{
+			np = qaws_clip_result_get_path_count(r);
+			oct_rings(up, nu, &in);
+			mind = oct_min_dist(r, &in, worst);
+			free(in.xy); free(in.start);
+		}
+		if (!cases[k].overlapping)
+		{
+			/* the distance oracle on the union (one closed boundary) */
+			if (r && nu == 1 && up[0].curve_count == 1)
+				bad = oct_oracle(up[0].curves[0], 1, delta, r, 200, &checked);
+			sprintf(msg, "three discs united, offset inward by %.2f (round joins): %u loops (want %u), nearest point to the input %.6f at (%.4f, %.4f), %u of %u grid points against the distance oracle",
+				-delta, np, cases[k].loops, mind, worst[0], worst[1], bad, checked);
+			TEST_ASSERT(r && np == cases[k].loops && mind > -delta - (OCT_F32 ? 2e-3 : 1e-5) && bad == 0 && checked > 10000, msg);
+		}
+		else
+		{
+			/* paths are offset each on its own, then united (Clipper's rule):
+			   the same as offsetting them one by one */
+			unsigned int rl = 0;
+			double ra = oct_single_union(dp, 3, delta, &rl), a = oct_area(r);
+			sprintf(msg, "three discs as overlapping paths, offset inward by %.2f (round joins): %u loops, area %.6f (each path alone, united: %u loops, area %.6f), nearest point to the input %.6f at (%.4f, %.4f)",
+				-delta, np, a, rl, ra, mind, worst[0], worst[1]);
+			TEST_ASSERT(r && np == rl && fabs(a - ra) < (OCT_F32 ? 1e-3 : 1e-6) && mind > -delta - (OCT_F32 ? 2e-3 : 1e-5), msg);
+		}
+		qaws_clip_result_destroy(r);
+	}
+	qaws_clip_result_destroy(u);
+	free(up);
+	for (i = 0; i < 3; i++) qaws_curve_destroy(d[i]);
+}
+
+/* the user's topographic map: the union offset inward by 0.39, then that
+   result by 0.39 again, and so on until nothing is left. Shrinking by a
+   then by b is shrinking by a + b, so level k is the union shrunk by
+   0.39 k; no point of a level is nearer its own input than 0.39 (the
+   reported vertex (0.386, 0.945) sat on the input). */
+static void test_topographic(double step, unsigned int levels)
+{
+	qaws_curve* d[3];
+	qaws_curve const* dv[3];
+	qaws_path_2d dp[3], *up, *in;
+	qaws_clip_result *u = NULL, *prev = NULL;
+	unsigned int i, nu, nin, level;
+	char msg[400];
+	d[0] = oct_ngon(0, 0, 1);
+	d[1] = oct_ngon(0.95, 0.45, 0.75);
+	d[2] = oct_ngon(-0.7, -0.75, 0.6);
+	for (i = 0; i < 3; i++)
+	{
+		dv[i] = d[i];
+		dp[i].curves = &dv[i]; dp[i].curve_count = 1; dp[i].closed = 1;
+	}
+	qaws_clip_boolean(QAWS_CLIP_UNION, QAWS_FILL_NON_ZERO, dp, 3, NULL, 0, &u);
+	nu = u ? qaws_clip_result_get_path_count(u) : 0;
+	up = (qaws_path_2d*)malloc(sizeof(qaws_path_2d) * (nu + 1));
+	for (i = 0; i < nu; i++) qaws_clip_result_get_path(u, i, &up[i]);
+	in = up;
+	nin = nu;
+	for (level = 1; level <= levels && nin; level++)
+	{
+		qaws_clip_result *r = NULL, *direct = NULL;
+		double worst[2] = { 0, 0 }, mind = 1e300, a, ad;
+		unsigned int np, nd;
+		oct_ring rin;
+		qaws_offset_paths(in, nin, (qaws_scalar)-step, QAWS_JOIN_ROUND, QAWS_END_POLYGON, &r);
+		qaws_offset_paths(up, nu, (qaws_scalar)(-step * level), QAWS_JOIN_ROUND, QAWS_END_POLYGON, &direct);
+		np = r ? qaws_clip_result_get_path_count(r) : 0;
+		nd = direct ? qaws_clip_result_get_path_count(direct) : 0;
+		a = oct_area(r);
+		ad = oct_area(direct);
+		if (np)
+		{
+			oct_rings(in, nin, &rin);
+			mind = oct_min_dist(r, &rin, worst);
+			free(rin.xy); free(rin.start);
+		}
+		sprintf(msg, "topographic level %u (%.2f from the level before): %u loops, area %.6f (the union shrunk by %.2f: %u loops, area %.6f), nearest point to its input %.6f at (%.4f, %.4f)",
+			level, step, np, a, step * level, nd, ad, np ? mind : 0.0, worst[0], worst[1]);
+		TEST_ASSERT(r && np == nd && fabs(a - ad) < (OCT_F32 ? 2e-3 : 1e-5) && (!np || mind > step - (OCT_F32 ? 2e-3 : 1e-5)), msg);
+		qaws_clip_result_destroy(direct);
+		/* the next level shrinks this one */
+		if (in != up) free(in);
+		qaws_clip_result_destroy(prev);
+		prev = r;
+		nin = np;
+		in = (qaws_path_2d*)malloc(sizeof(qaws_path_2d) * (nin + 1));
+		for (i = 0; i < nin; i++) qaws_clip_result_get_path(r, i, &in[i]);
+	}
+	if (in != up) free(in);
+	qaws_clip_result_destroy(prev);
+	qaws_clip_result_destroy(u);
+	free(up);
+	for (i = 0; i < 3; i++) qaws_curve_destroy(d[i]);
+}
+
 int test_90_offset_curves_main(void)
 {
 	g_pass = 0;
@@ -469,6 +726,10 @@ int test_90_offset_curves_main(void)
 	test_open();
 	test_extremes();
 	test_simple();
+	test_lobes();
+	test_topographic(0.39, 4);
+	test_topographic(0.1, 12);
+	test_topographic(0.05, 24);
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
 }
