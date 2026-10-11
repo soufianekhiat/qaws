@@ -2105,6 +2105,16 @@ qaws_status qaws_clip_execute(qaws_clip_desc const* desc, qaws_clip_result** out
 	}
 	if (s == QAWS_STATUS_OK && desc->clip_type != QAWS_CLIP_NONE && x.nsrc)
 	{
+		/* room for the ends and a few crossings per source, so the point list rarely grows */
+		if (x.cappts < 8 * x.nsrc + 64)
+		{
+			cl_point* g = (cl_point*)realloc(x.pts, sizeof(cl_point) * (8 * x.nsrc + 64));
+			if (g)
+			{
+				x.pts = g;
+				x.cappts = 8 * x.nsrc + 64;
+			}
+		}
 		s = cl_hits(&x);
 		if (s == QAWS_STATUS_OK) s = cl_edges(&x);
 		if (s == QAWS_STATUS_OK) s = cl_merge_edges(&x);
