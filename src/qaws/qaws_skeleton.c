@@ -129,7 +129,9 @@ typedef struct sk_run
 	qaws_skeleton* s;
 	int record;
 	double stop, now, eps, eps_t;
-	double eps_r, far;          /* near a tangency: the supports' residual, the distance */
+	double eps_r, far;
+	double rad;                 /* near a tangency: one point (a square root of eps_r) */
+	double tbound;              /* no point is farther from the boundary than half the extent */
 	sk_sup* sup;
 	unsigned int nsup, capsup;
 	sk_corner* c;
@@ -142,6 +144,7 @@ typedef struct sk_run
 	unsigned int captag, stamp;
 	unsigned int node_from;
 	int merge;                  /* the event joins corners born at its point too */
+	unsigned int depth;         /* events within events */
 	qaws_status st;
 } sk_run;
 
@@ -689,8 +692,14 @@ static unsigned int sk_corner_new(sk_run* r, double const* p, double t, unsigned
 		c->fake = c->smooth = 1;
 		if (a->kind == SK_CIRCLE)
 		{
-			double x = p[0] - a->m[0], y = p[1] - a->m[1], l = hypot(x, y);
-			if (l > 0) { c->v[0] = -a->s * x / l; c->v[1] = -a->s * y / l; }
+			double x = p[0] - a->m[0], y = p[1] - a->m[1], l = hypot(x, y), rho = sk_rho(a, t);
+			if (l > 0)
+			{
+				c->v[0] = -a->s * x / l; c->v[1] = -a->s * y / l;
+				/* on its circle (an event's point is good to its tolerance) */
+				c->p[0] = a->m[0] + rho * x / l;
+				c->p[1] = a->m[1] + rho * y / l;
+			}
 		}
 		else
 		{
@@ -856,7 +865,7 @@ static void sk_hits(sk_run* r, unsigned int ci, unsigned int ei)
 					continue;
 				q[0] = p[2 * j]; q[1] = p[2 * j + 1];
 			}
-			if (tt[j] <= c->t0 + r->eps_t && hypot(q[0] - c->p[0], q[1] - c->p[1]) <= r->eps)
+			if (tt[j] <= c->t0 + r->eps_r && hypot(q[0] - c->p[0], q[1] - c->p[1]) <= r->rad)
 				continue;
 			sk_push(r, SK_EV_CORNER, tt[j] < r->now ? r->now : tt[j], q, ci, 0, 0);
 		}
@@ -983,6 +992,13 @@ static void sk_squeezes(sk_run* r, unsigned int a, unsigned int from)
 				continue;
 			if ((x->kind == SK_CIRCLE && sk_rho(x, t) < r->eps) || (y->kind == SK_CIRCLE && sk_rho(y, t) < r->eps))
 				continue;
+			{
+				/* the supports come into contact (apart before, crossing after);
+				   at a parting tangency their crossings' corners just meet */
+				double h = 1e-6 * r->s->ext + 1e3 * r->eps_t, q[4];
+				if (sk_cross(x, y, t - h, 0, q) != 0 || sk_cross(x, y, t + h, 0, q) == 0)
+					continue;
+			}
 			if (x->kind != y->kind)
 			{
 				sk_sup const* l = x->kind == SK_LINE ? x : y;
@@ -1031,6 +1047,12 @@ static unsigned int sk_support_circle(sk_run* r, double const* p, double t, unsi
 	return r->nsup++;
 }
 
+/* a corner with a circle among its supports */
+static int sk_curved(sk_run const* r, sk_corner const* c)
+{
+	return r->sup[c->in].kind == SK_CIRCLE || r->sup[c->out].kind == SK_CIRCLE;
+}
+
 /* corner c is at p at time t: by its position, or, with a circle among its
    supports, by both supports passing through p (near a tangency the
    position is ill-conditioned: it moves like a square root of the time,
@@ -1042,12 +1064,25 @@ static int sk_at(sk_run const* r, sk_corner const* c, double const* p, double t)
 	d = hypot(q[0] - p[0], q[1] - p[1]);
 	if (d <= r->eps)
 		return 1;
-	if (d > r->far || (r->sup[c->in].kind == SK_LINE && r->sup[c->out].kind == SK_LINE))
-		return 0;
+	if (d > r->far || c->in == c->out || (r->sup[c->in].kind == SK_LINE && r->sup[c->out].kind == SK_LINE))
+		return 0;           /* a marker's one circle passes everywhere round it */
 	return fabs(sk_resid(&r->sup[c->in], p, t)) <= r->eps_r && fabs(sk_resid(&r->sup[c->out], p, t)) <= r->eps_r;
 }
 
 static void sk_settle(sk_run* r, unsigned int i, int spike, double t);
+
+/* corners a and b made neighbours: the events of their meeting */
+static void sk_link(sk_run* r, unsigned int a, unsigned int b)
+{
+	r->c[a].next = b;
+	r->c[b].prev = a;
+	if (a == b || !r->c[a].alive || !r->c[b].alive)
+		return;
+	if (r->c[b].out != r->c[a].in && r->c[b].out != r->c[a].out)
+		sk_hits(r, a, r->c[b].out);
+	if (r->c[a].in != r->c[b].out && r->c[a].in != r->c[b].in)
+		sk_hits(r, b, r->c[a].in);
+}
 
 /* the reflex corner opens a circle at its point */
 static void sk_splice(sk_run* r, unsigned int i, double t)
@@ -1056,7 +1091,12 @@ static void sk_splice(sk_run* r, unsigned int i, double t)
 	double p[2];
 	unsigned int node, g, prev = c->prev, next = c->next, in = c->in, out = c->out, c1, c2;
 	int sp1 = 0, sp2 = 0;
-	sk_pos(r, c, t, p);
+	if (t <= c->t0 + r->eps_t)
+	{
+		p[0] = c->p[0]; p[1] = c->p[1];     /* where it was born */
+	}
+	else
+		sk_pos(r, c, t, p);
 	node = sk_node(r, p, t);
 	sk_kill(r, i, node, t);
 	g = sk_support_circle(r, p, t, node);
@@ -1069,6 +1109,32 @@ static void sk_splice(sk_run* r, unsigned int i, double t)
 	c2 = sk_corner_new(r, p, t, g, out, c1, next, node, &sp2);
 	if (c2 == SK_NONE)
 		return;
+	{
+		/* the opened circle is tangent to both neighbours by construction:
+		   smooth corners at the tangent points, whatever the rounding says */
+		unsigned int k;
+		for (k = 0; k < 2; k++)
+		{
+			sk_corner* d = &r->c[k ? c2 : c1];
+			sk_sup const* e = &r->sup[k ? out : in];
+			if (d->smooth)
+				continue;
+			d->kind = SK_LINEAR;
+			d->smooth = 1;
+			d->tend = 1e300;
+			if (e->kind == SK_LINE)
+			{
+				d->v[0] = e->w * e->n[0]; d->v[1] = e->w * e->n[1];
+			}
+			else
+			{
+				double x = p[0] - e->m[0], y = p[1] - e->m[1], l = hypot(x, y);
+				d->v[0] = l > 0 ? -e->s * x / l : 0;
+				d->v[1] = l > 0 ? -e->s * y / l : 0;
+			}
+			if (k) sp2 = 0; else sp1 = 0;
+		}
+	}
 	sk_settle(r, c1, sp1, t);
 	sk_settle(r, c2, sp2, t);
 }
@@ -1134,8 +1200,7 @@ static void sk_spike(sk_run* r, unsigned int i, double t)
 				return;                    /* the loop was these three */
 			if (ain == bout)
 			{
-				r->c[aa].next = bb;
-				r->c[bb].prev = aa;
+				sk_link(r, aa, bb);
 				return;
 			}
 			m = sk_corner_new(r, q, t, ain, bout, aa, bb, node, &sp);
@@ -1146,8 +1211,7 @@ static void sk_spike(sk_run* r, unsigned int i, double t)
 			sk_kill(r, b, node, t);
 			if (bout == in)
 			{
-				r->c[a].next = bb;
-				r->c[bb].prev = a;
+				sk_link(r, a, bb);
 				return;
 			}
 			m = sk_corner_new(r, q, t, in, bout, a, bb, node, &sp);
@@ -1158,8 +1222,7 @@ static void sk_spike(sk_run* r, unsigned int i, double t)
 			sk_kill(r, a, node, t);
 			if (ain == out)
 			{
-				r->c[aa].next = b;
-				r->c[b].prev = aa;
+				sk_link(r, aa, b);
 				return;
 			}
 			m = sk_corner_new(r, q, t, ain, out, aa, b, node, &sp);
@@ -1215,7 +1278,7 @@ static void sk_settle(sk_run* r, unsigned int i, int spike, double t)
 		{
 			sk_corner const* o = &r->c[j];
 			double w[2];
-			if (j == i || !o->alive || o->fake || (o->t0 == c->t0 && o->p[0] == c->p[0] && o->p[1] == c->p[1]))
+			if (j == i || !o->alive || o->fake || (fabs(o->t0 - c->t0) <= r->eps_t && hypot(o->p[0] - c->p[0], o->p[1] - c->p[1]) <= r->eps))
 				continue;
 			(void)w;
 			if (sk_at(r, o, q, t))
@@ -1258,18 +1321,39 @@ static int sk_cmp_chain(void const* a, void const* b)
 static void sk_bubble(sk_run* r, unsigned int e, double const* p, double t, unsigned int node)
 {
 	int sp;
-	unsigned int f = sk_corner_new(r, p, t, e, e, SK_NONE, SK_NONE, node, &sp);
+	unsigned int f;
+	sk_sup const* c = &r->sup[e];
+	double q[2], l = hypot(p[0] - c->m[0], p[1] - c->m[1]);
+	q[0] = p[0]; q[1] = p[1];
+	if (l > 0)
+	{
+		/* its node on the circle */
+		q[0] = c->m[0] + sk_rho(c, t) * (p[0] - c->m[0]) / l;
+		q[1] = c->m[1] + sk_rho(c, t) * (p[1] - c->m[1]) / l;
+		node = sk_node(r, q, t);
+	}
+	f = sk_corner_new(r, q, t, e, e, SK_NONE, SK_NONE, node, &sp);
 	if (f != SK_NONE)
 		sk_candidates(r, f);
 }
 
-static void sk_event_at(sk_run* r, double const* p, double t)
+static void sk_event_at(sk_run* r, double const* p_in, double t)
 {
+	double p[2];
 	unsigned int i, ncons = 0, nsplit = 0, nch = 0, node = 0, stamp = ++r->stamp, k, n0 = r->nc;
 	unsigned int *cons = NULL, *split = NULL;
 	sk_chain* ch = NULL;
 	unsigned int* fresh = NULL;
 	int* spikes = NULL;
+	p[0] = p_in[0];
+	if (++r->depth > 64)
+	{
+		/* events re-triggering one another at one point */
+		r->depth--;
+		r->st = QAWS_STATUS_NUMERICAL_FAILURE;
+		return;
+	}
+	p[1] = p_in[1];
 	cons = (unsigned int*)malloc(sizeof(unsigned int) * (n0 + 1));
 	split = (unsigned int*)malloc(sizeof(unsigned int) * (n0 + 1));
 	if (!cons || !split)
@@ -1287,7 +1371,9 @@ static void sk_event_at(sk_run* r, double const* p, double t)
 		if (c->fake && c->next == i && !(r->sup[c->in].kind == SK_CIRCLE && fabs(sk_rho(&r->sup[c->in], t)) <= r->eps))
 			continue;
 		/* corners this point's earlier event made at this time are its result */
-		if (!r->merge && !c->fake && !c->initial && c->t0 >= t - r->eps_t && hypot(c->p[0] - p[0], c->p[1] - p[1]) <= r->eps)
+		if (!r->merge && !c->fake && !c->initial && (sk_curved(r, c)
+			? c->t0 >= t - r->eps_r && hypot(c->p[0] - p[0], c->p[1] - p[1]) <= r->rad
+			: c->t0 >= t - r->eps_t && hypot(c->p[0] - p[0], c->p[1] - p[1]) <= r->eps))
 			continue;
 		(void)q;
 		if (sk_at(r, c, p, t))
@@ -1322,6 +1408,94 @@ static void sk_event_at(sk_run* r, double const* p, double t)
 	}
 	if (!(ncons >= 2 || (ncons == 1 && (nsplit > 0 || r->c[cons[0]].next == cons[0])) || nsplit >= 2))
 		goto done;
+	if (ncons == 0 && nsplit == 2)
+	{
+		/* two edges touching: a squeeze only when they face each other across
+		   the unswept side (their inward normals opposite), not one behind
+		   the other */
+		double na[2], nb[2];
+		unsigned int z;
+		for (z = 0; z < 2; z++)
+		{
+			sk_sup const* e = &r->sup[r->c[split[z]].out];
+			double* nn = z ? nb : na;
+			if (e->kind == SK_LINE) { nn[0] = e->n[0]; nn[1] = e->n[1]; }
+			else
+			{
+				double x = e->m[0] - p[0], y = e->m[1] - p[1], l = hypot(x, y);
+				nn[0] = l > 0 ? e->s * x / l : 0;
+				nn[1] = l > 0 ? e->s * y / l : 0;
+			}
+		}
+		if (na[0] * nb[0] + na[1] * nb[1] > -0.5)
+			goto done;
+	}
+	{
+		/* among circles the point is good to the clustering's tolerance: the
+		   exact meeting of three of the supports there, when near */
+		unsigned int sup[3], ns = 0, z, curved = 0;
+		for (z = 0; z < ncons + nsplit && ns < 3; z++)
+		{
+			sk_corner const* c = &r->c[z < ncons ? cons[z] : split[z - ncons]];
+			unsigned int e2[2], y, w;
+			e2[0] = c->in; e2[1] = c->out;
+			for (y = 0; y < 2 && ns < 3; y++)
+			{
+				if (z >= ncons && y == 0) continue;     /* an edge through p: its own support */
+				for (w = 0; w < ns && sup[w] != e2[y]; w++) {}
+				if (w == ns) sup[ns++] = e2[y];
+			}
+		}
+		for (z = 0; z < ns; z++) if (r->sup[sup[z]].kind == SK_CIRCLE) curved = 1;
+		if (ns == 2 && curved)
+		{
+			/* two supports: their crossings meet at a tangency, the exact one near */
+			double ts[3], q[4];
+			unsigned int nt = sk_tangencies(&r->sup[sup[0]], &r->sup[sup[1]], ts);
+			for (z = 0; z < nt; z++)
+				if (fabs(ts[z] - t) <= r->eps_r)
+				{
+					sk_cross(&r->sup[sup[0]], &r->sup[sup[1]], ts[z], r->eps, q);
+					if (hypot(0.5 * (q[0] + q[2]) - p[0], 0.5 * (q[1] + q[3]) - p[1]) <= r->rad)
+					{
+						p[0] = 0.5 * (q[0] + q[2]);
+						p[1] = 0.5 * (q[1] + q[3]);
+						if (ts[z] > t) t = ts[z];
+					}
+					break;
+				}
+		}
+		if (ns == 3 && curved)
+		{
+			sk_sup const* three[3];
+			double q[4], tq[2];
+			unsigned int nq, best = 2;
+			double bd = r->rad;
+			three[0] = &r->sup[sup[0]]; three[1] = &r->sup[sup[1]]; three[2] = &r->sup[sup[2]];
+			nq = sk_meet3(three, q, tq);
+			for (z = 0; z < nq; z++)
+			{
+				double d = hypot(q[2 * z] - p[0], q[2 * z + 1] - p[1]);
+				if (d <= bd && fabs(tq[z] - t) <= r->eps_r) { bd = d; best = z; }
+			}
+			if (best < 2)
+			{
+				/* kept only when it fits the three supports better (near a double
+				   root the solve itself is good to half the digits) */
+				double before = 0, after = 0, tt = tq[best] > t ? tq[best] : t, w;
+				for (z = 0; z < 3; z++)
+				{
+					w = fabs(sk_resid(three[z], p, t)); if (w > before) before = w;
+					w = fabs(sk_resid(three[z], q + 2 * best, tt)); if (w > after) after = w;
+				}
+				if (after < before)
+				{
+					p[0] = q[2 * best]; p[1] = q[2 * best + 1];
+					t = tt;
+				}
+			}
+		}
+	}
 	node = sk_node(r, p, t);
 	ch = (sk_chain*)malloc(sizeof(sk_chain) * (ncons + nsplit + 1));
 	fresh = (unsigned int*)malloc(sizeof(unsigned int) * (ncons + nsplit + 1));
@@ -1411,9 +1585,23 @@ static void sk_event_at(sk_run* r, double const* p, double t)
 		if (ch[i].in != SK_NONE)
 		{
 			double dir[2];
+			sk_sup const* e;
 			ch[k] = ch[i];
-			sk_dir_at(&r->sup[ch[k].in], p, dir);
+			e = &r->sup[ch[k].in];
+			sk_dir_at(e, p, dir);
 			ch[k].ang = atan2(-dir[1], -dir[0]);
+			if (e->kind == SK_CIRCLE)
+			{
+				/* back along the edge by a short chord, not its tangent: edges
+				   tangent at p are ordered by their curvature */
+				double rho = fabs(sk_rho(e, t)), a0 = atan2(p[1] - e->m[1], p[0] - e->m[0]), da, q[2];
+				da = rho > 0 ? 1e-3 * r->s->ext / rho : 0;
+				if (da > 0.2) da = 0.2;
+				q[0] = e->m[0] + rho * cos(a0 - e->s * da);
+				q[1] = e->m[1] + rho * sin(a0 - e->s * da);
+				if (rho > 0)
+					ch[k].ang = atan2(q[1] - p[1], q[0] - p[0]);
+			}
 			k++;
 		}
 	nch = k;
@@ -1428,8 +1616,7 @@ static void sk_event_at(sk_run* r, double const* p, double t)
 		if (b->in == a->out)
 		{
 			/* one support on both sides: no corner */
-			r->c[b->cin].next = a->cout;
-			r->c[a->cout].prev = b->cin;
+			sk_link(r, b->cin, a->cout);
 			continue;
 		}
 		fresh[i] = sk_corner_new(r, p, t, b->in, a->out, b->cin, a->cout, node, &spikes[i]);
@@ -1437,17 +1624,43 @@ static void sk_event_at(sk_run* r, double const* p, double t)
 	for (i = 0; i < nch && r->st == QAWS_STATUS_OK; i++)
 		if (fresh[i] != SK_NONE && r->c[fresh[i]].alive)
 			sk_settle(r, fresh[i], spikes[i], t);
-	/* markers on circles with new neighbours: their new events */
+	/* markers on circles with new neighbours: a marker outside the arc left
+	   between them (a whole circle joined to another loop keeps only part of
+	   itself) goes; the others get their new events */
 	for (i = 0; i < nch && r->st == QAWS_STATUS_OK; i++)
 	{
 		unsigned int m[2], j;
 		m[0] = ch[i].cin; m[1] = ch[i].cout;
 		for (j = 0; j < 2; j++)
-			if (r->c[m[j]].alive && r->c[m[j]].fake && r->c[m[j]].next != m[j])
-				sk_candidates(r, m[j]);
+		{
+			unsigned int f = m[j], a, b;
+			sk_corner* c = &r->c[f];
+			if (!c->alive || !c->fake || c->next == f)
+				continue;
+			a = c->prev;
+			b = c->next;
+			if (r->sup[c->in].kind == SK_CIRCLE && a != b)
+			{
+				sk_sup const* e = &r->sup[c->in];
+				double pa[2], pf[2], pb[2], t2 = t + 1e3 * r->eps_t;
+				sk_pos(r, &r->c[a], t2, pa);
+				sk_pos(r, c, t2, pf);
+				sk_pos(r, &r->c[b], t2, pb);
+				if (sk_angle_along(e, pa, pf) + sk_angle_along(e, pf, pb) > sk_angle_along(e, pa, pb) + 1e-9)
+				{
+					double q[2];
+					sk_pos(r, c, t, q);
+					sk_kill(r, f, sk_node(r, q, t), t);
+					sk_link(r, a, b);
+					continue;
+				}
+			}
+			sk_candidates(r, f);
+		}
 	}
 done:
 	free(cons); free(split); free(ch); free(fresh); free(spikes);
+	r->depth--;
 }
 
 /* ------------------------------------------------------------------------ */
@@ -1468,6 +1681,85 @@ static int sk_curved_event(sk_run const* r, sk_event const* e)
 	return r->sup[r->c[e->corner].in].kind == SK_CIRCLE || r->sup[r->c[e->corner].out].kind == SK_CIRCLE;
 }
 
+/* DEBUG: the alive loops' signed areas at time t (arcs sampled) */
+static double sk_dbg_area(sk_run const* r, double t, unsigned int* nloops, double* most_negative)
+{
+	unsigned int i, *seen = (unsigned int*)calloc(r->nc + 1, sizeof(unsigned int));
+	double total = 0;
+	*nloops = 0;
+	*most_negative = 0;
+	for (i = 0; i < r->nc; i++)
+	{
+		unsigned int j = i, n = 0;
+		double a = 0;
+		if (!r->c[i].alive || seen[i])
+			continue;
+		do
+		{
+			sk_corner const* c = &r->c[j];
+			sk_sup const* e = &r->sup[c->out];
+			double p[2], q[2];
+			unsigned int k, m;
+			seen[j] = 1;
+			sk_pos(r, c, t, p);
+			sk_pos(r, &r->c[c->next], t, q);
+			m = e->kind == SK_LINE ? 1 : 32;
+			{
+				double prev[2], rho = fabs(sk_rho(e, t)), a0 = atan2(p[1] - e->m[1], p[0] - e->m[0]);
+				double sw = e->kind == SK_LINE ? 0 : (c->next == j ? 2 * SK_PI : sk_angle_along(e, p, q));
+				prev[0] = p[0]; prev[1] = p[1];
+				for (k = 1; k <= m; k++)
+				{
+					double x[2];
+					if (e->kind == SK_LINE) { x[0] = q[0]; x[1] = q[1]; }
+					else { double ang = a0 + e->s * sw * k / m; x[0] = e->m[0] + rho * cos(ang); x[1] = e->m[1] + rho * sin(ang); }
+					a += prev[0] * x[1] - x[0] * prev[1];
+					prev[0] = x[0]; prev[1] = x[1];
+				}
+			}
+			j = c->next;
+		} while (j != i && n++ <= r->nc);
+		a *= 0.5;
+		total += a;
+		(*nloops)++;
+		if (a < *most_negative) *most_negative = a;
+	}
+	free(seen);
+	return total;
+}
+
+/* the signed area of corner i's loop at time t (its arcs sampled) */
+static double sk_loop_area(sk_run const* r, unsigned int i, double t)
+{
+	unsigned int j = i, n = 0;
+	double a = 0;
+	do
+	{
+		sk_corner const* c = &r->c[j];
+		sk_sup const* e = &r->sup[c->out];
+		double p[2], q[2], prev[2];
+		unsigned int k, m = e->kind == SK_LINE ? 1 : 32;
+		sk_pos(r, c, t, p);
+		sk_pos(r, &r->c[c->next], t, q);
+		prev[0] = p[0]; prev[1] = p[1];
+		for (k = 1; k <= m; k++)
+		{
+			double x[2];
+			if (e->kind == SK_LINE) { x[0] = q[0]; x[1] = q[1]; }
+			else
+			{
+				double rho = fabs(sk_rho(e, t)), a0 = atan2(p[1] - e->m[1], p[0] - e->m[0]);
+				double sw = c->next == j ? 2 * SK_PI : sk_angle_along(e, p, q), ang = a0 + e->s * sw * k / m;
+				x[0] = e->m[0] + rho * cos(ang); x[1] = e->m[1] + rho * sin(ang);
+			}
+			a += prev[0] * x[1] - x[0] * prev[1];
+			prev[0] = x[0]; prev[1] = x[1];
+		}
+		j = c->next;
+	} while (j != i && n++ <= r->nc);
+	return 0.5 * a;
+}
+
 static qaws_status sk_simulate(qaws_skeleton* s, int record, double stop, sk_run* r)
 {
 	unsigned int l, i;
@@ -1478,6 +1770,7 @@ static qaws_status sk_simulate(qaws_skeleton* s, int record, double stop, sk_run
 	r->eps = s->tol;
 	r->eps_r = s->tol > 1e-7 * s->ext ? s->tol : 1e-7 * s->ext;
 	r->far = 10 * sqrt(r->eps_r * (s->ext > 0 ? s->ext : 1));
+	r->rad = sqrt(r->eps_r * (s->ext > 0 ? s->ext : 1));
 	r->eps_t = s->tol;
 	r->st = QAWS_STATUS_OK;
 	r->sup = (sk_sup*)malloc(sizeof(sk_sup) * (s->ninput + 1));
@@ -1492,6 +1785,11 @@ static qaws_status sk_simulate(qaws_skeleton* s, int record, double stop, sk_run
 		double wmax = 1;
 		for (i = 0; i < s->ninput; i++) if (s->sup[i].w > wmax) wmax = s->sup[i].w;
 		r->eps_t = s->tol / wmax;
+	}
+	{
+		double wmin = 1;
+		for (i = 0; i < s->ninput; i++) if (s->sup[i].w < wmin) wmin = s->sup[i].w;
+		r->tbound = (0.5 * s->ext + 10 * s->tol) / wmin;
 	}
 	/* the input's corners, at their nodes */
 	for (l = 0; l < s->nloops && r->st == QAWS_STATUS_OK; l++)
@@ -1529,6 +1827,8 @@ static qaws_status sk_simulate(qaws_skeleton* s, int record, double stop, sk_run
 		double q[2];
 		if (e.t > stop)
 			break;
+		if (e.t > r->tbound)
+			break;
 		if (e.kind == SK_EV_SQUEEZE)
 		{
 			if (!r->refs[e.a] || !r->refs[e.b])
@@ -1560,7 +1860,7 @@ static qaws_status sk_simulate(qaws_skeleton* s, int record, double stop, sk_run
 			   the digits, and their points move like square roots of them */
 			sk_event keep[32];
 			unsigned int nkeep = 0, k;
-			double rad = sqrt(r->eps_r * r->s->ext);
+			double rad = r->rad;
 			while (r->nh && r->heap[0].t <= e.t + r->eps_r && nkeep < 32)
 			{
 				sk_event f = sk_pop(r);
@@ -1585,6 +1885,30 @@ static qaws_status sk_simulate(qaws_skeleton* s, int record, double stop, sk_run
 		else
 			sk_pos(r, &r->c[e.corner], r->now, q);
 		sk_event_at(r, q, r->now);
+	}
+	if (r->st == QAWS_STATUS_OK && stop >= r->tbound)
+	{
+		/* loops left enclosing nothing (slivers closed at tangencies) go;
+		   any other leftover is a failure */
+		unsigned int* seen = (unsigned int*)calloc(r->nc + 1, sizeof(unsigned int));
+		int positive = 0;
+		if (!seen)
+			return QAWS_STATUS_ALLOCATION_FAILURE;
+		for (i = 0; i < r->nc && !positive; i++)
+			if (r->c[i].alive && !seen[i])
+			{
+				unsigned int j = i, n = 0;
+				do { seen[j] = 1; j = r->c[j].next; } while (j != i && n++ <= r->nc);
+				positive = fabs(sk_loop_area(r, i, r->now)) > 10 * r->eps * r->s->ext;
+			}
+		free(seen);
+		if (!positive)
+			for (i = 0; i < r->nc; i++)
+				if (r->c[i].alive)
+				{
+					r->c[i].alive = 0;
+					r->refs[r->c[i].out]--;
+				}
 	}
 	return r->st;
 }
