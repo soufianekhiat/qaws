@@ -99,6 +99,7 @@ add_executable(
   95_jobs.c
   96_exact_contacts.c
   97_clip_exact.c
+  98_region_sample.c
 )
 
 # The amalgamated library exports exactly the same symbols, so the tests can

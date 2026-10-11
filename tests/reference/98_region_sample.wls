@@ -1,0 +1,82 @@
+(* Ground truth for tests/98_region_sample.c: three regions bounded by
+   curves, at 30 digits.
+     crescent: the unit disc minus the disc of radius 7/10 at (9/20, 1/10)
+     holed:    the unit disc minus the disc of radius 7/20 at (3/10, 1/5)
+     bean:     four cubic Beziers, counter-clockwise, a dent on top
+   Each boundary is a list of exact parametric pieces {x(t), y(t), t0, t1}
+   run counter-clockwise round the region (holes clockwise): circle arcs
+   between the circles' crossings, the cubics.
+   Green's theorem gives
+     the moments M[a, b] = integral of x^a y^b over the region
+                         = sum of the integrals of x^(a+1) y^b / (a+1) dy,
+       for (a, b) = (0,0) (the area), (1,0), (0,1), (2,0), (0,2), (1,1);
+     the area left of x0, A(x0) = sum over the parts of the pieces with
+       x <= x0 of the integral of (x - x0) dy (the closing segment on
+       x = x0 adds nothing).
+   The areas are checked against closed forms.
+   Run: wolframscript -file 98_region_sample.wls > 98_region_sample.h *)
+prec = 30;
+(* a few pieces integrate to zero, where NIntegrate cannot meet a relative goal *)
+Off[NIntegrate::ncvb, NIntegrate::slwcon];
+fmt[v_] := Module[{m, e}, {m, e} = MantissaExponent[N[v, 20]]; If[v == 0, "0.0", ToString[NumberForm[N[m, 18], 17]] <> "e" <> ToString[e]]];
+row[name_, l_] := Print["static double const " <> name <> "[] = { " <> StringRiffle[fmt /@ Flatten[{l}], ", "] <> " };"];
+mom = {{0, 0}, {1, 0}, {0, 1}, {2, 0}, {0, 2}, {1, 1}};
+
+moments[pieces_] := Table[Total[Table[With[{x = p[[1]], y = p[[2]]},
+    NIntegrate[x^(ab[[1]] + 1) y^ab[[2]]/(ab[[1]] + 1) D[y, t], {t, p[[3]], p[[4]]}, WorkingPrecision -> 50, PrecisionGoal -> 35]], {p, pieces}]], {ab, mom}];
+
+(* the parameters in (t0, t1) where x(t) = x0, then the integral over the parts left of x0 *)
+leftOf[pieces_, x0_] := Total[Table[With[{x = p[[1]], y = p[[2]], t0 = p[[3]], t1 = p[[4]]},
+    Module[{cuts, ivs, sol},
+      sol = NSolve[{x == x0, t0 < t < t1}, t, Reals, WorkingPrecision -> 60];
+      cuts = If[sol === {}, {}, Sort[t /. sol]];
+      ivs = Partition[Join[{t0}, cuts, {t1}], 2, 1];
+      Total[If[(x /. t -> (#[[1]] + #[[2]])/2) < x0,
+          NIntegrate[(x - x0) D[y, t], {t, #[[1]], #[[2]]}, WorkingPrecision -> 50, PrecisionGoal -> 35], 0] & /@ ivs]]],
+    {p, pieces}]];
+
+(* circles: the arc of circle (c, r) from angle a0 to a1 (a1 < a0 runs clockwise) *)
+arc[c_, r_, a0_, a1_] := If[a0 < a1, {c[[1]] + r Cos[t], c[[2]] + r Sin[t], a0, a1}, {c[[1]] + r Cos[-t], c[[2]] + r Sin[-t], -a0, -a1}];
+crossAngles[c0_, r0_, c1_, r1_] := Module[{s = Solve[{(x - c0[[1]])^2 + (y - c0[[2]])^2 == r0^2, (x - c1[[1]])^2 + (y - c1[[2]])^2 == r1^2}, {x, y}, Reals]},
+  {ArcTan[#[[1]] - c0[[1]], #[[2]] - c0[[2]]], ArcTan[#[[1]] - c1[[1]], #[[2]] - c1[[2]]]} & /@ ({x, y} /. s)];
+
+(* the crescent: the big circle's arc outside the small disc counter-clockwise, then the small circle's arc inside the big disc clockwise *)
+cb = {0, 0}; rb = 1; cs = {9/20, 1/10}; rs = 7/10;
+ang = N[crossAngles[cb, rb, cs, rs], 60];
+(* order the two crossings P, Q so the big arc from P to Q counter-clockwise lies outside the small disc *)
+{p, q} = ang;
+outside[a_] := ((cb[[1]] + rb Cos[a] - cs[[1]])^2 + (cb[[2]] + rb Sin[a] - cs[[2]])^2 > rs^2);
+bigFrom = p[[1]]; bigTo = q[[1]]; If[bigTo < bigFrom, bigTo += 2 Pi];
+If[! outside[(bigFrom + bigTo)/2], {p, q} = {q, p}; bigFrom = p[[1]]; bigTo = q[[1]]; If[bigTo < bigFrom, bigTo += 2 Pi]];
+(* the small arc from Q back to P clockwise, inside the big disc *)
+smFrom = q[[2]]; smTo = p[[2]]; If[smTo > smFrom, smTo -= 2 Pi];
+crescent = {arc[cb, rb, bigFrom, bigTo], arc[cs, rs, smFrom, smTo]};
+holed = {arc[{0, 0}, 1, 0, 2 Pi], arc[{3/10, 1/5}, 7/20, 2 Pi, 0]};
+
+segs = {{{0, 0}, {1, -9/10}, {12/5, -1/2}, {11/5, 3/5}},
+        {{11/5, 3/5}, {2, 8/5}, {7/5, 11/10}, {1, 1}},
+        {{1, 1}, {3/5, 9/10}, {1/5, 9/5}, {-1/2, 6/5}},
+        {{-1/2, 6/5}, {-6/5, 3/5}, {-3/5, 1/5}, {0, 0}}};
+bez[P_] := Sum[BernsteinBasis[3, i, t] P[[i + 1]], {i, 0, 3}];
+bean = Table[Join[Expand[bez[s]], {0, 1}], {s, segs}];
+
+mc = moments[crescent]; mh = moments[holed]; mb = moments[bean];
+lens[r_, s_, d_] := r^2 ArcCos[(d^2 + r^2 - s^2)/(2 d r)] + s^2 ArcCos[(d^2 + s^2 - r^2)/(2 d s)] - Sqrt[(-d + r + s) (d + r - s) (d - r + s) (d + r + s)]/2;
+If[Abs[mc[[1]] - (Pi - lens[1, 7/10, Sqrt[(9/20)^2 + (1/10)^2]])] > 10^-28, Print["(* crescent area mismatch: ", N[mc[[1]] - (Pi - lens[1, 7/10, Sqrt[(9/20)^2 + (1/10)^2]])], " *)"]];
+If[Abs[mh[[1]] - (Pi - Pi (7/20)^2)] > 10^-28, Print["(* holed area mismatch *)"]];
+If[Abs[mb[[1]] - 8151/2000] > 10^-28, Print["(* bean area mismatch *)"]];
+
+xsDisc = {-9/10, -1/2, -1/4, 0, 1/4, 1/2, 3/4, 19/20};
+xsBean = {-7/10, -3/10, 0, 1/2, 1, 3/2, 2, 43/20};
+axc = Table[{x0, leftOf[crescent, x0]}, {x0, xsDisc}];
+axh = Table[{x0, leftOf[holed, x0]}, {x0, xsDisc}];
+axb = Table[{x0, leftOf[bean, x0]}, {x0, xsBean}];
+
+Print["/* Generated by tests/reference/98_region_sample.wls (Mathematica, 30 digits). */"];
+Print["/* moments: area, M10, M01, M20, M02, M11; area left of x: x, A(x) pairs */"];
+row["ref_crescent_moments", mc];
+row["ref_crescent_left", axc];
+row["ref_holed_moments", mh];
+row["ref_holed_left", axh];
+row["ref_bean_moments", mb];
+row["ref_bean_left", axb];

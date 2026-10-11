@@ -109,6 +109,7 @@ extern int test_94_polytree_main(void);
 extern int test_95_jobs_main(void);
 extern int test_96_exact_contacts_main(void);
 extern int test_97_clip_exact_main(void);
+extern int test_98_region_sample_main(void);
 
 /* Test registry */
 typedef struct {
@@ -215,6 +216,7 @@ static test_suite const g_test_suites[] = {
 	{"95_jobs", test_95_jobs_main},
 	{"96_exact_contacts", test_96_exact_contacts_main},
 	{"97_clip_exact", test_97_clip_exact_main},
+	{"98_region_sample", test_98_region_sample_main},
 };
 
 int main(void) {
