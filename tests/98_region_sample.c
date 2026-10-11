@@ -15,7 +15,11 @@
  *   - a sweep, nine shapes x six patterns: the area against the united
  *     region, closed forms and Monte Carlo by winding numbers; every
  *     pattern's cell areas against the exact cell areas (the region
- *     clipped by each cell of a 6 x 6 grid)
+ *     clipped by each cell of a 6 x 6 grid); with the density 2 + x^2 + y,
+ *     the mass against Green's theorem and three patterns' cell masses
+ *   - the density 1 + x^2 + y over the three regions, against Mathematica:
+ *     the mass, the mass left of x, the map keeping mass, every pattern's
+ *     weighted centroid
  */
 
 #include "test_common.h"
@@ -453,6 +457,51 @@ static unsigned int rst_shapes(rst_shape* sh)
 	return n;
 }
 
+/* the sweep's density 2 + x^2 + y (positive on every shape), and the mass of
+   a region bounded by paths by Green: the integral of P dy, P = 2x + x^3/3 + x y */
+static qaws_scalar rst_rho2(void* user, qaws_scalar x, qaws_scalar y)
+{
+	(void)user;
+	return (qaws_scalar)(2 + (double)x * x + y);
+}
+
+static double rst_green_mass(qaws_clip_result const* r)
+{
+	static double const gx[8] = { -0.9602898564975363, -0.7966664774136267, -0.5255324099163290, -0.1834346424956498,
+		0.1834346424956498, 0.5255324099163290, 0.7966664774136267, 0.9602898564975363 };
+	static double const gw[8] = { 0.1012285362903763, 0.2223810344533745, 0.3137066458778873, 0.3626837833783620,
+		0.3626837833783620, 0.3137066458778873, 0.2223810344533745, 0.1012285362903763 };
+	double sum = 0;
+	unsigned int i, k, j, sp, g;
+	for (i = 0; r && i < qaws_clip_result_get_path_count(r); i++)
+	{
+		qaws_path_2d p;
+		qaws_clip_result_get_path(r, i, &p);
+		for (k = 0; k < p.curve_count; k++)
+		{
+			qaws_curve const* c = p.curves[k];
+			qaws_range rg = qaws_curve_get_parameter_range(c);
+			unsigned int ns = qaws_curve_get_span_count(c);
+			if (ns == 0) ns = 1;
+			for (sp = 0; sp < ns; sp++)
+				for (j = 0; j < 16; j++)
+				{
+					double t0 = rg.min_value + (rg.max_value - rg.min_value) * (sp * 16.0 + j) / (16.0 * ns);
+					double t1 = rg.min_value + (rg.max_value - rg.min_value) * (sp * 16.0 + j + 1) / (16.0 * ns);
+					for (g = 0; g < 8; g++)
+					{
+						qaws_eval_result_2d e;
+						double x, y;
+						qaws_curve_evaluate_2d(c, (qaws_scalar)(0.5 * (t0 + t1) + 0.5 * (t1 - t0) * gx[g]), QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &e);
+						x = e.position.x; y = e.position.y;
+						sum += gw[g] * 0.5 * (t1 - t0) * (2 * x + x * x * x / 3 + x * y) * e.d1.y;
+					}
+				}
+		}
+	}
+	return sum;
+}
+
 static void test_sweep(void)
 {
 	enum { G = 6 };
@@ -480,6 +529,7 @@ static void test_sweep(void)
 		qaws_clip_result* region = NULL;
 		qaws_vec2 lo, hi;
 		double area, carea = 0, cells[G * G], mc, sigma, tv[K], box;
+		double cmass[G * G], gmass;
 		unsigned int inside = 0, outside[K], disagree = 0, out_total = 0;
 		int ok_tv = 1;
 		unsigned long long st = 99;
@@ -531,6 +581,7 @@ static void test_sweep(void)
 				qaws_path_compute_area_2d(&p, &a);
 				cells[k] += a;
 			}
+			cmass[k] = rst_green_mass(cut);
 			qaws_clip_result_destroy(cut);
 			qaws_curve_destroy(rc);
 		}
@@ -597,12 +648,172 @@ static void test_sweep(void)
 		sprintf(msg, "%s: %u points outside; total variation of the cell areas from the samples: map %.4f %.4f %.4f %.4f %.4f, box %.4f %.4f %.4f %.4f %.4f, blue noise %.4f (random, Sobol, stratified, Halton, R2)",
 			s->name, out_total, tv[0], tv[1], tv[2], tv[3], tv[4], tv[5], tv[6], tv[7], tv[8], tv[9], tv[10]);
 		TEST_ASSERT(out_total == 0 && ok_tv, msg);
+		/* the density 2 + x^2 + y: the mass against Green's theorem on the united
+		   region, and three patterns' cell masses against the exact ones */
+		{
+			static unsigned int const dk[3] = { QAWS_REGION_SAMPLE_SOBOL, QAWS_REGION_SAMPLE_STRATIFIED | QAWS_REGION_SAMPLE_BOX, QAWS_REGION_SAMPLE_BLUE_NOISE };
+			qaws_region_sampler* ds = NULL;
+			double dmass, dtv[3];
+			unsigned int dout = 0;
+			d.density = rst_rho2;
+			qaws_region_sampler_create(&d, &ds);
+			d.density = NULL;
+			gmass = rst_green_mass(region);
+			dmass = ds ? (double)qaws_region_sampler_get_mass(ds) : 0;
+			for (k = 0; ds && k < 3; k++)
+			{
+				unsigned int nn = dk[k] == QAWS_REGION_SAMPLE_BLUE_NOISE ? nblue : m / 2, c;
+				unsigned int counts[G * G];
+				memset(counts, 0, sizeof(counts));
+				qaws_region_sampler_generate(ds, nn, dk[k], 23, pts);
+				for (i = 0; i < nn; i++)
+				{
+					int cx = (int)((pts[i].x - lo.x) / (hi.x - lo.x) * G), cy = (int)((pts[i].y - lo.y) / (hi.y - lo.y) * G);
+					qaws_point_location loc = QAWS_POINT_OUTSIDE;
+					qaws_region_locate_point_2d(s->paths, s->npaths, s->rule, pts[i], 0, &loc);
+					if (loc == QAWS_POINT_OUTSIDE) dout++;
+					if (cx < 0) cx = 0;
+					if (cy < 0) cy = 0;
+					if (cx >= G) cx = G - 1;
+					if (cy >= G) cy = G - 1;
+					counts[cy * G + cx]++;
+				}
+				dtv[k] = 0;
+				for (c = 0; c < G * G; c++)
+					dtv[k] += fabs(gmass * counts[c] / nn - cmass[c]);
+				dtv[k] *= 0.5 / gmass;
+			}
+			printf("    %-20s  density 2 + x^2 + y: mass %.12f (Green %.12f); cell masses' total variation: Sobol %.4f, stratified over the box %.4f, blue noise %.4f\n",
+				"", dmass, gmass, ds ? dtv[0] : 0, ds ? dtv[1] : 0, ds ? dtv[2] : 0);
+			sprintf(msg, "%s, density 2 + x^2 + y: mass %.12f (Green on the region %.12f), %u points outside, total variation of the cell masses from the samples %.4f %.4f %.4f (Sobol, stratified over the box, blue noise)",
+				s->name, dmass, gmass, dout, ds ? dtv[0] : 0, ds ? dtv[1] : 0, ds ? dtv[2] : 0);
+			TEST_ASSERT(ds && fabs(dmass - gmass) <= (RST_F32 ? 2e-4 : 1e-8) * gmass && dout == 0
+				&& dtv[0] < (full ? 0.006 : 0.01) && dtv[1] < (full ? 0.03 : 0.045) && dtv[2] < (full ? 0.04 : 0.06), msg);
+			qaws_region_sampler_destroy(ds);
+		}
 		qaws_clip_result_destroy(region);
 		qaws_region_sampler_destroy(smp);
 	}
 	for (si = 0; si < ns; si++)
 		for (i = 0; i < sh[si].ncurves; i++)
 			qaws_curve_destroy(sh[si].curves[i]);
+	free(pts);
+}
+
+/* ------------------------------------------------------------------------ */
+/*  Density: rho = 1 + x^2 + y over the three regions                       */
+/* ------------------------------------------------------------------------ */
+
+static qaws_scalar rst_rho(void* user, qaws_scalar x, qaws_scalar y)
+{
+	(void)user;
+	return (qaws_scalar)(1 + (double)x * x + y);
+}
+
+static void test_density(void)
+{
+	static unsigned int const kinds[9] = { QAWS_REGION_SAMPLE_RANDOM, QAWS_REGION_SAMPLE_SOBOL, QAWS_REGION_SAMPLE_STRATIFIED,
+		QAWS_REGION_SAMPLE_HALTON, QAWS_REGION_SAMPLE_R2, QAWS_REGION_SAMPLE_RANDOM | QAWS_REGION_SAMPLE_BOX,
+		QAWS_REGION_SAMPLE_SOBOL | QAWS_REGION_SAMPLE_BOX, QAWS_REGION_SAMPLE_STRATIFIED | QAWS_REGION_SAMPLE_BOX, QAWS_REGION_SAMPLE_BLUE_NOISE };
+	static char const* const knames[9] = { "random", "Sobol", "stratified", "Halton", "R2", "random over the box",
+		"Sobol over the box", "stratified over the box", "blue noise" };
+	static double const segs[4][8] = {
+		{ 0, 0, 1, -0.9, 2.4, -0.5, 2.2, 0.6 }, { 2.2, 0.6, 2, 1.6, 1.4, 1.1, 1, 1 },
+		{ 1, 1, 0.6, 0.9, 0.2, 1.8, -0.5, 1.2 }, { -0.5, 1.2, -1.2, 0.6, -0.6, 0.2, 0, 0 } };
+	unsigned int r, k, i, n = 16384;
+	qaws_vec2* pts = (qaws_vec2*)malloc(sizeof(qaws_vec2) * n);
+	char msg[400];
+	for (r = 0; r < 3; r++)
+	{
+		qaws_curve* cs[4];
+		qaws_curve const* cv[4];
+		qaws_path_2d p[2];
+		qaws_region_sampler_desc d;
+		qaws_region_sampler* s = NULL;
+		double const* m = r == 0 ? ref_crescent_moments : r == 1 ? ref_holed_moments : ref_bean_moments;
+		double const* m3 = r == 0 ? ref_crescent_moments3 : r == 1 ? ref_holed_moments3 : ref_bean_moments3;
+		double const* ml = r == 0 ? ref_crescent_mass_left : r == 1 ? ref_holed_mass_left : ref_bean_mass_left;
+		unsigned int nml = (unsigned int)((r == 2 ? sizeof(ref_bean_mass_left) : sizeof(ref_crescent_mass_left)) / sizeof(double) / 2);
+		char const* name = r == 0 ? "crescent" : r == 1 ? "disc with a hole" : "bean";
+		/* mass, and the density's centroid: integrals of rho, x rho, y rho */
+		double mass = m[0] + m[3] + m[2], cx = (m[1] + m3[0] + m[5]) / mass, cy = (m[2] + m3[1] + m[4]) / mass, size = sqrt(m[0]);
+		double got_mass, worst = 0;
+		rst_region rg;
+		memset(&rg, 0, sizeof(rg));
+		if (r < 2)
+		{
+			double cc[2][3] = { { 0, 0, 1 }, { 0.45, 0.1, 0.7 } };
+			if (r == 1) { cc[1][0] = 0.3; cc[1][1] = 0.2; cc[1][2] = 0.35; }
+			cs[0] = rst_circle(cc[0][0], cc[0][1], cc[0][2], 1);
+			cs[1] = rst_circle(cc[1][0], cc[1][1], cc[1][2], 0);
+			for (i = 0; i < 2; i++) { cv[i] = cs[i]; p[i].curves = &cv[i]; p[i].curve_count = 1; p[i].closed = 1; }
+			memcpy(rg.c0, cc[0], sizeof(rg.c0));
+			memcpy(rg.c1, cc[1], sizeof(rg.c1));
+		}
+		else
+		{
+			for (i = 0; i < 4; i++) { cs[i] = rst_cubic(segs[i]); cv[i] = cs[i]; }
+			p[0].curves = cv; p[0].curve_count = 4; p[0].closed = 1;
+			rg.npoly = 4 * 4096;
+			rg.poly = (double*)malloc(sizeof(double) * 2 * rg.npoly);
+			for (i = 0; i < 4 * 4096; i++)
+			{
+				unsigned int sg = i / 4096;
+				double t = (i % 4096) / 4096.0, b0 = (1 - t) * (1 - t) * (1 - t), b1 = 3 * t * (1 - t) * (1 - t), b2 = 3 * t * t * (1 - t), b3 = t * t * t;
+				rg.poly[2 * i] = b0 * segs[sg][0] + b1 * segs[sg][2] + b2 * segs[sg][4] + b3 * segs[sg][6];
+				rg.poly[2 * i + 1] = b0 * segs[sg][1] + b1 * segs[sg][3] + b2 * segs[sg][5] + b3 * segs[sg][7];
+			}
+		}
+		memset(&d, 0, sizeof(d));
+		d.paths = p; d.path_count = r < 2 ? 2 : 1; d.fill_rule = r < 2 ? QAWS_FILL_POSITIVE : QAWS_FILL_NON_ZERO;
+		d.density = rst_rho;
+		qaws_region_sampler_create(&d, &s);
+		got_mass = s ? (double)qaws_region_sampler_get_mass(s) : 0;
+		for (i = 0; s && i < nml; i++)
+		{
+			qaws_scalar a = 0;
+			qaws_region_sampler_mass_left(s, (qaws_scalar)ml[2 * i], &a);
+			if (fabs((double)a - ml[2 * i + 1]) > worst) worst = fabs((double)a - ml[2 * i + 1]);
+		}
+		sprintf(msg, "density 1 + x^2 + y over the %s: mass %.12f (Mathematica %.12f), mass left of x at %u abscissas, worst error %.3g",
+			name, got_mass, mass, nml, worst);
+		TEST_ASSERT(s && fabs(got_mass - mass) <= (RST_F32 ? 2e-4 : 1e-9) * mass && worst <= (RST_F32 ? 2e-4 : 1e-9) * mass, msg);
+		/* the map keeps mass */
+		worst = 0;
+		for (i = 0; s && i <= 32; i++)
+		{
+			qaws_vec2 q;
+			qaws_scalar a = 0;
+			qaws_region_sampler_map(s, (qaws_scalar)(i / 32.0), (qaws_scalar)0.61, &q);
+			qaws_region_sampler_mass_left(s, q.x, &a);
+			if (fabs((double)a - i / 32.0 * mass) > worst) worst = fabs((double)a - i / 32.0 * mass);
+		}
+		sprintf(msg, "density over the %s: mass left of map(u, v).x = u mass at 33 u, worst error %.3g", name, worst);
+		TEST_ASSERT(worst <= (RST_F32 ? 1e-3 : 1e-8) * mass, msg);
+		/* every pattern: inside, and the density's centroid */
+		for (k = 0; s && k < 9; k++)
+		{
+			unsigned int base = kinds[k] & ~QAWS_REGION_SAMPLE_BOX, outside = 0, nn = base == QAWS_REGION_SAMPLE_BLUE_NOISE ? 4096 : n;
+			double sx = 0, sy = 0, e, lim;
+			int exact = !(kinds[k] & QAWS_REGION_SAMPLE_BOX) && base != QAWS_REGION_SAMPLE_RANDOM && base != QAWS_REGION_SAMPLE_BLUE_NOISE;
+			qaws_region_sampler_generate(s, nn, kinds[k], 5, pts);
+			for (i = 0; i < nn; i++)
+			{
+				if (!rst_inside(&rg, pts[i].x, pts[i].y, RST_F32 ? 1e-4 : 1e-9)) outside++;
+				sx += pts[i].x; sy += pts[i].y;
+			}
+			e = hypot(sx / nn - cx, sy / nn - cy) / size;
+			/* through the map the low-discrepancy patterns keep their order; random,
+			   rejection and blue noise (adaptive radii) to their noise */
+			lim = exact ? 2e-3 : (base == QAWS_REGION_SAMPLE_BLUE_NOISE ? 3e-2 : 1.5e-2);
+			sprintf(msg, "density over the %s, %s: %u points, %u outside, centroid (%.5f, %.5f) (Mathematica (%.5f, %.5f)), error %.2g of the size",
+				name, knames[k], nn, outside, sx / nn, sy / nn, cx, cy, e);
+			TEST_ASSERT(outside == 0 && e < lim, msg);
+		}
+		qaws_region_sampler_destroy(s);
+		free(rg.poly);
+		for (i = 0; i < (r < 2 ? 2u : 4u); i++) qaws_curve_destroy(cs[i]);
+	}
 	free(pts);
 }
 
@@ -614,6 +825,7 @@ int test_98_region_sample_main(void)
 	test_discs();
 	test_bean();
 	test_xor();
+	test_density();
 	test_sweep();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;

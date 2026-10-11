@@ -6,10 +6,12 @@ there is no mesh.
 
 ```c
 qaws_region_sampler_desc d = { paths, path_count, QAWS_FILL_NON_ZERO, 0 };
+d.density = rho; d.density_user = user;                 /* optional: importance sampling */
 qaws_region_sampler* s;
 qaws_region_sampler_create(&d, &s);
 
 qaws_region_sampler_get_area(s);
+qaws_region_sampler_get_mass(s);                        /* the density's integral (the area without one) */
 qaws_region_sampler_area_left(s, x, &a);            /* A(x): the area left of x */
 qaws_region_sampler_contains(s, p, &inside);         /* the slabs' winding below p */
 qaws_region_sampler_map(s, u, v, &p);               /* the unit square onto the region */
@@ -89,6 +91,34 @@ qaws_region_sampler_destroy(s);
 - **Determinism.** The same seed gives the same points.
 - **Thread safety.** `map` is thread-safe on one sampler.
 
+## Density (importance sampling)
+
+Set `desc.density` (and `density_user`), and points come in proportion to
+rho(x, y) instead of uniformly. The density must be finite and >= 0, and
+smooth for the map's accuracy. `get_mass` and `mass_left` return its
+integral over the region and over the part left of x.
+
+- **Through the map.** The map keeps mass.
+  - `u` picks x by the mass left of it, M(x) = ∫ g, where g(x) is the
+    density integrated along the chords at x.
+  - `v` picks y by the mass along those chords.
+  - M is tabulated at creation: 256 panels over the region's width, 8-point
+    Gauss in each, and composite 8-point Gauss along the chords. The panels
+    are uniform in s, with x = x_k + w (3s² − 2s³) in each slab: where the
+    boundary turns vertical, chords grow like sqrt(x − x_k), and the
+    smoothstep makes the integrand smooth again.
+  - x and y then come from safeguarded Newton (the derivatives are g and
+    rho).
+  - Every unit-square pattern follows the density, with its structure.
+- **Over the box.** A candidate is kept when it is inside and a hash of its
+  index falls under rho / rho_max. rho_max is the largest value met while
+  tabulating, and on a 64 x 64 grid over the box, plus 25 %; it is an
+  estimate, so a density with a sharp, narrow peak can exceed it.
+- **Blue noise.** 5n candidates are drawn through the density's map. Each
+  is eliminated against neighbours within its own radius, rmax ·
+  sqrt(mean / rho), kept within a factor of 4 of rmax, so the spacing
+  follows the density.
+
 ## Precision and cost
 
 - **Tolerance.** The area tolerance defaults to 1e-13 of the box's area,
@@ -133,6 +163,15 @@ digits):
     areas. The total variation stays under 0.6 % for the low-discrepancy
     and stratified patterns, about 2 % for random, and about 2 % for blue
     noise with a quarter of the points. No point falls outside.
+  - **Density:** with rho = 2 + x² + y, the mass matches Green's theorem on
+    the united region to 12 digits. Cell masses from Sobol (through the
+    map) stay under 0.7 %, from blue noise about 2 %, and from stratified
+    over the box about 2.5 %, because rejection by a density costs the
+    stratification.
   - **Full size:** `QAWS_RST_FULL` runs the sweep five times larger.
+- **Density against Mathematica:** for rho = 1 + x² + y over the three
+  regions, the mass, the mass left of x at eight abscissas, the map keeping
+  mass, and every pattern's weighted centroid (this needs the third-order
+  moments, which the reference script also gives).
 
 It runs in f64 and f32.

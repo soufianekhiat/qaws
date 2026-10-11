@@ -26,6 +26,17 @@ moments[pieces_] := Table[Total[Table[With[{x = p[[1]], y = p[[2]]},
     NIntegrate[x^(ab[[1]] + 1) y^ab[[2]]/(ab[[1]] + 1) D[y, t], {t, p[[3]], p[[4]]}, WorkingPrecision -> 50, PrecisionGoal -> 35]], {p, pieces}]], {ab, mom}];
 
 (* the parameters in (t0, t1) where x(t) = x0, then the integral over the parts left of x0 *)
+(* the density rho = 1 + x^2 + y: its mass left of x0 by Green with
+   P(x, y) = x + x^3/3 + x y (P_x = rho), the integral of (P(x, y) - P(x0, y)) dy *)
+pP[x_, y_] := x + x^3/3 + x y;
+massLeftOf[pieces_, x0_] := Total[Table[With[{x = p[[1]], y = p[[2]], t0 = p[[3]], t1 = p[[4]]},
+    Module[{cuts, ivs, sol},
+      sol = NSolve[{x == x0, t0 < t < t1}, t, Reals, WorkingPrecision -> 60];
+      cuts = If[sol === {}, {}, Sort[t /. sol]];
+      ivs = Partition[Join[{t0}, cuts, {t1}], 2, 1];
+      Total[If[(x /. t -> (#[[1]] + #[[2]])/2) < x0,
+          NIntegrate[(pP[x, y] - pP[x0, y]) D[y, t], {t, #[[1]], #[[2]]}, WorkingPrecision -> 50, PrecisionGoal -> 35], 0] & /@ ivs]]],
+    {p, pieces}]];
 leftOf[pieces_, x0_] := Total[Table[With[{x = p[[1]], y = p[[2]], t0 = p[[3]], t1 = p[[4]]},
     Module[{cuts, ivs, sol},
       sol = NSolve[{x == x0, t0 < t < t1}, t, Reals, WorkingPrecision -> 60];
@@ -80,3 +91,15 @@ row["ref_holed_moments", mh];
 row["ref_holed_left", axh];
 row["ref_bean_moments", mb];
 row["ref_bean_left", axb];
+
+(* the density rho = 1 + x^2 + y: the third moments for its weighted centroid
+   (mass = M00 + M20 + M01, x moment = M10 + M30 + M11, y moment = M01 + M21 + M02),
+   and the mass left of x *)
+mom = {{3, 0}, {2, 1}, {1, 2}, {0, 3}};
+Print["/* third moments M30, M21, M12, M03; the density 1 + x^2 + y: mass left of x: x, M(x) pairs */"];
+row["ref_crescent_moments3", moments[crescent]];
+row["ref_holed_moments3", moments[holed]];
+row["ref_bean_moments3", moments[bean]];
+row["ref_crescent_mass_left", Table[{x0, massLeftOf[crescent, x0]}, {x0, xsDisc}]];
+row["ref_holed_mass_left", Table[{x0, massLeftOf[holed, x0]}, {x0, xsDisc}]];
+row["ref_bean_mass_left", Table[{x0, massLeftOf[bean, x0]}, {x0, xsBean}]];

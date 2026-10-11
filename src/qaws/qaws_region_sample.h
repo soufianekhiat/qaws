@@ -36,6 +36,11 @@ typedef struct qaws_region_sampler_desc
 	unsigned int path_count;
 	qaws_fill_rule fill_rule;       /* the region: the paths under this rule */
 	qaws_scalar tolerance;          /* absolute area tolerance; 0 = 1e-13 of the box's area (1e-6 in float) */
+	/* optional density: points come in proportion to it (importance
+	   sampling). Finite, >= 0, smooth for the map's accuracy; NULL =
+	   uniform. Called from any thread the sampler is used on. */
+	qaws_scalar (*density)(void* user, qaws_scalar x, qaws_scalar y);
+	void* density_user;
 } qaws_region_sampler_desc;
 
 /* Sampling patterns. The first five are point sets of the unit square sent
@@ -65,8 +70,14 @@ void qaws_region_sampler_destroy(qaws_region_sampler* sampler);
 qaws_scalar qaws_region_sampler_get_area(qaws_region_sampler const* sampler);
 qaws_status qaws_region_sampler_area_left(qaws_region_sampler const* sampler, qaws_scalar x, qaws_scalar* out_area);
 
-/* The area-keeping map of the unit square onto the region; u, v in [0, 1].
-   Thread-safe. */
+/* With a density: its integral over the region (the mass), and over the
+   part left of x. Without one they are the areas. */
+qaws_scalar qaws_region_sampler_get_mass(qaws_region_sampler const* sampler);
+qaws_status qaws_region_sampler_mass_left(qaws_region_sampler const* sampler, qaws_scalar x, qaws_scalar* out_mass);
+
+/* The area-keeping map of the unit square onto the region (mass-keeping
+   with a density: u picks x by the mass left of it, v picks y by the mass
+   along the chords at x); u, v in [0, 1]. Thread-safe. */
 qaws_status qaws_region_sampler_map(qaws_region_sampler const* sampler, qaws_scalar u, qaws_scalar v, qaws_vec2* out_point);
 qaws_status qaws_region_sampler_map_many(qaws_region_sampler const* sampler, qaws_vec2 const* uv, unsigned int count,
 	qaws_vec2* out_points);
