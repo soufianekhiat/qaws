@@ -456,9 +456,13 @@ static unsigned int rst_shapes(rst_shape* sh)
 static void test_sweep(void)
 {
 	enum { G = 6 };
-	static unsigned int const kinds[6] = { QAWS_REGION_SAMPLE_RANDOM, QAWS_REGION_SAMPLE_SOBOL, QAWS_REGION_SAMPLE_STRATIFIED,
-		QAWS_REGION_SAMPLE_HALTON, QAWS_REGION_SAMPLE_R2, QAWS_REGION_SAMPLE_BLUE_NOISE };
-	static char const* const knames[6] = { "random", "Sobol", "stratified", "Halton", "R2", "blue" };
+	enum { K = 11 };
+	/* the unit-square patterns through the map, then over the box, then blue noise */
+	static unsigned int const kinds[K] = { QAWS_REGION_SAMPLE_RANDOM, QAWS_REGION_SAMPLE_SOBOL, QAWS_REGION_SAMPLE_STRATIFIED,
+		QAWS_REGION_SAMPLE_HALTON, QAWS_REGION_SAMPLE_R2,
+		QAWS_REGION_SAMPLE_RANDOM | QAWS_REGION_SAMPLE_BOX, QAWS_REGION_SAMPLE_SOBOL | QAWS_REGION_SAMPLE_BOX,
+		QAWS_REGION_SAMPLE_STRATIFIED | QAWS_REGION_SAMPLE_BOX, QAWS_REGION_SAMPLE_HALTON | QAWS_REGION_SAMPLE_BOX,
+		QAWS_REGION_SAMPLE_R2 | QAWS_REGION_SAMPLE_BOX, QAWS_REGION_SAMPLE_BLUE_NOISE };
 	rst_shape sh[9];
 	unsigned int ns = rst_shapes(sh), si, k, i;
 	/* the full sweep under QAWS_RST_FULL; the suite runs a fifth of it */
@@ -467,7 +471,7 @@ static void test_sweep(void)
 	qaws_vec2* pts = (qaws_vec2*)malloc(sizeof(qaws_vec2) * m);
 	char msg[400];
 	printf("    shape                 area (sampler)    area (clip region)  closed form       Monte Carlo (+- 4 sigma)    total variation of the cell areas from the samples:\n");
-	printf("                                                                                                             random  Sobol   strat.  Halton  R2      blue\n");
+	printf("                                                                                                             map: random Sobol  strat. Halton R2     box: random Sobol  strat. Halton R2     blue\n");
 	for (si = 0; si < ns; si++)
 	{
 		rst_shape* s = &sh[si];
@@ -475,8 +479,9 @@ static void test_sweep(void)
 		qaws_region_sampler* smp = NULL;
 		qaws_clip_result* region = NULL;
 		qaws_vec2 lo, hi;
-		double area, carea = 0, cells[G * G], mc, sigma, tv[6], box;
-		unsigned int inside = 0, outside[6];
+		double area, carea = 0, cells[G * G], mc, sigma, tv[K], box;
+		unsigned int inside = 0, outside[K], disagree = 0, out_total = 0;
+		int ok_tv = 1;
 		unsigned long long st = 99;
 		memset(&d, 0, sizeof(d));
 		d.paths = s->paths; d.path_count = s->npaths; d.fill_rule = s->rule;
@@ -538,11 +543,18 @@ static void test_sweep(void)
 			q.y = (qaws_scalar)(lo.y + (hi.y - lo.y) * rs_test_unit(&st));
 			qaws_region_locate_point_2d(s->paths, s->npaths, s->rule, q, 0, &loc);
 			if (loc != QAWS_POINT_OUTSIDE) inside++;
+			/* the sampler's own inside test agrees, but within rounding of the boundary */
+			if (loc != QAWS_POINT_ON)
+			{
+				int in = 0;
+				qaws_region_sampler_contains(smp, q, &in);
+				if (in != (loc == QAWS_POINT_INSIDE)) disagree++;
+			}
 		}
 		mc = box * inside / nmc;
 		sigma = box * sqrt((double)inside / nmc * (1 - (double)inside / nmc) / nmc);
 		/* every pattern: the cell areas from its samples */
-		for (k = 0; k < 6; k++)
+		for (k = 0; k < K; k++)
 		{
 			unsigned int n = kinds[k] == QAWS_REGION_SAMPLE_BLUE_NOISE ? nblue : m, c;
 			unsigned int counts[G * G];
@@ -566,16 +578,25 @@ static void test_sweep(void)
 				tv[k] += fabs(area * counts[c] / n - cells[c]);
 			tv[k] *= 0.5 / area;
 		}
-		printf("    %-20s  %.12f  %.12f    %-16s  %.5f +- %.5f        %.4f  %.4f  %.4f  %.4f  %.4f  %.4f\n", s->name, area, carea,
-			s->closed_form > 0 ? "" : "-", mc, 4 * sigma, tv[0], tv[1], tv[2], tv[3], tv[4], tv[5]);
+		printf("    %-20s  %.12f  %.12f    %-16s  %.5f +- %.5f       ", s->name, area, carea, s->closed_form > 0 ? "" : "-", mc, 4 * sigma);
+		for (k = 0; k < K; k++) printf(" %.4f", tv[k]);
+		printf("\n");
 		if (s->closed_form > 0) printf("    %-20s  %38s%.12f\n", "", "", s->closed_form);
-		sprintf(msg, "%s: area %.12f, the united region's %.12f, closed form %.12f, Monte Carlo %.5f +- %.5f (4 sigma)", s->name, area, carea, s->closed_form, mc, 4 * sigma);
+		sprintf(msg, "%s: area %.12f, the united region's %.12f, closed form %.12f, Monte Carlo %.5f +- %.5f (4 sigma), the sampler's inside test against winding numbers: %u disagree",
+			s->name, area, carea, s->closed_form, mc, 4 * sigma, disagree);
 		TEST_ASSERT(fabs(area - carea) <= (RST_F32 ? 1e-4 : 1e-9) * area && (s->closed_form == 0 || fabs(area - s->closed_form) <= (RST_F32 ? 2e-4 : 1e-9) * area)
-			&& fabs(area - mc) <= 4 * sigma, msg);
-		sprintf(msg, "%s: points outside %u %u %u %u %u %u; total variation of the cell areas from the samples %.4f %.4f %.4f %.4f %.4f %.4f (random, Sobol, stratified, Halton, R2, blue noise)",
-			s->name, outside[0], outside[1], outside[2], outside[3], outside[4], outside[5], tv[0], tv[1], tv[2], tv[3], tv[4], tv[5]);
-		TEST_ASSERT(outside[0] + outside[1] + outside[2] + outside[3] + outside[4] + outside[5] == 0
-			&& tv[0] < (full ? 0.03 : 0.045) && tv[1] < (full ? 0.005 : 0.008) && tv[2] < (full ? 0.005 : 0.008) && tv[3] < (full ? 0.005 : 0.008) && tv[4] < (full ? 0.005 : 0.008) && tv[5] < (full ? 0.03 : 0.045), msg);
+			&& fabs(area - mc) <= 4 * sigma && disagree == 0, msg);
+		/* random (map and box) and blue noise to their noise, the others closer */
+		for (k = 0; k < K; k++)
+		{
+			unsigned int base = kinds[k] & ~QAWS_REGION_SAMPLE_BOX;
+			double lim = (base == QAWS_REGION_SAMPLE_RANDOM || base == QAWS_REGION_SAMPLE_BLUE_NOISE) ? (full ? 0.03 : 0.045) : (full ? 0.005 : 0.008);
+			if (tv[k] >= lim) ok_tv = 0;
+			out_total += outside[k];
+		}
+		sprintf(msg, "%s: %u points outside; total variation of the cell areas from the samples: map %.4f %.4f %.4f %.4f %.4f, box %.4f %.4f %.4f %.4f %.4f, blue noise %.4f (random, Sobol, stratified, Halton, R2)",
+			s->name, out_total, tv[0], tv[1], tv[2], tv[3], tv[4], tv[5], tv[6], tv[7], tv[8], tv[9], tv[10]);
+		TEST_ASSERT(out_total == 0 && ok_tv, msg);
 		qaws_clip_result_destroy(region);
 		qaws_region_sampler_destroy(smp);
 	}

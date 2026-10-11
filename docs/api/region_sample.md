@@ -11,9 +11,12 @@ qaws_region_sampler_create(&d, &s);
 
 qaws_region_sampler_get_area(s);
 qaws_region_sampler_area_left(s, x, &a);            /* A(x): the area left of x */
+qaws_region_sampler_contains(s, p, &inside);         /* the slabs' winding below p */
 qaws_region_sampler_map(s, u, v, &p);               /* the unit square onto the region */
 qaws_region_sampler_map_many(s, uv, n, points);
-qaws_region_sampler_generate(s, n, QAWS_REGION_SAMPLE_BLUE_NOISE, seed, points);  /* or RANDOM, SOBOL, STRATIFIED, HALTON, R2 */
+qaws_region_sampler_generate(s, n, QAWS_REGION_SAMPLE_BLUE_NOISE, seed, points);
+qaws_region_sampler_generate(s, n, QAWS_REGION_SAMPLE_SOBOL | QAWS_REGION_SAMPLE_BOX, seed, points);
+/* kinds: RANDOM, SOBOL, STRATIFIED, HALTON, R2 (through the map, or | BOX), BLUE_NOISE */
 qaws_region_sampler_destroy(s);
 ```
 
@@ -53,18 +56,33 @@ qaws_region_sampler_destroy(s);
 | `kind` | Points |
 |---|---|
 | `QAWS_REGION_SAMPLE_RANDOM` | independent uniform (u, v) from splitmix64, seeded |
-| `QAWS_REGION_SAMPLE_SOBOL` | the 2D Sobol sequence (van der Corput, then the direction numbers of x + 1), digitally shifted by the seed (seed 0: unshifted) |
+| `QAWS_REGION_SAMPLE_SOBOL` | the 2D Sobol sequence (van der Corput, then the direction numbers of x + 1), Owen-scrambled by the seed (hashed nested uniform scrambling, Burley 2020; seed 0: plain) |
 | `QAWS_REGION_SAMPLE_STRATIFIED` | correlated multi-jittered sampling (Kensler 2013): one point per row and column of a near-square m x n grid, any count |
 | `QAWS_REGION_SAMPLE_HALTON` | Halton in bases 2 and 3, shifted by the seed (Cranley-Patterson) |
 | `QAWS_REGION_SAMPLE_R2` | the R2 Kronecker sequence (the plastic number), shifted by the seed |
 | `QAWS_REGION_SAMPLE_BLUE_NOISE` | weighted sample elimination (Yuksel 2015) from 5 n uniform points: evenly spaced in the region |
 
-- **Unit-square patterns.** The first five are point sets of the unit
-  square sent through the map. They are uniform in distribution, so their
-  moments converge as each pattern should. But the map follows x, then the
-  chords at x, so it is anisotropic: short chords compress y, and slowly
-  growing area stretches x. A grid's rows are visibly sheared in thin parts
-  of a region.
+- **Unit-square patterns through the map.** By default, the first five are
+  point sets of the unit square sent through the map. They are uniform in
+  distribution, so their moments converge as each pattern should, and the
+  count is exact by construction. But the map follows x, then the chords at
+  x, so it is anisotropic: short chords compress y, and slowly growing area
+  stretches x. A grid's rows are visibly sheared in thin parts of a region.
+- **Over the box: `| QAWS_REGION_SAMPLE_BOX`.** OR-ed into a unit-square
+  pattern, the pattern is laid over the region's bounding box and the
+  points outside are dropped.
+  - Restricting a uniform or low-discrepancy set to a subregion keeps it
+    uniform and keeps its spacing, the same in every direction, so there
+    is no shear.
+  - A sequence (random, Sobol, Halton, R2) runs until n points fall inside.
+  - For the stratified grid, every stratum inside is kept. Dropping strata
+    leaves holes, and eliminating the crowded ones favours the boundary,
+    since points there have fewer neighbours. Instead the grid's size is
+    searched until the strata inside number n (or a few more, dropped at
+    random).
+  - The cost is box / area candidates per point kept.
+  - The inside test is `qaws_region_sampler_contains`: the winding of the
+    pieces below the point in its slab, with no curve winding numbers.
 - **Blue noise.** This works on the points themselves, so they come out
   evenly spaced: the closest pair is above half the hexagonal packing radius
   of n points over the area.
@@ -107,6 +125,9 @@ digits):
   - **Area from samples:** points uniform in the box, located by winding
     numbers on the input paths (`qaws_region_locate_point_2d`), give the
     area within 4 sigma.
+  - **Patterns:** the five unit-square patterns run through the map and over
+    the box, plus blue noise. The sampler's inside test agrees with the
+    winding numbers on every Monte Carlo point.
   - **Cells:** over a 6 x 6 grid, each cell's area is exact by clipping
     the region with the cell. Each pattern's samples estimate the same cell
     areas. The total variation stays under 0.6 % for the low-discrepancy

@@ -51,6 +51,7 @@ struct qaws_region_sampler
 	unsigned int* first;        /* slab s: active pieces active[first[s] .. first[s + 1]) */
 	unsigned int* active;
 	double area, tol, ext;
+	double ylo, yhi;            /* the region's y extent */
 };
 
 static qaws_status rs_eval(qaws_curve const* c, double t, double* p, double* d)
@@ -258,14 +259,19 @@ qaws_status qaws_region_sampler_create(qaws_region_sampler_desc const* desc, qaw
 			s->ext = hi - lo;
 			{
 				qaws_vec2 blo, bhi;
-				double h = 1;
+				double h;
+				s->ylo = 1e300; s->yhi = -1e300;
 				for (i = 0; i < np; i++)
 				{
 					qaws_path_2d p;
 					qaws_clip_result_get_path(s->region, i, &p);
-					if (qaws_path_compute_bounds_2d(&p, &blo, &bhi) == QAWS_STATUS_OK && (double)(bhi.y - blo.y) > h)
-						h = (double)(bhi.y - blo.y);
+					if (qaws_path_compute_bounds_2d(&p, &blo, &bhi) == QAWS_STATUS_OK)
+					{
+						if ((double)blo.y < s->ylo) s->ylo = (double)blo.y;
+						if ((double)bhi.y > s->yhi) s->yhi = (double)bhi.y;
+					}
 				}
+				h = s->yhi > s->ylo ? s->yhi - s->ylo : 1;
 				s->tol = desc->tolerance > 0 ? (double)desc->tolerance : RS_AREA_REL * (s->ext > 0 ? s->ext : 1) * h;
 			}
 			eps = RS_MERGE_REL * (s->ext > 0 ? s->ext : 1);
@@ -525,6 +531,29 @@ static double rs_hashfloat(unsigned int i, unsigned int p)
 	return i * (1.0 / 4294967808.0);
 }
 
+static unsigned int rs_reverse_bits(unsigned int x)
+{
+	x = ((x >> 1) & 0x55555555u) | ((x & 0x55555555u) << 1);
+	x = ((x >> 2) & 0x33333333u) | ((x & 0x33333333u) << 2);
+	x = ((x >> 4) & 0x0f0f0f0fu) | ((x & 0x0f0f0f0fu) << 4);
+	x = ((x >> 8) & 0x00ff00ffu) | ((x & 0x00ff00ffu) << 8);
+	return (x >> 16) | (x << 16);
+}
+
+/* Owen scrambling by hashing (Burley, Practical Hash-based Owen Scrambling,
+   2020, after Laine and Karras): every digit flipped by a hash of the digits
+   above it, so the Sobol strata are kept and the lattice is gone */
+static unsigned int rs_owen(unsigned int x, unsigned int seed)
+{
+	x = rs_reverse_bits(x);
+	x += seed;
+	x ^= x * 0x6c50b47cu;
+	x ^= x * 0xb82f1e52u;
+	x ^= x * 0xc7afe638u;
+	x ^= x * 0x8d22f6e6u;
+	return rs_reverse_bits(x);
+}
+
 static double rs_radical(unsigned int i, unsigned int base)
 {
 	double f = 1.0 / base, r = 0;
@@ -590,7 +619,7 @@ static void rs_pattern_point(rs_pattern* q, unsigned int i, double* u, double* v
 		unsigned int x0 = 0, x1 = 0, k = i, b;
 		for (b = 0; k; b++, k >>= 1)
 			if (k & 1u) { x0 ^= 0x80000000u >> b; x1 ^= q->dir[b]; }
-		x0 ^= q->shift0; x1 ^= q->shift1;
+		if (q->shift0 || q->shift1) { x0 = rs_owen(x0, q->shift0); x1 = rs_owen(x1, q->shift1); }
 		*u = (x0 + 0.5) / 4294967296.0;
 		*v = (x1 + 0.5) / 4294967296.0;
 		break;
@@ -721,26 +750,14 @@ static void rs_elim_neighbours(rs_elim* e, unsigned int i, int sub)
 		}
 }
 
-static qaws_status rs_blue_noise(qaws_region_sampler const* s, unsigned int count, unsigned long long seed, qaws_vec2* out)
+/* count of the ncand candidates kept, the most crowded taken out first */
+static qaws_status rs_eliminate(qaws_region_sampler const* s, qaws_vec2 const* cand, unsigned int ncand, unsigned int count, qaws_vec2* out)
 {
-	unsigned int ncand = 5 * count, i, k;
-	qaws_vec2* cand = (qaws_vec2*)malloc(sizeof(qaws_vec2) * (ncand + 1));
+	unsigned int i, k;
 	rs_elim e;
-	rs_pattern q;
 	double hi[2];
 	qaws_status st = QAWS_STATUS_OK;
 	memset(&e, 0, sizeof(e));
-	if (!cand)
-		return QAWS_STATUS_ALLOCATION_FAILURE;
-	/* 5 n candidates, uniform over the region */
-	rs_pattern_init(&q, QAWS_REGION_SAMPLE_RANDOM, ncand, seed);
-	for (i = 0; i < ncand && st == QAWS_STATUS_OK; i++)
-	{
-		double u, v;
-		rs_pattern_point(&q, i, &u, &v);
-		st = qaws_region_sampler_map(s, (qaws_scalar)u, (qaws_scalar)v, &cand[i]);
-	}
-	if (st != QAWS_STATUS_OK) { free(cand); return st; }
 	/* the radius of n points packed hexagonally over the area; the weights'
 	   lower bound with beta = 0.65, gamma = 1.5 (the paper's values) */
 	e.pts = cand;
@@ -803,22 +820,169 @@ static qaws_status rs_blue_noise(qaws_region_sampler const* s, unsigned int coun
 				out[k++] = cand[i];
 	}
 	free(e.cell_first); free(e.cell_items); free(e.w); free(e.heap); free(e.pos);
+	return st;
+}
+
+/* blue noise: 5 n candidates uniform over the region, eliminated to n */
+static qaws_status rs_blue_noise(qaws_region_sampler const* s, unsigned int count, unsigned long long seed, qaws_vec2* out)
+{
+	unsigned int ncand = 5 * count, i;
+	qaws_vec2* cand = (qaws_vec2*)malloc(sizeof(qaws_vec2) * (ncand + 1));
+	rs_pattern q;
+	qaws_status st = QAWS_STATUS_OK;
+	if (!cand)
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	rs_pattern_init(&q, QAWS_REGION_SAMPLE_RANDOM, ncand, seed);
+	for (i = 0; i < ncand && st == QAWS_STATUS_OK; i++)
+	{
+		double u, v;
+		rs_pattern_point(&q, i, &u, &v);
+		st = qaws_region_sampler_map(s, (qaws_scalar)u, (qaws_scalar)v, &cand[i]);
+	}
+	if (st == QAWS_STATUS_OK)
+		st = rs_eliminate(s, cand, ncand, count, out);
 	free(cand);
 	return st;
+}
+
+/* inside: the winding below (x, y) of the pieces crossing the slab of x */
+static int rs_inside(qaws_region_sampler const* s, double x, double y)
+{
+	unsigned int k, j;
+	int w = 0;
+	if (!(x > s->xs[0] && x < s->xs[s->nxs - 1]) || !(y > s->ylo && y < s->yhi))
+		return 0;
+	k = rs_slab(s, x);
+	for (j = s->first[k]; j < s->first[k + 1]; j++)
+	{
+		rs_piece const* pc = &s->pieces[s->active[j]];
+		double p[2];
+		rs_eval(pc->c, rs_param(pc, x), p, NULL);
+		if (p[1] < y)
+			w += pc->sigma;
+	}
+	return w > 0;
+}
+
+qaws_status qaws_region_sampler_contains(qaws_region_sampler const* s, qaws_vec2 point, int* out_inside)
+{
+	if (!s || !out_inside)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	*out_inside = rs_inside(s, (double)point.x, (double)point.y);
+	return QAWS_STATUS_OK;
+}
+
+/* the pattern over the region's box, the points outside dropped: the
+   pattern's own spacing, the same in every direction. A sequence runs
+   until count points fall inside; the multi-jitter grid is sized by the
+   box's share of the area, and grown when it falls short. */
+static qaws_status rs_box(qaws_region_sampler const* s, unsigned int count, unsigned int kind, unsigned long long seed, qaws_vec2* out)
+{
+	double x0 = s->xs[0], w = s->xs[s->nxs - 1] - s->xs[0], y0 = s->ylo, h = s->yhi - s->ylo;
+	double ratio = w * h / s->area;
+	unsigned int got = 0, i;
+	rs_pattern q;
+	if (!(ratio >= 1) || ratio > 1e6)
+		return QAWS_STATUS_DEGENERATE_CURVE;
+	if (kind == QAWS_REGION_SAMPLE_STRATIFIED)
+	{
+		/* every stratum inside kept: dropping strata leaves holes, and
+		   eliminating the crowded ones favours the boundary. The grid's size
+		   is searched until the strata inside number count, or a few more;
+		   those few go at random. */
+		unsigned int total = (unsigned int)ceil(count * ratio), best_total = 0, best_got = 0, tries;
+		qaws_vec2* in = NULL;
+		for (tries = 0; tries < 24; tries++)
+		{
+			long step;
+			got = 0;
+			rs_pattern_init(&q, kind, total, seed);
+			for (i = 0; i < total; i++)
+			{
+				double u, v;
+				rs_pattern_point(&q, i, &u, &v);
+				got += rs_inside(s, x0 + w * u, y0 + h * v);
+			}
+			if (got >= count && (best_got == 0 || got < best_got))
+			{
+				best_got = got;
+				best_total = total;
+			}
+			if (got == count)
+				break;
+			step = (long)floor(((double)count - got) * ratio + 0.5);
+			if (step == 0) step = got < count ? 1 : -1;
+			if ((long)total + step < (long)count) step = (long)count - (long)total;
+			total = (unsigned int)((long)total + step);
+		}
+		while (best_got == 0)
+		{
+			/* never enough: grow until there are */
+			total += total / 8 + 1;
+			got = 0;
+			rs_pattern_init(&q, kind, total, seed);
+			for (i = 0; i < total; i++)
+			{
+				double u, v;
+				rs_pattern_point(&q, i, &u, &v);
+				got += rs_inside(s, x0 + w * u, y0 + h * v);
+			}
+			if (got >= count) { best_got = got; best_total = total; }
+		}
+		in = (qaws_vec2*)malloc(sizeof(qaws_vec2) * (best_got + 1));
+		if (!in)
+			return QAWS_STATUS_ALLOCATION_FAILURE;
+		rs_pattern_init(&q, kind, best_total, seed);
+		got = 0;
+		for (i = 0; i < best_total; i++)
+		{
+			double u, v;
+			rs_pattern_point(&q, i, &u, &v);
+			if (rs_inside(s, x0 + w * u, y0 + h * v))
+			{
+				in[got].x = (qaws_scalar)(x0 + w * u);
+				in[got].y = (qaws_scalar)(y0 + h * v);
+				got++;
+			}
+		}
+		/* the surplus at random: a hashed permutation's first count */
+		for (i = 0; i < count; i++)
+			out[i] = in[got == count ? i : rs_permute(i, got, q.p * 0x2545f491u)];
+		free(in);
+		return QAWS_STATUS_OK;
+	}
+	rs_pattern_init(&q, kind, count, seed);
+	for (i = 0; got < count; i++)
+	{
+		double u, v;
+		if (i > 4000000000u)
+			return QAWS_STATUS_DEGENERATE_CURVE;
+		rs_pattern_point(&q, i, &u, &v);
+		if (rs_inside(s, x0 + w * u, y0 + h * v))
+		{
+			out[got].x = (qaws_scalar)(x0 + w * u);
+			out[got].y = (qaws_scalar)(y0 + h * v);
+			got++;
+		}
+	}
+	return QAWS_STATUS_OK;
 }
 
 qaws_status qaws_region_sampler_generate(qaws_region_sampler const* s, unsigned int count, unsigned int kind,
 	unsigned long long seed, qaws_vec2* out)
 {
 	rs_pattern q;
-	unsigned int i;
+	unsigned int i, base = kind & ~QAWS_REGION_SAMPLE_BOX;
 	qaws_status r = QAWS_STATUS_OK;
-	if (!s || (count && !out) || kind > QAWS_REGION_SAMPLE_BLUE_NOISE)
+	if (!s || (count && !out) || base > QAWS_REGION_SAMPLE_BLUE_NOISE)
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	if (count == 0)
 		return QAWS_STATUS_OK;
-	if (kind == QAWS_REGION_SAMPLE_BLUE_NOISE)
+	if (base == QAWS_REGION_SAMPLE_BLUE_NOISE)
 		return rs_blue_noise(s, count, seed, out);
+	if (kind & QAWS_REGION_SAMPLE_BOX)
+		return rs_box(s, count, base, seed, out);
+	kind = base;
 	rs_pattern_init(&q, kind, count, seed);
 	for (i = 0; i < count && r == QAWS_STATUS_OK; i++)
 	{

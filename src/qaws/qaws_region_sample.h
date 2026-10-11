@@ -43,11 +43,19 @@ typedef struct qaws_region_sampler_desc
    sheared by the map (the map follows x, then the chords at x). Blue noise
    works on the points themselves: evenly spaced in the region. */
 #define QAWS_REGION_SAMPLE_RANDOM     0u   /* independent uniform (u, v), seeded */
-#define QAWS_REGION_SAMPLE_SOBOL      1u   /* the 2D Sobol sequence, digitally shifted by the seed */
+#define QAWS_REGION_SAMPLE_SOBOL      1u   /* the 2D Sobol sequence, Owen-scrambled by the seed (hashed, Burley 2020; seed 0: plain) */
 #define QAWS_REGION_SAMPLE_STRATIFIED 2u   /* correlated multi-jittered (Kensler 2013): one point per row and column of an m x n grid, jittered */
 #define QAWS_REGION_SAMPLE_HALTON     3u   /* the Halton sequence in bases 2 and 3, shifted by the seed (Cranley-Patterson) */
 #define QAWS_REGION_SAMPLE_R2         4u   /* the R2 Kronecker sequence (plastic number), shifted by the seed */
 #define QAWS_REGION_SAMPLE_BLUE_NOISE 5u   /* sample elimination (Yuksel 2015) from 5 n uniform points: Poisson-disk-like spacing */
+/* OR-ed into a unit-square pattern: the pattern laid over the region's
+   bounding box, the points outside dropped. Uniform, and the pattern's own
+   spacing, the same in every direction (no shear); it draws box / area
+   points per point kept. */
+#define QAWS_REGION_SAMPLE_BOX        0x100u
+
+/* 1 when the point is in the region (the winding of the boundary below it). */
+qaws_status qaws_region_sampler_contains(qaws_region_sampler const* sampler, qaws_vec2 point, int* out_inside);
 
 qaws_status qaws_region_sampler_create(qaws_region_sampler_desc const* desc, qaws_region_sampler** out_sampler);
 void qaws_region_sampler_destroy(qaws_region_sampler* sampler);
