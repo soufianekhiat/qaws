@@ -92,15 +92,23 @@ qaws_skeleton_destroy(s);
    concentric circles of one radius) leave a corner that runs along them
    to the nearer end. A corridor of constant width closing all at once
    therefore collapses along its middle.
-7. **Near tangencies.** Three measures handle them:
+7. **Near tangencies.** These measures handle them:
    - A corner with a circle among its supports counts as at an event's
      point when both its supports pass through the point. Its position
      there moves like a square root of the time, so position alone is
-     ill-conditioned.
+     ill-conditioned. Both crossings of its supports pass through the
+     point, though, so it counts only when its own crossing is the nearer
+     one, unless the supports touch then or are about to. Just after a
+     touching the two crossings part, and each is where it is.
    - Events among circles within the tolerances of one another are one
      event, because their times are near-double roots and good to only
      half the digits.
    - A corner born at its supports' tangency is classified just after it.
+   - A loop an event leaves enclosing nothing, which turns inside out at
+     once, is a sliver between two supports just past their touching. It
+     closes there, and its two faces meet along it.
+   - A circle opened at a splice is checked against every corner that can
+     split an edge, not only its neighbours.
 8. **Faces.** Each support's arcs are walked from its edge's end back to its
    start, turning so the face stays on the left. A face is entered along
    a smooth path (a slit) and left back along it.
@@ -135,12 +143,17 @@ The arcs with neither flag are the pure skeleton, clear of the boundary.
 - **Robustness.**
   - Polygons are robust: 1,000 random unions of grid rectangles, whose
     events are almost all degenerate, all tile their regions.
-  - Curved regions pass every structured case in the tests. On random
+  - Curved regions pass every structured case in the tests. Random
     star-shaped regions whose edges are random bulging arcs, with or
-    without a round hole, about three in four complete with exact arcs.
-  - The rest stop with QAWS_STATUS_NUMERICAL_FAILURE (a loop that never
-    closed), or in a few cases come out with an arc off its supports by up
-    to 1e-2. Most of these are at sigma = 2 pi. This is being worked on.
+    without a round hole, were run 400 times at each sigma:
+    - 780 of the 800 runs complete;
+    - each completed run tiles its region;
+    - its arcs lie on their supports to within 3e-6 of the size: nodes at
+      events near tangencies are good to half the digits;
+    - the other 20 stop with QAWS_STATUS_NUMERICAL_FAILURE (a loop that
+      never closed), most at sigma = 2 pi.
+  - In float builds the vertices are rounded off the curves' meetings,
+    and about four in ten such random regions fail.
 
 ## Tests
 
@@ -182,6 +195,14 @@ Curved shapes:
 - a square with a round bump, mitered (it pinches off as a bubble) and at
   sigma = pi;
 - the medial axes of an L, a comb and a star.
+
+**Random curved regions** (double builds), at both sigma: 40 star-shaped
+regions of 5 to 18 sides, each a line or an arc bulging either way, two
+in five with a round hole.
+- At most one of the 80 runs may fail to build.
+- Every run that builds tiles its region, and its arcs lie on their
+  supports to 1e-5 of the size.
+- At sigma = pi, the wavefront equals the round offset.
 
 **Free-form**, at both sigma: an ellipse (NURBS), an ellipse with a round
 hole, and a blob of four cubics.

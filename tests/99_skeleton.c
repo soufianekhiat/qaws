@@ -863,6 +863,174 @@ static void test_freeform(void)
 	}
 }
 
+/* ------------------------------------------------------------------------ */
+/*  Random curved regions                                                   */
+/* ------------------------------------------------------------------------ */
+
+static unsigned long long g_skt_seed;
+
+static double skt_rand(void)
+{
+	g_skt_seed = g_skt_seed * 6364136223846793005ull + 1442695040888963407ull;
+	return (double)(g_skt_seed >> 11) * (1.0 / 9007199254740992.0);
+}
+
+static qaws_curve* skt_line_curve(double x0, double y0, double x1, double y1)
+{
+	skt_seg g;
+	memset(&g, 0, sizeof(g));
+	g.arc = 0; g.a[0] = x0; g.a[1] = y0; g.a[2] = x1; g.a[3] = y1;
+	return skt_seg_curve(&g);
+}
+
+static qaws_curve* skt_arc_curve(double cx, double cy, double r, double a0, double a1)
+{
+	skt_seg g;
+	g.arc = 1; g.a[0] = cx; g.a[1] = cy; g.a[2] = r; g.a[3] = a0; g.a[4] = a1;
+	return skt_seg_curve(&g);
+}
+
+/* the arc from a to b with sagitta h, left of a to b when h > 0 */
+static qaws_curve* skt_bulge(double ax, double ay, double bx, double by, double h)
+{
+	double mx = 0.5 * (ax + bx), my = 0.5 * (ay + by), dx = bx - ax, dy = by - ay, l = hypot(dx, dy), c = 0.5 * l;
+	double r = (h * h + c * c) / (2 * fabs(h)), nx = -dy / l, ny = dx / l, sg = h > 0 ? 1 : -1;
+	double cx = mx - sg * (r - fabs(h)) * nx, cy = my - sg * (r - fabs(h)) * ny;
+	double a0 = atan2(ay - cy, ax - cx), a1 = atan2(by - cy, bx - cx), sw = a1 - a0;
+	if (h > 0) { while (sw > 0) sw -= 2 * SKT_PI; }
+	else { while (sw < 0) sw += 2 * SKT_PI; }
+	return skt_arc_curve(cx, cy, r, a0, a0 + sw);
+}
+
+/* star-shaped polygons of 5 to 18 vertices whose sides are lines or arcs
+   bulging either way, two in five with a round hole; both sigma. Each
+   region that builds tiles with its faces and its arcs lie on their
+   supports (to half the digits: events near tangencies are double roots);
+   at sigma = pi the wavefront is the round offset */
+static void test_random_curved(void)
+{
+	unsigned int const shapes = 40;
+	unsigned int c, built = 0, runs = 0, bad = 0;
+	double worst_dist = 0, worst_round = 0, worst_tile = 0;
+	char msg[600], fails[300] = "";
+	if (SKT_F32)
+	{
+		/* float vertices: the regions' corners rounded off their curves'
+		   meetings; double builds only */
+		printf("    random curved regions: double builds only\n");
+		return;
+	}
+	g_skt_seed = 4242;
+	for (c = 0; c < shapes; c++)
+	{
+		qaws_curve* cs[40];
+		qaws_curve const* cv[40];
+		qaws_path_2d p[2];
+		double xy[2 * 20], area = 0, size;
+		unsigned int n = 5 + (unsigned int)(skt_rand() * 14), i, np = 1, nc = 0, pass;
+		for (i = 0; i < n; i++)
+		{
+			double a = 2 * SKT_PI * (i + 0.3 * skt_rand()) / n, rr = 1 + 0.6 * skt_rand();
+			xy[2 * i] = rr * cos(a); xy[2 * i + 1] = rr * sin(a);
+		}
+		for (i = 0; i < n; i++)
+		{
+			double ax = xy[2 * i], ay = xy[2 * i + 1], bx = xy[2 * ((i + 1) % n)], by = xy[2 * ((i + 1) % n) + 1];
+			double l = hypot(bx - ax, by - ay);
+			cs[nc++] = skt_rand() < 0.35 ? skt_line_curve(ax, ay, bx, by) : skt_bulge(ax, ay, bx, by, (skt_rand() - 0.5) * 0.5 * l);
+		}
+		p[0].curves = cv; p[0].curve_count = nc; p[0].closed = 1;
+		if (skt_rand() < 0.4)
+		{
+			double hx = 0.25 * (skt_rand() - 0.5), hy = 0.25 * (skt_rand() - 0.5);
+			cs[nc++] = skt_arc_curve(hx, hy, 0.15 + 0.2 * skt_rand(), 2 * SKT_PI, 0);
+			np = 2;
+			p[1].curves = cv + nc - 1; p[1].curve_count = 1; p[1].closed = 1;
+		}
+		for (i = 0; i < nc; i++) cv[i] = cs[i];
+		{
+			qaws_clip_result* u = NULL;
+			if (qaws_clip_boolean(QAWS_CLIP_UNION, QAWS_FILL_NON_ZERO, p, np, NULL, 0, &u) == QAWS_STATUS_OK)
+				area = skt_result_area(u);
+			qaws_clip_result_destroy(u);
+		}
+		size = sqrt(fabs(area));
+		for (pass = 0; pass < 2; pass++)
+		{
+			qaws_skeleton_desc d;
+			qaws_skeleton* s = NULL;
+			unsigned int missing = 0, k;
+			double dist = 0, round = 0, faces = 0, tmax;
+			int ok;
+			memset(&d, 0, sizeof(d));
+			d.paths = p; d.path_count = np; d.fill_rule = QAWS_FILL_NON_ZERO;
+			d.splice_angle = (qaws_scalar)(pass ? SKT_PI : 0);
+			runs++;
+			if (qaws_skeleton_create(&d, &s) != QAWS_STATUS_OK)
+			{
+				if (strlen(fails) < sizeof(fails) - 40)
+					sprintf(fails + strlen(fails), " %u%s", c, pass ? " (pi)" : "");
+				continue;
+			}
+			built++;
+			tmax = (double)qaws_skeleton_get_max_time(s);
+			for (i = 0; i < qaws_skeleton_get_arc_count(s); i++)
+			{
+				qaws_skeleton_arc a;
+				qaws_skeleton_face fa, fb;
+				qaws_skeleton_get_arc(s, i, &a);
+				qaws_skeleton_get_face(s, a.face_a, &fa);
+				qaws_skeleton_get_face(s, a.face_b, &fb);
+				for (k = 0; k <= 4; k++)
+				{
+					qaws_vec2 q;
+					qaws_scalar t;
+					double e1, e2;
+					qaws_skeleton_evaluate_arc(s, i, (qaws_scalar)(k / 4.0), &q, &t);
+					e1 = fabs(skt_face_resid(&fa, q.x, q.y, t));
+					e2 = fabs(skt_face_resid(&fb, q.x, q.y, t));
+					if (e1 > dist) dist = e1;
+					if (e2 > dist) dist = e2;
+				}
+			}
+			for (i = 0; i < qaws_skeleton_get_face_count(s); i++)
+				faces += skt_face_area(s, i, &missing);
+			if (pass)
+				for (k = 1; k <= 4; k++)
+				{
+					double t = tmax * k / 5;
+					qaws_clip_result* r1 = NULL;
+					qaws_clip_result* r2 = NULL;
+					qaws_skeleton_offset(s, (qaws_scalar)t, &r1);
+					qaws_offset_paths(p, np, (qaws_scalar)-t, QAWS_JOIN_ROUND, QAWS_END_POLYGON, &r2);
+					if (fabs(skt_result_area(r1) - skt_result_area(r2)) > round)
+						round = fabs(skt_result_area(r1) - skt_result_area(r2));
+					qaws_clip_result_destroy(r1);
+					qaws_clip_result_destroy(r2);
+				}
+			ok = dist <= (SKT_F32 ? 1e-4 : 1e-5) * size && missing == 0 && fabs(faces - area) <= 2e-4 * area &&
+				round <= (SKT_F32 ? 1e-3 : 1e-6) * area;
+			if (!ok)
+			{
+				bad++;
+				if (strlen(fails) < sizeof(fails) - 40)
+					sprintf(fails + strlen(fails), " %u%s wrong", c, pass ? " (pi)" : "");
+			}
+			if (dist / size > worst_dist) worst_dist = dist / size;
+			if (round / area > worst_round) worst_round = round / area;
+			if (fabs(faces - area) / area > worst_tile) worst_tile = fabs(faces - area) / area;
+			if (g_verbose_skt) printf("    random %u (sigma %s): %u faces, supports' error %.2g, faces %.6f of %.6f (%u gaps), round offset error %.2g\n",
+				c, pass ? "pi" : "2 pi", qaws_skeleton_get_face_count(s), dist, faces, area, missing, round);
+			qaws_skeleton_destroy(s);
+		}
+		for (i = 0; i < nc; i++) qaws_curve_destroy(cs[i]);
+	}
+	sprintf(msg, "random curved regions: %u of %u built, %u off; worst supports' error %.2g, tiling %.2g, round offset %.2g of the size or area; failed:%s",
+		built, runs, bad, worst_dist, worst_tile, worst_round, fails[0] ? fails : " none");
+	TEST_ASSERT(built + 1 >= runs && bad == 0, msg);
+	if (g_verbose_skt) printf("    %s\n", msg);
+}
+
 int test_99_skeleton_main(void)
 {
 	g_pass = 0;
@@ -873,6 +1041,7 @@ int test_99_skeleton_main(void)
 	test_shapes();
 	test_curved();
 	test_freeform();
+	test_random_curved();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
 }
