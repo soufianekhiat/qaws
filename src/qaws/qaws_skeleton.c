@@ -170,6 +170,7 @@ typedef struct sk_run
 	unsigned int captag, stamp;
 	unsigned int node_from;
 	int merge;                  /* the event joins corners born at its point too */
+	unsigned int touch[2];      /* a squeeze's supports (SK_NONE otherwise): both must have edges there */
 	unsigned int depth;         /* events within events */
 	int collect;                /* events gathered into coll, not queued */
 	sk_event* coll;
@@ -978,8 +979,17 @@ static unsigned int sk_corner_new(sk_run* r, double const* p, double t, unsigned
 		}
 		else
 		{
+			/* on both lines: an event's point is good to the tolerances, and its
+			   error would ride along the whole path */
+			double da = a->d + a->w * t, db = b->d + b->w * t;
+			double x = (da * b->n[1] - a->n[1] * db) / det, y = (a->n[0] * db - da * b->n[0]) / det;
 			c->v[0] = (a->w * b->n[1] - a->n[1] * b->w) / det;
 			c->v[1] = (a->n[0] * b->w - a->w * b->n[0]) / det;
+			if (hypot(x - p[0], y - p[1]) <= 10 * r->eps_r)
+			{
+				c->p[0] = x;
+				c->p[1] = y;
+			}
 		}
 	}
 	else if (a->kind == SK_CIRCLE && b->kind == SK_CIRCLE && a->s == b->s && sk_same_circle(r, a, b))
@@ -1316,6 +1326,12 @@ static void sk_candidates(sk_run* r, unsigned int i)
 		sk_hits(r, i, r->c[j].out);
 	if (k != i && r->c[k].in != c->out && r->c[k].in != c->in)
 		sk_hits(r, i, r->c[k].in);
+	/* a smooth neighbour meets this one's far support too: from this side
+	   the meeting is at the neighbour's tangency, a double root */
+	if (j != i && r->c[j].smooth && !r->c[j].fake && r->c[j].kind == SK_LINEAR && (r->sup[r->c[j].out].kind == SK_LINE || r->sup[r->c[j].in].kind == SK_LINE) && c->in != r->c[j].out && c->in != r->c[j].in)
+		sk_hits(r, j, c->in);
+	if (k != i && k != j && r->c[k].smooth && !r->c[k].fake && r->c[k].kind == SK_LINEAR && (r->sup[r->c[k].in].kind == SK_LINE || r->sup[r->c[k].out].kind == SK_LINE) && c->out != r->c[k].in && c->out != r->c[k].out)
+		sk_hits(r, k, c->out);
 	/* its circles shrinking to their centres */
 	for (e = 0; e < 2; e++)
 	{
@@ -1799,6 +1815,10 @@ static void sk_event_at(sk_run* r, double const* p_in, double t)
 	sk_chain* ch = NULL;
 	unsigned int* fresh = NULL;
 	int* spikes = NULL;
+	unsigned int touch[2];
+	int merge = r->merge, skipped = 0;
+	touch[0] = r->touch[0]; touch[1] = r->touch[1];
+	r->touch[0] = r->touch[1] = SK_NONE;
 	p[0] = p_in[0];
 	if (++r->depth > 64)
 	{
@@ -1816,6 +1836,9 @@ static void sk_event_at(sk_run* r, double const* p_in, double t)
 		goto done;
 	}
 	/* the corners at p; a circle's marker only when the circle ends here */
+collect:
+	ncons = nsplit = 0;
+	stamp = ++r->stamp;
 	sk_grid_query(r, 0, p, t, n0);
 	for (k = 0; k < r->nfound; k++)
 	{
@@ -1827,10 +1850,13 @@ static void sk_event_at(sk_run* r, double const* p_in, double t)
 		if (c->fake && c->next == i && !(r->sup[c->in].kind == SK_CIRCLE && fabs(sk_rho(&r->sup[c->in], t)) <= r->eps))
 			continue;
 		/* corners this point's earlier event made at this time are its result */
-		if (!r->merge && !c->fake && !c->initial && (sk_curved(r, c)
+		if (!merge && !c->fake && !c->initial && (sk_curved(r, c)
 			? c->t0 >= t - r->eps_r && hypot(c->p[0] - p[0], c->p[1] - p[1]) <= r->rad
 			: c->t0 >= t - r->eps_t && hypot(c->p[0] - p[0], c->p[1] - p[1]) <= r->eps))
+		{
+			skipped |= sk_at(r, c, p, t);
 			continue;
+		}
 		if (sk_at(r, c, p, t))
 		{
 			r->tag[i] = stamp;
@@ -1865,7 +1891,32 @@ static void sk_event_at(sk_run* r, double const* p_in, double t)
 			split[nsplit++] = i;
 	}
 	if (!(ncons >= 2 || (ncons == 1 && (nsplit > 0 || r->c[cons[0]].next == cons[0])) || nsplit >= 2))
+	{
+		/* nothing here but corners born a moment ago nearby: a meeting with
+		   them, not this point's earlier event's result */
+		if (!merge && skipped && ncons + nsplit > 0)
+		{
+			merge = 1;
+			goto collect;
+		}
 		goto done;
+	}
+	if (touch[0] != SK_NONE)
+	{
+		/* supports touching where one has no edge: nothing meets (the corners
+		   of a circle opened a moment ago are within the tolerances of each
+		   other, not at an event) */
+		unsigned int z, y, has[2] = { 0, 0 };
+		for (z = 0; z < ncons + nsplit; z++)
+		{
+			sk_corner const* c = &r->c[z < ncons ? cons[z] : split[z - ncons]];
+			for (y = 0; y < 2; y++)
+				if (c->out == touch[y] || (z < ncons && c->in == touch[y]))
+					has[y] = 1;
+		}
+		if (!has[0] || !has[1])
+			goto done;
+	}
 	if (ncons == 0 && nsplit == 2)
 	{
 		/* two edges touching: a squeeze only when they face each other across
@@ -2283,6 +2334,7 @@ static qaws_status sk_simulate(qaws_skeleton* s, int record, double stop, sk_run
 	r->record = record;
 	r->stop = stop;
 	r->eps = s->tol;
+	r->touch[0] = r->touch[1] = SK_NONE;
 	r->eps_r = s->tol > 1e-7 * s->ext ? s->tol : 1e-7 * s->ext;
 	r->far = 10 * sqrt(r->eps_r * (s->ext > 0 ? s->ext : 1));
 	r->rad = sqrt(r->eps_r * (s->ext > 0 ? s->ext : 1));
@@ -2425,7 +2477,11 @@ static qaws_status sk_simulate(qaws_skeleton* s, int record, double stop, sk_run
 				sk_push(r, keep[k].kind, keep[k].t, keep[k].p, keep[k].corner, keep[k].a, keep[k].b);
 		}
 		if (e.kind == SK_EV_SQUEEZE)
+		{
+			r->touch[0] = e.a;
+			r->touch[1] = e.b;
 			sk_event_at(r, e.p, r->now);
+		}
 		else
 		{
 			if (r->c[e.corner].fake || e.t >= r->now)

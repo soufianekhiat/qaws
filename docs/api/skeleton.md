@@ -109,6 +109,18 @@ qaws_skeleton_destroy(s);
      closes there, and its two faces meet along it.
    - A circle opened at a splice is checked against every corner that can
      split an edge, not only its neighbours.
+   - A corner between two lines starts exactly on both. An event's point
+     is good only to the tolerances, and its error would ride along the
+     corner's whole path.
+   - A corner next to a smooth joint between a line and a circle is also
+     met from the joint's side. From its own side the meeting is at the
+     joint's tangency, a double root.
+   - Supports touch only where both have edges. The corners of a circle
+     opened a moment ago are within the tolerances of each other, and are
+     not an event.
+   - Corners an event made a moment ago near its point are its result, and
+     a later event there leaves them. An event that finds a corner but
+     nothing for it to meet takes them in after all.
 8. **Faces.** Each support's arcs are walked from its edge's end back to its
    start, turning so the face stays on the left. A face is entered along
    a smooth path (a slit) and left back along it. A circle opened and
@@ -153,9 +165,10 @@ The arcs with neither flag are the pure skeleton, clear of the boundary.
 - **Robustness.**
   - Polygons are robust: 1,000 random unions of grid rectangles, whose
     events are almost all degenerate, all tile their regions. Their
-    medial axis (sigma = pi) is weaker: random star-shaped polygons with
-    spiky sides all build up to 128 vertices (70 tried), but about a third
-    fail at 256 and most from 512 on.
+    medial axis (sigma = pi) is weaker. Random star-shaped polygons,
+    nearly round or with spiky sides, all build up to 128 vertices (800
+    tried). With spiky sides, 1 in 100 fails at 256 vertices, 1 in 40 at
+    512 and 4 in 10 at 1,024.
   - Curved regions pass every structured case in the tests. Random
     star-shaped regions whose edges are random bulging arcs, with or
     without a round hole, were run 400 times at each sigma:
