@@ -172,10 +172,10 @@ The arcs with neither flag are the pure skeleton, clear of the boundary.
       circle's growth to spare.
   - Collecting a splitting corner's meetings, and a new circle's
     touchings, still scans the supports, so those parts stay quadratic.
-  - A random star-shaped polygon with spiky sides takes 5 ms with 256
-    vertices, 32 ms with 1,024, 0.32 s with 4,096 and 1.1 s with 8,192
-    (mitered). Its medial axis (sigma = pi) takes 10 ms, 92 ms, 1.2 s and
-    7.1 s.
+  - A random star-shaped polygon with spiky sides takes 4 ms with 256
+    vertices, 25 ms with 1,024, 0.28 s with 4,096 and 1.0 s with 8,192
+    (mitered). Its medial axis (sigma = pi) takes 7 ms, 59 ms, 0.58 s and
+    2.7 s.
 - **Robustness.**
   - Polygons are robust: 1,000 random unions of grid rectangles, whose
     events are almost all degenerate, all tile their regions. Their

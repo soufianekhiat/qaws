@@ -953,14 +953,13 @@ static void sk_grid_edge(sk_run* r, unsigned int i, double t)
 		for (k = 0; k <= SK_GS; k++)
 		{
 			double tk = ta + (tb - ta) * k / SK_GS, ab[4], blo[2], bhi[2];
+			int whole = c->next == i;
 			sk_pos(r, c, tk, ab);
 			sk_pos(r, n, tk, ab + 2);
-			if (e->kind == SK_CIRCLE && c->next != i && hypot(ab[2] - ab[0], ab[3] - ab[1]) <= 1e3 * r->eps)
-			{
-				/* ends together: a whole circle or nothing, by the rounding */
-				sk_pair_add(r, &r->gae, i, c->gedge);
-				return;
-			}
+			/* ends together: a whole circle or nothing, by the rounding (both
+			   within the whole one) */
+			if (e->kind == SK_CIRCLE && hypot(ab[2] - ab[0], ab[3] - ab[1]) <= 1e3 * r->eps)
+				whole = 1;
 			if (k)
 			{
 				double d0 = hypot(ab[0] - last[0], ab[1] - last[1]), d1 = hypot(ab[2] - last[2], ab[3] - last[3]);
@@ -970,7 +969,7 @@ static void sk_grid_edge(sk_run* r, unsigned int i, double t)
 			memcpy(last, ab, sizeof(last));
 			sk_box(ab, 2, blo, bhi);
 			if (e->kind == SK_CIRCLE)
-				sk_arc_box(e, ab, ab + 2, fabs(sk_rho(e, tk)), c->next == i, blo, bhi);
+				sk_arc_box(e, ab, ab + 2, fabs(sk_rho(e, tk)), whole, blo, bhi);
 			if (!k)
 			{
 				lo[0] = blo[0]; lo[1] = blo[1]; hi[0] = bhi[0]; hi[1] = bhi[1];
@@ -1760,12 +1759,14 @@ static void sk_splice(sk_run* r, unsigned int i, double t)
 		for (j = 0; j < r->nc; j++)
 		{
 			sk_corner const* d = &r->c[j];
-			double here[2], theta;
+			double here[2];
 			if (!d->alive || d->fake)
 				continue;
-			theta = d->smooth ? SK_PI : sk_angle(r, d, t);
-			if (!(theta > SK_PI + 1e-9) && (d->smooth || (sk_ahead(&r->sup[d->in]) && sk_ahead(&r->sup[d->out]))))
-				continue;
+			/* only reflex ones among these (and with sigma at pi a reflex one
+			   opens at once) */
+			if (d->smooth || (sk_ahead(&r->sup[d->in]) && sk_ahead(&r->sup[d->out])))
+				if (d->smooth || r->s->sigma <= SK_PI + 1e-9 || !(sk_angle(r, d, t) > SK_PI + 1e-9))
+					continue;
 			sk_pos(r, d, t, here);
 			if (sk_resid(&r->sup[g], here, t) < -r->eps)
 				continue;
