@@ -342,6 +342,10 @@ together wherever the item applies to both.
     - Generalized barycentric coordinates for curved domains (mean value and
       harmonic coordinates extended from polygons to curved boundaries) as the
       second map: smooth, cage-driven sampling and interpolation over the region.
+    - Done (qaws_mean_value.h, test 100, docs/api/mean_value.md, figure 15):
+      mean value coordinates over regions of any curves, the handles their
+      control points; cage deformation and transfinite interpolation.
+      Harmonic coordinates are not done.
     - Ground truth from Mathematica (`tests/reference/*.wls`): A(x) in closed form,
       region areas and moments, chi-square / Kolmogorov-Smirnov uniformity tests
       against `RandomPoint` on the same regions.
@@ -448,7 +452,7 @@ the local checkout `C:\git\dunya\extern\clipper2` and compares results and timin
 | 8. RectClip, Minkowski | done (`qaws_rectclip.h`): rect clip and rect clip lines, Minkowski sum / difference, float and int64 |
 | 9. Batching, 2.5D | stacks done (`qaws_stack.h`): matched and distance-field sections, cubic blend, Booleans level by level on the executor; batch jobs (`qaws_clip_execute_batch`, clip64, offset, offset64) in parallel with results equal to one call each |
 | 10. Triangulation | done (`qaws_triangulate.h`): constrained Delaunay with exact predicates on a lattice, boundary sampled on the true curves, constraint curves (crossing ones split at their exact crossing), Ruppert refinement with boundary splits on the curves, Botsch-Kobbelt remeshing keeping features on their curves, quadrangulation (greedy plus augmenting paths, all-quads split, convex smoothing); contour stitching between stack levels into closed surface meshes (`qaws_stack_mesh_3d`) |
-| 11. Uniform sampling | done (`qaws_region_sample.h`): the inverse-CDF map from Green's theorem, random, Sobol, stratified, Halton, R2 and blue noise, density sampling, batched, f64 and f32 (test 98); generalized barycentric coordinates pending |
+| 11. Uniform sampling | done (`qaws_region_sample.h`): the inverse-CDF map from Green's theorem, random, Sobol, stratified, Halton, R2 and blue noise, density sampling, batched, f64 and f32 (test 98); mean value coordinates over curved regions (`qaws_mean_value.h`): handles the boundary curves' control points, cage deformation, transfinite interpolation, against Mathematica (test 100) |
 | 12. Skeletons | done (`qaws_skeleton.h`): straight, weighted and curved skeletons with the generalised intersection event, splice angle from mitered to the medial axis, free-form curves by biarcs, offsets from the skeleton; checked runs with retries, grid and lazy events (test 99) |
 
 Decisions made on the way:

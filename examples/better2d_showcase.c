@@ -14,6 +14,8 @@
  *   b2d12_skeleton.svg straight skeletons: roofs, wavefronts, degenerate events
  *   b2d13_curved_skeleton.svg  skeletons of lines and arcs, mitered and medial axis
  *   b2d14_freeform_skeleton.svg  skeletons of Bezier and NURBS regions through arc splines
+ *   b2d15_mean_value.svg  mean value coordinates over curved regions: a cage
+ *                      deformation by the curves' own control points, interpolants
  *
  * Each figure lives in better2d_showcase/NN_*.c, compiled as one translation
  * unit.
@@ -50,6 +52,7 @@
 #include "better2d_showcase/12_skeleton.c"
 #include "better2d_showcase/13_curved_skeleton.c"
 #include "better2d_showcase/14_freeform_skeleton.c"
+#include "better2d_showcase/15_mean_value.c"
 
 int main(void)
 {
@@ -69,5 +72,6 @@ int main(void)
 	demo_skeleton();
 	demo_curved_skeleton();
 	demo_freeform_skeleton();
+	demo_mean_value();
 	return 0;
 }
