@@ -1012,15 +1012,55 @@ static unsigned int sk_corner_new(sk_run* r, double const* p, double t, unsigned
 	else
 	{
 		double pts[4], d0, d1;
+		int touching, met;
 		sk_cross(a, b, t, r->eps, pts);
 		c->kind = SK_CONIC;
 		d0 = hypot(pts[0] - p[0], pts[1] - p[1]);
 		d1 = hypot(pts[2] - p[0], pts[3] - p[1]);
 		c->branch = d1 < d0;
-		/* tangent at birth, or an input's corner between supports nearly
-		   tangent there (their other crossing just before it on the edge
-		   coming in: the sliver between them closes at once) */
-		if (hypot(pts[2] - pts[0], pts[3] - pts[1]) <= (t == 0 ? r->rad : 1e3 * r->eps))
+		/* tangent at birth (or just past it: the crossings parting like a
+		   square root, both about as near the event's point), or an input's
+		   corner between supports nearly tangent there (their other crossing
+		   just before it on the edge coming in: the sliver between them
+		   closes at once) */
+		touching = hypot(pts[2] - pts[0], pts[3] - pts[1]) <= (t == 0 ? r->rad : 1e3 * r->eps);
+		met = 0;
+#if !QAWS_SCALAR_IS_FLOAT
+		/* (float builds keep the first branch along the edge: past their
+		   failures the convex branch reaches runs whose faces come up short
+		   by the vertices' rounding) */
+		if (t > 0)
+#else
+		if (0)
+#endif
+		{
+			/* two fronts just met (on the double's scale, whatever the
+			   tolerance): their crossings one point, or parting since a
+			   touching a moment ago */
+			double apart = hypot(pts[2] - pts[0], pts[3] - pts[1]), fine = 1e-9 * r->s->ext;
+			met = apart <= 1e3 * fine;
+			if (!met && apart <= r->rad)
+			{
+				double ts[3];
+				unsigned int nt = sk_tangencies(a, b, ts), k;
+				for (k = 0; k < nt; k++)
+					if (ts[k] <= t + 1e2 * fine && ts[k] >= t - 1e2 * fine)
+						met = 1;
+			}
+		}
+		if (met)
+		{
+			/* two fronts met: where they cross the region between them opens
+			   from nothing, a convex corner; the branch whose angle is the
+			   smaller a little later */
+			double dt = 1e3 * r->eps, a0, a1;
+			c->branch = 0;
+			a0 = sk_angle(r, c, t + dt);
+			c->branch = 1;
+			a1 = sk_angle(r, c, t + dt);
+			c->branch = a1 < a0;
+		}
+		else if (touching)
 		{
 			/* the branch met first along the edge coming in, a little later */
 			double dt = 1e3 * r->eps, q[4], from[2];
@@ -2372,9 +2412,10 @@ static qaws_status sk_simulate(qaws_skeleton* s, int record, double stop, sk_run
 				sk_event f = sk_pop(r);
 				if (f.kind != SK_EV_SPLICE && sk_curved_event(r, &e) && sk_curved_event(r, &f) && hypot(f.p[0] - e.p[0], f.p[1] - e.p[1]) <= rad)
 				{
-					/* a corner's own meeting comes back after this one, in case
-					   this one found nothing of it (gone by then if it did) */
-					if (f.kind != SK_EV_SQUEEZE && nheld < 32)
+					/* it comes back after this one, in case this one found
+					   nothing of it (a corner gone by then if it did, an edge
+					   through its point split there already) */
+					if (nheld < 32)
 						held[nheld++] = f;
 					continue;
 				}
@@ -2400,7 +2441,7 @@ static qaws_status sk_simulate(qaws_skeleton* s, int record, double stop, sk_run
 				sk_next_cand(r, e.corner, e.a);
 		}
 		for (i = 0; i < nheld; i++)
-			if (r->c[held[i].corner].alive)
+			if (held[i].kind == SK_EV_SQUEEZE ? r->refs[held[i].a] && r->refs[held[i].b] : r->c[held[i].corner].alive)
 				sk_push(r, held[i].kind, held[i].t, held[i].p, held[i].corner, held[i].a, held[i].b);
 	}
 	if (r->st == QAWS_STATUS_OK && stop >= r->tbound)

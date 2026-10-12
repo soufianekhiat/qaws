@@ -153,16 +153,16 @@ The arcs with neither flag are the pure skeleton, clear of the boundary.
 - **Robustness.**
   - Polygons are robust: 1,000 random unions of grid rectangles, whose
     events are almost all degenerate, all tile their regions. Their
-    medial axis (sigma = pi) is weaker: random star-shaped polygons fail
-    from about 1,000 vertices.
+    medial axis (sigma = pi) is weaker: random star-shaped polygons with
+    spiky sides all build up to 128 vertices (70 tried), but about a third
+    fail at 256 and most from 512 on.
   - Curved regions pass every structured case in the tests. Random
     star-shaped regions whose edges are random bulging arcs, with or
     without a round hole, were run 400 times at each sigma:
-    - 799 of the 800 runs complete;
+    - all 800 runs complete;
     - each completed run tiles its region;
     - its arcs lie on their supports to within 3e-6 of the size: nodes at
       events near tangencies are good to half the digits;
-    - the other one stops with QAWS_STATUS_NUMERICAL_FAILURE.
   - **Checks and retries.** A run fails when a loop never closes, when
     events keep remaking one another, or when the faces do not close up
     (a face's walk does not come back to its edge, or an arc between two
