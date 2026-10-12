@@ -146,14 +146,22 @@ The arcs with neither flag are the pure skeleton, clear of the boundary.
   - Curved regions pass every structured case in the tests. Random
     star-shaped regions whose edges are random bulging arcs, with or
     without a round hole, were run 400 times at each sigma:
-    - 780 of the 800 runs complete;
+    - 789 of the 800 runs complete;
     - each completed run tiles its region;
     - its arcs lie on their supports to within 3e-6 of the size: nodes at
       events near tangencies are good to half the digits;
-    - the other 20 stop with QAWS_STATUS_NUMERICAL_FAILURE (a loop that
-      never closed), most at sigma = 2 pi.
+    - the other 11 stop with QAWS_STATUS_NUMERICAL_FAILURE.
+  - **Checks and retries.** A run fails when a loop never closes, when
+    events keep remaking one another, or when the faces do not close up
+    (a face's walk does not come back to its edge, or an arc between two
+    faces is not on both). With the default tolerance, a failed run is
+    redone with the tolerance 8 times finer, 8 times coarser, then 64
+    times finer, since the near-coincidences that break a run depend on
+    where the tolerance cuts. In float builds only the coarser one is
+    tried: below the vertices' rounding, their meetings come apart. An
+    explicit `tolerance` is run once.
   - In float builds the vertices are rounded off the curves' meetings,
-    and about four in ten such random regions fail.
+    and about six in ten such random regions fail.
 
 ## Tests
 
@@ -199,7 +207,7 @@ Curved shapes:
 **Random curved regions** (double builds), at both sigma: 40 star-shaped
 regions of 5 to 18 sides, each a line or an arc bulging either way, two
 in five with a round hole.
-- At most one of the 80 runs may fail to build.
+- All 80 runs build.
 - Every run that builds tiles its region, and its arcs lie on their
   supports to 1e-5 of the size.
 - At sigma = pi, the wavefront equals the round offset.

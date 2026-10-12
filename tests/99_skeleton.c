@@ -1027,7 +1027,7 @@ static void test_random_curved(void)
 	}
 	sprintf(msg, "random curved regions: %u of %u built, %u off; worst supports' error %.2g, tiling %.2g, round offset %.2g of the size or area; failed:%s",
 		built, runs, bad, worst_dist, worst_tile, worst_round, fails[0] ? fails : " none");
-	TEST_ASSERT(built + 1 >= runs && bad == 0, msg);
+	TEST_ASSERT(built == runs && bad == 0, msg);
 	if (g_verbose_skt) printf("    %s\n", msg);
 }
 

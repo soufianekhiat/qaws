@@ -1938,6 +1938,12 @@ static qaws_status sk_simulate(qaws_skeleton* s, int record, double stop, sk_run
 			break;
 		if (e.t > r->tbound)
 			break;
+		if (r->nc > 100 * (s->ninput + 10))
+		{
+			/* events re-making one another without end */
+			r->st = QAWS_STATUS_NUMERICAL_FAILURE;
+			break;
+		}
 		if (e.kind == SK_EV_SQUEEZE)
 		{
 			if (!r->refs[e.a] || !r->refs[e.b])
@@ -2094,17 +2100,19 @@ static void sk_arc_eval(qaws_skeleton const* s, unsigned int i, double u, double
 
 static qaws_status sk_faces(qaws_skeleton* s)
 {
-	unsigned int f, i, total = 0, *cnt, *first, *list, *used, *back;
+	unsigned int f, i, total = 0, *cnt, *first, *list, *used, *back, *walks;
+	int open = 0;
 	cnt = (unsigned int*)calloc(s->nsup + 1, sizeof(unsigned int));
 	first = (unsigned int*)calloc(s->nsup + 1, sizeof(unsigned int));
 	list = (unsigned int*)malloc(sizeof(unsigned int) * (2 * s->narcs + 1));
 	used = (unsigned int*)calloc(s->narcs + 1, sizeof(unsigned int));
 	back = (unsigned int*)calloc(s->narcs + 1, sizeof(unsigned int));
+	walks = (unsigned int*)calloc(2 * s->narcs + 2, sizeof(unsigned int));
 	s->face_first = (unsigned int*)malloc(sizeof(unsigned int) * (s->nsup + 1));
 	s->face_nodes = (unsigned int*)malloc(sizeof(unsigned int) * (4 * s->narcs + 2 * s->nsup + 1));
-	if (!cnt || !first || !list || !used || !back || !s->face_first || !s->face_nodes)
+	if (!cnt || !first || !list || !used || !back || !walks || !s->face_first || !s->face_nodes)
 	{
-		free(cnt); free(first); free(list); free(used); free(back);
+		free(cnt); free(first); free(list); free(used); free(back); free(walks);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 	for (i = 0; i < s->narcs; i++)
@@ -2192,6 +2200,8 @@ static qaws_status sk_faces(qaws_skeleton* s)
 			if (best == SK_NONE)
 				break;
 			used[best] = f + 1;
+			if (s->arcs[best].face_a == f) walks[2 * best]++;
+			if (s->arcs[best].face_b == f) walks[2 * best + 1]++;
 			last = best;
 			{
 				int fwd = s->arcs[best].node_a == cur;
@@ -2205,10 +2215,18 @@ static qaws_status sk_faces(qaws_skeleton* s)
 			if (cur != na)
 				s->face_nodes[total++] = cur;
 		}
+		if (cur != na)
+			open = 1;
 	}
 	s->face_first[s->nsup] = total;
-	free(cnt); free(first); free(list); free(used); free(back);
-	return QAWS_STATUS_OK;
+	/* each arc between two faces walked by both */
+	for (i = 0; i < s->narcs && !open; i++)
+		if (s->arcs[i].face_a != s->arcs[i].face_b && !(walks[2 * i] && walks[2 * i + 1]))
+			open = 1;
+	free(cnt); free(first); free(list); free(used); free(back); free(walks);
+	/* a face whose walk never came back, or an arc left out: arcs that do
+	   not meet as a skeleton */
+	return open ? QAWS_STATUS_NUMERICAL_FAILURE : QAWS_STATUS_OK;
 }
 
 /* ------------------------------------------------------------------------ */
@@ -2674,29 +2692,70 @@ qaws_status qaws_skeleton_create(qaws_skeleton_desc const* desc, qaws_skeleton**
 	}
 	if (st == QAWS_STATUS_OK)
 	{
-		st = sk_simulate(s, 1, 1e300, &r);
-		if (st == QAWS_STATUS_OK)
+		/* a loop that never closed is a near-coincidence the tolerance cut
+		   the wrong way: the default tolerance is tried coarser and finer */
+#if QAWS_SCALAR_IS_FLOAT
+		/* not below the vertices' rounding: their meetings come apart */
+		static double const scales[2] = { 1, 8 };
+#else
+		static double const scales[4] = { 1, 0.125, 8, 1.0 / 64 };
+#endif
+		unsigned int attempt, nodes0 = s->nnodes, attempts = desc->tolerance > 0 ? 1 : (unsigned int)(sizeof(scales) / sizeof(scales[0]));
+		double tol0 = s->tol;
+		sk_sup* inputs = (sk_sup*)malloc(sizeof(sk_sup) * (s->ninput + 1));
+		if (!inputs)
+			attempts = 0, st = QAWS_STATUS_ALLOCATION_FAILURE;
+		else
+			memcpy(inputs, s->sup, sizeof(sk_sup) * s->ninput);
+		for (attempt = 0; attempt < attempts; attempt++)
 		{
-			unsigned int i;
-			for (i = 0; i < r.nc; i++)
-				if (r.c[i].alive)
+			if (attempt)
+			{
+				/* back to the input */
+				sk_sup* fresh = (sk_sup*)malloc(sizeof(sk_sup) * (s->ninput + 1));
+				if (!fresh)
 				{
-					st = QAWS_STATUS_NUMERICAL_FAILURE;   /* a loop that never closed */
+					st = QAWS_STATUS_ALLOCATION_FAILURE;
 					break;
 				}
+				memcpy(fresh, inputs, sizeof(sk_sup) * s->ninput);
+				free(s->sup);
+				s->sup = fresh;
+				s->nsup = s->ninput;
+				free(s->face_first); s->face_first = NULL;
+				free(s->face_nodes); s->face_nodes = NULL;
+			}
+			s->tol = tol0 * scales[attempt];
+			s->nnodes = nodes0;
+			s->narcs = 0;
+			s->tmax = 0;
+			st = sk_simulate(s, 1, 1e300, &r);
+			if (st == QAWS_STATUS_OK)
+			{
+				unsigned int i;
+				for (i = 0; i < r.nc; i++)
+					if (r.c[i].alive)
+					{
+						st = QAWS_STATUS_NUMERICAL_FAILURE;   /* a loop that never closed */
+						break;
+					}
+			}
+			if (st == QAWS_STATUS_OK)
+			{
+				/* keep the splice circles */
+				free(s->sup);
+				s->sup = r.sup;
+				s->nsup = r.nsup;
+				r.sup = NULL;
+			}
+			sk_run_free(&r);
+			if (st == QAWS_STATUS_OK)
+				st = sk_faces(s);
+			if (st != QAWS_STATUS_NUMERICAL_FAILURE)
+				break;
 		}
-		if (st == QAWS_STATUS_OK)
-		{
-			/* keep the splice circles */
-			free(s->sup);
-			s->sup = r.sup;
-			s->nsup = r.nsup;
-			r.sup = NULL;
-		}
-		sk_run_free(&r);
+		free(inputs);
 	}
-	if (st == QAWS_STATUS_OK)
-		st = sk_faces(s);
 	if (st != QAWS_STATUS_OK)
 	{
 		qaws_skeleton_destroy(s);
