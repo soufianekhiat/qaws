@@ -148,6 +148,14 @@ The arcs with neither flag are the pure skeleton, clear of the boundary.
   except when free-form curves are fitted: the fitted arcs are exact
   doubles, so their events keep the double default.
   Arithmetic is in double precision throughout.
+- **Float input.** A float vertex misses a float arc by its rounding. In
+  float builds each input edge is first made exact in double:
+  - a line goes through its start and the next edge's;
+  - an arc's centre moves onto the bisector of its two ends, so its circle
+    passes through both.
+
+  The meetings at the vertices are then exact. Near tangencies resolve on
+  the double's scale, whatever the float tolerance.
 - **Weights.** Weights apply to lines and must be > 0; arcs move at speed 1.
   Consecutive collinear lines with different weights are ambiguous
   (Biedl, Held, Huber, Kaaser and Palfrader, CGTA 2015), and their vertex
@@ -195,11 +203,14 @@ The arcs with neither flag are the pure skeleton, clear of the boundary.
     faces is not on both). With the default tolerance, a failed run is
     redone with the tolerance 8 times finer, 8 times coarser, then 64
     times finer, since the near-coincidences that break a run depend on
-    where the tolerance cuts. In float builds only the coarser one is
-    tried: below the vertices' rounding, their meetings come apart. An
-    explicit `tolerance` is run once.
-  - In float builds the vertices are rounded off the curves' meetings,
-    and about six in ten such random regions fail.
+    where the tolerance cuts. In float builds, whose input is made exact,
+    it is redone 8 times coarser, then at the double default (1e-3 times
+    finer) and 8 times finer still. An explicit `tolerance` is run once.
+  - In float builds the same random regions (400 at each sigma) build in
+    793 of 800 runs, and each run that builds tiles its region. Nodes are
+    floats, so arcs lie on their supports to about 1e-6; in ten runs some
+    are off by 1e-4 to 4e-3. The worst is a sliver closed up at one
+    instant, its seam on the face of a circle opened and closed at once.
 
 ## Tests
 

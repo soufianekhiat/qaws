@@ -63,7 +63,7 @@ typedef struct sk_sup
 	double start[2];            /* the input edge's start, in full precision */
 	double a0, sweep;           /* an input arc: start angle and signed sweep */
 	unsigned int path, curve, span;
-	int input;
+	int input;                  /* an input edge (2: fitted to a free-form curve) */
 } sk_sup;
 
 #define SK_LINEAR 0              /* p + v (t - t0) */
@@ -561,10 +561,10 @@ static void sk_pos(sk_run const* r, sk_corner const* c, double t, double* p)
 		return;
 	}
 	sk_cross(&r->sup[c->in], &r->sup[c->out], t, r->eps, pts);
-	if (t >= c->tend - 1e3 * r->eps_t)
+	if (t >= c->tend - 1e-6 * r->s->ext)
 	{
 		/* at its supports' tangency the crossing moves like a square root of
-		   the time: the tangent point */
+		   the time: the tangent point (just before it, on the double's scale) */
 		p[0] = 0.5 * (pts[0] + pts[2]);
 		p[1] = 0.5 * (pts[1] + pts[3]);
 		return;
@@ -727,12 +727,17 @@ static double sk_tend(sk_run const* r, sk_corner const* c)
 		{
 			sk_sup const* a = &r->sup[c->in];
 			sk_sup const* b = &r->sup[c->out];
-			double q[4];
+			double q[4], h = 1e3 * r->eps_t;
+			unsigned int k;
 			if ((a->kind == SK_CIRCLE && sk_rho(a, ts[i]) < -r->eps) || (b->kind == SK_CIRCLE && sk_rho(b, ts[i]) < -r->eps))
 				continue;
 			/* where they start to cross (a corner born just before, its event
-			   within the tolerances of the touching) the crossing goes on */
-			if (sk_cross(a, b, ts[i] + 1e3 * r->eps_t, r->eps, q) == 2 && hypot(q[2] - q[0], q[3] - q[1]) > r->eps)
+			   within the tolerances of the touching) the crossing goes on, looked at
+			   before the next tangency */
+			for (k = 0; k < n; k++)
+				if (ts[k] > ts[i] && 0.5 * (ts[k] - ts[i]) < h)
+					h = 0.5 * (ts[k] - ts[i]);
+			if (sk_cross(a, b, ts[i] + h, r->eps, q) == 2 && hypot(q[2] - q[0], q[3] - q[1]) > r->eps)
 				continue;
 			best = ts[i];
 		}
@@ -2549,7 +2554,13 @@ static qaws_status sk_simulate(qaws_skeleton* s, int record, double stop, sk_run
 	r->stop = stop;
 	r->eps = s->tol;
 	r->touch[0] = r->touch[1] = SK_NONE;
+#if QAWS_SCALAR_IS_FLOAT
+	/* the input made exact in double: near tangencies to the double's scale
+	   whatever the float tolerance */
+	r->eps_r = 1e-7 * s->ext;
+#else
 	r->eps_r = s->tol > 1e-7 * s->ext ? s->tol : 1e-7 * s->ext;
+#endif
 	r->far = 10 * sqrt(r->eps_r * (s->ext > 0 ? s->ext : 1));
 	r->rad = sqrt(r->eps_r * (s->ext > 0 ? s->ext : 1));
 	r->eps_t = s->tol;
@@ -3367,7 +3378,7 @@ qaws_status qaws_skeleton_create(qaws_skeleton_desc const* desc, qaws_skeleton**
 						e.sweep = g->sweep;
 					}
 					e.w = 1;
-					e.input = 1;
+					e.input = 2;           /* fitted: exact doubles */
 					e.path = sp; e.curve = sc; e.span = j;
 					st = sk_add_support(s, &capsup, &e, g->a);
 					if (g->a[0] < lo[0]) lo[0] = g->a[0];
@@ -3385,6 +3396,42 @@ qaws_status qaws_skeleton_create(qaws_skeleton_desc const* desc, qaws_skeleton**
 			s->nsup = first;
 			s->nnodes = first_node;
 		}
+#if QAWS_SCALAR_IS_FLOAT
+		if (st == QAWS_STATUS_OK && s->nsup - first > 1)
+		{
+			/* float vertices miss float arcs by their rounding: each edge
+			   through its own start and the next one's, exactly in double (a
+			   line through both, an arc's centre moved onto their bisector) */
+			for (k = first; k < s->nsup; k++)
+			{
+				sk_sup* e = &s->sup[k];
+				double const* a = e->start;
+				double const* b = s->sup[k + 1 < s->nsup ? k + 1 : first].start;
+				double ux = b[0] - a[0], uy = b[1] - a[1], l = hypot(ux, uy);
+				if (!(l > 0) || e->input != 1)
+					continue;
+				if (e->kind == SK_LINE)
+				{
+					e->n[0] = -uy / l;
+					e->n[1] = ux / l;
+					e->d = e->n[0] * a[0] + e->n[1] * a[1];
+				}
+				else
+				{
+					double mx = 0.5 * (a[0] + b[0]), my = 0.5 * (a[1] + b[1]), px = -uy / l, py = ux / l, h, sw;
+					h = (e->m[0] - mx) * px + (e->m[1] - my) * py;
+					e->m[0] = mx + h * px;
+					e->m[1] = my + h * py;
+					e->r0 = hypot(a[0] - e->m[0], a[1] - e->m[1]);
+					e->a0 = atan2(a[1] - e->m[1], a[0] - e->m[0]);
+					sw = atan2(b[1] - e->m[1], b[0] - e->m[0]) - e->a0;
+					while (sw - e->sweep > SK_PI) sw -= 2 * SK_PI;
+					while (e->sweep - sw > SK_PI) sw += 2 * SK_PI;
+					e->sweep = sw;
+				}
+			}
+		}
+#endif
 		if (st == QAWS_STATUS_OK && s->nsup > first)
 		{
 			for (k = first; k < s->nsup; k++)
@@ -3414,8 +3461,9 @@ qaws_status qaws_skeleton_create(qaws_skeleton_desc const* desc, qaws_skeleton**
 		/* a loop that never closed is a near-coincidence the tolerance cut
 		   the wrong way: the default tolerance is tried coarser and finer */
 #if QAWS_SCALAR_IS_FLOAT
-		/* not below the vertices' rounding: their meetings come apart */
-		static double const scales[2] = { 1, 8 };
+		/* the input made exact in double: finer tolerances hold too, down to
+		   the double default */
+		static double const scales[4] = { 1, 8, 1e-3, 1.25e-4 };
 #else
 		static double const scales[4] = { 1, 0.125, 8, 1.0 / 64 };
 #endif
