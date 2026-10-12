@@ -7,9 +7,11 @@
  *      sign; each piece is x-monotone, sigma = +1 when x grows along it
  *   3. slabs: the pieces' end abscissas sorted and merged; each piece spans
  *      a run of slabs, and A at every slab's left side is summed up
- *   4. map: u * area located among the slabs, x by safeguarded Newton on
- *      A(x) (its derivative is the chord length at x); y in the chords at x,
- *      the pieces' y sorted and paired by the winding
+ *   4. table: the chord length (or the density along the chords) g(x) in
+ *      panels per slab, 8-point Gauss each, kept as Legendre series
+ *   5. map: u * total located among the panels, x by the panel's series
+ *      inverted; y in the chords at x, the pieces' y sorted and paired by
+ *      the winding
  */
 
 #include "qaws_region_sample.h"
@@ -351,7 +353,7 @@ qaws_status qaws_region_sampler_create(qaws_region_sampler_desc const* desc, qaw
 			s->area = s->acum[nslab];
 			if (!(s->area > 0))
 				st = QAWS_STATUS_DEGENERATE_CURVE;
-			if (st == QAWS_STATUS_OK && desc->density)
+			if (st == QAWS_STATUS_OK)
 			{
 				s->rho = desc->density;
 				s->rho_user = desc->density_user;
@@ -582,7 +584,7 @@ static double rs_rho_solve(qaws_region_sampler const* s, double x, double a, dou
 	return b;
 }
 
-/* g(x): the density along the chords at x (slab k) */
+/* g(x): the density along the chords at x (slab k); without one their length */
 static double rs_g(qaws_region_sampler const* s, unsigned int k, double x, double* rmax)
 {
 	rs_cross stack[64], *cr;
@@ -592,7 +594,7 @@ static double rs_g(qaws_region_sampler const* s, unsigned int k, double x, doubl
 	for (j = 0; j + 1 < n; j++)
 	{
 		w += cr[j].sigma;
-		if (w > 0) sum += rs_rho_line(s, x, cr[j].y, cr[j + 1].y, rmax);
+		if (w > 0) sum += s->rho ? rs_rho_line(s, x, cr[j].y, cr[j + 1].y, rmax) : cr[j + 1].y - cr[j].y;
 	}
 	if (cr != stack) free(cr);
 	return sum;
@@ -715,6 +717,7 @@ static qaws_status rs_build_density(qaws_region_sampler* s)
 	s->mass = s->pmass[total];
 	/* the density's bound for rejection: the largest value met, and a grid
 	   over the box, with a margin */
+	if (s->rho)
 	{
 		unsigned int i, j;
 		for (j = 0; j < 64; j++)
@@ -757,10 +760,11 @@ qaws_status qaws_region_sampler_mass_left(qaws_region_sampler const* s, qaws_sca
 	return QAWS_STATUS_OK;
 }
 
-/* the mass-keeping map: x by the panels' interpolants, y by the chords' */
-static qaws_status rs_map_mass(qaws_region_sampler const* s, double u, double v, qaws_vec2* out)
+/* x with the mass (the area without a density) left of it u times the
+   whole: the panel holding it, then its interpolant inverted; k its slab */
+static double rs_map_x(qaws_region_sampler const* s, double u, unsigned int* out_k)
 {
-	double target = u * s->mass, x;
+	double target = u * s->mass;
 	unsigned int a, b, p, k, np;
 	if (target < 0) target = 0;
 	if (target > s->mass) target = s->mass;
@@ -774,7 +778,15 @@ static qaws_status rs_map_mass(qaws_region_sampler const* s, double u, double v,
 	p = a;
 	k = rs_panel_slab(s, p);
 	np = s->pfirst[k + 1] - s->pfirst[k];
-	x = rs_xs(s, k, (p - s->pfirst[k] + 0.5 * (1 + rs_legendre_solve(s->pcoef + 8 * p, target - s->pmass[p]))) / np, NULL);
+	*out_k = k;
+	return rs_xs(s, k, (p - s->pfirst[k] + 0.5 * (1 + rs_legendre_solve(s->pcoef + 8 * p, target - s->pmass[p]))) / np, NULL);
+}
+
+/* the mass-keeping map: x by the panels' interpolants, y by the chords' */
+static qaws_status rs_map_mass(qaws_region_sampler const* s, double u, double v, qaws_vec2* out)
+{
+	unsigned int k;
+	double x = rs_map_x(s, u, &k);
 	/* y: the mass along the chords at x */
 	{
 		rs_cross stack[64], *cr;
@@ -824,39 +836,11 @@ static qaws_status rs_map_mass(qaws_region_sampler const* s, double u, double v,
 /* the area-keeping map */
 static qaws_status rs_map_area(qaws_region_sampler const* s, qaws_scalar u, qaws_scalar v, qaws_vec2* out)
 {
-	double target, lo, hi, x, fx, chord, ytot = 0, yt, w = 0;
-	unsigned int k, it, j, nc;
+	double x, ytot = 0, yt, w = 0;
+	unsigned int k, j, nc;
 	rs_cross stackc[64], *cr = stackc;
-	target = (double)u * s->area;
-	if (target < 0) target = 0;
-	if (target > s->area) target = s->area;
-	/* the slab: the last abscissa with A below the target */
-	{
-		unsigned int a = 0, b = s->nxs - 2;
-		while (a < b)
-		{
-			unsigned int m = (a + b + 1) / 2;
-			if (s->acum[m] <= target) a = m; else b = m - 1;
-		}
-		k = a;
-	}
-	/* x: Newton on A(x) - target, its derivative the chord, in the slab */
-	lo = s->xs[k]; hi = s->xs[k + 1];
-	x = s->acum[k + 1] > s->acum[k] ? lo + (hi - lo) * (target - s->acum[k]) / (s->acum[k + 1] - s->acum[k]) : 0.5 * (lo + hi);
-	for (it = 0; it < 60; it++)
-	{
-		double nx;
-		fx = rs_area_in(s, k, x, &chord) - target;
-		if (fabs(fx) <= s->tol)
-			break;
-		if (fx > 0) hi = x; else lo = x;
-		nx = chord > 0 ? x - fx / chord : 0.5 * (lo + hi);
-		if (!(nx > lo && nx < hi))
-			nx = 0.5 * (lo + hi);
-		if (hi - lo <= RS_MERGE_REL * 1e-3 * s->ext)
-			break;
-		x = nx;
-	}
+	/* x: the table of the chord length, its interpolants inverted */
+	x = rs_map_x(s, (double)u, &k);
 	/* y: the chords at x */
 	nc = s->first[k + 1] - s->first[k];
 	if (nc > 64)

@@ -41,10 +41,14 @@ qaws_region_sampler_destroy(s);
    ∫ y dx = [x y] − ∫ x dy, the last term computed span by span to the
    tolerance. A at every slab's left side is summed once, at creation.
 4. **The map.**
-   - `u` locates the slab holding `u * area`. Inside it, `x` comes from
-     Newton on A(x) − u * area, kept in a shrinking bracket. The derivative
-     of A is the chord length at `x`, so the iteration converges
-     quadratically.
+   - A(x) is the integral of the chord length l(x). At creation, l is
+     tabulated in panels (the same table as a density's below, with rho =
+     1): 8-point Gauss per panel, kept as the degree-7 Legendre series
+     through those values. `u` locates the panel holding `u` times the
+     table's total, and `x` inverts that panel's series by safeguarded
+     Newton. A(x) itself, and `area_left`, stay exact by Green's theorem.
+     The map agrees with them to about 1e-15 of the area, against 2e-13
+     with Newton on the exact integrals, which this replaced.
    - `v` then picks `y` along the vertical chords at `x`. The pieces' y
      values are sorted, and a gap is inside when the winding below it is
      positive (a piece running to +x has the region above it). `y` sits at
@@ -140,8 +144,10 @@ integral over the region and over the part left of x.
 - **Tolerance.** The area tolerance defaults to 1e-13 of the box's area,
   or 1e-6 in f32. A(x) and the area match Mathematica to about 1e-12 in f64.
 - **Cost.** Creation is one union plus one integral per piece and slab.
-  A uniform point costs a few Newton steps, each one integral per piece
-  crossing its slab: about 30 µs on the test regions.
+  The panel table adds about 5 ms. A uniform point costs one panel
+  lookup, its series inverted, and the crossings at x: on the crescent,
+  2.4 µs serial and 0.34 µs on 8 threads (26 µs with Newton on the exact
+  integrals).
 - **Density cost.** Creation is 256 panels x 8 chord integrals (a few ms).
   On the crescent, 20,000 Sobol points took 2 to 3 µs each, against 35 to
   57 µs with Newton on the integrals before the interpolants. With 8
