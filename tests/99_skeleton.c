@@ -504,6 +504,12 @@ static double skt_face_area(qaws_skeleton const* s, unsigned int fi, unsigned in
 	unsigned char* used = (unsigned char*)calloc(qaws_skeleton_get_arc_count(s) + 1, 1);
 	qaws_skeleton_get_face(s, fi, &f);
 	na = f.node_count;
+	if (na == 1 && !f.edge)
+	{
+		/* a circle opened and closed at once: an empty face */
+		free(used);
+		return 0;
+	}
 #define SKT_PT(X, Y) do { double xx_ = (X), yy_ = (Y); if (have) area += px * yy_ - xx_ * py; px = xx_; py = yy_; have = 1; } while (0)
 	{
 		qaws_skeleton_node a;

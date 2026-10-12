@@ -765,15 +765,22 @@ static unsigned int sk_corner_new(sk_run* r, double const* p, double t, unsigned
 		d0 = hypot(pts[0] - p[0], pts[1] - p[1]);
 		d1 = hypot(pts[2] - p[0], pts[3] - p[1]);
 		c->branch = d1 < d0;
-		if (hypot(pts[2] - pts[0], pts[3] - pts[1]) <= 1e3 * r->eps)
+		/* tangent at birth, or an input's corner between supports nearly
+		   tangent there (their other crossing just before it on the edge
+		   coming in: the sliver between them closes at once) */
+		if (hypot(pts[2] - pts[0], pts[3] - pts[1]) <= (t == 0 ? r->rad : 1e3 * r->eps))
 		{
-			/* tangent at birth: the branch met first along the edge coming in,
-			   a little later */
+			/* the branch met first along the edge coming in, a little later */
 			double dt = 1e3 * r->eps, q[4], from[2];
-			if (prev != SK_NONE && sk_cross(a, b, t + dt, r->eps, q) == 2)
+			if ((prev != SK_NONE || t == 0) && sk_cross(a, b, t + dt, r->eps, q) == 2)
 			{
 				double u0, u1;
-				sk_pos(r, &r->c[prev], t + dt, from);
+				if (t == 0)
+				{
+					from[0] = a->start[0]; from[1] = a->start[1];
+				}
+				else
+					sk_pos(r, &r->c[prev], t + dt, from);
 				u0 = sk_along(a, from, q, t + dt);
 				u1 = sk_along(a, from, q + 2, t + dt);
 				if (a->kind == SK_LINE)
@@ -1115,7 +1122,8 @@ static int sk_at(sk_run const* r, sk_corner const* c, double const* p, double t)
 			{
 				nt = sk_tangencies(&r->sup[c->in], &r->sup[c->out], ts);
 				for (k = 0; k < nt; k++)
-					if (ts[k] >= t - r->eps_r && ts[k] <= t + r->rad)
+					if ((ts[k] >= t && ts[k] <= t + r->rad) ||
+						(ts[k] >= t - r->eps_r && hypot(x[2] - x[0], x[3] - x[1]) <= 1e3 * r->eps))
 						return 1;
 				return 0;
 			}
@@ -1353,6 +1361,10 @@ static void sk_settle(sk_run* r, unsigned int i, int spike, double t)
 			double w[2];
 			if (j == i || !o->alive || o->fake || (fabs(o->t0 - c->t0) <= r->eps_t && hypot(o->p[0] - c->p[0], o->p[1] - c->p[1]) <= r->eps))
 				continue;
+			/* the other crossing of the same two supports (just past their
+			   touching both pass through here) */
+			if (c->kind == SK_CONIC && o->kind == SK_CONIC && o->in == c->in && o->out == c->out && o->branch != c->branch)
+				continue;
 			(void)w;
 			if (sk_at(r, o, q, t))
 			{
@@ -1413,7 +1425,7 @@ static void sk_bubble(sk_run* r, unsigned int e, double const* p, double t, unsi
 static void sk_event_at(sk_run* r, double const* p_in, double t)
 {
 	double p[2];
-	unsigned int i, ncons = 0, nsplit = 0, nch = 0, node = 0, stamp = ++r->stamp, k, n0 = r->nc;
+	unsigned int i, ncons = 0, nsplit = 0, nch = 0, node = 0, stamp = ++r->stamp, k, n0 = r->nc, seen;
 	unsigned int *cons = NULL, *split = NULL;
 	sk_chain* ch = NULL;
 	unsigned int* fresh = NULL;
@@ -1437,7 +1449,6 @@ static void sk_event_at(sk_run* r, double const* p_in, double t)
 	/* the corners at p; a circle's marker only when the circle ends here */
 	for (i = 0; i < n0; i++)
 	{
-		double q[2];
 		sk_corner const* c = &r->c[i];
 		if (!c->alive)
 			continue;
@@ -1448,7 +1459,6 @@ static void sk_event_at(sk_run* r, double const* p_in, double t)
 			? c->t0 >= t - r->eps_r && hypot(c->p[0] - p[0], c->p[1] - p[1]) <= r->rad
 			: c->t0 >= t - r->eps_t && hypot(c->p[0] - p[0], c->p[1] - p[1]) <= r->eps))
 			continue;
-		(void)q;
 		if (sk_at(r, c, p, t))
 		{
 			r->tag[i] = stamp;
@@ -1700,12 +1710,24 @@ static void sk_event_at(sk_run* r, double const* p_in, double t)
 	/* a loop left enclosing nothing that turns inside out at once (a sliver
 	   between two supports just past their tangency, cut off at its far
 	   crossing) closes here */
-	for (i = 0; i < nch && r->st == QAWS_STATUS_OK; i++)
+	seen = ++r->stamp;
+	for (i = 0; i < 3 * nch && r->st == QAWS_STATUS_OK; i++)
 	{
-		unsigned int f = fresh[i] != SK_NONE ? fresh[i] : ch[i].cin, w, n = 0;
+		/* the loops of the new corners and of their neighbours (a new
+		   corner spliced at once leaves its loop to them) */
+		unsigned int f = i % 3 == 1 ? ch[i / 3].cout : i % 3 == 2 || fresh[i / 3] == SK_NONE ? ch[i / 3].cin : fresh[i / 3], w, n = 0;
 		double a0, a1, tiny = 1e-8 * r->s->ext * r->s->ext;
-		if (f == SK_NONE || !r->c[f].alive)
+		if (f == SK_NONE || !r->c[f].alive || r->tag[f] == seen)
 			continue;
+		r->tag[f] = seen;
+		for (w = r->c[f].next; w != f && n < 16; w = r->c[w].next)
+		{
+			r->tag[w] = seen;
+			n++;
+		}
+		if (w != f)
+			continue;   /* not a small loop */
+		n = 0;
 		a0 = sk_loop_area(r, f, t);
 		if (fabs(a0) > tiny)
 			continue;
@@ -1837,7 +1859,7 @@ static int sk_curved_event(sk_run const* r, sk_event const* e)
 	return r->sup[r->c[e->corner].in].kind == SK_CIRCLE || r->sup[r->c[e->corner].out].kind == SK_CIRCLE;
 }
 
-/* the signed area of corner i's loop at time t (its arcs sampled) */
+/* the signed area of corner i's loop at time t (exact for its arcs) */
 static double sk_loop_area(sk_run const* r, unsigned int i, double t)
 {
 	unsigned int j = i, n = 0;
@@ -1846,23 +1868,23 @@ static double sk_loop_area(sk_run const* r, unsigned int i, double t)
 	{
 		sk_corner const* c = &r->c[j];
 		sk_sup const* e = &r->sup[c->out];
-		double p[2], q[2], prev[2];
-		unsigned int k, m = e->kind == SK_LINE ? 1 : 32;
+		double p[2], q[2];
 		sk_pos(r, c, t, p);
 		sk_pos(r, &r->c[c->next], t, q);
-		prev[0] = p[0]; prev[1] = p[1];
-		for (k = 1; k <= m; k++)
+		if (e->kind == SK_LINE)
+			a += p[0] * q[1] - q[0] * p[1];
+		else
 		{
-			double x[2];
-			if (e->kind == SK_LINE) { x[0] = q[0]; x[1] = q[1]; }
-			else
-			{
-				double rho = fabs(sk_rho(e, t)), a0 = atan2(p[1] - e->m[1], p[0] - e->m[0]);
-				double sw = c->next == j ? 2 * SK_PI : sk_angle_along(e, p, q), ang = a0 + e->s * sw * k / m;
-				x[0] = e->m[0] + rho * cos(ang); x[1] = e->m[1] + rho * sin(ang);
-			}
-			a += prev[0] * x[1] - x[0] * prev[1];
-			prev[0] = x[0]; prev[1] = x[1];
+			/* to the arc's start, along it (twice its integral of x dy - y dx
+			   is rho^2 sweep + rho (mx d sin - my d cos)), on to the next corner */
+			double rho = fabs(sk_rho(e, t)), a0 = atan2(p[1] - e->m[1], p[0] - e->m[0]);
+			double sw = e->s * (c->next == j ? 2 * SK_PI : sk_angle_along(e, p, q)), a1 = a0 + sw;
+			double s0[2], s1[2];
+			s0[0] = e->m[0] + rho * cos(a0); s0[1] = e->m[1] + rho * sin(a0);
+			s1[0] = e->m[0] + rho * cos(a1); s1[1] = e->m[1] + rho * sin(a1);
+			a += p[0] * s0[1] - s0[0] * p[1];
+			a += rho * rho * sw + rho * (e->m[0] * (sin(a1) - sin(a0)) - e->m[1] * (cos(a1) - cos(a0)));
+			a += s1[0] * q[1] - q[0] * s1[1];
 		}
 		j = c->next;
 	} while (j != i && n++ <= r->nc);
@@ -1871,7 +1893,8 @@ static double sk_loop_area(sk_run const* r, unsigned int i, double t)
 
 static qaws_status sk_simulate(qaws_skeleton* s, int record, double stop, sk_run* r)
 {
-	unsigned int l, i;
+	unsigned int l, i, nheld = 0;
+	sk_event held[32];
 	memset(r, 0, sizeof(*r));
 	r->s = s;
 	r->record = record;
@@ -1976,30 +1999,40 @@ static qaws_status sk_simulate(qaws_skeleton* s, int record, double stop, sk_run
 			sk_event keep[32];
 			unsigned int nkeep = 0, k;
 			double rad = r->rad;
+			nheld = 0;
 			while (r->nh && r->heap[0].t <= e.t + r->eps_r && nkeep < 32)
 			{
 				sk_event f = sk_pop(r);
 				if (f.kind != SK_EV_SPLICE && sk_curved_event(r, &e) && sk_curved_event(r, &f) && hypot(f.p[0] - e.p[0], f.p[1] - e.p[1]) <= rad)
+				{
+					/* a corner's own meeting comes back after this one, in case
+					   this one found nothing of it (gone by then if it did) */
+					if (f.kind != SK_EV_SQUEEZE && nheld < 32)
+						held[nheld++] = f;
 					continue;
+				}
 				keep[nkeep++] = f;
 			}
 			for (k = 0; k < nkeep; k++)
 				sk_push(r, keep[k].kind, keep[k].t, keep[k].p, keep[k].corner, keep[k].a, keep[k].b);
 		}
 		if (e.kind == SK_EV_SQUEEZE)
-		{
 			sk_event_at(r, e.p, r->now);
-			continue;
-		}
-		if (r->c[e.corner].fake || e.t >= r->now)
-		{
-			/* the solved meeting point (a conic corner's own position is
-			   ill-conditioned there) */
-			q[0] = e.p[0]; q[1] = e.p[1];
-		}
 		else
-			sk_pos(r, &r->c[e.corner], r->now, q);
-		sk_event_at(r, q, r->now);
+		{
+			if (r->c[e.corner].fake || e.t >= r->now)
+			{
+				/* the solved meeting point (a conic corner's own position is
+				   ill-conditioned there) */
+				q[0] = e.p[0]; q[1] = e.p[1];
+			}
+			else
+				sk_pos(r, &r->c[e.corner], r->now, q);
+			sk_event_at(r, q, r->now);
+		}
+		for (i = 0; i < nheld; i++)
+			if (r->c[held[i].corner].alive)
+				sk_push(r, held[i].kind, held[i].t, held[i].p, held[i].corner, held[i].a, held[i].b);
 	}
 	if (r->st == QAWS_STATUS_OK && stop >= r->tbound)
 	{

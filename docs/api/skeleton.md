@@ -111,7 +111,8 @@ qaws_skeleton_destroy(s);
      split an edge, not only its neighbours.
 8. **Faces.** Each support's arcs are walked from its edge's end back to its
    start, turning so the face stays on the left. A face is entered along
-   a smooth path (a slit) and left back along it.
+   a smooth path (a slit) and left back along it. A circle opened and
+   closed at one instant (in a sliver) has an empty face: its one node.
 9. **Offsets.** `qaws_skeleton_offset` reruns the events up to t. It
    returns the loops of lines and arcs at t, united with the positive
    fill rule.
@@ -146,11 +147,11 @@ The arcs with neither flag are the pure skeleton, clear of the boundary.
   - Curved regions pass every structured case in the tests. Random
     star-shaped regions whose edges are random bulging arcs, with or
     without a round hole, were run 400 times at each sigma:
-    - 789 of the 800 runs complete;
+    - 799 of the 800 runs complete;
     - each completed run tiles its region;
     - its arcs lie on their supports to within 3e-6 of the size: nodes at
       events near tangencies are good to half the digits;
-    - the other 11 stop with QAWS_STATUS_NUMERICAL_FAILURE.
+    - the other one stops with QAWS_STATUS_NUMERICAL_FAILURE.
   - **Checks and retries.** A run fails when a loop never closes, when
     events keep remaking one another, or when the faces do not close up
     (a face's walk does not come back to its edge, or an arc between two
