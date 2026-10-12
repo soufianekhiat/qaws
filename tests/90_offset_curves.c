@@ -400,6 +400,53 @@ static void test_regions(void)
 	qaws_curve_destroy(star);
 }
 
+/* a full circle with a round hole running the other way, shrunk: the
+   annulus between the circles moved apart (in float builds the outer loop
+   comes back as a fine polygon, then meets the hole's arc in the union) */
+static void test_disc_with_hole(void)
+{
+	static double const deltas[3] = { 0.05, 0.1, 0.15 };
+	qaws_curve *outer = NULL, *hole = NULL;
+	qaws_curve const* cv[2];
+	qaws_path_2d p[2];
+	qaws_arc_segment g;
+	qaws_arc_desc d;
+	unsigned int k;
+	char msg[300];
+	memset(&d, 0, sizeof(d));
+	d.dimension = QAWS_DIMENSION_2D; d.segments = &g; d.segment_count = 1;
+	memset(&g, 0, sizeof(g));
+	g.radius = 1; g.angle_start = 0; g.angle_end = (qaws_scalar)(2 * OCT_PI);
+	qaws_curve_create_arc(&d, &outer);
+	g.center[0] = (qaws_scalar)0.3; g.center[1] = (qaws_scalar)0.1; g.radius = (qaws_scalar)0.35;
+	g.angle_start = (qaws_scalar)(2 * OCT_PI); g.angle_end = 0;
+	qaws_curve_create_arc(&d, &hole);
+	cv[0] = outer; cv[1] = hole;
+	p[0].curves = &cv[0]; p[0].curve_count = 1; p[0].closed = 1;
+	p[1].curves = &cv[1]; p[1].curve_count = 1; p[1].closed = 1;
+	for (k = 0; k < 3; k++)
+	{
+		qaws_clip_result* r = NULL;
+		double t = deltas[k], a = 0, expect = OCT_PI * ((1 - t) * (1 - t) - (0.35 + t) * (0.35 + t));
+		unsigned int i, n = 0;
+		qaws_offset_paths(p, 2, (qaws_scalar)-t, QAWS_JOIN_ROUND, QAWS_END_POLYGON, &r);
+		if (r) n = qaws_clip_result_get_path_count(r);
+		for (i = 0; i < n; i++)
+		{
+			qaws_path_2d q;
+			qaws_scalar s = 0;
+			qaws_clip_result_get_path(r, i, &q);
+			qaws_path_compute_area_2d(&q, &s);
+			a += (double)s;
+		}
+		sprintf(msg, "disc with a round hole shrunk by %g: %u loops, area %.7f (expected %.7f)", t, n, a, expect);
+		TEST_ASSERT(r && n == 2 && fabs(a - expect) < (OCT_F32 ? 1e-3 : 1e-6), msg);
+		qaws_clip_result_destroy(r);
+	}
+	qaws_curve_destroy(outer);
+	qaws_curve_destroy(hole);
+}
+
 static void test_open(void)
 {
 	static double const xy[8] = { 0, 0, 1, 2, 2, -2, 3, 0 };
@@ -723,6 +770,7 @@ int test_90_offset_curves_main(void)
 	test_parabola();
 	test_s_curve();
 	test_regions();
+	test_disc_with_hole();
 	test_open();
 	test_extremes();
 	test_simple();

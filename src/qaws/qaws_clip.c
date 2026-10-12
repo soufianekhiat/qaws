@@ -1903,22 +1903,33 @@ static qaws_status cl_emit_pieces(cl_ctx* x, cl_piece const* pc, unsigned int n,
 				}
 				if (!preserve)
 				{
-					/* drop corners between collinear neighbours (and spikes) */
-					unsigned int a, m = 0, changed = 1;
+					/* drop corners between collinear neighbours (and spikes): each
+					   with the run dropped since the last corner kept against the
+					   chord from it, so a fine polygon of a curve thins out to the
+					   tolerance instead of vanishing at once */
+					unsigned int a, m = 0, changed = 1, run;
 					while (changed && np >= 3)
 					{
 						changed = 0;
 						m = 0;
+						run = 0;
 						for (a = 0; a < np; a++)
 						{
-							int ends = !whole && (a == 0 || a == np - 1);
-							double const* pp = whole ? &pts[2 * ((a + np - 1) % np)] : (a ? &pts[2 * (a - 1)] : NULL);
+							int ends = !whole && (a == 0 || a == np - 1), drop;
+							double const* pp = m ? &pts[2 * (m - 1)] : (whole ? &pts[2 * (np - 1)] : NULL);
 							double const* nn = whole ? &pts[2 * ((a + 1) % np)] : (a + 1 < np ? &pts[2 * (a + 1)] : NULL);
-							if (!ends && pp && nn && cl_collinear(pp, &pts[2 * a], nn, x->tol))
+							unsigned int q;
+							/* the run lies past the corners kept: not yet overwritten */
+							drop = !ends && pp && nn && run < 256;
+							for (q = a - run; drop && q <= a; q++)
+								drop = cl_collinear(pp, &pts[2 * q], nn, x->tol);
+							if (drop)
 							{
 								changed = 1;
+								run++;
 								continue;
 							}
+							run = 0;
 							pts[2 * m] = pts[2 * a]; pts[2 * m + 1] = pts[2 * a + 1];
 							r->vertices[vstart + m] = r->vertices[vstart + a];
 							m++;

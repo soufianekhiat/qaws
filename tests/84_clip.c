@@ -486,6 +486,59 @@ static void test_collinear_strokes(void)
 	for (k = 0; k < N; k++) qaws_curve_destroy(c[k]);
 }
 
+/* a fine polygon of a circle (every corner within the tolerance of its
+   neighbours' chord) with a round hole: its collinear corners thin out
+   to the tolerance, the loop stays */
+static void test_fine_polygon(void)
+{
+	unsigned int const counts[3] = { 64, 400, 2052 };
+	unsigned int k, i;
+	char msg[256];
+	for (k = 0; k < 3; k++)
+	{
+		unsigned int n = counts[k];
+		qaws_scalar* xy = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 2 * n);
+		qaws_curve *pl = NULL, *hole = NULL;
+		qaws_curve const* cv[2];
+		qaws_path_2d p[2];
+		qaws_clip_result* r = NULL;
+		qaws_arc_segment g;
+		qaws_arc_desc d;
+		double poly = 0.5 * n * 0.95 * 0.95 * sin(2 * CLT_PI / n), expect = poly - CLT_PI * 0.4 * 0.4, got;
+		unsigned int empty = 0;
+		for (i = 0; i < n; i++)
+		{
+			xy[2 * i] = (qaws_scalar)(0.95 * cos(2 * CLT_PI * i / n));
+			xy[2 * i + 1] = (qaws_scalar)(0.95 * sin(2 * CLT_PI * i / n));
+		}
+		qaws_curve_create_polyline_2d(xy, n, 1, &pl);
+		memset(&g, 0, sizeof(g));
+		g.center[0] = (qaws_scalar)0.3; g.center[1] = (qaws_scalar)0.1; g.radius = (qaws_scalar)0.4;
+		g.angle_start = (qaws_scalar)(2 * CLT_PI); g.angle_end = 0;
+		memset(&d, 0, sizeof(d));
+		d.dimension = QAWS_DIMENSION_2D; d.segments = &g; d.segment_count = 1;
+		qaws_curve_create_arc(&d, &hole);
+		cv[0] = pl; cv[1] = hole;
+		p[0].curves = &cv[0]; p[0].curve_count = 1; p[0].closed = 1;
+		p[1].curves = &cv[1]; p[1].curve_count = 1; p[1].closed = 1;
+		qaws_clip_boolean(QAWS_CLIP_UNION, QAWS_FILL_POSITIVE, p, 2, NULL, 0, &r);
+		got = r ? clt_area(r) : 0;
+		for (i = 0; r && i < qaws_clip_result_get_path_count(r); i++)
+		{
+			qaws_path_2d q;
+			qaws_clip_result_get_path(r, i, &q);
+			empty += q.curve_count == 0;
+		}
+		sprintf(msg, "a %u-gon of a circle with a round hole: %u loops (%u empty), area %.9f (expected %.9f)",
+			n, r ? qaws_clip_result_get_path_count(r) : 0, empty, got, expect);
+		TEST_ASSERT(r && qaws_clip_result_get_path_count(r) == 2 && empty == 0 && fabs(got - expect) < CLT_TOL, msg);
+		qaws_clip_result_destroy(r);
+		qaws_curve_destroy(pl);
+		qaws_curve_destroy(hole);
+		free(xy);
+	}
+}
+
 int test_84_clip_main(void)
 {
 	g_pass = 0;
@@ -499,6 +552,7 @@ int test_84_clip_main(void)
 	test_open_and_z();
 	test_tangent_fan();
 	test_collinear_strokes();
+	test_fine_polygon();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
 }
