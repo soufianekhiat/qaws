@@ -165,14 +165,15 @@ The arcs with neither flag are the pure skeleton, clear of the boundary.
   - A random star-shaped polygon with spiky sides takes 4 ms with 256
     vertices, 27 ms with 1,024, 0.26 s with 4,096 and 1.0 s with 8,192
     (mitered).
+  - Their medial axis is slower: 47 ms with 256 vertices, 0.66 s with
+    1,024, about 14 s with 4,096. Corners and edges on circles are not in
+    the grid.
 - **Robustness.**
   - Polygons are robust: 1,000 random unions of grid rectangles, whose
     events are almost all degenerate, all tile their regions. Their
     medial axis (sigma = pi) is weaker. Random star-shaped polygons,
-    nearly round or with spiky sides, all build from 48 to 512 vertices
-    (640 tried). With spiky sides, 4 in 30 fail at 1,024 vertices and
-    most at 2,048, at spikes such as one whose sides are 3e-5 radians
-    from antiparallel.
+    nearly round or with spiky sides, all build from 48 to 2,048
+    vertices (686 tried); with spiky sides 1 of 3 fails at 4,096.
   - Curved regions pass every structured case in the tests. Random
     star-shaped regions whose edges are random bulging arcs, with or
     without a round hole, were run 400 times at each sigma:

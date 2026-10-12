@@ -1749,7 +1749,7 @@ static void sk_settle(sk_run* r, unsigned int i, int spike, double t)
 			double w[2];
 			j = r->found[k];
 			o = &r->c[j];
-			if (j == i || !o->alive || o->fake || (fabs(o->t0 - c->t0) <= r->eps_t && hypot(o->p[0] - c->p[0], o->p[1] - c->p[1]) <= r->eps))
+			if (j == i || !o->alive || o->fake || (fabs(o->t0 - c->t0) <= r->eps_t && (o->node == c->node || hypot(o->p[0] - c->p[0], o->p[1] - c->p[1]) <= r->eps)))
 				continue;
 			/* the other crossing of the same two supports (just past their
 			   touching both pass through here) */
