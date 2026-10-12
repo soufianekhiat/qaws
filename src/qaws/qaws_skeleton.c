@@ -709,7 +709,12 @@ static double sk_tend(sk_run const* r, sk_corner const* c)
 		{
 			sk_sup const* a = &r->sup[c->in];
 			sk_sup const* b = &r->sup[c->out];
+			double q[4];
 			if ((a->kind == SK_CIRCLE && sk_rho(a, ts[i]) < -r->eps) || (b->kind == SK_CIRCLE && sk_rho(b, ts[i]) < -r->eps))
+				continue;
+			/* where they start to cross (a corner born just before, its event
+			   within the tolerances of the touching) the crossing goes on */
+			if (sk_cross(a, b, ts[i] + 1e3 * r->eps_t, r->eps, q) == 2 && hypot(q[2] - q[0], q[3] - q[1]) > r->eps)
 				continue;
 			best = ts[i];
 		}
@@ -985,7 +990,7 @@ static unsigned int sk_corner_new(sk_run* r, double const* p, double t, unsigned
 			double x = (da * b->n[1] - a->n[1] * db) / det, y = (a->n[0] * db - da * b->n[0]) / det;
 			c->v[0] = (a->w * b->n[1] - a->n[1] * b->w) / det;
 			c->v[1] = (a->n[0] * b->w - a->w * b->n[0]) / det;
-			if (hypot(x - p[0], y - p[1]) <= 10 * r->eps_r)
+			if (hypot(x - p[0], y - p[1]) <= r->rad)
 			{
 				c->p[0] = x;
 				c->p[1] = y;

@@ -110,8 +110,11 @@ qaws_skeleton_destroy(s);
    - A circle opened at a splice is checked against every corner that can
      split an edge, not only its neighbours.
    - A corner between two lines starts exactly on both. An event's point
-     is good only to the tolerances, and its error would ride along the
-     corner's whole path.
+     is good only to the tolerances (among circles, to the square root of
+     one), and its error would ride along the corner's whole path.
+   - A tangency where a corner's supports start to cross does not end it
+     (a corner born just before, its event within the tolerances of the
+     touching).
    - A corner next to a smooth joint between a line and a circle is also
      met from the joint's side. From its own side the meeting is at the
      joint's tangency, a double root.
@@ -166,9 +169,10 @@ The arcs with neither flag are the pure skeleton, clear of the boundary.
   - Polygons are robust: 1,000 random unions of grid rectangles, whose
     events are almost all degenerate, all tile their regions. Their
     medial axis (sigma = pi) is weaker. Random star-shaped polygons,
-    nearly round or with spiky sides, all build up to 128 vertices (800
-    tried). With spiky sides, 1 in 100 fails at 256 vertices, 1 in 40 at
-    512 and 4 in 10 at 1,024.
+    nearly round or with spiky sides, all build from 48 to 512 vertices
+    (640 tried). With spiky sides, 4 in 30 fail at 1,024 vertices and
+    most at 2,048, at spikes such as one whose sides are 3e-5 radians
+    from antiparallel.
   - Curved regions pass every structured case in the tests. Random
     star-shaped regions whose edges are random bulging arcs, with or
     without a round hole, were run 400 times at each sigma:
