@@ -69,6 +69,14 @@ typedef struct sk_sup
 #define SK_LINEAR 0              /* p + v (t - t0) */
 #define SK_CONIC 1               /* a crossing of its supports */
 
+/* a splitting corner's earliest meetings with the supports ahead of it,
+   queued one at a time (all of them would fill the queue with stale ones) */
+#define SK_CANDS 8
+typedef struct sk_cand
+{
+	double t, p[2];
+} sk_cand;
+
 typedef struct sk_corner
 {
 	int kind;
@@ -80,6 +88,11 @@ typedef struct sk_corner
 	unsigned int node;          /* where it started */
 	int alive, smooth, fake;    /* fake: a loop of one circle, the corner a marker */
 	int initial;                /* one of the input's corners */
+	sk_cand cand[SK_CANDS];     /* the next meetings with supports ahead, by time */
+	unsigned int ncand, icand;  /* how many, the one queued */
+	int more;                   /* later ones not kept: found again when these run out */
+	unsigned int greg, gedge;   /* its own and its out edge's grid entries now */
+	double gexp;                /* until when they hold */
 } sk_corner;
 
 #define SK_EV_CORNER 0           /* the corner meets a support */
@@ -93,6 +106,18 @@ typedef struct sk_event
 	unsigned int kind, corner, a, b;
 	unsigned int seq;
 } sk_event;
+
+typedef struct sk_ilist
+{
+	unsigned int* v;
+	unsigned int n, cap;
+} sk_ilist;
+
+typedef struct sk_gexp
+{
+	double t;
+	unsigned int i;
+} sk_gexp;
 
 /* an arc's path */
 #define SK_GEO_LINE 0
@@ -146,6 +171,22 @@ typedef struct sk_run
 	unsigned int node_from;
 	int merge;                  /* the event joins corners born at its point too */
 	unsigned int depth;         /* events within events */
+	int collect;                /* events gathered into coll, not queued */
+	sk_event* coll;
+	unsigned int ncoll, capcoll;
+	unsigned int* found;        /* a query's corners */
+	unsigned int nfound, capfound;
+	/* the corners and edges between lines in a grid, by where they pass
+	   until they have moved about a cell (then entered again); the others
+	   always looked at */
+	int gon;
+	double glo[2], gh, grc, gre;
+	unsigned int gn;            /* cells per side */
+	sk_ilist* gc;               /* per cell: corners, as (index, entry) pairs */
+	sk_ilist* ge;               /* per cell: edges by their first corner, as pairs */
+	sk_ilist gac, gae;          /* the corners and edges on circles, as pairs */
+	sk_gexp* gq;                /* when corners' entries run out */
+	unsigned int ngq, capgq;
 	qaws_status st;
 } sk_run;
 
@@ -180,6 +221,12 @@ static double sk_resid(sk_sup const* e, double const* p, double t)
 	if (e->kind == SK_LINE)
 		return e->n[0] * p[0] + e->n[1] * p[1] - e->d - e->w * t;
 	return e->s * (e->r0 - hypot(p[0] - e->m[0], p[1] - e->m[1])) - t;
+}
+
+static int sk_cmp_uint(void const* a, void const* b)
+{
+	unsigned int x = *(unsigned int const*)a, y = *(unsigned int const*)b;
+	return x < y ? -1 : x > y;
 }
 
 /* the edge's direction at p (the interior on its left) */
@@ -602,6 +649,17 @@ static void sk_push(sk_run* r, unsigned int kind, double t, double const* p, uns
 	sk_event e;
 	if (!(t <= 1e300) || t > r->stop + r->eps_t)
 		return;
+	if (r->collect)
+	{
+		if (!sk_grow((void**)&r->coll, &r->capcoll, r->ncoll + 1, sizeof(sk_event)))
+		{
+			r->st = QAWS_STATUS_ALLOCATION_FAILURE;
+			return;
+		}
+		e.t = t; e.p[0] = p[0]; e.p[1] = p[1]; e.kind = kind; e.corner = corner; e.a = a; e.b = b; e.seq = 0;
+		r->coll[r->ncoll++] = e;
+		return;
+	}
 	if (!sk_grow((void**)&r->heap, &r->caph, r->nh + 1, sizeof(sk_event)))
 	{
 		r->st = QAWS_STATUS_ALLOCATION_FAILURE;
@@ -655,6 +713,200 @@ static double sk_tend(sk_run const* r, sk_corner const* c)
 			best = ts[i];
 		}
 	return best;
+}
+
+/* ------------------------------------------------------------------------ */
+/*  A grid of where corners and edges pass                                  */
+/* ------------------------------------------------------------------------ */
+
+static void sk_pair_add(sk_run* r, sk_ilist* l, unsigned int i, unsigned int reg)
+{
+	if (!sk_grow((void**)&l->v, &l->cap, l->n + 2, sizeof(unsigned int)))
+	{
+		r->st = QAWS_STATUS_ALLOCATION_FAILURE;
+		return;
+	}
+	l->v[l->n++] = i;
+	l->v[l->n++] = reg;
+}
+
+static unsigned int sk_cell(sk_run const* r, double x, int axis)
+{
+	double u = floor((x - r->glo[axis]) / r->gh);
+	return u < 0 ? 0 : u >= r->gn ? r->gn - 1 : (unsigned int)u;
+}
+
+/* entry (i, reg) into the cells of the box lo..hi widened by w; a box over
+   many cells (a fast corner, a long edge) into the always list instead */
+static void sk_grid_box(sk_run* r, sk_ilist* cells, sk_ilist* always, double const* lo, double const* hi, double w, unsigned int i, unsigned int reg, unsigned int most)
+{
+	unsigned int x0 = sk_cell(r, lo[0] - w, 0), x1 = sk_cell(r, hi[0] + w, 0);
+	unsigned int y0 = sk_cell(r, lo[1] - w, 1), y1 = sk_cell(r, hi[1] + w, 1), x, y;
+	if ((x1 - x0 + 1) * (y1 - y0 + 1) > most)
+	{
+		sk_pair_add(r, always, i, reg);
+		return;
+	}
+	for (y = y0; y <= y1; y++)
+		for (x = x0; x <= x1; x++)
+			sk_pair_add(r, &cells[y * r->gn + x], i, reg);
+}
+
+static void sk_gq_push(sk_run* r, double t, unsigned int i)
+{
+	unsigned int k;
+	if (!sk_grow((void**)&r->gq, &r->capgq, r->ngq + 1, sizeof(sk_gexp)))
+	{
+		r->st = QAWS_STATUS_ALLOCATION_FAILURE;
+		return;
+	}
+	k = r->ngq++;
+	while (k > 0 && r->gq[(k - 1) / 2].t > t)
+	{
+		r->gq[k] = r->gq[(k - 1) / 2];
+		k = (k - 1) / 2;
+	}
+	r->gq[k].t = t;
+	r->gq[k].i = i;
+}
+
+static sk_gexp sk_gq_pop(sk_run* r)
+{
+	sk_gexp top = r->gq[0], last = r->gq[--r->ngq];
+	unsigned int k = 0;
+	for (;;)
+	{
+		unsigned int a = 2 * k + 1, b = a + 1, m = k;
+		double mt = last.t;
+		if (a < r->ngq && r->gq[a].t < mt) { m = a; mt = r->gq[a].t; }
+		if (b < r->ngq && r->gq[b].t < mt) m = b;
+		if (m == k)
+			break;
+		r->gq[k] = r->gq[m];
+		k = m;
+	}
+	if (r->ngq) r->gq[k] = last;
+	return top;
+}
+
+/* corner i from time t on: between lines its straight path while it moves
+   about a cell, then entered again; else always looked at */
+static void sk_grid_corner(sk_run* r, unsigned int i, double t)
+{
+	sk_corner* c = &r->c[i];
+	double a[2], b[2], lo[2], hi[2], ta, v;
+	if (!r->gon || !c->alive)
+		return;
+	c->greg++;
+	if (c->kind != SK_LINEAR || c->fake || r->sup[c->in].kind != SK_LINE || r->sup[c->out].kind != SK_LINE)
+	{
+		c->gexp = 1e300;
+		sk_pair_add(r, &r->gac, i, c->greg);
+		return;
+	}
+	ta = c->t0 > t ? c->t0 : t;
+	v = hypot(c->v[0], c->v[1]);
+	c->gexp = ta + (v * 1e300 > r->gh ? r->gh / v : 1e300);
+	sk_pos(r, c, ta, a);
+	sk_pos(r, c, c->gexp < 1e299 ? c->gexp : ta, b);
+	lo[0] = a[0] < b[0] ? a[0] : b[0]; hi[0] = a[0] < b[0] ? b[0] : a[0];
+	lo[1] = a[1] < b[1] ? a[1] : b[1]; hi[1] = a[1] < b[1] ? b[1] : a[1];
+	sk_grid_box(r, r->gc, &r->gac, lo, hi, r->grc, i, c->greg, 64);
+	if (c->gexp < 1e299)
+		sk_gq_push(r, c->gexp, i);
+}
+
+/* the edge out of corner i from time t on, until a corner's entry runs out:
+   a line between straight paths is within their four ends' hull */
+static void sk_grid_edge(sk_run* r, unsigned int i, double t)
+{
+	sk_corner* c = &r->c[i];
+	sk_corner const* n;
+	double q[8], lo[2], hi[2], ta, tb;
+	unsigned int k;
+	if (!r->gon || !c->alive)
+		return;
+	c->gedge++;
+	n = &r->c[c->next];
+	if (r->sup[c->out].kind != SK_LINE || c->kind != SK_LINEAR || n->kind != SK_LINEAR || c->gexp >= 1e299 || n->gexp >= 1e299)
+	{
+		sk_pair_add(r, &r->gae, i, c->gedge);
+		return;
+	}
+	ta = c->t0 > t ? c->t0 : t;
+	if (n->t0 > ta) ta = n->t0;
+	tb = c->gexp < n->gexp ? c->gexp : n->gexp;
+	if (tb < ta) tb = ta;
+	sk_pos(r, c, ta, q);
+	sk_pos(r, c, tb, q + 2);
+	sk_pos(r, n, ta, q + 4);
+	sk_pos(r, n, tb, q + 6);
+	lo[0] = hi[0] = q[0]; lo[1] = hi[1] = q[1];
+	for (k = 1; k < 4; k++)
+	{
+		if (q[2 * k] < lo[0]) lo[0] = q[2 * k];
+		if (q[2 * k] > hi[0]) hi[0] = q[2 * k];
+		if (q[2 * k + 1] < lo[1]) lo[1] = q[2 * k + 1];
+		if (q[2 * k + 1] > hi[1]) hi[1] = q[2 * k + 1];
+	}
+	sk_grid_box(r, r->ge, &r->gae, lo, hi, r->gre, i, c->gedge, 512);
+}
+
+/* the entries run out by t, again from t (with the edges at the corner) */
+static void sk_grid_advance(sk_run* r, double t)
+{
+	while (r->ngq && r->gq[0].t <= t && r->st == QAWS_STATUS_OK)
+	{
+		sk_gexp g = sk_gq_pop(r);
+		sk_corner const* c = &r->c[g.i];
+		if (!c->alive || c->gexp != g.t)
+			continue;           /* entered again since */
+		sk_grid_corner(r, g.i, t);
+		sk_grid_edge(r, g.i, t);
+		if (r->c[g.i].prev != g.i)
+			sk_grid_edge(r, r->c[g.i].prev, t);
+	}
+}
+
+/* the alive corners below n0 that can be at p (edges: whose out edge can
+   pass through p) at time t, in increasing order, into r->found */
+static void sk_grid_query(sk_run* r, int edges, double const* p, double t, unsigned int n0)
+{
+	unsigned int k, m, pass, cell;
+	sk_grid_advance(r, t);
+	cell = sk_cell(r, p[1], 1) * r->gn + sk_cell(r, p[0], 0);
+	r->nfound = 0;
+	for (pass = 0; pass < 2; pass++)
+	{
+		sk_ilist* s = pass ? (edges ? &r->gae : &r->gac) : (edges ? &r->ge[cell] : &r->gc[cell]);
+		m = 0;
+		for (k = 0; k + 1 < s->n; k += 2)
+		{
+			unsigned int i = s->v[k], reg = s->v[k + 1];
+			sk_corner const* c = &r->c[i];
+			if (!c->alive || (edges ? c->gedge : c->greg) != reg)
+				continue;       /* ended, or entered again: the entry goes */
+			s->v[m++] = i;
+			s->v[m++] = reg;
+			if (i >= n0)
+				continue;
+			if (!sk_grow((void**)&r->found, &r->capfound, r->nfound + 1, sizeof(unsigned int)))
+			{
+				r->st = QAWS_STATUS_ALLOCATION_FAILURE;
+				return;
+			}
+			r->found[r->nfound++] = i;
+		}
+		s->n = m;
+	}
+	if (r->nfound > 1)
+	{
+		qsort(r->found, r->nfound, sizeof(unsigned int), sk_cmp_uint);
+		for (k = 1, m = 1; k < r->nfound; k++)
+			if (r->found[k] != r->found[m - 1])
+				r->found[m++] = r->found[k];
+		r->nfound = m;
+	}
 }
 
 static int sk_same_circle(sk_run const* r, sk_sup const* a, sk_sup const* b);
@@ -799,6 +1051,10 @@ static unsigned int sk_corner_new(sk_run* r, double const* p, double t, unsigned
 		return i;
 	}
 	r->refs[out]++;
+	sk_grid_corner(r, i, t);
+	sk_grid_edge(r, i, t);
+	if (prev != SK_NONE)
+		sk_grid_edge(r, prev, t);
 	return i;
 }
 
@@ -921,11 +1177,88 @@ static double sk_splice_time(sk_run const* r, sk_corner const* c, double sigma)
 	return 1e300;
 }
 
+/* corner i's queued meeting with the supports ahead: its next kept one (a
+   carries 1 + its index, so a stale copy is told apart) */
+static void sk_push_cand(sk_run* r, unsigned int i)
+{
+	sk_corner const* c = &r->c[i];
+	if (c->icand < c->ncand)
+		sk_push(r, SK_EV_CORNER, c->cand[c->icand].t, c->cand[c->icand].p, i, 1 + c->icand, 0);
+}
+
+/* the splitting corner i against every support ahead of it, from time
+   floor on: the earliest kept, the first queued */
+static void sk_split_cands(sk_run* r, unsigned int i, double floor)
+{
+	sk_corner* c = &r->c[i];
+	double here[2];
+	unsigned int e, k, n = 0;
+	sk_pos(r, c, r->now, here);
+	r->collect = 1;
+	r->ncoll = 0;
+	for (e = 0; e < r->nsup; e++)
+	{
+		if (!r->refs[e] || e == c->in || e == c->out)
+			continue;
+		if (sk_resid(&r->sup[e], here, r->now) < -r->eps)
+			continue;
+		if (c->kind == SK_LINEAR && r->sup[e].kind == SK_LINE)
+		{
+			sk_sup const* q = &r->sup[e];
+			if (q->n[0] * c->v[0] + q->n[1] * c->v[1] - q->w >= 0)
+				continue;
+		}
+		sk_hits(r, i, e);
+	}
+	r->collect = 0;
+	c = &r->c[i];
+	c->more = 0;
+	for (k = 0; k < r->ncoll; k++)
+	{
+		sk_event const* f = &r->coll[k];
+		unsigned int j;
+		if (!(f->t > floor))
+			continue;
+		if (n == SK_CANDS && f->t >= c->cand[n - 1].t)
+		{
+			c->more = 1;
+			continue;
+		}
+		if (n == SK_CANDS)
+		{
+			c->more = 1;
+			n--;
+		}
+		for (j = n; j > 0 && c->cand[j - 1].t > f->t; j--)
+			c->cand[j] = c->cand[j - 1];
+		c->cand[j].t = f->t;
+		c->cand[j].p[0] = f->p[0];
+		c->cand[j].p[1] = f->p[1];
+		n++;
+	}
+	c->ncand = n;
+	c->icand = 0;
+	sk_push_cand(r, i);
+}
+
+/* corner i's queued meeting came and went: the next */
+static void sk_next_cand(sk_run* r, unsigned int i, unsigned int a)
+{
+	sk_corner* c = &r->c[i];
+	if (!c->alive || a != 1 + c->icand)
+		return;
+	c->icand++;
+	if (c->icand < c->ncand)
+		sk_push_cand(r, i);
+	else if (c->more)
+		sk_split_cands(r, i, c->cand[c->ncand - 1].t);
+}
+
 static void sk_candidates(sk_run* r, unsigned int i)
 {
 	sk_corner const* c = &r->c[i];
 	unsigned int j = c->next, k = c->prev, e;
-	double theta, here[2];
+	double theta;
 	if (c->fake)
 	{
 		/* a marker on a circle: it ends at the centre, or where the skeleton
@@ -972,21 +1305,7 @@ static void sk_candidates(sk_run* r, unsigned int i)
 	   no later), but between arcs bending in it can */
 	if (!(theta > SK_PI + 1e-9) && (c->smooth || (r->sup[c->in].kind == SK_LINE && r->sup[c->out].kind == SK_LINE)))
 		return;
-	sk_pos(r, c, r->now, here);
-	for (e = 0; e < r->nsup; e++)
-	{
-		if (!r->refs[e] || e == c->in || e == c->out)
-			continue;
-		if (sk_resid(&r->sup[e], here, r->now) < -r->eps)
-			continue;
-		if (c->kind == SK_LINEAR && r->sup[e].kind == SK_LINE)
-		{
-			sk_sup const* q = &r->sup[e];
-			if (q->n[0] * c->v[0] + q->n[1] * c->v[1] - q->w >= 0)
-				continue;
-		}
-		sk_hits(r, i, e);
-	}
+	sk_split_cands(r, i, -1e300);
 }
 
 /* every pair of supports' touching times after now, one support against all */
@@ -1139,6 +1458,7 @@ static void sk_link(sk_run* r, unsigned int a, unsigned int b)
 {
 	r->c[a].next = b;
 	r->c[b].prev = a;
+	sk_grid_edge(r, a, r->now);
 	if (a == b || !r->c[a].alive || !r->c[b].alive)
 		return;
 	if (r->c[b].out != r->c[a].in && r->c[b].out != r->c[a].out)
@@ -1215,6 +1535,12 @@ static void sk_splice(sk_run* r, unsigned int i, double t)
 			}
 			if (k) sp2 = 0; else sp1 = 0;
 		}
+		/* their paths changed: where they pass again */
+		sk_grid_corner(r, c1, t);
+		sk_grid_corner(r, c2, t);
+		sk_grid_edge(r, c1, t);
+		sk_grid_edge(r, c2, t);
+		sk_grid_edge(r, r->c[c1].prev, t);
 	}
 	sk_settle(r, c1, sp1, t);
 	sk_settle(r, c2, sp2, t);
@@ -1354,11 +1680,14 @@ static void sk_settle(sk_run* r, unsigned int i, int spike, double t)
 	/* other corners already here (a spike run to an event's point): one
 	   event with them; corners born with this one are not counted */
 	{
-		unsigned int j;
-		for (j = 0; j < r->nc; j++)
+		unsigned int j, k;
+		sk_grid_query(r, 0, q, t, r->nc);
+		for (k = 0; k < r->nfound; k++)
 		{
-			sk_corner const* o = &r->c[j];
+			sk_corner const* o;
 			double w[2];
+			j = r->found[k];
+			o = &r->c[j];
 			if (j == i || !o->alive || o->fake || (fabs(o->t0 - c->t0) <= r->eps_t && hypot(o->p[0] - c->p[0], o->p[1] - c->p[1]) <= r->eps))
 				continue;
 			/* the other crossing of the same two supports (just past their
@@ -1447,9 +1776,12 @@ static void sk_event_at(sk_run* r, double const* p_in, double t)
 		goto done;
 	}
 	/* the corners at p; a circle's marker only when the circle ends here */
-	for (i = 0; i < n0; i++)
+	sk_grid_query(r, 0, p, t, n0);
+	for (k = 0; k < r->nfound; k++)
 	{
-		sk_corner const* c = &r->c[i];
+		sk_corner const* c;
+		i = r->found[k];
+		c = &r->c[i];
 		if (!c->alive)
 			continue;
 		if (c->fake && c->next == i && !(r->sup[c->in].kind == SK_CIRCLE && fabs(sk_rho(&r->sup[c->in], t)) <= r->eps))
@@ -1466,11 +1798,14 @@ static void sk_event_at(sk_run* r, double const* p_in, double t)
 		}
 	}
 	/* the edges through p (between two corners not at p) */
-	for (i = 0; i < n0; i++)
+	sk_grid_query(r, 1, p, t, n0);
+	for (k = 0; k < r->nfound; k++)
 	{
-		sk_corner const* c = &r->c[i];
+		sk_corner const* c;
 		sk_sup const* e;
 		double a[2], b[2], s, l;
+		i = r->found[k];
+		c = &r->c[i];
 		if (!c->alive || r->tag[i] == stamp || r->tag[c->next] == stamp)
 			continue;
 		e = &r->sup[c->out];
@@ -1847,7 +2182,15 @@ done:
 
 static void sk_run_free(sk_run* r)
 {
-	free(r->c); free(r->refs); free(r->heap); free(r->tag); free(r->sup);
+	unsigned int e;
+	for (e = 0; r->gc && e < r->gn * r->gn; e++)
+	{
+		free(r->gc[e].v);
+		free(r->ge[e].v);
+	}
+	free(r->gc); free(r->ge); free(r->gac.v); free(r->gae.v); free(r->gq);
+	free(r->found);
+	free(r->c); free(r->refs); free(r->heap); free(r->tag); free(r->sup); free(r->coll);
 }
 
 /* an event among circles (its time and point good to half the digits near
@@ -1923,6 +2266,29 @@ static qaws_status sk_simulate(qaws_skeleton* s, int record, double stop, sk_run
 		for (i = 0; i < s->ninput; i++) if (s->sup[i].w < wmin) wmin = s->sup[i].w;
 		r->tbound = (0.5 * s->ext + 10 * s->tol) / wmin;
 	}
+	{
+		/* the grid over the input, about one corner per cell; a corner is
+		   there within the tolerance */
+		double lo[2] = { 1e300, 1e300 }, hi[2] = { -1e300, -1e300 }, w;
+		unsigned int n;
+		for (i = 0; i < s->ninput; i++)
+			for (l = 0; l < 2; l++)
+			{
+				if (s->sup[i].start[l] < lo[l]) lo[l] = s->sup[i].start[l];
+				if (s->sup[i].start[l] > hi[l]) hi[l] = s->sup[i].start[l];
+			}
+		w = hi[0] - lo[0] > hi[1] - lo[1] ? hi[0] - lo[0] : hi[1] - lo[1];
+		n = (unsigned int)sqrt((double)s->ninput);
+		r->gn = n < 4 ? 4 : n > 512 ? 512 : n;
+		r->gh = (w > 0 ? w : 1) / r->gn;
+		r->glo[0] = lo[0]; r->glo[1] = lo[1];
+		r->grc = r->gre = 4 * r->eps;
+		r->gc = (sk_ilist*)calloc((size_t)r->gn * r->gn, sizeof(sk_ilist));
+		r->ge = (sk_ilist*)calloc((size_t)r->gn * r->gn, sizeof(sk_ilist));
+		if (!r->gc || !r->ge)
+			return QAWS_STATUS_ALLOCATION_FAILURE;
+		r->gon = 1;
+	}
 	/* the input's corners, at their nodes */
 	for (l = 0; l < s->nloops && r->st == QAWS_STATUS_OK; l++)
 	{
@@ -1943,6 +2309,7 @@ static qaws_status sk_simulate(qaws_skeleton* s, int record, double stop, sk_run
 		{
 			r->c[r->nc - 1].next = first;
 			r->c[first].prev = r->nc - 1;
+			sk_grid_edge(r, r->nc - 1, 0);
 		}
 	}
 	for (i = 0; i < r->nsup; i++)
@@ -2029,6 +2396,8 @@ static qaws_status sk_simulate(qaws_skeleton* s, int record, double stop, sk_run
 			else
 				sk_pos(r, &r->c[e.corner], r->now, q);
 			sk_event_at(r, q, r->now);
+			if (e.kind == SK_EV_CORNER && e.a)
+				sk_next_cand(r, e.corner, e.a);
 		}
 		for (i = 0; i < nheld; i++)
 			if (r->c[held[i].corner].alive)

@@ -137,13 +137,24 @@ The arcs with neither flag are the pure skeleton, clear of the boundary.
   Consecutive collinear lines with different weights are ambiguous
   (Biedl, Held, Huber, Kaaser and Palfrader, CGTA 2015), and their vertex
   moves at the average speed.
-- **Cost.** Each splitting corner is checked against every live support,
-  and each event scans the live corners, so the cost is quadratic. A
-  random star-shaped polygon takes 0.5 ms with 64 vertices, 90 ms with
-  1,024 and 2.3 s with 4,096.
+- **Cost.**
+  - A splitting corner finds its meetings with every live support ahead,
+    keeps the 8 earliest and queues one at a time: the queue holds a few
+    events per corner, not one per corner and support.
+  - An event finds the corners at its point, and the edges through it,
+    through a grid. Each corner and edge between lines is entered where
+    it passes until it has moved about a cell, then entered again.
+    Corners and edges on circles are looked at by every event.
+  - Collecting a splitting corner's meetings still scans the supports, so
+    that part stays quadratic.
+  - A random star-shaped polygon with spiky sides takes 4 ms with 256
+    vertices, 27 ms with 1,024, 0.26 s with 4,096 and 1.0 s with 8,192
+    (mitered).
 - **Robustness.**
   - Polygons are robust: 1,000 random unions of grid rectangles, whose
-    events are almost all degenerate, all tile their regions.
+    events are almost all degenerate, all tile their regions. Their
+    medial axis (sigma = pi) is weaker: random star-shaped polygons fail
+    from about 1,000 vertices.
   - Curved regions pass every structured case in the tests. Random
     star-shaped regions whose edges are random bulging arcs, with or
     without a round hole, were run 400 times at each sigma:
