@@ -155,25 +155,33 @@ The arcs with neither flag are the pure skeleton, clear of the boundary.
 - **Cost.**
   - A splitting corner finds its meetings with every live support ahead,
     keeps the 8 earliest and queues one at a time: the queue holds a few
-    events per corner, not one per corner and support.
+    events per corner, not one per corner and support. A convex corner
+    whose edges are lines or growing circles' arcs (ahead of their
+    tangents) splits nothing first and looks for none.
+  - Touchings are kept the same way: each support keeps its 8 earliest
+    touchings with the others and queues one at a time. A support without
+    edges is dropped from them, since it never has edges again.
   - An event finds the corners at its point, and the edges through it,
-    through a grid. Each corner and edge between lines is entered where
-    it passes until it has moved about a cell, then entered again.
-    Corners and edges on circles are looked at by every event.
-  - Collecting a splitting corner's meetings still scans the supports, so
-    that part stays quadratic.
-  - A random star-shaped polygon with spiky sides takes 4 ms with 256
-    vertices, 27 ms with 1,024, 0.26 s with 4,096 and 1.0 s with 8,192
-    (mitered).
-  - Their medial axis is slower: 47 ms with 256 vertices, 0.66 s with
-    1,024, about 14 s with 4,096. Corners and edges on circles are not in
-    the grid.
+    through a grid. Each corner and edge is entered where it passes until
+    it has moved about a cell, then entered again:
+    - a straight path by its ends;
+    - a conic by samples, with the largest step between them to spare
+      (near its supports' tangency, where it speeds up, it is looked at
+      by every event);
+    - an arc by its boxes at the samples, with its ends' steps and the
+      circle's growth to spare.
+  - Collecting a splitting corner's meetings, and a new circle's
+    touchings, still scans the supports, so those parts stay quadratic.
+  - A random star-shaped polygon with spiky sides takes 5 ms with 256
+    vertices, 32 ms with 1,024, 0.32 s with 4,096 and 1.1 s with 8,192
+    (mitered). Its medial axis (sigma = pi) takes 10 ms, 92 ms, 1.2 s and
+    7.1 s.
 - **Robustness.**
   - Polygons are robust: 1,000 random unions of grid rectangles, whose
     events are almost all degenerate, all tile their regions. Their
     medial axis (sigma = pi) is weaker. Random star-shaped polygons,
-    nearly round or with spiky sides, all build from 48 to 2,048
-    vertices (686 tried); with spiky sides 1 of 3 fails at 4,096.
+    nearly round or with spiky sides, all build from 48 to 8,192
+    vertices (685 tried).
   - Curved regions pass every structured case in the tests. Random
     star-shaped regions whose edges are random bulging arcs, with or
     without a round hole, were run 400 times at each sigma:
