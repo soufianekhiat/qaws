@@ -376,10 +376,15 @@ together wherever the item applies to both.
       parabolas (line-arc) or hyperbolas / ellipses (arc-arc). Skeleton arcs come
       out as exact rational quadratic Beziers.
     - Done (qaws_skeleton.h, test 99, docs/api/skeleton.md, figures 12 to 14):
-      the three steps below, in f64 and f32. Random curved regions (bulged
-      polygons with round holes) complete exactly in about 4 of 5 cases at
-      sigma = 2 pi and 9 of 10 at sigma = pi; the rest fail with a status, at
-      events among near-tangent circles.
+      the three steps below, in f64 and f32. Runs are checked (loops close,
+      faces close up) and redone at other tolerances when they fail.
+      - Random curved regions (bulged polygons with round holes) build all
+        800 runs in f64 and 793 of 800 in f32, each tiling its region.
+      - The medial axes of random spiky polygons build from 48 to 8,192
+        vertices (685 tried).
+      - Corners and edges are found through a grid, and splits and touchings
+        are kept lazily: 8,192 vertices take 1.0 s mitered and 2.7 s at
+        sigma = pi.
     - Plan:
       1. Polygons with holes, weighted (per-edge speeds), via the generalised
          intersection event: f64 with clustered coincident events. Wavefront at
@@ -429,7 +434,7 @@ the local checkout `C:\git\dunya\extern\clipper2` and compares results and timin
 
 ---
 
-## 8. Status (2026-10-10)
+## 8. Status (2026-10-12)
 
 | Item | State |
 |---|---|
@@ -443,6 +448,8 @@ the local checkout `C:\git\dunya\extern\clipper2` and compares results and timin
 | 8. RectClip, Minkowski | done (`qaws_rectclip.h`): rect clip and rect clip lines, Minkowski sum / difference, float and int64 |
 | 9. Batching, 2.5D | stacks done (`qaws_stack.h`): matched and distance-field sections, cubic blend, Booleans level by level on the executor; batch jobs (`qaws_clip_execute_batch`, clip64, offset, offset64) in parallel with results equal to one call each |
 | 10. Triangulation | done (`qaws_triangulate.h`): constrained Delaunay with exact predicates on a lattice, boundary sampled on the true curves, constraint curves (crossing ones split at their exact crossing), Ruppert refinement with boundary splits on the curves, Botsch-Kobbelt remeshing keeping features on their curves, quadrangulation (greedy plus augmenting paths, all-quads split, convex smoothing); contour stitching between stack levels into closed surface meshes (`qaws_stack_mesh_3d`) |
+| 11. Uniform sampling | done (`qaws_region_sample.h`): the inverse-CDF map from Green's theorem, random, Sobol, stratified, Halton, R2 and blue noise, density sampling, batched, f64 and f32 (test 98); generalized barycentric coordinates pending |
+| 12. Skeletons | done (`qaws_skeleton.h`): straight, weighted and curved skeletons with the generalised intersection event, splice angle from mitered to the medial axis, free-form curves by biarcs, offsets from the skeleton; checked runs with retries, grid and lazy events (test 99) |
 
 Decisions made on the way:
 
