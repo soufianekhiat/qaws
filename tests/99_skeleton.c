@@ -921,8 +921,9 @@ static void test_random_curved(void)
 	char msg[600], fails[300] = "";
 	if (SKT_F32)
 	{
-		/* float vertices: the regions' corners rounded off their curves'
-		   meetings; double builds only */
+		/* float builds make their input exact and build 77 of these 80
+		   runs, but their offsets are too slow and loose to compare;
+		   double builds only */
 		printf("    random curved regions: double builds only\n");
 		return;
 	}
