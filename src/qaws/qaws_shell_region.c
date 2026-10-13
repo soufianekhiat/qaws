@@ -25,15 +25,19 @@
 #if QAWS_SCALAR_IS_FLOAT
 #define SH_TOL 1e-4
 #define SH_ON_SIDE 1e-5     /* a loop's stretch on a side within rounding */
-#define SH_VERTEX_EPS 1e-5  /* the sectors stop this far (radians) either side of a vertex */
+#define SH_VERTEX_EPS 1e-4  /* the sectors stop this far (radians) either side of a vertex (in float, clear of the side: a ray grazing it meets the walk along it nearly tangent) */
 #define SH_CORNER_S 1e-7    /* a side crossed this near its end hits the corner */
 #define SH_TINY_RUN 1e-5
+#define SH_EDGE_NEAR 1e-4   /* a point this near a side (of the domain) is on it */
+#define SH_AREA_SLACK 1e-4  /* a Boolean this much (relative) out of its bounds has lost some */
 #else
 #define SH_TOL 1e-7
 #define SH_ON_SIDE 1e-9
 #define SH_VERTEX_EPS 1e-10
 #define SH_CORNER_S 1e-13
 #define SH_TINY_RUN 1e-13
+#define SH_EDGE_NEAR 1e-7
+#define SH_AREA_SLACK 1e-9
 #endif
 
 /* ------------------------------------------------------------------------ */
@@ -371,7 +375,9 @@ static int sh_cross(qaws_shell_atlas const* a, unsigned int* f, int side, double
 		return 0;
 	sh_add3(T, r.du, y[2], r.dv, y[3]);
 	al = sh_dot(T, EA);
-	be = sh_dot(T, NA);
+	/* across, outwards (a graze may leave heading along the side, its
+	   across part a rounding inward: on across all the same) */
+	be = fabs(sh_dot(T, NA));
 	/* the neighbour's point and frame */
 	sb = sh_invert_side(&a->c[g], sg2, a->rev[*f][side] ? 1 - s : s, r.position);
 	sh_side_uv(&a->c[g], sg2, sb, uv);
@@ -487,6 +493,19 @@ static qaws_status sh_trace(qaws_shell_atlas const* a, unsigned int* f, double* 
 					side = 0;
 					for (q = 0; q < 4; q++)
 						if (fabs(dist[q]) < best) { best = fabs(dist[q]); side = q; }
+					/* none of those at the exit: a graze (a ray along a side,
+					   past it by a rounding while heading along it): the side
+					   it is nearest */
+					if (best > SH_EDGE_NEAR)
+					{
+						double near[4];
+						near[0] = c->pv > 0 ? 1e300 : (ylo[1] - c->v0) / (c->v1 - c->v0);
+						near[1] = c->pu > 0 ? 1e300 : (c->u1 - ylo[0]) / (c->u1 - c->u0);
+						near[2] = c->pv > 0 ? 1e300 : (c->v1 - ylo[1]) / (c->v1 - c->v0);
+						near[3] = c->pu > 0 ? 1e300 : (ylo[0] - c->u0) / (c->u1 - c->u0);
+						for (q = 0; q < 4; q++)
+							if (fabs(near[q]) < best) { best = fabs(near[q]); side = q; }
+					}
 					/* along a closed direction: wrapped into its period (no corners there) */
 					if (side == 0 || side == 2) s = c->pu > 0 ? (ylo[0] - c->u0) / c->pu - floor((ylo[0] - c->u0) / c->pu) : (ylo[0] - c->u0) / (c->u1 - c->u0);
 					else s = c->pv > 0 ? (ylo[1] - c->v0) / c->pv - floor((ylo[1] - c->v0) / c->pv) : (ylo[1] - c->v0) / (c->v1 - c->v0);
@@ -704,13 +723,60 @@ static qaws_status sh_circ_at(sh_circ const* k, double th, unsigned int* f, doub
 	return st;
 }
 
+/* the circle's point at th seen from face f: a point of another face on a
+   side it shares with f (a ray from a vertex running along a curved edge
+   ends on it either side) moved into f's (u, v); *g the face it is on */
+static qaws_status sh_circ_on(sh_circ const* k, unsigned int f, double th, unsigned int* g, double* uv)
+{
+	qaws_shell_atlas const* a = k->a;
+	qaws_internal_sg_ctx const* c;
+	qaws_status st = sh_circ_at(k, th, g, uv);
+	int side;
+	if (st != QAWS_STATUS_OK || *g == f)
+		return st;
+	c = &a->c[*g];
+	for (side = 0; side < 4; side++)
+	{
+		double s, d, p[2];
+		qaws_surface_eval_result r;
+		int sf = a->nbside[*g][side];
+		if (a->nb[*g][side] != f)
+			continue;
+		if (side == 0 || side == 2)
+		{
+			s = (uv[0] - c->u0) / (c->u1 - c->u0);
+			d = fabs(uv[1] - (side == 0 ? c->v0 : c->v1)) / (c->v1 - c->v0);
+		}
+		else
+		{
+			s = (uv[1] - c->v0) / (c->v1 - c->v0);
+			d = fabs(uv[0] - (side == 3 ? c->u0 : c->u1)) / (c->u1 - c->u0);
+		}
+		if (d > SH_EDGE_NEAR)
+			continue;
+		if (s < 0) s = 0;
+		if (s > 1) s = 1;
+		sh_side_uv(c, side, s, p);
+		if (sh_point(c, p, QAWS_SURFACE_EVAL_POSITION, &r) != QAWS_STATUS_OK)
+			continue;
+		sh_side_uv(&a->c[f], sf, sh_invert_side(&a->c[f], sf, a->rev[*g][side] ? 1 - s : s, r.position), uv);
+		*g = f;
+		break;
+	}
+	return QAWS_STATUS_OK;
+}
+
 /* a run of the circle on face f for angles in [ta, tb], its ends given
    (on the face's sides): a Hermite in (u, v) through points of the
-   exponential map, refined until its midpoints agree within the tolerance */
+   exponential map, refined until its midpoints agree within the tolerance
+   or stop gaining (a fold of the rays: a ray from a vertex grazing a curved
+   edge changes face before its end reaches the side, and the end put on
+   the side differs from the ray's by as much at any refinement) */
 static qaws_status sh_fit_run(sh_circ const* k, unsigned int f, double ta, double tb, double const* ea, double const* eb,
 	double tol, qaws_curve** out)
 {
 	unsigned int n = 16;
+	double prev = 1e300;
 	*out = NULL;
 	while (n <= 4096)
 	{
@@ -729,16 +795,16 @@ static qaws_status sh_fit_run(sh_circ const* k, unsigned int f, double ta, doubl
 			double t = ta + dt * j, p[2], qa[2], qb[2], t0, t1;
 			if (j == 0) { p[0] = ea[0]; p[1] = ea[1]; }
 			else if (j == n) { p[0] = eb[0]; p[1] = eb[1]; }
-			else if ((st = sh_circ_at(k, t, &ff, p)) == QAWS_STATUS_OK && ff != f)
+			else if ((st = sh_circ_on(k, f, t, &ff, p)) == QAWS_STATUS_OK && ff != f)
 				st = QAWS_STATUS_NUMERICAL_FAILURE;
 			pts[2 * j] = p[0]; pts[2 * j + 1] = p[1];
 			/* d/dj by a difference on the face (one-sided at the ends) */
 			t0 = j == 0 ? t : t - dl;
 			t1 = j == n ? t : t + dl;
-			if (st == QAWS_STATUS_OK && j == 0) { qa[0] = ea[0]; qa[1] = ea[1]; }
-			else if (st == QAWS_STATUS_OK && (st = sh_circ_at(k, t0, &ff, qa)) == QAWS_STATUS_OK && ff != f) st = QAWS_STATUS_NUMERICAL_FAILURE;
-			if (st == QAWS_STATUS_OK && j == n) { qb[0] = eb[0]; qb[1] = eb[1]; }
-			else if (st == QAWS_STATUS_OK && (st = sh_circ_at(k, t1, &ff, qb)) == QAWS_STATUS_OK && ff != f) st = QAWS_STATUS_NUMERICAL_FAILURE;
+			/* (the ends' own rays, not the ends put on the sides: a difference
+			   over dl would magnify that rounding) */
+			if (st == QAWS_STATUS_OK && (st = sh_circ_on(k, f, t0, &ff, qa)) == QAWS_STATUS_OK && ff != f) st = QAWS_STATUS_NUMERICAL_FAILURE;
+			if (st == QAWS_STATUS_OK && (st = sh_circ_on(k, f, t1, &ff, qb)) == QAWS_STATUS_OK && ff != f) st = QAWS_STATUS_NUMERICAL_FAILURE;
 			if (st == QAWS_STATUS_OK)
 			{
 				/* the copies across a closed direction: qa, qb near p */
@@ -773,7 +839,7 @@ static qaws_status sh_fit_run(sh_circ const* k, unsigned int f, double ta, doubl
 		{
 			double p[2];
 			qaws_eval_result_2d e;
-			if ((st = sh_circ_at(k, ta + dt * (j + 0.5), &ff, p)) != QAWS_STATUS_OK)
+			if ((st = sh_circ_on(k, f, ta + dt * (j + 0.5), &ff, p)) != QAWS_STATUS_OK)
 				break;
 			if (ff != f)
 			{
@@ -795,12 +861,13 @@ static qaws_status sh_fit_run(sh_circ const* k, unsigned int f, double ta, doubl
 			qaws_curve_destroy(cv);
 			return st;
 		}
-		if (worst <= tol || n >= 4096)
+		if (worst <= tol || n >= 4096 || (n >= 64 && worst > 0.7 * prev))
 		{
 			*out = cv;
 			return QAWS_STATUS_OK;
 		}
 		qaws_curve_destroy(cv);
+		prev = worst;
 		n *= 2;
 	}
 	return QAWS_STATUS_NUMERICAL_FAILURE;
@@ -1649,6 +1716,45 @@ static qaws_status sh_region_paths(qaws_surface const* s, qaws_surface_region co
 	return st;
 }
 
+/* a face's Boolean within its bounds (a union no smaller than either part,
+   an intersection no larger, a difference no larger than the first, an
+   exclusive-or no larger than both): when the clip breaks one (boundaries
+   running together along a side, in float), the face's Boolean again with
+   exact topology */
+static int sh_bool_bounded(qaws_clip_type type, double ar, double ap, double aq)
+{
+	double big = ap > aq ? ap : aq, slack = SH_AREA_SLACK * (ap + aq) + 1e-300;
+	switch (type)
+	{
+	case QAWS_CLIP_UNION: return ar >= big - slack && ar <= ap + aq + slack;
+	case QAWS_CLIP_INTERSECTION: return ar <= (ap < aq ? ap : aq) + slack;
+	case QAWS_CLIP_DIFFERENCE: return ar <= ap + slack && ar >= ap - aq - slack;
+	case QAWS_CLIP_XOR: return ar <= ap + aq + slack && ar >= fabs(ap - aq) - slack;
+	default: return 1;
+	}
+}
+
+static qaws_status sh_bool_check(qaws_surface const* s, qaws_clip_type type, qaws_surface_region const* p, qaws_surface_region const* q,
+	qaws_surface_path const* pa, unsigned int na, qaws_surface_path const* pb, unsigned int nb, qaws_surface_region** r)
+{
+	qaws_scalar ar = 0, ap = 0, aq = 0, aw = 0;
+	qaws_surface_region* w = NULL;
+	if (qaws_surface_region_get_area(*r, &ar) != QAWS_STATUS_OK || qaws_surface_region_get_area(p, &ap) != QAWS_STATUS_OK ||
+		qaws_surface_region_get_area(q, &aq) != QAWS_STATUS_OK)
+		return QAWS_STATUS_OK;
+	if (sh_bool_bounded(type, (double)ar, (double)ap, (double)aq))
+		return QAWS_STATUS_OK;
+	if (qaws_surface_clip_exact(s, type, QAWS_FILL_NON_ZERO, pa, na, pb, nb, NULL, &w) == QAWS_STATUS_OK && w &&
+		qaws_surface_region_get_area(w, &aw) == QAWS_STATUS_OK && sh_bool_bounded(type, (double)aw, (double)ap, (double)aq))
+	{
+		qaws_surface_region_destroy(*r);
+		*r = w;
+	}
+	else
+		qaws_surface_region_destroy(w);
+	return QAWS_STATUS_OK;
+}
+
 qaws_status qaws_shell_region_clip(qaws_shell_region const* x, qaws_shell_region const* y, qaws_clip_type type,
 	qaws_shell_region** out_region)
 {
@@ -1689,6 +1795,8 @@ qaws_status qaws_shell_region_clip(qaws_shell_region const* x, qaws_shell_region
 				st = qaws_surface_clip(x->a->s[f], QAWS_CLIP_NONE, QAWS_FILL_NON_ZERO, pa, na, NULL, 0, &r->f[f]);
 			else
 				st = qaws_surface_clip(x->a->s[f], type, QAWS_FILL_NON_ZERO, pa, na, pb, nb, &r->f[f]);
+			if (st == QAWS_STATUS_OK && p && q && r->f[f])
+				st = sh_bool_check(x->a->s[f], type, p, q, pa, na, pb, nb, &r->f[f]);
 		}
 		/* nothing left on the face: none of it */
 		if (st == QAWS_STATUS_OK && r->f[f] && qaws_surface_region_get_path_count(r->f[f]) == 0)
@@ -1714,10 +1822,10 @@ qaws_status qaws_shell_region_clip(qaws_shell_region const* x, qaws_shell_region
 
 /* the circle's arc for angles in [ta, tb] (no vertex inside), its runs
    appended: split where it changes face (bisection on the angle), each
-   run fitted through the rays */
-static qaws_status sh_arc_runs(sh_circ const* k, double ta, double tb, double tol, qaws_shell_curve* sc)
+   run fitted through the rays; m0 samples per turn find the changes */
+static qaws_status sh_arc_runs_at(sh_circ const* k, double ta, double tb, double tol, unsigned int m0, qaws_shell_curve* sc)
 {
-	unsigned int m = (unsigned int)ceil(96 * (tb - ta) / (2 * SH_PI)), j, fcur, fj;
+	unsigned int m = (unsigned int)ceil(m0 * (tb - ta) / (2 * SH_PI)), j, fcur, fj;
 	double s0, p0[2], pj[2];
 	qaws_status st;
 	if (m < 8) m = 8;
@@ -1759,6 +1867,28 @@ static qaws_status sh_arc_runs(sh_circ const* k, double ta, double tb, double to
 			else
 				qaws_curve_destroy(cv);
 		}
+	}
+	return st;
+}
+
+/* the arc's runs, sampled finer when a fit meets another face between the
+   samples (a brief visit there: by a vertex, rays folding over a curved
+   edge); the runs of a failed try dropped */
+static qaws_status sh_arc_runs(sh_circ const* k, double ta, double tb, double tol, qaws_shell_curve* sc)
+{
+	unsigned int m0 = 96, n0 = sc->n;
+	qaws_status st = QAWS_STATUS_NUMERICAL_FAILURE;
+	while (m0 <= 96 * 64)
+	{
+		if ((st = sh_arc_runs_at(k, ta, tb, tol, m0, sc)) != QAWS_STATUS_NUMERICAL_FAILURE)
+			break;
+		while (sc->n > n0)
+		{
+			sc->n--;
+			qaws_surface_curve_destroy(sc->c[sc->n]);
+			qaws_curve_destroy(sc->keep[sc->n]);
+		}
+		m0 *= 4;
 	}
 	return st;
 }

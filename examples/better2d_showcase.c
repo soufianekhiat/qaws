@@ -33,7 +33,7 @@
  *   b2d23_shell_region.svg  curves and regions across shell faces: geodesics over
  *                      a cube's edges, circles across faces, two hemispheres
  *   b2d24_shell_saddle.svg  geodesic disks through saddle vertices: five and six
- *                      faces round a vertex, flat and curved (hypars)
+ *                      faces round a vertex, flat and bent; Booleans on a bent one
  *
  * Each figure lives in better2d_showcase/NN_*.c, compiled as one translation
  * unit.

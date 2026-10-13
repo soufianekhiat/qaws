@@ -305,3 +305,10 @@ Each item lands with tests in f64 and f32, docs, and a showcase figure.
 - Follow-up: more saddles. The monkey saddle (six squares, 3 pi) matches
   pi r² + (theta − 2 pi)/2 (r − rho)² to 5e-11; curved saddles (hypar faces)
   converge across tolerances to 1.4e-7 (test 107). Figure 24.
+- Follow-up: curved saddles. Bicubic patches bent round a vertex (curved
+  faces and edges): grazing exits cross at the nearest side, ray ends on a
+  shared side count for either face, arc fits stop when refining no longer
+  gains, end derivatives taken from the rays rather than the ends put on the
+  sides (a circle 21 s to 1.7 s, a vertex disk 136 s to 13 s), and each
+  face's Boolean checked against its bounds, redone exactly when out. Test
+  107 runs every Boolean of two disks through the vertex; figure 24.

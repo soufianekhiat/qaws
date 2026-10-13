@@ -17,6 +17,8 @@
  *     against pi r^2 + (pi / 2)(r - rho0)^2; the same six as hypars (far
  *     corners pushed off the plane, the faces curved): the disk at two
  *     tolerances, warped either way alike, larger than the flat one
+ *   - the monkey saddle bent (bicubic faces with curved edges): two disks
+ *     through the vertex under every Boolean, by inclusion and exclusion
  */
 
 #include "test_common.h"
@@ -321,6 +323,77 @@ static void test_monkey_saddle(void)
 		&& fabs(fine - other) <= (SHT_F32 ? 2e-4 : 1e-9), msg);
 }
 
+/* the monkey saddle bent: bicubic patches whose control grid is the flat
+   one moved by a smooth map (shared edges share control points) */
+static void sht_bent_monkey(qaws_surface** f)
+{
+	static double const D[6][3] = { { 1, 0, 0 }, { 0, 1, 0 }, { 0, 0, 1 }, { -1, 0, 0 }, { 0, -1, 0 }, { 0, 0, -1 } };
+	unsigned int i, j, q;
+	for (i = 0; i < 6; i++)
+	{
+		double const* a = D[i];
+		double const* b = D[(i + 1) % 6];
+		qaws_vec3 cp[16];
+		qaws_surface_bezier_desc bd;
+		for (j = 0; j < 4; j++)
+			for (q = 0; q < 4; q++)
+			{
+				double x = 1.6 * (a[0] * j + b[0] * q) / 3, y = 1.6 * (a[1] * j + b[1] * q) / 3, z = 1.6 * (a[2] * j + b[2] * q) / 3;
+				cp[4 * j + q].x = (qaws_scalar)(x + 0.35 * sin(2.2 * y + 0.7 * z));
+				cp[4 * j + q].y = (qaws_scalar)(y + 0.35 * sin(2.2 * z + 0.7 * x));
+				cp[4 * j + q].z = (qaws_scalar)(z + 0.45 * sin(2.0 * x + 1.3 * y) * cos(1.1 * z));
+			}
+		memset(&bd, 0, sizeof(bd));
+		bd.u_degree = 3; bd.v_degree = 3; bd.control_points = cp; bd.u_point_count = 4; bd.v_point_count = 4;
+		f[i] = NULL;
+		qaws_surface_create_bezier(&bd, &f[i]);
+	}
+}
+
+static void test_bent_monkey(void)
+{
+	static qaws_clip_type const T[4] = { QAWS_CLIP_UNION, QAWS_CLIP_INTERSECTION, QAWS_CLIP_DIFFERENCE, QAWS_CLIP_XOR };
+	qaws_surface* f[6];
+	qaws_shell_atlas* a = NULL;
+	qaws_shell_region *g = NULL, *h = NULL, *x[4] = { 0 };
+	qaws_scalar A = 0, B = 0, X[4] = { 0, 0, 0, 0 };
+	qaws_status st, s1 = QAWS_STATUS_INVALID_ARGUMENT, s2 = QAWS_STATUS_INVALID_ARGUMENT, sx = QAWS_STATUS_OK;
+	double tol = SHT_F32 ? 0 : 1e-6, e0, e1, e2, e3;
+	unsigned int i;
+	char msg[300];
+	sht_bent_monkey(f);
+	st = qaws_shell_atlas_create((qaws_surface const* const*)f, 6, 0, &a);
+	if (st == QAWS_STATUS_OK)
+	{
+		s1 = qaws_shell_region_create_geodesic_disk(a, sht_pt(0, 0.2, 0.2), (qaws_scalar)0.6, (qaws_scalar)tol, &g);
+		s2 = qaws_shell_region_create_geodesic_disk(a, sht_pt(2, 0.22, 0.19), (qaws_scalar)0.55, (qaws_scalar)tol, &h);
+	}
+	if (s1 == QAWS_STATUS_OK && s2 == QAWS_STATUS_OK)
+	{
+		qaws_shell_region_get_area(g, &A);
+		qaws_shell_region_get_area(h, &B);
+		for (i = 0; i < 4 && sx == QAWS_STATUS_OK; i++)
+			if ((sx = qaws_shell_region_clip(g, h, T[i], &x[i])) == QAWS_STATUS_OK)
+				qaws_shell_region_get_area(x[i], &X[i]);
+	}
+	e1 = fabs((double)X[0] + X[1] - A - B);
+	e2 = fabs((double)X[2] + X[1] - A);
+	e3 = fabs((double)X[3] - (X[0] - X[1]));
+	/* the disks against the f64 run at the default tolerance (no closed form
+	   on curved faces): a piece lost in float shows here */
+	e0 = fabs((double)A - 1.1462892) + fabs((double)B - 0.9885544);
+	sprintf(msg, "bent monkey saddle (bicubic faces, curved edges): disks %.6f, %.6f through the vertex (against f64 %.2g); union + intersection - both %.2g, "
+		"difference + intersection - A %.2g, xor - (union - intersection) %.2g (intersection %.4f)", (double)A, (double)B, e0, e1, e2, e3, (double)X[1]);
+	TEST_ASSERT(st == QAWS_STATUS_OK && s1 == QAWS_STATUS_OK && s2 == QAWS_STATUS_OK && sx == QAWS_STATUS_OK && X[1] > 0.1
+		&& e0 <= (SHT_F32 ? 2e-4 : 1e-6)
+		&& e1 <= (SHT_F32 ? 1e-4 : 1e-7) && e2 <= (SHT_F32 ? 1e-4 : 1e-7) && e3 <= (SHT_F32 ? 1e-4 : 1e-7), msg);
+	for (i = 0; i < 4; i++) qaws_shell_region_destroy(x[i]);
+	qaws_shell_region_destroy(g);
+	qaws_shell_region_destroy(h);
+	qaws_shell_atlas_destroy(a);
+	for (i = 0; i < 6; i++) qaws_surface_destroy(f[i]);
+}
+
 int test_107_shell_region_main(void)
 {
 	g_pass = 0;
@@ -330,6 +403,7 @@ int test_107_shell_region_main(void)
 	test_hemispheres();
 	test_saddle();
 	test_monkey_saddle();
+	test_bent_monkey();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
 }

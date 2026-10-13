@@ -72,13 +72,15 @@ qaws_shell_exp(atlas, p, direction, length, &q, &velocity, &crossings);
 | Saddle (five squares round a vertex, angle 5 pi/2): a disk through it against pi r² + (pi/4)(r − rho)² | 3e-11 |
 | Monkey saddle (six squares, angle 3 pi): a disk through the vertex against pi r² + (pi/2)(r − rho)² | 5e-11 |
 | Monkey saddle of hypars (curved faces): the disk at two tolerances; warped either way | 1.4e-7; 0 |
+| Monkey saddle of bicubic patches (curved faces and edges): two disks through the vertex, union + intersection − both; against the f64 disks in f32 | 1e-9; 1.3e-5 |
 
 In f32 the same checks hold to 3e-5. Figure 23 shows a fan of straightest
 geodesics over a cube's edges, circles over edges and their union, and
 circles across two hemispheres, a disk round a cube corner and a disk
 through a saddle vertex. Figure 24 shows disks through saddle vertices: five
-and six faces round a vertex, flat and curved, rays parting at the vertex,
-and two disks united across it.
+and six faces round a vertex, flat and bent into bicubic patches, rays
+parting at the vertex, and on the bent monkey saddle two disks through the
+vertex under union, intersection, both differences and exclusive-or.
 
 ## Limits
 
@@ -96,7 +98,7 @@ the points within r along the shell, vertices included.
   the circle's end point jumps there. Those jumps are found among 256 rays
   and pinned down by bisection on the angle.
 - **Sectors.** The disk is the union of sectors between the vertex
-  directions, stopping 1e-10 rad either side of each (1e-5 in float) and
+  directions, stopping 1e-10 rad either side of each (1e-4 in float) and
   none wider than a quarter turn. Each sector is a ray out, the circle's arc
   and a ray back.
 - **Behind a convex vertex.** Behind a cube's corner (a cone of angle
@@ -113,6 +115,19 @@ the points within r along the shell, vertices included.
 - **Runs by a corner.** A ray passing a vertex by a hair may leave a run a
   rounding long (left out) or, from its rounded start, overshoot the domain
   by a rounding at its end (shortened by as much).
+- **Curved edges.** Faces bent into bicubic patches have curved edges, and
+  rays from a vertex along them fold. A ray grazing a side, past it by a
+  rounding while heading along it, crosses at the side it is nearest. A
+  ray ending exactly on a shared side counts for either face. Arc fits stop
+  refining when doubling no longer gains, since a fold leaves a kink no
+  sampling removes. In float the vertex sectors stop 1e-4 rad inside the
+  sides: a ray hugging a side meets the boundary walked along it nearly
+  tangent, and the float clipper can lose a piece there.
+- **Booleans checked.** Each face's Boolean must keep its bounds (a union no
+  smaller than either part, an intersection no larger, a difference no
+  larger than the first, an exclusive-or between the difference and the
+  sum). Out of them, the face's Boolean is redone with exact topology
+  (`qaws_surface_clip_exact`).
 - **Chains.** A sector's runs on the centre's face meet inside the face, so
   regions take each loop's consecutive runs on one face as one chain (one
   composite curve).
