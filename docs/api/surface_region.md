@@ -1,0 +1,140 @@
+# API Reference: qaws_surface_region.h
+
+Curves and regions on a parametric surface, traced by the surface's own
+geometry (the plan: `docs/surface_regions_plan.md`). A geodesic is solved
+on the surface. A geodesic circle is the set of points at one geodesic
+distance from its centre. Both are kept as their images in the parameter
+plane (u, v), which are generally curved. They are not projections of
+planar shapes.
+
+```c
+qaws_surface_curve* c;
+qaws_surface_curve_create_geodesic(surface, a_uv, b_uv, 0, &c);           /* shortest path a -> b */
+qaws_surface_curve_create_geodesic_ray(surface, p_uv, dir_uv, len, 0, &c); /* from p along dir */
+qaws_surface_curve_create_geodesic_arc(surface, centre_uv, r, a0, a1, 0, &c); /* geodesic circle arc */
+qaws_surface_curve_create_uv(surface, uv_curve, &c);                       /* a curve drawn in (u, v) */
+
+qaws_surface_curve_get_uv(c);              /* its (u, v) image: a qaws 2D curve */
+qaws_surface_curve_get_length(c, &len);    /* surface length */
+qaws_surface_curve_evaluate(c, t, &uv, &xyz);
+qaws_surface_curve_destroy(c);
+
+qaws_surface_get_metric(surface, u, v, g, christoffel);   /* E F G, G^k_ij */
+qaws_surface_exp(surface, p_uv, dir_uv, len, 0, &q, &vel); /* the exponential map */
+```
+
+## The geometry
+
+The surface S(u, v) carries the metric
+
+```
+ds^2 = E du^2 + 2 F du dv + G dv^2,   E = S_u.S_u, F = S_u.S_v, G = S_v.S_v,
+```
+
+and its geodesics solve, by arc length,
+
+```
+u'' = -(G1_11 u'^2 + 2 G1_12 u' v' + G1_22 v'^2),
+v'' = -(G2_11 u'^2 + 2 G2_12 u' v' + G2_22 v'^2),
+```
+
+with `G^k_ij = g^-1 (S_u . S_ij, S_v . S_ij)` from the surface's first and
+second derivatives. This works for every surface kind that evaluates
+them.
+
+## How curves are built
+
+- **Integration**: the Dormand-Prince 5(4) pair with error control on the
+  (u, v) position.
+- **Representation**: a cubic Hermite spline in (u, v) through equal steps,
+  with positions and velocities exact at the nodes. Geodesics step by arc
+  length, circles by angle. The steps are halved until every span's
+  midpoint is within the tolerance of the solution.
+- **Geodesic between two points**: shooting from a. Newton runs on the
+  leaving angle and the length. The angle's derivative comes from
+  neighbouring shots; the length's is the end velocity. The start is the
+  chord. When Newton fails from there, continuation walks the target along
+  the chord. The result is locally shortest: on surfaces with several
+  geodesics between the points, it is the one the chord leads to.
+- **Geodesic circle**: theta -> exp_c(r (cos theta e1 + sin theta e2)).
+  - e1 is along S_u, and e2 is a quarter turn from it about S_u x S_v.
+  - Tangents come from a five-point stencil in theta.
+  - A full turn closes the curve.
+  - A circle that crosses itself (past the injectivity radius at its
+    centre) is refused with `INVALID_ARGUMENT`.
+- **Closed directions** (a cylinder's or a revolution's u): opposite edges
+  of the domain that coincide in space are found at creation. Curves cross
+  them continuously, with their (u, v) images in the covering plane (u past
+  the domain where they went round). Poles (S_u x S_v = 0) are not crossed
+  yet.
+
+## Accuracy and cost
+
+- **Tolerance**: relative to the parameter domain's diagonal. It defaults
+  to 1e-10 (1e-5 in float builds).
+- **Test 101**, in f64:
+  - against closed forms: a geodesic's length on a sphere matches the great
+    circle to 3e-14, a geodesic circle's points and length 2 pi R sin(r/R)
+    match to 1.4e-10, geodesics on a cylinder match the unrolled distances
+    to 1e-15, and a flat non-affine patch gives straight geodesics to 4e-14;
+  - against Mathematica (NDSolve) on a bicubic Bezier patch: the
+    exponential map, a geodesic between two points and a geodesic circle
+    agree to 3e-14.
+- **Cost**: a geodesic across a sphere takes about 2 ms; a full circle with
+  512 spans about 40 ms.
+
+## Tests
+
+Test 101 (`tests/101_surface_geodesic.c`), f64 and f32, with ground truth
+from `tests/reference/101_surface_geodesic.wls`. Figure 16 in
+`examples/better2d_showcase` draws geodesic polygons and circles on a
+sphere, a bicubic patch and a torus, beside their parameter planes.
+
+## Regions: Booleans and measures
+
+```c
+qaws_surface_curve const* edges[4] = { e0, e1, e2, e3 };
+qaws_surface_path square = { edges, 4, 1 }, circle = { &c, 1, 1 };
+qaws_surface_region* r;
+qaws_surface_clip(surface, QAWS_CLIP_UNION, QAWS_FILL_NON_ZERO, &square, 1, &circle, 1, &r);
+
+qaws_surface_region_get_area(r, &area);          /* surface area */
+qaws_surface_region_get_perimeter(r, &length);   /* boundary length on the surface */
+qaws_surface_region_integrate(r, f, user, dim, out);   /* integral of f dA */
+qaws_surface_region_contains(r, uv, &inside);    /* 1, 0, or -1 on the boundary */
+qaws_surface_region_get_path(r, i, &uv_path);    /* the loops in (u, v) */
+qaws_surface_region_create_trimmed(r, &trimmed); /* a trimmed surface */
+qaws_surface_region_destroy(r);
+```
+
+- **Topology.** A patch maps (u, v) one to one onto the surface. So two
+  curves cross on the surface exactly where their (u, v) images cross, and
+  a point is inside a region exactly when its (u, v) is. `qaws_clip` on the
+  images gives the regions' topology, under every clip type and fill rule.
+  The curves are the true ones, traced intrinsically, so there is no
+  projection error.
+- **Area** is ∬ sqrt(EG − F²) du dv. Integrals ∬ f dA use the same
+  construction, with any density f against the area element. Both go by
+  Green's theorem: P(u, v) is the integral of the area element along u,
+  with 8-point Gauss panels over each eighth of the domain. ∮ P dv is then
+  taken round the loops, with 8-point Gauss on every half span of the
+  boundary curves.
+- **Perimeter**: ∫ sqrt(g(c', c')) dt along the loops.
+- **Seams**: regions must not cross a closed direction's seam yet. That is
+  the next step of the plan.
+
+### Accuracy (test 102, f64)
+
+| Check | Agreement |
+|---|---|
+| Sphere: geodesic circles' areas against 2 pi R² (1 − cos(r/R)) | 7e-11 |
+| Sphere: perimeters against 2 pi R sin(r/R) | 1.1e-10 |
+| Sphere: a geodesic triangle against Girard's R² (angles − pi) | 2.2e-10 |
+| Sphere: union, intersection, difference, xor by inclusion and exclusion | 4e-13 |
+| Flat sheared patch: a geodesic circle's area against pi r² | 4e-11 |
+| Flat sheared patch: a union against the 2D engine on the plane's coordinates | 3e-11 |
+| Cylinder: a geodesic circle against the unrolled pi r² | 5e-11 |
+| Wavy bicubic patch: Gauss-Bonnet on a geodesic triangle (∬ K dA against the angle sum less pi) | 6e-12 |
+
+A Boolean of two circles with their areas takes about 10 ms. Figure 17
+shades Booleans on a patch and a sphere with their surface areas.

@@ -16,6 +16,10 @@
  *   b2d14_freeform_skeleton.svg  skeletons of Bezier and NURBS regions through arc splines
  *   b2d15_mean_value.svg  mean value coordinates over curved regions: a cage
  *                      deformation by the curves' own control points, interpolants
+ *   b2d16_surface_geodesic.svg  geodesic polygons and circles traced on a sphere,
+ *                      a bicubic patch and a torus, beside their parameter planes
+ *   b2d17_surface_boolean.svg  Booleans of geodesic squares and circles on a patch
+ *                      and a sphere, with their surface areas
  *
  * Each figure lives in better2d_showcase/NN_*.c, compiled as one translation
  * unit.
@@ -53,6 +57,8 @@
 #include "better2d_showcase/13_curved_skeleton.c"
 #include "better2d_showcase/14_freeform_skeleton.c"
 #include "better2d_showcase/15_mean_value.c"
+#include "better2d_showcase/16_surface_geodesic.c"
+#include "better2d_showcase/17_surface_boolean.c"
 
 int main(void)
 {
@@ -73,5 +79,7 @@ int main(void)
 	demo_curved_skeleton();
 	demo_freeform_skeleton();
 	demo_mean_value();
+	demo_surface_geodesic();
+	demo_surface_boolean();
 	return 0;
 }

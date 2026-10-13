@@ -65,6 +65,7 @@
 #include "qaws_triangulate.h"
 #include "qaws_region_sample.h"
 #include "qaws_mean_value.h"
+#include "qaws_surface_region.h"
 #include "qaws_skeleton.h"
 #include "qaws_alloc.h"
 #include "qaws_inline.h"

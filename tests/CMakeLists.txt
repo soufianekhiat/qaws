@@ -102,6 +102,8 @@ add_executable(
   98_region_sample.c
   99_skeleton.c
   100_mean_value.c
+  101_surface_geodesic.c
+  102_surface_region.c
 )
 
 # The amalgamated library exports exactly the same symbols, so the tests can
