@@ -107,11 +107,13 @@ qaws_status qaws_shell_curve_create_geodesic_circle(qaws_shell_atlas const* atla
 
 /* The shortest path from p0 to p1 across faces: the geodesic between them
    (aimed by Gauss-Newton on its angle and length); where a hole (a free
-   trim loop) is in the way, the taut path round it: the geodesics from
-   either end touching its rim, joined along the rim, the shorter way round,
-   unless a geodesic aimed from a fan of first angles is clear of the hole
-   and shorter (over a torus's tube, past its hole). One hole between the
-   ends; NUMERICAL_FAILURE when no path is found. */
+   trim loop) is in the way, the taut path round the holes: with both ends
+   on the holes' face, the shortest over the graph of the geodesics touching
+   the holes (from the ends and between holes) and the rims' stretches, the
+   holes those a candidate runs into (up to 6); with an end on another face,
+   the rays grazing the one hole, joined along its rim. A geodesic aimed from
+   a fan of first angles, clear of the holes and shorter, wins (over a
+   torus's tube, past its hole). NUMERICAL_FAILURE when no path is found. */
 qaws_status qaws_shell_curve_create_shortest_path(qaws_shell_atlas const* atlas, qaws_shell_point p0, qaws_shell_point p1,
 	qaws_scalar tolerance, qaws_shell_curve** out_curve);
 

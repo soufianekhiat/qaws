@@ -352,3 +352,9 @@ Each item lands with tests in f64 and f32, docs, and a showcase figure.
   checks a plate with a round hole against the closed form; figure 25's
   open holes now show these paths. Open: several holes between the ends;
   a complete search of geodesics where they refocus.
+- Follow-up: shortest paths round several holes (a graph of the geodesics
+  touching them, from the ends and between holes, and the rims' stretches,
+  searched by Dijkstra; holes added as candidates run into them), and from
+  an end on another face. Trace steps on trimmed faces go no further than
+  the nearest free piece, so thin holes stop rays. Test 108 (two and three
+  holes against the closed form, a neighbouring face, holes 0.002 across).

@@ -23,6 +23,9 @@
  *   - a torus with a hole where its seams cross, filled by a disk of the same
  *     surface: disks over the hole and a ray against the whole torus
  *   - shortest paths on a plate with a round hole against the taut string
+ *   - shortest paths round two and three holes in a row against the closed
+ *     form; from a neighbouring face round a hole against the unfolded one
+ *   - holes far smaller than a trace step stop the rays through them
  *   - an open loop refused; a centre off its trimmed face refused
  */
 
@@ -652,6 +655,143 @@ static void test_shortest_path(void)
 	qaws_curve_destroy(hole);
 }
 
+/* a plate with holes of radius r (space) at (xs[i], 0), y = 0 their line */
+static qaws_shell_atlas* str_holes(qaws_surface* sa, qaws_curve** oc, qaws_curve** hc, double const* xs, unsigned int n, double r)
+{
+	qaws_curve const *ol[4], *hl[4];
+	qaws_path_2d pa[5];
+	qaws_shell_face_desc fd;
+	qaws_shell_atlas* a = NULL;
+	unsigned int i;
+	str_square(oc, 0.125, 0.875);
+	for (i = 0; i < 4; i++) ol[i] = oc[i];
+	pa[0].curves = ol; pa[0].curve_count = 4; pa[0].closed = 1;
+	for (i = 0; i < n; i++)
+	{
+		hc[i] = str_arc((xs[i] + 2) / 4, 0.5, r / 4, 0, 2 * STR_PI);
+		hl[i] = hc[i];
+		pa[1 + i].curves = &hl[i]; pa[1 + i].curve_count = 1; pa[1 + i].closed = 1;
+	}
+	fd.surface = sa; fd.trims = pa; fd.trim_count = 1 + n;
+	qaws_shell_atlas_create_trimmed(&fd, 1, 0, &a);
+	return a;
+}
+
+static void test_shortest_holes(void)
+{
+	/* holes in a row, the ends on their line beyond them: over their tops,
+	   the tangents from the ends, the arcs to the tops and the segments
+	   between the tops */
+	static double const x2[2] = { -0.6, 0.6 }, x3[3] = { -0.8, 0, 0.8 };
+	double worst = 0, tol = STR_F32 ? 1e-5 : 1e-9;
+	unsigned int z, i, bad = 0;
+	char msg[200];
+	for (z = 0; z < 2; z++)
+	{
+		qaws_surface* sa = str_plane(STR_P00, STR_P10, STR_P01, STR_P11);
+		qaws_curve *oc[4], *hc[3];
+		unsigned int n = z ? 3 : 2;
+		double r = z ? 0.25 : 0.3, e = z ? 1.5 : 1.4, d = e - (z ? 0.8 : 0.6), span = z ? 1.6 : 1.2, ref, L0 = 0;
+		qaws_shell_atlas* a = str_holes(sa, oc, hc, z ? x3 : x2, n, r);
+		qaws_shell_curve* c = NULL;
+		ref = 2 * sqrt(d * d - r * r) + 2 * r * (STR_PI / 2 - acos(r / d)) + span;
+		if (a && qaws_shell_curve_create_shortest_path(a, str_pt(0, (-e + 2) / 4, 0.5), str_pt(0, (e + 2) / 4, 0.5), 0, &c) == QAWS_STATUS_OK)
+		{
+			qaws_scalar L = 0;
+			qaws_shell_curve_get_length(c, &L);
+			L0 = (double)L;
+			if (fabs(L0 - ref) > worst) worst = fabs(L0 - ref);
+		}
+		else
+			bad++;
+		qaws_shell_curve_destroy(c);
+		qaws_shell_atlas_destroy(a);
+		qaws_surface_destroy(sa);
+		for (i = 0; i < 4; i++) qaws_curve_destroy(oc[i]);
+		for (i = 0; i < n; i++) qaws_curve_destroy(hc[i]);
+	}
+	sprintf(msg, "shortest paths round two and three holes in a row: %u failed, against the closed form %.2g", bad, worst);
+	TEST_ASSERT(bad == 0 && worst <= tol, msg);
+}
+
+static void test_shortest_other_face(void)
+{
+	/* an end on a neighbouring face: a plate x in [-1, 1] with a hole of
+	   radius 0.3 at the origin and a plate x in [-3, -1] beside it, in the
+	   same plane (unfolded, the taut string of the plane) */
+	static double const A00[3] = { -1.5, -1.5, 0 }, A10[3] = { 1.5, -1.5, 0 }, A01[3] = { -1.5, 1.5, 0 }, A11[3] = { 1.5, 1.5, 0 };
+	static double const B00[3] = { -3, -1, 0 }, B10[3] = { -1, -1, 0 }, B01[3] = { -3, 1, 0 }, B11[3] = { -1, 1, 0 };
+	qaws_surface *sa = str_plane(A00, A10, A01, A11), *sb = str_plane(B00, B10, B01, B11);
+	qaws_curve *oc[4], *hole = str_arc(0.5, 0.5, 0.1, 0, 2 * STR_PI);
+	qaws_curve const *ol[4], *hl[1];
+	qaws_path_2d pa[2];
+	qaws_shell_face_desc fd[2];
+	qaws_shell_atlas* a = NULL;
+	qaws_shell_curve* c = NULL;
+	qaws_scalar L = 0;
+	qaws_status st;
+	double ref = str_taut(-1.5, 0.05, 0.8, -0.1, 0.3), tol = STR_F32 ? 1e-4 : 1e-6;
+	unsigned int i;
+	char msg[200];
+	str_square(oc, 1.0 / 6, 5.0 / 6);
+	for (i = 0; i < 4; i++) ol[i] = oc[i];
+	hl[0] = hole;
+	pa[0].curves = ol; pa[0].curve_count = 4; pa[0].closed = 1;
+	pa[1].curves = hl; pa[1].curve_count = 1; pa[1].closed = 1;
+	fd[0].surface = sa; fd[0].trims = pa; fd[0].trim_count = 2;
+	fd[1].surface = sb; fd[1].trims = NULL; fd[1].trim_count = 0;
+	st = qaws_shell_atlas_create_trimmed(fd, 2, 0, &a);
+	if (st == QAWS_STATUS_OK)
+		st = qaws_shell_curve_create_shortest_path(a, str_pt(1, 0.75, 0.525), str_pt(0, (0.8 + 1.5) / 3, (-0.1 + 1.5) / 3), 0, &c);
+	if (st == QAWS_STATUS_OK) qaws_shell_curve_get_length(c, &L);
+	sprintf(msg, "shortest path from a neighbouring face round the hole (%d): against the unfolded taut string %.2g", (int)st, fabs((double)L - ref));
+	TEST_ASSERT(st == QAWS_STATUS_OK && fabs((double)L - ref) <= tol, msg);
+	qaws_shell_curve_destroy(c);
+	qaws_shell_atlas_destroy(a);
+	qaws_surface_destroy(sa); qaws_surface_destroy(sb);
+	for (i = 0; i < 4; i++) qaws_curve_destroy(oc[i]);
+	qaws_curve_destroy(hole);
+}
+
+static void test_thin_holes(void)
+{
+	/* holes far smaller than a trace step: a ray through each stops at it,
+	   one passing beside it does not */
+	static double const rs[3] = { 0.004, 0.0015, 0.0005 };
+	unsigned int z, i, stopped = 0, passed = 0;
+	char msg[200];
+	for (z = 0; z < 3; z++)
+	{
+		qaws_surface* sa = str_plane(STR_P00, STR_P10, STR_P01, STR_P11);
+		qaws_curve *oc[4], *hole = str_arc(0.5, 0.5, rs[z], 0, 2 * STR_PI);
+		qaws_curve const *ol[4], *hl[1];
+		qaws_path_2d pa[2];
+		qaws_shell_face_desc fd;
+		qaws_shell_atlas* a = NULL;
+		qaws_shell_point q;
+		qaws_vec2 d;
+		str_square(oc, 0.125, 0.875);
+		for (i = 0; i < 4; i++) ol[i] = oc[i];
+		hl[0] = hole;
+		pa[0].curves = ol; pa[0].curve_count = 4; pa[0].closed = 1;
+		pa[1].curves = hl; pa[1].curve_count = 1; pa[1].closed = 1;
+		fd.surface = sa; fd.trims = pa; fd.trim_count = 2;
+		if (qaws_shell_atlas_create_trimmed(&fd, 1, 0, &a) == QAWS_STATUS_OK)
+		{
+			d.x = 1; d.y = 0;
+			stopped += qaws_shell_exp(a, str_pt(0, 0.3, 0.5), d, (qaws_scalar)1.6, &q, NULL, NULL) == QAWS_STATUS_OUT_OF_RANGE;
+			d.y = (qaws_scalar)(2.5 * rs[z] / 0.2);
+			passed += qaws_shell_exp(a, str_pt(0, 0.3, 0.5), d, (qaws_scalar)1.6, &q, NULL, NULL) == QAWS_STATUS_OK;
+		}
+		qaws_shell_atlas_destroy(a);
+		qaws_surface_destroy(sa);
+		for (i = 0; i < 4; i++) qaws_curve_destroy(oc[i]);
+		qaws_curve_destroy(hole);
+	}
+	sprintf(msg, "thin holes (0.016, 0.006 and 0.002 across, a step 0.2): rays through them stopped %u/3, beside them passing %u/3", stopped, passed);
+	TEST_ASSERT(stopped == 3 && passed == 3, msg);
+}
+
 static void test_refusals(void)
 {
 	qaws_surface* sa = str_plane(STR_P00, STR_P10, STR_P01, STR_P11);
@@ -707,6 +847,9 @@ int test_108_shell_trimmed_main(void)
 	test_capped_tube();
 	test_torus();
 	test_shortest_path();
+	test_shortest_holes();
+	test_shortest_other_face();
+	test_thin_holes();
 	test_refusals();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;

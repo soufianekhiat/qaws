@@ -161,34 +161,53 @@ gives the shortest path between two points. A ray stops at a hole's rim
 (a free trim loop); the shortest path goes round the hole instead.
 
 - **Clear.** It aims the geodesic from p0 at p1 by Gauss-Newton on its
-  angle and length. If that geodesic is not stopped by a hole, it is the
-  path.
-- **Round a hole.** It looks for the geodesics from each end that touch
-  the rim, joins each pair along the rim either way round, and keeps the
-  shortest of these taut strings.
-  - **Ends on the hole's face.** The touching places are found on the
-    untraced surface: the tangency (the cross product of the arrival
-    velocity with the rim's tangent) changes sign over 64 places round
-    the loop, and a secant step refines each sign change. A touching
-    geodesic that runs through the hole is dropped.
-  - **Ends on other faces.** It uses the traced rays that graze the rim,
-    found by bisection between hitting it and passing it.
+  angle and length. If no hole stops that geodesic, it is the path.
+- **Ends on the holes' face.** It builds a graph and searches it with
+  Dijkstra.
+  - **Nodes:** the two ends and places on the holes' rims.
+  - **End to hole:** geodesics from an end that touch a hole. The touching
+    places are found on the surface itself: the tangency (the cross product
+    of the arrival velocity with the rim's tangent) changes sign over 64
+    places round the loop, and a secant step refines each sign change.
+  - **Hole to hole:** geodesics touching two holes. Both tangencies change
+    sign within a cell of a 24 × 24 grid of rim places, and Newton on the
+    two places refines each one.
+  - **Rims:** the stretches of each rim between its nodes, either way.
+  - **Which holes:** the graph starts with the hole that stops the aimed
+    geodesic. A hole that one of the candidate geodesics runs into is
+    added, and the graph is rebuilt (up to 6 holes). A geodesic that runs
+    through a hole is not an edge.
+- **An end on another face.** It uses the traced rays that graze the one
+  hole, found by bisection between hitting it and passing it, joined along
+  its rim.
 - **Other geodesics.** It also aims from a fan of 32 first angles. A
-  geodesic that is clear of the hole and shorter than the taut string
-  wins. On a torus this is the path over the tube, past the hole.
+  geodesic that is clear of the holes and shorter than the taut string
+  wins. On a torus this can be the path over the tube, past the hole.
 
 | Check (test 108) | f64 | f32 |
 |---|---|---|
 | Plate with a round hole: three paths round it and one clear of it, against the taut string (tangents and the arc) | 1e-11 | 6e-7 |
+| Two and three holes in a row, ends beyond them: against the closed form (tangents, arcs to the tops, segments between) | 3e-13 (bound 1e-9) | 4e-7 (bound 1e-5) |
+| An end on a coplanar neighbouring face: against the unfolded taut string | bound 1e-6 | bound 1e-4 |
 
 The cylinder with a hole on its seam matches the unrolled taut string to
 1e-12 (scratch check).
 
 Limits:
-- Only one hole may lie between the ends.
+- With an end on another face, only one hole may lie between the ends.
 - The fan does not search every geodesic. A shorter geodesic can be missed
   on a surface where geodesics refocus, such as a torus past its conjugate
   distance.
+- Bitangents assume convex holes. A concave hole's touching geodesics are
+  still checked against the trims.
+
+## Thin holes
+
+On a trimmed face a trace step goes no further than the nearest free trim
+piece, and no less than a thousandth of a step. A hole far smaller than a
+step can no longer fall between two steps: test 108 stops rays at holes
+0.016, 0.006 and 0.002 across, against a step of 0.2. The nearest piece is
+the polygon's point when Newton runs to the far side of a tight bend.
 
 ## Limits
 
