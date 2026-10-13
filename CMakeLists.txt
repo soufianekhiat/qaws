@@ -82,6 +82,7 @@ src/qaws/qaws_region_sample.c
 src/qaws/qaws_mean_value.c
 src/qaws/qaws_surface_geodesic.c
 src/qaws/qaws_surface_region.c
+src/qaws/qaws_shell_region.c
 src/qaws/qaws_skeleton.c
   src/qaws/qaws_convert.c
   src/qaws/qaws_export.c
@@ -521,6 +522,7 @@ src/qaws/qaws_triangulate.h
 src/qaws/qaws_region_sample.h
 src/qaws/qaws_mean_value.h
 src/qaws/qaws_surface_region.h
+src/qaws/qaws_shell_region.h
 src/qaws/qaws_skeleton.h
       src/qaws/qaws_alloc.h
       src/qaws/qaws_inline.h

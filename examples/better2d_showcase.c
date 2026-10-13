@@ -30,6 +30,8 @@
  *                      a ring of squares across the seam united into a band
  *   b2d22_surface_medial.svg  medial axes on surfaces: junctions and the largest
  *                      inscribed geodesic circles on a sphere, a patch and a torus
+ *   b2d23_shell_region.svg  curves and regions across shell faces: geodesics over
+ *                      a cube's edges, circles across faces, two hemispheres
  *
  * Each figure lives in better2d_showcase/NN_*.c, compiled as one translation
  * unit.
@@ -74,6 +76,7 @@
 #include "better2d_showcase/20_surface_sample.c"
 #include "better2d_showcase/21_surface_exact.c"
 #include "better2d_showcase/22_surface_medial.c"
+#include "better2d_showcase/23_shell_region.c"
 
 int main(void)
 {
@@ -101,5 +104,6 @@ int main(void)
 	demo_surface_sample();
 	demo_surface_exact();
 	demo_surface_medial();
+	demo_shell_region();
 	return 0;
 }

@@ -282,3 +282,7 @@ Each item lands with tests in f64 and f32, docs, and a showcase figure.
   geodesics, crossings are refined to true geodesic distances (foot-point
   Newton, shooting), and junctions solved by Newton; the largest inscribed
   circle is reported. Test 106; figure 22.
+- Item 9: done for faces meeting along whole sides of their domains
+  (qaws_shell_region.h): straightest geodesics over edges, circles across
+  faces, regions, areas, perimeters and Booleans face by face. Test 107;
+  figure 23. Open: trimmed faces, and vertices (cone points).

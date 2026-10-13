@@ -1,0 +1,205 @@
+/*
+ * Test 107: curves and regions across the faces of a shell
+ * (qaws_shell_region.h)
+ *
+ *   - a cube of six flat faces: twelve shared edges; a straightest ray over
+ *     an edge against the unfolded line; geodesic circles over one edge and
+ *     over two (near a vertex, not round it) against pi r^2 and 2 pi r
+ *     (the faces unfold flat about the edges); two circles over edges by
+ *     inclusion and exclusion
+ *   - a sphere as two hemispheres meeting at the equator: a circle over
+ *     the equator against the cap 2 pi R^2 (1 - cos(r / R)) and its
+ *     perimeter; a great circle over the equator twice, back at its start
+ */
+
+#include "test_common.h"
+#include "qaws_shell_region.h"
+#include <math.h>
+#include <string.h>
+#include <stdlib.h>
+
+#define SHT_PI 3.14159265358979323846
+#define SHT_F32 (sizeof(qaws_scalar) == 4)
+
+static qaws_surface* sht_face(double const* p00, double const* p10, double const* p01, double const* p11)
+{
+	qaws_surface_bilinear_desc d;
+	qaws_surface* s = NULL;
+	memset(&d, 0, sizeof(d));
+	d.p00.x = (qaws_scalar)p00[0]; d.p00.y = (qaws_scalar)p00[1]; d.p00.z = (qaws_scalar)p00[2];
+	d.p10.x = (qaws_scalar)p10[0]; d.p10.y = (qaws_scalar)p10[1]; d.p10.z = (qaws_scalar)p10[2];
+	d.p01.x = (qaws_scalar)p01[0]; d.p01.y = (qaws_scalar)p01[1]; d.p01.z = (qaws_scalar)p01[2];
+	d.p11.x = (qaws_scalar)p11[0]; d.p11.y = (qaws_scalar)p11[1]; d.p11.z = (qaws_scalar)p11[2];
+	qaws_surface_create_bilinear(&d, &s);
+	return s;
+}
+
+/* the cube [-1, 1]^3, faces oriented outward: +z, -z, +x, -x, +y, -y */
+static void sht_cube(qaws_surface** f)
+{
+	static double const P[8][3] = { { -1, -1, -1 }, { 1, -1, -1 }, { -1, 1, -1 }, { 1, 1, -1 }, { -1, -1, 1 }, { 1, -1, 1 }, { -1, 1, 1 }, { 1, 1, 1 } };
+	f[0] = sht_face(P[4], P[5], P[6], P[7]);
+	f[1] = sht_face(P[0], P[2], P[1], P[3]);
+	f[2] = sht_face(P[1], P[3], P[5], P[7]);
+	f[3] = sht_face(P[0], P[4], P[2], P[6]);
+	f[4] = sht_face(P[2], P[6], P[3], P[7]);
+	f[5] = sht_face(P[0], P[1], P[4], P[5]);
+}
+
+static qaws_shell_point sht_pt(unsigned int face, double u, double v)
+{
+	qaws_shell_point p;
+	p.face = face; p.uv.x = (qaws_scalar)u; p.uv.y = (qaws_scalar)v;
+	return p;
+}
+
+static double sht_circle_area(qaws_shell_atlas const* a, qaws_shell_point c, double r, double* per, unsigned int* runs, qaws_status* st)
+{
+	qaws_shell_curve* k = NULL;
+	qaws_shell_region* g = NULL;
+	qaws_scalar A = 0, L = 0;
+	*st = qaws_shell_curve_create_geodesic_circle(a, c, (qaws_scalar)r, 0, &k);
+	if (runs) *runs = k ? qaws_shell_curve_get_run_count(k) : 0;
+	if (*st == QAWS_STATUS_OK) *st = qaws_shell_region_create(a, (qaws_shell_curve const* const*)&k, 1, &g);
+	if (*st == QAWS_STATUS_OK) *st = qaws_shell_region_get_area(g, &A);
+	if (*st == QAWS_STATUS_OK && per) *st = qaws_shell_region_get_perimeter(g, &L);
+	if (per) *per = (double)L;
+	qaws_shell_region_destroy(g);
+	qaws_shell_curve_destroy(k);
+	return (double)A;
+}
+
+static void test_cube(void)
+{
+	qaws_surface* f[6];
+	qaws_shell_atlas* a = NULL;
+	qaws_status st;
+	double tol = SHT_F32 ? 2e-4 : 1e-9;
+	unsigned int i;
+	char msg[300];
+	sht_cube(f);
+	st = qaws_shell_atlas_create((qaws_surface const* const*)f, 6, 0, &a);
+	sprintf(msg, "cube: the atlas of six faces, %u shared edges", a ? qaws_shell_atlas_get_edge_count(a) : 0);
+	TEST_ASSERT(st == QAWS_STATUS_OK && qaws_shell_atlas_get_edge_count(a) == 12, msg);
+	/* a ray from (0.3, -0.2, 1) at 30 degrees from +x, run 1.5: over the
+	   edge x = 1 and on down the face, unfolded a straight line */
+	{
+		qaws_shell_point q;
+		qaws_vec2 d;
+		qaws_vec3 vel;
+		unsigned int cr = 0;
+		qaws_surface_eval_result e;
+		double x0 = 0.3, y0 = -0.2, th = SHT_PI / 6, L = 1.5, tx = (1 - x0) / cos(th), ex, ey, ez, err = 1e300;
+		d.x = (qaws_scalar)cos(th); d.y = (qaws_scalar)sin(th);
+		st = qaws_shell_exp(a, sht_pt(0, (x0 + 1) / 2, (y0 + 1) / 2), d, (qaws_scalar)L, &q, &vel, &cr);
+		/* unfolded: the rest of the run goes down x = 1 */
+		ex = 1; ey = y0 + L * sin(th); ez = 1 - (L - tx) * cos(th);
+		if (st == QAWS_STATUS_OK)
+		{
+			qaws_surface_evaluate(f[q.face], q.uv.x, q.uv.y, QAWS_SURFACE_EVAL_POSITION, &e);
+			err = fabs(e.position.x - ex) + fabs(e.position.y - ey) + fabs(e.position.z - ez);
+		}
+		sprintf(msg, "cube: a straightest ray over an edge (%u crossing) against the unfolded line within %.2g", cr, err);
+		TEST_ASSERT(st == QAWS_STATUS_OK && cr == 1 && q.face == 2 && err <= tol, msg);
+	}
+	/* circles: over one edge, over two near a vertex (not round it) */
+	{
+		double per1, per2, a1, a2, r1 = 0.8, r2 = 0.5;
+		unsigned int n1, n2;
+		qaws_status s1, s2;
+		a1 = sht_circle_area(a, sht_pt(0, 0.75, 0.5), r1, &per1, &n1, &s1);
+		a2 = sht_circle_area(a, sht_pt(0, 0.8, 0.8), r2, &per2, &n2, &s2);
+		sprintf(msg, "cube: geodesic circles over one edge (%u runs) and two edges by a vertex (%u runs): areas against pi r^2 %.2g, %.2g; perimeters against 2 pi r %.2g, %.2g",
+			n1, n2, fabs(a1 - SHT_PI * r1 * r1), fabs(a2 - SHT_PI * r2 * r2), fabs(per1 - 2 * SHT_PI * r1), fabs(per2 - 2 * SHT_PI * r2));
+		TEST_ASSERT(!s1 && !s2 && n1 == 2 && n2 == 4 && fabs(a1 - SHT_PI * r1 * r1) <= tol && fabs(a2 - SHT_PI * r2 * r2) <= tol &&
+			fabs(per1 - 2 * SHT_PI * r1) <= tol && fabs(per2 - 2 * SHT_PI * r2) <= tol, msg);
+	}
+	/* two circles over edges: union + intersection = both */
+	{
+		qaws_shell_curve *k1 = NULL, *k2 = NULL;
+		qaws_shell_region *g1 = NULL, *g2 = NULL, *gu = NULL, *gi = NULL;
+		qaws_scalar A1 = 0, A2 = 0, AU = 0, AI = 0;
+		qaws_status s1;
+		s1 = qaws_shell_curve_create_geodesic_circle(a, sht_pt(0, 0.75, 0.5), (qaws_scalar)0.7, 0, &k1);
+		if (!s1) s1 = qaws_shell_curve_create_geodesic_circle(a, sht_pt(2, 0.6, 0.8), (qaws_scalar)0.6, 0, &k2);
+		if (!s1) s1 = qaws_shell_region_create(a, (qaws_shell_curve const* const*)&k1, 1, &g1);
+		if (!s1) s1 = qaws_shell_region_create(a, (qaws_shell_curve const* const*)&k2, 1, &g2);
+		if (!s1) s1 = qaws_shell_region_clip(g1, g2, QAWS_CLIP_UNION, &gu);
+		if (!s1) s1 = qaws_shell_region_clip(g1, g2, QAWS_CLIP_INTERSECTION, &gi);
+		if (!s1)
+		{
+			qaws_shell_region_get_area(g1, &A1); qaws_shell_region_get_area(g2, &A2);
+			qaws_shell_region_get_area(gu, &AU); qaws_shell_region_get_area(gi, &AI);
+		}
+		sprintf(msg, "cube: two circles over edges: union + intersection - both %.2g (intersection %.4f)", (double)(AU + AI - A1 - A2), (double)AI);
+		TEST_ASSERT(!s1 && fabs((double)(AU + AI - A1 - A2)) <= tol && AI > 0.05, msg);
+		qaws_shell_region_destroy(g1); qaws_shell_region_destroy(g2); qaws_shell_region_destroy(gu); qaws_shell_region_destroy(gi);
+		qaws_shell_curve_destroy(k1); qaws_shell_curve_destroy(k2);
+	}
+	qaws_shell_atlas_destroy(a);
+	for (i = 0; i < 6; i++) qaws_surface_destroy(f[i]);
+}
+
+static qaws_surface* sht_hemi(double a0, double a1, qaws_curve** prof)
+{
+	qaws_arc_segment g;
+	qaws_arc_desc ad;
+	qaws_surface_revolution_desc rd;
+	qaws_surface* s = NULL;
+	memset(&g, 0, sizeof(g));
+	g.radius = 1; g.angle_start = (qaws_scalar)a0; g.angle_end = (qaws_scalar)a1;
+	memset(&ad, 0, sizeof(ad));
+	ad.dimension = QAWS_DIMENSION_2D; ad.segments = &g; ad.segment_count = 1;
+	qaws_curve_create_arc(&ad, prof);
+	memset(&rd, 0, sizeof(rd));
+	rd.profile = *prof; rd.axis_direction.z = 1;
+	qaws_surface_create_revolution(&rd, &s);
+	return s;
+}
+
+static void test_hemispheres(void)
+{
+	qaws_curve *p1 = NULL, *p2 = NULL;
+	qaws_surface* h[2];
+	qaws_shell_atlas* a = NULL;
+	qaws_status st, s1;
+	double tol = SHT_F32 ? 2e-4 : 1e-9, r = 0.6, A, per;
+	unsigned int n = 0;
+	char msg[300];
+	h[0] = sht_hemi(-SHT_PI / 2, 0, &p1);
+	h[1] = sht_hemi(0, SHT_PI / 2, &p2);
+	st = qaws_shell_atlas_create((qaws_surface const* const*)h, 2, 0, &a);
+	A = sht_circle_area(a, sht_pt(1, 0.3, 0.1), r, &per, &n, &s1);
+	sprintf(msg, "hemispheres: one edge (the equator); a circle over it (%u runs) against the cap %.2g and 2 pi sin r %.2g",
+		n, fabs(A - 2 * SHT_PI * (1 - cos(r))), fabs(per - 2 * SHT_PI * sin(r)));
+	TEST_ASSERT(st == QAWS_STATUS_OK && qaws_shell_atlas_get_edge_count(a) == 1 && !s1 && n == 2 &&
+		fabs(A - 2 * SHT_PI * (1 - cos(r))) <= tol && fabs(per - 2 * SHT_PI * sin(r)) <= tol, msg);
+	/* a great circle from the equator heading north-east: back after 2 pi */
+	{
+		qaws_shell_point q;
+		qaws_vec2 d;
+		qaws_vec3 vel;
+		unsigned int cr = 0;
+		double du, dv;
+		d.x = (qaws_scalar)0.1; d.y = (qaws_scalar)0.2;
+		st = qaws_shell_exp(a, sht_pt(1, 0.1, 0.02), d, (qaws_scalar)(2 * SHT_PI), &q, &vel, &cr);
+		du = fabs(q.uv.x - 0.1); du = fmin(du, 1 - du);
+		dv = fabs(q.uv.y - 0.02);
+		sprintf(msg, "hemispheres: a great circle over the equator (%u crossings) back at its start within %.2g", cr, du + dv);
+		TEST_ASSERT(st == QAWS_STATUS_OK && cr == 2 && q.face == 1 && du + dv <= tol, msg);
+	}
+	qaws_shell_atlas_destroy(a);
+	qaws_surface_destroy(h[0]); qaws_surface_destroy(h[1]);
+	qaws_curve_destroy(p1); qaws_curve_destroy(p2);
+}
+
+int test_107_shell_region_main(void)
+{
+	g_pass = 0;
+	g_fail = 0;
+	printf("Test 107: curves and regions across the faces of a shell\n");
+	test_cube();
+	test_hemispheres();
+	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
+	return g_fail;
+}

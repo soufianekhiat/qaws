@@ -108,6 +108,7 @@ add_executable(
   104_surface_sample.c
   105_surface_exact.c
   106_surface_medial.c
+  107_shell_region.c
 )
 
 # The amalgamated library exports exactly the same symbols, so the tests can

@@ -118,6 +118,7 @@ extern int test_103_surface_offset_main(void);
 extern int test_104_surface_sample_main(void);
 extern int test_105_surface_exact_main(void);
 extern int test_106_surface_medial_main(void);
+extern int test_107_shell_region_main(void);
 
 /* Test registry */
 typedef struct {
@@ -233,6 +234,7 @@ static test_suite const g_test_suites[] = {
 	{"104_surface_sample", test_104_surface_sample_main},
 	{"105_surface_exact", test_105_surface_exact_main},
 	{"106_surface_medial", test_106_surface_medial_main},
+	{"107_shell_region", test_107_shell_region_main},
 };
 
 int main(void) {
