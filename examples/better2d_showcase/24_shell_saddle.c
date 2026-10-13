@@ -119,6 +119,17 @@ static void ssd_draw(svg* s, ssd_scene* sc)
 	memset(sc, 0, sizeof(*sc));
 }
 
+/* the surface at (u, v), brought into its parameter ranges by whole ranges
+   when past them (a closed surface's loops may run past its seam) */
+static void ssd_eval(qaws_surface const* f, double u, double v, unsigned int flags, qaws_surface_eval_result* r)
+{
+	qaws_range ru = qaws_surface_get_u_range(f), rv = qaws_surface_get_v_range(f);
+	double lu = ru.max_value - ru.min_value, lv = rv.max_value - rv.min_value;
+	if (lu > 0 && (u < ru.min_value - 1e-9 * lu || u > ru.max_value + 1e-9 * lu)) u -= lu * floor((u - ru.min_value) / lu);
+	if (lv > 0 && (v < rv.min_value - 1e-9 * lv || v > rv.max_value + 1e-9 * lv)) v -= lv * floor((v - rv.min_value) / lv);
+	qaws_surface_evaluate(f, (qaws_scalar)u, (qaws_scalar)v, flags, r);
+}
+
 /* a region painted on a face: its colour where the face is inside it */
 typedef struct ssd_paint
 {
@@ -168,7 +179,7 @@ static void ssd_surfaces(ssd_scene* sc, qaws_surface** f, unsigned int nf, ssd_p
 				for (m = 0; m < 4; m++)
 				{
 					double u = ru.min_value + (ru.max_value - ru.min_value) * uu[m] / N, w = rv.min_value + (rv.max_value - rv.min_value) * vv[m] / N, dep;
-					qaws_surface_evaluate(f[k], (qaws_scalar)u, (qaws_scalar)w, QAWS_SURFACE_EVAL_POSITION, &r);
+					ssd_eval(f[k], u, w, QAWS_SURFACE_EVAL_POSITION, &r);
 					sgf_project(v, r.position, &t->xy[2 * m], &t->xy[2 * m + 1], &dep);
 					dsum += dep;
 				}
@@ -176,7 +187,7 @@ static void ssd_surfaces(ssd_scene* sc, qaws_surface** f, unsigned int nf, ssd_p
 				t->depth = dsum / 4;
 				cu = ru.min_value + (ru.max_value - ru.min_value) * (i + 0.5) / N;
 				cv = rv.min_value + (rv.max_value - rv.min_value) * (j + 0.5) / N;
-				qaws_surface_evaluate(f[k], (qaws_scalar)cu, (qaws_scalar)cv, QAWS_SURFACE_EVAL_DU | QAWS_SURFACE_EVAL_DV, &r);
+				ssd_eval(f[k], cu, cv, QAWS_SURFACE_EVAL_DU | QAWS_SURFACE_EVAL_DV, &r);
 				{
 					double nx = (double)r.du.y * r.dv.z - (double)r.du.z * r.dv.y, ny = (double)r.du.z * r.dv.x - (double)r.du.x * r.dv.z;
 					double nz = (double)r.du.x * r.dv.y - (double)r.du.y * r.dv.x, nn = sqrt(nx * nx + ny * ny + nz * nz);
@@ -217,7 +228,7 @@ static void ssd_uv_line(ssd_scene* sc, qaws_surface const* f, double const* uv, 
 	{
 		qaws_surface_eval_result r;
 		double x, y, d;
-		qaws_surface_evaluate(f, (qaws_scalar)uv[2 * i], (qaws_scalar)uv[2 * i + 1], QAWS_SURFACE_EVAL_POSITION, &r);
+		ssd_eval(f, uv[2 * i], uv[2 * i + 1], QAWS_SURFACE_EVAL_POSITION, &r);
 		sgf_project(sc->view, r.position, &x, &y, &d);
 		if (i > 0)
 		{
@@ -299,7 +310,7 @@ static void ssd_dot(ssd_scene* sc, qaws_surface const* f, double u, double v, in
 	double d;
 	if (!t)
 		return;
-	qaws_surface_evaluate(f, (qaws_scalar)u, (qaws_scalar)v, QAWS_SURFACE_EVAL_POSITION, &r);
+	ssd_eval(f, u, v, QAWS_SURFACE_EVAL_POSITION, &r);
 	sgf_project(sc->view, r.position, &t->xy[0], &t->xy[1], &d);
 	t->n = 1;
 	t->depth = d - 0.1;

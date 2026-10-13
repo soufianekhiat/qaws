@@ -14,7 +14,11 @@
  *     a corner against the untrimmed cube's
  *   - T-junctions: a side meeting two faces side by side, flat and as walls:
  *     split where they meet; disks round the T point against pi r^2, 2 pi r
- *   - an open loop refused; a trim on a surface closed in u not covered
+ *   - a cylinder trimmed by its rims (loops wrapping round) and a hole on the
+ *     seam, filled by a disk of the same surface: disks across the hole and
+ *     the seam against pi r^2 and 2 pi r (the cylinder unrolled), a ray over
+ *     both against the unrolled line
+ *   - an open loop refused; a trim on a surface closed both ways not covered
  */
 
 #include "test_common.h"
@@ -376,10 +380,80 @@ static void test_tee(int walls)
 	for (i = 0; i < 3; i++) qaws_surface_destroy(f[i]);
 }
 
+/* the cylinder of radius 1/2 and height pi (its (u, v) isotropic: pi to the
+   unit), trimmed by its rims (lines wrapping round once) and a hole of
+   radius 0.1 centred on the seam; the hole filled by a disk of the same
+   surface whose circle starts elsewhere in another copy */
+static void test_cylinder(void)
+{
+	qaws_curve *prof = str_line(0.5, 0, 0.5, -STR_PI), *bot = str_line(0, 0, 1, 0), *top = str_line(1, 1, 0, 1);
+	qaws_curve *hole = str_arc(0, 0.5, 0.1, 0, 2 * STR_PI), *disk = str_arc(1, 0.5, 0.1, 2, 2 + 2 * STR_PI);
+	qaws_curve const *l1[1], *l2[1], *l3[1], *l4[1];
+	qaws_surface* s = NULL;
+	qaws_surface_revolution_desc rd;
+	qaws_path_2d pa[3], pb[1];
+	qaws_shell_face_desc fd[2];
+	qaws_shell_atlas* a = NULL;
+	qaws_status st;
+	static double const cs[3][3] = { { 0.85, 0.5, 0.3 }, { 0.9, 0.3, 0.25 }, { 0.5, 0.5, 0.4 } };
+	double worst = 0, tol = STR_F32 ? 2e-4 : 1e-8;
+	unsigned int z, ok = 0;
+	char msg[300];
+	memset(&rd, 0, sizeof(rd));
+	rd.profile = prof; rd.axis_direction.z = 1;
+	qaws_surface_create_revolution(&rd, &s);
+	l1[0] = bot; l2[0] = top; l3[0] = hole; l4[0] = disk;
+	pa[0].curves = l1; pa[0].curve_count = 1; pa[0].closed = 1;
+	pa[1].curves = l2; pa[1].curve_count = 1; pa[1].closed = 1;
+	pa[2].curves = l3; pa[2].curve_count = 1; pa[2].closed = 1;
+	pb[0].curves = l4; pb[0].curve_count = 1; pb[0].closed = 1;
+	fd[0].surface = s; fd[0].trims = pa; fd[0].trim_count = 3;
+	fd[1].surface = s; fd[1].trims = pb; fd[1].trim_count = 1;
+	st = qaws_shell_atlas_create_trimmed(fd, 2, 0, &a);
+	sprintf(msg, "cylinder: trimmed by its rims and a hole on the seam, the hole's disk: %u shared edges", a ? qaws_shell_atlas_get_edge_count(a) : 0);
+	TEST_ASSERT(st == QAWS_STATUS_OK && qaws_shell_atlas_get_edge_count(a) == 2, msg);
+	for (z = 0; z < 3 && st == QAWS_STATUS_OK; z++)
+	{
+		qaws_shell_region* g = NULL;
+		qaws_scalar A = 0, P = 0;
+		double r = cs[z][2], e = 1e300;
+		if (qaws_shell_region_create_geodesic_disk(a, str_pt(0, cs[z][0], cs[z][1]), (qaws_scalar)r, 0, &g) == QAWS_STATUS_OK)
+		{
+			qaws_shell_region_get_area(g, &A);
+			qaws_shell_region_get_perimeter(g, &P);
+			e = fabs((double)A - STR_PI * r * r) + fabs((double)P - 2 * STR_PI * r);
+		}
+		if (e > worst) worst = e;
+		if (e <= tol) ok++;
+		qaws_shell_region_destroy(g);
+	}
+	sprintf(msg, "cylinder: three disks (one over the hole and the seam) against pi r^2 and 2 pi r within %.2g", worst);
+	TEST_ASSERT(st == QAWS_STATUS_OK && ok == 3, msg);
+	if (st == QAWS_STATUS_OK)
+	{
+		/* a ray from (0.7, 0.45) over the hole's disk and the seam: unrolled, a line */
+		qaws_shell_point q;
+		qaws_vec2 d;
+		qaws_vec3 e;
+		unsigned int cr = 0;
+		double dx = 1, dy = 0.15, n = hypot(dx, dy), L = 1.6, X = STR_PI * 0.7 + L * dx / n, Y = STR_PI * 0.45 + L * dy / n, off;
+		double ex = 0.5 * cos(2 * X), ey = 0.5 * sin(2 * X), ez = -Y;
+		d.x = (qaws_scalar)(dx / n); d.y = (qaws_scalar)(dy / n);
+		st = qaws_shell_exp(a, str_pt(0, 0.7, 0.45), d, (qaws_scalar)L, &q, NULL, &cr);
+		e = str_at(a, q);
+		off = sqrt(((double)e.x - ex) * ((double)e.x - ex) + ((double)e.y - ey) * ((double)e.y - ey) + ((double)e.z - ez) * ((double)e.z - ez));
+		sprintf(msg, "cylinder: a ray over the hole's disk and the seam (%u crossings) against the unrolled line %.2g", cr, off);
+		TEST_ASSERT(st == QAWS_STATUS_OK && cr == 2 && off <= (STR_F32 ? 2e-6 : 1e-12), msg);
+	}
+	qaws_shell_atlas_destroy(a);
+	qaws_surface_destroy(s);
+	qaws_curve_destroy(prof); qaws_curve_destroy(bot); qaws_curve_destroy(top); qaws_curve_destroy(hole); qaws_curve_destroy(disk);
+}
+
 static void test_refusals(void)
 {
 	qaws_surface* sa = str_plane(STR_P00, STR_P10, STR_P01, STR_P11);
-	qaws_curve *open3[3], *prof = str_line(0.5, 0, 0.5, -1.5), *loop = str_arc(0.5, 0.5, 0.2, 0, 2 * STR_PI);
+	qaws_curve *open3[3], *prof = str_arc(1.0, 0, 0.3, 0, 2 * STR_PI), *loop = str_arc(0.5, 0.5, 0.2, 0, 2 * STR_PI);
 	qaws_curve const *ol[3], *cl[1];
 	qaws_path_2d p, pc;
 	qaws_shell_face_desc fd;
@@ -404,7 +478,7 @@ static void test_refusals(void)
 	fd.surface = tube; fd.trims = &pc; fd.trim_count = 1;
 	s2 = qaws_shell_atlas_create_trimmed(&fd, 1, 0, &a);
 	qaws_shell_atlas_destroy(a);
-	sprintf(msg, "refused: a loop that does not close (%d), a trim on a surface closed in u (%d)", (int)s1, (int)s2);
+	sprintf(msg, "refused: a loop that does not close (%d), a trim on a surface closed both ways (%d)", (int)s1, (int)s2);
 	TEST_ASSERT(s1 == QAWS_STATUS_INVALID_ARGUMENT && s2 == QAWS_STATUS_UNSUPPORTED_OPERATION, msg);
 	qaws_surface_destroy(sa); qaws_surface_destroy(tube);
 	for (i = 0; i < 3; i++) qaws_curve_destroy(open3[i]);
@@ -421,6 +495,7 @@ int test_108_shell_trimmed_main(void)
 	test_trimmed_cube();
 	test_tee(0);
 	test_tee(1);
+	test_cylinder();
 	test_refusals();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;

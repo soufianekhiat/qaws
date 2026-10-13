@@ -32,6 +32,7 @@
 #define SH_AREA_SLACK 1e-4  /* a Boolean this much (relative) out of its bounds has lost some */
 #define SH_FIT_DL 1e-3      /* the angle step (of a run's span) of the fits' differences */
 #define SH_JOIN_GAP 1e-6    /* a run and the trim it meets this far apart (relative) are joined as they are */
+#define SH_GRAZE 1e-6       /* the least angle (radians) a crossing goes across */
 #else
 #define SH_TOL 1e-7
 #define SH_ON_SIDE 1e-9
@@ -42,6 +43,7 @@
 #define SH_AREA_SLACK 1e-9
 #define SH_FIT_DL 1e-6
 #define SH_JOIN_GAP 1e-12
+#define SH_GRAZE 1e-9
 #endif
 
 /* ------------------------------------------------------------------------ */
@@ -67,6 +69,8 @@ typedef struct sh_trim
 	double sag;                 /* how far a piece strays from its polygon */
 	qaws_curve** own;           /* curves made here (a domain turned into a trim) */
 	unsigned int nown;
+	double pu, pv;              /* the face's periods (0: open), the pieces given in one copy */
+	double lo[2], hi[2];        /* the pieces' (u, v) box */
 } sh_trim;
 
 #define SH_TRIM_N 128
@@ -350,11 +354,60 @@ static qaws_status sh_find_vertices(qaws_shell_atlas* a)
 /*  Trims                                                                   */
 /* ------------------------------------------------------------------------ */
 
-/* the winding number of the pieces' polygons round uv */
+/* the copies of uv (by whole periods of a closed direction) that may meet
+   the pieces: their shifts, uv - shift near the pieces' box */
+static unsigned int sh_trim_copies(sh_trim const* t, double const* uv, double (*sh)[2])
+{
+	unsigned int n = 0;
+	int k, k0, k1;
+	if (t->pu > 0)
+	{
+		k0 = (int)floor((uv[0] - t->hi[0]) / t->pu) - 1;
+		k1 = (int)ceil((uv[0] - t->lo[0]) / t->pu) + 1;
+		for (k = k0; k <= k1 && n < 8; k++) { sh[n][0] = k * t->pu; sh[n][1] = 0; n++; }
+		return n;
+	}
+	if (t->pv > 0)
+	{
+		k0 = (int)floor((uv[1] - t->hi[1]) / t->pv) - 1;
+		k1 = (int)ceil((uv[1] - t->lo[1]) / t->pv) + 1;
+		for (k = k0; k <= k1 && n < 8; k++) { sh[n][0] = 0; sh[n][1] = k * t->pv; n++; }
+		return n;
+	}
+	sh[0][0] = sh[0][1] = 0;
+	return 1;
+}
+
+/* inside by the pieces' polygons: on an open face their winding number
+   round uv; on a face closed in u (v), the crossings of a ray from uv
+   across the closed direction, over the copies (a loop may wrap round) */
 static int sh_trim_winding(sh_trim const* t, double const* uv)
 {
 	unsigned int p, i;
 	int wn = 0;
+	if (t->pu > 0 || t->pv > 0)
+	{
+		double sh[8][2];
+		unsigned int nc = sh_trim_copies(t, uv, sh), k;
+		int ax = t->pu > 0 ? 0 : 1, crossings = 0;
+		for (k = 0; k < nc; k++)
+		{
+			double x = uv[0] - sh[k][0], y = uv[1] - sh[k][1];
+			double a0 = ax == 0 ? x : y, b0 = ax == 0 ? y : x;
+			for (p = 0; p < t->np; p++)
+			{
+				double const* q = t->poly + 2 * (SH_TRIM_N + 1) * p;
+				for (i = 0; i < SH_TRIM_N; i++)
+				{
+					double xa = q[2 * i + ax], xb = q[2 * i + 2 + ax], ya = q[2 * i + 1 - ax], yb = q[2 * i + 3 - ax];
+					if ((xa <= a0 && a0 < xb) || (xb <= a0 && a0 < xa))
+						if (ya + (a0 - xa) / (xb - xa) * (yb - ya) > b0)
+							crossings++;
+				}
+			}
+		}
+		return crossings & 1;
+	}
 	for (p = 0; p < t->np; p++)
 	{
 		double const* q = t->poly + 2 * (SH_TRIM_N + 1) * p;
@@ -369,27 +422,35 @@ static int sh_trim_winding(sh_trim const* t, double const* uv)
 	return wn;
 }
 
-/* the piece and its s nearest uv (by the polygons, then Newton on the
-   piece); the (u, v) distance */
-static double sh_trim_project(sh_trim const* t, double const* uv, unsigned int only, unsigned int* piece, double* s_out)
+/* the piece (only that one if given) and its s nearest uv, over the copies
+   of uv (by the polygons, then Newton on the piece); the (u, v) distance,
+   and (may be NULL) the shift of the copy: the piece's point plus it is
+   near uv */
+static double sh_trim_nearest(sh_trim const* t, double const* uv, unsigned int only, unsigned int* piece, double* s_out, double* shift)
 {
-	unsigned int p, i, bp = 0, it;
-	double best = 1e300, s = 0, c[2], d[2];
-	for (p = 0; p < t->np; p++)
+	unsigned int p, i, bp = 0, it, k, nc;
+	double best = 1e300, s = 0, c[2], d[2], sh[8][2], w[2], bs[2] = { 0, 0 };
+	nc = sh_trim_copies(t, uv, sh);
+	for (k = 0; k < nc; k++)
 	{
-		double const* q = t->poly + 2 * (SH_TRIM_N + 1) * p;
-		if (only != SH_NONE && p != only)
-			continue;
-		for (i = 0; i < SH_TRIM_N; i++)
+		double x = uv[0] - sh[k][0], y = uv[1] - sh[k][1];
+		for (p = 0; p < t->np; p++)
 		{
-			double ex = q[2 * i + 2] - q[2 * i], ey = q[2 * i + 3] - q[2 * i + 1], ee = ex * ex + ey * ey, l = 0, dx, dy;
-			if (ee > 0) l = ((uv[0] - q[2 * i]) * ex + (uv[1] - q[2 * i + 1]) * ey) / ee;
-			if (l < 0) l = 0;
-			if (l > 1) l = 1;
-			dx = q[2 * i] + l * ex - uv[0]; dy = q[2 * i + 1] + l * ey - uv[1];
-			if (dx * dx + dy * dy < best) { best = dx * dx + dy * dy; bp = p; s = (i + l) / SH_TRIM_N; }
+			double const* q = t->poly + 2 * (SH_TRIM_N + 1) * p;
+			if (only != SH_NONE && p != only)
+				continue;
+			for (i = 0; i < SH_TRIM_N; i++)
+			{
+				double ex = q[2 * i + 2] - q[2 * i], ey = q[2 * i + 3] - q[2 * i + 1], ee = ex * ex + ey * ey, l = 0, dx, dy;
+				if (ee > 0) l = ((x - q[2 * i]) * ex + (y - q[2 * i + 1]) * ey) / ee;
+				if (l < 0) l = 0;
+				if (l > 1) l = 1;
+				dx = q[2 * i] + l * ex - x; dy = q[2 * i + 1] + l * ey - y;
+				if (dx * dx + dy * dy < best) { best = dx * dx + dy * dy; bp = p; s = (i + l) / SH_TRIM_N; bs[0] = sh[k][0]; bs[1] = sh[k][1]; }
+			}
 		}
 	}
+	w[0] = uv[0] - bs[0]; w[1] = uv[1] - bs[1];
 	for (it = 0; it < 20; it++)
 	{
 		double dd, step;
@@ -397,7 +458,7 @@ static double sh_trim_project(sh_trim const* t, double const* uv, unsigned int o
 		dd = d[0] * d[0] + d[1] * d[1];
 		if (!(dd > 0))
 			break;
-		step = ((c[0] - uv[0]) * d[0] + (c[1] - uv[1]) * d[1]) / dd;
+		step = ((c[0] - w[0]) * d[0] + (c[1] - w[1]) * d[1]) / dd;
 		s -= step;
 		if (s < 0) s = 0;
 		if (s > 1) s = 1;
@@ -407,51 +468,26 @@ static double sh_trim_project(sh_trim const* t, double const* uv, unsigned int o
 	sh_trim_eval(t, bp, s, c, NULL);
 	*piece = bp;
 	*s_out = s;
-	return hypot(c[0] - uv[0], c[1] - uv[1]);
+	if (shift) { shift[0] = bs[0]; shift[1] = bs[1]; }
+	return hypot(c[0] - w[0], c[1] - w[1]);
 }
 
-/* inside the trim: by the polygons' winding away from the pieces; within
-   their sag of a piece, by the side of the piece itself the point is on
-   (the face on its left) */
+static double sh_trim_project(sh_trim const* t, double const* uv, unsigned int only, unsigned int* piece, double* s_out)
+{
+	return sh_trim_nearest(t, uv, only, piece, s_out, NULL);
+}
+
+/* inside the trim: by the polygons away from the pieces; within their sag
+   of a piece, by the side of the piece itself the point is on (the face on
+   its left) */
 static int sh_trim_inside(sh_trim const* t, double const* uv)
 {
-	unsigned int p, i, bp = 0;
-	double best = 1e300, s = 0, near = 2 * t->sag + 1e-12 * t->diag;
-	for (p = 0; p < t->np; p++)
-	{
-		double const* q = t->poly + 2 * (SH_TRIM_N + 1) * p;
-		for (i = 0; i < SH_TRIM_N; i++)
-		{
-			double ex = q[2 * i + 2] - q[2 * i], ey = q[2 * i + 3] - q[2 * i + 1], ee = ex * ex + ey * ey, l = 0, dx, dy;
-			if (ee > 0) l = ((uv[0] - q[2 * i]) * ex + (uv[1] - q[2 * i + 1]) * ey) / ee;
-			if (l < 0) l = 0;
-			if (l > 1) l = 1;
-			dx = q[2 * i] + l * ex - uv[0]; dy = q[2 * i + 1] + l * ey - uv[1];
-			if (dx * dx + dy * dy < best) { best = dx * dx + dy * dy; bp = p; s = (i + l) / SH_TRIM_N; }
-		}
-	}
-	if (sqrt(best) > near)
+	unsigned int bp;
+	double s, shift[2], c[2], d[2], near = 2 * t->sag + 1e-12 * t->diag;
+	if (sh_trim_nearest(t, uv, SH_NONE, &bp, &s, shift) > near)
 		return sh_trim_winding(t, uv) != 0;
-	{
-		double c[2], d[2];
-		unsigned int it;
-		for (it = 0; it < 20; it++)
-		{
-			double dd, step;
-			sh_trim_eval(t, bp, s, c, d);
-			dd = d[0] * d[0] + d[1] * d[1];
-			if (!(dd > 0))
-				break;
-			step = ((c[0] - uv[0]) * d[0] + (c[1] - uv[1]) * d[1]) / dd;
-			s -= step;
-			if (s < 0) s = 0;
-			if (s > 1) s = 1;
-			if (fabs(step) < 1e-15)
-				break;
-		}
-		sh_trim_eval(t, bp, s, c, d);
-		return -d[1] * (uv[0] - c[0]) + d[0] * (uv[1] - c[1]) >= 0;
-	}
+	sh_trim_eval(t, bp, s, c, d);
+	return -d[1] * (uv[0] - shift[0] - c[0]) + d[0] * (uv[1] - shift[1] - c[1]) >= 0;
 }
 
 static void sh_trim_free(sh_trim* t)
@@ -479,6 +515,7 @@ static void sh_trim_polys(sh_trim* t)
 			if (q[0] > hi[0]) hi[0] = q[0];
 			if (q[1] > hi[1]) hi[1] = q[1];
 		}
+	t->lo[0] = lo[0]; t->lo[1] = lo[1]; t->hi[0] = hi[0]; t->hi[1] = hi[1];
 	t->diag = hypot(hi[0] - lo[0], hi[1] - lo[1]);
 	t->sag = 0;
 	for (k = 0; k < t->np; k++)
@@ -577,12 +614,13 @@ static qaws_status sh_trim_rect(sh_trim* t, qaws_internal_sg_ctx const* c)
 /* a face's trim from its loops: each loop turned to keep the face on its
    left (a loop inside an even number of others counter-clockwise, inside
    an odd number clockwise) */
-static qaws_status sh_trim_build(sh_trim* t, qaws_path_2d const* loops, unsigned int nl)
+static qaws_status sh_trim_build(sh_trim* t, qaws_path_2d const* loops, unsigned int nl, double pu, double pv)
 {
 	unsigned int l, k, i, np = 0, at = 0;
 	double* area;
 	double lo[2] = { 1e300, 1e300 }, hi[2] = { -1e300, -1e300 };
 	memset(t, 0, sizeof(*t));
+	t->pu = pu; t->pv = pv;
 	for (l = 0; l < nl; l++)
 	{
 		if (!loops[l].curves || !loops[l].curve_count || !loops[l].closed)
@@ -641,37 +679,57 @@ static qaws_status sh_trim_build(sh_trim* t, qaws_path_2d const* loops, unsigned
 			unsigned int nx = k + 1 < t->lfirst[l + 1] ? k + 1 : t->lfirst[l];
 			double const* e = t->poly + 2 * ((SH_TRIM_N + 1) * k + SH_TRIM_N);
 			double const* b = t->poly + 2 * ((SH_TRIM_N + 1) * nx);
-			if (hypot(e[0] - b[0], e[1] - b[1]) > 1e-6 * t->diag)
+			double gx = e[0] - b[0], gy = e[1] - b[1];
+			/* (on a closed direction, up to whole periods: a loop may wrap round) */
+			if (pu > 0) gx -= pu * floor(gx / pu + 0.5);
+			if (pv > 0) gy -= pv * floor(gy / pv + 0.5);
+			if (hypot(gx, gy) > 1e-6 * t->diag)
 			{
 				free(area);
 				sh_trim_free(t);
 				return QAWS_STATUS_INVALID_ARGUMENT;
 			}
 		}
-	/* turned: a loop's nesting decides its way round */
+	/* turned: a loop's nesting decides its way round (on a closed face, the
+	   side of it the face is on by crossings) */
+	if (pu > 0 || pv > 0)
+		sh_trim_polys(t);
 	for (l = 0; l < nl; l++)
 	{
 		unsigned int depth = 0, m, first = t->lfirst[l], last = t->lfirst[l + 1];
 		double const* q = t->poly + 2 * ((SH_TRIM_N + 1) * first + SH_TRIM_N / 2);
-		for (m = 0; m < nl; m++)
+		int turn;
+		if (pu > 0 || pv > 0)
 		{
-			unsigned int p2, j;
-			int wn = 0;
-			if (m == l)
-				continue;
-			for (p2 = t->lfirst[m]; p2 < t->lfirst[m + 1]; p2++)
-			{
-				double const* r = t->poly + 2 * (SH_TRIM_N + 1) * p2;
-				for (j = 0; j < SH_TRIM_N; j++)
-				{
-					double left = (r[2 * j + 2] - r[2 * j]) * (q[1] - r[2 * j + 1]) - (q[0] - r[2 * j]) * (r[2 * j + 3] - r[2 * j + 1]);
-					if (r[2 * j + 1] <= q[1]) { if (r[2 * j + 3] > q[1] && left > 0) wn++; }
-					else if (r[2 * j + 3] <= q[1] && left < 0) wn--;
-				}
-			}
-			if (wn != 0) depth++;
+			double c[2], d[2], x[2], dl, off = 4 * t->sag + 1e-4 * t->diag;
+			sh_trim_eval(t, first, 0.5, c, d);
+			dl = hypot(d[0], d[1]);
+			x[0] = c[0] - off * d[1] / (dl > 0 ? dl : 1); x[1] = c[1] + off * d[0] / (dl > 0 ? dl : 1);
+			turn = sh_trim_winding(t, x) == 0;
 		}
-		if ((area[l] > 0) != (depth % 2 == 0))
+		else
+		{
+			for (m = 0; m < nl; m++)
+			{
+				unsigned int p2, j;
+				int wn = 0;
+				if (m == l)
+					continue;
+				for (p2 = t->lfirst[m]; p2 < t->lfirst[m + 1]; p2++)
+				{
+					double const* r = t->poly + 2 * (SH_TRIM_N + 1) * p2;
+					for (j = 0; j < SH_TRIM_N; j++)
+					{
+						double left = (r[2 * j + 2] - r[2 * j]) * (q[1] - r[2 * j + 1]) - (q[0] - r[2 * j]) * (r[2 * j + 3] - r[2 * j + 1]);
+						if (r[2 * j + 1] <= q[1]) { if (r[2 * j + 3] > q[1] && left > 0) wn++; }
+						else if (r[2 * j + 3] <= q[1] && left < 0) wn--;
+					}
+				}
+				if (wn != 0) depth++;
+			}
+			turn = (area[l] > 0) != (depth % 2 == 0);
+		}
+		if (turn)
 		{
 			/* reversed: the pieces in the other order, each run backwards */
 			unsigned int x, y;
@@ -815,9 +873,9 @@ qaws_status qaws_shell_atlas_create_trimmed(qaws_shell_face_desc const* faces, u
 			break;
 		if (faces[i].trim_count)
 		{
-			/* trims on a closed direction: not covered */
-			if (a->c[i].pu > 0 || a->c[i].pv > 0) { st = QAWS_STATUS_UNSUPPORTED_OPERATION; break; }
-			st = sh_trim_build(&a->tr[i], faces[i].trims, faces[i].trim_count);
+			/* trims on a surface closed both ways: not covered */
+			if (a->c[i].pu > 0 && a->c[i].pv > 0) { st = QAWS_STATUS_UNSUPPORTED_OPERATION; break; }
+			st = sh_trim_build(&a->tr[i], faces[i].trims, faces[i].trim_count, a->c[i].pu, a->c[i].pv);
 		}
 	}
 	/* the shell's size: the box of its faces' boundaries */
@@ -1037,6 +1095,16 @@ static int sh_cross(qaws_shell_atlas const* a, unsigned int* f, int side, double
 	/* across, outwards (a graze may leave heading along the side, its
 	   across part a rounding inward: on across all the same) */
 	be = fabs(sh_dot(T, NA));
+	/* (a graze crossed at least SH_GRAZE across, the speed kept: exactly
+	   along the side it would cross back at once, and again) */
+	{
+		double tn = sqrt(al * al + be * be);
+		if (be < SH_GRAZE * tn)
+		{
+			be = SH_GRAZE * tn;
+			al = al < 0 ? -sqrt(tn * tn - be * be) : sqrt(tn * tn - be * be);
+		}
+	}
 	/* the neighbour's point and frame */
 	sb = sh_invert_side(a, g, sg2, side >= 4 || sg2 >= 4 ? -1 : (SH_REV(a, *f, side) ? 1 - s : s), r.position);
 	sh_side_uv(a, g, sg2, sb, uv, NULL);
@@ -1148,7 +1216,8 @@ static qaws_status sh_trace(qaws_shell_atlas const* a, unsigned int* f, double* 
 					sh_trim const* t = &a->tr[*f];
 					unsigned int p, it2;
 					double sp, hh = lo, ye[4], tc[2], tdc[2];
-					sh_trim_project(t, ylo, SH_NONE, &p, &sp);
+					double csh[2];
+					sh_trim_nearest(t, ylo, SH_NONE, &p, &sp, csh);
 					memcpy(ye, ylo, sizeof(ye));
 					/* (from the step's start, before the crossing: the last point
 					   inside the polygons may be past it) */
@@ -1156,7 +1225,7 @@ static qaws_status sh_trace(qaws_shell_atlas const* a, unsigned int* f, double* 
 					{
 						double F0, F1, det, dh, ds;
 						sh_trim_eval(t, p, sp, tc, tdc);
-						F0 = ye[0] - tc[0]; F1 = ye[1] - tc[1];
+						F0 = ye[0] - csh[0] - tc[0]; F1 = ye[1] - csh[1] - tc[1];
 						det = -ye[2] * tdc[1] + tdc[0] * ye[3];
 						if (!(fabs(det) > 0))
 							break;
@@ -1175,7 +1244,7 @@ static qaws_status sh_trace(qaws_shell_atlas const* a, unsigned int* f, double* 
 							break;
 					}
 					sh_trim_eval(t, p, sp, tc, NULL);
-					if (hypot(ye[0] - tc[0], ye[1] - tc[1]) <= SH_EDGE_NEAR * t->diag)
+					if (hypot(ye[0] - csh[0] - tc[0], ye[1] - csh[1] - tc[1]) <= SH_EDGE_NEAR * t->diag)
 					{
 						memcpy(ylo, ye, sizeof(ylo));
 						lo = hh;
@@ -1235,6 +1304,11 @@ static qaws_status sh_trace(qaws_shell_atlas const* a, unsigned int* f, double* 
 				hops++;
 				crossed = 1;
 				if (crossings) (*crossings)++;
+				/* (a rounding of it left: done on the edge, which is on both
+				   faces; going on, a step that short could land a rounding
+				   either side and cross back, and back) */
+				if (left <= SH_TINY_RUN * a->c[*f].diag)
+					return QAWS_STATUS_OK;
 				break;
 			}
 		}
@@ -1593,9 +1667,10 @@ static qaws_status sh_circ_edge(sh_circ const* k, unsigned int f, double ta, dou
 	if (SH_TRIMMED(k->a, f))
 	{
 		unsigned int pc;
-		double sp;
-		sh_trim_project(&k->a->tr[f], p, SH_NONE, &pc, &sp);
+		double sp, csh[2];
+		sh_trim_nearest(&k->a->tr[f], p, SH_NONE, &pc, &sp, csh);
 		sh_trim_eval(&k->a->tr[f], pc, sp, p, NULL);
+		p[0] += csh[0]; p[1] += csh[1];
 	}
 	else
 	{
@@ -1901,9 +1976,10 @@ static qaws_status sh_bag_moved(sh_bag* b, qaws_surface const* s, qaws_surface_c
 	return QAWS_STATUS_OK;
 }
 
-/* the stretch of a trim piece from s = sa to sb (sa > sb: run backwards) */
+/* the stretch of a trim piece from s = sa to sb (sa > sb: run backwards),
+   moved by off (whole periods: another copy of it) */
 static qaws_status sh_bag_trim(sh_bag* b, qaws_shell_atlas const* a, unsigned int f, unsigned int p, double sa, double sb,
-	qaws_surface_curve const** out)
+	double const* off, qaws_surface_curve const** out)
 {
 	sh_trim const* t = &a->tr[f];
 	double dt = t->t1[p] - t->t0[p];
@@ -1912,6 +1988,17 @@ static qaws_status sh_bag_trim(sh_bag* b, qaws_shell_atlas const* a, unsigned in
 	qaws_status st;
 	if ((st = qaws_curve_extract(t->cv[p], (qaws_scalar)(t->t0[p] + sa * dt), (qaws_scalar)(t->t0[p] + sb * dt), &k)) != QAWS_STATUS_OK)
 		return st;
+	if (off && (off[0] != 0 || off[1] != 0))
+	{
+		qaws_scalar m[6];
+		qaws_curve* mv = NULL;
+		m[0] = 1; m[1] = 0; m[2] = (qaws_scalar)off[0]; m[3] = 0; m[4] = 1; m[5] = (qaws_scalar)off[1];
+		st = qaws_curve_transform_2d(k, m, &mv);
+		qaws_curve_destroy(k);
+		if (st != QAWS_STATUS_OK)
+			return st;
+		k = mv;
+	}
 	st = qaws_surface_curve_create_uv(a->s[f], k, &sc);
 	qaws_curve_destroy(k);
 	if (st != QAWS_STATUS_OK)
@@ -1939,7 +2026,7 @@ static qaws_status sh_trim_paths(sh_bag* b, qaws_shell_atlas const* a, unsigned 
 	for (l = 0; l < t->nl && st == QAWS_STATUS_OK; l++)
 	{
 		for (p = t->lfirst[l]; p < t->lfirst[l + 1] && st == QAWS_STATUS_OK; p++)
-			st = sh_bag_trim(b, a, f, p, 0, 1, &all[p]);
+			st = sh_bag_trim(b, a, f, p, 0, 1, NULL, &all[p]);
 		paths[l].curves = all + t->lfirst[l];
 		paths[l].curve_count = t->lfirst[l + 1] - t->lfirst[l];
 		paths[l].closed = 1;
@@ -2105,26 +2192,38 @@ static qaws_status sh_face_region(qaws_shell_atlas const* a, unsigned int f, qaw
 					/* along the trim loop: the stretches of its pieces between */
 					sh_trim const* t = &a->tr[f];
 					unsigned int cnt = t->lfirst[ce + 1] - t->lfirst[ce];
-					double wn, at = we, from[2];
+					double wn, at = we, from[2], off[2], sq;
+					unsigned int pq;
 					int cn;
 					sh_trim_place(t, q0, &cn, &wn);
 					if (wn < we) wn += cnt;
 					from[0] = pe[0]; from[1] = pe[1];
+					/* (on a closed face: along the trim's copy at pe) */
+					sh_trim_nearest(t, pe, SH_NONE, &pq, &sq, off);
 					while (st == QAWS_STATUS_OK && at < wn - 1e-12)
 					{
 						double base = floor(at), end = base + 1 < wn ? base + 1 : wn, e[2], sa = at - base, sb = end - base;
 						unsigned int p = t->lfirst[ce] + ((unsigned int)base) % cnt;
 						/* (from where the walk is to the piece: a rounding apart) */
 						sh_trim_eval(t, p, sa, e, NULL);
+						/* (a loop wrapping round: its next piece in the next copy) */
+						if (t->pu > 0) off[0] += t->pu * floor((from[0] - e[0] - off[0]) / t->pu + 0.5);
+						if (t->pv > 0) off[1] += t->pv * floor((from[1] - e[1] - off[1]) / t->pv + 0.5);
+						e[0] += off[0]; e[1] += off[1];
 						if (hypot(e[0] - from[0], e[1] - from[1]) > SH_JOIN_GAP * t->diag)
 							st = sh_bag_line(&b, a->s[f], from, e, &all[na++]);
 						if (st == QAWS_STATUS_OK && sb - sa > 1e-12)
-							st = sh_bag_trim(&b, a, f, p, sa, sb, &all[na++]);
+							st = sh_bag_trim(&b, a, f, p, sa, sb, off, &all[na++]);
 						sh_trim_eval(t, p, sb, from, NULL);
+						from[0] += off[0]; from[1] += off[1];
 						at = end;
 					}
-					if (st == QAWS_STATUS_OK && hypot(q0[0] - from[0], q0[1] - from[1]) > SH_JOIN_GAP * t->diag)
-						st = sh_bag_line(&b, a->s[f], from, q0, &all[na++]);
+					/* the next run moved onto the walk's copy (whole periods) */
+					shift[0] = t->pu > 0 ? t->pu * floor((from[0] - q0[0]) / t->pu + 0.5) : 0;
+					shift[1] = t->pv > 0 ? t->pv * floor((from[1] - q0[1]) / t->pv + 0.5) : 0;
+					qn[0] = q0[0] + shift[0]; qn[1] = q0[1] + shift[1];
+					if (st == QAWS_STATUS_OK && hypot(qn[0] - from[0], qn[1] - from[1]) > SH_JOIN_GAP * t->diag)
+						st = sh_bag_line(&b, a->s[f], from, qn, &all[na++]);
 				}
 				else if (c->pu > 0 || c->pv > 0)
 				{
@@ -2415,6 +2514,8 @@ qaws_status qaws_shell_region_create(qaws_shell_atlas const* a, qaws_shell_curve
 							if (sg2 == 1) uv[0] -= 1e-6 * (cg->u1 - cg->u0);
 							if (sg2 == 2) uv[1] -= 1e-6 * (cg->v1 - cg->v0);
 							if (sg2 == 3) uv[0] += 1e-6 * (cg->u1 - cg->u0);
+							if (cg->pu > 0) uv[0] -= cg->pu * floor((uv[0] - cg->u0) / cg->pu);
+							if (cg->pv > 0) uv[1] -= cg->pv * floor((uv[1] - cg->v0) / cg->pv);
 							q.x = (qaws_scalar)uv[0]; q.y = (qaws_scalar)uv[1];
 							qaws_surface_region_contains(r->f[g], q, &in);
 							if (in == 1) ins++;
@@ -2937,6 +3038,8 @@ static qaws_status sh_vertex_disk(qaws_shell_atlas const* a, unsigned int v, dou
 				continue;
 			sh_side_uv(a, f, (int)k, ck > 0 ? 0 : 1, uv, dout);
 			sh_side_uv(a, f, pv, cp > 0 ? 1 : 0, e, din);
+			if (c->pu > 0) uv[0] -= c->pu * floor((uv[0] - c->u0) / c->pu);
+			if (c->pv > 0) uv[1] -= c->pv * floor((uv[1] - c->v0) / c->pv);
 			dout[0] *= ck; dout[1] *= ck;
 			din[0] *= -cp; din[1] *= -cp;
 			if ((st = qaws_internal_sg_angle(c, uv[0], uv[1], dout, &t0)) != QAWS_STATUS_OK ||

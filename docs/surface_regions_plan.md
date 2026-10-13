@@ -325,3 +325,10 @@ Each item lands with tests in f64 and f32, docs, and a showcase figure.
   measured by Gauss on the first form; faces without runs judged at five
   places along the side. Test 108 (flat and folded T, a disk touching an
   edge); figure 25's last two panels.
+- Follow-up: trims on surfaces closed in one direction. Loops in continuous
+  (u, v) crossing the seam or wrapping round once; inside by ray crossings
+  over the copies; loops turned by the side the face is on; exits and walks
+  on the copy met. A crossing with only a rounding of the ray left ends on
+  the edge (in float it bounced). Test 108 (a cylinder with a hole on its
+  seam, filled by a disk of the same surface); figure 25's last row. Open:
+  trims on a torus, T-junctions along closed faces' domain sides.

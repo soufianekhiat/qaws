@@ -92,8 +92,15 @@ surface and, optionally, loops of (u, v) curves bounding it
 - **Orientation.** Loops are turned to keep the face on their left: a loop
   inside an even number of others runs counter-clockwise, its holes
   clockwise. A loop that does not close is refused (`INVALID_ARGUMENT`); a
-  trim on a surface closed in u or v is not covered
+  trim on a surface closed both ways (a torus) is not covered
   (`UNSUPPORTED_OPERATION`).
+- **Closed surfaces.** On a surface closed in u (or v) a loop is given in
+  continuous (u, v), and may cross the seam (a hole on it) or wrap round
+  once (a cylinder's rim: a line from (0, v) to (1, v)). It closes up to
+  whole periods. Inside is then by the crossings of a ray across the closed
+  direction over the copies of the point, and each loop is turned so that
+  the point just left of it is inside. Exits and region walks follow the
+  copy of the trim the geodesic meets.
 - **Edges.** A trim curve meets any other face's side (a trim curve or a
   side of an untrimmed domain) where every point of each lies within the
   tolerance of the other, whatever the two parametrisations. A plate's hole
@@ -130,6 +137,8 @@ surface and, optionally, loops of (u, v) curves bounding it
 | The same: a disk round a corner against the untrimmed cube's | 2e-12 |
 | T-junction (a 2 × 1 face meeting two unit faces, flat and as walls): three disks against pi r² and 2 pi r | 1e-10 |
 | The same: a disk on a wall just touching the edge below it stays on its wall | 4e-11 |
+| Cylinder trimmed by its rims and a hole on the seam, the hole's disk of the same surface: three disks against pi r² and 2 pi r (unrolled) | 2e-9 |
+| The same: a ray over the hole's disk and the seam against the unrolled line | 2e-15 |
 
 In f32 the same checks hold to 3e-5. Figure 25 shows the split plane, the
 plate and tube (helices through the hole, a disk over the rim, a union with
@@ -139,7 +148,7 @@ a disk inside the tube) and the trimmed cube.
 
 - A T-junction along a side of a face closed in u or v (a side that cannot
   be split) is not covered.
-- Trims on surfaces closed in u or v are not covered.
+- Trims on surfaces closed both ways are not covered.
 - Rays that hit a vertex exactly stop there; disks round vertices go
   through `qaws_shell_region_create_geodesic_disk`.
 
