@@ -80,7 +80,8 @@ circles across two hemispheres, a disk round a cube corner and a disk
 through a saddle vertex. Figure 24 shows disks through saddle vertices: five
 and six faces round a vertex, flat and bent into bicubic patches, rays
 parting at the vertex, and on the bent monkey saddle two disks through the
-vertex under union, intersection, both differences and exclusive-or.
+vertex under union, intersection, difference and exclusive-or, the surfaces
+shaded and drawn back to front.
 
 ## Limits
 
