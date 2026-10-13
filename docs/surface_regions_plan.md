@@ -302,3 +302,6 @@ Each item lands with tests in f64 and f32, docs, and a showcase figure.
   of the radius left, a union of corner sectors per face. A disk through
   the vertex of five squares matches pi r² + (pi/4)(r − rho)² to 3e-11
   (test 107, figure 23's sixth panel).
+- Follow-up: more saddles. The monkey saddle (six squares, 3 pi) matches
+  pi r² + (theta − 2 pi)/2 (r − rho)² to 5e-11; curved saddles (hypar faces)
+  converge across tolerances to 1.4e-7 (test 107). Figure 24.

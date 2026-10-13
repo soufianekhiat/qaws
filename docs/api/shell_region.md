@@ -70,11 +70,15 @@ qaws_shell_exp(atlas, p, direction, length, &q, &velocity, &crossings);
 | Two hemispheres: a great circle over the equator twice, back at its start | 2e-12 |
 | Cube: a geodesic disk round a corner against the unfolded cone of angle 3 pi/2 | 5e-11 |
 | Saddle (five squares round a vertex, angle 5 pi/2): a disk through it against pi r² + (pi/4)(r − rho)² | 3e-11 |
+| Monkey saddle (six squares, angle 3 pi): a disk through the vertex against pi r² + (pi/2)(r − rho)² | 5e-11 |
+| Monkey saddle of hypars (curved faces): the disk at two tolerances; warped either way | 1.4e-7; 0 |
 
 In f32 the same checks hold to 3e-5. Figure 23 shows a fan of straightest
 geodesics over a cube's edges, circles over edges and their union, and
 circles across two hemispheres, a disk round a cube corner and a disk
-through a saddle vertex.
+through a saddle vertex. Figure 24 shows disks through saddle vertices: five
+and six faces round a vertex, flat and curved, rays parting at the vertex,
+and two disks united across it.
 
 ## Limits
 

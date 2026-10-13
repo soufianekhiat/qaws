@@ -32,6 +32,8 @@
  *                      inscribed geodesic circles on a sphere, a patch and a torus
  *   b2d23_shell_region.svg  curves and regions across shell faces: geodesics over
  *                      a cube's edges, circles across faces, two hemispheres
+ *   b2d24_shell_saddle.svg  geodesic disks through saddle vertices: five and six
+ *                      faces round a vertex, flat and curved (hypars)
  *
  * Each figure lives in better2d_showcase/NN_*.c, compiled as one translation
  * unit.
@@ -77,6 +79,7 @@
 #include "better2d_showcase/21_surface_exact.c"
 #include "better2d_showcase/22_surface_medial.c"
 #include "better2d_showcase/23_shell_region.c"
+#include "better2d_showcase/24_shell_saddle.c"
 
 int main(void)
 {
@@ -105,5 +108,6 @@ int main(void)
 	demo_surface_exact();
 	demo_surface_medial();
 	demo_shell_region();
+	demo_shell_saddle();
 	return 0;
 }

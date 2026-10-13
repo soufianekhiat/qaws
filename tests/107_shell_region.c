@@ -13,6 +13,10 @@
  *     perimeter; a great circle over the equator twice, back at its start
  *   - five squares round a saddle vertex (angle 5 pi / 2): a disk through it
  *     against the plane disk plus the sector behind it, (pi / 4)(r - rho0)^2
+ *   - six squares round a vertex (a monkey saddle, angle 3 pi): a disk
+ *     against pi r^2 + (pi / 2)(r - rho0)^2; the same six as hypars (far
+ *     corners pushed off the plane, the faces curved): the disk at two
+ *     tolerances, warped either way alike, larger than the flat one
  */
 
 #include "test_common.h"
@@ -260,6 +264,63 @@ static void test_saddle(void)
 	for (i = 0; i < 5; i++) qaws_surface_destroy(f[i]);
 }
 
+/* six faces round the origin, face i spanned by axis directions d[i] and
+   d[i + 1] (the monkey saddle), the far corner pushed by w along the normal */
+static void sht_monkey(qaws_surface** f, double w)
+{
+	static double const D[6][3] = { { 1, 0, 0 }, { 0, 1, 0 }, { 0, 0, 1 }, { -1, 0, 0 }, { 0, -1, 0 }, { 0, 0, -1 } };
+	static double const O[3] = { 0, 0, 0 };
+	unsigned int i, k;
+	for (i = 0; i < 6; i++)
+	{
+		double const* a = D[i];
+		double const* b = D[(i + 1) % 6];
+		double n[3] = { a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0] }, p11[3];
+		for (k = 0; k < 3; k++) p11[k] = a[k] + b[k] + w * n[k];
+		f[i] = sht_face(O, a, b, p11);
+	}
+}
+
+static double sht_monkey_disk(double w, double tolerance, unsigned int* faces)
+{
+	qaws_surface* f[6];
+	qaws_shell_atlas* a = NULL;
+	qaws_shell_region* g = NULL;
+	qaws_scalar A = -1;
+	unsigned int i;
+	sht_monkey(f, w);
+	*faces = 0;
+	if (qaws_shell_atlas_create((qaws_surface const* const*)f, 6, 0, &a) == QAWS_STATUS_OK
+		&& qaws_shell_region_create_geodesic_disk(a, sht_pt(0, 0.3, 0.3), (qaws_scalar)0.6, (qaws_scalar)tolerance, &g) == QAWS_STATUS_OK)
+	{
+		qaws_shell_region_get_area(g, &A);
+		for (i = 0; i < 6; i++) if (qaws_shell_region_get_face(g, i)) (*faces)++;
+	}
+	qaws_shell_region_destroy(g);
+	qaws_shell_atlas_destroy(a);
+	for (i = 0; i < 6; i++) qaws_surface_destroy(f[i]);
+	return (double)A;
+}
+
+static void test_monkey_saddle(void)
+{
+	double rho0 = 0.3 * sqrt(2.0), r = 0.6, A0 = SHT_PI * r * r + 0.5 * SHT_PI * (r - rho0) * (r - rho0);
+	double flat, fine, coarse, other;
+	unsigned int n0, n1, n2, n3;
+	char msg[300];
+	flat = sht_monkey_disk(0, 0, &n0);
+	sprintf(msg, "monkey saddle (six squares, angle 3 pi): a disk through the vertex (on %u faces) against pi r^2 + (pi/2)(r - rho)^2 %.2g",
+		n0, fabs(flat - A0));
+	TEST_ASSERT(n0 == 6 && fabs(flat - A0) <= (SHT_F32 ? 2e-4 : 1e-9), msg);
+	fine = sht_monkey_disk(0.4, 0, &n1);
+	coarse = sht_monkey_disk(0.4, SHT_F32 ? 1e-3 : 1e-6, &n2);
+	other = sht_monkey_disk(-0.4, 0, &n3);
+	sprintf(msg, "monkey saddle of hypars: the disk %.9f (flat %.9f) at two tolerances %.2g, warped the other way %.2g",
+		fine, flat, fabs(fine - coarse), fabs(fine - other));
+	TEST_ASSERT(n1 == 6 && n2 == 6 && n3 == 6 && fine > flat + 1e-3 && fabs(fine - coarse) <= (SHT_F32 ? 2e-3 : 1e-6)
+		&& fabs(fine - other) <= (SHT_F32 ? 2e-4 : 1e-9), msg);
+}
+
 int test_107_shell_region_main(void)
 {
 	g_pass = 0;
@@ -268,6 +329,7 @@ int test_107_shell_region_main(void)
 	test_cube();
 	test_hemispheres();
 	test_saddle();
+	test_monkey_saddle();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
 }
