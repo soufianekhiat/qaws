@@ -289,10 +289,12 @@ qaws_surface_clip_exact(surface, QAWS_CLIP_UNION, QAWS_FILL_NON_ZERO, a, na, b, 
   48 parameter bits (2^-26 and 24 in float builds).
 - **Moved, not cut.** A loop lying within one period cell is moved into the
   first cell without being cut.
-- **Limitation.** A curved boundary cut at a seam gives pieces whose ends are
-  the doubles nearest the exact cuts, and the kernel may not certify those
-  back: the call then returns `QAWS_STATUS_CERTIFICATION_FAILED`, never a
-  wrong region. Straight edges across seams certify.
+- **Cuts at seams.** A curved boundary cut at a seam gives pieces whose ends
+  are the doubles nearest the exact cuts. A piece's end a few ulps past its
+  curve's start is that start on the kernel's parameter lattice; the kernel
+  orders it there (it used to make a vertex just after the start, an edge of
+  no length, and fail to certify). Curved and straight boundaries across
+  seams certify.
 - **Measures and queries** on the result are the same as for
   `qaws_surface_clip`.
 
@@ -308,8 +310,8 @@ qaws_surface_clip_exact(surface, QAWS_CLIP_UNION, QAWS_FILL_NON_ZERO, a, na, b, 
   - squares touching at a corner unite into two loops;
   - squares sharing part of an edge across the seam unite with the area the
     sum.
-- **A circle across the seam:** either the float area or
-  `CERTIFICATION_FAILED`.
+- **Circles across the seam:** five circles and their unions with shifted
+  copies certify, with the float path's areas (1e-8).
 
 Figure 21 shows a ring of sixteen squares sharing their sides united into
 one band, checkerboards, and a lens.

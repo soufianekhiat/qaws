@@ -6,6 +6,8 @@
  *   - against the float path: two geodesic circles on a sphere (union,
  *     intersection, difference, xor), circles across the sphere's seam,
  *     a circle across both seams of a torus: the same areas
+ *   - curved boundaries cut at the seam: five circles and their unions
+ *     certified, with the float areas
  *   - degenerate inputs drawn in (u, v), where only exact decisions hold:
  *     a region with itself (union and intersection the region, difference
  *     empty), two squares sharing an edge (union one loop, its area the sum),
@@ -151,24 +153,38 @@ static void test_against_float(void)
 	sprintf(msg, "exact against float: two circles' Booleans, a circle given a period on (moved, not cut), a circle on a torus agree to %.2g (status %d)",
 		worst, (int)bad);
 	TEST_ASSERT(bad == QAWS_STATUS_OK && worst <= tol, msg);
-	/* a curved boundary cut at the seam: the pieces' ends are the doubles
-	   nearest the exact cuts, which the kernel may not certify back: either
-	   the float area or CERTIFICATION_FAILED, never a wrong region */
+	/* curved boundaries cut at the seam (a cut piece's end a few ulps past
+	   its curve's start is that start on the parameter lattice): each circle
+	   and its union with a shifted copy certified, the float areas */
 	{
-		qaws_surface_curve* cx = NULL;
-		qaws_surface_curve const* px[1];
-		qaws_surface_path X;
-		double af, ae;
-		qaws_status sf, se;
-		qaws_surface_curve_create_geodesic_arc(s, sxt_uv(0.02, 0.5), (qaws_scalar)0.5, 0, (qaws_scalar)(2 * SXT_PI), 0, &cx);
-		px[0] = cx;
-		X.curves = px; X.curve_count = 1; X.closed = 1;
-		af = sxt_area(s, 0, QAWS_CLIP_NONE, &X, 1, NULL, 0, NULL, &sf);
-		ae = sxt_area(s, 1, QAWS_CLIP_NONE, &X, 1, NULL, 0, NULL, &se);
-		sprintf(msg, "exact, a circle across the seam: status %d, area %.2g off the float path's (status 19: not certified, reported)", (int)se,
-			se == QAWS_STATUS_OK ? fabs(ae - af) : 0.0);
-		TEST_ASSERT(!sf && ((se == QAWS_STATUS_OK && fabs(ae - af) <= tol) || se == QAWS_STATUS_CERTIFICATION_FAILED), msg);
-		qaws_surface_curve_destroy(cx);
+		static double const cs[5][3] = { { 0.02, 0.5, 0.5 }, { 0.0, 0.5, 0.4 }, { 0.98, 0.45, 0.6 }, { 0.05, 0.3, 0.3 }, { 0.99, 0.6, 0.25 } };
+		double off = 0;
+		qaws_status sbad = QAWS_STATUS_OK;
+		unsigned int z;
+		for (z = 0; z < 5; z++)
+		{
+			qaws_surface_curve *cx = NULL, *cy = NULL;
+			qaws_surface_curve const *px[1], *py[1];
+			qaws_surface_path X, Y;
+			double af, ae, uf, ue;
+			qaws_status sf, se, tf, te;
+			qaws_surface_curve_create_geodesic_arc(s, sxt_uv(cs[z][0], cs[z][1]), (qaws_scalar)cs[z][2], 0, (qaws_scalar)(2 * SXT_PI), 0, &cx);
+			qaws_surface_curve_create_geodesic_arc(s, sxt_uv(cs[z][0] + 0.06, cs[z][1] + 0.03), (qaws_scalar)cs[z][2], 0, (qaws_scalar)(2 * SXT_PI), 0, &cy);
+			px[0] = cx; py[0] = cy;
+			X.curves = px; X.curve_count = 1; X.closed = 1;
+			Y.curves = py; Y.curve_count = 1; Y.closed = 1;
+			af = sxt_area(s, 0, QAWS_CLIP_NONE, &X, 1, NULL, 0, NULL, &sf);
+			ae = sxt_area(s, 1, QAWS_CLIP_NONE, &X, 1, NULL, 0, NULL, &se);
+			uf = sxt_area(s, 0, QAWS_CLIP_UNION, &X, 1, &Y, 1, NULL, &tf);
+			ue = sxt_area(s, 1, QAWS_CLIP_UNION, &X, 1, &Y, 1, NULL, &te);
+			if (sf || se || tf || te) sbad = se ? se : te ? te : sf ? sf : tf;
+			if (fabs(ae - af) > off) off = fabs(ae - af);
+			if (fabs(ue - uf) > off) off = fabs(ue - uf);
+			qaws_surface_curve_destroy(cx);
+			qaws_surface_curve_destroy(cy);
+		}
+		sprintf(msg, "exact, five circles across the seam and their unions with shifted copies: status %d, areas %.2g off the float path's", (int)sbad, off);
+		TEST_ASSERT(sbad == QAWS_STATUS_OK && off <= tol, msg);
 	}
 	qaws_surface_curve_destroy(ca); qaws_surface_curve_destroy(cb); qaws_surface_curve_destroy(cs);
 	qaws_surface_destroy(s);

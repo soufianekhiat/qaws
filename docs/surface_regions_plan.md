@@ -358,3 +358,8 @@ Each item lands with tests in f64 and f32, docs, and a showcase figure.
   an end on another face. Trace steps on trimmed faces go no further than
   the nearest free piece, so thin holes stop rays. Test 108 (two and three
   holes against the closed form, a neighbouring face, holes 0.002 across).
+- Follow-up: curved boundaries cut at seams certify. The exact kernel now
+  puts an event whose exact parameter is a span's end at that end's double,
+  so a cut piece's end a few ulps past its curve's start is ordered as the
+  start, not as a vertex after it (an edge of no length). Test 105 (five
+  circles across the seam and their unions).

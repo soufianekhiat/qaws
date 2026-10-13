@@ -581,6 +581,14 @@ static qaws_status cx_exact_event(cx_ctx* x, unsigned int ei, int side)
 	qaws_status st;
 	TRY(cx_local(e, v->lo, side, &k, &num, &den));
 	TRY(cx_rat_add(x, k, &num, &den, &x->ev[ei].rat));
+	/* at a span's end on the parameter lattice: that end's double, so the
+	   order along the curve agrees (a double a few ulps past a curve's start
+	   is its start on the lattice, not a vertex after it) */
+	if (qaws_exact_int_is_zero(&num) || qaws_exact_int_cmp(&num, &den) == 0)
+	{
+		v = &x->ev[ei];
+		v->lo = v->hi = ldexp((double)(qaws_exact_int_is_zero(&num) ? e->spans[k].a : e->spans[k].b), -e->param_shift);
+	}
 	TRY(cx_span_point(&e->spans[k], &num, &den, &p));
 	return cx_pt_add(x, &p, &x->ev[ei].pt);
 }

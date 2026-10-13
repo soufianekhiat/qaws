@@ -36,6 +36,8 @@ The input curves are prepared onto one exact lattice. From there, each step is e
    - an exact point is tested against the partner curve's implicit equation;
    - two algebraic points on one curve are tested by the gcd of the partners' implicit equations
      substituted into that curve, counting its roots in the common enclosure.
+   - a hit whose exact parameter is a span's end (on the parameter lattice) is ordered at that end,
+     not at its double: a double a few ulps past a curve's start is that start.
 3. **Edges.** Each curve is cut at its vertices. Edges along an overlap are merged, using a union-find
    that tracks their relative direction, and they carry the sum of their winding steps. Edges whose
    steps cancel are dropped.
