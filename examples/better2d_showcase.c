@@ -85,6 +85,7 @@
 #include "better2d_showcase/24_shell_saddle.c"
 #include "better2d_showcase/25_shell_trimmed.c"
 #include "better2d_showcase/26_shell_paths.c"
+#include "better2d_showcase/27_geodesic_enclosure.c"
 
 int main(void)
 {
@@ -116,5 +117,6 @@ int main(void)
 	demo_shell_saddle();
 	demo_shell_trimmed();
 	demo_shell_paths();
+	demo_geodesic_enclosure();
 	return 0;
 }

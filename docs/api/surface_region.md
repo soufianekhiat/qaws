@@ -316,6 +316,72 @@ qaws_surface_clip_exact(surface, QAWS_CLIP_UNION, QAWS_FILL_NON_ZERO, a, na, b, 
 Figure 21 shows a ring of sixteen squares sharing their sides united into
 one band, checkerboards, and a lens.
 
+## Validated geodesics
+
+```c
+qaws_geodesic_enclosure* e = NULL;
+qaws_surface_geodesic_enclose(surface, p, direction, length, 0, &e);   /* width 0 = 1e-6 of the domain */
+qaws_geodesic_enclosure_get_step(e, i, &t0, &t1, &lo, &hi);           /* a box proven to hold the geodesic over [t0, t1] */
+qaws_geodesic_enclosure_get_end(e, &lo, &hi, &vlo, &vhi);             /* boxes for the end and its unit velocity */
+qaws_geodesic_enclosure_cross(e, f, cap, lo, hi, &count);             /* crossings of two, certified */
+```
+
+On polynomial surfaces (Bezier, B-spline, bilinear, biquadratic) a
+geodesic gets boxes in (u, v) proven to hold it, not just a curve within
+a tolerance.
+
+- **Arithmetic.** Intervals with outward rounding: each bound moves out by
+  one rounding after every operation, and bounds under 1e-290 are put at it
+  (denormals are very slow).
+- **The surface.** Each Bezier patch carries its derivative nets up to the
+  third order, in intervals. A B-spline is cut into Bezier patches by
+  knot insertion, also in intervals. A derivative over a box is the net's
+  Bernstein form over the box, met with the mean value form from the next
+  order. A box over several patches takes the hull.
+- **The equation.** y = (u, v, u', v') with y' = f(y), f = (u', v', a) and
+  a^k = -G^k_ij w^i w^j. Its second derivative y'' = (a, Da) takes the
+  gradient of a in (u, v) by interval duals (through the third
+  derivatives) and in w directly.
+- **A step** of length h from the set y^ + A r:
+  - the a priori box B: Y + [0, h] f(B) within B (Picard), from Y + [0, h]
+    f(Y) inflated; the geodesic over the step lies in B, and B is the
+    step's box;
+  - the end: y^ + h f(y^) + (I + h Df(Y)) A r + h²/2 y''(B), carried in
+    Lohner's moving frame: A is the orthonormal part of the propagated
+    matrix (Gram-Schmidt, widest columns first), and r is re-enclosed
+    through an interval enclosure of A's inverse (from A^T and the bound
+    |I - A^T A|). The set stays a thin slanted parallelepiped instead of a
+    box re-wrapped every step.
+- **Steps.** The remainder goes as h³ against an allowance proportional to
+  h, so the step is scaled by the square root of their ratio. A velocity's
+  remainder counts with the length left. Expect about ten times the steps
+  for a hundred times narrower boxes (a second-order method).
+- **Crossings.** Two enclosed geodesics:
+  - none where no step boxes meet;
+  - exactly one in a stretch where they meet, when the cross product of the
+    two velocity hulls there has one sign (no second crossing: the chord
+    between two would lie in both direction cones), and Miranda's theorem
+    holds for A(s) - B(t) seen across each curve's mean direction
+    (opposite signs on opposite faces of the stretch, so a crossing);
+  - otherwise `CERTIFICATION_FAILED`. The crossing's box is the hull of the
+    meeting step boxes' common parts, about a step across.
+- **Refusals.** Other surfaces: `UNSUPPORTED_OPERATION`. A geodesic
+  reaching the domain's edge: `OUT_OF_RANGE`. A step that cannot be
+  validated (the metric degenerates): `NUMERICAL_FAILURE`.
+
+| Check (test 109) | f64 | f32 |
+|---|---|---|
+| Parabolic cylinder z = x², length 1.5: the closed form's end (unrolled by arc length) inside the end box | box 1.8e-6 | same |
+| A plane parametrized unevenly (bicubic), length 0.6: the straight line's end inside | box 3e-6 | same |
+| Bicubic B-spline bump, length 0.9: the float geodesic's end (tolerance 1e-12) inside | box 1.3e-5 | box only |
+| Crossings on the bump: one, its box holding the float crossing; none for a pair apart | 1.3e-4 box | counts |
+| Refusals: a surface of revolution; a geodesic leaving the domain | | |
+
+The boxes are computed in double in both builds; f32 builds round the
+reported bounds outward to floats. Figure 27 shows three geodesics on the
+bump, the crossing's step boxes and box, and an end box with the float end
+inside.
+
 ## Medial axis
 
 ```c

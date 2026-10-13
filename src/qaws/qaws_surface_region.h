@@ -94,6 +94,45 @@ qaws_status qaws_surface_curve_create_geodesic_arc(qaws_surface const* surface, 
 qaws_status qaws_surface_curve_create_offset(qaws_surface_curve const* base, qaws_scalar distance, qaws_scalar tolerance,
 	qaws_surface_curve** out_curve);
 
+/* A validated enclosure of the geodesic leaving p in the (u, v) direction
+   for the surface length `length`, on a polynomial surface (Bezier,
+   B-spline, bilinear, biquadratic): the length cut into steps, each with a
+   box in (u, v) proven to hold the true geodesic over it, and a box proven
+   to hold its end and unit velocity. Interval arithmetic with outward
+   rounding throughout: the surface's derivatives up to the third bounded
+   from its control nets (B-splines cut into Bezier patches), each step's
+   box by Picard iteration, its end by a second-order Taylor form with the
+   remainder over that box. width: the end box's side to aim for, relative
+   to the domain's diagonal (0 = 1e-6; the steps shrink to reach it, about
+   ten times the steps for a hundred times narrower).
+   UNSUPPORTED_OPERATION for other surfaces; OUT_OF_RANGE when a box leaves
+   the domain; NUMERICAL_FAILURE when a step cannot be validated (the
+   metric degenerates). */
+typedef struct qaws_geodesic_enclosure qaws_geodesic_enclosure;
+
+qaws_status qaws_surface_geodesic_enclose(qaws_surface const* surface, qaws_vec2 p, qaws_vec2 direction, qaws_scalar length,
+	qaws_scalar width, qaws_geodesic_enclosure** out_enclosure);
+void qaws_geodesic_enclosure_destroy(qaws_geodesic_enclosure* enclosure);
+unsigned int qaws_geodesic_enclosure_get_step_count(qaws_geodesic_enclosure const* enclosure);
+/* Step i: its stretch of length [t0, t1] and the (u, v) box holding the
+   geodesic over it. */
+qaws_status qaws_geodesic_enclosure_get_step(qaws_geodesic_enclosure const* enclosure, unsigned int index, qaws_scalar* out_t0,
+	qaws_scalar* out_t1, qaws_vec2* out_lo, qaws_vec2* out_hi);
+/* The end: boxes holding the point and the unit (u, v) velocity there. */
+qaws_status qaws_geodesic_enclosure_get_end(qaws_geodesic_enclosure const* enclosure, qaws_vec2* out_point_lo, qaws_vec2* out_point_hi,
+	qaws_vec2* out_velocity_lo, qaws_vec2* out_velocity_hi);
+/* The crossings of two enclosed geodesics of one surface, certified: none
+   where no step boxes meet; exactly one in each stretch where they meet,
+   when there the two are transversal (the cross product of their velocity
+   boxes has one sign, so no second crossing) and each passes from one side
+   of the other to the other (Miranda on A(s) - B(t), seen across each
+   curve's mean direction, so one crossing). Their boxes (the hull of the
+   meeting boxes' common parts), up to capacity; the count. CERTIFICATION_
+   FAILED when a stretch cannot be told (a tangency, an overlap, boxes too
+   wide). */
+qaws_status qaws_geodesic_enclosure_cross(qaws_geodesic_enclosure const* a, qaws_geodesic_enclosure const* b, unsigned int capacity,
+	qaws_vec2* out_lo, qaws_vec2* out_hi, unsigned int* out_count);
+
 void qaws_surface_curve_destroy(qaws_surface_curve* curve);
 
 qaws_surface_curve_kind qaws_surface_curve_get_kind(qaws_surface_curve const* curve);

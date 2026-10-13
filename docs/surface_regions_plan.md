@@ -363,3 +363,10 @@ Each item lands with tests in f64 and f32, docs, and a showcase figure.
   so a cut piece's end a few ulps past its curve's start is ordered as the
   start, not as a vertex after it (an edge of no length). Test 105 (five
   circles across the seam and their unions).
+- Follow-up: validated geodesics on polynomial surfaces
+  (qaws_surface_geodesic_enclose): interval derivative nets (B-splines cut
+  into Bezier patches), Picard a priori boxes, a second-order Taylor step in
+  Lohner's moving frame; crossings of two certified (transversal hulls and
+  Miranda). Test 109 (two closed forms, a B-spline bump against the float
+  geodesic, crossings); figure 27. Open: rational and other surfaces,
+  higher-order steps, the certified path's Booleans of geodesic regions.
