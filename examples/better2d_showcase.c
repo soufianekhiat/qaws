@@ -84,6 +84,7 @@
 #include "better2d_showcase/23_shell_region.c"
 #include "better2d_showcase/24_shell_saddle.c"
 #include "better2d_showcase/25_shell_trimmed.c"
+#include "better2d_showcase/26_shell_paths.c"
 
 int main(void)
 {
@@ -114,5 +115,6 @@ int main(void)
 	demo_shell_region();
 	demo_shell_saddle();
 	demo_shell_trimmed();
+	demo_shell_paths();
 	return 0;
 }
