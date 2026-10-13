@@ -12,6 +12,7 @@
 #include "qaws_composite.h"
 #include "qaws_eval.h"
 #include "qaws_inspect.h"
+#include "qaws_triangulate.h"
 #include "qaws_operations.h"
 #include "qaws_path.h"
 #include "internal/qaws_internal_surface_region.h"
@@ -4186,5 +4187,337 @@ qaws_status qaws_shell_curve_create_shortest_path(qaws_shell_atlas const* a, qaw
 		return st;
 	}
 	*out_curve = sc;
+	return QAWS_STATUS_OK;
+}
+
+/* ------------------------------------------------------------------------ */
+/*  Sampling and meshing                                                    */
+/* ------------------------------------------------------------------------ */
+
+qaws_status qaws_shell_region_sample(qaws_shell_region const* region, qaws_surface_sample_desc const* desc, unsigned int count,
+	qaws_shell_point* out_points, qaws_vec3* out_xyz)
+{
+	unsigned int f, nf, given = 0, at = 0;
+	double total = 0, *area;
+	unsigned int* share;
+	qaws_status st = QAWS_STATUS_OK;
+	if (!region)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	nf = region->a->nf;
+	area = (double*)calloc(nf, sizeof(double));
+	share = (unsigned int*)calloc(nf, sizeof(unsigned int));
+	if (!area || !share)
+	{
+		free(area); free(share);
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	}
+	for (f = 0; f < nf; f++)
+		if (region->f[f])
+		{
+			qaws_scalar x = 0;
+			qaws_surface_region_get_area(region->f[f], &x);
+			area[f] = (double)x > 0 ? (double)x : 0;
+			total += area[f];
+		}
+	if (!(total > 0))
+	{
+		free(area); free(share);
+		return count ? QAWS_STATUS_INVALID_ARGUMENT : QAWS_STATUS_OK;
+	}
+	/* the count shared by area, the remainders to the largest fractions */
+	for (f = 0; f < nf; f++)
+	{
+		share[f] = (unsigned int)floor(count * area[f] / total);
+		given += share[f];
+	}
+	while (given < count)
+	{
+		unsigned int bf = 0;
+		double bfrac = -1;
+		for (f = 0; f < nf; f++)
+		{
+			double fr = count * area[f] / total - share[f];
+			if (area[f] > 0 && fr > bfrac) { bfrac = fr; bf = f; }
+		}
+		share[bf]++;
+		given++;
+	}
+	for (f = 0; f < nf && st == QAWS_STATUS_OK; f++)
+	{
+		qaws_surface_sample_desc d;
+		qaws_vec2* uv;
+		unsigned int i;
+		if (!share[f])
+			continue;
+		if (desc) d = *desc; else memset(&d, 0, sizeof(d));
+		d.seed += 0x9E3779B97F4A7C15ull * f;
+		uv = (qaws_vec2*)malloc(sizeof(qaws_vec2) * share[f]);
+		if (!uv)
+		{
+			st = QAWS_STATUS_ALLOCATION_FAILURE;
+			break;
+		}
+		st = qaws_surface_region_sample(region->f[f], &d, share[f], uv, out_xyz ? out_xyz + at : NULL);
+		for (i = 0; i < share[f] && out_points && st == QAWS_STATUS_OK; i++)
+		{
+			out_points[at + i].face = f;
+			out_points[at + i].uv = uv[i];
+		}
+		free(uv);
+		at += share[f];
+	}
+	free(area); free(share);
+	return st;
+}
+
+struct qaws_shell_mesh
+{
+	qaws_shell_point* vp;
+	qaws_vec3* vx;
+	unsigned int nv, capv, capx;
+	unsigned int* tri;
+	unsigned int nt, capt;
+};
+
+void qaws_shell_mesh_destroy(qaws_shell_mesh* mesh)
+{
+	if (!mesh)
+		return;
+	free(mesh->vp); free(mesh->vx); free(mesh->tri);
+	free(mesh);
+}
+
+unsigned int qaws_shell_mesh_get_vertex_count(qaws_shell_mesh const* mesh) { return mesh ? mesh->nv : 0; }
+unsigned int qaws_shell_mesh_get_triangle_count(qaws_shell_mesh const* mesh) { return mesh ? mesh->nt : 0; }
+
+qaws_status qaws_shell_mesh_get_vertex(qaws_shell_mesh const* mesh, unsigned int index, qaws_shell_point* out_point, qaws_vec3* out_xyz)
+{
+	if (!mesh || index >= mesh->nv)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	if (out_point) *out_point = mesh->vp[index];
+	if (out_xyz) *out_xyz = mesh->vx[index];
+	return QAWS_STATUS_OK;
+}
+
+qaws_status qaws_shell_mesh_get_triangle(qaws_shell_mesh const* mesh, unsigned int index, unsigned int out_vertices[3])
+{
+	if (!mesh || index >= mesh->nt || !out_vertices)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	memcpy(out_vertices, mesh->tri + 3 * index, sizeof(unsigned int) * 3);
+	return QAWS_STATUS_OK;
+}
+
+static int sm_grow(void** p, unsigned int* cap, unsigned int need, size_t size)
+{
+	void* g;
+	unsigned int nc;
+	if (need <= *cap)
+		return 1;
+	nc = *cap ? *cap : 256;
+	while (nc < need) nc *= 2;
+	g = realloc(*p, size * nc);
+	if (!g)
+		return 0;
+	*p = g;
+	*cap = nc;
+	return 1;
+}
+
+static int sm_add_tri(qaws_shell_mesh* m, unsigned int a, unsigned int b, unsigned int c)
+{
+	if (!sm_grow((void**)&m->tri, &m->capt, 3 * (m->nt + 1), sizeof(unsigned int)))
+		return 0;
+	m->tri[3 * m->nt] = a; m->tri[3 * m->nt + 1] = b; m->tri[3 * m->nt + 2] = c;
+	m->nt++;
+	return 1;
+}
+
+static double sm_d3(qaws_vec3 a, qaws_vec3 b)
+{
+	double dx = (double)a.x - b.x, dy = (double)a.y - b.y, dz = (double)a.z - b.z;
+	return sqrt(dx * dx + dy * dy + dz * dz);
+}
+
+qaws_status qaws_shell_region_triangulate(qaws_shell_region const* region, qaws_surface_mesh_desc const* desc, qaws_shell_mesh** out_mesh)
+{
+	qaws_shell_mesh* m;
+	qaws_surface_mesh_desc d;
+	unsigned int f, nf, i, j, k, nb = 0, capb = 0, *bnd = NULL;      /* boundary edges: face, a, b */
+	unsigned char* own = NULL;
+	double L, weld, near_line;
+	qaws_status st = QAWS_STATUS_OK;
+	if (!region || !out_mesh)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	*out_mesh = NULL;
+	nf = region->a->nf;
+	if (desc) d = *desc; else memset(&d, 0, sizeof(d));
+	L = (double)d.edge_length;
+	if (!(L > 0))
+	{
+		qaws_scalar A = 0;
+		qaws_shell_region_get_area(region, &A);
+		L = sqrt((double)A) / 30;
+		d.edge_length = (qaws_scalar)L;
+	}
+	if (!(L > 0))
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	/* (vertices met from two faces agree to the rounding of their (u, v)) */
+	weld = (sizeof(qaws_scalar) == 4 ? 1e-3 : 1e-6) * L;
+	near_line = 2 * (d.tolerance > 0 ? (double)d.tolerance : L / 100) + weld;
+	m = (qaws_shell_mesh*)calloc(1, sizeof(*m));
+	if (!m)
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	for (f = 0; f < nf && st == QAWS_STATUS_OK; f++)
+	{
+		qaws_mesh_2d* mm = NULL;
+		unsigned int nvf, *map;
+		if (!region->f[f])
+			continue;
+		if ((st = qaws_surface_region_triangulate(region->f[f], &d, &mm)) != QAWS_STATUS_OK)
+			break;
+		nvf = qaws_mesh_2d_get_vertex_count(mm);
+		map = (unsigned int*)malloc(sizeof(unsigned int) * (nvf + 1));
+		if (!map)
+		{
+			qaws_mesh_2d_destroy(mm);
+			st = QAWS_STATUS_ALLOCATION_FAILURE;
+			break;
+		}
+		for (i = 0; i < nvf && st == QAWS_STATUS_OK; i++)
+		{
+			/* the vertex, welded to one in space within the weld */
+			qaws_vec2 q = qaws_mesh_2d_get_vertex(mm, i);
+			qaws_surface_eval_result r;
+			double uv[2];
+			uv[0] = q.x; uv[1] = q.y;
+			memset(&r, 0, sizeof(r));
+			sh_point(&region->a->c[f], uv, QAWS_SURFACE_EVAL_POSITION, &r);
+			for (j = 0; j < m->nv && sm_d3(m->vx[j], r.position) > weld; j++) {}
+			if (j == m->nv)
+			{
+				if (!sm_grow((void**)&m->vp, &m->capv, m->nv + 1, sizeof(qaws_shell_point)) ||
+					!sm_grow((void**)&m->vx, &m->capx, m->nv + 1, sizeof(qaws_vec3)))
+				{
+					st = QAWS_STATUS_ALLOCATION_FAILURE;
+					break;
+				}
+				m->vp[m->nv].face = f; m->vp[m->nv].uv = q;
+				m->vx[m->nv] = r.position;
+				m->nv++;
+			}
+			map[i] = j;
+		}
+		for (i = 0; i < qaws_mesh_2d_get_triangle_count(mm) && st == QAWS_STATUS_OK; i++)
+		{
+			unsigned int t[3];
+			qaws_mesh_2d_get_triangle(mm, i, t);
+			if (!sm_add_tri(m, map[t[0]], map[t[1]], map[t[2]]))
+				st = QAWS_STATUS_ALLOCATION_FAILURE;
+		}
+		for (i = 0; i < qaws_mesh_2d_get_boundary_edge_count(mm) && st == QAWS_STATUS_OK; i++)
+		{
+			unsigned int e[2];
+			qaws_mesh_2d_get_boundary_edge(mm, i, e);
+			if (!sm_grow((void**)&bnd, &capb, 3 * (nb + 1), sizeof(unsigned int)))
+			{
+				st = QAWS_STATUS_ALLOCATION_FAILURE;
+				break;
+			}
+			bnd[3 * nb] = f; bnd[3 * nb + 1] = map[e[0]]; bnd[3 * nb + 2] = map[e[1]];
+			nb++;
+		}
+		free(map);
+		qaws_mesh_2d_destroy(mm);
+	}
+	/* the T-junctions where faces meet: each face's boundary edge split at
+	   the other faces' boundary vertices lying on it (the triangle on it
+	   fanned from its far vertex) */
+	own = st == QAWS_STATUS_OK ? (unsigned char*)calloc(m->nv + 1, 1) : NULL;
+	if (st == QAWS_STATUS_OK && !own)
+		st = QAWS_STATUS_ALLOCATION_FAILURE;
+	for (f = 0; f < nf && st == QAWS_STATUS_OK; f++)
+	{
+		if (!region->f[f])
+			continue;
+		memset(own, 0, m->nv);
+		for (k = 0; k < nb; k++)
+			if (bnd[3 * k] == f) { own[bnd[3 * k + 1]] = 1; own[bnd[3 * k + 2]] = 1; }
+		for (k = 0; k < nb && st == QAWS_STATUS_OK; k++)
+		{
+			unsigned int a = bnd[3 * k + 1], b = bnd[3 * k + 2], n = 0, ws[256], t;
+			double ts[256], ex, ey, ez, ee;
+			if (bnd[3 * k] != f)
+				continue;
+			ex = (double)m->vx[b].x - m->vx[a].x; ey = (double)m->vx[b].y - m->vx[a].y; ez = (double)m->vx[b].z - m->vx[a].z;
+			ee = ex * ex + ey * ey + ez * ez;
+			if (!(ee > 0))
+				continue;
+			for (j = 0; j < nb && n < 256; j++)
+			{
+				unsigned int q, w;
+				if (bnd[3 * j] == f)
+					continue;
+				for (q = 1; q <= 2 && n < 256; q++)
+				{
+					double s, px, py, pz;
+					unsigned int r2;
+					w = bnd[3 * j + q];
+					if (own[w])
+						continue;
+					px = (double)m->vx[w].x - m->vx[a].x; py = (double)m->vx[w].y - m->vx[a].y; pz = (double)m->vx[w].z - m->vx[a].z;
+					s = (px * ex + py * ey + pz * ez) / ee;
+					if (!(s > 1e-9 && s < 1 - 1e-9))
+						continue;
+					px -= s * ex; py -= s * ey; pz -= s * ez;
+					if (sqrt(px * px + py * py + pz * pz) > near_line)
+						continue;
+					for (r2 = 0; r2 < n && ws[r2] != w; r2++) {}
+					if (r2 < n)
+						continue;
+					ws[n] = w; ts[n] = s; n++;
+				}
+			}
+			if (!n)
+				continue;
+			/* in order along the edge */
+			for (i = 1; i < n; i++)
+				for (j = i; j > 0 && ts[j - 1] > ts[j]; j--)
+				{
+					double x = ts[j];
+					unsigned int y = ws[j];
+					ts[j] = ts[j - 1]; ws[j] = ws[j - 1]; ts[j - 1] = x; ws[j - 1] = y;
+				}
+			/* the triangle with the directed edge a -> b */
+			for (t = 0; t < m->nt; t++)
+			{
+				unsigned int* v = m->tri + 3 * t, e2;
+				for (e2 = 0; e2 < 3 && !(v[e2] == a && v[(e2 + 1) % 3] == b); e2++) {}
+				if (e2 < 3)
+				{
+					unsigned int c = v[(e2 + 2) % 3], prev;
+					v[0] = a; v[1] = ws[0]; v[2] = c;
+					prev = ws[0];
+					for (i = 1; i < n && st == QAWS_STATUS_OK; i++)
+					{
+						if (!sm_add_tri(m, prev, ws[i], c))
+							st = QAWS_STATUS_ALLOCATION_FAILURE;
+						prev = ws[i];
+					}
+					if (st == QAWS_STATUS_OK && !sm_add_tri(m, prev, b, c))
+						st = QAWS_STATUS_ALLOCATION_FAILURE;
+					break;
+				}
+			}
+			for (i = 0; i < n; i++) own[ws[i]] = 1;
+		}
+	}
+	free(own);
+	free(bnd);
+	if (st != QAWS_STATUS_OK)
+	{
+		qaws_shell_mesh_destroy(m);
+		return st;
+	}
+	*out_mesh = m;
 	return QAWS_STATUS_OK;
 }

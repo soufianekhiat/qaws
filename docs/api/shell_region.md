@@ -201,6 +201,38 @@ Limits:
 - Bitangents assume convex holes. A concave hole's touching geodesics are
   still checked against the trims.
 
+## Sampling and meshing
+
+```c
+qaws_shell_region_sample(region, &desc, count, points, xyz);   /* shell points (face, uv) and in space */
+qaws_shell_region_triangulate(region, &mesh_desc, &mesh);      /* one mesh across the faces */
+```
+
+- **Sampling.** The count is shared out between the faces by their parts'
+  areas, with the remainders going to the largest fractions. Each face's
+  part is then sampled as `qaws_surface_region_sample`, with the seed moved
+  on per face.
+- **Meshing.** Each face's part is meshed as
+  `qaws_surface_region_triangulate`, with one edge length for all faces:
+  the desc's, else 1/30 of the square root of the region's area. Then:
+  - vertices meeting in space are welded (within 1e-6 of the edge length,
+    1e-3 in f32);
+  - each face's boundary edges are split at the other faces' boundary
+    vertices lying on them (within twice the boundary tolerance of the
+    chord), the triangle on the edge fanned from its far vertex. There are
+    no T-junctions where faces meet: the mesh is conformal.
+
+  Triangles run counter-clockwise about the faces' S_u x S_v. A vertex
+  keeps the (face, uv) of the face that made it.
+
+| Check (test 111) | f64 | f32 |
+|---|---|---|
+| A disk round a cube's corner (three faces): the mesh's area against the region's | 1e-5 | 3e-4 |
+| The same: edges in one triangle add up to the perimeter (no cracks); no edge in three triangles | 6e-6 | 2e-4 |
+| Samples: all inside; each face's count within one of its share by area | yes | yes |
+
+Figure 29 shows the mesh and the samples.
+
 ## Thin holes
 
 On a trimmed face a trace step goes no further than the nearest free trim

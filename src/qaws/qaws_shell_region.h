@@ -158,4 +158,28 @@ qaws_status qaws_shell_region_get_perimeter(qaws_shell_region const* region, qaw
 /* 1 inside, 0 outside, -1 on the boundary. */
 qaws_status qaws_shell_region_contains(qaws_shell_region const* region, qaws_shell_point p, int* out_inside);
 
+/* count points spread over the region: shared out between the faces by
+   their parts' areas (largest remainders), each face's part sampled as
+   qaws_surface_region_sample (desc's seed moved on per face; desc NULL:
+   random, seed 0). out_points and out_xyz may be NULL. */
+qaws_status qaws_shell_region_sample(qaws_shell_region const* region, qaws_surface_sample_desc const* desc, unsigned int count,
+	qaws_shell_point* out_points, qaws_vec3* out_xyz);
+
+/* One triangle mesh of the region across the faces, conformal where they
+   meet: each face's part meshed as qaws_surface_region_triangulate with one
+   edge length for all (desc's, else 1/30 of the square root of the
+   region's area), vertices meeting in space welded, and each face's
+   boundary edges split at the other faces' boundary vertices on them (no
+   T-junctions along shared edges). Triangles counter-clockwise about the
+   faces' S_u x S_v. */
+typedef struct qaws_shell_mesh qaws_shell_mesh;
+
+qaws_status qaws_shell_region_triangulate(qaws_shell_region const* region, qaws_surface_mesh_desc const* desc, qaws_shell_mesh** out_mesh);
+void qaws_shell_mesh_destroy(qaws_shell_mesh* mesh);
+unsigned int qaws_shell_mesh_get_vertex_count(qaws_shell_mesh const* mesh);
+/* a vertex: its point on (one of) its faces and in space */
+qaws_status qaws_shell_mesh_get_vertex(qaws_shell_mesh const* mesh, unsigned int index, qaws_shell_point* out_point, qaws_vec3* out_xyz);
+unsigned int qaws_shell_mesh_get_triangle_count(qaws_shell_mesh const* mesh);
+qaws_status qaws_shell_mesh_get_triangle(qaws_shell_mesh const* mesh, unsigned int index, unsigned int out_vertices[3]);
+
 #endif /* QAWS_SHELL_REGION_H */

@@ -87,6 +87,7 @@
 #include "better2d_showcase/26_shell_paths.c"
 #include "better2d_showcase/27_geodesic_enclosure.c"
 #include "better2d_showcase/28_geodesic_query.c"
+#include "better2d_showcase/29_shell_mesh.c"
 
 int main(void)
 {
@@ -120,5 +121,6 @@ int main(void)
 	demo_shell_paths();
 	demo_geodesic_enclosure();
 	demo_geodesic_query();
+	demo_shell_mesh();
 	return 0;
 }

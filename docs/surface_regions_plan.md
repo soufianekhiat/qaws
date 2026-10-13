@@ -407,3 +407,7 @@ Each item lands with tests in f64 and f32, docs, and a showcase figure.
   (qaws_surface_curve_create_shortest_path): the surface trimmed to the
   region's outside, through the shells' shortest paths. Test 110 (a disk on
   a plate and on a cylinder against the taut string); figure 28.
+- Second part, item 3 done: sampling and meshing on shells
+  (qaws_shell_region_sample, qaws_shell_region_triangulate): shared out by
+  area; one mesh, conformal at the edges (welded, then boundary edges split
+  at the other faces' vertices). Test 111; figure 29.
