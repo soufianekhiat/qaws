@@ -29,4 +29,14 @@ qaws_status qaws_internal_sg_eval(qaws_internal_sg_ctx const* c, double u, doubl
 qaws_status qaws_internal_sg_first_form(qaws_internal_sg_ctx const* c, double u, double v, double* g);
 qaws_status qaws_internal_sg_area_element(qaws_internal_sg_ctx const* c, double u, double v, double* out);
 
+/* y = (u, v, u', v'): the base curve's point at t and its unit conormal
+   (side > 0 left of travel); y advanced by len along its geodesic */
+qaws_status qaws_internal_sg_conormal(qaws_internal_sg_ctx const* c, qaws_curve const* base, double t, double side, double* y);
+qaws_status qaws_internal_sg_integrate(qaws_internal_sg_ctx const* c, double* y, double len);
+
+/* the geodesic offset of the (u, v) curve base by dist (> 0 left), with the
+   conormal geodesics from its ends to the offset's (exactly its ends) */
+qaws_status qaws_internal_sg_offset(qaws_internal_sg_ctx const* c, qaws_curve const* base, double dist,
+	qaws_curve** out_offset, qaws_curve** out_ray0, qaws_curve** out_ray1);
+
 #endif /* QAWS_INTERNAL_SURFACE_REGION_H */

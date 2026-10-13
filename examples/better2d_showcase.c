@@ -22,6 +22,8 @@
  *                      and a sphere, with their surface areas
  *   b2d18_surface_seams.svg  regions across seams and round poles on a sphere,
  *                      a cylinder and a torus, with their parameter planes
+ *   b2d19_surface_offset.svg  geodesic offsets: grown, shrunk and tubes on a sphere,
+ *                      a wavy patch and a torus, across seams
  *
  * Each figure lives in better2d_showcase/NN_*.c, compiled as one translation
  * unit.
@@ -62,6 +64,7 @@
 #include "better2d_showcase/16_surface_geodesic.c"
 #include "better2d_showcase/17_surface_boolean.c"
 #include "better2d_showcase/18_surface_seams.c"
+#include "better2d_showcase/19_surface_offset.c"
 
 int main(void)
 {
@@ -85,5 +88,6 @@ int main(void)
 	demo_surface_geodesic();
 	demo_surface_boolean();
 	demo_surface_seams();
+	demo_surface_offset();
 	return 0;
 }

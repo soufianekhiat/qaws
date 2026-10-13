@@ -496,7 +496,15 @@ static qaws_status pt_gauss(qaws_curve const* c, double a, double b, int sixteen
 static qaws_status pt_area_piece(qaws_curve const* c, double a, double b, double tol, unsigned int depth, double* out)
 {
 	double g8 = 0.0, g16 = 0.0, l = 0.0, r = 0.0;
-	qaws_status s = pt_gauss(c, a, b, 0, &g8);
+	qaws_status s;
+	/* a polynomial span of degree p <= 8: x dy has degree 2p - 1 <= 15,
+	   which 16-point Gauss-Legendre integrates exactly (comparing it with
+	   8 points would only measure the rounding, which grows where the
+	   derivative comes from close control points) */
+	if (c->degree <= 8 && (c->kind == QAWS_CURVE_KIND_BEZIER || c->kind == QAWS_CURVE_KIND_BSPLINE ||
+		c->kind == QAWS_CURVE_KIND_HERMITE || c->kind == QAWS_CURVE_KIND_POLYNOMIAL))
+		return pt_gauss(c, a, b, 1, out);
+	s = pt_gauss(c, a, b, 0, &g8);
 	if (s == QAWS_STATUS_OK) s = pt_gauss(c, a, b, 1, &g16);
 	if (s != QAWS_STATUS_OK) return s;
 	/* agreed, or agreed to rounding of the value itself */

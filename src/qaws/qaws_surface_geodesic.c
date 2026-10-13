@@ -953,3 +953,158 @@ qaws_status qaws_internal_sg_area_element(qaws_internal_sg_ctx const* c, double 
 	*out = det > 0 ? sqrt(det) : 0;
 	return QAWS_STATUS_OK;
 }
+
+/* ------------------------------------------------------------------------ */
+/*  Offsets: exp along the conormals                                        */
+/* ------------------------------------------------------------------------ */
+
+/* the base's point at t and the unit velocity a quarter turn left of its
+   tangent (side > 0) or right of it */
+static qaws_status sg_conormal(sg_ctx const* c, qaws_curve const* base, double t, double side, double* y)
+{
+	qaws_eval_result_2d e;
+	double d[2], a;
+	qaws_status st = qaws_curve_evaluate_2d(base, (qaws_scalar)t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &e);
+	if (st != QAWS_STATUS_OK)
+		return st;
+	d[0] = (double)e.d1.x; d[1] = (double)e.d1.y;
+	y[0] = (double)e.position.x; y[1] = (double)e.position.y;
+	if ((st = sg_angle(c, y[0], y[1], d, &a)) != QAWS_STATUS_OK)
+		return st;
+	return sg_dir(c, y[0], y[1], a + (side > 0 ? 0.5 : -0.5) * SG_PI, y + 2);
+}
+
+qaws_status qaws_internal_sg_conormal(qaws_internal_sg_ctx const* c, qaws_curve const* base, double t, double side, double* y)
+{
+	return sg_conormal(c, base, t, side, y);
+}
+
+qaws_status qaws_internal_sg_integrate(qaws_internal_sg_ctx const* c, double* y, double len)
+{
+	return sg_integrate(c, y, len);
+}
+
+qaws_status qaws_internal_sg_offset(qaws_internal_sg_ctx const* c, qaws_curve const* base, double dist,
+	qaws_curve** out_offset, qaws_curve** out_ray0, qaws_curve** out_ray1)
+{
+	qaws_range rg = qaws_curve_get_parameter_range(base);
+	double t0 = (double)rg.min_value, t1 = (double)rg.max_value, r = fabs(dist), y[4], q0[2], q1[2];
+	unsigned int n = 4 * qaws_curve_get_span_count(base);
+	qaws_curve *r0 = NULL, *r1 = NULL, *cv = NULL;
+	qaws_status st;
+	*out_offset = NULL;
+	if (out_ray0) *out_ray0 = NULL;
+	if (out_ray1) *out_ray1 = NULL;
+	if (!(r > 0) || !(t1 > t0))
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	if (n < 16) n = 16;
+	/* the conormal geodesics at the ends: the offset starts and ends exactly
+	   where they do */
+	st = sg_conormal(c, base, t0, dist, y);
+	if (st == QAWS_STATUS_OK) st = sg_path(c, y, r, &r0);
+	if (st == QAWS_STATUS_OK) st = sg_conormal(c, base, t1, dist, y);
+	if (st == QAWS_STATUS_OK) st = sg_path(c, y, r, &r1);
+	if (st == QAWS_STATUS_OK)
+	{
+		qaws_eval_result_2d e;
+		qaws_range ra = qaws_curve_get_parameter_range(r0), rb = qaws_curve_get_parameter_range(r1);
+		qaws_curve_evaluate_2d(r0, ra.max_value, QAWS_EVAL_FLAG_POSITION, &e);
+		q0[0] = (double)e.position.x; q0[1] = (double)e.position.y;
+		qaws_curve_evaluate_2d(r1, rb.max_value, QAWS_EVAL_FLAG_POSITION, &e);
+		q1[0] = (double)e.position.x; q1[1] = (double)e.position.y;
+	}
+	while (st == QAWS_STATUS_OK)
+	{
+		double* pts = (double*)malloc(sizeof(double) * 4 * (n + 1));
+		double *der, worst = 0;
+		unsigned int k;
+		if (!pts)
+		{
+			st = QAWS_STATUS_ALLOCATION_FAILURE;
+			break;
+		}
+		der = pts + 2 * (n + 1);
+		for (k = 0; k <= n && st == QAWS_STATUS_OK; k++)
+		{
+			if (k == 0) { pts[0] = q0[0]; pts[1] = q0[1]; continue; }
+			if (k == n) { pts[2 * n] = q1[0]; pts[2 * n + 1] = q1[1]; continue; }
+			st = sg_conormal(c, base, t0 + (t1 - t0) * k / n, dist, y);
+			if (st == QAWS_STATUS_OK) st = sg_integrate(c, y, r);
+			pts[2 * k] = y[0]; pts[2 * k + 1] = y[1];
+		}
+		/* d/dk by five-point stencils, one-sided at the ends */
+		for (k = 0; k <= n && st == QAWS_STATUS_OK; k++)
+		{
+			double const* p = pts;
+			unsigned int j;
+			for (j = 0; j < 2; j++)
+			{
+				double v;
+				if (k >= 2 && k + 2 <= n)
+					v = (-p[2 * (k + 2) + j] + 8 * p[2 * (k + 1) + j] - 8 * p[2 * (k - 1) + j] + p[2 * (k - 2) + j]) / 12;
+				else if (k == 0)
+					v = (-25 * p[j] + 48 * p[2 + j] - 36 * p[4 + j] + 16 * p[6 + j] - 3 * p[8 + j]) / 12;
+				else if (k == 1)
+					v = (-3 * p[j] - 10 * p[2 + j] + 18 * p[4 + j] - 6 * p[6 + j] + p[8 + j]) / 12;
+				else if (k == n)
+					v = (25 * p[2 * n + j] - 48 * p[2 * (n - 1) + j] + 36 * p[2 * (n - 2) + j] - 16 * p[2 * (n - 3) + j] + 3 * p[2 * (n - 4) + j]) / 12;
+				else
+					v = (3 * p[2 * n + j] + 10 * p[2 * (n - 1) + j] - 18 * p[2 * (n - 2) + j] + 6 * p[2 * (n - 3) + j] - p[2 * (n - 4) + j]) / 12;
+				der[2 * k + j] = v;
+			}
+		}
+		if (st == QAWS_STATUS_OK)
+			st = sg_hermite(pts, der, n + 1, &cv);
+		for (k = 0; k < n && st == QAWS_STATUS_OK; k++)
+		{
+			qaws_eval_result_2d e;
+			st = sg_conormal(c, base, t0 + (t1 - t0) * (k + 0.5) / n, dist, y);
+			if (st == QAWS_STATUS_OK) st = sg_integrate(c, y, r);
+			if (st == QAWS_STATUS_OK && qaws_curve_evaluate_2d(cv, (qaws_scalar)(k + 0.5), QAWS_EVAL_FLAG_POSITION, &e) == QAWS_STATUS_OK)
+			{
+				double dd = hypot((double)e.position.x - y[0], (double)e.position.y - y[1]);
+				if (dd > worst) worst = dd;
+			}
+		}
+		free(pts);
+		/* (past a cusp of the offset, where the base curves more than 1/r, the
+		   fit stops refining: that run lies inside the swept strip) */
+		if (st != QAWS_STATUS_OK || worst <= c->tol || n >= 1u << 12)
+			break;
+		qaws_curve_destroy(cv);
+		cv = NULL;
+		n *= 2;
+	}
+	if (st != QAWS_STATUS_OK)
+	{
+		qaws_curve_destroy(cv); qaws_curve_destroy(r0); qaws_curve_destroy(r1);
+		return st;
+	}
+	*out_offset = cv;
+	if (out_ray0) *out_ray0 = r0; else qaws_curve_destroy(r0);
+	if (out_ray1) *out_ray1 = r1; else qaws_curve_destroy(r1);
+	return QAWS_STATUS_OK;
+}
+
+qaws_status qaws_surface_curve_create_offset(qaws_surface_curve const* base, qaws_scalar distance, qaws_scalar tolerance,
+	qaws_surface_curve** out_curve)
+{
+	qaws_surface_curve* c;
+	qaws_status st;
+	if (!base || !out_curve || !(distance != 0))
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	*out_curve = NULL;
+	c = sg_new(base->s, QAWS_SURFACE_CURVE_GEODESIC_OFFSET);
+	if (!c)
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	if ((st = sg_init(&c->ctx, base->s, (double)tolerance)) == QAWS_STATUS_OK)
+		st = qaws_internal_sg_offset(&c->ctx, base->uv, (double)distance, &c->uv, NULL, NULL);
+	if (st != QAWS_STATUS_OK)
+	{
+		qaws_surface_curve_destroy(c);
+		return st;
+	}
+	c->length = -1;
+	*out_curve = c;
+	return QAWS_STATUS_OK;
+}

@@ -248,3 +248,24 @@ qaws_status qaws_surface_region_triangulate(...);
    spanning faces.
 
 Each item lands with tests in f64 and f32, docs, and a showcase figure.
+
+## 12. Status
+
+- Items 1 to 3: done (tests 101 and 102, figures 16 and 17).
+- Item 4: done.
+  - Loops are cut into period cells and united there, and loops round a
+    closed direction are capped.
+  - Circles can be centred on poles.
+  - Cut pieces are cleaned before the Booleans: control points within
+    rounding of the seam lines go onto them, and end spans of no length
+    (left by cuts a rounding from a knot) are dropped.
+  - Test 102 covers the sphere, cylinder and torus; figure 18.
+- Item 5: done. The offset strips follow the region's own boundary, split
+  at corners with seam cuts left out. Test 103 checks closed forms on the
+  sphere and a sheared plane, and the Gauss lemma on a free-form patch and
+  a torus; figure 19.
+  - Found on the way: `qaws_path_compute_area_2d` compared 8- and 16-point
+    Gauss rules on polynomial spans, where 16 points are exact. Where
+    rounding beat the tolerance, the spans subdivided to depth 24. On the
+    B-splines that `qaws_clip` returns, this took 98 s for a 512-span
+    circle; it now takes 2 ms.

@@ -45,7 +45,8 @@ typedef enum qaws_surface_curve_kind
 {
 	QAWS_SURFACE_CURVE_UV = 0,          /* a curve drawn in (u, v) */
 	QAWS_SURFACE_CURVE_GEODESIC,        /* a geodesic segment (or ray) */
-	QAWS_SURFACE_CURVE_GEODESIC_ARC     /* an arc of a geodesic circle */
+	QAWS_SURFACE_CURVE_GEODESIC_ARC,    /* an arc of a geodesic circle */
+	QAWS_SURFACE_CURVE_GEODESIC_OFFSET  /* a curve's geodesic offset */
 } qaws_surface_curve_kind;
 
 /* The metric and Christoffel symbols at (u, v): g = { E, F, G },
@@ -84,6 +85,14 @@ qaws_status qaws_surface_curve_create_geodesic_ray(qaws_surface const* surface, 
    crosses itself: INVALID_ARGUMENT. */
 qaws_status qaws_surface_curve_create_geodesic_arc(qaws_surface const* surface, qaws_vec2 centre, qaws_scalar radius,
 	qaws_scalar angle0, qaws_scalar angle1, qaws_scalar tolerance, qaws_surface_curve** out_curve);
+
+/* The geodesic offset of a curve: each point carried the surface distance
+   |distance| along the geodesic leaving the base square to it, to the left
+   of travel (about S_u x S_v) for a positive distance, to the right for a
+   negative one. The base must be smooth (G1); where it curves more than
+   1/|distance| towards the offset, the offset has cusps and turns back. */
+qaws_status qaws_surface_curve_create_offset(qaws_surface_curve const* base, qaws_scalar distance, qaws_scalar tolerance,
+	qaws_surface_curve** out_curve);
 
 void qaws_surface_curve_destroy(qaws_surface_curve* curve);
 
@@ -144,6 +153,17 @@ void qaws_surface_region_destroy(qaws_surface_region* region);
 unsigned int qaws_surface_region_get_path_count(qaws_surface_region const* region);
 qaws_status qaws_surface_region_get_path(qaws_surface_region const* region, unsigned int index, qaws_path_2d* out_uv_path);
 int qaws_surface_region_is_hole(qaws_surface_region const* region, unsigned int index);
+
+/* The region within the surface distance |distance| of the region bounded
+   by the closed paths under the fill rule (distance > 0, grown) or the part
+   of it farther than |distance| from its boundary (distance < 0, shrunk),
+   with round joins: geodesic offsets of the boundary curves, geodesic
+   circles round the corners. Open paths give their tubes of radius
+   |distance| with round ends. Exact in the topology like qaws_surface_clip;
+   each boundary curve must be smooth (corners between curves). */
+qaws_status qaws_surface_offset(qaws_surface const* surface, qaws_fill_rule fill_rule,
+	qaws_surface_path const* paths, unsigned int path_count, qaws_scalar distance, qaws_scalar tolerance,
+	qaws_surface_region** out_region);
 
 /* The surface area, and the boundary's surface length. */
 qaws_status qaws_surface_region_get_area(qaws_surface_region const* region, qaws_scalar* out_area);

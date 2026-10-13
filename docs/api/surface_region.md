@@ -164,3 +164,55 @@ In f32 the same checks hold to 6e-6.
 
 A Boolean of two circles with their areas takes about 10 ms. Figure 17
 shades Booleans on a patch and a sphere with their surface areas.
+Figure 18 shows regions across the seams of a sphere, a cylinder and a
+torus, and round the sphere's poles.
+
+## Offsets
+
+```c
+qaws_surface_offset(surface, QAWS_FILL_NON_ZERO, paths, n, distance, 0, &r);
+qaws_surface_curve_create_offset(curve, distance, 0, &offset_curve);
+```
+
+- **Offset curves.** Each point of the base is carried |distance| along
+  the geodesic leaving it at a right angle: to the left of travel (about
+  S_u x S_v) for a positive distance, to the right for a negative one.
+  The points are fitted by a Hermite spline in (u, v), refined until the
+  midpoints agree with the exponential map to the tolerance.
+- **Regions.** The points within |d| of a region are reached either along
+  a conormal geodesic from a smooth boundary point or from a corner. So the
+  grown region (d > 0) is the region with:
+  - the strips the outward conormal geodesics of length d sweep;
+  - geodesic circles of radius d round the corners.
+  The shrunk region (d < 0) is the region less the inward strips and the
+  circles.
+- **Boundary.** The strips follow the region's own boundary (its loops
+  from `qaws_surface_clip`, inside on their left), not the input paths. So
+  overlapping operands and holes are handled, and cuts along seams and
+  poles are left out. The boundary is split into smooth pieces at its
+  corners.
+- **Open paths** give their tubes: strips on both sides, with circles at
+  every vertex and round ends.
+- **Topology.** The strips, circles and region are combined by
+  `qaws_clip` in (u, v), cut into one period on closed surfaces, so the
+  topology is exact. Folds of the strips past cusps (where the boundary
+  curves more than 1/|d| towards the offset) fall inside the other strips
+  and circles.
+
+### Accuracy (test 103, f64)
+
+| Check | Agreement |
+|---|---|
+| Sphere: a geodesic circle grown and shrunk against the circles of radius rho ± d (area, perimeter) | 1e-10 |
+| Sphere: a geodesic triangle grown against A + L R sin(d/R) + (2 pi − A/R²) R² (1 − cos(d/R)) | 1.5e-10 |
+| Sphere: a geodesic segment's tube against 2 l R sin(d/R) + 2 pi R² (1 − cos(d/R)) | 1.3e-10 |
+| Sphere: the offset curve of a circle at the radius rho + d | 6e-11 |
+| Sphere: two overlapping circles' union grown against the union of the larger circles | 9e-10 |
+| Sphere: a geodesic triangle across the seam, a corner on it, grown against the closed form | 1.5e-10 |
+| Flat sheared patch: a parallelogram grown, A + P d + pi d², and shrunk, A − P d + d² Σ cot(θ/2) | 3e-11 |
+| Cylinder: a circle across the seam grown and shrunk against pi (rho ± d)² | 6e-11 |
+| Cylinder: a band round it grown on both sides | 4e-15 |
+| Wavy patch and torus: a geodesic circle's offset against the circle of radius rho ± d (Gauss lemma) | 2.5e-10 |
+
+In f32 the same checks hold to 7e-5. Figure 19 shows offsets on a sphere,
+a wavy patch and a torus.

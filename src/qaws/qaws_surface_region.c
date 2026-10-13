@@ -17,8 +17,10 @@
 #include "qaws_surface_trim.h"
 #include "qaws_curve.h"
 #include "qaws_bezier.h"
+#include "qaws_bspline.h"
 #include "qaws_eval.h"
 #include "qaws_inspect.h"
+#include "qaws_operations.h"
 #include "internal/qaws_internal_surface_region.h"
 #include <stdlib.h>
 #include <string.h>
@@ -169,6 +171,134 @@ static double sr_signed_area(qaws_path_2d const* p)
 	return (double)a;
 }
 
+/* a piece cut at a period cell, cleaned for the Boolean that follows (a
+   curve that touches or runs along a seam a few ulps off it meets its
+   copies across the seam nearly tangentially, which the clip resolves
+   badly):
+   - an end span of no length (a cut a rounding away from a knot leaves
+     one, its tangent noise) dropped where the knot joining it to the next
+     span is C0 (multiplicity >= the degree), the end point kept exactly;
+   - control points within rounding of the cell's lines put on them.
+   Lines: lines[2j] is 0 for u = const, 1 for v = const, lines[2j + 1] the
+   value. Kinds other than Bezier and B-spline are kept. */
+static qaws_status sr_snap_cell(qaws_curve const* cv, double const* lines, unsigned int nl, qaws_curve** out)
+{
+	qaws_curve_kind kind = qaws_curve_get_kind(cv);
+	unsigned int n = 0, nk = 0, deg = qaws_curve_get_degree(cv), i, j, f = 0, b = 0, changed = 0;
+	qaws_scalar probe[2], *cp, *kn = NULL;
+	qaws_status st;
+#if QAWS_SCALAR_IS_FLOAT
+	double const near_line = 4e-6, tiny = 2e-5;   /* tiny: past what snapping can fold to a point */
+#else
+	double const near_line = 1e-13, tiny = 1e-12;
+#endif
+	*out = NULL;
+	if (kind != QAWS_CURVE_KIND_BEZIER && kind != QAWS_CURVE_KIND_BSPLINE)
+		return QAWS_STATUS_OK;
+	qaws_curve_get_control_points(cv, probe, 0, &n);
+	if (kind == QAWS_CURVE_KIND_BSPLINE)
+		qaws_bspline_get_knots(cv, probe, 0, &nk);
+	cp = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (2 * n + nk + 2));
+	if (!cp)
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	if ((st = qaws_curve_get_control_points(cv, cp, n, &n)) == QAWS_STATUS_OK && nk)
+	{
+		kn = cp + 2 * n;
+		st = qaws_bspline_get_knots(cv, kn, nk, &nk);
+	}
+	/* f, b: control points dropped at the front and the back */
+	if (st == QAWS_STATUS_OK && kn && deg > 1 && nk == n + deg + 1)
+	{
+		unsigned int e;
+		for (e = 0; e < 2; e++)
+		{
+			/* the end span's control points: deg + 1 from the end; its far knot's
+			   multiplicity */
+			unsigned int m = 1, k, base = e ? n - 1 - deg - b : f;
+			double kfar = (double)kn[e ? nk - deg - 2 - b : deg + 1 + f], span = 0;
+			if (n - f - b < 2 * deg + 1)
+				break;
+			for (k = 1; k < nk; k++)
+			{
+				unsigned int idx = e ? nk - deg - 2 - b - k : deg + 1 + f + k;
+				if (idx >= nk || (double)kn[idx] != kfar) break;
+				m++;
+			}
+			if (m < deg)
+				continue;
+			for (k = 0; k <= deg; k++)
+			{
+				double dx = (double)cp[2 * (base + k)] - cp[2 * (e ? n - 1 - b : f)];
+				double dy = (double)cp[2 * (base + k) + 1] - cp[2 * (e ? n - 1 - b : f) + 1];
+				if (hypot(dx, dy) > span) span = hypot(dx, dy);
+			}
+			if (span <= tiny * (1 + fabs((double)cp[2 * base]) + fabs((double)cp[2 * base + 1])))
+			{
+				if (e) b += deg; else f += deg;
+			}
+		}
+	}
+	if (f || b)
+	{
+		/* the new ends where the old ones were; the clamped knots */
+		qaws_scalar s0x = cp[0], s0y = cp[1], s1x = cp[2 * n - 2], s1y = cp[2 * n - 1];
+		unsigned int nn = n - f - b, nnk = nn + deg + 1;
+		qaws_scalar* k2 = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (nnk + 1));
+		if (!k2)
+		{
+			free(cp);
+			return QAWS_STATUS_ALLOCATION_FAILURE;
+		}
+		for (i = 0; i < nnk; i++)
+			k2[i] = kn[i + f];
+		for (i = 0; i <= deg; i++)
+		{
+			k2[i] = kn[f + deg];
+			k2[nnk - 1 - i] = kn[nk - 1 - b - deg];
+		}
+		memmove(cp, cp + 2 * f, sizeof(qaws_scalar) * 2 * nn);
+		n = nn;
+		kn = cp + 2 * n;
+		memcpy(kn, k2, sizeof(qaws_scalar) * nnk);
+		nk = nnk;
+		free(k2);
+		cp[0] = s0x; cp[1] = s0y;
+		cp[2 * n - 2] = s1x; cp[2 * n - 1] = s1y;
+		changed = 1;
+	}
+	for (i = 0; i < n && st == QAWS_STATUS_OK; i++)
+		for (j = 0; j < nl; j++)
+		{
+			unsigned int k = (unsigned int)lines[2 * j];
+			double x = (double)cp[2 * i + k], l = lines[2 * j + 1];
+			if (x != l && fabs(x - l) <= near_line * (1 + fabs(l)))
+			{
+				cp[2 * i + k] = (qaws_scalar)l;
+				changed = 1;
+			}
+		}
+	if (st == QAWS_STATUS_OK && changed)
+	{
+		if (kind == QAWS_CURVE_KIND_BEZIER)
+		{
+			qaws_bezier_desc d;
+			memset(&d, 0, sizeof(d));
+			d.dimension = QAWS_DIMENSION_2D; d.degree = deg; d.control_points = cp; d.control_point_count = n;
+			st = qaws_curve_create_bezier(&d, out);
+		}
+		else
+		{
+			qaws_bspline_desc d;
+			memset(&d, 0, sizeof(d));
+			d.dimension = QAWS_DIMENSION_2D; d.degree = deg; d.control_points = cp; d.control_point_count = n;
+			d.knots = kn; d.knot_count = nk;
+			st = qaws_curve_create_bspline(&d, out);
+		}
+	}
+	free(cp);
+	return st;
+}
+
 /* the loop's part in each period cell, translated into the first, its
    orientation kept */
 static qaws_status sr_cut_loop(qaws_internal_sg_ctx const* c, sr_pool* pl, qaws_path_2d const* loop)
@@ -234,7 +364,16 @@ static qaws_status sr_cut_loop(qaws_internal_sg_ctx const* c, sr_pool* pl, qaws_
 				{
 					qaws_curve *mv = NULL, *rv = NULL;
 					unsigned int src = area > 0 ? j : p.curve_count - 1 - j;
-					if ((st = qaws_curve_transform_2d(p.curves[src], t, &mv)) != QAWS_STATUS_OK)
+					qaws_curve* snapped = NULL;
+					double lines[8];
+					unsigned int nl = 0;
+					if (c->pu > 0) { lines[2 * nl] = 0; lines[2 * nl + 1] = ua; nl++; lines[2 * nl] = 0; lines[2 * nl + 1] = ub; nl++; }
+					if (c->pv > 0) { lines[2 * nl] = 1; lines[2 * nl + 1] = va; nl++; lines[2 * nl] = 1; lines[2 * nl + 1] = vb; nl++; }
+					if ((st = sr_snap_cell(p.curves[src], lines, nl, &snapped)) != QAWS_STATUS_OK)
+						return st;
+					st = qaws_curve_transform_2d(snapped ? snapped : p.curves[src], t, &mv);
+					qaws_curve_destroy(snapped);
+					if (st != QAWS_STATUS_OK)
 						return st;
 					if (area < 0)
 					{
@@ -603,7 +742,12 @@ static int sr_on_seam(qaws_internal_sg_ctx const* c, qaws_curve const* cv, doubl
 			x = j ? (double)e.position.y : (double)e.position.x;
 			t = fmod(x - line, per);
 			if (t < 0) t += per;
-			if (!(t <= 1e3 * c->tol || per - t <= 1e3 * c->tol))
+			/* the cuts are the cell's lines themselves: within rounding */
+#if QAWS_SCALAR_IS_FLOAT
+			if (!(t <= 1e-5 * (1 + fabs(line) + per) || per - t <= 1e-5 * (1 + fabs(line) + per)))
+#else
+			if (!(t <= 1e-12 * (1 + fabs(line) + per) || per - t <= 1e-12 * (1 + fabs(line) + per)))
+#endif
 				all = 0;
 		}
 		if (all)
@@ -723,4 +867,298 @@ qaws_status qaws_surface_region_create_trimmed(qaws_surface_region const* region
 	}
 	free(loops);
 	return st;
+}
+
+/* ------------------------------------------------------------------------ */
+/*  Offsets                                                                 */
+/* ------------------------------------------------------------------------ */
+
+/* the curves made for an offset, and the corners already given a circle */
+typedef struct sr_tube
+{
+	qaws_surface const* s;
+	qaws_internal_sg_ctx const* c;
+	double r, tol;
+	sr_pool raw;
+	qaws_surface_curve** disks;
+	unsigned int nd, capd;
+	double* centres;
+	unsigned int nc, capc;
+} sr_tube;
+
+/* the strip swept by the conormal geodesics of length |sd| on the side of
+   sd (> 0 left), counter-clockwise */
+static qaws_status sr_strip(sr_tube* tb, qaws_curve const* base, double sd)
+{
+	sr_pool* pl = &tb->raw;
+	qaws_curve *off = NULL, *r0 = NULL, *r1 = NULL, *x = NULL, *y = NULL;
+	qaws_curve const* loop[4];
+	qaws_status st = qaws_internal_sg_offset(tb->c, base, sd, &off, &r0, &r1);
+	if (st != QAWS_STATUS_OK)
+		return st;
+	if ((st = sr_keep(pl, off)) != QAWS_STATUS_OK) { qaws_curve_destroy(r0); qaws_curve_destroy(r1); return st; }
+	if ((st = sr_keep(pl, r0)) != QAWS_STATUS_OK) { qaws_curve_destroy(r1); return st; }
+	if ((st = sr_keep(pl, r1)) != QAWS_STATUS_OK) return st;
+	if (sd > 0)
+	{
+		/* along the base, out to the offset's end, back along it, in */
+		if ((st = qaws_curve_reverse(off, &x)) != QAWS_STATUS_OK || (st = sr_keep(pl, x)) != QAWS_STATUS_OK) return st;
+		if ((st = qaws_curve_reverse(r0, &y)) != QAWS_STATUS_OK || (st = sr_keep(pl, y)) != QAWS_STATUS_OK) return st;
+		loop[0] = base; loop[1] = r1; loop[2] = x; loop[3] = y;
+	}
+	else
+	{
+		/* along the offset, in to the base's end, back along it, out */
+		if ((st = qaws_curve_reverse(r1, &x)) != QAWS_STATUS_OK || (st = sr_keep(pl, x)) != QAWS_STATUS_OK) return st;
+		if ((st = qaws_curve_reverse(base, &y)) != QAWS_STATUS_OK || (st = sr_keep(pl, y)) != QAWS_STATUS_OK) return st;
+		loop[0] = off; loop[1] = x; loop[2] = y; loop[3] = r0;
+	}
+	return sr_add_path(pl, loop, 4);
+}
+
+/* a geodesic circle of radius r about the point (once per point: wrapped
+   into the period and compared within the tolerance) */
+static qaws_status sr_disk(sr_tube* tb, qaws_vec2 p)
+{
+	qaws_surface_curve* d = NULL;
+	qaws_curve const* one[1];
+	double u = (double)p.x, v = (double)p.y;
+	unsigned int i;
+	qaws_status st;
+	if (tb->c->pu > 0) { u = fmod(u - tb->c->u0, tb->c->pu); if (u < 0) u += tb->c->pu; }
+	if (tb->c->pv > 0) { v = fmod(v - tb->c->v0, tb->c->pv); if (v < 0) v += tb->c->pv; }
+	for (i = 0; i < tb->nc; i++)
+	{
+		double du = fabs(tb->centres[2 * i] - u), dv = fabs(tb->centres[2 * i + 1] - v);
+		if (tb->c->pu > 0 && du > 0.5 * tb->c->pu) du = tb->c->pu - du;
+		if (tb->c->pv > 0 && dv > 0.5 * tb->c->pv) dv = tb->c->pv - dv;
+		if (du <= tb->c->tol && dv <= tb->c->tol)
+			return QAWS_STATUS_OK;
+	}
+	if (!sr_grow((void**)&tb->centres, &tb->capc, 2 * (tb->nc + 1), sizeof(double)))
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	tb->centres[2 * tb->nc] = u; tb->centres[2 * tb->nc + 1] = v; tb->nc++;
+	st = qaws_surface_curve_create_geodesic_arc(tb->s, p, (qaws_scalar)tb->r, 0, (qaws_scalar)(2 * 3.14159265358979323846), (qaws_scalar)tb->tol, &d);
+	if (st != QAWS_STATUS_OK)
+		return st;
+	if (!sr_grow((void**)&tb->disks, &tb->capd, tb->nd + 1, sizeof(qaws_surface_curve*)))
+	{
+		qaws_surface_curve_destroy(d);
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	}
+	tb->disks[tb->nd++] = d;
+	one[0] = qaws_surface_curve_get_uv(d);
+	return sr_add_path(&tb->raw, one, 1);
+}
+
+/* a piece of no length on the surface (along a pole) */
+static int sr_on_pole(qaws_internal_sg_ctx const* c, qaws_curve const* cv, double ta, double tb)
+{
+	unsigned int k;
+	for (k = 1; k <= 3; k++)
+	{
+		qaws_eval_result_2d e;
+		double g[3], d2;
+		qaws_curve_evaluate_2d(cv, (qaws_scalar)(ta + (tb - ta) * k / 4), QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &e);
+		if (qaws_internal_sg_first_form(c, (double)e.position.x, (double)e.position.y, g) != QAWS_STATUS_OK)
+			return 0;
+		d2 = (double)e.d1.x * e.d1.x + (double)e.d1.y * e.d1.y;
+		if (!(g[0] * e.d1.x * e.d1.x + 2 * g[1] * e.d1.x * e.d1.y + g[2] * e.d1.y * e.d1.y <= 1e-16 * (g[0] + g[2]) * d2))
+			return 0;
+	}
+	return 1;
+}
+
+/* a corner at t: the tangents' directions just before and after it apart */
+static int sr_kink(qaws_curve const* cv, double t, qaws_range rg)
+{
+#if QAWS_SCALAR_IS_FLOAT
+	double const eps = 1e-4, ang = 1e-2;
+#else
+	double const eps = 1e-9, ang = 1e-5;
+#endif
+	double h = eps * ((double)rg.max_value - rg.min_value), la, lb, cr, dt;
+	qaws_eval_result_2d a, b;
+	qaws_curve_evaluate_2d(cv, (qaws_scalar)(t - h), QAWS_EVAL_FLAG_D1, &a);
+	qaws_curve_evaluate_2d(cv, (qaws_scalar)(t + h), QAWS_EVAL_FLAG_D1, &b);
+	la = hypot((double)a.d1.x, (double)a.d1.y);
+	lb = hypot((double)b.d1.x, (double)b.d1.y);
+	if (!(la > 0) || !(lb > 0))
+		return 1;
+	cr = ((double)a.d1.x * b.d1.y - (double)a.d1.y * b.d1.x) / (la * lb);
+	dt = ((double)a.d1.x * b.d1.x + (double)a.d1.y * b.d1.y) / (la * lb);
+	return atan2(fabs(cr), dt) > ang;
+}
+
+/* the curve in smooth pieces (split at the knots of a B-spline where it
+   turns a corner), less its cuts along seams and poles: each piece's strips on
+   the sides asked (bit 1 left, bit 2 right), circles at its ends */
+static qaws_status sr_tube_curve(sr_tube* tb, qaws_curve const* cv, int sides)
+{
+	qaws_range rg = qaws_curve_get_parameter_range(cv);
+	qaws_curve_kind kind = qaws_curve_get_kind(cv);
+	double* br = NULL;
+	unsigned int nb = 0, i;
+	qaws_status st = QAWS_STATUS_OK;
+	br = (double*)malloc(sizeof(double) * 2);
+	if (!br)
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	br[nb++] = (double)rg.min_value;
+	if (kind == QAWS_CURVE_KIND_BSPLINE || kind == QAWS_CURVE_KIND_NURBS)
+	{
+		unsigned int nk = 0, deg = qaws_curve_get_degree(cv);
+		qaws_scalar probe[2];
+		qaws_bspline_get_knots(cv, probe, 0, &nk);
+		if (nk > 0)
+		{
+			qaws_scalar* kn = (qaws_scalar*)malloc(sizeof(qaws_scalar) * nk);
+			double* nbr = (double*)realloc(br, sizeof(double) * (nk + 2));
+			if (!kn || !nbr)
+			{
+				free(kn); free(nbr ? nbr : br);
+				return QAWS_STATUS_ALLOCATION_FAILURE;
+			}
+			br = nbr;
+			if (qaws_bspline_get_knots(cv, kn, nk, &nk) == QAWS_STATUS_OK)
+				for (i = 0; i < nk;)
+				{
+					unsigned int m = 1;
+					while (i + m < nk && kn[i + m] == kn[i]) m++;
+					if (m >= deg && (double)kn[i] > br[nb - 1] && (double)kn[i] < (double)rg.max_value && sr_kink(cv, (double)kn[i], rg))
+						br[nb++] = (double)kn[i];
+					i += m;
+				}
+			free(kn);
+		}
+	}
+	br[nb++] = (double)rg.max_value;
+	for (i = 0; i + 1 < nb && st == QAWS_STATUS_OK; i++)
+	{
+		double ta = br[i], tb2 = br[i + 1];
+		qaws_curve* piece = NULL;
+		qaws_curve const* base = cv;
+		qaws_eval_result_2d e0, e1;
+		if (!(tb2 > ta) || sr_on_seam(tb->c, cv, ta, tb2) || sr_on_pole(tb->c, cv, ta, tb2))
+			continue;
+		if (nb > 2)
+		{
+			if ((st = qaws_curve_extract(cv, (qaws_scalar)ta, (qaws_scalar)tb2, &piece)) != QAWS_STATUS_OK || (st = sr_keep(&tb->raw, piece)) != QAWS_STATUS_OK)
+				break;
+			base = piece;
+		}
+		if (sides & 1) st = sr_strip(tb, base, tb->r);
+		if (st == QAWS_STATUS_OK && (sides & 2)) st = sr_strip(tb, base, -tb->r);
+		if (st == QAWS_STATUS_OK)
+		{
+			qaws_range pr = qaws_curve_get_parameter_range(base);
+			qaws_curve_evaluate_2d(base, pr.min_value, QAWS_EVAL_FLAG_POSITION, &e0);
+			qaws_curve_evaluate_2d(base, pr.max_value, QAWS_EVAL_FLAG_POSITION, &e1);
+			st = sr_disk(tb, e0.position);
+			if (st == QAWS_STATUS_OK) st = sr_disk(tb, e1.position);
+		}
+	}
+	free(br);
+	return st;
+}
+
+qaws_status qaws_surface_offset(qaws_surface const* surface, qaws_fill_rule fill_rule,
+	qaws_surface_path const* paths, unsigned int path_count, qaws_scalar distance, qaws_scalar tolerance,
+	qaws_surface_region** out_region)
+{
+	double d = (double)distance, r = fabs(d);
+	qaws_surface_region *R = NULL, *out = NULL;
+	qaws_surface_path* closed = NULL;
+	unsigned int nc = 0, i, k;
+	sr_tube tb;
+	sr_pool cut;
+	qaws_clip_result* T = NULL;
+	qaws_status st = QAWS_STATUS_OK;
+	if (!surface || !out_region || (!paths && path_count) || !(r == r))
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	*out_region = NULL;
+	memset(&tb, 0, sizeof(tb));
+	memset(&cut, 0, sizeof(cut));
+	closed = (qaws_surface_path*)malloc(sizeof(qaws_surface_path) * (path_count + 1));
+	out = (qaws_surface_region*)calloc(1, sizeof(*out));
+	if (!closed || !out)
+	{
+		free(closed); free(out);
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	}
+	out->s = surface;
+	st = qaws_internal_sg_init(&out->ctx, surface, (double)tolerance);
+	tb.s = surface; tb.c = &out->ctx; tb.r = r; tb.tol = (double)tolerance;
+	for (i = 0; i < path_count && st == QAWS_STATUS_OK; i++)
+	{
+		for (k = 0; k < paths[i].curve_count; k++)
+			if (!paths[i].curves[k] || qaws_surface_curve_get_surface(paths[i].curves[k]) != surface)
+				st = QAWS_STATUS_INVALID_ARGUMENT;
+		if (paths[i].closed && paths[i].curve_count)
+			closed[nc++] = paths[i];
+	}
+	/* the region the closed paths bound */
+	if (st == QAWS_STATUS_OK && nc)
+		st = qaws_surface_clip(surface, QAWS_CLIP_NONE, fill_rule, closed, nc, NULL, 0, &R);
+	/* the tube: its boundary (inside on the left of its loops) swept along
+	   the conormal geodesics on the side the offset moves to, circles round
+	   the corners; open paths on both sides, circles at every vertex */
+	if (st == QAWS_STATUS_OK && r > 0)
+	{
+		unsigned int np = R ? qaws_clip_result_get_path_count(R->res) : 0;
+		for (i = 0; i < np && st == QAWS_STATUS_OK; i++)
+		{
+			qaws_path_2d p;
+			if ((st = qaws_clip_result_get_path(R->res, i, &p)) != QAWS_STATUS_OK)
+				break;
+			for (k = 0; k < p.curve_count && st == QAWS_STATUS_OK; k++)
+				st = sr_tube_curve(&tb, p.curves[k], d > 0 ? 2 : 1);
+		}
+		for (i = 0; i < path_count && st == QAWS_STATUS_OK; i++)
+			if (!paths[i].closed)
+				for (k = 0; k < paths[i].curve_count && st == QAWS_STATUS_OK; k++)
+					st = sr_tube_curve(&tb, qaws_surface_curve_get_uv(paths[i].curves[k]), 3);
+	}
+	sr_fix_views(&tb.raw);
+	if (st == QAWS_STATUS_OK && tb.raw.np)
+	{
+		/* in one period on closed surfaces, then united */
+		if (out->ctx.pu > 0 || out->ctx.pv > 0)
+		{
+			st = sr_period(&out->ctx, tb.raw.paths, tb.raw.np, &cut);
+			sr_fix_views(&cut);
+			if (st == QAWS_STATUS_OK)
+				st = qaws_clip_boolean(QAWS_CLIP_UNION, QAWS_FILL_NON_ZERO, cut.paths, cut.np, NULL, 0, &T);
+		}
+		else
+			st = qaws_clip_boolean(QAWS_CLIP_UNION, QAWS_FILL_NON_ZERO, tb.raw.paths, tb.raw.np, NULL, 0, &T);
+	}
+	if (st == QAWS_STATUS_OK)
+	{
+		/* the region with the tube (grown) or less it (shrunk) */
+		unsigned int na = R ? qaws_clip_result_get_path_count(R->res) : 0, nb = T ? qaws_clip_result_get_path_count(T) : 0;
+		qaws_path_2d* qa = (qaws_path_2d*)malloc(sizeof(qaws_path_2d) * (na + 1));
+		qaws_path_2d* qb = (qaws_path_2d*)malloc(sizeof(qaws_path_2d) * (nb + 1));
+		if (!qa || !qb)
+			st = QAWS_STATUS_ALLOCATION_FAILURE;
+		for (i = 0; i < na && st == QAWS_STATUS_OK; i++) st = qaws_clip_result_get_path(R->res, i, &qa[i]);
+		for (i = 0; i < nb && st == QAWS_STATUS_OK; i++) st = qaws_clip_result_get_path(T, i, &qb[i]);
+		if (st == QAWS_STATUS_OK)
+			st = qaws_clip_boolean(d < 0 && na ? QAWS_CLIP_DIFFERENCE : QAWS_CLIP_UNION, QAWS_FILL_NON_ZERO, qa, na, qb, nb, &out->res);
+		free(qa); free(qb);
+	}
+	qaws_clip_result_destroy(T);
+	sr_pool_free(&tb.raw);
+	sr_pool_free(&cut);
+	for (i = 0; i < tb.nd; i++) qaws_surface_curve_destroy(tb.disks[i]);
+	free(tb.disks);
+	free(tb.centres);
+	qaws_surface_region_destroy(R);
+	free(closed);
+	if (st != QAWS_STATUS_OK)
+	{
+		qaws_surface_region_destroy(out);
+		return st;
+	}
+	*out_region = out;
+	return QAWS_STATUS_OK;
 }
