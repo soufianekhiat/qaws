@@ -332,3 +332,8 @@ Each item lands with tests in f64 and f32, docs, and a showcase figure.
   the edge (in float it bounced). Test 108 (a cylinder with a hole on its
   seam, filled by a disk of the same surface); figure 25's last row. Open:
   trims on a torus, T-junctions along closed faces' domain sides.
+- Follow-up: T-junctions on closed faces (a tube's rim met by two half
+  caps): the face turned into one trimmed by its rims; perimeters no longer
+  count a seam cut joined to a shared stretch (polylines judged segment by
+  segment), nor miss the stretch; a centre on a seam taken a hair off it.
+  Test 108 (one cap against two half caps). Open: trims on a torus.

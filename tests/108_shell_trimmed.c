@@ -18,6 +18,8 @@
  *     seam, filled by a disk of the same surface: disks across the hole and
  *     the seam against pi r^2 and 2 pi r (the cylinder unrolled), a ray over
  *     both against the unrolled line
+ *   - a tube capped by one disk or by two half disks (T points on the rim of
+ *     a closed face): disks over the rim alike either way and round the tube
  *   - an open loop refused; a trim on a surface closed both ways not covered
  */
 
@@ -450,6 +452,73 @@ static void test_cylinder(void)
 	qaws_curve_destroy(prof); qaws_curve_destroy(bot); qaws_curve_destroy(top); qaws_curve_destroy(hole); qaws_curve_destroy(disk);
 }
 
+/* a tube (closed in u) capped by one disk, or by two half disks whose
+   diameter meets the tube's rim at two T points (the rim, a side along a
+   closed face, split there): the same surface either way */
+static void test_capped_tube(void)
+{
+	static double const C00[3] = { -1, -1, 0 }, C10[3] = { -1, 1, 0 }, C01[3] = { 1, -1, 0 }, C11[3] = { 1, 1, 0 };
+	static double const cs[3][2] = { { 0.0, 0.15 }, { 0.25, 0.15 }, { 0.6, 0.2 } };
+	qaws_curve *prof = str_line(0.5, 0, 0.5, -1.5), *full = str_arc(0.5, 0.5, 0.25, STR_PI / 2, 5 * STR_PI / 2);
+	qaws_curve *h1 = str_arc(0.5, 0.5, 0.25, -STR_PI / 2, STR_PI / 2), *d1 = str_line(0.5, 0.75, 0.5, 0.25);
+	qaws_curve *h2 = str_arc(0.5, 0.5, 0.25, STR_PI / 2, 3 * STR_PI / 2), *d2 = str_line(0.5, 0.25, 0.5, 0.75);
+	qaws_surface *tube = NULL, *cap = str_plane(C00, C10, C01, C11);
+	qaws_surface_revolution_desc rd;
+	qaws_curve const *lf[1], *la[2], *lb[2];
+	qaws_path_2d pf[1], pa[1], pb[1];
+	qaws_shell_face_desc A[2], B[3];
+	qaws_shell_atlas *aa = NULL, *ab = NULL;
+	qaws_status s1, s2;
+	double worst = 0, ref = -1, tol = STR_F32 ? 2e-4 : 1e-9;
+	unsigned int z, ok = 0;
+	char msg[300];
+	memset(&rd, 0, sizeof(rd));
+	rd.profile = prof; rd.axis_direction.z = 1;
+	qaws_surface_create_revolution(&rd, &tube);
+	lf[0] = full; la[0] = h1; la[1] = d1; lb[0] = h2; lb[1] = d2;
+	pf[0].curves = lf; pf[0].curve_count = 1; pf[0].closed = 1;
+	pa[0].curves = la; pa[0].curve_count = 2; pa[0].closed = 1;
+	pb[0].curves = lb; pb[0].curve_count = 2; pb[0].closed = 1;
+	memset(A, 0, sizeof(A));
+	memset(B, 0, sizeof(B));
+	A[0].surface = tube; A[1].surface = cap; A[1].trims = pf; A[1].trim_count = 1;
+	B[0].surface = tube; B[1].surface = cap; B[1].trims = pa; B[1].trim_count = 1; B[2].surface = cap; B[2].trims = pb; B[2].trim_count = 1;
+	s1 = qaws_shell_atlas_create_trimmed(A, 2, 0, &aa);
+	s2 = qaws_shell_atlas_create_trimmed(B, 3, 0, &ab);
+	sprintf(msg, "capped tube: one cap, %u shared edge; two half caps meeting the rim at T points, %u shared edges",
+		aa ? qaws_shell_atlas_get_edge_count(aa) : 0, ab ? qaws_shell_atlas_get_edge_count(ab) : 0);
+	TEST_ASSERT(s1 == QAWS_STATUS_OK && s2 == QAWS_STATUS_OK && qaws_shell_atlas_get_edge_count(aa) == 1 && qaws_shell_atlas_get_edge_count(ab) == 3, msg);
+	/* disks over the rim (one centred on the seam right below a T point):
+	   the same either way, and by symmetry the same wherever round */
+	for (z = 0; z < 3 && s1 == QAWS_STATUS_OK && s2 == QAWS_STATUS_OK; z++)
+	{
+		qaws_shell_region *g = NULL, *h = NULL;
+		qaws_scalar Ag = 0, Ah = 0, Pg = 0, Ph = 0;
+		double e;
+		if (qaws_shell_region_create_geodesic_disk(aa, str_pt(0, cs[z][0], cs[z][1]), (qaws_scalar)0.5, 0, &g) == QAWS_STATUS_OK &&
+			qaws_shell_region_create_geodesic_disk(ab, str_pt(0, cs[z][0], cs[z][1]), (qaws_scalar)0.5, 0, &h) == QAWS_STATUS_OK)
+		{
+			qaws_shell_region_get_area(g, &Ag); qaws_shell_region_get_perimeter(g, &Pg);
+			qaws_shell_region_get_area(h, &Ah); qaws_shell_region_get_perimeter(h, &Ph);
+			if (z == 0) ref = (double)Ag + (double)Pg;
+			e = fabs((double)Ag - Ah) + fabs((double)Pg - Ph);
+			if (z < 2) e += fabs((double)Ag + (double)Pg - ref);
+			if (e > worst) worst = e;
+			if (e <= tol) ok++;
+		}
+		else
+			worst = 1e300;
+		qaws_shell_region_destroy(g);
+		qaws_shell_region_destroy(h);
+	}
+	sprintf(msg, "capped tube: disks over the rim (one on the seam below a T point) alike with one cap or two, round the tube alike, within %.2g", worst);
+	TEST_ASSERT(ok == 3, msg);
+	qaws_shell_atlas_destroy(aa);
+	qaws_shell_atlas_destroy(ab);
+	qaws_surface_destroy(tube); qaws_surface_destroy(cap);
+	qaws_curve_destroy(prof); qaws_curve_destroy(full); qaws_curve_destroy(h1); qaws_curve_destroy(d1); qaws_curve_destroy(h2); qaws_curve_destroy(d2);
+}
+
 static void test_refusals(void)
 {
 	qaws_surface* sa = str_plane(STR_P00, STR_P10, STR_P01, STR_P11);
@@ -496,6 +565,7 @@ int test_108_shell_trimmed_main(void)
 	test_tee(0);
 	test_tee(1);
 	test_cylinder();
+	test_capped_tube();
 	test_refusals();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
