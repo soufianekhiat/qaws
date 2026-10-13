@@ -6,7 +6,7 @@ hemispheres, a network of NURBS faces.
 
 ```c
 qaws_shell_atlas* atlas;
-qaws_shell_atlas_create(surfaces, n, 0, &atlas);        /* or _create_from_brep */
+qaws_shell_atlas_create(surfaces, n, 0, &atlas);        /* or _create_from_brep, _create_trimmed */
 
 qaws_shell_curve* c;
 qaws_shell_curve_create_geodesic_circle(atlas, centre, r, 0, &c);
@@ -83,10 +83,53 @@ parting at the vertex, and on the bent monkey saddle two disks through the
 vertex under union, intersection, difference and exclusive-or, the surfaces
 shaded and drawn back to front.
 
+## Trimmed faces
+
+`qaws_shell_atlas_create_trimmed(faces, n, 0, &atlas)` takes each face as a
+surface and, optionally, loops of (u, v) curves bounding it
+(`qaws_shell_face_desc`). Each curve of a loop is one side of the face.
+
+- **Orientation.** Loops are turned to keep the face on their left: a loop
+  inside an even number of others runs counter-clockwise, its holes
+  clockwise. A loop that does not close is refused (`INVALID_ARGUMENT`); a
+  trim on a surface closed in u or v is not covered
+  (`UNSUPPORTED_OPERATION`).
+- **Edges.** A trim curve meets any other face's side (a trim curve or a
+  side of an untrimmed domain) where every point of each lies within the
+  tolerance of the other, whatever the two parametrisations. A plate's hole
+  meets the top of a tube, a square's circular hole meets a disk of another
+  surface.
+- **Inside.** A point is inside a trimmed face by its loops' polygons (128
+  points per curve) away from the curves; within the polygons' sag of a
+  curve, by which side of the curve itself it lies on.
+- **Crossing.** Where a geodesic leaves a trimmed face, its exit is solved
+  with the trim curve by Newton on (length, curve parameter); the crossing
+  then takes the curve's own tangent and outward conormal.
+- **Corners.** A join of two trim curves is a vertex of the shell where the
+  boundary turns or the neighbour changes; a smooth join with one
+  neighbour (a circle given as one curve) is not.
+- **Regions.** A region's runs on a trimmed face are closed along the trim
+  loops (stretches of the trim curves between them); a hole no run touches
+  is taken out where the region holds it.
+
+| Check (test 108, f64) | Agreement |
+|---|---|
+| Plane split by a circle (two trimmed faces of two surfaces): a ray over the disk and out against the straight line | 1e-15 |
+| The same: a disk across the circle against pi r² and 2 pi r; each face's part against the lens | 3e-12; 6e-12; 2e-12 |
+| Plate with a hole and a tube: three straightest rays into the tube against the helices of the unrolled cylinder | 7e-15 |
+| Cube of planes trimmed to its faces: circles over one and two edges against pi r² and 2 pi r | 5e-11 |
+| The same: a disk round a corner against the untrimmed cube's | 2e-12 |
+
+In f32 the same checks hold to 3e-5. Figure 25 shows the split plane, the
+plate and tube (helices through the hole, a disk over the rim, a union with
+a disk inside the tube) and the trimmed cube.
+
 ## Limits
 
-- Edges are whole sides of the faces' domains. Faces trimmed along other
-  curves, and edges joining parts of sides, are not covered.
+- Edges are whole sides: a side (a domain side or a trim curve) meets
+  another whole. Edges joining parts of sides (T-junctions) are not covered;
+  split the longer curve where the others meet it.
+- Trims on surfaces closed in u or v are not covered.
 - Rays that hit a vertex exactly stop there; disks round vertices go
   through `qaws_shell_region_create_geodesic_disk`.
 

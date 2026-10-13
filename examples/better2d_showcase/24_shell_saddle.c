@@ -70,6 +70,11 @@ typedef struct ssd_scene
 	ssd_item* it;
 	unsigned int n, cap;
 	sgf_view const* view;
+	/* optional, per face: its trimmed part (quads outside left out), the
+	   (u, v) box to tessellate, the quads along each side (0: 34) */
+	qaws_surface_region const* const* trims;
+	double const (*box)[4];
+	unsigned int res;
 } ssd_scene;
 
 static ssd_item* ssd_new(ssd_scene* sc)
@@ -127,7 +132,7 @@ typedef struct ssd_paint
 static void ssd_surfaces(ssd_scene* sc, qaws_surface** f, unsigned int nf, ssd_paint const* paint, unsigned int np)
 {
 	static int const tint[6][3] = { { 236, 229, 214 }, { 214, 226, 236 }, { 222, 236, 214 }, { 236, 216, 226 }, { 222, 220, 238 }, { 238, 230, 206 } };
-	unsigned int const N = 34;
+	unsigned int const N = sc->res ? sc->res : 34;
 	double L[3] = { -0.35, 0.55, -0.75 }, ll = sqrt(0.35 * 0.35 + 0.55 * 0.55 + 0.75 * 0.75);
 	unsigned int k, i, j, m;
 	sgf_view const* v = sc->view;
@@ -135,10 +140,26 @@ static void ssd_surfaces(ssd_scene* sc, qaws_surface** f, unsigned int nf, ssd_p
 	for (k = 0; k < nf; k++)
 	{
 		qaws_range ru = qaws_surface_get_u_range(f[k]), rv = qaws_surface_get_v_range(f[k]);
+		if (sc->box)
+		{
+			ru.min_value = (qaws_scalar)sc->box[k][0]; ru.max_value = (qaws_scalar)sc->box[k][1];
+			rv.min_value = (qaws_scalar)sc->box[k][2]; rv.max_value = (qaws_scalar)sc->box[k][3];
+		}
 		for (i = 0; i < N; i++)
 			for (j = 0; j < N; j++)
 			{
-				ssd_item* t = ssd_new(sc);
+				ssd_item* t;
+				if (sc->trims && sc->trims[k])
+				{
+					int in = 0;
+					qaws_vec2 q0;
+					q0.x = (qaws_scalar)(ru.min_value + (ru.max_value - ru.min_value) * (i + 0.5) / N);
+					q0.y = (qaws_scalar)(rv.min_value + (rv.max_value - rv.min_value) * (j + 0.5) / N);
+					qaws_surface_region_contains(sc->trims[k], q0, &in);
+					if (in != 1)
+						continue;
+				}
+				t = ssd_new(sc);
 				double uu[4], vv[4], dsum = 0, cu, cv, sh, col[3];
 				qaws_surface_eval_result r;
 				if (!t)

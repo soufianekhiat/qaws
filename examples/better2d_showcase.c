@@ -34,6 +34,8 @@
  *                      a cube's edges, circles across faces, two hemispheres
  *   b2d24_shell_saddle.svg  geodesic disks through saddle vertices: five and six
  *                      faces round a vertex, flat and bent; Booleans on a bent one
+ *   b2d25_shell_trimmed.svg  shells of trimmed faces: a plane split by a circle, a
+ *                      plate with a hole and a tube, a cube of trimmed planes
  *
  * Each figure lives in better2d_showcase/NN_*.c, compiled as one translation
  * unit.
@@ -80,6 +82,7 @@
 #include "better2d_showcase/22_surface_medial.c"
 #include "better2d_showcase/23_shell_region.c"
 #include "better2d_showcase/24_shell_saddle.c"
+#include "better2d_showcase/25_shell_trimmed.c"
 
 int main(void)
 {
@@ -109,5 +112,6 @@ int main(void)
 	demo_surface_medial();
 	demo_shell_region();
 	demo_shell_saddle();
+	demo_shell_trimmed();
 	return 0;
 }

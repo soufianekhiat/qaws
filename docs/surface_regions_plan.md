@@ -312,3 +312,10 @@ Each item lands with tests in f64 and f32, docs, and a showcase figure.
   sides (a circle 21 s to 1.7 s, a vertex disk 136 s to 13 s), and each
   face's Boolean checked against its bounds, redone exactly when out. Test
   107 runs every Boolean of two disks through the vertex; figure 24.
+- Follow-up: trimmed faces (qaws_shell_atlas_create_trimmed). Faces bounded
+  by loops of (u, v) curves; edges matched between trim curves and domain
+  sides by closest points; exits solved against the trim curves by Newton;
+  inside tests exact within the polygons' sag; regions closed along the
+  trims. Test 108 (a plane split by a circle, a plate with a tube, a cube
+  of trimmed planes) in f64 and f32; figure 25. Open: T-junctions, trims
+  on closed surfaces.

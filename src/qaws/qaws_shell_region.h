@@ -21,6 +21,10 @@
  * boundaries. Sides along a face's closed direction are its seam, and a
  * side that is one point is a pole; neither is an edge.
  *
+ * Faces may be trimmed (qaws_shell_atlas_create_trimmed): bounded by loops
+ * of (u, v) curves, each curve a side, meeting other faces' sides along
+ * those curves.
+ *
  * Geodesics are continued over edges as the straightest curves: the
  * direction keeps its components along the edge and across it (the
  * across part turned into the next face's tangent plane). Across a smooth
@@ -51,6 +55,25 @@ typedef struct qaws_shell_point
    size (1e-4 in float). INVALID_ARGUMENT when faces meet oriented
    oppositely. */
 qaws_status qaws_shell_atlas_create(qaws_surface const* const* surfaces, unsigned int surface_count, qaws_scalar tolerance,
+	qaws_shell_atlas** out_atlas);
+/* A face of a trimmed shell: its surface and the loops in its (u, v)
+   bounding it, each closed and each of its curves one side of the face
+   (an edge is a side shared whole with another face's side). Loops are
+   turned to keep the face on their left (a loop inside an even number of
+   others counter-clockwise, its holes clockwise); with no loops the face
+   is its whole domain. Surfaces and curves are borrowed. */
+typedef struct qaws_shell_face_desc
+{
+	qaws_surface const* surface;
+	qaws_path_2d const* trims;
+	unsigned int trim_count;
+} qaws_shell_face_desc;
+
+/* The atlas of faces some of which are trimmed: their sides meet any
+   other face's sides (trim curves or sides of domains) where they coincide
+   in space, whatever their parametrisations. UNSUPPORTED_OPERATION for a
+   trim on a surface closed in u or v. */
+qaws_status qaws_shell_atlas_create_trimmed(qaws_shell_face_desc const* faces, unsigned int face_count, qaws_scalar tolerance,
 	qaws_shell_atlas** out_atlas);
 /* The atlas of a B-rep shell's faces. */
 qaws_status qaws_shell_atlas_create_from_brep(qaws_brep_shell const* shell, qaws_scalar tolerance, qaws_shell_atlas** out_atlas);

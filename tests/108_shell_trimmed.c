@@ -1,0 +1,361 @@
+/*
+ * Test 108: shells of trimmed faces (qaws_shell_atlas_create_trimmed)
+ *
+ *   - a plane split by a circle into two trimmed faces of different
+ *     surfaces (the square with a hole, the disk; the circle parametrised
+ *     differently in each): one curved edge; a ray over the disk and back
+ *     out, a straight line; a disk across the edge, pi r^2 and 2 pi r, each
+ *     face's part against the circles' lens
+ *   - a plate with a round hole and a tube hanging from it (the hole's trim
+ *     against the tube's untrimmed top side): straightest rays into the
+ *     tube against the helices of the unrolled cylinder
+ *   - a cube of planes trimmed to its faces: twelve edges; circles over one
+ *     edge and over two by a vertex against pi r^2 and 2 pi r; a disk round
+ *     a corner against the untrimmed cube's
+ *   - an open loop refused; a trim on a surface closed in u not covered
+ */
+
+#include "test_common.h"
+#include "qaws_shell_region.h"
+#include <math.h>
+#include <string.h>
+#include <stdlib.h>
+
+#define STR_PI 3.14159265358979323846
+#define STR_F32 (sizeof(qaws_scalar) == 4)
+
+static qaws_surface* str_plane(double const* p00, double const* p10, double const* p01, double const* p11)
+{
+	qaws_surface_bilinear_desc d;
+	qaws_surface* s = NULL;
+	memset(&d, 0, sizeof(d));
+	d.p00.x = (qaws_scalar)p00[0]; d.p00.y = (qaws_scalar)p00[1]; d.p00.z = (qaws_scalar)p00[2];
+	d.p10.x = (qaws_scalar)p10[0]; d.p10.y = (qaws_scalar)p10[1]; d.p10.z = (qaws_scalar)p10[2];
+	d.p01.x = (qaws_scalar)p01[0]; d.p01.y = (qaws_scalar)p01[1]; d.p01.z = (qaws_scalar)p01[2];
+	d.p11.x = (qaws_scalar)p11[0]; d.p11.y = (qaws_scalar)p11[1]; d.p11.z = (qaws_scalar)p11[2];
+	qaws_surface_create_bilinear(&d, &s);
+	return s;
+}
+
+static qaws_curve* str_line(double x0, double y0, double x1, double y1)
+{
+	qaws_bezier_desc bd;
+	qaws_scalar cp[4];
+	qaws_curve* c = NULL;
+	cp[0] = (qaws_scalar)x0; cp[1] = (qaws_scalar)y0; cp[2] = (qaws_scalar)x1; cp[3] = (qaws_scalar)y1;
+	memset(&bd, 0, sizeof(bd));
+	bd.dimension = QAWS_DIMENSION_2D; bd.degree = 1; bd.control_points = cp; bd.control_point_count = 2;
+	qaws_curve_create_bezier(&bd, &c);
+	return c;
+}
+
+static qaws_curve* str_arc(double cx, double cy, double r, double a0, double a1)
+{
+	qaws_arc_segment g;
+	qaws_arc_desc ad;
+	qaws_curve* c = NULL;
+	memset(&g, 0, sizeof(g));
+	g.center[0] = (qaws_scalar)cx; g.center[1] = (qaws_scalar)cy; g.radius = (qaws_scalar)r;
+	g.angle_start = (qaws_scalar)a0; g.angle_end = (qaws_scalar)a1;
+	memset(&ad, 0, sizeof(ad));
+	ad.dimension = QAWS_DIMENSION_2D; ad.segments = &g; ad.segment_count = 1;
+	qaws_curve_create_arc(&ad, &c);
+	return c;
+}
+
+/* the square [lo, hi]^2 of (u, v), counter-clockwise */
+static void str_square(qaws_curve** c, double lo, double hi)
+{
+	c[0] = str_line(lo, lo, hi, lo);
+	c[1] = str_line(hi, lo, hi, hi);
+	c[2] = str_line(hi, hi, lo, hi);
+	c[3] = str_line(lo, hi, lo, lo);
+}
+
+static qaws_shell_point str_pt(unsigned int face, double u, double v)
+{
+	qaws_shell_point p;
+	p.face = face; p.uv.x = (qaws_scalar)u; p.uv.y = (qaws_scalar)v;
+	return p;
+}
+
+static qaws_vec3 str_at(qaws_shell_atlas const* a, qaws_shell_point p)
+{
+	qaws_surface_eval_result r;
+	memset(&r, 0, sizeof(r));
+	qaws_surface_evaluate(qaws_shell_atlas_get_face(a, p.face), p.uv.x, p.uv.y, QAWS_SURFACE_EVAL_POSITION, &r);
+	return r.position;
+}
+
+/* the plane z = 0 as (x, y) = (-2 + 4u, -2 + 4v) */
+static double const STR_P00[3] = { -2, -2, 0 }, STR_P10[3] = { 2, -2, 0 }, STR_P01[3] = { -2, 2, 0 }, STR_P11[3] = { 2, 2, 0 };
+
+static void test_split_plane(void)
+{
+	/* the disk's own surface: [-1, 1]^2 with u along y and v along -x */
+	static double const Q00[3] = { 1, -1, 0 }, Q10[3] = { 1, 1, 0 }, Q01[3] = { -1, -1, 0 }, Q11[3] = { -1, 1, 0 };
+	qaws_surface *sa = str_plane(STR_P00, STR_P10, STR_P01, STR_P11), *sb = str_plane(Q00, Q10, Q01, Q11);
+	qaws_curve *oc[4], *hole, *disk;
+	qaws_curve const *ol[4], *hl[1], *dl[1];
+	qaws_path_2d pa[2], pb[1];
+	qaws_shell_face_desc fd[2];
+	qaws_shell_atlas* a = NULL;
+	qaws_status st;
+	double tol = STR_F32 ? 1e-4 : 1e-9;
+	unsigned int i;
+	char msg[300];
+	str_square(oc, 0.125, 0.875);
+	hole = str_arc(0.5, 0.5, 0.2, 0, 2 * STR_PI);
+	disk = str_arc(0.5, 0.5, 0.4, 1.0, 1.0 + 2 * STR_PI);
+	for (i = 0; i < 4; i++) ol[i] = oc[i];
+	hl[0] = hole; dl[0] = disk;
+	pa[0].curves = ol; pa[0].curve_count = 4; pa[0].closed = 1;
+	pa[1].curves = hl; pa[1].curve_count = 1; pa[1].closed = 1;
+	pb[0].curves = dl; pb[0].curve_count = 1; pb[0].closed = 1;
+	fd[0].surface = sa; fd[0].trims = pa; fd[0].trim_count = 2;
+	fd[1].surface = sb; fd[1].trims = pb; fd[1].trim_count = 1;
+	st = qaws_shell_atlas_create_trimmed(fd, 2, 0, &a);
+	sprintf(msg, "split plane: the square with a hole and the disk, %u shared edge (the circle)", a ? qaws_shell_atlas_get_edge_count(a) : 0);
+	TEST_ASSERT(st == QAWS_STATUS_OK && qaws_shell_atlas_get_edge_count(a) == 1, msg);
+	if (st == QAWS_STATUS_OK)
+	{
+		/* a ray from (-1.2, 0.1) over the disk and back out: a straight line */
+		qaws_shell_point q;
+		qaws_vec2 d;
+		qaws_vec3 e;
+		unsigned int cr = 0;
+		double dx = 1, dy = 0.3, n = hypot(dx, dy), L = 2, off;
+		d.x = (qaws_scalar)(dx / n); d.y = (qaws_scalar)(dy / n);
+		st = qaws_shell_exp(a, str_pt(0, (-1.2 + 2) / 4, (0.1 + 2) / 4), d, (qaws_scalar)L, &q, NULL, &cr);
+		e = str_at(a, q);
+		off = hypot((double)e.x - (-1.2 + L * dx / n), (double)e.y - (0.1 + L * dy / n)) + fabs((double)e.z);
+		sprintf(msg, "split plane: a ray over the disk and out (%u crossings) against the straight line %.2g", cr, off);
+		TEST_ASSERT(st == QAWS_STATUS_OK && cr == 2 && q.face == 0 && off <= (STR_F32 ? 2e-6 : 1e-12), msg);
+	}
+	if (st == QAWS_STATUS_OK)
+	{
+		/* a disk from (0.9, 0.2), r 0.5, over the circle */
+		qaws_shell_region* g = NULL;
+		qaws_scalar A = 0, P = 0, a0 = 0, a1 = 0;
+		double dd = hypot(0.9, 0.2), r1 = 0.5, r2 = 0.8, lens;
+		lens = r1 * r1 * acos((dd * dd + r1 * r1 - r2 * r2) / (2 * dd * r1)) + r2 * r2 * acos((dd * dd + r2 * r2 - r1 * r1) / (2 * dd * r2))
+			- 0.5 * sqrt((-dd + r1 + r2) * (dd + r1 - r2) * (dd - r1 + r2) * (dd + r1 + r2));
+		st = qaws_shell_region_create_geodesic_disk(a, str_pt(0, (0.9 + 2) / 4, (0.2 + 2) / 4), (qaws_scalar)r1, 0, &g);
+		if (st == QAWS_STATUS_OK)
+		{
+			qaws_shell_region_get_area(g, &A);
+			qaws_shell_region_get_perimeter(g, &P);
+			if (qaws_shell_region_get_face(g, 0)) qaws_surface_region_get_area(qaws_shell_region_get_face(g, 0), &a0);
+			if (qaws_shell_region_get_face(g, 1)) qaws_surface_region_get_area(qaws_shell_region_get_face(g, 1), &a1);
+		}
+		sprintf(msg, "split plane: a disk over the curved edge against pi r^2 %.2g and 2 pi r %.2g; the disk's lens %.2g, the rest %.2g",
+			fabs((double)A - STR_PI * r1 * r1), fabs((double)P - 2 * STR_PI * r1), fabs((double)a1 - lens), fabs((double)a0 - (STR_PI * r1 * r1 - lens)));
+		TEST_ASSERT(st == QAWS_STATUS_OK && fabs((double)A - STR_PI * r1 * r1) <= tol && fabs((double)P - 2 * STR_PI * r1) <= tol
+			&& fabs((double)a1 - lens) <= tol && fabs((double)a0 - (STR_PI * r1 * r1 - lens)) <= tol, msg);
+		qaws_shell_region_destroy(g);
+	}
+	qaws_shell_atlas_destroy(a);
+	qaws_surface_destroy(sa); qaws_surface_destroy(sb);
+	for (i = 0; i < 4; i++) qaws_curve_destroy(oc[i]);
+	qaws_curve_destroy(hole); qaws_curve_destroy(disk);
+}
+
+static void test_tube(void)
+{
+	qaws_surface *sa = str_plane(STR_P00, STR_P10, STR_P01, STR_P11), *tube = NULL;
+	qaws_curve *prof = str_line(0.5, 0, 0.5, -1.5), *hole = str_arc(0.5, 0.5, 0.125, 0, 2 * STR_PI), *oc[4];
+	qaws_curve const *ol[4], *hl[1];
+	qaws_surface_revolution_desc rd;
+	qaws_path_2d pa[2];
+	qaws_shell_face_desc fd[2];
+	qaws_shell_atlas* a = NULL;
+	qaws_status st;
+	unsigned int i;
+	char msg[300];
+	memset(&rd, 0, sizeof(rd));
+	rd.profile = prof; rd.axis_direction.z = 1;
+	qaws_surface_create_revolution(&rd, &tube);
+	str_square(oc, 0.125, 0.875);
+	for (i = 0; i < 4; i++) ol[i] = oc[i];
+	hl[0] = hole;
+	pa[0].curves = ol; pa[0].curve_count = 4; pa[0].closed = 1;
+	pa[1].curves = hl; pa[1].curve_count = 1; pa[1].closed = 1;
+	fd[0].surface = sa; fd[0].trims = pa; fd[0].trim_count = 2;
+	fd[1].surface = tube; fd[1].trims = NULL; fd[1].trim_count = 0;
+	st = qaws_shell_atlas_create_trimmed(fd, 2, 0, &a);
+	sprintf(msg, "plate and tube: the hole's trim against the tube's top, %u shared edge", a ? qaws_shell_atlas_get_edge_count(a) : 0);
+	TEST_ASSERT(st == QAWS_STATUS_OK && qaws_shell_atlas_get_edge_count(a) == 1, msg);
+	if (st == QAWS_STATUS_OK)
+	{
+		/* rays from (1.2, 0.3) into the hole: on the tube, helices (the
+		   components along the rim and down it kept, the cylinder unrolled) */
+		static double const dirs[3][2] = { { -1, -0.1 }, { -1, -0.5 }, { -1, 0.15 } };
+		double worst = 0;
+		unsigned int z, crs = 0;
+		for (z = 0; z < 3 && st == QAWS_STATUS_OK; z++)
+		{
+			qaws_shell_point q;
+			qaws_vec2 d;
+			qaws_vec3 e;
+			unsigned int cr = 0;
+			double R = 0.5, x0 = 1.2, y0 = 0.3, n = hypot(dirs[z][0], dirs[z][1]), dx = dirs[z][0] / n, dy = dirs[z][1] / n, L = 1.6;
+			double b = x0 * dx + y0 * dy, c = x0 * x0 + y0 * y0 - R * R, t = -b - sqrt(b * b - c), px = x0 + t * dx, py = y0 + t * dy;
+			double al = dx * (py / R) + dy * (-px / R), be = -(dx * px + dy * py) / R, l = L - t, ph = atan2(py, px) - al * l / R, off;
+			d.x = (qaws_scalar)dx; d.y = (qaws_scalar)dy;
+			st = qaws_shell_exp(a, str_pt(0, (x0 + 2) / 4, (y0 + 2) / 4), d, (qaws_scalar)L, &q, NULL, &cr);
+			e = str_at(a, q);
+			off = sqrt(((double)e.x - R * cos(ph)) * ((double)e.x - R * cos(ph)) + ((double)e.y - R * sin(ph)) * ((double)e.y - R * sin(ph))
+				+ ((double)e.z + be * l) * ((double)e.z + be * l));
+			if (off > worst) worst = off;
+			if (q.face == 1 && cr == 1) crs++;
+		}
+		sprintf(msg, "plate and tube: three rays into the tube (%u on it after one crossing) against the helices within %.2g", crs, worst);
+		TEST_ASSERT(st == QAWS_STATUS_OK && crs == 3 && worst <= (STR_F32 ? 2e-6 : 1e-12), msg);
+	}
+	qaws_shell_atlas_destroy(a);
+	qaws_surface_destroy(sa); qaws_surface_destroy(tube);
+	qaws_curve_destroy(prof); qaws_curve_destroy(hole);
+	for (i = 0; i < 4; i++) qaws_curve_destroy(oc[i]);
+}
+
+/* the cube [-1, 1]^3, faces oriented outward: +z, -z, +x, -x, +y, -y; each
+   a plane half as large again, trimmed to its square when trim is set */
+static void str_cube(qaws_surface** f, double grow)
+{
+	static double const P[8][3] = { { -1, -1, -1 }, { 1, -1, -1 }, { -1, 1, -1 }, { 1, 1, -1 }, { -1, -1, 1 }, { 1, -1, 1 }, { -1, 1, 1 }, { 1, 1, 1 } };
+	static int const C[6][4] = { { 4, 5, 6, 7 }, { 0, 2, 1, 3 }, { 1, 3, 5, 7 }, { 0, 4, 2, 6 }, { 2, 6, 3, 7 }, { 0, 1, 4, 5 } };
+	unsigned int i, k, m;
+	for (i = 0; i < 6; i++)
+	{
+		double q[4][3], c[3];
+		for (m = 0; m < 3; m++) c[m] = 0.25 * (P[C[i][0]][m] + P[C[i][1]][m] + P[C[i][2]][m] + P[C[i][3]][m]);
+		for (k = 0; k < 4; k++)
+			for (m = 0; m < 3; m++) q[k][m] = c[m] + grow * (P[C[i][k]][m] - c[m]);
+		f[i] = str_plane(q[0], q[1], q[2], q[3]);
+	}
+}
+
+static double str_circle(qaws_shell_atlas const* a, qaws_shell_point c, double r, double* per, qaws_status* st)
+{
+	qaws_shell_curve* k = NULL;
+	qaws_shell_region* g = NULL;
+	qaws_scalar A = 0, L = 0;
+	*st = qaws_shell_curve_create_geodesic_circle(a, c, (qaws_scalar)r, 0, &k);
+	if (*st == QAWS_STATUS_OK) *st = qaws_shell_region_create(a, (qaws_shell_curve const* const*)&k, 1, &g);
+	if (*st == QAWS_STATUS_OK) *st = qaws_shell_region_get_area(g, &A);
+	if (*st == QAWS_STATUS_OK) *st = qaws_shell_region_get_perimeter(g, &L);
+	*per = (double)L;
+	qaws_shell_region_destroy(g);
+	qaws_shell_curve_destroy(k);
+	return (double)A;
+}
+
+static void test_trimmed_cube(void)
+{
+	qaws_surface *f[6], *g[6];
+	qaws_curve* sq[6][4];
+	qaws_curve const* sl[6][4];
+	qaws_path_2d loops[6];
+	qaws_shell_face_desc fd[6];
+	qaws_shell_atlas *a = NULL, *b = NULL;
+	qaws_status st, sb;
+	double tol = STR_F32 ? 2e-4 : 1e-9, lo = 1.0 / 6, span = 2.0 / 3;
+	unsigned int i, k;
+	char msg[300];
+	str_cube(f, 1.5);
+	str_cube(g, 1);
+	for (i = 0; i < 6; i++)
+	{
+		str_square(sq[i], lo, 1 - lo);
+		for (k = 0; k < 4; k++) sl[i][k] = sq[i][k];
+		loops[i].curves = sl[i]; loops[i].curve_count = 4; loops[i].closed = 1;
+		fd[i].surface = f[i]; fd[i].trims = &loops[i]; fd[i].trim_count = 1;
+	}
+	st = qaws_shell_atlas_create_trimmed(fd, 6, 0, &a);
+	sb = qaws_shell_atlas_create((qaws_surface const* const*)g, 6, 0, &b);
+	sprintf(msg, "trimmed cube: planes trimmed to the faces, %u shared edges", a ? qaws_shell_atlas_get_edge_count(a) : 0);
+	TEST_ASSERT(st == QAWS_STATUS_OK && sb == QAWS_STATUS_OK && qaws_shell_atlas_get_edge_count(a) == 12, msg);
+	if (st == QAWS_STATUS_OK)
+	{
+		/* (a face's (u, v) of the cube at lo + span (u, v) of the plane) */
+		double per1 = 0, per2 = 0, a1, a2, r1 = 0.8, r2 = 0.5;
+		qaws_status s1, s2;
+		a1 = str_circle(a, str_pt(0, lo + span * 0.75, lo + span * 0.5), r1, &per1, &s1);
+		a2 = str_circle(a, str_pt(0, lo + span * 0.8, lo + span * 0.8), r2, &per2, &s2);
+		sprintf(msg, "trimmed cube: circles over one edge and over two by a vertex: areas against pi r^2 %.2g, %.2g; perimeters against 2 pi r %.2g, %.2g",
+			fabs(a1 - STR_PI * r1 * r1), fabs(a2 - STR_PI * r2 * r2), fabs(per1 - 2 * STR_PI * r1), fabs(per2 - 2 * STR_PI * r2));
+		TEST_ASSERT(s1 == QAWS_STATUS_OK && s2 == QAWS_STATUS_OK && fabs(a1 - STR_PI * r1 * r1) <= tol && fabs(a2 - STR_PI * r2 * r2) <= tol &&
+			fabs(per1 - 2 * STR_PI * r1) <= tol && fabs(per2 - 2 * STR_PI * r2) <= tol, msg);
+	}
+	if (st == QAWS_STATUS_OK && sb == QAWS_STATUS_OK)
+	{
+		/* a disk round a corner: the trimmed cube's against the plain one's */
+		qaws_shell_region *ga = NULL, *gb = NULL;
+		qaws_scalar A = 0, B = 0;
+		qaws_status s1, s2;
+		double t = 0.3;
+		s1 = qaws_shell_region_create_geodesic_disk(a, str_pt(0, lo + span * (1 - t / 2), lo + span * (1 - t / 2)), (qaws_scalar)0.75, 0, &ga);
+		s2 = qaws_shell_region_create_geodesic_disk(b, str_pt(0, 1 - t / 2, 1 - t / 2), (qaws_scalar)0.75, 0, &gb);
+		if (s1 == QAWS_STATUS_OK) qaws_shell_region_get_area(ga, &A);
+		if (s2 == QAWS_STATUS_OK) qaws_shell_region_get_area(gb, &B);
+		sprintf(msg, "trimmed cube: a disk round a corner %.9f against the untrimmed cube's %.9f (%.2g)", (double)A, (double)B, fabs((double)A - B));
+		TEST_ASSERT(s1 == QAWS_STATUS_OK && s2 == QAWS_STATUS_OK && fabs((double)A - B) <= (STR_F32 ? 2e-4 : 1e-8) && A > 1.5, msg);
+		qaws_shell_region_destroy(ga);
+		qaws_shell_region_destroy(gb);
+	}
+	qaws_shell_atlas_destroy(a);
+	qaws_shell_atlas_destroy(b);
+	for (i = 0; i < 6; i++)
+	{
+		qaws_surface_destroy(f[i]); qaws_surface_destroy(g[i]);
+		for (k = 0; k < 4; k++) qaws_curve_destroy(sq[i][k]);
+	}
+}
+
+static void test_refusals(void)
+{
+	qaws_surface* sa = str_plane(STR_P00, STR_P10, STR_P01, STR_P11);
+	qaws_curve *open3[3], *prof = str_line(0.5, 0, 0.5, -1.5), *loop = str_arc(0.5, 0.5, 0.2, 0, 2 * STR_PI);
+	qaws_curve const *ol[3], *cl[1];
+	qaws_path_2d p, pc;
+	qaws_shell_face_desc fd;
+	qaws_shell_atlas* a = NULL;
+	qaws_surface* tube = NULL;
+	qaws_surface_revolution_desc rd;
+	qaws_status s1, s2;
+	unsigned int i;
+	char msg[200];
+	open3[0] = str_line(0.2, 0.2, 0.8, 0.2); open3[1] = str_line(0.8, 0.2, 0.8, 0.8); open3[2] = str_line(0.8, 0.8, 0.3, 0.2);
+	for (i = 0; i < 3; i++) ol[i] = open3[i];
+	p.curves = ol; p.curve_count = 3; p.closed = 1;
+	fd.surface = sa; fd.trims = &p; fd.trim_count = 1;
+	s1 = qaws_shell_atlas_create_trimmed(&fd, 1, 0, &a);
+	qaws_shell_atlas_destroy(a);
+	a = NULL;
+	memset(&rd, 0, sizeof(rd));
+	rd.profile = prof; rd.axis_direction.z = 1;
+	qaws_surface_create_revolution(&rd, &tube);
+	cl[0] = loop;
+	pc.curves = cl; pc.curve_count = 1; pc.closed = 1;
+	fd.surface = tube; fd.trims = &pc; fd.trim_count = 1;
+	s2 = qaws_shell_atlas_create_trimmed(&fd, 1, 0, &a);
+	qaws_shell_atlas_destroy(a);
+	sprintf(msg, "refused: a loop that does not close (%d), a trim on a surface closed in u (%d)", (int)s1, (int)s2);
+	TEST_ASSERT(s1 == QAWS_STATUS_INVALID_ARGUMENT && s2 == QAWS_STATUS_UNSUPPORTED_OPERATION, msg);
+	qaws_surface_destroy(sa); qaws_surface_destroy(tube);
+	for (i = 0; i < 3; i++) qaws_curve_destroy(open3[i]);
+	qaws_curve_destroy(prof); qaws_curve_destroy(loop);
+}
+
+int test_108_shell_trimmed_main(void)
+{
+	g_pass = 0;
+	g_fail = 0;
+	printf("Test 108: shells of trimmed faces\n");
+	test_split_plane();
+	test_tube();
+	test_trimmed_cube();
+	test_refusals();
+	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
+	return g_fail;
+}
