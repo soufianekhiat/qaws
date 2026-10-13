@@ -28,6 +28,8 @@
  *                      noise, a density, meshes on a sphere, a wavy patch and a torus
  *   b2d21_surface_exact.svg  exact Booleans on surfaces: shared and touching edges,
  *                      a ring of squares across the seam united into a band
+ *   b2d22_surface_medial.svg  medial axes on surfaces: junctions and the largest
+ *                      inscribed geodesic circles on a sphere, a patch and a torus
  *
  * Each figure lives in better2d_showcase/NN_*.c, compiled as one translation
  * unit.
@@ -71,6 +73,7 @@
 #include "better2d_showcase/19_surface_offset.c"
 #include "better2d_showcase/20_surface_sample.c"
 #include "better2d_showcase/21_surface_exact.c"
+#include "better2d_showcase/22_surface_medial.c"
 
 int main(void)
 {
@@ -97,5 +100,6 @@ int main(void)
 	demo_surface_offset();
 	demo_surface_sample();
 	demo_surface_exact();
+	demo_surface_medial();
 	return 0;
 }

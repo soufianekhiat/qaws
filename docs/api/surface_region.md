@@ -305,3 +305,56 @@ qaws_surface_clip_exact(surface, QAWS_CLIP_UNION, QAWS_FILL_NON_ZERO, a, na, b, 
 
 Figure 21 shows a ring of sixteen squares sharing their sides united into
 one band, checkerboards, and a lens.
+
+## Medial axis
+
+```c
+qaws_surface_medial_desc md = { 0.04 };          /* resolution on the surface */
+qaws_surface_medial_axis* m;
+qaws_surface_region_medial_axis(region, &md, &m);
+qaws_surface_medial_axis_get_segment(m, i, uv, radius);
+qaws_surface_medial_axis_get_junction(m, i, &uv, &radius);
+qaws_surface_medial_axis_get_max_inscribed(m, &centre, &radius);
+```
+
+- **What it is.** The axis is the set of points at the same geodesic
+  distance from two or more nearest boundary points: the centres of the
+  largest geodesic circles inside the region.
+- **Boundary features.** The boundary is taken as its smooth pieces, split
+  at corners, plus its corners. Cuts along seams and poles are not features,
+  and their ends are not corners, since the boundary continues smoothly
+  across them.
+- **Labels.** Conormal geodesics are traced inward from samples of the
+  pieces, with fans of geodesics from the corners. They label a mesh of the
+  region, sized by the metric, with each vertex's nearest feature. Labels
+  are then checked across edges by true distances.
+- **Crossings.** A mesh edge whose ends have nearest boundary points far
+  apart crosses the axis. The crossing is found on the edge where the two
+  features' true geodesic distances agree: a piece's by Newton on its foot
+  point, a corner's by shooting. A crossing nearer a third feature is off
+  the axis and is dropped.
+- **Junctions.** Within a triangle, two crossings are joined by a segment.
+  Where three features meet, the junction (equally far from all three) is
+  found by Newton.
+- **Accuracy.** The axis is resolved to the resolution along it, and its
+  points are on the true axis to the tolerance.
+
+### Checks (test 106, f64)
+
+| Check | Agreement |
+|---|---|
+| Sphere: a band between latitudes, the axis on the middle latitude at the half-width | 2.5e-11 |
+| Sphere: a geodesic triangle's junction and largest circle against the spherical inradius | 1.3e-11 |
+| Cylinder: a rectangle's axis, unrolled, on the plane rectangle's, radii the side distances | 3.5e-12 |
+| Wavy patch: axis points inside the region shrunk by r − 1e-6, outside it shrunk by r + 1e-6 | 5 of 5 |
+
+In f32 the same checks hold to 3e-6. A test run takes about 14 s. Figure 22
+shows axes, junctions and the largest inscribed circles on a sphere, a wavy
+patch and a torus.
+
+### Known limitation
+
+On open patches, an offset by a large distance can send the geodesic
+circles round the corners off the patch's domain, and the call then
+returns `OUT_OF_RANGE`. The circles at convex corners are not needed
+inward; leaving them out is open work.

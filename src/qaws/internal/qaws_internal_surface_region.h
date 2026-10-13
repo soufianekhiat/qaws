@@ -36,6 +36,21 @@ qaws_status qaws_internal_sg_integrate(qaws_internal_sg_ctx const* c, double* y,
 
 /* the geodesic offset of the (u, v) curve base by dist (> 0 left), with the
    conormal geodesics from its ends to the offset's (exactly its ends) */
+/* the boundary foot of x: (s, t) with the conormal geodesic from base(s) on
+   the side (> 0 left) reaching x after t (x's period copy nearest it),
+   Newton from the given (s, t), s kept in [lo, hi]; 1 when it lands */
+int qaws_internal_sg_foot(qaws_internal_sg_ctx const* c, qaws_curve const* base, double side, double lo, double hi,
+	double const* x, double* s, double* t);
+
+/* the geodesic from a reaching x (its nearest period copy): angle th (as
+   sg_dir) and length L by shooting from the given ones; 1 when it lands */
+int qaws_internal_sg_reach(qaws_internal_sg_ctx const* c, double const* a, double const* x, double* th, double* L);
+
+/* the angle of a (u, v) direction (from S_u, about S_u x S_v); the geodesic
+   leaving a at angle th run L: its end and velocity (vel may be NULL) */
+qaws_status qaws_internal_sg_angle(qaws_internal_sg_ctx const* c, double u, double v, double const* d, double* out);
+qaws_status qaws_internal_sg_shoot(qaws_internal_sg_ctx const* c, double const* a, double th, double L, double* end, double* vel);
+
 qaws_status qaws_internal_sg_offset(qaws_internal_sg_ctx const* c, qaws_curve const* base, double dist,
 	qaws_curve** out_offset, qaws_curve** out_ray0, qaws_curve** out_ray1);
 

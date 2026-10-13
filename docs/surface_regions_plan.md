@@ -278,3 +278,7 @@ Each item lands with tests in f64 and f32, docs, and a showcase figure.
   return CERTIFICATION_FAILED: the kernel does not certify the cut pieces'
   rounded ends back. Validated enclosures for geodesics remain open. Test
   105; figure 21.
+- Item 8: done (medial axis). Mesh labels come from traced conormal
+  geodesics, crossings are refined to true geodesic distances (foot-point
+  Newton, shooting), and junctions solved by Newton; the largest inscribed
+  circle is reported. Test 106; figure 22.

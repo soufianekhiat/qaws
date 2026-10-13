@@ -240,4 +240,51 @@ struct qaws_mesh_2d;
 qaws_status qaws_surface_region_triangulate(qaws_surface_region const* region, qaws_surface_mesh_desc const* desc,
 	struct qaws_mesh_2d** out_mesh);
 
+/* ------------------------------------------------------------------------ */
+/*  Medial axis                                                             */
+/* ------------------------------------------------------------------------ */
+
+/* The medial axis of the region on the surface: the points at the same
+   geodesic distance from two or more nearest boundary points, the centres
+   of the largest geodesic circles inside.
+   - The boundary is taken as its smooth pieces (split at corners; cuts
+     along seams and poles left out) and their ends.
+   - Conormal geodesics traced inward from samples of the pieces, and
+     fans of geodesics from the ends, label a mesh of the region (sized by
+     the metric) with each vertex's nearest feature.
+   - A mesh edge whose ends have nearest boundary points far apart crosses
+     the axis there: found on the edge where the two features' distances
+     agree, each a true geodesic distance (a piece's by Newton on its
+     foot point, an end's by shooting).
+   - Within a triangle two crossings are joined by a segment; where three
+     features meet, the junction (equally far from all three) by Newton.
+   The axis is resolved to the resolution (the mesh's edge length on the
+   surface) along it; its points are on the true axis within the
+   tolerance. */
+typedef struct qaws_surface_medial_axis qaws_surface_medial_axis;
+
+typedef struct qaws_surface_medial_desc
+{
+	qaws_scalar resolution;     /* edge length on the surface; 0 = 1/40 of sqrt(area) */
+} qaws_surface_medial_desc;
+
+qaws_status qaws_surface_region_medial_axis(qaws_surface_region const* region, qaws_surface_medial_desc const* desc,
+	qaws_surface_medial_axis** out_axis);
+void qaws_surface_medial_axis_destroy(qaws_surface_medial_axis* axis);
+
+/* The axis as segments in (u, v), with the radii (distances to the
+   boundary) at their ends. */
+unsigned int qaws_surface_medial_axis_get_segment_count(qaws_surface_medial_axis const* axis);
+qaws_status qaws_surface_medial_axis_get_segment(qaws_surface_medial_axis const* axis, unsigned int index,
+	qaws_vec2 out_uv[2], qaws_scalar out_radius[2]);
+
+/* The junctions: points equally far from three boundary features. */
+unsigned int qaws_surface_medial_axis_get_junction_count(qaws_surface_medial_axis const* axis);
+qaws_status qaws_surface_medial_axis_get_junction(qaws_surface_medial_axis const* axis, unsigned int index,
+	qaws_vec2* out_uv, qaws_scalar* out_radius);
+
+/* The largest geodesic circle inside the region found on the axis. */
+qaws_status qaws_surface_medial_axis_get_max_inscribed(qaws_surface_medial_axis const* axis, qaws_vec2* out_centre,
+	qaws_scalar* out_radius);
+
 #endif /* QAWS_SURFACE_REGION_H */

@@ -1108,3 +1108,103 @@ qaws_status qaws_surface_curve_create_offset(qaws_surface_curve const* base, qaw
 	*out_curve = c;
 	return QAWS_STATUS_OK;
 }
+
+/* ------------------------------------------------------------------------ */
+/*  Distances to the boundary                                               */
+/* ------------------------------------------------------------------------ */
+
+/* x moved by whole periods to the copy nearest e */
+static void sg_near_copy(sg_ctx const* c, double const* e, double const* x, double* out)
+{
+	out[0] = x[0]; out[1] = x[1];
+	if (c->pu > 0) out[0] += c->pu * floor((e[0] - x[0]) / c->pu + 0.5);
+	if (c->pv > 0) out[1] += c->pv * floor((e[1] - x[1]) / c->pv + 0.5);
+}
+
+/* the conormal geodesic from base(s) on the side, run t: its end and velocity */
+static qaws_status sg_foot_shot(sg_ctx const* c, qaws_curve const* base, double side, double s, double t, double* end, double* vel)
+{
+	double y[4];
+	qaws_status st = sg_conormal(c, base, s, side, y);
+	if (st == QAWS_STATUS_OK)
+		st = sg_integrate(c, y, t);
+	end[0] = y[0]; end[1] = y[1];
+	if (vel) { vel[0] = y[2]; vel[1] = y[3]; }
+	return st;
+}
+
+int qaws_internal_sg_foot(qaws_internal_sg_ctx const* c, qaws_curve const* base, double side, double lo, double hi,
+	double const* x, double* s, double* t)
+{
+	unsigned int it;
+	double end[2], vel[2], tx[2], r, ds = 1e-6 * (hi - lo);
+	if (*s < lo) *s = lo;
+	if (*s > hi) *s = hi;
+	if (sg_foot_shot(c, base, side, *s, *t, end, vel) != QAWS_STATUS_OK)
+		return 0;
+	sg_near_copy(c, end, x, tx);
+	r = hypot(end[0] - tx[0], end[1] - tx[1]);
+	for (it = 0; it < 40; it++)
+	{
+		double ep[2], em[2], J[4], det, step[2], fx = end[0] - tx[0], fy = end[1] - tx[1], sp, sm;
+		unsigned int k;
+		int ok = 0;
+		if (r <= 0.05 * c->tol)
+			return 1;
+		sp = *s + ds; sm = *s - ds;
+		if (sp > hi) sp = hi;
+		if (sm < lo) sm = lo;
+		if (sg_foot_shot(c, base, side, sp, *t, ep, NULL) != QAWS_STATUS_OK || sg_foot_shot(c, base, side, sm, *t, em, NULL) != QAWS_STATUS_OK)
+			return 0;
+		J[0] = (ep[0] - em[0]) / (sp - sm); J[1] = vel[0];
+		J[2] = (ep[1] - em[1]) / (sp - sm); J[3] = vel[1];
+		det = J[0] * J[3] - J[1] * J[2];
+		if (!(fabs(det) > 0))
+			return 0;
+		step[0] = (J[3] * fx - J[1] * fy) / det;
+		step[1] = (J[0] * fy - J[2] * fx) / det;
+		for (k = 0; k < 12; k++)
+		{
+			double ns = *s - step[0], nt = *t - step[1], ne[2], nv[2], nr, nx[2];
+			if (ns < lo) ns = lo;
+			if (ns > hi) ns = hi;
+			if (nt > 0 && sg_foot_shot(c, base, side, ns, nt, ne, nv) == QAWS_STATUS_OK)
+			{
+				sg_near_copy(c, ne, x, nx);
+				nr = hypot(ne[0] - nx[0], ne[1] - nx[1]);
+				if (nr < r)
+				{
+					*s = ns; *t = nt;
+					end[0] = ne[0]; end[1] = ne[1]; vel[0] = nv[0]; vel[1] = nv[1];
+					tx[0] = nx[0]; tx[1] = nx[1];
+					r = nr;
+					ok = 1;
+					break;
+				}
+			}
+			step[0] *= 0.5; step[1] *= 0.5;
+		}
+		if (!ok)
+			return r <= 0.05 * c->tol;
+	}
+	return r <= 0.05 * c->tol;
+}
+
+int qaws_internal_sg_reach(qaws_internal_sg_ctx const* c, double const* a, double const* x, double* th, double* L)
+{
+	double end[2], tx[2];
+	if (sg_shoot(c, a, *th, *L, end, NULL) != QAWS_STATUS_OK)
+		return 0;
+	sg_near_copy(c, end, x, tx);
+	return sg_newton(c, a, tx, th, L);
+}
+
+qaws_status qaws_internal_sg_angle(qaws_internal_sg_ctx const* c, double u, double v, double const* d, double* out)
+{
+	return sg_angle(c, u, v, d, out);
+}
+
+qaws_status qaws_internal_sg_shoot(qaws_internal_sg_ctx const* c, double const* a, double th, double L, double* end, double* vel)
+{
+	return sg_shoot(c, a, th, L, end, vel);
+}
