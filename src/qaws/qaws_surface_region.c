@@ -1138,7 +1138,7 @@ static qaws_status sr_breaks(qaws_curve const* cv, double** out, unsigned int* o
 /* the curve in smooth pieces (sr_breaks), less its cuts along seams and
    poles: each piece's strips on the sides asked (bit 1 left, bit 2
    right), circles at its ends */
-static qaws_status sr_tube_curve(sr_tube* tb, qaws_curve const* cv, int sides)
+static qaws_status sr_tube_curve(sr_tube* tb, qaws_curve const* cv, int sides, int disks)
 {
 	double* br = NULL;
 	unsigned int nb = 0, i;
@@ -1161,7 +1161,7 @@ static qaws_status sr_tube_curve(sr_tube* tb, qaws_curve const* cv, int sides)
 		}
 		if (sides & 1) st = sr_strip(tb, base, tb->r);
 		if (st == QAWS_STATUS_OK && (sides & 2)) st = sr_strip(tb, base, -tb->r);
-		if (st == QAWS_STATUS_OK)
+		if (st == QAWS_STATUS_OK && disks)
 		{
 			qaws_range pr = qaws_curve_get_parameter_range(base);
 			qaws_curve_evaluate_2d(base, pr.min_value, QAWS_EVAL_FLAG_POSITION, &e0);
@@ -1171,6 +1171,127 @@ static qaws_status sr_tube_curve(sr_tube* tb, qaws_curve const* cv, int sides)
 		}
 	}
 	free(br);
+	return st;
+}
+
+/* the circles a region's corners need: where its boundary's smooth pieces
+   meet turning left (convex, inside on the left) when it grows, right
+   (reflex) when it shrinks; none at smooth joins. A piece ending at a cut
+   along a seam goes on from the piece leaving the same point on the
+   seam's other side (another loop, maybe): matched there by the point
+   modulo the periods. */
+typedef struct sr_end
+{
+	double p[2], d[2];          /* the point and the tangent there */
+} sr_end;
+
+static double sr_turn(qaws_internal_sg_ctx const* c, double const* at, double const* din, double const* dout, int* ok)
+{
+	double aa = 0, ab = 0;
+	*ok = qaws_internal_sg_angle(c, at[0], at[1], din, &aa) == QAWS_STATUS_OK &&
+		qaws_internal_sg_angle(c, at[0], at[1], dout, &ab) == QAWS_STATUS_OK;
+	return remainder(ab - aa, 2 * 3.14159265358979323846);
+}
+
+static qaws_status sr_corner_disks(sr_tube* tb, qaws_clip_result const* res, int grow)
+{
+	typedef struct sr_piece { qaws_curve const* cv; double lo, hi; } sr_piece;
+	sr_piece* seq = NULL;
+	sr_end *arr = NULL, *dep = NULL;
+	unsigned int ns, cap = 0, na = 0, capa = 0, nd = 0, capd = 0, i, j, k, np = qaws_clip_result_get_path_count(res);
+	qaws_status st = QAWS_STATUS_OK;
+	qaws_internal_sg_ctx const* c = tb->c;
+#if QAWS_SCALAR_IS_FLOAT
+	double const turn_min = 1e-3, same = 1e-5;
+#else
+	double const turn_min = 1e-6, same = 1e-9;
+#endif
+	for (i = 0; i < np && st == QAWS_STATUS_OK; i++)
+	{
+		qaws_path_2d p;
+		if ((st = qaws_clip_result_get_path(res, i, &p)) != QAWS_STATUS_OK)
+			break;
+		/* the loop's pieces in order, a cut as cv NULL */
+		ns = 0;
+		for (j = 0; j < p.curve_count && st == QAWS_STATUS_OK; j++)
+		{
+			qaws_curve const* cv = p.curves[j];
+			double* br = NULL;
+			unsigned int nb = 0;
+			if ((st = sr_breaks(cv, &br, &nb)) != QAWS_STATUS_OK)
+				break;
+			for (k = 0; k + 1 < nb; k++)
+			{
+				if (!(br[k + 1] > br[k]))
+					continue;
+				if (!sr_grow((void**)&seq, &cap, ns + 1, sizeof(sr_piece)))
+				{
+					st = QAWS_STATUS_ALLOCATION_FAILURE;
+					break;
+				}
+				seq[ns].cv = sr_on_seam(c, cv, br[k], br[k + 1]) || sr_on_pole(c, cv, br[k], br[k + 1]) ? NULL : cv;
+				seq[ns].lo = br[k]; seq[ns].hi = br[k + 1];
+				ns++;
+			}
+			free(br);
+		}
+		for (j = 0; j < ns && st == QAWS_STATUS_OK; j++)
+		{
+			sr_piece const* cur = &seq[j];
+			sr_piece const* prev = &seq[(j + ns - 1) % ns];
+			sr_piece const* next = &seq[(j + 1) % ns];
+			qaws_eval_result_2d a, b;
+			if (!cur->cv)
+				continue;
+			qaws_curve_evaluate_2d(cur->cv, (qaws_scalar)cur->lo, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &b);
+			if (!prev->cv)
+			{
+				/* leaving a cut: a departure to match */
+				if (!sr_grow((void**)&dep, &capd, nd + 1, sizeof(sr_end))) { st = QAWS_STATUS_ALLOCATION_FAILURE; break; }
+				dep[nd].p[0] = b.position.x; dep[nd].p[1] = b.position.y; dep[nd].d[0] = b.d1.x; dep[nd].d[1] = b.d1.y;
+				nd++;
+			}
+			else
+			{
+				double da[2], db[2], at[2], turn;
+				int ok;
+				qaws_curve_evaluate_2d(prev->cv, (qaws_scalar)prev->hi, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &a);
+				da[0] = a.d1.x; da[1] = a.d1.y; db[0] = b.d1.x; db[1] = b.d1.y;
+				at[0] = b.position.x; at[1] = b.position.y;
+				turn = sr_turn(c, at, da, db, &ok);
+				if (!ok || (grow && turn > turn_min) || (!grow && turn < -turn_min))
+					st = sr_disk(tb, b.position);
+			}
+			if (st == QAWS_STATUS_OK && !next->cv)
+			{
+				/* arriving at a cut: an arrival to match */
+				qaws_curve_evaluate_2d(cur->cv, (qaws_scalar)cur->hi, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &a);
+				if (!sr_grow((void**)&arr, &capa, na + 1, sizeof(sr_end))) { st = QAWS_STATUS_ALLOCATION_FAILURE; break; }
+				arr[na].p[0] = a.position.x; arr[na].p[1] = a.position.y; arr[na].d[0] = a.d1.x; arr[na].d[1] = a.d1.y;
+				na++;
+			}
+		}
+	}
+	/* the arrivals at cuts, each with the departure from its point */
+	for (i = 0; i < na && st == QAWS_STATUS_OK; i++)
+		for (j = 0; j < nd; j++)
+		{
+			double du = arr[i].p[0] - dep[j].p[0], dv = arr[i].p[1] - dep[j].p[1], turn;
+			int ok;
+			if (c->pu > 0) du -= c->pu * floor(du / c->pu + 0.5);
+			if (c->pv > 0) dv -= c->pv * floor(dv / c->pv + 0.5);
+			if (fabs(du) > same * (c->u1 - c->u0) || fabs(dv) > same * (c->v1 - c->v0))
+				continue;
+			turn = sr_turn(c, dep[j].p, arr[i].d, dep[j].d, &ok);
+			if (!ok || (grow && turn > turn_min) || (!grow && turn < -turn_min))
+			{
+				qaws_vec2 q;
+				q.x = (qaws_scalar)dep[j].p[0]; q.y = (qaws_scalar)dep[j].p[1];
+				st = sr_disk(tb, q);
+			}
+			break;
+		}
+	free(seq); free(arr); free(dep);
 	return st;
 }
 
@@ -1224,12 +1345,14 @@ qaws_status qaws_surface_offset(qaws_surface const* surface, qaws_fill_rule fill
 			if ((st = qaws_clip_result_get_path(R->res, i, &p)) != QAWS_STATUS_OK)
 				break;
 			for (k = 0; k < p.curve_count && st == QAWS_STATUS_OK; k++)
-				st = sr_tube_curve(&tb, p.curves[k], d > 0 ? 2 : 1);
+				st = sr_tube_curve(&tb, p.curves[k], d > 0 ? 2 : 1, 0);
 		}
+		if (st == QAWS_STATUS_OK && R)
+			st = sr_corner_disks(&tb, R->res, d > 0);
 		for (i = 0; i < path_count && st == QAWS_STATUS_OK; i++)
 			if (!paths[i].closed)
 				for (k = 0; k < paths[i].curve_count && st == QAWS_STATUS_OK; k++)
-					st = sr_tube_curve(&tb, qaws_surface_curve_get_uv(paths[i].curves[k]), 3);
+					st = sr_tube_curve(&tb, qaws_surface_curve_get_uv(paths[i].curves[k]), 3, 1);
 	}
 	sr_fix_views(&tb.raw);
 	if (st == QAWS_STATUS_OK && tb.raw.np)

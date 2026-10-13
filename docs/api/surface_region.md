@@ -183,9 +183,17 @@ qaws_surface_curve_create_offset(curve, distance, 0, &offset_curve);
   a conormal geodesic from a smooth boundary point or from a corner. So the
   grown region (d > 0) is the region with:
   - the strips the outward conormal geodesics of length d sweep;
-  - geodesic circles of radius d round the corners.
-  The shrunk region (d < 0) is the region less the inward strips and the
-  circles.
+  - geodesic circles of radius d round the convex corners.
+  The shrunk region (d < 0) is the region less the inward strips and
+  circles round the reflex corners.
+- **Corners.** A corner is where the boundary's pieces meet turning, with
+  the turn measured in the metric. Only the corners on the side the offset
+  moves to need a circle: elsewhere the two strips already overlap. Smooth
+  joins need none. A piece ending at a cut along a seam is matched with the
+  piece leaving the same point on the seam's other side, so a corner on a
+  seam counts like any other. Leaving out the unneeded circles also keeps
+  large offsets on open patches inside the patch: an outward circle at an
+  inward offset's convex corner would leave the domain.
 - **Boundary.** The strips follow the region's own boundary (its loops
   from `qaws_surface_clip`, inside on their left), not the input paths. So
   overlapping operands and holes are handled, and cuts along seams and
@@ -347,14 +355,8 @@ qaws_surface_medial_axis_get_max_inscribed(m, &centre, &radius);
 | Sphere: a geodesic triangle's junction and largest circle against the spherical inradius | 1.3e-11 |
 | Cylinder: a rectangle's axis, unrolled, on the plane rectangle's, radii the side distances | 3.5e-12 |
 | Wavy patch: axis points inside the region shrunk by r − 1e-6, outside it shrunk by r + 1e-6 | 5 of 5 |
+| Wavy patch: shrunk by the largest inscribed radius less 1e-6 a part left, plus 1e-6 nothing | yes |
 
 In f32 the same checks hold to 3e-6. A test run takes about 14 s. Figure 22
 shows axes, junctions and the largest inscribed circles on a sphere, a wavy
 patch and a torus.
-
-### Known limitation
-
-On open patches, an offset by a large distance can send the geodesic
-circles round the corners off the patch's domain, and the call then
-returns `OUT_OF_RANGE`. The circles at convex corners are not needed
-inward; leaving them out is open work.

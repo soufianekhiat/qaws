@@ -286,3 +286,9 @@ Each item lands with tests in f64 and f32, docs, and a showcase figure.
   (qaws_shell_region.h): straightest geodesics over edges, circles across
   faces, regions, areas, perimeters and Booleans face by face. Test 107;
   figure 23. Open: trimmed faces, and vertices (cone points).
+- Follow-up: offsets put circles only at the corners on the side the offset
+  moves to (convex when grown, reflex when shrunk), with corners on seams
+  matched across the cut. Large inward offsets on open patches no longer
+  leave the domain. Test 106 shrinks a region by its largest inscribed
+  radius, plus or minus 1e-6: a part is left just short of it and nothing
+  just past it.

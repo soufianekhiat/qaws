@@ -10,7 +10,9 @@
  *     plane rectangle's (a middle segment and four bisectors), each point at
  *     its distance to the nearest side
  *   - a wavy bicubic patch, by the geodesic offsets: an axis point at radius
- *     r is inside the region shrunk by r - d and outside it shrunk by r + d
+ *     r is inside the region shrunk by r - d and outside it shrunk by r + d;
+ *     shrunk by the largest inscribed radius less d a part is left, by it
+ *     plus d nothing
  */
 
 #include "test_common.h"
@@ -276,8 +278,6 @@ static void test_wavy(void)
 			int c1 = 0, c2 = 1;
 			qaws_status s1, s2;
 			qaws_surface_medial_axis_get_segment(m, i, p, rr);
-			if (rr[0] > 0.3)
-				continue;      /* (an offset that far sends its corner circles off the patch) */
 			if (rr[0] < 1e-3)
 				continue;      /* (an end at a corner, on the boundary) */
 			s1 = qaws_surface_offset(s, QAWS_FILL_NON_ZERO, &Q, 1, -(rr[0] - (qaws_scalar)dlt), 0, &in);
@@ -295,6 +295,26 @@ static void test_wavy(void)
 	sprintf(msg, "wavy patch: a geodesic quadrilateral's axis (%u segments): %u of %u points inside the region shrunk by r - %.0e and outside it shrunk by r + %.0e",
 		n, good, checked, dlt, dlt);
 	TEST_ASSERT(st == QAWS_STATUS_OK && checked == 5 && good == checked, msg);
+	/* the largest inscribed circle: the region shrunk by just less keeps a
+	   part, shrunk by just more vanishes */
+	{
+		qaws_vec2 bc;
+		qaws_scalar br = 0, a1 = 0, a2 = 0;
+		qaws_surface_region *in = NULL, *out = NULL;
+		qaws_status s1 = QAWS_STATUS_INVALID_ARGUMENT, s2 = QAWS_STATUS_INVALID_ARGUMENT;
+		if (st == QAWS_STATUS_OK)
+		{
+			qaws_surface_medial_axis_get_max_inscribed(m, &bc, &br);
+			s1 = qaws_surface_offset(s, QAWS_FILL_NON_ZERO, &Q, 1, -(br - (qaws_scalar)dlt), 0, &in);
+			s2 = qaws_surface_offset(s, QAWS_FILL_NON_ZERO, &Q, 1, -(br + (qaws_scalar)dlt), 0, &out);
+			if (in) qaws_surface_region_get_area(in, &a1);
+			if (out) qaws_surface_region_get_area(out, &a2);
+		}
+		sprintf(msg, "wavy patch: the region shrunk by the largest inscribed radius %.6f less %.0e keeps %.2g, by it plus %.0e keeps %.2g",
+			(double)br, dlt, (double)a1, dlt, (double)a2);
+		TEST_ASSERT(s1 == QAWS_STATUS_OK && s2 == QAWS_STATUS_OK && a1 > 0 && a2 == 0, msg);
+		qaws_surface_region_destroy(in); qaws_surface_region_destroy(out);
+	}
 	qaws_surface_medial_axis_destroy(m);
 	qaws_surface_region_destroy(r);
 	for (i = 0; i < 4; i++) qaws_surface_curve_destroy(q[i]);
