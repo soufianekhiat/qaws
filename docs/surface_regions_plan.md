@@ -319,3 +319,9 @@ Each item lands with tests in f64 and f32, docs, and a showcase figure.
   trims. Test 108 (a plane split by a circle, a plate with a tube, a cube
   of trimmed planes) in f64 and f32; figure 25. Open: T-junctions, trims
   on closed surfaces.
+- Follow-up: T-junctions. Sides running through other sides' ends are split
+  there (trim curves into stretches, open untrimmed faces turned into faces
+  trimmed by their domains); shared stretches found on any shared sides and
+  measured by Gauss on the first form; faces without runs judged at five
+  places along the side. Test 108 (flat and folded T, a disk touching an
+  edge); figure 25's last two panels.

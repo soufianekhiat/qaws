@@ -3,7 +3,7 @@
    plane split by a circle into a square with a hole and a disk (each with
    its own surface); a plate with a round hole and a tube hanging from it
    (the hole's trim meeting the tube's top); a cube of larger planes
-   trimmed to its faces. Straightest rays and geodesic disks run over the
+   trimmed to its faces; a T-junction (one side meeting two walls). Straightest rays and geodesic disks run over the
    trim edges. Drawn with figure 24's shaded renderer. */
 
 /* a face's trim loops as a region of it (to draw only its trimmed part) */
@@ -82,7 +82,7 @@ static void demo_shell_trimmed(void)
 	static int const fblue[3] = { 84, 174, 255 }, fred[3] = { 255, 129, 130 }, fpurple[3] = { 170, 120, 250 };
 	unsigned int k, i, j;
 	char label[220];
-	if (!svg_open(&s, "showcase/b2d25_shell_trimmed.svg", (int)(48 + 3 * (pw + 12)), (int)(110 + 2 * (ph + 44)),
+	if (!svg_open(&s, "showcase/b2d25_shell_trimmed.svg", (int)(48 + 4 * (pw + 12)), (int)(110 + 2 * (ph + 44)),
 		"Shells of trimmed faces",
 		"qaws_shell_atlas_create_trimmed: faces bounded by curves of their (u, v), edges matched along those curves in space; rays and disks cross them"))
 		return;
@@ -175,7 +175,7 @@ static void demo_shell_trimmed(void)
 		tr[0] = s25_trim_region(f[0], pa, 2);
 		tr[1] = NULL;
 		memset(&sc, 0, sizeof(sc));
-		v3.x0 = 24 + (k % 3) * (pw + 12); v3.y0 = 104 + (k / 3) * (ph + 44); v3.w = pw; v3.h = ph;
+		v3.x0 = 24 + (k % 4) * (pw + 12); v3.y0 = 104 + (k / 4) * (ph + 44); v3.w = pw; v3.h = ph;
 		sgf_view_init(&view, -0.6, k == 1 ? 0.75 : -0.42, 105, v3.x0 + pw / 2, v3.y0 + ph / 2 + (k == 1 ? 40 : -30));
 		sc.view = &view; sc.trims = (qaws_surface_region const* const*)tr; sc.box = box; sc.res = 80;
 		if (k == 1)
@@ -267,7 +267,7 @@ static void demo_shell_trimmed(void)
 		}
 		qaws_shell_atlas_create_trimmed(fd, 6, 0, &a);
 		memset(&sc, 0, sizeof(sc));
-		v3.x0 = 24 + (k % 3) * (pw + 12); v3.y0 = 104 + (k / 3) * (ph + 44); v3.w = pw; v3.h = ph;
+		v3.x0 = 24 + (k % 4) * (pw + 12); v3.y0 = 104 + (k / 4) * (ph + 44); v3.w = pw; v3.h = ph;
 		sgf_view_init(&view, -0.75 * pi, 0.6, 85, v3.x0 + pw / 2, v3.y0 + ph / 2 + 15);
 		sc.view = &view; sc.trims = (qaws_surface_region const* const*)tr; sc.box = (double const (*)[4])box; sc.res = 40;
 		if (k == 4)
@@ -298,6 +298,59 @@ static void demo_shell_trimmed(void)
 			qaws_surface_destroy(f[i]);
 			for (j = 0; j < 4; j++) qaws_curve_destroy(sq[i][j]);
 		}
+	}
+	/* a T-junction: the side of a 2 x 1 face meeting two unit walls side by
+	   side (split where they meet) */
+	for (k = 6; k < 8; k++)
+	{
+		static double const B00[3] = { 0, -1, 0 }, B10[3] = { 2, -1, 0 }, B01[3] = { 0, 0, 0 }, B11[3] = { 2, 0, 0 };
+		static double const A00[3] = { 0, 0, 0 }, A10[3] = { 1, 0, 0 }, A01[3] = { 0, 0, 1 }, A11[3] = { 1, 0, 1 };
+		static double const C00[3] = { 1, 0, 0 }, C10[3] = { 2, 0, 0 }, C01[3] = { 1, 0, 1 }, C11[3] = { 2, 0, 1 };
+		qaws_surface* f[3];
+		qaws_shell_atlas* a = NULL;
+		qaws_shell_region *g = NULL, *h = NULL, *x = NULL;
+		viewport v3;
+		sgf_view view;
+		ssd_scene sc;
+		ssd_paint paint[1];
+		double A = 0, B = 0;
+		qaws_scalar X = 0;
+		f[0] = shf_face(B00, B10, B01, B11);
+		f[1] = shf_face(A00, A10, A01, A11);
+		f[2] = shf_face(C00, C10, C01, C11);
+		qaws_shell_atlas_create((qaws_surface const* const*)f, 3, 0, &a);
+		memset(&sc, 0, sizeof(sc));
+		v3.x0 = 24 + (k % 4) * (pw + 12); v3.y0 = 104 + (k / 4) * (ph + 44); v3.w = pw; v3.h = ph;
+		sgf_view_init(&view, -0.45, 0.55, 125, v3.x0 + pw / 2 - 125, v3.y0 + ph / 2 + 30);
+		view.o[0] = 0; view.o[1] = 0; view.o[2] = 0;
+		sc.view = &view; sc.res = 40;
+		g = ssd_disk(a, shf_pt(0, 0.5, 0.7), 0.5, &A);
+		if (k == 6)
+		{
+			sprintf(label, "a T-junction: a disk round the T point, %.9f", A);
+			ssd_panel(&s, &v3, label, "one side meets two walls; split there; pi r^2 = 0.785398163");
+			paint[0].r = g; memcpy(paint[0].rgb, fblue, sizeof(fblue));
+		}
+		else
+		{
+			h = ssd_disk(a, shf_pt(2, 0.5, 0.55), 0.42, &B);
+			if (g && h) qaws_shell_region_clip(g, h, QAWS_CLIP_XOR, &x);
+			if (x) qaws_shell_region_get_area(x, &X);
+			sprintf(label, "with a disk on a wall, exclusive-or: %.6f", (double)X);
+			ssd_panel(&s, &v3, label, "A (blue) round the T point, B (red) on the right wall");
+			paint[0].r = x; memcpy(paint[0].rgb, fpurple, sizeof(fpurple));
+		}
+		ssd_surfaces(&sc, f, 3, paint, 1);
+		ssd_outline(&sc, g, f, 3, blue);
+		if (h) ssd_outline(&sc, h, f, 3, red);
+		ssd_edges(&sc, f, 3);
+		ssd_dot(&sc, f[0], 0.5, 1, black, 4.5);
+		ssd_dot(&sc, f[0], 0.5, 0.7, blue, 3.5);
+		if (h) ssd_dot(&sc, f[2], 0.5, 0.55, red, 3.5);
+		ssd_draw(&s, &sc);
+		qaws_shell_region_destroy(g); qaws_shell_region_destroy(h); qaws_shell_region_destroy(x);
+		qaws_shell_atlas_destroy(a);
+		for (i = 0; i < 3; i++) qaws_surface_destroy(f[i]);
 	}
 	svg_close(&s);
 	printf("figure 25: shells of trimmed faces, %.1f s\n", (double)(clock() - t0) / CLOCKS_PER_SEC);

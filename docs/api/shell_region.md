@@ -108,6 +108,15 @@ surface and, optionally, loops of (u, v) curves bounding it
 - **Corners.** A join of two trim curves is a vertex of the shell where the
   boundary turns or the neighbour changes; a smooth join with one
   neighbour (a circle given as one curve) is not.
+- **T-junctions.** A side running through another side's end (one long
+  side meeting two faces side by side) is split there, so every edge joins
+  whole sides: a trim curve into stretches of itself, and an open untrimmed
+  face's side by turning the face into one trimmed by its domain. The T
+  point is a vertex (its sides' neighbours differ). This holds for
+  `qaws_shell_atlas_create` as well.
+- **Faces without runs.** A face no boundary crosses is inside or outside as
+  a neighbour's region is just inside their shared side, at five places
+  along it (a region only touching the side does not count).
 - **Regions.** A region's runs on a trimmed face are closed along the trim
   loops (stretches of the trim curves between them); a hole no run touches
   is taken out where the region holds it.
@@ -119,6 +128,8 @@ surface and, optionally, loops of (u, v) curves bounding it
 | Plate with a hole and a tube: three straightest rays into the tube against the helices of the unrolled cylinder | 7e-15 |
 | Cube of planes trimmed to its faces: circles over one and two edges against pi r² and 2 pi r | 5e-11 |
 | The same: a disk round a corner against the untrimmed cube's | 2e-12 |
+| T-junction (a 2 × 1 face meeting two unit faces, flat and as walls): three disks against pi r² and 2 pi r | 1e-10 |
+| The same: a disk on a wall just touching the edge below it stays on its wall | 4e-11 |
 
 In f32 the same checks hold to 3e-5. Figure 25 shows the split plane, the
 plate and tube (helices through the hole, a disk over the rim, a union with
@@ -126,9 +137,8 @@ a disk inside the tube) and the trimmed cube.
 
 ## Limits
 
-- Edges are whole sides: a side (a domain side or a trim curve) meets
-  another whole. Edges joining parts of sides (T-junctions) are not covered;
-  split the longer curve where the others meet it.
+- A T-junction along a side of a face closed in u or v (a side that cannot
+  be split) is not covered.
 - Trims on surfaces closed in u or v are not covered.
 - Rays that hit a vertex exactly stop there; disks round vertices go
   through `qaws_shell_region_create_geodesic_disk`.

@@ -65,6 +65,8 @@ typedef struct sh_trim
 	double* poly;               /* per piece, SH_TRIM_N + 1 (u, v) points: inside tests, nearest points */
 	double diag;                /* the extent of the pieces in (u, v) */
 	double sag;                 /* how far a piece strays from its polygon */
+	qaws_curve** own;           /* curves made here (a domain turned into a trim) */
+	unsigned int nown;
 } sh_trim;
 
 #define SH_TRIM_N 128
@@ -454,8 +456,122 @@ static int sh_trim_inside(sh_trim const* t, double const* uv)
 
 static void sh_trim_free(sh_trim* t)
 {
+	unsigned int i;
+	for (i = 0; i < t->nown; i++) qaws_curve_destroy(t->own[i]);
+	free(t->own);
 	free((void*)t->cv); free(t->t0); free(t->t1); free(t->loop); free(t->lfirst); free(t->poly);
 	memset(t, 0, sizeof(*t));
+}
+
+/* the pieces' polygons, their extent and sag (the pieces' midway points
+   against the chords) */
+static void sh_trim_polys(sh_trim* t)
+{
+	unsigned int k, i;
+	double lo[2] = { 1e300, 1e300 }, hi[2] = { -1e300, -1e300 };
+	for (k = 0; k < t->np; k++)
+		for (i = 0; i <= SH_TRIM_N; i++)
+		{
+			double* q = t->poly + 2 * ((SH_TRIM_N + 1) * k + i);
+			sh_trim_eval(t, k, (double)i / SH_TRIM_N, q, NULL);
+			if (q[0] < lo[0]) lo[0] = q[0];
+			if (q[1] < lo[1]) lo[1] = q[1];
+			if (q[0] > hi[0]) hi[0] = q[0];
+			if (q[1] > hi[1]) hi[1] = q[1];
+		}
+	t->diag = hypot(hi[0] - lo[0], hi[1] - lo[1]);
+	t->sag = 0;
+	for (k = 0; k < t->np; k++)
+		for (i = 0; i < SH_TRIM_N; i++)
+		{
+			double const* q = t->poly + 2 * ((SH_TRIM_N + 1) * k + i);
+			double m[2], ex = q[2] - q[0], ey = q[3] - q[1], ee = ex * ex + ey * ey, w = 0, dx, dy;
+			sh_trim_eval(t, k, (i + 0.5) / SH_TRIM_N, m, NULL);
+			if (ee > 0) w = ((m[0] - q[0]) * ex + (m[1] - q[1]) * ey) / ee;
+			dx = q[0] + w * ex - m[0]; dy = q[1] + w * ey - m[1];
+			if (hypot(dx, dy) > t->sag) t->sag = hypot(dx, dy);
+		}
+}
+
+/* piece p split at the ns increasing s in ss (inside (0, 1)): the same
+   curve over the stretches between */
+static qaws_status sh_trim_split(sh_trim* t, unsigned int p, double const* ss, unsigned int ns)
+{
+	unsigned int np = t->np + ns, k, j, at = 0, l;
+	qaws_curve const** cv = (qaws_curve const**)malloc(sizeof(qaws_curve const*) * (np + 1));
+	double* t0 = (double*)malloc(sizeof(double) * (np + 1));
+	double* t1 = (double*)malloc(sizeof(double) * (np + 1));
+	unsigned int* loop = (unsigned int*)malloc(sizeof(unsigned int) * (np + 1));
+	double* poly = (double*)malloc(sizeof(double) * 2 * (SH_TRIM_N + 1) * (np + 1));
+	if (!cv || !t0 || !t1 || !loop || !poly)
+	{
+		free((void*)cv); free(t0); free(t1); free(loop); free(poly);
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	}
+	for (k = 0; k < t->np; k++)
+	{
+		if (k != p)
+		{
+			cv[at] = t->cv[k]; t0[at] = t->t0[k]; t1[at] = t->t1[k]; loop[at] = t->loop[k]; at++;
+			continue;
+		}
+		for (j = 0; j <= ns; j++)
+		{
+			double sa = j ? ss[j - 1] : 0, sb = j < ns ? ss[j] : 1, dt = t->t1[k] - t->t0[k];
+			cv[at] = t->cv[k];
+			t0[at] = t->t0[k] + sa * dt; t1[at] = t->t0[k] + sb * dt;
+			loop[at] = t->loop[k];
+			at++;
+		}
+	}
+	for (l = t->loop[p] + 1; l <= t->nl; l++) t->lfirst[l] += ns;
+	free((void*)t->cv); free(t->t0); free(t->t1); free(t->loop); free(t->poly);
+	t->cv = cv; t->t0 = t0; t->t1 = t1; t->loop = loop; t->poly = poly; t->np = np;
+	sh_trim_polys(t);
+	return QAWS_STATUS_OK;
+}
+
+/* an open face's domain as its trim: its four sides, counter-clockwise */
+static qaws_status sh_trim_rect(sh_trim* t, qaws_internal_sg_ctx const* c)
+{
+	double const x[5] = { c->u0, c->u1, c->u1, c->u0, c->u0 }, y[5] = { c->v0, c->v0, c->v1, c->v1, c->v0 };
+	unsigned int k;
+	memset(t, 0, sizeof(*t));
+	t->own = (qaws_curve**)calloc(4, sizeof(qaws_curve*));
+	t->cv = (qaws_curve const**)malloc(sizeof(qaws_curve const*) * 4);
+	t->t0 = (double*)malloc(sizeof(double) * 4);
+	t->t1 = (double*)malloc(sizeof(double) * 4);
+	t->loop = (unsigned int*)calloc(4, sizeof(unsigned int));
+	t->lfirst = (unsigned int*)malloc(sizeof(unsigned int) * 2);
+	t->poly = (double*)malloc(sizeof(double) * 2 * (SH_TRIM_N + 1) * 4);
+	if (!t->own || !t->cv || !t->t0 || !t->t1 || !t->loop || !t->lfirst || !t->poly)
+	{
+		sh_trim_free(t);
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	}
+	for (k = 0; k < 4; k++)
+	{
+		qaws_bezier_desc bd;
+		qaws_scalar cp[4];
+		qaws_range rg;
+		qaws_status st;
+		cp[0] = (qaws_scalar)x[k]; cp[1] = (qaws_scalar)y[k]; cp[2] = (qaws_scalar)x[k + 1]; cp[3] = (qaws_scalar)y[k + 1];
+		memset(&bd, 0, sizeof(bd));
+		bd.dimension = QAWS_DIMENSION_2D; bd.degree = 1; bd.control_points = cp; bd.control_point_count = 2;
+		if ((st = qaws_curve_create_bezier(&bd, &t->own[k])) != QAWS_STATUS_OK)
+		{
+			t->nown = k;
+			sh_trim_free(t);
+			return st;
+		}
+		t->nown = k + 1;
+		rg = qaws_curve_get_parameter_range(t->own[k]);
+		t->cv[k] = t->own[k]; t->t0[k] = rg.min_value; t->t1[k] = rg.max_value;
+	}
+	t->np = 4; t->nl = 1;
+	t->lfirst[0] = 0; t->lfirst[1] = 4;
+	sh_trim_polys(t);
+	return QAWS_STATUS_OK;
 }
 
 /* a face's trim from its loops: each loop turned to keep the face on its
@@ -575,19 +691,96 @@ static qaws_status sh_trim_build(sh_trim* t, qaws_path_2d const* loops, unsigned
 			}
 		}
 	}
-	/* the sag: the pieces' midway points against their polygons' chords */
-	for (k = 0; k < np; k++)
-		for (i = 0; i < SH_TRIM_N; i++)
-		{
-			double const* q = t->poly + 2 * ((SH_TRIM_N + 1) * k + i);
-			double m[2], ex = q[2] - q[0], ey = q[3] - q[1], ee = ex * ex + ey * ey, w = 0, dx, dy;
-			sh_trim_eval(t, k, (i + 0.5) / SH_TRIM_N, m, NULL);
-			if (ee > 0) w = ((m[0] - q[0]) * ex + (m[1] - q[1]) * ey) / ee;
-			dx = q[0] + w * ex - m[0]; dy = q[1] + w * ey - m[1];
-			if (hypot(dx, dy) > t->sag) t->sag = hypot(dx, dy);
-		}
+	sh_trim_polys(t);
 	free(area);
 	return QAWS_STATUS_OK;
+}
+
+/* the s inside (0, 1) where the side passes within the tolerance through
+   one of the points (not its own ends), increasing, one per place */
+static unsigned int sh_side_tees(qaws_shell_atlas const* a, unsigned int f, int side, double const* pts, unsigned int npts, double* ss)
+{
+	qaws_vec3 e0 = sh_side_pos(a, f, side, 0), e1 = sh_side_pos(a, f, side, 1);
+	unsigned int k, n = 0, i;
+	for (k = 0; k < npts; k++)
+	{
+		qaws_vec3 x;
+		double s;
+		x.x = (qaws_scalar)pts[3 * k]; x.y = (qaws_scalar)pts[3 * k + 1]; x.z = (qaws_scalar)pts[3 * k + 2];
+		if (sh_dist(x, e0) <= a->tol || sh_dist(x, e1) <= a->tol)
+			continue;
+		s = sh_invert_side(a, f, side, -1, x);
+		if (!(s > 0 && s < 1) || sh_dist(sh_side_pos(a, f, side, s), x) > a->tol)
+			continue;
+		for (i = 0; i < n; i++)
+			if (sh_dist(sh_side_pos(a, f, side, ss[i]), x) <= a->tol)
+				break;
+		if (i < n)
+			continue;
+		for (i = n; i > 0 && ss[i - 1] > s; i--) ss[i] = ss[i - 1];
+		ss[i] = s;
+		n++;
+	}
+	return n;
+}
+
+/* T-junctions: a side running through another side's end is split there,
+   so that every edge joins whole sides. An open untrimmed face with such a
+   side becomes trimmed by its domain; a side along a face closed in u or v
+   is left whole */
+static qaws_status sh_split_tees(qaws_shell_atlas* a)
+{
+	unsigned int f, total = 0, npts = 0;
+	int k;
+	double *pts, *ss;
+	qaws_status st = QAWS_STATUS_OK;
+	for (f = 0; f < a->nf; f++) total += SH_NS(a, f);
+	pts = (double*)malloc(sizeof(double) * 3 * (2 * total + 1));
+	ss = (double*)malloc(sizeof(double) * (2 * total + 1));
+	if (!pts || !ss)
+	{
+		free(pts); free(ss);
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	}
+	for (f = 0; f < a->nf; f++)
+		for (k = 0; k < (int)SH_NS(a, f); k++)
+		{
+			unsigned int e;
+			if (!sh_side_real(a, f, k))
+				continue;
+			for (e = 0; e < 2; e++)
+			{
+				qaws_vec3 x = sh_side_pos(a, f, k, e);
+				pts[3 * npts] = x.x; pts[3 * npts + 1] = x.y; pts[3 * npts + 2] = x.z;
+				npts++;
+			}
+		}
+	for (f = 0; f < a->nf && st == QAWS_STATUS_OK; f++)
+	{
+		int any = 0;
+		for (k = 0; k < (int)SH_NS(a, f) && !any; k++)
+			if (sh_side_real(a, f, k) && sh_side_tees(a, f, k, pts, npts, ss) > 0)
+				any = 1;
+		if (!any)
+			continue;
+		if (!SH_TRIMMED(a, f))
+		{
+			if (a->c[f].pu > 0 || a->c[f].pv > 0)
+				continue;
+			if ((st = sh_trim_rect(&a->tr[f], &a->c[f])) != QAWS_STATUS_OK)
+				break;
+		}
+		/* the pieces from the last, so the earlier keep their numbers */
+		for (k = (int)SH_NS(a, f) - 1; k >= 4 && st == QAWS_STATUS_OK; k--)
+		{
+			unsigned int n;
+			if (!sh_side_real(a, f, k) || !(n = sh_side_tees(a, f, k, pts, npts, ss)))
+				continue;
+			st = sh_trim_split(&a->tr[f], (unsigned int)(k - 4), ss, n);
+		}
+	}
+	free(pts); free(ss);
+	return st;
 }
 
 qaws_status qaws_shell_atlas_create_trimmed(qaws_shell_face_desc const* faces, unsigned int n, qaws_scalar tolerance,
@@ -627,18 +820,6 @@ qaws_status qaws_shell_atlas_create_trimmed(qaws_shell_face_desc const* faces, u
 			st = sh_trim_build(&a->tr[i], faces[i].trims, faces[i].trim_count);
 		}
 	}
-	total = 0;
-	for (i = 0; i < n; i++) { a->off[i] = total; total += SH_NS(a, i); }
-	a->off[n] = total;
-	if (st == QAWS_STATUS_OK)
-	{
-		a->nb = (unsigned int*)malloc(sizeof(unsigned int) * (total + 1));
-		a->nbside = (int*)malloc(sizeof(int) * (total + 1));
-		a->rev = (int*)malloc(sizeof(int) * (total + 1));
-		if (!a->nb || !a->nbside || !a->rev)
-			st = QAWS_STATUS_ALLOCATION_FAILURE;
-	}
-	for (j = 0; j < total && st == QAWS_STATUS_OK; j++) { a->nb[j] = SH_NONE; a->nbside[j] = -1; a->rev[j] = 0; }
 	/* the shell's size: the box of its faces' boundaries */
 	for (i = 0; i < n && st == QAWS_STATUS_OK; i++)
 		for (si = SH_TRIMMED(a, i) ? 4 : 0; si < (SH_TRIMMED(a, i) ? (int)SH_NS(a, i) : 4); si++)
@@ -657,6 +838,20 @@ qaws_status qaws_shell_atlas_create_trimmed(qaws_shell_face_desc const* faces, u
 		}
 	size = st == QAWS_STATUS_OK ? sqrt((hi[0] - lo[0]) * (hi[0] - lo[0]) + (hi[1] - lo[1]) * (hi[1] - lo[1]) + (hi[2] - lo[2]) * (hi[2] - lo[2])) : 0;
 	a->tol = tolerance > 0 ? (double)tolerance : SH_TOL * (size > 0 ? size : 1);
+	if (st == QAWS_STATUS_OK)
+		st = sh_split_tees(a);
+	total = 0;
+	for (i = 0; i < n; i++) { a->off[i] = total; total += SH_NS(a, i); }
+	a->off[n] = total;
+	if (st == QAWS_STATUS_OK)
+	{
+		a->nb = (unsigned int*)malloc(sizeof(unsigned int) * (total + 1));
+		a->nbside = (int*)malloc(sizeof(int) * (total + 1));
+		a->rev = (int*)malloc(sizeof(int) * (total + 1));
+		if (!a->nb || !a->nbside || !a->rev)
+			st = QAWS_STATUS_ALLOCATION_FAILURE;
+	}
+	for (j = 0; j < total && st == QAWS_STATUS_OK; j++) { a->nb[j] = SH_NONE; a->nbside[j] = -1; a->rev[j] = 0; }
 	/* the shared sides */
 	for (i = 0; i < n && st == QAWS_STATUS_OK; i++)
 		for (si = 0; si < (int)SH_NS(a, i) && st == QAWS_STATUS_OK; si++)
@@ -2199,25 +2394,32 @@ qaws_status qaws_shell_region_create(qaws_shell_atlas const* a, qaws_shell_curve
 						state[f] = state[g];
 					else
 					{
-						/* the neighbour's region just inside its side's middle */
-						double uv[2], duv[2];
-						int in = 0;
-						qaws_vec2 q;
+						/* the neighbour's region just inside the side, at five
+						   places along it (no run crosses the side, so they
+						   agree but where the region only touches it) */
+						unsigned int pl, ins = 0;
 						qaws_internal_sg_ctx const* cg = &a->c[g];
-						sh_side_uv(a, g, sg2, 0.5, uv, duv);
-						if (sg2 >= 4)
+						for (pl = 0; pl < 5; pl++)
 						{
-							/* left of the trim piece's way round */
-							double l = hypot(duv[0], duv[1]);
-							if (l > 0) { uv[0] -= 1e-6 * a->tr[g].diag * duv[1] / l; uv[1] += 1e-6 * a->tr[g].diag * duv[0] / l; }
+							double uv[2], duv[2];
+							int in = 0;
+							qaws_vec2 q;
+							sh_side_uv(a, g, sg2, 0.1 + 0.2 * pl, uv, duv);
+							if (sg2 >= 4)
+							{
+								/* left of the trim piece's way round */
+								double l = hypot(duv[0], duv[1]);
+								if (l > 0) { uv[0] -= 1e-6 * a->tr[g].diag * duv[1] / l; uv[1] += 1e-6 * a->tr[g].diag * duv[0] / l; }
+							}
+							if (sg2 == 0) uv[1] += 1e-6 * (cg->v1 - cg->v0);
+							if (sg2 == 1) uv[0] -= 1e-6 * (cg->u1 - cg->u0);
+							if (sg2 == 2) uv[1] -= 1e-6 * (cg->v1 - cg->v0);
+							if (sg2 == 3) uv[0] += 1e-6 * (cg->u1 - cg->u0);
+							q.x = (qaws_scalar)uv[0]; q.y = (qaws_scalar)uv[1];
+							qaws_surface_region_contains(r->f[g], q, &in);
+							if (in == 1) ins++;
 						}
-						if (sg2 == 0) uv[1] += 1e-6 * (cg->v1 - cg->v0);
-						if (sg2 == 1) uv[0] -= 1e-6 * (cg->u1 - cg->u0);
-						if (sg2 == 2) uv[1] -= 1e-6 * (cg->v1 - cg->v0);
-						if (sg2 == 3) uv[0] += 1e-6 * (cg->u1 - cg->u0);
-						q.x = (qaws_scalar)uv[0]; q.y = (qaws_scalar)uv[1];
-						qaws_surface_region_contains(r->f[g], q, &in);
-						state[f] = in == 1 ? 2 : 3;
+						state[f] = ins >= 3 ? 2 : 3;
 					}
 					if (state[f] == 2)
 						st = sh_full_face(a, f, &r->f[f]);
@@ -2275,76 +2477,47 @@ qaws_status qaws_shell_region_get_area(qaws_shell_region const* r, qaws_scalar* 
    both faces, not its boundary): its surface length */
 static double sh_shared_length(qaws_shell_atlas const* a, unsigned int f, qaws_curve const* cv)
 {
-	qaws_internal_sg_ctx const* c = &a->c[f];
-	unsigned int n = 0, i, s;
-	qaws_scalar probe[2], *cp;
-	double L = 0;
-	if (SH_TRIMMED(a, f))
+	qaws_range rg = qaws_curve_get_parameter_range(cv);
+	unsigned int k;
+	int side;
+	/* (its points all on shared sides, any of them: a stretch along two
+	   pieces of a split side comes back from the clip as one curve) */
+	for (k = 0; k <= 8; k++)
 	{
-		/* on a trimmed face: a curve all along one shared trim piece */
-		sh_trim const* t = &a->tr[f];
-		qaws_range rg = qaws_curve_get_parameter_range(cv);
-		unsigned int k, p0 = SH_NONE;
-		for (k = 0; k <= 4; k++)
-		{
-			qaws_eval_result_2d e;
-			double uv[2], sp;
-			unsigned int p;
-			qaws_curve_evaluate_2d(cv, (qaws_scalar)(rg.min_value + (rg.max_value - rg.min_value) * k / 4.0), QAWS_EVAL_FLAG_POSITION, &e);
-			uv[0] = e.position.x; uv[1] = e.position.y;
-			if (sh_trim_project(t, uv, SH_NONE, &p, &sp) > SH_ON_SIDE * t->diag * 1e3 || (p0 != SH_NONE && p != p0))
-				return 0;
-			p0 = p;
-		}
-		if (p0 == SH_NONE || SH_NB(a, f, 4 + (int)p0) == SH_NONE)
+		qaws_eval_result_2d e;
+		double uv[2], s;
+		int on = 0;
+		qaws_curve_evaluate_2d(cv, (qaws_scalar)(rg.min_value + (rg.max_value - rg.min_value) * k / 8.0), QAWS_EVAL_FLAG_POSITION, &e);
+		uv[0] = e.position.x; uv[1] = e.position.y;
+		for (side = 0; side < (int)SH_NS(a, f) && !on; side++)
+			if (SH_NB(a, f, side) != SH_NONE && sh_side_near(a, f, side, uv, &s) <= 10 * SH_ON_SIDE)
+				on = 1;
+		if (!on)
 			return 0;
-		{
-			qaws_surface_curve* sc = NULL;
-			qaws_scalar l = 0;
-			if (qaws_surface_curve_create_uv(a->s[f], cv, &sc) == QAWS_STATUS_OK)
-				qaws_surface_curve_get_length(sc, &l);
-			qaws_surface_curve_destroy(sc);
-			return (double)l;
-		}
 	}
-	if (qaws_curve_get_degree(cv) != 1)
-		return 0;
-	qaws_curve_get_control_points(cv, probe, 0, &n);
-	cp = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 2 * (n + 1));
-	if (!cp)
-		return 0;
-	qaws_curve_get_control_points(cv, cp, n, &n);
-	for (i = 0; i + 1 < n; i++)
-		for (s = 0; s < 4; s++)
-		{
-			double p[2], q[2], eu = SH_ON_SIDE * (c->u1 - c->u0), ev = SH_ON_SIDE * (c->v1 - c->v0);
-			int on;
-			if (SH_NB(a, f, s) == SH_NONE)
-				continue;
-			p[0] = cp[2 * i]; p[1] = cp[2 * i + 1]; q[0] = cp[2 * i + 2]; q[1] = cp[2 * i + 3];
-			if (s == 0) on = fabs(p[1] - c->v0) < ev && fabs(q[1] - c->v0) < ev;
-			else if (s == 1) on = fabs(p[0] - c->u1) < eu && fabs(q[0] - c->u1) < eu;
-			else if (s == 2) on = fabs(p[1] - c->v1) < ev && fabs(q[1] - c->v1) < ev;
-			else on = fabs(p[0] - c->u0) < eu && fabs(q[0] - c->u0) < eu;
-			if (on)
-			{
-				/* its length by Gauss on the segment */
-				static double const x8[4] = { 0.1834346424956498, 0.5255324099163290, 0.7966664774136267, 0.9602898564975363 };
-				static double const w8[4] = { 0.3626837833783620, 0.3137066458778873, 0.2223810344533745, 0.1012285362903763 };
-				unsigned int k, sg;
-				for (k = 0; k < 4; k++)
-					for (sg = 0; sg < 2; sg++)
-					{
-						double t = 0.5 + (sg ? 0.5 : -0.5) * x8[k], g[3], d[2];
-						d[0] = q[0] - p[0]; d[1] = q[1] - p[1];
-						if (qaws_internal_sg_first_form(c, p[0] + t * d[0], p[1] + t * d[1], g) == QAWS_STATUS_OK)
-							L += 0.5 * w8[k] * sqrt(g[0] * d[0] * d[0] + 2 * g[1] * d[0] * d[1] + g[2] * d[1] * d[1]);
-					}
-				break;
-			}
-		}
-	free(cp);
-	return L;
+	{
+		/* its length by Gauss on 8 stretches, the points held in the domain
+		   (a curve along a side may stray past it by a rounding) */
+		static double const x8[4] = { 0.1834346424956498, 0.5255324099163290, 0.7966664774136267, 0.9602898564975363 };
+		static double const w8[4] = { 0.3626837833783620, 0.3137066458778873, 0.2223810344533745, 0.1012285362903763 };
+		qaws_internal_sg_ctx const* c = &a->c[f];
+		double L = 0, h = (rg.max_value - rg.min_value) / 8.0;
+		unsigned int q, sg;
+		for (k = 0; k < 8; k++)
+			for (q = 0; q < 4; q++)
+				for (sg = 0; sg < 2; sg++)
+				{
+					qaws_eval_result_2d e;
+					double t = rg.min_value + h * (k + 0.5 + (sg ? 0.5 : -0.5) * x8[q]), g[3], u, v, du, dv;
+					qaws_curve_evaluate_2d(cv, (qaws_scalar)t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &e);
+					u = e.position.x; v = e.position.y; du = e.d1.x; dv = e.d1.y;
+					if (c->pu <= 0) { if (u < c->u0) u = c->u0; if (u > c->u1) u = c->u1; }
+					if (c->pv <= 0) { if (v < c->v0) v = c->v0; if (v > c->v1) v = c->v1; }
+					if (qaws_internal_sg_first_form(c, u, v, g) == QAWS_STATUS_OK)
+						L += 0.5 * h * w8[q] * sqrt(g[0] * du * du + 2 * g[1] * du * dv + g[2] * dv * dv);
+				}
+		return L;
+	}
 }
 
 qaws_status qaws_shell_region_get_perimeter(qaws_shell_region const* r, qaws_scalar* out_length)

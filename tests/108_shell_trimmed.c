@@ -12,6 +12,8 @@
  *   - a cube of planes trimmed to its faces: twelve edges; circles over one
  *     edge and over two by a vertex against pi r^2 and 2 pi r; a disk round
  *     a corner against the untrimmed cube's
+ *   - T-junctions: a side meeting two faces side by side, flat and as walls:
+ *     split where they meet; disks round the T point against pi r^2, 2 pi r
  *   - an open loop refused; a trim on a surface closed in u not covered
  */
 
@@ -115,8 +117,8 @@ static void test_split_plane(void)
 	fd[0].surface = sa; fd[0].trims = pa; fd[0].trim_count = 2;
 	fd[1].surface = sb; fd[1].trims = pb; fd[1].trim_count = 1;
 	st = qaws_shell_atlas_create_trimmed(fd, 2, 0, &a);
-	sprintf(msg, "split plane: the square with a hole and the disk, %u shared edge (the circle)", a ? qaws_shell_atlas_get_edge_count(a) : 0);
-	TEST_ASSERT(st == QAWS_STATUS_OK && qaws_shell_atlas_get_edge_count(a) == 1, msg);
+	sprintf(msg, "split plane: the square with a hole and the disk, %u shared edges (the circle, split where each face's circle starts)", a ? qaws_shell_atlas_get_edge_count(a) : 0);
+	TEST_ASSERT(st == QAWS_STATUS_OK && qaws_shell_atlas_get_edge_count(a) == 2, msg);
 	if (st == QAWS_STATUS_OK)
 	{
 		/* a ray from (-1.2, 0.1) over the disk and back out: a straight line */
@@ -312,6 +314,68 @@ static void test_trimmed_cube(void)
 	}
 }
 
+/* a T-junction: the side y = 0 of B (x in [0, 2], y in [-1, 0]) meets two
+   unit squares, side by side, flat beyond it or standing up from it as
+   walls (the angle round the T point 2 pi either way: unfolded, a plane) */
+static void test_tee(int walls)
+{
+	double B00[3] = { 0, -1, 0 }, B10[3] = { 2, -1, 0 }, B01[3] = { 0, 0, 0 }, B11[3] = { 2, 0, 0 };
+	double A00[3] = { 0, 0, 0 }, A10[3] = { 1, 0, 0 }, A01[3] = { 0, 1, 0 }, A11[3] = { 1, 1, 0 };
+	double C00[3] = { 1, 0, 0 }, C10[3] = { 2, 0, 0 }, C01[3] = { 1, 1, 0 }, C11[3] = { 2, 1, 0 };
+	static double const cs[3][3] = { { 1.0, -0.3, 0.5 }, { 0.7, -0.25, 0.5 }, { 0.6, -0.4, 0.55 } };
+	qaws_surface* f[3];
+	qaws_shell_atlas* a = NULL;
+	qaws_status st;
+	double worst = 0, tol = STR_F32 ? 2e-4 : 1e-9;
+	unsigned int i, z, ok = 0;
+	char msg[300];
+	if (walls) { A01[1] = 0; A01[2] = 1; A11[1] = 0; A11[2] = 1; C01[1] = 0; C01[2] = 1; C11[1] = 0; C11[2] = 1; }
+	f[0] = str_plane(B00, B10, B01, B11);
+	f[1] = str_plane(A00, A10, A01, A11);
+	f[2] = str_plane(C00, C10, C01, C11);
+	st = qaws_shell_atlas_create((qaws_surface const* const*)f, 3, 0, &a);
+	sprintf(msg, "T-junction (%s): a side meeting two faces' sides, split there: %u shared edges", walls ? "walls" : "flat",
+		a ? qaws_shell_atlas_get_edge_count(a) : 0);
+	TEST_ASSERT(st == QAWS_STATUS_OK && qaws_shell_atlas_get_edge_count(a) == 3, msg);
+	for (z = 0; z < 3 && st == QAWS_STATUS_OK; z++)
+	{
+		qaws_shell_region* g = NULL;
+		qaws_scalar A = 0, P = 0;
+		double r = cs[z][2], e;
+		if (qaws_shell_region_create_geodesic_disk(a, str_pt(0, cs[z][0] / 2, cs[z][1] + 1), (qaws_scalar)r, 0, &g) == QAWS_STATUS_OK)
+		{
+			qaws_shell_region_get_area(g, &A);
+			qaws_shell_region_get_perimeter(g, &P);
+			e = fabs((double)A - STR_PI * r * r) + fabs((double)P - 2 * STR_PI * r);
+			if (e > worst) worst = e;
+			if (e <= tol) ok++;
+		}
+		else
+			worst = 1e300;
+		qaws_shell_region_destroy(g);
+	}
+	sprintf(msg, "T-junction (%s): three disks (two round the T point) against pi r^2 and 2 pi r within %.2g", walls ? "walls" : "flat", worst);
+	TEST_ASSERT(st == QAWS_STATUS_OK && ok == 3, msg);
+	if (walls && st == QAWS_STATUS_OK)
+	{
+		/* a disk on a wall just touching the edge below it: on that wall only */
+		qaws_shell_region* g = NULL;
+		qaws_scalar A = 0;
+		unsigned int nf = 0;
+		qaws_status s1 = qaws_shell_region_create_geodesic_disk(a, str_pt(2, 0.5, 0.45), (qaws_scalar)0.45, 0, &g);
+		if (s1 == QAWS_STATUS_OK)
+		{
+			qaws_shell_region_get_area(g, &A);
+			for (i = 0; i < 3; i++) if (qaws_shell_region_get_face(g, i)) nf++;
+		}
+		sprintf(msg, "T-junction (walls): a disk touching the edge below it, on %u face, against pi r^2 %.2g", nf, fabs((double)A - STR_PI * 0.45 * 0.45));
+		TEST_ASSERT(s1 == QAWS_STATUS_OK && nf == 1 && fabs((double)A - STR_PI * 0.45 * 0.45) <= tol, msg);
+		qaws_shell_region_destroy(g);
+	}
+	qaws_shell_atlas_destroy(a);
+	for (i = 0; i < 3; i++) qaws_surface_destroy(f[i]);
+}
+
 static void test_refusals(void)
 {
 	qaws_surface* sa = str_plane(STR_P00, STR_P10, STR_P01, STR_P11);
@@ -355,6 +419,8 @@ int test_108_shell_trimmed_main(void)
 	test_split_plane();
 	test_tube();
 	test_trimmed_cube();
+	test_tee(0);
+	test_tee(1);
 	test_refusals();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
