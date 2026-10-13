@@ -36,7 +36,7 @@
  *                      faces round a vertex, flat and bent; Booleans on a bent one
  *   b2d25_shell_trimmed.svg  shells of trimmed faces: a plane split by a circle, a
  *                      plate with a hole and a tube, a cube of trimmed planes, a T-junction,
- *                      a cylinder with a hole on its seam
+ *                      a cylinder and a torus with holes on their seams
  *
  * Each figure lives in better2d_showcase/NN_*.c, compiled as one translation
  * unit.

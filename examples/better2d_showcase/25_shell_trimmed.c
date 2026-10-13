@@ -4,14 +4,15 @@
    its own surface); a plate with a round hole and a tube hanging from it
    (the hole's trim meeting the tube's top); a cube of larger planes
    trimmed to its faces; a T-junction (one side meeting two walls); a
-   cylinder trimmed by its rims and a hole on its seam.
+   cylinder trimmed by its rims and a hole on its seam; a torus with a hole
+   where its seams cross.
    Straightest rays and geodesic disks run over the trim edges. Drawn with
    figure 24's shaded renderer. */
 
 /* a face's trim loops as a region of it (to draw only its trimmed part) */
 static qaws_surface_region* s25_trim_region(qaws_surface const* s, qaws_path_2d const* loops, unsigned int nl)
 {
-	qaws_surface_path P[4];
+	qaws_surface_path P[8];
 	qaws_surface_curve* sc[16];
 	qaws_surface_curve const* cc[16];
 	qaws_surface_region* r = NULL;
@@ -436,6 +437,86 @@ static void demo_shell_trimmed(void)
 		qaws_surface_destroy(f[0]);
 		qaws_curve_destroy(prof); qaws_curve_destroy(bot); qaws_curve_destroy(top);
 		qaws_curve_destroy(hole); qaws_curve_destroy(hole2); qaws_curve_destroy(disk);
+	}
+	/* a torus (closed both ways) with a hole where its seams cross, the hole
+	   filled by a disk of the same surface (the loops as given) */
+	for (k = 10; k < 12; k++)
+	{
+		static double const box[2][4] = { { 0, 1, 0, 1 }, { -0.12, 0.12, -0.12, 0.12 } };
+		qaws_curve *prof = sgf_arc(1.0, 0, 0.35, 0, 2 * pi), *hole = sgf_arc(0, 0, 0.12, 2 * pi, 0), *disk = sgf_arc(0, 0, 0.12, 1.0, 1.0 + 2 * pi);
+		qaws_curve* hc[4] = { NULL, NULL, NULL, NULL };
+		qaws_curve const *lh[1], *ld[1];
+		qaws_surface* f[2];
+		qaws_path_2d thp[1], tdp[1];
+		qaws_shell_face_desc fd[2];
+		qaws_surface_region* tr[2] = { NULL, NULL };
+		qaws_shell_atlas* a = NULL;
+		qaws_shell_region* g = NULL;
+		viewport v3;
+		sgf_view view;
+		ssd_scene sc;
+		ssd_paint paint[1];
+		double A = 0;
+		f[0] = sgf_revolve(prof);
+		f[1] = f[0];
+		lh[0] = hole; ld[0] = disk;
+		thp[0].curves = lh; thp[0].curve_count = 1; thp[0].closed = 1;
+		tdp[0].curves = ld; tdp[0].curve_count = 1; tdp[0].closed = 1;
+		fd[0].surface = f[0]; fd[0].trims = thp; fd[0].trim_count = 1;
+		fd[1].surface = f[1]; fd[1].trims = tdp; fd[1].trim_count = 1;
+		qaws_shell_atlas_create_trimmed(fd, 2, 0, &a);
+		{
+			/* to draw: the domain less the hole's copies at its four corners */
+			qaws_curve *sq[4];
+			qaws_curve const *sql[4], *hl[4];
+			qaws_path_2d ps[5];
+			for (i = 0; i < 4; i++)
+			{
+				qaws_scalar m[6];
+				m[0] = 1; m[1] = 0; m[2] = (qaws_scalar)(i & 1); m[3] = 0; m[4] = 1; m[5] = (qaws_scalar)(i >> 1);
+				qaws_curve_transform_2d(disk, m, &hc[i]);
+				hl[i] = hc[i];
+				ps[1 + i].curves = &hl[i]; ps[1 + i].curve_count = 1; ps[1 + i].closed = 1;
+			}
+			sq[0] = s25_line(0, 0, 1, 0); sq[1] = s25_line(1, 0, 1, 1); sq[2] = s25_line(1, 1, 0, 1); sq[3] = s25_line(0, 1, 0, 0);
+			for (i = 0; i < 4; i++) sql[i] = sq[i];
+			ps[0].curves = sql; ps[0].curve_count = 4; ps[0].closed = 1;
+			tr[0] = s25_trim_region(f[0], ps, 5);
+			tr[1] = s25_trim_region(f[1], tdp, 1);
+			for (i = 0; i < 4; i++) qaws_curve_destroy(sq[i]);
+		}
+		memset(&sc, 0, sizeof(sc));
+		v3.x0 = 24 + (k % 4) * (pw + 12); v3.y0 = 104 + (k / 4) * (ph + 44); v3.w = pw; v3.h = ph;
+		sgf_view_init(&view, -0.5 * pi, 0.45, 125, v3.x0 + pw / 2, v3.y0 + ph / 2 + 15);
+		sc.view = &view; sc.trims = (qaws_surface_region const* const*)tr; sc.box = box; sc.res = 110;
+		if (k == 10)
+		{
+			g = ssd_disk(a, shf_pt(0, 0.15, 0.1), 0.3, &A);
+			sprintf(label, "a torus with a hole where its seams cross: disk %.6f", A);
+			ssd_panel(&s, &v3, label, "the loops as given (the face on their left); the same as on the whole torus");
+			paint[0].r = g; memcpy(paint[0].rgb, fblue, sizeof(fblue));
+			ssd_surfaces(&sc, f, 2, paint, 1);
+			ssd_outline(&sc, g, f, 2, blue);
+			ssd_dot(&sc, f[0], 0.15, 0.1, black, 3.5);
+		}
+		else
+		{
+			static double const dirs[7][2] = { { -1, -3 }, { -1, -2 }, { -1, -1 }, { -1, 0 }, { -1, 1 }, { -1, 2 }, { -1, 3 } };
+			double dn[7][2];
+			for (i = 0; i < 7; i++) { double nn = hypot(dirs[i][0], dirs[i][1]); dn[i][0] = dirs[i][0] / nn; dn[i][1] = dirs[i][1] / nn; }
+			ssd_panel(&s, &v3, "the torus: straightest rays over the hole", "across both seams and the hole's own face");
+			ssd_surfaces(&sc, f, 2, NULL, 0);
+			s25_rays(&sc, a, f, shf_pt(0, 0.2, 0.0), (double const (*)[2])dn, 7, 1.6, red);
+			ssd_dot(&sc, f[0], 0.2, 0.0, black, 3.5);
+		}
+		s25_trim_edges(&sc, f[0], thp, 1);
+		ssd_draw(&s, &sc);
+		qaws_shell_region_destroy(g);
+		qaws_surface_region_destroy(tr[0]); qaws_surface_region_destroy(tr[1]);
+		qaws_shell_atlas_destroy(a);
+		qaws_surface_destroy(f[0]);
+		for (i = 0; i < 4; i++) qaws_curve_destroy(hc[i]);
+		qaws_curve_destroy(prof); qaws_curve_destroy(hole); qaws_curve_destroy(disk);
 	}
 	svg_close(&s);
 	printf("figure 25: shells of trimmed faces, %.1f s\n", (double)(clock() - t0) / CLOCKS_PER_SEC);
