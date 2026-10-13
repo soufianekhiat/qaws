@@ -21,6 +21,8 @@
 #include "qaws_eval.h"
 #include "qaws_inspect.h"
 #include "qaws_operations.h"
+#include "qaws_region_sample.h"
+#include "qaws_triangulate.h"
 #include "internal/qaws_internal_surface_region.h"
 #include <stdlib.h>
 #include <string.h>
@@ -1161,4 +1163,361 @@ qaws_status qaws_surface_offset(qaws_surface const* surface, qaws_fill_rule fill
 	}
 	*out_region = out;
 	return QAWS_STATUS_OK;
+}
+
+/* ------------------------------------------------------------------------ */
+/*  Sampling and meshing                                                    */
+/* ------------------------------------------------------------------------ */
+
+/* the region's loops in (u, v) (views into its result) */
+static qaws_status sr_loops(qaws_surface_region const* r, qaws_path_2d** out, unsigned int* n)
+{
+	unsigned int np = qaws_clip_result_get_path_count(r->res), i;
+	qaws_status st = QAWS_STATUS_OK;
+	*out = (qaws_path_2d*)malloc(sizeof(qaws_path_2d) * (np + 1));
+	*n = np;
+	if (!*out)
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	for (i = 0; i < np && st == QAWS_STATUS_OK; i++)
+		st = qaws_clip_result_get_path(r->res, i, &(*out)[i]);
+	return st;
+}
+
+/* the sampler's density: the area element, times the caller's */
+typedef struct sr_dens
+{
+	qaws_internal_sg_ctx const* c;
+	qaws_scalar (*f)(void*, qaws_scalar, qaws_scalar);
+	void* user;
+} sr_dens;
+
+static qaws_scalar sr_area_density(void* user, qaws_scalar u, qaws_scalar v)
+{
+	sr_dens const* d = (sr_dens const*)user;
+	double a = 0;
+	if (qaws_internal_sg_area_element(d->c, (double)u, (double)v, &a) != QAWS_STATUS_OK)
+		return 0;
+	if (d->f)
+		a *= (double)d->f(d->user, u, v);
+	return (qaws_scalar)(a > 0 ? a : 0);
+}
+
+/* sample elimination (Yuksel 2015) in space: of the m candidates the n
+   kept, each removal the candidate most crowded by its neighbours within
+   2 r_max, r_max the densest packing's radius for n points over the area */
+typedef struct sr_cell_key
+{
+	long long x, y, z;
+	unsigned int i;
+} sr_cell_key;
+
+static int sr_key_cmp(void const* a, void const* b)
+{
+	sr_cell_key const* p = (sr_cell_key const*)a;
+	sr_cell_key const* q = (sr_cell_key const*)b;
+	if (p->x != q->x) return p->x < q->x ? -1 : 1;
+	if (p->y != q->y) return p->y < q->y ? -1 : 1;
+	if (p->z != q->z) return p->z < q->z ? -1 : 1;
+	return 0;
+}
+
+static void sr_heap_down(unsigned int* heap, unsigned int* pos, double const* w, unsigned int n, unsigned int i)
+{
+	for (;;)
+	{
+		unsigned int l = 2 * i + 1, r = l + 1, m = i, t;
+		if (l < n && w[heap[l]] > w[heap[m]]) m = l;
+		if (r < n && w[heap[r]] > w[heap[m]]) m = r;
+		if (m == i)
+			return;
+		t = heap[i]; heap[i] = heap[m]; heap[m] = t;
+		pos[heap[i]] = i; pos[heap[m]] = m;
+		i = m;
+	}
+}
+
+static qaws_status sr_eliminate(qaws_vec3 const* p, unsigned int m, unsigned int n, double area, unsigned char* keep)
+{
+	double rmax = sqrt(area / (2 * sqrt(3.0) * (n ? n : 1))), rr = 2 * rmax;
+	sr_cell_key* keys = (sr_cell_key*)malloc(sizeof(sr_cell_key) * (m + 1));
+	unsigned int *start = NULL, *nbr = NULL, *heap = NULL, *pos = NULL, nn = 0, cap = 0, i, left;
+	double *w = NULL, *wd = NULL;
+	qaws_status st = QAWS_STATUS_OK;
+	if (!keys)
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	for (i = 0; i < m; i++)
+	{
+		keys[i].x = (long long)floor((double)p[i].x / rr);
+		keys[i].y = (long long)floor((double)p[i].y / rr);
+		keys[i].z = (long long)floor((double)p[i].z / rr);
+		keys[i].i = i;
+		keep[i] = 1;
+	}
+	qsort(keys, m, sizeof(sr_cell_key), sr_key_cmp);
+	/* the neighbour lists, as one array with starts */
+	start = (unsigned int*)malloc(sizeof(unsigned int) * (m + 1));
+	w = (double*)calloc(m + 1, sizeof(double));
+	if (!start || !w)
+		st = QAWS_STATUS_ALLOCATION_FAILURE;
+	{
+		unsigned int* order = (unsigned int*)malloc(sizeof(unsigned int) * (m + 1));
+		if (!order) st = QAWS_STATUS_ALLOCATION_FAILURE;
+		for (i = 0; i < m && st == QAWS_STATUS_OK; i++) order[keys[i].i] = i;
+		for (i = 0; i < m && st == QAWS_STATUS_OK; i++)
+		{
+			sr_cell_key const* ki = &keys[order[i]];
+			int dx, dy, dz;
+			start[i] = nn;
+			for (dx = -1; dx <= 1; dx++)
+				for (dy = -1; dy <= 1; dy++)
+					for (dz = -1; dz <= 1; dz++)
+					{
+						sr_cell_key probe;
+						unsigned int lo = 0, hi = m;
+						probe.x = ki->x + dx; probe.y = ki->y + dy; probe.z = ki->z + dz;
+						/* the first key not below the cell */
+						while (lo < hi)
+						{
+							unsigned int mid = lo + (hi - lo) / 2;
+							if (sr_key_cmp(&keys[mid], &probe) < 0) lo = mid + 1; else hi = mid;
+						}
+						for (; lo < m && sr_key_cmp(&keys[lo], &probe) == 0; lo++)
+						{
+							unsigned int j = keys[lo].i;
+							double d;
+							if (j == i)
+								continue;
+							d = sqrt(((double)p[i].x - p[j].x) * ((double)p[i].x - p[j].x) + ((double)p[i].y - p[j].y) * ((double)p[i].y - p[j].y) +
+								((double)p[i].z - p[j].z) * ((double)p[i].z - p[j].z));
+							if (d >= rr)
+								continue;
+							if (!sr_grow((void**)&nbr, &cap, nn + 1, sizeof(unsigned int)))
+							{
+								st = QAWS_STATUS_ALLOCATION_FAILURE;
+								break;
+							}
+							nbr[nn++] = j;
+						}
+					}
+		}
+		start[m] = nn;
+		free(order);
+	}
+	free(keys);
+	/* the weights: sum over the neighbours of (1 - d / 2 r_max)^8 */
+	if (st == QAWS_STATUS_OK)
+	{
+		wd = (double*)malloc(sizeof(double) * (nn + 1));
+		heap = (unsigned int*)malloc(sizeof(unsigned int) * (m + 1));
+		pos = (unsigned int*)malloc(sizeof(unsigned int) * (m + 1));
+		if (!wd || !heap || !pos)
+			st = QAWS_STATUS_ALLOCATION_FAILURE;
+	}
+	for (i = 0; i < m && st == QAWS_STATUS_OK; i++)
+	{
+		unsigned int k;
+		for (k = start[i]; k < start[i + 1]; k++)
+		{
+			unsigned int j = nbr[k];
+			double d = sqrt(((double)p[i].x - p[j].x) * ((double)p[i].x - p[j].x) + ((double)p[i].y - p[j].y) * ((double)p[i].y - p[j].y) +
+				((double)p[i].z - p[j].z) * ((double)p[i].z - p[j].z));
+			wd[k] = pow(1 - d / rr, 8);
+			w[i] += wd[k];
+		}
+	}
+	if (st == QAWS_STATUS_OK)
+	{
+		for (i = 0; i < m; i++) { heap[i] = i; pos[i] = i; }
+		for (i = m / 2 + 1; i-- > 0;) sr_heap_down(heap, pos, w, m, i);
+		left = m;
+		while (left > n)
+		{
+			unsigned int top = heap[0], k;
+			keep[top] = 0;
+			left--;
+			heap[0] = heap[left];
+			pos[heap[0]] = 0;
+			sr_heap_down(heap, pos, w, left, 0);
+			/* its neighbours less crowded: their weights fall, they sift down */
+			for (k = start[top]; k < start[top + 1]; k++)
+			{
+				unsigned int j = nbr[k];
+				if (!keep[j])
+					continue;
+				w[j] -= wd[k];
+				sr_heap_down(heap, pos, w, left, pos[j]);
+			}
+		}
+	}
+	free(start); free(nbr); free(w); free(wd); free(heap); free(pos);
+	return st;
+}
+
+qaws_status qaws_surface_region_sample(qaws_surface_region const* region, qaws_surface_sample_desc const* desc,
+	unsigned int count, qaws_vec2* out_uv, qaws_vec3* out_points)
+{
+	unsigned int kind = desc ? desc->kind : QAWS_REGION_SAMPLE_RANDOM, np = 0, i;
+	unsigned long long seed = desc ? desc->seed : 0;
+	qaws_path_2d* loops = NULL;
+	qaws_region_sampler_desc sd;
+	qaws_region_sampler* sm = NULL;
+	qaws_vec2* uv = NULL;
+	sr_dens dens;
+	qaws_status st;
+	if (!region || (count && !out_uv && !out_points))
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	if (count == 0)
+		return QAWS_STATUS_OK;
+	if ((kind & QAWS_REGION_SAMPLE_BOX) || (kind == QAWS_REGION_SAMPLE_BLUE_NOISE && desc && desc->density))
+		return QAWS_STATUS_UNSUPPORTED_OPERATION;
+	if ((st = sr_loops(region, &loops, &np)) != QAWS_STATUS_OK || np == 0)
+	{
+		free(loops);
+		return st != QAWS_STATUS_OK ? st : QAWS_STATUS_INVALID_ARGUMENT;
+	}
+	dens.c = &region->ctx;
+	dens.f = desc ? desc->density : NULL;
+	dens.user = desc ? desc->density_user : NULL;
+	memset(&sd, 0, sizeof(sd));
+	sd.paths = loops; sd.path_count = np; sd.fill_rule = QAWS_FILL_NON_ZERO;
+	sd.density = sr_area_density; sd.density_user = &dens;
+	st = qaws_region_sampler_create(&sd, &sm);
+	if (st == QAWS_STATUS_OK)
+	{
+		if (kind == QAWS_REGION_SAMPLE_BLUE_NOISE)
+		{
+			/* five candidates a point, uniform in area, thinned in space */
+			unsigned int m = 5 * count, k = 0;
+			qaws_vec2* cu = (qaws_vec2*)malloc(sizeof(qaws_vec2) * m);
+			qaws_vec3* cp = (qaws_vec3*)malloc(sizeof(qaws_vec3) * m);
+			unsigned char* keep = (unsigned char*)malloc(m);
+			uv = (qaws_vec2*)malloc(sizeof(qaws_vec2) * count);
+			if (!cu || !cp || !keep || !uv)
+				st = QAWS_STATUS_ALLOCATION_FAILURE;
+			if (st == QAWS_STATUS_OK)
+				st = qaws_region_sampler_generate(sm, m, QAWS_REGION_SAMPLE_RANDOM, seed, cu);
+			for (i = 0; i < m && st == QAWS_STATUS_OK; i++)
+			{
+				qaws_surface_eval_result e;
+				st = qaws_internal_sg_eval(&region->ctx, (double)cu[i].x, (double)cu[i].y, QAWS_SURFACE_EVAL_POSITION, &e);
+				cp[i] = e.position;
+			}
+			if (st == QAWS_STATUS_OK)
+				st = sr_eliminate(cp, m, count, (double)qaws_region_sampler_get_mass(sm), keep);
+			for (i = 0; i < m && st == QAWS_STATUS_OK; i++)
+				if (keep[i] && k < count)
+					uv[k++] = cu[i];
+			free(cu); free(cp); free(keep);
+		}
+		else
+		{
+			uv = (qaws_vec2*)malloc(sizeof(qaws_vec2) * count);
+			if (!uv)
+				st = QAWS_STATUS_ALLOCATION_FAILURE;
+			else
+				st = qaws_region_sampler_generate(sm, count, kind, seed, uv);
+		}
+	}
+	for (i = 0; i < count && st == QAWS_STATUS_OK; i++)
+	{
+		if (out_uv)
+			out_uv[i] = uv[i];
+		if (out_points)
+		{
+			qaws_surface_eval_result e;
+			st = qaws_internal_sg_eval(&region->ctx, (double)uv[i].x, (double)uv[i].y, QAWS_SURFACE_EVAL_POSITION, &e);
+			out_points[i] = e.position;
+		}
+	}
+	free(uv);
+	qaws_region_sampler_destroy(sm);
+	free(loops);
+	return st;
+}
+
+/* the mesh's size field: the surface length L in (u, v) along the metric's
+   stretchiest direction */
+typedef struct sr_size
+{
+	qaws_internal_sg_ctx const* c;
+	double L;
+} sr_size;
+
+static double sr_stretch(qaws_internal_sg_ctx const* c, double u, double v)
+{
+	double g[3];
+	if (qaws_internal_sg_first_form(c, u, v, g) != QAWS_STATUS_OK)
+		return 0;
+	return sqrt(0.5 * (g[0] + g[2] + sqrt((g[0] - g[2]) * (g[0] - g[2]) + 4 * g[1] * g[1])));
+}
+
+static qaws_scalar sr_size_fn(void* user, qaws_vec2 p)
+{
+	sr_size const* s = (sr_size const*)user;
+	double k = sr_stretch(s->c, (double)p.x, (double)p.y);
+	return (qaws_scalar)(k > 0 ? s->L / k : s->L);
+}
+
+qaws_status qaws_surface_region_triangulate(qaws_surface_region const* region, qaws_surface_mesh_desc const* desc,
+	struct qaws_mesh_2d** out_mesh)
+{
+	qaws_path_2d* loops = NULL;
+	unsigned int np = 0, i, j;
+	qaws_triangulate_desc td;
+	qaws_vec2 lo, hi;
+	sr_size sz;
+	double L = desc ? (double)desc->edge_length : 0, tol = desc ? (double)desc->tolerance : 0, kmax = 0;
+	qaws_status st;
+	if (!region || !out_mesh)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	*out_mesh = NULL;
+	if ((st = sr_loops(region, &loops, &np)) != QAWS_STATUS_OK || np == 0)
+	{
+		free(loops);
+		return st != QAWS_STATUS_OK ? st : QAWS_STATUS_INVALID_ARGUMENT;
+	}
+	if (!(L > 0))
+	{
+		qaws_scalar a = 0;
+		qaws_surface_region_get_area(region, &a);
+		L = sqrt((double)a) / 30;
+	}
+	if (!(tol > 0))
+		tol = L / 100;
+	/* the boundary tolerance in (u, v): at the stretchiest point of the box */
+	{
+		qaws_vec2 a, b;
+		lo.x = lo.y = (qaws_scalar)1e30; hi.x = hi.y = (qaws_scalar)-1e30;
+		for (i = 0; i < np; i++)
+			if (qaws_path_compute_bounds_2d(&loops[i], &a, &b) == QAWS_STATUS_OK)
+			{
+				if (a.x < lo.x) lo.x = a.x;
+				if (a.y < lo.y) lo.y = a.y;
+				if (b.x > hi.x) hi.x = b.x;
+				if (b.y > hi.y) hi.y = b.y;
+			}
+	}
+	for (i = 0; i <= 16; i++)
+		for (j = 0; j <= 16; j++)
+		{
+			double k = sr_stretch(&region->ctx, (double)lo.x + ((double)hi.x - lo.x) * i / 16, (double)lo.y + ((double)hi.y - lo.y) * j / 16);
+			if (k > kmax) kmax = k;
+		}
+	sz.c = &region->ctx;
+	sz.L = L;
+	memset(&td, 0, sizeof(td));
+	td.paths = loops; td.path_count = np; td.fill_rule = QAWS_FILL_NON_ZERO;
+	td.tolerance = (qaws_scalar)(kmax > 0 ? tol / kmax : tol);
+	td.min_angle = (qaws_scalar)(desc && desc->min_angle > 0 ? desc->min_angle : 25);
+	td.size_fn = sr_size_fn; td.size_user = &sz;
+	st = qaws_triangulate_region_2d(&td, out_mesh);
+	if (st == QAWS_STATUS_OK && desc && desc->remesh_iterations)
+		st = qaws_mesh_2d_remesh(*out_mesh, (qaws_scalar)L, sr_size_fn, &sz, desc->remesh_iterations);
+	if (st != QAWS_STATUS_OK)
+	{
+		qaws_mesh_2d_destroy(*out_mesh);
+		*out_mesh = NULL;
+	}
+	free(loops);
+	return st;
 }

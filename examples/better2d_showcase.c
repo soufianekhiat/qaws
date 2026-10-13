@@ -24,6 +24,8 @@
  *                      a cylinder and a torus, with their parameter planes
  *   b2d19_surface_offset.svg  geodesic offsets: grown, shrunk and tubes on a sphere,
  *                      a wavy patch and a torus, across seams
+ *   b2d20_surface_sample.svg  sampling and meshing in the metric: Sobol points, blue
+ *                      noise, a density, meshes on a sphere, a wavy patch and a torus
  *
  * Each figure lives in better2d_showcase/NN_*.c, compiled as one translation
  * unit.
@@ -65,6 +67,7 @@
 #include "better2d_showcase/17_surface_boolean.c"
 #include "better2d_showcase/18_surface_seams.c"
 #include "better2d_showcase/19_surface_offset.c"
+#include "better2d_showcase/20_surface_sample.c"
 
 int main(void)
 {
@@ -89,5 +92,6 @@ int main(void)
 	demo_surface_boolean();
 	demo_surface_seams();
 	demo_surface_offset();
+	demo_surface_sample();
 	return 0;
 }

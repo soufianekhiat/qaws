@@ -183,4 +183,47 @@ qaws_status qaws_surface_region_contains(qaws_surface_region const* region, qaws
    outlive it). */
 qaws_status qaws_surface_region_create_trimmed(qaws_surface_region const* region, qaws_surface** out_surface);
 
+/* ------------------------------------------------------------------------ */
+/*  Sampling and meshing                                                    */
+/* ------------------------------------------------------------------------ */
+
+/* Points over the region uniform in surface area, or in proportion to a
+   density per unit area: the region's (u, v) loops through qaws_region_
+   sampler with the area element sqrt(E G - F^2) (times the density) as its
+   density, so the patterns of qaws_region_sample.h (QAWS_REGION_SAMPLE_*:
+   random, Sobol, stratified, Halton, R2) keep their structure through a
+   mass-keeping map. QAWS_REGION_SAMPLE_BLUE_NOISE is sample elimination
+   (Yuksel 2015) on the surface's own distances (in space), uniform in area
+   only. The BOX flag is not supported. */
+typedef struct qaws_surface_sample_desc
+{
+	unsigned int kind;                  /* QAWS_REGION_SAMPLE_* */
+	unsigned long long seed;
+	qaws_scalar (*density)(void* user, qaws_scalar u, qaws_scalar v);  /* optional, >= 0, per unit surface area */
+	void* density_user;
+} qaws_surface_sample_desc;
+
+/* count points; out_uv and out_points (either may be NULL) take them in
+   (u, v) and on the surface. desc NULL: random, seed 0. */
+qaws_status qaws_surface_region_sample(qaws_surface_region const* region, qaws_surface_sample_desc const* desc,
+	unsigned int count, qaws_vec2* out_uv, qaws_vec3* out_points);
+
+/* A triangle mesh of the region in (u, v) (qaws_triangulate.h) sized by the
+   metric: edges at most about edge_length on the surface, through the size
+   field edge_length / sqrt(the metric's largest eigenvalue). Its vertices
+   on the surface: qaws_surface_evaluate. On closed surfaces the cuts along
+   seams are boundary edges of the (u, v) mesh, their vertices one point on
+   the surface. */
+typedef struct qaws_surface_mesh_desc
+{
+	qaws_scalar edge_length;            /* surface length; 0 = 1/30 of the region's size */
+	qaws_scalar tolerance;              /* boundary deviation on the surface; 0 = edge_length / 100 */
+	qaws_scalar min_angle;              /* degrees in (u, v), 0 = 25 */
+	unsigned int remesh_iterations;     /* Botsch-Kobbelt rounds after refinement, 0 = none */
+} qaws_surface_mesh_desc;
+
+struct qaws_mesh_2d;
+qaws_status qaws_surface_region_triangulate(qaws_surface_region const* region, qaws_surface_mesh_desc const* desc,
+	struct qaws_mesh_2d** out_mesh);
+
 #endif /* QAWS_SURFACE_REGION_H */

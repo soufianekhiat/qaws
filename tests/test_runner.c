@@ -115,6 +115,7 @@ extern int test_100_mean_value_main(void);
 extern int test_101_surface_geodesic_main(void);
 extern int test_102_surface_region_main(void);
 extern int test_103_surface_offset_main(void);
+extern int test_104_surface_sample_main(void);
 
 /* Test registry */
 typedef struct {
@@ -227,6 +228,7 @@ static test_suite const g_test_suites[] = {
 	{"101_surface_geodesic", test_101_surface_geodesic_main},
 	{"102_surface_region", test_102_surface_region_main},
 	{"103_surface_offset", test_103_surface_offset_main},
+	{"104_surface_sample", test_104_surface_sample_main},
 };
 
 int main(void) {

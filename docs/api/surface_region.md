@@ -216,3 +216,49 @@ qaws_surface_curve_create_offset(curve, distance, 0, &offset_curve);
 
 In f32 the same checks hold to 7e-5. Figure 19 shows offsets on a sphere,
 a wavy patch and a torus.
+
+## Sampling and meshing
+
+```c
+qaws_surface_sample_desc sd = { QAWS_REGION_SAMPLE_SOBOL, seed, NULL, NULL };
+qaws_surface_region_sample(region, &sd, count, uv, points);
+
+qaws_surface_mesh_desc md = { edge_length, 0, 0, 3 };
+qaws_mesh_2d* mesh;
+qaws_surface_region_triangulate(region, &md, &mesh);
+```
+
+- **Sampling.** The region's loops in (u, v) go through `qaws_region_sampler`
+  (qaws_region_sample.h). Its density is the area element sqrt(EG − F²),
+  times an optional density per unit area, so its mass-keeping map sends the
+  unit square's patterns (random, Sobol, stratified, Halton, R2) to points
+  uniform in surface area. The patterns keep their structure through the
+  map.
+  - **Blue noise** is sample elimination (Yuksel 2015) on five candidates a
+    point, with distances measured in space.
+  - Regions across seams and round poles sample like any other: the area
+    element vanishes at a pole.
+- **Meshing.** A constrained Delaunay mesh of the (u, v) loops
+  (qaws_triangulate.h), refined by the size field L / sqrt(λmax(g)). λmax is
+  the metric's largest eigenvalue, so no edge is longer than about L on the
+  surface. The boundary tolerance is converted the same way. Botsch-Kobbelt
+  remeshing rounds can follow.
+  - On closed surfaces the cuts along seams are boundary edges of the
+    (u, v) mesh; their vertices on the two sides are one point on the
+    surface.
+  - Near a pole the triangles grow long in u on the surface, since the
+    size field is isotropic in (u, v).
+
+### Accuracy (test 104, f64)
+
+| Check | Agreement |
+|---|---|
+| Sphere, Sobol: mean cos(angle from the centre) over a circle across the seam, against (1 + cos(r/R)) / 2 | 2.5e-6 |
+| Sphere, Sobol: z uniform over a band (Archimedes), mean and mean square | 2.3e-6 |
+| Sphere, Sobol with the density 1 + z/R: the mean of z against its closed form | 2.2e-6 |
+| Sphere, blue noise: 500 points' smallest distance against the packing radius | 1.28 times |
+| Sphere: a circle across the seam meshed to 0.05: the triangles' area (relative), the longest edge | 1e-4, 0.0496 |
+| Flat sheared patch: a parallelogram's mesh against its area | 4e-15 |
+| Torus: a circle across both seams meshed to 0.03 (relative area) | 7.6e-5 |
+
+The same checks pass in f32. Figure 20 shows the points and the meshes.

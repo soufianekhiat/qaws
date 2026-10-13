@@ -269,3 +269,7 @@ Each item lands with tests in f64 and f32, docs, and a showcase figure.
     rounding beat the tolerance, the spans subdivided to depth 24. On the
     B-splines that `qaws_clip` returns, this took 98 s for a 512-span
     circle; it now takes 2 ms.
+- Item 6: done. Sampling goes through qaws_region_sampler with the area
+  element as density (every pattern, plus a density), and blue noise by
+  sample elimination in space. Meshes come from the (u, v) Delaunay mesher
+  with the size field L / sqrt(λmax(g)). Test 104; figure 20.
