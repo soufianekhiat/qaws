@@ -75,6 +75,9 @@ typedef struct ssd_scene
 	qaws_surface_region const* const* trims;
 	double const (*box)[4];
 	unsigned int res;
+	int const (*tints)[3];      /* optional, per face: its colour (else a pale tint by its number) */
+	int const* inner;           /* optional, per face: +1 (its normal points out) or -1 (in), its inner side darker */
+	int (*keep)(unsigned int face, double u, double v);   /* optional: the quads drawn (by their middle) */
 } ssd_scene;
 
 static ssd_item* ssd_new(ssd_scene* sc)
@@ -170,6 +173,8 @@ static void ssd_surfaces(ssd_scene* sc, qaws_surface** f, unsigned int nf, ssd_p
 					if (in != 1)
 						continue;
 				}
+				if (sc->keep && !sc->keep(k, ru.min_value + (ru.max_value - ru.min_value) * (i + 0.5) / N, rv.min_value + (rv.max_value - rv.min_value) * (j + 0.5) / N))
+					continue;
 				t = ssd_new(sc);
 				double uu[4], vv[4], dsum = 0, cu, cv, sh, col[3];
 				qaws_surface_eval_result r;
@@ -194,8 +199,10 @@ static void ssd_surfaces(ssd_scene* sc, qaws_surface** f, unsigned int nf, ssd_p
 					double a = v->rot[0] * nx + v->rot[1] * ny + v->rot[2] * nz, b = v->rot[3] * nx + v->rot[4] * ny + v->rot[5] * nz;
 					double c = v->rot[6] * nx + v->rot[7] * ny + v->rot[8] * nz;
 					sh = nn > 0 ? 0.55 + 0.45 * fabs(a * L[0] + b * L[1] + c * L[2]) / nn : 1;
+					/* (a face's inner side, seen through a hole, darker) */
+					if (sc->inner && sc->inner[k] * c > 0) sh *= 0.5;
 				}
-				for (m = 0; m < 3; m++) col[m] = tint[k % 6][m];
+				for (m = 0; m < 3; m++) col[m] = sc->tints ? sc->tints[k][m] : tint[k % 6][m];
 				for (m = 0; m < np; m++)
 				{
 					int in = 0;
