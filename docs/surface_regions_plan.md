@@ -292,3 +292,8 @@ Each item lands with tests in f64 and f32, docs, and a showcase figure.
   leave the domain. Test 106 shrinks a region by its largest inscribed
   radius, plus or minus 1e-6: a part is left just short of it and nothing
   just past it.
+- Follow-up: geodesic disks round shell vertices
+  (qaws_shell_region_create_geodesic_disk): the vertex directions are found
+  as jumps of the circle, and the disk is the union of sectors between them.
+  A disk round a cube corner matches the unfolded cone to 5e-11 (test 107,
+  figure 23).

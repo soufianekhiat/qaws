@@ -5,7 +5,8 @@
  *   - a cube of six flat faces: twelve shared edges; a straightest ray over
  *     an edge against the unfolded line; geodesic circles over one edge and
  *     over two (near a vertex, not round it) against pi r^2 and 2 pi r
- *     (the faces unfold flat about the edges); two circles over edges by
+ *     (the faces unfold flat about the edges); a disk round a corner against
+ *     the unfolded cone of angle 3 pi / 2; two circles over edges by
  *     inclusion and exclusion
  *   - a sphere as two hemispheres meeting at the equator: a circle over
  *     the equator against the cap 2 pi R^2 (1 - cos(r / R)) and its
@@ -135,6 +136,33 @@ static void test_cube(void)
 		TEST_ASSERT(!s1 && fabs((double)(AU + AI - A1 - A2)) <= tol && AI > 0.05, msg);
 		qaws_shell_region_destroy(g1); qaws_shell_region_destroy(g2); qaws_shell_region_destroy(gu); qaws_shell_region_destroy(gi);
 		qaws_shell_curve_destroy(k1); qaws_shell_curve_destroy(k2);
+	}
+	/* a disk round a corner (a cone of angle 3 pi / 2): unfolded, the plane
+	   disk less its part in the missing quarter behind the apex,
+	   int 1/2 R(phi)^2 over [3 pi / 4, 5 pi / 4], R the distance from the
+	   apex to the circle that way (Simpson) */
+	{
+		double t = 0.2, rho0 = t * sqrt(2.0), r = 0.6, back = 0, A0 = 0;
+		unsigned int n = 20000, q, nf = 0;
+		qaws_shell_region* g = NULL;
+		qaws_scalar A = 0;
+		qaws_status s1;
+		for (q = 0; q <= n; q++)
+		{
+			double phi = 0.75 * SHT_PI + 0.5 * SHT_PI * q / n, R = rho0 * cos(phi) + sqrt(r * r - rho0 * rho0 * sin(phi) * sin(phi));
+			back += (q == 0 || q == n ? 1 : (q % 2 ? 4 : 2)) * 0.5 * R * R;
+		}
+		back *= 0.5 * SHT_PI / n / 3;
+		A0 = SHT_PI * r * r - back;
+		s1 = qaws_shell_region_create_geodesic_disk(a, sht_pt(0, 1 - t / 2, 1 - t / 2), (qaws_scalar)r, 0, &g);
+		if (s1 == QAWS_STATUS_OK)
+		{
+			qaws_shell_region_get_area(g, &A);
+			for (q = 0; q < 6; q++) if (qaws_shell_region_get_face(g, q)) nf++;
+		}
+		sprintf(msg, "cube: a geodesic disk round a corner (on %u faces) against the unfolded cone's %.2g", nf, fabs((double)A - A0));
+		TEST_ASSERT(s1 == QAWS_STATUS_OK && nf == 3 && fabs((double)A - A0) <= (SHT_F32 ? 2e-4 : 1e-9), msg);
+		qaws_shell_region_destroy(g);
 	}
 	qaws_shell_atlas_destroy(a);
 	for (i = 0; i < 6; i++) qaws_surface_destroy(f[i]);

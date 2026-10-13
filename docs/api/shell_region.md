@@ -68,6 +68,7 @@ qaws_shell_exp(atlas, p, direction, length, &q, &velocity, &crossings);
 | Cube: two circles over edges, union + intersection − both | 8e-14 |
 | Two hemispheres: a circle over the equator against the cap and 2 pi sin r | 8e-12 |
 | Two hemispheres: a great circle over the equator twice, back at its start | 2e-12 |
+| Cube: a geodesic disk round a corner against the unfolded cone of angle 3 pi/2 | 5e-11 |
 
 In f32 the same checks hold to 3e-5. Figure 23 shows a fan of straightest
 geodesics over a cube's edges, circles over edges and their union, and
@@ -77,5 +78,24 @@ circles across two hemispheres.
 
 - Edges are whole sides of the faces' domains. Faces trimmed along other
   curves, and edges joining parts of sides, are not covered.
-- A circle round a vertex of a cube (a cone point), or reaching one, is not
-  supported: its rays stop at the vertex.
+- Rays that hit a vertex exactly stop there; disks round vertices go
+  through `qaws_shell_region_create_geodesic_disk`.
+
+## Disks round vertices
+
+`qaws_shell_region_create_geodesic_disk(atlas, centre, r, 0, &region)` gives
+the points within r along the shell, vertices included.
+
+- **Vertex directions.** Rays passing either side of a shell vertex part, so
+  the circle's end point jumps there. Those jumps are found among 256 rays
+  and pinned down by bisection on the angle.
+- **Sectors.** The disk is the union of sectors between the vertex
+  directions, stopping 1e-10 rad either side of each (1e-5 in float) and
+  none wider than a quarter turn. Each sector is a ray out, the circle's arc
+  and a ray back.
+- **Behind a convex vertex.** Behind a cube's corner (a cone of angle
+  3 pi/2), the sectors on the two sides overlap where the disk is reached
+  both ways round, and the union is the disk.
+- **Chains.** A sector's runs on the centre's face meet inside the face, so
+  regions take each loop's consecutive runs on one face as one chain (one
+  composite curve).

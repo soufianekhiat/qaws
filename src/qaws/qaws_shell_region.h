@@ -95,6 +95,18 @@ qaws_status qaws_shell_curve_get_length(qaws_shell_curve const* curve, qaws_scal
 qaws_status qaws_shell_region_create(qaws_shell_atlas const* atlas, qaws_shell_curve const* const* loops, unsigned int loop_count,
 	qaws_shell_region** out_region);
 
+/* The geodesic disk of radius r about the centre: the points within r
+   along the shell. With no shell vertex inside, the region of
+   qaws_shell_curve_create_geodesic_circle. With vertices inside, the rays
+   either side of a vertex part (the circle jumps there): the vertices'
+   directions are found as those jumps (bisection on the angle), and the
+   disk is the union of sectors between them (a hair either side), each a
+   ray out, the circle's arc and a ray back. Behind a convex vertex (a cube's
+   corner) the sectors overlap where the disk is reached both ways round,
+   and the union is the disk. */
+qaws_status qaws_shell_region_create_geodesic_disk(qaws_shell_atlas const* atlas, qaws_shell_point centre, qaws_scalar radius,
+	qaws_scalar tolerance, qaws_shell_region** out_region);
+
 /* The Boolean of two regions of one atlas, face by face. */
 qaws_status qaws_shell_region_clip(qaws_shell_region const* a, qaws_shell_region const* b, qaws_clip_type clip_type,
 	qaws_shell_region** out_region);

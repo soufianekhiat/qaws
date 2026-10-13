@@ -2,7 +2,8 @@
    (qaws_shell_region.h). A cube of six flat faces: a fan of straightest
    geodesics from one point over the edges, a geodesic circle over two
    edges by a vertex, two circles over edges united; a sphere as two
-   hemispheres: circles over the equator. Uses figures 16 to 19's
+   hemispheres: circles over the equator; a disk round a cube corner (three
+   quarters of a plane one). Uses figures 16 to 19's
    helpers. */
 
 static qaws_surface* shf_face(double const* p00, double const* p10, double const* p01, double const* p11)
@@ -72,7 +73,7 @@ static void demo_shell_region(void)
 	qaws_shell_atlas* a = NULL;
 	unsigned int i, k;
 	char label[220];
-	if (!svg_open(&s, "showcase/b2d23_shell_region.svg", (int)(48 + 4 * (pw + 12)), (int)(110 + (ph + 44)),
+	if (!svg_open(&s, "showcase/b2d23_shell_region.svg", (int)(48 + 5 * (pw + 12)), (int)(110 + (ph + 44)),
 		"Curves and regions across the faces of a shell",
 		"qaws_shell_region: straightest geodesics continued over edges, geodesic circles across faces, regions and Booleans face by face"))
 		return;
@@ -179,6 +180,39 @@ static void demo_shell_region(void)
 		qaws_shell_atlas_destroy(ah);
 		qaws_surface_destroy(h[0]); qaws_surface_destroy(h[1]);
 		qaws_curve_destroy(p1); qaws_curve_destroy(p2);
+	}
+	/* a disk round a corner of the cube: three quarters of a plane one */
+	{
+		qaws_surface* g[6];
+		qaws_shell_atlas* ag = NULL;
+		qaws_shell_region* r = NULL;
+		qaws_scalar A = 0;
+		viewport v3;
+		sgf_view view;
+		g[0] = shf_face(P[4], P[5], P[6], P[7]);
+		g[1] = shf_face(P[0], P[2], P[1], P[3]);
+		g[2] = shf_face(P[1], P[3], P[5], P[7]);
+		g[3] = shf_face(P[0], P[4], P[2], P[6]);
+		g[4] = shf_face(P[2], P[6], P[3], P[7]);
+		g[5] = shf_face(P[0], P[1], P[4], P[5]);
+		qaws_shell_atlas_create((qaws_surface const* const*)g, 6, 0, &ag);
+		v3.x0 = 24 + 4 * (pw + 12); v3.y0 = 104; v3.w = pw; v3.h = ph;
+		sgf_view_init(&view, -0.75 * pi, 0.6, 62, v3.x0 + pw / 2, v3.y0 + ph / 2 + 10);
+		qaws_shell_region_create_geodesic_disk(ag, shf_pt(0, 0.85, 0.85), (qaws_scalar)0.75, 0, &r);
+		if (r) qaws_shell_region_get_area(r, &A);
+		sprintf(label, "a disk round a corner: %.5f of pi r^2", (double)A / (pi * 0.75 * 0.75));
+		svg_panel(&s, &v3, label);
+		for (i = 0; i < 6; i++) shf_face_box(&s, g[i], &view);
+		if (r)
+		{
+			shf_region(&s, r, ag, &view, "#54aeff");
+			for (k = 0; k < 6; k++)
+				if (qaws_shell_region_get_face(r, k))
+					sof_outline(&s, qaws_shell_region_get_face(r, k), g[k], &view, NULL, 0, 0, "#0969da", 1.4);
+		}
+		qaws_shell_region_destroy(r);
+		qaws_shell_atlas_destroy(ag);
+		for (i = 0; i < 6; i++) qaws_surface_destroy(g[i]);
 	}
 	svg_close(&s);
 	printf("figure 23: curves and regions across the faces of a shell, %.1f s\n", (double)(clock() - t0) / CLOCKS_PER_SEC);
