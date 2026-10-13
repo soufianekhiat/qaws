@@ -370,3 +370,32 @@ Each item lands with tests in f64 and f32, docs, and a showcase figure.
   Miranda). Test 109 (two closed forms, a B-spline bump against the float
   geodesic, crossings); figure 27. Open: rational and other surfaces,
   higher-order steps, the certified path's Booleans of geodesic regions.
+
+## 13. Roadmap, second part (2026-10-14)
+
+The first roadmap is done. What follows covers what its own text promised
+but never listed, and what using it showed was missing, in this order:
+
+1. **Geodesic queries** on a surface: the geodesic distance between two
+   points; a curve's closest point to a point (the foot, where the
+   geodesic to it leaves the curve square) and the distance; two curves'
+   crossings (their (u, v) images met, then refined on the curves) and,
+   when they do not cross, their closest pair of points (each the other's
+   foot) and distance; a point's distance to a region (its boundary).
+2. **Shortest paths round regions** on a single surface: a region as the
+   obstacle, through the shells' graph of touching geodesics.
+3. **Sampling and meshing on shells**: each face's part, the samples
+   shared out by the faces' areas.
+4. **Offsets on shells**: boundaries carried along their conormals across
+   edges, corners rounded by shell disks.
+5. **Offsets in f32**: test 90 takes 18 minutes against 4 s in f64.
+6. **Shortest paths on closed curved surfaces**: a distance field (fast
+   marching on a mesh) to seed the search, instead of a fan of directions.
+7. **The certified path, completed**: areas and lengths with rigorous error
+   bounds (interval quadrature over the enclosure tubes), then Booleans of
+   regions bounded by geodesics certified through their enclosures'
+   crossings.
+8. **Mitered skeletons** on surfaces (section 7): each edge moved by its
+   geodesic offset, corners where the fronts meet.
+
+Each item lands with tests in f64 and f32, docs, and a showcase figure.
