@@ -91,9 +91,8 @@ surface and, optionally, loops of (u, v) curves bounding it
 
 - **Orientation.** Loops are turned to keep the face on their left: a loop
   inside an even number of others runs counter-clockwise, its holes
-  clockwise. A loop that does not close is refused (`INVALID_ARGUMENT`); a
-  trim on a surface closed both ways (a torus) is not covered
-  (`UNSUPPORTED_OPERATION`).
+  clockwise. A loop that does not close is refused (`INVALID_ARGUMENT`), as
+  is a ray's, circle's or disk's start off its trimmed face.
 - **Closed surfaces.** On a surface closed in u (or v) a loop is given in
   continuous (u, v), and may cross the seam (a hole on it) or wrap round
   once (a cylinder's rim: a line from (0, v) to (1, v)). It closes up to
@@ -101,6 +100,10 @@ surface and, optionally, loops of (u, v) curves bounding it
   direction over the copies of the point, and each loop is turned so that
   the point just left of it is inside. Exits and region walks follow the
   copy of the trim the geodesic meets.
+- **Closed both ways.** On a torus the loops are taken as given (the face
+  on their left: there is no outside to tell by). Inside is by the
+  crossings on the way from a point just left of the first loop to the
+  nearest copy of the point.
 - **Edges.** A trim curve meets any other face's side (a trim curve or a
   side of an untrimmed domain) where every point of each lies within the
   tolerance of the other, whatever the two parametrisations. A plate's hole
@@ -145,6 +148,7 @@ surface and, optionally, loops of (u, v) curves bounding it
 | Cylinder trimmed by its rims and a hole on the seam, the hole's disk of the same surface: three disks against pi r² and 2 pi r (unrolled) | 2e-9 |
 | The same: a ray over the hole's disk and the seam against the unrolled line | 2e-15 |
 | Tube capped by one disk or by two half disks (T points on the rim): disks over the rim alike either way and round the tube | 2e-12 |
+| Torus with a hole where its seams cross and the hole's disk: disks over the hole and a ray against the whole torus | 5e-11; 2e-14 |
 
 In f32 the same checks hold to 3e-5. Figure 25 shows the split plane, the
 plate and tube (helices through the hole, a disk over the rim, a union with
@@ -152,7 +156,6 @@ a disk inside the tube) and the trimmed cube.
 
 ## Limits
 
-- Trims on surfaces closed both ways are not covered.
 - Rays that hit a vertex exactly stop there; disks round vertices go
   through `qaws_shell_region_create_geodesic_disk`.
 

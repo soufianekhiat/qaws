@@ -60,8 +60,10 @@ qaws_status qaws_shell_atlas_create(qaws_surface const* const* surfaces, unsigne
    bounding it, each closed and each of its curves one side of the face
    (an edge is a side shared whole with another face's side). Loops are
    turned to keep the face on their left (a loop inside an even number of
-   others counter-clockwise, its holes clockwise); with no loops the face
-   is its whole domain. Surfaces and curves are borrowed. */
+   others counter-clockwise, its holes clockwise; on a surface closed in u
+   or v, a loop may cross the seam or wrap round once; on a surface closed
+   both ways, loops are taken as given, the face on their left); with no
+   loops the face is its whole domain. Surfaces and curves are borrowed. */
 typedef struct qaws_shell_face_desc
 {
 	qaws_surface const* surface;
@@ -71,8 +73,9 @@ typedef struct qaws_shell_face_desc
 
 /* The atlas of faces some of which are trimmed: their sides meet any
    other face's sides (trim curves or sides of domains) where they coincide
-   in space, whatever their parametrisations. UNSUPPORTED_OPERATION for a
-   trim on a surface closed in u or v. */
+   in space, whatever their parametrisations; a side running through another
+   side's end is split there (T-junctions). Rays, circles and disks from a
+   point off its trimmed face: INVALID_ARGUMENT. */
 qaws_status qaws_shell_atlas_create_trimmed(qaws_shell_face_desc const* faces, unsigned int face_count, qaws_scalar tolerance,
 	qaws_shell_atlas** out_atlas);
 /* The atlas of a B-rep shell's faces. */

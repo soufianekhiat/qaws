@@ -337,3 +337,7 @@ Each item lands with tests in f64 and f32, docs, and a showcase figure.
   count a seam cut joined to a shared stretch (polylines judged segment by
   segment), nor miss the stretch; a centre on a seam taken a hair off it.
   Test 108 (one cap against two half caps). Open: trims on a torus.
+- Follow-up: trims on a torus (closed both ways): loops as given, inside by
+  crossings from a point just left of the first loop to the nearest copy;
+  a start off its trimmed face refused. Test 108 (a torus with a hole where
+  its seams cross, against the whole torus). Trims now cover every surface.

@@ -20,7 +20,9 @@
  *     both against the unrolled line
  *   - a tube capped by one disk or by two half disks (T points on the rim of
  *     a closed face): disks over the rim alike either way and round the tube
- *   - an open loop refused; a trim on a surface closed both ways not covered
+ *   - a torus with a hole where its seams cross, filled by a disk of the same
+ *     surface: disks over the hole and a ray against the whole torus
+ *   - an open loop refused; a centre off its trimmed face refused
  */
 
 #include "test_common.h"
@@ -519,6 +521,81 @@ static void test_capped_tube(void)
 	qaws_curve_destroy(prof); qaws_curve_destroy(full); qaws_curve_destroy(h1); qaws_curve_destroy(d1); qaws_curve_destroy(h2); qaws_curve_destroy(d2);
 }
 
+/* a torus (closed both ways) with a hole where its seams cross, filled by a
+   disk of the same surface: the loops as given (the face on their left);
+   disks over the hole and rays against the whole torus's */
+static void test_torus(void)
+{
+	static double const cs[3][3] = { { 0.15, 0.1, 0.3 }, { -0.13, 0.08, 0.25 }, { 0.03, -0.17, 0.3 } };
+	qaws_curve *prof = str_arc(1.0, 0, 0.35, 0, 2 * STR_PI), *hole = str_arc(0, 0, 0.12, 2 * STR_PI, 0), *disk = str_arc(0, 0, 0.12, 1.0, 1.0 + 2 * STR_PI);
+	qaws_surface* s = NULL;
+	qaws_surface_revolution_desc rd;
+	qaws_curve const *lh[1], *ld[1];
+	qaws_path_2d ph[1], pd[1];
+	qaws_shell_face_desc A[1], B[2];
+	qaws_shell_atlas *aa = NULL, *ab = NULL;
+	qaws_status s1, s2;
+	double worst = 0, tol = STR_F32 ? 2e-4 : 1e-9;
+	unsigned int z, ok = 0;
+	char msg[300];
+	memset(&rd, 0, sizeof(rd));
+	rd.profile = prof; rd.axis_direction.z = 1;
+	qaws_surface_create_revolution(&rd, &s);
+	lh[0] = hole; ld[0] = disk;
+	ph[0].curves = lh; ph[0].curve_count = 1; ph[0].closed = 1;
+	pd[0].curves = ld; pd[0].curve_count = 1; pd[0].closed = 1;
+	memset(A, 0, sizeof(A));
+	memset(B, 0, sizeof(B));
+	A[0].surface = s;
+	B[0].surface = s; B[0].trims = ph; B[0].trim_count = 1;
+	B[1].surface = s; B[1].trims = pd; B[1].trim_count = 1;
+	s1 = qaws_shell_atlas_create_trimmed(A, 1, 0, &aa);
+	s2 = qaws_shell_atlas_create_trimmed(B, 2, 0, &ab);
+	sprintf(msg, "torus: whole, %u edges; with a hole on both seams and its disk, %u shared edges",
+		aa ? qaws_shell_atlas_get_edge_count(aa) : 0, ab ? qaws_shell_atlas_get_edge_count(ab) : 0);
+	TEST_ASSERT(s1 == QAWS_STATUS_OK && s2 == QAWS_STATUS_OK && qaws_shell_atlas_get_edge_count(aa) == 0 && qaws_shell_atlas_get_edge_count(ab) == 2, msg);
+	for (z = 0; z < 3 && s1 == QAWS_STATUS_OK && s2 == QAWS_STATUS_OK; z++)
+	{
+		qaws_shell_region *g = NULL, *h = NULL;
+		qaws_scalar Ag = 0, Ah = 0, Pg = 0, Ph = 0;
+		double e = 1e300;
+		if (qaws_shell_region_create_geodesic_disk(aa, str_pt(0, cs[z][0], cs[z][1]), (qaws_scalar)cs[z][2], 0, &g) == QAWS_STATUS_OK &&
+			qaws_shell_region_create_geodesic_disk(ab, str_pt(0, cs[z][0], cs[z][1]), (qaws_scalar)cs[z][2], 0, &h) == QAWS_STATUS_OK)
+		{
+			qaws_shell_region_get_area(g, &Ag); qaws_shell_region_get_perimeter(g, &Pg);
+			qaws_shell_region_get_area(h, &Ah); qaws_shell_region_get_perimeter(h, &Ph);
+			e = fabs((double)Ag - Ah) + fabs((double)Pg - Ph);
+		}
+		if (e > worst) worst = e;
+		if (e <= tol) ok++;
+		qaws_shell_region_destroy(g);
+		qaws_shell_region_destroy(h);
+	}
+	sprintf(msg, "torus: three disks over the hole (across both seams) against the whole torus's within %.2g", worst);
+	TEST_ASSERT(ok == 3, msg);
+	if (s1 == QAWS_STATUS_OK && s2 == QAWS_STATUS_OK)
+	{
+		/* a ray over the hole: as on the whole torus */
+		qaws_shell_point qa, qb;
+		qaws_vec2 d;
+		qaws_vec3 ea, eb;
+		unsigned int ca = 0, cb = 0;
+		qaws_status t1, t2;
+		double off;
+		d.x = (qaws_scalar)-0.03; d.y = (qaws_scalar)-1;
+		t1 = qaws_shell_exp(aa, str_pt(0, 0.08, 0.6), d, (qaws_scalar)1.2, &qa, NULL, &ca);
+		t2 = qaws_shell_exp(ab, str_pt(0, 0.08, 0.6), d, (qaws_scalar)1.2, &qb, NULL, &cb);
+		ea = str_at(aa, qa); eb = str_at(ab, qb);
+		off = sqrt(((double)ea.x - eb.x) * ((double)ea.x - eb.x) + ((double)ea.y - eb.y) * ((double)ea.y - eb.y) + ((double)ea.z - eb.z) * ((double)ea.z - eb.z));
+		sprintf(msg, "torus: a ray over the hole (%u crossings) against the whole torus's %.2g", cb, off);
+		TEST_ASSERT(t1 == QAWS_STATUS_OK && t2 == QAWS_STATUS_OK && cb == 1 && off <= (STR_F32 ? 2e-6 : 1e-12), msg);
+	}
+	qaws_shell_atlas_destroy(aa);
+	qaws_shell_atlas_destroy(ab);
+	qaws_surface_destroy(s);
+	qaws_curve_destroy(prof); qaws_curve_destroy(hole); qaws_curve_destroy(disk);
+}
+
 static void test_refusals(void)
 {
 	qaws_surface* sa = str_plane(STR_P00, STR_P10, STR_P01, STR_P11);
@@ -546,9 +623,15 @@ static void test_refusals(void)
 	pc.curves = cl; pc.curve_count = 1; pc.closed = 1;
 	fd.surface = tube; fd.trims = &pc; fd.trim_count = 1;
 	s2 = qaws_shell_atlas_create_trimmed(&fd, 1, 0, &a);
-	qaws_shell_atlas_destroy(a);
-	sprintf(msg, "refused: a loop that does not close (%d), a trim on a surface closed both ways (%d)", (int)s1, (int)s2);
-	TEST_ASSERT(s1 == QAWS_STATUS_INVALID_ARGUMENT && s2 == QAWS_STATUS_UNSUPPORTED_OPERATION, msg);
+	{
+		/* a disk of a torus: a centre off it refused */
+		qaws_shell_region* g = NULL;
+		qaws_status s3 = s2 == QAWS_STATUS_OK ? qaws_shell_region_create_geodesic_disk(a, str_pt(0, 0.1, 0.1), (qaws_scalar)0.1, 0, &g) : QAWS_STATUS_OK;
+		qaws_shell_region_destroy(g);
+		qaws_shell_atlas_destroy(a);
+		sprintf(msg, "refused: a loop that does not close (%d); a disk of a torus taken (%d), a centre off it (%d)", (int)s1, (int)s2, (int)s3);
+		TEST_ASSERT(s1 == QAWS_STATUS_INVALID_ARGUMENT && s2 == QAWS_STATUS_OK && s3 == QAWS_STATUS_INVALID_ARGUMENT, msg);
+	}
 	qaws_surface_destroy(sa); qaws_surface_destroy(tube);
 	for (i = 0; i < 3; i++) qaws_curve_destroy(open3[i]);
 	qaws_curve_destroy(prof); qaws_curve_destroy(loop);
@@ -566,6 +649,7 @@ int test_108_shell_trimmed_main(void)
 	test_tee(1);
 	test_cylinder();
 	test_capped_tube();
+	test_torus();
 	test_refusals();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;

@@ -48,6 +48,8 @@
 #define SH_SEAM_OFF 1e-10
 #endif
 
+#define SH_COPIES 32        /* copies of a point (by periods) near a closed face's trims, at most */
+
 /* ------------------------------------------------------------------------ */
 /*  The atlas                                                               */
 /* ------------------------------------------------------------------------ */
@@ -73,6 +75,7 @@ typedef struct sh_trim
 	unsigned int nown;
 	double pu, pv;              /* the face's periods (0: open), the pieces given in one copy */
 	double lo[2], hi[2];        /* the pieces' (u, v) box */
+	double ref[2];              /* closed both ways: a point inside (just left of the first piece) */
 } sh_trim;
 
 #define SH_TRIM_N 128
@@ -362,18 +365,29 @@ static unsigned int sh_trim_copies(sh_trim const* t, double const* uv, double (*
 {
 	unsigned int n = 0;
 	int k, k0, k1;
+	if (t->pu > 0 && t->pv > 0)
+	{
+		int j, j0, j1;
+		k0 = (int)floor((uv[0] - t->hi[0]) / t->pu) - 1;
+		k1 = (int)ceil((uv[0] - t->lo[0]) / t->pu) + 1;
+		j0 = (int)floor((uv[1] - t->hi[1]) / t->pv) - 1;
+		j1 = (int)ceil((uv[1] - t->lo[1]) / t->pv) + 1;
+		for (k = k0; k <= k1; k++)
+			for (j = j0; j <= j1 && n < SH_COPIES; j++) { sh[n][0] = k * t->pu; sh[n][1] = j * t->pv; n++; }
+		return n;
+	}
 	if (t->pu > 0)
 	{
 		k0 = (int)floor((uv[0] - t->hi[0]) / t->pu) - 1;
 		k1 = (int)ceil((uv[0] - t->lo[0]) / t->pu) + 1;
-		for (k = k0; k <= k1 && n < 8; k++) { sh[n][0] = k * t->pu; sh[n][1] = 0; n++; }
+		for (k = k0; k <= k1 && n < SH_COPIES; k++) { sh[n][0] = k * t->pu; sh[n][1] = 0; n++; }
 		return n;
 	}
 	if (t->pv > 0)
 	{
 		k0 = (int)floor((uv[1] - t->hi[1]) / t->pv) - 1;
 		k1 = (int)ceil((uv[1] - t->lo[1]) / t->pv) + 1;
-		for (k = k0; k <= k1 && n < 8; k++) { sh[n][0] = 0; sh[n][1] = k * t->pv; n++; }
+		for (k = k0; k <= k1 && n < SH_COPIES; k++) { sh[n][0] = 0; sh[n][1] = k * t->pv; n++; }
 		return n;
 	}
 	sh[0][0] = sh[0][1] = 0;
@@ -387,9 +401,39 @@ static int sh_trim_winding(sh_trim const* t, double const* uv)
 {
 	unsigned int p, i;
 	int wn = 0;
+	if (t->pu > 0 && t->pv > 0)
+	{
+		/* closed both ways: the crossings on the way from the reference
+		   point (inside) to the nearest copy of uv, over the pieces' copies */
+		double q[2], lo2[2], hi2[2];
+		int ku, kv, ku0, ku1, kv0, kv1, crossings = 0;
+		q[0] = uv[0] - t->pu * floor((uv[0] - t->ref[0]) / t->pu + 0.5);
+		q[1] = uv[1] - t->pv * floor((uv[1] - t->ref[1]) / t->pv + 0.5);
+		lo2[0] = q[0] < t->ref[0] ? q[0] : t->ref[0]; hi2[0] = q[0] < t->ref[0] ? t->ref[0] : q[0];
+		lo2[1] = q[1] < t->ref[1] ? q[1] : t->ref[1]; hi2[1] = q[1] < t->ref[1] ? t->ref[1] : q[1];
+		ku0 = (int)floor((lo2[0] - t->hi[0]) / t->pu) - 1; ku1 = (int)ceil((hi2[0] - t->lo[0]) / t->pu) + 1;
+		kv0 = (int)floor((lo2[1] - t->hi[1]) / t->pv) - 1; kv1 = (int)ceil((hi2[1] - t->lo[1]) / t->pv) + 1;
+		for (ku = ku0; ku <= ku1; ku++)
+			for (kv = kv0; kv <= kv1; kv++)
+				for (p = 0; p < t->np; p++)
+				{
+					double const* r = t->poly + 2 * (SH_TRIM_N + 1) * p;
+					double ox = ku * t->pu, oy = kv * t->pv;
+					for (i = 0; i < SH_TRIM_N; i++)
+					{
+						double ax = r[2 * i] + ox, ay = r[2 * i + 1] + oy, bx = r[2 * i + 2] + ox, by = r[2 * i + 3] + oy;
+						double d1 = (bx - ax) * (t->ref[1] - ay) - (t->ref[0] - ax) * (by - ay), d2 = (bx - ax) * (q[1] - ay) - (q[0] - ax) * (by - ay);
+						double d3 = (q[0] - t->ref[0]) * (ay - t->ref[1]) - (ax - t->ref[0]) * (q[1] - t->ref[1]);
+						double d4 = (q[0] - t->ref[0]) * (by - t->ref[1]) - (bx - t->ref[0]) * (q[1] - t->ref[1]);
+						if (((d1 > 0) != (d2 > 0)) && ((d3 > 0) != (d4 > 0)))
+							crossings++;
+					}
+				}
+		return !(crossings & 1);
+	}
 	if (t->pu > 0 || t->pv > 0)
 	{
-		double sh[8][2];
+		double sh[SH_COPIES][2];
 		unsigned int nc = sh_trim_copies(t, uv, sh), k;
 		int ax = t->pu > 0 ? 0 : 1, crossings = 0;
 		for (k = 0; k < nc; k++)
@@ -431,7 +475,7 @@ static int sh_trim_winding(sh_trim const* t, double const* uv)
 static double sh_trim_nearest(sh_trim const* t, double const* uv, unsigned int only, unsigned int* piece, double* s_out, double* shift)
 {
 	unsigned int p, i, bp = 0, it, k, nc;
-	double best = 1e300, s = 0, c[2], d[2], sh[8][2], w[2], bs[2] = { 0, 0 };
+	double best = 1e300, s = 0, c[2], d[2], sh[SH_COPIES][2], w[2], bs[2] = { 0, 0 };
 	nc = sh_trim_copies(t, uv, sh);
 	for (k = 0; k < nc; k++)
 	{
@@ -530,6 +574,16 @@ static void sh_trim_polys(sh_trim* t)
 			dx = q[0] + w * ex - m[0]; dy = q[1] + w * ey - m[1];
 			if (hypot(dx, dy) > t->sag) t->sag = hypot(dx, dy);
 		}
+	if (t->np)
+	{
+		/* (just left of the first piece's middle: the face's side) */
+		double c[2], d[2], dl, off;
+		sh_trim_eval(t, 0, 0.5, c, d);
+		dl = hypot(d[0], d[1]);
+		off = 4 * t->sag + 1e-4 * t->diag;
+		t->ref[0] = c[0] - off * d[1] / (dl > 0 ? dl : 1);
+		t->ref[1] = c[1] + off * d[0] / (dl > 0 ? dl : 1);
+	}
 }
 
 /* piece p split at the ns increasing s in ss (inside (0, 1)): the same
@@ -725,7 +779,9 @@ static qaws_status sh_trim_build(sh_trim* t, qaws_path_2d const* loops, unsigned
 		unsigned int depth = 0, m, first = t->lfirst[l], last = t->lfirst[l + 1];
 		double const* q = t->poly + 2 * ((SH_TRIM_N + 1) * first + SH_TRIM_N / 2);
 		int turn;
-		if (pu > 0 || pv > 0)
+		if (pu > 0 && pv > 0)
+			turn = 0;     /* closed both ways: as given, the face on their left */
+		else 		if (pu > 0 || pv > 0)
 		{
 			double c[2], d[2], x[2], dl, off = 4 * t->sag + 1e-4 * t->diag;
 			sh_trim_eval(t, first, 0.5, c, d);
@@ -899,8 +955,6 @@ qaws_status qaws_shell_atlas_create_trimmed(qaws_shell_face_desc const* faces, u
 			break;
 		if (faces[i].trim_count)
 		{
-			/* trims on a surface closed both ways: not covered */
-			if (a->c[i].pu > 0 && a->c[i].pv > 0) { st = QAWS_STATUS_UNSUPPORTED_OPERATION; break; }
 			st = sh_trim_build(&a->tr[i], faces[i].trims, faces[i].trim_count, a->c[i].pu, a->c[i].pv);
 		}
 	}
@@ -1344,13 +1398,24 @@ static qaws_status sh_trace(qaws_shell_atlas const* a, unsigned int* f, double* 
 	return QAWS_STATUS_NUMERICAL_FAILURE;
 }
 
+/* p on its face: inside its trim, or on it to a rounding (a corner, an edge) */
+static int sh_on_face(qaws_shell_atlas const* a, qaws_shell_point p)
+{
+	double uv[2], s;
+	unsigned int q;
+	if (!SH_TRIMMED(a, p.face))
+		return 1;
+	uv[0] = p.uv.x; uv[1] = p.uv.y;
+	return sh_inside(a, p.face, uv) || sh_trim_nearest(&a->tr[p.face], uv, SH_NONE, &q, &s, NULL) <= SH_EDGE_NEAR * a->tr[p.face].diag;
+}
+
 /* the start state: p with its unit (u, v) direction */
 static qaws_status sh_start(qaws_shell_atlas const* a, qaws_shell_point p, double const* d, double* y)
 {
 	qaws_internal_sg_ctx const* c;
 	double g[3], n;
 	qaws_status st;
-	if (!a || p.face >= a->nf)
+	if (!a || p.face >= a->nf || !sh_on_face(a, p))
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	c = &a->c[p.face];
 	if ((st = qaws_internal_sg_first_form(c, p.uv.x, p.uv.y, g)) != QAWS_STATUS_OK)
@@ -1755,6 +1820,8 @@ qaws_status qaws_shell_curve_create_geodesic_circle(qaws_shell_atlas const* a, q
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	*out_curve = NULL;
 	centre = sh_off_seam(a, centre);
+	if (!sh_on_face(a, centre))
+		return QAWS_STATUS_INVALID_ARGUMENT;
 	k.a = a; k.c = centre; k.r = (double)radius;
 	tol = tolerance > 0 ? (double)tolerance * a->c[centre.face].diag : a->c[centre.face].tol;
 	/* the faces the circle visits, at n angles */
@@ -3209,6 +3276,8 @@ qaws_status qaws_shell_region_create_geodesic_disk(qaws_shell_atlas const* a, qa
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	*out_region = NULL;
 	centre = sh_off_seam(a, centre);
+	if (!sh_on_face(a, centre))
+		return QAWS_STATUS_INVALID_ARGUMENT;
 	k.a = a; k.c = centre; k.r = (double)radius;
 	tol = tolerance > 0 ? (double)tolerance * a->c[centre.face].diag : a->c[centre.face].tol;
 	nv = sh_vertex_dirs(&k, dirs, 32);
