@@ -651,12 +651,79 @@ static int sg_self_crossing(double const* p, unsigned int n, int closed)
 	return 0;
 }
 
+/* a circle's centre on a pole (a domain edge where S_u x S_v = 0): 0 when
+   not, else +1 at v1, -1 at v0 */
+static int sg_pole(sg_ctx const* c, double const* p)
+{
+	double g[3];
+#if QAWS_SCALAR_IS_FLOAT
+	double const small = 1e-5;          /* cos(pi / 2) in float is 4e-8, not 0 */
+#else
+	double const small = 1e-10;
+#endif
+	if (c->pu <= 0)
+		return 0;
+	if (sg_metric(c, p[0], p[1], g, NULL) != QAWS_STATUS_NUMERICAL_FAILURE &&
+		(qaws_internal_sg_first_form(c, p[0], p[1], g) != QAWS_STATUS_OK || !(g[0] <= small * small * g[2])))
+		return 0;
+	if (fabs(p[1] - c->v1) <= 1e-9 * (c->v1 - c->v0)) return 1;
+	if (fabs(p[1] - c->v0) <= 1e-9 * (c->v1 - c->v0)) return -1;
+	return 0;
+}
+
+/* the circle's point at angle a, radius r: from the centre, or from a pole
+   along the meridian u = u0 + P a / (2 pi) (starting a hair away from it,
+   where the metric is regular; meridians of revolutions are geodesics) */
+static qaws_status sg_ray(sg_ctx const* c, double const* c0, int pole, double a, double r, double* y)
+{
+	double d[2];
+	qaws_status st;
+	if (!pole)
+	{
+		st = sg_dir(c, c0[0], c0[1], a, d);
+		if (st != QAWS_STATUS_OK)
+			return st;
+		y[0] = c0[0]; y[1] = c0[1]; y[2] = d[0]; y[3] = d[1];
+		return sg_integrate(c, y, r);
+	}
+	{
+#if QAWS_SCALAR_IS_FLOAT
+		double dv = 1e-3 * (c->v1 - c->v0), g[3], len, away[2];
+#else
+		double dv = 1e-8 * (c->v1 - c->v0), g[3], len, away[2];
+#endif
+		/* counter-clockwise seen from outside: at v0 the angle runs against u */
+		y[0] = c->u0 + (pole > 0 ? 1 : -1) * c->pu * a / (2 * SG_PI);
+		y[1] = pole > 0 ? c->v1 - dv : c->v0 + dv;
+		/* the hair's length: |S_v| dv at its middle */
+		st = sg_metric(c, y[0], pole > 0 ? c->v1 - 0.5 * dv : c->v0 + 0.5 * dv, g, NULL);
+		if (st != QAWS_STATUS_OK)
+		{
+			double gg[3];
+			qaws_surface_eval_result rr;
+			st = sg_eval(c, y[0], y[1], QAWS_SURFACE_EVAL_DV, &rr);
+			if (st != QAWS_STATUS_OK)
+				return st;
+			gg[2] = sg_dot(rr.dv, rr.dv);
+			g[2] = gg[2];
+		}
+		len = sqrt(g[2]) * dv;
+		away[0] = 0; away[1] = pole > 0 ? -1 : 1;
+		st = sg_unit(c, y[0], y[1], away, d);
+		if (st != QAWS_STATUS_OK)
+			return st;
+		y[2] = d[0]; y[3] = d[1];
+		return sg_integrate(c, y, r - len);
+	}
+}
+
 qaws_status qaws_surface_curve_create_geodesic_arc(qaws_surface const* surface, qaws_vec2 centre, qaws_scalar radius,
 	qaws_scalar angle0, qaws_scalar angle1, qaws_scalar tolerance, qaws_surface_curve** out_curve)
 {
 	sg_ctx ctx;
 	double c0[2], r = (double)radius, a0 = (double)angle0, a1 = (double)angle1, sweep;
 	int whole;
+	int pole;
 	unsigned int n;
 	qaws_status st;
 	if (!surface || !out_curve || !(r > 0) || !(a1 != a0))
@@ -666,6 +733,7 @@ qaws_status qaws_surface_curve_create_geodesic_arc(qaws_surface const* surface, 
 		return st;
 	c0[0] = (double)centre.x; c0[1] = (double)centre.y;
 	sweep = a1 - a0;
+	pole = sg_pole(&ctx, c0);
 	/* a full turn within the float rounding of 2 pi closes the circle */
 	whole = fabs(fabs(sweep) - 2 * SG_PI) <= 1e-6 * 2 * SG_PI;
 	if (whole)
@@ -688,17 +756,14 @@ qaws_status qaws_surface_curve_create_geodesic_arc(qaws_surface const* surface, 
 		st = QAWS_STATUS_OK;
 		for (k = 0; k < n + 5 && st == QAWS_STATUS_OK; k++)
 		{
-			double y[4], d[2], ang = a0 + ((double)k - 2) * dt;
-			st = sg_dir(&ctx, c0[0], c0[1], ang, d);
-			if (st != QAWS_STATUS_OK) break;
-			y[0] = c0[0]; y[1] = c0[1]; y[2] = d[0]; y[3] = d[1];
-			st = sg_integrate(&ctx, y, r);
+			double y[4], ang = a0 + ((double)k - 2) * dt;
+			st = sg_ray(&ctx, c0, pole, ang, r, y);
 			pts[2 * k] = y[0]; pts[2 * k + 1] = y[1];
 		}
 		if (st == QAWS_STATUS_OK && whole)
 		{
-			/* a closed curve: its two ends one point */
-			P[2 * n] = P[0]; P[2 * n + 1] = P[1];
+			/* a closed curve: its two ends one point (round a pole, one period apart in u) */
+			P[2 * n] = P[0] + (pole ? (sweep > 0 ? 1 : -1) * pole * ctx.pu : 0); P[2 * n + 1] = P[1];
 		}
 		for (k = 0; k <= n && st == QAWS_STATUS_OK; k++)
 		{
@@ -717,12 +782,9 @@ qaws_status qaws_surface_curve_create_geodesic_arc(qaws_surface const* surface, 
 			st = sg_hermite(hp, hd, n + 1, &cv);
 		for (k = 0; k < n && st == QAWS_STATUS_OK; k++)
 		{
-			double y[4], d[2];
+			double y[4];
 			qaws_eval_result_2d e;
-			st = sg_dir(&ctx, c0[0], c0[1], a0 + (k + 0.5) * dt, d);
-			if (st != QAWS_STATUS_OK) break;
-			y[0] = c0[0]; y[1] = c0[1]; y[2] = d[0]; y[3] = d[1];
-			st = sg_integrate(&ctx, y, r);
+			st = sg_ray(&ctx, c0, pole, a0 + (k + 0.5) * dt, r, y);
 			if (st == QAWS_STATUS_OK && qaws_curve_evaluate_2d(cv, (qaws_scalar)(k + 0.5), QAWS_EVAL_FLAG_POSITION, &e) == QAWS_STATUS_OK)
 			{
 				double dd = hypot((double)e.position.x - y[0], (double)e.position.y - y[1]);
@@ -732,7 +794,7 @@ qaws_status qaws_surface_curve_create_geodesic_arc(qaws_surface const* surface, 
 		if (st == QAWS_STATUS_OK && (worst <= ctx.tol || n >= 1u << 16))
 		{
 			qaws_surface_curve* c;
-			if (sg_self_crossing(P, whole ? n : n + 1, whole))
+			if (sg_self_crossing(P, whole && !pole ? n : n + 1, whole && !pole))
 			{
 				free(pts);
 				qaws_curve_destroy(cv);
@@ -865,4 +927,29 @@ qaws_status qaws_internal_sg_eval(qaws_internal_sg_ctx const* c, double u, doubl
 	qaws_surface_eval_result* r)
 {
 	return sg_eval(c, u, v, flags, r);
+}
+
+/* E, F, G without the singular check (a pole's edge has zero length) */
+qaws_status qaws_internal_sg_first_form(qaws_internal_sg_ctx const* c, double u, double v, double* g)
+{
+	qaws_surface_eval_result r;
+	qaws_status st = sg_eval(c, u, v, QAWS_SURFACE_EVAL_DU | QAWS_SURFACE_EVAL_DV, &r);
+	if (st != QAWS_STATUS_OK)
+		return st;
+	g[0] = sg_dot(r.du, r.du);
+	g[1] = sg_dot(r.du, r.dv);
+	g[2] = sg_dot(r.dv, r.dv);
+	return QAWS_STATUS_OK;
+}
+
+/* sqrt(E G - F^2), zero at a pole */
+qaws_status qaws_internal_sg_area_element(qaws_internal_sg_ctx const* c, double u, double v, double* out)
+{
+	double g[3], det;
+	qaws_status st = qaws_internal_sg_first_form(c, u, v, g);
+	if (st != QAWS_STATUS_OK)
+		return st;
+	det = g[0] * g[2] - g[1] * g[1];
+	*out = det > 0 ? sqrt(det) : 0;
+	return QAWS_STATUS_OK;
 }

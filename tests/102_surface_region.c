@@ -16,6 +16,10 @@
  *     integral of the Gaussian curvature equals the angle sum less pi) and
  *     on a geodesic circle (with its geodesic curvature)
  *   - containment, and the region as a trimmed surface
+ *   - seams and poles: circles across a sphere's seam and centred on its
+ *     poles, caps and bands from latitude lines, Booleans across the seam;
+ *     a band round a cylinder and a circle across its seam; circles across
+ *     either seam of a torus
  */
 
 #include "test_common.h"
@@ -339,6 +343,199 @@ static void test_gauss_bonnet(void)
 	qaws_surface_destroy(s);
 }
 
+static qaws_surface_curve* srt_uv_line(qaws_surface const* s, double u0, double v0, double u1, double v1, qaws_curve** keep)
+{
+	qaws_bezier_desc bd;
+	qaws_scalar cp[4];
+	qaws_surface_curve* c = NULL;
+	cp[0] = (qaws_scalar)u0; cp[1] = (qaws_scalar)v0; cp[2] = (qaws_scalar)u1; cp[3] = (qaws_scalar)v1;
+	memset(&bd, 0, sizeof(bd));
+	bd.dimension = QAWS_DIMENSION_2D; bd.degree = 1; bd.control_points = cp; bd.control_point_count = 2;
+	qaws_curve_create_bezier(&bd, keep);
+	qaws_surface_curve_create_uv(s, *keep, &c);
+	return c;
+}
+
+static double srt_area1(qaws_surface const* s, qaws_surface_curve const* c, double* per, qaws_status* st)
+{
+	qaws_surface_curve const* pc[1];
+	qaws_surface_path P;
+	qaws_surface_region* r = NULL;
+	qaws_scalar a = 0, p = 0;
+	pc[0] = c;
+	P.curves = pc; P.curve_count = 1; P.closed = 1;
+	*st = qaws_surface_clip(s, QAWS_CLIP_NONE, QAWS_FILL_NON_ZERO, &P, 1, NULL, 0, &r);
+	if (*st == QAWS_STATUS_OK) *st = qaws_surface_region_get_area(r, &a);
+	if (*st == QAWS_STATUS_OK && per) *st = qaws_surface_region_get_perimeter(r, &p);
+	if (per) *per = (double)p;
+	qaws_surface_region_destroy(r);
+	return (double)a;
+}
+
+static qaws_surface* srt_torus(double R0, double r0, double start, qaws_curve** prof)
+{
+	qaws_arc_segment g;
+	qaws_arc_desc ad;
+	qaws_surface_revolution_desc rd;
+	qaws_surface* s = NULL;
+	memset(&g, 0, sizeof(g));
+	g.center[0] = (qaws_scalar)R0; g.radius = (qaws_scalar)r0;
+	g.angle_start = (qaws_scalar)start; g.angle_end = (qaws_scalar)(start + 2 * SRT_PI);
+	memset(&ad, 0, sizeof(ad));
+	ad.dimension = QAWS_DIMENSION_2D; ad.segments = &g; ad.segment_count = 1;
+	qaws_curve_create_arc(&ad, prof);
+	memset(&rd, 0, sizeof(rd));
+	rd.profile = *prof; rd.axis_direction.z = 1;
+	qaws_surface_create_revolution(&rd, &s);
+	return s;
+}
+
+static void test_seams(void)
+{
+	double R = 1.3, tol = SRT_F32 ? 2e-4 : 1e-9;
+	qaws_curve* prof = NULL;
+	qaws_surface* s = srt_sphere(R, &prof);
+	char msg[400];
+	/* a circle across the seam, circles centred on both poles */
+	{
+		qaws_surface_curve *c = NULL, *n = NULL, *so = NULL;
+		double r = 0.6, cap = 2 * SRT_PI * R * R * (1 - cos(r / R)), a1, a2, a3, p2 = 0;
+		qaws_status s1, s2, s3;
+		qaws_surface_curve_create_geodesic_arc(s, srt_uv(0.02, 0.55), (qaws_scalar)r, 0, (qaws_scalar)(2 * SRT_PI), 0, &c);
+		qaws_surface_curve_create_geodesic_arc(s, srt_uv(0.3, 1), (qaws_scalar)r, 0, (qaws_scalar)(2 * SRT_PI), 0, &n);
+		qaws_surface_curve_create_geodesic_arc(s, srt_uv(0.3, 0), (qaws_scalar)r, 0, (qaws_scalar)(2 * SRT_PI), 0, &so);
+		a1 = srt_area1(s, c, NULL, &s1);
+		a2 = srt_area1(s, n, &p2, &s2);
+		a3 = srt_area1(s, so, NULL, &s3);
+		sprintf(msg, "sphere: a geodesic circle across the seam %.2g, about the north pole %.2g (perimeter %.2g), about the south pole %.2g, against the cap's area",
+			fabs(a1 - cap), fabs(a2 - cap), fabs(p2 - 2 * SRT_PI * R * sin(r / R)), fabs(a3 - cap));
+		TEST_ASSERT(c && n && so && !s1 && !s2 && !s3 && fabs(a1 - cap) <= tol && fabs(a2 - cap) <= tol && fabs(a3 - cap) <= tol &&
+			fabs(p2 - 2 * SRT_PI * R * sin(r / R)) <= tol, msg);
+		qaws_surface_curve_destroy(c); qaws_surface_curve_destroy(n); qaws_surface_curve_destroy(so);
+	}
+	/* caps and a band by latitude lines drawn in (u, v): going +u the inside is north (on the left) */
+	{
+		qaws_curve *k1 = NULL, *k2 = NULL, *k3 = NULL;
+		qaws_surface_curve *low = NULL, *north = srt_uv_line(s, 0, 0.8, 1, 0.8, &k1);
+		qaws_surface_curve* south = srt_uv_line(s, 1, 0.3, 0, 0.3, &k2);
+		qaws_surface_curve const* pb[2];
+		qaws_surface_path B[2];
+		qaws_surface_region* r = NULL;
+		qaws_scalar band = 0;
+		double l1 = -SRT_PI / 2 + SRT_PI * 0.8, l2 = -SRT_PI / 2 + SRT_PI * 0.3, a1, a2;
+		qaws_status s1, s2, s3;
+		a1 = srt_area1(s, north, NULL, &s1);
+		a2 = srt_area1(s, south, NULL, &s2);
+		/* the band: north of the lower line less north of the upper one */
+		low = srt_uv_line(s, 0, 0.3, 1, 0.3, &k3);
+		pb[0] = low; pb[1] = north;
+		B[0].curves = pb; B[0].curve_count = 1; B[0].closed = 1;
+		B[1].curves = pb + 1; B[1].curve_count = 1; B[1].closed = 1;
+		s3 = qaws_surface_clip(s, QAWS_CLIP_DIFFERENCE, QAWS_FILL_NON_ZERO, &B[0], 1, &B[1], 1, &r);
+		if (s3 == QAWS_STATUS_OK) qaws_surface_region_get_area(r, &band);
+		qaws_surface_region_destroy(r);
+		sprintf(msg, "sphere: latitude lines drawn in (u, v): the north cap %.2g, the south cap %.2g, the band between them %.2g, against closed forms",
+			fabs(a1 - 2 * SRT_PI * R * R * (1 - sin(l1))), fabs(a2 - 2 * SRT_PI * R * R * (1 + sin(l2))), fabs((double)band - 2 * SRT_PI * R * R * (sin(l1) - sin(l2))));
+		TEST_ASSERT(!s1 && !s2 && !s3 && fabs(a1 - 2 * SRT_PI * R * R * (1 - sin(l1))) <= tol && fabs(a2 - 2 * SRT_PI * R * R * (1 + sin(l2))) <= tol &&
+			fabs((double)band - 2 * SRT_PI * R * R * (sin(l1) - sin(l2))) <= tol, msg);
+		qaws_surface_curve_destroy(north); qaws_surface_curve_destroy(south); qaws_surface_curve_destroy(low);
+		qaws_curve_destroy(k1); qaws_curve_destroy(k2); qaws_curve_destroy(k3);
+	}
+	/* two circles across the seam: inclusion and exclusion */
+	{
+		qaws_surface_curve *a = NULL, *b = NULL;
+		qaws_surface_curve const *pa[1], *pb[1];
+		qaws_surface_path A, B;
+		double aA, aB, aU, aI;
+		qaws_status st, s1 = QAWS_STATUS_OK;
+		qaws_surface_curve_create_geodesic_arc(s, srt_uv(0.97, 0.5), (qaws_scalar)0.55, 0, (qaws_scalar)(2 * SRT_PI), 0, &a);
+		qaws_surface_curve_create_geodesic_arc(s, srt_uv(1.05, 0.55), (qaws_scalar)0.5, 0, (qaws_scalar)(2 * SRT_PI), 0, &b);
+		pa[0] = a; pb[0] = b;
+		A.curves = pa; A.curve_count = 1; A.closed = 1;
+		B.curves = pb; B.curve_count = 1; B.closed = 1;
+		aA = srt_area(s, QAWS_CLIP_NONE, &A, 1, NULL, 0, &st); if (st) s1 = st;
+		aB = srt_area(s, QAWS_CLIP_NONE, &B, 1, NULL, 0, &st); if (st) s1 = st;
+		aU = srt_area(s, QAWS_CLIP_UNION, &A, 1, &B, 1, &st); if (st) s1 = st;
+		aI = srt_area(s, QAWS_CLIP_INTERSECTION, &A, 1, &B, 1, &st); if (st) s1 = st;
+		sprintf(msg, "sphere: two circles across the seam (one centred past it): union + intersection - both %.2g, the intersection %.4f",
+			aU + aI - aA - aB, aI);
+		TEST_ASSERT(s1 == QAWS_STATUS_OK && fabs(aU + aI - aA - aB) <= tol && aI > 0.1, msg);
+		qaws_surface_curve_destroy(a); qaws_surface_curve_destroy(b);
+	}
+	qaws_surface_destroy(s);
+	qaws_curve_destroy(prof);
+	/* a cylinder: a band between two loops round it, and a circle across the seam */
+	{
+		double Rc = 0.8, H = 2.5, a, per = 0, ac;
+		qaws_arc_segment g;
+		qaws_arc_desc ad;
+		qaws_curve *circle = NULL, *k1 = NULL, *k2 = NULL;
+		qaws_surface_extrusion_desc ed;
+		qaws_surface* cy = NULL;
+		qaws_surface_curve *lo, *hi, *c = NULL;
+		qaws_surface_curve const* pb[2];
+		qaws_surface_path B[2];
+		qaws_surface_region* r = NULL;
+		qaws_scalar ar = 0, pr = 0;
+		qaws_range ru;
+		qaws_status st, s2;
+		memset(&g, 0, sizeof(g));
+		g.radius = (qaws_scalar)Rc; g.angle_start = 0; g.angle_end = (qaws_scalar)(2 * SRT_PI);
+		memset(&ad, 0, sizeof(ad));
+		ad.dimension = QAWS_DIMENSION_2D; ad.segments = &g; ad.segment_count = 1;
+		qaws_curve_create_arc(&ad, &circle);
+		memset(&ed, 0, sizeof(ed));
+		ed.profile = circle; ed.direction.z = 1; ed.length = (qaws_scalar)H;
+		qaws_surface_create_extrusion(&ed, &cy);
+		ru = qaws_surface_get_u_range(cy);
+		lo = srt_uv_line(cy, 0, 0.3, ru.max_value, 0.3, &k1);
+		hi = srt_uv_line(cy, ru.max_value, 0.7, 0, 0.7, &k2);
+		pb[0] = lo; pb[1] = hi;
+		B[0].curves = pb; B[0].curve_count = 1; B[0].closed = 1;
+		B[1].curves = pb + 1; B[1].curve_count = 1; B[1].closed = 1;
+		st = qaws_surface_clip(cy, QAWS_CLIP_NONE, QAWS_FILL_NON_ZERO, B, 2, NULL, 0, &r);
+		if (st == QAWS_STATUS_OK) { qaws_surface_region_get_area(r, &ar); qaws_surface_region_get_perimeter(r, &pr); }
+		qaws_surface_region_destroy(r);
+		a = 2 * SRT_PI * Rc * 0.4 * H;
+		per = 2 * 2 * SRT_PI * Rc;
+		qaws_surface_curve_create_geodesic_arc(cy, srt_uv(0.02 * ru.max_value, 0.5), (qaws_scalar)0.5, 0, (qaws_scalar)(2 * SRT_PI), 0, &c);
+		ac = srt_area1(cy, c, NULL, &s2);
+		sprintf(msg, "cylinder: a band between two loops round it (area %.2g, perimeter %.2g without the seam), a circle across the seam against pi r^2 %.2g",
+			fabs((double)ar - a), fabs((double)pr - per), fabs(ac - SRT_PI * 0.25));
+		TEST_ASSERT(st == QAWS_STATUS_OK && !s2 && fabs((double)ar - a) <= tol && fabs((double)pr - per) <= tol && fabs(ac - SRT_PI * 0.25) <= tol, msg);
+		qaws_surface_curve_destroy(lo); qaws_surface_curve_destroy(hi); qaws_surface_curve_destroy(c);
+		qaws_curve_destroy(k1); qaws_curve_destroy(k2);
+		qaws_surface_destroy(cy);
+		qaws_curve_destroy(circle);
+	}
+	/* a torus, closed both ways: a circle across the u seam against the same circle turned
+	   away from it; across the v seam against the same circle with the profile's seam
+	   elsewhere */
+	{
+		qaws_curve *p1 = NULL, *p2 = NULL;
+		qaws_surface* t1 = srt_torus(1.0, 0.42, 0, &p1);
+		qaws_surface* t2 = srt_torus(1.0, 0.42, SRT_PI / 2, &p2);
+		qaws_surface_curve *c1 = NULL, *c2 = NULL, *c3 = NULL, *c4 = NULL;
+		double a1, a2, a3, a4;
+		qaws_status q1, q2, q3, q4;
+		qaws_surface_curve_create_geodesic_arc(t1, srt_uv(0.01, 0.3), (qaws_scalar)0.3, 0, (qaws_scalar)(2 * SRT_PI), 0, &c1);
+		qaws_surface_curve_create_geodesic_arc(t1, srt_uv(0.4, 0.3), (qaws_scalar)0.3, 0, (qaws_scalar)(2 * SRT_PI), 0, &c2);
+		/* the outer equator: v 0 on t1, v 0.75 on t2 (its profile starts a quarter turn later) */
+		qaws_surface_curve_create_geodesic_arc(t1, srt_uv(0.4, 0.02), (qaws_scalar)0.3, 0, (qaws_scalar)(2 * SRT_PI), 0, &c3);
+		qaws_surface_curve_create_geodesic_arc(t2, srt_uv(0.4, 0.77), (qaws_scalar)0.3, 0, (qaws_scalar)(2 * SRT_PI), 0, &c4);
+		a1 = srt_area1(t1, c1, NULL, &q1);
+		a2 = srt_area1(t1, c2, NULL, &q2);
+		a3 = srt_area1(t1, c3, NULL, &q3);
+		a4 = srt_area1(t2, c4, NULL, &q4);
+		sprintf(msg, "torus: a circle across the u seam against the same circle away from it %.2g; across the v seam against the profile's seam elsewhere %.2g",
+			fabs(a1 - a2), fabs(a3 - a4));
+		TEST_ASSERT(c1 && c2 && c3 && c4 && !q1 && !q2 && !q3 && !q4 && fabs(a1 - a2) <= tol && fabs(a3 - a4) <= tol && a1 > 0.2, msg);
+		qaws_surface_curve_destroy(c1); qaws_surface_curve_destroy(c2); qaws_surface_curve_destroy(c3); qaws_surface_curve_destroy(c4);
+		qaws_surface_destroy(t1); qaws_surface_destroy(t2);
+		qaws_curve_destroy(p1); qaws_curve_destroy(p2);
+	}
+}
+
 int test_102_surface_region_main(void)
 {
 	g_pass = 0;
@@ -348,6 +545,7 @@ int test_102_surface_region_main(void)
 	test_plane();
 	test_cylinder();
 	test_gauss_bonnet();
+	test_seams();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
 }

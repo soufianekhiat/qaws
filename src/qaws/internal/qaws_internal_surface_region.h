@@ -25,4 +25,8 @@ qaws_status qaws_internal_sg_metric(qaws_internal_sg_ctx const* c, double u, dou
 qaws_status qaws_internal_sg_eval(qaws_internal_sg_ctx const* c, double u, double v, unsigned int flags,
 	qaws_surface_eval_result* r);
 
+/* E, F, G without the singular check; sqrt(E G - F^2), zero at a pole */
+qaws_status qaws_internal_sg_first_form(qaws_internal_sg_ctx const* c, double u, double v, double* g);
+qaws_status qaws_internal_sg_area_element(qaws_internal_sg_ctx const* c, double u, double v, double* out);
+
 #endif /* QAWS_INTERNAL_SURFACE_REGION_H */

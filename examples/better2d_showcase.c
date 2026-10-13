@@ -20,6 +20,8 @@
  *                      a bicubic patch and a torus, beside their parameter planes
  *   b2d17_surface_boolean.svg  Booleans of geodesic squares and circles on a patch
  *                      and a sphere, with their surface areas
+ *   b2d18_surface_seams.svg  regions across seams and round poles on a sphere,
+ *                      a cylinder and a torus, with their parameter planes
  *
  * Each figure lives in better2d_showcase/NN_*.c, compiled as one translation
  * unit.
@@ -59,6 +61,7 @@
 #include "better2d_showcase/15_mean_value.c"
 #include "better2d_showcase/16_surface_geodesic.c"
 #include "better2d_showcase/17_surface_boolean.c"
+#include "better2d_showcase/18_surface_seams.c"
 
 int main(void)
 {
@@ -81,5 +84,6 @@ int main(void)
 	demo_mean_value();
 	demo_surface_geodesic();
 	demo_surface_boolean();
+	demo_surface_seams();
 	return 0;
 }

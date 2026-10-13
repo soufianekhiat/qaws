@@ -65,8 +65,12 @@ them.
 - **Closed directions** (a cylinder's or a revolution's u): opposite edges
   of the domain that coincide in space are found at creation. Curves cross
   them continuously, with their (u, v) images in the covering plane (u past
-  the domain where they went round). Poles (S_u x S_v = 0) are not crossed
-  yet.
+  the domain where they went round).
+- **Poles** (a whole edge of the domain mapped to one point, a sphere's
+  ends): a geodesic circle centred on one has its rays start along the
+  meridians u = u0 + P theta / (2 pi), a hair from the pole where the
+  metric is regular. Its (u, v) image runs once round the period, against u
+  at v0 so that it is counter-clockwise seen from outside.
 
 ## Accuracy and cost
 
@@ -120,8 +124,21 @@ qaws_surface_region_destroy(r);
   taken round the loops, with 8-point Gauss on every half span of the
   boundary curves.
 - **Perimeter**: ∫ sqrt(g(c', c')) dt along the loops.
-- **Seams**: regions must not cross a closed direction's seam yet. That is
-  the next step of the plan.
+- **Seams.** On surfaces closed in u or v (cylinders, revolutions, tori),
+  the operands are brought into one period before the Boolean:
+  - each loop is cut into its period cells (clipped by each cell under the
+    fill rule of its own orientation), the pieces translated back by whole
+    periods;
+  - a loop going once round a closed direction (a latitude line, a pole
+    circle) is capped along the domain's edge, and the cap's constant
+    restored with the whole period;
+  - each operand is united under its fill rule, then the Boolean runs
+    under non-zero.
+  Loops going round more than once, or round both directions of a torus,
+  return `UNSUPPORTED_OPERATION`.
+- **Poles**: the area element vanishes there, so areas and integrals over
+  caps are ordinary; edges along the seam or on a pole are left out of the
+  perimeter.
 
 ### Accuracy (test 102, f64)
 
@@ -135,6 +152,15 @@ qaws_surface_region_destroy(r);
 | Flat sheared patch: a union against the 2D engine on the plane's coordinates | 3e-11 |
 | Cylinder: a geodesic circle against the unrolled pi r² | 5e-11 |
 | Wavy bicubic patch: Gauss-Bonnet on a geodesic triangle (∬ K dA against the angle sum less pi) | 6e-12 |
+| Sphere: a geodesic circle across the seam against the cap | 7e-11 |
+| Sphere: circles centred on the poles, area and perimeter | 1e-15 |
+| Sphere: caps and a band from latitude lines drawn in (u, v) | 9e-15 |
+| Sphere: two circles across the seam by inclusion and exclusion | 2e-12 |
+| Cylinder: a band between two loops round it, area and perimeter | 4e-15 |
+| Cylinder: a circle across the seam against pi r² | 5e-11 |
+| Torus: circles across either seam against the same circle away from it | 4e-13 |
+
+In f32 the same checks hold to 6e-6.
 
 A Boolean of two circles with their areas takes about 10 ms. Figure 17
 shades Booleans on a patch and a sphere with their surface areas.
