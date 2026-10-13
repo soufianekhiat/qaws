@@ -1,4 +1,4 @@
-/* Figure 29: sampling and meshing across a shell's faces
+/* Figure 29: sampling, meshing and offsets across a shell's faces
    (qaws_shell_region_triangulate, qaws_shell_region_sample). A geodesic
    disk round a cube's corner spans three faces: its mesh is one, conformal
    along the cube's edges (each face's boundary edges split at the other
@@ -38,9 +38,9 @@ static void demo_shell_mesh(void)
 	qaws_surface_mesh_desc md;
 	unsigned int i, k;
 	char label[240];
-	if (!svg_open(&s, "showcase/b2d29_shell_mesh.svg", (int)(48 + 2 * (pw + 12)), (int)(110 + (ph + 44)),
-		"Sampling and meshing on shells",
-		"qaws_shell_region_triangulate: one mesh across the faces, conformal at their edges; qaws_shell_region_sample: shared out by area"))
+	if (!svg_open(&s, "showcase/b2d29_shell_mesh.svg", (int)(48 + 3 * (pw + 12)), (int)(110 + (ph + 44)),
+		"Sampling, meshing and offsets on shells",
+		"one mesh across the faces, conformal at their edges; samples shared out by area; offsets along the shell (qaws_shell_region_offset)"))
 		return;
 	for (i = 0; i < 6; i++) f[i] = shf_face(P[C[i][0]], P[C[i][1]], P[C[i][2]], P[C[i][3]]);
 	qaws_shell_atlas_create((qaws_surface const* const*)f, 6, 0, &a);
@@ -94,6 +94,35 @@ static void demo_shell_mesh(void)
 		ssd_outline(&sc, g, f, 6, dark);
 		ssd_edges(&sc, f, 6);
 		ssd_draw(&s, &sc);
+	}
+	/* the disk grown and shrunk along the shell */
+	{
+		viewport v3;
+		sgf_view view;
+		ssd_scene sc;
+		ssd_paint paint[1];
+		qaws_shell_region *gr = NULL, *sh = NULL;
+		qaws_scalar A0 = 0, A1 = 0, A2 = 0;
+		static int const green[3] = { 26, 127, 55 }, purple[3] = { 130, 80, 223 };
+		if (g) qaws_shell_region_offset(g, (qaws_scalar)0.25, 0, &gr);
+		if (g) qaws_shell_region_offset(g, (qaws_scalar)-0.25, 0, &sh);
+		if (g) qaws_shell_region_get_area(g, &A0);
+		if (gr) qaws_shell_region_get_area(gr, &A1);
+		if (sh) qaws_shell_region_get_area(sh, &A2);
+		memset(&sc, 0, sizeof(sc));
+		v3.x0 = 24 + 2 * (pw + 12); v3.y0 = 104; v3.w = pw; v3.h = ph;
+		sgf_view_init(&view, -0.75 * pi, 0.6, 110, v3.x0 + pw / 2, v3.y0 + ph / 2 + 10);
+		sc.view = &view; sc.res = 40;
+		paint[0].r = g; memcpy(paint[0].rgb, fblue, sizeof(fblue));
+		ssd_surfaces(&sc, f, 6, paint, 1);
+		ssd_outline(&sc, g, f, 6, dark);
+		if (gr) ssd_outline(&sc, gr, f, 6, purple);
+		if (sh) ssd_outline(&sc, sh, f, 6, green);
+		ssd_edges(&sc, f, 6);
+		sprintf(label, "offsets by 0.25: areas %.4f, grown %.4f, shrunk %.4f", (double)A0, (double)A1, (double)A2);
+		ssd_panel(&s, &v3, label, "purple: grown (the disk of r + d); green: shrunk, across the cube's edges");
+		ssd_draw(&s, &sc);
+		qaws_shell_region_destroy(gr); qaws_shell_region_destroy(sh);
 	}
 	svg_close(&s);
 	qaws_shell_mesh_destroy(m);

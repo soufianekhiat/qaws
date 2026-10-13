@@ -411,3 +411,7 @@ Each item lands with tests in f64 and f32, docs, and a showcase figure.
   (qaws_shell_region_sample, qaws_shell_region_triangulate): shared out by
   area; one mesh, conformal at the edges (welded, then boundary edges split
   at the other faces' vertices). Test 111; figure 29.
+- Second part, item 4 done: offsets on shells (qaws_shell_region_offset):
+  fronts along the conormals across edges (the circles' run fitting with a
+  base curve), strips for open pieces, the fronts of closed pieces alone,
+  disks at the joins. Test 111; figure 29.

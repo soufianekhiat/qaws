@@ -158,6 +158,17 @@ qaws_status qaws_shell_region_get_perimeter(qaws_shell_region const* region, qaw
 /* 1 inside, 0 outside, -1 on the boundary. */
 qaws_status qaws_shell_region_contains(qaws_shell_region const* region, qaws_shell_point p, int* out_inside);
 
+/* The region grown by distance (> 0: the points within it of the region)
+   or shrunk (< 0: the region's points farther than |distance| from its
+   boundary), along the shell: each boundary piece's strip to its front
+   (the piece's points carried along its conormal across edges, fitted per
+   face as circles are), closed by the conormal rays at its ends, and
+   geodesic disks at the pieces' starts for round joins; united with the
+   region, or taken from it. Each boundary piece must curve less than
+   1/|distance| towards the front (no cusps). */
+qaws_status qaws_shell_region_offset(qaws_shell_region const* region, qaws_scalar distance, qaws_scalar tolerance,
+	qaws_shell_region** out_region);
+
 /* count points spread over the region: shared out between the faces by
    their parts' areas (largest remainders), each face's part sampled as
    qaws_surface_region_sample (desc's seed moved on per face; desc NULL:

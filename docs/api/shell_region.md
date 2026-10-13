@@ -233,6 +233,55 @@ qaws_shell_region_triangulate(region, &mesh_desc, &mesh);      /* one mesh acros
 
 Figure 29 shows the mesh and the samples.
 
+## Offsets
+
+```c
+qaws_shell_region_offset(region, distance, 0, &out);   /* > 0 grown, < 0 shrunk */
+```
+
+The points within the distance of the region (grown), or its points
+farther than |distance| from its boundary (shrunk), measured along the
+shell.
+
+- **Fronts.** Each boundary piece (a curve of a face's part that is not
+  along a shared side or a seam's cut) has a front: its points carried
+  |distance| along their conormal, outward when growing and inward when
+  shrinking, across edges by the straightest continuation. The front is
+  fitted per face the way shell circles are: the faces met at 32 places,
+  the changes of face found by bisection, and each run a Hermite curve.
+- **Open pieces.** Each gives a strip: the piece backwards, the conormal ray
+  at its start, the front, and the ray back at its end. A piece end on a
+  shared side is pulled back by 10 times the edge tolerance, as a fraction
+  of the piece, because a front started on the side rounds off the face in
+  f32. When shrinking, the loop is turned round.
+- **Closed pieces** (a path of one curve). The front alone bounds the
+  result: united with it when growing, met with it when shrinking. This
+  avoids a strip with a slit, which the f32 clip mishandles.
+- **Joins.** A geodesic disk of the distance at every piece's start gives
+  the round joins, and covers the hair at shared sides.
+- **Result.** When growing: the region united with the strips, disks and
+  fronts. When shrinking: the region met with the closed fronts, less the
+  strips and disks.
+- **Vertices.** A front point that lands on a shell vertex by a rounding is
+  taken a hair to either side.
+
+| Check (test 111) | f64 | f32 |
+|---|---|---|
+| Geodesic disks grown by 0.25 (two across edges, one round a cube's corner) against the disks of r + 0.25 | 7e-10 | 5e-6 |
+| The two without a vertex inside, shrunk by 0.25, against the disks of r - 0.25 | 2e-10 | 1.1e-5 |
+
+Shrinking a disk round a cube's corner leaves 0.0025 more than the disk
+of r - d, the same in f32 and f64. Near a cone point, some points are
+farther from the boundary than r minus their distance from the centre,
+because the geodesics through the vertex do not extend. No closed form
+checks that case. Figure 29's third panel shows it.
+
+Limits:
+- A boundary piece must curve less than 1/|distance| towards its front;
+  cusps are not handled.
+- Each piece adds a disk and a strip to the union, so a boundary of many
+  pieces is slow (20 s for the disk round the corner in f64).
+
 ## Thin holes
 
 On a trimmed face a trace step goes no further than the nearest free trim

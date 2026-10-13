@@ -1,12 +1,14 @@
 /*
- * Test 111: sampling and meshing across the faces of a shell
- * (qaws_shell_region_sample, qaws_shell_region_triangulate)
+ * Test 111: sampling, meshing and offsets across the faces of a shell
+ * (qaws_shell_region_sample, qaws_shell_region_triangulate, qaws_shell_region_offset)
  *
  *   - a geodesic disk round a cube's corner (three faces): its mesh's area
  *     against the region's; no cracks where the faces meet (the edges used
  *     by one triangle add up to the region's perimeter) and no edge in more
  *     than two triangles
  *   - samples of the disk: all inside, shared out by the faces' areas
+ *   - offsets: disks across edges and round a corner grown by d against the
+ *     disks of r + d, and shrunk (no vertex inside) against r - d
  */
 
 #include "test_common.h"
@@ -145,12 +147,54 @@ static void test_cube_corner(void)
 	for (i = 0; i < 6; i++) qaws_surface_destroy(f[i]);
 }
 
+static void test_offsets(void)
+{
+	/* a geodesic disk's offset by d is the disk of radius r + d (the points
+	   within d of it), and shrunk the disk of radius r - d where no vertex
+	   is inside (a cone point leaves points behind it farther from the
+	   boundary): two disks across edges and one round a cube's corner */
+	static double const P[8][3] = { { -1, -1, -1 }, { 1, -1, -1 }, { -1, 1, -1 }, { 1, 1, -1 }, { -1, -1, 1 }, { 1, -1, 1 }, { -1, 1, 1 }, { 1, 1, 1 } };
+	static int const C[6][4] = { { 4, 5, 6, 7 }, { 0, 2, 1, 3 }, { 1, 3, 5, 7 }, { 0, 4, 2, 6 }, { 2, 6, 3, 7 }, { 0, 1, 4, 5 } };
+	static double const cases[3][4] = { { 0.5, 0.5, 0.4, 1 }, { 0.7, 0.4, 0.5, 1 }, { 0.85, 0.85, 0.75, 0 } };
+	qaws_surface* f[6];
+	qaws_shell_atlas* a = NULL;
+	unsigned int i, z, bad = 0;
+	double worst = 0, tol = sizeof(qaws_scalar) == 4 ? 5e-5 : 1e-8;
+	char msg[300];
+	for (i = 0; i < 6; i++) f[i] = smt_plane(P[C[i][0]], P[C[i][1]], P[C[i][2]], P[C[i][3]]);
+	qaws_shell_atlas_create((qaws_surface const* const*)f, 6, 0, &a);
+	for (z = 0; z < 3; z++)
+	{
+		qaws_shell_point c;
+		qaws_shell_region *g = NULL, *gr = NULL, *sh = NULL, *big = NULL, *small = NULL;
+		qaws_scalar A1 = 0, A2 = 0, B1 = 0, B2 = 0;
+		double r = cases[z][2];
+		c.face = 0; c.uv.x = (qaws_scalar)cases[z][0]; c.uv.y = (qaws_scalar)cases[z][1];
+		qaws_shell_region_create_geodesic_disk(a, c, (qaws_scalar)r, 0, &g);
+		qaws_shell_region_create_geodesic_disk(a, c, (qaws_scalar)(r + 0.25), 0, &big);
+		if (cases[z][3]) qaws_shell_region_create_geodesic_disk(a, c, (qaws_scalar)(r - 0.25), 0, &small);
+		if (!g || !big || qaws_shell_region_offset(g, (qaws_scalar)0.25, 0, &gr) != QAWS_STATUS_OK)
+			bad++;
+		if (cases[z][3] && (!small || qaws_shell_region_offset(g, (qaws_scalar)-0.25, 0, &sh) != QAWS_STATUS_OK))
+			bad++;
+		if (gr) { qaws_shell_region_get_area(gr, &A1); qaws_shell_region_get_area(big, &B1); worst = fmax(worst, fabs((double)A1 - B1)); }
+		if (sh) { qaws_shell_region_get_area(sh, &A2); qaws_shell_region_get_area(small, &B2); worst = fmax(worst, fabs((double)A2 - B2)); }
+		qaws_shell_region_destroy(g); qaws_shell_region_destroy(gr); qaws_shell_region_destroy(sh);
+		qaws_shell_region_destroy(big); qaws_shell_region_destroy(small);
+	}
+	sprintf(msg, "shell offsets: disks grown (two across edges, one round a corner) and shrunk against the disks of r +- d: %u failed, %.2g off", bad, worst);
+	TEST_ASSERT(bad == 0 && worst <= tol, msg);
+	qaws_shell_atlas_destroy(a);
+	for (i = 0; i < 6; i++) qaws_surface_destroy(f[i]);
+}
+
 int test_111_shell_mesh_main(void)
 {
 	g_pass = 0;
 	g_fail = 0;
 	printf("Test 111: sampling and meshing on shells\n");
 	test_cube_corner();
+	test_offsets();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
 }

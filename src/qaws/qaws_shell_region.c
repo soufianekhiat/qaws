@@ -1665,12 +1665,16 @@ qaws_status qaws_shell_curve_create_geodesic_ray(qaws_shell_atlas const* a, qaws
 	return QAWS_STATUS_OK;
 }
 
-/* the circle's point at angle th: the ray from the centre run r */
+/* the circle's point at angle th: the ray from the centre run r; or, with a
+   base, the front of an offset: the base curve's point at s0 + (s1 - s0) th
+   (on face c.face) carried r along its unit conormal on the side */
 typedef struct sh_circ
 {
 	qaws_shell_atlas const* a;
 	qaws_shell_point c;
 	double r;
+	qaws_curve const* base;
+	double s0, s1, side;
 } sh_circ;
 
 static qaws_status sh_circ_at(sh_circ const* k, double th, unsigned int* f, double* uv)
@@ -1678,6 +1682,24 @@ static qaws_status sh_circ_at(sh_circ const* k, double th, unsigned int* f, doub
 	double end[2], vel[2], y[4];
 	qaws_status st;
 	double cc[2];
+	if (k->base)
+	{
+		/* (a front point a rounding on a shell vertex, where its geodesic
+		   stops, taken a hair either side) */
+		unsigned int tries;
+		for (tries = 0; tries < 3; tries++)
+		{
+			double t = th + (tries == 1 ? 1e-7 : tries == 2 ? -1e-7 : 0);
+			if ((st = qaws_internal_sg_conormal(&k->a->c[k->c.face], k->base, k->s0 + (k->s1 - k->s0) * t, k->side, y)) != QAWS_STATUS_OK)
+				return st;
+			*f = k->c.face;
+			st = sh_trace(k->a, f, y, k->r, NULL, NULL);
+			uv[0] = y[0]; uv[1] = y[1];
+			if (st != QAWS_STATUS_OUT_OF_RANGE)
+				break;
+		}
+		return st;
+	}
 	cc[0] = k->c.uv.x; cc[1] = k->c.uv.y;
 	if ((st = qaws_internal_sg_shoot(&k->a->c[k->c.face], cc, th, 0, end, vel)) != QAWS_STATUS_OK)
 		return st;
@@ -1900,7 +1922,7 @@ static qaws_shell_point sh_off_seam(qaws_shell_atlas const* a, qaws_shell_point 
 qaws_status qaws_shell_curve_create_geodesic_circle(qaws_shell_atlas const* a, qaws_shell_point centre, qaws_scalar radius,
 	qaws_scalar tolerance, qaws_shell_curve** out_curve)
 {
-	sh_circ k;
+	sh_circ k = { 0 };
 	unsigned int n = 64, i, *fa = NULL;
 	double* th = NULL;
 	qaws_shell_curve* sc = NULL;
@@ -3288,7 +3310,7 @@ static qaws_status sh_vertex_disk(qaws_shell_atlas const* a, unsigned int v, dou
 			/* the corner where side k starts: from its way out round to the
 			   way back along the side before it */
 			qaws_internal_sg_ctx const* c = &a->c[f];
-			sh_circ kc;
+			sh_circ kc = { 0 };
 			double uv[2], t0 = 0, t1 = 0, eps = SH_VERTEX_EPS, dout[2], din[2], e[2];
 			int pv = sh_side_prev(a, f, (int)k), ck = sh_side_ccw((int)k), cp = sh_side_ccw(pv);
 			unsigned int ns, q;
@@ -3357,7 +3379,7 @@ static int sh_ray_vertex(sh_circ const* k, double th, unsigned int* vout, double
 qaws_status qaws_shell_region_create_geodesic_disk(qaws_shell_atlas const* a, qaws_shell_point centre, qaws_scalar radius,
 	qaws_scalar tolerance, qaws_shell_region** out_region)
 {
-	sh_circ k;
+	sh_circ k = { 0 };
 	double dirs[32], tol, eps = SH_VERTEX_EPS;
 	unsigned int nv, i;
 	qaws_shell_region* acc = NULL;
@@ -3742,7 +3764,7 @@ static qaws_status sh_touch_runs(qaws_shell_atlas const* a, unsigned int f, doub
    touch rims); else the free loop it ran into (SH_NONE: none) in *other */
 static int sh_clear(qaws_shell_atlas const* a, unsigned int f, double const* uv, double th, double L, unsigned int* other)
 {
-	sh_circ k;
+	sh_circ k = { 0 };
 	double end[2], vel[2], e[2], len, t0;
 	unsigned int hf, hl;
 	*other = SH_NONE;
@@ -4054,7 +4076,7 @@ static qaws_status sh_hole_path(qaws_shell_atlas const* a, unsigned int f, doubl
 qaws_status qaws_shell_curve_create_shortest_path(qaws_shell_atlas const* a, qaws_shell_point p0, qaws_shell_point p1, qaws_scalar tolerance,
 	qaws_shell_curve** out_curve)
 {
-	sh_circ k0, k1;
+	sh_circ k0 = { 0 }, k1 = { 0 };
 	qaws_vec3 x0, x1;
 	double th0, th, L, tol, uv[2];
 	unsigned int blocked;
@@ -4520,4 +4542,337 @@ qaws_status qaws_shell_region_triangulate(qaws_shell_region const* region, qaws_
 	}
 	*out_mesh = m;
 	return QAWS_STATUS_OK;
+}
+
+/* ------------------------------------------------------------------------ */
+/*  Offsets                                                                 */
+/* ------------------------------------------------------------------------ */
+
+/* the front of the offset k from th 0 to 1, its runs pushed: the faces met
+   at 32 places, a run per stretch on one face (its ends where the front
+   leaves a face, by bisection), fitted as the circle's runs are */
+static qaws_status sh_front_runs(sh_circ const* k, double tol, qaws_shell_curve* sc)
+{
+	enum { N = 32 };
+	unsigned int fa[N + 1], i, j, f;
+	double th[N + 1], p[2];
+	qaws_status st = QAWS_STATUS_OK;
+	for (i = 0; i <= N && st == QAWS_STATUS_OK; i++)
+	{
+		th[i] = (double)i / N;
+		st = sh_circ_at(k, th[i], &fa[i], p);
+	}
+	for (i = 0; i <= N && st == QAWS_STATUS_OK; i = j + 1)
+	{
+		double ta = 0, tb = 0, ea[2], eb[2];
+		qaws_curve* cv = NULL;
+		qaws_surface_curve* c = NULL;
+		f = fa[i];
+		for (j = i; j + 1 <= N && fa[j + 1] == f; j++) {}
+		if (i == 0)
+		{
+			ta = 0;
+			st = sh_circ_at(k, 0, &f, ea);
+		}
+		else
+			st = sh_circ_edge(k, f, th[i], th[i - 1], &ta, ea);
+		if (st == QAWS_STATUS_OK)
+		{
+			if (j == N)
+			{
+				unsigned int g;
+				tb = 1;
+				st = sh_circ_at(k, 1, &g, eb);
+			}
+			else
+				st = sh_circ_edge(k, f, th[j], th[j + 1], &tb, eb);
+		}
+		if (st == QAWS_STATUS_OK && !(tb > ta))
+			continue;
+		if (st == QAWS_STATUS_OK)
+			st = sh_fit_run(k, f, ta, tb, ea, eb, tol, &cv);
+		if (st == QAWS_STATUS_OK)
+			st = qaws_surface_curve_create_uv(k->a->s[f], cv, &c);
+		if (st == QAWS_STATUS_OK)
+			st = sh_curve_push(sc, f, c, cv);
+		else
+			qaws_curve_destroy(cv);
+	}
+	return st;
+}
+
+/* a shell curve's runs pushed onto sc, forwards or backwards */
+static qaws_status sh_push_runs(qaws_shell_curve* sc, qaws_shell_curve const* from, int backwards)
+{
+	unsigned int i;
+	qaws_status st = QAWS_STATUS_OK;
+	for (i = 0; i < from->n && st == QAWS_STATUS_OK; i++)
+	{
+		unsigned int q = backwards ? from->n - 1 - i : i;
+		qaws_curve* cv = NULL;
+		qaws_surface_curve* c = NULL;
+		qaws_curve const* uv = qaws_surface_curve_get_uv(from->c[q]);
+		if (backwards)
+			st = qaws_curve_reverse(uv, &cv);
+		else
+		{
+			qaws_range rg = qaws_curve_get_parameter_range(uv);
+			st = qaws_curve_extract(uv, rg.min_value, rg.max_value, &cv);
+		}
+		if (st == QAWS_STATUS_OK && (st = qaws_surface_curve_create_uv(sc->a->s[from->face[q]], cv, &c)) == QAWS_STATUS_OK)
+			st = sh_curve_push(sc, from->face[q], c, cv);
+		else
+			qaws_curve_destroy(cv);
+	}
+	return st;
+}
+
+/* the shell ray along the base curve's conormal at s on face f */
+static qaws_status sh_conormal_ray(qaws_shell_atlas const* a, unsigned int f, qaws_curve const* base, double s, double side, double d,
+	double tol, qaws_shell_curve** out)
+{
+	double y[4];
+	qaws_shell_point p;
+	qaws_vec2 dir;
+	qaws_range rg = qaws_curve_get_parameter_range(base);
+	unsigned int tries;
+	qaws_status st = QAWS_STATUS_OK;
+	/* (a start on a shared side, rounded off the face, is retried a hair
+	   inside the piece) */
+	for (tries = 0; tries < 3; tries++)
+	{
+		double nudge = tries ? (tries == 1 ? 1e-7 : 1e-5) * ((double)rg.max_value - rg.min_value) : 0;
+		double t = s + (s > 0.5 * ((double)rg.min_value + rg.max_value) ? -nudge : nudge);
+		if ((st = qaws_internal_sg_conormal(&a->c[f], base, t, side, y)) != QAWS_STATUS_OK)
+			return st;
+		p.face = f; p.uv.x = (qaws_scalar)y[0]; p.uv.y = (qaws_scalar)y[1];
+		dir.x = (qaws_scalar)y[2]; dir.y = (qaws_scalar)y[3];
+		if ((st = qaws_shell_curve_create_geodesic_ray(a, p, dir, (qaws_scalar)d, (qaws_scalar)tol, out)) != QAWS_STATUS_OUT_OF_RANGE)
+			break;
+	}
+	return st;
+}
+
+/* a curve of a face's region along a shared side or a seam's cut: not the
+   region's boundary on the shell */
+static int sh_not_boundary(qaws_shell_atlas const* a, unsigned int f, qaws_curve const* cv)
+{
+	qaws_range rg = qaws_curve_get_parameter_range(cv);
+	qaws_internal_sg_ctx const* c = &a->c[f];
+	unsigned int i, on = 0, cut = 0;
+	for (i = 1; i <= 3; i++)
+	{
+		qaws_eval_result_2d e;
+		double uv[2], w;
+		qaws_curve_evaluate_2d(cv, rg.min_value + (rg.max_value - rg.min_value) * (qaws_scalar)(0.25 * i), QAWS_EVAL_FLAG_POSITION, &e);
+		uv[0] = e.position.x; uv[1] = e.position.y;
+		on += sh_on_shared(a, f, uv) != 0;
+		if (c->pu > 0) { w = (uv[0] - c->u0) / c->pu; cut += fabs(w - floor(w + 0.5)) < 1e-9; }
+		if (c->pv > 0) { w = (uv[1] - c->v0) / c->pv; cut += fabs(w - floor(w + 0.5)) < 1e-9; }
+	}
+	return on == 3 || cut >= 3;
+}
+
+static qaws_status sh_unite_into(qaws_shell_region** acc, qaws_shell_region* g)
+{
+	qaws_shell_region* u = NULL;
+	qaws_status st;
+	if (!*acc)
+	{
+		*acc = g;
+		return QAWS_STATUS_OK;
+	}
+	st = qaws_shell_region_clip(*acc, g, QAWS_CLIP_UNION, &u);
+	qaws_shell_region_destroy(g);
+	if (st != QAWS_STATUS_OK)
+		return st;
+	qaws_shell_region_destroy(*acc);
+	*acc = u;
+	return QAWS_STATUS_OK;
+}
+
+qaws_status qaws_shell_region_offset(qaws_shell_region const* region, qaws_scalar distance, qaws_scalar tolerance, qaws_shell_region** out_region)
+{
+	qaws_shell_atlas const* a;
+	qaws_shell_region *acc = NULL, *keep = NULL;
+	double d, tol, side;
+	unsigned int f, i, j;
+	qaws_status st = QAWS_STATUS_OK;
+	if (!region || !out_region || !(distance != 0))
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	*out_region = NULL;
+	a = region->a;
+	d = fabs((double)distance);
+	side = distance > 0 ? -1 : 1;           /* the region on the boundary's left: out to its right */
+	for (f = 0; f < a->nf && st == QAWS_STATUS_OK; f++)
+	{
+		unsigned int np;
+		if (!region->f[f])
+			continue;
+		tol = tolerance > 0 ? (double)tolerance * a->c[f].diag : a->c[f].tol;
+		np = qaws_surface_region_get_path_count(region->f[f]);
+		for (i = 0; i < np && st == QAWS_STATUS_OK; i++)
+		{
+			qaws_path_2d p;
+			if ((st = qaws_surface_region_get_path(region->f[f], i, &p)) != QAWS_STATUS_OK)
+				break;
+			for (j = 0; j < p.curve_count && st == QAWS_STATUS_OK; j++)
+			{
+				qaws_curve const* cv = p.curves[j];
+				qaws_range rg = qaws_curve_get_parameter_range(cv);
+				sh_circ k;
+				qaws_shell_curve *loop = NULL, *r0 = NULL, *r1 = NULL;
+				qaws_shell_region* g = NULL;
+				qaws_eval_result_2d e;
+				double s0[2];
+				if (sh_not_boundary(a, f, cv))
+					continue;
+				if (p.curve_count == 1)
+				{
+					/* a closed piece: its front alone bounds the result (grown:
+					   united; shrunk: met), no strip with a slit */
+					qaws_shell_curve* front = sh_curve_new(a);
+					memset(&k, 0, sizeof(k));
+					k.a = a; k.c.face = f; k.r = d; k.base = cv; k.s0 = (double)rg.min_value; k.s1 = (double)rg.max_value; k.side = side;
+					if (!front)
+					{
+						st = QAWS_STATUS_ALLOCATION_FAILURE;
+						break;
+					}
+					if ((st = sh_front_runs(&k, tol, front)) == QAWS_STATUS_OK)
+					{
+						front->closed = 1;
+						st = qaws_shell_region_create(a, (qaws_shell_curve const* const*)&front, 1, &g);
+					}
+					qaws_shell_curve_destroy(front);
+					if (st == QAWS_STATUS_OK && side < 0)
+						st = sh_unite_into(&acc, g);
+					else if (st == QAWS_STATUS_OK && !keep)
+						keep = g;
+					else if (st == QAWS_STATUS_OK)
+					{
+						qaws_shell_region* m2 = NULL;
+						st = qaws_shell_region_clip(keep, g, QAWS_CLIP_INTERSECTION, &m2);
+						qaws_shell_region_destroy(g);
+						if (st == QAWS_STATUS_OK)
+						{
+							qaws_shell_region_destroy(keep);
+							keep = m2;
+						}
+					}
+					continue;
+				}
+				/* the strip between the piece and its front: the piece back,
+				   the conormal ray out at its start, the front, the ray back
+				   at its end (counter-clockwise when growing; turned round
+				   when shrinking) */
+				memset(&k, 0, sizeof(k));
+				k.a = a; k.c.face = f; k.r = d; k.base = cv; k.s0 = (double)rg.min_value; k.s1 = (double)rg.max_value; k.side = side;
+				{
+					/* (an end on a shared side pulled a hair back along the piece: a
+					   front started on the side rounds off the face; the disk at
+					   the join covers the hair) */
+					qaws_eval_result_2d e2;
+					double q[2], hair = 10 * SH_EDGE_NEAR * (k.s1 - k.s0);
+					qaws_curve_evaluate_2d(cv, rg.min_value, QAWS_EVAL_FLAG_POSITION, &e2);
+					q[0] = e2.position.x; q[1] = e2.position.y;
+					if (sh_on_shared(a, f, q)) k.s0 += hair;
+					qaws_curve_evaluate_2d(cv, rg.max_value, QAWS_EVAL_FLAG_POSITION, &e2);
+					q[0] = e2.position.x; q[1] = e2.position.y;
+					if (sh_on_shared(a, f, q)) k.s1 -= hair;
+				}
+				loop = sh_curve_new(a);
+				if (!loop)
+				{
+					st = QAWS_STATUS_ALLOCATION_FAILURE;
+					break;
+				}
+				{
+					qaws_curve* rev = NULL;
+					qaws_surface_curve* c = NULL;
+					qaws_curve* part = NULL;
+					if ((st = qaws_curve_extract(cv, (qaws_scalar)k.s0, (qaws_scalar)k.s1, &part)) == QAWS_STATUS_OK)
+						st = qaws_curve_reverse(part, &rev);
+					qaws_curve_destroy(part);
+					if (st == QAWS_STATUS_OK && (st = qaws_surface_curve_create_uv(a->s[f], rev, &c)) == QAWS_STATUS_OK)
+						st = sh_curve_push(loop, f, c, rev);
+					else
+						qaws_curve_destroy(rev);
+				}
+				if (st == QAWS_STATUS_OK) st = sh_conormal_ray(a, f, cv, k.s0, side, d, tol, &r0);
+				if (st == QAWS_STATUS_OK) st = sh_push_runs(loop, r0, 0);
+				if (st == QAWS_STATUS_OK) st = sh_front_runs(&k, tol, loop);
+				if (st == QAWS_STATUS_OK) st = sh_conormal_ray(a, f, cv, k.s1, side, d, tol, &r1);
+				if (st == QAWS_STATUS_OK) st = sh_push_runs(loop, r1, 1);
+				qaws_shell_curve_destroy(r0);
+				qaws_shell_curve_destroy(r1);
+				if (st == QAWS_STATUS_OK)
+				{
+					loop->closed = 1;
+					if (side > 0)
+					{
+						/* shrinking: the same loop the other way round */
+						qaws_shell_curve* back = sh_curve_new(a);
+						if (!back)
+							st = QAWS_STATUS_ALLOCATION_FAILURE;
+						else if ((st = sh_push_runs(back, loop, 1)) == QAWS_STATUS_OK)
+						{
+							back->closed = 1;
+							qaws_shell_curve_destroy(loop);
+							loop = back;
+						}
+						else
+							qaws_shell_curve_destroy(back);
+					}
+				}
+				if (st == QAWS_STATUS_OK)
+					st = qaws_shell_region_create(a, (qaws_shell_curve const* const*)&loop, 1, &g);
+				qaws_shell_curve_destroy(loop);
+				if (st == QAWS_STATUS_OK)
+					st = sh_unite_into(&acc, g);
+				/* the join at the piece's start: a disk of the distance (round
+				   joins; inside a corner it adds nothing) */
+				qaws_curve_evaluate_2d(cv, rg.min_value, QAWS_EVAL_FLAG_POSITION, &e);
+				s0[0] = e.position.x; s0[1] = e.position.y;
+				if (st == QAWS_STATUS_OK)
+				{
+					qaws_shell_point c;
+					c.face = f; c.uv = e.position;
+					g = NULL;
+					if ((st = qaws_shell_region_create_geodesic_disk(a, c, (qaws_scalar)d, tolerance, &g)) == QAWS_STATUS_OK)
+						st = sh_unite_into(&acc, g);
+				}
+			}
+		}
+	}
+	if (st == QAWS_STATUS_OK && (acc || keep))
+	{
+		/* grown: the region with the strips, disks and closed fronts; shrunk:
+		   the region within the closed fronts, less the strips and disks */
+		qaws_shell_region *r = NULL, *base = NULL;
+		if (side < 0)
+			st = qaws_shell_region_clip(region, acc, QAWS_CLIP_UNION, &r);
+		else
+		{
+			if (keep)
+				st = qaws_shell_region_clip(region, keep, QAWS_CLIP_INTERSECTION, &base);
+			if (st == QAWS_STATUS_OK && acc)
+				st = qaws_shell_region_clip(base ? base : region, acc, QAWS_CLIP_DIFFERENCE, &r);
+			else if (st == QAWS_STATUS_OK)
+			{
+				r = base;
+				base = NULL;
+			}
+		}
+		qaws_shell_region_destroy(base);
+		if (st == QAWS_STATUS_OK)
+			*out_region = r;
+		else
+			qaws_shell_region_destroy(r);
+	}
+	else if (st == QAWS_STATUS_OK)
+		st = QAWS_STATUS_INVALID_ARGUMENT;
+	qaws_shell_region_destroy(acc);
+	qaws_shell_region_destroy(keep);
+	return st;
 }
