@@ -273,3 +273,8 @@ Each item lands with tests in f64 and f32, docs, and a showcase figure.
   element as density (every pattern, plus a density), and blue noise by
   sample elimination in space. Meshes come from the (u, v) Delaunay mesher
   with the size field L / sqrt(λmax(g)). Test 104; figure 20.
+- Item 7: done for the topology. `qaws_surface_clip_exact` sends every
+  Boolean through qaws_clip_exact. A curved boundary cut at a seam may
+  return CERTIFICATION_FAILED: the kernel does not certify the cut pieces'
+  rounded ends back. Validated enclosures for geodesics remain open. Test
+  105; figure 21.

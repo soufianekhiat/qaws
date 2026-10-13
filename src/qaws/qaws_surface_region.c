@@ -23,6 +23,7 @@
 #include "qaws_operations.h"
 #include "qaws_region_sample.h"
 #include "qaws_triangulate.h"
+#include "qaws_clip_exact.h"
 #include "internal/qaws_internal_surface_region.h"
 #include <stdlib.h>
 #include <string.h>
@@ -35,6 +36,14 @@ struct qaws_surface_region
 	qaws_internal_sg_ctx ctx;
 	qaws_clip_result* res;
 };
+
+#if QAWS_SCALAR_IS_FLOAT
+#define SR_EXACT_BITS 26
+#define SR_EXACT_PARAM_BITS 24
+#else
+#define SR_EXACT_BITS 32   /* the kernel's widest coordinates */
+#define SR_EXACT_PARAM_BITS 48   /* long splines: their pieces' ends a rounding off the true cuts */
+#endif
 
 static double const sr_x8[4] = { 0.1834346424956498, 0.5255324099163290, 0.7966664774136267, 0.9602898564975363 };
 static double const sr_w8[4] = { 0.3626837833783620, 0.3137066458778873, 0.2223810344533745, 0.1012285362903763 };
@@ -301,9 +310,32 @@ static qaws_status sr_snap_cell(qaws_curve const* cv, double const* lines, unsig
 	return st;
 }
 
+/* the Booleans' path: float (qaws_clip) or exact topology (qaws_clip_exact
+   on its lattice) */
+typedef struct sr_mode
+{
+	int exact;
+	qaws_exact_desc ex;
+} sr_mode;
+
+static qaws_status sr_bool(sr_mode const* md, qaws_clip_type type, qaws_fill_rule rule, qaws_path_2d const* a, unsigned int na,
+	qaws_path_2d const* b, unsigned int nb, qaws_clip_result** out)
+{
+	qaws_clip_exact_desc d;
+	if (!md || !md->exact)
+		return qaws_clip_boolean(type, rule, a, na, b, nb, out);
+	memset(&d, 0, sizeof(d));
+	d.subjects = a; d.subject_count = na;
+	d.clips = b; d.clip_count = nb;
+	d.clip_type = nb && type != QAWS_CLIP_NONE ? type : QAWS_CLIP_UNION;
+	d.fill_rule = rule;
+	d.exact = &md->ex;
+	return qaws_clip_exact_execute(&d, out, NULL);
+}
+
 /* the loop's part in each period cell, translated into the first, its
    orientation kept */
-static qaws_status sr_cut_loop(qaws_internal_sg_ctx const* c, sr_pool* pl, qaws_path_2d const* loop)
+static qaws_status sr_cut_loop(qaws_internal_sg_ctx const* c, sr_pool* pl, qaws_path_2d const* loop, sr_mode const* md)
 {
 	qaws_vec2 lo, hi;
 	double area = sr_signed_area(loop);
@@ -315,6 +347,28 @@ static qaws_status sr_cut_loop(qaws_internal_sg_ctx const* c, sr_pool* pl, qaws_
 		return QAWS_STATUS_OK;
 	if (c->pu > 0) { k0 = (int)floor(((double)lo.x - c->u0) / c->pu); k1 = (int)floor(((double)hi.x - c->u0) / c->pu - 1e-12); }
 	if (c->pv > 0) { m0 = (int)floor(((double)lo.y - c->v0) / c->pv); m1 = (int)floor(((double)hi.y - c->v0) / c->pv - 1e-12); }
+	if (k0 == k1 && m0 == m1)
+	{
+		/* in one cell: the loop itself, moved into the first (no clip, so an
+		   exact path takes no pieces back as input) */
+		qaws_curve const* moved[1024];
+		qaws_scalar t[6];
+		unsigned int j;
+		if (loop->curve_count > 1024)
+			return QAWS_STATUS_UNSUPPORTED_OPERATION;
+		t[0] = 1; t[1] = 0; t[2] = (qaws_scalar)(c->pu > 0 ? -k0 * c->pu : 0);
+		t[3] = 0; t[4] = 1; t[5] = (qaws_scalar)(c->pv > 0 ? -m0 * c->pv : 0);
+		for (j = 0; j < loop->curve_count; j++)
+		{
+			qaws_curve* mv = NULL;
+			if ((st = qaws_curve_transform_2d(loop->curves[j], t, &mv)) != QAWS_STATUS_OK)
+				return st;
+			if ((st = sr_keep(pl, mv)) != QAWS_STATUS_OK)
+				return st;
+			moved[j] = mv;
+		}
+		return sr_add_path(pl, moved, loop->curve_count);
+	}
 	for (k = k0; k <= k1; k++)
 		for (m = m0; m <= m1; m++)
 		{
@@ -341,7 +395,7 @@ static qaws_status sr_cut_loop(qaws_internal_sg_ctx const* c, sr_pool* pl, qaws_
 				if ((st = sr_line(pl, ub, va, ua, va, &rc[3])) != QAWS_STATUS_OK) return st;
 			}
 			cell.curves = rc; cell.curve_count = 4; cell.closed = 1;
-			st = qaws_clip_boolean(QAWS_CLIP_INTERSECTION, area > 0 ? QAWS_FILL_POSITIVE : QAWS_FILL_NEGATIVE, loop, 1, &cell, 1, &res);
+			st = sr_bool(md, QAWS_CLIP_INTERSECTION, area > 0 ? QAWS_FILL_POSITIVE : QAWS_FILL_NEGATIVE, loop, 1, &cell, 1, &res);
 			if (st != QAWS_STATUS_OK)
 				return st;
 			if (!sr_grow((void**)&pl->res, &pl->capr, pl->nr + 1, sizeof(qaws_clip_result*)))
@@ -371,7 +425,7 @@ static qaws_status sr_cut_loop(qaws_internal_sg_ctx const* c, sr_pool* pl, qaws_
 					unsigned int nl = 0;
 					if (c->pu > 0) { lines[2 * nl] = 0; lines[2 * nl + 1] = ua; nl++; lines[2 * nl] = 0; lines[2 * nl + 1] = ub; nl++; }
 					if (c->pv > 0) { lines[2 * nl] = 1; lines[2 * nl + 1] = va; nl++; lines[2 * nl] = 1; lines[2 * nl + 1] = vb; nl++; }
-					if ((st = sr_snap_cell(p.curves[src], lines, nl, &snapped)) != QAWS_STATUS_OK)
+					if ((!md || !md->exact) && (st = sr_snap_cell(p.curves[src], lines, nl, &snapped)) != QAWS_STATUS_OK)
 						return st;
 					st = qaws_curve_transform_2d(snapped ? snapped : p.curves[src], t, &mv);
 					qaws_curve_destroy(snapped);
@@ -400,7 +454,7 @@ static qaws_status sr_cut_loop(qaws_internal_sg_ctx const* c, sr_pool* pl, qaws_
 /* an operand's paths as loops of one period: loops going once round a
    closed direction capped along the domain's edge (u loops down to v0, v
    loops left to u0), their constant restored by whole periods */
-static qaws_status sr_period(qaws_internal_sg_ctx const* c, qaws_path_2d const* in, unsigned int n, sr_pool* pl)
+static qaws_status sr_period(qaws_internal_sg_ctx const* c, qaws_path_2d const* in, unsigned int n, sr_pool* pl, sr_mode const* md)
 {
 	unsigned int i;
 	int wu = 0, wv = 0;
@@ -423,7 +477,7 @@ static qaws_status sr_period(qaws_internal_sg_ctx const* c, qaws_path_2d const* 
 		if (c->pu > 0) ku = (int)floor(du / c->pu + 0.5);
 		if (c->pv > 0) kv = (int)floor(dv / c->pv + 0.5);
 		if (ku == 0 && kv == 0)
-			st = sr_cut_loop(c, pl, p);
+			st = sr_cut_loop(c, pl, p, md);
 		else if ((ku == 1 || ku == -1) && kv == 0 && c->pv <= 0)
 		{
 			/* round u once: capped down to v0 */
@@ -437,7 +491,7 @@ static qaws_status sr_period(qaws_internal_sg_ctx const* c, qaws_path_2d const* 
 			if ((st = sr_line(pl, b.position.x, c->v0, a.position.x, c->v0, &cv[j + 1])) != QAWS_STATUS_OK) return st;
 			if ((st = sr_line(pl, a.position.x, c->v0, a.position.x, a.position.y, &cv[j + 2])) != QAWS_STATUS_OK) return st;
 			q.curves = cv; q.curve_count = p->curve_count + 3; q.closed = 1;
-			st = sr_cut_loop(c, pl, &q);
+			st = sr_cut_loop(c, pl, &q, md);
 			wu += ku;
 		}
 		else if ((kv == 1 || kv == -1) && ku == 0 && c->pu <= 0)
@@ -453,7 +507,7 @@ static qaws_status sr_period(qaws_internal_sg_ctx const* c, qaws_path_2d const* 
 			if ((st = sr_line(pl, c->u0, b.position.y, c->u0, a.position.y, &cv[j + 1])) != QAWS_STATUS_OK) return st;
 			if ((st = sr_line(pl, c->u0, a.position.y, a.position.x, a.position.y, &cv[j + 2])) != QAWS_STATUS_OK) return st;
 			q.curves = cv; q.curve_count = p->curve_count + 3; q.closed = 1;
-			st = sr_cut_loop(c, pl, &q);
+			st = sr_cut_loop(c, pl, &q, md);
 			wv += kv;
 		}
 		else
@@ -474,10 +528,10 @@ static qaws_status sr_period(qaws_internal_sg_ctx const* c, qaws_path_2d const* 
 	return st;
 }
 
-qaws_status qaws_surface_clip(qaws_surface const* surface, qaws_clip_type clip_type, qaws_fill_rule fill_rule,
+static qaws_status sr_clip(qaws_surface const* surface, qaws_clip_type clip_type, qaws_fill_rule fill_rule,
 	qaws_surface_path const* subjects, unsigned int subject_count,
 	qaws_surface_path const* clips, unsigned int clip_count,
-	qaws_surface_region** out_region)
+	sr_mode const* md, qaws_surface_region** out_region)
 {
 	qaws_surface_region* r;
 	qaws_path_2d *ps = NULL, *pc = NULL;
@@ -507,7 +561,7 @@ qaws_status qaws_surface_clip(qaws_surface const* surface, qaws_clip_type clip_t
 		d.clips = pc; d.clip_count = clip_count;
 		d.clip_type = clip_count && clip_type != QAWS_CLIP_NONE ? clip_type : QAWS_CLIP_UNION;
 		d.fill_rule = fill_rule;
-		st = qaws_clip_execute(&d, &r->res);
+		st = sr_bool(md, d.clip_type, d.fill_rule, d.subjects, d.subject_count, d.clips, d.clip_count, &r->res);
 	}
 	else if (st == QAWS_STATUS_OK)
 	{
@@ -516,15 +570,15 @@ qaws_status qaws_surface_clip(qaws_surface const* surface, qaws_clip_type clip_t
 		qaws_clip_result *ua = NULL, *ub = NULL;
 		memset(&pa, 0, sizeof(pa));
 		memset(&pb, 0, sizeof(pb));
-		st = sr_period(&r->ctx, ps, subject_count, &pa);
+		st = sr_period(&r->ctx, ps, subject_count, &pa, md);
 		if (st == QAWS_STATUS_OK && clip_count)
-			st = sr_period(&r->ctx, pc, clip_count, &pb);
+			st = sr_period(&r->ctx, pc, clip_count, &pb, md);
 		sr_fix_views(&pa);
 		sr_fix_views(&pb);
 		if (st == QAWS_STATUS_OK)
-			st = qaws_clip_boolean(QAWS_CLIP_UNION, fill_rule, pa.paths, pa.np, NULL, 0, &ua);
+			st = sr_bool(md, QAWS_CLIP_UNION, fill_rule, pa.paths, pa.np, NULL, 0, &ua);
 		if (st == QAWS_STATUS_OK && clip_count)
-			st = qaws_clip_boolean(QAWS_CLIP_UNION, fill_rule, pb.paths, pb.np, NULL, 0, &ub);
+			st = sr_bool(md, QAWS_CLIP_UNION, fill_rule, pb.paths, pb.np, NULL, 0, &ub);
 		if (st == QAWS_STATUS_OK)
 		{
 			unsigned int na = qaws_clip_result_get_path_count(ua), nb = ub ? qaws_clip_result_get_path_count(ub) : 0, i;
@@ -541,7 +595,7 @@ qaws_status qaws_surface_clip(qaws_surface const* surface, qaws_clip_type clip_t
 				d.clips = qb; d.clip_count = nb;
 				d.clip_type = clip_count && clip_type != QAWS_CLIP_NONE ? clip_type : QAWS_CLIP_UNION;
 				d.fill_rule = QAWS_FILL_NON_ZERO;
-				st = qaws_clip_execute(&d, &r->res);
+				st = sr_bool(md, d.clip_type, d.fill_rule, d.subjects, d.subject_count, d.clips, d.clip_count, &r->res);
 			}
 			free(qa); free(qb);
 		}
@@ -558,6 +612,48 @@ qaws_status qaws_surface_clip(qaws_surface const* surface, qaws_clip_type clip_t
 	}
 	*out_region = r;
 	return QAWS_STATUS_OK;
+}
+
+qaws_status qaws_surface_clip(qaws_surface const* surface, qaws_clip_type clip_type, qaws_fill_rule fill_rule,
+	qaws_surface_path const* subjects, unsigned int subject_count,
+	qaws_surface_path const* clips, unsigned int clip_count,
+	qaws_surface_region** out_region)
+{
+	return sr_clip(surface, clip_type, fill_rule, subjects, subject_count, clips, clip_count, NULL, out_region);
+}
+
+qaws_status qaws_surface_clip_exact(qaws_surface const* surface, qaws_clip_type clip_type, qaws_fill_rule fill_rule,
+	qaws_surface_path const* subjects, unsigned int subject_count,
+	qaws_surface_path const* clips, unsigned int clip_count,
+	qaws_exact_desc const* exact, qaws_surface_region** out_region)
+{
+	sr_mode md;
+	md.exact = 1;
+	if (exact)
+		md.ex = *exact;
+	else
+	{
+		/* the lattice over the domain and a period either side of it, fine
+		   enough for the (u, v) images' tolerance */
+		qaws_internal_sg_ctx c;
+		qaws_status st;
+		double ext;
+		int e;
+		if (!surface)
+			return QAWS_STATUS_INVALID_ARGUMENT;
+		if ((st = qaws_internal_sg_init(&c, surface, 0)) != QAWS_STATUS_OK)
+			return st;
+		ext = fabs(c.u0) > fabs(c.u1) ? fabs(c.u0) : fabs(c.u1);
+		if (fabs(c.v0) > ext) ext = fabs(c.v0);
+		if (fabs(c.v1) > ext) ext = fabs(c.v1);
+		ext += (c.pu > c.pv ? c.pu : c.pv) + 0.5 * c.diag;
+		qaws_exact_desc_default(&md.ex);
+		md.ex.coord_bits = SR_EXACT_BITS;
+		md.ex.param_bits = SR_EXACT_PARAM_BITS;
+		e = (int)ceil(log2(ext > 0 ? ext : 1));
+		md.ex.space_exp2 = e - (int)md.ex.coord_bits;
+	}
+	return sr_clip(surface, clip_type, fill_rule, subjects, subject_count, clips, clip_count, &md, out_region);
 }
 
 void qaws_surface_region_destroy(qaws_surface_region* region)
@@ -1126,7 +1222,7 @@ qaws_status qaws_surface_offset(qaws_surface const* surface, qaws_fill_rule fill
 		/* in one period on closed surfaces, then united */
 		if (out->ctx.pu > 0 || out->ctx.pv > 0)
 		{
-			st = sr_period(&out->ctx, tb.raw.paths, tb.raw.np, &cut);
+			st = sr_period(&out->ctx, tb.raw.paths, tb.raw.np, &cut, NULL);
 			sr_fix_views(&cut);
 			if (st == QAWS_STATUS_OK)
 				st = qaws_clip_boolean(QAWS_CLIP_UNION, QAWS_FILL_NON_ZERO, cut.paths, cut.np, NULL, 0, &T);

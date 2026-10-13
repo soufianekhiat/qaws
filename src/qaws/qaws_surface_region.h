@@ -148,6 +148,20 @@ qaws_status qaws_surface_clip(qaws_surface const* surface, qaws_clip_type clip_t
 
 void qaws_surface_region_destroy(qaws_surface_region* region);
 
+/* The same with exact topology: every Boolean of the (u, v) images (the
+   cuts into period cells and the unions there too) through qaws_clip_exact
+   on the lattice `exact` (NULL: 2^-32 of the domain's extent with a period
+   either side; 2^-26 in float builds). Each decision is exact or certified
+   for the curves as given: drawn curves exactly, geodesics as their (u, v)
+   Hermite images (within the tolerance of the true ones). Measures and
+   queries on the region are those of qaws_surface_clip's.
+   QAWS_STATUS_CERTIFICATION_FAILED when a decision cannot be proven. */
+struct qaws_exact_desc;
+qaws_status qaws_surface_clip_exact(qaws_surface const* surface, qaws_clip_type clip_type, qaws_fill_rule fill_rule,
+	qaws_surface_path const* subjects, unsigned int subject_count,
+	qaws_surface_path const* clips, unsigned int clip_count,
+	struct qaws_exact_desc const* exact, qaws_surface_region** out_region);
+
 /* The boundary loops in (u, v): outside loops counter-clockwise, holes
    clockwise (views valid while the region lives). */
 unsigned int qaws_surface_region_get_path_count(qaws_surface_region const* region);

@@ -262,3 +262,46 @@ qaws_surface_region_triangulate(region, &md, &mesh);
 | Torus: a circle across both seams meshed to 0.03 (relative area) | 7.6e-5 |
 
 The same checks pass in f32. Figure 20 shows the points and the meshes.
+
+## Exact topology
+
+```c
+qaws_surface_clip_exact(surface, QAWS_CLIP_UNION, QAWS_FILL_NON_ZERO, a, na, b, nb, NULL, &r);
+```
+
+- **What is exact.** Every Boolean of the (u, v) images goes through
+  `qaws_clip_exact` (qaws_clip_exact.h) on an integer lattice, so shared
+  edges, touching corners, coincident loops and tangencies are decided
+  exactly, not within a tolerance. This includes the cuts into period cells
+  and the unions there on closed surfaces.
+  - Curves drawn in (u, v) are taken exactly.
+  - Geodesics are taken as their (u, v) Hermite images, which lie within the
+    tolerance of the true curves.
+- **The default lattice** is 2^-32 of the domain's extent plus a period, with
+  48 parameter bits (2^-26 and 24 in float builds).
+- **Moved, not cut.** A loop lying within one period cell is moved into the
+  first cell without being cut.
+- **Limitation.** A curved boundary cut at a seam gives pieces whose ends are
+  the doubles nearest the exact cuts, and the kernel may not certify those
+  back: the call then returns `QAWS_STATUS_CERTIFICATION_FAILED`, never a
+  wrong region. Straight edges across seams certify.
+- **Measures and queries** on the result are the same as for
+  `qaws_surface_clip`.
+
+### Checks (test 105)
+
+- **Against the float path:** two geodesic circles' four Booleans, a circle
+  moved by a period, and a circle on a torus give the same areas (1e-8).
+- **Degenerate inputs drawn in (u, v):**
+  - a region with itself: union and intersection are the region, one loop,
+    and the difference is empty;
+  - squares sharing an edge unite into one loop, with the area the sum to
+    2e-16;
+  - squares touching at a corner unite into two loops;
+  - squares sharing part of an edge across the seam unite with the area the
+    sum.
+- **A circle across the seam:** either the float area or
+  `CERTIFICATION_FAILED`.
+
+Figure 21 shows a ring of sixteen squares sharing their sides united into
+one band, checkerboards, and a lens.
