@@ -403,3 +403,7 @@ Each item lands with tests in f64 and f32, docs, and a showcase figure.
   distances, a curve's closest point, crossings, two curves' closest
   points, a point's signed distance to a region. Fits that stop improving
   (rays' accuracy above the tolerance) end there. Test 110; figure 28.
+- Second part, item 2 done: shortest paths round regions on a surface
+  (qaws_surface_curve_create_shortest_path): the surface trimmed to the
+  region's outside, through the shells' shortest paths. Test 110 (a disk on
+  a plate and on a cylinder against the taut string); figure 28.

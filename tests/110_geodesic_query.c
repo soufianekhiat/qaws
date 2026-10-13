@@ -10,12 +10,15 @@
  *     and inside against the distance to its centre less the radius
  *   - a cylinder: two geodesic segments apart, their closest distance
  *     against the unrolled segments'
+ *   - shortest paths round a disk on a plate and on a cylinder against the
+ *     taut string (unrolled)
  */
 
 #include "test_common.h"
 #include "qaws_surface_region.h"
 #include "qaws_surface_revolution.h"
 #include "qaws_bezier.h"
+#include "qaws_surface_bilinear.h"
 #include <math.h>
 #include <string.h>
 
@@ -164,6 +167,70 @@ static void test_cylinder(void)
 	qaws_curve_destroy(line);
 }
 
+/* the taut length from a to b round the circle of radius R at the origin */
+static double gq_taut(double ax, double ay, double bx, double by, double R)
+{
+	double da = hypot(ax, ay), db = hypot(bx, by), d = fabs(atan2(ay, ax) - atan2(by, bx)), cr;
+	if (d > GQ_PI) d = 2 * GQ_PI - d;
+	cr = fabs(ax * by - ay * bx) / hypot(bx - ax, by - ay);
+	if (cr >= R || (ax * (bx - ax) + ay * (by - ay)) * (bx * (bx - ax) + by * (by - ay)) > 0)
+		return hypot(bx - ax, by - ay);
+	return sqrt(da * da - R * R) + sqrt(db * db - R * R) + R * (d - acos(R / da) - acos(R / db));
+}
+
+static qaws_surface_region* gq_disk(qaws_surface const* s, double u, double v, double r, qaws_surface_curve** keep)
+{
+	qaws_surface_curve const* pc[1];
+	qaws_surface_path pp;
+	qaws_surface_region* rg = NULL;
+	qaws_surface_curve_create_geodesic_arc(s, gq_uv(u, v), (qaws_scalar)r, 0, (qaws_scalar)(2 * GQ_PI), 0, keep);
+	pc[0] = *keep;
+	pp.curves = pc; pp.curve_count = 1; pp.closed = 1;
+	qaws_surface_clip(s, QAWS_CLIP_NONE, QAWS_FILL_NON_ZERO, &pp, 1, NULL, 0, &rg);
+	return rg;
+}
+
+static void test_shortest_round(void)
+{
+	/* a disk in the way on a plate and on a cylinder (unrolled: the taut string) */
+	qaws_surface_bilinear_desc d;
+	qaws_bezier_desc bd;
+	qaws_surface_revolution_desc rd;
+	qaws_scalar cp[4];
+	qaws_curve* line = NULL;
+	qaws_surface *plate = NULL, *cy = NULL;
+	qaws_surface_curve *k1 = NULL, *k2 = NULL, *c1 = NULL, *c2 = NULL;
+	qaws_surface_region *r1, *r2;
+	qaws_scalar L1 = 0, L2 = 0;
+	qaws_status s1, s2;
+	double t1 = gq_taut(-1.2, 0.3, 0.9, 0.2, 0.5), t2 = gq_taut(GQ_PI * -0.15, GQ_PI * -0.05, GQ_PI * 0.15, GQ_PI * 0.05, 0.3), tol = GQ_F32 ? 5e-5 : 1e-8;
+	char msg[300];
+	memset(&d, 0, sizeof(d));
+	d.p00.x = -2; d.p00.y = -2; d.p10.x = 2; d.p10.y = -2; d.p01.x = -2; d.p01.y = 2; d.p11.x = 2; d.p11.y = 2;
+	qaws_surface_create_bilinear(&d, &plate);
+	cp[0] = (qaws_scalar)0.5; cp[1] = 0; cp[2] = (qaws_scalar)0.5; cp[3] = (qaws_scalar)-GQ_PI;
+	memset(&bd, 0, sizeof(bd));
+	bd.dimension = QAWS_DIMENSION_2D; bd.degree = 1; bd.control_points = cp; bd.control_point_count = 2;
+	qaws_curve_create_bezier(&bd, &line);
+	memset(&rd, 0, sizeof(rd));
+	rd.profile = line; rd.axis_direction.z = 1;
+	qaws_surface_create_revolution(&rd, &cy);
+	r1 = gq_disk(plate, 0.5, 0.5, 0.5, &k1);
+	r2 = gq_disk(cy, 0.5, 0.5, 0.3, &k2);
+	s1 = qaws_surface_curve_create_shortest_path(plate, r1, gq_uv((-1.2 + 2) / 4, (0.3 + 2) / 4), gq_uv((0.9 + 2) / 4, (0.2 + 2) / 4), 0, &c1);
+	s2 = qaws_surface_curve_create_shortest_path(cy, r2, gq_uv(0.35, 0.45), gq_uv(0.65, 0.55), 0, &c2);
+	if (c1) qaws_surface_curve_get_length(c1, &L1);
+	if (c2) qaws_surface_curve_get_length(c2, &L2);
+	sprintf(msg, "shortest paths round a disk, on a plate %.2g and on a cylinder %.2g off the taut string (status %d %d)",
+		fabs((double)L1 - t1), fabs((double)L2 - t2), (int)s1, (int)s2);
+	TEST_ASSERT(s1 == QAWS_STATUS_OK && s2 == QAWS_STATUS_OK && fabs((double)L1 - t1) <= tol && fabs((double)L2 - t2) <= tol, msg);
+	qaws_surface_curve_destroy(c1); qaws_surface_curve_destroy(c2);
+	qaws_surface_region_destroy(r1); qaws_surface_region_destroy(r2);
+	qaws_surface_curve_destroy(k1); qaws_surface_curve_destroy(k2);
+	qaws_surface_destroy(plate); qaws_surface_destroy(cy);
+	qaws_curve_destroy(line);
+}
+
 int test_110_geodesic_query_main(void)
 {
 	g_pass = 0;
@@ -171,6 +238,7 @@ int test_110_geodesic_query_main(void)
 	printf("Test 110: geodesic queries\n");
 	test_sphere();
 	test_cylinder();
+	test_shortest_round();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
 }

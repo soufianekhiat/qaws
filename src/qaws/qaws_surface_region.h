@@ -278,6 +278,15 @@ qaws_status qaws_surface_curve_closest_points(qaws_surface_curve const* a, qaws_
 qaws_status qaws_surface_region_distance(qaws_surface_region const* region, qaws_vec2 p, qaws_scalar tolerance,
 	qaws_scalar* out_distance, qaws_vec2* out_nearest);
 
+/* The shortest path from p0 to p1 avoiding a region (NULL: none): the
+   geodesics touching the region's boundary joined along it, as
+   qaws_shell_curve_create_shortest_path on the surface trimmed to the
+   region's outside (its domain's edges, or the rims of a closed direction,
+   bounding it). One curve drawn in (u, v), its pieces end to end.
+   UNSUPPORTED_OPERATION when the region's boundary is cut along a seam. */
+qaws_status qaws_surface_curve_create_shortest_path(qaws_surface const* surface, qaws_surface_region const* obstacles, qaws_vec2 p0,
+	qaws_vec2 p1, qaws_scalar tolerance, qaws_surface_curve** out_curve);
+
 /* The region as a trimmed surface (its loops borrowed: the region must
    outlive it). */
 qaws_status qaws_surface_region_create_trimmed(qaws_surface_region const* region, qaws_surface** out_surface);

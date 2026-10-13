@@ -421,6 +421,13 @@ curves drawn in (u, v).
   a geodesic is no shorter than its chord); the search stops once the bound
   passes the best distance. The sign comes from
   `qaws_surface_region_contains`.
+- **Shortest paths round a region.** `qaws_surface_curve_create_shortest_path(surface,
+  obstacles, p0, p1, 0, &curve)` trims the surface to the region's outside: the
+  region's loops run backwards as holes, bounded by the domain's edges or by a
+  closed direction's two rims. It then runs
+  `qaws_shell_curve_create_shortest_path` (geodesics touching the holes,
+  joined along their rims) and returns the runs end to end as one curve
+  drawn in (u, v). A region whose boundary is cut along a seam is refused.
 
 | Check (test 110) | f64 | f32 |
 |---|---|---|
@@ -429,10 +436,11 @@ curves drawn in (u, v).
 | Sphere: two geodesics' crossing against the great circles' meeting; closest distance 0 | 6.5e-11 | 1e-5 |
 | Sphere: signed distance to a geodesic disk, outside and inside | 3e-10 | 1e-6 |
 | Cylinder: two geodesic segments apart against the unrolled segments | 1e-12 | 2.4e-7 |
+| Shortest paths round a disk, on a plate and on a cylinder, against the taut string (unrolled) | 2e-10 | 1.7e-5 |
 
 Figure 28 shows points joined to their closest points on a geodesic, a
-crossing, a closest pair, and signed distances to a disk on the B-spline
-bump.
+crossing, a closest pair, signed distances to a disk, and shortest paths
+round two disks on the B-spline bump.
 
 A fix came with it. Geodesic fits (paths and circles) are refined by
 doubling until their midpoints agree with the integrated rays. On a steep

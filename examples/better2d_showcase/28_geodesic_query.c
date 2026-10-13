@@ -36,7 +36,7 @@ static void demo_geodesic_query(void)
 	ssd_scene sc;
 	char label[240];
 	unsigned int i;
-	if (!svg_open(&s, "showcase/b2d28_geodesic_query.svg", (int)(48 + 3 * (pw + 12)), (int)(110 + (ph + 44)),
+	if (!svg_open(&s, "showcase/b2d28_geodesic_query.svg", (int)(48 + 4 * (pw + 12)), (int)(110 + (ph + 44)),
 		"Geodesic queries",
 		"distances, closest points and crossings along the surface: qaws_surface_distance, _curve_closest_point, _curve_intersect, _curve_closest_points, _region_distance"))
 		return;
@@ -129,6 +129,46 @@ static void demo_geodesic_query(void)
 		ssd_draw(&s, &sc);
 		qaws_surface_region_destroy(rg);
 		qaws_surface_curve_destroy(cc);
+	}
+	/* shortest paths round two disks */
+	{
+		static double const to[5][2] = { { 0.85, 0.2 }, { 0.88, 0.4 }, { 0.88, 0.6 }, { 0.85, 0.8 }, { 0.7, 0.9 } };
+		qaws_surface_curve *c1 = NULL, *c2 = NULL;
+		qaws_surface_curve const *p1[1], *p2[1];
+		qaws_surface_path pp[2];
+		qaws_surface_region* rg = NULL;
+		double total = 0;
+		unsigned int ok = 0;
+		qaws_surface_curve_create_geodesic_arc(f[0], sgf_uv(0.45, 0.35), (qaws_scalar)0.25, 0, (qaws_scalar)(2 * pi), 0, &c1);
+		qaws_surface_curve_create_geodesic_arc(f[0], sgf_uv(0.55, 0.7), (qaws_scalar)0.2, 0, (qaws_scalar)(2 * pi), 0, &c2);
+		p1[0] = c1; p2[0] = c2;
+		pp[0].curves = p1; pp[0].curve_count = 1; pp[0].closed = 1;
+		pp[1].curves = p2; pp[1].curve_count = 1; pp[1].closed = 1;
+		qaws_surface_clip(f[0], QAWS_CLIP_UNION, QAWS_FILL_NON_ZERO, &pp[0], 1, &pp[1], 1, &rg);
+		s28_scene(&sc, &view, &v3, 3, pw, ph);
+		ssd_surfaces(&sc, f, 1, NULL, 0);
+		if (c1) ssd_curve_line(&sc, f[0], qaws_surface_curve_get_uv(c1), black, 1.4);
+		if (c2) ssd_curve_line(&sc, f[0], qaws_surface_curve_get_uv(c2), black, 1.4);
+		for (i = 0; rg && i < 5; i++)
+		{
+			qaws_surface_curve* path = NULL;
+			qaws_scalar L = 0;
+			if (qaws_surface_curve_create_shortest_path(f[0], rg, sgf_uv(0.12, 0.5), sgf_uv(to[i][0], to[i][1]), 0, &path) == QAWS_STATUS_OK)
+			{
+				ssd_curve_line(&sc, f[0], qaws_surface_curve_get_uv(path), red, 1.5);
+				qaws_surface_curve_get_length(path, &L);
+				total += (double)L;
+				ok++;
+			}
+			qaws_surface_curve_destroy(path);
+			ssd_dot(&sc, f[0], to[i][0], to[i][1], black, 2.6);
+		}
+		ssd_dot(&sc, f[0], 0.12, 0.5, black, 3.5);
+		sprintf(label, "shortest paths round two disks: %u paths, %.4f in all", ok, total);
+		ssd_panel(&s, &v3, label, "qaws_surface_curve_create_shortest_path: the disks' union as the obstacle");
+		ssd_draw(&s, &sc);
+		qaws_surface_region_destroy(rg);
+		qaws_surface_curve_destroy(c1); qaws_surface_curve_destroy(c2);
 	}
 	svg_close(&s);
 	qaws_surface_destroy(f[0]);

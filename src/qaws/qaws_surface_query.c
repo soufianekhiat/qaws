@@ -16,6 +16,9 @@
 #include "qaws_eval.h"
 #include "qaws_inspect.h"
 #include "qaws_operations.h"
+#include "qaws_shell_region.h"
+#include "qaws_bezier.h"
+#include "qaws_composite.h"
 #include "internal/qaws_internal_surface_region.h"
 #include <math.h>
 #include <stdlib.h>
@@ -448,4 +451,158 @@ qaws_status qaws_surface_region_distance(qaws_surface_region const* region, qaws
 	*out_distance = (qaws_scalar)(inside == 1 ? -best : inside == -1 ? 0 : best);
 	if (out_nearest) { out_nearest->x = (qaws_scalar)bq[0]; out_nearest->y = (qaws_scalar)bq[1]; }
 	return QAWS_STATUS_OK;
+}
+
+/* ------------------------------------------------------------------------ */
+/*  Shortest paths round regions                                            */
+/* ------------------------------------------------------------------------ */
+
+static qaws_status sq_line(double x0, double y0, double x1, double y1, qaws_curve** out)
+{
+	qaws_bezier_desc bd;
+	qaws_scalar cp[4];
+	cp[0] = (qaws_scalar)x0; cp[1] = (qaws_scalar)y0; cp[2] = (qaws_scalar)x1; cp[3] = (qaws_scalar)y1;
+	memset(&bd, 0, sizeof(bd));
+	bd.dimension = QAWS_DIMENSION_2D; bd.degree = 1; bd.control_points = cp; bd.control_point_count = 2;
+	return qaws_curve_create_bezier(&bd, out);
+}
+
+qaws_status qaws_surface_curve_create_shortest_path(qaws_surface const* surface, qaws_surface_region const* obstacles, qaws_vec2 p0,
+	qaws_vec2 p1, qaws_scalar tolerance, qaws_surface_curve** out_curve)
+{
+	qaws_internal_sg_ctx c;
+	qaws_curve** own = NULL;            /* every curve made here: the loops' */
+	qaws_curve const** views = NULL;
+	qaws_path_2d* loops = NULL;
+	unsigned int nown = 0, nl = 0, np, i, j, total = 0, nout = 0;
+	qaws_shell_face_desc fd;
+	qaws_shell_atlas* atlas = NULL;
+	qaws_shell_curve* sc = NULL;
+	qaws_status st;
+	if (!surface || !out_curve)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	*out_curve = NULL;
+	if (!obstacles)
+		return qaws_surface_curve_create_geodesic(surface, p0, p1, tolerance, out_curve);
+	if ((st = qaws_internal_sg_init(&c, surface, (double)tolerance)) != QAWS_STATUS_OK)
+		return st;
+	np = qaws_surface_region_get_path_count(obstacles);
+	for (i = 0; i < np; i++)
+	{
+		qaws_path_2d p;
+		if ((st = qaws_surface_region_get_path(obstacles, i, &p)) != QAWS_STATUS_OK)
+			return st;
+		for (j = 0; j < p.curve_count; j++)
+			if (sq_on_seam(&c, p.curves[j]))
+				return QAWS_STATUS_UNSUPPORTED_OPERATION;
+		total += p.curve_count;
+	}
+	nout = c.pu > 0 && c.pv > 0 ? 0 : c.pu > 0 || c.pv > 0 ? 2 : 4;
+	own = (qaws_curve**)calloc(total + nout + 1, sizeof(qaws_curve*));
+	views = (qaws_curve const**)calloc(total + nout + 1, sizeof(qaws_curve*));
+	loops = (qaws_path_2d*)calloc(np + 3, sizeof(qaws_path_2d));
+	if (!own || !views || !loops)
+	{
+		st = QAWS_STATUS_ALLOCATION_FAILURE;
+		goto done;
+	}
+	/* the outside: the domain's edges, or a closed direction's two rims
+	   (each a loop wrapping round, the face on its left) */
+	if (nout == 4)
+	{
+		st = sq_line(c.u0, c.v0, c.u1, c.v0, &own[0]);
+		if (st == QAWS_STATUS_OK) st = sq_line(c.u1, c.v0, c.u1, c.v1, &own[1]);
+		if (st == QAWS_STATUS_OK) st = sq_line(c.u1, c.v1, c.u0, c.v1, &own[2]);
+		if (st == QAWS_STATUS_OK) st = sq_line(c.u0, c.v1, c.u0, c.v0, &own[3]);
+		nown = 4;
+		for (i = 0; i < 4; i++) views[i] = own[i];
+		loops[0].curves = views; loops[0].curve_count = 4; loops[0].closed = 1;
+		nl = 1;
+	}
+	else if (nout == 2)
+	{
+		if (c.pu > 0)
+		{
+			st = sq_line(c.u0, c.v0, c.u1, c.v0, &own[0]);
+			if (st == QAWS_STATUS_OK) st = sq_line(c.u1, c.v1, c.u0, c.v1, &own[1]);
+		}
+		else
+		{
+			st = sq_line(c.u1, c.v0, c.u1, c.v1, &own[0]);
+			if (st == QAWS_STATUS_OK) st = sq_line(c.u0, c.v1, c.u0, c.v0, &own[1]);
+		}
+		nown = 2;
+		for (i = 0; i < 2; i++)
+		{
+			views[i] = own[i];
+			loops[i].curves = &views[i]; loops[i].curve_count = 1; loops[i].closed = 1;
+		}
+		nl = 2;
+	}
+	/* the obstacles' loops run backwards: holes of the free part */
+	for (i = 0; i < np && st == QAWS_STATUS_OK; i++)
+	{
+		qaws_path_2d p;
+		unsigned int first = nown;
+		qaws_surface_region_get_path(obstacles, i, &p);
+		for (j = 0; j < p.curve_count && st == QAWS_STATUS_OK; j++)
+		{
+			st = qaws_curve_reverse(p.curves[p.curve_count - 1 - j], &own[nown]);
+			if (st == QAWS_STATUS_OK)
+			{
+				views[nown] = own[nown];
+				nown++;
+			}
+		}
+		loops[nl].curves = &views[first]; loops[nl].curve_count = p.curve_count; loops[nl].closed = 1;
+		nl++;
+	}
+	if (st != QAWS_STATUS_OK)
+		goto done;
+	memset(&fd, 0, sizeof(fd));
+	fd.surface = surface; fd.trims = loops; fd.trim_count = nl;
+	if ((st = qaws_shell_atlas_create_trimmed(&fd, 1, 0, &atlas)) == QAWS_STATUS_OK)
+	{
+		qaws_shell_point a, b;
+		a.face = b.face = 0; a.uv = p0; b.uv = p1;
+		st = qaws_shell_curve_create_shortest_path(atlas, a, b, tolerance, &sc);
+	}
+	if (st == QAWS_STATUS_OK)
+	{
+		/* the runs end to end, as one curve in (u, v) */
+		unsigned int nr = qaws_shell_curve_get_run_count(sc);
+		qaws_curve** seg = (qaws_curve**)calloc(nr + 1, sizeof(qaws_curve*));
+		qaws_curve* comp = NULL;
+		if (!seg)
+			st = QAWS_STATUS_ALLOCATION_FAILURE;
+		for (i = 0; i < nr && st == QAWS_STATUS_OK; i++)
+		{
+			unsigned int fw;
+			qaws_surface_curve const* run;
+			qaws_range rg;
+			if ((st = qaws_shell_curve_get_run(sc, i, &fw, &run)) != QAWS_STATUS_OK)
+				break;
+			rg = qaws_curve_get_parameter_range(qaws_surface_curve_get_uv(run));
+			st = qaws_curve_extract(qaws_surface_curve_get_uv(run), rg.min_value, rg.max_value, &seg[i]);
+		}
+		if (st == QAWS_STATUS_OK)
+		{
+			qaws_composite_desc cd;
+			memset(&cd, 0, sizeof(cd));
+			cd.dimension = QAWS_DIMENSION_2D; cd.segments = seg; cd.segment_count = nr;
+			st = qaws_curve_create_composite(&cd, &comp);
+		}
+		else if (seg)
+			for (i = 0; i < nr; i++) qaws_curve_destroy(seg[i]);
+		if (st == QAWS_STATUS_OK)
+			st = qaws_surface_curve_create_uv(surface, comp, out_curve);
+		qaws_curve_destroy(comp);
+		free(seg);
+	}
+done:
+	qaws_shell_curve_destroy(sc);
+	qaws_shell_atlas_destroy(atlas);
+	for (i = 0; i < nown; i++) qaws_curve_destroy(own[i]);
+	free(own); free((void*)views); free(loops);
+	return st;
 }
