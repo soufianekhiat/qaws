@@ -341,3 +341,14 @@ Each item lands with tests in f64 and f32, docs, and a showcase figure.
   crossings from a point just left of the first loop to the nearest copy;
   a start off its trimmed face refused. Test 108 (a torus with a hole where
   its seams cross, against the whole torus). Trims now cover every surface.
+- Follow-up: geodesics through a pole (a meridian reaching a dome's top
+  goes on half a period round, from a hair past it). Test 107.
+- Follow-up: shortest paths round holes
+  (qaws_shell_curve_create_shortest_path). The geodesic is aimed; where a
+  hole stops it, the taut string is built: the geodesics from the ends
+  that touch the rim (found as sign changes of the tangency round the loop,
+  then refined), joined along the rim. A fan of aimed geodesics catches a
+  shorter path clear of the hole, such as over a torus's tube. Test 108
+  checks a plate with a round hole against the closed form; figure 25's
+  open holes now show these paths. Open: several holes between the ends;
+  a complete search of geodesics where they refocus.

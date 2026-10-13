@@ -154,6 +154,42 @@ In f32 the same checks hold to 3e-5. Figure 25 shows the split plane, the
 plate and tube (helices through the hole, a disk over the rim, a union with
 a disk inside the tube) and the trimmed cube.
 
+## Shortest paths round holes
+
+`qaws_shell_curve_create_shortest_path(atlas, p0, p1, tolerance, &curve)`
+gives the shortest path between two points. A ray stops at a hole's rim
+(a free trim loop); the shortest path goes round the hole instead.
+
+- **Clear.** It aims the geodesic from p0 at p1 by Gauss-Newton on its
+  angle and length. If that geodesic is not stopped by a hole, it is the
+  path.
+- **Round a hole.** It looks for the geodesics from each end that touch
+  the rim, joins each pair along the rim either way round, and keeps the
+  shortest of these taut strings.
+  - **Ends on the hole's face.** The touching places are found on the
+    untraced surface: the tangency (the cross product of the arrival
+    velocity with the rim's tangent) changes sign over 64 places round
+    the loop, and a secant step refines each sign change. A touching
+    geodesic that runs through the hole is dropped.
+  - **Ends on other faces.** It uses the traced rays that graze the rim,
+    found by bisection between hitting it and passing it.
+- **Other geodesics.** It also aims from a fan of 32 first angles. A
+  geodesic that is clear of the hole and shorter than the taut string
+  wins. On a torus this is the path over the tube, past the hole.
+
+| Check (test 108) | f64 | f32 |
+|---|---|---|
+| Plate with a round hole: three paths round it and one clear of it, against the taut string (tangents and the arc) | 1e-11 | 6e-7 |
+
+The cylinder with a hole on its seam matches the unrolled taut string to
+1e-12 (scratch check).
+
+Limits:
+- Only one hole may lie between the ends.
+- The fan does not search every geodesic. A shorter geodesic can be missed
+  on a surface where geodesics refocus, such as a torus past its conjugate
+  distance.
+
 ## Limits
 
 - Rays that hit a vertex exactly stop there; disks round vertices go

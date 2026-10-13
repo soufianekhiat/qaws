@@ -6,7 +6,8 @@
    trimmed to its faces; a T-junction (one side meeting two walls); a
    cylinder trimmed by its rims and a hole on its seam; a torus with a hole
    where its seams cross.
-   Straightest rays and geodesic disks run over the trim edges. Drawn with
+   Straightest rays and geodesic disks run over the trim edges; shortest
+   paths go round the open holes. Drawn with
    figure 24's shaded renderer. */
 
 /* a face's trim loops as a region of it (to draw only its trimmed part) */
@@ -92,6 +93,29 @@ static void s25_rays(ssd_scene* sc, qaws_shell_atlas const* a, qaws_surface** f,
 	}
 }
 
+/* the shortest paths from c to each target (round a hole in the way) */
+static void s25_paths(ssd_scene* sc, qaws_shell_atlas const* a, qaws_surface** f, qaws_shell_point c, double const (*to)[2], unsigned int n, int const* rgb)
+{
+	static int const black[3] = { 27, 31, 36 };
+	unsigned int i, w;
+	for (i = 0; i < n; i++)
+	{
+		qaws_shell_curve* g = NULL;
+		qaws_status st = qaws_shell_curve_create_shortest_path(a, c, shf_pt(c.face, to[i][0], to[i][1]), 0, &g);
+		if (st != QAWS_STATUS_OK)
+			printf("  figure 25: no shortest path to (%.2f, %.2f): %d\n", to[i][0], to[i][1], (int)st);
+		for (w = 0; g && w < qaws_shell_curve_get_run_count(g); w++)
+		{
+			unsigned int fw;
+			qaws_surface_curve const* run;
+			qaws_shell_curve_get_run(g, w, &fw, &run);
+			ssd_curve_line(sc, f[fw], qaws_surface_curve_get_uv(run), rgb, 1.4);
+		}
+		qaws_shell_curve_destroy(g);
+		ssd_dot(sc, f[c.face], to[i][0], to[i][1], black, 2.5);
+	}
+}
+
 /* what to draw of the cylinder and the torus: face 0 outside the hole (a
    circle of (u, v), over the period copies), face 1 inside it */
 static double s25_hole_dist(double u, double v, double cu, double cv, int wrap_v)
@@ -111,7 +135,7 @@ static int s25_keep_cylinder(unsigned int face, double u, double v)
 static int s25_keep_torus(unsigned int face, double u, double v)
 {
 	double d = s25_hole_dist(u, v, 0, 0, 1);
-	return face == 0 ? d >= 0.12 : d <= 0.12;
+	return face == 0 ? d >= 0.06 : d <= 0.06;
 }
 
 static void demo_shell_trimmed(void)
@@ -457,12 +481,10 @@ static void demo_shell_trimmed(void)
 		}
 		if (k == 8)
 		{
-			static double const dirs[8][2] = { { 1, -0.9 }, { 1, -0.6 }, { 1, -0.3 }, { 1, -0.1 }, { 1, 0.1 }, { 1, 0.3 }, { 1, 0.6 }, { 1, 0.9 } };
-			double dn[8][2];
-			for (i = 0; i < 8; i++) { double nn = hypot(dirs[i][0], dirs[i][1]); dn[i][0] = dirs[i][0] / nn; dn[i][1] = dirs[i][1] / nn; }
-			ssd_panel(&s, &v3, "a cylinder with an open hole on its seam", "rays meeting the hole stop at its rim; the others pass it, round the seam");
+			static double const to[7][2] = { { 0.22, 0.24 }, { 0.22, 0.36 }, { 0.22, 0.44 }, { 0.22, 0.5 }, { 0.22, 0.56 }, { 0.22, 0.64 }, { 0.22, 0.76 } };
+			ssd_panel(&s, &v3, "a cylinder with an open hole on its seam", "shortest paths across the seam: round the hole's rim where it is in the way");
 			ssd_surfaces(&sc, f, 1, NULL, 0);
-			s25_rays(&sc, a, f, shf_pt(0, 0.78, 0.5), (double const (*)[2])dn, 8, 1.6, red);
+			s25_paths(&sc, a, f, shf_pt(0, 0.78, 0.5), to, 7, red);
 			ssd_dot(&sc, f[0], 0.78, 0.5, black, 3.5);
 		}
 		else
@@ -488,9 +510,9 @@ static void demo_shell_trimmed(void)
 	   as given): left, the hole open; right, filled by a face of its own */
 	for (k = 10; k < 12; k++)
 	{
-		static double const box[2][4] = { { 0, 1, 0, 1 }, { -0.12, 0.12, -0.12, 0.12 } };
+		static double const box[2][4] = { { 0, 1, 0, 1 }, { -0.06, 0.06, -0.06, 0.06 } };
 		static int const tints[2][3] = { { 226, 220, 206 }, { 120, 170, 230 } };
-		qaws_curve *prof = sgf_arc(1.0, 0, 0.35, 0, 2 * pi), *hole = sgf_arc(0, 0, 0.12, 2 * pi, 0), *disk = sgf_arc(0, 0, 0.12, 1.0, 1.0 + 2 * pi);
+		qaws_curve *prof = sgf_arc(1.0, 0, 0.35, 0, 2 * pi), *hole = sgf_arc(0, 0, 0.06, 2 * pi, 0), *disk = sgf_arc(0, 0, 0.06, 1.0, 1.0 + 2 * pi);
 		qaws_curve* hc[4] = { NULL, NULL, NULL, NULL };
 		qaws_curve const *lh[1], *ld[1];
 		qaws_surface* f[2];
@@ -543,23 +565,21 @@ static void demo_shell_trimmed(void)
 		}
 		if (k == 10)
 		{
-			static double const dirs[8][2] = { { -1, -3 }, { -1, -2 }, { -1, -1 }, { -1, -0.4 }, { -1, 0.4 }, { -1, 1 }, { -1, 2 }, { -1, 3 } };
-			double dn[8][2];
-			for (i = 0; i < 8; i++) { double nn = hypot(dirs[i][0], dirs[i][1]); dn[i][0] = dirs[i][0] / nn; dn[i][1] = dirs[i][1] / nn; }
-			ssd_panel(&s, &v3, "a torus with an open hole where its seams cross", "rays meeting the hole stop at its rim; the others pass it, over both seams");
+			static double const to[7][2] = { { 0.9, 0.9 }, { 0.9, 0.95 }, { 0.9, 0.98 }, { 0.9, 0.0 }, { 0.9, 0.02 }, { 0.9, 0.05 }, { 0.9, 0.1 } };
+			ssd_panel(&s, &v3, "a torus with an open hole where its seams cross", "shortest paths over both seams: round the hole's rim where it is in the way");
 			ssd_surfaces(&sc, f, 1, NULL, 0);
-			s25_rays(&sc, a, f, shf_pt(0, 0.2, 0.0), (double const (*)[2])dn, 8, 1.6, red);
-			ssd_dot(&sc, f[0], 0.2, 0.0, black, 3.5);
+			s25_paths(&sc, a, f, shf_pt(0, 0.1, 0.0), to, 7, red);
+			ssd_dot(&sc, f[0], 0.1, 0.0, black, 3.5);
 		}
 		else
 		{
-			g = ssd_disk(a, shf_pt(0, 0.15, 0.1), 0.3, &A);
+			g = ssd_disk(a, shf_pt(0, 0.09, 0.03), 0.3, &A);
 			sprintf(label, "the torus's hole filled by a face of its own: disk %.6f", A);
 			ssd_panel(&s, &v3, label, "the blue face fills the hole; the disk crosses it, as on the whole torus");
 			paint[0].r = g; memcpy(paint[0].rgb, fblue, sizeof(fblue));
 			ssd_surfaces(&sc, f, 2, paint, 1);
 			ssd_outline(&sc, g, f, 2, blue);
-			ssd_dot(&sc, f[0], 0.15, 0.1, black, 3.5);
+			ssd_dot(&sc, f[0], 0.09, 0.03, black, 3.5);
 		}
 		s25_trim_edges(&sc, f[0], thp, 1);
 		ssd_draw(&s, &sc);

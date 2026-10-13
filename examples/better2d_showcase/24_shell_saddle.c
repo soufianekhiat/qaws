@@ -289,6 +289,34 @@ static void ssd_edges(ssd_scene* sc, qaws_surface** f, unsigned int nf)
 }
 
 /* a shell region's boundary on every face */
+/* a region's cut along a seam: the curve on a side of the domain (u or v at
+   0 or 1 at its ends and middle) whose opposite side is the same place */
+static int ssd_on_seam(qaws_surface const* f, qaws_curve const* c)
+{
+	qaws_range rg = qaws_curve_get_parameter_range(c);
+	qaws_eval_result_2d e[3];
+	qaws_surface_eval_result a, b;
+	unsigned int ax, i;
+	for (i = 0; i < 3; i++)
+		qaws_curve_evaluate_2d(c, rg.min_value + (rg.max_value - rg.min_value) * (qaws_scalar)(0.5 * i), QAWS_EVAL_FLAG_POSITION, &e[i]);
+	for (ax = 0; ax < 2; ax++)
+	{
+		double w = ax ? e[1].position.y : e[1].position.x, q[2];
+		int side = 1;
+		for (i = 0; i < 3; i++)
+			side &= fabs((ax ? e[i].position.y : e[i].position.x) - w) < 1e-6 && (fabs(w) < 1e-6 || fabs(w - 1) < 1e-6);
+		if (!side)
+			continue;
+		q[0] = e[1].position.x; q[1] = e[1].position.y;
+		q[ax] = 1 - q[ax];
+		ssd_eval(f, e[1].position.x, e[1].position.y, QAWS_SURFACE_EVAL_POSITION, &a);
+		ssd_eval(f, q[0], q[1], QAWS_SURFACE_EVAL_POSITION, &b);
+		if (fabs((double)(a.position.x - b.position.x)) + fabs((double)(a.position.y - b.position.y)) + fabs((double)(a.position.z - b.position.z)) < 1e-5)
+			return 1;
+	}
+	return 0;
+}
+
 static void ssd_outline(ssd_scene* sc, qaws_shell_region const* g, qaws_surface** f, unsigned int nf, int const* rgb)
 {
 	unsigned int k, p, c;
@@ -304,7 +332,8 @@ static void ssd_outline(ssd_scene* sc, qaws_shell_region const* g, qaws_surface*
 			qaws_path_2d path;
 			qaws_surface_region_get_path(r, p, &path);
 			for (c = 0; c < path.curve_count; c++)
-				ssd_curve_line(sc, f[k], path.curves[c], rgb, 2.0);
+				if (!ssd_on_seam(f[k], path.curves[c]))
+					ssd_curve_line(sc, f[k], path.curves[c], rgb, 2.0);
 		}
 	}
 }

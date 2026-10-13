@@ -3410,3 +3410,435 @@ qaws_status qaws_shell_region_create_geodesic_disk(qaws_shell_atlas const* a, qa
 	*out_region = acc;
 	return QAWS_STATUS_OK;
 }
+
+/* ------------------------------------------------------------------------ */
+/*  Shortest paths round holes                                              */
+/* ------------------------------------------------------------------------ */
+
+/* the ray from k's centre at angle th over k->r: where it ends (its face,
+   (u, v), the length run) and, when it stops at a free trim piece (a hole's
+   rim), that loop (else SH_NONE) */
+static qaws_status sh_hit(sh_circ const* k, double th, unsigned int* f, double* uv, double* len, unsigned int* loop)
+{
+	double end[2], vel[2], y[4], cc[2];
+	sh_runs runs;
+	unsigned int i;
+	qaws_status st;
+	cc[0] = k->c.uv.x; cc[1] = k->c.uv.y;
+	*loop = SH_NONE;
+	*len = 0;
+	if ((st = qaws_internal_sg_shoot(&k->a->c[k->c.face], cc, th, 0, end, vel)) != QAWS_STATUS_OK)
+		return st;
+	y[0] = end[0]; y[1] = end[1]; y[2] = vel[0]; y[3] = vel[1];
+	*f = k->c.face;
+	memset(&runs, 0, sizeof(runs));
+	st = sh_trace(k->a, f, y, k->r, &runs, NULL);
+	for (i = 0; i < runs.n; i++) *len += runs.r[i].len;
+	free(runs.r);
+	uv[0] = y[0]; uv[1] = y[1];
+	if (st == QAWS_STATUS_OUT_OF_RANGE && SH_TRIMMED(k->a, *f))
+	{
+		/* (the free piece it stopped at: the nearest) */
+		unsigned int p;
+		double s;
+		sh_trim_nearest(&k->a->tr[*f], uv, SH_NONE, &p, &s, NULL);
+		if (SH_NB(k->a, *f, 4 + (int)p) == SH_NONE)
+			*loop = k->a->tr[*f].loop[p];
+	}
+	return st;
+}
+
+static qaws_vec3 sh_pos3(qaws_shell_atlas const* a, unsigned int f, double const* uv)
+{
+	qaws_surface_eval_result r;
+	memset(&r, 0, sizeof(r));
+	qaws_internal_sg_eval(&a->c[f], uv[0], uv[1], QAWS_SURFACE_EVAL_POSITION, &r);
+	return r.position;
+}
+
+/* the angle at p (its face's metric angle) of the direction toward x in space */
+static double sh_aim_angle(qaws_shell_atlas const* a, qaws_shell_point p, qaws_vec3 x)
+{
+	qaws_internal_sg_ctx const* c = &a->c[p.face];
+	qaws_surface_eval_result r;
+	double w[3], su[3], sv[3], g11, g12, g22, b1, b2, det, d[2], th = 0;
+	qaws_internal_sg_eval(c, p.uv.x, p.uv.y, QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_DU | QAWS_SURFACE_EVAL_DV, &r);
+	w[0] = x.x - r.position.x; w[1] = x.y - r.position.y; w[2] = x.z - r.position.z;
+	sh_add3(su, r.du, 1, r.dv, 0); sh_add3(sv, r.dv, 1, r.du, 0);
+	g11 = sh_dot(su, su); g12 = sh_dot(su, sv); g22 = sh_dot(sv, sv);
+	b1 = sh_dot(su, w); b2 = sh_dot(sv, w);
+	det = g11 * g22 - g12 * g12;
+	d[0] = (g22 * b1 - g12 * b2) / det; d[1] = (g11 * b2 - g12 * b1) / det;
+	qaws_internal_sg_angle(c, p.uv.x, p.uv.y, d, &th);
+	return th;
+}
+
+/* the geodesic from k's centre reaching x: (th, L) by Gauss-Newton on its
+   end in space; 0 when it converges unblocked, else 1 with the loop of the
+   hole it ran into (SH_NONE: no convergence) in *blocked */
+static int sh_aim(sh_circ* k, qaws_vec3 x, double* th, double* L, unsigned int* blocked)
+{
+	unsigned int it, f, lp;
+	double uv[2], len;
+	*blocked = SH_NONE;
+	for (it = 0; it < 40; it++)
+	{
+		double r0[3], J[3][2], A11 = 0, A12 = 0, A22 = 0, g1 = 0, g2 = 0, det, h = 1e-7, n0;
+		qaws_vec3 e;
+		unsigned int q, m;
+		k->r = *L;
+		if (sh_hit(k, *th, &f, uv, &len, &lp) != QAWS_STATUS_OK)
+		{
+			*blocked = lp;
+			return 1;
+		}
+		e = sh_pos3(k->a, f, uv);
+		r0[0] = e.x - x.x; r0[1] = e.y - x.y; r0[2] = e.z - x.z;
+		n0 = sqrt(sh_dot(r0, r0));
+		if (n0 <= 1e-12 * (*L + 1))
+			return 0;
+		for (q = 0; q < 2; q++)
+		{
+			k->r = *L + (q == 1 ? h : 0);
+			if (sh_hit(k, *th + (q == 0 ? h : 0), &f, uv, &len, &lp) != QAWS_STATUS_OK)
+			{
+				*blocked = lp;
+				return 1;
+			}
+			e = sh_pos3(k->a, f, uv);
+			J[0][q] = (e.x - x.x - r0[0]) / h; J[1][q] = (e.y - x.y - r0[1]) / h; J[2][q] = (e.z - x.z - r0[2]) / h;
+		}
+		for (m = 0; m < 3; m++)
+		{
+			A11 += J[m][0] * J[m][0]; A12 += J[m][0] * J[m][1]; A22 += J[m][1] * J[m][1];
+			g1 += J[m][0] * r0[m]; g2 += J[m][1] * r0[m];
+		}
+		det = A11 * A22 - A12 * A12;
+		if (!(fabs(det) > 0))
+			break;
+		*th -= (A22 * g1 - A12 * g2) / det;
+		*L -= (A11 * g2 - A12 * g1) / det;
+		if (*L <= 0) *L = 1e-9;
+	}
+	return 1;
+}
+
+/* the ray from k's centre grazing the hole's loop on one side (sg +1 or -1
+   from th0, which runs into it): its angle and the length to where it
+   touches the rim, its face and (u, v) there (bisection between running into
+   the loop and passing it) */
+static int sh_graze(sh_circ* k, double th0, double sg, double Lmax, unsigned int loop, double* th, double* len, unsigned int* f, double* uv)
+{
+	double lo = 0, hi, l;
+	unsigned int lp, it;
+	k->r = Lmax;
+	for (hi = 0.02; hi < SH_PI; hi *= 1.5)
+	{
+		sh_hit(k, th0 + sg * hi, f, uv, &l, &lp);
+		if (lp != loop)
+			break;
+		lo = hi;
+	}
+	if (!(hi < SH_PI))
+		return 0;
+	for (it = 0; it < 60; it++)
+	{
+		double mid = 0.5 * (lo + hi);
+		sh_hit(k, th0 + sg * mid, f, uv, &l, &lp);
+		if (lp == loop) lo = mid; else hi = mid;
+	}
+	*th = th0 + sg * lo;
+	sh_hit(k, *th, f, uv, len, &lp);
+	return lp == loop;
+}
+
+/* the stretch of loop l of face f from place pa to pb (the loop's way when
+   fwd, else against it): its runs appended (when sc), its length */
+static qaws_status sh_rim_runs(qaws_shell_atlas const* a, unsigned int f, unsigned int l, double pa, double pb, int fwd,
+	qaws_shell_curve* sc, double* len)
+{
+	sh_trim const* t = &a->tr[f];
+	unsigned int cnt = t->lfirst[l + 1] - t->lfirst[l];
+	double at = pa, to = pb;
+	qaws_status st = QAWS_STATUS_OK;
+	*len = 0;
+	if (fwd) { if (to < at) to += cnt; }
+	else { if (to > at) to -= cnt; }
+	while (st == QAWS_STATUS_OK && (fwd ? at < to - 1e-12 : at > to + 1e-12))
+	{
+		double base = fwd ? floor(at) : ceil(at) - 1, end, dt;
+		unsigned int p;
+		qaws_curve* cv = NULL;
+		qaws_surface_curve* c = NULL;
+		end = fwd ? (base + 1 < to ? base + 1 : to) : (base > to ? base : to);
+		p = t->lfirst[l] + (unsigned int)((((long)base % (long)cnt) + (long)cnt) % (long)cnt);
+		dt = t->t1[p] - t->t0[p];
+		if ((st = qaws_curve_extract(t->cv[p], (qaws_scalar)(t->t0[p] + (at - base) * dt), (qaws_scalar)(t->t0[p] + (end - base) * dt), &cv)) == QAWS_STATUS_OK &&
+			(st = qaws_surface_curve_create_uv(a->s[f], cv, &c)) == QAWS_STATUS_OK)
+		{
+			qaws_scalar l2 = 0;
+			qaws_surface_curve_get_length(c, &l2);
+			*len += (double)l2;
+			if (sc)
+				st = sh_curve_push(sc, f, c, cv);
+			else
+			{
+				qaws_surface_curve_destroy(c);
+				qaws_curve_destroy(cv);
+			}
+		}
+		else
+			qaws_curve_destroy(cv);
+		at = end;
+	}
+	return st;
+}
+
+/* the geodesic from p (on face f, the surface untrimmed) touching loop l
+   of f: the place on the loop where the geodesic to it arrives along the
+   rim (secant on that place from *pl, the geodesic aimed by Newton from
+   (*th, *L)); 0 when it does not converge */
+static double sh_touch(qaws_shell_atlas const* a, unsigned int f, double const* p, unsigned int l, double pl, double* th, double* L, int* ok)
+{
+	sh_trim const* t = &a->tr[f];
+	long cnt = (long)(t->lfirst[l + 1] - t->lfirst[l]);
+	double x[2], dx[2], end[2], vel[2], b = floor(pl);
+	*ok = 0;
+	sh_trim_eval(t, t->lfirst[l] + (unsigned int)((((long)b % cnt) + cnt) % cnt), pl - b, x, dx);
+	if (!qaws_internal_sg_reach(&a->c[f], p, x, th, L) || qaws_internal_sg_shoot(&a->c[f], p, *th, *L, end, vel) != QAWS_STATUS_OK)
+		return 0;
+	*ok = 1;
+	return (vel[0] * dx[1] - vel[1] * dx[0]) / (hypot(vel[0], vel[1]) * hypot(dx[0], dx[1]));
+}
+
+static int sh_tangent(qaws_shell_atlas const* a, unsigned int f, double const* p, unsigned int l, double* pl, double* th, double* L)
+{
+	double q0 = *pl, q1 = *pl + 1e-4, F0, F1 = 1, th1 = *th, L1 = *L, n;
+	unsigned int it;
+	int ok;
+	F0 = sh_touch(a, f, p, l, q0, th, L, &ok);
+	if (!ok)
+		return 0;
+	for (it = 0; it < 40; it++)
+	{
+		double q2;
+		th1 = *th; L1 = *L;
+		F1 = sh_touch(a, f, p, l, q1, &th1, &L1, &ok);
+		if (!ok)
+			return 0;
+		if (fabs(q1 - q0) <= 1e-14 || F1 == 0 || !(fabs(F1 - F0) > 0))
+			break;
+		q2 = q1 - F1 * (q1 - q0) / (F1 - F0);
+		if (fabs(q2 - q1) > 0.25) q2 = q1 + (q2 > q1 ? 0.25 : -0.25);
+		q0 = q1; F0 = F1; q1 = q2;
+		*th = th1; *L = L1;
+	}
+	*th = th1; *L = L1;
+	n = (double)(a->tr[f].lfirst[l + 1] - a->tr[f].lfirst[l]);
+	*pl = q1 - n * floor(q1 / n);
+	return fabs(F1) < SH_EDGE_NEAR;
+}
+
+/* the geodesics from p (on face f) touching loop l: where the tangency
+   changes sign over 64 places round the loop (each geodesic aimed from the
+   last), refined by sh_tangent, those clear of the hole kept; their places,
+   angles and lengths, at most 4 */
+static unsigned int sh_tangents(qaws_shell_atlas const* a, unsigned int f, double const* p, unsigned int l, double* pl, double* th, double* L)
+{
+	sh_circ k;
+	sh_trim const* t = &a->tr[f];
+	unsigned int cnt = t->lfirst[l + 1] - t->lfirst[l], i, n = 0, ns = 64;
+	double x[2], Fp = 0, thp = 0, Lp = 0, th0, L0;
+	qaws_shell_point pp;
+	qaws_vec3 xp;
+	int ok, okp = 0;
+	pp.face = f; pp.uv.x = (qaws_scalar)p[0]; pp.uv.y = (qaws_scalar)p[1];
+	k.a = a; k.c = pp; k.r = 0;
+	xp = sh_pos3(a, f, p);
+	sh_trim_eval(t, t->lfirst[l], 0, x, NULL);
+	th0 = sh_aim_angle(a, pp, sh_pos3(a, f, x));
+	L0 = sh_dist(xp, sh_pos3(a, f, x));
+	for (i = 0; i <= ns && n < 4; i++)
+	{
+		double q = (double)cnt * i / ns, F = sh_touch(a, f, p, l, q, &th0, &L0, &ok);
+		if (ok && okp && (F > 0) != (Fp > 0))
+		{
+			double qq = (double)cnt * (i - 1) / ns, tt = thp, LL = Lp;
+			unsigned int hf, hl;
+			double e[2], len;
+			/* (one through the hole is no path: traced short of its touch) */
+			if (sh_tangent(a, f, p, l, &qq, &tt, &LL) && (k.r = LL * (1 - 1e-3)) > 0 && sh_hit(&k, tt, &hf, e, &len, &hl) == QAWS_STATUS_OK)
+			{
+				pl[n] = qq; th[n] = tt; L[n] = LL;
+				n++;
+			}
+		}
+		okp = ok; Fp = F; thp = th0; Lp = L0;
+	}
+	return n;
+}
+
+/* the touching geodesic from k's centre at th over k->r on its own face, the
+   surface untrimmed (traced over the trims it stops a rounding short of the
+   rim), appended forwards or backwards */
+static qaws_status sh_touch_runs(sh_circ const* k, double th, double tol, int backwards, qaws_shell_curve* sc)
+{
+	double end[2], vel[2], cc[2];
+	qaws_vec2 d;
+	qaws_surface_curve *ray = NULL, *c = NULL;
+	qaws_curve* cv = NULL;
+	qaws_status st;
+	cc[0] = k->c.uv.x; cc[1] = k->c.uv.y;
+	if ((st = qaws_internal_sg_shoot(&k->a->c[k->c.face], cc, th, 0, end, vel)) != QAWS_STATUS_OK)
+		return st;
+	d.x = (qaws_scalar)vel[0]; d.y = (qaws_scalar)vel[1];
+	if ((st = qaws_surface_curve_create_geodesic_ray(k->a->s[k->c.face], k->c.uv, d, (qaws_scalar)k->r, (qaws_scalar)tol, &ray)) != QAWS_STATUS_OK)
+		return st;
+	if (backwards)
+		st = qaws_curve_reverse(qaws_surface_curve_get_uv(ray), &cv);
+	else
+	{
+		qaws_range rg = qaws_curve_get_parameter_range(qaws_surface_curve_get_uv(ray));
+		st = qaws_curve_extract(qaws_surface_curve_get_uv(ray), rg.min_value, rg.max_value, &cv);
+	}
+	if (st == QAWS_STATUS_OK && (st = qaws_surface_curve_create_uv(k->a->s[k->c.face], cv, &c)) == QAWS_STATUS_OK)
+		st = sh_curve_push(sc, k->c.face, c, cv);
+	else
+		qaws_curve_destroy(cv);
+	qaws_surface_curve_destroy(ray);
+	return st;
+}
+
+qaws_status qaws_shell_curve_create_shortest_path(qaws_shell_atlas const* a, qaws_shell_point p0, qaws_shell_point p1, qaws_scalar tolerance,
+	qaws_shell_curve** out_curve)
+{
+	sh_circ k0, k1;
+	qaws_vec3 x0, x1;
+	double th0, th, L, tol, uv[2];
+	unsigned int blocked;
+	qaws_shell_curve* sc;
+	qaws_status st = QAWS_STATUS_OK;
+	if (!a || !out_curve || p0.face >= a->nf || p1.face >= a->nf || !sh_on_face(a, p0) || !sh_on_face(a, p1))
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	*out_curve = NULL;
+	uv[0] = p0.uv.x; uv[1] = p0.uv.y; x0 = sh_pos3(a, p0.face, uv);
+	uv[0] = p1.uv.x; uv[1] = p1.uv.y; x1 = sh_pos3(a, p1.face, uv);
+	tol = tolerance > 0 ? (double)tolerance * a->c[p0.face].diag : a->c[p0.face].tol;
+	k0.a = a; k0.c = p0; k1.a = a; k1.c = p1;
+	th = th0 = sh_aim_angle(a, p0, x1);
+	L = sh_dist(x0, x1);
+	sc = sh_curve_new(a);
+	if (!sc)
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	if (!sh_aim(&k0, x1, &th0, &L, &blocked))
+	{
+		/* nothing in the way: the geodesic itself */
+		k0.r = L;
+		st = sh_ray_runs(&k0, th0, tol, 0, sc);
+	}
+	else if (blocked == SH_NONE)
+		st = QAWS_STATUS_NUMERICAL_FAILURE;
+	else
+	{
+		/* round the hole: from each end the ray grazing its rim on either
+		   side, joined along the rim; the shortest of the ways round.
+		   shortcut: one hole between the ends and nothing else in the way;
+		   a path round several holes needs a search over their tangents */
+		double g[2][4], ln[2][4], pl[2][4], th1 = 0, L1, best = 1e300, rl, hit[2], m[2] = { 0, 0 }, half = 0;
+		double bt0 = 0, bt1 = 0, bl0 = 0, bl1 = 0, bpa = 0, bpb = 0, fth = 0, fL = 0;
+		int bfwd = 1, fan = 0;
+		unsigned int s, w, i0, i1, lp, f = 0, hf = 0, n[2] = { 0, 0 };
+		sh_circ* kk[2];
+		/* the sweeps start from rays into the hole: the aimed one where it
+		   was stopped, from p1 the geodesic to that point of the rim; they
+		   reach no further than to the hole and half round it (a ray
+		   passing it must not come back round to it, on a closed surface) */
+		kk[0] = &k0; kk[1] = &k1;
+		k0.r = 4 * sh_dist(x0, x1) + 4 * L;
+		if (sh_hit(&k0, th0, &hf, hit, &m[0], &lp) != QAWS_STATUS_OUT_OF_RANGE || lp != blocked)
+			st = QAWS_STATUS_NUMERICAL_FAILURE;
+		else
+		{
+			sh_trim const* t = &a->tr[hf];
+			qaws_vec3 xh = sh_pos3(a, hf, hit);
+			sh_rim_runs(a, hf, blocked, 0, (double)(t->lfirst[blocked + 1] - t->lfirst[blocked]), 1, NULL, &half);
+			half *= 0.5;
+			th1 = sh_aim_angle(a, p1, xh);
+			L1 = sh_dist(x1, xh);
+			uv[0] = p1.uv.x; uv[1] = p1.uv.y;
+			if (p1.face == hf) qaws_internal_sg_reach(&a->c[hf], uv, hit, &th1, &L1);
+			k1.r = k0.r;
+			if (sh_hit(&k1, th1, &f, hit, &m[1], &lp) != QAWS_STATUS_OUT_OF_RANGE || lp != blocked)
+				st = QAWS_STATUS_NUMERICAL_FAILURE;
+		}
+		for (s = 0; s < 2 && st == QAWS_STATUS_OK; s++)
+		{
+			/* the touching geodesics from each end: on the hole's face found
+			   on the surface itself (a ray found by hit or miss dips between
+			   the trace's steps), else the rays grazing it either side */
+			if (kk[s]->c.face == hf)
+			{
+				uv[0] = kk[s]->c.uv.x; uv[1] = kk[s]->c.uv.y;
+				n[s] = sh_tangents(a, hf, uv, blocked, pl[s], g[s], ln[s]);
+			}
+			else
+				for (w = 0; w < 2; w++)
+				{
+					double e[2];
+					int c;
+					if (sh_graze(kk[s], s ? th1 : th0, w ? -1 : 1, m[s] + half, blocked, &g[s][n[s]], &ln[s][n[s]], &f, e))
+					{
+						sh_trim_place(&a->tr[f], e, &c, &pl[s][n[s]]);
+						if (c == (int)blocked) n[s]++;
+					}
+				}
+		}
+		for (i0 = 0; i0 < n[0]; i0++)
+			for (i1 = 0; i1 < n[1]; i1++)
+				/* a pairing of the two ends' touching geodesics, joined either way round */
+				for (w = 0; w < 2; w++)
+					if (sh_rim_runs(a, hf, blocked, pl[0][i0], pl[1][i1], (int)w, NULL, &rl) == QAWS_STATUS_OK && ln[0][i0] + rl + ln[1][i1] < best)
+					{
+						best = ln[0][i0] + rl + ln[1][i1];
+						bt0 = g[0][i0]; bt1 = g[1][i1]; bl0 = ln[0][i0]; bl1 = ln[1][i1]; bpa = pl[0][i0]; bpb = pl[1][i1]; bfwd = (int)w;
+					}
+		/* another geodesic between the ends, clear of the hole and shorter (on
+		   a curved surface, over or round the hole the other way): aimed from
+		   a fan of first angles.
+		   shortcut: 16 angles at two lengths, not a search of every geodesic */
+		for (s = 1; s < 32 && st == QAWS_STATUS_OK; s++)
+		{
+			double tt = th + 2 * SH_PI * ((s % 16) + (s < 16 ? 0 : 0.5)) / 16, LL = sh_dist(x0, x1) * (s < 16 ? 1 : 1.25);
+			unsigned int bl;
+			if (!sh_aim(&k0, x1, &tt, &LL, &bl) && LL < best)
+			{
+				best = LL; fth = tt; fL = LL; fan = 1;
+			}
+		}
+		if (!(best < 1e300))
+			st = QAWS_STATUS_NUMERICAL_FAILURE;
+		if (st == QAWS_STATUS_OK && fan)
+		{
+			k0.r = fL;
+			st = sh_ray_runs(&k0, fth, tol, 0, sc);
+		}
+		else if (st == QAWS_STATUS_OK)
+		{
+			double e[2], dl;
+			/* (the trace may meet the rim a hair before the touching length) */
+			k0.r = bl0; k1.r = bl1;
+			if (p0.face != hf && sh_hit(&k0, bt0, &f, e, &dl, &lp) == QAWS_STATUS_OUT_OF_RANGE) k0.r = dl;
+			if (p1.face != hf && sh_hit(&k1, bt1, &f, e, &dl, &lp) == QAWS_STATUS_OUT_OF_RANGE) k1.r = dl;
+			st = p0.face == hf ? sh_touch_runs(&k0, bt0, tol, 0, sc) : sh_ray_runs(&k0, bt0, tol, 0, sc);
+			if (st == QAWS_STATUS_OK) st = sh_rim_runs(a, hf, blocked, bpa, bpb, bfwd, sc, &rl);
+			if (st == QAWS_STATUS_OK) st = p1.face == hf ? sh_touch_runs(&k1, bt1, tol, 1, sc) : sh_ray_runs(&k1, bt1, tol, 1, sc);
+		}
+	}
+	if (st != QAWS_STATUS_OK)
+	{
+		qaws_shell_curve_destroy(sc);
+		return st;
+	}
+	*out_curve = sc;
+	return QAWS_STATUS_OK;
+}
