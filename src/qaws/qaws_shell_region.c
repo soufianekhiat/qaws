@@ -1245,6 +1245,38 @@ static int sh_runs_add(sh_runs* rs, unsigned int f, double const* y0, double len
 	return 1;
 }
 
+/* along a meridian (coordinate ax varying, the other held at x): its length
+   from w0 to w1, by Gauss on 8 stretches */
+static double sh_meridian_length(qaws_internal_sg_ctx const* c, int ax, double x, double w0, double w1)
+{
+	static double const x8[4] = { 0.1834346424956498, 0.5255324099163290, 0.7966664774136267, 0.9602898564975363 };
+	static double const w8[4] = { 0.3626837833783620, 0.3137066458778873, 0.2223810344533745, 0.1012285362903763 };
+	double L = 0, h = (w1 - w0) / 8;
+	unsigned int k, q, sg;
+	for (k = 0; k < 8; k++)
+		for (q = 0; q < 4; q++)
+			for (sg = 0; sg < 2; sg++)
+			{
+				double w = w0 + h * (k + 0.5 + (sg ? 0.5 : -0.5) * x8[q]), g[3];
+				if (qaws_internal_sg_first_form(c, ax ? x : w, ax ? w : x, g) == QAWS_STATUS_OK)
+					L += 0.5 * fabs(h) * w8[q] * sqrt(ax ? g[2] : g[0]);
+			}
+	return L;
+}
+
+/* the point of the meridian at the length s from wp toward wt (bisection) */
+static double sh_meridian_at(qaws_internal_sg_ctx const* c, int ax, double x, double wp, double wt, double s)
+{
+	double lo = wp, hi = wt;
+	unsigned int it;
+	for (it = 0; it < 60; it++)
+	{
+		double mid = 0.5 * (lo + hi);
+		if (sh_meridian_length(c, ax, x, wp, mid) < s) lo = mid; else hi = mid;
+	}
+	return 0.5 * (lo + hi);
+}
+
 /* the geodesic from state y on face *f over the length L, across edges;
    y and *f become its end */
 static qaws_status sh_trace(qaws_shell_atlas const* a, unsigned int* f, double* y, double L, sh_runs* runs, unsigned int* crossings)
@@ -1272,9 +1304,10 @@ static qaws_status sh_trace(qaws_shell_atlas const* a, unsigned int* f, double* 
 			}
 			{
 				/* it leaves within this step: the exit by bisection on the length */
-				double lo = 0, hi = h, ylo[4], s;
+				double lo = 0, hi = h, ylo[4], s, ys[4], dstart = done;
 				unsigned int it;
 				int side;
+				memcpy(ys, y, sizeof(ys));
 				memcpy(ylo, y, sizeof(ylo));
 				for (it = 0; it < 80 && hi - lo > 1e-15 * (L + 1); it++)
 				{
@@ -1368,6 +1401,41 @@ static qaws_status sh_trace(qaws_shell_atlas const* a, unsigned int* f, double* 
 				memcpy(y, ylo, sizeof(ylo));
 				if (!sh_runs_add(runs, *f, y0, done))
 					return QAWS_STATUS_ALLOCATION_FAILURE;
+				/* a pole (a side along a closed direction's cross that is one
+				   point, the top of a dome): through it, on the same face half
+				   a period round, heading away */
+				if (side < 4 && !SH_TRIMMED(a, *f) && ((c->pu > 0 && (side == 0 || side == 2)) || (c->pv > 0 && (side == 1 || side == 3))) &&
+					sh_dist(sh_side_pos(a, *f, side, 0), sh_side_pos(a, *f, side, 0.5)) <= a->tol)
+				{
+					/* only a meridian reaches a pole (the others turn short of
+					   it, and integrate past it): from the step's start along its
+					   meridian to the pole, and on down the meridian half a period
+					   round from a hair past it (the coordinates are singular at
+					   the pole itself) */
+					int ax = c->pu > 0 ? 1 : 0;
+					double P = ax ? c->pu : c->pv, wp = (side == 0 || side == 3) ? (ax ? c->v0 : c->u0) : (ax ? c->v1 : c->u1);
+					double D = sh_meridian_length(c, ax, ys[1 - ax], ys[ax], wp), eps = SH_TINY_RUN * c->diag * 100;
+					double rem = left - dstart, go = rem - D < eps ? rem - D : eps, w;
+					if (!(rem > D))
+						return QAWS_STATUS_OK;
+					w = sh_meridian_at(c, ax, ys[1 - ax], wp, ys[ax], go);
+					y[1 - ax] = ys[1 - ax] + 0.5 * P;
+					y[ax] = w;
+					{
+						double g[3], gw;
+						if (qaws_internal_sg_first_form(c, ax ? y[0] : w, ax ? w : y[1], g) != QAWS_STATUS_OK)
+							return QAWS_STATUS_NUMERICAL_FAILURE;
+						gw = ax ? g[2] : g[0];
+						y[2 + (1 - ax)] = 0;
+						y[2 + ax] = (wp > w ? -1 : 1) / sqrt(gw > 0 ? gw : 1);
+					}
+					left -= dstart + D + go;
+					hops++;
+					crossed = 1;
+					if (left <= SH_TINY_RUN * c->diag)
+						return QAWS_STATUS_OK;
+					break;
+				}
 				/* a corner of the domain: a vertex of the shell (on a trim, a
 				   join of its pieces that is a vertex) */
 				if (side >= 4)

@@ -223,6 +223,13 @@ static void test_hemispheres(void)
 		dv = fabs(q.uv.y - 0.02);
 		sprintf(msg, "hemispheres: a great circle over the equator (%u crossings) back at its start within %.2g", cr, du + dv);
 		TEST_ASSERT(st == QAWS_STATUS_OK && cr == 2 && q.face == 1 && du + dv <= tol, msg);
+		/* a meridian: through both poles, back after 2 pi */
+		d.x = 0; d.y = 1;
+		st = qaws_shell_exp(a, sht_pt(1, 0.1, 0.02), d, (qaws_scalar)(2 * SHT_PI), &q, &vel, &cr);
+		du = fabs(q.uv.x - 0.1); du = fmin(du, 1 - du);
+		dv = fabs(q.uv.y - 0.02);
+		sprintf(msg, "hemispheres: a meridian through both poles back at its start within %.2g", du + dv);
+		TEST_ASSERT(st == QAWS_STATUS_OK && q.face == 1 && du + dv <= tol, msg);
 	}
 	qaws_shell_atlas_destroy(a);
 	qaws_surface_destroy(h[0]); qaws_surface_destroy(h[1]);
