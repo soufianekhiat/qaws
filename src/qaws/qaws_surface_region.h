@@ -232,6 +232,52 @@ qaws_status qaws_surface_region_integrate(qaws_surface_region const* region, qaw
    parameter point uv. */
 qaws_status qaws_surface_region_contains(qaws_surface_region const* region, qaws_vec2 uv, int* out_inside);
 
+qaws_surface const* qaws_surface_region_get_surface(qaws_surface_region const* region);
+
+/* ------------------------------------------------------------------------ */
+/*  Geodesic queries                                                        */
+/* ------------------------------------------------------------------------ */
+
+/* The geodesic distance from a to b: the length of the geodesic between
+   them (as qaws_surface_curve_create_geodesic: locally shortest, the one
+   the chord leads to). */
+qaws_status qaws_surface_distance(qaws_surface const* surface, qaws_vec2 a, qaws_vec2 b, qaws_scalar tolerance,
+	qaws_scalar* out_distance);
+
+/* The point of a curve nearest p along the surface: its parameter (of the
+   (u, v) image), its (u, v) and the geodesic distance (any may be NULL).
+   Inside the curve it is where the geodesic to p leaves the curve square
+   (a root of that angle, bracketed round the nearest of 64 samples); the
+   curve's ends are taken too. */
+qaws_status qaws_surface_curve_closest_point(qaws_surface_curve const* curve, qaws_vec2 p, qaws_scalar tolerance,
+	qaws_scalar* out_parameter, qaws_vec2* out_point, qaws_scalar* out_distance);
+
+typedef struct qaws_surface_crossing
+{
+	qaws_scalar parameter_a;    /* of curve a's (u, v) image */
+	qaws_scalar parameter_b;
+	qaws_vec2 point;            /* in a's (u, v) */
+} qaws_surface_crossing;
+
+/* Where two curves of one surface cross: their (u, v) images met (on a
+   closed surface, b's period copies too), up to capacity; the count of all. */
+qaws_status qaws_surface_curve_intersect(qaws_surface_curve const* a, qaws_surface_curve const* b, qaws_surface_crossing* out_crossings,
+	unsigned int capacity, unsigned int* out_count);
+
+/* The closest points of two curves and their geodesic distance: a crossing
+   when they cross (distance 0), else the pair each nearest the other
+   (closest points taken in turn from the nearest of 64 x 64 samples). Any
+   output may be NULL. */
+qaws_status qaws_surface_curve_closest_points(qaws_surface_curve const* a, qaws_surface_curve const* b, qaws_scalar tolerance,
+	qaws_scalar* out_parameter_a, qaws_scalar* out_parameter_b, qaws_vec2* out_point_a, qaws_vec2* out_point_b,
+	qaws_scalar* out_distance);
+
+/* A point's signed geodesic distance to a region: to its boundary (cuts
+   along seams left out), negative inside; the boundary's nearest point
+   (may be NULL). */
+qaws_status qaws_surface_region_distance(qaws_surface_region const* region, qaws_vec2 p, qaws_scalar tolerance,
+	qaws_scalar* out_distance, qaws_vec2* out_nearest);
+
 /* The region as a trimmed surface (its loops borrowed: the region must
    outlive it). */
 qaws_status qaws_surface_region_create_trimmed(qaws_surface_region const* region, qaws_surface** out_surface);

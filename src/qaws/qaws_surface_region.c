@@ -656,6 +656,11 @@ qaws_status qaws_surface_clip_exact(qaws_surface const* surface, qaws_clip_type 
 	return sr_clip(surface, clip_type, fill_rule, subjects, subject_count, clips, clip_count, &md, out_region);
 }
 
+qaws_surface const* qaws_surface_region_get_surface(qaws_surface_region const* region)
+{
+	return region ? region->s : NULL;
+}
+
 void qaws_surface_region_destroy(qaws_surface_region* region)
 {
 	if (!region)

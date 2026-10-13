@@ -382,6 +382,65 @@ reported bounds outward to floats. Figure 27 shows three geodesics on the
 bump, the crossing's step boxes and box, and an end box with the float end
 inside.
 
+## Geodesic queries
+
+```c
+qaws_surface_distance(surface, a, b, 0, &d);                                  /* along the surface */
+qaws_surface_curve_closest_point(curve, p, 0, &t, &q, &d);                   /* a curve's point nearest p */
+qaws_surface_curve_intersect(a, b, crossings, capacity, &count);             /* where two curves cross */
+qaws_surface_curve_closest_points(a, b, 0, &ta, &tb, &pa, &pb, &d);          /* two curves' nearest pair */
+qaws_surface_region_distance(region, p, 0, &d, &nearest);                    /* signed: negative inside */
+```
+
+The curves are any surface curves: geodesics, circles' arcs, offsets, or
+curves drawn in (u, v).
+
+- **Distance between two points.** The length of the geodesic between them,
+  aimed by shooting from the chord. It is the locally shortest geodesic,
+  the one the chord leads to, as in `qaws_surface_curve_create_geodesic`.
+- **A curve's closest point to p.** Inside the curve, the nearest point is
+  where the geodesic from the curve to p leaves the curve square: the root
+  of f(t) = g(c'(t), w(t)), with w that geodesic's unit starting velocity.
+  The search:
+  - samples 64 points of the curve;
+  - brackets f round the three nearest local minima of the chord in space;
+  - refines each bracket by Illinois regula falsi;
+  - also compares the curve's two ends.
+- **Crossings.** The (u, v) images are met with
+  `qaws_curve_find_intersections_2d`. On a closed surface, b's copies one
+  and two periods away in each closed direction are met too. A crossing is
+  as accurate as the images, which lie within the tolerance of the true
+  curves.
+- **Two curves' closest points.** A crossing at distance 0 when they cross.
+  Otherwise it takes the nearest pair of 64 × 64 samples, then alternates
+  closest points (b's to a's point, then a's to b's) until they stop
+  moving.
+- **A point's distance to a region.** The nearest boundary curve, skipping
+  the region's cuts along seams. Curves are taken nearest first by a lower
+  bound (the chord in space to 16 samples, less the samples' spacing, since
+  a geodesic is no shorter than its chord); the search stops once the bound
+  passes the best distance. The sign comes from
+  `qaws_surface_region_contains`.
+
+| Check (test 110) | f64 | f32 |
+|---|---|---|
+| Sphere: distance between two points against the great circle | 1e-13 | 1e-6 |
+| Sphere: a point's distance to a geodesic against the angle to its plane | 2e-11 | 3e-7 |
+| Sphere: two geodesics' crossing against the great circles' meeting; closest distance 0 | 6.5e-11 | 1e-5 |
+| Sphere: signed distance to a geodesic disk, outside and inside | 3e-10 | 1e-6 |
+| Cylinder: two geodesic segments apart against the unrolled segments | 1e-12 | 2.4e-7 |
+
+Figure 28 shows points joined to their closest points on a geodesic, a
+crossing, a closest pair, and signed distances to a disk on the B-spline
+bump.
+
+A fix came with it. Geodesic fits (paths and circles) are refined by
+doubling until their midpoints agree with the integrated rays. On a steep
+surface the rays' own accuracy (3e-9 there) sat above the tolerance, so a
+circle doubled up to 65536 points (two minutes). A fit now stops once its
+error no longer falls (it would fall sixteenfold for a cubic): 1.3 s for
+that circle.
+
 ## Medial axis
 
 ```c

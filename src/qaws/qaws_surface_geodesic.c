@@ -305,11 +305,20 @@ static qaws_status sg_hermite(double const* pts, double const* der, unsigned int
 	return st;
 }
 
+/* a fit refined by doubling has stopped improving: its error no longer
+   falls (a cubic's would by 16) but sits on the integration's own accuracy,
+   which more points cannot beat */
+static int sg_stalled(double worst, double prev, unsigned int n)
+{
+	return n >= 64 && worst > 0.5 * prev;
+}
+
 /* the geodesic from the state y0 over the length L as a Hermite spline in
    (u, v) through equal arc-length steps */
 static qaws_status sg_path(sg_ctx const* c, double const* y0, double L, qaws_curve** out)
 {
 	unsigned int n = 8;
+	double prev = 1e300;
 	*out = NULL;
 	while (n <= 1u << 18)
 	{
@@ -349,12 +358,13 @@ static qaws_status sg_path(sg_ctx const* c, double const* y0, double L, qaws_cur
 			qaws_curve_destroy(cv);
 			return st;
 		}
-		if (worst <= c->tol || n >= 1u << 18)
+		if (worst <= c->tol || n >= 1u << 18 || sg_stalled(worst, prev, n))
 		{
 			*out = cv;
 			return QAWS_STATUS_OK;
 		}
 		qaws_curve_destroy(cv);
+		prev = worst;
 		n *= 2;
 	}
 	return QAWS_STATUS_NUMERICAL_FAILURE;
@@ -725,6 +735,7 @@ qaws_status qaws_surface_curve_create_geodesic_arc(qaws_surface const* surface, 
 	int whole;
 	int pole;
 	unsigned int n;
+	double prev = 1e300;
 	qaws_status st;
 	if (!surface || !out_curve || !(r > 0) || !(a1 != a0))
 		return QAWS_STATUS_INVALID_ARGUMENT;
@@ -791,7 +802,7 @@ qaws_status qaws_surface_curve_create_geodesic_arc(qaws_surface const* surface, 
 				if (dd > worst) worst = dd;
 			}
 		}
-		if (st == QAWS_STATUS_OK && (worst <= ctx.tol || n >= 1u << 16))
+		if (st == QAWS_STATUS_OK && (worst <= ctx.tol || n >= 1u << 16 || sg_stalled(worst, prev, n)))
 		{
 			qaws_surface_curve* c;
 			if (sg_self_crossing(P, whole && !pole ? n : n + 1, whole && !pole))
@@ -822,6 +833,7 @@ qaws_status qaws_surface_curve_create_geodesic_arc(qaws_surface const* surface, 
 		qaws_curve_destroy(cv);
 		if (st != QAWS_STATUS_OK)
 			return st;
+		prev = worst;
 		n *= 2;
 	}
 	return QAWS_STATUS_NUMERICAL_FAILURE;

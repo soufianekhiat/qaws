@@ -399,3 +399,7 @@ but never listed, and what using it showed was missing, in this order:
    geodesic offset, corners where the fronts meet.
 
 Each item lands with tests in f64 and f32, docs, and a showcase figure.
+- Second part, item 1 done: geodesic queries (qaws_surface_query.c):
+  distances, a curve's closest point, crossings, two curves' closest
+  points, a point's signed distance to a region. Fits that stop improving
+  (rays' accuracy above the tolerance) end there. Test 110; figure 28.

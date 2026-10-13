@@ -111,6 +111,7 @@ add_executable(
   107_shell_region.c
   108_shell_trimmed.c
   109_geodesic_enclosure.c
+  110_geodesic_query.c
 )
 
 # The amalgamated library exports exactly the same symbols, so the tests can
