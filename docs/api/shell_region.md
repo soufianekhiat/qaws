@@ -69,10 +69,12 @@ qaws_shell_exp(atlas, p, direction, length, &q, &velocity, &crossings);
 | Two hemispheres: a circle over the equator against the cap and 2 pi sin r | 8e-12 |
 | Two hemispheres: a great circle over the equator twice, back at its start | 2e-12 |
 | Cube: a geodesic disk round a corner against the unfolded cone of angle 3 pi/2 | 5e-11 |
+| Saddle (five squares round a vertex, angle 5 pi/2): a disk through it against pi r² + (pi/4)(r − rho)² | 3e-11 |
 
 In f32 the same checks hold to 3e-5. Figure 23 shows a fan of straightest
 geodesics over a cube's edges, circles over edges and their union, and
-circles across two hemispheres.
+circles across two hemispheres, a disk round a cube corner and a disk
+through a saddle vertex.
 
 ## Limits
 
@@ -96,6 +98,17 @@ the points within r along the shell, vertices included.
 - **Behind a convex vertex.** Behind a cube's corner (a cone of angle
   3 pi/2), the sectors on the two sides overlap where the disk is reached
   both ways round, and the union is the disk.
+- **Behind a saddle vertex.** Round a vertex with more than 2 pi of angle
+  (five squares round it, 5 pi/2), the rays either side of the vertex
+  direction part and leave a gap behind it. Every point within r − rho of
+  the vertex (rho the vertex's distance from the centre) is within r of the
+  centre, so the disk about the vertex of radius r − rho is added: the union
+  of the corner sectors of each face at the vertex. Where geodesics through
+  the vertex are shortest this fills the gap exactly; behind a convex vertex
+  it adds nothing.
+- **Runs by a corner.** A ray passing a vertex by a hair may leave a run a
+  rounding long (left out) or, from its rounded start, overshoot the domain
+  by a rounding at its end (shortened by as much).
 - **Chains.** A sector's runs on the centre's face meet inside the face, so
   regions take each loop's consecutive runs on one face as one chain (one
   composite curve).

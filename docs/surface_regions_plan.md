@@ -297,3 +297,8 @@ Each item lands with tests in f64 and f32, docs, and a showcase figure.
   as jumps of the circle, and the disk is the union of sectors between them.
   A disk round a cube corner matches the unfolded cone to 5e-11 (test 107,
   figure 23).
+- Follow-up: saddle vertices (angle above 2 pi): the rays either side of the
+  vertex part, and the gap behind it is filled by the disk about the vertex
+  of the radius left, a union of corner sectors per face. A disk through
+  the vertex of five squares matches pi r² + (pi/4)(r − rho)² to 3e-11
+  (test 107, figure 23's sixth panel).

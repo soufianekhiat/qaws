@@ -11,6 +11,8 @@
  *   - a sphere as two hemispheres meeting at the equator: a circle over
  *     the equator against the cap 2 pi R^2 (1 - cos(r / R)) and its
  *     perimeter; a great circle over the equator twice, back at its start
+ *   - five squares round a saddle vertex (angle 5 pi / 2): a disk through it
+ *     against the plane disk plus the sector behind it, (pi / 4)(r - rho0)^2
  */
 
 #include "test_common.h"
@@ -221,6 +223,43 @@ static void test_hemispheres(void)
 	qaws_curve_destroy(p1); qaws_curve_destroy(p2);
 }
 
+/* five unit squares round the origin (three of the floor, two walls from
+   it): a saddle vertex of angle 5 pi / 2. A disk round it through a point
+   at rho0 from it: the plane disk, and behind the vertex the sector of
+   the angle left over (pi / 2) and radius r - rho0, reached through it */
+static void test_saddle(void)
+{
+	static double const S[5][4][3] = {
+		{ { 0, 0, 0 }, { 1, 0, 0 }, { 0, 1, 0 }, { 1, 1, 0 } },
+		{ { -1, 0, 0 }, { 0, 0, 0 }, { -1, 1, 0 }, { 0, 1, 0 } },
+		{ { -1, -1, 0 }, { 0, -1, 0 }, { -1, 0, 0 }, { 0, 0, 0 } },
+		{ { 0, -1, -1 }, { 0, 0, -1 }, { 0, -1, 0 }, { 0, 0, 0 } },
+		{ { 0, 0, -1 }, { 1, 0, -1 }, { 0, 0, 0 }, { 1, 0, 0 } } };
+	qaws_surface* f[5];
+	qaws_shell_atlas* a = NULL;
+	qaws_shell_region* g = NULL;
+	qaws_scalar A = 0;
+	double rho0 = 0.2 * sqrt(2.0), r = 0.5, A0 = SHT_PI * r * r + 0.25 * SHT_PI * (r - rho0) * (r - rho0);
+	unsigned int i, nf = 0;
+	qaws_status st, s1 = QAWS_STATUS_INVALID_ARGUMENT;
+	char msg[300];
+	for (i = 0; i < 5; i++) f[i] = sht_face(S[i][0], S[i][1], S[i][2], S[i][3]);
+	st = qaws_shell_atlas_create((qaws_surface const* const*)f, 5, 0, &a);
+	if (st == QAWS_STATUS_OK)
+		s1 = qaws_shell_region_create_geodesic_disk(a, sht_pt(0, 0.2, 0.2), (qaws_scalar)r, 0, &g);
+	if (s1 == QAWS_STATUS_OK)
+	{
+		qaws_shell_region_get_area(g, &A);
+		for (i = 0; i < 5; i++) if (qaws_shell_region_get_face(g, i)) nf++;
+	}
+	sprintf(msg, "saddle (five squares round a vertex): a disk through it (on %u faces) against the plane disk and the sector behind %.2g",
+		nf, fabs((double)A - A0));
+	TEST_ASSERT(st == QAWS_STATUS_OK && s1 == QAWS_STATUS_OK && nf == 5 && fabs((double)A - A0) <= (SHT_F32 ? 2e-4 : 1e-9), msg);
+	qaws_shell_region_destroy(g);
+	qaws_shell_atlas_destroy(a);
+	for (i = 0; i < 5; i++) qaws_surface_destroy(f[i]);
+}
+
 int test_107_shell_region_main(void)
 {
 	g_pass = 0;
@@ -228,6 +267,7 @@ int test_107_shell_region_main(void)
 	printf("Test 107: curves and regions across the faces of a shell\n");
 	test_cube();
 	test_hemispheres();
+	test_saddle();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
 }

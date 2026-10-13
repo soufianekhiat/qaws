@@ -27,11 +27,13 @@
 #define SH_ON_SIDE 1e-5     /* a loop's stretch on a side within rounding */
 #define SH_VERTEX_EPS 1e-5  /* the sectors stop this far (radians) either side of a vertex */
 #define SH_CORNER_S 1e-7    /* a side crossed this near its end hits the corner */
+#define SH_TINY_RUN 1e-5
 #else
 #define SH_TOL 1e-7
 #define SH_ON_SIDE 1e-9
 #define SH_VERTEX_EPS 1e-10
 #define SH_CORNER_S 1e-13
+#define SH_TINY_RUN 1e-13
 #endif
 
 /* ------------------------------------------------------------------------ */
@@ -50,6 +52,10 @@ struct qaws_shell_atlas
 	int (*rev)[4];              /* the neighbour's side runs the other way */
 	unsigned int ne;
 	double tol;                 /* in space */
+	/* the vertices: face corners (where two edges meet) at one point */
+	unsigned int nv;
+	double* vpos;               /* 3 per vertex */
+	unsigned int* vface;        /* 4 per face: the vertex at each corner (corner k: (u0, v0), (u1, v0), (u1, v1), (u0, v1)), or none */
 };
 
 static void sh_side_uv(qaws_internal_sg_ctx const* c, int side, double s, double* uv)
@@ -110,6 +116,43 @@ static int sh_sides_match(qaws_internal_sg_ctx const* a, int sa, qaws_internal_s
 static int sh_side_ccw(int side)
 {
 	return side == 0 || side == 1 ? 1 : -1;
+}
+
+/* the corners of the faces where a real side meets another (not along a
+   seam, not at a pole), grouped by their point in space */
+static qaws_status sh_find_vertices(qaws_shell_atlas* a)
+{
+	unsigned int f, k, j;
+	a->vface = (unsigned int*)malloc(sizeof(unsigned int) * 4 * a->nf);
+	a->vpos = (double*)malloc(sizeof(double) * 3 * (4 * a->nf + 1));
+	if (!a->vface || !a->vpos)
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	for (f = 0; f < a->nf; f++)
+		for (k = 0; k < 4; k++)
+		{
+			/* corner k between sides k - 1 and k (bottom 0, right 1, top 2, left 3) */
+			qaws_internal_sg_ctx const* c = &a->c[f];
+			int sa = (int)((k + 3) % 4), sb = (int)k;
+			double uv[2];
+			qaws_surface_eval_result r;
+			a->vface[4 * f + k] = SH_NONE;
+			if (!sh_side_real(c, sa, a->tol) || !sh_side_real(c, sb, a->tol))
+				continue;
+			uv[0] = k == 0 || k == 3 ? c->u0 : c->u1;
+			uv[1] = k <= 1 ? c->v0 : c->v1;
+			if (sh_point(c, uv, QAWS_SURFACE_EVAL_POSITION, &r) != QAWS_STATUS_OK)
+				continue;
+			for (j = 0; j < a->nv; j++)
+				if (fabs(a->vpos[3 * j] - r.position.x) + fabs(a->vpos[3 * j + 1] - r.position.y) + fabs(a->vpos[3 * j + 2] - r.position.z) <= a->tol)
+					break;
+			if (j == a->nv)
+			{
+				a->vpos[3 * j] = r.position.x; a->vpos[3 * j + 1] = r.position.y; a->vpos[3 * j + 2] = r.position.z;
+				a->nv++;
+			}
+			a->vface[4 * f + k] = j;
+		}
+	return QAWS_STATUS_OK;
 }
 
 qaws_status qaws_shell_atlas_create(qaws_surface const* const* surfaces, unsigned int n, qaws_scalar tolerance,
@@ -180,6 +223,8 @@ qaws_status qaws_shell_atlas_create(qaws_surface const* const* surfaces, unsigne
 					a->ne++;
 				}
 		}
+	if (st == QAWS_STATUS_OK)
+		st = sh_find_vertices(a);
 	if (st != QAWS_STATUS_OK)
 	{
 		qaws_shell_atlas_destroy(a);
@@ -213,6 +258,7 @@ void qaws_shell_atlas_destroy(qaws_shell_atlas* a)
 	if (!a)
 		return;
 	free(a->s); free(a->c); free(a->nb); free(a->nbside); free(a->rev);
+	free(a->vpos); free(a->vface);
 	free(a);
 }
 
@@ -242,23 +288,6 @@ static int sh_inside(qaws_internal_sg_ctx const* c, double const* uv)
 	if (c->pu <= 0 && (uv[0] < c->u0 - eu || uv[0] > c->u1 + eu)) return 0;
 	if (c->pv <= 0 && (uv[1] < c->v0 - ev || uv[1] > c->v1 + ev)) return 0;
 	return 1;
-}
-
-/* the side a point just past the domain left by, and its parameter there */
-static int sh_exit_side(qaws_internal_sg_ctx const* c, double const* uv, double* s)
-{
-	double du0 = c->pu > 0 ? 0 : (c->u0 - uv[0]) / (c->u1 - c->u0), du1 = c->pu > 0 ? 0 : (uv[0] - c->u1) / (c->u1 - c->u0);
-	double dv0 = c->pv > 0 ? 0 : (c->v0 - uv[1]) / (c->v1 - c->v0), dv1 = c->pv > 0 ? 0 : (uv[1] - c->v1) / (c->v1 - c->v0);
-	int side = 0;
-	double best = dv0;
-	if (du1 > best) { best = du1; side = 1; }
-	if (dv1 > best) { best = dv1; side = 2; }
-	if (du0 > best) { best = du0; side = 3; }
-	if (side == 0 || side == 2) *s = (uv[0] - c->u0) / (c->u1 - c->u0);
-	else *s = (uv[1] - c->v0) / (c->v1 - c->v0);
-	if (*s < 0) *s = 0;
-	if (*s > 1) *s = 1;
-	return side;
 }
 
 static void sh_add3(double* o, qaws_vec3 a, double ka, qaws_vec3 b, double kb)
@@ -446,12 +475,18 @@ static qaws_status sh_trace(qaws_shell_atlas const* a, unsigned int* f, double* 
 					else
 						hi = mid;
 				}
-				/* the side: from a point just past it */
+				/* the side: of those it heads out through, the one the exit is
+				   nearest (a point past it may be past two sides by a corner) */
 				{
-					double yp[4];
-					memcpy(yp, y, sizeof(yp));
-					qaws_internal_sg_integrate(c, yp, hi + 1e-9 * c->diag);
-					side = sh_exit_side(c, yp, &s);
+					double dist[4], best = 1e300;
+					int q;
+					dist[0] = c->pv > 0 || ylo[3] >= 0 ? 1e300 : (ylo[1] - c->v0) / (c->v1 - c->v0);
+					dist[1] = c->pu > 0 || ylo[2] <= 0 ? 1e300 : (c->u1 - ylo[0]) / (c->u1 - c->u0);
+					dist[2] = c->pv > 0 || ylo[3] <= 0 ? 1e300 : (c->v1 - ylo[1]) / (c->v1 - c->v0);
+					dist[3] = c->pu > 0 || ylo[2] >= 0 ? 1e300 : (ylo[0] - c->u0) / (c->u1 - c->u0);
+					side = 0;
+					for (q = 0; q < 4; q++)
+						if (fabs(dist[q]) < best) { best = fabs(dist[q]); side = q; }
 					/* along a closed direction: wrapped into its period (no corners there) */
 					if (side == 0 || side == 2) s = c->pu > 0 ? (ylo[0] - c->u0) / c->pu - floor((ylo[0] - c->u0) / c->pu) : (ylo[0] - c->u0) / (c->u1 - c->u0);
 					else s = c->pv > 0 ? (ylo[1] - c->v0) / c->pv - floor((ylo[1] - c->v0) / c->pv) : (ylo[1] - c->v0) / (c->v1 - c->v0);
@@ -607,11 +642,32 @@ qaws_status qaws_shell_curve_create_geodesic_ray(qaws_shell_atlas const* a, qaws
 	{
 		qaws_surface_curve* c = NULL;
 		qaws_vec2 q, dd;
-		if (!(runs.r[i].len > 0))
+		/* a run a rounding long (a ray past a vertex by a hair): left out */
+		if (!(runs.r[i].len > SH_TINY_RUN * a->c[runs.r[i].face].diag))
 			continue;
-		q.x = (qaws_scalar)runs.r[i].y0[0]; q.y = (qaws_scalar)runs.r[i].y0[1];
+		{
+			/* (rounded into its face's domain on open directions: a start on a side) */
+			qaws_internal_sg_ctx const* cf = &a->c[runs.r[i].face];
+			double su = runs.r[i].y0[0], sv = runs.r[i].y0[1];
+			if (cf->pu <= 0) { if (su < cf->u0) su = cf->u0; if (su > cf->u1) su = cf->u1; }
+			if (cf->pv <= 0) { if (sv < cf->v0) sv = cf->v0; if (sv > cf->v1) sv = cf->v1; }
+			q.x = (qaws_scalar)su; q.y = (qaws_scalar)sv;
+			if (cf->pu <= 0) { if (q.x < (qaws_scalar)cf->u0) q.x = (qaws_scalar)cf->u0; if (q.x > (qaws_scalar)cf->u1) q.x = (qaws_scalar)cf->u1; }
+			if (cf->pv <= 0) { if (q.y < (qaws_scalar)cf->v0) q.y = (qaws_scalar)cf->v0; if (q.y > (qaws_scalar)cf->v1) q.y = (qaws_scalar)cf->v1; }
+		}
 		dd.x = (qaws_scalar)runs.r[i].y0[2]; dd.y = (qaws_scalar)runs.r[i].y0[3];
-		st = qaws_surface_curve_create_geodesic_ray(a->s[runs.r[i].face], q, dd, (qaws_scalar)runs.r[i].len, tolerance, &c);
+		{
+			/* a run ending on a side by a corner may, from its rounded start,
+			   overshoot the domain by a rounding: shortened by as much */
+			double len = runs.r[i].len, cut = SH_TINY_RUN * a->c[runs.r[i].face].diag;
+			unsigned int tries;
+			st = qaws_surface_curve_create_geodesic_ray(a->s[runs.r[i].face], q, dd, (qaws_scalar)len, tolerance, &c);
+			for (tries = 0; st == QAWS_STATUS_OUT_OF_RANGE && tries < 4 && len > 2 * cut; tries++, cut *= 4)
+			{
+				len -= cut;
+				st = qaws_surface_curve_create_geodesic_ray(a->s[runs.r[i].face], q, dd, (qaws_scalar)len, tolerance, &c);
+			}
+		}
 		if (st == QAWS_STATUS_OK)
 			st = sh_curve_push(sc, runs.r[i].face, c, NULL);
 	}
@@ -1810,6 +1866,119 @@ static unsigned int sh_vertex_dirs(sh_circ const* k, double* out, unsigned int c
 	return nv;
 }
 
+/* a sector of the geodesic circle about k's centre: the ray at sa out, the
+   arc to sb, the ray at sb back; its region */
+static qaws_status sh_sector(sh_circ const* k, double sa, double sb, double tol, qaws_shell_region** out)
+{
+	qaws_shell_curve* sc = sh_curve_new(k->a);
+	qaws_status st;
+	*out = NULL;
+	if (!sc)
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	st = sh_ray_runs(k, sa, tol, 0, sc);
+	if (st == QAWS_STATUS_OK) st = sh_arc_runs(k, sa, sb, tol, sc);
+	if (st == QAWS_STATUS_OK) st = sh_ray_runs(k, sb, tol, 1, sc);
+	sc->closed = 1;
+	if (st == QAWS_STATUS_OK)
+		st = qaws_shell_region_create(k->a, (qaws_shell_curve const* const*)&sc, 1, out);
+	qaws_shell_curve_destroy(sc);
+	return st;
+}
+
+/* acc := acc u g (g consumed) */
+static qaws_status sh_unite(qaws_shell_region** acc, qaws_shell_region* g)
+{
+	qaws_shell_region* u = NULL;
+	qaws_status st;
+	if (!*acc)
+	{
+		*acc = g;
+		return QAWS_STATUS_OK;
+	}
+	st = qaws_shell_region_clip(*acc, g, QAWS_CLIP_UNION, &u);
+	qaws_shell_region_destroy(*acc);
+	qaws_shell_region_destroy(g);
+	*acc = u;
+	return st;
+}
+
+/* the geodesic disk of radius rho about a vertex: on each face at it, the
+   sector between the face's two sides there (a hair inside them), united */
+static qaws_status sh_vertex_disk(qaws_shell_atlas const* a, unsigned int v, double rho, double tol, qaws_shell_region** out)
+{
+	unsigned int f, k;
+	qaws_status st = QAWS_STATUS_OK;
+	*out = NULL;
+	for (f = 0; f < a->nf && st == QAWS_STATUS_OK; f++)
+		for (k = 0; k < 4 && st == QAWS_STATUS_OK; k++)
+		{
+			static double const dirs[4][2][2] = {
+				{ { 1, 0 }, { 0, 1 } },         /* (u0, v0): from +u round to +v */
+				{ { 0, 1 }, { -1, 0 } },        /* (u1, v0) */
+				{ { -1, 0 }, { 0, -1 } },       /* (u1, v1) */
+				{ { 0, -1 }, { 1, 0 } } };      /* (u0, v1) */
+			qaws_internal_sg_ctx const* c = &a->c[f];
+			sh_circ kc;
+			double uv[2], t0 = 0, t1 = 0, eps = SH_VERTEX_EPS;
+			unsigned int ns, q;
+			if (a->vface[4 * f + k] != v)
+				continue;
+			uv[0] = k == 0 || k == 3 ? c->u0 : c->u1;
+			uv[1] = k <= 1 ? c->v0 : c->v1;
+			if ((st = qaws_internal_sg_angle(c, uv[0], uv[1], dirs[k][0], &t0)) != QAWS_STATUS_OK ||
+				(st = qaws_internal_sg_angle(c, uv[0], uv[1], dirs[k][1], &t1)) != QAWS_STATUS_OK)
+				break;
+			while (t1 <= t0) t1 += 2 * SH_PI;
+			kc.a = a; kc.c.face = f; kc.c.uv.x = (qaws_scalar)uv[0]; kc.c.uv.y = (qaws_scalar)uv[1]; kc.r = rho;
+			ns = (unsigned int)ceil((t1 - t0) / (0.5 * SH_PI));
+			for (q = 0; q < ns && st == QAWS_STATUS_OK; q++)
+			{
+				double sa = t0 + eps + (t1 - t0 - 2 * eps) * q / ns, sb = t0 + eps + (t1 - t0 - 2 * eps) * (q + 1) / ns;
+				qaws_shell_region* g = NULL;
+				if ((st = sh_sector(&kc, sa, sb, tol, &g)) == QAWS_STATUS_OK)
+					st = sh_unite(out, g);
+				else
+					qaws_shell_region_destroy(g);
+			}
+		}
+	return st;
+}
+
+/* the vertex the ray at angle th runs through, and its distance there: the
+   atlas vertex the ray comes nearest (golden section on the length) */
+static int sh_ray_vertex(sh_circ const* k, double th, unsigned int* vout, double* dist)
+{
+	unsigned int v, best = SH_NONE;
+	double bestd = 1e300, bestL = 0;
+	for (v = 0; v < k->a->nv; v++)
+	{
+		double lo = 0, hi = k->r, g = 0.5 * (sqrt(5.0) - 1), x1, x2, f1, f2;
+		unsigned int it;
+		double const* P = k->a->vpos + 3 * v;
+		/* the distance from the ray's point at L to the vertex */
+#define SH_RAYD(L, out) do { sh_circ kk = *k; double pt[3]; kk.r = (L); out = sh_circ_point3(&kk, th, pt) ? sh_d3(pt, P) : 1e300; } while (0)
+		x1 = hi - g * (hi - lo); x2 = lo + g * (hi - lo);
+		SH_RAYD(x1, f1); SH_RAYD(x2, f2);
+		for (it = 0; it < 80; it++)
+		{
+			if (f1 < f2) { hi = x2; x2 = x1; f2 = f1; x1 = hi - g * (hi - lo); SH_RAYD(x1, f1); }
+			else { lo = x1; x1 = x2; f1 = f2; x2 = lo + g * (hi - lo); SH_RAYD(x2, f2); }
+		}
+#undef SH_RAYD
+		if ((f1 < f2 ? f1 : f2) < bestd)
+		{
+			bestd = f1 < f2 ? f1 : f2;
+			bestL = 0.5 * (lo + hi);
+			best = v;
+		}
+	}
+	if (best == SH_NONE || bestd > 1e-6 * (k->r + 1))
+		return 0;
+	*vout = best;
+	*dist = bestL;
+	return 1;
+}
+
 qaws_status qaws_shell_region_create_geodesic_disk(qaws_shell_atlas const* a, qaws_shell_point centre, qaws_scalar radius,
 	qaws_scalar tolerance, qaws_shell_region** out_region)
 {
@@ -1840,6 +2009,13 @@ qaws_status qaws_shell_region_create_geodesic_disk(qaws_shell_atlas const* a, qa
 		unsigned int z, w;
 		for (z = 1; z < nv; z++)
 			for (w = z; w > 0 && dirs[w - 1] > dirs[w]; w--) { double t = dirs[w]; dirs[w] = dirs[w - 1]; dirs[w - 1] = t; }
+		/* one vertex seen from both sides of a sample ray: once */
+		for (z = 1, w = 1; z < nv; z++)
+			if (dirs[z] - dirs[w - 1] > 1e-9)
+				dirs[w++] = dirs[z];
+		nv = w;
+		if (nv > 1 && dirs[0] + 2 * SH_PI - dirs[nv - 1] <= 1e-9)
+			nv--;
 	}
 	for (i = 0; i < nv && st == QAWS_STATUS_OK; i++)
 	{
@@ -1848,35 +2024,27 @@ qaws_status qaws_shell_region_create_geodesic_disk(qaws_shell_atlas const* a, qa
 		for (q = 0; q < ns && st == QAWS_STATUS_OK; q++)
 		{
 			double sa = ta + (tb - ta) * q / ns, sb = ta + (tb - ta) * (q + 1) / ns;
-			qaws_shell_curve* sc = sh_curve_new(a);
-			qaws_shell_region *g = NULL, *u = NULL;
-			if (!sc)
-			{
-				st = QAWS_STATUS_ALLOCATION_FAILURE;
-				break;
-			}
-			st = sh_ray_runs(&k, sa, tol, 0, sc);
-			if (st == QAWS_STATUS_OK) st = sh_arc_runs(&k, sa, sb, tol, sc);
-			if (st == QAWS_STATUS_OK) st = sh_ray_runs(&k, sb, tol, 1, sc);
-			sc->closed = 1;
-			if (st == QAWS_STATUS_OK)
-				st = qaws_shell_region_create(a, (qaws_shell_curve const* const*)&sc, 1, &g);
-			qaws_shell_curve_destroy(sc);
-			if (st == QAWS_STATUS_OK)
-			{
-				if (!acc)
-					acc = g;
-				else
-				{
-					st = qaws_shell_region_clip(acc, g, QAWS_CLIP_UNION, &u);
-					qaws_shell_region_destroy(acc);
-					qaws_shell_region_destroy(g);
-					acc = u;
-				}
-			}
+			qaws_shell_region* g = NULL;
+			if ((st = sh_sector(&k, sa, sb, tol, &g)) == QAWS_STATUS_OK)
+				st = sh_unite(&acc, g);
 			else
 				qaws_shell_region_destroy(g);
 		}
+	}
+	/* behind each vertex inside: the disk about it of the radius left (all
+	   within r of the centre through it); it fills a saddle's gap, where the
+	   rays either side part, and adds nothing at a convex vertex */
+	for (i = 0; i < nv && st == QAWS_STATUS_OK; i++)
+	{
+		unsigned int v;
+		double rho0;
+		qaws_shell_region* g = NULL;
+		if (!sh_ray_vertex(&k, dirs[i], &v, &rho0) || !(k.r - rho0 > 0))
+			continue;
+		if ((st = sh_vertex_disk(a, v, k.r - rho0, tol, &g)) == QAWS_STATUS_OK && g)
+			st = sh_unite(&acc, g);
+		else
+			qaws_shell_region_destroy(g);
 	}
 	if (st != QAWS_STATUS_OK)
 	{
