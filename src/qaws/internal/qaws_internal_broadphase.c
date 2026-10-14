@@ -1,10 +1,16 @@
 #include "qaws_internal_broadphase.h"
 #include "qaws_internal_parallel.h"
+#include "../qaws_platform.h"
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
 #define BP_MAX_CELLS (1u << 22)
+#if QAWS_SCALAR_IS_FLOAT
+#define BP_FLAT 1e-5          /* an axis this thin against the widest is flat */
+#else
+#define BP_FLAT 1e-9
+#endif
 #define BP_MAX_AXIS  4096u
 
 typedef struct bp_grid
@@ -105,8 +111,10 @@ static qaws_status bp_build(qaws_bp_box const* boxes, unsigned int count, unsign
 		for (k = 0; k < dim; k++)
 			if (hi[k] - G.lo[k] > ext)
 				ext = hi[k] - G.lo[k];
+		/* (an extent within the boxes' rounding is flat: float boxes of a
+		   curve on a line are a rounding thick) */
 		for (k = 0; k < dim; k++)
-			if (hi[k] - G.lo[k] > ext * 1e-9)
+			if (hi[k] - G.lo[k] > ext * BP_FLAT)
 			{
 				vol *= hi[k] - G.lo[k];
 				axes++;
@@ -170,9 +178,11 @@ static qaws_status bp_build(qaws_bp_box const* boxes, unsigned int count, unsign
 	B->ncell = ncell;
 	B->start = start;
 	B->items = items;
+	/* (over the axes the rings advance along: a flat axis of one cell, its
+	   side a rounding, would make the ring bound crawl) */
 	B->hmin = HUGE_VAL;
 	for (k = 0; k < dim; k++)
-		if (G.inv[k] > 0 && 1 / G.inv[k] < B->hmin)
+		if (G.inv[k] > 0 && G.g[k] > 1 && 1 / G.inv[k] < B->hmin)
 			B->hmin = 1 / G.inv[k];
 	if (!(B->hmin < HUGE_VAL))
 		B->hmin = 0;

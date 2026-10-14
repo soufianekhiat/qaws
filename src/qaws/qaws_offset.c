@@ -1663,9 +1663,9 @@ static qaws_status os_erode_path(os_ctx* x, qaws_path_2d const* p, double delta,
 	os_poly path, piece;
 	int64_t* ppts = NULL;
 	int64_t* all = NULL;
-	qaws_path64 pp64, *pieces = NULL, *bands = NULL;
-	qaws_clip64_result *band = NULL, *res = NULL;
-	unsigned int i, k, n, nsides, np = 0, used = 0, nb = 0;
+	qaws_path64 pp64, *pieces = NULL;
+	qaws_clip64_result* res = NULL;
+	unsigned int i, k, n, nsides, np = 0, used = 0;
 	qaws_status s = QAWS_STATUS_OK;
 	(void)jt;
 	memset(&path, 0, sizeof(path));
@@ -1772,45 +1772,22 @@ static qaws_status os_erode_path(os_ctx* x, qaws_path_2d const* p, double delta,
 			np++;
 		}
 	}
-	/* the band, then the interior minus it */
-	if (s == QAWS_STATUS_OK)
-	{
-		qaws_clip64_desc cd;
-		memset(&cd, 0, sizeof(cd));
-		cd.subjects = pieces;
-		cd.subject_count = np;
-		cd.clip_type = QAWS_CLIP_UNION;
-		cd.fill_rule = QAWS_FILL_NON_ZERO;
-		s = qaws_clip64_execute(&cd, &band);
-	}
+	/* the interior less the band, in one cut: the pieces under the non-zero
+	   rule are the band (their union first came back as thousands of loops,
+	   the slivers between strokes, and cutting by those took far longer) */
 	if (s == QAWS_STATUS_OK)
 		s = os_poly_path64(&path, org, scale, &ppts, &pp64);
 	if (s == QAWS_STATUS_OK)
 	{
 		qaws_clip64_desc cd;
-		nb = qaws_clip64_result_get_path_count(band);
-		bands = (qaws_path64*)malloc(sizeof(qaws_path64) * (nb + 1));
-		if (!bands)
-			s = QAWS_STATUS_ALLOCATION_FAILURE;
-		for (i = 0; s == QAWS_STATUS_OK && i < nb; i++)
-		{
-			int64_t const* bp;
-			unsigned int m;
-			qaws_clip64_result_get_path(band, i, &bp, &m);
-			bands[i].points = bp;
-			bands[i].point_count = m;
-		}
-		if (s == QAWS_STATUS_OK)
-		{
-			memset(&cd, 0, sizeof(cd));
-			cd.subjects = &pp64;
-			cd.subject_count = 1;
-			cd.clips = bands;
-			cd.clip_count = nb;
-			cd.clip_type = QAWS_CLIP_DIFFERENCE;
-			cd.fill_rule = QAWS_FILL_NON_ZERO;
-			s = qaws_clip64_execute(&cd, &res);
-		}
+		memset(&cd, 0, sizeof(cd));
+		cd.subjects = &pp64;
+		cd.subject_count = 1;
+		cd.clips = pieces;
+		cd.clip_count = np;
+		cd.clip_type = QAWS_CLIP_DIFFERENCE;
+		cd.fill_rule = QAWS_FILL_NON_ZERO;
+		s = qaws_clip64_execute(&cd, &res);
 	}
 	/* the loops back as closed polylines, as the path runs */
 	for (i = 0; s == QAWS_STATUS_OK && res && i < qaws_clip64_result_get_path_count(res); i++)
@@ -1824,20 +1801,44 @@ static qaws_status os_erode_path(os_ctx* x, qaws_path_2d const* p, double delta,
 			continue;
 		fp = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 2 * m);
 		if (!fp) { s = QAWS_STATUS_ALLOCATION_FAILURE; break; }
-		for (j = 0; j < m; j++)
 		{
-			unsigned int q = ccw ? j : m - 1 - j;
-			fp[2 * j] = (qaws_scalar)((double)rp[2 * q] / scale + org[0]);
-			fp[2 * j + 1] = (qaws_scalar)((double)rp[2 * q + 1] / scale + org[1]);
+			/* the points within a tenth of the tolerance of the chord between
+			   their kept neighbours dropped: the strokes' overlaps leave
+			   notches far finer than that at every corner, and the next offset
+			   of the result would carry them on and multiply them */
+			unsigned int kept = 0;
+			double eps = 0.1 * tol;
+			for (j = 0; j < m; j++)
+			{
+				unsigned int q = ccw ? j : m - 1 - j, nq = ccw ? (j + 1) % m : (2 * m - 2 - j) % m;
+				double px = (double)rp[2 * q] / scale + org[0], py = (double)rp[2 * q + 1] / scale + org[1];
+				if (kept && j > 0)
+				{
+					double ax = fp[2 * (kept - 1)], ay = fp[2 * (kept - 1) + 1];
+					double bx = (double)rp[2 * nq] / scale + org[0], by = (double)rp[2 * nq + 1] / scale + org[1];
+					double dx = bx - ax, dy = by - ay, l = sqrt(dx * dx + dy * dy);
+					if (l > 0 && fabs((px - ax) * dy - (py - ay) * dx) / l <= eps && ((px - ax) * dx + (py - ay) * dy) > 0 &&
+						((bx - px) * dx + (by - py) * dy) > 0)
+						continue;
+				}
+				fp[2 * kept] = (qaws_scalar)px;
+				fp[2 * kept + 1] = (qaws_scalar)py;
+				kept++;
+			}
+			m = kept;
 		}
-		s = qaws_curve_create_polyline_2d(fp, m, 1, &c);
+		s = m >= 3 ? qaws_curve_create_polyline_2d(fp, m, 1, &c) : QAWS_STATUS_OK;
+		if (m < 3)
+		{
+			free(fp);
+			continue;
+		}
 		free(fp);
 		if (s == QAWS_STATUS_OK) s = os_keep(x, c);
 		if (s == QAWS_STATUS_OK) s = os_loop_end(x, first);
 	}
 	qaws_clip64_result_destroy(res);
-	qaws_clip64_result_destroy(band);
-	free(bands); free(ppts); free(all); free(pieces);
+	free(ppts); free(all); free(pieces);
 	free(path.xy); free(piece.xy);
 	return s;
 }

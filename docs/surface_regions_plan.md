@@ -415,3 +415,10 @@ Each item lands with tests in f64 and f32, docs, and a showcase figure.
   fronts along the conormals across edges (the circles' run fitting with a
   base curve), strips for open pieces, the fronts of closed pieces alone,
   disks at the joins. Test 111; figure 29.
+- Second part, item 5 done: f32 offsets. Test 90 went from 18 minutes to
+  59 s: the broad phase's grid took a float rounding as an axis's extent (a
+  curve on a line: rings of cells 1e-8 wide, 295 s for one oracle), and
+  the erosion cut the interior by the band's thousands of sliver loops;
+  now flat axes are those under 1e-5 of the widest in f32, the ring bound
+  goes over axes of more than one cell, and the interior is cut by the
+  strokes and discs at once.

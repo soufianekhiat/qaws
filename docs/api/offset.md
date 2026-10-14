@@ -77,7 +77,11 @@ vertices as the Boolean operations (see [clip.md](clip.md)).
    of a shrinking path (whole lobes can be lost, which no distance check
    sees), so such paths are always rebuilt, and in integers
    (`qaws_clip64`): the path flattened to the fit tolerance, the discs as
-   polygons round their circles, the loops returned as polylines.
+   polygons round their circles, the interior cut by all the strokes and
+   discs at once (non-zero rule; their union first came back as thousands
+   of sliver loops, and cutting by those was slow), and the loops returned
+   as polylines without the points within a tenth of the tolerance of their
+   neighbours' chord.
 
    Overlapping paths are offset each on its own, then united (Clipper2's
    rule), so near their junctions the result is the union of the shrunk
