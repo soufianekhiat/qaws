@@ -161,7 +161,15 @@ gives the shortest path between two points. A ray stops at a hole's rim
 (a free trim loop); the shortest path goes round the hole instead.
 
 - **Clear.** It aims the geodesic from p0 at p1 by Gauss-Newton on its
-  angle and length. If no hole stops that geodesic, it is the path.
+  angle and length, each step halved while it leaves the domain or misses
+  by more. If no hole stops that geodesic, it is the path.
+- **Seeded by a distance field.** On a closed or curved shell the chord
+  can lead to a longer geodesic, or none. Dijkstra on a 40 x 40 grid per
+  face (eight neighbours, the faces' boundary nodes joined across shared
+  sides) gives a path; the geodesic is aimed at its points at each eighth
+  of its length in turn, each aim starting from the last, then at p1. The
+  shorter of the two clear geodesics wins; when the chord's is stopped by
+  a hole, the seeded one is a candidate against the holes' graph below.
 - **Ends on the holes' face.** It builds a graph and searches it with
   Dijkstra.
   - **Nodes:** the two ends and places on the holes' rims.
@@ -195,9 +203,10 @@ The cylinder with a hole on its seam matches the unrolled taut string to
 
 Limits:
 - With an end on another face, only one hole may lie between the ends.
-- The fan does not search every geodesic. A shorter geodesic can be missed
-  on a surface where geodesics refocus, such as a torus past its conjugate
-  distance.
+- The fan and the seed do not search every geodesic. The seed follows the
+  grid's shortest route, within a cell of the true one, and a geodesic in
+  another homotopy class shorter by less than the grid's error can be
+  missed.
 - Bitangents assume convex holes. A concave hole's touching geodesics are
   still checked against the trims.
 

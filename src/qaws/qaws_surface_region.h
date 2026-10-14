@@ -133,6 +133,40 @@ qaws_status qaws_geodesic_enclosure_get_end(qaws_geodesic_enclosure const* enclo
 qaws_status qaws_geodesic_enclosure_cross(qaws_geodesic_enclosure const* a, qaws_geodesic_enclosure const* b, unsigned int capacity,
 	qaws_vec2* out_lo, qaws_vec2* out_hi, unsigned int* out_count);
 
+/* A geodesic segment: from start, leaving in the (u, v) direction, for the
+   surface length length. */
+typedef struct qaws_geodesic_segment
+{
+	qaws_vec2 start;
+	qaws_vec2 direction;
+	qaws_scalar length;
+} qaws_geodesic_segment;
+
+/* The crossings of geodesic segments of a polynomial surface certified
+   against their float (u, v) images: each segment enclosed
+   (qaws_surface_geodesic_enclose, width as there), every pair's crossings
+   certified (qaws_geodesic_enclosure_cross; where two share an end, a
+   polygon's corner, the stretch there proven to hold no other meeting by
+   transversality), and the images (qaws_surface_curve_create_geodesic_ray)
+   crossing exactly as often away from shared ends, each crossing inside
+   its certified box. Then a Boolean of regions bounded by these segments,
+   taken exactly on their images (qaws_surface_clip_exact), has the true
+   geodesics' topology. out_crossings: the crossings certified (may be
+   NULL). CERTIFICATION_FAILED when a pair cannot be told apart or the
+   images disagree. */
+qaws_status qaws_surface_geodesics_certify(qaws_surface const* surface, qaws_geodesic_segment const* segments, unsigned int count,
+	qaws_scalar width, unsigned int* out_crossings);
+
+/* Rigorous bounds on the surface area of a geodesic polygon of a polynomial
+   surface: segments in order round it, each enclosed (width as in
+   qaws_surface_geodesic_enclose). A grid of resolution cells (0: 256)
+   along the longer side of the tubes' box; the cells clear of the tubes and
+   cut off from the outside by them count in both bounds, those the tubes
+   meet in the upper, each by the interval of |Su x Sv| over it.
+   CERTIFICATION_FAILED when no cell is clear inside. */
+qaws_status qaws_surface_geodesic_polygon_area(qaws_surface const* surface, qaws_geodesic_segment const* segments, unsigned int count,
+	qaws_scalar width, unsigned int resolution, qaws_scalar* out_lo, qaws_scalar* out_hi);
+
 void qaws_surface_curve_destroy(qaws_surface_curve* curve);
 
 qaws_surface_curve_kind qaws_surface_curve_get_kind(qaws_surface_curve const* curve);
@@ -278,7 +312,8 @@ qaws_status qaws_surface_curve_closest_points(qaws_surface_curve const* a, qaws_
 qaws_status qaws_surface_region_distance(qaws_surface_region const* region, qaws_vec2 p, qaws_scalar tolerance,
 	qaws_scalar* out_distance, qaws_vec2* out_nearest);
 
-/* The shortest path from p0 to p1 avoiding a region (NULL: none): the
+/* The shortest path from p0 to p1 avoiding a region (NULL: none, the
+   shortest geodesic, searched from a distance field as the shells' are): the
    geodesics touching the region's boundary joined along it, as
    qaws_shell_curve_create_shortest_path on the surface trimmed to the
    region's outside (its domain's edges, or the rims of a closed direction,
@@ -380,5 +415,21 @@ qaws_status qaws_surface_medial_axis_get_junction(qaws_surface_medial_axis const
 /* The largest geodesic circle inside the region found on the axis. */
 qaws_status qaws_surface_medial_axis_get_max_inscribed(qaws_surface_medial_axis const* axis, qaws_vec2* out_centre,
 	qaws_scalar* out_radius);
+
+/* The mitered (straight) skeleton of a region with corners: each edge (the
+   boundary between two corners) moves as its line, the edge carried on
+   past both ends along the geodesics of its tangents, at unit speed; the
+   fronts meet at mitres. A point is swept first by the edge nearest it
+   among those whose wedge holds it (at a convex corner nearer the edge's
+   line than the neighbour's, at a reflex one farther); the skeleton is
+   where that edge changes, found on a mesh as for the medial axis (labels,
+   crossings by bisection on the mesh edges, junctions by Newton), with
+   the time (the radius) at each point. The same accessors as the medial
+   axis. Exact for convex regions and reflex corners whose fronts are not
+   split (no split events: a front cut off by another counts on beyond the
+   cut). UNSUPPORTED_OPERATION for a loop without a corner (its medial
+   axis is the answer) or one cut along a seam or a pole. */
+qaws_status qaws_surface_region_mitered_skeleton(qaws_surface_region const* region, qaws_surface_medial_desc const* desc,
+	qaws_surface_medial_axis** out_axis);
 
 #endif /* QAWS_SURFACE_REGION_H */

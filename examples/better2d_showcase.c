@@ -88,6 +88,7 @@
 #include "better2d_showcase/27_geodesic_enclosure.c"
 #include "better2d_showcase/28_geodesic_query.c"
 #include "better2d_showcase/29_shell_mesh.c"
+#include "better2d_showcase/30_mitered_certified.c"
 
 int main(void)
 {
@@ -122,5 +123,6 @@ int main(void)
 	demo_geodesic_enclosure();
 	demo_geodesic_query();
 	demo_shell_mesh();
+	demo_mitered_certified();
 	return 0;
 }

@@ -377,8 +377,44 @@ a tolerance.
 | Crossings on the bump: one, its box holding the float crossing; none for a pair apart | 1.3e-4 box | counts |
 | Refusals: a surface of revolution; a geodesic leaving the domain | | |
 
+### Certified arrangements and areas
+
+```c
+qaws_geodesic_segment g[n];   /* start, (u, v) direction, length */
+qaws_surface_geodesics_certify(surface, g, n, 0, &crossings);
+qaws_surface_geodesic_polygon_area(surface, g, n, 0, 512, &lo, &hi);   /* g round a polygon */
+```
+
+- **Arrangements.** Every pair of segments' enclosures is crossed. Where
+  two share an end (a polygon's corner, within 1e-7 of the domain, 1e-4 in
+  f32), the stretch reaching both ends is that meeting: it is proven to
+  hold no other by transversality alone, and not counted. The float images
+  (`qaws_surface_curve_create_geodesic_ray`) must cross exactly as often
+  away from the shared ends, each crossing inside a certified box. A
+  Boolean of regions bounded by these segments, taken with
+  `qaws_surface_clip_exact` on the images, then has the true geodesics'
+  topology.
+- **Areas.** A grid over the tubes' box (resolution cells along its longer
+  side). The cells the step boxes meet are the tubes'; the free cells
+  reached from the grid's ring are outside; the other free cells are
+  inside. Each cell counts with the interval of |Su x Sv| over it (the
+  derivatives' interval forms), clamped to the domain: inside cells in
+  both bounds, the tubes' cells in the upper one only. The gap shrinks as
+  the cells do: about the perimeter times a cell, plus the area element's
+  change over a cell.
+
+| Check (test 109) | f64 | f32 |
+|---|---|---|
+| Two geodesic triangles on the bump (edges from `qaws_surface_curve_create_shortest_path`): crossings certified, as many as the float curves' | 2 | 2 |
+| A triangle's area, 512 cells: the bounds hold the float region's area, gap under 6% | [0.16793, 0.17617] holds 0.17205 (1.1 s) | same to 1e-5 |
+
+Limits: a free pocket cut off by the tubes is taken as inside, not proven
+by a winding number. That holds for a simple polygon whose tubes are
+thinner than its narrowest part.
+
 The boxes are computed in double in both builds; f32 builds round the
-reported bounds outward to floats. Figure 27 shows three geodesics on the
+reported bounds outward to floats.
+ Figure 27 shows three geodesics on the
 bump, the crossing's step boxes and box, and an end box with the float end
 inside.
 
@@ -428,6 +464,9 @@ curves drawn in (u, v).
   `qaws_shell_curve_create_shortest_path` (geodesics touching the holes,
   joined along their rims) and returns the runs end to end as one curve
   drawn in (u, v). A region whose boundary is cut along a seam is refused.
+  With no obstacles (NULL) it is the shortest geodesic over the whole
+  surface, seeded by the shells' distance field: on a torus, over the tube
+  or round the hole, whichever is shorter.
 
 | Check (test 110) | f64 | f32 |
 |---|---|---|
@@ -437,6 +476,7 @@ curves drawn in (u, v).
 | Sphere: signed distance to a geodesic disk, outside and inside | 3e-10 | 1e-6 |
 | Cylinder: two geodesic segments apart against the unrolled segments | 1e-12 | 2.4e-7 |
 | Shortest paths round a disk, on a plate and on a cylinder, against the taut string (unrolled) | 2e-10 | 1.7e-5 |
+| Torus R = 1, r = 0.35, no obstacles: four shortest paths (seeded) against the global distances (Mathematica, `reference/110_torus_distance.wls`) | 1e-8 | 1e-4 |
 
 Figure 28 shows points joined to their closest points on a geodesic, a
 crossing, a closest pair, signed distances to a disk, and shortest paths
@@ -495,3 +535,40 @@ qaws_surface_medial_axis_get_max_inscribed(m, &centre, &radius);
 In f32 the same checks hold to 3e-6. A test run takes about 14 s. Figure 22
 shows axes, junctions and the largest inscribed circles on a sphere, a wavy
 patch and a torus.
+
+## Mitered skeletons
+
+```c
+qaws_surface_region_mitered_skeleton(region, &desc, &axis);   /* the medial axis accessors */
+```
+
+The straight skeleton's analogue on a surface. There are no lines to move,
+so each edge (the boundary between two corners, smooth joins merged)
+moves as its line: the edge carried on past both ends by the geodesics of
+its end tangents. Its front at time t is that curve's geodesic offset by t.
+
+- **Who sweeps a point first.** The edge nearest it (the foot of the
+  conormal geodesic on its line) among the edges whose wedge holds it: at
+  a convex corner the point must be nearer the edge's line than the
+  neighbour's, at a reflex corner farther. Inside a reflex corner this
+  gives the mitre (the bisector), where the medial axis has a parabola.
+- **Distances.** The side of the line comes first, in (u, v) (the map
+  keeps sides): right of it, the edge does not count; left, the foot by
+  Newton from the nearest point, then from a fan of starts.
+- **The skeleton.** A mesh of the region (the resolution, 0: 1/40 of the
+  square root of the area), each vertex labelled; where two labels meet
+  on a mesh edge, bisection finds the change; two crossings in a triangle
+  make a segment, three labels a junction (Newton on the three distances).
+  Crossings at radius 0 are the boundary: snapped to the corner within a
+  mesh edge, else dropped.
+- **Limits.** No split events: a front cut off by another counts on beyond
+  the cut. That is exact for convex regions and for reflex corners whose
+  fronts are not split. A loop without corners (its skeleton is the medial
+  axis) and loops cut along a seam or a pole are refused.
+
+| Check (test 106) | f64 | f32 |
+|---|---|---|
+| An L on a cylinder, unrolled: segment ends on the plane L's straight skeleton, times the swept distances; the mitre from the reflex corner found | 1e-8 (ends at corners 1e-5) | 2e-4 |
+
+Figure 30 shows mitered skeletons against medial axes for an L on the
+wavy patch and a dart of shortest paths on the bump.

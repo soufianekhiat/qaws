@@ -237,6 +237,100 @@ static void test_cylinder(void)
 	qaws_curve_destroy(circle);
 }
 
+/* the plane L [0, 3] x [0, 1] u [0, 1] x [0, 3]: its straight skeleton's
+   segments, with the times at their ends (linear along each) */
+static double const smt_lsk[8][6] = {
+	{ 0, 0, 0, 0.5, 0.5, 0.5 }, { 1, 1, 0, 0.5, 0.5, 0.5 }, { 0.5, 0.5, 0.5, 2.5, 0.5, 0.5 }, { 3, 0, 0, 2.5, 0.5, 0.5 },
+	{ 3, 1, 0, 2.5, 0.5, 0.5 }, { 0.5, 0.5, 0.5, 0.5, 2.5, 0.5 }, { 0, 3, 0, 0.5, 2.5, 0.5 }, { 1, 3, 0, 0.5, 2.5, 0.5 } };
+
+/* (x, y)'s distance to the L's skeleton, and the time there */
+static double smt_l_skeleton(double x, double y, double* time)
+{
+	double best = 1e300;
+	unsigned int i;
+	for (i = 0; i < 8; i++)
+	{
+		double const* g = smt_lsk[i];
+		double dx = g[3] - g[0], dy = g[4] - g[1], l = ((x - g[0]) * dx + (y - g[1]) * dy) / (dx * dx + dy * dy), d;
+		l = l < 0 ? 0 : l > 1 ? 1 : l;
+		d = hypot(x - g[0] - l * dx, y - g[1] - l * dy);
+		if (d < best) { best = d; *time = g[2] + l * (g[5] - g[2]); }
+	}
+	return best;
+}
+
+/* the mitered skeleton of an L on a cylinder (developable): unrolled, on
+   the plane L's straight skeleton, times the distances swept; the mitre
+   from the reflex corner (not on the medial axis) found */
+static void test_mitered(void)
+{
+	double Rc = 0.8, Hc = 2.0, w = 0.4, tol = SMT_F32 ? 2e-4 : 1e-8, worst = 0, cworst = 0, P, u0, v0 = 0.2, best = 1e300;
+	static double const L[6][2] = { { 0, 0 }, { 3, 0 }, { 3, 1 }, { 1, 1 }, { 1, 3 }, { 0, 3 } };
+	qaws_arc_segment g;
+	qaws_arc_desc ad;
+	qaws_curve* circle = NULL;
+	qaws_surface_extrusion_desc ed;
+	qaws_surface* cy = NULL;
+	qaws_curve* k[6];
+	qaws_surface_curve* e[6];
+	qaws_surface_curve const* pe[6];
+	qaws_surface_path Q;
+	qaws_surface_region* r = NULL;
+	qaws_surface_medial_axis* m = NULL;
+	qaws_surface_medial_desc md;
+	qaws_range ru;
+	unsigned int i, n = 0;
+	qaws_status st;
+	char msg[300];
+	memset(&g, 0, sizeof(g));
+	g.radius = (qaws_scalar)Rc; g.angle_end = (qaws_scalar)(2 * SMT_PI);
+	memset(&ad, 0, sizeof(ad));
+	ad.dimension = QAWS_DIMENSION_2D; ad.segments = &g; ad.segment_count = 1;
+	qaws_curve_create_arc(&ad, &circle);
+	memset(&ed, 0, sizeof(ed));
+	ed.profile = circle; ed.direction.z = 1; ed.length = (qaws_scalar)Hc;
+	qaws_surface_create_extrusion(&ed, &cy);
+	ru = qaws_surface_get_u_range(cy);
+	P = (double)ru.max_value - ru.min_value;
+	u0 = ru.min_value + 0.2 * P;
+	/* (x, y) unrolled in units of w: u = u0 + x w P / (2 pi Rc), v = v0 + y w / Hc */
+	for (i = 0; i < 6; i++)
+	{
+		double const* a = L[i];
+		double const* b = L[(i + 1) % 6];
+		e[i] = smt_line(cy, u0 + a[0] * w * P / (2 * SMT_PI * Rc), v0 + a[1] * w / Hc, u0 + b[0] * w * P / (2 * SMT_PI * Rc), v0 + b[1] * w / Hc, &k[i]);
+		pe[i] = e[i];
+	}
+	Q.curves = pe; Q.curve_count = 6; Q.closed = 1;
+	qaws_surface_clip(cy, QAWS_CLIP_NONE, QAWS_FILL_NON_ZERO, &Q, 1, NULL, 0, &r);
+	memset(&md, 0, sizeof(md));
+	md.resolution = (qaws_scalar)0.04;
+	st = qaws_surface_region_mitered_skeleton(r, &md, &m);
+	if (st == QAWS_STATUS_OK)
+		for (i = 0; i < (n = qaws_surface_medial_axis_get_segment_count(m)); i++)
+		{
+			qaws_vec2 p[2];
+			qaws_scalar rr[2];
+			unsigned int q;
+			qaws_surface_medial_axis_get_segment(m, i, p, rr);
+			for (q = 0; q < 2; q++)
+			{
+				double x = ((double)p[q].x - u0) / P * 2 * SMT_PI * Rc / w, y = ((double)p[q].y - v0) * Hc / w, t = 0, d = smt_l_skeleton(x, y, &t);
+				/* (an end at a corner, radius about 0: the feet so near a line settle to about 1e-6) */
+				if ((double)rr[q] / w < 1e-4) cworst = fmax(cworst, d); else worst = fmax(worst, fmax(d, fabs((double)rr[q] / w - t)));
+				best = fmin(best, hypot(x - 0.75, y - 0.75));
+			}
+		}
+	sprintf(msg, "mitered skeleton: an L on a cylinder, unrolled (%u segments, status %d), on the plane L's straight skeleton within %.2g (times too), its reflex mitre met %.2g from its middle, ends at corners within %.2g",
+		n, (int)st, worst, best, cworst);
+	TEST_ASSERT(st == QAWS_STATUS_OK && n > 20 && worst <= tol && best <= 0.2 && cworst <= (SMT_F32 ? 1e-3 : 1e-5), msg);
+	qaws_surface_medial_axis_destroy(m);
+	qaws_surface_region_destroy(r);
+	for (i = 0; i < 6; i++) { qaws_surface_curve_destroy(e[i]); qaws_curve_destroy(k[i]); }
+	qaws_surface_destroy(cy);
+	qaws_curve_destroy(circle);
+}
+
 static void test_wavy(void)
 {
 	static double const z[16] = { 0, 0.3, -0.2, 0, 0.35, 0.8, 0.5, 0.1, -0.3, 0.6, 0.9, 0.35, 0, -0.15, 0.3, 0 };
@@ -329,6 +423,7 @@ int test_106_surface_medial_main(void)
 	test_sphere();
 	test_cylinder();
 	test_wavy();
+	test_mitered();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
 }

@@ -18,6 +18,7 @@
 #include "qaws_curve.h"
 #include "qaws_bezier.h"
 #include "qaws_bspline.h"
+#include "qaws_composite.h"
 #include "qaws_eval.h"
 #include "qaws_inspect.h"
 #include "qaws_operations.h"
@@ -1093,6 +1094,21 @@ static int sr_kink(qaws_curve const* cv, double t, qaws_range rg)
 	return atan2(fabs(cr), dt) > ang;
 }
 
+/* a piece [lo, hi]'s end: its point, and its tangent from inside the piece
+   (at a knot the curve's own derivative is the next piece's) */
+static void sr_piece_end(qaws_curve const* cv, double lo, double hi, qaws_eval_result_2d* r)
+{
+	qaws_eval_result_2d d;
+#if QAWS_SCALAR_IS_FLOAT
+	double const eps = 1e-4;
+#else
+	double const eps = 1e-9;
+#endif
+	qaws_curve_evaluate_2d(cv, (qaws_scalar)hi, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, r);
+	qaws_curve_evaluate_2d(cv, (qaws_scalar)(hi - eps * (hi - lo)), QAWS_EVAL_FLAG_D1, &d);
+	r->d1 = d.d1;
+}
+
 /* the parameters splitting the curve into smooth pieces: its ends and the
    knots of a B-spline where it turns a corner (malloc'ed) */
 static qaws_status sr_breaks(qaws_curve const* cv, double** out, unsigned int* out_n)
@@ -1260,7 +1276,7 @@ static qaws_status sr_corner_disks(sr_tube* tb, qaws_clip_result const* res, int
 			{
 				double da[2], db[2], at[2], turn;
 				int ok;
-				qaws_curve_evaluate_2d(prev->cv, (qaws_scalar)prev->hi, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &a);
+				sr_piece_end(prev->cv, prev->lo, prev->hi, &a);
 				da[0] = a.d1.x; da[1] = a.d1.y; db[0] = b.d1.x; db[1] = b.d1.y;
 				at[0] = b.position.x; at[1] = b.position.y;
 				turn = sr_turn(c, at, da, db, &ok);
@@ -1270,7 +1286,7 @@ static qaws_status sr_corner_disks(sr_tube* tb, qaws_clip_result const* res, int
 			if (st == QAWS_STATUS_OK && !next->cv)
 			{
 				/* arriving at a cut: an arrival to match */
-				qaws_curve_evaluate_2d(cur->cv, (qaws_scalar)cur->hi, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &a);
+				sr_piece_end(cur->cv, cur->lo, cur->hi, &a);
 				if (!sr_grow((void**)&arr, &capa, na + 1, sizeof(sr_end))) { st = QAWS_STATUS_ALLOCATION_FAILURE; break; }
 				arr[na].p[0] = a.position.x; arr[na].p[1] = a.position.y; arr[na].d[0] = a.d1.x; arr[na].d[1] = a.d1.y;
 				na++;
@@ -2076,7 +2092,7 @@ qaws_status qaws_surface_region_medial_axis(qaws_surface_region const* region, q
 			{
 				qaws_eval_result_2d a, b;
 				double da[2], db[2], aa = 0, ab = 0, turn;
-				qaws_curve_evaluate_2d(prev->cv, (qaws_scalar)prev->hi, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &a);
+				sr_piece_end(prev->cv, prev->lo, prev->hi, &a);
 				qaws_curve_evaluate_2d(cur->cv, (qaws_scalar)cur->lo, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &b);
 				da[0] = a.d1.x; da[1] = a.d1.y; db[0] = b.d1.x; db[1] = b.d1.y;
 				qaws_internal_sg_angle(m.c, (double)b.position.x, (double)b.position.y, da, &aa);
@@ -2503,5 +2519,446 @@ qaws_status qaws_surface_medial_axis_get_max_inscribed(qaws_surface_medial_axis 
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	out_centre->x = (qaws_scalar)axis->best[0]; out_centre->y = (qaws_scalar)axis->best[1];
 	*out_radius = (qaws_scalar)axis->best[2];
+	return QAWS_STATUS_OK;
+}
+
+/* ------------------------------------------------------------------------ */
+/*  Mitered skeletons                                                       */
+/* ------------------------------------------------------------------------ */
+
+/* an edge: the boundary between two corners, carried on by the geodesics
+   leaving its ends along its tangents (the line it moves as) */
+typedef struct mk_edge
+{
+	qaws_curve* cv;
+	double lo, hi;
+	unsigned int prev, next;
+	int convex[2];                  /* the corners at its start and end */
+	double corner[5];               /* its start corner: (u, v), point */
+} mk_edge;
+
+/* the signed distance from x to edge e's line: a foot on its left (the
+   region's side) from (s, t) or a fan of starts; -1e300 when none lands
+   (x right of the line) */
+static double mk_dist(qaws_internal_sg_ctx const* c, mk_edge const* e, double const* x, double* s, double* t)
+{
+	double best = -1e300, x3[3], q3[3], side;
+	unsigned int k;
+	qaws_scalar tp = 0;
+	qaws_vec2 xp;
+	qaws_eval_result_2d r;
+	if (*t > 0 && qaws_internal_sg_foot(c, e->cv, 1, e->lo, e->hi, x, s, t))
+		return *t;
+	if (sm_point3(c, x[0], x[1], x3) != QAWS_STATUS_OK)
+		return best;
+	/* the side first, in (u, v) (the map keeps it): right of the line, none;
+	   on it, 0; left, the foot from the nearest point */
+	xp.x = (qaws_scalar)x[0]; xp.y = (qaws_scalar)x[1];
+	if (qaws_curve_find_closest_parameter_2d(e->cv, xp, &tp) == QAWS_STATUS_OK &&
+		qaws_curve_evaluate_2d(e->cv, tp, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &r) == QAWS_STATUS_OK && hypot((double)r.d1.x, (double)r.d1.y) > 0)
+	{
+		side = ((double)r.d1.x * (x[1] - r.position.y) - (double)r.d1.y * (x[0] - r.position.x)) / hypot((double)r.d1.x, (double)r.d1.y);
+		if (side < -10 * c->tol)
+			return best;
+		*s = tp;
+		if (side <= 10 * c->tol)
+		{
+			*t = 0;
+			return 0;
+		}
+		sm_point3(c, r.position.x, r.position.y, q3);
+		*t = sm_d3(x3, q3);
+		if (qaws_internal_sg_foot(c, e->cv, 1, e->lo, e->hi, x, s, t))
+			return *t;
+	}
+	for (k = 0; k < 8; k++)
+	{
+		double ss = e->lo + (e->hi - e->lo) * (k + 0.5) / 8, tt;
+		qaws_curve_evaluate_2d(e->cv, (qaws_scalar)ss, QAWS_EVAL_FLAG_POSITION, &r);
+		sm_point3(c, r.position.x, r.position.y, q3);
+		tt = sm_d3(x3, q3);
+		if (tt > 0 && qaws_internal_sg_foot(c, e->cv, 1, e->lo, e->hi, x, &ss, &tt) && (best < 0 || tt < best))
+		{
+			best = tt; *s = ss; *t = tt;
+		}
+	}
+	return best;
+}
+
+/* the edge whose front sweeps x first, and when: the least distance among
+   the edges whose wedge holds x (at a convex corner nearer its own line
+   than its neighbour's, at a reflex one farther); 0xffffffff when none.
+   st holds each edge's foot (s, t), carried from call to call.
+   shortcut: the wedges alone, no split events (a front cut off by another
+   still counts beyond the cut); exact for convex polygons and reflex
+   corners whose fronts are not split, upgrade to a wavefront for others */
+static unsigned int mk_label(qaws_internal_sg_ctx const* c, mk_edge const* e, unsigned int ne, double const* x, double* st, double* d, double* out_t)
+{
+	unsigned int k, best = 0xffffffffu;
+	double bt = 1e300, tol = c->tol;
+	for (k = 0; k < ne; k++)
+		d[k] = mk_dist(c, &e[k], x, &st[2 * k], &st[2 * k + 1]);
+	for (k = 0; k < ne; k++)
+	{
+		double dp = d[e[k].prev], dn = d[e[k].next];
+		if (d[k] < -tol || d[k] >= bt)
+			continue;
+		if (e[k].convex[0] ? d[k] > dp + tol : d[k] < dp - tol)
+			continue;
+		if (e[k].convex[1] ? d[k] > dn + tol : d[k] < dn - tol)
+			continue;
+		best = k; bt = d[k];
+	}
+	*out_t = bt;
+	return best;
+}
+
+/* the uv curve of the geodesic from p along d (reversed: arriving at p),
+   as long as it stays in the domain up to len (halved till it does) */
+static qaws_curve* mk_ray(qaws_surface const* s, qaws_vec2 p, qaws_vec2 d, double len, int reversed)
+{
+	unsigned int k;
+	for (k = 0; k < 8; k++, len *= 0.5)
+	{
+		qaws_surface_curve* sc = NULL;
+		qaws_curve *a = NULL, *b = NULL;
+		qaws_range rg;
+		if (qaws_surface_curve_create_geodesic_ray(s, p, d, (qaws_scalar)len, 0, &sc) != QAWS_STATUS_OK)
+			continue;
+		rg = qaws_curve_get_parameter_range(qaws_surface_curve_get_uv(sc));
+		if (qaws_curve_extract(qaws_surface_curve_get_uv(sc), rg.min_value, rg.max_value, &a) == QAWS_STATUS_OK && reversed)
+		{
+			qaws_curve_reverse(a, &b);
+			qaws_curve_destroy(a);
+			a = b;
+		}
+		qaws_surface_curve_destroy(sc);
+		if (a)
+			return a;
+	}
+	return NULL;
+}
+
+qaws_status qaws_surface_region_mitered_skeleton(qaws_surface_region const* region, qaws_surface_medial_desc const* desc,
+	qaws_surface_medial_axis** out_axis)
+{
+	qaws_internal_sg_ctx const* c;
+	qaws_surface_medial_axis* ax = NULL;
+	qaws_path_2d* loops = NULL;
+	mk_edge* E = NULL;
+	unsigned int np = 0, ne = 0, cape = 0, i, j, k, nv = 0, nt, *lab = NULL, *hash = NULL, hsize = 1, ncr = 0, capcr = 0;
+	qaws_mesh_2d* mesh = NULL;
+	qaws_surface_mesh_desc md;
+	qaws_scalar area = 0;
+	double L, D, *vst = NULL, *vt = NULL, *dd = NULL, *ws = NULL;
+	sm_cross* cr = NULL;
+	qaws_status st;
+	if (!region || !out_axis)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	*out_axis = NULL;
+	c = &region->ctx;
+	qaws_surface_region_get_area(region, &area);
+	L = desc && desc->resolution > 0 ? (double)desc->resolution : sqrt((double)area) / 40;
+	D = 2 * sqrt((double)area) + L;
+	ax = (qaws_surface_medial_axis*)calloc(1, sizeof(*ax));
+	if (!ax)
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	/* the edges: each loop's pieces between corners, smooth joins merged */
+	st = sr_loops(region, &loops, &np);
+	for (i = 0; i < np && st == QAWS_STATUS_OK; i++)
+	{
+		sm_feature* seq = NULL;
+		double* turn = NULL;
+		unsigned int ns = 0, caps = 0, c0 = 0, first = ne, q;
+		for (j = 0; j < loops[i].curve_count && st == QAWS_STATUS_OK; j++)
+		{
+			qaws_curve const* cv = loops[i].curves[j];
+			double* br = NULL;
+			unsigned int nb = 0;
+			if ((st = sr_breaks(cv, &br, &nb)) != QAWS_STATUS_OK)
+				break;
+			for (k = 0; k + 1 < nb && st == QAWS_STATUS_OK; k++)
+			{
+				if (!(br[k + 1] > br[k]))
+					continue;
+				/* shortcut: cuts along seams or poles are refused, upgrade by
+				   joining the edge across the cut */
+				if (sr_on_seam(c, cv, br[k], br[k + 1]) || sr_on_pole(c, cv, br[k], br[k + 1]))
+					st = QAWS_STATUS_UNSUPPORTED_OPERATION;
+				else if (!sr_grow((void**)&seq, &caps, ns + 1, sizeof(sm_feature)))
+					st = QAWS_STATUS_ALLOCATION_FAILURE;
+				else
+				{
+					seq[ns].point = 0; seq[ns].cv = cv; seq[ns].lo = br[k]; seq[ns].hi = br[k + 1];
+					ns++;
+				}
+			}
+			free(br);
+		}
+		turn = (double*)malloc(sizeof(double) * (ns + 1));
+		if (st == QAWS_STATUS_OK && !turn)
+			st = QAWS_STATUS_ALLOCATION_FAILURE;
+		/* the turn at each piece's start (left: a convex corner) */
+		for (j = 0; j < ns && st == QAWS_STATUS_OK; j++)
+		{
+			sm_feature const* cur = &seq[j];
+			sm_feature const* prev = &seq[(j + ns - 1) % ns];
+			qaws_eval_result_2d a, b;
+			double da[2], db[2], aa = 0, ab = 0;
+			sr_piece_end(prev->cv, prev->lo, prev->hi, &a);
+			qaws_curve_evaluate_2d(cur->cv, (qaws_scalar)cur->lo, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &b);
+			da[0] = a.d1.x; da[1] = a.d1.y; db[0] = b.d1.x; db[1] = b.d1.y;
+			qaws_internal_sg_angle(c, (double)b.position.x, (double)b.position.y, da, &aa);
+			qaws_internal_sg_angle(c, (double)b.position.x, (double)b.position.y, db, &ab);
+			turn[j] = remainder(ab - aa, 2 * 3.14159265358979323846);
+			if (fabs(turn[j]) > SM_CORNER && fabs(turn[c0]) <= SM_CORNER)
+				c0 = j;
+		}
+		/* shortcut: a loop with no corner (a smooth boundary) is refused; its
+		   mitered skeleton is its medial axis */
+		if (st == QAWS_STATUS_OK && (ns == 0 || fabs(turn[c0]) <= SM_CORNER))
+			st = QAWS_STATUS_UNSUPPORTED_OPERATION;
+		for (j = 0; j < ns && st == QAWS_STATUS_OK;)
+		{
+			/* the pieces from corner c0 + j to the next */
+			qaws_curve* part[66];
+			unsigned int n = 0, j0 = j, z;
+			qaws_composite_desc cd;
+			qaws_eval_result_2d r0, r1;
+			sm_feature const* f0 = &seq[(c0 + j) % ns];
+			sm_feature const* f1;
+			qaws_vec2 back;
+			do
+			{
+				sm_feature const* f = &seq[(c0 + j) % ns];
+				if (n < 64 && qaws_curve_extract(f->cv, (qaws_scalar)f->lo, (qaws_scalar)f->hi, &part[n + 1]) == QAWS_STATUS_OK)
+					n++;
+				j++;
+			} while (j < ns && fabs(turn[(c0 + j) % ns]) <= SM_CORNER);
+			if (!sr_grow((void**)&E, &cape, ne + 1, sizeof(mk_edge)))
+			{
+				st = QAWS_STATUS_ALLOCATION_FAILURE;
+				for (z = 1; z <= n; z++) qaws_curve_destroy(part[z]);
+				break;
+			}
+			/* carried on past both ends along the geodesics of their tangents */
+			f1 = &seq[(c0 + j - 1) % ns];
+			qaws_curve_evaluate_2d(f0->cv, (qaws_scalar)f0->lo, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &r0);
+			sr_piece_end(f1->cv, f1->lo, f1->hi, &r1);
+			back.x = -r0.d1.x; back.y = -r0.d1.y;
+			part[0] = mk_ray(region->s, r0.position, back, D, 1);
+			part[n + 1] = mk_ray(region->s, r1.position, r1.d1, D, 0);
+			memset(&cd, 0, sizeof(cd));
+			cd.dimension = QAWS_DIMENSION_2D;
+			cd.segments = part[0] ? part : part + 1;
+			cd.segment_count = n + (part[0] ? 1 : 0) + (part[n + 1] ? 1 : 0);
+			E[ne].cv = NULL;
+			st = qaws_curve_create_composite(&cd, &E[ne].cv);
+			if (st != QAWS_STATUS_OK)
+				for (z = 0; z <= n + 1; z++) qaws_curve_destroy(part[z]);
+			else
+			{
+				qaws_range rg = qaws_curve_get_parameter_range(E[ne].cv);
+				E[ne].lo = rg.min_value; E[ne].hi = rg.max_value;
+				E[ne].corner[0] = r0.position.x; E[ne].corner[1] = r0.position.y;
+				sm_point3(c, E[ne].corner[0], E[ne].corner[1], E[ne].corner + 2);
+				E[ne].convex[0] = turn[(c0 + j0) % ns] > 0;
+				E[ne].convex[1] = turn[(c0 + j) % ns] > 0;
+				ne++;
+			}
+		}
+		for (q = first; q < ne; q++)
+		{
+			E[q].prev = q == first ? ne - 1 : q - 1;
+			E[q].next = q + 1 == ne ? first : q + 1;
+		}
+		free(seq); free(turn);
+	}
+	/* the mesh, each vertex labelled with the edge whose front sweeps it first */
+	if (st == QAWS_STATUS_OK)
+	{
+		memset(&md, 0, sizeof(md));
+		md.edge_length = (qaws_scalar)L;
+		st = qaws_surface_region_triangulate(region, &md, &mesh);
+	}
+	if (st == QAWS_STATUS_OK)
+	{
+		nv = qaws_mesh_2d_get_vertex_count(mesh);
+		lab = (unsigned int*)malloc(sizeof(unsigned int) * (nv + 1));
+		vt = (double*)malloc(sizeof(double) * (nv + 1));
+		vst = (double*)calloc(2 * ne * (nv + 1), sizeof(double));
+		dd = (double*)malloc(sizeof(double) * (ne + 1));
+		ws = (double*)malloc(sizeof(double) * 2 * (ne + 1));
+		if (!lab || !vt || !vst || !dd || !ws)
+			st = QAWS_STATUS_ALLOCATION_FAILURE;
+		for (i = 0; i < nv && st == QAWS_STATUS_OK; i++)
+		{
+			qaws_vec2 w = qaws_mesh_2d_get_vertex(mesh, i);
+			double x[2], *seed = vst + 2 * ne * i;
+			/* the feet carried from the last vertex */
+			if (i) memcpy(seed, seed - 2 * ne, sizeof(double) * 2 * ne);
+			x[0] = w.x; x[1] = w.y;
+			lab[i] = mk_label(c, E, ne, x, seed, dd, &vt[i]);
+		}
+	}
+	/* the crossings: on each mesh edge between differently labelled
+	   vertices, where the label changes (bisection), each found once */
+	if (st == QAWS_STATUS_OK)
+	{
+		nt = qaws_mesh_2d_get_triangle_count(mesh);
+		while (hsize < 4 * nt + 16) hsize <<= 1;
+		hash = (unsigned int*)malloc(sizeof(unsigned int) * hsize);
+		if (!hash)
+			st = QAWS_STATUS_ALLOCATION_FAILURE;
+		for (i = 0; i < hsize && st == QAWS_STATUS_OK; i++) hash[i] = 0xffffffffu;
+		for (i = 0; i < nt && st == QAWS_STATUS_OK; i++)
+		{
+			unsigned int v[3], e, ids[3], nc = 0, lv[3];
+			double cuv[3][2], crad[3];
+			qaws_mesh_2d_get_triangle(mesh, i, v);
+			for (e = 0; e < 3; e++)
+			{
+				unsigned int a = v[e] < v[(e + 1) % 3] ? v[e] : v[(e + 1) % 3], b = v[e] < v[(e + 1) % 3] ? v[(e + 1) % 3] : v[e];
+				unsigned int slot = (unsigned int)((a * 2654435761u) ^ (b * 40503u)) & (hsize - 1), id = 0xffffffffu;
+				while (hash[slot] != 0xffffffffu)
+				{
+					if (cr[hash[slot]].a == a && cr[hash[slot]].b == b) { id = hash[slot]; break; }
+					slot = (slot + 1) & (hsize - 1);
+				}
+				if (id == 0xffffffffu)
+				{
+					sm_cross* x;
+					if (!sr_grow((void**)&cr, &capcr, ncr + 1, sizeof(sm_cross)))
+					{
+						st = QAWS_STATUS_ALLOCATION_FAILURE;
+						break;
+					}
+					x = &cr[ncr];
+					memset(x, 0, sizeof(*x));
+					x->a = a; x->b = b;
+					if (lab[a] != 0xffffffffu && lab[b] != 0xffffffffu && lab[a] != lab[b])
+					{
+						qaws_vec2 pa = qaws_mesh_2d_get_vertex(mesh, a), pb = qaws_mesh_2d_get_vertex(mesh, b);
+						double l0 = 0, l1 = 1, len = hypot((double)pb.x - pa.x, (double)pb.y - pa.y), tm = 0;
+						unsigned int it;
+						memcpy(ws, vst + 2 * ne * a, sizeof(double) * 2 * ne);
+						for (it = 0; it < 60 && (l1 - l0) * len > 0.05 * c->tol; it++)
+						{
+							double xm[2], lm = 0.5 * (l0 + l1);
+							xm[0] = pa.x + lm * ((double)pb.x - pa.x); xm[1] = pa.y + lm * ((double)pb.y - pa.y);
+							if (mk_label(c, E, ne, xm, ws, dd, &tm) == lab[a]) l0 = lm; else l1 = lm;
+						}
+						x->uv[0] = pa.x + 0.5 * (l0 + l1) * ((double)pb.x - pa.x);
+						x->uv[1] = pa.y + 0.5 * (l0 + l1) * ((double)pb.y - pa.y);
+						mk_label(c, E, ne, x->uv, ws, dd, &x->r);
+						x->ok = x->r < 1e299;
+						/* at the boundary (feet so near a line do not settle): the
+						   skeleton meets it only at corners, so the corner within a
+						   mesh edge, else nothing */
+						if (x->ok && x->r < 1e-3 * L)
+						{
+							double p3[3], dc = 1e300;
+							unsigned int q, kc = 0;
+							sm_point3(c, x->uv[0], x->uv[1], p3);
+							for (q = 0; q < ne; q++)
+								if (sm_d3(p3, E[q].corner + 2) < dc) { dc = sm_d3(p3, E[q].corner + 2); kc = q; }
+							x->ok = dc <= 2 * L;
+							x->uv[0] = E[kc].corner[0]; x->uv[1] = E[kc].corner[1]; x->r = 0;
+						}
+						x->fa = lab[a]; x->fb = lab[b];
+						if (x->ok && x->r > ax->best[2]) { ax->best[0] = x->uv[0]; ax->best[1] = x->uv[1]; ax->best[2] = x->r; }
+					}
+					hash[slot] = ncr;
+					id = ncr++;
+				}
+				ids[e] = id;
+			}
+			if (st != QAWS_STATUS_OK)
+				break;
+			for (e = 0; e < 3; e++)
+			{
+				sm_cross const* x = &cr[ids[e]];
+				lv[e] = lab[v[e]];
+				if (x->ok)
+				{
+					cuv[nc][0] = x->uv[0]; cuv[nc][1] = x->uv[1]; crad[nc] = x->r;
+					nc++;
+				}
+			}
+			if (nc == 2)
+				st = sm_add_seg(ax, cuv[0], crad[0], cuv[1], crad[1]);
+			else if (nc == 3 && lv[0] != lv[1] && lv[1] != lv[2] && lv[0] != lv[2])
+			{
+				/* three fronts meet: equally far from the three lines, by Newton
+				   from the crossings' centre (kept there if it does not settle) */
+				double p[2], sv[6], bp[2], br = (crad[0] + crad[1] + crad[2]) / 3, bres = 1e300;
+				double span = hypot(cuv[1][0] - cuv[0][0], cuv[1][1] - cuv[0][1]) + hypot(cuv[2][0] - cuv[0][0], cuv[2][1] - cuv[0][1]);
+				unsigned int itn, a2, q, dup = 0;
+				p[0] = bp[0] = (cuv[0][0] + cuv[1][0] + cuv[2][0]) / 3;
+				p[1] = bp[1] = (cuv[0][1] + cuv[1][1] + cuv[2][1]) / 3;
+				for (q = 0; q < 3; q++) { sv[2 * q] = vst[2 * ne * v[q] + 2 * lv[q]]; sv[2 * q + 1] = vst[2 * ne * v[q] + 2 * lv[q] + 1]; }
+				for (itn = 0; itn < 20; itn++)
+				{
+					double d3[3], F[2], J[4], det, res;
+					for (q = 0; q < 3; q++) d3[q] = mk_dist(c, &E[lv[q]], p, &sv[2 * q], &sv[2 * q + 1]);
+					if (!(d3[0] > -1e299 && d3[1] > -1e299 && d3[2] > -1e299))
+						break;
+					F[0] = d3[0] - d3[1]; F[1] = d3[0] - d3[2];
+					res = fabs(F[0]) + fabs(F[1]);
+					/* (only near the triangle: a far root is another meeting) */
+					if (res < bres && hypot(p[0] - cuv[0][0], p[1] - cuv[0][1]) <= 2 * span + 4 * c->tol)
+					{
+						bres = res; bp[0] = p[0]; bp[1] = p[1]; br = (d3[0] + d3[1] + d3[2]) / 3;
+					}
+					if (res <= 1e-3 * c->tol)
+						break;
+					for (a2 = 0; a2 < 2; a2++)
+					{
+						double px[2], e3[3], s2[6], hs = SM_FD_STEP * c->diag;
+						memcpy(s2, sv, sizeof(s2));
+						px[0] = p[0] + (a2 == 0 ? hs : 0); px[1] = p[1] + (a2 == 1 ? hs : 0);
+						for (q = 0; q < 3; q++) e3[q] = mk_dist(c, &E[lv[q]], px, &s2[2 * q], &s2[2 * q + 1]);
+						J[a2] = ((e3[0] - e3[1]) - F[0]) / hs;
+						J[2 + a2] = ((e3[0] - e3[2]) - F[1]) / hs;
+					}
+					det = J[0] * J[3] - J[1] * J[2];
+					if (!(fabs(det) > 0))
+						break;
+					p[0] -= (J[3] * F[0] - J[1] * F[1]) / det;
+					p[1] -= (J[0] * F[1] - J[2] * F[0]) / det;
+				}
+				/* found already from a neighbouring triangle: the same junction */
+				for (q = 0; q < ax->njun && !dup; q++)
+					if (hypot(ax->junction[3 * q] - bp[0], ax->junction[3 * q + 1] - bp[1]) <= 100 * c->tol)
+					{
+						bp[0] = ax->junction[3 * q]; bp[1] = ax->junction[3 * q + 1]; br = ax->junction[3 * q + 2];
+						dup = 1;
+					}
+				if (!dup)
+				{
+					if (!sr_grow((void**)&ax->junction, &ax->capjun, 3 * (ax->njun + 1), sizeof(double)))
+						st = QAWS_STATUS_ALLOCATION_FAILURE;
+					else
+					{
+						ax->junction[3 * ax->njun] = bp[0]; ax->junction[3 * ax->njun + 1] = bp[1]; ax->junction[3 * ax->njun + 2] = br;
+						ax->njun++;
+						if (br > ax->best[2]) { ax->best[0] = bp[0]; ax->best[1] = bp[1]; ax->best[2] = br; }
+					}
+				}
+				for (q = 0; q < 3 && st == QAWS_STATUS_OK; q++)
+					st = sm_add_seg(ax, bp, br, cuv[q], crad[q]);
+			}
+		}
+	}
+	for (i = 0; i < ne; i++) qaws_curve_destroy(E[i].cv);
+	free(E); free(lab); free(vt); free(vst); free(dd); free(ws); free(hash); free(cr);
+	qaws_mesh_2d_destroy(mesh);
+	free(loops);
+	if (st != QAWS_STATUS_OK)
+	{
+		qaws_surface_medial_axis_destroy(ax);
+		return st;
+	}
+	*out_axis = ax;
 	return QAWS_STATUS_OK;
 }

@@ -482,11 +482,9 @@ qaws_status qaws_surface_curve_create_shortest_path(qaws_surface const* surface,
 	if (!surface || !out_curve)
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	*out_curve = NULL;
-	if (!obstacles)
-		return qaws_surface_curve_create_geodesic(surface, p0, p1, tolerance, out_curve);
 	if ((st = qaws_internal_sg_init(&c, surface, (double)tolerance)) != QAWS_STATUS_OK)
 		return st;
-	np = qaws_surface_region_get_path_count(obstacles);
+	np = obstacles ? qaws_surface_region_get_path_count(obstacles) : 0;
 	for (i = 0; i < np; i++)
 	{
 		qaws_path_2d p;
@@ -497,7 +495,8 @@ qaws_status qaws_surface_curve_create_shortest_path(qaws_surface const* surface,
 				return QAWS_STATUS_UNSUPPORTED_OPERATION;
 		total += p.curve_count;
 	}
-	nout = c.pu > 0 && c.pv > 0 ? 0 : c.pu > 0 || c.pv > 0 ? 2 : 4;
+	/* (no obstacles: the whole surface, no loops) */
+	nout = !np || (c.pu > 0 && c.pv > 0) ? 0 : c.pu > 0 || c.pv > 0 ? 2 : 4;
 	own = (qaws_curve**)calloc(total + nout + 1, sizeof(qaws_curve*));
 	views = (qaws_curve const**)calloc(total + nout + 1, sizeof(qaws_curve*));
 	loops = (qaws_path_2d*)calloc(np + 3, sizeof(qaws_path_2d));

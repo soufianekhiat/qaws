@@ -422,3 +422,24 @@ Each item lands with tests in f64 and f32, docs, and a showcase figure.
   now flat axes are those under 1e-5 of the widest in f32, the ring bound
   goes over axes of more than one cell, and the interior is cut by the
   strokes and discs at once.
+- Second part, item 6 done: shortest paths on closed curved surfaces.
+  Dijkstra on a 40 x 40 grid per face seeds the aim (at the path's points
+  in turn); the aim's Gauss-Newton steps are halved while they leave the
+  domain or miss by more, with float-sized difference steps in f32. With
+  no obstacles qaws_surface_curve_create_shortest_path searches the whole
+  surface. Test 110: four pairs on a torus against Mathematica's global
+  distances (1e-8, f32 1e-4).
+- Second part, item 7 done: certified arrangements of geodesic segments
+  (qaws_surface_geodesics_certify: shared corners proven by transversality,
+  the float images crossing as often inside the certified boxes) and
+  rigorous area bounds of geodesic polygons
+  (qaws_surface_geodesic_polygon_area: a grid over the tubes, interval
+  area elements). Lengths need nothing: a segment's length is its input.
+  Test 109; figure 30.
+- Second part, item 8 done: mitered skeletons
+  (qaws_surface_region_mitered_skeleton): edges moved as their geodesic
+  lines, wedges at the corners, labels on a mesh as for the medial axis.
+  No split events. A shared fix: a piece's end tangent is now read from
+  inside the piece (at a B-spline knot the curve's derivative was the next
+  piece's, so corners inside one curve went unseen by the offsets' disks,
+  the medial axis and the skeleton). Test 106; figure 30.

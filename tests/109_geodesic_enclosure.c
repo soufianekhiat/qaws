@@ -216,6 +216,57 @@ static void test_bump(void)
 	qaws_surface_destroy(s);
 }
 
+/* two geodesic triangles on the bump (edges: shortest paths): their crossings
+   certified as the float curves' count; one's area bounded round the float
+   region's */
+static void test_polygons(void)
+{
+	static double const T[2][3][2] = { { { 0.15, 0.2 }, { 0.75, 0.3 }, { 0.4, 0.8 } }, { { 0.3, 0.45 }, { 0.85, 0.55 }, { 0.6, 0.15 } } };
+	qaws_surface* s = get_bump();
+	qaws_surface_curve* c[6] = { NULL };
+	qaws_geodesic_segment g[6];
+	qaws_surface_crossing x[8];
+	qaws_surface_path p;
+	qaws_surface_region* rg = NULL;
+	qaws_scalar A = 0, lo = 0, hi = 0;
+	qaws_status st = QAWS_STATUS_OK, sc, sa;
+	unsigned int i, j, n = 0, nf = 0, ni;
+	char msg[300];
+	for (i = 0; i < 6 && st == QAWS_STATUS_OK; i++)
+	{
+		double const* a = T[i / 3][i % 3];
+		double const* b = T[i / 3][(i + 1) % 3];
+		qaws_eval_result_2d e;
+		qaws_range r;
+		if ((st = qaws_surface_curve_create_shortest_path(s, NULL, get_uv(a[0], a[1]), get_uv(b[0], b[1]), 0, &c[i])) != QAWS_STATUS_OK)
+			break;
+		r = qaws_curve_get_parameter_range(qaws_surface_curve_get_uv(c[i]));
+		qaws_curve_evaluate_2d(qaws_surface_curve_get_uv(c[i]), r.min_value, QAWS_EVAL_FLAG_D1, &e);
+		g[i].start = get_uv(a[0], a[1]); g[i].direction = e.d1;
+		qaws_surface_curve_get_length(c[i], &g[i].length);
+	}
+	sc = st ? st : qaws_surface_geodesics_certify(s, g, 6, 0, &n);
+	for (i = 0; i < 3 && st == QAWS_STATUS_OK; i++)
+		for (j = 3; j < 6; j++)
+			if (qaws_surface_curve_intersect(c[i], c[j], x, 8, &ni) == QAWS_STATUS_OK)
+				nf += ni;
+	sprintf(msg, "certified arrangement: two geodesic triangles on the bump, %u crossings (status %d), the float curves' %u", n, (int)sc, nf);
+	TEST_ASSERT(st == QAWS_STATUS_OK && sc == QAWS_STATUS_OK && n == nf && n > 0, msg);
+	sa = st;
+	if (st == QAWS_STATUS_OK)
+	{
+		p.curves = (qaws_surface_curve const* const*)c; p.curve_count = 3; p.closed = 1;
+		if (qaws_surface_clip(s, QAWS_CLIP_NONE, QAWS_FILL_NON_ZERO, &p, 1, NULL, 0, &rg) == QAWS_STATUS_OK)
+			qaws_surface_region_get_area(rg, &A);
+		sa = qaws_surface_geodesic_polygon_area(s, g, 3, 0, 512, &lo, &hi);
+	}
+	sprintf(msg, "certified area: a geodesic triangle in [%.6f, %.6f] (status %d), the float region's %.6f", (double)lo, (double)hi, (int)sa, (double)A);
+	TEST_ASSERT(sa == QAWS_STATUS_OK && lo <= A && A <= hi && hi - lo < 0.06 * A, msg);
+	qaws_surface_region_destroy(rg);
+	for (i = 0; i < 6; i++) qaws_surface_curve_destroy(c[i]);
+	qaws_surface_destroy(s);
+}
+
 static void test_refusals(void)
 {
 	qaws_arc_segment g;
@@ -252,6 +303,7 @@ int test_109_geodesic_enclosure_main(void)
 	printf("Test 109: validated enclosures of geodesics\n");
 	test_closed_forms();
 	test_bump();
+	test_polygons();
 	test_refusals();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;

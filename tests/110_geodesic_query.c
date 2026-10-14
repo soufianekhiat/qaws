@@ -19,6 +19,7 @@
 #include "qaws_surface_revolution.h"
 #include "qaws_bezier.h"
 #include "qaws_surface_bilinear.h"
+#include "reference/110_torus_distance.h"
 #include <math.h>
 #include <string.h>
 
@@ -231,6 +232,46 @@ static void test_shortest_round(void)
 	qaws_curve_destroy(line);
 }
 
+static void test_torus_shortest(void)
+{
+	/* the torus R = 1, r = 0.35: the global shortest geodesics (Mathematica,
+	   shooting from 360 first angles), which the chord does not always lead to */
+	qaws_arc_segment g;
+	qaws_arc_desc ad;
+	qaws_surface_revolution_desc rd;
+	qaws_curve* prof = NULL;
+	qaws_surface* s = NULL;
+	unsigned int i, bad = 0;
+	double worst = 0;
+	char msg[200];
+	memset(&g, 0, sizeof(g));
+	g.center[0] = 1; g.radius = (qaws_scalar)0.35; g.angle_start = 0; g.angle_end = (qaws_scalar)(2 * GQ_PI);
+	memset(&ad, 0, sizeof(ad));
+	ad.dimension = QAWS_DIMENSION_2D; ad.segments = &g; ad.segment_count = 1;
+	qaws_curve_create_arc(&ad, &prof);
+	memset(&rd, 0, sizeof(rd));
+	rd.profile = prof; rd.axis_direction.z = 1;
+	qaws_surface_create_revolution(&rd, &s);
+	for (i = 0; i < 4; i++)
+	{
+		qaws_surface_curve* c = NULL;
+		qaws_scalar L = 0;
+		double const* p = g110_torus_pairs[i];
+		if (qaws_surface_curve_create_shortest_path(s, NULL, gq_uv(p[0], p[1]), gq_uv(p[2], p[3]), 0, &c) != QAWS_STATUS_OK)
+		{
+			bad++;
+			continue;
+		}
+		qaws_surface_curve_get_length(c, &L);
+		worst = fmax(worst, fabs((double)L - g110_torus_distance[i]));
+		qaws_surface_curve_destroy(c);
+	}
+	sprintf(msg, "torus: shortest paths of four pairs against the global geodesic distances (Mathematica): %u failed, %.2g off", bad, worst);
+	TEST_ASSERT(bad == 0 && worst <= (GQ_F32 ? 1e-4 : 1e-8), msg);
+	qaws_surface_destroy(s);
+	qaws_curve_destroy(prof);
+}
+
 int test_110_geodesic_query_main(void)
 {
 	g_pass = 0;
@@ -239,6 +280,7 @@ int test_110_geodesic_query_main(void)
 	test_sphere();
 	test_cylinder();
 	test_shortest_round();
+	test_torus_shortest();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
 }

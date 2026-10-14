@@ -35,6 +35,8 @@
 #define SH_JOIN_GAP 1e-6    /* a run and the trim it meets this far apart (relative) are joined as they are */
 #define SH_GRAZE 1e-6       /* the least angle (radians) a crossing goes across */
 #define SH_SEAM_OFF 1e-5    /* a centre this near a seam (of the period) is taken this far off it */
+#define SH_AIM_H 1e-4     /* the aim's difference step */
+#define SH_AIM_EPS 1e-6   /* the aim's miss (relative) taken as reaching */
 #else
 #define SH_TOL 1e-7
 #define SH_ON_SIDE 1e-9
@@ -47,6 +49,8 @@
 #define SH_JOIN_GAP 1e-12
 #define SH_GRAZE 1e-9
 #define SH_SEAM_OFF 1e-10
+#define SH_AIM_H 1e-7
+#define SH_AIM_EPS 1e-10
 #endif
 
 #define SH_COPIES 32        /* copies of a point (by periods) near a closed face's trims, at most */
@@ -3522,25 +3526,39 @@ static double sh_aim_angle(qaws_shell_atlas const* a, qaws_shell_point p, qaws_v
    hole it ran into (SH_NONE: no convergence) in *blocked */
 static int sh_aim(sh_circ* k, qaws_vec3 x, double* th, double* L, unsigned int* blocked)
 {
-	unsigned int it, f, lp;
-	double uv[2], len;
+	unsigned int it, f, lp, back = 0;
+	double uv[2], len, pth = *th, pL = *L, pn = 1e300, dth = 0, dL = 0;
 	*blocked = SH_NONE;
-	for (it = 0; it < 40; it++)
+	for (it = 0; it < 80; it++)
 	{
-		double r0[3], J[3][2], A11 = 0, A12 = 0, A22 = 0, g1 = 0, g2 = 0, det, h = 1e-7, n0;
+		double r0[3], J[3][2], A11 = 0, A12 = 0, A22 = 0, g1 = 0, g2 = 0, det, h = SH_AIM_H, n0 = 0;
 		qaws_vec3 e;
 		unsigned int q, m;
+		int stopped;
 		k->r = *L;
-		if (sh_hit(k, *th, &f, uv, &len, &lp) != QAWS_STATUS_OK)
+		stopped = sh_hit(k, *th, &f, uv, &len, &lp) != QAWS_STATUS_OK;
+		if (!stopped)
+		{
+			e = sh_pos3(k->a, f, uv);
+			r0[0] = e.x - x.x; r0[1] = e.y - x.y; r0[2] = e.z - x.z;
+			n0 = sqrt(sh_dot(r0, r0));
+			if (n0 <= SH_AIM_EPS * (*L + 1))
+				return 0;
+		}
+		/* a step off the domain, or no better: half of it (back-tracking) */
+		if (it && (stopped || n0 >= pn) && back < 30)
+		{
+			dth *= 0.5; dL *= 0.5;
+			*th = pth + dth; *L = pL + dL;
+			back++;
+			continue;
+		}
+		if (stopped)
 		{
 			*blocked = lp;
 			return 1;
 		}
-		e = sh_pos3(k->a, f, uv);
-		r0[0] = e.x - x.x; r0[1] = e.y - x.y; r0[2] = e.z - x.z;
-		n0 = sqrt(sh_dot(r0, r0));
-		if (n0 <= 1e-12 * (*L + 1))
-			return 0;
+		back = 0; pth = *th; pL = *L; pn = n0;
 		for (q = 0; q < 2; q++)
 		{
 			k->r = *L + (q == 1 ? h : 0);
@@ -3560,10 +3578,12 @@ static int sh_aim(sh_circ* k, qaws_vec3 x, double* th, double* L, unsigned int* 
 		det = A11 * A22 - A12 * A12;
 		if (!(fabs(det) > 0))
 			break;
-		*th -= (A22 * g1 - A12 * g2) / det;
-		*L -= (A11 * g2 - A12 * g1) / det;
-		if (*L <= 0) *L = 1e-9;
+		dth = -(A22 * g1 - A12 * g2) / det;
+		dL = -(A11 * g2 - A12 * g1) / det;
+		if (pL + dL <= 0) dL = 1e-9 - pL;
+		*th = pth + dth; *L = pL + dL;
 	}
+	*th = pth; *L = pL;
 	return 1;
 }
 
@@ -4073,12 +4093,210 @@ static qaws_status sh_hole_path(qaws_shell_atlas const* a, unsigned int f, doubl
 	return st;
 }
 
+/* waypoints for aiming the geodesic from p0 to p1, from a distance field:
+   Dijkstra over a grid of points on every face (each linked to its eight
+   neighbours, round a closed direction too, and to the points of the
+   faces beside it within a cell and a half in space), p0 and p1 linked to
+   the points round them; the discrete path's points at each eighth of its
+   length and that length. 0 when p1 is not reached. */
+#define SH_SEED_G 40
+#define SH_SEED_WAY 7
+
+typedef struct sh_heap
+{
+	unsigned int* id;
+	double* key;
+	unsigned int n;
+} sh_heap;
+
+static void sh_heap_push(sh_heap* h, unsigned int id, double key)
+{
+	unsigned int i = h->n++;
+	while (i > 0)
+	{
+		unsigned int p = (i - 1) / 2;
+		if (h->key[p] <= key)
+			break;
+		h->id[i] = h->id[p]; h->key[i] = h->key[p];
+		i = p;
+	}
+	h->id[i] = id; h->key[i] = key;
+}
+
+static unsigned int sh_heap_pop(sh_heap* h, double* key)
+{
+	unsigned int top = h->id[0], i = 0, last;
+	double lk;
+	*key = h->key[0];
+	last = h->id[--h->n];
+	lk = h->key[h->n];
+	for (;;)
+	{
+		unsigned int c = 2 * i + 1;
+		if (c >= h->n)
+			break;
+		if (c + 1 < h->n && h->key[c + 1] < h->key[c]) c++;
+		if (h->key[c] >= lk)
+			break;
+		h->id[i] = h->id[c]; h->key[i] = h->key[c];
+		i = c;
+	}
+	if (h->n)
+	{
+		h->id[i] = last; h->key[i] = lk;
+	}
+	return top;
+}
+
+static int sh_seed(qaws_shell_atlas const* a, qaws_shell_point p0, qaws_shell_point p1, qaws_vec3* way, double* L)
+{
+	unsigned int const G = SH_SEED_G, per = (SH_SEED_G + 1) * (SH_SEED_G + 1), nf = a->nf, nn = nf * per + 2, src = nf * per, dst = nf * per + 1;
+	qaws_vec3* x = (qaws_vec3*)malloc(sizeof(qaws_vec3) * nn);
+	unsigned char* ok = (unsigned char*)calloc(nn, 1);
+	double* dist = (double*)malloc(sizeof(double) * nn);
+	unsigned int* prev = (unsigned int*)malloc(sizeof(unsigned int) * nn);
+	unsigned int *bnd = (unsigned int*)malloc(sizeof(unsigned int) * nf * 4 * (SH_SEED_G + 1)), nbnd = 0;
+	unsigned int *ea = NULL, *eb = NULL, ne = 0, cape = 0, *first = NULL, *adj = NULL;
+	sh_heap h;
+	unsigned int f, i, j, k;
+	int found = 0;
+	h.id = (unsigned int*)malloc(sizeof(unsigned int) * (nn * 10 + 16));
+	h.key = (double*)malloc(sizeof(double) * (nn * 10 + 16));
+	h.n = 0;
+	if (!x || !ok || !dist || !prev || !bnd || !h.id || !h.key)
+		goto done;
+	/* the grids */
+	for (f = 0; f < nf; f++)
+	{
+		qaws_internal_sg_ctx const* c = &a->c[f];
+		for (i = 0; i <= G; i++)
+			for (j = 0; j <= G; j++)
+			{
+				unsigned int id = f * per + i * (G + 1) + j;
+				double uv[2];
+				uv[0] = c->u0 + (c->u1 - c->u0) * i / G;
+				uv[1] = c->v0 + (c->v1 - c->v0) * j / G;
+				/* (a closed direction's last row is its first) */
+				if ((c->pu > 0 && i == G) || (c->pv > 0 && j == G) || !sh_inside(a, f, uv))
+					continue;
+				x[id] = sh_pos3(a, f, uv);
+				ok[id] = 1;
+				if ((i == 0 || i == G || j == 0 || j == G) && nbnd < nf * 4 * (G + 1))
+					bnd[nbnd++] = id;
+			}
+	}
+	/* links beyond a face's own grid: across shared sides, and the ends */
+#define SH_LINK(p, q) do { if (ne == cape) { unsigned int nc = cape ? 2 * cape : 1024; unsigned int* g1 = (unsigned int*)realloc(ea, sizeof(unsigned int) * nc); unsigned int* g2 = g1 ? (unsigned int*)realloc(eb, sizeof(unsigned int) * nc) : NULL; if (g1) ea = g1; if (!g1 || !g2) goto done; eb = g2; cape = nc; } ea[ne] = (p); eb[ne] = (q); ne++; } while (0)
+	for (i = 0; i < nbnd; i++)
+		for (j = i + 1; j < nbnd; j++)
+		{
+			unsigned int p = bnd[i], q = bnd[j];
+			double cell;
+			if (p / per == q / per)
+				continue;
+			cell = 1.5 * (a->c[p / per].diag + a->c[q / per].diag) / (2 * G);
+			if (sh_dist(x[p], x[q]) <= cell * 1.5)
+				SH_LINK(p, q);
+		}
+	for (k = 0; k < 2; k++)
+	{
+		qaws_shell_point pp = k ? p1 : p0;
+		qaws_internal_sg_ctx const* c = &a->c[pp.face];
+		double uv[2];
+		int ci = (int)floor(((double)pp.uv.x - c->u0) / (c->u1 - c->u0) * G), cj = (int)floor(((double)pp.uv.y - c->v0) / (c->v1 - c->v0) * G), di, dj;
+		uv[0] = pp.uv.x; uv[1] = pp.uv.y;
+		x[k ? dst : src] = sh_pos3(a, pp.face, uv);
+		ok[k ? dst : src] = 1;
+		for (di = -1; di <= 2; di++)
+			for (dj = -1; dj <= 2; dj++)
+			{
+				int ii = ci + di, jj = cj + dj;
+				if (c->pu > 0) ii = ((ii % (int)G) + (int)G) % (int)G;
+				if (c->pv > 0) jj = ((jj % (int)G) + (int)G) % (int)G;
+				if (ii < 0 || jj < 0 || ii > (int)G || jj > (int)G || !ok[pp.face * per + (unsigned int)ii * (G + 1) + (unsigned int)jj])
+					continue;
+				SH_LINK(k ? dst : src, pp.face * per + (unsigned int)ii * (G + 1) + (unsigned int)jj);
+			}
+	}
+#undef SH_LINK
+	/* the links as lists per node */
+	first = (unsigned int*)calloc(nn + 1, sizeof(unsigned int));
+	adj = (unsigned int*)malloc(sizeof(unsigned int) * (2 * ne + 1));
+	if (!first || !adj)
+		goto done;
+	for (k = 0; k < ne; k++) { first[ea[k] + 1]++; first[eb[k] + 1]++; }
+	for (k = 0; k < nn; k++) first[k + 1] += first[k];
+	{
+		unsigned int* fill = (unsigned int*)malloc(sizeof(unsigned int) * (nn + 1));
+		if (!fill)
+			goto done;
+		memcpy(fill, first, sizeof(unsigned int) * (nn + 1));
+		for (k = 0; k < ne; k++) { adj[fill[ea[k]]++] = eb[k]; adj[fill[eb[k]]++] = ea[k]; }
+		free(fill);
+	}
+	/* Dijkstra from p0 */
+	for (k = 0; k < nn; k++) { dist[k] = 1e300; prev[k] = nn; }
+	dist[src] = 0;
+	sh_heap_push(&h, src, 0);
+	while (h.n)
+	{
+		double d;
+		unsigned int u = sh_heap_pop(&h, &d), m;
+		int di, dj;
+		if (d > dist[u])
+			continue;
+		if (u == dst)
+		{
+			found = 1;
+			break;
+		}
+#define SH_RELAX(v) do { double nd = d + sh_dist(x[u], x[v]); if (ok[v] && nd < dist[v] && h.n < nn * 10) { dist[v] = nd; prev[v] = u; sh_heap_push(&h, v, nd); } } while (0)
+		for (m = first[u]; m < first[u + 1]; m++)
+			SH_RELAX(adj[m]);
+		if (u < src)
+		{
+			unsigned int fu = u / per, iu = (u % per) / (G + 1), ju = (u % per) % (G + 1);
+			qaws_internal_sg_ctx const* c = &a->c[fu];
+			for (di = -1; di <= 1; di++)
+				for (dj = -1; dj <= 1; dj++)
+				{
+					int ii = (int)iu + di, jj = (int)ju + dj;
+					if (!di && !dj)
+						continue;
+					if (c->pu > 0) ii = ((ii % (int)G) + (int)G) % (int)G;
+					if (c->pv > 0) jj = ((jj % (int)G) + (int)G) % (int)G;
+					if (ii < 0 || jj < 0 || ii > (int)G || jj > (int)G)
+						continue;
+					SH_RELAX(fu * per + (unsigned int)ii * (G + 1) + (unsigned int)jj);
+				}
+		}
+#undef SH_RELAX
+	}
+	if (found)
+	{
+		/* the path's points at each eighth of its length, walked back from p1 */
+		unsigned int v = dst, q;
+		for (q = 0; q < SH_SEED_WAY; q++) way[q] = x[dst];
+		while (v != src && prev[v] != nn)
+		{
+			for (q = 0; q < SH_SEED_WAY; q++)
+				if (dist[v] >= dist[dst] * (q + 1) / (SH_SEED_WAY + 1))
+					way[q] = x[v];
+			v = prev[v];
+		}
+		*L = dist[dst];
+	}
+done:
+	free(x); free(ok); free(dist); free(prev); free(bnd); free(ea); free(eb); free(first); free(adj); free(h.id); free(h.key);
+	return found;
+}
+
 qaws_status qaws_shell_curve_create_shortest_path(qaws_shell_atlas const* a, qaws_shell_point p0, qaws_shell_point p1, qaws_scalar tolerance,
 	qaws_shell_curve** out_curve)
 {
 	sh_circ k0 = { 0 }, k1 = { 0 };
 	qaws_vec3 x0, x1;
-	double th0, th, L, tol, uv[2];
+	double th0, th, L, tol, uv[2], seed_th = 0, seed_L = 0;
 	unsigned int blocked;
 	qaws_shell_curve* sc;
 	qaws_status st = QAWS_STATUS_OK;
@@ -4094,13 +4312,58 @@ qaws_status qaws_shell_curve_create_shortest_path(qaws_shell_atlas const* a, qaw
 	sc = sh_curve_new(a);
 	if (!sc)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
-	if (!sh_aim(&k0, x1, &th0, &L, &blocked))
+	{
+		/* the geodesic aimed from the chord, and from the distance field's
+		   path (on a closed or curved shell the chord can lead to a longer
+		   geodesic, or none): the shorter one clear of the holes; blocked
+		   when neither is */
+		double ths = 0, Ls = 0;
+		unsigned int bs = SH_NONE;
+		int chord = !sh_aim(&k0, x1, &th0, &L, &blocked), seeded = 0;
+		qaws_vec3 way[SH_SEED_WAY];
+		if (sh_seed(a, p0, p1, way, &Ls))
+		{
+			/* aimed at the path's points in turn, each from the last: the
+			   geodesic followed along the field's route to p1 */
+			unsigned int q;
+			ths = sh_aim_angle(a, p0, way[0]);
+			Ls = sh_dist(x0, way[0]);
+			seeded = 1;
+			for (q = 0; q <= SH_SEED_WAY && seeded; q++)
+				seeded = !sh_aim(&k0, q < SH_SEED_WAY ? way[q] : x1, &ths, &Ls, &bs);
+		}
+		if (chord)
+		{
+			if (seeded && Ls < L - tol) { th0 = ths; L = Ls; }
+			blocked = SH_NONE;
+		}
+		else if (blocked != SH_NONE)
+		{
+			/* round the hole the chord's geodesic ran into, the field's
+			   geodesic among the others clear of it */
+			if (seeded) { seed_th = ths; seed_L = Ls; }
+		}
+		else if (seeded)
+		{
+			th0 = ths; L = Ls;
+			blocked = SH_NONE;
+		}
+		else if (bs != SH_NONE)
+		{
+			/* (the chord's aim did not converge; the field's ran into a hole) */
+			th0 = ths; L = Ls;
+			blocked = bs;
+		}
+		else
+			blocked = SH_NONE - 1;
+	}
+	if (blocked == SH_NONE)
 	{
 		/* nothing in the way: the geodesic itself */
 		k0.r = L;
 		st = sh_ray_runs(&k0, th0, tol, 0, sc);
 	}
-	else if (blocked == SH_NONE)
+	else if (blocked == SH_NONE - 1)
 		st = QAWS_STATUS_NUMERICAL_FAILURE;
 	else
 	{
@@ -4110,7 +4373,7 @@ qaws_status qaws_shell_curve_create_shortest_path(qaws_shell_atlas const* a, qaw
 		   way), aimed from a fan of first angles.
 		   shortcut: 16 angles at two lengths, not a search of every geodesic */
 		double g[2][4], ln[2][4], pl[2][4], th1 = 0, L1, best = 1e300, rl, hit[2], m[2] = { 0, 0 }, half = 0;
-		double bt0 = 0, bt1 = 0, bl0 = 0, bl1 = 0, bpa = 0, bpb = 0, fth = 0, fL = 0;
+		double bt0 = 0, bt1 = 0, bl0 = 0, bl1 = 0, bpa = 0, bpb = 0, fth = seed_th, fL = seed_L;
 		int bfwd = 1;
 		unsigned int s, w, i0, i1, lp, f = 0, hf = 0, n[2] = { 0, 0 }, other;
 		sh_circ* kk[2];
