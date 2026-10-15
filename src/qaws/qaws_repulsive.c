@@ -13,6 +13,7 @@
  */
 
 #include "qaws_repulsive.h"
+#include "internal/qaws_internal_repulsive.h"
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -268,13 +269,6 @@ typedef enum rp_want
 	RP_HVP              /* Hessian times the direction */
 } rp_want;
 
-struct qaws_repulsive_curves
-{
-	unsigned int dim, nv, ne;
-	unsigned int* edges;
-	double alpha, beta;
-};
-
 struct qaws_repulsive_mesh
 {
 	unsigned int nv, nf;
@@ -283,25 +277,20 @@ struct qaws_repulsive_mesh
 };
 
 /* the pairs of elements (k vertices each, at idx), each with the term
-   function; results in double, written to the outputs only on success */
-static qaws_status rp_run(unsigned int dim, unsigned int nv, unsigned int const* idx, unsigned int ne, unsigned int k,
+   function, in double: positions, direction (may be NULL); acc (dim per
+   vertex; NULL: values only) accumulates seed * gradient or the HVP. On
+   failure acc's contents are unspecified. */
+static qaws_status rp_run_d(unsigned int dim, unsigned int const* idx, unsigned int ne, unsigned int k,
 	int (*pair)(void const*, rp_jet (*)[3], unsigned int, rp_jet*), void const* user, int skip_shared,
-	qaws_scalar const* positions, qaws_scalar const* direction, rp_want want, double seed,
-	double* out_v, double* out_t, double* out_t2, qaws_scalar* out_vec)
+	double const* positions, double const* direction, rp_want want, double seed,
+	double* out_v, double* out_t, double* out_t2, double* acc)
 {
-	unsigned int i, j, a, c, n = want == RP_EVAL ? 0 : 2 * k * dim;
-	double v = 0, t = 0, t2 = 0, *acc = NULL;
+	unsigned int i, j, a, c, n;
+	double v = 0, t = 0, t2 = 0;
 	rp_jet x[6][3], term;
-	if (!positions || ((want == RP_HVP) && !direction))
-		return QAWS_STATUS_INVALID_ARGUMENT;
-	if (want != RP_EVAL)
-	{
-		if (!out_vec)
-			return QAWS_STATUS_INVALID_ARGUMENT;
-		acc = (double*)calloc((size_t)nv * dim + 1, sizeof(double));
-		if (!acc)
-			return QAWS_STATUS_ALLOCATION_FAILURE;
-	}
+	if (!acc)
+		want = RP_EVAL;
+	n = want == RP_EVAL ? 0 : 2 * k * dim;
 	for (i = 0; i < ne; i++)
 		for (j = i + 1; j < ne; j++)
 		{
@@ -326,10 +315,7 @@ static qaws_status rp_run(unsigned int dim, unsigned int nv, unsigned int const*
 			}
 			r = pair(user, x, n, &term);
 			if (r != RP_OK)
-			{
-				free(acc);
 				return r == RP_DEGENERATE ? QAWS_STATUS_DEGENERATE_CURVE : QAWS_STATUS_NUMERICAL_FAILURE;
-			}
 			v += term.v; t += term.t; t2 += term.t2;
 			for (a = 0; acc && a < 2 * k; a++)
 			{
@@ -341,10 +327,36 @@ static qaws_status rp_run(unsigned int dim, unsigned int nv, unsigned int const*
 	if (out_v) *out_v = v;
 	if (out_t) *out_t = direction ? t : 0;
 	if (out_t2) *out_t2 = direction ? t2 : 0;
-	for (i = 0; acc && i < nv * dim; i++)
-		out_vec[i] = (qaws_scalar)((double)out_vec[i] + acc[i]);
-	free(acc);
 	return QAWS_STATUS_OK;
+}
+
+/* rp_run_d from qaws_scalar inputs: out_vec += the result, only on success */
+static qaws_status rp_run(unsigned int dim, unsigned int nv, unsigned int const* idx, unsigned int ne, unsigned int k,
+	int (*pair)(void const*, rp_jet (*)[3], unsigned int, rp_jet*), void const* user, int skip_shared,
+	qaws_scalar const* positions, qaws_scalar const* direction, rp_want want, double seed,
+	double* out_v, double* out_t, double* out_t2, qaws_scalar* out_vec)
+{
+	unsigned int i, m = nv * dim;
+	double *x, *d = NULL, *acc = NULL;
+	qaws_status st;
+	if (!positions || (want == RP_HVP && !direction) || (want != RP_EVAL && !out_vec))
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	x = (double*)calloc(3 * (size_t)m + 1, sizeof(double));
+	if (!x)
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	if (direction) d = x + m;
+	if (want != RP_EVAL) acc = x + 2 * m;
+	for (i = 0; i < m; i++)
+	{
+		x[i] = (double)positions[i];
+		if (d) d[i] = (double)direction[i];
+		if (acc) acc[i] = 0;
+	}
+	st = rp_run_d(dim, idx, ne, k, pair, user, skip_shared, x, d, want, seed, out_v, out_t, out_t2, acc);
+	for (i = 0; st == QAWS_STATUS_OK && acc && i < m; i++)
+		out_vec[i] = (qaws_scalar)((double)out_vec[i] + acc[i]);
+	free(x);
+	return st;
 }
 
 static int rp_curve_term(void const* user, rp_jet (*x)[3], unsigned int n, rp_jet* out)
@@ -520,4 +532,14 @@ qaws_status qaws_repulsive_mesh_hvp(qaws_repulsive_mesh const* mesh, qaws_scalar
 	if (!mesh)
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	return rp_run(3, mesh->nv, mesh->tris, mesh->nf, 3, rp_mesh_term, mesh, 0, positions, direction, RP_HVP, 0, NULL, NULL, NULL, out_hv);
+}
+
+/* ------------------------------------------------------------------------ */
+/*  For the solver                                                          */
+/* ------------------------------------------------------------------------ */
+
+qaws_status qaws_internal_repulsive_curves_energy(qaws_repulsive_curves const* curves, double const* x, double* out_energy, double* grad)
+{
+	return rp_run_d(curves->dim, curves->edges, curves->ne, 2, rp_curve_term, curves, 1, x, NULL, grad ? RP_GRAD : RP_EVAL, 1,
+		out_energy, NULL, NULL, grad);
 }

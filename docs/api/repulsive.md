@@ -7,9 +7,10 @@ Crane, *Repulsive Curves* (2021), and Yu, Brakensiek, Schumacher and Crane,
 papers with their reference code, and the contracts are in
 [`docs/repulsive_plan.md`](../repulsive_plan.md).
 
-This is milestone R1: the energies and their derivatives, evaluated
-directly over all pairs. There are no solvers yet (R2 for curves, R3 for
-meshes), so nothing here moves geometry or promises collision-free motion.
+Milestones R1 and R2: the energies and their derivatives, evaluated
+directly over all pairs, and the curves' constrained fractional Sobolev
+solver with a collision-checked mode and adapters to qaws curves. Meshes
+have no solver yet (R3).
 
 ```c
 qaws_repulsive_curves_desc d = { 3, vertex_count, edges, edge_count, 0, 0 };   /* (alpha, beta) = (3, 6) */
@@ -95,3 +96,133 @@ they are the square's.
 | Hv against central differences of gradients (best of h = 1e-3 to 1e-7) | 1.8e-10 | |
 | A straight curve: E, gradient and Hv exactly 0 (alpha = 3); Hv against differences (alpha = 2) | | |
 | Refusals, with outputs untouched | | |
+
+## Curve optimization (R2)
+
+```c
+qaws_repulsive_curves_solve_desc sd = { 0 };
+sd.hold_edge_lengths = 1;          /* or hold_total_length; pins, held edge directions */
+sd.collision_checked = 1;          /* validate every accepted motion */
+qaws_repulsive_curves_solve(c, &sd, positions, &report);              /* in place */
+
+qaws_repulsive_curves_solver* s = NULL;                               /* or step by step */
+qaws_repulsive_curves_solver_create(c, &sd, positions, &s);
+qaws_repulsive_curves_solver_step(s, positions, &report);             /* report.reason: RUNNING or why it stopped */
+qaws_repulsive_curves_solver_direction(s, positions, g);              /* the descent direction, not the gradient */
+qaws_repulsive_curves_solver_destroy(s);
+```
+
+The method is the paper's (Sec. 4.2 and 5.2 to 5.4), direct and dense.
+
+- **Metric.** A = B + B0 acts on vertex functions:
+  - The high-order term acts on edge differences D_I u = (u_i2 - u_i1) T_I / l_I, weighted
+    w_IJ = l_I l_J / 4 sum 1 / |x_i - x_j|^(2 sigma + 1), with
+    sigma = (beta - 1) / alpha - 1.
+  - The low-order term acts on edge averages, weighted by
+    k_4^2 / |x_i - x_j|^(2 sigma + 1).
+  - Both are assembled over the same pairs as the energy: edges with no
+    common vertex.
+- **Direction.** The solver solves [A~ C^T; C 0] [g; l] = [dE; 0], where A~
+  is the metric on each coordinate and C is the constraints' Jacobian. The
+  saddle-point system is solved as such, by dense LU with partial pivoting
+  (not CG). The result g is the descent direction in the metric, and
+  `_direction` returns it. It is not the coordinate gradient
+  (`qaws_repulsive_curves_gradient`); neither stands in for the other.
+- **Step.** Backtracking on the largest vertex move h:
+  - h starts at twice the last accepted move (a quarter of the mean edge
+    length at first);
+  - the trial point is y = x - (h / |g|_inf) g;
+  - y is projected back onto the constraints by Newton steps in the same
+    metric, [A~ C(y)^T; C(y) 0] [dx; m] = [0; -phi(y)];
+  - the step is accepted when Armijo holds on the projected y and, in
+    collision-checked mode, the motion x -> y passes the check.
+- **Constraints.** Each is held at its value when the solver is created:
+  - pinned vertices (an obstacle is a pinned component);
+  - held edge directions: the products of the edge with the direction's
+    normals stay 0 (one row in 2D, two in 3D);
+  - the total length, or every edge's length;
+  - the vertex barycenter, held by default when nothing is pinned, since
+    the metric does not see translations.
+
+  Rows that would repeat pins are dropped: the length or direction of an
+  edge whose ends are both pinned. Total and per-edge lengths together are
+  refused. Without barycenter or pins the system is singular, and the step
+  reports NUMERICAL_FAILURE rather than a silent result.
+- **Stopping.** The stationarity is <dE, g> l / (E |g|_inf): the energy's
+  relative first-order fall for a move of one mean edge length l along g.
+  The solve is CONVERGED when it drops under the tolerance (1e-4).
+
+| Termination | Meaning |
+|---|---|
+| CONVERGED | stationarity under the tolerance |
+| ITERATION_LIMIT | the budget spent (solve) |
+| INFEASIBLE | no trial step could be projected back onto the constraints |
+| COLLISION_LIMITED | every trial step collided, or the accepted ones vanish (under 1e-8 l) with collisions rejected |
+| STALLED | no trial step lowered the energy, or the accepted ones vanish (under 1e-12 l) |
+| NUMERICAL_FAILURE | a singular system or an unusable energy |
+
+The report also counts the trial steps rejected by the energy, by the
+collision check and by the projection. It gives the constraint residual and
+the size of the last step.
+
+### The two modes
+
+- **Energy-based.** Every accepted step lowers the energy and holds the
+  constraints, and nothing more. The discrete energy samples only the
+  vertices, so on a coarse polygon a strand can pass through another
+  between vertices. A 48-vertex trefoil with its total length held ends as
+  a circle (figure 32). At 96 vertices the same trefoil stays knotted, but
+  that is the energy's doing, not a guarantee.
+- **Collision-checked.** Every accepted motion is validated: the straight
+  path from the old positions to the projected new ones, so the
+  projection's own movement is included.
+  - **Check:** conservative advancement on every pair of edges sharing no
+    vertex. A pair's distance is Lipschitz in time, with the sum of its
+    largest endpoint moves as the constant. Each pair must stay at least
+    min(clearance, half its distance at the step's start) apart; the
+    clearance is 1e-3 l by default.
+  - **Guarantee:** no two such edges ever touch, so the topology is kept: a
+    knot keeps its type and a link its linking number.
+  - **Input:** if edges already touch, it is refused with INVALID_ARGUMENT.
+    There is no repair and no promise of untangling.
+  - **Exemption:** edges that share a vertex are not checked against each
+    other, since they meet there by construction. At a junction that means
+    every pair of its edges, and only those.
+
+### Adapters
+
+`qaws_repulsive_polyline_from_curves` turns qaws curves (2D or 3D) into the
+working polyline.
+- Each curve's parameter range is split until every edge is at most
+  edge_length long and its middle lies within tolerance of its chord.
+- Each vertex keeps its source curve and parameter.
+- A curve whose ends meet becomes a loop.
+
+`qaws_repulsive_polyline_to_curve` refits one curve's vertices as a
+degree-1 B-spline with those parameters as knots. The result is exactly the
+working polyline, parametrized as the source, and nothing is smoothed, so a
+collision-checked result stays valid for the refitted curve. Smooth refits,
+and optimizing a curve's own control points, are R5.
+
+### Checks (test 113)
+
+| Check | f64 | f32 |
+|---|---|---|
+| The metric against Mathematica (`tests/reference/113_repulsive_metric.wls`: from the paper's bilinear form, not its increment rules), a closed 3D heptagon and an open 2D curve | 2.2e-16 | 8e-8 |
+| The metric symmetric, constants in its kernel, positive semidefinite | exact, 3.4e-16 | |
+| The direction tangent to the held edge lengths, descending | 1.3e-16 | 5.8e-9 |
+| A trefoil (48 vertices), edge lengths held: converged, the energy falling at every step | 17 steps, lengths within 9.6e-9 | within 1e-5 |
+| An open 2D curve, ends pinned, end tangents and total length held, collision-checked | pins 1e-21, tangents 2.8e-15, length 7.8e-15 | 4.5e-6 |
+| A Hopf link, edge lengths held, collision-checked: linking number (an independent Gauss integral) | -1.0000 before and after, 16 steps | same |
+| The path check: a sweep through another segment with both ends clear is caught; sliding past passes; closing under the clearance is caught | | |
+| A circle and a cubic -> working polyline (provenance exact, the circle a loop, edges at most 0.15) -> collision-checked solve -> refit through every vertex at its parameter | 0 / 1e-14 | 1.7e-7 |
+| An obstacle loop pinned with its edge lengths held: solves, the loop unmoved | | |
+| Refusals: touching input (collision-checked), total and edge lengths together; free translations reported as NUMERICAL_FAILURE; the iteration budget | | |
+
+Cost: each step assembles the dense metric (O(E^2)) and factors a dense
+(dim V + k)^2 system, so the solver is meant for hundreds of vertices; a
+48-vertex trefoil takes about 25 ms a step. Hierarchical evaluation and
+iterative solves are R4.
+
+Figure 32 (`examples/better2d_showcase/32_repulsive_solve.c`) shows the two
+modes on a trefoil, pinned strands round a fixed loop, and a Hopf link.

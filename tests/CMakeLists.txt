@@ -114,6 +114,7 @@ add_executable(
   110_geodesic_query.c
   111_shell_mesh.c
   112_repulsive.c
+  113_repulsive_solve.c
 )
 
 # The amalgamated library exports exactly the same symbols, so the tests can

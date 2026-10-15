@@ -189,7 +189,7 @@ quadrature error.
 |---|---|---|
 | R0 | this specification: models, reconciliation, pinned references, contracts | done |
 | R1 | direct curve and surface energies with first- and second-order derivatives; Mathematica fixtures; invariance, scaling, adjoint, symmetry and refusal tests in f64 and f32 | done: `qaws_repulsive.h`, test 112 (Mathematica within 1.1e-14 in f64, 1.4e-6 in f32), figure 31 |
-| R2 | constrained curve solver (fractional Sobolev metric with its low-order term, constraints, translation nullspace), collision-checked stepping, polyline and qaws curve adapters | |
+| R2 | constrained curve solver (fractional Sobolev metric with its low-order term, constraints, translation nullspace), collision-checked stepping, polyline and qaws curve adapters | done: `qaws_repulsive_solve.c`, `qaws_repulsive_adapt.c`, test 113 (metric against Mathematica within 2.2e-16), figure 32 |
 | R3 | surface solver (fixed connectivity, pins, global area/volume, the Poisson-based preconditioner), collision checks | |
 | R4 | hierarchical energy/gradient and matrix-free operators, convergence to the direct evaluator, benchmarks | |
 | R5 | surface-constrained curves (repulsion in the embedded 3D geometry, seams and charts handled), native control-point optimization, differentiated solves | |

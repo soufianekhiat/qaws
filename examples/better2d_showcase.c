@@ -90,6 +90,7 @@
 #include "better2d_showcase/29_shell_mesh.c"
 #include "better2d_showcase/30_mitered_certified.c"
 #include "better2d_showcase/31_repulsive_energy.c"
+#include "better2d_showcase/32_repulsive_solve.c"
 
 int main(void)
 {
@@ -126,5 +127,6 @@ int main(void)
 	demo_shell_mesh();
 	demo_mitered_certified();
 	demo_repulsive_energy();
+	demo_repulsive_solve();
 	return 0;
 }
