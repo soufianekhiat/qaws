@@ -97,6 +97,18 @@ qaws_status qaws_repulsive_curves_hvp(qaws_repulsive_curves const* curves, qaws_
  * two edges ever touch and the topology (a knot's type, a link's linking)
  * is kept. An input whose edges already touch is refused. There is no
  * repair and no promise of untangling.
+ *
+ * Hierarchical mode (theta > 0, R4; also for meshes): nothing of size
+ * |V|^2 is stored. The energy and gradient are the Barnes-Hut ones below;
+ * the metric is applied from Barnes-Hut interaction lists, and the
+ * direction is solved by flexible GMRES. The preconditioner is the
+ * Laplacian sandwich (-L)^-1 L^(2 - s) (-L)^-1 (Repulsive Surfaces, Sec.
+ * 5.2), with the Laplacian factored by a profile Cholesky. Pinned vertices
+ * are eliminated, and the other rows are solved by their Schur complement:
+ * at most 32 rows, so per-edge lengths are refused here. The Newton
+ * projection reuses those solves. The step is an approximation of the
+ * dense mode's, converging to it as theta falls. The collision check is
+ * the dense mode's: all pairs, O(|E|^2) per accepted step.
  */
 
 typedef enum qaws_repulsive_termination
@@ -124,6 +136,7 @@ typedef struct qaws_repulsive_curves_solve_desc
 	unsigned int max_iterations;           /* solve: 0 = 100 */
 	qaws_scalar tolerance;                 /* stationarity (see the report); 0 = 1e-4 */
 	qaws_scalar constraint_tolerance;      /* |Phi| over the mean edge length; 0 = 1e-8 (1e-5 in f32) */
+	qaws_scalar theta;                     /* 0: dense (exact metric, LU); > 0: hierarchical (Barnes-Hut energy, gradient and metric at this theta, GMRES; see below) */
 } qaws_repulsive_curves_solve_desc;
 
 typedef struct qaws_repulsive_report
@@ -216,5 +229,87 @@ qaws_status qaws_repulsive_mesh_gradient(qaws_repulsive_mesh const* mesh, qaws_s
 	qaws_scalar* gradient, qaws_scalar* out_value);
 qaws_status qaws_repulsive_mesh_hvp(qaws_repulsive_mesh const* mesh, qaws_scalar const* positions, qaws_scalar const* direction,
 	qaws_scalar* out_hv);
+
+/* ---- hierarchical evaluation (R4) --------------------------------------- */
+
+/*
+ * Barnes-Hut energy and gradient (Repulsive Curves, Sec. 6.1; Repulsive
+ * Surfaces, Sec. 4). Each ordered pair's term uses its first element's own
+ * tangent or normal, so for an element I the elements of a tree node far
+ * from it are taken at once, by their total length (area) and weighted
+ * centroid with one-point quadrature: w_I W k(x_I, X, T_I). A node is far
+ * when max(r_I, r_node) <= theta dist(box_I, box_node), r the boxes' half
+ * diagonals; a node holding an element sharing a vertex with I is never
+ * far. The rest are the direct evaluator's exact terms. theta = 0 is the
+ * direct sum; larger is faster and coarser (0.25 to 0.5 typical).
+ *
+ * The gradient (gradient += seed dE/dx, may be NULL) follows the paper's
+ * scheme: each element's vertices get, from its own traversal, the
+ * derivative of both orders of each pair in those vertices, exactly for the
+ * pairs near it and, for a far node, with the node's averaged projector
+ * standing for its members' tangents or normals in the reverse term. It
+ * approximates the direct gradient (converging to it as theta falls); it
+ * is not the derivative of the approximated energy. No HVP here:
+ * hierarchical second derivatives are not provided.
+ */
+typedef struct qaws_repulsive_bh_stats
+{
+	unsigned long long near_pairs;         /* exact element pairs */
+	unsigned long long far_pairs;          /* element-node pairs taken at once */
+	unsigned int nodes;
+} qaws_repulsive_bh_stats;
+
+qaws_status qaws_repulsive_curves_bh(qaws_repulsive_curves const* curves, qaws_scalar const* positions, qaws_scalar theta, qaws_scalar seed,
+	qaws_scalar* gradient, qaws_scalar* out_value, qaws_repulsive_bh_stats* out_stats);
+qaws_status qaws_repulsive_mesh_bh(qaws_repulsive_mesh const* mesh, qaws_scalar const* positions, qaws_scalar theta, qaws_scalar seed,
+	qaws_scalar* gradient, qaws_scalar* out_value, qaws_repulsive_bh_stats* out_stats);
+
+/* ---- mesh optimization (R3) --------------------------------------------- */
+
+/*
+ * The surfaces' fractional Sobolev descent (Repulsive Surfaces, Sec. 3.2
+ * and 3.3): the metric A = B + B0 on vertex functions (the high-order term
+ * on the per-face gradients of the hat functions, the low-order term on
+ * face averages weighted by the p = 2 kernel, exponent 2 sigma + 2,
+ * sigma = s - 1, s = 2 - 2 / p), over every ordered pair of distinct
+ * faces; then the same constrained direction, step, projection, modes and
+ * report as the curves. Connectivity is fixed.
+ *
+ * Constraints, held at their values at the solver's creation: pinned
+ * vertices (an obstacle is a pinned component), the total area, the
+ * enclosed volume (a closed mesh only: every edge on exactly two faces),
+ * and the barycenter (by default when nothing is pinned).
+ *
+ * Collision-checked: every accepted motion keeps each vertex and face it
+ * does not belong to, and each two edges sharing no vertex, at least
+ * min(clearance, half their distance at the step's start) apart. Contact
+ * between triangle meshes always begins at such a pair, so no two
+ * triangles ever touch beyond their shared vertices and edges.
+ */
+typedef struct qaws_repulsive_mesh_solve_desc
+{
+	unsigned int const* pinned;
+	unsigned int pinned_count;
+	int hold_area;
+	int hold_volume;
+	int hold_barycenter;                   /* 0: when nothing is pinned; 1: always; -1: never */
+	int collision_checked;
+	qaws_scalar clearance;                 /* 0: 1e-3 of the mean edge length */
+	unsigned int max_iterations;           /* solve: 0 = 100 */
+	qaws_scalar tolerance;                 /* stationarity; 0 = 1e-4 */
+	qaws_scalar constraint_tolerance;      /* |Phi| over the mean edge length l (area rows over l, volume rows over l^2); 0 = 1e-8 (1e-5 in f32) */
+	qaws_scalar theta;                     /* 0: dense; > 0: hierarchical, as for curves */
+} qaws_repulsive_mesh_solve_desc;
+
+typedef struct qaws_repulsive_mesh_solver qaws_repulsive_mesh_solver;
+
+qaws_status qaws_repulsive_mesh_solver_create(qaws_repulsive_mesh const* mesh, qaws_repulsive_mesh_solve_desc const* desc,
+	qaws_scalar const* positions, qaws_repulsive_mesh_solver** out_solver);
+void qaws_repulsive_mesh_solver_destroy(qaws_repulsive_mesh_solver* solver);
+qaws_status qaws_repulsive_mesh_solver_step(qaws_repulsive_mesh_solver* solver, qaws_scalar* positions, qaws_repulsive_report* out_report);
+qaws_status qaws_repulsive_mesh_solver_direction(qaws_repulsive_mesh_solver const* solver, qaws_scalar const* positions,
+	qaws_scalar* out_direction);
+qaws_status qaws_repulsive_mesh_solve(qaws_repulsive_mesh const* mesh, qaws_repulsive_mesh_solve_desc const* desc,
+	qaws_scalar* positions, qaws_repulsive_report* out_report);
 
 #endif /* QAWS_REPULSIVE_H */

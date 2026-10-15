@@ -91,6 +91,9 @@
 #include "better2d_showcase/30_mitered_certified.c"
 #include "better2d_showcase/31_repulsive_energy.c"
 #include "better2d_showcase/32_repulsive_solve.c"
+#include "better2d_showcase/33_repulsive_mesh.c"
+#include "better2d_showcase/34_repulsive_bh.c"
+#include "better2d_showcase/35_repulsive_hsolve.c"
 
 int main(void)
 {
@@ -128,5 +131,8 @@ int main(void)
 	demo_mitered_certified();
 	demo_repulsive_energy();
 	demo_repulsive_solve();
+	demo_repulsive_mesh();
+	demo_repulsive_bh();
+	demo_repulsive_hsolve();
 	return 0;
 }

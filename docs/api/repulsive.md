@@ -7,10 +7,11 @@ Crane, *Repulsive Curves* (2021), and Yu, Brakensiek, Schumacher and Crane,
 papers with their reference code, and the contracts are in
 [`docs/repulsive_plan.md`](../repulsive_plan.md).
 
-Milestones R1 and R2: the energies and their derivatives, evaluated
-directly over all pairs, and the curves' constrained fractional Sobolev
-solver with a collision-checked mode and adapters to qaws curves. Meshes
-have no solver yet (R3).
+Milestones R1 to R4: the energies and their derivatives, evaluated
+directly over all pairs or by Barnes-Hut; the constrained fractional
+Sobolev solvers for curves (with adapters to qaws curves) and for triangle
+meshes, each with a collision-checked mode, dense or hierarchical (no
+|V|^2 storage); and the surfaces' Poisson-based preconditioner.
 
 ```c
 qaws_repulsive_curves_desc d = { 3, vertex_count, edges, edge_count, 0, 0 };   /* (alpha, beta) = (3, 6) */
@@ -226,3 +227,223 @@ iterative solves are R4.
 
 Figure 32 (`examples/better2d_showcase/32_repulsive_solve.c`) shows the two
 modes on a trefoil, pinned strands round a fixed loop, and a Hopf link.
+
+## Mesh optimization (R3)
+
+```c
+qaws_repulsive_mesh_solve_desc sd = { 0 };
+sd.hold_area = 1; sd.hold_volume = 1;      /* volume: closed meshes only */
+sd.collision_checked = 1;                  /* vertex-face and edge-edge checks on every accepted motion */
+qaws_repulsive_mesh_solve(mesh, &sd, positions, &report);
+/* or qaws_repulsive_mesh_solver_create / _step / _direction / _destroy, as for curves */
+```
+
+The surfaces' fractional Sobolev descent follows Repulsive Surfaces,
+Sec. 3.2 and 3.3. It runs on the same core as the curves: the constrained
+direction, the backtracking step, the Newton projection, the two modes and
+the report.
+
+- **Metric.** A = B + B0 acts on vertex functions, with s = 2 - 2/p and
+  sigma = s - 1. It is summed over every ordered pair of distinct faces
+  with weight a_S a_T / |X_S - X_T|^(2 sigma + 2):
+  - the high-order term (Eq. 12) acts on the per-face gradients of the hat
+    functions, D u(S) = N_S x (u_i e_jk + u_j e_ki + u_k e_ij) / (2 a_S);
+  - the low-order term (Eq. 13) acts on face averages, weighted by the
+    p = 2 kernel (N_S . d)^2 / |d|^4.
+- **Constraints.** Each is held at its value when the solver is created:
+  - pinned vertices (an obstacle is a pinned component);
+  - the total area;
+  - the enclosed volume (1/6) sum x_i . (x_j x x_k), for closed meshes only
+    (every edge on exactly two faces, oppositely oriented), refused
+    otherwise;
+  - the barycenter, by default when nothing is pinned.
+
+  The area and volume rows are divided by the mean edge length l and l^2,
+  so that one tolerance (in lengths) serves every row.
+- **Collision-checked.** Conservative advancement checks every vertex
+  against every face it is not a corner of, and every two edges that share
+  no vertex. The rule is the curves': each pair stays at least
+  min(clearance, half its start distance) apart. Contact between triangle
+  meshes always begins as such a pair, so no two triangles touch beyond the
+  vertices and edges they share. The input is also checked for an edge
+  passing through a face it shares no vertex with, since motion from a
+  clear state cannot reach that without a vertex-face or edge-edge contact
+  first. Touching input is refused.
+
+### The preconditioner (Sec. 5.2)
+
+The paper solves the metric iteratively, by GMRES, preconditioned by
+(-L)^+ L^(2 - s) (-L)^+:
+- L is the cotan Laplacian, so (-L)^+ is its pseudo-inverse on mean-zero
+  functions (a bordered dense LU here);
+- L^(2 - s) is the fractional operator of order 2 (2 - s), so the
+  composition has order -2s, A's inverse order.
+
+This is built and validated here
+(`qaws_internal_repulsive_mesh_gmres`, restarted GMRES with right
+preconditioning). The dense mode solves by LU, which is exact at
+these sizes; the hierarchical mode (R4, below) uses the preconditioner,
+with the Laplacian factored sparsely.
+
+One deliberate change from the paper concerns L^(2 - s), which is
+discretized by vertex quadrature: the sum over pairs of distinct vertices
+of (u_i - u_j)(v_i - v_j) m_i m_j / r_ij^(2(2 - s) + 2), with m the lumped
+areas. The paper's form (Eq. 11) works on face averages. On a
+3-colourable mesh (every subdivided octahedron or icosahedron), a vertex
+function that differs between two colour classes averages to zero on
+every face. That form then has a kernel beyond the constants, and the
+preconditioned system is singular there. On a lumpy 258-vertex sphere it
+had two extra zero eigenvalues, and GMRES stalled at 3000 iterations. The
+vertex form's kernel is the constants only.
+
+### Checks (test 114)
+
+| Check | f64 | f32 |
+|---|---|---|
+| The metric against Mathematica (`tests/reference/114_repulsive_mesh_metric.wls`: from the paper's bilinear forms, Eqs. 12 and 13), an open patch (p 6) and an octahedron (p 5.5) | 4.8e-16 | 1e-8 |
+| The metric symmetric, constants in its kernel, positive semidefinite | exact, 3.4e-16 | |
+| GMRES to 1e-10 on a lumpy sphere (258 vertices): unpreconditioned against (-L)^+ L^(2-s) (-L)^+ | 510 against 13 iterations, solutions 9.8e-10 apart | same |
+| The preconditioned spectrum (Mathematica, on the same sphere): condition of P A, excluding the constants | 2.43 (A alone 2750, (-L)^+ A 36) | |
+| A bumpy sphere (128 faces), area and volume held | E 16.43 -> 5.41 in 25 steps, area 8.8e-14, volume 2.1e-13 | 1.6e-9, 4.2e-9 |
+| A sheet under a pinned one, area held, collision-checked: the pinned sheet unmoved | 0 | 0 |
+| The path check: a vertex through a face and an edge through an edge, both ends clear, caught | | |
+| Refusals: volume on an open mesh; an edge through a face in the collision-checked mode; free translations reported | | |
+
+Cost: the metric and the systems are dense, O(F^2) to assemble and
+(3V + k)^3 to factor. A 128-face sphere takes well under a second per
+solve.
+
+Figure 33 (`examples/better2d_showcase/33_repulsive_mesh.c`) shows a bumpy
+sphere before and after, with its area and volume held, and a membrane
+with its rim pinned, pushed away from a fixed sheet in the
+collision-checked mode.
+
+## Hierarchical evaluation (R4): Barnes-Hut
+
+```c
+qaws_repulsive_bh_stats stats;
+qaws_repulsive_curves_bh(curves, positions, theta, 1, gradient, &energy, &stats);   /* theta 0: the direct sum */
+qaws_repulsive_mesh_bh(mesh, positions, theta, 1, gradient, &energy, &stats);
+```
+
+Every ordered pair's term uses its first element's own tangent or normal.
+For a target element I, a whole tree node of far elements is therefore
+taken at once, through its total length or area W and its weighted
+centroid X.
+
+- **Tree.** A bounding volume hierarchy over the elements' boxes, split
+  at the median centre of the widest axis (quickselect, no globals) down
+  to 8 per leaf.
+- **Far.** A node is far for I when
+  max(r_I, r_node) <= theta dist(box_I, box_node), with r the boxes' half
+  diagonals and dist the gap between the boxes. A node holding an element
+  that shares a vertex with I is at distance 0, so it is never far: the
+  adjacency rules hold under approximation.
+- **Energy.** Near pairs are the direct evaluator's exact terms, in closed
+  form (value and first derivatives; no jets on this path). A far
+  node contributes w_I W k(x_I, X, T_I). The I side keeps the direct
+  term's quadrature (the trapezoid over an edge's two endpoints, a face's
+  barycentre), so the error comes from the node's size alone.
+- **Gradient.** This follows the paper's scheme (Surfaces, Sec. 4.2):
+  - each element's vertices get, from its own traversal, the derivative of
+    both orders of each pair, e(I, J) + e(J, I), taken in I's vertices;
+  - this derivative is exact for the near pairs;
+  - for a far node, the reverse term replaces each member's tangent or
+    normal by the node's averaged projector (sum w (I - T T^T), or
+    sum w N N^T, over W).
+
+  It approximates the direct gradient and converges to it as theta falls;
+  it is not the derivative of the approximated energy. (The exact
+  derivative of the approximation was tried first. It turns each far pair
+  into a monopole force on the whole node, and on a 300-edge trefoil at
+  theta 0.25 it came out 14% off the direct gradient. This scheme gives
+  6%.)
+- **Not provided:** hierarchical HVPs.
+
+| Check (test 115) | f64 | f32 |
+|---|---|---|
+| theta 0 against the direct evaluator: trefoil (300 edges), lumpy sphere (512 faces) | energy 3.5e-16 and 1.6e-14, gradient 2.7e-13 and 3.2e-15 | 1e-6 |
+| Trefoil, theta 0.5 / 0.25 / 0.1: energy off | 3.1e-3 / 5.2e-4 / 3.8e-5 | |
+| Trefoil, theta 0.5 / 0.25 / 0.1: gradient off (max norm) | 0.16 / 0.061 / 0.0016 | |
+| Lumpy sphere, theta 0.5 / 0.25 / 0.1: energy off | 0.037 / 0.0015 / 1.7e-14 | |
+| Lumpy sphere, theta 0.5 / 0.25 / 0.1: gradient off | 0.0026 / 1.3e-4 / 2.2e-15 | |
+| A sphere of 2048 faces, theta 0.25, energy and gradient | 0.81 s against 5.5 s direct, energy within 1.6e-2 (times reported, not asserted) | |
+
+The curves' gradient converges more slowly than their energy. The
+kernel's derivative falls like 1/d^7, so a monopole far field at theta
+0.25 is coarse there; theta 0.1 is within 0.2%. Figure 34 plots the errors
+against theta and the time against size: a 2000-edge trefoil takes 0.70 s at
+theta 0.25 against 12 to 21 s direct (the times vary with the machine's load).
+
+## Hierarchical solve (R4)
+
+```c
+qaws_repulsive_curves_solve_desc sd = { 0 };
+sd.hold_total_length = 1;
+sd.theta = 0.25;                           /* 0: the dense mode above */
+qaws_repulsive_curves_solve(curves, &sd, positions, &report);
+/* meshes alike: qaws_repulsive_mesh_solve_desc.theta */
+```
+
+With `theta > 0` the solvers store nothing of size |V|^2:
+
+- **Energy and gradient.** These are the Barnes-Hut ones above.
+- **The metric.** A u is applied from Barnes-Hut interaction lists, built
+  once per step. A near pair carries its exact weights, the same ones as
+  the dense assembly. A far node carries one weight per unit length or
+  area, together with its sums of w g and w u. The low-order term's
+  reverse kernel uses the node's averaged projector, as the gradient does.
+  At theta 0 the product is the dense metric's.
+- **The direction.** [A~ C^T; C 0] [g; l] = [dE; 0] is solved with:
+  - pinned vertices eliminated: their rows and columns are dropped, and g
+    is 0 there;
+  - the remaining rows (barycenter, lengths, held directions, area,
+    volume; at most 32) solved by their Schur complement;
+  - z = A~^-1 dE and Y = A~^-1 C^T by flexible GMRES (restart 40,
+    relative tolerance 1e-8), one scalar solve per coordinate that a
+    right-hand side has;
+  - (C Y) l = C z, then g = z - Y l.
+
+  With nothing pinned, A's kernel (the constants) is lifted by
+  A + tau 1 1^T / |V|. The barycenter rows keep g's mean at 0, so the
+  solution is the same.
+- **The preconditioner** is the paper's (-L)^-1 L^(2 - s) (-L)^-1. The
+  Laplacian uses 1/l weights for curves and cotan weights for meshes. It
+  is shifted by a small multiple of the lumped mass, so that every
+  component is invertible, and solved by a profile Cholesky in a reverse
+  Cuthill-McKee order, factored once per step. L^(2 - s) is the
+  fractional operator by vertex quadrature, applied hierarchically too.
+  The constants on the free vertices are passed through by 1/tau.
+- **The projection** after a step is Newton's in the same metric. It
+  reuses Y: dx = -Y m with (C(y) Y) m = Phi(y).
+- **The collision-checked mode** is unchanged and still checks all pairs.
+  Shortcut: it is O(|E|^2) per accepted step; it needs a broad phase
+  (the tree above) to scale.
+- **Refused here:** per-edge lengths (one row per edge is too many for the
+  Schur complement).
+
+| Check (test 116) | f64 | f32 |
+|---|---|---|
+| The metric from the lists at theta 0 against the dense metric: two circles in 2D, a trefoil (200 edges each), a lumpy sphere (512 faces) | 3.9e-15, 4.3e-15, 2.1e-15 | same |
+| The same at theta 0.5 / 0.25 / 0.1 | curves 0.0048 to 0.0069 / 4.4e-4 to 1.2e-3 / 2.4e-5; the sphere 1.1e-4 / 6.9e-6 / 2e-15 | |
+| The iterative direction with every pair near, against the dense direction. Curves: barycenter; two pins and the length; 2D with a held direction. Meshes: area and volume; pins and area | 5.6e-10 to 4.4e-8 | 9e-9 to 4.6e-8 |
+| The same at theta 0.25: 1 - cos against the dense direction | 2.3e-6 at most | same |
+| A 600-edge trefoil, length held, theta 0.25 | E 40.9 -> 34.4, converged in 12 steps, length within 3.2e-13 | 9.5e-13 |
+| A 2048-face sphere, area and volume held, theta 0.25 | E 3.70 -> 3.17 in 8 steps, held within 3.9e-12 | 2.9e-6 |
+
+Time per step (f64, one core, the profile above; the times vary with the
+machine's load):
+
+| Size | Dense | Hierarchical (theta 0.25) |
+|---|---|---|
+| Curves, 250 / 500 / 1000 edges | 0.37 / 2.25 / 15.8 s | 0.14 / 0.47 / 0.79 s |
+| Curves, 2000 / 4000 edges | | 1.96 / 5.4 s |
+| Meshes, 512 / 2048 faces | 0.91 / 32.7 s | 0.56 / 4.3 s |
+| Meshes, 8192 faces | | 24.7 s |
+
+On meshes the step is dominated by the metric products. At 2048 faces,
+theta 0.25 keeps most pairs near. On curves, GMRES takes about 45
+iterations per solve; on meshes, about 11.
+
+Figure 35 shows a 600-edge (2, 5) torus knot relaxed in this mode, and the
+time per step against size.

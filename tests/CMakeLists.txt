@@ -115,6 +115,9 @@ add_executable(
   111_shell_mesh.c
   112_repulsive.c
   113_repulsive_solve.c
+  114_repulsive_mesh_solve.c
+  115_repulsive_bh.c
+  116_repulsive_hsolve.c
 )
 
 # The amalgamated library exports exactly the same symbols, so the tests can

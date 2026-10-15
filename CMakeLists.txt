@@ -86,6 +86,9 @@ src/qaws/qaws_surface_enclose.c
 src/qaws/qaws_repulsive.c
 src/qaws/qaws_repulsive_solve.c
 src/qaws/qaws_repulsive_adapt.c
+src/qaws/qaws_repulsive_mesh_solve.c
+src/qaws/qaws_repulsive_bh.c
+src/qaws/qaws_repulsive_hsolve.c
 src/qaws/qaws_surface_query.c
 src/qaws/qaws_shell_region.c
 src/qaws/qaws_skeleton.c
