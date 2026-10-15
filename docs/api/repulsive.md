@@ -127,18 +127,30 @@ The method is the paper's (Sec. 4.2 and 5.2 to 5.4), direct and dense.
   - Both are assembled over the same pairs as the energy: edges with no
     common vertex.
 - **Direction.** The solver solves [A~ C^T; C 0] [g; l] = [dE; 0], where A~
-  is the metric on each coordinate and C is the constraints' Jacobian. The
-  saddle-point system is solved as such, by dense LU with partial pivoting
-  (not CG). The result g is the descent direction in the metric, and
+  is the metric on each coordinate and C is the constraints' Jacobian. It
+  is solved by blocks (not CG), which A~ = A on each coordinate allows:
+  pinned vertices are eliminated, A's free block is inverted (|V|^3), then
+  Y = A~^-1 C^T and the Schur complement (C Y) l = C A~^-1 dE are solved
+  by LU (k^3). That is |V|^3 + k^3 rather than (dim |V| + k)^3, which
+  matters when every edge's length is held (k ~ |V|): the paper's
+  600-vertex scenes take about 1 s a step, not 10. With nothing pinned, A
+  (whose kernel is the constants) is lifted by tau 1 1^T / |V| first; the
+  barycenter rows keep g's mean 0, so the solution is unchanged. The
+  result g is the descent direction in the metric, and
   `_direction` returns it. It is not the coordinate gradient
   (`qaws_repulsive_curves_gradient`); neither stands in for the other.
 - **Step.** Backtracking on the largest vertex move h:
   - h starts at twice the last accepted move (a quarter of the mean edge
     length at first);
   - the trial point is y = x - (h / |g|_inf) g;
-  - y is projected back onto the constraints by Newton steps in the same
-    metric, [A~ C(y)^T; C(y) 0] [dx; m] = [0; -phi(y)];
-  - the step is accepted when Armijo holds on the projected y and, in
+  - y is projected back onto the constraints in the same metric, along
+    Y: dx = -Y m. First chord steps with the direction's factors (a solve
+    each), then Newton steps (C(y) Y) m = phi(y) if those stop
+    contracting. It aims at 1e-3 of the tolerance: a residual near the
+    tolerance moves the energy more than the last steps lower it;
+  - the step is accepted when Armijo holds (sufficient decrease 0.1 of the
+    linear prediction: with less, a step nearly twice the best one passes,
+    and the iterates zigzag across a narrow valley without converging) on the projected y and, in
     collision-checked mode, the motion x -> y passes the check.
 - **Constraints.** Each is held at its value when the solver is created:
   - pinned vertices (an obstacle is a pinned component);
@@ -284,8 +296,8 @@ The paper solves the metric iteratively, by GMRES, preconditioned by
 
 This is built and validated here
 (`qaws_internal_repulsive_mesh_gmres`, restarted GMRES with right
-preconditioning). The dense mode solves by LU, which is exact at
-these sizes; the hierarchical mode (R4, below) uses the preconditioner,
+preconditioning). The dense mode solves directly (A inverted), which is
+exact at these sizes; the hierarchical mode (R4, below) uses the preconditioner,
 with the Laplacian factored sparsely.
 
 One deliberate change from the paper concerns L^(2 - s), which is
@@ -687,6 +699,11 @@ threads, then the collision checks' broad phase.
 - **Closed forms.** The Barnes-Hut far terms are closed forms, value and
   gradient, like the near pairs. No jets remain on the hierarchical path.
   Their accuracy is unchanged to the digit (test 115).
+- **The dense mode** takes its energy from Barnes-Hut with theta 0, which
+  opens every node, so it computes the direct terms in closed form. The
+  jets' evaluator, kept for the Hessian products, is 6 times slower. The
+  dense mode's constrained system is solved by blocks (see Direction
+  above).
 - **Powers.** Every pair term takes powers. When twice the exponent is a
   whole number (alpha / 2, beta / 2 and p usually are), the power is
   computed by products and one square root.
@@ -722,6 +739,7 @@ threads, then the collision checks' broad phase.
 | Hierarchical step, 2000 edges | 1.7 s | 1.5 s | 0.36 s |
 | Hierarchical step, 8000 edges | failed (GMRES) | 10.6 s | 1.9 s |
 | Collision check of one step, 8000 / 32000 edges | 2.6 s / 61 s (the grid; all pairs before it) | 4.4 ms / 18 ms | |
+| Dense step, Freedman unknot (592 vertices, every edge's length held: k = 595) | 10 to 15 s | about 1 s | |
 
 Not done here:
 

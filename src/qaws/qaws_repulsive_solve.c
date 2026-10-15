@@ -8,8 +8,9 @@
  * step, the Newton projection back onto the constraints, the termination
  * reasons, and conservative advancement for the collision checks. Then the
  * curves' metric, constraints and checks. The dense mode: the metric is
- * |V| x |V|, the systems (dim |V| + k)^2, solved by LU with partial
- * pivoting; the hierarchical mode (theta > 0) is qaws_repulsive_hsolve.c.
+ * |V| x |V|, the systems solved by blocks (pins eliminated, A inverted,
+ * the Schur complement by LU; rs_dense); the hierarchical mode (theta > 0)
+ * is qaws_repulsive_hsolve.c.
  * Everything in double; a solver keeps its own double copy of the
  * positions.
  */
@@ -27,7 +28,7 @@
 #else
 #define RS_CTOL 1e-8
 #endif
-#define RS_ARMIJO 1e-4
+#define RS_ARMIJO 0.1
 #define RS_TRIALS 40
 
 typedef qaws_internal_rs_core rs_core;
@@ -116,54 +117,200 @@ static double rs_vmove(rs_core const* s, double const* x, double const* d, unsig
 	return s->ops->move ? s->ops->move(s, x, d, v) : rs_norm(d + s->dim * v, s->dim);
 }
 
-/* the saddle-point matrix [A~ C^T; C 0] (A~ = A on each coordinate),
-   factored; 0 when singular */
-static int rs_kkt(rs_core const* s, double const* A, double const* C, double* M, unsigned int* piv)
+/* The dense mode's systems [A~ C^T; C 0]. With a full metric (parameters),
+   the saddle-point matrix by LU. Otherwise by blocks, A~ = A on each
+   coordinate ((|V|^3 + k^3) rather than (dim |V| + k)^3; the paper's scenes
+   hold every edge's length, k ~ |V|):
+     - pinned vertices are eliminated (g 0 there); C's rows with no other
+       entry (the pins) are dropped;
+     - A's free block is inverted; with nothing pinned it is lifted by
+       tau 1 1^T / |V| first, the barycenter rows keeping g's mean 0;
+     - Y = A~^-1 C^T, then the Schur complement (C Y) lambda = C z,
+       z = A~^-1 dE, g = z - Y lambda.
+   The projection reuses Y: dx = -Y m, (C(y) Y) m = phi(y). */
+typedef struct rs_dense
 {
-	unsigned int dim = s->dim, N = s->N, n = N + s->k, i, j, q, r;
-	memset(M, 0, sizeof(double) * n * n);
-	if (s->full)
-		for (i = 0; i < N; i++)
-			for (j = 0; j < N; j++) M[i * n + j] = A[(size_t)i * N + j];
-	else
-		for (i = 0; i < s->nv; i++)
-			for (j = 0; j < s->nv; j++)
-				for (q = 0; q < dim; q++)
-					M[(dim * i + q) * n + dim * j + q] = A[i * s->nv + j];
-	for (r = 0; r < s->k; r++)
-		for (i = 0; i < N; i++)
-		{
-			M[(N + r) * n + i] = C[r * N + i];
-			M[i * n + N + r] = C[r * N + i];
-		}
-	return qaws_internal_rs_lu(M, n, piv);
+	double *A, *C, *phi, *rhs;          /* the metric, k x N, k, N + k */
+	double* M;                          /* full: (N + k)^2; blocks: A's free block's LU (nf^2) */
+	unsigned int* piv;
+	double *Ai, *Y, *S;                 /* blocks: A's free block's inverse, column j at Ai + j nf; k x N; k x k */
+	unsigned int *fi, *spiv, *nz, nf;   /* the free index of each vertex (~0u: pinned); k; N */
+	unsigned char* live;                /* the rows with a free entry */
+} rs_dense;
+
+static void rs_dense_free(rs_dense* D)
+{
+	free(D->A); free(D->C); free(D->phi); free(D->rhs); free(D->M); free(D->piv);
+	free(D->Ai); free(D->Y); free(D->S); free(D->fi); free(D->spiv); free(D->nz); free(D->live);
 }
 
-/* the direction at x: g (N + k: the multipliers after g), with A, dE (N)
-   and E; the KKT factors left in M */
-static qaws_status rs_direction(rs_core const* s, double const* x, double* A, double* C, double* phi, double* M,
-	unsigned int* piv, double* dE, double* E, double* g)
+static int rs_dense_create(rs_core const* s, rs_dense* D)
 {
-	unsigned int i, n = s->N + s->k;
+	size_t N = s->N, k = s->k, n = N + k, nv = s->nv, m = s->full ? n : nv;
+	memset(D, 0, sizeof(*D));
+	D->A = (double*)malloc(sizeof(double) * (rs_asize(s) + 1));
+	D->C = (double*)malloc(sizeof(double) * (k * N + 1));
+	D->phi = (double*)malloc(sizeof(double) * (k + 1));
+	D->rhs = (double*)malloc(sizeof(double) * (n + 1));
+	D->M = (double*)malloc(sizeof(double) * (m * m + 1));
+	D->piv = (unsigned int*)malloc(sizeof(unsigned int) * (m + 1));
+	if (!s->full)
+	{
+		D->Ai = (double*)malloc(sizeof(double) * (nv * nv + 1));
+		D->Y = (double*)malloc(sizeof(double) * (k * N + 1));
+		D->S = (double*)malloc(sizeof(double) * (k * k + 1));
+		D->fi = (unsigned int*)malloc(sizeof(unsigned int) * (nv + 1));
+		D->spiv = (unsigned int*)malloc(sizeof(unsigned int) * (k + 1));
+		D->nz = (unsigned int*)malloc(sizeof(unsigned int) * (N + 1));
+		D->live = (unsigned char*)malloc(k + 1);
+	}
+	if (D->A && D->C && D->phi && D->rhs && D->M && D->piv &&
+		(s->full || (D->Ai && D->Y && D->S && D->fi && D->spiv && D->nz && D->live)))
+		return 1;
+	rs_dense_free(D);
+	return 0;
+}
+
+/* full: the saddle-point matrix [A~ C^T; C 0] at D->C, factored; blocks:
+   the Schur complement C Y at D->C, factored; 0 when singular */
+static int rs_dense_factor(rs_core const* s, rs_dense* D)
+{
+	unsigned int N = s->N, k = s->k, n = N + k, i, j, r, c, nn;
+	if (s->full)
+	{
+		memset(D->M, 0, sizeof(double) * n * n);
+		for (i = 0; i < N; i++)
+			for (j = 0; j < N; j++) D->M[i * n + j] = D->A[(size_t)i * N + j];
+		for (r = 0; r < k; r++)
+			for (i = 0; i < N; i++)
+			{
+				D->M[(N + r) * n + i] = D->C[(size_t)r * N + i];
+				D->M[i * n + N + r] = D->C[(size_t)r * N + i];
+			}
+		return qaws_internal_rs_lu(D->M, n, D->piv);
+	}
+	for (r = 0; r < k; r++)
+	{
+		double const* cr = D->C + (size_t)r * N;
+		for (i = 0, nn = 0; i < N; i++)
+			if (cr[i] != 0 && D->fi[i / s->dim] != ~0u) D->nz[nn++] = i;
+		for (c = 0; c < k; c++)
+		{
+			double const* y = D->Y + (size_t)c * N;
+			double v = 0;
+			if (!D->live[r] || !D->live[c])
+				v = r == c;   /* (a dropped row: its multiplier 0) */
+			else
+				for (j = 0; j < nn; j++) v += cr[D->nz[j]] * y[D->nz[j]];
+			D->S[(size_t)r * k + c] = v;
+		}
+	}
+	return qaws_internal_rs_lu(D->S, k, D->spiv);
+}
+
+/* blocks: A's free block inverted (lifted with nothing pinned), Y from D->C */
+static int rs_dense_blocks(rs_core const* s, double const* x, rs_dense* D)
+{
+	unsigned int nv = s->nv, dim = s->dim, N = s->N, nf = 0, i, j, q, r;
+	double* col = D->rhs;
+	if (s->translates)
+		return 0;   /* (singular) */
+	for (i = 0; i < nv; i++) D->fi[i] = s->fixed && s->fixed[i] ? ~0u : nf++;
+	D->nf = nf;
+	for (i = 0; i < nv; i++)
+		for (j = 0; j < nv; j++)
+			if (D->fi[i] != ~0u && D->fi[j] != ~0u) D->M[(size_t)D->fi[i] * nf + D->fi[j]] = D->A[(size_t)i * nv + j];
+	if (nf == nv)
+	{
+		/* tau: A's scale on a coordinate function, mean removed */
+		double m = 0, num = 0, den = 0, tau;
+		for (i = 0; i < nv; i++) m += x[dim * i] / nv;
+		for (i = 0; i < nv; i++)
+		{
+			double a = 0;
+			for (j = 0; j < nv; j++) a += D->A[(size_t)i * nv + j] * (x[dim * j] - m);
+			num += (x[dim * i] - m) * a; den += (x[dim * i] - m) * (x[dim * i] - m);
+		}
+		tau = num > 0 && den > 0 ? num / den : 1;
+		for (i = 0; i < nv * nv; i++) D->M[i] += tau / nv;
+	}
+	if (!qaws_internal_rs_lu(D->M, nf, D->piv))
+		return 0;
+	for (j = 0; j < nf; j++)
+	{
+		memset(col, 0, sizeof(double) * nf);
+		col[j] = 1;
+		qaws_internal_rs_lu_solve(D->M, nf, D->piv, col);
+		memcpy(D->Ai + (size_t)j * nf, col, sizeof(double) * nf);
+	}
+	/* Y's rows: A~^-1 C_r^T from C_r's free entries */
+	for (r = 0; r < s->k; r++)
+	{
+		double const* cr = D->C + (size_t)r * N;
+		double* y = D->Y + (size_t)r * N;
+		memset(y, 0, sizeof(double) * N);
+		D->live[r] = 0;
+		for (j = 0; j < nv; j++)
+			for (q = 0; q < dim && D->fi[j] != ~0u; q++)
+				if (cr[dim * j + q] != 0)
+				{
+					double const* a = D->Ai + (size_t)D->fi[j] * nf;
+					D->live[r] = 1;
+					for (i = 0; i < nv; i++)
+						if (D->fi[i] != ~0u) y[dim * i + q] += a[D->fi[i]] * cr[dim * j + q];
+				}
+	}
+	return 1;
+}
+
+/* the direction at x: g (N + k), with dE (N) and E; D's factors kept for
+   the projection */
+static qaws_status rs_direction(rs_core const* s, double const* x, rs_dense* D, double* dE, double* E, double* g)
+{
+	unsigned int i, j, q, r, n = s->N + s->k, dim = s->dim, N = s->N;
 	qaws_status st;
 	memset(dE, 0, sizeof(double) * s->N);
 	if ((st = s->ops->energy(s, x, E, dE)) != QAWS_STATUS_OK)
 		return st;
-	if ((st = s->ops->metric(s, x, A)) != QAWS_STATUS_OK)
+	if ((st = s->ops->metric(s, x, D->A)) != QAWS_STATUS_OK)
 		return st;
-	s->ops->constraints(s, x, phi, C);
-	if (!rs_kkt(s, A, C, M, piv))
+	s->ops->constraints(s, x, D->phi, D->C);
+	if (s->full)
+	{
+		if (!rs_dense_factor(s, D))
+			return QAWS_STATUS_NUMERICAL_FAILURE;
+		for (i = 0; i < n; i++) g[i] = i < s->N ? dE[i] : 0;
+		qaws_internal_rs_lu_solve(D->M, n, D->piv, g);
+		return QAWS_STATUS_OK;
+	}
+	if (!rs_dense_blocks(s, x, D) || !rs_dense_factor(s, D))
 		return QAWS_STATUS_NUMERICAL_FAILURE;
-	for (i = 0; i < n; i++) g[i] = i < s->N ? dE[i] : 0;
-	qaws_internal_rs_lu_solve(M, n, piv, g);
+	/* z = A~^-1 dE, then the multipliers and g = z - Y lambda */
+	memset(g, 0, sizeof(double) * n);
+	for (j = 0; j < s->nv; j++)
+		for (q = 0; q < dim && D->fi[j] != ~0u; q++)
+		{
+			double const* a = D->Ai + (size_t)D->fi[j] * D->nf;
+			for (i = 0; i < s->nv; i++)
+				if (D->fi[i] != ~0u) g[dim * i + q] += a[D->fi[i]] * dE[dim * j + q];
+		}
+	for (r = 0; r < s->k; r++)
+	{
+		double v = 0;
+		for (i = 0; i < N && D->live[r]; i++) v += D->C[(size_t)r * N + i] * g[i];
+		D->rhs[r] = v;
+	}
+	qaws_internal_rs_lu_solve(D->S, s->k, D->spiv, D->rhs);
+	for (r = 0; r < s->k; r++)
+		for (i = 0; i < N && D->rhs[r] != 0; i++) g[i] -= D->rhs[r] * D->Y[(size_t)r * N + i];
 	return QAWS_STATUS_OK;
 }
 
 qaws_status qaws_internal_rs_direction(rs_core const* s, qaws_scalar const* positions, qaws_scalar* out_direction)
 {
 	unsigned int n, i;
-	double *buf, *x, *A, *C, *phi, *M, *dE, *g, E;
-	unsigned int* piv;
+	double *buf, *x, *dE, *g, E;
+	rs_dense D;
 	qaws_status st;
 	if (!s || !positions || !out_direction)
 		return QAWS_STATUS_INVALID_ARGUMENT;
@@ -184,74 +331,106 @@ qaws_status qaws_internal_rs_direction(rs_core const* s, qaws_scalar const* posi
 		return st;
 	}
 	n = s->N + s->k;
-	buf = (double*)malloc(sizeof(double) * ((size_t)s->N * 3 + rs_asize(s) + (size_t)s->k * s->N + s->k + (size_t)n * n + n + 1));
-	piv = (unsigned int*)malloc(sizeof(unsigned int) * (n + 1));
-	if (!buf || !piv)
+	buf = (double*)malloc(sizeof(double) * ((size_t)s->N * 2 + n + 1));
+	if (!buf || !rs_dense_create(s, &D))
 	{
-		free(buf); free(piv);
+		free(buf);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
-	x = buf; dE = x + s->N; A = dE + s->N; C = A + rs_asize(s); phi = C + (size_t)s->k * s->N; M = phi + s->k; g = M + (size_t)n * n;
+	x = buf; dE = x + s->N; g = dE + s->N;
 	for (i = 0; i < s->N; i++) x[i] = (double)positions[i];
-	st = rs_direction(s, x, A, C, phi, M, piv, dE, &E, g);
+	st = rs_direction(s, x, &D, dE, &E, g);
 	for (i = 0; st == QAWS_STATUS_OK && i < s->N; i++) out_direction[i] = (qaws_scalar)g[i];
-	free(buf); free(piv);
+	free(buf); rs_dense_free(&D);
 	return st;
 }
 
-/* y back onto the constraints: Newton steps [A~ C(y)^T; C(y) 0] [dx; m] =
-   [0; -phi(y)], the metric A fixed; 1 when |phi| <= ctol */
-static int rs_project(rs_core const* s, double const* A, double* y, double* C, double* phi, double* M, unsigned int* piv, double* rhs)
+/* y += the correction for phi = D->phi with D's factors: full,
+   [A~ C^T; C 0] [dx; m] = [0; -phi]; blocks, dx = -Y m, (C Y) m = phi */
+static void rs_correct(rs_core const* s, rs_dense* D, double* y)
 {
-	unsigned int it, i, n = s->N + s->k;
+	unsigned int i, r, N = s->N, n = N + s->k;
+	if (s->full)
+	{
+		for (i = 0; i < n; i++) D->rhs[i] = i < N ? 0 : -D->phi[i - N];
+		qaws_internal_rs_lu_solve(D->M, n, D->piv, D->rhs);
+		for (i = 0; i < N; i++) y[i] += D->rhs[i];
+		return;
+	}
+	for (r = 0; r < s->k; r++) D->rhs[r] = D->live[r] ? D->phi[r] : 0;
+	qaws_internal_rs_lu_solve(D->S, s->k, D->spiv, D->rhs);
+	for (r = 0; r < s->k; r++)
+		for (i = 0; i < N && D->rhs[r] != 0; i++) y[i] -= D->rhs[r] * D->Y[(size_t)r * N + i];
+}
+
+/* y back onto the constraints, the metric A fixed; 1 when |phi| <= ctol.
+   First chord steps with the factors on entry (the direction's, or the
+   last projection's): a solve each, no factoring; a projection's
+   correction is small, so they converge. If they do not, Newton steps at
+   C(y), factored each time. */
+static int rs_project(rs_core const* s, rs_dense* D, double* y)
+{
+	unsigned int it;
+	double prev = HUGE_VAL, tight = 1e-3 * s->ctol;   /* (aimed well inside: a residual near ctol moves the energy more than the last steps lower it) */
 	if (s->k == 0)
 		return 1;
-	for (it = 0; it < 12; it++)
+	for (it = 0; it < 30; it++)
 	{
-		s->ops->constraints(s, y, phi, C);
-		if (rs_phi_max(s, phi) <= s->ctol)
+		double m;
+		s->ops->constraints(s, y, D->phi, NULL);
+		m = rs_phi_max(s, D->phi);
+		if (m <= tight)
 			return 1;
-		if (!rs_kkt(s, A, C, M, piv))
-			return 0;
-		for (i = 0; i < n; i++) rhs[i] = i < s->N ? 0 : -phi[i - s->N];
-		qaws_internal_rs_lu_solve(M, n, piv, rhs);
-		for (i = 0; i < s->N; i++) y[i] += rhs[i];
+		if (!(m < 0.5 * prev))
+			break;   /* (not contracting: Newton) */
+		prev = m;
+		rs_correct(s, D, y);
 	}
-	s->ops->constraints(s, y, phi, NULL);
-	return rs_phi_max(s, phi) <= s->ctol;
+	for (it = 0, prev = HUGE_VAL; it < 12; it++)
+	{
+		double m;
+		s->ops->constraints(s, y, D->phi, D->C);
+		m = rs_phi_max(s, D->phi);
+		if (m <= tight)
+			return 1;
+		if (!(m < prev))
+			return m <= s->ctol;   /* (stalled at the rounding floor, or diverging: the trial step too long) */
+		if (!rs_dense_factor(s, D))
+			return 0;
+		prev = m;
+		rs_correct(s, D, y);
+	}
+	s->ops->constraints(s, y, D->phi, NULL);
+	return rs_phi_max(s, D->phi) <= s->ctol;
 }
 
 qaws_status qaws_internal_rs_step(rs_core* s, qaws_scalar* positions, qaws_repulsive_report* out_report)
 {
 	unsigned int n, i, v, trial, same = 1;
-	double *buf, *A, *C, *phi, *M, *dE, *g, *y, *rhs, E, Ey = 0, gdot = 0, gmax = 0, h;
-	unsigned int* piv;
+	double *buf, *phi, *dE, *g, *y, E, Ey = 0, gdot = 0, gmax = 0, h;
 	qaws_status st;
 	int last = 0;   /* the last rejection: 1 energy, 2 collision, 3 projection */
+	int dense;
+	rs_dense D;
 	qaws_internal_rs_hsys* H = NULL;
-	size_t dense;
 	if (!s || !positions)
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	n = s->N + s->k;
-	dense = s->theta > 0 ? 0 : rs_asize(s) + (size_t)s->k * s->N + (size_t)n * n + n;
+	dense = !(s->theta > 0);
 	/* the caller's positions, unless they are this solver's own rounded */
 	for (i = 0; i < s->N; i++) same &= positions[i] == (qaws_scalar)s->x[i];
 	if (!same)
 		for (i = 0; i < s->N; i++) s->x[i] = (double)positions[i];
-	buf = (double*)malloc(sizeof(double) * ((size_t)s->N * 2 + s->k + n + dense + 1));
-	piv = (unsigned int*)malloc(sizeof(unsigned int) * (n + 1));
-	if (!buf || !piv)
+	memset(&D, 0, sizeof(D));
+	buf = (double*)malloc(sizeof(double) * ((size_t)s->N * 2 + s->k + n + 1));
+	if (!buf || (dense && !rs_dense_create(s, &D)))
 	{
-		free(buf); free(piv);
+		free(buf);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 	dE = buf; y = dE + s->N; phi = y + s->N; g = phi + s->k;
-	A = C = M = rhs = NULL;
 	if (dense)
-	{
-		A = g + n; C = A + rs_asize(s); M = C + (size_t)s->k * s->N; rhs = M + (size_t)n * n;
-		st = rs_direction(s, s->x, A, C, phi, M, piv, dE, &E, g);
-	}
+		st = rs_direction(s, s->x, &D, dE, &E, g);
 	else
 	{
 		memset(dE, 0, sizeof(double) * s->N);
@@ -281,7 +460,7 @@ qaws_status qaws_internal_rs_step(rs_core* s, qaws_scalar* positions, qaws_repul
 	{
 		double tau = h / gmax;
 		for (i = 0; i < s->N; i++) y[i] = s->x[i] - tau * g[i];
-		if (dense ? !rs_project(s, A, y, C, phi, M, piv, rhs) : !qaws_internal_rs_hproject(H, y))
+		if (dense ? !rs_project(s, &D, y) : !qaws_internal_rs_hproject(H, y))
 		{
 			s->rep.rejected_projection++;
 			last = 3;
@@ -326,7 +505,7 @@ qaws_status qaws_internal_rs_step(rs_core* s, qaws_scalar* positions, qaws_repul
 	for (i = 0; i < s->N; i++) positions[i] = (qaws_scalar)s->x[i];
 done:
 	qaws_internal_rs_hsys_free(H);
-	free(buf); free(piv);
+	free(buf); rs_dense_free(&D);
 	if (out_report) *out_report = s->rep;
 	return QAWS_STATUS_OK;
 }
@@ -464,7 +643,7 @@ static qaws_status rs_metric(qaws_repulsive_curves const* c, double const* x, do
 static qaws_status rs_c_energy(rs_core const* core, double const* x, double* E, double* grad)
 {
 	qaws_repulsive_curves const* c = ((qaws_repulsive_curves_solver const*)core)->c;
-	return core->theta > 0 ? qaws_internal_repulsive_curves_bh(c, x, core->theta, E, grad) : qaws_internal_repulsive_curves_energy(c, x, E, grad);
+	return qaws_internal_repulsive_curves_bh(c, x, core->theta, E, grad);   /* (theta 0 opens every node: the direct terms, in closed form) */
 }
 
 static qaws_status rs_c_metric(rs_core const* core, double const* x, double* A)

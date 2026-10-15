@@ -154,7 +154,7 @@ static qaws_status rm_metric(qaws_repulsive_mesh const* m, double const* x, doub
 static qaws_status rm_energy(rs_core const* core, double const* x, double* E, double* grad)
 {
 	qaws_repulsive_mesh const* m = ((qaws_repulsive_mesh_solver const*)core)->m;
-	return core->theta > 0 ? qaws_internal_repulsive_mesh_bh(m, x, core->theta, E, grad) : qaws_internal_repulsive_mesh_energy(m, x, E, grad);
+	return qaws_internal_repulsive_mesh_bh(m, x, core->theta, E, grad);   /* (theta 0 opens every node: the direct terms, in closed form) */
 }
 
 static qaws_status rm_metric_op(rs_core const* core, double const* x, double* A)

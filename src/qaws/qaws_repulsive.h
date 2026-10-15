@@ -79,10 +79,10 @@ qaws_status qaws_repulsive_curves_hvp(qaws_repulsive_curves const* curves, qaws_
  * the metric A = B + B0 (the high-order term on edge differences and the
  * low-order term, exponent 2 sigma + 1, sigma = (beta - 1) / alpha - 1),
  * assembled densely; the descent direction g from the constrained system
- * [A C^T; C 0] [g; l] = [dE; 0] (dense LU with partial pivoting, the
- * saddle-point system solved as such); a step along -g, its size
- * backtracked (Armijo); the result projected back onto the constraints by
- * Newton steps in the same metric, [A C^T; C 0] [x; m] = [0; -Phi].
+ * [A C^T; C 0] [g; l] = [dE; 0] (by blocks: pins eliminated, A inverted,
+ * the Schur complement by LU); a step along -g, its size backtracked
+ * (Armijo); the result projected back onto the constraints in the same
+ * metric (chord, then Newton steps).
  *
  * Constraints are held at their values at the solver's creation: pinned
  * vertices (an obstacle is a pinned component), edges whose direction is
