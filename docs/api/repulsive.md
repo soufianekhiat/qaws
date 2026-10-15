@@ -7,13 +7,14 @@ Crane, *Repulsive Curves* (2021), and Yu, Brakensiek, Schumacher and Crane,
 papers with their reference code, and the contracts are in
 [`docs/repulsive_plan.md`](../repulsive_plan.md).
 
-Milestones R1 to R5: the energies and their derivatives, evaluated
+Milestones R1 to R6: the energies and their derivatives, evaluated
 directly over all pairs or by Barnes-Hut; the constrained fractional
 Sobolev solvers for curves (with adapters to qaws curves) and for triangle
 meshes, each with a collision-checked mode, dense or hierarchical (no
 |V|^2 storage); the surfaces' Poisson-based preconditioner; curves on
-parametric surfaces, native control-point optimization, and the
-derivatives of converged solutions.
+parametric surfaces, native control-point optimization, the derivatives
+of converged solutions; and GPU kernels for the energy, its gradient and
+the metric product.
 
 ```c
 qaws_repulsive_curves_desc d = { 3, vertex_count, edges, edge_count, 0, 0 };   /* (alpha, beta) = (3, 6) */
@@ -592,3 +593,86 @@ Figure 36 (`examples/better2d_showcase/36_repulsive_surface.c`) shows five
 crowded loops on a torus spreading over it with every edge's length held,
 and two B-splines, their ends pinned, relaxed through their control
 points.
+
+## On the GPU (R6)
+
+`core/qaws_repulsive_core.h` holds the pair terms as backend-neutral
+kernels (C, HLSL, GLSL):
+
+- the curve and mesh pair energies, with their gradients in either
+  element's vertices, in closed form;
+- the metric's pair weights (kB, kB0), and the per-element derivative
+  coefficients.
+
+The loops over pairs belong to the caller. `examples/repulsive.hlsl`
+drives them in two passes:
+
+- **CSElement**, one thread per element I, looping over every element J:
+  - I's energy share;
+  - its gradient block sum_J d/dI [e(I, J) + e(J, I)];
+  - its row of the metric product.
+- **CSGather**, one thread per vertex: the gradient and A u from the
+  elements holding the vertex, through a CSR adjacency.
+
+No atomics, so results do not depend on scheduling. Storage is
+O(elements), never N^2. The energy is the shares' sum, taken on the host
+in double.
+
+Two numerical choices matter in single precision:
+
+- **The cross product itself.** |T x d|^2 is computed from it, not as
+  |T|^2 |d|^2 - (T . d)^2, which loses every digit for neighbours nearly
+  in line.
+- **Powers by products.** Powers whose doubled exponent is a whole number
+  (alpha / 2, beta / 2, p) are computed by products and a square root, not
+  by the GPU's pow (exp2 of log2, about 5e-6 off).
+
+**What runs on the GPU:** the direct energy, its gradient, and the
+metric's product.
+
+**What does not:** HVPs, the Barnes-Hut traversal, the constraint rows,
+and the solves themselves. The host orchestrates (line search, GMRES,
+projection) with these products. This is not a full GPU solver.
+
+`examples/repulsive_gpu_parity.c` (Direct3D 11, Windows only, outside the
+library) runs the kernels on the GPU and compares them with the CPU
+library in double, given the same (float-rounded) positions:
+
+| Case (RTX 3060 Laptop) | Energy | Gradient | Metric product | GPU, one pass (all pairs, with the metric product) | CPU direct | CPU Barnes-Hut (theta 0.25) |
+|---|---|---|---|---|---|---|
+| Trefoil, 300 edges | 1.7e-9 | 1.4e-5 | 7.7e-7 | 1 to 4 ms | 0.24 s | 0.03 s |
+| Trefoil, 2000 edges | 3.1e-8 | 3.8e-4 | 1.8e-6 | 6 to 25 ms | 11.9 s | 0.38 s |
+| Trefoil, 8000 edges | 2.6e-9 | 1.1e-4 | | 0.10 s | 187 s | 1.7 s |
+| Lumpy sphere, 512 faces | 7.6e-8 | 2.3e-6 | 9.3e-7 | 3 to 13 ms | 0.34 s | 0.07 s |
+| Lumpy sphere, 2048 faces | 3.4e-8 | 9.4e-6 | 1.1e-6 | 10 to 50 ms | 5.7 s | 0.83 s |
+| Lumpy sphere, 8192 faces | 2.5e-7 | 3e-5 | | 40 to 70 ms | 87 s | 5.0 s |
+
+GPU times vary from run to run with the machine's load; ranges are shown.
+
+**Single-precision positions.** For fine curves, positions in single
+precision limit the gradient more than the arithmetic does. Rounding a
+trefoil's coordinates (about 2 in size) to float moves its exact gradient
+by 2e-3 at 300 edges, 0.65 at 2000, and 40 at 8000. The gradient of a
+finely sampled curve is a small difference of large neighbour terms,
+sensitive to each edge's position. The same holds for the f32 library's
+inputs. The kernels match the double CPU to 4e-4 at worst when given the
+same positions. Meshes are far less sensitive (1.2e-4 at 8192 faces).
+
+| Check (test 119: the core on the C backend, driven as the kernels drive it) | f64 | f32 |
+|---|---|---|
+| Against the library: energy, gradient and metric product for a trefoil with a ring (3D), an open wave (2D, z = 0), and a lumpy sphere | 2.7e-15 at most | 1.2e-6 at most |
+
+Figure 37 (`examples/better2d_showcase/37_repulsive_packing.c`) shows
+curves packed into a region. A container is a pinned loop; collision
+checking keeps the curves inside. One folded strand fills a disc, and
+three strands fill a square.
+
+### The showcase scenes
+
+| Scene (from the specification) | Figure |
+|---|---|
+| Pinned strands around obstacles | 32 |
+| Curves packed into a region | 37 |
+| Curves distributed over a surface | 36 |
+| A knot relaxed without crossings | 32 (a collision-checked trefoil), 35 (a 600-edge torus knot) |
+| A constrained surface optimized near another surface | 33 |

@@ -120,6 +120,7 @@ add_executable(
   116_repulsive_hsolve.c
   117_repulsive_surface.c
   118_repulsive_controls.c
+  119_repulsive_core.c
 )
 
 # The amalgamated library exports exactly the same symbols, so the tests can

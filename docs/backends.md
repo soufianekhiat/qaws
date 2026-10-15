@@ -192,6 +192,7 @@ Complete working examples are in the `examples/` directory:
 | `diff_cdf_sampling.hlsl` | HLSL | Inverse-CDF sampling of a B-spline (arc length or curvature measure): span measures, solved samples with first and second tangents, adjoint multipliers and a gather adjoint per control point |
 | `diff_surface_functionals.hlsl` | HLSL | Area, thin-plate and Willmore functionals of a B-spline surface: one thread per quadrature node (value and rates), a gather per control point for the gradient |
 | `diff_surface_sampling.hlsl` | HLSL | Inverse-CDF warp of the unit square onto a B-spline surface by area: cell measures, samples with first and second tangents, adjoint multipliers |
+| `repulsive.hlsl` | HLSL | Tangent-point energies of curves or meshes (`core/qaws_repulsive_core.h`): one thread per element over all others (energy share, gradient block, the Sobolev metric's row), a gather per vertex; run and checked against the CPU by `repulsive_gpu_parity.c` (Direct3D 11, Windows) |
 
 ## See also
 
