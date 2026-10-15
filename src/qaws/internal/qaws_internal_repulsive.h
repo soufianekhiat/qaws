@@ -48,6 +48,10 @@ qaws_status qaws_internal_repulsive_curves_metric(qaws_repulsive_curves const* c
    vertex stays at least min(clearance, half its distance at x0) apart */
 int qaws_internal_repulsive_curves_path_clear(qaws_repulsive_curves const* curves, double clearance, double const* x0, double const* x1);
 
+/* hv += H v at x (in double) */
+qaws_status qaws_internal_repulsive_curves_hvp(qaws_repulsive_curves const* curves, double const* x, double const* v, double* hv);
+qaws_status qaws_internal_repulsive_mesh_hvp(qaws_repulsive_mesh const* mesh, double const* x, double const* v, double* hv);
+
 /* Barnes-Hut energy at x and, if grad, grad += its gradient (in double) */
 qaws_status qaws_internal_repulsive_curves_bh(qaws_repulsive_curves const* curves, double const* x, double theta, double* E, double* grad);
 qaws_status qaws_internal_repulsive_mesh_bh(qaws_repulsive_mesh const* mesh, double const* x, double theta, double* E, double* grad);

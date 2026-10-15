@@ -94,6 +94,7 @@
 #include "better2d_showcase/33_repulsive_mesh.c"
 #include "better2d_showcase/34_repulsive_bh.c"
 #include "better2d_showcase/35_repulsive_hsolve.c"
+#include "better2d_showcase/36_repulsive_surface.c"
 
 int main(void)
 {
@@ -134,5 +135,6 @@ int main(void)
 	demo_repulsive_mesh();
 	demo_repulsive_bh();
 	demo_repulsive_hsolve();
+	demo_repulsive_surface();
 	return 0;
 }

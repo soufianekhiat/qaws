@@ -7,11 +7,13 @@ Crane, *Repulsive Curves* (2021), and Yu, Brakensiek, Schumacher and Crane,
 papers with their reference code, and the contracts are in
 [`docs/repulsive_plan.md`](../repulsive_plan.md).
 
-Milestones R1 to R4: the energies and their derivatives, evaluated
+Milestones R1 to R5: the energies and their derivatives, evaluated
 directly over all pairs or by Barnes-Hut; the constrained fractional
 Sobolev solvers for curves (with adapters to qaws curves) and for triangle
 meshes, each with a collision-checked mode, dense or hierarchical (no
-|V|^2 storage); and the surfaces' Poisson-based preconditioner.
+|V|^2 storage); the surfaces' Poisson-based preconditioner; curves on
+parametric surfaces, native control-point optimization, and the
+derivatives of converged solutions.
 
 ```c
 qaws_repulsive_curves_desc d = { 3, vertex_count, edges, edge_count, 0, 0 };   /* (alpha, beta) = (3, 6) */
@@ -447,3 +449,146 @@ iterations per solve; on meshes, about 11.
 
 Figure 35 shows a 600-edge (2, 5) torus knot relaxed in this mode, and the
 time per step against size.
+
+## Curves on a surface (R5)
+
+```c
+qaws_repulsive_surface_desc sd = { surface, 1, 1 };     /* periodic in u and v: declared */
+qaws_repulsive_curves_solve_desc d = { 0 };
+d.hold_edge_lengths = 1;
+qaws_repulsive_surface_curves_solve(curves, &sd, &d, uv, &report);   /* uv: two per vertex */
+qaws_repulsive_surface_positions(&sd, uv, vertex_count, positions);
+/* and _eval / _gradient / _hvp in uv */
+```
+
+The unknowns are the vertices' surface parameters, with x_i = S(u_i, v_i).
+The energy is the curves' own, measured in the embedding: no UV or
+geodesic distance enters the published energy.
+
+- **Derivatives in uv.** The gradient is J^T g. The HVP is
+  J^T H J v + sum g . S''[v, .], and the second directional derivative
+  d2E[Jv, Jv] + g . S''[v, v]. S's first and second derivatives come from
+  qaws_surface_evaluate.
+- **The descent.** It runs on the shared core with the metric pulled back,
+  the blocks A_ij J_i^T J_j (an N x N metric, N = 2|V|). A 1e-10 multiple
+  of the diagonal blocks lifts what A cannot see: a curve sliding along a
+  cylinder's axis is a symmetry of the energy. Steps move the parameters,
+  so the curves stay on S exactly and no projection onto the surface is
+  needed.
+- **Constraints.**
+  - Pins hold a vertex's parameters.
+  - Lengths and held directions are the curves' own, in 3D: the rows of an
+    internal x-space curve solver times J.
+  - No barycenter is held.
+- **The domain** is explicit:
+  - a declared periodic parameter wraps, so seams are crossed freely, and
+    uv stays unwrapped (continuous);
+  - a parameter that is not periodic stays in its range;
+  - a trimmed surface's vertices stay in its region;
+  - a vertex at a singular point (S_u x S_v about 0: a pole) is refused.
+  - A step that would leave the domain is rejected like one that raises
+    the energy. Input outside the domain is refused (OUT_OF_RANGE).
+- **Not covered.** Only vertices are kept in the domain: an edge's chord
+  is straight in 3D. One surface is one chart: crossing between the
+  patches of a multi-patch model is not supported. The dense mode only.
+- **Collision-checked.** The straight motion of each vertex from x to x',
+  a chord of its path on S, is checked with the curves' rule.
+
+| Check (test 117) | f64 | f32 |
+|---|---|---|
+| Against Mathematica (`tests/reference/117_repulsive_surface.wls`): E(S(uv)) for a closed hexagon, and an open polyline with a segment, on a bicubic Bezier patch. E, dE and d2E along a direction are composed in one variable; the gradient and Hv come from the symbolic x-space derivatives and S's exact ones | 1.3e-14 | 3.2e-6 |
+| Torus, two loops across the u seam: E with uv shifted by a period; the uv gradient against central differences | 0; 1.2e-9 | 0; 1.1e-3 |
+| Torus, three loops, length held: E 534 -> 40.6 in 30 steps, length 2.2e-14, off the torus | 1.1e-16 | 7.5e-8 |
+| Torus, collision-checked, two pins: E falls, the pins' parameters held | 2.6e-24 | 3e-21 |
+| Patch (not periodic), an open polyline growing: the energy falls, every parameter stays in [0, 1] | yes | yes |
+| Refusals: outside the range, in a trimmed hole, at a sphere's pole | OUT_OF_RANGE | OUT_OF_RANGE |
+
+## Native control points (R5)
+
+```c
+qaws_repulsive_controls_desc cd = { 0 };
+cd.polyline.curves = curves; cd.polyline.curve_count = n; cd.polyline.dimension = 3; cd.polyline.edge_length = h;
+qaws_repulsive_controls_create(&cd, &ctl);
+qaws_repulsive_controls_read(ctl, P);                      /* every curve's control points */
+qaws_repulsive_controls_solve(ctl, &solve_desc, P, &report);
+qaws_repulsive_controls_to_curve(ctl, P, i, &curve_i);    /* the same family, new control points */
+```
+
+The working polyline of the R2 adapter is a linear function of the curves'
+control points: x_s = sum_k B_sk P_k, the same weights for every
+coordinate. Its samples (curve, parameter) are chosen at creation and then
+held, so the derivatives are those of that fixed sampling.
+
+- **B** comes from the curves' own tangent evaluation (qaws_diff.h), one
+  control point at a time, and is checked twice:
+  - a control's tangent in one coordinate moves that coordinate only;
+  - B P reproduces the samples.
+
+  A curve that fails is refused (UNSUPPORTED_OPERATION). Bezier, B-spline
+  and NURBS (weights held) qualify.
+- **Derivatives in P** are B^T those in x, exactly, since the map is
+  linear; the HVP is B^T H B v.
+- **The solver** descends in P with the metric B^T A B per coordinate.
+  With theta > 0, the energy is Barnes-Hut's and B^T A B is assembled
+  column by column from the hierarchical metric (|P|^2 stored, never
+  |V|^2).
+  - Pins name control points.
+  - The barycenter is the samples'.
+  - Lengths and held directions are the polyline's.
+- **Collision-checked.** The samples move straight when the controls do,
+  and that motion is checked. The curve between the samples is not.
+
+## Derivatives of a converged solution (R5)
+
+```c
+qaws_repulsive_targets d = { 0 };
+d.pinned = dpins;                     /* the pinned positions' changes */
+d.edge_lengths = dl;                  /* curves; or d.length; meshes: d.area, d.volume */
+qaws_repulsive_curves_solver_solution_jvp(solver, &d, dx, &gauge);
+qaws_repulsive_curves_solver_solution_vjp(solver, xbar, &targets_bar, &gauge);
+```
+
+At a converged x*, dE = C^T lambda and every row holds its target. Moving
+the targets moves the solution by the KKT system of the Lagrangian:
+[K C^T; C 0] [dx; mu] = [0; dtargets], with K = Hess E - sum lambda_r
+Hess c_r. The descent's preconditioner is not differentiated.
+
+- **The terms.** lambda is C's least-squares multiplier of dE. K is applied
+  exactly: the energy's HVP and the constraints' Hessians (edge lengths;
+  area and volume per face).
+- **The solve.** Flexible GMRES, preconditioned by the descent's dense
+  Sobolev system (the same principal part). The VJP is the same solve with
+  [xbar; 0], the system being symmetric.
+- **Symmetries.** The rigid motions every constraint row allows are found
+  as the null space of (C M)^T (C M), over the translations and rotations
+  M, and gauged out: dx is orthogonal to them, and *out_gauge counts them.
+  A loop held by its barycenter keeps three rotations; a strand pinned at
+  both ends keeps the rotation about the line through its pins.
+- **Status.**
+  - NOT_CONVERGED unless the solver's last reason is CONVERGED.
+  - NUMERICAL_FAILURE for dependent rows, or a system GMRES cannot reduce
+    to 1e-7 (not a strict minimum on the constraint set).
+  - UNSUPPORTED_OPERATION in the hierarchical mode, and for the surface
+    and control-point solvers.
+- **Not provided.** The derivative of a fixed sequence of steps, and
+  derivatives in the exponents.
+- **A practical note.** The descent converges well when the problem is
+  well posed: every edge's length held for curves, no vertex free to slide
+  within a surface for meshes. Holding only the total length leaves a
+  curve's vertices free to bunch, and the descent crawls. The paper uses
+  per-edge lengths, and remeshing for surfaces, for this reason.
+
+| Check (test 118) | f64 | f32 |
+|---|---|---|
+| Control points (a B-spline, a Bezier, a NURBS): the gradient against central differences; the HVP against differences of the gradient; t and t2 against both | 3e-10; 3.7e-9; 2.9e-15 | 4.6e-5; 2.7e-4; 1.3e-7 |
+| Control-point solves, length held, dense and Barnes-Hut: E 26 -> 1.5e-4 and 0.17 in 15 steps; the curves rebuilt reproduce the solved samples | 1.7e-13 | 7.6e-5 |
+| A strand pinned at both ends, edge lengths held, a pin moved: the JVP against re-solved differences (less the free rotation about the pins' line, the one gauge) | 1.9e-5 (limited by the re-solves' convergence) | 1.2e-3 |
+| The adjoint identity xbar . JVP(d) = VJP(xbar) . d | to 12 digits | 1.4e-7 |
+| A loop, barycenter and edge lengths held, scaled: three rotations gauged, the JVP orthogonal to them, against the re-solved difference less its rotation | 1.7e-18; 2.3e-8 | 1.6e-10; 2.4e-5 |
+| A lumpy octahedron, area and volume changed: against the re-solved difference less its rotation (the differences' floor: 5e-4) | 2.8e-4 | 6.9e-3 |
+| Refusals: before convergence; in the hierarchical mode | NOT_CONVERGED; UNSUPPORTED | same |
+
+Figure 36 (`examples/better2d_showcase/36_repulsive_surface.c`) shows five
+crowded loops on a torus spreading over it with every edge's length held,
+and two B-splines, their ends pinned, relaxed through their control
+points.

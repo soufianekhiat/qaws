@@ -24,7 +24,10 @@ typedef enum qaws_status
 	QAWS_STATUS_EXACT_UNSUPPORTED,
 	QAWS_STATUS_EXACT_RANGE_EXCEEDED,
 	QAWS_STATUS_EXACT_INCOMPATIBLE_SPACE,
-	QAWS_STATUS_CERTIFICATION_FAILED
+	QAWS_STATUS_CERTIFICATION_FAILED,
+	/* a result defined at convergence asked for before it (repulsive
+	   solution derivatives) */
+	QAWS_STATUS_NOT_CONVERGED
 } qaws_status;
 
 char const* qaws_status_to_string(qaws_status status);

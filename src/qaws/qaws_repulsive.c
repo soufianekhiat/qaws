@@ -401,3 +401,13 @@ qaws_status qaws_internal_repulsive_mesh_energy(qaws_repulsive_mesh const* mesh,
 {
 	return rp_run_d(3, mesh->tris, mesh->nf, 3, rp_mesh_term, mesh, 0, x, NULL, grad ? RP_GRAD : RP_EVAL, 1, out_energy, NULL, NULL, grad);
 }
+
+qaws_status qaws_internal_repulsive_curves_hvp(qaws_repulsive_curves const* curves, double const* x, double const* v, double* hv)
+{
+	return rp_run_d(curves->dim, curves->edges, curves->ne, 2, rp_curve_term, curves, 1, x, v, RP_HVP, 0, NULL, NULL, NULL, hv);
+}
+
+qaws_status qaws_internal_repulsive_mesh_hvp(qaws_repulsive_mesh const* mesh, double const* x, double const* v, double* hv)
+{
+	return rp_run_d(3, mesh->tris, mesh->nf, 3, rp_mesh_term, mesh, 0, x, v, RP_HVP, 0, NULL, NULL, NULL, hv);
+}

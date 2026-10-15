@@ -103,16 +103,32 @@ static double rs_phi_max(rs_core const* s, double const* phi)
 	return m;
 }
 
+/* the metric's storage: nv x nv (A~ = A on each coordinate), or N x N */
+static size_t rs_asize(rs_core const* s)
+{
+	return s->full ? (size_t)s->N * s->N : (size_t)s->nv * s->nv;
+}
+
+/* how far vertex v moves (in the embedding) for the change d at x */
+static double rs_vmove(rs_core const* s, double const* x, double const* d, unsigned int v)
+{
+	return s->ops->move ? s->ops->move(s, x, d, v) : rs_norm(d + s->dim * v, s->dim);
+}
+
 /* the saddle-point matrix [A~ C^T; C 0] (A~ = A on each coordinate),
    factored; 0 when singular */
 static int rs_kkt(rs_core const* s, double const* A, double const* C, double* M, unsigned int* piv)
 {
 	unsigned int dim = s->dim, N = s->N, n = N + s->k, i, j, q, r;
 	memset(M, 0, sizeof(double) * n * n);
-	for (i = 0; i < s->nv; i++)
-		for (j = 0; j < s->nv; j++)
-			for (q = 0; q < dim; q++)
-				M[(dim * i + q) * n + dim * j + q] = A[i * s->nv + j];
+	if (s->full)
+		for (i = 0; i < N; i++)
+			for (j = 0; j < N; j++) M[i * n + j] = A[(size_t)i * N + j];
+	else
+		for (i = 0; i < s->nv; i++)
+			for (j = 0; j < s->nv; j++)
+				for (q = 0; q < dim; q++)
+					M[(dim * i + q) * n + dim * j + q] = A[i * s->nv + j];
 	for (r = 0; r < s->k; r++)
 		for (i = 0; i < N; i++)
 		{
@@ -167,14 +183,14 @@ qaws_status qaws_internal_rs_direction(rs_core const* s, qaws_scalar const* posi
 		return st;
 	}
 	n = s->N + s->k;
-	buf = (double*)malloc(sizeof(double) * ((size_t)s->N * 3 + (size_t)s->nv * s->nv + (size_t)s->k * s->N + s->k + (size_t)n * n + n + 1));
+	buf = (double*)malloc(sizeof(double) * ((size_t)s->N * 3 + rs_asize(s) + (size_t)s->k * s->N + s->k + (size_t)n * n + n + 1));
 	piv = (unsigned int*)malloc(sizeof(unsigned int) * (n + 1));
 	if (!buf || !piv)
 	{
 		free(buf); free(piv);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
-	x = buf; dE = x + s->N; A = dE + s->N; C = A + (size_t)s->nv * s->nv; phi = C + (size_t)s->k * s->N; M = phi + s->k; g = M + (size_t)n * n;
+	x = buf; dE = x + s->N; A = dE + s->N; C = A + rs_asize(s); phi = C + (size_t)s->k * s->N; M = phi + s->k; g = M + (size_t)n * n;
 	for (i = 0; i < s->N; i++) x[i] = (double)positions[i];
 	st = rs_direction(s, x, A, C, phi, M, piv, dE, &E, g);
 	for (i = 0; st == QAWS_STATUS_OK && i < s->N; i++) out_direction[i] = (qaws_scalar)g[i];
@@ -206,7 +222,7 @@ static int rs_project(rs_core const* s, double const* A, double* y, double* C, d
 
 qaws_status qaws_internal_rs_step(rs_core* s, qaws_scalar* positions, qaws_repulsive_report* out_report)
 {
-	unsigned int n, i, v, q, trial, same = 1, dim;
+	unsigned int n, i, v, trial, same = 1;
 	double *buf, *A, *C, *phi, *M, *dE, *g, *y, *rhs, E, Ey = 0, gdot = 0, gmax = 0, h;
 	unsigned int* piv;
 	qaws_status st;
@@ -215,9 +231,8 @@ qaws_status qaws_internal_rs_step(rs_core* s, qaws_scalar* positions, qaws_repul
 	size_t dense;
 	if (!s || !positions)
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	dim = s->dim;
 	n = s->N + s->k;
-	dense = s->theta > 0 ? 0 : (size_t)s->nv * s->nv + (size_t)s->k * s->N + (size_t)n * n + n;
+	dense = s->theta > 0 ? 0 : rs_asize(s) + (size_t)s->k * s->N + (size_t)n * n + n;
 	/* the caller's positions, unless they are this solver's own rounded */
 	for (i = 0; i < s->N; i++) same &= positions[i] == (qaws_scalar)s->x[i];
 	if (!same)
@@ -233,7 +248,7 @@ qaws_status qaws_internal_rs_step(rs_core* s, qaws_scalar* positions, qaws_repul
 	A = C = M = rhs = NULL;
 	if (dense)
 	{
-		A = g + n; C = A + (size_t)s->nv * s->nv; M = C + (size_t)s->k * s->N; rhs = M + (size_t)n * n;
+		A = g + n; C = A + rs_asize(s); M = C + (size_t)s->k * s->N; rhs = M + (size_t)n * n;
 		st = rs_direction(s, s->x, A, C, phi, M, piv, dE, &E, g);
 	}
 	else
@@ -249,7 +264,7 @@ qaws_status qaws_internal_rs_step(rs_core* s, qaws_scalar* positions, qaws_repul
 		goto done;
 	}
 	for (i = 0; i < s->N; i++) gdot += dE[i] * g[i];
-	for (v = 0; v < s->nv; v++) gmax = fmax(gmax, rs_norm(g + dim * v, dim));
+	for (v = 0; v < s->nv; v++) gmax = fmax(gmax, rs_vmove(s, s->x, g, v));
 	s->rep.energy = (qaws_scalar)E;
 	s->rep.stationarity = (qaws_scalar)(gmax > 0 && E > 0 ? gdot * s->lmean / (E * gmax) : 0);
 	s->ops->constraints(s, s->x, phi, NULL);
@@ -293,12 +308,8 @@ qaws_status qaws_internal_rs_step(rs_core* s, qaws_scalar* positions, qaws_repul
 	/* accepted: the move, and the next trial twice this one */
 	{
 		double move = 0;
-		for (v = 0; v < s->nv; v++)
-		{
-			double dlt[3] = { 0, 0, 0 };
-			for (q = 0; q < dim; q++) dlt[q] = y[dim * v + q] - s->x[dim * v + q];
-			move = fmax(move, rs_norm(dlt, dim));
-		}
+		for (i = 0; i < s->N; i++) dE[i] = y[i] - s->x[i];   /* (dE no longer needed) */
+		for (v = 0; v < s->nv; v++) move = fmax(move, rs_vmove(s, s->x, dE, v));
 		s->rep.last_step = (qaws_scalar)(move / s->lmean);
 	}
 	memcpy(s->x, y, sizeof(double) * s->N);
@@ -610,7 +621,126 @@ static int rs_c_path_ok(rs_core const* core, double const* x0, double const* x1)
 	return rs_curves_path_ok(((qaws_repulsive_curves_solver const*)core)->c, core->clearance, x0, x1);
 }
 
-static qaws_internal_rs_ops const rs_curve_ops = { rs_c_energy, rs_c_metric, rs_c_constraints, rs_c_path_ok, rs_c_hier };
+static qaws_status rs_c_hvp(rs_core const* core, double const* x, double const* v, double* hv)
+{
+	return qaws_internal_repulsive_curves_hvp(((qaws_repulsive_curves_solver const*)core)->c, x, v, hv);
+}
+
+/* hv += sum_r lambda_r Hess(c_r) v: only the length rows are not linear;
+   Hess(l_e) v = (I - T T^T)(v_1 - v_0) / l at the edge's end, minus at its start */
+static void rs_c_constraints_hvp(rs_core const* core, double const* x, double const* lambda, double const* v, double* hv)
+{
+	qaws_repulsive_curves_solver const* s = (qaws_repulsive_curves_solver const*)core;
+	unsigned int dim = core->dim, r, e, q;
+	if (!s->total_len && !s->edge_len)
+		return;
+	r = (s->bary ? dim : 0) + (core->theta > 0 ? 0 : dim * s->npin) + (dim - 1) * s->nt;
+	for (e = 0; e < s->c->ne; e++)
+	{
+		unsigned int const* E = s->c->edges + 2 * e;
+		double d[3] = { 0, 0, 0 }, w[3] = { 0, 0, 0 }, l, tw = 0, lam;
+		if (s->edge_len && s->fixed[E[0]] && s->fixed[E[1]])
+			continue;
+		lam = lambda[s->total_len ? r : r++];
+		for (q = 0; q < dim; q++) { d[q] = x[dim * E[1] + q] - x[dim * E[0] + q]; w[q] = v[dim * E[1] + q] - v[dim * E[0] + q]; }
+		l = rs_norm(d, dim);
+		if (!(l > 0))
+			continue;
+		for (q = 0; q < dim; q++) tw += d[q] * w[q] / l;
+		for (q = 0; q < dim; q++)
+		{
+			double h = lam * (w[q] - d[q] / l * tw) / l;
+			hv[dim * E[1] + q] += h; hv[dim * E[0] + q] -= h;
+		}
+	}
+}
+
+static qaws_internal_rs_ops const rs_curve_ops = { rs_c_energy, rs_c_metric, rs_c_constraints, rs_c_path_ok, rs_c_hier, NULL, rs_c_hvp,
+	rs_c_constraints_hvp };
+
+/* the rows' targets from t (to rows, dir 0) or back (dir 1) */
+static void rs_c_targets(qaws_repulsive_curves_solver const* s, qaws_repulsive_targets* t, double* rows, int dir)
+{
+	unsigned int dim = s->core.dim, r = 0, i, q, e;
+	if (dir)
+	{
+		memset(t->barycenter, 0, sizeof(t->barycenter));
+		t->length = t->area = t->volume = 0;
+	}
+	if (s->bary)
+		for (q = 0; q < dim; q++, r++)
+		{
+			if (dir) t->barycenter[q] = (qaws_scalar)rows[r]; else rows[r] = (double)t->barycenter[q];
+		}
+	for (i = 0; s->core.theta <= 0 && i < s->npin; i++)   /* (hierarchical: pins are not rows) */
+		for (q = 0; q < dim; q++, r++)
+		{
+			if (dir) { if (t->pinned) t->pinned[dim * i + q] = (qaws_scalar)rows[r]; }
+			else rows[r] = t->pinned ? (double)t->pinned[dim * i + q] : 0;
+		}
+	for (i = 0; i < (dim - 1) * s->nt; i++, r++)
+		if (!dir) rows[r] = 0;   /* (held directions: no target) */
+	if (s->total_len)
+	{
+		if (dir) t->length = (qaws_scalar)rows[r]; else rows[r] = (double)t->length;
+		r++;
+	}
+	for (e = 0; s->edge_len && e < s->c->ne; e++)
+	{
+		double val = 0;
+		if (!(s->fixed[s->c->edges[2 * e]] && s->fixed[s->c->edges[2 * e + 1]]))
+		{
+			if (dir) val = rows[r]; else rows[r] = t->edge_lengths ? (double)t->edge_lengths[e] : 0;
+			r++;
+		}
+		if (dir && t->edge_lengths) t->edge_lengths[e] = (qaws_scalar)val;
+	}
+}
+
+qaws_status qaws_repulsive_curves_solver_solution_jvp(qaws_repulsive_curves_solver const* s, qaws_repulsive_targets const* d, qaws_scalar* out_dx,
+	unsigned int* out_gauge)
+{
+	double *rows, *dx;
+	unsigned int i;
+	qaws_status st;
+	if (!s || !d || !out_dx)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	rows = (double*)calloc(s->core.k + 1, sizeof(double));
+	dx = (double*)malloc(sizeof(double) * (s->core.N + 1));
+	if (!rows || !dx)
+	{
+		free(rows); free(dx);
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	}
+	rs_c_targets(s, (qaws_repulsive_targets*)d, rows, 0);
+	st = qaws_internal_rs_sensitivity(&s->core, rows, NULL, dx, out_gauge);
+	for (i = 0; st == QAWS_STATUS_OK && i < s->core.N; i++) out_dx[i] = (qaws_scalar)dx[i];
+	free(rows); free(dx);
+	return st;
+}
+
+qaws_status qaws_repulsive_curves_solver_solution_vjp(qaws_repulsive_curves_solver const* s, qaws_scalar const* xbar, qaws_repulsive_targets* out_bar,
+	unsigned int* out_gauge)
+{
+	double *rows, *xb;
+	unsigned int i;
+	qaws_status st;
+	if (!s || !xbar || !out_bar)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	rows = (double*)calloc(s->core.k + 1, sizeof(double));
+	xb = (double*)malloc(sizeof(double) * (s->core.N + 1));
+	if (!rows || !xb)
+	{
+		free(rows); free(xb);
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	}
+	for (i = 0; i < s->core.N; i++) xb[i] = (double)xbar[i];
+	st = qaws_internal_rs_sensitivity(&s->core, NULL, xb, rows, out_gauge);
+	if (st == QAWS_STATUS_OK)
+		rs_c_targets(s, out_bar, rows, 1);
+	free(rows); free(xb);
+	return st;
+}
 
 void qaws_repulsive_curves_solver_destroy(qaws_repulsive_curves_solver* s)
 {

@@ -43,6 +43,8 @@ const char *qaws_status_to_string(qaws_status status)
 		return "QAWS_STATUS_EXACT_INCOMPATIBLE_SPACE";
 	case QAWS_STATUS_CERTIFICATION_FAILED:
 		return "QAWS_STATUS_CERTIFICATION_FAILED";
+	case QAWS_STATUS_NOT_CONVERGED:
+		return "QAWS_STATUS_NOT_CONVERGED";
 	default:
 		return "QAWS_STATUS_UNKNOWN";
 	}

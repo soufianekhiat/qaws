@@ -118,6 +118,8 @@ add_executable(
   114_repulsive_mesh_solve.c
   115_repulsive_bh.c
   116_repulsive_hsolve.c
+  117_repulsive_surface.c
+  118_repulsive_controls.c
 )
 
 # The amalgamated library exports exactly the same symbols, so the tests can

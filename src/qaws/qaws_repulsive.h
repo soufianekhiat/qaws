@@ -3,6 +3,7 @@
 
 #include "qaws_types.h"
 #include "qaws_status.h"
+#include "qaws_surface_types.h"
 
 /*
  * Tangent-point (repulsive) energies of polygonal curves and triangle
@@ -311,5 +312,184 @@ qaws_status qaws_repulsive_mesh_solver_direction(qaws_repulsive_mesh_solver cons
 	qaws_scalar* out_direction);
 qaws_status qaws_repulsive_mesh_solve(qaws_repulsive_mesh const* mesh, qaws_repulsive_mesh_solve_desc const* desc,
 	qaws_scalar* positions, qaws_repulsive_report* out_report);
+
+/* ---- derivatives of a converged solution (R5) ---------------------------- */
+
+/*
+ * At a solver whose last step reported CONVERGED (dense mode), the
+ * derivative of the solution x* with respect to the constraints' targets.
+ * It comes from the KKT system of the Lagrangian E - lambda . c, not from
+ * the descent's preconditioner:
+ *   [K C^T; C 0] [dx; mu] = [0; dtargets],  K = Hess E - sum lambda_r Hess c_r,
+ * K applied exactly (the energy's HVP and the constraints' Hessians),
+ * solved by GMRES preconditioned by the descent's Sobolev system. JVP:
+ * targets' changes to dx. VJP: xbar to the targets' adjoints (the same
+ * symmetric system).
+ *
+ * Contracts:
+ *   - NOT_CONVERGED unless the solver's last reason is CONVERGED: the
+ *     identity holds at a stationary point only (as close as the
+ *     tolerance; tighten it for accurate derivatives);
+ *   - rotations about the barycenter that every constraint allows (nothing
+ *     pinned, no held direction) leave the solution non-isolated. They are
+ *     gauged out (dx orthogonal to them), and *out_gauge says how many (0
+ *     to 3);
+ *   - NUMERICAL_FAILURE for dependent constraint rows, or a KKT system
+ *     GMRES cannot solve (not a strict minimum on the constraint set);
+ *   - UNSUPPORTED_OPERATION in the hierarchical mode;
+ *   - not provided: the derivative of a fixed sequence of steps, and
+ *     derivatives in the energy's exponents.
+ * Held directions have no target here (their rows' changes are 0).
+ */
+typedef struct qaws_repulsive_targets
+{
+	qaws_scalar* pinned;                   /* the pinned positions (dimension each, the desc's order); NULL: none */
+	qaws_scalar barycenter[3];             /* the held barycenter */
+	qaws_scalar length;                    /* curves: the total length */
+	qaws_scalar* edge_lengths;             /* curves: each edge's (hold_edge_lengths), NULL: none */
+	qaws_scalar area, volume;              /* meshes */
+} qaws_repulsive_targets;
+
+qaws_status qaws_repulsive_curves_solver_solution_jvp(qaws_repulsive_curves_solver const* solver, qaws_repulsive_targets const* dtargets,
+	qaws_scalar* out_dx, unsigned int* out_gauge);
+qaws_status qaws_repulsive_curves_solver_solution_vjp(qaws_repulsive_curves_solver const* solver, qaws_scalar const* xbar,
+	qaws_repulsive_targets* out_targets_bar, unsigned int* out_gauge);
+qaws_status qaws_repulsive_mesh_solver_solution_jvp(qaws_repulsive_mesh_solver const* solver, qaws_repulsive_targets const* dtargets,
+	qaws_scalar* out_dx, unsigned int* out_gauge);
+qaws_status qaws_repulsive_mesh_solver_solution_vjp(qaws_repulsive_mesh_solver const* solver, qaws_scalar const* xbar,
+	qaws_repulsive_targets* out_targets_bar, unsigned int* out_gauge);
+
+/* ---- curves on a surface (R5) ------------------------------------------- */
+
+/*
+ * A 3D curve set whose vertices live on a parametric surface S: vertex i at
+ * x_i = S(u_i, v_i), its parameters the unknowns (uv: two per vertex). The
+ * energy is the curves' own, measured in the embedding (no UV or geodesic
+ * distance enters it), and its derivatives in uv carry S's first and
+ * second derivatives (the chain rule, exact).
+ *
+ * The descent (dense mode only) pulls the metric back through S, the
+ * blocks A_ij J_i^T J_j, J_i = [S_u S_v] at vertex i; a 1e-10 multiple of
+ * the diagonal blocks lifts what A cannot see (a curve sliding along a
+ * cylinder's axis). Steps move the parameters, so the curve stays on S
+ * exactly; no projection onto the surface is needed. Pins hold a vertex's
+ * parameters; lengths and held directions are the curves' (measured in 3D);
+ * no barycenter is held.
+ *
+ * The domain is explicit:
+ *   - a parameter declared periodic wraps (a seam is crossed freely; the
+ *     uv returned are unwrapped, continuous across it); it must be periodic
+ *     in S, which is not checked;
+ *   - a parameter not declared periodic must stay in its range;
+ *   - a trimmed surface's vertices must stay in the trimmed region;
+ *   - a vertex at a singular point (S_u x S_v about 0, a pole) is refused.
+ * A step that would leave the domain is rejected like one that raises the
+ * energy (the line search backtracks); an input outside it is refused.
+ * Only the vertices are kept in the domain: an edge's chord is straight in
+ * 3D and may cross a trim's hole. One surface, one chart: curves crossing
+ * between patches of a multi-patch model are not supported.
+ *
+ * Collision-checked: every accepted motion is checked as the straight
+ * motion of each vertex in 3D from x to x' (a chord of its path on S), with
+ * the curves' rule.
+ */
+typedef struct qaws_repulsive_surface_desc
+{
+	qaws_surface const* surface;           /* borrowed */
+	int periodic_u, periodic_v;            /* declared seams */
+} qaws_repulsive_surface_desc;
+
+/* the positions S(uv) of count vertices (3 each) */
+qaws_status qaws_repulsive_surface_positions(qaws_repulsive_surface_desc const* surface, qaws_scalar const* uv, unsigned int count,
+	qaws_scalar* out_positions);
+
+/* the energy E(S(uv)) and, along duv, its first and second directional
+   derivatives; gradient += seed dE/duv; out_hv += H duv (H the Hessian in
+   uv, S's second derivatives included) */
+qaws_status qaws_repulsive_curves_on_surface_eval(qaws_repulsive_curves const* curves, qaws_repulsive_surface_desc const* surface,
+	qaws_scalar const* uv, qaws_scalar const* duv, qaws_scalar* out_value, qaws_scalar* out_tangent, qaws_scalar* out_tangent2);
+qaws_status qaws_repulsive_curves_on_surface_gradient(qaws_repulsive_curves const* curves, qaws_repulsive_surface_desc const* surface,
+	qaws_scalar const* uv, qaws_scalar seed, qaws_scalar* gradient, qaws_scalar* out_value);
+qaws_status qaws_repulsive_curves_on_surface_hvp(qaws_repulsive_curves const* curves, qaws_repulsive_surface_desc const* surface,
+	qaws_scalar const* uv, qaws_scalar const* duv, qaws_scalar* out_hv);
+
+typedef struct qaws_repulsive_surface_curves_solver qaws_repulsive_surface_curves_solver;
+
+/* desc as for curves; hold_barycenter and theta must be 0 */
+qaws_status qaws_repulsive_surface_curves_solver_create(qaws_repulsive_curves const* curves, qaws_repulsive_surface_desc const* surface,
+	qaws_repulsive_curves_solve_desc const* desc, qaws_scalar const* uv, qaws_repulsive_surface_curves_solver** out_solver);
+void qaws_repulsive_surface_curves_solver_destroy(qaws_repulsive_surface_curves_solver* solver);
+qaws_status qaws_repulsive_surface_curves_solver_step(qaws_repulsive_surface_curves_solver* solver, qaws_scalar* uv,
+	qaws_repulsive_report* out_report);
+qaws_status qaws_repulsive_surface_curves_solver_direction(qaws_repulsive_surface_curves_solver const* solver, qaws_scalar const* uv,
+	qaws_scalar* out_direction);
+qaws_status qaws_repulsive_surface_curves_solve(qaws_repulsive_curves const* curves, qaws_repulsive_surface_desc const* surface,
+	qaws_repulsive_curves_solve_desc const* desc, qaws_scalar* uv, qaws_repulsive_report* out_report);
+
+/* ---- native control points (R5) ---------------------------------------- */
+
+/*
+ * The working polyline of qaws_repulsive_polyline_from_curves as a linear
+ * function of the curves' control points: x_s = sum_k B_sk P_k, the same
+ * weights for every coordinate. The samples (curve, parameter) are chosen
+ * once, at creation, and held: the derivatives are those of that fixed
+ * sampling. B comes from the curves' own tangent evaluation (qaws_diff.h)
+ * and is checked: a control's tangent in one coordinate moves that
+ * coordinate only, and B P reproduces the samples. A curve that fails the
+ * checks (one not linear in its control points with its other fields held)
+ * is refused with UNSUPPORTED_OPERATION. Bezier, B-spline and NURBS curves
+ * (weights held) qualify.
+ *
+ * Energy derivatives in P are B^T those in x: exact, the map being linear
+ * (the HVP is B^T H B v). The solver descends in P with the metric B^T A B
+ * per coordinate. With theta > 0 the energy is the Barnes-Hut one and
+ * B^T A B is assembled column by column from the hierarchical metric, so
+ * nothing of size |V|^2 is stored, only |P|^2. Pins name control points.
+ * The barycenter is the samples'. Lengths and held directions are the
+ * polyline's. Collision-checked: the samples move straight when the
+ * controls do, and that motion is checked. The curve between the samples
+ * is not checked.
+ */
+typedef struct qaws_repulsive_controls_desc
+{
+	qaws_repulsive_polyline_desc polyline; /* the curves and their sampling */
+	qaws_scalar alpha, beta;               /* 0: (3, 6) */
+} qaws_repulsive_controls_desc;
+
+typedef struct qaws_repulsive_controls qaws_repulsive_controls;
+
+qaws_status qaws_repulsive_controls_create(qaws_repulsive_controls_desc const* desc, qaws_repulsive_controls** out_controls);
+void qaws_repulsive_controls_destroy(qaws_repulsive_controls* controls);
+/* the control points (all curves', in order, dimension each), the samples, the edges */
+void qaws_repulsive_controls_get_counts(qaws_repulsive_controls const* controls, unsigned int* out_control_count, unsigned int* out_vertex_count,
+	unsigned int* out_edge_count);
+/* the energy over the polyline (for evaluating positions directly) */
+qaws_repulsive_curves const* qaws_repulsive_controls_get_curves(qaws_repulsive_controls const* controls);
+/* the control points as read from the curves at creation */
+qaws_status qaws_repulsive_controls_read(qaws_repulsive_controls const* controls, qaws_scalar* out_control_points);
+/* the samples B P */
+qaws_status qaws_repulsive_controls_positions(qaws_repulsive_controls const* controls, qaws_scalar const* control_points, qaws_scalar* out_positions);
+/* as the curves' eval / gradient / hvp, in the control points */
+qaws_status qaws_repulsive_controls_eval(qaws_repulsive_controls const* controls, qaws_scalar const* control_points, qaws_scalar const* direction,
+	qaws_scalar* out_value, qaws_scalar* out_tangent, qaws_scalar* out_tangent2);
+qaws_status qaws_repulsive_controls_gradient(qaws_repulsive_controls const* controls, qaws_scalar const* control_points, qaws_scalar seed,
+	qaws_scalar* gradient, qaws_scalar* out_value);
+qaws_status qaws_repulsive_controls_hvp(qaws_repulsive_controls const* controls, qaws_scalar const* control_points, qaws_scalar const* direction,
+	qaws_scalar* out_hv);
+/* curve `curve` with these control points: the same family, its other
+   fields unchanged (qaws_curve_clone_with_fields) */
+qaws_status qaws_repulsive_controls_to_curve(qaws_repulsive_controls const* controls, qaws_scalar const* control_points, unsigned int curve,
+	qaws_curve** out_curve);
+
+typedef struct qaws_repulsive_controls_solver qaws_repulsive_controls_solver;
+
+qaws_status qaws_repulsive_controls_solver_create(qaws_repulsive_controls const* controls, qaws_repulsive_curves_solve_desc const* desc,
+	qaws_scalar const* control_points, qaws_repulsive_controls_solver** out_solver);
+void qaws_repulsive_controls_solver_destroy(qaws_repulsive_controls_solver* solver);
+qaws_status qaws_repulsive_controls_solver_step(qaws_repulsive_controls_solver* solver, qaws_scalar* control_points, qaws_repulsive_report* out_report);
+qaws_status qaws_repulsive_controls_solver_direction(qaws_repulsive_controls_solver const* solver, qaws_scalar const* control_points,
+	qaws_scalar* out_direction);
+qaws_status qaws_repulsive_controls_solve(qaws_repulsive_controls const* controls, qaws_repulsive_curves_solve_desc const* desc,
+	qaws_scalar* control_points, qaws_repulsive_report* out_report);
 
 #endif /* QAWS_REPULSIVE_H */

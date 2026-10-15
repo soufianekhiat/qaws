@@ -24,7 +24,7 @@ typedef struct qaws_internal_rs_ops
 {
 	/* E at x, and grad (N, may be NULL) += its gradient */
 	qaws_status (*energy)(qaws_internal_rs_core const* core, double const* x, double* E, double* grad);
-	/* the metric A (nv x nv, row major) at x */
+	/* the metric A at x: nv x nv (A~ = A on each coordinate), or N x N if core->full */
 	qaws_status (*metric)(qaws_internal_rs_core const* core, double const* x, double* A);
 	/* phi (k) and, if C, the Jacobian (k x N, row major) at x */
 	void (*constraints)(qaws_internal_rs_core const* core, double const* x, double* phi, double* C);
@@ -32,6 +32,12 @@ typedef struct qaws_internal_rs_ops
 	int (*path_ok)(qaws_internal_rs_core const* core, double const* x0, double const* x1);
 	/* the hierarchical mode's operators at x (theta > 0) */
 	qaws_status (*hier)(qaws_internal_rs_core const* core, double const* x, qaws_internal_rs_hier* out);
+	/* how far vertex v moves in the embedding for the change d at x (NULL: |d_v|) */
+	double (*move)(qaws_internal_rs_core const* core, double const* x, double const* d, unsigned int v);
+	/* for the solution's derivatives (NULL: not provided): hv += H v (the
+	   energy's Hessian), and hv += sum_r lambda_r Hess(c_r) v */
+	qaws_status (*hvp)(qaws_internal_rs_core const* core, double const* x, double const* v, double* hv);
+	void (*constraints_hvp)(qaws_internal_rs_core const* core, double const* x, double const* lambda, double const* v, double* hv);
 } qaws_internal_rs_ops;
 
 struct qaws_internal_rs_core
@@ -39,6 +45,7 @@ struct qaws_internal_rs_core
 	qaws_internal_rs_ops const* ops;
 	unsigned int dim, nv, N, k;          /* N = dim nv; k constraint rows (hierarchical: pins not among them) */
 	int checked;
+	int full;                            /* the metric is N x N (parameters: not one per coordinate) */
 	double clearance, tol, ctol, lmean, h;
 	double theta;                        /* 0: dense; > 0: hierarchical, pins eliminated */
 	int translates;                      /* nothing pinned, no barycenter held: a free translation */
@@ -59,6 +66,12 @@ typedef struct qaws_internal_rs_hsys qaws_internal_rs_hsys;
 qaws_status qaws_internal_rs_hdirection(qaws_internal_rs_core const* core, double const* x, double const* dE, double* g, qaws_internal_rs_hsys** out);
 int qaws_internal_rs_hproject(qaws_internal_rs_hsys* H, double* y);
 void qaws_internal_rs_hsys_free(qaws_internal_rs_hsys* H);
+
+/* the converged solution's derivative (qaws_repulsive_sens.c), dense mode:
+   with drows (k: the change of each constraint row's target, C dx = drows)
+   dx (N); or with xbar (N) the rows' adjoints (k) in out. *out_gauge: the
+   free rotations removed (dx orthogonal to them). */
+qaws_status qaws_internal_rs_sensitivity(qaws_internal_rs_core const* core, double const* drows, double const* xbar, double* out, unsigned int* out_gauge);
 
 /* LU with partial pivoting of the n x n row-major m in place (0: singular),
    and its solve */
