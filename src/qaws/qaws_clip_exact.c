@@ -138,7 +138,7 @@ typedef struct cx_ctx
 
 #define CX_GROW(ptr, n, cap, type) \
 	do { if ((n) == (cap)) { unsigned int nc_ = (cap) ? 2 * (cap) : 64; type* np_ = (type*)realloc((ptr), sizeof(type) * nc_); \
-		if (!np_) return QAWS_STATUS_ALLOCATION_FAILURE; (ptr) = np_; (cap) = nc_; } } while (0)
+		if (!np_) { return QAWS_STATUS_ALLOCATION_FAILURE; } (ptr) = np_; (cap) = nc_; } } while (0)
 
 static unsigned int cx_find(cx_event* ev, unsigned int i)
 {
@@ -209,16 +209,6 @@ static int cx_pt_double(cx_ctx const* x, cx_pt const* p, double* out)
 	qaws_exact_ratio_enclose(&p->y, &p->w, &lo, &hi, &ex1);
 	out[1] = ldexp(lo, x->ed.space_exp2);
 	return ex0 && ex1 && fabs(out[0]) < 1e300 && fabs(out[1]) < 1e300;
-}
-
-/* The homogeneous control points of a span: 3 per point. */
-static qaws_status cx_pow(xint* out, xint const* b, unsigned int e)
-{
-	qaws_status st;
-	qaws_exact_int_from_i64(out, 1);
-	while (e--)
-		TRY(qaws_exact_int_mul(out, out, b));
-	return QAWS_STATUS_OK;
 }
 
 /*

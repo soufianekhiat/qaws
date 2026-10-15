@@ -524,7 +524,7 @@ static qaws_status prepare_composite(qaws_exact_desc const* d, qaws_curve const*
 	{
 		qaws_exact_report r;
 		st = qaws_exact_curve_prepare(d, impl->segments[i], &seg[i], &r);
-		if (st == QAWS_STATUS_OK && seg[i]->dimension != curve->dimension)
+		if (st == QAWS_STATUS_OK && seg[i]->dimension != (int)curve->dimension)
 			st = QAWS_STATUS_INVALID_ARGUMENT;
 		if (st == QAWS_STATUS_OK)
 		{

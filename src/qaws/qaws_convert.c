@@ -157,7 +157,6 @@ qaws_status qaws_curve_convert_bezier_to_bspline(
 {
 	qaws_bezier_impl const *impl;
 	unsigned int degree;
-	unsigned int dim_count;
 	unsigned int knot_count;
 	qaws_scalar *knots;
 	qaws_bspline_desc desc;
@@ -174,7 +173,6 @@ qaws_status qaws_curve_convert_bezier_to_bspline(
 
 	impl = (qaws_bezier_impl const *)curve->impl;
 	degree = curve->degree;
-	dim_count = (unsigned int)curve->dimension;
 
 	/* Clamped knot vector: [0,...,0, 1,...,1] with (degree+1) repeats each */
 	knot_count = 2 * (degree + 1);

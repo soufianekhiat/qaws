@@ -102,16 +102,14 @@ static qaws_status gordon_surface_eval_sampled(
 	qaws_vec3 Lv_pos, Lv_du, Lv_dv;
 	qaws_vec3 T_pos, T_du, T_dv;
 	qaws_status status;
-	int need_pos, need_du, need_dv;
+	int need_du, need_dv;
 
-	need_pos = (eval_flags & QAWS_SURFACE_EVAL_POSITION) != 0;
 	need_du = (eval_flags & QAWS_SURFACE_EVAL_DU) != 0;
 	need_dv = (eval_flags & QAWS_SURFACE_EVAL_DV) != 0;
 
 	if (eval_flags & (QAWS_SURFACE_EVAL_DUU | QAWS_SURFACE_EVAL_DVV
 		| QAWS_SURFACE_EVAL_DUV | QAWS_SURFACE_EVAL_NORMAL))
 	{
-		need_pos = 1;
 		need_du = 1;
 		need_dv = 1;
 	}

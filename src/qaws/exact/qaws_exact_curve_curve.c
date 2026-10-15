@@ -780,19 +780,6 @@ static qaws_status invert_point(qaws_exact_span const* I, unsigned int dim, qaws
 	return QAWS_STATUS_CERTIFICATION_FAILED;
 }
 
-/* where in [0, 1]: -1 outside, 0 at 0, 1 inside, 2 at 1 */
-static int classify01(qaws_exact_int const* num, qaws_exact_int const* den)
-{
-	int s = qaws_exact_int_sign(num), c = qaws_exact_int_cmp(num, den);
-	if (qaws_exact_int_is_zero(den))
-		return -1;   /* the parameter at infinity */
-	if (s < 0 || c > 0)
-		return -1;
-	if (s == 0)
-		return 0;
-	return c == 0 ? 2 : 1;
-}
-
 /* A rational n / d (d > 0) and where it comes from: an end of span A (0, 1) or of span B (2, 3). */
 typedef struct cc_rat
 {

@@ -160,7 +160,7 @@ typedef struct cl_ctx
 
 #define CL_GROW(ptr, n, cap, type) \
 	do { if ((n) == (cap)) { unsigned int nc_ = (cap) ? 2 * (cap) : 64; type* np_ = (type*)realloc((ptr), sizeof(type) * nc_); \
-		if (!np_) return QAWS_STATUS_ALLOCATION_FAILURE; (ptr) = np_; (cap) = nc_; } } while (0)
+		if (!np_) { return QAWS_STATUS_ALLOCATION_FAILURE; } (ptr) = np_; (cap) = nc_; } } while (0)
 
 static qaws_status cl_eval(qaws_curve const* c, double t, double* p, double* d)
 {

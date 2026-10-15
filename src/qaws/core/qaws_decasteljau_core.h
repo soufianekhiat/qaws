@@ -72,6 +72,7 @@ QAWS_INLINE qaws_vec2 qaws_decasteljau_2d(
     qaws_vec2 result;
     int r, i;
 
+    work[0] = work[1] = QAWS_ZERO;   /* (degree < 0: no garbage read) */
     for (i = 0; i <= degree; i++) {
         work[i * 2]     = cp[i * 2];
         work[i * 2 + 1] = cp[i * 2 + 1];

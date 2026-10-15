@@ -28,7 +28,7 @@ QAWS_INLINE void qaws_mul_u64(uint64_t a, uint64_t b, uint64_t* hi, uint64_t* lo
 #if defined(_MSC_VER) && defined(_M_X64)
 	*lo = _umul128(a, b, hi);
 #elif defined(__SIZEOF_INT128__)
-	unsigned __int128 p = (unsigned __int128)a * b;
+	__extension__ unsigned __int128 p = (unsigned __int128)a * b;
 	*lo = (uint64_t)p;
 	*hi = (uint64_t)(p >> 64);
 #else
@@ -165,7 +165,7 @@ QAWS_INLINE void qaws_mul_i64(int64_t a, int64_t b, uint64_t* hi, uint64_t* lo)
 	*lo = (uint64_t)_mul128(a, b, &h);
 	*hi = (uint64_t)h;
 #elif defined(__SIZEOF_INT128__)
-	__int128 p = (__int128)a * b;
+	__extension__ __int128 p = (__int128)a * b;
 	*lo = (uint64_t)p;
 	*hi = (uint64_t)(p >> 64);
 #else

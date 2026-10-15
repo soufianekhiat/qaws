@@ -507,7 +507,7 @@ static void test_knots(int kind, char const* name)
 	double h = QAWS_SCALAR_IS_FLOAT ? 1e-2 : 1e-5, tol = QAWS_SCALAR_IS_FLOAT ? 5e-2 : 1e-6;
 	int ok1 = 1, ok2 = 1;
 	unsigned int i;
-	char msg[160];
+	char msg[320];
 	sm_base(kind, x);
 	for (i = 0; i < 10; i++)
 	{

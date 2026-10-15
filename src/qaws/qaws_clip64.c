@@ -115,7 +115,7 @@ typedef struct c64_ctx
 
 #define C64_GROW(ptr, n, cap, type) \
 	do { if ((n) == (cap)) { unsigned int nc_ = (cap) ? 2 * (cap) : 64; type* np_ = (type*)realloc((ptr), sizeof(type) * nc_); \
-		if (!np_) return QAWS_STATUS_ALLOCATION_FAILURE; (ptr) = np_; (cap) = nc_; } } while (0)
+		if (!np_) { return QAWS_STATUS_ALLOCATION_FAILURE; } (ptr) = np_; (cap) = nc_; } } while (0)
 
 /* ======================================================================== */
 /*  Rational helpers                                                        */

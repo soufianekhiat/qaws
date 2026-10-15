@@ -590,9 +590,9 @@ static qaws_scalar clamp_range(qaws_range r, qaws_scalar t)
 	return t;
 }
 
-/* Solves A x = b for n <= 3 (Gaussian elimination, partial pivoting) on a
+/* Solves A x = b for n <= 3 (A 3 x 3 row major; Gaussian elimination, partial pivoting) on a
    copy; transpose selects A^T. Returns 0 when singular relative to scale. */
-static int small_solve(qaws_scalar const A[3][3], unsigned int n, int transpose, qaws_scalar const* b, qaws_scalar* x)
+static int small_solve(qaws_scalar const* A, unsigned int n, int transpose, qaws_scalar const* b, qaws_scalar* x)
 {
 	double M[3][4], scale = 0;
 	unsigned int i, j, k;
@@ -600,7 +600,7 @@ static int small_solve(qaws_scalar const A[3][3], unsigned int n, int transpose,
 	{
 		for (j = 0; j < n; j++)
 		{
-			M[i][j] = transpose ? A[j][i] : A[i][j];
+			M[i][j] = transpose ? A[3 * j + i] : A[3 * i + j];
 			if (fabs(M[i][j]) > scale) scale = fabs(M[i][j]);
 		}
 		M[i][n] = b[i];
@@ -648,7 +648,7 @@ static qaws_scalar small_condition(qaws_scalar const A[3][3], unsigned int n)
 	{
 		qaws_scalar e[3] = { 0, 0, 0 }, x[3] = { 0, 0, 0 };
 		e[i] = QAWS_ONE;
-		if (!small_solve(A, n, 0, e, x))
+		if (!small_solve(A[0], n, 0, e, x))
 			return QAWS_DIFF_UNBOUNDED;
 		for (j = 0; j < n; j++)
 		{
@@ -707,7 +707,7 @@ static int pair_solve(pair_solution const* s, qaws_scalar const* b, qaws_scalar*
 	}
 	{
 		qaws_scalar nb[3] = { -b[0], -b[1], 0 };
-		return small_solve(s->H, 2, 0, nb, x);
+		return small_solve(s->H[0], 2, 0, nb, x);
 	}
 }
 
@@ -1160,7 +1160,7 @@ static qaws_status pierce_refine(qaws_surface const* surface, qaws_curve const* 
 			return st;
 		pierce_system(s);
 		nb[0] = -s->g[0]; nb[1] = -s->g[1]; nb[2] = -s->g[2];
-		s->singular = !small_solve(s->J, 3, 0, nb, x);
+		s->singular = !small_solve(s->J[0], 3, 0, nb, x);
 		if (it == OPS_NEWTON_STEPS + 2 || s->singular)
 			break;
 		s->u = clamp_range(surface->u_range, s->u + x[0]);
@@ -1213,7 +1213,7 @@ qaws_status qaws_surface_curve_point_tangent(
 	b[1] = -(stg.d[0].y - ctg.d[0].y);
 	b[2] = -(stg.d[0].z - ctg.d[0].z);
 	if (!s.singular)
-		small_solve(s.J, 3, 0, b, x);
+		small_solve(s.J[0], 3, 0, b, x);
 	out_tangent->u = x[0];
 	out_tangent->v = x[1];
 	out_tangent->t = x[2];
@@ -1244,7 +1244,7 @@ qaws_status qaws_surface_curve_point_adjoint(
 	tau[1] = -adjoint->v;
 	tau[2] = -(adjoint->t + qaws_v3_dot(adjoint->position, s.cj.d[1]));
 	if (!s.singular)
-		small_solve(s.J, 3, 1, tau, lam);
+		small_solve(s.J[0], 3, 1, tau, lam);
 	l = v3_make(lam[0], lam[1], lam[2]);
 	if (surface_adjoint)
 	{

@@ -444,8 +444,6 @@ static qaws_status svg_export_bezier(qaws_curve const* curve, svg_buf* b)
 		unsigned int npts = 4 * deg;
 		unsigned int i;
 		qaws_eval_result_2d r;
-		qaws_vec2 prev;
-		prev = cp[0];
 		for (i = 1; i <= npts; i++)
 		{
 			qaws_scalar t = (qaws_scalar)i / (qaws_scalar)npts;

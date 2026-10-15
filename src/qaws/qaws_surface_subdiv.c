@@ -1152,7 +1152,7 @@ static int sample_mesh_to_grid(
 					unsigned int ia = m->faces[best_offset + 0];
 					unsigned int ib = m->faces[best_offset + 1];
 					unsigned int ic = m->faces[best_offset + 2];
-					qaws_scalar l0, l1, l2;
+					qaws_scalar l0 = QAWS_ZERO, l1 = QAWS_ZERO, l2 = QAWS_ZERO;
 
 					barycentric_2d(
 						gu, gv,

@@ -15,54 +15,6 @@
 /*  Horner evaluation helpers                                                  */
 /* -------------------------------------------------------------------------- */
 
-/* Evaluate polynomial position using Horner's method for one component.
- * coeffs: pointer to the first scalar of the desired component (stride = dim_count)
- * degree: polynomial degree
- * dim_count: number of scalars per coefficient (2 or 3)
- * t: parameter value */
-static qaws_scalar poly_horner(
-	qaws_scalar const* coeffs, unsigned int degree,
-	unsigned int dim_count, qaws_scalar t)
-{
-	int i;
-	qaws_scalar result = coeffs[degree * dim_count];
-	for (i = (int)degree - 1; i >= 0; i--)
-		result = result * t + coeffs[(unsigned int)i * dim_count];
-	return result;
-}
-
-/* Evaluate first derivative using Horner's method for one component.
- * P'(t) = c1 + 2*c2*t + 3*c3*t^2 + ... = sum_{i=1}^{degree} i * c_i * t^{i-1}
- * Horner form: c1 + t*(2*c2 + t*(3*c3 + ...)) */
-static qaws_scalar poly_horner_d1(
-	qaws_scalar const* coeffs, unsigned int degree,
-	unsigned int dim_count, qaws_scalar t)
-{
-	int i;
-	qaws_scalar result;
-	if (degree < 1) return QAWS_ZERO;
-	result = (qaws_scalar)degree * coeffs[degree * dim_count];
-	for (i = (int)degree - 1; i >= 1; i--)
-		result = result * t + (qaws_scalar)i * coeffs[(unsigned int)i * dim_count];
-	return result;
-}
-
-/* Evaluate second derivative using Horner's method for one component.
- * P''(t) = 2*c2 + 6*c3*t + 12*c4*t^2 + ... = sum_{i=2}^{degree} i*(i-1) * c_i * t^{i-2}
- * Horner form: 2*c2 + t*(6*c3 + t*(12*c4 + ...)) */
-static qaws_scalar poly_horner_d2(
-	qaws_scalar const* coeffs, unsigned int degree,
-	unsigned int dim_count, qaws_scalar t)
-{
-	int i;
-	qaws_scalar result;
-	if (degree < 2) return QAWS_ZERO;
-	result = (qaws_scalar)(degree * (degree - 1)) * coeffs[degree * dim_count];
-	for (i = (int)degree - 1; i >= 2; i--)
-		result = result * t + (qaws_scalar)(i * (i - 1)) * coeffs[(unsigned int)i * dim_count];
-	return result;
-}
-
 /* Evaluate third derivative using Horner's method for one component.
  * P'''(t) = 6*c3 + 24*c4*t + ... = sum_{i=3}^{degree} i*(i-1)*(i-2) * c_i * t^{i-3}
  * Horner form: 6*c3 + t*(24*c4 + ...) */

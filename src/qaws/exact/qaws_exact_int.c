@@ -214,7 +214,7 @@ static void ei_mul64(uint64_t a, uint64_t b, uint64_t* hi, uint64_t* lo)
 #if defined(_MSC_VER) && defined(_M_X64)
 	*lo = _umul128(a, b, hi);
 #else
-	unsigned __int128 p = (unsigned __int128)a * b;
+	__extension__ unsigned __int128 p = (unsigned __int128)a * b;
 	*lo = (uint64_t)p;
 	*hi = (uint64_t)(p >> 64);
 #endif

@@ -271,7 +271,7 @@ static void compute_circular_subcurve(
 		qaws_scalar mid_jk2[2], mid_ij2[2], dir_jk2[2], dir_ij2[2];
 		qaws_scalar perp_jk2[2], perp_ij2[2];
 		qaws_scalar diff2[2], center2x, center2y;
-		qaws_scalar ctj2[2], ctk2[2];
+		qaws_scalar ctj2[2];
 		qaws_scalar denom_cross, len_jk2, len_ij2;
 
 		if (!compute_osculating_frame(pj, pi, pk, frame_u, frame_w)) {
@@ -324,8 +324,6 @@ static void compute_circular_subcurve(
 
 		ctj2[0] = pj2x - center2x;
 		ctj2[1] = pj2y - center2y;
-		ctk2[0] = pk2x - center2x;
-		ctk2[1] = pk2y - center2y;
 
 		sc->radius = (qaws_scalar)sqrt((double)(ctj2[0]*ctj2[0] + ctj2[1]*ctj2[1]));
 		if (sc->radius < (qaws_scalar)1e-10) {

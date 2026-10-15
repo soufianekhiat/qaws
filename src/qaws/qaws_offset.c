@@ -840,7 +840,7 @@ static double os_bez_project(double const* b, double const* q, double u, unsigne
 
 /* the signed distances of points X to cubic b (their parameters u refined
    in place), and their sum of squares */
-static double os_bez_resid(double const* b, double const (*X)[2], double* u, unsigned int n, double* res)
+static double os_bez_resid(double const* b, double (*X)[2], double* u, unsigned int n, double* res)
 {
 	unsigned int i;
 	double s = 0;

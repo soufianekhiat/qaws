@@ -240,12 +240,6 @@ static unsigned int tm_back(qaws_mesh_2d const* m, unsigned int t, unsigned int 
 	return TM_NONE;
 }
 
-static void tm_link(qaws_mesh_2d* m, unsigned int t, unsigned int k, unsigned int u, unsigned int j)
-{
-	m->t[t].n[k] = u;
-	if (u != TM_NONE) m->t[u].n[j] = t;
-}
-
 /* ======================================================================== */
 /*  Location and insertion                                                  */
 /* ======================================================================== */

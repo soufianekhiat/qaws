@@ -5068,12 +5068,9 @@ qaws_status qaws_surface_compute_geodesic_flip(
 						   interpolating the UV of the edge it lies on.
 						   For simplicity, use the midpoint's distance ratio
 						   to update the vertex position on the surface. */
-						qaws_scalar mid_2d[2], t_along;
+						qaws_scalar t_along;
 						qaws_scalar new_u, new_v;
 						qaws_surface_eval_result sr;
-
-						mid_2d[0] = (prev_2d[0] + next_2d[0]) * QAWS_LITERAL(0.5);
-						mid_2d[1] = (prev_2d[1] + next_2d[1]) * QAWS_LITERAL(0.5);
 
 						/* Express midpoint as fraction along v_cur's position:
 						   project onto line from v_cur to midpoint.

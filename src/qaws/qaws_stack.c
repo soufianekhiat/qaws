@@ -471,6 +471,7 @@ static qaws_status sk_match(qaws_stack_2d const* st, unsigned int const* idx, do
 		int is_pt[4];
 		sk_struct tpl, si;
 		int have_tpl = 0, same = 1;
+		memset(&tpl, 0, sizeof(tpl));
 		for (i = 0; i < n; i++)
 		{
 			qaws_path_2d const* p = &st->levels[idx[i]].paths[pairs[i * m + j]];

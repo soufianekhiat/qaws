@@ -4987,7 +4987,6 @@ qaws_status qaws_shell_region_offset(qaws_shell_region const* region, qaws_scala
 				qaws_shell_curve *loop = NULL, *r0 = NULL, *r1 = NULL;
 				qaws_shell_region* g = NULL;
 				qaws_eval_result_2d e;
-				double s0[2];
 				if (sh_not_boundary(a, f, cv))
 					continue;
 				if (p.curve_count == 1)
@@ -5096,7 +5095,6 @@ qaws_status qaws_shell_region_offset(qaws_shell_region const* region, qaws_scala
 				/* the join at the piece's start: a disk of the distance (round
 				   joins; inside a corner it adds nothing) */
 				qaws_curve_evaluate_2d(cv, rg.min_value, QAWS_EVAL_FLAG_POSITION, &e);
-				s0[0] = e.position.x; s0[1] = e.position.y;
 				if (st == QAWS_STATUS_OK)
 				{
 					qaws_shell_point c;
