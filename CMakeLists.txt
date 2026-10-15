@@ -413,6 +413,20 @@ if(QAWS_BUILD_EXAMPLES)
     RUNTIME_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/working_dir"
     RUNTIME_OUTPUT_DIRECTORY_RELEASE "${PROJECT_SOURCE_DIR}/working_dir"
     RUNTIME_OUTPUT_DIRECTORY_DEBUG "${PROJECT_SOURCE_DIR}/working_dir")
+  add_executable(qaws_repulsive_paper examples/repulsive_paper.c)
+  target_link_libraries(qaws_repulsive_paper PRIVATE Qaws::qaws)
+  target_include_directories(qaws_repulsive_paper PRIVATE "${PROJECT_SOURCE_DIR}/src/qaws")
+  if(NOT WIN32)
+    find_package(Threads REQUIRED)
+    target_link_libraries(qaws_repulsive_paper PRIVATE Threads::Threads)
+  endif()
+  if(MSVC)
+    target_compile_definitions(qaws_repulsive_paper PRIVATE _CRT_SECURE_NO_WARNINGS)
+  endif()
+  set_target_properties(qaws_repulsive_paper PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/working_dir"
+    RUNTIME_OUTPUT_DIRECTORY_RELEASE "${PROJECT_SOURCE_DIR}/working_dir"
+    RUNTIME_OUTPUT_DIRECTORY_DEBUG "${PROJECT_SOURCE_DIR}/working_dir")
   if(QAWS_ENABLE_EXACT)
     add_executable(qaws_exact_showcase examples/exact_showcase.c)
     target_link_libraries(qaws_exact_showcase PRIVATE Qaws::qaws)

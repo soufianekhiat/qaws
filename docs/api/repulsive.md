@@ -688,6 +688,27 @@ three strands fill a square.
 | A knot relaxed without crossings | 32 (a collision-checked trefoil), 35 (a 600-edge torus knot) |
 | A constrained surface optimized near another surface | 33 |
 
+## The paper's figures
+
+`examples/repulsive_paper.c` (target `qaws_repulsive_paper`) reproduces
+figures of Repulsive Curves from the paper's own scenes, copied under
+their MIT license into `examples/data/repulsive_curves`. Each figure uses
+the scene's curve, its (alpha, beta), and its constraints: every edge's
+length and the barycenter. The dense mode runs until it converges
+(stationarity 1e-4), on a 20-thread executor:
+
+| Figure | Scene | Vertices | Steps | Energy | Time |
+|---|---|---|---|---|---|
+| 2 | Freedman's unknot to the circle (alpha 2, beta 4.5) | 592 | 450 | 2281 -> 6.08 | 247 s |
+| 27 | K5 embedded in space (alpha 3, beta 6) | 635 | 235 | 1332 -> 1326 | 123 s |
+| 27 | K3,3 embedded in space | 573 | 394 | 420 -> 359 | 136 s |
+| 33 | an earbud cable untangled | 529 | 585 | -> 104.7 | 159 s |
+| 26 | a tree drawn in the plane (2D) | 793 | 464 | 1.4e5 -> 1.98e4 | 337 s |
+
+Not reproduced: the scenes that need terms Qaws does not have, namely
+length or length-difference objectives (TangentInterpolation,
+CurveInterpolation, PathPlanning) and repulsion from a surface.
+
 ## CPU performance
 
 The ideas come from the acceleration structures of TinyBVH, nanoflann and
