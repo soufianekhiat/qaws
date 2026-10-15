@@ -19,6 +19,7 @@
 #include "qaws_surface_region.h"
 #include "qaws_surface_bezier.h"
 #include "qaws_surface_bspline.h"
+#include "qaws_surface_bilinear.h"
 #include "qaws_surface_revolution.h"
 #include <math.h>
 #include <string.h>
@@ -229,8 +230,12 @@ static void test_polygons(void)
 	qaws_surface_path p;
 	qaws_surface_region* rg = NULL;
 	qaws_scalar A = 0, lo = 0, hi = 0;
-	qaws_status st = QAWS_STATUS_OK, sc, sa;
-	unsigned int i, j, n = 0, nf = 0, ni;
+	qaws_status st = QAWS_STATUS_OK, sc, sa, nc;
+	unsigned int i, j, n = 0, nf = 0, ni, m = 0;
+	static unsigned int const corner[6] = { 1, 2, 0, 4, 5, 3 };   /* each triangle closed: an edge ends where the next starts */
+	/* (in f32 the edges' data, a float fit's start and tangent, miss the corners by about
+	   1e-5: tubes that wide, so a corner's two tubes meet) */
+	qaws_scalar const tube = (qaws_scalar)(GET_F32 ? 1e-4 : 0);
 	char msg[300];
 	for (i = 0; i < 6 && st == QAWS_STATUS_OK; i++)
 	{
@@ -245,7 +250,11 @@ static void test_polygons(void)
 		g[i].start = get_uv(a[0], a[1]); g[i].direction = e.d1;
 		qaws_surface_curve_get_length(c[i], &g[i].length);
 	}
-	sc = st ? st : qaws_surface_geodesics_certify(s, g, 6, 0, &n);
+	sc = st ? st : qaws_surface_geodesics_certify(s, g, 6, corner, tube, &n);
+	/* the same corners undeclared: ends a hair apart, never taken as shared */
+	nc = st ? st : qaws_surface_geodesics_certify(s, g, 6, NULL, tube, &m);
+	sprintf(msg, "certified arrangement: the triangles' corners undeclared fail (status %d)", (int)nc);
+	TEST_ASSERT(nc == QAWS_STATUS_CERTIFICATION_FAILED, msg);
 	for (i = 0; i < 3 && st == QAWS_STATUS_OK; i++)
 		for (j = 3; j < 6; j++)
 			if (qaws_surface_curve_intersect(c[i], c[j], x, 8, &ni) == QAWS_STATUS_OK)
@@ -264,6 +273,49 @@ static void test_polygons(void)
 	TEST_ASSERT(sa == QAWS_STATUS_OK && lo <= A && A <= hi && hi - lo < 0.06 * A, msg);
 	qaws_surface_region_destroy(rg);
 	for (i = 0; i < 6; i++) qaws_surface_curve_destroy(c[i]);
+	qaws_surface_destroy(s);
+}
+
+/* the identity plane: straight segments, their exact geometry known */
+static qaws_geodesic_segment get_line(double x0, double y0, double x1, double y1)
+{
+	qaws_geodesic_segment g;
+	g.start = get_uv(x0, y0); g.direction = get_uv(x1 - x0, y1 - y0);
+	g.length = (qaws_scalar)hypot(x1 - x0, y1 - y0);
+	return g;
+}
+
+/* two false certifications found in review, kept as regressions:
+   - a C (a square less a cavity reached by a passage 0.002 wide): the
+     tubes' cells close the passage, so the cavity was taken as inside;
+     its area 0.4796 must lie in the bounds;
+   - two segments crossing 5e-8 from one's end and the other's start: their
+     ends near was taken as a shared corner, the crossing dropped; it must
+     be counted or fail, never certified as none */
+static void test_review_cases(void)
+{
+	static double const C[12][2] = { { 0.1, 0.1 }, { 0.9, 0.1 }, { 0.9, 0.9 }, { 0.1, 0.9 }, { 0.1, 0.501 }, { 0.3, 0.501 },
+		{ 0.3, 0.7 }, { 0.7, 0.7 }, { 0.7, 0.3 }, { 0.3, 0.3 }, { 0.3, 0.499 }, { 0.1, 0.499 } };
+	qaws_surface_bilinear_desc d;
+	qaws_surface* s = NULL;
+	qaws_geodesic_segment g[12], h[2];
+	qaws_scalar lo = 0, hi = 0;
+	qaws_status sa, sc;
+	unsigned int i, n = 99;
+	char msg[300];
+	memset(&d, 0, sizeof(d));
+	d.p10.x = 1; d.p01.y = 1; d.p11.x = 1; d.p11.y = 1;
+	qaws_surface_create_bilinear(&d, &s);
+	for (i = 0; i < 12; i++) g[i] = get_line(C[i][0], C[i][1], C[(i + 1) % 12][0], C[(i + 1) % 12][1]);
+	sa = qaws_surface_geodesic_polygon_area(s, g, 12, 0, 0, &lo, &hi);
+	sprintf(msg, "certified area: a C whose passage the grid closes, [%.6f, %.6f] (status %d) holding 0.4796", (double)lo, (double)hi, (int)sa);
+	TEST_ASSERT(sa == QAWS_STATUS_CERTIFICATION_FAILED || (sa == QAWS_STATUS_OK && lo <= 0.4796 && 0.4796 <= hi), msg);
+	TEST_ASSERT(sa == QAWS_STATUS_OK && hi - lo < 0.05, "certified area: the C's bounds proven, not refused");
+	h[0] = get_line(0.2, 0.5, 0.5, 0.5);
+	h[1] = get_line(0.49999995, 0.49999995, 0.49999995, 0.79999995);
+	sc = qaws_surface_geodesics_certify(s, h, 2, NULL, 0, &n);
+	sprintf(msg, "certified arrangement: a crossing 5e-8 from the ends, %u (status %d), never certified as none", n, (int)sc);
+	TEST_ASSERT(sc == QAWS_STATUS_CERTIFICATION_FAILED || (sc == QAWS_STATUS_OK && n == 1), msg);
 	qaws_surface_destroy(s);
 }
 
@@ -304,6 +356,7 @@ int test_109_geodesic_enclosure_main(void)
 	test_closed_forms();
 	test_bump();
 	test_polygons();
+	test_review_cases();
 	test_refusals();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;

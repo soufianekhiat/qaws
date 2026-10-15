@@ -74,11 +74,14 @@ static ge_iv ge_mul(ge_iv a, ge_iv b)
 
 static ge_iv ge_scl(ge_iv a, double k) { return ge_mul(a, ge_pt(k)); }
 
-/* a / b; 0 when b holds 0 */
+/* a / b; 0 when b holds 0 (r then the whole line, still an enclosure) */
 static int ge_div(ge_iv a, ge_iv b, ge_iv* r)
 {
 	if (!(b.lo > 0 || b.hi < 0))
+	{
+		r->lo = -HUGE_VAL; r->hi = HUGE_VAL;
 		return 0;
+	}
 	*r = ge_mul(a, ge_mk(ge_dn(1 / b.hi), ge_up(1 / b.lo)));
 	return 1;
 }
@@ -1066,7 +1069,7 @@ static int ge_side(double const* f, ge_iv const* a, ge_iv const* b)
 static int ge_cross_one(qaws_geodesic_enclosure const* a, qaws_geodesic_enclosure const* b, unsigned int i0, unsigned int i1,
 	unsigned int j0, unsigned int j1, int transversal_only)
 {
-	ge_iv WA[2], WB[2], x[2], w[2], y[2], c;
+	ge_iv WA[2] = { { 0, 0 }, { 0, 0 } }, WB[2] = { { 0, 0 }, { 0, 0 } }, x[2], w[2], y[2], c;
 	double e[2], f[2];
 	unsigned int i, j, k;
 	int s0 = 0, s1 = 0, t0 = 0, t1 = 0;
@@ -1121,14 +1124,15 @@ static int ge_cross_one(qaws_geodesic_enclosure const* a, qaws_geodesic_enclosur
 /* the crossings of a and b, as qaws_geodesic_enclosure_cross; shared[k]
    (k < nshared) an end of a (bit 0: its end, else its start) the same point
    as an end of b (bit 1): a stretch reaching both is that meeting, proven
-   the only one there by transversality alone, and not counted */
+   the only one there by transversality alone, and not counted; reached[k] set
+   and cbox[2k..2k+1] the hull of its meeting boxes */
 static qaws_status ge_cross_core(qaws_geodesic_enclosure const* a, qaws_geodesic_enclosure const* b, int const* shared, unsigned int nshared,
-	unsigned int capacity, qaws_vec2* out_lo, qaws_vec2* out_hi, unsigned int* out_count)
+	int* reached, ge_iv* cbox, unsigned int capacity, qaws_vec2* out_lo, qaws_vec2* out_hi, unsigned int* out_count)
 {
 	enum { CH = 32, EXT = 2, GAP = 2 * EXT + 1 };
 	unsigned int nc, i, j, k, count = 0, ci0 = 0, ci1 = 0, cj0 = 0, cj1 = 0, open = 0;
 	unsigned int *jlo, *jhi;
-	ge_iv *cb, *mh, hx[2];
+	ge_iv *cb, *mh, hx[2] = { { 0, 0 }, { 0, 0 } };
 	qaws_status st = QAWS_STATUS_OK;
 	if (!a || !b || !out_count || (capacity && (!out_lo || !out_hi)))
 		return QAWS_STATUS_INVALID_ARGUMENT;
@@ -1197,7 +1201,22 @@ static qaws_status ge_cross_core(qaws_geodesic_enclosure const* a, qaws_geodesic
 			unsigned int q;
 			int at_end = 0;
 			for (q = 0; q < nshared; q++)
-				at_end |= ((shared[q] & 1) ? i1 == a->n - 1 : i0 == 0) && ((shared[q] & 2) ? j1 == b->n - 1 : j0 == 0);
+				if (((shared[q] & 1) ? i1 == a->n - 1 : i0 == 0) && ((shared[q] & 2) ? j1 == b->n - 1 : j0 == 0))
+				{
+					at_end = 1;
+					if (reached)
+					{
+						/* the corner: the meeting, and both ends' step boxes there
+						   (they hold the true end and the declared point) */
+						ge_iv ea[2], eb[2];
+						ge_step_box(a, (shared[q] & 1) ? a->n - 1 : 0, ea, NULL);
+						ge_step_box(b, (shared[q] & 2) ? b->n - 1 : 0, eb, NULL);
+						ea[0] = ge_hull(ge_hull(ea[0], eb[0]), hx[0]); ea[1] = ge_hull(ge_hull(ea[1], eb[1]), hx[1]);
+						if (!reached[q]) { cbox[2 * q] = ea[0]; cbox[2 * q + 1] = ea[1]; }
+						else { cbox[2 * q] = ge_hull(cbox[2 * q], ea[0]); cbox[2 * q + 1] = ge_hull(cbox[2 * q + 1], ea[1]); }
+						reached[q] = 1;
+					}
+				}
 			if (!ge_cross_one(a, b, i0, i1, j0, j1, at_end))
 				st = QAWS_STATUS_CERTIFICATION_FAILED;
 			else if (!at_end)
@@ -1227,7 +1246,7 @@ static qaws_status ge_cross_core(qaws_geodesic_enclosure const* a, qaws_geodesic
 qaws_status qaws_geodesic_enclosure_cross(qaws_geodesic_enclosure const* a, qaws_geodesic_enclosure const* b, unsigned int capacity,
 	qaws_vec2* out_lo, qaws_vec2* out_hi, unsigned int* out_count)
 {
-	return ge_cross_core(a, b, NULL, 0, capacity, out_lo, out_hi, out_count);
+	return ge_cross_core(a, b, NULL, 0, NULL, NULL, capacity, out_lo, out_hi, out_count);
 }
 
 /* ------------------------------------------------------------------------ */
@@ -1235,67 +1254,67 @@ qaws_status qaws_geodesic_enclosure_cross(qaws_geodesic_enclosure const* a, qaws
 /* ------------------------------------------------------------------------ */
 
 qaws_status qaws_surface_geodesics_certify(qaws_surface const* surface, qaws_geodesic_segment const* segments, unsigned int count,
-	qaws_scalar width, unsigned int* out_crossings)
+	unsigned int const* next, qaws_scalar width, unsigned int* out_crossings)
 {
 	qaws_geodesic_enclosure** e;
 	qaws_surface_curve** img;
-	qaws_vec2* ends;
 	unsigned int i, j, total = 0;
-	double diag;
 	qaws_status st = QAWS_STATUS_OK;
+	/* the images' tolerance (qaws_surface_curve_create_geodesic_ray's default): a corner's box
+	   grown by it holds the images' meeting there */
+	double grow;
 	if (!surface || (count && !segments))
 		return QAWS_STATUS_INVALID_ARGUMENT;
+	grow = 10 * (sizeof(qaws_scalar) == 4 ? 1e-5 : 1e-10) * hypot((double)surface->u_range.max_value - surface->u_range.min_value,
+		(double)surface->v_range.max_value - surface->v_range.min_value);
+	for (i = 0; next && i < count; i++)
+		if (next[i] != QAWS_GEODESIC_NO_CORNER && (next[i] >= count || next[i] == i))
+			return QAWS_STATUS_INVALID_ARGUMENT;
 	e = (qaws_geodesic_enclosure**)calloc(count + 1, sizeof(*e));
 	img = (qaws_surface_curve**)calloc(count + 1, sizeof(*img));
-	ends = (qaws_vec2*)calloc(2 * count + 1, sizeof(qaws_vec2));
-	if (!e || !img || !ends)
+	if (!e || !img)
 	{
-		free(e); free(img); free(ends);
+		free(e); free(img);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
-	diag = hypot((double)surface->u_range.max_value - surface->u_range.min_value, (double)surface->v_range.max_value - surface->v_range.min_value);
 	/* each segment enclosed, and as the float geodesic its (u, v) image */
 	for (i = 0; i < count && st == QAWS_STATUS_OK; i++)
 	{
-		qaws_range rg;
-		qaws_vec2 q;
 		if ((st = qaws_surface_geodesic_enclose(surface, segments[i].start, segments[i].direction, segments[i].length, width, &e[i])) != QAWS_STATUS_OK)
 			break;
-		if ((st = qaws_surface_curve_create_geodesic_ray(surface, segments[i].start, segments[i].direction, segments[i].length, 0, &img[i])) != QAWS_STATUS_OK)
-			break;
-		rg = qaws_curve_get_parameter_range(qaws_surface_curve_get_uv(img[i]));
-		qaws_surface_curve_evaluate(img[i], rg.max_value, &q, NULL);
-		ends[2 * i] = segments[i].start;
-		ends[2 * i + 1] = q;
+		st = qaws_surface_curve_create_geodesic_ray(surface, segments[i].start, segments[i].direction, segments[i].length, 0, &img[i]);
 	}
 	for (i = 0; i < count && st == QAWS_STATUS_OK; i++)
 		for (j = i + 1; j < count && st == QAWS_STATUS_OK; j++)
 		{
-			int shared[4];
-			unsigned int ns = 0, ca, cb, nc = 0, ni = 0, k, q, m;
+			int shared[3], met[3] = { 0, 0, 0 };
+			ge_iv cbox[6];
+			unsigned int ns = 0, nc = 0, ni = 0, k, q, m;
 			qaws_vec2 lo[64], hi[64];
 			qaws_surface_crossing x[64];
-			double near = (sizeof(qaws_scalar) == 4 ? 1e-4 : 1e-7) * diag;
-			/* the ends they share (a polygon's corners) */
-			for (ca = 0; ca < 2; ca++)
-				for (cb = 0; cb < 2; cb++)
-					if (hypot((double)ends[2 * i + ca].x - ends[2 * j + cb].x, (double)ends[2 * i + ca].y - ends[2 * j + cb].y) <= near)
-						shared[ns++] = (int)(ca | (cb << 1));
-			if ((st = ge_cross_core(e[i], e[j], shared, ns, 64, lo, hi, &nc)) != QAWS_STATUS_OK)
+			/* the ends they share: declared corners (one's end the other's
+			   start), or starts that are the same point exactly; nearness
+			   alone is never taken for a shared end */
+			if (next && next[i] == j) shared[ns++] = 1;
+			if (next && next[j] == i) shared[ns++] = 2;
+			if (segments[i].start.x == segments[j].start.x && segments[i].start.y == segments[j].start.y) shared[ns++] = 0;
+			if ((st = ge_cross_core(e[i], e[j], shared, ns, met, cbox, 64, lo, hi, &nc)) != QAWS_STATUS_OK)
 				break;
-			/* the images: as many crossings, away from the shared ends, each
-			   in a certified box */
-			if ((st = qaws_surface_curve_intersect(img[i], img[j], x, 64, &ni)) != QAWS_STATUS_OK)
+			/* a declared corner the tubes do not reach: not closed there */
+			for (q = 0; q < ns; q++)
+				if (!met[q])
+					st = QAWS_STATUS_CERTIFICATION_FAILED;
+			/* the images: as many crossings outside the corners' meeting boxes,
+			   each in a certified box */
+			if (st != QAWS_STATUS_OK || (st = qaws_surface_curve_intersect(img[i], img[j], x, 64, &ni)) != QAWS_STATUS_OK)
 				break;
 			for (k = 0, m = 0; k < ni && k < 64; k++)
 			{
-				int at_end = 0, in = 0;
+				int at_corner = 0, in = 0;
+				double px = (double)x[k].point.x, py = (double)x[k].point.y;
 				for (q = 0; q < ns; q++)
-				{
-					qaws_vec2 p = ends[2 * i + (shared[q] & 1)];
-					at_end |= hypot((double)x[k].point.x - p.x, (double)x[k].point.y - p.y) <= 1e3 * near;
-				}
-				if (at_end)
+					at_corner |= px >= cbox[2 * q].lo - grow && px <= cbox[2 * q].hi + grow && py >= cbox[2 * q + 1].lo - grow && py <= cbox[2 * q + 1].hi + grow;
+				if (at_corner)
 					continue;
 				for (q = 0; q < nc && q < 64; q++)
 					in |= x[k].point.x >= lo[q].x && x[k].point.x <= hi[q].x && x[k].point.y >= lo[q].y && x[k].point.y <= hi[q].y;
@@ -1303,7 +1322,7 @@ qaws_status qaws_surface_geodesics_certify(qaws_surface const* surface, qaws_geo
 					st = QAWS_STATUS_CERTIFICATION_FAILED;
 				m++;
 			}
-			if (st == QAWS_STATUS_OK && m != nc)
+			if (st == QAWS_STATUS_OK && (m != nc || ni > 64))
 				st = QAWS_STATUS_CERTIFICATION_FAILED;
 			total += nc;
 		}
@@ -1312,7 +1331,7 @@ qaws_status qaws_surface_geodesics_certify(qaws_surface const* surface, qaws_geo
 		qaws_geodesic_enclosure_destroy(e[i]);
 		qaws_surface_curve_destroy(img[i]);
 	}
-	free(e); free(img); free(ends);
+	free(e); free(img);
 	if (out_crossings) *out_crossings = total;
 	return st;
 }
@@ -1340,14 +1359,44 @@ static int ge_area_elem(ge_surf const* s, ge_iv bu, ge_iv bv, ge_iv* out)
 	return 1;
 }
 
+/* the winding number of the closed polyline q (n points) round p, with each
+   side test proven (intervals); 0 with *ok = 0 when one cannot be told */
+static int ge_winding(double const* q, unsigned int n, double const* p, int* ok)
+{
+	unsigned int k;
+	int w = 0;
+	*ok = 1;
+	for (k = 0; k < n; k++)
+	{
+		double const* a = q + 2 * k;
+		double const* b = q + 2 * ((k + 1) % n);
+		ge_iv o;
+		if ((a[1] <= p[1]) == (b[1] <= p[1]))
+			continue;
+		/* which side of a -> b p lies on */
+		o = ge_sub(ge_mul(ge_sub(ge_pt(b[0]), ge_pt(a[0])), ge_sub(ge_pt(p[1]), ge_pt(a[1]))),
+			ge_mul(ge_sub(ge_pt(p[0]), ge_pt(a[0])), ge_sub(ge_pt(b[1]), ge_pt(a[1]))));
+		if (!(o.lo > 0 || o.hi < 0))
+		{
+			*ok = 0;
+			return 0;
+		}
+		if (a[1] <= p[1] && o.lo > 0) w++;
+		else if (a[1] > p[1] && o.hi < 0) w--;
+	}
+	return w;
+}
+
 qaws_status qaws_surface_geodesic_polygon_area(qaws_surface const* surface, qaws_geodesic_segment const* segments, unsigned int count,
 	qaws_scalar width, unsigned int resolution, qaws_scalar* out_lo, qaws_scalar* out_hi)
 {
 	ge_surf s;
 	qaws_geodesic_enclosure** e;
-	unsigned char* cell = NULL;         /* 0 free, 1 met by a tube, 2 outside */
+	double* box = NULL;                 /* the chain: u lo, hi, v lo, hi each */
+	double* q = NULL;                   /* the polyline through the chain's joins */
+	unsigned char* cell = NULL;         /* 0 free, 1 met by the chain, 2 outside, 3 inside */
 	unsigned int* stack = NULL;
-	unsigned int i, j, k, N = resolution ? resolution : 256, nu, nv, top = 0, inside = 0;
+	unsigned int i, j, k, N = resolution ? resolution : 256, nu, nv, nb = 0, top;
 	double bu0 = 1e300, bu1 = -1e300, bv0 = 1e300, bv1 = -1e300, hu, hv;
 	ge_iv lo = ge_pt(0), hi = ge_pt(0);
 	qaws_status st;
@@ -1361,21 +1410,59 @@ qaws_status qaws_surface_geodesic_polygon_area(qaws_surface const* surface, qaws
 		ge_surf_free(&s);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
-	/* the tubes, and the box round them */
 	for (i = 0; i < count && st == QAWS_STATUS_OK; i++)
-		if ((st = qaws_surface_geodesic_enclose(surface, segments[i].start, segments[i].direction, segments[i].length, width, &e[i])) == QAWS_STATUS_OK)
-			for (k = 0; k < e[i]->n; k++)
-			{
-				ge_iv x[2];
-				ge_step_box(e[i], k, x, NULL);
-				if (x[0].lo < bu0) bu0 = x[0].lo;
-				if (x[0].hi > bu1) bu1 = x[0].hi;
-				if (x[1].lo < bv0) bv0 = x[1].lo;
-				if (x[1].hi > bv1) bv1 = x[1].hi;
-			}
+	{
+		st = qaws_surface_geodesic_enclose(surface, segments[i].start, segments[i].direction, segments[i].length, width, &e[i]);
+		if (st == QAWS_STATUS_OK && e[i]->n == 0)
+			st = QAWS_STATUS_NUMERICAL_FAILURE;
+		if (st == QAWS_STATUS_OK)
+			nb += e[i]->n + 1;
+	}
 	if (st != QAWS_STATUS_OK)
 		goto done;
-	/* a grid over it, a cell wider on each side (the outside's ring) */
+	/* the chain of boxes round the curve: each segment's step boxes, then the
+	   box from its last one to the next segment's start (the gap between the
+	   true end and that start, closed by a straight (u, v) segment) */
+	box = (double*)malloc(sizeof(double) * 4 * nb);
+	q = (double*)malloc(sizeof(double) * 2 * nb);
+	if (!box || !q)
+	{
+		st = QAWS_STATUS_ALLOCATION_FAILURE;
+		goto done;
+	}
+	for (i = 0, j = 0; i < count; i++)
+	{
+		qaws_vec2 nx = segments[(i + 1) % count].start;
+		for (k = 0; k < e[i]->n; k++, j++)
+		{
+			ge_iv x[2];
+			ge_step_box(e[i], k, x, NULL);
+			box[4 * j] = x[0].lo; box[4 * j + 1] = x[0].hi; box[4 * j + 2] = x[1].lo; box[4 * j + 3] = x[1].hi;
+		}
+		box[4 * j] = fmin(box[4 * j - 4], (double)nx.x); box[4 * j + 1] = fmax(box[4 * j - 3], (double)nx.x);
+		box[4 * j + 2] = fmin(box[4 * j - 2], (double)nx.y); box[4 * j + 3] = fmax(box[4 * j - 1], (double)nx.y);
+		j++;
+	}
+	/* a point in each two consecutive boxes' common part (it holds the
+	   curve's point where one hands over to the next): the polyline through
+	   them runs in the boxes, as the curve does, so it winds round any point
+	   outside them as often as the curve (straight-line homotopy in each
+	   convex box) */
+	for (j = 0; j < nb; j++)
+	{
+		double const* a = box + 4 * ((j + nb - 1) % nb);
+		double const* b = box + 4 * j;
+		double ulo = fmax(a[0], b[0]), uhi = fmin(a[1], b[1]), vlo = fmax(a[2], b[2]), vhi = fmin(a[3], b[3]);
+		if (!(ulo <= uhi && vlo <= vhi))
+		{
+			st = QAWS_STATUS_CERTIFICATION_FAILED;
+			goto done;
+		}
+		q[2 * j] = fmin(fmax(0.5 * (ulo + uhi), ulo), uhi);
+		q[2 * j + 1] = fmin(fmax(0.5 * (vlo + vhi), vlo), vhi);
+		bu0 = fmin(bu0, b[0]); bu1 = fmax(bu1, b[1]); bv0 = fmin(bv0, b[2]); bv1 = fmax(bv1, b[3]);
+	}
+	/* a grid over them, a cell wider on each side */
 	hu = hv = (bu1 - bu0 > bv1 - bv0 ? bu1 - bu0 : bv1 - bv0) / N;
 	nu = (unsigned int)ceil((bu1 - bu0) / hu) + 2; nv = (unsigned int)ceil((bv1 - bv0) / hv) + 2;
 	bu0 -= hu; bv0 -= hv;
@@ -1386,43 +1473,50 @@ qaws_status qaws_surface_geodesic_polygon_area(qaws_surface const* surface, qaws
 		st = QAWS_STATUS_ALLOCATION_FAILURE;
 		goto done;
 	}
-	/* the cells the step boxes meet (a cell more each way: the index's rounding) */
-	for (i = 0; i < count; i++)
-		for (k = 0; k < e[i]->n; k++)
-		{
-			ge_iv x[2];
-			int a0, a1, b0, b1, a, b;
-			ge_step_box(e[i], k, x, NULL);
-			a0 = (int)floor((x[0].lo - bu0) / hu) - 1; a1 = (int)floor((x[0].hi - bu0) / hu) + 1;
-			b0 = (int)floor((x[1].lo - bv0) / hv) - 1; b1 = (int)floor((x[1].hi - bv0) / hv) + 1;
-			for (a = a0 < 0 ? 0 : a0; a <= a1 && a < (int)nu; a++)
-				for (b = b0 < 0 ? 0 : b0; b <= b1 && b < (int)nv; b++)
-					cell[(unsigned int)a * nv + (unsigned int)b] = 1;
-		}
-	/* the outside: the free cells reached from the ring without crossing a tube */
-	for (i = 0; i < nu; i++)
-		for (j = 0; j < nv; j++)
-			if ((i == 0 || j == 0 || i == nu - 1 || j == nv - 1) && !cell[i * nv + j])
-			{
-				cell[i * nv + j] = 2;
-				stack[top++] = i * nv + j;
-			}
-	while (top)
+	/* the cells the boxes meet (a cell more each way: the index's rounding) */
+	for (j = 0; j < nb; j++)
 	{
-		unsigned int c = stack[--top], ci = c / nv, cj = c % nv, nb[4], m;
-		nb[0] = ci > 0 ? c - nv : c; nb[1] = ci + 1 < nu ? c + nv : c;
-		nb[2] = cj > 0 ? c - 1 : c; nb[3] = cj + 1 < nv ? c + 1 : c;
-		for (m = 0; m < 4; m++)
-			if (!cell[nb[m]])
-			{
-				cell[nb[m]] = 2;
-				stack[top++] = nb[m];
-			}
+		double const* b = box + 4 * j;
+		int a0 = (int)floor((b[0] - bu0) / hu) - 1, a1 = (int)floor((b[1] - bu0) / hu) + 1;
+		int b0 = (int)floor((b[2] - bv0) / hv) - 1, b1 = (int)floor((b[3] - bv0) / hv) + 1, a, c;
+		for (a = a0 < 0 ? 0 : a0; a <= a1 && a < (int)nu; a++)
+			for (c = b0 < 0 ? 0 : b0; c <= b1 && c < (int)nv; c++)
+				cell[(unsigned int)a * nv + (unsigned int)c] = 1;
 	}
-	/* the inside's free cells count in both bounds, the tubes' in the upper.
-	   shortcut: a free pocket cut off by the tubes is taken as inside (true
-	   for a simple polygon whose tubes are thinner than its narrowest part),
-	   not proven by a winding number; upgrade if wide tubes meet */
+	/* each free component: its winding number, proven at one cell's centre
+	   (no box meets the component, so the curve's winding is the same over it) */
+	for (i = 0; i < nu * nv && st == QAWS_STATUS_OK; i++)
+	{
+		double p[2];
+		int ok, w;
+		unsigned char mark;
+		if (cell[i])
+			continue;
+		p[0] = bu0 + hu * (i / nv + 0.5); p[1] = bv0 + hv * (i % nv + 0.5);
+		w = ge_winding(q, nb, p, &ok);
+		if (!ok)
+		{
+			st = QAWS_STATUS_CERTIFICATION_FAILED;
+			break;
+		}
+		mark = w ? 3 : 2;
+		cell[i] = mark;
+		top = 0;
+		stack[top++] = i;
+		while (top)
+		{
+			unsigned int c = stack[--top], ci = c / nv, cj = c % nv, nbr[4], m;
+			nbr[0] = ci > 0 ? c - nv : c; nbr[1] = ci + 1 < nu ? c + nv : c;
+			nbr[2] = cj > 0 ? c - 1 : c; nbr[3] = cj + 1 < nv ? c + 1 : c;
+			for (m = 0; m < 4; m++)
+				if (!cell[nbr[m]])
+				{
+					cell[nbr[m]] = mark;
+					stack[top++] = nbr[m];
+				}
+		}
+	}
+	/* inside cells count in both bounds, the boxes' cells in the upper */
 	for (i = 0; i < nu && st == QAWS_STATUS_OK; i++)
 		for (j = 0; j < nv; j++)
 		{
@@ -1432,24 +1526,22 @@ qaws_status qaws_surface_geodesic_polygon_area(qaws_surface const* surface, qaws
 			cu = ge_mk(bu0 + hu * i, bu0 + hu * (i + 1));
 			cv = ge_mk(bv0 + hv * j, bv0 + hv * (j + 1));
 			if (!ge_area_elem(&s, cu, cv, &a))
-				continue;   /* (a tube's cell off the domain) */
+				continue;   /* (a box's cell off the domain: the region is inside it) */
 			du = ge_sub(ge_pt(cu.hi), ge_pt(cu.lo)); dv = ge_sub(ge_pt(cv.hi), ge_pt(cv.lo));
 			ar = ge_mul(a, ge_mul(du, dv));
 			hi = ge_add(hi, ge_pt(ar.hi));
-			if (!cell[i * nv + j])
-			{
+			if (cell[i * nv + j] == 3)
 				lo = ge_add(lo, ge_pt(ar.lo));
-				inside++;
-			}
 		}
-	if (!inside)
-		st = QAWS_STATUS_CERTIFICATION_FAILED;   /* (no cell clear inside: tubes too wide or the grid too coarse) */
-	*out_lo = (qaws_scalar)ge_out(lo.lo, 1);
-	*out_hi = (qaws_scalar)ge_out(hi.hi, 0);
+	if (st == QAWS_STATUS_OK)
+	{
+		*out_lo = (qaws_scalar)ge_out(lo.lo, 1);
+		*out_hi = (qaws_scalar)ge_out(hi.hi, 0);
+	}
 done:
 	for (i = 0; i < count; i++)
 		qaws_geodesic_enclosure_destroy(e[i]);
-	free(e); free(cell); free(stack);
+	free(e); free(box); free(q); free(cell); free(stack);
 	ge_surf_free(&s);
 	return st;
 }

@@ -94,6 +94,22 @@ from `tests/reference/101_surface_geodesic.wls`. Figure 16 in
 `examples/better2d_showcase` draws geodesic polygons and circles on a
 sphere, a bicubic patch and a torus, beside their parameter planes.
 
+## What is guaranteed
+
+Numerical results hold to the tolerance; certified results are proven
+under a stated contract or refused. Callers should know which is which:
+
+| Operation | Kind | What it is, and is not |
+|---|---|---|
+| `qaws_surface_distance`, `qaws_surface_curve_create_geodesic` | numerical | the locally shortest geodesic the chord leads to, not the global one |
+| `qaws_surface_curve_create_shortest_path` | numerical | aimed from a grid search's route and a fan of directions; a shorter geodesic in another class can be missed |
+| `qaws_surface_region_mitered_skeleton` | numerical | no split events (exact for convex regions and unsplit reflex fronts) |
+| `qaws_surface_geodesic_enclose`, `qaws_geodesic_enclosure_cross` | certified | boxes proven to hold the true geodesic; crossings proven or `CERTIFICATION_FAILED` |
+| `qaws_surface_geodesics_certify` | certified | crossings proven; corners only where declared, under the corner contract (below) |
+| `qaws_surface_geodesic_polygon_area` | certified | bounds on the region the closed curve (gaps joined) winds round; winding numbers proven |
+| `qaws_surface_clip_exact` | certified | exact topology for the curves as given (geodesics as their images) |
+| Derivatives (`qaws_diff_*`) | | cover curves and surfaces; clipping, meshing and the region operations here have no derivatives |
+
 ## Regions: Booleans and measures
 
 ```c
@@ -381,36 +397,62 @@ a tolerance.
 
 ```c
 qaws_geodesic_segment g[n];   /* start, (u, v) direction, length */
-qaws_surface_geodesics_certify(surface, g, n, 0, &crossings);
+qaws_surface_geodesics_certify(surface, g, n, next, 0, &crossings);   /* next[i]: the segment starting where i ends */
 qaws_surface_geodesic_polygon_area(surface, g, n, 0, 512, &lo, &hi);   /* g round a polygon */
 ```
 
-- **Arrangements.** Every pair of segments' enclosures is crossed. Where
-  two share an end (a polygon's corner, within 1e-7 of the domain, 1e-4 in
-  f32), the stretch reaching both ends is that meeting: it is proven to
-  hold no other by transversality alone, and not counted. The float images
-  (`qaws_surface_curve_create_geodesic_ray`) must cross exactly as often
-  away from the shared ends, each crossing inside a certified box. A
-  Boolean of regions bounded by these segments, taken with
-  `qaws_surface_clip_exact` on the images, then has the true geodesics'
-  topology.
-- **Areas.** A grid over the tubes' box (resolution cells along its longer
-  side). The cells the step boxes meet are the tubes'; the free cells
-  reached from the grid's ring are outside; the other free cells are
-  inside. Each cell counts with the interval of |Su x Sv| over it (the
-  derivatives' interval forms), clamped to the domain: inside cells in
-  both bounds, the tubes' cells in the upper one only. The gap shrinks as
-  the cells do: about the perimeter times a cell, plus the area element's
-  change over a cell.
+- **Arrangements.** Every pair of segments' enclosures is crossed, and the
+  float images (`qaws_surface_curve_create_geodesic_ray`) must cross
+  exactly as often, each crossing inside a certified box. A Boolean of
+  regions bounded by these segments, taken with `qaws_surface_clip_exact`
+  on the images, then has the true geodesics' topology away from the
+  declared corners.
+- **Corners are declared, never inferred.** Ends that are merely near are
+  crossed like any other stretch: if the boxes cannot tell whether two
+  segments cross there, certification fails. A polygon's corner is
+  declared by `next[i] = j` (segment i ends where segment j starts;
+  `QAWS_GEODESIC_NO_CORNER` or `next` NULL for none); two segments whose
+  starts are the same point exactly share it too. A shot segment's true
+  end is not exactly the next start, so a declared corner is a contract
+  that changes the geometry:
+  - the two tubes must meet there, else `CERTIFICATION_FAILED` (in f32,
+    pass a width that covers the data's own error, e.g. 1e-4 for edges
+    taken from float fits);
+  - the stretch where they meet is proven by transversality to hold at
+    most one meeting, and the corner is taken as simple: the segments cut
+    at their meeting, or joined across the gap;
+  - inside the corner's box (the meeting and both end step boxes, grown
+    by the images' tolerance) crossings are neither counted nor checked.
+- **Areas.** The polygon is the closed curve of the segments, each true
+  end joined to the next start by a straight (u, v) segment; its region is
+  where that curve winds a nonzero number of times round.
+  - The chain of boxes round the curve: each segment's step boxes, then
+    the box from its last one to the next start.
+  - A polyline through a point of each two consecutive boxes' common part
+    (it holds the curve's point where one hands over to the next) runs in
+    the boxes as the curve does, so straight-line homotopy in each convex
+    box gives it the same winding number round any point outside them.
+  - A grid over the boxes (resolution cells along the longer side). Each
+    free component of cells (clear of every box) is classified by that
+    winding number at one cell's centre, each side test proven in
+    intervals; when one cannot be told, `CERTIFICATION_FAILED`. A pocket
+    cut off by the tubes is thus classified, not assumed inside.
+  - Each cell counts with the interval of |Su x Sv| over it (the
+    derivatives' interval forms), clamped to the domain: inside cells in
+    both bounds, the boxes' cells in the upper one only. The gap shrinks
+    as the cells do: about the perimeter times a cell, plus the area
+    element's change over a cell.
 
 | Check (test 109) | f64 | f32 |
 |---|---|---|
 | Two geodesic triangles on the bump (edges from `qaws_surface_curve_create_shortest_path`): crossings certified, as many as the float curves' | 2 | 2 |
+| Corners undeclared: the same triangles fail (ends a hair apart are not shared) | yes | yes |
 | A triangle's area, 512 cells: the bounds hold the float region's area, gap under 6% | [0.16793, 0.17617] holds 0.17205 (1.1 s) | same to 1e-5 |
+| Review regression: a C on the identity plane whose passage (0.002 wide) the grid closes: its area 0.4796 in the bounds | [0.4514, 0.4999] at 256 cells, [0.4761, 0.4823] at 2048 | same |
+| Review regression: two segments crossing 5e-8 from one's end and the other's start, no corner declared: never certified as no crossing | fails | fails |
 
-Limits: a free pocket cut off by the tubes is taken as inside, not proven
-by a winding number. That holds for a simple polygon whose tubes are
-thinner than its narrowest part.
+In f32 the triangles take tubes 1e-4 wide (their edges' data miss the
+corners by about 1e-5).
 
 The boxes are computed in double in both builds; f32 builds round the
 reported bounds outward to floats.

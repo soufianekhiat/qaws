@@ -145,25 +145,43 @@ typedef struct qaws_geodesic_segment
 /* The crossings of geodesic segments of a polynomial surface certified
    against their float (u, v) images: each segment enclosed
    (qaws_surface_geodesic_enclose, width as there), every pair's crossings
-   certified (qaws_geodesic_enclosure_cross; where two share an end, a
-   polygon's corner, the stretch there proven to hold no other meeting by
-   transversality), and the images (qaws_surface_curve_create_geodesic_ray)
-   crossing exactly as often away from shared ends, each crossing inside
-   its certified box. Then a Boolean of regions bounded by these segments,
-   taken exactly on their images (qaws_surface_clip_exact), has the true
-   geodesics' topology. out_crossings: the crossings certified (may be
-   NULL). CERTIFICATION_FAILED when a pair cannot be told apart or the
-   images disagree. */
+   certified (qaws_geodesic_enclosure_cross), and the images
+   (qaws_surface_curve_create_geodesic_ray) crossing exactly as often, each
+   crossing inside its certified box.
+   Corners: segments share an end only where declared, never because their
+   ends are near. next[i] = j declares a polygon corner: segment i ends
+   where segment j starts (next NULL, or QAWS_GEODESIC_NO_CORNER: none);
+   two segments whose starts are the same point exactly share it too. A
+   shot segment's true end is not exactly the next start, so a declared
+   corner is a contract that changes the geometry: there the two tubes must
+   meet (else CERTIFICATION_FAILED), the stretch where they meet is proven
+   by transversality to hold at most one meeting, and the corner is taken
+   as simple (the segments cut at their meeting, or joined across the gap
+   when they do not meet). Inside that stretch's box crossings are neither
+   counted nor checked. Undeclared ends are crossed like any other stretch:
+   a segment ending too near another to tell whether they cross fails.
+   Then a Boolean of regions bounded by these segments, taken exactly on
+   their images (qaws_surface_clip_exact), has the true geodesics' topology
+   away from the declared corners. out_crossings: the crossings certified
+   (may be NULL). CERTIFICATION_FAILED when a pair cannot be told apart, a
+   declared corner is not met, or the images disagree. */
+#define QAWS_GEODESIC_NO_CORNER 0xffffffffu
 qaws_status qaws_surface_geodesics_certify(qaws_surface const* surface, qaws_geodesic_segment const* segments, unsigned int count,
-	qaws_scalar width, unsigned int* out_crossings);
+	unsigned int const* next, qaws_scalar width, unsigned int* out_crossings);
 
 /* Rigorous bounds on the surface area of a geodesic polygon of a polynomial
    surface: segments in order round it, each enclosed (width as in
-   qaws_surface_geodesic_enclose). A grid of resolution cells (0: 256)
-   along the longer side of the tubes' box; the cells clear of the tubes and
-   cut off from the outside by them count in both bounds, those the tubes
-   meet in the upper, each by the interval of |Su x Sv| over it.
-   CERTIFICATION_FAILED when no cell is clear inside. */
+   qaws_surface_geodesic_enclose). The polygon is the closed curve of the
+   segments, each true end joined to the next start by a straight (u, v)
+   segment (the gap, a hair long for shot corners); its region is where
+   that curve winds round a nonzero number of times. A grid of resolution
+   cells (0: 256) along the longer side of the boxes round the curve; each
+   free component of cells (clear of every box) is classified by its
+   winding number, proven on a polyline through the boxes' common parts
+   (homotopic to the curve within the boxes), each side test in intervals;
+   inside cells count in both bounds, the boxes' cells in the upper, each
+   by the interval of |Su x Sv| over it. CERTIFICATION_FAILED when a
+   winding number cannot be proven. */
 qaws_status qaws_surface_geodesic_polygon_area(qaws_surface const* surface, qaws_geodesic_segment const* segments, unsigned int count,
 	qaws_scalar width, unsigned int resolution, qaws_scalar* out_lo, qaws_scalar* out_hi);
 

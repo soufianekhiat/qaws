@@ -96,6 +96,7 @@ static void demo_mitered_certified(void)
 			/* two geodesic triangles, their crossings certified; one's area bounded */
 			static double const T[2][3][2] = { { { 0.15, 0.2 }, { 0.75, 0.3 }, { 0.4, 0.8 } }, { { 0.3, 0.45 }, { 0.85, 0.55 }, { 0.6, 0.15 } } };
 			qaws_geodesic_segment g[6];
+			static unsigned int const corner[6] = { 1, 2, 0, 4, 5, 3 };   /* each triangle closed: an edge ends where the next starts */
 			qaws_surface_curve const* pc[3];
 			qaws_surface_path Q;
 			qaws_scalar lo = 0, hi = 0, A = 0;
@@ -109,7 +110,7 @@ static void demo_mitered_certified(void)
 			ssf_path(&Q, pc, 3);
 			qaws_surface_clip(surf, QAWS_CLIP_NONE, QAWS_FILL_NON_ZERO, &Q, 1, NULL, 0, &r);
 			if (r) qaws_surface_region_get_area(r, &A);
-			sc = (int)qaws_surface_geodesics_certify(surf, g, 6, 0, &n);
+			sc = (int)qaws_surface_geodesics_certify(surf, g, 6, corner, 0, &n);
 			sa = (int)qaws_surface_geodesic_polygon_area(surf, g, 3, 0, 512, &lo, &hi);
 			sgf_view_init(&view, -0.7, 0.75, 110, v3.x0 + pw / 2, v3.y0 + ph / 2 + 10);
 			name = "geodesic triangles certified on the bump";

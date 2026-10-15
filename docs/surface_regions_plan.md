@@ -443,3 +443,10 @@ Each item lands with tests in f64 and f32, docs, and a showcase figure.
   inside the piece (at a B-spline knot the curve's derivative was the next
   piece's, so corners inside one curve went unseen by the offsets' disks,
   the medial axis and the skeleton). Test 106; figure 30.
+- Review hardening (2026-10-15): two false certifications fixed and kept as
+  regressions (test 109). Areas: free components of the grid are classified
+  by a winding number proven on a polyline homotopic to the curve within
+  its boxes (a C whose passage the grid closed had its outside pocket
+  counted inside). Arrangements: shared ends are declared (next[i]) or
+  exactly equal starts, never inferred from nearness (a crossing 5e-8 from
+  two ends was dropped). The GCC 13 strict f64 build is clean again.
