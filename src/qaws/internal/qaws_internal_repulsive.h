@@ -12,6 +12,7 @@ struct qaws_repulsive_curves
 	unsigned int dim, nv, ne;
 	unsigned int* edges;
 	double alpha, beta;
+	qaws_batch_executor const* executor;
 };
 
 struct qaws_repulsive_mesh
@@ -19,6 +20,7 @@ struct qaws_repulsive_mesh
 	unsigned int nv, nf;
 	unsigned int* tris;
 	double p;
+	qaws_batch_executor const* executor;
 };
 
 /* the mesh's energy at x (3 per vertex); grad (may be NULL) += its gradient */
@@ -64,8 +66,16 @@ typedef struct qaws_internal_rbh_op qaws_internal_rbh_op;
 qaws_status qaws_internal_rbh_curves_metric(qaws_repulsive_curves const* curves, double const* x, double theta, qaws_internal_rbh_op** out);
 qaws_status qaws_internal_rbh_mesh_metric(qaws_repulsive_mesh const* mesh, double const* x, double theta, qaws_internal_rbh_op** out);
 qaws_status qaws_internal_rbh_fractional(double const* points, double const* mass, unsigned int count, unsigned int dim, double ex, double theta,
-	qaws_internal_rbh_op** out);
+	qaws_internal_rbh_op** out, qaws_batch_executor const* executor);
 void qaws_internal_rbh_apply(qaws_internal_rbh_op* op, double const* u, double* y);
+/* a product's scratch: products with one each may run at once on one operator */
+typedef struct qaws_internal_rbh_scratch
+{
+	double *gi, *ui, *G, *U, *accB, *acc0;
+} qaws_internal_rbh_scratch;
+qaws_internal_rbh_scratch* qaws_internal_rbh_scratch_create(qaws_internal_rbh_op const* op);
+void qaws_internal_rbh_scratch_destroy(qaws_internal_rbh_scratch* scratch);
+void qaws_internal_rbh_apply_with(qaws_internal_rbh_op const* op, qaws_internal_rbh_scratch* scratch, double const* u, double* y);
 /* the near links (and far, if asked) */
 size_t qaws_internal_rbh_links(qaws_internal_rbh_op const* op, size_t* out_far);
 void qaws_internal_rbh_destroy(qaws_internal_rbh_op* op);

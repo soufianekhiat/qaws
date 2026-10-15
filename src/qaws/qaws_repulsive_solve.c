@@ -499,7 +499,7 @@ static qaws_status rs_c_hier(rs_core const* core, double const* x, qaws_internal
 	}
 	h->nl = c->ne;
 	if ((st = qaws_internal_rbh_curves_metric(c, x, core->theta, &h->A)) == QAWS_STATUS_OK)
-		st = qaws_internal_rbh_fractional(x, h->mass, c->nv, dim, 1 + 2 * (2 - s), core->theta, &h->F);
+		st = qaws_internal_rbh_fractional(x, h->mass, c->nv, dim, 1 + 2 * (2 - s), core->theta, &h->F, core->executor);
 	if (st != QAWS_STATUS_OK)
 		qaws_internal_rs_hier_free(h);
 	return st;
@@ -847,6 +847,7 @@ qaws_status qaws_repulsive_curves_solver_create(qaws_repulsive_curves const* c, 
 	}
 	for (i = 0; s->edge_len && i < c->ne; i++) s->nlen += !(s->fixed[c->edges[2 * i]] && s->fixed[c->edges[2 * i + 1]]);
 	k->theta = (double)d.theta;
+	k->executor = c->executor;
 	k->fixed = s->fixed;
 	k->translates = s->npin == 0 && !s->bary;
 	k->k = (s->bary ? dim : 0) + (k->theta > 0 ? 0 : dim * s->npin) + (dim - 1) * s->nt + (s->total_len ? 1 : 0) + s->nlen;
@@ -862,7 +863,7 @@ qaws_status qaws_repulsive_curves_solver_create(qaws_repulsive_curves const* c, 
 	k->h = 0.25 * k->lmean;
 	k->rep.reason = QAWS_REPULSIVE_RUNNING;
 	k->rep.stationarity = 1;
-	if (qaws_internal_repulsive_curves_energy(c, k->x, &total, NULL) != QAWS_STATUS_OK)
+	if (k->ops->energy(k, k->x, &total, NULL) != QAWS_STATUS_OK)
 	{
 		qaws_repulsive_curves_solver_destroy(s);
 		return QAWS_STATUS_NUMERICAL_FAILURE;

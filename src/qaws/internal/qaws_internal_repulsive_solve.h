@@ -48,6 +48,7 @@ struct qaws_internal_rs_core
 	int full;                            /* the metric is N x N (parameters: not one per coordinate) */
 	double clearance, tol, ctol, lmean, h;
 	double theta;                        /* 0: dense; > 0: hierarchical, pins eliminated */
+	qaws_batch_executor const* executor; /* optional: the hierarchical solves run through it */
 	int translates;                      /* nothing pinned, no barycenter held: a free translation */
 	unsigned char const* fixed;          /* pinned vertices */
 	double* x;                           /* the current positions, in double */

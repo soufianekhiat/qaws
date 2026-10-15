@@ -28,12 +28,28 @@
 
 #include "qaws_repulsive.h"
 #include "internal/qaws_internal_repulsive.h"
-#include "internal/qaws_internal_repulsive_jet.h"
+#include "internal/qaws_internal_parallel.h"
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
 
 #define BH_LEAF 8
+
+/* x^y for x >= 0; when 2 y is a whole number (alpha / 2, beta / 2, p usually
+   are) by products and one square root: exact to rounding, and several
+   times cheaper than pow, which every pair term calls */
+static double bh_pow(double x, double y)
+{
+	double y2 = y + y, r = 1;
+	int n, i;
+	if (!(y2 == floor(y2) && fabs(y2) <= 64))
+		return pow(x, y);
+	n = (int)fabs(y2);
+	for (i = 0; i < n / 2; i++) r *= x;
+	if (n % 2)
+		r *= sqrt(x);
+	return y < 0 ? 1 / r : r;
+}
 
 /* ------------------------------------------------------------------------ */
 /*  A bounding volume hierarchy over items                                  */
@@ -187,12 +203,14 @@ struct bh_ctx
 	unsigned int dim;
 	double theta, alpha, beta;      /* (meshes: p and 2p) */
 	double* grad;                   /* NULL: energy only */
+	double* blk;                    /* the current item's gradient block (k dim) */
+	qaws_batch_executor const* executor;
 	double E;
 	unsigned long long near, far;
 	int status;
 	int skip_shared;                /* (curves: edges sharing a vertex do not interact) */
-	/* the far terms: forward w_I W k(x_I, X, T_I), reverse w_I W (d^T P d)^(a/2) |d|^-b */
-	int (*far_term)(bh_ctx const*, unsigned int I, bh_node const* node, int reverse, unsigned int n, rp_jet* out);
+	/* a far node for I in closed form: its forward term (the energy), and if g the gradient of forward and reverse in I's vertices */
+	int (*far_g)(bh_ctx const*, unsigned int I, bh_node const* node, double* E, double* g);
 	/* e(A, B) in closed form, and if g its gradient in A's (which 0) or B's (1) vertices */
 	int (*near_g)(bh_ctx const*, unsigned int A, unsigned int B, int which, double* E, double* g);
 };
@@ -207,12 +225,6 @@ static int bh_shares(bh_ctx const* c, unsigned int I, unsigned int J)
 	return 0;
 }
 
-static void bh_add_grad(bh_ctx* c, unsigned int I, rp_jet const* t)
-{
-	unsigned int a, slots = c->k * c->dim;
-	for (a = 0; a < slots; a++) c->grad[c->dim * c->idx[c->k * I + a / c->dim] + a % c->dim] += t->g[a];
-}
-
 static void bh_visit(bh_ctx* c, unsigned int I, unsigned int id)
 {
 	bh_node const* n = &c->t.node[id];
@@ -220,7 +232,6 @@ static void bh_visit(bh_ctx* c, unsigned int I, unsigned int id)
 	double const* ihi = c->t.ihi + c->dim * I;
 	double ri = 0, d;
 	unsigned int q, slots = c->grad ? c->k * c->dim : 0, a;
-	rp_jet term;
 	if (c->status)
 		return;
 	for (q = 0; q < c->dim; q++) ri += 0.25 * (ihi[q] - ilo[q]) * (ihi[q] - ilo[q]);
@@ -229,23 +240,16 @@ static void bh_visit(bh_ctx* c, unsigned int I, unsigned int id)
 	if (c->theta > 0 && fmax(ri, n->r) <= c->theta * d)
 	{
 		/* far: the node at once */
-		if (!c->far_term(c, I, n, 0, slots, &term))
+		double e, gi[9];
+		int r;
+		if ((r = c->far_g(c, I, n, &e, c->grad ? gi : NULL)) != 0)
 		{
-			c->status = 2;
+			c->status = r;
 			return;
 		}
-		c->E += term.v;
+		c->E += e;
 		c->far++;
-		if (c->grad)
-		{
-			bh_add_grad(c, I, &term);
-			if (!c->far_term(c, I, n, 1, slots, &term))
-			{
-				c->status = 2;
-				return;
-			}
-			bh_add_grad(c, I, &term);
-		}
+		for (a = 0; c->grad && a < slots; a++) c->blk[a] += gi[a];
 		return;
 	}
 	if (n->child[0] >= 0)
@@ -271,44 +275,14 @@ static void bh_visit(bh_ctx* c, unsigned int I, unsigned int id)
 		c->near++;
 		if (!c->grad)
 			continue;
-		for (s = 0; s < slots; s++) c->grad[c->dim * c->idx[c->k * I + s / c->dim] + s % c->dim] += gi[s];
+		for (s = 0; s < slots; s++) c->blk[s] += gi[s];
 		if ((r = c->near_g(c, J, I, 1, &e, gi)) != 0)
 		{
 			c->status = r;
 			return;
 		}
-		for (s = 0; s < slots; s++) c->grad[c->dim * c->idx[c->k * I + s / c->dim] + s % c->dim] += gi[s];
+		for (s = 0; s < slots; s++) c->blk[s] += gi[s];
 	}
-}
-
-/* jets for item I's vertices, slots from slot0 (>= n: constants) */
-static void bh_item_vars(bh_ctx const* c, unsigned int I, unsigned int n, unsigned int slot0, rp_jet (*p)[3])
-{
-	unsigned int a, q;
-	for (a = 0; a < c->k; a++)
-		for (q = 0; q < 3; q++)
-		{
-			if (q < c->dim)
-				rp_var(&p[a][q], c->x[c->dim * c->idx[c->k * I + a] + q], 0, slot0 + a * c->dim + q, n);
-			else
-				rp_const(&p[a][q], 0, n);
-		}
-}
-
-/* (d^T P d) with P the node's averaged projector Q / W */
-static void bh_quad(bh_node const* node, rp_jet const* d, unsigned int n, rp_jet* out)
-{
-	static unsigned int const ix[3][3] = { { 0, 1, 2 }, { 1, 3, 4 }, { 2, 4, 5 } };
-	rp_jet t;
-	unsigned int i, j;
-	rp_const(out, 0, n);
-	for (i = 0; i < 3; i++)
-		for (j = 0; j < 3; j++)
-		{
-			rp_mul(&t, &d[i], &d[j], n);
-			rp_scale(&t, &t, node->Q[ix[i][j]] / node->W, n);
-			rp_add(out, out, &t, n);
-		}
 }
 
 /* ------------------------------------------------------------------------ */
@@ -333,7 +307,7 @@ static int bh_curve_near_g(bh_ctx const* c, unsigned int A, unsigned int B, int 
 	}
 	if (!(LA > 0 && LB > 0))
 		return 1;
-	W = 0.25 * pow(LA, 0.5 * (1 - c->alpha)) * sqrt(LB);
+	W = 0.25 * bh_pow(LA, 0.5 * (1 - c->alpha)) * sqrt(LB);
 	if (g) for (q = 0; q < 2 * dim; q++) g[q] = 0;
 	for (i = 0; i < 2; i++)
 		for (j = 0; j < 2; j++)
@@ -343,12 +317,12 @@ static int bh_curve_near_g(bh_ctx const* c, unsigned int A, unsigned int B, int 
 			if (!(r2 > 0))
 				return 2;
 			c2 = fmax(LA * r2 - ed * ed, 0);
-			k = pow(c2, a2) * pow(r2, -b2);
+			k = bh_pow(c2, a2) * bh_pow(r2, -b2);
 			S += k;
 			if (!g)
 				continue;
 			/* dk = kc dc2 + kr dr2; dc2 = 2 (r2 e - (e.d) d) . de + 2 (LA d - (e.d) e) . dd; dr2 = 2 d . dd */
-			kc = c2 > 0 ? a2 * pow(c2, a2 - 1) * pow(r2, -b2) : (c->alpha == 2 ? pow(r2, -b2) : 0);
+			kc = c2 > 0 ? a2 * bh_pow(c2, a2 - 1) * bh_pow(r2, -b2) : (c->alpha == 2 ? bh_pow(r2, -b2) : 0);
 			kr = -b2 * k / r2;
 			for (q = 0; q < dim; q++)
 			{
@@ -384,68 +358,89 @@ static int bh_curve_near_g(bh_ctx const* c, unsigned int A, unsigned int B, int 
 	return 0;
 }
 
-/* I's side keeps the direct term's trapezoid over its two endpoints; the
-   node's members are taken at their centroid X:
-   forward: l_I^(1 - alpha) W / 2 sum_i |e_I x d_i|^alpha |d_i|^-beta;
-   reverse: l_I W / 2 sum_i (d_i^T P d_i)^(alpha/2) |d_i|^-beta; d_i = x_i - X */
-static int bh_curve_far(bh_ctx const* c, unsigned int I, bh_node const* node, int reverse, unsigned int n, rp_jet* out)
+/* A far node for edge I, in closed form. I's side keeps the direct term's
+   trapezoid over its two endpoints; the node's members are taken at their
+   centroid X (d_i = x_i - X):
+   forward  F = W / 2 l_I^(1 - alpha) sum_i |e_I x d_i|^alpha |d_i|^-beta (the energy);
+   reverse  R = W / 2 l_I sum_i (d_i^T P d_i)^(alpha/2) |d_i|^-beta, P the
+            node's averaged projector Q / W.
+   *E = F; with g, the gradient of F + R in I's two endpoints (g[0..5]).
+   0, or 2 when an endpoint sits on X. */
+static int bh_curve_far_g(bh_ctx const* c, unsigned int I, bh_node const* node, double* E, double* g)
 {
-	rp_jet p[2][3], e[3], d[3], LI, a, b, dd, cr, sum, w;
-	unsigned int s, i;
-	bh_item_vars(c, I, n, 0, p);
-	for (s = 0; s < 3; s++) rp_sub(&e[s], &p[1][s], &p[0][s], n);
-	rp_dot(&LI, e, e, c->dim, n);
-	if (!(LI.v > 0))
-		return 0;
-	rp_const(&sum, 0, n);
+	static unsigned int const ix[3][3] = { { 0, 1, 2 }, { 1, 3, 4 }, { 2, 4, 5 } };
+	unsigned int dim = c->dim, i, q, r;
+	unsigned int const* P = c->idx + 2 * I;
+	double p[2][3] = { { 0, 0, 0 }, { 0, 0, 0 } }, e[3], X[3] = { 0, 0, 0 }, la = 0, l, Wf, Sf = 0, Sr = 0, ge[3] = { 0, 0, 0 };
+	double a2 = 0.5 * c->alpha, b2 = 0.5 * c->beta, W = node->W;
+	for (i = 0; i < 2; i++)
+		for (q = 0; q < dim; q++) p[i][q] = c->x[dim * P[i] + q];
+	for (q = 0; q < 3; q++)
+	{
+		e[q] = p[1][q] - p[0][q];
+		la += e[q] * e[q];
+		if (q < dim) X[q] = node->S[q] / W;
+	}
+	if (!(la > 0))
+		return 1;
+	l = sqrt(la);
+	Wf = 0.5 * W * bh_pow(la, 0.5 * (1 - c->alpha));
+	if (g)
+		for (q = 0; q < 6; q++) g[q] = 0;
 	for (i = 0; i < 2; i++)
 	{
-		for (s = 0; s < 3; s++)
+		double d[3], w[3], r2 = 0, c2, k, inv;
+		for (q = 0; q < 3; q++) { d[q] = p[i][q] - X[q]; r2 += d[q] * d[q]; }
+		if (!(r2 > 0))
+			return 2;
+		w[0] = e[1] * d[2] - e[2] * d[1]; w[1] = e[2] * d[0] - e[0] * d[2]; w[2] = e[0] * d[1] - e[1] * d[0];
+		c2 = w[0] * w[0] + w[1] * w[1] + w[2] * w[2];
+		inv = bh_pow(r2, -b2);
+		k = bh_pow(c2, a2) * inv;
+		Sf += k;
+		if (g)
 		{
-			d[s] = p[i][s];
-			d[s].v -= s < c->dim ? node->S[s] / node->W : 0;
+			/* forward: dk = kc dc2 + kr dr2, dc2 = 2 (d x w) . de + 2 (w x e) . dd */
+			double kc = c2 > 0 ? a2 * bh_pow(c2, a2 - 1) * inv : (c->alpha == 2 ? inv : 0), kr = -b2 * k / r2, dw[3], we[3];
+			/* reverse: q = d^T P d, kq = q^(a/2) r2^-b2 */
+			double Pd[3] = { 0, 0, 0 }, qd = 0, kq, kqq;
+			dw[0] = d[1] * w[2] - d[2] * w[1]; dw[1] = d[2] * w[0] - d[0] * w[2]; dw[2] = d[0] * w[1] - d[1] * w[0];
+			we[0] = w[1] * e[2] - w[2] * e[1]; we[1] = w[2] * e[0] - w[0] * e[2]; we[2] = w[0] * e[1] - w[1] * e[0];
+			for (q = 0; q < 3; q++)
+			{
+				for (r = 0; r < 3; r++) Pd[q] += node->Q[ix[q][r]] / W * d[r];
+				qd += d[q] * Pd[q];
+			}
+			qd = qd > 0 ? qd : 0;
+			kq = bh_pow(qd, a2) * inv;
+			kqq = qd > 0 ? a2 * bh_pow(qd, a2 - 1) * inv : (c->alpha == 2 ? inv : 0);
+			Sr += kq;
+			for (q = 0; q < 3; q++)
+			{
+				ge[q] += Wf * 2 * kc * dw[q];
+				g[3 * i + q] += Wf * (2 * kc * we[q] + 2 * kr * d[q]) + 0.5 * W * l * (2 * kqq * Pd[q] - 2 * b2 * kq * d[q] / r2);
+			}
 		}
-		rp_dot(&dd, d, d, c->dim, n);
-		if (!(dd.v > 0))
-			return 0;
-		if (reverse)
-		{
-			bh_quad(node, d, n, &cr);
-			if (cr.v < 0) cr.v = 0;
-		}
-		else
-			rp_cross2(&cr, e, d, c->dim, n);
-		rp_pow(&a, &cr, 0.5 * c->alpha, n);
-		rp_pow(&b, &dd, -0.5 * c->beta, n);
-		rp_mul(&a, &a, &b, n);
-		rp_add(&sum, &sum, &a, n);
 	}
-	rp_pow(&w, &LI, reverse ? 0.5 : 0.5 * (1 - c->alpha), n);
-	rp_mul(out, &w, &sum, n);
-	rp_scale(out, out, 0.5 * node->W, n);
-	return 1;
+	*E = Wf * Sf;
+	if (g)
+		for (q = 0; q < 3; q++)
+		{
+			/* the weights' own: (1 - alpha) e / la for F, e / la for R */
+			double t = ge[q] + (1 - c->alpha) * Wf * Sf * e[q] / la + 0.5 * W * l * Sr * e[q] / la;
+			g[3 + q] += t; g[q] -= t;
+		}
+	if (dim == 2 && g)
+	{
+		/* (2D: back to 2 coordinates per vertex) */
+		g[2] = g[3]; g[3] = g[4];
+	}
+	return 0;
 }
 
 /* ------------------------------------------------------------------------ */
 /*  Meshes                                                                  */
 /* ------------------------------------------------------------------------ */
-
-/* face quantities: m (unnormalized normal), M2 = |m|^2, X (barycenter) */
-static void bh_face(rp_jet (*p)[3], unsigned int n, rp_jet* m, rp_jet* M2, rp_jet* X)
-{
-	rp_jet u[3], v[3];
-	unsigned int s;
-	for (s = 0; s < 3; s++)
-	{
-		rp_sub(&u[s], &p[1][s], &p[0][s], n);
-		rp_sub(&v[s], &p[2][s], &p[0][s], n);
-		rp_add(&X[s], &p[0][s], &p[1][s], n);
-		rp_add(&X[s], &X[s], &p[2][s], n);
-		rp_scale(&X[s], &X[s], 1.0 / 3, n);
-	}
-	rp_cross3(m, u, v, n);
-	rp_dot(M2, m, m, 3, n);
-}
 
 /* d (u . m) / d corner c of a face with m = e1 x e2 (e1 = x1 - x0, e2 =
    x2 - x0): e2 x u, u x e1, and minus their sum at corner 0 */
@@ -484,13 +479,13 @@ static int bh_mesh_near_g(bh_ctx const* c, unsigned int A, unsigned int B, int w
 	for (q = 0; q < 3; q++) { d[q] = X[0][q] - X[1][q]; s += m[0][q] * d[q]; r2 += d[q] * d[q]; }
 	if (!(r2 > 0))
 		return 2;
-	e = 0.25 * pow(a, 1 - al) * b * pow(fabs(s), al) * pow(r2, -b2);
+	e = 0.25 * bh_pow(a, 1 - al) * b * bh_pow(fabs(s), al) * bh_pow(r2, -b2);
 	*E = e;
 	if (!g)
 		return 0;
 	/* de = e ((1 - p) da / a + db / b - b2 dr2 / r2) + 1/4 a^(1 - p) b p |s|^(p - 1) sgn(s) ds r2^-b2 */
 	{
-		double ks = 0.25 * pow(a, 1 - al) * b * al * pow(fabs(s), al - 1) * (s < 0 ? -1 : 1) * pow(r2, -b2), u[3];
+		double ks = 0.25 * bh_pow(a, 1 - al) * b * al * bh_pow(fabs(s), al - 1) * (s < 0 ? -1 : 1) * bh_pow(r2, -b2), u[3];
 		if (which == 0)
 		{
 			/* a: u = m_A / a; s: d . dm_A + m_A . dd; d moves by 1/3 of each corner */
@@ -510,40 +505,56 @@ static int bh_mesh_near_g(bh_ctx const* c, unsigned int A, unsigned int B, int w
 	return 0;
 }
 
-/* forward: |m_I|^(1 - p) W / 2 (m_I . d)^p |d|^-2p; reverse:
-   |m_I| W / 2 (d^T P d)^(p/2) |d|^-2p; d = X_I - X */
-static int bh_mesh_far(bh_ctx const* c, unsigned int I, bh_node const* node, int reverse, unsigned int n, rp_jet* out)
+/* A far node for face I, in closed form, d = X_I - X (X the node's centroid):
+   forward  F = W / 2 |m_I|^(1 - p) |m_I . d|^p |d|^-2p (the energy);
+   reverse  R = W / 2 |m_I| (d^T P d)^(p/2) |d|^-2p, P = Q / W.
+   *E = F; with g, the gradient of F + R in I's corners (g[0..8]).
+   0, or 1 degenerate, 2 when the barycenters coincide. */
+static int bh_mesh_far_g(bh_ctx const* c, unsigned int I, bh_node const* node, double* E, double* g)
 {
-	rp_jet p[3][3], mI[3], M2I, XI[3], d[3], dd, a, b, pr;
-	unsigned int s;
-	bh_item_vars(c, I, n, 0, p);
-	bh_face(p, n, mI, &M2I, XI);
-	for (s = 0; s < 3; s++)
+	static unsigned int const ix[3][3] = { { 0, 1, 2 }, { 1, 3, 4 }, { 2, 4, 5 } };
+	unsigned int const* t = c->idx + 3 * I;
+	double p[3][3], e1[3], e2[3], m[3], d[3], a, s = 0, r2 = 0, F, inv, al = c->alpha, W = node->W, J[9];
+	unsigned int k, q, r;
+	for (k = 0; k < 3; k++)
+		for (q = 0; q < 3; q++) p[k][q] = c->x[3 * t[k] + q];
+	for (q = 0; q < 3; q++)
 	{
-		d[s] = XI[s];
-		d[s].v -= node->S[s] / node->W;
+		e1[q] = p[1][q] - p[0][q]; e2[q] = p[2][q] - p[0][q];
+		d[q] = (p[0][q] + p[1][q] + p[2][q]) / 3 - node->S[q] / W;
 	}
-	rp_dot(&dd, d, d, 3, n);
-	if (!(M2I.v > 0 && dd.v > 0))
+	m[0] = e1[1] * e2[2] - e1[2] * e2[1]; m[1] = e1[2] * e2[0] - e1[0] * e2[2]; m[2] = e1[0] * e2[1] - e1[1] * e2[0];
+	a = sqrt(m[0] * m[0] + m[1] * m[1] + m[2] * m[2]);
+	if (!(a > 0))
+		return 1;
+	for (q = 0; q < 3; q++) { s += m[q] * d[q]; r2 += d[q] * d[q]; }
+	if (!(r2 > 0))
+		return 2;
+	inv = bh_pow(r2, -al);
+	F = 0.5 * W * bh_pow(a, 1 - al) * bh_pow(fabs(s), al) * inv;
+	*E = F;
+	if (!g)
 		return 0;
-	if (reverse)
 	{
-		rp_pow(out, &M2I, 0.5, n);
-		bh_quad(node, d, n, &pr);
-		if (pr.v < 0) pr.v = 0;
+		/* forward: as the near pair with 1/4 |m_B| replaced by W / 2 */
+		double ks = 0.5 * W * bh_pow(a, 1 - al) * al * bh_pow(fabs(s), al - 1) * (s < 0 ? -1 : 1) * inv, u[3], Pd[3] = { 0, 0, 0 }, qd = 0, R, kq, gd[3];
+		for (q = 0; q < 3; q++)
+			for (r = 0; r < 3; r++) Pd[q] += node->Q[ix[q][r]] / W * d[r];
+		for (q = 0; q < 3; q++) qd += d[q] * Pd[q];
+		qd = qd > 0 ? qd : 0;
+		R = 0.5 * W * a * bh_pow(qd, 0.5 * al) * inv;
+		/* reverse: dR = R m . dm / a^2 + W/2 a (p q^(p/2 - 1) Pd - 2p q^(p/2) d / r2) r2^-p . dd */
+		kq = 0.5 * W * a * (qd > 0 ? al * bh_pow(qd, 0.5 * al - 1) : (al == 2 ? 2 : 0)) * inv;
+		for (q = 0; q < 3; q++)
+		{
+			u[q] = F * (1 - al) * m[q] / (a * a) + ks * d[q] + R * m[q] / (a * a);
+			gd[q] = ks * m[q] - 2 * al * F * d[q] / r2 + kq * Pd[q] - 2 * al * R * d[q] / r2;
+		}
+		bh_dm(e1, e2, u, J);
+		for (k = 0; k < 3; k++)
+			for (q = 0; q < 3; q++) g[3 * k + q] = J[3 * k + q] + gd[q] / 3;
 	}
-	else
-	{
-		rp_pow(out, &M2I, 0.5 * (1 - c->alpha), n);
-		rp_dot(&pr, mI, d, 3, n);
-		rp_mul(&pr, &pr, &pr, n);
-	}
-	rp_scale(out, out, 0.5 * node->W, n);
-	rp_pow(&a, &pr, 0.5 * c->alpha, n);
-	rp_pow(&b, &dd, -0.5 * c->beta, n);
-	rp_mul(out, out, &a, n);
-	rp_mul(out, out, &b, n);
-	return 1;
+	return 0;
 }
 
 /* ------------------------------------------------------------------------ */
@@ -599,6 +610,62 @@ static int bh_items(bh_ctx* c, double* lo, double* hi, double* ctr, double* w, d
 	return 1;
 }
 
+/* every item's traversal, in chunks through the executor when there is
+   one. Each item writes only its own energy share and gradient block, so
+   the chunks share nothing; the shares are summed and the blocks gathered
+   in item order afterwards: the same result for any executor. */
+typedef struct bh_par
+{
+	bh_ctx const* base;
+	bh_ctx* chunk;                  /* one context per chunk */
+	double *share, *blocks;
+} bh_par;
+
+static qaws_status bh_chunk(void* user, unsigned int chunk, unsigned int begin, unsigned int end)
+{
+	bh_par* p = (bh_par*)user;
+	bh_ctx* c = &p->chunk[chunk];
+	unsigned int I, slots = p->base->k * p->base->dim;
+	*c = *p->base;
+	c->E = 0; c->near = c->far = 0; c->status = 0;
+	for (I = begin; I < end && !c->status; I++)
+	{
+		double e0 = c->E;
+		c->blk = p->blocks ? p->blocks + (size_t)slots * I : NULL;
+		bh_visit(c, I, 0);
+		p->share[I] = c->E - e0;
+	}
+	return c->status == 0 ? QAWS_STATUS_OK : c->status == 1 ? QAWS_STATUS_DEGENERATE_CURVE : QAWS_STATUS_NUMERICAL_FAILURE;
+}
+
+static qaws_status bh_traverse(bh_ctx* c)
+{
+	enum { GRAIN = 64 };
+	unsigned int chunks = qaws_internal_chunk_count(c->nitems, GRAIN), i, a, slots = c->k * c->dim;
+	bh_par p;
+	qaws_status st;
+	p.base = c;
+	p.chunk = (bh_ctx*)calloc(chunks + 1, sizeof(bh_ctx));
+	p.share = (double*)calloc((size_t)c->nitems + 1, sizeof(double));
+	p.blocks = c->grad ? (double*)calloc((size_t)slots * c->nitems + 1, sizeof(double)) : NULL;
+	if (!p.chunk || !p.share || (c->grad && !p.blocks))
+	{
+		free(p.chunk); free(p.share); free(p.blocks);
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	}
+	st = qaws_internal_parallel(c->executor, c->nitems, GRAIN, bh_chunk, &p);
+	if (st == QAWS_STATUS_OK)
+	{
+		c->E = 0;
+		for (i = 0; i < c->nitems; i++) c->E += p.share[i];
+		for (i = 0; i < chunks; i++) { c->near += p.chunk[i].near; c->far += p.chunk[i].far; }
+		for (i = 0; c->grad && i < c->nitems; i++)
+			for (a = 0; a < slots; a++) c->grad[c->dim * c->idx[c->k * i + a / c->dim] + a % c->dim] += p.blocks[(size_t)slots * i + a];
+	}
+	free(p.chunk); free(p.share); free(p.blocks);
+	return st;
+}
+
 /* E (and, if grad, grad += its gradient) at x, in double */
 static qaws_status bh_run(bh_ctx* c, double const* x, double* grad, double* E, qaws_repulsive_bh_stats* out_stats)
 {
@@ -634,13 +701,8 @@ static qaws_status bh_run(bh_ctx* c, double const* x, double* grad, double* E, q
 		}
 		bh_sums(&c->t, 0, w, qp);
 	}
-	for (i = 0; i < c->nitems && !c->status; i++)
-		bh_visit(c, i, 0);
-	if (c->status)
-	{
-		st = c->status == 1 ? QAWS_STATUS_DEGENERATE_CURVE : QAWS_STATUS_NUMERICAL_FAILURE;
+	if ((st = bh_traverse(c)) != QAWS_STATUS_OK)
 		goto done;
-	}
 	*E = c->E;
 	if (out_stats) { out_stats->near_pairs = c->near; out_stats->far_pairs = c->far; out_stats->nodes = c->t.nn; }
 done:
@@ -675,16 +737,16 @@ static void bh_curves_ctx(bh_ctx* c, qaws_repulsive_curves const* curves, double
 {
 	memset(c, 0, sizeof(*c));
 	c->nitems = curves->ne; c->k = 2; c->idx = curves->edges; c->dim = curves->dim; c->theta = theta;
-	c->alpha = curves->alpha; c->beta = curves->beta; c->skip_shared = 1;
-	c->far_term = bh_curve_far; c->near_g = bh_curve_near_g;
+	c->alpha = curves->alpha; c->beta = curves->beta; c->skip_shared = 1; c->executor = curves->executor;
+	c->far_g = bh_curve_far_g; c->near_g = bh_curve_near_g;
 }
 
 static void bh_mesh_ctx(bh_ctx* c, qaws_repulsive_mesh const* mesh, double theta)
 {
 	memset(c, 0, sizeof(*c));
 	c->nitems = mesh->nf; c->k = 3; c->idx = mesh->tris; c->dim = 3; c->theta = theta;
-	c->alpha = mesh->p; c->beta = 2 * mesh->p; c->skip_shared = 0;
-	c->far_term = bh_mesh_far; c->near_g = bh_mesh_near_g;
+	c->alpha = mesh->p; c->beta = 2 * mesh->p; c->skip_shared = 0; c->executor = mesh->executor;
+	c->far_g = bh_mesh_far_g; c->near_g = bh_mesh_near_g;
 }
 
 qaws_status qaws_internal_repulsive_curves_bh(qaws_repulsive_curves const* curves, double const* x, double theta, double* E, double* grad)
@@ -749,7 +811,7 @@ struct qaws_internal_rbh_op
 	double *c, *w;                  /* per item: k x gdim coefficients, weight */
 	rbh_link *near, *far;
 	size_t nnear, nfar, capnear, capfar;
-	double *gi, *ui, *G, *U, *accB, *acc0;
+	qaws_internal_rbh_scratch sc;  /* for qaws_internal_rbh_apply */
 };
 
 /* the weights of the pair (I, J), or of I and a far node */
@@ -763,6 +825,8 @@ typedef struct rbh_build
 	int skip_shared, status;
 	rbh_weights fn;
 	void const* user;
+	rbh_link *near, *far;            /* this chunk's links, its items in order */
+	size_t nnear, nfar, capnear, capfar;
 } rbh_build;
 
 static int rbh_push(rbh_link** v, size_t* n, size_t* cap, unsigned int I, unsigned int J, double kB, double kB0)
@@ -812,7 +876,7 @@ static void rbh_visit(rbh_build* b, unsigned int I, unsigned int id)
 	if (b->theta > 0 && fmax(ri, n->r) <= b->theta * d)
 	{
 		if (!b->fn(b->user, I, 0, n, &kB, &kB0)) { b->status = 2; return; }
-		if (!rbh_push(&op->far, &op->nfar, &op->capfar, I, id, kB, kB0)) b->status = 3;
+		if (!rbh_push(&b->far, &b->nfar, &b->capfar, I, id, kB, kB0)) b->status = 3;
 		return;
 	}
 	if (n->child[0] >= 0)
@@ -827,8 +891,49 @@ static void rbh_visit(rbh_build* b, unsigned int I, unsigned int id)
 		if (J == I || (b->skip_shared && rbh_shares(op, I, J)))
 			continue;
 		if (!b->fn(b->user, I, J, NULL, &kB, &kB0)) { b->status = 2; return; }
-		if (!rbh_push(&op->near, &op->nnear, &op->capnear, I, J, kB, kB0)) b->status = 3;
+		if (!rbh_push(&b->near, &b->nnear, &b->capnear, I, J, kB, kB0)) b->status = 3;
 	}
+}
+
+static void rbh_scratch_free(qaws_internal_rbh_scratch* sc)
+{
+	free(sc->gi); free(sc->ui); free(sc->G); free(sc->U); free(sc->accB); free(sc->acc0);
+	memset(sc, 0, sizeof(*sc));
+}
+
+/* a product's scratch, sized for op (its tree built) */
+static int rbh_scratch_make(qaws_internal_rbh_op const* op, qaws_internal_rbh_scratch* sc)
+{
+	size_t ni = (size_t)op->nitems + 1, nn = (size_t)op->t.nn + 1;
+	sc->gi = (double*)malloc(sizeof(double) * (op->gdim * ni + 1));
+	sc->ui = (double*)malloc(sizeof(double) * ni);
+	sc->accB = (double*)malloc(sizeof(double) * (op->gdim * ni + 1));
+	sc->acc0 = (double*)malloc(sizeof(double) * ni);
+	sc->G = (double*)malloc(sizeof(double) * (op->gdim * nn + 1));
+	sc->U = (double*)malloc(sizeof(double) * nn);
+	if (sc->gi && sc->ui && sc->accB && sc->acc0 && sc->G && sc->U)
+		return 1;
+	rbh_scratch_free(sc);
+	return 0;
+}
+
+qaws_internal_rbh_scratch* qaws_internal_rbh_scratch_create(qaws_internal_rbh_op const* op)
+{
+	qaws_internal_rbh_scratch* sc = (qaws_internal_rbh_scratch*)calloc(1, sizeof(*sc));
+	if (sc && !rbh_scratch_make(op, sc))
+	{
+		free(sc);
+		return NULL;
+	}
+	return sc;
+}
+
+void qaws_internal_rbh_scratch_destroy(qaws_internal_rbh_scratch* sc)
+{
+	if (!sc)
+		return;
+	rbh_scratch_free(sc);
+	free(sc);
 }
 
 void qaws_internal_rbh_destroy(qaws_internal_rbh_op* op)
@@ -836,24 +941,41 @@ void qaws_internal_rbh_destroy(qaws_internal_rbh_op* op)
 	if (!op)
 		return;
 	free(op->t.node); free(op->t.perm); free(op->c); free(op->w); free(op->near); free(op->far);
-	free(op->gi); free(op->ui); free(op->G); free(op->U); free(op->accB); free(op->acc0);
+	rbh_scratch_free(&op->sc);
 	free(op);
 }
 
 /* the tree and the lists, the items' c and w set; lo, hi, ctr the items'
    boxes and centers, qp their weighted projectors */
-static qaws_status rbh_finish(qaws_internal_rbh_op* op, double const* lo, double const* hi, double const* ctr, double const* qp, double theta,
-	int skip_shared, rbh_weights fn, void const* user)
+/* the lists of items [begin, end), one chunk */
+typedef struct rbh_par
 {
+	rbh_build const* base;
+	rbh_build* chunk;
+} rbh_par;
+
+static qaws_status rbh_chunk(void* user, unsigned int chunk, unsigned int begin, unsigned int end)
+{
+	rbh_par* p = (rbh_par*)user;
+	rbh_build* b = &p->chunk[chunk];
+	unsigned int I;
+	*b = *p->base;
+	for (I = begin; I < end && !b->status; I++)
+		rbh_visit(b, I, 0);
+	return b->status == 3 ? QAWS_STATUS_ALLOCATION_FAILURE : b->status ? QAWS_STATUS_NUMERICAL_FAILURE : QAWS_STATUS_OK;
+}
+
+static qaws_status rbh_finish(qaws_internal_rbh_op* op, double const* lo, double const* hi, double const* ctr, double const* qp, double theta,
+	int skip_shared, rbh_weights fn, void const* user, qaws_batch_executor const* executor)
+{
+	enum { GRAIN = 64 };
 	rbh_build b;
-	unsigned int i;
+	rbh_par p;
+	unsigned int i, chunks = qaws_internal_chunk_count(op->nitems, GRAIN);
+	qaws_status st;
 	size_t ni = (size_t)op->nitems + 1;
 	op->t.perm = (unsigned int*)malloc(sizeof(unsigned int) * ni);
-	op->gi = (double*)malloc(sizeof(double) * (op->gdim * ni + 1));
-	op->ui = (double*)malloc(sizeof(double) * ni);
-	op->accB = (double*)malloc(sizeof(double) * (op->gdim * ni + 1));
-	op->acc0 = (double*)malloc(sizeof(double) * ni);
-	if (!op->t.perm || !op->gi || !op->ui || !op->accB || !op->acc0)
+	if (!op->t.perm)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	for (i = 0; i < op->nitems; i++) op->t.perm[i] = i;
 	op->t.dim = op->dim; op->t.ilo = lo; op->t.ihi = hi; op->t.ic = ctr;
@@ -863,78 +985,108 @@ static qaws_status rbh_finish(qaws_internal_rbh_op* op, double const* lo, double
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 		bh_sums(&op->t, 0, op->w, qp);
 	}
-	op->G = (double*)malloc(sizeof(double) * (op->gdim * (size_t)op->t.nn + 1));
-	op->U = (double*)malloc(sizeof(double) * ((size_t)op->t.nn + 1));
-	if (!op->G || !op->U)
+	if (!rbh_scratch_make(op, &op->sc))
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	memset(&b, 0, sizeof(b));
 	b.op = op; b.ilo = lo; b.ihi = hi; b.theta = theta; b.skip_shared = skip_shared; b.fn = fn; b.user = user;
-	for (i = 0; i < op->nitems && !b.status; i++)
-		rbh_visit(&b, i, 0);
+	/* the items' lists in chunks through the executor, then joined in chunk
+	   (so item) order: the same lists for any executor */
+	p.base = &b;
+	p.chunk = (rbh_build*)calloc(chunks + 1, sizeof(rbh_build));
+	if (!p.chunk)
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	st = qaws_internal_parallel(executor, op->nitems, GRAIN, rbh_chunk, &p);
+	for (i = 0; st == QAWS_STATUS_OK && i < chunks; i++) { op->nnear += p.chunk[i].nnear; op->nfar += p.chunk[i].nfar; }
+	if (st == QAWS_STATUS_OK)
+	{
+		op->near = (rbh_link*)malloc(sizeof(rbh_link) * (op->nnear + 1));
+		op->far = (rbh_link*)malloc(sizeof(rbh_link) * (op->nfar + 1));
+		op->capnear = op->nnear; op->capfar = op->nfar;
+		if (!op->near || !op->far)
+			st = QAWS_STATUS_ALLOCATION_FAILURE;
+	}
+	if (st == QAWS_STATUS_OK)
+	{
+		size_t an = 0, af = 0;
+		for (i = 0; i < chunks; i++)
+		{
+			if (p.chunk[i].nnear) memcpy(op->near + an, p.chunk[i].near, sizeof(rbh_link) * p.chunk[i].nnear);
+			if (p.chunk[i].nfar) memcpy(op->far + af, p.chunk[i].far, sizeof(rbh_link) * p.chunk[i].nfar);
+			an += p.chunk[i].nnear; af += p.chunk[i].nfar;
+		}
+	}
+	for (i = 0; i < chunks; i++) { free(p.chunk[i].near); free(p.chunk[i].far); }
+	free(p.chunk);
 	op->t.ilo = op->t.ihi = op->t.ic = NULL;
-	return b.status == 3 ? QAWS_STATUS_ALLOCATION_FAILURE : b.status ? QAWS_STATUS_NUMERICAL_FAILURE : QAWS_STATUS_OK;
+	return st;
 }
 
-void qaws_internal_rbh_apply(qaws_internal_rbh_op* op, double const* u, double* y)
+/* y = A u with the caller's scratch: products with one scratch each may run at once */
+void qaws_internal_rbh_apply_with(qaws_internal_rbh_op const* op, qaws_internal_rbh_scratch* sc, double const* u, double* y)
 {
 	unsigned int I, a, q, gd = op->gdim, k = op->k, id;
 	size_t l;
 	for (I = 0; I < op->nitems; I++)
 	{
 		double s = 0;
-		for (q = 0; q < gd; q++) op->gi[gd * I + q] = 0;
+		for (q = 0; q < gd; q++) sc->gi[gd * I + q] = 0;
 		for (a = 0; a < k; a++)
 		{
 			double v = u[rbh_vertex(op, I, a)];
 			s += v;
-			for (q = 0; q < gd; q++) op->gi[gd * I + q] += v * op->c[(k * I + a) * gd + q];
+			for (q = 0; q < gd; q++) sc->gi[gd * I + q] += v * op->c[(k * I + a) * gd + q];
 		}
-		op->ui[I] = s / k;
+		sc->ui[I] = s / k;
 	}
 	/* the nodes' sums, children (later ids) first */
 	for (id = op->t.nn; id-- > 0;)
 	{
 		bh_node const* n = &op->t.node[id];
-		double* G = op->G + (size_t)gd * id;
+		double* G = sc->G + (size_t)gd * id;
 		for (q = 0; q < gd; q++) G[q] = 0;
-		op->U[id] = 0;
+		sc->U[id] = 0;
 		if (n->child[0] >= 0)
 		{
 			unsigned int c0 = (unsigned int)n->child[0], c1 = (unsigned int)n->child[1];
-			for (q = 0; q < gd; q++) G[q] = op->G[(size_t)gd * c0 + q] + op->G[(size_t)gd * c1 + q];
-			op->U[id] = op->U[c0] + op->U[c1];
+			for (q = 0; q < gd; q++) G[q] = sc->G[(size_t)gd * c0 + q] + sc->G[(size_t)gd * c1 + q];
+			sc->U[id] = sc->U[c0] + sc->U[c1];
 		}
 		else
 			for (a = n->begin; a < n->end; a++)
 			{
 				unsigned int J = op->t.perm[a];
-				for (q = 0; q < gd; q++) G[q] += op->w[J] * op->gi[gd * J + q];
-				op->U[id] += op->w[J] * op->ui[J];
+				for (q = 0; q < gd; q++) G[q] += op->w[J] * sc->gi[gd * J + q];
+				sc->U[id] += op->w[J] * sc->ui[J];
 			}
 	}
-	memset(op->accB, 0, sizeof(double) * (gd * (size_t)op->nitems + 1));
-	memset(op->acc0, 0, sizeof(double) * ((size_t)op->nitems + 1));
+	memset(sc->accB, 0, sizeof(double) * (gd * (size_t)op->nitems + 1));
+	memset(sc->acc0, 0, sizeof(double) * ((size_t)op->nitems + 1));
 	for (l = 0; l < op->nnear; l++)
 	{
 		rbh_link const* e = &op->near[l];
-		for (q = 0; q < gd; q++) op->accB[gd * e->I + q] += e->kB * (op->gi[gd * e->I + q] - op->gi[gd * e->J + q]);
-		op->acc0[e->I] += e->kB0 * (op->ui[e->I] - op->ui[e->J]);
+		for (q = 0; q < gd; q++) sc->accB[gd * e->I + q] += e->kB * (sc->gi[gd * e->I + q] - sc->gi[gd * e->J + q]);
+		sc->acc0[e->I] += e->kB0 * (sc->ui[e->I] - sc->ui[e->J]);
 	}
 	for (l = 0; l < op->nfar; l++)
 	{
 		rbh_link const* e = &op->far[l];
 		double W = op->t.node[e->J].W;
-		for (q = 0; q < gd; q++) op->accB[gd * e->I + q] += e->kB * (W * op->gi[gd * e->I + q] - op->G[(size_t)gd * e->J + q]);
-		op->acc0[e->I] += e->kB0 * (W * op->ui[e->I] - op->U[e->J]);
+		for (q = 0; q < gd; q++) sc->accB[gd * e->I + q] += e->kB * (W * sc->gi[gd * e->I + q] - sc->G[(size_t)gd * e->J + q]);
+		sc->acc0[e->I] += e->kB0 * (W * sc->ui[e->I] - sc->U[e->J]);
 	}
 	memset(y, 0, sizeof(double) * op->nv);
 	for (I = 0; I < op->nitems; I++)
 		for (a = 0; a < k; a++)
 		{
-			double s = op->acc0[I] / k;
-			for (q = 0; q < gd; q++) s += op->c[(k * I + a) * gd + q] * op->accB[gd * I + q];
+			double s = sc->acc0[I] / k;
+			for (q = 0; q < gd; q++) s += op->c[(k * I + a) * gd + q] * sc->accB[gd * I + q];
 			y[rbh_vertex(op, I, a)] += s;
 		}
+}
+
+void qaws_internal_rbh_apply(qaws_internal_rbh_op* op, double const* u, double* y)
+{
+	qaws_internal_rbh_apply_with(op, &op->sc, u, y);
 }
 
 size_t qaws_internal_rbh_links(qaws_internal_rbh_op const* op, size_t* out_far)
@@ -1004,7 +1156,7 @@ static int rbh_curve_pair(rbh_curves const* u, unsigned int const* P, unsigned i
 			}
 			if (!(r2 > 0))
 				return 0;
-			inv = pow(r2, -0.5 * u->ex);
+			inv = bh_pow(r2, -0.5 * u->ex);
 			*w += inv;
 			*w0 += fmax(r2 - td * td, 0) / (r2 * r2) * inv;
 		}
@@ -1045,7 +1197,7 @@ static int rbh_curve_weights(void const* user, unsigned int I, unsigned int J, b
 			return 0;
 		for (r = 0; r < dim; r++)
 			for (s = 0; s < dim; s++) dQd += d[r] * d[s] * far->Q[ix[r][s]];
-		inv = pow(r2, -0.5 * u->ex);
+		inv = bh_pow(r2, -0.5 * u->ex);
 		sB += inv;
 		s0 += inv / (r2 * r2) * (fmax(r2 - td * td, 0) + fmax(dQd, 0) / far->W);
 	}
@@ -1094,7 +1246,7 @@ qaws_status qaws_internal_rbh_curves_metric(qaws_repulsive_curves const* c, doub
 	}
 	u.c = c; u.x = x; u.ex = 2 * ((c->beta - 1) / c->alpha - 1) + 1;
 	if (st == QAWS_STATUS_OK)
-		st = rbh_finish(op, lo, hi, ctr, qp, theta, 1, rbh_curve_weights, &u);
+		st = rbh_finish(op, lo, hi, ctr, qp, theta, 1, rbh_curve_weights, &u, c->executor);
 	free(lo); free(hi); free(ctr); free(qp);
 	if (st != QAWS_STATUS_OK)
 	{
@@ -1126,7 +1278,7 @@ static int rbh_mesh_weights(void const* user, unsigned int S, unsigned int T, bh
 	}
 	if (!(r2 > 0))
 		return 0;
-	inv = pow(r2, -0.5 * u->ex);
+	inv = bh_pow(r2, -0.5 * u->ex);
 	if (!far)
 	{
 		/* w = a_S a_T r^-ex: kB = 2 w, kB0 = w ((N_S . d)^2 + (N_T . d)^2) / r^4 */
@@ -1191,7 +1343,7 @@ qaws_status qaws_internal_rbh_mesh_metric(qaws_repulsive_mesh const* m, double c
 	}
 	u.a = fa; u.N = fN; u.X = ctr; u.ex = 2 * (1 - 2 / m->p) + 2;
 	if (st == QAWS_STATUS_OK)
-		st = rbh_finish(op, lo, hi, ctr, qp, theta, 0, rbh_mesh_weights, &u);
+		st = rbh_finish(op, lo, hi, ctr, qp, theta, 0, rbh_mesh_weights, &u, m->executor);
 	free(lo); free(hi); free(ctr); free(qp); free(fa); free(fN);
 	if (st != QAWS_STATUS_OK)
 	{
@@ -1225,12 +1377,12 @@ static int rbh_point_weights(void const* user, unsigned int i, unsigned int j, b
 	if (!(r2 > 0))
 		return 0;
 	*kB = 0;
-	*kB0 = 2 * u->m[i] * (far ? 1 : u->m[j]) * pow(r2, -0.5 * u->ex);
+	*kB0 = 2 * u->m[i] * (far ? 1 : u->m[j]) * bh_pow(r2, -0.5 * u->ex);
 	return 1;
 }
 
 qaws_status qaws_internal_rbh_fractional(double const* p, double const* mass, unsigned int nv, unsigned int dim, double ex, double theta,
-	qaws_internal_rbh_op** out)
+	qaws_internal_rbh_op** out, qaws_batch_executor const* executor)
 {
 	double *lo, *hi, *ctr, *qp;
 	unsigned int i, q;
@@ -1246,7 +1398,7 @@ qaws_status qaws_internal_rbh_fractional(double const* p, double const* mass, un
 		op->w[i] = mass[i];
 	}
 	u.p = p; u.m = mass; u.dim = dim; u.ex = ex;
-	st = rbh_finish(op, lo, hi, ctr, qp, theta, 0, rbh_point_weights, &u);
+	st = rbh_finish(op, lo, hi, ctr, qp, theta, 0, rbh_point_weights, &u, executor);
 	free(lo); free(hi); free(ctr); free(qp);
 	if (st != QAWS_STATUS_OK)
 	{

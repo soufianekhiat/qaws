@@ -255,7 +255,7 @@ qaws_status qaws_repulsive_curves_create(qaws_repulsive_curves_desc const* desc,
 	}
 	if (desc->edge_count) memcpy(c->edges, desc->edges, sizeof(unsigned int) * 2 * desc->edge_count);
 	c->dim = desc->dimension; c->nv = desc->vertex_count; c->ne = desc->edge_count;
-	c->alpha = alpha; c->beta = beta;
+	c->alpha = alpha; c->beta = beta; c->executor = desc->executor;
 	*out_curves = c;
 	return QAWS_STATUS_OK;
 }
@@ -338,7 +338,7 @@ qaws_status qaws_repulsive_mesh_create(qaws_repulsive_mesh_desc const* desc, qaw
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 	if (desc->triangle_count) memcpy(m->tris, desc->triangles, sizeof(unsigned int) * 3 * desc->triangle_count);
-	m->nv = desc->vertex_count; m->nf = desc->triangle_count; m->p = p;
+	m->nv = desc->vertex_count; m->nf = desc->triangle_count; m->p = p; m->executor = desc->executor;
 	*out_mesh = m;
 	return QAWS_STATUS_OK;
 }

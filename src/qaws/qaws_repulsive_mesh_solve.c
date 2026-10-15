@@ -439,7 +439,7 @@ static qaws_status rm_hier(rs_core const* core, double const* x, qaws_internal_r
 			h->mass[o] += l / 6;
 		}
 	if ((st = qaws_internal_rbh_mesh_metric(m, x, core->theta, &h->A)) == QAWS_STATUS_OK)
-		st = qaws_internal_rbh_fractional(x, h->mass, m->nv, 3, 2 + 2 * (2 - s), core->theta, &h->F);
+		st = qaws_internal_rbh_fractional(x, h->mass, m->nv, 3, 2 + 2 * (2 - s), core->theta, &h->F, core->executor);
 	if (st != QAWS_STATUS_OK)
 		qaws_internal_rs_hier_free(h);
 	return st;
@@ -688,6 +688,7 @@ qaws_status qaws_repulsive_mesh_solver_create(qaws_repulsive_mesh const* m, qaws
 	k->lmean = total / s->ne;
 	rm_measures(m, k->x, &s->A0, NULL, &s->V0, NULL);
 	k->theta = (double)d.theta;
+	k->executor = m->executor;
 	k->fixed = s->fixed;
 	k->translates = s->npin == 0 && !s->bary;
 	k->k = (s->bary ? 3 : 0) + (k->theta > 0 ? 0 : 3 * s->npin) + (s->area ? 1 : 0) + (s->volume ? 1 : 0);
@@ -702,7 +703,7 @@ qaws_status qaws_repulsive_mesh_solver_create(qaws_repulsive_mesh const* m, qaws
 	k->h = 0.25 * k->lmean;
 	k->rep.reason = QAWS_REPULSIVE_RUNNING;
 	k->rep.stationarity = 1;
-	if ((st = qaws_internal_repulsive_mesh_energy(m, k->x, &E, NULL)) != QAWS_STATUS_OK)
+	if ((st = k->ops->energy(k, k->x, &E, NULL)) != QAWS_STATUS_OK)
 	{
 		qaws_repulsive_mesh_solver_destroy(s);
 		return st;

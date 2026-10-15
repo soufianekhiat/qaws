@@ -4,6 +4,7 @@
 #include "qaws_types.h"
 #include "qaws_status.h"
 #include "qaws_surface_types.h"
+#include "qaws_batch_executor.h"
 
 /*
  * Tangent-point (repulsive) energies of polygonal curves and triangle
@@ -48,6 +49,7 @@ typedef struct qaws_repulsive_curves_desc
 	unsigned int edge_count;
 	qaws_scalar alpha;                 /* 0 and 0: (3, 6). alpha >= 2, beta in [alpha + 2, 2 alpha + 1] */
 	qaws_scalar beta;
+	qaws_batch_executor const* executor;   /* optional: runs the evaluations in parallel (the results do not depend on it) */
 } qaws_repulsive_curves_desc;
 
 typedef struct qaws_repulsive_curves qaws_repulsive_curves;
@@ -217,6 +219,7 @@ typedef struct qaws_repulsive_mesh_desc
 	unsigned int const* triangles;     /* 3 vertex indices per face; connectivity fixed */
 	unsigned int triangle_count;
 	qaws_scalar p;                     /* 0: 6. p > 4 */
+	qaws_batch_executor const* executor;   /* optional, as for curves */
 } qaws_repulsive_mesh_desc;
 
 typedef struct qaws_repulsive_mesh qaws_repulsive_mesh;

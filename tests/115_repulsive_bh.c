@@ -204,6 +204,39 @@ static void test_timing(void)
 	free(x); free(g); free(tris);
 }
 
+/* an executor that runs the chunks backwards: the results must not move */
+static void rb_backwards(void* user, unsigned int count, qaws_batch_task_fn task, void* ctx)
+{
+	unsigned int i;
+	(void)user;
+	for (i = count; i-- > 0;) task(ctx, i, i + 1);
+}
+
+static void test_executor(void)
+{
+	enum { N = 700 };
+	qaws_scalar x[3 * N], g0[3 * N], g1[3 * N], E0 = 0, E1 = 0;
+	unsigned int e[2 * N], i, same = 1;
+	qaws_repulsive_curves_desc d;
+	qaws_repulsive_curves *c0 = NULL, *c1 = NULL;
+	qaws_batch_executor ex;
+	char msg[200];
+	rb_trefoil(x, e, N);
+	memset(&d, 0, sizeof(d));
+	d.dimension = 3; d.vertex_count = N; d.edges = e; d.edge_count = N;
+	qaws_repulsive_curves_create(&d, &c0);
+	ex.parallel_for = rb_backwards; ex.user = NULL;
+	d.executor = &ex;
+	qaws_repulsive_curves_create(&d, &c1);
+	memset(g0, 0, sizeof(g0)); memset(g1, 0, sizeof(g1));
+	qaws_repulsive_curves_bh(c0, x, (qaws_scalar)0.25, 1, g0, &E0, NULL);
+	qaws_repulsive_curves_bh(c1, x, (qaws_scalar)0.25, 1, g1, &E1, NULL);
+	for (i = 0; i < 3 * N; i++) same &= g0[i] == g1[i];
+	sprintf(msg, "an executor running the chunks backwards: energy and gradient identical %d (E %.17g, %.17g)", same && E0 == E1, (double)E0, (double)E1);
+	TEST_ASSERT(same && E0 == E1, msg);
+	qaws_repulsive_curves_destroy(c0); qaws_repulsive_curves_destroy(c1);
+}
+
 int test_115_repulsive_bh_main(void)
 {
 	g_pass = 0;
@@ -212,6 +245,7 @@ int test_115_repulsive_bh_main(void)
 	test_curves();
 	test_meshes();
 	test_timing();
+	test_executor();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
 }

@@ -29,12 +29,14 @@
 #include "qaws_repulsive.h"
 #include "internal/qaws_internal_repulsive.h"
 #include "internal/qaws_internal_repulsive_solve.h"
+#include "internal/qaws_internal_parallel.h"
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
 
 #define RH_RESTART 40
 #define RH_TOL 1e-8          /* each scalar solve, relative */
+#define RH_ACCEPT 1e-6       /* accepted once restarts stop gaining: the floor rounding sets in the approximate products */
 
 typedef qaws_internal_rs_core rs_core;
 
@@ -47,11 +49,10 @@ struct qaws_internal_rs_hsys
 	unsigned int nfree, k;
 	double *Y, *C, *phi, *S;        /* k x N, k x N, k, k x k */
 	unsigned int* piv;
-	double *t0, *t1, *t2, *t3;      /* nv each */
+	double *t0, *t1;                /* nv each */
 	unsigned int *perm, *inv, *first;  /* the Laplacian's ordering and profile */
 	size_t* start;
 	double* L;
-	double *V, *Z, *H, *cs, *sn, *gq;   /* GMRES */
 };
 
 void qaws_internal_rs_hier_free(qaws_internal_rs_hier* h)
@@ -68,9 +69,8 @@ void qaws_internal_rs_hsys_free(qaws_internal_rs_hsys* H)
 		return;
 	qaws_internal_rs_hier_free(&H->h);
 	free(H->Y); free(H->C); free(H->phi); free(H->S); free(H->piv);
-	free(H->t0); free(H->t1); free(H->t2); free(H->t3);
+	free(H->t0); free(H->t1);
 	free(H->perm); free(H->inv); free(H->first); free(H->start); free(H->L);
-	free(H->V); free(H->Z); free(H->H); free(H->cs); free(H->sn); free(H->gq);
 	free(H);
 }
 
@@ -90,19 +90,61 @@ static double rh_dot(double const* a, double const* b, unsigned int n)
 	return r;
 }
 
+/* one scalar solve's workspace: GMRES's vectors, the products' scratch */
+typedef struct rh_work
+{
+	double *V, *Z, *H, *cs, *sn, *gq;
+	double *t0, *t3, *b, *r, *tmp;  /* nv each */
+	qaws_internal_rbh_scratch *sa, *sf;
+} rh_work;
+
+static void rh_work_destroy(rh_work* W)
+{
+	if (!W)
+		return;
+	free(W->V); free(W->Z); free(W->H); free(W->cs); free(W->sn); free(W->gq);
+	free(W->t0); free(W->t3); free(W->b); free(W->r); free(W->tmp);
+	qaws_internal_rbh_scratch_destroy(W->sa);
+	qaws_internal_rbh_scratch_destroy(W->sf);
+	free(W);
+}
+
+static rh_work* rh_work_create(qaws_internal_rs_hsys const* H)
+{
+	size_t nv = H->s->nv;
+	rh_work* W = (rh_work*)calloc(1, sizeof(rh_work));
+	if (!W)
+		return NULL;
+	W->V = (double*)malloc(sizeof(double) * nv * (RH_RESTART + 1));
+	W->Z = (double*)malloc(sizeof(double) * nv * (RH_RESTART + 1));
+	W->H = (double*)calloc((RH_RESTART + 1) * RH_RESTART, sizeof(double));
+	W->cs = (double*)malloc(sizeof(double) * RH_RESTART); W->sn = (double*)malloc(sizeof(double) * RH_RESTART);
+	W->gq = (double*)malloc(sizeof(double) * (RH_RESTART + 1));
+	W->t0 = (double*)malloc(sizeof(double) * nv); W->t3 = (double*)malloc(sizeof(double) * nv);
+	W->b = (double*)malloc(sizeof(double) * nv); W->r = (double*)malloc(sizeof(double) * nv); W->tmp = (double*)malloc(sizeof(double) * nv);
+	W->sa = qaws_internal_rbh_scratch_create(H->h.A);
+	W->sf = qaws_internal_rbh_scratch_create(H->h.F);
+	if (!W->V || !W->Z || !W->H || !W->cs || !W->sn || !W->gq || !W->t0 || !W->t3 || !W->b || !W->r || !W->tmp || !W->sa || !W->sf)
+	{
+		rh_work_destroy(W);
+		return NULL;
+	}
+	return W;
+}
+
 /* y = A u on the free vertices (u's pinned entries ignored) */
-static void rh_apply(qaws_internal_rs_hsys* H, double const* u, double* y)
+static void rh_apply(qaws_internal_rs_hsys const* H, rh_work* W, double const* u, double* y)
 {
 	rs_core const* s = H->s;
 	unsigned int i;
-	memcpy(H->t3, u, sizeof(double) * s->nv);
-	rh_mask(s, H->t3);
-	qaws_internal_rbh_apply(H->h.A, H->t3, y);
+	memcpy(W->t3, u, sizeof(double) * s->nv);
+	rh_mask(s, W->t3);
+	qaws_internal_rbh_apply_with(H->h.A, W->sa, W->t3, y);
 	rh_mask(s, y);
 	if (H->aug)
 	{
 		double m = 0;
-		for (i = 0; i < s->nv; i++) m += H->t3[i] / s->nv;
+		for (i = 0; i < s->nv; i++) m += W->t3[i] / s->nv;
 		for (i = 0; i < s->nv; i++) y[i] += H->tau * m;
 	}
 }
@@ -219,11 +261,11 @@ done:
 	return ok;
 }
 
-/* (-L + shift M) z = b on the free vertices (t0 as scratch) */
-static void rh_chol_solve(qaws_internal_rs_hsys* H, double const* b, double* z)
+/* (-L + shift M) z = b on the free vertices (W's t0 as scratch) */
+static void rh_chol_solve(qaws_internal_rs_hsys const* H, rh_work* W, double const* b, double* z)
 {
 	unsigned int nv = H->s->nv, i, j;
-	double* y = H->t0;
+	double* y = W->t0;
 	for (i = 0; i < nv; i++) y[H->perm[i]] = b[i];
 	for (i = 0; i < nv; i++)
 	{
@@ -242,64 +284,57 @@ static void rh_chol_solve(qaws_internal_rs_hsys* H, double const* b, double* z)
 }
 
 /* z = P v: the free constants by tau, the rest by the Laplacian sandwich */
-static void rh_precond(qaws_internal_rs_hsys* H, double const* v, double* z, double* tmp)
+static void rh_precond(qaws_internal_rs_hsys const* H, rh_work* W, double const* v, double* z)
 {
 	rs_core const* s = H->s;
 	unsigned int i;
-	double c = 0;
+	double c = 0, *tmp = W->tmp;
 	for (i = 0; i < s->nv; i++) tmp[i] = v[i];
 	rh_mask(s, tmp);
 	for (i = 0; i < s->nv; i++) c += tmp[i] / H->nfree;
 	for (i = 0; i < s->nv; i++) if (!s->fixed || !s->fixed[i]) tmp[i] -= c;
-	rh_chol_solve(H, tmp, z);
-	qaws_internal_rbh_apply(H->h.F, z, tmp);
+	rh_chol_solve(H, W, tmp, z);
+	qaws_internal_rbh_apply_with(H->h.F, W->sf, z, tmp);
 	rh_mask(s, tmp);
-	rh_chol_solve(H, tmp, z);
+	rh_chol_solve(H, W, tmp, z);
 	for (i = 0; i < s->nv; i++) if (!s->fixed || !s->fixed[i]) z[i] += c / H->tau;
 }
 
 /* A u = b on the free vertices by flexible GMRES (restarted); 0 when it
    does not converge */
-static int rh_solve(qaws_internal_rs_hsys* H, double const* b0, double* u)
+static int rh_solve(qaws_internal_rs_hsys const* H, rh_work* W, double const* b0, double* u)
 {
 	enum { R = RH_RESTART };
 	unsigned int nv = H->s->nv, i, j, k, outer;
-	double *V = H->V, *Z = H->Z, *Hm = H->H, bn;
-	double* b = (double*)malloc(sizeof(double) * nv);
-	double* tmp = (double*)malloc(sizeof(double) * nv);
-	double* r = (double*)malloc(sizeof(double) * nv);
+	double *V = W->V, *Z = W->Z, *Hm = W->H, *b = W->b, *r = W->r, bn, prev = HUGE_VAL;
 	int ok = 0;
 	memset(u, 0, sizeof(double) * nv);
-	if (!b || !tmp || !r)
-		goto done;
 	memcpy(b, b0, sizeof(double) * nv);
 	rh_mask(H->s, b);
 	bn = sqrt(rh_dot(b, b, nv));
 	if (!(bn > 0))
-	{
-		ok = 1;
-		goto done;
-	}
+		return 1;
 	for (outer = 0; outer < 25; outer++)
 	{
 		double beta;
-		rh_apply(H, u, r);
+		rh_apply(H, W, u, r);
 		for (i = 0; i < nv; i++) r[i] = b[i] - r[i];
 		beta = sqrt(rh_dot(r, r, nv));
-		if (beta <= RH_TOL * bn)
+		if (beta <= RH_TOL * bn || (beta <= RH_ACCEPT * bn && beta > 0.5 * prev))
 		{
 			ok = 1;
 			break;
 		}
+		prev = beta;
 		for (i = 0; i < nv; i++) V[i] = r[i] / beta;
-		memset(H->gq, 0, sizeof(double) * (R + 1));
-		H->gq[0] = beta;
+		memset(W->gq, 0, sizeof(double) * (R + 1));
+		W->gq[0] = beta;
 		for (j = 0; j < R; j++)
 		{
 			double* z = Z + (size_t)j * nv;
 			double hn;
-			rh_precond(H, V + (size_t)j * nv, z, tmp);
-			rh_apply(H, z, r);
+			rh_precond(H, W, V + (size_t)j * nv, z);
+			rh_apply(H, W, z, r);
 			for (k = 0; k <= j; k++)
 			{
 				double hk = rh_dot(r, V + (size_t)k * nv, nv);
@@ -313,22 +348,22 @@ static int rh_solve(qaws_internal_rs_hsys* H, double const* b0, double* u)
 			for (k = 0; k < j; k++)
 			{
 				double a = Hm[k * R + j], c2 = Hm[(k + 1) * R + j];
-				Hm[k * R + j] = H->cs[k] * a + H->sn[k] * c2;
-				Hm[(k + 1) * R + j] = -H->sn[k] * a + H->cs[k] * c2;
+				Hm[k * R + j] = W->cs[k] * a + W->sn[k] * c2;
+				Hm[(k + 1) * R + j] = -W->sn[k] * a + W->cs[k] * c2;
 			}
 			{
 				double a = Hm[j * R + j], c2 = Hm[(j + 1) * R + j], rr = hypot(a, c2);
-				H->cs[j] = rr > 0 ? a / rr : 1; H->sn[j] = rr > 0 ? c2 / rr : 0;
+				W->cs[j] = rr > 0 ? a / rr : 1; W->sn[j] = rr > 0 ? c2 / rr : 0;
 				Hm[j * R + j] = rr; Hm[(j + 1) * R + j] = 0;
-				H->gq[j + 1] = -H->sn[j] * H->gq[j]; H->gq[j] *= H->cs[j];
+				W->gq[j + 1] = -W->sn[j] * W->gq[j]; W->gq[j] *= W->cs[j];
 			}
-			if (fabs(H->gq[j + 1]) <= RH_TOL * bn || j + 1 == R || !(hn > 0))
+			if (fabs(W->gq[j + 1]) <= RH_TOL * bn || j + 1 == R || !(hn > 0))
 			{
 				double y[R];
 				unsigned int n = j + 1;
 				for (k = n; k-- > 0;)
 				{
-					double sm = H->gq[k];
+					double sm = W->gq[k];
 					for (i = k + 1; i < n; i++) sm -= Hm[k * R + i] * y[i];
 					y[k] = Hm[k * R + k] != 0 ? sm / Hm[k * R + k] : 0;
 				}
@@ -339,36 +374,77 @@ static int rh_solve(qaws_internal_rs_hsys* H, double const* b0, double* u)
 		}
 	}
 	rh_mask(H->s, u);
-done:
-	free(b); free(tmp); free(r);
 	return ok;
 }
 
-/* the N-vector v solved per coordinate (coordinates with nothing free
-   skipped): out = A~^-1 v */
-static int rh_solve_vec(qaws_internal_rs_hsys* H, double const* v, double* out)
+/* The scalar solves of a direction: for each N-vector source and each
+   coordinate it has free entries in, A u = that coordinate. Identical
+   right-hand sides (the barycenter rows, one per coordinate) are solved
+   once. The distinct ones are independent: they run through the executor,
+   each with its own workspace, and give the same result in any order. */
+typedef struct rh_batch
+{
+	qaws_internal_rs_hsys const* H;
+	double const* rhs;              /* the distinct right-hand sides, nv each */
+	double* sol;
+	int* ok;
+} rh_batch;
+
+static qaws_status rh_batch_job(void* user, unsigned int chunk, unsigned int begin, unsigned int end)
+{
+	rh_batch* b = (rh_batch*)user;
+	unsigned int nv = b->H->s->nv, j;
+	rh_work* W = rh_work_create(b->H);
+	(void)chunk;
+	if (!W)
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	for (j = begin; j < end; j++) b->ok[j] = rh_solve(b->H, W, b->rhs + (size_t)j * nv, b->sol + (size_t)j * nv);
+	rh_work_destroy(W);
+	return QAWS_STATUS_OK;
+}
+
+static int rh_solve_all(qaws_internal_rs_hsys const* H, double const* const* src, double* const* dst, unsigned int count)
 {
 	rs_core const* s = H->s;
-	unsigned int q, i, dim = s->dim;
-	double* b = (double*)malloc(sizeof(double) * s->nv);
-	double* u = (double*)malloc(sizeof(double) * s->nv);
-	int ok = b && u;
-	for (q = 0; ok && q < dim; q++)
-	{
-		int any = 0;
-		for (i = 0; i < s->nv; i++)
+	unsigned int dim = s->dim, nv = s->nv, njob = 0, nuniq = 0, j, q, i, t;
+	unsigned int* which = (unsigned int*)malloc(sizeof(unsigned int) * (count * dim + 1));   /* job -> distinct system */
+	double *rhs = (double*)malloc(sizeof(double) * ((size_t)count * dim * nv + 1)), *sol = (double*)malloc(sizeof(double) * ((size_t)count * dim * nv + 1));
+	int* ok = (int*)malloc(sizeof(int) * (count * dim + 1));
+	int good = which && rhs && sol && ok;
+	rh_batch b;
+	for (j = 0; good && j < count; j++)
+		for (q = 0; q < dim; q++)
 		{
-			b[i] = v[dim * i + q];
-			any |= b[i] != 0 && !(s->fixed && s->fixed[i]);
+			double* v = rhs + (size_t)nuniq * nv;
+			int any = 0;
+			for (i = 0; i < nv; i++)
+			{
+				v[i] = src[j][dim * i + q];
+				if (s->fixed && s->fixed[i]) v[i] = 0;
+				any |= v[i] != 0;
+			}
+			if (!any)
+			{
+				which[njob++] = 0xffffffffu;   /* (nothing free: u = 0) */
+				continue;
+			}
+			for (t = 0; t < nuniq && memcmp(rhs + (size_t)t * nv, v, sizeof(double) * nv) != 0; t++)
+				;
+			which[njob++] = t;
+			if (t == nuniq)
+				nuniq++;
 		}
-		if (any)
-			ok = rh_solve(H, b, u);
-		else
-			memset(u, 0, sizeof(double) * s->nv);
-		for (i = 0; i < s->nv; i++) out[dim * i + q] = u[i];
+	if (good)
+	{
+		b.H = H; b.rhs = rhs; b.sol = sol; b.ok = ok;
+		good = qaws_internal_parallel(s->executor, nuniq, 1, rh_batch_job, &b) == QAWS_STATUS_OK;
 	}
-	free(b); free(u);
-	return ok;
+	for (t = 0; good && t < nuniq; t++) good = ok[t];
+	for (j = 0, njob = 0; good && j < count; j++)
+		for (q = 0; q < dim; q++, njob++)
+			for (i = 0; i < nv; i++) dst[j][dim * i + q] = which[njob] == 0xffffffffu ? 0 : sol[(size_t)which[njob] * nv + i];
+	free(which); free(rhs); free(sol); free(ok);
+	return good;
 }
 
 qaws_status qaws_internal_rs_hdirection(rs_core const* s, double const* x, double const* dE, double* g, qaws_internal_rs_hsys** out)
@@ -390,14 +466,7 @@ qaws_status qaws_internal_rs_hdirection(rs_core const* s, double const* x, doubl
 	H->S = (double*)malloc(sizeof(double) * (k * k + 1));
 	H->piv = (unsigned int*)malloc(sizeof(unsigned int) * (k + 1));
 	H->t0 = (double*)malloc(sizeof(double) * nv); H->t1 = (double*)malloc(sizeof(double) * nv);
-	H->t2 = (double*)malloc(sizeof(double) * nv); H->t3 = (double*)malloc(sizeof(double) * nv);
-	H->V = (double*)malloc(sizeof(double) * nv * (RH_RESTART + 1));
-	H->Z = (double*)malloc(sizeof(double) * nv * (RH_RESTART + 1));
-	H->H = (double*)calloc((RH_RESTART + 1) * RH_RESTART, sizeof(double));
-	H->cs = (double*)malloc(sizeof(double) * RH_RESTART); H->sn = (double*)malloc(sizeof(double) * RH_RESTART);
-	H->gq = (double*)malloc(sizeof(double) * (RH_RESTART + 1));
-	if (!H->Y || !H->C || !H->phi || !H->S || !H->piv || !H->t0 || !H->t1 || !H->t2 || !H->t3 || !H->V || !H->Z || !H->H || !H->cs || !H->sn ||
-		!H->gq)
+	if (!H->Y || !H->C || !H->phi || !H->S || !H->piv || !H->t0 || !H->t1)
 	{
 		qaws_internal_rs_hsys_free(H);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
@@ -432,21 +501,29 @@ qaws_status qaws_internal_rs_hdirection(rs_core const* s, double const* x, doubl
 			for (i = 0; i < nv; i++) m += H->t0[i] / nv;
 			for (i = 0; i < nv; i++) H->t0[i] -= m;
 		}
+		rh_work* W0 = rh_work_create(H);
+		if (!W0)
+			goto fail;
 		H->aug = 0;   /* (A alone for tau) */
-		rh_apply(H, H->t0, H->t1);
+		rh_apply(H, W0, H->t0, H->t1);
 		H->aug = H->nfree == nv;
+		rh_work_destroy(W0);
 		num = rh_dot(H->t0, H->t1, nv); den = rh_dot(H->t0, H->t0, nv);
 		if (num > 0 && den > 0) H->tau = num / den;
 	}
-	/* z, then Y and the Schur complement */
-	if (!rh_solve_vec(H, dE, g))
-		goto fail;
+	/* z and Y together (their solves run at once), then the Schur complement */
+	if (k)
+		s->ops->constraints(s, x, H->phi, H->C);
+	{
+		double const* src[QAWS_INTERNAL_RS_HROWS + 1];
+		double* dst[QAWS_INTERNAL_RS_HROWS + 1];
+		src[0] = dE; dst[0] = g;
+		for (r = 0; r < k; r++) { src[r + 1] = H->C + (size_t)r * N; dst[r + 1] = H->Y + (size_t)r * N; }
+		if (!rh_solve_all(H, src, dst, k + 1))
+			goto fail;
+	}
 	if (k)
 	{
-		s->ops->constraints(s, x, H->phi, H->C);
-		for (r = 0; r < k; r++)
-			if (!rh_solve_vec(H, H->C + (size_t)r * N, H->Y + (size_t)r * N))
-				goto fail;
 		for (r = 0; r < k; r++)
 		{
 			for (c = 0; c < k; c++) H->S[r * k + c] = rh_dot(H->C + (size_t)r * N, H->Y + (size_t)c * N, N);
