@@ -80,4 +80,10 @@ void qaws_internal_rbh_apply_with(qaws_internal_rbh_op const* op, qaws_internal_
 size_t qaws_internal_rbh_links(qaws_internal_rbh_op const* op, size_t* out_far);
 void qaws_internal_rbh_destroy(qaws_internal_rbh_op* op);
 
+/* every pair i < j of overlapping boxes that accept allows (NULL: all), visited once, by a
+   self traversal of a median-split tree; a non-OK visit stops and is returned */
+struct qaws_bp_box;
+qaws_status qaws_internal_rbh_box_pairs(struct qaws_bp_box const* boxes, unsigned int count, unsigned int dim,
+	int (*accept)(void* user, unsigned int i, unsigned int j), qaws_status (*visit)(void* user, unsigned int i, unsigned int j), void* user);
+
 #endif /* QAWS_INTERNAL_REPULSIVE_H */

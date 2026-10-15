@@ -419,9 +419,8 @@ With `theta > 0` the solvers store nothing of size |V|^2:
   The constants on the free vertices are passed through by 1/tau.
 - **The projection** after a step is Newton's in the same metric. It
   reuses Y: dx = -Y m with (C(y) Y) m = Phi(y).
-- **The collision-checked mode** is unchanged and still checks all pairs.
-  Shortcut: it is O(|E|^2) per accepted step; it needs a broad phase
-  (the tree above) to scale.
+- **The collision-checked mode** is the dense one's: the same pairs, the
+  same rule, through a broad phase (below).
 - **Refused here:** per-edge lengths (one row per edge is too many for the
   Schur complement).
 
@@ -676,3 +675,59 @@ three strands fill a square.
 | Curves distributed over a surface | 36 |
 | A knot relaxed without crossings | 32 (a collision-checked trefoil), 35 (a 600-edge torus knot) |
 | A constrained surface optimized near another surface | 33 |
+
+## CPU performance
+
+The ideas come from the acceleration structures of TinyBVH, nanoflann and
+Farq (Farq's `farq_bvh.hpp`: median and Morton builds, 8-wide nodes with
+outward-rounded float bounds, AVX box tests, a parallel build). They are
+applied where the profile pointed: the per-interaction cost first, then
+threads, then the collision checks' broad phase.
+
+- **Closed forms.** The Barnes-Hut far terms are closed forms, value and
+  gradient, like the near pairs. No jets remain on the hierarchical path.
+  Their accuracy is unchanged to the digit (test 115).
+- **Powers.** Every pair term takes powers. When twice the exponent is a
+  whole number (alpha / 2, beta / 2 and p usually are), the power is
+  computed by products and one square root.
+- **An executor** (`qaws_repulsive_curves_desc.executor`, and the mesh's)
+  runs the work in parallel, following Qaws's convention: Qaws has no
+  threads of its own, and results do not depend on the executor. Test 115
+  runs the chunks backwards and checks bit-identical results.
+  - **Barnes-Hut:** each element writes only its own energy share and
+    gradient block; a gather in element order follows.
+  - **The interaction lists:** built in chunks of elements and joined in
+    element order.
+  - **The hierarchical direction:** its scalar GMRES solves run at once,
+    each with its own workspace (the products' scratch is per solve).
+    Identical right-hand sides, such as the barycenter rows, are solved
+    once.
+- **The collision checks' broad phase** is a self traversal of the same
+  median-split tree over each element's swept box, grown by half the
+  clearance. Pairs of boxes farther apart than the clearance cannot come
+  closer than it, since a straight motion stays in the box of its two
+  positions. Qaws's uniform grid sizes its cells for boxes spread through a
+  volume; along a curve its cells hold hundreds of edges each.
+- **Fixes found on the way:**
+  - the hierarchical GMRES now accepts the rounding floor (1e-6) once its
+    restarts stop gaining; at 8000 edges the floor sat just above 1e-8 and
+    every step failed;
+  - a solver's creation now takes its initial energy in its own mode; the
+    direct one cost minutes at 8000 edges.
+
+| Lumpy trefoil (f64, 20 threads) | Before | After, serial | After, threads |
+|---|---|---|---|
+| Barnes-Hut energy and gradient, 8000 edges | 1.63 s | 0.24 s | 0.035 s |
+| Barnes-Hut energy and gradient, 32000 edges | 10.9 s | 1.06 s | 0.15 s |
+| Hierarchical step, 2000 edges | 1.7 s | 1.5 s | 0.36 s |
+| Hierarchical step, 8000 edges | failed (GMRES) | 10.6 s | 1.9 s |
+| Collision check of one step, 8000 / 32000 edges | 2.6 s / 61 s (the grid; all pairs before it) | 4.4 ms / 18 ms | |
+
+Not done here:
+
+- **Wide nodes with SIMD box tests** (Farq's 8-wide AVX traversal). After
+  the closed forms, the traversal is no longer what dominates.
+- **A Morton build.** The tree's build is a small share.
+- **Parallelism inside one metric product.** With fewer solves than
+  threads, the extra threads stay idle; at 8000 edges a step's 7 solves use
+  7 of 20.

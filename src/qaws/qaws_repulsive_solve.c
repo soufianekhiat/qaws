@@ -17,6 +17,7 @@
 #include "qaws_repulsive.h"
 #include "internal/qaws_internal_repulsive.h"
 #include "internal/qaws_internal_repulsive_solve.h"
+#include "internal/qaws_internal_broadphase.h"
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -597,23 +598,71 @@ static double rs_move(double const* x0, double const* x1, unsigned int v, unsign
 /* every pair of edges sharing no vertex stays at least min(clearance, half
    its distance at t = 0) apart along x0 -> x1 (conservative advancement:
    the distance is Lipschitz in t with the pair's largest endpoint moves) */
+/* the pairs of edges sharing no vertex, through the grid broad phase:
+   each edge's box holds its straight motion x0 -> x1 (a segment moving
+   straight stays in the box of its two positions), grown by pad; boxes
+   farther apart than 2 pad hold edges that stay farther apart. With
+   touch > 0 the positions are still (x1 = x0) and a pair closer than touch
+   fails; otherwise each candidate pair runs the advancement with the
+   required min(clearance, d0 / 2) <= clearance = 2 pad. */
+typedef struct rs_bp
+{
+	qaws_repulsive_curves const* c;
+	double const *x0, *x1;
+	double clearance, touch;
+} rs_bp;
+
+static int rs_bp_accept(void* user, unsigned int i, unsigned int j)
+{
+	rs_bp const* b = (rs_bp const*)user;
+	return !rs_shared(b->c->edges + 2 * i, b->c->edges + 2 * j);
+}
+
+static qaws_status rs_bp_visit(void* user, unsigned int i, unsigned int j)
+{
+	rs_bp const* b = (rs_bp const*)user;
+	unsigned int dim = b->c->dim;
+	rs_epair p;
+	double L, d0;
+	p.I = b->c->edges + 2 * i; p.J = b->c->edges + 2 * j; p.x0 = b->x0; p.x1 = b->x1; p.dim = dim;
+	d0 = rs_epair_at(&p, 0);
+	if (b->touch > 0)
+		return d0 > b->touch ? QAWS_STATUS_OK : QAWS_STATUS_NUMERICAL_FAILURE;
+	L = fmax(rs_move(b->x0, b->x1, p.I[0], dim), rs_move(b->x0, b->x1, p.I[1], dim)) + fmax(rs_move(b->x0, b->x1, p.J[0], dim), rs_move(b->x0, b->x1, p.J[1], dim));
+	return qaws_internal_rs_advance(rs_epair_at, &p, d0, L, fmin(b->clearance, 0.5 * d0)) ? QAWS_STATUS_OK : QAWS_STATUS_NUMERICAL_FAILURE;
+}
+
+/* 1 when every pair of edges sharing no vertex stays clear (touch 0) or is
+   not closer than touch (x1 = x0); 0 otherwise, or out of memory */
+static int rs_curves_pairs_ok(qaws_repulsive_curves const* c, double clearance, double touch, double const* x0, double const* x1)
+{
+	unsigned int dim = c->dim, i, a, q;
+	double pad = touch > 0 ? touch : 0.5 * clearance * (1 + 1e-9);
+	qaws_bp_box* box = (qaws_bp_box*)malloc(sizeof(qaws_bp_box) * (c->ne + 1));
+	rs_bp b;
+	qaws_status st;
+	if (!box)
+		return 0;
+	for (i = 0; i < c->ne; i++)
+	{
+		for (q = 0; q < 3; q++) { box[i].lo[q] = q < dim ? HUGE_VAL : 0; box[i].hi[q] = q < dim ? -HUGE_VAL : 0; }
+		for (a = 0; a < 2; a++)
+			for (q = 0; q < dim; q++)
+			{
+				double u = x0[dim * c->edges[2 * i + a] + q], v = x1[dim * c->edges[2 * i + a] + q];
+				box[i].lo[q] = fmin(box[i].lo[q], fmin(u, v) - pad);
+				box[i].hi[q] = fmax(box[i].hi[q], fmax(u, v) + pad);
+			}
+	}
+	b.c = c; b.x0 = x0; b.x1 = x1; b.clearance = clearance; b.touch = touch;
+	st = qaws_internal_rbh_box_pairs(box, c->ne, dim, rs_bp_accept, rs_bp_visit, &b);
+	free(box);
+	return st == QAWS_STATUS_OK;
+}
+
 static int rs_curves_path_ok(qaws_repulsive_curves const* c, double clearance, double const* x0, double const* x1)
 {
-	unsigned int I, J;
-	for (I = 0; I < c->ne; I++)
-		for (J = I + 1; J < c->ne; J++)
-		{
-			rs_epair p;
-			double L, d0;
-			p.I = c->edges + 2 * I; p.J = c->edges + 2 * J; p.x0 = x0; p.x1 = x1; p.dim = c->dim;
-			if (rs_shared(p.I, p.J))
-				continue;
-			L = fmax(rs_move(x0, x1, p.I[0], c->dim), rs_move(x0, x1, p.I[1], c->dim)) + fmax(rs_move(x0, x1, p.J[0], c->dim), rs_move(x0, x1, p.J[1], c->dim));
-			d0 = rs_epair_at(&p, 0);
-			if (!qaws_internal_rs_advance(rs_epair_at, &p, d0, L, fmin(clearance, 0.5 * d0)))
-				return 0;
-		}
-	return 1;
+	return rs_curves_pairs_ok(c, clearance, 0, x0, x1);
 }
 
 static int rs_c_path_ok(rs_core const* core, double const* x0, double const* x1)
@@ -872,18 +921,11 @@ qaws_status qaws_repulsive_curves_solver_create(qaws_repulsive_curves const* c, 
 	/* collision-checked: no two edges sharing no vertex may touch already */
 	if (k->checked)
 	{
-		unsigned int I, J;
-		for (I = 0; I < c->ne; I++)
-			for (J = I + 1; J < c->ne; J++)
-			{
-				rs_epair p;
-				p.I = c->edges + 2 * I; p.J = c->edges + 2 * J; p.x0 = p.x1 = k->x; p.dim = dim;
-				if (!rs_shared(p.I, p.J) && !(rs_epair_at(&p, 0) > 1e-12 * k->lmean))
-				{
-					qaws_repulsive_curves_solver_destroy(s);
-					return QAWS_STATUS_INVALID_ARGUMENT;
-				}
-			}
+		if (!rs_curves_pairs_ok(c, 0, 1e-12 * k->lmean, k->x, k->x))
+		{
+			qaws_repulsive_curves_solver_destroy(s);
+			return QAWS_STATUS_INVALID_ARGUMENT;
+		}
 	}
 	*out_solver = s;
 	return QAWS_STATUS_OK;

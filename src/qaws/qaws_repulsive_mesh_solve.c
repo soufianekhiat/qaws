@@ -14,6 +14,7 @@
 #include "qaws_repulsive.h"
 #include "internal/qaws_internal_repulsive.h"
 #include "internal/qaws_internal_repulsive_solve.h"
+#include "internal/qaws_internal_broadphase.h"
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -337,70 +338,112 @@ static double rm_move(double const* x0, double const* x1, unsigned int v)
 /* every vertex against every face it is not a corner of, every two edges
    sharing no vertex: at least min(clearance, half the start distance);
    check = 0: whether no such pair touches at x0 (the input check) */
+/* the vertex-face and edge-edge pairs (with check 0: the still input, and
+   edge-face crossings) through the grid broad phase over one box list:
+   vertices [0, nv), edges [nv, nv + ne), faces after. Each box holds its
+   element's straight motion x0 -> x1, grown by pad; boxes farther apart
+   than 2 pad hold elements that stay farther apart than the clearance. */
+typedef struct rm_bp
+{
+	qaws_repulsive_mesh_solver const* s;
+	double const *x0, *x1;
+	int check;
+} rm_bp;
+
+static int rm_bp_kind(rm_bp const* b, unsigned int i)
+{
+	return i < b->s->m->nv ? 0 : i < b->s->m->nv + b->s->ne ? 1 : 2;   /* vertex, edge, face */
+}
+
+static int rm_bp_accept(void* user, unsigned int i, unsigned int j)
+{
+	rm_bp const* b = (rm_bp const*)user;
+	qaws_repulsive_mesh_solver const* s = b->s;
+	unsigned int nv = s->m->nv, ne = s->ne;
+	int ki = rm_bp_kind(b, i), kj = rm_bp_kind(b, j);
+	if (ki > kj) { unsigned int t = i; i = j; j = t; t = (unsigned int)ki; ki = kj; kj = (int)t; }
+	if (ki == 0 && kj == 2)
+	{
+		unsigned int const* t = s->m->tris + 3 * (j - nv - ne);
+		return t[0] != i && t[1] != i && t[2] != i;
+	}
+	if (ki == 1 && (kj == 1 || (kj == 2 && !b->check)))
+	{
+		unsigned int const* e = s->edges + 2 * (i - nv);
+		unsigned int const* o = kj == 1 ? s->edges + 2 * (j - nv) : s->m->tris + 3 * (j - nv - ne);
+		unsigned int n = kj == 1 ? 2 : 3, k;
+		for (k = 0; k < n; k++)
+			if (o[k] == e[0] || o[k] == e[1])
+				return 0;
+		return 1;
+	}
+	return 0;
+}
+
+static qaws_status rm_bp_visit(void* user, unsigned int i, unsigned int j)
+{
+	rm_bp const* b = (rm_bp const*)user;
+	qaws_repulsive_mesh_solver const* s = b->s;
+	unsigned int nv = s->m->nv, ne = s->ne;
+	int ki = rm_bp_kind(b, i), kj = rm_bp_kind(b, j);
+	double const *x0 = b->x0, *x1 = b->x1;
+	double d0, L;
+	rm_pair p;
+	if (ki > kj) { unsigned int t = i; i = j; j = t; t = (unsigned int)ki; ki = kj; kj = (int)t; }
+	p.x0 = x0; p.x1 = x1;
+	if (ki == 1 && kj == 2)
+	{
+		/* the input: an edge through a face (motion from a clear state cannot reach this without a vertex-face or edge-edge contact first) */
+		unsigned int const* e = s->edges + 2 * (i - nv);
+		unsigned int const* t = s->m->tris + 3 * (j - nv - ne);
+		return rm_segtri(x0 + 3 * e[0], x0 + 3 * e[1], x0 + 3 * t[0], x0 + 3 * t[1], x0 + 3 * t[2]) ? QAWS_STATUS_NUMERICAL_FAILURE : QAWS_STATUS_OK;
+	}
+	if (ki == 0)
+	{
+		unsigned int const* t = s->m->tris + 3 * (j - nv - ne);
+		p.vf = 1; p.v[0] = i; p.v[1] = t[0]; p.v[2] = t[1]; p.v[3] = t[2];
+		L = rm_move(x0, x1, i) + fmax(rm_move(x0, x1, t[0]), fmax(rm_move(x0, x1, t[1]), rm_move(x0, x1, t[2])));
+	}
+	else
+	{
+		unsigned int const* a = s->edges + 2 * (i - nv);
+		unsigned int const* c = s->edges + 2 * (j - nv);
+		p.vf = 0; p.v[0] = a[0]; p.v[1] = a[1]; p.v[2] = c[0]; p.v[3] = c[1];
+		L = fmax(rm_move(x0, x1, a[0]), rm_move(x0, x1, a[1])) + fmax(rm_move(x0, x1, c[0]), rm_move(x0, x1, c[1]));
+	}
+	d0 = rm_pair_at(&p, 0);
+	if (!b->check)
+		return d0 > 1e-12 * s->core.lmean ? QAWS_STATUS_OK : QAWS_STATUS_NUMERICAL_FAILURE;
+	return qaws_internal_rs_advance(rm_pair_at, &p, d0, L, fmin(s->core.clearance, 0.5 * d0)) ? QAWS_STATUS_OK : QAWS_STATUS_NUMERICAL_FAILURE;
+}
+
 static int rm_pairs_ok(qaws_repulsive_mesh_solver const* s, double const* x0, double const* x1, int check)
 {
 	qaws_repulsive_mesh const* m = s->m;
-	unsigned int v, f, i, j;
-	rm_pair p;
-	p.x0 = x0; p.x1 = x1;
-	p.vf = 1;
-	for (v = 0; v < m->nv; v++)
-		for (f = 0; f < m->nf; f++)
-		{
-			unsigned int const* t = m->tris + 3 * f;
-			double d0, L;
-			if (t[0] == v || t[1] == v || t[2] == v)
-				continue;
-			p.v[0] = v; p.v[1] = t[0]; p.v[2] = t[1]; p.v[3] = t[2];
-			d0 = rm_pair_at(&p, 0);
-			if (!check)
-			{
-				if (!(d0 > 1e-12 * s->core.lmean))
-					return 0;
-				continue;
-			}
-			L = rm_move(x0, x1, v) + fmax(rm_move(x0, x1, t[0]), fmax(rm_move(x0, x1, t[1]), rm_move(x0, x1, t[2])));
-			if (!qaws_internal_rs_advance(rm_pair_at, &p, d0, L, fmin(s->core.clearance, 0.5 * d0)))
-				return 0;
-		}
-	if (!check)
+	unsigned int nv = m->nv, ne = s->ne, n = nv + ne + m->nf, i, a, q;
+	double pad = check ? 0.5 * s->core.clearance * (1 + 1e-9) : 1e-12 * s->core.lmean;
+	qaws_bp_box* box = (qaws_bp_box*)malloc(sizeof(qaws_bp_box) * (n + 1));
+	rm_bp b;
+	qaws_status st;
+	if (!box)
+		return 0;
+	for (i = 0; i < n; i++)
 	{
-		/* the input: an edge through a face it shares no vertex with
-		   touches no vertex-face or edge-edge pair (motion from a clear
-		   state cannot reach this without one first) */
-		for (i = 0; i < s->ne; i++)
-			for (f = 0; f < m->nf; f++)
+		unsigned int const* vs = i < nv ? &i : i < nv + ne ? s->edges + 2 * (i - nv) : m->tris + 3 * (i - nv - ne);
+		unsigned int k = i < nv ? 1 : i < nv + ne ? 2 : 3;
+		for (q = 0; q < 3; q++) { box[i].lo[q] = HUGE_VAL; box[i].hi[q] = -HUGE_VAL; }
+		for (a = 0; a < k; a++)
+			for (q = 0; q < 3; q++)
 			{
-				unsigned int const* t = m->tris + 3 * f;
-				unsigned int const* e = s->edges + 2 * i;
-				if (e[0] == t[0] || e[0] == t[1] || e[0] == t[2] || e[1] == t[0] || e[1] == t[1] || e[1] == t[2])
-					continue;
-				if (rm_segtri(x0 + 3 * e[0], x0 + 3 * e[1], x0 + 3 * t[0], x0 + 3 * t[1], x0 + 3 * t[2]))
-					return 0;
+				double u = x0[3 * vs[a] + q], v = x1[3 * vs[a] + q];
+				box[i].lo[q] = fmin(box[i].lo[q], fmin(u, v) - pad);
+				box[i].hi[q] = fmax(box[i].hi[q], fmax(u, v) + pad);
 			}
 	}
-	p.vf = 0;
-	for (i = 0; i < s->ne; i++)
-		for (j = i + 1; j < s->ne; j++)
-		{
-			unsigned int const* a = s->edges + 2 * i;
-			unsigned int const* b = s->edges + 2 * j;
-			double d0, L;
-			if (a[0] == b[0] || a[0] == b[1] || a[1] == b[0] || a[1] == b[1])
-				continue;
-			p.v[0] = a[0]; p.v[1] = a[1]; p.v[2] = b[0]; p.v[3] = b[1];
-			d0 = rm_pair_at(&p, 0);
-			if (!check)
-			{
-				if (!(d0 > 1e-12 * s->core.lmean))
-					return 0;
-				continue;
-			}
-			L = fmax(rm_move(x0, x1, a[0]), rm_move(x0, x1, a[1])) + fmax(rm_move(x0, x1, b[0]), rm_move(x0, x1, b[1]));
-			if (!qaws_internal_rs_advance(rm_pair_at, &p, d0, L, fmin(s->core.clearance, 0.5 * d0)))
-				return 0;
-		}
-	return 1;
+	b.s = s; b.x0 = x0; b.x1 = x1; b.check = check;
+	st = qaws_internal_rbh_box_pairs(box, n, 3, rm_bp_accept, rm_bp_visit, &b);
+	free(box);
+	return st == QAWS_STATUS_OK;
 }
 
 static int rm_path_ok(rs_core const* core, double const* x0, double const* x1)

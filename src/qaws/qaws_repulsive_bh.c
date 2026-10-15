@@ -29,6 +29,7 @@
 #include "qaws_repulsive.h"
 #include "internal/qaws_internal_repulsive.h"
 #include "internal/qaws_internal_parallel.h"
+#include "internal/qaws_internal_broadphase.h"
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -1407,4 +1408,106 @@ qaws_status qaws_internal_rbh_fractional(double const* p, double const* mass, un
 	}
 	*out = op;
 	return QAWS_STATUS_OK;
+}
+
+/* ------------------------------------------------------------------------ */
+/*  Overlapping boxes: the collision checks' broad phase                    */
+/* ------------------------------------------------------------------------ */
+
+/* Every pair i < j of overlapping boxes that accept allows, visited once,
+   by a self traversal of the median-split tree above: a pair of nodes
+   whose boxes do not overlap is dropped whole. O(n log n + pairs) for
+   boxes spread along curves and surfaces, where a uniform grid's cells
+   (sized for boxes spread through a volume) are far too coarse. */
+typedef struct rbh_pairs
+{
+	bh_tree t;
+	qaws_bp_box const* box;
+	int (*accept)(void*, unsigned int, unsigned int);
+	qaws_status (*visit)(void*, unsigned int, unsigned int);
+	void* user;
+	qaws_status st;
+} rbh_pairs;
+
+static int rbh_overlap(double const* alo, double const* ahi, double const* blo, double const* bhi, unsigned int dim)
+{
+	unsigned int q;
+	for (q = 0; q < dim; q++)
+		if (alo[q] > bhi[q] || blo[q] > ahi[q])
+			return 0;
+	return 1;
+}
+
+static void rbh_pairs_visit(rbh_pairs* P, int a, int b)
+{
+	bh_node const *na = &P->t.node[a], *nb = &P->t.node[b];
+	if (P->st != QAWS_STATUS_OK || !rbh_overlap(na->lo, na->hi, nb->lo, nb->hi, P->t.dim))
+		return;
+	if (na->child[0] < 0 && nb->child[0] < 0)
+	{
+		unsigned int i, j;
+		for (i = na->begin; i < na->end && P->st == QAWS_STATUS_OK; i++)
+			for (j = a == b ? i + 1 : nb->begin; j < nb->end && P->st == QAWS_STATUS_OK; j++)
+			{
+				unsigned int u = P->t.perm[i], v = P->t.perm[j], lo = u < v ? u : v, hi = u < v ? v : u;
+				if (!rbh_overlap(P->box[u].lo, P->box[u].hi, P->box[v].lo, P->box[v].hi, P->t.dim))
+					continue;
+				if (P->accept && !P->accept(P->user, lo, hi))
+					continue;
+				P->st = P->visit(P->user, lo, hi);
+			}
+		return;
+	}
+	if (a == b)
+	{
+		rbh_pairs_visit(P, na->child[0], na->child[0]);
+		rbh_pairs_visit(P, na->child[1], na->child[1]);
+		rbh_pairs_visit(P, na->child[0], na->child[1]);
+		return;
+	}
+	/* (open the larger, or the inner one) */
+	if (nb->child[0] < 0 || (na->child[0] >= 0 && na->r >= nb->r))
+	{
+		rbh_pairs_visit(P, na->child[0], b);
+		rbh_pairs_visit(P, na->child[1], b);
+	}
+	else
+	{
+		rbh_pairs_visit(P, a, nb->child[0]);
+		rbh_pairs_visit(P, a, nb->child[1]);
+	}
+}
+
+qaws_status qaws_internal_rbh_box_pairs(qaws_bp_box const* box, unsigned int n, unsigned int dim, int (*accept)(void*, unsigned int, unsigned int),
+	qaws_status (*visit)(void*, unsigned int, unsigned int), void* user)
+{
+	rbh_pairs P;
+	double *lo = (double*)malloc(sizeof(double) * dim * ((size_t)n + 1)), *hi = (double*)malloc(sizeof(double) * dim * ((size_t)n + 1));
+	double* ctr = (double*)malloc(sizeof(double) * dim * ((size_t)n + 1));
+	unsigned int i, q;
+	memset(&P, 0, sizeof(P));
+	P.t.perm = (unsigned int*)malloc(sizeof(unsigned int) * ((size_t)n + 1));
+	P.st = QAWS_STATUS_OK;
+	if (!lo || !hi || !ctr || !P.t.perm)
+		P.st = QAWS_STATUS_ALLOCATION_FAILURE;
+	for (i = 0; P.st == QAWS_STATUS_OK && i < n; i++)
+	{
+		P.t.perm[i] = i;
+		for (q = 0; q < dim; q++)
+		{
+			lo[dim * i + q] = box[i].lo[q]; hi[dim * i + q] = box[i].hi[q];
+			ctr[dim * i + q] = 0.5 * (box[i].lo[q] + box[i].hi[q]);
+		}
+	}
+	P.t.dim = dim; P.t.ilo = lo; P.t.ihi = hi; P.t.ic = ctr;
+	P.box = box; P.accept = accept; P.visit = visit; P.user = user;
+	if (P.st == QAWS_STATUS_OK && n > 1)
+	{
+		if (bh_build(&P.t, 0, n) < 0)
+			P.st = QAWS_STATUS_ALLOCATION_FAILURE;
+		else
+			rbh_pairs_visit(&P, 0, 0);
+	}
+	free(lo); free(hi); free(ctr); free(P.t.perm); free(P.t.node);
+	return P.st;
 }

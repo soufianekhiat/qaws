@@ -111,7 +111,7 @@ qaws_status qaws_repulsive_curves_hvp(qaws_repulsive_curves const* curves, qaws_
  * at most 32 rows, so per-edge lengths are refused here. The Newton
  * projection reuses those solves. The step is an approximation of the
  * dense mode's, converging to it as theta falls. The collision check is
- * the dense mode's: all pairs, O(|E|^2) per accepted step.
+ * the dense mode's, through the same tree broad phase.
  */
 
 typedef enum qaws_repulsive_termination
