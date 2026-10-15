@@ -123,6 +123,7 @@ extern int test_108_shell_trimmed_main(void);
 extern int test_109_geodesic_enclosure_main(void);
 extern int test_110_geodesic_query_main(void);
 extern int test_111_shell_mesh_main(void);
+extern int test_112_repulsive_main(void);
 
 /* Test registry */
 typedef struct {
@@ -243,6 +244,7 @@ static test_suite const g_test_suites[] = {
 	{"109_geodesic_enclosure", test_109_geodesic_enclosure_main},
 	{"110_geodesic_query", test_110_geodesic_query_main},
 	{"111_shell_mesh", test_111_shell_mesh_main},
+	{"112_repulsive", test_112_repulsive_main},
 };
 
 int main(void) {
