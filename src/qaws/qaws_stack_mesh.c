@@ -18,7 +18,7 @@
 
 #define SM_NONE 0xFFFFFFFFu
 #define SM_DENSE 32             /* samples per span to measure arc length */
-#define SM_CORNER 0.9            /* a turn over about 25 degrees between dense points: a corner */
+#define STM_CORNER 0.9            /* a turn over about 25 degrees between dense points: a corner */
 
 struct qaws_mesh_3d
 {
@@ -204,7 +204,7 @@ static void sm_at(sm_contour const* c, sm_dense const* d, double s, double* p)
 	}
 }
 
-/* the contour's samples into the mesh: on its corners (turns over SM_CORNER
+/* the contour's samples into the mesh: on its corners (turns over STM_CORNER
    between dense points, where pieces meet or polylines kink), and by arc
    length between them; about n in all (c->n is updated) */
 static int sm_emit(qaws_mesh_3d* m, sm_contour* c, double z)
@@ -224,7 +224,7 @@ static int sm_emit(qaws_mesh_3d* m, sm_contour* c, double z)
 		double vx = d.p[2 * b] - d.p[2 * i], vy = d.p[2 * b + 1] - d.p[2 * i + 1];
 		double lu = hypot(ux, uy), lv = hypot(vx, vy);
 		if (lu <= 1e-12 * c->length || lv <= 1e-12 * c->length) continue;
-		if ((ux * vx + uy * vy) / (lu * lv) < SM_CORNER) corner[k++] = d.s[i];
+		if ((ux * vx + uy * vy) / (lu * lv) < STM_CORNER) corner[k++] = d.s[i];
 	}
 	c->first = m->nv;
 	if (k == 0)

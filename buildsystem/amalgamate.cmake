@@ -31,8 +31,9 @@ get_filename_component(QAWS_OUTPUT_DIR "${QAWS_OUTPUT_DIR}" ABSOLUTE)
 # include time and must not be pulled into the C amalgamation.
 set(_AM_EXCLUDED qaws_hlsl.h qaws_glsl.h qaws_halide.h)
 
-# An include line: optional blanks, #include "target", optional blanks, end of line.
-set(_AM_INCLUDE_RE "\n[ \t]*#[ \t]*include[ \t]*\"([^\"\n]+)\"[ \t]*\n")
+# An include line: optional blanks, #include "target", the rest of the line
+# (blanks or a comment).
+set(_AM_INCLUDE_RE "\n[ \t]*#[ \t]*include[ \t]*\"([^\"\n]+)\"[^\n]*\n")
 
 set_property(GLOBAL PROPERTY AM_SEEN "")
 set_property(GLOBAL PROPERTY AM_MISSING "")

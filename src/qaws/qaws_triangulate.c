@@ -1531,7 +1531,7 @@ static double rm_target(rm_ctx const* x, double const* p)
 }
 
 /* twice the signed area of a, b, c (a's position replaced by pa if given) */
-static double rm_cross(rm_ctx const* x, unsigned int a, unsigned int b, unsigned int c, double const* pa)
+static double tri_cross(rm_ctx const* x, unsigned int a, unsigned int b, unsigned int c, double const* pa)
 {
 	double const* A = pa ? pa : x->p + 2 * a;
 	double const* B = x->p + 2 * b;
@@ -1744,7 +1744,7 @@ static int rm_split(rm_ctx* x)
 		for (j = 0; j < n; j++)
 		{
 			unsigned int t = r[j] / 3, k = r[j] % 3, c = x->tri[3 * t + k], ea = x->tri[3 * t + (k + 1) % 3], eb = x->tri[3 * t + (k + 2) % 3];
-			if (!(rm_cross(x, TM_NONE, c, ea, mid) > 0) || !(rm_cross(x, TM_NONE, eb, c, mid) > 0)) break;
+			if (!(tri_cross(x, TM_NONE, c, ea, mid) > 0) || !(tri_cross(x, TM_NONE, eb, c, mid) > 0)) break;
 		}
 		if (j < n) continue;
 		mv = rm_vert(x, mid[0], mid[1], bi != TM_NONE ? x->bc[bi] : TM_NONE, tm);
@@ -1859,7 +1859,7 @@ static int rm_collapse(rm_ctx* x)
 			if (x->tri[3 * t] == TM_NONE || rm_has(x, t, w)) continue;
 			o[0] = x->tri[3 * t]; o[1] = x->tri[3 * t + 1]; o[2] = x->tri[3 * t + 2];
 			for (kk = 0; kk < 3; kk++) if (o[kk] == u) o[kk] = w;
-			if (!(rm_cross(x, o[0], o[1], o[2], NULL) > 0)) ok = 0;
+			if (!(tri_cross(x, o[0], o[1], o[2], NULL) > 0)) ok = 0;
 			for (kk = 0; kk < 3 && ok; kk++)
 				if (o[kk] != w)
 				{
@@ -1963,7 +1963,7 @@ static int rm_flip(rm_ctx* x)
 		e = hypot(x->p[2 * a] - x->p[2 * b], x->p[2 * a + 1] - x->p[2 * b + 1]);
 		s = e * e;
 		if (rm_incircle(x, c, a, b, d) <= 1e-9 * s * s) continue;
-		if (!(rm_cross(x, c, a, d, NULL) > 0) || !(rm_cross(x, d, b, c, NULL) > 0)) continue;
+		if (!(tri_cross(x, c, a, d, NULL) > 0) || !(tri_cross(x, d, b, c, NULL) > 0)) continue;
 		x->tri[3 * t] = c; x->tri[3 * t + 1] = a; x->tri[3 * t + 2] = d;
 		x->tri[3 * u] = d; x->tri[3 * u + 1] = b; x->tri[3 * u + 2] = c;
 		x->used[t] = x->used[u] = 1;
@@ -2012,7 +2012,7 @@ static int rm_smooth(rm_ctx* x)
 			unsigned int t = star[j], k;
 			for (k = 0; k < 3; k++)
 				if (x->tri[3 * t + k] == v)
-					ok = rm_cross(x, TM_NONE, x->tri[3 * t + (k + 1) % 3], x->tri[3 * t + (k + 2) % 3], np) > 0;
+					ok = tri_cross(x, TM_NONE, x->tri[3 * t + (k + 1) % 3], x->tri[3 * t + (k + 2) % 3], np) > 0;
 		}
 		if (!ok) continue;
 		x->p[2 * v] = np[0]; x->p[2 * v + 1] = np[1];
