@@ -34,6 +34,7 @@ struct qaws_repulsive_mesh_solver
 	unsigned int *pin, npin, *edges, ne;
 	unsigned char* fixed;
 	double *pin_target, bary0[3], A0, V0;
+	double area_w;                  /* > 0: the area weighted into the energy */
 	int bary, area, volume;
 };
 
@@ -151,10 +152,26 @@ static qaws_status rm_metric(qaws_repulsive_mesh const* m, double const* x, doub
 /*  Constraints                                                             */
 /* ------------------------------------------------------------------------ */
 
+static void rm_measures(qaws_repulsive_mesh const* m, double const* x, double* area, double* gA, double* volume, double* gV);
+
 static qaws_status rm_energy(rs_core const* core, double const* x, double* E, double* grad)
 {
-	qaws_repulsive_mesh const* m = ((qaws_repulsive_mesh_solver const*)core)->m;
-	return qaws_internal_repulsive_mesh_bh(m, x, core->theta, E, grad);   /* (theta 0 opens every node: the direct terms, in closed form) */
+	qaws_repulsive_mesh_solver const* s = (qaws_repulsive_mesh_solver const*)core;
+	qaws_repulsive_mesh const* m = s->m;
+	qaws_status st = qaws_internal_repulsive_mesh_bh(m, x, core->theta, E, grad);   /* (theta 0 opens every node: the direct terms, in closed form) */
+	if (st == QAWS_STATUS_OK && s->area_w > 0)
+	{
+		/* the area weighted (the paper's minimize area) */
+		double area, volume, *gA = grad ? (double*)malloc(sizeof(double) * 3 * m->nv) : NULL;
+		unsigned int i;
+		if (grad && !gA)
+			return QAWS_STATUS_ALLOCATION_FAILURE;
+		rm_measures(m, x, &area, gA, &volume, NULL);
+		*E += s->area_w * area;
+		for (i = 0; gA && i < 3 * m->nv; i++) grad[i] += s->area_w * gA[i];
+		free(gA);
+	}
+	return st;
 }
 
 static qaws_status rm_metric_op(rs_core const* core, double const* x, double* A)
@@ -545,6 +562,8 @@ static void rm_constraints_hvp(rs_core const* core, double const* x, double cons
 }
 
 static qaws_internal_rs_ops const rm_ops = { rm_energy, rm_metric_op, rm_constraints, rm_path_ok, rm_hier, NULL, rm_hvp, rm_constraints_hvp };
+/* with the area weighted: no Hessian products, so no solution derivatives */
+static qaws_internal_rs_ops const rm_ops_plain = { rm_energy, rm_metric_op, rm_constraints, rm_path_ok, rm_hier, NULL, NULL, NULL };
 
 /* the rows' targets from t (to rows, dir 0) or back (dir 1) */
 static void rm_targets(qaws_repulsive_mesh_solver const* s, qaws_repulsive_targets* t, double* rows, int dir)
@@ -682,7 +701,7 @@ qaws_status qaws_repulsive_mesh_solver_create(qaws_repulsive_mesh const* m, qaws
 	*out_solver = NULL;
 	memset(&d, 0, sizeof(d));
 	if (desc) d = *desc;
-	if (d.pinned_count && !d.pinned)
+	if ((d.pinned_count && !d.pinned) || !(d.area_weight >= 0))
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	for (i = 0; i < d.pinned_count; i++) if (d.pinned[i] >= m->nv) return QAWS_STATUS_INVALID_ARGUMENT;
 	s = (qaws_repulsive_mesh_solver*)calloc(1, sizeof(*s));
@@ -693,6 +712,9 @@ qaws_status qaws_repulsive_mesh_solver_create(qaws_repulsive_mesh const* m, qaws
 	s->m = m; k->dim = 3; k->nv = m->nv; k->N = 3 * m->nv;
 	s->npin = d.pinned_count;
 	s->area = d.hold_area != 0; s->volume = d.hold_volume != 0;
+	s->area_w = (double)d.area_weight;
+	if (s->area_w > 0)
+		k->ops = &rm_ops_plain;
 	s->bary = d.hold_barycenter > 0 || (d.hold_barycenter == 0 && d.pinned_count == 0);
 	k->checked = d.collision_checked != 0;
 	k->x = (double*)malloc(sizeof(double) * k->N);

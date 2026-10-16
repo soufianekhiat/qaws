@@ -320,6 +320,8 @@ typedef struct qaws_repulsive_mesh_solve_desc
 	qaws_scalar tolerance;                 /* stationarity; 0 = 1e-4 */
 	qaws_scalar constraint_tolerance;      /* |Phi| over the mean edge length l (area rows over l, volume rows over l^2); 0 = 1e-8 (1e-5 in f32) */
 	qaws_scalar theta;                     /* 0: dense; > 0: hierarchical, as for curves */
+	qaws_scalar area_weight;               /* > 0: weight * the area added to the energy (the paper's minimize area: tangent-point
+	                                          energy regularizing area minimization); no solution derivatives then */
 } qaws_repulsive_mesh_solve_desc;
 
 typedef struct qaws_repulsive_mesh_solver qaws_repulsive_mesh_solver;

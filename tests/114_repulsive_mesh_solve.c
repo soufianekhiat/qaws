@@ -197,6 +197,73 @@ static void test_sphere(void)
 	qaws_repulsive_mesh_destroy(m);
 }
 
+/* the area of x's faces, independently of the library */
+static double rm_area_of(qaws_scalar const* x, unsigned int const* tris, unsigned int nf)
+{
+	double A = 0;
+	unsigned int f, q;
+	for (f = 0; f < nf; f++)
+	{
+		double a[3], b[3], c[3], n[3];
+		for (q = 0; q < 3; q++) { a[q] = x[3 * tris[3 * f] + q]; b[q] = x[3 * tris[3 * f + 1] + q]; c[q] = x[3 * tris[3 * f + 2] + q]; }
+		n[0] = (b[1] - a[1]) * (c[2] - a[2]) - (b[2] - a[2]) * (c[1] - a[1]);
+		n[1] = (b[2] - a[2]) * (c[0] - a[0]) - (b[0] - a[0]) * (c[2] - a[2]);
+		n[2] = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+		A += 0.5 * sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+	}
+	return A;
+}
+
+/* the area weighted into the energy (the paper's minimize area) */
+static void test_area_weight(void)
+{
+	double xd[3 * 70], A0, Aw = 0, Ap = 0;
+	qaws_scalar x[3 * 70], xw[3 * 70], xp[3 * 70], dx[3 * 70];
+	unsigned int tris[3 * 130], nv, nf, i, k;
+	qaws_repulsive_mesh* m;
+	qaws_repulsive_mesh_solve_desc sd;
+	qaws_repulsive_mesh_solver* s = NULL;
+	qaws_repulsive_report r0, rw, rp;
+	qaws_repulsive_targets t;
+	qaws_status st, sj;
+	char msg[400];
+	rm_sphere(2, xd, tris, &nv, &nf);
+	for (i = 0; i < nv; i++)
+	{
+		double rr = 1 + 0.2 * sin(4 * xd[3 * i]) * sin(3 * xd[3 * i + 2]);
+		for (k = 0; k < 3; k++) x[3 * i + k] = (qaws_scalar)(xd[3 * i + k] * rr);
+	}
+	A0 = rm_area_of(x, tris, nf);
+	m = rm_make(nv, tris, nf, 0);
+	memset(&r0, 0, sizeof(r0)); memset(&rw, 0, sizeof(rw)); memset(&rp, 0, sizeof(rp));
+	memcpy(xw, x, sizeof(x)); memcpy(xp, x, sizeof(x));
+	/* the same solve, weighted and not: unweighted the surface inflates, weighted it shrinks */
+	memset(&sd, 0, sizeof(sd));
+	sd.max_iterations = 20;
+	st = qaws_repulsive_mesh_solve(m, &sd, xp, &rp);
+	sd.area_weight = (qaws_scalar)2;
+	st = st == QAWS_STATUS_OK ? qaws_repulsive_mesh_solve(m, &sd, xw, &rw) : st;
+	Aw = rm_area_of(xw, tris, nf);
+	Ap = rm_area_of(xp, tris, nf);
+	sprintf(msg, "area weighted (2): the energy at the input %.9g against the unweighted %.9g + 2 A %.9g; after 20 steps, area %.6f (unweighted %.6f, input %.6f), E %.5g from %.5g",
+		(double)rw.initial_energy, (double)rp.initial_energy, 2 * A0, Aw, Ap, A0, (double)rw.energy, (double)rw.initial_energy);
+	TEST_ASSERT(st == QAWS_STATUS_OK && fabs((double)rw.initial_energy - (double)rp.initial_energy - 2 * A0) <= (RM_F32 ? 1e-4 : 1e-10) * (double)rw.initial_energy &&
+		Aw < Ap && Aw < A0 && rw.energy < rw.initial_energy, msg);
+	/* no solution derivatives with it; a negative weight refused */
+	sd.max_iterations = 0;
+	st = qaws_repulsive_mesh_solver_create(m, &sd, x, &s);
+	memset(&t, 0, sizeof(t));
+	sj = s ? qaws_repulsive_mesh_solver_solution_jvp(s, &t, dx, NULL) : QAWS_STATUS_INVALID_ARGUMENT;
+	qaws_repulsive_mesh_solver_destroy(s);
+	s = NULL;
+	sd.area_weight = (qaws_scalar)-1;
+	sprintf(msg, "area weighted: solution derivatives refused (%d), a negative weight refused (%d)", (int)sj,
+		(int)qaws_repulsive_mesh_solver_create(m, &sd, x, &s));
+	TEST_ASSERT(st == QAWS_STATUS_OK && sj == QAWS_STATUS_UNSUPPORTED_OPERATION && s == NULL, msg);
+	qaws_repulsive_mesh_solver_destroy(s);
+	qaws_repulsive_mesh_destroy(m);
+}
+
 /* a square sheet of n x n vertices at height z, its triangles from vertex base */
 static unsigned int rm_sheet(qaws_scalar* x, unsigned int* tris, unsigned int base, unsigned int n, double z, double bump)
 {
@@ -308,6 +375,7 @@ int test_114_repulsive_mesh_solve_main(void)
 	test_preconditioner();
 	test_sphere();
 	test_sheets();
+	test_area_weight();
 	test_path_check();
 	test_refusals();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);

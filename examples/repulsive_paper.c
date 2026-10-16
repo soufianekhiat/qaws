@@ -16,8 +16,9 @@
  *   paper7_cylinder.svg   a cylinder with Dirichlet ends (Fig. 9, left)
  *   paper8_hopf.svg       a Hopf link to its canonical shape (Fig. 11)
  *   paper9_borromean.svg  Borromean rings to their canonical shape (Fig. 11)
+ *   paper10_neck.svg      area minimization regularized: no pinch-off (Fig. 9, centre)
  *
- * Usage: qaws_repulsive_paper [data directory [figure 1 to 9 [most steps]]] (default
+ * Usage: qaws_repulsive_paper [data directory [figure 1 to 10 [most steps]]] (default
  * ../examples/data/repulsive_curves, from working_dir; every figure). Minutes, not
  * seconds: the scenes have 500 to 800 vertices and take hundreds of steps
  * (about 20 minutes on 20 threads).
@@ -139,6 +140,7 @@ static unsigned int rp_thread_count(void)
 
 /* at most this many steps in every solve (a preview; argument 3) */
 static unsigned int rp_cap = RP_UNTIL;
+
 
 typedef struct rp_curve
 {
@@ -651,49 +653,59 @@ static void rp_solve_mesh(rp_mesh const* mesh, double p, qaws_repulsive_mesh_sol
 
 /* a surfaces figure: the input and nsnap snapshots, every panel fitted to
    the input's view */
-static void rp_surface_figure(rp_mesh const* m, char const* svgname, char const* title, char const* subtitle, double p,
-	qaws_repulsive_mesh_solve_desc const* sd, unsigned int const* steps, unsigned int nsnap, rp_view const* view)
+/* panels of the mesh at positions xs[0..n), labelled, one scale for all */
+static void rp_mesh_panels(char const* svgname, char const* title, char const* subtitle, rp_mesh const* m, double const* const* xs,
+	char const (*labels)[200], unsigned int n, rp_view const* view, int const* rgbs)
 {
-	double* snaps[8];
-	qaws_repulsive_report reps[8];
-	svg s;
-	double const pw = 300, ph = 300;
-	time_t t0 = time(NULL);
-	unsigned int k;
-	char label[200];
-	int* rgbs = rp_face_colours(m);
 	static int const rgb[3] = { 110, 165, 235 };
-	printf("%s: %u vertices, %u faces\n", svgname, m->nv, m->nf);
-	rp_solve_mesh(m, p, sd, steps, nsnap, snaps, reps);
-	if (svg_open(&s, svgname, (int)(48 + (nsnap + 1) * (pw + 12)), (int)(110 + ph + 30), title, subtitle))
+	double const pw = 300, ph = 300;
+	svg s;
+	unsigned int k;
+	if (svg_open(&s, svgname, (int)(48 + n * (pw + 12)), (int)(110 + ph + 30), title, subtitle))
 	{
 		viewport v;
 		rp_fit fit;
 		double scale = 1e300;
 		v.y0 = 84; v.w = pw; v.h = ph; v.xmin = v.ymin = 0; v.xmax = v.ymax = 1; v.x0 = 24;
-		for (k = 0; k <= nsnap; k++)
+		for (k = 0; k < n; k++)
 		{
-			rp_fit_points(&v, view, k ? snaps[k - 1] : m->x, m->nv, &fit);
+			rp_fit_points(&v, view, xs[k], m->nv, &fit);
 			scale = fmin(scale, fit.scale);   /* (one scale for every panel: sizes compare) */
 		}
-		for (k = 0; k <= nsnap; k++)
+		for (k = 0; k < n; k++)
 		{
-			double const* x = k ? snaps[k - 1] : m->x;
 			v.x0 = 24 + k * (pw + 12);
-			if (k)
-				sprintf(label, "%s%u steps: E %.4g", reps[k - 1].reason == QAWS_REPULSIVE_CONVERGED ? "converged, " : "", reps[k - 1].iterations,
-					(double)reps[k - 1].energy);
-			else
-				sprintf(label, "input: %u faces, E %.4g", m->nf, (double)reps[0].initial_energy);
-			svg_panel(&s, &v, label);
-			rp_fit_points(&v, view, x, m->nv, &fit);
+			svg_panel(&s, &v, labels[k]);
+			rp_fit_points(&v, view, xs[k], m->nv, &fit);
 			fit.cx = v.x0 + 0.5 * v.w + (fit.cx - v.x0 - 0.5 * v.w) * scale / fit.scale;
 			fit.cy = v.y0 + 0.5 * v.h + (fit.cy - v.y0 - 0.5 * v.h) * scale / fit.scale;
 			fit.scale = scale;
-			rp_draw_mesh(&s, &fit, view, x, m->t, m->nf, rgb, rgbs);
+			rp_draw_mesh(&s, &fit, view, xs[k], m->t, m->nf, rgb, rgbs);
 		}
 		svg_close(&s);
 	}
+}
+
+static void rp_surface_figure(rp_mesh const* m, char const* svgname, char const* title, char const* subtitle, double p,
+	qaws_repulsive_mesh_solve_desc const* sd, unsigned int const* steps, unsigned int nsnap, rp_view const* view)
+{
+	double* snaps[8];
+	qaws_repulsive_report reps[8];
+	time_t t0 = time(NULL);
+	unsigned int k;
+	int* rgbs = rp_face_colours(m);
+	double const* xs[9];
+	char labels[9][200];
+	printf("%s: %u vertices, %u faces\n", svgname, m->nv, m->nf);
+	rp_solve_mesh(m, p, sd, steps, nsnap, snaps, reps);
+	xs[0] = m->x;
+	sprintf(labels[0], "input: %u faces, E %.4g", m->nf, (double)reps[0].initial_energy);
+	for (k = 0; k < nsnap; k++)
+	{
+		xs[k + 1] = snaps[k];
+		sprintf(labels[k + 1], "%s%u steps: E %.4g", reps[k].reason == QAWS_REPULSIVE_CONVERGED ? "converged, " : "", reps[k].iterations, (double)reps[k].energy);
+	}
+	rp_mesh_panels(svgname, title, subtitle, m, xs, labels, nsnap + 1, view, rgbs);
 	for (k = 0; k < nsnap; k++) free(snaps[k]);
 	free(rgbs);
 	printf("  %s, %.0f s\n", svgname, difftime(time(NULL), t0));
@@ -855,7 +867,7 @@ static void rp_paths_figure(char const* dir)
 int main(int argc, char** argv)
 {
 	char const* dir = argc > 1 ? argv[1] : "../examples/data/repulsive_curves";
-	int only = argc > 2 ? atoi(argv[2]) : 0;   /* (one figure: 1 to 9) */
+	int only = argc > 2 ? atoi(argv[2]) : 0;   /* (one figure: 1 to 10) */
 	if (argc > 3)
 		rp_cap = (unsigned int)atoi(argv[3]);
 	setvbuf(stdout, NULL, _IONBF, 0);
@@ -912,6 +924,46 @@ int main(int argc, char** argv)
 			free(pins);
 		}
 		rp_free_mesh(&m);
+	}
+	if (!only || only == 10)
+	{
+		/* Repulsive Surfaces, Fig. 9 (centre): area minimization between two
+		   rings past the catenoid's limit (1.6 apart for radius 1: a minimal
+		   surface pinches off), regularized by the tangent-point energy */
+		static unsigned int const steps[1] = { RP_UNTIL };
+		static double const weights[3] = { 1, 10, 100 };
+		rp_view view = { 0.5, 0.45 };
+		rp_mesh m;
+		qaws_repulsive_mesh_solve_desc sd;
+		unsigned int npin, k;
+		unsigned int* pins;
+		time_t t0 = time(NULL);
+		if (rp_cylinder(48, 16, 1, 1.6, &m) && (pins = rp_boundary(&m, &npin)) != NULL)
+		{
+			double* snaps[3];
+			qaws_repulsive_report reps[3];
+			double const* xs[4];
+			char labels[4][200];
+			memset(&sd, 0, sizeof(sd));
+			sd.pinned = pins; sd.pinned_count = npin; sd.theta = (qaws_scalar)0.25;
+			xs[0] = m.x;
+			sprintf(labels[0], "input: %u faces", m.nf);
+			for (k = 0; k < 3; k++)
+			{
+				sd.area_weight = (qaws_scalar)weights[k];
+				printf("paper10_neck: the area weighted by %g\n", weights[k]);
+				rp_solve_mesh(&m, 6, &sd, steps, 1, snaps + k, reps + k);
+				xs[k + 1] = snaps[k];
+				sprintf(labels[k + 1], "area weight %g: %u steps, E %.4g", weights[k], reps[k].iterations, (double)reps[k].energy);
+			}
+			rp_mesh_panels("showcase/paper10_neck.svg", "Repulsive Surfaces, Fig. 9 (centre): area minimization without pinching off",
+				"two rings 1.6 apart (radius 1: past the catenoid's limit), pinned; the area weighted, the tangent-point energy (p 6) keeping a neck",
+				&m, xs, labels, 4, &view, NULL);
+			for (k = 0; k < 3; k++) free(snaps[k]);
+			free(pins);
+		}
+		rp_free_mesh(&m);
+		printf("  showcase/paper10_neck.svg, %.0f s\n", difftime(time(NULL), t0));
 	}
 	/* Repulsive Surfaces, Fig. 11 (the gallery): linked surfaces flowing to
 	   their canonical embeddings; the paper's meshes, the area held (the

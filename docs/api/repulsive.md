@@ -272,6 +272,10 @@ the report.
     (every edge on exactly two faces, oppositely oriented), refused
     otherwise;
   - the barycenter, by default when nothing is pinned.
+- **Area weight.** `area_weight` w > 0 adds w times the area to the
+  energy: the paper's "minimize area" (Fig. 9, centre). The descent then
+  runs without the energy's Hessian-vector product, and the solution's
+  derivatives are refused (unsupported). A negative weight is refused.
 
   The area and volume rows are divided by the mean edge length l and l^2,
   so that one tolerance (in lengths) serves every row.
@@ -323,6 +327,7 @@ vertex form's kernel is the constants only.
 | A sheet under a pinned one, area held, collision-checked: the pinned sheet unmoved | 0 | 0 |
 | The path check: a vertex through a face and an edge through an edge, both ends clear, caught | | |
 | Refusals: volume on an open mesh; an edge through a face in the collision-checked mode; free translations reported | | |
+| The area weight (2): the energy at the input against the unweighted energy + 2 A; 20 steps, the area 12.59 -> 4.16 (unweighted it inflates to 861); solution derivatives and a negative weight refused | within 1e-10 relative | within 1e-4 |
 
 Cost: the metric and the systems are dense, O(F^2) to assemble and
 (3V + k)^3 to factor. A 128-face sphere takes well under a second per
@@ -712,10 +717,32 @@ crossbar 2 wide. The tail to stationarity 1e-4 is slow: 3e-4 at 750
 steps, the energy still falling by 0.5 every 50.
 
 `qaws_repulsive_paper data-directory [figure [most steps]]` runs one
-figure (1 to 6), or caps every solve for a preview.
+figure (1 to 10), or caps every solve for a preview.
 
 Not reproduced: the interpolation scenes (TangentInterpolation and
 CurveInterpolation). They need objectives on the lengths' differences.
+
+
+### Repulsive Surfaces
+
+The same program reproduces figures of Repulsive Surfaces. The Hopf link
+and the Borromean rings are the paper's meshes, copied under their MIT
+license into `examples/data/repulsive_surfaces`. The cylinders are
+generated. Each runs the hierarchical mode (theta 0.25, p 6) until it
+stalls at the hierarchical stationarity floor (about 6e-3):
+
+| Figure | Scene | Faces | Steps | Energy |
+|---|---|---|---|---|
+| 9 (left) | a cylinder, both rims pinned, to a near-sphere | 1728 | 24 | 1.002 -> 0.641 |
+| 9 (centre) | two pinned rings 1.6 apart, the area weighted 1, 10 and 100: a neck kept in each | 1440 | 17, 24, 23 | 9.99, 86.9, 803 |
+| 11 | a Hopf link, the area held | 9216 | 40 | 842.5 -> 303.3 (256 s) |
+
+The paper's flows hold nothing for the links and are stopped by eye.
+Here the area is held, since unconstrained the links inflate (the energy
+falls toward 0 as the surfaces grow).
+
+Not reproduced: the scenes that need remeshing, implicit obstacles,
+growth schedules, or p <= 4 (the solver needs p > 4).
 
 ## Space-time paths and rooms (Sec. 8.5)
 
