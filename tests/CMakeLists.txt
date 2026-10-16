@@ -121,6 +121,7 @@ add_executable(
   117_repulsive_surface.c
   118_repulsive_controls.c
   119_repulsive_core.c
+  120_repulsive_spacetime.c
 )
 
 # The amalgamated library exports exactly the same symbols, so the tests can

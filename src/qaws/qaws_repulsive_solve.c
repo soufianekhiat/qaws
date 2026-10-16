@@ -514,6 +514,82 @@ done:
 /*  Collision checks                                                        */
 /* ------------------------------------------------------------------------ */
 
+/* Per wall p0 p1 (length l, unit t along it, n across), a vertex at signed
+   height h over its line and a = t . (p0 - x), b = a + l along it:
+   f = integral from a to b of ds / (h^2 + s^2) = atan2(|h| (b - a), h^2 + a b) / |h|,
+   df/da = -1 / (h^2 + a^2), df/db = 1 / (h^2 + b^2), and near the line,
+   beside the wall (a b > 0), the series 1/a - 1/b - h^2 (1/a^3 - 1/b^3) / 3. */
+int qaws_internal_rs_room(double const* room, unsigned int count, double w, unsigned int dim, unsigned int u, unsigned int v,
+	double const* x, unsigned int nv, double* E, double* grad)
+{
+	unsigned int i, j;
+	double sum = 0;
+	for (i = 0; i < nv; i++)
+	{
+		double px = x[dim * i + u], py = x[dim * i + v];
+		int in = 0;
+		for (j = 0; j < count; j++)
+		{
+			double const *p0 = room + 2 * j, *p1 = room + 2 * ((j + 1) % count);
+			double ex = p1[0] - p0[0], ey = p1[1] - p0[1], s = ex * (px - p0[0]) + ey * (py - p0[1]);
+			if ((p0[1] > py) != (p1[1] > py) && px < p0[0] + (py - p0[1]) * ex / ey)
+				in = !in;
+			if (ex * (py - p0[1]) - ey * (px - p0[0]) == 0 && s >= 0 && s <= ex * ex + ey * ey)
+				return 0;   /* (on a wall) */
+		}
+		if (!in)
+			return 0;
+	}
+	for (i = 0; i < nv; i++)
+	{
+		double px = x[dim * i + u], py = x[dim * i + v], gx = 0, gy = 0;
+		for (j = 0; j < count; j++)
+		{
+			double const *p0 = room + 2 * j, *p1 = room + 2 * ((j + 1) % count);
+			double l = hypot(p1[0] - p0[0], p1[1] - p0[1]), tx, ty, h, sg, a, b, f, fh;
+			if (!(l > 0))
+				continue;
+			tx = (p1[0] - p0[0]) / l; ty = (p1[1] - p0[1]) / l;
+			h = -ty * (px - p0[0]) + tx * (py - p0[1]);
+			sg = h < 0 ? -1 : 1;
+			h = fabs(h);
+			a = tx * (p0[0] - px) + ty * (p0[1] - py);
+			b = a + l;
+			if (a * b > 0 && h < 1e-4 * fmin(fabs(a), fabs(b)))
+			{
+				double c3 = 1 / (a * a * a) - 1 / (b * b * b);
+				f = 1 / a - 1 / b - h * h * c3 / 3;
+				fh = -2 * h * c3 / 3;
+			}
+			else if (h > 0)
+			{
+				double phi = atan2(h * (b - a), h * h + a * b);
+				f = phi / h;
+				fh = (a / (h * h + a * a) - b / (h * h + b * b)) / h - phi / (h * h);
+			}
+			else
+			{
+				/* (h 0 with a b <= 0: on the wall, refused above) */
+				f = 0; fh = 0;
+			}
+			sum += f;
+			{
+				/* d/dx: dh = sg n, da = db = -t */
+				double fab = 1 / (h * h + b * b) - 1 / (h * h + a * a);
+				gx += fh * sg * -ty - fab * tx;
+				gy += fh * sg * tx - fab * ty;
+			}
+		}
+		if (grad)
+		{
+			grad[dim * i + u] += w * gx;
+			grad[dim * i + v] += w * gy;
+		}
+	}
+	*E += w * sum;
+	return 1;
+}
+
 double qaws_internal_rs_segdist(double const* p0, double const* p1, double const* q0, double const* q1, unsigned int dim)
 {
 	double d1[3] = { 0, 0, 0 }, d2[3] = { 0, 0, 0 }, r[3] = { 0, 0, 0 }, a = 0, e = 0, f = 0, b = 0, c = 0, s, t, den, out = 0;
@@ -588,6 +664,9 @@ struct qaws_repulsive_curves_solver
 	unsigned char* fixed;           /* pinned vertices */
 	double *pin_target, *tbasis, *len0, L0, bary0[3];
 	int total_len, edge_len, bary;
+	unsigned int hold, nhold;       /* the held coordinate + 1 (0: none); its rows */
+	double *hold0, len_w, *room, room_w;
+	unsigned int nroom, ru, rv;     /* the room's points; its plane's coordinates */
 };
 
 /* A = B + B0 at x (nv x nv, row major), the paper's increments over every
@@ -642,8 +721,23 @@ static qaws_status rs_metric(qaws_repulsive_curves const* c, double const* x, do
 
 static qaws_status rs_c_energy(rs_core const* core, double const* x, double* E, double* grad)
 {
-	qaws_repulsive_curves const* c = ((qaws_repulsive_curves_solver const*)core)->c;
-	return qaws_internal_repulsive_curves_bh(c, x, core->theta, E, grad);   /* (theta 0 opens every node: the direct terms, in closed form) */
+	qaws_repulsive_curves_solver const* s = (qaws_repulsive_curves_solver const*)core;
+	unsigned int e, q, dim = core->dim;
+	qaws_status st = qaws_internal_repulsive_curves_bh(s->c, x, core->theta, E, grad);   /* (theta 0 opens every node: the direct terms, in closed form) */
+	if (st != QAWS_STATUS_OK)
+		return st;
+	for (e = 0; s->len_w > 0 && e < s->c->ne; e++)
+	{
+		unsigned int const* I = s->c->edges + 2 * e;
+		double d[3] = { 0, 0, 0 }, l;
+		for (q = 0; q < dim; q++) d[q] = x[dim * I[1] + q] - x[dim * I[0] + q];
+		l = rs_norm(d, dim);
+		*E += s->len_w * l;
+		for (q = 0; grad && l > 0 && q < dim; q++) { grad[dim * I[1] + q] += s->len_w * d[q] / l; grad[dim * I[0] + q] -= s->len_w * d[q] / l; }
+	}
+	if (s->nroom && !qaws_internal_rs_room(s->room, s->nroom, s->room_w, dim, s->ru, s->rv, x, core->nv, E, grad))
+		return QAWS_STATUS_NUMERICAL_FAILURE;   /* (a vertex out of the room: no energy, so a trial step there is refused) */
+	return QAWS_STATUS_OK;
 }
 
 static qaws_status rs_c_metric(rs_core const* core, double const* x, double* A)
@@ -695,6 +789,11 @@ static void rs_c_constraints(rs_core const* core, double const* x, double* phi, 
 		for (q = 0; q < dim; q++, r++)
 		{
 			double m = 0;
+			if (q + 1 == s->hold)
+			{
+				r--;   /* (held for every vertex already) */
+				continue;
+			}
 			for (i = 0; i < core->nv; i++)
 			{
 				m += x[dim * i + q] / core->nv;
@@ -742,7 +841,15 @@ static void rs_c_constraints(rs_core const* core, double const* x, double* phi, 
 				for (q = 0; q < dim; q++) { C[row * N + dim * E[1] + q] += d[q] / l; C[row * N + dim * E[0] + q] -= d[q] / l; }
 		}
 		if (s->total_len) phi[r0] = total - s->L0;
+		if (s->total_len) r = r0 + 1;
 	}
+	for (i = 0; s->hold && i < core->nv; i++)
+		if (!s->fixed[i])
+		{
+			phi[r] = x[dim * i + s->hold - 1] - s->hold0[i];
+			if (C) C[r * N + dim * i + s->hold - 1] = 1;
+			r++;
+		}
 }
 
 /* a pair of edges along the straight motion x0 -> x1 */
@@ -885,6 +992,8 @@ static void rs_c_constraints_hvp(rs_core const* core, double const* x, double co
 
 static qaws_internal_rs_ops const rs_curve_ops = { rs_c_energy, rs_c_metric, rs_c_constraints, rs_c_path_ok, rs_c_hier, NULL, rs_c_hvp,
 	rs_c_constraints_hvp };
+/* with the space-time and room terms: no Hessian products, so no solution derivatives */
+static qaws_internal_rs_ops const rs_curve_ops_plain = { rs_c_energy, rs_c_metric, rs_c_constraints, rs_c_path_ok, rs_c_hier, NULL, NULL, NULL };
 
 /* the rows' targets from t (to rows, dir 0) or back (dir 1) */
 static void rs_c_targets(qaws_repulsive_curves_solver const* s, qaws_repulsive_targets* t, double* rows, int dir)
@@ -975,6 +1084,7 @@ void qaws_repulsive_curves_solver_destroy(qaws_repulsive_curves_solver* s)
 	if (!s)
 		return;
 	free(s->fixed); free(s->pin); free(s->pin_target); free(s->tedge); free(s->tbasis); free(s->len0); free(s->core.x);
+	free(s->hold0); free(s->room);
 	free(s);
 }
 
@@ -992,7 +1102,8 @@ qaws_status qaws_repulsive_curves_solver_create(qaws_repulsive_curves const* c, 
 	memset(&d, 0, sizeof(d));
 	if (desc) d = *desc;
 	dim = c->dim;
-	if ((d.pinned_count && !d.pinned) || (d.tangent_edge_count && !d.tangent_edges) || (d.hold_total_length && d.hold_edge_lengths) || c->ne == 0)
+	if ((d.pinned_count && !d.pinned) || (d.tangent_edge_count && !d.tangent_edges) || (d.hold_total_length && d.hold_edge_lengths) || c->ne == 0 ||
+		d.hold_coordinate > dim || !(d.length_weight >= 0) || !(d.room_weight >= 0) || (d.room && d.room_count < 3) || (!d.room && d.room_count))
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	for (i = 0; i < d.pinned_count; i++) if (d.pinned[i] >= c->nv) return QAWS_STATUS_INVALID_ARGUMENT;
 	for (i = 0; i < d.tangent_edge_count; i++) if (d.tangent_edges[i] >= c->ne) return QAWS_STATUS_INVALID_ARGUMENT;
@@ -1013,7 +1124,9 @@ qaws_status qaws_repulsive_curves_solver_create(qaws_repulsive_curves const* c, 
 	s->tbasis = (double*)malloc(sizeof(double) * (dim * (dim - 1) * d.tangent_edge_count + 1));
 	s->fixed = (unsigned char*)calloc(c->nv + 1, 1);
 	s->len0 = (double*)malloc(sizeof(double) * (c->ne + 1));
-	if (!k->x || !s->pin || !s->pin_target || !s->tedge || !s->tbasis || !s->len0 || !s->fixed)
+	s->hold0 = (double*)malloc(sizeof(double) * (c->nv + 1));
+	s->room = (double*)malloc(sizeof(double) * (2 * d.room_count + 1));
+	if (!k->x || !s->pin || !s->pin_target || !s->tedge || !s->tbasis || !s->len0 || !s->fixed || !s->hold0 || !s->room)
 	{
 		qaws_repulsive_curves_solver_destroy(s);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
@@ -1074,11 +1187,30 @@ qaws_status qaws_repulsive_curves_solver_create(qaws_repulsive_curves const* c, 
 		}
 	}
 	for (i = 0; s->edge_len && i < c->ne; i++) s->nlen += !(s->fixed[c->edges[2 * i]] && s->fixed[c->edges[2 * i + 1]]);
+	/* space-time and the room */
+	s->hold = d.hold_coordinate;
+	for (i = 0; s->hold && i < c->nv; i++)
+	{
+		s->hold0[i] = k->x[dim * i + s->hold - 1];
+		s->nhold += !s->fixed[i];
+	}
+	s->len_w = (double)d.length_weight;
+	s->nroom = d.room ? d.room_count : 0;
+	s->room_w = d.room_weight > 0 ? (double)d.room_weight : 1;
+	for (i = 0; i < 2 * s->nroom; i++) s->room[i] = (double)d.room[i];
+	if (dim == 2) { s->ru = 0; s->rv = 1; }
+	else
+	{
+		unsigned int ax = s->hold ? s->hold - 1 : 2;   /* (extruded along the held coordinate, or z) */
+		s->ru = ax == 0 ? 1 : 0; s->rv = ax == 2 ? 1 : 2;
+	}
+	if (s->hold || s->len_w > 0 || s->nroom)
+		k->ops = &rs_curve_ops_plain;
 	k->theta = (double)d.theta;
 	k->executor = c->executor;
 	k->fixed = s->fixed;
 	k->translates = s->npin == 0 && !s->bary;
-	k->k = (s->bary ? dim : 0) + (k->theta > 0 ? 0 : dim * s->npin) + (dim - 1) * s->nt + (s->total_len ? 1 : 0) + s->nlen;
+	k->k = (s->bary ? dim - (s->hold ? 1 : 0) : 0) + (k->theta > 0 ? 0 : dim * s->npin) + (dim - 1) * s->nt + (s->total_len ? 1 : 0) + s->nlen + s->nhold;
 	if (!(d.theta >= 0) || (k->theta > 0 && k->k > QAWS_INTERNAL_RS_HROWS))
 	{
 		/* (hierarchical: a solve per row and coordinate; per-edge lengths are too many) */
@@ -1091,6 +1223,12 @@ qaws_status qaws_repulsive_curves_solver_create(qaws_repulsive_curves const* c, 
 	k->h = 0.25 * k->lmean;
 	k->rep.reason = QAWS_REPULSIVE_RUNNING;
 	k->rep.stationarity = 1;
+	total = 0;
+	if (s->nroom && !qaws_internal_rs_room(s->room, s->nroom, 1, dim, s->ru, s->rv, k->x, k->nv, &total, NULL))
+	{
+		qaws_repulsive_curves_solver_destroy(s);   /* (a vertex not strictly inside the room) */
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	}
 	if (k->ops->energy(k, k->x, &total, NULL) != QAWS_STATUS_OK)
 	{
 		qaws_repulsive_curves_solver_destroy(s);

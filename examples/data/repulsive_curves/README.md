@@ -12,5 +12,6 @@ unchanged from https://github.com/icethrush/repulsive-curves (commit
 | k5.obj, k33.obj | GraphDrawing | alpha 3, beta 6; edge lengths, barycenter |
 | earbuds.obj | CableUntangle | alpha 3, beta 6; edge lengths, barycenter |
 | graph-sampled.obj | PlanarGraphDrawing | alpha 3, beta 6; edge lengths, barycenter; in the plane y = 0 |
+| paths-center.obj | PathPlanning (with the obstacle h-shape.obj: here the H polygon, `rp_h_room` in repulsive_paper.c) | alpha 3, beta 6; ends pinned, length weighted 1, the H's walls repelling with weight 0.05; time is y |
 
 OBJ curves: `v x y z` vertices and `l i j` edges (1-based).

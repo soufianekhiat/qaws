@@ -11,9 +11,10 @@
  *   paper3_k33.svg        K3,3 embedded in space (Fig. 27)
  *   paper4_earbuds.svg    a tangled earbud cable untangled (Fig. 33)
  *   paper5_planar.svg     a tree drawn in the plane (Fig. 26)
+ *   paper6_paths.svg      four agents' paths planned in space-time (Fig. 31)
  *
- * Usage: qaws_repulsive_paper [data directory] (default
- * ../examples/data/repulsive_curves, from working_dir). Minutes, not
+ * Usage: qaws_repulsive_paper [data directory [figure 1 to 6 [most steps]]] (default
+ * ../examples/data/repulsive_curves, from working_dir; every figure). Minutes, not
  * seconds: the scenes have 500 to 800 vertices and take hundreds of steps
  * (about 20 minutes on 20 threads).
  */
@@ -132,6 +133,9 @@ static unsigned int rp_thread_count(void)
 /* a snapshot's step count meaning: until the solver stops */
 #define RP_UNTIL 5000u
 
+/* at most this many steps in every solve (a preview; argument 3) */
+static unsigned int rp_cap = RP_UNTIL;
+
 typedef struct rp_curve
 {
 	double* x;             /* 3 per vertex, as read */
@@ -180,10 +184,11 @@ static int rp_load(char const* dir, char const* name, rp_curve* c)
 
 static void rp_free(rp_curve* c) { free(c->x); free(c->e); }
 
-/* solve in dim 3, or 2 on (x, z) (the paper's y-plane scene); snapshots
-   after each of steps[0..nsnap) iterations (positions, 3 per vertex) */
+/* solve in dim 3, or 2 on (x, z) (the paper's y-plane scene), with sd0's
+   settings (NULL: every edge's length held); snapshots after each of
+   steps[0..nsnap) iterations (positions, 3 per vertex) */
 static void rp_solve(rp_curve const* c, unsigned int dim, double alpha, double beta, unsigned int const* steps, unsigned int nsnap,
-	double** snaps, qaws_repulsive_report* reps)
+	double** snaps, qaws_repulsive_report* reps, qaws_repulsive_curves_solve_desc const* sd0)
 {
 	unsigned int threads = rp_thread_count(), i, k, it = 0;
 	qaws_batch_executor ex;
@@ -201,15 +206,20 @@ static void rp_solve(rp_curve const* c, unsigned int dim, double alpha, double b
 	cd.dimension = dim; cd.vertex_count = c->nv; cd.edges = c->e; cd.edge_count = c->ne;
 	cd.alpha = (qaws_scalar)alpha; cd.beta = (qaws_scalar)beta; cd.executor = &ex;
 	memset(&sd, 0, sizeof(sd));
-	sd.hold_edge_lengths = 1;   /* (the barycenter too: by default, nothing pinned) */
+	if (sd0)
+		sd = *sd0;
+	else
+		sd.hold_edge_lengths = 1;   /* (the barycenter too: by default, nothing pinned) */
 	if (qaws_repulsive_curves_create(&cd, &rc) != QAWS_STATUS_OK || qaws_repulsive_curves_solver_create(rc, &sd, x, &s) != QAWS_STATUS_OK)
 		printf("  the scene was refused\n");
 	for (k = 0; k < nsnap; k++)
 	{
-		while (s && it < steps[k] && r.reason == QAWS_REPULSIVE_RUNNING)
+		while (s && it < steps[k] && it < rp_cap && r.reason == QAWS_REPULSIVE_RUNNING)
 		{
 			qaws_repulsive_curves_solver_step(s, x, &r);
 			it = r.iterations;
+			if (it % 50 == 0 && r.reason == QAWS_REPULSIVE_RUNNING)
+				printf("    %u steps: E %.6g, stationarity %.3g\n", it, (double)r.energy, (double)r.stationarity);
 		}
 		reps[k] = r;
 		snaps[k] = (double*)malloc(sizeof(double) * 3 * c->nv);
@@ -256,13 +266,34 @@ static int rp_seg_cmp(void const* p, void const* q)
 	return a < b ? 1 : a > b ? -1 : 0;
 }
 
-/* the curve x (3 per vertex) in panel v, fitted, coloured along t (one per
-   edge, in [0, 1]; NULL: one colour) */
-static void rp_draw(svg* s, viewport const* v, rp_view const* view, double const* x, rp_curve const* c, double const* t, double width)
+/* a panel's map from the view's plane: points (3 each) fitted into v */
+typedef struct rp_fit
+{
+	double scale, cx, cy;
+} rp_fit;
+
+static void rp_fit_points(viewport const* v, rp_view const* view, double const* pts, unsigned int n, rp_fit* f)
+{
+	double lo[2] = { 1e300, 1e300 }, hi[2] = { -1e300, -1e300 };
+	unsigned int i, k;
+	for (i = 0; i < n; i++)
+	{
+		double p[3];
+		rp_rotate(view, pts + 3 * i, p);
+		for (k = 0; k < 2; k++) { lo[k] = fmin(lo[k], p[k]); hi[k] = fmax(hi[k], p[k]); }
+	}
+	f->scale = 0.88 * fmin(v->w / fmax(hi[0] - lo[0], 1e-12), v->h / fmax(hi[1] - lo[1], 1e-12));
+	f->cx = v->x0 + 0.5 * v->w - f->scale * 0.5 * (lo[0] + hi[0]);
+	f->cy = v->y0 + 0.5 * v->h + f->scale * 0.5 * (lo[1] + hi[1]);
+}
+
+/* the curve x (3 per vertex) through the fit, coloured along t (one per
+   edge, in [0, 1]; NULL: one colour shaded by depth) */
+static void rp_draw_fit(svg* s, rp_fit const* fit, rp_view const* view, double const* x, rp_curve const* c, double const* t, double width)
 {
 	rp_seg* seg = (rp_seg*)malloc(sizeof(rp_seg) * c->ne);
-	double lo[2] = { 1e300, 1e300 }, hi[2] = { -1e300, -1e300 }, dlo = 1e300, dhi = -1e300, scale, cx, cy;
-	unsigned int i, k;
+	double dlo = 1e300, dhi = -1e300, scale = fit->scale, cx = fit->cx, cy = fit->cy;
+	unsigned int i;
 	for (i = 0; i < c->ne; i++)
 	{
 		double p[3], q[3];
@@ -271,15 +302,8 @@ static void rp_draw(svg* s, viewport const* v, rp_view const* view, double const
 		seg[i].a[0] = p[0]; seg[i].a[1] = p[1]; seg[i].b[0] = q[0]; seg[i].b[1] = q[1];
 		seg[i].depth = 0.5 * (p[2] + q[2]);
 		seg[i].edge = i;
-		for (k = 0; k < 2; k++)
-		{
-			lo[k] = fmin(lo[k], fmin(p[k], q[k])); hi[k] = fmax(hi[k], fmax(p[k], q[k]));
-		}
 		dlo = fmin(dlo, seg[i].depth); dhi = fmax(dhi, seg[i].depth);
 	}
-	scale = 0.88 * fmin(v->w / fmax(hi[0] - lo[0], 1e-12), v->h / fmax(hi[1] - lo[1], 1e-12));
-	cx = v->x0 + 0.5 * v->w - scale * 0.5 * (lo[0] + hi[0]);
-	cy = v->y0 + 0.5 * v->h + scale * 0.5 * (lo[1] + hi[1]);
 	qsort(seg, c->ne, sizeof(rp_seg), rp_seg_cmp);
 	for (i = 0; i < c->ne; i++)
 	{
@@ -312,6 +336,14 @@ static void rp_draw(svg* s, viewport const* v, rp_view const* view, double const
 	free(seg);
 }
 
+/* the curve fitted into panel v */
+static void rp_draw(svg* s, viewport const* v, rp_view const* view, double const* x, rp_curve const* c, double const* t, double width)
+{
+	rp_fit fit;
+	rp_fit_points(v, view, x, c->nv, &fit);
+	rp_draw_fit(s, &fit, view, x, c, t, width);
+}
+
 /* each edge's position in the file, in [0, 1], for colouring: the scenes
    list their edges along their chains */
 static double* rp_chain_param(rp_curve const* c)
@@ -338,7 +370,7 @@ static void rp_figure(char const* dir, char const* file, char const* svgname, ch
 	if (!rp_load(dir, file, &c))
 		return;
 	printf("%s: %u vertices, %u edges\n", file, c.nv, c.ne);
-	rp_solve(&c, dim, alpha, beta, steps, nsnap, snaps, reps);
+	rp_solve(&c, dim, alpha, beta, steps, nsnap, snaps, reps, NULL);
 	if (colour_along)
 		t = rp_chain_param(&c);
 	if (svg_open(&s, svgname, (int)(48 + (nsnap + 1) * (pw + 12)), (int)(110 + ph + 30), title, subtitle))
@@ -364,36 +396,200 @@ static void rp_figure(char const* dir, char const* file, char const* svgname, ch
 	printf("  %s, %.0f s\n", svgname, difftime(time(NULL), t0));
 }
 
+/* ------------------------------------------------------------------ */
+/*  Path planning in space-time (Fig. 31)                             */
+/* ------------------------------------------------------------------ */
+
+/* the room of the paper's scene: an H in (x, z), extruded along time y */
+static qaws_scalar const rp_h_room[24] = { -3, -3, -1, -3, -1, -1, 1, -1, 1, -3, 3, -3, 3, 3, 1, 3, 1, 1, -1, 1, -1, 3, -3, 3 };
+
+static void rp_line3(svg* s, rp_fit const* fit, rp_view const* view, double const* p, double const* q, char const* color, double width)
+{
+	double a[3], b[3];
+	rp_rotate(view, p, a);
+	rp_rotate(view, q, b);
+	fprintf(s->f, "<line x1=\"%.2f\" y1=\"%.2f\" x2=\"%.2f\" y2=\"%.2f\" stroke=\"%s\" stroke-width=\"%.2f\" stroke-linecap=\"round\"/>\n",
+		fit->cx + fit->scale * a[0], fit->cy - fit->scale * a[1], fit->cx + fit->scale * b[0], fit->cy - fit->scale * b[1], color, width);
+}
+
+/* the room's prism from t0 to t1 (its two H outlines and its vertical edges) */
+static void rp_room3(svg* s, rp_fit const* fit, rp_view const* view, double t0, double t1, int caps_only)
+{
+	unsigned int j;
+	for (j = 0; j < 12; j++)
+	{
+		qaws_scalar const *a = rp_h_room + 2 * j, *b = rp_h_room + 2 * ((j + 1) % 12);
+		double p0[3] = { a[0], t0, a[1] }, q0[3] = { b[0], t0, b[1] }, p1[3] = { a[0], t1, a[1] }, q1[3] = { b[0], t1, b[1] };
+		rp_line3(s, fit, view, p0, q0, "#8c959f", 1.2);
+		if (!caps_only)
+		{
+			rp_line3(s, fit, view, p1, q1, "#8c959f", 1.2);
+			rp_line3(s, fit, view, p0, p1, "#d0d7de", 1);
+		}
+	}
+}
+
+/* each edge's component (an agent), over the count, for colouring */
+static double* rp_components(rp_curve const* c, unsigned int* out_count)
+{
+	unsigned int* lab = (unsigned int*)malloc(sizeof(unsigned int) * c->nv);
+	double* t = (double*)malloc(sizeof(double) * c->ne);
+	unsigned int i, n = 0, changed = 1;
+	for (i = 0; lab && i < c->nv; i++) lab[i] = i;
+	while (lab && changed)
+		for (changed = 0, i = 0; i < c->ne; i++)
+		{
+			unsigned int a = c->e[2 * i], b = c->e[2 * i + 1], m = lab[a] < lab[b] ? lab[a] : lab[b];
+			if (lab[a] != m || lab[b] != m) { lab[a] = lab[b] = m; changed = 1; }
+		}
+	for (i = 0; lab && i < c->nv; i++) n += lab[i] == i;
+	for (i = 0; lab && t && i < c->ne; i++)
+	{
+		unsigned int k = 0, v;
+		for (v = 0; v < lab[c->e[2 * i]]; v++) k += lab[v] == v;   /* (the label's rank) */
+		t[i] = n > 1 ? (double)k / (n - 1) : 0;
+	}
+	*out_count = n;
+	free(lab);
+	return t;
+}
+
+/* the smallest distance in (x, z) between two agents at one time: from each
+   vertex to the other agents' edges spanning its time y, interpolated */
+static double rp_slice_closest(double const* x, rp_curve const* c, double const* comp)
+{
+	double* col = (double*)malloc(sizeof(double) * c->nv), m = HUGE_VAL;
+	unsigned int i, e;
+	for (i = 0; col && i < c->ne; i++) col[c->e[2 * i]] = col[c->e[2 * i + 1]] = comp[i];
+	for (i = 0; col && i < c->nv; i++)
+		for (e = 0; e < c->ne; e++)
+		{
+			double const *p = x + 3 * c->e[2 * e], *q = x + 3 * c->e[2 * e + 1];
+			double t = x[3 * i + 1], s;
+			if (comp[e] == col[i] || (t - p[1]) * (t - q[1]) > 0 || p[1] == q[1])
+				continue;
+			s = (t - p[1]) / (q[1] - p[1]);
+			m = fmin(m, hypot(x[3 * i] - (p[0] + s * (q[0] - p[0])), x[3 * i + 2] - (p[2] + s * (q[2] - p[2]))));
+		}
+	free(col);
+	return m;
+}
+
+static void rp_paths_figure(char const* dir)
+{
+	static unsigned int const steps[1] = { 400 };   /* (by then set; the tail to stationarity 1e-4 is slow: 3e-4 at 750) */
+	rp_curve c;
+	double* snaps[1];
+	qaws_repulsive_report reps[1];
+	qaws_repulsive_curves_solve_desc sd;
+	unsigned int* pins, npin = 0, i, nagents;
+	unsigned char* deg;
+	double *comp, before, after, prism[3 * 24];
+	time_t t0 = time(NULL);
+	svg s;
+	double const pw = 300, ph = 330;
+	char label[200];
+	if (!rp_load(dir, "paths-center.obj", &c))
+		return;
+	printf("paths-center.obj: %u vertices, %u edges\n", c.nv, c.ne);
+	/* the paper's scene: the ends pinned (fix_special_vertices), time held,
+	   the length weighted (optimize_length 1), the H room's walls repelling
+	   (repel_surface h-shape.obj 0.05: twice that here, the time integral of
+	   r^-3 being 2 / rho^2) */
+	deg = (unsigned char*)calloc(c.nv, 1);
+	pins = (unsigned int*)malloc(sizeof(unsigned int) * c.nv);
+	for (i = 0; i < 2 * c.ne; i++) deg[c.e[i]]++;
+	for (i = 0; i < c.nv; i++) if (deg[i] != 2) pins[npin++] = i;
+	memset(&sd, 0, sizeof(sd));
+	sd.pinned = pins; sd.pinned_count = npin;
+	sd.hold_coordinate = 2; sd.length_weight = 1;
+	sd.room = rp_h_room; sd.room_count = 12; sd.room_weight = (qaws_scalar)0.1;
+	rp_solve(&c, 3, 3, 6, steps, 1, snaps, reps, &sd);
+	comp = rp_components(&c, &nagents);
+	before = rp_slice_closest(c.x, &c, comp);
+	after = rp_slice_closest(snaps[0], &c, comp);
+	printf("  %u agents; the closest in a time slice %.3f -> %.3f\n", nagents, before, after);
+	for (i = 0; i < 12; i++)
+	{
+		prism[3 * i] = prism[3 * (i + 12)] = rp_h_room[2 * i];
+		prism[3 * i + 1] = 0; prism[3 * (i + 12) + 1] = 8;
+		prism[3 * i + 2] = prism[3 * (i + 12) + 2] = rp_h_room[2 * i + 1];
+	}
+	if (svg_open(&s, "showcase/paper6_paths.svg", (int)(48 + 3 * (pw + 12)), (int)(110 + ph + 30),
+		"Repulsive Curves, Fig. 31: four agents' paths planned in space-time",
+		"paths as curves in (x, time, z): time held, the ends pinned, the length weighted, the H room's walls repelling; alpha 3, beta 6"))
+	{
+		viewport v;
+		rp_fit fit;
+		rp_view side = { 0.55, -1.2 }, top = { 0, 0 };
+		unsigned int k, e;
+		v.y0 = 84; v.w = pw; v.h = ph; v.xmin = v.ymin = 0; v.xmax = v.ymax = 1;
+		for (k = 0; k < 2; k++)
+		{
+			v.x0 = 24 + k * (pw + 12);
+			if (k) sprintf(label, "%s%u steps: E %.4g; apart %.2f", reps[0].reason == QAWS_REPULSIVE_CONVERGED ? "converged, " : "",
+				reps[0].iterations, (double)reps[0].energy, after);
+			else sprintf(label, "input: E %.4g; the agents %.2f apart", (double)reps[0].initial_energy, before);
+			svg_panel(&s, &v, label);
+			rp_fit_points(&v, &side, prism, 24, &fit);
+			rp_room3(&s, &fit, &side, 0, 8, 0);
+			rp_draw_fit(&s, &fit, &side, k ? snaps[0] : c.x, &c, comp, 2.0);
+		}
+		/* from above: the paths over the room, the input's in grey */
+		v.x0 = 24 + 2 * (pw + 12);
+		svg_panel(&s, &v, "from above (along time); the input in grey");
+		rp_fit_points(&v, &top, prism, 24, &fit);
+		rp_room3(&s, &fit, &top, 0, 8, 1);
+		for (e = 0; e < c.ne; e++) rp_line3(&s, &fit, &top, c.x + 3 * c.e[2 * e], c.x + 3 * c.e[2 * e + 1], "#afb8c1", 1.2);
+		rp_draw_fit(&s, &fit, &top, snaps[0], &c, comp, 2.0);
+		svg_close(&s);
+	}
+	free(snaps[0]); free(comp); free(pins); free(deg);
+	rp_free(&c);
+	printf("  showcase/paper6_paths.svg, %.0f s\n", difftime(time(NULL), t0));
+}
+
 int main(int argc, char** argv)
 {
 	char const* dir = argc > 1 ? argv[1] : "../examples/data/repulsive_curves";
+	int only = argc > 2 ? atoi(argv[2]) : 0;   /* (one figure: 1 to 6) */
+	if (argc > 3)
+		rp_cap = (unsigned int)atoi(argv[3]);
 	setvbuf(stdout, NULL, _IONBF, 0);
 	MAKE_DIR("showcase");
+	if (!only || only == 1)
 	{
 		static unsigned int const steps[3] = { 300, 400, RP_UNTIL };
 		rp_view view = { 0.0, 1.15 };
 		rp_figure(dir, "freedmancurve600.obj", "showcase/paper1_freedman.svg", "Repulsive Curves, Fig. 2: Freedman's unknot to the circle",
 			"alpha 2, beta 4.5; every edge's length and the barycenter held", 3, 2, 4.5, steps, 3, &view, 1);
 	}
+	if (!only || only == 2 || only == 3)
 	{
 		static unsigned int const k5[2] = { 50, RP_UNTIL }, k33[2] = { 200, RP_UNTIL };
 		rp_view view = { 0.3, 0.5 };
-		rp_figure(dir, "k5.obj", "showcase/paper2_k5.svg", "Repulsive Curves, Fig. 27: K5 embedded in space",
-			"a jittered planar drawing; alpha 3, beta 6; every edge's length (its weight) and the barycenter held", 3, 3, 6, k5, 2, &view, 1);
-		rp_figure(dir, "k33.obj", "showcase/paper3_k33.svg", "Repulsive Curves, Fig. 27: K3,3 embedded in space",
-			"a jittered planar drawing; alpha 3, beta 6; every edge's length (its weight) and the barycenter held", 3, 3, 6, k33, 2, &view, 1);
+		if (!only || only == 2)
+			rp_figure(dir, "k5.obj", "showcase/paper2_k5.svg", "Repulsive Curves, Fig. 27: K5 embedded in space",
+				"a jittered planar drawing; alpha 3, beta 6; every edge's length (its weight) and the barycenter held", 3, 3, 6, k5, 2, &view, 1);
+		if (!only || only == 3)
+			rp_figure(dir, "k33.obj", "showcase/paper3_k33.svg", "Repulsive Curves, Fig. 27: K3,3 embedded in space",
+				"a jittered planar drawing; alpha 3, beta 6; every edge's length (its weight) and the barycenter held", 3, 3, 6, k33, 2, &view, 1);
 	}
+	if (!only || only == 4)
 	{
 		static unsigned int const steps[3] = { 300, 450, RP_UNTIL };
 		rp_view view = { 0.3, 0.5 };
 		rp_figure(dir, "earbuds.obj", "showcase/paper4_earbuds.svg", "Repulsive Curves, Fig. 33: untangling a pair of earbuds",
 			"alpha 3, beta 6; every edge's length and the barycenter held", 3, 3, 6, steps, 3, &view, 1);
 	}
+	if (!only || only == 5)
 	{
 		static unsigned int const steps[2] = { 100, RP_UNTIL };
 		rp_view view = { 0.0, 0.0 };
 		rp_figure(dir, "graph-sampled.obj", "showcase/paper5_planar.svg", "Repulsive Curves, Fig. 26: a tree drawn in the plane",
 			"its edges as repulsive curves: alpha 3, beta 6; every edge's length and the barycenter held; 2D", 2, 3, 6, steps, 2, &view, 0);
 	}
+	if (!only || only == 6)
+		rp_paths_figure(dir);
 	return 0;
 }

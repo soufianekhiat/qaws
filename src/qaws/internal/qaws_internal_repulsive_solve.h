@@ -85,6 +85,13 @@ qaws_status qaws_internal_rs_direction(qaws_internal_rs_core const* core, qaws_s
 /* one step (positions in place) */
 qaws_status qaws_internal_rs_step(qaws_internal_rs_core* core, qaws_scalar* positions, qaws_repulsive_report* out_report);
 
+/* a room's walls on nv vertices (dim each; u and v the plane's coordinates;
+   the polygon's count points, 2 each): E += w sum over vertices and walls of
+   the integral along the wall of rho^-2, grad (may be NULL) += its
+   gradient; 0 (nothing added) when a vertex is not strictly inside */
+int qaws_internal_rs_room(double const* room, unsigned int count, double w, unsigned int dim, unsigned int u, unsigned int v,
+	double const* x, unsigned int nv, double* E, double* grad);
+
 /* the distance between segments p0 p1 and q0 q1 (dim 2 or 3) */
 double qaws_internal_rs_segdist(double const* p0, double const* p1, double const* q0, double const* q1, unsigned int dim);
 

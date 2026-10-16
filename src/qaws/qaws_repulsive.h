@@ -140,6 +140,23 @@ typedef struct qaws_repulsive_curves_solve_desc
 	qaws_scalar tolerance;                 /* stationarity (see the report); 0 = 1e-4 */
 	qaws_scalar constraint_tolerance;      /* |Phi| over the mean edge length; 0 = 1e-8 (1e-5 in f32) */
 	qaws_scalar theta;                     /* 0: dense (exact metric, LU); > 0: hierarchical (Barnes-Hut energy, gradient and metric at this theta, GMRES; see below) */
+	/* Space-time and rooms (Repulsive Curves, Sec. 8.5: the paths of agents
+	   as curves whose time is one coordinate, kept apart in space-time, so
+	   in every time slice, and inside an environment extruded along time).
+	   The room is a simple polygon: in 2D in the plane; in 3D in the plane of
+	   the two other coordinates, in order, than the extruded one (the held
+	   coordinate, or z when none is held). Its walls repel each vertex by
+	   room_weight * sum over walls of the integral along the wall of rho^-2,
+	   rho the distance in the plane: half the integral of r^-3 over the
+	   walls extruded without end (the paper's mesh obstacle, p = 3). The
+	   vertices must start strictly inside; a trial step leaving it is
+	   refused. These terms have no solution derivatives (_solution_jvp and
+	   _vjp: UNSUPPORTED_OPERATION). */
+	unsigned int hold_coordinate;          /* 1 to dimension: that coordinate of every vertex held (time); 0: none */
+	qaws_scalar length_weight;             /* > 0: weight * the total length added to the energy (the paper's optimize_length) */
+	qaws_scalar const* room;               /* room_count points, 2 coordinates each; NULL: no room */
+	unsigned int room_count;
+	qaws_scalar room_weight;               /* 0 = 1 */
 } qaws_repulsive_curves_solve_desc;
 
 typedef struct qaws_repulsive_report

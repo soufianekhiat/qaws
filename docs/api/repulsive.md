@@ -704,10 +704,66 @@ length and the barycenter. The dense mode runs until it converges
 | 27 | K3,3 embedded in space | 573 | 394 | 420 -> 359 | 136 s |
 | 33 | an earbud cable untangled | 529 | 585 | -> 104.7 | 159 s |
 | 26 | a tree drawn in the plane (2D) | 793 | 464 | 1.4e5 -> 1.98e4 | 337 s |
+| 31 | four agents' paths planned in space-time (below) | 772 | 400 (not converged) | 1433 -> 593 | 531 s |
 
-Not reproduced: the scenes that need terms Qaws does not have, namely
-length or length-difference objectives (TangentInterpolation,
-CurveInterpolation, PathPlanning) and repulsion from a surface.
+Figure 31 stops at 400 steps. By then the paths are set, and the agents'
+closest approach in a time slice has grown from 0.08 to 0.84 in a
+crossbar 2 wide. The tail to stationarity 1e-4 is slow: 3e-4 at 750
+steps, the energy still falling by 0.5 every 50.
+
+`qaws_repulsive_paper data-directory [figure [most steps]]` runs one
+figure (1 to 6), or caps every solve for a preview.
+
+Not reproduced: the interpolation scenes (TangentInterpolation and
+CurveInterpolation). They need objectives on the lengths' differences.
+
+## Space-time paths and rooms (Sec. 8.5)
+
+The paper plans the paths of agents moving in a 2D room as curves in
+(x, time, z). If the paths are kept apart in space-time, they are kept
+apart in every time slice. The environment is the room extruded along
+time. Three settings of `qaws_repulsive_curves_solve_desc` provide this:
+
+- **`hold_coordinate`** (1 to the dimension) holds that coordinate of
+  every vertex, as one constraint row each. Time then stays exact: each
+  path remains a graph over time, and no agent moves back in time. The
+  paper does not enforce this; its length term keeps the braid stretched
+  in practice. The barycenter's row along it is dropped, since the held
+  rows already fix it. These rows are too many for the hierarchical mode,
+  so only the dense mode accepts it.
+- **`length_weight`** adds the weight times the total length to the
+  energy. This is the paper's `optimize_length`.
+- **`room`** is a simple polygon that the vertices stay inside. In 2D it
+  lies in the plane. In 3D it lies in the plane of the other two
+  coordinates, extruded along the held one (or z). Each vertex is
+  repelled by room_weight times the sum over walls of the integral of
+  rho^-2 along the wall, where rho is the distance in the plane. Per
+  wall, in closed form:
+  - the integral is atan2(|h| (b - a), h^2 + a b) / |h|, where h is the
+    vertex's height over the wall's line and [a, b] is the wall along it;
+  - near the line and beside the wall, a series takes over;
+  - this is half the integral of r^-3 over the wall extruded without end.
+  The paper's obstacle is a mesh's potential, p = beta - alpha = 3 in its
+  scene. On the extruded room, that potential is twice this term, so the
+  paper's weight 0.05 is room_weight 0.1 here. A vertex must start
+  strictly inside: creation refuses one that does not. A trial step that
+  leaves the room has no energy, so it is refused.
+
+These terms have no Hessian products, so a solver using them refuses
+solution derivatives (UNSUPPORTED_OPERATION).
+
+Test 120 checks the room term against Mathematica integrating the
+definition (`tests/reference/120_repulsive_room.wls`). On the paper's H,
+at five points, the energy agrees to 7.6e-16 and the gradient to 1.6e-15
+relative. One of the points lies 1e-6 off a wall's line, beside the wall,
+so the series is checked too. The 2D integral also matches half the 3D
+integral of r^-3. Finally, four agents swap corners through a square room
+(65 vertices each). The solve converges in 32 steps with times held to
+5e-15 and every vertex inside after every step. The closest agents in a
+time slice go from 0.12 to 2.07 apart: they share a roundabout. With 25
+vertices each, the time steps were too coarse and the solve settled in a
+pinwheel instead. There, the four agents trade places within a single
+edge, 0.59 apart.
 
 ## CPU performance
 
