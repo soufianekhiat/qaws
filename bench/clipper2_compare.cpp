@@ -81,14 +81,14 @@ static Timing run_clip64(qaws_clip_type ct, qaws_fill_rule fr, Paths64 const& s,
 	d.clip_type = ct; d.fill_rule = fr;
 	qaws_clip64_result* r = nullptr;
 	Timing t = { 0, 0, 0 };
-	if (qaws_clip64_execute(&d, &r) == QAWS_STATUS_OK)
+	if (qaws_clip64_execute(&r, &d) == QAWS_STATUS_OK)
 	{
 		unsigned n = qaws_clip64_result_get_path_count(r);
 		t.paths = n;
 		for (unsigned i = 0; i < n; i++)
 		{
 			int64_t const* p; unsigned m;
-			qaws_clip64_result_get_path(r, i, &p, &m);
+			qaws_clip64_result_get_path(&p, &m, r, i);
 			t.area += 0.5 * qaws_path64_area2(p, m);
 		}
 	}
@@ -107,7 +107,7 @@ static Timing run_clip(qaws_clip_type ct, qaws_fill_rule fr, Paths64 const& s, P
 			std::vector<qaws_scalar> v;
 			for (auto const& q : p) { v.push_back((qaws_scalar)q.x); v.push_back((qaws_scalar)q.y); }
 			qaws_curve* cv = nullptr;
-			qaws_curve_create_polyline_2d(v.data(), (unsigned)p.size(), 1, &cv);
+			qaws_curve_create_polyline_2d(&cv, v.data(), (unsigned)p.size(), 1);
 			curves.push_back(cv);
 		}
 	views.assign(curves.begin(), curves.end());
@@ -123,15 +123,15 @@ static Timing run_clip(qaws_clip_type ct, qaws_fill_rule fr, Paths64 const& s, P
 	d.clip_type = ct; d.fill_rule = fr;
 	qaws_clip_result* r = nullptr;
 	Timing t = { 0, 0, 0 };
-	if (qaws_clip_execute(&d, &r) == QAWS_STATUS_OK)
+	if (qaws_clip_execute(&r, &d) == QAWS_STATUS_OK)
 	{
 		unsigned n = qaws_clip_result_get_path_count(r);
 		t.paths = n;
 		for (unsigned i = 0; i < n; i++)
 		{
 			qaws_path_2d p; qaws_scalar a = 0;
-			qaws_clip_result_get_path(r, i, &p);
-			qaws_path_compute_area_2d(&p, &a);
+			qaws_clip_result_get_path(&p, r, i);
+			qaws_path_compute_area_2d(&a, &p);
 			t.area += a;
 		}
 	}
@@ -151,7 +151,7 @@ static Timing run_clipx(qaws_clip_type ct, qaws_fill_rule fr, Paths64 const& s, 
 			std::vector<qaws_scalar> v;
 			for (auto const& q : p) { v.push_back((qaws_scalar)q.x); v.push_back((qaws_scalar)q.y); }
 			qaws_curve* cv = nullptr;
-			qaws_curve_create_polyline_2d(v.data(), (unsigned)p.size(), 1, &cv);
+			qaws_curve_create_polyline_2d(&cv, v.data(), (unsigned)p.size(), 1);
 			curves.push_back(cv);
 		}
 	views.assign(curves.begin(), curves.end());
@@ -171,7 +171,7 @@ static Timing run_clipx(qaws_clip_type ct, qaws_fill_rule fr, Paths64 const& s, 
 	d.exact = &ed;
 	qaws_clip_result* r = nullptr;
 	Timing t = { 0, 0, 0 };
-	qaws_status st = qaws_clip_exact_execute(&d, &r, nullptr);
+	qaws_status st = qaws_clip_exact_execute(&r, nullptr, &d);
 	if (st == QAWS_STATUS_OK)
 	{
 		unsigned n = qaws_clip_result_get_path_count(r);
@@ -179,8 +179,8 @@ static Timing run_clipx(qaws_clip_type ct, qaws_fill_rule fr, Paths64 const& s, 
 		for (unsigned i = 0; i < n; i++)
 		{
 			qaws_path_2d p; qaws_scalar a = 0;
-			qaws_clip_result_get_path(r, i, &p);
-			qaws_path_compute_area_2d(&p, &a);
+			qaws_clip_result_get_path(&p, r, i);
+			qaws_path_compute_area_2d(&a, &p);
 			t.area += a;
 		}
 	}
