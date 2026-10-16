@@ -29,7 +29,7 @@ static qaws_curve* ct_bezier(unsigned int degree, double const* p)
 	d.degree = degree;
 	d.control_points = cps;
 	d.control_point_count = degree + 1;
-	qaws_curve_create_bezier(&d, &c);
+	qaws_curve_create_bezier(&c, &d);
 	return c;
 }
 

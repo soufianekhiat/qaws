@@ -36,7 +36,7 @@ static qaws_surface* sgt_sphere(double R, qaws_curve** prof)
 	g.radius = (qaws_scalar)R; g.angle_start = (qaws_scalar)(-SGT_PI / 2); g.angle_end = (qaws_scalar)(SGT_PI / 2);
 	memset(&ad, 0, sizeof(ad));
 	ad.dimension = QAWS_DIMENSION_2D; ad.segments = &g; ad.segment_count = 1;
-	qaws_curve_create_arc(&ad, prof);
+	qaws_curve_create_arc(prof, &ad);
 	memset(&rd, 0, sizeof(rd));
 	rd.profile = *prof; rd.axis_direction.z = 1;
 	qaws_surface_create_revolution(&rd, &s);
@@ -184,7 +184,7 @@ static void test_sphere(void)
 		qaws_scalar L = 0;
 		memset(&bd, 0, sizeof(bd));
 		bd.dimension = QAWS_DIMENSION_2D; bd.degree = 1; bd.control_points = cp; bd.control_point_count = 2;
-		qaws_curve_create_bezier(&bd, &line);
+		qaws_curve_create_bezier(&line, &bd);
 		qaws_surface_curve_create_uv(s, line, &c);
 		qaws_surface_curve_get_length(c, &L);
 		sprintf(msg, "sphere: a meridian drawn in (u, v): length against R pi / 2 within %.2g", fabs((double)L - R * SGT_PI / 2));
@@ -223,7 +223,7 @@ static void test_cylinder(void)
 	g.radius = (qaws_scalar)R; g.angle_start = 0; g.angle_end = (qaws_scalar)(2 * SGT_PI);
 	memset(&ad, 0, sizeof(ad));
 	ad.dimension = QAWS_DIMENSION_2D; ad.segments = &g; ad.segment_count = 1;
-	qaws_curve_create_arc(&ad, &circle);
+	qaws_curve_create_arc(&circle, &ad);
 	memset(&ed, 0, sizeof(ed));
 	ed.profile = circle; ed.direction.z = 1; ed.length = (qaws_scalar)H;
 	qaws_surface_create_extrusion(&ed, &s);

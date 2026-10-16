@@ -61,7 +61,7 @@ static qaws_curve* sc_curve(qaws_scalar const* cps)
 	d.control_point_count = SC_CP;
 	d.knots = g_sc_knots;
 	d.knot_count = SC_KC;
-	qaws_curve_create_bspline(&d, &c);
+	qaws_curve_create_bspline(&c, &d);
 	return c;
 }
 

@@ -37,7 +37,7 @@ static qaws_curve* es_curve(ref_exact_self_hits const* r)
 		d.control_point_count = (unsigned int)r->n;
 		d.weights = ws;
 		d.weight_count = (unsigned int)r->n;
-		qaws_curve_create_rational_bezier(&d, &c);
+		qaws_curve_create_rational_bezier(&c, &d);
 	}
 	else
 	{
@@ -51,7 +51,7 @@ static qaws_curve* es_curve(ref_exact_self_hits const* r)
 		d.weight_count = (unsigned int)r->n;
 		d.knots = kn;
 		d.knot_count = (unsigned int)r->nk;
-		qaws_curve_create_nurbs(&d, &c);
+		qaws_curve_create_nurbs(&c, &d);
 	}
 	return c;
 }
@@ -132,7 +132,7 @@ static void test_conic(void)
 	d.weight_count = 7;
 	d.knots = kn;
 	d.knot_count = 10;
-	qaws_curve_create_nurbs(&d, &c);
+	qaws_curve_create_nurbs(&c, &d);
 	qaws_exact_curve_prepare(NULL, c, &e, NULL);
 	TEST_ASSERT(qaws_exact_curve_self_hits(e, hits, 8, &count) == QAWS_STATUS_OK && count == 0,
 		"a closed NURBS conic of three arcs: no self-intersection (arcs on one conic touch at their ends)");
@@ -147,7 +147,7 @@ static void test_conic(void)
 	d.knot_count = 12;
 	c = NULL;
 	e = NULL;
-	qaws_curve_create_nurbs(&d, &c);
+	qaws_curve_create_nurbs(&c, &d);
 	qaws_exact_curve_prepare(NULL, c, &e, NULL);
 	{
 		char msg[300];

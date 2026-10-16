@@ -187,7 +187,7 @@ static qaws_status bezier_rebuild(qaws_curve const* curve, qaws_diff_views const
 	d.degree = curve->degree;
 	d.control_points = cps;
 	d.control_point_count = impl->control_point_count;
-	st = qaws_curve_create_bezier(&d, out_curve);
+	st = qaws_curve_create_bezier(out_curve, &d);
 	qaws_internal_dealloc(NULL, owned);
 	return st;
 }
@@ -211,9 +211,9 @@ static qaws_curve_vtable const bezier_vtable = {
 };
 
 qaws_status qaws_curve_create_bezier_ex(
+	qaws_curve** out_curve,
 	qaws_bezier_desc const* desc,
-	qaws_allocator const* allocator,
-	qaws_curve** out_curve)
+	qaws_allocator const* allocator)
 {
 	unsigned int dim_count;
 	size_t cp_size;
@@ -250,7 +250,7 @@ qaws_status qaws_curve_create_bezier_ex(
 }
 
 qaws_status qaws_curve_create_bezier(
-	qaws_bezier_desc const* desc, qaws_curve** out_curve)
+	qaws_curve** out_curve, qaws_bezier_desc const* desc)
 {
-	return qaws_curve_create_bezier_ex(desc, NULL, out_curve);
+	return qaws_curve_create_bezier_ex(out_curve, desc, NULL);
 }

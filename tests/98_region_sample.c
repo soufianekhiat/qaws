@@ -45,7 +45,7 @@ static qaws_curve* rst_circle(double cx, double cy, double r, int ccw)
 	g.angle_end = ccw ? (qaws_scalar)(2 * RST_PI) : 0;
 	memset(&d, 0, sizeof(d));
 	d.dimension = QAWS_DIMENSION_2D; d.segments = &g; d.segment_count = 1;
-	qaws_curve_create_arc(&d, &c);
+	qaws_curve_create_arc(&c, &d);
 	return c;
 }
 
@@ -58,7 +58,7 @@ static qaws_curve* rst_cubic(double const* xy)
 	for (i = 0; i < 8; i++) p[i] = (qaws_scalar)xy[i];
 	memset(&d, 0, sizeof(d));
 	d.dimension = QAWS_DIMENSION_2D; d.degree = 3; d.control_points = p; d.control_point_count = 4;
-	qaws_curve_create_bezier(&d, &c);
+	qaws_curve_create_bezier(&c, &d);
 	return c;
 }
 
@@ -494,7 +494,7 @@ static double rst_green_mass(qaws_clip_result const* r)
 					{
 						qaws_eval_result_2d e;
 						double x, y;
-						qaws_curve_evaluate_2d(c, (qaws_scalar)(0.5 * (t0 + t1) + 0.5 * (t1 - t0) * gx[g]), QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &e);
+						qaws_curve_evaluate_2d(&e, c, (qaws_scalar)(0.5 * (t0 + t1) + 0.5 * (t1 - t0) * gx[g]), QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1);
 						x = e.position.x; y = e.position.y;
 						sum += gw[g] * 0.5 * (t1 - t0) * (2 * x + x * x * x / 3 + x * y) * e.d1.y;
 					}

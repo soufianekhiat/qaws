@@ -821,21 +821,21 @@ static qaws_status cb_find(qaws_curve_batch_desc const* desc, unsigned int dim, 
 }
 
 qaws_status qaws_curve_batch_find_intersections_2d(
-	qaws_curve_batch_desc const* desc,
 	qaws_curve_batch_hit_2d* out_hits,
-	unsigned int hit_capacity,
 	unsigned int* out_count,
-	qaws_curve_batch_stats* out_stats)
+	qaws_curve_batch_stats* out_stats,
+	unsigned int hit_capacity,
+	qaws_curve_batch_desc const* desc)
 {
 	return cb_find(desc, 2, out_hits, hit_capacity, out_count, out_stats);
 }
 
 qaws_status qaws_curve_batch_find_intersections_3d(
-	qaws_curve_batch_desc const* desc,
 	qaws_curve_batch_hit_3d* out_hits,
-	unsigned int hit_capacity,
 	unsigned int* out_count,
-	qaws_curve_batch_stats* out_stats)
+	qaws_curve_batch_stats* out_stats,
+	unsigned int hit_capacity,
+	qaws_curve_batch_desc const* desc)
 {
 	return cb_find(desc, 3, out_hits, hit_capacity, out_count, out_stats);
 }
@@ -844,7 +844,7 @@ qaws_status qaws_curve_batch_find_intersections_3d(
 /*  Prepared sets                                                      */
 /* ------------------------------------------------------------------ */
 
-qaws_status qaws_curve_set_create(qaws_curve_batch_desc const* desc, qaws_curve_set** out_set)
+qaws_status qaws_curve_set_create(qaws_curve_set** out_set, qaws_curve_batch_desc const* desc)
 {
 	qaws_curve_set* set;
 	cb_ctx x;
@@ -993,14 +993,14 @@ done:
 	return s;
 }
 
-qaws_status qaws_curve_set_find_intersections_2d(qaws_curve_set const* set, qaws_curve_set const* other, qaws_curve_batch_hit_2d* out_hits,
-	unsigned int hit_capacity, unsigned int* out_count, qaws_curve_batch_stats* out_stats)
+qaws_status qaws_curve_set_find_intersections_2d(qaws_curve_batch_hit_2d* out_hits, unsigned int* out_count, qaws_curve_batch_stats* out_stats,
+	qaws_curve_set const* set, qaws_curve_set const* other, unsigned int hit_capacity)
 {
 	return cs_find(set, other, 2, out_hits, hit_capacity, out_count, out_stats);
 }
 
-qaws_status qaws_curve_set_find_intersections_3d(qaws_curve_set const* set, qaws_curve_set const* other, qaws_curve_batch_hit_3d* out_hits,
-	unsigned int hit_capacity, unsigned int* out_count, qaws_curve_batch_stats* out_stats)
+qaws_status qaws_curve_set_find_intersections_3d(qaws_curve_batch_hit_3d* out_hits, unsigned int* out_count, qaws_curve_batch_stats* out_stats,
+	qaws_curve_set const* set, qaws_curve_set const* other, unsigned int hit_capacity)
 {
 	return cs_find(set, other, 3, out_hits, hit_capacity, out_count, out_stats);
 }
@@ -1198,10 +1198,10 @@ static int lc_cmp(void const* p, void const* q)
 }
 
 qaws_status qaws_curve_batch_find_level_crossings(
-	qaws_level_crossing_desc const* desc,
 	qaws_level_crossing* out_crossings,
+	unsigned int* out_count,
 	unsigned int capacity,
-	unsigned int* out_count)
+	qaws_level_crossing_desc const* desc)
 {
 	lc_ctx x;
 	qaws_flat_seg* segs = NULL;
@@ -1393,7 +1393,7 @@ static qaws_status cp_eval2(qaws_curve const* c, unsigned int dim, qaws_scalar t
 	if (dim == 2)
 	{
 		qaws_eval_result_2d r;
-		s = qaws_curve_evaluate_2d(c, t, flags, &r);
+		s = qaws_curve_evaluate_2d(&r, c, t, flags);
 		P[0] = r.position.x; P[1] = r.position.y; P[2] = 0;
 		D1[0] = r.d1.x; D1[1] = r.d1.y; D1[2] = 0;
 		D2[0] = r.d2.x; D2[1] = r.d2.y; D2[2] = 0;
@@ -1401,7 +1401,7 @@ static qaws_status cp_eval2(qaws_curve const* c, unsigned int dim, qaws_scalar t
 	else
 	{
 		qaws_eval_result_3d r;
-		s = qaws_curve_evaluate_3d(c, t, flags, &r);
+		s = qaws_curve_evaluate_3d(&r, c, t, flags);
 		P[0] = r.position.x; P[1] = r.position.y; P[2] = r.position.z;
 		D1[0] = r.d1.x; D1[1] = r.d1.y; D1[2] = r.d1.z;
 		D2[0] = r.d2.x; D2[1] = r.d2.y; D2[2] = r.d2.z;
@@ -1613,9 +1613,9 @@ static qaws_status cp_run(qaws_curve const* const* curves, unsigned int dim, qaw
 }
 
 qaws_status qaws_curve_batch_find_closest(
-	qaws_closest_desc const* desc,
 	qaws_closest_point* out_points,
-	qaws_curve_batch_stats* out_stats)
+	qaws_curve_batch_stats* out_stats,
+	qaws_closest_desc const* desc)
 {
 	qaws_curve_batch_stats st;
 	qaws_flat_seg* segs = NULL;
@@ -1648,12 +1648,12 @@ qaws_status qaws_curve_batch_find_closest(
 }
 
 qaws_status qaws_curve_set_find_closest(
+	qaws_closest_point* out_points,
+	qaws_curve_batch_stats* out_stats,
 	qaws_curve_set const* set,
 	qaws_scalar const* points,
 	unsigned int point_count,
-	qaws_scalar max_distance,
-	qaws_closest_point* out_points,
-	qaws_curve_batch_stats* out_stats)
+	qaws_scalar max_distance)
 {
 	qaws_curve_batch_stats st;
 	qaws_status s;

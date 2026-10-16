@@ -250,7 +250,7 @@ static qaws_status sk_blend_struct(sk_struct const* tpl, qaws_curve const* const
 		qaws_bezier_desc d;
 		memset(&d, 0, sizeof(d));
 		d.dimension = QAWS_DIMENSION_2D; d.degree = tpl->degree; d.control_points = cp; d.control_point_count = tpl->n;
-		s = qaws_curve_create_bezier(&d, out);
+		s = qaws_curve_create_bezier(out, &d);
 		break;
 	}
 	case QAWS_CURVE_KIND_RATIONAL_BEZIER:
@@ -259,7 +259,7 @@ static qaws_status sk_blend_struct(sk_struct const* tpl, qaws_curve const* const
 		memset(&d, 0, sizeof(d));
 		d.dimension = QAWS_DIMENSION_2D; d.degree = tpl->degree; d.control_points = cp; d.control_point_count = tpl->n;
 		d.weights = wt; d.weight_count = tpl->n;
-		s = qaws_curve_create_rational_bezier(&d, out);
+		s = qaws_curve_create_rational_bezier(out, &d);
 		break;
 	}
 	case QAWS_CURVE_KIND_BSPLINE:
@@ -268,7 +268,7 @@ static qaws_status sk_blend_struct(sk_struct const* tpl, qaws_curve const* const
 		memset(&d, 0, sizeof(d));
 		d.dimension = QAWS_DIMENSION_2D; d.degree = tpl->degree; d.control_points = cp; d.control_point_count = tpl->n;
 		d.knots = tpl->knots; d.knot_count = tpl->knot_count;
-		s = qaws_curve_create_bspline(&d, out);
+		s = qaws_curve_create_bspline(out, &d);
 		break;
 	}
 	default:
@@ -277,7 +277,7 @@ static qaws_status sk_blend_struct(sk_struct const* tpl, qaws_curve const* const
 		memset(&d, 0, sizeof(d));
 		d.dimension = QAWS_DIMENSION_2D; d.degree = tpl->degree; d.control_points = cp; d.control_point_count = tpl->n;
 		d.knots = tpl->knots; d.knot_count = tpl->knot_count; d.weights = wt; d.weight_count = tpl->n;
-		s = qaws_curve_create_nurbs(&d, out);
+		s = qaws_curve_create_nurbs(out, &d);
 		break;
 	}
 	}
@@ -300,7 +300,7 @@ static void sk_resample(qaws_curve const* c, unsigned int m, double* out)
 	for (i = 0; i <= DENSE; i++)
 	{
 		qaws_eval_result_2d e;
-		qaws_curve_evaluate_2d(c, (qaws_scalar)(r.min_value + (r.max_value - r.min_value) * i / DENSE), QAWS_EVAL_FLAG_POSITION, &e);
+		qaws_curve_evaluate_2d(&e, c, (qaws_scalar)(r.min_value + (r.max_value - r.min_value) * i / DENSE), QAWS_EVAL_FLAG_POSITION);
 		xy[2 * i] = e.position.x;
 		xy[2 * i + 1] = e.position.y;
 		acc[i] = i ? acc[i - 1] + hypot(xy[2 * i] - xy[2 * i - 2], xy[2 * i + 1] - xy[2 * i - 1]) : 0;
@@ -398,7 +398,7 @@ static qaws_status sk_blend_resampled(qaws_curve const* const* cs, double const*
 	memset(&d, 0, sizeof(d));
 	d.dimension = QAWS_DIMENSION_2D; d.control_points = sp; d.control_point_count = m;
 	d.parameterization = QAWS_PARAMETERIZATION_CENTRIPETAL; d.closed = 1;
-	s = qaws_curve_create_catmull_rom(&d, out);
+	s = qaws_curve_create_catmull_rom(out, &d);
 	free(sp);
 	free(all);
 	return s;
@@ -662,8 +662,8 @@ static qaws_status sk_distance(qaws_stack_2d const* st, unsigned int const* idx,
 		memset(&bd, 0, sizeof(bd));
 		bd.curves = curves;
 		bd.curve_count = nc;
-		s = qaws_curve_set_create(&bd, &set);
-		if (s == QAWS_STATUS_OK) s = qaws_curve_set_find_closest(set, pts, nn, 0, cp, NULL);
+		s = qaws_curve_set_create(&set, &bd);
+		if (s == QAWS_STATUS_OK) s = qaws_curve_set_find_closest(cp, NULL, set, pts, nn, 0);
 		if (s == QAWS_STATUS_OK) s = sk_level_signs(L, st->fill_rule, &g, ext / 4096, ins);
 		if (s == QAWS_STATUS_OK)
 			for (q = 0; q < nn; q++)

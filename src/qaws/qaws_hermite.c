@@ -276,7 +276,7 @@ static qaws_status hermite_rebuild(qaws_curve const *curve, qaws_diff_views cons
 		d.derivatives = ders;
 		d.point_count = impl->point_count;
 		d.derivative_count = impl->point_count;
-		st = qaws_curve_create_hermite(&d, out_curve);
+		st = qaws_curve_create_hermite(out_curve, &d);
 	}
 	qaws_internal_dealloc(NULL, owned_pts);
 	qaws_internal_dealloc(NULL, owned_ders);
@@ -311,9 +311,9 @@ static qaws_curve_vtable const hermite_vtable = {
 /* -------------------------------------------------------------------------- */
 
 qaws_status qaws_curve_create_hermite_ex(
+	qaws_curve **out_curve,
 	qaws_hermite_desc const *desc,
-	qaws_allocator const *allocator,
-	qaws_curve **out_curve)
+	qaws_allocator const *allocator)
 {
 	qaws_status status;
 	qaws_curve *curve;
@@ -423,10 +423,10 @@ qaws_status qaws_curve_create_hermite_ex(
 			tmp_d = tmp_c + span_count;
 
 			qaws_hermite_prepare_2d(
-				(const qaws_vec2 *)impl->points,
-				(const qaws_vec2 *)impl->tangents,
-				desc->point_count,
-				tmp_a, tmp_b, tmp_c, tmp_d);
+				tmp_a,
+				tmp_b,
+				tmp_c,
+				tmp_d, (const qaws_vec2 *)impl->points, (const qaws_vec2 *)impl->tangents, desc->point_count);
 
 			for (s = 0; s < span_count; s++) {
 				impl->span_coeffs[s * 8 + 0] = tmp_a[s].x;
@@ -456,10 +456,10 @@ qaws_status qaws_curve_create_hermite_ex(
 			tmp_d = tmp_c + span_count;
 
 			qaws_hermite_prepare_3d(
-				(const qaws_vec3 *)impl->points,
-				(const qaws_vec3 *)impl->tangents,
-				desc->point_count,
-				tmp_a, tmp_b, tmp_c, tmp_d);
+				tmp_a,
+				tmp_b,
+				tmp_c,
+				tmp_d, (const qaws_vec3 *)impl->points, (const qaws_vec3 *)impl->tangents, desc->point_count);
 
 			for (s = 0; s < span_count; s++) {
 				impl->span_coeffs[s * 12 + 0]  = tmp_a[s].x;
@@ -486,8 +486,8 @@ qaws_status qaws_curve_create_hermite_ex(
 }
 
 qaws_status qaws_curve_create_hermite(
-	qaws_hermite_desc const *desc,
-	qaws_curve **out_curve)
+	qaws_curve **out_curve,
+	qaws_hermite_desc const *desc)
 {
-	return qaws_curve_create_hermite_ex(desc, NULL, out_curve);
+	return qaws_curve_create_hermite_ex(out_curve, desc, NULL);
 }

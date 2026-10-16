@@ -38,7 +38,7 @@ typedef struct qaws_subdivision_desc
 } qaws_subdivision_desc;
 
 qaws_status qaws_curve_create_subdivision(
-	qaws_subdivision_desc const* desc,
-	qaws_curve** out_curve);
+	qaws_curve** out_curve,
+	qaws_subdivision_desc const* desc);
 
 #endif /* QAWS_SUBDIVISION_H */

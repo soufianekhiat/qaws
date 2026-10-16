@@ -214,7 +214,7 @@ static qaws_curve* strand_curve(qaws_scalar const* cps, unsigned int n, qaws_sca
 	d.control_point_count = n;
 	d.knots = knots;
 	d.knot_count = n + 4;
-	qaws_curve_create_bspline(&d, &c);
+	qaws_curve_create_bspline(&c, &d);
 	return c;
 }
 
@@ -229,8 +229,8 @@ static void strand_alignment(tensor_field const* t, qaws_curve const* c, double*
 	{
 		qaws_eval_result_2d e;
 		double len, tx, ty, ox, oy, a, b, cx, cy, d;
-		qaws_curve_evaluate_2d(c, (qaws_scalar)(r.min_value + (r.max_value - r.min_value) * (k + 0.5) / m),
-			QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &e);
+		qaws_curve_evaluate_2d(&e, c,
+			(qaws_scalar)(r.min_value + (r.max_value - r.min_value) * (k + 0.5) / m), QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1);
 		len = sqrt(e.d1.x * e.d1.x + e.d1.y * e.d1.y) + 1e-12;
 		tx = e.d1.x / len;
 		ty = e.d1.y / len;
@@ -324,7 +324,7 @@ static void strand_svg(svg* s, imgmap const* m, qaws_curve const* c, char const*
 	for (k = 0; k < 160; k++)
 	{
 		qaws_eval_result_2d e;
-		qaws_curve_evaluate_2d(c, (qaws_scalar)(r.min_value + (r.max_value - r.min_value) * k / 159.0), QAWS_EVAL_FLAG_POSITION, &e);
+		qaws_curve_evaluate_2d(&e, c, (qaws_scalar)(r.min_value + (r.max_value - r.min_value) * k / 159.0), QAWS_EVAL_FLAG_POSITION);
 		map_pt(m, e.position.x, e.position.y, &xy[2 * k], &xy[2 * k + 1]);
 	}
 	svg_polyline(s, xy, 160, color, width, opacity, 0);
@@ -340,7 +340,7 @@ static void strand_svg_photo(svg* s, imgmap const* m, qaws_curve const* c, image
 	{
 		qaws_eval_result_2d e;
 		double sx, sy;
-		qaws_curve_evaluate_2d(c, (qaws_scalar)(r.min_value + (r.max_value - r.min_value) * k / n), QAWS_EVAL_FLAG_POSITION, &e);
+		qaws_curve_evaluate_2d(&e, c, (qaws_scalar)(r.min_value + (r.max_value - r.min_value) * k / n), QAWS_EVAL_FLAG_POSITION);
 		map_pt(m, e.position.x, e.position.y, &sx, &sy);
 		if (k > 0)
 		{
@@ -394,7 +394,7 @@ static void app_hair(void)
 		d.data_point_count = (unsigned int)st->n;
 		d.degree = 3;
 		d.control_point_count = ncp;
-		if (qaws_curve_fit_bspline(&d, &st->fit) != QAWS_STATUS_OK)
+		if (qaws_curve_fit_bspline(&st->fit, &d) != QAWS_STATUS_OK)
 		{
 			st->fit = NULL;
 			continue;

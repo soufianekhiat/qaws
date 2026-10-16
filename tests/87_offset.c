@@ -143,7 +143,7 @@ static void test_curves(void)
 		s[1].radius = 5; s[1].angle_start = (qaws_scalar)OST_PI; s[1].angle_end = (qaws_scalar)(2 * OST_PI);
 		memset(&ad, 0, sizeof(ad));
 		ad.dimension = QAWS_DIMENSION_2D; ad.segments = s; ad.segment_count = 2;
-		qaws_curve_create_arc(&ad, &c);
+		qaws_curve_create_arc(&c, &ad);
 		cc = c;
 		a = ost_run(&cc, 1, 1, 1, QAWS_JOIN_ROUND, QAWS_END_POLYGON, NULL);
 		sprintf(msg, "arc circle r 5 grown by 1: 36 pi (%.12g vs %.12g)", a, 36 * OST_PI);
@@ -177,7 +177,7 @@ static void test_curves(void)
 		for (i = 0; i < 8; i++) p[i] = (qaws_scalar)cp[i];
 		memset(&d, 0, sizeof(d));
 		d.dimension = QAWS_DIMENSION_2D; d.degree = 3; d.control_points = p; d.control_point_count = 4;
-		qaws_curve_create_bezier(&d, &c);
+		qaws_curve_create_bezier(&c, &d);
 		cc = c;
 		path.curves = &cc; path.curve_count = 1; path.closed = 0;
 		qaws_path_compute_length_2d(&path, &L);
@@ -189,7 +189,7 @@ static void test_curves(void)
 			for (k = 0; k <= 200000; k++)
 			{
 				qaws_eval_result_2d ev;
-				qaws_curve_evaluate_2d(c, (qaws_scalar)(k / 200000.0), QAWS_EVAL_FLAG_POSITION, &ev);
+				qaws_curve_evaluate_2d(&ev, c, (qaws_scalar)(k / 200000.0), QAWS_EVAL_FLAG_POSITION);
 				if (k) acc += hypot(ev.position.x - px, ev.position.y - py);
 				px = ev.position.x; py = ev.position.y;
 			}

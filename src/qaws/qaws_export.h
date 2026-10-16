@@ -29,8 +29,8 @@ typedef struct qaws_bspline_fit_desc
 } qaws_bspline_fit_desc;
 
 qaws_status qaws_curve_fit_bspline(
-	qaws_bspline_fit_desc const* desc,
-	qaws_curve** out_curve);
+	qaws_curve** out_curve,
+	qaws_bspline_fit_desc const* desc);
 
 /*
  * SVG path export.
@@ -51,10 +51,10 @@ qaws_status qaws_curve_fit_bspline(
  * The curve must be 2D.
  */
 qaws_status qaws_curve_export_svg_path(
-	qaws_curve const* curve,
 	char* out_path_data,
-	unsigned int capacity,
 	unsigned int* out_length,
+	qaws_curve const* curve,
+	unsigned int capacity,
 	unsigned int sample_count);
 
 /*
@@ -88,18 +88,18 @@ typedef enum qaws_polyline_sampling
  *                For curvature sampling this may be <= sample_count.
  */
 qaws_status qaws_polyline_export_2d(
+	qaws_vec2* out_points,
+	unsigned int* out_count,
 	qaws_curve const* curve,
 	unsigned int sample_count,
-	qaws_polyline_sampling sampling,
-	qaws_vec2* out_points,
-	unsigned int* out_count);
+	qaws_polyline_sampling sampling);
 
 qaws_status qaws_polyline_export_3d(
+	qaws_vec3* out_points,
+	unsigned int* out_count,
 	qaws_curve const* curve,
 	unsigned int sample_count,
-	qaws_polyline_sampling sampling,
-	qaws_vec3* out_points,
-	unsigned int* out_count);
+	qaws_polyline_sampling sampling);
 
 /*
  * OBJ surface export.
@@ -118,12 +118,12 @@ qaws_status qaws_polyline_export_3d(
  * out_length:      actual string length written (excluding null).
  */
 qaws_status qaws_surface_export_obj(
+	char* out_obj_data,
+	unsigned int* out_length,
 	qaws_surface const* surface,
+	unsigned int capacity,
 	unsigned int u_samples,
 	unsigned int v_samples,
-	int include_normals,
-	char* out_obj_data,
-	unsigned int capacity,
-	unsigned int* out_length);
+	int include_normals);
 
 #endif /* QAWS_EXPORT_H */

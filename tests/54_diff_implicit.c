@@ -28,7 +28,7 @@ static qaws_curve* imp_curve(qaws_scalar const* p, unsigned int dim)
 	d.control_point_count = 6;
 	d.knots = g_imp_knots;
 	d.knot_count = 10;
-	qaws_curve_create_bspline(&d, &c);
+	qaws_curve_create_bspline(&c, &d);
 	return c;
 }
 
@@ -329,7 +329,7 @@ static void check_pair(unsigned int dim)
 	if (dim == 2)
 	{
 		qaws_intersection_2d hits[4];
-		qaws_curve_find_intersections_2d(A, B, hits, 4, &ns);
+		qaws_curve_find_intersections_2d(hits, &ns, A, B, 4);
 		for (i = 0; i < ns; i++)
 		{
 			seeds[i][0] = hits[i].parameter_a;
@@ -346,8 +346,8 @@ static void check_pair(unsigned int dim)
 			{
 				qaws_eval_result_3d ra, rb;
 				double d;
-				qaws_curve_evaluate_3d(A, (qaws_scalar)(3.0 * a / 40), QAWS_EVAL_FLAG_POSITION, &ra);
-				qaws_curve_evaluate_3d(B, (qaws_scalar)(3.0 * b / 40), QAWS_EVAL_FLAG_POSITION, &rb);
+				qaws_curve_evaluate_3d(&ra, A, (qaws_scalar)(3.0 * a / 40), QAWS_EVAL_FLAG_POSITION);
+				qaws_curve_evaluate_3d(&rb, B, (qaws_scalar)(3.0 * b / 40), QAWS_EVAL_FLAG_POSITION);
 				d = v3w(qaws_v3_sub(ra.position, rb.position), qaws_v3_sub(ra.position, rb.position));
 				if (d < best)
 				{
@@ -441,7 +441,7 @@ static void check_plane(void)
 	C = imp_curve(c, 3);
 	plane.point = qaws_v3((qaws_scalar)2.2, (qaws_scalar)0.3, (qaws_scalar)0.1);
 	plane.normal = qaws_v3((qaws_scalar)1, (qaws_scalar)0.3, (qaws_scalar)-0.2);
-	qaws_curve_find_plane_intersections(C, &plane, seeds, hits_pos, 8, &ns);
+	qaws_curve_find_plane_intersections(seeds, hits_pos, &ns, C, &plane, 8);
 	printf("    plane: %u crossings\n", ns);
 	TEST_ASSERT(ns >= 1, "plane crossing found");
 	for (i = 0; i < ns; i++)
@@ -503,7 +503,7 @@ static void check_extremum_inflection(void)
 	root_curve_a(c, 2);
 	C = imp_curve(c, 2);
 
-	qaws_curve_find_extrema(C, 1, seeds, 8, &ns);
+	qaws_curve_find_extrema(seeds, &ns, C, 8, 1);
 	printf("    extrema in y: %u\n", ns);
 	TEST_ASSERT(ns >= 1, "extremum found");
 	for (i = 0; i < ns; i++)
@@ -548,7 +548,7 @@ static void check_extremum_inflection(void)
 	TEST_ASSERT(ok_adj, "extremum adjoint identity");
 
 	ok_fd = ok_adj = 1;
-	qaws_curve_find_inflection_points(C, seeds, 8, &ns);
+	qaws_curve_find_inflection_points(seeds, &ns, C, 8);
 	printf("    inflections: %u\n", ns);
 	TEST_ASSERT(ns >= 1, "inflection found");
 	for (i = 0; i < ns; i++)
@@ -619,7 +619,7 @@ static void check_pierce(void)
 	}
 	S = imp_surface(sc, sw);
 	C = imp_curve(c, 3);
-	qaws_surface_find_curve_intersections(S, C, hits, 4, &ns);
+	qaws_surface_find_curve_intersections(hits, &ns, S, C, 4);
 	printf("    surface-curve: %u piercings\n", ns);
 	TEST_ASSERT(ns >= 1, "piercing found");
 	for (i = 0; i < ns; i++)

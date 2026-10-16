@@ -10,10 +10,10 @@ Thread-safe: operates on immutable input curves.
 
 ```c
 qaws_status qaws_curve_split(
-    qaws_curve const* curve,
-    qaws_scalar parameter,
     qaws_curve** out_left,
-    qaws_curve** out_right);
+    qaws_curve** out_right,
+    qaws_curve const* curve,
+    qaws_scalar parameter);
 ```
 
 Splits a curve at the given parameter into two sub-curves.
@@ -38,10 +38,10 @@ cubic B-splines.
 
 ```c
 qaws_status qaws_curve_extract(
+    qaws_curve** out_curve,
     qaws_curve const* curve,
     qaws_scalar t0,
-    qaws_scalar t1,
-    qaws_curve** out_curve);
+    qaws_scalar t1);
 ```
 
 Returns the piece of `curve` between `t0` and `t1` as a new curve that lies
@@ -70,9 +70,9 @@ source, both ways (f64; 1e-5 in float builds).
 
 ```c
 qaws_status qaws_curve_join(
+    qaws_curve** out_joined,
     qaws_curve const* curve_a,
-    qaws_curve const* curve_b,
-    qaws_curve** out_joined);
+    qaws_curve const* curve_b);
 ```
 
 Joins two curves end-to-end into a single curve.
@@ -90,12 +90,12 @@ Joins two curves end-to-end into a single curve.
 
 ```c
 qaws_status qaws_curve_offset_2d(
-    qaws_curve const* curve,
-    qaws_scalar distance,
-    int trim,
     qaws_curve** out_curves,
+    unsigned int* out_count,
+    qaws_curve const* curve,
     unsigned int curve_capacity,
-    unsigned int* out_count);
+    qaws_scalar distance,
+    int trim);
 ```
 
 Computes the offset (parallel) curve at a signed distance. 2D only.
@@ -125,9 +125,9 @@ Positive distance offsets to the left of the travel direction. At cusps where th
 
 ```c
 qaws_status qaws_curve_reparameterize_arc_length(
+    qaws_curve** out_curve,
     qaws_curve const* curve,
-    unsigned int table_resolution,
-    qaws_curve** out_curve);
+    unsigned int table_resolution);
 ```
 
 Creates an arc-length reparameterized wrapper curve.

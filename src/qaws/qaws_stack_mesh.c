@@ -105,7 +105,7 @@ static qaws_status sm_section_job(void* ctx, unsigned int chunk, unsigned int be
 static void sm_eval(qaws_curve const* c, double t, double* p)
 {
 	qaws_eval_result_2d r;
-	qaws_curve_evaluate_2d(c, (qaws_scalar)t, QAWS_EVAL_FLAG_POSITION, &r);
+	qaws_curve_evaluate_2d(&r, c, (qaws_scalar)t, QAWS_EVAL_FLAG_POSITION);
 	p[0] = r.position.x;
 	p[1] = r.position.y;
 }

@@ -8,10 +8,10 @@ Curve evaluation functions.
 
 ```c
 qaws_status qaws_curve_evaluate_2d(
+    qaws_eval_result_2d* out_result,
     qaws_curve const* curve,
     qaws_scalar parameter,
-    unsigned int eval_flags,
-    qaws_eval_result_2d* out_result);
+    unsigned int eval_flags);
 ```
 
 Evaluates a 2D curve at a global parameter.
@@ -30,10 +30,10 @@ Evaluates a 2D curve at a global parameter.
 
 ```c
 qaws_status qaws_curve_evaluate_3d(
+    qaws_eval_result_3d* out_result,
     qaws_curve const* curve,
     qaws_scalar parameter,
-    unsigned int eval_flags,
-    qaws_eval_result_3d* out_result);
+    unsigned int eval_flags);
 ```
 
 Same as `evaluate_2d` but for 3D curves.
@@ -44,11 +44,11 @@ Same as `evaluate_2d` but for 3D curves.
 
 ```c
 qaws_status qaws_curve_evaluate_span_2d(
+    qaws_eval_result_2d* out_result,
     qaws_curve const* curve,
     unsigned int span_index,
     qaws_scalar local_parameter,
-    unsigned int eval_flags,
-    qaws_eval_result_2d* out_result);
+    unsigned int eval_flags);
 ```
 
 Evaluates a 2D curve at a specific span with a local parameter.
@@ -64,11 +64,11 @@ Evaluates a 2D curve at a specific span with a local parameter.
 
 ```c
 qaws_status qaws_curve_evaluate_span_3d(
+    qaws_eval_result_3d* out_result,
     qaws_curve const* curve,
     unsigned int span_index,
     qaws_scalar local_parameter,
-    unsigned int eval_flags,
-    qaws_eval_result_3d* out_result);
+    unsigned int eval_flags);
 ```
 
 Same as `evaluate_span_2d` but for 3D curves.
@@ -79,11 +79,11 @@ Same as `evaluate_span_2d` but for 3D curves.
 
 ```c
 qaws_status qaws_curve_evaluate_batch_2d(
+    qaws_eval_result_2d* out_results,
     qaws_curve const* curve,
     qaws_scalar const* parameters,
     unsigned int count,
-    unsigned int eval_flags,
-    qaws_eval_result_2d* out_results);
+    unsigned int eval_flags);
 ```
 
 Evaluates a 2D curve at multiple parameters in one call.
@@ -103,11 +103,11 @@ Evaluates a 2D curve at multiple parameters in one call.
 
 ```c
 qaws_status qaws_curve_evaluate_batch_3d(
+    qaws_eval_result_3d* out_results,
     qaws_curve const* curve,
     qaws_scalar const* parameters,
     unsigned int count,
-    unsigned int eval_flags,
-    qaws_eval_result_3d* out_results);
+    unsigned int eval_flags);
 ```
 
 Same as `evaluate_batch_2d` but for 3D curves.
@@ -118,12 +118,12 @@ Same as `evaluate_batch_2d` but for 3D curves.
 
 ```c
 qaws_status qaws_surface_evaluate_batch(
+    qaws_surface_eval_result* out_results,
     qaws_surface const* surface,
     qaws_scalar const* u_params,
     qaws_scalar const* v_params,
     unsigned int count,
-    unsigned int eval_flags,
-    qaws_surface_eval_result* out_results);
+    unsigned int eval_flags);
 ```
 
 Evaluates a surface at multiple (u, v) parameter pairs in one call.

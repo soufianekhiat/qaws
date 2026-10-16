@@ -41,7 +41,7 @@ static qaws_curve* csk_curve(csk_seg const* g)
 		cp[0] = (qaws_scalar)g->a[0]; cp[1] = (qaws_scalar)g->a[1]; cp[2] = (qaws_scalar)g->a[2]; cp[3] = (qaws_scalar)g->a[3];
 		memset(&d, 0, sizeof(d));
 		d.dimension = QAWS_DIMENSION_2D; d.degree = 1; d.control_points = cp; d.control_point_count = 2;
-		qaws_curve_create_bezier(&d, &c);
+		qaws_curve_create_bezier(&c, &d);
 	}
 	else
 	{
@@ -52,7 +52,7 @@ static qaws_curve* csk_curve(csk_seg const* g)
 		s.angle_start = (qaws_scalar)g->a[3]; s.angle_end = (qaws_scalar)g->a[4];
 		memset(&d, 0, sizeof(d));
 		d.dimension = QAWS_DIMENSION_2D; d.segments = &s; d.segment_count = 1;
-		qaws_curve_create_arc(&d, &c);
+		qaws_curve_create_arc(&c, &d);
 	}
 	return c;
 }
@@ -71,7 +71,7 @@ static void csk_path_curves(svg* s, viewport const* v, qaws_path_2d const* p, un
 				/* a polyline (qaws_clip joins consecutive lines): its points */
 				qaws_scalar buf[2 * 256];
 				unsigned int m = 0;
-				qaws_curve_get_control_points(c, buf, 256, &m);
+				qaws_curve_get_control_points(buf, &m, c, 256);
 				for (j = (k == 0 ? 0 : 1); j < m && j < 256; j++)
 					fprintf(s->f, "%s%.2f,%.2f ", (j == 0 && k == 0) ? "M" : "L", vx(v, buf[2 * j]), vy(v, buf[2 * j + 1]));
 				continue;
@@ -81,7 +81,7 @@ static void csk_path_curves(svg* s, viewport const* v, qaws_path_2d const* p, un
 			for (j = (k == 0 ? 0 : 1); j <= m; j++)
 			{
 				qaws_eval_result_2d e;
-				qaws_curve_evaluate_2d(c, (qaws_scalar)(rg.min_value + (rg.max_value - rg.min_value) * j / m), QAWS_EVAL_FLAG_POSITION, &e);
+				qaws_curve_evaluate_2d(&e, c, (qaws_scalar)(rg.min_value + (rg.max_value - rg.min_value) * j / m), QAWS_EVAL_FLAG_POSITION);
 				fprintf(s->f, "%s%.2f,%.2f ", (j == 0 && k == 0) ? "M" : "L", vx(v, e.position.x), vy(v, e.position.y));
 			}
 		}

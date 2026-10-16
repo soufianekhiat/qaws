@@ -66,7 +66,7 @@ static qaws_curve const* rs_line(double x0, double y0, double x1, double y1)
 	p[0] = (qaws_scalar)x0; p[1] = (qaws_scalar)y0; p[2] = (qaws_scalar)x1; p[3] = (qaws_scalar)y1;
 	memset(&d, 0, sizeof(d));
 	d.dimension = QAWS_DIMENSION_2D; d.degree = 1; d.control_points = p; d.control_point_count = 2;
-	qaws_curve_create_bezier(&d, &c);
+	qaws_curve_create_bezier(&c, &d);
 	return rs_hold(c);
 }
 
@@ -79,7 +79,7 @@ static qaws_curve const* rs_cubic(double x0, double y0, double x1, double y1, do
 	p[4] = (qaws_scalar)x2; p[5] = (qaws_scalar)y2; p[6] = (qaws_scalar)x3; p[7] = (qaws_scalar)y3;
 	memset(&d, 0, sizeof(d));
 	d.dimension = QAWS_DIMENSION_2D; d.degree = 3; d.control_points = p; d.control_point_count = 4;
-	qaws_curve_create_bezier(&d, &c);
+	qaws_curve_create_bezier(&c, &d);
 	return rs_hold(c);
 }
 
@@ -94,7 +94,7 @@ static qaws_curve const* rs_arc(double cx, double cy, double r, double a0, doubl
 	g.angle_start = (qaws_scalar)a0; g.angle_end = (qaws_scalar)a1;
 	memset(&d, 0, sizeof(d));
 	d.dimension = QAWS_DIMENSION_2D; d.segments = &g; d.segment_count = 1;
-	qaws_curve_create_arc(&d, &c);
+	qaws_curve_create_arc(&c, &d);
 	return rs_hold(c);
 }
 
@@ -390,7 +390,7 @@ static void rs_draw_region(svg* s, viewport const* v, rsr const* g)
 			for (j = (k == 0 ? 0 : 1); j <= m; j++)
 			{
 				qaws_eval_result_2d e;
-				qaws_curve_evaluate_2d(c, (qaws_scalar)(rg.min_value + (rg.max_value - rg.min_value) * j / m), QAWS_EVAL_FLAG_POSITION, &e);
+				qaws_curve_evaluate_2d(&e, c, (qaws_scalar)(rg.min_value + (rg.max_value - rg.min_value) * j / m), QAWS_EVAL_FLAG_POSITION);
 				fprintf(s->f, "%s%.2f,%.2f ", (j == 0 && k == 0) ? "M" : "L", vx(v, e.position.x), vy(v, e.position.y));
 			}
 		}

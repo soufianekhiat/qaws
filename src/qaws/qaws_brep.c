@@ -727,7 +727,7 @@ qaws_status qaws_brep_compute_surface_area(
 		if (!surf)
 			continue;
 
-		s = qaws_surface_compute_area(surf, &face_area);
+		s = qaws_surface_compute_area(&face_area, surf);
 		if (s != QAWS_STATUS_OK)
 			return s;
 

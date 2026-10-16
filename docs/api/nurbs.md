@@ -38,8 +38,8 @@ typedef struct qaws_nurbs_desc {
 
 ```c
 qaws_status qaws_curve_create_nurbs(
-    qaws_nurbs_desc const* desc,
-    qaws_curve** out_curve);
+    qaws_curve** out_curve,
+    qaws_nurbs_desc const* desc);
 ```
 
 Creates a NURBS curve.

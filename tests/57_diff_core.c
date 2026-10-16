@@ -77,7 +77,7 @@ static void test_core_kernels(void)
 	d.control_point_count = CORE_CP;
 	d.knots = g_core_knots;
 	d.knot_count = CORE_KC;
-	TEST_ASSERT_STATUS(qaws_curve_create_bspline(&d, &c));
+	TEST_ASSERT_STATUS(qaws_curve_create_bspline(&c, &d));
 
 	/* tangents */
 	fv = qaws_field_view_make(dir, CORE_CP, QAWS_FIELD_CONTROL_POINTS, 3);

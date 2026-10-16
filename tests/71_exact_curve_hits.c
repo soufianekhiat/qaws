@@ -34,7 +34,7 @@ static qaws_curve* ec_curve(int degree, int rational, long long const* cp, long 
 		d.control_point_count = (unsigned int)n;
 		d.weights = ws;
 		d.weight_count = (unsigned int)n;
-		qaws_curve_create_rational_bezier(&d, &c);
+		qaws_curve_create_rational_bezier(&c, &d);
 	}
 	else
 	{
@@ -44,7 +44,7 @@ static qaws_curve* ec_curve(int degree, int rational, long long const* cp, long 
 		d.degree = (unsigned int)degree;
 		d.control_points = cps;
 		d.control_point_count = (unsigned int)n;
-		qaws_curve_create_bezier(&d, &c);
+		qaws_curve_create_bezier(&c, &d);
 	}
 	return c;
 }
@@ -133,9 +133,9 @@ static void test_splines(void)
 	d.control_point_count = 4;
 	d.knots = knots;
 	d.knot_count = 7;
-	qaws_curve_create_bspline(&d, &ca);
+	qaws_curve_create_bspline(&ca, &d);
 	d.control_points = cb_pts;
-	qaws_curve_create_bspline(&d, &cb);
+	qaws_curve_create_bspline(&cb, &d);
 	qaws_exact_curve_prepare(NULL, ca, &ea, NULL);
 	qaws_exact_curve_prepare(NULL, cb, &eb, NULL);
 	TEST_ASSERT(qaws_exact_curve_curve_hits(ea, eb, hits, 8, &count) == QAWS_STATUS_OK && count == 2 && hits[0].kind == QAWS_EXACT_HIT_CROSSING &&
@@ -147,9 +147,9 @@ static void test_splines(void)
 	bd.degree = 1;
 	bd.control_points = la;
 	bd.control_point_count = 2;
-	qaws_curve_create_bezier(&bd, &sa);
+	qaws_curve_create_bezier(&sa, &bd);
 	bd.control_points = lb;
-	qaws_curve_create_bezier(&bd, &sb);
+	qaws_curve_create_bezier(&sb, &bd);
 	qaws_exact_curve_prepare(NULL, sa, &esa, NULL);
 	qaws_exact_curve_prepare(NULL, sb, &esb, NULL);
 	TEST_ASSERT(qaws_exact_curve_curve_hits(esa, esb, hits, 8, &count) == QAWS_STATUS_OK && count == 1 && hits[0].kind == QAWS_EXACT_HIT_POINT &&

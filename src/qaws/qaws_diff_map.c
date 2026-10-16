@@ -515,42 +515,42 @@ fail:
 
 static qaws_status construct_split(void const* user, qaws_curve const* const* in, qaws_curve** out)
 {
-	return qaws_curve_split(in[0], *(qaws_scalar const*)user, &out[0], &out[1]);
+	return qaws_curve_split(&out[0], &out[1], in[0], *(qaws_scalar const*)user);
 }
 
 static qaws_status construct_join(void const* user, qaws_curve const* const* in, qaws_curve** out)
 {
 	(void)user;
-	return qaws_curve_join(in[0], in[1], &out[0]);
+	return qaws_curve_join(&out[0], in[0], in[1]);
 }
 
 static qaws_status construct_hermite_to_bezier(void const* user, qaws_curve const* const* in, qaws_curve** out)
 {
-	return qaws_curve_convert_hermite_to_bezier(in[0], *(unsigned int const*)user, &out[0]);
+	return qaws_curve_convert_hermite_to_bezier(&out[0], in[0], *(unsigned int const*)user);
 }
 
 static qaws_status construct_bezier_to_bspline(void const* user, qaws_curve const* const* in, qaws_curve** out)
 {
 	(void)user;
-	return qaws_curve_convert_bezier_to_bspline(in[0], &out[0]);
+	return qaws_curve_convert_bezier_to_bspline(&out[0], in[0]);
 }
 
 static qaws_status construct_bspline_to_nurbs(void const* user, qaws_curve const* const* in, qaws_curve** out)
 {
 	(void)user;
-	return qaws_curve_convert_bspline_to_nurbs(in[0], &out[0]);
+	return qaws_curve_convert_bspline_to_nurbs(&out[0], in[0]);
 }
 
 static qaws_status construct_elevate(void const* user, qaws_curve const* const* in, qaws_curve** out)
 {
 	(void)user;
-	return qaws_curve_elevate_degree(in[0], &out[0]);
+	return qaws_curve_elevate_degree(&out[0], in[0]);
 }
 
 static qaws_status construct_reduce(void const* user, qaws_curve const* const* in, qaws_curve** out)
 {
 	(void)user;
-	return qaws_curve_reduce_degree(in[0], &out[0]);
+	return qaws_curve_reduce_degree(&out[0], in[0]);
 }
 
 /* Runs the construction on the real inputs, then builds its map. */
@@ -999,7 +999,7 @@ qaws_status qaws_curve_fit_bspline_diff(qaws_curve** out_curve, qaws_diff_map** 
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	if (out_map)
 		*out_map = NULL;
-	st = qaws_curve_fit_bspline(desc, out_curve);
+	st = qaws_curve_fit_bspline(out_curve, desc);
 	if (st != QAWS_STATUS_OK || !out_map)
 		return st;
 
@@ -1167,7 +1167,7 @@ static qaws_status offset_surface_setup(offset_state* s, unsigned int i)
 	qaws_scalar su = QAWS_ZERO, sv = QAWS_ZERO, a, b, d, det;
 	qaws_surface_jet* j = &s->sjets[i];
 	qaws_surface_eval_result sr;
-	qaws_status st = qaws_surface_find_closest_point(s->surface, s->jets[i].d[0], &su, &sv, &closest);
+	qaws_status st = qaws_surface_find_closest_point(&su, &sv, &closest, s->surface, s->jets[i].d[0]);
 	if (st != QAWS_STATUS_OK)
 		return st;
 	st = qaws_surface_eval_jet(j, s->surface, su, sv, QAWS_SJET_ORDER2);
@@ -1267,7 +1267,7 @@ qaws_status qaws_curve_offset_3d_diff(
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	if (out_map)
 		*out_map = NULL;
-	st = qaws_curve_offset_3d(curve, distance, direction_mode, direction, surf, sample_count, out_curve);
+	st = qaws_curve_offset_3d(out_curve, curve, surf, direction, sample_count, distance, direction_mode);
 	if (st != QAWS_STATUS_OK || !out_map)
 		return st;
 

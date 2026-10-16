@@ -25,7 +25,7 @@ static void sbf_fill(svg* s, qaws_surface_region const* r, qaws_surface const* s
 			{
 				qaws_eval_result_2d e;
 				double sx, sy;
-				qaws_curve_evaluate_2d(p.curves[ci], (qaws_scalar)(rg.min_value + (rg.max_value - rg.min_value) * k / n), QAWS_EVAL_FLAG_POSITION, &e);
+				qaws_curve_evaluate_2d(&e, p.curves[ci], (qaws_scalar)(rg.min_value + (rg.max_value - rg.min_value) * k / n), QAWS_EVAL_FLAG_POSITION);
 				if (view)
 				{
 					qaws_surface_eval_result q;

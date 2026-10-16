@@ -86,8 +86,8 @@ static void obj_heat_distance_mesh(
 		idx = (unsigned int*)malloc(idx_cap * sizeof(unsigned int));
 		if (!tv || !idx) { free(tv); free(idx); return; }
 
-		s = qaws_surface_tessellate(surf, tess_desc, tv, tv_cap, &tv_count,
-			idx, idx_cap, &idx_count);
+		s = qaws_surface_tessellate(tv, &tv_count, idx, &idx_count, surf,
+			tv_cap, idx_cap, tess_desc);
 		if (s == QAWS_STATUS_OK && tv_count == count)
 		{
 			unsigned int ti;
@@ -322,14 +322,14 @@ static void obj_tube_on_surface(obj_writer* w, qaws_curve const* curve,
 		qaws_vec3 closest;
 		qaws_surface_eval_result sr;
 
-		if (qaws_curve_evaluate_3d(curve, t, QAWS_EVAL_FLAG_POSITION, &r) != QAWS_STATUS_OK)
+		if (qaws_curve_evaluate_3d(&r, curve, t, QAWS_EVAL_FLAG_POSITION) != QAWS_STATUS_OK)
 			continue;
 
 		/* Project the curve sample onto the surface */
 		{
 			int use_projection = 0;
-			if (qaws_surface_find_closest_point(surface, r.position,
-				&out_u, &out_v, &closest) == QAWS_STATUS_OK)
+			if (qaws_surface_find_closest_point(&out_u, &out_v,
+				&closest, surface, r.position) == QAWS_STATUS_OK)
 			{
 				/* Sanity check: if the projected point is far from the curve
 				   sample, Newton converged to a wrong local minimum. */
@@ -508,10 +508,10 @@ static void test_geodesic_flip_flat(void)
 		td.curvature_threshold = QAWS_LITERAL(0.01);
 		td.max_edge_length = QAWS_LITERAL(0.5); /* Force subdivision on flat surface */
 
-		s = qaws_surface_compute_geodesic_flip(surf,
+		s = qaws_surface_compute_geodesic_flip(&geo,
+			surf, &td,
 			(qaws_scalar)0.2, (qaws_scalar)0.2,
-			(qaws_scalar)0.8, (qaws_scalar)0.8,
-			&td, 0, &geo);
+			(qaws_scalar)0.8, (qaws_scalar)0.8, 0);
 		TEST_ASSERT_STATUS(s);
 		TEST_ASSERT(geo != NULL, "flip geodesic produced a curve");
 	}
@@ -522,8 +522,8 @@ static void test_geodesic_flip_flat(void)
 	{
 		qaws_scalar arc_len = 0;
 		qaws_range range = qaws_curve_get_parameter_range(geo);
-		qaws_status as = qaws_curve_compute_arc_length(geo,
-			range.min_value, range.max_value, &arc_len);
+		qaws_status as = qaws_curve_compute_arc_length(&arc_len,
+			geo, range.min_value, range.max_value);
 		TEST_ASSERT_STATUS(as);
 
 		/* Expected straight-line distance on the flat surface:
@@ -549,7 +549,7 @@ static void test_geodesic_flip_flat(void)
 					(range.max_value - range.min_value) * (qaws_scalar)i / (qaws_scalar)9;
 				qaws_eval_result_3d r;
 				memset(&r, 0, sizeof(r));
-				qaws_curve_evaluate_3d(geo, t, QAWS_EVAL_FLAG_POSITION, &r);
+				qaws_curve_evaluate_3d(&r, geo, t, QAWS_EVAL_FLAG_POSITION);
 				if (QAWS_FABS(r.position.z) > (qaws_scalar)0.1)
 					on_surface = 0;
 			}
@@ -597,10 +597,10 @@ static void test_geodesic_flip_dome(void)
 		td.curvature_threshold = QAWS_LITERAL(0.05);
 		td.max_edge_length = QAWS_ZERO;
 
-		s = qaws_surface_compute_geodesic_flip(surf,
+		s = qaws_surface_compute_geodesic_flip(&geo,
+			surf, &td,
 			(qaws_scalar)0.1, (qaws_scalar)0.1,
-			(qaws_scalar)0.9, (qaws_scalar)0.9,
-			&td, 0, &geo);
+			(qaws_scalar)0.9, (qaws_scalar)0.9, 0);
 		TEST_ASSERT_STATUS(s);
 		TEST_ASSERT(geo != NULL, "flip geodesic on dome produced a curve");
 	}
@@ -609,7 +609,7 @@ static void test_geodesic_flip_dome(void)
 	{
 		qaws_scalar arc_len = 0;
 		qaws_range range = qaws_curve_get_parameter_range(geo);
-		qaws_curve_compute_arc_length(geo, range.min_value, range.max_value, &arc_len);
+		qaws_curve_compute_arc_length(&arc_len, geo, range.min_value, range.max_value);
 		printf("  dome flip geodesic arc_len=%.4f\n", (double)arc_len);
 		TEST_ASSERT(arc_len > QAWS_LITERAL(0.1), "dome geodesic has positive length");
 
@@ -675,9 +675,9 @@ static void test_heat_distance_flat(void)
 		td.curvature_threshold = QAWS_LITERAL(0.01);
 		td.max_edge_length = QAWS_LITERAL(0.5); /* Force subdivision on flat surface */
 
-		s = qaws_surface_compute_geodesic_distance(surf,
-			(qaws_scalar)0.5, (qaws_scalar)0.5, &td,
-			u_buf, v_buf, dist, cap, &count);
+		s = qaws_surface_compute_geodesic_distance(u_buf,
+			v_buf, dist, &count,
+			surf, cap, &td, (qaws_scalar)0.5, (qaws_scalar)0.5);
 		TEST_ASSERT_STATUS(s);
 		TEST_ASSERT(count > 0, "heat method returned vertices");
 		printf("  heat flat: %u vertices\n", count);
@@ -782,9 +782,9 @@ static void test_heat_distance_dome(void)
 		td.curvature_threshold = QAWS_LITERAL(0.05);
 		td.max_edge_length = QAWS_ZERO;
 
-		s = qaws_surface_compute_geodesic_distance(surf,
-			(qaws_scalar)0.5, (qaws_scalar)0.5, &td,
-			u_buf, v_buf, dist, cap, &count);
+		s = qaws_surface_compute_geodesic_distance(u_buf,
+			v_buf, dist, &count,
+			surf, cap, &td, (qaws_scalar)0.5, (qaws_scalar)0.5);
 		TEST_ASSERT_STATUS(s);
 		TEST_ASSERT(count > 0, "heat method on dome returned vertices");
 		printf("  heat dome: %u vertices\n", count);
@@ -849,9 +849,9 @@ static void test_heat_distance_buffer_check(void)
 	}
 
 	/* Capacity too small should return BUFFER_TOO_SMALL and needed count */
-	s = qaws_surface_compute_geodesic_distance(surf,
-		(qaws_scalar)0.5, (qaws_scalar)0.5, NULL,
-		u_small, v_small, dist_small, 4, &count);
+	s = qaws_surface_compute_geodesic_distance(u_small,
+		v_small, dist_small, &count,
+		surf, 4, NULL, (qaws_scalar)0.5, (qaws_scalar)0.5);
 	TEST_ASSERT(s == QAWS_STATUS_BUFFER_TOO_SMALL,
 		"buffer too small returns correct status");
 	TEST_ASSERT(count > 4, "needed count > capacity");
@@ -898,24 +898,24 @@ static void visual_obj_geodesic_comparison(void)
 	td_heat.max_edge_length = QAWS_LITERAL(0.15);
 
 	/* Method 1: RK4 shooting (continuous ODE) — more iterations and steps */
-	s = qaws_surface_compute_geodesic(surf, su, sv, eu, ev,
-		50, 600, &geo_rk4);
+	s = qaws_surface_compute_geodesic(&geo_rk4, surf, 600, su, sv,
+		eu, ev, 50);
 	if (s == QAWS_STATUS_OK)
 		printf("  RK4 geodesic: OK\n");
 	else
 		printf("  RK4 geodesic: failed (status %d)\n", (int)s);
 
 	/* Method 2: Dijkstra + UV smoothing (discrete mesh) */
-	s = qaws_surface_compute_geodesic_flip(surf, su, sv, eu, ev,
-		&td_flip, 0, &geo_flip);
+	s = qaws_surface_compute_geodesic_flip(&geo_flip, surf, &td_flip, su, sv,
+		eu, ev, 0);
 	if (s == QAWS_STATUS_OK)
 		printf("  Flip geodesic: OK\n");
 	else
 		printf("  Flip geodesic: failed (status %d)\n", (int)s);
 
 	/* Method 3: Heat geodesic path (gradient descent on distance field) */
-	s = qaws_surface_compute_geodesic_heat(surf, su, sv, eu, ev,
-		&td_heat, &geo_heat);
+	s = qaws_surface_compute_geodesic_heat(&geo_heat, surf, &td_heat, su, sv,
+		eu, ev);
 	if (s == QAWS_STATUS_OK)
 		printf("  Heat geodesic: OK\n");
 	else
@@ -926,8 +926,8 @@ static void visual_obj_geodesic_comparison(void)
 	u_buf = (qaws_scalar*)malloc(cap * sizeof(qaws_scalar));
 	v_buf = (qaws_scalar*)malloc(cap * sizeof(qaws_scalar));
 
-	s = qaws_surface_compute_geodesic_distance(surf, su, sv, &td_heat,
-		u_buf, v_buf, dist, cap, &count);
+	s = qaws_surface_compute_geodesic_distance(u_buf, v_buf, dist, &count,
+		surf, cap, &td_heat, su, sv);
 	if (s == QAWS_STATUS_OK)
 		printf("  Heat distance: %u vertices\n", count);
 	else
@@ -953,12 +953,12 @@ static void visual_obj_geodesic_comparison(void)
 		{
 			rng = qaws_curve_get_parameter_range(geo_rk4);
 			memset(&tip, 0, sizeof(tip));
-			qaws_curve_evaluate_3d(geo_rk4, rng.min_value, QAWS_EVAL_FLAG_POSITION, &tip);
+			qaws_curve_evaluate_3d(&tip, geo_rk4, rng.min_value, QAWS_EVAL_FLAG_POSITION);
 			dx = (double)(tip.position.x - sr_start.position.x);
 			dy = (double)(tip.position.y - sr_start.position.y);
 			dz = (double)(tip.position.z - sr_start.position.z);
 			printf("  RK4  t=0: err_start=%.6f\n", sqrt(dx*dx+dy*dy+dz*dz));
-			qaws_curve_evaluate_3d(geo_rk4, rng.max_value, QAWS_EVAL_FLAG_POSITION, &tip);
+			qaws_curve_evaluate_3d(&tip, geo_rk4, rng.max_value, QAWS_EVAL_FLAG_POSITION);
 			dx = (double)(tip.position.x - sr_end.position.x);
 			dy = (double)(tip.position.y - sr_end.position.y);
 			dz = (double)(tip.position.z - sr_end.position.z);
@@ -968,12 +968,12 @@ static void visual_obj_geodesic_comparison(void)
 		{
 			rng = qaws_curve_get_parameter_range(geo_flip);
 			memset(&tip, 0, sizeof(tip));
-			qaws_curve_evaluate_3d(geo_flip, rng.min_value, QAWS_EVAL_FLAG_POSITION, &tip);
+			qaws_curve_evaluate_3d(&tip, geo_flip, rng.min_value, QAWS_EVAL_FLAG_POSITION);
 			dx = (double)(tip.position.x - sr_start.position.x);
 			dy = (double)(tip.position.y - sr_start.position.y);
 			dz = (double)(tip.position.z - sr_start.position.z);
 			printf("  Flip t=0: err_start=%.6f\n", sqrt(dx*dx+dy*dy+dz*dz));
-			qaws_curve_evaluate_3d(geo_flip, rng.max_value, QAWS_EVAL_FLAG_POSITION, &tip);
+			qaws_curve_evaluate_3d(&tip, geo_flip, rng.max_value, QAWS_EVAL_FLAG_POSITION);
 			dx = (double)(tip.position.x - sr_end.position.x);
 			dy = (double)(tip.position.y - sr_end.position.y);
 			dz = (double)(tip.position.z - sr_end.position.z);
@@ -983,12 +983,12 @@ static void visual_obj_geodesic_comparison(void)
 		{
 			rng = qaws_curve_get_parameter_range(geo_heat);
 			memset(&tip, 0, sizeof(tip));
-			qaws_curve_evaluate_3d(geo_heat, rng.min_value, QAWS_EVAL_FLAG_POSITION, &tip);
+			qaws_curve_evaluate_3d(&tip, geo_heat, rng.min_value, QAWS_EVAL_FLAG_POSITION);
 			dx = (double)(tip.position.x - sr_start.position.x);
 			dy = (double)(tip.position.y - sr_start.position.y);
 			dz = (double)(tip.position.z - sr_start.position.z);
 			printf("  Heat t=0: err_start=%.6f\n", sqrt(dx*dx+dy*dy+dz*dz));
-			qaws_curve_evaluate_3d(geo_heat, rng.max_value, QAWS_EVAL_FLAG_POSITION, &tip);
+			qaws_curve_evaluate_3d(&tip, geo_heat, rng.max_value, QAWS_EVAL_FLAG_POSITION);
 			dx = (double)(tip.position.x - sr_end.position.x);
 			dy = (double)(tip.position.y - sr_end.position.y);
 			dz = (double)(tip.position.z - sr_end.position.z);
@@ -1001,21 +1001,21 @@ static void visual_obj_geodesic_comparison(void)
 	{
 		qaws_scalar len = 0;
 		qaws_range rng = qaws_curve_get_parameter_range(geo_rk4);
-		qaws_curve_compute_arc_length(geo_rk4, rng.min_value, rng.max_value, &len);
+		qaws_curve_compute_arc_length(&len, geo_rk4, rng.min_value, rng.max_value);
 		printf("  RK4 arc length:  %.4f\n", (double)len);
 	}
 	if (geo_flip)
 	{
 		qaws_scalar len = 0;
 		qaws_range rng = qaws_curve_get_parameter_range(geo_flip);
-		qaws_curve_compute_arc_length(geo_flip, rng.min_value, rng.max_value, &len);
+		qaws_curve_compute_arc_length(&len, geo_flip, rng.min_value, rng.max_value);
 		printf("  Flip arc length: %.4f\n", (double)len);
 	}
 	if (geo_heat)
 	{
 		qaws_scalar len = 0;
 		qaws_range rng = qaws_curve_get_parameter_range(geo_heat);
-		qaws_curve_compute_arc_length(geo_heat, rng.min_value, rng.max_value, &len);
+		qaws_curve_compute_arc_length(&len, geo_heat, rng.min_value, rng.max_value);
 		printf("  Heat arc length: %.4f\n", (double)len);
 	}
 

@@ -65,7 +65,7 @@ static qaws_curve* groom_curve(qaws_scalar const* cps)
 	d.control_points = cps;
 	d.control_point_count = HG_CP;
 	d.is_uniform = 1;
-	qaws_curve_create_bspline(&d, &c);
+	qaws_curve_create_bspline(&c, &d);
 	return c;
 }
 
@@ -273,7 +273,7 @@ static void groom_render(svg* s, view3 const* v, groom_strand const* st, int ns,
 		{
 			qaws_eval_result_3d e;
 			double x[3], sx, sy, d;
-			qaws_curve_evaluate_3d(c, (qaws_scalar)(r.min_value + (r.max_value - r.min_value) * k / m), QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &e);
+			qaws_curve_evaluate_3d(&e, c, (qaws_scalar)(r.min_value + (r.max_value - r.min_value) * k / m), QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1);
 			x[0] = e.position.x; x[1] = e.position.y; x[2] = e.position.z;
 			view_xform(v, x, &sx, &sy, &d);
 			if (k > 0)

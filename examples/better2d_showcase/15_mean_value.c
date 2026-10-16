@@ -13,7 +13,7 @@ static qaws_curve* mvf_cubic(double const* xy)
 	for (i = 0; i < 8; i++) cp[i] = (qaws_scalar)xy[i];
 	memset(&d, 0, sizeof(d));
 	d.dimension = QAWS_DIMENSION_2D; d.degree = 3; d.control_points = cp; d.control_point_count = 4;
-	qaws_curve_create_bezier(&d, &c);
+	qaws_curve_create_bezier(&c, &d);
 	return c;
 }
 
@@ -67,7 +67,7 @@ static void mvf_boundary(svg* s, viewport const* v, qaws_mean_value const* m, qa
 		for (k = 0; k <= 160; k++)
 		{
 			qaws_eval_result_2d e;
-			qaws_curve_evaluate_2d(cs[i], rg.min_value + (rg.max_value - rg.min_value) * k / 160, QAWS_EVAL_FLAG_POSITION, &e);
+			qaws_curve_evaluate_2d(&e, cs[i], rg.min_value + (rg.max_value - rg.min_value) * k / 160, QAWS_EVAL_FLAG_POSITION);
 			bp[k] = e.position;
 		}
 		if (qaws_mean_value_deform(m, hh, bp, 161, bo) == QAWS_STATUS_OK)
@@ -148,7 +148,7 @@ static void demo_mean_value(void)
 		g.angle_start = (qaws_scalar)(2 * 3.14159265358979323846); g.angle_end = 0;
 		memset(&ad, 0, sizeof(ad));
 		ad.dimension = QAWS_DIMENSION_2D; ad.segments = &g; ad.segment_count = 1;
-		qaws_curve_create_arc(&ad, &cs[4]);
+		qaws_curve_create_arc(&cs[4], &ad);
 		cv[4] = cs[4];
 	}
 	p[0].curves = cv; p[0].curve_count = 4; p[0].closed = 1;
@@ -242,7 +242,7 @@ static void demo_mean_value(void)
 			for (k = 0; k <= 240; k++)
 			{
 				qaws_eval_result_2d e;
-				qaws_curve_evaluate_2d(pv[i], rg.min_value + (rg.max_value - rg.min_value) * k / 240, QAWS_EVAL_FLAG_POSITION, &e);
+				qaws_curve_evaluate_2d(&e, pv[i], rg.min_value + (rg.max_value - rg.min_value) * k / 240, QAWS_EVAL_FLAG_POSITION);
 				bp[k] = e.position;
 			}
 			mvf_points(&s, &v, bp, 241, "#1b1f24", 1.6);

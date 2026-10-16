@@ -53,7 +53,7 @@ static qaws_curve* fo_curve(fo_loop const* L)
 	d.control_point_count = (unsigned int)(L->n + 3);
 	d.knots = L->knots;
 	d.knot_count = (unsigned int)(L->n + 7);
-	qaws_curve_create_bspline(&d, &c);
+	qaws_curve_create_bspline(&c, &d);
 	return c;
 }
 
@@ -183,7 +183,7 @@ static void fo_project(qaws_curve const* c, fo_loop* L)
 		{
 			qaws_eval_result_2d e;
 			double dx, dy, g, H, t = L->t[i];
-			qaws_curve_evaluate_2d(c, (qaws_scalar)t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2, &e);
+			qaws_curve_evaluate_2d(&e, c, (qaws_scalar)t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2);
 			dx = e.position.x - L->q[2 * i];
 			dy = e.position.y - L->q[2 * i + 1];
 			g = dx * e.d1.x + dy * e.d1.y;
@@ -268,7 +268,7 @@ static void fo_curve_path(svg* s, imgmap const* m, qaws_curve const* c, int star
 	{
 		qaws_eval_result_2d e;
 		double x, y;
-		qaws_curve_evaluate_2d(c, (qaws_scalar)(r.min_value + (r.max_value - r.min_value) * k / n), QAWS_EVAL_FLAG_POSITION, &e);
+		qaws_curve_evaluate_2d(&e, c, (qaws_scalar)(r.min_value + (r.max_value - r.min_value) * k / n), QAWS_EVAL_FLAG_POSITION);
 		map_pt(m, e.position.x, e.position.y, &x, &y);
 		fprintf(s->f, "%s%.2f %.2f", (k == 0 && start) ? "M" : (k == 0 ? "M" : "L"), x, y);
 	}

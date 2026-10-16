@@ -101,7 +101,7 @@ static void precompute_bishop_frames(qaws_surface_pipe_impl* impl)
 		qaws_scalar t_path = impl->path_range.min_value + u * s_path;
 		qaws_vec3 T;
 
-		if (qaws_curve_compute_tangent_3d(impl->path, t_path, &T) != QAWS_STATUS_OK)
+		if (qaws_curve_compute_tangent_3d(&T, impl->path, t_path) != QAWS_STATUS_OK)
 		{
 			/* Fallback: use arbitrary frame */
 			T.x = QAWS_ZERO; T.y = QAWS_ZERO; T.z = QAWS_ONE;
@@ -215,8 +215,8 @@ static qaws_status pipe_surface_eval(
 	/* Evaluate path position */
 	memset(&path_r, 0, sizeof(path_r));
 	{
-		qaws_status s = qaws_curve_evaluate_3d(impl->path, t_path,
-			QAWS_EVAL_FLAG_POSITION, &path_r);
+		qaws_status s = qaws_curve_evaluate_3d(&path_r, impl->path,
+			t_path, QAWS_EVAL_FLAG_POSITION);
 		if (s != QAWS_STATUS_OK) return s;
 	}
 
@@ -277,14 +277,14 @@ static qaws_status pipe_surface_eval(
 			qaws_vec3 N_lo, B_lo, N_hi, B_hi;
 
 			memset(&pr, 0, sizeof(pr));
-			qaws_curve_evaluate_3d(impl->path, t_lo, QAWS_EVAL_FLAG_POSITION, &pr);
+			qaws_curve_evaluate_3d(&pr, impl->path, t_lo, QAWS_EVAL_FLAG_POSITION);
 			lookup_bishop_frame(impl, u_lo, &N_lo, &B_lo);
 			p_lo.x = pr.position.x + rx * cos_theta * N_lo.x + ry * sin_theta * B_lo.x;
 			p_lo.y = pr.position.y + rx * cos_theta * N_lo.y + ry * sin_theta * B_lo.y;
 			p_lo.z = pr.position.z + rx * cos_theta * N_lo.z + ry * sin_theta * B_lo.z;
 
 			memset(&pr, 0, sizeof(pr));
-			qaws_curve_evaluate_3d(impl->path, t_hi, QAWS_EVAL_FLAG_POSITION, &pr);
+			qaws_curve_evaluate_3d(&pr, impl->path, t_hi, QAWS_EVAL_FLAG_POSITION);
 			lookup_bishop_frame(impl, u_hi, &N_hi, &B_hi);
 			p_hi.x = pr.position.x + rx * cos_theta * N_hi.x + ry * sin_theta * B_hi.x;
 			p_hi.y = pr.position.y + rx * cos_theta * N_hi.y + ry * sin_theta * B_hi.y;

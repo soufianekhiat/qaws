@@ -450,7 +450,7 @@ static qaws_curve* skt_seg_curve(skt_seg const* g)
 		cp[0] = (qaws_scalar)g->a[0]; cp[1] = (qaws_scalar)g->a[1]; cp[2] = (qaws_scalar)g->a[2]; cp[3] = (qaws_scalar)g->a[3];
 		memset(&d, 0, sizeof(d));
 		d.dimension = QAWS_DIMENSION_2D; d.degree = 1; d.control_points = cp; d.control_point_count = 2;
-		qaws_curve_create_bezier(&d, &c);
+		qaws_curve_create_bezier(&c, &d);
 	}
 	else
 	{
@@ -461,7 +461,7 @@ static qaws_curve* skt_seg_curve(skt_seg const* g)
 		s.angle_start = (qaws_scalar)g->a[3]; s.angle_end = (qaws_scalar)g->a[4];
 		memset(&d, 0, sizeof(d));
 		d.dimension = QAWS_DIMENSION_2D; d.segments = &s; d.segment_count = 1;
-		qaws_curve_create_arc(&d, &c);
+		qaws_curve_create_arc(&c, &d);
 	}
 	return c;
 }
@@ -486,8 +486,8 @@ static double skt_boundary_dist(qaws_curve* const* cs, unsigned int n, double x,
 		qaws_eval_result_2d e;
 		double dd;
 		q.x = (qaws_scalar)x; q.y = (qaws_scalar)y;
-		qaws_curve_find_closest_parameter_2d(cs[i], q, &t);
-		qaws_curve_evaluate_2d(cs[i], t, QAWS_EVAL_FLAG_POSITION, &e);
+		qaws_curve_find_closest_parameter_2d(&t, cs[i], q);
+		qaws_curve_evaluate_2d(&e, cs[i], t, QAWS_EVAL_FLAG_POSITION);
 		dd = hypot((double)e.position.x - x, (double)e.position.y - y);
 		if (dd < best) best = dd;
 	}
@@ -523,14 +523,14 @@ static double skt_face_area(qaws_skeleton const* s, unsigned int fi, unsigned in
 		for (k = 1; k <= m; k++)
 		{
 			qaws_eval_result_2d e;
-			qaws_curve_evaluate_2d(f.edge, (qaws_scalar)(rg.min_value + (rg.max_value - rg.min_value) * k / m), QAWS_EVAL_FLAG_POSITION, &e);
+			qaws_curve_evaluate_2d(&e, f.edge, (qaws_scalar)(rg.min_value + (rg.max_value - rg.min_value) * k / m), QAWS_EVAL_FLAG_POSITION);
 			SKT_PT(e.position.x, e.position.y);
 		}
 		{
 			/* a closed edge ends where it starts: the arcs start at node 0 */
 			qaws_eval_result_2d e0, e1;
-			qaws_curve_evaluate_2d(f.edge, rg.min_value, QAWS_EVAL_FLAG_POSITION, &e0);
-			qaws_curve_evaluate_2d(f.edge, rg.max_value, QAWS_EVAL_FLAG_POSITION, &e1);
+			qaws_curve_evaluate_2d(&e0, f.edge, rg.min_value, QAWS_EVAL_FLAG_POSITION);
+			qaws_curve_evaluate_2d(&e1, f.edge, rg.max_value, QAWS_EVAL_FLAG_POSITION);
 			start = (na > 1 && hypot((double)e1.position.x - e0.position.x, (double)e1.position.y - e0.position.y) > (SKT_F32 ? 1e-5 : 1e-9)) ? 1 : 0;
 		}
 	}
@@ -759,7 +759,7 @@ static qaws_curve* skt_cubic(double x0, double y0, double x1, double y1, double 
 	cp[4] = (qaws_scalar)x2; cp[5] = (qaws_scalar)y2; cp[6] = (qaws_scalar)x3; cp[7] = (qaws_scalar)y3;
 	memset(&d, 0, sizeof(d));
 	d.dimension = QAWS_DIMENSION_2D; d.degree = 3; d.control_points = cp; d.control_point_count = 4;
-	qaws_curve_create_bezier(&d, &c);
+	qaws_curve_create_bezier(&c, &d);
 	return c;
 }
 
@@ -850,7 +850,7 @@ static void test_freeform(void)
 			g.angle_start = (qaws_scalar)(2 * pi); g.angle_end = 0;
 			memset(&d, 0, sizeof(d));
 			d.dimension = QAWS_DIMENSION_2D; d.segments = &g; d.segment_count = 1;
-			qaws_curve_create_arc(&d, &cs[1]);
+			qaws_curve_create_arc(&cs[1], &d);
 			cv[1] = cs[1];
 			p[1].curves = &cv[1]; p[1].curve_count = 1; p[1].closed = 1;
 			skt_check_freeform("ellipse with a round hole", cs, 2, p, 2, sigma);

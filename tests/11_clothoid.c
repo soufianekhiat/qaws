@@ -18,14 +18,14 @@ static void test_clothoid(void)
 		desc.end_curvature = 0;
 		desc.length = 2;
 
-		TEST_ASSERT_STATUS(qaws_curve_create_clothoid(&desc, &crv));
+		TEST_ASSERT_STATUS(qaws_curve_create_clothoid(&crv, &desc));
 		TEST_ASSERT(crv != NULL, "clothoid created");
 		TEST_ASSERT(qaws_curve_get_kind(crv) == QAWS_CURVE_KIND_CLOTHOID, "clothoid kind");
 		TEST_ASSERT(qaws_curve_is_rational(crv) == 0, "clothoid not rational");
 		TEST_ASSERT(qaws_curve_get_dimension(crv) == QAWS_DIMENSION_2D, "clothoid 2d");
 
 		/* At start: origin */
-		qaws_curve_evaluate_2d(crv, 0, QAWS_EVAL_FLAG_POSITION, &r);
+		qaws_curve_evaluate_2d(&r, crv, 0, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT(approx_eq(r.position.x, 0) && approx_eq(r.position.y, 0),
 			"clothoid start");
 
@@ -33,14 +33,14 @@ static void test_clothoid(void)
 		{
 			qaws_range rng = qaws_curve_get_parameter_range(crv);
 			TEST_ASSERT(approx_eq(rng.max_value, 2), "clothoid range = length");
-			qaws_curve_evaluate_2d(crv, rng.max_value, QAWS_EVAL_FLAG_POSITION, &r);
+			qaws_curve_evaluate_2d(&r, crv, rng.max_value, QAWS_EVAL_FLAG_POSITION);
 			TEST_ASSERT(approx_eq(r.position.x, 2) && approx_eq(r.position.y, 0),
 				"clothoid straight line end");
 		}
 
 		/* D1 for straight line: the unit tangent (cos(0), sin(0)) = (1, 0)
 		   (the parameter is arc length) */
-		qaws_curve_evaluate_2d(crv, 0, QAWS_EVAL_FLAG_D1, &r);
+		qaws_curve_evaluate_2d(&r, crv, 0, QAWS_EVAL_FLAG_D1);
 		TEST_ASSERT(approx_eq(r.d1.x, 1), "clothoid straight d1.x");
 		TEST_ASSERT(approx_eq(r.d1.y, 0), "clothoid straight d1.y");
 
@@ -62,19 +62,19 @@ static void test_clothoid(void)
 		desc.end_curvature = 1;
 		desc.length = pi_half; /* quarter circle */
 
-		TEST_ASSERT_STATUS(qaws_curve_create_clothoid(&desc, &crv));
+		TEST_ASSERT_STATUS(qaws_curve_create_clothoid(&crv, &desc));
 
 		/* End point: (sin(pi/2), 1-cos(pi/2)) = (1, 1) */
 		{
 			qaws_range rng = qaws_curve_get_parameter_range(crv);
-			qaws_curve_evaluate_2d(crv, rng.max_value, QAWS_EVAL_FLAG_POSITION, &r);
+			qaws_curve_evaluate_2d(&r, crv, rng.max_value, QAWS_EVAL_FLAG_POSITION);
 			TEST_ASSERT(approx_eq(r.position.x, 1), "clothoid circle x");
 			TEST_ASSERT(approx_eq(r.position.y, 1), "clothoid circle y");
 		}
 
 		/* D1 at start = (cos(0), sin(0)) = (1, 0): the unit tangent */
-		qaws_curve_evaluate_2d(crv, 0,
-			QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2 | QAWS_EVAL_FLAG_D3, &r);
+		qaws_curve_evaluate_2d(&r, crv,
+			0, QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2 | QAWS_EVAL_FLAG_D3);
 		TEST_ASSERT(approx_eq(r.d1.x, 1), "clothoid d1.x at start");
 		TEST_ASSERT(approx_eq(r.d1.y, 0), "clothoid d1.y at start");
 		TEST_ASSERT(r.valid_flags & QAWS_EVAL_FLAG_D2, "clothoid d2 valid");
@@ -97,10 +97,10 @@ static void test_clothoid(void)
 		desc.end_curvature = 1;
 		desc.length = 1;
 
-		qaws_curve_create_clothoid(&desc, &crv);
+		qaws_curve_create_clothoid(&crv, &desc);
 		if (crv)
 		{
-			qaws_status s = qaws_curve_evaluate_3d(crv, 0, QAWS_EVAL_FLAG_POSITION, &r3d);
+			qaws_status s = qaws_curve_evaluate_3d(&r3d, crv, 0, QAWS_EVAL_FLAG_POSITION);
 			TEST_ASSERT(s != QAWS_STATUS_OK, "clothoid 3d eval rejected");
 			qaws_curve_destroy(crv);
 		}
@@ -112,7 +112,7 @@ static void test_clothoid(void)
 		qaws_curve *crv = NULL;
 		memset(&desc, 0, sizeof(desc));
 		desc.length = 0;
-		TEST_ASSERT(qaws_curve_create_clothoid(&desc, &crv) != QAWS_STATUS_OK,
+		TEST_ASSERT(qaws_curve_create_clothoid(&crv, &desc) != QAWS_STATUS_OK,
 			"clothoid zero length rejected");
 	}
 }

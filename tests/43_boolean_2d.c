@@ -22,7 +22,7 @@ static qaws_curve* make_circle_2d(qaws_scalar cx, qaws_scalar cy, qaws_scalar r)
 	desc.segments = &seg;
 	desc.segment_count = 1;
 
-	qaws_curve_create_arc(&desc, &curve);
+	qaws_curve_create_arc(&curve, &desc);
 	return curve;
 }
 

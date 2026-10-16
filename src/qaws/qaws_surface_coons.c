@@ -89,13 +89,13 @@ static qaws_status coons_surface_eval_sampled(
 	memset(&rd0, 0, sizeof(rd0));
 	memset(&rd1, 0, sizeof(rd1));
 
-	status = qaws_curve_evaluate_3d(impl->c0, t_c0, c_flags, &rc0);
+	status = qaws_curve_evaluate_3d(&rc0, impl->c0, t_c0, c_flags);
 	if (status != QAWS_STATUS_OK) return status;
-	status = qaws_curve_evaluate_3d(impl->c1, t_c1, c_flags, &rc1);
+	status = qaws_curve_evaluate_3d(&rc1, impl->c1, t_c1, c_flags);
 	if (status != QAWS_STATUS_OK) return status;
-	status = qaws_curve_evaluate_3d(impl->d0, t_d0, d_flags, &rd0);
+	status = qaws_curve_evaluate_3d(&rd0, impl->d0, t_d0, d_flags);
 	if (status != QAWS_STATUS_OK) return status;
-	status = qaws_curve_evaluate_3d(impl->d1, t_d1, d_flags, &rd1);
+	status = qaws_curve_evaluate_3d(&rd1, impl->d1, t_d1, d_flags);
 	if (status != QAWS_STATUS_OK) return status;
 
 	/* Position: (1-v)*c0 + v*c1 + (1-u)*d0 + u*d1
@@ -641,23 +641,23 @@ qaws_status qaws_surface_create_coons(
 
 	/* Cache corner points: P00=c0(start), P10=c0(end), P01=c1(start), P11=c1(end) */
 	memset(&corner_r, 0, sizeof(corner_r));
-	qaws_curve_evaluate_3d(desc->c0, impl->range_c0.min_value,
-		QAWS_EVAL_FLAG_POSITION, &corner_r);
+	qaws_curve_evaluate_3d(&corner_r, desc->c0,
+		impl->range_c0.min_value, QAWS_EVAL_FLAG_POSITION);
 	impl->P00 = corner_r.position;
 
 	memset(&corner_r, 0, sizeof(corner_r));
-	qaws_curve_evaluate_3d(desc->c0, impl->range_c0.max_value,
-		QAWS_EVAL_FLAG_POSITION, &corner_r);
+	qaws_curve_evaluate_3d(&corner_r, desc->c0,
+		impl->range_c0.max_value, QAWS_EVAL_FLAG_POSITION);
 	impl->P10 = corner_r.position;
 
 	memset(&corner_r, 0, sizeof(corner_r));
-	qaws_curve_evaluate_3d(desc->c1, impl->range_c1.min_value,
-		QAWS_EVAL_FLAG_POSITION, &corner_r);
+	qaws_curve_evaluate_3d(&corner_r, desc->c1,
+		impl->range_c1.min_value, QAWS_EVAL_FLAG_POSITION);
 	impl->P01 = corner_r.position;
 
 	memset(&corner_r, 0, sizeof(corner_r));
-	qaws_curve_evaluate_3d(desc->c1, impl->range_c1.max_value,
-		QAWS_EVAL_FLAG_POSITION, &corner_r);
+	qaws_curve_evaluate_3d(&corner_r, desc->c1,
+		impl->range_c1.max_value, QAWS_EVAL_FLAG_POSITION);
 	impl->P11 = corner_r.position;
 
 	surface->impl = impl;

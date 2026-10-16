@@ -108,7 +108,7 @@ static void skf_draw(svg* s, viewport const* v, sk_fig* f)
 				{
 					qaws_scalar buf[2 * 512];
 					unsigned int m = 0, j;
-					qaws_curve_get_control_points(q.curves[ci], buf, 512, &m);
+					qaws_curve_get_control_points(buf, &m, q.curves[ci], 512);
 					for (j = 0; j < m && j < 512; j++)
 						fprintf(s->f, "%s%.2f,%.2f ", (ci == 0 && j == 0) ? "M" : "L", vx(v, buf[2 * j]), vy(v, buf[2 * j + 1]));
 				}

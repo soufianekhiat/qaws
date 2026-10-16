@@ -33,11 +33,11 @@ static void test_self_intersection(void)
 		desc.point_count = 5;
 		desc.derivative_count = 5;
 
-		s = qaws_curve_create_hermite(&desc, &curve);
+		s = qaws_curve_create_hermite(&curve, &desc);
 		TEST_ASSERT_STATUS(s);
 
 		s = qaws_curve_find_self_intersections_2d(
-			curve, isects, 16, &isect_count);
+			isects, &isect_count, curve, 16);
 		TEST_ASSERT_STATUS(s);
 		TEST_ASSERT(isect_count > 0, "figure-8 has self-intersections");
 
@@ -81,11 +81,11 @@ static void test_self_intersection(void)
 		bdesc.control_points = cp;
 		bdesc.control_point_count = 4;
 
-		s = qaws_curve_create_bezier(&bdesc, &curve);
+		s = qaws_curve_create_bezier(&curve, &bdesc);
 		TEST_ASSERT_STATUS(s);
 
 		s = qaws_curve_find_self_intersections_2d(
-			curve, isects, 8, &isect_count);
+			isects, &isect_count, curve, 8);
 		TEST_ASSERT_STATUS(s);
 		TEST_ASSERT(isect_count == 0, "simple arc has no self-intersections");
 
@@ -98,7 +98,7 @@ static void test_self_intersection(void)
 		unsigned int count = 0;
 		qaws_status s;
 
-		s = qaws_curve_find_self_intersections_2d(NULL, isects, 4, &count);
+		s = qaws_curve_find_self_intersections_2d(isects, &count, NULL, 4);
 		TEST_ASSERT(s == QAWS_STATUS_INVALID_ARGUMENT,
 			"null curve => INVALID_ARGUMENT");
 	}
@@ -122,10 +122,10 @@ static void test_self_intersection(void)
 		bdesc.control_points = cp3;
 		bdesc.control_point_count = 4;
 
-		s = qaws_curve_create_bezier(&bdesc, &curve);
+		s = qaws_curve_create_bezier(&curve, &bdesc);
 		TEST_ASSERT_STATUS(s);
 
-		s = qaws_curve_find_self_intersections_2d(curve, isects, 4, &count);
+		s = qaws_curve_find_self_intersections_2d(isects, &count, curve, 4);
 		TEST_ASSERT(s == QAWS_STATUS_INVALID_DIMENSION,
 			"3d curve for 2d self-isect => INVALID_DIMENSION");
 
@@ -161,11 +161,11 @@ static void test_self_intersection(void)
 		desc.point_count = 5;
 		desc.derivative_count = 5;
 
-		s = qaws_curve_create_hermite(&desc, &curve);
+		s = qaws_curve_create_hermite(&curve, &desc);
 		TEST_ASSERT_STATUS(s);
 
 		s = qaws_curve_find_self_intersections_3d(
-			curve, isects, 16, &isect_count);
+			isects, &isect_count, curve, 16);
 		TEST_ASSERT_STATUS(s);
 		TEST_ASSERT(isect_count > 0, "3D figure-8 has self-intersections");
 
@@ -200,13 +200,13 @@ static void test_curve_curve_intersection(void)
 		descB.control_points = cpB;
 		descB.control_point_count = 4;
 
-		s = qaws_curve_create_bezier(&descA, &curveA);
+		s = qaws_curve_create_bezier(&curveA, &descA);
 		TEST_ASSERT_STATUS(s);
-		s = qaws_curve_create_bezier(&descB, &curveB);
+		s = qaws_curve_create_bezier(&curveB, &descB);
 		TEST_ASSERT_STATUS(s);
 
 		s = qaws_curve_find_intersections_2d(
-			curveA, curveB, isects, 16, &isect_count);
+			isects, &isect_count, curveA, curveB, 16);
 		TEST_ASSERT_STATUS(s);
 		TEST_ASSERT(isect_count > 0, "crossing beziers have intersections");
 
@@ -217,11 +217,11 @@ static void test_curve_curve_intersection(void)
 			{
 				qaws_eval_result_2d ra, rb;
 				qaws_scalar dx, dy;
-				s = qaws_curve_evaluate_2d(curveA, isects[i].parameter_a,
-					QAWS_EVAL_FLAG_POSITION, &ra);
+				s = qaws_curve_evaluate_2d(&ra, curveA,
+					isects[i].parameter_a, QAWS_EVAL_FLAG_POSITION);
 				TEST_ASSERT_STATUS(s);
-				s = qaws_curve_evaluate_2d(curveB, isects[i].parameter_b,
-					QAWS_EVAL_FLAG_POSITION, &rb);
+				s = qaws_curve_evaluate_2d(&rb, curveB,
+					isects[i].parameter_b, QAWS_EVAL_FLAG_POSITION);
 				TEST_ASSERT_STATUS(s);
 
 				dx = ra.position.x - rb.position.x;
@@ -258,13 +258,13 @@ static void test_curve_curve_intersection(void)
 		descB.control_points = cpB;
 		descB.control_point_count = 4;
 
-		s = qaws_curve_create_bezier(&descA, &curveA);
+		s = qaws_curve_create_bezier(&curveA, &descA);
 		TEST_ASSERT_STATUS(s);
-		s = qaws_curve_create_bezier(&descB, &curveB);
+		s = qaws_curve_create_bezier(&curveB, &descB);
 		TEST_ASSERT_STATUS(s);
 
 		s = qaws_curve_find_intersections_2d(
-			curveA, curveB, isects, 8, &isect_count);
+			isects, &isect_count, curveA, curveB, 8);
 		TEST_ASSERT_STATUS(s);
 		TEST_ASSERT(isect_count == 0, "non-intersecting curves have 0 intersections");
 
@@ -293,13 +293,13 @@ static void test_curve_curve_intersection(void)
 		descA.control_points = cpArc;
 		descA.control_point_count = 4;
 
-		s = qaws_curve_create_bezier(&descL, &line);
+		s = qaws_curve_create_bezier(&line, &descL);
 		TEST_ASSERT_STATUS(s);
-		s = qaws_curve_create_bezier(&descA, &arc);
+		s = qaws_curve_create_bezier(&arc, &descA);
 		TEST_ASSERT_STATUS(s);
 
 		s = qaws_curve_find_intersections_2d(
-			line, arc, isects, 8, &isect_count);
+			isects, &isect_count, line, arc, 8);
 		TEST_ASSERT_STATUS(s);
 		TEST_ASSERT(isect_count == 2, "line crosses arc at 2 points");
 
@@ -313,7 +313,7 @@ static void test_curve_curve_intersection(void)
 		unsigned int count = 0;
 		qaws_status s;
 
-		s = qaws_curve_find_intersections_2d(NULL, NULL, isects, 4, &count);
+		s = qaws_curve_find_intersections_2d(isects, &count, NULL, NULL, 4);
 		TEST_ASSERT(s == QAWS_STATUS_INVALID_ARGUMENT,
 			"null curves => INVALID_ARGUMENT");
 	}
@@ -338,12 +338,12 @@ static void test_curve_curve_intersection(void)
 		d3.control_points = cp3;
 		d3.control_point_count = 3;
 
-		s = qaws_curve_create_bezier(&d2, &c2);
+		s = qaws_curve_create_bezier(&c2, &d2);
 		TEST_ASSERT_STATUS(s);
-		s = qaws_curve_create_bezier(&d3, &c3);
+		s = qaws_curve_create_bezier(&c3, &d3);
 		TEST_ASSERT_STATUS(s);
 
-		s = qaws_curve_find_intersections_2d(c2, c3, isects, 4, &count);
+		s = qaws_curve_find_intersections_2d(isects, &count, c2, c3, 4);
 		TEST_ASSERT(s == QAWS_STATUS_INVALID_DIMENSION,
 			"mixed dimensions => INVALID_DIMENSION");
 
@@ -372,13 +372,13 @@ static void test_curve_curve_intersection(void)
 		descB.control_points = cpB;
 		descB.control_point_count = 4;
 
-		s = qaws_curve_create_bezier(&descA, &curveA);
+		s = qaws_curve_create_bezier(&curveA, &descA);
 		TEST_ASSERT_STATUS(s);
-		s = qaws_curve_create_bezier(&descB, &curveB);
+		s = qaws_curve_create_bezier(&curveB, &descB);
 		TEST_ASSERT_STATUS(s);
 
 		s = qaws_curve_find_intersections_3d(
-			curveA, curveB, isects, 16, &isect_count);
+			isects, &isect_count, curveA, curveB, 16);
 		TEST_ASSERT_STATUS(s);
 		TEST_ASSERT(isect_count >= 0, "3D curve-curve intersection ran");
 

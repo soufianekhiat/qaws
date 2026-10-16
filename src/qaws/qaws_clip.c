@@ -178,7 +178,7 @@ static qaws_status cl_eval(qaws_curve const* c, double t, double* p, double* d)
 		if (d) { d[0] = bx - ax; d[1] = by - ay; }
 		return QAWS_STATUS_OK;
 	}
-	s = qaws_curve_evaluate_2d(c, (qaws_scalar)t, d ? QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 : QAWS_EVAL_FLAG_POSITION, &r);
+	s = qaws_curve_evaluate_2d(&r, c, (qaws_scalar)t, d ? QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 : QAWS_EVAL_FLAG_POSITION);
 	p[0] = r.position.x; p[1] = r.position.y;
 	if (d) { d[0] = r.d1.x; d[1] = r.d1.y; }
 	return s;
@@ -207,7 +207,7 @@ static qaws_status cl_line(cl_ctx* x, double const* a, double const* b, qaws_cur
 	cp[2] = (qaws_scalar)b[0]; cp[3] = (qaws_scalar)b[1];
 	memset(&bd, 0, sizeof(bd));
 	bd.dimension = QAWS_DIMENSION_2D; bd.degree = 1; bd.control_points = cp; bd.control_point_count = 2;
-	s = qaws_curve_create_bezier(&bd, out);
+	s = qaws_curve_create_bezier(out, &bd);
 	if (s == QAWS_STATUS_OK)
 		s = cl_temp(x, *out);
 	return s;
@@ -779,7 +779,7 @@ static qaws_status cl_hits(cl_ctx* x)
 		if (!hits)
 			s = QAWS_STATUS_ALLOCATION_FAILURE;
 		else
-			s = qaws_curve_batch_find_intersections_2d(&bd, hits, cap, &n, NULL);
+			s = qaws_curve_batch_find_intersections_2d(hits, &n, NULL, cap, &bd);
 		if (s == QAWS_STATUS_OK && n > cap)
 		{
 			/* more than guessed: once more with room for all */
@@ -789,7 +789,7 @@ static qaws_status cl_hits(cl_ctx* x)
 			if (!hits)
 				s = QAWS_STATUS_ALLOCATION_FAILURE;
 			else
-				s = qaws_curve_batch_find_intersections_2d(&bd, hits, cap, &n, NULL);
+				s = qaws_curve_batch_find_intersections_2d(hits, &n, NULL, cap, &bd);
 		}
 		if (n > cap) n = cap;
 	}
@@ -1719,11 +1719,11 @@ static qaws_status cl_snap(qaws_curve** c, double const* p0, double const* p1)
 	qaws_curve_kind k = old->kind;
 	if (k != QAWS_CURVE_KIND_BEZIER && k != QAWS_CURVE_KIND_BSPLINE && k != QAWS_CURVE_KIND_NURBS && k != QAWS_CURVE_KIND_RATIONAL_BEZIER)
 		return QAWS_STATUS_OK;
-	if (qaws_curve_get_control_points(old, buf, 64, &n) == QAWS_STATUS_BUFFER_TOO_SMALL)
+	if (qaws_curve_get_control_points(buf, &n, old, 64) == QAWS_STATUS_BUFFER_TOO_SMALL)
 	{
 		cp = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 2 * n);
 		if (!cp) return QAWS_STATUS_ALLOCATION_FAILURE;
-		qaws_curve_get_control_points(old, cp, n, &n);
+		qaws_curve_get_control_points(cp, &n, old, n);
 	}
 	cp[0] = (qaws_scalar)p0[0]; cp[1] = (qaws_scalar)p0[1];
 	cp[2 * n - 2] = (qaws_scalar)p1[0]; cp[2 * n - 1] = (qaws_scalar)p1[1];
@@ -1734,7 +1734,7 @@ static qaws_status cl_snap(qaws_curve** c, double const* p0, double const* p1)
 		qaws_bezier_desc d;
 		memset(&d, 0, sizeof(d));
 		d.dimension = QAWS_DIMENSION_2D; d.degree = old->degree; d.control_points = cp; d.control_point_count = n;
-		s = qaws_curve_create_bezier(&d, c);
+		s = qaws_curve_create_bezier(c, &d);
 		break;
 	}
 	case QAWS_CURVE_KIND_RATIONAL_BEZIER:
@@ -1744,7 +1744,7 @@ static qaws_status cl_snap(qaws_curve** c, double const* p0, double const* p1)
 		memset(&d, 0, sizeof(d));
 		d.dimension = QAWS_DIMENSION_2D; d.degree = old->degree; d.control_points = cp; d.control_point_count = n;
 		d.weights = impl->weights; d.weight_count = n;
-		s = qaws_curve_create_rational_bezier(&d, c);
+		s = qaws_curve_create_rational_bezier(c, &d);
 		break;
 	}
 	case QAWS_CURVE_KIND_BSPLINE:
@@ -1754,7 +1754,7 @@ static qaws_status cl_snap(qaws_curve** c, double const* p0, double const* p1)
 		memset(&d, 0, sizeof(d));
 		d.dimension = QAWS_DIMENSION_2D; d.degree = old->degree; d.control_points = cp; d.control_point_count = n;
 		d.knots = impl->knots; d.knot_count = impl->knot_count;
-		s = qaws_curve_create_bspline(&d, c);
+		s = qaws_curve_create_bspline(c, &d);
 		break;
 	}
 	default:
@@ -1764,7 +1764,7 @@ static qaws_status cl_snap(qaws_curve** c, double const* p0, double const* p1)
 		memset(&d, 0, sizeof(d));
 		d.dimension = QAWS_DIMENSION_2D; d.degree = old->degree; d.control_points = cp; d.control_point_count = n;
 		d.knots = impl->knots; d.knot_count = impl->knot_count; d.weights = impl->weights; d.weight_count = n;
-		s = qaws_curve_create_nurbs(&d, c);
+		s = qaws_curve_create_nurbs(c, &d);
 		break;
 	}
 	}
@@ -1804,11 +1804,11 @@ static unsigned int cl_line_corners(qaws_curve const* c, double ta, double tb, d
 	unsigned int n = 0, i, m = 0;
 	if (c->kind != QAWS_CURVE_KIND_BSPLINE)
 		return 0;
-	if (qaws_curve_get_control_points(c, buf, 64, &n) == QAWS_STATUS_BUFFER_TOO_SMALL)
+	if (qaws_curve_get_control_points(buf, &n, c, 64) == QAWS_STATUS_BUFFER_TOO_SMALL)
 	{
 		cp = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 2 * n);
 		if (!cp) return 0;
-		qaws_curve_get_control_points(c, cp, n, &n);
+		qaws_curve_get_control_points(cp, &n, c, n);
 	}
 	kn = ((qaws_bspline_impl const*)c->impl)->knots;
 	/* degree 1: control point i sits at knot i + 1 */
@@ -1967,7 +1967,7 @@ static qaws_status cl_emit_pieces(cl_ctx* x, cl_piece const* pc, unsigned int n,
 			cl_vertex_record(x, pc[i].va, &vr);
 			s = cl_res_vertex(r, &vr);
 			if (s == QAWS_STATUS_OK)
-				s = qaws_curve_extract(c, (qaws_scalar)pc[i].ta, (qaws_scalar)pc[j - 1].tb, &e);
+				s = qaws_curve_extract(&e, c, (qaws_scalar)pc[i].ta, (qaws_scalar)pc[j - 1].tb);
 			if (s == QAWS_STATUS_OK)
 				s = cl_snap(&e, x->v[pc[i].va].p, x->v[pc[j - 1].vb].p);
 			if (s == QAWS_STATUS_OK)

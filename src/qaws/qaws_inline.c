@@ -138,8 +138,8 @@ static qaws_curve_vtable const inline_bezier_vtable = {
 };
 
 qaws_status qaws_curve_init_bezier_inline(
-	qaws_bezier_desc const* desc,
-	qaws_curve_inline* out)
+	qaws_curve_inline* out,
+	qaws_bezier_desc const* desc)
 {
 	unsigned int dim_count, n_scalars;
 	qaws_curve* curve;
@@ -332,8 +332,8 @@ static qaws_curve_vtable const inline_poly_vtable = {
 };
 
 qaws_status qaws_curve_init_polynomial_inline(
-	qaws_polynomial_desc const* desc,
-	qaws_curve_inline* out)
+	qaws_curve_inline* out,
+	qaws_polynomial_desc const* desc)
 {
 	unsigned int dim_count, n_scalars;
 	qaws_curve* curve;

@@ -18,7 +18,7 @@ static void sxf_square(qaws_surface const* s, double u0, double v0, double u1, d
 		memset(&bz, 0, sizeof(bz));
 		bz.dimension = QAWS_DIMENSION_2D; bz.degree = 1; bz.control_points = cp; bz.control_point_count = 2;
 		k[i] = NULL; c[i] = NULL;
-		qaws_curve_create_bezier(&bz, &k[i]);
+		qaws_curve_create_bezier(&k[i], &bz);
 		qaws_surface_curve_create_uv(s, k[i], &c[i]);
 	}
 }

@@ -92,8 +92,8 @@ static void demo_triangulate(void)
 		return;
 	qaws_curve_create_ellipse_2d((qaws_scalar)-0.9, (qaws_scalar)0.4, (qaws_scalar)0.55, (qaws_scalar)0.35, 0, &h1);
 	qaws_curve_create_ellipse_2d((qaws_scalar)0.9, (qaws_scalar)-0.5, (qaws_scalar)0.4, (qaws_scalar)0.4, 0, &h2);
-	qaws_curve_reverse(h1, &h1r);
-	qaws_curve_reverse(h2, &h2r);
+	qaws_curve_reverse(&h1r, h1);
+	qaws_curve_reverse(&h2r, h2);
 	qaws_curve_create_ellipse_2d(0, 0, (qaws_scalar)3.2, (qaws_scalar)2.4, 0, &disc);
 	{
 		/* a rounded box: a closed cubic B-spline through the corners' arcs */

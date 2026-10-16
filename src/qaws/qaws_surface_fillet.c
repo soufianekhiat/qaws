@@ -400,7 +400,7 @@ static qaws_status build_fillet_grid(
 			qaws_scalar tu, tv;
 			qaws_vec3 closest;
 			qaws_status cst = qaws_surface_find_closest_point(
-				surface_a, contact_a, &tu, &tv, &closest);
+				&tu, &tv, &closest, surface_a, contact_a);
 			if (cst != QAWS_STATUS_OK)
 			{
 				tu = sp->u1; tv = sp->v1;
@@ -413,7 +413,7 @@ static qaws_status build_fillet_grid(
 			qaws_scalar tu, tv;
 			qaws_vec3 closest;
 			qaws_status cst = qaws_surface_find_closest_point(
-				surface_b, contact_b, &tu, &tv, &closest);
+				&tu, &tv, &closest, surface_b, contact_b);
 			if (cst != QAWS_STATUS_OK)
 			{
 				tu = sp->u2; tv = sp->v2;

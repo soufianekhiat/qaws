@@ -313,7 +313,7 @@ qaws_status qaws_internal_fit_bspline_range(
 	desc.is_uniform = 0;
 	desc.is_closed = 0;
 
-	status = qaws_curve_create_bspline(&desc, out_curve);
+	status = qaws_curve_create_bspline(out_curve, &desc);
 
 	free(knots);
 	free(ata_band);

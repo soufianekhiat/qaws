@@ -15,7 +15,7 @@ static qaws_curve* make_line_3d(qaws_vec3 a, qaws_vec3 b)
 	d.degree = 1;
 	d.control_points = pts;
 	d.control_point_count = 2;
-	qaws_curve_create_bezier(&d, &c);
+	qaws_curve_create_bezier(&c, &d);
 	return c;
 }
 
@@ -35,7 +35,7 @@ static qaws_curve* make_quad_3d(qaws_vec3 a, qaws_vec3 b, qaws_vec3 c_pt)
 	d.degree = 2;
 	d.control_points = pts;
 	d.control_point_count = 3;
-	qaws_curve_create_bezier(&d, &crv);
+	qaws_curve_create_bezier(&crv, &d);
 	return crv;
 }
 
@@ -55,7 +55,7 @@ static qaws_curve* make_quad_2d(qaws_vec2 a, qaws_vec2 b, qaws_vec2 c_pt)
 	d.degree = 2;
 	d.control_points = pts;
 	d.control_point_count = 3;
-	qaws_curve_create_bezier(&d, &crv);
+	qaws_curve_create_bezier(&crv, &d);
 	return crv;
 }
 

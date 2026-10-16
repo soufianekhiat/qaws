@@ -50,7 +50,7 @@ static void demo_families(void)
 	cd.control_point_count = 7;
 	cd.parameterization = QAWS_PARAMETERIZATION_UNIFORM;
 	cd.closed = 1;
-	qaws_curve_create_catmull_rom(&cd, &cr);
+	qaws_curve_create_catmull_rom(&cr, &cd);
 	qaws_exact_curve_prepare(&desc, cr, &ecr, &rcr);
 
 	/* the polynomial in t: a_k = sum_j cheb_j C(j, k) (-100)^(j - k), integers below 2^53 */
@@ -76,7 +76,7 @@ static void demo_families(void)
 	pd.coefficient_count = 7;
 	pd.t_min = 99;
 	pd.t_max = 101;
-	qaws_curve_create_polynomial(&pd, &poly);
+	qaws_curve_create_polynomial(&poly, &pd);
 	qaws_exact_curve_prepare(&desc, poly, &epoly, &rpoly);
 
 	svg_open(&sv, "showcase/exact5_families.svg", 1260, 520, "Exact Hermite, Catmull-Rom and polynomial curves",
@@ -130,7 +130,7 @@ static void demo_families(void)
 			float g = ef_horner_f32(a, 6, (float)t);
 			qaws_eval_result_2d r;
 			qaws_exact_curve_evaluate(epoly, t, 0, ex, NULL);
-			qaws_curve_evaluate_2d(poly, (qaws_scalar)t, QAWS_EVAL_FLAG_POSITION, &r);
+			qaws_curve_evaluate_2d(&r, poly, (qaws_scalar)t, QAWS_EVAL_FLAG_POSITION);
 			e32[i] = fabs(g - ex[1]);
 			e64[i] = fabs(r.position.y - ex[1]);
 			if (e32[i] > worst32) worst32 = e32[i];

@@ -22,14 +22,14 @@ qaws_status qaws_internal_curve_point(qaws_curve const* c, unsigned int dim, qaw
 	if (dim == 2)
 	{
 		qaws_eval_result_2d r;
-		s = qaws_curve_evaluate_2d(c, t, flags, &r);
+		s = qaws_curve_evaluate_2d(&r, c, t, flags);
 		p[0] = r.position.x; p[1] = r.position.y; p[2] = 0;
 		if (d) { d[0] = r.d1.x; d[1] = r.d1.y; d[2] = 0; }
 	}
 	else
 	{
 		qaws_eval_result_3d r;
-		s = qaws_curve_evaluate_3d(c, t, flags, &r);
+		s = qaws_curve_evaluate_3d(&r, c, t, flags);
 		p[0] = r.position.x; p[1] = r.position.y; p[2] = r.position.z;
 		if (d) { d[0] = r.d1.x; d[1] = r.d1.y; d[2] = r.d1.z; }
 	}

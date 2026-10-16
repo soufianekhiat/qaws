@@ -86,7 +86,7 @@ static void demo_exact_bezier(void)
 	d.control_point_count = EB_DEG + 1;
 	d.weights = ws;
 	d.weight_count = EB_DEG + 1;
-	qaws_curve_create_rational_bezier(&d, &c);
+	qaws_curve_create_rational_bezier(&c, &d);
 	qaws_exact_desc_default(&desc);
 	qaws_exact_curve_prepare(&desc, c, &ec, &rep);
 	for (i = 0; i < EB_SAMPLES; i++)
@@ -96,7 +96,7 @@ static void demo_exact_bezier(void)
 		float g[2];
 		qaws_eval_result_2d r;
 		qaws_exact_curve_evaluate(ec, t, 3, ex, NULL);
-		qaws_curve_evaluate_2d(c, (qaws_scalar)t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2 | QAWS_EVAL_FLAG_D3, &r);
+		qaws_curve_evaluate_2d(&r, c, (qaws_scalar)t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2 | QAWS_EVAL_FLAG_D3);
 		eb_f32(h32, EB_DEG, (float)t, g);
 		f[0] = g[0];
 		f[1] = g[1];

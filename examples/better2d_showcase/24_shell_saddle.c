@@ -260,7 +260,7 @@ static void ssd_curve_line(ssd_scene* sc, qaws_surface const* f, qaws_curve cons
 	for (k = 0; k <= 96; k++)
 	{
 		qaws_eval_result_2d e;
-		qaws_curve_evaluate_2d(cv, (qaws_scalar)(rg.min_value + (rg.max_value - rg.min_value) * k / 96.0), QAWS_EVAL_FLAG_POSITION, &e);
+		qaws_curve_evaluate_2d(&e, cv, (qaws_scalar)(rg.min_value + (rg.max_value - rg.min_value) * k / 96.0), QAWS_EVAL_FLAG_POSITION);
 		uv[2 * k] = e.position.x; uv[2 * k + 1] = e.position.y;
 	}
 	ssd_uv_line(sc, f, uv, 97, rgb, width);
@@ -298,7 +298,7 @@ static int ssd_on_seam(qaws_surface const* f, qaws_curve const* c)
 	qaws_surface_eval_result a, b;
 	unsigned int ax, i;
 	for (i = 0; i < 3; i++)
-		qaws_curve_evaluate_2d(c, rg.min_value + (rg.max_value - rg.min_value) * (qaws_scalar)(0.5 * i), QAWS_EVAL_FLAG_POSITION, &e[i]);
+		qaws_curve_evaluate_2d(&e[i], c, rg.min_value + (rg.max_value - rg.min_value) * (qaws_scalar)(0.5 * i), QAWS_EVAL_FLAG_POSITION);
 	for (ax = 0; ax < 2; ax++)
 	{
 		double w = ax ? e[1].position.y : e[1].position.x, q[2];

@@ -46,7 +46,7 @@ static qaws_curve* ebt_ellipse(double a, double b)
 	d.knot_count = 12;
 	d.weights = ws;
 	d.weight_count = 9;
-	qaws_curve_create_nurbs(&d, &c);
+	qaws_curve_create_nurbs(&c, &d);
 	return c;
 }
 
@@ -70,7 +70,7 @@ static qaws_curve* ebt_parabola(double c, int vertical, double R)
 	d.coefficient_count = 3;
 	d.t_min = (qaws_scalar)-R;
 	d.t_max = (qaws_scalar)R;
-	qaws_curve_create_polynomial(&d, &out);
+	qaws_curve_create_polynomial(&out, &d);
 	return out;
 }
 
@@ -129,7 +129,7 @@ static void test_against_float(void)
 	fd.curves = (qaws_curve const* const*)cs;
 	fd.curve_count = EBT_N;
 	fd.families = fam;
-	qaws_curve_batch_find_intersections_2d(&fd, hf, 512, &nf, NULL);
+	qaws_curve_batch_find_intersections_2d(hf, &nf, NULL, 512, &fd);
 	/* each float hit in exactly one enclosure of its curve pair */
 	for (i = 0; i < nf; i++)
 	{
@@ -245,7 +245,7 @@ static void test_self(void)
 	bd.degree = 3;
 	bd.control_points = cp;
 	bd.control_point_count = 4;
-	qaws_curve_create_bezier(&bd, &c);
+	qaws_curve_create_bezier(&c, &bd);
 	qaws_exact_curve_prepare(NULL, c, &e, NULL);
 	memset(&d, 0, sizeof(d));
 	d.curves = (qaws_exact_curve const* const*)&e;
@@ -312,7 +312,7 @@ static qaws_curve* ebt_line(double x0, double y0, double x1, double y1)
 	d.degree = 1;
 	d.control_points = cp;
 	d.control_point_count = 2;
-	qaws_curve_create_bezier(&d, &c);
+	qaws_curve_create_bezier(&c, &d);
 	return c;
 }
 
@@ -349,7 +349,7 @@ static void test_closest(void)
 		pd.t_min = -1;
 		pd.t_max = 1;
 		cs[i] = NULL;
-		qaws_curve_create_polynomial(&pd, &cs[i]);
+		qaws_curve_create_polynomial(&cs[i], &pd);
 	}
 	cs[EBT_PARAB] = ebt_line(-1.5, 1.25, 1.5, 1.25);
 	cs[EBT_PARAB + 1] = ebt_line(-1.5, -1.25, 1.5, -1.25);
@@ -374,7 +374,7 @@ static void test_closest(void)
 	fd.curve_count = n;
 	fd.points = fpts;
 	fd.point_count = EBT_POINTS;
-	qaws_curve_batch_find_closest(&fd, fo, NULL);
+	qaws_curve_batch_find_closest(fo, NULL, &fd);
 	for (i = 0; i < EBT_POINTS; i++)
 	{
 		double tol = QAWS_SCALAR_IS_FLOAT ? 1e-5 : 1e-10;

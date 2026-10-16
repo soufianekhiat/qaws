@@ -26,7 +26,7 @@ All Qaws functions that can fail return a `qaws_status` code. Check it before us
 ## Converting to string
 
 ```c
-qaws_status s = qaws_curve_create_bezier(&desc, &curve);
+qaws_status s = qaws_curve_create_bezier(&curve, &desc);
 if (s != QAWS_STATUS_OK) {
     printf("Error: %s\n", qaws_status_to_string(s));
 }
@@ -36,7 +36,7 @@ if (s != QAWS_STATUS_OK) {
 
 ```c
 qaws_curve* curve = NULL;
-qaws_status s = qaws_curve_create_bezier(&desc, &curve);
+qaws_status s = qaws_curve_create_bezier(&curve, &desc);
 if (s != QAWS_STATUS_OK) {
     // handle error -- curve is NULL
     return;
@@ -55,6 +55,6 @@ Calling a family-specific inspection function on the wrong curve type returns `Q
 // curve is a Hermite curve
 qaws_scalar knots[10];
 unsigned int count;
-qaws_status s = qaws_bspline_get_knots(curve, knots, 10, &count);
+qaws_status s = qaws_bspline_get_knots(knots, &count, curve, 10);
 // s == QAWS_STATUS_UNSUPPORTED_OPERATION
 ```

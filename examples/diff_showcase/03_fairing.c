@@ -37,7 +37,7 @@ static void fairing_energy(qaws_scalar const* cps, qaws_scalar const* ref, qaws_
 		{
 			qaws_eval_result_2d er;
 			double dx, dy;
-			qaws_curve_evaluate_2d(r, ts[i], QAWS_EVAL_FLAG_POSITION, &er);
+			qaws_curve_evaluate_2d(&er, r, ts[i], QAWS_EVAL_FLAG_POSITION);
 			dx = primal[i].d[0].x - er.position.x;
 			dy = primal[i].d[0].y - er.position.y;
 			e += lambda * (dx * dx + dy * dy) / FAIR_SAMPLES;

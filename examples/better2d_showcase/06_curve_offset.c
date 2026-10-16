@@ -19,7 +19,7 @@ static void co_curve(svg* s, viewport const* v, qaws_curve const* c, char const*
 	for (j = 0; j <= m; j++)
 	{
 		qaws_eval_result_2d e;
-		qaws_curve_evaluate_2d(c, (qaws_scalar)(r.min_value + (r.max_value - r.min_value) * j / m), QAWS_EVAL_FLAG_POSITION, &e);
+		qaws_curve_evaluate_2d(&e, c, (qaws_scalar)(r.min_value + (r.max_value - r.min_value) * j / m), QAWS_EVAL_FLAG_POSITION);
 		xy[2 * j] = vx(v, e.position.x);
 		xy[2 * j + 1] = vy(v, e.position.y);
 	}
@@ -34,7 +34,7 @@ static unsigned int co_joints(svg* s, viewport const* v, qaws_curve const* c, ch
 	qaws_scalar* cp = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 2 * (n + 4));
 	if (qaws_curve_get_kind(c) == QAWS_CURVE_KIND_BSPLINE && qaws_curve_get_degree(c) == 3)
 	{
-		qaws_curve_get_control_points(c, cp, n + 4, &got);
+		qaws_curve_get_control_points(cp, &got, c, n + 4);
 		for (i = 0; i < got; i += 3)
 			svg_circle(s, vx(v, cp[2 * i]), vy(v, cp[2 * i + 1]), rad, fill, "#ffffff");
 	}
@@ -71,7 +71,7 @@ static void co_parallel(svg* s, viewport const* v, qaws_curve const* c, double d
 	{
 		qaws_eval_result_2d e;
 		double t = r.min_value + (r.max_value - r.min_value) * j / N, sp, nx, ny, k;
-		qaws_curve_evaluate_2d(c, (qaws_scalar)t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2, &e);
+		qaws_curve_evaluate_2d(&e, c, (qaws_scalar)t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2);
 		sp = hypot(e.d1.x, e.d1.y);
 		nx = e.d1.y / sp; ny = -e.d1.x / sp;
 		k = (e.d1.x * e.d2.y - e.d1.y * e.d2.x) / (sp * sp * sp);
@@ -100,7 +100,7 @@ static void co_cusps(svg* s, viewport const* v, qaws_curve const* c, double delt
 	{
 		qaws_eval_result_2d e;
 		double sp;
-		qaws_curve_evaluate_2d(c, (qaws_scalar)t[i], QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &e);
+		qaws_curve_evaluate_2d(&e, c, (qaws_scalar)t[i], QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1);
 		sp = hypot(e.d1.x, e.d1.y);
 		svg_circle(s, vx(v, e.position.x + delta * e.d1.y / sp), vy(v, e.position.y - delta * e.d1.x / sp), 4.2, "#24292f", "#ffffff");
 	}
@@ -115,7 +115,7 @@ static qaws_curve* co_bezier(double const* xy, unsigned int n)
 	for (i = 0; i < 2 * n; i++) p[i] = (qaws_scalar)xy[i];
 	memset(&d, 0, sizeof(d));
 	d.dimension = QAWS_DIMENSION_2D; d.degree = n - 1; d.control_points = p; d.control_point_count = n;
-	qaws_curve_create_bezier(&d, &c);
+	qaws_curve_create_bezier(&c, &d);
 	return c;
 }
 
@@ -156,7 +156,7 @@ static qaws_curve* co_star(unsigned int m, double r0, double r1, double cx, doub
 	memset(&d, 0, sizeof(d));
 	d.dimension = QAWS_DIMENSION_2D; d.degree = 3; d.control_points = cp; d.control_point_count = n;
 	d.knots = kn; d.knot_count = kc;
-	qaws_curve_create_bspline(&d, &c);
+	qaws_curve_create_bspline(&c, &d);
 	return c;
 }
 

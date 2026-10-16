@@ -41,7 +41,7 @@ static qaws_curve* es_curve(ref_exact_spline const* r)
 		d.knot_count = (unsigned int)r->nk;
 		d.weights = ws;
 		d.weight_count = (unsigned int)r->n;
-		qaws_curve_create_nurbs(&d, &c);
+		qaws_curve_create_nurbs(&c, &d);
 	}
 	else
 	{
@@ -53,7 +53,7 @@ static qaws_curve* es_curve(ref_exact_spline const* r)
 		d.control_point_count = (unsigned int)r->n;
 		d.knots = knots;
 		d.knot_count = (unsigned int)r->nk;
-		qaws_curve_create_bspline(&d, &c);
+		qaws_curve_create_bspline(&c, &d);
 	}
 	return c;
 }
@@ -112,11 +112,11 @@ static void test_reference(void)
 			memset(&f, 0, sizeof(f));
 			qaws_exact_curve_evaluate(e, t, (unsigned int)r->k, out, NULL);
 			if (r->dim == 3)
-				qaws_curve_evaluate_3d(c, (qaws_scalar)t, flags, &f);
+				qaws_curve_evaluate_3d(&f, c, (qaws_scalar)t, flags);
 			else
 			{
 				qaws_eval_result_2d f2;
-				qaws_curve_evaluate_2d(c, (qaws_scalar)t, flags, &f2);
+				qaws_curve_evaluate_2d(&f2, c, (qaws_scalar)t, flags);
 				f.position.x = f2.position.x; f.position.y = f2.position.y;
 				f.d1.x = f2.d1.x; f.d1.y = f2.d1.y;
 				f.d2.x = f2.d2.x; f.d2.y = f2.d2.y;
@@ -200,7 +200,7 @@ static void test_widths(void)
 		d.knot_count = nk;
 		d.weights = ws;
 		d.weight_count = n;
-		qaws_curve_create_nurbs(&d, &c);
+		qaws_curve_create_nurbs(&c, &d);
 		st = qaws_exact_curve_prepare(&desc, c, &e, &rep);
 		report_bits[p] = st == QAWS_STATUS_OK ? rep.storage_bits : 0;
 		eval_ok[p] = 0;

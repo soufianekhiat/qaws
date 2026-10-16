@@ -377,7 +377,7 @@ static qaws_status cx_line(cx_ctx* x, double const* a, double const* b, qaws_cur
 	d.control_points = cp;
 	d.control_point_count = 2;
 	CX_GROW(x->temp, x->ntemp, x->captemp, qaws_curve*);
-	s = qaws_curve_create_bezier(&d, out);
+	s = qaws_curve_create_bezier(out, &d);
 	if (s == QAWS_STATUS_OK)
 		x->temp[x->ntemp++] = *out;
 	return s;

@@ -39,10 +39,10 @@ static void demo_self_hits(void)
 	d.control_point_count = 6;
 	d.knots = kn_star;
 	d.knot_count = 9;
-	qaws_curve_create_bspline(&d, &cs);
+	qaws_curve_create_bspline(&cs, &d);
 	qaws_exact_curve_prepare(&desc, cs, &es, NULL);
 	ss = qaws_exact_curve_self_hits(es, hs, 32, &ns);
-	qaws_curve_find_self_intersections_2d(cs, f2, 64, &nf2);
+	qaws_curve_find_self_intersections_2d(f2, &nf2, cs, 64);
 	/* a trefoil knot: a closed (periodic) cubic B-spline in space */
 	for (i = 0; i < 12; i++)
 	{
@@ -65,10 +65,10 @@ static void demo_self_hits(void)
 	d.control_point_count = 15;
 	d.knots = kn_knot;
 	d.knot_count = 19;
-	qaws_curve_create_bspline(&d, &ck);
+	qaws_curve_create_bspline(&ck, &d);
 	qaws_exact_curve_prepare(&desc, ck, &ek, NULL);
 	sk = qaws_exact_curve_self_hits(ek, hk, 32, &nk);
-	qaws_curve_find_self_intersections_3d(ck, f3, 64, &nf3);
+	qaws_curve_find_self_intersections_3d(f3, &nf3, ck, 64);
 
 	svg_open(&sv, "showcase/exact9_self_hits.svg", 880, 540, "Certified self-intersections",
 		"Left: a B-spline star, crossings isolated exactly. Right: a trefoil knot, whose shadow crosses itself while the curve never does.");

@@ -48,7 +48,7 @@ static qaws_curve* cbt_ellipse(double a, double b, int lift, double z)
 	d.knot_count = 12;
 	d.weights = ws;
 	d.weight_count = 9;
-	qaws_curve_create_nurbs(&d, &c);
+	qaws_curve_create_nurbs(&c, &d);
 	return c;
 }
 
@@ -84,7 +84,7 @@ static qaws_curve* cbt_gradient(double c, int vertical, double R, int lift)
 	d.coefficient_count = deg + 1;
 	d.t_min = (qaws_scalar)-R;
 	d.t_max = (qaws_scalar)R;
-	qaws_curve_create_polynomial(&d, &out);
+	qaws_curve_create_polynomial(&out, &d);
 	return out;
 }
 
@@ -137,8 +137,8 @@ static void test_heightfield(int lift)
 	d.curves = (qaws_curve const* const*)cs;
 	d.curve_count = CBT_LEVELS + CBT_LINES;
 	d.families = fam;
-	s = lift ? qaws_curve_batch_find_intersections_3d(&d, h3, 1024, &n, &st)
-		: qaws_curve_batch_find_intersections_2d(&d, h2, 1024, &n, &st);
+	s = lift ? qaws_curve_batch_find_intersections_3d(h3, &n, &st, 1024, &d)
+		: qaws_curve_batch_find_intersections_2d(h2, &n, &st, 1024, &d);
 	/* every expected crossing must be found once */
 	for (i = 0; i < CBT_LEVELS; i++)
 		for (j = 0; j < CBT_LINES; j++)
@@ -201,7 +201,7 @@ static qaws_curve* cbt_cubic(void)
 	d.degree = 3;
 	d.control_points = cp;
 	d.control_point_count = 4;
-	qaws_curve_create_bezier(&d, &c);
+	qaws_curve_create_bezier(&c, &d);
 	return c;
 }
 
@@ -220,12 +220,12 @@ static void test_against_pairwise(void)
 	memset(&d, 0, sizeof(d));
 	d.curves = (qaws_curve const* const*)cs;
 	d.curve_count = CBT_RANDOM;
-	qaws_curve_batch_find_intersections_2d(&d, hb, 4096, &nb, NULL);
+	qaws_curve_batch_find_intersections_2d(hb, &nb, NULL, 4096, &d);
 	for (i = 0; i < CBT_RANDOM; i++)
 		for (j = i + 1; j < CBT_RANDOM; j++)
 		{
 			unsigned int np = 0, k, m;
-			qaws_curve_find_intersections_2d(cs[i], cs[j], hp, 64, &np);
+			qaws_curve_find_intersections_2d(hp, &np, cs[i], cs[j], 64);
 			for (k = 0; k < np && k < 64; k++)
 			{
 				total++;
@@ -260,15 +260,15 @@ static void test_self(void)
 	bd.degree = 3;
 	bd.control_points = cp;
 	bd.control_point_count = 4;
-	qaws_curve_create_bezier(&bd, &c);
+	qaws_curve_create_bezier(&c, &bd);
 	cs[0] = c;
 	memset(&d, 0, sizeof(d));
 	d.curves = (qaws_curve const* const*)cs;
 	d.curve_count = 1;
-	qaws_curve_batch_find_intersections_2d(&d, hb, 8, &nn, NULL);
+	qaws_curve_batch_find_intersections_2d(hb, &nn, NULL, 8, &d);
 	d.flags = QAWS_CURVE_BATCH_SELF;
-	qaws_curve_batch_find_intersections_2d(&d, hb, 8, &nb, NULL);
-	qaws_curve_find_self_intersections_2d(c, hp, 8, &np);
+	qaws_curve_batch_find_intersections_2d(hb, &nb, NULL, 8, &d);
+	qaws_curve_find_self_intersections_2d(hp, &np, c, 8);
 	printf("    looped cubic: batch self %u at (%.6f, %.6f), t %.6f / %.6f; pairwise self %u\n", nb,
 		nb ? hb[0].position.x : 0, nb ? hb[0].position.y : 0, nb ? hb[0].parameter_a : 0, nb ? hb[0].parameter_b : 0, np);
 	TEST_ASSERT(nn == 0, "without the self flag a single curve has no hits");
@@ -312,14 +312,14 @@ static void test_timing(void)
 		d.curve_count = 2 * n;
 		d.families = fam;
 		t0 = cbt_now();
-		qaws_curve_batch_find_intersections_2d(&d, hb, 4 * n * n, &nb, &st);
+		qaws_curve_batch_find_intersections_2d(hb, &nb, &st, 4 * n * n, &d);
 		tb = cbt_now() - t0;
 		t0 = cbt_now();
 		for (i = 0; i < n; i++)
 			for (j = 0; j < n; j++)
 			{
 				unsigned int k = 0;
-				qaws_curve_find_intersections_2d(cs[i], cs[n + j], hp, 16, &k);
+				qaws_curve_find_intersections_2d(hp, &k, cs[i], cs[n + j], 16);
 				np += k;
 			}
 		tp = cbt_now() - t0;
@@ -362,7 +362,7 @@ static void test_sets(void)
 	d.curve_count = CBT_SET_N;
 	d.flatness = (qaws_scalar)CBT_SET_FLAT;
 	t0 = cbt_now();
-	qaws_curve_set_create(&d, &cset);
+	qaws_curve_set_create(&cset, &d);
 	t_set += cbt_now() - t0;
 	for (f = 0; f < CBT_FRAMES; f++)
 	{
@@ -377,8 +377,8 @@ static void test_sets(void)
 		gd.flatness = (qaws_scalar)CBT_SET_FLAT;
 		/* the prepared contours against this frame's gradient lines */
 		t0 = cbt_now();
-		qaws_curve_set_create(&gd, &gset);
-		qaws_curve_set_find_intersections_2d(cset, gset, hs, 8192, &ns, NULL);
+		qaws_curve_set_create(&gset, &gd);
+		qaws_curve_set_find_intersections_2d(hs, &ns, NULL, cset, gset, 8192);
 		t_set += cbt_now() - t0;
 		/* the one-shot call on everything, two families */
 		for (i = 0; i < CBT_SET_N; i++)
@@ -394,7 +394,7 @@ static void test_sets(void)
 		gd.families = fam;
 		gd.flatness = (qaws_scalar)CBT_SET_FLAT;
 		t0 = cbt_now();
-		qaws_curve_batch_find_intersections_2d(&gd, ho, 8192, &no, NULL);
+		qaws_curve_batch_find_intersections_2d(ho, &no, NULL, 8192, &gd);
 		t_once += cbt_now() - t0;
 		same &= ns == no;
 		for (k = 0; k < ns && k < no && same; k++)
@@ -408,8 +408,8 @@ static void test_sets(void)
 	/* a set with itself: the one-shot call on the same curves */
 	{
 		unsigned int ns = 0, no = 0, k;
-		qaws_curve_set_find_intersections_2d(cset, NULL, hs, 8192, &ns, NULL);
-		qaws_curve_batch_find_intersections_2d(&d, ho, 8192, &no, NULL);
+		qaws_curve_set_find_intersections_2d(hs, &ns, NULL, cset, NULL, 8192);
+		qaws_curve_batch_find_intersections_2d(ho, &no, NULL, 8192, &d);
 		self_same = ns == no;
 		for (k = 0; k < ns && k < no; k++)
 			self_same &= hs[k].curve_a == ho[k].curve_a && hs[k].curve_b == ho[k].curve_b;
@@ -466,7 +466,7 @@ static void test_levels(void)
 		d.field = pass ? cbt_field_no_gradient : cbt_field;
 		d.levels = lv;
 		d.level_count = CBT_LEVELS;
-		qaws_curve_batch_find_level_crossings(&d, lc, 1024, &n[pass]);
+		qaws_curve_batch_find_level_crossings(lc, &n[pass], 1024, &d);
 		expected = 0;
 		for (i = 0; i < CBT_LEVELS; i++)
 			for (j = 0; j < CBT_LINES; j++)
@@ -527,14 +527,14 @@ static void test_levels(void)
 		d.levels = lv2;
 		d.level_count = nn;
 		t0 = cbt_now();
-		qaws_curve_batch_find_level_crossings(&d, out, 4 * nn * nn, &nl);
+		qaws_curve_batch_find_level_crossings(out, &nl, 4 * nn * nn, &d);
 		tl = cbt_now() - t0;
 		memset(&bd, 0, sizeof(bd));
 		bd.curves = (qaws_curve const* const*)g;
 		bd.curve_count = 2 * nn;
 		bd.families = fam;
 		t0 = cbt_now();
-		qaws_curve_batch_find_intersections_2d(&bd, hb, 4 * nn * nn, &nb, NULL);
+		qaws_curve_batch_find_intersections_2d(hb, &nb, NULL, 4 * nn * nn, &bd);
 		tb = cbt_now() - t0;
 		printf("    %u gradient lines x %u levels: level crossings %u in %.3f s; batch against %u contour curves %u in %.3f s\n", nn, nn, nl, tl, nn, nb, tb);
 		sprintf(msg, "%u x %u: the level crossings equal the batch with contour curves (%u)", nn, nn, nb);
@@ -587,7 +587,7 @@ static void test_closest(void)
 	d.points = pts;
 	d.point_count = CBT_QUERIES;
 	t0 = cbt_now();
-	qaws_curve_batch_find_closest(&d, out, &st);
+	qaws_curve_batch_find_closest(out, &st, &d);
 	tb = cbt_now() - t0;
 	for (i = 0; i < CBT_QUERIES; i++)
 	{
@@ -608,7 +608,7 @@ static void test_closest(void)
 	/* 3D: the circles in z = 0, points off the plane: sqrt((rho - r)^2 + z^2) */
 	d.curves = (qaws_curve const* const*)cs3;
 	d.points = pts3;
-	qaws_curve_batch_find_closest(&d, out3, NULL);
+	qaws_curve_batch_find_closest(out3, NULL, &d);
 	for (i = 0; i < CBT_QUERIES; i++)
 	{
 		double rho = hypot(pts3[3 * i], pts3[3 * i + 1]), z = pts3[3 * i + 2], best = 1e30;
@@ -623,7 +623,7 @@ static void test_closest(void)
 	d.curves = (qaws_curve const* const*)cs;
 	d.points = pts;
 	d.max_distance = (qaws_scalar)0.1;
-	qaws_curve_batch_find_closest(&d, out3, NULL);
+	qaws_curve_batch_find_closest(out3, NULL, &d);
 	for (i = 0; i < CBT_QUERIES; i++)
 	{
 		double rho = hypot(pts[2 * i], pts[2 * i + 1]);
@@ -637,8 +637,8 @@ static void test_closest(void)
 	memset(&sd, 0, sizeof(sd));
 	sd.curves = (qaws_curve const* const*)cs;
 	sd.curve_count = CBT_RINGS;
-	qaws_curve_set_create(&sd, &set);
-	qaws_curve_set_find_closest(set, pts, CBT_QUERIES, 0, outs, NULL);
+	qaws_curve_set_create(&set, &sd);
+	qaws_curve_set_find_closest(outs, NULL, set, pts, CBT_QUERIES, 0);
 	for (i = 0; i < CBT_QUERIES; i++)
 		same_set &= outs[i].curve == out[i].curve && fabs(outs[i].distance - out[i].distance) < 1e-12;
 	qaws_curve_set_destroy(set);
@@ -654,8 +654,8 @@ static void test_closest(void)
 		{
 			qaws_scalar t = 0;
 			qaws_eval_result_2d e;
-			qaws_curve_find_closest_parameter_2d(cs[k], q, &t);
-			qaws_curve_evaluate_2d(cs[k], t, QAWS_EVAL_FLAG_POSITION, &e);
+			qaws_curve_find_closest_parameter_2d(&t, cs[k], q);
+			qaws_curve_evaluate_2d(&e, cs[k], t, QAWS_EVAL_FLAG_POSITION);
 			if (hypot(e.position.x - q.x, e.position.y - q.y) < best)
 				best = hypot(e.position.x - q.x, e.position.y - q.y);
 		}
@@ -683,7 +683,7 @@ static qaws_curve* cbt_poly(qaws_scalar const* xy, unsigned int n)
 	qaws_curve* c = NULL;
 	memset(&d, 0, sizeof(d));
 	d.dimension = QAWS_DIMENSION_2D; d.degree = 1; d.control_points = xy; d.control_point_count = n;
-	qaws_curve_create_bspline(&d, &c);
+	qaws_curve_create_bspline(&c, &d);
 	return c;
 }
 
@@ -704,7 +704,7 @@ static qaws_curve* cbt_circle(double cx, double cy, double r)
 	memset(&d, 0, sizeof(d));
 	d.dimension = QAWS_DIMENSION_2D; d.degree = 2; d.control_points = cps; d.control_point_count = 9;
 	d.knots = kn; d.knot_count = 12; d.weights = ws; d.weight_count = 9;
-	qaws_curve_create_nurbs(&d, &c);
+	qaws_curve_create_nurbs(&c, &d);
 	return c;
 }
 
@@ -716,7 +716,7 @@ static unsigned int cbt_kinds_of(qaws_curve const* a, qaws_curve const* b, qaws_
 	cs[0] = a; cs[1] = b;
 	memset(&d, 0, sizeof(d));
 	d.curves = cs; d.curve_count = 2; d.families = fam;
-	qaws_curve_batch_find_intersections_2d(&d, h, cap, &n, NULL);
+	qaws_curve_batch_find_intersections_2d(h, &n, NULL, cap, &d);
 	return n;
 }
 
@@ -753,7 +753,7 @@ static void test_kinds(void)
 		s.radius = 2; s.angle_start = (qaws_scalar)0.5; s.angle_end = (qaws_scalar)2.0;
 		memset(&ad, 0, sizeof(ad));
 		ad.dimension = QAWS_DIMENSION_2D; ad.segments = &s; ad.segment_count = 1;
-		qaws_curve_create_arc(&ad, &arc);
+		qaws_curve_create_arc(&arc, &ad);
 		n = cbt_kinds_of(circle, arc, h, 16);
 		sprintf(msg, "an arc lying on a circle: one OVERLAP over the whole arc (%u hits, kind %u, arc [%.4f, %.4f] of 3)",
 			n, n ? h[0].kind : 9, n ? (double)h[0].parameter_b : 0.0, n ? (double)h[0].parameter_b_end : 0.0);
@@ -774,7 +774,7 @@ static void test_kinds(void)
 		unsigned int n1, n2, n3, k1, k2, k3;
 		memset(&bd, 0, sizeof(bd));
 		bd.dimension = QAWS_DIMENSION_2D; bd.degree = 3; bd.control_points = cu; bd.control_point_count = 4;
-		qaws_curve_create_bezier(&bd, &cubic);
+		qaws_curve_create_bezier(&cubic, &bd);
 		n1 = cbt_kinds_of(c1, c2, h, 16); k1 = n1 ? h[0].kind : 9;
 		n2 = cbt_kinds_of(c1, line, h, 16); k2 = n2 ? h[0].kind : 9;
 		n3 = cbt_kinds_of(cubic, axis, h, 16); k3 = n3 ? h[0].kind : 9;
@@ -811,7 +811,7 @@ static void test_shallow_cap(void)
 	g.angle_start = 0; g.angle_end = (qaws_scalar)(2 * CBT_PI);
 	memset(&ad, 0, sizeof(ad));
 	ad.dimension = QAWS_DIMENSION_2D; ad.segments = &g; ad.segment_count = 1;
-	qaws_curve_create_arc(&ad, &circle);
+	qaws_curve_create_arc(&circle, &ad);
 	for (k = 0; k < 64; k++)
 	{
 		/* the line at distance CBT_CAP_R from the centre, normal at angle a:
@@ -830,7 +830,7 @@ static void test_shallow_cap(void)
 		memset(&bd, 0, sizeof(bd));
 		bd.curves = cs; bd.curve_count = 2; bd.families = fam;
 		bd.flatness = (qaws_scalar)0.02;
-		qaws_curve_batch_find_intersections_2d(&bd, hits, 8, &n, NULL);
+		qaws_curve_batch_find_intersections_2d(hits, &n, NULL, 8, &bd);
 		total++;
 		if (n != 2) missed++;
 		qaws_curve_destroy(line);

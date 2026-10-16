@@ -14,9 +14,9 @@
 /* -------------------------------------------------------------------------- */
 
 qaws_status qaws_curve_convert_hermite_to_bezier(
+	qaws_curve **out_bezier,
 	qaws_curve const *curve,
-	unsigned int span_index,
-	qaws_curve **out_bezier)
+	unsigned int span_index)
 {
 	qaws_hermite_impl const *impl;
 	unsigned int dim_count;
@@ -67,7 +67,7 @@ qaws_status qaws_curve_convert_hermite_to_bezier(
 	desc.control_points = cp;
 	desc.control_point_count = 4;
 
-	status = qaws_curve_create_bezier(&desc, out_bezier);
+	status = qaws_curve_create_bezier(out_bezier, &desc);
 	free(cp);
 	return status;
 }
@@ -77,9 +77,9 @@ qaws_status qaws_curve_convert_hermite_to_bezier(
 /* -------------------------------------------------------------------------- */
 
 qaws_status qaws_curve_convert_catmull_rom_to_bezier(
+	qaws_curve **out_bezier,
 	qaws_curve const *curve,
-	unsigned int span_index,
-	qaws_curve **out_bezier)
+	unsigned int span_index)
 {
 	qaws_catmull_rom_impl const *impl;
 	unsigned int dim_count;
@@ -142,7 +142,7 @@ qaws_status qaws_curve_convert_catmull_rom_to_bezier(
 	desc.control_points = cp;
 	desc.control_point_count = 4;
 
-	status = qaws_curve_create_bezier(&desc, out_bezier);
+	status = qaws_curve_create_bezier(out_bezier, &desc);
 	free(cp);
 	return status;
 }
@@ -152,8 +152,8 @@ qaws_status qaws_curve_convert_catmull_rom_to_bezier(
 /* -------------------------------------------------------------------------- */
 
 qaws_status qaws_curve_convert_bezier_to_bspline(
-	qaws_curve const *curve,
-	qaws_curve **out_bspline)
+	qaws_curve **out_bspline,
+	qaws_curve const *curve)
 {
 	qaws_bezier_impl const *impl;
 	unsigned int degree;
@@ -195,7 +195,7 @@ qaws_status qaws_curve_convert_bezier_to_bspline(
 	desc.is_uniform = 0;
 	desc.is_closed = 0;
 
-	status = qaws_curve_create_bspline(&desc, out_bspline);
+	status = qaws_curve_create_bspline(out_bspline, &desc);
 	free(knots);
 	return status;
 }
@@ -205,8 +205,8 @@ qaws_status qaws_curve_convert_bezier_to_bspline(
 /* -------------------------------------------------------------------------- */
 
 qaws_status qaws_curve_convert_bspline_to_nurbs(
-	qaws_curve const *curve,
-	qaws_curve **out_nurbs)
+	qaws_curve **out_nurbs,
+	qaws_curve const *curve)
 {
 	qaws_bspline_impl const *impl;
 	unsigned int cp_count;
@@ -245,7 +245,7 @@ qaws_status qaws_curve_convert_bspline_to_nurbs(
 	desc.weight_count = cp_count;
 	desc.is_closed = 0;
 
-	status = qaws_curve_create_nurbs(&desc, out_nurbs);
+	status = qaws_curve_create_nurbs(out_nurbs, &desc);
 	free(weights);
 	return status;
 }
@@ -255,8 +255,8 @@ qaws_status qaws_curve_convert_bspline_to_nurbs(
 /* -------------------------------------------------------------------------- */
 
 qaws_status qaws_curve_elevate_degree(
-	qaws_curve const *curve,
-	qaws_curve **out_elevated)
+	qaws_curve **out_elevated,
+	qaws_curve const *curve)
 {
 	qaws_bezier_impl const *impl;
 	unsigned int n;
@@ -311,7 +311,7 @@ qaws_status qaws_curve_elevate_degree(
 	desc.control_points = new_cp;
 	desc.control_point_count = new_count;
 
-	status = qaws_curve_create_bezier(&desc, out_elevated);
+	status = qaws_curve_create_bezier(out_elevated, &desc);
 	free(new_cp);
 	return status;
 }
@@ -407,8 +407,8 @@ static int deg_reduce_gauss_solve(double *A, double *b, unsigned int sys_n)
 /* -------------------------------------------------------------------------- */
 
 qaws_status qaws_curve_reduce_degree(
-	qaws_curve const *curve,
-	qaws_curve **out_reduced)
+	qaws_curve **out_reduced,
+	qaws_curve const *curve)
 {
 	qaws_bezier_impl const *impl;
 	unsigned int n;       /* original degree */
@@ -463,7 +463,7 @@ qaws_status qaws_curve_reduce_degree(
 		desc.degree = m;
 		desc.control_points = new_cp;
 		desc.control_point_count = new_count;
-		status = qaws_curve_create_bezier(&desc, out_reduced);
+		status = qaws_curve_create_bezier(out_reduced, &desc);
 		free(new_cp);
 		return status;
 	}
@@ -592,7 +592,7 @@ qaws_status qaws_curve_reduce_degree(
 	desc.control_points = new_cp;
 	desc.control_point_count = new_count;
 
-	status = qaws_curve_create_bezier(&desc, out_reduced);
+	status = qaws_curve_create_bezier(out_reduced, &desc);
 	free(new_cp);
 	return status;
 }

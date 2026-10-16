@@ -197,7 +197,7 @@ static void test_tangent(void)
 	bd.degree = 2;
 	bd.control_points = cp;
 	bd.control_point_count = 3;
-	qaws_curve_create_bezier(&bd, &pc);
+	qaws_curve_create_bezier(&pc, &bd);
 	lens = cxt_path(&s, pc);   /* the path closes with the line back from (2, 1) to (0, 1) */
 	for (k = 0; k < 3; k++)
 	{

@@ -38,7 +38,7 @@ static qaws_curve* make_curve_3d(qaws_scalar const* cps)
 	d.control_point_count = 6;
 	d.knots = g_curve_knots;
 	d.knot_count = 10;
-	qaws_curve_create_bspline(&d, &c);
+	qaws_curve_create_bspline(&c, &d);
 	return c;
 }
 
@@ -50,7 +50,7 @@ static qaws_curve* make_curve_2d(qaws_scalar const* cps)
 	d.degree = 4;
 	d.control_points = cps;
 	d.control_point_count = 5;
-	qaws_curve_create_bezier(&d, &c);
+	qaws_curve_create_bezier(&c, &d);
 	return c;
 }
 
@@ -190,10 +190,10 @@ static void test_curve_3d(void)
 			qaws_vec3 T, N, B;
 			qaws_curve_eval_tangent_3d(&p, &tg, c, NULL, t, 0, 0xF, NULL);
 			qaws_curve_geometry_eval_3d(&g, NULL, NULL, &validity, &p, NULL, NULL);
-			qaws_curve_compute_curvature_3d(c, t, &kappa);
-			qaws_curve_compute_torsion_3d(c, t, &tau);
-			qaws_curve_compute_speed(c, t, &speed);
-			qaws_curve_compute_frenet_frame_3d(c, t, &T, &N, &B);
+			qaws_curve_compute_curvature_3d(&kappa, c, t);
+			qaws_curve_compute_torsion_3d(&tau, c, t);
+			qaws_curve_compute_speed(&speed, c, t);
+			qaws_curve_compute_frenet_frame_3d(&T, &N, &B, c, t);
 			if (validity != QAWS_DIFF_VALID || !diff_close(g.curvature, kappa, 1e-4) ||
 			    !diff_close(g.torsion, tau, 1e-4) || !diff_close(g.speed, speed, 1e-4) ||
 			    !diff_close(qaws_v3_dot(g.tangent, T), 1, 1e-4) || !diff_close(qaws_v3_dot(g.normal, N), 1, 1e-4) ||
@@ -287,7 +287,7 @@ static void test_curve_2d(void)
 		one_view(&v, &views, QAWS_FIELD_CONTROL_POINTS, dir, 5, 2);
 		qaws_curve_eval_tangent_2d(&p, &tg, c, &views, t, tdot, 0xF, NULL);
 		qaws_curve_geometry_eval_2d(&g, &gt, NULL, NULL, &p, &tg, NULL);
-		qaws_curve_compute_curvature_2d(c, t, &kappa);
+		qaws_curve_compute_curvature_2d(&kappa, c, t);
 		if (!diff_close(g.curvature, kappa, 1e-4))
 			ok_values = 0;
 
@@ -325,7 +325,7 @@ static void test_curve_straight(void)
 	d.degree = 3;
 	d.control_points = line;
 	d.control_point_count = 4;
-	qaws_curve_create_bezier(&d, &c);
+	qaws_curve_create_bezier(&c, &d);
 	qaws_curve_eval_tangent_3d(&p, &tg, c, NULL, (qaws_scalar)0.4, 0, 0xF, NULL);
 	qaws_curve_geometry_eval_3d(&g, NULL, NULL, &validity, &p, NULL, NULL);
 	TEST_ASSERT(validity == QAWS_DIFF_ILL_CONDITIONED, "straight point reports ill-conditioned frame");
@@ -376,7 +376,7 @@ static void test_surface(void)
 
 		qaws_surface_eval_jet(&p, s, u, v, QAWS_SJET_ORDER3);
 		qaws_surface_geometry_eval(&g, NULL, NULL, &validity, &p, NULL, NULL);
-		qaws_surface_compute_principal_curvatures(s, u, v, &ref);
+		qaws_surface_compute_principal_curvatures(&ref, s, u, v);
 		if (validity != QAWS_DIFF_VALID || !diff_close(g.gaussian, ref.gaussian, 1e-4) ||
 		    !diff_close(g.mean, ref.mean, 1e-4) ||
 		    !diff_close(g.kappa1 + g.kappa2, ref.kappa1 + ref.kappa2, 1e-4) ||

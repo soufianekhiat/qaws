@@ -300,10 +300,10 @@ static void test_adapter(void)
 	as.radius = 1; as.angle_end = (qaws_scalar)(2 * RS_PI);
 	memset(&ad, 0, sizeof(ad));
 	ad.dimension = QAWS_DIMENSION_2D; ad.segments = &as; ad.segment_count = 1;
-	qaws_curve_create_arc(&ad, &cv[0]);
+	qaws_curve_create_arc(&cv[0], &ad);
 	memset(&bd, 0, sizeof(bd));
 	bd.dimension = QAWS_DIMENSION_2D; bd.degree = 3; bd.control_points = bcp; bd.control_point_count = 4;
-	qaws_curve_create_bezier(&bd, &cv[1]);
+	qaws_curve_create_bezier(&cv[1], &bd);
 	memset(&pd, 0, sizeof(pd));
 	pd.curves = (qaws_curve const* const*)cv; pd.curve_count = 2; pd.dimension = 2; pd.edge_length = (qaws_scalar)0.15;
 	s0 = qaws_repulsive_polyline_from_curves(NULL, NULL, NULL, NULL, &nv, &ne, 0, 0, &pd);   /* sizing */
@@ -313,7 +313,7 @@ static void test_adapter(void)
 	for (i = 0; s1 == QAWS_STATUS_OK && i < nv; i++)
 	{
 		qaws_eval_result_2d ev;
-		qaws_curve_evaluate_2d(cv[src[i]], t[i], QAWS_EVAL_FLAG_POSITION, &ev);
+		qaws_curve_evaluate_2d(&ev, cv[src[i]], t[i], QAWS_EVAL_FLAG_POSITION);
 		at = fmax(at, hypot((double)ev.position.x - x[2 * i], (double)ev.position.y - x[2 * i + 1]));
 		loop_v += src[i] == 0;
 	}
@@ -336,14 +336,14 @@ static void test_adapter(void)
 		for (i = 0; s3 == QAWS_STATUS_OK && i < nv; i++)
 		{
 			qaws_eval_result_2d ev;
-			qaws_curve_evaluate_2d(fit[src[i]], t[i], QAWS_EVAL_FLAG_POSITION, &ev);
+			qaws_curve_evaluate_2d(&ev, fit[src[i]], t[i], QAWS_EVAL_FLAG_POSITION);
 			back = fmax(back, hypot((double)ev.position.x - x[2 * i], (double)ev.position.y - x[2 * i + 1]));
 		}
 		if (s3 == QAWS_STATUS_OK)
 		{
 			/* the loop closes at the source's end parameter */
 			qaws_eval_result_2d ev;
-			qaws_curve_evaluate_2d(fit[0], qaws_curve_get_parameter_range(cv[0]).max_value, QAWS_EVAL_FLAG_POSITION, &ev);
+			qaws_curve_evaluate_2d(&ev, fit[0], qaws_curve_get_parameter_range(cv[0]).max_value, QAWS_EVAL_FLAG_POSITION);
 			back = fmax(back, hypot((double)ev.position.x - x[0], (double)ev.position.y - x[1]));
 		}
 	}

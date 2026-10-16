@@ -301,9 +301,9 @@ static qaws_curve_vtable const trajectory_vtable = {
  * ------------------------------------------------------------------------- */
 
 qaws_status qaws_curve_create_trajectory_ex(
+	qaws_curve **out_curve,
 	qaws_trajectory_desc const *desc,
-	qaws_allocator const *allocator,
-	qaws_curve **out_curve)
+	qaws_allocator const *allocator)
 {
 	unsigned int dim_count;
 	unsigned int key_count;
@@ -527,10 +527,10 @@ qaws_status qaws_curve_create_trajectory_ex(
 			tmp_d = tmp_c + span_count;
 
 			qaws_trajectory_prepare_2d(
-				(const qaws_vec2 *)impl->key_positions,
-				impl->key_times, key_count, desc->degree,
-				impl->closed,
-				tmp_a, tmp_b, tmp_c, tmp_d, &prep_span_count);
+				tmp_a,
+				tmp_b, tmp_c, tmp_d,
+				&prep_span_count,
+				(const qaws_vec2 *)impl->key_positions, impl->key_times, key_count, desc->degree, impl->closed);
 
 			for (s = 0; s < span_count; s++) {
 				impl->span_coeffs[s * 8 + 0] = tmp_a[s].x;
@@ -563,10 +563,10 @@ qaws_status qaws_curve_create_trajectory_ex(
 			tmp_d = tmp_c + span_count;
 
 			qaws_trajectory_prepare_3d(
-				(const qaws_vec3 *)impl->key_positions,
-				impl->key_times, key_count, desc->degree,
-				impl->closed,
-				tmp_a, tmp_b, tmp_c, tmp_d, &prep_span_count);
+				tmp_a,
+				tmp_b, tmp_c, tmp_d,
+				&prep_span_count,
+				(const qaws_vec3 *)impl->key_positions, impl->key_times, key_count, desc->degree, impl->closed);
 
 			for (s = 0; s < span_count; s++) {
 				impl->span_coeffs[s * 12 + 0]  = tmp_a[s].x;
@@ -593,8 +593,8 @@ qaws_status qaws_curve_create_trajectory_ex(
 }
 
 qaws_status qaws_curve_create_trajectory(
-	qaws_trajectory_desc const *desc,
-	qaws_curve **out_curve)
+	qaws_curve **out_curve,
+	qaws_trajectory_desc const *desc)
 {
-	return qaws_curve_create_trajectory_ex(desc, NULL, out_curve);
+	return qaws_curve_create_trajectory_ex(out_curve, desc, NULL);
 }

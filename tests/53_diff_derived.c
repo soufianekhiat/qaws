@@ -54,7 +54,7 @@ static qaws_curve* make_child(unsigned int dim, unsigned int cp_count, qaws_scal
 		d.degree = cp_count - 1;
 		d.control_points = p;
 		d.control_point_count = cp_count;
-		qaws_curve_create_bezier(&d, &c);
+		qaws_curve_create_bezier(&c, &d);
 	}
 	else
 	{
@@ -66,7 +66,7 @@ static qaws_curve* make_child(unsigned int dim, unsigned int cp_count, qaws_scal
 		d.control_point_count = cp_count;
 		d.knots = g_knots_6;
 		d.knot_count = cp_count + 4;
-		qaws_curve_create_bspline(&d, &c);
+		qaws_curve_create_bspline(&c, &d);
 	}
 	return c;
 }

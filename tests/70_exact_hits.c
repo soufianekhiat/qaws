@@ -38,7 +38,7 @@ static qaws_curve* eh_curve(ref_exact_hits const* r)
 		d.control_point_count = (unsigned int)n;
 		d.weights = ws;
 		d.weight_count = (unsigned int)n;
-		qaws_curve_create_rational_bezier(&d, &c);
+		qaws_curve_create_rational_bezier(&c, &d);
 	}
 	else
 	{
@@ -48,7 +48,7 @@ static qaws_curve* eh_curve(ref_exact_hits const* r)
 		d.degree = (unsigned int)r->degree;
 		d.control_points = cps;
 		d.control_point_count = (unsigned int)n;
-		qaws_curve_create_bezier(&d, &c);
+		qaws_curve_create_bezier(&c, &d);
 	}
 	return c;
 }
@@ -149,7 +149,7 @@ static void test_polyline(void)
 	d.control_point_count = 5;
 	d.knots = knots;
 	d.knot_count = 7;
-	qaws_curve_create_bspline(&d, &c);
+	qaws_curve_create_bspline(&c, &d);
 	qaws_exact_curve_prepare(NULL, c, &e, NULL);
 	TEST_ASSERT(qaws_exact_curve_line_hits(e, y1a, y1b, 0, hits, 8, &count) == QAWS_STATUS_OK && count == 2 &&
 		hits[0].kind == QAWS_EXACT_HIT_OVERLAP && hits[0].t_lo == 1 && hits[0].t_hi == 2 && hits[1].kind == QAWS_EXACT_HIT_POINT &&

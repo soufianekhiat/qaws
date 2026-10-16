@@ -21,17 +21,17 @@ static void test_trajectory(void)
 	desc.closed = 0;
 
 	qaws_curve* curve = NULL;
-	qaws_status s = qaws_curve_create_trajectory(&desc, &curve);
+	qaws_status s = qaws_curve_create_trajectory(&curve, &desc);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(qaws_curve_get_kind(curve) == QAWS_CURVE_KIND_TRAJECTORY, "kind == TRAJECTORY");
 
 	qaws_eval_result_2d r;
-	s = qaws_curve_evaluate_2d(curve, (qaws_scalar)0.0, QAWS_EVAL_FLAG_POSITION, &r);
+	s = qaws_curve_evaluate_2d(&r, curve, (qaws_scalar)0.0, QAWS_EVAL_FLAG_POSITION);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(approx_eq(r.position.x, (qaws_scalar)0.0), "start x");
 	TEST_ASSERT(approx_eq(r.position.y, (qaws_scalar)0.0), "start y");
 
-	s = qaws_curve_evaluate_2d(curve, (qaws_scalar)1.0, QAWS_EVAL_FLAG_POSITION, &r);
+	s = qaws_curve_evaluate_2d(&r, curve, (qaws_scalar)1.0, QAWS_EVAL_FLAG_POSITION);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(approx_eq(r.position.x, (qaws_scalar)5.0), "key1 x");
 	TEST_ASSERT(approx_eq(r.position.y, (qaws_scalar)0.0), "key1 y");

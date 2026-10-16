@@ -560,8 +560,8 @@ static int tm_cross_split(qaws_mesh_2d* m, unsigned int s, unsigned int o)
 		{
 			qaws_eval_result_2d es, eo;
 			double fx, fy, det, dts, dto;
-			qaws_curve_evaluate_2d(cs, (qaws_scalar)ts, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &es);
-			qaws_curve_evaluate_2d(co, (qaws_scalar)to, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &eo);
+			qaws_curve_evaluate_2d(&es, cs, (qaws_scalar)ts, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1);
+			qaws_curve_evaluate_2d(&eo, co, (qaws_scalar)to, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1);
 			fx = (double)es.position.x - eo.position.x;
 			fy = (double)es.position.y - eo.position.y;
 			/* [Cs' -Co'] (dts, dto) = -f */
@@ -578,7 +578,7 @@ static int tm_cross_split(qaws_mesh_2d* m, unsigned int s, unsigned int o)
 		}
 		{
 			qaws_eval_result_2d es;
-			qaws_curve_evaluate_2d(cs, (qaws_scalar)ts, QAWS_EVAL_FLAG_POSITION, &es);
+			qaws_curve_evaluate_2d(&es, cs, (qaws_scalar)ts, QAWS_EVAL_FLAG_POSITION);
 			if (hypot((double)es.position.x - x[0], (double)es.position.y - x[1]) < 4 * hypot(B[0] - A[0], B[1] - A[1]) + 4 * hypot(Q[0] - P[0], Q[1] - P[1]))
 			{
 				x[0] = es.position.x; x[1] = es.position.y;
@@ -770,7 +770,7 @@ static int tm_classify(qaws_mesh_2d* m)
 static void tm_eval(qaws_curve const* c, double t, double* p)
 {
 	qaws_eval_result_2d r;
-	qaws_curve_evaluate_2d(c, (qaws_scalar)t, QAWS_EVAL_FLAG_POSITION, &r);
+	qaws_curve_evaluate_2d(&r, c, (qaws_scalar)t, QAWS_EVAL_FLAG_POSITION);
 	p[0] = r.position.x;
 	p[1] = r.position.y;
 }
@@ -1382,7 +1382,7 @@ qaws_status qaws_triangulate_region_2d(qaws_triangulate_desc const* d, qaws_mesh
 		qd.points = pts;
 		qd.point_count = 2 * ncons;
 		qd.max_distance = (qaws_scalar)(sizeof(qaws_scalar) == 4 ? 1e-4 * m->ext : 1e-8 * m->ext);
-		if (qaws_curve_batch_find_closest(&qd, cl, NULL) == QAWS_STATUS_OK)
+		if (qaws_curve_batch_find_closest(cl, NULL, &qd) == QAWS_STATUS_OK)
 			for (i = 0; i < 2 * ncons; i++)
 				if (cl[i].curve != QAWS_CURVE_BATCH_NONE)
 				{

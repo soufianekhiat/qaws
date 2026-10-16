@@ -70,7 +70,7 @@ static qaws_curve* sm_curve(int kind, qaws_scalar const* x)
 		d.knot_count = 10;
 		d.weights = x + 18;
 		d.weight_count = 6;
-		qaws_curve_create_nurbs(&d, &c);
+		qaws_curve_create_nurbs(&c, &d);
 	}
 	else
 	{
@@ -82,7 +82,7 @@ static qaws_curve* sm_curve(int kind, qaws_scalar const* x)
 		d.control_point_count = 6;
 		d.knots = g_sm_knots;
 		d.knot_count = 10;
-		qaws_curve_create_bspline(&d, &c);
+		qaws_curve_create_bspline(&c, &d);
 	}
 	return c;
 }
@@ -183,7 +183,7 @@ static void test_straight(void)
 	bd.degree = 3;
 	bd.control_points = cps;
 	bd.control_point_count = 4;
-	qaws_curve_create_bezier(&bd, &c);
+	qaws_curve_create_bezier(&c, &bd);
 	for (i = 0; i < 5; i++)
 	{
 		tg[i].distance = 0;
@@ -453,7 +453,7 @@ static void test_traversal(void)
 		d.end_time = (qaws_scalar)6.0;
 		d.easing = easings[p];
 		d.wrap_mode = wraps[p];
-		TEST_ASSERT_STATUS(qaws_traversal_create(c, &d, &tr));
+		TEST_ASSERT_STATUS(qaws_traversal_create(&tr, c, &d));
 		for (i = 0; i < SM_SAMPLES; i++)
 		{
 			tin[i] = (qaws_scalar)times[i];
@@ -470,7 +470,7 @@ static void test_traversal(void)
 		for (i = 0; i < SM_SAMPLES; i++)
 		{
 			qaws_eval_result_3d e;
-			qaws_traversal_evaluate_3d(tr, tin[i], QAWS_EVAL_FLAG_POSITION, &e);
+			qaws_traversal_evaluate_3d(&e, tr, tin[i], QAWS_EVAL_FLAG_POSITION);
 			ok_v &= diff_close(val[i].position.x, e.position.x, 1e-3) && diff_close(val[i].position.y, e.position.y, 1e-3) &&
 				diff_close(val[i].position.z, e.position.z, 1e-3);
 			ok_1 &= diff_close(t1[i].position.x, (vp[i].position.x - vm[i].position.x) / (2 * h), tol) &&

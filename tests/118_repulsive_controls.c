@@ -66,14 +66,14 @@ static void rc_curves(qaws_curve** c)
 	}
 	memset(&bd, 0, sizeof(bd));
 	bd.dimension = QAWS_DIMENSION_3D; bd.degree = 3; bd.control_points = p[0]; bd.control_point_count = 8; bd.knots = knots; bd.knot_count = 12;
-	qaws_curve_create_bspline(&bd, &c[0]);
+	qaws_curve_create_bspline(&c[0], &bd);
 	memset(&zd, 0, sizeof(zd));
 	zd.dimension = QAWS_DIMENSION_3D; zd.degree = 3; zd.control_points = p[1]; zd.control_point_count = 4;
-	qaws_curve_create_bezier(&zd, &c[1]);
+	qaws_curve_create_bezier(&c[1], &zd);
 	memset(&nd, 0, sizeof(nd));
 	nd.dimension = QAWS_DIMENSION_3D; nd.degree = 3; nd.control_points = p[2]; nd.control_point_count = 8; nd.knots = knots; nd.knot_count = 12;
 	nd.weights = w; nd.weight_count = 8;
-	qaws_curve_create_nurbs(&nd, &c[2]);
+	qaws_curve_create_nurbs(&c[2], &nd);
 }
 
 static void test_controls(void)
@@ -165,7 +165,7 @@ static void test_controls(void)
 						if (src[i] == ci)
 						{
 							qaws_eval_result_3d er;
-							qaws_curve_evaluate_3d(cc, ts[i], QAWS_EVAL_FLAG_POSITION, &er);
+							qaws_curve_evaluate_3d(&er, cc, ts[i], QAWS_EVAL_FLAG_POSITION);
 							rebuilt = fmax(rebuilt, fabs((double)er.position.x - x[3 * i]) + fabs((double)er.position.y - x[3 * i + 1]) + fabs((double)er.position.z - x[3 * i + 2]));
 						}
 					if (!cc) rebuilt = 1;

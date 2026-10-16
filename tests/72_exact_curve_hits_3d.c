@@ -34,7 +34,7 @@ static qaws_curve* e3_curve(int degree, int rational, long long const* cp, long 
 		d.control_point_count = (unsigned int)n;
 		d.weights = ws;
 		d.weight_count = (unsigned int)n;
-		qaws_curve_create_rational_bezier(&d, &c);
+		qaws_curve_create_rational_bezier(&c, &d);
 	}
 	else
 	{
@@ -44,7 +44,7 @@ static qaws_curve* e3_curve(int degree, int rational, long long const* cp, long 
 		d.degree = (unsigned int)degree;
 		d.control_points = cps;
 		d.control_point_count = (unsigned int)n;
-		qaws_curve_create_bezier(&d, &c);
+		qaws_curve_create_bezier(&c, &d);
 	}
 	return c;
 }
@@ -121,9 +121,9 @@ static void test_vertical(void)
 	d.degree = 2;
 	d.control_points = a3;
 	d.control_point_count = 3;
-	qaws_curve_create_bezier(&d, &ca);
+	qaws_curve_create_bezier(&ca, &d);
 	d.control_points = b3;
-	qaws_curve_create_bezier(&d, &cb);
+	qaws_curve_create_bezier(&cb, &d);
 	qaws_exact_curve_prepare(NULL, ca, &ea, NULL);
 	qaws_exact_curve_prepare(NULL, cb, &eb, NULL);
 	/* z_a = 4 t (1 - t) * 2, z_b = 2 (1 - t)^2 - 4 t (1 - t) + 2 t^2, same x = y = 2t: equal at 8 t (1 - t) = 2 - 8 t (1 - t): t (1 - t) = 1/8 */

@@ -25,8 +25,8 @@ Only requested quantities are computed. The `valid_flags` field in the result te
 
 ```c
 qaws_eval_result_2d result;
-qaws_status s = qaws_curve_evaluate_2d(curve, 0.5f,
-    QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &result);
+qaws_status s = qaws_curve_evaluate_2d(&result, curve,
+    0.5f, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1);
 
 // result.position.x, result.position.y
 // result.d1.x, result.d1.y
@@ -45,10 +45,10 @@ For piecewise curves, you can evaluate a specific span directly:
 
 ```c
 qaws_eval_result_2d result;
-qaws_curve_evaluate_span_2d(curve,
-    0,       // span index (0 to span_count-1)
-    0.5f,    // local parameter within span [0, 1]
-    QAWS_EVAL_FLAG_POSITION, &result);
+qaws_curve_evaluate_span_2d(&result,
+    curve,       0,    // span index (0 to span_count-1)
+    0.5f, // local parameter within span [0, 1]
+    QAWS_EVAL_FLAG_POSITION);
 ```
 
 This is useful when you already know which span you're in.
@@ -59,8 +59,8 @@ All evaluation functions have 3D variants:
 
 ```c
 qaws_eval_result_3d result;
-qaws_curve_evaluate_3d(curve, 0.5f,
-    QAWS_EVAL_FLAG_POSITION, &result);
+qaws_curve_evaluate_3d(&result, curve,
+    0.5f, QAWS_EVAL_FLAG_POSITION);
 // result.position.x, .y, .z
 ```
 
@@ -110,27 +110,27 @@ for (int i = 0; i < 256; i++)
     params[i] = (qaws_scalar)i / 255.0f;
 
 qaws_status s = qaws_curve_evaluate_batch_2d(
-    curve, params, 256,
-    QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1,
-    results);
+    results, curve, params,
+    256,
+    QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1);
 ```
 
 **Signatures** (from `qaws_eval.h`):
 
 ```c
 qaws_status qaws_curve_evaluate_batch_2d(
+    qaws_eval_result_2d* out_results,
     qaws_curve const* curve,
     qaws_scalar const* parameters,
     unsigned int count,
-    unsigned int eval_flags,
-    qaws_eval_result_2d* out_results);
+    unsigned int eval_flags);
 
 qaws_status qaws_curve_evaluate_batch_3d(
+    qaws_eval_result_3d* out_results,
     qaws_curve const* curve,
     qaws_scalar const* parameters,
     unsigned int count,
-    unsigned int eval_flags,
-    qaws_eval_result_3d* out_results);
+    unsigned int eval_flags);
 ```
 
 `out_results` is a caller-allocated array of `count` elements. On partial failure the call evaluates as many parameters as possible and returns the first error status; entries where `out_results[i].valid_flags == 0` indicate that evaluation failed for that parameter.
@@ -156,8 +156,8 @@ qaws_scalar u_params[64], v_params[64];
 qaws_surface_eval_result results[64];
 // ... fill u_params, v_params ...
 qaws_status s = qaws_surface_evaluate_batch(
-    surface, u_params, v_params, 64,
-    QAWS_EVAL_FLAG_POSITION, results);
+    results, surface, u_params, v_params,
+    64, QAWS_EVAL_FLAG_POSITION);
 ```
 
 `qaws_surface_evaluate_batch` takes parallel arrays of `u` and `v` parameters plus a count, just like the curve batch functions.
@@ -229,8 +229,8 @@ This is the mechanism that enables non-C backends: on the CPU, `qaws_prepare_*` 
 ```c
 // CPU side: prepare coefficients
 qaws_vec3 a[N], b[N], c[N], d[N];
-qaws_hermite_prepare_3d(points, tangents, point_count,
-    a, b, c, d);
+qaws_hermite_prepare_3d(a, b, c,
+    d, points, tangents, point_count);
 // Upload a, b, c, d arrays to GPU buffer
 
 // GPU side (HLSL/GLSL): evaluate using core header
@@ -247,12 +247,12 @@ For cases where you want full `qaws_curve` API compatibility but cannot use heap
 qaws_curve_inline ic;
 qaws_vec3 pts[] = {{0,0,0}, {1,2,3}, {4,5,6}, {7,8,9}};
 qaws_bezier_desc desc = { QAWS_DIMENSION_3D, 3, pts, 4 };
-qaws_curve_init_bezier_inline(&desc, &ic);
+qaws_curve_init_bezier_inline(&ic, &desc);
 
 // Use via &ic.curve — works with all evaluation functions
 qaws_eval_result_3d result;
-qaws_curve_evaluate_3d(&ic.curve, 0.5f,
-    QAWS_EVAL_FLAG_POSITION, &result);
+qaws_curve_evaluate_3d(&result, &ic.curve,
+    0.5f, QAWS_EVAL_FLAG_POSITION);
 ```
 
 **Available inline constructors:**

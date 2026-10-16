@@ -72,7 +72,7 @@ struct qaws_region_sampler
 static qaws_status rs_eval(qaws_curve const* c, double t, double* p, double* d)
 {
 	qaws_eval_result_2d r;
-	qaws_status s = qaws_curve_evaluate_2d(c, (qaws_scalar)t, QAWS_EVAL_FLAG_POSITION | (d ? QAWS_EVAL_FLAG_D1 : 0), &r);
+	qaws_status s = qaws_curve_evaluate_2d(&r, c, (qaws_scalar)t, QAWS_EVAL_FLAG_POSITION | (d ? QAWS_EVAL_FLAG_D1 : 0));
 	if (s != QAWS_STATUS_OK)
 	{
 		/* (zeros: no caller reads garbage) */

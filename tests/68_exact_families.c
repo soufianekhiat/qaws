@@ -39,7 +39,7 @@ static qaws_curve* ef_curve(ref_exact_family const* r)
 		d.derivatives = b;
 		d.point_count = (unsigned int)r->n;
 		d.derivative_count = (unsigned int)r->n;
-		qaws_curve_create_hermite(&d, &c);
+		qaws_curve_create_hermite(&c, &d);
 	}
 	else if (r->family <= 2)
 	{
@@ -52,7 +52,7 @@ static qaws_curve* ef_curve(ref_exact_family const* r)
 		d.control_point_count = (unsigned int)r->n;
 		d.parameterization = QAWS_PARAMETERIZATION_UNIFORM;
 		d.closed = r->family == 2;
-		qaws_curve_create_catmull_rom(&d, &c);
+		qaws_curve_create_catmull_rom(&c, &d);
 	}
 	else
 	{
@@ -66,7 +66,7 @@ static qaws_curve* ef_curve(ref_exact_family const* r)
 		d.coefficient_count = (unsigned int)r->n;
 		d.t_min = (qaws_scalar)(r->t0n / 16.0);
 		d.t_max = (qaws_scalar)(r->t1n / 16.0);
-		qaws_curve_create_polynomial(&d, &c);
+		qaws_curve_create_polynomial(&c, &d);
 	}
 	return c;
 }
@@ -122,12 +122,12 @@ static void test_reference(void)
 				memset(&f, 0, sizeof(f));
 				qaws_exact_curve_evaluate(e, t, (unsigned int)r->k, out, NULL);
 				if (r->dim == 3)
-					qaws_curve_evaluate_3d(c, (qaws_scalar)t, flags, &f);
+					qaws_curve_evaluate_3d(&f, c, (qaws_scalar)t, flags);
 				else
 				{
 					qaws_eval_result_2d f2;
 					memset(&f2, 0, sizeof(f2));
-					qaws_curve_evaluate_2d(c, (qaws_scalar)t, flags, &f2);
+					qaws_curve_evaluate_2d(&f2, c, (qaws_scalar)t, flags);
 					f.position.x = f2.position.x; f.position.y = f2.position.y;
 					f.d1.x = f2.d1.x; f.d1.y = f2.d1.y;
 					f.d2.x = f2.d2.x; f.d2.y = f2.d2.y;

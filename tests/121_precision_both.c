@@ -38,10 +38,10 @@ static void test_both(void)
 	}
 	d32.dimension = QAWS_DIMENSION_2D; d32.degree = 3; d32.control_points = p32; d32.control_point_count = 4;
 	d64.dimension = QAWS_DIMENSION_2D; d64.degree = 3; d64.control_points = p64; d64.control_point_count = 4;
-	s32 = qaws_curve_create_bezier_f32(&d32, &c32);
-	s64 = qaws_curve_create_bezier_f64(&d64, &c64);
-	if (s32 == QAWS_STATUS_OK) s32 = qaws_curve_evaluate_2d_f32(c32, (qaws_f32)t, QAWS_EVAL_FLAG_POSITION, &r32);
-	if (s64 == QAWS_STATUS_OK) s64 = qaws_curve_evaluate_2d_f64(c64, t, QAWS_EVAL_FLAG_POSITION, &r64);
+	s32 = qaws_curve_create_bezier_f32(&c32, &d32);
+	s64 = qaws_curve_create_bezier_f64(&c64, &d64);
+	if (s32 == QAWS_STATUS_OK) s32 = qaws_curve_evaluate_2d_f32(&r32, c32, (qaws_f32)t, QAWS_EVAL_FLAG_POSITION);
+	if (s64 == QAWS_STATUS_OK) s64 = qaws_curve_evaluate_2d_f64(&r64, c64, t, QAWS_EVAL_FLAG_POSITION);
 	e32 = fmax(fabs((double)r32.position.x - ex), fabs((double)r32.position.y - ey));
 	e64 = fmax(fabs(r64.position.x - ex), fabs(r64.position.y - ey));
 	agree = fmax(fabs((double)r32.position.x - r64.position.x), fabs((double)r32.position.y - r64.position.y));

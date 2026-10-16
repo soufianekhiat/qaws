@@ -36,7 +36,7 @@ static qaws_curve* eb_curve(ref_exact_bezier const* r, double wscale)
 		d.control_point_count = (unsigned int)n;
 		d.weights = ws;
 		d.weight_count = (unsigned int)n;
-		qaws_curve_create_rational_bezier(&d, &c);
+		qaws_curve_create_rational_bezier(&c, &d);
 	}
 	else
 	{
@@ -46,7 +46,7 @@ static qaws_curve* eb_curve(ref_exact_bezier const* r, double wscale)
 		d.degree = (unsigned int)r->degree;
 		d.control_points = cps;
 		d.control_point_count = (unsigned int)n;
-		qaws_curve_create_bezier(&d, &c);
+		qaws_curve_create_bezier(&c, &d);
 	}
 	return c;
 }
@@ -116,11 +116,11 @@ static void test_reference(void)
 				unsigned int flags = QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2 | QAWS_EVAL_FLAG_D3;
 				qaws_exact_curve_evaluate(e, t, (unsigned int)r->k, out, NULL);
 				if (r->dim == 3)
-					qaws_curve_evaluate_3d(c, (qaws_scalar)t, flags, &f);
+					qaws_curve_evaluate_3d(&f, c, (qaws_scalar)t, flags);
 				else
 				{
 					qaws_eval_result_2d f2;
-					qaws_curve_evaluate_2d(c, (qaws_scalar)t, flags, &f2);
+					qaws_curve_evaluate_2d(&f2, c, (qaws_scalar)t, flags);
 					f.position.x = f2.position.x; f.position.y = f2.position.y; f.position.z = 0;
 					f.d1.x = f2.d1.x; f.d1.y = f2.d1.y; f.d1.z = 0;
 					f.d2.x = f2.d2.x; f.d2.y = f2.d2.y; f.d2.z = 0;
@@ -162,7 +162,7 @@ static void test_reports(void)
 	d.degree = 1;
 	d.control_points = cps;
 	d.control_point_count = 2;
-	qaws_curve_create_bezier(&d, &c);
+	qaws_curve_create_bezier(&c, &d);
 	qaws_exact_desc_default(&desc);
 	TEST_ASSERT(qaws_exact_curve_prepare(&desc, c, &e, &rep) == QAWS_STATUS_EXACT_RANGE_EXCEEDED,
 		"a coordinate past the lattice range is reported");

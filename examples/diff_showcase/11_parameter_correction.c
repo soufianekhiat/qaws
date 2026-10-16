@@ -38,7 +38,7 @@ static qaws_curve* pc_fit(qaws_scalar const* data, qaws_scalar const* t, qaws_di
 	if (map)
 		qaws_curve_fit_bspline_diff(&c, map, &desc);
 	else
-		qaws_curve_fit_bspline(&desc, &c);
+		qaws_curve_fit_bspline(&c, &desc);
 	return c;
 }
 
@@ -51,7 +51,7 @@ static double pc_error(qaws_curve const* c, qaws_scalar const* data, qaws_scalar
 	{
 		qaws_eval_result_2d r;
 		double dx, dy;
-		qaws_curve_evaluate_2d(c, t[k], QAWS_EVAL_FLAG_POSITION, &r);
+		qaws_curve_evaluate_2d(&r, c, t[k], QAWS_EVAL_FLAG_POSITION);
 		dx = r.position.x - data[2 * k];
 		dy = r.position.y - data[2 * k + 1];
 		e += dx * dx + dy * dy;
@@ -101,7 +101,7 @@ static double pc_gradient(qaws_scalar const* data, qaws_scalar const* t, qaws_sc
 	{
 		qaws_eval_result_2d r;
 		double dx, dy;
-		qaws_curve_evaluate_2d(c, t[k], QAWS_EVAL_FLAG_POSITION, &r);
+		qaws_curve_evaluate_2d(&r, c, t[k], QAWS_EVAL_FLAG_POSITION);
 		dx = r.position.x - data[2 * k];
 		dy = r.position.y - data[2 * k + 1];
 		e += dx * dx + dy * dy;
@@ -167,7 +167,7 @@ static void pc_hoschek_step(qaws_scalar const* data, qaws_scalar* t)
 		{
 			qaws_eval_result_2d r;
 			double dx, dy, num, den;
-			qaws_curve_evaluate_2d(c, t[k], QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2, &r);
+			qaws_curve_evaluate_2d(&r, c, t[k], QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2);
 			dx = r.position.x - data[2 * k];
 			dy = r.position.y - data[2 * k + 1];
 			num = dx * r.d1.x + dy * r.d1.y;
@@ -183,7 +183,7 @@ static void pc_hoschek_step(qaws_scalar const* data, qaws_scalar* t)
 					double tn = t[k] + step, ex, ey;
 					if (tn < lo) tn = lo;
 					if (tn > hi) tn = hi;
-					qaws_curve_evaluate_2d(c, (qaws_scalar)tn, QAWS_EVAL_FLAG_POSITION, &q);
+					qaws_curve_evaluate_2d(&q, c, (qaws_scalar)tn, QAWS_EVAL_FLAG_POSITION);
 					ex = q.position.x - data[2 * k];
 					ey = q.position.y - data[2 * k + 1];
 					if (ex * ex + ey * ey < dx * dx + dy * dy)
@@ -210,7 +210,7 @@ static void pc_panel(svg* s, viewport const* v, char const* label, qaws_scalar c
 	for (k = 0; k < PC_M; k++)
 	{
 		qaws_eval_result_2d r;
-		qaws_curve_evaluate_2d(c, t[k], QAWS_EVAL_FLAG_POSITION, &r);
+		qaws_curve_evaluate_2d(&r, c, t[k], QAWS_EVAL_FLAG_POSITION);
 		svg_line(s, vx(v, data[2 * k]), vy(v, data[2 * k + 1]), vx(v, r.position.x), vy(v, r.position.y), "#cf222e", 1.6, 0.9);
 		svg_circle(s, vx(v, r.position.x), vy(v, r.position.y), 2.2, color, color);
 	}

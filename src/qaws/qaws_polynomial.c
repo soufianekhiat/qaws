@@ -228,7 +228,7 @@ static qaws_status polynomial_rebuild(qaws_curve const* curve, qaws_diff_views c
 	d.coefficient_count = impl->coefficient_count;
 	d.t_min = curve->parameter_range.min_value;
 	d.t_max = curve->parameter_range.max_value;
-	st = qaws_curve_create_polynomial(&d, out_curve);
+	st = qaws_curve_create_polynomial(out_curve, &d);
 	qaws_internal_dealloc(NULL, owned);
 	return st;
 }
@@ -261,8 +261,8 @@ static qaws_curve_vtable const polynomial_vtable = {
 /* -------------------------------------------------------------------------- */
 
 qaws_status qaws_curve_create_polynomial(
-	qaws_polynomial_desc const* desc,
-	qaws_curve** out_curve)
+	qaws_curve** out_curve,
+	qaws_polynomial_desc const* desc)
 {
 	unsigned int dim_count;
 	size_t coeff_size;

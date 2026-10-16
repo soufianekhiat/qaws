@@ -51,7 +51,7 @@ static qaws_status composite_eval_span_2d(
 	seg = impl->segments[span_index];
 	composite_map_parameter(seg, local_t, &seg_param, &scale);
 
-	status = qaws_curve_evaluate_2d(seg, seg_param, eval_flags, out_result);
+	status = qaws_curve_evaluate_2d(out_result, seg, seg_param, eval_flags);
 	if (status != QAWS_STATUS_OK)
 		return status;
 
@@ -91,7 +91,7 @@ static qaws_status composite_eval_span_3d(
 	seg = impl->segments[span_index];
 	composite_map_parameter(seg, local_t, &seg_param, &scale);
 
-	status = qaws_curve_evaluate_3d(seg, seg_param, eval_flags, out_result);
+	status = qaws_curve_evaluate_3d(out_result, seg, seg_param, eval_flags);
 	if (status != QAWS_STATUS_OK)
 		return status;
 
@@ -153,20 +153,20 @@ static int composite_is_closed(qaws_curve const* curve)
 	last  = impl->segments[impl->segment_count - 1];
 
 	if (curve->dimension == QAWS_DIMENSION_2D) {
-		if (qaws_curve_evaluate_2d(first, first->parameter_range.min_value,
-				QAWS_EVAL_FLAG_POSITION, &r0) != QAWS_STATUS_OK)
+		if (qaws_curve_evaluate_2d(&r0, first,
+				first->parameter_range.min_value, QAWS_EVAL_FLAG_POSITION) != QAWS_STATUS_OK)
 			return 0;
-		if (qaws_curve_evaluate_2d(last, last->parameter_range.max_value,
-				QAWS_EVAL_FLAG_POSITION, &r1) != QAWS_STATUS_OK)
+		if (qaws_curve_evaluate_2d(&r1, last,
+				last->parameter_range.max_value, QAWS_EVAL_FLAG_POSITION) != QAWS_STATUS_OK)
 			return 0;
 		dist_sq = (r1.position.x - r0.position.x) * (r1.position.x - r0.position.x)
 		        + (r1.position.y - r0.position.y) * (r1.position.y - r0.position.y);
 	} else {
-		if (qaws_curve_evaluate_3d(first, first->parameter_range.min_value,
-				QAWS_EVAL_FLAG_POSITION, &r0_3d) != QAWS_STATUS_OK)
+		if (qaws_curve_evaluate_3d(&r0_3d, first,
+				first->parameter_range.min_value, QAWS_EVAL_FLAG_POSITION) != QAWS_STATUS_OK)
 			return 0;
-		if (qaws_curve_evaluate_3d(last, last->parameter_range.max_value,
-				QAWS_EVAL_FLAG_POSITION, &r1_3d) != QAWS_STATUS_OK)
+		if (qaws_curve_evaluate_3d(&r1_3d, last,
+				last->parameter_range.max_value, QAWS_EVAL_FLAG_POSITION) != QAWS_STATUS_OK)
 			return 0;
 		dist_sq = (r1_3d.position.x - r0_3d.position.x) * (r1_3d.position.x - r0_3d.position.x)
 		        + (r1_3d.position.y - r0_3d.position.y) * (r1_3d.position.y - r0_3d.position.y)
@@ -333,8 +333,8 @@ static qaws_curve_vtable const composite_vtable = {
 /* ------------------------------------------------------------------ */
 
 qaws_status qaws_curve_create_composite(
-	qaws_composite_desc const* desc,
-	qaws_curve** out_curve)
+	qaws_curve** out_curve,
+	qaws_composite_desc const* desc)
 {
 	unsigned int i;
 	unsigned int max_degree;

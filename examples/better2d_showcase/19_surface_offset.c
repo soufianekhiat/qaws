@@ -25,9 +25,9 @@ static void sof_outline(svg* s, qaws_surface_region const* r, qaws_surface const
 				   them): segment by segment, the cuts left out */
 				unsigned int nc = 0, seg;
 				qaws_scalar probe[2], *cp;
-				qaws_curve_get_control_points(p.curves[ci], probe, 0, &nc);
+				qaws_curve_get_control_points(probe, &nc, p.curves[ci], 0);
 				cp = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 2 * (nc + 1));
-				qaws_curve_get_control_points(p.curves[ci], cp, nc, &nc);
+				qaws_curve_get_control_points(cp, &nc, p.curves[ci], nc);
 				for (seg = 0; seg + 1 < nc; seg++)
 				{
 					double a0 = cp[2 * seg], a1 = cp[2 * seg + 1], b0 = cp[2 * seg + 2], b1 = cp[2 * seg + 3];
@@ -56,7 +56,7 @@ static void sof_outline(svg* s, qaws_surface_region const* r, qaws_surface const
 			for (k = 0; k <= n; k++)
 			{
 				qaws_eval_result_2d e;
-				qaws_curve_evaluate_2d(p.curves[ci], (qaws_scalar)(rg.min_value + (rg.max_value - rg.min_value) * k / n), QAWS_EVAL_FLAG_POSITION, &e);
+				qaws_curve_evaluate_2d(&e, p.curves[ci], (qaws_scalar)(rg.min_value + (rg.max_value - rg.min_value) * k / n), QAWS_EVAL_FLAG_POSITION);
 				uv[2 * k] = e.position.x; uv[2 * k + 1] = e.position.y;
 			}
 			{

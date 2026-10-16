@@ -59,7 +59,7 @@ static qaws_curve* str_line(double x0, double y0, double x1, double y1)
 	cp[0] = (qaws_scalar)x0; cp[1] = (qaws_scalar)y0; cp[2] = (qaws_scalar)x1; cp[3] = (qaws_scalar)y1;
 	memset(&bd, 0, sizeof(bd));
 	bd.dimension = QAWS_DIMENSION_2D; bd.degree = 1; bd.control_points = cp; bd.control_point_count = 2;
-	qaws_curve_create_bezier(&bd, &c);
+	qaws_curve_create_bezier(&c, &bd);
 	return c;
 }
 
@@ -73,7 +73,7 @@ static qaws_curve* str_arc(double cx, double cy, double r, double a0, double a1)
 	g.angle_start = (qaws_scalar)a0; g.angle_end = (qaws_scalar)a1;
 	memset(&ad, 0, sizeof(ad));
 	ad.dimension = QAWS_DIMENSION_2D; ad.segments = &g; ad.segment_count = 1;
-	qaws_curve_create_arc(&ad, &c);
+	qaws_curve_create_arc(&c, &ad);
 	return c;
 }
 

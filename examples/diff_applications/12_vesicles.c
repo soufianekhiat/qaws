@@ -55,7 +55,7 @@ static qaws_curve* vs_curve(qaws_scalar const* p)
 	d.control_point_count = VS_N + 3;
 	d.knots = g_vs_knots;
 	d.knot_count = VS_N + 7;
-	qaws_curve_create_bspline(&d, &c);
+	qaws_curve_create_bspline(&c, &d);
 	return c;
 }
 
@@ -466,7 +466,7 @@ static void app_vesicles(void)
 		for (i = 0; i <= 400; i++)
 		{
 			qaws_eval_result_2d e;
-			qaws_curve_evaluate_2d(c, (qaws_scalar)(r.min_value + (r.max_value - r.min_value) * i / 400.0), QAWS_EVAL_FLAG_POSITION, &e);
+			qaws_curve_evaluate_2d(&e, c, (qaws_scalar)(r.min_value + (r.max_value - r.min_value) * i / 400.0), QAWS_EVAL_FLAG_POSITION);
 			xy[2 * i] = vx(&vp, e.position.x);
 			xy[2 * i + 1] = vy(&vp, e.position.y);
 			fprintf(s.f, "%s%.2f %.2f", i ? "L" : "M", xy[2 * i], xy[2 * i + 1]);

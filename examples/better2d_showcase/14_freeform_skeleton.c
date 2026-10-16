@@ -12,7 +12,7 @@ static qaws_curve* ffs_cubic(double x0, double y0, double x1, double y1, double 
 	cp[4] = (qaws_scalar)x2; cp[5] = (qaws_scalar)y2; cp[6] = (qaws_scalar)x3; cp[7] = (qaws_scalar)y3;
 	memset(&d, 0, sizeof(d));
 	d.dimension = QAWS_DIMENSION_2D; d.degree = 3; d.control_points = cp; d.control_point_count = 4;
-	qaws_curve_create_bezier(&d, &c);
+	qaws_curve_create_bezier(&c, &d);
 	return c;
 }
 
@@ -143,9 +143,9 @@ static void demo_freeform_skeleton(void)
 		d.dimension = QAWS_DIMENSION_2D; d.segments = &g; d.segment_count = 1;
 		memset(&g, 0, sizeof(g));
 		g.center[0] = (qaws_scalar)-0.6; g.center[1] = (qaws_scalar)0.1; g.radius = (qaws_scalar)0.3; g.angle_start = (qaws_scalar)(2 * pi); g.angle_end = 0;
-		qaws_curve_create_arc(&d, &sh[3].cs[1]);
+		qaws_curve_create_arc(&sh[3].cs[1], &d);
 		g.center[0] = (qaws_scalar)0.7; g.center[1] = (qaws_scalar)-0.2; g.radius = (qaws_scalar)0.22;
-		qaws_curve_create_arc(&d, &sh[3].cs[2]);
+		qaws_curve_create_arc(&sh[3].cs[2], &d);
 		sh[3].count[1] = 1; sh[3].count[2] = 1; sh[3].nloops = 3;
 		sh[3].box[0] = -1.65; sh[3].box[1] = 1.65; sh[3].box[2] = -1.05; sh[3].box[3] = 1.05;
 	}
@@ -156,10 +156,10 @@ static void demo_freeform_skeleton(void)
 		sh[4].name = "square with a wavy cubic edge";
 		memset(&bd, 0, sizeof(bd));
 		bd.dimension = QAWS_DIMENSION_2D; bd.degree = 1; bd.control_points = cp; bd.control_point_count = 2;
-		cp[0] = 0; cp[1] = 0; cp[2] = 2; cp[3] = 0; qaws_curve_create_bezier(&bd, &sh[4].cs[0]);
-		cp[0] = 2; cp[1] = 0; cp[2] = 2; cp[3] = 1.6; qaws_curve_create_bezier(&bd, &sh[4].cs[1]);
+		cp[0] = 0; cp[1] = 0; cp[2] = 2; cp[3] = 0; qaws_curve_create_bezier(&sh[4].cs[0], &bd);
+		cp[0] = 2; cp[1] = 0; cp[2] = 2; cp[3] = 1.6; qaws_curve_create_bezier(&sh[4].cs[1], &bd);
 		sh[4].cs[2] = ffs_cubic(2, 1.6, 1.4, 2.6, 0.6, 0.6, 0, 1.6);
-		cp[0] = 0; cp[1] = 1.6; cp[2] = 0; cp[3] = 0; qaws_curve_create_bezier(&bd, &sh[4].cs[3]);
+		cp[0] = 0; cp[1] = 1.6; cp[2] = 0; cp[3] = 0; qaws_curve_create_bezier(&sh[4].cs[3], &bd);
 		sh[4].count[0] = 4; sh[4].nloops = 1;
 		sh[4].box[0] = -0.05; sh[4].box[1] = 2.05; sh[4].box[2] = -0.05; sh[4].box[3] = 2.15;
 	}

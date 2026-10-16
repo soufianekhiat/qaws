@@ -16,7 +16,7 @@ static qaws_curve* ex_make(int which, char const** name)
 		qaws_bezier_desc d;
 		memset(&d, 0, sizeof(d));
 		d.dimension = QAWS_DIMENSION_2D; d.degree = 5; d.control_points = cp; d.control_point_count = 6;
-		qaws_curve_create_bezier(&d, &c);
+		qaws_curve_create_bezier(&c, &d);
 		*name = "Bezier (degree 5)";
 		break;
 	}
@@ -27,7 +27,7 @@ static qaws_curve* ex_make(int which, char const** name)
 		memset(&d, 0, sizeof(d));
 		d.dimension = QAWS_DIMENSION_2D; d.degree = 2; d.control_points = cp; d.control_point_count = 3;
 		d.weights = w; d.weight_count = 3;
-		qaws_curve_create_rational_bezier(&d, &c);
+		qaws_curve_create_rational_bezier(&c, &d);
 		*name = "rational Bezier (quarter circle)";
 		break;
 	}
@@ -39,7 +39,7 @@ static qaws_curve* ex_make(int which, char const** name)
 		memset(&d, 0, sizeof(d));
 		d.dimension = QAWS_DIMENSION_2D; d.degree = 3; d.control_points = cp; d.control_point_count = 7;
 		d.knots = kn; d.knot_count = 11;
-		qaws_curve_create_bspline(&d, &c);
+		qaws_curve_create_bspline(&c, &d);
 		*name = "cubic B-spline";
 		break;
 	}
@@ -60,7 +60,7 @@ static qaws_curve* ex_make(int which, char const** name)
 		memset(&d, 0, sizeof(d));
 		d.dimension = QAWS_DIMENSION_2D; d.degree = 2; d.control_points = cp; d.control_point_count = 9;
 		d.knots = kn; d.knot_count = 12; d.weights = w; d.weight_count = 9;
-		qaws_curve_create_nurbs(&d, &c);
+		qaws_curve_create_nurbs(&c, &d);
 		*name = "NURBS ellipse";
 		break;
 	}
@@ -71,7 +71,7 @@ static qaws_curve* ex_make(int which, char const** name)
 		memset(&d, 0, sizeof(d));
 		d.dimension = QAWS_DIMENSION_2D; d.degree = 3; d.points = p; d.derivatives = v;
 		d.point_count = 4; d.derivative_count = 4;
-		qaws_curve_create_hermite(&d, &c);
+		qaws_curve_create_hermite(&c, &d);
 		*name = "Hermite";
 		break;
 	}
@@ -84,7 +84,7 @@ static qaws_curve* ex_make(int which, char const** name)
 		d.dimension = QAWS_DIMENSION_2D; d.control_points = p; d.control_point_count = 6;
 		d.parameterization = which == 5 ? QAWS_PARAMETERIZATION_CENTRIPETAL : QAWS_PARAMETERIZATION_CHORDAL;
 		d.closed = which == 6;
-		qaws_curve_create_catmull_rom(&d, &c);
+		qaws_curve_create_catmull_rom(&c, &d);
 		*name = which == 5 ? "Catmull-Rom (centripetal)" : "Catmull-Rom (chordal, closed)";
 		break;
 	}
@@ -95,7 +95,7 @@ static qaws_curve* ex_make(int which, char const** name)
 		memset(&d, 0, sizeof(d));
 		d.dimension = QAWS_DIMENSION_2D; d.degree = 3; d.key_positions = p; d.key_count = 4;
 		d.key_times = t; d.key_time_count = 4;
-		qaws_curve_create_trajectory(&d, &c);
+		qaws_curve_create_trajectory(&c, &d);
 		*name = "trajectory";
 		break;
 	}
@@ -106,7 +106,7 @@ static qaws_curve* ex_make(int which, char const** name)
 		memset(&d, 0, sizeof(d));
 		d.dimension = QAWS_DIMENSION_2D; d.control_points = p; d.control_point_count = 5;
 		d.mode = QAWS_YUKSEL_MODE_CIRCULAR;
-		qaws_curve_create_yuksel(&d, &c);
+		qaws_curve_create_yuksel(&c, &d);
 		*name = "Yuksel (circular, fitted)";
 		break;
 	}
@@ -117,7 +117,7 @@ static qaws_curve* ex_make(int which, char const** name)
 		memset(&d, 0, sizeof(d));
 		d.dimension = QAWS_DIMENSION_2D; d.degree = 4; d.coefficients = co; d.coefficient_count = 5;
 		d.t_min = -1; d.t_max = 2;
-		qaws_curve_create_polynomial(&d, &c);
+		qaws_curve_create_polynomial(&c, &d);
 		*name = "polynomial (degree 4)";
 		break;
 	}
@@ -131,7 +131,7 @@ static qaws_curve* ex_make(int which, char const** name)
 		s[1].radius = 1; s[1].angle_start = (qaws_scalar)1.5; s[1].angle_end = (qaws_scalar)4.5;
 		memset(&d, 0, sizeof(d));
 		d.dimension = QAWS_DIMENSION_2D; d.segments = s; d.segment_count = 2;
-		qaws_curve_create_arc(&d, &c);
+		qaws_curve_create_arc(&c, &d);
 		*name = "arc (two segments)";
 		break;
 	}
@@ -141,7 +141,7 @@ static qaws_curve* ex_make(int which, char const** name)
 		memset(&d, 0, sizeof(d));
 		d.start_angle = (qaws_scalar)0.3; d.start_curvature = (qaws_scalar)-0.2;
 		d.end_curvature = (qaws_scalar)1.1; d.length = 6;
-		qaws_curve_create_clothoid(&d, &c);
+		qaws_curve_create_clothoid(&c, &d);
 		*name = "clothoid";
 		break;
 	}
@@ -152,7 +152,7 @@ static qaws_curve* ex_make(int which, char const** name)
 		memset(&d, 0, sizeof(d));
 		d.dimension = QAWS_DIMENSION_2D; d.scheme = QAWS_SUBDIVISION_LANE_RIESENFELD_3;
 		d.control_points = p; d.control_point_count = 5; d.closed = 1; d.refinement_levels = 3;
-		qaws_curve_create_subdivision(&d, &c);
+		qaws_curve_create_subdivision(&c, &d);
 		*name = "subdivision (closed)";
 		break;
 	}
@@ -167,17 +167,17 @@ static qaws_curve* ex_make(int which, char const** name)
 		qaws_curve* seg[3] = { NULL, NULL, NULL };
 		memset(&bd, 0, sizeof(bd));
 		bd.dimension = QAWS_DIMENSION_2D; bd.degree = 1; bd.control_points = l; bd.control_point_count = 2;
-		qaws_curve_create_bezier(&bd, &seg[0]);
+		qaws_curve_create_bezier(&seg[0], &bd);
 		bd.degree = 3; bd.control_points = b; bd.control_point_count = 4;
-		qaws_curve_create_bezier(&bd, &seg[1]);
+		qaws_curve_create_bezier(&seg[1], &bd);
 		memset(&s, 0, sizeof(s));
 		s.center[0] = 3; s.center[1] = 2; s.radius = 1; s.angle_start = 0; s.angle_end = (qaws_scalar)PI;
 		memset(&ad, 0, sizeof(ad));
 		ad.dimension = QAWS_DIMENSION_2D; ad.segments = &s; ad.segment_count = 1;
-		qaws_curve_create_arc(&ad, &seg[2]);
+		qaws_curve_create_arc(&seg[2], &ad);
 		memset(&d, 0, sizeof(d));
 		d.dimension = QAWS_DIMENSION_2D; d.segments = seg; d.segment_count = 3;
-		qaws_curve_create_composite(&d, &c);
+		qaws_curve_create_composite(&c, &d);
 		*name = "composite (line, Bezier, arc)";
 		break;
 	}
@@ -207,7 +207,7 @@ static void ex_sample(qaws_curve const* c, double t0, double t1, double* xy, int
 	for (i = 0; i < n; i++)
 	{
 		qaws_eval_result_2d r;
-		qaws_curve_evaluate_2d(c, (qaws_scalar)(t0 + (t1 - t0) * i / (n - 1)), QAWS_EVAL_FLAG_POSITION, &r);
+		qaws_curve_evaluate_2d(&r, c, (qaws_scalar)(t0 + (t1 - t0) * i / (n - 1)), QAWS_EVAL_FLAG_POSITION);
 		xy[2 * i] = r.position.x;
 		xy[2 * i + 1] = r.position.y;
 	}
@@ -239,7 +239,7 @@ static void demo_extract(void)
 		r = qaws_curve_get_parameter_range(c);
 		t0 = r.min_value + 0.2 * (r.max_value - r.min_value);
 		t1 = r.min_value + 0.75 * (r.max_value - r.min_value);
-		qaws_curve_extract(c, (qaws_scalar)t0, (qaws_scalar)t1, &e);
+		qaws_curve_extract(&e, c, (qaws_scalar)t0, (qaws_scalar)t1);
 		ex_sample(c, r.min_value, r.max_value, src, EX_SAMPLES);
 		for (i = 0; i < EX_SAMPLES; i++)
 		{
@@ -274,7 +274,7 @@ static void demo_extract(void)
 				{
 					qaws_eval_result_2d a;
 					double t = t0 + (t1 - t0) * i / (EX_SAMPLES - 1), d;
-					qaws_curve_evaluate_2d(c, (qaws_scalar)t, QAWS_EVAL_FLAG_POSITION, &a);
+					qaws_curve_evaluate_2d(&a, c, (qaws_scalar)t, QAWS_EVAL_FLAG_POSITION);
 					d = hypot(a.position.x - pc[2 * i], a.position.y - pc[2 * i + 1]);
 					if (k != 8 && d > err) err = d;
 				}
@@ -286,7 +286,7 @@ static void demo_extract(void)
 			{
 				qaws_scalar cps[3 * 256];
 				unsigned int n = 0, j;
-				if (qaws_curve_get_control_points(e, cps, 256, &n) == QAWS_STATUS_OK && n > 1)
+				if (qaws_curve_get_control_points(cps, &n, e, 256) == QAWS_STATUS_OK && n > 1)
 				{
 					double poly[2 * 256];
 					for (j = 0; j < n && j < 256; j++)

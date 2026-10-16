@@ -489,7 +489,7 @@ static qaws_status catmull_rom_rebuild(qaws_curve const *curve, qaws_diff_views 
 	d.control_point_count = impl->control_point_count;
 	d.parameterization = impl->parameterization;
 	d.closed = impl->closed;
-	st = qaws_curve_create_catmull_rom(&d, out_curve);
+	st = qaws_curve_create_catmull_rom(out_curve, &d);
 	qaws_internal_dealloc(NULL, owned);
 	return st;
 }
@@ -522,9 +522,9 @@ static qaws_curve_vtable const catmull_rom_vtable = {
 /* -------------------------------------------------------------------------- */
 
 qaws_status qaws_curve_create_catmull_rom_ex(
+	qaws_curve **out_curve,
 	qaws_catmull_rom_desc const *desc,
-	qaws_allocator const *allocator,
-	qaws_curve **out_curve)
+	qaws_allocator const *allocator)
 {
 	qaws_catmull_rom_impl *impl = NULL;
 	qaws_curve *curve = NULL;
@@ -625,9 +625,9 @@ qaws_status qaws_curve_create_catmull_rom_ex(
 			tmp_d = tmp_c + span_count;
 
 			qaws_catmull_rom_prepare_2d(
-				(const qaws_vec2 *)impl->control_points, N,
-				impl->parameterization, impl->closed,
-				tmp_a, tmp_b, tmp_c, tmp_d, &prep_span_count);
+				tmp_a, tmp_b,
+				tmp_c, tmp_d,
+				&prep_span_count, (const qaws_vec2 *)impl->control_points, N, impl->parameterization, impl->closed);
 
 			for (s = 0; s < span_count; s++) {
 				impl->segment_coeffs[s * 8 + 0] = tmp_a[s].x;
@@ -657,9 +657,9 @@ qaws_status qaws_curve_create_catmull_rom_ex(
 			tmp_d = tmp_c + span_count;
 
 			qaws_catmull_rom_prepare_3d(
-				(const qaws_vec3 *)impl->control_points, N,
-				impl->parameterization, impl->closed,
-				tmp_a, tmp_b, tmp_c, tmp_d, &prep_span_count);
+				tmp_a, tmp_b,
+				tmp_c, tmp_d,
+				&prep_span_count, (const qaws_vec3 *)impl->control_points, N, impl->parameterization, impl->closed);
 
 			for (s = 0; s < span_count; s++) {
 				impl->segment_coeffs[s * 12 + 0]  = tmp_a[s].x;
@@ -712,8 +712,8 @@ qaws_status qaws_curve_create_catmull_rom_ex(
 }
 
 qaws_status qaws_curve_create_catmull_rom(
-	qaws_catmull_rom_desc const *desc,
-	qaws_curve **out_curve)
+	qaws_curve **out_curve,
+	qaws_catmull_rom_desc const *desc)
 {
-	return qaws_curve_create_catmull_rom_ex(desc, NULL, out_curve);
+	return qaws_curve_create_catmull_rom_ex(out_curve, desc, NULL);
 }

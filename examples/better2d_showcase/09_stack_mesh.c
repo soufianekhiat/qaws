@@ -178,7 +178,7 @@ static qaws_curve* sm3_circle(double x, double y, double r, int hole)
 {
 	qaws_curve *c = sk_circ(x, y, r), *rv = NULL;
 	if (!hole) return c;
-	qaws_curve_reverse(c, &rv);
+	qaws_curve_reverse(&rv, c);
 	qaws_curve_destroy(c);
 	return rv;
 }

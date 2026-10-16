@@ -96,7 +96,7 @@ static int loop_contains_point(
 			qaws_eval_result_2d r2d;
 
 			memset(&r2d, 0, sizeof(r2d));
-			if (qaws_curve_evaluate_2d(crv, t, QAWS_EVAL_FLAG_POSITION, &r2d) == QAWS_STATUS_OK)
+			if (qaws_curve_evaluate_2d(&r2d, crv, t, QAWS_EVAL_FLAG_POSITION) == QAWS_STATUS_OK)
 			{
 				poly_x[sample_idx] = r2d.position.x;
 				poly_y[sample_idx] = r2d.position.y;

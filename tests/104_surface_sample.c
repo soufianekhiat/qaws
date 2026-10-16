@@ -42,7 +42,7 @@ static qaws_surface* sst_revolve(double cx, double r, double a0, double a1, qaws
 	g.center[0] = (qaws_scalar)cx; g.radius = (qaws_scalar)r; g.angle_start = (qaws_scalar)a0; g.angle_end = (qaws_scalar)a1;
 	memset(&ad, 0, sizeof(ad));
 	ad.dimension = QAWS_DIMENSION_2D; ad.segments = &g; ad.segment_count = 1;
-	qaws_curve_create_arc(&ad, prof);
+	qaws_curve_create_arc(prof, &ad);
 	memset(&rd, 0, sizeof(rd));
 	rd.profile = *prof; rd.axis_direction.z = 1;
 	qaws_surface_create_revolution(&rd, &s);
@@ -139,9 +139,9 @@ static void test_sampling(void)
 		memset(&bz, 0, sizeof(bz));
 		bz.dimension = QAWS_DIMENSION_2D; bz.degree = 1; bz.control_points = cp; bz.control_point_count = 2;
 		cp[0] = 0; cp[1] = (qaws_scalar)0.35; cp[2] = 1; cp[3] = (qaws_scalar)0.35;
-		qaws_curve_create_bezier(&bz, &k1);
+		qaws_curve_create_bezier(&k1, &bz);
 		cp[0] = 1; cp[1] = (qaws_scalar)0.7; cp[2] = 0; cp[3] = (qaws_scalar)0.7;
-		qaws_curve_create_bezier(&bz, &k2);
+		qaws_curve_create_bezier(&k2, &bz);
 		qaws_surface_curve_create_uv(s, k1, &lat[0]);
 		qaws_surface_curve_create_uv(s, k2, &lat[1]);
 		rb = sst_region(s, lat, 2, 2);

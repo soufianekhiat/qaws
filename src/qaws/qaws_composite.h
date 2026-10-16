@@ -38,7 +38,7 @@ typedef struct qaws_composite_desc
 } qaws_composite_desc;
 
 qaws_status qaws_curve_create_composite(
-	qaws_composite_desc const* desc,
-	qaws_curve** out_curve);
+	qaws_curve** out_curve,
+	qaws_composite_desc const* desc);
 
 #endif /* QAWS_COMPOSITE_H */

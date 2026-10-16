@@ -43,7 +43,7 @@ static qaws_curve* bo_polygon(double const* xy, unsigned int n)
 	d.control_point_count = n + 1;
 	d.knots = kn;
 	d.knot_count = n + 3;
-	qaws_curve_create_bspline(&d, &c);
+	qaws_curve_create_bspline(&c, &d);
 	return c;
 }
 
@@ -69,7 +69,7 @@ static qaws_curve* bo_conic(double dx, double dy)
 	d.weight_count = 7;
 	d.knots = kn;
 	d.knot_count = 10;
-	qaws_curve_create_nurbs(&d, &c);
+	qaws_curve_create_nurbs(&c, &d);
 	return c;
 }
 

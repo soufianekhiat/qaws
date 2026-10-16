@@ -12,7 +12,7 @@ static void test_bezier_linear(void)
 	desc.control_point_count = 2;
 
 	qaws_curve* curve = NULL;
-	qaws_status s = qaws_curve_create_bezier(&desc, &curve);
+	qaws_status s = qaws_curve_create_bezier(&curve, &desc);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(curve != NULL, "curve allocated");
 
@@ -21,7 +21,7 @@ static void test_bezier_linear(void)
 	TEST_ASSERT(qaws_curve_get_span_count(curve) == 1, "span_count == 1");
 
 	qaws_eval_result_2d result;
-	s = qaws_curve_evaluate_2d(curve, (qaws_scalar)0.5, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &result);
+	s = qaws_curve_evaluate_2d(&result, curve, (qaws_scalar)0.5, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(approx_eq(result.position.x, (qaws_scalar)0.5), "midpoint x");
 	TEST_ASSERT(approx_eq(result.position.y, (qaws_scalar)0.5), "midpoint y");
@@ -41,24 +41,24 @@ static void test_bezier_cubic(void)
 	desc.control_point_count = 4;
 
 	qaws_curve* curve = NULL;
-	qaws_status s = qaws_curve_create_bezier(&desc, &curve);
+	qaws_status s = qaws_curve_create_bezier(&curve, &desc);
 	TEST_ASSERT_STATUS(s);
 
 	/* Evaluate at endpoints */
 	qaws_eval_result_2d r0, r1;
-	s = qaws_curve_evaluate_2d(curve, (qaws_scalar)0.0, QAWS_EVAL_FLAG_POSITION, &r0);
+	s = qaws_curve_evaluate_2d(&r0, curve, (qaws_scalar)0.0, QAWS_EVAL_FLAG_POSITION);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(approx_eq(r0.position.x, (qaws_scalar)0.0), "start x");
 	TEST_ASSERT(approx_eq(r0.position.y, (qaws_scalar)0.0), "start y");
 
-	s = qaws_curve_evaluate_2d(curve, (qaws_scalar)1.0, QAWS_EVAL_FLAG_POSITION, &r1);
+	s = qaws_curve_evaluate_2d(&r1, curve, (qaws_scalar)1.0, QAWS_EVAL_FLAG_POSITION);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(approx_eq(r1.position.x, (qaws_scalar)1.0), "end x");
 	TEST_ASSERT(approx_eq(r1.position.y, (qaws_scalar)0.0), "end y");
 
 	/* Evaluate at midpoint */
 	qaws_eval_result_2d rm;
-	s = qaws_curve_evaluate_2d(curve, (qaws_scalar)0.5, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2 | QAWS_EVAL_FLAG_D3, &rm);
+	s = qaws_curve_evaluate_2d(&rm, curve, (qaws_scalar)0.5, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2 | QAWS_EVAL_FLAG_D3);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(approx_eq(rm.position.x, (qaws_scalar)0.5), "mid x");
 	TEST_ASSERT(approx_eq(rm.position.y, (qaws_scalar)0.75), "mid y");
@@ -78,16 +78,16 @@ static void test_bezier_3d(void)
 	desc.control_point_count = 4;
 
 	qaws_curve* curve = NULL;
-	qaws_status s = qaws_curve_create_bezier(&desc, &curve);
+	qaws_status s = qaws_curve_create_bezier(&curve, &desc);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(qaws_curve_get_dimension(curve) == QAWS_DIMENSION_3D, "dim == 3D");
 
 	qaws_eval_result_3d r;
-	s = qaws_curve_evaluate_3d(curve, (qaws_scalar)0.0, QAWS_EVAL_FLAG_POSITION, &r);
+	s = qaws_curve_evaluate_3d(&r, curve, (qaws_scalar)0.0, QAWS_EVAL_FLAG_POSITION);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(approx_eq(r.position.x, (qaws_scalar)0.0), "start x");
 
-	s = qaws_curve_evaluate_3d(curve, (qaws_scalar)1.0, QAWS_EVAL_FLAG_POSITION, &r);
+	s = qaws_curve_evaluate_3d(&r, curve, (qaws_scalar)1.0, QAWS_EVAL_FLAG_POSITION);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(approx_eq(r.position.z, (qaws_scalar)1.0), "end z");
 
@@ -107,11 +107,11 @@ static void test_bezier_derivatives(void)
 	desc.control_point_count = 2;
 
 	qaws_curve* curve = NULL;
-	qaws_status s = qaws_curve_create_bezier(&desc, &curve);
+	qaws_status s = qaws_curve_create_bezier(&curve, &desc);
 	TEST_ASSERT_STATUS(s);
 
 	qaws_eval_result_2d r;
-	s = qaws_curve_evaluate_2d(curve, (qaws_scalar)0.5, QAWS_EVAL_FLAG_D1, &r);
+	s = qaws_curve_evaluate_2d(&r, curve, (qaws_scalar)0.5, QAWS_EVAL_FLAG_D1);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(approx_eq(r.d1.x, (qaws_scalar)3.0), "linear D1.x == 3");
 	TEST_ASSERT(approx_eq(r.d1.y, (qaws_scalar)4.0), "linear D1.y == 4");
@@ -128,11 +128,11 @@ static void test_bezier_derivatives(void)
 	desc.control_points = pts_cub;
 	desc.control_point_count = 4;
 
-	s = qaws_curve_create_bezier(&desc, &curve);
+	s = qaws_curve_create_bezier(&curve, &desc);
 	TEST_ASSERT_STATUS(s);
 
-	s = qaws_curve_evaluate_2d(curve, (qaws_scalar)0.5,
-		QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2 | QAWS_EVAL_FLAG_D3, &r);
+	s = qaws_curve_evaluate_2d(&r, curve,
+		(qaws_scalar)0.5, QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2 | QAWS_EVAL_FLAG_D3);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(approx_eq(r.d1.x, (qaws_scalar)1.5), "cubic D1.x at 0.5");
 	TEST_ASSERT(approx_eq(r.d1.y, (qaws_scalar)0.0), "cubic D1.y at 0.5");
@@ -160,17 +160,17 @@ static void test_evaluate_span(void)
 	desc.control_point_count = 2;
 
 	qaws_curve* curve = NULL;
-	qaws_status s = qaws_curve_create_bezier(&desc, &curve);
+	qaws_status s = qaws_curve_create_bezier(&curve, &desc);
 	TEST_ASSERT_STATUS(s);
 
 	qaws_eval_result_2d r;
-	s = qaws_curve_evaluate_span_2d(curve, 0, (qaws_scalar)0.5, QAWS_EVAL_FLAG_POSITION, &r);
+	s = qaws_curve_evaluate_span_2d(&r, curve, 0, (qaws_scalar)0.5, QAWS_EVAL_FLAG_POSITION);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(approx_eq(r.position.x, (qaws_scalar)0.5), "span eval midpoint x");
 	TEST_ASSERT(approx_eq(r.position.y, (qaws_scalar)0.5), "span eval midpoint y");
 
 	/* Out of range span index */
-	s = qaws_curve_evaluate_span_2d(curve, 5, (qaws_scalar)0.5, QAWS_EVAL_FLAG_POSITION, &r);
+	s = qaws_curve_evaluate_span_2d(&r, curve, 5, (qaws_scalar)0.5, QAWS_EVAL_FLAG_POSITION);
 	TEST_ASSERT(s == QAWS_STATUS_OUT_OF_RANGE, "out-of-range span returns error");
 
 	qaws_curve_destroy(curve);

@@ -48,7 +48,7 @@ static qaws_curve* fn_curve(qaws_scalar const* p)
 	d.control_point_count = 6;
 	d.knots = g_fn_knots;
 	d.knot_count = 10;
-	qaws_curve_create_bspline(&d, &c);
+	qaws_curve_create_bspline(&c, &d);
 	return c;
 }
 
@@ -63,7 +63,7 @@ static void test_curve_values(void)
 	bd.degree = 3;
 	bd.control_points = line;
 	bd.control_point_count = 4;
-	qaws_curve_create_bezier(&bd, &c);
+	qaws_curve_create_bezier(&c, &bd);
 	qaws_curve_functional_eval(&len, NULL, NULL, c, NULL, QAWS_FUNCTIONAL_LENGTH, 0, NULL);
 	qaws_curve_functional_eval(&bend, NULL, NULL, c, NULL, QAWS_FUNCTIONAL_BENDING, 0, NULL);
 	TEST_ASSERT(approx_eq(len, (qaws_scalar)(3 * 1.4142135623730951)), "segment length");
@@ -82,7 +82,7 @@ static void test_curve_values(void)
 		rd.control_point_count = 3;
 		rd.weights = w;
 		rd.weight_count = 3;
-		qaws_curve_create_rational_bezier(&rd, &c);
+		qaws_curve_create_rational_bezier(&c, &rd);
 		qaws_curve_functional_eval(&len, NULL, NULL, c, NULL, QAWS_FUNCTIONAL_LENGTH, 8, NULL);
 		qaws_curve_functional_eval(&k2, NULL, NULL, c, NULL, QAWS_FUNCTIONAL_CURVATURE_SQUARED, 8, NULL);
 		TEST_ASSERT(approx_eq_loose(len, (qaws_scalar)1.5707963267948966), "quarter circle length is pi/2");
@@ -458,7 +458,7 @@ static qaws_curve* knot_curve(unsigned int degree, qaws_scalar const* cps, qaws_
 	d.control_point_count = 6;
 	d.knots = knots;
 	d.knot_count = 6 + degree + 1;
-	qaws_curve_create_bspline(&d, &c);
+	qaws_curve_create_bspline(&c, &d);
 	return c;
 }
 

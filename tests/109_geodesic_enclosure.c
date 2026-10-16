@@ -246,7 +246,7 @@ static void test_polygons(void)
 		if ((st = qaws_surface_curve_create_shortest_path(s, NULL, get_uv(a[0], a[1]), get_uv(b[0], b[1]), 0, &c[i])) != QAWS_STATUS_OK)
 			break;
 		r = qaws_curve_get_parameter_range(qaws_surface_curve_get_uv(c[i]));
-		qaws_curve_evaluate_2d(qaws_surface_curve_get_uv(c[i]), r.min_value, QAWS_EVAL_FLAG_D1, &e);
+		qaws_curve_evaluate_2d(&e, qaws_surface_curve_get_uv(c[i]), r.min_value, QAWS_EVAL_FLAG_D1);
 		g[i].start = get_uv(a[0], a[1]); g[i].direction = e.d1;
 		qaws_surface_curve_get_length(c[i], &g[i].length);
 	}
@@ -333,7 +333,7 @@ static void test_refusals(void)
 	g.radius = 1; g.angle_start = (qaws_scalar)-1; g.angle_end = 1;
 	memset(&ad, 0, sizeof(ad));
 	ad.dimension = QAWS_DIMENSION_2D; ad.segments = &g; ad.segment_count = 1;
-	qaws_curve_create_arc(&ad, &prof);
+	qaws_curve_create_arc(&prof, &ad);
 	memset(&rd, 0, sizeof(rd));
 	rd.profile = prof; rd.axis_direction.z = 1;
 	qaws_surface_create_revolution(&rd, &rev);

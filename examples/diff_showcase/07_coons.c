@@ -19,7 +19,7 @@ static qaws_curve* cb_curve(qaws_scalar const* p)
 	d.control_point_count = CB_CP;
 	d.knots = g_cb_knots;
 	d.knot_count = 10;
-	qaws_curve_create_bspline(&d, &c);
+	qaws_curve_create_bspline(&c, &d);
 	return c;
 }
 
@@ -97,8 +97,8 @@ static void cb_draw_boundaries(svg* s, projection const* pr, cb_patch const* pat
 		for (k = 0; k < 80; k++)
 		{
 			qaws_eval_result_3d e;
-			qaws_curve_evaluate_3d(patch->curves[i], r.min_value + (r.max_value - r.min_value) * k / (qaws_scalar)79,
-				QAWS_EVAL_FLAG_POSITION, &e);
+			qaws_curve_evaluate_3d(&e, patch->curves[i],
+				r.min_value + (r.max_value - r.min_value) * k / (qaws_scalar)79, QAWS_EVAL_FLAG_POSITION);
 			project(pr, e.position.x, e.position.y, e.position.z, &xy[2 * k], &xy[2 * k + 1]);
 		}
 		svg_polyline(s, xy, 80, (i == 1 || i == 3) ? "#cf222e" : "#24292f", (i == 1 || i == 3) ? 3 : 2, 1, 0);

@@ -34,7 +34,7 @@ typedef struct cxt_case
 static void cxt_pos(qaws_curve const* c, double t, double* p)
 {
 	qaws_eval_result_2d r;
-	qaws_curve_evaluate_2d(c, (qaws_scalar)t, QAWS_EVAL_FLAG_POSITION, &r);
+	qaws_curve_evaluate_2d(&r, c, (qaws_scalar)t, QAWS_EVAL_FLAG_POSITION);
 	p[0] = r.position.x;
 	p[1] = r.position.y;
 }
@@ -123,7 +123,7 @@ static qaws_curve* cxt_bezier(void)
 	qaws_curve* c = NULL;
 	memset(&d, 0, sizeof(d));
 	d.dimension = QAWS_DIMENSION_2D; d.degree = 5; d.control_points = cp; d.control_point_count = 6;
-	qaws_curve_create_bezier(&d, &c);
+	qaws_curve_create_bezier(&c, &d);
 	return c;
 }
 
@@ -135,7 +135,7 @@ static qaws_curve* cxt_rational_bezier(void)
 	memset(&d, 0, sizeof(d));
 	d.dimension = QAWS_DIMENSION_2D; d.degree = 2; d.control_points = cp; d.control_point_count = 3;
 	d.weights = w; d.weight_count = 3;
-	qaws_curve_create_rational_bezier(&d, &c);
+	qaws_curve_create_rational_bezier(&c, &d);
 	return c;
 }
 
@@ -153,7 +153,7 @@ static qaws_curve* cxt_bspline(int uniform)
 	{
 		d.knots = kn; d.knot_count = 11;
 	}
-	qaws_curve_create_bspline(&d, &c);
+	qaws_curve_create_bspline(&c, &d);
 	return c;
 }
 
@@ -174,7 +174,7 @@ static qaws_curve* cxt_nurbs_circle(void)
 	memset(&d, 0, sizeof(d));
 	d.dimension = QAWS_DIMENSION_2D; d.degree = 2; d.control_points = cp; d.control_point_count = 9;
 	d.knots = kn; d.knot_count = 12; d.weights = w; d.weight_count = 9;
-	qaws_curve_create_nurbs(&d, &c);
+	qaws_curve_create_nurbs(&c, &d);
 	return c;
 }
 
@@ -186,7 +186,7 @@ static qaws_curve* cxt_hermite(void)
 	memset(&d, 0, sizeof(d));
 	d.dimension = QAWS_DIMENSION_2D; d.degree = 3; d.points = p; d.derivatives = v;
 	d.point_count = 4; d.derivative_count = 4;
-	qaws_curve_create_hermite(&d, &c);
+	qaws_curve_create_hermite(&c, &d);
 	return c;
 }
 
@@ -198,7 +198,7 @@ static qaws_curve* cxt_catmull_rom(qaws_parameterization par, int closed)
 	memset(&d, 0, sizeof(d));
 	d.dimension = QAWS_DIMENSION_2D; d.control_points = p; d.control_point_count = 6;
 	d.parameterization = par; d.closed = closed;
-	qaws_curve_create_catmull_rom(&d, &c);
+	qaws_curve_create_catmull_rom(&c, &d);
 	return c;
 }
 
@@ -210,7 +210,7 @@ static qaws_curve* cxt_trajectory(void)
 	memset(&d, 0, sizeof(d));
 	d.dimension = QAWS_DIMENSION_2D; d.degree = 3; d.key_positions = p; d.key_count = 4;
 	d.key_times = t; d.key_time_count = 4;
-	qaws_curve_create_trajectory(&d, &c);
+	qaws_curve_create_trajectory(&c, &d);
 	return c;
 }
 
@@ -221,7 +221,7 @@ static qaws_curve* cxt_yuksel(qaws_yuksel_mode mode)
 	qaws_curve* c = NULL;
 	memset(&d, 0, sizeof(d));
 	d.dimension = QAWS_DIMENSION_2D; d.control_points = p; d.control_point_count = 5; d.mode = mode;
-	qaws_curve_create_yuksel(&d, &c);
+	qaws_curve_create_yuksel(&c, &d);
 	return c;
 }
 
@@ -233,7 +233,7 @@ static qaws_curve* cxt_polynomial(void)
 	memset(&d, 0, sizeof(d));
 	d.dimension = QAWS_DIMENSION_2D; d.degree = 4; d.coefficients = co; d.coefficient_count = 5;
 	d.t_min = -1; d.t_max = 2;
-	qaws_curve_create_polynomial(&d, &c);
+	qaws_curve_create_polynomial(&c, &d);
 	return c;
 }
 
@@ -249,7 +249,7 @@ static qaws_curve* cxt_arc(void)
 	s[1].radius = 1; s[1].angle_start = (qaws_scalar)1.5; s[1].angle_end = (qaws_scalar)3.5;
 	memset(&d, 0, sizeof(d));
 	d.dimension = QAWS_DIMENSION_2D; d.segments = s; d.segment_count = 2;
-	qaws_curve_create_arc(&d, &c);
+	qaws_curve_create_arc(&c, &d);
 	return c;
 }
 
@@ -260,7 +260,7 @@ static qaws_curve* cxt_clothoid(void)
 	memset(&d, 0, sizeof(d));
 	d.origin_x = 1; d.origin_y = -1; d.start_angle = (qaws_scalar)0.3;
 	d.start_curvature = (qaws_scalar)-0.2; d.end_curvature = (qaws_scalar)1.1; d.length = 6;
-	qaws_curve_create_clothoid(&d, &c);
+	qaws_curve_create_clothoid(&c, &d);
 	return c;
 }
 
@@ -272,7 +272,7 @@ static qaws_curve* cxt_subdivision(void)
 	memset(&d, 0, sizeof(d));
 	d.dimension = QAWS_DIMENSION_2D; d.scheme = QAWS_SUBDIVISION_LANE_RIESENFELD_3;
 	d.control_points = p; d.control_point_count = 5; d.closed = 1; d.refinement_levels = 3;
-	qaws_curve_create_subdivision(&d, &c);
+	qaws_curve_create_subdivision(&c, &d);
 	return c;
 }
 
@@ -288,17 +288,17 @@ static qaws_curve* cxt_composite(void)
 	qaws_curve* c = NULL;
 	memset(&bd, 0, sizeof(bd));
 	bd.dimension = QAWS_DIMENSION_2D; bd.degree = 1; bd.control_points = l; bd.control_point_count = 2;
-	qaws_curve_create_bezier(&bd, &seg[0]);
+	qaws_curve_create_bezier(&seg[0], &bd);
 	bd.degree = 3; bd.control_points = b; bd.control_point_count = 4;
-	qaws_curve_create_bezier(&bd, &seg[1]);
+	qaws_curve_create_bezier(&seg[1], &bd);
 	memset(&s, 0, sizeof(s));
 	s.center[0] = 3; s.center[1] = 2; s.radius = 1; s.angle_start = 0; s.angle_end = (qaws_scalar)3.14159265358979;
 	memset(&ad, 0, sizeof(ad));
 	ad.dimension = QAWS_DIMENSION_2D; ad.segments = &s; ad.segment_count = 1;
-	qaws_curve_create_arc(&ad, &seg[2]);
+	qaws_curve_create_arc(&seg[2], &ad);
 	memset(&d, 0, sizeof(d));
 	d.dimension = QAWS_DIMENSION_2D; d.segments = seg; d.segment_count = 3;
-	qaws_curve_create_composite(&d, &c);
+	qaws_curve_create_composite(&c, &d);
 	return c;
 }
 
@@ -328,7 +328,7 @@ static unsigned int cxt_cases(cxt_case* cs)
 	src = cxt_bezier();
 	{
 		qaws_curve* rp = NULL;
-		qaws_curve_reparameterize_arc_length(src, 0, &rp);
+		qaws_curve_reparameterize_arc_length(&rp, src, 0);
 		CXT_ADD("reparameterized", rp, QAWS_CURVE_KIND_BEZIER, 0);
 		cs[n - 1].keep = src;
 	}
@@ -371,7 +371,7 @@ static void test_extract(cxt_case const* cs, unsigned int n)
 			if (j == 6) continue;   /* a 1e-7 piece is below float rounding */
 #endif
 			total++;
-			s = qaws_curve_extract(cs[i].curve, (qaws_scalar)t0, (qaws_scalar)t1, &e);
+			s = qaws_curve_extract(&e, cs[i].curve, (qaws_scalar)t0, (qaws_scalar)t1);
 			if (s != QAWS_STATUS_OK)
 			{
 				printf("    %s [%.3f, %.3f]: status %d\n", cs[i].name, pairs[j][0], pairs[j][1], (int)s);
@@ -418,7 +418,7 @@ static void test_reverse(cxt_case const* cs, unsigned int n)
 		qaws_range r, rr;
 		double ends, inside, tol;
 		if (!cs[i].curve) continue;
-		if (qaws_curve_reverse(cs[i].curve, &rv) != QAWS_STATUS_OK)
+		if (qaws_curve_reverse(&rv, cs[i].curve) != QAWS_STATUS_OK)
 		{
 			printf("    reverse %s failed\n", cs[i].name);
 			bad++;
@@ -444,7 +444,7 @@ static void test_hermite_split(void)
 	qaws_curve* c = cxt_hermite();
 	qaws_curve *l = NULL, *r = NULL;
 	double ends, inside, tol = CXT_TOL * cxt_extent(c);
-	int ok = qaws_curve_split(c, (qaws_scalar)1.4, &l, &r) == QAWS_STATUS_OK;
+	int ok = qaws_curve_split(&l, &r, c, (qaws_scalar)1.4) == QAWS_STATUS_OK;
 	if (ok)
 	{
 		cxt_compare(c, 0.0, 1.4, l, &ends, &inside);
@@ -467,10 +467,10 @@ static void test_closed(void)
 	qaws_curve *poly = NULL, *loop = NULL, *circle = cxt_nurbs_circle(), *open = cxt_bspline(0);
 	memset(&bd, 0, sizeof(bd));
 	bd.dimension = QAWS_DIMENSION_2D; bd.degree = 1; bd.control_points = sq; bd.control_point_count = 5;
-	qaws_curve_create_bspline(&bd, &poly);
+	qaws_curve_create_bspline(&poly, &bd);
 	memset(&zd, 0, sizeof(zd));
 	zd.dimension = QAWS_DIMENSION_2D; zd.degree = 3; zd.control_points = lp; zd.control_point_count = 4;
-	qaws_curve_create_bezier(&zd, &loop);
+	qaws_curve_create_bezier(&loop, &zd);
 	TEST_ASSERT(qaws_curve_is_closed(poly) == 1, "a closed degree-1 B-spline polygon is closed");
 	TEST_ASSERT(qaws_curve_is_closed(loop) == 1, "a Bezier loop is closed");
 	TEST_ASSERT(qaws_curve_is_closed(circle) == 1, "a NURBS circle is closed");

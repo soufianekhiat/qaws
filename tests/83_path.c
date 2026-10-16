@@ -44,8 +44,8 @@ static double ptt_sampled_area(qaws_path_2d const* p)
 		for (j = 0; j <= 20000; j++)
 		{
 			qaws_eval_result_2d e;
-			qaws_curve_evaluate_2d(p->curves[i], (qaws_scalar)(r.min_value + (r.max_value - r.min_value) * j / 20000.0),
-				QAWS_EVAL_FLAG_POSITION, &e);
+			qaws_curve_evaluate_2d(&e, p->curves[i],
+				(qaws_scalar)(r.min_value + (r.max_value - r.min_value) * j / 20000.0), QAWS_EVAL_FLAG_POSITION);
 			if (first) { x0 = px = e.position.x; y0 = py = e.position.y; first = 0; continue; }
 			a += 0.5 * (px * e.position.y - e.position.x * py);
 			px = e.position.x; py = e.position.y;
@@ -101,9 +101,9 @@ static void test_area(void)
 		s.radius = 2; s.angle_start = 0; s.angle_end = (qaws_scalar)PTT_PI;
 		memset(&ad, 0, sizeof(ad));
 		ad.dimension = QAWS_DIMENSION_2D; ad.segments = &s; ad.segment_count = 1;
-		qaws_curve_create_arc(&ad, &h[0]);
+		qaws_curve_create_arc(&h[0], &ad);
 		s.angle_start = (qaws_scalar)PTT_PI; s.angle_end = (qaws_scalar)(2 * PTT_PI);
-		qaws_curve_create_arc(&ad, &h[1]);
+		qaws_curve_create_arc(&h[1], &ad);
 		cs[0] = h[0]; cs[1] = h[1];
 		p.curves = cs; p.curve_count = 2; p.closed = 1;
 		qaws_path_compute_area_2d(&p, &a);
@@ -122,7 +122,7 @@ static void test_area(void)
 		qaws_scalar a = 0;
 		memset(&d, 0, sizeof(d));
 		d.dimension = QAWS_DIMENSION_2D; d.degree = 2; d.control_points = cp; d.control_point_count = 3;
-		qaws_curve_create_bezier(&d, &b);
+		qaws_curve_create_bezier(&b, &d);
 		c = b; p = ptt_one(&c, 0);
 		qaws_path_compute_area_2d(&p, &a);
 		sprintf(msg, "open parabola closed by its chord: area -4/3 (%.15g)", (double)a);
@@ -139,11 +139,11 @@ static void test_area(void)
 		memset(&cd, 0, sizeof(cd));
 		cd.dimension = QAWS_DIMENSION_2D; cd.control_points = cr; cd.control_point_count = 5;
 		cd.parameterization = QAWS_PARAMETERIZATION_CHORDAL; cd.closed = 1;
-		qaws_curve_create_catmull_rom(&cd, &k[0]);
+		qaws_curve_create_catmull_rom(&k[0], &cd);
 		memset(&sd, 0, sizeof(sd));
 		sd.dimension = QAWS_DIMENSION_2D; sd.scheme = QAWS_SUBDIVISION_LANE_RIESENFELD_3;
 		sd.control_points = cr; sd.control_point_count = 5; sd.closed = 1; sd.refinement_levels = 3;
-		qaws_curve_create_subdivision(&sd, &k[1]);
+		qaws_curve_create_subdivision(&k[1], &sd);
 		for (i = 0; i < 2; i++)
 		{
 			qaws_curve const* c = k[i];
@@ -184,11 +184,11 @@ static void test_bounds(void)
 		unsigned int i;
 		memset(&d, 0, sizeof(d));
 		d.dimension = QAWS_DIMENSION_2D; d.degree = 3; d.control_points = cp; d.control_point_count = 4;
-		qaws_curve_create_bezier(&d, &b);
+		qaws_curve_create_bezier(&b, &d);
 		for (i = 0; i <= 100000; i++)
 		{
 			qaws_eval_result_2d r;
-			qaws_curve_evaluate_2d(b, (qaws_scalar)(i / 100000.0), QAWS_EVAL_FLAG_POSITION, &r);
+			qaws_curve_evaluate_2d(&r, b, (qaws_scalar)(i / 100000.0), QAWS_EVAL_FLAG_POSITION);
 			if (r.position.x < slo[0]) slo[0] = r.position.x;
 			if (r.position.y < slo[1]) slo[1] = r.position.y;
 			if (r.position.x > shi[0]) shi[0] = r.position.x;
@@ -287,7 +287,7 @@ static void test_transform(void)
 	s.center[0] = 1; s.center[1] = 1; s.radius = 2; s.angle_start = (qaws_scalar)0.3; s.angle_end = (qaws_scalar)2.9;
 	memset(&ad, 0, sizeof(ad));
 	ad.dimension = QAWS_DIMENSION_2D; ad.segments = &s; ad.segment_count = 1;
-	qaws_curve_create_arc(&ad, &arc);
+	qaws_curve_create_arc(&arc, &ad);
 	qaws_curve_transform_2d(arc, mr, &rot);
 	qaws_curve_transform_2d(arc, ms, &shear);
 	for (i = 0; i <= 64; i++)
@@ -295,9 +295,9 @@ static void test_transform(void)
 		qaws_range ra = qaws_curve_get_parameter_range(arc), rr = qaws_curve_get_parameter_range(rot), rs = qaws_curve_get_parameter_range(shear);
 		qaws_eval_result_2d a, b, c;
 		double f = i / 64.0, x, y;
-		qaws_curve_evaluate_2d(arc, (qaws_scalar)(ra.min_value + f * (ra.max_value - ra.min_value)), QAWS_EVAL_FLAG_POSITION, &a);
-		qaws_curve_evaluate_2d(rot, (qaws_scalar)(rr.min_value + f * (rr.max_value - rr.min_value)), QAWS_EVAL_FLAG_POSITION, &b);
-		qaws_curve_evaluate_2d(shear, (qaws_scalar)(rs.min_value + f * (rs.max_value - rs.min_value)), QAWS_EVAL_FLAG_POSITION, &c);
+		qaws_curve_evaluate_2d(&a, arc, (qaws_scalar)(ra.min_value + f * (ra.max_value - ra.min_value)), QAWS_EVAL_FLAG_POSITION);
+		qaws_curve_evaluate_2d(&b, rot, (qaws_scalar)(rr.min_value + f * (rr.max_value - rr.min_value)), QAWS_EVAL_FLAG_POSITION);
+		qaws_curve_evaluate_2d(&c, shear, (qaws_scalar)(rs.min_value + f * (rs.max_value - rs.min_value)), QAWS_EVAL_FLAG_POSITION);
 		x = mr[0] * a.position.x + mr[1] * a.position.y + mr[2];
 		y = mr[3] * a.position.x + mr[4] * a.position.y + mr[5];
 		if (hypot(x - b.position.x, y - b.position.y) > worst) worst = hypot(x - b.position.x, y - b.position.y);

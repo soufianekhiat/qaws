@@ -69,7 +69,7 @@ static qaws_surface* rs_torus(qaws_curve** profile)
 	memset(&ad, 0, sizeof(ad));
 	ad.dimension = QAWS_DIMENSION_2D; ad.segments = &a; ad.segment_count = 1;
 	*profile = NULL;
-	qaws_curve_create_arc(&ad, profile);
+	qaws_curve_create_arc(profile, &ad);
 	memset(&rd, 0, sizeof(rd));
 	rd.profile = *profile; rd.axis_direction.z = 1; rd.angle = 0;
 	qaws_surface_create_revolution(&rd, &s);
@@ -290,7 +290,7 @@ static void test_domain(void)
 		a.radius = 1; a.angle_start = (qaws_scalar)(-RS_PI / 2); a.angle_end = (qaws_scalar)(RS_PI / 2);
 		memset(&ad, 0, sizeof(ad));
 		ad.dimension = QAWS_DIMENSION_2D; ad.segments = &a; ad.segment_count = 1;
-		qaws_curve_create_arc(&ad, &prof);
+		qaws_curve_create_arc(&prof, &ad);
 		memset(&rd, 0, sizeof(rd));
 		rd.profile = prof; rd.axis_direction.z = 1;
 		qaws_surface_create_revolution(&rd, &sphere);
@@ -318,7 +318,7 @@ static void test_domain(void)
 			memset(&h, 0, sizeof(h));
 			h.center[0] = h.center[1] = (qaws_scalar)0.5; h.radius = (qaws_scalar)0.15; h.angle_end = (qaws_scalar)(2 * RS_PI);
 			ad.segments = &h;
-			qaws_curve_create_arc(&ad, &hc);
+			qaws_curve_create_arc(&hc, &ad);
 			hl[0] = hc;
 			loop.curves = hl; loop.curve_count = 1; loop.is_outer = 0;
 			memset(&td, 0, sizeof(td));

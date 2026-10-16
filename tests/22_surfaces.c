@@ -316,7 +316,7 @@ static void test_surface_ruled(void)
 		d.degree = 1;
 		d.control_points = pts_a;
 		d.control_point_count = 2;
-		qaws_curve_create_bezier(&d, &ca);
+		qaws_curve_create_bezier(&ca, &d);
 	}
 
 	/* Curve B: arc from (0,0,2) through (2,2,2) to (4,0,2) */
@@ -328,7 +328,7 @@ static void test_surface_ruled(void)
 		d.degree = 3;
 		d.control_points = pts_b;
 		d.control_point_count = 4;
-		qaws_curve_create_bezier(&d, &cb);
+		qaws_curve_create_bezier(&cb, &d);
 	}
 
 	rdesc.curve_a = ca;
@@ -404,7 +404,7 @@ static void test_surface_swept(void)
 		d.degree = 3;
 		d.control_points = pts;
 		d.control_point_count = 4;
-		qaws_curve_create_bezier(&d, &path);
+		qaws_curve_create_bezier(&path, &d);
 	}
 
 	/* Profile: circle approximation using 2D cubic Bezier */
@@ -422,7 +422,7 @@ static void test_surface_swept(void)
 		d.degree = 12;
 		d.control_points = pts;
 		d.control_point_count = 13;
-		qaws_curve_create_bezier(&d, &profile);
+		qaws_curve_create_bezier(&profile, &d);
 	}
 
 	memset(&sdesc, 0, sizeof(sdesc));

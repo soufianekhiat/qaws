@@ -26,8 +26,8 @@ typedef struct qaws_composite_desc {
 
 ```c
 qaws_status qaws_curve_create_composite(
-    qaws_composite_desc const* desc,
-    qaws_curve** out_curve);
+    qaws_curve** out_curve,
+    qaws_composite_desc const* desc);
 ```
 
 Chains multiple heterogeneous curves end-to-end into a single composite curve.

@@ -26,7 +26,7 @@ static void demo_hits(void)
 	d.degree = 4;
 	d.control_points = cps;
 	d.control_point_count = 5;
-	qaws_curve_create_bezier(&d, &c);
+	qaws_curve_create_bezier(&c, &d);
 	qaws_exact_desc_default(&desc);
 	qaws_exact_curve_prepare(&desc, c, &e, NULL);
 	for (k = 1; k <= EH_K; k++)
@@ -49,8 +49,8 @@ static void demo_hits(void)
 		ld.degree = 1;
 		ld.control_points = seg;
 		ld.control_point_count = 2;
-		qaws_curve_create_bezier(&ld, &line);
-		qaws_curve_find_intersections_2d(c, line, ix, 16, &nf);
+		qaws_curve_create_bezier(&line, &ld);
+		qaws_curve_find_intersections_2d(ix, &nf, c, line, 16);
 		f64_n[k] = (int)nf;
 		qaws_curve_destroy(line);
 		/* sign changes of y(t) - h over 100000 samples */

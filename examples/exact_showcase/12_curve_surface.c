@@ -58,7 +58,7 @@ static void demo_curve_surface(void)
 	cd.control_point_count = 13;
 	cd.knots = ckn;
 	cd.knot_count = 17;
-	qaws_curve_create_bspline(&cd, &c);
+	qaws_curve_create_bspline(&c, &cd);
 	qaws_exact_surface_prepare(NULL, s, &es, NULL);
 	qaws_exact_curve_prepare(NULL, c, &ec, NULL);
 	t0 = clock();

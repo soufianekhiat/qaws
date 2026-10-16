@@ -379,7 +379,7 @@ static qaws_status rbez_rebuild(qaws_curve const* curve, qaws_diff_views const* 
 		d.control_point_count = impl->control_point_count;
 		d.weights = w;
 		d.weight_count = impl->control_point_count;
-		st = qaws_curve_create_rational_bezier(&d, out_curve);
+		st = qaws_curve_create_rational_bezier(out_curve, &d);
 	}
 	qaws_internal_dealloc(NULL, owned_cps);
 	qaws_internal_dealloc(NULL, owned_w);
@@ -414,8 +414,8 @@ static qaws_curve_vtable const rbez_vtable = {
  * ------------------------------------------------------------------------- */
 
 qaws_status qaws_curve_create_rational_bezier(
-	qaws_rational_bezier_desc const* desc,
-	qaws_curve** out_curve)
+	qaws_curve** out_curve,
+	qaws_rational_bezier_desc const* desc)
 {
 	unsigned int dim_count;
 	unsigned int n_pts;
@@ -507,14 +507,14 @@ qaws_status qaws_curve_create_rational_bezier(
 
 	if (dim_count == 2) {
 		qaws_rational_bezier_prepare_2d(
-			(const qaws_vec2 *)desc->control_points,
-			desc->weights, desc->degree,
-			impl->weighted_points);
+			impl->weighted_points,
+			(const qaws_vec2 *)desc->control_points, desc->weights,
+			desc->degree);
 	} else {
 		qaws_rational_bezier_prepare_3d(
-			(const qaws_vec3 *)desc->control_points,
-			desc->weights, desc->degree,
-			impl->weighted_points);
+			impl->weighted_points,
+			(const qaws_vec3 *)desc->control_points, desc->weights,
+			desc->degree);
 	}
 
 	curve->impl = impl;

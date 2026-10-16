@@ -23,7 +23,7 @@ static qaws_curve* bo_conic_curve(double dx, double dy, double sx)
 	d.weight_count = 7;
 	d.knots = kn;
 	d.knot_count = 10;
-	qaws_curve_create_nurbs(&d, &c);
+	qaws_curve_create_nurbs(&c, &d);
 	return c;
 }
 

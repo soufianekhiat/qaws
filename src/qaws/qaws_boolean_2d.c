@@ -16,7 +16,7 @@
 static qaws_status bo_copy(qaws_curve const* c, qaws_curve** out)
 {
 	qaws_range r = qaws_curve_get_parameter_range(c);
-	return qaws_curve_extract(c, r.min_value, r.max_value, out);
+	return qaws_curve_extract(out, c, r.min_value, r.max_value);
 }
 
 static qaws_status bo_path_curve(qaws_path_2d const* p, qaws_curve** out)
@@ -39,7 +39,7 @@ static qaws_status bo_path_curve(qaws_path_2d const* p, qaws_curve** out)
 		d.dimension = QAWS_DIMENSION_2D;
 		d.segments = seg;
 		d.segment_count = p->curve_count;
-		s = qaws_curve_create_composite(&d, out);
+		s = qaws_curve_create_composite(out, &d);
 	}
 	if (s != QAWS_STATUS_OK)
 		for (i = 0; i < made; i++)

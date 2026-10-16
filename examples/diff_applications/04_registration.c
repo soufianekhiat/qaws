@@ -53,7 +53,7 @@ static qaws_curve* rg_curve(qaws_scalar const* pts)
 	d.control_point_count = RG_N;
 	d.parameterization = QAWS_PARAMETERIZATION_CENTRIPETAL;
 	d.closed = 1;
-	qaws_curve_create_catmull_rom(&d, &c);
+	qaws_curve_create_catmull_rom(&c, &d);
 	return c;
 }
 
@@ -414,7 +414,7 @@ static void rg_curve_svg(svg* s, viewport const* v, reg_problem const* pb, reg_s
 	for (k = 0; k < 200; k++)
 	{
 		qaws_eval_result_2d e;
-		qaws_curve_evaluate_2d(c, (qaws_scalar)(RG_N * k / 199.0), QAWS_EVAL_FLAG_POSITION, &e);
+		qaws_curve_evaluate_2d(&e, c, (qaws_scalar)(RG_N * k / 199.0), QAWS_EVAL_FLAG_POSITION);
 		xy[2 * k] = vx(v, e.position.x);
 		xy[2 * k + 1] = vy(v, e.position.y);
 	}

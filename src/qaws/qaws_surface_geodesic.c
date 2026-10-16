@@ -300,7 +300,7 @@ static qaws_status sg_hermite(double const* pts, double const* der, unsigned int
 	d.dimension = QAWS_DIMENSION_2D; d.degree = 3;
 	d.points = buf; d.point_count = n;
 	d.derivatives = buf + 2 * n; d.derivative_count = n;
-	st = qaws_curve_create_hermite(&d, out);
+	st = qaws_curve_create_hermite(out, &d);
 	free(buf);
 	return st;
 }
@@ -346,7 +346,7 @@ static qaws_status sg_path(sg_ctx const* c, double const* y0, double L, qaws_cur
 			qaws_eval_result_2d e;
 			ym[0] = pts[2 * k]; ym[1] = pts[2 * k + 1]; ym[2] = der[2 * k] / h; ym[3] = der[2 * k + 1] / h;
 			st = sg_integrate(c, ym, 0.5 * h);
-			if (st == QAWS_STATUS_OK && qaws_curve_evaluate_2d(cv, (qaws_scalar)(k + 0.5), QAWS_EVAL_FLAG_POSITION, &e) == QAWS_STATUS_OK)
+			if (st == QAWS_STATUS_OK && qaws_curve_evaluate_2d(&e, cv, (qaws_scalar)(k + 0.5), QAWS_EVAL_FLAG_POSITION) == QAWS_STATUS_OK)
 			{
 				double d = hypot((double)e.position.x - ym[0], (double)e.position.y - ym[1]);
 				if (d > worst) worst = d;
@@ -527,7 +527,7 @@ qaws_status qaws_surface_curve_create_uv(qaws_surface const* surface, qaws_curve
 		return st;
 	}
 	rg = qaws_curve_get_parameter_range(uv_curve);
-	st = qaws_curve_extract(uv_curve, rg.min_value, rg.max_value, &c->uv);
+	st = qaws_curve_extract(&c->uv, uv_curve, rg.min_value, rg.max_value);
 	c->length = -1;
 	if (st != QAWS_STATUS_OK)
 	{
@@ -569,7 +569,7 @@ qaws_status qaws_surface_curve_create_geodesic_ray(qaws_surface const* surface, 
 	{
 		qaws_eval_result_2d e;
 		qaws_range rg = qaws_curve_get_parameter_range(c->uv);
-		qaws_curve_evaluate_2d(c->uv, rg.max_value, QAWS_EVAL_FLAG_POSITION, &e);
+		qaws_curve_evaluate_2d(&e, c->uv, rg.max_value, QAWS_EVAL_FLAG_POSITION);
 		c->b[0] = (double)e.position.x; c->b[1] = (double)e.position.y;
 	}
 	*out_curve = c;
@@ -796,7 +796,7 @@ qaws_status qaws_surface_curve_create_geodesic_arc(qaws_surface const* surface, 
 			double y[4];
 			qaws_eval_result_2d e;
 			st = sg_ray(&ctx, c0, pole, a0 + (k + 0.5) * dt, r, y);
-			if (st == QAWS_STATUS_OK && qaws_curve_evaluate_2d(cv, (qaws_scalar)(k + 0.5), QAWS_EVAL_FLAG_POSITION, &e) == QAWS_STATUS_OK)
+			if (st == QAWS_STATUS_OK && qaws_curve_evaluate_2d(&e, cv, (qaws_scalar)(k + 0.5), QAWS_EVAL_FLAG_POSITION) == QAWS_STATUS_OK)
 			{
 				double dd = hypot((double)e.position.x - y[0], (double)e.position.y - y[1]);
 				if (dd > worst) worst = dd;
@@ -888,7 +888,7 @@ qaws_status qaws_surface_curve_get_length(qaws_surface_curve const* curve, qaws_
 				{
 					double t = 0.5 * (a + b) + (k ? 0.5 : -0.5) * (b - a) * x[i], g[3];
 					qaws_eval_result_2d e;
-					qaws_curve_evaluate_2d(curve->uv, (qaws_scalar)t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &e);
+					qaws_curve_evaluate_2d(&e, curve->uv, (qaws_scalar)t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1);
 					if (sg_metric(&curve->ctx, (double)e.position.x, (double)e.position.y, g, NULL) != QAWS_STATUS_OK)
 						return QAWS_STATUS_NUMERICAL_FAILURE;
 					s += 0.5 * (b - a) * w[i] * sqrt(g[0] * e.d1.x * e.d1.x + 2 * g[1] * e.d1.x * e.d1.y + g[2] * e.d1.y * e.d1.y);
@@ -906,7 +906,7 @@ qaws_status qaws_surface_curve_evaluate(qaws_surface_curve const* curve, qaws_sc
 	qaws_status st;
 	if (!curve)
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	st = qaws_curve_evaluate_2d(curve->uv, t, QAWS_EVAL_FLAG_POSITION, &e);
+	st = qaws_curve_evaluate_2d(&e, curve->uv, t, QAWS_EVAL_FLAG_POSITION);
 	if (st != QAWS_STATUS_OK)
 		return st;
 	if (out_uv)
@@ -976,7 +976,7 @@ static qaws_status sg_conormal(sg_ctx const* c, qaws_curve const* base, double t
 {
 	qaws_eval_result_2d e;
 	double d[2], a;
-	qaws_status st = qaws_curve_evaluate_2d(base, (qaws_scalar)t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &e);
+	qaws_status st = qaws_curve_evaluate_2d(&e, base, (qaws_scalar)t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1);
 	if (st != QAWS_STATUS_OK)
 		return st;
 	d[0] = (double)e.d1.x; d[1] = (double)e.d1.y;
@@ -1020,9 +1020,9 @@ qaws_status qaws_internal_sg_offset(qaws_internal_sg_ctx const* c, qaws_curve co
 	{
 		qaws_eval_result_2d e;
 		qaws_range ra = qaws_curve_get_parameter_range(r0), rb = qaws_curve_get_parameter_range(r1);
-		qaws_curve_evaluate_2d(r0, ra.max_value, QAWS_EVAL_FLAG_POSITION, &e);
+		qaws_curve_evaluate_2d(&e, r0, ra.max_value, QAWS_EVAL_FLAG_POSITION);
 		q0[0] = (double)e.position.x; q0[1] = (double)e.position.y;
-		qaws_curve_evaluate_2d(r1, rb.max_value, QAWS_EVAL_FLAG_POSITION, &e);
+		qaws_curve_evaluate_2d(&e, r1, rb.max_value, QAWS_EVAL_FLAG_POSITION);
 		q1[0] = (double)e.position.x; q1[1] = (double)e.position.y;
 	}
 	while (st == QAWS_STATUS_OK)
@@ -1072,7 +1072,7 @@ qaws_status qaws_internal_sg_offset(qaws_internal_sg_ctx const* c, qaws_curve co
 			qaws_eval_result_2d e;
 			st = sg_conormal(c, base, t0 + (t1 - t0) * (k + 0.5) / n, dist, y);
 			if (st == QAWS_STATUS_OK) st = sg_integrate(c, y, r);
-			if (st == QAWS_STATUS_OK && qaws_curve_evaluate_2d(cv, (qaws_scalar)(k + 0.5), QAWS_EVAL_FLAG_POSITION, &e) == QAWS_STATUS_OK)
+			if (st == QAWS_STATUS_OK && qaws_curve_evaluate_2d(&e, cv, (qaws_scalar)(k + 0.5), QAWS_EVAL_FLAG_POSITION) == QAWS_STATUS_OK)
 			{
 				double dd = hypot((double)e.position.x - y[0], (double)e.position.y - y[1]);
 				if (dd > worst) worst = dd;

@@ -24,7 +24,7 @@ static void demo_curve_hits(void)
 	d.degree = 4;
 	d.control_points = acp;
 	d.control_point_count = 5;
-	qaws_curve_create_bezier(&d, &ca);
+	qaws_curve_create_bezier(&ca, &d);
 	qaws_exact_desc_default(&desc);
 	desc.space_exp2 = -29;   /* every 2^-k, k <= 28, on the lattice (x up to 4) */
 	desc.coord_bits = 32;
@@ -46,12 +46,12 @@ static void demo_curve_hits(void)
 			bcp[2 * i + 1] = (qaws_scalar)(h - acp[2 * i + 1]);
 		}
 		d.control_points = bcp;
-		qaws_curve_create_bezier(&d, &cb);
+		qaws_curve_create_bezier(&cb, &d);
 		qaws_exact_curve_prepare(&desc, cb, &eb, NULL);
 		if (qaws_exact_curve_curve_hits(ea, eb, hits, 8, &n) != QAWS_STATUS_OK)
 			failed++;
 		exact_n[k] = (int)n;
-		qaws_curve_find_intersections_2d(ca, cb, ix, 16, &nf);
+		qaws_curve_find_intersections_2d(ix, &nf, ca, cb, 16);
 		f64_n[k] = (int)nf;
 		f64_wrong += f64_n[k] != exact_n[k];
 		if (k <= 5)

@@ -46,15 +46,15 @@ static qaws_status swept_surface_eval(
 	/* Evaluate path position */
 	memset(&path_r, 0, sizeof(path_r));
 	{
-		qaws_status s = qaws_curve_evaluate_3d(impl->path, t_path,
-			QAWS_EVAL_FLAG_POSITION, &path_r);
+		qaws_status s = qaws_curve_evaluate_3d(&path_r, impl->path,
+			t_path, QAWS_EVAL_FLAG_POSITION);
 		if (s != QAWS_STATUS_OK) return s;
 	}
 
 	/* Get Frenet frame at path point */
 	{
 		qaws_status s = qaws_curve_compute_frenet_frame_3d(
-			impl->path, t_path, &T, &N, &B);
+			&T, &N, &B, impl->path, t_path);
 		if (s != QAWS_STATUS_OK) return s;
 	}
 
@@ -68,7 +68,7 @@ static qaws_status swept_surface_eval(
 			pf |= QAWS_EVAL_FLAG_D2;
 
 		memset(&prof_r, 0, sizeof(prof_r));
-		s = qaws_curve_evaluate_2d(impl->profile, t_prof, pf, &prof_r);
+		s = qaws_curve_evaluate_2d(&prof_r, impl->profile, t_prof, pf);
 		if (s != QAWS_STATUS_OK) return s;
 	}
 
@@ -129,15 +129,15 @@ static qaws_status swept_surface_eval(
 			qaws_vec3 T_lo, N_lo, B_lo, T_hi, N_hi, B_hi;
 
 			memset(&pr, 0, sizeof(pr));
-			qaws_curve_evaluate_3d(impl->path, t_lo, QAWS_EVAL_FLAG_POSITION, &pr);
-			qaws_curve_compute_frenet_frame_3d(impl->path, t_lo, &T_lo, &N_lo, &B_lo);
+			qaws_curve_evaluate_3d(&pr, impl->path, t_lo, QAWS_EVAL_FLAG_POSITION);
+			qaws_curve_compute_frenet_frame_3d(&T_lo, &N_lo, &B_lo, impl->path, t_lo);
 			p_lo.x = pr.position.x + px * N_lo.x + py * B_lo.x;
 			p_lo.y = pr.position.y + px * N_lo.y + py * B_lo.y;
 			p_lo.z = pr.position.z + px * N_lo.z + py * B_lo.z;
 
 			memset(&pr, 0, sizeof(pr));
-			qaws_curve_evaluate_3d(impl->path, t_hi, QAWS_EVAL_FLAG_POSITION, &pr);
-			qaws_curve_compute_frenet_frame_3d(impl->path, t_hi, &T_hi, &N_hi, &B_hi);
+			qaws_curve_evaluate_3d(&pr, impl->path, t_hi, QAWS_EVAL_FLAG_POSITION);
+			qaws_curve_compute_frenet_frame_3d(&T_hi, &N_hi, &B_hi, impl->path, t_hi);
 			p_hi.x = pr.position.x + px * N_hi.x + py * B_hi.x;
 			p_hi.y = pr.position.y + px * N_hi.y + py * B_hi.y;
 			p_hi.z = pr.position.z + px * N_hi.z + py * B_hi.z;
@@ -173,8 +173,8 @@ static qaws_status swept_surface_eval(
 			qaws_vec3 dv_lo, dv_hi;
 			qaws_scalar inv2h = QAWS_ONE / (QAWS_LITERAL(2.0) * h);
 
-			qaws_curve_compute_frenet_frame_3d(impl->path, t_lo, &T_tmp, &N_lo, &B_lo);
-			qaws_curve_compute_frenet_frame_3d(impl->path, t_hi, &T_tmp, &N_hi, &B_hi);
+			qaws_curve_compute_frenet_frame_3d(&T_tmp, &N_lo, &B_lo, impl->path, t_lo);
+			qaws_curve_compute_frenet_frame_3d(&T_tmp, &N_hi, &B_hi, impl->path, t_hi);
 
 			dv_lo.x = dpx * N_lo.x + dpy * B_lo.x;
 			dv_lo.y = dpx * N_lo.y + dpy * B_lo.y;

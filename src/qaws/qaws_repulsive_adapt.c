@@ -18,13 +18,13 @@ static void ra_eval(qaws_curve const* c, unsigned int dim, double t, double* p)
 	if (dim == 2)
 	{
 		qaws_eval_result_2d r;
-		qaws_curve_evaluate_2d(c, (qaws_scalar)t, QAWS_EVAL_FLAG_POSITION, &r);
+		qaws_curve_evaluate_2d(&r, c, (qaws_scalar)t, QAWS_EVAL_FLAG_POSITION);
 		p[0] = r.position.x; p[1] = r.position.y; p[2] = 0;
 	}
 	else
 	{
 		qaws_eval_result_3d r;
-		qaws_curve_evaluate_3d(c, (qaws_scalar)t, QAWS_EVAL_FLAG_POSITION, &r);
+		qaws_curve_evaluate_3d(&r, c, (qaws_scalar)t, QAWS_EVAL_FLAG_POSITION);
 		p[0] = r.position.x; p[1] = r.position.y; p[2] = r.position.z;
 	}
 }
@@ -188,7 +188,7 @@ qaws_status qaws_repulsive_polyline_to_curve(qaws_curve** out_curve, qaws_scalar
 	memset(&d, 0, sizeof(d));
 	d.dimension = (qaws_dimension)dimension; d.degree = 1; d.control_points = cp; d.control_point_count = m;
 	d.knots = kn; d.knot_count = m + 2;
-	st = qaws_curve_create_bspline(&d, out_curve);
+	st = qaws_curve_create_bspline(out_curve, &d);
 	free(cp); free(kn);
 	return st;
 }

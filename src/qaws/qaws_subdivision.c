@@ -497,8 +497,8 @@ static unsigned int scheme_degree(qaws_subdivision_scheme scheme)
 /* -------------------------------------------------------------------------- */
 
 qaws_status qaws_curve_create_subdivision(
-	qaws_subdivision_desc const* desc,
-	qaws_curve** out_curve)
+	qaws_curve** out_curve,
+	qaws_subdivision_desc const* desc)
 {
 	qaws_subdivision_impl* impl = NULL;
 	qaws_curve* curve = NULL;

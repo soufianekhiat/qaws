@@ -16,19 +16,19 @@ static void test_bspline(void)
 	desc.is_closed = 0;
 
 	qaws_curve* curve = NULL;
-	qaws_status s = qaws_curve_create_bspline(&desc, &curve);
+	qaws_status s = qaws_curve_create_bspline(&curve, &desc);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(qaws_curve_get_kind(curve) == QAWS_CURVE_KIND_BSPLINE, "kind == BSPLINE");
 
 	/* Evaluate at endpoints of clamped uniform B-spline */
 	qaws_eval_result_2d r;
 	qaws_range range = qaws_curve_get_parameter_range(curve);
-	s = qaws_curve_evaluate_2d(curve, range.min_value, QAWS_EVAL_FLAG_POSITION, &r);
+	s = qaws_curve_evaluate_2d(&r, curve, range.min_value, QAWS_EVAL_FLAG_POSITION);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(approx_eq(r.position.x, (qaws_scalar)0.0), "start x");
 	TEST_ASSERT(approx_eq(r.position.y, (qaws_scalar)0.0), "start y");
 
-	s = qaws_curve_evaluate_2d(curve, range.max_value, QAWS_EVAL_FLAG_POSITION, &r);
+	s = qaws_curve_evaluate_2d(&r, curve, range.max_value, QAWS_EVAL_FLAG_POSITION);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(approx_eq(r.position.x, (qaws_scalar)4.0), "end x");
 	TEST_ASSERT(approx_eq(r.position.y, (qaws_scalar)0.0), "end y");
@@ -54,16 +54,16 @@ static void test_bspline_custom_knots(void)
 	desc.is_closed = 0;
 
 	qaws_curve* curve = NULL;
-	qaws_status s = qaws_curve_create_bspline(&desc, &curve);
+	qaws_status s = qaws_curve_create_bspline(&curve, &desc);
 	TEST_ASSERT_STATUS(s);
 
 	qaws_eval_result_2d r;
 	qaws_range range = qaws_curve_get_parameter_range(curve);
-	s = qaws_curve_evaluate_2d(curve, range.min_value, QAWS_EVAL_FLAG_POSITION, &r);
+	s = qaws_curve_evaluate_2d(&r, curve, range.min_value, QAWS_EVAL_FLAG_POSITION);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(approx_eq(r.position.x, (qaws_scalar)0.0), "custom knots start x");
 
-	s = qaws_curve_evaluate_2d(curve, range.max_value, QAWS_EVAL_FLAG_POSITION, &r);
+	s = qaws_curve_evaluate_2d(&r, curve, range.max_value, QAWS_EVAL_FLAG_POSITION);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(approx_eq(r.position.x, (qaws_scalar)4.0), "custom knots end x");
 
@@ -94,12 +94,12 @@ static void test_bspline_repeated_end_knots(void)
 		desc.control_point_count = 6;
 		desc.knots = which ? knots_end : knots_start;
 		desc.knot_count = 10;
-		TEST_ASSERT_STATUS(qaws_curve_create_bspline(&desc, &curve));
+		TEST_ASSERT_STATUS(qaws_curve_create_bspline(&curve, &desc));
 		range = qaws_curve_get_parameter_range(curve);
 		t = which ? range.max_value : range.min_value;
 		inside = which ? t - (qaws_scalar)1e-4 : t + (qaws_scalar)1e-4;
-		TEST_ASSERT_STATUS(qaws_curve_evaluate_2d(curve, t, QAWS_EVAL_FLAG_POSITION, &at));
-		TEST_ASSERT_STATUS(qaws_curve_evaluate_2d(curve, inside, QAWS_EVAL_FLAG_POSITION, &near));
+		TEST_ASSERT_STATUS(qaws_curve_evaluate_2d(&at, curve, t, QAWS_EVAL_FLAG_POSITION));
+		TEST_ASSERT_STATUS(qaws_curve_evaluate_2d(&near, curve, inside, QAWS_EVAL_FLAG_POSITION));
 		TEST_ASSERT(fabs(at.position.x - near.position.x) < 1e-2 && fabs(at.position.y - near.position.y) < 1e-2,
 			which ? "triple knot at the domain end: finite and continuous" : "triple knot at the domain start: finite and continuous");
 		/* the triple knot interpolates a control point */

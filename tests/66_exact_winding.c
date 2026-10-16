@@ -40,7 +40,7 @@ static qaws_exact_curve* ew_piece(qaws_scalar const* cps, qaws_scalar const* ws,
 		d.control_point_count = degree + 1;
 		d.weights = ws;
 		d.weight_count = degree + 1;
-		qaws_curve_create_rational_bezier(&d, &c);
+		qaws_curve_create_rational_bezier(&c, &d);
 	}
 	else
 	{
@@ -50,7 +50,7 @@ static qaws_exact_curve* ew_piece(qaws_scalar const* cps, qaws_scalar const* ws,
 		d.degree = degree;
 		d.control_points = cps;
 		d.control_point_count = degree + 1;
-		qaws_curve_create_bezier(&d, &c);
+		qaws_curve_create_bezier(&c, &d);
 	}
 	qaws_exact_curve_prepare(&desc, c, &e, NULL);
 	qaws_curve_destroy(c);

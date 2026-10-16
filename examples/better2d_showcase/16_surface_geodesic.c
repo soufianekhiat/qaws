@@ -169,7 +169,7 @@ static qaws_curve* sgf_arc(double cx, double cy, double r, double a0, double a1)
 	g.angle_start = (qaws_scalar)a0; g.angle_end = (qaws_scalar)a1;
 	memset(&ad, 0, sizeof(ad));
 	ad.dimension = QAWS_DIMENSION_2D; ad.segments = &g; ad.segment_count = 1;
-	qaws_curve_create_arc(&ad, &c);
+	qaws_curve_create_arc(&c, &ad);
 	return c;
 }
 

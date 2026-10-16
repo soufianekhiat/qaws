@@ -36,7 +36,7 @@ static qaws_curve* oct_bezier(double const* xy, unsigned int n)
 	for (i = 0; i < 2 * n; i++) p[i] = (qaws_scalar)xy[i];
 	memset(&d, 0, sizeof(d));
 	d.dimension = QAWS_DIMENSION_2D; d.degree = n - 1; d.control_points = p; d.control_point_count = n;
-	qaws_curve_create_bezier(&d, &c);
+	qaws_curve_create_bezier(&c, &d);
 	return c;
 }
 
@@ -46,7 +46,7 @@ static unsigned int oct_chain(qaws_curve const* c, double* cp, unsigned int cap,
 {
 	unsigned int n = 0, i;
 	qaws_scalar* tmp = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 2 * cap);
-	qaws_curve_get_control_points(c, tmp, cap, &n);
+	qaws_curve_get_control_points(tmp, &n, c, cap);
 	for (i = 0; i < 2 * n; i++) cp[i] = tmp[i];
 	free(tmp);
 	*corners = 0;
@@ -150,7 +150,7 @@ static void test_parabola(void)
 		{
 			qaws_eval_result_2d e;
 			double d, d2;
-			qaws_curve_evaluate_2d(chain, (qaws_scalar)(rg.min_value + (rg.max_value - rg.min_value) * i / 2000), QAWS_EVAL_FLAG_POSITION, &e);
+			qaws_curve_evaluate_2d(&e, chain, (qaws_scalar)(rg.min_value + (rg.max_value - rg.min_value) * i / 2000), QAWS_EVAL_FLAG_POSITION);
 			d = oct_dist_to(oct_par_offset, e.position.x, e.position.y);
 			d2 = oct_dist_to(oct_par_evolute, e.position.x, e.position.y);
 			if (d2 < d) d = d2;
@@ -233,7 +233,7 @@ static qaws_curve* oct_star(unsigned int m, double r0, double r1)
 	memset(&d, 0, sizeof(d));
 	d.dimension = QAWS_DIMENSION_2D; d.degree = 3; d.control_points = cp; d.control_point_count = n;
 	d.knots = kn; d.knot_count = kc;
-	qaws_curve_create_bspline(&d, &c);
+	qaws_curve_create_bspline(&c, &d);
 	return c;
 }
 
@@ -270,19 +270,19 @@ static void oct_rings(qaws_path_2d const* paths, unsigned int n, oct_ring* o)
 				double t0 = rg.min_value + (rg.max_value - rg.min_value) * s / ns, t1 = rg.min_value + (rg.max_value - rg.min_value) * (s + 1) / ns;
 				qaws_eval_result_2d e0, e1, eq;
 				unsigned int m = 1, q;
-				qaws_curve_evaluate_2d(c, (qaws_scalar)t0, QAWS_EVAL_FLAG_POSITION, &e0);
-				qaws_curve_evaluate_2d(c, (qaws_scalar)t1, QAWS_EVAL_FLAG_POSITION, &e1);
+				qaws_curve_evaluate_2d(&e0, c, (qaws_scalar)t0, QAWS_EVAL_FLAG_POSITION);
+				qaws_curve_evaluate_2d(&e1, c, (qaws_scalar)t1, QAWS_EVAL_FLAG_POSITION);
 				for (q = 1; q < 4 && m == 1; q++)
 				{
 					double dx = e1.position.x - e0.position.x, dy = e1.position.y - e0.position.y, l = hypot(dx, dy);
-					qaws_curve_evaluate_2d(c, (qaws_scalar)(t0 + (t1 - t0) * q / 4), QAWS_EVAL_FLAG_POSITION, &eq);
+					qaws_curve_evaluate_2d(&eq, c, (qaws_scalar)(t0 + (t1 - t0) * q / 4), QAWS_EVAL_FLAG_POSITION);
 					if (!(l > 0) || fabs((eq.position.x - e0.position.x) * dy - (eq.position.y - e0.position.y) * dx) > (OCT_F32 ? 1e-5 : 1e-9) * l)
 						m = 256;
 				}
 				for (j = 0; j < m; j++)
 				{
 					qaws_eval_result_2d e;
-					qaws_curve_evaluate_2d(c, (qaws_scalar)(t0 + (t1 - t0) * j / m), QAWS_EVAL_FLAG_POSITION, &e);
+					qaws_curve_evaluate_2d(&e, c, (qaws_scalar)(t0 + (t1 - t0) * j / m), QAWS_EVAL_FLAG_POSITION);
 					o->xy[2 * o->count] = e.position.x;
 					o->xy[2 * o->count + 1] = e.position.y;
 					o->count++;
@@ -340,7 +340,7 @@ static unsigned int oct_oracle(qaws_curve const* c, int closed, double delta, qa
 		}
 	memset(&cd, 0, sizeof(cd));
 	cd.curves = &c; cd.curve_count = 1; cd.points = pts; cd.point_count = grid * grid;
-	qaws_curve_batch_find_closest(&cd, cl, NULL);
+	qaws_curve_batch_find_closest(cl, NULL, &cd);
 	res = (qaws_path_2d*)malloc(sizeof(qaws_path_2d) * (np + 1));
 	for (i = 0; i < np; i++) qaws_clip_result_get_path(r, i, &res[i]);
 	memset(&sr, 0, sizeof(sr));
@@ -417,10 +417,10 @@ static void test_disc_with_hole(void)
 	d.dimension = QAWS_DIMENSION_2D; d.segments = &g; d.segment_count = 1;
 	memset(&g, 0, sizeof(g));
 	g.radius = 1; g.angle_start = 0; g.angle_end = (qaws_scalar)(2 * OCT_PI);
-	qaws_curve_create_arc(&d, &outer);
+	qaws_curve_create_arc(&outer, &d);
 	g.center[0] = (qaws_scalar)0.3; g.center[1] = (qaws_scalar)0.1; g.radius = (qaws_scalar)0.35;
 	g.angle_start = (qaws_scalar)(2 * OCT_PI); g.angle_end = 0;
-	qaws_curve_create_arc(&d, &hole);
+	qaws_curve_create_arc(&hole, &d);
 	cv[0] = outer; cv[1] = hole;
 	p[0].curves = &cv[0]; p[0].curve_count = 1; p[0].closed = 1;
 	p[1].curves = &cv[1]; p[1].curve_count = 1; p[1].closed = 1;

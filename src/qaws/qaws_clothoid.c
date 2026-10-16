@@ -430,7 +430,7 @@ static qaws_status clothoid_rebuild(qaws_curve const *curve, qaws_diff_views con
 	d.start_curvature = k0[0];
 	d.end_curvature = k0[0] + rate[0] * impl->length;
 	d.length = impl->length;
-	return qaws_curve_create_clothoid(&d, out_curve);
+	return qaws_curve_create_clothoid(out_curve, &d);
 }
 
 static qaws_curve_diff_vtable const clothoid_diff_vtable = {
@@ -465,8 +465,8 @@ static qaws_curve_vtable const clothoid_vtable = {
  * ------------------------------------------------------------------------- */
 
 qaws_status qaws_curve_create_clothoid(
-	qaws_clothoid_desc const *desc,
-	qaws_curve **out_curve)
+	qaws_curve **out_curve,
+	qaws_clothoid_desc const *desc)
 {
 	qaws_range parameter_range;
 	qaws_curve *curve;

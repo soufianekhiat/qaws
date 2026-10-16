@@ -28,10 +28,10 @@ qaws_bezier_desc desc = {
 };
 
 qaws_curve* curve = NULL;
-qaws_curve_create_bezier(&desc, &curve);
+qaws_curve_create_bezier(&curve, &desc);
 
 qaws_eval_result_2d r;
-qaws_curve_evaluate_2d(curve, 0.5f, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &r);
+qaws_curve_evaluate_2d(&r, curve, 0.5f, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1);
 // r.position = point on curve at t=0.5
 // r.d1       = first derivative (tangent direction)
 

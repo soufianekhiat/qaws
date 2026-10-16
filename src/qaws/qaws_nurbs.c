@@ -455,7 +455,7 @@ static qaws_status nurbs_rebuild(qaws_curve const *curve, qaws_diff_views const 
 		d.knot_count = impl->knot_count;
 		d.weights = w;
 		d.weight_count = impl->control_point_count;
-		st = qaws_curve_create_nurbs(&d, out_curve);
+		st = qaws_curve_create_nurbs(out_curve, &d);
 	}
 	qaws_internal_dealloc(NULL, owned_cps);
 	qaws_internal_dealloc(NULL, owned_w);
@@ -491,9 +491,9 @@ static qaws_curve_vtable const nurbs_vtable = {
  * ------------------------------------------------------------------------- */
 
 qaws_status qaws_curve_create_nurbs_ex(
+	qaws_curve **out_curve,
 	qaws_nurbs_desc const *desc,
-	qaws_allocator const *allocator,
-	qaws_curve **out_curve)
+	qaws_allocator const *allocator)
 {
 	unsigned int dim_count;
 	unsigned int degree;
@@ -650,8 +650,8 @@ qaws_status qaws_curve_create_nurbs_ex(
 }
 
 qaws_status qaws_curve_create_nurbs(
-	qaws_nurbs_desc const *desc,
-	qaws_curve **out_curve)
+	qaws_curve **out_curve,
+	qaws_nurbs_desc const *desc)
 {
-	return qaws_curve_create_nurbs_ex(desc, NULL, out_curve);
+	return qaws_curve_create_nurbs_ex(out_curve, desc, NULL);
 }

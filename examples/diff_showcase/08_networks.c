@@ -15,7 +15,7 @@ static qaws_curve* net_curve(qaws_scalar const* p)
 	d.control_point_count = 6;
 	d.knots = g_net_knots;
 	d.knot_count = 10;
-	qaws_curve_create_bspline(&d, &c);
+	qaws_curve_create_bspline(&c, &d);
 	return c;
 }
 
@@ -46,7 +46,7 @@ static void draw_curve3(svg* s, projection const* pr, qaws_curve const* c, char 
 	for (k = 0; k < 80; k++)
 	{
 		qaws_eval_result_3d e;
-		qaws_curve_evaluate_3d(c, r.min_value + (r.max_value - r.min_value) * k / (qaws_scalar)79, QAWS_EVAL_FLAG_POSITION, &e);
+		qaws_curve_evaluate_3d(&e, c, r.min_value + (r.max_value - r.min_value) * k / (qaws_scalar)79, QAWS_EVAL_FLAG_POSITION);
 		project(pr, e.position.x, e.position.y, e.position.z, &xy[2 * k], &xy[2 * k + 1]);
 	}
 	svg_polyline(s, xy, 80, color, width, 1, 0);

@@ -136,7 +136,7 @@ static void demo_terrain(void)
 		bd.control_points = cp;
 		bd.control_point_count = 3;
 		arcs[i] = NULL;
-		qaws_curve_create_bezier(&bd, &arcs[i]);
+		qaws_curve_create_bezier(&arcs[i], &bd);
 	}
 	memset(&cd, 0, sizeof(cd));
 	cd.curves = (qaws_curve const* const*)arcs;
@@ -151,7 +151,7 @@ static void demo_terrain(void)
 	{
 		qaws_surface_curve_intersection b[16];
 		unsigned int n = 0;
-		qaws_surface_find_curve_intersections(sf[0], arcs[i], b, 16, &n);
+		qaws_surface_find_curve_intersections(b, &n, sf[0], arcs[i], 16);
 		pair_hits += n;
 	}
 	t_cs_pair = hf_now() - t0;
@@ -205,7 +205,7 @@ static void demo_terrain(void)
 		for (k = 0; k < hit_end; k++)
 		{
 			qaws_eval_result_3d e;
-			qaws_curve_evaluate_3d(arcs[i], (qaws_scalar)(rg.min_value + (tend - rg.min_value) * k / (hit_end - 1)), QAWS_EVAL_FLAG_POSITION, &e);
+			qaws_curve_evaluate_3d(&e, arcs[i], (qaws_scalar)(rg.min_value + (tend - rg.min_value) * k / (hit_end - 1)), QAWS_EVAL_FLAG_POSITION);
 			project(&pr, e.position.x, e.position.y, e.position.z, &xy[2 * k], &xy[2 * k + 1]);
 		}
 		svg_polyline(&s, xy, (int)hit_end, "#0969da", 0.9, 0.55, 0);

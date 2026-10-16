@@ -42,7 +42,7 @@ static qaws_surface* sxt_revolve(double cx, double r, double a0, double a1, qaws
 	g.center[0] = (qaws_scalar)cx; g.radius = (qaws_scalar)r; g.angle_start = (qaws_scalar)a0; g.angle_end = (qaws_scalar)a1;
 	memset(&ad, 0, sizeof(ad));
 	ad.dimension = QAWS_DIMENSION_2D; ad.segments = &g; ad.segment_count = 1;
-	qaws_curve_create_arc(&ad, prof);
+	qaws_curve_create_arc(prof, &ad);
 	memset(&rd, 0, sizeof(rd));
 	rd.profile = *prof; rd.axis_direction.z = 1;
 	qaws_surface_create_revolution(&rd, &s);
@@ -85,7 +85,7 @@ static void sxt_square_make(sxt_square* q, qaws_surface const* s, double u0, dou
 		memset(&bz, 0, sizeof(bz));
 		bz.dimension = QAWS_DIMENSION_2D; bz.degree = 1; bz.control_points = cp; bz.control_point_count = 2;
 		q->k[i] = NULL; q->c[i] = NULL;
-		qaws_curve_create_bezier(&bz, &q->k[i]);
+		qaws_curve_create_bezier(&q->k[i], &bz);
 		qaws_surface_curve_create_uv(s, q->k[i], &q->c[i]);
 		q->pc[i] = q->c[i];
 	}

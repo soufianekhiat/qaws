@@ -58,7 +58,7 @@ static qaws_status extrusion_surface_eval(
 			pf |= QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2;
 
 		memset(&pr, 0, sizeof(pr));
-		s = qaws_curve_evaluate_2d(impl->profile, t_prof, pf, &pr);
+		s = qaws_curve_evaluate_2d(&pr, impl->profile, t_prof, pf);
 		if (s != QAWS_STATUS_OK) return s;
 
 		/* Lift 2D to 3D: (x,y) -> (x, y, 0) */
@@ -82,7 +82,7 @@ static qaws_status extrusion_surface_eval(
 			pf |= QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2;
 
 		memset(&pr, 0, sizeof(pr));
-		s = qaws_curve_evaluate_3d(impl->profile, t_prof, pf, &pr);
+		s = qaws_curve_evaluate_3d(&pr, impl->profile, t_prof, pf);
 		if (s != QAWS_STATUS_OK) return s;
 
 		prof_pos = pr.position;

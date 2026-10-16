@@ -13,11 +13,11 @@ static void test_arc_length(void)
 	desc.control_point_count = 2;
 
 	qaws_curve* curve = NULL;
-	qaws_status s = qaws_curve_create_bezier(&desc, &curve);
+	qaws_status s = qaws_curve_create_bezier(&curve, &desc);
 	TEST_ASSERT_STATUS(s);
 
 	qaws_scalar length = 0;
-	s = qaws_curve_compute_arc_length(curve, (qaws_scalar)0.0, (qaws_scalar)1.0, &length);
+	s = qaws_curve_compute_arc_length(&length, curve, (qaws_scalar)0.0, (qaws_scalar)1.0);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(approx_eq(length, (qaws_scalar)5.0), "straight line length == 5");
 
@@ -36,7 +36,7 @@ static void test_inspection_flags(void)
 	desc.control_point_count = 2;
 
 	qaws_curve* curve = NULL;
-	qaws_status s = qaws_curve_create_bezier(&desc, &curve);
+	qaws_status s = qaws_curve_create_bezier(&curve, &desc);
 	TEST_ASSERT_STATUS(s);
 
 	TEST_ASSERT(qaws_curve_is_closed(curve) == 0, "bezier is_closed == 0");
@@ -59,11 +59,11 @@ static void test_bounds_3d(void)
 	desc.control_point_count = 3;
 
 	qaws_curve* curve = NULL;
-	qaws_status s = qaws_curve_create_bezier(&desc, &curve);
+	qaws_status s = qaws_curve_create_bezier(&curve, &desc);
 	TEST_ASSERT_STATUS(s);
 
 	qaws_vec3 bmin, bmax;
-	s = qaws_curve_compute_bounds_3d(curve, &bmin, &bmax);
+	s = qaws_curve_compute_bounds_3d(&bmin, &bmax, curve);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(bmin.x >= (qaws_scalar)-0.1, "3d bounds min x");
 	TEST_ASSERT(bmax.x <= (qaws_scalar)4.1, "3d bounds max x");
@@ -93,20 +93,20 @@ static void test_precomputed_coefficients(void)
 		hdesc.point_count = 2;
 		hdesc.derivative_count = 2;
 
-		status = qaws_curve_create_hermite(&hdesc, &curve);
+		status = qaws_curve_create_hermite(&curve, &hdesc);
 		TEST_ASSERT_STATUS(status);
 
 		/* At t=0, D1 should be the tangent (0, 2) */
-		qaws_curve_evaluate_2d(curve, (qaws_scalar)0.0,
-			QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &r);
+		qaws_curve_evaluate_2d(&r, curve,
+			(qaws_scalar)0.0, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1);
 		TEST_ASSERT(approx_eq(r.position.x, (qaws_scalar)0.0), "hermite coeffs pos x");
 		TEST_ASSERT(approx_eq(r.position.y, (qaws_scalar)0.0), "hermite coeffs pos y");
 		TEST_ASSERT(approx_eq(r.d1.x, (qaws_scalar)0.0), "hermite coeffs d1 x");
 		TEST_ASSERT(approx_eq(r.d1.y, (qaws_scalar)2.0), "hermite coeffs d1 y");
 
 		/* At t=1, position should be (2,0), D1 should be (0,-2) */
-		qaws_curve_evaluate_2d(curve, (qaws_scalar)1.0,
-			QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &r);
+		qaws_curve_evaluate_2d(&r, curve,
+			(qaws_scalar)1.0, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1);
 		TEST_ASSERT(approx_eq(r.position.x, (qaws_scalar)2.0), "hermite coeffs end pos x");
 		TEST_ASSERT(approx_eq(r.position.y, (qaws_scalar)0.0), "hermite coeffs end pos y");
 		TEST_ASSERT(approx_eq(r.d1.x, (qaws_scalar)0.0), "hermite coeffs end d1 x");
@@ -133,24 +133,24 @@ static void test_precomputed_coefficients(void)
 		tdesc.key_times = times;
 		tdesc.key_time_count = 3;
 
-		status = qaws_curve_create_trajectory(&tdesc, &curve);
+		status = qaws_curve_create_trajectory(&curve, &tdesc);
 		TEST_ASSERT_STATUS(status);
 
 		/* Start should be (0,0) */
-		qaws_curve_evaluate_2d(curve, (qaws_scalar)0.0,
-			QAWS_EVAL_FLAG_POSITION, &r);
+		qaws_curve_evaluate_2d(&r, curve,
+			(qaws_scalar)0.0, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT(approx_eq(r.position.x, (qaws_scalar)0.0), "traj coeffs start x");
 		TEST_ASSERT(approx_eq(r.position.y, (qaws_scalar)0.0), "traj coeffs start y");
 
 		/* At t=1, should be (1,1) */
-		qaws_curve_evaluate_2d(curve, (qaws_scalar)1.0,
-			QAWS_EVAL_FLAG_POSITION, &r);
+		qaws_curve_evaluate_2d(&r, curve,
+			(qaws_scalar)1.0, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT(approx_eq(r.position.x, (qaws_scalar)1.0), "traj coeffs mid x");
 		TEST_ASSERT(approx_eq(r.position.y, (qaws_scalar)1.0), "traj coeffs mid y");
 
 		/* At t=2, should be (2,0) */
-		qaws_curve_evaluate_2d(curve, (qaws_scalar)2.0,
-			QAWS_EVAL_FLAG_POSITION, &r);
+		qaws_curve_evaluate_2d(&r, curve,
+			(qaws_scalar)2.0, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT(approx_eq(r.position.x, (qaws_scalar)2.0), "traj coeffs end x");
 		TEST_ASSERT(approx_eq(r.position.y, (qaws_scalar)0.0), "traj coeffs end y");
 
@@ -173,13 +173,13 @@ static void test_precomputed_coefficients(void)
 		hdesc.point_count = 2;
 		hdesc.derivative_count = 2;
 
-		status = qaws_curve_create_hermite(&hdesc, &curve);
+		status = qaws_curve_create_hermite(&curve, &hdesc);
 		TEST_ASSERT_STATUS(status);
 
 		/* At t=0, evaluate all derivatives */
-		qaws_curve_evaluate_2d(curve, (qaws_scalar)0.0,
-			QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 |
-			QAWS_EVAL_FLAG_D2 | QAWS_EVAL_FLAG_D3, &r);
+		qaws_curve_evaluate_2d(&r, curve,
+			(qaws_scalar)0.0, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 |
+			QAWS_EVAL_FLAG_D2 | QAWS_EVAL_FLAG_D3);
 
 		/* D2 should be finite (not NaN) */
 		TEST_ASSERT(r.d2.x == r.d2.x, "hermite d2 x finite at t=0");
@@ -190,8 +190,8 @@ static void test_precomputed_coefficients(void)
 		TEST_ASSERT(r.d3.y == r.d3.y, "hermite d3 y finite at t=0");
 
 		/* At t=0.5, D2 and D3 should also be finite */
-		qaws_curve_evaluate_2d(curve, (qaws_scalar)0.5,
-			QAWS_EVAL_FLAG_D2 | QAWS_EVAL_FLAG_D3, &r);
+		qaws_curve_evaluate_2d(&r, curve,
+			(qaws_scalar)0.5, QAWS_EVAL_FLAG_D2 | QAWS_EVAL_FLAG_D3);
 		TEST_ASSERT(r.d2.x == r.d2.x, "hermite d2 x finite at t=0.5");
 		TEST_ASSERT(r.d2.y == r.d2.y, "hermite d2 y finite at t=0.5");
 		TEST_ASSERT(r.d3.x == r.d3.x, "hermite d3 x finite at t=0.5");
@@ -203,10 +203,10 @@ static void test_precomputed_coefficients(void)
 		 */
 		{
 			qaws_eval_result_2d r0, r1;
-			qaws_curve_evaluate_2d(curve, (qaws_scalar)0.0,
-				QAWS_EVAL_FLAG_D3, &r0);
-			qaws_curve_evaluate_2d(curve, (qaws_scalar)1.0,
-				QAWS_EVAL_FLAG_D3, &r1);
+			qaws_curve_evaluate_2d(&r0, curve,
+				(qaws_scalar)0.0, QAWS_EVAL_FLAG_D3);
+			qaws_curve_evaluate_2d(&r1, curve,
+				(qaws_scalar)1.0, QAWS_EVAL_FLAG_D3);
 			TEST_ASSERT(approx_eq(r0.d3.x, r1.d3.x),
 				"hermite d3 constant x");
 			TEST_ASSERT(approx_eq(r0.d3.y, r1.d3.y),
@@ -235,12 +235,12 @@ static void test_precomputed_coefficients(void)
 		tdesc.key_times = times;
 		tdesc.key_time_count = 3;
 
-		status = qaws_curve_create_trajectory(&tdesc, &curve);
+		status = qaws_curve_create_trajectory(&curve, &tdesc);
 		TEST_ASSERT_STATUS(status);
 
 		/* D1 at t=0 should point roughly toward (3,4) => positive x, positive y */
-		qaws_curve_evaluate_2d(curve, (qaws_scalar)0.0,
-			QAWS_EVAL_FLAG_D1, &r);
+		qaws_curve_evaluate_2d(&r, curve,
+			(qaws_scalar)0.0, QAWS_EVAL_FLAG_D1);
 		TEST_ASSERT(r.d1.x > (qaws_scalar)0.0, "traj d1 start x positive");
 		TEST_ASSERT(r.d1.y > (qaws_scalar)0.0, "traj d1 start y positive");
 
@@ -267,30 +267,30 @@ static void test_precomputed_coefficients(void)
 		hdesc.point_count = 3;
 		hdesc.derivative_count = 3;
 
-		status = qaws_curve_create_hermite(&hdesc, &curve);
+		status = qaws_curve_create_hermite(&curve, &hdesc);
 		TEST_ASSERT_STATUS(status);
 		TEST_ASSERT(qaws_curve_get_span_count(curve) == 2,
 			"multi-span hermite span count");
 
 		/* Boundary t=0 -> point 0 */
-		qaws_curve_evaluate_2d(curve, (qaws_scalar)0.0,
-			QAWS_EVAL_FLAG_POSITION, &r);
+		qaws_curve_evaluate_2d(&r, curve,
+			(qaws_scalar)0.0, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT(approx_eq(r.position.x, (qaws_scalar)0.0),
 			"multi hermite boundary 0 x");
 		TEST_ASSERT(approx_eq(r.position.y, (qaws_scalar)0.0),
 			"multi hermite boundary 0 y");
 
 		/* Boundary t=1 -> point 1 */
-		qaws_curve_evaluate_2d(curve, (qaws_scalar)1.0,
-			QAWS_EVAL_FLAG_POSITION, &r);
+		qaws_curve_evaluate_2d(&r, curve,
+			(qaws_scalar)1.0, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT(approx_eq(r.position.x, (qaws_scalar)1.0),
 			"multi hermite boundary 1 x");
 		TEST_ASSERT(approx_eq(r.position.y, (qaws_scalar)2.0),
 			"multi hermite boundary 1 y");
 
 		/* Boundary t=2 -> point 2 */
-		qaws_curve_evaluate_2d(curve, (qaws_scalar)2.0,
-			QAWS_EVAL_FLAG_POSITION, &r);
+		qaws_curve_evaluate_2d(&r, curve,
+			(qaws_scalar)2.0, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT(approx_eq(r.position.x, (qaws_scalar)3.0),
 			"multi hermite boundary 2 x");
 		TEST_ASSERT(approx_eq(r.position.y, (qaws_scalar)1.0),
@@ -317,9 +317,9 @@ static int derivative_consistent(qaws_curve const* c, char const* name, int max_
 		qaws_scalar t = (qaws_scalar)(r.min_value + fr[k] * (r.max_value - r.min_value));
 		qaws_eval_result_2d e, ep, em;
 		double scale;
-		qaws_curve_evaluate_2d(c, t, flags, &e);
-		qaws_curve_evaluate_2d(c, (qaws_scalar)(t + h), flags, &ep);
-		qaws_curve_evaluate_2d(c, (qaws_scalar)(t - h), flags, &em);
+		qaws_curve_evaluate_2d(&e, c, t, flags);
+		qaws_curve_evaluate_2d(&ep, c, (qaws_scalar)(t + h), flags);
+		qaws_curve_evaluate_2d(&em, c, (qaws_scalar)(t - h), flags);
 		scale = 1 + sqrt((double)e.d1.x * e.d1.x + (double)e.d1.y * e.d1.y);
 		if (fabs(e.d1.x - (ep.position.x - em.position.x) / (2 * h)) > tol * scale ||
 		    fabs(e.d1.y - (ep.position.y - em.position.y) / (2 * h)) > tol * scale)
@@ -366,61 +366,61 @@ static void test_family_derivatives(void)
 		qaws_bezier_desc d;
 		memset(&d, 0, sizeof(d));
 		d.dimension = QAWS_DIMENSION_2D; d.degree = 3; d.control_points = p4; d.control_point_count = 4;
-		CHECK_FAMILY(qaws_curve_create_bezier(&d, &c), "bezier", 3);
+		CHECK_FAMILY(qaws_curve_create_bezier(&c, &d), "bezier", 3);
 	}
 	{
 		qaws_bspline_desc d;
 		memset(&d, 0, sizeof(d));
 		d.dimension = QAWS_DIMENSION_2D; d.degree = 3; d.control_points = p6; d.control_point_count = 6;
 		d.knots = knots; d.knot_count = 10;
-		CHECK_FAMILY(qaws_curve_create_bspline(&d, &c), "bspline (non-uniform knots)", 3);
+		CHECK_FAMILY(qaws_curve_create_bspline(&c, &d), "bspline (non-uniform knots)", 3);
 	}
 	{
 		qaws_nurbs_desc d;
 		memset(&d, 0, sizeof(d));
 		d.dimension = QAWS_DIMENSION_2D; d.degree = 3; d.control_points = p6; d.control_point_count = 6;
 		d.knots = knots; d.knot_count = 10; d.weights = w6; d.weight_count = 6;
-		CHECK_FAMILY(qaws_curve_create_nurbs(&d, &c), "nurbs", 3);
+		CHECK_FAMILY(qaws_curve_create_nurbs(&c, &d), "nurbs", 3);
 	}
 	{
 		qaws_rational_bezier_desc d;
 		memset(&d, 0, sizeof(d));
 		d.dimension = QAWS_DIMENSION_2D; d.degree = 3; d.control_points = p4; d.control_point_count = 4;
 		d.weights = w6; d.weight_count = 4;
-		CHECK_FAMILY(qaws_curve_create_rational_bezier(&d, &c), "rational bezier", 3);
+		CHECK_FAMILY(qaws_curve_create_rational_bezier(&c, &d), "rational bezier", 3);
 	}
 	{
 		static qaws_scalar const der[8] = { 1, 0, 0.5f, 1, 1, -1, 0, 1 };
 		qaws_hermite_desc d;
 		memset(&d, 0, sizeof(d));
 		d.dimension = QAWS_DIMENSION_2D; d.degree = 3; d.points = p4; d.derivatives = der; d.point_count = 4; d.derivative_count = 4;
-		CHECK_FAMILY(qaws_curve_create_hermite(&d, &c), "hermite", 3);
+		CHECK_FAMILY(qaws_curve_create_hermite(&c, &d), "hermite", 3);
 	}
 	{
 		qaws_catmull_rom_desc d;
 		memset(&d, 0, sizeof(d));
 		d.dimension = QAWS_DIMENSION_2D; d.control_points = p6; d.control_point_count = 6;
 		d.parameterization = QAWS_PARAMETERIZATION_CENTRIPETAL;
-		CHECK_FAMILY(qaws_curve_create_catmull_rom(&d, &c), "catmull-rom (centripetal)", 3);
+		CHECK_FAMILY(qaws_curve_create_catmull_rom(&c, &d), "catmull-rom (centripetal)", 3);
 	}
 	{
 		qaws_yuksel_desc d;
 		memset(&d, 0, sizeof(d));
 		d.dimension = QAWS_DIMENSION_2D; d.control_points = p6; d.control_point_count = 6; d.mode = QAWS_YUKSEL_MODE_BEZIER;
-		CHECK_FAMILY(qaws_curve_create_yuksel(&d, &c), "yuksel (bezier)", 2);
+		CHECK_FAMILY(qaws_curve_create_yuksel(&c, &d), "yuksel (bezier)", 2);
 	}
 	{
 		qaws_yuksel_desc d;
 		memset(&d, 0, sizeof(d));
 		d.dimension = QAWS_DIMENSION_2D; d.control_points = p6; d.control_point_count = 6; d.mode = QAWS_YUKSEL_MODE_CIRCULAR;
-		CHECK_FAMILY(qaws_curve_create_yuksel(&d, &c), "yuksel (circular)", 2);
+		CHECK_FAMILY(qaws_curve_create_yuksel(&c, &d), "yuksel (circular)", 2);
 	}
 	{
 		static qaws_scalar const times[4] = { 0, 0.7f, 1.9f, 3.0f };
 		qaws_trajectory_desc d;
 		memset(&d, 0, sizeof(d));
 		d.dimension = QAWS_DIMENSION_2D; d.degree = 3; d.key_positions = p4; d.key_count = 4; d.key_times = times; d.key_time_count = 4;
-		CHECK_FAMILY(qaws_curve_create_trajectory(&d, &c), "trajectory (non-uniform times)", 3);
+		CHECK_FAMILY(qaws_curve_create_trajectory(&c, &d), "trajectory (non-uniform times)", 3);
 	}
 	{
 		static qaws_scalar const coef[8] = { 0.2f, -0.1f, 1.1f, 0.4f, -0.3f, 0.9f, 0.05f, -0.2f };
@@ -428,14 +428,14 @@ static void test_family_derivatives(void)
 		memset(&d, 0, sizeof(d));
 		d.dimension = QAWS_DIMENSION_2D; d.degree = 3; d.coefficients = coef; d.coefficient_count = 4;
 		d.t_min = (qaws_scalar)0.5; d.t_max = (qaws_scalar)2.5;
-		CHECK_FAMILY(qaws_curve_create_polynomial(&d, &c), "polynomial on [0.5, 2.5]", 3);
+		CHECK_FAMILY(qaws_curve_create_polynomial(&c, &d), "polynomial on [0.5, 2.5]", 3);
 	}
 	{
 		qaws_clothoid_desc d;
 		memset(&d, 0, sizeof(d));
 		d.start_angle = (qaws_scalar)0.3; d.start_curvature = (qaws_scalar)0.2; d.end_curvature = (qaws_scalar)1.5;
 		d.length = (qaws_scalar)3.0;
-		CHECK_FAMILY(qaws_curve_create_clothoid(&d, &c), "clothoid", 3);
+		CHECK_FAMILY(qaws_curve_create_clothoid(&c, &d), "clothoid", 3);
 	}
 	{
 		qaws_arc_segment seg[2];
@@ -446,14 +446,14 @@ static void test_family_derivatives(void)
 		seg[1].angle_end = (qaws_scalar)1.0;
 		memset(&d, 0, sizeof(d));
 		d.dimension = QAWS_DIMENSION_2D; d.segments = seg; d.segment_count = 2;
-		CHECK_FAMILY(qaws_curve_create_arc(&d, &c), "arc (two segments)", 3);
+		CHECK_FAMILY(qaws_curve_create_arc(&c, &d), "arc (two segments)", 3);
 	}
 	{
 		qaws_subdivision_desc d;
 		memset(&d, 0, sizeof(d));
 		d.dimension = QAWS_DIMENSION_2D; d.scheme = QAWS_SUBDIVISION_LANE_RIESENFELD_3; d.control_points = p6; d.control_point_count = 6;
 		d.refinement_levels = 6;
-		CHECK_FAMILY(qaws_curve_create_subdivision(&d, &c), "subdivision (cubic)", 1);
+		CHECK_FAMILY(qaws_curve_create_subdivision(&c, &d), "subdivision (cubic)", 1);
 	}
 	{
 		qaws_bezier_desc b;
@@ -463,16 +463,16 @@ static void test_family_derivatives(void)
 		qaws_composite_desc d;
 		memset(&b, 0, sizeof(b));
 		b.dimension = QAWS_DIMENSION_2D; b.degree = 3; b.control_points = p4; b.control_point_count = 4;
-		qaws_curve_create_bezier(&b, &parts[0]);
+		qaws_curve_create_bezier(&parts[0], &b);
 		memset(&seg, 0, sizeof(seg));
 		seg.center[0] = (qaws_scalar)4; seg.center[1] = (qaws_scalar)1.5; seg.radius = (qaws_scalar)1.0;
 		seg.angle_start = (qaws_scalar)-1.6; seg.angle_end = (qaws_scalar)0.4;
 		memset(&a, 0, sizeof(a));
 		a.dimension = QAWS_DIMENSION_2D; a.segments = &seg; a.segment_count = 1;
-		qaws_curve_create_arc(&a, &parts[1]);
+		qaws_curve_create_arc(&parts[1], &a);
 		memset(&d, 0, sizeof(d));
 		d.dimension = QAWS_DIMENSION_2D; d.segments = parts; d.segment_count = 2;
-		CHECK_FAMILY(qaws_curve_create_composite(&d, &c), "composite (bezier + arc)", 3);
+		CHECK_FAMILY(qaws_curve_create_composite(&c, &d), "composite (bezier + arc)", 3);
 	}
 #undef CHECK_FAMILY
 }

@@ -39,7 +39,7 @@ static qaws_curve* ce_bezier(unsigned int degree, double const* p)
 	for (i = 0; i < 2 * (degree + 1); i++) cp[i] = (qaws_scalar)p[i];
 	memset(&d, 0, sizeof(d));
 	d.dimension = QAWS_DIMENSION_2D; d.degree = degree; d.control_points = cp; d.control_point_count = degree + 1;
-	qaws_curve_create_bezier(&d, &c);
+	qaws_curve_create_bezier(&c, &d);
 	return c;
 }
 
@@ -52,13 +52,13 @@ static void ce_add_closed(ce_scene* s, qaws_curve* c)
 	qaws_curve* line = NULL;
 	qaws_scalar cp[4];
 	qaws_bezier_desc d;
-	qaws_curve_evaluate_2d(c, r.max_value, QAWS_EVAL_FLAG_POSITION, &b);
-	qaws_curve_evaluate_2d(c, r.min_value, QAWS_EVAL_FLAG_POSITION, &a);
+	qaws_curve_evaluate_2d(&b, c, r.max_value, QAWS_EVAL_FLAG_POSITION);
+	qaws_curve_evaluate_2d(&a, c, r.min_value, QAWS_EVAL_FLAG_POSITION);
 	xy[0] = b.position.x; xy[1] = b.position.y; xy[2] = a.position.x; xy[3] = a.position.y;
 	cp[0] = (qaws_scalar)xy[0]; cp[1] = (qaws_scalar)xy[1]; cp[2] = (qaws_scalar)xy[2]; cp[3] = (qaws_scalar)xy[3];
 	memset(&d, 0, sizeof(d));
 	d.dimension = QAWS_DIMENSION_2D; d.degree = 1; d.control_points = cp; d.control_point_count = 2;
-	qaws_curve_create_bezier(&d, &line);
+	qaws_curve_create_bezier(&line, &d);
 	s->curves[s->n] = c;
 	s->views[s->n] = c;
 	s->curves[s->n + 1] = line;
@@ -213,7 +213,7 @@ static void demo_clip_exact(void)
 			for (j = 0; j <= 64; j++)
 			{
 				qaws_eval_result_2d e;
-				qaws_curve_evaluate_2d(sc.curves[i], (qaws_scalar)(rr.min_value + (rr.max_value - rr.min_value) * j / 64), QAWS_EVAL_FLAG_POSITION, &e);
+				qaws_curve_evaluate_2d(&e, sc.curves[i], (qaws_scalar)(rr.min_value + (rr.max_value - rr.min_value) * j / 64), QAWS_EVAL_FLAG_POSITION);
 				if (e.position.x < lo[0]) lo[0] = e.position.x;
 				if (e.position.y < lo[1]) lo[1] = e.position.y;
 				if (e.position.x > hi[0]) hi[0] = e.position.x;

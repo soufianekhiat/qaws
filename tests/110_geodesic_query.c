@@ -77,7 +77,7 @@ static void test_sphere(void)
 	g.radius = (qaws_scalar)R; g.angle_start = (qaws_scalar)(-GQ_PI / 2); g.angle_end = (qaws_scalar)(GQ_PI / 2);
 	memset(&ad, 0, sizeof(ad));
 	ad.dimension = QAWS_DIMENSION_2D; ad.segments = &g; ad.segment_count = 1;
-	qaws_curve_create_arc(&ad, &prof);
+	qaws_curve_create_arc(&prof, &ad);
 	memset(&rd, 0, sizeof(rd));
 	rd.profile = prof; rd.axis_direction.z = 1;
 	qaws_surface_create_revolution(&rd, &s);
@@ -152,7 +152,7 @@ static void test_cylinder(void)
 	cp[0] = (qaws_scalar)0.5; cp[1] = 0; cp[2] = (qaws_scalar)0.5; cp[3] = (qaws_scalar)-GQ_PI;
 	memset(&bd, 0, sizeof(bd));
 	bd.dimension = QAWS_DIMENSION_2D; bd.degree = 1; bd.control_points = cp; bd.control_point_count = 2;
-	qaws_curve_create_bezier(&bd, &line);
+	qaws_curve_create_bezier(&line, &bd);
 	memset(&rd, 0, sizeof(rd));
 	rd.profile = line; rd.axis_direction.z = 1;
 	qaws_surface_create_revolution(&rd, &cy);
@@ -212,7 +212,7 @@ static void test_shortest_round(void)
 	cp[0] = (qaws_scalar)0.5; cp[1] = 0; cp[2] = (qaws_scalar)0.5; cp[3] = (qaws_scalar)-GQ_PI;
 	memset(&bd, 0, sizeof(bd));
 	bd.dimension = QAWS_DIMENSION_2D; bd.degree = 1; bd.control_points = cp; bd.control_point_count = 2;
-	qaws_curve_create_bezier(&bd, &line);
+	qaws_curve_create_bezier(&line, &bd);
 	memset(&rd, 0, sizeof(rd));
 	rd.profile = line; rd.axis_direction.z = 1;
 	qaws_surface_create_revolution(&rd, &cy);
@@ -248,7 +248,7 @@ static void test_torus_shortest(void)
 	g.center[0] = 1; g.radius = (qaws_scalar)0.35; g.angle_start = 0; g.angle_end = (qaws_scalar)(2 * GQ_PI);
 	memset(&ad, 0, sizeof(ad));
 	ad.dimension = QAWS_DIMENSION_2D; ad.segments = &g; ad.segment_count = 1;
-	qaws_curve_create_arc(&ad, &prof);
+	qaws_curve_create_arc(&prof, &ad);
 	memset(&rd, 0, sizeof(rd));
 	rd.profile = prof; rd.axis_direction.z = 1;
 	qaws_surface_create_revolution(&rd, &s);

@@ -91,7 +91,7 @@ qaws_status qaws_surface_distance(qaws_surface const* surface, qaws_vec2 a, qaws
 static void sq_curve_at(qaws_curve const* cv, double t, double* p, double* d)
 {
 	qaws_eval_result_2d e;
-	qaws_curve_evaluate_2d(cv, (qaws_scalar)t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &e);
+	qaws_curve_evaluate_2d(&e, cv, (qaws_scalar)t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1);
 	p[0] = e.position.x; p[1] = e.position.y;
 	if (d) { d[0] = e.d1.x; d[1] = e.d1.y; }
 }
@@ -250,7 +250,7 @@ qaws_status qaws_surface_curve_intersect(qaws_surface_curve const* a, qaws_surfa
 			m[0] = 1; m[1] = 0; m[2] = (qaws_scalar)(ku * c.pu); m[3] = 0; m[4] = 1; m[5] = (qaws_scalar)(kv * c.pv);
 			if ((ku || kv) && (st = qaws_curve_transform_2d(cb, m, &moved)) != QAWS_STATUS_OK)
 				break;
-			st = qaws_curve_find_intersections_2d(ca, moved ? moved : cb, hits, 64, &n);
+			st = qaws_curve_find_intersections_2d(hits, &n, ca, moved ? moved : cb, 64);
 			qaws_curve_destroy(moved);
 			if (st == QAWS_STATUS_BUFFER_TOO_SMALL)
 				st = QAWS_STATUS_OK;
@@ -464,7 +464,7 @@ static qaws_status sq_line(double x0, double y0, double x1, double y1, qaws_curv
 	cp[0] = (qaws_scalar)x0; cp[1] = (qaws_scalar)y0; cp[2] = (qaws_scalar)x1; cp[3] = (qaws_scalar)y1;
 	memset(&bd, 0, sizeof(bd));
 	bd.dimension = QAWS_DIMENSION_2D; bd.degree = 1; bd.control_points = cp; bd.control_point_count = 2;
-	return qaws_curve_create_bezier(&bd, out);
+	return qaws_curve_create_bezier(out, &bd);
 }
 
 qaws_status qaws_surface_curve_create_shortest_path(qaws_surface const* surface, qaws_surface_region const* obstacles, qaws_vec2 p0,
@@ -546,7 +546,7 @@ qaws_status qaws_surface_curve_create_shortest_path(qaws_surface const* surface,
 		qaws_surface_region_get_path(obstacles, i, &p);
 		for (j = 0; j < p.curve_count && st == QAWS_STATUS_OK; j++)
 		{
-			st = qaws_curve_reverse(p.curves[p.curve_count - 1 - j], &own[nown]);
+			st = qaws_curve_reverse(&own[nown], p.curves[p.curve_count - 1 - j]);
 			if (st == QAWS_STATUS_OK)
 			{
 				views[nown] = own[nown];
@@ -582,14 +582,14 @@ qaws_status qaws_surface_curve_create_shortest_path(qaws_surface const* surface,
 			if ((st = qaws_shell_curve_get_run(sc, i, &fw, &run)) != QAWS_STATUS_OK)
 				break;
 			rg = qaws_curve_get_parameter_range(qaws_surface_curve_get_uv(run));
-			st = qaws_curve_extract(qaws_surface_curve_get_uv(run), rg.min_value, rg.max_value, &seg[i]);
+			st = qaws_curve_extract(&seg[i], qaws_surface_curve_get_uv(run), rg.min_value, rg.max_value);
 		}
 		if (st == QAWS_STATUS_OK)
 		{
 			qaws_composite_desc cd;
 			memset(&cd, 0, sizeof(cd));
 			cd.dimension = QAWS_DIMENSION_2D; cd.segments = seg; cd.segment_count = nr;
-			st = qaws_curve_create_composite(&cd, &comp);
+			st = qaws_curve_create_composite(&comp, &cd);
 		}
 		else if (seg)
 			for (i = 0; i < nr; i++) qaws_curve_destroy(seg[i]);

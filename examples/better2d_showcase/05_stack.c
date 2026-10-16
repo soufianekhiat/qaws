@@ -24,7 +24,7 @@ static void sk_draw_region(svg* s, sk_view const* sv, qaws_clip_result const* r,
 			for (j = 0; j <= 96; j++)
 			{
 				qaws_eval_result_2d e;
-				qaws_curve_evaluate_2d(p.curves[k], (qaws_scalar)(rg.min_value + (rg.max_value - rg.min_value) * j / 96), QAWS_EVAL_FLAG_POSITION, &e);
+				qaws_curve_evaluate_2d(&e, p.curves[k], (qaws_scalar)(rg.min_value + (rg.max_value - rg.min_value) * j / 96), QAWS_EVAL_FLAG_POSITION);
 				xy[2 * j] = vx(&sv->v, e.position.x) + sv->sx * z;
 				xy[2 * j + 1] = vy(&sv->v, e.position.y * 0.45) - sv->sy * z;
 			}

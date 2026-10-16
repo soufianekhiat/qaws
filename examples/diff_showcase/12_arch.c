@@ -45,8 +45,8 @@ static double arch_loss(qaws_curve const* arch, qaws_curve const* deck, qaws_sca
 	memset(f, 0, sizeof(*f));
 	if (grad)
 		memset(grad, 0, sizeof(qaws_scalar) * AR_N * 2);
-	qaws_curve_find_intersections_2d(arch, deck, hits, 4, &nh);
-	qaws_curve_find_extrema(arch, 1, ext, 8, &ne);
+	qaws_curve_find_intersections_2d(hits, &nh, arch, deck, 4);
+	qaws_curve_find_extrema(ext, &ne, arch, 8, 1);
 	if (nh < 2 || ne < 1)
 		return 1e9;
 	/* apex: the highest extremum; crossings: left-most and right-most */
@@ -55,7 +55,7 @@ static double arch_loss(qaws_curve const* arch, qaws_curve const* deck, qaws_sca
 		for (i = 0; i < ne; i++)
 		{
 			qaws_eval_result_2d r;
-			qaws_curve_evaluate_2d(arch, ext[i], QAWS_EVAL_FLAG_POSITION, &r);
+			qaws_curve_evaluate_2d(&r, arch, ext[i], QAWS_EVAL_FLAG_POSITION);
 			if (r.position.y > best)
 			{
 				best = r.position.y;

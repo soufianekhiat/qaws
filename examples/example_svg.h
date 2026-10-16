@@ -198,7 +198,7 @@ static qaws_curve* bspline_2d(qaws_scalar const* cps, unsigned int n)
 	d.control_points = cps;
 	d.control_point_count = n;
 	d.is_uniform = 1;
-	qaws_curve_create_bspline(&d, &c);
+	qaws_curve_create_bspline(&c, &d);
 	return c;
 }
 
@@ -210,7 +210,7 @@ static void curve_polyline(qaws_curve const* c, viewport const* v, double* xy, i
 	{
 		qaws_eval_result_2d e;
 		qaws_scalar t = r.min_value + (r.max_value - r.min_value) * i / (qaws_scalar)(n - 1);
-		qaws_curve_evaluate_2d(c, t, QAWS_EVAL_FLAG_POSITION, &e);
+		qaws_curve_evaluate_2d(&e, c, t, QAWS_EVAL_FLAG_POSITION);
 		xy[2 * i] = vx(v, e.position.x);
 		xy[2 * i + 1] = vy(v, e.position.y);
 	}

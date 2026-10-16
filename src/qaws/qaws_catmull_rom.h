@@ -27,7 +27,7 @@ typedef struct qaws_catmull_rom_desc
 } qaws_catmull_rom_desc;
 
 qaws_status qaws_curve_create_catmull_rom(
-	qaws_catmull_rom_desc const* desc,
-	qaws_curve** out_curve);
+	qaws_curve** out_curve,
+	qaws_catmull_rom_desc const* desc);
 
 #endif /* QAWS_CATMULL_ROM_H */

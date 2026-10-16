@@ -111,10 +111,10 @@ static qaws_status curve_solve(qaws_curve const* curve, qaws_vec3 q, curve_solut
 		q2.x = q.x;
 		q2.y = q.y;
 		q.z = QAWS_ZERO;
-		st = qaws_curve_find_closest_parameter_2d(curve, q2, &t0);
+		st = qaws_curve_find_closest_parameter_2d(&t0, curve, q2);
 	}
 	else
-		st = qaws_curve_find_closest_parameter_3d(curve, q, &t0);
+		st = qaws_curve_find_closest_parameter_3d(&t0, curve, q);
 	if (st != QAWS_STATUS_OK)
 		return st;
 	st = curve_refine(curve, q, t0, s);
@@ -385,7 +385,7 @@ static qaws_status surface_solve(qaws_surface const* surface, qaws_vec3 q, surfa
 	qaws_status st;
 	int i, j, bi = 0, bj = 0;
 
-	st = qaws_surface_find_closest_point(surface, q, &u0, &v0, &pt);
+	st = qaws_surface_find_closest_point(&u0, &v0, &pt, surface, q);
 	if (st != QAWS_STATUS_OK)
 		return st;
 	st = surface_refine(surface, q, u0, v0, s);

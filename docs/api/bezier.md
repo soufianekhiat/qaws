@@ -28,8 +28,8 @@ typedef struct qaws_bezier_desc {
 
 ```c
 qaws_status qaws_curve_create_bezier(
-    qaws_bezier_desc const* desc,
-    qaws_curve** out_curve);
+    qaws_curve** out_curve,
+    qaws_bezier_desc const* desc);
 ```
 
 Creates a single-span Bezier curve.

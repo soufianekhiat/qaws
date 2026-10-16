@@ -87,7 +87,7 @@ static void demo_exact_heightfield(void)
 	{
 		qaws_eval_result_2d r;
 		qaws_exact_batch_hit const* h = &eh[i];
-		qaws_curve_evaluate_2d(sc.curves[h->curve_a], (qaws_scalar)((h->pair.a_lo + h->pair.a_hi) / 2), QAWS_EVAL_FLAG_POSITION, &r);
+		qaws_curve_evaluate_2d(&r, sc.curves[h->curve_a], (qaws_scalar)((h->pair.a_lo + h->pair.a_hi) / 2), QAWS_EVAL_FLAG_POSITION);
 		svg_circle(&sv, vx(&v, r.position.x), vy(&v, r.position.y), 2.6, h->pair.kind == QAWS_EXACT_HIT_POINT ? "#8250df" : "#1a7f37", "#ffffff");
 	}
 	svg_text(&sv, v.x0 + 10, v.y0 + 20, 13, "#24292f", "start", "green = certified crossing (isolating enclosure on both curves)");

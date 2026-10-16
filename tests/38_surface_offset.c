@@ -15,7 +15,7 @@ static qaws_curve* make_line_3d(qaws_vec3 a, qaws_vec3 b)
 	d.degree = 1;
 	d.control_points = pts;
 	d.control_point_count = 2;
-	qaws_curve_create_bezier(&d, &c);
+	qaws_curve_create_bezier(&c, &d);
 	return c;
 }
 
@@ -181,7 +181,7 @@ static qaws_surface* make_hemisphere(qaws_curve** out_profile)
 	bd.degree = 2;
 	bd.control_points = pts;
 	bd.control_point_count = 3;
-	qaws_curve_create_bezier(&bd, &prof);
+	qaws_curve_create_bezier(&prof, &bd);
 	if (!prof) return NULL;
 
 	memset(&rd, 0, sizeof(rd));
@@ -285,7 +285,7 @@ static void visual_obj_offset_selfintersect(void)
 	bd.degree = 2;
 	bd.control_points = pts;
 	bd.control_point_count = 3;
-	qaws_curve_create_bezier(&bd, &prof);
+	qaws_curve_create_bezier(&prof, &bd);
 	if (!prof) return;
 
 	memset(&rd, 0, sizeof(rd));

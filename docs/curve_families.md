@@ -27,7 +27,7 @@ qaws_bezier_desc desc = {
     .control_point_count = 4
 };
 qaws_curve* c = NULL;
-qaws_curve_create_bezier(&desc, &c);
+qaws_curve_create_bezier(&c, &desc);
 ```
 
 ---
@@ -276,7 +276,7 @@ qaws_rational_bezier_desc desc = {
     .weight_count = 3
 };
 qaws_curve* c = NULL;
-qaws_curve_create_rational_bezier(&desc, &c);
+qaws_curve_create_rational_bezier(&c, &desc);
 ```
 
 ---
@@ -310,7 +310,7 @@ qaws_arc_desc desc = {
     .segment_count = 1
 };
 qaws_curve* c = NULL;
-qaws_curve_create_arc(&desc, &c);
+qaws_curve_create_arc(&c, &desc);
 ```
 
 ---
@@ -341,7 +341,7 @@ qaws_polynomial_desc desc = {
     .t_max = 1.0f
 };
 qaws_curve* c = NULL;
-qaws_curve_create_polynomial(&desc, &c);
+qaws_curve_create_polynomial(&c, &desc);
 ```
 
 ---
@@ -380,7 +380,7 @@ qaws_clothoid_desc desc = {
     .length = 5.0f
 };
 qaws_curve* c = NULL;
-qaws_curve_create_clothoid(&desc, &c);
+qaws_curve_create_clothoid(&c, &desc);
 ```
 
 ---
@@ -418,7 +418,7 @@ qaws_subdivision_desc desc = {
     .refinement_levels = 6
 };
 qaws_curve* c = NULL;
-qaws_curve_create_subdivision(&desc, &c);
+qaws_curve_create_subdivision(&c, &desc);
 ```
 
 ---
@@ -446,7 +446,7 @@ qaws_composite_desc desc = {
     .segment_count = 2
 };
 qaws_curve* c = NULL;
-qaws_curve_create_composite(&desc, &c);
+qaws_curve_create_composite(&c, &desc);
 /* line_curve and arc_curve are now owned by c; do not destroy them separately */
 ```
 

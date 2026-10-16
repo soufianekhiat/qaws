@@ -78,7 +78,7 @@ static qaws_curve* smt_circle(double cx, double cy, double r)
 static qaws_curve* smt_hole(double r)
 {
 	qaws_curve *c = smt_circle(0, 0, r), *rv = NULL;
-	qaws_curve_reverse(c, &rv);
+	qaws_curve_reverse(&rv, c);
 	qaws_curve_destroy(c);
 	return rv;
 }

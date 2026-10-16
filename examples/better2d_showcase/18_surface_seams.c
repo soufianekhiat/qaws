@@ -57,7 +57,7 @@ static void ssf_fill3d(svg* s, qaws_surface_region const* r, qaws_surface const*
 			{
 				qaws_eval_result_2d e;
 				if (total + 1 >= cap) { cap = cap ? 2 * cap : 4096; pts = (double*)realloc(pts, sizeof(double) * 2 * cap); }
-				qaws_curve_evaluate_2d(p.curves[ci], (qaws_scalar)(rg.min_value + (rg.max_value - rg.min_value) * k / n), QAWS_EVAL_FLAG_POSITION, &e);
+				qaws_curve_evaluate_2d(&e, p.curves[ci], (qaws_scalar)(rg.min_value + (rg.max_value - rg.min_value) * k / n), QAWS_EVAL_FLAG_POSITION);
 				pts[2 * total] = e.position.x; pts[2 * total + 1] = e.position.y; total++;
 			}
 		}
@@ -127,7 +127,7 @@ static qaws_surface_curve* ssf_line(qaws_surface const* s, double u0, double v0,
 	cp[0] = (qaws_scalar)u0; cp[1] = (qaws_scalar)v0; cp[2] = (qaws_scalar)u1; cp[3] = (qaws_scalar)v1;
 	memset(&bd, 0, sizeof(bd));
 	bd.dimension = QAWS_DIMENSION_2D; bd.degree = 1; bd.control_points = cp; bd.control_point_count = 2;
-	qaws_curve_create_bezier(&bd, keep);
+	qaws_curve_create_bezier(keep, &bd);
 	qaws_surface_curve_create_uv(s, *keep, &c);
 	return c;
 }

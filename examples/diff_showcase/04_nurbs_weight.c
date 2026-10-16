@@ -15,7 +15,7 @@ static qaws_curve* quarter(qaws_scalar const* w)
 	d.control_point_count = 3;
 	d.weights = w;
 	d.weight_count = 3;
-	qaws_curve_create_rational_bezier(&d, &c);
+	qaws_curve_create_rational_bezier(&c, &d);
 	return c;
 }
 

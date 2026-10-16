@@ -105,7 +105,7 @@ static void app_hair3d(void)
 				int ix, iy, ch;
 				for (ch = 0; ch < 3; ch++)
 					st[i].color[ch] = hair_mean[ch];
-				qaws_curve_evaluate_3d(cv, (qaws_scalar)(0.5 * (r.min_value + r.max_value)), QAWS_EVAL_FLAG_POSITION, &e);
+				qaws_curve_evaluate_3d(&e, cv, (qaws_scalar)(0.5 * (r.min_value + r.max_value)), QAWS_EVAL_FLAG_POSITION);
 				x[0] = e.position.x; x[1] = e.position.y; x[2] = e.position.z;
 				view_xform(&hp.cam.v, x, &px, &py, &d);
 				ix = (int)px; iy = (int)py;

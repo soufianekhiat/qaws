@@ -50,8 +50,8 @@ typedef struct qaws_arc_desc {
 
 ```c
 qaws_status qaws_curve_create_arc(
-    qaws_arc_desc const* desc,
-    qaws_curve** out_curve);
+    qaws_curve** out_curve,
+    qaws_arc_desc const* desc);
 ```
 
 Creates an arc curve from one or more arc segments.

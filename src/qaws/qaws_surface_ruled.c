@@ -55,8 +55,8 @@ static qaws_status ruled_surface_eval(
 	memset(&ra, 0, sizeof(ra));
 	memset(&rb, 0, sizeof(rb));
 
-	sa_status = qaws_curve_evaluate_3d(impl->curve_a, u_a, curve_flags, &ra);
-	sb_status = qaws_curve_evaluate_3d(impl->curve_b, u_b, curve_flags, &rb);
+	sa_status = qaws_curve_evaluate_3d(&ra, impl->curve_a, u_a, curve_flags);
+	sb_status = qaws_curve_evaluate_3d(&rb, impl->curve_b, u_b, curve_flags);
 	if (sa_status != QAWS_STATUS_OK) return sa_status;
 	if (sb_status != QAWS_STATUS_OK) return sb_status;
 

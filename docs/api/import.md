@@ -8,12 +8,12 @@ Deserialization and import from raw point data.
 
 ```c
 qaws_status qaws_polyline_import_catmull_rom(
-    qaws_dimension dimension,
+    qaws_curve** out_curve,
     void const* points,
+    qaws_dimension dimension,
     unsigned int point_count,
     qaws_parameterization parameterization,
-    int closed,
-    qaws_curve** out_curve);
+    int closed);
 ```
 
 Creates a Catmull-Rom spline that interpolates through a raw point array.
@@ -34,11 +34,11 @@ Creates a Catmull-Rom spline that interpolates through a raw point array.
 
 ```c
 qaws_status qaws_polyline_import_trajectory(
-    qaws_dimension dimension,
+    qaws_curve** out_curve,
     void const* points,
+    qaws_dimension dimension,
     unsigned int point_count,
-    int closed,
-    qaws_curve** out_curve);
+    int closed);
 ```
 
 Creates a cubic trajectory that interpolates through a raw point array with uniform timing.

@@ -37,18 +37,18 @@
  *   closed:           non-zero for a closed loop.
  */
 qaws_status qaws_polyline_import_catmull_rom(
-	qaws_dimension dimension,
+	qaws_curve** out_curve,
 	void const* points,
+	qaws_dimension dimension,
 	unsigned int point_count,
 	qaws_parameterization parameterization,
-	int closed,
-	qaws_curve** out_curve);
+	int closed);
 
 qaws_status qaws_polyline_import_trajectory(
-	qaws_dimension dimension,
+	qaws_curve** out_curve,
 	void const* points,
+	qaws_dimension dimension,
 	unsigned int point_count,
-	int closed,
-	qaws_curve** out_curve);
+	int closed);
 
 #endif /* QAWS_IMPORT_H */

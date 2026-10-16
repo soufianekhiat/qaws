@@ -64,7 +64,7 @@ static void demo_offset(void)
 		qaws_clothoid_desc cd;
 		memset(&cd, 0, sizeof(cd));
 		cd.start_curvature = 0; cd.end_curvature = (qaws_scalar)1.6; cd.length = 9;
-		qaws_curve_create_clothoid(&cd, &spiral);
+		qaws_curve_create_clothoid(&spiral, &cd);
 	}
 	t0 = (double)clock() / CLOCKS_PER_SEC;
 	for (k = 0; k < 12; k++)
@@ -132,7 +132,7 @@ static void demo_offset(void)
 				qaws_path_2d pp[2];
 				static double const dr[3] = { 0.25, 0.5, -0.35 };
 				qaws_curve_create_ellipse_2d(0, 0, (qaws_scalar)1.6, (qaws_scalar)1.0, (qaws_scalar)0.4, &inner_ccw);
-				qaws_curve_reverse(inner_ccw, &hole);
+				qaws_curve_reverse(&hole, inner_ccw);
 				cs[0] = outer; cs[1] = hole;
 				pp[0].curves = &cs[0]; pp[0].curve_count = 1; pp[0].closed = 1;
 				pp[1].curves = &cs[1]; pp[1].curve_count = 1; pp[1].closed = 1;

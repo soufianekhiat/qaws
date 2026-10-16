@@ -46,12 +46,12 @@ static void demo_closest(void)
 	d.curves = contours;
 	d.curve_count = n;
 	t0 = hf_now();
-	qaws_curve_set_create(&d, &set);
+	qaws_curve_set_create(&set, &d);
 	t_set = hf_now() - t0;
 	t0 = hf_now();
 	do
 	{
-		qaws_curve_set_find_closest(set, pts, CL_POINTS, 0, cp, &st);
+		qaws_curve_set_find_closest(cp, &st, set, pts, CL_POINTS, 0);
 		reps++;
 	} while (hf_now() - t0 < 0.05);
 	t_query = (hf_now() - t0) / reps;

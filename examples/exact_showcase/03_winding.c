@@ -16,7 +16,7 @@ static int wd_sampled(qaws_curve* const* pieces, int count, int per, double cons
 		{
 			qaws_eval_result_2d r;
 			double dx, dy;
-			qaws_curve_evaluate_2d(pieces[k], (qaws_scalar)((double)i / per), QAWS_EVAL_FLAG_POSITION, &r);
+			qaws_curve_evaluate_2d(&r, pieces[k], (qaws_scalar)((double)i / per), QAWS_EVAL_FLAG_POSITION);
 			dx = r.position.x - p[0];
 			dy = r.position.y - p[1];
 			if (!first)
@@ -64,7 +64,7 @@ static void demo_winding(void)
 		d.control_point_count = 3;
 		d.weights = ws;
 		d.weight_count = 3;
-		qaws_curve_create_rational_bezier(&d, &pieces[k]);
+		qaws_curve_create_rational_bezier(&pieces[k], &d);
 		qaws_exact_curve_prepare(&desc, pieces[k], &exact[k], NULL);
 	}
 	/* zoom window centred on the boundary at angle `ang` (the conic is

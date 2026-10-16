@@ -287,7 +287,7 @@ static qaws_curve* make_bezier(unsigned int degree)
 	d.degree = degree;
 	d.control_points = cps;
 	d.control_point_count = degree + 1;
-	qaws_curve_create_bezier(&d, &c);
+	qaws_curve_create_bezier(&c, &d);
 	return c;
 }
 
@@ -304,7 +304,7 @@ static qaws_curve* make_bspline(void)
 	d.control_point_count = 7;
 	d.knots = g_map_knots;
 	d.knot_count = 11;
-	qaws_curve_create_bspline(&d, &c);
+	qaws_curve_create_bspline(&c, &d);
 	return c;
 }
 
@@ -326,7 +326,7 @@ static qaws_curve* make_nurbs(void)
 	d.knot_count = 11;
 	d.weights = w;
 	d.weight_count = 7;
-	qaws_curve_create_nurbs(&d, &c);
+	qaws_curve_create_nurbs(&c, &d);
 	return c;
 }
 
@@ -343,7 +343,7 @@ static qaws_curve* make_hermite(void)
 	d.derivatives = ders;
 	d.point_count = 4;
 	d.derivative_count = 4;
-	qaws_curve_create_hermite(&d, &c);
+	qaws_curve_create_hermite(&c, &d);
 	return c;
 }
 
@@ -401,7 +401,7 @@ static void fit_at(qaws_dimension dim, qaws_scalar const* data, qaws_scalar cons
 	desc.degree = 3;
 	desc.control_point_count = FIT_N;
 	desc.parameters = params ? t : NULL;
-	qaws_curve_fit_bspline(&desc, &c);
+	qaws_curve_fit_bspline(&c, &desc);
 	qaws_curve_read_field(cps, &got, c, FIT_N * dc, QAWS_FIELD_CONTROL_POINTS);
 	qaws_curve_read_field(knots, &got, c, FIT_KC, QAWS_FIELD_KNOTS);
 	qaws_curve_destroy(c);
@@ -535,7 +535,7 @@ static qaws_curve* off_curve(qaws_scalar const* cps)
 	d.control_point_count = OFF_CP;
 	d.knots = k;
 	d.knot_count = OFF_CP + 4;
-	qaws_curve_create_bspline(&d, &c);
+	qaws_curve_create_bspline(&c, &d);
 	return c;
 }
 
@@ -544,7 +544,7 @@ static void off_points(qaws_scalar const* cps, qaws_scalar dist, int mode, qaws_
 	qaws_curve* c = off_curve(cps);
 	qaws_curve* o = NULL;
 	unsigned int got = 0;
-	qaws_curve_offset_3d(c, dist, mode, &dir, NULL, OFF_SAMPLES, &o);
+	qaws_curve_offset_3d(&o, c, NULL, &dir, OFF_SAMPLES, dist, mode);
 	qaws_curve_read_field(out, &got, o, OFF_OUT * 3, QAWS_FIELD_CONTROL_POINTS);
 	qaws_curve_destroy(o);
 	qaws_curve_destroy(c);
@@ -654,7 +654,7 @@ static void off_surface_points(qaws_scalar const* cps, qaws_scalar dist, qaws_sc
 	qaws_surface* s = off_patch(sp);
 	qaws_curve* o = NULL;
 	unsigned int got = 0;
-	qaws_curve_offset_3d(c, dist, 2, NULL, s, OFF_SAMPLES, &o);
+	qaws_curve_offset_3d(&o, c, s, NULL, OFF_SAMPLES, dist, 2);
 	qaws_curve_read_field(out, &got, o, OFF_OUT * 3, QAWS_FIELD_CONTROL_POINTS);
 	qaws_curve_destroy(o);
 	qaws_surface_destroy(s);
@@ -864,7 +864,7 @@ static void ref_split(void)
 	d.degree = 5;
 	d.control_points = cps;
 	d.control_point_count = 6;
-	qaws_curve_create_bezier(&d, &c);
+	qaws_curve_create_bezier(&c, &d);
 	TEST_ASSERT_STATUS(qaws_curve_split_diff(&l, &r, &map, c, (qaws_scalar)0.37));
 	qaws_curve_read_field(val, &got, l, 18, QAWS_FIELD_CONTROL_POINTS);
 	qaws_curve_read_field(val + 18, &got, r, 18, QAWS_FIELD_CONTROL_POINTS);

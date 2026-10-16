@@ -66,7 +66,7 @@ static qaws_status reverse_bezier(
 	desc.control_points = rev_cp;
 	desc.control_point_count = n;
 
-	status = qaws_curve_create_bezier(&desc, out_reversed);
+	status = qaws_curve_create_bezier(out_reversed, &desc);
 	free(rev_cp);
 	return status;
 }
@@ -115,7 +115,7 @@ static qaws_status reverse_hermite(
 	desc.point_count = n;
 	desc.derivative_count = n;
 
-	status = qaws_curve_create_hermite(&desc, out_reversed);
+	status = qaws_curve_create_hermite(out_reversed, &desc);
 	free(rev_pts);
 	free(rev_der);
 	return status;
@@ -155,7 +155,7 @@ static qaws_status reverse_catmull_rom(
 	desc.parameterization = impl->parameterization;
 	desc.closed = impl->closed;
 
-	status = qaws_curve_create_catmull_rom(&desc, out_reversed);
+	status = qaws_curve_create_catmull_rom(out_reversed, &desc);
 	free(rev_cp);
 	return status;
 }
@@ -210,7 +210,7 @@ static qaws_status reverse_bspline(
 	desc.is_uniform = 0;
 	desc.is_closed = 0;
 
-	status = qaws_curve_create_bspline(&desc, out_reversed);
+	status = qaws_curve_create_bspline(out_reversed, &desc);
 	free(rev_cp);
 	free(rev_knots);
 	return status;
@@ -279,7 +279,7 @@ static qaws_status reverse_nurbs(
 	desc.weight_count = wn;
 	desc.is_closed = 0;
 
-	status = qaws_curve_create_nurbs(&desc, out_reversed);
+	status = qaws_curve_create_nurbs(out_reversed, &desc);
 	free(rev_cp);
 	free(rev_knots);
 	free(rev_weights);
@@ -375,7 +375,7 @@ static qaws_status reverse_trajectory(
 	desc.key_acceleration_count = acc_n;
 	desc.closed = impl->closed;
 
-	status = qaws_curve_create_trajectory(&desc, out_reversed);
+	status = qaws_curve_create_trajectory(out_reversed, &desc);
 	free(rev_acc);
 	free(rev_vel);
 	free(rev_times);
@@ -403,10 +403,10 @@ static qaws_status reverse_yuksel(
 	/* only the quadratic mode traces the same curve with its points
 	   reversed; the arc modes pick their arcs from the point order */
 	if (impl->mode != QAWS_YUKSEL_MODE_BEZIER)
-		return qaws_curve_extract(curve,
+		return qaws_curve_extract(out_reversed,
+			curve,
 			curve->parameter_range.max_value,
-			curve->parameter_range.min_value,
-			out_reversed);
+			curve->parameter_range.min_value);
 
 	rev_cp = (qaws_scalar *)malloc(sizeof(qaws_scalar) * (size_t)(n * dim));
 	if (!rev_cp)
@@ -423,7 +423,7 @@ static qaws_status reverse_yuksel(
 	desc.mode = (qaws_yuksel_mode)impl->mode;
 	desc.closed = impl->closed;
 
-	status = qaws_curve_create_yuksel(&desc, out_reversed);
+	status = qaws_curve_create_yuksel(out_reversed, &desc);
 	free(rev_cp);
 	return status;
 }
@@ -464,7 +464,7 @@ static qaws_status reverse_rational_bezier(
 	desc.weights = &buf[n * dim];
 	desc.weight_count = n;
 
-	status = qaws_curve_create_rational_bezier(&desc, out_reversed);
+	status = qaws_curve_create_rational_bezier(out_reversed, &desc);
 	free(buf);
 	return status;
 }
@@ -505,7 +505,7 @@ static qaws_status reverse_polynomial(
 	desc.t_min = curve->parameter_range.min_value;
 	desc.t_max = curve->parameter_range.max_value;
 
-	status = qaws_curve_create_polynomial(&desc, out_reversed);
+	status = qaws_curve_create_polynomial(out_reversed, &desc);
 	free(co);
 	return status;
 }
@@ -536,7 +536,7 @@ static qaws_status reverse_arc(
 	desc.segments = seg;
 	desc.segment_count = n;
 
-	status = qaws_curve_create_arc(&desc, out_reversed);
+	status = qaws_curve_create_arc(out_reversed, &desc);
 	free(seg);
 	return status;
 }
@@ -551,7 +551,7 @@ static qaws_status reverse_clothoid(
 	qaws_clothoid_desc desc;
 	qaws_status status;
 
-	status = qaws_curve_evaluate_2d(curve, L, QAWS_EVAL_FLAG_POSITION, &end);
+	status = qaws_curve_evaluate_2d(&end, curve, L, QAWS_EVAL_FLAG_POSITION);
 	if (status != QAWS_STATUS_OK)
 		return status;
 
@@ -564,7 +564,7 @@ static qaws_status reverse_clothoid(
 	desc.end_curvature = -impl->kappa_0;
 	desc.length = L;
 
-	return qaws_curve_create_clothoid(&desc, out_reversed);
+	return qaws_curve_create_clothoid(out_reversed, &desc);
 }
 
 static qaws_status reverse_composite(
@@ -583,7 +583,7 @@ static qaws_status reverse_composite(
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 
 	for (i = 0; i < n && status == QAWS_STATUS_OK; i++) {
-		status = qaws_curve_reverse(impl->segments[n - 1 - i], &seg[i]);
+		status = qaws_curve_reverse(&seg[i], impl->segments[n - 1 - i]);
 		if (status == QAWS_STATUS_OK)
 			made++;
 	}
@@ -593,7 +593,7 @@ static qaws_status reverse_composite(
 		desc.dimension = curve->dimension;
 		desc.segments = seg;
 		desc.segment_count = n;
-		status = qaws_curve_create_composite(&desc, out_reversed);
+		status = qaws_curve_create_composite(out_reversed, &desc);
 	}
 	if (status != QAWS_STATUS_OK)
 		for (i = 0; i < made; i++)
@@ -607,10 +607,10 @@ static qaws_status reverse_by_extract(
 	qaws_curve **out_reversed)
 {
 	/* no reversible description: the reversed exact piece of the whole curve */
-	return qaws_curve_extract(curve,
+	return qaws_curve_extract(out_reversed,
+		curve,
 		curve->parameter_range.max_value,
-		curve->parameter_range.min_value,
-		out_reversed);
+		curve->parameter_range.min_value);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -618,8 +618,8 @@ static qaws_status reverse_by_extract(
 /* -------------------------------------------------------------------------- */
 
 qaws_status qaws_curve_reverse(
-	qaws_curve const *curve,
-	qaws_curve **out_reversed)
+	qaws_curve **out_reversed,
+	qaws_curve const *curve)
 {
 	if (!curve || !out_reversed)
 		return QAWS_STATUS_INVALID_ARGUMENT;

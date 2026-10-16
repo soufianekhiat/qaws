@@ -115,7 +115,7 @@ static void trt_measure(qaws_mesh_2d const* m, trt_stats* s)
 			qaws_eval_result_2d e;
 			qaws_vec2 p = qaws_mesh_2d_get_vertex(m, i);
 			double d;
-			qaws_curve_evaluate_2d(qaws_mesh_2d_get_boundary_curve(m, c), t, QAWS_EVAL_FLAG_POSITION, &e);
+			qaws_curve_evaluate_2d(&e, qaws_mesh_2d_get_boundary_curve(m, c), t, QAWS_EVAL_FLAG_POSITION);
 			d = hypot((double)e.position.x - p.x, (double)e.position.y - p.y);
 			if (d > s->on_curve) s->on_curve = d;
 		}
@@ -211,7 +211,7 @@ static void test_annulus(void)
 	char msg[300];
 	qaws_curve_create_ellipse_2d(0, 0, 2, 2, 0, &o);
 	qaws_curve_create_ellipse_2d((qaws_scalar)0.3, 0, 1, 1, 0, &h);
-	qaws_curve_reverse(h, &hr);
+	qaws_curve_reverse(&hr, h);
 	cs[0] = o; cs[1] = hr;
 	m = trt_run(cs, 2, QAWS_FILL_NON_ZERO, 2e-3, 0, 0, NULL);
 	TEST_ASSERT(m != NULL, "annulus: triangulated");
@@ -303,7 +303,7 @@ static void test_refine(void)
 	char msg[300];
 	qaws_curve_create_ellipse_2d(0, 0, 1, (qaws_scalar)0.7, 0, &o);
 	qaws_curve_create_ellipse_2d((qaws_scalar)0.2, 0, (qaws_scalar)0.3, (qaws_scalar)0.2, 0, &h);
-	qaws_curve_reverse(h, &hr);
+	qaws_curve_reverse(&hr, h);
 	cs[0] = o; cs[1] = hr;
 	{
 		qaws_mesh_2d* m = trt_run(cs, 2, QAWS_FILL_NON_ZERO, 2e-3, 30, 0, NULL);
@@ -417,7 +417,7 @@ static void test_remesh(void)
 		qaws_mesh_2d* m;
 		qaws_curve_create_ellipse_2d(0, 0, 2, 2, 0, &o);
 		qaws_curve_create_ellipse_2d((qaws_scalar)0.3, 0, 1, 1, 0, &h);
-		qaws_curve_reverse(h, &hr);
+		qaws_curve_reverse(&hr, h);
 		cs[0] = o; cs[1] = hr;
 		m = trt_run(cs, 2, QAWS_FILL_NON_ZERO, 2e-3, 0, 0, NULL);
 		if (m && qaws_mesh_2d_remesh(m, 0, trt_ring_size, NULL, 6) == QAWS_STATUS_OK)

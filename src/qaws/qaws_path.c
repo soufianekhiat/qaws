@@ -64,7 +64,7 @@ static int pt_check_path(qaws_path_2d const* p)
 static qaws_status pt_eval(qaws_curve const* c, double t, unsigned int flags, double* p, double* d)
 {
 	qaws_eval_result_2d r;
-	qaws_status s = qaws_curve_evaluate_2d(c, (qaws_scalar)t, flags, &r);
+	qaws_status s = qaws_curve_evaluate_2d(&r, c, (qaws_scalar)t, flags);
 	p[0] = r.position.x; p[1] = r.position.y;
 	if (d) { d[0] = r.d1.x; d[1] = r.d1.y; }
 	return s;
@@ -105,7 +105,7 @@ qaws_status qaws_curve_create_polyline_2d(qaws_scalar const* points, unsigned in
 	d.control_point_count = n;
 	d.knots = kn;
 	d.knot_count = n + 2;
-	s = qaws_curve_create_bspline(&d, out_curve);
+	s = qaws_curve_create_bspline(out_curve, &d);
 	free(cp);
 	return s;
 }
@@ -137,7 +137,7 @@ qaws_status qaws_curve_create_ellipse_2d(qaws_scalar cx, qaws_scalar cy, qaws_sc
 	d.knot_count = 12;
 	d.weights = w;
 	d.weight_count = 9;
-	return qaws_curve_create_nurbs(&d, out_curve);
+	return qaws_curve_create_nurbs(out_curve, &d);
 }
 
 /* ======================================================================== */
@@ -257,7 +257,7 @@ static qaws_status pt_arc_to_nurbs(qaws_curve const* curve, qaws_curve** out)
 	d.knot_count = k;
 	d.weights = w;
 	d.weight_count = np;
-	s = qaws_curve_create_nurbs(&d, out);
+	s = qaws_curve_create_nurbs(out, &d);
 	free(cp);
 	return s;
 }
@@ -285,7 +285,7 @@ qaws_status qaws_curve_transform_2d(qaws_curve const* curve, qaws_scalar const m
 		memset(&d, 0, sizeof(d));
 		d.dimension = QAWS_DIMENSION_2D; d.degree = curve->degree;
 		d.control_points = cp; d.control_point_count = impl->control_point_count;
-		s = qaws_curve_create_bezier(&d, out_curve);
+		s = qaws_curve_create_bezier(out_curve, &d);
 		free(cp);
 		return s;
 	}
@@ -300,7 +300,7 @@ qaws_status qaws_curve_transform_2d(qaws_curve const* curve, qaws_scalar const m
 		d.dimension = QAWS_DIMENSION_2D; d.degree = curve->degree;
 		d.control_points = cp; d.control_point_count = impl->control_point_count;
 		d.weights = impl->weights; d.weight_count = impl->control_point_count;
-		s = qaws_curve_create_rational_bezier(&d, out_curve);
+		s = qaws_curve_create_rational_bezier(out_curve, &d);
 		free(cp);
 		return s;
 	}
@@ -315,7 +315,7 @@ qaws_status qaws_curve_transform_2d(qaws_curve const* curve, qaws_scalar const m
 		d.dimension = QAWS_DIMENSION_2D; d.degree = curve->degree;
 		d.control_points = cp; d.control_point_count = impl->control_point_count;
 		d.knots = impl->knots; d.knot_count = impl->knot_count;
-		s = qaws_curve_create_bspline(&d, out_curve);
+		s = qaws_curve_create_bspline(out_curve, &d);
 		free(cp);
 		return s;
 	}
@@ -331,7 +331,7 @@ qaws_status qaws_curve_transform_2d(qaws_curve const* curve, qaws_scalar const m
 		d.control_points = cp; d.control_point_count = impl->control_point_count;
 		d.knots = impl->knots; d.knot_count = impl->knot_count;
 		d.weights = impl->weights; d.weight_count = impl->weight_count;
-		s = qaws_curve_create_nurbs(&d, out_curve);
+		s = qaws_curve_create_nurbs(out_curve, &d);
 		free(cp);
 		return s;
 	}
@@ -353,7 +353,7 @@ qaws_status qaws_curve_transform_2d(qaws_curve const* curve, qaws_scalar const m
 		d.dimension = QAWS_DIMENSION_2D; d.degree = curve->degree;
 		d.coefficients = co; d.coefficient_count = n;
 		d.t_min = curve->parameter_range.min_value; d.t_max = curve->parameter_range.max_value;
-		s = qaws_curve_create_polynomial(&d, out_curve);
+		s = qaws_curve_create_polynomial(out_curve, &d);
 		free(co);
 		return s;
 	}
@@ -396,7 +396,7 @@ qaws_status qaws_curve_transform_2d(qaws_curve const* curve, qaws_scalar const m
 		}
 		memset(&d, 0, sizeof(d));
 		d.dimension = QAWS_DIMENSION_2D; d.segments = seg; d.segment_count = impl->segment_count;
-		s = qaws_curve_create_arc(&d, out_curve);
+		s = qaws_curve_create_arc(out_curve, &d);
 		free(seg);
 		return s;
 	}
@@ -422,7 +422,7 @@ qaws_status qaws_curve_transform_2d(qaws_curve const* curve, qaws_scalar const m
 		d.start_curvature = (qaws_scalar)((flip ? -impl->kappa_0 : impl->kappa_0) / scale);
 		d.end_curvature = (qaws_scalar)((flip ? -impl->kappa_1 : impl->kappa_1) / scale);
 		d.length = (qaws_scalar)(impl->length * scale);
-		return qaws_curve_create_clothoid(&d, out_curve);
+		return qaws_curve_create_clothoid(out_curve, &d);
 	}
 	case QAWS_CURVE_KIND_COMPOSITE:
 	{
@@ -439,7 +439,7 @@ qaws_status qaws_curve_transform_2d(qaws_curve const* curve, qaws_scalar const m
 		{
 			memset(&d, 0, sizeof(d));
 			d.dimension = QAWS_DIMENSION_2D; d.segments = seg; d.segment_count = impl->segment_count;
-			s = qaws_curve_create_composite(&d, out_curve);
+			s = qaws_curve_create_composite(out_curve, &d);
 		}
 		if (s != QAWS_STATUS_OK)
 			for (i = 0; i < made; i++) qaws_curve_destroy(seg[i]);
@@ -451,7 +451,7 @@ qaws_status qaws_curve_transform_2d(qaws_curve const* curve, qaws_scalar const m
 		/* Hermite, Catmull-Rom, trajectory, subdivision, Yuksel, wrappers:
 		   their exact extracted form, then that */
 		qaws_curve* e = NULL;
-		s = qaws_curve_extract(curve, curve->parameter_range.min_value, curve->parameter_range.max_value, &e);
+		s = qaws_curve_extract(&e, curve, curve->parameter_range.min_value, curve->parameter_range.max_value);
 		if (s == QAWS_STATUS_OK)
 			s = qaws_curve_transform_2d(e, m, out_curve);
 		qaws_curve_destroy(e);

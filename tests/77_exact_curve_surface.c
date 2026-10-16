@@ -63,7 +63,7 @@ static qaws_curve* ecs_curve(ref_exact_curve_surface const* r)
 	d.control_point_count = (unsigned int)r->m + 1;
 	d.weights = ws;
 	d.weight_count = (unsigned int)r->m + 1;
-	qaws_curve_create_rational_bezier(&d, &c);
+	qaws_curve_create_rational_bezier(&c, &d);
 	return c;
 }
 
@@ -163,7 +163,7 @@ static void test_on_surface(void)
 	bd.degree = 1;
 	bd.control_points = seg;
 	bd.control_point_count = 2;
-	qaws_curve_create_bezier(&bd, &c);
+	qaws_curve_create_bezier(&c, &bd);
 	qaws_exact_surface_prepare(NULL, s, &es, NULL);
 	qaws_exact_curve_prepare(NULL, c, &ec, NULL);
 	TEST_ASSERT(qaws_exact_curve_surface_hits(ec, es, hits, 4, &count) == QAWS_STATUS_CERTIFICATION_FAILED,

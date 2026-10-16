@@ -17,7 +17,7 @@ static qaws_curve* ks_curve(qaws_scalar const* cps, qaws_scalar const* knots)
 	d.control_point_count = KS_CP;
 	d.knots = knots;
 	d.knot_count = KS_KNOTS;
-	qaws_curve_create_bspline(&d, &c);
+	qaws_curve_create_bspline(&c, &d);
 	return c;
 }
 
@@ -57,7 +57,7 @@ static double ks_speed_ratio(qaws_curve const* c)
 	{
 		qaws_eval_result_2d e;
 		double s;
-		qaws_curve_evaluate_2d(c, r.min_value + (r.max_value - r.min_value) * i / (qaws_scalar)400, QAWS_EVAL_FLAG_D1, &e);
+		qaws_curve_evaluate_2d(&e, c, r.min_value + (r.max_value - r.min_value) * i / (qaws_scalar)400, QAWS_EVAL_FLAG_D1);
 		s = sqrt((double)e.d1.x * e.d1.x + (double)e.d1.y * e.d1.y);
 		if (s < lo) lo = s;
 		if (s > hi) hi = s;
@@ -82,7 +82,7 @@ static void ks_panel(svg* s, viewport const* v, qaws_curve const* c, qaws_scalar
 	for (i = 0; i < KS_N; i++)
 	{
 		qaws_eval_result_2d e;
-		qaws_curve_evaluate_2d(c, r.min_value + (r.max_value - r.min_value) * i / (qaws_scalar)(KS_N - 1), QAWS_EVAL_FLAG_POSITION, &e);
+		qaws_curve_evaluate_2d(&e, c, r.min_value + (r.max_value - r.min_value) * i / (qaws_scalar)(KS_N - 1), QAWS_EVAL_FLAG_POSITION);
 		svg_line(s, vx(v, e.position.x), vy(v, e.position.y), vx(v, val[i].position.x), vy(v, val[i].position.y), "#8250df", 1, 0.6);
 		svg_circle(s, vx(v, e.position.x), vy(v, e.position.y), 2.6, "#0969da", "#ffffff");
 		svg_circle(s, vx(v, val[i].position.x), vy(v, val[i].position.y), 2.6, "#cf222e", "#ffffff");
@@ -91,7 +91,7 @@ static void ks_panel(svg* s, viewport const* v, qaws_curve const* c, qaws_scalar
 	{
 		qaws_eval_result_2d e;
 		double x0, y0;
-		qaws_curve_evaluate_2d(c, knots[i], QAWS_EVAL_FLAG_POSITION, &e);
+		qaws_curve_evaluate_2d(&e, c, knots[i], QAWS_EVAL_FLAG_POSITION);
 		x0 = vx(v, e.position.x);
 		y0 = vy(v, e.position.y);
 		fprintf(s->f, "<path d=\"M%.1f %.1fL%.1f %.1fL%.1f %.1fL%.1f %.1fZ\" fill=\"#1a7f37\" stroke=\"#ffffff\"/>\n",
@@ -157,7 +157,7 @@ static void demo_knot_sampling(void)
 			svg_line(&s, x0, y0, x0 + k1 * t1[i].position.x, y0 - k1 * t1[i].position.y, "#0969da", 1.6, 0.9);
 			svg_circle(&s, x0, y0, 2.8, "#cf222e", "#ffffff");
 		}
-		qaws_curve_evaluate_2d(c, knots[7], QAWS_EVAL_FLAG_POSITION, &e);
+		qaws_curve_evaluate_2d(&e, c, knots[7], QAWS_EVAL_FLAG_POSITION);
 		svg_circle(&s, vx(&va, e.position.x), vy(&va, e.position.y), 6, "#1a7f37", "#24292f");
 		svg_text(&s, va.x0 + 12, va.y0 + va.h - 12, 12, "#57606a", "start", "arrows: sample tangents (longest 50 px)");
 	}

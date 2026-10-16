@@ -325,8 +325,8 @@ static qaws_curve_vtable const arc_vtable = {
  * ------------------------------------------------------------------------- */
 
 qaws_status qaws_curve_create_arc(
-	qaws_arc_desc const *desc,
-	qaws_curve **out_curve)
+	qaws_curve **out_curve,
+	qaws_arc_desc const *desc)
 {
 	unsigned int i;
 	qaws_scalar total_length;

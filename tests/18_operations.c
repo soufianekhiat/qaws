@@ -18,25 +18,25 @@ static void test_curve_reverse(void)
 		bdesc.control_points = pts;
 		bdesc.control_point_count = 3;
 
-		status = qaws_curve_create_bezier(&bdesc, &curve);
+		status = qaws_curve_create_bezier(&curve, &bdesc);
 		TEST_ASSERT_STATUS(status);
 
-		status = qaws_curve_reverse(curve, &rev);
+		status = qaws_curve_reverse(&rev, curve);
 		TEST_ASSERT_STATUS(status);
 
 		/* Original start == reversed end */
-		qaws_curve_evaluate_2d(curve, (qaws_scalar)0.0,
-			QAWS_EVAL_FLAG_POSITION, &r_orig);
-		qaws_curve_evaluate_2d(rev, (qaws_scalar)1.0,
-			QAWS_EVAL_FLAG_POSITION, &r_rev);
+		qaws_curve_evaluate_2d(&r_orig, curve,
+			(qaws_scalar)0.0, QAWS_EVAL_FLAG_POSITION);
+		qaws_curve_evaluate_2d(&r_rev, rev,
+			(qaws_scalar)1.0, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT(approx_eq(r_orig.position.x, r_rev.position.x), "reverse: start==end x");
 		TEST_ASSERT(approx_eq(r_orig.position.y, r_rev.position.y), "reverse: start==end y");
 
 		/* Original end == reversed start */
-		qaws_curve_evaluate_2d(curve, (qaws_scalar)1.0,
-			QAWS_EVAL_FLAG_POSITION, &r_orig);
-		qaws_curve_evaluate_2d(rev, (qaws_scalar)0.0,
-			QAWS_EVAL_FLAG_POSITION, &r_rev);
+		qaws_curve_evaluate_2d(&r_orig, curve,
+			(qaws_scalar)1.0, QAWS_EVAL_FLAG_POSITION);
+		qaws_curve_evaluate_2d(&r_rev, rev,
+			(qaws_scalar)0.0, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT(approx_eq(r_orig.position.x, r_rev.position.x), "reverse: end==start x");
 		TEST_ASSERT(approx_eq(r_orig.position.y, r_rev.position.y), "reverse: end==start y");
 
@@ -60,19 +60,19 @@ static void test_curve_reverse(void)
 		cdesc.parameterization = QAWS_PARAMETERIZATION_CENTRIPETAL;
 		cdesc.closed = 0;
 
-		status = qaws_curve_create_catmull_rom(&cdesc, &curve);
+		status = qaws_curve_create_catmull_rom(&curve, &cdesc);
 		TEST_ASSERT_STATUS(status);
 
-		status = qaws_curve_reverse(curve, &rev);
+		status = qaws_curve_reverse(&rev, curve);
 		TEST_ASSERT_STATUS(status);
 
 		/* Check start/end swap */
 		range = qaws_curve_get_parameter_range(curve);
-		qaws_curve_evaluate_2d(curve, range.min_value,
-			QAWS_EVAL_FLAG_POSITION, &r_orig);
+		qaws_curve_evaluate_2d(&r_orig, curve,
+			range.min_value, QAWS_EVAL_FLAG_POSITION);
 		range = qaws_curve_get_parameter_range(rev);
-		qaws_curve_evaluate_2d(rev, range.max_value,
-			QAWS_EVAL_FLAG_POSITION, &r_rev);
+		qaws_curve_evaluate_2d(&r_rev, rev,
+			range.max_value, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT(approx_eq(r_orig.position.x, r_rev.position.x),
 			"catmull reverse start x");
 		TEST_ASSERT(approx_eq(r_orig.position.y, r_rev.position.y),
@@ -99,16 +99,16 @@ static void test_curve_reverse(void)
 		hdesc.point_count = 2;
 		hdesc.derivative_count = 2;
 
-		status = qaws_curve_create_hermite(&hdesc, &curve);
+		status = qaws_curve_create_hermite(&curve, &hdesc);
 		TEST_ASSERT_STATUS(status);
 
-		status = qaws_curve_reverse(curve, &rev);
+		status = qaws_curve_reverse(&rev, curve);
 		TEST_ASSERT_STATUS(status);
 
-		qaws_curve_evaluate_2d(curve, (qaws_scalar)0.0,
-			QAWS_EVAL_FLAG_POSITION, &r_orig);
-		qaws_curve_evaluate_2d(rev, (qaws_scalar)1.0,
-			QAWS_EVAL_FLAG_POSITION, &r_rev);
+		qaws_curve_evaluate_2d(&r_orig, curve,
+			(qaws_scalar)0.0, QAWS_EVAL_FLAG_POSITION);
+		qaws_curve_evaluate_2d(&r_rev, rev,
+			(qaws_scalar)1.0, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT(approx_eq(r_orig.position.x, r_rev.position.x),
 			"hermite reverse x");
 		TEST_ASSERT(approx_eq(r_orig.position.y, r_rev.position.y),
@@ -121,7 +121,7 @@ static void test_curve_reverse(void)
 	/* NULL argument */
 	{
 		qaws_curve *rev = NULL;
-		qaws_status status = qaws_curve_reverse(NULL, &rev);
+		qaws_status status = qaws_curve_reverse(&rev, NULL);
 		TEST_ASSERT(status == QAWS_STATUS_INVALID_ARGUMENT, "reverse null curve");
 	}
 
@@ -144,28 +144,28 @@ static void test_curve_reverse(void)
 		bsdesc.is_uniform = 1;
 		bsdesc.is_closed = 0;
 
-		status = qaws_curve_create_bspline(&bsdesc, &curve);
+		status = qaws_curve_create_bspline(&curve, &bsdesc);
 		TEST_ASSERT_STATUS(status);
 
-		status = qaws_curve_reverse(curve, &rev);
+		status = qaws_curve_reverse(&rev, curve);
 		TEST_ASSERT_STATUS(status);
 
 		range = qaws_curve_get_parameter_range(curve);
 		rev_range = qaws_curve_get_parameter_range(rev);
 
-		qaws_curve_evaluate_2d(curve, range.min_value,
-			QAWS_EVAL_FLAG_POSITION, &r_orig);
-		qaws_curve_evaluate_2d(rev, rev_range.max_value,
-			QAWS_EVAL_FLAG_POSITION, &r_rev);
+		qaws_curve_evaluate_2d(&r_orig, curve,
+			range.min_value, QAWS_EVAL_FLAG_POSITION);
+		qaws_curve_evaluate_2d(&r_rev, rev,
+			rev_range.max_value, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT(approx_eq(r_orig.position.x, r_rev.position.x),
 			"bspline reverse: start==end x");
 		TEST_ASSERT(approx_eq(r_orig.position.y, r_rev.position.y),
 			"bspline reverse: start==end y");
 
-		qaws_curve_evaluate_2d(curve, range.max_value,
-			QAWS_EVAL_FLAG_POSITION, &r_orig);
-		qaws_curve_evaluate_2d(rev, rev_range.min_value,
-			QAWS_EVAL_FLAG_POSITION, &r_rev);
+		qaws_curve_evaluate_2d(&r_orig, curve,
+			range.max_value, QAWS_EVAL_FLAG_POSITION);
+		qaws_curve_evaluate_2d(&r_rev, rev,
+			rev_range.min_value, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT(approx_eq(r_orig.position.x, r_rev.position.x),
 			"bspline reverse: end==start x");
 		TEST_ASSERT(approx_eq(r_orig.position.y, r_rev.position.y),
@@ -197,28 +197,28 @@ static void test_curve_reverse(void)
 		ndesc.weight_count = 3;
 		ndesc.is_closed = 0;
 
-		status = qaws_curve_create_nurbs(&ndesc, &curve);
+		status = qaws_curve_create_nurbs(&curve, &ndesc);
 		TEST_ASSERT_STATUS(status);
 
-		status = qaws_curve_reverse(curve, &rev);
+		status = qaws_curve_reverse(&rev, curve);
 		TEST_ASSERT_STATUS(status);
 
 		range = qaws_curve_get_parameter_range(curve);
 		rev_range = qaws_curve_get_parameter_range(rev);
 
-		qaws_curve_evaluate_2d(curve, range.min_value,
-			QAWS_EVAL_FLAG_POSITION, &r_orig);
-		qaws_curve_evaluate_2d(rev, rev_range.max_value,
-			QAWS_EVAL_FLAG_POSITION, &r_rev);
+		qaws_curve_evaluate_2d(&r_orig, curve,
+			range.min_value, QAWS_EVAL_FLAG_POSITION);
+		qaws_curve_evaluate_2d(&r_rev, rev,
+			rev_range.max_value, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT(approx_eq(r_orig.position.x, r_rev.position.x),
 			"nurbs reverse: start==end x");
 		TEST_ASSERT(approx_eq(r_orig.position.y, r_rev.position.y),
 			"nurbs reverse: start==end y");
 
-		qaws_curve_evaluate_2d(curve, range.max_value,
-			QAWS_EVAL_FLAG_POSITION, &r_orig);
-		qaws_curve_evaluate_2d(rev, rev_range.min_value,
-			QAWS_EVAL_FLAG_POSITION, &r_rev);
+		qaws_curve_evaluate_2d(&r_orig, curve,
+			range.max_value, QAWS_EVAL_FLAG_POSITION);
+		qaws_curve_evaluate_2d(&r_rev, rev,
+			rev_range.min_value, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT(approx_eq(r_orig.position.x, r_rev.position.x),
 			"nurbs reverse: end==start x");
 		TEST_ASSERT(approx_eq(r_orig.position.y, r_rev.position.y),
@@ -251,28 +251,28 @@ static void test_curve_reverse(void)
 		tdesc.key_acceleration_count = 0;
 		tdesc.closed = 0;
 
-		status = qaws_curve_create_trajectory(&tdesc, &curve);
+		status = qaws_curve_create_trajectory(&curve, &tdesc);
 		TEST_ASSERT_STATUS(status);
 
-		status = qaws_curve_reverse(curve, &rev);
+		status = qaws_curve_reverse(&rev, curve);
 		TEST_ASSERT_STATUS(status);
 
 		range = qaws_curve_get_parameter_range(curve);
 		rev_range = qaws_curve_get_parameter_range(rev);
 
-		qaws_curve_evaluate_2d(curve, range.min_value,
-			QAWS_EVAL_FLAG_POSITION, &r_orig);
-		qaws_curve_evaluate_2d(rev, rev_range.max_value,
-			QAWS_EVAL_FLAG_POSITION, &r_rev);
+		qaws_curve_evaluate_2d(&r_orig, curve,
+			range.min_value, QAWS_EVAL_FLAG_POSITION);
+		qaws_curve_evaluate_2d(&r_rev, rev,
+			rev_range.max_value, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT(approx_eq(r_orig.position.x, r_rev.position.x),
 			"traj reverse: start==end x");
 		TEST_ASSERT(approx_eq(r_orig.position.y, r_rev.position.y),
 			"traj reverse: start==end y");
 
-		qaws_curve_evaluate_2d(curve, range.max_value,
-			QAWS_EVAL_FLAG_POSITION, &r_orig);
-		qaws_curve_evaluate_2d(rev, rev_range.min_value,
-			QAWS_EVAL_FLAG_POSITION, &r_rev);
+		qaws_curve_evaluate_2d(&r_orig, curve,
+			range.max_value, QAWS_EVAL_FLAG_POSITION);
+		qaws_curve_evaluate_2d(&r_rev, rev,
+			rev_range.min_value, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT(approx_eq(r_orig.position.x, r_rev.position.x),
 			"traj reverse: end==start x");
 		TEST_ASSERT(approx_eq(r_orig.position.y, r_rev.position.y),
@@ -296,16 +296,16 @@ static void test_curve_reverse(void)
 		mbdesc.control_points = mpts;
 		mbdesc.control_point_count = 3;
 
-		status = qaws_curve_create_bezier(&mbdesc, &curve);
+		status = qaws_curve_create_bezier(&curve, &mbdesc);
 		TEST_ASSERT_STATUS(status);
 
-		status = qaws_curve_reverse(curve, &rev);
+		status = qaws_curve_reverse(&rev, curve);
 		TEST_ASSERT_STATUS(status);
 
-		qaws_curve_evaluate_2d(curve, (qaws_scalar)0.5,
-			QAWS_EVAL_FLAG_POSITION, &r_orig);
-		qaws_curve_evaluate_2d(rev, (qaws_scalar)0.5,
-			QAWS_EVAL_FLAG_POSITION, &r_rev);
+		qaws_curve_evaluate_2d(&r_orig, curve,
+			(qaws_scalar)0.5, QAWS_EVAL_FLAG_POSITION);
+		qaws_curve_evaluate_2d(&r_rev, rev,
+			(qaws_scalar)0.5, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT(approx_eq(r_orig.position.x, r_rev.position.x),
 			"bezier reverse midpoint x");
 		TEST_ASSERT(approx_eq(r_orig.position.y, r_rev.position.y),
@@ -335,47 +335,47 @@ static void test_curve_split(void)
 		bdesc.control_points = pts;
 		bdesc.control_point_count = 3;
 
-		status = qaws_curve_create_bezier(&bdesc, &curve);
+		status = qaws_curve_create_bezier(&curve, &bdesc);
 		TEST_ASSERT_STATUS(status);
 
-		status = qaws_curve_split(curve, (qaws_scalar)0.5, &left, &right);
+		status = qaws_curve_split(&left, &right, curve, (qaws_scalar)0.5);
 		TEST_ASSERT_STATUS(status);
 		TEST_ASSERT(left != NULL, "split left not null");
 		TEST_ASSERT(right != NULL, "split right not null");
 
 		/* Left end == original at t=0.5 */
-		qaws_curve_evaluate_2d(curve, (qaws_scalar)0.5,
-			QAWS_EVAL_FLAG_POSITION, &r_orig);
-		qaws_curve_evaluate_2d(left, (qaws_scalar)1.0,
-			QAWS_EVAL_FLAG_POSITION, &r_left);
+		qaws_curve_evaluate_2d(&r_orig, curve,
+			(qaws_scalar)0.5, QAWS_EVAL_FLAG_POSITION);
+		qaws_curve_evaluate_2d(&r_left, left,
+			(qaws_scalar)1.0, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT(approx_eq(r_orig.position.x, r_left.position.x),
 			"bezier split left end x");
 		TEST_ASSERT(approx_eq(r_orig.position.y, r_left.position.y),
 			"bezier split left end y");
 
 		/* Right start == original at t=0.5 */
-		qaws_curve_evaluate_2d(right, (qaws_scalar)0.0,
-			QAWS_EVAL_FLAG_POSITION, &r_right);
+		qaws_curve_evaluate_2d(&r_right, right,
+			(qaws_scalar)0.0, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT(approx_eq(r_orig.position.x, r_right.position.x),
 			"bezier split right start x");
 		TEST_ASSERT(approx_eq(r_orig.position.y, r_right.position.y),
 			"bezier split right start y");
 
 		/* Left start == original start */
-		qaws_curve_evaluate_2d(curve, (qaws_scalar)0.0,
-			QAWS_EVAL_FLAG_POSITION, &r_orig);
-		qaws_curve_evaluate_2d(left, (qaws_scalar)0.0,
-			QAWS_EVAL_FLAG_POSITION, &r_left);
+		qaws_curve_evaluate_2d(&r_orig, curve,
+			(qaws_scalar)0.0, QAWS_EVAL_FLAG_POSITION);
+		qaws_curve_evaluate_2d(&r_left, left,
+			(qaws_scalar)0.0, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT(approx_eq(r_orig.position.x, r_left.position.x),
 			"bezier split left start x");
 		TEST_ASSERT(approx_eq(r_orig.position.y, r_left.position.y),
 			"bezier split left start y");
 
 		/* Right end == original end */
-		qaws_curve_evaluate_2d(curve, (qaws_scalar)1.0,
-			QAWS_EVAL_FLAG_POSITION, &r_orig);
-		qaws_curve_evaluate_2d(right, (qaws_scalar)1.0,
-			QAWS_EVAL_FLAG_POSITION, &r_right);
+		qaws_curve_evaluate_2d(&r_orig, curve,
+			(qaws_scalar)1.0, QAWS_EVAL_FLAG_POSITION);
+		qaws_curve_evaluate_2d(&r_right, right,
+			(qaws_scalar)1.0, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT(approx_eq(r_orig.position.x, r_right.position.x),
 			"bezier split right end x");
 		TEST_ASSERT(approx_eq(r_orig.position.y, r_right.position.y),
@@ -404,31 +404,31 @@ static void test_curve_split(void)
 		hdesc.point_count = 3;
 		hdesc.derivative_count = 3;
 
-		status = qaws_curve_create_hermite(&hdesc, &curve);
+		status = qaws_curve_create_hermite(&curve, &hdesc);
 		TEST_ASSERT_STATUS(status);
 
 		/* Split at span boundary t=1 */
-		status = qaws_curve_split(curve, (qaws_scalar)1.0, &left, &right);
+		status = qaws_curve_split(&left, &right, curve, (qaws_scalar)1.0);
 		TEST_ASSERT_STATUS(status);
 
 		/* Left curve should match original at t=0 */
-		qaws_curve_evaluate_2d(curve, (qaws_scalar)0.0,
-			QAWS_EVAL_FLAG_POSITION, &r_orig);
+		qaws_curve_evaluate_2d(&r_orig, curve,
+			(qaws_scalar)0.0, QAWS_EVAL_FLAG_POSITION);
 		{
 			qaws_range lr = qaws_curve_get_parameter_range(left);
-			qaws_curve_evaluate_2d(left, lr.min_value,
-				QAWS_EVAL_FLAG_POSITION, &r_sub);
+			qaws_curve_evaluate_2d(&r_sub, left,
+				lr.min_value, QAWS_EVAL_FLAG_POSITION);
 		}
 		TEST_ASSERT(approx_eq(r_orig.position.x, r_sub.position.x),
 			"hermite split left start x");
 
 		/* Right curve should match original at t=2 */
-		qaws_curve_evaluate_2d(curve, (qaws_scalar)2.0,
-			QAWS_EVAL_FLAG_POSITION, &r_orig);
+		qaws_curve_evaluate_2d(&r_orig, curve,
+			(qaws_scalar)2.0, QAWS_EVAL_FLAG_POSITION);
 		{
 			qaws_range rr = qaws_curve_get_parameter_range(right);
-			qaws_curve_evaluate_2d(right, rr.max_value,
-				QAWS_EVAL_FLAG_POSITION, &r_sub);
+			qaws_curve_evaluate_2d(&r_sub, right,
+				rr.max_value, QAWS_EVAL_FLAG_POSITION);
 		}
 		TEST_ASSERT(approx_eq(r_orig.position.x, r_sub.position.x),
 			"hermite split right end x");
@@ -461,19 +461,19 @@ static void test_curve_split(void)
 		sdesc.knots = knots;
 		sdesc.knot_count = 8;
 
-		status = qaws_curve_create_bspline(&sdesc, &curve);
+		status = qaws_curve_create_bspline(&curve, &sdesc);
 		TEST_ASSERT_STATUS(status);
 
 		/* Split at an existing internal knot value */
-		status = qaws_curve_split(curve, (qaws_scalar)1.0, &left, &right);
+		status = qaws_curve_split(&left, &right, curve, (qaws_scalar)1.0);
 		if (status == QAWS_STATUS_OK) {
 			/* Both sub-curves at the split point match the original */
-			qaws_curve_evaluate_2d(curve, (qaws_scalar)1.0,
-				QAWS_EVAL_FLAG_POSITION, &r_orig);
+			qaws_curve_evaluate_2d(&r_orig, curve,
+				(qaws_scalar)1.0, QAWS_EVAL_FLAG_POSITION);
 			if (left != NULL) {
 				qaws_range lr = qaws_curve_get_parameter_range(left);
-				qaws_curve_evaluate_2d(left, lr.max_value,
-					QAWS_EVAL_FLAG_POSITION, &r_left);
+				qaws_curve_evaluate_2d(&r_left, left,
+					lr.max_value, QAWS_EVAL_FLAG_POSITION);
 				TEST_ASSERT(approx_eq(r_orig.position.x, r_left.position.x),
 					"bspline split left end x");
 				TEST_ASSERT(approx_eq(r_orig.position.y, r_left.position.y),
@@ -481,8 +481,8 @@ static void test_curve_split(void)
 			}
 			if (right != NULL) {
 				qaws_range rr = qaws_curve_get_parameter_range(right);
-				qaws_curve_evaluate_2d(right, rr.min_value,
-					QAWS_EVAL_FLAG_POSITION, &r_right);
+				qaws_curve_evaluate_2d(&r_right, right,
+					rr.min_value, QAWS_EVAL_FLAG_POSITION);
 				TEST_ASSERT(approx_eq(r_orig.position.x, r_right.position.x),
 					"bspline split right start x");
 				TEST_ASSERT(approx_eq(r_orig.position.y, r_right.position.y),
@@ -523,20 +523,20 @@ static void test_curve_split(void)
 		tdesc.key_times = times;
 		tdesc.key_time_count = 3;
 
-		status = qaws_curve_create_trajectory(&tdesc, &curve);
+		status = qaws_curve_create_trajectory(&curve, &tdesc);
 		TEST_ASSERT_STATUS(status);
 
 		/* Split between keyframes at t=0.5 */
-		status = qaws_curve_split(curve, (qaws_scalar)0.5, &left, &right);
+		status = qaws_curve_split(&left, &right, curve, (qaws_scalar)0.5);
 		TEST_ASSERT_STATUS(status);
 
 		/* Left start matches original start */
-		qaws_curve_evaluate_2d(curve, (qaws_scalar)0.0,
-			QAWS_EVAL_FLAG_POSITION, &r_orig);
+		qaws_curve_evaluate_2d(&r_orig, curve,
+			(qaws_scalar)0.0, QAWS_EVAL_FLAG_POSITION);
 		{
 			qaws_range lr = qaws_curve_get_parameter_range(left);
-			qaws_curve_evaluate_2d(left, lr.min_value,
-				QAWS_EVAL_FLAG_POSITION, &r_sub);
+			qaws_curve_evaluate_2d(&r_sub, left,
+				lr.min_value, QAWS_EVAL_FLAG_POSITION);
 		}
 		TEST_ASSERT(approx_eq(r_orig.position.x, r_sub.position.x),
 			"traj split left start x");
@@ -544,12 +544,12 @@ static void test_curve_split(void)
 			"traj split left start y");
 
 		/* Right end matches original end */
-		qaws_curve_evaluate_2d(curve, (qaws_scalar)2.0,
-			QAWS_EVAL_FLAG_POSITION, &r_orig);
+		qaws_curve_evaluate_2d(&r_orig, curve,
+			(qaws_scalar)2.0, QAWS_EVAL_FLAG_POSITION);
 		{
 			qaws_range rr = qaws_curve_get_parameter_range(right);
-			qaws_curve_evaluate_2d(right, rr.max_value,
-				QAWS_EVAL_FLAG_POSITION, &r_sub);
+			qaws_curve_evaluate_2d(&r_sub, right,
+				rr.max_value, QAWS_EVAL_FLAG_POSITION);
 		}
 		TEST_ASSERT(approx_eq(r_orig.position.x, r_sub.position.x),
 			"traj split right end x");
@@ -575,18 +575,18 @@ static void test_curve_split(void)
 		bdesc.control_points = pts;
 		bdesc.control_point_count = 3;
 
-		status = qaws_curve_create_bezier(&bdesc, &curve);
+		status = qaws_curve_create_bezier(&curve, &bdesc);
 		TEST_ASSERT_STATUS(status);
 
 		/* Parameter below range */
-		status = qaws_curve_split(curve, (qaws_scalar)-1.0, &left, &right);
+		status = qaws_curve_split(&left, &right, curve, (qaws_scalar)-1.0);
 		TEST_ASSERT(
 			status == QAWS_STATUS_OUT_OF_RANGE ||
 			status == QAWS_STATUS_INVALID_ARGUMENT,
 			"split below range returns error");
 
 		/* Parameter above range */
-		status = qaws_curve_split(curve, (qaws_scalar)2.0, &left, &right);
+		status = qaws_curve_split(&left, &right, curve, (qaws_scalar)2.0);
 		TEST_ASSERT(
 			status == QAWS_STATUS_OUT_OF_RANGE ||
 			status == QAWS_STATUS_INVALID_ARGUMENT,
@@ -611,10 +611,10 @@ static void test_curve_split(void)
 		bdesc.control_points = pts;
 		bdesc.control_point_count = 4;
 
-		status = qaws_curve_create_bezier(&bdesc, &curve);
+		status = qaws_curve_create_bezier(&curve, &bdesc);
 		TEST_ASSERT_STATUS(status);
 
-		status = qaws_curve_split(curve, (qaws_scalar)0.3, &left, &right);
+		status = qaws_curve_split(&left, &right, curve, (qaws_scalar)0.3);
 		TEST_ASSERT_STATUS(status);
 
 		/* Verify left half at several internal points */
@@ -623,14 +623,14 @@ static void test_curve_split(void)
 			qaws_scalar param = t;
 			qaws_scalar left_param;
 			if (param > (qaws_scalar)0.3) param = (qaws_scalar)0.3;
-			qaws_curve_evaluate_2d(curve, param,
-				QAWS_EVAL_FLAG_POSITION, &r_orig);
+			qaws_curve_evaluate_2d(&r_orig, curve,
+				param, QAWS_EVAL_FLAG_POSITION);
 			/* Map original [0,0.3] to left's [0,1] */
 			left_param = param / (qaws_scalar)0.3;
 			if (left_param > (qaws_scalar)1.0)
 				left_param = (qaws_scalar)1.0;
-			qaws_curve_evaluate_2d(left, left_param,
-				QAWS_EVAL_FLAG_POSITION, &r_sub);
+			qaws_curve_evaluate_2d(&r_sub, left,
+				left_param, QAWS_EVAL_FLAG_POSITION);
 			TEST_ASSERT(approx_eq(r_orig.position.x, r_sub.position.x),
 				"cubic split left interior x");
 			TEST_ASSERT(approx_eq(r_orig.position.y, r_sub.position.y),
@@ -643,16 +643,16 @@ static void test_curve_split(void)
 			qaws_scalar param = t;
 			qaws_scalar right_param;
 			if (param > (qaws_scalar)1.0) param = (qaws_scalar)1.0;
-			qaws_curve_evaluate_2d(curve, param,
-				QAWS_EVAL_FLAG_POSITION, &r_orig);
+			qaws_curve_evaluate_2d(&r_orig, curve,
+				param, QAWS_EVAL_FLAG_POSITION);
 			/* Map original [0.3,1.0] to right's [0,1] */
 			right_param = (param - (qaws_scalar)0.3) / (qaws_scalar)0.7;
 			if (right_param < (qaws_scalar)0.0)
 				right_param = (qaws_scalar)0.0;
 			if (right_param > (qaws_scalar)1.0)
 				right_param = (qaws_scalar)1.0;
-			qaws_curve_evaluate_2d(right, right_param,
-				QAWS_EVAL_FLAG_POSITION, &r_sub);
+			qaws_curve_evaluate_2d(&r_sub, right,
+				right_param, QAWS_EVAL_FLAG_POSITION);
 			TEST_ASSERT(approx_eq(r_orig.position.x, r_sub.position.x),
 				"cubic split right interior x");
 			TEST_ASSERT(approx_eq(r_orig.position.y, r_sub.position.y),
@@ -670,7 +670,7 @@ static void test_curve_split(void)
 		qaws_curve *right = NULL;
 		qaws_status status;
 
-		status = qaws_curve_split(NULL, (qaws_scalar)0.5, &left, &right);
+		status = qaws_curve_split(&left, &right, NULL, (qaws_scalar)0.5);
 		TEST_ASSERT(status == QAWS_STATUS_INVALID_ARGUMENT, "split null curve");
 	}
 }
@@ -698,25 +698,25 @@ static void test_curve_join(void)
 		hdesc.point_count = 3;
 		hdesc.derivative_count = 3;
 
-		status = qaws_curve_create_hermite(&hdesc, &curve);
+		status = qaws_curve_create_hermite(&curve, &hdesc);
 		TEST_ASSERT_STATUS(status);
 
 		/* Split at boundary */
-		status = qaws_curve_split(curve, (qaws_scalar)1.0, &left, &right);
+		status = qaws_curve_split(&left, &right, curve, (qaws_scalar)1.0);
 		TEST_ASSERT_STATUS(status);
 
 		/* Join the halves back */
-		status = qaws_curve_join(left, right, &joined);
+		status = qaws_curve_join(&joined, left, right);
 		TEST_ASSERT_STATUS(status);
 		TEST_ASSERT(joined != NULL, "joined not null");
 
 		/* Start of joined should match original start */
-		qaws_curve_evaluate_2d(curve, (qaws_scalar)0.0,
-			QAWS_EVAL_FLAG_POSITION, &r_orig);
+		qaws_curve_evaluate_2d(&r_orig, curve,
+			(qaws_scalar)0.0, QAWS_EVAL_FLAG_POSITION);
 		{
 			qaws_range jr = qaws_curve_get_parameter_range(joined);
-			qaws_curve_evaluate_2d(joined, jr.min_value,
-				QAWS_EVAL_FLAG_POSITION, &r_joined);
+			qaws_curve_evaluate_2d(&r_joined, joined,
+				jr.min_value, QAWS_EVAL_FLAG_POSITION);
 		}
 		TEST_ASSERT(approx_eq(r_orig.position.x, r_joined.position.x),
 			"join start x");
@@ -724,12 +724,12 @@ static void test_curve_join(void)
 			"join start y");
 
 		/* End of joined should match original end */
-		qaws_curve_evaluate_2d(curve, (qaws_scalar)2.0,
-			QAWS_EVAL_FLAG_POSITION, &r_orig);
+		qaws_curve_evaluate_2d(&r_orig, curve,
+			(qaws_scalar)2.0, QAWS_EVAL_FLAG_POSITION);
 		{
 			qaws_range jr = qaws_curve_get_parameter_range(joined);
-			qaws_curve_evaluate_2d(joined, jr.max_value,
-				QAWS_EVAL_FLAG_POSITION, &r_joined);
+			qaws_curve_evaluate_2d(&r_joined, joined,
+				jr.max_value, QAWS_EVAL_FLAG_POSITION);
 		}
 		TEST_ASSERT(approx_eq(r_orig.position.x, r_joined.position.x),
 			"join end x");
@@ -758,7 +758,7 @@ static void test_curve_join(void)
 		bdesc.degree = 1;
 		bdesc.control_points = bpts;
 		bdesc.control_point_count = 2;
-		qaws_curve_create_bezier(&bdesc, &bezier);
+		qaws_curve_create_bezier(&bezier, &bdesc);
 
 		hdesc.dimension = QAWS_DIMENSION_2D;
 		hdesc.degree = 3;
@@ -766,9 +766,9 @@ static void test_curve_join(void)
 		hdesc.derivatives = hders;
 		hdesc.point_count = 2;
 		hdesc.derivative_count = 2;
-		qaws_curve_create_hermite(&hdesc, &hermite);
+		qaws_curve_create_hermite(&hermite, &hdesc);
 
-		status = qaws_curve_join(bezier, hermite, &joined);
+		status = qaws_curve_join(&joined, bezier, hermite);
 		TEST_ASSERT(status == QAWS_STATUS_INVALID_ARGUMENT, "join mismatched families");
 
 		qaws_curve_destroy(hermite);
@@ -801,22 +801,22 @@ static void test_curve_join(void)
 		sdesc_b.control_point_count = 4;
 		sdesc_b.is_uniform = 1;
 
-		status = qaws_curve_create_bspline(&sdesc_a, &bsp_a);
+		status = qaws_curve_create_bspline(&bsp_a, &sdesc_a);
 		TEST_ASSERT_STATUS(status);
-		status = qaws_curve_create_bspline(&sdesc_b, &bsp_b);
+		status = qaws_curve_create_bspline(&bsp_b, &sdesc_b);
 		TEST_ASSERT_STATUS(status);
 
-		status = qaws_curve_join(bsp_a, bsp_b, &joined);
+		status = qaws_curve_join(&joined, bsp_a, bsp_b);
 		if (status == QAWS_STATUS_OK && joined != NULL) {
 			qaws_range jr = qaws_curve_get_parameter_range(joined);
 
 			/* Start of joined matches start of A */
 			{
 				qaws_range ar = qaws_curve_get_parameter_range(bsp_a);
-				qaws_curve_evaluate_2d(bsp_a, ar.min_value,
-					QAWS_EVAL_FLAG_POSITION, &r_a);
-				qaws_curve_evaluate_2d(joined, jr.min_value,
-					QAWS_EVAL_FLAG_POSITION, &r_j);
+				qaws_curve_evaluate_2d(&r_a, bsp_a,
+					ar.min_value, QAWS_EVAL_FLAG_POSITION);
+				qaws_curve_evaluate_2d(&r_j, joined,
+					jr.min_value, QAWS_EVAL_FLAG_POSITION);
 				TEST_ASSERT(approx_eq(r_a.position.x, r_j.position.x),
 					"bspline join start x");
 				TEST_ASSERT(approx_eq(r_a.position.y, r_j.position.y),
@@ -826,10 +826,10 @@ static void test_curve_join(void)
 			/* End of joined matches end of B */
 			{
 				qaws_range br = qaws_curve_get_parameter_range(bsp_b);
-				qaws_curve_evaluate_2d(bsp_b, br.max_value,
-					QAWS_EVAL_FLAG_POSITION, &r_b);
-				qaws_curve_evaluate_2d(joined, jr.max_value,
-					QAWS_EVAL_FLAG_POSITION, &r_j);
+				qaws_curve_evaluate_2d(&r_b, bsp_b,
+					br.max_value, QAWS_EVAL_FLAG_POSITION);
+				qaws_curve_evaluate_2d(&r_j, joined,
+					jr.max_value, QAWS_EVAL_FLAG_POSITION);
 				TEST_ASSERT(approx_eq(r_b.position.x, r_j.position.x),
 					"bspline join end x");
 				TEST_ASSERT(approx_eq(r_b.position.y, r_j.position.y),
@@ -880,12 +880,12 @@ static void test_curve_join(void)
 		tdesc_b.key_times = times_b;
 		tdesc_b.key_time_count = 2;
 
-		status = qaws_curve_create_trajectory(&tdesc_a, &traj_a);
+		status = qaws_curve_create_trajectory(&traj_a, &tdesc_a);
 		TEST_ASSERT_STATUS(status);
-		status = qaws_curve_create_trajectory(&tdesc_b, &traj_b);
+		status = qaws_curve_create_trajectory(&traj_b, &tdesc_b);
 		TEST_ASSERT_STATUS(status);
 
-		status = qaws_curve_join(traj_a, traj_b, &joined);
+		status = qaws_curve_join(&joined, traj_a, traj_b);
 		TEST_ASSERT_STATUS(status);
 		TEST_ASSERT(joined != NULL, "trajectory join not null");
 
@@ -893,10 +893,10 @@ static void test_curve_join(void)
 		{
 			qaws_range ar = qaws_curve_get_parameter_range(traj_a);
 			qaws_range jr = qaws_curve_get_parameter_range(joined);
-			qaws_curve_evaluate_2d(traj_a, ar.min_value,
-				QAWS_EVAL_FLAG_POSITION, &r_a);
-			qaws_curve_evaluate_2d(joined, jr.min_value,
-				QAWS_EVAL_FLAG_POSITION, &r_j);
+			qaws_curve_evaluate_2d(&r_a, traj_a,
+				ar.min_value, QAWS_EVAL_FLAG_POSITION);
+			qaws_curve_evaluate_2d(&r_j, joined,
+				jr.min_value, QAWS_EVAL_FLAG_POSITION);
 			TEST_ASSERT(approx_eq(r_a.position.x, r_j.position.x),
 				"traj join start x");
 			TEST_ASSERT(approx_eq(r_a.position.y, r_j.position.y),
@@ -907,10 +907,10 @@ static void test_curve_join(void)
 		{
 			qaws_range br = qaws_curve_get_parameter_range(traj_b);
 			qaws_range jr = qaws_curve_get_parameter_range(joined);
-			qaws_curve_evaluate_2d(traj_b, br.max_value,
-				QAWS_EVAL_FLAG_POSITION, &r_b);
-			qaws_curve_evaluate_2d(joined, jr.max_value,
-				QAWS_EVAL_FLAG_POSITION, &r_j);
+			qaws_curve_evaluate_2d(&r_b, traj_b,
+				br.max_value, QAWS_EVAL_FLAG_POSITION);
+			qaws_curve_evaluate_2d(&r_j, joined,
+				jr.max_value, QAWS_EVAL_FLAG_POSITION);
 			TEST_ASSERT(approx_eq(r_b.position.x, r_j.position.x),
 				"traj join end x");
 			TEST_ASSERT(approx_eq(r_b.position.y, r_j.position.y),
@@ -942,17 +942,17 @@ static void test_curve_join(void)
 		hdesc.point_count = 4;
 		hdesc.derivative_count = 4;
 
-		status = qaws_curve_create_hermite(&hdesc, &curve);
+		status = qaws_curve_create_hermite(&curve, &hdesc);
 		TEST_ASSERT_STATUS(status);
 		TEST_ASSERT(qaws_curve_get_span_count(curve) == 3,
 			"hermite 3-span count");
 
 		/* Split at span boundary t=1 */
-		status = qaws_curve_split(curve, (qaws_scalar)1.0, &left, &right);
+		status = qaws_curve_split(&left, &right, curve, (qaws_scalar)1.0);
 		TEST_ASSERT_STATUS(status);
 
 		/* Join back */
-		status = qaws_curve_join(left, right, &joined);
+		status = qaws_curve_join(&joined, left, right);
 		TEST_ASSERT_STATUS(status);
 
 		/* Verify evaluation at several points matches original */
@@ -962,14 +962,14 @@ static void test_curve_join(void)
 			qaws_range jr;
 			qaws_scalar jparam;
 			if (param > (qaws_scalar)3.0) param = (qaws_scalar)3.0;
-			qaws_curve_evaluate_2d(curve, param,
-				QAWS_EVAL_FLAG_POSITION, &r_orig);
+			qaws_curve_evaluate_2d(&r_orig, curve,
+				param, QAWS_EVAL_FLAG_POSITION);
 			jr = qaws_curve_get_parameter_range(joined);
 			jparam = jr.min_value +
 				(param / (qaws_scalar)3.0) * (jr.max_value - jr.min_value);
 			if (jparam > jr.max_value) jparam = jr.max_value;
-			qaws_curve_evaluate_2d(joined, jparam,
-				QAWS_EVAL_FLAG_POSITION, &r_joined);
+			qaws_curve_evaluate_2d(&r_joined, joined,
+				jparam, QAWS_EVAL_FLAG_POSITION);
 			TEST_ASSERT(approx_eq(r_orig.position.x, r_joined.position.x),
 				"hermite roundtrip x");
 			TEST_ASSERT(approx_eq(r_orig.position.y, r_joined.position.y),
@@ -1017,13 +1017,13 @@ static void test_curve_offset(void)
 		ndesc.knot_count = 6;
 		ndesc.is_closed = 0;
 
-		s = qaws_curve_create_nurbs(&ndesc, &arc);
+		s = qaws_curve_create_nurbs(&arc, &ndesc);
 		TEST_ASSERT_STATUS(s);
 
 		qaws_curve* offsets[4] = {NULL};
 		unsigned int off_count = 0;
 		/* Negative = right of travel = outward for CCW arc */
-		s = qaws_curve_offset_2d(arc, (qaws_scalar)-0.5, 0, offsets, 4, &off_count);
+		s = qaws_curve_offset_2d(offsets, &off_count, arc, 4, (qaws_scalar)-0.5, 0);
 		TEST_ASSERT_STATUS(s);
 		TEST_ASSERT(off_count >= 1, "offset of arc produces at least 1 curve");
 
@@ -1037,7 +1037,7 @@ static void test_curve_offset(void)
 			sd.sample_count = 64;
 			sd.error_tolerance = 0;
 			sd.use_adaptive_sampling = 0;
-			s = qaws_curve_sample_2d(offsets[0], &sd, sample_buf, 64, &sample_n);
+			s = qaws_curve_sample_2d(sample_buf, &sample_n, offsets[0], 64, &sd);
 			if (s == QAWS_STATUS_OK && sample_n > 2)
 			{
 				int all_close = 1;
@@ -1075,12 +1075,12 @@ static void test_curve_offset(void)
 		bdesc.degree = 3;
 		bdesc.control_points = pts;
 		bdesc.control_point_count = 4;
-		s = qaws_curve_create_bezier(&bdesc, &bez);
+		s = qaws_curve_create_bezier(&bez, &bdesc);
 		TEST_ASSERT_STATUS(s);
 
 		qaws_curve* offsets[8] = {NULL};
 		unsigned int off_count = 0;
-		s = qaws_curve_offset_2d(bez, (qaws_scalar)0.3, 0, offsets, 8, &off_count);
+		s = qaws_curve_offset_2d(offsets, &off_count, bez, 8, (qaws_scalar)0.3, 0);
 		TEST_ASSERT_STATUS(s);
 		TEST_ASSERT(off_count >= 1, "offset of S-curve produces at least 1 curve");
 
@@ -1105,13 +1105,13 @@ static void test_curve_offset(void)
 		bdesc.degree = 3;
 		bdesc.control_points = pts;
 		bdesc.control_point_count = 4;
-		s = qaws_curve_create_bezier(&bdesc, &bez);
+		s = qaws_curve_create_bezier(&bez, &bdesc);
 		TEST_ASSERT_STATUS(s);
 
 		qaws_curve* offsets[8] = {NULL};
 		unsigned int off_count = 0;
 		/* Large offset relative to curvature radius -- should handle cusps */
-		s = qaws_curve_offset_2d(bez, (qaws_scalar)1.0, 1, offsets, 8, &off_count);
+		s = qaws_curve_offset_2d(offsets, &off_count, bez, 8, (qaws_scalar)1.0, 1);
 		TEST_ASSERT_STATUS(s);
 		TEST_ASSERT(off_count >= 1, "large offset produces at least 1 curve");
 
@@ -1135,12 +1135,12 @@ static void test_curve_offset(void)
 		bdesc.degree = 2;
 		bdesc.control_points = pts;
 		bdesc.control_point_count = 3;
-		s = qaws_curve_create_bezier(&bdesc, &bez);
+		s = qaws_curve_create_bezier(&bez, &bdesc);
 		TEST_ASSERT_STATUS(s);
 
 		qaws_curve* offsets[4] = {NULL};
 		unsigned int off_count = 0;
-		s = qaws_curve_offset_2d(bez, (qaws_scalar)-0.5, 0, offsets, 4, &off_count);
+		s = qaws_curve_offset_2d(offsets, &off_count, bez, 4, (qaws_scalar)-0.5, 0);
 		TEST_ASSERT_STATUS(s);
 		TEST_ASSERT(off_count >= 1, "negative offset produces at least 1 curve");
 
@@ -1155,7 +1155,7 @@ static void test_curve_offset(void)
 		unsigned int cnt = 0;
 		qaws_curve* dummy[1] = {NULL};
 
-		s = qaws_curve_offset_2d(NULL, (qaws_scalar)1.0, 0, dummy, 1, &cnt);
+		s = qaws_curve_offset_2d(dummy, &cnt, NULL, 1, (qaws_scalar)1.0, 0);
 		TEST_ASSERT(s != QAWS_STATUS_OK, "null curve rejected");
 	}
 
@@ -1175,12 +1175,12 @@ static void test_curve_offset(void)
 		bdesc.degree = 3;
 		bdesc.control_points = pts3d;
 		bdesc.control_point_count = 4;
-		s = qaws_curve_create_bezier(&bdesc, &bez3d);
+		s = qaws_curve_create_bezier(&bez3d, &bdesc);
 		TEST_ASSERT_STATUS(s);
 
 		qaws_curve* offsets[4] = {NULL};
 		unsigned int cnt = 0;
-		s = qaws_curve_offset_2d(bez3d, (qaws_scalar)1.0, 0, offsets, 4, &cnt);
+		s = qaws_curve_offset_2d(offsets, &cnt, bez3d, 4, (qaws_scalar)1.0, 0);
 		TEST_ASSERT(s == QAWS_STATUS_INVALID_DIMENSION, "3D curve rejected by offset_2d");
 
 		qaws_curve_destroy(bez3d);

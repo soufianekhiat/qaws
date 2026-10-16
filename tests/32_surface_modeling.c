@@ -15,7 +15,7 @@ static qaws_curve* make_line_3d(qaws_vec3 a, qaws_vec3 b)
 	d.degree = 1;
 	d.control_points = pts;
 	d.control_point_count = 2;
-	qaws_curve_create_bezier(&d, &c);
+	qaws_curve_create_bezier(&c, &d);
 	return c;
 }
 
@@ -35,7 +35,7 @@ static qaws_curve* make_quad_3d(qaws_vec3 a, qaws_vec3 b, qaws_vec3 c_pt)
 	d.degree = 2;
 	d.control_points = pts;
 	d.control_point_count = 3;
-	qaws_curve_create_bezier(&d, &crv);
+	qaws_curve_create_bezier(&crv, &d);
 	return crv;
 }
 
@@ -54,7 +54,7 @@ static qaws_curve* make_circle_profile_2d(qaws_scalar radius)
 	d.degree = 2;
 	d.control_points = pts;
 	d.control_point_count = 3;
-	qaws_curve_create_bezier(&d, &crv);
+	qaws_curve_create_bezier(&crv, &d);
 	return crv;
 }
 
@@ -189,7 +189,7 @@ static void test_extrusion_surface(void)
 		d.degree = 2;
 		d.control_points = pts;
 		d.control_point_count = 3;
-		qaws_curve_create_bezier(&d, &profile);
+		qaws_curve_create_bezier(&profile, &d);
 	}
 
 	{
@@ -270,7 +270,7 @@ static void test_revolution_surface(void)
 		d.degree = 1;
 		d.control_points = pts;
 		d.control_point_count = 2;
-		qaws_curve_create_bezier(&d, &profile);
+		qaws_curve_create_bezier(&profile, &d);
 	}
 
 	{
@@ -360,7 +360,7 @@ static void test_revolution_surface(void)
 		d.control_points = pts;
 		d.control_point_count = 2;
 		profile = NULL;
-		qaws_curve_create_bezier(&d, &profile);
+		qaws_curve_create_bezier(&profile, &d);
 
 		rd.profile = profile;
 		rd.axis_origin.x = 0; rd.axis_origin.y = 0; rd.axis_origin.z = 0;
@@ -452,7 +452,7 @@ static void visual_obj_extrusion(void)
 		d.degree = 3;
 		d.control_points = pts;
 		d.control_point_count = 4;
-		qaws_curve_create_bezier(&d, &profile);
+		qaws_curve_create_bezier(&profile, &d);
 	}
 	if (!profile) return;
 
@@ -508,7 +508,7 @@ static void visual_obj_revolution(void)
 		d.degree = 3;
 		d.control_points = pts;
 		d.control_point_count = 4;
-		qaws_curve_create_bezier(&d, &profile);
+		qaws_curve_create_bezier(&profile, &d);
 	}
 	if (!profile) return;
 

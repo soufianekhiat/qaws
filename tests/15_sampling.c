@@ -46,7 +46,7 @@ static void test_sampling(void)
 	desc.control_point_count = 2;
 
 	qaws_curve* curve = NULL;
-	qaws_status s = qaws_curve_create_bezier(&desc, &curve);
+	qaws_status s = qaws_curve_create_bezier(&curve, &desc);
 	TEST_ASSERT_STATUS(s);
 
 	qaws_sampling_desc sdesc;
@@ -57,7 +57,7 @@ static void test_sampling(void)
 
 	qaws_vec2 samples[11];
 	unsigned int count = 0;
-	s = qaws_curve_sample_2d(curve, &sdesc, samples, 11, &count);
+	s = qaws_curve_sample_2d(samples, &count, curve, 11, &sdesc);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(count == 11, "sample count == 11");
 	TEST_ASSERT(approx_eq(samples[0].x, (qaws_scalar)0.0), "first sample x");
@@ -80,7 +80,7 @@ static void test_sampling_extended(void)
 	desc2.control_point_count = 2;
 
 	qaws_curve* curve2 = NULL;
-	qaws_status s = qaws_curve_create_bezier(&desc2, &curve2);
+	qaws_status s = qaws_curve_create_bezier(&curve2, &desc2);
 	TEST_ASSERT_STATUS(s);
 
 	qaws_sampling_desc sdesc;
@@ -90,14 +90,14 @@ static void test_sampling_extended(void)
 	sdesc.use_adaptive_sampling = 0;
 
 	unsigned int count = 0;
-	s = qaws_curve_get_sample_count(curve2, &sdesc, &count);
+	s = qaws_curve_get_sample_count(&count, curve2, &sdesc);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(count == 5, "get_sample_count == 5");
 
 	/* sample_eval_2d */
 	qaws_eval_result_2d evals[5];
 	unsigned int eval_count = 0;
-	s = qaws_curve_sample_eval_2d(curve2, &sdesc, evals, 5, &eval_count);
+	s = qaws_curve_sample_eval_2d(evals, &eval_count, curve2, 5, &sdesc);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(eval_count == 5, "sample_eval count == 5");
 	TEST_ASSERT(approx_eq(evals[0].position.x, (qaws_scalar)0.0), "eval sample 0 x");
@@ -114,12 +114,12 @@ static void test_sampling_extended(void)
 	desc3.control_point_count = 2;
 
 	qaws_curve* curve3 = NULL;
-	s = qaws_curve_create_bezier(&desc3, &curve3);
+	s = qaws_curve_create_bezier(&curve3, &desc3);
 	TEST_ASSERT_STATUS(s);
 
 	qaws_vec3 samples3[5];
 	unsigned int count3 = 0;
-	s = qaws_curve_sample_3d(curve3, &sdesc, samples3, 5, &count3);
+	s = qaws_curve_sample_3d(samples3, &count3, curve3, 5, &sdesc);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(count3 == 5, "sample_3d count == 5");
 	TEST_ASSERT(approx_eq(samples3[0].z, (qaws_scalar)0.0), "3d sample start z");
@@ -128,7 +128,7 @@ static void test_sampling_extended(void)
 	/* sample_eval_3d */
 	qaws_eval_result_3d evals3[5];
 	unsigned int eval3_count = 0;
-	s = qaws_curve_sample_eval_3d(curve3, &sdesc, evals3, 5, &eval3_count);
+	s = qaws_curve_sample_eval_3d(evals3, &eval3_count, curve3, 5, &sdesc);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(eval3_count == 5, "sample_eval_3d count == 5");
 
@@ -149,7 +149,7 @@ static void test_adaptive_eval_sampling(void)
 	bdesc.control_points = pts;
 	bdesc.control_point_count = 4;
 
-	status = qaws_curve_create_bezier(&bdesc, &curve);
+	status = qaws_curve_create_bezier(&curve, &bdesc);
 	TEST_ASSERT_STATUS(status);
 
 	/* Uniform eval sampling baseline */
@@ -163,7 +163,7 @@ static void test_adaptive_eval_sampling(void)
 		sdesc.use_adaptive_sampling = 0;
 
 		status = qaws_curve_sample_eval_2d(
-			curve, &sdesc, samples, 2048, &count);
+			samples, &count, curve, 2048, &sdesc);
 		TEST_ASSERT_STATUS(status);
 		TEST_ASSERT(count == 8, "uniform eval gives 8");
 	}
@@ -182,7 +182,7 @@ static void test_adaptive_eval_sampling(void)
 		sdesc.error_tolerance = (qaws_scalar)0.001;
 
 		status = qaws_curve_sample_eval_2d(
-			curve, &sdesc, samples, 2048, &count);
+			samples, &count, curve, 2048, &sdesc);
 		TEST_ASSERT_STATUS(status);
 		TEST_ASSERT(count >= 8, "adaptive eval >= initial");
 
@@ -207,7 +207,7 @@ static void test_adaptive_eval_sampling(void)
 		bdesc.dimension = QAWS_DIMENSION_3D;
 		bdesc.control_points = pts3d;
 
-		status = qaws_curve_create_bezier(&bdesc, &curve3d);
+		status = qaws_curve_create_bezier(&curve3d, &bdesc);
 		TEST_ASSERT_STATUS(status);
 
 		memset(&sdesc, 0, sizeof(sdesc));
@@ -216,7 +216,7 @@ static void test_adaptive_eval_sampling(void)
 		sdesc.error_tolerance = (qaws_scalar)0.01;
 
 		status = qaws_curve_sample_eval_3d(
-			curve3d, &sdesc, samples3d, 2048, &count3d);
+			samples3d, &count3d, curve3d, 2048, &sdesc);
 		TEST_ASSERT_STATUS(status);
 		TEST_ASSERT(count3d >= 8, "3D adaptive eval >= initial");
 
@@ -235,7 +235,7 @@ static void test_adaptive_eval_sampling(void)
 		sdesc.error_tolerance = (qaws_scalar)0.0001;
 
 		status = qaws_curve_sample_eval_2d(
-			curve, &sdesc, tiny_buf, 2, &count_needed);
+			tiny_buf, &count_needed, curve, 2, &sdesc);
 		TEST_ASSERT(status == QAWS_STATUS_BUFFER_TOO_SMALL,
 			"tiny buffer returns BUFFER_TOO_SMALL");
 		TEST_ASSERT(count_needed > 2,
@@ -263,7 +263,7 @@ static void test_adaptive_sampling(void)
 	bdesc.control_points = pts;
 	bdesc.control_point_count = 4;
 
-	status = qaws_curve_create_bezier(&bdesc, &curve);
+	status = qaws_curve_create_bezier(&curve, &bdesc);
 	TEST_ASSERT_STATUS(status);
 
 	/* Uniform sampling for baseline */
@@ -271,7 +271,7 @@ static void test_adaptive_sampling(void)
 	sdesc.sample_count = 8;
 	sdesc.use_adaptive_sampling = 0;
 
-	status = qaws_curve_sample_2d(curve, &sdesc, positions, 2048, &count);
+	status = qaws_curve_sample_2d(positions, &count, curve, 2048, &sdesc);
 	TEST_ASSERT_STATUS(status);
 	TEST_ASSERT(count == 8, "uniform gives exactly 8 samples");
 
@@ -281,7 +281,7 @@ static void test_adaptive_sampling(void)
 	sdesc.use_adaptive_sampling = 1;
 	sdesc.error_tolerance = (qaws_scalar)0.001;
 
-	status = qaws_curve_sample_2d(curve, &sdesc, positions, 2048, &count);
+	status = qaws_curve_sample_2d(positions, &count, curve, 2048, &sdesc);
 	TEST_ASSERT_STATUS(status);
 	TEST_ASSERT(count >= 8, "adaptive produces >= initial samples");
 
@@ -296,7 +296,7 @@ static void test_adaptive_sampling(void)
 		sdesc.error_tolerance = (qaws_scalar)1.0;
 
 		status = qaws_curve_sample_2d(
-			curve, &sdesc, positions, 2048, &count_loose);
+			positions, &count_loose, curve, 2048, &sdesc);
 		TEST_ASSERT_STATUS(status);
 		TEST_ASSERT(count_loose <= count_tight,
 			"loose tolerance <= tight tolerance samples");
@@ -332,7 +332,7 @@ static void test_adaptive_sampling(void)
 		bdesc.control_points = pts3d;
 		bdesc.control_point_count = 4;
 
-		status = qaws_curve_create_bezier(&bdesc, &curve3d);
+		status = qaws_curve_create_bezier(&curve3d, &bdesc);
 		TEST_ASSERT_STATUS(status);
 
 		memset(&sdesc, 0, sizeof(sdesc));
@@ -341,7 +341,7 @@ static void test_adaptive_sampling(void)
 		sdesc.error_tolerance = (qaws_scalar)0.01;
 
 		status = qaws_curve_sample_3d(
-			curve3d, &sdesc, positions3d, 2048, &count3d);
+			positions3d, &count3d, curve3d, 2048, &sdesc);
 		TEST_ASSERT_STATUS(status);
 		TEST_ASSERT(count3d >= 8, "3D adaptive produces >= initial samples");
 
@@ -370,11 +370,11 @@ static void test_curvature_weighted_sampling(void)
 		bdesc.control_points = pts;
 		bdesc.control_point_count = 4;
 
-		s = qaws_curve_create_bezier(&bdesc, &curve);
+		s = qaws_curve_create_bezier(&curve, &bdesc);
 		TEST_ASSERT_STATUS(s);
 
-		s = qaws_curve_sample_curvature_weighted_2d(curve, 20,
-			samples, 20, &count);
+		s = qaws_curve_sample_curvature_weighted_2d(samples, &count,
+			curve, 20, 20);
 		TEST_ASSERT_STATUS(s);
 		TEST_ASSERT(count == 20, "curvature weighted 2d count == 20");
 
@@ -420,11 +420,11 @@ static void test_curvature_weighted_sampling(void)
 		bdesc.control_points = pts;
 		bdesc.control_point_count = 4;
 
-		s = qaws_curve_create_bezier(&bdesc, &curve);
+		s = qaws_curve_create_bezier(&curve, &bdesc);
 		TEST_ASSERT_STATUS(s);
 
-		s = qaws_curve_sample_curvature_weighted_3d(curve, 15,
-			samples, 15, &count);
+		s = qaws_curve_sample_curvature_weighted_3d(samples, &count,
+			curve, 15, 15);
 		TEST_ASSERT_STATUS(s);
 		TEST_ASSERT(count == 15, "curvature weighted 3d count == 15");
 
@@ -454,16 +454,16 @@ static void test_curvature_weighted_sampling(void)
 		bdesc.control_points = pts;
 		bdesc.control_point_count = 4;
 
-		s = qaws_curve_create_bezier(&bdesc, &curve);
+		s = qaws_curve_create_bezier(&curve, &bdesc);
 		TEST_ASSERT_STATUS(s);
 
-		s = qaws_curve_sample_curvature_weighted_2d(NULL, 10,
-			samples, 10, &count);
+		s = qaws_curve_sample_curvature_weighted_2d(samples, &count,
+			NULL, 10, 10);
 		TEST_ASSERT(s == QAWS_STATUS_INVALID_ARGUMENT,
 			"curv weighted null curve => INVALID_ARGUMENT");
 
-		s = qaws_curve_sample_curvature_weighted_2d(curve, 10,
-			NULL, 10, &count);
+		s = qaws_curve_sample_curvature_weighted_2d(NULL, &count,
+			curve, 10, 10);
 		TEST_ASSERT(s == QAWS_STATUS_INVALID_ARGUMENT,
 			"curv weighted null out => INVALID_ARGUMENT");
 
@@ -484,11 +484,11 @@ static void test_curvature_weighted_sampling(void)
 		bdesc.control_points = pts;
 		bdesc.control_point_count = 4;
 
-		s = qaws_curve_create_bezier(&bdesc, &curve);
+		s = qaws_curve_create_bezier(&curve, &bdesc);
 		TEST_ASSERT_STATUS(s);
 
-		s = qaws_curve_sample_curvature_weighted_2d(curve, 1,
-			samples, 10, &count);
+		s = qaws_curve_sample_curvature_weighted_2d(samples, &count,
+			curve, 1, 10);
 		TEST_ASSERT(s == QAWS_STATUS_INVALID_ARGUMENT,
 			"curv weighted count<2 => INVALID_ARGUMENT");
 
@@ -515,11 +515,11 @@ static void test_feature_preserving_sampling(void)
 		bdesc.control_points = pts;
 		bdesc.control_point_count = 4;
 
-		s = qaws_curve_create_bezier(&bdesc, &curve);
+		s = qaws_curve_create_bezier(&curve, &bdesc);
 		TEST_ASSERT_STATUS(s);
 
-		s = qaws_curve_sample_feature_preserving_2d(curve, 5,
-			samples, 50, &count);
+		s = qaws_curve_sample_feature_preserving_2d(samples, &count,
+			curve, 5, 50);
 		TEST_ASSERT_STATUS(s);
 		TEST_ASSERT(count >= 5,
 			"feature preserving 2d count >= base count");
@@ -549,11 +549,11 @@ static void test_feature_preserving_sampling(void)
 		bdesc.control_points = pts;
 		bdesc.control_point_count = 4;
 
-		s = qaws_curve_create_bezier(&bdesc, &curve);
+		s = qaws_curve_create_bezier(&curve, &bdesc);
 		TEST_ASSERT_STATUS(s);
 
-		s = qaws_curve_sample_feature_preserving_3d(curve, 5,
-			samples, 50, &count);
+		s = qaws_curve_sample_feature_preserving_3d(samples, &count,
+			curve, 5, 50);
 		TEST_ASSERT_STATUS(s);
 		TEST_ASSERT(count >= 5,
 			"feature preserving 3d count >= base count");
@@ -584,16 +584,16 @@ static void test_feature_preserving_sampling(void)
 		bdesc.control_points = pts;
 		bdesc.control_point_count = 4;
 
-		s = qaws_curve_create_bezier(&bdesc, &curve);
+		s = qaws_curve_create_bezier(&curve, &bdesc);
 		TEST_ASSERT_STATUS(s);
 
-		s = qaws_curve_sample_feature_preserving_2d(NULL, 5,
-			samples, 50, &count);
+		s = qaws_curve_sample_feature_preserving_2d(samples, &count,
+			NULL, 5, 50);
 		TEST_ASSERT(s == QAWS_STATUS_INVALID_ARGUMENT,
 			"feature preserving null curve => INVALID_ARGUMENT");
 
-		s = qaws_curve_sample_feature_preserving_2d(curve, 5,
-			NULL, 50, &count);
+		s = qaws_curve_sample_feature_preserving_2d(NULL, &count,
+			curve, 5, 50);
 		TEST_ASSERT(s == QAWS_STATUS_INVALID_ARGUMENT,
 			"feature preserving null out => INVALID_ARGUMENT");
 
@@ -619,7 +619,7 @@ static void test_streaming_sampling(void)
 		bdesc.control_points = pts;
 		bdesc.control_point_count = 4;
 
-		s = qaws_curve_create_bezier(&bdesc, &curve);
+		s = qaws_curve_create_bezier(&curve, &bdesc);
 		TEST_ASSERT_STATUS(s);
 
 		memset(&sdesc, 0, sizeof(sdesc));
@@ -652,7 +652,7 @@ static void test_streaming_sampling(void)
 		bdesc.control_points = pts;
 		bdesc.control_point_count = 4;
 
-		s = qaws_curve_create_bezier(&bdesc, &curve);
+		s = qaws_curve_create_bezier(&curve, &bdesc);
 		TEST_ASSERT_STATUS(s);
 
 		memset(&sdesc, 0, sizeof(sdesc));
@@ -685,7 +685,7 @@ static void test_streaming_sampling(void)
 		bdesc.control_points = pts;
 		bdesc.control_point_count = 4;
 
-		s = qaws_curve_create_bezier(&bdesc, &curve);
+		s = qaws_curve_create_bezier(&curve, &bdesc);
 		TEST_ASSERT_STATUS(s);
 
 		memset(&sdesc, 0, sizeof(sdesc));
@@ -717,7 +717,7 @@ static void test_streaming_sampling(void)
 		bdesc.control_points = pts;
 		bdesc.control_point_count = 4;
 
-		s = qaws_curve_create_bezier(&bdesc, &curve);
+		s = qaws_curve_create_bezier(&curve, &bdesc);
 		TEST_ASSERT_STATUS(s);
 
 		memset(&sdesc, 0, sizeof(sdesc));

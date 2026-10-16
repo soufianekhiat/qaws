@@ -393,7 +393,7 @@ static qaws_curve* hv_curve(hv_strand const* s, qaws_scalar const* cps)
 	d.control_point_count = (unsigned int)s->ncp;
 	d.knots = s->knots;
 	d.knot_count = (unsigned int)s->ncp + 4;
-	qaws_curve_create_bspline(&d, &c);
+	qaws_curve_create_bspline(&c, &d);
 	return c;
 }
 
@@ -1107,7 +1107,7 @@ static int hv_reconstruct(hv_scene* sc, hv_case const* hc, strand* traced, int* 
 			d.data_point_count = (unsigned int)st->n;
 			d.degree = 3;
 			d.control_point_count = (unsigned int)h->ncp;
-			if (qaws_curve_fit_bspline(&d, &c) != QAWS_STATUS_OK)
+			if (qaws_curve_fit_bspline(&c, &d) != QAWS_STATUS_OK)
 			{
 				free(pts);
 				continue;
@@ -1147,7 +1147,7 @@ static int hv_reconstruct(hv_scene* sc, hv_case const* hc, strand* traced, int* 
 						qaws_eval_result_3d e;
 						double p[3], px, py, t, f = (k + 0.5) / 16 * (st->n - 1);
 						int i0 = (int)f;
-						qaws_curve_evaluate_3d(cc, (qaws_scalar)(rr.min_value + (rr.max_value - rr.min_value) * (k + 0.5) / 16), QAWS_EVAL_FLAG_POSITION, &e);
+						qaws_curve_evaluate_3d(&e, cc, (qaws_scalar)(rr.min_value + (rr.max_value - rr.min_value) * (k + 0.5) / 16), QAWS_EVAL_FLAG_POSITION);
 						p[0] = e.position.x; p[1] = e.position.y; p[2] = e.position.z;
 						hv_project(&sc->cam, p, &px, &py, &t);
 						err += (px - st->xy[2 * i0]) * (px - st->xy[2 * i0]) + (py - st->xy[2 * i0 + 1]) * (py - st->xy[2 * i0 + 1]);
@@ -1259,8 +1259,8 @@ static void hv_volume_build(hv_scene const* sc, hv_strand const* hs, int n, hv_v
 		{
 			qaws_eval_result_3d e;
 			double p[3], t[3], tl;
-			qaws_curve_evaluate_3d(cv, (qaws_scalar)(r.min_value + (r.max_value - r.min_value) * q / m),
-				QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &e);
+			qaws_curve_evaluate_3d(&e, cv,
+				(qaws_scalar)(r.min_value + (r.max_value - r.min_value) * q / m), QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1);
 			p[0] = e.position.x; p[1] = e.position.y; p[2] = e.position.z;
 			tl = sqrt(e.d1.x * e.d1.x + e.d1.y * e.d1.y + e.d1.z * e.d1.z) + 1e-12;
 			t[0] = e.d1.x / tl; t[1] = e.d1.y / tl; t[2] = e.d1.z / tl;

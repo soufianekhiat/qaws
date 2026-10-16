@@ -28,7 +28,7 @@ static void demo_nurbs_extraction(void)
 	d.knot_count = 13;
 	d.weights = ws;
 	d.weight_count = 9;
-	qaws_curve_create_nurbs(&d, &c);
+	qaws_curve_create_nurbs(&c, &d);
 	qaws_exact_desc_default(&desc);
 	qaws_exact_curve_prepare(&desc, c, &e, &rep);
 	svg_open(&sv, "showcase/exact4_nurbs.svg", 1280, 540, "Exact NURBS: local Bezier extraction and the integer budget",
@@ -118,7 +118,7 @@ static void demo_nurbs_extraction(void)
 			rd.knot_count = nk;
 			rd.weights = rw;
 			rd.weight_count = n;
-			qaws_curve_create_nurbs(&rd, &rcu);
+			qaws_curve_create_nurbs(&rcu, &rd);
 			if (qaws_exact_curve_prepare(&desc, rcu, &re, &rr) == QAWS_STATUS_OK)
 			{
 				unsigned int k;

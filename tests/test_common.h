@@ -229,7 +229,7 @@ static unsigned int svg_sample_curve(qaws_curve const* curve,
 	sd.error_tolerance = 0;
 	sd.use_adaptive_sampling = 0;
 	unsigned int count = 0;
-	qaws_curve_sample_2d(curve, &sd, buf, capacity, &count);
+	qaws_curve_sample_2d(buf, &count, curve, capacity, &sd);
 	return count;
 }
 
@@ -247,7 +247,7 @@ static void svg_arrow(svg_writer* w, qaws_curve const* crv, qaws_scalar frac,
 	qaws_range rng = qaws_curve_get_parameter_range(crv);
 	qaws_scalar t = rng.min_value + (rng.max_value - rng.min_value) * frac;
 	qaws_scalar len, nx, ny;
-	qaws_curve_evaluate_2d(crv, t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &r);
+	qaws_curve_evaluate_2d(&r, crv, t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1);
 	len = (qaws_scalar)sqrt((double)(r.d1.x * r.d1.x + r.d1.y * r.d1.y));
 	if (len < (qaws_scalar)1e-10) return;
 	nx = r.d1.x / len; ny = r.d1.y / len;
@@ -273,10 +273,10 @@ static void svg_draw_extrema(svg_writer* svg, qaws_curve* curve, qaws_scalar y_l
 	{
 		qaws_scalar params[8];
 		unsigned int count = 0, i;
-		if (qaws_curve_find_extrema(curve, 0, params, 8, &count) == QAWS_STATUS_OK) {
+		if (qaws_curve_find_extrema(params, &count, curve, 8, 0) == QAWS_STATUS_OK) {
 			for (i = 0; i < count; i++) {
 				qaws_eval_result_2d r;
-				qaws_curve_evaluate_2d(curve, params[i], QAWS_EVAL_FLAG_POSITION, &r);
+				qaws_curve_evaluate_2d(&r, curve, params[i], QAWS_EVAL_FLAG_POSITION);
 				svg_dot(svg, r.position.x, r.position.y, "#6272a4", (qaws_scalar)5);
 				svg_line(svg, r.position.x, y_lo, r.position.x, y_hi,
 					"#6272a450", (qaws_scalar)0.5);
@@ -290,15 +290,15 @@ static void svg_draw_extrema(svg_writer* svg, qaws_curve* curve, qaws_scalar y_l
 		qaws_range rng = qaws_curve_get_parameter_range(curve);
 		qaws_eval_result_2d r0, r1;
 		qaws_scalar x0, x1;
-		qaws_curve_evaluate_2d(curve, rng.min_value, QAWS_EVAL_FLAG_POSITION, &r0);
-		qaws_curve_evaluate_2d(curve, rng.max_value, QAWS_EVAL_FLAG_POSITION, &r1);
+		qaws_curve_evaluate_2d(&r0, curve, rng.min_value, QAWS_EVAL_FLAG_POSITION);
+		qaws_curve_evaluate_2d(&r1, curve, rng.max_value, QAWS_EVAL_FLAG_POSITION);
 		x0 = r0.position.x < r1.position.x ? r0.position.x - (qaws_scalar)0.3 : r1.position.x - (qaws_scalar)0.3;
 		x1 = r0.position.x > r1.position.x ? r0.position.x + (qaws_scalar)0.3 : r1.position.x + (qaws_scalar)0.3;
-		if (qaws_curve_find_extrema(curve, 1, params, 8, &count) == QAWS_STATUS_OK) {
+		if (qaws_curve_find_extrema(params, &count, curve, 8, 1) == QAWS_STATUS_OK) {
 			unsigned int yi;
 			for (yi = 0; yi < count; yi++) {
 				qaws_eval_result_2d r;
-				qaws_curve_evaluate_2d(curve, params[yi], QAWS_EVAL_FLAG_POSITION, &r);
+				qaws_curve_evaluate_2d(&r, curve, params[yi], QAWS_EVAL_FLAG_POSITION);
 				svg_dot(svg, r.position.x, r.position.y, "#50fa7b", (qaws_scalar)5);
 				svg_line(svg, x0, r.position.y, x1, r.position.y,
 					"#50fa7b50", (qaws_scalar)0.5);
@@ -410,7 +410,7 @@ static unsigned int obj_curve_polyline(obj_writer* w, qaws_curve const* curve,
 	sd.traversal_mode = QAWS_TRAVERSAL_MODE_PARAMETER;
 	sd.sample_count = sample_count;
 	count = 0;
-	qaws_curve_sample_3d(curve, &sd, buf, 512, &count);
+	qaws_curve_sample_3d(buf, &count, curve, 512, &sd);
 	if (count < 2) return 0;
 
 	first_vi = w->vertex_count + 1;
@@ -591,9 +591,9 @@ static void obj_tube(obj_writer* w, qaws_curve const* curve,
 		qaws_vec3 T_vec, N_vec, B_vec;
 		qaws_eval_result_3d r;
 
-		if (qaws_curve_evaluate_3d(curve, t, QAWS_EVAL_FLAG_POSITION, &r) != QAWS_STATUS_OK)
+		if (qaws_curve_evaluate_3d(&r, curve, t, QAWS_EVAL_FLAG_POSITION) != QAWS_STATUS_OK)
 			continue;
-		if (qaws_curve_compute_tangent_3d(curve, t, &T_vec) != QAWS_STATUS_OK)
+		if (qaws_curve_compute_tangent_3d(&T_vec, curve, t) != QAWS_STATUS_OK)
 			continue;
 		v3_normalize(&T_vec);
 
@@ -691,7 +691,7 @@ static void obj_curvature_comb(obj_writer* w, qaws_curve const* curve,
 	qaws_curvature_sample_3d samples[256];
 	unsigned int ci;
 	if (sample_count > 256) sample_count = 256;
-	if (qaws_curve_compute_curvature_comb_3d(curve, sample_count, samples, 256)
+	if (qaws_curve_compute_curvature_comb_3d(samples, curve, sample_count, 256)
 		!= QAWS_STATUS_OK)
 		return;
 	for (ci = 0; ci < sample_count; ci++)
@@ -713,7 +713,7 @@ static void obj_curvature_comb_surface(obj_writer* w, qaws_curve const* curve,
 	qaws_curvature_sample_3d samples[256];
 	unsigned int first_v, ci;
 	if (sample_count > 256) sample_count = 256;
-	if (qaws_curve_compute_curvature_comb_3d(curve, sample_count, samples, 256)
+	if (qaws_curve_compute_curvature_comb_3d(samples, curve, sample_count, 256)
 		!= QAWS_STATUS_OK)
 		return;
 
@@ -975,7 +975,7 @@ static void obj_surface_mesh_curvature(
 			qaws_scalar v = v_min + v_len * (qaws_scalar)vi / (qaws_scalar)(v_samples - 1);
 			qaws_scalar K = 0;
 			unsigned int idx = ui * v_samples + vi;
-			qaws_surface_compute_gaussian_curvature(surf, u, v, &K);
+			qaws_surface_compute_gaussian_curvature(&K, surf, u, v);
 			kappa[idx] = K;
 			if (fabs((double)K) > (double)max_abs_k)
 				max_abs_k = (qaws_scalar)fabs((double)K);

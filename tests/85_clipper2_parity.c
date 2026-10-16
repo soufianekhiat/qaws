@@ -265,7 +265,7 @@ static int c2_in_set(qaws_path_2d const* p, unsigned int n, qaws_fill_rule fr, q
 		unsigned int m = 0, c;
 		for (c = 0; c < p[i].curve_count; c++)
 		{
-			if (qaws_curve_get_control_points(p[i].curves[c], buf, 2048, &m) != QAWS_STATUS_OK)
+			if (qaws_curve_get_control_points(buf, &m, p[i].curves[c], 2048) != QAWS_STATUS_OK)
 				continue;
 			for (k = 0; k + 1 < m; k++)
 			{
@@ -926,7 +926,7 @@ static void test_polygons_exact_curves(void)
 						{
 							qaws_scalar cpt[512];
 							unsigned int m = 0, q;
-							qaws_curve_get_control_points(p.curves[j], cpt, 256, &m);
+							qaws_curve_get_control_points(cpt, &m, p.curves[j], 256);
 							for (q = 0; q < m; q++) printf(" %.4f,%.4f", (double)cpt[2 * q], (double)cpt[2 * q + 1]);
 							printf(" |");
 						}

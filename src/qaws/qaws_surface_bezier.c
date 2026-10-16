@@ -275,9 +275,9 @@ static qaws_surface_vtable const bezier_surface_vtable = {
 };
 
 qaws_status qaws_surface_create_bezier_ex(
+	qaws_surface** out_surface,
 	qaws_surface_bezier_desc const* desc,
-	qaws_allocator const* allocator,
-	qaws_surface** out_surface)
+	qaws_allocator const* allocator)
 {
 	qaws_surface* surface;
 	qaws_surface_bezier_impl* impl;
@@ -327,5 +327,5 @@ qaws_status qaws_surface_create_bezier(
 	qaws_surface_bezier_desc const* desc,
 	qaws_surface** out_surface)
 {
-	return qaws_surface_create_bezier_ex(desc, NULL, out_surface);
+	return qaws_surface_create_bezier_ex(out_surface, desc, NULL);
 }

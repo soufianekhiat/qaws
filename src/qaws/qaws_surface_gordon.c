@@ -152,7 +152,7 @@ static qaws_status gordon_surface_eval_sampled(
 			cf |= QAWS_EVAL_FLAG_D1;
 
 		memset(&cr, 0, sizeof(cr));
-		status = qaws_curve_evaluate_3d(impl->u_curves[i], t_curve, cf, &cr);
+		status = qaws_curve_evaluate_3d(&cr, impl->u_curves[i], t_curve, cf);
 		if (status != QAWS_STATUS_OK)
 		{
 			free(u_pts);
@@ -208,7 +208,7 @@ static qaws_status gordon_surface_eval_sampled(
 			cf |= QAWS_EVAL_FLAG_D1;
 
 		memset(&cr, 0, sizeof(cr));
-		status = qaws_curve_evaluate_3d(impl->v_curves[i], t_curve, cf, &cr);
+		status = qaws_curve_evaluate_3d(&cr, impl->v_curves[i], t_curve, cf);
 		if (status != QAWS_STATUS_OK)
 		{
 			free(v_pts);
@@ -812,8 +812,8 @@ qaws_status qaws_surface_create_gordon(
 			qaws_status status;
 
 			memset(&cr, 0, sizeof(cr));
-			status = qaws_curve_evaluate_3d(desc->u_curves[i], t_curve,
-				QAWS_EVAL_FLAG_POSITION, &cr);
+			status = qaws_curve_evaluate_3d(&cr, desc->u_curves[i],
+				t_curve, QAWS_EVAL_FLAG_POSITION);
 			if (status != QAWS_STATUS_OK)
 			{
 				gordon_surface_destroy(impl, NULL);

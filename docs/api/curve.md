@@ -26,8 +26,8 @@ Destroys a curve object and frees all associated memory.
 
 ```c
 qaws_status qaws_curve_reverse(
-    qaws_curve const* curve,
-    qaws_curve** out_reversed);
+    qaws_curve** out_reversed,
+    qaws_curve const* curve);
 ```
 
 Creates a new curve that traces the same path as the input but in the opposite direction.

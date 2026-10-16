@@ -84,7 +84,7 @@ static qaws_status loft_surface_eval_sampled(
 			cf |= QAWS_EVAL_FLAG_D1;
 
 		memset(&cr, 0, sizeof(cr));
-		status = qaws_curve_evaluate_3d(impl->sections[i], t_curve, cf, &cr);
+		status = qaws_curve_evaluate_3d(&cr, impl->sections[i], t_curve, cf);
 		if (status != QAWS_STATUS_OK)
 		{
 			free(sec_pos);

@@ -346,7 +346,7 @@ static void test_obj_surface_ruled(void)
 		d.degree = 4;
 		d.control_points = pts;
 		d.control_point_count = 5;
-		qaws_curve_create_bezier(&d, &ca);
+		qaws_curve_create_bezier(&ca, &d);
 	}
 
 	/* Curve B: wavy line at z=3, different shape */
@@ -358,7 +358,7 @@ static void test_obj_surface_ruled(void)
 		d.degree = 4;
 		d.control_points = pts;
 		d.control_point_count = 5;
-		qaws_curve_create_bezier(&d, &cb);
+		qaws_curve_create_bezier(&cb, &d);
 	}
 
 	rdesc.curve_a = ca;
@@ -439,7 +439,7 @@ static void test_obj_surface_swept(void)
 		d.derivatives = der;
 		d.point_count = n;
 		d.derivative_count = n;
-		qaws_curve_create_hermite(&d, &path);
+		qaws_curve_create_hermite(&path, &d);
 	}
 
 	/* Profile: 5-pointed star cross-section */
@@ -469,7 +469,7 @@ static void test_obj_surface_swept(void)
 		d.derivatives = der;
 		d.point_count = n;
 		d.derivative_count = n;
-		qaws_curve_create_hermite(&d, &profile);
+		qaws_curve_create_hermite(&profile, &d);
 	}
 
 	memset(&sdesc, 0, sizeof(sdesc));

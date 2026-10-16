@@ -1395,7 +1395,7 @@ static qaws_status yuksel_rebuild(qaws_curve const* curve, qaws_diff_views const
 	d.control_point_count = impl->control_point_count;
 	d.mode = (qaws_yuksel_mode)impl->mode;
 	d.closed = impl->closed;
-	st = qaws_curve_create_yuksel(&d, out_curve);
+	st = qaws_curve_create_yuksel(out_curve, &d);
 	qaws_internal_dealloc(NULL, owned);
 	return st;
 }
@@ -1440,8 +1440,8 @@ static qaws_curve_vtable const yuksel_bezier_vtable = {
 /* ------------------------------------------------------------------ */
 
 qaws_status qaws_curve_create_yuksel(
-	qaws_yuksel_desc const* desc,
-	qaws_curve** out_curve)
+	qaws_curve** out_curve,
+	qaws_yuksel_desc const* desc)
 {
 	qaws_status status;
 	qaws_curve* curve;

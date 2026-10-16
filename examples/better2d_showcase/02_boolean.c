@@ -19,8 +19,8 @@ static void bo_path_points(qaws_path_2d const* p, viewport const* v, double** xy
 				*cap = *cap ? 2 * *cap : 1024;
 				*xy = (double*)realloc(*xy, sizeof(double) * 2 * *cap);
 			}
-			qaws_curve_evaluate_2d(p->curves[i], (qaws_scalar)(r.min_value + (r.max_value - r.min_value) * j / BO_SAMPLES),
-				QAWS_EVAL_FLAG_POSITION, &e);
+			qaws_curve_evaluate_2d(&e, p->curves[i],
+				(qaws_scalar)(r.min_value + (r.max_value - r.min_value) * j / BO_SAMPLES), QAWS_EVAL_FLAG_POSITION);
 			(*xy)[2 * *n] = vx(v, e.position.x);
 			(*xy)[2 * *n + 1] = vy(v, e.position.y);
 			(*n)++;
@@ -57,7 +57,7 @@ static void bo_curve(svg* s, viewport const* v, qaws_curve const* c, char const*
 	for (j = 0; j <= BO_SAMPLES; j++)
 	{
 		qaws_eval_result_2d e;
-		qaws_curve_evaluate_2d(c, (qaws_scalar)(r.min_value + (r.max_value - r.min_value) * j / BO_SAMPLES), QAWS_EVAL_FLAG_POSITION, &e);
+		qaws_curve_evaluate_2d(&e, c, (qaws_scalar)(r.min_value + (r.max_value - r.min_value) * j / BO_SAMPLES), QAWS_EVAL_FLAG_POSITION);
 		xy[2 * j] = vx(v, e.position.x);
 		xy[2 * j + 1] = vy(v, e.position.y);
 	}
@@ -119,7 +119,7 @@ static qaws_curve* bo_blob(double cx, double cy, double r, double wobble, unsign
 	memset(&d, 0, sizeof(d));
 	d.dimension = QAWS_DIMENSION_2D; d.degree = 3; d.control_points = cp; d.control_point_count = N + 3;
 	d.knots = kn; d.knot_count = N + 3 + 4;
-	qaws_curve_create_bspline(&d, &c);
+	qaws_curve_create_bspline(&c, &d);
 	return c;
 }
 

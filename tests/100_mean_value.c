@@ -42,7 +42,7 @@ static qaws_curve* mvt_bezier(double const* xy, unsigned int n)
 	for (i = 0; i < 2 * n; i++) p[i] = (qaws_scalar)xy[i];
 	memset(&d, 0, sizeof(d));
 	d.dimension = QAWS_DIMENSION_2D; d.degree = n - 1; d.control_points = p; d.control_point_count = n;
-	qaws_curve_create_bezier(&d, &c);
+	qaws_curve_create_bezier(&c, &d);
 	return c;
 }
 
@@ -57,7 +57,7 @@ static qaws_curve* mvt_circle(double cx, double cy, double r, int ccw)
 	g.angle_end = ccw ? (qaws_scalar)(2 * MVT_PI) : 0;
 	memset(&d, 0, sizeof(d));
 	d.dimension = QAWS_DIMENSION_2D; d.segments = &g; d.segment_count = 1;
-	qaws_curve_create_arc(&d, &c);
+	qaws_curve_create_arc(&c, &d);
 	return c;
 }
 
@@ -374,8 +374,8 @@ static unsigned int mvt_shape(unsigned int which, qaws_curve** cs, qaws_curve co
 		*name = "lens of rational Beziers";
 		memset(&d, 0, sizeof(d));
 		d.dimension = QAWS_DIMENSION_2D; d.degree = 2; d.control_point_count = 3; d.weights = w; d.weight_count = 3;
-		d.control_points = a; qaws_curve_create_rational_bezier(&d, &cs[(*nc)++]);
-		d.control_points = b; qaws_curve_create_rational_bezier(&d, &cs[(*nc)++]);
+		d.control_points = a; qaws_curve_create_rational_bezier(&cs[(*nc)++], &d);
+		d.control_points = b; qaws_curve_create_rational_bezier(&cs[(*nc)++], &d);
 		cv[0] = cs[0]; cv[1] = cs[1];
 		p[0].curves = cv; p[0].curve_count = 2; p[0].closed = 1;
 		return 1;
@@ -389,7 +389,7 @@ static unsigned int mvt_shape(unsigned int which, qaws_curve** cs, qaws_curve co
 		*name = "closed cubic B-spline";
 		memset(&d, 0, sizeof(d));
 		d.dimension = QAWS_DIMENSION_2D; d.degree = 3; d.control_points = cp; d.control_point_count = 9; d.knots = kn; d.knot_count = 13;
-		qaws_curve_create_bspline(&d, &cs[(*nc)++]);
+		qaws_curve_create_bspline(&cs[(*nc)++], &d);
 		cv[0] = cs[0];
 		p[0].curves = cv; p[0].curve_count = 1; p[0].closed = 1;
 		return 1;
@@ -406,10 +406,10 @@ static unsigned int mvt_shape(unsigned int which, qaws_curve** cs, qaws_curve co
 		g.radius = 1; g.angle_start = (qaws_scalar)(MVT_PI / 2); g.angle_end = (qaws_scalar)(3 * MVT_PI / 2);
 		memset(&ad, 0, sizeof(ad));
 		ad.dimension = QAWS_DIMENSION_2D; ad.segments = &g; ad.segment_count = 1;
-		qaws_curve_create_arc(&ad, &cs[(*nc)++]);
+		qaws_curve_create_arc(&cs[(*nc)++], &ad);
 		memset(&hd, 0, sizeof(hd));
 		hd.dimension = QAWS_DIMENSION_2D; hd.degree = 3; hd.points = hp; hd.derivatives = ht; hd.point_count = 2; hd.derivative_count = 2;
-		qaws_curve_create_hermite(&hd, &cs[(*nc)++]);
+		qaws_curve_create_hermite(&cs[(*nc)++], &hd);
 		cv[0] = cs[0]; cv[1] = cs[1];
 		p[0].curves = cv; p[0].curve_count = 2; p[0].closed = 1;
 		return 1;
@@ -487,7 +487,7 @@ static void test_boundary(void)
 		qaws_scalar w[12], v0 = 0, f0 = 0;
 		double ds[4] = { 1e-2, 1e-4, 1e-6, 1e-8 };
 		b[0] = (1 - t) * (1 - t) * (1 - t); b[1] = 3 * t * (1 - t) * (1 - t); b[2] = 3 * t * t * (1 - t); b[3] = t * t * t;
-		qaws_curve_evaluate_2d(cs[1], (qaws_scalar)t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &e);
+		qaws_curve_evaluate_2d(&e, cs[1], (qaws_scalar)t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1);
 		qaws_mean_value_coordinates(m, e.position, w);
 		for (i = 0; i < 12; i++)
 		{

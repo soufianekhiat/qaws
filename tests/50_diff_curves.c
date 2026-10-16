@@ -54,7 +54,7 @@ static qaws_status create_bezier(family const* f, qaws_scalar const* const* p, q
 	d.degree = f->counts[0] - 1;
 	d.control_points = p[0];
 	d.control_point_count = f->counts[0];
-	return qaws_curve_create_bezier(&d, out);
+	return qaws_curve_create_bezier(out, &d);
 }
 
 static qaws_status create_bspline(family const* f, qaws_scalar const* const* p, qaws_curve** out)
@@ -67,7 +67,7 @@ static qaws_status create_bspline(family const* f, qaws_scalar const* const* p, 
 	d.control_point_count = f->counts[0];
 	d.knots = f->knots;
 	d.knot_count = f->knot_count;
-	return qaws_curve_create_bspline(&d, out);
+	return qaws_curve_create_bspline(out, &d);
 }
 
 static qaws_status create_bspline_knots(family const* f, qaws_scalar const* const* p, qaws_curve** out)
@@ -80,7 +80,7 @@ static qaws_status create_bspline_knots(family const* f, qaws_scalar const* cons
 	d.control_point_count = f->counts[0];
 	d.knots = p[1];
 	d.knot_count = f->counts[1];
-	return qaws_curve_create_bspline(&d, out);
+	return qaws_curve_create_bspline(out, &d);
 }
 
 static qaws_status create_hermite(family const* f, qaws_scalar const* const* p, qaws_curve** out)
@@ -92,7 +92,7 @@ static qaws_status create_hermite(family const* f, qaws_scalar const* const* p, 
 	d.derivatives = p[1];
 	d.point_count = f->counts[0];
 	d.derivative_count = f->counts[1];
-	return qaws_curve_create_hermite(&d, out);
+	return qaws_curve_create_hermite(out, &d);
 }
 
 static qaws_status create_polynomial(family const* f, qaws_scalar const* const* p, qaws_curve** out)
@@ -104,7 +104,7 @@ static qaws_status create_polynomial(family const* f, qaws_scalar const* const* 
 	d.coefficient_count = f->counts[0];
 	d.t_min = f->t_min;
 	d.t_max = f->t_max;
-	return qaws_curve_create_polynomial(&d, out);
+	return qaws_curve_create_polynomial(out, &d);
 }
 
 static qaws_status create_nurbs(family const* f, qaws_scalar const* const* p, qaws_curve** out)
@@ -119,7 +119,7 @@ static qaws_status create_nurbs(family const* f, qaws_scalar const* const* p, qa
 	d.knot_count = f->knot_count;
 	d.weights = p[1];
 	d.weight_count = f->counts[1];
-	return qaws_curve_create_nurbs(&d, out);
+	return qaws_curve_create_nurbs(out, &d);
 }
 
 static qaws_status create_nurbs_knots(family const* f, qaws_scalar const* const* p, qaws_curve** out)
@@ -134,7 +134,7 @@ static qaws_status create_nurbs_knots(family const* f, qaws_scalar const* const*
 	d.weight_count = f->counts[1];
 	d.knots = p[2];
 	d.knot_count = f->counts[2];
-	return qaws_curve_create_nurbs(&d, out);
+	return qaws_curve_create_nurbs(out, &d);
 }
 
 static qaws_status create_catmull_rom(family const* f, qaws_scalar const* const* p, qaws_curve** out)
@@ -146,7 +146,7 @@ static qaws_status create_catmull_rom(family const* f, qaws_scalar const* const*
 	d.control_point_count = f->counts[0];
 	d.parameterization = f->cr_param;
 	d.closed = f->cr_closed;
-	return qaws_curve_create_catmull_rom(&d, out);
+	return qaws_curve_create_catmull_rom(out, &d);
 }
 
 static qaws_status create_yuksel(family const* f, qaws_scalar const* const* p, qaws_curve** out)
@@ -158,7 +158,7 @@ static qaws_status create_yuksel(family const* f, qaws_scalar const* const* p, q
 	d.control_point_count = f->counts[0];
 	d.mode = QAWS_YUKSEL_MODE_BEZIER;
 	d.closed = f->cr_closed;
-	return qaws_curve_create_yuksel(&d, out);
+	return qaws_curve_create_yuksel(out, &d);
 }
 
 static qaws_status create_rational_bezier(family const* f, qaws_scalar const* const* p, qaws_curve** out)
@@ -170,7 +170,7 @@ static qaws_status create_rational_bezier(family const* f, qaws_scalar const* co
 	d.control_point_count = f->counts[0];
 	d.weights = p[1];
 	d.weight_count = f->counts[1];
-	return qaws_curve_create_rational_bezier(&d, out);
+	return qaws_curve_create_rational_bezier(out, &d);
 }
 
 /* The length is the domain t_max; the curve at fixed s does not depend on it. */
@@ -184,7 +184,7 @@ static qaws_status create_clothoid(family const* f, qaws_scalar const* const* p,
 	d.start_curvature = p[2][0];
 	d.end_curvature = p[2][0] + p[3][0] * f->t_max;
 	d.length = f->t_max;
-	return qaws_curve_create_clothoid(&d, out);
+	return qaws_curve_create_clothoid(out, &d);
 }
 
 static void make_families(family* fams, unsigned int* count)
@@ -518,13 +518,13 @@ static void check_primal(family const* f, qaws_curve const* c)
 		if (f->dim == 3)
 		{
 			qaws_eval_result_3d r;
-			qaws_curve_evaluate_3d(c, t, 0xF, &r);
+			qaws_curve_evaluate_3d(&r, c, t, 0xF);
 			ref.d[0] = r.position; ref.d[1] = r.d1; ref.d[2] = r.d2; ref.d[3] = r.d3;
 		}
 		else
 		{
 			qaws_eval_result_2d r;
-			qaws_curve_evaluate_2d(c, t, 0xF, &r);
+			qaws_curve_evaluate_2d(&r, c, t, 0xF);
 			ref.d[0].x = r.position.x; ref.d[0].y = r.position.y;
 			ref.d[1].x = r.d1.x; ref.d[1].y = r.d1.y;
 			ref.d[2].x = r.d2.x; ref.d[2].y = r.d2.y;
@@ -772,7 +772,7 @@ static qaws_curve* make_bspline(void)
 	d.control_point_count = 7;
 	d.knots = knots;
 	d.knot_count = 11;
-	qaws_curve_create_bspline(&d, &c);
+	qaws_curve_create_bspline(&c, &d);
 	return c;
 }
 
@@ -927,7 +927,7 @@ static void test_schema(void)
 		d.dimension = QAWS_DIMENSION_2D;
 		d.segments = &seg;
 		d.segment_count = 1;
-		qaws_curve_create_arc(&d, &cl);
+		qaws_curve_create_arc(&cl, &d);
 		TEST_ASSERT(qaws_curve_get_diff_capabilities(cl) == 0, "no capabilities without rules");
 		TEST_ASSERT(qaws_curve_get_diff_class(cl) == QAWS_DIFF_UNSUPPORTED, "unsupported class");
 		TEST_ASSERT(qaws_curve_eval_tangent_2d(&p, &tg, cl, NULL, (qaws_scalar)0.5, 0, 1, NULL)
@@ -1006,7 +1006,7 @@ static qaws_curve* composite_build(composite_params const* p)
 	bd.degree = 3;
 	bd.control_points = p->bez;
 	bd.control_point_count = 4;
-	qaws_curve_create_bezier(&bd, &segs[0]);
+	qaws_curve_create_bezier(&segs[0], &bd);
 
 	memset(&nd, 0, sizeof(nd));
 	nd.dimension = QAWS_DIMENSION_3D;
@@ -1017,12 +1017,12 @@ static qaws_curve* composite_build(composite_params const* p)
 	nd.knot_count = 11;
 	nd.weights = p->w;
 	nd.weight_count = 7;
-	qaws_curve_create_nurbs(&nd, &segs[1]);
+	qaws_curve_create_nurbs(&segs[1], &nd);
 
 	cd.dimension = QAWS_DIMENSION_3D;
 	cd.segments = segs;
 	cd.segment_count = 2;
-	qaws_curve_create_composite(&cd, &c);
+	qaws_curve_create_composite(&c, &cd);
 	return c;
 }
 
@@ -1087,7 +1087,7 @@ static void test_composite(void)
 		qaws_curve *cp, *cm;
 		double lhs = 0, rhs;
 
-		qaws_curve_evaluate_3d(c, t, 0xF, &r);
+		qaws_curve_evaluate_3d(&r, c, t, 0xF);
 		memset(&dir, 0, sizeof(dir));
 		diff_rand_fill(dir.data.bez, 12);
 		diff_rand_fill(dir.data.nrb, 21);
@@ -1247,7 +1247,7 @@ static void test_reference_knots(int nurbs)
 		d.weight_count = 7;
 		d.knots = knots;
 		d.knot_count = 11;
-		qaws_curve_create_nurbs(&d, &c);
+		qaws_curve_create_nurbs(&c, &d);
 	}
 	else
 	{
@@ -1259,7 +1259,7 @@ static void test_reference_knots(int nurbs)
 		d.control_point_count = 7;
 		d.knots = knots;
 		d.knot_count = 11;
-		qaws_curve_create_bspline(&d, &c);
+		qaws_curve_create_bspline(&c, &d);
 	}
 
 	for (i = 0; i < 3; i++)

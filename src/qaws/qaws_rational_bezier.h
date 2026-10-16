@@ -28,7 +28,7 @@ typedef struct qaws_rational_bezier_desc
 } qaws_rational_bezier_desc;
 
 qaws_status qaws_curve_create_rational_bezier(
-	qaws_rational_bezier_desc const* desc,
-	qaws_curve** out_curve);
+	qaws_curve** out_curve,
+	qaws_rational_bezier_desc const* desc);
 
 #endif /* QAWS_RATIONAL_BEZIER_H */

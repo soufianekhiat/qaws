@@ -265,9 +265,9 @@ static void test_tspline_obj_export(void)
 		obj_group(&obj, "tspline_dome");
 		obj_use_material(&obj, "tspline");
 
-		status = qaws_surface_tessellate(surface, &tdesc,
-			tverts, 8192, &tvert_count,
-			tindices, 49152, &tidx_count);
+		status = qaws_surface_tessellate(tverts, &tvert_count,
+			tindices, &tidx_count, surface,
+			8192, 49152, &tdesc);
 
 		if (status == QAWS_STATUS_OK && tvert_count > 0)
 		{

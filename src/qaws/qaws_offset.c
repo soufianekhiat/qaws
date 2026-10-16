@@ -63,7 +63,7 @@ static qaws_status os_eval(qaws_curve const* c, double t, double* p, double* d1,
 {
 	qaws_eval_result_2d r;
 	unsigned int fl = QAWS_EVAL_FLAG_POSITION | (d1 ? QAWS_EVAL_FLAG_D1 : 0) | (d2 ? QAWS_EVAL_FLAG_D2 : 0);
-	qaws_status s = qaws_curve_evaluate_2d(c, (qaws_scalar)t, fl, &r);
+	qaws_status s = qaws_curve_evaluate_2d(&r, c, (qaws_scalar)t, fl);
 	p[0] = r.position.x; p[1] = r.position.y;
 	if (d1) { d1[0] = r.d1.x; d1[1] = r.d1.y; }
 	if (d2) { d2[0] = r.d2.x; d2[1] = r.d2.y; }
@@ -213,7 +213,7 @@ static qaws_status os_line(os_ctx* x, double const* a, double const* b)
 	cp[2] = (qaws_scalar)b[0]; cp[3] = (qaws_scalar)b[1];
 	memset(&d, 0, sizeof(d));
 	d.dimension = QAWS_DIMENSION_2D; d.degree = 1; d.control_points = cp; d.control_point_count = 2;
-	s = qaws_curve_create_bezier(&d, &c);
+	s = qaws_curve_create_bezier(&c, &d);
 	return s == QAWS_STATUS_OK ? os_keep(x, c) : s;
 }
 
@@ -238,7 +238,7 @@ static qaws_status os_arc(os_ctx* x, double const* center, double r, double a0, 
 		return QAWS_STATUS_OK;
 	memset(&d, 0, sizeof(d));
 	d.dimension = QAWS_DIMENSION_2D; d.segments = &g; d.segment_count = 1;
-	s = qaws_curve_create_arc(&d, &c);
+	s = qaws_curve_create_arc(&c, &d);
 	return s == QAWS_STATUS_OK ? os_keep(x, c) : s;
 }
 
@@ -402,7 +402,7 @@ static qaws_status os_keep_bspline(os_ctx* x, qaws_scalar const* cp, unsigned in
 	memset(&d, 0, sizeof(d));
 	d.dimension = QAWS_DIMENSION_2D; d.degree = 3; d.control_points = cp; d.control_point_count = np;
 	d.knots = kn; d.knot_count = kc;
-	st = qaws_curve_create_bspline(&d, &c);
+	st = qaws_curve_create_bspline(&c, &d);
 	if (st == QAWS_STATUS_OK)
 		st = os_keep(x, c);
 	free(kn);
@@ -1295,7 +1295,7 @@ static qaws_status os_offset_elem(os_ctx* x, os_elem const* el, double delta, qa
 	{
 		/* the arc piece's own segment: concentric, radius moved by delta */
 		qaws_curve* piece = NULL;
-		qaws_status s = qaws_curve_extract(el->c, (qaws_scalar)el->t0, (qaws_scalar)el->t1, &piece);
+		qaws_status s = qaws_curve_extract(&piece, el->c, (qaws_scalar)el->t0, (qaws_scalar)el->t1);
 		if (s == QAWS_STATUS_OK && piece->kind == QAWS_CURVE_KIND_ARC)
 		{
 			qaws_arc_impl const* impl = (qaws_arc_impl const*)piece->impl;
@@ -1580,8 +1580,8 @@ static qaws_status os_append_loops(os_ctx* x, qaws_clip_result const* r, int rev
 		{
 			qaws_curve const* c = p.curves[reverse ? p.curve_count - 1 - k : k];
 			qaws_curve* cp = NULL;
-			s = reverse ? qaws_curve_reverse(c, &cp)
-			            : qaws_curve_extract(c, c->parameter_range.min_value, c->parameter_range.max_value, &cp);
+			s = reverse ? qaws_curve_reverse(&cp, c)
+			            : qaws_curve_extract(&cp, c, c->parameter_range.min_value, c->parameter_range.max_value);
 			if (s == QAWS_STATUS_OK)
 				s = os_keep(x, cp);
 		}
@@ -1879,7 +1879,7 @@ static qaws_status os_erode_path(os_ctx* x, qaws_path_2d const* p, double delta,
 			qaws_path_2d pp;
 			if (!(t1 > t0))
 				continue;
-			s = qaws_curve_extract(c, (qaws_scalar)t0, (qaws_scalar)t1, &piece);
+			s = qaws_curve_extract(&piece, c, (qaws_scalar)t0, (qaws_scalar)t1);
 			if (s != QAWS_STATUS_OK)
 				break;
 			pv = piece;
@@ -2002,7 +2002,7 @@ static qaws_status os_check(qaws_offset_desc const* desc, qaws_clip_result const
 					pts = gp;
 					capp = nc;
 				}
-				qaws_curve_evaluate_2d(c, (qaws_scalar)t, QAWS_EVAL_FLAG_POSITION, &e);
+				qaws_curve_evaluate_2d(&e, c, (qaws_scalar)t, QAWS_EVAL_FLAG_POSITION);
 				pts[2 * np] = e.position.x;
 				pts[2 * np + 1] = e.position.y;
 				np++;
@@ -2023,7 +2023,7 @@ static qaws_status os_check(qaws_offset_desc const* desc, qaws_clip_result const
 			cd.point_count = np;
 			cd.max_distance = (qaws_scalar)(2 * d + tol);
 			cd.executor = desc->executor;
-			s = qaws_curve_batch_find_closest(&cd, cl, NULL);
+			s = qaws_curve_batch_find_closest(cl, NULL, &cd);
 			for (i = 0; s == QAWS_STATUS_OK && i < np; i++)
 				if (cl[i].curve != QAWS_CURVE_BATCH_NONE && (double)cl[i].distance < d - tol)
 				{
@@ -2125,7 +2125,7 @@ static qaws_status os_execute(qaws_offset_desc const* desc, qaws_clip_result** o
 				for (k = a; k < b && s == QAWS_STATUS_OK; k++)
 				{
 					qaws_curve* rv = NULL;
-					s = qaws_curve_reverse(x.curves[k], &rv);
+					s = qaws_curve_reverse(&rv, x.curves[k]);
 					if (s == QAWS_STATUS_OK)
 					{
 						qaws_curve_destroy(x.curves[k]);

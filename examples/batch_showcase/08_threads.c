@@ -164,7 +164,7 @@ static unsigned long long th_op(th_scene* sc, unsigned int op, qaws_batch_execut
 		d.curve_count = sc->hf.count;
 		d.families = sc->hf.family;
 		d.executor = x;
-		qaws_curve_batch_find_intersections_2d(&d, ch, 1 << 16, &n, NULL);
+		qaws_curve_batch_find_intersections_2d(ch, &n, NULL, 1 << 16, &d);
 		return th_hash(h, ch, n * sizeof(ch[0]));
 	}
 	case 1:
@@ -177,7 +177,7 @@ static unsigned long long th_op(th_scene* sc, unsigned int op, qaws_batch_execut
 		d.levels = sc->levels;
 		d.level_count = 96;
 		d.executor = x;
-		qaws_curve_batch_find_level_crossings(&d, lc, 1 << 16, &n);
+		qaws_curve_batch_find_level_crossings(lc, &n, 1 << 16, &d);
 		for (i = 0; i < n; i++)
 		{
 			h = th_hash(h, &lc[i].curve, 2 * sizeof(unsigned int));
@@ -194,7 +194,7 @@ static unsigned long long th_op(th_scene* sc, unsigned int op, qaws_batch_execut
 		d.points = sc->pts2;
 		d.point_count = TH_POINTS;
 		d.executor = x;
-		qaws_curve_batch_find_closest(&d, cp, NULL);
+		qaws_curve_batch_find_closest(cp, NULL, &d);
 		for (i = 0; i < TH_POINTS; i++)
 		{
 			h = th_hash(h, &cp[i].curve, sizeof(unsigned int));

@@ -51,7 +51,7 @@ static void test_obj_helix(void)
 		desc.point_count = num_pts;
 		desc.derivative_count = num_pts;
 
-		if (qaws_curve_create_hermite(&desc, &curve) == QAWS_STATUS_OK)
+		if (qaws_curve_create_hermite(&curve, &desc) == QAWS_STATUS_OK)
 		{
 			/* Tube mesh */
 			obj_group(&w, "helix_tube");
@@ -72,9 +72,9 @@ static void test_obj_helix(void)
 					* (qaws_scalar)fi / (qaws_scalar)15;
 				qaws_vec3 T_vec, N_vec, B_vec;
 				qaws_eval_result_3d r;
-				if (qaws_curve_evaluate_3d(curve, t, QAWS_EVAL_FLAG_POSITION, &r)
+				if (qaws_curve_evaluate_3d(&r, curve, t, QAWS_EVAL_FLAG_POSITION)
 					== QAWS_STATUS_OK &&
-					qaws_curve_compute_frenet_frame_3d(curve, t, &T_vec, &N_vec, &B_vec)
+					qaws_curve_compute_frenet_frame_3d(&T_vec, &N_vec, &B_vec, curve, t)
 					== QAWS_STATUS_OK)
 				{
 					char grp[64];
@@ -181,7 +181,7 @@ static void test_obj_trefoil_knot(void)
 		desc.point_count = num_pts;
 		desc.derivative_count = num_pts;
 
-		if (qaws_curve_create_hermite(&desc, &curve) == QAWS_STATUS_OK)
+		if (qaws_curve_create_hermite(&curve, &desc) == QAWS_STATUS_OK)
 		{
 			qaws_range range = qaws_curve_get_parameter_range(curve);
 			unsigned int fi;
@@ -208,9 +208,9 @@ static void test_obj_trefoil_knot(void)
 					* (qaws_scalar)fi / (qaws_scalar)8;
 				qaws_vec3 T_vec, N_vec, B_vec;
 				qaws_eval_result_3d r;
-				if (qaws_curve_evaluate_3d(curve, t, QAWS_EVAL_FLAG_POSITION, &r)
+				if (qaws_curve_evaluate_3d(&r, curve, t, QAWS_EVAL_FLAG_POSITION)
 					== QAWS_STATUS_OK &&
-					qaws_curve_compute_frenet_frame_3d(curve, t, &T_vec, &N_vec, &B_vec)
+					qaws_curve_compute_frenet_frame_3d(&T_vec, &N_vec, &B_vec, curve, t)
 					== QAWS_STATUS_OK)
 				{
 					char grp[64];
@@ -282,7 +282,7 @@ static void test_obj_3d_intersection(void)
 		hd.point_count = 5;
 		hd.derivative_count = 5;
 
-		if (qaws_curve_create_hermite(&hd, &crv) == QAWS_STATUS_OK)
+		if (qaws_curve_create_hermite(&crv, &hd) == QAWS_STATUS_OK)
 		{
 			qaws_intersection_3d isects[32];
 			unsigned int ic = 0, ii;
@@ -292,7 +292,7 @@ static void test_obj_3d_intersection(void)
 			obj_use_material(&w, "tube_a");
 			obj_tube(&w, crv, 100, 10, (qaws_scalar)0.05);
 
-			if (qaws_curve_find_self_intersections_3d(crv, isects, 32, &ic)
+			if (qaws_curve_find_self_intersections_3d(isects, &ic, crv, 32)
 				== QAWS_STATUS_OK && ic > 0)
 			{
 				obj_group(&w, "ex1_self_isect");
@@ -333,8 +333,8 @@ static void test_obj_3d_intersection(void)
 		hdb.points = pb; hdb.derivatives = db_d;
 		hdb.point_count = 3; hdb.derivative_count = 3;
 
-		if (qaws_curve_create_hermite(&hda, &ca) == QAWS_STATUS_OK &&
-			qaws_curve_create_hermite(&hdb, &cb) == QAWS_STATUS_OK)
+		if (qaws_curve_create_hermite(&ca, &hda) == QAWS_STATUS_OK &&
+			qaws_curve_create_hermite(&cb, &hdb) == QAWS_STATUS_OK)
 		{
 			qaws_intersection_3d isects[32];
 			unsigned int ic = 0, ii;
@@ -347,7 +347,7 @@ static void test_obj_3d_intersection(void)
 			obj_use_material(&w, "tube_b");
 			obj_tube(&w, cb, 80, 10, (qaws_scalar)0.05);
 
-			if (qaws_curve_find_intersections_3d(ca, cb, isects, 32, &ic)
+			if (qaws_curve_find_intersections_3d(isects, &ic, ca, cb, 32)
 				== QAWS_STATUS_OK && ic > 0)
 			{
 				obj_group(&w, "ex2_isect");
@@ -385,8 +385,8 @@ static void test_obj_3d_intersection(void)
 		cd.parameterization = QAWS_PARAMETERIZATION_CENTRIPETAL;
 		cd.closed = 0;
 
-		if (qaws_curve_create_hermite(&sd, &sc) == QAWS_STATUS_OK &&
-			qaws_curve_create_catmull_rom(&cd, &cc) == QAWS_STATUS_OK)
+		if (qaws_curve_create_hermite(&sc, &sd) == QAWS_STATUS_OK &&
+			qaws_curve_create_catmull_rom(&cc, &cd) == QAWS_STATUS_OK)
 		{
 			qaws_intersection_3d isects[32];
 			unsigned int ic = 0, ii;
@@ -399,7 +399,7 @@ static void test_obj_3d_intersection(void)
 			obj_use_material(&w, "tube_d");
 			obj_tube(&w, cc, 80, 10, (qaws_scalar)0.05);
 
-			if (qaws_curve_find_intersections_3d(sc, cc, isects, 32, &ic)
+			if (qaws_curve_find_intersections_3d(isects, &ic, sc, cc, 32)
 				== QAWS_STATUS_OK && ic > 0)
 			{
 				obj_group(&w, "ex3_isect");
@@ -434,8 +434,8 @@ static void test_obj_3d_intersection(void)
 		cdb.control_points = cb_pts; cdb.control_point_count = 5;
 		cdb.parameterization = QAWS_PARAMETERIZATION_CENTRIPETAL;
 
-		if (qaws_curve_create_catmull_rom(&cda, &ca) == QAWS_STATUS_OK &&
-			qaws_curve_create_catmull_rom(&cdb, &cb) == QAWS_STATUS_OK)
+		if (qaws_curve_create_catmull_rom(&ca, &cda) == QAWS_STATUS_OK &&
+			qaws_curve_create_catmull_rom(&cb, &cdb) == QAWS_STATUS_OK)
 		{
 			qaws_intersection_3d isects[32];
 			unsigned int ic = 0, ii;
@@ -448,7 +448,7 @@ static void test_obj_3d_intersection(void)
 			obj_use_material(&w, "tube_d");
 			obj_tube(&w, cb, 80, 10, (qaws_scalar)0.05);
 
-			if (qaws_curve_find_intersections_3d(ca, cb, isects, 32, &ic)
+			if (qaws_curve_find_intersections_3d(isects, &ic, ca, cb, 32)
 				== QAWS_STATUS_OK && ic > 0)
 			{
 				obj_group(&w, "ex4_isect");
@@ -496,7 +496,7 @@ static void test_obj_3d_families(void)
 		desc.degree = 3;
 		desc.control_points = pts;
 		desc.control_point_count = 4;
-		if (qaws_curve_create_bezier(&desc, &crv) == QAWS_STATUS_OK)
+		if (qaws_curve_create_bezier(&crv, &desc) == QAWS_STATUS_OK)
 		{
 			obj_group(&w, "bezier_tube");
 			obj_use_material(&w, "bezier");
@@ -524,7 +524,7 @@ static void test_obj_3d_families(void)
 		desc.knot_count = 0;
 		desc.is_uniform = 1;
 		desc.is_closed = 0;
-		if (qaws_curve_create_bspline(&desc, &crv) == QAWS_STATUS_OK)
+		if (qaws_curve_create_bspline(&crv, &desc) == QAWS_STATUS_OK)
 		{
 			obj_group(&w, "bspline_tube");
 			obj_use_material(&w, "bspline");
@@ -549,7 +549,7 @@ static void test_obj_3d_families(void)
 		desc.control_point_count = 5;
 		desc.parameterization = QAWS_PARAMETERIZATION_CENTRIPETAL;
 		desc.closed = 0;
-		if (qaws_curve_create_catmull_rom(&desc, &crv) == QAWS_STATUS_OK)
+		if (qaws_curve_create_catmull_rom(&crv, &desc) == QAWS_STATUS_OK)
 		{
 			obj_group(&w, "catmull_tube");
 			obj_use_material(&w, "catmull");
@@ -579,7 +579,7 @@ static void test_obj_3d_families(void)
 		desc.knots = NULL;
 		desc.knot_count = 0;
 		desc.is_closed = 0;
-		if (qaws_curve_create_nurbs(&desc, &crv) == QAWS_STATUS_OK)
+		if (qaws_curve_create_nurbs(&crv, &desc) == QAWS_STATUS_OK)
 		{
 			obj_group(&w, "nurbs_tube");
 			obj_use_material(&w, "nurbs");
@@ -605,7 +605,7 @@ static void test_obj_3d_families(void)
 		desc.derivatives = der;
 		desc.point_count = 4;
 		desc.derivative_count = 4;
-		if (qaws_curve_create_hermite(&desc, &crv) == QAWS_STATUS_OK)
+		if (qaws_curve_create_hermite(&crv, &desc) == QAWS_STATUS_OK)
 		{
 			obj_group(&w, "hermite_tube");
 			obj_use_material(&w, "hermite");
@@ -653,7 +653,7 @@ static void test_obj_3d_curvature_comb(void)
 		desc.is_uniform = 1;
 		desc.is_closed = 0;
 
-		if (qaws_curve_create_bspline(&desc, &crv) == QAWS_STATUS_OK)
+		if (qaws_curve_create_bspline(&crv, &desc) == QAWS_STATUS_OK)
 		{
 			/* Tube */
 			obj_group(&w, "curve_tube");
@@ -724,7 +724,7 @@ static void test_obj_3d_traversal(void)
 		desc.control_points = pts;
 		desc.control_point_count = 5;
 
-		if (qaws_curve_create_bezier(&desc, &crv) == QAWS_STATUS_OK)
+		if (qaws_curve_create_bezier(&crv, &desc) == QAWS_STATUS_OK)
 		{
 			qaws_range range = qaws_curve_get_parameter_range(crv);
 			unsigned int mi;
@@ -742,7 +742,7 @@ static void test_obj_3d_traversal(void)
 				qaws_scalar t = range.min_value + (range.max_value - range.min_value)
 					* (qaws_scalar)mi / (qaws_scalar)20;
 				qaws_eval_result_3d r;
-				if (qaws_curve_evaluate_3d(crv, t, QAWS_EVAL_FLAG_POSITION, &r)
+				if (qaws_curve_evaluate_3d(&r, crv, t, QAWS_EVAL_FLAG_POSITION)
 					== QAWS_STATUS_OK)
 					obj_marker(&w, r.position, (qaws_scalar)0.04);
 			}
@@ -756,10 +756,10 @@ static void test_obj_3d_traversal(void)
 				td.speed = (qaws_scalar)1.0;
 				td.clamp_to_domain = 1;
 
-				if (qaws_traversal_create(crv, &td, &trav) == QAWS_STATUS_OK)
+				if (qaws_traversal_create(&trav, crv, &td) == QAWS_STATUS_OK)
 				{
 					qaws_scalar arc_len = 0;
-					qaws_curve_compute_arc_length(crv, range.min_value, range.max_value, &arc_len);
+					qaws_curve_compute_arc_length(&arc_len, crv, range.min_value, range.max_value);
 
 					obj_group(&w, "arc_length_uniform");
 					obj_use_material(&w, "arc_pts");
@@ -767,7 +767,7 @@ static void test_obj_3d_traversal(void)
 					{
 						qaws_scalar s = arc_len * (qaws_scalar)mi / (qaws_scalar)20;
 						qaws_eval_result_3d r;
-						if (qaws_traversal_evaluate_3d(trav, s, QAWS_EVAL_FLAG_POSITION, &r)
+						if (qaws_traversal_evaluate_3d(&r, trav, s, QAWS_EVAL_FLAG_POSITION)
 							== QAWS_STATUS_OK)
 							obj_marker(&w, r.position, (qaws_scalar)0.04);
 					}
@@ -840,7 +840,7 @@ static void test_obj_3d_torus_knot(void)
 		desc.point_count = num_pts;
 		desc.derivative_count = num_pts;
 
-		if (qaws_curve_create_hermite(&desc, &curve) == QAWS_STATUS_OK)
+		if (qaws_curve_create_hermite(&curve, &desc) == QAWS_STATUS_OK)
 		{
 			obj_group(&w, "torus_knot_tube");
 			obj_use_material(&w, "knot");

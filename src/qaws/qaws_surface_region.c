@@ -145,7 +145,7 @@ static qaws_status sr_line(sr_pool* pl, double x0, double y0, double x1, double 
 	cp[0] = (qaws_scalar)x0; cp[1] = (qaws_scalar)y0; cp[2] = (qaws_scalar)x1; cp[3] = (qaws_scalar)y1;
 	memset(&d, 0, sizeof(d));
 	d.dimension = QAWS_DIMENSION_2D; d.degree = 1; d.control_points = cp; d.control_point_count = 2;
-	st = qaws_curve_create_bezier(&d, &c);
+	st = qaws_curve_create_bezier(&c, &d);
 	if (st != QAWS_STATUS_OK)
 		return st;
 	*out = c;
@@ -207,16 +207,16 @@ static qaws_status sr_snap_cell(qaws_curve const* cv, double const* lines, unsig
 	*out = NULL;
 	if (kind != QAWS_CURVE_KIND_BEZIER && kind != QAWS_CURVE_KIND_BSPLINE)
 		return QAWS_STATUS_OK;
-	qaws_curve_get_control_points(cv, probe, 0, &n);
+	qaws_curve_get_control_points(probe, &n, cv, 0);
 	if (kind == QAWS_CURVE_KIND_BSPLINE)
-		qaws_bspline_get_knots(cv, probe, 0, &nk);
+		qaws_bspline_get_knots(probe, &nk, cv, 0);
 	cp = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (2 * n + nk + 2));
 	if (!cp)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
-	if ((st = qaws_curve_get_control_points(cv, cp, n, &n)) == QAWS_STATUS_OK && nk)
+	if ((st = qaws_curve_get_control_points(cp, &n, cv, n)) == QAWS_STATUS_OK && nk)
 	{
 		kn = cp + 2 * n;
-		st = qaws_bspline_get_knots(cv, kn, nk, &nk);
+		st = qaws_bspline_get_knots(kn, &nk, cv, nk);
 	}
 	/* f, b: control points dropped at the front and the back */
 	if (st == QAWS_STATUS_OK && kn && deg > 1 && nk == n + deg + 1)
@@ -296,7 +296,7 @@ static qaws_status sr_snap_cell(qaws_curve const* cv, double const* lines, unsig
 			qaws_bezier_desc d;
 			memset(&d, 0, sizeof(d));
 			d.dimension = QAWS_DIMENSION_2D; d.degree = deg; d.control_points = cp; d.control_point_count = n;
-			st = qaws_curve_create_bezier(&d, out);
+			st = qaws_curve_create_bezier(out, &d);
 		}
 		else
 		{
@@ -304,7 +304,7 @@ static qaws_status sr_snap_cell(qaws_curve const* cv, double const* lines, unsig
 			memset(&d, 0, sizeof(d));
 			d.dimension = QAWS_DIMENSION_2D; d.degree = deg; d.control_points = cp; d.control_point_count = n;
 			d.knots = kn; d.knot_count = nk;
-			st = qaws_curve_create_bspline(&d, out);
+			st = qaws_curve_create_bspline(out, &d);
 		}
 	}
 	free(cp);
@@ -435,7 +435,7 @@ static qaws_status sr_cut_loop(qaws_internal_sg_ctx const* c, sr_pool* pl, qaws_
 					if (area < 0)
 					{
 						/* a negative loop stays negative: its pieces run back */
-						st = qaws_curve_reverse(mv, &rv);
+						st = qaws_curve_reverse(&rv, mv);
 						qaws_curve_destroy(mv);
 						if (st != QAWS_STATUS_OK)
 							return st;
@@ -471,8 +471,8 @@ static qaws_status sr_period(qaws_internal_sg_ctx const* c, qaws_path_2d const* 
 			continue;
 		r0 = qaws_curve_get_parameter_range(p->curves[0]);
 		r1 = qaws_curve_get_parameter_range(p->curves[p->curve_count - 1]);
-		qaws_curve_evaluate_2d(p->curves[0], r0.min_value, QAWS_EVAL_FLAG_POSITION, &a);
-		qaws_curve_evaluate_2d(p->curves[p->curve_count - 1], r1.max_value, QAWS_EVAL_FLAG_POSITION, &b);
+		qaws_curve_evaluate_2d(&a, p->curves[0], r0.min_value, QAWS_EVAL_FLAG_POSITION);
+		qaws_curve_evaluate_2d(&b, p->curves[p->curve_count - 1], r1.max_value, QAWS_EVAL_FLAG_POSITION);
 		du = (double)b.position.x - a.position.x;
 		dv = (double)b.position.y - a.position.y;
 		if (c->pu > 0) ku = (int)floor(du / c->pu + 0.5);
@@ -776,7 +776,7 @@ static qaws_status sr_green(sr_job const* jb, double* out)
 					{
 						double t = 0.5 * (a + b) + (side ? 0.5 : -0.5) * (b - a) * sr_x8[i], P[16];
 						qaws_eval_result_2d e;
-						st = qaws_curve_evaluate_2d(c, (qaws_scalar)t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &e);
+						st = qaws_curve_evaluate_2d(&e, c, (qaws_scalar)t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1);
 						if (st != QAWS_STATUS_OK)
 							return st;
 						st = sr_potential(jb, (double)e.position.x, (double)e.position.y, P);
@@ -842,7 +842,7 @@ static int sr_on_seam(qaws_internal_sg_ctx const* c, qaws_curve const* cv, doubl
 		{
 			qaws_eval_result_2d e;
 			double x, t;
-			qaws_curve_evaluate_2d(cv, (qaws_scalar)(ta + (tb - ta) * k / 4), QAWS_EVAL_FLAG_POSITION, &e);
+			qaws_curve_evaluate_2d(&e, cv, (qaws_scalar)(ta + (tb - ta) * k / 4), QAWS_EVAL_FLAG_POSITION);
 			x = j ? (double)e.position.y : (double)e.position.x;
 			t = fmod(x - line, per);
 			if (t < 0) t += per;
@@ -890,7 +890,7 @@ qaws_status qaws_surface_region_get_perimeter(qaws_surface_region const* region,
 					{
 						double t = 0.5 * (a + b) + (side ? 0.5 : -0.5) * (b - a) * sr_x8[i], g[3];
 						qaws_eval_result_2d e;
-						st = qaws_curve_evaluate_2d(c, (qaws_scalar)t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &e);
+						st = qaws_curve_evaluate_2d(&e, c, (qaws_scalar)t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1);
 						if (st != QAWS_STATUS_OK)
 							return st;
 						st = qaws_internal_sg_first_form(&region->ctx, (double)e.position.x, (double)e.position.y, g);
@@ -1006,15 +1006,15 @@ static qaws_status sr_strip(sr_tube* tb, qaws_curve const* base, double sd)
 	if (sd > 0)
 	{
 		/* along the base, out to the offset's end, back along it, in */
-		if ((st = qaws_curve_reverse(off, &x)) != QAWS_STATUS_OK || (st = sr_keep(pl, x)) != QAWS_STATUS_OK) return st;
-		if ((st = qaws_curve_reverse(r0, &y)) != QAWS_STATUS_OK || (st = sr_keep(pl, y)) != QAWS_STATUS_OK) return st;
+		if ((st = qaws_curve_reverse(&x, off)) != QAWS_STATUS_OK || (st = sr_keep(pl, x)) != QAWS_STATUS_OK) return st;
+		if ((st = qaws_curve_reverse(&y, r0)) != QAWS_STATUS_OK || (st = sr_keep(pl, y)) != QAWS_STATUS_OK) return st;
 		loop[0] = base; loop[1] = r1; loop[2] = x; loop[3] = y;
 	}
 	else
 	{
 		/* along the offset, in to the base's end, back along it, out */
-		if ((st = qaws_curve_reverse(r1, &x)) != QAWS_STATUS_OK || (st = sr_keep(pl, x)) != QAWS_STATUS_OK) return st;
-		if ((st = qaws_curve_reverse(base, &y)) != QAWS_STATUS_OK || (st = sr_keep(pl, y)) != QAWS_STATUS_OK) return st;
+		if ((st = qaws_curve_reverse(&x, r1)) != QAWS_STATUS_OK || (st = sr_keep(pl, x)) != QAWS_STATUS_OK) return st;
+		if ((st = qaws_curve_reverse(&y, base)) != QAWS_STATUS_OK || (st = sr_keep(pl, y)) != QAWS_STATUS_OK) return st;
 		loop[0] = off; loop[1] = x; loop[2] = y; loop[3] = r0;
 	}
 	return sr_add_path(pl, loop, 4);
@@ -1063,7 +1063,7 @@ static int sr_on_pole(qaws_internal_sg_ctx const* c, qaws_curve const* cv, doubl
 	{
 		qaws_eval_result_2d e;
 		double g[3], d2;
-		qaws_curve_evaluate_2d(cv, (qaws_scalar)(ta + (tb - ta) * k / 4), QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &e);
+		qaws_curve_evaluate_2d(&e, cv, (qaws_scalar)(ta + (tb - ta) * k / 4), QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1);
 		if (qaws_internal_sg_first_form(c, (double)e.position.x, (double)e.position.y, g) != QAWS_STATUS_OK)
 			return 0;
 		d2 = (double)e.d1.x * e.d1.x + (double)e.d1.y * e.d1.y;
@@ -1083,8 +1083,8 @@ static int sr_kink(qaws_curve const* cv, double t, qaws_range rg)
 #endif
 	double h = eps * ((double)rg.max_value - rg.min_value), la, lb, cr, dt;
 	qaws_eval_result_2d a, b;
-	qaws_curve_evaluate_2d(cv, (qaws_scalar)(t - h), QAWS_EVAL_FLAG_D1, &a);
-	qaws_curve_evaluate_2d(cv, (qaws_scalar)(t + h), QAWS_EVAL_FLAG_D1, &b);
+	qaws_curve_evaluate_2d(&a, cv, (qaws_scalar)(t - h), QAWS_EVAL_FLAG_D1);
+	qaws_curve_evaluate_2d(&b, cv, (qaws_scalar)(t + h), QAWS_EVAL_FLAG_D1);
 	la = hypot((double)a.d1.x, (double)a.d1.y);
 	lb = hypot((double)b.d1.x, (double)b.d1.y);
 	if (!(la > 0) || !(lb > 0))
@@ -1104,8 +1104,8 @@ static void sr_piece_end(qaws_curve const* cv, double lo, double hi, qaws_eval_r
 #else
 	double const eps = 1e-9;
 #endif
-	qaws_curve_evaluate_2d(cv, (qaws_scalar)hi, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, r);
-	qaws_curve_evaluate_2d(cv, (qaws_scalar)(hi - eps * (hi - lo)), QAWS_EVAL_FLAG_D1, &d);
+	qaws_curve_evaluate_2d(r, cv, (qaws_scalar)hi, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1);
+	qaws_curve_evaluate_2d(&d, cv, (qaws_scalar)(hi - eps * (hi - lo)), QAWS_EVAL_FLAG_D1);
 	r->d1 = d.d1;
 }
 
@@ -1127,7 +1127,7 @@ static qaws_status sr_breaks(qaws_curve const* cv, double** out, unsigned int* o
 	{
 		unsigned int nk = 0, deg = qaws_curve_get_degree(cv);
 		qaws_scalar probe[2];
-		qaws_bspline_get_knots(cv, probe, 0, &nk);
+		qaws_bspline_get_knots(probe, &nk, cv, 0);
 		if (nk > 0)
 		{
 			qaws_scalar* kn = (qaws_scalar*)malloc(sizeof(qaws_scalar) * nk);
@@ -1138,7 +1138,7 @@ static qaws_status sr_breaks(qaws_curve const* cv, double** out, unsigned int* o
 				return QAWS_STATUS_ALLOCATION_FAILURE;
 			}
 			br = nbr;
-			if (qaws_bspline_get_knots(cv, kn, nk, &nk) == QAWS_STATUS_OK)
+			if (qaws_bspline_get_knots(kn, &nk, cv, nk) == QAWS_STATUS_OK)
 				for (i = 0; i < nk;)
 				{
 					unsigned int m = 1;
@@ -1176,7 +1176,7 @@ static qaws_status sr_tube_curve(sr_tube* tb, qaws_curve const* cv, int sides, i
 			continue;
 		if (nb > 2)
 		{
-			if ((st = qaws_curve_extract(cv, (qaws_scalar)ta, (qaws_scalar)tb2, &piece)) != QAWS_STATUS_OK || (st = sr_keep(&tb->raw, piece)) != QAWS_STATUS_OK)
+			if ((st = qaws_curve_extract(&piece, cv, (qaws_scalar)ta, (qaws_scalar)tb2)) != QAWS_STATUS_OK || (st = sr_keep(&tb->raw, piece)) != QAWS_STATUS_OK)
 				break;
 			base = piece;
 		}
@@ -1185,8 +1185,8 @@ static qaws_status sr_tube_curve(sr_tube* tb, qaws_curve const* cv, int sides, i
 		if (st == QAWS_STATUS_OK && disks)
 		{
 			qaws_range pr = qaws_curve_get_parameter_range(base);
-			qaws_curve_evaluate_2d(base, pr.min_value, QAWS_EVAL_FLAG_POSITION, &e0);
-			qaws_curve_evaluate_2d(base, pr.max_value, QAWS_EVAL_FLAG_POSITION, &e1);
+			qaws_curve_evaluate_2d(&e0, base, pr.min_value, QAWS_EVAL_FLAG_POSITION);
+			qaws_curve_evaluate_2d(&e1, base, pr.max_value, QAWS_EVAL_FLAG_POSITION);
 			st = sr_disk(tb, e0.position);
 			if (st == QAWS_STATUS_OK) st = sr_disk(tb, e1.position);
 		}
@@ -1264,7 +1264,7 @@ static qaws_status sr_corner_disks(sr_tube* tb, qaws_clip_result const* res, int
 			qaws_eval_result_2d a, b;
 			if (!cur->cv)
 				continue;
-			qaws_curve_evaluate_2d(cur->cv, (qaws_scalar)cur->lo, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &b);
+			qaws_curve_evaluate_2d(&b, cur->cv, (qaws_scalar)cur->lo, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1);
 			if (!prev->cv)
 			{
 				/* leaving a cut: a departure to match */
@@ -1970,7 +1970,7 @@ static double sm_dist(sm_ctx const* m, unsigned int f, double const* x, double* 
 		{
 			qaws_eval_result_2d r;
 			ss = ft->lo + (ft->hi - ft->lo) * (k + 0.5) / 8;
-			qaws_curve_evaluate_2d(ft->cv, (qaws_scalar)ss, QAWS_EVAL_FLAG_POSITION, &r);
+			qaws_curve_evaluate_2d(&r, ft->cv, (qaws_scalar)ss, QAWS_EVAL_FLAG_POSITION);
 			sm_point3(m->c, r.position.x, r.position.y, q3);
 			tt = sm_d3(x3, q3);
 			ok = tt > 0 && qaws_internal_sg_foot(m->c, ft->cv, 1, ft->lo, ft->hi, x, &ss, &tt);
@@ -2093,7 +2093,7 @@ qaws_status qaws_surface_region_medial_axis(qaws_surface_region const* region, q
 				qaws_eval_result_2d a, b;
 				double da[2], db[2], aa = 0, ab = 0, turn;
 				sr_piece_end(prev->cv, prev->lo, prev->hi, &a);
-				qaws_curve_evaluate_2d(cur->cv, (qaws_scalar)cur->lo, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &b);
+				qaws_curve_evaluate_2d(&b, cur->cv, (qaws_scalar)cur->lo, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1);
 				da[0] = a.d1.x; da[1] = a.d1.y; db[0] = b.d1.x; db[1] = b.d1.y;
 				qaws_internal_sg_angle(m.c, (double)b.position.x, (double)b.position.y, da, &aa);
 				qaws_internal_sg_angle(m.c, (double)b.position.x, (double)b.position.y, db, &ab);
@@ -2122,7 +2122,7 @@ qaws_status qaws_surface_region_medial_axis(qaws_surface_region const* region, q
 			for (q = 0; q <= 32; q++)
 			{
 				qaws_eval_result_2d r;
-				qaws_curve_evaluate_2d(ft->cv, (qaws_scalar)(ft->lo + (ft->hi - ft->lo) * q / 32), QAWS_EVAL_FLAG_POSITION, &r);
+				qaws_curve_evaluate_2d(&r, ft->cv, (qaws_scalar)(ft->lo + (ft->hi - ft->lo) * q / 32), QAWS_EVAL_FLAG_POSITION);
 				sm_point3(m.c, r.position.x, r.position.y, cur);
 				if (q) len += sm_d3(prev, cur);
 				prev[0] = cur[0]; prev[1] = cur[1]; prev[2] = cur[2];
@@ -2190,7 +2190,7 @@ qaws_status qaws_surface_region_medial_axis(qaws_surface_region const* region, q
 			else
 			{
 				qaws_eval_result_2d r;
-				qaws_curve_evaluate_2d(ft->cv, (qaws_scalar)lab[i].s, QAWS_EVAL_FLAG_POSITION, &r);
+				qaws_curve_evaluate_2d(&r, ft->cv, (qaws_scalar)lab[i].s, QAWS_EVAL_FLAG_POSITION);
 				sm_point3(m.c, r.position.x, r.position.y, lab[i].foot);
 			}
 		}
@@ -2226,7 +2226,7 @@ qaws_status qaws_surface_region_medial_axis(qaws_surface_region const* region, q
 						else
 						{
 							qaws_eval_result_2d r;
-							qaws_curve_evaluate_2d(ft->cv, (qaws_scalar)s1, QAWS_EVAL_FLAG_POSITION, &r);
+							qaws_curve_evaluate_2d(&r, ft->cv, (qaws_scalar)s1, QAWS_EVAL_FLAG_POSITION);
 							sm_point3(m.c, r.position.x, r.position.y, lab[p].foot);
 						}
 					}
@@ -2554,8 +2554,8 @@ static double mk_dist(qaws_internal_sg_ctx const* c, mk_edge const* e, double co
 	/* the side first, in (u, v) (the map keeps it): right of the line, none;
 	   on it, 0; left, the foot from the nearest point */
 	xp.x = (qaws_scalar)x[0]; xp.y = (qaws_scalar)x[1];
-	if (qaws_curve_find_closest_parameter_2d(e->cv, xp, &tp) == QAWS_STATUS_OK &&
-		qaws_curve_evaluate_2d(e->cv, tp, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &r) == QAWS_STATUS_OK && hypot((double)r.d1.x, (double)r.d1.y) > 0)
+	if (qaws_curve_find_closest_parameter_2d(&tp, e->cv, xp) == QAWS_STATUS_OK &&
+		qaws_curve_evaluate_2d(&r, e->cv, tp, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1) == QAWS_STATUS_OK && hypot((double)r.d1.x, (double)r.d1.y) > 0)
 	{
 		side = ((double)r.d1.x * (x[1] - r.position.y) - (double)r.d1.y * (x[0] - r.position.x)) / hypot((double)r.d1.x, (double)r.d1.y);
 		if (side < -10 * c->tol)
@@ -2574,7 +2574,7 @@ static double mk_dist(qaws_internal_sg_ctx const* c, mk_edge const* e, double co
 	for (k = 0; k < 8; k++)
 	{
 		double ss = e->lo + (e->hi - e->lo) * (k + 0.5) / 8, tt;
-		qaws_curve_evaluate_2d(e->cv, (qaws_scalar)ss, QAWS_EVAL_FLAG_POSITION, &r);
+		qaws_curve_evaluate_2d(&r, e->cv, (qaws_scalar)ss, QAWS_EVAL_FLAG_POSITION);
 		sm_point3(c, r.position.x, r.position.y, q3);
 		tt = sm_d3(x3, q3);
 		if (tt > 0 && qaws_internal_sg_foot(c, e->cv, 1, e->lo, e->hi, x, &ss, &tt) && (best < 0 || tt < best))
@@ -2626,9 +2626,9 @@ static qaws_curve* mk_ray(qaws_surface const* s, qaws_vec2 p, qaws_vec2 d, doubl
 		if (qaws_surface_curve_create_geodesic_ray(s, p, d, (qaws_scalar)len, 0, &sc) != QAWS_STATUS_OK)
 			continue;
 		rg = qaws_curve_get_parameter_range(qaws_surface_curve_get_uv(sc));
-		if (qaws_curve_extract(qaws_surface_curve_get_uv(sc), rg.min_value, rg.max_value, &a) == QAWS_STATUS_OK && reversed)
+		if (qaws_curve_extract(&a, qaws_surface_curve_get_uv(sc), rg.min_value, rg.max_value) == QAWS_STATUS_OK && reversed)
 		{
-			qaws_curve_reverse(a, &b);
+			qaws_curve_reverse(&b, a);
 			qaws_curve_destroy(a);
 			a = b;
 		}
@@ -2706,7 +2706,7 @@ qaws_status qaws_surface_region_mitered_skeleton(qaws_surface_region const* regi
 			qaws_eval_result_2d a, b;
 			double da[2], db[2], aa = 0, ab = 0;
 			sr_piece_end(prev->cv, prev->lo, prev->hi, &a);
-			qaws_curve_evaluate_2d(cur->cv, (qaws_scalar)cur->lo, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &b);
+			qaws_curve_evaluate_2d(&b, cur->cv, (qaws_scalar)cur->lo, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1);
 			da[0] = a.d1.x; da[1] = a.d1.y; db[0] = b.d1.x; db[1] = b.d1.y;
 			qaws_internal_sg_angle(c, (double)b.position.x, (double)b.position.y, da, &aa);
 			qaws_internal_sg_angle(c, (double)b.position.x, (double)b.position.y, db, &ab);
@@ -2731,7 +2731,7 @@ qaws_status qaws_surface_region_mitered_skeleton(qaws_surface_region const* regi
 			do
 			{
 				sm_feature const* f = &seq[(c0 + j) % ns];
-				if (n < 64 && qaws_curve_extract(f->cv, (qaws_scalar)f->lo, (qaws_scalar)f->hi, &part[n + 1]) == QAWS_STATUS_OK)
+				if (n < 64 && qaws_curve_extract(&part[n + 1], f->cv, (qaws_scalar)f->lo, (qaws_scalar)f->hi) == QAWS_STATUS_OK)
 					n++;
 				j++;
 			} while (j < ns && fabs(turn[(c0 + j) % ns]) <= SM_CORNER);
@@ -2743,7 +2743,7 @@ qaws_status qaws_surface_region_mitered_skeleton(qaws_surface_region const* regi
 			}
 			/* carried on past both ends along the geodesics of their tangents */
 			f1 = &seq[(c0 + j - 1) % ns];
-			qaws_curve_evaluate_2d(f0->cv, (qaws_scalar)f0->lo, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &r0);
+			qaws_curve_evaluate_2d(&r0, f0->cv, (qaws_scalar)f0->lo, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1);
 			sr_piece_end(f1->cv, f1->lo, f1->hi, &r1);
 			back.x = -r0.d1.x; back.y = -r0.d1.y;
 			part[0] = mk_ray(region->s, r0.position, back, D, 1);
@@ -2753,7 +2753,7 @@ qaws_status qaws_surface_region_mitered_skeleton(qaws_surface_region const* regi
 			cd.segments = part[0] ? part : part + 1;
 			cd.segment_count = n + (part[0] ? 1 : 0) + (part[n + 1] ? 1 : 0);
 			E[ne].cv = NULL;
-			st = qaws_curve_create_composite(&cd, &E[ne].cv);
+			st = qaws_curve_create_composite(&E[ne].cv, &cd);
 			if (st != QAWS_STATUS_OK)
 				for (z = 0; z <= n + 1; z++) qaws_curve_destroy(part[z]);
 			else

@@ -162,7 +162,7 @@ static void demo_arc_length(void)
 		for (i = 0; i < AL_N; i++)
 		{
 			qaws_eval_result_2d e;
-			qaws_curve_evaluate_2d(c, (qaws_scalar)(r.min_value + (r.max_value - r.min_value) * i / (AL_N - 1)), QAWS_EVAL_FLAG_POSITION, &e);
+			qaws_curve_evaluate_2d(&e, c, (qaws_scalar)(r.min_value + (r.max_value - r.min_value) * i / (AL_N - 1)), QAWS_EVAL_FLAG_POSITION);
 			svg_circle(&s, vx(&a, e.position.x), vy(&a, e.position.y) + 26, 3.2, "#ffffff", "#8c959f");
 		}
 		/* constant-speed samples with first and second tangents for the control point moving right */

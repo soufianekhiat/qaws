@@ -39,16 +39,16 @@
  *   qaws_curve_inline ic;
  *   qaws_vec3 pts[] = {{0,0,0}, {1,2,3}, {4,5,6}, {7,8,9}};
  *   qaws_bezier_desc desc = { QAWS_DIMENSION_3D, 3, pts, 4 };
- *   qaws_curve_init_bezier_inline(&desc, &ic);
+ *   qaws_curve_init_bezier_inline(&ic, &desc);
  *   // Use &ic.curve with qaws_curve_evaluate_3d, etc.
  */
 
 qaws_status qaws_curve_init_bezier_inline(
-	qaws_bezier_desc const* desc,
-	qaws_curve_inline* out);
+	qaws_curve_inline* out,
+	qaws_bezier_desc const* desc);
 
 qaws_status qaws_curve_init_polynomial_inline(
-	qaws_polynomial_desc const* desc,
-	qaws_curve_inline* out);
+	qaws_curve_inline* out,
+	qaws_polynomial_desc const* desc);
 
 #endif /* QAWS_INLINE_H */

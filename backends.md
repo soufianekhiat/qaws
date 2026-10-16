@@ -791,58 +791,58 @@ Each family has a prepare function that takes raw geometry input and outputs pre
 /* --- Hermite --- */
 /* Input: points + tangents. Output: a,b,c,d coefficient vectors per span. */
 qaws_status qaws_hermite_prepare_2d(
-    const qaws_vec2* points,
-    const qaws_vec2* tangents,
-    unsigned int point_count,
-    qaws_vec2* out_a,          /* [span_count] */
-    qaws_vec2* out_b,          /* [span_count] */
-    qaws_vec2* out_c,          /* [span_count] */
-    qaws_vec2* out_d);         /* [span_count] */
+    qaws_vec2* out_a,
+    /* [span_count] */
+    qaws_vec2* out_b,
+    /* [span_count] */
+    qaws_vec2* out_c,
+    /* [span_count] */
+    qaws_vec2* out_d,          const qaws_vec2* points,          const qaws_vec2* tangents,          unsigned int point_count);         /* [span_count] */
 
 /* --- Catmull-Rom --- */
 /* Input: interpolation points. Output: same a,b,c,d coefficients. */
 qaws_status qaws_catmull_rom_prepare_2d(
-    const qaws_vec2* points,
-    unsigned int point_count,
-    qaws_parameterization param,
-    int closed,
     qaws_vec2* out_a,
     qaws_vec2* out_b,
     qaws_vec2* out_c,
     qaws_vec2* out_d,
-    unsigned int* out_span_count);
+    unsigned int* out_span_count,
+    const qaws_vec2* points,
+    unsigned int point_count,
+    qaws_parameterization param,
+    int closed);
 
 /* --- Trajectory --- */
 /* Input: key positions + times. Output: same a,b,c,d coefficients. */
 qaws_status qaws_trajectory_prepare_2d(
-    const qaws_vec2* positions,
-    const qaws_scalar* times,
-    unsigned int key_count,
-    unsigned int degree,
-    int closed,
     qaws_vec2* out_a,
     qaws_vec2* out_b,
     qaws_vec2* out_c,
     qaws_vec2* out_d,
-    unsigned int* out_span_count);
+    unsigned int* out_span_count,
+    const qaws_vec2* positions,
+    const qaws_scalar* times,
+    unsigned int key_count,
+    unsigned int degree,
+    int closed);
 
 /* --- Bezier --- */
 /* No prepare needed for position-only eval (CPs are the data).
    For derivative eval, pre-compute derivative control points. */
 qaws_status qaws_bezier_prepare_deriv_2d(
-    const qaws_vec2* control_points,
-    unsigned int degree,
-    qaws_vec2* out_d1_cp,      /* [degree] */
-    qaws_vec2* out_d2_cp,      /* [degree-1] */
-    qaws_vec2* out_d3_cp);     /* [degree-2] */
+    qaws_vec2* out_d1_cp,
+    /* [degree] */
+    qaws_vec2* out_d2_cp,
+    /* [degree-1] */
+    qaws_vec2* out_d3_cp,      const qaws_vec2* control_points,      unsigned int degree);     /* [degree-2] */
 
 /* --- Rational Bezier --- */
 /* Output: homogeneous weighted points (w*x, w*y, w) */
 qaws_status qaws_rational_bezier_prepare_2d(
+    qaws_scalar* out_weighted_cp,
     const qaws_vec2* control_points,
     const qaws_scalar* weights,
-    unsigned int degree,
-    qaws_scalar* out_weighted_cp);  /* [(degree+1) * 3] */
+    unsigned int degree);  /* [(degree+1) * 3] */
 
 /* --- B-spline / NURBS --- */
 /* No prepare needed — knots, CPs, and weights are already flat arrays.
@@ -854,15 +854,15 @@ qaws_status qaws_rational_bezier_prepare_2d(
 /* --- Arc --- */
 /* Output: per-segment axis vectors and angle range */
 qaws_status qaws_arc_prepare_2d(
+    qaws_vec2* out_axis_u,
+    qaws_vec2* out_axis_v,
+    qaws_scalar* out_theta_start,
+    qaws_scalar* out_theta_range,
     qaws_vec2 center,
     qaws_scalar radius_x,
     qaws_scalar radius_y,
     qaws_scalar start_angle,
-    qaws_scalar end_angle,
-    qaws_vec2* out_axis_u,
-    qaws_vec2* out_axis_v,
-    qaws_scalar* out_theta_start,
-    qaws_scalar* out_theta_range);
+    qaws_scalar end_angle);
 ```
 
 All prepare functions output **flat arrays of scalars or vec2/vec3**. No opaque structs, no pointers-to-pointers. The caller owns the memory and decides where to store it (CPU array, GPU buffer, shared memory, etc.).
@@ -933,8 +933,8 @@ All three families pre-compute `a,b,c,d` coefficients per span. Today this code 
 ```c
 qaws_vec2 a[MAX_SPANS], b[MAX_SPANS], c[MAX_SPANS], d[MAX_SPANS];
 unsigned int span_count;
-qaws_catmull_rom_prepare_2d(points, 10, QAWS_PARAMETERIZATION_CENTRIPETAL, 0,
-                            a, b, c, d, &span_count);
+qaws_catmull_rom_prepare_2d(a, b, c, d,
+                            &span_count, points, 10, QAWS_PARAMETERIZATION_CENTRIPETAL, 0);
 /* Upload a,b,c,d to GPU as a StructuredBuffer of span_count * 8 floats */
 ```
 

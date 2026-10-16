@@ -28,7 +28,7 @@ typedef struct qaws_hermite_desc
 } qaws_hermite_desc;
 
 qaws_status qaws_curve_create_hermite(
-	qaws_hermite_desc const* desc,
-	qaws_curve** out_curve);
+	qaws_curve** out_curve,
+	qaws_hermite_desc const* desc);
 
 #endif /* QAWS_HERMITE_H */

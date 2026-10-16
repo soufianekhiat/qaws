@@ -348,9 +348,9 @@ static qaws_status mv_add_curve(qaws_mean_value* m, qaws_curve const* c, unsigne
 		double *cp, *kn, *w = NULL;
 		qaws_range rg = qaws_curve_get_parameter_range(c);
 		qaws_scalar probe[2];
-		qaws_curve_get_control_points(c, probe, 0, &n);       /* the counts */
+		qaws_curve_get_control_points(probe, &n, c, 0);       /* the counts */
 		if (kind == QAWS_CURVE_KIND_BSPLINE || kind == QAWS_CURVE_KIND_NURBS)
-			qaws_bspline_get_knots(c, probe, 0, &nk);
+			qaws_bspline_get_knots(probe, &nk, c, 0);
 		else
 			nk = 2 * (deg + 1);
 		if (n == 0 || n > 100000 || nk > 200000)
@@ -363,11 +363,11 @@ static qaws_status mv_add_curve(qaws_mean_value* m, qaws_curve const* c, unsigne
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 		}
 		kn = cp + 2 * n;
-		st = qaws_curve_get_control_points(c, buf, n, &n);
+		st = qaws_curve_get_control_points(buf, &n, c, n);
 		for (i = 0; i < 2 * n; i++) cp[i] = (double)buf[i];
 		if (st == QAWS_STATUS_OK && (kind == QAWS_CURVE_KIND_BSPLINE || kind == QAWS_CURVE_KIND_NURBS))
 		{
-			st = qaws_bspline_get_knots(c, buf, nk, &nk);
+			st = qaws_bspline_get_knots(buf, &nk, c, nk);
 			for (i = 0; i < nk; i++) kn[i] = (double)buf[i];
 		}
 		else
@@ -382,7 +382,7 @@ static qaws_status mv_add_curve(qaws_mean_value* m, qaws_curve const* c, unsigne
 		if (st == QAWS_STATUS_OK && kind == QAWS_CURVE_KIND_NURBS)
 		{
 			w = kn + nk;
-			st = qaws_nurbs_get_weights(c, buf, n, &nw);
+			st = qaws_nurbs_get_weights(buf, &nw, c, n);
 			for (i = 0; i < nw && i < n; i++) w[i] = (double)buf[i];
 		}
 		else if (st == QAWS_STATUS_OK && kind == QAWS_CURVE_KIND_RATIONAL_BEZIER)
@@ -745,7 +745,7 @@ qaws_status qaws_mean_value_create(qaws_mean_value_desc const* desc, qaws_mean_v
 		for (ci = 0; ci < desc->paths[pi].curve_count; ci++)
 		{
 			qaws_vec2 a, b;
-			if (qaws_curve_compute_bounds_2d(desc->paths[pi].curves[ci], &a, &b) == QAWS_STATUS_OK)
+			if (qaws_curve_compute_bounds_2d(&a, &b, desc->paths[pi].curves[ci]) == QAWS_STATUS_OK)
 			{
 				if (a.x < lo[0]) lo[0] = a.x;
 				if (a.y < lo[1]) lo[1] = a.y;

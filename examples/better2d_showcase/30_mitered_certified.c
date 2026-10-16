@@ -18,7 +18,7 @@ static qaws_geodesic_segment s30_seg(qaws_surface* f, qaws_vec2 a, qaws_vec2 b, 
 	if (qaws_surface_curve_create_shortest_path(f, NULL, a, b, 0, out) != QAWS_STATUS_OK)
 		return g;
 	r = qaws_curve_get_parameter_range(qaws_surface_curve_get_uv(*out));
-	qaws_curve_evaluate_2d(qaws_surface_curve_get_uv(*out), r.min_value, QAWS_EVAL_FLAG_D1, &e);
+	qaws_curve_evaluate_2d(&e, qaws_surface_curve_get_uv(*out), r.min_value, QAWS_EVAL_FLAG_D1);
 	g.start = a; g.direction = e.d1;
 	qaws_surface_curve_get_length(*out, &g.length);
 	return g;

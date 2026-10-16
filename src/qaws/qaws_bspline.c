@@ -440,7 +440,7 @@ static qaws_status bspline_rebuild(qaws_curve const *curve, qaws_diff_views cons
 		d.control_point_count = impl->control_point_count;
 		d.knots = knots;
 		d.knot_count = impl->knot_count;
-		st = qaws_curve_create_bspline(&d, out_curve);
+		st = qaws_curve_create_bspline(out_curve, &d);
 	}
 	qaws_internal_dealloc(NULL, owned_cps);
 	qaws_internal_dealloc(NULL, owned_knots);
@@ -475,9 +475,9 @@ static qaws_curve_vtable const bspline_vtable = {
 /* -------------------------------------------------------------------------- */
 
 qaws_status qaws_curve_create_bspline_ex(
+	qaws_curve **out_curve,
 	qaws_bspline_desc const *desc,
-	qaws_allocator const *allocator,
-	qaws_curve **out_curve)
+	qaws_allocator const *allocator)
 {
 	qaws_bspline_impl *impl = NULL;
 	qaws_curve *curve = NULL;
@@ -644,8 +644,8 @@ qaws_status qaws_curve_create_bspline_ex(
 }
 
 qaws_status qaws_curve_create_bspline(
-	qaws_bspline_desc const *desc,
-	qaws_curve **out_curve)
+	qaws_curve **out_curve,
+	qaws_bspline_desc const *desc)
 {
-	return qaws_curve_create_bspline_ex(desc, NULL, out_curve);
+	return qaws_curve_create_bspline_ex(out_curve, desc, NULL);
 }

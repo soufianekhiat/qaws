@@ -140,7 +140,7 @@ static void photo_overlay(svg* s, hair_photo const* hp, groom_strand const* st, 
 		{
 			qaws_eval_result_3d e;
 			double x[3], px, py, d;
-			qaws_curve_evaluate_3d(c, (qaws_scalar)(r.min_value + (r.max_value - r.min_value) * k / 24), QAWS_EVAL_FLAG_POSITION, &e);
+			qaws_curve_evaluate_3d(&e, c, (qaws_scalar)(r.min_value + (r.max_value - r.min_value) * k / 24), QAWS_EVAL_FLAG_POSITION);
 			x[0] = e.position.x; x[1] = e.position.y; x[2] = e.position.z;
 			view_xform(&hp->cam.v, x, &px, &py, &d);
 			xy[2 * n] = x0 + px * sc;

@@ -48,7 +48,7 @@ static qaws_surface* srt_sphere(double R, qaws_curve** prof)
 	g.radius = (qaws_scalar)R; g.angle_start = (qaws_scalar)(-SRT_PI / 2); g.angle_end = (qaws_scalar)(SRT_PI / 2);
 	memset(&ad, 0, sizeof(ad));
 	ad.dimension = QAWS_DIMENSION_2D; ad.segments = &g; ad.segment_count = 1;
-	qaws_curve_create_arc(&ad, prof);
+	qaws_curve_create_arc(prof, &ad);
 	memset(&rd, 0, sizeof(rd));
 	rd.profile = *prof; rd.axis_direction.z = 1;
 	qaws_surface_create_revolution(&rd, &s);
@@ -187,7 +187,7 @@ static void test_plane(void)
 		g.angle_start = 0; g.angle_end = (qaws_scalar)(2 * SRT_PI);
 		memset(&ad, 0, sizeof(ad));
 		ad.dimension = QAWS_DIMENSION_2D; ad.segments = &g; ad.segment_count = 1;
-		qaws_curve_create_arc(&ad, &cc);
+		qaws_curve_create_arc(&cc, &ad);
 		for (k = 0; k < 4; k++)
 		{
 			xy[2 * k] = (qaws_scalar)(corner[k].x * 2 + corner[k].y * 0.6);
@@ -235,7 +235,7 @@ static void test_cylinder(void)
 	g.radius = (qaws_scalar)R; g.angle_start = 0; g.angle_end = (qaws_scalar)(2 * SRT_PI);
 	memset(&ad, 0, sizeof(ad));
 	ad.dimension = QAWS_DIMENSION_2D; ad.segments = &g; ad.segment_count = 1;
-	qaws_curve_create_arc(&ad, &circle);
+	qaws_curve_create_arc(&circle, &ad);
 	memset(&ed, 0, sizeof(ed));
 	ed.profile = circle; ed.direction.z = 1; ed.length = (qaws_scalar)H;
 	qaws_surface_create_extrusion(&ed, &s);
@@ -316,8 +316,8 @@ static void test_gauss_bonnet(void)
 		qaws_range ri = qaws_curve_get_parameter_range(in), ro = qaws_curve_get_parameter_range(out);
 		qaws_eval_result_2d a, b;
 		double da[2], db[2];
-		qaws_curve_evaluate_2d(in, ri.max_value, QAWS_EVAL_FLAG_D1, &a);
-		qaws_curve_evaluate_2d(out, ro.min_value, QAWS_EVAL_FLAG_D1, &b);
+		qaws_curve_evaluate_2d(&a, in, ri.max_value, QAWS_EVAL_FLAG_D1);
+		qaws_curve_evaluate_2d(&b, out, ro.min_value, QAWS_EVAL_FLAG_D1);
 		da[0] = -a.d1.x; da[1] = -a.d1.y; db[0] = b.d1.x; db[1] = b.d1.y;
 		angles += srt_angle(s, tri[i], da, db);
 	}
@@ -351,7 +351,7 @@ static qaws_surface_curve* srt_uv_line(qaws_surface const* s, double u0, double 
 	cp[0] = (qaws_scalar)u0; cp[1] = (qaws_scalar)v0; cp[2] = (qaws_scalar)u1; cp[3] = (qaws_scalar)v1;
 	memset(&bd, 0, sizeof(bd));
 	bd.dimension = QAWS_DIMENSION_2D; bd.degree = 1; bd.control_points = cp; bd.control_point_count = 2;
-	qaws_curve_create_bezier(&bd, keep);
+	qaws_curve_create_bezier(keep, &bd);
 	qaws_surface_curve_create_uv(s, *keep, &c);
 	return c;
 }
@@ -383,7 +383,7 @@ static qaws_surface* srt_torus(double R0, double r0, double start, qaws_curve** 
 	g.angle_start = (qaws_scalar)start; g.angle_end = (qaws_scalar)(start + 2 * SRT_PI);
 	memset(&ad, 0, sizeof(ad));
 	ad.dimension = QAWS_DIMENSION_2D; ad.segments = &g; ad.segment_count = 1;
-	qaws_curve_create_arc(&ad, prof);
+	qaws_curve_create_arc(prof, &ad);
 	memset(&rd, 0, sizeof(rd));
 	rd.profile = *prof; rd.axis_direction.z = 1;
 	qaws_surface_create_revolution(&rd, &s);
@@ -483,7 +483,7 @@ static void test_seams(void)
 		g.radius = (qaws_scalar)Rc; g.angle_start = 0; g.angle_end = (qaws_scalar)(2 * SRT_PI);
 		memset(&ad, 0, sizeof(ad));
 		ad.dimension = QAWS_DIMENSION_2D; ad.segments = &g; ad.segment_count = 1;
-		qaws_curve_create_arc(&ad, &circle);
+		qaws_curve_create_arc(&circle, &ad);
 		memset(&ed, 0, sizeof(ed));
 		ed.profile = circle; ed.direction.z = 1; ed.length = (qaws_scalar)H;
 		qaws_surface_create_extrusion(&ed, &cy);
