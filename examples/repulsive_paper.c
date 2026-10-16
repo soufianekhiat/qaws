@@ -14,8 +14,10 @@
  *   paper6_paths.svg      four agents' paths planned in space-time (Fig. 31)
  * and from Repulsive Surfaces (Yu, Brakensiek, Schumacher, Crane, ACM TOG 2021):
  *   paper7_cylinder.svg   a cylinder with Dirichlet ends (Fig. 9, left)
+ *   paper8_hopf.svg       a Hopf link to its canonical shape (Fig. 11)
+ *   paper9_borromean.svg  Borromean rings to their canonical shape (Fig. 11)
  *
- * Usage: qaws_repulsive_paper [data directory [figure 1 to 7 [most steps]]] (default
+ * Usage: qaws_repulsive_paper [data directory [figure 1 to 9 [most steps]]] (default
  * ../examples/data/repulsive_curves, from working_dir; every figure). Minutes, not
  * seconds: the scenes have 500 to 800 vertices and take hundreds of steps
  * (about 20 minutes on 20 threads).
@@ -853,7 +855,7 @@ static void rp_paths_figure(char const* dir)
 int main(int argc, char** argv)
 {
 	char const* dir = argc > 1 ? argv[1] : "../examples/data/repulsive_curves";
-	int only = argc > 2 ? atoi(argv[2]) : 0;   /* (one figure: 1 to 7) */
+	int only = argc > 2 ? atoi(argv[2]) : 0;   /* (one figure: 1 to 9) */
 	if (argc > 3)
 		rp_cap = (unsigned int)atoi(argv[3]);
 	setvbuf(stdout, NULL, _IONBF, 0);
@@ -910,6 +912,33 @@ int main(int argc, char** argv)
 			free(pins);
 		}
 		rp_free_mesh(&m);
+	}
+	/* Repulsive Surfaces, Fig. 11 (the gallery): linked surfaces flowing to
+	   their canonical embeddings; the paper's meshes, the area held (the
+	   paper's flow holds nothing and is stopped by eye) */
+	{
+		static char const* const files[2] = { "hopf.obj", "borromean.obj" };
+		static char const* const svgs[2] = { "showcase/paper8_hopf.svg", "showcase/paper9_borromean.svg" };
+		static char const* const titles[2] = { "Repulsive Surfaces, Fig. 11: a Hopf link", "Repulsive Surfaces, Fig. 11: Borromean rings" };
+		static unsigned int const steps[2] = { 25, RP_UNTIL };
+		char sdir[1024];
+		unsigned int k;
+		sprintf(sdir, "%s/../repulsive_surfaces", dir);
+		for (k = 0; k < 2; k++)
+		{
+			rp_view view = { 0.6, 0.5 };
+			rp_mesh m;
+			qaws_repulsive_mesh_solve_desc sd;
+			if (only && only != 8 + (int)k)
+				continue;
+			if (!rp_load_mesh(sdir, files[k], &m))
+				continue;
+			memset(&sd, 0, sizeof(sd));
+			sd.hold_area = 1; sd.theta = (qaws_scalar)0.25;
+			rp_surface_figure(&m, svgs[k], titles[k], "p 6; the area and the barycenter held; the hierarchical fractional Sobolev descent (theta 0.25)", 6, &sd,
+				steps, 2, &view);
+			rp_free_mesh(&m);
+		}
 	}
 	return 0;
 }
