@@ -1,4 +1,17 @@
-#ifndef QAWS_DIFF_TYPES_H
+#include "qaws_platform.h"   /* (QAWS_SCALAR_IS_FLOAT: the precision this pass declares) */
+#if QAWS_SCALAR_IS_FLOAT
+#ifndef QAWS_DIFF_TYPES_H_F32
+#define QAWS_DIFF_TYPES_H_F32
+#define QAWS_DIFF_TYPES_H_BODY
+#endif
+#else
+#ifndef QAWS_DIFF_TYPES_H_F64
+#define QAWS_DIFF_TYPES_H_F64
+#define QAWS_DIFF_TYPES_H_BODY
+#endif
+#endif
+#ifdef QAWS_DIFF_TYPES_H_BODY
+#undef QAWS_DIFF_TYPES_H_BODY
 #define QAWS_DIFF_TYPES_H
 
 #include "qaws_types.h"
@@ -32,6 +45,8 @@
  * Append only.
  * =================================================================== */
 
+#ifndef QAWS_ENUM_QAWS_DIFF_FIELD
+#define QAWS_ENUM_QAWS_DIFF_FIELD
 typedef enum qaws_diff_field
 {
 	QAWS_FIELD_NONE = 0,
@@ -59,14 +74,20 @@ typedef enum qaws_diff_field
 	QAWS_FIELD_PARAMETER = 22,       /* an operation input parameter (split parameter, ...) */
 	QAWS_FIELD_COUNT
 } qaws_diff_field;
+#endif
 
+#ifndef QAWS_ENUM_QAWS_VALUE_TYPE
+#define QAWS_ENUM_QAWS_VALUE_TYPE
 typedef enum qaws_value_type
 {
 	QAWS_VALUE_SCALAR = 1,
 	QAWS_VALUE_VEC2 = 2,
 	QAWS_VALUE_VEC3 = 3
 } qaws_value_type;
+#endif
 
+#ifndef QAWS_ENUM_QAWS_VALUE_DOMAIN
+#define QAWS_ENUM_QAWS_VALUE_DOMAIN
 typedef enum qaws_value_domain
 {
 	QAWS_DOMAIN_GENERIC = 0,
@@ -80,7 +101,10 @@ typedef enum qaws_value_domain
 	QAWS_DOMAIN_ARC_LENGTH,
 	QAWS_DOMAIN_CURVATURE
 } qaws_value_domain;
+#endif
 
+#ifndef QAWS_ENUM_QAWS_VALUE_CONSTRAINT
+#define QAWS_ENUM_QAWS_VALUE_CONSTRAINT
 typedef enum qaws_value_constraint
 {
 	QAWS_CONSTRAINT_NONE = 0,
@@ -89,11 +113,14 @@ typedef enum qaws_value_constraint
 	QAWS_CONSTRAINT_MONOTONIC,      /* elements non-decreasing (knot vectors) */
 	QAWS_CONSTRAINT_UNIT_INTERVAL   /* in [0, 1] */
 } qaws_value_constraint;
+#endif
 
 /* ===================================================================
  * Differentiability classes, capabilities, runtime validity
  * =================================================================== */
 
+#ifndef QAWS_ENUM_QAWS_DIFF_CLASS
+#define QAWS_ENUM_QAWS_DIFF_CLASS
 typedef enum qaws_diff_class
 {
 	QAWS_DIFF_SMOOTH = 0,
@@ -103,7 +130,10 @@ typedef enum qaws_diff_class
 	QAWS_DIFF_DISCRETE,          /* only derivatives under frozen topology exist */
 	QAWS_DIFF_UNSUPPORTED
 } qaws_diff_class;
+#endif
 
+#ifndef QAWS_ENUM_QAWS_DIFF_CAPABILITY
+#define QAWS_ENUM_QAWS_DIFF_CAPABILITY
 typedef enum qaws_diff_capability
 {
 	QAWS_CAP_TANGENT    = 1 << 0,
@@ -113,8 +143,11 @@ typedef enum qaws_diff_capability
 	QAWS_CAP_LOCAL_SUPPORT = 1 << 4,  /* qaws_*_local_support is available */
 	QAWS_CAP_LINEAR     = 1 << 5      /* output is linear in all fields (weights in support are exact) */
 } qaws_diff_capability;
+#endif
 
 /* Discrete states a derivative may rely on. */
+#ifndef QAWS_ENUM_QAWS_DIFF_FREEZE
+#define QAWS_ENUM_QAWS_DIFF_FREEZE
 typedef enum qaws_diff_freeze
 {
 	QAWS_FREEZE_NONE       = 0,
@@ -123,8 +156,11 @@ typedef enum qaws_diff_freeze
 	QAWS_FREEZE_TOPOLOGY   = 1 << 2,   /* trim loops, boolean topology, mesh connectivity */
 	QAWS_FREEZE_SAMPLE_SET = 1 << 3    /* sample counts / adaptive sampling decisions */
 } qaws_diff_freeze;
+#endif
 
 /* Runtime validity, ordered from best to worst. */
+#ifndef QAWS_ENUM_QAWS_DIFF_VALIDITY
+#define QAWS_ENUM_QAWS_DIFF_VALIDITY
 typedef enum qaws_diff_validity
 {
 	QAWS_DIFF_VALID = 0,
@@ -134,15 +170,21 @@ typedef enum qaws_diff_validity
 	QAWS_DIFF_AMBIGUOUS,         /* several competing solutions */
 	QAWS_DIFF_INVALID
 } qaws_diff_validity;
+#endif
 
+#ifndef QAWS_ENUM_QAWS_DIFF_ACCUMULATION
+#define QAWS_ENUM_QAWS_DIFF_ACCUMULATION
 typedef enum qaws_diff_accumulation
 {
 	QAWS_ACCUMULATE_SCATTER = 0, /* each sample adds into the parameter adjoints */
 	QAWS_ACCUMULATE_GATHER,      /* each parameter gathers its samples (deterministic order) */
 	QAWS_ACCUMULATE_TILED        /* tile-local accumulation, one flush per tile */
 } qaws_diff_accumulation;
+#endif
 
 /* Coordinate kind of an evaluation parameter. */
+#ifndef QAWS_ENUM_QAWS_COORDINATE_KIND
+#define QAWS_ENUM_QAWS_COORDINATE_KIND
 typedef enum qaws_coordinate_kind
 {
 	QAWS_COORDINATE_PARAMETRIC = 0,
@@ -151,6 +193,7 @@ typedef enum qaws_coordinate_kind
 	QAWS_COORDINATE_TIME,
 	QAWS_COORDINATE_WORLD_DISTANCE
 } qaws_coordinate_kind;
+#endif
 
 /* ===================================================================
  * Field description (schema)
@@ -254,6 +297,8 @@ typedef struct qaws_curve_jet_3d
 } qaws_curve_jet_3d;
 
 /* Surface jet channels: all partial derivatives up to total order 3. */
+#ifndef QAWS_ENUM_QAWS_SURFACE_JET_CHANNEL
+#define QAWS_ENUM_QAWS_SURFACE_JET_CHANNEL
 typedef enum qaws_surface_jet_channel
 {
 	QAWS_SJET_P   = 1 << 0,
@@ -270,6 +315,7 @@ typedef enum qaws_surface_jet_channel
 	QAWS_SJET_ORDER2 = QAWS_SJET_ORDER1 | QAWS_SJET_UU | QAWS_SJET_UV | QAWS_SJET_VV,
 	QAWS_SJET_ORDER3 = QAWS_SJET_ORDER2 | QAWS_SJET_UUU | QAWS_SJET_UUV | QAWS_SJET_UVV | QAWS_SJET_VVV
 } qaws_surface_jet_channel;
+#endif
 
 #define QAWS_SURFACE_JET_COUNT 10
 
@@ -292,6 +338,8 @@ typedef struct qaws_surface_jet
  * W^(k) = sum_j weights * w_j, with C = A / W.
  * =================================================================== */
 
+#ifndef QAWS_ENUM_QAWS_SUPPORT_KIND
+#define QAWS_ENUM_QAWS_SUPPORT_KIND
 typedef enum qaws_support_kind
 {
 	QAWS_SUPPORT_LOCAL = 0,   /* a few contiguous elements per field */
@@ -299,6 +347,7 @@ typedef enum qaws_support_kind
 	QAWS_SUPPORT_GLOBAL,      /* every element may contribute */
 	QAWS_SUPPORT_IMPLICIT     /* defined through a solve */
 } qaws_support_kind;
+#endif
 
 #define QAWS_DIFF_MAX_ORDER 5
 #define QAWS_DIFF_MAX_SUPPORT 32

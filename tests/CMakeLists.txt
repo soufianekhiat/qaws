@@ -122,6 +122,7 @@ add_executable(
   118_repulsive_controls.c
   119_repulsive_core.c
   120_repulsive_spacetime.c
+  121_precision_both.c
 )
 
 # The amalgamated library exports exactly the same symbols, so the tests can
@@ -159,3 +160,23 @@ set_target_properties(qaws_tests PROPERTIES
 
 add_test(NAME qaws_tests COMMAND qaws_tests)
 set_tests_properties(qaws_tests PROPERTIES WORKING_DIRECTORY "${QAWS_WORKING_DIR}")
+
+# The API checks (docs/parameter_convention_plan.md): every declaration in
+# the parameter convention, less the shrinking allow-list; qaws_names.h the
+# map of the headers' precision-bearing names.
+add_executable(qaws_api_tool "${PROJECT_SOURCE_DIR}/tools/qaws_api_tool.c")
+set(_QAWS_SRC "${PROJECT_SOURCE_DIR}/src/qaws")
+file(GLOB _QAWS_PUBLIC_HEADERS "${_QAWS_SRC}/*.h")
+list(REMOVE_ITEM _QAWS_PUBLIC_HEADERS "${_QAWS_SRC}/qaws_names.h")
+file(GLOB _QAWS_INTERNAL_HEADERS "${_QAWS_SRC}/internal/*.h")
+file(GLOB _QAWS_CORE_HEADERS "${_QAWS_SRC}/core/*.h")
+file(GLOB _QAWS_OTHER_HEADERS "${_QAWS_SRC}/exact/*.h" "${_QAWS_SRC}/simd/*.h")
+set(_QAWS_NAMED_HEADERS ${_QAWS_PUBLIC_HEADERS})
+list(REMOVE_ITEM _QAWS_NAMED_HEADERS "${_QAWS_SRC}/qaws_status.h" "${_QAWS_SRC}/qaws_batch_executor.h")
+add_test(NAME qaws_api_convention
+  COMMAND qaws_api_tool survey -allow "${PROJECT_SOURCE_DIR}/tools/qaws_api_allow.txt"
+    ${_QAWS_PUBLIC_HEADERS} ${_QAWS_INTERNAL_HEADERS} ${_QAWS_CORE_HEADERS})
+add_test(NAME qaws_api_names
+  COMMAND qaws_api_tool names -check "${_QAWS_SRC}/qaws_names.h"
+    -once "${_QAWS_SRC}/qaws_status.h" "${_QAWS_SRC}/qaws_batch_executor.h"
+    -- ${_QAWS_NAMED_HEADERS} ${_QAWS_INTERNAL_HEADERS} ${_QAWS_OTHER_HEADERS} ${_QAWS_CORE_HEADERS})

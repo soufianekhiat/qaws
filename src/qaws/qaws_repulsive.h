@@ -1,4 +1,17 @@
-#ifndef QAWS_REPULSIVE_H
+#include "qaws_platform.h"   /* (QAWS_SCALAR_IS_FLOAT: the precision this pass declares) */
+#if QAWS_SCALAR_IS_FLOAT
+#ifndef QAWS_REPULSIVE_H_F32
+#define QAWS_REPULSIVE_H_F32
+#define QAWS_REPULSIVE_H_BODY
+#endif
+#else
+#ifndef QAWS_REPULSIVE_H_F64
+#define QAWS_REPULSIVE_H_F64
+#define QAWS_REPULSIVE_H_BODY
+#endif
+#endif
+#ifdef QAWS_REPULSIVE_H_BODY
+#undef QAWS_REPULSIVE_H_BODY
 #define QAWS_REPULSIVE_H
 
 #include "qaws_types.h"
@@ -114,6 +127,8 @@ qaws_status qaws_repulsive_curves_hvp(qaws_repulsive_curves const* curves, qaws_
  * the dense mode's, through the same tree broad phase.
  */
 
+#ifndef QAWS_ENUM_QAWS_REPULSIVE_TERMINATION
+#define QAWS_ENUM_QAWS_REPULSIVE_TERMINATION
 typedef enum qaws_repulsive_termination
 {
 	QAWS_REPULSIVE_RUNNING = 0,            /* a step taken, not stopped */
@@ -124,6 +139,7 @@ typedef enum qaws_repulsive_termination
 	QAWS_REPULSIVE_STALLED,                /* no step lowered the energy */
 	QAWS_REPULSIVE_NUMERICAL_FAILURE       /* a singular system or an unusable energy */
 } qaws_repulsive_termination;
+#endif
 
 typedef struct qaws_repulsive_curves_solve_desc
 {

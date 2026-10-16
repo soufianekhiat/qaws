@@ -1,4 +1,17 @@
-#ifndef QAWS_EXPORT_H
+#include "qaws_platform.h"   /* (QAWS_SCALAR_IS_FLOAT: the precision this pass declares) */
+#if QAWS_SCALAR_IS_FLOAT
+#ifndef QAWS_EXPORT_H_F32
+#define QAWS_EXPORT_H_F32
+#define QAWS_EXPORT_H_BODY
+#endif
+#else
+#ifndef QAWS_EXPORT_H_F64
+#define QAWS_EXPORT_H_F64
+#define QAWS_EXPORT_H_BODY
+#endif
+#endif
+#ifdef QAWS_EXPORT_H_BODY
+#undef QAWS_EXPORT_H_BODY
 #define QAWS_EXPORT_H
 
 #include "qaws_types.h"
@@ -51,11 +64,14 @@ qaws_status qaws_curve_export_svg_path(
  * QAWS_POLYLINE_CURVATURE:  curvature-weighted — more points in high-curvature
  *                           regions, fewer in straight segments.
  */
+#ifndef QAWS_ENUM_QAWS_POLYLINE_SAMPLING
+#define QAWS_ENUM_QAWS_POLYLINE_SAMPLING
 typedef enum qaws_polyline_sampling
 {
 	QAWS_POLYLINE_UNIFORM   = 0,
 	QAWS_POLYLINE_CURVATURE = 1
 } qaws_polyline_sampling;
+#endif
 
 /*
  * Polyline export.

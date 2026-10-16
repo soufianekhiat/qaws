@@ -1,15 +1,31 @@
-#ifndef QAWS_SUBDIVISION_H
+#include "qaws_platform.h"   /* (QAWS_SCALAR_IS_FLOAT: the precision this pass declares) */
+#if QAWS_SCALAR_IS_FLOAT
+#ifndef QAWS_SUBDIVISION_H_F32
+#define QAWS_SUBDIVISION_H_F32
+#define QAWS_SUBDIVISION_H_BODY
+#endif
+#else
+#ifndef QAWS_SUBDIVISION_H_F64
+#define QAWS_SUBDIVISION_H_F64
+#define QAWS_SUBDIVISION_H_BODY
+#endif
+#endif
+#ifdef QAWS_SUBDIVISION_H_BODY
+#undef QAWS_SUBDIVISION_H_BODY
 #define QAWS_SUBDIVISION_H
 
 #include "qaws_types.h"
 #include "qaws_status.h"
 
+#ifndef QAWS_ENUM_QAWS_SUBDIVISION_SCHEME
+#define QAWS_ENUM_QAWS_SUBDIVISION_SCHEME
 typedef enum qaws_subdivision_scheme
 {
 	QAWS_SUBDIVISION_CHAIKIN = 0,        /* Quadratic B-spline limit (C1) */
 	QAWS_SUBDIVISION_LANE_RIESENFELD_3,  /* Cubic B-spline limit (C2) */
 	QAWS_SUBDIVISION_LANE_RIESENFELD_4   /* Quartic B-spline limit (C3) */
 } qaws_subdivision_scheme;
+#endif
 
 typedef struct qaws_subdivision_desc
 {

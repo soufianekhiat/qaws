@@ -1,4 +1,17 @@
-#ifndef QAWS_PATH_H
+#include "qaws_platform.h"   /* (QAWS_SCALAR_IS_FLOAT: the precision this pass declares) */
+#if QAWS_SCALAR_IS_FLOAT
+#ifndef QAWS_PATH_H_F32
+#define QAWS_PATH_H_F32
+#define QAWS_PATH_H_BODY
+#endif
+#else
+#ifndef QAWS_PATH_H_F64
+#define QAWS_PATH_H_F64
+#define QAWS_PATH_H_BODY
+#endif
+#endif
+#ifdef QAWS_PATH_H_BODY
+#undef QAWS_PATH_H_BODY
 #define QAWS_PATH_H
 
 #include "qaws_types.h"
@@ -23,6 +36,8 @@ typedef struct qaws_path_2d
 	int closed;
 } qaws_path_2d;
 
+#ifndef QAWS_ENUM_QAWS_FILL_RULE
+#define QAWS_ENUM_QAWS_FILL_RULE
 typedef enum qaws_fill_rule
 {
 	QAWS_FILL_EVEN_ODD = 0,     /* odd winding numbers are inside */
@@ -30,13 +45,17 @@ typedef enum qaws_fill_rule
 	QAWS_FILL_POSITIVE,         /* positive winding numbers are inside */
 	QAWS_FILL_NEGATIVE          /* negative winding numbers are inside */
 } qaws_fill_rule;
+#endif
 
+#ifndef QAWS_ENUM_QAWS_POINT_LOCATION
+#define QAWS_ENUM_QAWS_POINT_LOCATION
 typedef enum qaws_point_location
 {
 	QAWS_POINT_OUTSIDE = 0,
 	QAWS_POINT_INSIDE,
 	QAWS_POINT_ON               /* within the tolerance of a boundary */
 } qaws_point_location;
+#endif
 
 /* 1 when winding number w is inside under the rule. */
 int qaws_fill_rule_inside(qaws_fill_rule rule, int winding);

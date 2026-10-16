@@ -1,5 +1,9 @@
 #include "qaws_status.h"
 
+/* (precision-free: defined by the f64 pass only, where the library and a
+   twice-compiled amalgamation both compile it once) */
+#if !QAWS_SCALAR_IS_FLOAT
+
 const char *qaws_status_to_string(qaws_status status)
 {
 	switch (status) {
@@ -49,3 +53,4 @@ const char *qaws_status_to_string(qaws_status status)
 		return "QAWS_STATUS_UNKNOWN";
 	}
 }
+#endif /* !QAWS_SCALAR_IS_FLOAT */

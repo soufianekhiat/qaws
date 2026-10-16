@@ -1,4 +1,17 @@
-#ifndef QAWS_ALLOC_H
+#include "qaws_platform.h"   /* (QAWS_SCALAR_IS_FLOAT: the precision this pass declares) */
+#if QAWS_SCALAR_IS_FLOAT
+#ifndef QAWS_ALLOC_H_F32
+#define QAWS_ALLOC_H_F32
+#define QAWS_ALLOC_H_BODY
+#endif
+#else
+#ifndef QAWS_ALLOC_H_F64
+#define QAWS_ALLOC_H_F64
+#define QAWS_ALLOC_H_BODY
+#endif
+#endif
+#ifdef QAWS_ALLOC_H_BODY
+#undef QAWS_ALLOC_H_BODY
 #define QAWS_ALLOC_H
 
 #include "qaws_types.h"

@@ -1,4 +1,17 @@
-#ifndef QAWS_DIFF_SAMPLING_H
+#include "qaws_platform.h"   /* (QAWS_SCALAR_IS_FLOAT: the precision this pass declares) */
+#if QAWS_SCALAR_IS_FLOAT
+#ifndef QAWS_DIFF_SAMPLING_H_F32
+#define QAWS_DIFF_SAMPLING_H_F32
+#define QAWS_DIFF_SAMPLING_H_BODY
+#endif
+#else
+#ifndef QAWS_DIFF_SAMPLING_H_F64
+#define QAWS_DIFF_SAMPLING_H_F64
+#define QAWS_DIFF_SAMPLING_H_BODY
+#endif
+#endif
+#ifdef QAWS_DIFF_SAMPLING_H_BODY
+#undef QAWS_DIFF_SAMPLING_H_BODY
 #define QAWS_DIFF_SAMPLING_H
 
 #include "qaws_diff_types.h"
@@ -53,12 +66,15 @@
  * reported as QAWS_DIFF_ILL_CONDITIONED through ctx->report.
  */
 
+#ifndef QAWS_ENUM_QAWS_SAMPLE_MEASURE
+#define QAWS_ENUM_QAWS_SAMPLE_MEASURE
 typedef enum qaws_sample_measure
 {
 	QAWS_MEASURE_ARC_LENGTH = 0,
 	QAWS_MEASURE_CURVATURE,
 	QAWS_MEASURE_DENSITY
 } qaws_sample_measure;
+#endif
 
 /* Positive density at a point, with its gradient and Hessian (xx, xy, xz,
    yy, yz, zz); the outputs are always given. */

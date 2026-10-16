@@ -1,4 +1,17 @@
-#ifndef QAWS_CLIP_H
+#include "qaws_platform.h"   /* (QAWS_SCALAR_IS_FLOAT: the precision this pass declares) */
+#if QAWS_SCALAR_IS_FLOAT
+#ifndef QAWS_CLIP_H_F32
+#define QAWS_CLIP_H_F32
+#define QAWS_CLIP_H_BODY
+#endif
+#else
+#ifndef QAWS_CLIP_H_F64
+#define QAWS_CLIP_H_F64
+#define QAWS_CLIP_H_BODY
+#endif
+#endif
+#ifdef QAWS_CLIP_H_BODY
+#undef QAWS_CLIP_H_BODY
 #define QAWS_CLIP_H
 
 #include "qaws_types.h"
@@ -36,6 +49,8 @@
  * Thread-safe on immutable curves.
  */
 
+#ifndef QAWS_ENUM_QAWS_CLIP_TYPE
+#define QAWS_ENUM_QAWS_CLIP_TYPE
 typedef enum qaws_clip_type
 {
 	QAWS_CLIP_NONE = 0,
@@ -44,6 +59,7 @@ typedef enum qaws_clip_type
 	QAWS_CLIP_DIFFERENCE,
 	QAWS_CLIP_XOR
 } qaws_clip_type;
+#endif
 
 #define QAWS_CLIP_PRESERVE_COLLINEAR 1u  /* keep vertices between collinear line pieces */
 #define QAWS_CLIP_REVERSE_SOLUTION   2u  /* outer paths clockwise, holes counter-clockwise */

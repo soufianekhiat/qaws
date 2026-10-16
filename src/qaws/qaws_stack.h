@@ -1,4 +1,17 @@
-#ifndef QAWS_STACK_H
+#include "qaws_platform.h"   /* (QAWS_SCALAR_IS_FLOAT: the precision this pass declares) */
+#if QAWS_SCALAR_IS_FLOAT
+#ifndef QAWS_STACK_H_F32
+#define QAWS_STACK_H_F32
+#define QAWS_STACK_H_BODY
+#endif
+#else
+#ifndef QAWS_STACK_H_F64
+#define QAWS_STACK_H_F64
+#define QAWS_STACK_H_BODY
+#endif
+#endif
+#ifdef QAWS_STACK_H_BODY
+#undef QAWS_STACK_H_BODY
 #define QAWS_STACK_H
 
 #include "qaws_types.h"
@@ -41,18 +54,24 @@
  * Thread-safe on immutable curves.
  */
 
+#ifndef QAWS_ENUM_QAWS_STACK_INTERP
+#define QAWS_ENUM_QAWS_STACK_INTERP
 typedef enum qaws_stack_interp
 {
 	QAWS_STACK_LINEAR = 0,
 	QAWS_STACK_CUBIC
 } qaws_stack_interp;
+#endif
 
+#ifndef QAWS_ENUM_QAWS_STACK_BLEND
+#define QAWS_ENUM_QAWS_STACK_BLEND
 typedef enum qaws_stack_blend
 {
 	QAWS_STACK_BLEND_AUTO = 0,
 	QAWS_STACK_BLEND_MATCH,
 	QAWS_STACK_BLEND_DISTANCE
 } qaws_stack_blend;
+#endif
 
 typedef struct qaws_stack_level
 {

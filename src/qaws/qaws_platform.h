@@ -28,18 +28,10 @@
 
 #if QAWS_BACKEND == QAWS_BACKEND_C
 # include <math.h>
-# ifndef QAWS_SCALAR_IS_FLOAT
-#   define QAWS_SCALAR_IS_FLOAT 1
-# endif
-# if QAWS_SCALAR_IS_FLOAT
-    typedef float qaws_scalar;
-#   define QAWS_LITERAL(x) x##f
-#   define QAWS_EPSILON 1e-6f
-# else
-    typedef double qaws_scalar;
-#   define QAWS_LITERAL(x) x
-#   define QAWS_EPSILON 1e-12
-# endif
+  /* both precisions; qaws_scalar, QAWS_LITERAL, QAWS_EPSILON and the maths
+     follow QAWS_SCALAR_IS_FLOAT (qaws_precision.h) */
+  typedef float qaws_f32;
+  typedef double qaws_f64;
 
 #elif QAWS_BACKEND == QAWS_BACKEND_HLSL
   typedef float qaws_scalar;
@@ -130,27 +122,7 @@
  * =================================================================== */
 
 #if QAWS_BACKEND == QAWS_BACKEND_C
-# if QAWS_SCALAR_IS_FLOAT
-#   define QAWS_SQRT(x)     sqrtf(x)
-#   define QAWS_FABS(x)     fabsf(x)
-#   define QAWS_FLOOR(x)    floorf(x)
-#   define QAWS_CEIL(x)     ceilf(x)
-#   define QAWS_SIN(x)      sinf(x)
-#   define QAWS_COS(x)      cosf(x)
-#   define QAWS_ATAN2(y,x)  atan2f(y,x)
-#   define QAWS_POW(x,y)    powf(x,y)
-#   define QAWS_FMOD(x,y)   fmodf(x,y)
-# else
-#   define QAWS_SQRT(x)     sqrt(x)
-#   define QAWS_FABS(x)     fabs(x)
-#   define QAWS_FLOOR(x)    floor(x)
-#   define QAWS_CEIL(x)     ceil(x)
-#   define QAWS_SIN(x)      sin(x)
-#   define QAWS_COS(x)      cos(x)
-#   define QAWS_ATAN2(y,x)  atan2(y,x)
-#   define QAWS_POW(x,y)    pow(x,y)
-#   define QAWS_FMOD(x,y)   fmod(x,y)
-# endif
+  /* (qaws_precision.h) */
 
 #elif QAWS_BACKEND == QAWS_BACKEND_HLSL
 # define QAWS_SQRT(x)     sqrt(x)
@@ -201,14 +173,7 @@
  * =================================================================== */
 
 #if QAWS_BACKEND == QAWS_BACKEND_C
-  QAWS_INLINE qaws_scalar qaws_min(qaws_scalar a, qaws_scalar b) { return (a < b) ? a : b; }
-  QAWS_INLINE qaws_scalar qaws_max(qaws_scalar a, qaws_scalar b) { return (a > b) ? a : b; }
-  QAWS_INLINE qaws_scalar qaws_clamp(qaws_scalar x, qaws_scalar lo, qaws_scalar hi) {
-      return (x < lo) ? lo : (x > hi) ? hi : x;
-  }
-  QAWS_INLINE qaws_scalar qaws_lerp(qaws_scalar a, qaws_scalar b, qaws_scalar t) {
-      return (QAWS_ONE - t) * a + t * b;
-  }
+  /* (qaws_precision.h, once per precision) */
 
 #elif QAWS_BACKEND == QAWS_BACKEND_HLSL
 # define qaws_min(a, b)        min(a, b)
@@ -230,3 +195,6 @@
 #endif
 
 #endif /* QAWS_PLATFORM_H */
+
+/* the current precision's names (outside the guard: see qaws_precision.h) */
+#include "qaws_precision.h"

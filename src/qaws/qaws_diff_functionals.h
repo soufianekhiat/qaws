@@ -1,4 +1,17 @@
-#ifndef QAWS_DIFF_FUNCTIONALS_H
+#include "qaws_platform.h"   /* (QAWS_SCALAR_IS_FLOAT: the precision this pass declares) */
+#if QAWS_SCALAR_IS_FLOAT
+#ifndef QAWS_DIFF_FUNCTIONALS_H_F32
+#define QAWS_DIFF_FUNCTIONALS_H_F32
+#define QAWS_DIFF_FUNCTIONALS_H_BODY
+#endif
+#else
+#ifndef QAWS_DIFF_FUNCTIONALS_H_F64
+#define QAWS_DIFF_FUNCTIONALS_H_F64
+#define QAWS_DIFF_FUNCTIONALS_H_BODY
+#endif
+#endif
+#ifdef QAWS_DIFF_FUNCTIONALS_H_BODY
+#undef QAWS_DIFF_FUNCTIONALS_H_BODY
 #define QAWS_DIFF_FUNCTIONALS_H
 
 #include "qaws_diff_types.h"
@@ -22,19 +35,25 @@
  * per direction, 0 = 8; 4 x 4 points per cell).
  */
 
+#ifndef QAWS_ENUM_QAWS_CURVE_FUNCTIONAL
+#define QAWS_ENUM_QAWS_CURVE_FUNCTIONAL
 typedef enum qaws_curve_functional
 {
 	QAWS_FUNCTIONAL_LENGTH = 0,            /* integral of |C'| dt */
 	QAWS_FUNCTIONAL_BENDING,               /* integral of |C''|^2 dt */
 	QAWS_FUNCTIONAL_CURVATURE_SQUARED      /* integral of kappa^2 ds */
 } qaws_curve_functional;
+#endif
 
+#ifndef QAWS_ENUM_QAWS_SURFACE_FUNCTIONAL
+#define QAWS_ENUM_QAWS_SURFACE_FUNCTIONAL
 typedef enum qaws_surface_functional
 {
 	QAWS_FUNCTIONAL_AREA = 0,              /* integral of |Su x Sv| du dv */
 	QAWS_FUNCTIONAL_THIN_PLATE,            /* integral of |Suu|^2 + 2|Suv|^2 + |Svv|^2 */
 	QAWS_FUNCTIONAL_WILLMORE               /* integral of H^2 dA */
 } qaws_surface_functional;
+#endif
 
 qaws_status qaws_curve_functional_eval(
 	qaws_diff_context const* ctx,

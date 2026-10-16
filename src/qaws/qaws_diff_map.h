@@ -1,4 +1,17 @@
-#ifndef QAWS_DIFF_MAP_H
+#include "qaws_platform.h"   /* (QAWS_SCALAR_IS_FLOAT: the precision this pass declares) */
+#if QAWS_SCALAR_IS_FLOAT
+#ifndef QAWS_DIFF_MAP_H_F32
+#define QAWS_DIFF_MAP_H_F32
+#define QAWS_DIFF_MAP_H_BODY
+#endif
+#else
+#ifndef QAWS_DIFF_MAP_H_F64
+#define QAWS_DIFF_MAP_H_F64
+#define QAWS_DIFF_MAP_H_BODY
+#endif
+#endif
+#ifdef QAWS_DIFF_MAP_H_BODY
+#undef QAWS_DIFF_MAP_H_BODY
 #define QAWS_DIFF_MAP_H
 
 #include "qaws_diff_types.h"
@@ -24,11 +37,14 @@
 
 typedef struct qaws_diff_map qaws_diff_map;
 
+#ifndef QAWS_ENUM_QAWS_DIFF_MAP_KIND
+#define QAWS_ENUM_QAWS_DIFF_MAP_KIND
 typedef enum qaws_diff_map_kind
 {
 	QAWS_DIFF_MAP_LINEAR_SPARSE = 0,
 	QAWS_DIFF_MAP_OPERATOR
 } qaws_diff_map_kind;
+#endif
 
 /* Component value meaning "the same weight on every component". */
 #define QAWS_DIFF_MAP_ALL_COMPONENTS 0xFFu

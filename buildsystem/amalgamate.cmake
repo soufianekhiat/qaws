@@ -138,8 +138,10 @@ function(_am_banner kind out_var)
  *
  * SIMD batch evaluation: ${simd}
  *
- * Define QAWS_SCALAR_IS_FLOAT=1 for float, 0 for double, before
- * including this file. It must match between qaws.h and qaws.c.
+ * Both precisions: compile qaws.c twice, with QAWS_SCALAR_IS_FLOAT=0 and
+ * with QAWS_SCALAR_IS_FLOAT=1 (every scalar-bearing name gets its _f64 or
+ * _f32 form). Including qaws.h declares the precision QAWS_SCALAR_IS_FLOAT
+ * selects (default 1); include it again under the other value for both.
  */
 " PARENT_SCOPE)
 endfunction()

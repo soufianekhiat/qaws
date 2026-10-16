@@ -1,4 +1,17 @@
-#ifndef QAWS_SURFACE_TRIM_H
+#include "qaws_platform.h"   /* (QAWS_SCALAR_IS_FLOAT: the precision this pass declares) */
+#if QAWS_SCALAR_IS_FLOAT
+#ifndef QAWS_SURFACE_TRIM_H_F32
+#define QAWS_SURFACE_TRIM_H_F32
+#define QAWS_SURFACE_TRIM_H_BODY
+#endif
+#else
+#ifndef QAWS_SURFACE_TRIM_H_F64
+#define QAWS_SURFACE_TRIM_H_F64
+#define QAWS_SURFACE_TRIM_H_BODY
+#endif
+#endif
+#ifdef QAWS_SURFACE_TRIM_H_BODY
+#undef QAWS_SURFACE_TRIM_H_BODY
 #define QAWS_SURFACE_TRIM_H
 
 #include "qaws_surface_types.h"

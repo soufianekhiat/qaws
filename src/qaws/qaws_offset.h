@@ -1,4 +1,17 @@
-#ifndef QAWS_OFFSET_H
+#include "qaws_platform.h"   /* (QAWS_SCALAR_IS_FLOAT: the precision this pass declares) */
+#if QAWS_SCALAR_IS_FLOAT
+#ifndef QAWS_OFFSET_H_F32
+#define QAWS_OFFSET_H_F32
+#define QAWS_OFFSET_H_BODY
+#endif
+#else
+#ifndef QAWS_OFFSET_H_F64
+#define QAWS_OFFSET_H_F64
+#define QAWS_OFFSET_H_BODY
+#endif
+#endif
+#ifdef QAWS_OFFSET_H_BODY
+#undef QAWS_OFFSET_H_BODY
 #define QAWS_OFFSET_H
 
 #include "qaws_types.h"
@@ -30,6 +43,8 @@
  * Thread-safe on immutable curves.
  */
 
+#ifndef QAWS_ENUM_QAWS_JOIN_TYPE
+#define QAWS_ENUM_QAWS_JOIN_TYPE
 typedef enum qaws_join_type
 {
 	QAWS_JOIN_SQUARE = 0,   /* corners cut square at exactly |delta| from the corner */
@@ -37,7 +52,10 @@ typedef enum qaws_join_type
 	QAWS_JOIN_ROUND,        /* a circular arc of radius |delta| round the corner */
 	QAWS_JOIN_MITER         /* the offsets extended to meet, squared beyond the miter limit */
 } qaws_join_type;
+#endif
 
+#ifndef QAWS_ENUM_QAWS_END_TYPE
+#define QAWS_ENUM_QAWS_END_TYPE
 typedef enum qaws_end_type
 {
 	QAWS_END_POLYGON = 0,   /* closed path, offset on one side */
@@ -46,6 +64,7 @@ typedef enum qaws_end_type
 	QAWS_END_SQUARE,        /* open path, ends extended by |delta| and cut square */
 	QAWS_END_ROUND          /* open path, half circles at the ends */
 } qaws_end_type;
+#endif
 
 typedef struct qaws_offset_group
 {
