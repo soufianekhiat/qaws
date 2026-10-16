@@ -8,7 +8,7 @@ Brakensiek, Henrik Schumacher, Keenan Crane, ACM Transactions on Graphics
 
 | File | Scene | Settings there |
 |---|---|---|
-| hopf.obj | HopfLink (Fig. 11's gallery) | alpha 6, beta 12 (p 6); nothing held (the flow stopped by eye, with remeshing); here the area held |
-| borromean.obj | BorromeanRings (Fig. 11's gallery) | alpha 6, beta 12 (p 6); the area held |
+| hopf.obj | HopfLink (Fig. 11's gallery) | alpha 6, beta 12 (p 6); the area and the barycenter held, 200 iterations |
+| borromean.obj | BorromeanRings (Fig. 11's gallery) | alpha 6, beta 12 (p 6); the area and the barycenter held, 350 iterations |
 
 OBJ meshes: `v x y z` vertices and `f i j k` faces (1-based).

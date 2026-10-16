@@ -966,14 +966,14 @@ int main(int argc, char** argv)
 		printf("  showcase/paper10_neck.svg, %.0f s\n", difftime(time(NULL), t0));
 	}
 	/* Repulsive Surfaces, Fig. 11 (the gallery): linked surfaces flowing to
-	   their canonical embeddings; the paper's meshes, the area held (the
-	   paper's flow holds nothing and is stopped by eye) */
+	   their canonical embeddings; the paper's meshes, the area and the
+	   barycenter held as in the paper's scene files */
 	{
 		static char const* const files[2] = { "hopf.obj", "borromean.obj" };
 		static char const* const svgs[2] = { "showcase/paper8_hopf.svg", "showcase/paper9_borromean.svg" };
 		static char const* const titles[2] = { "Repulsive Surfaces, Fig. 11: a Hopf link", "Repulsive Surfaces, Fig. 11: Borromean rings" };
-		/* shortcut: the rings stopped at 400 steps (9 s a step, every step backtracked to 1/32), far from the stationarity floor */
-		static unsigned int const steps[2][2] = { { 25, RP_UNTIL }, { 200, 400 } };
+		/* shortcut: the rings stopped at the scene's 350 steps (9 s a step, every step backtracked to 1/32), far from the stationarity floor */
+		static unsigned int const steps[2][2] = { { 25, RP_UNTIL }, { 175, 350 } };
 		char sdir[1024];
 		unsigned int k;
 		sprintf(sdir, "%s/../repulsive_surfaces", dir);

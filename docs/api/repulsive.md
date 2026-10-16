@@ -737,9 +737,9 @@ stalls at the hierarchical stationarity floor (about 6e-3):
 | 9 (centre) | two pinned rings 1.6 apart, the area weighted 1, 10 and 100: a neck kept in each | 1440 | 17, 24, 23 | 9.99, 86.9, 803 |
 | 11 | a Hopf link, the area held | 9216 | 40 | 842.5 -> 303.3 (256 s) |
 
-The paper's flows hold nothing for the links and are stopped by eye.
-Here the area is held, since unconstrained the links inflate (the energy
-falls toward 0 as the surfaces grow).
+The links hold the area and the barycenter, as the paper's own scene
+files do (with limits of 200 and 350 iterations): unconstrained, they
+inflate (the energy falls toward 0 as the surfaces grow).
 
 Not reproduced: the scenes that need remeshing, implicit obstacles,
 growth schedules, or p <= 4 (the solver needs p > 4).
