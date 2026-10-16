@@ -395,13 +395,13 @@ static qaws_status bp_serial_visit(void* user, unsigned int chunk, unsigned int 
 
 
 qaws_status qaws_internal_broadphase(
+	qaws_bp_stats* out_stats,
 	qaws_bp_box const* boxes,
 	unsigned int count,
 	unsigned int dim,
 	qaws_bp_accept accept,
 	qaws_bp_visit visit,
-	void* user,
-	qaws_bp_stats* out_stats)
+	void* user)
 {
 	struct qaws_bp_grid GR;
 	bp_serial b;
@@ -435,7 +435,7 @@ qaws_status qaws_internal_broadphase(
 	return s;
 }
 
-qaws_status qaws_internal_grid_create(qaws_bp_box const* boxes, unsigned int count, unsigned int dim, qaws_bp_grid** out_grid)
+qaws_status qaws_internal_grid_create(qaws_bp_grid** out_grid, qaws_bp_box const* boxes, unsigned int count, unsigned int dim)
 {
 	struct qaws_bp_grid* g;
 	qaws_status s;
@@ -603,9 +603,9 @@ static qaws_status bp_par_job(void* ctx, unsigned int chunk, unsigned int begin,
 	return bp_cells(P->GR, P->boxes, P->accept, P->accept_user, P->visit, P->visit_user, chunk, begin, end, &P->candidates[chunk]);
 }
 
-qaws_status qaws_internal_grid_pairs(qaws_bp_grid const* grid, qaws_bp_box const* boxes, qaws_bp_accept accept, void* accept_user,
-	qaws_status (*visit)(void* user, unsigned int chunk, unsigned int i, unsigned int j), void* visit_user, qaws_batch_executor const* executor,
-	unsigned int* out_candidates)
+qaws_status qaws_internal_grid_pairs(unsigned int* out_candidates, qaws_bp_grid const* grid, qaws_bp_box const* boxes, qaws_bp_accept accept,
+	void* accept_user, qaws_status (*visit)(void* user, unsigned int chunk, unsigned int i, unsigned int j), void* visit_user,
+	qaws_batch_executor const* executor)
 {
 	bp_par P;
 	unsigned int k, n = qaws_internal_grid_pair_chunks(grid);
@@ -630,7 +630,7 @@ qaws_status qaws_internal_grid_pairs(qaws_bp_grid const* grid, qaws_bp_box const
 		if (keys && bp_sweep_cost(boxes, keys, nk, axis) < bp_grid_cost(grid))
 			s = bp_sweep(boxes, grid->count, grid->dim, axis, keys, nk, accept, accept_user, visit, visit_user, &P.candidates[0]);
 		else
-			s = qaws_internal_parallel(executor, grid->ncell, BP_PAIR_GRAIN, bp_par_job, &P);
+			s = qaws_internal_parallel(grid->ncell, BP_PAIR_GRAIN, bp_par_job, executor, &P);
 		free(keys);
 	}
 	for (k = 0; k < n && out_candidates; k++)

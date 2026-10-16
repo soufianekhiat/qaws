@@ -275,7 +275,7 @@ static void fillet_surface_destroy(void* impl, qaws_allocator const* allocator)
 	{
 		if (fi->grid) free(fi->grid);
 	}
-	qaws_internal_dealloc(allocator, impl);
+	qaws_internal_dealloc(impl, allocator);
 }
 
 static int fillet_surface_is_rational(qaws_surface const* s)
@@ -683,10 +683,10 @@ qaws_status qaws_surface_create_fillet_with_trims(
 	if (cp_count > sample_count) cp_count = sample_count;
 
 	status = qaws_internal_fit_bspline(
-		QAWS_DIMENSION_2D, 3,
-		trim_a_params, trim_a_coords,
+		out_trim_a, trim_a_params,
+		trim_a_coords, QAWS_DIMENSION_2D,
 		sample_count, cp_count,
-		out_trim_a);
+		3);
 
 	if (status != QAWS_STATUS_OK)
 	{
@@ -699,10 +699,10 @@ qaws_status qaws_surface_create_fillet_with_trims(
 	}
 
 	status = qaws_internal_fit_bspline(
-		QAWS_DIMENSION_2D, 3,
-		trim_b_params, trim_b_coords,
+		out_trim_b, trim_b_params,
+		trim_b_coords, QAWS_DIMENSION_2D,
 		sample_count, cp_count,
-		out_trim_b);
+		3);
 
 	if (status != QAWS_STATUS_OK)
 	{

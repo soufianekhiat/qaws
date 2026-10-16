@@ -129,9 +129,9 @@ static void composite_destroy_impl(void* impl_ptr, qaws_allocator const* allocat
 	if (impl->segments) {
 		for (i = 0; i < impl->segment_count; i++)
 			qaws_curve_destroy(impl->segments[i]);
-		qaws_internal_dealloc(allocator, impl->segments);
+		qaws_internal_dealloc(impl->segments, allocator);
 	}
-	qaws_internal_dealloc(allocator, impl);
+	qaws_internal_dealloc(impl, allocator);
 }
 
 /* ------------------------------------------------------------------ */
@@ -269,8 +269,8 @@ static qaws_status composite_tangent_span(
 	seg = impl->segments[span_index];
 	composite_map_parameter(seg, local_t, &seg_t, &scale);
 	/* Each composite span has unit width, so dt_segment = scale * dt. */
-	st = qaws_internal_curve_tangent_any(ctx, seg, seg_t, scale * t_dot, channels,
-		qaws_internal_child_views(views, span_index), primal, tangent, tangent2);
+	st = qaws_internal_curve_tangent_any(primal, tangent, tangent2, seg, qaws_internal_child_views(views, span_index),
+		seg_t, scale * t_dot, channels, ctx);
 	if (st != QAWS_STATUS_OK)
 		return st;
 	composite_scale_jet(primal, scale);
@@ -296,8 +296,8 @@ static qaws_status composite_adjoint_span(
 	seg = impl->segments[span_index];
 	composite_map_parameter(seg, local_t, &seg_t, &scale);
 	composite_scale_jet(&j, scale);
-	st = qaws_internal_curve_adjoint_any(ctx, seg, seg_t, channels, &j,
-		(qaws_diff_views*)qaws_internal_child_views(views, span_index), t_adjoint ? &seg_bar : NULL);
+	st = qaws_internal_curve_adjoint_any((qaws_diff_views*)qaws_internal_child_views(views, span_index), t_adjoint ? &seg_bar : NULL, seg, &j, seg_t,
+		channels, ctx);
 	if (st != QAWS_STATUS_OK)
 		return st;
 	if (t_adjoint)

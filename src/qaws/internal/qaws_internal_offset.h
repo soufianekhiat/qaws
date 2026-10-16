@@ -10,8 +10,8 @@
    receives its first curve_capacity curves, *out_curve_count their number.
    cusps (optional) receives up to cusp_capacity parameters of the offset's
    cusps; *cusp_count their number. */
-qaws_status qaws_internal_offset_curve(qaws_curve const* curve, double delta, double tolerance,
-	qaws_curve** out_curves, unsigned int curve_capacity, unsigned int* out_curve_count,
-	double* cusps, unsigned int cusp_capacity, unsigned int* cusp_count);
+qaws_status qaws_internal_offset_curve(qaws_curve** out_curves, unsigned int* out_curve_count, double* cusps,
+	unsigned int* cusp_count, qaws_curve const* curve, unsigned int curve_capacity,
+	unsigned int cusp_capacity, double delta, double tolerance);
 
 #endif /* QAWS_INTERNAL_OFFSET_H */

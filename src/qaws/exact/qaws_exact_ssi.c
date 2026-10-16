@@ -32,12 +32,12 @@ typedef struct ssi_pt
 
 static void* ss_alloc(size_t b)
 {
-	return qaws_internal_alloc(NULL, (unsigned long)b);
+	return qaws_internal_alloc((unsigned long)b, NULL);
 }
 
 static void ss_free(void* p)
 {
-	qaws_internal_dealloc(NULL, p);
+	qaws_internal_dealloc(p, NULL);
 }
 
 /*

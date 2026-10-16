@@ -9,20 +9,20 @@
    t: parameter in [0,1].
    out_point: receives dim_count scalars. */
 void qaws_internal_decasteljau(
+	qaws_scalar* out_point,
 	qaws_scalar const* control_points,
-	unsigned int degree,
 	unsigned int dim_count,
-	qaws_scalar t,
-	qaws_scalar* out_point);
+	unsigned int degree,
+	qaws_scalar t);
 
 /* Bezier derivative control points.
    Given degree-N control points, writes degree-(N-1) differenced control points.
    out_deriv_points must hold degree * dim_count scalars. */
 void qaws_internal_bezier_derivative_points(
+	qaws_scalar* out_deriv_points,
 	qaws_scalar const* control_points,
-	unsigned int degree,
 	unsigned int dim_count,
-	qaws_scalar* out_deriv_points);
+	unsigned int degree);
 
 /* Cubic Hermite basis values and derivatives.
    t: local parameter in [0,1].
@@ -31,11 +31,11 @@ void qaws_internal_bezier_derivative_points(
    out_d2h: if non-NULL, receives 4 second derivative values.
    out_d3h: if non-NULL, receives 4 third derivative values. */
 void qaws_internal_hermite_basis(
-	qaws_scalar t,
 	qaws_scalar* out_h,
 	qaws_scalar* out_dh,
 	qaws_scalar* out_d2h,
-	qaws_scalar* out_d3h);
+	qaws_scalar* out_d3h,
+	qaws_scalar t);
 
 /* B-spline basis functions N_{i,p}(t).
    knots: full knot vector.
@@ -45,24 +45,24 @@ void qaws_internal_hermite_basis(
    t: parameter value.
    out_basis: receives (degree+1) basis values for indices [span-degree .. span]. */
 void qaws_internal_bspline_basis(
+	qaws_scalar* out_basis,
 	qaws_scalar const* knots,
 	unsigned int knot_count,
 	unsigned int degree,
 	unsigned int span,
-	qaws_scalar t,
-	qaws_scalar* out_basis);
+	qaws_scalar t);
 
 /* B-spline basis functions and their derivatives up to order k.
    out_ders: (k+1) x (degree+1) row-major array.
    out_ders[0] = basis values, out_ders[1] = first derivs, etc. */
 void qaws_internal_bspline_basis_derivs(
+	qaws_scalar* out_ders,
 	qaws_scalar const* knots,
 	unsigned int knot_count,
 	unsigned int degree,
 	unsigned int span,
 	qaws_scalar t,
-	unsigned int k,
-	qaws_scalar* out_ders);
+	unsigned int k);
 
 /* Find knot span index such that knots[span] <= t < knots[span+1].
    Returns the span index. Clamps to valid range. */

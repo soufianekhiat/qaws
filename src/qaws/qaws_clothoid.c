@@ -154,7 +154,7 @@ static qaws_status clothoid_eval_span_3d(
 static void clothoid_destroy_impl(void *impl, qaws_allocator const* allocator)
 {
 	if (impl)
-		qaws_internal_dealloc(allocator, impl);
+		qaws_internal_dealloc(impl, allocator);
 }
 
 /* ---------------------------------------------------------------------------
@@ -263,7 +263,7 @@ static void cl_read(qaws_diff_views const *views, qaws_diff_field field, unsigne
 	qaws_field_view const *v = views ? qaws_diff_views_find(views, field) : NULL;
 	out[0] = out[1] = 0;
 	if (v)
-		qaws_internal_view_read(v, 0, comps, out);
+		qaws_internal_view_read(out, v, 0, comps);
 }
 
 static void cl_params_make(qaws_clothoid_impl const *impl, qaws_scalar const *d_origin, qaws_scalar d_th0,
@@ -418,10 +418,10 @@ static qaws_status clothoid_rebuild(qaws_curve const *curve, qaws_diff_views con
 	rate[0] = impl->rate;
 	if (values)
 	{
-		if ((v = qaws_diff_views_find(values, QAWS_FIELD_CENTER)) != NULL && v->data) qaws_internal_view_read(v, 0, 2, origin);
-		if ((v = qaws_diff_views_find(values, QAWS_FIELD_ANGLE_START)) != NULL && v->data) qaws_internal_view_read(v, 0, 1, th0);
-		if ((v = qaws_diff_views_find(values, QAWS_FIELD_CURVATURE)) != NULL && v->data) qaws_internal_view_read(v, 0, 1, k0);
-		if ((v = qaws_diff_views_find(values, QAWS_FIELD_CURVATURE_RATE)) != NULL && v->data) qaws_internal_view_read(v, 0, 1, rate);
+		if ((v = qaws_diff_views_find(values, QAWS_FIELD_CENTER)) != NULL && v->data) qaws_internal_view_read(origin, v, 0, 2);
+		if ((v = qaws_diff_views_find(values, QAWS_FIELD_ANGLE_START)) != NULL && v->data) qaws_internal_view_read(th0, v, 0, 1);
+		if ((v = qaws_diff_views_find(values, QAWS_FIELD_CURVATURE)) != NULL && v->data) qaws_internal_view_read(k0, v, 0, 1);
+		if ((v = qaws_diff_views_find(values, QAWS_FIELD_CURVATURE_RATE)) != NULL && v->data) qaws_internal_view_read(rate, v, 0, 1);
 	}
 	memset(&d, 0, sizeof(d));
 	d.origin_x = origin[0];

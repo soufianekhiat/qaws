@@ -16,7 +16,7 @@ static qaws_scalar fl_dot(qaws_scalar const* a, qaws_scalar const* b)
 	return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 }
 
-qaws_status qaws_internal_curve_point(qaws_curve const* c, unsigned int dim, qaws_scalar t, unsigned int flags, qaws_scalar* p, qaws_scalar* d)
+qaws_status qaws_internal_curve_point(qaws_scalar* p, qaws_scalar* d, qaws_curve const* c, unsigned int dim, qaws_scalar t, unsigned int flags)
 {
 	qaws_status s;
 	if (dim == 2)
@@ -106,9 +106,9 @@ static qaws_status fl_curve_piece(fl_curve* f, qaws_scalar t0, qaws_scalar const
 	qaws_scalar t1, qaws_scalar const* p1, unsigned int depth)
 {
 	qaws_scalar ta = (t0 + tm) / 2, tb = (tm + t1) / 2, pa[3], pb[3], dev, d;
-	qaws_status s = qaws_internal_curve_point(f->c, f->dim, ta, QAWS_EVAL_FLAG_POSITION, pa, NULL);
+	qaws_status s = qaws_internal_curve_point(pa, NULL, f->c, f->dim, ta, QAWS_EVAL_FLAG_POSITION);
 	if (s == QAWS_STATUS_OK)
-		s = qaws_internal_curve_point(f->c, f->dim, tb, QAWS_EVAL_FLAG_POSITION, pb, NULL);
+		s = qaws_internal_curve_point(pb, NULL, f->c, f->dim, tb, QAWS_EVAL_FLAG_POSITION);
 	if (s != QAWS_STATUS_OK)
 		return s;
 	dev = fl_point_segment(pm, p0, p1);
@@ -144,8 +144,8 @@ static qaws_status fl_curve_piece(fl_curve* f, qaws_scalar t0, qaws_scalar const
 	return fl_curve_piece(f, tm, pm, tb, pb, t1, p1, depth + 1);
 }
 
-qaws_status qaws_internal_flatten_curve(qaws_curve const* c, unsigned int dim, qaws_scalar flatness, unsigned int owner,
-	qaws_flat_seg** segs, unsigned int* count, unsigned int* capacity)
+qaws_status qaws_internal_flatten_curve(qaws_flat_seg** segs, unsigned int* count, unsigned int* capacity, qaws_curve const* c,
+	unsigned int dim, qaws_scalar flatness, unsigned int owner)
 {
 	fl_curve f;
 	qaws_scalar p0[3], p1[3], pm[3];
@@ -160,11 +160,11 @@ qaws_status qaws_internal_flatten_curve(qaws_curve const* c, unsigned int dim, q
 			continue;
 		/* a span starts where the previous one ended */
 		if (!have)
-			s = qaws_internal_curve_point(c, dim, t0, QAWS_EVAL_FLAG_POSITION, p0, NULL);
+			s = qaws_internal_curve_point(p0, NULL, c, dim, t0, QAWS_EVAL_FLAG_POSITION);
 		if (s == QAWS_STATUS_OK)
-			s = qaws_internal_curve_point(c, dim, t1, QAWS_EVAL_FLAG_POSITION, p1, NULL);
+			s = qaws_internal_curve_point(p1, NULL, c, dim, t1, QAWS_EVAL_FLAG_POSITION);
 		if (s == QAWS_STATUS_OK)
-			s = qaws_internal_curve_point(c, dim, tm, QAWS_EVAL_FLAG_POSITION, pm, NULL);
+			s = qaws_internal_curve_point(pm, NULL, c, dim, tm, QAWS_EVAL_FLAG_POSITION);
 		if (s == QAWS_STATUS_OK)
 			s = fl_curve_piece(&f, t0, p0, tm, pm, t1, p1, 0);
 		if (s != QAWS_STATUS_OK)
@@ -272,8 +272,8 @@ static qaws_status fl_surf_patch(fl_surf* f, qaws_scalar u0, qaws_scalar u1, qaw
 	}
 }
 
-qaws_status qaws_internal_flatten_surface(qaws_surface const* s, qaws_scalar flatness, unsigned int owner,
-	qaws_flat_patch** patches, unsigned int* count, unsigned int* capacity)
+qaws_status qaws_internal_flatten_surface(qaws_flat_patch** patches, unsigned int* count, unsigned int* capacity,
+	qaws_surface const* s, qaws_scalar flatness, unsigned int owner)
 {
 	fl_surf f;
 	qaws_scalar c[4][3];
@@ -301,7 +301,7 @@ qaws_scalar qaws_internal_flatten_extent(qaws_curve const* const* curves, unsign
 	{
 		qaws_range r = curves[i]->parameter_range;
 		for (j = 0; j <= 16; j++)
-			if (qaws_internal_curve_point(curves[i], dim, r.min_value + (r.max_value - r.min_value) * (qaws_scalar)j / 16, QAWS_EVAL_FLAG_POSITION, p, NULL) == QAWS_STATUS_OK)
+			if (qaws_internal_curve_point(p, NULL, curves[i], dim, r.min_value + (r.max_value - r.min_value) * (qaws_scalar)j / 16, QAWS_EVAL_FLAG_POSITION) == QAWS_STATUS_OK)
 				FL_GROW(p)
 	}
 	for (i = 0; i < surface_count; i++)

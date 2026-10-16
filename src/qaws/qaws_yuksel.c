@@ -1020,9 +1020,9 @@ static void yuksel_destroy_impl(void* impl_ptr, qaws_allocator const* allocator)
 {
 	qaws_yuksel_impl* impl = (qaws_yuksel_impl*)impl_ptr;
 	if (impl) {
-		qaws_internal_dealloc(allocator, impl->control_points);
-		qaws_internal_dealloc(allocator, impl->subcurves);
-		qaws_internal_dealloc(allocator, impl);
+		qaws_internal_dealloc(impl->control_points, allocator);
+		qaws_internal_dealloc(impl->subcurves, allocator);
+		qaws_internal_dealloc(impl, allocator);
 	}
 }
 
@@ -1083,7 +1083,7 @@ static void yk_pdot(yk_seed const* sd, unsigned int i, unsigned int dim, qaws_sc
 			out[sd->coord] = (qaws_scalar)1;
 	}
 	else if (sd->view)
-		qaws_internal_view_read(sd->view, i, dim, out);
+		qaws_internal_view_read(out, sd->view, i, dim);
 }
 
 static qaws_dual1 yk_mul_s(qaws_dual1 a, qaws_scalar s)
@@ -1385,8 +1385,8 @@ static qaws_status yuksel_rebuild(qaws_curve const* curve, qaws_diff_views const
 	qaws_yuksel_desc d;
 	qaws_scalar const* pts = NULL;
 	qaws_scalar* owned = NULL;
-	qaws_status st = qaws_internal_field_override(values, QAWS_FIELD_POINTS, impl->control_points,
-		impl->control_point_count, (unsigned int)curve->dimension, &pts, &owned);
+	qaws_status st = qaws_internal_field_override(&pts, &owned, values,
+		impl->control_points, impl->control_point_count, QAWS_FIELD_POINTS, (unsigned int)curve->dimension);
 	if (st != QAWS_STATUS_OK)
 		return st;
 	memset(&d, 0, sizeof(d));
@@ -1396,7 +1396,7 @@ static qaws_status yuksel_rebuild(qaws_curve const* curve, qaws_diff_views const
 	d.mode = (qaws_yuksel_mode)impl->mode;
 	d.closed = impl->closed;
 	st = qaws_curve_create_yuksel(out_curve, &d);
-	qaws_internal_dealloc(NULL, owned);
+	qaws_internal_dealloc(owned, NULL);
 	return st;
 }
 

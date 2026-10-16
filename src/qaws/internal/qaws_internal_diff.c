@@ -3,19 +3,19 @@
 #include <string.h>
 
 void qaws_internal_bspline_basis_derivs_any(
+	qaws_scalar* out_ders,
 	qaws_scalar const* knots,
 	unsigned int knot_count,
 	unsigned int degree,
 	unsigned int span,
 	qaws_scalar t,
-	unsigned int k,
-	qaws_scalar* out_ders)
+	unsigned int k)
 {
 	unsigned int stride = degree + 1;
 	unsigned int kk = (k < degree) ? k : degree;
 	unsigned int r, j;
 
-	qaws_internal_bspline_basis_derivs(knots, knot_count, degree, span, t, kk, out_ders);
+	qaws_internal_bspline_basis_derivs(out_ders, knots, knot_count, degree, span, t, kk);
 
 	for (r = kk + 1; r <= k; r++)
 		for (j = 0; j < stride; j++)
@@ -23,10 +23,10 @@ void qaws_internal_bspline_basis_derivs_any(
 }
 
 void qaws_internal_bernstein_derivs(
+	qaws_scalar* out,
 	unsigned int n,
 	qaws_scalar t,
-	unsigned int k,
-	qaws_scalar* out)
+	unsigned int k)
 {
 	/* levels[m][j] = B_{j,m}(t) for m = 0..n */
 	qaws_scalar levels[QAWS_DIFF_MAX_SUPPORT][QAWS_DIFF_MAX_SUPPORT];
@@ -83,13 +83,13 @@ void qaws_internal_bernstein_derivs(
  * the 2p knots the span's basis depends on.
  */
 void qaws_internal_bspline_basis_derivs_knot(
+	qaws_dual1* out_ders,
 	qaws_scalar const* knots,
+	qaws_scalar const* kdot,
 	unsigned int degree,
 	unsigned int span,
 	qaws_scalar t,
-	qaws_scalar const* kdot,
-	unsigned int k,
-	qaws_dual1* out_ders)
+	unsigned int k)
 {
 	qaws_dual1 ndu[QAWS_INTERNAL_KNOT_MAX_DEGREE + 1][QAWS_INTERNAL_KNOT_MAX_DEGREE + 1];
 	qaws_dual1 a[2][QAWS_INTERNAL_KNOT_MAX_DEGREE + 1];

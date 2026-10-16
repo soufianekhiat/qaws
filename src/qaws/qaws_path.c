@@ -408,7 +408,7 @@ qaws_status qaws_curve_transform_2d(qaws_curve** out_curve, qaws_curve const* cu
 		if (!pt_similarity(m, &scale, &angle, &flip))
 		{
 			qaws_curve* fit = NULL;
-			s = qaws_internal_curve_fit_cubic(curve, curve->parameter_range.min_value, curve->parameter_range.max_value, &fit);
+			s = qaws_internal_curve_fit_cubic(&fit, curve, curve->parameter_range.min_value, curve->parameter_range.max_value);
 			if (s == QAWS_STATUS_OK)
 				s = qaws_curve_transform_2d(out_curve, fit, m);
 			qaws_curve_destroy(fit);
@@ -836,7 +836,7 @@ static qaws_status pt_flatten(qaws_path_2d const* paths, unsigned int path_count
 		{
 			qaws_flat_seg* fs = NULL;
 			unsigned int n = 0, cap = 0;
-			qaws_status s = qaws_internal_flatten_curve(paths[i].curves[j], 2, (qaws_scalar)flat, i, &fs, &n, &cap);
+			qaws_status s = qaws_internal_flatten_curve(&fs, &n, &cap, paths[i].curves[j], 2, (qaws_scalar)flat, i);
 			if (s != QAWS_STATUS_OK) { free(fs); return s; }
 			for (k = 0; k < n; k++)
 			{
@@ -1242,7 +1242,7 @@ qaws_status qaws_polyline_rdp_2d(qaws_scalar* out, unsigned int* out_count, qaws
 	return QAWS_STATUS_OK;
 }
 
-qaws_status qaws_internal_curve_area_2d(qaws_curve const* c, double t0, double t1, double tol, double* out)
+qaws_status qaws_internal_curve_area_2d(double* out, qaws_curve const* c, double t0, double t1, double tol)
 {
 	double lo = t0 < t1 ? t0 : t1, hi = t0 < t1 ? t1 : t0, sum = 0.0;
 	unsigned int s;

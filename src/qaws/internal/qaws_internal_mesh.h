@@ -40,8 +40,8 @@ qaws_status qaws_internal_mesh_build(
 	qaws_internal_mesh* mesh,
 	qaws_scalar const* positions,
 	qaws_scalar const* uvs,
-	unsigned int vertex_count,
 	unsigned int const* indices,
+	unsigned int vertex_count,
 	unsigned int index_count);
 
 void qaws_internal_mesh_destroy(qaws_internal_mesh* mesh);
@@ -50,11 +50,11 @@ void qaws_internal_mesh_destroy(qaws_internal_mesh* mesh);
    out_path must have capacity >= vertex_count. Returns path length in out_path_count.
    Returns QAWS_STATUS_OK on success, QAWS_STATUS_NUMERICAL_FAILURE if disconnected. */
 qaws_status qaws_internal_mesh_dijkstra(
+	unsigned int* out_path,
+	unsigned int* out_path_count,
 	qaws_internal_mesh const* mesh,
 	unsigned int src,
-	unsigned int dst,
-	unsigned int* out_path,
-	unsigned int* out_path_count);
+	unsigned int dst);
 
 /* Compute 3D edge length between two vertices */
 qaws_scalar qaws_internal_mesh_edge_length(

@@ -596,7 +596,7 @@ static qaws_status cl_line_hits(cl_ctx* x)
 		}
 		lc.x = x;
 		lc.L = L;
-		s = qaws_internal_broadphase(boxes, n, 2, NULL, cl_line_visit, &lc, NULL);
+		s = qaws_internal_broadphase(NULL, boxes, n, 2, NULL, cl_line_visit, &lc);
 		free(boxes);
 	}
 	(void)j;
@@ -667,7 +667,7 @@ static qaws_status cl_snap_lines(cl_ctx* x)
 	sn.x = x;
 	sn.line_src = line_src;
 	sn.s = QAWS_STATUS_OK;
-	if (n && x->nv && qaws_internal_grid_create(boxes, n, 2, &grid) == QAWS_STATUS_OK)
+	if (n && x->nv && qaws_internal_grid_create(&grid, boxes, n, 2) == QAWS_STATUS_OK)
 	{
 		for (i = 0; i < x->nv && sn.s == QAWS_STATUS_OK; i++)
 		{
@@ -1321,8 +1321,8 @@ static double cl_half_area(cl_ctx const* x, unsigned int h)
 		double const* q = x->v[cl_origin(x, h ^ 1)].p;
 		return 0.5 * (p[0] + q[0]) * (q[1] - p[1]);
 	}
-	qaws_internal_curve_area_2d(x->src[e->src].c, (h & 1) ? e->t1 : e->t0, (h & 1) ? e->t0 : e->t1,
-		x->ext * x->ext * CL_AREA_REL, &a);
+	qaws_internal_curve_area_2d(&a, x->src[e->src].c, (h & 1) ? e->t1 : e->t0,
+		(h & 1) ? e->t0 : e->t1, x->ext * x->ext * CL_AREA_REL);
 	/* the curve's ends lie within the tolerance of the vertices: chords from
 	   and to the vertices close it, else each gap weighs |x| times its size */
 	{
@@ -1567,7 +1567,7 @@ static qaws_status cl_faces(cl_ctx* x, unsigned int* out_faces, unsigned int** o
 		{
 			/* point location: a grid over the positive cycles, each query in its own cell */
 			qaws_bp_grid* grid = NULL;
-			if (qaws_internal_grid_create(boxes, n.npos, 2, &grid) == QAWS_STATUS_OK)
+			if (qaws_internal_grid_create(&grid, boxes, n.npos, 2) == QAWS_STATUS_OK)
 			{
 				cl_nest_ring rg;
 				rg.n = &n;
@@ -1584,7 +1584,7 @@ static qaws_status cl_faces(cl_ctx* x, unsigned int* out_faces, unsigned int** o
 				qaws_internal_grid_destroy(grid);
 			}
 			else
-				qaws_internal_broadphase(boxes, n.npos + nq, 2, cl_nest_accept, cl_nest_visit, &n, NULL);
+				qaws_internal_broadphase(NULL, boxes, n.npos + nq, 2, cl_nest_accept, cl_nest_visit, &n);
 		}
 		for (i = 0; i < nq; i++)
 		{

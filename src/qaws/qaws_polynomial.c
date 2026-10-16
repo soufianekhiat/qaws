@@ -134,7 +134,7 @@ static qaws_status polynomial_eval_span_3d(
 static void polynomial_destroy_impl(void* impl, qaws_allocator const* allocator)
 {
 	qaws_polynomial_impl* pi = (qaws_polynomial_impl*)impl;
-	if (pi) { qaws_internal_dealloc(allocator, pi->coefficients); qaws_internal_dealloc(allocator, pi); }
+	if (pi) { qaws_internal_dealloc(pi->coefficients, allocator); qaws_internal_dealloc(pi, allocator); }
 }
 
 static int polynomial_is_closed(qaws_curve const* c)    { return qaws_internal_curve_ends_meet(c); }
@@ -218,8 +218,8 @@ static qaws_status polynomial_rebuild(qaws_curve const* curve, qaws_diff_views c
 	qaws_polynomial_desc d;
 	qaws_scalar const* coeffs;
 	qaws_scalar* owned;
-	qaws_status st = qaws_internal_field_override(values, QAWS_FIELD_COEFFICIENTS, impl->coefficients,
-		impl->coefficient_count, (unsigned int)curve->dimension, &coeffs, &owned);
+	qaws_status st = qaws_internal_field_override(&coeffs, &owned, values,
+		impl->coefficients, impl->coefficient_count, QAWS_FIELD_COEFFICIENTS, (unsigned int)curve->dimension);
 	if (st != QAWS_STATUS_OK)
 		return st;
 	d.dimension = curve->dimension;
@@ -229,7 +229,7 @@ static qaws_status polynomial_rebuild(qaws_curve const* curve, qaws_diff_views c
 	d.t_min = curve->parameter_range.min_value;
 	d.t_max = curve->parameter_range.max_value;
 	st = qaws_curve_create_polynomial(out_curve, &d);
-	qaws_internal_dealloc(NULL, owned);
+	qaws_internal_dealloc(owned, NULL);
 	return st;
 }
 

@@ -194,7 +194,7 @@ static qaws_status offset_surface_eval_sampled(
 	/* Normal */
 	if (eval_flags & QAWS_SURFACE_EVAL_NORMAL)
 	{
-		qaws_internal_surface_normal(out_result->du, out_result->dv, &out_result->normal);
+		qaws_internal_surface_normal(&out_result->normal, out_result->du, out_result->dv);
 		out_result->valid_flags |= QAWS_SURFACE_EVAL_NORMAL;
 	}
 
@@ -220,17 +220,17 @@ static qaws_status offset_bijet(qaws_dual3 const* S, qaws_dual1 d, qaws_dual3* O
 	qaws_scalar scale;
 	unsigned int k;
 
-	qaws_bijet_shift_u(S, OFFSET_JET_ORDER, su);
-	qaws_bijet_shift_v(S, OFFSET_JET_ORDER, sv);
-	qaws_bijet_cross(su, sv, OFFSET_JET_ORDER, n);
-	qaws_bijet_dot(n, n, OFFSET_JET_ORDER, q);
+	qaws_bijet_shift_u(su, S, OFFSET_JET_ORDER);
+	qaws_bijet_shift_v(sv, S, OFFSET_JET_ORDER);
+	qaws_bijet_cross(n, su, sv, OFFSET_JET_ORDER);
+	qaws_bijet_dot(q, n, n, OFFSET_JET_ORDER);
 
 	scale = qaws_v3_dot(su[0].v, su[0].v) * qaws_v3_dot(sv[0].v, sv[0].v);
 	if (!(q[0].v > QAWS_EPSILON * QAWS_EPSILON * scale) || !(scale > QAWS_ZERO))
 		return QAWS_STATUS_DEGENERATE_CURVE;
 
-	qaws_bijet_sqrt(q, OFFSET_JET_ORDER, l);
-	qaws_bijet_div(n, l, OFFSET_JET_ORDER, N);
+	qaws_bijet_sqrt(l, q, OFFSET_JET_ORDER);
+	qaws_bijet_div(N, n, l, OFFSET_JET_ORDER);
 	for (k = 0; k < OFFSET_JET_COUNT; k++)
 		O[k] = qaws_dual3_add(S[k], qaws_dual3_scale(N[k], d));
 	return QAWS_STATUS_OK;
@@ -301,7 +301,7 @@ static qaws_status offset_surface_eval(
 	}
 	if (eval_flags & QAWS_SURFACE_EVAL_NORMAL)
 	{
-		qaws_internal_surface_normal(out_result->du, out_result->dv, &out_result->normal);
+		qaws_internal_surface_normal(&out_result->normal, out_result->du, out_result->dv);
 		out_result->valid_flags |= QAWS_SURFACE_EVAL_NORMAL;
 	}
 	return QAWS_STATUS_OK;
@@ -367,7 +367,7 @@ static qaws_status offset_tangent(
 	if (channels & ~(unsigned int)QAWS_SJET_ORDER2)
 		return QAWS_STATUS_UNSUPPORTED_OPERATION;
 	if (dv)
-		qaws_internal_view_read(dv, 0, 1, &d_dot);
+		qaws_internal_view_read(&d_dot, dv, 0, 1);
 
 	if (tangent2)
 		st = qaws_surface_eval_batch_tangent2(&bp, &bt, &btt, impl->base, &u, &v, &u_dot, &v_dot,
@@ -480,7 +480,7 @@ static qaws_surface_diff_vtable const offset_surface_diff_vtable = {
 
 static void offset_surface_destroy(void* impl, qaws_allocator const* allocator)
 {
-	qaws_internal_dealloc(allocator, impl);
+	qaws_internal_dealloc(impl, allocator);
 }
 
 static int offset_surface_is_rational(qaws_surface const* s)

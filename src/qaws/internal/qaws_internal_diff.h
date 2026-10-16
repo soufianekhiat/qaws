@@ -207,28 +207,28 @@ typedef qaws_status (*qaws_diff_collect_fn)(
 /* Accumulate (+=) every sample's contributions into views with the
    strategy selected by ctx (scatter, tiled or gather). */
 qaws_status qaws_internal_diff_accumulate(
-	qaws_diff_context const* ctx,
-	unsigned int components,
+	qaws_diff_views* views,
+	void const* user,
 	unsigned int sample_count,
 	unsigned int entry_capacity,
+	unsigned int components,
 	qaws_diff_collect_fn collect,
-	void const* user,
-	qaws_diff_views* views);
+	qaws_diff_context const* ctx);
 
 void qaws_internal_diff_report_note(
-	qaws_diff_context const* ctx,
 	qaws_diff_class diff_class,
 	qaws_diff_validity validity,
 	unsigned int frozen,
-	unsigned int index);
+	unsigned int index,
+	qaws_diff_context const* ctx);
 
 unsigned int qaws_internal_view_stride(qaws_field_view const* v);
 int qaws_internal_view_element_active(qaws_field_view const* v, unsigned int e);
 int qaws_internal_view_component_active(qaws_field_view const* v, unsigned int c);
 
 /* Masked read of one tangent element (zeros when inactive). */
-void qaws_internal_view_read(qaws_field_view const* v, unsigned int e,
-	unsigned int components, qaws_scalar* out);
+void qaws_internal_view_read(qaws_scalar* out, qaws_field_view const* v,
+	unsigned int e, unsigned int components);
 
 /* Masked add into one adjoint element. */
 void qaws_internal_view_add(qaws_field_view* v, unsigned int e,
@@ -247,51 +247,51 @@ qaws_status qaws_internal_check_views(qaws_diff_views const* views, unsigned int
 /* Curve jet of any dimension lifted to 3D (z = 0 for 2D curves). tangent2
    may be NULL. */
 qaws_status qaws_internal_curve_tangent_any(
-	qaws_diff_context const* ctx,
+	qaws_curve_jet_3d* primal,
+	qaws_curve_jet_3d* tangent,
+	qaws_curve_jet_3d* tangent2,
 	qaws_curve const* curve,
+	qaws_diff_views const* views,
 	qaws_scalar t,
 	qaws_scalar t_dot,
 	unsigned int channels,
-	qaws_diff_views const* views,
-	qaws_curve_jet_3d* primal,
-	qaws_curve_jet_3d* tangent,
-	qaws_curve_jet_3d* tangent2);
+	qaws_diff_context const* ctx);
 
 /* Adjoint of the lifted jet (z ignored for 2D curves). */
 qaws_status qaws_internal_curve_adjoint_any(
-	qaws_diff_context const* ctx,
+	qaws_diff_views* views,
+	qaws_scalar* t_adjoint,
 	qaws_curve const* curve,
+	qaws_curve_jet_3d const* jet_adjoint,
 	qaws_scalar t,
 	unsigned int channels,
-	qaws_curve_jet_3d const* jet_adjoint,
-	qaws_diff_views* views,
-	qaws_scalar* t_adjoint);
+	qaws_diff_context const* ctx);
 
 /* views->children[i] or NULL. */
 qaws_diff_views const* qaws_internal_child_views(qaws_diff_views const* views, unsigned int i);
 
 /* Contiguous values of a field for rebuilding: the view's values when the
    field is present in `values` (copied into *out_owned, to be freed with
-   qaws_internal_dealloc(NULL, ...)), otherwise `fallback`. */
+   qaws_internal_dealloc(..., NULL)), otherwise `fallback`. */
 qaws_status qaws_internal_field_override(
+	qaws_scalar const** out_values,
+	qaws_scalar** out_owned,
 	qaws_diff_views const* values,
-	qaws_diff_field field,
 	qaws_scalar const* fallback,
 	unsigned int count,
-	unsigned int components,
-	qaws_scalar const** out_values,
-	qaws_scalar** out_owned);
+	qaws_diff_field field,
+	unsigned int components);
 
 /* B-spline basis derivatives for orders 0..k (k may exceed degree; higher
    rows are zero). out has (k+1) rows of stride (degree+1). */
 void qaws_internal_bspline_basis_derivs_any(
+	qaws_scalar* out_ders,
 	qaws_scalar const* knots,
 	unsigned int knot_count,
 	unsigned int degree,
 	unsigned int span,
 	qaws_scalar t,
-	unsigned int k,
-	qaws_scalar* out_ders);
+	unsigned int k);
 
 /* Basis derivatives along a knot direction, as second-order duals:
    .v = d^r N_j/dt^r, .t = its derivative along kdot, .tt = second
@@ -300,20 +300,20 @@ void qaws_internal_bspline_basis_derivs_any(
 #define QAWS_INTERNAL_KNOT_MAX_DEGREE 15
 
 void qaws_internal_bspline_basis_derivs_knot(
+	qaws_dual1* out_ders,
 	qaws_scalar const* knots,
+	qaws_scalar const* kdot,
 	unsigned int degree,
 	unsigned int span,
 	qaws_scalar t,
-	qaws_scalar const* kdot,
-	unsigned int k,
-	qaws_dual1* out_ders);
+	unsigned int k);
 
 /* Bernstein basis derivatives of degree n at t for orders 0..k.
    out[r * (n+1) + i] = d^r B_{i,n}(t) / dt^r. */
 void qaws_internal_bernstein_derivs(
+	qaws_scalar* out,
 	unsigned int n,
 	qaws_scalar t,
-	unsigned int k,
-	qaws_scalar* out);
+	unsigned int k);
 
 #endif /* QAWS_INTERNAL_DIFF_H */

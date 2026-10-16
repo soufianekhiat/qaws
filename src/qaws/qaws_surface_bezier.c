@@ -84,7 +84,7 @@ static qaws_status bezier_surface_eval(
 	if (eval_flags & QAWS_SURFACE_EVAL_POSITION)
 	{
 		qaws_scalar pt[3];
-		qaws_internal_decasteljau(col, ud, 3, u, pt);
+		qaws_internal_decasteljau(pt, col, 3, ud, u);
 		out_result->position.x = pt[0];
 		out_result->position.y = pt[1];
 		out_result->position.z = pt[2];
@@ -97,7 +97,7 @@ static qaws_status bezier_surface_eval(
 		qaws_scalar du_col[64 * 3]; /* derivative column */
 		qaws_scalar pt[3];
 		deriv_cps(col, ud, 3, ud, du_col, 3);
-		qaws_internal_decasteljau(du_col, ud - 1, 3, u, pt);
+		qaws_internal_decasteljau(pt, du_col, 3, ud - 1, u);
 		out_result->du.x = pt[0]; out_result->du.y = pt[1]; out_result->du.z = pt[2];
 		out_result->valid_flags |= QAWS_SURFACE_EVAL_DU;
 
@@ -105,7 +105,7 @@ static qaws_status bezier_surface_eval(
 		{
 			qaws_scalar duu_col[64 * 3];
 			deriv_cps(du_col, ud - 1, 3, ud - 1, duu_col, 3);
-			qaws_internal_decasteljau(duu_col, ud - 2, 3, u, pt);
+			qaws_internal_decasteljau(pt, duu_col, 3, ud - 2, u);
 			out_result->duu.x = pt[0]; out_result->duu.y = pt[1]; out_result->duu.z = pt[2];
 			out_result->valid_flags |= QAWS_SURFACE_EVAL_DUU;
 		}
@@ -122,10 +122,10 @@ static qaws_status bezier_surface_eval(
 			/* Compute v-derivative CPs for this row, then evaluate at v */
 			qaws_scalar dv_row[64 * 3];
 			deriv_cps(cp + i * row_stride, vd, 3, vd, dv_row, 3);
-			qaws_internal_decasteljau(dv_row, vd - 1, 3, v, dv_col + i * 3);
+			qaws_internal_decasteljau(dv_col + i * 3, dv_row, 3, vd - 1, v);
 		}
 		/* Evaluate the dv column at u */
-		qaws_internal_decasteljau(dv_col, ud, 3, u, pt);
+		qaws_internal_decasteljau(pt, dv_col, 3, ud, u);
 		out_result->dv.x = pt[0]; out_result->dv.y = pt[1]; out_result->dv.z = pt[2];
 		out_result->valid_flags |= QAWS_SURFACE_EVAL_DV;
 
@@ -137,9 +137,9 @@ static qaws_status bezier_surface_eval(
 				qaws_scalar dv_row[64 * 3], dvv_row[64 * 3];
 				deriv_cps(cp + i * row_stride, vd, 3, vd, dv_row, 3);
 				deriv_cps(dv_row, vd - 1, 3, vd - 1, dvv_row, 3);
-				qaws_internal_decasteljau(dvv_row, vd - 2, 3, v, dvv_col + i * 3);
+				qaws_internal_decasteljau(dvv_col + i * 3, dvv_row, 3, vd - 2, v);
 			}
-			qaws_internal_decasteljau(dvv_col, ud, 3, u, pt);
+			qaws_internal_decasteljau(pt, dvv_col, 3, ud, u);
 			out_result->dvv.x = pt[0]; out_result->dvv.y = pt[1]; out_result->dvv.z = pt[2];
 			out_result->valid_flags |= QAWS_SURFACE_EVAL_DVV;
 		}
@@ -155,10 +155,10 @@ static qaws_status bezier_surface_eval(
 		{
 			qaws_scalar dv_row[64 * 3];
 			deriv_cps(cp + i * row_stride, vd, 3, vd, dv_row, 3);
-			qaws_internal_decasteljau(dv_row, vd - 1, 3, v, dv_col + i * 3);
+			qaws_internal_decasteljau(dv_col + i * 3, dv_row, 3, vd - 1, v);
 		}
 		deriv_cps(dv_col, ud, 3, ud, duv_col, 3);
-		qaws_internal_decasteljau(duv_col, ud - 1, 3, u, pt);
+		qaws_internal_decasteljau(pt, duv_col, 3, ud - 1, u);
 		out_result->duv.x = pt[0]; out_result->duv.y = pt[1]; out_result->duv.z = pt[2];
 		out_result->valid_flags |= QAWS_SURFACE_EVAL_DUV;
 	}
@@ -166,7 +166,7 @@ static qaws_status bezier_surface_eval(
 	/* Normal */
 	if (eval_flags & QAWS_SURFACE_EVAL_NORMAL)
 	{
-		qaws_internal_surface_normal(out_result->du, out_result->dv, &out_result->normal);
+		qaws_internal_surface_normal(&out_result->normal, out_result->du, out_result->dv);
 		out_result->valid_flags |= QAWS_SURFACE_EVAL_NORMAL;
 	}
 
@@ -178,8 +178,8 @@ static void bezier_surface_destroy(void* impl, qaws_allocator const* allocator)
 	qaws_surface_bezier_impl* bi = (qaws_surface_bezier_impl*)impl;
 	if (bi)
 	{
-		qaws_internal_dealloc(allocator, bi->control_points);
-		qaws_internal_dealloc(allocator, bi);
+		qaws_internal_dealloc(bi->control_points, allocator);
+		qaws_internal_dealloc(bi, allocator);
 	}
 }
 
@@ -230,8 +230,8 @@ static qaws_status bezier_surface_linear_support(qaws_surface const* surface,
 	if (ud + 1 > QAWS_DIFF_MAX_SUPPORT || vd + 1 > QAWS_DIFF_MAX_SUPPORT || order > QAWS_DIFF_MAX_ORDER)
 		return QAWS_STATUS_UNSUPPORTED_OPERATION;
 
-	qaws_internal_bernstein_derivs(ud, u, order, bu);
-	qaws_internal_bernstein_derivs(vd, v, order, bv);
+	qaws_internal_bernstein_derivs(bu, ud, u, order);
+	qaws_internal_bernstein_derivs(bv, vd, v, order);
 
 	out->kind = QAWS_SUPPORT_GLOBAL;
 	out->field = QAWS_FIELD_CONTROL_POINTS;
@@ -303,14 +303,14 @@ qaws_status qaws_surface_create_bezier_ex(
 		allocator);
 	if (!surface) return QAWS_STATUS_ALLOCATION_FAILURE;
 
-	impl = (qaws_surface_bezier_impl*)qaws_internal_alloc(allocator, (unsigned long)sizeof(qaws_surface_bezier_impl));
+	impl = (qaws_surface_bezier_impl*)qaws_internal_alloc((unsigned long)sizeof(qaws_surface_bezier_impl), allocator);
 	if (!impl) { qaws_internal_surface_free(surface); return QAWS_STATUS_ALLOCATION_FAILURE; }
 
 	cp_size = (size_t)desc->u_point_count * desc->v_point_count * 3 * sizeof(qaws_scalar);
-	impl->control_points = (qaws_scalar*)qaws_internal_alloc(allocator, (unsigned long)cp_size);
+	impl->control_points = (qaws_scalar*)qaws_internal_alloc((unsigned long)cp_size, allocator);
 	if (!impl->control_points)
 	{
-		qaws_internal_dealloc(allocator, impl);
+		qaws_internal_dealloc(impl, allocator);
 		qaws_internal_surface_free(surface);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}

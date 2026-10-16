@@ -199,7 +199,7 @@ static qaws_status mv_add_spline(qaws_mean_value* m, double const* cp, double co
 			if (nk <= 256)
 			{
 				for (j = 0; j < nk; j++) kq[j] = (qaws_scalar)kn[j];
-				qaws_internal_bspline_basis(kq, nk, p, s, (qaws_scalar)(ka + u * (kb - ka)), nq);
+				qaws_internal_bspline_basis(nq, kq, nk, p, s, (qaws_scalar)(ka + u * (kb - ka)));
 				for (j = 0; j < nb; j++) nv[j] = (double)nq[j];
 			}
 			else
@@ -400,7 +400,7 @@ static qaws_status mv_add_curve(qaws_mean_value* m, qaws_curve const* c, unsigne
 		/* any other kind: a cubic B-spline fitted to it (exact for cubic spans) */
 		qaws_curve* fit = NULL;
 		qaws_range rg = qaws_curve_get_parameter_range(c);
-		st = qaws_internal_curve_fit_cubic(c, rg.min_value, rg.max_value, &fit);
+		st = qaws_internal_curve_fit_cubic(&fit, c, rg.min_value, rg.max_value);
 		if (st == QAWS_STATUS_OK)
 			st = mv_add_curve(m, fit, path, curve, loop_first);
 		qaws_curve_destroy(fit);

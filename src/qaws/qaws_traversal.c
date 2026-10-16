@@ -623,7 +623,7 @@ qaws_status qaws_traversal_create(
 	}
 
 	status = qaws_internal_build_arc_length_table(
-		curve, table_size, traversal->table_params, traversal->table_distances);
+		traversal->table_params, traversal->table_distances, curve, table_size);
 	if (status != QAWS_STATUS_OK)
 	{
 		free(traversal->table_distances);
@@ -808,7 +808,7 @@ qaws_status qaws_traversal_create_multi(
 				}
 
 				seg_len = (qaws_scalar)0.0;
-				qaws_internal_arc_length(curves[ci], local_start, local_end, &seg_len);
+				qaws_internal_arc_length(&seg_len, curves[ci], local_start, local_end);
 				seg_length += seg_len;
 			}
 		}

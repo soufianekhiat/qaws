@@ -251,7 +251,14 @@ static param analyze(toks const* v, size_t a, size_t b)
 	for (i = a; i < b; i++)
 	{
 		char const* s = v->t[i].s;
-		if (!strcmp(s, "*") || !strcmp(s, "[")) { p.ptr++; outer_const = i > a && !strcmp(v->t[i - 1].s, "const") && p.ptr >= 2; }
+		if (!strcmp(s, "["))
+		{
+			/* an array: one level, its bound skipped (it may hold a '*') */
+			p.ptr++;
+			while (i + 1 < b && strcmp(v->t[i + 1].s, "]")) i++;
+			continue;
+		}
+		if (!strcmp(s, "*")) { p.ptr++; outer_const = i > a && !strcmp(v->t[i - 1].s, "const") && p.ptr >= 2; }
 		else if (!strcmp(s, "const")) { if (p.ptr == 0) p.cnst = 1; }
 		else if (!strcmp(s, "QAWS_OUT")) p.out = 1;
 		else if (!strcmp(s, "QAWS_INOUT")) p.inout = 1;
@@ -262,6 +269,15 @@ static param analyze(toks const* v, size_t a, size_t b)
 			if (scalarish(s)) p.scal = 1;
 		}
 	}
+	for (i = a; i < b; i++)
+		if (!strcmp(v->t[i].s, "("))
+		{
+			/* a function pointer, ret (*name)(params): a callback, a value */
+			memset(&p, 0, sizeof(p));
+			p.type = "callback";
+			p.name = i + 2 < b && !strcmp(v->t[i + 1].s, "*") ? v->t[i + 2].s : "callback";
+			return p;
+		}
 	if (!strcmp(p.name, "")) p.name = p.type;
 	p.data = p.scal || is_data(p.type);
 	/* T const** (a pointer handed back) writes: an output, as T* const*;

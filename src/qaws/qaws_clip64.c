@@ -562,7 +562,7 @@ static qaws_status c64_hits(c64_ctx* x)
 	memset(&P, 0, sizeof(P));
 	P.x = x;
 	if (s == QAWS_STATUS_OK && x->nseg > 1)
-		s = qaws_internal_broadphase(boxes, x->nseg, 2, NULL, c64_visit, &P, NULL);
+		s = qaws_internal_broadphase(NULL, boxes, x->nseg, 2, NULL, c64_visit, &P);
 	free(boxes);
 	if (s == QAWS_STATUS_OK)
 		s = c64_reserve(x, P.n, P.n / 2);
@@ -974,7 +974,7 @@ static qaws_status c64_faces(c64_ctx* x, unsigned int* out_faces)
 					boxes[nccw].lo[2] = boxes[nccw].hi[2] = 0;
 					of[nccw++] = i;
 				}
-			if (qaws_internal_grid_create(boxes, nccw, 2, &grid) != QAWS_STATUS_OK)
+			if (qaws_internal_grid_create(&grid, boxes, nccw, 2) != QAWS_STATUS_OK)
 				grid = NULL;
 		}
 		rg.x = x;

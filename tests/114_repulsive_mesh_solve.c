@@ -93,7 +93,7 @@ static void test_metric(void)
 		double A[36], x[18], err = 0, mx = 0, asym = 0, row = 0, psd = 1e300;
 		qaws_status st;
 		for (i = 0; i < 3 * k[t].nv; i++) x[i] = (double)(qaws_scalar)k[t].x[i];
-		st = m ? qaws_internal_repulsive_mesh_metric(m, x, A) : QAWS_STATUS_INVALID_ARGUMENT;
+		st = m ? qaws_internal_repulsive_mesh_metric(A, m, x) : QAWS_STATUS_INVALID_ARGUMENT;
 		for (i = 0; i < k[t].nv * k[t].nv; i++) { err = fmax(err, fabs(A[i] - k[t].A[i])); mx = fmax(mx, fabs(k[t].A[i])); }
 		for (i = 0; i < k[t].nv; i++)
 		{
@@ -135,8 +135,8 @@ static void test_preconditioner(void)
 	m = rm_make(nv, tris, nf, 6);
 	for (i = 0; i < nv; i++) { b[i] = sin(1.7 * i) + cos(0.3 * i * i); mean += b[i] / nv; }
 	for (i = 0; i < nv; i++) b[i] -= mean;
-	s0 = qaws_internal_repulsive_mesh_gmres(m, x, b, 0, 1e-10, u0, &it0);
-	s1 = qaws_internal_repulsive_mesh_gmres(m, x, b, 1, 1e-10, u1, &it1);
+	s0 = qaws_internal_repulsive_mesh_gmres(&it0, u0, m, x, b, 0, 1e-10);
+	s1 = qaws_internal_repulsive_mesh_gmres(&it1, u1, m, x, b, 1, 1e-10);
 	for (i = 0; i < nv; i++) { diff = fmax(diff, fabs(u0[i] - u1[i])); un = fmax(un, fabs(u0[i])); }
 	sprintf(msg, "preconditioner, a lumpy sphere (%u vertices, %u faces): GMRES to 1e-10 in %u iterations unpreconditioned, %u with (-L)^+ L^(2-s) (-L)^+; solutions %.2g apart",
 		nv, nf, it0, it1, diff / un);

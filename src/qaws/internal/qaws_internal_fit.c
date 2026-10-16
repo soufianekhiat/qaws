@@ -180,15 +180,15 @@ static int solve_banded_spd(
 /* ========================================================================== */
 
 qaws_status qaws_internal_fit_bspline_range(
-	qaws_dimension dimension,
-	unsigned int degree,
+	qaws_curve** out_curve,
 	qaws_scalar const* sample_params,
 	qaws_scalar const* sample_coords,
+	qaws_dimension dimension,
 	unsigned int sample_count,
 	unsigned int control_point_count,
+	unsigned int degree,
 	qaws_scalar t_min,
-	qaws_scalar t_max,
-	qaws_curve** out_curve)
+	qaws_scalar t_max)
 {
 	unsigned int n = control_point_count;
 	unsigned int p = degree;
@@ -325,13 +325,13 @@ qaws_status qaws_internal_fit_bspline_range(
 }
 
 qaws_status qaws_internal_fit_bspline(
-	qaws_dimension dimension,
-	unsigned int degree,
+	qaws_curve** out_curve,
 	qaws_scalar const* sample_params,
 	qaws_scalar const* sample_coords,
+	qaws_dimension dimension,
 	unsigned int sample_count,
 	unsigned int control_point_count,
-	qaws_curve** out_curve)
+	unsigned int degree)
 {
 	qaws_scalar t_min, t_max;
 	if (!sample_params || sample_count < 2)
@@ -341,8 +341,8 @@ qaws_status qaws_internal_fit_bspline(
 	t_max = sample_params[sample_count - 1];
 
 	return qaws_internal_fit_bspline_range(
-		dimension, degree,
-		sample_params, sample_coords,
+		out_curve, sample_params,
+		sample_coords, dimension,
 		sample_count, control_point_count,
-		t_min, t_max, out_curve);
+		degree, t_min, t_max);
 }

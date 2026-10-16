@@ -420,9 +420,9 @@ static void subdivision_destroy_impl(void* impl, qaws_allocator const* allocator
 {
 	qaws_subdivision_impl* si = (qaws_subdivision_impl*)impl;
 	if (si) {
-		qaws_internal_dealloc(allocator, si->refined_points);
-		qaws_internal_dealloc(allocator, si->segment_coeffs);
-		qaws_internal_dealloc(allocator, si);
+		qaws_internal_dealloc(si->refined_points, allocator);
+		qaws_internal_dealloc(si->segment_coeffs, allocator);
+		qaws_internal_dealloc(si, allocator);
 	}
 }
 

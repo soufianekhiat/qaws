@@ -818,7 +818,7 @@ qaws_status qaws_curve_sample_2d(
 		}
 
 		status = qaws_internal_build_arc_length_table(
-			curve, table_size, table_params, table_distances);
+			table_params, table_distances, curve, table_size);
 		if (status != QAWS_STATUS_OK)
 		{
 			free(table_params);
@@ -934,7 +934,7 @@ qaws_status qaws_curve_sample_3d(
 		}
 
 		status = qaws_internal_build_arc_length_table(
-			curve, table_size, table_params, table_distances);
+			table_params, table_distances, curve, table_size);
 		if (status != QAWS_STATUS_OK)
 		{
 			free(table_params);
@@ -1053,7 +1053,7 @@ qaws_status qaws_curve_sample_eval_2d(
 		}
 
 		status = qaws_internal_build_arc_length_table(
-			curve, table_size, table_params, table_distances);
+			table_params, table_distances, curve, table_size);
 		if (status != QAWS_STATUS_OK)
 		{
 			free(table_params);
@@ -1168,7 +1168,7 @@ qaws_status qaws_curve_sample_eval_3d(
 		}
 
 		status = qaws_internal_build_arc_length_table(
-			curve, table_size, table_params, table_distances);
+			table_params, table_distances, curve, table_size);
 		if (status != QAWS_STATUS_OK)
 		{
 			free(table_params);
@@ -1839,7 +1839,7 @@ qaws_status qaws_curve_sample_streaming_2d(
 		}
 
 		status = qaws_internal_build_arc_length_table(
-			curve, table_size, table_params, table_distances);
+			table_params, table_distances, curve, table_size);
 		if (status != QAWS_STATUS_OK)
 		{
 			free(table_params);
@@ -1948,7 +1948,7 @@ qaws_status qaws_curve_sample_streaming_3d(
 		}
 
 		status = qaws_internal_build_arc_length_table(
-			curve, table_size, table_params, table_distances);
+			table_params, table_distances, curve, table_size);
 		if (status != QAWS_STATUS_OK)
 		{
 			free(table_params);

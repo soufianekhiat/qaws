@@ -136,7 +136,7 @@ static qaws_status rsn_precond(rsn_sys* S, double const* A)
 		rows = r < S->k ? S->C + (size_t)r * N : S->G + (size_t)(r - S->k) * N;
 		for (i = 0; i < N; i++) { S->M[(N + r) * n + i] = rows[i]; S->M[i * n + N + r] = rows[i]; }
 	}
-	return qaws_internal_rs_lu(S->M, n, S->piv) ? QAWS_STATUS_OK : QAWS_STATUS_NUMERICAL_FAILURE;
+	return qaws_internal_rs_lu(S->M, S->piv, n) ? QAWS_STATUS_OK : QAWS_STATUS_NUMERICAL_FAILURE;
 }
 
 /* the system's solve by flexible GMRES, right-preconditioned */
@@ -181,7 +181,7 @@ static qaws_status rsn_solve(rsn_sys* S, double const* b, double* u)
 			double* z = Z + (size_t)j * n;
 			double hn;
 			memcpy(z, V + (size_t)j * n, sizeof(double) * n);
-			qaws_internal_rs_lu_solve(S->M, n, S->piv, z);
+			qaws_internal_rs_lu_solve(z, S->M, S->piv, n);
 			if ((a = rsn_apply(S, z, w)) != QAWS_STATUS_OK) { st = a; goto done; }
 			for (kk = 0; kk <= j; kk++)
 			{
@@ -225,7 +225,7 @@ done:
 	return st;
 }
 
-qaws_status qaws_internal_rs_sensitivity(rs_core const* s, double const* drows, double const* xbar, double* out, unsigned int* out_gauge)
+qaws_status qaws_internal_rs_sensitivity(double* out, unsigned int* out_gauge, rs_core const* s, double const* drows, double const* xbar)
 {
 	rsn_sys S;
 	unsigned int N, k, i, r, q, dim, nv;
@@ -270,12 +270,12 @@ qaws_status qaws_internal_rs_sensitivity(rs_core const* s, double const* drows, 
 			S.lambda[r] = rsn_dot(S.C + (size_t)r * N, dE, N);
 			cn = fmax(cn, sqrt(CC[r * k + r]));
 		}
-		if (!qaws_internal_rs_lu(CC, k, cpiv))
+		if (!qaws_internal_rs_lu(CC, cpiv, k))
 		{
 			st = QAWS_STATUS_NUMERICAL_FAILURE;   /* (dependent constraint rows) */
 			goto done;
 		}
-		qaws_internal_rs_lu_solve(CC, k, cpiv, S.lambda);
+		qaws_internal_rs_lu_solve(S.lambda, CC, cpiv, k);
 	}
 	/* the rigid motions every row allows: of the translations and the
 	   rotations about the barycenter (unit vectors M_a), the combinations

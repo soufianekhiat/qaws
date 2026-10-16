@@ -540,7 +540,7 @@ static qaws_status sk_level_signs(qaws_stack_level const* L, qaws_fill_rule fr, 
 	qaws_status s = QAWS_STATUS_OK;
 	for (i = 0; i < L->path_count && s == QAWS_STATUS_OK; i++)
 		for (c = 0; c < L->paths[i].curve_count && s == QAWS_STATUS_OK; c++)
-			s = qaws_internal_flatten_curve(L->paths[i].curves[c], 2, (qaws_scalar)flat, i, &segs, &ns, &cap);
+			s = qaws_internal_flatten_curve(&segs, &ns, &cap, L->paths[i].curves[c], 2, (qaws_scalar)flat, i);
 	if (s != QAWS_STATUS_OK) { free(segs); return s; }
 	for (j = 0; j <= g->ny; j++)
 	{
@@ -933,7 +933,7 @@ qaws_status qaws_stack_boolean_2d(qaws_stack_result** out, qaws_stack_2d const* 
 	}
 	r->count = n;
 	job.ct = ct; job.a = a; job.b = b; job.z = r->z; job.levels = r->levels;
-	s = qaws_internal_parallel(executor, n, 1, sk_level_job, &job);
+	s = qaws_internal_parallel(n, 1, sk_level_job, executor, &job);
 	if (s != QAWS_STATUS_OK)
 	{
 		qaws_stack_result_destroy(r);

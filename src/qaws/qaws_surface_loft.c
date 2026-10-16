@@ -104,8 +104,8 @@ static qaws_status loft_surface_eval_sampled(
 	/* Blend section positions in v via Catmull-Rom */
 	if (need_pos || need_dv)
 	{
-		qaws_internal_surface_catmull_rom_blend(sec_pos, impl->v_params, n, v,
-			&pos, need_dv ? &dv_vec : NULL);
+		qaws_internal_surface_catmull_rom_blend(&pos, need_dv ? &dv_vec : NULL, sec_pos, impl->v_params,
+			n, v);
 	}
 
 	if (eval_flags & QAWS_SURFACE_EVAL_POSITION)
@@ -123,8 +123,8 @@ static qaws_status loft_surface_eval_sampled(
 	/* dS/du: blend section derivatives in v with same weights */
 	if (need_du)
 	{
-		qaws_internal_surface_catmull_rom_blend(sec_du, impl->v_params, n, v,
-			&du_vec, NULL);
+		qaws_internal_surface_catmull_rom_blend(&du_vec, NULL, sec_du, impl->v_params,
+			n, v);
 		if (eval_flags & QAWS_SURFACE_EVAL_DU)
 		{
 			out_result->du = du_vec;
@@ -207,7 +207,7 @@ static qaws_status loft_surface_eval_sampled(
 
 		if (eval_flags & QAWS_SURFACE_EVAL_NORMAL)
 		{
-			qaws_internal_surface_normal(out_result->du, out_result->dv, &out_result->normal);
+			qaws_internal_surface_normal(&out_result->normal, out_result->du, out_result->dv);
 			out_result->valid_flags |= QAWS_SURFACE_EVAL_NORMAL;
 		}
 	}
@@ -249,7 +249,7 @@ static qaws_status loft_tangent(
 	qaws_scalar w[QAWS_INTERNAL_CR_ROWS][4];
 	qaws_dual3 S[QAWS_SURFACE_JET_COUNT];
 
-	qaws_internal_catmull_rom_weights(impl->v_params, impl->section_count, v, idx, w);
+	qaws_internal_catmull_rom_weights(idx, impl->v_params, impl->section_count, v, w);
 	for (ch = 0; ch < QAWS_SURFACE_JET_COUNT; ch++)
 		S[ch] = qaws_dual3_const(qaws_v3_zero());
 
@@ -261,8 +261,8 @@ static qaws_status loft_tangent(
 		qaws_status st;
 		if (w[0][k] == QAWS_ZERO && w[1][k] == QAWS_ZERO && w[2][k] == QAWS_ZERO && w[3][k] == QAWS_ZERO)
 			continue;
-		st = qaws_internal_curve_tangent_any(ctx, impl->sections[idx[k]], r.min_value + u * s, s * u_dot, 0xFu,
-			qaws_internal_child_views(views, idx[k]), &p, &t, tangent2 ? &tt : NULL);
+		st = qaws_internal_curve_tangent_any(&p, &t, tangent2 ? &tt : NULL, impl->sections[idx[k]], qaws_internal_child_views(views, idx[k]),
+			r.min_value + u * s, s * u_dot, 0xFu, ctx);
 		if (st != QAWS_STATUS_OK)
 			return st;
 		for (ch = 0; ch < QAWS_SURFACE_JET_COUNT; ch++)
@@ -305,7 +305,7 @@ static qaws_status loft_adjoint(
 	unsigned int idx[4], k, ch;
 	qaws_scalar w[QAWS_INTERNAL_CR_ROWS][4];
 
-	qaws_internal_catmull_rom_weights(impl->v_params, impl->section_count, v, idx, w);
+	qaws_internal_catmull_rom_weights(idx, impl->v_params, impl->section_count, v, w);
 	for (k = 0; k < 4; k++)
 	{
 		qaws_range r = impl->section_ranges[idx[k]];
@@ -327,7 +327,7 @@ static qaws_status loft_adjoint(
 		{
 			/* d/dv of the weight: v enters only through W_k. */
 			qaws_curve_jet_3d p, tg;
-			st = qaws_internal_curve_tangent_any(ctx, impl->sections[idx[k]], t, QAWS_ZERO, 0xFu, NULL, &p, &tg, NULL);
+			st = qaws_internal_curve_tangent_any(&p, &tg, NULL, impl->sections[idx[k]], NULL, t, QAWS_ZERO, 0xFu, ctx);
 			if (st != QAWS_STATUS_OK)
 				return st;
 			for (ch = 0; ch < QAWS_SURFACE_JET_COUNT; ch++)
@@ -338,8 +338,8 @@ static qaws_status loft_adjoint(
 				*v_adjoint += w[b + 1][k] * loft_power(s, a) * qaws_v3_dot(ybar->d[ch], p.d[a]);
 			}
 		}
-		st = qaws_internal_curve_adjoint_any(ctx, impl->sections[idx[k]], t, 0xFu, &jbar,
-			(qaws_diff_views*)qaws_internal_child_views(views, idx[k]), u_adjoint ? &tbar : NULL);
+		st = qaws_internal_curve_adjoint_any((qaws_diff_views*)qaws_internal_child_views(views, idx[k]), u_adjoint ? &tbar : NULL, impl->sections[idx[k]], &jbar, t,
+			0xFu, ctx);
 		if (st != QAWS_STATUS_OK)
 			return st;
 		if (u_adjoint)
@@ -406,7 +406,7 @@ static qaws_status loft_surface_eval(
 	if (eval_flags & QAWS_SURFACE_EVAL_DVV) { out_result->dvv = p.d[5]; out_result->valid_flags |= QAWS_SURFACE_EVAL_DVV; }
 	if (eval_flags & QAWS_SURFACE_EVAL_NORMAL)
 	{
-		qaws_internal_surface_normal(out_result->du, out_result->dv, &out_result->normal);
+		qaws_internal_surface_normal(&out_result->normal, out_result->du, out_result->dv);
 		out_result->valid_flags |= QAWS_SURFACE_EVAL_NORMAL;
 	}
 	return QAWS_STATUS_OK;
@@ -421,7 +421,7 @@ static void loft_surface_destroy(void* impl, qaws_allocator const* allocator)
 		if (li->v_params) free(li->v_params);
 		if (li->section_ranges) free(li->section_ranges);
 	}
-	qaws_internal_dealloc(allocator, impl);
+	qaws_internal_dealloc(impl, allocator);
 }
 
 static int loft_surface_is_rational(qaws_surface const* s)

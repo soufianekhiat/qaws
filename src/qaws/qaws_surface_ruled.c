@@ -116,7 +116,7 @@ static qaws_status ruled_surface_eval(
 	/* Normal */
 	if (eval_flags & QAWS_SURFACE_EVAL_NORMAL)
 	{
-		qaws_internal_surface_normal(out_result->du, out_result->dv, &out_result->normal);
+		qaws_internal_surface_normal(&out_result->normal, out_result->du, out_result->dv);
 		out_result->valid_flags |= QAWS_SURFACE_EVAL_NORMAL;
 	}
 
@@ -126,7 +126,7 @@ static qaws_status ruled_surface_eval(
 static void ruled_surface_destroy(void* impl, qaws_allocator const* allocator)
 {
 	/* We don't own the curves - just free the impl struct */
-	qaws_internal_dealloc(allocator, impl);
+	qaws_internal_dealloc(impl, allocator);
 }
 
 static int ruled_surface_is_rational(qaws_surface const* s)
@@ -201,12 +201,12 @@ static qaws_status ruled_tangent(
 	unsigned int ch;
 	qaws_status st;
 
-	st = qaws_internal_curve_tangent_any(ctx, impl->curve_a, impl->range_a.min_value + u * sa, sa * u_dot,
-		0xFu, qaws_internal_child_views(views, 0), &ap, &at, tangent2 ? &att : NULL);
+	st = qaws_internal_curve_tangent_any(&ap, &at, tangent2 ? &att : NULL, impl->curve_a,
+		qaws_internal_child_views(views, 0), impl->range_a.min_value + u * sa, sa * u_dot, 0xFu, ctx);
 	if (st != QAWS_STATUS_OK)
 		return st;
-	st = qaws_internal_curve_tangent_any(ctx, impl->curve_b, impl->range_b.min_value + u * sb, sb * u_dot,
-		0xFu, qaws_internal_child_views(views, 1), &bp, &bt, tangent2 ? &btt : NULL);
+	st = qaws_internal_curve_tangent_any(&bp, &bt, tangent2 ? &btt : NULL, impl->curve_b,
+		qaws_internal_child_views(views, 1), impl->range_b.min_value + u * sb, sb * u_dot, 0xFu, ctx);
 	if (st != QAWS_STATUS_OK)
 		return st;
 
@@ -270,10 +270,10 @@ static qaws_status ruled_adjoint(
 	{
 		/* dS_{a,0}/dv = S_{a,1} = B_a sb^a - A_a sa^a */
 		qaws_curve_jet_3d ap, at, bp, bt;
-		st = qaws_internal_curve_tangent_any(ctx, impl->curve_a, ta, QAWS_ZERO, 0xFu, NULL, &ap, &at, NULL);
+		st = qaws_internal_curve_tangent_any(&ap, &at, NULL, impl->curve_a, NULL, ta, QAWS_ZERO, 0xFu, ctx);
 		if (st != QAWS_STATUS_OK)
 			return st;
-		st = qaws_internal_curve_tangent_any(ctx, impl->curve_b, tb, QAWS_ZERO, 0xFu, NULL, &bp, &bt, NULL);
+		st = qaws_internal_curve_tangent_any(&bp, &bt, NULL, impl->curve_b, NULL, tb, QAWS_ZERO, 0xFu, ctx);
 		if (st != QAWS_STATUS_OK)
 			return st;
 		for (ch = 0; ch < QAWS_SURFACE_JET_COUNT; ch++)
@@ -306,12 +306,12 @@ static qaws_status ruled_adjoint(
 		bbar.channels |= 1u << a;
 	}
 
-	st = qaws_internal_curve_adjoint_any(ctx, impl->curve_a, ta, abar.channels, &abar,
-		(qaws_diff_views*)qaws_internal_child_views(views, 0), u_adjoint ? &tabar : NULL);
+	st = qaws_internal_curve_adjoint_any((qaws_diff_views*)qaws_internal_child_views(views, 0), u_adjoint ? &tabar : NULL, impl->curve_a, &abar, ta,
+		abar.channels, ctx);
 	if (st != QAWS_STATUS_OK)
 		return st;
-	st = qaws_internal_curve_adjoint_any(ctx, impl->curve_b, tb, bbar.channels, &bbar,
-		(qaws_diff_views*)qaws_internal_child_views(views, 1), u_adjoint ? &tbbar : NULL);
+	st = qaws_internal_curve_adjoint_any((qaws_diff_views*)qaws_internal_child_views(views, 1), u_adjoint ? &tbbar : NULL, impl->curve_b, &bbar, tb,
+		bbar.channels, ctx);
 	if (st != QAWS_STATUS_OK)
 		return st;
 	if (u_adjoint)

@@ -77,7 +77,7 @@ static qaws_status os_eval_side(qaws_curve const* c, double t, int side, double*
 	qaws_eval_result_2d r;
 	unsigned int fl = QAWS_EVAL_FLAG_POSITION | (d1 ? QAWS_EVAL_FLAG_D1 : 0) | (d2 ? QAWS_EVAL_FLAG_D2 : 0);
 	qaws_scalar local = 0;
-	unsigned int s = qaws_internal_find_span(c, (qaws_scalar)t, &local);
+	unsigned int s = qaws_internal_find_span(&local, c, (qaws_scalar)t);
 	qaws_status st;
 	if (side < 0 && s > 0 && local <= 0 && (qaws_scalar)t > c->parameter_range.min_value)
 	{
@@ -2255,9 +2255,9 @@ qaws_status qaws_offset_paths(qaws_clip_result** out_result, qaws_path_2d const*
 	return qaws_offset_execute(out_result, &d);
 }
 
-qaws_status qaws_internal_offset_curve(qaws_curve const* curve, double delta, double tolerance,
-	qaws_curve** out_curves, unsigned int curve_capacity, unsigned int* out_curve_count,
-	double* cusps, unsigned int cusp_capacity, unsigned int* cusp_count)
+qaws_status qaws_internal_offset_curve(qaws_curve** out_curves, unsigned int* out_curve_count, double* cusps,
+	unsigned int* cusp_count, qaws_curve const* curve, unsigned int curve_capacity,
+	unsigned int cusp_capacity, double delta, double tolerance)
 {
 	os_ctx x;
 	qaws_offset_desc d;

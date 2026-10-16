@@ -148,7 +148,7 @@ static qaws_status revolution_surface_eval(
 	/* Normal */
 	if (eval_flags & QAWS_SURFACE_EVAL_NORMAL)
 	{
-		qaws_internal_surface_normal(out_result->du, out_result->dv, &out_result->normal);
+		qaws_internal_surface_normal(&out_result->normal, out_result->du, out_result->dv);
 		out_result->valid_flags |= QAWS_SURFACE_EVAL_NORMAL;
 	}
 
@@ -157,7 +157,7 @@ static qaws_status revolution_surface_eval(
 
 static void revolution_surface_destroy(void* impl, qaws_allocator const* allocator)
 {
-	qaws_internal_dealloc(allocator, impl);
+	qaws_internal_dealloc(impl, allocator);
 }
 
 static int revolution_surface_is_rational(qaws_surface const* s)
@@ -280,7 +280,7 @@ static qaws_scalar revolution_view_scalar(qaws_diff_views const* views, qaws_dif
 	qaws_field_view const* fv = views ? qaws_diff_views_find(views, field) : NULL;
 	qaws_scalar x = QAWS_ZERO;
 	if (fv)
-		qaws_internal_view_read(fv, 0, 1, &x);
+		qaws_internal_view_read(&x, fv, 0, 1);
 	return x;
 }
 
@@ -300,8 +300,8 @@ static qaws_status revolution_tangent(
 	unsigned int k;
 	qaws_status st;
 
-	st = qaws_internal_curve_tangent_any(ctx, impl->profile, impl->prof_range.min_value + v * s, s * v_dot,
-		0xFu, qaws_internal_child_views(views, 0), &cp, &ct, tangent2 ? &ctt : NULL);
+	st = qaws_internal_curve_tangent_any(&cp, &ct, tangent2 ? &ctt : NULL, impl->profile,
+		qaws_internal_child_views(views, 0), impl->prof_range.min_value + v * s, s * v_dot, 0xFu, ctx);
 	if (st != QAWS_STATUS_OK)
 		return st;
 	for (k = 0; k < 4; k++)
@@ -310,7 +310,7 @@ static qaws_status revolution_tangent(
 		h[k] = qaws_dual1_make(cp.d[k].y, ct.d[k].y, tangent2 ? ctt.d[k].y : QAWS_ZERO);
 	}
 	if (ov)
-		qaws_internal_view_read(ov, 0, 3, o_dot);
+		qaws_internal_view_read(o_dot, ov, 0, 3);
 	origin = qaws_dual3_make(impl->origin, qaws_v3(o_dot[0], o_dot[1], o_dot[2]), qaws_v3_zero());
 
 	revolution_jets(impl, qaws_dual1_make(u, u_dot, QAWS_ZERO),
@@ -355,7 +355,7 @@ static qaws_status revolution_adjoint(
 	unsigned int seed, k;
 	qaws_status st;
 
-	st = qaws_internal_curve_tangent_any(ctx, impl->profile, t, QAWS_ZERO, 0xFu, NULL, &cp, &ct, NULL);
+	st = qaws_internal_curve_tangent_any(&cp, &ct, NULL, impl->profile, NULL, t, QAWS_ZERO, 0xFu, ctx);
 	if (st != QAWS_STATUS_OK)
 		return st;
 
@@ -390,8 +390,8 @@ static qaws_status revolution_adjoint(
 		cbar.d[k].y = bars[4 + k];
 	}
 	cbar.channels = 0xFu;
-	st = qaws_internal_curve_adjoint_any(ctx, impl->profile, t, 0xFu, &cbar,
-		(qaws_diff_views*)qaws_internal_child_views(views, 0), v_adjoint ? &tbar : NULL);
+	st = qaws_internal_curve_adjoint_any((qaws_diff_views*)qaws_internal_child_views(views, 0), v_adjoint ? &tbar : NULL, impl->profile, &cbar, t,
+		0xFu, ctx);
 	if (st != QAWS_STATUS_OK)
 		return st;
 	if (v_adjoint)

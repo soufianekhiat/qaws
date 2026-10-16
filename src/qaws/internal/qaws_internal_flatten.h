@@ -36,15 +36,15 @@ typedef struct qaws_flat_patch
 } qaws_flat_patch;
 
 /* position (and d1 when d != NULL) of a 2D or 3D curve as 3 scalars (z = 0 in 2D) */
-qaws_status qaws_internal_curve_point(qaws_curve const* c, unsigned int dim, qaws_scalar t, unsigned int flags, qaws_scalar* p, qaws_scalar* d);
+qaws_status qaws_internal_curve_point(qaws_scalar* p, qaws_scalar* d, qaws_curve const* c, unsigned int dim, qaws_scalar t, unsigned int flags);
 
 /* appends the segments of curve `owner` to *segs (grown with realloc) */
-qaws_status qaws_internal_flatten_curve(qaws_curve const* c, unsigned int dim, qaws_scalar flatness, unsigned int owner,
-	qaws_flat_seg** segs, unsigned int* count, unsigned int* capacity);
+qaws_status qaws_internal_flatten_curve(qaws_flat_seg** segs, unsigned int* count, unsigned int* capacity, qaws_curve const* c,
+	unsigned int dim, qaws_scalar flatness, unsigned int owner);
 
 /* appends the patches of surface `owner` to *patches (grown with realloc) */
-qaws_status qaws_internal_flatten_surface(qaws_surface const* s, qaws_scalar flatness, unsigned int owner,
-	qaws_flat_patch** patches, unsigned int* count, unsigned int* capacity);
+qaws_status qaws_internal_flatten_surface(qaws_flat_patch** patches, unsigned int* count, unsigned int* capacity,
+	qaws_surface const* s, qaws_scalar flatness, unsigned int owner);
 
 /* largest axis extent of a coarse sampling of curves and surfaces (1 when empty) */
 qaws_scalar qaws_internal_flatten_extent(qaws_curve const* const* curves, unsigned int curve_count, unsigned int dim,

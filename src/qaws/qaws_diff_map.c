@@ -33,7 +33,7 @@ struct qaws_diff_map
 
 static qaws_diff_map* map_create(qaws_diff_map_kind kind, unsigned int in_count, unsigned int out_count)
 {
-	qaws_diff_map* m = (qaws_diff_map*)qaws_internal_alloc(NULL, (unsigned long)sizeof(qaws_diff_map));
+	qaws_diff_map* m = (qaws_diff_map*)qaws_internal_alloc((unsigned long)sizeof(qaws_diff_map), NULL);
 	if (!m)
 		return NULL;
 	memset(m, 0, sizeof(*m));
@@ -47,8 +47,8 @@ void qaws_diff_map_destroy(qaws_diff_map* map)
 {
 	if (!map)
 		return;
-	qaws_internal_dealloc(NULL, map->entries);
-	qaws_internal_dealloc(NULL, map);
+	qaws_internal_dealloc(map->entries, NULL);
+	qaws_internal_dealloc(map, NULL);
 }
 
 static qaws_status map_add(qaws_diff_map* m, unsigned int out_obj, qaws_diff_field out_field, unsigned int out_elem,
@@ -59,14 +59,14 @@ static qaws_status map_add(qaws_diff_map* m, unsigned int out_obj, qaws_diff_fie
 	if (m->entry_count == m->capacity)
 	{
 		unsigned int cap = m->capacity ? m->capacity * 2 : 64;
-		qaws_diff_map_entry* grown = (qaws_diff_map_entry*)qaws_internal_alloc(NULL,
-			(unsigned long)(sizeof(qaws_diff_map_entry) * cap));
+		qaws_diff_map_entry* grown = (qaws_diff_map_entry*)qaws_internal_alloc((unsigned long)(sizeof(qaws_diff_map_entry) * cap),
+			NULL);
 		if (!grown)
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 		if (m->entries)
 		{
 			memcpy(grown, m->entries, sizeof(qaws_diff_map_entry) * m->entry_count);
-			qaws_internal_dealloc(NULL, m->entries);
+			qaws_internal_dealloc(m->entries, NULL);
 		}
 		m->entries = grown;
 		m->capacity = cap;
@@ -119,7 +119,7 @@ static void entry_apply(qaws_diff_map_entry const* e, qaws_field_view const* src
 {
 	qaws_scalar in[3], add[3] = { 0, 0, 0 };
 	unsigned int c;
-	qaws_internal_view_read(src, src_elem, src->components, in);
+	qaws_internal_view_read(in, src, src_elem, src->components);
 	if (src_comp == QAWS_DIFF_MAP_ALL_COMPONENTS && dst_comp == QAWS_DIFF_MAP_ALL_COMPONENTS)
 	{
 		for (c = 0; c < dst->components && c < src->components; c++)
@@ -245,7 +245,7 @@ static qaws_status read_values(qaws_curve const* c, qaws_diff_field f, qaws_scal
 	qaws_status st = qaws_curve_read_field(NULL, n, c, 0, f);
 	if (st != QAWS_STATUS_OK)
 		return st;
-	*out = (qaws_scalar*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_scalar) * (*n + 1)));
+	*out = (qaws_scalar*)qaws_internal_alloc((unsigned long)(sizeof(qaws_scalar) * (*n + 1)), NULL);
 	if (!*out)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	return qaws_curve_read_field(*out, n, c, *n, f);
@@ -265,7 +265,7 @@ static qaws_status make_probe(qaws_curve const* c, field_info const* fields, uns
 	for (i = 0; i < nf; i++)
 	{
 		size_t size = sizeof(qaws_scalar) * (size_t)fields[i].count * fields[i].components;
-		buffers[n] = (qaws_scalar*)qaws_internal_alloc(NULL, (unsigned long)(size + 1));
+		buffers[n] = (qaws_scalar*)qaws_internal_alloc((unsigned long)(size + 1), NULL);
 		if (!buffers[n])
 		{
 			st = QAWS_STATUS_ALLOCATION_FAILURE;
@@ -280,7 +280,7 @@ static qaws_status make_probe(qaws_curve const* c, field_info const* fields, uns
 	if (rational)
 	{
 		unsigned int wc = fields[0].count;
-		buffers[n] = (qaws_scalar*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_scalar) * (wc + 1)));
+		buffers[n] = (qaws_scalar*)qaws_internal_alloc((unsigned long)(sizeof(qaws_scalar) * (wc + 1)), NULL);
 		if (!buffers[n])
 		{
 			st = QAWS_STATUS_ALLOCATION_FAILURE;
@@ -298,7 +298,7 @@ static qaws_status make_probe(qaws_curve const* c, field_info const* fields, uns
 	st = qaws_curve_clone_with_fields(out, c, &vs);
 done:
 	for (i = 0; i < n; i++)
-		qaws_internal_dealloc(NULL, buffers[i]);
+		qaws_internal_dealloc(buffers[i], NULL);
 	return st;
 }
 
@@ -346,8 +346,8 @@ static qaws_status add_column(qaws_diff_map* m, qaws_curve* const* f0, qaws_curv
 					}
 				}
 			}
-			qaws_internal_dealloc(NULL, a);
-			qaws_internal_dealloc(NULL, b);
+			qaws_internal_dealloc(a, NULL);
+			qaws_internal_dealloc(b, NULL);
 			if (st != QAWS_STATUS_OK)
 				return st;
 		}
@@ -411,13 +411,13 @@ static qaws_status rationalize(qaws_diff_map* m, qaws_curve const* const* in, un
 			st = map_add(m, e->out_object, QAWS_FIELD_WEIGHTS, e->out_element, 0,
 				e->in_object, QAWS_FIELD_WEIGHTS, e->in_element, 0, A);
 	}
-	qaws_internal_dealloc(NULL, old);
+	qaws_internal_dealloc(old, NULL);
 	for (i = 0; i < MAP_MAX_OBJECTS; i++)
 	{
-		qaws_internal_dealloc(NULL, w_in[i]);
-		qaws_internal_dealloc(NULL, p_in[i]);
-		qaws_internal_dealloc(NULL, w_out[i]);
-		qaws_internal_dealloc(NULL, p_out[i]);
+		qaws_internal_dealloc(w_in[i], NULL);
+		qaws_internal_dealloc(p_in[i], NULL);
+		qaws_internal_dealloc(w_out[i], NULL);
+		qaws_internal_dealloc(p_out[i], NULL);
 	}
 	return st;
 }
@@ -587,12 +587,12 @@ static qaws_status bezier_split_parameter_column(qaws_diff_map* m, qaws_curve co
 	{
 		qaws_scalar dl[3] = { 0, 0, 0 }, dr[3] = { 0, 0, 0 };
 		/* left_i uses degree-i Bernstein in t */
-		qaws_internal_bernstein_derivs(i, t, 1, b);
+		qaws_internal_bernstein_derivs(b, i, t, 1);
 		for (j = 0; j <= i; j++)
 			for (c = 0; c < dim; c++)
 				dl[c] += b[(i + 1) + j] * p[j * dim + c];
 		/* right_i uses degree-(n-i) Bernstein in t over P_i..P_n */
-		qaws_internal_bernstein_derivs(n - i, t, 1, b);
+		qaws_internal_bernstein_derivs(b, n - i, t, 1);
 		for (j = i; j <= n; j++)
 			for (c = 0; c < dim; c++)
 				dr[c] += b[(n - i + 1) + (j - i)] * p[j * dim + c];
@@ -603,7 +603,7 @@ static qaws_status bezier_split_parameter_column(qaws_diff_map* m, qaws_curve co
 				st = map_add(m, 1, QAWS_FIELD_CONTROL_POINTS, i, c, 1, QAWS_FIELD_PARAMETER, 0, 0, dr[c]);
 		}
 	}
-	qaws_internal_dealloc(NULL, p);
+	qaws_internal_dealloc(p, NULL);
 	return st;
 }
 
@@ -1022,9 +1022,9 @@ qaws_status qaws_curve_fit_bspline_diff(qaws_curve** out_curve, qaws_diff_map** 
 	   kd (2 * kc as fit_dual) */
 	nd = (size_t)s.m * s.dim * 2 + (size_t)s.m * 3 + (size_t)s.kc * 4 + (size_t)s.sys * s.sys * 2 +
 		(size_t)s.n * s.dim * 2 + (size_t)s.sys * s.dim + 8;
-	work = (double*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(double) * nd));
-	scal = (qaws_scalar*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_scalar) * (s.m + s.kc + s.n * s.dim + 4) +
-		sizeof(unsigned int) * (s.m + s.kc + 4)));
+	work = (double*)qaws_internal_alloc((unsigned long)(sizeof(double) * nd), NULL);
+	scal = (qaws_scalar*)qaws_internal_alloc((unsigned long)(sizeof(qaws_scalar) * (s.m + s.kc + s.n * s.dim + 4) +
+		sizeof(unsigned int) * (s.m + s.kc + 4)), NULL);
 	if (!work || !scal)
 	{
 		st = QAWS_STATUS_ALLOCATION_FAILURE;
@@ -1086,8 +1086,8 @@ qaws_status qaws_curve_fit_bspline_diff(qaws_curve** out_curve, qaws_diff_map** 
 	}
 done:
 	qaws_diff_map_destroy(map);
-	qaws_internal_dealloc(NULL, work);
-	qaws_internal_dealloc(NULL, scal);
+	qaws_internal_dealloc(work, NULL);
+	qaws_internal_dealloc(scal, NULL);
 	if (st != QAWS_STATUS_OK && *out_curve)
 	{
 		qaws_curve_destroy(*out_curve);
@@ -1201,7 +1201,7 @@ static qaws_status offset_emit(qaws_diff_map* m, offset_state* s, unsigned int i
 {
 	qaws_curve* fit = NULL;
 	unsigned int j, c, got = 0;
-	qaws_status st = qaws_internal_fit_bspline(QAWS_DIMENSION_3D, 3, s->params, s->dq, s->n_samples, s->n_cp, &fit);
+	qaws_status st = qaws_internal_fit_bspline(&fit, s->params, s->dq, QAWS_DIMENSION_3D, s->n_samples, s->n_cp, 3);
 	if (st != QAWS_STATUS_OK)
 		return st;
 	st = qaws_curve_read_field(s->cps, &got, fit, s->n_cp * 3, QAWS_FIELD_CONTROL_POINTS);
@@ -1287,13 +1287,13 @@ qaws_status qaws_curve_offset_3d_diff(
 		if (s.dir_len > QAWS_LITERAL(1e-12))
 			s.dir = qaws_v3_scale(s.dir, QAWS_ONE / s.dir_len);
 	}
-	s.params = (qaws_scalar*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_scalar) * (s.n_samples * 4 + s.n_cp * 3 + 4)));
-	s.jets = (qaws_curve_jet_3d*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_curve_jet_3d) * s.n_samples * 2));
-	s.normals = (qaws_vec3*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_vec3) * s.n_samples));
+	s.params = (qaws_scalar*)qaws_internal_alloc((unsigned long)(sizeof(qaws_scalar) * (s.n_samples * 4 + s.n_cp * 3 + 4)), NULL);
+	s.jets = (qaws_curve_jet_3d*)qaws_internal_alloc((unsigned long)(sizeof(qaws_curve_jet_3d) * s.n_samples * 2), NULL);
+	s.normals = (qaws_vec3*)qaws_internal_alloc((unsigned long)(sizeof(qaws_vec3) * s.n_samples), NULL);
 	if (direction_mode == 2)
 	{
-		s.uv = (qaws_scalar*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_scalar) * s.n_samples * 7));
-		s.sjets = (qaws_surface_jet*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_surface_jet) * s.n_samples));
+		s.uv = (qaws_scalar*)qaws_internal_alloc((unsigned long)(sizeof(qaws_scalar) * s.n_samples * 7), NULL);
+		s.sjets = (qaws_surface_jet*)qaws_internal_alloc((unsigned long)(sizeof(qaws_surface_jet) * s.n_samples), NULL);
 	}
 	if (!s.params || !s.jets || !s.normals || (direction_mode == 2 && (!s.uv || !s.sjets)))
 	{
@@ -1358,7 +1358,7 @@ qaws_status qaws_curve_offset_3d_diff(
 		qaws_scalar* seed;
 		if (!(fields[f].capabilities & QAWS_CAP_TANGENT))
 			continue;
-		seed = (qaws_scalar*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_scalar) * (fields[f].count * comps + 1)));
+		seed = (qaws_scalar*)qaws_internal_alloc((unsigned long)(sizeof(qaws_scalar) * (fields[f].count * comps + 1)), NULL);
 		if (!seed)
 		{
 			st = QAWS_STATUS_ALLOCATION_FAILURE;
@@ -1380,7 +1380,7 @@ qaws_status qaws_curve_offset_3d_diff(
 				if (st == QAWS_STATUS_OK)
 					st = offset_emit(map, &s, 0, fields[f].field, e, c);
 			}
-		qaws_internal_dealloc(NULL, seed);
+		qaws_internal_dealloc(seed, NULL);
 	}
 
 	/* input 1: the distance */
@@ -1427,7 +1427,7 @@ qaws_status qaws_curve_offset_3d_diff(
 			qaws_scalar* seed;
 			if (!(sf[f].capabilities & QAWS_CAP_TANGENT) || sf[f].field == QAWS_FIELD_U_KNOTS || sf[f].field == QAWS_FIELD_V_KNOTS)
 				continue;
-			seed = (qaws_scalar*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_scalar) * (sf[f].count * comps + 1)));
+			seed = (qaws_scalar*)qaws_internal_alloc((unsigned long)(sizeof(qaws_scalar) * (sf[f].count * comps + 1)), NULL);
 			if (!seed)
 			{
 				st = QAWS_STATUS_ALLOCATION_FAILURE;
@@ -1461,7 +1461,7 @@ qaws_status qaws_curve_offset_3d_diff(
 					if (st == QAWS_STATUS_OK)
 						st = offset_emit(map, &s, 3, sf[f].field, e, c);
 				}
-			qaws_internal_dealloc(NULL, seed);
+			qaws_internal_dealloc(seed, NULL);
 		}
 	}
 
@@ -1472,11 +1472,11 @@ qaws_status qaws_curve_offset_3d_diff(
 	}
 done:
 	qaws_diff_map_destroy(map);
-	qaws_internal_dealloc(NULL, s.params);
-	qaws_internal_dealloc(NULL, s.jets);
-	qaws_internal_dealloc(NULL, s.normals);
-	qaws_internal_dealloc(NULL, s.uv);
-	qaws_internal_dealloc(NULL, s.sjets);
+	qaws_internal_dealloc(s.params, NULL);
+	qaws_internal_dealloc(s.jets, NULL);
+	qaws_internal_dealloc(s.normals, NULL);
+	qaws_internal_dealloc(s.uv, NULL);
+	qaws_internal_dealloc(s.sjets, NULL);
 	if (st != QAWS_STATUS_OK && *out_curve)
 	{
 		qaws_curve_destroy(*out_curve);

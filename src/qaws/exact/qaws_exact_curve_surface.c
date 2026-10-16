@@ -30,12 +30,12 @@ typedef struct cs_ctx
 
 static void* cs_alloc(size_t b)
 {
-	return qaws_internal_alloc(NULL, (unsigned long)b);
+	return qaws_internal_alloc((unsigned long)b, NULL);
 }
 
 static void cs_free(void* p)
 {
-	qaws_internal_dealloc(NULL, p);
+	qaws_internal_dealloc(p, NULL);
 }
 
 /* Divides one tensor by the gcd of its coefficients (a positive factor). */

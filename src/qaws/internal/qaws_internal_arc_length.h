@@ -6,20 +6,20 @@
 /* Compute arc length of a curve segment between two global parameter values
    using Gaussian quadrature. */
 qaws_status qaws_internal_arc_length(
+	qaws_scalar* out_length,
 	qaws_curve const* curve,
 	qaws_scalar t_min,
-	qaws_scalar t_max,
-	qaws_scalar* out_length);
+	qaws_scalar t_max);
 
 /* Build a cumulative arc-length table for a curve.
    table_params and table_distances must each hold table_size entries.
    table_params[i] are uniformly spaced parameters from min to max.
    table_distances[i] are cumulative arc lengths. */
 qaws_status qaws_internal_build_arc_length_table(
-	qaws_curve const* curve,
-	unsigned int table_size,
 	qaws_scalar* table_params,
-	qaws_scalar* table_distances);
+	qaws_scalar* table_distances,
+	qaws_curve const* curve,
+	unsigned int table_size);
 
 /* Map a distance value to a parameter using an arc-length table.
    Uses binary search + linear interpolation. */

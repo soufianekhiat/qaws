@@ -40,7 +40,7 @@ QAWS_INLINE unsigned int qaws_bijet_count(unsigned int order)
 }
 
 /* out = f x g */
-QAWS_INLINE void qaws_bijet_cross(qaws_dual3 const* f, qaws_dual3 const* g, unsigned int order, qaws_dual3* out)
+QAWS_INLINE void qaws_bijet_cross(qaws_dual3* out, qaws_dual3 const* f, qaws_dual3 const* g, unsigned int order)
 {
 	unsigned int n = qaws_bijet_count(order), k, i, j;
 	for (k = 0; k < n; k++)
@@ -57,7 +57,7 @@ QAWS_INLINE void qaws_bijet_cross(qaws_dual3 const* f, qaws_dual3 const* g, unsi
 }
 
 /* out = f . g */
-QAWS_INLINE void qaws_bijet_dot(qaws_dual3 const* f, qaws_dual3 const* g, unsigned int order, qaws_dual1* out)
+QAWS_INLINE void qaws_bijet_dot(qaws_dual1* out, qaws_dual3 const* f, qaws_dual3 const* g, unsigned int order)
 {
 	unsigned int n = qaws_bijet_count(order), k, i, j;
 	for (k = 0; k < n; k++)
@@ -76,7 +76,7 @@ QAWS_INLINE void qaws_bijet_dot(qaws_dual3 const* f, qaws_dual3 const* g, unsign
 }
 
 /* l = sqrt(q):  2 l_00 l_ab = q_ab - sum_{(i,j) not in {(0,0),(a,b)}} C C l_ij l_{a-i,b-j} */
-QAWS_INLINE void qaws_bijet_sqrt(qaws_dual1 const* q, unsigned int order, qaws_dual1* out)
+QAWS_INLINE void qaws_bijet_sqrt(qaws_dual1* out, qaws_dual1 const* q, unsigned int order)
 {
 	unsigned int n = qaws_bijet_count(order), k, i, j;
 	out[0] = qaws_dual1_sqrt(q[0]);
@@ -101,7 +101,7 @@ QAWS_INLINE void qaws_bijet_sqrt(qaws_dual1 const* q, unsigned int order, qaws_d
 }
 
 /* out = f / l:  l_00 out_ab = f_ab - sum_{(i,j) != (0,0)} C C l_ij out_{a-i,b-j} */
-QAWS_INLINE void qaws_bijet_div(qaws_dual3 const* f, qaws_dual1 const* l, unsigned int order, qaws_dual3* out)
+QAWS_INLINE void qaws_bijet_div(qaws_dual3* out, qaws_dual3 const* f, qaws_dual1 const* l, unsigned int order)
 {
 	unsigned int n = qaws_bijet_count(order), k, i, j;
 	for (k = 0; k < n; k++)
@@ -123,14 +123,14 @@ QAWS_INLINE void qaws_bijet_div(qaws_dual3 const* f, qaws_dual1 const* l, unsign
 
 /* Shifted views of a jet: (d/du f)_{ab} = f_{a+1,b}, (d/dv f)_{ab} = f_{a,b+1}.
    The input must hold order + 1. */
-QAWS_INLINE void qaws_bijet_shift_u(qaws_dual3 const* f, unsigned int order, qaws_dual3* out)
+QAWS_INLINE void qaws_bijet_shift_u(qaws_dual3* out, qaws_dual3 const* f, unsigned int order)
 {
 	unsigned int n = qaws_bijet_count(order), k;
 	for (k = 0; k < n; k++)
 		out[k] = f[qaws_bijet_index(g_bijet_a[k] + 1, g_bijet_b[k])];
 }
 
-QAWS_INLINE void qaws_bijet_shift_v(qaws_dual3 const* f, unsigned int order, qaws_dual3* out)
+QAWS_INLINE void qaws_bijet_shift_v(qaws_dual3* out, qaws_dual3 const* f, unsigned int order)
 {
 	unsigned int n = qaws_bijet_count(order), k;
 	for (k = 0; k < n; k++)

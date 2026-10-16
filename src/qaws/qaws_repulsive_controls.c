@@ -424,8 +424,8 @@ static qaws_status rcs_energy(rs_core const* core, double const* P, double* E, d
 	qaws_status st;
 	rc_apply(ctl, P, s->x);
 	if (grad) memset(s->gx, 0, sizeof(double) * ctl->dim * ctl->nv);
-	st = s->theta > 0 ? qaws_internal_repulsive_curves_bh(ctl->rc, s->x, s->theta, E, grad ? s->gx : NULL)
-		: qaws_internal_repulsive_curves_energy(ctl->rc, s->x, E, grad ? s->gx : NULL);
+	st = s->theta > 0 ? qaws_internal_repulsive_curves_bh(E, grad ? s->gx : NULL, ctl->rc, s->x, s->theta)
+		: qaws_internal_repulsive_curves_energy(E, grad ? s->gx : NULL, ctl->rc, s->x);
 	if (st == QAWS_STATUS_OK && grad)
 		rc_apply_t(ctl, s->gx, 1, grad);
 	return st;
@@ -442,9 +442,9 @@ static qaws_status rcs_metric(rs_core const* core, double const* P, double* M)
 	qaws_status st;
 	rc_apply(ctl, P, s->x);
 	if (s->theta > 0)
-		st = qaws_internal_rbh_curves_metric(ctl->rc, s->x, s->theta, &op);
+		st = qaws_internal_rbh_curves_metric(&op, ctl->rc, s->x, s->theta);
 	else
-		st = qaws_internal_repulsive_curves_metric(ctl->rc, s->x, s->A);
+		st = qaws_internal_repulsive_curves_metric(s->A, ctl->rc, s->x);
 	if (st != QAWS_STATUS_OK)
 		return st;
 	for (k = 0; k < nc; k++)
@@ -457,7 +457,7 @@ static qaws_status rcs_metric(rs_core const* core, double const* P, double* M)
 			for (a = ctl->brow[i]; a < ctl->brow[i + 1]; a++)
 				if (ctl->bcol[a] == k) u[i] = ctl->bval[a];
 		if (op)
-			qaws_internal_rbh_apply(op, u, y);
+			qaws_internal_rbh_apply(y, op, u);
 		else
 			for (i = 0; i < nv; i++)
 			{
@@ -623,12 +623,12 @@ fail:
 
 qaws_status qaws_repulsive_controls_solver_direction(qaws_scalar* out_direction, qaws_repulsive_controls_solver const* s, qaws_scalar const* controls)
 {
-	return s ? qaws_internal_rs_direction(&s->core, controls, out_direction) : QAWS_STATUS_INVALID_ARGUMENT;
+	return s ? qaws_internal_rs_direction(out_direction, &s->core, controls) : QAWS_STATUS_INVALID_ARGUMENT;
 }
 
 qaws_status qaws_repulsive_controls_solver_step(qaws_repulsive_report* out_report, qaws_scalar* controls, qaws_repulsive_controls_solver* s)
 {
-	return s ? qaws_internal_rs_step(&s->core, controls, out_report) : QAWS_STATUS_INVALID_ARGUMENT;
+	return s ? qaws_internal_rs_step(out_report, controls, &s->core) : QAWS_STATUS_INVALID_ARGUMENT;
 }
 
 qaws_status qaws_repulsive_controls_solve(qaws_repulsive_report* out_report, qaws_scalar* controls, qaws_repulsive_controls const* ctl,

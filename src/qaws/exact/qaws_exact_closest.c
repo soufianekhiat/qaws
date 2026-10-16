@@ -604,7 +604,7 @@ qaws_status qaws_exact_curve_batch_closest(qaws_exact_closest_point* out_points,
 		}
 	}
 	stats.span_count = nspan;
-	st = qaws_internal_grid_create(boxes, nspan, dim, &grid);
+	st = qaws_internal_grid_create(&grid, boxes, nspan, dim);
 	{
 		ecl_job J;
 		unsigned int nchunk = qaws_internal_chunk_count(point_count, CL_GRAIN), ch;
@@ -623,7 +623,7 @@ qaws_status qaws_exact_curve_batch_closest(qaws_exact_closest_point* out_points,
 		if (!J.chunk_stats)
 			st = QAWS_STATUS_ALLOCATION_FAILURE;
 		if (st == QAWS_STATUS_OK)
-			st = qaws_internal_parallel(desc->executor, point_count, CL_GRAIN, ecl_chunk, &J);
+			st = qaws_internal_parallel(point_count, CL_GRAIN, ecl_chunk, desc->executor, &J);
 		for (ch = 0; J.chunk_stats && ch < nchunk; ch++)
 		{
 			stats.candidate_count += J.chunk_stats[ch].candidate_count;
@@ -1431,7 +1431,7 @@ qaws_status qaws_exact_surface_batch_closest(qaws_exact_surface_closest_point* o
 				}
 			}
 	stats.patch_count = npatch;
-	st = qaws_internal_grid_create(boxes, npatch, 3, &grid);
+	st = qaws_internal_grid_create(&grid, boxes, npatch, 3);
 	if (st == QAWS_STATUS_OK)
 	{
 		esc_job J;
@@ -1449,7 +1449,7 @@ qaws_status qaws_exact_surface_batch_closest(qaws_exact_surface_closest_point* o
 		if (!J.chunk_stats)
 			st = QAWS_STATUS_ALLOCATION_FAILURE;
 		else
-			st = qaws_internal_parallel(desc->executor, point_count, CL_GRAIN, esc_chunk, &J);
+			st = qaws_internal_parallel(point_count, CL_GRAIN, esc_chunk, desc->executor, &J);
 		for (ch = 0; J.chunk_stats && ch < nchunk; ch++)
 		{
 			stats.candidate_count += J.chunk_stats[ch].candidate_count;

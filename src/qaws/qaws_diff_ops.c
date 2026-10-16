@@ -25,8 +25,8 @@ static void report_implicit(
 	qaws_scalar gap)
 {
 	qaws_diff_report* r;
-	qaws_internal_diff_report_note(ctx,
-		frozen ? QAWS_DIFF_ACTIVE_SET : QAWS_DIFF_SMOOTH, validity, frozen, 0);
+	qaws_internal_diff_report_note(frozen ? QAWS_DIFF_ACTIVE_SET : QAWS_DIFF_SMOOTH,
+		validity, frozen, 0, ctx);
 	if (!ctx || !ctx->report)
 		return;
 	r = ctx->report;
@@ -65,8 +65,8 @@ typedef struct curve_solution
 static qaws_status curve_jet_at(qaws_curve const* curve, qaws_scalar t, qaws_curve_jet_3d* jet)
 {
 	qaws_curve_jet_3d unused;
-	return qaws_internal_curve_tangent_any(NULL, curve, t, QAWS_ZERO,
-		QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2, NULL, jet, &unused, NULL);
+	return qaws_internal_curve_tangent_any(jet, &unused, NULL, curve,
+		NULL, t, QAWS_ZERO, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2, NULL);
 }
 
 /* Newton refinement on g(t) = C' . (C - q) starting at t0, so the implicit
@@ -220,8 +220,8 @@ qaws_status qaws_curve_closest_point_tangent(
 		return QAWS_STATUS_OK;
 
 	/* Parameter tangents of C and C' at the fixed solution parameter. */
-	st = qaws_internal_curve_tangent_any(NULL, curve, s.t, QAWS_ZERO,
-		QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, param_tangent, &p, &tg, NULL);
+	st = qaws_internal_curve_tangent_any(&p, &tg, NULL, curve,
+		param_tangent, s.t, QAWS_ZERO, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, NULL);
 	if (st != QAWS_STATUS_OK)
 		return st;
 
@@ -272,7 +272,7 @@ qaws_status qaws_curve_closest_point_adjoint(
 	jbar.d[0] = qaws_v3_axpy(qaws_v3_axpy(adjoint->position, n, adjoint->distance), s.jet.d[1], mu);
 	jbar.d[1] = qaws_v3_scale(s.r, mu);
 	jbar.channels = QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1;
-	st = qaws_internal_curve_adjoint_any(NULL, curve, s.t, jbar.channels, &jbar, param_adjoint, NULL);
+	st = qaws_internal_curve_adjoint_any(param_adjoint, NULL, curve, &jbar, s.t, jbar.channels, NULL);
 	if (st != QAWS_STATUS_OK)
 		return st;
 
@@ -579,8 +579,8 @@ static qaws_status root_jet(qaws_curve const* curve, qaws_scalar t, qaws_diff_vi
 	qaws_curve_jet_3d* primal, qaws_curve_jet_3d* tangent)
 {
 	qaws_curve_jet_3d unused;
-	return qaws_internal_curve_tangent_any(NULL, curve, t, QAWS_ZERO, ROOT_CHANNELS, views, primal,
-		tangent ? tangent : &unused, NULL);
+	return qaws_internal_curve_tangent_any(primal, tangent ? tangent : &unused, NULL, curve, views, t, QAWS_ZERO,
+		ROOT_CHANNELS, NULL);
 }
 
 static qaws_scalar clamp_range(qaws_range r, qaws_scalar t)
@@ -834,12 +834,12 @@ qaws_status qaws_curve_pair_point_adjoint(
 	jb.channels = ch;
 	if (adjoint_a)
 	{
-		st = qaws_internal_curve_adjoint_any(NULL, curve_a, s.t[0], ch, &ja, adjoint_a, NULL);
+		st = qaws_internal_curve_adjoint_any(adjoint_a, NULL, curve_a, &ja, s.t[0], ch, NULL);
 		if (st != QAWS_STATUS_OK)
 			return st;
 	}
 	if (adjoint_b)
-		st = qaws_internal_curve_adjoint_any(NULL, curve_b, s.t[1], ch, &jb, adjoint_b, NULL);
+		st = qaws_internal_curve_adjoint_any(adjoint_b, NULL, curve_b, &jb, s.t[1], ch, NULL);
 	return st;
 }
 
@@ -949,7 +949,7 @@ qaws_status qaws_curve_plane_point_adjoint(
 	}
 	if (!param_adjoint)
 		return QAWS_STATUS_OK;
-	return qaws_internal_curve_adjoint_any(NULL, curve, t, jbar.channels, &jbar, param_adjoint, NULL);
+	return qaws_internal_curve_adjoint_any(param_adjoint, NULL, curve, &jbar, t, jbar.channels, NULL);
 }
 
 /* extremum */
@@ -1038,7 +1038,7 @@ qaws_status qaws_curve_extremum_adjoint(
 	}
 	if (!param_adjoint)
 		return QAWS_STATUS_OK;
-	return qaws_internal_curve_adjoint_any(NULL, curve, t, jbar.channels, &jbar, param_adjoint, NULL);
+	return qaws_internal_curve_adjoint_any(param_adjoint, NULL, curve, &jbar, t, jbar.channels, NULL);
 }
 
 /* inflection */
@@ -1114,7 +1114,7 @@ qaws_status qaws_curve_inflection_adjoint(
 	jbar.channels = QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2;
 	if (!param_adjoint)
 		return QAWS_STATUS_OK;
-	return qaws_internal_curve_adjoint_any(NULL, curve, t, jbar.channels, &jbar, param_adjoint, NULL);
+	return qaws_internal_curve_adjoint_any(param_adjoint, NULL, curve, &jbar, t, jbar.channels, NULL);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1262,7 +1262,7 @@ qaws_status qaws_surface_curve_point_adjoint(
 		memset(&cb, 0, sizeof(cb));
 		cb.d[0] = qaws_v3_sub(adjoint->position, l);
 		cb.channels = QAWS_EVAL_FLAG_POSITION;
-		st = qaws_internal_curve_adjoint_any(NULL, curve, s.t, cb.channels, &cb, curve_adjoint, NULL);
+		st = qaws_internal_curve_adjoint_any(curve_adjoint, NULL, curve, &cb, s.t, cb.channels, NULL);
 	}
 	return st;
 }

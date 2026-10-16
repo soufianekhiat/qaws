@@ -461,7 +461,7 @@ QAWS_INLINE qaws_vec2 qaws_bezier3_eval_2d(
  * Control points in flat array: [x0,y0, x1,y1, ..., xn,yn]
  * degree must be <= QAWS_CORE_MAX_DEGREE.
  *
- * Matches qaws_internal_decasteljau(cp, degree, 2, t, buf)
+ * Matches qaws_internal_decasteljau(buf, cp, 2, degree, t)
  * ---------------------------------------------------------------- */
 
 QAWS_INLINE qaws_vec2 qaws_decasteljau_2d(
@@ -497,7 +497,7 @@ QAWS_INLINE qaws_vec2 qaws_decasteljau_2d(
  * Given degree-N CPs, writes degree-(N-1) differenced CPs.
  * out_dp must be QAWS_CORE_MAX_POINTS * 2 in size.
  *
- * Matches qaws_internal_bezier_derivative_points(cp, degree, 2, out)
+ * Matches qaws_internal_bezier_derivative_points(out, cp, 2, degree)
  * ---------------------------------------------------------------- */
 
 QAWS_INLINE void qaws_bezier_deriv_points_2d(

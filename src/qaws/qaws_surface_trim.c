@@ -147,7 +147,7 @@ static void trimmed_surface_destroy(void* impl_ptr, qaws_allocator const* alloca
 			free(impl->loops);
 		}
 	}
-	qaws_internal_dealloc(allocator, impl);
+	qaws_internal_dealloc(impl, allocator);
 }
 
 static int trimmed_surface_is_rational(qaws_surface const* s)

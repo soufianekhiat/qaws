@@ -59,7 +59,7 @@ static void test_metric(void)
 		double A[64], x[24], err = 0, m = 0, asym = 0, row = 0, psd = 1e300;
 		qaws_status st;
 		for (i = 0; i < k[t].nv * k[t].dim; i++) x[i] = (double)(qaws_scalar)k[t].x[i];
-		st = c ? qaws_internal_repulsive_curves_metric(c, x, A) : QAWS_STATUS_INVALID_ARGUMENT;
+		st = c ? qaws_internal_repulsive_curves_metric(A, c, x) : QAWS_STATUS_INVALID_ARGUMENT;
 		for (i = 0; i < k[t].nv * k[t].nv; i++) { err = fmax(err, fabs(A[i] - k[t].A[i])); m = fmax(m, fabs(k[t].A[i])); }
 		for (i = 0; i < k[t].nv; i++)
 		{

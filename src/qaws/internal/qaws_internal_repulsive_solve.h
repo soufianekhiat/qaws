@@ -64,33 +64,33 @@ void qaws_internal_rs_hier_free(qaws_internal_rs_hier* h);
    its state kept for the projection; the projection of y back onto the
    constraints (1 when within ctol) */
 typedef struct qaws_internal_rs_hsys qaws_internal_rs_hsys;
-qaws_status qaws_internal_rs_hdirection(qaws_internal_rs_core const* core, double const* x, double const* dE, double* g, qaws_internal_rs_hsys** out);
-int qaws_internal_rs_hproject(qaws_internal_rs_hsys* H, double* y);
+qaws_status qaws_internal_rs_hdirection(qaws_internal_rs_hsys** out, double* g, qaws_internal_rs_core const* core, double const* x, double const* dE);
+int qaws_internal_rs_hproject(double* y, qaws_internal_rs_hsys* H);
 void qaws_internal_rs_hsys_free(qaws_internal_rs_hsys* H);
 
 /* the converged solution's derivative (qaws_repulsive_sens.c), dense mode:
    with drows (k: the change of each constraint row's target, C dx = drows)
    dx (N); or with xbar (N) the rows' adjoints (k) in out. *out_gauge: the
    free rotations removed (dx orthogonal to them). */
-qaws_status qaws_internal_rs_sensitivity(qaws_internal_rs_core const* core, double const* drows, double const* xbar, double* out, unsigned int* out_gauge);
+qaws_status qaws_internal_rs_sensitivity(double* out, unsigned int* out_gauge, qaws_internal_rs_core const* core, double const* drows, double const* xbar);
 
 /* LU with partial pivoting of the n x n row-major m in place (0: singular),
    and its solve */
-int qaws_internal_rs_lu(double* m, unsigned int n, unsigned int* piv);
-void qaws_internal_rs_lu_solve(double const* m, unsigned int n, unsigned int const* piv, double* b);
+int qaws_internal_rs_lu(double* m, unsigned int* piv, unsigned int n);
+void qaws_internal_rs_lu_solve(double* b, double const* m, unsigned int const* piv, unsigned int n);
 
 /* the descent direction g at positions (N) */
-qaws_status qaws_internal_rs_direction(qaws_internal_rs_core const* core, qaws_scalar const* positions, qaws_scalar* out_direction);
+qaws_status qaws_internal_rs_direction(qaws_scalar* out_direction, qaws_internal_rs_core const* core, qaws_scalar const* positions);
 
 /* one step (positions in place) */
-qaws_status qaws_internal_rs_step(qaws_internal_rs_core* core, qaws_scalar* positions, qaws_repulsive_report* out_report);
+qaws_status qaws_internal_rs_step(qaws_repulsive_report* out_report, qaws_scalar* positions, qaws_internal_rs_core* core);
 
 /* a room's walls on nv vertices (dim each; u and v the plane's coordinates;
    the polygon's count points, 2 each): E += w sum over vertices and walls of
    the integral along the wall of rho^-2, grad (may be NULL) += its
    gradient; 0 (nothing added) when a vertex is not strictly inside */
-int qaws_internal_rs_room(double const* room, unsigned int count, double w, unsigned int dim, unsigned int u, unsigned int v,
-	double const* x, unsigned int nv, double* E, double* grad);
+int qaws_internal_rs_room(double* E, double* grad, double const* room, double const* x, unsigned int count, unsigned int dim,
+	double w, unsigned int u, unsigned int v, unsigned int nv);
 
 /* the distance between segments p0 p1 and q0 q1 (dim 2 or 3) */
 double qaws_internal_rs_segdist(double const* p0, double const* p1, double const* q0, double const* q1, unsigned int dim);

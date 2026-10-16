@@ -135,10 +135,10 @@ static void hermite_destroy_impl(void *impl, qaws_allocator const* allocator)
 {
 	qaws_hermite_impl *hi = (qaws_hermite_impl *)impl;
 	if (hi) {
-		qaws_internal_dealloc(allocator, hi->span_coeffs);
-		qaws_internal_dealloc(allocator, hi->points);
-		qaws_internal_dealloc(allocator, hi->tangents);
-		qaws_internal_dealloc(allocator, hi);
+		qaws_internal_dealloc(hi->span_coeffs, allocator);
+		qaws_internal_dealloc(hi->points, allocator);
+		qaws_internal_dealloc(hi->tangents, allocator);
+		qaws_internal_dealloc(hi, allocator);
 	}
 }
 
@@ -265,10 +265,10 @@ static qaws_status hermite_rebuild(qaws_curve const *curve, qaws_diff_views cons
 	qaws_scalar const *pts = NULL, *ders = NULL;
 	qaws_scalar *owned_pts = NULL, *owned_ders = NULL;
 	unsigned int dim = (unsigned int)curve->dimension;
-	qaws_status st = qaws_internal_field_override(values, QAWS_FIELD_POINTS, impl->points, impl->point_count, dim, &pts, &owned_pts);
+	qaws_status st = qaws_internal_field_override(&pts, &owned_pts, values, impl->points, impl->point_count, QAWS_FIELD_POINTS, dim);
 	if (st != QAWS_STATUS_OK)
 		return st;
-	st = qaws_internal_field_override(values, QAWS_FIELD_DERIVATIVES, impl->tangents, impl->point_count, dim, &ders, &owned_ders);
+	st = qaws_internal_field_override(&ders, &owned_ders, values, impl->tangents, impl->point_count, QAWS_FIELD_DERIVATIVES, dim);
 	if (st == QAWS_STATUS_OK) {
 		d.dimension = curve->dimension;
 		d.degree = 3;
@@ -278,8 +278,8 @@ static qaws_status hermite_rebuild(qaws_curve const *curve, qaws_diff_views cons
 		d.derivative_count = impl->point_count;
 		st = qaws_curve_create_hermite(out_curve, &d);
 	}
-	qaws_internal_dealloc(NULL, owned_pts);
-	qaws_internal_dealloc(NULL, owned_ders);
+	qaws_internal_dealloc(owned_pts, NULL);
+	qaws_internal_dealloc(owned_ders, NULL);
 	return st;
 }
 
@@ -366,7 +366,7 @@ qaws_status qaws_curve_create_hermite_ex(
 		curve->span_boundaries[i] = (qaws_scalar)i;
 	}
 
-	impl = (qaws_hermite_impl *)qaws_internal_alloc(allocator, (unsigned long)sizeof(qaws_hermite_impl));
+	impl = (qaws_hermite_impl *)qaws_internal_alloc((unsigned long)sizeof(qaws_hermite_impl), allocator);
 	if (!impl) {
 		qaws_internal_curve_free(curve);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
@@ -374,18 +374,18 @@ qaws_status qaws_curve_create_hermite_ex(
 
 	pts_size = (size_t)desc->point_count * (size_t)dim_count * sizeof(qaws_scalar);
 
-	impl->points = (qaws_scalar *)qaws_internal_alloc(allocator, (unsigned long)pts_size);
+	impl->points = (qaws_scalar *)qaws_internal_alloc((unsigned long)pts_size, allocator);
 	if (!impl->points) {
-		qaws_internal_dealloc(allocator, impl);
+		qaws_internal_dealloc(impl, allocator);
 		qaws_internal_curve_free(curve);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 	memcpy(impl->points, desc->points, pts_size);
 
-	impl->tangents = (qaws_scalar *)qaws_internal_alloc(allocator, (unsigned long)pts_size);
+	impl->tangents = (qaws_scalar *)qaws_internal_alloc((unsigned long)pts_size, allocator);
 	if (!impl->tangents) {
-		qaws_internal_dealloc(allocator, impl->points);
-		qaws_internal_dealloc(allocator, impl);
+		qaws_internal_dealloc(impl->points, allocator);
+		qaws_internal_dealloc(impl, allocator);
 		qaws_internal_curve_free(curve);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
@@ -396,12 +396,12 @@ qaws_status qaws_curve_create_hermite_ex(
 	/* Precompute per-span polynomial coefficients via prepare functions */
 	{
 		unsigned int s;
-		impl->span_coeffs = (qaws_scalar *)qaws_internal_alloc(allocator,
-			(unsigned long)(sizeof(qaws_scalar) * (size_t)span_count * (size_t)dim_count * 4));
+		impl->span_coeffs = (qaws_scalar *)qaws_internal_alloc((unsigned long)(sizeof(qaws_scalar) * (size_t)span_count * (size_t)dim_count * 4),
+			allocator);
 		if (!impl->span_coeffs) {
-			qaws_internal_dealloc(allocator, impl->tangents);
-			qaws_internal_dealloc(allocator, impl->points);
-			qaws_internal_dealloc(allocator, impl);
+			qaws_internal_dealloc(impl->tangents, allocator);
+			qaws_internal_dealloc(impl->points, allocator);
+			qaws_internal_dealloc(impl, allocator);
 			qaws_internal_curve_free(curve);
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 		}
@@ -409,12 +409,12 @@ qaws_status qaws_curve_create_hermite_ex(
 		if (dim_count == 2) {
 			qaws_vec2 *tmp_a, *tmp_b, *tmp_c, *tmp_d;
 			size_t vec_size = (size_t)span_count * sizeof(qaws_vec2);
-			tmp_a = (qaws_vec2 *)qaws_internal_alloc(allocator, (unsigned long)(vec_size * 4));
+			tmp_a = (qaws_vec2 *)qaws_internal_alloc((unsigned long)(vec_size * 4), allocator);
 			if (!tmp_a) {
-				qaws_internal_dealloc(allocator, impl->span_coeffs);
-				qaws_internal_dealloc(allocator, impl->tangents);
-				qaws_internal_dealloc(allocator, impl->points);
-				qaws_internal_dealloc(allocator, impl);
+				qaws_internal_dealloc(impl->span_coeffs, allocator);
+				qaws_internal_dealloc(impl->tangents, allocator);
+				qaws_internal_dealloc(impl->points, allocator);
+				qaws_internal_dealloc(impl, allocator);
 				qaws_internal_curve_free(curve);
 				return QAWS_STATUS_ALLOCATION_FAILURE;
 			}
@@ -438,16 +438,16 @@ qaws_status qaws_curve_create_hermite_ex(
 				impl->span_coeffs[s * 8 + 6] = tmp_c[s].y;
 				impl->span_coeffs[s * 8 + 7] = tmp_d[s].y;
 			}
-			qaws_internal_dealloc(allocator, tmp_a);
+			qaws_internal_dealloc(tmp_a, allocator);
 		} else {
 			qaws_vec3 *tmp_a, *tmp_b, *tmp_c, *tmp_d;
 			size_t vec_size = (size_t)span_count * sizeof(qaws_vec3);
-			tmp_a = (qaws_vec3 *)qaws_internal_alloc(allocator, (unsigned long)(vec_size * 4));
+			tmp_a = (qaws_vec3 *)qaws_internal_alloc((unsigned long)(vec_size * 4), allocator);
 			if (!tmp_a) {
-				qaws_internal_dealloc(allocator, impl->span_coeffs);
-				qaws_internal_dealloc(allocator, impl->tangents);
-				qaws_internal_dealloc(allocator, impl->points);
-				qaws_internal_dealloc(allocator, impl);
+				qaws_internal_dealloc(impl->span_coeffs, allocator);
+				qaws_internal_dealloc(impl->tangents, allocator);
+				qaws_internal_dealloc(impl->points, allocator);
+				qaws_internal_dealloc(impl, allocator);
 				qaws_internal_curve_free(curve);
 				return QAWS_STATUS_ALLOCATION_FAILURE;
 			}
@@ -475,7 +475,7 @@ qaws_status qaws_curve_create_hermite_ex(
 				impl->span_coeffs[s * 12 + 10] = tmp_c[s].z;
 				impl->span_coeffs[s * 12 + 11] = tmp_d[s].z;
 			}
-			qaws_internal_dealloc(allocator, tmp_a);
+			qaws_internal_dealloc(tmp_a, allocator);
 		}
 	}
 

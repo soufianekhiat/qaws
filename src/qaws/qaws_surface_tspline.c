@@ -238,7 +238,7 @@ static qaws_status tspline_surface_eval(
 	/* Normal from cross product du x dv */
 	if (eval_flags & QAWS_SURFACE_EVAL_NORMAL)
 	{
-		qaws_internal_surface_normal(out_result->du, out_result->dv, &out_result->normal);
+		qaws_internal_surface_normal(&out_result->normal, out_result->du, out_result->dv);
 		out_result->valid_flags |= QAWS_SURFACE_EVAL_NORMAL;
 	}
 
@@ -250,11 +250,11 @@ static void tspline_surface_destroy(void* impl, qaws_allocator const* allocator)
 	qaws_surface_tspline_impl* ti = (qaws_surface_tspline_impl*)impl;
 	if (ti)
 	{
-		qaws_internal_dealloc(allocator, ti->positions);
-		qaws_internal_dealloc(allocator, ti->weights);
-		qaws_internal_dealloc(allocator, ti->u_knots_all);
-		qaws_internal_dealloc(allocator, ti->v_knots_all);
-		qaws_internal_dealloc(allocator, ti);
+		qaws_internal_dealloc(ti->positions, allocator);
+		qaws_internal_dealloc(ti->weights, allocator);
+		qaws_internal_dealloc(ti->u_knots_all, allocator);
+		qaws_internal_dealloc(ti->v_knots_all, allocator);
+		qaws_internal_dealloc(ti, allocator);
 	}
 }
 

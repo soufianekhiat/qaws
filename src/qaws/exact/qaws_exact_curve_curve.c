@@ -16,12 +16,12 @@ typedef qaws_exact_poly poly;
 
 static void* cc_alloc(size_t bytes)
 {
-	return qaws_internal_alloc(NULL, (unsigned long)bytes);
+	return qaws_internal_alloc((unsigned long)bytes, NULL);
 }
 
 static void cc_free(void* p)
 {
-	qaws_internal_dealloc(NULL, p);
+	qaws_internal_dealloc(p, NULL);
 }
 
 

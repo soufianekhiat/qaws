@@ -34,7 +34,7 @@ static void test_room_term(void)
 	for (i = 0; i < 5; i++)
 	{
 		double E = 0, g[2] = { 0, 0 };
-		int ok = qaws_internal_rs_room(g120_room, 12, g120_w, 2, 0, 1, g120_pts + 2 * i, 1, &E, g);
+		int ok = qaws_internal_rs_room(&E, g, g120_room, g120_pts + 2 * i, 12, 2, g120_w, 0, 1, 1);
 		if (!ok) { emax = HUGE_VAL; break; }
 		emax = fmax(emax, fabs(E - g120_e[3 * i]) / fabs(g120_e[3 * i]));
 		for (q = 0; q < 2; q++)
@@ -48,7 +48,7 @@ static void test_room_term(void)
 	/* the 2D integral against half the 3D one, one wall */
 	{
 		double sq[8] = { 1, -1, 1, 1, -1, 1, -1, -1 }, p[2] = { 0, 0 }, E = 0;   /* (a square: its 4 walls alike at the origin) */
-		qaws_internal_rs_room(sq, 4, 1, 2, 0, 1, p, 1, &E, NULL);
+		qaws_internal_rs_room(&E, NULL, sq, p, 4, 2, 1, 0, 1, 1);
 		sprintf(msg, "room term against the paper's obstacle: a square's wall at the origin %.17g, half the 3D integral of r^-3 %.17g (Mathematica)",
 			E / 4, g120_half3d);
 		TEST_ASSERT(fabs(E / 4 - g120_wall2d) <= 1e-15 && fabs(g120_wall2d - g120_half3d) <= 1e-15, msg);
@@ -56,7 +56,7 @@ static void test_room_term(void)
 	/* refusals: outside, on a wall; nothing added */
 	{
 		double out[2] = { 0, 2 }, on[2] = { 2, -3 }, E = 5, g[2] = { 7, 7 };
-		int a = qaws_internal_rs_room(g120_room, 12, 1, 2, 0, 1, out, 1, &E, g), b = qaws_internal_rs_room(g120_room, 12, 1, 2, 0, 1, on, 1, &E, g);
+		int a = qaws_internal_rs_room(&E, g, g120_room, out, 12, 2, 1, 0, 1, 1), b = qaws_internal_rs_room(&E, g, g120_room, on, 12, 2, 1, 0, 1, 1);
 		sprintf(msg, "room term refusals: a point outside (in the H's notch) %d, on a wall %d; nothing added %d", a, b, E == 5 && g[0] == 7 && g[1] == 7);
 		TEST_ASSERT(!a && !b && E == 5 && g[0] == 7 && g[1] == 7, msg);
 	}

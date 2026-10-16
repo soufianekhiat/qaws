@@ -98,7 +98,7 @@ qaws_status qaws_curve_compute_arc_length(
 		return QAWS_STATUS_INVALID_ARGUMENT;
 
 	return qaws_internal_arc_length(
-		curve, parameter_min, parameter_max, out_length);
+		out_length, curve, parameter_min, parameter_max);
 }
 
 qaws_status qaws_curve_compute_bounds_2d(
@@ -315,8 +315,8 @@ qaws_status qaws_curve_find_closest_parameter_2d(
 	target_pos[1] = point.y;
 
 	best_t = qaws_internal_closest_point_newton(
-		closest_eval_2d, &ctx, target_pos, 2,
-		range_min, range_max, best_t, 32);
+		target_pos, 2, closest_eval_2d, range_min,
+		range_max, best_t, 32, &ctx);
 
 	*out_parameter = best_t;
 	return QAWS_STATUS_OK;
@@ -411,8 +411,8 @@ qaws_status qaws_curve_find_closest_parameter_3d(
 	target_pos[2] = point.z;
 
 	best_t = qaws_internal_closest_point_newton(
-		closest_eval_3d, &ctx, target_pos, 3,
-		range_min, range_max, best_t, 32);
+		target_pos, 3, closest_eval_3d, range_min,
+		range_max, best_t, 32, &ctx);
 
 	*out_parameter = best_t;
 	return QAWS_STATUS_OK;
@@ -4086,10 +4086,10 @@ qaws_status qaws_surface_project_curve(
 	if (n_cp > n_samples) n_cp = n_samples;
 
 	status = qaws_internal_fit_bspline(
-		QAWS_DIMENSION_2D, 3,
-		params, uv_coords,
+		out_uv_curve, params,
+		uv_coords, QAWS_DIMENSION_2D,
 		n_samples, n_cp,
-		out_uv_curve);
+		3);
 
 	free(params);
 	free(uv_coords);
@@ -4261,10 +4261,10 @@ static qaws_status create_path_bspline(
 		params[i] = (qaws_scalar)i / (qaws_scalar)(point_count - 1);
 
 	status = qaws_internal_fit_bspline(
-		QAWS_DIMENSION_3D, 3,
-		params, path_coords,
+		out_curve, params,
+		path_coords, QAWS_DIMENSION_3D,
 		point_count, n_cp,
-		out_curve);
+		3);
 	free(params);
 
 	if (status != QAWS_STATUS_OK)
@@ -4695,7 +4695,7 @@ static qaws_status geodesic_tessellate_and_build(
 
 	/* Build edge-adjacency mesh */
 	status = qaws_internal_mesh_build(out_mesh, positions, uvs,
-		vert_count, indices, idx_count);
+		indices, vert_count, idx_count);
 
 	if (status != QAWS_STATUS_OK)
 	{
@@ -4771,7 +4771,7 @@ qaws_status qaws_surface_compute_geodesic_flip(
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 
-	status = qaws_internal_mesh_dijkstra(&mesh, src_v, dst_v, path, &path_count);
+	status = qaws_internal_mesh_dijkstra(path, &path_count, &mesh, src_v, dst_v);
 	if (status != QAWS_STATUS_OK || path_count < 2)
 	{
 		free(path);
@@ -5194,7 +5194,7 @@ static qaws_status heat_solve_distances(
 	mass_diag = (qaws_scalar*)malloc(vert_count * sizeof(qaws_scalar));
 	if (!mass_diag) return QAWS_STATUS_ALLOCATION_FAILURE;
 
-	status = qaws_internal_build_laplacian(mesh, &L, mass_diag);
+	status = qaws_internal_build_laplacian(&L, mass_diag, mesh);
 	if (status != QAWS_STATUS_OK) { free(mass_diag); return status; }
 
 	/* Compute mean edge length */
@@ -5250,7 +5250,7 @@ static qaws_status heat_solve_distances(
 
 	rhs[src_v] = QAWS_ONE;
 
-	status = qaws_internal_cg_solve(&A_minus_tL, rhs, heat, 0, QAWS_ZERO);
+	status = qaws_internal_cg_solve(heat, &A_minus_tL, rhs, 0, QAWS_ZERO);
 	if (status != QAWS_STATUS_OK) goto cleanup;
 
 	/* Step II: Per-triangle gradient X = -grad(u) / |grad(u)| */
@@ -5388,7 +5388,7 @@ static qaws_status heat_solve_distances(
 			div_X[vi] = -div_X[vi];
 
 		memset(heat, 0, vert_count * sizeof(qaws_scalar));
-		status = qaws_internal_cg_solve(&L_reg, div_X, heat, 0, QAWS_ZERO);
+		status = qaws_internal_cg_solve(heat, &L_reg, div_X, 0, QAWS_ZERO);
 		if (status != QAWS_STATUS_OK) goto cleanup;
 
 		min_phi = heat[0];

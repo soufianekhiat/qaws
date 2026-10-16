@@ -31,8 +31,8 @@ void qaws_curve_destroy(qaws_curve *curve)
 		curve->vtable->destroy_impl(curve->impl, a);
 	}
 
-	qaws_internal_dealloc(a, curve->span_boundaries);
-	qaws_internal_dealloc(a, curve);
+	qaws_internal_dealloc(curve->span_boundaries, a);
+	qaws_internal_dealloc(curve, a);
 }
 
 /* -------------------------------------------------------------------------- */

@@ -126,7 +126,7 @@ static void test_parabola(void)
 	double cusps[8], cp[2 * 4096], worst = 0, tol = OCT_F32 ? 1e-5 : 1e-9;
 	unsigned int nc = 0, ncurves = 0, n, corners, i;
 	char msg[300];
-	qaws_internal_offset_curve(c, -1, tol, &chain, 1, &ncurves, cusps, 8, &nc);
+	qaws_internal_offset_curve(&chain, &ncurves, cusps, &nc, c, 1, 8, -1, tol);
 	sprintf(msg, "parabola offset 1 toward its focus: 2 cusps (%u) at the reference parameters (%.15g, %.15g vs %.15g, %.15g)",
 		nc, nc > 0 ? cusps[0] : 0, nc > 1 ? cusps[1] : 0, ref_parabola_t[0], ref_parabola_t[1]);
 	TEST_ASSERT(nc == 2 && fabs(cusps[0] - ref_parabola_t[0]) < (OCT_F32 ? 1e-4 : 1e-10)
@@ -176,7 +176,7 @@ static void test_s_curve(void)
 		double cusps[8], cp[2 * 4096], tol = OCT_F32 ? 1e-5 : 1e-9, d0 = 1e300, d1 = 1e300;
 		unsigned int nc = 0, ncurves = 0, n, corners;
 		qaws_curve* chain = NULL;
-		qaws_internal_offset_curve(c, side ? -0.6 : 0.6, tol, &chain, 1, &ncurves, cusps, 8, &nc);
+		qaws_internal_offset_curve(&chain, &ncurves, cusps, &nc, c, 1, 8, side ? -0.6 : 0.6, tol);
 		if (chain)
 		{
 			n = oct_chain(chain, cp, 4096, &corners);
@@ -388,7 +388,7 @@ static void test_regions(void)
 		qaws_curve* chain = NULL;
 		double cusps[64];
 		unsigned int nc = 0, nk = 0, bad = 0, checked = 0;
-		qaws_internal_offset_curve(star, deltas[k], 1e-6, &chain, 1, &nk, cusps, 64, &nc);
+		qaws_internal_offset_curve(&chain, &nk, cusps, &nc, star, 1, 64, deltas[k], 1e-6);
 		qaws_curve_destroy(chain);
 		qaws_offset_paths(&r, &path, 1, (qaws_scalar)deltas[k], QAWS_JOIN_ROUND, QAWS_END_POLYGON);
 		if (r) bad = oct_oracle(star, 1, deltas[k], r, 180, &checked);

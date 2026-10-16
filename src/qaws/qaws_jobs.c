@@ -68,7 +68,7 @@ static qaws_status jb_run(jb_kind kind, void const* descs, unsigned int count, q
 	c.kind = kind;
 	c.descs = descs;
 	c.out = out;
-	s = qaws_internal_parallel(executor, count, 1, jb_job, &c);
+	s = qaws_internal_parallel(count, 1, jb_job, executor, &c);
 	if (s != QAWS_STATUS_OK)
 	{
 		/* all or nothing */

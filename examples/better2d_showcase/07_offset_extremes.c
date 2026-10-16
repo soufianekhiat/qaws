@@ -64,7 +64,7 @@ static void demo_offset_extremes(void)
 			double d = side ? -cs->delta : cs->delta;
 			unsigned int nk = 0, q;
 			co_parallel(&s, &v, c, d);
-			qaws_internal_offset_curve(c, d, 1e-6 * span, ch, 64, &nk, NULL, 0, NULL);
+			qaws_internal_offset_curve(ch, &nk, NULL, NULL, c, 64, 0, d, 1e-6 * span);
 			for (q = 0; q < nk && q < 64; q++)
 			{
 				co_curve(&s, &v, ch[q], side ? "#0550ae" : "#cf222e", 1.0, 0.9, 0);

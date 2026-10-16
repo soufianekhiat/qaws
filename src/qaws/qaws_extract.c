@@ -525,8 +525,8 @@ static qaws_status ex_cubic_kind(qaws_curve const* c, qaws_scalar t0, qaws_scala
 {
 	ex_cubics q;
 	qaws_scalar u0, u1;
-	unsigned int s0 = qaws_internal_find_span(c, t0, &u0);
-	unsigned int s1 = qaws_internal_find_span(c, t1, &u1);
+	unsigned int s0 = qaws_internal_find_span(&u0, c, t0);
+	unsigned int s1 = qaws_internal_find_span(&u1, c, t1);
 	unsigned int s;
 	qaws_status st;
 
@@ -575,8 +575,8 @@ static qaws_status ex_arc(qaws_curve const* c, qaws_scalar t0, qaws_scalar t1, q
 {
 	qaws_arc_impl const* impl = (qaws_arc_impl const*)c->impl;
 	qaws_scalar u0, u1;
-	unsigned int s0 = qaws_internal_find_span(c, t0, &u0);
-	unsigned int s1 = qaws_internal_find_span(c, t1, &u1);
+	unsigned int s0 = qaws_internal_find_span(&u0, c, t0);
+	unsigned int s1 = qaws_internal_find_span(&u1, c, t1);
 	unsigned int s, n = 0;
 	qaws_arc_segment* seg;
 	qaws_arc_desc d;
@@ -629,8 +629,8 @@ static qaws_status ex_composite(qaws_curve const* c, qaws_scalar t0, qaws_scalar
 {
 	qaws_composite_impl const* impl = (qaws_composite_impl const*)c->impl;
 	qaws_scalar u0, u1;
-	unsigned int s0 = qaws_internal_find_span(c, t0, &u0);
-	unsigned int s1 = qaws_internal_find_span(c, t1, &u1);
+	unsigned int s0 = qaws_internal_find_span(&u0, c, t0);
+	unsigned int s1 = qaws_internal_find_span(&u1, c, t1);
 	unsigned int s, n = 0, i;
 	qaws_curve** parts;
 	qaws_composite_desc d;
@@ -742,8 +742,8 @@ qaws_status qaws_curve_extract(
 		qaws_curve const* src0 = NULL;
 		qaws_curve const* src1 = NULL;
 		qaws_scalar s0, s1;
-		if (!qaws_internal_reparam_source(curve, t0, &src0, &s0) ||
-		    !qaws_internal_reparam_source(curve, t1, &src1, &s1))
+		if (!qaws_internal_reparam_source(&src0, &s0, curve, t0) ||
+		    !qaws_internal_reparam_source(&src1, &s1, curve, t1))
 			return QAWS_STATUS_UNSUPPORTED_OPERATION;
 		return qaws_curve_extract(out_curve, src0, s0, s1);
 	}
@@ -752,7 +752,7 @@ qaws_status qaws_curve_extract(
 	}
 }
 
-qaws_status qaws_internal_curve_fit_cubic(qaws_curve const* curve, qaws_scalar t0, qaws_scalar t1, qaws_curve** out_curve)
+qaws_status qaws_internal_curve_fit_cubic(qaws_curve** out_curve, qaws_curve const* curve, qaws_scalar t0, qaws_scalar t1)
 {
 	return ex_cubic_kind(curve, t0, t1, 1, out_curve);
 }

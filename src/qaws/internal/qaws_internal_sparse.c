@@ -66,9 +66,9 @@ static void csr_matvec(
 /* ------------------------------------------------------------------ */
 
 qaws_status qaws_internal_cg_solve(
+	qaws_scalar* x,
 	qaws_internal_csr const* A,
 	qaws_scalar const* b,
-	qaws_scalar* x,
 	unsigned int max_iterations,
 	qaws_scalar tolerance)
 {
@@ -198,9 +198,9 @@ qaws_status qaws_internal_cg_solve(
 /* ------------------------------------------------------------------ */
 
 qaws_status qaws_internal_build_laplacian(
-	qaws_internal_mesh const* mesh,
 	qaws_internal_csr* out_L,
-	qaws_scalar* out_mass_diag)
+	qaws_scalar* out_mass_diag,
+	qaws_internal_mesh const* mesh)
 {
 	unsigned int n = mesh->vertex_count;
 	unsigned int ei;

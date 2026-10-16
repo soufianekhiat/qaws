@@ -23,7 +23,7 @@ typedef struct qaws_wide
 	uint64_t l[QAWS_WIDE_LIMBS];   /* little endian, two's complement */
 } qaws_wide;
 
-QAWS_INLINE void qaws_mul_u64(uint64_t a, uint64_t b, uint64_t* hi, uint64_t* lo)
+QAWS_INLINE void qaws_mul_u64(uint64_t* hi, uint64_t* lo, uint64_t a, uint64_t b)
 {
 #if defined(_MSC_VER) && defined(_M_X64)
 	*lo = _umul128(a, b, hi);
@@ -127,7 +127,7 @@ QAWS_INLINE qaws_wide qaws_wide_mul(qaws_wide const* a, qaws_wide const* b)
 		for (j = 0; j < ny && i + j < QAWS_WIDE_LIMBS; j++)
 		{
 			uint64_t hi, lo, s;
-			qaws_mul_u64(x.l[i], y.l[j], &hi, &lo);
+			qaws_mul_u64(&hi, &lo, x.l[i], y.l[j]);
 			s = r.l[i + j] + lo;
 			hi += s < lo;
 			s += carry;
@@ -158,7 +158,7 @@ QAWS_INLINE int qaws_wide_cmp(qaws_wide const* a, qaws_wide const* b)
 }
 
 /* the signed 128-bit product of two int64, sign extended to the wide */
-QAWS_INLINE void qaws_mul_i64(int64_t a, int64_t b, uint64_t* hi, uint64_t* lo)
+QAWS_INLINE void qaws_mul_i64(uint64_t* hi, uint64_t* lo, int64_t a, int64_t b)
 {
 #if defined(_MSC_VER) && defined(_M_X64)
 	int64_t h;
@@ -171,7 +171,7 @@ QAWS_INLINE void qaws_mul_i64(int64_t a, int64_t b, uint64_t* hi, uint64_t* lo)
 #else
 	/* unsigned product, then the two's complement corrections */
 	uint64_t h, l;
-	qaws_mul_u64((uint64_t)a, (uint64_t)b, &h, &l);
+	qaws_mul_u64(&h, &l, (uint64_t)a, (uint64_t)b);
 	if (a < 0) h -= (uint64_t)b;
 	if (b < 0) h -= (uint64_t)a;
 	*hi = h;
@@ -213,16 +213,16 @@ QAWS_INLINE qaws_wide qaws_wide_from_i128_pair(uint64_t ph, uint64_t pl, uint64_
 QAWS_INLINE qaws_wide qaws_wide_cross(int64_t ax, int64_t ay, int64_t bx, int64_t by)
 {
 	uint64_t ph, pl, qh, ql;
-	qaws_mul_i64(ax, by, &ph, &pl);
-	qaws_mul_i64(ay, bx, &qh, &ql);
+	qaws_mul_i64(&ph, &pl, ax, by);
+	qaws_mul_i64(&qh, &ql, ay, bx);
 	return qaws_wide_from_i128_pair(ph, pl, qh, ql, -1);
 }
 
 QAWS_INLINE qaws_wide qaws_wide_dot(int64_t ax, int64_t ay, int64_t bx, int64_t by)
 {
 	uint64_t ph, pl, qh, ql;
-	qaws_mul_i64(ax, bx, &ph, &pl);
-	qaws_mul_i64(ay, by, &qh, &ql);
+	qaws_mul_i64(&ph, &pl, ax, bx);
+	qaws_mul_i64(&qh, &ql, ay, by);
 	return qaws_wide_from_i128_pair(ph, pl, qh, ql, 1);
 }
 

@@ -188,7 +188,7 @@ qaws_status qaws_exact_boolean_2d(qaws_exact_piece* out_pieces, unsigned int* ou
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	pairs = NULL;
 	x = NULL;
-	sd = (bo_side*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(bo_side) * 2));
+	sd = (bo_side*)qaws_internal_alloc((unsigned long)(sizeof(bo_side) * 2), NULL);
 	if (!sd)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	/* both boundaries simple */
@@ -204,8 +204,8 @@ qaws_status qaws_exact_boolean_2d(qaws_exact_piece* out_pieces, unsigned int* ou
 	{
 		if (st != QAWS_STATUS_OK)
 			break;
-		qaws_internal_dealloc(NULL, pairs);
-		pairs = (qaws_exact_pair*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_exact_pair) * cap));
+		qaws_internal_dealloc(pairs, NULL);
+		pairs = (qaws_exact_pair*)qaws_internal_alloc((unsigned long)(sizeof(qaws_exact_pair) * cap), NULL);
 		if (!pairs)
 		{
 			st = QAWS_STATUS_ALLOCATION_FAILURE;
@@ -223,8 +223,8 @@ qaws_status qaws_exact_boolean_2d(qaws_exact_piece* out_pieces, unsigned int* ou
 			st = QAWS_STATUS_CERTIFICATION_FAILED;
 	if (st == QAWS_STATUS_OK)
 	{
-		x = (bo_cross*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(bo_cross) * (np + 1)));
-		ints = (int*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(int) * 10 * (np + 1)));
+		x = (bo_cross*)qaws_internal_alloc((unsigned long)(sizeof(bo_cross) * (np + 1)), NULL);
+		ints = (int*)qaws_internal_alloc((unsigned long)(sizeof(int) * 10 * (np + 1)), NULL);
 		if (!x || !ints)
 			st = QAWS_STATUS_ALLOCATION_FAILURE;
 		for (s = 0; s < 2 && st == QAWS_STATUS_OK; s++)
@@ -372,10 +372,10 @@ qaws_status qaws_exact_boolean_2d(qaws_exact_piece* out_pieces, unsigned int* ou
 				}
 			}
 	}
-	qaws_internal_dealloc(NULL, pairs);
-	qaws_internal_dealloc(NULL, x);
-	qaws_internal_dealloc(NULL, ints);
-	qaws_internal_dealloc(NULL, sd);
+	qaws_internal_dealloc(pairs, NULL);
+	qaws_internal_dealloc(x, NULL);
+	qaws_internal_dealloc(ints, NULL);
+	qaws_internal_dealloc(sd, NULL);
 	*out_piece_count = npieces;
 	*out_loop_count = nloops;
 	return st;

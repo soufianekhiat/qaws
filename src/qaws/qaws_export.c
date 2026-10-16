@@ -248,7 +248,7 @@ qaws_status qaws_curve_fit_bspline(
 				knots, knot_count, p, n, params[k]);
 
 			qaws_internal_bspline_basis(
-				knots, knot_count, p, span, params[k], basis);
+				basis, knots, knot_count, p, span, params[k]);
 
 			/* Compute R_k = D_k - N_{0,p}(t_k)*D_0 - N_{n-1,p}(t_k)*D_{m-1}
 			   for each dimension. */

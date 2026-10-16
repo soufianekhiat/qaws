@@ -277,7 +277,7 @@ static qaws_status rsf_energy(rs_core const* core, double const* q, double* E, d
 	if (!rsf_map(&s->sd, q, n, s->x, grad ? s->J : NULL, NULL))
 		return QAWS_STATUS_OUT_OF_RANGE;   /* (a step out of the domain: rejected) */
 	if (grad) memset(s->gx, 0, sizeof(double) * 3 * n);
-	if ((st = qaws_internal_repulsive_curves_energy(s->c, s->x, E, grad ? s->gx : NULL)) != QAWS_STATUS_OK || !grad)
+	if ((st = qaws_internal_repulsive_curves_energy(E, grad ? s->gx : NULL, s->c, s->x)) != QAWS_STATUS_OK || !grad)
 		return st;
 	for (i = 0; i < n; i++)
 		for (a = 0; a < 2; a++)
@@ -293,7 +293,7 @@ static qaws_status rsf_metric(rs_core const* core, double const* q, double* M)
 	qaws_status st;
 	if (!rsf_map(&s->sd, q, n, s->x, s->J, NULL))
 		return QAWS_STATUS_OUT_OF_RANGE;
-	if ((st = qaws_internal_repulsive_curves_metric(s->c, s->x, s->A)) != QAWS_STATUS_OK)
+	if ((st = qaws_internal_repulsive_curves_metric(s->A, s->c, s->x)) != QAWS_STATUS_OK)
 		return st;
 	for (i = 0; i < n; i++)
 		for (j = 0; j < n; j++)
@@ -450,7 +450,7 @@ qaws_status qaws_repulsive_surface_curves_solver_create(qaws_repulsive_surface_c
 	k->lmean = in->lmean; k->clearance = in->clearance; k->tol = in->tol; k->ctol = in->ctol; k->h = in->h;
 	k->rep.reason = QAWS_REPULSIVE_RUNNING;
 	k->rep.stationarity = 1;
-	if ((st = qaws_internal_repulsive_curves_energy(c, s->x, &E, NULL)) != QAWS_STATUS_OK)
+	if ((st = qaws_internal_repulsive_curves_energy(&E, NULL, c, s->x)) != QAWS_STATUS_OK)
 		goto fail;
 	k->rep.initial_energy = k->rep.energy = (qaws_scalar)E;
 	free(xs);
@@ -465,12 +465,12 @@ fail:
 qaws_status qaws_repulsive_surface_curves_solver_direction(qaws_scalar* out_direction, qaws_repulsive_surface_curves_solver const* s,
 	qaws_scalar const* uv)
 {
-	return s ? qaws_internal_rs_direction(&s->core, uv, out_direction) : QAWS_STATUS_INVALID_ARGUMENT;
+	return s ? qaws_internal_rs_direction(out_direction, &s->core, uv) : QAWS_STATUS_INVALID_ARGUMENT;
 }
 
 qaws_status qaws_repulsive_surface_curves_solver_step(qaws_repulsive_report* out_report, qaws_scalar* uv, qaws_repulsive_surface_curves_solver* s)
 {
-	return s ? qaws_internal_rs_step(&s->core, uv, out_report) : QAWS_STATUS_INVALID_ARGUMENT;
+	return s ? qaws_internal_rs_step(out_report, uv, &s->core) : QAWS_STATUS_INVALID_ARGUMENT;
 }
 
 qaws_status qaws_repulsive_surface_curves_solve(qaws_repulsive_report* out_report, qaws_scalar* uv,

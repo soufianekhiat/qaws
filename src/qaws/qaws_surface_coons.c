@@ -244,7 +244,7 @@ static qaws_status coons_surface_eval_sampled(
 		/* Normal */
 		if (eval_flags & QAWS_SURFACE_EVAL_NORMAL)
 		{
-			qaws_internal_surface_normal(out_result->du, out_result->dv, &out_result->normal);
+			qaws_internal_surface_normal(&out_result->normal, out_result->du, out_result->dv);
 			out_result->valid_flags |= QAWS_SURFACE_EVAL_NORMAL;
 		}
 	}
@@ -350,9 +350,9 @@ static qaws_status coons_gather(
 	for (i = 0; i < 4; i++)
 	{
 		qaws_scalar s = ranges[i].max_value - ranges[i].min_value;
-		st = qaws_internal_curve_tangent_any(ctx, curves[i], ranges[i].min_value + coord[i] * s,
-			with_tangent ? s * coord_dot[i] : QAWS_ZERO, 0xFu,
-			with_tangent ? qaws_internal_child_views(views, i) : NULL, &p, &t, with_second ? &tt : NULL);
+		st = qaws_internal_curve_tangent_any(&p, &t, with_second ? &tt : NULL,
+			curves[i], with_tangent ? qaws_internal_child_views(views, i) : NULL,
+			ranges[i].min_value + coord[i] * s, with_tangent ? s * coord_dot[i] : QAWS_ZERO, 0xFu, ctx);
 		if (st != QAWS_STATUS_OK)
 			return st;
 		coons_fill(slots[i], &p, with_tangent ? &t : NULL, with_second ? &tt : NULL);
@@ -364,8 +364,8 @@ static qaws_status coons_gather(
 		unsigned int ci = i / 2;
 		qaws_scalar tc = (i % 2) ? ranges[ci].max_value : ranges[ci].min_value;
 		qaws_dual3* dst = i == 0 ? &in->P00 : i == 1 ? &in->P10 : i == 2 ? &in->P01 : &in->P11;
-		st = qaws_internal_curve_tangent_any(ctx, curves[ci], tc, QAWS_ZERO, QAWS_EVAL_FLAG_POSITION,
-			with_tangent ? qaws_internal_child_views(views, ci) : NULL, &p, &t, with_second ? &tt : NULL);
+		st = qaws_internal_curve_tangent_any(&p, &t, with_second ? &tt : NULL, curves[ci], with_tangent ? qaws_internal_child_views(views, ci) : NULL,
+			tc, QAWS_ZERO, QAWS_EVAL_FLAG_POSITION, ctx);
 		if (st != QAWS_STATUS_OK)
 			return st;
 		*dst = qaws_dual3_make(p.d[0], with_tangent ? t.d[0] : qaws_v3_zero(), with_second ? tt.d[0] : qaws_v3_zero());
@@ -399,7 +399,7 @@ static qaws_status coons_surface_eval(
 	if (eval_flags & QAWS_SURFACE_EVAL_DVV) { out_result->dvv = S[5].v; out_result->valid_flags |= QAWS_SURFACE_EVAL_DVV; }
 	if (eval_flags & QAWS_SURFACE_EVAL_NORMAL)
 	{
-		qaws_internal_surface_normal(out_result->du, out_result->dv, &out_result->normal);
+		qaws_internal_surface_normal(&out_result->normal, out_result->du, out_result->dv);
 		out_result->valid_flags |= QAWS_SURFACE_EVAL_NORMAL;
 	}
 	return QAWS_STATUS_OK;
@@ -534,8 +534,8 @@ static qaws_status coons_adjoint(
 		for (k = 0; k < 4; k++)
 			jbar.d[k] = bars[4 * i + k];
 		jbar.channels = 0xFu;
-		st = qaws_internal_curve_adjoint_any(ctx, curves[i], ranges[i].min_value + coord * s, 0xFu, &jbar, cv,
-			want ? &tbar : NULL);
+		st = qaws_internal_curve_adjoint_any(cv, want ? &tbar : NULL, curves[i], &jbar, ranges[i].min_value + coord * s, 0xFu,
+			ctx);
 		if (st != QAWS_STATUS_OK)
 			return st;
 		coord_bar[i < 2 ? 0 : 1] += s * tbar;
@@ -549,8 +549,8 @@ static qaws_status coons_adjoint(
 				memset(&cbar, 0, sizeof(cbar));
 				cbar.d[0] = bars[16 + 2 * i + e];
 				cbar.channels = QAWS_EVAL_FLAG_POSITION;
-				st = qaws_internal_curve_adjoint_any(ctx, curves[i], e ? ranges[i].max_value : ranges[i].min_value,
-					QAWS_EVAL_FLAG_POSITION, &cbar, cv, NULL);
+				st = qaws_internal_curve_adjoint_any(cv, NULL, curves[i],
+					&cbar, e ? ranges[i].max_value : ranges[i].min_value, QAWS_EVAL_FLAG_POSITION, ctx);
 				if (st != QAWS_STATUS_OK)
 					return st;
 			}
@@ -577,7 +577,7 @@ static qaws_surface_diff_vtable const coons_surface_diff_vtable = {
 
 static void coons_surface_destroy(void* impl, qaws_allocator const* allocator)
 {
-	qaws_internal_dealloc(allocator, impl);
+	qaws_internal_dealloc(impl, allocator);
 }
 
 static int coons_surface_is_rational(qaws_surface const* s)

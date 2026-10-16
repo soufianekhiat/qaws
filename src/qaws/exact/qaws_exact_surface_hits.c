@@ -14,12 +14,12 @@ typedef qaws_exact_poly poly;
 
 static void* sh_alloc(size_t bytes)
 {
-	return qaws_internal_alloc(NULL, (unsigned long)bytes);
+	return qaws_internal_alloc((unsigned long)bytes, NULL);
 }
 
 static void sh_free(void* p)
 {
-	qaws_internal_dealloc(NULL, p);
+	qaws_internal_dealloc(p, NULL);
 }
 
 /* ------------------------------------------------------------------ */
@@ -842,7 +842,7 @@ qaws_status qaws_exact_surface_batch_raycast(qaws_exact_ray_hit* out_hits, qaws_
 			}
 	}
 	stats.patch_count = npatch;
-	st = qaws_internal_grid_create(boxes, npatch, 3, &grid);
+	st = qaws_internal_grid_create(&grid, boxes, npatch, 3);
 	if (st == QAWS_STATUS_OK)
 	{
 		er_job J;
@@ -859,7 +859,7 @@ qaws_status qaws_exact_surface_batch_raycast(qaws_exact_ray_hit* out_hits, qaws_
 		if (!J.chunk_stats)
 			st = QAWS_STATUS_ALLOCATION_FAILURE;
 		else
-			st = qaws_internal_parallel(desc->executor, ray_count, ER_GRAIN, er_chunk, &J);
+			st = qaws_internal_parallel(ray_count, ER_GRAIN, er_chunk, desc->executor, &J);
 		for (ch = 0; J.chunk_stats && ch < nchunk; ch++)
 		{
 			stats.candidate_count += J.chunk_stats[ch].candidate_count;

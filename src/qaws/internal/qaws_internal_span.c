@@ -1,9 +1,9 @@
 #include "qaws_internal_span.h"
 
 unsigned int qaws_internal_find_span(
+	qaws_scalar* out_local_t,
 	qaws_curve const* curve,
-	qaws_scalar parameter,
-	qaws_scalar* out_local_t)
+	qaws_scalar parameter)
 {
 	unsigned int span_count = curve->span_count;
 	qaws_scalar const* boundaries = curve->span_boundaries;

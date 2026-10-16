@@ -31,13 +31,13 @@ typedef struct qaws_bp_stats
 
 /* dim 2 or 3 (dim 2 ignores the z of the boxes). out_stats may be NULL. */
 qaws_status qaws_internal_broadphase(
+	qaws_bp_stats* out_stats,
 	qaws_bp_box const* boxes,
 	unsigned int count,
 	unsigned int dim,
 	qaws_bp_accept accept,
 	qaws_bp_visit visit,
-	void* user,
-	qaws_bp_stats* out_stats);
+	void* user);
 
 /*
  * The same grid kept for point queries: qaws_internal_grid_ring visits the
@@ -48,7 +48,7 @@ qaws_status qaws_internal_broadphase(
  */
 typedef struct qaws_bp_grid qaws_bp_grid;
 
-qaws_status qaws_internal_grid_create(qaws_bp_box const* boxes, unsigned int count, unsigned int dim, qaws_bp_grid** out_grid);
+qaws_status qaws_internal_grid_create(qaws_bp_grid** out_grid, qaws_bp_box const* boxes, unsigned int count, unsigned int dim);
 void qaws_internal_grid_destroy(qaws_bp_grid* grid);
 double qaws_internal_grid_ring(qaws_bp_grid const* grid, double const* p, unsigned int r, void (*visit)(void* user, unsigned int item), void* user);
 
@@ -70,8 +70,8 @@ int qaws_internal_grid_ray(qaws_bp_grid const* grid, double const* o, double con
 struct qaws_batch_executor;
 unsigned int qaws_internal_grid_cells(qaws_bp_grid const* grid);
 unsigned int qaws_internal_grid_pair_chunks(qaws_bp_grid const* grid);
-qaws_status qaws_internal_grid_pairs(qaws_bp_grid const* grid, qaws_bp_box const* boxes, qaws_bp_accept accept, void* accept_user,
-	qaws_status (*visit)(void* user, unsigned int chunk, unsigned int i, unsigned int j), void* visit_user, struct qaws_batch_executor const* executor,
-	unsigned int* out_candidates);
+qaws_status qaws_internal_grid_pairs(unsigned int* out_candidates, qaws_bp_grid const* grid, qaws_bp_box const* boxes, qaws_bp_accept accept,
+	void* accept_user, qaws_status (*visit)(void* user, unsigned int chunk, unsigned int i, unsigned int j), void* visit_user,
+	struct qaws_batch_executor const* executor);
 
 #endif /* QAWS_INTERNAL_BROADPHASE_H */

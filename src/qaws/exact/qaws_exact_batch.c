@@ -117,7 +117,7 @@ static qaws_status eb_pairs(eb_ctx* x, qaws_bp_box const* boxes, unsigned int n,
 	qaws_bp_grid* grid = NULL;
 	eb_ctx* ch = NULL;
 	unsigned int k, nch = 0, cand = 0;
-	qaws_status s = qaws_internal_grid_create(boxes, n, dim, &grid);
+	qaws_status s = qaws_internal_grid_create(&grid, boxes, n, dim);
 	if (s == QAWS_STATUS_OK)
 		nch = qaws_internal_grid_pair_chunks(grid);
 	if (s == QAWS_STATUS_OK && nch)
@@ -134,7 +134,7 @@ static qaws_status eb_pairs(eb_ctx* x, qaws_bp_box const* boxes, unsigned int n,
 				s = QAWS_STATUS_ALLOCATION_FAILURE;
 		}
 		if (s == QAWS_STATUS_OK)
-			s = qaws_internal_grid_pairs(grid, boxes, eb_accept, x, eb_visit_chunk, ch, x->desc->executor, &cand);
+			s = qaws_internal_grid_pairs(&cand, grid, boxes, eb_accept, x, eb_visit_chunk, ch, x->desc->executor);
 		for (k = 0; ch && k < nch; k++)
 		{
 			if (s == QAWS_STATUS_OK
@@ -383,7 +383,7 @@ static qaws_status es_pairs(es_ctx* x, qaws_bp_box const* boxes, unsigned int n,
 	qaws_bp_grid* grid = NULL;
 	es_ctx* ch = NULL;
 	unsigned int k, nch = 0, cand = 0;
-	qaws_status s = qaws_internal_grid_create(boxes, n, 3, &grid);
+	qaws_status s = qaws_internal_grid_create(&grid, boxes, n, 3);
 	if (s == QAWS_STATUS_OK)
 		nch = qaws_internal_grid_pair_chunks(grid);
 	if (s == QAWS_STATUS_OK && nch)
@@ -398,7 +398,7 @@ static qaws_status es_pairs(es_ctx* x, qaws_bp_box const* boxes, unsigned int n,
 			ch[k].nspan = x->nspan;
 		}
 		if (s == QAWS_STATUS_OK)
-			s = qaws_internal_grid_pairs(grid, boxes, es_accept, x, es_visit_chunk, ch, x->desc->executor, &cand);
+			s = qaws_internal_grid_pairs(&cand, grid, boxes, es_accept, x, es_visit_chunk, ch, x->desc->executor);
 		for (k = 0; ch && k < nch; k++)
 		{
 			if (s == QAWS_STATUS_OK
@@ -719,7 +719,7 @@ qaws_status qaws_exact_surface_batch_hits(qaws_exact_ssi_point* out_points, unsi
 				x.pieces[npiece].b = iv;
 				qaws_exact_patch_box(desc->surfaces[i], iu, iv, boxes[npiece].lo, boxes[npiece].hi);
 			}
-	st = qaws_internal_broadphase(boxes, npiece, 3, ess_accept, ess_visit, &x, &bs);
+	st = qaws_internal_broadphase(&bs, boxes, npiece, 3, ess_accept, ess_visit, &x);
 	stats.cell_count = bs.cell_count;
 	stats.candidate_count = bs.candidate_count;
 	if (st != QAWS_STATUS_OK)
@@ -752,7 +752,7 @@ qaws_status qaws_exact_surface_batch_hits(qaws_exact_ssi_point* out_points, unsi
 		J.groups = groups;
 		J.point_capacity = point_capacity;
 		J.branch_capacity = branch_capacity;
-		st = qaws_internal_parallel(desc->executor, ng, 1, ess_chunk, &J);
+		st = qaws_internal_parallel(ng, 1, ess_chunk, desc->executor, &J);
 	}
 	/* the surface pairs in order, as many as fit */
 	for (g = 0; g < ng && st == QAWS_STATUS_OK; g++)

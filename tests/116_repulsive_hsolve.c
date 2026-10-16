@@ -120,9 +120,9 @@ static void rh_check(qaws_internal_rbh_op* (*make)(void const*, double const*, d
 		nfar[t] = 0;
 		if (!op)
 			continue;
-		qaws_internal_rbh_apply(op, u, y);
+		qaws_internal_rbh_apply(y, op, u);
 		e[t] = rh_relerr(y, y0, nv);
-		qaws_internal_rbh_links(op, &nfar[t]);
+		qaws_internal_rbh_links(&nfar[t], op);
 		qaws_internal_rbh_destroy(op);
 	}
 	sprintf(msg, "%s: theta 0 against the dense metric %.2g; theta 0.5 / 0.25 / 0.1: %.2g / %.2g / %.2g (far links %u / %u / %u)", name, e[0], e[1], e[2],
@@ -134,14 +134,14 @@ static void rh_check(qaws_internal_rbh_op* (*make)(void const*, double const*, d
 static qaws_internal_rbh_op* rh_make_curves(void const* c, double const* x, double theta)
 {
 	qaws_internal_rbh_op* op = NULL;
-	qaws_internal_rbh_curves_metric((qaws_repulsive_curves const*)c, x, theta, &op);
+	qaws_internal_rbh_curves_metric(&op, (qaws_repulsive_curves const*)c, x, theta);
 	return op;
 }
 
 static qaws_internal_rbh_op* rh_make_mesh(void const* m, double const* x, double theta)
 {
 	qaws_internal_rbh_op* op = NULL;
-	qaws_internal_rbh_mesh_metric((qaws_repulsive_mesh const*)m, x, theta, &op);
+	qaws_internal_rbh_mesh_metric(&op, (qaws_repulsive_mesh const*)m, x, theta);
 	return op;
 }
 
@@ -159,7 +159,7 @@ static void test_metric(void)
 		memset(&d, 0, sizeof(d));
 		d.dimension = dim; d.vertex_count = N; d.edges = e; d.edge_count = N;
 		qaws_repulsive_curves_create(&c, &d);
-		qaws_internal_repulsive_curves_metric(c, x, A);
+		qaws_internal_repulsive_curves_metric(A, c, x);
 		rh_check(rh_make_curves, c, x, A, N, dim == 3 ? "trefoil (200 edges)" : "two circles in 2D (200 edges)");
 		qaws_repulsive_curves_destroy(c);
 		free(A);
@@ -176,7 +176,7 @@ static void test_metric(void)
 		memset(&d, 0, sizeof(d));
 		d.vertex_count = nv; d.triangles = tris; d.triangle_count = nf;
 		qaws_repulsive_mesh_create(&m, &d);
-		qaws_internal_repulsive_mesh_metric(m, x, A);
+		qaws_internal_repulsive_mesh_metric(A, m, x);
 		rh_check(rh_make_mesh, m, x, A, nv, "lumpy sphere (512 faces)");
 		qaws_repulsive_mesh_destroy(m);
 		free(x); free(tris); free(A);

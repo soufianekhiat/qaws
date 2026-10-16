@@ -40,7 +40,7 @@ void qaws_batch_bspline_eval_2d(
         qaws_scalar vx, vy;
 
         span = qaws_internal_find_knot_span(knots, knot_count, degree, cp_count, t);
-        qaws_internal_bspline_basis(knots, knot_count, degree, span, t, basis);
+        qaws_internal_bspline_basis(basis, knots, knot_count, degree, span, t);
 
         vx = QAWS_ZERO;
         vy = QAWS_ZERO;
@@ -84,7 +84,7 @@ void qaws_batch_bspline_eval_3d(
         qaws_scalar vx, vy, vz;
 
         span = qaws_internal_find_knot_span(knots, knot_count, degree, cp_count, t);
-        qaws_internal_bspline_basis(knots, knot_count, degree, span, t, basis);
+        qaws_internal_bspline_basis(basis, knots, knot_count, degree, span, t);
 
         vx = QAWS_ZERO;
         vy = QAWS_ZERO;

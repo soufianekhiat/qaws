@@ -1977,7 +1977,7 @@ static double cx_half_area(cx_ctx const* x, cx_graph const* g, unsigned int h)
 		double const* q = g->v[(h & 1) ? e->v0 : e->v1].p;
 		return 0.5 * (p[0] + q[0]) * (q[1] - p[1]);
 	}
-	qaws_internal_curve_area_2d(c, (h & 1) ? e->t1 : e->t0, (h & 1) ? e->t0 : e->t1, x->ext * x->ext * 1e-12, &a);
+	qaws_internal_curve_area_2d(&a, c, (h & 1) ? e->t1 : e->t0, (h & 1) ? e->t0 : e->t1, x->ext * x->ext * 1e-12);
 	return a;
 }
 
@@ -2482,7 +2482,7 @@ static qaws_status cx_build(cx_ctx* x, qaws_clip_result* result)
 				sb[i].hi[0] = x->src[i].hi[0]; sb[i].hi[1] = x->src[i].hi[1];
 				sb[i].lo[2] = sb[i].hi[2] = 0;
 			}
-			if (st == QAWS_STATUS_OK && qaws_internal_grid_create(sb, x->nsrc, 2, &g.sgrid) != QAWS_STATUS_OK)
+			if (st == QAWS_STATUS_OK && qaws_internal_grid_create(&g.sgrid, sb, x->nsrc, 2) != QAWS_STATUS_OK)
 				g.sgrid = NULL;
 			free(sb);
 		}

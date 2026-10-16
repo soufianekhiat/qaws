@@ -18,7 +18,7 @@ qaws_status qaws_curve_evaluate_2d(
 	if (curve->dimension != QAWS_DIMENSION_2D)
 		return QAWS_STATUS_INVALID_DIMENSION;
 
-	span_index = qaws_internal_find_span(curve, parameter, &local_t);
+	span_index = qaws_internal_find_span(&local_t, curve, parameter);
 	return curve->vtable->eval_span_2d(curve, span_index, local_t, eval_flags, out_result);
 }
 
@@ -36,7 +36,7 @@ qaws_status qaws_curve_evaluate_3d(
 	if (curve->dimension != QAWS_DIMENSION_3D)
 		return QAWS_STATUS_INVALID_DIMENSION;
 
-	span_index = qaws_internal_find_span(curve, parameter, &local_t);
+	span_index = qaws_internal_find_span(&local_t, curve, parameter);
 	return curve->vtable->eval_span_3d(curve, span_index, local_t, eval_flags, out_result);
 }
 
@@ -104,7 +104,7 @@ qaws_status qaws_curve_evaluate_batch_2d(
 		qaws_status s;
 
 		memset(&out_results[i], 0, sizeof(out_results[i]));
-		span_index = qaws_internal_find_span(curve, parameters[i], &local_t);
+		span_index = qaws_internal_find_span(&local_t, curve, parameters[i]);
 		s = curve->vtable->eval_span_2d(curve, span_index, local_t, eval_flags, &out_results[i]);
 		if (s != QAWS_STATUS_OK && first_err == QAWS_STATUS_OK)
 			first_err = s;
@@ -134,7 +134,7 @@ qaws_status qaws_curve_evaluate_batch_3d(
 		qaws_status s;
 
 		memset(&out_results[i], 0, sizeof(out_results[i]));
-		span_index = qaws_internal_find_span(curve, parameters[i], &local_t);
+		span_index = qaws_internal_find_span(&local_t, curve, parameters[i]);
 		s = curve->vtable->eval_span_3d(curve, span_index, local_t, eval_flags, &out_results[i]);
 		if (s != QAWS_STATUS_OK && first_err == QAWS_STATUS_OK)
 			first_err = s;

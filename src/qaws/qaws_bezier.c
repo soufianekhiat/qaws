@@ -111,7 +111,7 @@ static qaws_status bezier_eval_span_3d(
 static void bezier_destroy_impl(void* impl, qaws_allocator const* allocator)
 {
 	qaws_bezier_impl* bi = (qaws_bezier_impl*)impl;
-	if (bi) { qaws_internal_dealloc(allocator, bi->control_points); qaws_internal_dealloc(allocator, bi); }
+	if (bi) { qaws_internal_dealloc(bi->control_points, allocator); qaws_internal_dealloc(bi, allocator); }
 }
 
 static int bezier_is_closed(qaws_curve const* c)   { return qaws_internal_curve_ends_meet(c); }
@@ -157,7 +157,7 @@ static qaws_status bezier_linear_support(qaws_curve const* curve, unsigned int s
 	if (n + 1 > QAWS_DIFF_MAX_SUPPORT || order > QAWS_DIFF_MAX_ORDER)
 		return QAWS_STATUS_UNSUPPORTED_OPERATION;
 
-	qaws_internal_bernstein_derivs(n, local_t, order, b);
+	qaws_internal_bernstein_derivs(b, n, local_t, order);
 
 	out->kind = QAWS_SUPPORT_LOCAL;
 	out->range_count = 1;
@@ -179,8 +179,8 @@ static qaws_status bezier_rebuild(qaws_curve const* curve, qaws_diff_views const
 	qaws_bezier_desc d;
 	qaws_scalar const* cps;
 	qaws_scalar* owned;
-	qaws_status st = qaws_internal_field_override(values, QAWS_FIELD_CONTROL_POINTS, impl->control_points,
-		impl->control_point_count, (unsigned int)curve->dimension, &cps, &owned);
+	qaws_status st = qaws_internal_field_override(&cps, &owned, values,
+		impl->control_points, impl->control_point_count, QAWS_FIELD_CONTROL_POINTS, (unsigned int)curve->dimension);
 	if (st != QAWS_STATUS_OK)
 		return st;
 	d.dimension = curve->dimension;
@@ -188,7 +188,7 @@ static qaws_status bezier_rebuild(qaws_curve const* curve, qaws_diff_views const
 	d.control_points = cps;
 	d.control_point_count = impl->control_point_count;
 	st = qaws_curve_create_bezier(out_curve, &d);
-	qaws_internal_dealloc(NULL, owned);
+	qaws_internal_dealloc(owned, NULL);
 	return st;
 }
 
@@ -235,12 +235,12 @@ qaws_status qaws_curve_create_bezier_ex(
 	if (!curve) return QAWS_STATUS_ALLOCATION_FAILURE;
 	curve->span_boundaries[0] = 0; curve->span_boundaries[1] = 1;
 
-	impl = (qaws_bezier_impl*)qaws_internal_alloc(allocator, sizeof(qaws_bezier_impl));
+	impl = (qaws_bezier_impl*)qaws_internal_alloc(sizeof(qaws_bezier_impl), allocator);
 	if (!impl) { qaws_curve_destroy(curve); return QAWS_STATUS_ALLOCATION_FAILURE; }
 
 	cp_size = (size_t)dim_count * desc->control_point_count * sizeof(qaws_scalar);
-	impl->control_points = (qaws_scalar*)qaws_internal_alloc(allocator, (unsigned long)cp_size);
-	if (!impl->control_points) { qaws_internal_dealloc(allocator, impl); qaws_curve_destroy(curve); return QAWS_STATUS_ALLOCATION_FAILURE; }
+	impl->control_points = (qaws_scalar*)qaws_internal_alloc((unsigned long)cp_size, allocator);
+	if (!impl->control_points) { qaws_internal_dealloc(impl, allocator); qaws_curve_destroy(curve); return QAWS_STATUS_ALLOCATION_FAILURE; }
 	memcpy(impl->control_points, desc->control_points, cp_size);
 	impl->control_point_count = desc->control_point_count;
 

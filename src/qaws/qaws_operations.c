@@ -2901,9 +2901,9 @@ static void reparam_destroy_impl(void* impl_ptr, qaws_allocator const* allocator
 {
 	qaws_arc_reparam_impl* impl = (qaws_arc_reparam_impl*)impl_ptr;
 	if (!impl) return;
-	qaws_internal_dealloc(allocator, impl->table_params);
-	qaws_internal_dealloc(allocator, impl->table_distances);
-	qaws_internal_dealloc(allocator, impl);
+	qaws_internal_dealloc(impl->table_params, allocator);
+	qaws_internal_dealloc(impl->table_distances, allocator);
+	qaws_internal_dealloc(impl, allocator);
 }
 
 /* ------------------------------------------------------------------ */
@@ -3009,7 +3009,7 @@ qaws_status qaws_curve_reparameterize_arc_length(
 
 	/* Build arc-length table from the source curve */
 	status = qaws_internal_build_arc_length_table(
-		curve, tbl_size, impl->table_params, impl->table_distances);
+		impl->table_params, impl->table_distances, curve, tbl_size);
 	if (status != QAWS_STATUS_OK) {
 		free(impl->table_distances);
 		free(impl->table_params);
@@ -3129,11 +3129,11 @@ static void lm_destroy_impl(void* impl_ptr, qaws_allocator const* allocator)
 {
 	qaws_length_match_impl* impl = (qaws_length_match_impl*)impl_ptr;
 	if (!impl) return;
-	qaws_internal_dealloc(allocator, impl->table_params_a);
-	qaws_internal_dealloc(allocator, impl->table_distances_a);
-	qaws_internal_dealloc(allocator, impl->table_params_b);
-	qaws_internal_dealloc(allocator, impl->table_distances_b);
-	qaws_internal_dealloc(allocator, impl);
+	qaws_internal_dealloc(impl->table_params_a, allocator);
+	qaws_internal_dealloc(impl->table_distances_a, allocator);
+	qaws_internal_dealloc(impl->table_params_b, allocator);
+	qaws_internal_dealloc(impl->table_distances_b, allocator);
+	qaws_internal_dealloc(impl, allocator);
 }
 
 static int lm_is_closed(qaws_curve const* curve)
@@ -3160,16 +3160,16 @@ static qaws_curve_vtable const lm_vtable = {
 };
 
 int qaws_internal_reparam_source(
-	qaws_curve const* curve,
-	qaws_scalar t,
 	qaws_curve const** out_source,
-	qaws_scalar* out_source_t)
+	qaws_scalar* out_source_t,
+	qaws_curve const* curve,
+	qaws_scalar t)
 {
 	qaws_scalar local_t;
 	if (curve->vtable == &reparam_vtable)
 	{
 		qaws_arc_reparam_impl const* impl = (qaws_arc_reparam_impl const*)curve->impl;
-		qaws_internal_find_span(curve, t, &local_t);
+		qaws_internal_find_span(&local_t, curve, t);
 		*out_source = impl->source;
 		*out_source_t = qaws_internal_distance_to_parameter(
 			impl->table_params, impl->table_distances, impl->table_size,
@@ -3180,7 +3180,7 @@ int qaws_internal_reparam_source(
 	{
 		qaws_length_match_impl const* impl = (qaws_length_match_impl const*)curve->impl;
 		qaws_scalar s, frac;
-		qaws_internal_find_span(curve, t, &local_t);
+		qaws_internal_find_span(&local_t, curve, t);
 		s = curve->parameter_range.min_value +
 			local_t * (curve->parameter_range.max_value - curve->parameter_range.min_value);
 		frac = (impl->total_arc_length_a > QAWS_ZERO) ? (s / impl->total_arc_length_a) : QAWS_ZERO;
@@ -3236,11 +3236,11 @@ qaws_status qaws_curve_match_arc_length(
 
 	/* Build arc-length tables */
 	status = qaws_internal_build_arc_length_table(
-		curve_a, tbl_size, impl->table_params_a, impl->table_distances_a);
+		impl->table_params_a, impl->table_distances_a, curve_a, tbl_size);
 	if (status != QAWS_STATUS_OK) { lm_destroy_impl(impl, NULL); return status; }
 
 	status = qaws_internal_build_arc_length_table(
-		curve_b, tbl_size, impl->table_params_b, impl->table_distances_b);
+		impl->table_params_b, impl->table_distances_b, curve_b, tbl_size);
 	if (status != QAWS_STATUS_OK) { lm_destroy_impl(impl, NULL); return status; }
 
 	impl->total_arc_length_a = impl->table_distances_a[tbl_size - 1];
@@ -3385,10 +3385,10 @@ qaws_status qaws_curve_offset_3d(
 	if (n_cp > n_samples) n_cp = n_samples;
 
 	status = qaws_internal_fit_bspline(
-		QAWS_DIMENSION_3D, 3,
-		params, coords,
+		out_curve, params,
+		coords, QAWS_DIMENSION_3D,
 		n_samples, n_cp,
-		out_curve);
+		3);
 
 	free(params);
 	free(coords);
@@ -3481,8 +3481,8 @@ qaws_status qaws_curve_merge_chain(
 	if (n_cp < degree + 1) n_cp = degree + 1;
 	if (n_cp > total_samples) n_cp = total_samples;
 
-	status = qaws_internal_fit_bspline(dim, degree, params, coords,
-		total_samples, n_cp, &merged);
+	status = qaws_internal_fit_bspline(&merged, params, coords, dim,
+		total_samples, n_cp, degree);
 
 	if (status != QAWS_STATUS_OK) { free(params); free(coords); return status; }
 
@@ -3520,8 +3520,8 @@ qaws_status qaws_curve_merge_chain(
 		merged = NULL;
 		n_cp = total_samples / 2;
 		if (n_cp < degree + 1) n_cp = degree + 1;
-		status = qaws_internal_fit_bspline(dim, degree, params, coords,
-			total_samples, n_cp, &merged);
+		status = qaws_internal_fit_bspline(&merged, params, coords, dim,
+			total_samples, n_cp, degree);
 		if (status != QAWS_STATUS_OK)
 		{
 			free(params); free(coords);
@@ -3605,7 +3605,7 @@ qaws_status qaws_curve_fillet_2d(
 			coords[i * 2] = er.position.x;
 			coords[i * 2 + 1] = er.position.y;
 		}
-		status = qaws_internal_fit_bspline(QAWS_DIMENSION_2D, 3, params, coords, n_samp, 16, out_curve);
+		status = qaws_internal_fit_bspline(out_curve, params, coords, QAWS_DIMENSION_2D, n_samp, 16, 3);
 		free(params); free(coords);
 		return status;
 	}
@@ -3742,7 +3742,7 @@ qaws_status qaws_curve_fillet_2d(
 
 		{
 			qaws_curve* seg_copy = NULL;
-			status = qaws_internal_fit_bspline(QAWS_DIMENSION_2D, 3, samp_params, samp_coords, n_samp, 10, &seg_copy);
+			status = qaws_internal_fit_bspline(&seg_copy, samp_params, samp_coords, QAWS_DIMENSION_2D, n_samp, 10, 3);
 			free(samp_params); free(samp_coords);
 			if (status != QAWS_STATUS_OK) goto cleanup_fillet;
 			if (new_count >= total_segs) { qaws_curve_destroy(seg_copy); goto cleanup_fillet; }
@@ -3894,7 +3894,7 @@ qaws_status qaws_curve_chamfer_2d(
 			coords[i * 2] = er.position.x;
 			coords[i * 2 + 1] = er.position.y;
 		}
-		status = qaws_internal_fit_bspline(QAWS_DIMENSION_2D, 3, params, coords, n_samp, 16, out_curve);
+		status = qaws_internal_fit_bspline(out_curve, params, coords, QAWS_DIMENSION_2D, n_samp, 16, 3);
 		free(params); free(coords);
 		return status;
 	}
@@ -4020,7 +4020,7 @@ qaws_status qaws_curve_chamfer_2d(
 
 		{
 			qaws_curve* seg_copy = NULL;
-			status = qaws_internal_fit_bspline(QAWS_DIMENSION_2D, 3, samp_params, samp_coords, n_samp, 10, &seg_copy);
+			status = qaws_internal_fit_bspline(&seg_copy, samp_params, samp_coords, QAWS_DIMENSION_2D, n_samp, 10, 3);
 			free(samp_params); free(samp_coords);
 			if (status != QAWS_STATUS_OK) goto cleanup_chamfer;
 			if (new_count >= total_segs) { qaws_curve_destroy(seg_copy); goto cleanup_chamfer; }
