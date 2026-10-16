@@ -112,8 +112,8 @@ static void demo_repulsive_mesh(void)
 		memset(&sd, 0, sizeof(sd));
 		sd.hold_area = 1; sd.hold_volume = 1; sd.max_iterations = 40;
 		memset(&r, 0, sizeof(r));
-		if (qaws_repulsive_mesh_create(&d, &m) == QAWS_STATUS_OK)
-			qaws_repulsive_mesh_solve(m, &sd, x, &r);
+		if (qaws_repulsive_mesh_create(&m, &d) == QAWS_STATUS_OK)
+			qaws_repulsive_mesh_solve(&r, x, m, &sd);
 		for (k = 0; k < 2; k++)
 		{
 			viewport v;
@@ -165,8 +165,8 @@ static void demo_repulsive_mesh(void)
 		memset(&sd, 0, sizeof(sd));
 		sd.pinned = pins; sd.pinned_count = np; sd.hold_area = 1; sd.collision_checked = 1; sd.max_iterations = 30;
 		memset(&r, 0, sizeof(r));
-		if (qaws_repulsive_mesh_create(&d, &m) == QAWS_STATUS_OK)
-			qaws_repulsive_mesh_solve(m, &sd, x, &r);
+		if (qaws_repulsive_mesh_create(&m, &d) == QAWS_STATUS_OK)
+			qaws_repulsive_mesh_solve(&r, x, m, &sd);
 		v.x0 = 24 + 2 * (pw + 12); v.y0 = 84; v.w = pw; v.h = ph; v.xmin = v.ymin = -1; v.xmax = v.ymax = 1;
 		pr.cx = v.x0 + pw / 2; pr.cy = v.y0 + ph / 2 - 10; pr.scale = 150; pr.zscale = 1.6;
 		sprintf(label, "a membrane under a fixed sheet: E %.0f -> %.2f", (double)r.initial_energy, (double)r.energy);

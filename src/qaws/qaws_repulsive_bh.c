@@ -764,8 +764,8 @@ qaws_status qaws_internal_repulsive_mesh_bh(qaws_repulsive_mesh const* mesh, dou
 	return bh_run(&c, x, grad, E, NULL);
 }
 
-qaws_status qaws_repulsive_curves_bh(qaws_repulsive_curves const* curves, qaws_scalar const* positions, qaws_scalar theta, qaws_scalar seed,
-	qaws_scalar* gradient, qaws_scalar* out_value, qaws_repulsive_bh_stats* out_stats)
+qaws_status qaws_repulsive_curves_bh(qaws_scalar* gradient, qaws_scalar* out_value, qaws_repulsive_bh_stats* out_stats, qaws_repulsive_curves const* curves,
+	qaws_scalar const* positions, qaws_scalar theta, qaws_scalar seed)
 {
 	bh_ctx c;
 	if (!curves || !positions || !(theta >= 0))
@@ -774,8 +774,8 @@ qaws_status qaws_repulsive_curves_bh(qaws_repulsive_curves const* curves, qaws_s
 	return bh_public(&c, curves->nv, positions, seed, gradient, out_value, out_stats);
 }
 
-qaws_status qaws_repulsive_mesh_bh(qaws_repulsive_mesh const* mesh, qaws_scalar const* positions, qaws_scalar theta, qaws_scalar seed,
-	qaws_scalar* gradient, qaws_scalar* out_value, qaws_repulsive_bh_stats* out_stats)
+qaws_status qaws_repulsive_mesh_bh(qaws_scalar* gradient, qaws_scalar* out_value, qaws_repulsive_bh_stats* out_stats, qaws_repulsive_mesh const* mesh,
+	qaws_scalar const* positions, qaws_scalar theta, qaws_scalar seed)
 {
 	bh_ctx c;
 	if (!mesh || !positions || !(theta >= 0))

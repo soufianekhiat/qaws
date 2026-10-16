@@ -86,8 +86,8 @@ static void demo_repulsive_solve(void)
 		memset(&sd, 0, sizeof(sd));
 		sd.hold_total_length = 1; sd.collision_checked = (int)k; sd.max_iterations = 150;
 		memset(&r, 0, sizeof(r));
-		if (qaws_repulsive_curves_create(&d, &c) == QAWS_STATUS_OK)
-			qaws_repulsive_curves_solve(c, &sd, x, &r);
+		if (qaws_repulsive_curves_create(&c, &d) == QAWS_STATUS_OK)
+			qaws_repulsive_curves_solve(&r, x, c, &sd);
 		sprintf(label, k ? "48 vertices, collision-checked: still a trefoil" : "48 vertices, energy-based: passed through itself");
 		s32_fit(&pr, &v, x0, x, N);
 		svg_panel(&s, &v, label);
@@ -130,8 +130,8 @@ static void demo_repulsive_solve(void)
 		memset(&sd, 0, sizeof(sd));
 		sd.pinned = pins; sd.pinned_count = np; sd.hold_edge_lengths = 1; sd.collision_checked = 1; sd.max_iterations = 120;
 		memset(&r, 0, sizeof(r));
-		if (qaws_repulsive_curves_create(&d, &c) == QAWS_STATUS_OK)
-			qaws_repulsive_curves_solve(c, &sd, x, &r);
+		if (qaws_repulsive_curves_create(&c, &d) == QAWS_STATUS_OK)
+			qaws_repulsive_curves_solve(&r, x, c, &sd);
 		svg_panel(&s, &v, "strands pinned at both ends, round a fixed loop");
 		s32_draw(&s, &v, x0, 2, e, ne, NULL, "#8c959f", 1.2, 0.8);
 		s32_draw(&s, &v, x, 2, e, ne - O, NULL, "#0969da", 2.2, 1);
@@ -168,8 +168,8 @@ static void demo_repulsive_solve(void)
 		memset(&sd, 0, sizeof(sd));
 		sd.hold_edge_lengths = 1; sd.collision_checked = 1; sd.max_iterations = 60;
 		memset(&r, 0, sizeof(r));
-		if (qaws_repulsive_curves_create(&d, &c) == QAWS_STATUS_OK)
-			qaws_repulsive_curves_solve(c, &sd, x, &r);
+		if (qaws_repulsive_curves_create(&c, &d) == QAWS_STATUS_OK)
+			qaws_repulsive_curves_solve(&r, x, c, &sd);
 		s32_fit(&pr, &v, x0, x, 2 * M);
 		svg_panel(&s, &v, "a Hopf link, edge lengths held, collision-checked");
 		s32_draw(&s, &v, x0, 3, e, 2 * M, &pr, "#8c959f", 1.2, 0.8);

@@ -281,7 +281,7 @@ static void gp_case(gp_ctx* g, char const* name, double const* x0, unsigned int 
 		qaws_repulsive_curves_desc d;
 		memset(&d, 0, sizeof(d));
 		d.dimension = 3; d.vertex_count = nv; d.edges = idx; d.edge_count = ne;
-		qaws_repulsive_curves_create(&d, &c);
+		qaws_repulsive_curves_create(&c, &d);
 		t0 = gp_now(); qaws_internal_repulsive_curves_energy(c, x, &Ec, gc); tc = gp_now() - t0;
 		t0 = gp_now(); qaws_internal_repulsive_curves_bh(c, x, 0.25, &Eb, gb); tb = gp_now() - t0;
 		{
@@ -297,7 +297,7 @@ static void gp_case(gp_ctx* g, char const* name, double const* x0, unsigned int 
 		qaws_repulsive_mesh_desc d;
 		memset(&d, 0, sizeof(d));
 		d.vertex_count = nv; d.triangles = idx; d.triangle_count = ne;
-		qaws_repulsive_mesh_create(&d, &m);
+		qaws_repulsive_mesh_create(&m, &d);
 		t0 = gp_now(); qaws_internal_repulsive_mesh_energy(m, x, &Ec, gc); tc = gp_now() - t0;
 		t0 = gp_now(); qaws_internal_repulsive_mesh_bh(m, x, 0.25, &Eb, gb); tb = gp_now() - t0;
 		{

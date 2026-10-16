@@ -77,12 +77,12 @@ static double s35_step(unsigned int n, double theta)
 	s35_knot(x, e, n);
 	memset(&d, 0, sizeof(d));
 	d.dimension = 3; d.vertex_count = n; d.edges = e; d.edge_count = n;
-	qaws_repulsive_curves_create(&d, &c);
+	qaws_repulsive_curves_create(&c, &d);
 	memset(&sd, 0, sizeof(sd));
 	sd.hold_total_length = 1; sd.theta = (qaws_scalar)theta;
-	qaws_repulsive_curves_solver_create(c, &sd, x, &s);
+	qaws_repulsive_curves_solver_create(&s, c, x, &sd);
 	c0 = clock();
-	for (it = 0; it < 2; it++) qaws_repulsive_curves_solver_step(s, x, &r);
+	for (it = 0; it < 2; it++) qaws_repulsive_curves_solver_step(&r, x, s);
 	qaws_repulsive_curves_solver_destroy(s);
 	qaws_repulsive_curves_destroy(c);
 	free(x); free(e);
@@ -113,11 +113,11 @@ static void demo_repulsive_hsolve(void)
 	memcpy(x0, x, sizeof(qaws_scalar) * 3 * N);
 	memset(&d, 0, sizeof(d));
 	d.dimension = 3; d.vertex_count = N; d.edges = e; d.edge_count = N;
-	qaws_repulsive_curves_create(&d, &c);
+	qaws_repulsive_curves_create(&c, &d);
 	memset(&sd, 0, sizeof(sd));
 	sd.hold_total_length = 1; sd.max_iterations = 25; sd.theta = (qaws_scalar)0.25;
 	memset(&r, 0, sizeof(r));
-	qaws_repulsive_curves_solve(c, &sd, x, &r);
+	qaws_repulsive_curves_solve(&r, x, c, &sd);
 	qaws_repulsive_curves_destroy(c);
 	for (k = 0; k < 2; k++)
 	{

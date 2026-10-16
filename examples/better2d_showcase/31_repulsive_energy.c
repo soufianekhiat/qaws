@@ -88,8 +88,8 @@ static void demo_repulsive_energy(void)
 		memset(&d, 0, sizeof(d));
 		d.dimension = 2; d.vertex_count = n; d.edges = e; d.edge_count = ne;
 		memset(g, 0, sizeof(qaws_scalar) * 2 * n);
-		if (qaws_repulsive_curves_create(&d, &c) == QAWS_STATUS_OK)
-			qaws_repulsive_curves_gradient(c, x, 1, g, &E);
+		if (qaws_repulsive_curves_create(&c, &d) == QAWS_STATUS_OK)
+			qaws_repulsive_curves_gradient(g, &E, c, x, 1);
 		sprintf(label, "an arch beside a loop (2D): E = %.4g", (double)E);
 		s31_panel(&s, &v, x, 2, e, ne, g, n, NULL, label);
 		qaws_repulsive_curves_destroy(c);
@@ -124,8 +124,8 @@ static void demo_repulsive_energy(void)
 		memset(&d, 0, sizeof(d));
 		d.dimension = 2; d.vertex_count = n; d.edges = e; d.edge_count = ne;
 		memset(g, 0, sizeof(qaws_scalar) * 2 * n);
-		if (qaws_repulsive_curves_create(&d, &c) == QAWS_STATUS_OK)
-			qaws_repulsive_curves_gradient(c, x, 1, g, &E);
+		if (qaws_repulsive_curves_create(&c, &d) == QAWS_STATUS_OK)
+			qaws_repulsive_curves_gradient(g, &E, c, x, 1);
 		sprintf(label, "a junction of three branches and a polyline: E = %.4g", (double)E);
 		s31_panel(&s, &v, x, 2, e, ne, g, n, NULL, label);
 		qaws_repulsive_curves_destroy(c);
@@ -150,8 +150,8 @@ static void demo_repulsive_energy(void)
 		memset(&d, 0, sizeof(d));
 		d.dimension = 3; d.vertex_count = n; d.edges = e; d.edge_count = ne;
 		memset(g, 0, sizeof(qaws_scalar) * 3 * n);
-		if (qaws_repulsive_curves_create(&d, &c) == QAWS_STATUS_OK)
-			qaws_repulsive_curves_gradient(c, x, 1, g, &E);
+		if (qaws_repulsive_curves_create(&c, &d) == QAWS_STATUS_OK)
+			qaws_repulsive_curves_gradient(g, &E, c, x, 1);
 		sprintf(label, "a trefoil polygon (3D, projected): E = %.4g", (double)E);
 		v.xmin = -4; v.xmax = 4;
 		s31_panel(&s, &v, x, 3, e, ne, g, n, &pr, label);

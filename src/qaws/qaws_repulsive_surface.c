@@ -133,7 +133,7 @@ static qaws_status rsf_eval_make(qaws_repulsive_curves const* c, qaws_repulsive_
 		for (i = 0; i < n; i++)
 			for (k = 0; k < 3; k++)
 				e->dxs[3 * i + k] = (qaws_scalar)(e->J[6 * i + k] * (double)duv[2 * i] + e->J[6 * i + 3 + k] * (double)duv[2 * i + 1]);
-	st = qaws_repulsive_curves_gradient(c, e->xs, 1, e->g, &Es);
+	st = qaws_repulsive_curves_gradient(e->g, &Es, c, e->xs, 1);
 	if (st != QAWS_STATUS_OK)
 		rsf_eval_free(e);
 	*E = (double)Es;
@@ -145,7 +145,7 @@ static qaws_status rsf_check(qaws_repulsive_curves const* c, qaws_repulsive_surf
 	return !c || !sd || !sd->surface || !uv ? QAWS_STATUS_INVALID_ARGUMENT : c->dim != 3 ? QAWS_STATUS_INVALID_DIMENSION : QAWS_STATUS_OK;
 }
 
-qaws_status qaws_repulsive_surface_positions(qaws_repulsive_surface_desc const* sd, qaws_scalar const* uv, unsigned int count, qaws_scalar* out_positions)
+qaws_status qaws_repulsive_surface_positions(qaws_scalar* out_positions, qaws_scalar const* uv, unsigned int count, qaws_repulsive_surface_desc const* sd)
 {
 	unsigned int i;
 	if (!sd || !sd->surface || !uv || !out_positions)
@@ -160,8 +160,8 @@ qaws_status qaws_repulsive_surface_positions(qaws_repulsive_surface_desc const* 
 	return QAWS_STATUS_OK;
 }
 
-qaws_status qaws_repulsive_curves_on_surface_eval(qaws_repulsive_curves const* c, qaws_repulsive_surface_desc const* sd, qaws_scalar const* uv,
-	qaws_scalar const* duv, qaws_scalar* out_value, qaws_scalar* out_tangent, qaws_scalar* out_tangent2)
+qaws_status qaws_repulsive_curves_on_surface_eval(qaws_scalar* out_value, qaws_scalar* out_tangent, qaws_scalar* out_tangent2,
+	qaws_repulsive_curves const* c, qaws_scalar const* uv, qaws_scalar const* duv, qaws_repulsive_surface_desc const* sd)
 {
 	rsf_eval e;
 	double E;
@@ -174,7 +174,7 @@ qaws_status qaws_repulsive_curves_on_surface_eval(qaws_repulsive_curves const* c
 	{
 		/* t2 = d2E[dx, dx] + g . S''[duv, duv] */
 		double acc = 0;
-		st = qaws_repulsive_curves_eval(c, e.xs, e.dxs, &v, &t, &t2);
+		st = qaws_repulsive_curves_eval(&v, &t, &t2, c, e.xs, e.dxs);
 		for (i = 0; i < c->nv; i++)
 		{
 			double a = (double)duv[2 * i], b = (double)duv[2 * i + 1];
@@ -192,8 +192,8 @@ qaws_status qaws_repulsive_curves_on_surface_eval(qaws_repulsive_curves const* c
 	return st;
 }
 
-qaws_status qaws_repulsive_curves_on_surface_gradient(qaws_repulsive_curves const* c, qaws_repulsive_surface_desc const* sd, qaws_scalar const* uv,
-	qaws_scalar seed, qaws_scalar* gradient, qaws_scalar* out_value)
+qaws_status qaws_repulsive_curves_on_surface_gradient(qaws_scalar* gradient, qaws_scalar* out_value, qaws_repulsive_curves const* c,
+	qaws_scalar const* uv, qaws_repulsive_surface_desc const* sd, qaws_scalar seed)
 {
 	rsf_eval e;
 	double E;
@@ -213,8 +213,8 @@ qaws_status qaws_repulsive_curves_on_surface_gradient(qaws_repulsive_curves cons
 	return QAWS_STATUS_OK;
 }
 
-qaws_status qaws_repulsive_curves_on_surface_hvp(qaws_repulsive_curves const* c, qaws_repulsive_surface_desc const* sd, qaws_scalar const* uv,
-	qaws_scalar const* duv, qaws_scalar* out_hv)
+qaws_status qaws_repulsive_curves_on_surface_hvp(qaws_scalar* out_hv, qaws_repulsive_curves const* c, qaws_scalar const* uv,
+	qaws_scalar const* duv, qaws_repulsive_surface_desc const* sd)
 {
 	rsf_eval e;
 	double E;
@@ -233,7 +233,7 @@ qaws_status qaws_repulsive_curves_on_surface_hvp(qaws_repulsive_curves const* c,
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 	/* J^T H_x (J duv) + sum_c g_c S_c''[duv, .] */
-	st = qaws_repulsive_curves_hvp(c, e.xs, e.dxs, hx);
+	st = qaws_repulsive_curves_hvp(hx, c, e.xs, e.dxs);
 	for (i = 0; st == QAWS_STATUS_OK && i < n; i++)
 	{
 		double du = (double)duv[2 * i], dv = (double)duv[2 * i + 1];
@@ -374,8 +374,8 @@ void qaws_repulsive_surface_curves_solver_destroy(qaws_repulsive_surface_curves_
 	free(s);
 }
 
-qaws_status qaws_repulsive_surface_curves_solver_create(qaws_repulsive_curves const* c, qaws_repulsive_surface_desc const* sd,
-	qaws_repulsive_curves_solve_desc const* desc, qaws_scalar const* uv, qaws_repulsive_surface_curves_solver** out_solver)
+qaws_status qaws_repulsive_surface_curves_solver_create(qaws_repulsive_surface_curves_solver** out_solver, qaws_repulsive_curves const* c,
+	qaws_scalar const* uv, qaws_repulsive_surface_desc const* sd, qaws_repulsive_curves_solve_desc const* desc)
 {
 	qaws_repulsive_surface_curves_solver* s;
 	qaws_repulsive_curves_solve_desc d, di;
@@ -427,7 +427,7 @@ qaws_status qaws_repulsive_surface_curves_solver_create(qaws_repulsive_curves co
 	for (i = 0; i < 3 * n; i++) xs[i] = (qaws_scalar)s->x[i];
 	di = d;
 	di.pinned = NULL; di.pinned_count = 0; di.hold_barycenter = -1; di.theta = 0;
-	if ((st = qaws_repulsive_curves_solver_create(c, &di, xs, &s->inner)) != QAWS_STATUS_OK)
+	if ((st = qaws_repulsive_curves_solver_create(&s->inner, c, xs, &di)) != QAWS_STATUS_OK)
 		goto fail;
 	in = (rs_core const*)s->inner;
 	s->kin = in->k;
@@ -462,30 +462,30 @@ fail:
 	return st;
 }
 
-qaws_status qaws_repulsive_surface_curves_solver_direction(qaws_repulsive_surface_curves_solver const* s, qaws_scalar const* uv,
-	qaws_scalar* out_direction)
+qaws_status qaws_repulsive_surface_curves_solver_direction(qaws_scalar* out_direction, qaws_repulsive_surface_curves_solver const* s,
+	qaws_scalar const* uv)
 {
 	return s ? qaws_internal_rs_direction(&s->core, uv, out_direction) : QAWS_STATUS_INVALID_ARGUMENT;
 }
 
-qaws_status qaws_repulsive_surface_curves_solver_step(qaws_repulsive_surface_curves_solver* s, qaws_scalar* uv, qaws_repulsive_report* out_report)
+qaws_status qaws_repulsive_surface_curves_solver_step(qaws_repulsive_report* out_report, qaws_scalar* uv, qaws_repulsive_surface_curves_solver* s)
 {
 	return s ? qaws_internal_rs_step(&s->core, uv, out_report) : QAWS_STATUS_INVALID_ARGUMENT;
 }
 
-qaws_status qaws_repulsive_surface_curves_solve(qaws_repulsive_curves const* c, qaws_repulsive_surface_desc const* sd,
-	qaws_repulsive_curves_solve_desc const* desc, qaws_scalar* uv, qaws_repulsive_report* out_report)
+qaws_status qaws_repulsive_surface_curves_solve(qaws_repulsive_report* out_report, qaws_scalar* uv,
+	qaws_repulsive_curves const* c, qaws_repulsive_surface_desc const* sd, qaws_repulsive_curves_solve_desc const* desc)
 {
 	qaws_repulsive_surface_curves_solver* s = NULL;
 	qaws_repulsive_report rep;
 	unsigned int it, max = desc && desc->max_iterations ? desc->max_iterations : 100;
-	qaws_status st = qaws_repulsive_surface_curves_solver_create(c, sd, desc, uv, &s);
+	qaws_status st = qaws_repulsive_surface_curves_solver_create(&s, c, uv, sd, desc);
 	if (st != QAWS_STATUS_OK)
 		return st;
 	memset(&rep, 0, sizeof(rep));
 	for (it = 0; it < max && st == QAWS_STATUS_OK; it++)
 	{
-		st = qaws_repulsive_surface_curves_solver_step(s, uv, &rep);
+		st = qaws_repulsive_surface_curves_solver_step(&rep, uv, s);
 		if (rep.reason != QAWS_REPULSIVE_RUNNING)
 			break;
 	}

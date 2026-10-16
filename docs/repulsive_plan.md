@@ -156,13 +156,13 @@ a zero.
 
 ## 6. API (R1)
 
-    qaws_repulsive_curves_create(desc, &curves);        topology and exponents, validated
-    qaws_repulsive_curves_eval(curves, positions, direction, &e, &t, &t2);
-    qaws_repulsive_curves_gradient(curves, positions, seed, gradient, &e);
-    qaws_repulsive_curves_hvp(curves, positions, direction, hv);
+    qaws_repulsive_curves_create(&curves, desc);        topology and exponents, validated
+    qaws_repulsive_curves_eval(&e, &t, &t2, curves, positions, direction);
+    qaws_repulsive_curves_gradient(gradient, &e, curves, positions, seed);
+    qaws_repulsive_curves_hvp(hv, curves, positions, direction);
     qaws_repulsive_curves_destroy(curves);
 
-    qaws_repulsive_mesh_create(desc, &mesh);            positions/index view
+    qaws_repulsive_mesh_create(&mesh, desc);            positions/index view
     qaws_repulsive_mesh_eval / _gradient / _hvp / _destroy
 
 A prepared object holds the topology and the exponents only. Positions

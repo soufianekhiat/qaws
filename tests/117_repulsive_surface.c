@@ -40,7 +40,7 @@ static qaws_repulsive_curves* rs_curves(unsigned int nv, unsigned int const* e, 
 	qaws_repulsive_curves* c = NULL;
 	memset(&d, 0, sizeof(d));
 	d.dimension = 3; d.vertex_count = nv; d.edges = e; d.edge_count = ne;
-	qaws_repulsive_curves_create(&d, &c);
+	qaws_repulsive_curves_create(&c, &d);
 	return c;
 }
 
@@ -102,9 +102,9 @@ static void rs_fixture(qaws_surface const* patch, char const* tag, double const*
 	for (i = 0; i < 2 * nv; i++) { uv[i] = (qaws_scalar)uvd[i]; dir[i] = (qaws_scalar)dird[i]; g[i] = h[i] = 0; }
 	memset(&sd, 0, sizeof(sd));
 	sd.surface = patch;
-	s1 = qaws_repulsive_curves_on_surface_eval(c, &sd, uv, dir, &v, &t, &t2);
-	s2 = qaws_repulsive_curves_on_surface_gradient(c, &sd, uv, 1, g, NULL);
-	s3 = qaws_repulsive_curves_on_surface_hvp(c, &sd, uv, dir, h);
+	s1 = qaws_repulsive_curves_on_surface_eval(&v, &t, &t2, c, uv, dir, &sd);
+	s2 = qaws_repulsive_curves_on_surface_gradient(g, NULL, c, uv, &sd, 1);
+	s3 = qaws_repulsive_curves_on_surface_hvp(h, c, uv, dir, &sd);
 	ev = fmax(rs_rel((double)v, value[0]), fmax(rs_rel((double)t, value[1]), rs_rel((double)t2, value[2])));
 	eg = rs_relv(g, grad, 2 * nv);
 	eh = rs_relv(h, hv, 2 * nv);
@@ -156,8 +156,8 @@ static void test_seam(void)
 	sd.surface = torus; sd.periodic_u = 1; sd.periodic_v = 1;
 	for (i = 0; i < 2 * N; i++) { uv2[i] = uv[i]; g[i] = 0; }
 	for (i = 0; i < N; i += 3) uv2[2 * i] = (qaws_scalar)((double)uv2[2 * i] - ((double)ru.max_value - ru.min_value));   /* (a period back) */
-	qaws_repulsive_curves_on_surface_gradient(c, &sd, uv, 1, g, &E0);
-	qaws_repulsive_curves_on_surface_eval(c, &sd, uv2, NULL, &E1, NULL, NULL);
+	qaws_repulsive_curves_on_surface_gradient(g, &E0, c, uv, &sd, 1);
+	qaws_repulsive_curves_on_surface_eval(&E1, NULL, NULL, c, uv2, NULL, &sd);
 	/* central differences of the gradient, each coordinate */
 	for (i = 0; i < 2 * N; i++)
 	{
@@ -165,9 +165,9 @@ static void test_seam(void)
 		double hstep = RS_F32 ? 1e-3 : 1e-6;
 		memcpy(gp, uv, sizeof(uv));
 		gp[i] = (qaws_scalar)((double)uv[i] + hstep);
-		qaws_repulsive_curves_on_surface_eval(c, &sd, gp, NULL, &ep, NULL, NULL);
+		qaws_repulsive_curves_on_surface_eval(&ep, NULL, NULL, c, gp, NULL, &sd);
 		gp[i] = (qaws_scalar)((double)uv[i] - hstep);
-		qaws_repulsive_curves_on_surface_eval(c, &sd, gp, NULL, &em, NULL, NULL);
+		qaws_repulsive_curves_on_surface_eval(&em, NULL, NULL, c, gp, NULL, &sd);
 		err = fmax(err, fabs(((double)ep - em) / (2 * hstep) - (double)g[i]));
 		m = fmax(m, fabs((double)g[i]));
 	}
@@ -184,7 +184,7 @@ static double rs_off_torus(qaws_repulsive_surface_desc const* sd, qaws_scalar co
 	qaws_scalar* x = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * n);
 	double m = 0;
 	unsigned int i;
-	qaws_repulsive_surface_positions(sd, uv, n, x);
+	qaws_repulsive_surface_positions(x, uv, n, sd);
 	for (i = 0; i < n; i++)
 	{
 		double rho = sqrt((double)x[3 * i] * x[3 * i] + (double)x[3 * i + 1] * x[3 * i + 1]) - 1;
@@ -216,7 +216,7 @@ static void test_solves(void)
 	memset(&d, 0, sizeof(d));
 	d.hold_total_length = 1; d.max_iterations = 30;
 	memset(&r, 0, sizeof(r));
-	st = qaws_repulsive_surface_curves_solve(c, &sd, &d, uv, &r);
+	st = qaws_repulsive_surface_curves_solve(&r, uv, c, &sd, &d);
 	sprintf(msg, "torus, three loops, length held: status %d, reason %d after %u steps, E %.4g -> %.4g, length residual %.2g, off the torus %.2g",
 		(int)st, (int)r.reason, r.iterations, (double)r.initial_energy, (double)r.energy, (double)r.constraint_residual, rs_off_torus(&sd, uv, N));
 	TEST_ASSERT(st == QAWS_STATUS_OK && r.iterations >= 5 && r.energy < 0.9 * r.initial_energy && (double)r.constraint_residual <= (RS_F32 ? 1e-4 : 1e-7) &&
@@ -228,7 +228,7 @@ static void test_solves(void)
 		memset(&d, 0, sizeof(d));
 		d.hold_total_length = 1; d.max_iterations = 20; d.collision_checked = 1; d.pinned = pins; d.pinned_count = 2;
 		memset(&r, 0, sizeof(r));
-		st = qaws_repulsive_surface_curves_solve(c, &sd, &d, uv, &r);
+		st = qaws_repulsive_surface_curves_solve(&r, uv, c, &sd, &d);
 		sprintf(msg, "torus, collision-checked, two pins: status %d, reason %d after %u steps, E %.4g -> %.4g; pins moved %.2g",
 			(int)st, (int)r.reason, r.iterations, (double)r.initial_energy, (double)r.energy,
 			fmax(fabs((double)uv[0] - u0[0]) + fabs((double)uv[1] - u0[1]), fabs((double)uv[24] - u1[0]) + fabs((double)uv[25] - u1[1])));
@@ -265,7 +265,7 @@ static void test_domain(void)
 	memset(&d, 0, sizeof(d));
 	d.max_iterations = 40;
 	memset(&r, 0, sizeof(r));
-	st = qaws_repulsive_surface_curves_solve(c, &sd, &d, uv, &r);
+	st = qaws_repulsive_surface_curves_solve(&r, uv, c, &sd, &d);
 	for (i = 0; i < 2 * N; i++) { lo = fmin(lo, (double)uv[i]); hi = fmax(hi, (double)uv[i]); }
 	sprintf(msg, "patch, an open polyline growing: status %d, reason %d after %u steps (rejected %u), E %.4g -> %.4g, parameters in [%.4g, %.4g]",
 		(int)st, (int)r.reason, r.iterations, r.rejected_energy, (double)r.initial_energy, (double)r.energy, lo, hi);
@@ -282,7 +282,7 @@ static void test_domain(void)
 		qaws_surface_revolution_desc rd;
 		memcpy(bad, uv, sizeof(bad));
 		bad[4] = (qaws_scalar)1.2;
-		s1 = qaws_repulsive_surface_curves_solver_create(c, &sd, NULL, bad, &s);
+		s1 = qaws_repulsive_surface_curves_solver_create(&s, c, bad, &sd, NULL);
 		qaws_repulsive_surface_curves_solver_destroy(s);
 		s = NULL;
 		/* a sphere: the half circle from the south pole to the north, revolved */
@@ -301,7 +301,7 @@ static void test_domain(void)
 			ss.surface = sphere; ss.periodic_u = 1;
 			for (i = 0; i < N; i++) { bad[2 * i] = (qaws_scalar)(0.1 * i); bad[2 * i + 1] = (qaws_scalar)(0.5 * ((double)rv.min_value + rv.max_value) + 0.01 * i); }
 			bad[1] = rv.max_value;   /* (the north pole) */
-			s2 = qaws_repulsive_surface_curves_solver_create(c, &ss, NULL, bad, &s);
+			s2 = qaws_repulsive_surface_curves_solver_create(&s, c, bad, &ss, NULL);
 			qaws_repulsive_surface_curves_solver_destroy(s);
 		}
 		qaws_surface_destroy(sphere);
@@ -327,11 +327,11 @@ static void test_domain(void)
 			memset(&ts, 0, sizeof(ts));
 			ts.surface = trimmed;
 			memcpy(bad, uv, sizeof(bad));
-			s1b = qaws_repulsive_surface_curves_solver_create(c, &ts, NULL, bad, &s);
+			s1b = qaws_repulsive_surface_curves_solver_create(&s, c, bad, &ts, NULL);
 			qaws_repulsive_surface_curves_solver_destroy(s);
 			s = NULL;
 			bad[6] = bad[7] = (qaws_scalar)0.52;   /* (in the hole) */
-			s3 = qaws_repulsive_surface_curves_solver_create(c, &ts, NULL, bad, &s);
+			s3 = qaws_repulsive_surface_curves_solver_create(&s, c, bad, &ts, NULL);
 			qaws_repulsive_surface_curves_solver_destroy(s);
 			qaws_surface_destroy(trimmed);
 			qaws_curve_destroy(hc);

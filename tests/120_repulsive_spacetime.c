@@ -117,16 +117,16 @@ static void test_agents(void)
 	close0 = rt_closest(x);
 	memset(&cd, 0, sizeof(cd));
 	cd.dimension = 3; cd.vertex_count = RT_A * RT_NV; cd.edges = e; cd.edge_count = RT_A * (RT_NV - 1); cd.alpha = 3; cd.beta = 6;
-	qaws_repulsive_curves_create(&cd, &c);
+	qaws_repulsive_curves_create(&c, &cd);
 	memset(&d, 0, sizeof(d));
 	d.pinned = pins; d.pinned_count = 2 * RT_A;
 	d.hold_coordinate = 2; d.length_weight = 1; d.room = room; d.room_count = 4; d.room_weight = (qaws_scalar)0.1;
 	d.tolerance = (qaws_scalar)(RT_F32 ? 1e-3 : 1e-4);
-	st = qaws_repulsive_curves_solver_create(c, &d, x, &s);
+	st = qaws_repulsive_curves_solver_create(&s, c, x, &d);
 	memset(&r, 0, sizeof(r));
 	for (it = 0; st == QAWS_STATUS_OK && it < 300; it++)
 	{
-		qaws_repulsive_curves_solver_step(s, x, &r);
+		qaws_repulsive_curves_solver_step(&r, x, s);
 		for (i = 0; i < RT_A * RT_NV; i++)
 			inside &= fabs((double)x[3 * i]) < 3 && fabs((double)x[3 * i + 2]) < 3;
 		if (r.reason != QAWS_REPULSIVE_RUNNING)
@@ -143,7 +143,7 @@ static void test_agents(void)
 		qaws_repulsive_targets t;
 		qaws_scalar dx[3 * RT_A * RT_NV];
 		memset(&t, 0, sizeof(t));
-		st = s ? qaws_repulsive_curves_solver_solution_jvp(s, &t, dx, NULL) : QAWS_STATUS_INVALID_ARGUMENT;
+		st = s ? qaws_repulsive_curves_solver_solution_jvp(dx, NULL, s, &t) : QAWS_STATUS_INVALID_ARGUMENT;
 		sprintf(msg, "space-time solver: solution derivatives refused (%d)", (int)st);
 		TEST_ASSERT(st == QAWS_STATUS_UNSUPPORTED_OPERATION, msg);
 	}
@@ -155,11 +155,11 @@ static void test_agents(void)
 		qaws_status s1, s2, s3, s4;
 		qaws_repulsive_curves_solver* t = NULL;
 		rt_paths(y, e);
-		b.hold_coordinate = 4; s1 = qaws_repulsive_curves_solver_create(c, &b, y, &t); qaws_repulsive_curves_solver_destroy(t); t = NULL;
-		b = d; b.room_count = 2; s2 = qaws_repulsive_curves_solver_create(c, &b, y, &t); qaws_repulsive_curves_solver_destroy(t); t = NULL;
-		b = d; b.length_weight = -1; s3 = qaws_repulsive_curves_solver_create(c, &b, y, &t); qaws_repulsive_curves_solver_destroy(t); t = NULL;
+		b.hold_coordinate = 4; s1 = qaws_repulsive_curves_solver_create(&t, c, y, &b); qaws_repulsive_curves_solver_destroy(t); t = NULL;
+		b = d; b.room_count = 2; s2 = qaws_repulsive_curves_solver_create(&t, c, y, &b); qaws_repulsive_curves_solver_destroy(t); t = NULL;
+		b = d; b.length_weight = -1; s3 = qaws_repulsive_curves_solver_create(&t, c, y, &b); qaws_repulsive_curves_solver_destroy(t); t = NULL;
 		y[3 * 5] = 4;   /* (a vertex out of the room) */
-		b = d; s4 = qaws_repulsive_curves_solver_create(c, &b, y, &t); qaws_repulsive_curves_solver_destroy(t);
+		b = d; s4 = qaws_repulsive_curves_solver_create(&t, c, y, &b); qaws_repulsive_curves_solver_destroy(t);
 		sprintf(msg, "space-time refusals: coordinate 4 of 3 (%d), a room of 2 points (%d), a negative length weight (%d), a vertex outside (%d)",
 			(int)s1, (int)s2, (int)s3, (int)s4);
 		TEST_ASSERT(s1 == QAWS_STATUS_INVALID_ARGUMENT && s2 == QAWS_STATUS_INVALID_ARGUMENT && s3 == QAWS_STATUS_INVALID_ARGUMENT &&

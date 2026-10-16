@@ -28,9 +28,9 @@ static double s34_eval(qaws_repulsive_curves* c, qaws_repulsive_mesh* m, qaws_sc
 {
 	qaws_scalar E = 0;
 	memset(g, 0, sizeof(qaws_scalar) * n);
-	if (theta < 0) { if (c) qaws_repulsive_curves_gradient(c, x, 1, g, &E); else qaws_repulsive_mesh_gradient(m, x, 1, g, &E); }
-	else if (c) qaws_repulsive_curves_bh(c, x, (qaws_scalar)theta, 1, g, &E, NULL);
-	else qaws_repulsive_mesh_bh(m, x, (qaws_scalar)theta, 1, g, &E, NULL);
+	if (theta < 0) { if (c) qaws_repulsive_curves_gradient(g, &E, c, x, 1); else qaws_repulsive_mesh_gradient(g, &E, m, x, 1); }
+	else if (c) qaws_repulsive_curves_bh(g, &E, NULL, c, x, (qaws_scalar)theta, 1);
+	else qaws_repulsive_mesh_bh(g, &E, NULL, m, x, (qaws_scalar)theta, 1);
 	return (double)E;
 }
 
@@ -65,7 +65,7 @@ static void demo_repulsive_bh(void)
 			s34_trefoil(x, e, 300);
 			memset(&d, 0, sizeof(d));
 			d.dimension = 3; d.vertex_count = 300; d.edges = e; d.edge_count = 300;
-			qaws_repulsive_curves_create(&d, &c);
+			qaws_repulsive_curves_create(&c, &d);
 			n = 900;
 		}
 		else
@@ -81,7 +81,7 @@ static void demo_repulsive_bh(void)
 			}
 			memset(&d, 0, sizeof(d));
 			d.vertex_count = nv; d.triangles = tris; d.triangle_count = nf;
-			qaws_repulsive_mesh_create(&d, &m);
+			qaws_repulsive_mesh_create(&m, &d);
 			n = 3 * nv;
 		}
 		E0 = s34_eval(c, m, x, -1, g0, n);
@@ -129,7 +129,7 @@ static void demo_repulsive_bh(void)
 			s34_trefoil(x, e, nn);
 			memset(&d, 0, sizeof(d));
 			d.dimension = 3; d.vertex_count = nn; d.edges = e; d.edge_count = nn;
-			qaws_repulsive_curves_create(&d, &c);
+			qaws_repulsive_curves_create(&c, &d);
 			for (j = 0; j < 2; j++)
 			{
 				unsigned int rep = 0;

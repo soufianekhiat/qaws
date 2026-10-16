@@ -85,15 +85,15 @@ static void demo_repulsive_surface(void)
 			}
 		memset(&sd, 0, sizeof(sd));
 		sd.surface = torus; sd.periodic_u = 1; sd.periodic_v = 1;
-		qaws_repulsive_surface_positions(&sd, uv, K * N, x0);
+		qaws_repulsive_surface_positions(x0, uv, K * N, &sd);
 		memset(&cd, 0, sizeof(cd));
 		cd.dimension = 3; cd.vertex_count = K * N; cd.edges = e; cd.edge_count = K * N;
-		qaws_repulsive_curves_create(&cd, &c);
+		qaws_repulsive_curves_create(&c, &cd);
 		memset(&d, 0, sizeof(d));
 		d.hold_edge_lengths = 1; d.max_iterations = 60;
 		memset(&r, 0, sizeof(r));
-		qaws_repulsive_surface_curves_solve(c, &sd, &d, uv, &r);
-		qaws_repulsive_surface_positions(&sd, uv, K * N, x);
+		qaws_repulsive_surface_curves_solve(&r, uv, c, &sd, &d);
+		qaws_repulsive_surface_positions(x, uv, K * N, &sd);
 		for (i = 0; i < 2; i++)
 		{
 			v.x0 = 24 + i * (pw + 12); v.y0 = 84; v.w = pw; v.h = ph; v.xmin = v.ymin = -1; v.xmax = v.ymax = 1;
@@ -137,13 +137,13 @@ static void demo_repulsive_surface(void)
 		}
 		memset(&cd, 0, sizeof(cd));
 		cd.polyline.curves = (qaws_curve const* const*)cv; cd.polyline.curve_count = 2; cd.polyline.dimension = 3; cd.polyline.edge_length = (qaws_scalar)0.06;
-		qaws_repulsive_controls_create(&cd, &ctl);
-		qaws_repulsive_controls_read(ctl, P0);
+		qaws_repulsive_controls_create(&ctl, &cd);
+		qaws_repulsive_controls_read(P0, ctl);
 		memcpy(P, P0, sizeof(P));
 		memset(&d, 0, sizeof(d));
 		d.hold_total_length = 1; d.max_iterations = 40; d.pinned = ends; d.pinned_count = 4;   /* (each end control pinned) */
 		memset(&r, 0, sizeof(r));
-		qaws_repulsive_controls_solve(ctl, &d, P, &r);
+		qaws_repulsive_controls_solve(&r, P, ctl, &d);
 		v.x0 = 24 + 2 * (pw + 12); v.y0 = 84; v.w = pw; v.h = ph;
 		pr.cx = v.x0 + pw / 2; pr.cy = v.y0 + ph / 2; pr.scale = 120; pr.zscale = 1;
 		sprintf(label, "two B-splines by their control points: E %.1f -> %.1f", (double)r.initial_energy, (double)r.energy);
@@ -156,7 +156,7 @@ static void demo_repulsive_surface(void)
 				qaws_curve* out = NULL;
 				double xy[2 * 121];
 				unsigned int m;
-				qaws_repulsive_controls_to_curve(ctl, Q, k, &out);
+				qaws_repulsive_controls_to_curve(&out, ctl, Q, k);
 				for (m = 0; out && m <= 120; m++)
 				{
 					qaws_eval_result_3d er;

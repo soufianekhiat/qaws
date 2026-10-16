@@ -144,8 +144,8 @@ static void rk_check(char const* name, qaws_scalar const* x, unsigned int dim, u
 		qaws_repulsive_curves_desc d;
 		memset(&d, 0, sizeof(d));
 		d.dimension = dim; d.vertex_count = nv; d.edges = idx; d.edge_count = ne;
-		qaws_repulsive_curves_create(&d, &c);
-		qaws_repulsive_curves_gradient(c, x, 1, gl, &El);
+		qaws_repulsive_curves_create(&c, &d);
+		qaws_repulsive_curves_gradient(gl, &El, c, x, 1);
 		qaws_internal_repulsive_curves_metric(c, xd, A);
 		alpha = 3; beta = 6;
 	}
@@ -154,8 +154,8 @@ static void rk_check(char const* name, qaws_scalar const* x, unsigned int dim, u
 		qaws_repulsive_mesh_desc d;
 		memset(&d, 0, sizeof(d));
 		d.vertex_count = nv; d.triangles = idx; d.triangle_count = ne;
-		qaws_repulsive_mesh_create(&d, &m);
-		qaws_repulsive_mesh_gradient(m, x, 1, gl, &El);
+		qaws_repulsive_mesh_create(&m, &d);
+		qaws_repulsive_mesh_gradient(gl, &El, m, x, 1);
 		qaws_internal_repulsive_mesh_metric(m, xd, A);
 		alpha = 6; beta = 12;
 	}

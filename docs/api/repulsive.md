@@ -19,10 +19,10 @@ the metric product.
 ```c
 qaws_repulsive_curves_desc d = { 3, vertex_count, edges, edge_count, 0, 0 };   /* (alpha, beta) = (3, 6) */
 qaws_repulsive_curves* c = NULL;
-qaws_repulsive_curves_create(&d, &c);
-qaws_repulsive_curves_eval(c, positions, direction, &e, &de, &d2e);   /* E, dE[v], d2E[v, v] */
-qaws_repulsive_curves_gradient(c, positions, 1, gradient, &e);        /* gradient += seed dE/dx */
-qaws_repulsive_curves_hvp(c, positions, direction, hv);               /* hv += H v */
+qaws_repulsive_curves_create(&c, &d);
+qaws_repulsive_curves_eval(&e, &de, &d2e, c, positions, direction);   /* E, dE[v], d2E[v, v] */
+qaws_repulsive_curves_gradient(gradient, &e, c, positions, 1);        /* gradient += seed dE/dx */
+qaws_repulsive_curves_hvp(hv, c, positions, direction);               /* hv += H v */
 qaws_repulsive_curves_destroy(c);
 
 qaws_repulsive_mesh_desc m = { vertex_count, triangles, triangle_count, 0 };   /* p = 6 */
@@ -107,12 +107,12 @@ they are the square's.
 qaws_repulsive_curves_solve_desc sd = { 0 };
 sd.hold_edge_lengths = 1;          /* or hold_total_length; pins, held edge directions */
 sd.collision_checked = 1;          /* validate every accepted motion */
-qaws_repulsive_curves_solve(c, &sd, positions, &report);              /* in place */
+qaws_repulsive_curves_solve(&report, positions, c, &sd);              /* in place */
 
 qaws_repulsive_curves_solver* s = NULL;                               /* or step by step */
-qaws_repulsive_curves_solver_create(c, &sd, positions, &s);
-qaws_repulsive_curves_solver_step(s, positions, &report);             /* report.reason: RUNNING or why it stopped */
-qaws_repulsive_curves_solver_direction(s, positions, g);              /* the descent direction, not the gradient */
+qaws_repulsive_curves_solver_create(&s, c, positions, &sd);
+qaws_repulsive_curves_solver_step(&report, positions, s);             /* report.reason: RUNNING or why it stopped */
+qaws_repulsive_curves_solver_direction(g, s, positions);              /* the descent direction, not the gradient */
 qaws_repulsive_curves_solver_destroy(s);
 ```
 
@@ -249,7 +249,7 @@ modes on a trefoil, pinned strands round a fixed loop, and a Hopf link.
 qaws_repulsive_mesh_solve_desc sd = { 0 };
 sd.hold_area = 1; sd.hold_volume = 1;      /* volume: closed meshes only */
 sd.collision_checked = 1;                  /* vertex-face and edge-edge checks on every accepted motion */
-qaws_repulsive_mesh_solve(mesh, &sd, positions, &report);
+qaws_repulsive_mesh_solve(&report, positions, mesh, &sd);
 /* or qaws_repulsive_mesh_solver_create / _step / _direction / _destroy, as for curves */
 ```
 
@@ -337,8 +337,8 @@ collision-checked mode.
 
 ```c
 qaws_repulsive_bh_stats stats;
-qaws_repulsive_curves_bh(curves, positions, theta, 1, gradient, &energy, &stats);   /* theta 0: the direct sum */
-qaws_repulsive_mesh_bh(mesh, positions, theta, 1, gradient, &energy, &stats);
+qaws_repulsive_curves_bh(gradient, &energy, &stats, curves, positions, theta, 1);   /* theta 0: the direct sum */
+qaws_repulsive_mesh_bh(gradient, &energy, &stats, mesh, positions, theta, 1);
 ```
 
 Every ordered pair's term uses its first element's own tangent or normal.
@@ -396,7 +396,7 @@ theta 0.25 against 12 to 21 s direct (the times vary with the machine's load).
 qaws_repulsive_curves_solve_desc sd = { 0 };
 sd.hold_total_length = 1;
 sd.theta = 0.25;                           /* 0: the dense mode above */
-qaws_repulsive_curves_solve(curves, &sd, positions, &report);
+qaws_repulsive_curves_solve(&report, positions, curves, &sd);
 /* meshes alike: qaws_repulsive_mesh_solve_desc.theta */
 ```
 
@@ -468,8 +468,8 @@ time per step against size.
 qaws_repulsive_surface_desc sd = { surface, 1, 1 };     /* periodic in u and v: declared */
 qaws_repulsive_curves_solve_desc d = { 0 };
 d.hold_edge_lengths = 1;
-qaws_repulsive_surface_curves_solve(curves, &sd, &d, uv, &report);   /* uv: two per vertex */
-qaws_repulsive_surface_positions(&sd, uv, vertex_count, positions);
+qaws_repulsive_surface_curves_solve(&report, uv, curves, &sd, &d);   /* uv: two per vertex */
+qaws_repulsive_surface_positions(positions, uv, vertex_count, &sd);
 /* and _eval / _gradient / _hvp in uv */
 ```
 
@@ -520,10 +520,10 @@ geodesic distance enters the published energy.
 ```c
 qaws_repulsive_controls_desc cd = { 0 };
 cd.polyline.curves = curves; cd.polyline.curve_count = n; cd.polyline.dimension = 3; cd.polyline.edge_length = h;
-qaws_repulsive_controls_create(&cd, &ctl);
-qaws_repulsive_controls_read(ctl, P);                      /* every curve's control points */
-qaws_repulsive_controls_solve(ctl, &solve_desc, P, &report);
-qaws_repulsive_controls_to_curve(ctl, P, i, &curve_i);    /* the same family, new control points */
+qaws_repulsive_controls_create(&ctl, &cd);
+qaws_repulsive_controls_read(P, ctl);                      /* every curve's control points */
+qaws_repulsive_controls_solve(&report, P, ctl, &solve_desc);
+qaws_repulsive_controls_to_curve(&curve_i, ctl, P, i);    /* the same family, new control points */
 ```
 
 The working polyline of the R2 adapter is a linear function of the curves'
@@ -556,8 +556,8 @@ held, so the derivatives are those of that fixed sampling.
 qaws_repulsive_targets d = { 0 };
 d.pinned = dpins;                     /* the pinned positions' changes */
 d.edge_lengths = dl;                  /* curves; or d.length; meshes: d.area, d.volume */
-qaws_repulsive_curves_solver_solution_jvp(solver, &d, dx, &gauge);
-qaws_repulsive_curves_solver_solution_vjp(solver, xbar, &targets_bar, &gauge);
+qaws_repulsive_curves_solver_solution_jvp(dx, &gauge, solver, &d);
+qaws_repulsive_curves_solver_solution_vjp(&targets_bar, &gauge, solver, xbar);
 ```
 
 At a converged x*, dE = C^T lambda and every row holds its target. Moving

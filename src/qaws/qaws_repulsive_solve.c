@@ -1034,8 +1034,8 @@ static void rs_c_targets(qaws_repulsive_curves_solver const* s, qaws_repulsive_t
 	}
 }
 
-qaws_status qaws_repulsive_curves_solver_solution_jvp(qaws_repulsive_curves_solver const* s, qaws_repulsive_targets const* d, qaws_scalar* out_dx,
-	unsigned int* out_gauge)
+qaws_status qaws_repulsive_curves_solver_solution_jvp(qaws_scalar* out_dx, unsigned int* out_gauge, qaws_repulsive_curves_solver const* s,
+	qaws_repulsive_targets const* d)
 {
 	double *rows, *dx;
 	unsigned int i;
@@ -1056,8 +1056,8 @@ qaws_status qaws_repulsive_curves_solver_solution_jvp(qaws_repulsive_curves_solv
 	return st;
 }
 
-qaws_status qaws_repulsive_curves_solver_solution_vjp(qaws_repulsive_curves_solver const* s, qaws_scalar const* xbar, qaws_repulsive_targets* out_bar,
-	unsigned int* out_gauge)
+qaws_status qaws_repulsive_curves_solver_solution_vjp(qaws_repulsive_targets* out_bar, unsigned int* out_gauge, qaws_repulsive_curves_solver const* s,
+	qaws_scalar const* xbar)
 {
 	double *rows, *xb;
 	unsigned int i;
@@ -1088,8 +1088,8 @@ void qaws_repulsive_curves_solver_destroy(qaws_repulsive_curves_solver* s)
 	free(s);
 }
 
-qaws_status qaws_repulsive_curves_solver_create(qaws_repulsive_curves const* c, qaws_repulsive_curves_solve_desc const* desc,
-	qaws_scalar const* positions, qaws_repulsive_curves_solver** out_solver)
+qaws_status qaws_repulsive_curves_solver_create(qaws_repulsive_curves_solver** out_solver, qaws_repulsive_curves const* c,
+	qaws_scalar const* positions, qaws_repulsive_curves_solve_desc const* desc)
 {
 	qaws_repulsive_curves_solver* s;
 	rs_core* k;
@@ -1248,29 +1248,29 @@ qaws_status qaws_repulsive_curves_solver_create(qaws_repulsive_curves const* c, 
 	return QAWS_STATUS_OK;
 }
 
-qaws_status qaws_repulsive_curves_solver_direction(qaws_repulsive_curves_solver const* s, qaws_scalar const* positions, qaws_scalar* out_direction)
+qaws_status qaws_repulsive_curves_solver_direction(qaws_scalar* out_direction, qaws_repulsive_curves_solver const* s, qaws_scalar const* positions)
 {
 	return s ? qaws_internal_rs_direction(&s->core, positions, out_direction) : QAWS_STATUS_INVALID_ARGUMENT;
 }
 
-qaws_status qaws_repulsive_curves_solver_step(qaws_repulsive_curves_solver* s, qaws_scalar* positions, qaws_repulsive_report* out_report)
+qaws_status qaws_repulsive_curves_solver_step(qaws_repulsive_report* out_report, qaws_scalar* positions, qaws_repulsive_curves_solver* s)
 {
 	return s ? qaws_internal_rs_step(&s->core, positions, out_report) : QAWS_STATUS_INVALID_ARGUMENT;
 }
 
-qaws_status qaws_repulsive_curves_solve(qaws_repulsive_curves const* curves, qaws_repulsive_curves_solve_desc const* desc,
-	qaws_scalar* positions, qaws_repulsive_report* out_report)
+qaws_status qaws_repulsive_curves_solve(qaws_repulsive_report* out_report, qaws_scalar* positions,
+	qaws_repulsive_curves const* curves, qaws_repulsive_curves_solve_desc const* desc)
 {
 	qaws_repulsive_curves_solver* s = NULL;
 	qaws_repulsive_report rep;
 	unsigned int it, max = desc && desc->max_iterations ? desc->max_iterations : 100;
-	qaws_status st = qaws_repulsive_curves_solver_create(curves, desc, positions, &s);
+	qaws_status st = qaws_repulsive_curves_solver_create(&s, curves, positions, desc);
 	if (st != QAWS_STATUS_OK)
 		return st;
 	memset(&rep, 0, sizeof(rep));
 	for (it = 0; it < max && st == QAWS_STATUS_OK; it++)
 	{
-		st = qaws_repulsive_curves_solver_step(s, positions, &rep);
+		st = qaws_repulsive_curves_solver_step(&rep, positions, s);
 		if (rep.reason != QAWS_REPULSIVE_RUNNING)
 			break;
 	}

@@ -158,7 +158,7 @@ static void test_metric(void)
 		rh_curves(dim, N, x, e);
 		memset(&d, 0, sizeof(d));
 		d.dimension = dim; d.vertex_count = N; d.edges = e; d.edge_count = N;
-		qaws_repulsive_curves_create(&d, &c);
+		qaws_repulsive_curves_create(&c, &d);
 		qaws_internal_repulsive_curves_metric(c, x, A);
 		rh_check(rh_make_curves, c, x, A, N, dim == 3 ? "trefoil (200 edges)" : "two circles in 2D (200 edges)");
 		qaws_repulsive_curves_destroy(c);
@@ -175,7 +175,7 @@ static void test_metric(void)
 		A = (double*)malloc(sizeof(double) * nv * nv);
 		memset(&d, 0, sizeof(d));
 		d.vertex_count = nv; d.triangles = tris; d.triangle_count = nf;
-		qaws_repulsive_mesh_create(&d, &m);
+		qaws_repulsive_mesh_create(&m, &d);
 		qaws_internal_repulsive_mesh_metric(m, x, A);
 		rh_check(rh_make_mesh, m, x, A, nv, "lumpy sphere (512 faces)");
 		qaws_repulsive_mesh_destroy(m);
@@ -203,15 +203,15 @@ static void rh_dirs(void* solver_dense, void* solver_h, void* solver_q, int mesh
 	char msg[300];
 	if (mesh)
 	{
-		s0 = qaws_repulsive_mesh_solver_direction((qaws_repulsive_mesh_solver*)solver_dense, x, g0);
-		s1 = qaws_repulsive_mesh_solver_direction((qaws_repulsive_mesh_solver*)solver_h, x, g1);
-		s2 = qaws_repulsive_mesh_solver_direction((qaws_repulsive_mesh_solver*)solver_q, x, g2);
+		s0 = qaws_repulsive_mesh_solver_direction(g0, (qaws_repulsive_mesh_solver*)solver_dense, x);
+		s1 = qaws_repulsive_mesh_solver_direction(g1, (qaws_repulsive_mesh_solver*)solver_h, x);
+		s2 = qaws_repulsive_mesh_solver_direction(g2, (qaws_repulsive_mesh_solver*)solver_q, x);
 	}
 	else
 	{
-		s0 = qaws_repulsive_curves_solver_direction((qaws_repulsive_curves_solver*)solver_dense, x, g0);
-		s1 = qaws_repulsive_curves_solver_direction((qaws_repulsive_curves_solver*)solver_h, x, g1);
-		s2 = qaws_repulsive_curves_solver_direction((qaws_repulsive_curves_solver*)solver_q, x, g2);
+		s0 = qaws_repulsive_curves_solver_direction(g0, (qaws_repulsive_curves_solver*)solver_dense, x);
+		s1 = qaws_repulsive_curves_solver_direction(g1, (qaws_repulsive_curves_solver*)solver_h, x);
+		s2 = qaws_repulsive_curves_solver_direction(g2, (qaws_repulsive_curves_solver*)solver_q, x);
 	}
 	if (s0 == QAWS_STATUS_OK && s1 == QAWS_STATUS_OK && s2 == QAWS_STATUS_OK)
 	{
@@ -236,7 +236,7 @@ static qaws_repulsive_curves* rh_curves_make(unsigned int dim, unsigned int n, u
 	qaws_repulsive_curves* c = NULL;
 	memset(&d, 0, sizeof(d));
 	d.dimension = dim; d.vertex_count = n; d.edges = e; d.edge_count = n;
-	qaws_repulsive_curves_create(&d, &c);
+	qaws_repulsive_curves_create(&c, &d);
 	return c;
 }
 
@@ -255,7 +255,7 @@ static void rh_curve_dirs(unsigned int dim, qaws_repulsive_curves_solve_desc* sd
 	for (t = 0; t < 3; t++)
 	{
 		sd->theta = (qaws_scalar)th[t];
-		qaws_repulsive_curves_solver_create(c, sd, x, &s[t]);
+		qaws_repulsive_curves_solver_create(&s[t], c, x, sd);
 	}
 	if (s[0] && s[1] && s[2])
 		rh_dirs(s[0], s[1], s[2], 0, x, dim * N, name);
@@ -279,11 +279,11 @@ static void rh_mesh_dirs(qaws_repulsive_mesh_solve_desc* sd, char const* name)
 	for (i = 0; i < 3 * nv; i++) x[i] = (qaws_scalar)xd[i];
 	memset(&d, 0, sizeof(d));
 	d.vertex_count = nv; d.triangles = tris; d.triangle_count = nf;
-	qaws_repulsive_mesh_create(&d, &m);
+	qaws_repulsive_mesh_create(&m, &d);
 	for (t = 0; t < 3; t++)
 	{
 		sd->theta = (qaws_scalar)th[t];
-		qaws_repulsive_mesh_solver_create(m, sd, x, &s[t]);
+		qaws_repulsive_mesh_solver_create(&s[t], m, x, sd);
 	}
 	if (s[0] && s[1] && s[2])
 		rh_dirs(s[0], s[1], s[2], 1, x, 3 * nv, name);
@@ -339,7 +339,7 @@ static void test_solves(void)
 			memset(&sd, 0, sizeof(sd));
 			sd.hold_total_length = 1; sd.max_iterations = t ? 20 : 3; sd.theta = (qaws_scalar)(t ? 0.25 : 0);
 			memset(&r[t], 0, sizeof(r[t]));
-			qaws_repulsive_curves_solve(c, &sd, t ? x : x2, &r[t]);
+			qaws_repulsive_curves_solve(&r[t], t ? x : x2, c, &sd);
 			tm[t] = (double)(clock() - c0) / CLOCKS_PER_SEC / (r[t].iterations ? r[t].iterations : 1);
 		}
 		sprintf(msg, "trefoil (600 edges), total length held: hierarchical (theta 0.25) E %.4g -> %.4g in %u steps, length off %.2g, reason %d; "
@@ -365,12 +365,12 @@ static void test_solves(void)
 		for (i = 0; i < 3 * nv; i++) x[i] = (qaws_scalar)xd[i];
 		memset(&d, 0, sizeof(d));
 		d.vertex_count = nv; d.triangles = tris; d.triangle_count = nf;
-		qaws_repulsive_mesh_create(&d, &m);
+		qaws_repulsive_mesh_create(&m, &d);
 		memset(&md, 0, sizeof(md));
 		md.hold_area = 1; md.hold_volume = 1; md.max_iterations = 8; md.theta = (qaws_scalar)0.25;
 		memset(&r, 0, sizeof(r));
 		c0 = clock();
-		qaws_repulsive_mesh_solve(m, &md, x, &r);
+		qaws_repulsive_mesh_solve(&r, x, m, &md);
 		tm = (double)(clock() - c0) / CLOCKS_PER_SEC / (r.iterations ? r.iterations : 1);
 		sprintf(msg, "lumpy sphere (%u faces), area and volume held: hierarchical (theta 0.25) E %.4g -> %.4g in %u steps, residual %.2g, reason %d; %.2f s per step",
 			nf, (double)r.initial_energy, (double)r.energy, r.iterations, (double)r.constraint_residual, (int)r.reason, tm);

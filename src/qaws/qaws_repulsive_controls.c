@@ -130,7 +130,7 @@ done:
 	return st;
 }
 
-qaws_status qaws_repulsive_controls_create(qaws_repulsive_controls_desc const* desc, qaws_repulsive_controls** out)
+qaws_status qaws_repulsive_controls_create(qaws_repulsive_controls** out, qaws_repulsive_controls_desc const* desc)
 {
 	qaws_repulsive_controls* ctl;
 	qaws_repulsive_curves_desc cd;
@@ -147,7 +147,7 @@ qaws_status qaws_repulsive_controls_create(qaws_repulsive_controls_desc const* d
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	ctl->dim = dim; ctl->ncurve = desc->polyline.curve_count;
 	/* the working polyline, sized then made */
-	st = qaws_repulsive_polyline_from_curves(&desc->polyline, NULL, 0, NULL, 0, NULL, NULL, &ctl->nv, &ctl->ne);
+	st = qaws_repulsive_polyline_from_curves(NULL, NULL, NULL, NULL, &ctl->nv, &ctl->ne, 0, 0, &desc->polyline);
 	if (st != QAWS_STATUS_OK && st != QAWS_STATUS_BUFFER_TOO_SMALL)
 		goto fail;
 	pos = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (dim * ctl->nv + 1));
@@ -161,7 +161,7 @@ qaws_status qaws_repulsive_controls_create(qaws_repulsive_controls_desc const* d
 		st = QAWS_STATUS_ALLOCATION_FAILURE;
 		goto fail;
 	}
-	if ((st = qaws_repulsive_polyline_from_curves(&desc->polyline, pos, ctl->nv, ctl->edges, ctl->ne, ctl->src, ctl->t, &ctl->nv, &ctl->ne)) != QAWS_STATUS_OK)
+	if ((st = qaws_repulsive_polyline_from_curves(pos, ctl->edges, ctl->src, ctl->t, &ctl->nv, &ctl->ne, ctl->nv, ctl->ne, &desc->polyline)) != QAWS_STATUS_OK)
 		goto fail;
 	/* the controls: each curve's CONTROL_POINTS field */
 	ctl->first[0] = 0;
@@ -256,7 +256,7 @@ qaws_status qaws_repulsive_controls_create(qaws_repulsive_controls_desc const* d
 	memset(&cd, 0, sizeof(cd));
 	cd.dimension = dim; cd.vertex_count = ctl->nv; cd.edges = ctl->edges; cd.edge_count = ctl->ne;
 	cd.alpha = desc->alpha; cd.beta = desc->beta;
-	if ((st = qaws_repulsive_curves_create(&cd, &ctl->rc)) != QAWS_STATUS_OK)
+	if ((st = qaws_repulsive_curves_create(&ctl->rc, &cd)) != QAWS_STATUS_OK)
 		goto fail;
 	free(pos); free(tr); free(tc); free(tv);
 	*out = ctl;
@@ -267,7 +267,7 @@ fail:
 	return st;
 }
 
-void qaws_repulsive_controls_get_counts(qaws_repulsive_controls const* ctl, unsigned int* out_controls, unsigned int* out_vertices, unsigned int* out_edges)
+void qaws_repulsive_controls_get_counts(unsigned int* out_controls, unsigned int* out_vertices, unsigned int* out_edges, qaws_repulsive_controls const* ctl)
 {
 	if (out_controls) *out_controls = ctl ? ctl->nc : 0;
 	if (out_vertices) *out_vertices = ctl ? ctl->nv : 0;
@@ -279,7 +279,7 @@ qaws_repulsive_curves const* qaws_repulsive_controls_get_curves(qaws_repulsive_c
 	return ctl ? ctl->rc : NULL;
 }
 
-qaws_status qaws_repulsive_controls_read(qaws_repulsive_controls const* ctl, qaws_scalar* out_controls)
+qaws_status qaws_repulsive_controls_read(qaws_scalar* out_controls, qaws_repulsive_controls const* ctl)
 {
 	unsigned int i;
 	if (!ctl || !out_controls)
@@ -312,13 +312,13 @@ static qaws_status rc_positions(qaws_repulsive_controls const* ctl, qaws_scalar 
 	return QAWS_STATUS_OK;
 }
 
-qaws_status qaws_repulsive_controls_positions(qaws_repulsive_controls const* ctl, qaws_scalar const* controls, qaws_scalar* out_positions)
+qaws_status qaws_repulsive_controls_positions(qaws_scalar* out_positions, qaws_repulsive_controls const* ctl, qaws_scalar const* controls)
 {
 	return ctl && controls && out_positions ? rc_positions(ctl, controls, NULL, out_positions, NULL) : QAWS_STATUS_INVALID_ARGUMENT;
 }
 
-qaws_status qaws_repulsive_controls_eval(qaws_repulsive_controls const* ctl, qaws_scalar const* controls, qaws_scalar const* direction,
-	qaws_scalar* out_value, qaws_scalar* out_tangent, qaws_scalar* out_tangent2)
+qaws_status qaws_repulsive_controls_eval(qaws_scalar* out_value, qaws_scalar* out_tangent, qaws_scalar* out_tangent2,
+	qaws_repulsive_controls const* ctl, qaws_scalar const* controls, qaws_scalar const* direction)
 {
 	qaws_scalar *x, *dx;
 	qaws_status st;
@@ -328,13 +328,13 @@ qaws_status qaws_repulsive_controls_eval(qaws_repulsive_controls const* ctl, qaw
 	dx = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (ctl->dim * ctl->nv + 1));
 	st = !x || !dx ? QAWS_STATUS_ALLOCATION_FAILURE : rc_positions(ctl, controls, direction, x, direction ? dx : NULL);
 	if (st == QAWS_STATUS_OK)
-		st = qaws_repulsive_curves_eval(ctl->rc, x, direction ? dx : NULL, out_value, out_tangent, out_tangent2);
+		st = qaws_repulsive_curves_eval(out_value, out_tangent, out_tangent2, ctl->rc, x, direction ? dx : NULL);
 	free(x); free(dx);
 	return st;
 }
 
-qaws_status qaws_repulsive_controls_gradient(qaws_repulsive_controls const* ctl, qaws_scalar const* controls, qaws_scalar seed, qaws_scalar* gradient,
-	qaws_scalar* out_value)
+qaws_status qaws_repulsive_controls_gradient(qaws_scalar* gradient, qaws_scalar* out_value, qaws_repulsive_controls const* ctl, qaws_scalar const* controls,
+	qaws_scalar seed)
 {
 	unsigned int i, m;
 	qaws_scalar *x, *g;
@@ -349,7 +349,7 @@ qaws_status qaws_repulsive_controls_gradient(qaws_repulsive_controls const* ctl,
 	acc = (double*)calloc(ctl->dim * ctl->nc + 1, sizeof(double));
 	st = !x || !g || !gd || !acc ? QAWS_STATUS_ALLOCATION_FAILURE : rc_positions(ctl, controls, NULL, x, NULL);
 	if (st == QAWS_STATUS_OK)
-		st = qaws_repulsive_curves_gradient(ctl->rc, x, 1, g, out_value);
+		st = qaws_repulsive_curves_gradient(g, out_value, ctl->rc, x, 1);
 	if (st == QAWS_STATUS_OK)
 	{
 		for (i = 0; i < m; i++) gd[i] = (double)g[i];
@@ -360,7 +360,7 @@ qaws_status qaws_repulsive_controls_gradient(qaws_repulsive_controls const* ctl,
 	return st;
 }
 
-qaws_status qaws_repulsive_controls_hvp(qaws_repulsive_controls const* ctl, qaws_scalar const* controls, qaws_scalar const* direction, qaws_scalar* out_hv)
+qaws_status qaws_repulsive_controls_hvp(qaws_scalar* out_hv, qaws_repulsive_controls const* ctl, qaws_scalar const* controls, qaws_scalar const* direction)
 {
 	unsigned int i, m;
 	qaws_scalar *x, *dx, *h;
@@ -376,7 +376,7 @@ qaws_status qaws_repulsive_controls_hvp(qaws_repulsive_controls const* ctl, qaws
 	acc = (double*)calloc(ctl->dim * ctl->nc + 1, sizeof(double));
 	st = !x || !dx || !h || !hd || !acc ? QAWS_STATUS_ALLOCATION_FAILURE : rc_positions(ctl, controls, direction, x, dx);
 	if (st == QAWS_STATUS_OK)
-		st = qaws_repulsive_curves_hvp(ctl->rc, x, dx, h);   /* (B^T H B v: the map is linear) */
+		st = qaws_repulsive_curves_hvp(h, ctl->rc, x, dx);   /* (B^T H B v: the map is linear) */
 	if (st == QAWS_STATUS_OK)
 	{
 		for (i = 0; i < m; i++) hd[i] = (double)h[i];
@@ -387,7 +387,7 @@ qaws_status qaws_repulsive_controls_hvp(qaws_repulsive_controls const* ctl, qaws
 	return st;
 }
 
-qaws_status qaws_repulsive_controls_to_curve(qaws_repulsive_controls const* ctl, qaws_scalar const* controls, unsigned int curve, qaws_curve** out_curve)
+qaws_status qaws_repulsive_controls_to_curve(qaws_curve** out_curve, qaws_repulsive_controls const* ctl, qaws_scalar const* controls, unsigned int curve)
 {
 	qaws_field_view view;
 	qaws_diff_views views;
@@ -530,8 +530,8 @@ void qaws_repulsive_controls_solver_destroy(qaws_repulsive_controls_solver* s)
 	free(s);
 }
 
-qaws_status qaws_repulsive_controls_solver_create(qaws_repulsive_controls const* ctl, qaws_repulsive_curves_solve_desc const* desc,
-	qaws_scalar const* controls, qaws_repulsive_controls_solver** out_solver)
+qaws_status qaws_repulsive_controls_solver_create(qaws_repulsive_controls_solver** out_solver, qaws_repulsive_controls const* ctl,
+	qaws_scalar const* controls, qaws_repulsive_curves_solve_desc const* desc)
 {
 	qaws_repulsive_controls_solver* s;
 	qaws_repulsive_curves_solve_desc d, di;
@@ -579,7 +579,7 @@ qaws_status qaws_repulsive_controls_solver_create(qaws_repulsive_controls const*
 	for (i = 0; i < dim * nv; i++) xs[i] = (qaws_scalar)s->x[i];
 	di = d;
 	di.pinned = NULL; di.pinned_count = 0; di.hold_barycenter = -1; di.theta = 0;
-	if ((st = qaws_repulsive_curves_solver_create(ctl->rc, &di, xs, &s->inner)) != QAWS_STATUS_OK)
+	if ((st = qaws_repulsive_curves_solver_create(&s->inner, ctl->rc, xs, &di)) != QAWS_STATUS_OK)
 		goto fail;
 	in = (rs_core const*)s->inner;
 	s->kin = in->k;
@@ -621,29 +621,29 @@ fail:
 	return st;
 }
 
-qaws_status qaws_repulsive_controls_solver_direction(qaws_repulsive_controls_solver const* s, qaws_scalar const* controls, qaws_scalar* out_direction)
+qaws_status qaws_repulsive_controls_solver_direction(qaws_scalar* out_direction, qaws_repulsive_controls_solver const* s, qaws_scalar const* controls)
 {
 	return s ? qaws_internal_rs_direction(&s->core, controls, out_direction) : QAWS_STATUS_INVALID_ARGUMENT;
 }
 
-qaws_status qaws_repulsive_controls_solver_step(qaws_repulsive_controls_solver* s, qaws_scalar* controls, qaws_repulsive_report* out_report)
+qaws_status qaws_repulsive_controls_solver_step(qaws_repulsive_report* out_report, qaws_scalar* controls, qaws_repulsive_controls_solver* s)
 {
 	return s ? qaws_internal_rs_step(&s->core, controls, out_report) : QAWS_STATUS_INVALID_ARGUMENT;
 }
 
-qaws_status qaws_repulsive_controls_solve(qaws_repulsive_controls const* ctl, qaws_repulsive_curves_solve_desc const* desc, qaws_scalar* controls,
-	qaws_repulsive_report* out_report)
+qaws_status qaws_repulsive_controls_solve(qaws_repulsive_report* out_report, qaws_scalar* controls, qaws_repulsive_controls const* ctl,
+	qaws_repulsive_curves_solve_desc const* desc)
 {
 	qaws_repulsive_controls_solver* s = NULL;
 	qaws_repulsive_report rep;
 	unsigned int it, max = desc && desc->max_iterations ? desc->max_iterations : 100;
-	qaws_status st = qaws_repulsive_controls_solver_create(ctl, desc, controls, &s);
+	qaws_status st = qaws_repulsive_controls_solver_create(&s, ctl, controls, desc);
 	if (st != QAWS_STATUS_OK)
 		return st;
 	memset(&rep, 0, sizeof(rep));
 	for (it = 0; it < max && st == QAWS_STATUS_OK; it++)
 	{
-		st = qaws_repulsive_controls_solver_step(s, controls, &rep);
+		st = qaws_repulsive_controls_solver_step(&rep, controls, s);
 		if (rep.reason != QAWS_REPULSIVE_RUNNING)
 			break;
 	}

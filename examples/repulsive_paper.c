@@ -212,13 +212,13 @@ static void rp_solve(rp_curve const* c, unsigned int dim, double alpha, double b
 		sd = *sd0;
 	else
 		sd.hold_edge_lengths = 1;   /* (the barycenter too: by default, nothing pinned) */
-	if (qaws_repulsive_curves_create(&cd, &rc) != QAWS_STATUS_OK || qaws_repulsive_curves_solver_create(rc, &sd, x, &s) != QAWS_STATUS_OK)
+	if (qaws_repulsive_curves_create(&rc, &cd) != QAWS_STATUS_OK || qaws_repulsive_curves_solver_create(&s, rc, x, &sd) != QAWS_STATUS_OK)
 		printf("  the scene was refused\n");
 	for (k = 0; k < nsnap; k++)
 	{
 		while (s && it < steps[k] && it < rp_cap && r.reason == QAWS_REPULSIVE_RUNNING)
 		{
-			qaws_repulsive_curves_solver_step(s, x, &r);
+			qaws_repulsive_curves_solver_step(&r, x, s);
 			it = r.iterations;
 			if (it % 50 == 0 && r.reason == QAWS_REPULSIVE_RUNNING)
 				printf("    %u steps: E %.6g, stationarity %.3g\n", it, (double)r.energy, (double)r.stationarity);
@@ -626,13 +626,13 @@ static void rp_solve_mesh(rp_mesh const* mesh, double p, qaws_repulsive_mesh_sol
 	ex.parallel_for = rp_parallel_for; ex.user = &threads;
 	memset(&md, 0, sizeof(md));
 	md.vertex_count = mesh->nv; md.triangles = mesh->t; md.triangle_count = mesh->nf; md.p = (qaws_scalar)p; md.executor = &ex;
-	if (qaws_repulsive_mesh_create(&md, &rm) != QAWS_STATUS_OK || qaws_repulsive_mesh_solver_create(rm, &sd, x, &s) != QAWS_STATUS_OK)
+	if (qaws_repulsive_mesh_create(&rm, &md) != QAWS_STATUS_OK || qaws_repulsive_mesh_solver_create(&s, rm, x, &sd) != QAWS_STATUS_OK)
 		printf("  the scene was refused\n");
 	for (k = 0; k < nsnap; k++)
 	{
 		while (s && it < steps[k] && it < rp_cap && r.reason == QAWS_REPULSIVE_RUNNING)
 		{
-			qaws_repulsive_mesh_solver_step(s, x, &r);
+			qaws_repulsive_mesh_solver_step(&r, x, s);
 			it = r.iterations;
 			if (it % 25 == 0 && r.reason == QAWS_REPULSIVE_RUNNING)
 				printf("    %u steps: E %.6g, stationarity %.3g\n", it, (double)r.energy, (double)r.stationarity);

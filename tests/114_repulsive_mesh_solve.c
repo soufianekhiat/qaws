@@ -34,7 +34,7 @@ static qaws_repulsive_mesh* rm_make(unsigned int nv, unsigned int const* tris, u
 	qaws_repulsive_mesh* m = NULL;
 	memset(&d, 0, sizeof(d));
 	d.vertex_count = nv; d.triangles = tris; d.triangle_count = nf; d.p = (qaws_scalar)p;
-	qaws_repulsive_mesh_create(&d, &m);
+	qaws_repulsive_mesh_create(&m, &d);
 	return m;
 }
 
@@ -178,7 +178,7 @@ static void test_sphere(void)
 	memset(&sd, 0, sizeof(sd));
 	sd.hold_area = 1; sd.hold_volume = 1; sd.max_iterations = 25;
 	memset(&r, 0, sizeof(r));
-	st = qaws_repulsive_mesh_solve(m, &sd, x, &r);
+	st = qaws_repulsive_mesh_solve(&r, x, m, &sd);
 	for (f = 0; f < nf; f++)
 	{
 		double a[3], b[3], c[3], n[3];
@@ -239,7 +239,7 @@ static void test_sheets(void)
 	memset(&sd, 0, sizeof(sd));
 	sd.pinned = pins; sd.pinned_count = np; sd.hold_area = 1; sd.collision_checked = 1; sd.max_iterations = 15;
 	memset(&r, 0, sizeof(r));
-	st = qaws_repulsive_mesh_solve(m, &sd, x, &r);
+	st = qaws_repulsive_mesh_solve(&r, x, m, &sd);
 	for (i = 3 * n * n; i < 3 * 2 * n * n; i++) still = fmax(still, fabs((double)x[i] - x0[i]));
 	sprintf(msg, "a sheet under a pinned one, area held, collision-checked: reason %d after %u steps, E %.4f from %.4f, the pinned sheet moved %.2g, rejections e%u c%u",
 		(int)r.reason, r.iterations, (double)r.energy, (double)r.initial_energy, still, r.rejected_energy, r.rejected_collision);
@@ -287,12 +287,12 @@ static void test_refusals(void)
 	memset(&sd, 0, sizeof(sd));
 	memset(&r, 0, sizeof(r));
 	sd.hold_volume = 1;
-	s1 = qaws_repulsive_mesh_solver_create(m, &sd, y, &s);           /* open: no volume */
+	s1 = qaws_repulsive_mesh_solver_create(&s, m, y, &sd);           /* open: no volume */
 	sd.hold_volume = 0; sd.collision_checked = 1;
-	s2 = qaws_repulsive_mesh_solver_create(m, &sd, x, &s);           /* touching */
+	s2 = qaws_repulsive_mesh_solver_create(&s, m, x, &sd);           /* touching */
 	sd.collision_checked = 0; sd.hold_barycenter = -1;
-	s3 = qaws_repulsive_mesh_solver_create(m, &sd, y, &s);
-	if (s3 == QAWS_STATUS_OK) qaws_repulsive_mesh_solver_step(s, y, &r);
+	s3 = qaws_repulsive_mesh_solver_create(&s, m, y, &sd);
+	if (s3 == QAWS_STATUS_OK) qaws_repulsive_mesh_solver_step(&r, y, s);
 	qaws_repulsive_mesh_solver_destroy(s);
 	sprintf(msg, "refusals: volume on an open mesh %d, touching input (collision-checked) %d; free translations: reason %d", (int)s1, (int)s2, (int)r.reason);
 	TEST_ASSERT(s1 == QAWS_STATUS_INVALID_ARGUMENT && s2 == QAWS_STATUS_INVALID_ARGUMENT && s3 == QAWS_STATUS_OK && r.reason == QAWS_REPULSIVE_NUMERICAL_FAILURE, msg);

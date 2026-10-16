@@ -99,9 +99,9 @@ static void ra_split(ra_out* o, double t0, double const* p0, double t1, double c
 		ra_emit(o, t0, p0);
 }
 
-qaws_status qaws_repulsive_polyline_from_curves(qaws_repulsive_polyline_desc const* desc,
-	qaws_scalar* out_positions, unsigned int vertex_capacity, unsigned int* out_edges, unsigned int edge_capacity,
-	unsigned int* out_source_curve, qaws_scalar* out_source_t, unsigned int* out_vertex_count, unsigned int* out_edge_count)
+qaws_status qaws_repulsive_polyline_from_curves(qaws_scalar* out_positions,
+	unsigned int* out_edges, unsigned int* out_source_curve, qaws_scalar* out_source_t, unsigned int* out_vertex_count,
+	unsigned int* out_edge_count, unsigned int vertex_capacity, unsigned int edge_capacity, qaws_repulsive_polyline_desc const* desc)
 {
 	unsigned int i, nv = 0, ne = 0, k;
 	if (!desc || !desc->curves || !desc->curve_count || (desc->dimension != 2 && desc->dimension != 3) || !(desc->edge_length > 0) ||
@@ -143,9 +143,9 @@ qaws_status qaws_repulsive_polyline_from_curves(qaws_repulsive_polyline_desc con
 	return nv > vertex_capacity || ne > edge_capacity ? QAWS_STATUS_BUFFER_TOO_SMALL : QAWS_STATUS_OK;
 }
 
-qaws_status qaws_repulsive_polyline_to_curve(unsigned int dimension, qaws_scalar const* positions, unsigned int vertex_count,
-	unsigned int const* source_curve, qaws_scalar const* source_t, unsigned int curve, qaws_curve const* source,
-	qaws_curve** out_curve)
+qaws_status qaws_repulsive_polyline_to_curve(qaws_curve** out_curve, qaws_scalar const* positions, unsigned int const* source_curve,
+	qaws_scalar const* source_t, unsigned int vertex_count, unsigned int dimension, unsigned int curve,
+	qaws_curve const* source)
 {
 	unsigned int i, m = 0, q, first = 0;
 	int closed;

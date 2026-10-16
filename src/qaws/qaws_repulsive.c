@@ -227,7 +227,7 @@ static int rp_mesh_term(void const* user, rp_jet (*x)[3], unsigned int n, rp_jet
 /*  Curves                                                                  */
 /* ------------------------------------------------------------------------ */
 
-qaws_status qaws_repulsive_curves_create(qaws_repulsive_curves_desc const* desc, qaws_repulsive_curves** out_curves)
+qaws_status qaws_repulsive_curves_create(qaws_repulsive_curves** out_curves, qaws_repulsive_curves_desc const* desc)
 {
 	qaws_repulsive_curves* c;
 	double alpha, beta;
@@ -268,8 +268,8 @@ void qaws_repulsive_curves_destroy(qaws_repulsive_curves* curves)
 	free(curves);
 }
 
-qaws_status qaws_repulsive_curves_eval(qaws_repulsive_curves const* curves, qaws_scalar const* positions,
-	qaws_scalar const* direction, qaws_scalar* out_value, qaws_scalar* out_tangent, qaws_scalar* out_tangent2)
+qaws_status qaws_repulsive_curves_eval(qaws_scalar* out_value, qaws_scalar* out_tangent,
+	qaws_scalar* out_tangent2, qaws_repulsive_curves const* curves, qaws_scalar const* positions, qaws_scalar const* direction)
 {
 	double v, t, t2;
 	qaws_status st;
@@ -285,8 +285,8 @@ qaws_status qaws_repulsive_curves_eval(qaws_repulsive_curves const* curves, qaws
 	return QAWS_STATUS_OK;
 }
 
-qaws_status qaws_repulsive_curves_gradient(qaws_repulsive_curves const* curves, qaws_scalar const* positions, qaws_scalar seed,
-	qaws_scalar* gradient, qaws_scalar* out_value)
+qaws_status qaws_repulsive_curves_gradient(qaws_scalar* gradient, qaws_scalar* out_value, qaws_repulsive_curves const* curves,
+	qaws_scalar const* positions, qaws_scalar seed)
 {
 	double v;
 	qaws_status st;
@@ -298,8 +298,8 @@ qaws_status qaws_repulsive_curves_gradient(qaws_repulsive_curves const* curves, 
 	return st;
 }
 
-qaws_status qaws_repulsive_curves_hvp(qaws_repulsive_curves const* curves, qaws_scalar const* positions, qaws_scalar const* direction,
-	qaws_scalar* out_hv)
+qaws_status qaws_repulsive_curves_hvp(qaws_scalar* out_hv, qaws_repulsive_curves const* curves, qaws_scalar const* positions,
+	qaws_scalar const* direction)
 {
 	if (!curves)
 		return QAWS_STATUS_INVALID_ARGUMENT;
@@ -311,7 +311,7 @@ qaws_status qaws_repulsive_curves_hvp(qaws_repulsive_curves const* curves, qaws_
 /*  Meshes                                                                  */
 /* ------------------------------------------------------------------------ */
 
-qaws_status qaws_repulsive_mesh_create(qaws_repulsive_mesh_desc const* desc, qaws_repulsive_mesh** out_mesh)
+qaws_status qaws_repulsive_mesh_create(qaws_repulsive_mesh** out_mesh, qaws_repulsive_mesh_desc const* desc)
 {
 	qaws_repulsive_mesh* m;
 	double p;
@@ -351,8 +351,8 @@ void qaws_repulsive_mesh_destroy(qaws_repulsive_mesh* mesh)
 	free(mesh);
 }
 
-qaws_status qaws_repulsive_mesh_eval(qaws_repulsive_mesh const* mesh, qaws_scalar const* positions,
-	qaws_scalar const* direction, qaws_scalar* out_value, qaws_scalar* out_tangent, qaws_scalar* out_tangent2)
+qaws_status qaws_repulsive_mesh_eval(qaws_scalar* out_value, qaws_scalar* out_tangent,
+	qaws_scalar* out_tangent2, qaws_repulsive_mesh const* mesh, qaws_scalar const* positions, qaws_scalar const* direction)
 {
 	double v, t, t2;
 	qaws_status st;
@@ -367,8 +367,8 @@ qaws_status qaws_repulsive_mesh_eval(qaws_repulsive_mesh const* mesh, qaws_scala
 	return QAWS_STATUS_OK;
 }
 
-qaws_status qaws_repulsive_mesh_gradient(qaws_repulsive_mesh const* mesh, qaws_scalar const* positions, qaws_scalar seed,
-	qaws_scalar* gradient, qaws_scalar* out_value)
+qaws_status qaws_repulsive_mesh_gradient(qaws_scalar* gradient, qaws_scalar* out_value, qaws_repulsive_mesh const* mesh,
+	qaws_scalar const* positions, qaws_scalar seed)
 {
 	double v;
 	qaws_status st;
@@ -379,8 +379,8 @@ qaws_status qaws_repulsive_mesh_gradient(qaws_repulsive_mesh const* mesh, qaws_s
 	return st;
 }
 
-qaws_status qaws_repulsive_mesh_hvp(qaws_repulsive_mesh const* mesh, qaws_scalar const* positions, qaws_scalar const* direction,
-	qaws_scalar* out_hv)
+qaws_status qaws_repulsive_mesh_hvp(qaws_scalar* out_hv, qaws_repulsive_mesh const* mesh, qaws_scalar const* positions,
+	qaws_scalar const* direction)
 {
 	if (!mesh)
 		return QAWS_STATUS_INVALID_ARGUMENT;
