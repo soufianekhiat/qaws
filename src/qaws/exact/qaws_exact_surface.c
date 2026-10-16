@@ -90,8 +90,8 @@ static qaws_status extract_patch(qaws_exact_hfrac const* net, unsigned int ncv, 
 	return st;
 }
 
-qaws_status qaws_exact_surface_prepare(qaws_exact_desc const* desc, qaws_surface const* surface, qaws_exact_surface** out_surface,
-	qaws_exact_report* out_report)
+qaws_status qaws_exact_surface_prepare(qaws_exact_surface** out_surface, qaws_exact_report* out_report, qaws_surface const* surface,
+	qaws_exact_desc const* desc)
 {
 	qaws_exact_desc d;
 	qaws_surface_kind kind;
@@ -461,8 +461,8 @@ static int64_t lattice_param(double x, int shift)
 	return (int64_t)r;
 }
 
-qaws_status qaws_exact_surface_evaluate(qaws_exact_surface const* surface, double u, double v, unsigned int order, double* out,
-	double* out_normal)
+qaws_status qaws_exact_surface_evaluate(double* out, double* out_normal, qaws_exact_surface const* surface, double u, double v,
+	unsigned int order)
 {
 	static unsigned int const da[6] = { 0, 1, 0, 2, 1, 0 }, db[6] = { 0, 0, 1, 0, 1, 2 };
 	unsigned int count, k, c;
@@ -492,14 +492,14 @@ qaws_status qaws_exact_surface_evaluate(qaws_exact_surface const* surface, doubl
 	return QAWS_STATUS_OK;
 }
 
-void qaws_exact_surface_patch_count(qaws_exact_surface const* surface, unsigned int* out_u_count, unsigned int* out_v_count)
+void qaws_exact_surface_patch_count(unsigned int* out_u_count, unsigned int* out_v_count, qaws_exact_surface const* surface)
 {
 	if (out_u_count) *out_u_count = surface ? surface->nu : 0;
 	if (out_v_count) *out_v_count = surface ? surface->nv : 0;
 }
 
-qaws_status qaws_exact_surface_patch_bezier(qaws_exact_surface const* surface, unsigned int iu, unsigned int iv, unsigned int* out_p,
-	unsigned int* out_q, double out_rect[4], double* out_points, double* out_weights)
+qaws_status qaws_exact_surface_patch_bezier(unsigned int* out_p, unsigned int* out_q, double out_rect[4], double* out_points,
+	double* out_weights, qaws_exact_surface const* surface, unsigned int iu, unsigned int iv)
 {
 	qaws_exact_int const* h;
 	qaws_exact_int wmax;

@@ -65,7 +65,7 @@ static void demo_winding(void)
 		d.weights = ws;
 		d.weight_count = 3;
 		qaws_curve_create_rational_bezier(&pieces[k], &d);
-		qaws_exact_curve_prepare(&desc, pieces[k], &exact[k], NULL);
+		qaws_exact_curve_prepare(&exact[k], NULL, pieces[k], &desc);
 	}
 	/* zoom window centred on the boundary at angle `ang` (the conic is
 	   within a fraction of a lattice unit of the circle there) */
@@ -80,7 +80,7 @@ static void demo_winding(void)
 			p[0] = bx - half + 2 * half * (i + 0.5) / WD_N;
 			p[1] = by - half + 2 * half * (j + 0.5) / WD_N;
 			sampled[kk] = (signed char)(wd_sampled(pieces, 4, 64, p) != 0);
-			st = qaws_exact_winding_2d((qaws_exact_curve const* const*)exact, 4, p, &w);
+			st = qaws_exact_winding_2d(&w, (qaws_exact_curve const* const*)exact, p, 4);
 			certified[kk] = (signed char)(st == QAWS_STATUS_OK ? (w != 0) : -1);
 			n_failed += st != QAWS_STATUS_OK;
 			wrong[kk] = (signed char)(certified[kk] >= 0 && sampled[kk] != certified[kk]);
@@ -98,7 +98,7 @@ static void demo_winding(void)
 				double e[2];
 				if (k > 0 && i == 0)
 					continue;
-				qaws_exact_curve_evaluate(exact[k], i / 100.0, 0, e, NULL);
+				qaws_exact_curve_evaluate(e, NULL, exact[k], i / 100.0, 0);
 				xy[2 * q] = vx(&vf, e[0] - cx);
 				xy[2 * q + 1] = vy(&vf, e[1] - cy);
 				q++;

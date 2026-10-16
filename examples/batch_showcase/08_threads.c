@@ -256,7 +256,7 @@ static unsigned long long th_op(th_scene* sc, unsigned int op, qaws_batch_execut
 		d.surface_count = 1 + TR_LEVELS;
 		d.families = sc->fam;
 		d.executor = x;
-		qaws_exact_surface_batch_hits(&d, ept, 1 << 16, &m, ebr, 1024, &n, NULL);
+		qaws_exact_surface_batch_hits(ept, &m, ebr, &n, NULL, 1 << 16, 1024, &d);
 		return th_hash(th_hash(h, ebr, n * sizeof(ebr[0])), ept, m * sizeof(ept[0]));
 	}
 	case 7:
@@ -266,7 +266,7 @@ static unsigned long long th_op(th_scene* sc, unsigned int op, qaws_batch_execut
 		d.surfaces = (qaws_exact_surface const* const*)sc->es;
 		d.surface_count = 1;
 		d.executor = x;
-		qaws_exact_surface_batch_closest(&d, sc->epts, TH_EXACT, ecp, NULL);
+		qaws_exact_surface_batch_closest(ecp, NULL, sc->epts, TH_EXACT, &d);
 		return th_hash(h, ecp, sizeof(ecp));
 	}
 	default:
@@ -276,7 +276,7 @@ static unsigned long long th_op(th_scene* sc, unsigned int op, qaws_batch_execut
 		d.surfaces = (qaws_exact_surface const* const*)sc->es;
 		d.surface_count = 1;
 		d.executor = x;
-		qaws_exact_surface_batch_raycast(&d, sc->ep0, sc->ep1, TH_EXACT, 0, erh, NULL);
+		qaws_exact_surface_batch_raycast(erh, NULL, sc->ep0, sc->ep1, TH_EXACT, &d, 0);
 		for (i = 0; i < TH_EXACT; i++)
 		{
 			h = th_hash(h, &erh[i].surface, sizeof(unsigned int));
@@ -328,7 +328,7 @@ static void th_build(th_scene* sc)
 	qaws_exact_desc_default(&xd);
 	xd.space_exp2 = -20;
 	for (i = 0; i <= TR_LEVELS; i++)
-		qaws_exact_surface_prepare(&xd, sc->sf[i], &sc->es[i], NULL);
+		qaws_exact_surface_prepare(&sc->es[i], NULL, sc->sf[i], &xd);
 	sc->pts2 = (qaws_scalar*)malloc(2 * TH_POINTS * sizeof(qaws_scalar));
 	sc->pts3 = (qaws_scalar*)malloc(3 * TH_POINTS * sizeof(qaws_scalar));
 	sc->org = (qaws_scalar*)malloc(3 * TH_RAYS * sizeof(qaws_scalar));

@@ -74,9 +74,9 @@ static void test_reference(void)
 		unsigned int count = 0, k;
 		qaws_status st;
 		int ok;
-		qaws_exact_curve_prepare(&desc, ca, &ea, NULL);
-		qaws_exact_curve_prepare(&desc, cb, &eb, NULL);
-		st = qaws_exact_curve_curve_hits(ea, eb, hits, 32, &count);
+		qaws_exact_curve_prepare(&ea, NULL, ca, &desc);
+		qaws_exact_curve_prepare(&eb, NULL, cb, &desc);
+		st = qaws_exact_curve_curve_hits(hits, &count, ea, eb, 32);
 		ok = st == QAWS_STATUS_OK && count == (unsigned int)r->n;
 		for (k = 0; ok && k < count; k++)
 		{
@@ -136,9 +136,9 @@ static void test_splines(void)
 	qaws_curve_create_bspline(&ca, &d);
 	d.control_points = cb_pts;
 	qaws_curve_create_bspline(&cb, &d);
-	qaws_exact_curve_prepare(NULL, ca, &ea, NULL);
-	qaws_exact_curve_prepare(NULL, cb, &eb, NULL);
-	TEST_ASSERT(qaws_exact_curve_curve_hits(ea, eb, hits, 8, &count) == QAWS_STATUS_OK && count == 2 && hits[0].kind == QAWS_EXACT_HIT_CROSSING &&
+	qaws_exact_curve_prepare(&ea, NULL, ca, NULL);
+	qaws_exact_curve_prepare(&eb, NULL, cb, NULL);
+	TEST_ASSERT(qaws_exact_curve_curve_hits(hits, &count, ea, eb, 8) == QAWS_STATUS_OK && count == 2 && hits[0].kind == QAWS_EXACT_HIT_CROSSING &&
 		hits[0].a_lo <= 0.6 && 0.6 <= hits[0].a_hi && hits[0].b_lo <= 0.6 && 0.6 <= hits[0].b_hi && hits[1].kind == QAWS_EXACT_HIT_POINT &&
 		hits[1].a_lo == 1 && hits[1].b_lo == 1, "B-spline / B-spline: the crossing at 0.6, and the knot point (1, 1) reported once");
 	/* segments: exact rational intersection, and the shared-end rule */
@@ -150,15 +150,15 @@ static void test_splines(void)
 	qaws_curve_create_bezier(&sa, &bd);
 	bd.control_points = lb;
 	qaws_curve_create_bezier(&sb, &bd);
-	qaws_exact_curve_prepare(NULL, sa, &esa, NULL);
-	qaws_exact_curve_prepare(NULL, sb, &esb, NULL);
-	TEST_ASSERT(qaws_exact_curve_curve_hits(esa, esb, hits, 8, &count) == QAWS_STATUS_OK && count == 1 && hits[0].kind == QAWS_EXACT_HIT_POINT &&
+	qaws_exact_curve_prepare(&esa, NULL, sa, NULL);
+	qaws_exact_curve_prepare(&esb, NULL, sb, NULL);
+	TEST_ASSERT(qaws_exact_curve_curve_hits(hits, &count, esa, esb, 8) == QAWS_STATUS_OK && count == 1 && hits[0].kind == QAWS_EXACT_HIT_POINT &&
 		hits[0].a_lo == 0.5 && hits[0].b_lo == 1, "segment / segment: the exact point (2, 2) at s = 1/2, r = 1");
 	/* a curve against itself: a common component, one overlap over the whole range */
 	{
 		char msg[300];
 		double t0 = qaws_curve_get_parameter_range(ca).min_value, t1 = qaws_curve_get_parameter_range(ca).max_value;
-		qaws_status st = qaws_exact_curve_curve_hits(ea, ea, hits, 8, &count);
+		qaws_status st = qaws_exact_curve_curve_hits(hits, &count, ea, ea, 8);
 		sprintf(msg, "a curve against itself: one overlap [%g, %g] x [%g, %g] (opposite %d), %u pairs, status %d", count ? hits[0].a_lo : -1,
 			count ? hits[0].a_hi : -1, count ? hits[0].b_lo : -1, count ? hits[0].b_hi : -1, count ? hits[0].opposite : -1, count, (int)st);
 		TEST_ASSERT(st == QAWS_STATUS_OK && count == 1 && hits[0].kind == QAWS_EXACT_HIT_OVERLAP && !hits[0].opposite && hits[0].a_lo == t0 &&

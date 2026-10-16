@@ -427,7 +427,7 @@ static qaws_status cx_add_curve(cx_ctx* x, qaws_curve const* c, unsigned int ope
 	s->scale = scale;
 	s->t0 = cx_tmin(c);
 	s->t1 = cx_tmax(c);
-	TRY(qaws_exact_curve_prepare(&x->ed, c, &s->e, NULL));
+	TRY(qaws_exact_curve_prepare(&s->e, NULL, c, &x->ed));
 	if (s->e->span_count == 1 && s->e->spans[0].degree == 1)
 	{
 		xint const* h = s->e->spans[0].h;
@@ -747,7 +747,7 @@ static qaws_status cx_hits(cx_ctx* x)
 		qaws_exact_batch_hit* g = (qaws_exact_batch_hit*)realloc(x->hits, sizeof(qaws_exact_batch_hit) * cap);
 		if (!g) { free(cs); return QAWS_STATUS_ALLOCATION_FAILURE; }
 		x->hits = g;
-		st = qaws_exact_curve_batch_hits(&bd, x->hits, cap, &n, &bs);
+		st = qaws_exact_curve_batch_hits(x->hits, &n, &bs, cap, &bd);
 		if (st != QAWS_STATUS_BUFFER_TOO_SMALL)
 			break;
 		cap = n + 16;
@@ -2116,7 +2116,7 @@ static qaws_status cx_locate(cx_ctx* x, cx_graph* g, unsigned int comp, unsigned
 				for (;;)
 				{
 					/* a coarse enclosure is enough to find the edge and the distance */
-					ls = qaws_exact_curve_line_hits(sr->e, p, p1, 1e-9 * (sr->t1 - sr->t0), hk, capk, &nh);
+					ls = qaws_exact_curve_line_hits(hk, &nh, sr->e, p, p1, 1e-9 * (sr->t1 - sr->t0), capk);
 					if (ls != QAWS_STATUS_BUFFER_TOO_SMALL)
 						break;
 					capk *= 4;
@@ -2147,7 +2147,7 @@ static qaws_status cx_locate(cx_ctx* x, cx_graph* g, unsigned int comp, unsigned
 						pd[2] = sr->lb[0] - sr->la[0];
 						pd[3] = sr->lb[1] - sr->la[1];
 					}
-					else if (qaws_exact_curve_evaluate(sr->e, tm, 1, pd, NULL) != QAWS_STATUS_OK) { bad = 1; break; }
+					else if (qaws_exact_curve_evaluate(pd, NULL, sr->e, tm, 1) != QAWS_STATUS_OK) { bad = 1; break; }
 					dist = ((pd[0] - p[0]) * dir[0] + (pd[1] - p[1]) * dir[1]) / hypot(dir[0], dir[1]);
 					if (dist < -margin)
 						continue;
@@ -2335,7 +2335,7 @@ static qaws_status cx_build(cx_ctx* x, qaws_clip_result* result)
 		{
 			double pd[2] = { 0, 0 };
 			if (g.v[i].sa != CX_NONE)
-				qaws_exact_curve_evaluate(x->src[g.v[i].sa].e, g.v[i].ta, 0, pd, NULL);
+				qaws_exact_curve_evaluate(pd, NULL, x->src[g.v[i].sa].e, g.v[i].ta, 0);
 			g.v[i].p[0] = pd[0];
 			g.v[i].p[1] = pd[1];
 		}

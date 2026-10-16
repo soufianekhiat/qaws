@@ -121,13 +121,13 @@ static void test_reference(void)
 		unsigned int pu = 0, pv = 0;
 		surf[i] = es_surface(r);
 		ex[i] = NULL;
-		if (qaws_exact_surface_prepare(&desc, surf[i], &ex[i], &rep) != QAWS_STATUS_OK)
+		if (qaws_exact_surface_prepare(&ex[i], &rep, surf[i], &desc) != QAWS_STATUS_OK)
 		{
 			ok_count = 0;
 			continue;
 		}
 		if (rep.storage_bits > max_bits) max_bits = rep.storage_bits;
-		qaws_exact_surface_patch_count(ex[i], &pu, &pv);
+		qaws_exact_surface_patch_count(&pu, &pv, ex[i]);
 		ok_count &= pu == es_spans(r->ku, r->p, r->nu) && pv == es_spans(r->kv, r->q, r->nv);
 	}
 	for (i = 0; i < nrow; i++)
@@ -163,7 +163,7 @@ static void test_reference(void)
 			                     QAWS_SURFACE_EVAL_DUV | QAWS_SURFACE_EVAL_DVV;
 			qaws_vec3 fv[6];
 			int j;
-			qaws_exact_surface_evaluate(e, u, v, 2, out, nrm);
+			qaws_exact_surface_evaluate(out, nrm, e, u, v, 2);
 			qaws_surface_evaluate(&f, surf[r->c], (qaws_scalar)u, (qaws_scalar)v, flags);
 			fv[0] = f.position; fv[1] = f.du; fv[2] = f.dv; fv[3] = f.duu; fv[4] = f.duv; fv[5] = f.dvv;
 			for (j = 0; j < 6; j++)

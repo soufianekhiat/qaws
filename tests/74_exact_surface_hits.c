@@ -83,8 +83,8 @@ static void test_reference(void)
 			p0[k] = ldexp(eh_rational(r->p0[k]), -10);
 			p1[k] = ldexp(eh_rational(r->p1[k]), -10);
 		}
-		qaws_exact_surface_prepare(&desc, s, &e, NULL);
-		st = qaws_exact_surface_line_hits(e, p0, p1, hits, 16, &count);
+		qaws_exact_surface_prepare(&e, NULL, s, &desc);
+		st = qaws_exact_surface_line_hits(hits, &count, e, p0, p1, 16);
 		ok = st == QAWS_STATUS_OK && count == (unsigned int)r->n;
 		for (k = 0; ok && k < count; k++)
 		{
@@ -137,9 +137,9 @@ static void test_overlap(void)
 	d.u_point_count = 2;
 	d.v_point_count = 2;
 	qaws_surface_create_bezier(&s, &d);
-	qaws_exact_surface_prepare(NULL, s, &e, NULL);
-	TEST_ASSERT(qaws_exact_surface_line_hits(e, a, b, hits, 4, &count) == QAWS_STATUS_CERTIFICATION_FAILED, "a line lying on the surface is refused");
-	TEST_ASSERT(qaws_exact_surface_line_hits(e, c, dd, hits, 4, &count) == QAWS_STATUS_OK && count == 1 && hits[0].kind == QAWS_EXACT_HIT_POINT &&
+	qaws_exact_surface_prepare(&e, NULL, s, NULL);
+	TEST_ASSERT(qaws_exact_surface_line_hits(hits, &count, e, a, b, 4) == QAWS_STATUS_CERTIFICATION_FAILED, "a line lying on the surface is refused");
+	TEST_ASSERT(qaws_exact_surface_line_hits(hits, &count, e, c, dd, 4) == QAWS_STATUS_OK && count == 1 && hits[0].kind == QAWS_EXACT_HIT_POINT &&
 		hits[0].u_lo == 0.5 && hits[0].v_lo == 0.5 && hits[0].t_lo == 0.5, "a vertical ray through the center: the exact hit (1/2, 1/2), t = 1/2");
 	qaws_exact_surface_destroy(e);
 	qaws_surface_destroy(s);

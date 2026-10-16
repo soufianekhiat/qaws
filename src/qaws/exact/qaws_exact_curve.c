@@ -523,7 +523,7 @@ static qaws_status prepare_composite(qaws_exact_desc const* d, qaws_curve const*
 	for (i = 0; i < impl->segment_count && st == QAWS_STATUS_OK; i++)
 	{
 		qaws_exact_report r;
-		st = qaws_exact_curve_prepare(d, impl->segments[i], &seg[i], &r);
+		st = qaws_exact_curve_prepare(&seg[i], &r, impl->segments[i], d);
 		if (st == QAWS_STATUS_OK && seg[i]->dimension != (int)curve->dimension)
 			st = QAWS_STATUS_INVALID_ARGUMENT;
 		if (st == QAWS_STATUS_OK)
@@ -796,8 +796,8 @@ static qaws_status prepare_net(qaws_exact_desc const* dp, qaws_curve const* curv
 	return QAWS_STATUS_OK;
 }
 
-qaws_status qaws_exact_curve_prepare(qaws_exact_desc const* desc, qaws_curve const* curve, qaws_exact_curve** out_curve,
-	qaws_exact_report* out_report)
+qaws_status qaws_exact_curve_prepare(qaws_exact_curve** out_curve, qaws_exact_report* out_report, qaws_curve const* curve,
+	qaws_exact_desc const* desc)
 {
 	qaws_exact_desc d;
 	qaws_curve_kind kind;
@@ -996,8 +996,8 @@ qaws_status qaws_exact_curve_eval_rational(qaws_exact_curve const* curve, int64_
 	return QAWS_STATUS_OK;
 }
 
-qaws_status qaws_exact_curve_evaluate(qaws_exact_curve const* curve, double t, unsigned int order, double* out,
-	qaws_exact_report* out_report)
+qaws_status qaws_exact_curve_evaluate(double* out, qaws_exact_report* out_report, qaws_exact_curve const* curve, double t,
+	unsigned int order)
 {
 	double scale, r;
 	int64_t T;
@@ -1031,8 +1031,8 @@ unsigned int qaws_exact_curve_span_count(qaws_exact_curve const* curve)
 	return curve ? curve->span_count : 0;
 }
 
-qaws_status qaws_exact_curve_span_bezier(qaws_exact_curve const* curve, unsigned int s, unsigned int* out_degree, double* out_t0,
-	double* out_t1, double* out_points, double* out_weights)
+qaws_status qaws_exact_curve_span_bezier(unsigned int* out_degree, double* out_t0, double* out_t1, double* out_points,
+	double* out_weights, qaws_exact_curve const* curve, unsigned int s)
 {
 	qaws_exact_span const* sp;
 	unsigned int D, i, c, dim;

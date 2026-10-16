@@ -48,13 +48,13 @@ static void demo_exact_terrain(void)
 	qaws_exact_desc_default(&xd);
 	xd.space_exp2 = -20;
 	for (i = 0; i <= TR_LEVELS; i++)
-		qaws_exact_surface_prepare(&xd, sf[i], &es[i], NULL);
+		qaws_exact_surface_prepare(&es[i], NULL, sf[i], &xd);
 	memset(&ed, 0, sizeof(ed));
 	ed.surfaces = (qaws_exact_surface const* const*)es;
 	ed.surface_count = 1 + TR_LEVELS;
 	ed.families = fam;
 	t0 = hf_now();
-	st = qaws_exact_surface_batch_hits(&ed, ept, 1 << 16, &enp, ebr, 1024, &enb, &est);
+	st = qaws_exact_surface_batch_hits(ept, &enp, ebr, &enb, &est, 1 << 16, 1024, &ed);
 	t_exact = hf_now() - t0;
 	for (i = 0; i < enp; i++)
 		if (ept[i].u1_hi - ept[i].u1_lo > widest)

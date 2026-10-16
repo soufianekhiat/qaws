@@ -51,7 +51,7 @@ static void demo_families(void)
 	cd.parameterization = QAWS_PARAMETERIZATION_UNIFORM;
 	cd.closed = 1;
 	qaws_curve_create_catmull_rom(&cr, &cd);
-	qaws_exact_curve_prepare(&desc, cr, &ecr, &rcr);
+	qaws_exact_curve_prepare(&ecr, &rcr, cr, &desc);
 
 	/* the polynomial in t: a_k = sum_j cheb_j C(j, k) (-100)^(j - k), integers below 2^53 */
 	for (k = 0; k <= 6; k++)
@@ -77,7 +77,7 @@ static void demo_families(void)
 	pd.t_min = 99;
 	pd.t_max = 101;
 	qaws_curve_create_polynomial(&poly, &pd);
-	qaws_exact_curve_prepare(&desc, poly, &epoly, &rpoly);
+	qaws_exact_curve_prepare(&epoly, &rpoly, poly, &desc);
 
 	svg_open(&sv, "showcase/exact5_families.svg", 1260, 520, "Exact Hermite, Catmull-Rom and polynomial curves",
 		"Left: a closed uniform Catmull-Rom curve converted exactly into one integer cubic Bezier per span (common factor 6). Middle, right: T6(t - 100) as monomials in t on [99, 101].");
@@ -96,7 +96,7 @@ static void demo_families(void)
 	{
 		double pts[2 * 4], t0, t1, xy[2 * 61], pg[2 * 4];
 		unsigned int deg;
-		qaws_exact_curve_span_bezier(ecr, s, &deg, &t0, &t1, pts, NULL);
+		qaws_exact_curve_span_bezier(&deg, &t0, &t1, pts, NULL, ecr, s);
 		for (i = 0; i <= deg; i++)
 		{
 			pg[2 * i] = vx(&vc, pts[2 * i]);
@@ -108,7 +108,7 @@ static void demo_families(void)
 		for (i = 0; i <= 60; i++)
 		{
 			double out[2];
-			qaws_exact_curve_evaluate(ecr, t0 + (t1 - t0) * i / 60.0, 0, out, NULL);
+			qaws_exact_curve_evaluate(out, NULL, ecr, t0 + (t1 - t0) * i / 60.0, 0);
 			xy[2 * i] = vx(&vc, out[0]);
 			xy[2 * i + 1] = vy(&vc, out[1]);
 		}
@@ -129,7 +129,7 @@ static void demo_families(void)
 			double t = 99 + i / 512.0, ex[2];
 			float g = ef_horner_f32(a, 6, (float)t);
 			qaws_eval_result_2d r;
-			qaws_exact_curve_evaluate(epoly, t, 0, ex, NULL);
+			qaws_exact_curve_evaluate(ex, NULL, epoly, t, 0);
 			qaws_curve_evaluate_2d(&r, poly, (qaws_scalar)t, QAWS_EVAL_FLAG_POSITION);
 			e32[i] = fabs(g - ex[1]);
 			e64[i] = fabs(r.position.y - ex[1]);

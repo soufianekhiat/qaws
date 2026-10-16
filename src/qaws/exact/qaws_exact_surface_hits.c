@@ -584,8 +584,8 @@ static void sort_by_t(qaws_exact_surface_hit* h, unsigned int count)
 	}
 }
 
-qaws_status qaws_exact_surface_line_hits(qaws_exact_surface const* surface, double const p0[3], double const p1[3], qaws_exact_surface_hit* out_hits,
-	unsigned int capacity, unsigned int* out_count)
+qaws_status qaws_exact_surface_line_hits(qaws_exact_surface_hit* out_hits, unsigned int* out_count, qaws_exact_surface const* surface, double const p0[3],
+	double const p1[3], unsigned int capacity)
 {
 	line_ctx L;
 	unsigned int iu, iv, count = 0;
@@ -781,8 +781,8 @@ static qaws_status er_chunk(void* ctx, unsigned int chunk, unsigned int begin, u
 	return st;
 }
 
-qaws_status qaws_exact_surface_batch_raycast(qaws_exact_ssi_batch_desc const* desc, double const* p0, double const* p1, unsigned int ray_count,
-	double max_t, qaws_exact_ray_hit* out_hits, qaws_exact_batch_stats* out_stats)
+qaws_status qaws_exact_surface_batch_raycast(qaws_exact_ray_hit* out_hits, qaws_exact_batch_stats* out_stats, double const* p0, double const* p1,
+	unsigned int ray_count, qaws_exact_ssi_batch_desc const* desc, double max_t)
 {
 	qaws_exact_batch_stats stats;
 	er_patch* patches = NULL;

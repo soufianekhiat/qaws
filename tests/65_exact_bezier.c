@@ -87,7 +87,7 @@ static void test_reference(void)
 		qaws_exact_curve* e3 = NULL;
 		qaws_exact_int num[3], den, num3[3], den3;
 		int comp;
-		if (qaws_exact_curve_prepare(&desc, c, &e, NULL) != QAWS_STATUS_OK ||
+		if (qaws_exact_curve_prepare(&e, NULL, c, &desc) != QAWS_STATUS_OK ||
 		    qaws_exact_curve_eval_rational(e, r->T, (unsigned int)r->k, num, &den) != QAWS_STATUS_OK)
 			ok_exact = 0;
 		else
@@ -99,7 +99,7 @@ static void test_reference(void)
 				if (b > max_bits) max_bits = b;
 			}
 			/* weights times 3: the same rational values */
-			if (r->rational && qaws_exact_curve_prepare(&desc, c3, &e3, NULL) == QAWS_STATUS_OK &&
+			if (r->rational && qaws_exact_curve_prepare(&e3, NULL, c3, &desc) == QAWS_STATUS_OK &&
 			    qaws_exact_curve_eval_rational(e3, r->T, (unsigned int)r->k, num3, &den3) == QAWS_STATUS_OK)
 				for (comp = 0; comp < r->dim; comp++)
 				{
@@ -114,7 +114,7 @@ static void test_reference(void)
 				double out[12], t = ldexp((double)r->T, -8);
 				qaws_eval_result_3d f;
 				unsigned int flags = QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2 | QAWS_EVAL_FLAG_D3;
-				qaws_exact_curve_evaluate(e, t, (unsigned int)r->k, out, NULL);
+				qaws_exact_curve_evaluate(out, NULL, e, t, (unsigned int)r->k);
 				if (r->dim == 3)
 					qaws_curve_evaluate_3d(&f, c, (qaws_scalar)t, flags);
 				else
@@ -164,10 +164,10 @@ static void test_reports(void)
 	d.control_point_count = 2;
 	qaws_curve_create_bezier(&c, &d);
 	qaws_exact_desc_default(&desc);
-	TEST_ASSERT(qaws_exact_curve_prepare(&desc, c, &e, &rep) == QAWS_STATUS_EXACT_RANGE_EXCEEDED,
+	TEST_ASSERT(qaws_exact_curve_prepare(&e, &rep, c, &desc) == QAWS_STATUS_EXACT_RANGE_EXCEEDED,
 		"a coordinate past the lattice range is reported");
 	desc.space_exp2 = 10;
-	TEST_ASSERT(qaws_exact_curve_prepare(&desc, c, &e, &rep) == QAWS_STATUS_OK && (rep.flags & QAWS_EXACT_FLAG_INPUT_QUANTIZED) &&
+	TEST_ASSERT(qaws_exact_curve_prepare(&e, &rep, c, &desc) == QAWS_STATUS_OK && (rep.flags & QAWS_EXACT_FLAG_INPUT_QUANTIZED) &&
 		rep.max_position_quantization_error > 0, "a coarse lattice reports its quantization error");
 	qaws_exact_curve_destroy(e);
 	qaws_curve_destroy(c);

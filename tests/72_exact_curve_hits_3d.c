@@ -74,9 +74,9 @@ static void test_reference(void)
 		unsigned int count = 0, k;
 		qaws_status st;
 		int ok;
-		qaws_exact_curve_prepare(&desc, ca, &ea, NULL);
-		qaws_exact_curve_prepare(&desc, cb, &eb, NULL);
-		st = qaws_exact_curve_curve_hits(ea, eb, hits, 16, &count);
+		qaws_exact_curve_prepare(&ea, NULL, ca, &desc);
+		qaws_exact_curve_prepare(&eb, NULL, cb, &desc);
+		st = qaws_exact_curve_curve_hits(hits, &count, ea, eb, 16);
 		ok = st == QAWS_STATUS_OK && count == (unsigned int)r->n;
 		for (k = 0; ok && k < count; k++)
 		{
@@ -124,10 +124,10 @@ static void test_vertical(void)
 	qaws_curve_create_bezier(&ca, &d);
 	d.control_points = b3;
 	qaws_curve_create_bezier(&cb, &d);
-	qaws_exact_curve_prepare(NULL, ca, &ea, NULL);
-	qaws_exact_curve_prepare(NULL, cb, &eb, NULL);
+	qaws_exact_curve_prepare(&ea, NULL, ca, NULL);
+	qaws_exact_curve_prepare(&eb, NULL, cb, NULL);
 	/* z_a = 4 t (1 - t) * 2, z_b = 2 (1 - t)^2 - 4 t (1 - t) + 2 t^2, same x = y = 2t: equal at 8 t (1 - t) = 2 - 8 t (1 - t): t (1 - t) = 1/8 */
-	TEST_ASSERT(qaws_exact_curve_curve_hits(ea, eb, hits, 8, &count) == QAWS_STATUS_OK && count == 2 && hits[0].a_lo <= 0.5 - sqrt(0.125) + 1e-12 &&
+	TEST_ASSERT(qaws_exact_curve_curve_hits(hits, &count, ea, eb, 8) == QAWS_STATUS_OK && count == 2 && hits[0].a_lo <= 0.5 - sqrt(0.125) + 1e-12 &&
 		hits[0].a_hi >= 0.5 - sqrt(0.125) - 1e-12 && hits[0].b_lo <= hits[0].a_hi && hits[0].b_hi >= hits[0].a_lo,
 		"curves in a vertical plane: the degenerate xy projection is skipped, both crossings found");
 	qaws_exact_curve_destroy(ea);

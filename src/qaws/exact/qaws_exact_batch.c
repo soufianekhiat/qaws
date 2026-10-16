@@ -186,7 +186,7 @@ static qaws_status eb_self(eb_ctx* x, unsigned int i)
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 		}
 		buf = g;
-		st = qaws_exact_curve_self_hits(x->desc->curves[i], buf, cap, &n);
+		st = qaws_exact_curve_self_hits(buf, &n, x->desc->curves[i], cap);
 		if (st != QAWS_STATUS_BUFFER_TOO_SMALL)
 			break;
 		cap *= 4;
@@ -199,8 +199,8 @@ static qaws_status eb_self(eb_ctx* x, unsigned int i)
 	return st;
 }
 
-qaws_status qaws_exact_curve_batch_hits(qaws_exact_batch_desc const* desc, qaws_exact_batch_hit* out_hits, unsigned int capacity,
-	unsigned int* out_count, qaws_exact_batch_stats* out_stats)
+qaws_status qaws_exact_curve_batch_hits(qaws_exact_batch_hit* out_hits, unsigned int* out_count, qaws_exact_batch_stats* out_stats,
+	unsigned int capacity, qaws_exact_batch_desc const* desc)
 {
 	eb_ctx x;
 	qaws_bp_box* boxes = NULL;
@@ -427,8 +427,8 @@ static int es_cmp_hit(void const* p, void const* q)
 	return 0;
 }
 
-qaws_status qaws_exact_curve_surface_batch_hits(qaws_exact_surface_batch_desc const* desc, qaws_exact_curve_surface_batch_hit* out_hits,
-	unsigned int capacity, unsigned int* out_count, qaws_exact_batch_stats* out_stats)
+qaws_status qaws_exact_curve_surface_batch_hits(qaws_exact_curve_surface_batch_hit* out_hits, unsigned int* out_count,
+	qaws_exact_batch_stats* out_stats, unsigned int capacity, qaws_exact_surface_batch_desc const* desc)
 {
 	es_ctx* x;
 	qaws_bp_box* boxes = NULL;
@@ -669,9 +669,9 @@ static qaws_status ess_chunk(void* ctx, unsigned int chunk, unsigned int begin, 
 	return QAWS_STATUS_OK;
 }
 
-qaws_status qaws_exact_surface_batch_hits(qaws_exact_ssi_batch_desc const* desc, qaws_exact_ssi_point* out_points, unsigned int point_capacity,
-	unsigned int* out_point_count, qaws_exact_ssi_batch_branch* out_branches, unsigned int branch_capacity, unsigned int* out_branch_count,
-	qaws_exact_batch_stats* out_stats)
+qaws_status qaws_exact_surface_batch_hits(qaws_exact_ssi_point* out_points, unsigned int* out_point_count, qaws_exact_ssi_batch_branch* out_branches,
+	unsigned int* out_branch_count, qaws_exact_batch_stats* out_stats, unsigned int point_capacity, unsigned int branch_capacity,
+	qaws_exact_ssi_batch_desc const* desc)
 {
 	ess_ctx x;
 	qaws_bp_box* boxes = NULL;

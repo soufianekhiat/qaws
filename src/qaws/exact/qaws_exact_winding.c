@@ -211,7 +211,7 @@ static int wn_same_point(qaws_exact_int const* a, qaws_exact_int const* b)
 	return 1;
 }
 
-qaws_status qaws_exact_winding_2d(qaws_exact_curve const* const* pieces, unsigned int count, double const p[2], int* out_winding)
+qaws_status qaws_exact_winding_2d(int* out_winding, qaws_exact_curve const* const* pieces, double const p[2], unsigned int count)
 {
 	int64_t m[2];
 	int e[2], c, kscale = 0, total = 0;

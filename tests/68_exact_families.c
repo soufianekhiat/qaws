@@ -106,7 +106,7 @@ static void test_reference(void)
 		qaws_exact_int num[3], den;
 		int comp, ok = 1;
 		rows[r->family]++;
-		if (!c || qaws_exact_curve_prepare(&desc, c, &e, &rep) != QAWS_STATUS_OK || e->param_shift < 6 ||
+		if (!c || qaws_exact_curve_prepare(&e, &rep, c, &desc) != QAWS_STATUS_OK || e->param_shift < 6 ||
 		    qaws_exact_curve_eval_rational(e, r->T << (e->param_shift - 6), (unsigned int)r->k, num, &den) != QAWS_STATUS_OK)
 			ok = 0;
 		else
@@ -120,7 +120,7 @@ static void test_reference(void)
 				qaws_eval_result_3d f;
 				unsigned int flags = QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2 | QAWS_EVAL_FLAG_D3;
 				memset(&f, 0, sizeof(f));
-				qaws_exact_curve_evaluate(e, t, (unsigned int)r->k, out, NULL);
+				qaws_exact_curve_evaluate(out, NULL, e, t, (unsigned int)r->k);
 				if (r->dim == 3)
 					qaws_curve_evaluate_3d(&f, c, (qaws_scalar)t, flags);
 				else

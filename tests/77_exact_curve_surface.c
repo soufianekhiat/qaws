@@ -92,9 +92,9 @@ static void test_reference(void)
 		unsigned int count = 0, k, q;
 		qaws_status st;
 		int ok;
-		qaws_exact_surface_prepare(&desc, s, &es, NULL);
-		qaws_exact_curve_prepare(&desc, c, &ec, NULL);
-		st = qaws_exact_curve_surface_hits(ec, es, hits, 16, &count);
+		qaws_exact_surface_prepare(&es, NULL, s, &desc);
+		qaws_exact_curve_prepare(&ec, NULL, c, &desc);
+		st = qaws_exact_curve_surface_hits(hits, &count, ec, es, 16);
 		ok = st == QAWS_STATUS_OK && count == (unsigned int)r->n;
 		/* hits are unordered: each reference hit inside exactly one enclosure */
 		for (k = 0; ok && k < (unsigned int)r->n; k++)
@@ -164,9 +164,9 @@ static void test_on_surface(void)
 	bd.control_points = seg;
 	bd.control_point_count = 2;
 	qaws_curve_create_bezier(&c, &bd);
-	qaws_exact_surface_prepare(NULL, s, &es, NULL);
-	qaws_exact_curve_prepare(NULL, c, &ec, NULL);
-	TEST_ASSERT(qaws_exact_curve_surface_hits(ec, es, hits, 4, &count) == QAWS_STATUS_CERTIFICATION_FAILED,
+	qaws_exact_surface_prepare(&es, NULL, s, NULL);
+	qaws_exact_curve_prepare(&ec, NULL, c, NULL);
+	TEST_ASSERT(qaws_exact_curve_surface_hits(hits, &count, ec, es, 4) == QAWS_STATUS_CERTIFICATION_FAILED,
 		"a curve lying on the surface is refused (the subdivision budget runs out)");
 	qaws_exact_surface_destroy(es);
 	qaws_exact_curve_destroy(ec);

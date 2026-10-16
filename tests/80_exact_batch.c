@@ -117,13 +117,13 @@ static void test_against_float(void)
 	qaws_exact_desc_default(&ed);
 	ed.space_exp2 = -20;
 	for (i = 0; i < EBT_N; i++)
-		qaws_exact_curve_prepare(&ed, cs[i], &ec[i], NULL);
+		qaws_exact_curve_prepare(&ec[i], NULL, cs[i], &ed);
 	memset(&d, 0, sizeof(d));
 	d.curves = (qaws_exact_curve const* const*)ec;
 	d.curve_count = EBT_N;
 	d.families = fam;
 	t0 = ebt_now();
-	s = qaws_exact_curve_batch_hits(&d, he, 512, &ne, &st);
+	s = qaws_exact_curve_batch_hits(he, &ne, &st, 512, &d);
 	tb = ebt_now() - t0;
 	memset(&fd, 0, sizeof(fd));
 	fd.curves = (qaws_curve const* const*)cs;
@@ -154,7 +154,7 @@ static void test_against_float(void)
 		for (j = EBT_LEVELS; j < EBT_N; j++)
 		{
 			unsigned int np = 0, k, m;
-			qaws_exact_curve_curve_hits(ec[i], ec[j], hp, 64, &np);
+			qaws_exact_curve_curve_hits(hp, &np, ec[i], ec[j], 64);
 			for (k = 0; k < np; k++)
 			{
 				int found = 0;
@@ -195,12 +195,12 @@ static void test_uncertified(void)
 	qaws_exact_desc_default(&ed);
 	ed.space_exp2 = -20;
 	for (i = 0; i <= EBT_N; i++)
-		qaws_exact_curve_prepare(&ed, cs[i], &ec[i], NULL);
+		qaws_exact_curve_prepare(&ec[i], NULL, cs[i], &ed);
 	memset(&d, 0, sizeof(d));
 	d.curves = (qaws_exact_curve const* const*)ec;
 	d.curve_count = EBT_N + 1;
 	d.families = fam;
-	s = qaws_exact_curve_batch_hits(&d, he, 512, &ne, &st);
+	s = qaws_exact_curve_batch_hits(he, &ne, &st, 512, &d);
 	{
 		unsigned int ov = 0;
 		double lo = 1e300, hi = -1e300;
@@ -246,12 +246,12 @@ static void test_self(void)
 	bd.control_points = cp;
 	bd.control_point_count = 4;
 	qaws_curve_create_bezier(&c, &bd);
-	qaws_exact_curve_prepare(NULL, c, &e, NULL);
+	qaws_exact_curve_prepare(&e, NULL, c, NULL);
 	memset(&d, 0, sizeof(d));
 	d.curves = (qaws_exact_curve const* const*)&e;
 	d.curve_count = 1;
 	d.flags = QAWS_EXACT_BATCH_SELF;
-	s = qaws_exact_curve_batch_hits(&d, h, 4, &n, NULL);
+	s = qaws_exact_curve_batch_hits(h, &n, NULL, 4, &d);
 	printf("    looped cubic: %u certified self-intersection(s), t in [%.12f, %.12f] / [%.12f, %.12f]\n", n,
 		n ? h[0].pair.a_lo : 0, n ? h[0].pair.a_hi : 0, n ? h[0].pair.b_lo : 0, n ? h[0].pair.b_hi : 0);
 	TEST_ASSERT(s == QAWS_STATUS_OK && n == 1 && h[0].curve_a == 0 && h[0].curve_b == 0 && h[0].pair.a_lo <= t1 && t1 <= h[0].pair.a_hi
@@ -272,7 +272,7 @@ static void test_boxes(void)
 	ed.space_exp2 = -20;
 	for (i = 0; i < EBT_N; i++)
 	{
-		qaws_exact_curve_prepare(&ed, cs[i], &ec[i], NULL);
+		qaws_exact_curve_prepare(&ec[i], NULL, cs[i], &ed);
 		for (k = 0; k < ec[i]->span_count; k++)
 		{
 			qaws_exact_span const* sp = &ec[i]->spans[k];
@@ -356,7 +356,7 @@ static void test_closest(void)
 	qaws_exact_desc_default(&ed);
 	ed.space_exp2 = -16;
 	for (i = 0; i < n; i++)
-		qaws_exact_curve_prepare(&ed, cs[i], &ec[i], NULL);
+		qaws_exact_curve_prepare(&ec[i], NULL, cs[i], &ed);
 	for (i = 0; i < 2 * EBT_POINTS; i++)
 	{
 		state ^= state << 13; state ^= state >> 7; state ^= state << 17;
@@ -367,7 +367,7 @@ static void test_closest(void)
 	d.curves = (qaws_exact_curve const* const*)ec;
 	d.curve_count = n;
 	t0 = ebt_now();
-	s = qaws_exact_curve_batch_closest(&d, pts, EBT_POINTS, eo, &st);
+	s = qaws_exact_curve_batch_closest(eo, &st, pts, EBT_POINTS, &d);
 	te = ebt_now() - t0;
 	memset(&fd, 0, sizeof(fd));
 	fd.curves = (qaws_curve const* const*)cs;
@@ -398,7 +398,7 @@ static void test_closest(void)
 		lines[1] = ec[EBT_PARAB + 1];
 		d.curves = lines;
 		d.curve_count = 2;
-		s = qaws_exact_curve_batch_closest(&d, p, 1, &o, NULL);
+		s = qaws_exact_curve_batch_closest(&o, NULL, p, 1, &d);
 		TEST_ASSERT(s == QAWS_STATUS_OK && !o.certified && o.distance_lo <= 1.25 && o.distance_hi >= 1.25 && o.distance_hi - o.distance_lo < 1e-12,
 			"a point midway between two lines: a tie, reported uncertified at the exact distance");
 	}

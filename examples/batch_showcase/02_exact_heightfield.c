@@ -37,7 +37,7 @@ static void demo_exact_heightfield(void)
 	for (i = 0; i < sc.count; i++)
 	{
 		qaws_exact_report rep;
-		qaws_exact_curve_prepare(&ed, sc.curves[i], &ec[i], &rep);
+		qaws_exact_curve_prepare(&ec[i], &rep, sc.curves[i], &ed);
 		quantized += (rep.flags & QAWS_EXACT_FLAG_INPUT_QUANTIZED) != 0;
 	}
 	eh = (qaws_exact_batch_hit*)malloc(cap * sizeof(qaws_exact_batch_hit));
@@ -46,7 +46,7 @@ static void demo_exact_heightfield(void)
 	d.curve_count = sc.count;
 	d.families = sc.family;
 	t0 = hf_now();
-	s = qaws_exact_curve_batch_hits(&d, eh, cap, &ne, &est);
+	s = qaws_exact_curve_batch_hits(eh, &ne, &est, cap, &d);
 	t_exact = hf_now() - t0;
 	for (i = 0; i < ne && i < cap; i++)
 	{
@@ -63,7 +63,7 @@ static void demo_exact_heightfield(void)
 			if (sc.family[i] != sc.family[j])
 			{
 				unsigned int k = 0;
-				if (qaws_exact_curve_curve_hits(ec[i], ec[j], pbuf, 256, &k) != QAWS_STATUS_OK)
+				if (qaws_exact_curve_curve_hits(pbuf, &k, ec[i], ec[j], 256) != QAWS_STATUS_OK)
 					pairwise_failed++;
 				np += k;
 			}

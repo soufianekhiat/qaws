@@ -93,8 +93,8 @@ static double bo_area(qaws_exact_curve const* const* curves, qaws_exact_piece co
 			{
 				double ts, te;
 				unsigned int sc = qaws_exact_curve_span_count(c);
-				qaws_exact_curve_span_bezier(c, 0, NULL, &ts, NULL, NULL, NULL);
-				qaws_exact_curve_span_bezier(c, sc - 1, NULL, NULL, &te, NULL, NULL);
+				qaws_exact_curve_span_bezier(NULL, &ts, NULL, NULL, NULL, c, 0);
+				qaws_exact_curve_span_bezier(NULL, NULL, &te, NULL, NULL, c, sc - 1);
 				span = te - ts;
 				if (!p->reversed && t1 <= t0) t1 += span;
 				if (p->reversed && t1 >= t0) t1 -= span;
@@ -114,7 +114,7 @@ static double bo_area(qaws_exact_curve const* const* curves, qaws_exact_piece co
 					}
 					while (t >= te) t -= span;
 					while (t < ts) t += span;
-					qaws_exact_curve_evaluate(c, t, 0, q, NULL);
+					qaws_exact_curve_evaluate(q, NULL, c, t, 0);
 					if (have)
 						area += prev[0] * q[1] - q[0] * prev[1];
 					else
@@ -147,13 +147,13 @@ static void test_squares(void)
 	qaws_exact_loop loops[8];
 	unsigned int np = 0, nl = 0, op;
 	char msg[160];
-	qaws_exact_curve_prepare(NULL, ca, &ea, NULL);
-	qaws_exact_curve_prepare(NULL, cb, &eb, NULL);
+	qaws_exact_curve_prepare(&ea, NULL, ca, NULL);
+	qaws_exact_curve_prepare(&eb, NULL, cb, NULL);
 	curves[0] = ea;
 	curves[1] = eb;
 	for (op = 0; op < 3; op++)
 	{
-		qaws_status st = qaws_exact_boolean_2d(ea, eb, op, pieces, 32, &np, loops, 8, &nl);
+		qaws_status st = qaws_exact_boolean_2d(pieces, &np, loops, &nl, ea, eb, 32, 8, op);
 		/* polygons: the area from the pieces' vertices, exactly */
 		double area = bo_area(curves, pieces, loops, nl, 0);
 		printf("    squares %-12s: status %d, %u loops, %u pieces, area %.12f\n", names[op], (int)st, nl, np, area);
@@ -179,8 +179,8 @@ static void test_conics(void)
 	unsigned int np = 0, nl = 0, op, i, j, cnt[3] = { 0, 0, 0 }, G = 240;
 	double x0 = -4.5, x1 = 4.5, y0 = -4.5, y1 = 5.0, cell;
 	char msg[160];
-	qaws_exact_curve_prepare(NULL, ca, &ea, NULL);
-	qaws_exact_curve_prepare(NULL, cb, &eb, NULL);
+	qaws_exact_curve_prepare(&ea, NULL, ca, NULL);
+	qaws_exact_curve_prepare(&eb, NULL, cb, NULL);
 	curves[0] = ea;
 	curves[1] = eb;
 	/* the grid estimate: certified windings at cell centers */
@@ -190,8 +190,8 @@ static void test_conics(void)
 		{
 			double p[2] = { x0 + (i + 0.5) * cell, y0 + (j + 0.5) * (y1 - y0) / G };
 			int wa = 0, wb = 0, ia, ib;
-			qaws_exact_winding_2d(&curves[0], 1, p, &wa);
-			qaws_exact_winding_2d(&curves[1], 1, p, &wb);
+			qaws_exact_winding_2d(&wa, &curves[0], p, 1);
+			qaws_exact_winding_2d(&wb, &curves[1], p, 1);
 			ia = wa != 0;
 			ib = wb != 0;
 			cnt[0] += ia || ib;
@@ -200,7 +200,7 @@ static void test_conics(void)
 		}
 	for (op = 0; op < 3; op++)
 	{
-		qaws_status st = qaws_exact_boolean_2d(ea, eb, op, pieces, 32, &np, loops, 8, &nl);
+		qaws_status st = qaws_exact_boolean_2d(pieces, &np, loops, &nl, ea, eb, 32, 8, op);
 		double area = bo_area(curves, pieces, loops, nl, 2000), grid = cnt[op] * cell * (y1 - y0) / G;
 		printf("    conics  %-12s: status %d, %u loops, %u pieces, area %.5f, certified-winding grid %.5f\n", names[op], (int)st, nl, np, area, grid);
 		sprintf(msg, "conics %s: one loop, area agrees with the winding grid", names[op]);
@@ -227,20 +227,20 @@ static void test_disjoint_nested(void)
 	qaws_exact_piece pieces[16];
 	qaws_exact_loop loops[8];
 	unsigned int np = 0, nl = 0, n0, n1, n2;
-	qaws_exact_curve_prepare(NULL, cbig, &ebig, NULL);
-	qaws_exact_curve_prepare(NULL, csmall, &esmall, NULL);
-	qaws_exact_curve_prepare(NULL, cfar, &efar, NULL);
-	qaws_exact_curve_prepare(NULL, cbow, &ebow, NULL);
-	qaws_exact_boolean_2d(ebig, efar, QAWS_BOOLEAN_UNION, pieces, 16, &np, loops, 8, &n0);
-	qaws_exact_boolean_2d(ebig, efar, QAWS_BOOLEAN_INTERSECTION, pieces, 16, &np, loops, 8, &n1);
-	qaws_exact_boolean_2d(ebig, efar, QAWS_BOOLEAN_DIFFERENCE, pieces, 16, &np, loops, 8, &n2);
+	qaws_exact_curve_prepare(&ebig, NULL, cbig, NULL);
+	qaws_exact_curve_prepare(&esmall, NULL, csmall, NULL);
+	qaws_exact_curve_prepare(&efar, NULL, cfar, NULL);
+	qaws_exact_curve_prepare(&ebow, NULL, cbow, NULL);
+	qaws_exact_boolean_2d(pieces, &np, loops, &n0, ebig, efar, 16, 8, QAWS_BOOLEAN_UNION);
+	qaws_exact_boolean_2d(pieces, &np, loops, &n1, ebig, efar, 16, 8, QAWS_BOOLEAN_INTERSECTION);
+	qaws_exact_boolean_2d(pieces, &np, loops, &n2, ebig, efar, 16, 8, QAWS_BOOLEAN_DIFFERENCE);
 	TEST_ASSERT(n0 == 2 && n1 == 0 && n2 == 1, "disjoint regions: union both, intersection none, difference the first");
-	qaws_exact_boolean_2d(ebig, esmall, QAWS_BOOLEAN_UNION, pieces, 16, &np, loops, 8, &n0);
-	qaws_exact_boolean_2d(ebig, esmall, QAWS_BOOLEAN_INTERSECTION, pieces, 16, &np, loops, 8, &n1);
-	qaws_exact_boolean_2d(ebig, esmall, QAWS_BOOLEAN_DIFFERENCE, pieces, 16, &np, loops, 8, &n2);
+	qaws_exact_boolean_2d(pieces, &np, loops, &n0, ebig, esmall, 16, 8, QAWS_BOOLEAN_UNION);
+	qaws_exact_boolean_2d(pieces, &np, loops, &n1, ebig, esmall, 16, 8, QAWS_BOOLEAN_INTERSECTION);
+	qaws_exact_boolean_2d(pieces, &np, loops, &n2, ebig, esmall, 16, 8, QAWS_BOOLEAN_DIFFERENCE);
 	TEST_ASSERT(n0 == 1 && n1 == 1 && n2 == 2 && pieces[0].region == 0 && pieces[1].region == 1,
 		"nested regions: union the outer, intersection the inner, difference both (a hole)");
-	TEST_ASSERT(qaws_exact_boolean_2d(ebow, esmall, QAWS_BOOLEAN_UNION, pieces, 16, &np, loops, 8, &nl) == QAWS_STATUS_CERTIFICATION_FAILED,
+	TEST_ASSERT(qaws_exact_boolean_2d(pieces, &np, loops, &nl, ebow, esmall, 16, 8, QAWS_BOOLEAN_UNION) == QAWS_STATUS_CERTIFICATION_FAILED,
 		"a self-intersecting boundary is refused");
 	qaws_exact_curve_destroy(ebig);
 	qaws_exact_curve_destroy(esmall);

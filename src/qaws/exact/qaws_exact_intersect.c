@@ -221,8 +221,8 @@ static qaws_status hyperplane_hits(qaws_exact_curve const* curve, dyadic const* 
 	return st;
 }
 
-qaws_status qaws_exact_curve_line_hits(qaws_exact_curve const* curve, double const p0[2], double const p1[2], double width,
-	qaws_exact_hit* out_hits, unsigned int capacity, unsigned int* out_count)
+qaws_status qaws_exact_curve_line_hits(qaws_exact_hit* out_hits, unsigned int* out_count, qaws_exact_curve const* curve, double const p0[2],
+	double const p1[2], double width, unsigned int capacity)
 {
 	dyadic N[2], P[2], a, b;
 	qaws_status st;
@@ -242,8 +242,8 @@ qaws_status qaws_exact_curve_line_hits(qaws_exact_curve const* curve, double con
 	return hyperplane_hits(curve, N, P, width, out_hits, capacity, out_count);
 }
 
-qaws_status qaws_exact_curve_plane_hits(qaws_exact_curve const* curve, double const point[3], double const normal[3], double width,
-	qaws_exact_hit* out_hits, unsigned int capacity, unsigned int* out_count)
+qaws_status qaws_exact_curve_plane_hits(qaws_exact_hit* out_hits, unsigned int* out_count, qaws_exact_curve const* curve, double const point[3],
+	double const normal[3], double width, unsigned int capacity)
 {
 	dyadic N[3], P[3];
 	unsigned int c;

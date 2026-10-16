@@ -532,8 +532,8 @@ static qaws_status ecl_chunk(void* ctx, unsigned int chunk, unsigned int begin, 
 	return st;
 }
 
-qaws_status qaws_exact_curve_batch_closest(qaws_exact_batch_desc const* desc, double const* points, unsigned int point_count,
-	qaws_exact_closest_point* out_points, qaws_exact_batch_stats* out_stats)
+qaws_status qaws_exact_curve_batch_closest(qaws_exact_closest_point* out_points, qaws_exact_batch_stats* out_stats, double const* points,
+	unsigned int point_count, qaws_exact_batch_desc const* desc)
 {
 	qaws_exact_batch_stats stats;
 	cl_ring R;
@@ -1369,8 +1369,8 @@ static qaws_status esc_chunk(void* ctx, unsigned int chunk, unsigned int begin, 
 	return st;
 }
 
-qaws_status qaws_exact_surface_batch_closest(qaws_exact_ssi_batch_desc const* desc, double const* points, unsigned int point_count,
-	qaws_exact_surface_closest_point* out_points, qaws_exact_batch_stats* out_stats)
+qaws_status qaws_exact_surface_batch_closest(qaws_exact_surface_closest_point* out_points, qaws_exact_batch_stats* out_stats, double const* points,
+	unsigned int point_count, qaws_exact_ssi_batch_desc const* desc)
 {
 	qaws_exact_batch_stats stats;
 	cl_ring R;

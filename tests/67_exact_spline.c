@@ -87,7 +87,7 @@ static void test_reference(void)
 		qaws_exact_report rep;
 		qaws_exact_int num[3], den;
 		int comp;
-		if (!c || qaws_exact_curve_prepare(&desc, c, &e, &rep) != QAWS_STATUS_OK)
+		if (!c || qaws_exact_curve_prepare(&e, &rep, c, &desc) != QAWS_STATUS_OK)
 		{
 			ok_prep = 0;
 			qaws_curve_destroy(c);
@@ -110,7 +110,7 @@ static void test_reference(void)
 			unsigned int flags = QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2 | QAWS_EVAL_FLAG_D3;
 			qaws_eval_result_3d f;
 			memset(&f, 0, sizeof(f));
-			qaws_exact_curve_evaluate(e, t, (unsigned int)r->k, out, NULL);
+			qaws_exact_curve_evaluate(out, NULL, e, t, (unsigned int)r->k);
 			if (r->dim == 3)
 				qaws_curve_evaluate_3d(&f, c, (qaws_scalar)t, flags);
 			else
@@ -201,7 +201,7 @@ static void test_widths(void)
 		d.weights = ws;
 		d.weight_count = n;
 		qaws_curve_create_nurbs(&c, &d);
-		st = qaws_exact_curve_prepare(&desc, c, &e, &rep);
+		st = qaws_exact_curve_prepare(&e, &rep, c, &desc);
 		report_bits[p] = st == QAWS_STATUS_OK ? rep.storage_bits : 0;
 		eval_ok[p] = 0;
 		max_order[p] = 0;
@@ -211,7 +211,7 @@ static void test_widths(void)
 			unsigned int k;
 			for (k = 0; k <= 3; k++)
 			{
-				st = qaws_exact_curve_evaluate(e, 0.37, k, out, NULL);
+				st = qaws_exact_curve_evaluate(out, NULL, e, 0.37, k);
 				if (st != QAWS_STATUS_OK)
 					break;
 				max_order[p] = k + 1;

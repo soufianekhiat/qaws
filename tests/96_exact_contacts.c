@@ -47,10 +47,10 @@ static void ct_run(ct_case* k, unsigned int da, double const* pa, unsigned int d
 	k->a = ct_bezier(da, pa);
 	k->b = ct_bezier(db, pb);
 	k->ea = k->eb = NULL;
-	qaws_exact_curve_prepare(NULL, k->a, &k->ea, NULL);
-	qaws_exact_curve_prepare(NULL, k->b, &k->eb, NULL);
+	qaws_exact_curve_prepare(&k->ea, NULL, k->a, NULL);
+	qaws_exact_curve_prepare(&k->eb, NULL, k->b, NULL);
 	k->count = 0;
-	k->status = qaws_exact_curve_curve_hits(k->ea, k->eb, k->hits, 16, &k->count);
+	k->status = qaws_exact_curve_curve_hits(k->hits, &k->count, k->ea, k->eb, 16);
 }
 
 static void ct_free(ct_case* k)

@@ -60,8 +60,8 @@ static qaws_exact_sign sign_of(double v)
 
 #define TRY(x) do { st = (x); if (st != QAWS_STATUS_OK) return st; } while (0)
 
-qaws_status qaws_exact_orient2d(double const a[2], double const b[2], double const c[2], qaws_exact_sign* out_sign,
-	qaws_exact_path* out_path)
+qaws_status qaws_exact_orient2d(qaws_exact_sign* out_sign, qaws_exact_path* out_path, double const a[2], double const b[2],
+	double const c[2])
 {
 	double v[6], detleft, detright, det, detsum;
 	qaws_exact_int x[6], acx, bcy, acy, bcx, l, r;
@@ -94,8 +94,8 @@ qaws_status qaws_exact_orient2d(double const a[2], double const b[2], double con
 	return QAWS_STATUS_OK;
 }
 
-qaws_status qaws_exact_orient3d(double const a[3], double const b[3], double const c[3], double const d[3],
-	qaws_exact_sign* out_sign, qaws_exact_path* out_path)
+qaws_status qaws_exact_orient3d(qaws_exact_sign* out_sign, qaws_exact_path* out_path, double const a[3], double const b[3],
+	double const c[3], double const d[3])
 {
 	double v[12], adx, bdx, cdx, ady, bdy, cdy, adz, bdz, cdz, det, permanent;
 	qaws_exact_int x[12], D[9], t1, t2, m1, m2, m3, acc;
@@ -153,7 +153,7 @@ qaws_status qaws_exact_orient3d(double const a[3], double const b[3], double con
 	return QAWS_STATUS_OK;
 }
 
-qaws_status qaws_exact_compare_ratio(double a, double b, double c, double d, qaws_exact_sign* out_sign, qaws_exact_path* out_path)
+qaws_status qaws_exact_compare_ratio(qaws_exact_sign* out_sign, qaws_exact_path* out_path, double a, double b, double c, double d)
 {
 	double v[4], ad, cb, det, sum;
 	qaws_exact_int x[4], l, r;

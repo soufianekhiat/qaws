@@ -40,7 +40,7 @@ static void test_orient2d_reference(void)
 		a[0] = ep_value(g_ref_o2[i].p[0]); a[1] = ep_value(g_ref_o2[i].p[1]);
 		b[0] = ep_value(g_ref_o2[i].p[2]); b[1] = ep_value(g_ref_o2[i].p[3]);
 		c[0] = ep_value(g_ref_o2[i].p[4]); c[1] = ep_value(g_ref_o2[i].p[5]);
-		ok &= qaws_exact_orient2d(a, b, c, &s, &path) == QAWS_STATUS_OK && (int)s == g_ref_o2[i].sign;
+		ok &= qaws_exact_orient2d(&s, &path, a, b, c) == QAWS_STATUS_OK && (int)s == g_ref_o2[i].sign;
 		naive_wrong += ep_naive2(a, b, c) != g_ref_o2[i].sign;
 		exact_path += path == QAWS_EXACT_PATH_EXACT;
 	}
@@ -62,7 +62,7 @@ static void test_orient3d_reference(void)
 		qaws_exact_path path;
 		for (k = 0; k < 12; k++)
 			p[k] = ep_value(g_ref_o3[i].p[k]);
-		ok &= qaws_exact_orient3d(p, p + 3, p + 6, p + 9, &s, &path) == QAWS_STATUS_OK && (int)s == g_ref_o3[i].sign;
+		ok &= qaws_exact_orient3d(&s, &path, p, p + 3, p + 6, p + 9) == QAWS_STATUS_OK && (int)s == g_ref_o3[i].sign;
 		exact_path += path == QAWS_EXACT_PATH_EXACT;
 		{
 			double adx = p[0] - p[9], ady = p[1] - p[10], adz = p[2] - p[11];
@@ -87,7 +87,7 @@ static void test_ratio_reference(void)
 		double a = ep_value(g_ref_ratio[i].p[0]), b = ep_value(g_ref_ratio[i].p[1]), c = ep_value(g_ref_ratio[i].p[2]),
 			d = ep_value(g_ref_ratio[i].p[3]), q;
 		qaws_exact_sign s;
-		ok &= qaws_exact_compare_ratio(a, b, c, d, &s, NULL) == QAWS_STATUS_OK && (int)s == g_ref_ratio[i].sign;
+		ok &= qaws_exact_compare_ratio(&s, NULL, a, b, c, d) == QAWS_STATUS_OK && (int)s == g_ref_ratio[i].sign;
 		q = a / b - c / d;
 		naive_wrong += (q > 0 ? 1 : (q < 0 ? -1 : 0)) != g_ref_ratio[i].sign;
 	}
@@ -153,7 +153,7 @@ static void test_fuzz(void)
 		if (i % 3 == 1) c[0] = nextafter(c[0], 1e300);
 		if (i % 3 == 2) c[1] = nextafter(c[1], -1e300);
 		truth = ep_exact2(a, b, c);
-		ok &= qaws_exact_orient2d(a, b, c, &s, &path) == QAWS_STATUS_OK && (int)s == truth;
+		ok &= qaws_exact_orient2d(&s, &path, a, b, c) == QAWS_STATUS_OK && (int)s == truth;
 		exact_path += path == QAWS_EXACT_PATH_EXACT;
 		naive_wrong += ep_naive2(a, b, c) != truth;
 	}
@@ -166,11 +166,11 @@ static void test_arguments(void)
 {
 	double a[2] = { 0, 0 }, b[2] = { 1, 0 }, c[2] = { HUGE_VAL, 0 };
 	qaws_exact_sign s;
-	TEST_ASSERT(qaws_exact_orient2d(a, b, c, &s, NULL) == QAWS_STATUS_INVALID_ARGUMENT, "non-finite input is refused");
-	TEST_ASSERT(qaws_exact_compare_ratio(1, 0, 1, 2, &s, NULL) == QAWS_STATUS_INVALID_ARGUMENT, "zero denominator is refused");
+	TEST_ASSERT(qaws_exact_orient2d(&s, NULL, a, b, c) == QAWS_STATUS_INVALID_ARGUMENT, "non-finite input is refused");
+	TEST_ASSERT(qaws_exact_compare_ratio(&s, NULL, 1, 0, 1, 2) == QAWS_STATUS_INVALID_ARGUMENT, "zero denominator is refused");
 	c[0] = 1e-300;
 	c[1] = 1e300;
-	TEST_ASSERT(qaws_exact_orient2d(a, b, c, &s, NULL) == QAWS_STATUS_OK && s == QAWS_EXACT_POSITIVE,
+	TEST_ASSERT(qaws_exact_orient2d(&s, NULL, a, b, c) == QAWS_STATUS_OK && s == QAWS_EXACT_POSITIVE,
 		"orient2d across 600 decades of magnitude");
 }
 

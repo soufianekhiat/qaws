@@ -77,13 +77,13 @@ static void test_reference(void)
 			a[k] = ldexp((double)r->a[k], -10);
 			b[k] = r->dim == 2 ? ldexp((double)r->b[k], -10) : (double)r->b[k];
 		}
-		if (qaws_exact_curve_prepare(&desc, c, &e, NULL) != QAWS_STATUS_OK)
+		if (qaws_exact_curve_prepare(&e, NULL, c, &desc) != QAWS_STATUS_OK)
 		{
 			bad_rows++;
 			qaws_curve_destroy(c);
 			continue;
 		}
-		st = r->dim == 2 ? qaws_exact_curve_line_hits(e, a, b, 0, hits, 32, &count) : qaws_exact_curve_plane_hits(e, a, b, 0, hits, 32, &count);
+		st = r->dim == 2 ? qaws_exact_curve_line_hits(hits, &count, e, a, b, 0, 32) : qaws_exact_curve_plane_hits(hits, &count, e, a, b, 0, 32);
 		if (r->expect == 1)
 		{
 			ok = st == QAWS_STATUS_CERTIFICATION_FAILED;
@@ -150,14 +150,14 @@ static void test_polyline(void)
 	d.knots = knots;
 	d.knot_count = 7;
 	qaws_curve_create_bspline(&c, &d);
-	qaws_exact_curve_prepare(NULL, c, &e, NULL);
-	TEST_ASSERT(qaws_exact_curve_line_hits(e, y1a, y1b, 0, hits, 8, &count) == QAWS_STATUS_OK && count == 2 &&
+	qaws_exact_curve_prepare(&e, NULL, c, NULL);
+	TEST_ASSERT(qaws_exact_curve_line_hits(hits, &count, e, y1a, y1b, 0, 8) == QAWS_STATUS_OK && count == 2 &&
 		hits[0].kind == QAWS_EXACT_HIT_OVERLAP && hits[0].t_lo == 1 && hits[0].t_hi == 2 && hits[1].kind == QAWS_EXACT_HIT_POINT &&
 		hits[1].t_lo == 3.5, "y = 1: the segment on the line is one overlap [1, 2] (its end hits merged), then t = 3.5");
-	TEST_ASSERT(qaws_exact_curve_line_hits(e, y0a, y0b, 0, hits, 8, &count) == QAWS_STATUS_OK && count == 2 &&
+	TEST_ASSERT(qaws_exact_curve_line_hits(hits, &count, e, y0a, y0b, 0, 8) == QAWS_STATUS_OK && count == 2 &&
 		hits[0].kind == QAWS_EXACT_HIT_POINT && hits[0].t_lo == 0 && hits[1].kind == QAWS_EXACT_HIT_POINT && hits[1].t_lo == 3,
 		"y = 0: the hit on the knot t = 3 is reported once");
-	TEST_ASSERT(qaws_exact_curve_line_hits(e, y0a, y0b, 0, hits, 1, &count) == QAWS_STATUS_BUFFER_TOO_SMALL && count == 1,
+	TEST_ASSERT(qaws_exact_curve_line_hits(hits, &count, e, y0a, y0b, 0, 1) == QAWS_STATUS_BUFFER_TOO_SMALL && count == 1,
 		"capacity overflow is reported");
 	qaws_exact_curve_destroy(e);
 	qaws_curve_destroy(c);

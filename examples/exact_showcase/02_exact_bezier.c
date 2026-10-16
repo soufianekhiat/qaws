@@ -88,14 +88,14 @@ static void demo_exact_bezier(void)
 	d.weight_count = EB_DEG + 1;
 	qaws_curve_create_rational_bezier(&c, &d);
 	qaws_exact_desc_default(&desc);
-	qaws_exact_curve_prepare(&desc, c, &ec, &rep);
+	qaws_exact_curve_prepare(&ec, &rep, c, &desc);
 	for (i = 0; i < EB_SAMPLES; i++)
 	{
 		/* parameters on the 2^-24 lattice, so every evaluator sees the same t */
 		double t = ldexp(nearbyint(ldexp((i + 0.5) / EB_SAMPLES, 24)), -24), ex[8], f[2];
 		float g[2];
 		qaws_eval_result_2d r;
-		qaws_exact_curve_evaluate(ec, t, 3, ex, NULL);
+		qaws_exact_curve_evaluate(ex, NULL, ec, t, 3);
 		qaws_curve_evaluate_2d(&r, c, (qaws_scalar)t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2 | QAWS_EVAL_FLAG_D3);
 		eb_f32(h32, EB_DEG, (float)t, g);
 		f[0] = g[0];
@@ -119,7 +119,7 @@ static void demo_exact_bezier(void)
 		for (i = 0; i <= 400; i++)
 		{
 			double ex[2];
-			qaws_exact_curve_evaluate(ec, i / 400.0, 0, ex, NULL);
+			qaws_exact_curve_evaluate(ex, NULL, ec, i / 400.0, 0);
 			xy[2 * i] = vx(&vc, ex[0]);
 			xy[2 * i + 1] = vy(&vc, ex[1]);
 		}

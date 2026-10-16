@@ -79,8 +79,8 @@ static void test_reference(void)
 		unsigned int count = 0, k;
 		qaws_status st;
 		int ok;
-		qaws_exact_curve_prepare(&desc, c, &e, NULL);
-		st = qaws_exact_curve_self_hits(e, hits, 32, &count);
+		qaws_exact_curve_prepare(&e, NULL, c, &desc);
+		st = qaws_exact_curve_self_hits(hits, &count, e, 32);
 		ok = st == QAWS_STATUS_OK && count == (unsigned int)r->count;
 		for (k = 0; ok && k < count; k++)
 		{
@@ -133,8 +133,8 @@ static void test_conic(void)
 	d.knots = kn;
 	d.knot_count = 10;
 	qaws_curve_create_nurbs(&c, &d);
-	qaws_exact_curve_prepare(NULL, c, &e, NULL);
-	TEST_ASSERT(qaws_exact_curve_self_hits(e, hits, 8, &count) == QAWS_STATUS_OK && count == 0,
+	qaws_exact_curve_prepare(&e, NULL, c, NULL);
+	TEST_ASSERT(qaws_exact_curve_self_hits(hits, &count, e, 8) == QAWS_STATUS_OK && count == 0,
 		"a closed NURBS conic of three arcs: no self-intersection (arcs on one conic touch at their ends)");
 	qaws_exact_curve_destroy(e);
 	qaws_curve_destroy(c);
@@ -148,10 +148,10 @@ static void test_conic(void)
 	c = NULL;
 	e = NULL;
 	qaws_curve_create_nurbs(&c, &d);
-	qaws_exact_curve_prepare(NULL, c, &e, NULL);
+	qaws_exact_curve_prepare(&e, NULL, c, NULL);
 	{
 		char msg[300];
-		qaws_status st = qaws_exact_curve_self_hits(e, hits, 8, &count);
+		qaws_status st = qaws_exact_curve_self_hits(hits, &count, e, 8);
 		sprintf(msg, "an arc traced twice: one overlap of [0, 1] with [3, 4] (status %d, %u pairs, kind %d, a %g..%g, b %g..%g, opposite %d)", (int)st, count,
 			count ? (int)hits[0].kind : -1, count ? hits[0].a_lo : -1, count ? hits[0].a_hi : -1, count ? hits[0].b_lo : -1, count ? hits[0].b_hi : -1,
 			count ? hits[0].opposite : -1);

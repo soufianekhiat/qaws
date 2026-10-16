@@ -28,7 +28,7 @@ static double ec_gap(qaws_curve* c, qaws_exact_curve* e, double t0, double t1, u
 		qaws_eval_result_2d r2;
 		double ref[12];
 		unsigned int flags = QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2;
-		qaws_exact_curve_evaluate(e, t, 2, out, NULL);
+		qaws_exact_curve_evaluate(out, NULL, e, t, 2);
 		if (dim == 3)
 		{
 			qaws_curve_evaluate_3d(&r3, c, (qaws_scalar)t, flags);
@@ -94,7 +94,7 @@ static void test_composite(void)
 	cd.segments = segs;
 	cd.segment_count = 3;
 	qaws_curve_create_composite(&c, &cd);
-	st = qaws_exact_curve_prepare(NULL, c, &e, &rep);
+	st = qaws_exact_curve_prepare(&e, &rep, c, NULL);
 	TEST_ASSERT(st == QAWS_STATUS_OK && qaws_exact_curve_span_count(e) == 5, "a composite of three curves: one exact curve of 1 + 3 + 1 spans");
 	if (st != QAWS_STATUS_OK)
 	{
@@ -152,7 +152,7 @@ static void test_frozen(void)
 			d.parameterization = kinds[k];
 			d.closed = (int)closed;
 			qaws_curve_create_catmull_rom(&c, &d);
-			st = qaws_exact_curve_prepare(NULL, c, &e, &rep);
+			st = qaws_exact_curve_prepare(&e, &rep, c, NULL);
 			if (st != QAWS_STATUS_OK)
 			{
 				sprintf(msg, "%s%s Catmull-Rom: frozen preparation", names[k], closed ? " closed" : "");

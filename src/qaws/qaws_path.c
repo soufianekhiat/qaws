@@ -1009,7 +1009,7 @@ static int pt_orient(qaws_scalar const* a, qaws_scalar const* b, qaws_scalar con
 	double da[2] = { a[0], a[1] }, db[2] = { b[0], b[1] }, dc[2] = { c[0], c[1] };
 	qaws_exact_sign sg = QAWS_EXACT_ZERO;
 	/* orient2d(b, c, a) = (b - a) x (c - a) */
-	if (qaws_exact_orient2d(db, dc, da, &sg, NULL) == QAWS_STATUS_OK)
+	if (qaws_exact_orient2d(&sg, NULL, db, dc, da) == QAWS_STATUS_OK)
 		return (int)sg;
 #endif
 	{

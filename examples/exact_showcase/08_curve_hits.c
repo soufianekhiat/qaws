@@ -28,7 +28,7 @@ static void demo_curve_hits(void)
 	qaws_exact_desc_default(&desc);
 	desc.space_exp2 = -29;   /* every 2^-k, k <= 28, on the lattice (x up to 4) */
 	desc.coord_bits = 32;
-	qaws_exact_curve_prepare(&desc, ca, &ea, NULL);
+	qaws_exact_curve_prepare(&ea, NULL, ca, &desc);
 	svg_open(&sv, "showcase/exact8_curve_hits.svg", 1260, 520, "Certified curve / curve intersections near a tangency",
 		"Two quartic bumps, the upper one dipping 2^-k below the top of the lower one: always two crossings, 2^(-k/2) apart (coordinates on the 2^-29 lattice).");
 	for (k = 1; k <= EC_K; k++)
@@ -47,8 +47,8 @@ static void demo_curve_hits(void)
 		}
 		d.control_points = bcp;
 		qaws_curve_create_bezier(&cb, &d);
-		qaws_exact_curve_prepare(&desc, cb, &eb, NULL);
-		if (qaws_exact_curve_curve_hits(ea, eb, hits, 8, &n) != QAWS_STATUS_OK)
+		qaws_exact_curve_prepare(&eb, NULL, cb, &desc);
+		if (qaws_exact_curve_curve_hits(hits, &n, ea, eb, 8) != QAWS_STATUS_OK)
 			failed++;
 		exact_n[k] = (int)n;
 		qaws_curve_find_intersections_2d(ix, &nf, ca, cb, 16);
@@ -60,7 +60,7 @@ static void demo_curve_hits(void)
 			for (i = 0; i <= 200; i++)
 			{
 				double out[2];
-				qaws_exact_curve_evaluate(eb, i / 200.0, 0, out, NULL);
+				qaws_exact_curve_evaluate(out, NULL, eb, i / 200.0, 0);
 				xy[2 * i] = vx(&vc, out[0]);
 				xy[2 * i + 1] = vy(&vc, out[1]);
 			}
@@ -77,8 +77,8 @@ static void demo_curve_hits(void)
 			for (i = 0; i <= 200; i++)
 			{
 				double t = 0.4975 + 0.005 * i / 200.0, pa[2], pb[2];
-				qaws_exact_curve_evaluate(ea, t, 0, pa, NULL);
-				qaws_exact_curve_evaluate(eb, t, 0, pb, NULL);
+				qaws_exact_curve_evaluate(pa, NULL, ea, t, 0);
+				qaws_exact_curve_evaluate(pb, NULL, eb, t, 0);
 				xa[2 * i] = vx(&vz, pa[0]);
 				xa[2 * i + 1] = vy(&vz, pa[1]);
 				xb[2 * i] = vx(&vz, pb[0]);
@@ -89,7 +89,7 @@ static void demo_curve_hits(void)
 			for (j = 0; j < n; j++)
 			{
 				double p[2];
-				qaws_exact_curve_evaluate(ea, 0.5 * (hits[j].a_lo + hits[j].a_hi), 0, p, NULL);
+				qaws_exact_curve_evaluate(p, NULL, ea, 0.5 * (hits[j].a_lo + hits[j].a_hi), 0);
 				svg_circle(&sv, vx(&vz, p[0]), vy(&vz, p[1]), 6, "none", "#1a7f37");
 				sprintf(buf, "s in [%.15f, %.15f]", hits[j].a_lo, hits[j].a_hi);
 				svg_text(&sv, vz.x0 + 12, vz.y0 + vz.h - 30 + 16 * j, 11, "#1a7f37", "start", buf);
@@ -103,7 +103,7 @@ static void demo_curve_hits(void)
 		for (i = 0; i <= 200; i++)
 		{
 			double out[2];
-			qaws_exact_curve_evaluate(ea, i / 200.0, 0, out, NULL);
+			qaws_exact_curve_evaluate(out, NULL, ea, i / 200.0, 0);
 			xy[2 * i] = vx(&vc, out[0]);
 			xy[2 * i + 1] = vy(&vc, out[1]);
 		}
