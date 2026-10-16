@@ -623,7 +623,7 @@ qaws_status qaws_exact_curve_batch_closest(qaws_exact_closest_point* out_points,
 		if (!J.chunk_stats)
 			st = QAWS_STATUS_ALLOCATION_FAILURE;
 		if (st == QAWS_STATUS_OK)
-			st = qaws_internal_parallel(point_count, CL_GRAIN, ecl_chunk, desc->executor, &J);
+			st = qaws_internal_parallel(point_count, CL_GRAIN, ecl_chunk, &J, desc->executor);
 		for (ch = 0; J.chunk_stats && ch < nchunk; ch++)
 		{
 			stats.candidate_count += J.chunk_stats[ch].candidate_count;
@@ -1449,7 +1449,7 @@ qaws_status qaws_exact_surface_batch_closest(qaws_exact_surface_closest_point* o
 		if (!J.chunk_stats)
 			st = QAWS_STATUS_ALLOCATION_FAILURE;
 		else
-			st = qaws_internal_parallel(point_count, CL_GRAIN, esc_chunk, desc->executor, &J);
+			st = qaws_internal_parallel(point_count, CL_GRAIN, esc_chunk, &J, desc->executor);
 		for (ch = 0; J.chunk_stats && ch < nchunk; ch++)
 		{
 			stats.candidate_count += J.chunk_stats[ch].candidate_count;

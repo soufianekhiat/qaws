@@ -80,7 +80,7 @@ float3 node_of(uint n)
 {
     float out_node[3];
     uint cell = n / 16, q = n % 16;
-    qaws_surface_cell_node(0.0, 1.0, 0.0, 1.0, (float)(cell / cells), (float)(cell % cells), (float)cells, (int)q, out_node);
+    qaws_surface_cell_node(out_node, 0.0, 1.0, 0.0, 1.0, (float)(cell / cells), (float)(cell % cells), (float)cells, (int)q);
     return float3(out_node[0], out_node[1], out_node[2]);
 }
 
@@ -95,7 +95,7 @@ void CSNode(uint3 id : SV_DispatchThreadID)
         return;
     node = node_of(n);
     w = load_window(node.x, node.y);
-    f = qaws_bspline_surface_node(functional, w.cp, w.dot, w.uk, w.vk, (int)u_degree, (int)v_degree, node.x, node.y, node.z);
+    f = qaws_bspline_surface_node(w.cp, w.dot, w.uk, w.vk, functional, (int)u_degree, (int)v_degree, node.x, node.y, node.z);
     node_values[n * 3 + 0] = f.v;
     node_values[n * 3 + 1] = f.t;
     node_values[n * 3 + 2] = f.tt;
@@ -117,7 +117,7 @@ void CSGather(uint3 id : SV_DispatchThreadID)
         qaws_vec3 g;
         if (i < w.ufirst || i > w.ufirst + (int)u_degree || j < w.vfirst || j > w.vfirst + (int)v_degree)
             continue;
-        g = qaws_bspline_surface_node_adjoint_cp(functional, w.cp, w.uk, w.vk, (int)u_degree, (int)v_degree, node.x, node.y,
+        g = qaws_bspline_surface_node_adjoint_cp(w.cp, w.uk, w.vk, functional, (int)u_degree, (int)v_degree, node.x, node.y,
             i - w.ufirst, j - w.vfirst, node.z);
         acc += float3(g.x, g.y, g.z);
     }

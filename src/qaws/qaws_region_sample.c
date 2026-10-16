@@ -710,7 +710,7 @@ static qaws_status rs_build_density(qaws_region_sampler* s)
 	}
 	/* the panels in parallel, then their masses summed in order */
 	c->s = s;
-	st = qaws_internal_parallel(total, 2, rs_build_job, s->executor, c);
+	st = qaws_internal_parallel(total, 2, rs_build_job, c, s->executor);
 	for (k = 0; k < 256; k++)
 		if (c->rmax[k] > rmax) rmax = c->rmax[k];
 	free(c);
@@ -1122,7 +1122,7 @@ static qaws_status rs_batch_job(void* ctx, unsigned int chunk, unsigned int b, u
 
 static qaws_status rs_batch_run(rs_batch const* c, unsigned int count)
 {
-	return qaws_internal_parallel(count, RS_GRAIN, rs_batch_job, c->s->executor, (void*)c);
+	return qaws_internal_parallel(count, RS_GRAIN, rs_batch_job, (void*)c, c->s->executor);
 }
 
 /* count pattern points (or given uv) through the map */

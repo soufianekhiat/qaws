@@ -126,7 +126,7 @@ static void test_sampling(int id, qaws_sample_measure_desc const* measure, char 
 	{
 		qaws_dual1 m;
 		sc_load(cps, dir, k, &w[k]);
-		m = qaws_bspline_integrate(id, flo, w[k].lcp, w[k].ldir, w[k].lk, SC_DEG, SC_DEG, w[k].a, w[k].b);
+		m = qaws_bspline_integrate(w[k].lcp, w[k].ldir, w[k].lk, id, flo, SC_DEG, SC_DEG, w[k].a, w[k].b);
 		cum[k + 1] = cum[k] + m.v;
 		cum1[k + 1] = cum1[k] + m.t;
 		cum2[k + 1] = cum2[k] + m.tt;
@@ -148,12 +148,12 @@ static void test_sampling(int id, qaws_sample_measure_desc const* measure, char 
 		while (k + 1 < SC_SPANS && cum[k + 1] <= sigma)
 			k++;
 		span_of[i] = k;
-		ts[i] = qaws_bspline_cdf_solve(id, flo, w[k].lcp, w[k].lk, SC_DEG, SC_DEG, w[k].a, w[k].b, (qaws_scalar)(sigma - cum[k]));
+		ts[i] = qaws_bspline_cdf_solve(w[k].lcp, w[k].lk, id, flo, SC_DEG, SC_DEG, w[k].a, w[k].b, (qaws_scalar)(sigma - cum[k]));
 		ok_t &= diff_close(ts[i], val[i].t, QAWS_SCALAR_IS_FLOAT ? 1e-3 : 1e-11);
-		part = qaws_bspline_integrate(id, flo, w[k].lcp, w[k].ldir, w[k].lk, SC_DEG, SC_DEG, w[k].a, (qaws_scalar)ts[i]);
-		qaws_bspline_cdf_tangent(id, flo, w[k].lcp, w[k].ldir, w[k].lk, SC_DEG, SC_DEG, (qaws_scalar)ts[i],
-			(qaws_scalar)(dt[i] + frac[i] * cum1[SC_SPANS]), (qaws_scalar)(dt2[i] + frac[i] * cum2[SC_SPANS]),
-			(qaws_scalar)(cum1[k] + part.t), (qaws_scalar)(cum2[k] + part.tt), ot, op);
+		part = qaws_bspline_integrate(w[k].lcp, w[k].ldir, w[k].lk, id, flo, SC_DEG, SC_DEG, w[k].a, (qaws_scalar)ts[i]);
+		qaws_bspline_cdf_tangent(ot, op, w[k].lcp, w[k].ldir, w[k].lk, id, flo, SC_DEG,
+			SC_DEG, (qaws_scalar)ts[i],
+			(qaws_scalar)(dt[i] + frac[i] * cum1[SC_SPANS]), (qaws_scalar)(dt2[i] + frac[i] * cum2[SC_SPANS]), (qaws_scalar)(cum1[k] + part.t), (qaws_scalar)(cum2[k] + part.tt));
 		ok_1 &= diff_close(ot[0], t1[i].t, tol) && sc_vclose(op[0], t1[i].position, tol);
 		ok_2 &= diff_close(ot[1], t2[i].t, tol) && sc_vclose(op[1], t2[i].position, tol);
 	}
@@ -171,7 +171,7 @@ static void test_sampling(int id, qaws_sample_measure_desc const* measure, char 
 	for (i = 0; i < SC_N; i++)
 	{
 		k = span_of[i];
-		lambda[i] = qaws_bspline_cdf_lambda(id, flo, w[k].lcp, w[k].lk, SC_DEG, SC_DEG, (qaws_scalar)ts[i], adj[i].t, adj[i].position);
+		lambda[i] = qaws_bspline_cdf_lambda(w[k].lcp, w[k].lk, id, flo, SC_DEG, SC_DEG, (qaws_scalar)ts[i], adj[i].t, adj[i].position);
 		ok_d &= diff_close(lambda[i], dadj[i], tol);
 		F += lambda[i] * frac[i];
 	}
@@ -195,8 +195,8 @@ static void test_sampling(int id, qaws_sample_measure_desc const* measure, char 
 			for (q = 0; q < 8 * QAWS_SAMPLING_PIECES; q++)
 			{
 				qaws_scalar xw[2];
-				qaws_gauss8(q % 8, xw);
-				acc = qaws_v3_add(acc, qaws_bspline_node_adjoint_cp(id, flo, w[k].lcp, w[k].lk, SC_DEG, SC_DEG,
+				qaws_gauss8(xw, q % 8);
+				acc = qaws_v3_add(acc, qaws_bspline_node_adjoint_cp(w[k].lcp, w[k].lk, id, flo, SC_DEG, SC_DEG,
 					(qaws_scalar)(w[k].a + h * (q / 8) + 0.5 * h * (1 + xw[0])), j, (qaws_scalar)(wspan[k] * 0.5 * h * xw[1])));
 			}
 			/* partial spans and positions of the samples in this span */
@@ -209,8 +209,8 @@ static void test_sampling(int id, qaws_sample_measure_desc const* measure, char 
 				for (q = 0; q < 8 * QAWS_SAMPLING_PIECES && hp > 0; q++)
 				{
 					qaws_scalar xw[2];
-					qaws_gauss8(q % 8, xw);
-					acc = qaws_v3_add(acc, qaws_bspline_node_adjoint_cp(id, flo, w[k].lcp, w[k].lk, SC_DEG, SC_DEG,
+					qaws_gauss8(xw, q % 8);
+					acc = qaws_v3_add(acc, qaws_bspline_node_adjoint_cp(w[k].lcp, w[k].lk, id, flo, SC_DEG, SC_DEG,
 						(qaws_scalar)(w[k].a + hp * (q / 8) + 0.5 * hp * (1 + xw[0])), j, (qaws_scalar)(-lambda[i] * 0.5 * hp * xw[1])));
 				}
 				yb.position = adj[i].position;
@@ -259,7 +259,7 @@ static void test_functional(int id, qaws_curve_functional functional, char const
 	{
 		qaws_dual1 m;
 		sc_load(cps, dir, k, &w[k]);
-		m = qaws_bspline_integrate(id, 0, w[k].lcp, w[k].ldir, w[k].lk, SC_DEG, SC_DEG, w[k].a, w[k].b);
+		m = qaws_bspline_integrate(w[k].lcp, w[k].ldir, w[k].lk, id, 0, SC_DEG, SC_DEG, w[k].a, w[k].b);
 		v += m.v;
 		d1 += m.t;
 		d2 += m.tt;
@@ -278,8 +278,8 @@ static void test_functional(int id, qaws_curve_functional functional, char const
 			for (q = 0; q < 8 * QAWS_SAMPLING_PIECES; q++)
 			{
 				qaws_scalar xw[2];
-				qaws_gauss8(q % 8, xw);
-				acc = qaws_v3_add(acc, qaws_bspline_node_adjoint_cp(id, 0, w[k].lcp, w[k].lk, SC_DEG, SC_DEG,
+				qaws_gauss8(xw, q % 8);
+				acc = qaws_v3_add(acc, qaws_bspline_node_adjoint_cp(w[k].lcp, w[k].lk, id, 0, SC_DEG, SC_DEG,
 					(qaws_scalar)(w[k].a + h * (q / 8) + 0.5 * h * (1 + xw[0])), j, (qaws_scalar)(0.5 * h * xw[1])));
 			}
 		}

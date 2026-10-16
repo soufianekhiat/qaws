@@ -630,7 +630,7 @@ qaws_status qaws_internal_grid_pairs(unsigned int* out_candidates, qaws_bp_grid 
 		if (keys && bp_sweep_cost(boxes, keys, nk, axis) < bp_grid_cost(grid))
 			s = bp_sweep(boxes, grid->count, grid->dim, axis, keys, nk, accept, accept_user, visit, visit_user, &P.candidates[0]);
 		else
-			s = qaws_internal_parallel(grid->ncell, BP_PAIR_GRAIN, bp_par_job, executor, &P);
+			s = qaws_internal_parallel(grid->ncell, BP_PAIR_GRAIN, bp_par_job, &P, executor);
 		free(keys);
 	}
 	for (k = 0; k < n && out_candidates; k++)

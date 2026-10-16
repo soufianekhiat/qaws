@@ -64,8 +64,8 @@ QAWS_INLINE void qaws_rp_cross3(qaws_scalar a[3], qaws_scalar b[3], QAWS_OUT qaw
 
 /* e(A, B) for edges A = (p[0..2], p[3..5]), B = (q[0..2], q[3..5]); with
    which 0 the gradient in A's two vertices (g[0..5]), with which 1 in B's */
-QAWS_INLINE int qaws_repulsive_curve_pair(qaws_scalar p[6], qaws_scalar q[6], qaws_scalar alpha, qaws_scalar beta, int which,
-    QAWS_OUT qaws_scalar e_out[1], QAWS_OUT qaws_scalar g[6])
+QAWS_INLINE int qaws_repulsive_curve_pair(QAWS_OUT qaws_scalar e_out[1], QAWS_OUT qaws_scalar g[6], qaws_scalar p[6], qaws_scalar q[6], qaws_scalar alpha,
+    qaws_scalar beta, int which)
 {
     qaws_scalar e[3];
     qaws_scalar f[3];
@@ -148,8 +148,8 @@ QAWS_INLINE void qaws_rp_dm(qaws_scalar e1[3], qaws_scalar e2[3], qaws_scalar u[
 
 /* e(A, B) for faces A = p (corners 3 x 3), B = q; with which 0 the
    gradient in A's corners (g[0..8]), with which 1 in B's */
-QAWS_INLINE int qaws_repulsive_mesh_pair(qaws_scalar p[9], qaws_scalar q[9], qaws_scalar pw, int which,
-    QAWS_OUT qaws_scalar e_out[1], QAWS_OUT qaws_scalar g[9])
+QAWS_INLINE int qaws_repulsive_mesh_pair(QAWS_OUT qaws_scalar e_out[1], QAWS_OUT qaws_scalar g[9], qaws_scalar p[9], qaws_scalar q[9],
+    qaws_scalar pw, int which)
 {
     qaws_scalar e1[3];
     qaws_scalar e2[3];
@@ -253,7 +253,7 @@ QAWS_INLINE qaws_scalar qaws_repulsive_mesh_coefficients(qaws_scalar p[9], QAWS_
    row A gathers them: kB = 2 w, w = 1/4 l_A l_B sum_ij r^-ex, and kB0 the
    low-order weights of both orders, |T x d|^2 / r^4 r^-ex; ex = 2 sigma + 1,
    sigma = (beta - 1) / alpha - 1. kw[0] = kB, kw[1] = kB0. */
-QAWS_INLINE int qaws_repulsive_curve_metric_pair(qaws_scalar p[6], qaws_scalar q[6], qaws_scalar ex, QAWS_OUT qaws_scalar kw[2])
+QAWS_INLINE int qaws_repulsive_curve_metric_pair(QAWS_OUT qaws_scalar kw[2], qaws_scalar p[6], qaws_scalar q[6], qaws_scalar ex)
 {
     qaws_scalar e[3];
     qaws_scalar f[3];
@@ -296,7 +296,7 @@ QAWS_INLINE int qaws_repulsive_curve_metric_pair(qaws_scalar p[6], qaws_scalar q
 /* the meshes' weights for faces (A, B), A != B: w = a_A a_B r^-ex,
    kB = 2 w, kB0 = w ((N_A . d)^2 + (N_B . d)^2) / r^4; ex = 2 sigma + 2,
    sigma = 1 - 2 / p */
-QAWS_INLINE int qaws_repulsive_mesh_metric_pair(qaws_scalar p[9], qaws_scalar q[9], qaws_scalar ex, QAWS_OUT qaws_scalar kw[2])
+QAWS_INLINE int qaws_repulsive_mesh_metric_pair(QAWS_OUT qaws_scalar kw[2], qaws_scalar p[9], qaws_scalar q[9], qaws_scalar ex)
 {
     qaws_scalar e1[3];
     qaws_scalar e2[3];

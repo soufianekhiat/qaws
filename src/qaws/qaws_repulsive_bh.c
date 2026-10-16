@@ -654,7 +654,7 @@ static qaws_status bh_traverse(bh_ctx* c)
 		free(p.chunk); free(p.share); free(p.blocks);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
-	st = qaws_internal_parallel(c->nitems, GRAIN, bh_chunk, c->executor, &p);
+	st = qaws_internal_parallel(c->nitems, GRAIN, bh_chunk, &p, c->executor);
 	if (st == QAWS_STATUS_OK)
 	{
 		c->E = 0;
@@ -996,7 +996,7 @@ static qaws_status rbh_finish(qaws_internal_rbh_op* op, double const* lo, double
 	p.chunk = (rbh_build*)calloc(chunks + 1, sizeof(rbh_build));
 	if (!p.chunk)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
-	st = qaws_internal_parallel(op->nitems, GRAIN, rbh_chunk, executor, &p);
+	st = qaws_internal_parallel(op->nitems, GRAIN, rbh_chunk, &p, executor);
 	for (i = 0; st == QAWS_STATUS_OK && i < chunks; i++) { op->nnear += p.chunk[i].nnear; op->nfar += p.chunk[i].nfar; }
 	if (st == QAWS_STATUS_OK)
 	{

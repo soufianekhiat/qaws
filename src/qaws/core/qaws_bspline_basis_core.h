@@ -100,11 +100,11 @@ QAWS_INLINE int qaws_find_span(
  * =================================================================== */
 
 QAWS_INLINE void qaws_bspline_basis(
+    QAWS_OUT qaws_scalar out_N[QAWS_CORE_MAX_POINTS],
     qaws_scalar knots[QAWS_CORE_MAX_POINTS * 2],
     int degree,
     int span,
-    qaws_scalar t,
-    QAWS_OUT qaws_scalar out_N[QAWS_CORE_MAX_POINTS])
+    qaws_scalar t)
 {
     qaws_scalar left[QAWS_CORE_MAX_POINTS];
     qaws_scalar right[QAWS_CORE_MAX_POINTS];

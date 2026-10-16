@@ -1267,7 +1267,7 @@ qaws_status qaws_curve_batch_find_level_crossings(
 		for (k = 0; s == QAWS_STATUS_OK && k < J.nchunk; k++)
 			J.ctx[k] = x;
 		if (s == QAWS_STATUS_OK)
-			s = qaws_internal_parallel(nseg, LC_GRAIN, lc_chunk, desc->executor, &J);
+			s = qaws_internal_parallel(nseg, LC_GRAIN, lc_chunk, &J, desc->executor);
 		/* the chunks' lists together */
 		for (k = 0; J.ctx && k < J.nchunk; k++)
 		{
@@ -1600,7 +1600,7 @@ static qaws_status cp_run(qaws_curve const* const* curves, unsigned int dim, qaw
 	J.max_distance = max_distance;
 	J.out = out;
 	if (s == QAWS_STATUS_OK)
-		s = qaws_internal_parallel(point_count, CP_GRAIN, cp_chunk, executor, &J);
+		s = qaws_internal_parallel(point_count, CP_GRAIN, cp_chunk, &J, executor);
 	for (k = 0; k < nchunk; k++)
 	{
 		stats->candidate_count += J.stats[k].candidate_count;

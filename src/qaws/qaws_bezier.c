@@ -48,9 +48,9 @@ static qaws_status bezier_eval_span_2d(
 	if ((eval_flags & QAWS_EVAL_FLAG_D3) && degree >= 3) {
 		qaws_scalar d1cp[QAWS_CORE_MAX_POINTS * 2], d2cp[QAWS_CORE_MAX_POINTS * 2], d3cp[QAWS_CORE_MAX_POINTS * 2];
 		qaws_vec2 d3val;
-		qaws_bezier_deriv_points_2d(local_cp, (int)degree, d1cp);
-		qaws_bezier_deriv_points_2d(d1cp, (int)degree - 1, d2cp);
-		qaws_bezier_deriv_points_2d(d2cp, (int)degree - 2, d3cp);
+		qaws_bezier_deriv_points_2d(d1cp, local_cp, (int)degree);
+		qaws_bezier_deriv_points_2d(d2cp, d1cp, (int)degree - 1);
+		qaws_bezier_deriv_points_2d(d3cp, d2cp, (int)degree - 2);
 		d3val = qaws_decasteljau_2d(d3cp, (int)degree - 3, local_t);
 		out_result->d3.x = d3val.x; out_result->d3.y = d3val.y;
 		out_result->valid_flags |= QAWS_EVAL_FLAG_D3;
@@ -98,9 +98,9 @@ static qaws_status bezier_eval_span_3d(
 	if ((eval_flags & QAWS_EVAL_FLAG_D3) && degree >= 3) {
 		qaws_scalar d1cp[QAWS_CORE_MAX_POINTS * 3], d2cp[QAWS_CORE_MAX_POINTS * 3], d3cp[QAWS_CORE_MAX_POINTS * 3];
 		qaws_vec3 d3val;
-		qaws_bezier_deriv_points_3d(local_cp, (int)degree, d1cp);
-		qaws_bezier_deriv_points_3d(d1cp, (int)degree - 1, d2cp);
-		qaws_bezier_deriv_points_3d(d2cp, (int)degree - 2, d3cp);
+		qaws_bezier_deriv_points_3d(d1cp, local_cp, (int)degree);
+		qaws_bezier_deriv_points_3d(d2cp, d1cp, (int)degree - 1);
+		qaws_bezier_deriv_points_3d(d3cp, d2cp, (int)degree - 2);
 		d3val = qaws_decasteljau_3d(d3cp, (int)degree - 3, local_t);
 		out_result->d3.x = d3val.x; out_result->d3.y = d3val.y; out_result->d3.z = d3val.z;
 		out_result->valid_flags |= QAWS_EVAL_FLAG_D3;

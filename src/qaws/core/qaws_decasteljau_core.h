@@ -131,9 +131,9 @@ QAWS_INLINE qaws_vec3 qaws_decasteljau_3d(
  * =================================================================== */
 
 QAWS_INLINE void qaws_bezier_deriv_points_2d(
+    QAWS_OUT qaws_scalar out_dp[QAWS_CORE_MAX_POINTS * 2],
     qaws_scalar cp[QAWS_CORE_MAX_POINTS * 2],
-    int degree,
-    QAWS_OUT qaws_scalar out_dp[QAWS_CORE_MAX_POINTS * 2])
+    int degree)
 {
     qaws_scalar deg = (qaws_scalar)degree;
     int i;
@@ -148,9 +148,9 @@ QAWS_INLINE void qaws_bezier_deriv_points_2d(
  * =================================================================== */
 
 QAWS_INLINE void qaws_bezier_deriv_points_3d(
+    QAWS_OUT qaws_scalar out_dp[QAWS_CORE_MAX_POINTS * 3],
     qaws_scalar cp[QAWS_CORE_MAX_POINTS * 3],
-    int degree,
-    QAWS_OUT qaws_scalar out_dp[QAWS_CORE_MAX_POINTS * 3])
+    int degree)
 {
     qaws_scalar deg = (qaws_scalar)degree;
     int i;
@@ -186,16 +186,16 @@ QAWS_INLINE qaws_eval_2d qaws_decasteljau_eval_2d(
     result.d2.x = QAWS_ZERO; result.d2.y = QAWS_ZERO;
 
     if ((eval_flags & 0x2) && degree >= 1) {
-        qaws_bezier_deriv_points_2d(cp, degree, d1cp);
+        qaws_bezier_deriv_points_2d(d1cp, cp, degree);
         d1val = qaws_decasteljau_2d(d1cp, degree - 1, t);
         result.d1 = d1val;
     }
 
     if ((eval_flags & 0x4) && degree >= 2) {
         if (!(eval_flags & 0x2)) {
-            qaws_bezier_deriv_points_2d(cp, degree, d1cp);
+            qaws_bezier_deriv_points_2d(d1cp, cp, degree);
         }
-        qaws_bezier_deriv_points_2d(d1cp, degree - 1, d2cp);
+        qaws_bezier_deriv_points_2d(d2cp, d1cp, degree - 1);
         d2val = qaws_decasteljau_2d(d2cp, degree - 2, t);
         result.d2 = d2val;
     }
@@ -225,16 +225,16 @@ QAWS_INLINE qaws_eval_3d qaws_decasteljau_eval_3d(
     result.d2.x = QAWS_ZERO; result.d2.y = QAWS_ZERO; result.d2.z = QAWS_ZERO;
 
     if ((eval_flags & 0x2) && degree >= 1) {
-        qaws_bezier_deriv_points_3d(cp, degree, d1cp);
+        qaws_bezier_deriv_points_3d(d1cp, cp, degree);
         d1val = qaws_decasteljau_3d(d1cp, degree - 1, t);
         result.d1 = d1val;
     }
 
     if ((eval_flags & 0x4) && degree >= 2) {
         if (!(eval_flags & 0x2)) {
-            qaws_bezier_deriv_points_3d(cp, degree, d1cp);
+            qaws_bezier_deriv_points_3d(d1cp, cp, degree);
         }
-        qaws_bezier_deriv_points_3d(d1cp, degree - 1, d2cp);
+        qaws_bezier_deriv_points_3d(d2cp, d1cp, degree - 1);
         d2val = qaws_decasteljau_3d(d2cp, degree - 2, t);
         result.d2 = d2val;
     }

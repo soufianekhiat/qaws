@@ -501,9 +501,9 @@ QAWS_INLINE qaws_vec2 qaws_decasteljau_2d(
  * ---------------------------------------------------------------- */
 
 QAWS_INLINE void qaws_bezier_deriv_points_2d(
+    qaws_scalar out_dp[QAWS_CORE_MAX_POINTS * 2],
     qaws_scalar cp[QAWS_CORE_MAX_POINTS * 2],
-    int degree,
-    qaws_scalar out_dp[QAWS_CORE_MAX_POINTS * 2])
+    int degree)
 {
     qaws_scalar deg = (qaws_scalar)degree;  /* QAWS_LITERAL needed for Halide */
     int i;

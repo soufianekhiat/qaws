@@ -45,7 +45,7 @@
 #define QAWS_CORE_SURFACE_WINDOW (QAWS_CORE_MAX_POINTS * QAWS_CORE_MAX_POINTS * 3)
 
 /* 4-point Gauss-Legendre rule on [-1, 1]: xw[0] node, xw[1] weight. */
-QAWS_INLINE void qaws_gauss4(int k, QAWS_OUT qaws_scalar xw[2])
+QAWS_INLINE void qaws_gauss4(QAWS_OUT qaws_scalar xw[2], int k)
 {
     qaws_scalar s = k < 2 ? -QAWS_ONE : QAWS_ONE;
     int m = k < 2 ? 1 - k : k - 2;
@@ -56,15 +56,15 @@ QAWS_INLINE void qaws_gauss4(int k, QAWS_OUT qaws_scalar xw[2])
 /* Node q (0..15) of cell (ci, cj) of a cells x cells grid over
    [u0, u1] x [v0, v1]: node = (u, v, weight). */
 QAWS_INLINE void qaws_surface_cell_node(
-    qaws_scalar u0, qaws_scalar u1, qaws_scalar v0, qaws_scalar v1,
-    qaws_scalar cell_u, qaws_scalar cell_v, qaws_scalar cells, int q,
-    QAWS_OUT qaws_scalar node[3])
+    QAWS_OUT qaws_scalar node[3], qaws_scalar u0, qaws_scalar u1, qaws_scalar v0,
+    qaws_scalar v1, qaws_scalar cell_u, qaws_scalar cell_v, qaws_scalar cells,
+    int q)
 {
     qaws_scalar xa[2];
     qaws_scalar xb[2];
     qaws_scalar du = (u1 - u0) / cells, dv = (v1 - v0) / cells;
-    qaws_gauss4(q / 4, xa);
-    qaws_gauss4(q - 4 * (q / 4), xb);
+    qaws_gauss4(xa, q / 4);
+    qaws_gauss4(xb, q - 4 * (q / 4));
     node[0] = u0 + du * (cell_u + QAWS_LITERAL(0.5) + QAWS_LITERAL(0.5) * xa[0]);
     node[1] = v0 + dv * (cell_v + QAWS_LITERAL(0.5) + QAWS_LITERAL(0.5) * xb[0]);
     node[2] = QAWS_LITERAL(0.25) * du * dv * xa[1] * xb[1];
@@ -117,6 +117,8 @@ QAWS_INLINE void qaws_surface_rows(
 /* Jet entries (S_u, S_v, S_uu, S_uv, S_vv) of the window and of its
    tangents: y[k] for the value, y_dot[k] along local_cp_dot. */
 QAWS_INLINE void qaws_bspline_surface_jet_rows(
+    QAWS_OUT qaws_vec3 y[5],
+    QAWS_OUT qaws_vec3 y_dot[5],
     qaws_scalar local_cp[QAWS_CORE_SURFACE_WINDOW],
     qaws_scalar local_cp_dot[QAWS_CORE_SURFACE_WINDOW],
     qaws_scalar local_u_knots[QAWS_CORE_MAX_POINTS * 2],
@@ -124,9 +126,7 @@ QAWS_INLINE void qaws_bspline_surface_jet_rows(
     int u_degree,
     int v_degree,
     qaws_scalar u,
-    qaws_scalar v,
-    QAWS_OUT qaws_vec3 y[5],
-    QAWS_OUT qaws_vec3 y_dot[5])
+    qaws_scalar v)
 {
     qaws_scalar nu[(QAWS_CORE_MAX_DERIV + 1) * QAWS_CORE_MAX_POINTS];
     qaws_scalar nv[(QAWS_CORE_MAX_DERIV + 1) * QAWS_CORE_MAX_POINTS];
@@ -156,11 +156,11 @@ QAWS_INLINE void qaws_bspline_surface_jet_rows(
 
 /* weight f at (u, v) with its first and second rates along local_cp_dot. */
 QAWS_INLINE qaws_dual1 qaws_bspline_surface_node(
-    int id,
     qaws_scalar local_cp[QAWS_CORE_SURFACE_WINDOW],
     qaws_scalar local_cp_dot[QAWS_CORE_SURFACE_WINDOW],
     qaws_scalar local_u_knots[QAWS_CORE_MAX_POINTS * 2],
     qaws_scalar local_v_knots[QAWS_CORE_MAX_POINTS * 2],
+    int id,
     int u_degree,
     int v_degree,
     qaws_scalar u,
@@ -170,7 +170,7 @@ QAWS_INLINE qaws_dual1 qaws_bspline_surface_node(
     qaws_vec3 y[5];
     qaws_vec3 yd[5];
     qaws_dual1 f;
-    qaws_bspline_surface_jet_rows(local_cp, local_cp_dot, local_u_knots, local_v_knots, u_degree, v_degree, u, v, y, yd);
+    qaws_bspline_surface_jet_rows(y, yd, local_cp, local_cp_dot, local_u_knots, local_v_knots, u_degree, v_degree, u, v);
     f = qaws_core_surface_integrand(id,
         qaws_dual3_make(y[0], yd[0], qaws_v3_zero()), qaws_dual3_make(y[1], yd[1], qaws_v3_zero()),
         qaws_dual3_make(y[2], yd[2], qaws_v3_zero()), qaws_dual3_make(y[3], yd[3], qaws_v3_zero()),
@@ -181,10 +181,10 @@ QAWS_INLINE qaws_dual1 qaws_bspline_surface_node(
 /* c sum_k N_i^(ku_k)(u) N_j^(kv_k)(v) df/dy_k at (u, v) for local control
    point (i, j). */
 QAWS_INLINE qaws_vec3 qaws_bspline_surface_node_adjoint_cp(
-    int id,
     qaws_scalar local_cp[QAWS_CORE_SURFACE_WINDOW],
     qaws_scalar local_u_knots[QAWS_CORE_MAX_POINTS * 2],
     qaws_scalar local_v_knots[QAWS_CORE_MAX_POINTS * 2],
+    int id,
     int u_degree,
     int v_degree,
     qaws_scalar u,
@@ -209,7 +209,7 @@ QAWS_INLINE qaws_vec3 qaws_bspline_surface_node_adjoint_cp(
     ku_of[2] = 2; kv_of[2] = 0;
     ku_of[3] = 1; kv_of[3] = 1;
     ku_of[4] = 0; kv_of[4] = 2;
-    qaws_bspline_surface_jet_rows(local_cp, local_cp, local_u_knots, local_v_knots, u_degree, v_degree, u, v, y, yd);
+    qaws_bspline_surface_jet_rows(y, yd, local_cp, local_cp, local_u_knots, local_v_knots, u_degree, v_degree, u, v);
     qaws_surface_rows(local_u_knots, u_degree, u, nu);
     qaws_surface_rows(local_v_knots, v_degree, v, nv);
     for (k = 0; k < 5; k++) {

@@ -12,7 +12,7 @@
  */
 unsigned int qaws_internal_chunk_count(unsigned int count, unsigned int grain);
 
-qaws_status qaws_internal_parallel(unsigned int count, unsigned int grain, qaws_status (*job)(void* ctx, unsigned int chunk, unsigned int begin, unsigned int end),
-	qaws_batch_executor const* executor, void* ctx);
+qaws_status qaws_internal_parallel(unsigned int count, unsigned int grain, qaws_status (*job)(void* user, unsigned int chunk, unsigned int begin, unsigned int end),
+	void* user, qaws_batch_executor const* executor);
 
 #endif /* QAWS_INTERNAL_PARALLEL_H */

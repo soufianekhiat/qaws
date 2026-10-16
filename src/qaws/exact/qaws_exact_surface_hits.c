@@ -859,7 +859,7 @@ qaws_status qaws_exact_surface_batch_raycast(qaws_exact_ray_hit* out_hits, qaws_
 		if (!J.chunk_stats)
 			st = QAWS_STATUS_ALLOCATION_FAILURE;
 		else
-			st = qaws_internal_parallel(ray_count, ER_GRAIN, er_chunk, desc->executor, &J);
+			st = qaws_internal_parallel(ray_count, ER_GRAIN, er_chunk, &J, desc->executor);
 		for (ch = 0; J.chunk_stats && ch < nchunk; ch++)
 		{
 			stats.candidate_count += J.chunk_stats[ch].candidate_count;

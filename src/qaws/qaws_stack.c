@@ -933,7 +933,7 @@ qaws_status qaws_stack_boolean_2d(qaws_stack_result** out, qaws_stack_2d const* 
 	}
 	r->count = n;
 	job.ct = ct; job.a = a; job.b = b; job.z = r->z; job.levels = r->levels;
-	s = qaws_internal_parallel(n, 1, sk_level_job, executor, &job);
+	s = qaws_internal_parallel(n, 1, sk_level_job, &job, executor);
 	if (s != QAWS_STATUS_OK)
 	{
 		qaws_stack_result_destroy(r);

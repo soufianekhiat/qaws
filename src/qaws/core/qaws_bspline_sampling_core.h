@@ -51,7 +51,7 @@
 #define QAWS_CORE_INTEGRAND_CURVATURE_SQ 3
 
 /* 8-point Gauss-Legendre rule on [-1, 1]: xw[0] node, xw[1] weight. */
-QAWS_INLINE void qaws_gauss8(int k, QAWS_OUT qaws_scalar xw[2])
+QAWS_INLINE void qaws_gauss8(QAWS_OUT qaws_scalar xw[2], int k)
 {
     int m = k < 4 ? 3 - k : k - 4;
     qaws_scalar s = k < 4 ? -QAWS_ONE : QAWS_ONE;
@@ -87,28 +87,8 @@ QAWS_INLINE qaws_dual1 qaws_core_integrand(int id, qaws_scalar curvature_floor, 
 /* Jets (C', C'', C''') at t and the first two along the control point
    tangents. */
 QAWS_INLINE void qaws_bspline_jet_rows(
-    qaws_scalar local_cp[QAWS_CORE_MAX_POINTS * 3],
-    qaws_scalar local_cp_dot[QAWS_CORE_MAX_POINTS * 3],
-    qaws_scalar local_knots[QAWS_CORE_MAX_POINTS * 2],
-    int degree,
-    int span,
-    qaws_scalar t,
     QAWS_OUT qaws_vec3 c[4],
-    QAWS_OUT qaws_vec3 c_dot[3])
-{
-    qaws_scalar ders[(QAWS_CORE_MAX_DERIV + 1) * QAWS_CORE_MAX_POINTS];
-    int k;
-    qaws_bspline_diff_rows(local_knots, degree, span, t, ders);
-    for (k = 0; k < 4; k++)
-        c[k] = qaws_bspline_diff_row_sum(ders, local_cp, degree, k);
-    for (k = 0; k < 3; k++)
-        c_dot[k] = qaws_bspline_diff_row_sum(ders, local_cp_dot, degree, k);
-}
-
-/* f at t along the control point tangents (v, t, tt). */
-QAWS_INLINE qaws_dual1 qaws_bspline_integrand_at(
-    int id,
-    qaws_scalar curvature_floor,
+    QAWS_OUT qaws_vec3 c_dot[3],
     qaws_scalar local_cp[QAWS_CORE_MAX_POINTS * 3],
     qaws_scalar local_cp_dot[QAWS_CORE_MAX_POINTS * 3],
     qaws_scalar local_knots[QAWS_CORE_MAX_POINTS * 2],
@@ -116,9 +96,29 @@ QAWS_INLINE qaws_dual1 qaws_bspline_integrand_at(
     int span,
     qaws_scalar t)
 {
+    qaws_scalar ders[(QAWS_CORE_MAX_DERIV + 1) * QAWS_CORE_MAX_POINTS];
+    int k;
+    qaws_bspline_diff_rows(local_knots, degree, span, t, ders);
+    for (k = 0; k < 4; k++)
+        c[k] = qaws_bspline_diff_row_sum(local_cp, ders, degree, k);
+    for (k = 0; k < 3; k++)
+        c_dot[k] = qaws_bspline_diff_row_sum(local_cp_dot, ders, degree, k);
+}
+
+/* f at t along the control point tangents (v, t, tt). */
+QAWS_INLINE qaws_dual1 qaws_bspline_integrand_at(
+    qaws_scalar local_cp[QAWS_CORE_MAX_POINTS * 3],
+    qaws_scalar local_cp_dot[QAWS_CORE_MAX_POINTS * 3],
+    qaws_scalar local_knots[QAWS_CORE_MAX_POINTS * 2],
+    int id,
+    qaws_scalar curvature_floor,
+    int degree,
+    int span,
+    qaws_scalar t)
+{
     qaws_vec3 c[4];
     qaws_vec3 c_dot[3];
-    qaws_bspline_jet_rows(local_cp, local_cp_dot, local_knots, degree, span, t, c, c_dot);
+    qaws_bspline_jet_rows(c, c_dot, local_cp, local_cp_dot, local_knots, degree, span, t);
     return qaws_core_integrand(id, curvature_floor,
         qaws_dual3_make(c[1], c_dot[1], qaws_v3_zero()), qaws_dual3_make(c[2], c_dot[2], qaws_v3_zero()));
 }
@@ -126,11 +126,11 @@ QAWS_INLINE qaws_dual1 qaws_bspline_integrand_at(
 /* Integral of f over [a, b] inside one span, with its first and second
    derivatives along the control point tangents (zero when b <= a). */
 QAWS_INLINE qaws_dual1 qaws_bspline_integrate(
-    int id,
-    qaws_scalar curvature_floor,
     qaws_scalar local_cp[QAWS_CORE_MAX_POINTS * 3],
     qaws_scalar local_cp_dot[QAWS_CORE_MAX_POINTS * 3],
     qaws_scalar local_knots[QAWS_CORE_MAX_POINTS * 2],
+    int id,
+    qaws_scalar curvature_floor,
     int degree,
     int span,
     qaws_scalar a,
@@ -145,9 +145,9 @@ QAWS_INLINE qaws_dual1 qaws_bspline_integrate(
     int piece, k;
     for (piece = 0; piece < QAWS_SAMPLING_PIECES; piece++) {
         for (k = 0; k < 8; k++) {
-            qaws_gauss8(k, xw);
+            qaws_gauss8(xw, k);
             W = QAWS_LITERAL(0.5) * h * xw[1];
-            f = qaws_bspline_integrand_at(id, curvature_floor, local_cp, local_cp_dot, local_knots, degree, span,
+            f = qaws_bspline_integrand_at(local_cp, local_cp_dot, local_knots, id, curvature_floor, degree, span,
                 lo + QAWS_LITERAL(0.5) * h * (QAWS_ONE + xw[0]));
             sum = qaws_dual1_make(sum.v + W * f.v, sum.t + W * f.t, sum.tt + W * f.tt);
         }
@@ -162,10 +162,10 @@ QAWS_INLINE qaws_dual1 qaws_bspline_integrate(
 /* Parameter in [a, b] (one span) at which the measure from a reaches
    `remaining`: safeguarded Newton, fixed iteration count. */
 QAWS_INLINE qaws_scalar qaws_bspline_cdf_solve(
-    int id,
-    qaws_scalar curvature_floor,
     qaws_scalar local_cp[QAWS_CORE_MAX_POINTS * 3],
     qaws_scalar local_knots[QAWS_CORE_MAX_POINTS * 2],
+    int id,
+    qaws_scalar curvature_floor,
     int degree,
     int span,
     qaws_scalar a,
@@ -177,14 +177,14 @@ QAWS_INLINE qaws_scalar qaws_bspline_cdf_solve(
     int it;
     for (it = 0; it < QAWS_CORE_MAX_POINTS * 3; it++)
         zero_dot[it] = QAWS_ZERO;
-    total = qaws_bspline_integrate(id, curvature_floor, local_cp, zero_dot, local_knots, degree, span, a, b).v;
+    total = qaws_bspline_integrate(local_cp, zero_dot, local_knots, id, curvature_floor, degree, span, a, b).v;
     len = QAWS_SELECT(total > QAWS_ZERO, remaining / total, QAWS_ZERO);
     t = a + (b - a) * QAWS_SELECT(len < QAWS_ZERO, QAWS_ZERO, QAWS_SELECT(len > QAWS_ONE, QAWS_ONE, len));
     for (it = 0; it < 40; it++) {
-        f = qaws_bspline_integrate(id, curvature_floor, local_cp, zero_dot, local_knots, degree, span, a, t).v - remaining;
+        f = qaws_bspline_integrate(local_cp, zero_dot, local_knots, id, curvature_floor, degree, span, a, t).v - remaining;
         hi = QAWS_SELECT(f > QAWS_ZERO, t, hi);
         lo = QAWS_SELECT(f > QAWS_ZERO, lo, t);
-        m = qaws_bspline_integrand_at(id, curvature_floor, local_cp, zero_dot, local_knots, degree, span, t).v;
+        m = qaws_bspline_integrand_at(local_cp, zero_dot, local_knots, id, curvature_floor, degree, span, t).v;
         next = QAWS_SELECT(m > QAWS_ZERO, t - f / QAWS_SELECT(m > QAWS_ZERO, m, QAWS_ONE), QAWS_LITERAL(0.5) * (lo + hi));
         next = QAWS_SELECT(next > lo && next < hi, next, QAWS_LITERAL(0.5) * (lo + hi));
         t = QAWS_SELECT(f == QAWS_ZERO, t, next);
@@ -203,26 +203,26 @@ QAWS_INLINE qaws_scalar qaws_bspline_cdf_solve(
  * out_p = (position tangent, second tangent).
  */
 QAWS_INLINE void qaws_bspline_cdf_tangent(
-    int id,
-    qaws_scalar curvature_floor,
+    QAWS_OUT qaws_scalar out_t[2],
+    QAWS_OUT qaws_vec3 out_p[2],
     qaws_scalar local_cp[QAWS_CORE_MAX_POINTS * 3],
     qaws_scalar local_cp_dot[QAWS_CORE_MAX_POINTS * 3],
     qaws_scalar local_knots[QAWS_CORE_MAX_POINTS * 2],
+    int id,
+    qaws_scalar curvature_floor,
     int degree,
     int span,
     qaws_scalar t,
     qaws_scalar sigma_dot,
     qaws_scalar sigma_dot2,
     qaws_scalar measure_dot,
-    qaws_scalar measure_dot2,
-    QAWS_OUT qaws_scalar out_t[2],
-    QAWS_OUT qaws_vec3 out_p[2])
+    qaws_scalar measure_dot2)
 {
     qaws_vec3 c[4];
     qaws_vec3 c_dot[3];
     qaws_dual1 me, mt;
     qaws_scalar td, tdd, m;
-    qaws_bspline_jet_rows(local_cp, local_cp_dot, local_knots, degree, span, t, c, c_dot);
+    qaws_bspline_jet_rows(c, c_dot, local_cp, local_cp_dot, local_knots, degree, span, t);
     me = qaws_core_integrand(id, curvature_floor,
         qaws_dual3_make(c[1], c_dot[1], qaws_v3_zero()), qaws_dual3_make(c[2], c_dot[2], qaws_v3_zero()));
     mt = qaws_core_integrand(id, curvature_floor,
@@ -240,10 +240,10 @@ QAWS_INLINE void qaws_bspline_cdf_tangent(
 
 /* lambda = (t_bar + p_bar . C') / m of one sample (0 where m vanishes). */
 QAWS_INLINE qaws_scalar qaws_bspline_cdf_lambda(
-    int id,
-    qaws_scalar curvature_floor,
     qaws_scalar local_cp[QAWS_CORE_MAX_POINTS * 3],
     qaws_scalar local_knots[QAWS_CORE_MAX_POINTS * 2],
+    int id,
+    qaws_scalar curvature_floor,
     int degree,
     int span,
     qaws_scalar t,
@@ -253,17 +253,17 @@ QAWS_INLINE qaws_scalar qaws_bspline_cdf_lambda(
     qaws_vec3 c[4];
     qaws_vec3 c_dot[3];
     qaws_scalar m;
-    qaws_bspline_jet_rows(local_cp, local_cp, local_knots, degree, span, t, c, c_dot);
+    qaws_bspline_jet_rows(c, c_dot, local_cp, local_cp, local_knots, degree, span, t);
     m = qaws_core_integrand(id, curvature_floor, qaws_dual3_const(c[1]), qaws_dual3_const(c[2])).v;
     return QAWS_SELECT(m > QAWS_ZERO, (t_bar + qaws_v3_dot(p_bar, c[1])) / QAWS_SELECT(m > QAWS_ZERO, m, QAWS_ONE), QAWS_ZERO);
 }
 
 /* c (N_j' df/dC' + N_j'' df/dC'') at the node t for local control point j. */
 QAWS_INLINE qaws_vec3 qaws_bspline_node_adjoint_cp(
-    int id,
-    qaws_scalar curvature_floor,
     qaws_scalar local_cp[QAWS_CORE_MAX_POINTS * 3],
     qaws_scalar local_knots[QAWS_CORE_MAX_POINTS * 2],
+    int id,
+    qaws_scalar curvature_floor,
     int degree,
     int span,
     qaws_scalar t,
@@ -275,8 +275,8 @@ QAWS_INLINE qaws_vec3 qaws_bspline_node_adjoint_cp(
     qaws_scalar g1[3], g2[3];
     int i;
     qaws_bspline_diff_rows(local_knots, degree, span, t, ders);
-    c1 = qaws_bspline_diff_row_sum(ders, local_cp, degree, 1);
-    c2 = qaws_bspline_diff_row_sum(ders, local_cp, degree, 2);
+    c1 = qaws_bspline_diff_row_sum(local_cp, ders, degree, 1);
+    c2 = qaws_bspline_diff_row_sum(local_cp, ders, degree, 2);
     /* gradient by seeding each component of C' and C'' */
     for (i = 0; i < 3; i++) {
         e = qaws_v3(i == 0 ? QAWS_ONE : QAWS_ZERO, i == 1 ? QAWS_ONE : QAWS_ZERO, i == 2 ? QAWS_ONE : QAWS_ZERO);

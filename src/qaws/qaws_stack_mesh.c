@@ -792,7 +792,7 @@ qaws_status qaws_stack_mesh_3d(qaws_mesh_3d** out, qaws_stack_mesh_desc const* d
 	}
 	job.st = st;
 	job.s = s;
-	status = qaws_internal_parallel(ns, 1, sm_section_job, desc->executor, &job);
+	status = qaws_internal_parallel(ns, 1, sm_section_job, &job, desc->executor);
 	/* contours, measured */
 	for (i = 0; status == QAWS_STATUS_OK && i < ns; i++)
 	{

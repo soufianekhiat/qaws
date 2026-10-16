@@ -45,8 +45,8 @@ QAWS_INLINE void qaws_bspline_diff_rows(
 
 /* sum_j N_j^(k) values[j] */
 QAWS_INLINE qaws_vec3 qaws_bspline_diff_row_sum(
-    qaws_scalar ders[(QAWS_CORE_MAX_DERIV + 1) * QAWS_CORE_MAX_POINTS],
     qaws_scalar values[QAWS_CORE_MAX_POINTS * 3],
+    qaws_scalar ders[(QAWS_CORE_MAX_DERIV + 1) * QAWS_CORE_MAX_POINTS],
     int degree,
     int k)
 {
@@ -79,20 +79,20 @@ QAWS_INLINE qaws_eval_3d qaws_bspline_tangent_3d(
 
     qaws_bspline_diff_rows(local_knots, degree, span, t, ders);
 
-    a = qaws_bspline_diff_row_sum(ders, local_cp_dot, degree, 0);
-    b = qaws_bspline_diff_row_sum(ders, local_cp, degree, 1);
+    a = qaws_bspline_diff_row_sum(local_cp_dot, ders, degree, 0);
+    b = qaws_bspline_diff_row_sum(local_cp, ders, degree, 1);
     r.position.x = a.x + t_dot * b.x;
     r.position.y = a.y + t_dot * b.y;
     r.position.z = a.z + t_dot * b.z;
 
-    a = qaws_bspline_diff_row_sum(ders, local_cp_dot, degree, 1);
-    b = qaws_bspline_diff_row_sum(ders, local_cp, degree, 2);
+    a = qaws_bspline_diff_row_sum(local_cp_dot, ders, degree, 1);
+    b = qaws_bspline_diff_row_sum(local_cp, ders, degree, 2);
     r.d1.x = a.x + t_dot * b.x;
     r.d1.y = a.y + t_dot * b.y;
     r.d1.z = a.z + t_dot * b.z;
 
-    a = qaws_bspline_diff_row_sum(ders, local_cp_dot, degree, 2);
-    b = qaws_bspline_diff_row_sum(ders, local_cp, degree, 3);
+    a = qaws_bspline_diff_row_sum(local_cp_dot, ders, degree, 2);
+    b = qaws_bspline_diff_row_sum(local_cp, ders, degree, 3);
     r.d2.x = a.x + t_dot * b.x;
     r.d2.y = a.y + t_dot * b.y;
     r.d2.z = a.z + t_dot * b.z;
@@ -136,9 +136,9 @@ QAWS_INLINE qaws_scalar qaws_bspline_adjoint_t_3d(
     qaws_vec3 c1, c2, c3;
 
     qaws_bspline_diff_rows(local_knots, degree, span, t, ders);
-    c1 = qaws_bspline_diff_row_sum(ders, local_cp, degree, 1);
-    c2 = qaws_bspline_diff_row_sum(ders, local_cp, degree, 2);
-    c3 = qaws_bspline_diff_row_sum(ders, local_cp, degree, 3);
+    c1 = qaws_bspline_diff_row_sum(local_cp, ders, degree, 1);
+    c2 = qaws_bspline_diff_row_sum(local_cp, ders, degree, 2);
+    c3 = qaws_bspline_diff_row_sum(local_cp, ders, degree, 3);
     return ybar.position.x * c1.x + ybar.position.y * c1.y + ybar.position.z * c1.z
          + ybar.d1.x * c2.x + ybar.d1.y * c2.y + ybar.d1.z * c2.z
          + ybar.d2.x * c3.x + ybar.d2.y * c3.y + ybar.d2.z * c3.z;

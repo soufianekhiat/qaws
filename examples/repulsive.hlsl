@@ -102,21 +102,21 @@ void CSElement(uint3 tid : SV_DispatchThreadID)
         if (k == 2) {
             float p6[6]; float q6[6]; float g6[6]; float c6[6];
             for (c = 0; c < 6; c++) { p6[c] = p[c]; q6[c] = q[c]; }
-            qaws_repulsive_curve_pair(p6, q6, alpha, beta, 0, e1, g6);
+            qaws_repulsive_curve_pair(e1, g6, p6, q6, alpha, beta, 0);
             share += e1[0];
             for (c = 0; c < 6; c++) blk[c] += g6[c];
-            qaws_repulsive_curve_pair(q6, p6, alpha, beta, 1, e1, g6);
+            qaws_repulsive_curve_pair(e1, g6, q6, p6, alpha, beta, 1);
             for (c = 0; c < 6; c++) blk[c] += g6[c];
-            qaws_repulsive_curve_metric_pair(p6, q6, ex, kw);
+            qaws_repulsive_curve_metric_pair(kw, p6, q6, ex);
             qaws_repulsive_curve_coefficients(q6, c6);
             for (c = 0; c < 6; c++) cJ[c] = c6[c];
         } else {
-            qaws_repulsive_mesh_pair(p, q, alpha, 0, e1, g);
+            qaws_repulsive_mesh_pair(e1, g, p, q, alpha, 0);
             share += e1[0];
             for (c = 0; c < 9; c++) blk[c] += g[c];
-            qaws_repulsive_mesh_pair(q, p, alpha, 1, e1, g);
+            qaws_repulsive_mesh_pair(e1, g, q, p, alpha, 1);
             for (c = 0; c < 9; c++) blk[c] += g[c];
-            qaws_repulsive_mesh_metric_pair(p, q, ex, kw);
+            qaws_repulsive_mesh_metric_pair(kw, p, q, ex);
             qaws_repulsive_mesh_coefficients(q, cJ);
         }
         for (c = 0; c < 3; c++) gJ[c] = 0;

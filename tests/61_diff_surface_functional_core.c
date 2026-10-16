@@ -106,9 +106,9 @@ static void test_functional(int id, qaws_surface_functional functional, char con
 				qaws_scalar node[3];
 				sf_window w;
 				qaws_dual1 f;
-				qaws_surface_cell_node(0, 1, 0, 1, (qaws_scalar)ci, (qaws_scalar)cj, SF_CELLS, q, node);
+				qaws_surface_cell_node(node, 0, 1, 0, 1, (qaws_scalar)ci, (qaws_scalar)cj, SF_CELLS, q);
 				sf_load(cps, dir, node[0], node[1], &w);
-				f = qaws_bspline_surface_node(id, w.cp, w.dot, w.uk, w.vk, SF_DEG, SF_DEG, node[0], node[1], node[2]);
+				f = qaws_bspline_surface_node(w.cp, w.dot, w.uk, w.vk, id, SF_DEG, SF_DEG, node[0], node[1], node[2]);
 				v += f.v;
 				d1 += f.t;
 				d2 += f.tt;
@@ -128,11 +128,11 @@ static void test_functional(int id, qaws_surface_functional functional, char con
 					{
 						qaws_scalar node[3];
 						sf_window w;
-						qaws_surface_cell_node(0, 1, 0, 1, (qaws_scalar)ci, (qaws_scalar)cj, SF_CELLS, q, node);
+						qaws_surface_cell_node(node, 0, 1, 0, 1, (qaws_scalar)ci, (qaws_scalar)cj, SF_CELLS, q);
 						sf_load(cps, NULL, node[0], node[1], &w);
 						if (i < w.ufirst || i > w.ufirst + SF_DEG || j < w.vfirst || j > w.vfirst + SF_DEG)
 							continue;
-						acc = qaws_v3_add(acc, qaws_bspline_surface_node_adjoint_cp(id, w.cp, w.uk, w.vk, SF_DEG, SF_DEG, node[0], node[1],
+						acc = qaws_v3_add(acc, qaws_bspline_surface_node_adjoint_cp(w.cp, w.uk, w.vk, id, SF_DEG, SF_DEG, node[0], node[1],
 							i - w.ufirst, j - w.vfirst, node[2]));
 					}
 			ok_g &= diff_close(acc.x, grad[k], tol) && diff_close(acc.y, grad[k + 1], tol) && diff_close(acc.z, grad[k + 2], tol);

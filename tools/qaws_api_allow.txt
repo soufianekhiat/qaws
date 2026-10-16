@@ -1,31 +1,3 @@
 # Declarations not yet in the parameter convention (docs/parameter_convention_plan.md):
 # "function rule". The survey fails on a violation missing here and on an entry
 # that no longer applies, so this list only shrinks; it ends empty.
-qaws_bezier_deriv_points_2d R3
-qaws_bezier_deriv_points_3d R3
-qaws_bspline_basis R3
-qaws_bspline_cdf_lambda R3
-qaws_bspline_cdf_solve R3
-qaws_bspline_cdf_tangent R3
-qaws_bspline_diff_row_sum R3
-qaws_bspline_integrand_at R3
-qaws_bspline_integrate R3
-qaws_bspline_jet_rows R3
-qaws_bspline_node_adjoint_cp R3
-qaws_bspline_surface_jet_rows R3
-qaws_bspline_surface_node R3
-qaws_bspline_surface_node_adjoint_cp R3
-qaws_gauss4 R3
-qaws_gauss8 R3
-qaws_internal_parallel R1
-qaws_patch_F R3
-qaws_patch_cdf_multipliers R3
-qaws_patch_cdf_solve R3
-qaws_patch_cdf_tangent R3
-qaws_patch_jets R3
-qaws_patch_marginal R3
-qaws_repulsive_curve_metric_pair R3
-qaws_repulsive_curve_pair R3
-qaws_repulsive_mesh_metric_pair R3
-qaws_repulsive_mesh_pair R3
-qaws_surface_cell_node R3

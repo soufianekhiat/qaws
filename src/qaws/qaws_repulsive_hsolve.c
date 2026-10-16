@@ -437,7 +437,7 @@ static int rh_solve_all(qaws_internal_rs_hsys const* H, double const* const* src
 	if (good)
 	{
 		b.H = H; b.rhs = rhs; b.sol = sol; b.ok = ok;
-		good = qaws_internal_parallel(nuniq, 1, rh_batch_job, s->executor, &b) == QAWS_STATUS_OK;
+		good = qaws_internal_parallel(nuniq, 1, rh_batch_job, &b, s->executor) == QAWS_STATUS_OK;
 	}
 	for (t = 0; good && t < nuniq; t++) good = ok[t];
 	for (j = 0, njob = 0; good && j < count; j++)

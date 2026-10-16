@@ -1803,7 +1803,7 @@ static qaws_status sc_run(qaws_surface const* const* surfaces, qaws_flat_patch c
 	J.max_distance = max_distance;
 	J.out = out;
 	if (s == QAWS_STATUS_OK)
-		s = qaws_internal_parallel(point_count, SC_GRAIN, sc_chunk, executor, &J);
+		s = qaws_internal_parallel(point_count, SC_GRAIN, sc_chunk, &J, executor);
 	for (k = 0; k < nchunk; k++)
 	{
 		stats->candidate_count += J.stats[k].candidate_count;
@@ -2101,7 +2101,7 @@ static qaws_status sr_run(qaws_surface const* const* surfaces, qaws_flat_patch c
 	J.pos_tol = ext * SB_POS_REL;
 	J.out = out;
 	if (s == QAWS_STATUS_OK)
-		s = qaws_internal_parallel(ray_count, SR_GRAIN, sr_chunk, executor, &J);
+		s = qaws_internal_parallel(ray_count, SR_GRAIN, sr_chunk, &J, executor);
 	for (k = 0; k < nchunk; k++)
 	{
 		stats->candidate_count += J.stats[k].candidate_count;

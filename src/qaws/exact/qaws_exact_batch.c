@@ -752,7 +752,7 @@ qaws_status qaws_exact_surface_batch_hits(qaws_exact_ssi_point* out_points, unsi
 		J.groups = groups;
 		J.point_capacity = point_capacity;
 		J.branch_capacity = branch_capacity;
-		st = qaws_internal_parallel(ng, 1, ess_chunk, desc->executor, &J);
+		st = qaws_internal_parallel(ng, 1, ess_chunk, &J, desc->executor);
 	}
 	/* the surface pairs in order, as many as fit */
 	for (g = 0; g < ng && st == QAWS_STATUS_OK; g++)
