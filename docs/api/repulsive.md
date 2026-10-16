@@ -728,18 +728,28 @@ CurveInterpolation). They need objectives on the lengths' differences.
 The same program reproduces figures of Repulsive Surfaces. The Hopf link
 and the Borromean rings are the paper's meshes, copied under their MIT
 license into `examples/data/repulsive_surfaces`. The cylinders are
-generated. Each runs the hierarchical mode (theta 0.25, p 6) until it
-stalls at the hierarchical stationarity floor (about 6e-3):
+generated, in the paper's proportions. Each runs the hierarchical mode
+(theta 0.25, p 6) until it stalls at the hierarchical stationarity floor
+(about 6e-3). The surfaces are rendered by a small z-buffered rasterizer
+(smooth shading from the vertex normals, supersampled), one PNG per panel
+beside the figure's SVG:
 
 | Figure | Scene | Faces | Steps | Energy |
 |---|---|---|---|---|
-| 9 (left) | a cylinder, both rims pinned, to a near-sphere | 1728 | 24 | 1.002 -> 0.641 |
-| 9 (centre) | two pinned rings 1.6 apart, the area weighted 1, 10 and 100: a neck kept in each | 1440 | 17, 24, 23 | 9.99, 86.9, 803 |
+| 9 (left) | a cylinder twice as tall as wide, both rims pinned, ballooning to a near-sphere | 3360 | 82 | 2.244 -> 0.397 |
+| 9 (centre) | two pinned rings 3 apart (radius 1), the area weighted 1, 10 and 100: a neck kept in each | 2592 | 30, 29, 38 | 18.6, 134.9, 1077 |
 | 11 | a Hopf link, the area held | 9216 | 40 | 842.5 -> 303.3 (256 s) |
 
 The links hold the area and the barycenter, as the paper's own scene
 files do (with limits of 200 and 350 iterations): unconstrained, they
 inflate (the energy falls toward 0 as the surfaces grow).
+
+Against the reference implementation (the paper's code, scored by its
+exact all-pairs energy): on the Fig. 9 (left) cylinder it reaches 0.3823
+and this solver 0.3852; on the Hopf link 303.25 against 303.69. On the
+Borromean rings it descends much faster (4686 against 7033 after 350
+steps): its approximate direction opens a pinch between two rings that
+this solver's exact one, held by its largest-vertex step, does not.
 
 Not reproduced: the scenes that need remeshing, implicit obstacles,
 growth schedules, or p <= 4 (the solver needs p > 4).

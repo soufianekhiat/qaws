@@ -471,50 +471,202 @@ static int rp_load_mesh(char const* dir, char const* name, rp_mesh* m)
 
 static void rp_free_mesh(rp_mesh* m) { free(m->x); free(m->t); }
 
-typedef struct rp_face
-{
-	double depth;
-	unsigned int f;
-} rp_face;
+/* ---- rendered panels: a z-buffered rasterizer to RGBA PNG ------------ */
 
-static int rp_face_cmp(void const* p, void const* q)
+/* PNG with stored (uncompressed) deflate blocks: no zlib needed */
+static unsigned int rp_crc(unsigned int crc, unsigned char const* p, size_t n)
 {
-	double a = ((rp_face const*)p)->depth, b = ((rp_face const*)q)->depth;
-	return a < b ? 1 : a > b ? -1 : 0;
+	static unsigned int table[256];
+	static int ready = 0;
+	size_t i;
+	if (!ready)
+	{
+		unsigned int c, k, b;
+		for (k = 0; k < 256; k++)
+		{
+			for (c = k, b = 0; b < 8; b++) c = c & 1 ? 0xedb88320u ^ (c >> 1) : c >> 1;
+			table[k] = c;
+		}
+		ready = 1;
+	}
+	crc = ~crc;
+	for (i = 0; i < n; i++) crc = table[(crc ^ p[i]) & 0xff] ^ (crc >> 8);
+	return ~crc;
 }
 
-/* faces nf (3 vertex indices each) of x through the fit, far to near, flat
-   shaded (two-sided) in colour rgb; a face's colour from rgbs[face] if given */
-static void rp_draw_mesh(svg* s, rp_fit const* fit, rp_view const* view, double const* x, unsigned int const* tri, unsigned int nf,
-	int const* rgb, int const* rgbs)
+static void rp_be32(unsigned char* p, unsigned int v)
 {
-	static double const light[3] = { -0.35, 0.55, -0.76 };   /* (in the view: from the upper left, toward the eye) */
-	rp_face* order = (rp_face*)malloc(sizeof(rp_face) * nf);
+	p[0] = (unsigned char)(v >> 24); p[1] = (unsigned char)(v >> 16); p[2] = (unsigned char)(v >> 8); p[3] = (unsigned char)v;
+}
+
+static void rp_png_chunk(FILE* f, char const* type, unsigned char const* data, size_t n)
+{
+	unsigned char hdr[8];
+	rp_be32(hdr, (unsigned int)n);
+	memcpy(hdr + 4, type, 4);
+	fwrite(hdr, 1, 8, f);
+	if (n)
+		fwrite(data, 1, n, f);
+	rp_be32(hdr, rp_crc(rp_crc(0, hdr + 4, 4), data, n));
+	fwrite(hdr, 1, 4, f);
+}
+
+static int rp_png_write(char const* path, int w, int h, unsigned char const* rgba)
+{
+	static unsigned char const sig[8] = { 137, 80, 78, 71, 13, 10, 26, 10 };
+	size_t row = 4 * (size_t)w + 1, raw_n = (size_t)h * row, blocks = (raw_n + 65534) / 65535, pos = 0, i;
+	unsigned char* raw = (unsigned char*)malloc(raw_n);
+	unsigned char* z = (unsigned char*)malloc(2 + raw_n + 5 * blocks + 4);
+	unsigned char ihdr[13];
+	unsigned int a = 1, b = 0;
+	FILE* f = fopen(path, "wb");
+	int y;
+	if (!f || !raw || !z)
+	{
+		if (f) fclose(f);
+		free(raw); free(z);
+		return 0;
+	}
+	for (y = 0; y < h; y++)
+	{
+		raw[(size_t)y * row] = 0;
+		memcpy(raw + (size_t)y * row + 1, rgba + (size_t)y * 4 * w, 4 * (size_t)w);
+	}
+	z[pos++] = 0x78; z[pos++] = 0x01;
+	for (i = 0; i < raw_n; i += 65535)
+	{
+		size_t len = raw_n - i < 65535 ? raw_n - i : 65535;
+		z[pos++] = (unsigned char)(i + len == raw_n);
+		z[pos++] = (unsigned char)(len & 0xff); z[pos++] = (unsigned char)(len >> 8);
+		z[pos++] = (unsigned char)(~len & 0xff); z[pos++] = (unsigned char)((~len >> 8) & 0xff);
+		memcpy(z + pos, raw + i, len);
+		pos += len;
+	}
+	for (i = 0; i < raw_n; i++) { a = (a + raw[i]) % 65521; b = (b + a) % 65521; }
+	rp_be32(z + pos, (b << 16) | a);
+	pos += 4;
+	fwrite(sig, 1, 8, f);
+	rp_be32(ihdr, (unsigned int)w); rp_be32(ihdr + 4, (unsigned int)h);
+	ihdr[8] = 8; ihdr[9] = 6; ihdr[10] = 0; ihdr[11] = 0; ihdr[12] = 0;   /* 8-bit RGBA */
+	rp_png_chunk(f, "IHDR", ihdr, 13);
+	rp_png_chunk(f, "IDAT", z, pos);
+	rp_png_chunk(f, "IEND", NULL, 0);
+	fclose(f);
+	free(raw); free(z);
+	return 1;
+}
+
+#define RP_SS 3   /* supersamples per output pixel, each way */
+
+/* the faces of x rendered into a w x h RGBA image, transparent where empty:
+   pixel (px, py) is the panel point (x0 + px / res, y0 + py / res) under the
+   fit. Smooth shaded by the area-weighted vertex normals (Blinn-Phong, a key
+   and a fill light); both sides lit, the side facing away darker; a face's
+   colour from rgbs[face] if given */
+static int rp_render(char const* path, int w, int h, double x0, double y0, double res, rp_fit const* fit, rp_view const* view,
+	double const* x, unsigned int nv, unsigned int const* tri, unsigned int nf, int const* rgb, int const* rgbs)
+{
+	static double const key[3] = { -0.42, 0.62, -0.66 }, fill[3] = { 0.65, 0.05, -0.76 };   /* (view space: y up, the eye toward -z) */
+	int W = w * RP_SS, H = h * RP_SS, px, py;
+	double r = res * RP_SS, hk[3], hl;
+	double* q = (double*)malloc(sizeof(double) * 3 * nv);
+	double* vn = (double*)calloc(3 * (size_t)nv, sizeof(double));
+	float* zb = (float*)malloc(sizeof(float) * (size_t)W * H);
+	unsigned char* hi = (unsigned char*)calloc(4 * (size_t)W * H, 1);
+	unsigned char* out = (unsigned char*)malloc(4 * (size_t)w * h);
 	unsigned int i, k;
-	for (i = 0; order && i < nf; i++)
+	int ok = 0;
+	if (!q || !vn || !zb || !hi || !out)
+		goto done;
+	hk[0] = key[0]; hk[1] = key[1]; hk[2] = key[2] - 1;   /* (the half vector toward the eye) */
+	hl = sqrt(hk[0] * hk[0] + hk[1] * hk[1] + hk[2] * hk[2]);
+	for (k = 0; k < 3; k++) hk[k] /= hl;
+	for (i = 0; i < nv; i++)
 	{
-		double d = 0, q[3];
-		for (k = 0; k < 3; k++) { rp_rotate(view, x + 3 * tri[3 * i + k], q); d += q[2]; }
-		order[i].depth = d; order[i].f = i;
+		rp_rotate(view, x + 3 * i, q + 3 * i);
+		q[3 * i] = (fit->cx + fit->scale * q[3 * i] - x0) * r;
+		q[3 * i + 1] = (fit->cy - fit->scale * q[3 * i + 1] - y0) * r;   /* (pixels: y down) */
+		q[3 * i + 2] *= fit->scale * r;
 	}
-	if (order)
-		qsort(order, nf, sizeof(rp_face), rp_face_cmp);
-	for (i = 0; order && i < nf; i++)
+	for (i = 0; i < nf; i++)
 	{
-		unsigned int const* t = tri + 3 * order[i].f;
-		int const* c = rgbs ? rgbs + 3 * order[i].f : rgb;
-		double p[3][3], u[3], w[3], n[3], l, sh;
-		for (k = 0; k < 3; k++) rp_rotate(view, x + 3 * t[k], p[k]);
-		for (k = 0; k < 3; k++) { u[k] = p[1][k] - p[0][k]; w[k] = p[2][k] - p[0][k]; }
-		n[0] = u[1] * w[2] - u[2] * w[1]; n[1] = u[2] * w[0] - u[0] * w[2]; n[2] = u[0] * w[1] - u[1] * w[0];
-		l = sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
-		sh = l > 0 ? 0.3 + 0.7 * fabs(n[0] * light[0] + n[1] * light[1] + n[2] * light[2]) / l : 0.3;
-		fprintf(s->f, "<polygon points=\"%.2f,%.2f %.2f,%.2f %.2f,%.2f\" fill=\"rgb(%d,%d,%d)\" stroke=\"rgb(%d,%d,%d)\" stroke-width=\"0.35\" stroke-linejoin=\"round\"/>\n",
-			fit->cx + fit->scale * p[0][0], fit->cy - fit->scale * p[0][1], fit->cx + fit->scale * p[1][0], fit->cy - fit->scale * p[1][1],
-			fit->cx + fit->scale * p[2][0], fit->cy - fit->scale * p[2][1],
-			(int)(c[0] * sh), (int)(c[1] * sh), (int)(c[2] * sh), (int)(c[0] * sh * 0.82), (int)(c[1] * sh * 0.82), (int)(c[2] * sh * 0.82));
+		/* area-weighted normals, in view space (y back up) */
+		unsigned int const* t = tri + 3 * i;
+		double a[3], b[3], n[3];
+		for (k = 0; k < 3; k++)
+		{
+			a[k] = q[3 * t[1] + k] - q[3 * t[0] + k];
+			b[k] = q[3 * t[2] + k] - q[3 * t[0] + k];
+		}
+		a[1] = -a[1]; b[1] = -b[1];
+		n[0] = a[1] * b[2] - a[2] * b[1]; n[1] = a[2] * b[0] - a[0] * b[2]; n[2] = a[0] * b[1] - a[1] * b[0];
+		for (k = 0; k < 3; k++) { vn[3 * t[0] + k] += n[k]; vn[3 * t[1] + k] += n[k]; vn[3 * t[2] + k] += n[k]; }
 	}
-	free(order);
+	for (i = 0; i < (unsigned int)(W * H); i++) zb[i] = 1e30f;
+	for (i = 0; i < nf; i++)
+	{
+		unsigned int const* t = tri + 3 * i;
+		double const *A = q + 3 * t[0], *B = q + 3 * t[1], *C = q + 3 * t[2];
+		double area = (B[0] - A[0]) * (C[1] - A[1]) - (B[1] - A[1]) * (C[0] - A[0]);
+		int const* c = rgbs ? rgbs + 3 * i : rgb;
+		int xa, xb, ya, yb;
+		if (fabs(area) < 1e-12)
+			continue;
+		xa = (int)fmax(0, floor(fmin(A[0], fmin(B[0], C[0])))); xb = (int)fmin(W - 1, ceil(fmax(A[0], fmax(B[0], C[0]))));
+		ya = (int)fmax(0, floor(fmin(A[1], fmin(B[1], C[1])))); yb = (int)fmin(H - 1, ceil(fmax(A[1], fmax(B[1], C[1]))));
+		for (py = ya; py <= yb; py++)
+			for (px = xa; px <= xb; px++)
+			{
+				double sx = px + 0.5, sy = py + 0.5, l0, l1, l2, d, n[3], nl, dk, df, sp, shade = 1;
+				unsigned char* o;
+				l0 = ((B[0] - sx) * (C[1] - sy) - (B[1] - sy) * (C[0] - sx)) / area;
+				l1 = ((C[0] - sx) * (A[1] - sy) - (C[1] - sy) * (A[0] - sx)) / area;
+				l2 = 1 - l0 - l1;
+				if (l0 < 0 || l1 < 0 || l2 < 0)
+					continue;
+				d = l0 * A[2] + l1 * B[2] + l2 * C[2];
+				if (d >= zb[(size_t)py * W + px])
+					continue;
+				zb[(size_t)py * W + px] = (float)d;
+				for (k = 0; k < 3; k++) n[k] = l0 * vn[3 * t[0] + k] + l1 * vn[3 * t[1] + k] + l2 * vn[3 * t[2] + k];
+				nl = sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+				if (nl == 0)
+					continue;
+				for (k = 0; k < 3; k++) n[k] /= nl;
+				if (n[2] > 0)
+				{
+					for (k = 0; k < 3; k++) n[k] = -n[k];   /* (the side facing away, as seen) */
+					shade = 0.72;
+				}
+				dk = fmax(0, n[0] * key[0] + n[1] * key[1] + n[2] * key[2]);
+				df = fmax(0, n[0] * fill[0] + n[1] * fill[1] + n[2] * fill[2]);
+				sp = pow(fmax(0, n[0] * hk[0] + n[1] * hk[1] + n[2] * hk[2]), 36);
+				o = hi + 4 * ((size_t)py * W + px);
+				for (k = 0; k < 3; k++)
+					o[k] = (unsigned char)fmin(255, fmax(0, shade * (c[k] * (0.34 + 0.10 * n[1] + 0.62 * dk + 0.30 * df) + 255 * 0.35 * sp)));
+				o[3] = 255;
+			}
+	}
+	/* box-filter the supersamples, colour weighted by coverage */
+	for (py = 0; py < h; py++)
+		for (px = 0; px < w; px++)
+		{
+			double s[4] = { 0, 0, 0, 0 };
+			int u, v;
+			for (v = 0; v < RP_SS; v++)
+				for (u = 0; u < RP_SS; u++)
+				{
+					unsigned char const* p = hi + 4 * ((size_t)(py * RP_SS + v) * W + px * RP_SS + u);
+					for (k = 0; k < 3; k++) s[k] += p[k] * (p[3] / 255.0);
+					s[3] += p[3];
+				}
+			for (k = 0; k < 3; k++) out[4 * ((size_t)py * w + px) + k] = (unsigned char)(s[3] > 0 ? fmin(255, s[k] * 255 / s[3] + 0.5) : 0);
+			out[4 * ((size_t)py * w + px) + 3] = (unsigned char)(s[3] / (RP_SS * RP_SS) + 0.5);
+		}
+	ok = rp_png_write(path, w, h, out);
+done:
+	free(q); free(vn); free(zb); free(hi); free(out);
+	return ok;
 }
 
 /* an open cylinder: nu around, nh rings from z = -h/2 to h/2, radius r */
@@ -585,7 +737,7 @@ static unsigned int* rp_boundary(rp_mesh const* m, unsigned int* out_count)
 /* each face's colour by its component */
 static int* rp_face_colours(rp_mesh const* m)
 {
-	static int const pal[4][3] = { { 110, 165, 235 }, { 240, 150, 80 }, { 120, 200, 130 }, { 200, 130, 210 } };
+	static int const pal[4][3] = { { 72, 132, 222 }, { 236, 140, 64 }, { 120, 200, 130 }, { 200, 130, 210 } };
 	unsigned int* lab = (unsigned int*)malloc(sizeof(unsigned int) * m->nv);
 	int* rgb = (int*)malloc(sizeof(int) * 3 * m->nf);
 	unsigned int i, k, changed = 1;
@@ -657,7 +809,7 @@ static void rp_solve_mesh(rp_mesh const* mesh, double p, qaws_repulsive_mesh_sol
 static void rp_mesh_panels(char const* svgname, char const* title, char const* subtitle, rp_mesh const* m, double const* const* xs,
 	char const (*labels)[200], unsigned int n, rp_view const* view, int const* rgbs)
 {
-	static int const rgb[3] = { 110, 165, 235 };
+	static int const rgb[3] = { 72, 132, 222 };   /* (the paper's blue) */
 	double const pw = 300, ph = 300;
 	svg s;
 	unsigned int k;
@@ -674,13 +826,21 @@ static void rp_mesh_panels(char const* svgname, char const* title, char const* s
 		}
 		for (k = 0; k < n; k++)
 		{
+			char png[600];
+			char const* base;
+			size_t stem = strlen(svgname) > 4 ? strlen(svgname) - 4 : strlen(svgname);   /* (without .svg) */
 			v.x0 = 24 + k * (pw + 12);
-			svg_panel(&s, &v, labels[k]);
+			svg_panel(&s, &v, NULL);
 			rp_fit_points(&v, view, xs[k], m->nv, &fit);
 			fit.cx = v.x0 + 0.5 * v.w + (fit.cx - v.x0 - 0.5 * v.w) * scale / fit.scale;
 			fit.cy = v.y0 + 0.5 * v.h + (fit.cy - v.y0 - 0.5 * v.h) * scale / fit.scale;
 			fit.scale = scale;
-			rp_draw_mesh(&s, &fit, view, xs[k], m->t, m->nf, rgb, rgbs);
+			/* the panel rendered at twice its size, beside the SVG */
+			sprintf(png, "%.*s_%u.png", (int)stem, svgname, k);
+			base = strrchr(png, '/') ? strrchr(png, '/') + 1 : png;
+			if (rp_render(png, (int)(2 * pw), (int)(2 * ph), v.x0, v.y0, 2, &fit, view, xs[k], m->nv, m->t, m->nf, rgb, rgbs))
+				fprintf(s.f, "<image href=\"%s\" x=\"%.1f\" y=\"%.1f\" width=\"%.1f\" height=\"%.1f\"/>\n", base, v.x0, v.y0, pw, ph);
+			fprintf(s.f, "<text x=\"%.1f\" y=\"%.1f\" font-size=\"13\" font-weight=\"600\" fill=\"#24292f\">%s</text>\n", v.x0 + 10, v.y0 + 20, labels[k]);
 		}
 		svg_close(&s);
 	}
@@ -910,12 +1070,12 @@ int main(int argc, char** argv)
 	{
 		/* Repulsive Surfaces, Fig. 9 (left): a cylinder, both rims pinned */
 		static unsigned int const steps[2] = { 10, RP_UNTIL };
-		rp_view view = { 0.5, 0.45 };
+		rp_view view = { 0.5, -0.32 };   /* (from slightly above, as the paper) */
 		rp_mesh m;
 		qaws_repulsive_mesh_solve_desc sd;
 		unsigned int npin;
 		unsigned int* pins;
-		if (rp_cylinder(48, 19, 1, 2, &m) && (pins = rp_boundary(&m, &npin)) != NULL)
+		if (rp_cylinder(48, 36, 1, 4, &m) && (pins = rp_boundary(&m, &npin)) != NULL)   /* (twice as tall as wide, as the paper draws it) */
 		{
 			memset(&sd, 0, sizeof(sd));
 			sd.pinned = pins; sd.pinned_count = npin; sd.theta = (qaws_scalar)0.25;
@@ -928,17 +1088,17 @@ int main(int argc, char** argv)
 	if (!only || only == 10)
 	{
 		/* Repulsive Surfaces, Fig. 9 (centre): area minimization between two
-		   rings past the catenoid's limit (1.6 apart for radius 1: a minimal
+		   rings past the catenoid's limit (3 apart for radius 1: a minimal
 		   surface pinches off), regularized by the tangent-point energy */
 		static unsigned int const steps[1] = { RP_UNTIL };
 		static double const weights[3] = { 1, 10, 100 };
-		rp_view view = { 0.5, 0.45 };
+		rp_view view = { 0.5, -0.32 };   /* (from slightly above, as the paper) */
 		rp_mesh m;
 		qaws_repulsive_mesh_solve_desc sd;
 		unsigned int npin, k;
 		unsigned int* pins;
 		time_t t0 = time(NULL);
-		if (rp_cylinder(48, 16, 1, 1.6, &m) && (pins = rp_boundary(&m, &npin)) != NULL)
+		if (rp_cylinder(48, 28, 1, 3, &m) && (pins = rp_boundary(&m, &npin)) != NULL)
 		{
 			double* snaps[3];
 			qaws_repulsive_report reps[3];
@@ -957,7 +1117,7 @@ int main(int argc, char** argv)
 				sprintf(labels[k + 1], "area weight %g: %u steps, E %.4g", weights[k], reps[k].iterations, (double)reps[k].energy);
 			}
 			rp_mesh_panels("showcase/paper10_neck.svg", "Repulsive Surfaces, Fig. 9 (centre): area minimization without pinching off",
-				"two rings 1.6 apart (radius 1: past the catenoid's limit), pinned; the area weighted, the tangent-point energy (p 6) keeping a neck",
+				"two rings 3 apart (radius 1: far past the catenoid's limit of 1.33), pinned; the area weighted, the tangent-point energy (p 6) keeping a neck",
 				&m, xs, labels, 4, &view, NULL);
 			for (k = 0; k < 3; k++) free(snaps[k]);
 			free(pins);
