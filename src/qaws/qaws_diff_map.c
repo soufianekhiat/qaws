@@ -99,8 +99,8 @@ unsigned int qaws_diff_map_output_count(qaws_diff_map const* map)
 	return map ? map->out_count : 0u;
 }
 
-qaws_status qaws_diff_map_get_entries(qaws_diff_map const* map, qaws_diff_map_entry* out_entries,
-	unsigned int capacity, unsigned int* out_count)
+qaws_status qaws_diff_map_get_entries(qaws_diff_map_entry* out_entries, unsigned int* out_count,
+	qaws_diff_map const* map, unsigned int capacity)
 {
 	if (!map || !out_count)
 		return QAWS_STATUS_INVALID_ARGUMENT;
@@ -136,12 +136,12 @@ static void entry_apply(qaws_diff_map_entry const* e, qaws_field_view const* src
 }
 
 qaws_status qaws_diff_map_tangent(
+	qaws_diff_views* const* out_tangents,
 	qaws_diff_map const* map,
-	qaws_diff_context const* ctx,
 	qaws_diff_views const* const* in_tangents,
 	unsigned int in_count,
-	qaws_diff_views* const* out_tangents,
-	unsigned int out_count)
+	unsigned int out_count,
+	qaws_diff_context const* ctx)
 {
 	unsigned int i;
 	(void)ctx;
@@ -171,12 +171,12 @@ qaws_status qaws_diff_map_tangent(
 }
 
 qaws_status qaws_diff_map_adjoint(
+	qaws_diff_views* const* in_adjoints,
 	qaws_diff_map const* map,
-	qaws_diff_context const* ctx,
 	qaws_diff_views const* const* out_adjoints,
 	unsigned int out_count,
-	qaws_diff_views* const* in_adjoints,
-	unsigned int in_count)
+	unsigned int in_count,
+	qaws_diff_context const* ctx)
 {
 	unsigned int i;
 	(void)ctx;
@@ -223,7 +223,7 @@ static unsigned int vector_fields(qaws_curve const* c, field_info* out, int* rat
 	qaws_field_desc fields[MAP_MAX_FIELDS];
 	unsigned int n = 0, i, k = 0;
 	*rational = 0;
-	if (qaws_curve_describe_fields(c, fields, MAP_MAX_FIELDS, &n) != QAWS_STATUS_OK)
+	if (qaws_curve_describe_fields(fields, &n, c, MAP_MAX_FIELDS) != QAWS_STATUS_OK)
 		return 0;
 	for (i = 0; i < n && i < MAP_MAX_FIELDS; i++)
 	{
@@ -242,13 +242,13 @@ static unsigned int vector_fields(qaws_curve const* c, field_info* out, int* rat
 
 static qaws_status read_values(qaws_curve const* c, qaws_diff_field f, qaws_scalar** out, unsigned int* n)
 {
-	qaws_status st = qaws_curve_read_field(c, f, NULL, 0, n);
+	qaws_status st = qaws_curve_read_field(NULL, n, c, 0, f);
 	if (st != QAWS_STATUS_OK)
 		return st;
 	*out = (qaws_scalar*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_scalar) * (*n + 1)));
 	if (!*out)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
-	return qaws_curve_read_field(c, f, *out, *n, n);
+	return qaws_curve_read_field(*out, n, c, *n, f);
 }
 
 /* Clone of `c` with every vector field zero (weights one), and optionally
@@ -274,7 +274,7 @@ static qaws_status make_probe(qaws_curve const* c, field_info const* fields, uns
 		memset(buffers[n], 0, size);
 		if ((int)i == unit_field)
 			buffers[n][(size_t)unit_elem * fields[i].components] = QAWS_ONE;
-		views[n] = qaws_field_view_make(fields[i].field, buffers[n], fields[i].count, fields[i].components);
+		views[n] = qaws_field_view_make(buffers[n], fields[i].count, fields[i].field, fields[i].components);
 		n++;
 	}
 	if (rational)
@@ -288,14 +288,14 @@ static qaws_status make_probe(qaws_curve const* c, field_info const* fields, uns
 		}
 		for (i = 0; i < wc; i++)
 			buffers[n][i] = QAWS_ONE;
-		views[n] = qaws_field_view_make(QAWS_FIELD_WEIGHTS, buffers[n], wc, 1);
+		views[n] = qaws_field_view_make(buffers[n], wc, QAWS_FIELD_WEIGHTS, 1);
 		n++;
 	}
 	vs.fields = views;
 	vs.field_count = n;
 	vs.children = NULL;
 	vs.child_count = 0;
-	st = qaws_curve_clone_with_fields(c, &vs, out);
+	st = qaws_curve_clone_with_fields(out, c, &vs);
 done:
 	for (i = 0; i < n; i++)
 		qaws_internal_dealloc(NULL, buffers[i]);
@@ -607,8 +607,8 @@ static qaws_status bezier_split_parameter_column(qaws_diff_map* m, qaws_curve co
 	return st;
 }
 
-qaws_status qaws_curve_split_diff(qaws_curve const* curve, qaws_scalar parameter,
-	qaws_curve** out_left, qaws_curve** out_right, qaws_diff_map** out_map)
+qaws_status qaws_curve_split_diff(qaws_curve** out_left, qaws_curve** out_right,
+	qaws_diff_map** out_map, qaws_curve const* curve, qaws_scalar parameter)
 {
 	qaws_curve const* in[1];
 	qaws_curve* out[2];
@@ -638,8 +638,8 @@ qaws_status qaws_curve_split_diff(qaws_curve const* curve, qaws_scalar parameter
 	return QAWS_STATUS_OK;
 }
 
-qaws_status qaws_curve_join_diff(qaws_curve const* curve_a, qaws_curve const* curve_b,
-	qaws_curve** out_joined, qaws_diff_map** out_map)
+qaws_status qaws_curve_join_diff(qaws_curve** out_joined, qaws_diff_map** out_map,
+	qaws_curve const* curve_a, qaws_curve const* curve_b)
 {
 	qaws_curve const* in[2];
 	if (!curve_a || !curve_b || !out_joined)
@@ -649,40 +649,40 @@ qaws_status qaws_curve_join_diff(qaws_curve const* curve_a, qaws_curve const* cu
 	return run_with_map(in, 2, 0, out_joined, 1, construct_join, NULL, out_map);
 }
 
-qaws_status qaws_curve_convert_hermite_to_bezier_diff(qaws_curve const* curve, unsigned int span_index,
-	qaws_curve** out_bezier, qaws_diff_map** out_map)
+qaws_status qaws_curve_convert_hermite_to_bezier_diff(qaws_curve** out_bezier, qaws_diff_map** out_map,
+	qaws_curve const* curve, unsigned int span_index)
 {
 	if (!curve || !out_bezier)
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	return run_with_map(&curve, 1, 0, out_bezier, 1, construct_hermite_to_bezier, &span_index, out_map);
 }
 
-qaws_status qaws_curve_convert_bezier_to_bspline_diff(qaws_curve const* curve,
-	qaws_curve** out_bspline, qaws_diff_map** out_map)
+qaws_status qaws_curve_convert_bezier_to_bspline_diff(qaws_curve** out_bspline,
+	qaws_diff_map** out_map, qaws_curve const* curve)
 {
 	if (!curve || !out_bspline)
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	return run_with_map(&curve, 1, 0, out_bspline, 1, construct_bezier_to_bspline, NULL, out_map);
 }
 
-qaws_status qaws_curve_convert_bspline_to_nurbs_diff(qaws_curve const* curve,
-	qaws_curve** out_nurbs, qaws_diff_map** out_map)
+qaws_status qaws_curve_convert_bspline_to_nurbs_diff(qaws_curve** out_nurbs,
+	qaws_diff_map** out_map, qaws_curve const* curve)
 {
 	if (!curve || !out_nurbs)
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	return run_with_map(&curve, 1, 0, out_nurbs, 1, construct_bspline_to_nurbs, NULL, out_map);
 }
 
-qaws_status qaws_curve_elevate_degree_diff(qaws_curve const* curve,
-	qaws_curve** out_elevated, qaws_diff_map** out_map)
+qaws_status qaws_curve_elevate_degree_diff(qaws_curve** out_elevated,
+	qaws_diff_map** out_map, qaws_curve const* curve)
 {
 	if (!curve || !out_elevated)
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	return run_with_map(&curve, 1, 0, out_elevated, 1, construct_elevate, NULL, out_map);
 }
 
-qaws_status qaws_curve_reduce_degree_diff(qaws_curve const* curve,
-	qaws_curve** out_reduced, qaws_diff_map** out_map)
+qaws_status qaws_curve_reduce_degree_diff(qaws_curve** out_reduced,
+	qaws_diff_map** out_map, qaws_curve const* curve)
 {
 	if (!curve || !out_reduced)
 		return QAWS_STATUS_INVALID_ARGUMENT;
@@ -919,9 +919,9 @@ static qaws_status fit_prepare(fit_state* s, struct qaws_bspline_fit_desc const*
 				s->params[k] /= total;
 		s->params[s->m - 1] = QAWS_ONE;
 	}
-	st = qaws_curve_read_field(curve, QAWS_FIELD_KNOTS, s->knots, s->kc, &got);
+	st = qaws_curve_read_field(s->knots, &got, curve, s->kc, QAWS_FIELD_KNOTS);
 	if (st == QAWS_STATUS_OK)
-		st = qaws_curve_read_field(curve, QAWS_FIELD_CONTROL_POINTS, cps, s->n * s->dim, &got);
+		st = qaws_curve_read_field(cps, &got, curve, s->n * s->dim, QAWS_FIELD_CONTROL_POINTS);
 	if (st != QAWS_STATUS_OK)
 		return st;
 	for (i = 0; i < s->n * s->dim; i++)
@@ -984,8 +984,8 @@ static qaws_status fit_prepare(fit_state* s, struct qaws_bspline_fit_desc const*
 	return QAWS_STATUS_OK;
 }
 
-qaws_status qaws_curve_fit_bspline_diff(struct qaws_bspline_fit_desc const* desc, qaws_curve** out_curve,
-	qaws_diff_map** out_map)
+qaws_status qaws_curve_fit_bspline_diff(qaws_curve** out_curve, qaws_diff_map** out_map,
+	struct qaws_bspline_fit_desc const* desc)
 {
 	fit_state s;
 	qaws_diff_map* map = NULL;
@@ -1170,7 +1170,7 @@ static qaws_status offset_surface_setup(offset_state* s, unsigned int i)
 	qaws_status st = qaws_surface_find_closest_point(s->surface, s->jets[i].d[0], &su, &sv, &closest);
 	if (st != QAWS_STATUS_OK)
 		return st;
-	st = qaws_surface_eval_jet(s->surface, su, sv, QAWS_SJET_ORDER2, j);
+	st = qaws_surface_eval_jet(j, s->surface, su, sv, QAWS_SJET_ORDER2);
 	if (st != QAWS_STATUS_OK)
 		return st;
 	s->uv[2 * i] = su;
@@ -1204,7 +1204,7 @@ static qaws_status offset_emit(qaws_diff_map* m, offset_state* s, unsigned int i
 	qaws_status st = qaws_internal_fit_bspline(QAWS_DIMENSION_3D, 3, s->params, s->dq, s->n_samples, s->n_cp, &fit);
 	if (st != QAWS_STATUS_OK)
 		return st;
-	st = qaws_curve_read_field(fit, QAWS_FIELD_CONTROL_POINTS, s->cps, s->n_cp * 3, &got);
+	st = qaws_curve_read_field(s->cps, &got, fit, s->n_cp * 3, QAWS_FIELD_CONTROL_POINTS);
 	qaws_curve_destroy(fit);
 	if (st != QAWS_STATUS_OK)
 		return st;
@@ -1219,8 +1219,8 @@ static qaws_status offset_emit(qaws_diff_map* m, offset_state* s, unsigned int i
 static qaws_status offset_curve_column(offset_state* s, qaws_diff_views const* views)
 {
 	unsigned int i;
-	qaws_status st = qaws_curve_eval_batch_tangent_3d(NULL, s->curve, s->params, NULL, s->n_samples,
-		QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2 | QAWS_EVAL_FLAG_D3, views, NULL, s->tan);
+	qaws_status st = qaws_curve_eval_batch_tangent_3d(NULL, s->tan, s->curve, s->params, NULL,
+		views, s->n_samples, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2 | QAWS_EVAL_FLAG_D3, NULL);
 	if (st != QAWS_STATUS_OK)
 		return st;
 	for (i = 0; i < s->n_samples; i++)
@@ -1230,7 +1230,7 @@ static qaws_status offset_curve_column(offset_state* s, qaws_diff_views const* v
 		{
 			qaws_curve_geometry_3d g, dg;
 			qaws_diff_validity validity;
-			qaws_curve_geometry_eval_3d(&s->jets[i], &s->tan[i], NULL, &g, &dg, NULL, &validity);
+			qaws_curve_geometry_eval_3d(&g, &dg, NULL, &validity, &s->jets[i], &s->tan[i], NULL);
 			dq = qaws_v3_axpy(dq, dg.normal, s->distance);
 		}
 		else if (s->mode == 2)
@@ -1243,14 +1243,14 @@ static qaws_status offset_curve_column(offset_state* s, qaws_diff_views const* v
 }
 
 qaws_status qaws_curve_offset_3d_diff(
-	qaws_curve const* curve,
-	qaws_scalar distance,
-	int direction_mode,
-	qaws_vec3 const* direction,
-	qaws_surface const* surf,
-	unsigned int sample_count,
 	qaws_curve** out_curve,
-	qaws_diff_map** out_map)
+	qaws_diff_map** out_map,
+	qaws_curve const* curve,
+	qaws_surface const* surf,
+	qaws_vec3 const* direction,
+	unsigned int sample_count,
+	qaws_scalar distance,
+	int direction_mode)
 {
 	offset_state s;
 	qaws_diff_map* map = NULL;
@@ -1313,8 +1313,8 @@ qaws_status qaws_curve_offset_3d_diff(
 	range = curve->parameter_range;
 	for (i = 0; i < s.n_samples; i++)
 		s.params[i] = range.min_value + (range.max_value - range.min_value) * (qaws_scalar)i / (qaws_scalar)(s.n_samples - 1);
-	st = qaws_curve_eval_batch_tangent_3d(NULL, curve, s.params, NULL, s.n_samples,
-		QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2 | QAWS_EVAL_FLAG_D3, NULL, s.jets, s.tan);
+	st = qaws_curve_eval_batch_tangent_3d(s.jets, s.tan, curve, s.params, NULL,
+		NULL, s.n_samples, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2 | QAWS_EVAL_FLAG_D3, NULL);
 	if (st != QAWS_STATUS_OK)
 		goto done;
 	for (i = 0; i < s.n_samples; i++)
@@ -1323,7 +1323,7 @@ qaws_status qaws_curve_offset_3d_diff(
 		{
 			qaws_curve_geometry_3d g;
 			qaws_diff_validity validity;
-			qaws_curve_geometry_eval_3d(&s.jets[i], NULL, NULL, &g, NULL, NULL, &validity);
+			qaws_curve_geometry_eval_3d(&g, NULL, NULL, &validity, &s.jets[i], NULL, NULL);
 			if (validity == QAWS_DIFF_INVALID || validity == QAWS_DIFF_ILL_CONDITIONED)
 			{
 				/* straight pieces: the Frenet normal is undefined there */
@@ -1350,7 +1350,7 @@ qaws_status qaws_curve_offset_3d_diff(
 	}
 
 	/* input 0: every differentiable field of the curve */
-	if (qaws_curve_describe_fields(curve, fields, MAP_MAX_FIELDS, &nf) != QAWS_STATUS_OK)
+	if (qaws_curve_describe_fields(fields, &nf, curve, MAP_MAX_FIELDS) != QAWS_STATUS_OK)
 		nf = 0;
 	for (f = 0; f < nf && f < MAP_MAX_FIELDS && st == QAWS_STATUS_OK; f++)
 	{
@@ -1368,7 +1368,7 @@ qaws_status qaws_curve_offset_3d_diff(
 		for (e = 0; e < fields[f].count && st == QAWS_STATUS_OK; e++)
 			for (c = 0; c < comps && st == QAWS_STATUS_OK; c++)
 			{
-				qaws_field_view fv = qaws_field_view_make(fields[f].field, seed, fields[f].count, comps);
+				qaws_field_view fv = qaws_field_view_make(seed, fields[f].count, fields[f].field, comps);
 				qaws_diff_views views;
 				views.fields = &fv;
 				views.field_count = 1;
@@ -1419,7 +1419,7 @@ qaws_status qaws_curve_offset_3d_diff(
 	{
 		qaws_field_desc sf[MAP_MAX_FIELDS];
 		unsigned int ns = 0;
-		if (qaws_surface_describe_fields(surf, sf, MAP_MAX_FIELDS, &ns) != QAWS_STATUS_OK)
+		if (qaws_surface_describe_fields(sf, &ns, surf, MAP_MAX_FIELDS) != QAWS_STATUS_OK)
 			ns = 0;
 		for (f = 0; f < ns && f < MAP_MAX_FIELDS && st == QAWS_STATUS_OK; f++)
 		{
@@ -1437,7 +1437,7 @@ qaws_status qaws_curve_offset_3d_diff(
 			for (e = 0; e < sf[f].count && st == QAWS_STATUS_OK; e++)
 				for (c = 0; c < comps && st == QAWS_STATUS_OK; c++)
 				{
-					qaws_field_view fv = qaws_field_view_make(sf[f].field, seed, sf[f].count, comps);
+					qaws_field_view fv = qaws_field_view_make(seed, sf[f].count, sf[f].field, comps);
 					qaws_diff_views views;
 					views.fields = &fv;
 					views.field_count = 1;
@@ -1448,8 +1448,8 @@ qaws_status qaws_curve_offset_3d_diff(
 					{
 						qaws_surface_jet p, tg;
 						qaws_vec3 dn;
-						st = qaws_surface_eval_tangent(NULL, surf, s.uv[2 * i], s.uv[2 * i + 1], QAWS_ZERO, QAWS_ZERO,
-							QAWS_SJET_ORDER1, &views, &p, &tg);
+						st = qaws_surface_eval_tangent(&p, &tg, surf, &views, s.uv[2 * i], s.uv[2 * i + 1],
+							QAWS_ZERO, QAWS_ZERO, QAWS_SJET_ORDER1, NULL);
 						if (st != QAWS_STATUS_OK)
 							break;
 						dn = offset_surface_rate(&s, i, qaws_v3_zero(), &tg);

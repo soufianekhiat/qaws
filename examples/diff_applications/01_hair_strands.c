@@ -259,8 +259,8 @@ static double strand_energy(tensor_field const* t, strand const* s, qaws_scalar 
 
 	for (k = 0; k < m; k++)
 		ts[k] = (qaws_scalar)(r.min_value + (r.max_value - r.min_value) * (k + 0.5) / m);
-	qaws_curve_eval_batch_tangent_2d(NULL, c, ts, NULL, m, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2,
-		NULL, prim, tan);
+	qaws_curve_eval_batch_tangent_2d(prim, tan, c, ts, NULL, NULL,
+		m, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2, NULL);
 	memset(bar, 0, sizeof(qaws_curve_jet_2d) * m);
 	for (k = 0; k < m; k++)
 	{
@@ -275,7 +275,7 @@ static double strand_energy(tensor_field const* t, strand const* s, qaws_scalar 
 		double qy = s->xy[2 * i0 + 1] * (1 - w) + s->xy[2 * (i0 + 1 < s->n ? i0 + 1 : i0) + 1] * w;
 		double rx = prim[k].d[0].x - qx, ry = prim[k].d[0].y - qy;
 
-		qaws_curve_geometry_eval_2d(&prim[k], NULL, NULL, &g, NULL, NULL, &validity);
+		qaws_curve_geometry_eval_2d(&g, NULL, NULL, &validity, &prim[k], NULL, NULL);
 		ea = align_energy(t, prim[k].d[0].x, prim[k].d[0].y, g.tangent.x, g.tangent.y, &dex, &dey, &detx, &dety);
 		e += (ea + spring * (rx * rx + ry * ry)) / m;
 		bar[k].d[0].x = (qaws_scalar)((dex + 2 * spring * rx) / m);
@@ -284,10 +284,10 @@ static double strand_energy(tensor_field const* t, strand const* s, qaws_scalar 
 		memset(&gb, 0, sizeof(gb));
 		gb.tangent.x = (qaws_scalar)(detx / m);
 		gb.tangent.y = (qaws_scalar)(dety / m);
-		qaws_curve_geometry_adjoint_2d(&prim[k], &gb, &bar[k], &validity);
+		qaws_curve_geometry_adjoint_2d(&validity, &bar[k], &prim[k], &gb);
 	}
-	qaws_curve_eval_batch_adjoint_2d(NULL, c, ts, m, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2,
-		bar, &views, NULL);
+	qaws_curve_eval_batch_adjoint_2d(&views, NULL, c, ts, bar,
+		m, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2, NULL);
 	{
 		/* bending per unit length cubed keeps the weight scale free */
 		qaws_scalar bg[48], bend = 0;
@@ -295,7 +295,7 @@ static double strand_energy(tensor_field const* t, strand const* s, qaws_scalar 
 		qaws_diff_views bv = one_field(&bf, QAWS_FIELD_CONTROL_POINTS, bg, ncp, 2);
 		double len = s->n * 1.5, scale = bend_w / (len * len * len);
 		memset(bg, 0, sizeof(bg));
-		qaws_curve_functional_gradient(NULL, c, QAWS_FUNCTIONAL_BENDING, 0, &bv, &bend);
+		qaws_curve_functional_gradient(&bend, &bv, c, QAWS_FUNCTIONAL_BENDING, 0, NULL);
 		e += scale * bend;
 		for (k = 0; k < 2 * ncp; k++)
 			grad[k] += (qaws_scalar)(scale * bg[k]);
@@ -402,8 +402,8 @@ static void app_hair(void)
 		/* the fit as a curve we can rebuild from control points */
 		{
 			unsigned int got = 0;
-			qaws_curve_read_field(st->fit, QAWS_FIELD_CONTROL_POINTS, cps, ncp * 2, &got);
-			qaws_curve_read_field(st->fit, QAWS_FIELD_KNOTS, st->knots, ncp + 4, &got);
+			qaws_curve_read_field(cps, &got, st->fit, ncp * 2, QAWS_FIELD_CONTROL_POINTS);
+			qaws_curve_read_field(st->knots, &got, st->fit, ncp + 4, QAWS_FIELD_KNOTS);
 		}
 		qaws_curve_destroy(st->fit);
 		st->fit = strand_curve(cps, ncp, st->knots);

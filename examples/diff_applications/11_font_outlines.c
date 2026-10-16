@@ -205,7 +205,7 @@ static double fo_energy(qaws_curve const* c, fo_loop const* L, qaws_scalar* grad
 	int i;
 	for (i = 0; i < L->nq; i++)
 		ts[i] = (qaws_scalar)L->t[i];
-	qaws_curve_eval_batch_tangent_2d(NULL, c, ts, NULL, (unsigned int)L->nq, QAWS_EVAL_FLAG_POSITION, NULL, prim, tan);
+	qaws_curve_eval_batch_tangent_2d(prim, tan, c, ts, NULL, NULL, (unsigned int)L->nq, QAWS_EVAL_FLAG_POSITION, NULL);
 	for (i = 0; i < L->nq; i++)
 	{
 		double dx = prim[i].d[0].x - L->q[2 * i], dy = prim[i].d[0].y - L->q[2 * i + 1], d2 = dx * dx + dy * dy;
@@ -223,7 +223,7 @@ static double fo_energy(qaws_curve const* c, fo_loop const* L, qaws_scalar* grad
 		qaws_field_view fv;
 		qaws_diff_views views = one_field(&fv, QAWS_FIELD_CONTROL_POINTS, ext, (unsigned int)(L->n + 3), 2);
 		memset(ext, 0, sizeof(qaws_scalar) * 2 * (size_t)(L->n + 3));
-		qaws_curve_eval_batch_adjoint_2d(NULL, c, ts, (unsigned int)L->nq, QAWS_EVAL_FLAG_POSITION, bar, &views, NULL);
+		qaws_curve_eval_batch_adjoint_2d(&views, NULL, c, ts, bar, (unsigned int)L->nq, QAWS_EVAL_FLAG_POSITION, NULL);
 		memset(grad, 0, sizeof(qaws_scalar) * 2 * (size_t)L->n);
 		for (i = 0; i < L->n + 3; i++)
 		{

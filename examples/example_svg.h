@@ -180,7 +180,7 @@ static void adam_step(adam* a, qaws_scalar* x, qaws_scalar const* g, int n, doub
 static qaws_diff_views one_field(qaws_field_view* fv, qaws_diff_field field, qaws_scalar* data, unsigned int count, unsigned int comps)
 {
 	qaws_diff_views views;
-	*fv = qaws_field_view_make(field, data, count, comps);
+	*fv = qaws_field_view_make(data, count, field, comps);
 	views.fields = fv;
 	views.field_count = 1;
 	views.children = NULL;

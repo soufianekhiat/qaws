@@ -234,7 +234,7 @@ static double contour_energy(float const* f, int w, int h, contour const* c, qaw
 	if (m > MAXS) m = MAXS;
 	for (k = 0; k < m; k++)
 		ts[k] = (qaws_scalar)(r.max_value * (k + 0.5) / m);
-	qaws_curve_eval_batch_tangent_2d(NULL, cr, ts, NULL, m, QAWS_EVAL_FLAG_POSITION, NULL, prim, tan);
+	qaws_curve_eval_batch_tangent_2d(prim, tan, cr, ts, NULL, NULL, m, QAWS_EVAL_FLAG_POSITION, NULL);
 	for (k = 0; k < m; k++)
 	{
 		double gx, gy, v = sample(f, w, h, prim[k].d[0].x, prim[k].d[0].y, &gx, &gy) - c->level;
@@ -251,7 +251,7 @@ static double contour_energy(float const* f, int w, int h, contour const* c, qaw
 		qaws_diff_views views = one_field(&fv, QAWS_FIELD_POINTS, grad, (unsigned int)c->np, 2);
 		int i;
 		memset(grad, 0, sizeof(qaws_scalar) * 2 * (size_t)c->np);
-		qaws_curve_eval_batch_adjoint_2d(NULL, cr, ts, m, QAWS_EVAL_FLAG_POSITION, bar, &views, NULL);
+		qaws_curve_eval_batch_adjoint_2d(&views, NULL, cr, ts, bar, m, QAWS_EVAL_FLAG_POSITION, NULL);
 		/* keep the points from sliding: spring to their initial positions */
 		for (i = 0; i < 2 * c->np; i++)
 		{

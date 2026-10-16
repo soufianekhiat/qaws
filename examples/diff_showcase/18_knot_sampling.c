@@ -29,7 +29,7 @@ static double ks_loss(qaws_curve const* c, qaws_cdf_target const* tg, qaws_scala
 	qaws_range r = qaws_curve_get_parameter_range(c);
 	double loss = 0;
 	int i;
-	qaws_curve_cdf_sample_tangent(NULL, c, NULL, tg, NULL, NULL, KS_N, 0, NULL, val, NULL, NULL, NULL);
+	qaws_curve_cdf_sample_tangent(val, NULL, NULL, NULL, c, tg, NULL, NULL, NULL, KS_N, NULL, 0, NULL);
 	memset(adj, 0, sizeof(adj));
 	for (i = 0; i < KS_N; i++)
 	{
@@ -42,7 +42,7 @@ static double ks_loss(qaws_curve const* c, qaws_cdf_target const* tg, qaws_scala
 		qaws_field_view fv;
 		qaws_diff_views views = one_field(&fv, QAWS_FIELD_KNOTS, grad, KS_KNOTS, 1);
 		memset(grad, 0, sizeof(qaws_scalar) * KS_KNOTS);
-		qaws_curve_cdf_sample_adjoint(NULL, c, NULL, tg, KS_N, 0, adj, &views, NULL);
+		qaws_curve_cdf_sample_adjoint(&views, NULL, c, tg, adj, KS_N, NULL, 0, NULL);
 	}
 	return loss;
 }
@@ -78,7 +78,7 @@ static void ks_panel(svg* s, viewport const* v, qaws_curve const* c, qaws_scalar
 	svg_panel(s, v, label);
 	curve_polyline(c, v, xy, 400);
 	svg_polyline(s, xy, 400, "#57606a", 2, 1, 0);
-	qaws_curve_cdf_sample_tangent(NULL, c, NULL, tg, NULL, NULL, KS_N, 0, NULL, val, NULL, NULL, NULL);
+	qaws_curve_cdf_sample_tangent(val, NULL, NULL, NULL, c, tg, NULL, NULL, NULL, KS_N, NULL, 0, NULL);
 	for (i = 0; i < KS_N; i++)
 	{
 		qaws_eval_result_2d e;
@@ -140,7 +140,7 @@ static void demo_knot_sampling(void)
 		svg_panel(&s, &va, "d samples / d knot u7 (first order tangents)");
 		curve_polyline(c, &va, xy, 400);
 		svg_polyline(&s, xy, 400, "#57606a", 2, 1, 0);
-		qaws_curve_cdf_sample_tangent(NULL, c, NULL, tg, NULL, NULL, KS_N, 0, &views, val, t1, NULL, NULL);
+		qaws_curve_cdf_sample_tangent(val, t1, NULL, NULL, c, tg, NULL, NULL, &views, KS_N, NULL, 0, NULL);
 		{
 			/* longest arrow 50 px */
 			double mx = 1e-12;

@@ -44,7 +44,7 @@ static double film_area(qaws_scalar const* cps)
 {
 	qaws_surface* s = film_surface(cps);
 	qaws_scalar a = 0;
-	qaws_surface_functional_eval(NULL, s, QAWS_FUNCTIONAL_AREA, 0, NULL, &a, NULL, NULL);
+	qaws_surface_functional_eval(&a, NULL, NULL, s, NULL, QAWS_FUNCTIONAL_AREA, 0, NULL);
 	qaws_surface_destroy(s);
 	return a;
 }
@@ -65,7 +65,7 @@ static void film_gradient(qaws_scalar const* cps, unsigned char const* active, q
 	qaws_diff_views v;
 	memset(g, 0, sizeof(qaws_scalar) * SF_CP * 3);
 	v = film_view(&fv, g, active);
-	qaws_surface_functional_gradient(NULL, s, QAWS_FUNCTIONAL_AREA, 0, &v, NULL);
+	qaws_surface_functional_gradient(NULL, &v, s, QAWS_FUNCTIONAL_AREA, 0, NULL);
 	qaws_surface_destroy(s);
 }
 
@@ -75,7 +75,7 @@ static void film_hvp(qaws_surface const* s, unsigned char const* active, qaws_sc
 	qaws_diff_views vd = film_view(&fd, dir, active), vo;
 	memset(out, 0, sizeof(qaws_scalar) * SF_CP * 3);
 	vo = film_view(&fo, out, active);
-	qaws_surface_functional_hvp(NULL, s, QAWS_FUNCTIONAL_AREA, 0, &vd, &vo);
+	qaws_surface_functional_hvp(&vo, s, &vd, QAWS_FUNCTIONAL_AREA, 0, NULL);
 }
 
 static double vdot(qaws_scalar const* a, qaws_scalar const* b, int n)
@@ -91,8 +91,8 @@ static double film_mean_abs(void const* user, qaws_scalar u, qaws_scalar v)
 {
 	qaws_surface_jet j;
 	qaws_surface_geometry g;
-	qaws_surface_eval_jet((qaws_surface const*)user, u, v, QAWS_SJET_ORDER2, &j);
-	qaws_surface_geometry_eval(&j, NULL, NULL, &g, NULL, NULL, NULL);
+	qaws_surface_eval_jet(&j, (qaws_surface const*)user, u, v, QAWS_SJET_ORDER2);
+	qaws_surface_geometry_eval(&g, NULL, NULL, NULL, &j, NULL, NULL);
 	return fabs(g.mean);
 }
 

@@ -31,32 +31,32 @@ static void test_param_keys(void)
 
 	k = qaws_param_key_make(QAWS_FIELD_CONTROL_POINTS, 4, 2, 3);
 	TEST_ASSERT_STATUS(qaws_param_key_prepend_child(&k, 0));
-	n = qaws_param_key_to_string(&k, buf, sizeof(buf));
+	n = qaws_param_key_to_string(buf, &k, sizeof(buf));
 	TEST_ASSERT(strcmp(buf, "child[0]/control_points/4/z") == 0, "vector key text");
 	TEST_ASSERT(n == strlen(buf), "key length");
 
-	TEST_ASSERT_STATUS(qaws_param_key_parse(buf, &parsed));
+	TEST_ASSERT_STATUS(qaws_param_key_parse(&parsed, buf));
 	TEST_ASSERT(qaws_param_key_compare(&k, &parsed) == 0, "vector key round trip");
 
 	k = qaws_param_key_make(QAWS_FIELD_WEIGHTS, 17, 0, 1);
-	qaws_param_key_to_string(&k, buf, sizeof(buf));
+	qaws_param_key_to_string(buf, &k, sizeof(buf));
 	TEST_ASSERT(strcmp(buf, "weights/17") == 0, "scalar key has no component");
-	TEST_ASSERT_STATUS(qaws_param_key_parse(buf, &parsed));
+	TEST_ASSERT_STATUS(qaws_param_key_parse(&parsed, buf));
 	TEST_ASSERT(qaws_param_key_compare(&k, &parsed) == 0, "scalar key round trip");
 
 	k = qaws_param_key_make(QAWS_FIELD_RADIUS, 0, 0, 1);
 	TEST_ASSERT_STATUS(qaws_param_key_prepend_child(&k, 3));
 	TEST_ASSERT_STATUS(qaws_param_key_prepend_child(&k, 1));
-	qaws_param_key_to_string(&k, buf, sizeof(buf));
+	qaws_param_key_to_string(buf, &k, sizeof(buf));
 	TEST_ASSERT(strcmp(buf, "child[1]/child[3]/radius/0") == 0, "nested child path order");
 
-	TEST_ASSERT(qaws_param_key_parse("bogus/1", &parsed) != QAWS_STATUS_OK, "unknown field rejected");
-	TEST_ASSERT(qaws_param_key_parse("control_points", &parsed) != QAWS_STATUS_OK, "missing element rejected");
-	TEST_ASSERT(qaws_param_key_parse("control_points/1/w", &parsed) != QAWS_STATUS_OK, "bad component rejected");
+	TEST_ASSERT(qaws_param_key_parse(&parsed, "bogus/1") != QAWS_STATUS_OK, "unknown field rejected");
+	TEST_ASSERT(qaws_param_key_parse(&parsed, "control_points") != QAWS_STATUS_OK, "missing element rejected");
+	TEST_ASSERT(qaws_param_key_parse(&parsed, "control_points/1/w") != QAWS_STATUS_OK, "bad component rejected");
 
 	/* Truncation still reports the full length. */
 	k = qaws_param_key_make(QAWS_FIELD_CONTROL_POINTS, 123, 1, 3);
-	n = qaws_param_key_to_string(&k, buf, 8);
+	n = qaws_param_key_to_string(buf, &k, 8);
 	TEST_ASSERT(n == strlen("control_points/123/y"), "truncated length");
 	TEST_ASSERT(strlen(buf) == 7, "truncated buffer is terminated");
 
@@ -82,7 +82,7 @@ static void test_views(void)
 {
 	qaws_scalar data[6] = { 1, 2, 3, 4, 5, 6 };
 	unsigned char active[2] = { 1, 0 };
-	qaws_field_view v = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, data, 2, 3);
+	qaws_field_view v = qaws_field_view_make(data, 2, QAWS_FIELD_CONTROL_POINTS, 3);
 	qaws_diff_views views;
 
 	views.fields = &v;

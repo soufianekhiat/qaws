@@ -44,7 +44,7 @@ static void demo_nurbs_weight(void)
 		qaws_diff_views views;
 		double l = 0;
 
-		qaws_curve_eval_batch_tangent_2d(NULL, c, ts, NULL, 64, QAWS_EVAL_FLAG_POSITION, NULL, p, t);
+		qaws_curve_eval_batch_tangent_2d(p, t, c, ts, NULL, NULL, 64, QAWS_EVAL_FLAG_POSITION, NULL);
 		memset(ybar, 0, sizeof(ybar));
 		for (i = 0; i < 64; i++)
 		{
@@ -60,7 +60,7 @@ static void demo_nurbs_weight(void)
 		/* Only the middle weight is active: the mask keeps the end weights fixed. */
 		views = one_field(&fv, QAWS_FIELD_WEIGHTS, wbar, 3, 1);
 		fv.active = active;
-		qaws_curve_eval_batch_adjoint_2d(NULL, c, ts, 64, QAWS_EVAL_FLAG_POSITION, ybar, &views, NULL);
+		qaws_curve_eval_batch_adjoint_2d(&views, NULL, c, ts, ybar, 64, QAWS_EVAL_FLAG_POSITION, NULL);
 		qaws_curve_destroy(c);
 		if (it < W_ITERS)
 			w[1] -= (qaws_scalar)(1.5 * wbar[1]);

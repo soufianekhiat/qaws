@@ -211,10 +211,10 @@ static qaws_status prepare_cubic_points(qaws_exact_desc const* d, qaws_curve con
 			return QAWS_STATUS_EXACT_UNSUPPORTED;   /* distances: sqrt */
 		closed = impl->closed;
 	}
-	if (qaws_curve_read_field(curve, QAWS_FIELD_POINTS, pts, n * dim, &got) != QAWS_STATUS_OK)
+	if (qaws_curve_read_field(pts, &got, curve, n * dim, QAWS_FIELD_POINTS) != QAWS_STATUS_OK)
 		return QAWS_STATUS_EXACT_UNSUPPORTED;
 	if (kind == QAWS_CURVE_KIND_HERMITE &&
-	    qaws_curve_read_field(curve, QAWS_FIELD_DERIVATIVES, tan, n * dim, &got) != QAWS_STATUS_OK)
+	    qaws_curve_read_field(tan, &got, curve, n * dim, QAWS_FIELD_DERIVATIVES) != QAWS_STATUS_OK)
 		return QAWS_STATUS_EXACT_UNSUPPORTED;
 	for (i = 0; i < n * dim; i++)
 	{
@@ -281,7 +281,7 @@ static qaws_status prepare_cubic_family(qaws_exact_desc const* d, qaws_curve con
 	qaws_scalar* pts;
 	int64_t* P;
 	qaws_status st;
-	if (qaws_curve_describe_fields(curve, fields, 8, &nf) != QAWS_STATUS_OK)
+	if (qaws_curve_describe_fields(fields, &nf, curve, 8) != QAWS_STATUS_OK)
 		return QAWS_STATUS_EXACT_UNSUPPORTED;
 	for (f = 0; f < nf && f < 8; f++)
 		if (fields[f].field == QAWS_FIELD_POINTS)
@@ -320,7 +320,7 @@ static qaws_status prepare_polynomial(qaws_exact_desc const* d, qaws_curve const
 	qaws_exact_int A[(QAWS_EXACT_MAX_DEGREE + 1) * 3], B[(QAWS_EXACT_MAX_DEGREE + 1) * 3], t, pw;
 	qaws_exact_curve* ec;
 	qaws_status st;
-	if (qaws_curve_describe_fields(curve, fields, 8, &nf) != QAWS_STATUS_OK)
+	if (qaws_curve_describe_fields(fields, &nf, curve, 8) != QAWS_STATUS_OK)
 		return QAWS_STATUS_EXACT_UNSUPPORTED;
 	for (f = 0; f < nf && f < 8; f++)
 		if (fields[f].field == QAWS_FIELD_COEFFICIENTS)
@@ -328,7 +328,7 @@ static qaws_status prepare_polynomial(qaws_exact_desc const* d, qaws_curve const
 	if (ncoef < 1 || ncoef > QAWS_EXACT_MAX_DEGREE + 1 || (dim != 2 && dim != 3))
 		return QAWS_STATUS_EXACT_RANGE_EXCEEDED;
 	n = ncoef - 1;
-	if (qaws_curve_read_field(curve, QAWS_FIELD_COEFFICIENTS, co, ncoef * dim, &got) != QAWS_STATUS_OK)
+	if (qaws_curve_read_field(co, &got, curve, ncoef * dim, QAWS_FIELD_COEFFICIENTS) != QAWS_STATUS_OK)
 		return QAWS_STATUS_EXACT_UNSUPPORTED;
 	for (i = 0; i <= QAWS_EXACT_MAX_DEGREE; i++)
 		for (j = 0; j <= QAWS_EXACT_MAX_DEGREE; j++)
@@ -634,11 +634,11 @@ static qaws_status prepare_net(qaws_exact_desc const* dp, qaws_curve const* curv
 	qaws_exact_hfrac* local = NULL;
 	qaws_exact_curve* ec;
 	qaws_status st = QAWS_STATUS_OK;
-	if (qaws_curve_read_field(curve, QAWS_FIELD_CONTROL_POINTS, cps, n * dim, &got) != QAWS_STATUS_OK)
+	if (qaws_curve_read_field(cps, &got, curve, n * dim, QAWS_FIELD_CONTROL_POINTS) != QAWS_STATUS_OK)
 		return QAWS_STATUS_EXACT_UNSUPPORTED;
 	for (i = 0; i < n; i++)
 		ws[i] = 1;
-	if (rational && qaws_curve_read_field(curve, QAWS_FIELD_WEIGHTS, ws, n, &got) != QAWS_STATUS_OK)
+	if (rational && qaws_curve_read_field(ws, &got, curve, n, QAWS_FIELD_WEIGHTS) != QAWS_STATUS_OK)
 		return QAWS_STATUS_EXACT_UNSUPPORTED;
 	for (i = 0; i < n; i++)
 	{
@@ -664,7 +664,7 @@ static qaws_status prepare_net(qaws_exact_desc const* dp, qaws_curve const* curv
 		int e = 0;
 		if (spline)
 		{
-			if (qaws_curve_read_field(curve, QAWS_FIELD_KNOTS, kn, nk, &got) != QAWS_STATUS_OK)
+			if (qaws_curve_read_field(kn, &got, curve, nk, QAWS_FIELD_KNOTS) != QAWS_STATUS_OK)
 			{
 				exact_curve_free(ec);
 				return QAWS_STATUS_EXACT_UNSUPPORTED;
@@ -865,7 +865,7 @@ qaws_status qaws_exact_curve_prepare(qaws_exact_desc const* desc, qaws_curve con
 	spline = kind == QAWS_CURVE_KIND_BSPLINE || kind == QAWS_CURVE_KIND_NURBS;
 	if (kind != QAWS_CURVE_KIND_BEZIER && kind != QAWS_CURVE_KIND_RATIONAL_BEZIER && !spline)
 		return QAWS_STATUS_EXACT_UNSUPPORTED;
-	if (qaws_curve_describe_fields(curve, fields, 8, &nf) != QAWS_STATUS_OK)
+	if (qaws_curve_describe_fields(fields, &nf, curve, 8) != QAWS_STATUS_OK)
 		return QAWS_STATUS_EXACT_UNSUPPORTED;
 	for (f = 0; f < nf && f < 8; f++)
 	{

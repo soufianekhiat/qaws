@@ -101,11 +101,11 @@ static qaws_diff_views sm_views(int kind, qaws_field_view* fv, qaws_scalar* data
 {
 	qaws_diff_views v;
 	unsigned int dim = sm_dim(kind);
-	fv[0] = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, data, 6, dim);
+	fv[0] = qaws_field_view_make(data, 6, QAWS_FIELD_CONTROL_POINTS, dim);
 	v.field_count = 1;
 	if (kind == 1)
 	{
-		fv[1] = qaws_field_view_make(QAWS_FIELD_WEIGHTS, data + 18, 6, 1);
+		fv[1] = qaws_field_view_make(data + 18, 6, QAWS_FIELD_WEIGHTS, 1);
 		v.field_count = 2;
 	}
 	v.fields = fv;
@@ -141,7 +141,7 @@ static void sm_values(int kind, qaws_scalar const* x, qaws_scalar const* dist_sh
 		if (dist_shift)
 			tg[i].distance += dist_shift[i];
 	}
-	qaws_curve_cdf_sample_tangent(NULL, c, MEAS, tg, NULL, NULL, SM_SAMPLES, 0, NULL, out, NULL, NULL, NULL);
+	qaws_curve_cdf_sample_tangent(out, NULL, NULL, NULL, c, tg, NULL, NULL, NULL, SM_SAMPLES, MEAS, 0, NULL);
 	qaws_curve_destroy(c);
 }
 
@@ -189,7 +189,7 @@ static void test_straight(void)
 		tg[i].distance = 0;
 		tg[i].fraction = (qaws_scalar)(i / 4.0);
 	}
-	TEST_ASSERT(qaws_curve_cdf_sample_tangent(NULL, c, MEAS, tg, NULL, NULL, 5, 0, NULL, s, NULL, NULL, &total) == QAWS_STATUS_OK,
+	TEST_ASSERT(qaws_curve_cdf_sample_tangent(s, NULL, NULL, &total, c, tg, NULL, NULL, NULL, 5, MEAS, 0, NULL) == QAWS_STATUS_OK,
 		"straight segment samples");
 	TEST_ASSERT(approx_eq(total, 3), "segment length");
 	for (i = 0; i < 5; i++)
@@ -241,14 +241,14 @@ static void test_reference(sm_ref const* r)
 	vh = sm_views(0, fh, hv);
 	(void)vx;
 	c = sm_curve(0, x);
-	REF_ASSERT(qaws_curve_cdf_sample_tangent(NULL, c, MEAS, g_sm_targets, NULL, NULL, SM_SAMPLES, 0, &vd, val, tan1, tan2, &total)
+	REF_ASSERT(qaws_curve_cdf_sample_tangent(val, tan1, tan2, &total, c, g_sm_targets, NULL, NULL, &vd, SM_SAMPLES, MEAS, 0, NULL)
 		== QAWS_STATUS_OK, "forward");
 	REF_ASSERT(diff_close(total, r->total[0], tol), "total length");
 	if (!MEAS)
 	{
 		/* the length functional integrates with the same accuracy */
 		qaws_scalar len = 0;
-		qaws_curve_functional_eval(NULL, c, QAWS_FUNCTIONAL_LENGTH, 8, NULL, &len, NULL, NULL);
+		qaws_curve_functional_eval(&len, NULL, NULL, c, NULL, QAWS_FUNCTIONAL_LENGTH, 8, NULL);
 		REF_ASSERT(diff_close(len, r->total[0], tol), "length functional");
 	}
 	for (i = 0; i < SM_SAMPLES; i++)
@@ -269,9 +269,9 @@ static void test_reference(sm_ref const* r)
 	REF_ASSERT(ok_2, "second order tangents");
 	memset(grad, 0, sizeof(grad));
 	memset(hv, 0, sizeof(hv));
-	REF_ASSERT(qaws_curve_cdf_sample_adjoint(NULL, c, MEAS, g_sm_targets, SM_SAMPLES, 0, adj, &vg, NULL) == QAWS_STATUS_OK,
+	REF_ASSERT(qaws_curve_cdf_sample_adjoint(&vg, NULL, c, g_sm_targets, adj, SM_SAMPLES, MEAS, 0, NULL) == QAWS_STATUS_OK,
 		"adjoint");
-	REF_ASSERT(qaws_curve_cdf_sample_hvp(NULL, c, MEAS, g_sm_targets, SM_SAMPLES, 0, adj, &vd, &vh) == QAWS_STATUS_OK,
+	REF_ASSERT(qaws_curve_cdf_sample_hvp(&vh, c, g_sm_targets, adj, &vd, SM_SAMPLES, MEAS, 0, NULL) == QAWS_STATUS_OK,
 		"hvp");
 	for (i = 0; i < 18; i++)
 	{
@@ -306,7 +306,7 @@ static void test_finite_differences(int kind, char const* name)
 	vd = sm_views(kind, fd, dir);
 	vg = sm_views(kind, fg, grad);
 	c = sm_curve(kind, x);
-	qaws_curve_cdf_sample_tangent(NULL, c, MEAS, g_sm_targets, ddir, NULL, SM_SAMPLES, 0, &vd, val, t1, t2, NULL);
+	qaws_curve_cdf_sample_tangent(val, t1, t2, NULL, c, g_sm_targets, ddir, NULL, &vd, SM_SAMPLES, MEAS, 0, NULL);
 	for (i = 0; i < np; i++)
 	{
 		xp[i] = (qaws_scalar)(x[i] + h * dir[i]);
@@ -331,8 +331,8 @@ static void test_finite_differences(int kind, char const* name)
 			tp[i].distance += sp[i];
 			tm[i].distance += smn[i];
 		}
-		qaws_curve_cdf_sample_tangent(NULL, cp, MEAS, tp, ddir, NULL, SM_SAMPLES, 0, &vd, NULL, t1p, NULL, NULL);
-		qaws_curve_cdf_sample_tangent(NULL, cm, MEAS, tm, ddir, NULL, SM_SAMPLES, 0, &vd, NULL, t1m, NULL, NULL);
+		qaws_curve_cdf_sample_tangent(NULL, t1p, NULL, NULL, cp, tp, ddir, NULL, &vd, SM_SAMPLES, MEAS, 0, NULL);
+		qaws_curve_cdf_sample_tangent(NULL, t1m, NULL, NULL, cm, tm, ddir, NULL, &vd, SM_SAMPLES, MEAS, 0, NULL);
 		qaws_curve_destroy(cp);
 		qaws_curve_destroy(cm);
 	}
@@ -359,7 +359,7 @@ static void test_finite_differences(int kind, char const* name)
 			adj[i].position.z = 0;
 	memset(grad, 0, sizeof(grad));
 	memset(dadj, 0, sizeof(dadj));
-	qaws_curve_cdf_sample_adjoint(NULL, c, MEAS, g_sm_targets, SM_SAMPLES, 0, adj, &vg, dadj);
+	qaws_curve_cdf_sample_adjoint(&vg, dadj, c, g_sm_targets, adj, SM_SAMPLES, MEAS, 0, NULL);
 	{
 		double lhs = sm_sample_dot(adj, t1, SM_SAMPLES);
 		double rhs = diff_dot(grad, dir, np) + diff_dot(dadj, ddir, SM_SAMPLES);
@@ -374,7 +374,7 @@ static void test_finite_differences(int kind, char const* name)
 		qaws_diff_views vh = sm_views(kind, fh, hv), vgp = sm_views(kind, fp, gp), vgm = sm_views(kind, fm, gm);
 		qaws_status st;
 		memset(hv, 0, sizeof(hv));
-		st = qaws_curve_cdf_sample_hvp(NULL, c, MEAS, g_sm_targets, SM_SAMPLES, 0, adj, &vd, &vh);
+		st = qaws_curve_cdf_sample_hvp(&vh, c, g_sm_targets, adj, &vd, SM_SAMPLES, MEAS, 0, NULL);
 		/* rational curves (weights) polarize the second order forward pass */
 		{
 			qaws_curve* cp;
@@ -389,8 +389,8 @@ static void test_finite_differences(int kind, char const* name)
 			cm = sm_curve(kind, xm);
 			memset(gp, 0, sizeof(gp));
 			memset(gm, 0, sizeof(gm));
-			qaws_curve_cdf_sample_adjoint(NULL, cp, MEAS, g_sm_targets, SM_SAMPLES, 0, adj, &vgp, NULL);
-			qaws_curve_cdf_sample_adjoint(NULL, cm, MEAS, g_sm_targets, SM_SAMPLES, 0, adj, &vgm, NULL);
+			qaws_curve_cdf_sample_adjoint(&vgp, NULL, cp, g_sm_targets, adj, SM_SAMPLES, MEAS, 0, NULL);
+			qaws_curve_cdf_sample_adjoint(&vgm, NULL, cm, g_sm_targets, adj, SM_SAMPLES, MEAS, 0, NULL);
 			for (k = 0; k < np; k++)
 				okh &= diff_close(hv[k], (gp[k] - gm[k]) / (2 * h), tol);
 			sprintf(msg, "%s: HVP matches finite differences of the gradient", name);
@@ -404,7 +404,7 @@ static void test_finite_differences(int kind, char const* name)
 				qaws_diff_views vu = sm_views(kind, fu, u), vhu = sm_views(kind, fhu, hu);
 				diff_rand_fill(u, np);
 				memset(hu, 0, sizeof(hu));
-				qaws_curve_cdf_sample_hvp(NULL, c, MEAS, g_sm_targets, SM_SAMPLES, 0, adj, &vu, &vhu);
+				qaws_curve_cdf_sample_hvp(&vhu, c, g_sm_targets, adj, &vu, SM_SAMPLES, MEAS, 0, NULL);
 				sprintf(msg, "%s: HVP is symmetric", name);
 				TEST_ASSERT(diff_close(diff_dot(u, hv, np), diff_dot(dir, hu, np), QAWS_SCALAR_IS_FLOAT ? 5e-3 : 1e-9), msg);
 			}
@@ -460,13 +460,13 @@ static void test_traversal(void)
 			tpl[i] = (qaws_scalar)(times[i] + h);
 			tmi[i] = (qaws_scalar)(times[i] - h);
 		}
-		TEST_ASSERT_STATUS(qaws_traversal_cdf_targets(tr, tin, SM_SAMPLES, tg, r1, r2));
-		qaws_traversal_cdf_targets(tr, tpl, SM_SAMPLES, tp, NULL, NULL);
-		qaws_traversal_cdf_targets(tr, tmi, SM_SAMPLES, tm, NULL, NULL);
+		TEST_ASSERT_STATUS(qaws_traversal_cdf_targets(tg, r1, r2, tr, tin, SM_SAMPLES));
+		qaws_traversal_cdf_targets(tp, NULL, NULL, tr, tpl, SM_SAMPLES);
+		qaws_traversal_cdf_targets(tm, NULL, NULL, tr, tmi, SM_SAMPLES);
 		/* time direction 1: the distance moves at r1 and accelerates at r2 */
-		qaws_curve_cdf_sample_tangent(NULL, c, NULL, tg, r1, r2, SM_SAMPLES, 0, NULL, val, t1, t2, NULL);
-		qaws_curve_cdf_sample_tangent(NULL, c, NULL, tp, NULL, NULL, SM_SAMPLES, 0, NULL, vp, NULL, NULL, NULL);
-		qaws_curve_cdf_sample_tangent(NULL, c, NULL, tm, NULL, NULL, SM_SAMPLES, 0, NULL, vm, NULL, NULL, NULL);
+		qaws_curve_cdf_sample_tangent(val, t1, t2, NULL, c, tg, r1, r2, NULL, SM_SAMPLES, NULL, 0, NULL);
+		qaws_curve_cdf_sample_tangent(vp, NULL, NULL, NULL, c, tp, NULL, NULL, NULL, SM_SAMPLES, NULL, 0, NULL);
+		qaws_curve_cdf_sample_tangent(vm, NULL, NULL, NULL, c, tm, NULL, NULL, NULL, SM_SAMPLES, NULL, 0, NULL);
 		for (i = 0; i < SM_SAMPLES; i++)
 		{
 			qaws_eval_result_3d e;
@@ -515,8 +515,8 @@ static void test_knots(int kind, char const* name)
 		kp[i] = (qaws_scalar)(g_sm_knots0[i] + h * dk[i]);
 		km[i] = (qaws_scalar)(g_sm_knots0[i] - h * dk[i]);
 	}
-	fd = qaws_field_view_make(QAWS_FIELD_KNOTS, kd, 10, 1);
-	fg = qaws_field_view_make(QAWS_FIELD_KNOTS, grad, 10, 1);
+	fd = qaws_field_view_make(kd, 10, QAWS_FIELD_KNOTS, 1);
+	fg = qaws_field_view_make(grad, 10, QAWS_FIELD_KNOTS, 1);
 	vd.fields = &fd;
 	vg.fields = &fg;
 	vd.field_count = vg.field_count = 1;
@@ -528,9 +528,9 @@ static void test_knots(int kind, char const* name)
 	g_sm_knots = km;
 	cm = sm_curve(kind, x);
 	g_sm_knots = g_sm_knots0;
-	TEST_ASSERT_STATUS(qaws_curve_cdf_sample_tangent(NULL, c, MEAS, g_sm_targets, NULL, NULL, SM_SAMPLES, 0, &vd, NULL, t1, t2, NULL));
-	qaws_curve_cdf_sample_tangent(NULL, cp, MEAS, g_sm_targets, NULL, NULL, SM_SAMPLES, 0, &vd, vp, t1p, NULL, NULL);
-	qaws_curve_cdf_sample_tangent(NULL, cm, MEAS, g_sm_targets, NULL, NULL, SM_SAMPLES, 0, &vd, vm, t1m, NULL, NULL);
+	TEST_ASSERT_STATUS(qaws_curve_cdf_sample_tangent(NULL, t1, t2, NULL, c, g_sm_targets, NULL, NULL, &vd, SM_SAMPLES, MEAS, 0, NULL));
+	qaws_curve_cdf_sample_tangent(vp, t1p, NULL, NULL, cp, g_sm_targets, NULL, NULL, &vd, SM_SAMPLES, MEAS, 0, NULL);
+	qaws_curve_cdf_sample_tangent(vm, t1m, NULL, NULL, cm, g_sm_targets, NULL, NULL, &vd, SM_SAMPLES, MEAS, 0, NULL);
 	for (i = 0; i < SM_SAMPLES; i++)
 	{
 		ok1 &= diff_close(t1[i].t, (vp[i].t - vm[i].t) / (2 * h), tol);
@@ -550,7 +550,7 @@ static void test_knots(int kind, char const* name)
 	sm_rand_adjoint(adj, SM_SAMPLES);
 	memset(grad, 0, sizeof(grad));
 	memset(adj_d, 0, sizeof(adj_d));
-	TEST_ASSERT_STATUS(qaws_curve_cdf_sample_adjoint(NULL, c, MEAS, g_sm_targets, SM_SAMPLES, 0, adj, &vg, adj_d));
+	TEST_ASSERT_STATUS(qaws_curve_cdf_sample_adjoint(&vg, adj_d, c, g_sm_targets, adj, SM_SAMPLES, MEAS, 0, NULL));
 	{
 		double lhs = sm_sample_dot(adj, t1, SM_SAMPLES), rhs = diff_dot(grad, kd, 10);
 		sprintf(msg, "%s: knot adjoint identity (%.12g vs %.12g)", name, lhs, rhs);
@@ -562,9 +562,9 @@ static void test_knots(int kind, char const* name)
 		qaws_field_view fh, fp, fm;
 		qaws_diff_views vh, vgp, vgm;
 		int okh = 1;
-		fh = qaws_field_view_make(QAWS_FIELD_KNOTS, hv, 10, 1);
-		fp = qaws_field_view_make(QAWS_FIELD_KNOTS, gp, 10, 1);
-		fm = qaws_field_view_make(QAWS_FIELD_KNOTS, gm, 10, 1);
+		fh = qaws_field_view_make(hv, 10, QAWS_FIELD_KNOTS, 1);
+		fp = qaws_field_view_make(gp, 10, QAWS_FIELD_KNOTS, 1);
+		fm = qaws_field_view_make(gm, 10, QAWS_FIELD_KNOTS, 1);
 		vh.fields = &fh;
 		vgp.fields = &fp;
 		vgm.fields = &fm;
@@ -575,9 +575,9 @@ static void test_knots(int kind, char const* name)
 		memset(gp, 0, sizeof(gp));
 		memset(gm, 0, sizeof(gm));
 		sprintf(msg, "%s: knot HVP", name);
-		TEST_ASSERT(qaws_curve_cdf_sample_hvp(NULL, c, MEAS, g_sm_targets, SM_SAMPLES, 0, adj, &vd, &vh) == QAWS_STATUS_OK, msg);
-		qaws_curve_cdf_sample_adjoint(NULL, cp, MEAS, g_sm_targets, SM_SAMPLES, 0, adj, &vgp, NULL);
-		qaws_curve_cdf_sample_adjoint(NULL, cm, MEAS, g_sm_targets, SM_SAMPLES, 0, adj, &vgm, NULL);
+		TEST_ASSERT(qaws_curve_cdf_sample_hvp(&vh, c, g_sm_targets, adj, &vd, SM_SAMPLES, MEAS, 0, NULL) == QAWS_STATUS_OK, msg);
+		qaws_curve_cdf_sample_adjoint(&vgp, NULL, cp, g_sm_targets, adj, SM_SAMPLES, MEAS, 0, NULL);
+		qaws_curve_cdf_sample_adjoint(&vgm, NULL, cm, g_sm_targets, adj, SM_SAMPLES, MEAS, 0, NULL);
 		for (i = 0; i < 10; i++)
 			okh &= diff_close(hv[i], (gp[i] - gm[i]) / (2 * h), QAWS_SCALAR_IS_FLOAT ? 5e-2 : 1e-5);
 		sprintf(msg, "%s: knot HVP matches finite differences of the knot gradient", name);
@@ -595,7 +595,7 @@ static void test_refusals(void)
 	qaws_curve* c;
 	sm_base(0, x);
 	c = sm_curve(0, x);
-	TEST_ASSERT(qaws_curve_cdf_sample_tangent(NULL, NULL, MEAS, g_sm_targets, NULL, NULL, SM_SAMPLES, 0, NULL, s, NULL, NULL, NULL) ==
+	TEST_ASSERT(qaws_curve_cdf_sample_tangent(s, NULL, NULL, NULL, NULL, g_sm_targets, NULL, NULL, NULL, SM_SAMPLES, MEAS, 0, NULL) ==
 		QAWS_STATUS_INVALID_ARGUMENT, "NULL curve");
 	qaws_curve_destroy(c);
 }

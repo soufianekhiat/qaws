@@ -72,7 +72,7 @@ static double arch_loss(qaws_curve const* arch, qaws_curve const* deck, qaws_sca
 	}
 	{
 		qaws_curve_extremum e, eb;
-		qaws_curve_extremum_tangent(NULL, arch, up, f->t_apex, NULL, NULL, &e, NULL);
+		qaws_curve_extremum_tangent(&e, NULL, arch, NULL, NULL, up, f->t_apex, NULL);
 		f->apex = e.position;
 		loss += (e.position.x - AR_APEX_X) * (e.position.x - AR_APEX_X) + (e.value - AR_APEX_Y) * (e.value - AR_APEX_Y);
 		if (grad)
@@ -80,21 +80,21 @@ static double arch_loss(qaws_curve const* arch, qaws_curve const* deck, qaws_sca
 			memset(&eb, 0, sizeof(eb));
 			eb.position.x = (qaws_scalar)(2 * (e.position.x - AR_APEX_X));
 			eb.value = (qaws_scalar)(2 * (e.value - AR_APEX_Y));
-			qaws_curve_extremum_adjoint(NULL, arch, up, f->t_apex, &eb, &gv, NULL);
+			qaws_curve_extremum_adjoint(&gv, NULL, arch, &eb, up, f->t_apex, NULL);
 		}
 	}
 	for (i = 0; i < 2; i++)
 	{
 		qaws_curve_pair_point p, pb;
 		double target = i == 0 ? AR_X0 : AR_X1;
-		qaws_curve_pair_point_tangent(NULL, arch, deck, f->t_cross[i], f->tb_cross[i], NULL, NULL, &p, NULL);
+		qaws_curve_pair_point_tangent(&p, NULL, arch, deck, NULL, NULL, f->t_cross[i], f->tb_cross[i], NULL);
 		f->cross[i] = p.position_a;
 		loss += (p.position_a.x - target) * (p.position_a.x - target);
 		if (grad)
 		{
 			memset(&pb, 0, sizeof(pb));
 			pb.position_a.x = (qaws_scalar)(2 * (p.position_a.x - target));
-			qaws_curve_pair_point_adjoint(NULL, arch, deck, f->t_cross[i], f->tb_cross[i], &pb, &gv, NULL);
+			qaws_curve_pair_point_adjoint(&gv, NULL, arch, deck, &pb, f->t_cross[i], f->tb_cross[i], NULL);
 		}
 	}
 	/* a little fairness */
@@ -103,7 +103,7 @@ static double arch_loss(qaws_curve const* arch, qaws_curve const* deck, qaws_sca
 		qaws_field_view bf;
 		qaws_diff_views bv = one_field(&bf, QAWS_FIELD_CONTROL_POINTS, bg, AR_N, 2);
 		memset(bg, 0, sizeof(bg));
-		qaws_curve_functional_gradient(NULL, arch, QAWS_FUNCTIONAL_BENDING, 0, &bv, &bend);
+		qaws_curve_functional_gradient(&bend, &bv, arch, QAWS_FUNCTIONAL_BENDING, 0, NULL);
 		loss += 1e-3 * bend;
 		if (grad)
 			for (i = 0; i < AR_N * 2; i++)

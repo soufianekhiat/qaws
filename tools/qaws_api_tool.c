@@ -1,7 +1,7 @@
 /*
  * qaws_api_tool - Qaws's API checks (docs/parameter_convention_plan.md)
  *
- *   qaws_api_tool survey [-v] [-allow file] header...
+ *   qaws_api_tool survey [-v] [-order] [-allow file] [-types header... --] header...
  *       checks every function declaration against the parameter
  *       convention shared with Alwan, Suwar and Abaad:
  *         R1 the context last;
@@ -174,6 +174,7 @@ enum kind { K_OUT, K_HANDLE, K_IN, K_KNOB, K_SIZE, K_VALUE, K_STRIDE, K_CTX };
 typedef struct survey
 {
 	int verbose;
+	int order;                       /* print each violator's spec (the order) instead */
 	char const* file;
 	char** allow;                    /* "name rule" lines */
 	unsigned char* allow_used;
@@ -193,44 +194,150 @@ static int scalarish(char const* s)
 
 static int contains(char const* s, char const* part) { return strstr(s, part) != NULL; }
 
-/* a parameter tokens [a, b): its kind */
-static enum kind classify(toks const* v, size_t a, size_t b)
+/* the structs a public header gives a body: data, passed by pointer as
+   buffers; every other struct is an opaque handle (collected first) */
+static char** g_data;
+static size_t g_ndata;
+
+static int is_data(char const* s)
+{
+	size_t k;
+	for (k = 0; k < g_ndata; k++) if (!strcmp(g_data[k], s)) return 1;
+	return 0;
+}
+
+static void add_data(char const* s)
+{
+	size_t l = strlen(s);
+	if (is_data(s)) return;
+	g_data = (char**)realloc(g_data, sizeof(char*) * (g_ndata + 1));
+	g_data[g_ndata] = (char*)malloc(l + 1);
+	memcpy(g_data[g_ndata], s, l + 1);
+	g_ndata++;
+}
+
+static void data_stmt(void* user, toks const* v, size_t a, size_t b, int body)
 {
 	size_t i;
-	int ptr = 0, cnst = 0, scal = 0, outmark = 0;
-	char const* name = "";
-	char const* type = "";
+	int has_body = 0, is_struct = 0;
+	(void)user; (void)body;
+	for (i = a; i < b; i++)
+	{
+		if (!strcmp(v->t[i].s, "{")) has_body = 1;
+		if (!strcmp(v->t[i].s, "struct") || !strcmp(v->t[i].s, "union")) is_struct = 1;
+	}
+	if (!has_body || !is_struct) return;
+	for (i = a; i + 1 < b; i++)
+		if ((!strcmp(v->t[i].s, "struct") || !strcmp(v->t[i].s, "union")) && is_id(v->t[i + 1].s[0])) { add_data(v->t[i + 1].s); break; }
+	if (is_id(v->t[b - 1].s[0])) add_data(v->t[b - 1].s);   /* (typedef struct { ... } name;) */
+}
+
+/* a parameter's facts: pointer depth, whether the pointee is const (a
+   const before the first '*'), its type and name */
+typedef struct param
+{
+	int ptr, cnst, scal, data, out, inout;
+	char const* name;
+	char const* type;
+} param;
+
+static param analyze(toks const* v, size_t a, size_t b)
+{
+	param p;
+	size_t i;
+	memset(&p, 0, sizeof(p));
+	p.name = ""; p.type = "";
+	int outer_const = 0;   /* (a const right before the last '*': the pointed-to pointers are const) */
 	for (i = a; i < b; i++)
 	{
 		char const* s = v->t[i].s;
-		if (!strcmp(s, "*") || !strcmp(s, "[")) ptr++;
-		else if (!strcmp(s, "const")) cnst = 1;
-		else if (!strcmp(s, "QAWS_OUT") || !strcmp(s, "QAWS_INOUT")) outmark = 1;
+		if (!strcmp(s, "*") || !strcmp(s, "[")) { p.ptr++; outer_const = i > a && !strcmp(v->t[i - 1].s, "const") && p.ptr >= 2; }
+		else if (!strcmp(s, "const")) { if (p.ptr == 0) p.cnst = 1; }
+		else if (!strcmp(s, "QAWS_OUT")) p.out = 1;
+		else if (!strcmp(s, "QAWS_INOUT")) p.inout = 1;
 		else if (is_id(s[0]) && !isdigit((unsigned char)s[0]))
 		{
-			if (!strcmp(type, "")) type = s;
-			else if (strcmp(s, "struct") && strcmp(s, "unsigned") && strcmp(s, "signed")) name = s;
-			if (scalarish(s)) scal = 1;
-			if (!strcmp(type, "struct")) type = s;
+			if (!strcmp(p.type, "") || !strcmp(p.type, "struct") || !strcmp(p.type, "unsigned") || !strcmp(p.type, "signed")) p.type = s;
+			else p.name = s;
+			if (scalarish(s)) p.scal = 1;
 		}
 	}
-	if (!strcmp(name, "")) name = type;
-	if (contains(type, "context") || contains(type, "_ctx") || contains(type, "executor") || !strcmp(name, "ctx")) return K_CTX;
-	if (contains(name, "stride")) return K_STRIDE;
-	if (outmark) return K_OUT;
-	if (ptr >= 2 && !cnst) return K_OUT;
-	if (ptr && !cnst)
+	if (!strcmp(p.name, "")) p.name = p.type;
+	p.data = p.scal || is_data(p.type);
+	/* T const** (a pointer handed back) writes: an output, as T* const*;
+	   only T const* const* reads at every level */
+	if (p.ptr >= 2 && p.cnst && !outer_const) p.cnst = 0;
+	return p;
+}
+
+static int is_ctx(param const* p)
+{
+	return contains(p->type, "context") || contains(p->type, "_ctx") || contains(p->type, "executor") || contains(p->type, "allocator") ||
+		!strcmp(p->name, "ctx");
+}
+
+static int is_size(param const* p)
+{
+	return !p->ptr && (contains(p->name, "count") || !strcmp(p->name, "n") || contains(p->name, "width") || contains(p->name, "height") ||
+		!strcmp(p->name, "dim") || !strcmp(p->name, "dimension") || !strcmp(p->name, "size") || contains(p->name, "capacity"));
+}
+
+static int is_user_data(param const* p)
+{
+	return !strcmp(p->type, "void") && (!strcmp(p->name, "user") || !strcmp(p->name, "user_data") || contains(p->name, "_user") ||
+		!strcmp(p->name, "impl") || !strcmp(p->name, "ptr"));
+}
+
+static int is_desc(param const* p)
+{
+	return contains(p->type, "desc") || contains(p->type, "options") || contains(p->type, "params") || contains(p->type, "settings") ||
+		contains(p->type, "config") || contains(p->type, "targets") || contains(p->type, "spec");
+}
+
+/* a parameter tokens [a, b): its kind */
+static enum kind classify(toks const* v, size_t a, size_t b)
+{
+	param p = analyze(v, a, b);
+	if (is_ctx(&p)) return K_CTX;
+	if (contains(p.name, "stride")) return K_STRIDE;
+	if (p.out || p.inout) return K_OUT;
+	if (p.ptr >= 2 && !p.cnst) return K_OUT;
+	if (p.ptr && !p.cnst)
 	{
-		if (!strncmp(name, "out", 3) || scal || contains(type, "report") || contains(type, "result") || contains(type, "stats") ||
-			contains(type, "summary"))
-			return K_OUT;
+		if (is_user_data(&p)) return K_VALUE;
+		if (!strncmp(p.name, "out", 3) || p.data) return K_OUT;
 		return K_HANDLE;
 	}
-	if (ptr) return scal ? K_IN : K_KNOB;
-	if (contains(name, "count") || !strcmp(name, "n") || contains(name, "width") || contains(name, "height") || !strcmp(name, "dim") ||
-		!strcmp(name, "dimension") || !strcmp(name, "size"))
-		return K_SIZE;
+	if (p.ptr) return p.data && !is_desc(&p) ? K_IN : K_KNOB;
+	if (is_size(&p)) return K_SIZE;
 	return K_VALUE;
+}
+
+/* a parameter's place in the convention's order: 0 plain outputs, 1
+   reports, 2 in-out buffers, 3 object handles, 4 input buffers, 5 sizes,
+   6 descriptors and options, 7 scalars, enums, callbacks and their data,
+   8 the context (a stride takes its buffer's place, right after it) */
+static int rank_of(toks const* v, size_t a, size_t b)
+{
+	param p = analyze(v, a, b);
+	if (is_ctx(&p)) return 8;
+	if (p.out) return 0;
+	if (p.inout) return 2;
+	if (p.ptr >= 2 && !p.cnst) return 0;
+	if (p.ptr && !p.cnst)
+	{
+		if (is_user_data(&p)) return 7;
+		if (!strncmp(p.name, "out", 3)) return 0;
+		if (contains(p.type, "report") || contains(p.type, "result") || contains(p.type, "stats") || contains(p.type, "summary")) return 1;
+		return p.data ? 2 : 3;
+	}
+	if (p.ptr)
+	{
+		if (is_desc(&p)) return 6;
+		return p.data ? 4 : 3;
+	}
+	if (is_size(&p)) return 5;
+	return 7;
 }
 
 static int allowed(survey* S, char const* fn, char const* rule)
@@ -248,6 +355,7 @@ static void survey_stmt(void* user, toks const* v, size_t a, size_t b, int body)
 	survey* S = (survey*)user;
 	size_t i, open = 0, close, p, q;
 	enum kind kinds[64];
+	int ranks[64];
 	int nk = 0, bad[5] = { 0, 0, 0, 0, 0 };
 	char const* fn = NULL;
 	(void)body;
@@ -277,9 +385,12 @@ static void survey_stmt(void* user, toks const* v, size_t a, size_t b, int body)
 			else if (!strcmp(v->t[q].s, ")")) depth--;
 			else if (!strcmp(v->t[q].s, ",") && depth == 0) break;
 		}
+		ranks[nk] = rank_of(v, p, q);
 		kinds[nk++] = classify(v, p, q);
 		p = q + 1;
 	}
+	for (i = 1; i < (size_t)nk; i++)
+		if (kinds[i] == K_STRIDE) ranks[i] = ranks[i - 1];   /* (a stride stays with its buffer) */
 	S->fns++;
 	/* R1 */
 	for (i = 0; i < (size_t)nk; i++) if (kinds[i] == K_CTX && i + 1 != (size_t)nk) bad[0] = 1;
@@ -317,6 +428,17 @@ static void survey_stmt(void* user, toks const* v, size_t a, size_t b, int body)
 					printf("%s: %s: %s (allowed)\n", S->file, fn, names[i]);
 			}
 		if (!any) S->ok++;
+		if (any && S->order)
+		{
+			/* the convention's order: a stable sort by rank, as old indices */
+			int idx[64], k, m;
+			for (k = 0; k < nk; k++) idx[k] = k;
+			for (k = 1; k < nk; k++)
+				for (m = k; m > 0 && ranks[idx[m - 1]] > ranks[idx[m]]; m--) { int t = idx[m]; idx[m] = idx[m - 1]; idx[m - 1] = t; }
+			printf("%s", fn);
+			for (k = 0; k < nk; k++) printf(" %d", idx[k]);
+			printf("\n");
+		}
 	}
 }
 
@@ -346,9 +468,22 @@ static int run_survey(int argc, char** argv)
 	int i, stale = 0;
 	size_t k;
 	memset(&S, 0, sizeof(S));
+	/* first the data structs: the bodies the public headers give (the
+	   surveyed ones and those after -types, read for their types only) */
 	for (i = 0; i < argc; i++)
 	{
+		toks v = { NULL, 0, 0 };
+		if (argv[i][0] == '-') { if (!strcmp(argv[i], "-allow")) i++; continue; }
+		if (contains(argv[i], "internal")) continue;
+		if (!tokenize(argv[i], &v)) return 2;
+		statements(&v, data_stmt, NULL);
+		free(v.t);
+	}
+	for (i = 0; i < argc; i++)
+	{
+		if (!strcmp(argv[i], "-types")) { while (i + 1 < argc && strcmp(argv[i + 1], "--")) i++; i++; continue; }
 		if (!strcmp(argv[i], "-v")) { S.verbose = 1; continue; }
+		if (!strcmp(argv[i], "-order")) { S.order = 1; continue; }
 		if (!strcmp(argv[i], "-allow") && i + 1 < argc) { if (!load_allow(argv[++i], &S)) return 2; continue; }
 		{
 			toks v = { NULL, 0, 0 };
@@ -540,7 +675,7 @@ int main(int argc, char** argv)
 		return run_survey(argc - 2, argv + 2);
 	if (argc >= 2 && !strcmp(argv[1], "names"))
 		return run_names(argc - 2, argv + 2);
-	fprintf(stderr, "usage: qaws_api_tool survey [-v] [-allow file] header...\n"
+	fprintf(stderr, "usage: qaws_api_tool survey [-v] [-order] [-allow file] [-types header... --] header...\n"
 		"       qaws_api_tool names [-check file] -once header... -- header...\n");
 	return 2;
 }

@@ -87,16 +87,16 @@ static void test_functional(int id, qaws_surface_functional functional, char con
 	d.v_knots = g_sf_vk;
 	d.v_knot_count = SF_NV + SF_DEG + 1;
 	TEST_ASSERT_STATUS(qaws_surface_create_bspline(&d, &s));
-	fd = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, dir, SF_NU * SF_NV, 3);
-	fg = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, grad, SF_NU * SF_NV, 3);
+	fd = qaws_field_view_make(dir, SF_NU * SF_NV, QAWS_FIELD_CONTROL_POINTS, 3);
+	fg = qaws_field_view_make(grad, SF_NU * SF_NV, QAWS_FIELD_CONTROL_POINTS, 3);
 	vd.fields = &fd;
 	vg.fields = &fg;
 	vd.field_count = vg.field_count = 1;
 	vd.children = vg.children = NULL;
 	vd.child_count = vg.child_count = 0;
 	memset(grad, 0, sizeof(grad));
-	TEST_ASSERT_STATUS(qaws_surface_functional_eval(NULL, s, functional, SF_CELLS, &vd, &value, &t1, &t2));
-	TEST_ASSERT_STATUS(qaws_surface_functional_gradient(NULL, s, functional, SF_CELLS, &vg, &gv));
+	TEST_ASSERT_STATUS(qaws_surface_functional_eval(&value, &t1, &t2, s, &vd, functional, SF_CELLS, NULL));
+	TEST_ASSERT_STATUS(qaws_surface_functional_gradient(&gv, &vg, s, functional, SF_CELLS, NULL));
 
 	/* one thread per node, then a sum */
 	for (ci = 0; ci < SF_CELLS; ci++)

@@ -72,7 +72,7 @@ static void demo_vase(void)
 		qaws_diff_views child, views;
 		double l = 0;
 
-		qaws_surface_eval_batch_tangent(NULL, vase, us, vs, NULL, NULL, VASE_N, QAWS_SJET_P, NULL, primal, tangent);
+		qaws_surface_eval_batch_tangent(primal, tangent, vase, us, vs, NULL, NULL, NULL, VASE_N, QAWS_SJET_P, NULL);
 		memset(ybar, 0, sizeof(ybar));
 		for (i = 0; i < VASE_N; i++)
 		{
@@ -90,7 +90,7 @@ static void demo_vase(void)
 		views.field_count = 0;
 		views.children = &child;
 		views.child_count = 1;
-		qaws_surface_eval_batch_adjoint(NULL, vase, us, vs, VASE_N, QAWS_SJET_P, ybar, &views, NULL, NULL);
+		qaws_surface_eval_batch_adjoint(&views, NULL, NULL, vase, us, vs, ybar, VASE_N, QAWS_SJET_P, NULL);
 		qaws_surface_destroy(vase);
 		qaws_curve_destroy(profile);
 		if (it < VASE_ITERS)

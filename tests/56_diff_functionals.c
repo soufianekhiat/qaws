@@ -23,7 +23,7 @@
 static qaws_diff_views one_view(qaws_field_view* fv, qaws_scalar* data, unsigned int count, unsigned int comps)
 {
 	qaws_diff_views v;
-	*fv = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, data, count, comps);
+	*fv = qaws_field_view_make(data, count, QAWS_FIELD_CONTROL_POINTS, comps);
 	v.fields = fv;
 	v.field_count = 1;
 	v.children = NULL;
@@ -64,8 +64,8 @@ static void test_curve_values(void)
 	bd.control_points = line;
 	bd.control_point_count = 4;
 	qaws_curve_create_bezier(&bd, &c);
-	qaws_curve_functional_eval(NULL, c, QAWS_FUNCTIONAL_LENGTH, 0, NULL, &len, NULL, NULL);
-	qaws_curve_functional_eval(NULL, c, QAWS_FUNCTIONAL_BENDING, 0, NULL, &bend, NULL, NULL);
+	qaws_curve_functional_eval(&len, NULL, NULL, c, NULL, QAWS_FUNCTIONAL_LENGTH, 0, NULL);
+	qaws_curve_functional_eval(&bend, NULL, NULL, c, NULL, QAWS_FUNCTIONAL_BENDING, 0, NULL);
 	TEST_ASSERT(approx_eq(len, (qaws_scalar)(3 * 1.4142135623730951)), "segment length");
 	TEST_ASSERT(approx_eq(bend, 0), "a uniformly parameterized segment has no bending");
 	qaws_curve_destroy(c);
@@ -83,15 +83,15 @@ static void test_curve_values(void)
 		rd.weights = w;
 		rd.weight_count = 3;
 		qaws_curve_create_rational_bezier(&rd, &c);
-		qaws_curve_functional_eval(NULL, c, QAWS_FUNCTIONAL_LENGTH, 8, NULL, &len, NULL, NULL);
-		qaws_curve_functional_eval(NULL, c, QAWS_FUNCTIONAL_CURVATURE_SQUARED, 8, NULL, &k2, NULL, NULL);
+		qaws_curve_functional_eval(&len, NULL, NULL, c, NULL, QAWS_FUNCTIONAL_LENGTH, 8, NULL);
+		qaws_curve_functional_eval(&k2, NULL, NULL, c, NULL, QAWS_FUNCTIONAL_CURVATURE_SQUARED, 8, NULL);
 		TEST_ASSERT(approx_eq_loose(len, (qaws_scalar)1.5707963267948966), "quarter circle length is pi/2");
 		TEST_ASSERT(approx_eq_loose(k2, (qaws_scalar)1.5707963267948966), "unit circle curvature energy is pi/2");
 		{
 			qaws_scalar dir[6] = { 0 }, hv[6] = { 0 };
 			qaws_field_view a, b;
 			qaws_diff_views va = one_view(&a, dir, 3, 2), vb = one_view(&b, hv, 3, 2);
-			TEST_ASSERT(qaws_curve_functional_hvp(NULL, c, QAWS_FUNCTIONAL_LENGTH, 0, &va, &vb)
+			TEST_ASSERT(qaws_curve_functional_hvp(&vb, c, &va, QAWS_FUNCTIONAL_LENGTH, 0, NULL)
 				== QAWS_STATUS_UNSUPPORTED_OPERATION, "direct HVP refused for rational curves");
 		}
 		qaws_curve_destroy(c);
@@ -102,7 +102,7 @@ static double curve_value(qaws_scalar const* p, qaws_curve_functional f)
 {
 	qaws_curve* c = fn_curve(p);
 	qaws_scalar v = 0;
-	qaws_curve_functional_eval(NULL, c, f, 0, NULL, &v, NULL, NULL);
+	qaws_curve_functional_eval(&v, NULL, NULL, c, NULL, f, 0, NULL);
 	qaws_curve_destroy(c);
 	return v;
 }
@@ -114,7 +114,7 @@ static void curve_gradient(qaws_scalar const* p, qaws_curve_functional f, qaws_s
 	qaws_diff_views v;
 	memset(g, 0, sizeof(qaws_scalar) * 18);
 	v = one_view(&fv, g, 6, 3);
-	qaws_curve_functional_gradient(NULL, c, f, 0, &v, NULL);
+	qaws_curve_functional_gradient(NULL, &v, c, f, 0, NULL);
 	qaws_curve_destroy(c);
 }
 
@@ -140,7 +140,7 @@ static void check_curve_functional(qaws_curve_functional f, char const* name)
 	c = fn_curve(p);
 
 	vd = one_view(&fv, d, 6, 3);
-	qaws_curve_functional_eval(NULL, c, f, 0, &vd, &val, &tan, &tan2);
+	qaws_curve_functional_eval(&val, &tan, &tan2, c, &vd, f, 0, NULL);
 	curve_gradient(p, f, g);
 
 	for (i = 0; i < 18; i++)
@@ -157,7 +157,7 @@ static void check_curve_functional(qaws_curve_functional f, char const* name)
 	/* HVP: finite differences of the gradient, symmetry, and tangent2. */
 	memset(hv, 0, sizeof(hv));
 	vh = one_view(&fv2, hv, 6, 3);
-	TEST_ASSERT_STATUS(qaws_curve_functional_hvp(NULL, c, f, 0, &vd, &vh));
+	TEST_ASSERT_STATUS(qaws_curve_functional_hvp(&vh, c, &vd, f, 0, NULL));
 	curve_gradient(pp, f, gp);
 	curve_gradient(pm, f, gm);
 	for (i = 0; i < 18; i++)
@@ -171,7 +171,7 @@ static void check_curve_functional(qaws_curve_functional f, char const* name)
 		qaws_diff_views vhe;
 		memset(he, 0, sizeof(he));
 		vhe = one_view(&fh, he, 6, 3);
-		qaws_curve_functional_hvp(NULL, c, f, 0, &ve, &vhe);
+		qaws_curve_functional_hvp(&vhe, c, &ve, f, 0, NULL);
 		TEST_ASSERT(diff_close(diff_dot(e, hv, 18), diff_dot(d, he, 18), DIFF_TOL * 10), "HVP is symmetric");
 	}
 	qaws_curve_destroy(c);
@@ -223,9 +223,9 @@ static void ref_curve_errs(qaws_curve_functional f, unsigned int quadrature, dou
 	vd = one_view(&fd, dir, 6, 3);
 	vg = one_view(&fg, g, 6, 3);
 	vh = one_view(&fh, hv, 6, 3);
-	TEST_ASSERT_STATUS(qaws_curve_functional_eval(NULL, c, f, quadrature, &vd, &got[0], &got[1], &got[2]));
-	TEST_ASSERT_STATUS(qaws_curve_functional_gradient(NULL, c, f, quadrature, &vg, NULL));
-	TEST_ASSERT_STATUS(qaws_curve_functional_hvp(NULL, c, f, quadrature, &vd, &vh));
+	TEST_ASSERT_STATUS(qaws_curve_functional_eval(&got[0], &got[1], &got[2], c, &vd, f, quadrature, NULL));
+	TEST_ASSERT_STATUS(qaws_curve_functional_gradient(NULL, &vg, c, f, quadrature, NULL));
+	TEST_ASSERT_STATUS(qaws_curve_functional_hvp(&vh, c, &vd, f, quadrature, NULL));
 	e[0] = ref_max_err(got, vals, 3);
 	e[1] = ref_max_err(g, grad, 18);
 	e[2] = ref_max_err(hv, hvp, 18);
@@ -305,9 +305,9 @@ static double ref_surface_err(qaws_surface_functional f, unsigned int cells, dou
 	vd = one_view(&fd, dir, 25, 3);
 	vg = one_view(&fg, g, 25, 3);
 	vh = one_view(&fh, hv, 25, 3);
-	qaws_surface_functional_eval(NULL, s, f, cells, &vd, &got[0], &got[1], &got[2]);
-	qaws_surface_functional_gradient(NULL, s, f, cells, &vg, NULL);
-	qaws_surface_functional_hvp(NULL, s, f, cells, &vd, &vh);
+	qaws_surface_functional_eval(&got[0], &got[1], &got[2], s, &vd, f, cells, NULL);
+	qaws_surface_functional_gradient(NULL, &vg, s, f, cells, NULL);
+	qaws_surface_functional_hvp(&vh, s, &vd, f, cells, NULL);
 	qaws_surface_destroy(s);
 	e_parts[0] = ref_max_err(got, vals, 3);
 	e_parts[1] = ref_max_err(g, grad, 75);
@@ -369,9 +369,9 @@ static void test_surface_values(void)
 	qaws_scalar area = 0, plate = 0, will = 0;
 	fill_patch(p, 0);
 	s = fn_surface(p);
-	qaws_surface_functional_eval(NULL, s, QAWS_FUNCTIONAL_AREA, 0, NULL, &area, NULL, NULL);
-	qaws_surface_functional_eval(NULL, s, QAWS_FUNCTIONAL_THIN_PLATE, 0, NULL, &plate, NULL, NULL);
-	qaws_surface_functional_eval(NULL, s, QAWS_FUNCTIONAL_WILLMORE, 0, NULL, &will, NULL, NULL);
+	qaws_surface_functional_eval(&area, NULL, NULL, s, NULL, QAWS_FUNCTIONAL_AREA, 0, NULL);
+	qaws_surface_functional_eval(&plate, NULL, NULL, s, NULL, QAWS_FUNCTIONAL_THIN_PLATE, 0, NULL);
+	qaws_surface_functional_eval(&will, NULL, NULL, s, NULL, QAWS_FUNCTIONAL_WILLMORE, 0, NULL);
 	TEST_ASSERT(approx_eq(area, 1), "unit square area");
 	TEST_ASSERT(approx_eq(plate, 0) && approx_eq(will, 0), "a plane has no thin-plate or Willmore energy");
 	qaws_surface_destroy(s);
@@ -381,7 +381,7 @@ static double surface_value(qaws_scalar const* p, qaws_surface_functional f)
 {
 	qaws_surface* s = fn_surface(p);
 	qaws_scalar v = 0;
-	qaws_surface_functional_eval(NULL, s, f, 4, NULL, &v, NULL, NULL);
+	qaws_surface_functional_eval(&v, NULL, NULL, s, NULL, f, 4, NULL);
 	qaws_surface_destroy(s);
 	return v;
 }
@@ -393,7 +393,7 @@ static void surface_gradient(qaws_scalar const* p, qaws_surface_functional f, qa
 	qaws_diff_views v;
 	memset(g, 0, sizeof(qaws_scalar) * 48);
 	v = one_view(&fv, g, 16, 3);
-	qaws_surface_functional_gradient(NULL, s, f, 4, &v, NULL);
+	qaws_surface_functional_gradient(NULL, &v, s, f, 4, NULL);
 	qaws_surface_destroy(s);
 }
 
@@ -412,7 +412,7 @@ static void check_surface_functional(qaws_surface_functional f, char const* name
 	diff_rand_fill(d, 48);
 	s = fn_surface(p);
 	vd = one_view(&fv, d, 16, 3);
-	qaws_surface_functional_eval(NULL, s, f, 4, &vd, &val, &tan, &tan2);
+	qaws_surface_functional_eval(&val, &tan, &tan2, s, &vd, f, 4, NULL);
 	surface_gradient(p, f, g);
 	for (i = 0; i < 48; i++)
 	{
@@ -427,7 +427,7 @@ static void check_surface_functional(qaws_surface_functional f, char const* name
 
 	memset(hv, 0, sizeof(hv));
 	vh = one_view(&fv2, hv, 16, 3);
-	TEST_ASSERT_STATUS(qaws_surface_functional_hvp(NULL, s, f, 4, &vd, &vh));
+	TEST_ASSERT_STATUS(qaws_surface_functional_hvp(&vh, s, &vd, f, 4, NULL));
 	surface_gradient(pp, f, gp);
 	surface_gradient(pm, f, gm);
 	for (i = 0; i < 48; i++)
@@ -472,7 +472,7 @@ static double knot_value(unsigned int degree, qaws_scalar const* cps, qaws_scala
 	for (i = 0; i < 6 + degree + 1; i++)
 		k[i] = (qaws_scalar)(knots[i] + h * dk[i]);
 	c = knot_curve(degree, cps, k);
-	qaws_curve_functional_eval(NULL, c, f, 0, NULL, &v, NULL, NULL);
+	qaws_curve_functional_eval(&v, NULL, NULL, c, NULL, f, 0, NULL);
 	qaws_curve_destroy(c);
 	return v;
 }
@@ -501,12 +501,12 @@ static void check_knot_functional(unsigned int degree, qaws_curve_functional f, 
 		dk[i] *= (qaws_scalar)0.3;
 	c = knot_curve(degree, cps, knots);
 
-	fv[0] = qaws_field_view_make(QAWS_FIELD_KNOTS, dk, kc, 1);
+	fv[0] = qaws_field_view_make(dk, kc, QAWS_FIELD_KNOTS, 1);
 	dir.fields = fv;
 	dir.field_count = 1;
 	dir.children = NULL;
 	dir.child_count = 0;
-	TEST_ASSERT_STATUS(qaws_curve_functional_eval(NULL, c, f, 0, &dir, &v, &tan, &tan2));
+	TEST_ASSERT_STATUS(qaws_curve_functional_eval(&v, &tan, &tan2, c, &dir, f, 0, NULL));
 
 	fd = (knot_value(degree, cps, knots, dk, h, f) - knot_value(degree, cps, knots, dk, -h, f)) / (2 * h);
 	{
@@ -515,24 +515,24 @@ static void check_knot_functional(unsigned int degree, qaws_curve_functional f, 
 		qaws_curve* cs;
 		for (i = 0; i < kc; i++) ks[i] = (qaws_scalar)(knots[i] + h * dk[i]);
 		cs = knot_curve(degree, cps, ks);
-		qaws_curve_functional_eval(NULL, cs, f, 0, &dir, NULL, &tp, NULL);
+		qaws_curve_functional_eval(NULL, &tp, NULL, cs, &dir, f, 0, NULL);
 		qaws_curve_destroy(cs);
 		for (i = 0; i < kc; i++) ks[i] = (qaws_scalar)(knots[i] - h * dk[i]);
 		cs = knot_curve(degree, cps, ks);
-		qaws_curve_functional_eval(NULL, cs, f, 0, &dir, NULL, &tm, NULL);
+		qaws_curve_functional_eval(NULL, &tm, NULL, cs, &dir, f, 0, NULL);
 		qaws_curve_destroy(cs);
 		fd2 = ((double)tp - tm) / (2 * h);
 	}
 
 	memset(gk, 0, sizeof(gk));
 	memset(gc, 0, sizeof(gc));
-	fv[0] = qaws_field_view_make(QAWS_FIELD_KNOTS, gk, kc, 1);
-	fv[1] = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, gc, 6, 3);
+	fv[0] = qaws_field_view_make(gk, kc, QAWS_FIELD_KNOTS, 1);
+	fv[1] = qaws_field_view_make(gc, 6, QAWS_FIELD_CONTROL_POINTS, 3);
 	grad.fields = fv;
 	grad.field_count = 2;
 	grad.children = NULL;
 	grad.child_count = 0;
-	TEST_ASSERT_STATUS(qaws_curve_functional_gradient(NULL, c, f, 0, &grad, NULL));
+	TEST_ASSERT_STATUS(qaws_curve_functional_gradient(NULL, &grad, c, f, 0, NULL));
 	gdot = diff_dot(gk, dk, kc);
 
 	printf("    degree %u %-18s tangent %.8f fd %.8f gradient %.8f | tangent2 %.6f fd %.6f\n",
@@ -612,13 +612,13 @@ static void check_surface_knot_functional(qaws_surface_functional f, char const*
 		duk[i] *= (qaws_scalar)0.2;
 		dvk[i] *= (qaws_scalar)0.2;
 	}
-	fv[0] = qaws_field_view_make(QAWS_FIELD_U_KNOTS, duk, SK_KN, 1);
-	fv[1] = qaws_field_view_make(QAWS_FIELD_V_KNOTS, dvk, SK_KN, 1);
+	fv[0] = qaws_field_view_make(duk, SK_KN, QAWS_FIELD_U_KNOTS, 1);
+	fv[1] = qaws_field_view_make(dvk, SK_KN, QAWS_FIELD_V_KNOTS, 1);
 	vd.fields = fv; vd.field_count = 2; vd.children = NULL; vd.child_count = 0;
 	memset(gu, 0, sizeof(gu));
 	memset(gv, 0, sizeof(gv));
-	fg[0] = qaws_field_view_make(QAWS_FIELD_U_KNOTS, gu, SK_KN, 1);
-	fg[1] = qaws_field_view_make(QAWS_FIELD_V_KNOTS, gv, SK_KN, 1);
+	fg[0] = qaws_field_view_make(gu, SK_KN, QAWS_FIELD_U_KNOTS, 1);
+	fg[1] = qaws_field_view_make(gv, SK_KN, QAWS_FIELD_V_KNOTS, 1);
 	vg.fields = fg; vg.field_count = 2; vg.children = NULL; vg.child_count = 0;
 
 	s = sk_surface(cps, uk, vk);
@@ -626,10 +626,10 @@ static void check_surface_knot_functional(qaws_surface_functional f, char const*
 	sk_shift(uk, duk, -h, ukm); sk_shift(vk, dvk, -h, vkm);
 	sp = sk_surface(cps, ukp, vkp);
 	sm = sk_surface(cps, ukm, vkm);
-	TEST_ASSERT_STATUS(qaws_surface_functional_eval(NULL, s, f, 6, &vd, &value, &t1, &t2));
-	qaws_surface_functional_eval(NULL, sp, f, 6, &vd, &vp, &tp, NULL);
-	qaws_surface_functional_eval(NULL, sm, f, 6, &vd, &vm, &tm, NULL);
-	TEST_ASSERT_STATUS(qaws_surface_functional_gradient(NULL, s, f, 6, &vg, NULL));
+	TEST_ASSERT_STATUS(qaws_surface_functional_eval(&value, &t1, &t2, s, &vd, f, 6, NULL));
+	qaws_surface_functional_eval(&vp, &tp, NULL, sp, &vd, f, 6, NULL);
+	qaws_surface_functional_eval(&vm, &tm, NULL, sm, &vd, f, 6, NULL);
+	TEST_ASSERT_STATUS(qaws_surface_functional_gradient(NULL, &vg, s, f, 6, NULL));
 	printf("    %s: tangent %.10g fd %.10g, tangent2 %.10g fd %.10g\n", name, t1, (vp - vm) / (2 * h), t2, (tp - tm) / (2 * h));
 	sprintf(msg, "surface %s: knot tangent matches finite differences", name);
 	TEST_ASSERT(diff_close(t1, (vp - vm) / (2 * h), tol), msg);

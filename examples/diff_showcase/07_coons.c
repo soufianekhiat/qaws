@@ -56,8 +56,8 @@ static double cb_abs_mean(void const* user, qaws_scalar u, qaws_scalar v)
 {
 	qaws_surface_jet j;
 	qaws_surface_geometry g;
-	qaws_surface_eval_jet((qaws_surface const*)user, u, v, QAWS_SJET_ORDER2, &j);
-	qaws_surface_geometry_eval(&j, NULL, NULL, &g, NULL, NULL, NULL);
+	qaws_surface_eval_jet(&j, (qaws_surface const*)user, u, v, QAWS_SJET_ORDER2);
+	qaws_surface_geometry_eval(&g, NULL, NULL, NULL, &j, NULL, NULL);
 	return fabs(g.mean);
 }
 
@@ -72,16 +72,16 @@ static double cb_energy(cb_patch const* patch, qaws_diff_views* views)
 			qaws_scalar u = (qaws_scalar)((i + 0.5) / CB_GRID), v = (qaws_scalar)((j + 0.5) / CB_GRID);
 			qaws_surface_jet p, ybar;
 			qaws_surface_geometry g, gbar;
-			qaws_surface_eval_jet(patch->surface, u, v, QAWS_SJET_ORDER2, &p);
-			qaws_surface_geometry_eval(&p, NULL, NULL, &g, NULL, NULL, NULL);
+			qaws_surface_eval_jet(&p, patch->surface, u, v, QAWS_SJET_ORDER2);
+			qaws_surface_geometry_eval(&g, NULL, NULL, NULL, &p, NULL, NULL);
 			e += g.mean * g.mean / (CB_GRID * CB_GRID);
 			if (views)
 			{
 				memset(&gbar, 0, sizeof(gbar));
 				gbar.mean = (qaws_scalar)(2 * g.mean / (CB_GRID * CB_GRID));
 				memset(&ybar, 0, sizeof(ybar));
-				qaws_surface_geometry_adjoint(&p, &gbar, &ybar, NULL);
-				qaws_surface_eval_adjoint(NULL, patch->surface, u, v, ybar.channels, &ybar, views, NULL, NULL);
+				qaws_surface_geometry_adjoint(NULL, &ybar, &p, &gbar);
+				qaws_surface_eval_adjoint(views, NULL, NULL, patch->surface, &ybar, u, v, ybar.channels, NULL);
 			}
 		}
 	return e;

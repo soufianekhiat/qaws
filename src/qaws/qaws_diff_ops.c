@@ -186,13 +186,13 @@ static void curve_report(qaws_diff_context const* ctx, curve_solution const* s)
 }
 
 qaws_status qaws_curve_closest_point_tangent(
-	qaws_diff_context const* ctx,
+	qaws_curve_closest_point* out_value,
+	qaws_curve_closest_point* out_tangent,
 	qaws_curve const* curve,
-	qaws_vec3 query,
 	qaws_vec3 const* query_tangent,
 	qaws_diff_views const* param_tangent,
-	qaws_curve_closest_point* out_value,
-	qaws_curve_closest_point* out_tangent)
+	qaws_vec3 query,
+	qaws_diff_context const* ctx)
 {
 	curve_solution s;
 	qaws_curve_jet_3d p, tg;
@@ -240,12 +240,12 @@ qaws_status qaws_curve_closest_point_tangent(
 }
 
 qaws_status qaws_curve_closest_point_adjoint(
-	qaws_diff_context const* ctx,
-	qaws_curve const* curve,
-	qaws_vec3 query,
-	qaws_curve_closest_point const* adjoint,
 	qaws_diff_views* param_adjoint,
-	qaws_vec3* query_adjoint)
+	qaws_vec3* query_adjoint,
+	qaws_curve const* curve,
+	qaws_curve_closest_point const* adjoint,
+	qaws_vec3 query,
+	qaws_diff_context const* ctx)
 {
 	curve_solution s;
 	qaws_curve_jet_3d jbar;
@@ -355,7 +355,7 @@ static qaws_status surface_refine(qaws_surface const* surface, qaws_vec3 q, qaws
 	for (it = 0; it <= OPS_NEWTON_STEPS; it++)
 	{
 		qaws_scalar x[2];
-		st = qaws_surface_eval_jet(surface, s->u, s->v, QAWS_SJET_ORDER2, &s->jet);
+		st = qaws_surface_eval_jet(&s->jet, surface, s->u, s->v, QAWS_SJET_ORDER2);
 		if (st != QAWS_STATUS_OK)
 			return st;
 		surface_system(s, q);
@@ -468,13 +468,13 @@ static void surface_report(qaws_diff_context const* ctx, surface_solution const*
 }
 
 qaws_status qaws_surface_closest_point_tangent(
-	qaws_diff_context const* ctx,
+	qaws_surface_closest_point* out_value,
+	qaws_surface_closest_point* out_tangent,
 	qaws_surface const* surface,
-	qaws_vec3 query,
 	qaws_vec3 const* query_tangent,
 	qaws_diff_views const* param_tangent,
-	qaws_surface_closest_point* out_value,
-	qaws_surface_closest_point* out_tangent)
+	qaws_vec3 query,
+	qaws_diff_context const* ctx)
 {
 	surface_solution s;
 	qaws_surface_jet p, tg;
@@ -496,7 +496,7 @@ qaws_status qaws_surface_closest_point_tangent(
 	if (!out_tangent)
 		return QAWS_STATUS_OK;
 
-	st = qaws_surface_eval_tangent(NULL, surface, s.u, s.v, QAWS_ZERO, QAWS_ZERO, QAWS_SJET_ORDER1, param_tangent, &p, &tg);
+	st = qaws_surface_eval_tangent(&p, &tg, surface, param_tangent, s.u, s.v, QAWS_ZERO, QAWS_ZERO, QAWS_SJET_ORDER1, NULL);
 	if (st != QAWS_STATUS_OK)
 		return st;
 	dg[0] = qaws_v3_dot(tg.d[1], s.r) + qaws_v3_dot(s.jet.d[1], qaws_v3_sub(tg.d[0], qd));
@@ -513,12 +513,12 @@ qaws_status qaws_surface_closest_point_tangent(
 }
 
 qaws_status qaws_surface_closest_point_adjoint(
-	qaws_diff_context const* ctx,
-	qaws_surface const* surface,
-	qaws_vec3 query,
-	qaws_surface_closest_point const* adjoint,
 	qaws_diff_views* param_adjoint,
-	qaws_vec3* query_adjoint)
+	qaws_vec3* query_adjoint,
+	qaws_surface const* surface,
+	qaws_surface_closest_point const* adjoint,
+	qaws_vec3 query,
+	qaws_diff_context const* ctx)
 {
 	surface_solution s;
 	qaws_surface_jet jbar;
@@ -547,7 +547,7 @@ qaws_status qaws_surface_closest_point_adjoint(
 	jbar.d[1] = qaws_v3_scale(s.r, lambda[0]);
 	jbar.d[2] = qaws_v3_scale(s.r, lambda[1]);
 	jbar.channels = QAWS_SJET_ORDER1;
-	st = qaws_surface_eval_adjoint(NULL, surface, s.u, s.v, jbar.channels, &jbar, param_adjoint, NULL, NULL);
+	st = qaws_surface_eval_adjoint(param_adjoint, NULL, NULL, surface, &jbar, s.u, s.v, jbar.channels, NULL);
 	if (st != QAWS_STATUS_OK)
 		return st;
 
@@ -754,10 +754,10 @@ static qaws_vec3 unit_or_zero(qaws_vec3 r, qaws_scalar len)
 }
 
 qaws_status qaws_curve_pair_point_tangent(
-	qaws_diff_context const* ctx, qaws_curve const* curve_a, qaws_curve const* curve_b,
-	qaws_scalar t_a_seed, qaws_scalar t_b_seed,
-	qaws_diff_views const* tangent_a, qaws_diff_views const* tangent_b,
-	qaws_curve_pair_point* out_value, qaws_curve_pair_point* out_tangent)
+	qaws_curve_pair_point* out_value, qaws_curve_pair_point* out_tangent, qaws_curve const* curve_a,
+	qaws_curve const* curve_b, qaws_diff_views const* tangent_a,
+	qaws_diff_views const* tangent_b, qaws_scalar t_a_seed,
+	qaws_scalar t_b_seed, qaws_diff_context const* ctx)
 {
 	pair_solution s;
 	qaws_curve_jet_3d pa, ta, pb, tb;
@@ -799,9 +799,9 @@ qaws_status qaws_curve_pair_point_tangent(
 }
 
 qaws_status qaws_curve_pair_point_adjoint(
-	qaws_diff_context const* ctx, qaws_curve const* curve_a, qaws_curve const* curve_b,
-	qaws_scalar t_a_seed, qaws_scalar t_b_seed, qaws_curve_pair_point const* adjoint,
-	qaws_diff_views* adjoint_a, qaws_diff_views* adjoint_b)
+	qaws_diff_views* adjoint_a, qaws_diff_views* adjoint_b, qaws_curve const* curve_a,
+	qaws_curve const* curve_b, qaws_curve_pair_point const* adjoint, qaws_scalar t_a_seed,
+	qaws_scalar t_b_seed, qaws_diff_context const* ctx)
 {
 	pair_solution s;
 	qaws_curve_jet_3d ja, jb;
@@ -882,9 +882,9 @@ static qaws_scalar plane_fn(void const* user, qaws_curve_jet_3d const* j, qaws_s
 }
 
 qaws_status qaws_curve_plane_point_tangent(
-	qaws_diff_context const* ctx, qaws_curve const* curve, qaws_plane const* plane, qaws_scalar t_seed,
+	qaws_curve_plane_point* out_value, qaws_curve_plane_point* out_tangent, qaws_curve const* curve, qaws_plane const* plane,
 	qaws_plane const* plane_tangent, qaws_diff_views const* param_tangent,
-	qaws_curve_plane_point* out_value, qaws_curve_plane_point* out_tangent)
+	qaws_scalar t_seed, qaws_diff_context const* ctx)
 {
 	qaws_curve_jet_3d j, p, tg;
 	qaws_scalar t, g, g_t, t_dot = QAWS_ZERO, scale;
@@ -921,8 +921,8 @@ qaws_status qaws_curve_plane_point_tangent(
 }
 
 qaws_status qaws_curve_plane_point_adjoint(
-	qaws_diff_context const* ctx, qaws_curve const* curve, qaws_plane const* plane, qaws_scalar t_seed,
-	qaws_curve_plane_point const* adjoint, qaws_diff_views* param_adjoint, qaws_plane* plane_adjoint)
+	qaws_diff_views* param_adjoint, qaws_plane* plane_adjoint, qaws_curve const* curve, qaws_plane const* plane,
+	qaws_curve_plane_point const* adjoint, qaws_scalar t_seed, qaws_diff_context const* ctx)
 {
 	qaws_curve_jet_3d j, jbar;
 	qaws_scalar t, g, g_t, mu = QAWS_ZERO, scale;
@@ -968,9 +968,9 @@ static qaws_vec3 flat_if_2d(qaws_curve const* curve, qaws_vec3 v)
 }
 
 qaws_status qaws_curve_extremum_tangent(
-	qaws_diff_context const* ctx, qaws_curve const* curve, qaws_vec3 direction, qaws_scalar t_seed,
-	qaws_vec3 const* direction_tangent, qaws_diff_views const* param_tangent,
-	qaws_curve_extremum* out_value, qaws_curve_extremum* out_tangent)
+	qaws_curve_extremum* out_value, qaws_curve_extremum* out_tangent, qaws_curve const* curve, qaws_vec3 const* direction_tangent,
+	qaws_diff_views const* param_tangent, qaws_vec3 direction,
+	qaws_scalar t_seed, qaws_diff_context const* ctx)
 {
 	qaws_curve_jet_3d j, p, tg;
 	qaws_scalar t, g, g_t, t_dot = QAWS_ZERO, scale;
@@ -1005,8 +1005,8 @@ qaws_status qaws_curve_extremum_tangent(
 }
 
 qaws_status qaws_curve_extremum_adjoint(
-	qaws_diff_context const* ctx, qaws_curve const* curve, qaws_vec3 direction, qaws_scalar t_seed,
-	qaws_curve_extremum const* adjoint, qaws_diff_views* param_adjoint, qaws_vec3* direction_adjoint)
+	qaws_diff_views* param_adjoint, qaws_vec3* direction_adjoint, qaws_curve const* curve, qaws_curve_extremum const* adjoint,
+	qaws_vec3 direction, qaws_scalar t_seed, qaws_diff_context const* ctx)
 {
 	qaws_curve_jet_3d j, jbar;
 	qaws_scalar t, g, g_t, mu = QAWS_ZERO, scale, tau;
@@ -1055,8 +1055,8 @@ static qaws_scalar inflection_scale(qaws_curve_jet_3d const* j)
 }
 
 qaws_status qaws_curve_inflection_tangent(
-	qaws_diff_context const* ctx, qaws_curve const* curve, qaws_scalar t_seed,
-	qaws_diff_views const* param_tangent, qaws_curve_inflection* out_value, qaws_curve_inflection* out_tangent)
+	qaws_curve_inflection* out_value, qaws_curve_inflection* out_tangent, qaws_curve const* curve,
+	qaws_diff_views const* param_tangent, qaws_scalar t_seed, qaws_diff_context const* ctx)
 {
 	qaws_curve_jet_3d j, p, tg;
 	qaws_scalar t, g, g_t, t_dot = QAWS_ZERO, scale;
@@ -1089,8 +1089,8 @@ qaws_status qaws_curve_inflection_tangent(
 }
 
 qaws_status qaws_curve_inflection_adjoint(
-	qaws_diff_context const* ctx, qaws_curve const* curve, qaws_scalar t_seed,
-	qaws_curve_inflection const* adjoint, qaws_diff_views* param_adjoint)
+	qaws_diff_views* param_adjoint, qaws_curve const* curve, qaws_curve_inflection const* adjoint,
+	qaws_scalar t_seed, qaws_diff_context const* ctx)
 {
 	qaws_curve_jet_3d j, jbar;
 	qaws_scalar t, g, g_t, mu = QAWS_ZERO, scale;
@@ -1153,7 +1153,7 @@ static qaws_status pierce_refine(qaws_surface const* surface, qaws_curve const* 
 	for (it = 0; it <= OPS_NEWTON_STEPS + 2; it++)
 	{
 		qaws_scalar x[3] = { 0, 0, 0 }, nb[3];
-		st = qaws_surface_eval_jet(surface, s->u, s->v, QAWS_SJET_ORDER1, &s->sj);
+		st = qaws_surface_eval_jet(&s->sj, surface, s->u, s->v, QAWS_SJET_ORDER1);
 		if (st == QAWS_STATUS_OK)
 			st = root_jet(curve, s->t, NULL, &s->cj, NULL);
 		if (st != QAWS_STATUS_OK)
@@ -1177,10 +1177,10 @@ static void pierce_report(qaws_diff_context const* ctx, pierce_solution const* s
 }
 
 qaws_status qaws_surface_curve_point_tangent(
-	qaws_diff_context const* ctx, qaws_surface const* surface, qaws_curve const* curve,
-	qaws_scalar u_seed, qaws_scalar v_seed, qaws_scalar t_seed,
-	qaws_diff_views const* surface_tangent, qaws_diff_views const* curve_tangent,
-	qaws_surface_curve_point* out_value, qaws_surface_curve_point* out_tangent)
+	qaws_surface_curve_point* out_value, qaws_surface_curve_point* out_tangent, qaws_surface const* surface,
+	qaws_curve const* curve, qaws_diff_views const* surface_tangent, qaws_diff_views const* curve_tangent,
+	qaws_scalar u_seed, qaws_scalar v_seed,
+	qaws_scalar t_seed, qaws_diff_context const* ctx)
 {
 	pierce_solution s;
 	qaws_surface_jet sp, stg;
@@ -1202,7 +1202,7 @@ qaws_status qaws_surface_curve_point_tangent(
 	out_value->position = s.cj.d[0];
 	if (!out_tangent)
 		return QAWS_STATUS_OK;
-	st = qaws_surface_eval_tangent(NULL, surface, s.u, s.v, QAWS_ZERO, QAWS_ZERO, QAWS_SJET_P, surface_tangent, &sp, &stg);
+	st = qaws_surface_eval_tangent(&sp, &stg, surface, surface_tangent, s.u, s.v, QAWS_ZERO, QAWS_ZERO, QAWS_SJET_P, NULL);
 	if (st == QAWS_STATUS_OK)
 		st = root_jet(curve, s.t, curve_tangent, &cp, &ctg);
 	if (st != QAWS_STATUS_OK)
@@ -1222,9 +1222,9 @@ qaws_status qaws_surface_curve_point_tangent(
 }
 
 qaws_status qaws_surface_curve_point_adjoint(
-	qaws_diff_context const* ctx, qaws_surface const* surface, qaws_curve const* curve,
-	qaws_scalar u_seed, qaws_scalar v_seed, qaws_scalar t_seed, qaws_surface_curve_point const* adjoint,
-	qaws_diff_views* surface_adjoint, qaws_diff_views* curve_adjoint)
+	qaws_diff_views* surface_adjoint, qaws_diff_views* curve_adjoint, qaws_surface const* surface,
+	qaws_curve const* curve, qaws_surface_curve_point const* adjoint, qaws_scalar u_seed, qaws_scalar v_seed,
+	qaws_scalar t_seed, qaws_diff_context const* ctx)
 {
 	pierce_solution s;
 	qaws_scalar tau[3], lam[3] = { 0, 0, 0 };
@@ -1252,7 +1252,7 @@ qaws_status qaws_surface_curve_point_adjoint(
 		memset(&sb, 0, sizeof(sb));
 		sb.d[0] = l;
 		sb.channels = QAWS_SJET_P;
-		st = qaws_surface_eval_adjoint(NULL, surface, s.u, s.v, QAWS_SJET_P, &sb, surface_adjoint, NULL, NULL);
+		st = qaws_surface_eval_adjoint(surface_adjoint, NULL, NULL, surface, &sb, s.u, s.v, QAWS_SJET_P, NULL);
 		if (st != QAWS_STATUS_OK)
 			return st;
 	}

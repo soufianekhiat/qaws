@@ -36,7 +36,7 @@ static qaws_curve* pc_fit(qaws_scalar const* data, qaws_scalar const* t, qaws_di
 	desc.control_point_count = PC_N;
 	desc.parameters = t;
 	if (map)
-		qaws_curve_fit_bspline_diff(&desc, &c, map);
+		qaws_curve_fit_bspline_diff(&c, map, &desc);
 	else
 		qaws_curve_fit_bspline(&desc, &c);
 	return c;
@@ -113,13 +113,13 @@ static double pc_gradient(qaws_scalar const* data, qaws_scalar const* t, qaws_sc
 	memset(kbar, 0, sizeof(kbar));
 	memset(tbar, 0, sizeof(tbar));
 	memset(pbar, 0, sizeof(pbar));
-	out_f[0] = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, cbar, PC_N, 2);
-	out_f[1] = qaws_field_view_make(QAWS_FIELD_KNOTS, kbar, PC_KC, 1);
+	out_f[0] = qaws_field_view_make(cbar, PC_N, QAWS_FIELD_CONTROL_POINTS, 2);
+	out_f[1] = qaws_field_view_make(kbar, PC_KC, QAWS_FIELD_KNOTS, 1);
 	out_v.fields = out_f;
 	out_v.field_count = 2;
 	out_v.children = NULL;
 	out_v.child_count = 0;
-	qaws_curve_eval_batch_adjoint_2d(NULL, c, t, PC_M, 1, ybar, &out_v, tbar);
+	qaws_curve_eval_batch_adjoint_2d(&out_v, tbar, c, t, ybar, PC_M, 1, NULL);
 
 	/* Fairness keeps the refit from looping between sparse samples: the
 	   bending gradient lands on control points and knots alike. */
@@ -130,11 +130,11 @@ static double pc_gradient(qaws_scalar const* data, qaws_scalar const* t, qaws_sc
 		int i;
 		memset(cb, 0, sizeof(cb));
 		memset(kb, 0, sizeof(kb));
-		bf[0] = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, cb, PC_N, 2);
-		bf[1] = qaws_field_view_make(QAWS_FIELD_KNOTS, kb, PC_KC, 1);
+		bf[0] = qaws_field_view_make(cb, PC_N, QAWS_FIELD_CONTROL_POINTS, 2);
+		bf[1] = qaws_field_view_make(kb, PC_KC, QAWS_FIELD_KNOTS, 1);
 		bv = out_v;
 		bv.fields = bf;
-		qaws_curve_functional_gradient(NULL, c, QAWS_FUNCTIONAL_BENDING, 0, &bv, &bend);
+		qaws_curve_functional_gradient(&bend, &bv, c, QAWS_FUNCTIONAL_BENDING, 0, NULL);
 		for (i = 0; i < PC_N * 2; i++)
 			cbar[i] += (qaws_scalar)(PC_LAMBDA * cb[i]);
 		for (i = 0; i < PC_KC; i++)
@@ -147,7 +147,7 @@ static double pc_gradient(qaws_scalar const* data, qaws_scalar const* t, qaws_sc
 	outs[0] = &out_v;
 	ins[0] = NULL;
 	ins[1] = &in_v;
-	qaws_diff_map_adjoint(map, NULL, outs, 1, ins, 2);
+	qaws_diff_map_adjoint(ins, map, outs, 1, 2, NULL);
 
 	for (k = 0; k < PC_M; k++)
 		g[k] = (k == 0 || k == PC_M - 1) ? 0 : tbar[k] + pbar[k];
@@ -227,7 +227,7 @@ static double pc_objective(qaws_scalar const* data, qaws_scalar const* t, double
 {
 	qaws_curve* c = pc_fit(data, t, NULL);
 	qaws_scalar b = 0;
-	qaws_curve_functional_eval(NULL, c, QAWS_FUNCTIONAL_BENDING, 0, NULL, &b, NULL, NULL);
+	qaws_curve_functional_eval(&b, NULL, NULL, c, NULL, QAWS_FUNCTIONAL_BENDING, 0, NULL);
 	*mse = pc_error(c, data, t);
 	*bending = b;
 	qaws_curve_destroy(c);

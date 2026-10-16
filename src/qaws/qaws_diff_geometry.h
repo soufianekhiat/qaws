@@ -72,31 +72,31 @@ typedef struct qaws_surface_geometry
  * tangent2 output needs both.
  */
 qaws_status qaws_curve_geometry_eval_2d(
-	qaws_curve_jet_2d const* primal,
-	qaws_curve_jet_2d const* tangent,
-	qaws_curve_jet_2d const* tangent2,
 	qaws_curve_geometry_2d* out_value,
 	qaws_curve_geometry_2d* out_tangent,
 	qaws_curve_geometry_2d* out_tangent2,
-	qaws_diff_validity* out_validity);
+	qaws_diff_validity* out_validity,
+	qaws_curve_jet_2d const* primal,
+	qaws_curve_jet_2d const* tangent,
+	qaws_curve_jet_2d const* tangent2);
 
 qaws_status qaws_curve_geometry_eval_3d(
-	qaws_curve_jet_3d const* primal,
-	qaws_curve_jet_3d const* tangent,
-	qaws_curve_jet_3d const* tangent2,
 	qaws_curve_geometry_3d* out_value,
 	qaws_curve_geometry_3d* out_tangent,
 	qaws_curve_geometry_3d* out_tangent2,
-	qaws_diff_validity* out_validity);
+	qaws_diff_validity* out_validity,
+	qaws_curve_jet_3d const* primal,
+	qaws_curve_jet_3d const* tangent,
+	qaws_curve_jet_3d const* tangent2);
 
 qaws_status qaws_surface_geometry_eval(
-	qaws_surface_jet const* primal,
-	qaws_surface_jet const* tangent,
-	qaws_surface_jet const* tangent2,
 	qaws_surface_geometry* out_value,
 	qaws_surface_geometry* out_tangent,
 	qaws_surface_geometry* out_tangent2,
-	qaws_diff_validity* out_validity);
+	qaws_diff_validity* out_validity,
+	qaws_surface_jet const* primal,
+	qaws_surface_jet const* tangent,
+	qaws_surface_jet const* tangent2);
 
 /*
  * Reverse propagation: accumulates (+=) into the jet adjoint the pullback
@@ -104,21 +104,21 @@ qaws_status qaws_surface_geometry_eval(
  * are touched; the jet adjoint channels mask is extended accordingly.
  */
 qaws_status qaws_curve_geometry_adjoint_2d(
-	qaws_curve_jet_2d const* primal,
-	qaws_curve_geometry_2d const* adjoint,
+	qaws_diff_validity* out_validity,
 	qaws_curve_jet_2d* inout_jet_adjoint,
-	qaws_diff_validity* out_validity);
+	qaws_curve_jet_2d const* primal,
+	qaws_curve_geometry_2d const* adjoint);
 
 qaws_status qaws_curve_geometry_adjoint_3d(
-	qaws_curve_jet_3d const* primal,
-	qaws_curve_geometry_3d const* adjoint,
+	qaws_diff_validity* out_validity,
 	qaws_curve_jet_3d* inout_jet_adjoint,
-	qaws_diff_validity* out_validity);
+	qaws_curve_jet_3d const* primal,
+	qaws_curve_geometry_3d const* adjoint);
 
 qaws_status qaws_surface_geometry_adjoint(
-	qaws_surface_jet const* primal,
-	qaws_surface_geometry const* adjoint,
+	qaws_diff_validity* out_validity,
 	qaws_surface_jet* inout_jet_adjoint,
-	qaws_diff_validity* out_validity);
+	qaws_surface_jet const* primal,
+	qaws_surface_geometry const* adjoint);
 
 #endif /* QAWS_DIFF_GEOMETRY_H */

@@ -34,7 +34,7 @@ static double affects_value(void const* user, qaws_scalar u, qaws_scalar v)
 {
 	affects_ctx const* a = (affects_ctx const*)user;
 	qaws_surface_jet p, t;
-	qaws_surface_eval_tangent(NULL, a->surface, u, v, 0, 0, QAWS_SJET_P, a->views, &p, &t);
+	qaws_surface_eval_tangent(&p, &t, a->surface, a->views, u, v, 0, 0, QAWS_SJET_P, NULL);
 	return sqrt(t.d[0].x * t.d[0].x + t.d[0].y * t.d[0].y + t.d[0].z * t.d[0].z);
 }
 
@@ -171,7 +171,7 @@ static void demo_networks(void)
 		views.child_count = 5;
 		memset(&ybar, 0, sizeof(ybar));
 		ybar.d[0] = v3(0, 0, 1);  /* height of the marked point */
-		qaws_surface_eval_adjoint(NULL, loft, u0, v0, QAWS_SJET_P, &ybar, &views, NULL, NULL);
+		qaws_surface_eval_adjoint(&views, NULL, NULL, loft, &ybar, u0, v0, QAWS_SJET_P, NULL);
 		for (i = 0; i < 5; i++)
 		{
 			infl[i] = 0;
@@ -186,7 +186,7 @@ static void demo_networks(void)
 			heat(infl[i] / imax, col);
 			draw_curve3(&s, &pb, sections[i], col, 2 + 4 * infl[i] / imax);
 		}
-		qaws_surface_eval_tangent(NULL, loft, u0, v0, 0, 0, QAWS_SJET_P, NULL, &p, &t);
+		qaws_surface_eval_tangent(&p, &t, loft, NULL, u0, v0, 0, 0, QAWS_SJET_P, NULL);
 		project(&pb, p.d[0].x, p.d[0].y, p.d[0].z, &sx, &sy);
 		svg_circle(&s, sx, sy, 7, "#cf222e", "#ffffff");
 

@@ -195,7 +195,7 @@ static double mp_project(patch_fit* p, mesh const* m, qaws_surface const* s, int
 		for (it = 0; it <= steps; it++)
 		{
 			double g0, g1, a, b, c, det, du, dv;
-			qaws_surface_eval_jet(s, uv[0], uv[1], QAWS_SJET_ORDER2, &j);
+			qaws_surface_eval_jet(&j, s, uv[0], uv[1], QAWS_SJET_ORDER2);
 			rx = j.d[0].x - x[0]; ry = j.d[0].y - x[1]; rz = j.d[0].z - x[2];
 			if (it == steps)
 				break;
@@ -320,7 +320,7 @@ static void mp_thin_plate_hessian(double* H)
 		dir[3 * k] = 1;
 		vd = one_field(&fd, QAWS_FIELD_CONTROL_POINTS, dir, MP_CP, 3);
 		vo = one_field(&fo, QAWS_FIELD_CONTROL_POINTS, out, MP_CP, 3);
-		qaws_surface_functional_hvp(NULL, s, QAWS_FUNCTIONAL_THIN_PLATE, 4, &vd, &vo);
+		qaws_surface_functional_hvp(&vo, s, &vd, QAWS_FUNCTIONAL_THIN_PLATE, 4, NULL);
 		for (j = 0; j < MP_CP; j++)
 			H[j * MP_CP + k] = out[3 * j];
 	}
@@ -375,7 +375,7 @@ static void mp_xupdate(patch_fit* p, mesh const* m, double const* H, double tp, 
 		double const* x = &m->v[3 * p->pts[i]];
 		int idx[16], n = 0;
 		double w[16];
-		qaws_surface_local_support(s, p->uv[2 * i], p->uv[2 * i + 1], 0, &sup);
+		qaws_surface_local_support(&sup, s, p->uv[2 * i], p->uv[2 * i + 1], 0);
 		for (a = 0; a < (int)sup.u_count; a++)
 			for (c = 0; c < (int)sup.v_count; c++)
 			{
@@ -504,7 +504,7 @@ static double mp_rational_energy(patch_fit const* p, mesh const* m, qaws_scalar 
 		double rx, ry, rz;
 		us[i] = p->uv[2 * i];
 		vs[i] = p->uv[2 * i + 1];
-		qaws_surface_eval_jet(s, us[i], vs[i], QAWS_SJET_P, &j);
+		qaws_surface_eval_jet(&j, s, us[i], vs[i], QAWS_SJET_P);
 		rx = j.d[0].x - x[0]; ry = j.d[0].y - x[1]; rz = j.d[0].z - x[2];
 		e += (rx * rx + ry * ry + rz * rz) / p->n;
 		memset(&bars[i], 0, sizeof(bars[i]));
@@ -513,14 +513,14 @@ static double mp_rational_energy(patch_fit const* p, mesh const* m, qaws_scalar 
 	}
 	memset(g_cp, 0, sizeof(qaws_scalar) * MP_CP * 3);
 	memset(g_w, 0, sizeof(qaws_scalar) * MP_CP);
-	fv[0] = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, g_cp, MP_CP, 3);
-	fv[1] = qaws_field_view_make(QAWS_FIELD_WEIGHTS, g_w, MP_CP, 1);
+	fv[0] = qaws_field_view_make(g_cp, MP_CP, QAWS_FIELD_CONTROL_POINTS, 3);
+	fv[1] = qaws_field_view_make(g_w, MP_CP, QAWS_FIELD_WEIGHTS, 1);
 	views.fields = fv;
 	views.field_count = 2;
 	views.children = NULL;
 	views.child_count = 0;
 	if (p->n)
-		qaws_surface_eval_batch_adjoint(NULL, s, us, vs, (unsigned int)p->n, QAWS_SJET_P, bars, &views, NULL, NULL);
+		qaws_surface_eval_batch_adjoint(&views, NULL, NULL, s, us, vs, bars, (unsigned int)p->n, QAWS_SJET_P, NULL);
 	free(bars);
 	free(us);
 	qaws_surface_destroy(s);

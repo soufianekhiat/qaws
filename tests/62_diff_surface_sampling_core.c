@@ -75,14 +75,14 @@ static void test_surface_sampling_core(void)
 	d.v_knots = g_sw_vk;
 	d.v_knot_count = SW_NV + SW_DEG + 1;
 	TEST_ASSERT_STATUS(qaws_surface_create_bspline(&d, &s));
-	fd = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, dir, SW_NU * SW_NV, 3);
-	fg = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, grad, SW_NU * SW_NV, 3);
+	fd = qaws_field_view_make(dir, SW_NU * SW_NV, QAWS_FIELD_CONTROL_POINTS, 3);
+	fg = qaws_field_view_make(grad, SW_NU * SW_NV, QAWS_FIELD_CONTROL_POINTS, 3);
 	vd.fields = &fd;
 	vg.fields = &fg;
 	vd.field_count = vg.field_count = 1;
 	vd.children = vg.children = NULL;
 	vd.child_count = vg.child_count = 0;
-	TEST_ASSERT_STATUS(qaws_surface_cdf_sample_tangent(NULL, s, NULL, g_sw_xi, xd, SW_N, SW_CELLS, 8, &vd, val, t1, t2, &total));
+	TEST_ASSERT_STATUS(qaws_surface_cdf_sample_tangent(val, t1, t2, &total, s, g_sw_xi, xd, &vd, SW_N, NULL, SW_CELLS, 8, NULL));
 
 	/* one thread per u cell, then an exclusive prefix sum */
 	pv[0] = pt[0] = ptt[0] = 0;
@@ -125,7 +125,7 @@ static void test_surface_sampling_core(void)
 	}
 	memset(grad, 0, sizeof(grad));
 	memset(xadj, 0, sizeof(xadj));
-	TEST_ASSERT_STATUS(qaws_surface_cdf_sample_adjoint(NULL, s, NULL, g_sw_xi, SW_N, SW_CELLS, 8, adj, &vg, xadj));
+	TEST_ASSERT_STATUS(qaws_surface_cdf_sample_adjoint(&vg, xadj, s, g_sw_xi, adj, SW_N, NULL, SW_CELLS, 8, NULL));
 	for (c = 0; c < SW_CELLS; c++)
 		cellw[c] = 0;
 	for (n = 0; n < SW_N; n++)

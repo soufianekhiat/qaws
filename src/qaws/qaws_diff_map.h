@@ -63,27 +63,27 @@ unsigned int qaws_diff_map_input_count(qaws_diff_map const* map);
 unsigned int qaws_diff_map_output_count(qaws_diff_map const* map);
 
 qaws_status qaws_diff_map_tangent(
+	qaws_diff_views* const* out_tangents,
 	qaws_diff_map const* map,
-	qaws_diff_context const* ctx,
 	qaws_diff_views const* const* in_tangents,
 	unsigned int in_count,
-	qaws_diff_views* const* out_tangents,
-	unsigned int out_count);
+	unsigned int out_count,
+	qaws_diff_context const* ctx);
 
 qaws_status qaws_diff_map_adjoint(
+	qaws_diff_views* const* in_adjoints,
 	qaws_diff_map const* map,
-	qaws_diff_context const* ctx,
 	qaws_diff_views const* const* out_adjoints,
 	unsigned int out_count,
-	qaws_diff_views* const* in_adjoints,
-	unsigned int in_count);
+	unsigned int in_count,
+	qaws_diff_context const* ctx);
 
 /* Sparse entries of a LINEAR_SPARSE map (BUFFER_TOO_SMALL reports the size). */
 qaws_status qaws_diff_map_get_entries(
-	qaws_diff_map const* map,
 	qaws_diff_map_entry* out_entries,
-	unsigned int capacity,
-	unsigned int* out_count);
+	unsigned int* out_count,
+	qaws_diff_map const* map,
+	unsigned int capacity);
 
 void qaws_diff_map_destroy(qaws_diff_map* map);
 
@@ -99,45 +99,45 @@ void qaws_diff_map_destroy(qaws_diff_map* map);
 
 /* inputs: 0 = curve, 1 = split parameter; outputs: 0 = left, 1 = right */
 qaws_status qaws_curve_split_diff(
-	qaws_curve const* curve,
-	qaws_scalar parameter,
 	qaws_curve** out_left,
 	qaws_curve** out_right,
-	qaws_diff_map** out_map);
+	qaws_diff_map** out_map,
+	qaws_curve const* curve,
+	qaws_scalar parameter);
 
 /* inputs: 0 = curve_a, 1 = curve_b; outputs: 0 = joined */
 qaws_status qaws_curve_join_diff(
-	qaws_curve const* curve_a,
-	qaws_curve const* curve_b,
 	qaws_curve** out_joined,
-	qaws_diff_map** out_map);
+	qaws_diff_map** out_map,
+	qaws_curve const* curve_a,
+	qaws_curve const* curve_b);
 
 /* inputs: 0 = curve; outputs: 0 = converted curve */
 qaws_status qaws_curve_convert_hermite_to_bezier_diff(
-	qaws_curve const* curve,
-	unsigned int span_index,
 	qaws_curve** out_bezier,
-	qaws_diff_map** out_map);
+	qaws_diff_map** out_map,
+	qaws_curve const* curve,
+	unsigned int span_index);
 
 qaws_status qaws_curve_convert_bezier_to_bspline_diff(
-	qaws_curve const* curve,
 	qaws_curve** out_bspline,
-	qaws_diff_map** out_map);
+	qaws_diff_map** out_map,
+	qaws_curve const* curve);
 
 qaws_status qaws_curve_convert_bspline_to_nurbs_diff(
-	qaws_curve const* curve,
 	qaws_curve** out_nurbs,
-	qaws_diff_map** out_map);
+	qaws_diff_map** out_map,
+	qaws_curve const* curve);
 
 qaws_status qaws_curve_elevate_degree_diff(
-	qaws_curve const* curve,
 	qaws_curve** out_elevated,
-	qaws_diff_map** out_map);
+	qaws_diff_map** out_map,
+	qaws_curve const* curve);
 
 qaws_status qaws_curve_reduce_degree_diff(
-	qaws_curve const* curve,
 	qaws_curve** out_reduced,
-	qaws_diff_map** out_map);
+	qaws_diff_map** out_map,
+	qaws_curve const* curve);
 
 /*
  * Least-squares B-spline fit (qaws_curve_fit_bspline) with the exact
@@ -156,9 +156,9 @@ qaws_status qaws_curve_reduce_degree_diff(
 struct qaws_bspline_fit_desc;
 
 qaws_status qaws_curve_fit_bspline_diff(
-	struct qaws_bspline_fit_desc const* desc,
 	qaws_curve** out_curve,
-	qaws_diff_map** out_map);
+	qaws_diff_map** out_map,
+	struct qaws_bspline_fit_desc const* desc);
 
 /*
  * 3D offset (qaws_curve_offset_3d) with its exact map. The offset samples
@@ -181,13 +181,13 @@ qaws_status qaws_curve_fit_bspline_diff(
  * outputs: 0 = offset curve (QAWS_FIELD_CONTROL_POINTS)
  */
 qaws_status qaws_curve_offset_3d_diff(
-	qaws_curve const* curve,
-	qaws_scalar distance,
-	int direction_mode,
-	qaws_vec3 const* direction,
-	qaws_surface const* surface,
-	unsigned int sample_count,
 	qaws_curve** out_curve,
-	qaws_diff_map** out_map);
+	qaws_diff_map** out_map,
+	qaws_curve const* curve,
+	qaws_surface const* surface,
+	qaws_vec3 const* direction,
+	unsigned int sample_count,
+	qaws_scalar distance,
+	int direction_mode);
 
 #endif /* QAWS_DIFF_MAP_H */

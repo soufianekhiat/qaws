@@ -73,7 +73,7 @@ static int sc_vclose(qaws_vec3 a, qaws_vec3 b, double tol)
 static qaws_diff_views sc_views(qaws_field_view* fv, qaws_scalar* data)
 {
 	qaws_diff_views v;
-	*fv = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, data, SC_CP, 3);
+	*fv = qaws_field_view_make(data, SC_CP, QAWS_FIELD_CONTROL_POINTS, 3);
 	v.fields = fv;
 	v.field_count = 1;
 	v.children = NULL;
@@ -118,7 +118,7 @@ static void test_sampling(int id, qaws_sample_measure_desc const* measure, char 
 	c = sc_curve(cps);
 	vd = sc_views(&fd, dir);
 	vg = sc_views(&fg, grad);
-	TEST_ASSERT_STATUS(qaws_curve_cdf_sample_tangent(NULL, c, measure, tg, dt, dt2, SC_N, 0, &vd, val, t1, t2, &total));
+	TEST_ASSERT_STATUS(qaws_curve_cdf_sample_tangent(val, t1, t2, &total, c, tg, dt, dt2, &vd, SC_N, measure, 0, NULL));
 
 	/* one thread per span: measures and their tangents, then a prefix sum */
 	cum[0] = cum1[0] = cum2[0] = 0;
@@ -167,7 +167,7 @@ static void test_sampling(int id, qaws_sample_measure_desc const* measure, char 
 	/* adjoint: lambda per sample, span weights, then a gather per control point */
 	memset(grad, 0, sizeof(grad));
 	memset(dadj, 0, sizeof(dadj));
-	TEST_ASSERT_STATUS(qaws_curve_cdf_sample_adjoint(NULL, c, measure, tg, SC_N, 0, adj, &vg, dadj));
+	TEST_ASSERT_STATUS(qaws_curve_cdf_sample_adjoint(&vg, dadj, c, tg, adj, SC_N, measure, 0, NULL));
 	for (i = 0; i < SC_N; i++)
 	{
 		k = span_of[i];
@@ -253,8 +253,8 @@ static void test_functional(int id, qaws_curve_functional functional, char const
 	vd = sc_views(&fd, dir);
 	vg = sc_views(&fg, grad);
 	memset(grad, 0, sizeof(grad));
-	TEST_ASSERT_STATUS(qaws_curve_functional_eval(NULL, c, functional, 8, &vd, &value, &tan1, &tan2));
-	TEST_ASSERT_STATUS(qaws_curve_functional_gradient(NULL, c, functional, 8, &vg, &gv));
+	TEST_ASSERT_STATUS(qaws_curve_functional_eval(&value, &tan1, &tan2, c, &vd, functional, 8, NULL));
+	TEST_ASSERT_STATUS(qaws_curve_functional_gradient(&gv, &vg, c, functional, 8, NULL));
 	for (k = 0; k < SC_SPANS; k++)
 	{
 		qaws_dual1 m;

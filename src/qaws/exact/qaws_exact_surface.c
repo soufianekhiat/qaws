@@ -122,7 +122,7 @@ qaws_status qaws_exact_surface_prepare(qaws_exact_desc const* desc, qaws_surface
 	rational = kind == QAWS_SURFACE_KIND_NURBS;
 	p = qaws_surface_get_u_degree(surface);
 	q = qaws_surface_get_v_degree(surface);
-	if (qaws_surface_describe_fields(surface, fields, 8, &nf) != QAWS_STATUS_OK)
+	if (qaws_surface_describe_fields(fields, &nf, surface, 8) != QAWS_STATUS_OK)
 		return QAWS_STATUS_EXACT_UNSUPPORTED;
 	for (f = 0; f < nf && f < 8; f++)
 	{
@@ -154,10 +154,10 @@ qaws_status qaws_exact_surface_prepare(qaws_exact_desc const* desc, qaws_surface
 	}
 	else
 	{
-		if (qaws_surface_read_field(surface, QAWS_FIELD_U_KNOTS, kn, nku, &got) != QAWS_STATUS_OK)
+		if (qaws_surface_read_field(kn, &got, surface, nku, QAWS_FIELD_U_KNOTS) != QAWS_STATUS_OK)
 			return QAWS_STATUS_EXACT_UNSUPPORTED;
 		for (i = 0; i < nku; i++) kud[i] = (double)kn[i];
-		if (qaws_surface_read_field(surface, QAWS_FIELD_V_KNOTS, kn, nkv, &got) != QAWS_STATUS_OK)
+		if (qaws_surface_read_field(kn, &got, surface, nkv, QAWS_FIELD_V_KNOTS) != QAWS_STATUS_OK)
 			return QAWS_STATUS_EXACT_UNSUPPORTED;
 		for (i = 0; i < nkv; i++) kvd[i] = (double)kn[i];
 	}
@@ -178,11 +178,11 @@ qaws_status qaws_exact_surface_prepare(qaws_exact_desc const* desc, qaws_surface
 	net = (qaws_exact_hfrac*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_exact_hfrac) * ncp));
 	if (st == QAWS_STATUS_OK && (!cps || !ws || !net))
 		st = QAWS_STATUS_ALLOCATION_FAILURE;
-	if (st == QAWS_STATUS_OK && qaws_surface_read_field(surface, QAWS_FIELD_CONTROL_POINTS, cps, ncp * 3, &got) != QAWS_STATUS_OK)
+	if (st == QAWS_STATUS_OK && qaws_surface_read_field(cps, &got, surface, ncp * 3, QAWS_FIELD_CONTROL_POINTS) != QAWS_STATUS_OK)
 		st = QAWS_STATUS_EXACT_UNSUPPORTED;
 	for (i = 0; st == QAWS_STATUS_OK && i < ncp; i++)
 		ws[i] = 1;
-	if (st == QAWS_STATUS_OK && rational && qaws_surface_read_field(surface, QAWS_FIELD_WEIGHTS, ws, ncp, &got) != QAWS_STATUS_OK)
+	if (st == QAWS_STATUS_OK && rational && qaws_surface_read_field(ws, &got, surface, ncp, QAWS_FIELD_WEIGHTS) != QAWS_STATUS_OK)
 		st = QAWS_STATUS_EXACT_UNSUPPORTED;
 	for (i = 0; st == QAWS_STATUS_OK && i < ncp; i++)
 	{

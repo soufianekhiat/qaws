@@ -1395,12 +1395,12 @@ static double profile_eval(qaws_traversal const* traversal, qaws_scalar time, do
 }
 
 qaws_status qaws_traversal_cdf_targets(
-	qaws_traversal const* traversal,
-	qaws_scalar const* inputs,
-	unsigned int count,
 	qaws_cdf_target* out_targets,
 	qaws_scalar* out_rate,
-	qaws_scalar* out_rate2)
+	qaws_scalar* out_rate2,
+	qaws_traversal const* traversal,
+	qaws_scalar const* inputs,
+	unsigned int count)
 {
 	unsigned int i;
 	double L;

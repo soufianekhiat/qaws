@@ -30,7 +30,7 @@ static void demo_sensitivity(void)
 		memset(&ybar, 0, sizeof(ybar));
 		if (j == 0) ybar.d[0].x = 1; else ybar.d[0].y = 1;
 		views = one_field(&fv, QAWS_FIELD_CONTROL_POINTS, pbar, 10, 2);
-		qaws_curve_eval_adjoint_2d(NULL, c, t_star, QAWS_EVAL_FLAG_POSITION, &ybar, &views, NULL);
+		qaws_curve_eval_adjoint_2d(&views, NULL, c, &ybar, t_star, QAWS_EVAL_FLAG_POSITION, NULL);
 		for (i = 0; i < 10; i++)
 			infl[i] += pbar[2 * i] * pbar[2 * i] + pbar[2 * i + 1] * pbar[2 * i + 1];
 	}
@@ -60,7 +60,7 @@ static void demo_sensitivity(void)
 	}
 	{
 		qaws_curve_jet_2d p, t;
-		qaws_curve_eval_tangent_2d(NULL, c, t_star, 0, QAWS_EVAL_FLAG_POSITION, NULL, &p, &t);
+		qaws_curve_eval_tangent_2d(&p, &t, c, NULL, t_star, 0, QAWS_EVAL_FLAG_POSITION, NULL);
 		svg_circle(&s, vx(&a, p.d[0].x), vy(&a, p.d[0].y), 7, "#cf222e", "#ffffff");
 		sprintf(buf, "C(t = %.1f)", (double)t_star);
 		svg_text(&s, vx(&a, p.d[0].x) + 10, vy(&a, p.d[0].y) + 22, 13, "#cf222e", "start", buf);
@@ -80,7 +80,7 @@ static void demo_sensitivity(void)
 		for (i = 0; i < 400; i++)
 		{
 			qaws_scalar t = r.min_value + (r.max_value - r.min_value) * i / (qaws_scalar)399;
-			qaws_curve_eval_tangent_2d(NULL, c, t, 0, QAWS_EVAL_FLAG_POSITION, &views, &primal, &tg);
+			qaws_curve_eval_tangent_2d(&primal, &tg, c, &views, t, 0, QAWS_EVAL_FLAG_POSITION, NULL);
 			xy[2 * i] = vx(&b, primal.d[0].x);
 			xy[2 * i + 1] = vy(&b, primal.d[0].y);
 			mags[i] = sqrt(tg.d[0].x * tg.d[0].x + tg.d[0].y * tg.d[0].y);

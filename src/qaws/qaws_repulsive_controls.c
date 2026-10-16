@@ -85,14 +85,14 @@ static qaws_status rc_columns(qaws_repulsive_controls* ctl, unsigned int ci, uns
 	}
 	for (i = 0; i < ctl->nv; i++)
 		if (ctl->src[i] == ci) { rows[ns] = i; ts[ns++] = ctl->t[i]; }
-	view = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, dir, ncc, dim);
+	view = qaws_field_view_make(dir, ncc, QAWS_FIELD_CONTROL_POINTS, dim);
 	memset(&views, 0, sizeof(views));
 	views.fields = &view; views.field_count = 1;
 	for (k = 0; k < ncc && st == QAWS_STATUS_OK; k++)
 	{
 		dir[dim * k] = 1;
-		st = dim == 3 ? qaws_curve_eval_batch_tangent_3d(NULL, ctl->curves[ci], ts, NULL, ns, 1, &views, NULL, j3)
-			: qaws_curve_eval_batch_tangent_2d(NULL, ctl->curves[ci], ts, NULL, ns, 1, &views, NULL, j2);
+		st = dim == 3 ? qaws_curve_eval_batch_tangent_3d(NULL, j3, ctl->curves[ci], ts, NULL, &views, ns, 1, NULL)
+			: qaws_curve_eval_batch_tangent_2d(NULL, j2, ctl->curves[ci], ts, NULL, &views, ns, 1, NULL);
 		dir[dim * k] = 0;
 		for (s = 0; st == QAWS_STATUS_OK && s < ns; s++)
 		{
@@ -170,7 +170,7 @@ qaws_status qaws_repulsive_controls_create(qaws_repulsive_controls** out, qaws_r
 		qaws_field_desc f[16];
 		unsigned int nf = 0, ncc = 0;
 		ctl->curves[ci] = desc->polyline.curves[ci];
-		if (qaws_curve_describe_fields(ctl->curves[ci], f, 16, &nf) != QAWS_STATUS_OK)
+		if (qaws_curve_describe_fields(f, &nf, ctl->curves[ci], 16) != QAWS_STATUS_OK)
 		{
 			st = QAWS_STATUS_UNSUPPORTED_OPERATION;
 			goto fail;
@@ -199,7 +199,7 @@ qaws_status qaws_repulsive_controls_create(qaws_repulsive_controls** out, qaws_r
 			st = QAWS_STATUS_ALLOCATION_FAILURE;
 			goto fail;
 		}
-		st = qaws_curve_read_field(ctl->curves[ci], QAWS_FIELD_CONTROL_POINTS, buf, dim * ncc, &got);
+		st = qaws_curve_read_field(buf, &got, ctl->curves[ci], dim * ncc, QAWS_FIELD_CONTROL_POINTS);
 		for (i = 0; st == QAWS_STATUS_OK && i < dim * ncc; i++) ctl->P0[dim * ctl->first[ci] + i] = (double)buf[i];
 		free(buf);
 		if (st != QAWS_STATUS_OK || got != dim * ncc)
@@ -395,10 +395,10 @@ qaws_status qaws_repulsive_controls_to_curve(qaws_curve** out_curve, qaws_repuls
 	if (!ctl || !controls || !out_curve || curve >= ctl->ncurve)
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	ncc = ctl->first[curve + 1] - ctl->first[curve];
-	view = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, (qaws_scalar*)(controls + ctl->dim * ctl->first[curve]), ncc, ctl->dim);
+	view = qaws_field_view_make((qaws_scalar*)(controls + ctl->dim * ctl->first[curve]), ncc, QAWS_FIELD_CONTROL_POINTS, ctl->dim);
 	memset(&views, 0, sizeof(views));
 	views.fields = &view; views.field_count = 1;
-	return qaws_curve_clone_with_fields(ctl->curves[curve], &views, out_curve);
+	return qaws_curve_clone_with_fields(out_curve, ctl->curves[curve], &views);
 }
 
 /* ------------------------------------------------------------------------ */

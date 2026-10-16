@@ -154,8 +154,8 @@ static void hair_fit_strands(tensor_field const* tf, strand* strands, int ns, do
 			st->fit = NULL;
 			continue;
 		}
-		qaws_curve_read_field(st->fit, QAWS_FIELD_CONTROL_POINTS, cps, ncp * 2, &got);
-		qaws_curve_read_field(st->fit, QAWS_FIELD_KNOTS, st->knots, ncp + 4, &got);
+		qaws_curve_read_field(cps, &got, st->fit, ncp * 2, QAWS_FIELD_CONTROL_POINTS);
+		qaws_curve_read_field(st->knots, &got, st->fit, ncp + 4, QAWS_FIELD_KNOTS);
 		qaws_curve_destroy(st->fit);
 		st->fit = strand_curve(cps, ncp, st->knots);
 		strand_alignment(tf, st->fit, &ea, &aa);

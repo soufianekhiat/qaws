@@ -241,7 +241,7 @@ static qaws_status offset_base_jet(qaws_surface const* base, qaws_scalar u, qaws
 {
 	qaws_surface_jet j;
 	unsigned int k;
-	qaws_status st = qaws_surface_eval_jet(base, u, v, QAWS_SJET_ORDER3, &j);
+	qaws_status st = qaws_surface_eval_jet(&j, base, u, v, QAWS_SJET_ORDER3);
 	if (st != QAWS_STATUS_OK)
 		return st;
 	for (k = 0; k < QAWS_SURFACE_JET_COUNT; k++)
@@ -370,11 +370,11 @@ static qaws_status offset_tangent(
 		qaws_internal_view_read(dv, 0, 1, &d_dot);
 
 	if (tangent2)
-		st = qaws_surface_eval_batch_tangent2(ctx, impl->base, &u, &v, &u_dot, &v_dot, 1, QAWS_SJET_ORDER3,
-			qaws_internal_child_views(views, 0), &bp, &bt, &btt);
+		st = qaws_surface_eval_batch_tangent2(&bp, &bt, &btt, impl->base, &u, &v, &u_dot, &v_dot,
+			qaws_internal_child_views(views, 0), 1, QAWS_SJET_ORDER3, ctx);
 	else
-		st = qaws_surface_eval_tangent(ctx, impl->base, u, v, u_dot, v_dot, QAWS_SJET_ORDER3,
-			qaws_internal_child_views(views, 0), &bp, &bt);
+		st = qaws_surface_eval_tangent(&bp, &bt, impl->base, qaws_internal_child_views(views, 0), u, v, u_dot,
+			v_dot, QAWS_SJET_ORDER3, ctx);
 	if (st != QAWS_STATUS_OK)
 		return st;
 
@@ -421,7 +421,7 @@ static qaws_status offset_adjoint(
 
 	if (channels & ~(unsigned int)QAWS_SJET_ORDER2)
 		return QAWS_STATUS_UNSUPPORTED_OPERATION;
-	st = qaws_surface_eval_jet(impl->base, u, v, QAWS_SJET_ORDER3, &bj);
+	st = qaws_surface_eval_jet(&bj, impl->base, u, v, QAWS_SJET_ORDER3);
 	if (st != QAWS_STATUS_OK)
 		return st;
 
@@ -457,8 +457,8 @@ static qaws_status offset_adjoint(
 	}
 	bbar.channels = QAWS_SJET_ORDER3;
 
-	st = qaws_surface_eval_adjoint(ctx, impl->base, u, v, QAWS_SJET_ORDER3, &bbar,
-		(qaws_diff_views*)qaws_internal_child_views(views, 0), u_adjoint, v_adjoint);
+	st = qaws_surface_eval_adjoint((qaws_diff_views*)qaws_internal_child_views(views, 0), u_adjoint, v_adjoint, impl->base, &bbar, u,
+		v, QAWS_SJET_ORDER3, ctx);
 	if (st != QAWS_STATUS_OK)
 		return st;
 	if (dv)

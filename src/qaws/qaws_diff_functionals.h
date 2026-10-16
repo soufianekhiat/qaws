@@ -56,55 +56,55 @@ typedef enum qaws_surface_functional
 #endif
 
 qaws_status qaws_curve_functional_eval(
-	qaws_diff_context const* ctx,
-	qaws_curve const* curve,
-	qaws_curve_functional functional,
-	unsigned int quadrature,
-	qaws_diff_views const* direction,
 	qaws_scalar* out_value,
 	qaws_scalar* out_tangent,
-	qaws_scalar* out_tangent2);
+	qaws_scalar* out_tangent2,
+	qaws_curve const* curve,
+	qaws_diff_views const* direction,
+	qaws_curve_functional functional,
+	unsigned int quadrature,
+	qaws_diff_context const* ctx);
 
 qaws_status qaws_curve_functional_gradient(
-	qaws_diff_context const* ctx,
+	qaws_scalar* out_value,
+	qaws_diff_views* gradient,
 	qaws_curve const* curve,
 	qaws_curve_functional functional,
 	unsigned int quadrature,
-	qaws_diff_views* gradient,
-	qaws_scalar* out_value);
+	qaws_diff_context const* ctx);
 
 qaws_status qaws_curve_functional_hvp(
-	qaws_diff_context const* ctx,
+	qaws_diff_views* out_hv,
 	qaws_curve const* curve,
+	qaws_diff_views const* direction,
 	qaws_curve_functional functional,
 	unsigned int quadrature,
-	qaws_diff_views const* direction,
-	qaws_diff_views* out_hv);
+	qaws_diff_context const* ctx);
 
 qaws_status qaws_surface_functional_eval(
-	qaws_diff_context const* ctx,
-	qaws_surface const* surface,
-	qaws_surface_functional functional,
-	unsigned int quadrature,
-	qaws_diff_views const* direction,
 	qaws_scalar* out_value,
 	qaws_scalar* out_tangent,
-	qaws_scalar* out_tangent2);
+	qaws_scalar* out_tangent2,
+	qaws_surface const* surface,
+	qaws_diff_views const* direction,
+	qaws_surface_functional functional,
+	unsigned int quadrature,
+	qaws_diff_context const* ctx);
 
 qaws_status qaws_surface_functional_gradient(
-	qaws_diff_context const* ctx,
+	qaws_scalar* out_value,
+	qaws_diff_views* gradient,
 	qaws_surface const* surface,
 	qaws_surface_functional functional,
 	unsigned int quadrature,
-	qaws_diff_views* gradient,
-	qaws_scalar* out_value);
+	qaws_diff_context const* ctx);
 
 qaws_status qaws_surface_functional_hvp(
-	qaws_diff_context const* ctx,
+	qaws_diff_views* out_hv,
 	qaws_surface const* surface,
+	qaws_diff_views const* direction,
 	qaws_surface_functional functional,
 	unsigned int quadrature,
-	qaws_diff_views const* direction,
-	qaws_diff_views* out_hv);
+	qaws_diff_context const* ctx);
 
 #endif /* QAWS_DIFF_FUNCTIONALS_H */

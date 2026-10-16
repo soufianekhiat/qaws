@@ -43,9 +43,9 @@ void qaws_diff_report_reset(qaws_diff_report* report);
 
 /* View over caller storage: element i, component c at data[i * components + c]. */
 qaws_field_view qaws_field_view_make(
-	qaws_diff_field field,
 	qaws_scalar* data,
 	unsigned int count,
+	qaws_diff_field field,
 	unsigned int components);
 
 /* Returns the view of a field, or NULL when the field is absent (inactive). */
@@ -78,13 +78,13 @@ int qaws_param_key_compare(
 /* "child[0]/control_points/4/z". Returns the length that the full string
    needs (excluding the terminator); writes at most capacity bytes. */
 unsigned int qaws_param_key_to_string(
-	qaws_param_key const* key,
 	char* buffer,
+	qaws_param_key const* key,
 	unsigned int capacity);
 
 qaws_status qaws_param_key_parse(
-	char const* text,
-	qaws_param_key* out_key);
+	qaws_param_key* out_key,
+	char const* text);
 
 char const* qaws_diff_field_name(qaws_diff_field field);
 qaws_diff_field qaws_diff_field_from_name(char const* name);
@@ -98,42 +98,42 @@ qaws_diff_class qaws_curve_get_diff_class(qaws_curve const* curve);
 qaws_coordinate_kind qaws_curve_get_coordinate_kind(qaws_curve const* curve);
 
 qaws_status qaws_curve_describe_fields(
-	qaws_curve const* curve,
 	qaws_field_desc* out_fields,
-	unsigned int capacity,
-	unsigned int* out_count);
+	unsigned int* out_count,
+	qaws_curve const* curve,
+	unsigned int capacity);
 
 /* Copy the primal values of one field (count * components scalars). */
 qaws_status qaws_curve_read_field(
-	qaws_curve const* curve,
-	qaws_diff_field field,
 	qaws_scalar* out_values,
+	unsigned int* out_scalar_count,
+	qaws_curve const* curve,
 	unsigned int capacity,
-	unsigned int* out_scalar_count);
+	qaws_diff_field field);
 
 /* New curve of the same family with fields replaced by the values in the
    views (absent fields are copied unchanged). Typical use: apply an
    optimizer step. QAWS_STATUS_UNSUPPORTED_OPERATION for derived curves. */
 qaws_status qaws_curve_clone_with_fields(
+	qaws_curve** out_curve,
 	qaws_curve const* curve,
-	qaws_diff_views const* values,
-	qaws_curve** out_curve);
+	qaws_diff_views const* values);
 
 /* Objects a derived curve chains into (composite segments, ...);
    child i matches views->children[i]. */
 qaws_status qaws_curve_diff_children(
-	qaws_curve const* curve,
 	qaws_diff_child* out_children,
-	unsigned int capacity,
-	unsigned int* out_count);
+	unsigned int* out_count,
+	qaws_curve const* curve,
+	unsigned int capacity);
 
 /* Parameters influencing the evaluation at t. For QAWS_CAP_LINEAR curves
    the weights are exact basis derivatives for orders 0..order. */
 qaws_status qaws_curve_local_support(
+	qaws_local_support* out_support,
 	qaws_curve const* curve,
 	qaws_scalar t,
-	unsigned int order,
-	qaws_local_support* out_support);
+	unsigned int order);
 
 /*
  * Support index for gather-style adjoint accumulation (CPU or GPU):
@@ -144,15 +144,15 @@ qaws_status qaws_curve_local_support(
  * holds the required size.
  */
 qaws_status qaws_curve_build_support_index(
+	unsigned int* out_offsets,
+	unsigned int* out_samples,
+	unsigned int* out_entry_count,
 	qaws_curve const* curve,
 	qaws_scalar const* t,
 	unsigned int count,
-	qaws_diff_field field,
-	unsigned int* out_offsets,
 	unsigned int offset_capacity,
-	unsigned int* out_samples,
 	unsigned int sample_capacity,
-	unsigned int* out_entry_count);
+	qaws_diff_field field);
 
 /* ===================================================================
  * Curve evaluation: batch
@@ -162,114 +162,114 @@ qaws_status qaws_curve_build_support_index(
  * =================================================================== */
 
 qaws_status qaws_curve_eval_batch_tangent_2d(
-	qaws_diff_context const* ctx,
-	qaws_curve const* curve,
-	qaws_scalar const* t,
-	qaws_scalar const* t_tangent,
-	unsigned int count,
-	unsigned int channels,
-	qaws_diff_views const* param_tangent,
-	qaws_curve_jet_2d* out_primal,
-	qaws_curve_jet_2d* out_tangent);
-
-qaws_status qaws_curve_eval_batch_tangent_3d(
-	qaws_diff_context const* ctx,
-	qaws_curve const* curve,
-	qaws_scalar const* t,
-	qaws_scalar const* t_tangent,
-	unsigned int count,
-	unsigned int channels,
-	qaws_diff_views const* param_tangent,
-	qaws_curve_jet_3d* out_primal,
-	qaws_curve_jet_3d* out_tangent);
-
-qaws_status qaws_curve_eval_batch_tangent2_2d(
-	qaws_diff_context const* ctx,
-	qaws_curve const* curve,
-	qaws_scalar const* t,
-	qaws_scalar const* t_tangent,
-	unsigned int count,
-	unsigned int channels,
-	qaws_diff_views const* param_tangent,
 	qaws_curve_jet_2d* out_primal,
 	qaws_curve_jet_2d* out_tangent,
-	qaws_curve_jet_2d* out_tangent2);
-
-qaws_status qaws_curve_eval_batch_tangent2_3d(
-	qaws_diff_context const* ctx,
 	qaws_curve const* curve,
 	qaws_scalar const* t,
 	qaws_scalar const* t_tangent,
+	qaws_diff_views const* param_tangent,
 	unsigned int count,
 	unsigned int channels,
-	qaws_diff_views const* param_tangent,
+	qaws_diff_context const* ctx);
+
+qaws_status qaws_curve_eval_batch_tangent_3d(
 	qaws_curve_jet_3d* out_primal,
 	qaws_curve_jet_3d* out_tangent,
-	qaws_curve_jet_3d* out_tangent2);
+	qaws_curve const* curve,
+	qaws_scalar const* t,
+	qaws_scalar const* t_tangent,
+	qaws_diff_views const* param_tangent,
+	unsigned int count,
+	unsigned int channels,
+	qaws_diff_context const* ctx);
+
+qaws_status qaws_curve_eval_batch_tangent2_2d(
+	qaws_curve_jet_2d* out_primal,
+	qaws_curve_jet_2d* out_tangent,
+	qaws_curve_jet_2d* out_tangent2,
+	qaws_curve const* curve,
+	qaws_scalar const* t,
+	qaws_scalar const* t_tangent,
+	qaws_diff_views const* param_tangent,
+	unsigned int count,
+	unsigned int channels,
+	qaws_diff_context const* ctx);
+
+qaws_status qaws_curve_eval_batch_tangent2_3d(
+	qaws_curve_jet_3d* out_primal,
+	qaws_curve_jet_3d* out_tangent,
+	qaws_curve_jet_3d* out_tangent2,
+	qaws_curve const* curve,
+	qaws_scalar const* t,
+	qaws_scalar const* t_tangent,
+	qaws_diff_views const* param_tangent,
+	unsigned int count,
+	unsigned int channels,
+	qaws_diff_context const* ctx);
 
 /* Accumulates (+=) into param_adjoint and t_adjoint (either may be NULL).
    Only the channels in `channels` of each out_adjoint jet are read. */
 qaws_status qaws_curve_eval_batch_adjoint_2d(
-	qaws_diff_context const* ctx,
+	qaws_diff_views* param_adjoint,
+	qaws_scalar* t_adjoint,
 	qaws_curve const* curve,
 	qaws_scalar const* t,
+	qaws_curve_jet_2d const* out_adjoint,
 	unsigned int count,
 	unsigned int channels,
-	qaws_curve_jet_2d const* out_adjoint,
-	qaws_diff_views* param_adjoint,
-	qaws_scalar* t_adjoint);
+	qaws_diff_context const* ctx);
 
 qaws_status qaws_curve_eval_batch_adjoint_3d(
-	qaws_diff_context const* ctx,
+	qaws_diff_views* param_adjoint,
+	qaws_scalar* t_adjoint,
 	qaws_curve const* curve,
 	qaws_scalar const* t,
+	qaws_curve_jet_3d const* out_adjoint,
 	unsigned int count,
 	unsigned int channels,
-	qaws_curve_jet_3d const* out_adjoint,
-	qaws_diff_views* param_adjoint,
-	qaws_scalar* t_adjoint);
+	qaws_diff_context const* ctx);
 
 /* ===================================================================
  * Curve evaluation: single sample
  * =================================================================== */
 
 qaws_status qaws_curve_eval_tangent_2d(
-	qaws_diff_context const* ctx,
+	qaws_curve_jet_2d* out_primal,
+	qaws_curve_jet_2d* out_tangent,
 	qaws_curve const* curve,
+	qaws_diff_views const* param_tangent,
 	qaws_scalar t,
 	qaws_scalar t_tangent,
 	unsigned int channels,
-	qaws_diff_views const* param_tangent,
-	qaws_curve_jet_2d* out_primal,
-	qaws_curve_jet_2d* out_tangent);
+	qaws_diff_context const* ctx);
 
 qaws_status qaws_curve_eval_tangent_3d(
-	qaws_diff_context const* ctx,
+	qaws_curve_jet_3d* out_primal,
+	qaws_curve_jet_3d* out_tangent,
 	qaws_curve const* curve,
+	qaws_diff_views const* param_tangent,
 	qaws_scalar t,
 	qaws_scalar t_tangent,
 	unsigned int channels,
-	qaws_diff_views const* param_tangent,
-	qaws_curve_jet_3d* out_primal,
-	qaws_curve_jet_3d* out_tangent);
+	qaws_diff_context const* ctx);
 
 qaws_status qaws_curve_eval_adjoint_2d(
-	qaws_diff_context const* ctx,
+	qaws_diff_views* param_adjoint,
+	qaws_scalar* t_adjoint,
 	qaws_curve const* curve,
+	qaws_curve_jet_2d const* out_adjoint,
 	qaws_scalar t,
 	unsigned int channels,
-	qaws_curve_jet_2d const* out_adjoint,
-	qaws_diff_views* param_adjoint,
-	qaws_scalar* t_adjoint);
+	qaws_diff_context const* ctx);
 
 qaws_status qaws_curve_eval_adjoint_3d(
-	qaws_diff_context const* ctx,
+	qaws_diff_views* param_adjoint,
+	qaws_scalar* t_adjoint,
 	qaws_curve const* curve,
+	qaws_curve_jet_3d const* out_adjoint,
 	qaws_scalar t,
 	unsigned int channels,
-	qaws_curve_jet_3d const* out_adjoint,
-	qaws_diff_views* param_adjoint,
-	qaws_scalar* t_adjoint);
+	qaws_diff_context const* ctx);
 
 /* ===================================================================
  * Surface schema
@@ -279,43 +279,43 @@ unsigned int qaws_surface_get_diff_capabilities(qaws_surface const* surface);
 qaws_diff_class qaws_surface_get_diff_class(qaws_surface const* surface);
 
 qaws_status qaws_surface_describe_fields(
-	qaws_surface const* surface,
 	qaws_field_desc* out_fields,
-	unsigned int capacity,
-	unsigned int* out_count);
+	unsigned int* out_count,
+	qaws_surface const* surface,
+	unsigned int capacity);
 
 qaws_status qaws_surface_read_field(
-	qaws_surface const* surface,
-	qaws_diff_field field,
 	qaws_scalar* out_values,
+	unsigned int* out_scalar_count,
+	qaws_surface const* surface,
 	unsigned int capacity,
-	unsigned int* out_scalar_count);
+	qaws_diff_field field);
 
 /* Objects the surface rules chain into; child i matches views->children[i]. */
 qaws_status qaws_surface_diff_children(
-	qaws_surface const* surface,
 	qaws_diff_child* out_children,
-	unsigned int capacity,
-	unsigned int* out_count);
+	unsigned int* out_count,
+	qaws_surface const* surface,
+	unsigned int capacity);
 
 qaws_status qaws_surface_local_support(
+	qaws_surface_support* out_support,
 	qaws_surface const* surface,
 	qaws_scalar u,
 	qaws_scalar v,
-	unsigned int order,
-	qaws_surface_support* out_support);
+	unsigned int order);
 
 qaws_status qaws_surface_build_support_index(
+	unsigned int* out_offsets,
+	unsigned int* out_samples,
+	unsigned int* out_entry_count,
 	qaws_surface const* surface,
 	qaws_scalar const* u,
 	qaws_scalar const* v,
 	unsigned int count,
-	qaws_diff_field field,
-	unsigned int* out_offsets,
 	unsigned int offset_capacity,
-	unsigned int* out_samples,
 	unsigned int sample_capacity,
-	unsigned int* out_entry_count);
+	qaws_diff_field field);
 
 /* ===================================================================
  * Surface jets and evaluation
@@ -327,72 +327,72 @@ qaws_status qaws_surface_build_support_index(
 
 /* Primal spatial jet (analytic, no finite differences). */
 qaws_status qaws_surface_eval_jet(
+	qaws_surface_jet* out_jet,
 	qaws_surface const* surface,
 	qaws_scalar u,
 	qaws_scalar v,
-	unsigned int channels,
-	qaws_surface_jet* out_jet);
+	unsigned int channels);
 
 qaws_status qaws_surface_eval_batch_tangent(
-	qaws_diff_context const* ctx,
-	qaws_surface const* surface,
-	qaws_scalar const* u,
-	qaws_scalar const* v,
-	qaws_scalar const* u_tangent,
-	qaws_scalar const* v_tangent,
-	unsigned int count,
-	unsigned int channels,
-	qaws_diff_views const* param_tangent,
-	qaws_surface_jet* out_primal,
-	qaws_surface_jet* out_tangent);
-
-qaws_status qaws_surface_eval_batch_tangent2(
-	qaws_diff_context const* ctx,
-	qaws_surface const* surface,
-	qaws_scalar const* u,
-	qaws_scalar const* v,
-	qaws_scalar const* u_tangent,
-	qaws_scalar const* v_tangent,
-	unsigned int count,
-	unsigned int channels,
-	qaws_diff_views const* param_tangent,
 	qaws_surface_jet* out_primal,
 	qaws_surface_jet* out_tangent,
-	qaws_surface_jet* out_tangent2);
-
-qaws_status qaws_surface_eval_batch_adjoint(
-	qaws_diff_context const* ctx,
 	qaws_surface const* surface,
 	qaws_scalar const* u,
 	qaws_scalar const* v,
+	qaws_scalar const* u_tangent,
+	qaws_scalar const* v_tangent,
+	qaws_diff_views const* param_tangent,
 	unsigned int count,
 	unsigned int channels,
-	qaws_surface_jet const* out_adjoint,
+	qaws_diff_context const* ctx);
+
+qaws_status qaws_surface_eval_batch_tangent2(
+	qaws_surface_jet* out_primal,
+	qaws_surface_jet* out_tangent,
+	qaws_surface_jet* out_tangent2,
+	qaws_surface const* surface,
+	qaws_scalar const* u,
+	qaws_scalar const* v,
+	qaws_scalar const* u_tangent,
+	qaws_scalar const* v_tangent,
+	qaws_diff_views const* param_tangent,
+	unsigned int count,
+	unsigned int channels,
+	qaws_diff_context const* ctx);
+
+qaws_status qaws_surface_eval_batch_adjoint(
 	qaws_diff_views* param_adjoint,
 	qaws_scalar* u_adjoint,
-	qaws_scalar* v_adjoint);
+	qaws_scalar* v_adjoint,
+	qaws_surface const* surface,
+	qaws_scalar const* u,
+	qaws_scalar const* v,
+	qaws_surface_jet const* out_adjoint,
+	unsigned int count,
+	unsigned int channels,
+	qaws_diff_context const* ctx);
 
 qaws_status qaws_surface_eval_tangent(
-	qaws_diff_context const* ctx,
+	qaws_surface_jet* out_primal,
+	qaws_surface_jet* out_tangent,
 	qaws_surface const* surface,
+	qaws_diff_views const* param_tangent,
 	qaws_scalar u,
 	qaws_scalar v,
 	qaws_scalar u_tangent,
 	qaws_scalar v_tangent,
 	unsigned int channels,
-	qaws_diff_views const* param_tangent,
-	qaws_surface_jet* out_primal,
-	qaws_surface_jet* out_tangent);
+	qaws_diff_context const* ctx);
 
 qaws_status qaws_surface_eval_adjoint(
-	qaws_diff_context const* ctx,
+	qaws_diff_views* param_adjoint,
+	qaws_scalar* u_adjoint,
+	qaws_scalar* v_adjoint,
 	qaws_surface const* surface,
+	qaws_surface_jet const* out_adjoint,
 	qaws_scalar u,
 	qaws_scalar v,
 	unsigned int channels,
-	qaws_surface_jet const* out_adjoint,
-	qaws_diff_views* param_adjoint,
-	qaws_scalar* u_adjoint,
-	qaws_scalar* v_adjoint);
+	qaws_diff_context const* ctx);
 
 #endif /* QAWS_DIFF_H */

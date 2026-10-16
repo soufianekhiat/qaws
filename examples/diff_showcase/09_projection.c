@@ -52,11 +52,11 @@ static void demo_projection(void)
 			/* d^2 to the curve: no correspondences, the foot point is
 			   re-solved and differentiated through its optimality. */
 			qaws_curve_closest_point val, bar;
-			qaws_curve_closest_point_tangent(NULL, c, targets[i], NULL, NULL, &val, NULL);
+			qaws_curve_closest_point_tangent(&val, NULL, c, NULL, NULL, targets[i], NULL);
 			l += val.distance * val.distance / PRJ_N;
 			memset(&bar, 0, sizeof(bar));
 			bar.distance = (qaws_scalar)(2 * val.distance / PRJ_N);
-			qaws_curve_closest_point_adjoint(NULL, c, targets[i], &bar, &views, NULL);
+			qaws_curve_closest_point_adjoint(&views, NULL, c, &bar, targets[i], NULL);
 		}
 		loss[it] = l;
 		qaws_curve_destroy(c);
@@ -75,7 +75,7 @@ static void demo_projection(void)
 		for (i = 0; i < PRJ_N; i++)
 		{
 			qaws_curve_closest_point val;
-			qaws_curve_closest_point_tangent(NULL, c, targets[i], NULL, NULL, &val, NULL);
+			qaws_curve_closest_point_tangent(&val, NULL, c, NULL, NULL, targets[i], NULL);
 			svg_line(&s, vx(&a, targets[i].x), vy(&a, targets[i].y), vx(&a, val.position.x), vy(&a, val.position.y), "#cf222e", 1, 0.7);
 			svg_circle(&s, vx(&a, targets[i].x), vy(&a, targets[i].y), 2.6, "#d0d7de", "#57606a");
 		}
@@ -118,7 +118,7 @@ static void demo_projection(void)
 				qaws_diff_context_init(&ctx);
 				qaws_diff_report_reset(&report);
 				ctx.report = &report;
-				qaws_curve_closest_point_tangent(&ctx, c, v3((qaws_scalar)wx, (qaws_scalar)wy, 0), NULL, NULL, &val, NULL);
+				qaws_curve_closest_point_tangent(&val, NULL, c, NULL, NULL, v3((qaws_scalar)wx, (qaws_scalar)wy, 0), &ctx);
 				/* Shade by the reported gap to the best competing foot point,
 				   relative to the distance: the medial axis is where it vanishes. */
 				rel = report.branch_gap / (val.distance + 1e-9);
