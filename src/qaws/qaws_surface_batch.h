@@ -123,9 +123,10 @@ qaws_status qaws_surface_batch_find_intersections(
  * surfaces). A set keeps pointers to its surfaces: they must outlive it
  * and stay unchanged.
  *
- * qaws_surface_set_find_intersections(set, NULL, ...) intersects a set with
- * itself by its desc (families) as the one-shot call; (set, other, ...)
- * every surface of set with every surface of other: surface_a indexes
+ * qaws_surface_set_find_intersections(outputs..., set, NULL, ...) intersects
+ * a set with itself by its desc (families) as the one-shot call; with
+ * (..., set, other, ...) every surface of set with every surface of
+ * other: surface_a indexes
  * set, surface_b other. qaws_curve_set_find_surface_intersections takes a
  * prepared set of 3D curves against a prepared surface set.
  */

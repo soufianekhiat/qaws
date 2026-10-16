@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.20)
 
 project(
   Qaws
-  VERSION 2.0.0
+  VERSION 3.0.0
   DESCRIPTION "Dependency-free C11 curve evaluation and traversal library"
   LANGUAGES C
 )
@@ -334,14 +334,21 @@ set_target_properties(
 )
 
 if(QAWS_UNITY_BUILD)
-  # BATCH_SIZE 0 folds every source into a single translation unit.
+  # One translation unit per precision: the wrappers of a precision grouped
+  # (two precisions in one unit would define every static function twice).
   set_target_properties(
     qaws
     PROPERTIES
       UNITY_BUILD ON
-      UNITY_BUILD_MODE BATCH
-      UNITY_BUILD_BATCH_SIZE 0
+      UNITY_BUILD_MODE GROUP
   )
+  foreach(_wrapper IN LISTS _QAWS_WRAPPED_SOURCES)
+    if(_wrapper MATCHES "_f32\\.c$")
+      set_source_files_properties("${_wrapper}" PROPERTIES UNITY_GROUP qaws_f32)
+    else()
+      set_source_files_properties("${_wrapper}" PROPERTIES UNITY_GROUP qaws_f64)
+    endif()
+  endforeach()
 endif()
 
 if(QAWS_DEBUG_POSTFIX)

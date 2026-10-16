@@ -196,3 +196,31 @@ As built (steps 1 and 2):
 3. The convention, one module at a time, as above.
 4. `CONTRIBUTING.md`, the docs' snippets, the version and the changelog.
 5. Back to `repulsive`: the Repulsive Surfaces figures.
+
+Steps 1 to 4 are done (3.0.0). How step 3 went:
+
+- **The order of each declaration.** `qaws_api_tool survey -order` sorts a
+  declaration's parameters by rank (stably) and prints the result as old
+  indices. A perl script, not part of the tree, applied it to every call,
+  declaration and definition. It parses the arguments with balanced
+  brackets and keeps the separators. It also covers the `_f32` and `_f64`
+  spellings and the docs, C++ and shader files. Calls inside comments or
+  strings with other arguments were left alone and fixed by hand where
+  they described an order.
+- **The classifier's rules**, refined module by module:
+  - a struct is data when a public header gives it a body, and an opaque
+    handle otherwise;
+  - a pointer is an input only when it is const at every level (`T const**`
+    hands back a pointer, so it is an output);
+  - function pointers are callbacks;
+  - an array bound may hold a `*`;
+  - an array of descriptors is a buffer, and its count follows it;
+  - the allocator and executor go last.
+- **The commits:** repulsive, differentiation, curves, surfaces, 2D
+  operations, regions, exact, internal headers, shader cores. Each family
+  passed the whole f64 suite on Linux (108 fails as on `repulsive`), and
+  every target built with MSVC. The cores' HLSL kernels compile with
+  `dxc` (cs_6_0), as before; three entries already failed with `fxc`
+  before this work.
+- **The result:** 851 of 851 declarations in the convention, and the
+  allow-list is empty.
