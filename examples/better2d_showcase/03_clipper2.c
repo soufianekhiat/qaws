@@ -155,7 +155,7 @@ static void demo_clipper2(void)
 			qaws_scalar* p = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 2 * (b - a + 1));
 			unsigned int j;
 			for (j = 0; j < 2 * (b - a); j++) p[j] = (qaws_scalar)r.pts[2 * a + j];
-			if (b - a >= 3) qaws_curve_create_polyline_2d(p, b - a, 1, &cs[i]);
+			if (b - a >= 3) qaws_curve_create_polyline_2d(&cs[i], p, b - a, 1);
 			free(p);
 			views[i] = cs[i];
 			paths[i].curves = &views[i];
@@ -167,7 +167,7 @@ static void demo_clipper2(void)
 		d.clips = paths + r.ns; d.clip_count = r.nc;
 		d.clip_type = (qaws_clip_type)r.ct; d.fill_rule = (qaws_fill_rule)r.fr;
 		t0 = (double)clock() / CLOCKS_PER_SEC;
-		qaws_clip_execute(&d, &res);
+		qaws_clip_execute(&res, &d);
 		total_time += (double)clock() / CLOCKS_PER_SEC - t0;
 		sprintf(label, "#%d %s, %s", r.number, ctn[r.ct], frn[r.fr]);
 		svg_panel(&s, &v, label);
@@ -179,8 +179,8 @@ static void demo_clipper2(void)
 				qaws_path_2d p;
 				qaws_scalar a = 0;
 				unsigned int c;
-				qaws_clip_result_get_path(res, i, &p);
-				qaws_path_compute_area_2d(&p, &a);
+				qaws_clip_result_get_path(&p, res, i);
+				qaws_path_compute_area_2d(&a, &p);
 				area += a;
 				for (c = 0; c < p.curve_count; c++)
 					bo_curve(&s, &v, p.curves[c], "#0969da", 1.4, 0);

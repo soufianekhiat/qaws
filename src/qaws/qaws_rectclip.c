@@ -29,7 +29,7 @@ static qaws_status rc_clip(qaws_scalar const rect[4], qaws_path_2d const* paths,
 	box[4] = rect[2]; box[5] = rect[3]; box[6] = rect[0]; box[7] = rect[3];
 	if (!(rect[2] > rect[0]) || !(rect[3] > rect[1]))
 		return qaws_internal_clip_result_empty(out);
-	s = qaws_curve_create_polyline_2d(box, 4, 1, &r);
+	s = qaws_curve_create_polyline_2d(&r, box, 4, 1);
 	if (s != QAWS_STATUS_OK)
 		return s;
 	rv = r;
@@ -55,7 +55,7 @@ static qaws_status rc_clip(qaws_scalar const rect[4], qaws_path_2d const* paths,
 		d.clip_count = 1;
 		d.clip_type = QAWS_CLIP_INTERSECTION;
 		d.fill_rule = QAWS_FILL_NON_ZERO;
-		s = qaws_clip_execute(&d, &one);
+		s = qaws_clip_execute(&one, &d);
 		if (s == QAWS_STATUS_OK)
 			s = qaws_internal_clip_result_append(all, one);
 	}
@@ -69,12 +69,12 @@ static qaws_status rc_clip(qaws_scalar const rect[4], qaws_path_2d const* paths,
 	return QAWS_STATUS_OK;
 }
 
-qaws_status qaws_rect_clip_2d(qaws_scalar const rect[4], qaws_path_2d const* paths, unsigned int n, qaws_clip_result** out)
+qaws_status qaws_rect_clip_2d(qaws_clip_result** out, qaws_scalar const rect[4], qaws_path_2d const* paths, unsigned int n)
 {
 	return rc_clip(rect, paths, n, 0, out);
 }
 
-qaws_status qaws_rect_clip_lines_2d(qaws_scalar const rect[4], qaws_path_2d const* paths, unsigned int n, qaws_clip_result** out)
+qaws_status qaws_rect_clip_lines_2d(qaws_clip_result** out, qaws_scalar const rect[4], qaws_path_2d const* paths, unsigned int n)
 {
 	return rc_clip(rect, paths, n, 1, out);
 }
@@ -107,7 +107,7 @@ static qaws_status rc_clip64(int64_t const rect[4], qaws_path64 const* paths, un
 		d.clip_count = 1;
 		d.clip_type = QAWS_CLIP_INTERSECTION;
 		d.fill_rule = QAWS_FILL_NON_ZERO;
-		s = qaws_clip64_execute(&d, &one);
+		s = qaws_clip64_execute(&one, &d);
 		if (s == QAWS_STATUS_OK)
 			s = qaws_internal_clip64_result_append(all, one);
 	}
@@ -120,12 +120,12 @@ static qaws_status rc_clip64(int64_t const rect[4], qaws_path64 const* paths, un
 	return QAWS_STATUS_OK;
 }
 
-qaws_status qaws_rect_clip64(int64_t const rect[4], qaws_path64 const* paths, unsigned int n, qaws_clip64_result** out)
+qaws_status qaws_rect_clip64(qaws_clip64_result** out, int64_t const rect[4], qaws_path64 const* paths, unsigned int n)
 {
 	return rc_clip64(rect, paths, n, 0, out);
 }
 
-qaws_status qaws_rect_clip_lines64(int64_t const rect[4], qaws_path64 const* paths, unsigned int n, qaws_clip64_result** out)
+qaws_status qaws_rect_clip_lines64(qaws_clip64_result** out, int64_t const rect[4], qaws_path64 const* paths, unsigned int n)
 {
 	return rc_clip64(rect, paths, n, 1, out);
 }
@@ -199,14 +199,14 @@ static qaws_status mk_float(qaws_scalar const* pattern, unsigned int np, qaws_sc
 	{
 		qaws_scalar q[8];
 		for (k = 0; k < 8; k++) q[k] = (qaws_scalar)quads[8 * i + k];
-		s = qaws_curve_create_polyline_2d(q, 4, 1, &cs[i]);
+		s = qaws_curve_create_polyline_2d(&cs[i], q, 4, 1);
 		views[i] = cs[i];
 		paths[i].curves = &views[i];
 		paths[i].curve_count = 1;
 		paths[i].closed = 1;
 	}
 	if (s == QAWS_STATUS_OK)
-		s = qaws_clip_boolean(QAWS_CLIP_UNION, QAWS_FILL_NON_ZERO, paths, nquad, NULL, 0, out);
+		s = qaws_clip_boolean(out, paths, NULL, nquad, 0, QAWS_CLIP_UNION, QAWS_FILL_NON_ZERO);
 	for (i = 0; cs && i < nquad; i++) qaws_curve_destroy(cs[i]);
 	free(cs); free((void*)views); free(paths);
 	free(pat); free(pth); free(quads);
@@ -267,31 +267,31 @@ static qaws_status mk_64(int64_t const* pattern, unsigned int np, int64_t const*
 	d.subject_count = nquad;
 	d.clip_type = QAWS_CLIP_UNION;
 	d.fill_rule = QAWS_FILL_NON_ZERO;
-	s = qaws_clip64_execute(&d, out);
+	s = qaws_clip64_execute(out, &d);
 	free(q64); free(paths);
 	return s;
 }
 
-qaws_status qaws_minkowski_sum_2d(qaws_scalar const* pattern, unsigned int np, qaws_scalar const* path, unsigned int nq, int closed,
-	qaws_clip_result** out)
+qaws_status qaws_minkowski_sum_2d(qaws_clip_result** out, qaws_scalar const* pattern, qaws_scalar const* path, unsigned int np, unsigned int nq,
+	int closed)
 {
 	return mk_float(pattern, np, path, nq, closed, 1.0, out);
 }
 
-qaws_status qaws_minkowski_diff_2d(qaws_scalar const* pattern, unsigned int np, qaws_scalar const* path, unsigned int nq, int closed,
-	qaws_clip_result** out)
+qaws_status qaws_minkowski_diff_2d(qaws_clip_result** out, qaws_scalar const* pattern, qaws_scalar const* path, unsigned int np, unsigned int nq,
+	int closed)
 {
 	return mk_float(pattern, np, path, nq, closed, -1.0, out);
 }
 
-qaws_status qaws_minkowski_sum64(int64_t const* pattern, unsigned int np, int64_t const* path, unsigned int nq, int closed,
-	qaws_clip64_result** out)
+qaws_status qaws_minkowski_sum64(qaws_clip64_result** out, int64_t const* pattern, int64_t const* path, unsigned int np, unsigned int nq,
+	int closed)
 {
 	return mk_64(pattern, np, path, nq, closed, 1.0, out);
 }
 
-qaws_status qaws_minkowski_diff64(int64_t const* pattern, unsigned int np, int64_t const* path, unsigned int nq, int closed,
-	qaws_clip64_result** out)
+qaws_status qaws_minkowski_diff64(qaws_clip64_result** out, int64_t const* pattern, int64_t const* path, unsigned int np, unsigned int nq,
+	int closed)
 {
 	return mk_64(pattern, np, path, nq, closed, -1.0, out);
 }

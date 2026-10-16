@@ -6,14 +6,14 @@ engines.
 
 ```c
 /* rect = { left, bottom, right, top } */
-qaws_status qaws_rect_clip_2d(qaws_scalar const rect[4], qaws_path_2d const* paths, unsigned int n, qaws_clip_result** out);
-qaws_status qaws_rect_clip_lines_2d(qaws_scalar const rect[4], qaws_path_2d const* paths, unsigned int n, qaws_clip_result** out);
-qaws_status qaws_rect_clip64(int64_t const rect[4], qaws_path64 const* paths, unsigned int n, qaws_clip64_result** out);
-qaws_status qaws_rect_clip_lines64(int64_t const rect[4], qaws_path64 const* paths, unsigned int n, qaws_clip64_result** out);
+qaws_status qaws_rect_clip_2d(qaws_clip_result** out, qaws_scalar const rect[4], qaws_path_2d const* paths, unsigned int n);
+qaws_status qaws_rect_clip_lines_2d(qaws_clip_result** out, qaws_scalar const rect[4], qaws_path_2d const* paths, unsigned int n);
+qaws_status qaws_rect_clip64(qaws_clip64_result** out, int64_t const rect[4], qaws_path64 const* paths, unsigned int n);
+qaws_status qaws_rect_clip_lines64(qaws_clip64_result** out, int64_t const rect[4], qaws_path64 const* paths, unsigned int n);
 
-qaws_status qaws_minkowski_sum_2d(pattern, pattern_count, path, path_count, closed, qaws_clip_result** out);
+qaws_status qaws_minkowski_sum_2d(qaws_clip_result** out, pattern, path, pattern_count, path_count, closed);
 qaws_status qaws_minkowski_diff_2d(...);
-qaws_status qaws_minkowski_sum64(int64_t const* pattern, ..., qaws_clip64_result** out);
+qaws_status qaws_minkowski_sum64(qaws_clip64_result** out, int64_t const* pattern, ...);
 qaws_status qaws_minkowski_diff64(...);
 ```
 

@@ -107,13 +107,13 @@ static qaws_status sk_union(qaws_path_2d const* paths, unsigned int n, qaws_fill
 {
 	if (!n)
 		return qaws_internal_clip_result_empty(out);
-	return qaws_clip_boolean(QAWS_CLIP_UNION, fr, paths, n, NULL, 0, out);
+	return qaws_clip_boolean(out, paths, NULL, n, 0, QAWS_CLIP_UNION, fr);
 }
 
 static void sk_center(qaws_path_2d const* p, double* c, double* size)
 {
 	qaws_vec2 lo, hi;
-	if (qaws_path_compute_bounds_2d(p, &lo, &hi) != QAWS_STATUS_OK)
+	if (qaws_path_compute_bounds_2d(&lo, &hi, p) != QAWS_STATUS_OK)
 	{
 		c[0] = c[1] = 0;
 		*size = 0;
@@ -604,7 +604,7 @@ static qaws_status sk_distance(qaws_stack_2d const* st, unsigned int const* idx,
 		for (j = 0; j < L->path_count; j++)
 		{
 			qaws_vec2 a, b;
-			if (L->paths[j].curve_count && qaws_path_compute_bounds_2d(&L->paths[j], &a, &b) == QAWS_STATUS_OK)
+			if (L->paths[j].curve_count && qaws_path_compute_bounds_2d(&a, &b, &L->paths[j]) == QAWS_STATUS_OK)
 			{
 				if (a.x < lo[0]) lo[0] = a.x;
 				if (a.y < lo[1]) lo[1] = a.y;
@@ -788,7 +788,7 @@ static qaws_status sk_distance(qaws_stack_2d const* st, unsigned int const* idx,
 					if (!gl) { free(lp); s = QAWS_STATUS_ALLOCATION_FAILURE; break; }
 					loops = gl; caploops = nc2;
 				}
-				s = qaws_curve_create_polyline_2d(lp, m, 1, &c);
+				s = qaws_curve_create_polyline_2d(&c, lp, m, 1);
 				if (s == QAWS_STATUS_OK) loops[nloops++] = c;
 			}
 			free(lp);
@@ -826,7 +826,7 @@ done:
 /*  Public                                                                  */
 /* ======================================================================== */
 
-qaws_status qaws_stack_section_2d(qaws_stack_2d const* st, qaws_scalar z, qaws_clip_result** out)
+qaws_status qaws_stack_section_2d(qaws_clip_result** out, qaws_stack_2d const* st, qaws_scalar z)
 {
 	unsigned int idx[4], n = 0, at = 0;
 	double w[4];
@@ -874,8 +874,8 @@ static qaws_status sk_level_job(void* ctx, unsigned int chunk, unsigned int begi
 	for (i = begin; i < end; i++)
 	{
 		qaws_clip_result *ra = NULL, *rb = NULL;
-		qaws_status s = qaws_stack_section_2d(j->a, (qaws_scalar)j->z[i], &ra);
-		if (s == QAWS_STATUS_OK) s = qaws_stack_section_2d(j->b, (qaws_scalar)j->z[i], &rb);
+		qaws_status s = qaws_stack_section_2d(&ra, j->a, (qaws_scalar)j->z[i]);
+		if (s == QAWS_STATUS_OK) s = qaws_stack_section_2d(&rb, j->b, (qaws_scalar)j->z[i]);
 		if (s == QAWS_STATUS_OK)
 		{
 			unsigned int na = qaws_clip_result_get_path_count(ra), nb = qaws_clip_result_get_path_count(rb), k;
@@ -885,9 +885,9 @@ static qaws_status sk_level_job(void* ctx, unsigned int chunk, unsigned int begi
 				s = QAWS_STATUS_ALLOCATION_FAILURE;
 			else
 			{
-				for (k = 0; k < na; k++) qaws_clip_result_get_path(ra, k, &pa[k]);
-				for (k = 0; k < nb; k++) qaws_clip_result_get_path(rb, k, &pb[k]);
-				s = qaws_clip_boolean(j->ct, QAWS_FILL_NON_ZERO, pa, na, pb, nb, &j->levels[i]);
+				for (k = 0; k < na; k++) qaws_clip_result_get_path(&pa[k], ra, k);
+				for (k = 0; k < nb; k++) qaws_clip_result_get_path(&pb[k], rb, k);
+				s = qaws_clip_boolean(&j->levels[i], pa, pb, na, nb, j->ct, QAWS_FILL_NON_ZERO);
 			}
 			free(pa);
 			free(pb);
@@ -900,8 +900,8 @@ static qaws_status sk_level_job(void* ctx, unsigned int chunk, unsigned int begi
 	return QAWS_STATUS_OK;
 }
 
-qaws_status qaws_stack_boolean_2d(qaws_clip_type ct, qaws_stack_2d const* a, qaws_stack_2d const* b,
-	qaws_batch_executor const* executor, qaws_stack_result** out)
+qaws_status qaws_stack_boolean_2d(qaws_stack_result** out, qaws_stack_2d const* a, qaws_stack_2d const* b,
+	qaws_clip_type ct, qaws_batch_executor const* executor)
 {
 	qaws_stack_result* r;
 	unsigned int i, ia = 0, ib = 0, n = 0;

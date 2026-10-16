@@ -76,7 +76,7 @@ static void sst_mesh_measure(qaws_surface const* s, qaws_mesh_2d const* m, doubl
 		unsigned int v[3];
 		qaws_vec3 q[3];
 		double ax, ay, az, bx, by, bz, nx, ny, nz;
-		qaws_mesh_2d_get_triangle(m, t, v);
+		qaws_mesh_2d_get_triangle(v, m, t);
 		for (k = 0; k < 3; k++)
 		{
 			qaws_vec2 w = qaws_mesh_2d_get_vertex(m, v[k]);

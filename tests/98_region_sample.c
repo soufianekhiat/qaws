@@ -347,7 +347,7 @@ static qaws_curve* clt_rect_curve(double x0, double y0, double x1, double y1)
 	qaws_curve* c = NULL;
 	p[0] = (qaws_scalar)x0; p[1] = (qaws_scalar)y0; p[2] = (qaws_scalar)x1; p[3] = (qaws_scalar)y0;
 	p[4] = (qaws_scalar)x1; p[5] = (qaws_scalar)y1; p[6] = (qaws_scalar)x0; p[7] = (qaws_scalar)y1;
-	qaws_curve_create_polyline_2d(p, 4, 1, &c);
+	qaws_curve_create_polyline_2d(&c, p, 4, 1);
 	return c;
 }
 
@@ -396,7 +396,7 @@ static qaws_curve* rst_polar(unsigned int n, double r0, double a1, unsigned int 
 		p[2 * i] = (qaws_scalar)(r * cos(t));
 		p[2 * i + 1] = (qaws_scalar)(r * sin(t));
 	}
-	qaws_curve_create_polyline_2d(p, n, 1, &c);
+	qaws_curve_create_polyline_2d(&c, p, n, 1);
 	return c;
 }
 
@@ -410,7 +410,7 @@ static unsigned int rst_shapes(rst_shape* sh)
 	memset(sh, 0, sizeof(rst_shape) * 9);
 	/* an ellipse, NURBS, turned */
 	sh[n].name = "ellipse (NURBS)"; sh[n].rule = QAWS_FILL_NON_ZERO; sh[n].closed_form = RST_PI * 1.3 * 0.6;
-	{ qaws_curve* c = NULL; qaws_curve_create_ellipse_2d((qaws_scalar)0.2, (qaws_scalar)-0.1, (qaws_scalar)1.3, (qaws_scalar)0.6, (qaws_scalar)0.5, &c); rst_add(&sh[n], c); }
+	{ qaws_curve* c = NULL; qaws_curve_create_ellipse_2d(&c, (qaws_scalar)0.2, (qaws_scalar)-0.1, (qaws_scalar)1.3, (qaws_scalar)0.6, (qaws_scalar)0.5); rst_add(&sh[n], c); }
 	n++;
 	sh[n].name = "disc minus disc"; sh[n].rule = QAWS_FILL_POSITIVE; sh[n].closed_form = ref_crescent_moments[0];
 	rst_add(&sh[n], rst_circle(0, 0, 1, 1)); rst_add(&sh[n], rst_circle(0.45, 0.1, 0.7, 0));
@@ -437,7 +437,7 @@ static unsigned int rst_shapes(rst_shape* sh)
 			double r = (i % 2) ? 0.45 : 1.0, t = RST_PI / 2 + RST_PI * i / 5;
 			p[2 * i] = (qaws_scalar)(r * cos(t)); p[2 * i + 1] = (qaws_scalar)(r * sin(t));
 		}
-		qaws_curve_create_polyline_2d(p, 10, 1, &c);
+		qaws_curve_create_polyline_2d(&c, p, 10, 1);
 		rst_add(&sh[n], c);
 	}
 	n++;
@@ -451,7 +451,7 @@ static unsigned int rst_shapes(rst_shape* sh)
 	n++;
 	/* an ellipse with three holes */
 	sh[n].name = "ellipse with 3 holes"; sh[n].rule = QAWS_FILL_POSITIVE; sh[n].closed_form = RST_PI * (1.5 * 1.0 - 0.25 * 0.25 - 0.2 * 0.2 - 0.3 * 0.3);
-	{ qaws_curve* c = NULL; qaws_curve_create_ellipse_2d(0, 0, (qaws_scalar)1.5, (qaws_scalar)1.0, 0, &c); rst_add(&sh[n], c); }
+	{ qaws_curve* c = NULL; qaws_curve_create_ellipse_2d(&c, 0, 0, (qaws_scalar)1.5, (qaws_scalar)1.0, 0); rst_add(&sh[n], c); }
 	rst_add(&sh[n], rst_circle(-0.7, 0.1, 0.25, 0));
 	rst_add(&sh[n], rst_circle(0.1, 0.45, 0.2, 0));
 	rst_add(&sh[n], rst_circle(0.6, -0.2, 0.3, 0));
@@ -478,7 +478,7 @@ static double rst_green_mass(qaws_clip_result const* r)
 	for (i = 0; r && i < qaws_clip_result_get_path_count(r); i++)
 	{
 		qaws_path_2d p;
-		qaws_clip_result_get_path(r, i, &p);
+		qaws_clip_result_get_path(&p, r, i);
 		for (k = 0; k < p.curve_count; k++)
 		{
 			qaws_curve const* c = p.curves[k];
@@ -541,13 +541,13 @@ static void test_sweep(void)
 		if (!smp) { TEST_ASSERT(0, s->name); continue; }
 		area = (double)qaws_region_sampler_get_area(smp);
 		/* the region's area from the united paths (qaws_path_compute_area_2d) */
-		qaws_clip_boolean(QAWS_CLIP_UNION, s->rule, s->paths, s->npaths, NULL, 0, &region);
+		qaws_clip_boolean(&region, s->paths, NULL, s->npaths, 0, QAWS_CLIP_UNION, s->rule);
 		for (i = 0; region && i < qaws_clip_result_get_path_count(region); i++)
 		{
 			qaws_path_2d p;
 			qaws_scalar a = 0;
-			qaws_clip_result_get_path(region, i, &p);
-			qaws_path_compute_area_2d(&p, &a);
+			qaws_clip_result_get_path(&p, region, i);
+			qaws_path_compute_area_2d(&a, &p);
 			carea += a;
 		}
 		/* the box, and the exact area of the region in each cell of a G x G grid */
@@ -556,8 +556,8 @@ static void test_sweep(void)
 		{
 			qaws_path_2d p;
 			qaws_vec2 a, b;
-			qaws_clip_result_get_path(region, i, &p);
-			qaws_path_compute_bounds_2d(&p, &a, &b);
+			qaws_clip_result_get_path(&p, region, i);
+			qaws_path_compute_bounds_2d(&a, &b, &p);
 			if (a.x < lo.x) lo.x = a.x;
 			if (a.y < lo.y) lo.y = a.y;
 			if (b.x > hi.x) hi.x = b.x;
@@ -573,14 +573,14 @@ static void test_sweep(void)
 			qaws_path_2d rp;
 			qaws_clip_result* cut = NULL;
 			rp.curves = &rv; rp.curve_count = 1; rp.closed = 1;
-			qaws_clip_boolean(QAWS_CLIP_INTERSECTION, s->rule, s->paths, s->npaths, &rp, 1, &cut);
+			qaws_clip_boolean(&cut, s->paths, &rp, s->npaths, 1, QAWS_CLIP_INTERSECTION, s->rule);
 			cells[k] = 0;
 			for (i = 0; cut && i < qaws_clip_result_get_path_count(cut); i++)
 			{
 				qaws_path_2d p;
 				qaws_scalar a = 0;
-				qaws_clip_result_get_path(cut, i, &p);
-				qaws_path_compute_area_2d(&p, &a);
+				qaws_clip_result_get_path(&p, cut, i);
+				qaws_path_compute_area_2d(&a, &p);
 				cells[k] += a;
 			}
 			cmass[k] = rst_green_mass(cut);
@@ -594,7 +594,7 @@ static void test_sweep(void)
 			qaws_point_location loc = QAWS_POINT_OUTSIDE;
 			q.x = (qaws_scalar)(lo.x + (hi.x - lo.x) * rs_test_unit(&st));
 			q.y = (qaws_scalar)(lo.y + (hi.y - lo.y) * rs_test_unit(&st));
-			qaws_region_locate_point_2d(s->paths, s->npaths, s->rule, q, 0, &loc);
+			qaws_region_locate_point_2d(&loc, s->paths, s->npaths, s->rule, q, 0);
 			if (loc != QAWS_POINT_OUTSIDE) inside++;
 			/* the sampler's own inside test agrees, but within rounding of the boundary */
 			if (loc != QAWS_POINT_ON)
@@ -618,7 +618,7 @@ static void test_sweep(void)
 			{
 				int cx = (int)((pts[i].x - lo.x) / (hi.x - lo.x) * G), cy = (int)((pts[i].y - lo.y) / (hi.y - lo.y) * G);
 				qaws_point_location loc = QAWS_POINT_OUTSIDE;
-				qaws_region_locate_point_2d(s->paths, s->npaths, s->rule, pts[i], 0, &loc);
+				qaws_region_locate_point_2d(&loc, s->paths, s->npaths, s->rule, pts[i], 0);
 				if (loc == QAWS_POINT_OUTSIDE) outside[k]++;
 				if (cx < 0) cx = 0;
 				if (cy < 0) cy = 0;
@@ -672,7 +672,7 @@ static void test_sweep(void)
 				{
 					int cx = (int)((pts[i].x - lo.x) / (hi.x - lo.x) * G), cy = (int)((pts[i].y - lo.y) / (hi.y - lo.y) * G);
 					qaws_point_location loc = QAWS_POINT_OUTSIDE;
-					qaws_region_locate_point_2d(s->paths, s->npaths, s->rule, pts[i], 0, &loc);
+					qaws_region_locate_point_2d(&loc, s->paths, s->npaths, s->rule, pts[i], 0);
 					if (loc == QAWS_POINT_OUTSIDE) dout++;
 					if (cx < 0) cx = 0;
 					if (cy < 0) cy = 0;

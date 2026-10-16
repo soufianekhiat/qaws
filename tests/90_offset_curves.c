@@ -328,7 +328,7 @@ static unsigned int oct_oracle(qaws_curve const* c, int closed, double delta, qa
 	qaws_closest_point* cl = (qaws_closest_point*)malloc(sizeof(qaws_closest_point) * grid * grid);
 	qaws_closest_desc cd;
 	src.curves = &c; src.curve_count = 1; src.closed = closed;
-	qaws_path_compute_bounds_2d(&src, &lo, &hi);
+	qaws_path_compute_bounds_2d(&lo, &hi, &src);
 	ext = fabs(delta) + 0.2;
 	lo.x -= (qaws_scalar)ext; lo.y -= (qaws_scalar)ext; hi.x += (qaws_scalar)ext; hi.y += (qaws_scalar)ext;
 	band = OCT_F32 ? 2e-3 : 1e-4;
@@ -342,7 +342,7 @@ static unsigned int oct_oracle(qaws_curve const* c, int closed, double delta, qa
 	cd.curves = &c; cd.curve_count = 1; cd.points = pts; cd.point_count = grid * grid;
 	qaws_curve_batch_find_closest(cl, NULL, &cd);
 	res = (qaws_path_2d*)malloc(sizeof(qaws_path_2d) * (np + 1));
-	for (i = 0; i < np; i++) qaws_clip_result_get_path(r, i, &res[i]);
+	for (i = 0; i < np; i++) qaws_clip_result_get_path(&res[i], r, i);
 	memset(&sr, 0, sizeof(sr));
 	oct_rings(res, np, &rr);
 	if (closed) oct_rings(&src, 1, &sr);
@@ -390,7 +390,7 @@ static void test_regions(void)
 		unsigned int nc = 0, nk = 0, bad = 0, checked = 0;
 		qaws_internal_offset_curve(star, deltas[k], 1e-6, &chain, 1, &nk, cusps, 64, &nc);
 		qaws_curve_destroy(chain);
-		qaws_offset_paths(&path, 1, (qaws_scalar)deltas[k], QAWS_JOIN_ROUND, QAWS_END_POLYGON, &r);
+		qaws_offset_paths(&r, &path, 1, (qaws_scalar)deltas[k], QAWS_JOIN_ROUND, QAWS_END_POLYGON);
 		if (r) bad = oct_oracle(star, 1, deltas[k], r, 180, &checked);
 		sprintf(msg, "star %s by %g past its radii of curvature (%u cusps): %u of %u grid points against the distance oracle",
 			deltas[k] > 0 ? "grown" : "shrunk", fabs(deltas[k]), nc, bad, checked);
@@ -429,14 +429,14 @@ static void test_disc_with_hole(void)
 		qaws_clip_result* r = NULL;
 		double t = deltas[k], a = 0, expect = OCT_PI * ((1 - t) * (1 - t) - (0.35 + t) * (0.35 + t));
 		unsigned int i, n = 0;
-		qaws_offset_paths(p, 2, (qaws_scalar)-t, QAWS_JOIN_ROUND, QAWS_END_POLYGON, &r);
+		qaws_offset_paths(&r, p, 2, (qaws_scalar)-t, QAWS_JOIN_ROUND, QAWS_END_POLYGON);
 		if (r) n = qaws_clip_result_get_path_count(r);
 		for (i = 0; i < n; i++)
 		{
 			qaws_path_2d q;
 			qaws_scalar s = 0;
-			qaws_clip_result_get_path(r, i, &q);
-			qaws_path_compute_area_2d(&q, &s);
+			qaws_clip_result_get_path(&q, r, i);
+			qaws_path_compute_area_2d(&s, &q);
 			a += (double)s;
 		}
 		sprintf(msg, "disc with a round hole shrunk by %g: %u loops, area %.7f (expected %.7f)", t, n, a, expect);
@@ -457,7 +457,7 @@ static void test_open(void)
 	unsigned int bad = 0, checked = 0;
 	char msg[300];
 	path.curves = &cc; path.curve_count = 1; path.closed = 0;
-	qaws_offset_paths(&path, 1, (qaws_scalar)0.6, QAWS_JOIN_ROUND, QAWS_END_ROUND, &r);
+	qaws_offset_paths(&r, &path, 1, (qaws_scalar)0.6, QAWS_JOIN_ROUND, QAWS_END_ROUND);
 	if (r) bad = oct_oracle(c, 0, 0.6, r, 180, &checked);
 	sprintf(msg, "cubic S stroked 0.6 with round ends (cusps on both sides): %u of %u grid points against the distance oracle", bad, checked);
 	TEST_ASSERT(r && bad == 0 && checked > 10000, msg);
@@ -487,7 +487,7 @@ static void test_extremes(void)
 		qaws_clip_result* r = NULL;
 		unsigned int bad = 0, checked = 0;
 		path.curves = &cc; path.curve_count = 1; path.closed = 0;
-		qaws_offset_paths(&path, 1, (qaws_scalar)cases[i].delta, QAWS_JOIN_ROUND, QAWS_END_ROUND, &r);
+		qaws_offset_paths(&r, &path, 1, (qaws_scalar)cases[i].delta, QAWS_JOIN_ROUND, QAWS_END_ROUND);
 		if (r) bad = oct_oracle(c, 0, cases[i].delta, r, 160, &checked);
 		sprintf(msg, "%s, stroked %g with round ends: %u of %u grid points against the distance oracle", cases[i].name, cases[i].delta, bad, checked);
 		TEST_ASSERT(r && bad == 0 && checked > 5000, msg);
@@ -505,18 +505,18 @@ static void test_simple(void)
 	unsigned int i, spans = 0;
 	double a = 0;
 	char msg[300];
-	qaws_curve_create_ellipse_2d(0, 0, 5, 5, 0, &c);
+	qaws_curve_create_ellipse_2d(&c, 0, 0, 5, 5, 0);
 	cc = c;
 	path.curves = &cc; path.curve_count = 1; path.closed = 1;
-	qaws_offset_paths(&path, 1, 1, QAWS_JOIN_ROUND, QAWS_END_POLYGON, &r);
+	qaws_offset_paths(&r, &path, 1, 1, QAWS_JOIN_ROUND, QAWS_END_POLYGON);
 	for (i = 0; r && i < qaws_clip_result_get_path_count(r); i++)
 	{
 		qaws_path_2d p;
 		qaws_scalar pa = 0;
 		unsigned int k;
-		qaws_clip_result_get_path(r, i, &p);
+		qaws_clip_result_get_path(&p, r, i);
 		for (k = 0; k < p.curve_count; k++) spans += qaws_curve_get_span_count(p.curves[k]);
-		qaws_path_compute_area_2d(&p, &pa);
+		qaws_path_compute_area_2d(&pa, &p);
 		a += pa;
 	}
 	sprintf(msg, "NURBS circle r 5 grown by 1 at the default tolerance (1e-6 of the extent): %u cubics, area %.12g vs %.12g", spans, a, 36 * OCT_PI);
@@ -536,7 +536,7 @@ static qaws_curve* oct_ngon(double cx, double cy, double r)
 		p[2 * i] = (qaws_scalar)(cx + r * cos(2 * OCT_PI * i / 96));
 		p[2 * i + 1] = (qaws_scalar)(cy + r * sin(2 * OCT_PI * i / 96));
 	}
-	qaws_curve_create_polyline_2d(p, 96, 1, &c);
+	qaws_curve_create_polyline_2d(&c, p, 96, 1);
 	return c;
 }
 
@@ -547,7 +547,7 @@ static double oct_min_dist(qaws_clip_result const* r, oct_ring const* in, double
 	double best = 1e300;
 	qaws_path_2d* res = (qaws_path_2d*)malloc(sizeof(qaws_path_2d) * (np + 1));
 	oct_ring rr;
-	for (i = 0; i < np; i++) qaws_clip_result_get_path(r, i, &res[i]);
+	for (i = 0; i < np; i++) qaws_clip_result_get_path(&res[i], r, i);
 	oct_rings(res, np, &rr);
 	for (a = 0; a < rr.count; a++)
 	{
@@ -589,21 +589,21 @@ static double oct_single_union(qaws_path_2d const* paths, unsigned int n, double
 	double area = 0;
 	for (i = 0; i < n; i++)
 	{
-		qaws_offset_paths(&paths[i], 1, (qaws_scalar)delta, QAWS_JOIN_ROUND, QAWS_END_POLYGON, &rs[i]);
+		qaws_offset_paths(&rs[i], &paths[i], 1, (qaws_scalar)delta, QAWS_JOIN_ROUND, QAWS_END_POLYGON);
 		cap += rs[i] ? qaws_clip_result_get_path_count(rs[i]) : 0;
 	}
 	all = (qaws_path_2d*)malloc(sizeof(qaws_path_2d) * (cap + 1));
 	for (i = 0; i < n; i++)
 		for (j = 0; rs[i] && j < qaws_clip_result_get_path_count(rs[i]); j++)
-			qaws_clip_result_get_path(rs[i], j, &all[na++]);
-	qaws_clip_boolean(QAWS_CLIP_UNION, QAWS_FILL_POSITIVE, all, na, NULL, 0, &u);
+			qaws_clip_result_get_path(&all[na++], rs[i], j);
+	qaws_clip_boolean(&u, all, NULL, na, 0, QAWS_CLIP_UNION, QAWS_FILL_POSITIVE);
 	*loops = u ? qaws_clip_result_get_path_count(u) : 0;
 	for (i = 0; u && i < *loops; i++)
 	{
 		qaws_path_2d p;
 		qaws_scalar a = 0;
-		qaws_clip_result_get_path(u, i, &p);
-		qaws_path_compute_area_2d(&p, &a);
+		qaws_clip_result_get_path(&p, u, i);
+		qaws_path_compute_area_2d(&a, &p);
 		area += a;
 	}
 	qaws_clip_result_destroy(u);
@@ -620,8 +620,8 @@ static double oct_area(qaws_clip_result const* r)
 	{
 		qaws_path_2d p;
 		qaws_scalar a = 0;
-		qaws_clip_result_get_path(r, i, &p);
-		qaws_path_compute_area_2d(&p, &a);
+		qaws_clip_result_get_path(&p, r, i);
+		qaws_path_compute_area_2d(&a, &p);
 		area += a;
 	}
 	return area;
@@ -654,17 +654,17 @@ static void test_lobes(void)
 		dv[i] = d[i];
 		dp[i].curves = &dv[i]; dp[i].curve_count = 1; dp[i].closed = 1;
 	}
-	qaws_clip_boolean(QAWS_CLIP_UNION, QAWS_FILL_NON_ZERO, dp, 3, NULL, 0, &u);
+	qaws_clip_boolean(&u, dp, NULL, 3, 0, QAWS_CLIP_UNION, QAWS_FILL_NON_ZERO);
 	nu = u ? qaws_clip_result_get_path_count(u) : 0;
 	up = (qaws_path_2d*)malloc(sizeof(qaws_path_2d) * (nu + 1));
-	for (i = 0; i < nu; i++) qaws_clip_result_get_path(u, i, &up[i]);
+	for (i = 0; i < nu; i++) qaws_clip_result_get_path(&up[i], u, i);
 	for (k = 0; k < sizeof(cases) / sizeof(cases[0]); k++)
 	{
 		double delta = cases[k].delta, worst[2] = { 0, 0 }, mind = 0;
 		qaws_clip_result* r = NULL;
 		unsigned int np = 0, bad = 0, checked = 0;
 		oct_ring in;
-		qaws_offset_paths(cases[k].overlapping ? dp : up, cases[k].overlapping ? 3 : nu, (qaws_scalar)delta, QAWS_JOIN_ROUND, QAWS_END_POLYGON, &r);
+		qaws_offset_paths(&r, cases[k].overlapping ? dp : up, cases[k].overlapping ? 3 : nu, (qaws_scalar)delta, QAWS_JOIN_ROUND, QAWS_END_POLYGON);
 		if (r)
 		{
 			np = qaws_clip_result_get_path_count(r);
@@ -719,10 +719,10 @@ static void test_topographic(double step, unsigned int levels)
 		dv[i] = d[i];
 		dp[i].curves = &dv[i]; dp[i].curve_count = 1; dp[i].closed = 1;
 	}
-	qaws_clip_boolean(QAWS_CLIP_UNION, QAWS_FILL_NON_ZERO, dp, 3, NULL, 0, &u);
+	qaws_clip_boolean(&u, dp, NULL, 3, 0, QAWS_CLIP_UNION, QAWS_FILL_NON_ZERO);
 	nu = u ? qaws_clip_result_get_path_count(u) : 0;
 	up = (qaws_path_2d*)malloc(sizeof(qaws_path_2d) * (nu + 1));
-	for (i = 0; i < nu; i++) qaws_clip_result_get_path(u, i, &up[i]);
+	for (i = 0; i < nu; i++) qaws_clip_result_get_path(&up[i], u, i);
 	in = up;
 	nin = nu;
 	for (level = 1; level <= levels && nin; level++)
@@ -731,8 +731,8 @@ static void test_topographic(double step, unsigned int levels)
 		double worst[2] = { 0, 0 }, mind = 1e300, a, ad;
 		unsigned int np, nd;
 		oct_ring rin;
-		qaws_offset_paths(in, nin, (qaws_scalar)-step, QAWS_JOIN_ROUND, QAWS_END_POLYGON, &r);
-		qaws_offset_paths(up, nu, (qaws_scalar)(-step * level), QAWS_JOIN_ROUND, QAWS_END_POLYGON, &direct);
+		qaws_offset_paths(&r, in, nin, (qaws_scalar)-step, QAWS_JOIN_ROUND, QAWS_END_POLYGON);
+		qaws_offset_paths(&direct, up, nu, (qaws_scalar)(-step * level), QAWS_JOIN_ROUND, QAWS_END_POLYGON);
 		np = r ? qaws_clip_result_get_path_count(r) : 0;
 		nd = direct ? qaws_clip_result_get_path_count(direct) : 0;
 		a = oct_area(r);
@@ -753,7 +753,7 @@ static void test_topographic(double step, unsigned int levels)
 		prev = r;
 		nin = np;
 		in = (qaws_path_2d*)malloc(sizeof(qaws_path_2d) * (nin + 1));
-		for (i = 0; i < nin; i++) qaws_clip_result_get_path(r, i, &in[i]);
+		for (i = 0; i < nin; i++) qaws_clip_result_get_path(&in[i], r, i);
 	}
 	if (in != up) free(in);
 	qaws_clip_result_destroy(prev);

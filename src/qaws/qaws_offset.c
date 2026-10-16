@@ -1575,7 +1575,7 @@ static qaws_status os_append_loops(os_ctx* x, qaws_clip_result const* r, int rev
 	{
 		qaws_path_2d p;
 		unsigned int first = x->ncurves;
-		qaws_clip_result_get_path(r, i, &p);
+		qaws_clip_result_get_path(&p, r, i);
 		for (k = 0; k < p.curve_count && s == QAWS_STATUS_OK; k++)
 		{
 			qaws_curve const* c = p.curves[reverse ? p.curve_count - 1 - k : k];
@@ -1787,7 +1787,7 @@ static qaws_status os_erode_path(os_ctx* x, qaws_path_2d const* p, double delta,
 		cd.clip_count = np;
 		cd.clip_type = QAWS_CLIP_DIFFERENCE;
 		cd.fill_rule = QAWS_FILL_NON_ZERO;
-		s = qaws_clip64_execute(&cd, &res);
+		s = qaws_clip64_execute(&res, &cd);
 	}
 	/* the loops back as closed polylines, as the path runs */
 	for (i = 0; s == QAWS_STATUS_OK && res && i < qaws_clip64_result_get_path_count(res); i++)
@@ -1796,7 +1796,7 @@ static qaws_status os_erode_path(os_ctx* x, qaws_path_2d const* p, double delta,
 		unsigned int m, j, first = x->ncurves;
 		qaws_scalar* fp;
 		qaws_curve* c = NULL;
-		qaws_clip64_result_get_path(res, i, &rp, &m);
+		qaws_clip64_result_get_path(&rp, &m, res, i);
 		if (m < 3)
 			continue;
 		fp = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 2 * m);
@@ -1827,7 +1827,7 @@ static qaws_status os_erode_path(os_ctx* x, qaws_path_2d const* p, double delta,
 			}
 			m = kept;
 		}
-		s = m >= 3 ? qaws_curve_create_polyline_2d(fp, m, 1, &c) : QAWS_STATUS_OK;
+		s = m >= 3 ? qaws_curve_create_polyline_2d(&c, fp, m, 1) : QAWS_STATUS_OK;
 		if (m < 3)
 		{
 			free(fp);
@@ -1922,7 +1922,7 @@ static qaws_status os_erode_path(os_ctx* x, qaws_path_2d const* p, double delta,
 			cd.clip_type = QAWS_CLIP_UNION;
 			cd.fill_rule = QAWS_FILL_POSITIVE;
 			cd.executor = x->d->executor;
-			s = qaws_clip_execute(&cd, &band);
+			s = qaws_clip_execute(&band, &cd);
 		}
 	}
 	/* the interior minus the band */
@@ -1933,10 +1933,10 @@ static qaws_status os_erode_path(os_ctx* x, qaws_path_2d const* p, double delta,
 		if (!bp)
 			s = QAWS_STATUS_ALLOCATION_FAILURE;
 		for (i = 0; s == QAWS_STATUS_OK && i < nb; i++)
-			qaws_clip_result_get_path(band, i, &bp[i]);
+			qaws_clip_result_get_path(&bp[i], band, i);
 	}
 	if (s == QAWS_STATUS_OK)
-		s = qaws_clip_boolean(QAWS_CLIP_DIFFERENCE, QAWS_FILL_NON_ZERO, p, 1, bp, nb, &res);
+		s = qaws_clip_boolean(&res, p, bp, 1, nb, QAWS_CLIP_DIFFERENCE, QAWS_FILL_NON_ZERO);
 	if (s == QAWS_STATUS_OK)
 		s = os_append_loops(x, res, !ccw);
 	qaws_clip_result_destroy(res);
@@ -1985,7 +1985,7 @@ static qaws_status os_check(qaws_offset_desc const* desc, qaws_clip_result const
 	for (i = 0; i < qaws_clip_result_get_path_count(r) && s == QAWS_STATUS_OK; i++)
 	{
 		qaws_path_2d p;
-		qaws_clip_result_get_path(r, i, &p);
+		qaws_clip_result_get_path(&p, r, i);
 		for (k = 0; k < p.curve_count && s == QAWS_STATUS_OK; k++)
 		{
 			qaws_curve const* c = p.curves[k];
@@ -2087,7 +2087,7 @@ static qaws_status os_execute(qaws_offset_desc const* desc, qaws_clip_result** o
 			for (i = 0; i < gr->path_count; i++)
 			{
 				qaws_vec2 lo, hi;
-				if (gr->paths[i].curve_count && qaws_path_compute_bounds_2d(&gr->paths[i], &lo, &hi) == QAWS_STATUS_OK && lo.y < lowest)
+				if (gr->paths[i].curve_count && qaws_path_compute_bounds_2d(&lo, &hi, &gr->paths[i]) == QAWS_STATUS_OK && lo.y < lowest)
 				{
 					lowest = lo.y;
 					best = i;
@@ -2164,7 +2164,7 @@ static qaws_status os_execute(qaws_offset_desc const* desc, qaws_clip_result** o
 			cd.fill_rule = QAWS_FILL_POSITIVE;
 			cd.flags = desc->flags ^ (first_reversed ? QAWS_CLIP_REVERSE_SOLUTION : 0u);
 			cd.executor = desc->executor;
-			s = qaws_clip_execute(&cd, out_result);
+			s = qaws_clip_execute(out_result, &cd);
 		}
 	}
 	for (i = 0; i < x.ncurves; i++)
@@ -2203,7 +2203,7 @@ static double os_check_tolerance(qaws_offset_desc const* desc)
 }
 #endif
 
-qaws_status qaws_offset_execute(qaws_offset_desc const* desc, qaws_clip_result** out_result)
+qaws_status qaws_offset_execute(qaws_clip_result** out_result, qaws_offset_desc const* desc)
 {
 #if QAWS_SCALAR_IS_FLOAT
 	/* float: the raw loops of a shrinking path meet in features finer than a
@@ -2239,8 +2239,8 @@ qaws_status qaws_offset_execute(qaws_offset_desc const* desc, qaws_clip_result**
 #endif
 }
 
-qaws_status qaws_offset_paths(qaws_path_2d const* paths, unsigned int path_count, qaws_scalar delta,
-	qaws_join_type join_type, qaws_end_type end_type, qaws_clip_result** out_result)
+qaws_status qaws_offset_paths(qaws_clip_result** out_result, qaws_path_2d const* paths, unsigned int path_count,
+	qaws_scalar delta, qaws_join_type join_type, qaws_end_type end_type)
 {
 	qaws_offset_group g;
 	qaws_offset_desc d;
@@ -2252,7 +2252,7 @@ qaws_status qaws_offset_paths(qaws_path_2d const* paths, unsigned int path_count
 	d.groups = &g;
 	d.group_count = 1;
 	d.delta = delta;
-	return qaws_offset_execute(&d, out_result);
+	return qaws_offset_execute(out_result, &d);
 }
 
 qaws_status qaws_internal_offset_curve(qaws_curve const* curve, double delta, double tolerance,

@@ -252,13 +252,13 @@ qaws_status qaws_region_sampler_create(qaws_region_sampler_desc const* desc, qaw
 	if (!s)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	/* 1. the region, its boundary simple */
-	st = qaws_clip_boolean(QAWS_CLIP_UNION, desc->fill_rule, desc->paths, desc->path_count, NULL, 0, &s->region);
+	st = qaws_clip_boolean(&s->region, desc->paths, NULL, desc->path_count, 0, QAWS_CLIP_UNION, desc->fill_rule);
 	np = st == QAWS_STATUS_OK ? qaws_clip_result_get_path_count(s->region) : 0;
 	/* 2. x-monotone pieces */
 	for (i = 0; st == QAWS_STATUS_OK && i < np; i++)
 	{
 		qaws_path_2d p;
-		qaws_clip_result_get_path(s->region, i, &p);
+		qaws_clip_result_get_path(&p, s->region, i);
 		for (k = 0; k < p.curve_count && st == QAWS_STATUS_OK; k++)
 			st = rs_cut_curve(p.curves[k], &s->pieces, &s->npieces, &cap);
 	}
@@ -289,8 +289,8 @@ qaws_status qaws_region_sampler_create(qaws_region_sampler_desc const* desc, qaw
 				for (i = 0; i < np; i++)
 				{
 					qaws_path_2d p;
-					qaws_clip_result_get_path(s->region, i, &p);
-					if (qaws_path_compute_bounds_2d(&p, &blo, &bhi) == QAWS_STATUS_OK)
+					qaws_clip_result_get_path(&p, s->region, i);
+					if (qaws_path_compute_bounds_2d(&blo, &bhi, &p) == QAWS_STATUS_OK)
 					{
 						if ((double)blo.y < s->ylo) s->ylo = (double)blo.y;
 						if ((double)bhi.y > s->yhi) s->yhi = (double)bhi.y;

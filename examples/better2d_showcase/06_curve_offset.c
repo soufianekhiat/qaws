@@ -49,7 +49,7 @@ static void co_result(svg* s, viewport const* v, qaws_clip_result const* r, char
 	for (i = 0; i < qaws_clip_result_get_path_count(r); i++)
 	{
 		qaws_path_2d p;
-		qaws_clip_result_get_path(r, i, &p);
+		qaws_clip_result_get_path(&p, r, i);
 		for (k = 0; k < p.curve_count; k++)
 		{
 			co_curve(s, v, p.curves[k], line, 1.8, 0.95, 0);
@@ -255,7 +255,7 @@ static void demo_curve_offset(void)
 			co_view(&v, x0, y0, pw, ph, 0, 0, 9.2);
 			svg_panel(&s, &v, k == 2 ? "star grown by 1: raw chain, then the union" : "star shrunk by 0.45: raw chain, then the union");
 			qaws_internal_offset_curve(star, d, 1e-5, &ch, 1, &nk, cusps, 64, &nc);
-			if (qaws_offset_paths(&p, 1, (qaws_scalar)d, QAWS_JOIN_ROUND, QAWS_END_POLYGON, &r) == QAWS_STATUS_OK)
+			if (qaws_offset_paths(&r, &p, 1, (qaws_scalar)d, QAWS_JOIN_ROUND, QAWS_END_POLYGON) == QAWS_STATUS_OK)
 				co_result(&s, &v, r, k == 2 ? "#c8e1ff" : "#dafbe1", k == 2 ? "#0969da" : "#1a7f37", &cub, 0);
 			if (ch) co_curve(&s, &v, ch, "#cf222e", 0.9, 0.85, 0);
 			co_cusps(&s, &v, star, d, cusps, nc);
@@ -277,7 +277,7 @@ static void demo_curve_offset(void)
 			svg_panel(&s, &v, "the S stroked 0.6, round ends: cusps on both sides");
 			co_parallel(&s, &v, scurve, 0.6);
 			co_parallel(&s, &v, scurve, -0.6);
-			if (qaws_offset_paths(&p, 1, (qaws_scalar)0.6, QAWS_JOIN_ROUND, QAWS_END_ROUND, &r) == QAWS_STATUS_OK)
+			if (qaws_offset_paths(&r, &p, 1, (qaws_scalar)0.6, QAWS_JOIN_ROUND, QAWS_END_ROUND) == QAWS_STATUS_OK)
 				co_result(&s, &v, r, "#fff1e5", "#bc4c00", &cub, 1);
 			co_curve(&s, &v, scurve, "#57606a", 2.0, 0.9, 0);
 			sprintf(label, "one region, %u cubics and arcs; each point within 0.6 of the S (grid oracle, test 90)", cub);
@@ -305,9 +305,9 @@ static void demo_curve_offset(void)
 			g.paths = &pa; g.path_count = 1; g.join_type = QAWS_JOIN_ROUND; g.end_type = QAWS_END_POLYGON;
 			memset(&d, 0, sizeof(d));
 			d.groups = &g; d.group_count = 1; d.delta = delta; d.delta_fn = co_const; d.delta_user = &delta;
-			if (qaws_offset_execute(&d, &ra) == QAWS_STATUS_OK)
+			if (qaws_offset_execute(&ra, &d) == QAWS_STATUS_OK)
 				co_result(&s, &v, ra, NULL, "#bf8700", &na, 1);
-			if (qaws_offset_paths(&pb, 1, delta, QAWS_JOIN_ROUND, QAWS_END_POLYGON, &rb) == QAWS_STATUS_OK)
+			if (qaws_offset_paths(&rb, &pb, 1, delta, QAWS_JOIN_ROUND, QAWS_END_POLYGON) == QAWS_STATUS_OK)
 				co_result(&s, &v, rb, NULL, "#1a7f37", &nb, 1);
 			co_curve(&s, &v, a, "#57606a", 1.4, 0.9, 0);
 			co_curve(&s, &v, b, "#57606a", 1.4, 0.9, 0);

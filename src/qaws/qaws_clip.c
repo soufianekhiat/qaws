@@ -1946,7 +1946,7 @@ static qaws_status cl_emit_pieces(cl_ctx* x, cl_piece const* pc, unsigned int n,
 					unsigned int a;
 					if (!sp) { free(pts); return QAWS_STATUS_ALLOCATION_FAILURE; }
 					for (a = 0; a < 2 * np; a++) sp[a] = (qaws_scalar)pts[a];
-					s = qaws_curve_create_polyline_2d(sp, np, whole, &pl);
+					s = qaws_curve_create_polyline_2d(&pl, sp, np, whole);
 					free(sp);
 					if (s == QAWS_STATUS_OK)
 						s = cl_res_curve(r, pl);
@@ -2200,9 +2200,9 @@ static qaws_status cl_open(cl_ctx* x)
 			cl_eval(x->src[e->src].c, 0.5 * (e->t0 + e->t1), m, NULL);
 			q.x = (qaws_scalar)m[0]; q.y = (qaws_scalar)m[1];
 			if (d->subject_count)
-				s = qaws_region_locate_point_2d(d->subjects, d->subject_count, d->fill_rule, q, (qaws_scalar)x->tol, &ls);
+				s = qaws_region_locate_point_2d(&ls, d->subjects, d->subject_count, d->fill_rule, q, (qaws_scalar)x->tol);
 			if (s == QAWS_STATUS_OK && d->clip_count)
-				s = qaws_region_locate_point_2d(d->clips, d->clip_count, d->fill_rule, q, (qaws_scalar)x->tol, &lc);
+				s = qaws_region_locate_point_2d(&lc, d->clips, d->clip_count, d->fill_rule, q, (qaws_scalar)x->tol);
 			in_s = ls == QAWS_POINT_INSIDE;
 			in_c = lc == QAWS_POINT_INSIDE;
 			switch (d->clip_type)
@@ -2263,7 +2263,7 @@ static void cl_free_ctx(cl_ctx* x)
 	free(x->h); free(x->vout);
 }
 
-qaws_status qaws_clip_execute(qaws_clip_desc const* desc, qaws_clip_result** out_result)
+qaws_status qaws_clip_execute(qaws_clip_result** out_result, qaws_clip_desc const* desc)
 {
 	cl_ctx x;
 	qaws_status s;
@@ -2395,7 +2395,7 @@ unsigned int qaws_clip_result_get_path_count(qaws_clip_result const* r)
 	return r ? r->path_count : 0;
 }
 
-qaws_status qaws_clip_result_get_path(qaws_clip_result const* r, unsigned int i, qaws_path_2d* out)
+qaws_status qaws_clip_result_get_path(qaws_path_2d* out, qaws_clip_result const* r, unsigned int i)
 {
 	if (!r || !out || i >= r->path_count)
 		return QAWS_STATUS_INVALID_ARGUMENT;
@@ -2425,7 +2425,7 @@ unsigned int qaws_clip_result_get_open_path_count(qaws_clip_result const* r)
 	return r ? r->open_count : 0;
 }
 
-qaws_status qaws_clip_result_get_open_path(qaws_clip_result const* r, unsigned int i, qaws_path_2d* out)
+qaws_status qaws_clip_result_get_open_path(qaws_path_2d* out, qaws_clip_result const* r, unsigned int i)
 {
 	if (!r || !out || i >= r->open_count)
 		return QAWS_STATUS_INVALID_ARGUMENT;
@@ -2435,8 +2435,8 @@ qaws_status qaws_clip_result_get_open_path(qaws_clip_result const* r, unsigned i
 	return QAWS_STATUS_OK;
 }
 
-qaws_status qaws_clip_result_get_vertices(qaws_clip_result const* r, int open, unsigned int i,
-	qaws_clip_vertex const** out_vertices, unsigned int* out_count)
+qaws_status qaws_clip_result_get_vertices(qaws_clip_vertex const** out_vertices, unsigned int* out_count, qaws_clip_result const* r,
+	int open, unsigned int i)
 {
 	struct cl_out_path const* p;
 	if (!r || !out_vertices || !out_count || i >= (open ? r->open_count : r->path_count))
@@ -2447,10 +2447,10 @@ qaws_status qaws_clip_result_get_vertices(qaws_clip_result const* r, int open, u
 	return QAWS_STATUS_OK;
 }
 
-qaws_status qaws_clip_boolean(qaws_clip_type clip_type, qaws_fill_rule fill_rule,
-	qaws_path_2d const* subjects, unsigned int subject_count,
-	qaws_path_2d const* clips, unsigned int clip_count,
-	qaws_clip_result** out_result)
+qaws_status qaws_clip_boolean(qaws_clip_result** out_result, qaws_path_2d const* subjects,
+	qaws_path_2d const* clips, unsigned int subject_count,
+	unsigned int clip_count, qaws_clip_type clip_type,
+	qaws_fill_rule fill_rule)
 {
 	qaws_clip_desc d;
 	memset(&d, 0, sizeof(d));
@@ -2460,7 +2460,7 @@ qaws_status qaws_clip_boolean(qaws_clip_type clip_type, qaws_fill_rule fill_rule
 	d.clip_count = clip_count;
 	d.clip_type = clip_type;
 	d.fill_rule = fill_rule;
-	return qaws_clip_execute(&d, out_result);
+	return qaws_clip_execute(out_result, &d);
 }
 
 /* ======================================================================== */

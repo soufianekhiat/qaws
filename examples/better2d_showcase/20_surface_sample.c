@@ -40,7 +40,7 @@ static void ssm_mesh(svg* s, qaws_surface const* surf, sgf_view const* view, vie
 	{
 		unsigned int v[3];
 		double xy[6], cu = 0, cv = 0;
-		qaws_mesh_2d_get_triangle(m, t, v);
+		qaws_mesh_2d_get_triangle(v, m, t);
 		for (k = 0; k < 3; k++)
 		{
 			qaws_vec2 w = qaws_mesh_2d_get_vertex(m, v[k]);

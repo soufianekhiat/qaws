@@ -13,9 +13,9 @@ typedef struct qaws_stack_2d {
 	unsigned int grid;            /* distance blend: marching squares cells across; 0 = 192 */
 } qaws_stack_2d;
 
-qaws_status qaws_stack_section_2d(qaws_stack_2d const* stack, qaws_scalar z, qaws_clip_result** out);
-qaws_status qaws_stack_boolean_2d(qaws_clip_type ct, qaws_stack_2d const* a, qaws_stack_2d const* b,
-	qaws_batch_executor const* executor, qaws_stack_result** out);
+qaws_status qaws_stack_section_2d(qaws_clip_result** out, qaws_stack_2d const* stack, qaws_scalar z);
+qaws_status qaws_stack_boolean_2d(qaws_stack_result** out, qaws_stack_2d const* a, qaws_stack_2d const* b,
+	qaws_clip_type ct, qaws_batch_executor const* executor);
 ```
 
 A stack is a list of levels at increasing heights, with any spacing. Each
@@ -103,7 +103,7 @@ typedef struct qaws_stack_mesh_desc {
 	qaws_batch_executor const* executor;
 } qaws_stack_mesh_desc;
 
-qaws_status qaws_stack_mesh_3d(qaws_stack_mesh_desc const* desc, qaws_mesh_3d** out_mesh);
+qaws_status qaws_stack_mesh_3d(qaws_mesh_3d** out_mesh, qaws_stack_mesh_desc const* desc);
 /* qaws_mesh_3d_get_vertex_count / get_vertex (qaws_vec3), get_triangle_count / get_triangle, destroy */
 ```
 

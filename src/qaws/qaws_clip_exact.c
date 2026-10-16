@@ -2578,7 +2578,7 @@ static void cx_free(cx_ctx* x)
 	free(x->src); free(x->temp); free(x->pts); free(x->ptf); free(x->sev_first); free(x->sev); free(x->rats); free(x->ev); free(x->hits); free(x->cuts); free(x->e);
 }
 
-qaws_status qaws_clip_exact_execute(qaws_clip_exact_desc const* desc, qaws_clip_result** out_result, qaws_clip_exact_stats* out_stats)
+qaws_status qaws_clip_exact_execute(qaws_clip_result** out_result, qaws_clip_exact_stats* out_stats, qaws_clip_exact_desc const* desc)
 {
 	cx_ctx x;
 	qaws_clip_result* r = NULL;

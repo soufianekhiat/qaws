@@ -193,17 +193,17 @@ static void test_plane(void)
 			xy[2 * k] = (qaws_scalar)(corner[k].x * 2 + corner[k].y * 0.6);
 			xy[2 * k + 1] = (qaws_scalar)(corner[k].y * 3);
 		}
-		qaws_curve_create_polyline_2d(xy, 4, 1, &pq);
+		qaws_curve_create_polyline_2d(&pq, xy, 4, 1);
 		cv1[0] = cc; cv2[0] = pq;
 		p1.curves = cv1; p1.curve_count = 1; p1.closed = 1;
 		p2.curves = cv2; p2.curve_count = 1; p2.closed = 1;
-		qaws_clip_boolean(QAWS_CLIP_UNION, QAWS_FILL_NON_ZERO, &p1, 1, &p2, 1, &res);
+		qaws_clip_boolean(&res, &p1, &p2, 1, 1, QAWS_CLIP_UNION, QAWS_FILL_NON_ZERO);
 		for (k = 0; res && k < qaws_clip_result_get_path_count(res); k++)
 		{
 			qaws_path_2d q;
 			qaws_scalar a;
-			qaws_clip_result_get_path(res, k, &q);
-			qaws_path_compute_area_2d(&q, &a);
+			qaws_clip_result_get_path(&q, res, k);
+			qaws_path_compute_area_2d(&a, &q);
 			a2 += (double)a;
 		}
 		sprintf(msg, "flat sheared patch: a geodesic circle's area against pi r^2 within %.2g; its union with a geodesic square against the 2D engine within %.2g",

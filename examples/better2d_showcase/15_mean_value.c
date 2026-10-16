@@ -208,15 +208,15 @@ static void demo_mean_value(void)
 		{
 			qaws_scalar L[12] = { 0, 0, 2, 0, 2, (qaws_scalar)0.8, (qaws_scalar)0.9, (qaws_scalar)0.8, (qaws_scalar)0.9, (qaws_scalar)1.6, 0, (qaws_scalar)1.6 };
 			qaws_scalar H[8] = { (qaws_scalar)0.25, (qaws_scalar)0.25, (qaws_scalar)0.6, (qaws_scalar)0.25, (qaws_scalar)0.6, (qaws_scalar)0.55, (qaws_scalar)0.25, (qaws_scalar)0.55 };
-			qaws_curve_create_polyline_2d(L, 6, 1, &c0);
-			qaws_curve_create_polyline_2d(H, 4, 1, &c1);
+			qaws_curve_create_polyline_2d(&c0, L, 6, 1);
+			qaws_curve_create_polyline_2d(&c1, H, 4, 1);
 			np = 2;
 			box[0] = -0.05; box[1] = 2.05; box[2] = -0.05; box[3] = 1.65;
 			label = "a concave polygon with a hole: 1 on the hole, a wave on the outside";
 		}
 		else
 		{
-			qaws_curve_create_ellipse_2d((qaws_scalar)0.1, (qaws_scalar)-0.2, (qaws_scalar)1.5, (qaws_scalar)0.8, (qaws_scalar)0.3, &c0);
+			qaws_curve_create_ellipse_2d(&c0, (qaws_scalar)0.1, (qaws_scalar)-0.2, (qaws_scalar)1.5, (qaws_scalar)0.8, (qaws_scalar)0.3);
 			box[0] = -1.5; box[1] = 1.7; box[2] = -1.15; box[3] = 0.75;
 			label = "a NURBS ellipse: five waves round its boundary";
 		}

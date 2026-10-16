@@ -35,21 +35,21 @@ static qaws_status jb_job(void* ctx, unsigned int chunk, unsigned int begin, uns
 			/* the job runs serially: the batch is the parallel part */
 			qaws_clip_desc d = ((qaws_clip_desc const*)j->descs)[i];
 			d.executor = NULL;
-			s = qaws_clip_execute(&d, (qaws_clip_result**)&j->out[i]);
+			s = qaws_clip_execute((qaws_clip_result**)&j->out[i], &d);
 			break;
 		}
 		case JB_CLIP64:
-			s = qaws_clip64_execute(&((qaws_clip64_desc const*)j->descs)[i], (qaws_clip64_result**)&j->out[i]);
+			s = qaws_clip64_execute((qaws_clip64_result**)&j->out[i], &((qaws_clip64_desc const*)j->descs)[i]);
 			break;
 		case JB_OFFSET:
 		{
 			qaws_offset_desc d = ((qaws_offset_desc const*)j->descs)[i];
 			d.executor = NULL;
-			s = qaws_offset_execute(&d, (qaws_clip_result**)&j->out[i]);
+			s = qaws_offset_execute((qaws_clip_result**)&j->out[i], &d);
 			break;
 		}
 		default:
-			s = qaws_offset64_execute(&((qaws_offset64_desc const*)j->descs)[i], (qaws_clip64_result**)&j->out[i]);
+			s = qaws_offset64_execute((qaws_clip64_result**)&j->out[i], &((qaws_offset64_desc const*)j->descs)[i]);
 			break;
 		}
 		if (s != QAWS_STATUS_OK) return s;
@@ -83,26 +83,26 @@ static qaws_status jb_run(jb_kind kind, void const* descs, unsigned int count, q
 	return s;
 }
 
-qaws_status qaws_clip_execute_batch(qaws_clip_desc const* descs, unsigned int count, qaws_batch_executor const* executor,
-	qaws_clip_result** out_results)
+qaws_status qaws_clip_execute_batch(qaws_clip_result** out_results, unsigned int count, qaws_clip_desc const* descs,
+	qaws_batch_executor const* executor)
 {
 	return jb_run(JB_CLIP, descs, count, executor, (void**)out_results);
 }
 
-qaws_status qaws_clip64_execute_batch(qaws_clip64_desc const* descs, unsigned int count, qaws_batch_executor const* executor,
-	qaws_clip64_result** out_results)
+qaws_status qaws_clip64_execute_batch(qaws_clip64_result** out_results, unsigned int count, qaws_clip64_desc const* descs,
+	qaws_batch_executor const* executor)
 {
 	return jb_run(JB_CLIP64, descs, count, executor, (void**)out_results);
 }
 
-qaws_status qaws_offset_execute_batch(qaws_offset_desc const* descs, unsigned int count, qaws_batch_executor const* executor,
-	qaws_clip_result** out_results)
+qaws_status qaws_offset_execute_batch(qaws_clip_result** out_results, unsigned int count, qaws_offset_desc const* descs,
+	qaws_batch_executor const* executor)
 {
 	return jb_run(JB_OFFSET, descs, count, executor, (void**)out_results);
 }
 
-qaws_status qaws_offset64_execute_batch(qaws_offset64_desc const* descs, unsigned int count, qaws_batch_executor const* executor,
-	qaws_clip64_result** out_results)
+qaws_status qaws_offset64_execute_batch(qaws_clip64_result** out_results, unsigned int count, qaws_offset64_desc const* descs,
+	qaws_batch_executor const* executor)
 {
 	return jb_run(JB_OFFSET64, descs, count, executor, (void**)out_results);
 }

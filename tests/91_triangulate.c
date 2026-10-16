@@ -51,7 +51,7 @@ static void trt_measure(qaws_mesh_2d const* m, trt_stats* s)
 	{
 		qaws_vec2 p[3];
 		double a, l[3];
-		qaws_mesh_2d_get_triangle(m, i, &tri[3 * i]);
+		qaws_mesh_2d_get_triangle(&tri[3 * i], m, i);
 		for (k = 0; k < 3; k++) p[k] = qaws_mesh_2d_get_vertex(m, tri[3 * i + k]);
 		a = 0.5 * trt_cross(p[0], p[1], p[2]);
 		if (a <= 0) s->cw++;
@@ -83,7 +83,7 @@ static void trt_measure(qaws_mesh_2d const* m, trt_stats* s)
 				for (j = 0; j < nb && !boundary; j++)
 				{
 					unsigned int e[2];
-					qaws_mesh_2d_get_boundary_edge(m, j, e);
+					qaws_mesh_2d_get_boundary_edge(e, m, j);
 					boundary = (e[0] == a && e[1] == b) || (e[0] == b && e[1] == a);
 				}
 				if (boundary) continue;
@@ -110,7 +110,7 @@ static void trt_measure(qaws_mesh_2d const* m, trt_stats* s)
 	{
 		unsigned int c;
 		qaws_scalar t;
-		if (qaws_mesh_2d_get_vertex_source(m, i, &c, &t))
+		if (qaws_mesh_2d_get_vertex_source(&c, &t, m, i))
 		{
 			qaws_eval_result_2d e;
 			qaws_vec2 p = qaws_mesh_2d_get_vertex(m, i);
@@ -135,7 +135,7 @@ static qaws_mesh_2d* trt_run(qaws_curve const** cs, unsigned int n, qaws_fill_ru
 	d.paths = p; d.path_count = n; d.fill_rule = fr;
 	d.tolerance = (qaws_scalar)tol; d.min_angle = (qaws_scalar)min_angle; d.max_area = (qaws_scalar)max_area;
 	d.size_fn = size_fn;
-	qaws_triangulate_region_2d(&d, &m);
+	qaws_triangulate_region_2d(&m, &d);
 	return m;
 }
 
@@ -145,7 +145,7 @@ static qaws_curve* trt_poly(double const* xy, unsigned int n)
 	qaws_curve* c = NULL;
 	unsigned int i;
 	for (i = 0; i < 2 * n; i++) p[i] = (qaws_scalar)xy[i];
-	qaws_curve_create_polyline_2d(p, n, 1, &c);
+	qaws_curve_create_polyline_2d(&c, p, n, 1);
 	return c;
 }
 
@@ -175,7 +175,7 @@ static void test_disc(void)
 	qaws_mesh_2d* m;
 	trt_stats s;
 	char msg[300];
-	qaws_curve_create_ellipse_2d(0, 0, 1, 1, 0, &c);
+	qaws_curve_create_ellipse_2d(&c, 0, 0, 1, 1, 0);
 	cc = c;
 	m = trt_run(&cc, 1, QAWS_FILL_NON_ZERO, 1e-3, 0, 0, NULL);
 	TEST_ASSERT(m != NULL, "disc: triangulated");
@@ -209,8 +209,8 @@ static void test_annulus(void)
 	qaws_mesh_2d* m;
 	trt_stats s;
 	char msg[300];
-	qaws_curve_create_ellipse_2d(0, 0, 2, 2, 0, &o);
-	qaws_curve_create_ellipse_2d((qaws_scalar)0.3, 0, 1, 1, 0, &h);
+	qaws_curve_create_ellipse_2d(&o, 0, 0, 2, 2, 0);
+	qaws_curve_create_ellipse_2d(&h, (qaws_scalar)0.3, 0, 1, 1, 0);
 	qaws_curve_reverse(&hr, h);
 	cs[0] = o; cs[1] = hr;
 	m = trt_run(cs, 2, QAWS_FILL_NON_ZERO, 2e-3, 0, 0, NULL);
@@ -225,7 +225,7 @@ static void test_annulus(void)
 			unsigned int v[3];
 			qaws_vec2 a, b, c;
 			double cx, cy;
-			qaws_mesh_2d_get_triangle(m, i, v);
+			qaws_mesh_2d_get_triangle(v, m, i);
 			a = qaws_mesh_2d_get_vertex(m, v[0]); b = qaws_mesh_2d_get_vertex(m, v[1]); c = qaws_mesh_2d_get_vertex(m, v[2]);
 			cx = ((double)a.x + b.x + c.x) / 3 - 0.3; cy = ((double)a.y + b.y + c.y) / 3;
 			if (hypot(cx, cy) < 0.99) inside++;
@@ -301,8 +301,8 @@ static void test_refine(void)
 	qaws_curve *o = NULL, *h = NULL, *hr = NULL;
 	qaws_curve const* cs[2];
 	char msg[300];
-	qaws_curve_create_ellipse_2d(0, 0, 1, (qaws_scalar)0.7, 0, &o);
-	qaws_curve_create_ellipse_2d((qaws_scalar)0.2, 0, (qaws_scalar)0.3, (qaws_scalar)0.2, 0, &h);
+	qaws_curve_create_ellipse_2d(&o, 0, 0, 1, (qaws_scalar)0.7, 0);
+	qaws_curve_create_ellipse_2d(&h, (qaws_scalar)0.2, 0, (qaws_scalar)0.3, (qaws_scalar)0.2, 0);
 	qaws_curve_reverse(&hr, h);
 	cs[0] = o; cs[1] = hr;
 	{
@@ -334,7 +334,7 @@ static void test_refine(void)
 				unsigned int v[3], k;
 				qaws_vec2 p[3], c;
 				double lmax = 0;
-				qaws_mesh_2d_get_triangle(m, i, v);
+				qaws_mesh_2d_get_triangle(v, m, i);
 				for (k = 0; k < 3; k++) p[k] = qaws_mesh_2d_get_vertex(m, v[k]);
 				for (k = 0; k < 3; k++)
 				{
@@ -363,7 +363,7 @@ static void trt_edges(qaws_mesh_2d const* m, double* mean, double* lmax)
 	for (i = 0; i < nt; i++)
 	{
 		unsigned int v[3];
-		qaws_mesh_2d_get_triangle(m, i, v);
+		qaws_mesh_2d_get_triangle(v, m, i);
 		for (k = 0; k < 3; k++)
 		{
 			qaws_vec2 a = qaws_mesh_2d_get_vertex(m, v[k]), b = qaws_mesh_2d_get_vertex(m, v[(k + 1) % 3]);
@@ -391,7 +391,7 @@ static void test_remesh(void)
 		qaws_curve* c = NULL;
 		qaws_curve const* cc;
 		qaws_mesh_2d* m;
-		qaws_curve_create_ellipse_2d(0, 0, 1, 1, 0, &c);
+		qaws_curve_create_ellipse_2d(&c, 0, 0, 1, 1, 0);
 		cc = c;
 		m = trt_run(&cc, 1, QAWS_FILL_NON_ZERO, 1e-3, 0, 0, NULL);
 		if (m && qaws_mesh_2d_remesh(m, (qaws_scalar)0.1, NULL, NULL, 6) == QAWS_STATUS_OK)
@@ -415,8 +415,8 @@ static void test_remesh(void)
 		qaws_curve *o = NULL, *h = NULL, *hr = NULL;
 		qaws_curve const* cs[2];
 		qaws_mesh_2d* m;
-		qaws_curve_create_ellipse_2d(0, 0, 2, 2, 0, &o);
-		qaws_curve_create_ellipse_2d((qaws_scalar)0.3, 0, 1, 1, 0, &h);
+		qaws_curve_create_ellipse_2d(&o, 0, 0, 2, 2, 0);
+		qaws_curve_create_ellipse_2d(&h, (qaws_scalar)0.3, 0, 1, 1, 0);
 		qaws_curve_reverse(&hr, h);
 		cs[0] = o; cs[1] = hr;
 		m = trt_run(cs, 2, QAWS_FILL_NON_ZERO, 2e-3, 0, 0, NULL);
@@ -445,7 +445,7 @@ static unsigned int trt_straddle(qaws_mesh_2d const* m)
 	for (i = 0; i < qaws_mesh_2d_get_triangle_count(m); i++)
 	{
 		unsigned int v[3], up = 0, dn = 0;
-		qaws_mesh_2d_get_triangle(m, i, v);
+		qaws_mesh_2d_get_triangle(v, m, i);
 		for (k = 0; k < 3; k++)
 		{
 			double y = (double)qaws_mesh_2d_get_vertex(m, v[k]).y;
@@ -456,7 +456,7 @@ static unsigned int trt_straddle(qaws_mesh_2d const* m)
 	for (i = 0; i < qaws_mesh_2d_get_quad_count(m); i++)
 	{
 		unsigned int v[4], up = 0, dn = 0;
-		qaws_mesh_2d_get_quad(m, i, v);
+		qaws_mesh_2d_get_quad(v, m, i);
 		for (k = 0; k < 4; k++)
 		{
 			double y = (double)qaws_mesh_2d_get_vertex(m, v[k]).y;
@@ -477,7 +477,7 @@ static void trt_line(qaws_mesh_2d const* m, double* len, double* off)
 	{
 		unsigned int e[2];
 		qaws_vec2 a, b;
-		qaws_mesh_2d_get_constraint_edge(m, i, e);
+		qaws_mesh_2d_get_constraint_edge(e, m, i);
 		a = qaws_mesh_2d_get_vertex(m, e[0]);
 		b = qaws_mesh_2d_get_vertex(m, e[1]);
 		if (fabs((double)a.y - 1) < 0.25 && fabs((double)b.y - 1) < 0.25)
@@ -498,7 +498,7 @@ static unsigned int trt_quads(qaws_mesh_2d const* m, double* area)
 	{
 		unsigned int v[4];
 		qaws_vec2 p[4];
-		qaws_mesh_2d_get_quad(m, i, v);
+		qaws_mesh_2d_get_quad(v, m, i);
 		for (k = 0; k < 4; k++) p[k] = qaws_mesh_2d_get_vertex(m, v[k]);
 		for (k = 0; k < 4; k++)
 			if (!(trt_cross(p[k], p[(k + 1) % 4], p[(k + 2) % 4]) > 0)) { bad++; break; }
@@ -518,9 +518,9 @@ static void test_constraints_and_quads(void)
 	unsigned int pass;
 	{
 		qaws_scalar l[4] = { 0, 1, 4, 1 };
-		qaws_curve_create_polyline_2d(l, 2, 0, &line);
+		qaws_curve_create_polyline_2d(&line, l, 2, 0);
 	}
-	qaws_curve_create_ellipse_2d(2, (qaws_scalar)2.6, (qaws_scalar)0.8, (qaws_scalar)0.8, 0, &circ);
+	qaws_curve_create_ellipse_2d(&circ, 2, (qaws_scalar)2.6, (qaws_scalar)0.8, (qaws_scalar)0.8, 0);
 	cl[0] = line; cl[1] = circ;
 	p.curves = &cb; p.curve_count = 1; p.closed = 1;
 	cp[0].curves = &cl[0]; cp[0].curve_count = 1; cp[0].closed = 0;
@@ -536,7 +536,7 @@ static void test_constraints_and_quads(void)
 		d.constraints = cp; d.constraint_count = 2;
 		d.tolerance = (qaws_scalar)2e-3;
 		if (pass >= 1) d.min_angle = 28;
-		if (qaws_triangulate_region_2d(&d, &m) != QAWS_STATUS_OK || !m) { TEST_ASSERT(0, "constrained square triangulated"); continue; }
+		if (qaws_triangulate_region_2d(&m, &d) != QAWS_STATUS_OK || !m) { TEST_ASSERT(0, "constrained square triangulated"); continue; }
 		if (pass == 2 && qaws_mesh_2d_remesh(m, (qaws_scalar)0.2, NULL, NULL, 5) != QAWS_STATUS_OK) { TEST_ASSERT(0, "constrained square remeshed"); qaws_mesh_2d_destroy(m); continue; }
 		trt_measure(m, &s);
 		trt_line(m, &len, &off);
@@ -567,15 +567,15 @@ static void test_constraints_and_quads(void)
 		qaws_curve const* cx[2];
 		qaws_path_2d xp[2];
 		qaws_mesh_2d* m = NULL;
-		qaws_curve_create_polyline_2d(d1, 2, 0, &a);
-		qaws_curve_create_polyline_2d(d2, 2, 0, &b);
+		qaws_curve_create_polyline_2d(&a, d1, 2, 0);
+		qaws_curve_create_polyline_2d(&b, d2, 2, 0);
 		cx[0] = a; cx[1] = b;
 		xp[0].curves = &cx[0]; xp[0].curve_count = 1; xp[0].closed = 0;
 		xp[1].curves = &cx[1]; xp[1].curve_count = 1; xp[1].closed = 0;
 		memset(&d, 0, sizeof(d));
 		d.paths = &p; d.path_count = 1; d.fill_rule = QAWS_FILL_NON_ZERO;
 		d.constraints = xp; d.constraint_count = 2; d.min_angle = 25;
-		if (qaws_triangulate_region_2d(&d, &m) == QAWS_STATUS_OK && m)
+		if (qaws_triangulate_region_2d(&m, &d) == QAWS_STATUS_OK && m)
 		{
 			unsigned int i, k, across = 0;
 			double len = 0;
@@ -584,7 +584,7 @@ static void test_constraints_and_quads(void)
 			for (i = 0; i < qaws_mesh_2d_get_triangle_count(m); i++)
 			{
 				unsigned int v[3], l1 = 0, r1 = 0, l2 = 0, r2 = 0;
-				qaws_mesh_2d_get_triangle(m, i, v);
+				qaws_mesh_2d_get_triangle(v, m, i);
 				for (k = 0; k < 3; k++)
 				{
 					qaws_vec2 q = qaws_mesh_2d_get_vertex(m, v[k]);
@@ -597,7 +597,7 @@ static void test_constraints_and_quads(void)
 			{
 				unsigned int e[2];
 				qaws_vec2 u, w;
-				qaws_mesh_2d_get_constraint_edge(m, i, e);
+				qaws_mesh_2d_get_constraint_edge(e, m, i);
 				u = qaws_mesh_2d_get_vertex(m, e[0]); w = qaws_mesh_2d_get_vertex(m, e[1]);
 				len += hypot((double)w.x - u.x, (double)w.y - u.y);
 			}
@@ -615,7 +615,7 @@ static void test_constraints_and_quads(void)
 		qaws_curve* c = NULL;
 		qaws_curve const* cc;
 		unsigned int all;
-		qaws_curve_create_ellipse_2d(0, 0, 1, 1, 0, &c);
+		qaws_curve_create_ellipse_2d(&c, 0, 0, 1, 1, 0);
 		cc = c;
 		for (all = 0; all < 2; all++)
 		{

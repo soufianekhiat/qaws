@@ -23,8 +23,8 @@ typedef struct qaws_offset_desc {
 	qaws_batch_executor const* executor;
 } qaws_offset_desc;
 
-qaws_status qaws_offset_execute(qaws_offset_desc const* desc, qaws_clip_result** out_result);
-qaws_status qaws_offset_paths(paths, path_count, delta, join_type, end_type, out_result);   /* InflatePaths */
+qaws_status qaws_offset_execute(qaws_clip_result** out_result, qaws_offset_desc const* desc);
+qaws_status qaws_offset_paths(out_result, paths, path_count, delta, join_type, end_type);   /* InflatePaths */
 ```
 
 The result is a `qaws_clip_result`, with the same paths, nesting and
@@ -209,8 +209,8 @@ typedef struct qaws_offset64_desc {
 	double arc_tolerance;     /* 0 = |delta| / 500 */
 	unsigned int flags;       /* QAWS_CLIP_PRESERVE_COLLINEAR, QAWS_CLIP_REVERSE_SOLUTION */
 } qaws_offset64_desc;
-qaws_status qaws_offset64_execute(desc, qaws_clip64_result** out_result);
-qaws_status qaws_offset64_paths(paths, path_count, delta, join_type, end_type, out_result);   /* InflatePaths */
+qaws_status qaws_offset64_execute(qaws_clip64_result** out_result, desc);
+qaws_status qaws_offset64_paths(out_result, paths, path_count, delta, join_type, end_type);   /* InflatePaths */
 ```
 
 This is Clipper2's `ClipperOffset` algorithm, ported to C (Angus Johnson,

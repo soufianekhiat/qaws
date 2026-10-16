@@ -73,7 +73,7 @@ static void ffs_draw(svg* s, viewport const* v, ffs_shape const* sh, double sigm
 		{
 			unsigned int n = qaws_clip_result_get_path_count(r), pi;
 			qaws_path_2d* q = (qaws_path_2d*)malloc(sizeof(qaws_path_2d) * (n + 1));
-			for (pi = 0; pi < n; pi++) qaws_clip_result_get_path(r, pi, &q[pi]);
+			for (pi = 0; pi < n; pi++) qaws_clip_result_get_path(&q[pi], r, pi);
 			csk_path_curves(s, v, q, n, col, 1.0, "none");
 			free(q);
 		}
@@ -111,7 +111,7 @@ static void demo_freeform_skeleton(void)
 	clock_t t0 = clock();
 	memset(sh, 0, sizeof(sh));
 	sh[0].name = "ellipse (rational NURBS)";
-	qaws_curve_create_ellipse_2d(0, 0, 1.5, 0.8, 0.35, &sh[0].cs[0]);
+	qaws_curve_create_ellipse_2d(&sh[0].cs[0], 0, 0, 1.5, 0.8, 0.35);
 	sh[0].count[0] = 1; sh[0].nloops = 1;
 	sh[0].box[0] = -1.55; sh[0].box[1] = 1.55; sh[0].box[2] = -1.1; sh[0].box[3] = 1.1;
 	sh[1].name = "blob of four cubics";
@@ -137,7 +137,7 @@ static void demo_freeform_skeleton(void)
 		qaws_arc_segment g;
 		qaws_arc_desc d;
 		sh[3].name = "ellipse with two round holes";
-		qaws_curve_create_ellipse_2d(0, 0, 1.6, 1.0, 0, &sh[3].cs[0]);
+		qaws_curve_create_ellipse_2d(&sh[3].cs[0], 0, 0, 1.6, 1.0, 0);
 		sh[3].count[0] = 1;
 		memset(&d, 0, sizeof(d));
 		d.dimension = QAWS_DIMENSION_2D; d.segments = &g; d.segment_count = 1;

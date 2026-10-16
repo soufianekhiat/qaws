@@ -74,7 +74,7 @@ static qaws_status pt_eval(qaws_curve const* c, double t, unsigned int flags, do
 /*  Construction                                                            */
 /* ======================================================================== */
 
-qaws_status qaws_curve_create_polyline_2d(qaws_scalar const* points, unsigned int count, int closed, qaws_curve** out_curve)
+qaws_status qaws_curve_create_polyline_2d(qaws_curve** out_curve, qaws_scalar const* points, unsigned int count, int closed)
 {
 	unsigned int n, i;
 	qaws_scalar *cp, *kn;
@@ -110,8 +110,8 @@ qaws_status qaws_curve_create_polyline_2d(qaws_scalar const* points, unsigned in
 	return s;
 }
 
-qaws_status qaws_curve_create_ellipse_2d(qaws_scalar cx, qaws_scalar cy, qaws_scalar rx, qaws_scalar ry,
-	qaws_scalar rotation, qaws_curve** out_curve)
+qaws_status qaws_curve_create_ellipse_2d(qaws_curve** out_curve, qaws_scalar cx, qaws_scalar cy, qaws_scalar rx,
+	qaws_scalar ry, qaws_scalar rotation)
 {
 	static double const ux[9] = { 1, 1, 0, -1, -1, -1, 0, 1, 1 }, uy[9] = { 0, 1, 1, 1, 0, -1, -1, -1, 0 };
 	qaws_scalar cp[18], w[9], kn[12] = { 0, 0, 0, (qaws_scalar)0.25, (qaws_scalar)0.25, (qaws_scalar)0.5,
@@ -262,7 +262,7 @@ static qaws_status pt_arc_to_nurbs(qaws_curve const* curve, qaws_curve** out)
 	return s;
 }
 
-qaws_status qaws_curve_transform_2d(qaws_curve const* curve, qaws_scalar const m[6], qaws_curve** out_curve)
+qaws_status qaws_curve_transform_2d(qaws_curve** out_curve, qaws_curve const* curve, qaws_scalar const m[6])
 {
 	qaws_status s;
 	double scale, angle;
@@ -368,7 +368,7 @@ qaws_status qaws_curve_transform_2d(qaws_curve const* curve, qaws_scalar const m
 			qaws_curve* nurbs = NULL;
 			s = pt_arc_to_nurbs(curve, &nurbs);
 			if (s == QAWS_STATUS_OK)
-				s = qaws_curve_transform_2d(nurbs, m, out_curve);
+				s = qaws_curve_transform_2d(out_curve, nurbs, m);
 			qaws_curve_destroy(nurbs);
 			return s;
 		}
@@ -410,7 +410,7 @@ qaws_status qaws_curve_transform_2d(qaws_curve const* curve, qaws_scalar const m
 			qaws_curve* fit = NULL;
 			s = qaws_internal_curve_fit_cubic(curve, curve->parameter_range.min_value, curve->parameter_range.max_value, &fit);
 			if (s == QAWS_STATUS_OK)
-				s = qaws_curve_transform_2d(fit, m, out_curve);
+				s = qaws_curve_transform_2d(out_curve, fit, m);
 			qaws_curve_destroy(fit);
 			return s;
 		}
@@ -433,7 +433,7 @@ qaws_status qaws_curve_transform_2d(qaws_curve const* curve, qaws_scalar const m
 		if (!seg) return QAWS_STATUS_ALLOCATION_FAILURE;
 		s = QAWS_STATUS_OK;
 		for (i = 0; i < impl->segment_count && s == QAWS_STATUS_OK; i++)
-			if ((s = qaws_curve_transform_2d(impl->segments[i], m, &seg[i])) == QAWS_STATUS_OK)
+			if ((s = qaws_curve_transform_2d(&seg[i], impl->segments[i], m)) == QAWS_STATUS_OK)
 				made++;
 		if (s == QAWS_STATUS_OK)
 		{
@@ -453,7 +453,7 @@ qaws_status qaws_curve_transform_2d(qaws_curve const* curve, qaws_scalar const m
 		qaws_curve* e = NULL;
 		s = qaws_curve_extract(&e, curve, curve->parameter_range.min_value, curve->parameter_range.max_value);
 		if (s == QAWS_STATUS_OK)
-			s = qaws_curve_transform_2d(e, m, out_curve);
+			s = qaws_curve_transform_2d(out_curve, e, m);
 		qaws_curve_destroy(e);
 		return s;
 	}
@@ -538,12 +538,12 @@ static qaws_status pt_line_area(qaws_curve const* c, double a, double b, double*
 static double pt_extent(qaws_path_2d const* path)
 {
 	qaws_vec2 lo, hi;
-	if (qaws_path_compute_bounds_2d(path, &lo, &hi) != QAWS_STATUS_OK)
+	if (qaws_path_compute_bounds_2d(&lo, &hi, path) != QAWS_STATUS_OK)
 		return 1.0;
 	return sqrt((double)((hi.x - lo.x) * (hi.x - lo.x) + (hi.y - lo.y) * (hi.y - lo.y)));
 }
 
-qaws_status qaws_path_compute_area_2d(qaws_path_2d const* path, qaws_scalar* out_area)
+qaws_status qaws_path_compute_area_2d(qaws_scalar* out_area, qaws_path_2d const* path)
 {
 	double area = 0.0, ext, tol = -1.0;
 	unsigned int i, s;
@@ -587,7 +587,7 @@ qaws_status qaws_path_compute_area_2d(qaws_path_2d const* path, qaws_scalar* out
 	return QAWS_STATUS_OK;
 }
 
-qaws_status qaws_region_compute_area_2d(qaws_path_2d const* paths, unsigned int path_count, qaws_scalar* out_area)
+qaws_status qaws_region_compute_area_2d(qaws_scalar* out_area, qaws_path_2d const* paths, unsigned int path_count)
 {
 	double sum = 0.0;
 	unsigned int i;
@@ -596,7 +596,7 @@ qaws_status qaws_region_compute_area_2d(qaws_path_2d const* paths, unsigned int 
 	for (i = 0; i < path_count; i++)
 	{
 		qaws_scalar a;
-		qaws_status s = qaws_path_compute_area_2d(&paths[i], &a);
+		qaws_status s = qaws_path_compute_area_2d(&a, &paths[i]);
 		if (s != QAWS_STATUS_OK) return s;
 		sum += a;
 	}
@@ -607,7 +607,7 @@ qaws_status qaws_region_compute_area_2d(qaws_path_2d const* paths, unsigned int 
 int qaws_path_is_positive_2d(qaws_path_2d const* path)
 {
 	qaws_scalar a = 0;
-	return qaws_path_compute_area_2d(path, &a) == QAWS_STATUS_OK && a >= 0;
+	return qaws_path_compute_area_2d(&a, path) == QAWS_STATUS_OK && a >= 0;
 }
 
 /* |C'| over [a, b] with n-point Gauss-Legendre (n = 8 or 16) */
@@ -648,7 +648,7 @@ static qaws_status pt_len_piece(qaws_curve const* c, double a, double b, double 
 	return s;
 }
 
-qaws_status qaws_path_compute_length_2d(qaws_path_2d const* path, qaws_scalar* out_length)
+qaws_status qaws_path_compute_length_2d(qaws_scalar* out_length, qaws_path_2d const* path)
 {
 	double sum = 0.0, tol;
 	unsigned int i, k;
@@ -715,7 +715,7 @@ static qaws_status pt_extrema(qaws_curve const* c, double a, double b, double* l
 	return QAWS_STATUS_OK;
 }
 
-qaws_status qaws_path_compute_bounds_2d(qaws_path_2d const* path, qaws_vec2* out_min, qaws_vec2* out_max)
+qaws_status qaws_path_compute_bounds_2d(qaws_vec2* out_min, qaws_vec2* out_max, qaws_path_2d const* path)
 {
 	double lo[2] = { 1e300, 1e300 }, hi[2] = { -1e300, -1e300 };
 	unsigned int i, s, k;
@@ -896,8 +896,8 @@ static int pt_wind(pt_segs* q, unsigned int from, unsigned int to, double const*
 	return 1;
 }
 
-qaws_status qaws_region_locate_point_2d(qaws_path_2d const* paths, unsigned int path_count, qaws_fill_rule fill_rule,
-	qaws_vec2 point, qaws_scalar tolerance, qaws_point_location* out_location)
+qaws_status qaws_region_locate_point_2d(qaws_point_location* out_location, qaws_path_2d const* paths, unsigned int path_count,
+	qaws_fill_rule fill_rule, qaws_vec2 point, qaws_scalar tolerance)
 {
 	pt_segs q;
 	double ext = 0.0, tol, pt[2], lo[2] = { 1e300, 1e300 }, hi[2] = { -1e300, -1e300 };
@@ -915,7 +915,7 @@ qaws_status qaws_region_locate_point_2d(qaws_path_2d const* paths, unsigned int 
 	for (i = 0; i < path_count; i++)
 	{
 		qaws_vec2 a, b;
-		if (paths[i].curve_count && qaws_path_compute_bounds_2d(&paths[i], &a, &b) == QAWS_STATUS_OK)
+		if (paths[i].curve_count && qaws_path_compute_bounds_2d(&a, &b, &paths[i]) == QAWS_STATUS_OK)
 		{
 			if (a.x < lo[0]) lo[0] = a.x;
 			if (a.y < lo[1]) lo[1] = a.y;
@@ -961,7 +961,7 @@ qaws_status qaws_region_locate_point_2d(qaws_path_2d const* paths, unsigned int 
 	return QAWS_STATUS_OK;
 }
 
-qaws_status qaws_path_compute_winding_2d(qaws_path_2d const* path, qaws_vec2 point, int* out_winding)
+qaws_status qaws_path_compute_winding_2d(int* out_winding, qaws_path_2d const* path, qaws_vec2 point)
 {
 	qaws_point_location loc;
 	qaws_status s;
@@ -971,7 +971,7 @@ qaws_status qaws_path_compute_winding_2d(qaws_path_2d const* path, qaws_vec2 poi
 	/* the non-zero rule tells inside from outside; the sign and size come
 	   from the even-odd and positive rules only up to |w| <= 1, so compute
 	   the angle sum directly */
-	s = qaws_region_locate_point_2d(path, 1, QAWS_FILL_NON_ZERO, point, 0, &loc);
+	s = qaws_region_locate_point_2d(&loc, path, 1, QAWS_FILL_NON_ZERO, point, 0);
 	if (s != QAWS_STATUS_OK)
 		return s;
 	if (loc == QAWS_POINT_ON)
@@ -1023,8 +1023,8 @@ static int pt_same(qaws_scalar const* a, qaws_scalar const* b)
 	return a[0] == b[0] && a[1] == b[1];
 }
 
-qaws_status qaws_polyline_strip_duplicates_2d(qaws_scalar const* points, unsigned int count, int closed,
-	qaws_scalar* out, unsigned int* out_count)
+qaws_status qaws_polyline_strip_duplicates_2d(qaws_scalar* out, unsigned int* out_count, qaws_scalar const* points,
+	unsigned int count, int closed)
 {
 	unsigned int i, n = 0;
 	if ((!points && count) || !out || !out_count)
@@ -1045,8 +1045,8 @@ qaws_status qaws_polyline_strip_duplicates_2d(qaws_scalar const* points, unsigne
 	return QAWS_STATUS_OK;
 }
 
-qaws_status qaws_polyline_trim_collinear_2d(qaws_scalar const* points, unsigned int count, int closed,
-	qaws_scalar* out, unsigned int* out_count)
+qaws_status qaws_polyline_trim_collinear_2d(qaws_scalar* out, unsigned int* out_count, qaws_scalar const* points,
+	unsigned int count, int closed)
 {
 	qaws_scalar* w;
 	unsigned int n, i, changed = 1;
@@ -1056,7 +1056,7 @@ qaws_status qaws_polyline_trim_collinear_2d(qaws_scalar const* points, unsigned 
 	w = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 2 * (count ? count : 1));
 	if (!w)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
-	s = qaws_polyline_strip_duplicates_2d(points, count, closed, w, &n);
+	s = qaws_polyline_strip_duplicates_2d(w, &n, points, count, closed);
 	/* drop a point collinear with its neighbours (a spike too: collinear,
 	   with the path turning back) until none is left */
 	while (changed && n >= 3)
@@ -1094,7 +1094,7 @@ qaws_status qaws_polyline_trim_collinear_2d(qaws_scalar const* points, unsigned 
 		if (closed && changed)
 		{
 			/* strip again: removing a spike can leave two equal neighbours */
-			qaws_polyline_strip_duplicates_2d(w, n, 1, w, &n);
+			qaws_polyline_strip_duplicates_2d(w, &n, w, n, 1);
 		}
 	}
 	if (n < (closed ? 3u : 2u))
@@ -1115,8 +1115,8 @@ static double pt_perp2(qaws_scalar const* p, qaws_scalar const* a, qaws_scalar c
 	return cr * cr / l2;
 }
 
-qaws_status qaws_polyline_simplify_2d(qaws_scalar const* points, unsigned int count, int closed, qaws_scalar epsilon,
-	qaws_scalar* out, unsigned int* out_count)
+qaws_status qaws_polyline_simplify_2d(qaws_scalar* out, unsigned int* out_count, qaws_scalar const* points, unsigned int count,
+	int closed, qaws_scalar epsilon)
 {
 	unsigned int *prev, *next, i, alive, n = count;
 	unsigned char* gone;
@@ -1211,8 +1211,8 @@ static void pt_rdp(qaws_scalar const* p, unsigned int a, unsigned int b, double 
 	}
 }
 
-qaws_status qaws_polyline_rdp_2d(qaws_scalar const* points, unsigned int count, qaws_scalar epsilon,
-	qaws_scalar* out, unsigned int* out_count)
+qaws_status qaws_polyline_rdp_2d(qaws_scalar* out, unsigned int* out_count, qaws_scalar const* points,
+	unsigned int count, qaws_scalar epsilon)
 {
 	unsigned char* keep;
 	unsigned int i, m = 0;

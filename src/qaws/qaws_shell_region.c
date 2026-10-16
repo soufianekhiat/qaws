@@ -2192,7 +2192,7 @@ static qaws_status sh_bag_moved(sh_bag* b, qaws_surface const* s, qaws_surface_c
 		return QAWS_STATUS_OK;
 	}
 	t[0] = 1; t[1] = 0; t[2] = (qaws_scalar)du; t[3] = 0; t[4] = 1; t[5] = (qaws_scalar)dv;
-	if ((st = qaws_curve_transform_2d(qaws_surface_curve_get_uv(run), t, &mv)) != QAWS_STATUS_OK)
+	if ((st = qaws_curve_transform_2d(&mv, qaws_surface_curve_get_uv(run), t)) != QAWS_STATUS_OK)
 		return st;
 	st = qaws_surface_curve_create_uv(s, mv, &sc);
 	qaws_curve_destroy(mv);
@@ -2228,7 +2228,7 @@ static qaws_status sh_bag_trim(sh_bag* b, qaws_shell_atlas const* a, unsigned in
 		qaws_scalar m[6];
 		qaws_curve* mv = NULL;
 		m[0] = 1; m[1] = 0; m[2] = (qaws_scalar)off[0]; m[3] = 0; m[4] = 1; m[5] = (qaws_scalar)off[1];
-		st = qaws_curve_transform_2d(k, m, &mv);
+		st = qaws_curve_transform_2d(&mv, k, m);
 		qaws_curve_destroy(k);
 		if (st != QAWS_STATUS_OK)
 			return st;
@@ -2626,7 +2626,7 @@ qaws_status qaws_shell_region_create(qaws_shell_atlas const* a, qaws_shell_curve
 						sh_run_ends(L->c[(first + q) % L->n], p0, p1);
 						t[0] = 1; t[1] = 0; t[2] = (qaws_scalar)(q ? endp[0] - p0[0] : 0);
 						t[3] = 0; t[4] = 1; t[5] = (qaws_scalar)(q ? endp[1] - p0[1] : 0);
-						st = qaws_curve_transform_2d(uv, t, &seg[q]);
+						st = qaws_curve_transform_2d(&seg[q], uv, t);
 						endp[0] = p1[0] + (q ? endp[0] - p0[0] : 0);
 						endp[1] = p1[1] + (q ? endp[1] - p0[1] : 0);
 					}
@@ -4695,14 +4695,14 @@ qaws_status qaws_shell_region_triangulate(qaws_shell_region const* region, qaws_
 		for (i = 0; i < qaws_mesh_2d_get_triangle_count(mm) && st == QAWS_STATUS_OK; i++)
 		{
 			unsigned int t[3];
-			qaws_mesh_2d_get_triangle(mm, i, t);
+			qaws_mesh_2d_get_triangle(t, mm, i);
 			if (!sm_add_tri(m, map[t[0]], map[t[1]], map[t[2]]))
 				st = QAWS_STATUS_ALLOCATION_FAILURE;
 		}
 		for (i = 0; i < qaws_mesh_2d_get_boundary_edge_count(mm) && st == QAWS_STATUS_OK; i++)
 		{
 			unsigned int e[2];
-			qaws_mesh_2d_get_boundary_edge(mm, i, e);
+			qaws_mesh_2d_get_boundary_edge(e, mm, i);
 			if (!sm_grow((void**)&bnd, &capb, 3 * (nb + 1), sizeof(unsigned int)))
 			{
 				st = QAWS_STATUS_ALLOCATION_FAILURE;

@@ -43,7 +43,7 @@ static void skf_draw(svg* s, viewport const* v, sk_fig* f)
 	{
 		qaws_scalar buf[2 * 400];
 		for (i = 0; i < 2 * f->count[l]; i++) buf[i] = (qaws_scalar)f->pts[2 * off + i];
-		qaws_curve_create_polyline_2d(buf, f->count[l], 1, &cs[l]);
+		qaws_curve_create_polyline_2d(&cs[l], buf, f->count[l], 1);
 		cv[l] = cs[l];
 		p[l].curves = &cv[l]; p[l].curve_count = 1; p[l].closed = 1;
 		off += f->count[l];
@@ -103,7 +103,7 @@ static void skf_draw(svg* s, viewport const* v, sk_fig* f)
 			{
 				qaws_path_2d q;
 				unsigned int ci;
-				qaws_clip_result_get_path(r, pi, &q);
+				qaws_clip_result_get_path(&q, r, pi);
 				for (ci = 0; ci < q.curve_count; ci++)
 				{
 					qaws_scalar buf[2 * 512];

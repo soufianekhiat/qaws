@@ -67,7 +67,7 @@ static qaws_curve* mvt_polyline(double const* xy, unsigned int n)
 	qaws_curve* c = NULL;
 	unsigned int i;
 	for (i = 0; i < 2 * n; i++) p[i] = (qaws_scalar)xy[i];
-	qaws_curve_create_polyline_2d(p, n, 1, &c);
+	qaws_curve_create_polyline_2d(&c, p, n, 1);
 	return c;
 }
 
@@ -163,7 +163,7 @@ static void test_reference(void)
 		qaws_mean_value* m = NULL;
 		unsigned int k;
 		double worst = 0;
-		qaws_curve_create_ellipse_2d((qaws_scalar)0.1, (qaws_scalar)-0.2, (qaws_scalar)1.5, (qaws_scalar)0.8, (qaws_scalar)0.3, &c);
+		qaws_curve_create_ellipse_2d(&c, (qaws_scalar)0.1, (qaws_scalar)-0.2, (qaws_scalar)1.5, (qaws_scalar)0.8, (qaws_scalar)0.3);
 		cv = c;
 		p.curves = &cv; p.curve_count = 1; p.closed = 1;
 		mvt_make(&p, 1, &m);
@@ -359,7 +359,7 @@ static unsigned int mvt_shape(unsigned int which, qaws_curve** cs, qaws_curve co
 		return 1;
 	case 1:
 		*name = "NURBS ellipse with a round hole";
-		qaws_curve_create_ellipse_2d((qaws_scalar)0.1, (qaws_scalar)-0.2, (qaws_scalar)1.5, (qaws_scalar)0.8, (qaws_scalar)0.3, &cs[(*nc)++]);
+		qaws_curve_create_ellipse_2d(&cs[(*nc)++], (qaws_scalar)0.1, (qaws_scalar)-0.2, (qaws_scalar)1.5, (qaws_scalar)0.8, (qaws_scalar)0.3);
 		cs[(*nc)++] = mvt_circle(0.5, -0.1, 0.3, 0);
 		cv[0] = cs[0]; cv[1] = cs[1];
 		p[0].curves = cv; p[0].curve_count = 1; p[0].closed = 1;

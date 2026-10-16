@@ -1498,7 +1498,7 @@ static void c64_free(c64_ctx* x)
 	free(x->h); free(x->vfirst); free(x->vcount); free(x->vout); free(x->vround);
 }
 
-qaws_status qaws_clip64_execute(qaws_clip64_desc const* desc, qaws_clip64_result** out_result)
+qaws_status qaws_clip64_execute(qaws_clip64_result** out_result, qaws_clip64_desc const* desc)
 {
 	c64_ctx x;
 	qaws_status s;
@@ -1574,7 +1574,7 @@ void qaws_clip64_result_destroy(qaws_clip64_result* r)
 
 unsigned int qaws_clip64_result_get_path_count(qaws_clip64_result const* r) { return r ? r->path_count : 0; }
 
-qaws_status qaws_clip64_result_get_path(qaws_clip64_result const* r, unsigned int i, int64_t const** out, unsigned int* n)
+qaws_status qaws_clip64_result_get_path(int64_t const** out, unsigned int* n, qaws_clip64_result const* r, unsigned int i)
 {
 	if (!r || !out || !n || i >= r->path_count) return QAWS_STATUS_INVALID_ARGUMENT;
 	*out = r->pts + 2 * r->paths[i].first;
@@ -1582,7 +1582,7 @@ qaws_status qaws_clip64_result_get_path(qaws_clip64_result const* r, unsigned in
 	return QAWS_STATUS_OK;
 }
 
-qaws_status qaws_clip64_result_get_path_exact(qaws_clip64_result const* r, unsigned int i, double const** out, unsigned int* n)
+qaws_status qaws_clip64_result_get_path_exact(double const** out, unsigned int* n, qaws_clip64_result const* r, unsigned int i)
 {
 	if (!r || !out || !n || i >= r->path_count) return QAWS_STATUS_INVALID_ARGUMENT;
 	*out = r->ex + 2 * r->paths[i].efirst;
@@ -1607,7 +1607,7 @@ unsigned int qaws_clip64_result_get_depth(qaws_clip64_result const* r, unsigned 
 
 unsigned int qaws_clip64_result_get_open_path_count(qaws_clip64_result const* r) { return r ? r->open_count : 0; }
 
-qaws_status qaws_clip64_result_get_open_path(qaws_clip64_result const* r, unsigned int i, int64_t const** out, unsigned int* n)
+qaws_status qaws_clip64_result_get_open_path(int64_t const** out, unsigned int* n, qaws_clip64_result const* r, unsigned int i)
 {
 	if (!r || !out || !n || i >= r->open_count) return QAWS_STATUS_INVALID_ARGUMENT;
 	*out = r->pts + 2 * r->open_paths[i].first;

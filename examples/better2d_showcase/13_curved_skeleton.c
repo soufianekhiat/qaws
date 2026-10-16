@@ -125,7 +125,7 @@ static void csk_draw(svg* s, viewport const* v, csk_shape const* sh, double sigm
 		{
 			unsigned int n = qaws_clip_result_get_path_count(r), pi;
 			qaws_path_2d* q = (qaws_path_2d*)malloc(sizeof(qaws_path_2d) * (n + 1));
-			for (pi = 0; pi < n; pi++) qaws_clip_result_get_path(r, pi, &q[pi]);
+			for (pi = 0; pi < n; pi++) qaws_clip_result_get_path(&q[pi], r, pi);
 			csk_path_curves(s, v, q, n, col, 1.0, "none");
 			free(q);
 		}

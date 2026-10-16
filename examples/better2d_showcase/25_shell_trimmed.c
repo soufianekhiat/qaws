@@ -459,7 +459,7 @@ static void demo_shell_trimmed(void)
 			qaws_path_2d ps[3];
 			qaws_scalar m[6];
 			for (i = 0; i < 6; i++) m[i] = (qaws_scalar)mv[i];
-			qaws_curve_transform_2d(hole, m, &hole2);
+			qaws_curve_transform_2d(&hole2, hole, m);
 			sq[0] = s25_line(0, 0, 1, 0); sq[1] = s25_line(1, 0, 1, 1); sq[2] = s25_line(1, 1, 0, 1); sq[3] = s25_line(0, 1, 0, 0);
 			for (i = 0; i < 4; i++) sql[i] = sq[i];
 			hl[0] = hole; hl[1] = hole2;
@@ -544,7 +544,7 @@ static void demo_shell_trimmed(void)
 			{
 				qaws_scalar m[6];
 				m[0] = 1; m[1] = 0; m[2] = (qaws_scalar)(i & 1); m[3] = 0; m[4] = 1; m[5] = (qaws_scalar)(i >> 1);
-				qaws_curve_transform_2d(disk, m, &hc[i]);
+				qaws_curve_transform_2d(&hc[i], disk, m);
 				hl[i] = hc[i];
 				ps[1 + i].curves = &hl[i]; ps[1 + i].curve_count = 1; ps[1 + i].closed = 1;
 			}

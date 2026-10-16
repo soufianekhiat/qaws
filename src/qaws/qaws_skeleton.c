@@ -3215,7 +3215,7 @@ qaws_status qaws_skeleton_create(qaws_skeleton_desc const* desc, qaws_skeleton**
 	if (desc->splice_angle != 0 && !((double)desc->splice_angle >= SK_PI - 1e-12 && (double)desc->splice_angle <= 2 * SK_PI + 1e-12))
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	*out = NULL;
-	st = qaws_clip_boolean(QAWS_CLIP_UNION, desc->fill_rule, desc->paths, desc->path_count, NULL, 0, &region);
+	st = qaws_clip_boolean(&region, desc->paths, NULL, desc->path_count, 0, QAWS_CLIP_UNION, desc->fill_rule);
 	if (st != QAWS_STATUS_OK)
 		return st;
 	s = (qaws_skeleton*)calloc(1, sizeof(qaws_skeleton));
@@ -3233,8 +3233,8 @@ qaws_status qaws_skeleton_create(qaws_skeleton_desc const* desc, qaws_skeleton**
 		{
 			qaws_path_2d path;
 			qaws_vec2 a, b;
-			qaws_clip_result_get_path(region, pi, &path);
-			if (qaws_path_compute_bounds_2d(&path, &a, &b) == QAWS_STATUS_OK && hypot((double)b.x - a.x, (double)b.y - a.y) > ext0)
+			qaws_clip_result_get_path(&path, region, pi);
+			if (qaws_path_compute_bounds_2d(&a, &b, &path) == QAWS_STATUS_OK && hypot((double)b.x - a.x, (double)b.y - a.y) > ext0)
 				ext0 = hypot((double)b.x - a.x, (double)b.y - a.y);
 		}
 		fit_tol = desc->curve_tolerance > 0 ? (double)desc->curve_tolerance : 1e-4 * (ext0 > 0 ? ext0 : 1);
@@ -3248,8 +3248,8 @@ qaws_status qaws_skeleton_create(qaws_skeleton_desc const* desc, qaws_skeleton**
 		qaws_path_2d path;
 		qaws_clip_vertex const* vx = NULL;
 		unsigned int nv = 0, ci, first = s->nsup, first_node = s->nnodes, k;
-		qaws_clip_result_get_path(region, pi, &path);
-		qaws_clip_result_get_vertices(region, 0, pi, &vx, &nv);
+		qaws_clip_result_get_path(&path, region, pi);
+		qaws_clip_result_get_vertices(&vx, &nv, region, 0, pi);
 		s->loop_first[s->nloops] = first;
 		for (ci = 0; ci < path.curve_count && st == QAWS_STATUS_OK; ci++)
 		{
@@ -3843,7 +3843,7 @@ qaws_status qaws_skeleton_offset(qaws_skeleton const* s, qaws_scalar time, qaws_
 			paths[i].closed = 1;
 		}
 		if (st == QAWS_STATUS_OK)
-			st = qaws_clip_boolean(QAWS_CLIP_UNION, QAWS_FILL_POSITIVE, paths, nloops, NULL, 0, out);
+			st = qaws_clip_boolean(out, paths, NULL, nloops, 0, QAWS_CLIP_UNION, QAWS_FILL_POSITIVE);
 	}
 	for (i = 0; curves && i < ncur; i++)
 		if (curves[i]) qaws_curve_destroy(curves[i]);

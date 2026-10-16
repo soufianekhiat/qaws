@@ -76,7 +76,7 @@ static int p94_run64(p94_input const* in, p94_tree* t)
 	memset(&d, 0, sizeof(d));
 	d.subjects = s; d.subject_count = in->subjects; d.clips = c; d.clip_count = in->clips;
 	d.clip_type = in->ct; d.fill_rule = in->fr;
-	ok = qaws_clip64_execute(&d, &r) == QAWS_STATUS_OK && r;
+	ok = qaws_clip64_execute(&r, &d) == QAWS_STATUS_OK && r;
 	free(s);
 	if (!ok) return 0;
 	p94_alloc(t, qaws_clip64_result_get_path_count(r));
@@ -84,7 +84,7 @@ static int p94_run64(p94_input const* in, p94_tree* t)
 	{
 		int64_t const* p;
 		unsigned int n = 0, k;
-		qaws_clip64_result_get_path(r, i, &p, &n);
+		qaws_clip64_result_get_path(&p, &n, r, i);
 		t->xy[i] = (double*)malloc(sizeof(double) * 2 * (n + 1));
 		for (k = 0; k < 2 * n; k++) t->xy[i][k] = (double)p[k];
 		t->np[i] = n;
@@ -113,7 +113,7 @@ static int p94_runf(p94_input const* in, p94_tree* t)
 		qaws_path_2d* pp = i < in->subjects ? &s[i] : &c[i - in->subjects];
 		for (k = 0; k < 2 * n; k++) xy[k] = (qaws_scalar)p[k];
 		cs[nc] = NULL;
-		qaws_curve_create_polyline_2d(xy, n, 1, &cs[nc]);
+		qaws_curve_create_polyline_2d(&cs[nc], xy, n, 1);
 		free(xy);
 		cv[nc] = cs[nc];
 		pp->curves = &cv[nc]; pp->curve_count = cs[nc] ? 1 : 0; pp->closed = 1;
@@ -122,13 +122,13 @@ static int p94_runf(p94_input const* in, p94_tree* t)
 	memset(&d, 0, sizeof(d));
 	d.subjects = s; d.subject_count = in->subjects; d.clips = c; d.clip_count = in->clips;
 	d.clip_type = in->ct; d.fill_rule = in->fr;
-	if (qaws_clip_execute(&d, &r) != QAWS_STATUS_OK || !r) { for (i = 0; i < nc; i++) qaws_curve_destroy(cs[i]); free(cs); free((void*)cv); free(s); return 0; }
+	if (qaws_clip_execute(&r, &d) != QAWS_STATUS_OK || !r) { for (i = 0; i < nc; i++) qaws_curve_destroy(cs[i]); free(cs); free((void*)cv); free(s); return 0; }
 	p94_alloc(t, qaws_clip_result_get_path_count(r));
 	for (i = 0; i < t->n; i++)
 	{
 		qaws_clip_vertex const* vt = NULL;
 		unsigned int nv = 0;
-		qaws_clip_result_get_vertices(r, 0, i, &vt, &nv);
+		qaws_clip_result_get_vertices(&vt, &nv, r, 0, i);
 		t->xy[i] = (double*)malloc(sizeof(double) * 2 * (nv + 1));
 		for (k = 0; k < nv; k++) { t->xy[i][2 * k] = (double)vt[k].position.x; t->xy[i][2 * k + 1] = (double)vt[k].position.y; }
 		t->np[i] = nv;

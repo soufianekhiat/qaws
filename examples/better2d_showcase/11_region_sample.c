@@ -18,7 +18,7 @@ static void rsr_take(rsr* g, qaws_clip_result* r)
 	g->r = r;
 	g->n = r ? qaws_clip_result_get_path_count(r) : 0;
 	g->p = (qaws_path_2d*)malloc(sizeof(qaws_path_2d) * (g->n + 1));
-	for (i = 0; i < g->n; i++) qaws_clip_result_get_path(r, i, &g->p[i]);
+	for (i = 0; i < g->n; i++) qaws_clip_result_get_path(&g->p[i], r, i);
 }
 
 static void rsr_free(rsr* g)
@@ -33,7 +33,7 @@ static rsr rsr_op(qaws_clip_type op, qaws_path_2d const* a, unsigned int na, qaw
 {
 	rsr g;
 	qaws_clip_result* r = NULL;
-	qaws_clip_boolean(op, QAWS_FILL_NON_ZERO, a, na, b, nb, &r);
+	qaws_clip_boolean(&r, a, b, na, nb, op, QAWS_FILL_NON_ZERO);
 	rsr_take(&g, r);
 	return g;
 }
@@ -257,7 +257,7 @@ static rsr rs_cheese(void)
 	unsigned int i;
 	rsr g;
 	for (i = 0; i < 7; i++) holes[i] = rs_disc(hc[i][0], hc[i][1], hc[i][2]);
-	qaws_curve_create_ellipse_2d((qaws_scalar)1.0, (qaws_scalar)-0.1, (qaws_scalar)0.45, (qaws_scalar)0.25, (qaws_scalar)0.4, &e);
+	qaws_curve_create_ellipse_2d(&e, (qaws_scalar)1.0, (qaws_scalar)-0.1, (qaws_scalar)0.45, (qaws_scalar)0.25, (qaws_scalar)0.4);
 	{
 		qaws_curve const* ec = rs_hold(e);
 		ell = rs_path(&ec, 1);

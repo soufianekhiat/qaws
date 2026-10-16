@@ -43,8 +43,8 @@ static int j95_same(qaws_clip_result const* a, qaws_clip_result const* b)
 	{
 		qaws_clip_vertex const *va = NULL, *vb = NULL;
 		unsigned int na = 0, nb = 0;
-		qaws_clip_result_get_vertices(a, 0, i, &va, &na);
-		qaws_clip_result_get_vertices(b, 0, i, &vb, &nb);
+		qaws_clip_result_get_vertices(&va, &na, a, 0, i);
+		qaws_clip_result_get_vertices(&vb, &nb, b, 0, i);
 		if (na != nb) return 0;
 		for (k = 0; k < na; k++)
 			if (va[k].position.x != vb[k].position.x || va[k].position.y != vb[k].position.y) return 0;
@@ -60,8 +60,8 @@ static int j95_same64(qaws_clip64_result const* a, qaws_clip64_result const* b)
 	{
 		int64_t const *pa, *pb;
 		unsigned int na = 0, nb = 0;
-		qaws_clip64_result_get_path(a, i, &pa, &na);
-		qaws_clip64_result_get_path(b, i, &pb, &nb);
+		qaws_clip64_result_get_path(&pa, &na, a, i);
+		qaws_clip64_result_get_path(&pb, &nb, b, i);
 		if (na != nb || memcmp(pa, pb, sizeof(int64_t) * 2 * na)) return 0;
 	}
 	return 1;
@@ -105,9 +105,9 @@ int test_95_jobs_main(void)
 		}
 		curves[i] = NULL;
 		if (i % 5 == 4)
-			qaws_curve_create_ellipse_2d((qaws_scalar)cx, (qaws_scalar)cy, (qaws_scalar)(2 + 2 * j95_rand()), (qaws_scalar)(1 + j95_rand()), 0, &curves[i]);
+			qaws_curve_create_ellipse_2d(&curves[i], (qaws_scalar)cx, (qaws_scalar)cy, (qaws_scalar)(2 + 2 * j95_rand()), (qaws_scalar)(1 + j95_rand()), 0);
 		else
-			qaws_curve_create_polyline_2d(xy, n, 1, &curves[i]);
+			qaws_curve_create_polyline_2d(&curves[i], xy, n, 1);
 		views[i] = curves[i];
 		paths[i].curves = &views[i]; paths[i].curve_count = 1; paths[i].closed = 1;
 		p64[i].points = pts[i]; p64[i].point_count = n;
@@ -134,19 +134,19 @@ int test_95_jobs_main(void)
 		qaws_clip64_result *s1[J95_JOBS], *s2[J95_JOBS], *q1[J95_JOBS], *q2[J95_JOBS];
 		for (i = 0; i < J95_JOBS; i++)
 		{
-			r1[i] = NULL; qaws_clip_execute(&cd[i], &r1[i]);
-			s1[i] = NULL; qaws_clip64_execute(&cd64[i], &s1[i]);
-			o1[i] = NULL; qaws_offset_execute(&od[i], &o1[i]);
-			q1[i] = NULL; qaws_offset64_execute(&od64[i], &q1[i]);
+			r1[i] = NULL; qaws_clip_execute(&r1[i], &cd[i]);
+			s1[i] = NULL; qaws_clip64_execute(&s1[i], &cd64[i]);
+			o1[i] = NULL; qaws_offset_execute(&o1[i], &od[i]);
+			q1[i] = NULL; qaws_offset64_execute(&q1[i], &od64[i]);
 		}
 		for (e = 0; e < 3; e++)
 		{
 			unsigned int same_c = 1, same_c64 = 1, same_o = 1, same_o64 = 1;
 			qaws_batch_executor const* x = e ? &ex[e] : NULL;
-			qaws_status a = qaws_clip_execute_batch(cd, J95_JOBS, x, r2);
-			qaws_status b = qaws_clip64_execute_batch(cd64, J95_JOBS, x, s2);
-			qaws_status c = qaws_offset_execute_batch(od, J95_JOBS, x, o2);
-			qaws_status d = qaws_offset64_execute_batch(od64, J95_JOBS, x, q2);
+			qaws_status a = qaws_clip_execute_batch(r2, J95_JOBS, cd, x);
+			qaws_status b = qaws_clip64_execute_batch(s2, J95_JOBS, cd64, x);
+			qaws_status c = qaws_offset_execute_batch(o2, J95_JOBS, od, x);
+			qaws_status d = qaws_offset64_execute_batch(q2, J95_JOBS, od64, x);
 			for (i = 0; i < J95_JOBS; i++)
 			{
 				same_c = same_c && j95_same(r1[i], r2[i]);
@@ -173,7 +173,7 @@ int test_95_jobs_main(void)
 		qaws_status s;
 		bad[0] = cd[0]; bad[1] = cd[1]; bad[2] = cd[2];
 		bad[1].subjects = NULL; bad[1].subject_count = 3;
-		s = qaws_clip_execute_batch(bad, 3, NULL, r);
+		s = qaws_clip_execute_batch(r, 3, bad, NULL);
 		sprintf(msg, "a failing job: its status, no result kept (%d, %p %p %p)", (int)s, (void*)r[0], (void*)r[1], (void*)r[2]);
 		TEST_ASSERT(s != QAWS_STATUS_OK && !r[0] && !r[1] && !r[2], msg);
 	}

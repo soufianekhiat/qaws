@@ -28,7 +28,7 @@ static qaws_clip64_result* c6_run(qaws_clip_type ct, qaws_fill_rule fr, int64_t 
 	d.subjects = sp; d.subject_count = ns;
 	d.clips = cp; d.clip_count = nc;
 	d.clip_type = ct; d.fill_rule = fr; d.flags = flags;
-	st = qaws_clip64_execute(&d, &r);
+	st = qaws_clip64_execute(&r, &d);
 	if (st != QAWS_STATUS_OK)
 		printf("    clip64 status %d\n", (int)st);
 	return r;
@@ -42,7 +42,7 @@ static double c6_area(qaws_clip64_result const* r)
 	{
 		int64_t const* p;
 		unsigned int m;
-		qaws_clip64_result_get_path(r, i, &p, &m);
+		qaws_clip64_result_get_path(&p, &m, r, i);
 		sum += 0.5 * qaws_path64_area2(p, m);
 	}
 	return sum;
@@ -52,7 +52,7 @@ static unsigned int c6_points(qaws_clip64_result const* r, unsigned int i)
 {
 	int64_t const* p;
 	unsigned int m = 0;
-	qaws_clip64_result_get_path(r, i, &p, &m);
+	qaws_clip64_result_get_path(&p, &m, r, i);
 	return m;
 }
 
@@ -207,19 +207,19 @@ static void test_fill_and_nesting(void)
 		d.clips = &clip; d.clip_count = 1;
 		d.open_subjects = &open; d.open_subject_count = 1;
 		d.clip_type = QAWS_CLIP_INTERSECTION; d.fill_rule = QAWS_FILL_NON_ZERO;
-		qaws_clip64_execute(&d, &r);
+		qaws_clip64_execute(&r, &d);
 		if (r)
 		{
 			int64_t const* p;
 			unsigned int m = 0;
 			ni = qaws_clip64_result_get_open_path_count(r);
-			if (ni) qaws_clip64_result_get_open_path(r, 0, &p, &m);
+			if (ni) qaws_clip64_result_get_open_path(&p, &m, r, 0);
 			ni = ni == 1 && m == 2 && p[0] == 0 && p[2] == 20 ? 1 : 0;
 		}
 		qaws_clip64_result_destroy(r);
 		r = NULL;
 		d.clip_type = QAWS_CLIP_DIFFERENCE;
-		qaws_clip64_execute(&d, &r);
+		qaws_clip64_execute(&r, &d);
 		no = r ? qaws_clip64_result_get_open_path_count(r) : 0;
 		qaws_clip64_result_destroy(r);
 		sprintf(msg, "int64 open line: intersection keeps 0..20 (%u), difference the 2 outside pieces (%u)", ni, no);

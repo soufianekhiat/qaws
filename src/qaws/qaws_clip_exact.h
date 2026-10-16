@@ -87,6 +87,6 @@ typedef struct qaws_clip_exact_stats
 	unsigned int ray_retries;       /* rays given up for passing too close to a vertex */
 } qaws_clip_exact_stats;
 
-qaws_status qaws_clip_exact_execute(qaws_clip_exact_desc const* desc, qaws_clip_result** out_result, qaws_clip_exact_stats* out_stats);
+qaws_status qaws_clip_exact_execute(qaws_clip_result** out_result, qaws_clip_exact_stats* out_stats, qaws_clip_exact_desc const* desc);
 
 #endif /* QAWS_CLIP_EXACT_H */

@@ -179,7 +179,7 @@ static void sr_fix_views(sr_pool* pl)
 static double sr_signed_area(qaws_path_2d const* p)
 {
 	qaws_scalar a = 0;
-	qaws_path_compute_area_2d(p, &a);
+	qaws_path_compute_area_2d(&a, p);
 	return (double)a;
 }
 
@@ -324,14 +324,14 @@ static qaws_status sr_bool(sr_mode const* md, qaws_clip_type type, qaws_fill_rul
 {
 	qaws_clip_exact_desc d;
 	if (!md || !md->exact)
-		return qaws_clip_boolean(type, rule, a, na, b, nb, out);
+		return qaws_clip_boolean(out, a, b, na, nb, type, rule);
 	memset(&d, 0, sizeof(d));
 	d.subjects = a; d.subject_count = na;
 	d.clips = b; d.clip_count = nb;
 	d.clip_type = nb && type != QAWS_CLIP_NONE ? type : QAWS_CLIP_UNION;
 	d.fill_rule = rule;
 	d.exact = &md->ex;
-	return qaws_clip_exact_execute(&d, out, NULL);
+	return qaws_clip_exact_execute(out, NULL, &d);
 }
 
 /* the loop's part in each period cell, translated into the first, its
@@ -341,7 +341,7 @@ static qaws_status sr_cut_loop(qaws_internal_sg_ctx const* c, sr_pool* pl, qaws_
 	qaws_vec2 lo, hi;
 	double area = sr_signed_area(loop);
 	int k0 = 0, k1 = 0, m0 = 0, m1 = 0, k, m;
-	qaws_status st = qaws_path_compute_bounds_2d(loop, &lo, &hi);
+	qaws_status st = qaws_path_compute_bounds_2d(&lo, &hi, loop);
 	if (st != QAWS_STATUS_OK)
 		return st;
 	if (area == 0)
@@ -362,7 +362,7 @@ static qaws_status sr_cut_loop(qaws_internal_sg_ctx const* c, sr_pool* pl, qaws_
 		for (j = 0; j < loop->curve_count; j++)
 		{
 			qaws_curve* mv = NULL;
-			if ((st = qaws_curve_transform_2d(loop->curves[j], t, &mv)) != QAWS_STATUS_OK)
+			if ((st = qaws_curve_transform_2d(&mv, loop->curves[j], t)) != QAWS_STATUS_OK)
 				return st;
 			if ((st = sr_keep(pl, mv)) != QAWS_STATUS_OK)
 				return st;
@@ -411,7 +411,7 @@ static qaws_status sr_cut_loop(qaws_internal_sg_ctx const* c, sr_pool* pl, qaws_
 				qaws_path_2d p;
 				qaws_curve const* moved[512];
 				qaws_scalar t[6];
-				if ((st = qaws_clip_result_get_path(res, i, &p)) != QAWS_STATUS_OK)
+				if ((st = qaws_clip_result_get_path(&p, res, i)) != QAWS_STATUS_OK)
 					return st;
 				if (p.curve_count > 512)
 					return QAWS_STATUS_UNSUPPORTED_OPERATION;
@@ -428,7 +428,7 @@ static qaws_status sr_cut_loop(qaws_internal_sg_ctx const* c, sr_pool* pl, qaws_
 					if (c->pv > 0) { lines[2 * nl] = 1; lines[2 * nl + 1] = va; nl++; lines[2 * nl] = 1; lines[2 * nl + 1] = vb; nl++; }
 					if ((!md || !md->exact) && (st = sr_snap_cell(p.curves[src], lines, nl, &snapped)) != QAWS_STATUS_OK)
 						return st;
-					st = qaws_curve_transform_2d(snapped ? snapped : p.curves[src], t, &mv);
+					st = qaws_curve_transform_2d(&mv, snapped ? snapped : p.curves[src], t);
 					qaws_curve_destroy(snapped);
 					if (st != QAWS_STATUS_OK)
 						return st;
@@ -587,8 +587,8 @@ static qaws_status sr_clip(qaws_surface const* surface, qaws_clip_type clip_type
 			qaws_path_2d* qb = (qaws_path_2d*)malloc(sizeof(qaws_path_2d) * (nb + 1));
 			if (!qa || !qb)
 				st = QAWS_STATUS_ALLOCATION_FAILURE;
-			for (i = 0; i < na && st == QAWS_STATUS_OK; i++) st = qaws_clip_result_get_path(ua, i, &qa[i]);
-			for (i = 0; i < nb && st == QAWS_STATUS_OK; i++) st = qaws_clip_result_get_path(ub, i, &qb[i]);
+			for (i = 0; i < na && st == QAWS_STATUS_OK; i++) st = qaws_clip_result_get_path(&qa[i], ua, i);
+			for (i = 0; i < nb && st == QAWS_STATUS_OK; i++) st = qaws_clip_result_get_path(&qb[i], ub, i);
 			if (st == QAWS_STATUS_OK)
 			{
 				memset(&d, 0, sizeof(d));
@@ -679,7 +679,7 @@ qaws_status qaws_surface_region_get_path(qaws_surface_region const* region, unsi
 {
 	if (!region || !out_uv_path)
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	return qaws_clip_result_get_path(region->res, index, out_uv_path);
+	return qaws_clip_result_get_path(out_uv_path, region->res, index);
 }
 
 int qaws_surface_region_is_hole(qaws_surface_region const* region, unsigned int index)
@@ -758,7 +758,7 @@ static qaws_status sr_green(sr_job const* jb, double* out)
 	for (pi = 0; pi < np; pi++)
 	{
 		qaws_path_2d path;
-		qaws_status st = qaws_clip_result_get_path(jb->r->res, pi, &path);
+		qaws_status st = qaws_clip_result_get_path(&path, jb->r->res, pi);
 		if (st != QAWS_STATUS_OK)
 			return st;
 		for (ci = 0; ci < path.curve_count; ci++)
@@ -870,7 +870,7 @@ qaws_status qaws_surface_region_get_perimeter(qaws_surface_region const* region,
 	for (pi = 0; pi < np; pi++)
 	{
 		qaws_path_2d path;
-		qaws_status st = qaws_clip_result_get_path(region->res, pi, &path);
+		qaws_status st = qaws_clip_result_get_path(&path, region->res, pi);
 		if (st != QAWS_STATUS_OK)
 			return st;
 		for (ci = 0; ci < path.curve_count; ci++)
@@ -921,7 +921,7 @@ qaws_status qaws_surface_region_contains(qaws_surface_region const* region, qaws
 	if (!paths)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	for (i = 0; i < np && st == QAWS_STATUS_OK; i++)
-		st = qaws_clip_result_get_path(region->res, i, &paths[i]);
+		st = qaws_clip_result_get_path(&paths[i], region->res, i);
 	if (region->ctx.pu > 0)
 	{
 		double t = fmod((double)uv.x - region->ctx.u0, region->ctx.pu);
@@ -935,7 +935,7 @@ qaws_status qaws_surface_region_contains(qaws_surface_region const* region, qaws
 		uv.y = (qaws_scalar)(region->ctx.v0 + t);
 	}
 	if (st == QAWS_STATUS_OK)
-		st = qaws_region_locate_point_2d(paths, np, QAWS_FILL_NON_ZERO, uv, (qaws_scalar)region->ctx.tol, &loc);
+		st = qaws_region_locate_point_2d(&loc, paths, np, QAWS_FILL_NON_ZERO, uv, (qaws_scalar)region->ctx.tol);
 	free(paths);
 	*out_inside = loc == QAWS_POINT_ON ? -1 : (loc == QAWS_POINT_INSIDE ? 1 : 0);
 	return st;
@@ -956,7 +956,7 @@ qaws_status qaws_surface_region_create_trimmed(qaws_surface_region const* region
 	for (i = 0; i < np && st == QAWS_STATUS_OK; i++)
 	{
 		qaws_path_2d p;
-		st = qaws_clip_result_get_path(region->res, i, &p);
+		st = qaws_clip_result_get_path(&p, region->res, i);
 		loops[i].curves = p.curves;
 		loops[i].curve_count = p.curve_count;
 		loops[i].is_outer = !qaws_clip_result_is_hole(region->res, i);
@@ -1230,7 +1230,7 @@ static qaws_status sr_corner_disks(sr_tube* tb, qaws_clip_result const* res, int
 	for (i = 0; i < np && st == QAWS_STATUS_OK; i++)
 	{
 		qaws_path_2d p;
-		if ((st = qaws_clip_result_get_path(res, i, &p)) != QAWS_STATUS_OK)
+		if ((st = qaws_clip_result_get_path(&p, res, i)) != QAWS_STATUS_OK)
 			break;
 		/* the loop's pieces in order, a cut as cv NULL */
 		ns = 0;
@@ -1363,7 +1363,7 @@ qaws_status qaws_surface_offset(qaws_surface const* surface, qaws_fill_rule fill
 		for (i = 0; i < np && st == QAWS_STATUS_OK; i++)
 		{
 			qaws_path_2d p;
-			if ((st = qaws_clip_result_get_path(R->res, i, &p)) != QAWS_STATUS_OK)
+			if ((st = qaws_clip_result_get_path(&p, R->res, i)) != QAWS_STATUS_OK)
 				break;
 			for (k = 0; k < p.curve_count && st == QAWS_STATUS_OK; k++)
 				st = sr_tube_curve(&tb, p.curves[k], d > 0 ? 2 : 1, 0);
@@ -1384,10 +1384,10 @@ qaws_status qaws_surface_offset(qaws_surface const* surface, qaws_fill_rule fill
 			st = sr_period(&out->ctx, tb.raw.paths, tb.raw.np, &cut, NULL);
 			sr_fix_views(&cut);
 			if (st == QAWS_STATUS_OK)
-				st = qaws_clip_boolean(QAWS_CLIP_UNION, QAWS_FILL_NON_ZERO, cut.paths, cut.np, NULL, 0, &T);
+				st = qaws_clip_boolean(&T, cut.paths, NULL, cut.np, 0, QAWS_CLIP_UNION, QAWS_FILL_NON_ZERO);
 		}
 		else
-			st = qaws_clip_boolean(QAWS_CLIP_UNION, QAWS_FILL_NON_ZERO, tb.raw.paths, tb.raw.np, NULL, 0, &T);
+			st = qaws_clip_boolean(&T, tb.raw.paths, NULL, tb.raw.np, 0, QAWS_CLIP_UNION, QAWS_FILL_NON_ZERO);
 	}
 	if (st == QAWS_STATUS_OK)
 	{
@@ -1397,10 +1397,10 @@ qaws_status qaws_surface_offset(qaws_surface const* surface, qaws_fill_rule fill
 		qaws_path_2d* qb = (qaws_path_2d*)malloc(sizeof(qaws_path_2d) * (nb + 1));
 		if (!qa || !qb)
 			st = QAWS_STATUS_ALLOCATION_FAILURE;
-		for (i = 0; i < na && st == QAWS_STATUS_OK; i++) st = qaws_clip_result_get_path(R->res, i, &qa[i]);
-		for (i = 0; i < nb && st == QAWS_STATUS_OK; i++) st = qaws_clip_result_get_path(T, i, &qb[i]);
+		for (i = 0; i < na && st == QAWS_STATUS_OK; i++) st = qaws_clip_result_get_path(&qa[i], R->res, i);
+		for (i = 0; i < nb && st == QAWS_STATUS_OK; i++) st = qaws_clip_result_get_path(&qb[i], T, i);
 		if (st == QAWS_STATUS_OK)
-			st = qaws_clip_boolean(d < 0 && na ? QAWS_CLIP_DIFFERENCE : QAWS_CLIP_UNION, QAWS_FILL_NON_ZERO, qa, na, qb, nb, &out->res);
+			st = qaws_clip_boolean(&out->res, qa, qb, na, nb, d < 0 && na ? QAWS_CLIP_DIFFERENCE : QAWS_CLIP_UNION, QAWS_FILL_NON_ZERO);
 		free(qa); free(qb);
 	}
 	qaws_clip_result_destroy(T);
@@ -1434,7 +1434,7 @@ static qaws_status sr_loops(qaws_surface_region const* r, qaws_path_2d** out, un
 	if (!*out)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	for (i = 0; i < np && st == QAWS_STATUS_OK; i++)
-		st = qaws_clip_result_get_path(r->res, i, &(*out)[i]);
+		st = qaws_clip_result_get_path(&(*out)[i], r->res, i);
 	return st;
 }
 
@@ -1744,7 +1744,7 @@ qaws_status qaws_surface_region_triangulate(qaws_surface_region const* region, q
 		qaws_vec2 a, b;
 		lo.x = lo.y = (qaws_scalar)1e30; hi.x = hi.y = (qaws_scalar)-1e30;
 		for (i = 0; i < np; i++)
-			if (qaws_path_compute_bounds_2d(&loops[i], &a, &b) == QAWS_STATUS_OK)
+			if (qaws_path_compute_bounds_2d(&a, &b, &loops[i]) == QAWS_STATUS_OK)
 			{
 				if (a.x < lo.x) lo.x = a.x;
 				if (a.y < lo.y) lo.y = a.y;
@@ -1765,7 +1765,7 @@ qaws_status qaws_surface_region_triangulate(qaws_surface_region const* region, q
 	td.tolerance = (qaws_scalar)(kmax > 0 ? tol / kmax : tol);
 	td.min_angle = (qaws_scalar)(desc && desc->min_angle > 0 ? desc->min_angle : 25);
 	td.size_fn = sr_size_fn; td.size_user = &sz;
-	st = qaws_triangulate_region_2d(&td, out_mesh);
+	st = qaws_triangulate_region_2d(out_mesh, &td);
 	if (st == QAWS_STATUS_OK && desc && desc->remesh_iterations)
 		st = qaws_mesh_2d_remesh(*out_mesh, (qaws_scalar)L, sr_size_fn, &sz, desc->remesh_iterations);
 	if (st != QAWS_STATUS_OK)
@@ -2201,7 +2201,7 @@ qaws_status qaws_surface_region_medial_axis(qaws_surface_region const* region, q
 		for (i = 0; i < nt && st == QAWS_STATUS_OK; i++)
 		{
 			unsigned int v[3], e;
-			qaws_mesh_2d_get_triangle(mesh, i, v);
+			qaws_mesh_2d_get_triangle(v, mesh, i);
 			for (e = 0; e < 3; e++)
 			{
 				unsigned int a = v[e], b = v[(e + 1) % 3], z;
@@ -2243,7 +2243,7 @@ qaws_status qaws_surface_region_medial_axis(qaws_surface_region const* region, q
 		{
 			unsigned int v[3], e, ids[3], nc = 0;
 			double cuv[3][2], crad[3];
-			qaws_mesh_2d_get_triangle(mesh, i, v);
+			qaws_mesh_2d_get_triangle(v, mesh, i);
 			for (e = 0; e < 3; e++)
 			{
 				unsigned int a = v[e] < v[(e + 1) % 3] ? v[e] : v[(e + 1) % 3], b = v[e] < v[(e + 1) % 3] ? v[(e + 1) % 3] : v[e];
@@ -2815,7 +2815,7 @@ qaws_status qaws_surface_region_mitered_skeleton(qaws_surface_region const* regi
 		{
 			unsigned int v[3], e, ids[3], nc = 0, lv[3];
 			double cuv[3][2], crad[3];
-			qaws_mesh_2d_get_triangle(mesh, i, v);
+			qaws_mesh_2d_get_triangle(v, mesh, i);
 			for (e = 0; e < 3; e++)
 			{
 				unsigned int a = v[e] < v[(e + 1) % 3] ? v[e] : v[(e + 1) % 3], b = v[e] < v[(e + 1) % 3] ? v[(e + 1) % 3] : v[e];

@@ -22,8 +22,8 @@ typedef struct qaws_clip_desc {
 	qaws_clip_z_fn z_fn; void* z_user; /* Clipper2's Z callback */
 } qaws_clip_desc;
 
-qaws_status qaws_clip_execute(qaws_clip_desc const* desc, qaws_clip_result** out_result);
-qaws_status qaws_clip_boolean(qaws_clip_type, qaws_fill_rule, subjects, subject_count, clips, clip_count, out_result);
+qaws_status qaws_clip_execute(qaws_clip_result** out_result, qaws_clip_desc const* desc);
+qaws_status qaws_clip_boolean(out_result, subjects, clips, subject_count, clip_count, qaws_clip_type, qaws_fill_rule);
 ```
 
 The paths are `qaws_path_2d` (see [path.md](path.md)) and may hold curves of
@@ -99,13 +99,13 @@ any kind.
 
 ```c
 unsigned int qaws_clip_result_get_path_count(r);
-qaws_status  qaws_clip_result_get_path(r, i, qaws_path_2d* out);   /* view, valid until destroy */
+qaws_status  qaws_clip_result_get_path(qaws_path_2d* out, r, i);   /* view, valid until destroy */
 unsigned int qaws_clip_result_get_parent(r, i);                    /* QAWS_CLIP_NONE_INDEX at the top */
 int          qaws_clip_result_is_hole(r, i);
 unsigned int qaws_clip_result_get_depth(r, i);
 unsigned int qaws_clip_result_get_open_path_count(r);
-qaws_status  qaws_clip_result_get_open_path(r, i, qaws_path_2d* out);
-qaws_status  qaws_clip_result_get_vertices(r, open, i, qaws_clip_vertex const** v, unsigned int* n);
+qaws_status  qaws_clip_result_get_open_path(qaws_path_2d* out, r, i);
+qaws_status  qaws_clip_result_get_vertices(qaws_clip_vertex const** v, unsigned int* n, r, open, i);
 void         qaws_clip_result_destroy(r);
 ```
 
@@ -152,10 +152,10 @@ ellipses and cubic B-spline blobs in 12 ms.
 ## Batches
 
 ```c
-qaws_status qaws_clip_execute_batch(qaws_clip_desc const* descs, unsigned int count, qaws_batch_executor const* executor, qaws_clip_result** out_results);
-qaws_status qaws_clip64_execute_batch(qaws_clip64_desc const* descs, unsigned int count, qaws_batch_executor const* executor, qaws_clip64_result** out_results);
-qaws_status qaws_offset_execute_batch(qaws_offset_desc const* descs, unsigned int count, qaws_batch_executor const* executor, qaws_clip_result** out_results);
-qaws_status qaws_offset64_execute_batch(qaws_offset64_desc const* descs, unsigned int count, qaws_batch_executor const* executor, qaws_clip64_result** out_results);
+qaws_status qaws_clip_execute_batch(qaws_clip_result** out_results, unsigned int count, qaws_clip_desc const* descs, qaws_batch_executor const* executor);
+qaws_status qaws_clip64_execute_batch(qaws_clip64_result** out_results, unsigned int count, qaws_clip64_desc const* descs, qaws_batch_executor const* executor);
+qaws_status qaws_offset_execute_batch(qaws_clip_result** out_results, unsigned int count, qaws_offset_desc const* descs, qaws_batch_executor const* executor);
+qaws_status qaws_offset64_execute_batch(qaws_clip64_result** out_results, unsigned int count, qaws_offset64_desc const* descs, qaws_batch_executor const* executor);
 ```
 
 These run many independent jobs in one call, in parallel through the

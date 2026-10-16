@@ -825,7 +825,7 @@ static void test_shallow_cap(void)
 		qaws_curve_batch_hit_2d hits[8];
 		lp[0] = (qaws_scalar)(r * c + 0.5 * s); lp[1] = (qaws_scalar)(r * s - 0.5 * c);
 		lp[2] = (qaws_scalar)(r * c - 0.5 * s); lp[3] = (qaws_scalar)(r * s + 0.5 * c);
-		qaws_curve_create_polyline_2d(lp, 2, 0, &line);
+		qaws_curve_create_polyline_2d(&line, lp, 2, 0);
 		cs[0] = line; cs[1] = circle;
 		memset(&bd, 0, sizeof(bd));
 		bd.curves = cs; bd.curve_count = 2; bd.families = fam;

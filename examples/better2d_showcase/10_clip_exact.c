@@ -162,12 +162,12 @@ static void demo_clip_exact(void)
 			for (q = 0; q < 4; q++)
 			{
 				qaws_curve* e = NULL;
-				qaws_curve_create_ellipse_2d((qaws_scalar)(0.75 * q), (qaws_scalar)(0.25 * q), 1.5f, 1.0f, (qaws_scalar)(0.3 * q), &e);
+				qaws_curve_create_ellipse_2d(&e, (qaws_scalar)(0.75 * q), (qaws_scalar)(0.25 * q), 1.5f, 1.0f, (qaws_scalar)(0.3 * q));
 				ce_add(&sc, e);
 			}
 			{
 				qaws_curve* e = NULL;
-				qaws_curve_create_ellipse_2d(0.75f, 0.25f, 1.5f, 1.0f, 0.3f, &e);
+				qaws_curve_create_ellipse_2d(&e, 0.75f, 0.25f, 1.5f, 1.0f, 0.3f);
 				ce_add(&sc, e);
 			}
 			first_clip = 5; d.clip_type = QAWS_CLIP_UNION;
@@ -203,7 +203,7 @@ static void demo_clip_exact(void)
 			}
 			d.subjects = subj; d.subject_count = nsj;
 			d.clips = clip; d.clip_count = ncl;
-			status = qaws_clip_exact_execute(&d, &r, &st);
+			status = qaws_clip_exact_execute(&r, &st, &d);
 		}
 		/* the view */
 		for (i = 0; i < sc.n; i++)

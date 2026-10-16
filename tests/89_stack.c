@@ -28,8 +28,8 @@ static double stt_area(qaws_clip_result const* r)
 	{
 		qaws_path_2d p;
 		qaws_scalar a = 0;
-		qaws_clip_result_get_path(r, i, &p);
-		qaws_path_compute_area_2d(&p, &a);
+		qaws_clip_result_get_path(&p, r, i);
+		qaws_path_compute_area_2d(&a, &p);
 		s += a;
 	}
 	return s;
@@ -80,14 +80,14 @@ static qaws_curve* stt_point(double x, double y)
 	qaws_curve* c = NULL;
 	p[0] = p[2] = (qaws_scalar)x;
 	p[1] = p[3] = (qaws_scalar)y;
-	qaws_curve_create_polyline_2d(p, 2, 1, &c);
+	qaws_curve_create_polyline_2d(&c, p, 2, 1);
 	return c;
 }
 
 static qaws_curve* stt_circle(double cx, double cy, double r)
 {
 	qaws_curve* c = NULL;
-	qaws_curve_create_ellipse_2d((qaws_scalar)cx, (qaws_scalar)cy, (qaws_scalar)r, (qaws_scalar)r, 0, &c);
+	qaws_curve_create_ellipse_2d(&c, (qaws_scalar)cx, (qaws_scalar)cy, (qaws_scalar)r, (qaws_scalar)r, 0);
 	return c;
 }
 
@@ -101,23 +101,23 @@ static void test_cone(void)
 	stt_add(&s, 0, stt_circle(0, 0, 2));
 	stt_add(&s, 4, stt_point(0, 0));
 	stt_done(&s, QAWS_STACK_LINEAR);
-	qaws_stack_section_2d(&s.st, 1, &r);
+	qaws_stack_section_2d(&r, &s.st, 1);
 	a = r ? stt_area(r) : 0;
 	sprintf(msg, "cone: the section at z 1 is the circle of radius 1.5 (area %.12g vs %.12g)", a, STT_PI * 2.25);
 	TEST_ASSERT(r && fabs(a - STT_PI * 2.25) < STT_TOL(STT_PI * 2.25), msg);
 	if (r)
 	{
 		qaws_path_2d p;
-		qaws_clip_result_get_path(r, 0, &p);
+		qaws_clip_result_get_path(&p, r, 0);
 		TEST_ASSERT(p.curve_count >= 1 && qaws_curve_get_kind(p.curves[0]) == QAWS_CURVE_KIND_NURBS, "the cone's section is a NURBS circle, not a fit");
 	}
 	qaws_clip_result_destroy(r);
 	r = NULL;
-	qaws_stack_section_2d(&s.st, 5, &r);
+	qaws_stack_section_2d(&r, &s.st, 5);
 	TEST_ASSERT(r && qaws_clip_result_get_path_count(r) == 0, "above the apex: empty");
 	qaws_clip_result_destroy(r);
 	r = NULL;
-	qaws_stack_section_2d(&s.st, 0, &r);
+	qaws_stack_section_2d(&r, &s.st, 0);
 	TEST_ASSERT(r && fabs(stt_area(r) - 4 * STT_PI) < STT_TOL(4 * STT_PI), "at a level: that level's region");
 	qaws_clip_result_destroy(r);
 	stt_free(&s);
@@ -145,7 +145,7 @@ static void test_sphere(void)
 		{
 			double z = 0.5 * ((double)s.levels[k].z + (double)s.levels[k + 1].z), want = sqrt(1 - z * z), got, e;
 			qaws_clip_result* r = NULL;
-			qaws_stack_section_2d(&s.st, (qaws_scalar)z, &r);
+			qaws_stack_section_2d(&r, &s.st, (qaws_scalar)z);
 			got = r ? sqrt(stt_area(r) / STT_PI) : 0;
 			e = fabs(got - want);
 			if (i) { if (e > ec) ec = e; } else { if (e > el) el = e; }
@@ -169,7 +169,7 @@ static void test_split(void)
 	qaws_clip_result* r = NULL;
 	double a;
 	char msg[256];
-	qaws_curve_create_ellipse_2d(0, 0, 3, (qaws_scalar)1.2, 0, &e);
+	qaws_curve_create_ellipse_2d(&e, 0, 0, 3, (qaws_scalar)1.2, 0);
 	v[0] = e; v[1] = c1; v[2] = c2;
 	p[0].curves = &v[0]; p[0].curve_count = 1; p[0].closed = 1;
 	p[1].curves = &v[1]; p[1].curve_count = 1; p[1].closed = 1;
@@ -178,7 +178,7 @@ static void test_split(void)
 	lv[1].z = 1; lv[1].paths = &p[1]; lv[1].path_count = 2;
 	memset(&st, 0, sizeof(st));
 	st.levels = lv; st.level_count = 2; st.fill_rule = QAWS_FILL_NON_ZERO;
-	qaws_stack_section_2d(&st, (qaws_scalar)0.9, &r);
+	qaws_stack_section_2d(&r, &st, (qaws_scalar)0.9);
 	a = r ? stt_area(r) : 0;
 	sprintf(msg, "ellipse splitting into two circles: the distance section at z 0.9 has 2 parts (%u) and an area between the levels' (%.6g in [%.6g, %.6g])",
 		r ? qaws_clip_result_get_path_count(r) : 0, a, 2 * STT_PI, STT_PI * 3.6);
@@ -214,10 +214,10 @@ static void test_boolean(void)
 		stt_add(&sphere, z, rr > 1e-9 ? stt_circle(0.5, 0, rr) : stt_point(0.5, 0));
 	}
 	stt_done(&sphere, QAWS_STACK_LINEAR);
-	qaws_stack_boolean_2d(QAWS_CLIP_INTERSECTION, &cone.st, &sphere.st, NULL, &r);
+	qaws_stack_boolean_2d(&r, &cone.st, &sphere.st, QAWS_CLIP_INTERSECTION, NULL);
 	memset(&ex, 0, sizeof(ex));
 	ex.parallel_for = stt_backwards;
-	qaws_stack_boolean_2d(QAWS_CLIP_INTERSECTION, &cone.st, &sphere.st, &ex, &r2);
+	qaws_stack_boolean_2d(&r2, &cone.st, &sphere.st, QAWS_CLIP_INTERSECTION, &ex);
 	n = r ? qaws_stack_result_get_level_count(r) : 0;
 	for (i = 0; r && r2 && i < n; i++)
 		same = same && fabs(stt_area(qaws_stack_result_get_level(r, i)) - stt_area(qaws_stack_result_get_level(r2, i))) == 0;

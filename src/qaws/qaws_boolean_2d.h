@@ -36,11 +36,11 @@ typedef enum qaws_boolean_op {
    there are more paths than boundary_capacity (the first ones are written).
    Curves must be 2D and closed (or treated as closed by connecting endpoints). */
 qaws_status qaws_boolean_2d(
+	qaws_curve** out_boundaries,
+	unsigned int* out_count,
 	qaws_curve const* region_a,
 	qaws_curve const* region_b,
-	qaws_boolean_op operation,
-	qaws_curve** out_boundaries,
 	unsigned int boundary_capacity,
-	unsigned int* out_count);
+	qaws_boolean_op operation);
 
 #endif /* QAWS_BOOLEAN_2D_H */

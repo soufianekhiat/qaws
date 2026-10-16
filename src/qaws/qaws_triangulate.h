@@ -78,7 +78,7 @@ typedef struct qaws_triangulate_desc
 	unsigned int max_vertices;      /* 0 = 4 million */
 } qaws_triangulate_desc;
 
-qaws_status qaws_triangulate_region_2d(qaws_triangulate_desc const* desc, qaws_mesh_2d** out_mesh);
+qaws_status qaws_triangulate_region_2d(qaws_mesh_2d** out_mesh, qaws_triangulate_desc const* desc);
 
 /* Remeshing in place toward edges of target_length (or the size field when
    size_fn is given), iterations rounds of split / collapse / flip /
@@ -92,24 +92,24 @@ unsigned int qaws_mesh_2d_get_vertex_count(qaws_mesh_2d const* mesh);
 qaws_vec2 qaws_mesh_2d_get_vertex(qaws_mesh_2d const* mesh, unsigned int vertex);
 unsigned int qaws_mesh_2d_get_triangle_count(qaws_mesh_2d const* mesh);
 /* counter-clockwise vertex indices */
-void qaws_mesh_2d_get_triangle(qaws_mesh_2d const* mesh, unsigned int triangle, unsigned int out_vertices[3]);
+void qaws_mesh_2d_get_triangle(unsigned int out_vertices[3], qaws_mesh_2d const* mesh, unsigned int triangle);
 
 /* A vertex on the boundary or a constraint: its curve (index among
    qaws_mesh_2d_get_boundary_curve, which lists the boundary curves then the
    constraint pieces) and parameter there; returns 0 for a free vertex. A
    vertex where two boundary curves meet reports the curve it starts. */
-int qaws_mesh_2d_get_vertex_source(qaws_mesh_2d const* mesh, unsigned int vertex, unsigned int* out_curve, qaws_scalar* out_parameter);
+int qaws_mesh_2d_get_vertex_source(unsigned int* out_curve, qaws_scalar* out_parameter, qaws_mesh_2d const* mesh, unsigned int vertex);
 unsigned int qaws_mesh_2d_get_boundary_curve_count(qaws_mesh_2d const* mesh);
 qaws_curve const* qaws_mesh_2d_get_boundary_curve(qaws_mesh_2d const* mesh, unsigned int curve);
 
 /* The edges on the boundary (each once, oriented with the region on the
    left) */
 unsigned int qaws_mesh_2d_get_boundary_edge_count(qaws_mesh_2d const* mesh);
-void qaws_mesh_2d_get_boundary_edge(qaws_mesh_2d const* mesh, unsigned int edge, unsigned int out_vertices[2]);
+void qaws_mesh_2d_get_boundary_edge(unsigned int out_vertices[2], qaws_mesh_2d const* mesh, unsigned int edge);
 
 /* The edges along the constraints (each once) */
 unsigned int qaws_mesh_2d_get_constraint_edge_count(qaws_mesh_2d const* mesh);
-void qaws_mesh_2d_get_constraint_edge(qaws_mesh_2d const* mesh, unsigned int edge, unsigned int out_vertices[2]);
+void qaws_mesh_2d_get_constraint_edge(unsigned int out_vertices[2], qaws_mesh_2d const* mesh, unsigned int edge);
 
 /* Quadrangulation in place: triangles paired into convex quadrilaterals
    (the best shaped pairs first, never across a boundary or constraint
@@ -122,6 +122,6 @@ void qaws_mesh_2d_get_constraint_edge(qaws_mesh_2d const* mesh, unsigned int edg
 qaws_status qaws_mesh_2d_quadrangulate(qaws_mesh_2d* mesh, int all_quads, unsigned int smoothing_iterations);
 unsigned int qaws_mesh_2d_get_quad_count(qaws_mesh_2d const* mesh);
 /* counter-clockwise vertex indices */
-void qaws_mesh_2d_get_quad(qaws_mesh_2d const* mesh, unsigned int quad, unsigned int out_vertices[4]);
+void qaws_mesh_2d_get_quad(unsigned int out_vertices[4], qaws_mesh_2d const* mesh, unsigned int quad);
 
 #endif /* QAWS_TRIANGULATE_H */

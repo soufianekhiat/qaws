@@ -248,7 +248,7 @@ qaws_status qaws_surface_curve_intersect(qaws_surface_curve const* a, qaws_surfa
 			unsigned int n = 0, i;
 			qaws_scalar m[6];
 			m[0] = 1; m[1] = 0; m[2] = (qaws_scalar)(ku * c.pu); m[3] = 0; m[4] = 1; m[5] = (qaws_scalar)(kv * c.pv);
-			if ((ku || kv) && (st = qaws_curve_transform_2d(cb, m, &moved)) != QAWS_STATUS_OK)
+			if ((ku || kv) && (st = qaws_curve_transform_2d(&moved, cb, m)) != QAWS_STATUS_OK)
 				break;
 			st = qaws_curve_find_intersections_2d(hits, &n, ca, moved ? moved : cb, 64);
 			qaws_curve_destroy(moved);

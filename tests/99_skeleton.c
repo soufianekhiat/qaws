@@ -96,8 +96,8 @@ static double skt_result_area(qaws_clip_result const* r)
 	{
 		qaws_path_2d p;
 		qaws_scalar v = 0;
-		qaws_clip_result_get_path(r, i, &p);
-		qaws_path_compute_area_2d(&p, &v);
+		qaws_clip_result_get_path(&p, r, i);
+		qaws_path_compute_area_2d(&v, &p);
 		a += (double)v;
 	}
 	return a;
@@ -131,7 +131,7 @@ static qaws_skeleton* skt_check(skt_shape const* sh, skt_weights const* wts)
 	for (l = 0; l < sh->nloops; l++)
 	{
 		for (i = 0; i < 2 * sh->count[l]; i++) buf[i] = (qaws_scalar)sh->pts[2 * off + i];
-		qaws_curve_create_polyline_2d(buf, sh->count[l], 1, &cs[l]);
+		qaws_curve_create_polyline_2d(&cs[l], buf, sh->count[l], 1);
 		cv[l] = cs[l];
 		p[l].curves = &cv[l]; p[l].curve_count = 1; p[l].closed = 1;
 		area += skt_poly_area(sh->pts + 2 * off, sh->count[l]);
@@ -140,7 +140,7 @@ static qaws_skeleton* skt_check(skt_shape const* sh, skt_weights const* wts)
 	{
 		/* the region's area: the paths united */
 		qaws_clip_result* u = NULL;
-		if (qaws_clip_boolean(QAWS_CLIP_UNION, QAWS_FILL_NON_ZERO, p, sh->nloops, NULL, 0, &u) == QAWS_STATUS_OK)
+		if (qaws_clip_boolean(&u, p, NULL, sh->nloops, 0, QAWS_CLIP_UNION, QAWS_FILL_NON_ZERO) == QAWS_STATUS_OK)
 			area = skt_result_area(u);
 		qaws_clip_result_destroy(u);
 	}
@@ -587,7 +587,7 @@ static void skt_check_curved(skt_cshape const* sh)
 	ns = off;
 	{
 		qaws_clip_result* u = NULL;
-		if (qaws_clip_boolean(QAWS_CLIP_UNION, QAWS_FILL_NON_ZERO, p, sh->nloops, NULL, 0, &u) == QAWS_STATUS_OK)
+		if (qaws_clip_boolean(&u, p, NULL, sh->nloops, 0, QAWS_CLIP_UNION, QAWS_FILL_NON_ZERO) == QAWS_STATUS_OK)
 			area = skt_result_area(u);
 		qaws_clip_result_destroy(u);
 	}
@@ -644,7 +644,7 @@ static void skt_check_curved(skt_cshape const* sh)
 				continue;
 			qaws_skeleton_offset(s, (qaws_scalar)t, &r1);
 			if (!sh->exact)
-				qaws_offset_paths(p, sh->nloops, (qaws_scalar)-t, QAWS_JOIN_ROUND, QAWS_END_POLYGON, &r2);
+				qaws_offset_paths(&r2, p, sh->nloops, (qaws_scalar)-t, QAWS_JOIN_ROUND, QAWS_END_POLYGON);
 			a1 = skt_result_area(r1);
 			a2 = sh->exact ? sh->exact(t) : skt_result_area(r2);
 			if (fabs(a1 - a2) > worst_round) worst_round = fabs(a1 - a2);
@@ -776,7 +776,7 @@ static void skt_check_freeform(char const* name, qaws_curve* const* cs, unsigned
 	char msg[400];
 	{
 		qaws_clip_result* u = NULL;
-		if (qaws_clip_boolean(QAWS_CLIP_UNION, QAWS_FILL_NON_ZERO, p, np, NULL, 0, &u) == QAWS_STATUS_OK)
+		if (qaws_clip_boolean(&u, p, NULL, np, 0, QAWS_CLIP_UNION, QAWS_FILL_NON_ZERO) == QAWS_STATUS_OK)
 			area = skt_result_area(u);
 		qaws_clip_result_destroy(u);
 	}
@@ -837,7 +837,7 @@ static void test_freeform(void)
 	{
 		double sigma = k ? pi : 0;
 		/* an ellipse: one exact rational NURBS */
-		qaws_curve_create_ellipse_2d(0.1, -0.2, 1.5, 0.8, 0.3, &cs[0]);
+		qaws_curve_create_ellipse_2d(&cs[0], 0.1, -0.2, 1.5, 0.8, 0.3);
 		cv[0] = cs[0];
 		p[0].curves = cv; p[0].curve_count = 1; p[0].closed = 1;
 		skt_check_freeform("ellipse (NURBS)", cs, 1, p, 1, sigma);
@@ -957,7 +957,7 @@ static void test_random_curved(void)
 		for (i = 0; i < nc; i++) cv[i] = cs[i];
 		{
 			qaws_clip_result* u = NULL;
-			if (qaws_clip_boolean(QAWS_CLIP_UNION, QAWS_FILL_NON_ZERO, p, np, NULL, 0, &u) == QAWS_STATUS_OK)
+			if (qaws_clip_boolean(&u, p, NULL, np, 0, QAWS_CLIP_UNION, QAWS_FILL_NON_ZERO) == QAWS_STATUS_OK)
 				area = skt_result_area(u);
 			qaws_clip_result_destroy(u);
 		}
@@ -1009,7 +1009,7 @@ static void test_random_curved(void)
 					qaws_clip_result* r1 = NULL;
 					qaws_clip_result* r2 = NULL;
 					qaws_skeleton_offset(s, (qaws_scalar)t, &r1);
-					qaws_offset_paths(p, np, (qaws_scalar)-t, QAWS_JOIN_ROUND, QAWS_END_POLYGON, &r2);
+					qaws_offset_paths(&r2, p, np, (qaws_scalar)-t, QAWS_JOIN_ROUND, QAWS_END_POLYGON);
 					if (fabs(skt_result_area(r1) - skt_result_area(r2)) > round)
 						round = fabs(skt_result_area(r1) - skt_result_area(r2));
 					qaws_clip_result_destroy(r1);

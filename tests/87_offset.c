@@ -36,8 +36,8 @@ static double ost_area(qaws_clip_result const* r)
 	{
 		qaws_path_2d p;
 		qaws_scalar a = 0;
-		qaws_clip_result_get_path(r, i, &p);
-		qaws_path_compute_area_2d(&p, &a);
+		qaws_clip_result_get_path(&p, r, i);
+		qaws_path_compute_area_2d(&a, &p);
 		sum += a;
 	}
 	return sum;
@@ -49,7 +49,7 @@ static qaws_curve* ost_poly(double const* xy, unsigned int n, int closed)
 	qaws_curve* c = NULL;
 	unsigned int i;
 	for (i = 0; i < 2 * n; i++) p[i] = (qaws_scalar)xy[i];
-	qaws_curve_create_polyline_2d(p, n, closed, &c);
+	qaws_curve_create_polyline_2d(&c, p, n, closed);
 	return c;
 }
 
@@ -61,7 +61,7 @@ static double ost_run(qaws_curve const** cs, unsigned int n, int closed, double 
 	unsigned int i;
 	double a = -1e9;
 	for (i = 0; i < n; i++) { p[i].curves = &cs[i]; p[i].curve_count = 1; p[i].closed = closed; }
-	if (qaws_offset_paths(p, n, (qaws_scalar)delta, jt, et, &r) == QAWS_STATUS_OK)
+	if (qaws_offset_paths(&r, p, n, (qaws_scalar)delta, jt, et) == QAWS_STATUS_OK)
 	{
 		a = ost_area(r);
 		if (out_paths) *out_paths = qaws_clip_result_get_path_count(r);
@@ -155,7 +155,7 @@ static void test_curves(void)
 		qaws_curve* c = NULL;
 		qaws_curve const* cc;
 		double a, b;
-		qaws_curve_create_ellipse_2d(0, 0, 5, 5, 0, &c);
+		qaws_curve_create_ellipse_2d(&c, 0, 0, 5, 5, 0);
 		cc = c;
 		a = ost_run(&cc, 1, 1, 1, QAWS_JOIN_ROUND, QAWS_END_POLYGON, NULL);
 		b = ost_run(&cc, 1, 1, -2, QAWS_JOIN_ROUND, QAWS_END_POLYGON, NULL);
@@ -180,7 +180,7 @@ static void test_curves(void)
 		qaws_curve_create_bezier(&c, &d);
 		cc = c;
 		path.curves = &cc; path.curve_count = 1; path.closed = 0;
-		qaws_path_compute_length_2d(&path, &L);
+		qaws_path_compute_length_2d(&L, &path);
 		{
 			/* the reference length by a dense chord sum, against the path length
 			   (agreeing to 1e-9) */
@@ -229,13 +229,13 @@ static void test_miter_and_callback(void)
 	memset(&d, 0, sizeof(d));
 	g.paths = &p; g.path_count = 1; g.join_type = QAWS_JOIN_MITER; g.end_type = QAWS_END_POLYGON;
 	d.groups = &g; d.group_count = 1; d.delta = 1; d.miter_limit = 2;
-	qaws_offset_execute(&d, &r);
+	qaws_offset_execute(&r, &d);
 	lo.y = hi.y = 0;
 	if (r && qaws_clip_result_get_path_count(r) == 1)
 	{
 		qaws_path_2d o;
-		qaws_clip_result_get_path(r, 0, &o);
-		qaws_path_compute_bounds_2d(&o, &lo, &hi);
+		qaws_clip_result_get_path(&o, r, 0);
+		qaws_path_compute_bounds_2d(&lo, &hi, &o);
 		n = 1;
 	}
 	am = r ? ost_area(r) : 0;
@@ -245,7 +245,7 @@ static void test_miter_and_callback(void)
 	/* constant callback = plain delta */
 	r = NULL;
 	d.delta_fn = ost_const;
-	qaws_offset_execute(&d, &r);
+	qaws_offset_execute(&r, &d);
 	ac = r ? ost_area(r) : 0;
 	qaws_clip_result_destroy(r);
 	ap = ost_run(&cc, 1, 1, 1, QAWS_JOIN_MITER, QAWS_END_POLYGON, NULL);
@@ -295,7 +295,7 @@ static void test_near_straight(void)
 			qaws_clip_result* r = NULL;
 			qaws_status s;
 			path.curves = &pv; path.curve_count = 1; path.closed = 1;
-			s = qaws_offset_paths(&path, 1, (qaws_scalar)delta, joins[j], QAWS_END_POLYGON, &r);
+			s = qaws_offset_paths(&r, &path, 1, (qaws_scalar)delta, joins[j], QAWS_END_POLYGON);
 			sprintf(msg, "an almost straight %s corner %s by 0.02, %s joins: status %d, %u loops (its turn %.3g rad)",
 				c ? "convex" : "reflex", c ? "grown" : "shrunk", names[j], (int)s, r ? qaws_clip_result_get_path_count(r) : 0, turn);
 			TEST_ASSERT(s == QAWS_STATUS_OK && r && qaws_clip_result_get_path_count(r) == 1, msg);
