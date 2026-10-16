@@ -12,8 +12,10 @@
  *   paper4_earbuds.svg    a tangled earbud cable untangled (Fig. 33)
  *   paper5_planar.svg     a tree drawn in the plane (Fig. 26)
  *   paper6_paths.svg      four agents' paths planned in space-time (Fig. 31)
+ * and from Repulsive Surfaces (Yu, Brakensiek, Schumacher, Crane, ACM TOG 2021):
+ *   paper7_cylinder.svg   a cylinder with Dirichlet ends (Fig. 9, left)
  *
- * Usage: qaws_repulsive_paper [data directory [figure 1 to 6 [most steps]]] (default
+ * Usage: qaws_repulsive_paper [data directory [figure 1 to 7 [most steps]]] (default
  * ../examples/data/repulsive_curves, from working_dir; every figure). Minutes, not
  * seconds: the scenes have 500 to 800 vertices and take hundreds of steps
  * (about 20 minutes on 20 threads).
@@ -397,6 +399,305 @@ static void rp_figure(char const* dir, char const* file, char const* svgname, ch
 }
 
 /* ------------------------------------------------------------------ */
+/*  Meshes (Repulsive Surfaces)                                       */
+/* ------------------------------------------------------------------ */
+
+typedef struct rp_mesh
+{
+	double* x;             /* 3 per vertex */
+	unsigned int* t;       /* 3 per face */
+	unsigned int nv, nf;
+} rp_mesh;
+
+/* an OBJ mesh: v and f lines (1-based, v/vt/vn accepted), polygons fanned */
+static int rp_load_mesh(char const* dir, char const* name, rp_mesh* m)
+{
+	char path[1024], line[1024];
+	FILE* f;
+	unsigned int cv = 0, cf = 0, pass;
+	memset(m, 0, sizeof(*m));
+	sprintf(path, "%s/%s", dir, name);
+	if (!(f = fopen(path, "r")))
+	{
+		printf("cannot read %s\n", path);
+		return 0;
+	}
+	for (pass = 0; pass < 2; pass++)
+	{
+		cv = cf = 0;
+		rewind(f);
+		while (fgets(line, sizeof(line), f))
+		{
+			if (line[0] == 'v' && line[1] == ' ')
+			{
+				double a, b, d;
+				if (pass && sscanf(line + 2, "%lf %lf %lf", &a, &b, &d) == 3) { m->x[3 * cv] = a; m->x[3 * cv + 1] = b; m->x[3 * cv + 2] = d; }
+				cv++;
+			}
+			else if (line[0] == 'f' && line[1] == ' ')
+			{
+				unsigned int idx[32], n = 0, k;
+				char* p = line + 2;
+				while (n < 32)
+				{
+					while (*p == ' ' || *p == '\t') p++;
+					if (*p < '0' || *p > '9') break;
+					idx[n++] = (unsigned int)strtoul(p, &p, 10) - 1;
+					while (*p && *p != ' ' && *p != '\t') p++;
+				}
+				for (k = 1; k + 1 < n; k++, cf++)
+					if (pass) { m->t[3 * cf] = idx[0]; m->t[3 * cf + 1] = idx[k]; m->t[3 * cf + 2] = idx[k + 1]; }
+			}
+		}
+		if (!pass)
+		{
+			m->nv = cv; m->nf = cf;
+			m->x = (double*)malloc(sizeof(double) * 3 * (cv + 1));
+			m->t = (unsigned int*)malloc(sizeof(unsigned int) * 3 * (cf + 1));
+			if (!m->x || !m->t)
+				break;
+		}
+	}
+	fclose(f);
+	for (cf = 0; m->x && m->t && cf < 3 * m->nf; cf++)
+		if (m->t[cf] >= m->nv)
+			return 0;
+	return m->x && m->t && m->nf > 0;
+}
+
+static void rp_free_mesh(rp_mesh* m) { free(m->x); free(m->t); }
+
+typedef struct rp_face
+{
+	double depth;
+	unsigned int f;
+} rp_face;
+
+static int rp_face_cmp(void const* p, void const* q)
+{
+	double a = ((rp_face const*)p)->depth, b = ((rp_face const*)q)->depth;
+	return a < b ? 1 : a > b ? -1 : 0;
+}
+
+/* faces nf (3 vertex indices each) of x through the fit, far to near, flat
+   shaded (two-sided) in colour rgb; a face's colour from rgbs[face] if given */
+static void rp_draw_mesh(svg* s, rp_fit const* fit, rp_view const* view, double const* x, unsigned int const* tri, unsigned int nf,
+	int const* rgb, int const* rgbs)
+{
+	static double const light[3] = { -0.35, 0.55, -0.76 };   /* (in the view: from the upper left, toward the eye) */
+	rp_face* order = (rp_face*)malloc(sizeof(rp_face) * nf);
+	unsigned int i, k;
+	for (i = 0; order && i < nf; i++)
+	{
+		double d = 0, q[3];
+		for (k = 0; k < 3; k++) { rp_rotate(view, x + 3 * tri[3 * i + k], q); d += q[2]; }
+		order[i].depth = d; order[i].f = i;
+	}
+	if (order)
+		qsort(order, nf, sizeof(rp_face), rp_face_cmp);
+	for (i = 0; order && i < nf; i++)
+	{
+		unsigned int const* t = tri + 3 * order[i].f;
+		int const* c = rgbs ? rgbs + 3 * order[i].f : rgb;
+		double p[3][3], u[3], w[3], n[3], l, sh;
+		for (k = 0; k < 3; k++) rp_rotate(view, x + 3 * t[k], p[k]);
+		for (k = 0; k < 3; k++) { u[k] = p[1][k] - p[0][k]; w[k] = p[2][k] - p[0][k]; }
+		n[0] = u[1] * w[2] - u[2] * w[1]; n[1] = u[2] * w[0] - u[0] * w[2]; n[2] = u[0] * w[1] - u[1] * w[0];
+		l = sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+		sh = l > 0 ? 0.3 + 0.7 * fabs(n[0] * light[0] + n[1] * light[1] + n[2] * light[2]) / l : 0.3;
+		fprintf(s->f, "<polygon points=\"%.2f,%.2f %.2f,%.2f %.2f,%.2f\" fill=\"rgb(%d,%d,%d)\" stroke=\"rgb(%d,%d,%d)\" stroke-width=\"0.35\" stroke-linejoin=\"round\"/>\n",
+			fit->cx + fit->scale * p[0][0], fit->cy - fit->scale * p[0][1], fit->cx + fit->scale * p[1][0], fit->cy - fit->scale * p[1][1],
+			fit->cx + fit->scale * p[2][0], fit->cy - fit->scale * p[2][1],
+			(int)(c[0] * sh), (int)(c[1] * sh), (int)(c[2] * sh), (int)(c[0] * sh * 0.82), (int)(c[1] * sh * 0.82), (int)(c[2] * sh * 0.82));
+	}
+	free(order);
+}
+
+/* an open cylinder: nu around, nh rings from z = -h/2 to h/2, radius r */
+static int rp_cylinder(unsigned int nu, unsigned int nh, double r, double h, rp_mesh* m)
+{
+	unsigned int i, j, f = 0;
+	m->nv = nu * nh; m->nf = 2 * nu * (nh - 1);
+	m->x = (double*)malloc(sizeof(double) * 3 * m->nv);
+	m->t = (unsigned int*)malloc(sizeof(unsigned int) * 3 * m->nf);
+	if (!m->x || !m->t)
+		return 0;
+	for (j = 0; j < nh; j++)
+		for (i = 0; i < nu; i++)
+		{
+			double a = 6.283185307179586 * (i + 0.5 * (j % 2)) / nu;   /* (alternate rings shifted: near-equilateral faces) */
+			unsigned int v = j * nu + i;
+			m->x[3 * v] = r * cos(a); m->x[3 * v + 1] = r * sin(a); m->x[3 * v + 2] = -0.5 * h + h * j / (nh - 1);
+		}
+	for (j = 0; j + 1 < nh; j++)
+		for (i = 0; i < nu; i++)
+		{
+			unsigned int a = j * nu + i, b = j * nu + (i + 1) % nu, c = (j + 1) * nu + i, d = (j + 1) * nu + (i + 1) % nu;
+			if (j % 2 == 0)
+			{
+				m->t[3 * f] = a; m->t[3 * f + 1] = b; m->t[3 * f + 2] = c; f++;
+				m->t[3 * f] = b; m->t[3 * f + 1] = d; m->t[3 * f + 2] = c; f++;
+			}
+			else
+			{
+				m->t[3 * f] = a; m->t[3 * f + 1] = d; m->t[3 * f + 2] = c; f++;
+				m->t[3 * f] = a; m->t[3 * f + 1] = b; m->t[3 * f + 2] = d; f++;
+			}
+		}
+	return 1;
+}
+
+/* the mesh's vertices on a boundary (an edge of one face) */
+static unsigned int* rp_boundary(rp_mesh const* m, unsigned int* out_count)
+{
+	unsigned int* key = (unsigned int*)malloc(sizeof(unsigned int) * 6 * m->nf);
+	unsigned int* pins = (unsigned int*)malloc(sizeof(unsigned int) * (m->nv + 1));
+	unsigned char* b = (unsigned char*)calloc(m->nv + 1, 1);
+	unsigned int f, k, n = 0, i;
+	*out_count = 0;
+	if (!key || !pins || !b)
+	{
+		free(key); free(b);
+		return pins;
+	}
+	for (f = 0; f < m->nf; f++)
+		for (k = 0; k < 3; k++)
+		{
+			unsigned int u = m->t[3 * f + k], v = m->t[3 * f + (k + 1) % 3];
+			key[2 * n] = u < v ? u : v; key[2 * n + 1] = u < v ? v : u; n++;
+		}
+	/* (an edge counted once: quadratic, but run once per figure) */
+	for (i = 0; i < n; i++)
+	{
+		unsigned int c = 0, j;
+		for (j = 0; j < n && c < 2; j++) c += key[2 * j] == key[2 * i] && key[2 * j + 1] == key[2 * i + 1];
+		if (c == 1) b[key[2 * i]] = b[key[2 * i + 1]] = 1;
+	}
+	for (i = 0; i < m->nv; i++) if (b[i]) pins[(*out_count)++] = i;
+	free(key); free(b);
+	return pins;
+}
+
+/* each face's colour by its component */
+static int* rp_face_colours(rp_mesh const* m)
+{
+	static int const pal[4][3] = { { 110, 165, 235 }, { 240, 150, 80 }, { 120, 200, 130 }, { 200, 130, 210 } };
+	unsigned int* lab = (unsigned int*)malloc(sizeof(unsigned int) * m->nv);
+	int* rgb = (int*)malloc(sizeof(int) * 3 * m->nf);
+	unsigned int i, k, changed = 1;
+	if (!lab || !rgb)
+	{
+		free(lab); free(rgb);
+		return NULL;
+	}
+	for (i = 0; i < m->nv; i++) lab[i] = i;
+	while (changed)
+		for (changed = 0, i = 0; i < m->nf; i++)
+		{
+			unsigned int a = lab[m->t[3 * i]], b = lab[m->t[3 * i + 1]], c = lab[m->t[3 * i + 2]], lo = a < b ? (a < c ? a : c) : (b < c ? b : c);
+			for (k = 0; k < 3; k++)
+				if (lab[m->t[3 * i + k]] != lo) { lab[m->t[3 * i + k]] = lo; changed = 1; }
+		}
+	for (i = 0; i < m->nf; i++)
+	{
+		unsigned int r = 0, v;
+		for (v = 0; v < lab[m->t[3 * i]]; v++) r += lab[v] == v;   /* (the component's rank) */
+		for (k = 0; k < 3; k++) rgb[3 * i + k] = pal[r % 4][k];
+	}
+	free(lab);
+	return rgb;
+}
+
+/* solve the mesh (p, sd's settings) on the
+   caller's threads; snapshots after each of steps[0..nsnap) */
+static void rp_solve_mesh(rp_mesh const* mesh, double p, qaws_repulsive_mesh_solve_desc const* sd0, unsigned int const* steps, unsigned int nsnap,
+	double** snaps, qaws_repulsive_report* reps)
+{
+	unsigned int threads = rp_thread_count(), i, k, it = 0;
+	qaws_batch_executor ex;
+	qaws_repulsive_mesh_desc md;
+	qaws_repulsive_mesh* rm = NULL;
+	qaws_repulsive_mesh_solve_desc sd = *sd0;
+	qaws_repulsive_mesh_solver* s = NULL;
+	qaws_repulsive_report r;
+	qaws_scalar* x = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * mesh->nv);
+	memset(&r, 0, sizeof(r));
+	for (i = 0; i < 3 * mesh->nv; i++) x[i] = (qaws_scalar)mesh->x[i];
+	ex.parallel_for = rp_parallel_for; ex.user = &threads;
+	memset(&md, 0, sizeof(md));
+	md.vertex_count = mesh->nv; md.triangles = mesh->t; md.triangle_count = mesh->nf; md.p = (qaws_scalar)p; md.executor = &ex;
+	if (qaws_repulsive_mesh_create(&md, &rm) != QAWS_STATUS_OK || qaws_repulsive_mesh_solver_create(rm, &sd, x, &s) != QAWS_STATUS_OK)
+		printf("  the scene was refused\n");
+	for (k = 0; k < nsnap; k++)
+	{
+		while (s && it < steps[k] && it < rp_cap && r.reason == QAWS_REPULSIVE_RUNNING)
+		{
+			qaws_repulsive_mesh_solver_step(s, x, &r);
+			it = r.iterations;
+			if (it % 25 == 0 && r.reason == QAWS_REPULSIVE_RUNNING)
+				printf("    %u steps: E %.6g, stationarity %.3g\n", it, (double)r.energy, (double)r.stationarity);
+		}
+		reps[k] = r;
+		snaps[k] = (double*)malloc(sizeof(double) * 3 * mesh->nv);
+		for (i = 0; i < 3 * mesh->nv; i++) snaps[k][i] = (double)x[i];
+		printf("  %u steps: E %.6g, stationarity %.3g, reason %d\n", it, (double)r.energy, (double)r.stationarity, (int)r.reason);
+	}
+	qaws_repulsive_mesh_solver_destroy(s);
+	qaws_repulsive_mesh_destroy(rm);
+	free(x);
+}
+
+/* a surfaces figure: the input and nsnap snapshots, every panel fitted to
+   the input's view */
+static void rp_surface_figure(rp_mesh const* m, char const* svgname, char const* title, char const* subtitle, double p,
+	qaws_repulsive_mesh_solve_desc const* sd, unsigned int const* steps, unsigned int nsnap, rp_view const* view)
+{
+	double* snaps[8];
+	qaws_repulsive_report reps[8];
+	svg s;
+	double const pw = 300, ph = 300;
+	time_t t0 = time(NULL);
+	unsigned int k;
+	char label[200];
+	int* rgbs = rp_face_colours(m);
+	static int const rgb[3] = { 110, 165, 235 };
+	printf("%s: %u vertices, %u faces\n", svgname, m->nv, m->nf);
+	rp_solve_mesh(m, p, sd, steps, nsnap, snaps, reps);
+	if (svg_open(&s, svgname, (int)(48 + (nsnap + 1) * (pw + 12)), (int)(110 + ph + 30), title, subtitle))
+	{
+		viewport v;
+		rp_fit fit;
+		double scale = 1e300;
+		v.y0 = 84; v.w = pw; v.h = ph; v.xmin = v.ymin = 0; v.xmax = v.ymax = 1; v.x0 = 24;
+		for (k = 0; k <= nsnap; k++)
+		{
+			rp_fit_points(&v, view, k ? snaps[k - 1] : m->x, m->nv, &fit);
+			scale = fmin(scale, fit.scale);   /* (one scale for every panel: sizes compare) */
+		}
+		for (k = 0; k <= nsnap; k++)
+		{
+			double const* x = k ? snaps[k - 1] : m->x;
+			v.x0 = 24 + k * (pw + 12);
+			if (k)
+				sprintf(label, "%s%u steps: E %.4g", reps[k - 1].reason == QAWS_REPULSIVE_CONVERGED ? "converged, " : "", reps[k - 1].iterations,
+					(double)reps[k - 1].energy);
+			else
+				sprintf(label, "input: %u faces, E %.4g", m->nf, (double)reps[0].initial_energy);
+			svg_panel(&s, &v, label);
+			rp_fit_points(&v, view, x, m->nv, &fit);
+			fit.cx = v.x0 + 0.5 * v.w + (fit.cx - v.x0 - 0.5 * v.w) * scale / fit.scale;
+			fit.cy = v.y0 + 0.5 * v.h + (fit.cy - v.y0 - 0.5 * v.h) * scale / fit.scale;
+			fit.scale = scale;
+			rp_draw_mesh(&s, &fit, view, x, m->t, m->nf, rgb, rgbs);
+		}
+		svg_close(&s);
+	}
+	for (k = 0; k < nsnap; k++) free(snaps[k]);
+	free(rgbs);
+	printf("  %s, %.0f s\n", svgname, difftime(time(NULL), t0));
+}
+
+/* ------------------------------------------------------------------ */
 /*  Path planning in space-time (Fig. 31)                             */
 /* ------------------------------------------------------------------ */
 
@@ -552,7 +853,7 @@ static void rp_paths_figure(char const* dir)
 int main(int argc, char** argv)
 {
 	char const* dir = argc > 1 ? argv[1] : "../examples/data/repulsive_curves";
-	int only = argc > 2 ? atoi(argv[2]) : 0;   /* (one figure: 1 to 6) */
+	int only = argc > 2 ? atoi(argv[2]) : 0;   /* (one figure: 1 to 7) */
 	if (argc > 3)
 		rp_cap = (unsigned int)atoi(argv[3]);
 	setvbuf(stdout, NULL, _IONBF, 0);
@@ -591,5 +892,24 @@ int main(int argc, char** argv)
 	}
 	if (!only || only == 6)
 		rp_paths_figure(dir);
+	if (!only || only == 7)
+	{
+		/* Repulsive Surfaces, Fig. 9 (left): a cylinder, both rims pinned */
+		static unsigned int const steps[2] = { 10, RP_UNTIL };
+		rp_view view = { 0.5, 0.45 };
+		rp_mesh m;
+		qaws_repulsive_mesh_solve_desc sd;
+		unsigned int npin;
+		unsigned int* pins;
+		if (rp_cylinder(48, 19, 1, 2, &m) && (pins = rp_boundary(&m, &npin)) != NULL)
+		{
+			memset(&sd, 0, sizeof(sd));
+			sd.pinned = pins; sd.pinned_count = npin; sd.theta = (qaws_scalar)0.25;
+			rp_surface_figure(&m, "showcase/paper7_cylinder.svg", "Repulsive Surfaces, Fig. 9 (left): a cylinder with Dirichlet ends",
+				"both rims pinned; p 6; the hierarchical fractional Sobolev descent (theta 0.25)", 6, &sd, steps, 2, &view);
+			free(pins);
+		}
+		rp_free_mesh(&m);
+	}
 	return 0;
 }
