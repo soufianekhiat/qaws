@@ -8,13 +8,13 @@ boundary itself, with the boundary curves' control points as handles.
 qaws_mean_value_desc d = { paths, path_count };      /* closed loops; holes by nesting */
 d.executor = &executor;                               /* optional: deform in parallel */
 qaws_mean_value* m;
-qaws_mean_value_create(&d, &m);
+qaws_mean_value_create(&m, &d);
 
 unsigned int n = qaws_mean_value_get_handle_count(m);
-qaws_mean_value_get_handle(m, i, &p);                 /* the handles at rest */
-qaws_mean_value_coordinates(m, x, weights);           /* n weights: sum 1, sum w_i P_i = x */
-qaws_mean_value_deform(m, moved, points, count, out); /* x -> sum w_i(x) P_i' */
-qaws_mean_value_interpolate(m, x, f, user, dim, out); /* the interpolant of data on the boundary */
+qaws_mean_value_get_handle(&p, m, i);                 /* the handles at rest */
+qaws_mean_value_coordinates(weights, m, x);           /* n weights: sum 1, sum w_i P_i = x */
+qaws_mean_value_deform(out, m, moved, points, count); /* x -> sum w_i(x) P_i' */
+qaws_mean_value_interpolate(out, m, dim, x, f, user); /* the interpolant of data on the boundary */
 qaws_mean_value_destroy(m);
 ```
 

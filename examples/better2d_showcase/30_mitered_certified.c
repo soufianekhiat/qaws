@@ -15,12 +15,12 @@ static qaws_geodesic_segment s30_seg(qaws_surface* f, qaws_vec2 a, qaws_vec2 b, 
 	qaws_range r;
 	memset(&g, 0, sizeof(g));
 	*out = NULL;
-	if (qaws_surface_curve_create_shortest_path(f, NULL, a, b, 0, out) != QAWS_STATUS_OK)
+	if (qaws_surface_curve_create_shortest_path(out, f, NULL, a, b, 0) != QAWS_STATUS_OK)
 		return g;
 	r = qaws_curve_get_parameter_range(qaws_surface_curve_get_uv(*out));
 	qaws_curve_evaluate_2d(&e, qaws_surface_curve_get_uv(*out), r.min_value, QAWS_EVAL_FLAG_D1);
 	g.start = a; g.direction = e.d1;
-	qaws_surface_curve_get_length(*out, &g.length);
+	qaws_surface_curve_get_length(&g.length, *out);
 	return g;
 }
 
@@ -68,7 +68,7 @@ static void demo_mitered_certified(void)
 			for (i = 0; i < 6; i++) { cv[i] = ssf_line(surf, L[i][0], L[i][1], L[(i + 1) % 6][0], L[(i + 1) % 6][1], &keep[i]); pc[i] = cv[i]; }
 			ncv = 6;
 			ssf_path(&Q, pc, 6);
-			qaws_surface_clip(surf, QAWS_CLIP_NONE, QAWS_FILL_NON_ZERO, &Q, 1, NULL, 0, &r);
+			qaws_surface_clip(&r, surf, &Q, NULL, 1, 0, QAWS_CLIP_NONE, QAWS_FILL_NON_ZERO);
 			sgf_view_init(&view, 0.7, 0.75, 100, v3.x0 + pw / 2, v3.y0 + ph / 2 + 10);
 			view.o[0] = 1; view.o[1] = 1; view.o[2] = 0.3;
 			mesh_lines = 10;
@@ -87,7 +87,7 @@ static void demo_mitered_certified(void)
 			(void)g;
 			ncv = 4;
 			ssf_path(&Q, pc, 4);
-			qaws_surface_clip(surf, QAWS_CLIP_NONE, QAWS_FILL_NON_ZERO, &Q, 1, NULL, 0, &r);
+			qaws_surface_clip(&r, surf, &Q, NULL, 1, 0, QAWS_CLIP_NONE, QAWS_FILL_NON_ZERO);
 			sgf_view_init(&view, -0.7, 0.75, 110, v3.x0 + pw / 2, v3.y0 + ph / 2 + 10);
 			name = "a dart of shortest paths on the bump";
 		}
@@ -108,10 +108,10 @@ static void demo_mitered_certified(void)
 			ncv = 6;
 			for (i = 0; i < 3; i++) pc[i] = cv[i];
 			ssf_path(&Q, pc, 3);
-			qaws_surface_clip(surf, QAWS_CLIP_NONE, QAWS_FILL_NON_ZERO, &Q, 1, NULL, 0, &r);
-			if (r) qaws_surface_region_get_area(r, &A);
-			sc = (int)qaws_surface_geodesics_certify(surf, g, 6, corner, 0, &n);
-			sa = (int)qaws_surface_geodesic_polygon_area(surf, g, 3, 0, 512, &lo, &hi);
+			qaws_surface_clip(&r, surf, &Q, NULL, 1, 0, QAWS_CLIP_NONE, QAWS_FILL_NON_ZERO);
+			if (r) qaws_surface_region_get_area(&A, r);
+			sc = (int)qaws_surface_geodesics_certify(&n, surf, g, corner, 6, 0);
+			sa = (int)qaws_surface_geodesic_polygon_area(&lo, &hi, surf, g, 3, 0, 512);
 			sgf_view_init(&view, -0.7, 0.75, 110, v3.x0 + pw / 2, v3.y0 + ph / 2 + 10);
 			name = "geodesic triangles certified on the bump";
 			sprintf(label, "%u crossings certified%s; area [%.3f, %.3f]%s", n, sc ? " (failed)" : "", (double)lo, (double)hi, sa ? " (failed)" : "");
@@ -126,8 +126,8 @@ static void demo_mitered_certified(void)
 			pu = 1;
 			for (i = 0; i < 4; i++)
 			{
-				qaws_surface_curve_create_shortest_path(surf, NULL, sgf_uv(P[i][0], P[i][1]), sgf_uv(P[i][2], P[i][3]), 0, &cv[2 * i]);
-				qaws_surface_curve_create_geodesic(surf, sgf_uv(P[i][0], P[i][1]), sgf_uv(P[i][2], P[i][3]), 0, &cv[2 * i + 1]);
+				qaws_surface_curve_create_shortest_path(&cv[2 * i], surf, NULL, sgf_uv(P[i][0], P[i][1]), sgf_uv(P[i][2], P[i][3]), 0);
+				qaws_surface_curve_create_geodesic(&cv[2 * i + 1], surf, sgf_uv(P[i][0], P[i][1]), sgf_uv(P[i][2], P[i][3]), 0);
 			}
 			ncv = 8;
 			sgf_view_init(&view, -pi / 2 + 0.35, 0.75, 105, v3.x0 + pw / 2, v3.y0 + ph / 2 + 4);
@@ -137,8 +137,8 @@ static void demo_mitered_certified(void)
 			{
 				qaws_scalar a = 0, b = 0;
 				char one[40];
-				if (cv[2 * i]) qaws_surface_curve_get_length(cv[2 * i], &a);
-				if (cv[2 * i + 1]) qaws_surface_curve_get_length(cv[2 * i + 1], &b);
+				if (cv[2 * i]) qaws_surface_curve_get_length(&a, cv[2 * i]);
+				if (cv[2 * i + 1]) qaws_surface_curve_get_length(&b, cv[2 * i + 1]);
 				sprintf(one, "%s%.2f/%.2f", i ? ", " : "seeded/chord ", (double)a, (double)b);
 				strcat(label, one);
 			}
@@ -148,8 +148,8 @@ static void demo_mitered_certified(void)
 			qaws_surface_medial_desc md;
 			memset(&md, 0, sizeof(md));
 			md.resolution = (qaws_scalar)0.04;
-			qaws_surface_region_medial_axis(r, &md, &ma);
-			if (qaws_surface_region_mitered_skeleton(r, &md, &mm) == QAWS_STATUS_OK)
+			qaws_surface_region_medial_axis(&ma, r, &md);
+			if (qaws_surface_region_mitered_skeleton(&mm, r, &md) == QAWS_STATUS_OK)
 				sprintf(label, "mitered: %u segments, %u junctions (medial %u)", qaws_surface_medial_axis_get_segment_count(mm),
 					qaws_surface_medial_axis_get_junction_count(mm), qaws_surface_medial_axis_get_segment_count(ma));
 		}
@@ -179,7 +179,7 @@ static void demo_mitered_certified(void)
 				unsigned int j, nx = 0, q;
 				qaws_surface_crossing x[4];
 				for (j = 3; j < 6; j++)
-					if (cv[i] && cv[j] && qaws_surface_curve_intersect(cv[i], cv[j], x, 4, &nx) == QAWS_STATUS_OK)
+					if (cv[i] && cv[j] && qaws_surface_curve_intersect(x, &nx, cv[i], cv[j], 4) == QAWS_STATUS_OK)
 						for (q = 0; q < nx && q < 4; q++)
 						{
 							qaws_surface_eval_result e;

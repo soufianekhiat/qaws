@@ -66,7 +66,7 @@ static int sq_geo(qaws_internal_sg_ctx const* c, double const* a, double const* 
 	return 1;
 }
 
-qaws_status qaws_surface_distance(qaws_surface const* surface, qaws_vec2 a, qaws_vec2 b, qaws_scalar tolerance, qaws_scalar* out_distance)
+qaws_status qaws_surface_distance(qaws_scalar* out_distance, qaws_surface const* surface, qaws_vec2 a, qaws_vec2 b, qaws_scalar tolerance)
 {
 	qaws_internal_sg_ctx c;
 	double pa[2], pb[2], th = 0, L = 0;
@@ -198,8 +198,8 @@ static int sq_closest(qaws_internal_sg_ctx const* c, qaws_curve const* cv, doubl
 	return 1;
 }
 
-qaws_status qaws_surface_curve_closest_point(qaws_surface_curve const* curve, qaws_vec2 p, qaws_scalar tolerance,
-	qaws_scalar* out_parameter, qaws_vec2* out_point, qaws_scalar* out_distance)
+qaws_status qaws_surface_curve_closest_point(qaws_scalar* out_parameter, qaws_vec2* out_point, qaws_scalar* out_distance,
+	qaws_surface_curve const* curve, qaws_vec2 p, qaws_scalar tolerance)
 {
 	qaws_internal_sg_ctx c;
 	double x[2], t, d, q[2];
@@ -220,8 +220,8 @@ qaws_status qaws_surface_curve_closest_point(qaws_surface_curve const* curve, qa
 	return QAWS_STATUS_OK;
 }
 
-qaws_status qaws_surface_curve_intersect(qaws_surface_curve const* a, qaws_surface_curve const* b, qaws_surface_crossing* out_crossings,
-	unsigned int capacity, unsigned int* out_count)
+qaws_status qaws_surface_curve_intersect(qaws_surface_crossing* out_crossings, unsigned int* out_count, qaws_surface_curve const* a,
+	qaws_surface_curve const* b, unsigned int capacity)
 {
 	qaws_internal_sg_ctx c;
 	qaws_curve const *ca, *cb;
@@ -266,9 +266,9 @@ qaws_status qaws_surface_curve_intersect(qaws_surface_curve const* a, qaws_surfa
 	return st;
 }
 
-qaws_status qaws_surface_curve_closest_points(qaws_surface_curve const* a, qaws_surface_curve const* b, qaws_scalar tolerance,
-	qaws_scalar* out_parameter_a, qaws_scalar* out_parameter_b, qaws_vec2* out_point_a, qaws_vec2* out_point_b,
-	qaws_scalar* out_distance)
+qaws_status qaws_surface_curve_closest_points(qaws_scalar* out_parameter_a, qaws_scalar* out_parameter_b, qaws_vec2* out_point_a,
+	qaws_vec2* out_point_b, qaws_scalar* out_distance, qaws_surface_curve const* a, qaws_surface_curve const* b,
+	qaws_scalar tolerance)
 {
 	qaws_internal_sg_ctx c;
 	qaws_curve const *ca, *cb;
@@ -278,7 +278,7 @@ qaws_status qaws_surface_curve_closest_points(qaws_surface_curve const* a, qaws_
 	qaws_status st;
 	if (!a || !b)
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	if ((st = qaws_surface_curve_intersect(a, b, &x, 1, &n)) != QAWS_STATUS_OK)
+	if ((st = qaws_surface_curve_intersect(&x, &n, a, b, 1)) != QAWS_STATUS_OK)
 		return st;
 	if ((st = qaws_internal_sg_init(&c, qaws_surface_curve_get_surface(a), (double)tolerance)) != QAWS_STATUS_OK)
 		return st;
@@ -360,8 +360,8 @@ static int sq_on_seam(qaws_internal_sg_ctx const* c, qaws_curve const* cv)
 	return 0;
 }
 
-qaws_status qaws_surface_region_distance(qaws_surface_region const* region, qaws_vec2 p, qaws_scalar tolerance,
-	qaws_scalar* out_distance, qaws_vec2* out_nearest)
+qaws_status qaws_surface_region_distance(qaws_scalar* out_distance, qaws_vec2* out_nearest, qaws_surface_region const* region,
+	qaws_vec2 p, qaws_scalar tolerance)
 {
 	qaws_internal_sg_ctx c;
 	unsigned int np, i, j;
@@ -385,7 +385,7 @@ qaws_status qaws_surface_region_distance(qaws_surface_region const* region, qaws
 		for (i = 0; i < np && st == QAWS_STATUS_OK; i++)
 		{
 			qaws_path_2d path;
-			if ((st = qaws_surface_region_get_path(region, i, &path)) != QAWS_STATUS_OK)
+			if ((st = qaws_surface_region_get_path(&path, region, i)) != QAWS_STATUS_OK)
 				break;
 			for (j = 0; j < path.curve_count; j++)
 			{
@@ -446,7 +446,7 @@ qaws_status qaws_surface_region_distance(qaws_surface_region const* region, qaws
 	}
 	if (!(best < 1e300))
 		return QAWS_STATUS_NUMERICAL_FAILURE;
-	if ((st = qaws_surface_region_contains(region, p, &inside)) != QAWS_STATUS_OK)
+	if ((st = qaws_surface_region_contains(&inside, region, p)) != QAWS_STATUS_OK)
 		return st;
 	*out_distance = (qaws_scalar)(inside == 1 ? -best : inside == -1 ? 0 : best);
 	if (out_nearest) { out_nearest->x = (qaws_scalar)bq[0]; out_nearest->y = (qaws_scalar)bq[1]; }
@@ -467,8 +467,8 @@ static qaws_status sq_line(double x0, double y0, double x1, double y1, qaws_curv
 	return qaws_curve_create_bezier(out, &bd);
 }
 
-qaws_status qaws_surface_curve_create_shortest_path(qaws_surface const* surface, qaws_surface_region const* obstacles, qaws_vec2 p0,
-	qaws_vec2 p1, qaws_scalar tolerance, qaws_surface_curve** out_curve)
+qaws_status qaws_surface_curve_create_shortest_path(qaws_surface_curve** out_curve, qaws_surface const* surface, qaws_surface_region const* obstacles,
+	qaws_vec2 p0, qaws_vec2 p1, qaws_scalar tolerance)
 {
 	qaws_internal_sg_ctx c;
 	qaws_curve** own = NULL;            /* every curve made here: the loops' */
@@ -488,7 +488,7 @@ qaws_status qaws_surface_curve_create_shortest_path(qaws_surface const* surface,
 	for (i = 0; i < np; i++)
 	{
 		qaws_path_2d p;
-		if ((st = qaws_surface_region_get_path(obstacles, i, &p)) != QAWS_STATUS_OK)
+		if ((st = qaws_surface_region_get_path(&p, obstacles, i)) != QAWS_STATUS_OK)
 			return st;
 		for (j = 0; j < p.curve_count; j++)
 			if (sq_on_seam(&c, p.curves[j]))
@@ -543,7 +543,7 @@ qaws_status qaws_surface_curve_create_shortest_path(qaws_surface const* surface,
 	{
 		qaws_path_2d p;
 		unsigned int first = nown;
-		qaws_surface_region_get_path(obstacles, i, &p);
+		qaws_surface_region_get_path(&p, obstacles, i);
 		for (j = 0; j < p.curve_count && st == QAWS_STATUS_OK; j++)
 		{
 			st = qaws_curve_reverse(&own[nown], p.curves[p.curve_count - 1 - j]);
@@ -560,11 +560,11 @@ qaws_status qaws_surface_curve_create_shortest_path(qaws_surface const* surface,
 		goto done;
 	memset(&fd, 0, sizeof(fd));
 	fd.surface = surface; fd.trims = loops; fd.trim_count = nl;
-	if ((st = qaws_shell_atlas_create_trimmed(&fd, 1, 0, &atlas)) == QAWS_STATUS_OK)
+	if ((st = qaws_shell_atlas_create_trimmed(&atlas, &fd, 1, 0)) == QAWS_STATUS_OK)
 	{
 		qaws_shell_point a, b;
 		a.face = b.face = 0; a.uv = p0; b.uv = p1;
-		st = qaws_shell_curve_create_shortest_path(atlas, a, b, tolerance, &sc);
+		st = qaws_shell_curve_create_shortest_path(&sc, atlas, a, b, tolerance);
 	}
 	if (st == QAWS_STATUS_OK)
 	{
@@ -579,7 +579,7 @@ qaws_status qaws_surface_curve_create_shortest_path(qaws_surface const* surface,
 			unsigned int fw;
 			qaws_surface_curve const* run;
 			qaws_range rg;
-			if ((st = qaws_shell_curve_get_run(sc, i, &fw, &run)) != QAWS_STATUS_OK)
+			if ((st = qaws_shell_curve_get_run(&fw, &run, sc, i)) != QAWS_STATUS_OK)
 				break;
 			rg = qaws_curve_get_parameter_range(qaws_surface_curve_get_uv(run));
 			st = qaws_curve_extract(&seg[i], qaws_surface_curve_get_uv(run), rg.min_value, rg.max_value);
@@ -594,7 +594,7 @@ qaws_status qaws_surface_curve_create_shortest_path(qaws_surface const* surface,
 		else if (seg)
 			for (i = 0; i < nr; i++) qaws_curve_destroy(seg[i]);
 		if (st == QAWS_STATUS_OK)
-			st = qaws_surface_curve_create_uv(surface, comp, out_curve);
+			st = qaws_surface_curve_create_uv(out_curve, surface, comp);
 		qaws_curve_destroy(comp);
 		free(seg);
 	}

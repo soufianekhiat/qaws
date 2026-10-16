@@ -143,10 +143,10 @@ int test_95_jobs_main(void)
 		{
 			unsigned int same_c = 1, same_c64 = 1, same_o = 1, same_o64 = 1;
 			qaws_batch_executor const* x = e ? &ex[e] : NULL;
-			qaws_status a = qaws_clip_execute_batch(r2, J95_JOBS, cd, x);
-			qaws_status b = qaws_clip64_execute_batch(s2, J95_JOBS, cd64, x);
-			qaws_status c = qaws_offset_execute_batch(o2, J95_JOBS, od, x);
-			qaws_status d = qaws_offset64_execute_batch(q2, J95_JOBS, od64, x);
+			qaws_status a = qaws_clip_execute_batch(r2, cd, J95_JOBS, x);
+			qaws_status b = qaws_clip64_execute_batch(s2, cd64, J95_JOBS, x);
+			qaws_status c = qaws_offset_execute_batch(o2, od, J95_JOBS, x);
+			qaws_status d = qaws_offset64_execute_batch(q2, od64, J95_JOBS, x);
 			for (i = 0; i < J95_JOBS; i++)
 			{
 				same_c = same_c && j95_same(r1[i], r2[i]);
@@ -173,7 +173,7 @@ int test_95_jobs_main(void)
 		qaws_status s;
 		bad[0] = cd[0]; bad[1] = cd[1]; bad[2] = cd[2];
 		bad[1].subjects = NULL; bad[1].subject_count = 3;
-		s = qaws_clip_execute_batch(r, 3, bad, NULL);
+		s = qaws_clip_execute_batch(r, bad, 3, NULL);
 		sprintf(msg, "a failing job: its status, no result kept (%d, %p %p %p)", (int)s, (void*)r[0], (void*)r[1], (void*)r[2]);
 		TEST_ASSERT(s != QAWS_STATUS_OK && !r[0] && !r[1] && !r[2], msg);
 	}

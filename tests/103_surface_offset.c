@@ -62,9 +62,9 @@ static double sot_offset(qaws_surface const* s, qaws_surface_curve* const* cv, u
 	unsigned int i;
 	for (i = 0; i < n; i++) pc[i] = cv[i];
 	P.curves = pc; P.curve_count = n; P.closed = closed;
-	*st = qaws_surface_offset(s, QAWS_FILL_NON_ZERO, &P, 1, (qaws_scalar)d, 0, &r);
-	if (*st == QAWS_STATUS_OK) *st = qaws_surface_region_get_area(r, &a);
-	if (*st == QAWS_STATUS_OK && per) *st = qaws_surface_region_get_perimeter(r, &p);
+	*st = qaws_surface_offset(&r, s, &P, 1, QAWS_FILL_NON_ZERO, (qaws_scalar)d, 0);
+	if (*st == QAWS_STATUS_OK) *st = qaws_surface_region_get_area(&a, r);
+	if (*st == QAWS_STATUS_OK && per) *st = qaws_surface_region_get_perimeter(&p, r);
 	if (per) *per = (double)p;
 	qaws_surface_region_destroy(r);
 	return (double)a;
@@ -79,9 +79,9 @@ static double sot_area(qaws_surface const* s, qaws_surface_curve* const* cv, uns
 	unsigned int i;
 	for (i = 0; i < n; i++) pc[i] = cv[i];
 	P.curves = pc; P.curve_count = n; P.closed = 1;
-	*st = qaws_surface_clip(s, QAWS_CLIP_NONE, QAWS_FILL_NON_ZERO, &P, 1, NULL, 0, &r);
-	if (*st == QAWS_STATUS_OK) *st = qaws_surface_region_get_area(r, &a);
-	if (*st == QAWS_STATUS_OK && per) *st = qaws_surface_region_get_perimeter(r, &p);
+	*st = qaws_surface_clip(&r, s, &P, NULL, 1, 0, QAWS_CLIP_NONE, QAWS_FILL_NON_ZERO);
+	if (*st == QAWS_STATUS_OK) *st = qaws_surface_region_get_area(&a, r);
+	if (*st == QAWS_STATUS_OK && per) *st = qaws_surface_region_get_perimeter(&p, r);
 	if (per) *per = (double)p;
 	qaws_surface_region_destroy(r);
 	return (double)a;
@@ -90,7 +90,7 @@ static double sot_area(qaws_surface const* s, qaws_surface_curve* const* cv, uns
 static qaws_surface_curve* sot_circle(qaws_surface const* s, double u, double v, double r)
 {
 	qaws_surface_curve* c = NULL;
-	qaws_surface_curve_create_geodesic_arc(s, sot_uv(u, v), (qaws_scalar)r, 0, (qaws_scalar)(2 * SOT_PI), 0, &c);
+	qaws_surface_curve_create_geodesic_arc(&c, s, sot_uv(u, v), (qaws_scalar)r, 0, (qaws_scalar)(2 * SOT_PI), 0);
 	return c;
 }
 
@@ -114,7 +114,7 @@ static void test_sphere(void)
 	TEST_ASSERT(c && !q1 && !q2 && fabs(a1 - cap1) <= tol && fabs(a2 - cap2) <= tol &&
 		fabs(p1 - 2 * SOT_PI * R * sin((rho + d) / R)) <= tol && fabs(p2 - 2 * SOT_PI * R * sin((rho - d) / R)) <= tol, msg);
 	tri[0] = sot_uv(0.3, 0.42); tri[1] = sot_uv(0.5, 0.40); tri[2] = sot_uv(0.4, 0.68);
-	for (i = 0; i < 3; i++) qaws_surface_curve_create_geodesic(s, tri[i], tri[(i + 1) % 3], 0, &t[i]);
+	for (i = 0; i < 3; i++) qaws_surface_curve_create_geodesic(&t[i], s, tri[i], tri[(i + 1) % 3], 0);
 	{
 		double A, L;
 		qaws_scalar l0 = 0;
@@ -122,7 +122,7 @@ static void test_sphere(void)
 		at = sot_offset(s, t, 3, 1, d, NULL, &q4);
 		cf = A + L * R * sin(d / R) + (2 * SOT_PI - A / (R * R)) * R * R * (1 - cos(d / R));
 		as = sot_offset(s, t, 1, 0, d, NULL, &q5);
-		qaws_surface_curve_get_length(t[0], &l0);
+		qaws_surface_curve_get_length(&l0, t[0]);
 		cs = 2 * (double)l0 * R * sin(d / R) + 2 * SOT_PI * R * R * (1 - cos(d / R));
 	}
 	sprintf(msg, "sphere: a geodesic triangle grown against strips and corner sectors %.2g; a geodesic segment's tube %.2g",
@@ -135,7 +135,7 @@ static void test_sphere(void)
 		double A, L, ag, cfs;
 		qaws_status w1, w2;
 		tv[0] = sot_uv(0.92, 0.36); tv[1] = sot_uv(1.12, 0.40); tv[2] = sot_uv(1.0, 0.66);
-		for (i = 0; i < 3; i++) qaws_surface_curve_create_geodesic(s, tv[i], tv[(i + 1) % 3], 0, &ts[i]);
+		for (i = 0; i < 3; i++) qaws_surface_curve_create_geodesic(&ts[i], s, tv[i], tv[(i + 1) % 3], 0);
 		A = sot_area(s, ts, 3, &L, &w1);
 		ag = sot_offset(s, ts, 3, 1, d, NULL, &w2);
 		cfs = A + L * R * sin(d / R) + (2 * SOT_PI - A / (R * R)) * R * R * (1 - cos(d / R));
@@ -149,9 +149,9 @@ static void test_sphere(void)
 		qaws_range rg;
 		double worst = 0, cx[3], ccl = cos(SOT_PI * 0.55 - SOT_PI / 2);
 		unsigned int k;
-		qaws_status st = qaws_surface_curve_create_offset(c, (qaws_scalar)d, 0, &o);
+		qaws_status st = qaws_surface_curve_create_offset(&o, c, (qaws_scalar)d, 0);
 		/* the circle runs counter-clockwise: its right is outward */
-		if (st == QAWS_STATUS_OK) { qaws_surface_curve_destroy(o); o = NULL; st = qaws_surface_curve_create_offset(c, (qaws_scalar)-d, 0, &o); }
+		if (st == QAWS_STATUS_OK) { qaws_surface_curve_destroy(o); o = NULL; st = qaws_surface_curve_create_offset(&o, c, (qaws_scalar)-d, 0); }
 		cx[0] = R * ccl * cos(2 * SOT_PI * 0.4); cx[1] = R * ccl * sin(2 * SOT_PI * 0.4); cx[2] = R * sin(SOT_PI * 0.55 - SOT_PI / 2);
 		if (st == QAWS_STATUS_OK)
 		{
@@ -160,7 +160,7 @@ static void test_sphere(void)
 			{
 				qaws_vec3 p;
 				double dot, ang;
-				qaws_surface_curve_evaluate(o, (qaws_scalar)(rg.min_value + (rg.max_value - rg.min_value) * k / 200), NULL, &p);
+				qaws_surface_curve_evaluate(NULL, &p, o, (qaws_scalar)(rg.min_value + (rg.max_value - rg.min_value) * k / 200));
 				dot = (p.x * cx[0] + p.y * cx[1] + p.z * cx[2]) / (R * R);
 				ang = R * acos(dot > 1 ? 1 : dot);
 				if (fabs(ang - (rho + d)) > worst) worst = fabs(ang - (rho + d));
@@ -186,10 +186,10 @@ static void test_sphere(void)
 		E[1].curves = pe + 1; E[1].curve_count = 1; E[1].closed = 1;
 		F[0].curves = pf; F[0].curve_count = 1; F[0].closed = 1;
 		F[1].curves = pf + 1; F[1].curve_count = 1; F[1].closed = 1;
-		s1 = qaws_surface_offset(s, QAWS_FILL_NON_ZERO, E, 2, (qaws_scalar)d, 0, &rg);
-		s2 = qaws_surface_clip(s, QAWS_CLIP_NONE, QAWS_FILL_NON_ZERO, F, 2, NULL, 0, &rf);
-		if (!s1) qaws_surface_region_get_area(rg, &ag);
-		if (!s2) qaws_surface_region_get_area(rf, &af);
+		s1 = qaws_surface_offset(&rg, s, E, 2, QAWS_FILL_NON_ZERO, (qaws_scalar)d, 0);
+		s2 = qaws_surface_clip(&rf, s, F, NULL, 2, 0, QAWS_CLIP_NONE, QAWS_FILL_NON_ZERO);
+		if (!s1) qaws_surface_region_get_area(&ag, rg);
+		if (!s2) qaws_surface_region_get_area(&af, rf);
 		sprintf(msg, "sphere: two overlapping circles' union grown against the union of the circles of radius rho + d %.2g", fabs((double)ag - (double)af));
 		TEST_ASSERT(!s1 && !s2 && fabs((double)ag - (double)af) <= tol && af > 1, msg);
 		qaws_surface_region_destroy(rg); qaws_surface_region_destroy(rf);
@@ -216,7 +216,7 @@ static void test_plane(void)
 	bd.p10.x = 2; bd.p01.x = (qaws_scalar)0.6; bd.p01.y = 3; bd.p11.x = (qaws_scalar)2.6; bd.p11.y = 3;
 	qaws_surface_create_bilinear(&s, &bd);
 	corner[0] = sot_uv(0.3, 0.3); corner[1] = sot_uv(0.62, 0.3); corner[2] = sot_uv(0.62, 0.58); corner[3] = sot_uv(0.3, 0.58);
-	for (i = 0; i < 4; i++) qaws_surface_curve_create_geodesic(s, corner[i], corner[(i + 1) % 4], 0, &sq[i]);
+	for (i = 0; i < 4; i++) qaws_surface_curve_create_geodesic(&sq[i], s, corner[i], corner[(i + 1) % 4], 0);
 	/* the parallelogram: sides (0.64, 0) and (0.168, 0.84) */
 	bl = sqrt(0.168 * 0.168 + 0.84 * 0.84);
 	A = 0.64 * 0.84;
@@ -269,13 +269,13 @@ static void test_cylinder(void)
 		qaws_curve_create_bezier(&k1, &bz);
 		cp[0] = ru.max_value; cp[1] = (qaws_scalar)0.6; cp[2] = ru.min_value; cp[3] = (qaws_scalar)0.6;
 		qaws_curve_create_bezier(&k2, &bz);
-		qaws_surface_curve_create_uv(cy, k1, &band[0]);
-		qaws_surface_curve_create_uv(cy, k2, &band[1]);
+		qaws_surface_curve_create_uv(&band[0], cy, k1);
+		qaws_surface_curve_create_uv(&band[1], cy, k2);
 		p0[0] = band[0]; p1[0] = band[1];
 		B[0].curves = p0; B[0].curve_count = 1; B[0].closed = 1;
 		B[1].curves = p1; B[1].curve_count = 1; B[1].closed = 1;
-		q3 = qaws_surface_offset(cy, QAWS_FILL_NON_ZERO, B, 2, (qaws_scalar)d, 0, &r);
-		if (q3 == QAWS_STATUS_OK) q3 = qaws_surface_region_get_area(r, &a);
+		q3 = qaws_surface_offset(&r, cy, B, 2, QAWS_FILL_NON_ZERO, (qaws_scalar)d, 0);
+		if (q3 == QAWS_STATUS_OK) q3 = qaws_surface_region_get_area(&a, r);
 		qaws_surface_region_destroy(r);
 		ab = (double)a;
 	}

@@ -615,18 +615,18 @@ static qaws_status sr_clip(qaws_surface const* surface, qaws_clip_type clip_type
 	return QAWS_STATUS_OK;
 }
 
-qaws_status qaws_surface_clip(qaws_surface const* surface, qaws_clip_type clip_type, qaws_fill_rule fill_rule,
-	qaws_surface_path const* subjects, unsigned int subject_count,
-	qaws_surface_path const* clips, unsigned int clip_count,
-	qaws_surface_region** out_region)
+qaws_status qaws_surface_clip(qaws_surface_region** out_region, qaws_surface const* surface, qaws_surface_path const* subjects,
+	qaws_surface_path const* clips, unsigned int subject_count,
+	unsigned int clip_count, qaws_clip_type clip_type,
+	qaws_fill_rule fill_rule)
 {
 	return sr_clip(surface, clip_type, fill_rule, subjects, subject_count, clips, clip_count, NULL, out_region);
 }
 
-qaws_status qaws_surface_clip_exact(qaws_surface const* surface, qaws_clip_type clip_type, qaws_fill_rule fill_rule,
-	qaws_surface_path const* subjects, unsigned int subject_count,
-	qaws_surface_path const* clips, unsigned int clip_count,
-	qaws_exact_desc const* exact, qaws_surface_region** out_region)
+qaws_status qaws_surface_clip_exact(qaws_surface_region** out_region, qaws_surface const* surface, qaws_surface_path const* subjects,
+	qaws_surface_path const* clips, unsigned int subject_count,
+	unsigned int clip_count, qaws_exact_desc const* exact,
+	qaws_clip_type clip_type, qaws_fill_rule fill_rule)
 {
 	sr_mode md;
 	md.exact = 1;
@@ -675,7 +675,7 @@ unsigned int qaws_surface_region_get_path_count(qaws_surface_region const* regio
 	return region ? qaws_clip_result_get_path_count(region->res) : 0;
 }
 
-qaws_status qaws_surface_region_get_path(qaws_surface_region const* region, unsigned int index, qaws_path_2d* out_uv_path)
+qaws_status qaws_surface_region_get_path(qaws_path_2d* out_uv_path, qaws_surface_region const* region, unsigned int index)
 {
 	if (!region || !out_uv_path)
 		return QAWS_STATUS_INVALID_ARGUMENT;
@@ -800,7 +800,7 @@ static void sr_job_init(sr_job* jb, qaws_surface_region const* r)
 	jb->panel = (r->ctx.u1 - r->ctx.u0) / 8;
 }
 
-qaws_status qaws_surface_region_get_area(qaws_surface_region const* region, qaws_scalar* out_area)
+qaws_status qaws_surface_region_get_area(qaws_scalar* out_area, qaws_surface_region const* region)
 {
 	sr_job jb;
 	double a;
@@ -813,8 +813,8 @@ qaws_status qaws_surface_region_get_area(qaws_surface_region const* region, qaws
 	return st;
 }
 
-qaws_status qaws_surface_region_integrate(qaws_surface_region const* region, qaws_surface_region_fn fn, void* user,
-	unsigned int dim, qaws_scalar* out_values)
+qaws_status qaws_surface_region_integrate(qaws_scalar* out_values, qaws_surface_region const* region, unsigned int dim,
+	qaws_surface_region_fn fn, void* user)
 {
 	sr_job jb;
 	double v[16];
@@ -860,7 +860,7 @@ static int sr_on_seam(qaws_internal_sg_ctx const* c, qaws_curve const* cv, doubl
 	return 0;
 }
 
-qaws_status qaws_surface_region_get_perimeter(qaws_surface_region const* region, qaws_scalar* out_length)
+qaws_status qaws_surface_region_get_perimeter(qaws_scalar* out_length, qaws_surface_region const* region)
 {
 	unsigned int np, pi, ci;
 	double total = 0;
@@ -905,7 +905,7 @@ qaws_status qaws_surface_region_get_perimeter(qaws_surface_region const* region,
 	return QAWS_STATUS_OK;
 }
 
-qaws_status qaws_surface_region_contains(qaws_surface_region const* region, qaws_vec2 uv, int* out_inside)
+qaws_status qaws_surface_region_contains(int* out_inside, qaws_surface_region const* region, qaws_vec2 uv)
 {
 	unsigned int np, i;
 	qaws_path_2d* paths;
@@ -941,7 +941,7 @@ qaws_status qaws_surface_region_contains(qaws_surface_region const* region, qaws
 	return st;
 }
 
-qaws_status qaws_surface_region_create_trimmed(qaws_surface_region const* region, qaws_surface** out_surface)
+qaws_status qaws_surface_region_create_trimmed(qaws_surface** out_surface, qaws_surface_region const* region)
 {
 	unsigned int np, i;
 	qaws_trim_loop* loops;
@@ -1042,7 +1042,7 @@ static qaws_status sr_disk(sr_tube* tb, qaws_vec2 p)
 	if (!sr_grow((void**)&tb->centres, &tb->capc, 2 * (tb->nc + 1), sizeof(double)))
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	tb->centres[2 * tb->nc] = u; tb->centres[2 * tb->nc + 1] = v; tb->nc++;
-	st = qaws_surface_curve_create_geodesic_arc(tb->s, p, (qaws_scalar)tb->r, 0, (qaws_scalar)(2 * 3.14159265358979323846), (qaws_scalar)tb->tol, &d);
+	st = qaws_surface_curve_create_geodesic_arc(&d, tb->s, p, (qaws_scalar)tb->r, 0, (qaws_scalar)(2 * 3.14159265358979323846), (qaws_scalar)tb->tol);
 	if (st != QAWS_STATUS_OK)
 		return st;
 	if (!sr_grow((void**)&tb->disks, &tb->capd, tb->nd + 1, sizeof(qaws_surface_curve*)))
@@ -1316,9 +1316,9 @@ static qaws_status sr_corner_disks(sr_tube* tb, qaws_clip_result const* res, int
 	return st;
 }
 
-qaws_status qaws_surface_offset(qaws_surface const* surface, qaws_fill_rule fill_rule,
-	qaws_surface_path const* paths, unsigned int path_count, qaws_scalar distance, qaws_scalar tolerance,
-	qaws_surface_region** out_region)
+qaws_status qaws_surface_offset(qaws_surface_region** out_region, qaws_surface const* surface,
+	qaws_surface_path const* paths, unsigned int path_count, qaws_fill_rule fill_rule, qaws_scalar distance,
+	qaws_scalar tolerance)
 {
 	double d = (double)distance, r = fabs(d);
 	qaws_surface_region *R = NULL, *out = NULL;
@@ -1353,7 +1353,7 @@ qaws_status qaws_surface_offset(qaws_surface const* surface, qaws_fill_rule fill
 	}
 	/* the region the closed paths bound */
 	if (st == QAWS_STATUS_OK && nc)
-		st = qaws_surface_clip(surface, QAWS_CLIP_NONE, fill_rule, closed, nc, NULL, 0, &R);
+		st = qaws_surface_clip(&R, surface, closed, NULL, nc, 0, QAWS_CLIP_NONE, fill_rule);
 	/* the tube: its boundary (inside on the left of its loops) swept along
 	   the conormal geodesics on the side the offset moves to, circles round
 	   the corners; open paths on both sides, circles at every vertex */
@@ -1608,8 +1608,8 @@ static qaws_status sr_eliminate(qaws_vec3 const* p, unsigned int m, unsigned int
 	return st;
 }
 
-qaws_status qaws_surface_region_sample(qaws_surface_region const* region, qaws_surface_sample_desc const* desc,
-	unsigned int count, qaws_vec2* out_uv, qaws_vec3* out_points)
+qaws_status qaws_surface_region_sample(qaws_vec2* out_uv, qaws_vec3* out_points,
+	qaws_surface_region const* region, unsigned int count, qaws_surface_sample_desc const* desc)
 {
 	unsigned int kind = desc ? desc->kind : QAWS_REGION_SAMPLE_RANDOM, np = 0, i;
 	unsigned long long seed = desc ? desc->seed : 0;
@@ -1636,7 +1636,7 @@ qaws_status qaws_surface_region_sample(qaws_surface_region const* region, qaws_s
 	memset(&sd, 0, sizeof(sd));
 	sd.paths = loops; sd.path_count = np; sd.fill_rule = QAWS_FILL_NON_ZERO;
 	sd.density = sr_area_density; sd.density_user = &dens;
-	st = qaws_region_sampler_create(&sd, &sm);
+	st = qaws_region_sampler_create(&sm, &sd);
 	if (st == QAWS_STATUS_OK)
 	{
 		if (kind == QAWS_REGION_SAMPLE_BLUE_NOISE)
@@ -1650,7 +1650,7 @@ qaws_status qaws_surface_region_sample(qaws_surface_region const* region, qaws_s
 			if (!cu || !cp || !keep || !uv)
 				st = QAWS_STATUS_ALLOCATION_FAILURE;
 			if (st == QAWS_STATUS_OK)
-				st = qaws_region_sampler_generate(sm, m, QAWS_REGION_SAMPLE_RANDOM, seed, cu);
+				st = qaws_region_sampler_generate(cu, sm, m, QAWS_REGION_SAMPLE_RANDOM, seed);
 			for (i = 0; i < m && st == QAWS_STATUS_OK; i++)
 			{
 				qaws_surface_eval_result e;
@@ -1670,7 +1670,7 @@ qaws_status qaws_surface_region_sample(qaws_surface_region const* region, qaws_s
 			if (!uv)
 				st = QAWS_STATUS_ALLOCATION_FAILURE;
 			else
-				st = qaws_region_sampler_generate(sm, count, kind, seed, uv);
+				st = qaws_region_sampler_generate(uv, sm, count, kind, seed);
 		}
 	}
 	for (i = 0; i < count && st == QAWS_STATUS_OK; i++)
@@ -1713,8 +1713,8 @@ static qaws_scalar sr_size_fn(void* user, qaws_vec2 p)
 	return (qaws_scalar)(k > 0 ? s->L / k : s->L);
 }
 
-qaws_status qaws_surface_region_triangulate(qaws_surface_region const* region, qaws_surface_mesh_desc const* desc,
-	struct qaws_mesh_2d** out_mesh)
+qaws_status qaws_surface_region_triangulate(struct qaws_mesh_2d** out_mesh, qaws_surface_region const* region,
+	qaws_surface_mesh_desc const* desc)
 {
 	qaws_path_2d* loops = NULL;
 	unsigned int np = 0, i, j;
@@ -1734,7 +1734,7 @@ qaws_status qaws_surface_region_triangulate(qaws_surface_region const* region, q
 	if (!(L > 0))
 	{
 		qaws_scalar a = 0;
-		qaws_surface_region_get_area(region, &a);
+		qaws_surface_region_get_area(&a, region);
 		L = sqrt((double)a) / 30;
 	}
 	if (!(tol > 0))
@@ -2013,8 +2013,8 @@ typedef struct sm_cross
 	double sc, tc;
 } sm_cross;
 
-qaws_status qaws_surface_region_medial_axis(qaws_surface_region const* region, qaws_surface_medial_desc const* desc,
-	qaws_surface_medial_axis** out_axis)
+qaws_status qaws_surface_region_medial_axis(qaws_surface_medial_axis** out_axis, qaws_surface_region const* region,
+	qaws_surface_medial_desc const* desc)
 {
 	sm_ctx m;
 	qaws_surface_medial_axis* ax = NULL;
@@ -2034,7 +2034,7 @@ qaws_status qaws_surface_region_medial_axis(qaws_surface_region const* region, q
 	*out_axis = NULL;
 	memset(&m, 0, sizeof(m));
 	m.c = &region->ctx;
-	qaws_surface_region_get_area(region, &area);
+	qaws_surface_region_get_area(&area, region);
 	L = desc && desc->resolution > 0 ? (double)desc->resolution : sqrt((double)area) / 40;
 	h = 0.5 * L;
 	D = 2 * sqrt((double)area) + L;
@@ -2161,7 +2161,7 @@ qaws_status qaws_surface_region_medial_axis(qaws_surface_region const* region, q
 	{
 		memset(&md, 0, sizeof(md));
 		md.edge_length = (qaws_scalar)L;
-		st = qaws_surface_region_triangulate(region, &md, &mesh);
+		st = qaws_surface_region_triangulate(&mesh, region, &md);
 	}
 	if (st == QAWS_STATUS_OK)
 	{
@@ -2482,8 +2482,8 @@ unsigned int qaws_surface_medial_axis_get_segment_count(qaws_surface_medial_axis
 	return axis ? axis->nseg : 0;
 }
 
-qaws_status qaws_surface_medial_axis_get_segment(qaws_surface_medial_axis const* axis, unsigned int index,
-	qaws_vec2 out_uv[2], qaws_scalar out_radius[2])
+qaws_status qaws_surface_medial_axis_get_segment(qaws_vec2 out_uv[2], qaws_scalar out_radius[2],
+	qaws_surface_medial_axis const* axis, unsigned int index)
 {
 	if (!axis || index >= axis->nseg || !out_uv)
 		return QAWS_STATUS_INVALID_ARGUMENT;
@@ -2502,8 +2502,8 @@ unsigned int qaws_surface_medial_axis_get_junction_count(qaws_surface_medial_axi
 	return axis ? axis->njun : 0;
 }
 
-qaws_status qaws_surface_medial_axis_get_junction(qaws_surface_medial_axis const* axis, unsigned int index,
-	qaws_vec2* out_uv, qaws_scalar* out_radius)
+qaws_status qaws_surface_medial_axis_get_junction(qaws_vec2* out_uv, qaws_scalar* out_radius,
+	qaws_surface_medial_axis const* axis, unsigned int index)
 {
 	if (!axis || index >= axis->njun || !out_uv)
 		return QAWS_STATUS_INVALID_ARGUMENT;
@@ -2512,8 +2512,8 @@ qaws_status qaws_surface_medial_axis_get_junction(qaws_surface_medial_axis const
 	return QAWS_STATUS_OK;
 }
 
-qaws_status qaws_surface_medial_axis_get_max_inscribed(qaws_surface_medial_axis const* axis, qaws_vec2* out_centre,
-	qaws_scalar* out_radius)
+qaws_status qaws_surface_medial_axis_get_max_inscribed(qaws_vec2* out_centre, qaws_scalar* out_radius,
+	qaws_surface_medial_axis const* axis)
 {
 	if (!axis || !out_centre || !out_radius)
 		return QAWS_STATUS_INVALID_ARGUMENT;
@@ -2623,7 +2623,7 @@ static qaws_curve* mk_ray(qaws_surface const* s, qaws_vec2 p, qaws_vec2 d, doubl
 		qaws_surface_curve* sc = NULL;
 		qaws_curve *a = NULL, *b = NULL;
 		qaws_range rg;
-		if (qaws_surface_curve_create_geodesic_ray(s, p, d, (qaws_scalar)len, 0, &sc) != QAWS_STATUS_OK)
+		if (qaws_surface_curve_create_geodesic_ray(&sc, s, p, d, (qaws_scalar)len, 0) != QAWS_STATUS_OK)
 			continue;
 		rg = qaws_curve_get_parameter_range(qaws_surface_curve_get_uv(sc));
 		if (qaws_curve_extract(&a, qaws_surface_curve_get_uv(sc), rg.min_value, rg.max_value) == QAWS_STATUS_OK && reversed)
@@ -2639,8 +2639,8 @@ static qaws_curve* mk_ray(qaws_surface const* s, qaws_vec2 p, qaws_vec2 d, doubl
 	return NULL;
 }
 
-qaws_status qaws_surface_region_mitered_skeleton(qaws_surface_region const* region, qaws_surface_medial_desc const* desc,
-	qaws_surface_medial_axis** out_axis)
+qaws_status qaws_surface_region_mitered_skeleton(qaws_surface_medial_axis** out_axis, qaws_surface_region const* region,
+	qaws_surface_medial_desc const* desc)
 {
 	qaws_internal_sg_ctx const* c;
 	qaws_surface_medial_axis* ax = NULL;
@@ -2657,7 +2657,7 @@ qaws_status qaws_surface_region_mitered_skeleton(qaws_surface_region const* regi
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	*out_axis = NULL;
 	c = &region->ctx;
-	qaws_surface_region_get_area(region, &area);
+	qaws_surface_region_get_area(&area, region);
 	L = desc && desc->resolution > 0 ? (double)desc->resolution : sqrt((double)area) / 40;
 	D = 2 * sqrt((double)area) + L;
 	ax = (qaws_surface_medial_axis*)calloc(1, sizeof(*ax));
@@ -2779,7 +2779,7 @@ qaws_status qaws_surface_region_mitered_skeleton(qaws_surface_region const* regi
 	{
 		memset(&md, 0, sizeof(md));
 		md.edge_length = (qaws_scalar)L;
-		st = qaws_surface_region_triangulate(region, &md, &mesh);
+		st = qaws_surface_region_triangulate(&mesh, region, &md);
 	}
 	if (st == QAWS_STATUS_OK)
 	{

@@ -6,15 +6,15 @@ hemispheres, a network of NURBS faces.
 
 ```c
 qaws_shell_atlas* atlas;
-qaws_shell_atlas_create(surfaces, n, 0, &atlas);        /* or _create_from_brep, _create_trimmed */
+qaws_shell_atlas_create(&atlas, surfaces, n, 0);        /* or _create_from_brep, _create_trimmed */
 
 qaws_shell_curve* c;
-qaws_shell_curve_create_geodesic_circle(atlas, centre, r, 0, &c);
+qaws_shell_curve_create_geodesic_circle(&c, atlas, centre, r, 0);
 qaws_shell_region* region;
-qaws_shell_region_create(atlas, &c, 1, &region);
-qaws_shell_region_get_area(region, &area);
-qaws_shell_region_clip(a, b, QAWS_CLIP_UNION, &u);
-qaws_shell_exp(atlas, p, direction, length, &q, &velocity, &crossings);
+qaws_shell_region_create(&region, atlas, &c, 1);
+qaws_shell_region_get_area(&area, region);
+qaws_shell_region_clip(&u, a, b, QAWS_CLIP_UNION);
+qaws_shell_exp(&q, &velocity, &crossings, atlas, p, direction, length);
 ```
 
 ## The atlas
@@ -85,7 +85,7 @@ shaded and drawn back to front.
 
 ## Trimmed faces
 
-`qaws_shell_atlas_create_trimmed(faces, n, 0, &atlas)` takes each face as a
+`qaws_shell_atlas_create_trimmed(&atlas, faces, n, 0)` takes each face as a
 surface and, optionally, loops of (u, v) curves bounding it
 (`qaws_shell_face_desc`). Each curve of a loop is one side of the face.
 
@@ -156,7 +156,7 @@ a disk inside the tube) and the trimmed cube.
 
 ## Shortest paths round holes
 
-`qaws_shell_curve_create_shortest_path(atlas, p0, p1, tolerance, &curve)`
+`qaws_shell_curve_create_shortest_path(&curve, atlas, p0, p1, tolerance)`
 gives the shortest path between two points. A ray stops at a hole's rim
 (a free trim loop); the shortest path goes round the hole instead.
 
@@ -213,8 +213,8 @@ Limits:
 ## Sampling and meshing
 
 ```c
-qaws_shell_region_sample(region, &desc, count, points, xyz);   /* shell points (face, uv) and in space */
-qaws_shell_region_triangulate(region, &mesh_desc, &mesh);      /* one mesh across the faces */
+qaws_shell_region_sample(points, xyz, region, count, &desc);   /* shell points (face, uv) and in space */
+qaws_shell_region_triangulate(&mesh, region, &mesh_desc);      /* one mesh across the faces */
 ```
 
 - **Sampling.** The count is shared out between the faces by their parts'
@@ -245,7 +245,7 @@ Figure 29 shows the mesh and the samples.
 ## Offsets
 
 ```c
-qaws_shell_region_offset(region, distance, 0, &out);   /* > 0 grown, < 0 shrunk */
+qaws_shell_region_offset(&out, region, distance, 0);   /* > 0 grown, < 0 shrunk */
 ```
 
 The points within the distance of the region (grown), or its points
@@ -306,7 +306,7 @@ the polygon's point when Newton runs to the far side of a tight bend.
 
 ## Disks round vertices
 
-`qaws_shell_region_create_geodesic_disk(atlas, centre, r, 0, &region)` gives
+`qaws_shell_region_create_geodesic_disk(&region, atlas, centre, r, 0)` gives
 the points within r along the shell, vertices included.
 
 - **Vertex directions.** Rays passing either side of a shell vertex part, so

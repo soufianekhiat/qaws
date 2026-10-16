@@ -3201,7 +3201,7 @@ static qaws_status sk_edge_curve(sk_sup const* e, qaws_skeleton_node const* a, q
 	}
 }
 
-qaws_status qaws_skeleton_create(qaws_skeleton_desc const* desc, qaws_skeleton** out)
+qaws_status qaws_skeleton_create(qaws_skeleton** out, qaws_skeleton_desc const* desc)
 {
 	qaws_skeleton* s;
 	qaws_clip_result* region = NULL;
@@ -3537,7 +3537,7 @@ unsigned int qaws_skeleton_get_arc_count(qaws_skeleton const* s) { return s ? s-
 unsigned int qaws_skeleton_get_face_count(qaws_skeleton const* s) { return s ? s->nsup : 0; }
 qaws_scalar qaws_skeleton_get_max_time(qaws_skeleton const* s) { return s ? (qaws_scalar)s->tmax : 0; }
 
-qaws_status qaws_skeleton_get_node(qaws_skeleton const* s, unsigned int i, qaws_skeleton_node* out)
+qaws_status qaws_skeleton_get_node(qaws_skeleton_node* out, qaws_skeleton const* s, unsigned int i)
 {
 	if (!s || !out || i >= s->nnodes)
 		return QAWS_STATUS_INVALID_ARGUMENT;
@@ -3545,7 +3545,7 @@ qaws_status qaws_skeleton_get_node(qaws_skeleton const* s, unsigned int i, qaws_
 	return QAWS_STATUS_OK;
 }
 
-qaws_status qaws_skeleton_get_arc(qaws_skeleton const* s, unsigned int i, qaws_skeleton_arc* out)
+qaws_status qaws_skeleton_get_arc(qaws_skeleton_arc* out, qaws_skeleton const* s, unsigned int i)
 {
 	if (!s || !out || i >= s->narcs)
 		return QAWS_STATUS_INVALID_ARGUMENT;
@@ -3553,7 +3553,7 @@ qaws_status qaws_skeleton_get_arc(qaws_skeleton const* s, unsigned int i, qaws_s
 	return QAWS_STATUS_OK;
 }
 
-qaws_status qaws_skeleton_get_face(qaws_skeleton const* s, unsigned int i, qaws_skeleton_face* out)
+qaws_status qaws_skeleton_get_face(qaws_skeleton_face* out, qaws_skeleton const* s, unsigned int i)
 {
 	if (!s || !out || i >= s->nsup)
 		return QAWS_STATUS_INVALID_ARGUMENT;
@@ -3605,7 +3605,7 @@ static void sk_arc_eval(qaws_skeleton const* s, unsigned int i, double u, double
 	*t = (double)a->time + ((double)b->time - a->time) * u;
 }
 
-qaws_status qaws_skeleton_evaluate_arc(qaws_skeleton const* s, unsigned int i, qaws_scalar u, qaws_vec2* point, qaws_scalar* time)
+qaws_status qaws_skeleton_evaluate_arc(qaws_vec2* point, qaws_scalar* time, qaws_skeleton const* s, unsigned int i, qaws_scalar u)
 {
 	double p[2], t;
 	if (!s || i >= s->narcs || !point)
@@ -3669,7 +3669,7 @@ static int sk_conic_piece(qaws_skeleton const* s, unsigned int i, double u0, dou
 	return *w > 0;
 }
 
-qaws_status qaws_skeleton_get_arc_curve(qaws_skeleton const* s, unsigned int i, qaws_curve** out)
+qaws_status qaws_skeleton_get_arc_curve(qaws_curve** out, qaws_skeleton const* s, unsigned int i)
 {
 	sk_geo const* g;
 	if (!s || i >= s->narcs || !out)
@@ -3747,7 +3747,7 @@ qaws_status qaws_skeleton_get_arc_curve(qaws_skeleton const* s, unsigned int i, 
 /*  Offsets                                                                 */
 /* ------------------------------------------------------------------------ */
 
-qaws_status qaws_skeleton_offset(qaws_skeleton const* s, qaws_scalar time, qaws_clip_result** out)
+qaws_status qaws_skeleton_offset(qaws_clip_result** out, qaws_skeleton const* s, qaws_scalar time)
 {
 	sk_run r;
 	qaws_status st;

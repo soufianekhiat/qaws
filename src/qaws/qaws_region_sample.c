@@ -239,7 +239,7 @@ void qaws_region_sampler_destroy(qaws_region_sampler* s)
 	free(s);
 }
 
-qaws_status qaws_region_sampler_create(qaws_region_sampler_desc const* desc, qaws_region_sampler** out)
+qaws_status qaws_region_sampler_create(qaws_region_sampler** out, qaws_region_sampler_desc const* desc)
 {
 	qaws_region_sampler* s;
 	qaws_status st;
@@ -409,7 +409,7 @@ static double rs_area_in(qaws_region_sampler const* s, unsigned int k, double x,
 	return a;
 }
 
-qaws_status qaws_region_sampler_area_left(qaws_region_sampler const* s, qaws_scalar x, qaws_scalar* out)
+qaws_status qaws_region_sampler_area_left(qaws_scalar* out, qaws_region_sampler const* s, qaws_scalar x)
 {
 	double xd = (double)x;
 	if (!s || !out)
@@ -750,14 +750,14 @@ qaws_scalar qaws_region_sampler_get_mass(qaws_region_sampler const* s)
 	return s ? (qaws_scalar)(s->rho ? s->mass : s->area) : 0;
 }
 
-qaws_status qaws_region_sampler_mass_left(qaws_region_sampler const* s, qaws_scalar x, qaws_scalar* out)
+qaws_status qaws_region_sampler_mass_left(qaws_scalar* out, qaws_region_sampler const* s, qaws_scalar x)
 {
 	double xd = (double)x;
 	unsigned int k;
 	if (!s || !out)
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	if (!s->rho)
-		return qaws_region_sampler_area_left(s, x, out);
+		return qaws_region_sampler_area_left(out, s, x);
 	if (xd <= s->xs[0]) { *out = 0; return QAWS_STATUS_OK; }
 	if (xd >= s->xs[s->nxs - 1]) { *out = (qaws_scalar)s->mass; return QAWS_STATUS_OK; }
 	k = rs_slab(s, xd);
@@ -891,7 +891,7 @@ static qaws_status rs_map_area(qaws_region_sampler const* s, qaws_scalar u, qaws
 	return QAWS_STATUS_OK;
 }
 
-qaws_status qaws_region_sampler_map(qaws_region_sampler const* s, qaws_scalar u, qaws_scalar v, qaws_vec2* out)
+qaws_status qaws_region_sampler_map(qaws_vec2* out, qaws_region_sampler const* s, qaws_scalar u, qaws_scalar v)
 {
 	if (!s || !out)
 		return QAWS_STATUS_INVALID_ARGUMENT;
@@ -1115,7 +1115,7 @@ static qaws_status rs_batch_job(void* ctx, unsigned int chunk, unsigned int b, u
 		if (c->keep)
 			c->keep[i] = (unsigned char)rs_keep(c->s, c->box[0] + c->box[1] * u, c->box[2] + c->box[3] * v, c->first + i, c->q->p);
 		else
-			st = qaws_region_sampler_map(c->s, (qaws_scalar)u, (qaws_scalar)v, &c->out[i]);
+			st = qaws_region_sampler_map(&c->out[i], c->s, (qaws_scalar)u, (qaws_scalar)v);
 	}
 	return st;
 }
@@ -1137,7 +1137,7 @@ static qaws_status rs_map_batch(qaws_region_sampler const* s, rs_pattern const* 
 	return rs_batch_run(&c, count);
 }
 
-qaws_status qaws_region_sampler_map_many(qaws_region_sampler const* s, qaws_vec2 const* uv, unsigned int count, qaws_vec2* out)
+qaws_status qaws_region_sampler_map_many(qaws_vec2* out, qaws_region_sampler const* s, qaws_vec2 const* uv, unsigned int count)
 {
 	if (!s || (count && (!uv || !out)))
 		return QAWS_STATUS_INVALID_ARGUMENT;
@@ -1373,7 +1373,7 @@ static int rs_inside(qaws_region_sampler const* s, double x, double y)
 	return w > 0;
 }
 
-qaws_status qaws_region_sampler_contains(qaws_region_sampler const* s, qaws_vec2 point, int* out_inside)
+qaws_status qaws_region_sampler_contains(int* out_inside, qaws_region_sampler const* s, qaws_vec2 point)
 {
 	if (!s || !out_inside)
 		return QAWS_STATUS_INVALID_ARGUMENT;
@@ -1542,8 +1542,8 @@ static qaws_status rs_box(qaws_region_sampler const* s, unsigned int count, unsi
 	return st;
 }
 
-qaws_status qaws_region_sampler_generate(qaws_region_sampler const* s, unsigned int count, unsigned int kind,
-	unsigned long long seed, qaws_vec2* out)
+qaws_status qaws_region_sampler_generate(qaws_vec2* out, qaws_region_sampler const* s, unsigned int count,
+	unsigned int kind, unsigned long long seed)
 {
 	rs_pattern q;
 	unsigned int base = kind & ~QAWS_REGION_SAMPLE_BOX;

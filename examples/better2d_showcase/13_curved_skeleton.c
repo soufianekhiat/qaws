@@ -109,7 +109,7 @@ static void csk_draw(svg* s, viewport const* v, csk_shape const* sh, double sigm
 	csk_path_curves(s, v, p, sh->nloops, "none", 0, "#f6f8fa");
 	memset(&d, 0, sizeof(d));
 	d.paths = p; d.path_count = sh->nloops; d.fill_rule = QAWS_FILL_NON_ZERO; d.splice_angle = (qaws_scalar)sigma;
-	if (qaws_skeleton_create(&d, &sk) != QAWS_STATUS_OK)
+	if (qaws_skeleton_create(&sk, &d) != QAWS_STATUS_OK)
 	{
 		svg_text(s, v->x0 + v->w / 2, v->y0 + v->h / 2, 12, "#cf222e", "middle", "failed");
 		for (i = 0; i < off; i++) qaws_curve_destroy(cs[i]);
@@ -121,7 +121,7 @@ static void csk_draw(svg* s, viewport const* v, csk_shape const* sh, double sigm
 		qaws_clip_result* r = NULL;
 		char col[32];
 		heat((double)k / 9, col);
-		if (qaws_skeleton_offset(sk, (qaws_scalar)(tmax * k / 9), &r) == QAWS_STATUS_OK)
+		if (qaws_skeleton_offset(&r, sk, (qaws_scalar)(tmax * k / 9)) == QAWS_STATUS_OK)
 		{
 			unsigned int n = qaws_clip_result_get_path_count(r), pi;
 			qaws_path_2d* q = (qaws_path_2d*)malloc(sizeof(qaws_path_2d) * (n + 1));
@@ -134,14 +134,14 @@ static void csk_draw(svg* s, viewport const* v, csk_shape const* sh, double sigm
 	for (i = 0; i < qaws_skeleton_get_arc_count(sk); i++)
 	{
 		qaws_skeleton_arc a;
-		qaws_skeleton_get_arc(sk, i, &a);
+		qaws_skeleton_get_arc(&a, sk, i);
 		fprintf(s->f, "<polyline fill=\"none\" stroke=\"%s\" stroke-width=\"%.1f\"%s points=\"",
 			a.smooth ? "#8c959f" : "#1b1f24", a.smooth ? 0.8 : (a.boundary ? 1.0 : 2.0), a.smooth ? " stroke-dasharray=\"3,2\"" : "");
 		for (k = 0; k <= 32; k++)
 		{
 			qaws_vec2 q;
 			qaws_scalar t;
-			qaws_skeleton_evaluate_arc(sk, i, (qaws_scalar)(k / 32.0), &q, &t);
+			qaws_skeleton_evaluate_arc(&q, &t, sk, i, (qaws_scalar)(k / 32.0));
 			fprintf(s->f, "%.2f,%.2f ", vx(v, q.x), vy(v, q.y));
 		}
 		fprintf(s->f, "\"/>\n");

@@ -96,7 +96,7 @@ typedef struct qaws_offset_desc
 qaws_status qaws_offset_execute(qaws_clip_result** out_result, qaws_offset_desc const* desc);
 
 /* Many independent offsets in one call (see qaws_clip_execute_batch). */
-qaws_status qaws_offset_execute_batch(qaws_clip_result** out_results, unsigned int count, qaws_offset_desc const* descs,
+qaws_status qaws_offset_execute_batch(qaws_clip_result** out_results, qaws_offset_desc const* descs, unsigned int count,
 	qaws_batch_executor const* executor);
 
 /* One group, one delta (Clipper2's InflatePaths). */
@@ -133,7 +133,7 @@ typedef struct qaws_offset64_desc
 } qaws_offset64_desc;
 
 qaws_status qaws_offset64_execute(qaws_clip64_result** out_result, qaws_offset64_desc const* desc);
-qaws_status qaws_offset64_execute_batch(qaws_clip64_result** out_results, unsigned int count, qaws_offset64_desc const* descs,
+qaws_status qaws_offset64_execute_batch(qaws_clip64_result** out_results, qaws_offset64_desc const* descs, unsigned int count,
 	qaws_batch_executor const* executor);
 
 /* One group, miter limit 2, the default arc tolerance (Clipper2's InflatePaths). */

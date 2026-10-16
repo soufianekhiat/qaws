@@ -38,8 +38,8 @@ static void skt_face_line(qaws_skeleton const* s, qaws_skeleton_face const* f, d
 {
 	qaws_skeleton_node a, b;
 	double l;
-	qaws_skeleton_get_node(s, f->nodes[0], &a);
-	qaws_skeleton_get_node(s, f->nodes[1], &b);
+	qaws_skeleton_get_node(&a, s, f->nodes[0]);
+	qaws_skeleton_get_node(&b, s, f->nodes[1]);
 	l = hypot((double)b.position.x - a.position.x, (double)b.position.y - a.position.y);
 	n[0] = -((double)b.position.y - a.position.y) / l;
 	n[1] = ((double)b.position.x - a.position.x) / l;
@@ -149,7 +149,7 @@ static qaws_skeleton* skt_check(skt_shape const* sh, skt_weights const* wts)
 	memset(&d, 0, sizeof(d));
 	d.paths = p; d.path_count = sh->nloops; d.fill_rule = QAWS_FILL_NON_ZERO;
 	if (wts) { d.weight_fn = skt_weight; d.weight_user = (void*)wts; }
-	st = qaws_skeleton_create(&d, &s);
+	st = qaws_skeleton_create(&s, &d);
 	sprintf(msg, "%s: created (status %d)", sh->name, (int)st);
 	TEST_ASSERT(st == QAWS_STATUS_OK && s, msg);
 	if (!s)
@@ -162,14 +162,14 @@ static qaws_skeleton* skt_check(skt_shape const* sh, skt_weights const* wts)
 	for (i = 0; i < qaws_skeleton_get_arc_count(s); i++)
 	{
 		qaws_skeleton_arc a;
-		qaws_skeleton_get_arc(s, i, &a);
+		qaws_skeleton_get_arc(&a, s, i);
 		for (k = 0; k < 4; k++)
 		{
 			qaws_skeleton_face f;
 			qaws_skeleton_node nd;
 			double n[2], dd, e;
-			qaws_skeleton_get_face(s, (k & 1) ? a.face_b : a.face_a, &f);
-			qaws_skeleton_get_node(s, (k & 2) ? a.node_b : a.node_a, &nd);
+			qaws_skeleton_get_face(&f, s, (k & 1) ? a.face_b : a.face_a);
+			qaws_skeleton_get_node(&nd, s, (k & 2) ? a.node_b : a.node_a);
 			skt_face_line(s, &f, n, &dd);
 			e = fabs(n[0] * nd.position.x + n[1] * nd.position.y - dd - (double)f.weight * nd.time);
 			if (e > worst_dist) worst_dist = e;
@@ -180,11 +180,11 @@ static qaws_skeleton* skt_check(skt_shape const* sh, skt_weights const* wts)
 	{
 		qaws_skeleton_face f;
 		double xy[2 * 256];
-		qaws_skeleton_get_face(s, i, &f);
+		qaws_skeleton_get_face(&f, s, i);
 		for (k = 0; k < f.node_count && k < 256; k++)
 		{
 			qaws_skeleton_node nd;
-			qaws_skeleton_get_node(s, f.nodes[k], &nd);
+			qaws_skeleton_get_node(&nd, s, f.nodes[k]);
 			xy[2 * k] = nd.position.x; xy[2 * k + 1] = nd.position.y;
 		}
 		faces += skt_poly_area(xy, f.node_count);
@@ -199,17 +199,17 @@ static qaws_skeleton* skt_check(skt_shape const* sh, skt_weights const* wts)
 			qaws_skeleton_face f;
 			double xy[2 * 256], n[2], dd;
 			unsigned int j;
-			qaws_skeleton_get_face(s, i, &f);
+			qaws_skeleton_get_face(&f, s, i);
 			for (j = 0; j < f.node_count && j < 256; j++)
 			{
 				qaws_skeleton_node nd;
-				qaws_skeleton_get_node(s, f.nodes[j], &nd);
+				qaws_skeleton_get_node(&nd, s, f.nodes[j]);
 				xy[2 * j] = nd.position.x; xy[2 * j + 1] = nd.position.y;
 			}
 			skt_face_line(s, &f, n, &dd);
 			unswept += skt_clip_area(xy, f.node_count, n, dd, (double)f.weight * t);
 		}
-		qaws_skeleton_offset(s, (qaws_scalar)t, &r);
+		qaws_skeleton_offset(&r, s, (qaws_scalar)t);
 		got = skt_result_area(r);
 		if (fabs(got - unswept) > worst_off) worst_off = fabs(got - unswept);
 		qaws_clip_result_destroy(r);
@@ -258,9 +258,9 @@ static double skt_ridge(qaws_skeleton const* s, double t)
 	{
 		qaws_skeleton_arc a;
 		qaws_skeleton_node x, y;
-		qaws_skeleton_get_arc(s, i, &a);
-		qaws_skeleton_get_node(s, a.node_a, &x);
-		qaws_skeleton_get_node(s, a.node_b, &y);
+		qaws_skeleton_get_arc(&a, s, i);
+		qaws_skeleton_get_node(&x, s, a.node_a);
+		qaws_skeleton_get_node(&y, s, a.node_b);
 		if (fabs((double)x.time - t) < 1e-6 && fabs((double)y.time - t) < 1e-6)
 		{
 			double l = hypot((double)x.position.x - y.position.x, (double)x.position.y - y.position.y);
@@ -312,7 +312,7 @@ static void test_closed_forms(void)
 		for (i = 0; s && i < qaws_skeleton_get_node_count(s); i++)
 		{
 			qaws_skeleton_node nd;
-			qaws_skeleton_get_node(s, i, &nd);
+			qaws_skeleton_get_node(&nd, s, i);
 			if (fabs((double)nd.time) > tol && fabs((double)nd.time - 0.5) > tol) ok = 0;
 		}
 		TEST_ASSERT(ok && fabs((double)qaws_skeleton_get_max_time(s) - 0.5) <= tol, msg);
@@ -502,7 +502,7 @@ static double skt_face_area(qaws_skeleton const* s, unsigned int fi, unsigned in
 	int have = 0;
 	unsigned int k, na, i, m = 256, start;
 	unsigned char* used = (unsigned char*)calloc(qaws_skeleton_get_arc_count(s) + 1, 1);
-	qaws_skeleton_get_face(s, fi, &f);
+	qaws_skeleton_get_face(&f, s, fi);
 	na = f.node_count;
 	if (na == 1 && !f.edge)
 	{
@@ -513,7 +513,7 @@ static double skt_face_area(qaws_skeleton const* s, unsigned int fi, unsigned in
 #define SKT_PT(X, Y) do { double xx_ = (X), yy_ = (Y); if (have) area += px * yy_ - xx_ * py; px = xx_; py = yy_; have = 1; } while (0)
 	{
 		qaws_skeleton_node a;
-		qaws_skeleton_get_node(s, f.nodes[0], &a);
+		qaws_skeleton_get_node(&a, s, f.nodes[0]);
 		SKT_PT(a.position.x, a.position.y);
 	}
 	start = 0;
@@ -542,7 +542,7 @@ static double skt_face_area(qaws_skeleton const* s, unsigned int fi, unsigned in
 		for (i = 0; i < qaws_skeleton_get_arc_count(s) && !found; i++)
 		{
 			qaws_skeleton_arc ar;
-			qaws_skeleton_get_arc(s, i, &ar);
+			qaws_skeleton_get_arc(&ar, s, i);
 			if ((used[i] && pass == 0) || (ar.face_a != fi && ar.face_b != fi))
 				continue;
 			if ((ar.node_a == a && ar.node_b == b) || (ar.node_a == b && ar.node_b == a))
@@ -555,7 +555,7 @@ static double skt_face_area(qaws_skeleton const* s, unsigned int fi, unsigned in
 				{
 					qaws_vec2 q;
 					qaws_scalar tt;
-					qaws_skeleton_evaluate_arc(s, i, (qaws_scalar)(rev ? 1 - j / 64.0 : j / 64.0), &q, &tt);
+					qaws_skeleton_evaluate_arc(&q, &tt, s, i, (qaws_scalar)(rev ? 1 - j / 64.0 : j / 64.0));
 					SKT_PT(q.x, q.y);
 				}
 			}
@@ -595,7 +595,7 @@ static void skt_check_curved(skt_cshape const* sh)
 	memset(&d, 0, sizeof(d));
 	d.paths = p; d.path_count = sh->nloops; d.fill_rule = QAWS_FILL_NON_ZERO;
 	d.splice_angle = (qaws_scalar)sh->sigma;
-	st = qaws_skeleton_create(&d, &s);
+	st = qaws_skeleton_create(&s, &d);
 	sprintf(msg, "%s: created (status %d)", sh->name, (int)st);
 	TEST_ASSERT(st == QAWS_STATUS_OK && s, msg);
 	if (!s)
@@ -610,15 +610,15 @@ static void skt_check_curved(skt_cshape const* sh)
 	{
 		qaws_skeleton_arc a;
 		qaws_skeleton_face fa, fb;
-		qaws_skeleton_get_arc(s, i, &a);
-		qaws_skeleton_get_face(s, a.face_a, &fa);
-		qaws_skeleton_get_face(s, a.face_b, &fb);
+		qaws_skeleton_get_arc(&a, s, i);
+		qaws_skeleton_get_face(&fa, s, a.face_a);
+		qaws_skeleton_get_face(&fb, s, a.face_b);
 		for (k = 0; k <= 8; k++)
 		{
 			qaws_vec2 q;
 			qaws_scalar t;
 			double e1, e2;
-			qaws_skeleton_evaluate_arc(s, i, (qaws_scalar)(k / 8.0), &q, &t);
+			qaws_skeleton_evaluate_arc(&q, &t, s, i, (qaws_scalar)(k / 8.0));
 			e1 = fabs(skt_face_resid(&fa, q.x, q.y, t));
 			e2 = fabs(skt_face_resid(&fb, q.x, q.y, t));
 			if (e1 > worst_dist) worst_dist = e1;
@@ -642,7 +642,7 @@ static void skt_check_curved(skt_cshape const* sh)
 			qaws_clip_result* r2 = NULL;
 			if (sh->exact && t > sh->exact_until)
 				continue;
-			qaws_skeleton_offset(s, (qaws_scalar)t, &r1);
+			qaws_skeleton_offset(&r1, s, (qaws_scalar)t);
 			if (!sh->exact)
 				qaws_offset_paths(&r2, p, sh->nloops, (qaws_scalar)-t, QAWS_JOIN_ROUND, QAWS_END_POLYGON);
 			a1 = skt_result_area(r1);
@@ -786,7 +786,7 @@ static void skt_check_freeform(char const* name, qaws_curve* const* cs, unsigned
 	d.paths = p; d.path_count = np; d.fill_rule = QAWS_FILL_NON_ZERO;
 	d.splice_angle = (qaws_scalar)sigma;
 	d.curve_tolerance = (qaws_scalar)fit;
-	st = qaws_skeleton_create(&d, &s);
+	st = qaws_skeleton_create(&s, &d);
 	sprintf(msg, "%s: created (status %d)", name, (int)st);
 	TEST_ASSERT(st == QAWS_STATUS_OK && s, msg);
 	if (!s)
@@ -795,15 +795,15 @@ static void skt_check_freeform(char const* name, qaws_curve* const* cs, unsigned
 	{
 		qaws_skeleton_arc a;
 		qaws_skeleton_face fa, fb;
-		qaws_skeleton_get_arc(s, i, &a);
-		qaws_skeleton_get_face(s, a.face_a, &fa);
-		qaws_skeleton_get_face(s, a.face_b, &fb);
+		qaws_skeleton_get_arc(&a, s, i);
+		qaws_skeleton_get_face(&fa, s, a.face_a);
+		qaws_skeleton_get_face(&fb, s, a.face_b);
 		for (k = 0; k <= 8; k++)
 		{
 			qaws_vec2 q;
 			qaws_scalar t;
 			double e1, e2;
-			qaws_skeleton_evaluate_arc(s, i, (qaws_scalar)(k / 8.0), &q, &t);
+			qaws_skeleton_evaluate_arc(&q, &t, s, i, (qaws_scalar)(k / 8.0));
 			e1 = fabs(skt_face_resid(&fa, q.x, q.y, t));
 			e2 = fabs(skt_face_resid(&fb, q.x, q.y, t));
 			if (e1 > worst_dist) worst_dist = e1;
@@ -973,7 +973,7 @@ static void test_random_curved(void)
 			d.paths = p; d.path_count = np; d.fill_rule = QAWS_FILL_NON_ZERO;
 			d.splice_angle = (qaws_scalar)(pass ? SKT_PI : 0);
 			runs++;
-			if (qaws_skeleton_create(&d, &s) != QAWS_STATUS_OK)
+			if (qaws_skeleton_create(&s, &d) != QAWS_STATUS_OK)
 			{
 				if (strlen(fails) < sizeof(fails) - 40)
 					sprintf(fails + strlen(fails), " %u%s", c, pass ? " (pi)" : "");
@@ -985,15 +985,15 @@ static void test_random_curved(void)
 			{
 				qaws_skeleton_arc a;
 				qaws_skeleton_face fa, fb;
-				qaws_skeleton_get_arc(s, i, &a);
-				qaws_skeleton_get_face(s, a.face_a, &fa);
-				qaws_skeleton_get_face(s, a.face_b, &fb);
+				qaws_skeleton_get_arc(&a, s, i);
+				qaws_skeleton_get_face(&fa, s, a.face_a);
+				qaws_skeleton_get_face(&fb, s, a.face_b);
 				for (k = 0; k <= 4; k++)
 				{
 					qaws_vec2 q;
 					qaws_scalar t;
 					double e1, e2;
-					qaws_skeleton_evaluate_arc(s, i, (qaws_scalar)(k / 4.0), &q, &t);
+					qaws_skeleton_evaluate_arc(&q, &t, s, i, (qaws_scalar)(k / 4.0));
 					e1 = fabs(skt_face_resid(&fa, q.x, q.y, t));
 					e2 = fabs(skt_face_resid(&fb, q.x, q.y, t));
 					if (e1 > dist) dist = e1;
@@ -1008,7 +1008,7 @@ static void test_random_curved(void)
 					double t = tmax * k / 5;
 					qaws_clip_result* r1 = NULL;
 					qaws_clip_result* r2 = NULL;
-					qaws_skeleton_offset(s, (qaws_scalar)t, &r1);
+					qaws_skeleton_offset(&r1, s, (qaws_scalar)t);
 					qaws_offset_paths(&r2, p, np, (qaws_scalar)-t, QAWS_JOIN_ROUND, QAWS_END_POLYGON);
 					if (fabs(skt_result_area(r1) - skt_result_area(r2)) > round)
 						round = fabs(skt_result_area(r1) - skt_result_area(r2));

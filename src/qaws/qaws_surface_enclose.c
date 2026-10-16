@@ -818,8 +818,8 @@ static double ge_out(double x, int down)
 	return (double)f;
 }
 
-qaws_status qaws_surface_geodesic_enclose(qaws_surface const* surface, qaws_vec2 p, qaws_vec2 direction, qaws_scalar length,
-	qaws_scalar width, qaws_geodesic_enclosure** out_enclosure)
+qaws_status qaws_surface_geodesic_enclose(qaws_geodesic_enclosure** out_enclosure, qaws_surface const* surface, qaws_scalar width, qaws_vec2 p,
+	qaws_vec2 direction, qaws_scalar length)
 {
 	ge_surf s;
 	qaws_geodesic_enclosure* e;
@@ -1011,8 +1011,8 @@ unsigned int qaws_geodesic_enclosure_get_step_count(qaws_geodesic_enclosure cons
 	return enclosure ? enclosure->n : 0;
 }
 
-qaws_status qaws_geodesic_enclosure_get_step(qaws_geodesic_enclosure const* enclosure, unsigned int index, qaws_scalar* out_t0,
-	qaws_scalar* out_t1, qaws_vec2* out_lo, qaws_vec2* out_hi)
+qaws_status qaws_geodesic_enclosure_get_step(qaws_scalar* out_t0, qaws_scalar* out_t1, qaws_vec2* out_lo,
+	qaws_vec2* out_hi, qaws_geodesic_enclosure const* enclosure, unsigned int index)
 {
 	double const* q;
 	if (!enclosure || index >= enclosure->n)
@@ -1025,8 +1025,8 @@ qaws_status qaws_geodesic_enclosure_get_step(qaws_geodesic_enclosure const* encl
 	return QAWS_STATUS_OK;
 }
 
-qaws_status qaws_geodesic_enclosure_get_end(qaws_geodesic_enclosure const* enclosure, qaws_vec2* out_point_lo, qaws_vec2* out_point_hi,
-	qaws_vec2* out_velocity_lo, qaws_vec2* out_velocity_hi)
+qaws_status qaws_geodesic_enclosure_get_end(qaws_vec2* out_point_lo, qaws_vec2* out_point_hi, qaws_vec2* out_velocity_lo,
+	qaws_vec2* out_velocity_hi, qaws_geodesic_enclosure const* enclosure)
 {
 	ge_iv const* y;
 	if (!enclosure)
@@ -1243,8 +1243,8 @@ static qaws_status ge_cross_core(qaws_geodesic_enclosure const* a, qaws_geodesic
 	return st;
 }
 
-qaws_status qaws_geodesic_enclosure_cross(qaws_geodesic_enclosure const* a, qaws_geodesic_enclosure const* b, unsigned int capacity,
-	qaws_vec2* out_lo, qaws_vec2* out_hi, unsigned int* out_count)
+qaws_status qaws_geodesic_enclosure_cross(qaws_vec2* out_lo, qaws_vec2* out_hi, unsigned int* out_count,
+	qaws_geodesic_enclosure const* a, qaws_geodesic_enclosure const* b, unsigned int capacity)
 {
 	return ge_cross_core(a, b, NULL, 0, NULL, NULL, capacity, out_lo, out_hi, out_count);
 }
@@ -1253,8 +1253,8 @@ qaws_status qaws_geodesic_enclosure_cross(qaws_geodesic_enclosure const* a, qaws
 /*  Certified arrangements of geodesic segments                             */
 /* ------------------------------------------------------------------------ */
 
-qaws_status qaws_surface_geodesics_certify(qaws_surface const* surface, qaws_geodesic_segment const* segments, unsigned int count,
-	unsigned int const* next, qaws_scalar width, unsigned int* out_crossings)
+qaws_status qaws_surface_geodesics_certify(unsigned int* out_crossings, qaws_surface const* surface, qaws_geodesic_segment const* segments,
+	unsigned int const* next, unsigned int count, qaws_scalar width)
 {
 	qaws_geodesic_enclosure** e;
 	qaws_surface_curve** img;
@@ -1280,9 +1280,9 @@ qaws_status qaws_surface_geodesics_certify(qaws_surface const* surface, qaws_geo
 	/* each segment enclosed, and as the float geodesic its (u, v) image */
 	for (i = 0; i < count && st == QAWS_STATUS_OK; i++)
 	{
-		if ((st = qaws_surface_geodesic_enclose(surface, segments[i].start, segments[i].direction, segments[i].length, width, &e[i])) != QAWS_STATUS_OK)
+		if ((st = qaws_surface_geodesic_enclose(&e[i], surface, width, segments[i].start, segments[i].direction, segments[i].length)) != QAWS_STATUS_OK)
 			break;
-		st = qaws_surface_curve_create_geodesic_ray(surface, segments[i].start, segments[i].direction, segments[i].length, 0, &img[i]);
+		st = qaws_surface_curve_create_geodesic_ray(&img[i], surface, segments[i].start, segments[i].direction, segments[i].length, 0);
 	}
 	for (i = 0; i < count && st == QAWS_STATUS_OK; i++)
 		for (j = i + 1; j < count && st == QAWS_STATUS_OK; j++)
@@ -1306,7 +1306,7 @@ qaws_status qaws_surface_geodesics_certify(qaws_surface const* surface, qaws_geo
 					st = QAWS_STATUS_CERTIFICATION_FAILED;
 			/* the images: as many crossings outside the corners' meeting boxes,
 			   each in a certified box */
-			if (st != QAWS_STATUS_OK || (st = qaws_surface_curve_intersect(img[i], img[j], x, 64, &ni)) != QAWS_STATUS_OK)
+			if (st != QAWS_STATUS_OK || (st = qaws_surface_curve_intersect(x, &ni, img[i], img[j], 64)) != QAWS_STATUS_OK)
 				break;
 			for (k = 0, m = 0; k < ni && k < 64; k++)
 			{
@@ -1387,8 +1387,8 @@ static int ge_winding(double const* q, unsigned int n, double const* p, int* ok)
 	return w;
 }
 
-qaws_status qaws_surface_geodesic_polygon_area(qaws_surface const* surface, qaws_geodesic_segment const* segments, unsigned int count,
-	qaws_scalar width, unsigned int resolution, qaws_scalar* out_lo, qaws_scalar* out_hi)
+qaws_status qaws_surface_geodesic_polygon_area(qaws_scalar* out_lo, qaws_scalar* out_hi, qaws_surface const* surface,
+	qaws_geodesic_segment const* segments, unsigned int count, qaws_scalar width, unsigned int resolution)
 {
 	ge_surf s;
 	qaws_geodesic_enclosure** e;
@@ -1412,7 +1412,7 @@ qaws_status qaws_surface_geodesic_polygon_area(qaws_surface const* surface, qaws
 	}
 	for (i = 0; i < count && st == QAWS_STATUS_OK; i++)
 	{
-		st = qaws_surface_geodesic_enclose(surface, segments[i].start, segments[i].direction, segments[i].length, width, &e[i]);
+		st = qaws_surface_geodesic_enclose(&e[i], surface, width, segments[i].start, segments[i].direction, segments[i].length);
 		if (st == QAWS_STATUS_OK && e[i]->n == 0)
 			st = QAWS_STATUS_NUMERICAL_FAILURE;
 		if (st == QAWS_STATUS_OK)

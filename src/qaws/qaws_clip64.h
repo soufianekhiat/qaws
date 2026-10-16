@@ -67,7 +67,7 @@ typedef struct qaws_clip64_result qaws_clip64_result;
 
 qaws_status qaws_clip64_execute(qaws_clip64_result** out_result, qaws_clip64_desc const* desc);
 /* Many independent clips in one call (see qaws_clip_execute_batch). */
-qaws_status qaws_clip64_execute_batch(qaws_clip64_result** out_results, unsigned int count, qaws_clip64_desc const* descs,
+qaws_status qaws_clip64_execute_batch(qaws_clip64_result** out_results, qaws_clip64_desc const* descs, unsigned int count,
 	qaws_batch_executor const* executor);
 void qaws_clip64_result_destroy(qaws_clip64_result* result);
 

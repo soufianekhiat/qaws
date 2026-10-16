@@ -83,25 +83,25 @@ static qaws_status jb_run(jb_kind kind, void const* descs, unsigned int count, q
 	return s;
 }
 
-qaws_status qaws_clip_execute_batch(qaws_clip_result** out_results, unsigned int count, qaws_clip_desc const* descs,
+qaws_status qaws_clip_execute_batch(qaws_clip_result** out_results, qaws_clip_desc const* descs, unsigned int count,
 	qaws_batch_executor const* executor)
 {
 	return jb_run(JB_CLIP, descs, count, executor, (void**)out_results);
 }
 
-qaws_status qaws_clip64_execute_batch(qaws_clip64_result** out_results, unsigned int count, qaws_clip64_desc const* descs,
+qaws_status qaws_clip64_execute_batch(qaws_clip64_result** out_results, qaws_clip64_desc const* descs, unsigned int count,
 	qaws_batch_executor const* executor)
 {
 	return jb_run(JB_CLIP64, descs, count, executor, (void**)out_results);
 }
 
-qaws_status qaws_offset_execute_batch(qaws_clip_result** out_results, unsigned int count, qaws_offset_desc const* descs,
+qaws_status qaws_offset_execute_batch(qaws_clip_result** out_results, qaws_offset_desc const* descs, unsigned int count,
 	qaws_batch_executor const* executor)
 {
 	return jb_run(JB_OFFSET, descs, count, executor, (void**)out_results);
 }
 
-qaws_status qaws_offset64_execute_batch(qaws_clip64_result** out_results, unsigned int count, qaws_offset64_desc const* descs,
+qaws_status qaws_offset64_execute_batch(qaws_clip64_result** out_results, qaws_offset64_desc const* descs, unsigned int count,
 	qaws_batch_executor const* executor)
 {
 	return jb_run(JB_OFFSET64, descs, count, executor, (void**)out_results);

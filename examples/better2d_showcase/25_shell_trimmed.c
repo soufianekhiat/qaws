@@ -24,11 +24,11 @@ static qaws_surface_region* s25_trim_region(qaws_surface const* s, qaws_path_2d 
 		for (k = 0; k < loops[l].curve_count; k++, n++)
 		{
 			sc[n] = NULL;
-			qaws_surface_curve_create_uv(s, loops[l].curves[k], &sc[n]);
+			qaws_surface_curve_create_uv(&sc[n], s, loops[l].curves[k]);
 			cc[n] = sc[n];
 		}
 	}
-	qaws_surface_clip(s, QAWS_CLIP_NONE, QAWS_FILL_EVEN_ODD, P, nl, NULL, 0, &r);
+	qaws_surface_clip(&r, s, P, NULL, nl, 0, QAWS_CLIP_NONE, QAWS_FILL_EVEN_ODD);
 	for (k = 0; k < n; k++) qaws_surface_curve_destroy(sc[k]);
 	return r;
 }
@@ -67,26 +67,26 @@ static void s25_rays(ssd_scene* sc, qaws_shell_atlas const* a, qaws_surface** f,
 		qaws_vec2 d;
 		double lo = 0, hi = len;
 		d.x = (qaws_scalar)dirs[i][0]; d.y = (qaws_scalar)dirs[i][1];
-		if (qaws_shell_curve_create_geodesic_ray(a, c, d, (qaws_scalar)len, 0, &g) != QAWS_STATUS_OK)
+		if (qaws_shell_curve_create_geodesic_ray(&g, a, c, d, (qaws_scalar)len, 0) != QAWS_STATUS_OK)
 		{
 			for (it = 0; it < 40; it++)
 			{
 				double mid = 0.5 * (lo + hi);
 				qaws_shell_curve* t = NULL;
-				if (qaws_shell_curve_create_geodesic_ray(a, c, d, (qaws_scalar)mid, 0, &t) == QAWS_STATUS_OK) lo = mid; else hi = mid;
+				if (qaws_shell_curve_create_geodesic_ray(&t, a, c, d, (qaws_scalar)mid, 0) == QAWS_STATUS_OK) lo = mid; else hi = mid;
 				qaws_shell_curve_destroy(t);
 			}
 			qaws_shell_curve_destroy(g);
 			g = NULL;
 			if (lo > 0)
-				qaws_shell_curve_create_geodesic_ray(a, c, d, (qaws_scalar)lo, 0, &g);
+				qaws_shell_curve_create_geodesic_ray(&g, a, c, d, (qaws_scalar)lo, 0);
 		}
 		if (g)
 			for (w = 0; w < qaws_shell_curve_get_run_count(g); w++)
 			{
 				unsigned int fw;
 				qaws_surface_curve const* run;
-				qaws_shell_curve_get_run(g, w, &fw, &run);
+				qaws_shell_curve_get_run(&fw, &run, g, w);
 				ssd_curve_line(sc, f[fw], qaws_surface_curve_get_uv(run), rgb, 1.4);
 			}
 		qaws_shell_curve_destroy(g);
@@ -101,14 +101,14 @@ static void s25_paths(ssd_scene* sc, qaws_shell_atlas const* a, qaws_surface** f
 	for (i = 0; i < n; i++)
 	{
 		qaws_shell_curve* g = NULL;
-		qaws_status st = qaws_shell_curve_create_shortest_path(a, c, shf_pt(c.face, to[i][0], to[i][1]), 0, &g);
+		qaws_status st = qaws_shell_curve_create_shortest_path(&g, a, c, shf_pt(c.face, to[i][0], to[i][1]), 0);
 		if (st != QAWS_STATUS_OK)
 			printf("  figure 25: no shortest path to (%.2f, %.2f): %d\n", to[i][0], to[i][1], (int)st);
 		for (w = 0; g && w < qaws_shell_curve_get_run_count(g); w++)
 		{
 			unsigned int fw;
 			qaws_surface_curve const* run;
-			qaws_shell_curve_get_run(g, w, &fw, &run);
+			qaws_shell_curve_get_run(&fw, &run, g, w);
 			ssd_curve_line(sc, f[fw], qaws_surface_curve_get_uv(run), rgb, 1.4);
 		}
 		qaws_shell_curve_destroy(g);
@@ -180,7 +180,7 @@ static void demo_shell_trimmed(void)
 		pa[1].curves = hl; pa[1].curve_count = 1; pa[1].closed = 1;
 		fd[0].surface = f[0]; fd[0].trims = pa; fd[0].trim_count = 2;
 		fd[1].surface = f[1]; fd[1].trims = NULL; fd[1].trim_count = 0;
-		qaws_shell_atlas_create_trimmed(fd, 2, 0, &a);
+		qaws_shell_atlas_create_trimmed(&a, fd, 2, 0);
 		tr[0] = s25_trim_region(f[0], pa, 2);
 		g = ssd_disk(a, shf_pt(0, (0.95 + 2) / 4, (0.45 + 2) / 4), 0.5, &A);
 		memset(&sc, 0, sizeof(sc));
@@ -238,7 +238,7 @@ static void demo_shell_trimmed(void)
 		pa[1].curves = hl; pa[1].curve_count = 1; pa[1].closed = 1;
 		fd[0].surface = f[0]; fd[0].trims = pa; fd[0].trim_count = 2;
 		fd[1].surface = f[1]; fd[1].trims = NULL; fd[1].trim_count = 0;
-		qaws_shell_atlas_create_trimmed(fd, 2, 0, &a);
+		qaws_shell_atlas_create_trimmed(&a, fd, 2, 0);
 		tr[0] = s25_trim_region(f[0], pa, 2);
 		tr[1] = NULL;
 		memset(&sc, 0, sizeof(sc));
@@ -269,8 +269,8 @@ static void demo_shell_trimmed(void)
 		{
 			g = ssd_disk(a, shf_pt(0, (0.75 + 2) / 4, (0.1 + 2) / 4), 0.5, &A);
 			h = ssd_disk(a, shf_pt(1, 0.06, 0.25), 0.4, &B);
-			if (g && h) qaws_shell_region_clip(g, h, QAWS_CLIP_UNION, &x);
-			if (x) qaws_shell_region_get_area(x, &X);
+			if (g && h) qaws_shell_region_clip(&x, g, h, QAWS_CLIP_UNION);
+			if (x) qaws_shell_region_get_area(&X, x);
 			sprintf(label, "united with a disk on the tube: area %.6f", (double)X);
 			ssd_panel(&s, &v3, label, "A on the plate (blue), B inside the tube (red), their union filled");
 			paint[0].r = x; memcpy(paint[0].rgb, fpurple, sizeof(fpurple)); np = 1;
@@ -332,7 +332,7 @@ static void demo_shell_trimmed(void)
 			tr[i] = NULL;
 			box[i][0] = lo; box[i][1] = 1 - lo; box[i][2] = lo; box[i][3] = 1 - lo;
 		}
-		qaws_shell_atlas_create_trimmed(fd, 6, 0, &a);
+		qaws_shell_atlas_create_trimmed(&a, fd, 6, 0);
 		memset(&sc, 0, sizeof(sc));
 		v3.x0 = 24 + (k % 4) * (pw + 12); v3.y0 = 104 + (k / 4) * (ph + 44); v3.w = pw; v3.h = ph;
 		sgf_view_init(&view, -0.75 * pi, 0.6, 85, v3.x0 + pw / 2, v3.y0 + ph / 2 + 15);
@@ -340,9 +340,9 @@ static void demo_shell_trimmed(void)
 		if (k == 4)
 		{
 			qaws_shell_curve* c = NULL;
-			qaws_shell_curve_create_geodesic_circle(a, shf_pt(0, lo + span * 0.8, lo + span * 0.8), (qaws_scalar)0.5, 0, &c);
-			if (c) qaws_shell_region_create(a, (qaws_shell_curve const* const*)&c, 1, &g);
-			if (g) { qaws_scalar Ar = 0; qaws_shell_region_get_area(g, &Ar); A = (double)Ar; }
+			qaws_shell_curve_create_geodesic_circle(&c, a, shf_pt(0, lo + span * 0.8, lo + span * 0.8), (qaws_scalar)0.5, 0);
+			if (c) qaws_shell_region_create(&g, a, (qaws_shell_curve const* const*)&c, 1);
+			if (g) { qaws_scalar Ar = 0; qaws_shell_region_get_area(&Ar, g); A = (double)Ar; }
 			qaws_shell_curve_destroy(c);
 			sprintf(label, "a cube of trimmed planes: circle %.9f", A);
 			ssd_panel(&s, &v3, label, "over two trim edges by a vertex, pi r^2 = 0.785398163");
@@ -385,7 +385,7 @@ static void demo_shell_trimmed(void)
 		f[0] = shf_face(B00, B10, B01, B11);
 		f[1] = shf_face(A00, A10, A01, A11);
 		f[2] = shf_face(C00, C10, C01, C11);
-		qaws_shell_atlas_create((qaws_surface const* const*)f, 3, 0, &a);
+		qaws_shell_atlas_create(&a, (qaws_surface const* const*)f, 3, 0);
 		memset(&sc, 0, sizeof(sc));
 		v3.x0 = 24 + (k % 4) * (pw + 12); v3.y0 = 104 + (k / 4) * (ph + 44); v3.w = pw; v3.h = ph;
 		sgf_view_init(&view, -0.45, 0.55, 125, v3.x0 + pw / 2 - 125, v3.y0 + ph / 2 + 30);
@@ -401,8 +401,8 @@ static void demo_shell_trimmed(void)
 		else
 		{
 			h = ssd_disk(a, shf_pt(2, 0.5, 0.55), 0.42, &B);
-			if (g && h) qaws_shell_region_clip(g, h, QAWS_CLIP_XOR, &x);
-			if (x) qaws_shell_region_get_area(x, &X);
+			if (g && h) qaws_shell_region_clip(&x, g, h, QAWS_CLIP_XOR);
+			if (x) qaws_shell_region_get_area(&X, x);
 			sprintf(label, "with a disk on a wall, exclusive-or: %.6f", (double)X);
 			ssd_panel(&s, &v3, label, "A (blue) round the T point, B (red) on the right wall");
 			paint[0].r = x; memcpy(paint[0].rgb, fpurple, sizeof(fpurple));
@@ -450,7 +450,7 @@ static void demo_shell_trimmed(void)
 		pb[0].curves = l4; pb[0].curve_count = 1; pb[0].closed = 1;
 		fd[0].surface = f[0]; fd[0].trims = pa; fd[0].trim_count = 3;
 		fd[1].surface = f[1]; fd[1].trims = pb; fd[1].trim_count = 1;
-		qaws_shell_atlas_create_trimmed(fd, nf, 0, &a);
+		qaws_shell_atlas_create_trimmed(&a, fd, nf, 0);
 		{
 			/* to draw: the domain less the hole and its copy a period on */
 			qaws_curve *sq[4];
@@ -534,7 +534,7 @@ static void demo_shell_trimmed(void)
 		tdp[0].curves = ld; tdp[0].curve_count = 1; tdp[0].closed = 1;
 		fd[0].surface = f[0]; fd[0].trims = thp; fd[0].trim_count = 1;
 		fd[1].surface = f[1]; fd[1].trims = tdp; fd[1].trim_count = 1;
-		qaws_shell_atlas_create_trimmed(fd, nf, 0, &a);
+		qaws_shell_atlas_create_trimmed(&a, fd, nf, 0);
 		{
 			/* to draw: the domain less the hole's copies at its four corners */
 			qaws_curve *sq[4];

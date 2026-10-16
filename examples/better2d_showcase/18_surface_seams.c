@@ -47,7 +47,7 @@ static void ssf_fill3d(svg* s, qaws_surface_region const* r, qaws_surface const*
 	for (pi = 0; pi < np; pi++)
 	{
 		qaws_path_2d p;
-		qaws_surface_region_get_path(r, pi, &p);
+		qaws_surface_region_get_path(&p, r, pi);
 		start[pi] = total;
 		for (ci = 0; ci < p.curve_count; ci++)
 		{
@@ -128,7 +128,7 @@ static qaws_surface_curve* ssf_line(qaws_surface const* s, double u0, double v0,
 	memset(&bd, 0, sizeof(bd));
 	bd.dimension = QAWS_DIMENSION_2D; bd.degree = 1; bd.control_points = cp; bd.control_point_count = 2;
 	qaws_curve_create_bezier(keep, &bd);
-	qaws_surface_curve_create_uv(s, *keep, &c);
+	qaws_surface_curve_create_uv(&c, s, *keep);
 	return c;
 }
 
@@ -157,12 +157,12 @@ static void demo_surface_seams(void)
 		qaws_curve* keep[3] = { 0 };
 		qaws_vec2 corner[4];
 		corner[0] = sgf_uv(0.92, 0.38); corner[1] = sgf_uv(1.08, 0.38); corner[2] = sgf_uv(1.08, 0.62); corner[3] = sgf_uv(0.92, 0.62);
-		for (i = 0; i < 4; i++) qaws_surface_curve_create_geodesic(sph, corner[i], corner[(i + 1) % 4], 0, &sq[i]);
-		qaws_surface_curve_create_geodesic_arc(sph, sgf_uv(1.02, 0.56), (qaws_scalar)0.3, 0, (qaws_scalar)(2 * pi), 0, &cs);
-		qaws_surface_curve_create_geodesic_arc(sph, sgf_uv(0.3, 1), (qaws_scalar)0.55, 0, (qaws_scalar)(2 * pi), 0, &cn);
-		qaws_surface_curve_create_geodesic_arc(sph, sgf_uv(0.0, 0.72), (qaws_scalar)0.4, 0, (qaws_scalar)(2 * pi), 0, &cs2);
-		qaws_surface_curve_create_geodesic_arc(sph, sgf_uv(0.03, 0.5), (qaws_scalar)0.42, 0, (qaws_scalar)(2 * pi), 0, &cb);
-		qaws_surface_curve_create_geodesic_arc(sph, sgf_uv(0.0, 0), (qaws_scalar)0.35, 0, (qaws_scalar)(2 * pi), 0, &csp);
+		for (i = 0; i < 4; i++) qaws_surface_curve_create_geodesic(&sq[i], sph, corner[i], corner[(i + 1) % 4], 0);
+		qaws_surface_curve_create_geodesic_arc(&cs, sph, sgf_uv(1.02, 0.56), (qaws_scalar)0.3, 0, (qaws_scalar)(2 * pi), 0);
+		qaws_surface_curve_create_geodesic_arc(&cn, sph, sgf_uv(0.3, 1), (qaws_scalar)0.55, 0, (qaws_scalar)(2 * pi), 0);
+		qaws_surface_curve_create_geodesic_arc(&cs2, sph, sgf_uv(0.0, 0.72), (qaws_scalar)0.4, 0, (qaws_scalar)(2 * pi), 0);
+		qaws_surface_curve_create_geodesic_arc(&cb, sph, sgf_uv(0.03, 0.5), (qaws_scalar)0.42, 0, (qaws_scalar)(2 * pi), 0);
+		qaws_surface_curve_create_geodesic_arc(&csp, sph, sgf_uv(0.0, 0), (qaws_scalar)0.35, 0, (qaws_scalar)(2 * pi), 0);
 		/* latitude lines: going +u the inside is north */
 		lat[0] = ssf_line(sph, 0, 0.42, 1, 0.42, &keep[0]);
 		lat[1] = ssf_line(sph, 1, 0.6, 0, 0.6, &keep[1]);
@@ -210,14 +210,14 @@ static void demo_surface_seams(void)
 				qaws_surface_path AA[2];
 				ssf_path(&AA[0], pa, 1); ssf_path(&AA[1], pa + 1, 1);
 				ssf_path(&B, pb, nb);
-				st = qaws_surface_clip(sph, op, QAWS_FILL_NON_ZERO, AA, 2, &B, 1, &r);
+				st = qaws_surface_clip(&r, sph, AA, &B, 2, 1, op, QAWS_FILL_NON_ZERO);
 			}
 			else
 			{
 				ssf_path(&A, pa, na); ssf_path(&B, pb, nb);
-				st = qaws_surface_clip(sph, op, QAWS_FILL_NON_ZERO, &A, 1, &B, 1, &r);
+				st = qaws_surface_clip(&r, sph, &A, &B, 1, 1, op, QAWS_FILL_NON_ZERO);
 			}
-			if (st == QAWS_STATUS_OK) qaws_surface_region_get_area(r, &area);
+			if (st == QAWS_STATUS_OK) qaws_surface_region_get_area(&area, r);
 			svg_panel(&s, &v3, name);
 			sprintf(label, "(u, v): area %.4f", (double)area);
 			svg_panel(&s, &vuv, label);
@@ -263,11 +263,11 @@ static void demo_surface_seams(void)
 		P = (double)ru.max_value - ru.min_value;
 		lo = ssf_line(cy, ru.min_value, 0.3, ru.max_value, 0.3, &k1);
 		hi = ssf_line(cy, ru.max_value, 0.7, ru.min_value, 0.7, &k2);
-		qaws_surface_curve_create_geodesic_arc(cy, sgf_uv(ru.min_value + 0.01 * P, 0.62), (qaws_scalar)0.45, 0, (qaws_scalar)(2 * pi), 0, &c);
+		qaws_surface_curve_create_geodesic_arc(&c, cy, sgf_uv(ru.min_value + 0.01 * P, 0.62), (qaws_scalar)0.45, 0, (qaws_scalar)(2 * pi), 0);
 		pa[0] = lo; pa[1] = hi; pb[0] = c;
 		ssf_path(&A[0], pa, 1); ssf_path(&A[1], pa + 1, 1); ssf_path(&B, pb, 1);
-		st = qaws_surface_clip(cy, QAWS_CLIP_DIFFERENCE, QAWS_FILL_NON_ZERO, A, 2, &B, 1, &r);
-		if (st == QAWS_STATUS_OK) qaws_surface_region_get_area(r, &area);
+		st = qaws_surface_clip(&r, cy, A, &B, 2, 1, QAWS_CLIP_DIFFERENCE, QAWS_FILL_NON_ZERO);
+		if (st == QAWS_STATUS_OK) qaws_surface_region_get_area(&area, r);
 		v3.x0 = 24; v3.y0 = 104 + 2 * (ph + 44); v3.w = pw; v3.h = ph;
 		vuv.x0 = v3.x0 + pw + 12; vuv.y0 = v3.y0; vuv.w = pw; vuv.h = ph;
 		vuv.xmin = ru.min_value - 0.1 * P; vuv.xmax = ru.max_value + 0.1 * P;
@@ -310,19 +310,19 @@ static void demo_surface_seams(void)
 		qaws_scalar area = 0, a1 = 0, a2 = 0;
 		viewport v3, vuv;
 		sgf_view view;
-		qaws_surface_curve_create_geodesic_arc(tor, sgf_uv(0.0, 0.0), (qaws_scalar)0.32, 0, (qaws_scalar)(2 * pi), 0, &c1);
-		qaws_surface_curve_create_geodesic_arc(tor, sgf_uv(0.05, 0.93), (qaws_scalar)0.28, 0, (qaws_scalar)(2 * pi), 0, &c2);
+		qaws_surface_curve_create_geodesic_arc(&c1, tor, sgf_uv(0.0, 0.0), (qaws_scalar)0.32, 0, (qaws_scalar)(2 * pi), 0);
+		qaws_surface_curve_create_geodesic_arc(&c2, tor, sgf_uv(0.05, 0.93), (qaws_scalar)0.28, 0, (qaws_scalar)(2 * pi), 0);
 		pa[0] = c1; pb[0] = c2;
 		ssf_path(&A, pa, 1); ssf_path(&B, pb, 1);
 		{
 			qaws_surface_region* q = NULL;
-			if (qaws_surface_clip(tor, QAWS_CLIP_NONE, QAWS_FILL_NON_ZERO, &A, 1, NULL, 0, &q) == QAWS_STATUS_OK) qaws_surface_region_get_area(q, &a1);
+			if (qaws_surface_clip(&q, tor, &A, NULL, 1, 0, QAWS_CLIP_NONE, QAWS_FILL_NON_ZERO) == QAWS_STATUS_OK) qaws_surface_region_get_area(&a1, q);
 			qaws_surface_region_destroy(q); q = NULL;
-			if (qaws_surface_clip(tor, QAWS_CLIP_NONE, QAWS_FILL_NON_ZERO, &B, 1, NULL, 0, &q) == QAWS_STATUS_OK) qaws_surface_region_get_area(q, &a2);
+			if (qaws_surface_clip(&q, tor, &B, NULL, 1, 0, QAWS_CLIP_NONE, QAWS_FILL_NON_ZERO) == QAWS_STATUS_OK) qaws_surface_region_get_area(&a2, q);
 			qaws_surface_region_destroy(q);
 		}
-		st = qaws_surface_clip(tor, QAWS_CLIP_UNION, QAWS_FILL_NON_ZERO, &A, 1, &B, 1, &r);
-		if (st == QAWS_STATUS_OK) qaws_surface_region_get_area(r, &area);
+		st = qaws_surface_clip(&r, tor, &A, &B, 1, 1, QAWS_CLIP_UNION, QAWS_FILL_NON_ZERO);
+		if (st == QAWS_STATUS_OK) qaws_surface_region_get_area(&area, r);
 		v3.x0 = 24 + 2 * (pw + 12); v3.y0 = 104 + 2 * (ph + 44); v3.w = pw; v3.h = ph;
 		vuv.x0 = v3.x0 + pw + 12; vuv.y0 = v3.y0; vuv.w = pw; vuv.h = ph;
 		vuv.xmin = -0.1; vuv.xmax = 1.1; vuv.ymin = 0.5 - 0.6 * ph / pw; vuv.ymax = 0.5 + 0.6 * ph / pw;

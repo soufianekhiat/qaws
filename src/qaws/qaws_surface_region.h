@@ -68,47 +68,47 @@ typedef enum qaws_surface_curve_kind
 /* The metric and Christoffel symbols at (u, v): g = { E, F, G },
    christoffel = { G1_11, G1_12, G1_22, G2_11, G2_12, G2_22 } (either may be
    NULL). NUMERICAL_FAILURE where the surface is singular (S_u x S_v = 0). */
-qaws_status qaws_surface_get_metric(qaws_surface const* surface, qaws_scalar u, qaws_scalar v,
-	qaws_scalar* out_g, qaws_scalar* out_christoffel);
+qaws_status qaws_surface_get_metric(qaws_scalar* out_g, qaws_scalar* out_christoffel, qaws_surface const* surface,
+	qaws_scalar u, qaws_scalar v);
 
 /* The exponential map: the point reached from p along the geodesic leaving
    with the (u, v) velocity direction, after the surface length `length`;
    and the unit (u, v) velocity there (may be NULL). */
-qaws_status qaws_surface_exp(qaws_surface const* surface, qaws_vec2 p, qaws_vec2 direction, qaws_scalar length,
-	qaws_scalar tolerance, qaws_vec2* out_point, qaws_vec2* out_velocity);
+qaws_status qaws_surface_exp(qaws_vec2* out_point, qaws_vec2* out_velocity, qaws_surface const* surface, qaws_vec2 p,
+	qaws_vec2 direction, qaws_scalar length, qaws_scalar tolerance);
 
 /* A curve drawn in (u, v): the 2D curve is copied. */
-qaws_status qaws_surface_curve_create_uv(qaws_surface const* surface, qaws_curve const* uv_curve,
-	qaws_surface_curve** out_curve);
+qaws_status qaws_surface_curve_create_uv(qaws_surface_curve** out_curve, qaws_surface const* surface,
+	qaws_curve const* uv_curve);
 
 /* The geodesic from a to b (parameter points): shooting from a, by Newton
    on the leaving direction and the length, from the chord (and by
    continuation along it when that fails). Locally shortest; on surfaces
    with several geodesics between the points it is the one the chord leads
    to. */
-qaws_status qaws_surface_curve_create_geodesic(qaws_surface const* surface, qaws_vec2 a, qaws_vec2 b,
-	qaws_scalar tolerance, qaws_surface_curve** out_curve);
+qaws_status qaws_surface_curve_create_geodesic(qaws_surface_curve** out_curve, qaws_surface const* surface, qaws_vec2 a,
+	qaws_vec2 b, qaws_scalar tolerance);
 
 /* The geodesic leaving p in the (u, v) direction, for the surface length
    `length`. */
-qaws_status qaws_surface_curve_create_geodesic_ray(qaws_surface const* surface, qaws_vec2 p, qaws_vec2 direction,
-	qaws_scalar length, qaws_scalar tolerance, qaws_surface_curve** out_curve);
+qaws_status qaws_surface_curve_create_geodesic_ray(qaws_surface_curve** out_curve, qaws_surface const* surface, qaws_vec2 p,
+	qaws_vec2 direction, qaws_scalar length, qaws_scalar tolerance);
 
 /* An arc of the geodesic circle of radius r about centre: the points
    exp_centre(r (cos a e1 + sin a e2)) for a from angle0 to angle1, e1 along
    S_u and e2 a quarter turn from it about S_u x S_v (angles in radians; a
    full turn closes the circle). Beyond the injectivity radius the circle
    crosses itself: INVALID_ARGUMENT. */
-qaws_status qaws_surface_curve_create_geodesic_arc(qaws_surface const* surface, qaws_vec2 centre, qaws_scalar radius,
-	qaws_scalar angle0, qaws_scalar angle1, qaws_scalar tolerance, qaws_surface_curve** out_curve);
+qaws_status qaws_surface_curve_create_geodesic_arc(qaws_surface_curve** out_curve, qaws_surface const* surface, qaws_vec2 centre,
+	qaws_scalar radius, qaws_scalar angle0, qaws_scalar angle1, qaws_scalar tolerance);
 
 /* The geodesic offset of a curve: each point carried the surface distance
    |distance| along the geodesic leaving the base square to it, to the left
    of travel (about S_u x S_v) for a positive distance, to the right for a
    negative one. The base must be smooth (G1); where it curves more than
    1/|distance| towards the offset, the offset has cusps and turns back. */
-qaws_status qaws_surface_curve_create_offset(qaws_surface_curve const* base, qaws_scalar distance, qaws_scalar tolerance,
-	qaws_surface_curve** out_curve);
+qaws_status qaws_surface_curve_create_offset(qaws_surface_curve** out_curve, qaws_surface_curve const* base, qaws_scalar distance,
+	qaws_scalar tolerance);
 
 /* A validated enclosure of the geodesic leaving p in the (u, v) direction
    for the surface length `length`, on a polynomial surface (Bezier,
@@ -126,17 +126,17 @@ qaws_status qaws_surface_curve_create_offset(qaws_surface_curve const* base, qaw
    metric degenerates). */
 typedef struct qaws_geodesic_enclosure qaws_geodesic_enclosure;
 
-qaws_status qaws_surface_geodesic_enclose(qaws_surface const* surface, qaws_vec2 p, qaws_vec2 direction, qaws_scalar length,
-	qaws_scalar width, qaws_geodesic_enclosure** out_enclosure);
+qaws_status qaws_surface_geodesic_enclose(qaws_geodesic_enclosure** out_enclosure, qaws_surface const* surface, qaws_scalar width, qaws_vec2 p,
+	qaws_vec2 direction, qaws_scalar length);
 void qaws_geodesic_enclosure_destroy(qaws_geodesic_enclosure* enclosure);
 unsigned int qaws_geodesic_enclosure_get_step_count(qaws_geodesic_enclosure const* enclosure);
 /* Step i: its stretch of length [t0, t1] and the (u, v) box holding the
    geodesic over it. */
-qaws_status qaws_geodesic_enclosure_get_step(qaws_geodesic_enclosure const* enclosure, unsigned int index, qaws_scalar* out_t0,
-	qaws_scalar* out_t1, qaws_vec2* out_lo, qaws_vec2* out_hi);
+qaws_status qaws_geodesic_enclosure_get_step(qaws_scalar* out_t0, qaws_scalar* out_t1, qaws_vec2* out_lo,
+	qaws_vec2* out_hi, qaws_geodesic_enclosure const* enclosure, unsigned int index);
 /* The end: boxes holding the point and the unit (u, v) velocity there. */
-qaws_status qaws_geodesic_enclosure_get_end(qaws_geodesic_enclosure const* enclosure, qaws_vec2* out_point_lo, qaws_vec2* out_point_hi,
-	qaws_vec2* out_velocity_lo, qaws_vec2* out_velocity_hi);
+qaws_status qaws_geodesic_enclosure_get_end(qaws_vec2* out_point_lo, qaws_vec2* out_point_hi, qaws_vec2* out_velocity_lo,
+	qaws_vec2* out_velocity_hi, qaws_geodesic_enclosure const* enclosure);
 /* The crossings of two enclosed geodesics of one surface, certified: none
    where no step boxes meet; exactly one in each stretch where they meet,
    when there the two are transversal (the cross product of their velocity
@@ -146,8 +146,8 @@ qaws_status qaws_geodesic_enclosure_get_end(qaws_geodesic_enclosure const* enclo
    meeting boxes' common parts), up to capacity; the count. CERTIFICATION_
    FAILED when a stretch cannot be told (a tangency, an overlap, boxes too
    wide). */
-qaws_status qaws_geodesic_enclosure_cross(qaws_geodesic_enclosure const* a, qaws_geodesic_enclosure const* b, unsigned int capacity,
-	qaws_vec2* out_lo, qaws_vec2* out_hi, unsigned int* out_count);
+qaws_status qaws_geodesic_enclosure_cross(qaws_vec2* out_lo, qaws_vec2* out_hi, unsigned int* out_count,
+	qaws_geodesic_enclosure const* a, qaws_geodesic_enclosure const* b, unsigned int capacity);
 
 /* A geodesic segment: from start, leaving in the (u, v) direction, for the
    surface length length. */
@@ -182,8 +182,8 @@ typedef struct qaws_geodesic_segment
    (may be NULL). CERTIFICATION_FAILED when a pair cannot be told apart, a
    declared corner is not met, or the images disagree. */
 #define QAWS_GEODESIC_NO_CORNER 0xffffffffu
-qaws_status qaws_surface_geodesics_certify(qaws_surface const* surface, qaws_geodesic_segment const* segments, unsigned int count,
-	unsigned int const* next, qaws_scalar width, unsigned int* out_crossings);
+qaws_status qaws_surface_geodesics_certify(unsigned int* out_crossings, qaws_surface const* surface, qaws_geodesic_segment const* segments,
+	unsigned int const* next, unsigned int count, qaws_scalar width);
 
 /* Rigorous bounds on the surface area of a geodesic polygon of a polynomial
    surface: segments in order round it, each enclosed (width as in
@@ -198,8 +198,8 @@ qaws_status qaws_surface_geodesics_certify(qaws_surface const* surface, qaws_geo
    inside cells count in both bounds, the boxes' cells in the upper, each
    by the interval of |Su x Sv| over it. CERTIFICATION_FAILED when a
    winding number cannot be proven. */
-qaws_status qaws_surface_geodesic_polygon_area(qaws_surface const* surface, qaws_geodesic_segment const* segments, unsigned int count,
-	qaws_scalar width, unsigned int resolution, qaws_scalar* out_lo, qaws_scalar* out_hi);
+qaws_status qaws_surface_geodesic_polygon_area(qaws_scalar* out_lo, qaws_scalar* out_hi, qaws_surface const* surface,
+	qaws_geodesic_segment const* segments, unsigned int count, qaws_scalar width, unsigned int resolution);
 
 void qaws_surface_curve_destroy(qaws_surface_curve* curve);
 
@@ -212,11 +212,11 @@ qaws_curve const* qaws_surface_curve_get_uv(qaws_surface_curve const* curve);
 
 /* The surface length (geodesics: exact to the tolerance; others by Gauss
    quadrature of |S_u u' + S_v v'|). */
-qaws_status qaws_surface_curve_get_length(qaws_surface_curve const* curve, qaws_scalar* out_length);
+qaws_status qaws_surface_curve_get_length(qaws_scalar* out_length, qaws_surface_curve const* curve);
 
 /* The point at the (u, v) image's parameter t, in (u, v) and on the surface. */
-qaws_status qaws_surface_curve_evaluate(qaws_surface_curve const* curve, qaws_scalar t, qaws_vec2* out_uv,
-	qaws_vec3* out_point);
+qaws_status qaws_surface_curve_evaluate(qaws_vec2* out_uv, qaws_vec3* out_point, qaws_surface_curve const* curve,
+	qaws_scalar t);
 
 /* ------------------------------------------------------------------------ */
 /*  Regions                                                                 */
@@ -248,10 +248,10 @@ typedef struct qaws_surface_region qaws_surface_region;
 /* The subjects under the fill rule, combined with the clips by the clip
    type (QAWS_CLIP_NONE or no clips: the subjects' union under the rule).
    Every curve must lie on `surface`. */
-qaws_status qaws_surface_clip(qaws_surface const* surface, qaws_clip_type clip_type, qaws_fill_rule fill_rule,
-	qaws_surface_path const* subjects, unsigned int subject_count,
-	qaws_surface_path const* clips, unsigned int clip_count,
-	qaws_surface_region** out_region);
+qaws_status qaws_surface_clip(qaws_surface_region** out_region, qaws_surface const* surface, qaws_surface_path const* subjects,
+	qaws_surface_path const* clips, unsigned int subject_count,
+	unsigned int clip_count, qaws_clip_type clip_type,
+	qaws_fill_rule fill_rule);
 
 void qaws_surface_region_destroy(qaws_surface_region* region);
 
@@ -264,15 +264,15 @@ void qaws_surface_region_destroy(qaws_surface_region* region);
    queries on the region are those of qaws_surface_clip's.
    QAWS_STATUS_CERTIFICATION_FAILED when a decision cannot be proven. */
 struct qaws_exact_desc;
-qaws_status qaws_surface_clip_exact(qaws_surface const* surface, qaws_clip_type clip_type, qaws_fill_rule fill_rule,
-	qaws_surface_path const* subjects, unsigned int subject_count,
-	qaws_surface_path const* clips, unsigned int clip_count,
-	struct qaws_exact_desc const* exact, qaws_surface_region** out_region);
+qaws_status qaws_surface_clip_exact(qaws_surface_region** out_region, qaws_surface const* surface, qaws_surface_path const* subjects,
+	qaws_surface_path const* clips, unsigned int subject_count,
+	unsigned int clip_count, struct qaws_exact_desc const* exact,
+	qaws_clip_type clip_type, qaws_fill_rule fill_rule);
 
 /* The boundary loops in (u, v): outside loops counter-clockwise, holes
    clockwise (views valid while the region lives). */
 unsigned int qaws_surface_region_get_path_count(qaws_surface_region const* region);
-qaws_status qaws_surface_region_get_path(qaws_surface_region const* region, unsigned int index, qaws_path_2d* out_uv_path);
+qaws_status qaws_surface_region_get_path(qaws_path_2d* out_uv_path, qaws_surface_region const* region, unsigned int index);
 int qaws_surface_region_is_hole(qaws_surface_region const* region, unsigned int index);
 
 /* The region within the surface distance |distance| of the region bounded
@@ -282,23 +282,23 @@ int qaws_surface_region_is_hole(qaws_surface_region const* region, unsigned int 
    circles round the corners. Open paths give their tubes of radius
    |distance| with round ends. Exact in the topology like qaws_surface_clip;
    each boundary curve must be smooth (corners between curves). */
-qaws_status qaws_surface_offset(qaws_surface const* surface, qaws_fill_rule fill_rule,
-	qaws_surface_path const* paths, unsigned int path_count, qaws_scalar distance, qaws_scalar tolerance,
-	qaws_surface_region** out_region);
+qaws_status qaws_surface_offset(qaws_surface_region** out_region, qaws_surface const* surface,
+	qaws_surface_path const* paths, unsigned int path_count, qaws_fill_rule fill_rule, qaws_scalar distance,
+	qaws_scalar tolerance);
 
 /* The surface area, and the boundary's surface length. */
-qaws_status qaws_surface_region_get_area(qaws_surface_region const* region, qaws_scalar* out_area);
-qaws_status qaws_surface_region_get_perimeter(qaws_surface_region const* region, qaws_scalar* out_length);
+qaws_status qaws_surface_region_get_area(qaws_scalar* out_area, qaws_surface_region const* region);
+qaws_status qaws_surface_region_get_perimeter(qaws_scalar* out_length, qaws_surface_region const* region);
 
 /* The integral over the region of dim values f(user, u, v, point) against
    the surface's area element (a density, a moment, a curvature). */
 typedef void (*qaws_surface_region_fn)(void* user, qaws_scalar u, qaws_scalar v, qaws_vec3 point, qaws_scalar* out_values);
-qaws_status qaws_surface_region_integrate(qaws_surface_region const* region, qaws_surface_region_fn fn, void* user,
-	unsigned int dim, qaws_scalar* out_values);
+qaws_status qaws_surface_region_integrate(qaws_scalar* out_values, qaws_surface_region const* region, unsigned int dim,
+	qaws_surface_region_fn fn, void* user);
 
 /* 1 inside, 0 outside, -1 on the boundary (within the tolerance), at the
    parameter point uv. */
-qaws_status qaws_surface_region_contains(qaws_surface_region const* region, qaws_vec2 uv, int* out_inside);
+qaws_status qaws_surface_region_contains(int* out_inside, qaws_surface_region const* region, qaws_vec2 uv);
 
 qaws_surface const* qaws_surface_region_get_surface(qaws_surface_region const* region);
 
@@ -309,16 +309,16 @@ qaws_surface const* qaws_surface_region_get_surface(qaws_surface_region const* r
 /* The geodesic distance from a to b: the length of the geodesic between
    them (as qaws_surface_curve_create_geodesic: locally shortest, the one
    the chord leads to). */
-qaws_status qaws_surface_distance(qaws_surface const* surface, qaws_vec2 a, qaws_vec2 b, qaws_scalar tolerance,
-	qaws_scalar* out_distance);
+qaws_status qaws_surface_distance(qaws_scalar* out_distance, qaws_surface const* surface, qaws_vec2 a, qaws_vec2 b,
+	qaws_scalar tolerance);
 
 /* The point of a curve nearest p along the surface: its parameter (of the
    (u, v) image), its (u, v) and the geodesic distance (any may be NULL).
    Inside the curve it is where the geodesic to p leaves the curve square
    (a root of that angle, bracketed round the nearest of 64 samples); the
    curve's ends are taken too. */
-qaws_status qaws_surface_curve_closest_point(qaws_surface_curve const* curve, qaws_vec2 p, qaws_scalar tolerance,
-	qaws_scalar* out_parameter, qaws_vec2* out_point, qaws_scalar* out_distance);
+qaws_status qaws_surface_curve_closest_point(qaws_scalar* out_parameter, qaws_vec2* out_point, qaws_scalar* out_distance,
+	qaws_surface_curve const* curve, qaws_vec2 p, qaws_scalar tolerance);
 
 typedef struct qaws_surface_crossing
 {
@@ -329,22 +329,22 @@ typedef struct qaws_surface_crossing
 
 /* Where two curves of one surface cross: their (u, v) images met (on a
    closed surface, b's period copies too), up to capacity; the count of all. */
-qaws_status qaws_surface_curve_intersect(qaws_surface_curve const* a, qaws_surface_curve const* b, qaws_surface_crossing* out_crossings,
-	unsigned int capacity, unsigned int* out_count);
+qaws_status qaws_surface_curve_intersect(qaws_surface_crossing* out_crossings, unsigned int* out_count, qaws_surface_curve const* a,
+	qaws_surface_curve const* b, unsigned int capacity);
 
 /* The closest points of two curves and their geodesic distance: a crossing
    when they cross (distance 0), else the pair each nearest the other
    (closest points taken in turn from the nearest of 64 x 64 samples). Any
    output may be NULL. */
-qaws_status qaws_surface_curve_closest_points(qaws_surface_curve const* a, qaws_surface_curve const* b, qaws_scalar tolerance,
-	qaws_scalar* out_parameter_a, qaws_scalar* out_parameter_b, qaws_vec2* out_point_a, qaws_vec2* out_point_b,
-	qaws_scalar* out_distance);
+qaws_status qaws_surface_curve_closest_points(qaws_scalar* out_parameter_a, qaws_scalar* out_parameter_b, qaws_vec2* out_point_a,
+	qaws_vec2* out_point_b, qaws_scalar* out_distance, qaws_surface_curve const* a, qaws_surface_curve const* b,
+	qaws_scalar tolerance);
 
 /* A point's signed geodesic distance to a region: to its boundary (cuts
    along seams left out), negative inside; the boundary's nearest point
    (may be NULL). */
-qaws_status qaws_surface_region_distance(qaws_surface_region const* region, qaws_vec2 p, qaws_scalar tolerance,
-	qaws_scalar* out_distance, qaws_vec2* out_nearest);
+qaws_status qaws_surface_region_distance(qaws_scalar* out_distance, qaws_vec2* out_nearest, qaws_surface_region const* region,
+	qaws_vec2 p, qaws_scalar tolerance);
 
 /* The shortest path from p0 to p1 avoiding a region (NULL: none, the
    shortest geodesic, searched from a distance field as the shells' are): the
@@ -353,12 +353,12 @@ qaws_status qaws_surface_region_distance(qaws_surface_region const* region, qaws
    region's outside (its domain's edges, or the rims of a closed direction,
    bounding it). One curve drawn in (u, v), its pieces end to end.
    UNSUPPORTED_OPERATION when the region's boundary is cut along a seam. */
-qaws_status qaws_surface_curve_create_shortest_path(qaws_surface const* surface, qaws_surface_region const* obstacles, qaws_vec2 p0,
-	qaws_vec2 p1, qaws_scalar tolerance, qaws_surface_curve** out_curve);
+qaws_status qaws_surface_curve_create_shortest_path(qaws_surface_curve** out_curve, qaws_surface const* surface, qaws_surface_region const* obstacles,
+	qaws_vec2 p0, qaws_vec2 p1, qaws_scalar tolerance);
 
 /* The region as a trimmed surface (its loops borrowed: the region must
    outlive it). */
-qaws_status qaws_surface_region_create_trimmed(qaws_surface_region const* region, qaws_surface** out_surface);
+qaws_status qaws_surface_region_create_trimmed(qaws_surface** out_surface, qaws_surface_region const* region);
 
 /* ------------------------------------------------------------------------ */
 /*  Sampling and meshing                                                    */
@@ -382,8 +382,8 @@ typedef struct qaws_surface_sample_desc
 
 /* count points; out_uv and out_points (either may be NULL) take them in
    (u, v) and on the surface. desc NULL: random, seed 0. */
-qaws_status qaws_surface_region_sample(qaws_surface_region const* region, qaws_surface_sample_desc const* desc,
-	unsigned int count, qaws_vec2* out_uv, qaws_vec3* out_points);
+qaws_status qaws_surface_region_sample(qaws_vec2* out_uv, qaws_vec3* out_points,
+	qaws_surface_region const* region, unsigned int count, qaws_surface_sample_desc const* desc);
 
 /* A triangle mesh of the region in (u, v) (qaws_triangulate.h) sized by the
    metric: edges at most about edge_length on the surface, through the size
@@ -400,8 +400,8 @@ typedef struct qaws_surface_mesh_desc
 } qaws_surface_mesh_desc;
 
 struct qaws_mesh_2d;
-qaws_status qaws_surface_region_triangulate(qaws_surface_region const* region, qaws_surface_mesh_desc const* desc,
-	struct qaws_mesh_2d** out_mesh);
+qaws_status qaws_surface_region_triangulate(struct qaws_mesh_2d** out_mesh, qaws_surface_region const* region,
+	qaws_surface_mesh_desc const* desc);
 
 /* ------------------------------------------------------------------------ */
 /*  Medial axis                                                             */
@@ -431,24 +431,24 @@ typedef struct qaws_surface_medial_desc
 	qaws_scalar resolution;     /* edge length on the surface; 0 = 1/40 of sqrt(area) */
 } qaws_surface_medial_desc;
 
-qaws_status qaws_surface_region_medial_axis(qaws_surface_region const* region, qaws_surface_medial_desc const* desc,
-	qaws_surface_medial_axis** out_axis);
+qaws_status qaws_surface_region_medial_axis(qaws_surface_medial_axis** out_axis, qaws_surface_region const* region,
+	qaws_surface_medial_desc const* desc);
 void qaws_surface_medial_axis_destroy(qaws_surface_medial_axis* axis);
 
 /* The axis as segments in (u, v), with the radii (distances to the
    boundary) at their ends. */
 unsigned int qaws_surface_medial_axis_get_segment_count(qaws_surface_medial_axis const* axis);
-qaws_status qaws_surface_medial_axis_get_segment(qaws_surface_medial_axis const* axis, unsigned int index,
-	qaws_vec2 out_uv[2], qaws_scalar out_radius[2]);
+qaws_status qaws_surface_medial_axis_get_segment(qaws_vec2 out_uv[2], qaws_scalar out_radius[2],
+	qaws_surface_medial_axis const* axis, unsigned int index);
 
 /* The junctions: points equally far from three boundary features. */
 unsigned int qaws_surface_medial_axis_get_junction_count(qaws_surface_medial_axis const* axis);
-qaws_status qaws_surface_medial_axis_get_junction(qaws_surface_medial_axis const* axis, unsigned int index,
-	qaws_vec2* out_uv, qaws_scalar* out_radius);
+qaws_status qaws_surface_medial_axis_get_junction(qaws_vec2* out_uv, qaws_scalar* out_radius,
+	qaws_surface_medial_axis const* axis, unsigned int index);
 
 /* The largest geodesic circle inside the region found on the axis. */
-qaws_status qaws_surface_medial_axis_get_max_inscribed(qaws_surface_medial_axis const* axis, qaws_vec2* out_centre,
-	qaws_scalar* out_radius);
+qaws_status qaws_surface_medial_axis_get_max_inscribed(qaws_vec2* out_centre, qaws_scalar* out_radius,
+	qaws_surface_medial_axis const* axis);
 
 /* The mitered (straight) skeleton of a region with corners: each edge (the
    boundary between two corners) moves as its line, the edge carried on
@@ -463,7 +463,7 @@ qaws_status qaws_surface_medial_axis_get_max_inscribed(qaws_surface_medial_axis 
    split (no split events: a front cut off by another counts on beyond the
    cut). UNSUPPORTED_OPERATION for a loop without a corner (its medial
    axis is the answer) or one cut along a seam or a pole. */
-qaws_status qaws_surface_region_mitered_skeleton(qaws_surface_region const* region, qaws_surface_medial_desc const* desc,
-	qaws_surface_medial_axis** out_axis);
+qaws_status qaws_surface_region_mitered_skeleton(qaws_surface_medial_axis** out_axis, qaws_surface_region const* region,
+	qaws_surface_medial_desc const* desc);
 
 #endif /* QAWS_SURFACE_REGION_H */

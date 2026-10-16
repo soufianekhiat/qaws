@@ -108,7 +108,7 @@ static unsigned int sgf_sample(qaws_surface_curve const* c, double* uv, unsigned
 	for (k = 0; k < n; k++)
 	{
 		qaws_vec2 p;
-		qaws_surface_curve_evaluate(c, (qaws_scalar)(rg.min_value + (rg.max_value - rg.min_value) * k / (n - 1)), &p, NULL);
+		qaws_surface_curve_evaluate(&p, NULL, c, (qaws_scalar)(rg.min_value + (rg.max_value - rg.min_value) * k / (n - 1)));
 		uv[2 * k] = p.x; uv[2 * k + 1] = p.y;
 	}
 	return n;
@@ -231,11 +231,11 @@ static void demo_surface_geodesic(void)
 		if (row == 0)
 		{
 			qaws_vec2 a = sgf_uv(0.14, 0.68), b = sgf_uv(0.3, 0.74), c = sgf_uv(0.24, 0.5), ctr = sgf_uv(0.4, 0.42);
-			qaws_surface_curve_create_geodesic(surf, a, b, 0, &items[n].c); items[n++].color = "#24292f";
-			qaws_surface_curve_create_geodesic(surf, b, c, 0, &items[n].c); items[n++].color = "#24292f";
-			qaws_surface_curve_create_geodesic(surf, c, a, 0, &items[n].c); items[n++].color = "#24292f";
+			qaws_surface_curve_create_geodesic(&items[n].c, surf, a, b, 0); items[n++].color = "#24292f";
+			qaws_surface_curve_create_geodesic(&items[n].c, surf, b, c, 0); items[n++].color = "#24292f";
+			qaws_surface_curve_create_geodesic(&items[n].c, surf, c, a, 0); items[n++].color = "#24292f";
 			for (i = 0; i < 5; i++)
-				if (qaws_surface_curve_create_geodesic_arc(surf, ctr, (qaws_scalar)(0.1 * (i + 1)), 0, (qaws_scalar)(2 * pi), 0, &items[n].c) == QAWS_STATUS_OK)
+				if (qaws_surface_curve_create_geodesic_arc(&items[n].c, surf, ctr, (qaws_scalar)(0.1 * (i + 1)), 0, (qaws_scalar)(2 * pi), 0) == QAWS_STATUS_OK)
 					items[n++].color = ring[i];
 			sgf_view_init(&view, 3.0, 0.3, 125, 0, 0);
 		}
@@ -244,10 +244,10 @@ static void demo_surface_geodesic(void)
 			qaws_vec2 q[4];
 			q[0] = sgf_uv(0.15, 0.2); q[1] = sgf_uv(0.85, 0.15); q[2] = sgf_uv(0.8, 0.85); q[3] = sgf_uv(0.2, 0.8);
 			for (i = 0; i < 4; i++)
-				if (qaws_surface_curve_create_geodesic(surf, q[i], q[(i + 1) % 4], 0, &items[n].c) == QAWS_STATUS_OK)
+				if (qaws_surface_curve_create_geodesic(&items[n].c, surf, q[i], q[(i + 1) % 4], 0) == QAWS_STATUS_OK)
 					items[n++].color = "#24292f";
 			for (i = 0; i < 4; i++)
-				if (qaws_surface_curve_create_geodesic_arc(surf, sgf_uv(0.5, 0.5), (qaws_scalar)(0.15 + 0.15 * i), 0, (qaws_scalar)(2 * pi), 0, &items[n].c) == QAWS_STATUS_OK)
+				if (qaws_surface_curve_create_geodesic_arc(&items[n].c, surf, sgf_uv(0.5, 0.5), (qaws_scalar)(0.15 + 0.15 * i), 0, (qaws_scalar)(2 * pi), 0) == QAWS_STATUS_OK)
 					items[n++].color = ring[i];
 			sgf_view_init(&view, 0.7, 0.75, 150, 0, 0);
 			view.o[0] = 1; view.o[1] = 1; view.o[2] = 0.3;
@@ -260,11 +260,11 @@ static void demo_surface_geodesic(void)
 			{
 				qaws_vec2 b = q[(i + 1) % 4];
 				if (i == 3) b.x += 1;      /* back round to the start, in the covering plane */
-				if (qaws_surface_curve_create_geodesic(surf, q[i], b, 0, &items[n].c) == QAWS_STATUS_OK)
+				if (qaws_surface_curve_create_geodesic(&items[n].c, surf, q[i], b, 0) == QAWS_STATUS_OK)
 					items[n++].color = "#24292f";
 			}
 			for (i = 0; i < 3; i++)
-				if (qaws_surface_curve_create_geodesic_arc(surf, sgf_uv(0.62, 0.25), (qaws_scalar)(0.12 + 0.12 * i), 0, (qaws_scalar)(2 * pi), 0, &items[n].c) == QAWS_STATUS_OK)
+				if (qaws_surface_curve_create_geodesic_arc(&items[n].c, surf, sgf_uv(0.62, 0.25), (qaws_scalar)(0.12 + 0.12 * i), 0, (qaws_scalar)(2 * pi), 0) == QAWS_STATUS_OK)
 					items[n++].color = ring[i];
 			sgf_view_init(&view, 0.81, 0.85, 105, 0, 0);
 		}

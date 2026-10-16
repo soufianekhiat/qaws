@@ -718,7 +718,7 @@ static qaws_status mv_coordinates(qaws_mean_value const* m, double const* x, dou
 /*  The API                                                                 */
 /* ------------------------------------------------------------------------ */
 
-qaws_status qaws_mean_value_create(qaws_mean_value_desc const* desc, qaws_mean_value** out_coords)
+qaws_status qaws_mean_value_create(qaws_mean_value** out_coords, qaws_mean_value_desc const* desc)
 {
 	qaws_mean_value* m;
 	unsigned int pi, ci, *loop_piece = NULL, nloops = 0;
@@ -837,7 +837,7 @@ unsigned int qaws_mean_value_get_handle_count(qaws_mean_value const* coords)
 	return coords ? coords->nh : 0;
 }
 
-qaws_status qaws_mean_value_get_handle(qaws_mean_value const* coords, unsigned int index, qaws_vec2* out_point)
+qaws_status qaws_mean_value_get_handle(qaws_vec2* out_point, qaws_mean_value const* coords, unsigned int index)
 {
 	if (!coords || !out_point || index >= coords->nh)
 		return QAWS_STATUS_INVALID_ARGUMENT;
@@ -846,7 +846,7 @@ qaws_status qaws_mean_value_get_handle(qaws_mean_value const* coords, unsigned i
 	return QAWS_STATUS_OK;
 }
 
-qaws_status qaws_mean_value_coordinates(qaws_mean_value const* coords, qaws_vec2 point, qaws_scalar* out_weights)
+qaws_status qaws_mean_value_coordinates(qaws_scalar* out_weights, qaws_mean_value const* coords, qaws_vec2 point)
 {
 	double x[2], *w;
 	unsigned int i;
@@ -904,8 +904,8 @@ static void mv_deform_task(void* ctx_, unsigned int begin, unsigned int end)
 	free(w);
 }
 
-qaws_status qaws_mean_value_deform(qaws_mean_value const* coords, qaws_vec2 const* moved_handles,
-	qaws_vec2 const* points, unsigned int count, qaws_vec2* out_points)
+qaws_status qaws_mean_value_deform(qaws_vec2* out_points, qaws_mean_value const* coords,
+	qaws_vec2 const* moved_handles, qaws_vec2 const* points, unsigned int count)
 {
 	mv_deform_ctx ctx;
 	if (!coords || !moved_handles || (!points && count) || (!out_points && count))
@@ -918,8 +918,8 @@ qaws_status qaws_mean_value_deform(qaws_mean_value const* coords, qaws_vec2 cons
 	return ctx.st;
 }
 
-qaws_status qaws_mean_value_interpolate(qaws_mean_value const* coords, qaws_vec2 point,
-	qaws_mean_value_boundary_fn fn, void* user, unsigned int dim, qaws_scalar* out_values)
+qaws_status qaws_mean_value_interpolate(qaws_scalar* out_values, qaws_mean_value const* coords,
+	unsigned int dim, qaws_vec2 point, qaws_mean_value_boundary_fn fn, void* user)
 {
 	double x[2], *acc, total, u, floor;
 	qaws_scalar* tmp;

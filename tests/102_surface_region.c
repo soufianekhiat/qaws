@@ -60,9 +60,9 @@ static double srt_area(qaws_surface const* s, qaws_clip_type type, qaws_surface_
 {
 	qaws_surface_region* r = NULL;
 	qaws_scalar area = 0;
-	*st = qaws_surface_clip(s, type, QAWS_FILL_NON_ZERO, a, na, b, nb, &r);
+	*st = qaws_surface_clip(&r, s, a, b, na, nb, type, QAWS_FILL_NON_ZERO);
 	if (*st == QAWS_STATUS_OK)
-		*st = qaws_surface_region_get_area(r, &area);
+		*st = qaws_surface_region_get_area(&area, r);
 	qaws_surface_region_destroy(r);
 	return (double)area;
 }
@@ -78,8 +78,8 @@ static void test_sphere(void)
 	double ra = 0.6, rb = 0.5, aA, aB, aU, aI, aD, aX, worst_cf;
 	qaws_status st, s1 = QAWS_STATUS_OK;
 	char msg[400];
-	qaws_surface_curve_create_geodesic_arc(s, srt_uv(0.3, 0.55), (qaws_scalar)ra, 0, (qaws_scalar)(2 * SRT_PI), 0, &ca);
-	qaws_surface_curve_create_geodesic_arc(s, srt_uv(0.38, 0.5), (qaws_scalar)rb, 0, (qaws_scalar)(2 * SRT_PI), 0, &cb);
+	qaws_surface_curve_create_geodesic_arc(&ca, s, srt_uv(0.3, 0.55), (qaws_scalar)ra, 0, (qaws_scalar)(2 * SRT_PI), 0);
+	qaws_surface_curve_create_geodesic_arc(&cb, s, srt_uv(0.38, 0.5), (qaws_scalar)rb, 0, (qaws_scalar)(2 * SRT_PI), 0);
 	pa[0] = ca; pb[0] = cb;
 	A.curves = pa; A.curve_count = 1; A.closed = 1;
 	B.curves = pb; B.curve_count = 1; B.closed = 1;
@@ -98,10 +98,10 @@ static void test_sphere(void)
 		qaws_surface_region* r = NULL;
 		qaws_scalar per = 0;
 		int in1 = 0, in2 = 0;
-		qaws_surface_clip(s, QAWS_CLIP_NONE, QAWS_FILL_NON_ZERO, &A, 1, NULL, 0, &r);
-		qaws_surface_region_get_perimeter(r, &per);
-		qaws_surface_region_contains(r, srt_uv(0.3, 0.55), &in1);
-		qaws_surface_region_contains(r, srt_uv(0.7, 0.55), &in2);
+		qaws_surface_clip(&r, s, &A, NULL, 1, 0, QAWS_CLIP_NONE, QAWS_FILL_NON_ZERO);
+		qaws_surface_region_get_perimeter(&per, r);
+		qaws_surface_region_contains(&in1, r, srt_uv(0.3, 0.55));
+		qaws_surface_region_contains(&in2, r, srt_uv(0.7, 0.55));
 		sprintf(msg, "sphere: a geodesic circle's perimeter against 2 pi R sin(r / R) within %.2g; its centre inside (%d), the far side outside (%d)",
 			fabs((double)per - 2 * SRT_PI * R * sin(ra / R)), in1, in2);
 		TEST_ASSERT(fabs((double)per - 2 * SRT_PI * R * sin(ra / R)) <= tol && in1 == 1 && in2 == 0, msg);
@@ -118,7 +118,7 @@ static void test_sphere(void)
 		{
 			double lon = 2 * SRT_PI * tri[i][0], lat = -SRT_PI / 2 + SRT_PI * tri[i][1];
 			P[i][0] = cos(lat) * cos(lon); P[i][1] = cos(lat) * sin(lon); P[i][2] = sin(lat);
-			qaws_surface_curve_create_geodesic(s, srt_uv(tri[i][0], tri[i][1]), srt_uv(tri[(i + 1) % 3][0], tri[(i + 1) % 3][1]), 0, &e[i]);
+			qaws_surface_curve_create_geodesic(&e[i], s, srt_uv(tri[i][0], tri[i][1]), srt_uv(tri[(i + 1) % 3][0], tri[(i + 1) % 3][1]), 0);
 			pe[i] = e[i];
 		}
 		/* the angle at each vertex between the planes through it and its neighbours */
@@ -163,9 +163,9 @@ static void test_plane(void)
 	d.p01.x = (qaws_scalar)0.6; d.p01.y = 3; d.p01.z = 0;
 	d.p11.x = (qaws_scalar)2.6; d.p11.y = 3; d.p11.z = 0;
 	qaws_surface_create_bilinear(&s, &d);
-	qaws_surface_curve_create_geodesic_arc(s, srt_uv(0.5, 0.5), (qaws_scalar)r, 0, (qaws_scalar)(2 * SRT_PI), 0, &circle);
+	qaws_surface_curve_create_geodesic_arc(&circle, s, srt_uv(0.5, 0.5), (qaws_scalar)r, 0, (qaws_scalar)(2 * SRT_PI), 0);
 	corner[0] = srt_uv(0.3, 0.3); corner[1] = srt_uv(0.62, 0.3); corner[2] = srt_uv(0.62, 0.58); corner[3] = srt_uv(0.3, 0.58);
-	for (i = 0; i < 4; i++) { qaws_surface_curve_create_geodesic(s, corner[i], corner[(i + 1) % 4], 0, &sq[i]); ps[i] = sq[i]; }
+	for (i = 0; i < 4; i++) { qaws_surface_curve_create_geodesic(&sq[i], s, corner[i], corner[(i + 1) % 4], 0); ps[i] = sq[i]; }
 	pc[0] = circle;
 	C.curves = pc; C.curve_count = 1; C.closed = 1;
 	Q.curves = ps; Q.curve_count = 4; Q.closed = 1;
@@ -241,7 +241,7 @@ static void test_cylinder(void)
 	qaws_surface_create_extrusion(&s, &ed);
 	ru = qaws_surface_get_u_range(s);
 	/* centred near the middle of the domain, clear of the seam (step 4 cuts at seams) */
-	st = qaws_surface_curve_create_geodesic_arc(s, srt_uv(0.5 * ru.max_value, 0.5), (qaws_scalar)r, 0, (qaws_scalar)(2 * SRT_PI), 0, &c);
+	st = qaws_surface_curve_create_geodesic_arc(&c, s, srt_uv(0.5 * ru.max_value, 0.5), (qaws_scalar)r, 0, (qaws_scalar)(2 * SRT_PI), 0);
 	pc[0] = c;
 	P.curves = pc; P.curve_count = 1; P.closed = 1;
 	if (st == QAWS_STATUS_OK)
@@ -279,7 +279,7 @@ static double srt_angle(qaws_surface const* s, qaws_vec2 p, double const* a, dou
 {
 	qaws_scalar g[3];
 	double ab, aa, bb;
-	qaws_surface_get_metric(s, p.x, p.y, g, NULL);
+	qaws_surface_get_metric(g, NULL, s, p.x, p.y);
 	ab = g[0] * a[0] * b[0] + g[1] * (a[0] * b[1] + a[1] * b[0]) + g[2] * a[1] * b[1];
 	aa = g[0] * a[0] * a[0] + 2 * g[1] * a[0] * a[1] + g[2] * a[1] * a[1];
 	bb = g[0] * b[0] * b[0] + 2 * g[1] * b[0] * b[1] + g[2] * b[1] * b[1];
@@ -307,7 +307,7 @@ static void test_gauss_bonnet(void)
 	bd.u_degree = 3; bd.v_degree = 3; bd.control_points = cp; bd.u_point_count = 4; bd.v_point_count = 4;
 	qaws_surface_create_bezier(&s, &bd);
 	tri[0] = srt_uv(0.15, 0.2); tri[1] = srt_uv(0.85, 0.3); tri[2] = srt_uv(0.4, 0.85);
-	for (i = 0; i < 3; i++) { qaws_surface_curve_create_geodesic(s, tri[i], tri[(i + 1) % 3], 0, &e[i]); pe[i] = e[i]; }
+	for (i = 0; i < 3; i++) { qaws_surface_curve_create_geodesic(&e[i], s, tri[i], tri[(i + 1) % 3], 0); pe[i] = e[i]; }
 	/* the interior angle at each vertex: between the incoming edge reversed and the outgoing edge */
 	for (i = 0; i < 3; i++)
 	{
@@ -322,16 +322,16 @@ static void test_gauss_bonnet(void)
 		angles += srt_angle(s, tri[i], da, db);
 	}
 	T.curves = pe; T.curve_count = 3; T.closed = 1;
-	st = qaws_surface_clip(s, QAWS_CLIP_NONE, QAWS_FILL_NON_ZERO, &T, 1, NULL, 0, &r);
+	st = qaws_surface_clip(&r, s, &T, NULL, 1, 0, QAWS_CLIP_NONE, QAWS_FILL_NON_ZERO);
 	if (st == QAWS_STATUS_OK)
-		st = qaws_surface_region_integrate(r, srt_curvature, s, 1, &Kint);
+		st = qaws_surface_region_integrate(&Kint, r, 1, srt_curvature, s);
 	sprintf(msg, "wavy patch, Gauss-Bonnet on a geodesic triangle: the integral of K (%.6f) against the angle sum less pi (%.6f): %.2g",
 		(double)Kint, angles - SRT_PI, fabs((double)Kint - (angles - SRT_PI)));
 	TEST_ASSERT(st == QAWS_STATUS_OK && fabs((double)Kint - (angles - SRT_PI)) <= tol && fabs((double)Kint) > 1e-3, msg);
 	{
 		qaws_surface* tr = NULL;
 		int in = 0;
-		qaws_status s2 = qaws_surface_region_create_trimmed(r, &tr), s3 = QAWS_STATUS_INVALID_ARGUMENT;
+		qaws_status s2 = qaws_surface_region_create_trimmed(&tr, r), s3 = QAWS_STATUS_INVALID_ARGUMENT;
 		if (s2 == QAWS_STATUS_OK)
 			s3 = qaws_surface_trim_contains(&in, tr, (qaws_scalar)0.45, (qaws_scalar)0.45);
 		sprintf(msg, "the triangle as a trimmed surface (status %d), its inside point kept (%d)", (int)s2, in);
@@ -352,7 +352,7 @@ static qaws_surface_curve* srt_uv_line(qaws_surface const* s, double u0, double 
 	memset(&bd, 0, sizeof(bd));
 	bd.dimension = QAWS_DIMENSION_2D; bd.degree = 1; bd.control_points = cp; bd.control_point_count = 2;
 	qaws_curve_create_bezier(keep, &bd);
-	qaws_surface_curve_create_uv(s, *keep, &c);
+	qaws_surface_curve_create_uv(&c, s, *keep);
 	return c;
 }
 
@@ -364,9 +364,9 @@ static double srt_area1(qaws_surface const* s, qaws_surface_curve const* c, doub
 	qaws_scalar a = 0, p = 0;
 	pc[0] = c;
 	P.curves = pc; P.curve_count = 1; P.closed = 1;
-	*st = qaws_surface_clip(s, QAWS_CLIP_NONE, QAWS_FILL_NON_ZERO, &P, 1, NULL, 0, &r);
-	if (*st == QAWS_STATUS_OK) *st = qaws_surface_region_get_area(r, &a);
-	if (*st == QAWS_STATUS_OK && per) *st = qaws_surface_region_get_perimeter(r, &p);
+	*st = qaws_surface_clip(&r, s, &P, NULL, 1, 0, QAWS_CLIP_NONE, QAWS_FILL_NON_ZERO);
+	if (*st == QAWS_STATUS_OK) *st = qaws_surface_region_get_area(&a, r);
+	if (*st == QAWS_STATUS_OK && per) *st = qaws_surface_region_get_perimeter(&p, r);
 	if (per) *per = (double)p;
 	qaws_surface_region_destroy(r);
 	return (double)a;
@@ -401,9 +401,9 @@ static void test_seams(void)
 		qaws_surface_curve *c = NULL, *n = NULL, *so = NULL;
 		double r = 0.6, cap = 2 * SRT_PI * R * R * (1 - cos(r / R)), a1, a2, a3, p2 = 0;
 		qaws_status s1, s2, s3;
-		qaws_surface_curve_create_geodesic_arc(s, srt_uv(0.02, 0.55), (qaws_scalar)r, 0, (qaws_scalar)(2 * SRT_PI), 0, &c);
-		qaws_surface_curve_create_geodesic_arc(s, srt_uv(0.3, 1), (qaws_scalar)r, 0, (qaws_scalar)(2 * SRT_PI), 0, &n);
-		qaws_surface_curve_create_geodesic_arc(s, srt_uv(0.3, 0), (qaws_scalar)r, 0, (qaws_scalar)(2 * SRT_PI), 0, &so);
+		qaws_surface_curve_create_geodesic_arc(&c, s, srt_uv(0.02, 0.55), (qaws_scalar)r, 0, (qaws_scalar)(2 * SRT_PI), 0);
+		qaws_surface_curve_create_geodesic_arc(&n, s, srt_uv(0.3, 1), (qaws_scalar)r, 0, (qaws_scalar)(2 * SRT_PI), 0);
+		qaws_surface_curve_create_geodesic_arc(&so, s, srt_uv(0.3, 0), (qaws_scalar)r, 0, (qaws_scalar)(2 * SRT_PI), 0);
 		a1 = srt_area1(s, c, NULL, &s1);
 		a2 = srt_area1(s, n, &p2, &s2);
 		a3 = srt_area1(s, so, NULL, &s3);
@@ -431,8 +431,8 @@ static void test_seams(void)
 		pb[0] = low; pb[1] = north;
 		B[0].curves = pb; B[0].curve_count = 1; B[0].closed = 1;
 		B[1].curves = pb + 1; B[1].curve_count = 1; B[1].closed = 1;
-		s3 = qaws_surface_clip(s, QAWS_CLIP_DIFFERENCE, QAWS_FILL_NON_ZERO, &B[0], 1, &B[1], 1, &r);
-		if (s3 == QAWS_STATUS_OK) qaws_surface_region_get_area(r, &band);
+		s3 = qaws_surface_clip(&r, s, &B[0], &B[1], 1, 1, QAWS_CLIP_DIFFERENCE, QAWS_FILL_NON_ZERO);
+		if (s3 == QAWS_STATUS_OK) qaws_surface_region_get_area(&band, r);
 		qaws_surface_region_destroy(r);
 		sprintf(msg, "sphere: latitude lines drawn in (u, v): the north cap %.2g, the south cap %.2g, the band between them %.2g, against closed forms",
 			fabs(a1 - 2 * SRT_PI * R * R * (1 - sin(l1))), fabs(a2 - 2 * SRT_PI * R * R * (1 + sin(l2))), fabs((double)band - 2 * SRT_PI * R * R * (sin(l1) - sin(l2))));
@@ -448,8 +448,8 @@ static void test_seams(void)
 		qaws_surface_path A, B;
 		double aA, aB, aU, aI;
 		qaws_status st, s1 = QAWS_STATUS_OK;
-		qaws_surface_curve_create_geodesic_arc(s, srt_uv(0.97, 0.5), (qaws_scalar)0.55, 0, (qaws_scalar)(2 * SRT_PI), 0, &a);
-		qaws_surface_curve_create_geodesic_arc(s, srt_uv(1.05, 0.55), (qaws_scalar)0.5, 0, (qaws_scalar)(2 * SRT_PI), 0, &b);
+		qaws_surface_curve_create_geodesic_arc(&a, s, srt_uv(0.97, 0.5), (qaws_scalar)0.55, 0, (qaws_scalar)(2 * SRT_PI), 0);
+		qaws_surface_curve_create_geodesic_arc(&b, s, srt_uv(1.05, 0.55), (qaws_scalar)0.5, 0, (qaws_scalar)(2 * SRT_PI), 0);
 		pa[0] = a; pb[0] = b;
 		A.curves = pa; A.curve_count = 1; A.closed = 1;
 		B.curves = pb; B.curve_count = 1; B.closed = 1;
@@ -493,12 +493,12 @@ static void test_seams(void)
 		pb[0] = lo; pb[1] = hi;
 		B[0].curves = pb; B[0].curve_count = 1; B[0].closed = 1;
 		B[1].curves = pb + 1; B[1].curve_count = 1; B[1].closed = 1;
-		st = qaws_surface_clip(cy, QAWS_CLIP_NONE, QAWS_FILL_NON_ZERO, B, 2, NULL, 0, &r);
-		if (st == QAWS_STATUS_OK) { qaws_surface_region_get_area(r, &ar); qaws_surface_region_get_perimeter(r, &pr); }
+		st = qaws_surface_clip(&r, cy, B, NULL, 2, 0, QAWS_CLIP_NONE, QAWS_FILL_NON_ZERO);
+		if (st == QAWS_STATUS_OK) { qaws_surface_region_get_area(&ar, r); qaws_surface_region_get_perimeter(&pr, r); }
 		qaws_surface_region_destroy(r);
 		a = 2 * SRT_PI * Rc * 0.4 * H;
 		per = 2 * 2 * SRT_PI * Rc;
-		qaws_surface_curve_create_geodesic_arc(cy, srt_uv(0.02 * ru.max_value, 0.5), (qaws_scalar)0.5, 0, (qaws_scalar)(2 * SRT_PI), 0, &c);
+		qaws_surface_curve_create_geodesic_arc(&c, cy, srt_uv(0.02 * ru.max_value, 0.5), (qaws_scalar)0.5, 0, (qaws_scalar)(2 * SRT_PI), 0);
 		ac = srt_area1(cy, c, NULL, &s2);
 		sprintf(msg, "cylinder: a band between two loops round it (area %.2g, perimeter %.2g without the seam), a circle across the seam against pi r^2 %.2g",
 			fabs((double)ar - a), fabs((double)pr - per), fabs(ac - SRT_PI * 0.25));
@@ -518,11 +518,11 @@ static void test_seams(void)
 		qaws_surface_curve *c1 = NULL, *c2 = NULL, *c3 = NULL, *c4 = NULL;
 		double a1, a2, a3, a4;
 		qaws_status q1, q2, q3, q4;
-		qaws_surface_curve_create_geodesic_arc(t1, srt_uv(0.01, 0.3), (qaws_scalar)0.3, 0, (qaws_scalar)(2 * SRT_PI), 0, &c1);
-		qaws_surface_curve_create_geodesic_arc(t1, srt_uv(0.4, 0.3), (qaws_scalar)0.3, 0, (qaws_scalar)(2 * SRT_PI), 0, &c2);
+		qaws_surface_curve_create_geodesic_arc(&c1, t1, srt_uv(0.01, 0.3), (qaws_scalar)0.3, 0, (qaws_scalar)(2 * SRT_PI), 0);
+		qaws_surface_curve_create_geodesic_arc(&c2, t1, srt_uv(0.4, 0.3), (qaws_scalar)0.3, 0, (qaws_scalar)(2 * SRT_PI), 0);
 		/* the outer equator: v 0 on t1, v 0.75 on t2 (its profile starts a quarter turn later) */
-		qaws_surface_curve_create_geodesic_arc(t1, srt_uv(0.4, 0.02), (qaws_scalar)0.3, 0, (qaws_scalar)(2 * SRT_PI), 0, &c3);
-		qaws_surface_curve_create_geodesic_arc(t2, srt_uv(0.4, 0.77), (qaws_scalar)0.3, 0, (qaws_scalar)(2 * SRT_PI), 0, &c4);
+		qaws_surface_curve_create_geodesic_arc(&c3, t1, srt_uv(0.4, 0.02), (qaws_scalar)0.3, 0, (qaws_scalar)(2 * SRT_PI), 0);
+		qaws_surface_curve_create_geodesic_arc(&c4, t2, srt_uv(0.4, 0.77), (qaws_scalar)0.3, 0, (qaws_scalar)(2 * SRT_PI), 0);
 		a1 = srt_area1(t1, c1, NULL, &q1);
 		a2 = srt_area1(t1, c2, NULL, &q2);
 		a3 = srt_area1(t1, c3, NULL, &q3);

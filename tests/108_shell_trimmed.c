@@ -128,7 +128,7 @@ static void test_split_plane(void)
 	pb[0].curves = dl; pb[0].curve_count = 1; pb[0].closed = 1;
 	fd[0].surface = sa; fd[0].trims = pa; fd[0].trim_count = 2;
 	fd[1].surface = sb; fd[1].trims = pb; fd[1].trim_count = 1;
-	st = qaws_shell_atlas_create_trimmed(fd, 2, 0, &a);
+	st = qaws_shell_atlas_create_trimmed(&a, fd, 2, 0);
 	sprintf(msg, "split plane: the square with a hole and the disk, %u shared edges (the circle, split where each face's circle starts)", a ? qaws_shell_atlas_get_edge_count(a) : 0);
 	TEST_ASSERT(st == QAWS_STATUS_OK && qaws_shell_atlas_get_edge_count(a) == 2, msg);
 	if (st == QAWS_STATUS_OK)
@@ -140,7 +140,7 @@ static void test_split_plane(void)
 		unsigned int cr = 0;
 		double dx = 1, dy = 0.3, n = hypot(dx, dy), L = 2, off;
 		d.x = (qaws_scalar)(dx / n); d.y = (qaws_scalar)(dy / n);
-		st = qaws_shell_exp(a, str_pt(0, (-1.2 + 2) / 4, (0.1 + 2) / 4), d, (qaws_scalar)L, &q, NULL, &cr);
+		st = qaws_shell_exp(&q, NULL, &cr, a, str_pt(0, (-1.2 + 2) / 4, (0.1 + 2) / 4), d, (qaws_scalar)L);
 		e = str_at(a, q);
 		off = hypot((double)e.x - (-1.2 + L * dx / n), (double)e.y - (0.1 + L * dy / n)) + fabs((double)e.z);
 		sprintf(msg, "split plane: a ray over the disk and out (%u crossings) against the straight line %.2g", cr, off);
@@ -154,13 +154,13 @@ static void test_split_plane(void)
 		double dd = hypot(0.9, 0.2), r1 = 0.5, r2 = 0.8, lens;
 		lens = r1 * r1 * acos((dd * dd + r1 * r1 - r2 * r2) / (2 * dd * r1)) + r2 * r2 * acos((dd * dd + r2 * r2 - r1 * r1) / (2 * dd * r2))
 			- 0.5 * sqrt((-dd + r1 + r2) * (dd + r1 - r2) * (dd - r1 + r2) * (dd + r1 + r2));
-		st = qaws_shell_region_create_geodesic_disk(a, str_pt(0, (0.9 + 2) / 4, (0.2 + 2) / 4), (qaws_scalar)r1, 0, &g);
+		st = qaws_shell_region_create_geodesic_disk(&g, a, str_pt(0, (0.9 + 2) / 4, (0.2 + 2) / 4), (qaws_scalar)r1, 0);
 		if (st == QAWS_STATUS_OK)
 		{
-			qaws_shell_region_get_area(g, &A);
-			qaws_shell_region_get_perimeter(g, &P);
-			if (qaws_shell_region_get_face(g, 0)) qaws_surface_region_get_area(qaws_shell_region_get_face(g, 0), &a0);
-			if (qaws_shell_region_get_face(g, 1)) qaws_surface_region_get_area(qaws_shell_region_get_face(g, 1), &a1);
+			qaws_shell_region_get_area(&A, g);
+			qaws_shell_region_get_perimeter(&P, g);
+			if (qaws_shell_region_get_face(g, 0)) qaws_surface_region_get_area(&a0, qaws_shell_region_get_face(g, 0));
+			if (qaws_shell_region_get_face(g, 1)) qaws_surface_region_get_area(&a1, qaws_shell_region_get_face(g, 1));
 		}
 		sprintf(msg, "split plane: a disk over the curved edge against pi r^2 %.2g and 2 pi r %.2g; the disk's lens %.2g, the rest %.2g",
 			fabs((double)A - STR_PI * r1 * r1), fabs((double)P - 2 * STR_PI * r1), fabs((double)a1 - lens), fabs((double)a0 - (STR_PI * r1 * r1 - lens)));
@@ -196,7 +196,7 @@ static void test_tube(void)
 	pa[1].curves = hl; pa[1].curve_count = 1; pa[1].closed = 1;
 	fd[0].surface = sa; fd[0].trims = pa; fd[0].trim_count = 2;
 	fd[1].surface = tube; fd[1].trims = NULL; fd[1].trim_count = 0;
-	st = qaws_shell_atlas_create_trimmed(fd, 2, 0, &a);
+	st = qaws_shell_atlas_create_trimmed(&a, fd, 2, 0);
 	sprintf(msg, "plate and tube: the hole's trim against the tube's top, %u shared edge", a ? qaws_shell_atlas_get_edge_count(a) : 0);
 	TEST_ASSERT(st == QAWS_STATUS_OK && qaws_shell_atlas_get_edge_count(a) == 1, msg);
 	if (st == QAWS_STATUS_OK)
@@ -216,7 +216,7 @@ static void test_tube(void)
 			double b = x0 * dx + y0 * dy, c = x0 * x0 + y0 * y0 - R * R, t = -b - sqrt(b * b - c), px = x0 + t * dx, py = y0 + t * dy;
 			double al = dx * (py / R) + dy * (-px / R), be = -(dx * px + dy * py) / R, l = L - t, ph = atan2(py, px) - al * l / R, off;
 			d.x = (qaws_scalar)dx; d.y = (qaws_scalar)dy;
-			st = qaws_shell_exp(a, str_pt(0, (x0 + 2) / 4, (y0 + 2) / 4), d, (qaws_scalar)L, &q, NULL, &cr);
+			st = qaws_shell_exp(&q, NULL, &cr, a, str_pt(0, (x0 + 2) / 4, (y0 + 2) / 4), d, (qaws_scalar)L);
 			e = str_at(a, q);
 			off = sqrt(((double)e.x - R * cos(ph)) * ((double)e.x - R * cos(ph)) + ((double)e.y - R * sin(ph)) * ((double)e.y - R * sin(ph))
 				+ ((double)e.z + be * l) * ((double)e.z + be * l));
@@ -254,10 +254,10 @@ static double str_circle(qaws_shell_atlas const* a, qaws_shell_point c, double r
 	qaws_shell_curve* k = NULL;
 	qaws_shell_region* g = NULL;
 	qaws_scalar A = 0, L = 0;
-	*st = qaws_shell_curve_create_geodesic_circle(a, c, (qaws_scalar)r, 0, &k);
-	if (*st == QAWS_STATUS_OK) *st = qaws_shell_region_create(a, (qaws_shell_curve const* const*)&k, 1, &g);
-	if (*st == QAWS_STATUS_OK) *st = qaws_shell_region_get_area(g, &A);
-	if (*st == QAWS_STATUS_OK) *st = qaws_shell_region_get_perimeter(g, &L);
+	*st = qaws_shell_curve_create_geodesic_circle(&k, a, c, (qaws_scalar)r, 0);
+	if (*st == QAWS_STATUS_OK) *st = qaws_shell_region_create(&g, a, (qaws_shell_curve const* const*)&k, 1);
+	if (*st == QAWS_STATUS_OK) *st = qaws_shell_region_get_area(&A, g);
+	if (*st == QAWS_STATUS_OK) *st = qaws_shell_region_get_perimeter(&L, g);
 	*per = (double)L;
 	qaws_shell_region_destroy(g);
 	qaws_shell_curve_destroy(k);
@@ -285,8 +285,8 @@ static void test_trimmed_cube(void)
 		loops[i].curves = sl[i]; loops[i].curve_count = 4; loops[i].closed = 1;
 		fd[i].surface = f[i]; fd[i].trims = &loops[i]; fd[i].trim_count = 1;
 	}
-	st = qaws_shell_atlas_create_trimmed(fd, 6, 0, &a);
-	sb = qaws_shell_atlas_create((qaws_surface const* const*)g, 6, 0, &b);
+	st = qaws_shell_atlas_create_trimmed(&a, fd, 6, 0);
+	sb = qaws_shell_atlas_create(&b, (qaws_surface const* const*)g, 6, 0);
 	sprintf(msg, "trimmed cube: planes trimmed to the faces, %u shared edges", a ? qaws_shell_atlas_get_edge_count(a) : 0);
 	TEST_ASSERT(st == QAWS_STATUS_OK && sb == QAWS_STATUS_OK && qaws_shell_atlas_get_edge_count(a) == 12, msg);
 	if (st == QAWS_STATUS_OK)
@@ -308,10 +308,10 @@ static void test_trimmed_cube(void)
 		qaws_scalar A = 0, B = 0;
 		qaws_status s1, s2;
 		double t = 0.3;
-		s1 = qaws_shell_region_create_geodesic_disk(a, str_pt(0, lo + span * (1 - t / 2), lo + span * (1 - t / 2)), (qaws_scalar)0.75, 0, &ga);
-		s2 = qaws_shell_region_create_geodesic_disk(b, str_pt(0, 1 - t / 2, 1 - t / 2), (qaws_scalar)0.75, 0, &gb);
-		if (s1 == QAWS_STATUS_OK) qaws_shell_region_get_area(ga, &A);
-		if (s2 == QAWS_STATUS_OK) qaws_shell_region_get_area(gb, &B);
+		s1 = qaws_shell_region_create_geodesic_disk(&ga, a, str_pt(0, lo + span * (1 - t / 2), lo + span * (1 - t / 2)), (qaws_scalar)0.75, 0);
+		s2 = qaws_shell_region_create_geodesic_disk(&gb, b, str_pt(0, 1 - t / 2, 1 - t / 2), (qaws_scalar)0.75, 0);
+		if (s1 == QAWS_STATUS_OK) qaws_shell_region_get_area(&A, ga);
+		if (s2 == QAWS_STATUS_OK) qaws_shell_region_get_area(&B, gb);
 		sprintf(msg, "trimmed cube: a disk round a corner %.9f against the untrimmed cube's %.9f (%.2g)", (double)A, (double)B, fabs((double)A - B));
 		TEST_ASSERT(s1 == QAWS_STATUS_OK && s2 == QAWS_STATUS_OK && fabs((double)A - B) <= (STR_F32 ? 2e-4 : 1e-8) && A > 1.5, msg);
 		qaws_shell_region_destroy(ga);
@@ -345,7 +345,7 @@ static void test_tee(int walls)
 	f[0] = str_plane(B00, B10, B01, B11);
 	f[1] = str_plane(A00, A10, A01, A11);
 	f[2] = str_plane(C00, C10, C01, C11);
-	st = qaws_shell_atlas_create((qaws_surface const* const*)f, 3, 0, &a);
+	st = qaws_shell_atlas_create(&a, (qaws_surface const* const*)f, 3, 0);
 	sprintf(msg, "T-junction (%s): a side meeting two faces' sides, split there: %u shared edges", walls ? "walls" : "flat",
 		a ? qaws_shell_atlas_get_edge_count(a) : 0);
 	TEST_ASSERT(st == QAWS_STATUS_OK && qaws_shell_atlas_get_edge_count(a) == 3, msg);
@@ -354,10 +354,10 @@ static void test_tee(int walls)
 		qaws_shell_region* g = NULL;
 		qaws_scalar A = 0, P = 0;
 		double r = cs[z][2], e;
-		if (qaws_shell_region_create_geodesic_disk(a, str_pt(0, cs[z][0] / 2, cs[z][1] + 1), (qaws_scalar)r, 0, &g) == QAWS_STATUS_OK)
+		if (qaws_shell_region_create_geodesic_disk(&g, a, str_pt(0, cs[z][0] / 2, cs[z][1] + 1), (qaws_scalar)r, 0) == QAWS_STATUS_OK)
 		{
-			qaws_shell_region_get_area(g, &A);
-			qaws_shell_region_get_perimeter(g, &P);
+			qaws_shell_region_get_area(&A, g);
+			qaws_shell_region_get_perimeter(&P, g);
 			e = fabs((double)A - STR_PI * r * r) + fabs((double)P - 2 * STR_PI * r);
 			if (e > worst) worst = e;
 			if (e <= tol) ok++;
@@ -374,10 +374,10 @@ static void test_tee(int walls)
 		qaws_shell_region* g = NULL;
 		qaws_scalar A = 0;
 		unsigned int nf = 0;
-		qaws_status s1 = qaws_shell_region_create_geodesic_disk(a, str_pt(2, 0.5, 0.45), (qaws_scalar)0.45, 0, &g);
+		qaws_status s1 = qaws_shell_region_create_geodesic_disk(&g, a, str_pt(2, 0.5, 0.45), (qaws_scalar)0.45, 0);
 		if (s1 == QAWS_STATUS_OK)
 		{
-			qaws_shell_region_get_area(g, &A);
+			qaws_shell_region_get_area(&A, g);
 			for (i = 0; i < 3; i++) if (qaws_shell_region_get_face(g, i)) nf++;
 		}
 		sprintf(msg, "T-junction (walls): a disk touching the edge below it, on %u face, against pi r^2 %.2g", nf, fabs((double)A - STR_PI * 0.45 * 0.45));
@@ -417,7 +417,7 @@ static void test_cylinder(void)
 	pb[0].curves = l4; pb[0].curve_count = 1; pb[0].closed = 1;
 	fd[0].surface = s; fd[0].trims = pa; fd[0].trim_count = 3;
 	fd[1].surface = s; fd[1].trims = pb; fd[1].trim_count = 1;
-	st = qaws_shell_atlas_create_trimmed(fd, 2, 0, &a);
+	st = qaws_shell_atlas_create_trimmed(&a, fd, 2, 0);
 	sprintf(msg, "cylinder: trimmed by its rims and a hole on the seam, the hole's disk: %u shared edges", a ? qaws_shell_atlas_get_edge_count(a) : 0);
 	TEST_ASSERT(st == QAWS_STATUS_OK && qaws_shell_atlas_get_edge_count(a) == 2, msg);
 	for (z = 0; z < 3 && st == QAWS_STATUS_OK; z++)
@@ -425,10 +425,10 @@ static void test_cylinder(void)
 		qaws_shell_region* g = NULL;
 		qaws_scalar A = 0, P = 0;
 		double r = cs[z][2], e = 1e300;
-		if (qaws_shell_region_create_geodesic_disk(a, str_pt(0, cs[z][0], cs[z][1]), (qaws_scalar)r, 0, &g) == QAWS_STATUS_OK)
+		if (qaws_shell_region_create_geodesic_disk(&g, a, str_pt(0, cs[z][0], cs[z][1]), (qaws_scalar)r, 0) == QAWS_STATUS_OK)
 		{
-			qaws_shell_region_get_area(g, &A);
-			qaws_shell_region_get_perimeter(g, &P);
+			qaws_shell_region_get_area(&A, g);
+			qaws_shell_region_get_perimeter(&P, g);
 			e = fabs((double)A - STR_PI * r * r) + fabs((double)P - 2 * STR_PI * r);
 		}
 		if (e > worst) worst = e;
@@ -447,7 +447,7 @@ static void test_cylinder(void)
 		double dx = 1, dy = 0.15, n = hypot(dx, dy), L = 1.6, X = STR_PI * 0.7 + L * dx / n, Y = STR_PI * 0.45 + L * dy / n, off;
 		double ex = 0.5 * cos(2 * X), ey = 0.5 * sin(2 * X), ez = -Y;
 		d.x = (qaws_scalar)(dx / n); d.y = (qaws_scalar)(dy / n);
-		st = qaws_shell_exp(a, str_pt(0, 0.7, 0.45), d, (qaws_scalar)L, &q, NULL, &cr);
+		st = qaws_shell_exp(&q, NULL, &cr, a, str_pt(0, 0.7, 0.45), d, (qaws_scalar)L);
 		e = str_at(a, q);
 		off = sqrt(((double)e.x - ex) * ((double)e.x - ex) + ((double)e.y - ey) * ((double)e.y - ey) + ((double)e.z - ez) * ((double)e.z - ez));
 		sprintf(msg, "cylinder: a ray over the hole's disk and the seam (%u crossings) against the unrolled line %.2g", cr, off);
@@ -489,8 +489,8 @@ static void test_capped_tube(void)
 	memset(B, 0, sizeof(B));
 	A[0].surface = tube; A[1].surface = cap; A[1].trims = pf; A[1].trim_count = 1;
 	B[0].surface = tube; B[1].surface = cap; B[1].trims = pa; B[1].trim_count = 1; B[2].surface = cap; B[2].trims = pb; B[2].trim_count = 1;
-	s1 = qaws_shell_atlas_create_trimmed(A, 2, 0, &aa);
-	s2 = qaws_shell_atlas_create_trimmed(B, 3, 0, &ab);
+	s1 = qaws_shell_atlas_create_trimmed(&aa, A, 2, 0);
+	s2 = qaws_shell_atlas_create_trimmed(&ab, B, 3, 0);
 	sprintf(msg, "capped tube: one cap, %u shared edge; two half caps meeting the rim at T points, %u shared edges",
 		aa ? qaws_shell_atlas_get_edge_count(aa) : 0, ab ? qaws_shell_atlas_get_edge_count(ab) : 0);
 	TEST_ASSERT(s1 == QAWS_STATUS_OK && s2 == QAWS_STATUS_OK && qaws_shell_atlas_get_edge_count(aa) == 1 && qaws_shell_atlas_get_edge_count(ab) == 3, msg);
@@ -501,11 +501,11 @@ static void test_capped_tube(void)
 		qaws_shell_region *g = NULL, *h = NULL;
 		qaws_scalar Ag = 0, Ah = 0, Pg = 0, Ph = 0;
 		double e;
-		if (qaws_shell_region_create_geodesic_disk(aa, str_pt(0, cs[z][0], cs[z][1]), (qaws_scalar)0.5, 0, &g) == QAWS_STATUS_OK &&
-			qaws_shell_region_create_geodesic_disk(ab, str_pt(0, cs[z][0], cs[z][1]), (qaws_scalar)0.5, 0, &h) == QAWS_STATUS_OK)
+		if (qaws_shell_region_create_geodesic_disk(&g, aa, str_pt(0, cs[z][0], cs[z][1]), (qaws_scalar)0.5, 0) == QAWS_STATUS_OK &&
+			qaws_shell_region_create_geodesic_disk(&h, ab, str_pt(0, cs[z][0], cs[z][1]), (qaws_scalar)0.5, 0) == QAWS_STATUS_OK)
 		{
-			qaws_shell_region_get_area(g, &Ag); qaws_shell_region_get_perimeter(g, &Pg);
-			qaws_shell_region_get_area(h, &Ah); qaws_shell_region_get_perimeter(h, &Ph);
+			qaws_shell_region_get_area(&Ag, g); qaws_shell_region_get_perimeter(&Pg, g);
+			qaws_shell_region_get_area(&Ah, h); qaws_shell_region_get_perimeter(&Ph, h);
 			if (z == 0) ref = (double)Ag + (double)Pg;
 			e = fabs((double)Ag - Ah) + fabs((double)Pg - Ph);
 			if (z < 2) e += fabs((double)Ag + (double)Pg - ref);
@@ -553,8 +553,8 @@ static void test_torus(void)
 	A[0].surface = s;
 	B[0].surface = s; B[0].trims = ph; B[0].trim_count = 1;
 	B[1].surface = s; B[1].trims = pd; B[1].trim_count = 1;
-	s1 = qaws_shell_atlas_create_trimmed(A, 1, 0, &aa);
-	s2 = qaws_shell_atlas_create_trimmed(B, 2, 0, &ab);
+	s1 = qaws_shell_atlas_create_trimmed(&aa, A, 1, 0);
+	s2 = qaws_shell_atlas_create_trimmed(&ab, B, 2, 0);
 	sprintf(msg, "torus: whole, %u edges; with a hole on both seams and its disk, %u shared edges",
 		aa ? qaws_shell_atlas_get_edge_count(aa) : 0, ab ? qaws_shell_atlas_get_edge_count(ab) : 0);
 	TEST_ASSERT(s1 == QAWS_STATUS_OK && s2 == QAWS_STATUS_OK && qaws_shell_atlas_get_edge_count(aa) == 0 && qaws_shell_atlas_get_edge_count(ab) == 2, msg);
@@ -563,11 +563,11 @@ static void test_torus(void)
 		qaws_shell_region *g = NULL, *h = NULL;
 		qaws_scalar Ag = 0, Ah = 0, Pg = 0, Ph = 0;
 		double e = 1e300;
-		if (qaws_shell_region_create_geodesic_disk(aa, str_pt(0, cs[z][0], cs[z][1]), (qaws_scalar)cs[z][2], 0, &g) == QAWS_STATUS_OK &&
-			qaws_shell_region_create_geodesic_disk(ab, str_pt(0, cs[z][0], cs[z][1]), (qaws_scalar)cs[z][2], 0, &h) == QAWS_STATUS_OK)
+		if (qaws_shell_region_create_geodesic_disk(&g, aa, str_pt(0, cs[z][0], cs[z][1]), (qaws_scalar)cs[z][2], 0) == QAWS_STATUS_OK &&
+			qaws_shell_region_create_geodesic_disk(&h, ab, str_pt(0, cs[z][0], cs[z][1]), (qaws_scalar)cs[z][2], 0) == QAWS_STATUS_OK)
 		{
-			qaws_shell_region_get_area(g, &Ag); qaws_shell_region_get_perimeter(g, &Pg);
-			qaws_shell_region_get_area(h, &Ah); qaws_shell_region_get_perimeter(h, &Ph);
+			qaws_shell_region_get_area(&Ag, g); qaws_shell_region_get_perimeter(&Pg, g);
+			qaws_shell_region_get_area(&Ah, h); qaws_shell_region_get_perimeter(&Ph, h);
 			e = fabs((double)Ag - Ah) + fabs((double)Pg - Ph);
 		}
 		if (e > worst) worst = e;
@@ -587,8 +587,8 @@ static void test_torus(void)
 		qaws_status t1, t2;
 		double off;
 		d.x = (qaws_scalar)-0.03; d.y = (qaws_scalar)-1;
-		t1 = qaws_shell_exp(aa, str_pt(0, 0.08, 0.6), d, (qaws_scalar)1.2, &qa, NULL, &ca);
-		t2 = qaws_shell_exp(ab, str_pt(0, 0.08, 0.6), d, (qaws_scalar)1.2, &qb, NULL, &cb);
+		t1 = qaws_shell_exp(&qa, NULL, &ca, aa, str_pt(0, 0.08, 0.6), d, (qaws_scalar)1.2);
+		t2 = qaws_shell_exp(&qb, NULL, &cb, ab, str_pt(0, 0.08, 0.6), d, (qaws_scalar)1.2);
 		ea = str_at(aa, qa); eb = str_at(ab, qb);
 		off = sqrt(((double)ea.x - eb.x) * ((double)ea.x - eb.x) + ((double)ea.y - eb.y) * ((double)ea.y - eb.y) + ((double)ea.z - eb.z) * ((double)ea.z - eb.z));
 		sprintf(msg, "torus: a ray over the hole (%u crossings) against the whole torus's %.2g", cb, off);
@@ -631,18 +631,18 @@ static void test_shortest_path(void)
 	pa[0].curves = ol; pa[0].curve_count = 4; pa[0].closed = 1;
 	pa[1].curves = hl; pa[1].curve_count = 1; pa[1].closed = 1;
 	fd.surface = sa; fd.trims = pa; fd.trim_count = 2;
-	st = qaws_shell_atlas_create_trimmed(&fd, 1, 0, &a);
+	st = qaws_shell_atlas_create_trimmed(&a, &fd, 1, 0);
 	for (z = 0; z < 4 && st == QAWS_STATUS_OK; z++)
 	{
 		qaws_shell_curve* c = NULL;
 		qaws_scalar L = 0;
 		double off;
-		if (qaws_shell_curve_create_shortest_path(a, str_pt(0, (pts[z][0] + 2) / 4, (pts[z][1] + 2) / 4), str_pt(0, (pts[z][2] + 2) / 4, (pts[z][3] + 2) / 4), 0, &c) != QAWS_STATUS_OK)
+		if (qaws_shell_curve_create_shortest_path(&c, a, str_pt(0, (pts[z][0] + 2) / 4, (pts[z][1] + 2) / 4), str_pt(0, (pts[z][2] + 2) / 4, (pts[z][3] + 2) / 4), 0) != QAWS_STATUS_OK)
 		{
 			bad++;
 			continue;
 		}
-		qaws_shell_curve_get_length(c, &L);
+		qaws_shell_curve_get_length(&L, c);
 		off = fabs((double)L - str_taut(pts[z][0], pts[z][1], pts[z][2], pts[z][3], 0.5));
 		if (off > worst) worst = off;
 		qaws_shell_curve_destroy(c);
@@ -673,7 +673,7 @@ static qaws_shell_atlas* str_holes(qaws_surface* sa, qaws_curve** oc, qaws_curve
 		pa[1 + i].curves = &hl[i]; pa[1 + i].curve_count = 1; pa[1 + i].closed = 1;
 	}
 	fd.surface = sa; fd.trims = pa; fd.trim_count = 1 + n;
-	qaws_shell_atlas_create_trimmed(&fd, 1, 0, &a);
+	qaws_shell_atlas_create_trimmed(&a, &fd, 1, 0);
 	return a;
 }
 
@@ -695,10 +695,10 @@ static void test_shortest_holes(void)
 		qaws_shell_atlas* a = str_holes(sa, oc, hc, z ? x3 : x2, n, r);
 		qaws_shell_curve* c = NULL;
 		ref = 2 * sqrt(d * d - r * r) + 2 * r * (STR_PI / 2 - acos(r / d)) + span;
-		if (a && qaws_shell_curve_create_shortest_path(a, str_pt(0, (-e + 2) / 4, 0.5), str_pt(0, (e + 2) / 4, 0.5), 0, &c) == QAWS_STATUS_OK)
+		if (a && qaws_shell_curve_create_shortest_path(&c, a, str_pt(0, (-e + 2) / 4, 0.5), str_pt(0, (e + 2) / 4, 0.5), 0) == QAWS_STATUS_OK)
 		{
 			qaws_scalar L = 0;
-			qaws_shell_curve_get_length(c, &L);
+			qaws_shell_curve_get_length(&L, c);
 			L0 = (double)L;
 			if (fabs(L0 - ref) > worst) worst = fabs(L0 - ref);
 		}
@@ -740,10 +740,10 @@ static void test_shortest_other_face(void)
 	pa[1].curves = hl; pa[1].curve_count = 1; pa[1].closed = 1;
 	fd[0].surface = sa; fd[0].trims = pa; fd[0].trim_count = 2;
 	fd[1].surface = sb; fd[1].trims = NULL; fd[1].trim_count = 0;
-	st = qaws_shell_atlas_create_trimmed(fd, 2, 0, &a);
+	st = qaws_shell_atlas_create_trimmed(&a, fd, 2, 0);
 	if (st == QAWS_STATUS_OK)
-		st = qaws_shell_curve_create_shortest_path(a, str_pt(1, 0.75, 0.525), str_pt(0, (0.8 + 1.5) / 3, (-0.1 + 1.5) / 3), 0, &c);
-	if (st == QAWS_STATUS_OK) qaws_shell_curve_get_length(c, &L);
+		st = qaws_shell_curve_create_shortest_path(&c, a, str_pt(1, 0.75, 0.525), str_pt(0, (0.8 + 1.5) / 3, (-0.1 + 1.5) / 3), 0);
+	if (st == QAWS_STATUS_OK) qaws_shell_curve_get_length(&L, c);
 	sprintf(msg, "shortest path from a neighbouring face round the hole (%d): against the unfolded taut string %.2g", (int)st, fabs((double)L - ref));
 	TEST_ASSERT(st == QAWS_STATUS_OK && fabs((double)L - ref) <= tol, msg);
 	qaws_shell_curve_destroy(c);
@@ -776,12 +776,12 @@ static void test_thin_holes(void)
 		pa[0].curves = ol; pa[0].curve_count = 4; pa[0].closed = 1;
 		pa[1].curves = hl; pa[1].curve_count = 1; pa[1].closed = 1;
 		fd.surface = sa; fd.trims = pa; fd.trim_count = 2;
-		if (qaws_shell_atlas_create_trimmed(&fd, 1, 0, &a) == QAWS_STATUS_OK)
+		if (qaws_shell_atlas_create_trimmed(&a, &fd, 1, 0) == QAWS_STATUS_OK)
 		{
 			d.x = 1; d.y = 0;
-			stopped += qaws_shell_exp(a, str_pt(0, 0.3, 0.5), d, (qaws_scalar)1.6, &q, NULL, NULL) == QAWS_STATUS_OUT_OF_RANGE;
+			stopped += qaws_shell_exp(&q, NULL, NULL, a, str_pt(0, 0.3, 0.5), d, (qaws_scalar)1.6) == QAWS_STATUS_OUT_OF_RANGE;
 			d.y = (qaws_scalar)(2.5 * rs[z] / 0.2);
-			passed += qaws_shell_exp(a, str_pt(0, 0.3, 0.5), d, (qaws_scalar)1.6, &q, NULL, NULL) == QAWS_STATUS_OK;
+			passed += qaws_shell_exp(&q, NULL, NULL, a, str_pt(0, 0.3, 0.5), d, (qaws_scalar)1.6) == QAWS_STATUS_OK;
 		}
 		qaws_shell_atlas_destroy(a);
 		qaws_surface_destroy(sa);
@@ -809,7 +809,7 @@ static void test_refusals(void)
 	for (i = 0; i < 3; i++) ol[i] = open3[i];
 	p.curves = ol; p.curve_count = 3; p.closed = 1;
 	fd.surface = sa; fd.trims = &p; fd.trim_count = 1;
-	s1 = qaws_shell_atlas_create_trimmed(&fd, 1, 0, &a);
+	s1 = qaws_shell_atlas_create_trimmed(&a, &fd, 1, 0);
 	qaws_shell_atlas_destroy(a);
 	a = NULL;
 	memset(&rd, 0, sizeof(rd));
@@ -818,11 +818,11 @@ static void test_refusals(void)
 	cl[0] = loop;
 	pc.curves = cl; pc.curve_count = 1; pc.closed = 1;
 	fd.surface = tube; fd.trims = &pc; fd.trim_count = 1;
-	s2 = qaws_shell_atlas_create_trimmed(&fd, 1, 0, &a);
+	s2 = qaws_shell_atlas_create_trimmed(&a, &fd, 1, 0);
 	{
 		/* a disk of a torus: a centre off it refused */
 		qaws_shell_region* g = NULL;
-		qaws_status s3 = s2 == QAWS_STATUS_OK ? qaws_shell_region_create_geodesic_disk(a, str_pt(0, 0.1, 0.1), (qaws_scalar)0.1, 0, &g) : QAWS_STATUS_OK;
+		qaws_status s3 = s2 == QAWS_STATUS_OK ? qaws_shell_region_create_geodesic_disk(&g, a, str_pt(0, 0.1, 0.1), (qaws_scalar)0.1, 0) : QAWS_STATUS_OK;
 		qaws_shell_region_destroy(g);
 		qaws_shell_atlas_destroy(a);
 		sprintf(msg, "refused: a loop that does not close (%d); a disk of a torus taken (%d), a centre off it (%d)", (int)s1, (int)s2, (int)s3);

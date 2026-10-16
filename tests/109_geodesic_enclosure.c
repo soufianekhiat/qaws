@@ -36,7 +36,7 @@ static qaws_vec2 get_uv(double u, double v)
 static int get_inside(qaws_geodesic_enclosure const* e, double u, double v, double* side)
 {
 	qaws_vec2 lo, hi;
-	qaws_geodesic_enclosure_get_end(e, &lo, &hi, NULL, NULL);
+	qaws_geodesic_enclosure_get_end(&lo, &hi, NULL, NULL, e);
 	*side = fmax((double)(hi.x - lo.x), (double)(hi.y - lo.y));
 	return u >= (double)lo.x && u <= (double)hi.x && v >= (double)lo.y && v <= (double)hi.y;
 }
@@ -93,7 +93,7 @@ static void test_closed_forms(void)
 		a = sqrt(1 + 4 * x0 * x0) * 2 * du; b = 2 * dv; n = hypot(a, b); a /= n; b /= n;
 		s1 = get_sx(x0) + L * a; y1 = y0 + L * b;
 		for (i = 0; i < 200; i++) { double m = 0.5 * (lo + hi); if (get_sx(m) < s1) lo = m; else hi = m; }
-		st = qaws_surface_geodesic_enclose(s, get_uv(u0, v0), get_uv(du, dv), (qaws_scalar)L, 0, &e);
+		st = qaws_surface_geodesic_enclose(&e, s, 0, get_uv(u0, v0), get_uv(du, dv), (qaws_scalar)L);
 		if (st == QAWS_STATUS_OK)
 			in = get_inside(e, (0.5 * (lo + hi) + 1) / 2, (y1 + 1) / 2, &side);
 		sprintf(msg, "enclosure: parabolic cylinder, the closed form's end in the end box %d (status %d, side %.2g, %u steps)", in, (int)st, side,
@@ -121,7 +121,7 @@ static void test_closed_forms(void)
 		d.u_degree = 3; d.v_degree = 3; d.control_points = cp; d.u_point_count = 4; d.v_point_count = 4;
 		qaws_surface_create_bezier(&s, &d);
 		a = get_dbez3(xs, u0) * du; b = get_dbez3(ys, v0) * dv; n = hypot(a, b); a /= n; b /= n;
-		st = qaws_surface_geodesic_enclose(s, get_uv(u0, v0), get_uv(du, dv), (qaws_scalar)L, 0, &e);
+		st = qaws_surface_geodesic_enclose(&e, s, 0, get_uv(u0, v0), get_uv(du, dv), (qaws_scalar)L);
 		if (st == QAWS_STATUS_OK)
 			in = get_inside(e, get_inv3(xs, get_bez3(xs, u0) + L * a), get_inv3(ys, get_bez3(ys, v0) + L * b), &side);
 		sprintf(msg, "enclosure: a plane parametrized unevenly, the straight line's end in the end box %d (status %d, side %.2g)", in, (int)st, side);
@@ -159,9 +159,9 @@ static int get_float_cross(qaws_surface const* s, double const* A, double const*
 	for (i = 0; i <= N; i++)
 	{
 		qaws_vec2 q;
-		qaws_surface_exp(s, get_uv(A[0], A[1]), get_uv(A[2], A[3]), (qaws_scalar)(A[4] * i / N), 0, &q, NULL);
+		qaws_surface_exp(&q, NULL, s, get_uv(A[0], A[1]), get_uv(A[2], A[3]), (qaws_scalar)(A[4] * i / N), 0);
 		pa[i][0] = q.x; pa[i][1] = q.y;
-		qaws_surface_exp(s, get_uv(B[0], B[1]), get_uv(B[2], B[3]), (qaws_scalar)(B[4] * i / N), 0, &q, NULL);
+		qaws_surface_exp(&q, NULL, s, get_uv(B[0], B[1]), get_uv(B[2], B[3]), (qaws_scalar)(B[4] * i / N), 0);
 		pb[i][0] = q.x; pb[i][1] = q.y;
 	}
 	for (i = 0; i < N; i++)
@@ -192,10 +192,10 @@ static void test_bump(void)
 	double side = 0, fx[2] = { 0, 0 };
 	int in = 1, inx = 1, nf = 0;
 	char msg[300];
-	sa = qaws_surface_geodesic_enclose(s, get_uv(A[0], A[1]), get_uv(A[2], A[3]), (qaws_scalar)A[4], 0, &ea);
-	sb = qaws_surface_geodesic_enclose(s, get_uv(B[0], B[1]), get_uv(B[2], B[3]), (qaws_scalar)B[4], 0, &eb);
-	sc = qaws_surface_geodesic_enclose(s, get_uv(C[0], C[1]), get_uv(C[2], C[3]), (qaws_scalar)C[4], 0, &ec);
-	qaws_surface_exp(s, get_uv(A[0], A[1]), get_uv(A[2], A[3]), (qaws_scalar)A[4], (qaws_scalar)1e-12, &q, NULL);
+	sa = qaws_surface_geodesic_enclose(&ea, s, 0, get_uv(A[0], A[1]), get_uv(A[2], A[3]), (qaws_scalar)A[4]);
+	sb = qaws_surface_geodesic_enclose(&eb, s, 0, get_uv(B[0], B[1]), get_uv(B[2], B[3]), (qaws_scalar)B[4]);
+	sc = qaws_surface_geodesic_enclose(&ec, s, 0, get_uv(C[0], C[1]), get_uv(C[2], C[3]), (qaws_scalar)C[4]);
+	qaws_surface_exp(&q, NULL, s, get_uv(A[0], A[1]), get_uv(A[2], A[3]), (qaws_scalar)A[4], (qaws_scalar)1e-12);
 	if (sa == QAWS_STATUS_OK)
 	{
 		in = get_inside(ea, (double)q.x, (double)q.y, &side);
@@ -203,8 +203,8 @@ static void test_bump(void)
 	}
 	sprintf(msg, "enclosure: B-spline bump, the float geodesic's end in the end box %d (status %d, side %.2g)", in, (int)sa, side);
 	TEST_ASSERT(sa == QAWS_STATUS_OK && in && side <= 1e-4, msg);
-	x1 = sa || sb ? sa : qaws_geodesic_enclosure_cross(ea, eb, 2, lo, hi, &n1);
-	x2 = sa || sc ? sa : qaws_geodesic_enclosure_cross(ea, ec, 2, lo + 1, hi + 1, &n2);
+	x1 = sa || sb ? sa : qaws_geodesic_enclosure_cross(lo, hi, &n1, ea, eb, 2);
+	x2 = sa || sc ? sa : qaws_geodesic_enclosure_cross(lo + 1, hi + 1, &n2, ea, ec, 2);
 	if (!GET_F32)
 	{
 		nf = get_float_cross(s, A, B, fx);
@@ -243,21 +243,21 @@ static void test_polygons(void)
 		double const* b = T[i / 3][(i + 1) % 3];
 		qaws_eval_result_2d e;
 		qaws_range r;
-		if ((st = qaws_surface_curve_create_shortest_path(s, NULL, get_uv(a[0], a[1]), get_uv(b[0], b[1]), 0, &c[i])) != QAWS_STATUS_OK)
+		if ((st = qaws_surface_curve_create_shortest_path(&c[i], s, NULL, get_uv(a[0], a[1]), get_uv(b[0], b[1]), 0)) != QAWS_STATUS_OK)
 			break;
 		r = qaws_curve_get_parameter_range(qaws_surface_curve_get_uv(c[i]));
 		qaws_curve_evaluate_2d(&e, qaws_surface_curve_get_uv(c[i]), r.min_value, QAWS_EVAL_FLAG_D1);
 		g[i].start = get_uv(a[0], a[1]); g[i].direction = e.d1;
-		qaws_surface_curve_get_length(c[i], &g[i].length);
+		qaws_surface_curve_get_length(&g[i].length, c[i]);
 	}
-	sc = st ? st : qaws_surface_geodesics_certify(s, g, 6, corner, tube, &n);
+	sc = st ? st : qaws_surface_geodesics_certify(&n, s, g, corner, 6, tube);
 	/* the same corners undeclared: ends a hair apart, never taken as shared */
-	nc = st ? st : qaws_surface_geodesics_certify(s, g, 6, NULL, tube, &m);
+	nc = st ? st : qaws_surface_geodesics_certify(&m, s, g, NULL, 6, tube);
 	sprintf(msg, "certified arrangement: the triangles' corners undeclared fail (status %d)", (int)nc);
 	TEST_ASSERT(nc == QAWS_STATUS_CERTIFICATION_FAILED, msg);
 	for (i = 0; i < 3 && st == QAWS_STATUS_OK; i++)
 		for (j = 3; j < 6; j++)
-			if (qaws_surface_curve_intersect(c[i], c[j], x, 8, &ni) == QAWS_STATUS_OK)
+			if (qaws_surface_curve_intersect(x, &ni, c[i], c[j], 8) == QAWS_STATUS_OK)
 				nf += ni;
 	sprintf(msg, "certified arrangement: two geodesic triangles on the bump, %u crossings (status %d), the float curves' %u", n, (int)sc, nf);
 	TEST_ASSERT(st == QAWS_STATUS_OK && sc == QAWS_STATUS_OK && n == nf && n > 0, msg);
@@ -265,9 +265,9 @@ static void test_polygons(void)
 	if (st == QAWS_STATUS_OK)
 	{
 		p.curves = (qaws_surface_curve const* const*)c; p.curve_count = 3; p.closed = 1;
-		if (qaws_surface_clip(s, QAWS_CLIP_NONE, QAWS_FILL_NON_ZERO, &p, 1, NULL, 0, &rg) == QAWS_STATUS_OK)
-			qaws_surface_region_get_area(rg, &A);
-		sa = qaws_surface_geodesic_polygon_area(s, g, 3, 0, 512, &lo, &hi);
+		if (qaws_surface_clip(&rg, s, &p, NULL, 1, 0, QAWS_CLIP_NONE, QAWS_FILL_NON_ZERO) == QAWS_STATUS_OK)
+			qaws_surface_region_get_area(&A, rg);
+		sa = qaws_surface_geodesic_polygon_area(&lo, &hi, s, g, 3, 0, 512);
 	}
 	sprintf(msg, "certified area: a geodesic triangle in [%.6f, %.6f] (status %d), the float region's %.6f", (double)lo, (double)hi, (int)sa, (double)A);
 	TEST_ASSERT(sa == QAWS_STATUS_OK && lo <= A && A <= hi && hi - lo < 0.06 * A, msg);
@@ -307,13 +307,13 @@ static void test_review_cases(void)
 	d.p10.x = 1; d.p01.y = 1; d.p11.x = 1; d.p11.y = 1;
 	qaws_surface_create_bilinear(&s, &d);
 	for (i = 0; i < 12; i++) g[i] = get_line(C[i][0], C[i][1], C[(i + 1) % 12][0], C[(i + 1) % 12][1]);
-	sa = qaws_surface_geodesic_polygon_area(s, g, 12, 0, 0, &lo, &hi);
+	sa = qaws_surface_geodesic_polygon_area(&lo, &hi, s, g, 12, 0, 0);
 	sprintf(msg, "certified area: a C whose passage the grid closes, [%.6f, %.6f] (status %d) holding 0.4796", (double)lo, (double)hi, (int)sa);
 	TEST_ASSERT(sa == QAWS_STATUS_CERTIFICATION_FAILED || (sa == QAWS_STATUS_OK && lo <= 0.4796 && 0.4796 <= hi), msg);
 	TEST_ASSERT(sa == QAWS_STATUS_OK && hi - lo < 0.05, "certified area: the C's bounds proven, not refused");
 	h[0] = get_line(0.2, 0.5, 0.5, 0.5);
 	h[1] = get_line(0.49999995, 0.49999995, 0.49999995, 0.79999995);
-	sc = qaws_surface_geodesics_certify(s, h, 2, NULL, 0, &n);
+	sc = qaws_surface_geodesics_certify(&n, s, h, NULL, 2, 0);
 	sprintf(msg, "certified arrangement: a crossing 5e-8 from the ends, %u (status %d), never certified as none", n, (int)sc);
 	TEST_ASSERT(sc == QAWS_STATUS_CERTIFICATION_FAILED || (sc == QAWS_STATUS_OK && n == 1), msg);
 	qaws_surface_destroy(s);
@@ -337,10 +337,10 @@ static void test_refusals(void)
 	memset(&rd, 0, sizeof(rd));
 	rd.profile = prof; rd.axis_direction.z = 1;
 	qaws_surface_create_revolution(&rev, &rd);
-	s1 = qaws_surface_geodesic_enclose(rev, get_uv(0.5, 0.5), get_uv(1, 0), (qaws_scalar)0.5, 0, &e);
+	s1 = qaws_surface_geodesic_enclose(&e, rev, 0, get_uv(0.5, 0.5), get_uv(1, 0), (qaws_scalar)0.5);
 	qaws_geodesic_enclosure_destroy(e);
 	e = NULL;
-	s2 = qaws_surface_geodesic_enclose(s, get_uv(0.5, 0.5), get_uv(1, 0.2), (qaws_scalar)3, 0, &e);
+	s2 = qaws_surface_geodesic_enclose(&e, s, 0, get_uv(0.5, 0.5), get_uv(1, 0.2), (qaws_scalar)3);
 	qaws_geodesic_enclosure_destroy(e);
 	sprintf(msg, "enclosure refused: a surface of revolution (%d), a geodesic leaving the domain (%d)", (int)s1, (int)s2);
 	TEST_ASSERT(s1 == QAWS_STATUS_UNSUPPORTED_OPERATION && s2 == QAWS_STATUS_OUT_OF_RANGE, msg);

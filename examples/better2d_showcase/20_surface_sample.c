@@ -99,15 +99,15 @@ static void demo_surface_sample(void)
 		unsigned int n = 1500;
 		qaws_vec2* w = (qaws_vec2*)malloc(sizeof(qaws_vec2) * n);
 		qaws_vec3* p = (qaws_vec3*)malloc(sizeof(qaws_vec3) * n);
-		qaws_surface_curve_create_geodesic_arc(sph, sgf_uv(0.02, 0.62), (qaws_scalar)0.62, 0, (qaws_scalar)(2 * pi), 0, &c);
+		qaws_surface_curve_create_geodesic_arc(&c, sph, sgf_uv(0.02, 0.62), (qaws_scalar)0.62, 0, (qaws_scalar)(2 * pi), 0);
 		pc[0] = c;
 		ssf_path(&P, pc, 1);
-		qaws_surface_clip(sph, QAWS_CLIP_NONE, QAWS_FILL_NON_ZERO, &P, 1, NULL, 0, &rc);
+		qaws_surface_clip(&rc, sph, &P, NULL, 1, 0, QAWS_CLIP_NONE, QAWS_FILL_NON_ZERO);
 		lat[0] = ssf_line(sph, 0, 0.3, 1, 0.3, &keep[0]);
 		lat[1] = ssf_line(sph, 1, 0.75, 0, 0.75, &keep[1]);
 		pl[0] = lat[0]; pl[1] = lat[1];
 		ssf_path(&B[0], pl, 1); ssf_path(&B[1], pl + 1, 1);
-		qaws_surface_clip(sph, QAWS_CLIP_NONE, QAWS_FILL_NON_ZERO, B, 2, NULL, 0, &rb);
+		qaws_surface_clip(&rb, sph, B, NULL, 2, 0, QAWS_CLIP_NONE, QAWS_FILL_NON_ZERO);
 		for (k = 0; k < 4; k++)
 		{
 			viewport v3, vuv;
@@ -126,14 +126,14 @@ static void demo_surface_sample(void)
 			if (k < 3)
 			{
 				sgf_mesh(&s, sph, &view, 12, 1);
-				if (qaws_surface_region_sample(k == 2 ? rb : rc, &sd, m, w, p) == QAWS_STATUS_OK)
+				if (qaws_surface_region_sample(w, p, k == 2 ? rb : rc, m, &sd) == QAWS_STATUS_OK)
 					ssm_points(&s, sph, &view, w, p, m, NULL, k == 1 ? "#cf222e" : "#0969da", 1.2);
 				sof_outline(&s, k == 2 ? rb : rc, sph, &view, NULL, 1, 0, "#57606a", 1.2);
 			}
 			else
 			{
 				ssf_box(&s, &vuv, sph);
-				if (qaws_surface_region_sample(rc, &sd, m, w, p) == QAWS_STATUS_OK)
+				if (qaws_surface_region_sample(w, p, rc, m, &sd) == QAWS_STATUS_OK)
 					ssm_points(&s, sph, NULL, w, p, m, &vuv, "#0969da", 1.0);
 				sbf_fill(&s, rc, sph, NULL, &vuv, 1, "none", "#57606a");
 			}
@@ -151,7 +151,7 @@ static void demo_surface_sample(void)
 			memset(&md, 0, sizeof(md));
 			md.edge_length = (qaws_scalar)0.06;
 			md.remesh_iterations = 3;
-			if (qaws_surface_region_triangulate(rc, &md, &mesh) == QAWS_STATUS_OK)
+			if (qaws_surface_region_triangulate(&mesh, rc, &md) == QAWS_STATUS_OK)
 			{
 				sprintf(label, "meshed to edges of 0.06: %u triangles", qaws_mesh_2d_get_triangle_count(mesh));
 				svg_panel(&s, &v3, label);
@@ -190,18 +190,18 @@ static void demo_surface_sample(void)
 		bd.u_degree = 3; bd.v_degree = 3; bd.control_points = cp; bd.u_point_count = 4; bd.v_point_count = 4;
 		qaws_surface_create_bezier(&patch, &bd);
 		corner[0] = sgf_uv(0.15, 0.18); corner[1] = sgf_uv(0.85, 0.15); corner[2] = sgf_uv(0.82, 0.85); corner[3] = sgf_uv(0.18, 0.82);
-		for (i = 0; i < 4; i++) { qaws_surface_curve_create_geodesic(patch, corner[i], corner[(i + 1) % 4], 0, &sq[i]); pa[i] = sq[i]; }
-		qaws_surface_curve_create_geodesic_arc(patch, sgf_uv(0.5, 0.52), (qaws_scalar)0.4, 0, (qaws_scalar)(2 * pi), 0, &circ);
+		for (i = 0; i < 4; i++) { qaws_surface_curve_create_geodesic(&sq[i], patch, corner[i], corner[(i + 1) % 4], 0); pa[i] = sq[i]; }
+		qaws_surface_curve_create_geodesic_arc(&circ, patch, sgf_uv(0.5, 0.52), (qaws_scalar)0.4, 0, (qaws_scalar)(2 * pi), 0);
 		pb[0] = circ;
 		ssf_path(&A, pa, 4); ssf_path(&Bp, pb, 1);
-		qaws_surface_clip(patch, QAWS_CLIP_DIFFERENCE, QAWS_FILL_NON_ZERO, &A, 1, &Bp, 1, &r);
+		qaws_surface_clip(&r, patch, &A, &Bp, 1, 1, QAWS_CLIP_DIFFERENCE, QAWS_FILL_NON_ZERO);
 		v3.x0 = 24 + 2 * (pw + 12); v3.y0 = 104 + ph + 44; v3.w = pw; v3.h = ph;
 		sgf_view_init(&view, 0.7, 0.75, 100, v3.x0 + pw / 2, v3.y0 + ph / 2 + 10);
 		view.o[0] = 1; view.o[1] = 1; view.o[2] = 0.3;
 		memset(&md, 0, sizeof(md));
 		md.edge_length = (qaws_scalar)0.08;
 		md.remesh_iterations = 3;
-		if (r && qaws_surface_region_triangulate(r, &md, &mesh) == QAWS_STATUS_OK)
+		if (r && qaws_surface_region_triangulate(&mesh, r, &md) == QAWS_STATUS_OK)
 		{
 			sprintf(label, "a wavy patch: a square less a circle, %u triangles", qaws_mesh_2d_get_triangle_count(mesh));
 			svg_panel(&s, &v3, label);
@@ -226,16 +226,16 @@ static void demo_surface_sample(void)
 		qaws_mesh_2d* mesh = NULL;
 		viewport v3;
 		sgf_view view;
-		qaws_surface_curve_create_geodesic_arc(tor, sgf_uv(0.0, 0.0), (qaws_scalar)0.4, 0, (qaws_scalar)(2 * pi), 0, &c);
+		qaws_surface_curve_create_geodesic_arc(&c, tor, sgf_uv(0.0, 0.0), (qaws_scalar)0.4, 0, (qaws_scalar)(2 * pi), 0);
 		pc[0] = c;
 		ssf_path(&P, pc, 1);
-		qaws_surface_clip(tor, QAWS_CLIP_NONE, QAWS_FILL_NON_ZERO, &P, 1, NULL, 0, &r);
+		qaws_surface_clip(&r, tor, &P, NULL, 1, 0, QAWS_CLIP_NONE, QAWS_FILL_NON_ZERO);
 		v3.x0 = 24 + 3 * (pw + 12); v3.y0 = 104 + ph + 44; v3.w = pw; v3.h = ph;
 		sgf_view_init(&view, -pi / 2 + 0.35, 0.45, 105, v3.x0 + pw / 2, v3.y0 + ph / 2 + 4);
 		memset(&md, 0, sizeof(md));
 		md.edge_length = (qaws_scalar)0.045;
 		md.remesh_iterations = 3;
-		if (r && qaws_surface_region_triangulate(r, &md, &mesh) == QAWS_STATUS_OK)
+		if (r && qaws_surface_region_triangulate(&mesh, r, &md) == QAWS_STATUS_OK)
 		{
 			sprintf(label, "a torus: a circle across both seams, %u triangles", qaws_mesh_2d_get_triangle_count(mesh));
 			svg_panel(&s, &v3, label);

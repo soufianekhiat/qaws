@@ -125,24 +125,24 @@ typedef struct qaws_skeleton_face
 	int side;
 } qaws_skeleton_face;
 
-qaws_status qaws_skeleton_create(qaws_skeleton_desc const* desc, qaws_skeleton** out_skeleton);
+qaws_status qaws_skeleton_create(qaws_skeleton** out_skeleton, qaws_skeleton_desc const* desc);
 void qaws_skeleton_destroy(qaws_skeleton* skeleton);
 
 unsigned int qaws_skeleton_get_node_count(qaws_skeleton const* skeleton);
-qaws_status qaws_skeleton_get_node(qaws_skeleton const* skeleton, unsigned int index, qaws_skeleton_node* out_node);
+qaws_status qaws_skeleton_get_node(qaws_skeleton_node* out_node, qaws_skeleton const* skeleton, unsigned int index);
 unsigned int qaws_skeleton_get_arc_count(qaws_skeleton const* skeleton);
-qaws_status qaws_skeleton_get_arc(qaws_skeleton const* skeleton, unsigned int index, qaws_skeleton_arc* out_arc);
+qaws_status qaws_skeleton_get_arc(qaws_skeleton_arc* out_arc, qaws_skeleton const* skeleton, unsigned int index);
 unsigned int qaws_skeleton_get_face_count(qaws_skeleton const* skeleton);
-qaws_status qaws_skeleton_get_face(qaws_skeleton const* skeleton, unsigned int index, qaws_skeleton_face* out_face);
+qaws_status qaws_skeleton_get_face(qaws_skeleton_face* out_face, qaws_skeleton const* skeleton, unsigned int index);
 
 /* The point of an arc at u in [0, 1] (node_a to node_b), exactly, and the
    time it is swept. */
-qaws_status qaws_skeleton_evaluate_arc(qaws_skeleton const* skeleton, unsigned int index, qaws_scalar u,
-	qaws_vec2* out_point, qaws_scalar* out_time);
+qaws_status qaws_skeleton_evaluate_arc(qaws_vec2* out_point, qaws_scalar* out_time, qaws_skeleton const* skeleton,
+	unsigned int index, qaws_scalar u);
 
 /* The arc as a new curve (destroy it): a line, a circular arc, or a degree
    2 rational NURBS (the exact conic, in pieces when it turns far). */
-qaws_status qaws_skeleton_get_arc_curve(qaws_skeleton const* skeleton, unsigned int index, qaws_curve** out_curve);
+qaws_status qaws_skeleton_get_arc_curve(qaws_curve** out_curve, qaws_skeleton const* skeleton, unsigned int index);
 
 /* The time the region is swept out (the roof's top). */
 qaws_scalar qaws_skeleton_get_max_time(qaws_skeleton const* skeleton);
@@ -151,6 +151,6 @@ qaws_scalar qaws_skeleton_get_max_time(qaws_skeleton const* skeleton);
    by the splice angle, weighted): its loops of lines and arcs, outer
    counter-clockwise, holes clockwise, as a qaws_clip result. Empty past
    the max time. */
-qaws_status qaws_skeleton_offset(qaws_skeleton const* skeleton, qaws_scalar time, qaws_clip_result** out_result);
+qaws_status qaws_skeleton_offset(qaws_clip_result** out_result, qaws_skeleton const* skeleton, qaws_scalar time);
 
 #endif /* QAWS_SKELETON_H */

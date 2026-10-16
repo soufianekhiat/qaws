@@ -152,10 +152,10 @@ ellipses and cubic B-spline blobs in 12 ms.
 ## Batches
 
 ```c
-qaws_status qaws_clip_execute_batch(qaws_clip_result** out_results, unsigned int count, qaws_clip_desc const* descs, qaws_batch_executor const* executor);
-qaws_status qaws_clip64_execute_batch(qaws_clip64_result** out_results, unsigned int count, qaws_clip64_desc const* descs, qaws_batch_executor const* executor);
-qaws_status qaws_offset_execute_batch(qaws_clip_result** out_results, unsigned int count, qaws_offset_desc const* descs, qaws_batch_executor const* executor);
-qaws_status qaws_offset64_execute_batch(qaws_clip64_result** out_results, unsigned int count, qaws_offset64_desc const* descs, qaws_batch_executor const* executor);
+qaws_status qaws_clip_execute_batch(qaws_clip_result** out_results, qaws_clip_desc const* descs, unsigned int count, qaws_batch_executor const* executor);
+qaws_status qaws_clip64_execute_batch(qaws_clip64_result** out_results, qaws_clip64_desc const* descs, unsigned int count, qaws_batch_executor const* executor);
+qaws_status qaws_offset_execute_batch(qaws_clip_result** out_results, qaws_offset_desc const* descs, unsigned int count, qaws_batch_executor const* executor);
+qaws_status qaws_offset64_execute_batch(qaws_clip64_result** out_results, qaws_offset64_desc const* descs, unsigned int count, qaws_batch_executor const* executor);
 ```
 
 These run many independent jobs in one call, in parallel through the

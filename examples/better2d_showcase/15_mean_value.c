@@ -43,11 +43,11 @@ static void mvf_grid(svg* s, viewport const* v, qaws_mean_value const* m, qaws_r
 			int in = 0;
 			if (horiz) { q.x = (qaws_scalar)(box[0] + (box[1] - box[0]) * k / 400.0); q.y = (qaws_scalar)c; }
 			else { q.x = (qaws_scalar)c; q.y = (qaws_scalar)(box[2] + (box[3] - box[2]) * k / 400.0); }
-			if (k <= 400) qaws_region_sampler_contains(rs, q, &in);
+			if (k <= 400) qaws_region_sampler_contains(&in, rs, q);
 			if (in) run[nr++] = q;
 			else
 			{
-				if (nr > 1 && qaws_mean_value_deform(m, hh, run, nr, out) == QAWS_STATUS_OK)
+				if (nr > 1 && qaws_mean_value_deform(out, m, hh, run, nr) == QAWS_STATUS_OK)
 					mvf_points(s, v, out, nr, horiz ? "#2f6fbf" : "#cf6a2a", 0.9);
 				nr = 0;
 			}
@@ -70,7 +70,7 @@ static void mvf_boundary(svg* s, viewport const* v, qaws_mean_value const* m, qa
 			qaws_curve_evaluate_2d(&e, cs[i], rg.min_value + (rg.max_value - rg.min_value) * k / 160, QAWS_EVAL_FLAG_POSITION);
 			bp[k] = e.position;
 		}
-		if (qaws_mean_value_deform(m, hh, bp, 161, bo) == QAWS_STATUS_OK)
+		if (qaws_mean_value_deform(bo, m, hh, bp, 161) == QAWS_STATUS_OK)
 			mvf_points(s, v, bo, 161, "#1b1f24", 2.2);
 	}
 }
@@ -107,8 +107,8 @@ static void mvf_field(svg* s, viewport const* v, qaws_mean_value const* m, qaws_
 			double x0 = box[0] + (box[1] - box[0]) * i / nx, x1 = box[0] + (box[1] - box[0]) * (i + 1) / nx;
 			double y0 = box[2] + (box[3] - box[2]) * j / ny, y1 = box[2] + (box[3] - box[2]) * (j + 1) / ny;
 			q.x = (qaws_scalar)(0.5 * (x0 + x1)); q.y = (qaws_scalar)(0.5 * (y0 + y1));
-			qaws_region_sampler_contains(rs, q, &in);
-			if (!in || qaws_mean_value_interpolate(m, q, mvf_fn, &d, 1, &val) != QAWS_STATUS_OK)
+			qaws_region_sampler_contains(&in, rs, q);
+			if (!in || qaws_mean_value_interpolate(&val, m, 1, q, mvf_fn, &d) != QAWS_STATUS_OK)
 				continue;
 			heat((double)val, col);
 			fprintf(s->f, "<rect x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" fill=\"%s\"/>\n",
@@ -157,14 +157,14 @@ static void demo_mean_value(void)
 	d.paths = p; d.path_count = 2;
 	memset(&rd, 0, sizeof(rd));
 	rd.paths = p; rd.path_count = 2; rd.fill_rule = QAWS_FILL_EVEN_ODD;
-	if (qaws_mean_value_create(&d, &m) == QAWS_STATUS_OK && qaws_region_sampler_create(&rd, &rs) == QAWS_STATUS_OK)
+	if (qaws_mean_value_create(&m, &d) == QAWS_STATUS_OK && qaws_region_sampler_create(&rs, &rd) == QAWS_STATUS_OK)
 	{
 		nh = qaws_mean_value_get_handle_count(m);
 		h = (qaws_vec2*)malloc(sizeof(qaws_vec2) * nh);
 		mv = (qaws_vec2*)malloc(sizeof(qaws_vec2) * nh);
 		for (i = 0; i < nh; i++)
 		{
-			qaws_mean_value_get_handle(m, i, &h[i]);
+			qaws_mean_value_get_handle(&h[i], m, i);
 			mv[i].x = (qaws_scalar)(h[i].x + 0.15 * h[i].y * h[i].y);
 			mv[i].y = (qaws_scalar)(h[i].y + 0.16 * h[i].x * h[i].x - 0.1 * h[i].x);
 			if (i >= 12) mv[i].x -= (qaws_scalar)0.12;
@@ -232,7 +232,7 @@ static void demo_mean_value(void)
 			v.xmin = cx - 0.5 * pw * sc; v.xmax = cx + 0.5 * pw * sc; v.ymin = cy - 0.5 * ph * sc; v.ymax = cy + 0.5 * ph * sc;
 		}
 		svg_panel(&s, &v, label);
-		if (qaws_mean_value_create(&d, &m) == QAWS_STATUS_OK && qaws_region_sampler_create(&rd, &rs) == QAWS_STATUS_OK)
+		if (qaws_mean_value_create(&m, &d) == QAWS_STATUS_OK && qaws_region_sampler_create(&rs, &rd) == QAWS_STATUS_OK)
 			mvf_field(&s, &v, m, rs, box, panel);
 		for (i = 0; i < np; i++)
 		{

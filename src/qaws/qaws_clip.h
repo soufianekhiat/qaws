@@ -107,7 +107,7 @@ qaws_status qaws_clip_execute(qaws_clip_result** out_result, qaws_clip_desc cons
 /* Many independent clips in one call, in parallel through the executor (each
    job's own executor is not used: the jobs are the parallel part); results
    in order, the same as one call each; on a failure none is kept. */
-qaws_status qaws_clip_execute_batch(qaws_clip_result** out_results, unsigned int count, qaws_clip_desc const* descs,
+qaws_status qaws_clip_execute_batch(qaws_clip_result** out_results, qaws_clip_desc const* descs, unsigned int count,
 	qaws_batch_executor const* executor);
 void qaws_clip_result_destroy(qaws_clip_result* result);
 

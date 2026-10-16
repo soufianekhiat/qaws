@@ -470,9 +470,9 @@ static void demo_region_sample(void)
 			}
 			d.density_user = &dd;
 			rs_draw_region(&s, &v, &g);
-			if (qaws_region_sampler_create(&d, &smp) == QAWS_STATUS_OK)
+			if (qaws_region_sampler_create(&smp, &d) == QAWS_STATUS_OK)
 			{
-				qaws_region_sampler_generate(smp, n, kinds[c], 7 + r, pts);
+				qaws_region_sampler_generate(pts, smp, n, kinds[c], 7 + r);
 				rs_draw_points(&s, &v, pts, n, "#cf222e");
 				qaws_region_sampler_destroy(smp);
 			}

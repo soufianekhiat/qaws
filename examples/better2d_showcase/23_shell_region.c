@@ -44,7 +44,7 @@ static void shf_curve(svg* s, qaws_shell_curve const* c, sgf_view const* view, q
 	{
 		unsigned int f;
 		qaws_surface_curve const* sc;
-		qaws_shell_curve_get_run(c, i, &f, &sc);
+		qaws_shell_curve_get_run(&f, &sc, c, i);
 		ssf_curve(s, sc, qaws_shell_atlas_get_face(a, f), view, NULL, pu, 0, color);
 	}
 }
@@ -84,7 +84,7 @@ static void demo_shell_region(void)
 	f[3] = shf_face(P[0], P[4], P[2], P[6]);
 	f[4] = shf_face(P[2], P[6], P[3], P[7]);
 	f[5] = shf_face(P[0], P[1], P[4], P[5]);
-	qaws_shell_atlas_create((qaws_surface const* const*)f, 6, 0, &a);
+	qaws_shell_atlas_create(&a, (qaws_surface const* const*)f, 6, 0);
 	for (k = 0; k < 3; k++)
 	{
 		viewport v3;
@@ -104,7 +104,7 @@ static void demo_shell_region(void)
 				double th = 2 * pi * (i + 0.5) / 24;
 				d.x = (qaws_scalar)cos(th); d.y = (qaws_scalar)sin(th);
 				/* run until a vertex or 3.2 */
-				if (qaws_shell_curve_create_geodesic_ray(a, shf_pt(0, 0.6, 0.45), d, (qaws_scalar)3.2, 0, &c) == QAWS_STATUS_OK)
+				if (qaws_shell_curve_create_geodesic_ray(&c, a, shf_pt(0, 0.6, 0.45), d, (qaws_scalar)3.2, 0) == QAWS_STATUS_OK)
 					shf_curve(&s, c, &view, a, 0, "#cf222e");
 				qaws_shell_curve_destroy(c);
 			}
@@ -114,9 +114,9 @@ static void demo_shell_region(void)
 			qaws_shell_curve* c = NULL;
 			qaws_shell_region* r = NULL;
 			qaws_scalar A = 0;
-			qaws_shell_curve_create_geodesic_circle(a, shf_pt(0, 0.8, 0.8), (qaws_scalar)0.55, 0, &c);
-			if (c) qaws_shell_region_create(a, (qaws_shell_curve const* const*)&c, 1, &r);
-			if (r) qaws_shell_region_get_area(r, &A);
+			qaws_shell_curve_create_geodesic_circle(&c, a, shf_pt(0, 0.8, 0.8), (qaws_scalar)0.55, 0);
+			if (c) qaws_shell_region_create(&r, a, (qaws_shell_curve const* const*)&c, 1);
+			if (r) qaws_shell_region_get_area(&A, r);
 			sprintf(label, "a circle over two edges: %.6f, pi r^2 %.6f", (double)A, pi * 0.55 * 0.55);
 			svg_panel(&s, &v3, label);
 			for (i = 0; i < 6; i++) shf_face_box(&s, f[i], &view);
@@ -130,12 +130,12 @@ static void demo_shell_region(void)
 			qaws_shell_curve *c1 = NULL, *c2 = NULL;
 			qaws_shell_region *r1 = NULL, *r2 = NULL, *ru = NULL;
 			qaws_scalar A = 0;
-			qaws_shell_curve_create_geodesic_circle(a, shf_pt(0, 0.75, 0.5), (qaws_scalar)0.7, 0, &c1);
-			qaws_shell_curve_create_geodesic_circle(a, shf_pt(2, 0.6, 0.8), (qaws_scalar)0.6, 0, &c2);
-			if (c1) qaws_shell_region_create(a, (qaws_shell_curve const* const*)&c1, 1, &r1);
-			if (c2) qaws_shell_region_create(a, (qaws_shell_curve const* const*)&c2, 1, &r2);
-			if (r1 && r2) qaws_shell_region_clip(r1, r2, QAWS_CLIP_UNION, &ru);
-			if (ru) qaws_shell_region_get_area(ru, &A);
+			qaws_shell_curve_create_geodesic_circle(&c1, a, shf_pt(0, 0.75, 0.5), (qaws_scalar)0.7, 0);
+			qaws_shell_curve_create_geodesic_circle(&c2, a, shf_pt(2, 0.6, 0.8), (qaws_scalar)0.6, 0);
+			if (c1) qaws_shell_region_create(&r1, a, (qaws_shell_curve const* const*)&c1, 1);
+			if (c2) qaws_shell_region_create(&r2, a, (qaws_shell_curve const* const*)&c2, 1);
+			if (r1 && r2) qaws_shell_region_clip(&ru, r1, r2, QAWS_CLIP_UNION);
+			if (ru) qaws_shell_region_get_area(&A, ru);
 			sprintf(label, "two circles over edges, united: area %.6f", (double)A);
 			svg_panel(&s, &v3, label);
 			for (i = 0; i < 6; i++) shf_face_box(&s, f[i], &view);
@@ -160,15 +160,15 @@ static void demo_shell_region(void)
 		qaws_scalar A = 0;
 		h[0] = sgf_revolve(p1);
 		h[1] = sgf_revolve(p2);
-		qaws_shell_atlas_create((qaws_surface const* const*)h, 2, 0, &ah);
+		qaws_shell_atlas_create(&ah, (qaws_surface const* const*)h, 2, 0);
 		v3.x0 = 24 + 3 * (pw + 12); v3.y0 = 104; v3.w = pw; v3.h = ph;
 		sgf_view_init(&view, -pi / 2 - 2 * pi * 0.3 + 0.2, 0.3, 120, v3.x0 + pw / 2, v3.y0 + ph / 2 + 10);
-		qaws_shell_curve_create_geodesic_circle(ah, shf_pt(1, 0.3, 0.08), (qaws_scalar)0.55, 0, &c1);
-		qaws_shell_curve_create_geodesic_circle(ah, shf_pt(0, 0.36, 0.85), (qaws_scalar)0.45, 0, &c2);
-		if (c1) qaws_shell_region_create(ah, (qaws_shell_curve const* const*)&c1, 1, &r1);
-		if (c2) qaws_shell_region_create(ah, (qaws_shell_curve const* const*)&c2, 1, &r2);
-		if (r1 && r2) qaws_shell_region_clip(r1, r2, QAWS_CLIP_XOR, &rx);
-		if (rx) qaws_shell_region_get_area(rx, &A);
+		qaws_shell_curve_create_geodesic_circle(&c1, ah, shf_pt(1, 0.3, 0.08), (qaws_scalar)0.55, 0);
+		qaws_shell_curve_create_geodesic_circle(&c2, ah, shf_pt(0, 0.36, 0.85), (qaws_scalar)0.45, 0);
+		if (c1) qaws_shell_region_create(&r1, ah, (qaws_shell_curve const* const*)&c1, 1);
+		if (c2) qaws_shell_region_create(&r2, ah, (qaws_shell_curve const* const*)&c2, 1);
+		if (r1 && r2) qaws_shell_region_clip(&rx, r1, r2, QAWS_CLIP_XOR);
+		if (rx) qaws_shell_region_get_area(&A, rx);
 		sprintf(label, "hemispheres: circles over the equator, xor");
 		svg_panel(&s, &v3, label);
 		sgf_mesh(&s, h[0], &view, 12, 1);
@@ -196,11 +196,11 @@ static void demo_shell_region(void)
 		g[3] = shf_face(P[0], P[4], P[2], P[6]);
 		g[4] = shf_face(P[2], P[6], P[3], P[7]);
 		g[5] = shf_face(P[0], P[1], P[4], P[5]);
-		qaws_shell_atlas_create((qaws_surface const* const*)g, 6, 0, &ag);
+		qaws_shell_atlas_create(&ag, (qaws_surface const* const*)g, 6, 0);
 		v3.x0 = 24 + 4 * (pw + 12); v3.y0 = 104; v3.w = pw; v3.h = ph;
 		sgf_view_init(&view, -0.75 * pi, 0.6, 62, v3.x0 + pw / 2, v3.y0 + ph / 2 + 10);
-		qaws_shell_region_create_geodesic_disk(ag, shf_pt(0, 0.85, 0.85), (qaws_scalar)0.75, 0, &r);
-		if (r) qaws_shell_region_get_area(r, &A);
+		qaws_shell_region_create_geodesic_disk(&r, ag, shf_pt(0, 0.85, 0.85), (qaws_scalar)0.75, 0);
+		if (r) qaws_shell_region_get_area(&A, r);
 		sprintf(label, "a disk round a corner: %.5f of pi r^2", (double)A / (pi * 0.75 * 0.75));
 		svg_panel(&s, &v3, label);
 		for (i = 0; i < 6; i++) shf_face_box(&s, g[i], &view);
@@ -232,11 +232,11 @@ static void demo_shell_region(void)
 		viewport v3;
 		sgf_view view;
 		for (i = 0; i < 5; i++) g[i] = shf_face(S[i][0], S[i][1], S[i][2], S[i][3]);
-		qaws_shell_atlas_create((qaws_surface const* const*)g, 5, 0, &ag);
+		qaws_shell_atlas_create(&ag, (qaws_surface const* const*)g, 5, 0);
 		v3.x0 = 24 + 5 * (pw + 12); v3.y0 = 104; v3.w = pw; v3.h = ph;
 		sgf_view_init(&view, 0.25 * pi, 0.5, 105, v3.x0 + pw / 2, v3.y0 + ph / 2 - 10);
-		qaws_shell_region_create_geodesic_disk(ag, shf_pt(0, 0.3, 0.3), (qaws_scalar)rr, 0, &r);
-		if (r) qaws_shell_region_get_area(r, &A);
+		qaws_shell_region_create_geodesic_disk(&r, ag, shf_pt(0, 0.3, 0.3), (qaws_scalar)rr, 0);
+		if (r) qaws_shell_region_get_area(&A, r);
 		sprintf(label, "through a saddle: %.6f, closed form %.6f", (double)A, pi * rr * rr + 0.25 * pi * (rr - rho0) * (rr - rho0));
 		svg_panel(&s, &v3, label);
 		for (i = 0; i < 5; i++) shf_face_box(&s, g[i], &view);

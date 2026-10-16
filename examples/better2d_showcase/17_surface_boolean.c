@@ -16,7 +16,7 @@ static void sbf_fill(svg* s, qaws_surface_region const* r, qaws_surface const* s
 	{
 		qaws_path_2d p;
 		int first = 1;
-		qaws_surface_region_get_path(r, pi, &p);
+		qaws_surface_region_get_path(&p, r, pi);
 		for (ci = 0; ci < p.curve_count; ci++)
 		{
 			qaws_range rg = qaws_curve_get_parameter_range(p.curves[ci]);
@@ -74,8 +74,8 @@ static void demo_surface_boolean(void)
 	bd.u_degree = 3; bd.v_degree = 3; bd.control_points = cp; bd.u_point_count = 4; bd.v_point_count = 4;
 	qaws_surface_create_bezier(&patch, &bd);
 	corner[0] = sgf_uv(0.15, 0.2); corner[1] = sgf_uv(0.62, 0.15); corner[2] = sgf_uv(0.67, 0.62); corner[3] = sgf_uv(0.2, 0.67);
-	for (i = 0; i < 4; i++) { qaws_surface_curve_create_geodesic(patch, corner[i], corner[(i + 1) % 4], 0, &sq[i]); psq[i] = sq[i]; }
-	qaws_surface_curve_create_geodesic_arc(patch, sgf_uv(0.62, 0.62), (qaws_scalar)0.55, 0, (qaws_scalar)(2 * pi), 0, &circle);
+	for (i = 0; i < 4; i++) { qaws_surface_curve_create_geodesic(&sq[i], patch, corner[i], corner[(i + 1) % 4], 0); psq[i] = sq[i]; }
+	qaws_surface_curve_create_geodesic_arc(&circle, patch, sgf_uv(0.62, 0.62), (qaws_scalar)0.55, 0, (qaws_scalar)(2 * pi), 0);
 	pci[0] = circle;
 	SQ.curves = psq; SQ.curve_count = 4; SQ.closed = 1;
 	CI.curves = pci; CI.curve_count = 1; CI.closed = 1;
@@ -91,8 +91,8 @@ static void demo_surface_boolean(void)
 		vuv.xmin = -0.1; vuv.xmax = 1.1; vuv.ymin = 0.5 - 0.6 * ph / pw; vuv.ymax = 0.5 + 0.6 * ph / pw;
 		sgf_view_init(&view, 0.7, 0.75, 100, v3.x0 + pw / 2, v3.y0 + ph / 2 + 10);
 		view.o[0] = 1; view.o[1] = 1; view.o[2] = 0.3;
-		qaws_surface_clip(patch, ops[k], QAWS_FILL_NON_ZERO, &SQ, 1, &CI, 1, &r);
-		qaws_surface_region_get_area(r, &area);
+		qaws_surface_clip(&r, patch, &SQ, &CI, 1, 1, ops[k], QAWS_FILL_NON_ZERO);
+		qaws_surface_region_get_area(&area, r);
 		sprintf(label, "%s: area %.4f", opname[k], (double)area);
 		svg_panel(&s, &v3, label);
 		svg_panel(&s, &vuv, k == 0 ? "the same in the parameter plane" : NULL);
@@ -120,11 +120,11 @@ static void demo_surface_boolean(void)
 		qaws_vec2 tri[3];
 		static char const* const names[4] = { "a lens of two geodesic circles", "a geodesic triangle less a circle",
 			"three geodesic circles' union", "their xor (even-odd)" };
-		qaws_surface_curve_create_geodesic_arc(sph, sgf_uv(0.36, 0.52), (qaws_scalar)0.55, 0, (qaws_scalar)(2 * pi), 0, &c1);
-		qaws_surface_curve_create_geodesic_arc(sph, sgf_uv(0.44, 0.48), (qaws_scalar)0.5, 0, (qaws_scalar)(2 * pi), 0, &c2);
-		qaws_surface_curve_create_geodesic_arc(sph, sgf_uv(0.40, 0.62), (qaws_scalar)0.45, 0, (qaws_scalar)(2 * pi), 0, &c3);
+		qaws_surface_curve_create_geodesic_arc(&c1, sph, sgf_uv(0.36, 0.52), (qaws_scalar)0.55, 0, (qaws_scalar)(2 * pi), 0);
+		qaws_surface_curve_create_geodesic_arc(&c2, sph, sgf_uv(0.44, 0.48), (qaws_scalar)0.5, 0, (qaws_scalar)(2 * pi), 0);
+		qaws_surface_curve_create_geodesic_arc(&c3, sph, sgf_uv(0.40, 0.62), (qaws_scalar)0.45, 0, (qaws_scalar)(2 * pi), 0);
 		tri[0] = sgf_uv(0.26, 0.4); tri[1] = sgf_uv(0.52, 0.36); tri[2] = sgf_uv(0.4, 0.75);
-		for (i = 0; i < 3; i++) { qaws_surface_curve_create_geodesic(sph, tri[i], tri[(i + 1) % 3], 0, &t[i]); pt[i] = t[i]; }
+		for (i = 0; i < 3; i++) { qaws_surface_curve_create_geodesic(&t[i], sph, tri[i], tri[(i + 1) % 3], 0); pt[i] = t[i]; }
 		p1[0] = c1; p2[0] = c2; p3[0] = c3;
 		P1.curves = p1; P1.curve_count = 1; P1.closed = 1;
 		P2.curves = p2; P2.curve_count = 1; P2.closed = 1;
@@ -139,16 +139,16 @@ static void demo_surface_boolean(void)
 			sgf_view view;
 			v3.x0 = 24 + k * (pw + 12); v3.y0 = 104 + 2 * (ph + 44); v3.w = pw; v3.h = ph;
 			sgf_view_init(&view, 3.0 - 2 * pi * 0.1, 0.25, 105, v3.x0 + pw / 2, v3.y0 + ph / 2 + 10);
-			if (k == 0) qaws_surface_clip(sph, QAWS_CLIP_INTERSECTION, QAWS_FILL_NON_ZERO, &P1, 1, &P2, 1, &r);
-			else if (k == 1) qaws_surface_clip(sph, QAWS_CLIP_DIFFERENCE, QAWS_FILL_NON_ZERO, &PT, 1, &P3, 1, &r);
-			else if (k == 2) qaws_surface_clip(sph, QAWS_CLIP_UNION, QAWS_FILL_NON_ZERO, P12, 2, &P3, 1, &r);
+			if (k == 0) qaws_surface_clip(&r, sph, &P1, &P2, 1, 1, QAWS_CLIP_INTERSECTION, QAWS_FILL_NON_ZERO);
+			else if (k == 1) qaws_surface_clip(&r, sph, &PT, &P3, 1, 1, QAWS_CLIP_DIFFERENCE, QAWS_FILL_NON_ZERO);
+			else if (k == 2) qaws_surface_clip(&r, sph, P12, &P3, 2, 1, QAWS_CLIP_UNION, QAWS_FILL_NON_ZERO);
 			else
 			{
 				qaws_surface_path all[3];
 				all[0] = P1; all[1] = P2; all[2] = P3;
-				qaws_surface_clip(sph, QAWS_CLIP_NONE, QAWS_FILL_EVEN_ODD, all, 3, NULL, 0, &r);
+				qaws_surface_clip(&r, sph, all, NULL, 3, 0, QAWS_CLIP_NONE, QAWS_FILL_EVEN_ODD);
 			}
-			qaws_surface_region_get_area(r, &area);
+			qaws_surface_region_get_area(&area, r);
 			sprintf(label, "%s: area %.4f", names[k], (double)area);
 			svg_panel(&s, &v3, label);
 			sgf_mesh(&s, sph, &view, 12, 1);

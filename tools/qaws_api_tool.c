@@ -290,6 +290,9 @@ static int is_user_data(param const* p)
 
 static int is_desc(param const* p)
 {
+	size_t l = strlen(p->name);
+	if (l > 1 && p->name[l - 1] == 's' && p->ptr)
+		return 0;   /* (descs, faces: an array of them, a buffer its count follows) */
 	return contains(p->type, "desc") || contains(p->type, "options") || contains(p->type, "params") || contains(p->type, "settings") ||
 		contains(p->type, "config") || contains(p->type, "targets") || contains(p->type, "spec");
 }

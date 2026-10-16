@@ -80,7 +80,7 @@ static qaws_status mvt_make(qaws_path_2d* p, unsigned int np, qaws_mean_value** 
 	qaws_mean_value_desc d;
 	memset(&d, 0, sizeof(d));
 	d.paths = p; d.path_count = np;
-	return qaws_mean_value_create(&d, out);
+	return qaws_mean_value_create(out, &d);
 }
 
 /* the coordinates' sum less 1 and the reproduction error at x */
@@ -92,11 +92,11 @@ static qaws_status mvt_check(qaws_mean_value const* m, double x, double y, doubl
 	double s = 0, sx = 0, sy = 0;
 	qaws_status st;
 	pt.x = (qaws_scalar)x; pt.y = (qaws_scalar)y;
-	st = qaws_mean_value_coordinates(m, pt, w);
+	st = qaws_mean_value_coordinates(w, m, pt);
 	for (i = 0; i < n; i++)
 	{
 		qaws_vec2 h;
-		qaws_mean_value_get_handle(m, i, &h);
+		qaws_mean_value_get_handle(&h, m, i);
 		s += w[i];
 		sx += w[i] * h.x;
 		sy += w[i] * h.y;
@@ -144,7 +144,7 @@ static void test_reference(void)
 			qaws_scalar w[12];
 			qaws_vec2 pt;
 			pt.x = (qaws_scalar)ref_blob_points[2 * k]; pt.y = (qaws_scalar)ref_blob_points[2 * k + 1];
-			if (qaws_mean_value_coordinates(m, pt, w) != QAWS_STATUS_OK)
+			if (qaws_mean_value_coordinates(w, m, pt) != QAWS_STATUS_OK)
 				worst = 1e300;
 			for (i = 0; i < 12; i++)
 				if (fabs((double)w[i] - ref_blob_coords[12 * k + i]) > worst)
@@ -172,7 +172,7 @@ static void test_reference(void)
 			qaws_vec2 pt;
 			qaws_scalar v = 0;
 			pt.x = (qaws_scalar)ref_ellipse_points[2 * k]; pt.y = (qaws_scalar)ref_ellipse_points[2 * k + 1];
-			if (qaws_mean_value_interpolate(m, pt, mvt_ell_fn, NULL, 1, &v) != QAWS_STATUS_OK)
+			if (qaws_mean_value_interpolate(&v, m, 1, pt, mvt_ell_fn, NULL) != QAWS_STATUS_OK)
 				worst = 1e300;
 			if (fabs((double)v - ref_ellipse_values[k]) > worst)
 				worst = fabs((double)v - ref_ellipse_values[k]);
@@ -201,7 +201,7 @@ static void test_reference(void)
 			qaws_vec2 pt;
 			qaws_scalar v = 0;
 			pt.x = (qaws_scalar)ref_disc_points[2 * k]; pt.y = (qaws_scalar)ref_disc_points[2 * k + 1];
-			if (qaws_mean_value_interpolate(m, pt, mvt_disc_fn, NULL, 1, &v) != QAWS_STATUS_OK)
+			if (qaws_mean_value_interpolate(&v, m, 1, pt, mvt_disc_fn, NULL) != QAWS_STATUS_OK)
 				worst = 1e300;
 			if (fabs((double)v - ref_disc_values[k]) > worst)
 				worst = fabs((double)v - ref_disc_values[k]);
@@ -293,8 +293,8 @@ static void test_polygons(void)
 			ref[9] = t;
 		}
 		for (i = 0; i < 10; i++) s += ref[i];
-		qaws_mean_value_coordinates(m, pt, w);
-		qaws_mean_value_coordinates(mq, pt, wq);
+		qaws_mean_value_coordinates(w, m, pt);
+		qaws_mean_value_coordinates(wq, mq, pt);
 		for (i = 0; i < 10; i++)
 		{
 			/* a corner of the quadratic edges: itself and half of each middle point beside it */
@@ -304,7 +304,7 @@ static void test_polygons(void)
 			if (fabs(quad - ref[i] / s) > worst_quad) worst_quad = fabs(quad - ref[i] / s);
 			comb += (double)w[i] * mvt_hv[i];
 		}
-		qaws_mean_value_interpolate(m, pt, mvt_pl_fn, NULL, 1, &v);
+		qaws_mean_value_interpolate(&v, m, 1, pt, mvt_pl_fn, NULL);
 		if (fabs((double)v - comb) > worst_int) worst_int = fabs((double)v - comb);
 	}
 	sprintf(msg, "an L with a hole: %u handles (10); against Floater's closed form %.2g; its edges as quadratic Beziers %.2g; the interpolant of piecewise linear data %.2g",
@@ -328,7 +328,7 @@ static void test_polygons(void)
 			qaws_vec2 pt;
 			pt.x = (qaws_scalar)(0.8 * cos(2.4 * k) * (k % 7) / 7.0);
 			pt.y = (qaws_scalar)(0.5 * sin(2.4 * k) * (k % 7) / 7.0);
-			qaws_mean_value_coordinates(mh, pt, w);
+			qaws_mean_value_coordinates(w, mh, pt);
 			for (i = 0; i < 6; i++) if (!(w[i] > 0)) neg++;
 		}
 		sprintf(msg, "a convex hexagon: coordinates positive at 50 points (%u not)", neg);
@@ -439,9 +439,9 @@ static void test_kinds(void)
 		st = mvt_make(p, np, &m);
 		memset(&rd, 0, sizeof(rd));
 		rd.paths = p; rd.path_count = np; rd.fill_rule = QAWS_FILL_EVEN_ODD;
-		qaws_region_sampler_create(&rd, &rs);
+		qaws_region_sampler_create(&rs, &rd);
 		size = rs ? sqrt((double)qaws_region_sampler_get_area(rs)) : 1;
-		if (rs) qaws_region_sampler_generate(rs, 40, QAWS_REGION_SAMPLE_SOBOL, 7, pts);
+		if (rs) qaws_region_sampler_generate(pts, rs, 40, QAWS_REGION_SAMPLE_SOBOL, 7);
 		for (k = 0; k < 40 && m && rs; k++)
 		{
 			double se, re;
@@ -488,7 +488,7 @@ static void test_boundary(void)
 		double ds[4] = { 1e-2, 1e-4, 1e-6, 1e-8 };
 		b[0] = (1 - t) * (1 - t) * (1 - t); b[1] = 3 * t * (1 - t) * (1 - t); b[2] = 3 * t * t * (1 - t); b[3] = t * t * t;
 		qaws_curve_evaluate_2d(&e, cs[1], (qaws_scalar)t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1);
-		qaws_mean_value_coordinates(m, e.position, w);
+		qaws_mean_value_coordinates(w, m, e.position);
 		for (i = 0; i < 12; i++)
 		{
 			double want = i >= 3 && i <= 6 ? b[i - 3] : 0;
@@ -498,7 +498,7 @@ static void test_boundary(void)
 		TEST_ASSERT(worst_on <= (MVT_F32 ? 1e-5 : 1e-13), msg);
 		/* from inside, along the inward normal: the interpolant tends to f there */
 		mvt_xy_fn(NULL, 0, 1, (qaws_scalar)t, e.position, &f0);
-		qaws_mean_value_interpolate(m, e.position, mvt_xy_fn, NULL, 1, &v0);
+		qaws_mean_value_interpolate(&v0, m, 1, e.position, mvt_xy_fn, NULL);
 		{
 			double l = hypot(e.d1.x, e.d1.y);
 			nrm.x = (qaws_scalar)(-e.d1.y / l); nrm.y = (qaws_scalar)(e.d1.x / l);
@@ -508,7 +508,7 @@ static void test_boundary(void)
 			qaws_scalar v = 0;
 			pt.x = (qaws_scalar)(e.position.x + ds[k] * nrm.x);
 			pt.y = (qaws_scalar)(e.position.y + ds[k] * nrm.y);
-			qaws_mean_value_interpolate(m, pt, mvt_xy_fn, NULL, 1, &v);
+			qaws_mean_value_interpolate(&v, m, 1, pt, mvt_xy_fn, NULL);
 			gaps[k] = fabs((double)v - (double)f0);
 		}
 		(void)e2;
@@ -548,7 +548,7 @@ static void test_orientation(void)
 			qaws_vec2 pt;
 			qaws_scalar val = 0;
 			pt.x = (qaws_scalar)pts[2 * k]; pt.y = (qaws_scalar)pts[2 * k + 1];
-			qaws_mean_value_interpolate(m, pt, mvt_disc_fn, NULL, 1, &val);
+			qaws_mean_value_interpolate(&val, m, 1, pt, mvt_disc_fn, NULL);
 			v[o][k] = (double)val;
 		}
 		qaws_mean_value_destroy(m);
@@ -592,20 +592,20 @@ static void test_deform(void)
 	mvt_make(p, np, &m);
 	memset(&rd, 0, sizeof(rd));
 	rd.paths = p; rd.path_count = np; rd.fill_rule = QAWS_FILL_EVEN_ODD;
-	qaws_region_sampler_create(&rd, &rs);
+	qaws_region_sampler_create(&rs, &rd);
 	if (m && rs)
 	{
 		n = qaws_mean_value_get_handle_count(m);
 		hv = (qaws_vec2*)malloc(sizeof(qaws_vec2) * n);
 		moved = (qaws_vec2*)malloc(sizeof(qaws_vec2) * n);
-		for (i = 0; i < n; i++) qaws_mean_value_get_handle(m, i, &hv[i]);
-		qaws_region_sampler_generate(rs, 30, QAWS_REGION_SAMPLE_R2, 3, pts);
+		for (i = 0; i < n; i++) qaws_mean_value_get_handle(&hv[i], m, i);
+		qaws_region_sampler_generate(pts, rs, 30, QAWS_REGION_SAMPLE_R2, 3);
 		/* unmoved */
-		qaws_mean_value_deform(m, hv, pts, 30, out);
+		qaws_mean_value_deform(out, m, hv, pts, 30);
 		for (k = 0; k < 30; k++) if (hypot(out[k].x - pts[k].x, out[k].y - pts[k].y) > we) we = hypot(out[k].x - pts[k].x, out[k].y - pts[k].y);
 		/* translated */
 		for (i = 0; i < n; i++) { moved[i].x = hv[i].x + (qaws_scalar)0.7; moved[i].y = hv[i].y - (qaws_scalar)0.2; }
-		qaws_mean_value_deform(m, moved, pts, 30, out);
+		qaws_mean_value_deform(out, m, moved, pts, 30);
 		for (k = 0; k < 30; k++) { double d = hypot(out[k].x - pts[k].x - 0.7, out[k].y - pts[k].y + 0.2); if (d > wt) wt = d; }
 		/* affine */
 		for (i = 0; i < n; i++)
@@ -613,7 +613,7 @@ static void test_deform(void)
 			moved[i].x = (qaws_scalar)(1.2 * hv[i].x - 0.4 * hv[i].y + 0.1);
 			moved[i].y = (qaws_scalar)(0.3 * hv[i].x + 0.9 * hv[i].y - 0.3);
 		}
-		qaws_mean_value_deform(m, moved, pts, 30, out);
+		qaws_mean_value_deform(out, m, moved, pts, 30);
 		for (k = 0; k < 30; k++)
 		{
 			double ex = 1.2 * pts[k].x - 0.4 * pts[k].y + 0.1, ey = 0.3 * pts[k].x + 0.9 * pts[k].y - 0.3, d = hypot(out[k].x - ex, out[k].y - ey);
@@ -633,13 +633,13 @@ static void test_deform(void)
 			moved[i].x = (qaws_scalar)(hv[i].x + 0.2 * hv[i].y * hv[i].y);
 			moved[i].y = (qaws_scalar)(hv[i].y + 0.1 * sin(2 * hv[i].x));
 		}
-		qaws_mean_value_deform(m, moved, pts, 30, out);
+		qaws_mean_value_deform(out, m, moved, pts, 30);
 		memset(&d, 0, sizeof(d));
 		d.paths = p; d.path_count = np;
 		ex.parallel_for = mvt_backwards; ex.user = NULL;
 		d.executor = &ex;
-		qaws_mean_value_create(&d, &me);
-		if (me) qaws_mean_value_deform(me, moved, pts, 30, out2);
+		qaws_mean_value_create(&me, &d);
+		if (me) qaws_mean_value_deform(out2, me, moved, pts, 30);
 		for (k = 0; k < 30 && me; k++) if (hypot(out[k].x - out2[k].x, out[k].y - out2[k].y) > wx) wx = hypot(out[k].x - out2[k].x, out[k].y - out2[k].y);
 		sprintf(msg, "a bend through an executor (chunks backwards): the serial points within %.2g", wx);
 		TEST_ASSERT(me && wx == 0, msg);

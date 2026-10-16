@@ -467,8 +467,8 @@ static double sg_chord_length(sg_ctx const* c, double const* a, double const* b)
 /*  The API                                                                 */
 /* ------------------------------------------------------------------------ */
 
-qaws_status qaws_surface_get_metric(qaws_surface const* surface, qaws_scalar u, qaws_scalar v,
-	qaws_scalar* out_g, qaws_scalar* out_christoffel)
+qaws_status qaws_surface_get_metric(qaws_scalar* out_g, qaws_scalar* out_christoffel, qaws_surface const* surface,
+	qaws_scalar u, qaws_scalar v)
 {
 	sg_ctx c;
 	double g[3], gam[6];
@@ -486,8 +486,8 @@ qaws_status qaws_surface_get_metric(qaws_surface const* surface, qaws_scalar u, 
 	return QAWS_STATUS_OK;
 }
 
-qaws_status qaws_surface_exp(qaws_surface const* surface, qaws_vec2 p, qaws_vec2 direction, qaws_scalar length,
-	qaws_scalar tolerance, qaws_vec2* out_point, qaws_vec2* out_velocity)
+qaws_status qaws_surface_exp(qaws_vec2* out_point, qaws_vec2* out_velocity, qaws_surface const* surface, qaws_vec2 p,
+	qaws_vec2 direction, qaws_scalar length, qaws_scalar tolerance)
 {
 	sg_ctx c;
 	double y[4], d[2], un[2];
@@ -507,8 +507,8 @@ qaws_status qaws_surface_exp(qaws_surface const* surface, qaws_vec2 p, qaws_vec2
 	return QAWS_STATUS_OK;
 }
 
-qaws_status qaws_surface_curve_create_uv(qaws_surface const* surface, qaws_curve const* uv_curve,
-	qaws_surface_curve** out_curve)
+qaws_status qaws_surface_curve_create_uv(qaws_surface_curve** out_curve, qaws_surface const* surface,
+	qaws_curve const* uv_curve)
 {
 	qaws_surface_curve* c;
 	qaws_range rg;
@@ -538,8 +538,8 @@ qaws_status qaws_surface_curve_create_uv(qaws_surface const* surface, qaws_curve
 	return QAWS_STATUS_OK;
 }
 
-qaws_status qaws_surface_curve_create_geodesic_ray(qaws_surface const* surface, qaws_vec2 p, qaws_vec2 direction,
-	qaws_scalar length, qaws_scalar tolerance, qaws_surface_curve** out_curve)
+qaws_status qaws_surface_curve_create_geodesic_ray(qaws_surface_curve** out_curve, qaws_surface const* surface, qaws_vec2 p,
+	qaws_vec2 direction, qaws_scalar length, qaws_scalar tolerance)
 {
 	sg_ctx ctx;
 	qaws_surface_curve* c;
@@ -576,8 +576,8 @@ qaws_status qaws_surface_curve_create_geodesic_ray(qaws_surface const* surface, 
 	return QAWS_STATUS_OK;
 }
 
-qaws_status qaws_surface_curve_create_geodesic(qaws_surface const* surface, qaws_vec2 a, qaws_vec2 b,
-	qaws_scalar tolerance, qaws_surface_curve** out_curve)
+qaws_status qaws_surface_curve_create_geodesic(qaws_surface_curve** out_curve, qaws_surface const* surface, qaws_vec2 a,
+	qaws_vec2 b, qaws_scalar tolerance)
 {
 	sg_ctx ctx;
 	double pa[2], pb[2], d[2], th, L;
@@ -625,7 +625,7 @@ qaws_status qaws_surface_curve_create_geodesic(qaws_surface const* surface, qaws
 		qaws_surface_curve* c = NULL;
 		sg_dir(&ctx, pa[0], pa[1], th, dd);
 		dir.x = (qaws_scalar)dd[0]; dir.y = (qaws_scalar)dd[1];
-		st = qaws_surface_curve_create_geodesic_ray(surface, a, dir, (qaws_scalar)L, tolerance, &c);
+		st = qaws_surface_curve_create_geodesic_ray(&c, surface, a, dir, (qaws_scalar)L, tolerance);
 		if (st != QAWS_STATUS_OK)
 			return st;
 		/* the end exactly on b */
@@ -727,8 +727,8 @@ static qaws_status sg_ray(sg_ctx const* c, double const* c0, int pole, double a,
 	}
 }
 
-qaws_status qaws_surface_curve_create_geodesic_arc(qaws_surface const* surface, qaws_vec2 centre, qaws_scalar radius,
-	qaws_scalar angle0, qaws_scalar angle1, qaws_scalar tolerance, qaws_surface_curve** out_curve)
+qaws_status qaws_surface_curve_create_geodesic_arc(qaws_surface_curve** out_curve, qaws_surface const* surface, qaws_vec2 centre,
+	qaws_scalar radius, qaws_scalar angle0, qaws_scalar angle1, qaws_scalar tolerance)
 {
 	sg_ctx ctx;
 	double c0[2], r = (double)radius, a0 = (double)angle0, a1 = (double)angle1, sweep;
@@ -862,7 +862,7 @@ qaws_curve const* qaws_surface_curve_get_uv(qaws_surface_curve const* curve)
 	return curve ? curve->uv : NULL;
 }
 
-qaws_status qaws_surface_curve_get_length(qaws_surface_curve const* curve, qaws_scalar* out_length)
+qaws_status qaws_surface_curve_get_length(qaws_scalar* out_length, qaws_surface_curve const* curve)
 {
 	if (!curve || !out_length)
 		return QAWS_STATUS_INVALID_ARGUMENT;
@@ -899,8 +899,8 @@ qaws_status qaws_surface_curve_get_length(qaws_surface_curve const* curve, qaws_
 	}
 }
 
-qaws_status qaws_surface_curve_evaluate(qaws_surface_curve const* curve, qaws_scalar t, qaws_vec2* out_uv,
-	qaws_vec3* out_point)
+qaws_status qaws_surface_curve_evaluate(qaws_vec2* out_uv, qaws_vec3* out_point, qaws_surface_curve const* curve,
+	qaws_scalar t)
 {
 	qaws_eval_result_2d e;
 	qaws_status st;
@@ -1098,8 +1098,8 @@ qaws_status qaws_internal_sg_offset(qaws_internal_sg_ctx const* c, qaws_curve co
 	return QAWS_STATUS_OK;
 }
 
-qaws_status qaws_surface_curve_create_offset(qaws_surface_curve const* base, qaws_scalar distance, qaws_scalar tolerance,
-	qaws_surface_curve** out_curve)
+qaws_status qaws_surface_curve_create_offset(qaws_surface_curve** out_curve, qaws_surface_curve const* base, qaws_scalar distance,
+	qaws_scalar tolerance)
 {
 	qaws_surface_curve* c;
 	qaws_status st;

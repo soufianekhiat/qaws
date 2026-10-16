@@ -58,7 +58,7 @@ static void s27_float_2d(svg* s, viewport const* v, qaws_surface const* f, doubl
 	{
 		qaws_vec2 q, p, d;
 		p.x = (qaws_scalar)g[0]; p.y = (qaws_scalar)g[1]; d.x = (qaws_scalar)g[2]; d.y = (qaws_scalar)g[3];
-		qaws_surface_exp(f, p, d, (qaws_scalar)(ta + (tb - ta) * i / N), 0, &q, NULL);
+		qaws_surface_exp(&q, NULL, f, p, d, (qaws_scalar)(ta + (tb - ta) * i / N), 0);
 		if (q.x < v->xmin || q.x > v->xmax || q.y < v->ymin || q.y > v->ymax)
 		{
 			if (n > 1) svg_polyline(s, xy, n, color, 1.6, 0.9, 0);
@@ -80,7 +80,7 @@ static unsigned int s27_steps_2d(svg* s, viewport const* v, qaws_geodesic_enclos
 	{
 		qaws_vec2 lo, hi;
 		qaws_scalar t0, t1;
-		qaws_geodesic_enclosure_get_step(e, i, &t0, &t1, &lo, &hi);
+		qaws_geodesic_enclosure_get_step(&t0, &t1, &lo, &hi, e, i);
 		if (hi.x < v->xmin || lo.x > v->xmax || hi.y < v->ymin || lo.y > v->ymax)
 			continue;
 		s27_box_2d(s, v, lo.x, lo.y, hi.x, hi.y, color, 0.7);
@@ -115,11 +115,11 @@ static void demo_geodesic_enclosure(void)
 	{
 		qaws_vec2 p, d;
 		p.x = (qaws_scalar)G[k][0]; p.y = (qaws_scalar)G[k][1]; d.x = (qaws_scalar)G[k][2]; d.y = (qaws_scalar)G[k][3];
-		if (qaws_surface_geodesic_enclose(f[0], p, d, (qaws_scalar)G[k][4], 0, &e[k]) == QAWS_STATUS_OK)
+		if (qaws_surface_geodesic_enclose(&e[k], f[0], 0, p, d, (qaws_scalar)G[k][4]) == QAWS_STATUS_OK)
 			steps += qaws_geodesic_enclosure_get_step_count(e[k]);
 	}
-	if (e[0] && e[1]) x01 = qaws_geodesic_enclosure_cross(e[0], e[1], 1, &clo[0], &chi[0], &n01);
-	if (e[0] && e[2]) x02 = qaws_geodesic_enclosure_cross(e[0], e[2], 1, &clo[1], &chi[1], &n02);
+	if (e[0] && e[1]) x01 = qaws_geodesic_enclosure_cross(&clo[0], &chi[0], &n01, e[0], e[1], 1);
+	if (e[0] && e[2]) x02 = qaws_geodesic_enclosure_cross(&clo[1], &chi[1], &n02, e[0], e[2], 1);
 	/* the bump: the geodesics, every 40th step box, the crossing */
 	{
 		viewport v3;
@@ -139,13 +139,13 @@ static void demo_geodesic_enclosure(void)
 			qaws_surface_curve* c = NULL;
 			qaws_vec2 p, d;
 			p.x = (qaws_scalar)G[k][0]; p.y = (qaws_scalar)G[k][1]; d.x = (qaws_scalar)G[k][2]; d.y = (qaws_scalar)G[k][3];
-			if (qaws_surface_curve_create_geodesic_ray(f[0], p, d, (qaws_scalar)G[k][4], 0, &c) == QAWS_STATUS_OK)
+			if (qaws_surface_curve_create_geodesic_ray(&c, f[0], p, d, (qaws_scalar)G[k][4], 0) == QAWS_STATUS_OK)
 				ssd_curve_line(&sc, f[0], qaws_surface_curve_get_uv(c), col[k], 1.6);
 			qaws_surface_curve_destroy(c);
 			for (i = 0; e[k] && i < qaws_geodesic_enclosure_get_step_count(e[k]); i += 40)
 			{
 				qaws_vec2 lo, hi;
-				qaws_geodesic_enclosure_get_step(e[k], i, NULL, NULL, &lo, &hi);
+				qaws_geodesic_enclosure_get_step(NULL, NULL, &lo, &hi, e[k], i);
 				s27_box_3d(&sc, f[0], lo, hi, col[k]);
 			}
 			ssd_dot(&sc, f[0], G[k][0], G[k][1], col[k], 3.2);
@@ -180,8 +180,8 @@ static void demo_geodesic_enclosure(void)
 		qaws_vec2 lo, hi, q, p, d;
 		double cu, cv, r;
 		p.x = (qaws_scalar)G[0][0]; p.y = (qaws_scalar)G[0][1]; d.x = (qaws_scalar)G[0][2]; d.y = (qaws_scalar)G[0][3];
-		qaws_geodesic_enclosure_get_end(e[0], &lo, &hi, NULL, NULL);
-		qaws_surface_exp(f[0], p, d, (qaws_scalar)G[0][4], (qaws_scalar)1e-12, &q, NULL);
+		qaws_geodesic_enclosure_get_end(&lo, &hi, NULL, NULL, e[0]);
+		qaws_surface_exp(&q, NULL, f[0], p, d, (qaws_scalar)G[0][4], (qaws_scalar)1e-12);
 		cu = 0.5 * (lo.x + hi.x); cv = 0.5 * (lo.y + hi.y); r = 1.5 * fmax(hi.x - lo.x, hi.y - lo.y);
 		v2.x0 = 24 + 2 * (pw + 12); v2.y0 = 104; v2.w = pw; v2.h = ph;
 		v2.xmin = cu - r; v2.xmax = cu + r; v2.ymin = cv - r; v2.ymax = cv + r;

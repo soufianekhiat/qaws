@@ -9,16 +9,16 @@ qaws_region_sampler_desc d = { paths, path_count, QAWS_FILL_NON_ZERO, 0 };
 d.density = rho; d.density_user = user;                 /* optional: importance sampling */
 d.executor = &executor;                                 /* optional: parallel table and points */
 qaws_region_sampler* s;
-qaws_region_sampler_create(&d, &s);
+qaws_region_sampler_create(&s, &d);
 
 qaws_region_sampler_get_area(s);
 qaws_region_sampler_get_mass(s);                        /* the density's integral (the area without one) */
-qaws_region_sampler_area_left(s, x, &a);            /* A(x): the area left of x */
-qaws_region_sampler_contains(s, p, &inside);         /* the slabs' winding below p */
-qaws_region_sampler_map(s, u, v, &p);               /* the unit square onto the region */
-qaws_region_sampler_map_many(s, uv, n, points);
-qaws_region_sampler_generate(s, n, QAWS_REGION_SAMPLE_BLUE_NOISE, seed, points);
-qaws_region_sampler_generate(s, n, QAWS_REGION_SAMPLE_SOBOL | QAWS_REGION_SAMPLE_BOX, seed, points);
+qaws_region_sampler_area_left(&a, s, x);            /* A(x): the area left of x */
+qaws_region_sampler_contains(&inside, s, p);         /* the slabs' winding below p */
+qaws_region_sampler_map(&p, s, u, v);               /* the unit square onto the region */
+qaws_region_sampler_map_many(points, s, uv, n);
+qaws_region_sampler_generate(points, s, n, QAWS_REGION_SAMPLE_BLUE_NOISE, seed);
+qaws_region_sampler_generate(points, s, n, QAWS_REGION_SAMPLE_SOBOL | QAWS_REGION_SAMPLE_BOX, seed);
 /* kinds: RANDOM, SOBOL, STRATIFIED, HALTON, R2 (through the map, or | BOX), BLUE_NOISE */
 qaws_region_sampler_destroy(s);
 ```
