@@ -73,15 +73,15 @@ static void test_loft_two_sections(void)
 		desc.sections = sections;
 		desc.section_count = 2;
 		desc.v_parameters = NULL; /* uniform */
-		s = qaws_surface_create_loft(&desc, &surf);
+		s = qaws_surface_create_loft(&surf, &desc);
 	}
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(surf != NULL, "loft 2-section surface created");
 
 	/* eval(0,0) ~ (0,0,0) */
 	memset(&r, 0, sizeof(r));
-	s = qaws_surface_evaluate(surf, 0, 0,
-		QAWS_SURFACE_EVAL_POSITION, &r);
+	s = qaws_surface_evaluate(&r, surf, 0,
+		0, QAWS_SURFACE_EVAL_POSITION);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(fabs(r.position.x) < TOLERANCE_LOOSE, "loft2 (0,0) x");
 	TEST_ASSERT(fabs(r.position.y) < TOLERANCE_LOOSE, "loft2 (0,0) y");
@@ -89,8 +89,8 @@ static void test_loft_two_sections(void)
 
 	/* eval(0,1) ~ (0,3,2) */
 	memset(&r, 0, sizeof(r));
-	s = qaws_surface_evaluate(surf, 0, 1,
-		QAWS_SURFACE_EVAL_POSITION, &r);
+	s = qaws_surface_evaluate(&r, surf, 0,
+		1, QAWS_SURFACE_EVAL_POSITION);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(fabs(r.position.x) < TOLERANCE_LOOSE, "loft2 (0,1) x");
 	TEST_ASSERT(approx_eq_loose(r.position.y, (qaws_scalar)3.0), "loft2 (0,1) y");
@@ -98,8 +98,8 @@ static void test_loft_two_sections(void)
 
 	/* eval(0.5, 0.5) ~ (2, 1.5, 1) midpoint */
 	memset(&r, 0, sizeof(r));
-	s = qaws_surface_evaluate(surf, (qaws_scalar)0.5, (qaws_scalar)0.5,
-		QAWS_SURFACE_EVAL_POSITION, &r);
+	s = qaws_surface_evaluate(&r, surf, (qaws_scalar)0.5,
+		(qaws_scalar)0.5, QAWS_SURFACE_EVAL_POSITION);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(approx_eq_loose(r.position.x, (qaws_scalar)2.0), "loft2 mid x");
 	TEST_ASSERT(approx_eq_loose(r.position.y, (qaws_scalar)1.5), "loft2 mid y");
@@ -165,15 +165,15 @@ static void test_loft_four_sections(void)
 		desc.sections = sections;
 		desc.section_count = 4;
 		desc.v_parameters = v_params;
-		s = qaws_surface_create_loft(&desc, &surf);
+		s = qaws_surface_create_loft(&surf, &desc);
 	}
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(surf != NULL, "loft 4-section surface created");
 
 	/* Corner (0,0) ~ (0,0,0) */
 	memset(&r, 0, sizeof(r));
-	s = qaws_surface_evaluate(surf, 0, 0,
-		QAWS_SURFACE_EVAL_POSITION, &r);
+	s = qaws_surface_evaluate(&r, surf, 0,
+		0, QAWS_SURFACE_EVAL_POSITION);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(fabs(r.position.x) < TOLERANCE_LOOSE, "loft4 (0,0) x");
 	TEST_ASSERT(fabs(r.position.y) < TOLERANCE_LOOSE, "loft4 (0,0) y");
@@ -181,8 +181,8 @@ static void test_loft_four_sections(void)
 
 	/* Corner (1,1) ~ (4,3,0) */
 	memset(&r, 0, sizeof(r));
-	s = qaws_surface_evaluate(surf, 1, 1,
-		QAWS_SURFACE_EVAL_POSITION, &r);
+	s = qaws_surface_evaluate(&r, surf, 1,
+		1, QAWS_SURFACE_EVAL_POSITION);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(approx_eq_loose(r.position.x, (qaws_scalar)4.0), "loft4 (1,1) x");
 	TEST_ASSERT(approx_eq_loose(r.position.y, (qaws_scalar)3.0), "loft4 (1,1) y");
@@ -190,8 +190,8 @@ static void test_loft_four_sections(void)
 
 	/* Center should have a raised z due to middle sections */
 	memset(&r, 0, sizeof(r));
-	s = qaws_surface_evaluate(surf, (qaws_scalar)0.5, (qaws_scalar)0.5,
-		QAWS_SURFACE_EVAL_POSITION, &r);
+	s = qaws_surface_evaluate(&r, surf, (qaws_scalar)0.5,
+		(qaws_scalar)0.5, QAWS_SURFACE_EVAL_POSITION);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(r.position.z > (qaws_scalar)0.1, "loft4 center raised in z");
 
@@ -257,7 +257,7 @@ static void visual_obj_loft(void)
 		desc.sections = sections;
 		desc.section_count = 4;
 		desc.v_parameters = v_params;
-		qaws_surface_create_loft(&desc, &surf);
+		qaws_surface_create_loft(&surf, &desc);
 	}
 	if (!surf) goto cleanup_loft;
 

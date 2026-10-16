@@ -803,28 +803,28 @@ static void obj_surface_mesh(
 		memset(&rv0, 0, sizeof(rv0));
 		memset(&rv1, 0, sizeof(rv1));
 
-		qaws_surface_evaluate(surf,
+		qaws_surface_evaluate(&rc,
+			surf,
 			u_min + u_len * (qaws_scalar)0.5,
-			v_min + v_len * (qaws_scalar)0.5,
-			QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL, &rc);
-		qaws_surface_evaluate(surf, u_min, v_min,
-			QAWS_SURFACE_EVAL_POSITION, &r00);
-		qaws_surface_evaluate(surf, u_min + u_len, v_min,
-			QAWS_SURFACE_EVAL_POSITION, &r10);
-		qaws_surface_evaluate(surf, u_min, v_min + v_len,
-			QAWS_SURFACE_EVAL_POSITION, &r01);
-		qaws_surface_evaluate(surf, u_min + u_len, v_min + v_len,
-			QAWS_SURFACE_EVAL_POSITION, &r11);
+			v_min + v_len * (qaws_scalar)0.5, QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL);
+		qaws_surface_evaluate(&r00, surf, u_min,
+			v_min, QAWS_SURFACE_EVAL_POSITION);
+		qaws_surface_evaluate(&r10, surf, u_min + u_len,
+			v_min, QAWS_SURFACE_EVAL_POSITION);
+		qaws_surface_evaluate(&r01, surf, u_min,
+			v_min + v_len, QAWS_SURFACE_EVAL_POSITION);
+		qaws_surface_evaluate(&r11, surf, u_min + u_len,
+			v_min + v_len, QAWS_SURFACE_EVAL_POSITION);
 
 		/* Heuristic 1: V-closure detection.
 		   If S(u_mid, v_min) ~ S(u_mid, v_max), the surface wraps
 		   around in v (pipe, swept). For these, du x dv points inward. */
-		qaws_surface_evaluate(surf,
-			u_min + u_len * (qaws_scalar)0.5, v_min,
-			QAWS_SURFACE_EVAL_POSITION, &rv0);
-		qaws_surface_evaluate(surf,
-			u_min + u_len * (qaws_scalar)0.5, v_min + v_len,
-			QAWS_SURFACE_EVAL_POSITION, &rv1);
+		qaws_surface_evaluate(&rv0,
+			surf, u_min + u_len * (qaws_scalar)0.5,
+			v_min, QAWS_SURFACE_EVAL_POSITION);
+		qaws_surface_evaluate(&rv1,
+			surf, u_min + u_len * (qaws_scalar)0.5,
+			v_min + v_len, QAWS_SURFACE_EVAL_POSITION);
 
 		dx = rv1.position.x - rv0.position.x;
 		dy = rv1.position.y - rv0.position.y;
@@ -871,8 +871,8 @@ static void obj_surface_mesh(
 			qaws_scalar v = v_min + v_len * (qaws_scalar)vi / (qaws_scalar)(v_samples - 1);
 			qaws_surface_eval_result r;
 			memset(&r, 0, sizeof(r));
-			qaws_surface_evaluate(surf, u, v,
-				QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL, &r);
+			qaws_surface_evaluate(&r, surf, u,
+				v, QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL);
 			obj_vertex(w, r.position);
 			if (flip)
 			{
@@ -997,25 +997,25 @@ static void obj_surface_mesh_curvature(
 		memset(&rv0, 0, sizeof(rv0));
 		memset(&rv1, 0, sizeof(rv1));
 
-		qaws_surface_evaluate(surf,
+		qaws_surface_evaluate(&rc,
+			surf,
 			u_min + u_len * (qaws_scalar)0.5,
-			v_min + v_len * (qaws_scalar)0.5,
-			QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL, &rc);
-		qaws_surface_evaluate(surf, u_min, v_min,
-			QAWS_SURFACE_EVAL_POSITION, &r00);
-		qaws_surface_evaluate(surf, u_min + u_len, v_min,
-			QAWS_SURFACE_EVAL_POSITION, &r10);
-		qaws_surface_evaluate(surf, u_min, v_min + v_len,
-			QAWS_SURFACE_EVAL_POSITION, &r01);
-		qaws_surface_evaluate(surf, u_min + u_len, v_min + v_len,
-			QAWS_SURFACE_EVAL_POSITION, &r11);
+			v_min + v_len * (qaws_scalar)0.5, QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL);
+		qaws_surface_evaluate(&r00, surf, u_min,
+			v_min, QAWS_SURFACE_EVAL_POSITION);
+		qaws_surface_evaluate(&r10, surf, u_min + u_len,
+			v_min, QAWS_SURFACE_EVAL_POSITION);
+		qaws_surface_evaluate(&r01, surf, u_min,
+			v_min + v_len, QAWS_SURFACE_EVAL_POSITION);
+		qaws_surface_evaluate(&r11, surf, u_min + u_len,
+			v_min + v_len, QAWS_SURFACE_EVAL_POSITION);
 
-		qaws_surface_evaluate(surf,
-			u_min + u_len * (qaws_scalar)0.5, v_min,
-			QAWS_SURFACE_EVAL_POSITION, &rv0);
-		qaws_surface_evaluate(surf,
-			u_min + u_len * (qaws_scalar)0.5, v_min + v_len,
-			QAWS_SURFACE_EVAL_POSITION, &rv1);
+		qaws_surface_evaluate(&rv0,
+			surf, u_min + u_len * (qaws_scalar)0.5,
+			v_min, QAWS_SURFACE_EVAL_POSITION);
+		qaws_surface_evaluate(&rv1,
+			surf, u_min + u_len * (qaws_scalar)0.5,
+			v_min + v_len, QAWS_SURFACE_EVAL_POSITION);
 
 		dx = rv1.position.x - rv0.position.x;
 		dy = rv1.position.y - rv0.position.y;
@@ -1060,8 +1060,8 @@ static void obj_surface_mesh_curvature(
 			double cr, cg, cb, t;
 
 			memset(&r, 0, sizeof(r));
-			qaws_surface_evaluate(surf, u, v,
-				QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL, &r);
+			qaws_surface_evaluate(&r, surf, u,
+				v, QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL);
 
 			t = (double)kappa[idx] / (double)max_abs_k;
 			curvature_color(t, &cr, &cg, &cb);

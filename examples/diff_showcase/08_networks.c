@@ -91,7 +91,7 @@ static void demo_networks(void)
 	gd.v_curves = vc;
 	gd.v_curve_count = 3;
 	gd.u_params = params;
-	qaws_surface_create_gordon(&gd, &gordon);
+	qaws_surface_create_gordon(&gordon, &gd);
 
 	svg_open(&s, "showcase/8_networks.svg", 1200, 600, "Curve networks: Gordon affects / loft affected by",
 		"Left: tangent of one control point of the middle v-curve -> |dS| over a Gordon surface. Right: adjoint of one loft point -> influence per section.");
@@ -158,7 +158,7 @@ static void demo_networks(void)
 		ld.sections = sp;
 		ld.section_count = 5;
 		ld.v_parameters = NULL;
-		qaws_surface_create_loft(&ld, &loft);
+		qaws_surface_create_loft(&loft, &ld);
 
 		memset(bars, 0, sizeof(bars));
 		for (i = 0; i < 5; i++)

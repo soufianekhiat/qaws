@@ -72,7 +72,7 @@ static void demo_repulsive_surface(void)
 		qaws_curve_create_arc(&profile, &ad);
 		memset(&rd, 0, sizeof(rd));
 		rd.profile = profile; rd.axis_direction.z = 1;
-		qaws_surface_create_revolution(&rd, &torus);
+		qaws_surface_create_revolution(&torus, &rd);
 		ru = qaws_surface_get_u_range(torus); rv = qaws_surface_get_v_range(torus);
 		/* five small loops crowded near one spot, around the tube */
 		for (k = 0; k < K; k++)

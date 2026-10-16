@@ -35,7 +35,7 @@ static qaws_exact_surface* ssi_patch(double const* z, unsigned int deg, double x
 	d.control_points = cps;
 	d.u_point_count = deg + 1;
 	d.v_point_count = deg + 1;
-	qaws_surface_create_bezier(&d, &s);
+	qaws_surface_create_bezier(&s, &d);
 	qaws_exact_surface_prepare(NULL, s, &e, NULL);
 	qaws_surface_destroy(s);
 	return e;
@@ -81,7 +81,7 @@ static qaws_exact_surface* ssi_tube(double k, int along_x, double h)
 	d.u_knot_count = 10;
 	d.v_knots = kv;
 	d.v_knot_count = 4;
-	qaws_surface_create_nurbs(&d, &s);
+	qaws_surface_create_nurbs(&s, &d);
 	qaws_exact_surface_prepare(NULL, s, &e, NULL);
 	qaws_surface_destroy(s);
 	return e;

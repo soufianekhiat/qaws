@@ -49,7 +49,7 @@ static qaws_surface* ss_surface(int kind, qaws_scalar const* x)
 		d.control_points = (qaws_vec3 const*)x;
 		d.u_point_count = 4;
 		d.v_point_count = 4;
-		qaws_surface_create_bezier(&d, &s);
+		qaws_surface_create_bezier(&s, &d);
 	}
 	else
 	{
@@ -65,7 +65,7 @@ static qaws_surface* ss_surface(int kind, qaws_scalar const* x)
 		d.u_knot_count = 8;
 		d.v_knots = g_ss_knots;
 		d.v_knot_count = 8;
-		qaws_surface_create_nurbs(&d, &s);
+		qaws_surface_create_nurbs(&s, &d);
 	}
 	return s;
 }
@@ -178,7 +178,7 @@ static void test_cylinder(void)
 	d.u_point_count = 3;
 	d.v_point_count = 3;
 	d.weights = w;
-	TEST_ASSERT_STATUS(qaws_surface_create_nurbs(&d, &s));
+	TEST_ASSERT_STATUS(qaws_surface_create_nurbs(&s, &d));
 	TEST_ASSERT(qaws_surface_cdf_sample_tangent(out, NULL, NULL, &total, s, g_ss_xi, NULL, NULL, SS_SAMPLES, &g_ss_curvature, 8, 8,
 		NULL) == QAWS_STATUS_OK, "quarter cylinder: curvature samples");
 	{
@@ -264,7 +264,7 @@ static qaws_surface* sk_surface(qaws_scalar const* cps, double s)
 	d.u_knot_count = 9;
 	d.v_knots = vk;
 	d.v_knot_count = 9;
-	qaws_surface_create_bspline(&d, &srf);
+	qaws_surface_create_bspline(&srf, &d);
 	return srf;
 }
 

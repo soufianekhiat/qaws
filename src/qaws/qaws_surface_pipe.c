@@ -366,8 +366,8 @@ static qaws_surface_vtable const pipe_surface_vtable = {
 };
 
 qaws_status qaws_surface_create_pipe(
-	qaws_surface_pipe_desc const* desc,
-	qaws_surface** out_surface)
+	qaws_surface** out_surface,
+	qaws_surface_pipe_desc const* desc)
 {
 	qaws_surface* surface;
 	qaws_surface_pipe_impl* impl;

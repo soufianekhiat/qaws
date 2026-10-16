@@ -21,7 +21,7 @@ static qaws_surface* s27_bump(void)
 		}
 	memset(&d, 0, sizeof(d));
 	d.u_degree = 3; d.v_degree = 3; d.control_points = cp; d.u_point_count = 6; d.v_point_count = 6;
-	qaws_surface_create_bspline(&d, &s);
+	qaws_surface_create_bspline(&s, &d);
 	return s;
 }
 

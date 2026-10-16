@@ -279,8 +279,8 @@ static qaws_surface_vtable const tspline_surface_vtable = {
 };
 
 qaws_status qaws_surface_create_tspline(
-	qaws_surface_tspline_desc const* desc,
-	qaws_surface** out_surface)
+	qaws_surface** out_surface,
+	qaws_surface_tspline_desc const* desc)
 {
 	qaws_surface* surface;
 	qaws_surface_tspline_impl* impl;

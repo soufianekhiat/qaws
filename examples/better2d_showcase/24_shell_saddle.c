@@ -47,7 +47,7 @@ static void ssd_fan(qaws_surface** f, double const (*d)[3], unsigned int n, doub
 			memset(&bd, 0, sizeof(bd));
 			bd.u_degree = 3; bd.v_degree = 3; bd.control_points = cp; bd.u_point_count = 4; bd.v_point_count = 4;
 			f[i] = NULL;
-			qaws_surface_create_bezier(&bd, &f[i]);
+			qaws_surface_create_bezier(&f[i], &bd);
 		}
 	}
 }
@@ -130,7 +130,7 @@ static void ssd_eval(qaws_surface const* f, double u, double v, unsigned int fla
 	double lu = ru.max_value - ru.min_value, lv = rv.max_value - rv.min_value;
 	if (lu > 0 && (u < ru.min_value - 1e-9 * lu || u > ru.max_value + 1e-9 * lu)) u -= lu * floor((u - ru.min_value) / lu);
 	if (lv > 0 && (v < rv.min_value - 1e-9 * lv || v > rv.max_value + 1e-9 * lv)) v -= lv * floor((v - rv.min_value) / lv);
-	qaws_surface_evaluate(f, (qaws_scalar)u, (qaws_scalar)v, flags, r);
+	qaws_surface_evaluate(r, f, (qaws_scalar)u, (qaws_scalar)v, flags);
 }
 
 /* a region painted on a face: its colour where the face is inside it */

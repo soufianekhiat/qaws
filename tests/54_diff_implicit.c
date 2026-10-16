@@ -175,7 +175,7 @@ static qaws_surface* imp_surface(qaws_scalar const* cps, qaws_scalar const* w)
 	d.u_knot_count = 8;
 	d.v_knots = g_imp_sknots;
 	d.v_knot_count = 8;
-	qaws_surface_create_nurbs(&d, &s);
+	qaws_surface_create_nurbs(&s, &d);
 	return s;
 }
 

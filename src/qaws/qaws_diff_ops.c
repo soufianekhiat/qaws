@@ -398,8 +398,8 @@ static qaws_status surface_solve(qaws_surface const* surface, qaws_vec3 q, surfa
 		{
 			qaws_surface_eval_result e;
 			qaws_vec3 r;
-			qaws_surface_evaluate(surface, ur.min_value + du * (qaws_scalar)i, vr.min_value + dv * (qaws_scalar)j,
-				QAWS_SURFACE_EVAL_POSITION, &e);
+			qaws_surface_evaluate(&e, surface, ur.min_value + du * (qaws_scalar)i,
+				vr.min_value + dv * (qaws_scalar)j, QAWS_SURFACE_EVAL_POSITION);
 			r = qaws_v3_sub(e.position, q);
 			d[i][j] = QAWS_SQRT(qaws_v3_dot(r, r));
 			if (d[i][j] < d[bi][bj])

@@ -64,7 +64,7 @@ static void demo_mitered_certified(void)
 			for (i = 0; i < 16; i++) { cp[i].x = (qaws_scalar)((i / 4) / 3.0 * 2); cp[i].y = (qaws_scalar)((i % 4) / 3.0 * 2); cp[i].z = (qaws_scalar)z[i]; }
 			memset(&bd, 0, sizeof(bd));
 			bd.u_degree = 3; bd.v_degree = 3; bd.control_points = cp; bd.u_point_count = 4; bd.v_point_count = 4;
-			qaws_surface_create_bezier(&bd, &surf);
+			qaws_surface_create_bezier(&surf, &bd);
 			for (i = 0; i < 6; i++) { cv[i] = ssf_line(surf, L[i][0], L[i][1], L[(i + 1) % 6][0], L[(i + 1) % 6][1], &keep[i]); pc[i] = cv[i]; }
 			ncv = 6;
 			ssf_path(&Q, pc, 6);
@@ -184,7 +184,7 @@ static void demo_mitered_certified(void)
 						{
 							qaws_surface_eval_result e;
 							double sx, sy;
-							qaws_surface_evaluate(surf, x[q].point.x, x[q].point.y, QAWS_SURFACE_EVAL_POSITION, &e);
+							qaws_surface_evaluate(&e, surf, x[q].point.x, x[q].point.y, QAWS_SURFACE_EVAL_POSITION);
 							sgf_project(&view, e.position, &sx, &sy, NULL);
 							fprintf(s.f, "<circle cx=\"%.2f\" cy=\"%.2f\" r=\"3.5\" fill=\"#1b1f24\"/>\n", sx, sy);
 							fprintf(s.f, "<circle cx=\"%.2f\" cy=\"%.2f\" r=\"3\" fill=\"#1b1f24\"/>\n", vx(&vuv, x[q].point.x), vy(&vuv, x[q].point.y));

@@ -967,7 +967,7 @@ qaws_status qaws_surface_region_create_trimmed(qaws_surface_region const* region
 		d.base = region->s;
 		d.loops = loops;
 		d.loop_count = np;
-		st = qaws_surface_create_trimmed(&d, out_surface);
+		st = qaws_surface_create_trimmed(out_surface, &d);
 	}
 	free(loops);
 	return st;

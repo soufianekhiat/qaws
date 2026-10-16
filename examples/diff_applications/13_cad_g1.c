@@ -40,7 +40,7 @@ static void cg_edge_uv(int e, double s, double* u, double* v)
 static void cg_eval(qaws_surface const* srf, double u, double v, double* p)
 {
 	qaws_surface_eval_result r;
-	qaws_surface_evaluate(srf, (qaws_scalar)u, (qaws_scalar)v, QAWS_SURFACE_EVAL_POSITION, &r);
+	qaws_surface_evaluate(&r, srf, (qaws_scalar)u, (qaws_scalar)v, QAWS_SURFACE_EVAL_POSITION);
 	p[0] = r.position.x;
 	p[1] = r.position.y;
 	p[2] = r.position.z;
@@ -356,13 +356,13 @@ static void cg_render_zebra(svg* s, view3 const* v, patch_fit const* pf, int gri
 					(qaws_scalar)((j + 1) / (double)grid), (qaws_scalar)((j + 1) / (double)grid) };
 				for (c = 0; c < 4; c++)
 				{
-					qaws_surface_evaluate(srf, uu[c], vv[c], QAWS_SURFACE_EVAL_POSITION, &r[c]);
+					qaws_surface_evaluate(&r[c], srf, uu[c], vv[c], QAWS_SURFACE_EVAL_POSITION);
 					p[0] = r[c].position.x; p[1] = r[c].position.y; p[2] = r[c].position.z;
 					view_xform(v, p, &polys[n].xy[2 * c], &polys[n].xy[2 * c + 1], &d);
 					dsum += d;
 				}
-				qaws_surface_evaluate(srf, (qaws_scalar)((i + 0.5) / grid), (qaws_scalar)((j + 0.5) / grid),
-					QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL, &mid);
+				qaws_surface_evaluate(&mid, srf, (qaws_scalar)((i + 0.5) / grid),
+					(qaws_scalar)((j + 0.5) / grid), QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL);
 				nn[0] = mid.normal.x; nn[1] = mid.normal.y; nn[2] = mid.normal.z;
 				if (nn[0] * mid.position.x + nn[1] * mid.position.y + nn[2] * mid.position.z < 0)
 				{

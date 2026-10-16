@@ -47,7 +47,7 @@ static void demo_surface(void)
 	d.u_knot_count = 11;
 	d.v_knots = knots;
 	d.v_knot_count = 11;
-	qaws_surface_create_nurbs(&d, &surf);
+	qaws_surface_create_nurbs(&surf, &d);
 	qaws_exact_desc_default(&desc);
 	qaws_exact_surface_prepare(&desc, surf, &es, &rep);
 	qaws_exact_surface_patch_count(es, &pu, &pv);
@@ -62,7 +62,7 @@ static void demo_surface(void)
 			int k = (int)(j * ES_N + i);
 			qaws_exact_surface_evaluate(es, u, v, 0, pos, nrm);
 			exact_map[k] = (signed char)(nrm[2] > 0 ? 1 : (nrm[2] < 0 ? -1 : 0));
-			qaws_surface_evaluate(surf, (qaws_scalar)u, (qaws_scalar)v, QAWS_SURFACE_EVAL_DU | QAWS_SURFACE_EVAL_DV, &r);
+			qaws_surface_evaluate(&r, surf, (qaws_scalar)u, (qaws_scalar)v, QAWS_SURFACE_EVAL_DU | QAWS_SURFACE_EVAL_DV);
 			nz = (double)r.du.x * r.dv.y - (double)r.du.y * r.dv.x;
 			f64_map[k] = (signed char)(nz > 0 ? 1 : (nz < 0 ? -1 : 0));
 			wrong_map[k] = (signed char)(f64_map[k] != exact_map[k] ? 1 : 0);

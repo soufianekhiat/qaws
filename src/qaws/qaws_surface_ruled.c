@@ -339,8 +339,8 @@ static qaws_surface_vtable const ruled_surface_vtable = {
 };
 
 qaws_status qaws_surface_create_ruled(
-	qaws_surface_ruled_desc const* desc,
-	qaws_surface** out_surface)
+	qaws_surface** out_surface,
+	qaws_surface_ruled_desc const* desc)
 {
 	qaws_surface* surface;
 	qaws_surface_ruled_impl* impl;

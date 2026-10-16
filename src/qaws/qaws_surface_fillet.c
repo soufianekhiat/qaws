@@ -366,13 +366,13 @@ static qaws_status build_fillet_grid(
 		/* Get normals from both surfaces */
 		{
 			qaws_status st;
-			st = qaws_surface_get_normal(surface_a, sp->u1, sp->v1, &normal_a);
+			st = qaws_surface_get_normal(&normal_a, surface_a, sp->u1, sp->v1);
 			if (st != QAWS_STATUS_OK)
 			{
 				/* Fallback: use (0,0,1) */
 				normal_a.x = 0; normal_a.y = 0; normal_a.z = 1;
 			}
-			st = qaws_surface_get_normal(surface_b, sp->u2, sp->v2, &normal_b);
+			st = qaws_surface_get_normal(&normal_b, surface_b, sp->u2, sp->v2);
 			if (st != QAWS_STATUS_OK)
 			{
 				normal_b.x = 0; normal_b.y = 0; normal_b.z = 1;
@@ -531,8 +531,8 @@ static qaws_status create_fillet_internal(
 	ssi_desc.max_march_steps = FILLET_SSI_MAX_STEPS;
 
 	status = qaws_surface_intersect(
-		&ssi_desc, ssi_curves, FILLET_SSI_MAX_CURVES, &curve_count,
-		point_buffer, FILLET_SSI_POINT_CAP);
+		ssi_curves, &curve_count, point_buffer, FILLET_SSI_MAX_CURVES,
+		FILLET_SSI_POINT_CAP, &ssi_desc);
 
 	if (status != QAWS_STATUS_OK || curve_count == 0)
 	{
@@ -600,17 +600,17 @@ static qaws_status create_fillet_internal(
 /* ------------------------------------------------------------------ */
 
 qaws_status qaws_surface_create_fillet(
-	qaws_surface_fillet_desc const* desc,
-	qaws_surface** out_surface)
+	qaws_surface** out_surface,
+	qaws_surface_fillet_desc const* desc)
 {
 	return create_fillet_internal(desc, out_surface, NULL, NULL);
 }
 
 qaws_status qaws_surface_create_fillet_with_trims(
-	qaws_surface_fillet_desc const* desc,
 	qaws_surface** out_fillet,
 	qaws_curve** out_trim_a,
-	qaws_curve** out_trim_b)
+	qaws_curve** out_trim_b,
+	qaws_surface_fillet_desc const* desc)
 {
 	qaws_scalar* trim_a_uv = NULL;
 	qaws_scalar* trim_b_uv = NULL;

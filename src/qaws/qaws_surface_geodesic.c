@@ -53,7 +53,7 @@ static double sg_wrap(double x, double x0, double p)
 
 static qaws_status sg_eval(sg_ctx const* c, double u, double v, unsigned int flags, qaws_surface_eval_result* r)
 {
-	return qaws_surface_evaluate(c->s, (qaws_scalar)sg_wrap(u, c->u0, c->pu), (qaws_scalar)sg_wrap(v, c->v0, c->pv), flags, r);
+	return qaws_surface_evaluate(r, c->s, (qaws_scalar)sg_wrap(u, c->u0, c->pu), (qaws_scalar)sg_wrap(v, c->v0, c->pv), flags);
 }
 
 static double sg_dot(qaws_vec3 a, qaws_vec3 b)
@@ -116,8 +116,8 @@ static qaws_status sg_init(sg_ctx* c, qaws_surface const* s, double tol)
 		for (j = 0; j <= 6; j++)
 		{
 			qaws_surface_eval_result r;
-			if (qaws_surface_evaluate(s, (qaws_scalar)(c->u0 + (c->u1 - c->u0) * i / 6), (qaws_scalar)(c->v0 + (c->v1 - c->v0) * j / 6),
-				QAWS_SURFACE_EVAL_POSITION, &r) != QAWS_STATUS_OK)
+			if (qaws_surface_evaluate(&r, s, (qaws_scalar)(c->u0 + (c->u1 - c->u0) * i / 6),
+				(qaws_scalar)(c->v0 + (c->v1 - c->v0) * j / 6), QAWS_SURFACE_EVAL_POSITION) != QAWS_STATUS_OK)
 				continue;
 			if (r.position.x < lo[0]) lo[0] = r.position.x;
 			if (r.position.y < lo[1]) lo[1] = r.position.y;
@@ -137,13 +137,13 @@ static qaws_status sg_init(sg_ctx* c, qaws_surface const* s, double tol)
 #else
 		double close = 1e-9 * size;
 #endif
-		qaws_surface_evaluate(s, ru.min_value, (qaws_scalar)(c->v0 + (c->v1 - c->v0) * t), QAWS_SURFACE_EVAL_POSITION, &a);
-		qaws_surface_evaluate(s, ru.max_value, (qaws_scalar)(c->v0 + (c->v1 - c->v0) * t), QAWS_SURFACE_EVAL_POSITION, &b);
+		qaws_surface_evaluate(&a, s, ru.min_value, (qaws_scalar)(c->v0 + (c->v1 - c->v0) * t), QAWS_SURFACE_EVAL_POSITION);
+		qaws_surface_evaluate(&b, s, ru.max_value, (qaws_scalar)(c->v0 + (c->v1 - c->v0) * t), QAWS_SURFACE_EVAL_POSITION);
 		if (sqrt((a.position.x - b.position.x) * (a.position.x - b.position.x) + (a.position.y - b.position.y) * (a.position.y - b.position.y) +
 			(a.position.z - b.position.z) * (a.position.z - b.position.z)) > close)
 			cu = 0;
-		qaws_surface_evaluate(s, (qaws_scalar)(c->u0 + (c->u1 - c->u0) * t), rv.min_value, QAWS_SURFACE_EVAL_POSITION, &a);
-		qaws_surface_evaluate(s, (qaws_scalar)(c->u0 + (c->u1 - c->u0) * t), rv.max_value, QAWS_SURFACE_EVAL_POSITION, &b);
+		qaws_surface_evaluate(&a, s, (qaws_scalar)(c->u0 + (c->u1 - c->u0) * t), rv.min_value, QAWS_SURFACE_EVAL_POSITION);
+		qaws_surface_evaluate(&b, s, (qaws_scalar)(c->u0 + (c->u1 - c->u0) * t), rv.max_value, QAWS_SURFACE_EVAL_POSITION);
 		if (sqrt((a.position.x - b.position.x) * (a.position.x - b.position.x) + (a.position.y - b.position.y) * (a.position.y - b.position.y) +
 			(a.position.z - b.position.z) * (a.position.z - b.position.z)) > close)
 			cv = 0;

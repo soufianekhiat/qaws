@@ -47,7 +47,7 @@ static qaws_surface* sot_revolve(double cx, double r, double a0, double a1, qaws
 	qaws_curve_create_arc(prof, &ad);
 	memset(&rd, 0, sizeof(rd));
 	rd.profile = *prof; rd.axis_direction.z = 1;
-	qaws_surface_create_revolution(&rd, &s);
+	qaws_surface_create_revolution(&s, &rd);
 	return s;
 }
 
@@ -214,7 +214,7 @@ static void test_plane(void)
 	char msg[300];
 	memset(&bd, 0, sizeof(bd));
 	bd.p10.x = 2; bd.p01.x = (qaws_scalar)0.6; bd.p01.y = 3; bd.p11.x = (qaws_scalar)2.6; bd.p11.y = 3;
-	qaws_surface_create_bilinear(&bd, &s);
+	qaws_surface_create_bilinear(&s, &bd);
 	corner[0] = sot_uv(0.3, 0.3); corner[1] = sot_uv(0.62, 0.3); corner[2] = sot_uv(0.62, 0.58); corner[3] = sot_uv(0.3, 0.58);
 	for (i = 0; i < 4; i++) qaws_surface_curve_create_geodesic(s, corner[i], corner[(i + 1) % 4], 0, &sq[i]);
 	/* the parallelogram: sides (0.64, 0) and (0.168, 0.84) */
@@ -250,7 +250,7 @@ static void test_cylinder(void)
 	qaws_curve_create_arc(&circle, &ad);
 	memset(&ed, 0, sizeof(ed));
 	ed.profile = circle; ed.direction.z = 1; ed.length = (qaws_scalar)H;
-	qaws_surface_create_extrusion(&ed, &cy);
+	qaws_surface_create_extrusion(&cy, &ed);
 	ru = qaws_surface_get_u_range(cy);
 	c = sot_circle(cy, ru.min_value + 0.02 * (ru.max_value - ru.min_value), 0.5, rho);
 	a1 = sot_offset(cy, &c, 1, 1, d, NULL, &q1);
@@ -306,7 +306,7 @@ static void test_gauss_lemma(void)
 	for (i = 0; i < 16; i++) { cp[i].x = (qaws_scalar)((i / 4) / 3.0 * 2); cp[i].y = (qaws_scalar)((i % 4) / 3.0 * 2); cp[i].z = (qaws_scalar)z[i]; }
 	memset(&bd, 0, sizeof(bd));
 	bd.u_degree = 3; bd.v_degree = 3; bd.control_points = cp; bd.u_point_count = 4; bd.v_point_count = 4;
-	qaws_surface_create_bezier(&bd, &s);
+	qaws_surface_create_bezier(&s, &bd);
 	c = sot_circle(s, 0.5, 0.5, rho);
 	c1 = sot_circle(s, 0.5, 0.5, rho + d);
 	c2 = sot_circle(s, 0.5, 0.5, rho - d);

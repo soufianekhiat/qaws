@@ -86,7 +86,7 @@ static void test_functional(int id, qaws_surface_functional functional, char con
 	d.u_knot_count = SF_NU + SF_DEG + 1;
 	d.v_knots = g_sf_vk;
 	d.v_knot_count = SF_NV + SF_DEG + 1;
-	TEST_ASSERT_STATUS(qaws_surface_create_bspline(&d, &s));
+	TEST_ASSERT_STATUS(qaws_surface_create_bspline(&s, &d));
 	fd = qaws_field_view_make(dir, SF_NU * SF_NV, QAWS_FIELD_CONTROL_POINTS, 3);
 	fg = qaws_field_view_make(grad, SF_NU * SF_NV, QAWS_FIELD_CONTROL_POINTS, 3);
 	vd.fields = &fd;

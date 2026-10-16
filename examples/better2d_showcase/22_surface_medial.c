@@ -34,7 +34,7 @@ static void smf_axis(svg* s, qaws_surface_medial_axis const* m, qaws_surface con
 		qaws_surface_eval_result e;
 		double sx, sy;
 		qaws_surface_medial_axis_get_junction(m, i, &p, &r);
-		qaws_surface_evaluate(surf, p.x, p.y, QAWS_SURFACE_EVAL_POSITION, &e);
+		qaws_surface_evaluate(&e, surf, p.x, p.y, QAWS_SURFACE_EVAL_POSITION);
 		if (sgf_facing(surf, view, p.x, p.y, pu))
 		{
 			sgf_project(view, e.position, &sx, &sy, NULL);
@@ -131,7 +131,7 @@ static void demo_surface_medial(void)
 			for (i = 0; i < 16; i++) { cp[i].x = (qaws_scalar)((i / 4) / 3.0 * 2); cp[i].y = (qaws_scalar)((i % 4) / 3.0 * 2); cp[i].z = (qaws_scalar)z[i]; }
 			memset(&bd, 0, sizeof(bd));
 			bd.u_degree = 3; bd.v_degree = 3; bd.control_points = cp; bd.u_point_count = 4; bd.v_point_count = 4;
-			qaws_surface_create_bezier(&bd, &surf);
+			qaws_surface_create_bezier(&surf, &bd);
 			c[0] = sgf_uv(0.15, 0.2); c[1] = sgf_uv(0.85, 0.25); c[2] = sgf_uv(0.75, 0.7); c[3] = sgf_uv(0.2, 0.8);
 			for (i = 0; i < 4; i++) { qaws_surface_curve_create_geodesic(surf, c[i], c[(i + 1) % 4], 0, &cv[i]); pc[i] = cv[i]; }
 			ncv = 4;

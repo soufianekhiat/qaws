@@ -53,7 +53,7 @@ static void ssm_mesh(svg* s, qaws_surface const* surf, sgf_view const* view, vie
 				if (uu > ru.max_value) uu = ru.max_value;
 				if (vv < rv.min_value) vv = rv.min_value;
 				if (vv > rv.max_value) vv = rv.max_value;
-				qaws_surface_evaluate(surf, (qaws_scalar)uu, (qaws_scalar)vv, QAWS_SURFACE_EVAL_POSITION, &e);
+				qaws_surface_evaluate(&e, surf, (qaws_scalar)uu, (qaws_scalar)vv, QAWS_SURFACE_EVAL_POSITION);
 				sgf_project(view, e.position, &xy[2 * k], &xy[2 * k + 1], NULL);
 			}
 			else
@@ -188,7 +188,7 @@ static void demo_surface_sample(void)
 		for (i = 0; i < 16; i++) { cp[i].x = (qaws_scalar)((i / 4) / 3.0 * 2); cp[i].y = (qaws_scalar)((i % 4) / 3.0 * 2); cp[i].z = (qaws_scalar)z[i]; }
 		memset(&bd, 0, sizeof(bd));
 		bd.u_degree = 3; bd.v_degree = 3; bd.control_points = cp; bd.u_point_count = 4; bd.v_point_count = 4;
-		qaws_surface_create_bezier(&bd, &patch);
+		qaws_surface_create_bezier(&patch, &bd);
 		corner[0] = sgf_uv(0.15, 0.18); corner[1] = sgf_uv(0.85, 0.15); corner[2] = sgf_uv(0.82, 0.85); corner[3] = sgf_uv(0.18, 0.82);
 		for (i = 0; i < 4; i++) { qaws_surface_curve_create_geodesic(patch, corner[i], corner[(i + 1) % 4], 0, &sq[i]); pa[i] = sq[i]; }
 		qaws_surface_curve_create_geodesic_arc(patch, sgf_uv(0.5, 0.52), (qaws_scalar)0.4, 0, (qaws_scalar)(2 * pi), 0, &circ);

@@ -42,7 +42,7 @@ static void demo_ray_cast(void)
 	d.u_knot_count = 7;
 	d.v_knots = kn;
 	d.v_knot_count = 7;
-	qaws_surface_create_nurbs(&d, &s);
+	qaws_surface_create_nurbs(&s, &d);
 	qaws_exact_desc_default(&desc);
 	qaws_exact_surface_prepare(&desc, s, &e, NULL);
 	/* the window: the control net projected on (ex, ey), with a margin */

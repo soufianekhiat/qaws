@@ -128,7 +128,7 @@ static qaws_status trimmed_surface_eval(
 {
 	qaws_surface_trim_impl const* impl =
 		(qaws_surface_trim_impl const*)surface->impl;
-	return qaws_surface_evaluate(impl->base, u, v, eval_flags, out_result);
+	return qaws_surface_evaluate(out_result, impl->base, u, v, eval_flags);
 }
 
 static void trimmed_surface_destroy(void* impl_ptr, qaws_allocator const* allocator)
@@ -164,8 +164,8 @@ static qaws_surface_vtable const trimmed_surface_vtable = {
 };
 
 qaws_status qaws_surface_create_trimmed(
-	qaws_surface_trim_desc const* desc,
-	qaws_surface** out_surface)
+	qaws_surface** out_surface,
+	qaws_surface_trim_desc const* desc)
 {
 	qaws_surface* surface;
 	qaws_surface_trim_impl* impl;
@@ -254,9 +254,9 @@ qaws_status qaws_surface_create_trimmed(
 }
 
 qaws_status qaws_surface_trim_contains(
-	qaws_surface const* trimmed_surface,
-	qaws_scalar u, qaws_scalar v,
-	int* out_inside)
+	int* out_inside,
+	qaws_surface const* trimmed_surface, qaws_scalar u,
+	qaws_scalar v)
 {
 	qaws_surface_trim_impl const* impl;
 	int inside = 1;

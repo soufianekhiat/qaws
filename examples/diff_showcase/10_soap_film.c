@@ -18,7 +18,7 @@ static qaws_surface* film_surface(qaws_scalar const* cps)
 	d.control_points = (qaws_vec3 const*)cps;
 	d.u_point_count = SF_N;
 	d.v_point_count = SF_N;
-	qaws_surface_create_bspline(&d, &s);
+	qaws_surface_create_bspline(&s, &d);
 	return s;
 }
 

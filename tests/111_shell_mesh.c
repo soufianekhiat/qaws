@@ -27,7 +27,7 @@ static qaws_surface* smt_plane(double const* p00, double const* p10, double cons
 	d.p10.x = (qaws_scalar)p10[0]; d.p10.y = (qaws_scalar)p10[1]; d.p10.z = (qaws_scalar)p10[2];
 	d.p01.x = (qaws_scalar)p01[0]; d.p01.y = (qaws_scalar)p01[1]; d.p01.z = (qaws_scalar)p01[2];
 	d.p11.x = (qaws_scalar)p11[0]; d.p11.y = (qaws_scalar)p11[1]; d.p11.z = (qaws_scalar)p11[2];
-	qaws_surface_create_bilinear(&d, &s);
+	qaws_surface_create_bilinear(&s, &d);
 	return s;
 }
 

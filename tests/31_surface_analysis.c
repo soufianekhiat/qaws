@@ -21,7 +21,7 @@ static qaws_surface* make_bilinear_surface(void)
 	desc.u_point_count = 2;
 	desc.v_point_count = 2;
 
-	qaws_surface_create_bezier(&desc, &surf);
+	qaws_surface_create_bezier(&surf, &desc);
 	return surf;
 }
 
@@ -51,7 +51,7 @@ static qaws_surface* make_dome_surface(void)
 	desc.u_point_count = 3;
 	desc.v_point_count = 3;
 
-	qaws_surface_create_bezier(&desc, &surf);
+	qaws_surface_create_bezier(&surf, &desc);
 	return surf;
 }
 
@@ -88,7 +88,7 @@ static qaws_surface* make_wavy_surface(qaws_curve** out_profile)
 	rd.axis_origin.x = 0; rd.axis_origin.y = 0; rd.axis_origin.z = 0;
 	rd.axis_direction.x = 0; rd.axis_direction.y = 0; rd.axis_direction.z = 1;
 	rd.angle = 0;
-	qaws_surface_create_revolution(&rd, &surf);
+	qaws_surface_create_revolution(&surf, &rd);
 	*out_profile = prof;
 	return surf;
 }

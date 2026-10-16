@@ -40,7 +40,7 @@ static void demo_curve_surface(void)
 	d.u_knot_count = 7;
 	d.v_knots = kn;
 	d.v_knot_count = 7;
-	qaws_surface_create_nurbs(&d, &s);
+	qaws_surface_create_nurbs(&s, &d);
 	/* a spiral weaving up and down through it (a cubic B-spline, 10 spans) */
 	for (k = 0; k < 13; k++)
 	{

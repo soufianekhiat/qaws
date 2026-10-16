@@ -144,8 +144,8 @@ Surfaces are evaluated over a (u, v) parameter domain. The single-point and batc
 ```c
 qaws_surface_eval_result result;
 qaws_status s = qaws_surface_evaluate(
-    surface, 0.5f, 0.25f,
-    QAWS_EVAL_FLAG_POSITION, &result);
+    &result, surface, 0.5f,
+    0.25f, QAWS_EVAL_FLAG_POSITION);
 // result.position.x, .y, .z
 ```
 
@@ -166,7 +166,7 @@ Surface normals can also be obtained directly:
 
 ```c
 qaws_vec3 normal;
-qaws_surface_get_normal(surface, u, v, &normal);
+qaws_surface_get_normal(&normal, surface, u, v);
 ```
 
 ## Core eval headers (multi-backend architecture)

@@ -222,7 +222,7 @@ static void test_batch_eval(void)
 		sdesc.u_point_count = 2;
 		sdesc.v_point_count = 2;
 		sdesc.control_points = cps;
-		s = qaws_surface_create_bezier(&sdesc, &surf);
+		s = qaws_surface_create_bezier(&surf, &sdesc);
 		TEST_ASSERT(s == QAWS_STATUS_OK, "batch: create surface");
 
 		s = qaws_surface_evaluate_batch(sresults, surf, u_params, v_params,
@@ -231,8 +231,8 @@ static void test_batch_eval(void)
 
 		for (i = 0; i < 3; i++)
 		{
-			qaws_surface_evaluate(surf, u_params[i], v_params[i],
-				QAWS_SURFACE_EVAL_POSITION, &ssingle);
+			qaws_surface_evaluate(&ssingle, surf, u_params[i],
+				v_params[i], QAWS_SURFACE_EVAL_POSITION);
 			TEST_ASSERT(
 				(float)fabs(sresults[i].position.x - ssingle.position.x) < 1e-6f &&
 				(float)fabs(sresults[i].position.y - ssingle.position.y) < 1e-6f &&

@@ -211,7 +211,7 @@ static unsigned long long th_op(th_scene* sc, unsigned int op, qaws_batch_execut
 		d.points = sc->pts3;
 		d.point_count = TH_POINTS;
 		d.executor = x;
-		qaws_surface_batch_find_closest(&d, sp, NULL);
+		qaws_surface_batch_find_closest(sp, NULL, &d);
 		for (i = 0; i < TH_POINTS; i++)
 		{
 			h = th_hash(h, &sp[i].surface, sizeof(unsigned int));
@@ -229,7 +229,7 @@ static unsigned long long th_op(th_scene* sc, unsigned int op, qaws_batch_execut
 		d.directions = sc->dir;
 		d.ray_count = TH_RAYS;
 		d.executor = x;
-		qaws_surface_batch_raycast(&d, rh, NULL);
+		qaws_surface_batch_raycast(rh, NULL, &d);
 		for (i = 0; i < TH_RAYS; i++)
 		{
 			h = th_hash(h, &rh[i].surface, sizeof(unsigned int));
@@ -245,7 +245,7 @@ static unsigned long long th_op(th_scene* sc, unsigned int op, qaws_batch_execut
 		d.surface_count = 1 + TR_LEVELS;
 		d.families = sc->fam;
 		d.executor = x;
-		qaws_surface_batch_find_intersections(&d, cv, 1024, &n, pt, 1 << 17, &m, NULL);
+		qaws_surface_batch_find_intersections(cv, &n, pt, &m, NULL, 1024, 1 << 17, &d);
 		return th_hash(th_hash(h, cv, n * sizeof(cv[0])), pt, m * sizeof(pt[0]));
 	}
 	case 6:

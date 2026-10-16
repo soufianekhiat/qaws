@@ -51,11 +51,11 @@ typedef struct qaws_ssi_desc
    Each curve in out_curves will point into point_buffer.
    Returns the number of curves found in *out_curve_count. */
 qaws_status qaws_surface_intersect(
-	qaws_ssi_desc const* desc,
 	qaws_ssi_curve* out_curves,
-	unsigned int curve_capacity,
 	unsigned int* out_curve_count,
 	qaws_ssi_point* point_buffer,
-	unsigned int point_capacity);
+	unsigned int curve_capacity,
+	unsigned int point_capacity,
+	qaws_ssi_desc const* desc);
 
 #endif /* QAWS_SURFACE_INTERSECT_H */

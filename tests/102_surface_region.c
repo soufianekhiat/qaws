@@ -51,7 +51,7 @@ static qaws_surface* srt_sphere(double R, qaws_curve** prof)
 	qaws_curve_create_arc(prof, &ad);
 	memset(&rd, 0, sizeof(rd));
 	rd.profile = *prof; rd.axis_direction.z = 1;
-	qaws_surface_create_revolution(&rd, &s);
+	qaws_surface_create_revolution(&s, &rd);
 	return s;
 }
 
@@ -162,7 +162,7 @@ static void test_plane(void)
 	d.p10.x = 2; d.p10.y = 0; d.p10.z = 0;
 	d.p01.x = (qaws_scalar)0.6; d.p01.y = 3; d.p01.z = 0;
 	d.p11.x = (qaws_scalar)2.6; d.p11.y = 3; d.p11.z = 0;
-	qaws_surface_create_bilinear(&d, &s);
+	qaws_surface_create_bilinear(&s, &d);
 	qaws_surface_curve_create_geodesic_arc(s, srt_uv(0.5, 0.5), (qaws_scalar)r, 0, (qaws_scalar)(2 * SRT_PI), 0, &circle);
 	corner[0] = srt_uv(0.3, 0.3); corner[1] = srt_uv(0.62, 0.3); corner[2] = srt_uv(0.62, 0.58); corner[3] = srt_uv(0.3, 0.58);
 	for (i = 0; i < 4; i++) { qaws_surface_curve_create_geodesic(s, corner[i], corner[(i + 1) % 4], 0, &sq[i]); ps[i] = sq[i]; }
@@ -238,7 +238,7 @@ static void test_cylinder(void)
 	qaws_curve_create_arc(&circle, &ad);
 	memset(&ed, 0, sizeof(ed));
 	ed.profile = circle; ed.direction.z = 1; ed.length = (qaws_scalar)H;
-	qaws_surface_create_extrusion(&ed, &s);
+	qaws_surface_create_extrusion(&s, &ed);
 	ru = qaws_surface_get_u_range(s);
 	/* centred near the middle of the domain, clear of the seam (step 4 cuts at seams) */
 	st = qaws_surface_curve_create_geodesic_arc(s, srt_uv(0.5 * ru.max_value, 0.5), (qaws_scalar)r, 0, (qaws_scalar)(2 * SRT_PI), 0, &c);
@@ -260,7 +260,7 @@ static void srt_curvature(void* user, qaws_scalar u, qaws_scalar v, qaws_vec3 p,
 	qaws_surface_eval_result r;
 	double n[3], nl, E, F, G, L, M, N;
 	(void)p;
-	qaws_surface_evaluate(s, u, v, QAWS_SURFACE_EVAL_DU | QAWS_SURFACE_EVAL_DV | QAWS_SURFACE_EVAL_DUU | QAWS_SURFACE_EVAL_DUV | QAWS_SURFACE_EVAL_DVV, &r);
+	qaws_surface_evaluate(&r, s, u, v, QAWS_SURFACE_EVAL_DU | QAWS_SURFACE_EVAL_DV | QAWS_SURFACE_EVAL_DUU | QAWS_SURFACE_EVAL_DUV | QAWS_SURFACE_EVAL_DVV);
 	n[0] = (double)r.du.y * r.dv.z - (double)r.du.z * r.dv.y;
 	n[1] = (double)r.du.z * r.dv.x - (double)r.du.x * r.dv.z;
 	n[2] = (double)r.du.x * r.dv.y - (double)r.du.y * r.dv.x;
@@ -305,7 +305,7 @@ static void test_gauss_bonnet(void)
 	for (i = 0; i < 16; i++) { cp[i].x = (qaws_scalar)((i / 4) / 3.0 * 2); cp[i].y = (qaws_scalar)((i % 4) / 3.0 * 2); cp[i].z = (qaws_scalar)z[i]; }
 	memset(&bd, 0, sizeof(bd));
 	bd.u_degree = 3; bd.v_degree = 3; bd.control_points = cp; bd.u_point_count = 4; bd.v_point_count = 4;
-	qaws_surface_create_bezier(&bd, &s);
+	qaws_surface_create_bezier(&s, &bd);
 	tri[0] = srt_uv(0.15, 0.2); tri[1] = srt_uv(0.85, 0.3); tri[2] = srt_uv(0.4, 0.85);
 	for (i = 0; i < 3; i++) { qaws_surface_curve_create_geodesic(s, tri[i], tri[(i + 1) % 3], 0, &e[i]); pe[i] = e[i]; }
 	/* the interior angle at each vertex: between the incoming edge reversed and the outgoing edge */
@@ -333,7 +333,7 @@ static void test_gauss_bonnet(void)
 		int in = 0;
 		qaws_status s2 = qaws_surface_region_create_trimmed(r, &tr), s3 = QAWS_STATUS_INVALID_ARGUMENT;
 		if (s2 == QAWS_STATUS_OK)
-			s3 = qaws_surface_trim_contains(tr, (qaws_scalar)0.45, (qaws_scalar)0.45, &in);
+			s3 = qaws_surface_trim_contains(&in, tr, (qaws_scalar)0.45, (qaws_scalar)0.45);
 		sprintf(msg, "the triangle as a trimmed surface (status %d), its inside point kept (%d)", (int)s2, in);
 		TEST_ASSERT(s2 == QAWS_STATUS_OK && s3 == QAWS_STATUS_OK && in == 1, msg);
 		qaws_surface_destroy(tr);
@@ -386,7 +386,7 @@ static qaws_surface* srt_torus(double R0, double r0, double start, qaws_curve** 
 	qaws_curve_create_arc(prof, &ad);
 	memset(&rd, 0, sizeof(rd));
 	rd.profile = *prof; rd.axis_direction.z = 1;
-	qaws_surface_create_revolution(&rd, &s);
+	qaws_surface_create_revolution(&s, &rd);
 	return s;
 }
 
@@ -486,7 +486,7 @@ static void test_seams(void)
 		qaws_curve_create_arc(&circle, &ad);
 		memset(&ed, 0, sizeof(ed));
 		ed.profile = circle; ed.direction.z = 1; ed.length = (qaws_scalar)H;
-		qaws_surface_create_extrusion(&ed, &cy);
+		qaws_surface_create_extrusion(&cy, &ed);
 		ru = qaws_surface_get_u_range(cy);
 		lo = srt_uv_line(cy, 0, 0.3, ru.max_value, 0.3, &k1);
 		hi = srt_uv_line(cy, ru.max_value, 0.7, 0, 0.7, &k2);

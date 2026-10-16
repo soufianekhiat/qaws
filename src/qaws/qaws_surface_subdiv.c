@@ -1474,8 +1474,8 @@ static int build_triangle_mesh(
  * ----------------------------------------------------------------------- */
 
 qaws_status qaws_surface_create_subdiv(
-	qaws_surface_subdiv_desc const* desc,
-	qaws_surface** out_surface)
+	qaws_surface** out_surface,
+	qaws_surface_subdiv_desc const* desc)
 {
 	qaws_surface* surface;
 	qaws_surface_subdiv_impl* impl;
@@ -1627,12 +1627,12 @@ qaws_status qaws_surface_create_subdiv(
  * ----------------------------------------------------------------------- */
 
 qaws_status qaws_surface_subdiv_get_mesh(
-	qaws_surface const* surface,
 	qaws_vec3 const** out_vertices,
 	qaws_vec3 const** out_normals,
 	unsigned int const** out_triangles,
 	unsigned int* out_vertex_count,
-	unsigned int* out_triangle_count)
+	unsigned int* out_triangle_count,
+	qaws_surface const* surface)
 {
 	qaws_surface_subdiv_impl const* impl;
 

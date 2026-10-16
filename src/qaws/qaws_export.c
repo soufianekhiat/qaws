@@ -850,26 +850,26 @@ qaws_status qaws_surface_export_obj(
 		memset(&rv0, 0, sizeof(rv0));
 		memset(&rv1, 0, sizeof(rv1));
 
-		qaws_surface_evaluate(surface,
+		qaws_surface_evaluate(&rc,
+			surface,
 			u_min + u_len * (qaws_scalar)0.5,
-			v_min + v_len * (qaws_scalar)0.5,
-			QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL, &rc);
-		qaws_surface_evaluate(surface, u_min, v_min,
-			QAWS_SURFACE_EVAL_POSITION, &r00);
-		qaws_surface_evaluate(surface, u_min + u_len, v_min,
-			QAWS_SURFACE_EVAL_POSITION, &r10);
-		qaws_surface_evaluate(surface, u_min, v_min + v_len,
-			QAWS_SURFACE_EVAL_POSITION, &r01);
-		qaws_surface_evaluate(surface, u_min + u_len, v_min + v_len,
-			QAWS_SURFACE_EVAL_POSITION, &r11);
+			v_min + v_len * (qaws_scalar)0.5, QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL);
+		qaws_surface_evaluate(&r00, surface, u_min,
+			v_min, QAWS_SURFACE_EVAL_POSITION);
+		qaws_surface_evaluate(&r10, surface, u_min + u_len,
+			v_min, QAWS_SURFACE_EVAL_POSITION);
+		qaws_surface_evaluate(&r01, surface, u_min,
+			v_min + v_len, QAWS_SURFACE_EVAL_POSITION);
+		qaws_surface_evaluate(&r11, surface, u_min + u_len,
+			v_min + v_len, QAWS_SURFACE_EVAL_POSITION);
 
 		/* V-closure: pipe/swept surfaces wrap in v */
-		qaws_surface_evaluate(surface,
-			u_min + u_len * (qaws_scalar)0.5, v_min,
-			QAWS_SURFACE_EVAL_POSITION, &rv0);
-		qaws_surface_evaluate(surface,
-			u_min + u_len * (qaws_scalar)0.5, v_min + v_len,
-			QAWS_SURFACE_EVAL_POSITION, &rv1);
+		qaws_surface_evaluate(&rv0,
+			surface, u_min + u_len * (qaws_scalar)0.5,
+			v_min, QAWS_SURFACE_EVAL_POSITION);
+		qaws_surface_evaluate(&rv1,
+			surface, u_min + u_len * (qaws_scalar)0.5,
+			v_min + v_len, QAWS_SURFACE_EVAL_POSITION);
 
 		dx = rv1.position.x - rv0.position.x;
 		dy = rv1.position.y - rv0.position.y;
@@ -913,7 +913,7 @@ qaws_status qaws_surface_export_obj(
 			qaws_scalar v = v_min + v_len * (qaws_scalar)vi / (qaws_scalar)(v_samples - 1);
 			qaws_surface_eval_result r;
 			memset(&r, 0, sizeof(r));
-			qaws_surface_evaluate(surface, u, v, eval_flags, &r);
+			qaws_surface_evaluate(&r, surface, u, v, eval_flags);
 			objbuf_append(&b, "v %.6g %.6g %.6g\n",
 				(double)r.position.x, (double)r.position.y, (double)r.position.z);
 		}
@@ -932,8 +932,8 @@ qaws_status qaws_surface_export_obj(
 				qaws_scalar v = v_min + v_len * (qaws_scalar)vi / (qaws_scalar)(v_samples - 1);
 				qaws_surface_eval_result r;
 				memset(&r, 0, sizeof(r));
-				qaws_surface_evaluate(surface, u, v,
-					QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL, &r);
+				qaws_surface_evaluate(&r, surface, u,
+					v, QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL);
 				objbuf_append(&b, "vn %.6g %.6g %.6g\n",
 					(double)(r.normal.x * sign),
 					(double)(r.normal.y * sign),

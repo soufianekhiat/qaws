@@ -89,7 +89,7 @@ static void test_closed_forms(void)
 		}
 		memset(&d, 0, sizeof(d));
 		d.u_degree = 2; d.v_degree = 1; d.control_points = cp; d.u_point_count = 3; d.v_point_count = 2;
-		qaws_surface_create_bezier(&d, &s);
+		qaws_surface_create_bezier(&s, &d);
 		a = sqrt(1 + 4 * x0 * x0) * 2 * du; b = 2 * dv; n = hypot(a, b); a /= n; b /= n;
 		s1 = get_sx(x0) + L * a; y1 = y0 + L * b;
 		for (i = 0; i < 200; i++) { double m = 0.5 * (lo + hi); if (get_sx(m) < s1) lo = m; else hi = m; }
@@ -119,7 +119,7 @@ static void test_closed_forms(void)
 			}
 		memset(&d, 0, sizeof(d));
 		d.u_degree = 3; d.v_degree = 3; d.control_points = cp; d.u_point_count = 4; d.v_point_count = 4;
-		qaws_surface_create_bezier(&d, &s);
+		qaws_surface_create_bezier(&s, &d);
 		a = get_dbez3(xs, u0) * du; b = get_dbez3(ys, v0) * dv; n = hypot(a, b); a /= n; b /= n;
 		st = qaws_surface_geodesic_enclose(s, get_uv(u0, v0), get_uv(du, dv), (qaws_scalar)L, 0, &e);
 		if (st == QAWS_STATUS_OK)
@@ -146,7 +146,7 @@ static qaws_surface* get_bump(void)
 		}
 	memset(&d, 0, sizeof(d));
 	d.u_degree = 3; d.v_degree = 3; d.control_points = cp; d.u_point_count = 6; d.v_point_count = 6;
-	qaws_surface_create_bspline(&d, &s);
+	qaws_surface_create_bspline(&s, &d);
 	return s;
 }
 
@@ -305,7 +305,7 @@ static void test_review_cases(void)
 	char msg[300];
 	memset(&d, 0, sizeof(d));
 	d.p10.x = 1; d.p01.y = 1; d.p11.x = 1; d.p11.y = 1;
-	qaws_surface_create_bilinear(&d, &s);
+	qaws_surface_create_bilinear(&s, &d);
 	for (i = 0; i < 12; i++) g[i] = get_line(C[i][0], C[i][1], C[(i + 1) % 12][0], C[(i + 1) % 12][1]);
 	sa = qaws_surface_geodesic_polygon_area(s, g, 12, 0, 0, &lo, &hi);
 	sprintf(msg, "certified area: a C whose passage the grid closes, [%.6f, %.6f] (status %d) holding 0.4796", (double)lo, (double)hi, (int)sa);
@@ -336,7 +336,7 @@ static void test_refusals(void)
 	qaws_curve_create_arc(&prof, &ad);
 	memset(&rd, 0, sizeof(rd));
 	rd.profile = prof; rd.axis_direction.z = 1;
-	qaws_surface_create_revolution(&rd, &rev);
+	qaws_surface_create_revolution(&rev, &rd);
 	s1 = qaws_surface_geodesic_enclose(rev, get_uv(0.5, 0.5), get_uv(1, 0), (qaws_scalar)0.5, 0, &e);
 	qaws_geodesic_enclosure_destroy(e);
 	e = NULL;

@@ -38,7 +38,7 @@ static int sgf_facing(qaws_surface const* s, sgf_view const* v, double u, double
 	qaws_range ru = qaws_surface_get_u_range(s);
 	double uu = u, nz;
 	if (pu > 0) { uu = fmod(u - ru.min_value, pu); if (uu < 0) uu += pu; uu += ru.min_value; }
-	if (qaws_surface_evaluate(s, (qaws_scalar)uu, (qaws_scalar)w, QAWS_SURFACE_EVAL_DU | QAWS_SURFACE_EVAL_DV | QAWS_SURFACE_EVAL_POSITION, &r) != QAWS_STATUS_OK)
+	if (qaws_surface_evaluate(&r, s, (qaws_scalar)uu, (qaws_scalar)w, QAWS_SURFACE_EVAL_DU | QAWS_SURFACE_EVAL_DV | QAWS_SURFACE_EVAL_POSITION) != QAWS_STATUS_OK)
 		return 1;
 	{
 		double nx = (double)r.du.y * r.dv.z - (double)r.du.z * r.dv.y, ny = (double)r.du.z * r.dv.x - (double)r.du.x * r.dv.z;
@@ -62,7 +62,7 @@ static void sgf_curve3d(svg* s, qaws_surface const* surf, sgf_view const* v, dou
 		double uu = uv[2 * k], sx, sy;
 		int f = two_sided ? 1 : sgf_facing(surf, v, uv[2 * k], uv[2 * k + 1], pu);
 		if (pu > 0) { uu = fmod(uu - ru.min_value, pu); if (uu < 0) uu += pu; uu += ru.min_value; }
-		qaws_surface_evaluate(surf, (qaws_scalar)uu, (qaws_scalar)uv[2 * k + 1], QAWS_SURFACE_EVAL_POSITION, &r);
+		qaws_surface_evaluate(&r, surf, (qaws_scalar)uu, (qaws_scalar)uv[2 * k + 1], QAWS_SURFACE_EVAL_POSITION);
 		sgf_project(v, r.position, &sx, &sy, NULL);
 		if (prev >= 0 && f != prev)
 		{
@@ -155,7 +155,7 @@ static qaws_surface* sgf_revolve(qaws_curve* profile)
 	qaws_surface* s = NULL;
 	memset(&rd, 0, sizeof(rd));
 	rd.profile = profile; rd.axis_direction.z = 1;
-	qaws_surface_create_revolution(&rd, &s);
+	qaws_surface_create_revolution(&s, &rd);
 	return s;
 }
 
@@ -217,7 +217,7 @@ static void demo_surface_geodesic(void)
 			for (i = 0; i < 16; i++) { cp[i].x = (qaws_scalar)((i / 4) / 3.0 * 2); cp[i].y = (qaws_scalar)((i % 4) / 3.0 * 2); cp[i].z = (qaws_scalar)z[i]; }
 			memset(&bd, 0, sizeof(bd));
 			bd.u_degree = 3; bd.v_degree = 3; bd.control_points = cp; bd.u_point_count = 4; bd.v_point_count = 4;
-			qaws_surface_create_bezier(&bd, &surf);
+			qaws_surface_create_bezier(&surf, &bd);
 			name = "a wavy bicubic patch: a geodesic square and circles about its centre";
 		}
 		else

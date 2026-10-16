@@ -42,7 +42,7 @@ static qaws_surface* ecs_surface(ref_exact_curve_surface const* r)
 	d.u_knot_count = (unsigned int)r->nku;
 	d.v_knots = kv;
 	d.v_knot_count = (unsigned int)r->nkv;
-	qaws_surface_create_nurbs(&d, &s);
+	qaws_surface_create_nurbs(&s, &d);
 	return s;
 }
 
@@ -157,7 +157,7 @@ static void test_on_surface(void)
 	d.control_points = cps;
 	d.u_point_count = 2;
 	d.v_point_count = 2;
-	qaws_surface_create_bezier(&d, &s);
+	qaws_surface_create_bezier(&s, &d);
 	memset(&bd, 0, sizeof(bd));
 	bd.dimension = QAWS_DIMENSION_3D;
 	bd.degree = 1;

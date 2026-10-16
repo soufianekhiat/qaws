@@ -425,8 +425,8 @@ static qaws_surface_vtable const revolution_surface_vtable = {
 };
 
 qaws_status qaws_surface_create_revolution(
-	qaws_surface_revolution_desc const* desc,
-	qaws_surface** out_surface)
+	qaws_surface** out_surface,
+	qaws_surface_revolution_desc const* desc)
 {
 	qaws_surface* surface;
 	qaws_surface_revolution_impl* impl;

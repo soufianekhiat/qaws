@@ -22,7 +22,7 @@ static qaws_surface* bspline_surface(qaws_scalar const* cps)
 	d.control_points = (qaws_vec3 const*)cps;
 	d.u_point_count = SN;
 	d.v_point_count = SN;
-	qaws_surface_create_bspline(&d, &s);
+	qaws_surface_create_bspline(&s, &d);
 	return s;
 }
 
@@ -46,10 +46,10 @@ static void draw_surface(svg* s, viewport const* v, qaws_surface const* surf, do
 			qaws_surface_eval_result r[4];
 			double x[4], y[4], zc = 0;
 			int k;
-			qaws_surface_evaluate(surf, u0, v0, QAWS_SURFACE_EVAL_POSITION, &r[0]);
-			qaws_surface_evaluate(surf, u1, v0, QAWS_SURFACE_EVAL_POSITION, &r[1]);
-			qaws_surface_evaluate(surf, u1, v1, QAWS_SURFACE_EVAL_POSITION, &r[2]);
-			qaws_surface_evaluate(surf, u0, v1, QAWS_SURFACE_EVAL_POSITION, &r[3]);
+			qaws_surface_evaluate(&r[0], surf, u0, v0, QAWS_SURFACE_EVAL_POSITION);
+			qaws_surface_evaluate(&r[1], surf, u1, v0, QAWS_SURFACE_EVAL_POSITION);
+			qaws_surface_evaluate(&r[2], surf, u1, v1, QAWS_SURFACE_EVAL_POSITION);
+			qaws_surface_evaluate(&r[3], surf, u0, v1, QAWS_SURFACE_EVAL_POSITION);
 			for (k = 0; k < 4; k++)
 			{
 				iso(v, r[k].position.x, r[k].position.y, r[k].position.z, &x[k], &y[k]);

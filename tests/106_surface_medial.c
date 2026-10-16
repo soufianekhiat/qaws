@@ -59,7 +59,7 @@ static qaws_surface* smt_sphere(double R, qaws_curve** prof)
 	qaws_curve_create_arc(prof, &ad);
 	memset(&rd, 0, sizeof(rd));
 	rd.profile = *prof; rd.axis_direction.z = 1;
-	qaws_surface_create_revolution(&rd, &s);
+	qaws_surface_create_revolution(&s, &rd);
 	return s;
 }
 
@@ -199,7 +199,7 @@ static void test_cylinder(void)
 	qaws_curve_create_arc(&circle, &ad);
 	memset(&ed, 0, sizeof(ed));
 	ed.profile = circle; ed.direction.z = 1; ed.length = (qaws_scalar)Hc;
-	qaws_surface_create_extrusion(&ed, &cy);
+	qaws_surface_create_extrusion(&cy, &ed);
 	ru = qaws_surface_get_u_range(cy);
 	P = (double)ru.max_value - ru.min_value;
 	u0 = ru.min_value + 0.2 * P; u1 = ru.min_value + 0.55 * P;
@@ -289,7 +289,7 @@ static void test_mitered(void)
 	qaws_curve_create_arc(&circle, &ad);
 	memset(&ed, 0, sizeof(ed));
 	ed.profile = circle; ed.direction.z = 1; ed.length = (qaws_scalar)Hc;
-	qaws_surface_create_extrusion(&ed, &cy);
+	qaws_surface_create_extrusion(&cy, &ed);
 	ru = qaws_surface_get_u_range(cy);
 	P = (double)ru.max_value - ru.min_value;
 	u0 = ru.min_value + 0.2 * P;
@@ -351,7 +351,7 @@ static void test_wavy(void)
 	for (i = 0; i < 16; i++) { cp[i].x = (qaws_scalar)((i / 4) / 3.0 * 2); cp[i].y = (qaws_scalar)((i % 4) / 3.0 * 2); cp[i].z = (qaws_scalar)z[i]; }
 	memset(&bd, 0, sizeof(bd));
 	bd.u_degree = 3; bd.v_degree = 3; bd.control_points = cp; bd.u_point_count = 4; bd.v_point_count = 4;
-	qaws_surface_create_bezier(&bd, &s);
+	qaws_surface_create_bezier(&s, &bd);
 	corner[0] = smt_uv(0.15, 0.2); corner[1] = smt_uv(0.85, 0.25); corner[2] = smt_uv(0.75, 0.7); corner[3] = smt_uv(0.2, 0.8);
 	for (i = 0; i < 4; i++) { qaws_surface_curve_create_geodesic(s, corner[i], corner[(i + 1) % 4], 0, &q[i]); pq[i] = q[i]; }
 	Q.curves = pq; Q.curve_count = 4; Q.closed = 1;

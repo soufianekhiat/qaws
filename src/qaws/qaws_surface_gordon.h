@@ -39,7 +39,7 @@ typedef struct qaws_surface_gordon_desc
 } qaws_surface_gordon_desc;
 
 qaws_status qaws_surface_create_gordon(
-	qaws_surface_gordon_desc const* desc,
-	qaws_surface** out_surface);
+	qaws_surface** out_surface,
+	qaws_surface_gordon_desc const* desc);
 
 #endif /* QAWS_SURFACE_GORDON_H */

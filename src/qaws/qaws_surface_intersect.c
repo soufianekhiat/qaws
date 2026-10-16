@@ -93,9 +93,9 @@ static int newton_refine(
 		/* Evaluate both surfaces */
 		memset(&r1, 0, sizeof(r1));
 		memset(&r2, 0, sizeof(r2));
-		if (qaws_surface_evaluate(sa, *u1, *v1, eval_flags, &r1) != QAWS_STATUS_OK)
+		if (qaws_surface_evaluate(&r1, sa, *u1, *v1, eval_flags) != QAWS_STATUS_OK)
 			return 0;
-		if (qaws_surface_evaluate(sb, *u2, *v2, eval_flags, &r2) != QAWS_STATUS_OK)
+		if (qaws_surface_evaluate(&r2, sb, *u2, *v2, eval_flags) != QAWS_STATUS_OK)
 			return 0;
 
 		/* Check convergence */
@@ -160,8 +160,8 @@ static int newton_refine(
 		qaws_surface_eval_result r1, r2;
 		memset(&r1, 0, sizeof(r1));
 		memset(&r2, 0, sizeof(r2));
-		qaws_surface_evaluate(sa, *u1, *v1, QAWS_SURFACE_EVAL_POSITION, &r1);
-		qaws_surface_evaluate(sb, *u2, *v2, QAWS_SURFACE_EVAL_POSITION, &r2);
+		qaws_surface_evaluate(&r1, sa, *u1, *v1, QAWS_SURFACE_EVAL_POSITION);
+		qaws_surface_evaluate(&r2, sb, *u2, *v2, QAWS_SURFACE_EVAL_POSITION);
 		if (vec3_dist(r1.position, r2.position) < tolerance * QAWS_LITERAL(10.0))
 		{
 			out_pos->x = (r1.position.x + r2.position.x) * QAWS_LITERAL(0.5);
@@ -233,9 +233,9 @@ static unsigned int march_direction(
 		/* Evaluate normals at current point */
 		memset(&r1, 0, sizeof(r1));
 		memset(&r2, 0, sizeof(r2));
-		if (qaws_surface_evaluate(sa, u1, v1, eval_flags, &r1) != QAWS_STATUS_OK)
+		if (qaws_surface_evaluate(&r1, sa, u1, v1, eval_flags) != QAWS_STATUS_OK)
 			break;
-		if (qaws_surface_evaluate(sb, u2, v2, eval_flags, &r2) != QAWS_STATUS_OK)
+		if (qaws_surface_evaluate(&r2, sb, u2, v2, eval_flags) != QAWS_STATUS_OK)
 			break;
 
 		n1 = r1.normal;
@@ -387,12 +387,12 @@ static unsigned int march_direction(
 }
 
 qaws_status qaws_surface_intersect(
-	qaws_ssi_desc const* desc,
 	qaws_ssi_curve* out_curves,
-	unsigned int curve_capacity,
 	unsigned int* out_curve_count,
 	qaws_ssi_point* point_buffer,
-	unsigned int point_capacity)
+	unsigned int curve_capacity,
+	unsigned int point_capacity,
+	qaws_ssi_desc const* desc)
 {
 	qaws_surface const* sa;
 	qaws_surface const* sb;
@@ -436,14 +436,14 @@ qaws_status qaws_surface_intersect(
 
 		memset(&rc0, 0, sizeof(rc0));
 		memset(&rc1, 0, sizeof(rc1));
-		qaws_surface_evaluate(sa, 0, 0, QAWS_SURFACE_EVAL_POSITION, &rc0);
-		qaws_surface_evaluate(sa, 1, 1, QAWS_SURFACE_EVAL_POSITION, &rc1);
+		qaws_surface_evaluate(&rc0, sa, 0, 0, QAWS_SURFACE_EVAL_POSITION);
+		qaws_surface_evaluate(&rc1, sa, 1, 1, QAWS_SURFACE_EVAL_POSITION);
 		diag_a = vec3_dist(rc0.position, rc1.position);
 
 		memset(&rc0, 0, sizeof(rc0));
 		memset(&rc1, 0, sizeof(rc1));
-		qaws_surface_evaluate(sb, 0, 0, QAWS_SURFACE_EVAL_POSITION, &rc0);
-		qaws_surface_evaluate(sb, 1, 1, QAWS_SURFACE_EVAL_POSITION, &rc1);
+		qaws_surface_evaluate(&rc0, sb, 0, 0, QAWS_SURFACE_EVAL_POSITION);
+		qaws_surface_evaluate(&rc1, sb, 1, 1, QAWS_SURFACE_EVAL_POSITION);
 		diag_b = vec3_dist(rc0.position, rc1.position);
 
 		max_diag = (diag_a > diag_b) ? diag_a : diag_b;
@@ -465,7 +465,7 @@ qaws_status qaws_surface_intersect(
 				unsigned int gi2, gj2;
 
 				memset(&r1, 0, sizeof(r1));
-				if (qaws_surface_evaluate(sa, u1_c, v1_c, QAWS_SURFACE_EVAL_POSITION, &r1)
+				if (qaws_surface_evaluate(&r1, sa, u1_c, v1_c, QAWS_SURFACE_EVAL_POSITION)
 					!= QAWS_STATUS_OK)
 					continue;
 
@@ -479,7 +479,7 @@ qaws_status qaws_surface_intersect(
 						qaws_scalar dist;
 
 						memset(&r2, 0, sizeof(r2));
-						if (qaws_surface_evaluate(sb, u2_c, v2_c, QAWS_SURFACE_EVAL_POSITION, &r2)
+						if (qaws_surface_evaluate(&r2, sb, u2_c, v2_c, QAWS_SURFACE_EVAL_POSITION)
 							!= QAWS_STATUS_OK)
 							continue;
 

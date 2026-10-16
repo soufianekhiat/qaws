@@ -45,7 +45,7 @@ static qaws_surface* sst_revolve(double cx, double r, double a0, double a1, qaws
 	qaws_curve_create_arc(prof, &ad);
 	memset(&rd, 0, sizeof(rd));
 	rd.profile = *prof; rd.axis_direction.z = 1;
-	qaws_surface_create_revolution(&rd, &s);
+	qaws_surface_create_revolution(&s, &rd);
 	return s;
 }
 
@@ -88,7 +88,7 @@ static void sst_mesh_measure(qaws_surface const* s, qaws_mesh_2d const* m, doubl
 			if (uu > ru.max_value) uu = ru.max_value;
 			if (vv < rv.min_value) vv = rv.min_value;
 			if (vv > rv.max_value) vv = rv.max_value;
-			qaws_surface_evaluate(s, (qaws_scalar)uu, (qaws_scalar)vv, QAWS_SURFACE_EVAL_POSITION, &e);
+			qaws_surface_evaluate(&e, s, (qaws_scalar)uu, (qaws_scalar)vv, QAWS_SURFACE_EVAL_POSITION);
 			q[k] = e.position;
 		}
 		ax = q[1].x - q[0].x; ay = q[1].y - q[0].y; az = q[1].z - q[0].z;
@@ -258,7 +258,7 @@ static void test_meshing(void)
 		qaws_status st;
 		memset(&bd, 0, sizeof(bd));
 		bd.p10.x = 2; bd.p01.x = (qaws_scalar)0.6; bd.p01.y = 3; bd.p11.x = (qaws_scalar)2.6; bd.p11.y = 3;
-		qaws_surface_create_bilinear(&bd, &s);
+		qaws_surface_create_bilinear(&s, &bd);
 		corner[0] = sst_uv(0.3, 0.3); corner[1] = sst_uv(0.62, 0.3); corner[2] = sst_uv(0.62, 0.58); corner[3] = sst_uv(0.3, 0.58);
 		for (i = 0; i < 4; i++) qaws_surface_curve_create_geodesic(s, corner[i], corner[(i + 1) % 4], 0, &sq[i]);
 		r = sst_region(s, sq, 4, 1);

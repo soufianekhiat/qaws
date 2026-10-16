@@ -64,22 +64,22 @@ void qaws_brep_destroy(qaws_brep_shell* shell);
 
 /* Add topological entities */
 qaws_status qaws_brep_add_vertex(
+	qaws_brep_vertex_id* out_id,
 	qaws_brep_shell* shell,
-	qaws_vec3 position,
-	qaws_brep_vertex_id* out_id);
+	qaws_vec3 position);
 
 qaws_status qaws_brep_add_edge(
+	qaws_brep_edge_id* out_id,
 	qaws_brep_shell* shell,
-	qaws_brep_edge_desc const* desc,
-	qaws_brep_edge_id* out_id);
+	qaws_brep_edge_desc const* desc);
 
 qaws_status qaws_brep_add_face(
+	qaws_brep_face_id* out_id,
 	qaws_brep_shell* shell,
-	qaws_brep_face_desc const* desc,
 	qaws_brep_edge_id const* edge_ids,
 	int const* edge_orientations,   /* +1 or -1 per edge */
 	unsigned int edge_count,
-	qaws_brep_face_id* out_id);
+	qaws_brep_face_desc const* desc);
 
 /* Query topology */
 unsigned int qaws_brep_get_vertex_count(qaws_brep_shell const* shell);
@@ -87,48 +87,48 @@ unsigned int qaws_brep_get_edge_count(qaws_brep_shell const* shell);
 unsigned int qaws_brep_get_face_count(qaws_brep_shell const* shell);
 
 qaws_status qaws_brep_get_vertex_position(
+	qaws_vec3* out_position,
 	qaws_brep_shell const* shell,
-	qaws_brep_vertex_id id,
-	qaws_vec3* out_position);
+	qaws_brep_vertex_id id);
 
 qaws_status qaws_brep_get_face_surface(
+	qaws_surface const** out_surface,
 	qaws_brep_shell const* shell,
-	qaws_brep_face_id id,
-	qaws_surface const** out_surface);
+	qaws_brep_face_id id);
 
 qaws_status qaws_brep_get_edge_vertices(
-	qaws_brep_shell const* shell,
-	qaws_brep_edge_id id,
 	qaws_brep_vertex_id* out_v_start,
-	qaws_brep_vertex_id* out_v_end);
+	qaws_brep_vertex_id* out_v_end,
+	qaws_brep_shell const* shell,
+	qaws_brep_edge_id id);
 
 qaws_status qaws_brep_get_edge_faces(
-	qaws_brep_shell const* shell,
-	qaws_brep_edge_id id,
 	qaws_brep_face_id* out_face_left,
-	qaws_brep_face_id* out_face_right);
+	qaws_brep_face_id* out_face_right,
+	qaws_brep_shell const* shell,
+	qaws_brep_edge_id id);
 
 qaws_status qaws_brep_get_face_edges(
-	qaws_brep_shell const* shell,
-	qaws_brep_face_id id,
 	qaws_brep_edge_id* out_edges,
+	unsigned int* out_count,
+	qaws_brep_shell const* shell,
 	unsigned int capacity,
-	unsigned int* out_count);
+	qaws_brep_face_id id);
 
 /* Adjacency queries */
 qaws_status qaws_brep_get_vertex_edges(
-	qaws_brep_shell const* shell,
-	qaws_brep_vertex_id id,
 	qaws_brep_edge_id* out_edges,
+	unsigned int* out_count,
+	qaws_brep_shell const* shell,
 	unsigned int capacity,
-	unsigned int* out_count);
+	qaws_brep_vertex_id id);
 
 qaws_status qaws_brep_get_vertex_faces(
-	qaws_brep_shell const* shell,
-	qaws_brep_vertex_id id,
 	qaws_brep_face_id* out_faces,
+	unsigned int* out_count,
+	qaws_brep_shell const* shell,
 	unsigned int capacity,
-	unsigned int* out_count);
+	qaws_brep_vertex_id id);
 
 /* Validation */
 #ifndef QAWS_ENUM_QAWS_BREP_VALIDATION_FLAGS
@@ -144,23 +144,23 @@ typedef enum qaws_brep_validation_flags
 #endif
 
 qaws_status qaws_brep_validate(
-	qaws_brep_shell const* shell,
-	unsigned int* out_flags);
+	unsigned int* out_flags,
+	qaws_brep_shell const* shell);
 
 /* Euler characteristic: V - E + F = 2 for closed genus-0 shell */
 qaws_status qaws_brep_euler_characteristic(
-	qaws_brep_shell const* shell,
-	int* out_chi);
+	int* out_chi,
+	qaws_brep_shell const* shell);
 
 /* Compute shell volume (only valid for closed shells).
    Uses the divergence theorem on the face meshes. */
 qaws_status qaws_brep_compute_volume(
-	qaws_brep_shell const* shell,
-	qaws_scalar* out_volume);
+	qaws_scalar* out_volume,
+	qaws_brep_shell const* shell);
 
 /* Compute total surface area (sum of all face areas). */
 qaws_status qaws_brep_compute_surface_area(
-	qaws_brep_shell const* shell,
-	qaws_scalar* out_area);
+	qaws_scalar* out_area,
+	qaws_brep_shell const* shell);
 
 #endif /* QAWS_BREP_H */

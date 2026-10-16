@@ -36,7 +36,7 @@ static qaws_surface* ssi_tube_surface(double k, int along_x, double h)
 	d.u_knot_count = 10;
 	d.v_knots = kv;
 	d.v_knot_count = 4;
-	qaws_surface_create_nurbs(&d, &s);
+	qaws_surface_create_nurbs(&s, &d);
 	return s;
 }
 
@@ -68,7 +68,7 @@ static void demo_ssi(void)
 	memset(&fd, 0, sizeof(fd));
 	fd.surface_a = sa;
 	fd.surface_b = sb;
-	qaws_surface_intersect(&fd, fc, 16, &nf, fpts, 20000);
+	qaws_surface_intersect(fc, &nf, fpts, 16, 20000, &fd);
 
 	svg_open(&sv, "showcase/exact13_ssi.svg", 1180, 540, "Certified surface / surface intersection curves",
 		"Two elliptic tubes (rational NURBS conics, extruded): the thin one pierces the wide one. Each loop is a chain of certified points; between two of them lies exactly one smooth arc.");

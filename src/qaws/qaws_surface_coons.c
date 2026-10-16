@@ -594,8 +594,8 @@ static qaws_surface_vtable const coons_surface_vtable = {
 };
 
 qaws_status qaws_surface_create_coons(
-	qaws_surface_coons_desc const* desc,
-	qaws_surface** out_surface)
+	qaws_surface** out_surface,
+	qaws_surface_coons_desc const* desc)
 {
 	qaws_surface* surface;
 	qaws_surface_coons_impl* impl;

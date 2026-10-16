@@ -407,8 +407,8 @@ qaws_status qaws_surface_create_bspline_ex(
 }
 
 qaws_status qaws_surface_create_bspline(
-	qaws_surface_bspline_desc const* desc,
-	qaws_surface** out_surface)
+	qaws_surface** out_surface,
+	qaws_surface_bspline_desc const* desc)
 {
 	return qaws_surface_create_bspline_ex(out_surface, desc, NULL);
 }

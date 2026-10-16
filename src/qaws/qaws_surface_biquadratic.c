@@ -308,8 +308,8 @@ static qaws_surface_vtable const biquadratic_surface_vtable = {
 };
 
 qaws_status qaws_surface_create_biquadratic(
-	qaws_surface_biquadratic_desc const* desc,
-	qaws_surface** out_surface)
+	qaws_surface** out_surface,
+	qaws_surface_biquadratic_desc const* desc)
 {
 	qaws_surface* surface;
 	qaws_surface_biquadratic_impl* impl;

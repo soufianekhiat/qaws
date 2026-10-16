@@ -53,7 +53,7 @@ static qaws_surface* rs_patch(void)
 	for (i = 0; i < 16; i++) { p[i].x = (qaws_scalar)g117_patch[3 * i]; p[i].y = (qaws_scalar)g117_patch[3 * i + 1]; p[i].z = (qaws_scalar)g117_patch[3 * i + 2]; }
 	memset(&d, 0, sizeof(d));
 	d.u_degree = 3; d.v_degree = 3; d.control_points = p; d.u_point_count = 4; d.v_point_count = 4;
-	qaws_surface_create_bezier(&d, &s);
+	qaws_surface_create_bezier(&s, &d);
 	return s;
 }
 
@@ -72,7 +72,7 @@ static qaws_surface* rs_torus(qaws_curve** profile)
 	qaws_curve_create_arc(profile, &ad);
 	memset(&rd, 0, sizeof(rd));
 	rd.profile = *profile; rd.axis_direction.z = 1; rd.angle = 0;
-	qaws_surface_create_revolution(&rd, &s);
+	qaws_surface_create_revolution(&s, &rd);
 	return s;
 }
 
@@ -293,7 +293,7 @@ static void test_domain(void)
 		qaws_curve_create_arc(&prof, &ad);
 		memset(&rd, 0, sizeof(rd));
 		rd.profile = prof; rd.axis_direction.z = 1;
-		qaws_surface_create_revolution(&rd, &sphere);
+		qaws_surface_create_revolution(&sphere, &rd);
 		{
 			qaws_repulsive_surface_desc ss;
 			qaws_range rv = qaws_surface_get_v_range(sphere);
@@ -323,7 +323,7 @@ static void test_domain(void)
 			loop.curves = hl; loop.curve_count = 1; loop.is_outer = 0;
 			memset(&td, 0, sizeof(td));
 			td.base = patch; td.loops = &loop; td.loop_count = 1;
-			qaws_surface_create_trimmed(&td, &trimmed);
+			qaws_surface_create_trimmed(&trimmed, &td);
 			memset(&ts, 0, sizeof(ts));
 			ts.surface = trimmed;
 			memcpy(bad, uv, sizeof(bad));

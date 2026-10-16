@@ -324,8 +324,8 @@ qaws_status qaws_surface_create_bezier_ex(
 }
 
 qaws_status qaws_surface_create_bezier(
-	qaws_surface_bezier_desc const* desc,
-	qaws_surface** out_surface)
+	qaws_surface** out_surface,
+	qaws_surface_bezier_desc const* desc)
 {
 	return qaws_surface_create_bezier_ex(out_surface, desc, NULL);
 }

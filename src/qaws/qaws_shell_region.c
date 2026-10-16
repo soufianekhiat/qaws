@@ -1072,7 +1072,7 @@ qaws_status qaws_shell_atlas_create_from_brep(qaws_brep_shell const* shell, qaws
 	if (!s)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	for (i = 0; i < n && st == QAWS_STATUS_OK; i++)
-		st = qaws_brep_get_face_surface(shell, i, &s[i]);
+		st = qaws_brep_get_face_surface(&s[i], shell, i);
 	if (st == QAWS_STATUS_OK)
 		st = qaws_shell_atlas_create(s, n, tolerance, out_atlas);
 	free(s);

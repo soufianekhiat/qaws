@@ -41,7 +41,7 @@ static void cb_build(qaws_scalar (*p)[CB_CP * 3], cb_patch* out)
 	d.d0 = out->curves[2];
 	d.d1 = out->curves[3];
 	out->surface = NULL;
-	qaws_surface_create_coons(&d, &out->surface);
+	qaws_surface_create_coons(&out->surface, &d);
 }
 
 static void cb_destroy(cb_patch* p)

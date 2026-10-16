@@ -39,7 +39,7 @@ static qaws_surface* sht_face(double const* p00, double const* p10, double const
 	d.p10.x = (qaws_scalar)p10[0]; d.p10.y = (qaws_scalar)p10[1]; d.p10.z = (qaws_scalar)p10[2];
 	d.p01.x = (qaws_scalar)p01[0]; d.p01.y = (qaws_scalar)p01[1]; d.p01.z = (qaws_scalar)p01[2];
 	d.p11.x = (qaws_scalar)p11[0]; d.p11.y = (qaws_scalar)p11[1]; d.p11.z = (qaws_scalar)p11[2];
-	qaws_surface_create_bilinear(&d, &s);
+	qaws_surface_create_bilinear(&s, &d);
 	return s;
 }
 
@@ -105,7 +105,7 @@ static void test_cube(void)
 		ex = 1; ey = y0 + L * sin(th); ez = 1 - (L - tx) * cos(th);
 		if (st == QAWS_STATUS_OK)
 		{
-			qaws_surface_evaluate(f[q.face], q.uv.x, q.uv.y, QAWS_SURFACE_EVAL_POSITION, &e);
+			qaws_surface_evaluate(&e, f[q.face], q.uv.x, q.uv.y, QAWS_SURFACE_EVAL_POSITION);
 			err = fabs(e.position.x - ex) + fabs(e.position.y - ey) + fabs(e.position.z - ez);
 		}
 		sprintf(msg, "cube: a straightest ray over an edge (%u crossing) against the unfolded line within %.2g", cr, err);
@@ -189,7 +189,7 @@ static qaws_surface* sht_hemi(double a0, double a1, qaws_curve** prof)
 	qaws_curve_create_arc(prof, &ad);
 	memset(&rd, 0, sizeof(rd));
 	rd.profile = *prof; rd.axis_direction.z = 1;
-	qaws_surface_create_revolution(&rd, &s);
+	qaws_surface_create_revolution(&s, &rd);
 	return s;
 }
 
@@ -353,7 +353,7 @@ static void sht_bent_monkey(qaws_surface** f)
 		memset(&bd, 0, sizeof(bd));
 		bd.u_degree = 3; bd.v_degree = 3; bd.control_points = cp; bd.u_point_count = 4; bd.v_point_count = 4;
 		f[i] = NULL;
-		qaws_surface_create_bezier(&bd, &f[i]);
+		qaws_surface_create_bezier(&f[i], &bd);
 	}
 }
 

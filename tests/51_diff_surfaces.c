@@ -46,7 +46,7 @@ static qaws_surface* family_surface(surface_family const* f, qaws_scalar const* 
 		d.control_points = (qaws_vec3 const*)cps;
 		d.u_point_count = f->u_count;
 		d.v_point_count = f->v_count;
-		qaws_surface_create_bezier(&d, &s);
+		qaws_surface_create_bezier(&s, &d);
 		break;
 	}
 	case 1:
@@ -61,7 +61,7 @@ static qaws_surface* family_surface(surface_family const* f, qaws_scalar const* 
 		d.u_knot_count = f->u_knot_count;
 		d.v_knots = f->v_knots;
 		d.v_knot_count = f->v_knot_count;
-		qaws_surface_create_bspline(&d, &s);
+		qaws_surface_create_bspline(&s, &d);
 		break;
 	}
 	case 2:
@@ -71,7 +71,7 @@ static qaws_surface* family_surface(surface_family const* f, qaws_scalar const* 
 		memcpy(&d.p10, cps + 3, sizeof(qaws_vec3));
 		memcpy(&d.p01, cps + 6, sizeof(qaws_vec3));
 		memcpy(&d.p11, cps + 9, sizeof(qaws_vec3));
-		qaws_surface_create_bilinear(&d, &s);
+		qaws_surface_create_bilinear(&s, &d);
 		break;
 	}
 	case 4:
@@ -87,14 +87,14 @@ static qaws_surface* family_surface(surface_family const* f, qaws_scalar const* 
 		d.u_knot_count = f->u_knot_count;
 		d.v_knots = f->v_knots;
 		d.v_knot_count = f->v_knot_count;
-		qaws_surface_create_nurbs(&d, &s);
+		qaws_surface_create_nurbs(&s, &d);
 		break;
 	}
 	default:
 	{
 		qaws_surface_biquadratic_desc d;
 		memcpy(d.control_points, cps, sizeof(qaws_vec3) * 9);
-		qaws_surface_create_biquadratic(&d, &s);
+		qaws_surface_create_biquadratic(&s, &d);
 		break;
 	}
 	}
@@ -229,8 +229,8 @@ static void check_primal(surface_family const* f, qaws_surface const* s)
 		qaws_surface_eval_result r;
 		sample_uv(i, &u, &v);
 		TEST_ASSERT_STATUS(qaws_surface_eval_jet(&j, s, u, v, QAWS_SJET_ORDER3));
-		qaws_surface_evaluate(s, u, v, QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_DU | QAWS_SURFACE_EVAL_DV |
-			QAWS_SURFACE_EVAL_DUU | QAWS_SURFACE_EVAL_DUV | QAWS_SURFACE_EVAL_DVV, &r);
+		qaws_surface_evaluate(&r, s, u, v, QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_DU | QAWS_SURFACE_EVAL_DV |
+			QAWS_SURFACE_EVAL_DUU | QAWS_SURFACE_EVAL_DUV | QAWS_SURFACE_EVAL_DVV);
 		if (!vec_close(j.d[0], r.position, 1e-4) || !vec_close(j.d[1], r.du, 1e-4) || !vec_close(j.d[2], r.dv, 1e-4) ||
 		    !vec_close(j.d[3], r.duu, 1e-4) || !vec_close(j.d[4], r.duv, 1e-4) || !vec_close(j.d[5], r.dvv, 1e-4))
 			ok = 0;
@@ -556,7 +556,7 @@ static qaws_surface* knot_surface(knot_surface_params const* p, int rational)
 		d.u_knot_count = SK_UK;
 		d.v_knots = p->vk;
 		d.v_knot_count = SK_VK;
-		qaws_surface_create_nurbs(&d, &s);
+		qaws_surface_create_nurbs(&s, &d);
 	}
 	else
 	{
@@ -571,7 +571,7 @@ static qaws_surface* knot_surface(knot_surface_params const* p, int rational)
 		d.u_knot_count = SK_UK;
 		d.v_knots = p->vk;
 		d.v_knot_count = SK_VK;
-		qaws_surface_create_bspline(&d, &s);
+		qaws_surface_create_bspline(&s, &d);
 	}
 	return s;
 }

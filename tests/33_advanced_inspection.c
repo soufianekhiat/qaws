@@ -22,7 +22,7 @@ static qaws_surface* make_dome(void)
 	desc.u_degree = 2; desc.v_degree = 2;
 	desc.control_points = cp;
 	desc.u_point_count = 3; desc.v_point_count = 3;
-	qaws_surface_create_bezier(&desc, &surf);
+	qaws_surface_create_bezier(&surf, &desc);
 	return surf;
 }
 
@@ -43,7 +43,7 @@ static qaws_surface* make_flat_surface(void)
 	desc.u_degree = 1; desc.v_degree = 1;
 	desc.control_points = cp;
 	desc.u_point_count = 2; desc.v_point_count = 2;
-	qaws_surface_create_bezier(&desc, &surf);
+	qaws_surface_create_bezier(&surf, &desc);
 	return surf;
 }
 
@@ -609,9 +609,9 @@ static void visual_obj_closest_point(void)
 
 			/* Surface normal arrow at closest point (shows orthogonality) */
 			memset(&nr, 0, sizeof(nr));
-			if (qaws_surface_evaluate(surf, u, v,
-				QAWS_SURFACE_EVAL_NORMAL | QAWS_SURFACE_EVAL_DU
-				| QAWS_SURFACE_EVAL_DV, &nr) == QAWS_STATUS_OK)
+			if (qaws_surface_evaluate(&nr, surf, u,
+				v, QAWS_SURFACE_EVAL_NORMAL | QAWS_SURFACE_EVAL_DU
+				| QAWS_SURFACE_EVAL_DV) == QAWS_STATUS_OK)
 			{
 				qaws_vec3 tip;
 				tip.x = closest.x + nr.normal.x * (qaws_scalar)0.5;
@@ -777,7 +777,7 @@ static void visual_svg_surface_curve_intersection(void)
 			qaws_scalar v = (qaws_scalar)vi / (qaws_scalar)32;
 			qaws_surface_eval_result r;
 			memset(&r, 0, sizeof(r));
-			qaws_surface_evaluate(surf, u, v, QAWS_SURFACE_EVAL_POSITION, &r);
+			qaws_surface_evaluate(&r, surf, u, v, QAWS_SURFACE_EVAL_POSITION);
 			pts_2d[vi].x = r.position.x + r.position.y * proj_cx;
 			pts_2d[vi].y = r.position.z + r.position.y * proj_cy;
 		}
@@ -794,7 +794,7 @@ static void visual_svg_surface_curve_intersection(void)
 			qaws_scalar u = (qaws_scalar)ui / (qaws_scalar)32;
 			qaws_surface_eval_result r;
 			memset(&r, 0, sizeof(r));
-			qaws_surface_evaluate(surf, u, v, QAWS_SURFACE_EVAL_POSITION, &r);
+			qaws_surface_evaluate(&r, surf, u, v, QAWS_SURFACE_EVAL_POSITION);
 			pts_2d[ui].x = r.position.x + r.position.y * proj_cx;
 			pts_2d[ui].y = r.position.z + r.position.y * proj_cy;
 		}
@@ -874,7 +874,7 @@ static void visual_svg_closest_point(void)
 			qaws_scalar u = (qaws_scalar)ui / (qaws_scalar)32;
 			qaws_surface_eval_result r;
 			memset(&r, 0, sizeof(r));
-			qaws_surface_evaluate(surf, u, v, QAWS_SURFACE_EVAL_POSITION, &r);
+			qaws_surface_evaluate(&r, surf, u, v, QAWS_SURFACE_EVAL_POSITION);
 			pts_2d[ui].x = r.position.x;
 			pts_2d[ui].y = r.position.z;
 		}
@@ -991,16 +991,16 @@ static void visual_obj_dual_tessellation(void)
 		memset(&r01, 0, sizeof(r01));
 		memset(&r11, 0, sizeof(r11));
 		memset(&rc, 0, sizeof(rc));
-		qaws_surface_evaluate(surf, su0, sv0,
-			QAWS_SURFACE_EVAL_POSITION, &r00);
-		qaws_surface_evaluate(surf, su1, sv0,
-			QAWS_SURFACE_EVAL_POSITION, &r10);
-		qaws_surface_evaluate(surf, su0, sv1,
-			QAWS_SURFACE_EVAL_POSITION, &r01);
-		qaws_surface_evaluate(surf, su1, sv1,
-			QAWS_SURFACE_EVAL_POSITION, &r11);
-		qaws_surface_evaluate(surf, u_mid, v_mid,
-			QAWS_SURFACE_EVAL_POSITION, &rc);
+		qaws_surface_evaluate(&r00, surf, su0,
+			sv0, QAWS_SURFACE_EVAL_POSITION);
+		qaws_surface_evaluate(&r10, surf, su1,
+			sv0, QAWS_SURFACE_EVAL_POSITION);
+		qaws_surface_evaluate(&r01, surf, su0,
+			sv1, QAWS_SURFACE_EVAL_POSITION);
+		qaws_surface_evaluate(&r11, surf, su1,
+			sv1, QAWS_SURFACE_EVAL_POSITION);
+		qaws_surface_evaluate(&rc, surf, u_mid,
+			v_mid, QAWS_SURFACE_EVAL_POSITION);
 
 		if (sdepth < 5)
 		{
@@ -1185,8 +1185,8 @@ static void visual_obj_dual_tessellation(void)
 			* (leaves[i].v0 + leaves[i].v1);
 		qaws_surface_eval_result r;
 		memset(&r, 0, sizeof(r));
-		qaws_surface_evaluate(surf, u_mid, v_mid,
-			QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL, &r);
+		qaws_surface_evaluate(&r, surf, u_mid,
+			v_mid, QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL);
 		obj_vertex(&w, r.position);
 		obj_normal(&w, r.normal);
 	}

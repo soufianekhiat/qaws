@@ -644,7 +644,7 @@ static qaws_surface* off_patch(qaws_scalar const* p)
 	d.control_points = (qaws_vec3 const*)p;
 	d.u_point_count = 4;
 	d.v_point_count = 4;
-	qaws_surface_create_bezier(&d, &s);
+	qaws_surface_create_bezier(&s, &d);
 	return s;
 }
 

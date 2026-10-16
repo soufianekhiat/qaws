@@ -22,7 +22,7 @@ static qaws_surface* vase_surface(qaws_curve* profile)
 	d.axis_origin = v3(0, 0, 0);
 	d.axis_direction = v3(0, 0, 1);
 	d.angle = 0; /* full turn */
-	qaws_surface_create_revolution(&d, &s);
+	qaws_surface_create_revolution(&s, &d);
 	return s;
 }
 

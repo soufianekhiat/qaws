@@ -176,7 +176,7 @@ static qaws_surface* mp_surface(qaws_scalar const* cps)
 	d.u_knot_count = MP_N + 4;
 	d.v_knots = g_mp_knots;
 	d.v_knot_count = MP_N + 4;
-	qaws_surface_create_bspline(&d, &s);
+	qaws_surface_create_bspline(&s, &d);
 	return s;
 }
 
@@ -480,7 +480,7 @@ static qaws_surface* mp_surface_nurbs(qaws_scalar const* cps, qaws_scalar const*
 	d.u_knot_count = MP_N + 4;
 	d.v_knots = g_mp_knots;
 	d.v_knot_count = MP_N + 4;
-	qaws_surface_create_nurbs(&d, &s);
+	qaws_surface_create_nurbs(&s, &d);
 	return s;
 }
 
@@ -730,13 +730,13 @@ static void render_patches(svg* s, view3 const* v, patch_fit const* pf, int grid
 					(qaws_scalar)((j + 1) / (double)grid), (qaws_scalar)((j + 1) / (double)grid) };
 				for (c = 0; c < 4; c++)
 				{
-					qaws_surface_evaluate(srf, uu[c], vv[c], QAWS_SURFACE_EVAL_POSITION, &r[c]);
+					qaws_surface_evaluate(&r[c], srf, uu[c], vv[c], QAWS_SURFACE_EVAL_POSITION);
 					p[0] = r[c].position.x; p[1] = r[c].position.y; p[2] = r[c].position.z;
 					view_xform(v, p, &polys[n].xy[2 * c], &polys[n].xy[2 * c + 1], &d);
 					dsum += d;
 				}
-				qaws_surface_evaluate(srf, (qaws_scalar)((i + 0.5) / grid), (qaws_scalar)((j + 0.5) / grid),
-					QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL, &mid);
+				qaws_surface_evaluate(&mid, srf, (qaws_scalar)((i + 0.5) / grid),
+					(qaws_scalar)((j + 0.5) / grid), QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL);
 				nn[0] = mid.normal.x; nn[1] = mid.normal.y; nn[2] = mid.normal.z;
 				if (nn[0] * mid.position.x + nn[1] * mid.position.y + nn[2] * mid.position.z < 0)
 				{

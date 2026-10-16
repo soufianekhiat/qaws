@@ -39,7 +39,7 @@ static qaws_surface* sgt_sphere(double R, qaws_curve** prof)
 	qaws_curve_create_arc(prof, &ad);
 	memset(&rd, 0, sizeof(rd));
 	rd.profile = *prof; rd.axis_direction.z = 1;
-	qaws_surface_create_revolution(&rd, &s);
+	qaws_surface_create_revolution(&s, &rd);
 	return s;
 }
 
@@ -49,7 +49,7 @@ static qaws_vec3 sgt_point(qaws_surface const* s, qaws_vec2 uv)
 	qaws_range ru = qaws_surface_get_u_range(s);
 	double p = (double)ru.max_value - (double)ru.min_value, u = fmod((double)uv.x - ru.min_value, p);
 	if (u < 0) u += p;
-	qaws_surface_evaluate(s, (qaws_scalar)(ru.min_value + u), uv.y, QAWS_SURFACE_EVAL_POSITION, &r);
+	qaws_surface_evaluate(&r, s, (qaws_scalar)(ru.min_value + u), uv.y, QAWS_SURFACE_EVAL_POSITION);
 	return r.position;
 }
 
@@ -82,7 +82,7 @@ static void test_plane(void)
 	d.p10.x = 3; d.p10.y = (qaws_scalar)0.4;
 	d.p01.x = (qaws_scalar)0.5; d.p01.y = 2;
 	d.p11.x = (qaws_scalar)2.2; d.p11.y = (qaws_scalar)2.6;
-	qaws_surface_create_bilinear(&d, &s);
+	qaws_surface_create_bilinear(&s, &d);
 	for (k = 0; k < 3; k++)
 	{
 		qaws_surface_curve* c = NULL;
@@ -226,7 +226,7 @@ static void test_cylinder(void)
 	qaws_curve_create_arc(&circle, &ad);
 	memset(&ed, 0, sizeof(ed));
 	ed.profile = circle; ed.direction.z = 1; ed.length = (qaws_scalar)H;
-	qaws_surface_create_extrusion(&ed, &s);
+	qaws_surface_create_extrusion(&s, &ed);
 	ru = qaws_surface_get_u_range(s);
 	for (k = 0; k < 3; k++)
 	{
@@ -239,8 +239,8 @@ static void test_cylinder(void)
 		if (qaws_surface_curve_create_geodesic(s, a, b, 0, &c) != QAWS_STATUS_OK) { worst = 1e300; continue; }
 		qaws_surface_curve_get_length(c, &L);
 		/* unrolled: the arc length round (u is unwrapped in the covering plane) and the height */
-		qaws_surface_evaluate(s, (qaws_scalar)0, a.y, QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_DU, &ra);
-		qaws_surface_evaluate(s, (qaws_scalar)0, b.y, QAWS_SURFACE_EVAL_POSITION, &rb);
+		qaws_surface_evaluate(&ra, s, (qaws_scalar)0, a.y, QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_DU);
+		qaws_surface_evaluate(&rb, s, (qaws_scalar)0, b.y, QAWS_SURFACE_EVAL_POSITION);
 		du = ((double)b.x - a.x) * sqrt((double)ra.du.x * ra.du.x + (double)ra.du.y * ra.du.y + (double)ra.du.z * ra.du.z);
 		dh = (double)rb.position.z - ra.position.z;
 		if (fabs((double)L - hypot(du, dh)) > worst) worst = fabs((double)L - hypot(du, dh));
@@ -266,7 +266,7 @@ static void test_patch(void)
 	}
 	memset(&d, 0, sizeof(d));
 	d.u_degree = 3; d.v_degree = 3; d.control_points = cp; d.u_point_count = 4; d.v_point_count = 4;
-	qaws_surface_create_bezier(&d, &s);
+	qaws_surface_create_bezier(&s, &d);
 	/* the exponential map: the angle's direction (from S_u, a quarter turn about S_u x S_v) */
 	for (k = 0; k < 3 && s; k++)
 	{

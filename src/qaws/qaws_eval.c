@@ -160,8 +160,8 @@ qaws_status qaws_surface_evaluate_batch(
 	{
 		qaws_status s;
 		memset(&out_results[i], 0, sizeof(out_results[i]));
-		s = qaws_surface_evaluate(surface, u_params[i], v_params[i],
-			eval_flags, &out_results[i]);
+		s = qaws_surface_evaluate(&out_results[i], surface, u_params[i],
+			v_params[i], eval_flags);
 		if (s != QAWS_STATUS_OK && first_err == QAWS_STATUS_OK)
 			first_err = s;
 	}

@@ -37,7 +37,7 @@ static void gq_at(qaws_surface const* s, double u, double v, double* x)
 {
 	qaws_surface_eval_result r;
 	memset(&r, 0, sizeof(r));
-	qaws_surface_evaluate(s, (qaws_scalar)u, (qaws_scalar)v, QAWS_SURFACE_EVAL_POSITION, &r);
+	qaws_surface_evaluate(&r, s, (qaws_scalar)u, (qaws_scalar)v, QAWS_SURFACE_EVAL_POSITION);
 	x[0] = r.position.x; x[1] = r.position.y; x[2] = r.position.z;
 }
 
@@ -80,7 +80,7 @@ static void test_sphere(void)
 	qaws_curve_create_arc(&prof, &ad);
 	memset(&rd, 0, sizeof(rd));
 	rd.profile = prof; rd.axis_direction.z = 1;
-	qaws_surface_create_revolution(&rd, &s);
+	qaws_surface_create_revolution(&s, &rd);
 	gq_at(s, A[0], A[1], a3); gq_at(s, B[0], B[1], b3); gq_at(s, X[0], X[1], x3); gq_at(s, C[0], C[1], c3); gq_at(s, D[0], D[1], d3);
 	st = qaws_surface_distance(s, gq_uv(A[0], A[1]), gq_uv(B[0], B[1]), 0, &d);
 	ref = R * acos(gq_dot(a3, b3) / (R * R));
@@ -155,7 +155,7 @@ static void test_cylinder(void)
 	qaws_curve_create_bezier(&line, &bd);
 	memset(&rd, 0, sizeof(rd));
 	rd.profile = line; rd.axis_direction.z = 1;
-	qaws_surface_create_revolution(&rd, &cy);
+	qaws_surface_create_revolution(&cy, &rd);
 	qaws_surface_curve_create_geodesic(cy, gq_uv(a[0], a[1]), gq_uv(b[0], b[1]), 0, &e);
 	qaws_surface_curve_create_geodesic(cy, gq_uv(c[0], c[1]), gq_uv(dd[0], dd[1]), 0, &f);
 	for (i = 0; i < 2; i++) { ua[i] = GQ_PI * a[i]; ub[i] = GQ_PI * b[i]; uc[i] = GQ_PI * c[i]; ud[i] = GQ_PI * dd[i]; }
@@ -208,14 +208,14 @@ static void test_shortest_round(void)
 	char msg[300];
 	memset(&d, 0, sizeof(d));
 	d.p00.x = -2; d.p00.y = -2; d.p10.x = 2; d.p10.y = -2; d.p01.x = -2; d.p01.y = 2; d.p11.x = 2; d.p11.y = 2;
-	qaws_surface_create_bilinear(&d, &plate);
+	qaws_surface_create_bilinear(&plate, &d);
 	cp[0] = (qaws_scalar)0.5; cp[1] = 0; cp[2] = (qaws_scalar)0.5; cp[3] = (qaws_scalar)-GQ_PI;
 	memset(&bd, 0, sizeof(bd));
 	bd.dimension = QAWS_DIMENSION_2D; bd.degree = 1; bd.control_points = cp; bd.control_point_count = 2;
 	qaws_curve_create_bezier(&line, &bd);
 	memset(&rd, 0, sizeof(rd));
 	rd.profile = line; rd.axis_direction.z = 1;
-	qaws_surface_create_revolution(&rd, &cy);
+	qaws_surface_create_revolution(&cy, &rd);
 	r1 = gq_disk(plate, 0.5, 0.5, 0.5, &k1);
 	r2 = gq_disk(cy, 0.5, 0.5, 0.3, &k2);
 	s1 = qaws_surface_curve_create_shortest_path(plate, r1, gq_uv((-1.2 + 2) / 4, (0.3 + 2) / 4), gq_uv((0.9 + 2) / 4, (0.2 + 2) / 4), 0, &c1);
@@ -251,7 +251,7 @@ static void test_torus_shortest(void)
 	qaws_curve_create_arc(&prof, &ad);
 	memset(&rd, 0, sizeof(rd));
 	rd.profile = prof; rd.axis_direction.z = 1;
-	qaws_surface_create_revolution(&rd, &s);
+	qaws_surface_create_revolution(&s, &rd);
 	for (i = 0; i < 4; i++)
 	{
 		qaws_surface_curve* c = NULL;

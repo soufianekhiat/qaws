@@ -45,12 +45,12 @@ static int rsf_at(qaws_repulsive_surface_desc const* sd, double u, double v, dou
 	if (qaws_surface_get_kind(sd->surface) == QAWS_SURFACE_KIND_TRIMMED)
 	{
 		int in = 0;
-		if (qaws_surface_trim_contains(sd->surface, (qaws_scalar)u, (qaws_scalar)v, &in) != QAWS_STATUS_OK || !in)
+		if (qaws_surface_trim_contains(&in, sd->surface, (qaws_scalar)u, (qaws_scalar)v) != QAWS_STATUS_OK || !in)
 			return 0;
 	}
-	if (qaws_surface_evaluate(sd->surface, (qaws_scalar)u, (qaws_scalar)v,
-		QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_DU | QAWS_SURFACE_EVAL_DV | (H ? QAWS_SURFACE_EVAL_DUU | QAWS_SURFACE_EVAL_DUV | QAWS_SURFACE_EVAL_DVV : 0),
-		&r) != QAWS_STATUS_OK)
+	if (qaws_surface_evaluate(&r, sd->surface, (qaws_scalar)u,
+		(qaws_scalar)v,
+		QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_DU | QAWS_SURFACE_EVAL_DV | (H ? QAWS_SURFACE_EVAL_DUU | QAWS_SURFACE_EVAL_DUV | QAWS_SURFACE_EVAL_DVV : 0)) != QAWS_STATUS_OK)
 		return 0;
 	x[0] = (double)r.position.x; x[1] = (double)r.position.y; x[2] = (double)r.position.z;
 	{

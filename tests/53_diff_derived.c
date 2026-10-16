@@ -88,7 +88,7 @@ static int instance_build(derived_fixture const* f, qaws_scalar const (*child_pa
 		d.profile = out->children[0];
 		d.direction = qaws_v3(own[0], own[1], own[2]);
 		d.length = 0;
-		qaws_surface_create_extrusion(&d, &out->surface);
+		qaws_surface_create_extrusion(&out->surface, &d);
 	}
 	else if (f->kind == 2)
 	{
@@ -96,7 +96,7 @@ static int instance_build(derived_fixture const* f, qaws_scalar const (*child_pa
 		memset(&d, 0, sizeof(d));
 		d.curve_a = out->children[0];
 		d.curve_b = out->children[1];
-		qaws_surface_create_ruled(&d, &out->surface);
+		qaws_surface_create_ruled(&out->surface, &d);
 	}
 	else if (f->kind == 3)
 	{
@@ -106,7 +106,7 @@ static int instance_build(derived_fixture const* f, qaws_scalar const (*child_pa
 		d.axis_origin = qaws_v3(own[0], own[1], own[2]);
 		d.axis_direction = qaws_v3(0, 0, 1);
 		d.angle = own[3];
-		qaws_surface_create_revolution(&d, &out->surface);
+		qaws_surface_create_revolution(&out->surface, &d);
 	}
 	else if (f->kind == 5)
 	{
@@ -119,7 +119,7 @@ static int instance_build(derived_fixture const* f, qaws_scalar const (*child_pa
 		d.sections = sections;
 		d.section_count = 4;
 		d.v_parameters = vparams; /* away from the sample v values */
-		qaws_surface_create_loft(&d, &out->surface);
+		qaws_surface_create_loft(&out->surface, &d);
 	}
 	else if (f->kind == 6)
 	{
@@ -139,7 +139,7 @@ static int instance_build(derived_fixture const* f, qaws_scalar const (*child_pa
 		d.v_curves = vc;
 		d.v_curve_count = 3;
 		d.u_params = params;
-		qaws_surface_create_gordon(&d, &out->surface);
+		qaws_surface_create_gordon(&out->surface, &d);
 	}
 	else
 	{
@@ -149,7 +149,7 @@ static int instance_build(derived_fixture const* f, qaws_scalar const (*child_pa
 		d.c1 = out->children[1];
 		d.d0 = out->children[2];
 		d.d1 = out->children[3];
-		qaws_surface_create_coons(&d, &out->surface);
+		qaws_surface_create_coons(&out->surface, &d);
 	}
 	return out->surface != NULL;
 }
@@ -402,8 +402,8 @@ static void check_fixture(derived_fixture const* f)
 
 		sample(i, &u, &v);
 		qaws_surface_eval_jet(&p, base.surface, u, v, QAWS_SJET_ORDER2);
-		qaws_surface_evaluate(base.surface, u, v, QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_DU | QAWS_SURFACE_EVAL_DV |
-			QAWS_SURFACE_EVAL_DUU | QAWS_SURFACE_EVAL_DUV | QAWS_SURFACE_EVAL_DVV, &r);
+		qaws_surface_evaluate(&r, base.surface, u, v, QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_DU | QAWS_SURFACE_EVAL_DV |
+			QAWS_SURFACE_EVAL_DUU | QAWS_SURFACE_EVAL_DUV | QAWS_SURFACE_EVAL_DVV);
 		if (!vclose(p.d[0], r.position, 1e-4) || !vclose(p.d[1], r.du, 1e-4) || !vclose(p.d[2], r.dv, 1e-4) ||
 		    !vclose(p.d[3], r.duu, 1e-4) || !vclose(p.d[4], r.duv, 1e-4) || !vclose(p.d[5], r.dvv, 1e-4))
 			ok_jet = 0;
@@ -573,11 +573,11 @@ static int offset_build(offset_params const* p, offset_instance* out)
 	d.u_knot_count = 8;
 	d.v_knots = g_off_knots;
 	d.v_knot_count = 8;
-	if (qaws_surface_create_nurbs(&d, &out->base) != QAWS_STATUS_OK)
+	if (qaws_surface_create_nurbs(&out->base, &d) != QAWS_STATUS_OK)
 		return 0;
 	od.base = out->base;
 	od.distance = p->distance;
-	return qaws_surface_create_offset(&od, &out->offset) == QAWS_STATUS_OK;
+	return qaws_surface_create_offset(&out->offset, &od) == QAWS_STATUS_OK;
 }
 
 static void offset_destroy(offset_instance* in)
@@ -659,7 +659,7 @@ static void test_offset(void)
 		{
 			qaws_surface_eval_result br;
 			qaws_surface_jet j0, ju1, ju0;
-			qaws_surface_evaluate(in.base, u, v, QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL, &br);
+			qaws_surface_evaluate(&br, in.base, u, v, QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL);
 			qaws_surface_eval_jet(&j0, in.offset, u, v, QAWS_SJET_ORDER2);
 			if (!vclose(j0.d[0], qaws_v3_axpy(br.position, br.normal, base.distance), 1e-6))
 				ok_pos = 0;

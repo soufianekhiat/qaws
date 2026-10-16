@@ -25,7 +25,7 @@ static void test_surface_bezier(void)
 	desc.u_point_count = 2;
 	desc.v_point_count = 2;
 
-	s = qaws_surface_create_bezier(&desc, &surf);
+	s = qaws_surface_create_bezier(&surf, &desc);
 	TEST_ASSERT(s == QAWS_STATUS_OK, "bezier surface create");
 	TEST_ASSERT(surf != NULL, "bezier surface not null");
 	TEST_ASSERT(qaws_surface_get_kind(surf) == QAWS_SURFACE_KIND_BEZIER, "bezier kind");
@@ -40,22 +40,22 @@ static void test_surface_bezier(void)
 
 	/* Evaluate at corner (0,0) -> P00 = (0,0,0) */
 	memset(&r, 0, sizeof(r));
-	s = qaws_surface_evaluate(surf, 0, 0, QAWS_SURFACE_EVAL_POSITION, &r);
+	s = qaws_surface_evaluate(&r, surf, 0, 0, QAWS_SURFACE_EVAL_POSITION);
 	TEST_ASSERT(s == QAWS_STATUS_OK, "bezier eval (0,0)");
 	TEST_ASSERT(fabs(r.position.x) < 0.01f && fabs(r.position.y) < 0.01f
 		&& fabs(r.position.z) < 0.01f, "bezier pos (0,0) = origin");
 
 	/* Evaluate at corner (1,1) -> P11 = (2,3,1) */
 	memset(&r, 0, sizeof(r));
-	s = qaws_surface_evaluate(surf, 1, 1, QAWS_SURFACE_EVAL_POSITION, &r);
+	s = qaws_surface_evaluate(&r, surf, 1, 1, QAWS_SURFACE_EVAL_POSITION);
 	TEST_ASSERT(s == QAWS_STATUS_OK, "bezier eval (1,1)");
 	TEST_ASSERT(fabs(r.position.x - 2) < 0.01f && fabs(r.position.y - 3) < 0.01f
 		&& fabs(r.position.z - 1) < 0.01f, "bezier pos (1,1) = (2,3,1)");
 
 	/* Evaluate at center (0.5,0.5) -> average = (1, 1.5, 0.25) */
 	memset(&r, 0, sizeof(r));
-	s = qaws_surface_evaluate(surf, (qaws_scalar)0.5, (qaws_scalar)0.5,
-		QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL, &r);
+	s = qaws_surface_evaluate(&r, surf, (qaws_scalar)0.5,
+		(qaws_scalar)0.5, QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL);
 	TEST_ASSERT(s == QAWS_STATUS_OK, "bezier eval center");
 	TEST_ASSERT(fabs(r.position.x - 1) < 0.01f && fabs(r.position.y - 1.5f) < 0.01f,
 		"bezier center position");
@@ -65,7 +65,7 @@ static void test_surface_bezier(void)
 	{
 		qaws_vec3 pts[25];
 		unsigned int count = 0;
-		s = qaws_surface_sample(surf, 5, 5, pts, 25, &count);
+		s = qaws_surface_sample(pts, &count, surf, 5, 5, 25);
 		TEST_ASSERT(s == QAWS_STATUS_OK, "bezier sample ok");
 		TEST_ASSERT(count == 25, "bezier sample count 25");
 	}
@@ -107,7 +107,7 @@ static void test_surface_bspline(void)
 	desc.u_knot_count = 0; /* auto uniform */
 	desc.v_knot_count = 0;
 
-	s = qaws_surface_create_bspline(&desc, &surf);
+	s = qaws_surface_create_bspline(&surf, &desc);
 	TEST_ASSERT(s == QAWS_STATUS_OK, "bspline surface create");
 	TEST_ASSERT(surf != NULL, "bspline surface not null");
 	TEST_ASSERT(qaws_surface_get_kind(surf) == QAWS_SURFACE_KIND_BSPLINE, "bspline kind");
@@ -122,9 +122,9 @@ static void test_surface_bspline(void)
 		qaws_scalar vm = (vr.min_value + vr.max_value) * (qaws_scalar)0.5;
 
 		memset(&r, 0, sizeof(r));
-		s = qaws_surface_evaluate(surf, um, vm,
-			QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_DU
-			| QAWS_SURFACE_EVAL_DV | QAWS_SURFACE_EVAL_NORMAL, &r);
+		s = qaws_surface_evaluate(&r, surf, um,
+			vm, QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_DU
+			| QAWS_SURFACE_EVAL_DV | QAWS_SURFACE_EVAL_NORMAL);
 		TEST_ASSERT(s == QAWS_STATUS_OK, "bspline eval center ok");
 		TEST_ASSERT(r.valid_flags & QAWS_SURFACE_EVAL_POSITION, "bspline pos valid");
 		TEST_ASSERT(r.valid_flags & QAWS_SURFACE_EVAL_NORMAL, "bspline normal valid");
@@ -136,7 +136,7 @@ static void test_surface_bspline(void)
 	{
 		qaws_vec3 pts[100];
 		unsigned int count = 0;
-		s = qaws_surface_sample(surf, 10, 10, pts, 100, &count);
+		s = qaws_surface_sample(pts, &count, surf, 10, 10, 100);
 		TEST_ASSERT(s == QAWS_STATUS_OK, "bspline sample ok");
 		TEST_ASSERT(count == 100, "bspline sample count 100");
 	}
@@ -178,7 +178,7 @@ static void test_surface_nurbs(void)
 	desc.u_knot_count = 0; /* auto uniform */
 	desc.v_knot_count = 0;
 
-	s = qaws_surface_create_nurbs(&desc, &surf);
+	s = qaws_surface_create_nurbs(&surf, &desc);
 	TEST_ASSERT(s == QAWS_STATUS_OK, "nurbs surface create");
 	TEST_ASSERT(surf != NULL, "nurbs surface not null");
 	TEST_ASSERT(qaws_surface_get_kind(surf) == QAWS_SURFACE_KIND_NURBS, "nurbs kind");
@@ -192,8 +192,8 @@ static void test_surface_nurbs(void)
 		qaws_scalar vm = (vr.min_value + vr.max_value) * (qaws_scalar)0.5;
 
 		memset(&r, 0, sizeof(r));
-		s = qaws_surface_evaluate(surf, um, vm,
-			QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL, &r);
+		s = qaws_surface_evaluate(&r, surf, um,
+			vm, QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL);
 		TEST_ASSERT(s == QAWS_STATUS_OK, "nurbs eval center");
 		TEST_ASSERT(r.valid_flags & QAWS_SURFACE_EVAL_POSITION, "nurbs pos valid");
 		TEST_ASSERT(r.valid_flags & QAWS_SURFACE_EVAL_NORMAL, "nurbs normal valid");
@@ -201,18 +201,18 @@ static void test_surface_nurbs(void)
 
 	/* Evaluate at corners */
 	memset(&r, 0, sizeof(r));
-	s = qaws_surface_evaluate(surf, 0, 0, QAWS_SURFACE_EVAL_POSITION, &r);
+	s = qaws_surface_evaluate(&r, surf, 0, 0, QAWS_SURFACE_EVAL_POSITION);
 	TEST_ASSERT(s == QAWS_STATUS_OK, "nurbs eval corner (0,0)");
 
 	memset(&r, 0, sizeof(r));
-	s = qaws_surface_evaluate(surf, 1, 1, QAWS_SURFACE_EVAL_POSITION, &r);
+	s = qaws_surface_evaluate(&r, surf, 1, 1, QAWS_SURFACE_EVAL_POSITION);
 	TEST_ASSERT(s == QAWS_STATUS_OK, "nurbs eval corner (1,1)");
 
 	/* Sample grid */
 	{
 		qaws_vec3 pts[64];
 		unsigned int count = 0;
-		s = qaws_surface_sample(surf, 8, 8, pts, 64, &count);
+		s = qaws_surface_sample(pts, &count, surf, 8, 8, 64);
 		TEST_ASSERT(s == QAWS_STATUS_OK, "nurbs sample ok");
 		TEST_ASSERT(count == 64, "nurbs sample count 64");
 	}
@@ -231,18 +231,18 @@ static void test_surface_error_handling(void)
 	printf("test_surface_error_handling\n");
 
 	/* Null desc */
-	s = qaws_surface_create_bezier(NULL, &surf);
+	s = qaws_surface_create_bezier(&surf, NULL);
 	TEST_ASSERT(s == QAWS_STATUS_INVALID_ARGUMENT, "bezier null desc");
 
 	/* Null output */
 	memset(&bdesc, 0, sizeof(bdesc));
-	s = qaws_surface_create_bezier(&bdesc, NULL);
+	s = qaws_surface_create_bezier(NULL, &bdesc);
 	TEST_ASSERT(s == QAWS_STATUS_INVALID_ARGUMENT, "bezier null out");
 
 	/* Bad degree */
 	bdesc.u_degree = 0;
 	bdesc.v_degree = 1;
-	s = qaws_surface_create_bezier(&bdesc, &surf);
+	s = qaws_surface_create_bezier(&surf, &bdesc);
 	TEST_ASSERT(s == QAWS_STATUS_INVALID_DEGREE, "bezier bad degree");
 
 	/* Bad point count */
@@ -253,12 +253,12 @@ static void test_surface_error_handling(void)
 		bdesc.control_points = cp;
 		bdesc.u_point_count = 3; /* wrong: should be 2 for degree 1 */
 		bdesc.v_point_count = 2;
-		s = qaws_surface_create_bezier(&bdesc, &surf);
+		s = qaws_surface_create_bezier(&surf, &bdesc);
 		TEST_ASSERT(s == QAWS_STATUS_INVALID_CONTROL_POINT_COUNT, "bezier bad cp count");
 	}
 
 	/* B-spline null desc */
-	s = qaws_surface_create_bspline(NULL, &surf);
+	s = qaws_surface_create_bspline(&surf, NULL);
 	TEST_ASSERT(s == QAWS_STATUS_INVALID_ARGUMENT, "bspline null desc");
 
 	/* B-spline too few CPs */
@@ -270,7 +270,7 @@ static void test_surface_error_handling(void)
 		sdesc.control_points = cp2;
 		sdesc.u_point_count = 2;
 		sdesc.v_point_count = 2;
-		s = qaws_surface_create_bspline(&sdesc, &surf);
+		s = qaws_surface_create_bspline(&surf, &sdesc);
 		TEST_ASSERT(s == QAWS_STATUS_INVALID_CONTROL_POINT_COUNT, "bspline too few CPs");
 	}
 
@@ -284,7 +284,7 @@ static void test_surface_error_handling(void)
 		ndesc.u_point_count = 2;
 		ndesc.v_point_count = 2;
 		ndesc.weights = NULL;
-		s = qaws_surface_create_nurbs(&ndesc, &surf);
+		s = qaws_surface_create_nurbs(&surf, &ndesc);
 		TEST_ASSERT(s == QAWS_STATUS_INVALID_ARGUMENT, "nurbs null weights");
 	}
 
@@ -333,28 +333,28 @@ static void test_surface_ruled(void)
 
 	rdesc.curve_a = ca;
 	rdesc.curve_b = cb;
-	s = qaws_surface_create_ruled(&rdesc, &surf);
+	s = qaws_surface_create_ruled(&surf, &rdesc);
 	TEST_ASSERT(s == QAWS_STATUS_OK, "ruled create ok");
 	TEST_ASSERT(qaws_surface_get_kind(surf) == QAWS_SURFACE_KIND_RULED, "ruled kind");
 
 	/* At v=0 should be on curve A */
 	memset(&r, 0, sizeof(r));
-	s = qaws_surface_evaluate(surf, 0, 0, QAWS_SURFACE_EVAL_POSITION, &r);
+	s = qaws_surface_evaluate(&r, surf, 0, 0, QAWS_SURFACE_EVAL_POSITION);
 	TEST_ASSERT(s == QAWS_STATUS_OK, "ruled eval (0,0)");
 	TEST_ASSERT(fabs(r.position.x) < 0.01f && fabs(r.position.z) < 0.01f,
 		"ruled v=0 on curve A start");
 
 	/* At v=1 should be on curve B */
 	memset(&r, 0, sizeof(r));
-	s = qaws_surface_evaluate(surf, 0, 1, QAWS_SURFACE_EVAL_POSITION, &r);
+	s = qaws_surface_evaluate(&r, surf, 0, 1, QAWS_SURFACE_EVAL_POSITION);
 	TEST_ASSERT(s == QAWS_STATUS_OK, "ruled eval (0,1)");
 	TEST_ASSERT(fabs(r.position.z - 2) < 0.01f, "ruled v=1 on curve B");
 
 	/* dv should be B-A direction (upward) */
 	memset(&r, 0, sizeof(r));
-	s = qaws_surface_evaluate(surf, (qaws_scalar)0.5, (qaws_scalar)0.5,
-		QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_DU
-		| QAWS_SURFACE_EVAL_DV | QAWS_SURFACE_EVAL_NORMAL, &r);
+	s = qaws_surface_evaluate(&r, surf, (qaws_scalar)0.5,
+		(qaws_scalar)0.5, QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_DU
+		| QAWS_SURFACE_EVAL_DV | QAWS_SURFACE_EVAL_NORMAL);
 	TEST_ASSERT(s == QAWS_STATUS_OK, "ruled eval center");
 	TEST_ASSERT(r.valid_flags & QAWS_SURFACE_EVAL_NORMAL, "ruled normal valid");
 	/* Position z should be ~1 at v=0.5 */
@@ -362,8 +362,8 @@ static void test_surface_ruled(void)
 
 	/* dvv should be 0 (linear in v) */
 	memset(&r, 0, sizeof(r));
-	s = qaws_surface_evaluate(surf, (qaws_scalar)0.5, (qaws_scalar)0.5,
-		QAWS_SURFACE_EVAL_DVV, &r);
+	s = qaws_surface_evaluate(&r, surf, (qaws_scalar)0.5,
+		(qaws_scalar)0.5, QAWS_SURFACE_EVAL_DVV);
 	TEST_ASSERT(s == QAWS_STATUS_OK, "ruled dvv eval");
 	TEST_ASSERT(fabs(r.dvv.x) < 0.01f && fabs(r.dvv.y) < 0.01f
 		&& fabs(r.dvv.z) < 0.01f, "ruled dvv = 0");
@@ -372,7 +372,7 @@ static void test_surface_ruled(void)
 	{
 		qaws_vec3 pts[100];
 		unsigned int count = 0;
-		s = qaws_surface_sample(surf, 10, 10, pts, 100, &count);
+		s = qaws_surface_sample(pts, &count, surf, 10, 10, 100);
 		TEST_ASSERT(s == QAWS_STATUS_OK, "ruled sample ok");
 		TEST_ASSERT(count == 100, "ruled sample count 100");
 	}
@@ -430,14 +430,14 @@ static void test_surface_swept(void)
 	sdesc.profile = profile;
 	sdesc.scale = (qaws_scalar)0.3;
 
-	s = qaws_surface_create_swept(&sdesc, &surf);
+	s = qaws_surface_create_swept(&surf, &sdesc);
 	TEST_ASSERT(s == QAWS_STATUS_OK, "swept create ok");
 	TEST_ASSERT(qaws_surface_get_kind(surf) == QAWS_SURFACE_KIND_SWEPT, "swept kind");
 
 	/* Evaluate at path start, profile center-ish */
 	memset(&r, 0, sizeof(r));
-	s = qaws_surface_evaluate(surf, 0, 0,
-		QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_DV | QAWS_SURFACE_EVAL_NORMAL, &r);
+	s = qaws_surface_evaluate(&r, surf, 0,
+		0, QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_DV | QAWS_SURFACE_EVAL_NORMAL);
 	TEST_ASSERT(s == QAWS_STATUS_OK, "swept eval ok");
 	TEST_ASSERT(r.valid_flags & QAWS_SURFACE_EVAL_POSITION, "swept pos valid");
 
@@ -445,7 +445,7 @@ static void test_surface_swept(void)
 	{
 		qaws_vec3 pts[200];
 		unsigned int count = 0;
-		s = qaws_surface_sample(surf, 20, 10, pts, 200, &count);
+		s = qaws_surface_sample(pts, &count, surf, 20, 10, 200);
 		TEST_ASSERT(s == QAWS_STATUS_OK, "swept sample ok");
 		TEST_ASSERT(count == 200, "swept sample count 200");
 	}

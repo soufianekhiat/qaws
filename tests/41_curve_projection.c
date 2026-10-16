@@ -20,7 +20,7 @@ static void test_curve_projection(void)
 		bd.p10.x = 2; bd.p10.y = 0; bd.p10.z = 0;
 		bd.p01.x = 0; bd.p01.y = 2; bd.p01.z = 0;
 		bd.p11.x = 2; bd.p11.y = 2; bd.p11.z = 0;
-		s = qaws_surface_create_bilinear(&bd, &surf);
+		s = qaws_surface_create_bilinear(&surf, &bd);
 		TEST_ASSERT_STATUS(s);
 	}
 
@@ -91,7 +91,7 @@ static void test_geodesic_flat(void)
 		bd.p10.x = 2; bd.p10.y = 0; bd.p10.z = 0;
 		bd.p01.x = 0; bd.p01.y = 2; bd.p01.z = 0;
 		bd.p11.x = 2; bd.p11.y = 2; bd.p11.z = 0;
-		s = qaws_surface_create_bilinear(&bd, &surf);
+		s = qaws_surface_create_bilinear(&surf, &bd);
 		TEST_ASSERT_STATUS(s);
 	}
 
@@ -148,7 +148,7 @@ static void visual_obj_geodesic(void)
 		bd.control_points[6].x = -1; bd.control_points[6].y =  1; bd.control_points[6].z = 0;
 		bd.control_points[7].x =  0; bd.control_points[7].y =  1; bd.control_points[7].z = 0;
 		bd.control_points[8].x =  1; bd.control_points[8].y =  1; bd.control_points[8].z = 0;
-		s = qaws_surface_create_biquadratic(&bd, &surf);
+		s = qaws_surface_create_biquadratic(&surf, &bd);
 		if (s != QAWS_STATUS_OK) return;
 	}
 
@@ -220,7 +220,7 @@ static void visual_obj_projection(void)
 		bd.control_points[6].x = -1; bd.control_points[6].y =  1; bd.control_points[6].z = 0;
 		bd.control_points[7].x =  0; bd.control_points[7].y =  1; bd.control_points[7].z = 0;
 		bd.control_points[8].x =  1; bd.control_points[8].y =  1; bd.control_points[8].z = 0;
-		s = qaws_surface_create_biquadratic(&bd, &surf);
+		s = qaws_surface_create_biquadratic(&surf, &bd);
 		if (s != QAWS_STATUS_OK) return;
 	}
 
@@ -294,8 +294,8 @@ static void visual_obj_projection(void)
 			memset(&er_uv, 0, sizeof(er_uv));
 			qaws_curve_evaluate_2d(&er_uv, uv_curve, t, QAWS_EVAL_FLAG_POSITION);
 			memset(&ser, 0, sizeof(ser));
-			qaws_surface_evaluate(surf, er_uv.position.x, er_uv.position.y,
-				QAWS_SURFACE_EVAL_POSITION, &ser);
+			qaws_surface_evaluate(&ser, surf, er_uv.position.x,
+				er_uv.position.y, QAWS_SURFACE_EVAL_POSITION);
 			obj_sphere(&w, ser.position, (qaws_scalar)0.03);
 		}
 	}

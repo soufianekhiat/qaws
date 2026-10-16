@@ -28,9 +28,9 @@ Request specific outputs by combining flags:
 
 ```c
 qaws_surface_eval_result result;
-qaws_surface_evaluate(surface, u, v,
-    QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL,
-    &result);
+qaws_surface_evaluate(&result, surface, u,
+    v,
+    QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL);
 /* result.position and result.normal are now populated.
    result.valid_flags indicates which fields were computed. */
 ```
@@ -41,7 +41,7 @@ Convenience function that returns only the unit surface normal at (u, v):
 
 ```c
 qaws_vec3 n;
-qaws_surface_get_normal(surface, u, v, &n);
+qaws_surface_get_normal(&n, surface, u, v);
 ```
 
 ### Sample a grid
@@ -52,8 +52,8 @@ Produces a u_count x v_count grid of positions in row-major order (v varies fast
 unsigned int u_count = 32, v_count = 32;
 qaws_vec3 positions[32 * 32];
 unsigned int count;
-qaws_surface_sample(surface, u_count, v_count,
-    positions, 32 * 32, &count);
+qaws_surface_sample(positions, &count, surface,
+    u_count, v_count, 32 * 32);
 ```
 
 ### Inspection
@@ -115,7 +115,7 @@ qaws_surface_bezier_desc desc = {
     .v_point_count = 2
 };
 qaws_surface* s = NULL;
-qaws_surface_create_bezier(&desc, &s);
+qaws_surface_create_bezier(&s, &desc);
 ```
 
 ---
@@ -168,7 +168,7 @@ qaws_surface_bspline_desc desc = {
     .v_knot_count = 0
 };
 qaws_surface* s = NULL;
-qaws_surface_create_bspline(&desc, &s);
+qaws_surface_create_bspline(&s, &desc);
 ```
 
 ---
@@ -231,7 +231,7 @@ qaws_surface_nurbs_desc desc = {
     .v_knot_count = 6
 };
 qaws_surface* s = NULL;
-qaws_surface_create_nurbs(&desc, &s);
+qaws_surface_create_nurbs(&s, &desc);
 ```
 
 ---
@@ -274,7 +274,7 @@ qaws_surface_swept_desc desc = {
     .scale = 1.0f
 };
 qaws_surface* s = NULL;
-qaws_surface_create_swept(&desc, &s);
+qaws_surface_create_swept(&s, &desc);
 /* path_3d and circle_2d must remain valid while s is in use. */
 ```
 
@@ -315,6 +315,6 @@ qaws_surface_ruled_desc desc = {
     .curve_b = top_curve
 };
 qaws_surface* s = NULL;
-qaws_surface_create_ruled(&desc, &s);
+qaws_surface_create_ruled(&s, &desc);
 /* bottom_curve and top_curve must remain valid while s is in use. */
 ```

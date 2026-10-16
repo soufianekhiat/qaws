@@ -710,8 +710,8 @@ static qaws_surface_vtable const gordon_surface_vtable = {
 };
 
 qaws_status qaws_surface_create_gordon(
-	qaws_surface_gordon_desc const* desc,
-	qaws_surface** out_surface)
+	qaws_surface** out_surface,
+	qaws_surface_gordon_desc const* desc)
 {
 	qaws_surface* surface;
 	qaws_surface_gordon_impl* impl;

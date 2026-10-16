@@ -87,7 +87,7 @@ static int sb_newton(sb_ctx* x, qaws_curve const* c, qaws_surface const* s, qaws
 		qaws_surface_eval_result r;
 		int k;
 		if (qaws_internal_curve_point(c, 3, *t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, pc, dc) != QAWS_STATUS_OK
-			|| qaws_surface_evaluate(s, *u, *v, QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_DU | QAWS_SURFACE_EVAL_DV, &r) != QAWS_STATUS_OK)
+			|| qaws_surface_evaluate(&r, s, *u, *v, QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_DU | QAWS_SURFACE_EVAL_DV) != QAWS_STATUS_OK)
 			return 0;
 		f[0] = r.position.x - pc[0]; f[1] = r.position.y - pc[1]; f[2] = r.position.z - pc[2];
 		su[0] = r.du.x; su[1] = r.du.y; su[2] = r.du.z;
@@ -341,11 +341,11 @@ static qaws_status sb_solve(sb_ctx* x, qaws_curve_surface_batch_hit* out_hits, u
 }
 
 qaws_status qaws_curve_surface_batch_find_intersections(
-	qaws_curve_surface_batch_desc const* desc,
 	qaws_curve_surface_batch_hit* out_hits,
-	unsigned int hit_capacity,
 	unsigned int* out_count,
-	qaws_surface_batch_stats* out_stats)
+	qaws_surface_batch_stats* out_stats,
+	unsigned int hit_capacity,
+	qaws_curve_surface_batch_desc const* desc)
 {
 	sb_ctx x;
 	qaws_scalar ext;
@@ -389,7 +389,7 @@ qaws_status qaws_curve_surface_batch_find_intersections(
 /*  Prepared surface sets                                              */
 /* ------------------------------------------------------------------ */
 
-qaws_status qaws_surface_set_create(qaws_surface_batch_desc const* desc, qaws_surface_set** out_set)
+qaws_status qaws_surface_set_create(qaws_surface_set** out_set, qaws_surface_batch_desc const* desc)
 {
 	qaws_surface_set* set;
 	unsigned int i, n, cap = 0;
@@ -444,12 +444,12 @@ unsigned int qaws_surface_set_get_patch_count(qaws_surface_set const* set)
 }
 
 qaws_status qaws_curve_set_find_surface_intersections(
+	qaws_curve_surface_batch_hit* out_hits,
+	unsigned int* out_count,
+	qaws_surface_batch_stats* out_stats,
 	qaws_curve_set const* curves,
 	qaws_surface_set const* surfaces,
-	qaws_curve_surface_batch_hit* out_hits,
-	unsigned int hit_capacity,
-	unsigned int* out_count,
-	qaws_surface_batch_stats* out_stats)
+	unsigned int hit_capacity)
 {
 	sb_ctx x;
 	qaws_curve_surface_batch_desc d;
@@ -528,7 +528,7 @@ static int ss_newton(ss_ctx* x, qaws_surface const* sa, qaws_surface const* sb, 
 		qaws_surface_eval_result ra, rb;
 		qaws_scalar f[3], J[4][3], M[3][3], y[3], det;
 		int r, c, k;
-		if (qaws_surface_evaluate(sa, pt->u1, pt->v1, flags, &ra) != QAWS_STATUS_OK || qaws_surface_evaluate(sb, pt->u2, pt->v2, flags, &rb) != QAWS_STATUS_OK)
+		if (qaws_surface_evaluate(&ra, sa, pt->u1, pt->v1, flags) != QAWS_STATUS_OK || qaws_surface_evaluate(&rb, sb, pt->u2, pt->v2, flags) != QAWS_STATUS_OK)
 			return 0;
 		f[0] = ra.position.x - rb.position.x; f[1] = ra.position.y - rb.position.y; f[2] = ra.position.z - rb.position.z;
 		/* converged: two more steps take it to rounding level */
@@ -1032,7 +1032,7 @@ static int ss_step(ss_ctx* x, qaws_surface const* sa, qaws_surface const* sb, qa
 	qaws_scalar const* vv[2];
 	qaws_scalar delta[2][2];
 	int k, s;
-	if (qaws_surface_evaluate(sa, p->u1, p->v1, flags, &ra) != QAWS_STATUS_OK || qaws_surface_evaluate(sb, p->u2, p->v2, flags, &rb) != QAWS_STATUS_OK)
+	if (qaws_surface_evaluate(&ra, sa, p->u1, p->v1, flags) != QAWS_STATUS_OK || qaws_surface_evaluate(&rb, sb, p->u2, p->v2, flags) != QAWS_STATUS_OK)
 		return 0;
 	au[0] = ra.du.x; au[1] = ra.du.y; au[2] = ra.du.z; av[0] = ra.dv.x; av[1] = ra.dv.y; av[2] = ra.dv.z;
 	bu[0] = rb.du.x; bu[1] = rb.du.y; bu[2] = rb.du.z; bv[0] = rb.dv.x; bv[1] = rb.dv.y; bv[2] = rb.dv.z;
@@ -1306,14 +1306,14 @@ static qaws_status ss_check_out(unsigned int* out_curve_count, unsigned int* out
 }
 
 qaws_status qaws_surface_batch_find_intersections(
-	qaws_surface_batch_desc const* desc,
 	qaws_surface_batch_curve* out_curves,
-	unsigned int curve_capacity,
 	unsigned int* out_curve_count,
 	qaws_ssi_point* out_points,
-	unsigned int point_capacity,
 	unsigned int* out_point_count,
-	qaws_surface_batch_stats* out_stats)
+	qaws_surface_batch_stats* out_stats,
+	unsigned int curve_capacity,
+	unsigned int point_capacity,
+	qaws_surface_batch_desc const* desc)
 {
 	ss_ctx x;
 	ss_out o;
@@ -1355,15 +1355,15 @@ qaws_status qaws_surface_batch_find_intersections(
 }
 
 qaws_status qaws_surface_set_find_intersections(
-	qaws_surface_set const* set,
-	qaws_surface_set const* other,
 	qaws_surface_batch_curve* out_curves,
-	unsigned int curve_capacity,
 	unsigned int* out_curve_count,
 	qaws_ssi_point* out_points,
-	unsigned int point_capacity,
 	unsigned int* out_point_count,
-	qaws_surface_batch_stats* out_stats)
+	qaws_surface_batch_stats* out_stats,
+	qaws_surface_set const* set,
+	qaws_surface_set const* other,
+	unsigned int curve_capacity,
+	unsigned int point_capacity)
 {
 	ss_ctx x;
 	ss_out o;
@@ -1507,7 +1507,7 @@ static qaws_scalar sc_refine(qaws_surface const* s, qaws_scalar const* p, qaws_s
 	for (it = 0; it < SC_ITERS; it++)
 	{
 		qaws_scalar su[3], sv[3], suu[3], suv[3], svv[3], g0, g1, h00, h01, h11, det, du, dv;
-		if (qaws_surface_evaluate(s, *u, *v, flags, &r) != QAWS_STATUS_OK)
+		if (qaws_surface_evaluate(&r, s, *u, *v, flags) != QAWS_STATUS_OK)
 			break;
 		w[0] = r.position.x - p[0]; w[1] = r.position.y - p[1]; w[2] = r.position.z - p[2];
 		su[0] = r.du.x; su[1] = r.du.y; su[2] = r.du.z;
@@ -1576,7 +1576,7 @@ static qaws_scalar sc_refine(qaws_surface const* s, qaws_scalar const* p, qaws_s
 		if (fabs(du) <= (ur.max_value - ur.min_value) * SB_STEP_REL && fabs(dv) <= (vr.max_value - vr.min_value) * SB_STEP_REL)
 			break;
 	}
-	qaws_surface_evaluate(s, *u, *v, QAWS_SURFACE_EVAL_POSITION, &r);
+	qaws_surface_evaluate(&r, s, *u, *v, QAWS_SURFACE_EVAL_POSITION);
 	pos[0] = r.position.x; pos[1] = r.position.y; pos[2] = r.position.z;
 	w[0] = pos[0] - p[0]; w[1] = pos[1] - p[1]; w[2] = pos[2] - p[2];
 	return (qaws_scalar)sqrt(sb_dot(w, w));
@@ -1816,9 +1816,9 @@ static qaws_status sc_run(qaws_surface const* const* surfaces, qaws_flat_patch c
 }
 
 qaws_status qaws_surface_batch_find_closest(
-	qaws_surface_batch_closest_desc const* desc,
 	qaws_surface_batch_closest* out_points,
-	qaws_surface_batch_stats* out_stats)
+	qaws_surface_batch_stats* out_stats,
+	qaws_surface_batch_closest_desc const* desc)
 {
 	qaws_surface_batch_stats st;
 	qaws_flat_patch* patches = NULL;
@@ -1846,12 +1846,12 @@ qaws_status qaws_surface_batch_find_closest(
 }
 
 qaws_status qaws_surface_set_find_closest(
+	qaws_surface_batch_closest* out_points,
+	qaws_surface_batch_stats* out_stats,
 	qaws_surface_set const* set,
 	qaws_scalar const* points,
 	unsigned int point_count,
-	qaws_scalar max_distance,
-	qaws_surface_batch_closest* out_points,
-	qaws_surface_batch_stats* out_stats)
+	qaws_scalar max_distance)
 {
 	qaws_surface_batch_stats st;
 	qaws_status s;
@@ -1893,7 +1893,7 @@ static int sr_newton(sr_ctx const* x, qaws_surface const* s, qaws_scalar* t, qaw
 	{
 		qaws_surface_eval_result r;
 		qaws_scalar f[3], su[3], sv[3], det;
-		if (qaws_surface_evaluate(s, *u, *v, QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_DU | QAWS_SURFACE_EVAL_DV, &r) != QAWS_STATUS_OK)
+		if (qaws_surface_evaluate(&r, s, *u, *v, QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_DU | QAWS_SURFACE_EVAL_DV) != QAWS_STATUS_OK)
 			return 0;
 		f[0] = r.position.x - x->o[0] - *t * x->d[0];
 		f[1] = r.position.y - x->o[1] - *t * x->d[1];
@@ -2114,9 +2114,9 @@ static qaws_status sr_run(qaws_surface const* const* surfaces, qaws_flat_patch c
 }
 
 qaws_status qaws_surface_batch_raycast(
-	qaws_surface_ray_desc const* desc,
 	qaws_surface_ray_hit* out_hits,
-	qaws_surface_batch_stats* out_stats)
+	qaws_surface_batch_stats* out_stats,
+	qaws_surface_ray_desc const* desc)
 {
 	qaws_surface_batch_stats st;
 	qaws_flat_patch* patches = NULL;
@@ -2144,13 +2144,13 @@ qaws_status qaws_surface_batch_raycast(
 }
 
 qaws_status qaws_surface_set_raycast(
+	qaws_surface_ray_hit* out_hits,
+	qaws_surface_batch_stats* out_stats,
 	qaws_surface_set const* set,
 	qaws_scalar const* origins,
 	qaws_scalar const* directions,
 	unsigned int ray_count,
-	qaws_scalar max_t,
-	qaws_surface_ray_hit* out_hits,
-	qaws_surface_batch_stats* out_stats)
+	qaws_scalar max_t)
 {
 	qaws_surface_batch_stats st;
 	qaws_status s;

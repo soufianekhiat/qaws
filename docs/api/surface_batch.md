@@ -32,9 +32,9 @@ typedef struct qaws_curve_surface_batch_hit {
 } qaws_curve_surface_batch_hit;      /* sorted by (curve, surface, t) */
 
 qaws_status qaws_curve_surface_batch_find_intersections(
-	qaws_curve_surface_batch_desc const* desc,
-	qaws_curve_surface_batch_hit* out_hits, unsigned int hit_capacity,
-	unsigned int* out_count, qaws_surface_batch_stats* out_stats);
+	qaws_curve_surface_batch_hit* out_hits,
+	unsigned int* out_count, qaws_surface_batch_stats* out_stats,
+	unsigned int hit_capacity, qaws_curve_surface_batch_desc const* desc);
 ```
 
 Only segment / patch pairs are kept from the grid. Each pair is processed
@@ -62,10 +62,10 @@ typedef struct qaws_surface_batch_curve {
 } qaws_surface_batch_curve;
 
 qaws_status qaws_surface_batch_find_intersections(
-	qaws_surface_batch_desc const* desc,
-	qaws_surface_batch_curve* out_curves, unsigned int curve_capacity, unsigned int* out_curve_count,
-	qaws_ssi_point* out_points, unsigned int point_capacity, unsigned int* out_point_count,
-	qaws_surface_batch_stats* out_stats);
+	qaws_surface_batch_curve* out_curves,
+	unsigned int* out_curve_count, qaws_ssi_point* out_points, unsigned int* out_point_count,
+	qaws_surface_batch_stats* out_stats, unsigned int curve_capacity, unsigned int point_capacity,
+	qaws_surface_batch_desc const* desc);
 ```
 
 Patch pairs of different surfaces (and different families, when given)
@@ -124,16 +124,16 @@ float batch gives the same branch count on all 16 levels.
 ## Prepared sets
 
 ```c
-qaws_status qaws_surface_set_create(qaws_surface_batch_desc const* desc, qaws_surface_set** out_set);
+qaws_status qaws_surface_set_create(qaws_surface_set** out_set, qaws_surface_batch_desc const* desc);
 void qaws_surface_set_destroy(qaws_surface_set* set);
 unsigned int qaws_surface_set_get_patch_count(qaws_surface_set const* set);
 
-qaws_status qaws_surface_set_find_intersections(qaws_surface_set const* set, qaws_surface_set const* other,
-	qaws_surface_batch_curve* out_curves, unsigned int curve_capacity, unsigned int* out_curve_count,
-	qaws_ssi_point* out_points, unsigned int point_capacity, unsigned int* out_point_count, qaws_surface_batch_stats* out_stats);
+qaws_status qaws_surface_set_find_intersections(qaws_surface_batch_curve* out_curves, unsigned int* out_curve_count,
+	qaws_ssi_point* out_points, unsigned int* out_point_count, qaws_surface_batch_stats* out_stats,
+	qaws_surface_set const* set, qaws_surface_set const* other, unsigned int curve_capacity, unsigned int point_capacity);
 
-qaws_status qaws_curve_set_find_surface_intersections(qaws_curve_set const* curves, qaws_surface_set const* surfaces,
-	qaws_curve_surface_batch_hit* out_hits, unsigned int hit_capacity, unsigned int* out_count, qaws_surface_batch_stats* out_stats);
+qaws_status qaws_curve_set_find_surface_intersections(qaws_curve_surface_batch_hit* out_hits, unsigned int* out_count,
+	qaws_surface_batch_stats* out_stats, qaws_curve_set const* curves, qaws_surface_set const* surfaces, unsigned int hit_capacity);
 ```
 
 A surface set flattens its surfaces once, for example a terrain queried
@@ -167,10 +167,10 @@ typedef struct qaws_surface_batch_closest {
 	qaws_vec3 position;
 } qaws_surface_batch_closest;
 
-qaws_status qaws_surface_batch_find_closest(qaws_surface_batch_closest_desc const* desc,
-	qaws_surface_batch_closest* out_points, qaws_surface_batch_stats* out_stats);
-qaws_status qaws_surface_set_find_closest(qaws_surface_set const* set, qaws_scalar const* points, unsigned int point_count,
-	qaws_scalar max_distance, qaws_surface_batch_closest* out_points, qaws_surface_batch_stats* out_stats);
+qaws_status qaws_surface_batch_find_closest(qaws_surface_batch_closest* out_points,
+	qaws_surface_batch_stats* out_stats, qaws_surface_batch_closest_desc const* desc);
+qaws_status qaws_surface_set_find_closest(qaws_surface_batch_closest* out_points, qaws_surface_batch_stats* out_stats, qaws_surface_set const* set,
+	qaws_scalar const* points, unsigned int point_count, qaws_scalar max_distance);
 ```
 
 This returns, for every query point, the nearest point over all surfaces.
@@ -207,10 +207,10 @@ typedef struct qaws_surface_ray_hit {
 	qaws_vec3 position;
 } qaws_surface_ray_hit;
 
-qaws_status qaws_surface_batch_raycast(qaws_surface_ray_desc const* desc, qaws_surface_ray_hit* out_hits,
-	qaws_surface_batch_stats* out_stats);
-qaws_status qaws_surface_set_raycast(qaws_surface_set const* set, qaws_scalar const* origins, qaws_scalar const* directions,
-	unsigned int ray_count, qaws_scalar max_t, qaws_surface_ray_hit* out_hits, qaws_surface_batch_stats* out_stats);
+qaws_status qaws_surface_batch_raycast(qaws_surface_ray_hit* out_hits, qaws_surface_batch_stats* out_stats,
+	qaws_surface_ray_desc const* desc);
+qaws_status qaws_surface_set_raycast(qaws_surface_ray_hit* out_hits, qaws_surface_batch_stats* out_stats, qaws_surface_set const* set,
+	qaws_scalar const* origins, qaws_scalar const* directions, unsigned int ray_count, qaws_scalar max_t);
 ```
 
 This returns the first hit of every ray o + t d, with 0 ≤ t ≤ max_t.

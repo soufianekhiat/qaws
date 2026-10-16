@@ -31,7 +31,7 @@ static qaws_surface* kp_surface(qaws_scalar const* cps, qaws_scalar const* uk, q
 	d.u_knot_count = KP_UK;
 	d.v_knots = vk;
 	d.v_knot_count = KP_VK;
-	qaws_surface_create_bspline(&d, &s);
+	qaws_surface_create_bspline(&s, &d);
 	return s;
 }
 

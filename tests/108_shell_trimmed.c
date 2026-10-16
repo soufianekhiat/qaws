@@ -47,7 +47,7 @@ static qaws_surface* str_plane(double const* p00, double const* p10, double cons
 	d.p10.x = (qaws_scalar)p10[0]; d.p10.y = (qaws_scalar)p10[1]; d.p10.z = (qaws_scalar)p10[2];
 	d.p01.x = (qaws_scalar)p01[0]; d.p01.y = (qaws_scalar)p01[1]; d.p01.z = (qaws_scalar)p01[2];
 	d.p11.x = (qaws_scalar)p11[0]; d.p11.y = (qaws_scalar)p11[1]; d.p11.z = (qaws_scalar)p11[2];
-	qaws_surface_create_bilinear(&d, &s);
+	qaws_surface_create_bilinear(&s, &d);
 	return s;
 }
 
@@ -97,7 +97,7 @@ static qaws_vec3 str_at(qaws_shell_atlas const* a, qaws_shell_point p)
 {
 	qaws_surface_eval_result r;
 	memset(&r, 0, sizeof(r));
-	qaws_surface_evaluate(qaws_shell_atlas_get_face(a, p.face), p.uv.x, p.uv.y, QAWS_SURFACE_EVAL_POSITION, &r);
+	qaws_surface_evaluate(&r, qaws_shell_atlas_get_face(a, p.face), p.uv.x, p.uv.y, QAWS_SURFACE_EVAL_POSITION);
 	return r.position;
 }
 
@@ -188,7 +188,7 @@ static void test_tube(void)
 	char msg[300];
 	memset(&rd, 0, sizeof(rd));
 	rd.profile = prof; rd.axis_direction.z = 1;
-	qaws_surface_create_revolution(&rd, &tube);
+	qaws_surface_create_revolution(&tube, &rd);
 	str_square(oc, 0.125, 0.875);
 	for (i = 0; i < 4; i++) ol[i] = oc[i];
 	hl[0] = hole;
@@ -409,7 +409,7 @@ static void test_cylinder(void)
 	char msg[300];
 	memset(&rd, 0, sizeof(rd));
 	rd.profile = prof; rd.axis_direction.z = 1;
-	qaws_surface_create_revolution(&rd, &s);
+	qaws_surface_create_revolution(&s, &rd);
 	l1[0] = bot; l2[0] = top; l3[0] = hole; l4[0] = disk;
 	pa[0].curves = l1; pa[0].curve_count = 1; pa[0].closed = 1;
 	pa[1].curves = l2; pa[1].curve_count = 1; pa[1].closed = 1;
@@ -480,7 +480,7 @@ static void test_capped_tube(void)
 	char msg[300];
 	memset(&rd, 0, sizeof(rd));
 	rd.profile = prof; rd.axis_direction.z = 1;
-	qaws_surface_create_revolution(&rd, &tube);
+	qaws_surface_create_revolution(&tube, &rd);
 	lf[0] = full; la[0] = h1; la[1] = d1; lb[0] = h2; lb[1] = d2;
 	pf[0].curves = lf; pf[0].curve_count = 1; pf[0].closed = 1;
 	pa[0].curves = la; pa[0].curve_count = 2; pa[0].closed = 1;
@@ -544,7 +544,7 @@ static void test_torus(void)
 	char msg[300];
 	memset(&rd, 0, sizeof(rd));
 	rd.profile = prof; rd.axis_direction.z = 1;
-	qaws_surface_create_revolution(&rd, &s);
+	qaws_surface_create_revolution(&s, &rd);
 	lh[0] = hole; ld[0] = disk;
 	ph[0].curves = lh; ph[0].curve_count = 1; ph[0].closed = 1;
 	pd[0].curves = ld; pd[0].curve_count = 1; pd[0].closed = 1;
@@ -814,7 +814,7 @@ static void test_refusals(void)
 	a = NULL;
 	memset(&rd, 0, sizeof(rd));
 	rd.profile = prof; rd.axis_direction.z = 1;
-	qaws_surface_create_revolution(&rd, &tube);
+	qaws_surface_create_revolution(&tube, &rd);
 	cl[0] = loop;
 	pc.curves = cl; pc.curve_count = 1; pc.closed = 1;
 	fd.surface = tube; fd.trims = &pc; fd.trim_count = 1;

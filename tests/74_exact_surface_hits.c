@@ -50,7 +50,7 @@ static qaws_surface* eh_surface(ref_exact_surface_hits const* r)
 	d.u_knot_count = (unsigned int)r->nku;
 	d.v_knots = kv;
 	d.v_knot_count = (unsigned int)r->nkv;
-	qaws_surface_create_nurbs(&d, &s);
+	qaws_surface_create_nurbs(&s, &d);
 	return s;
 }
 
@@ -136,7 +136,7 @@ static void test_overlap(void)
 	d.control_points = cps;
 	d.u_point_count = 2;
 	d.v_point_count = 2;
-	qaws_surface_create_bezier(&d, &s);
+	qaws_surface_create_bezier(&s, &d);
 	qaws_exact_surface_prepare(NULL, s, &e, NULL);
 	TEST_ASSERT(qaws_exact_surface_line_hits(e, a, b, hits, 4, &count) == QAWS_STATUS_CERTIFICATION_FAILED, "a line lying on the surface is refused");
 	TEST_ASSERT(qaws_exact_surface_line_hits(e, c, dd, hits, 4, &count) == QAWS_STATUS_OK && count == 1 && hits[0].kind == QAWS_EXACT_HIT_POINT &&

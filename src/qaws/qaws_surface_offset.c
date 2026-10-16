@@ -30,7 +30,7 @@ static qaws_status offset_eval_position(
 		| QAWS_SURFACE_EVAL_DV | QAWS_SURFACE_EVAL_NORMAL;
 
 	memset(&base_r, 0, sizeof(base_r));
-	status = qaws_surface_evaluate(base, u, v, flags, &base_r);
+	status = qaws_surface_evaluate(&base_r, base, u, v, flags);
 	if (status != QAWS_STATUS_OK) return status;
 
 	out_pos->x = base_r.position.x + distance * base_r.normal.x;
@@ -497,8 +497,8 @@ static qaws_surface_vtable const offset_surface_vtable = {
 };
 
 qaws_status qaws_surface_create_offset(
-	qaws_surface_offset_desc const* desc,
-	qaws_surface** out_surface)
+	qaws_surface** out_surface,
+	qaws_surface_offset_desc const* desc)
 {
 	qaws_surface* surface;
 	qaws_surface_offset_impl* impl;

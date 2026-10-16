@@ -26,7 +26,7 @@ static qaws_surface* tr_terrain(void)
 	d.control_points = cp;
 	d.u_point_count = TR_GRID;
 	d.v_point_count = TR_GRID;
-	qaws_surface_create_bspline(&d, &s);
+	qaws_surface_create_bspline(&s, &d);
 	return s;
 }
 
@@ -49,14 +49,14 @@ static qaws_surface* tr_plane(double z)
 	d.control_points = cp;
 	d.u_point_count = 2;
 	d.v_point_count = 2;
-	qaws_surface_create_bezier(&d, &s);
+	qaws_surface_create_bezier(&s, &d);
 	return s;
 }
 
 static double tr_value(void const* user, qaws_scalar u, qaws_scalar v)
 {
 	qaws_surface_eval_result r;
-	qaws_surface_evaluate((qaws_surface const*)user, u, v, QAWS_SURFACE_EVAL_POSITION, &r);
+	qaws_surface_evaluate(&r, (qaws_surface const*)user, u, v, QAWS_SURFACE_EVAL_POSITION);
 	return r.position.z;
 }
 
@@ -98,7 +98,7 @@ static void demo_terrain(void)
 	sd.surface_count = 1 + TR_LEVELS;
 	sd.families = fam;
 	t0 = hf_now();
-	qaws_surface_batch_find_intersections(&sd, cv, 1024, &nc, pt, 1 << 17, &np, &sst);
+	qaws_surface_batch_find_intersections(cv, &nc, pt, &np, &sst, 1024, 1 << 17, &sd);
 	t_ssi = hf_now() - t0;
 	t0 = hf_now();
 	for (i = 0; i < TR_LEVELS; i++)
@@ -110,7 +110,7 @@ static void demo_terrain(void)
 		memset(&d, 0, sizeof(d));
 		d.surface_a = sf[0];
 		d.surface_b = sf[1 + i];
-		qaws_surface_intersect(&d, pc, 256, &n, pp, 1 << 15);
+		qaws_surface_intersect(pc, &n, pp, 256, 1 << 15, &d);
 		pair_curves += n;
 	}
 	t_ssi_pair = hf_now() - t0;
@@ -144,7 +144,7 @@ static void demo_terrain(void)
 	cd.surfaces = (qaws_surface const* const*)sf;
 	cd.surface_count = 1;
 	t0 = hf_now();
-	qaws_curve_surface_batch_find_intersections(&cd, hits, 4096, &nh, &cst);
+	qaws_curve_surface_batch_find_intersections(hits, &nh, &cst, 4096, &cd);
 	t_cs = hf_now() - t0;
 	t0 = hf_now();
 	for (i = 0; i < TR_ARCS; i++)

@@ -262,7 +262,7 @@ static void draw_quads(svg* s, projection const* pr, qaws_surface const* surf, i
 		qaws_surface_eval_result r;
 		i = k / nv;
 		j = k % nv;
-		qaws_surface_evaluate(surf, (qaws_scalar)((i + 0.5) / nu), (qaws_scalar)((j + 0.5) / nv), QAWS_SURFACE_EVAL_POSITION, &r);
+		qaws_surface_evaluate(&r, surf, (qaws_scalar)((i + 0.5) / nu), (qaws_scalar)((j + 0.5) / nv), QAWS_SURFACE_EVAL_POSITION);
 		depth[k] = r.position.x + r.position.y;
 		order[k] = k;
 	}
@@ -284,10 +284,10 @@ static void draw_quads(svg* s, projection const* pr, qaws_surface const* surf, i
 		int c;
 		i = order[k] / nv;
 		j = order[k] % nv;
-		qaws_surface_evaluate(surf, (qaws_scalar)(i / (double)nu), (qaws_scalar)(j / (double)nv), QAWS_SURFACE_EVAL_POSITION, &r[0]);
-		qaws_surface_evaluate(surf, (qaws_scalar)((i + 1) / (double)nu), (qaws_scalar)(j / (double)nv), QAWS_SURFACE_EVAL_POSITION, &r[1]);
-		qaws_surface_evaluate(surf, (qaws_scalar)((i + 1) / (double)nu), (qaws_scalar)((j + 1) / (double)nv), QAWS_SURFACE_EVAL_POSITION, &r[2]);
-		qaws_surface_evaluate(surf, (qaws_scalar)(i / (double)nu), (qaws_scalar)((j + 1) / (double)nv), QAWS_SURFACE_EVAL_POSITION, &r[3]);
+		qaws_surface_evaluate(&r[0], surf, (qaws_scalar)(i / (double)nu), (qaws_scalar)(j / (double)nv), QAWS_SURFACE_EVAL_POSITION);
+		qaws_surface_evaluate(&r[1], surf, (qaws_scalar)((i + 1) / (double)nu), (qaws_scalar)(j / (double)nv), QAWS_SURFACE_EVAL_POSITION);
+		qaws_surface_evaluate(&r[2], surf, (qaws_scalar)((i + 1) / (double)nu), (qaws_scalar)((j + 1) / (double)nv), QAWS_SURFACE_EVAL_POSITION);
+		qaws_surface_evaluate(&r[3], surf, (qaws_scalar)(i / (double)nu), (qaws_scalar)((j + 1) / (double)nv), QAWS_SURFACE_EVAL_POSITION);
 		for (c = 0; c < 4; c++)
 			project(pr, r[c].position.x, r[c].position.y, r[c].position.z, &x[c], &y[c]);
 		heat((value(user, (qaws_scalar)((i + 0.5) / nu), (qaws_scalar)((j + 0.5) / nv)) - lo) / (hi - lo), col);

@@ -2371,7 +2371,7 @@ qaws_status qaws_surface_compute_bounds(
 
 	/* Evaluate first point to initialize bounds */
 	status = qaws_surface_evaluate(
-		surface, u_min, v_min, QAWS_SURFACE_EVAL_POSITION, &result);
+		&result, surface, u_min, v_min, QAWS_SURFACE_EVAL_POSITION);
 	if (status != QAWS_STATUS_OK)
 		return status;
 
@@ -2397,7 +2397,7 @@ qaws_status qaws_surface_compute_bounds(
 				/ (qaws_scalar)(nv - 1);
 
 			status = qaws_surface_evaluate(
-				surface, u, v, QAWS_SURFACE_EVAL_POSITION, &result);
+				&result, surface, u, v, QAWS_SURFACE_EVAL_POSITION);
 			if (status != QAWS_STATUS_OK)
 				return status;
 
@@ -2497,9 +2497,9 @@ qaws_status qaws_surface_compute_area(
 				wv = (qaws_scalar)2.0;
 
 			status = qaws_surface_evaluate(
-				surface, u, v,
-				QAWS_SURFACE_EVAL_DU | QAWS_SURFACE_EVAL_DV,
-				&result);
+				&result, surface, u,
+				v,
+				QAWS_SURFACE_EVAL_DU | QAWS_SURFACE_EVAL_DV);
 			if (status != QAWS_STATUS_OK)
 				return status;
 
@@ -2538,11 +2538,11 @@ qaws_status qaws_surface_compute_gaussian_curvature(
 		return QAWS_STATUS_INVALID_ARGUMENT;
 
 	status = qaws_surface_evaluate(
-		surface, u, v,
+		&result, surface, u,
+		v,
 		QAWS_SURFACE_EVAL_DU | QAWS_SURFACE_EVAL_DV
 		| QAWS_SURFACE_EVAL_DUU | QAWS_SURFACE_EVAL_DUV
-		| QAWS_SURFACE_EVAL_DVV,
-		&result);
+		| QAWS_SURFACE_EVAL_DVV);
 	if (status != QAWS_STATUS_OK)
 		return status;
 
@@ -2606,11 +2606,11 @@ qaws_status qaws_surface_compute_mean_curvature(
 		return QAWS_STATUS_INVALID_ARGUMENT;
 
 	status = qaws_surface_evaluate(
-		surface, u, v,
+		&result, surface, u,
+		v,
 		QAWS_SURFACE_EVAL_DU | QAWS_SURFACE_EVAL_DV
 		| QAWS_SURFACE_EVAL_DUU | QAWS_SURFACE_EVAL_DUV
-		| QAWS_SURFACE_EVAL_DVV,
-		&result);
+		| QAWS_SURFACE_EVAL_DVV);
 	if (status != QAWS_STATUS_OK)
 		return status;
 
@@ -2677,11 +2677,11 @@ qaws_status qaws_surface_compute_principal_curvatures(
 		return QAWS_STATUS_INVALID_ARGUMENT;
 
 	status = qaws_surface_evaluate(
-		surface, u, v,
+		&result, surface, u,
+		v,
 		QAWS_SURFACE_EVAL_DU | QAWS_SURFACE_EVAL_DV
 		| QAWS_SURFACE_EVAL_DUU | QAWS_SURFACE_EVAL_DUV
-		| QAWS_SURFACE_EVAL_DVV,
-		&result);
+		| QAWS_SURFACE_EVAL_DVV);
 	if (status != QAWS_STATUS_OK)
 		return status;
 
@@ -3039,7 +3039,7 @@ qaws_status qaws_surface_find_closest_point(
 				/ QAWS_LITERAL(7.0);
 
 			status = qaws_surface_evaluate(
-				surface, u, v, QAWS_SURFACE_EVAL_POSITION, &result);
+				&result, surface, u, v, QAWS_SURFACE_EVAL_POSITION);
 			if (status != QAWS_STATUS_OK)
 				return status;
 
@@ -3066,11 +3066,11 @@ qaws_status qaws_surface_find_closest_point(
 		qaws_vec3 r;
 
 		status = qaws_surface_evaluate(
-			surface, u, v,
+			&result, surface, u,
+			v,
 			QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_DU
 			| QAWS_SURFACE_EVAL_DV | QAWS_SURFACE_EVAL_DUU
-			| QAWS_SURFACE_EVAL_DUV | QAWS_SURFACE_EVAL_DVV,
-			&result);
+			| QAWS_SURFACE_EVAL_DUV | QAWS_SURFACE_EVAL_DVV);
 		if (status != QAWS_STATUS_OK)
 			return status;
 
@@ -3120,7 +3120,7 @@ qaws_status qaws_surface_find_closest_point(
 
 	/* Evaluate final position */
 	status = qaws_surface_evaluate(
-		surface, u, v, QAWS_SURFACE_EVAL_POSITION, &result);
+		&result, surface, u, v, QAWS_SURFACE_EVAL_POSITION);
 	if (status != QAWS_STATUS_OK)
 		return status;
 
@@ -3372,8 +3372,8 @@ qaws_status qaws_surface_find_curve_intersections(
 					/ QAWS_LITERAL(7.0);
 
 				status = qaws_surface_evaluate(
-					surface, u, v, QAWS_SURFACE_EVAL_POSITION,
-					&surf_result);
+					&surf_result, surface, u, v,
+					QAWS_SURFACE_EVAL_POSITION);
 				if (status != QAWS_STATUS_OK)
 					return status;
 
@@ -3403,10 +3403,10 @@ qaws_status qaws_surface_find_curve_intersections(
 		for (iter = 0; iter < 20; ++iter)
 		{
 			status = qaws_surface_evaluate(
-				surface, u, v,
+				&surf_result, surface, u,
+				v,
 				QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_DU
-				| QAWS_SURFACE_EVAL_DV,
-				&surf_result);
+				| QAWS_SURFACE_EVAL_DV);
 			if (status != QAWS_STATUS_OK)
 				return status;
 
@@ -3477,7 +3477,7 @@ qaws_status qaws_surface_find_curve_intersections(
 
 		/* Check convergence */
 		status = qaws_surface_evaluate(
-			surface, u, v, QAWS_SURFACE_EVAL_POSITION, &surf_result);
+			&surf_result, surface, u, v, QAWS_SURFACE_EVAL_POSITION);
 		if (status != QAWS_STATUS_OK)
 			return status;
 
@@ -3578,8 +3578,8 @@ static unsigned int qaws_tess_eval_add(
 		return idx;
 
 	memset(&r, 0, sizeof(r));
-	*out_status = qaws_surface_evaluate(surface, u, v,
-		QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL, &r);
+	*out_status = qaws_surface_evaluate(&r, surface, u,
+		v, QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL);
 	if (*out_status != QAWS_STATUS_OK)
 		return 0;
 
@@ -3749,41 +3749,41 @@ qaws_status qaws_surface_tessellate(
 		v_mid = QAWS_LITERAL(0.5) * (quad.v0 + quad.v1);
 
 		/* Evaluate 4 corners + center */
-		status = qaws_surface_evaluate(surface, quad.u0, quad.v0,
-			QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL,
-			&r00);
+		status = qaws_surface_evaluate(&r00, surface, quad.u0,
+			quad.v0,
+			QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL);
 		if (status != QAWS_STATUS_OK)
 		{
 			free(stack); free(leaves); return status;
 		}
 
-		status = qaws_surface_evaluate(surface, quad.u1, quad.v0,
-			QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL,
-			&r10);
+		status = qaws_surface_evaluate(&r10, surface, quad.u1,
+			quad.v0,
+			QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL);
 		if (status != QAWS_STATUS_OK)
 		{
 			free(stack); free(leaves); return status;
 		}
 
-		status = qaws_surface_evaluate(surface, quad.u0, quad.v1,
-			QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL,
-			&r01);
+		status = qaws_surface_evaluate(&r01, surface, quad.u0,
+			quad.v1,
+			QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL);
 		if (status != QAWS_STATUS_OK)
 		{
 			free(stack); free(leaves); return status;
 		}
 
-		status = qaws_surface_evaluate(surface, quad.u1, quad.v1,
-			QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL,
-			&r11);
+		status = qaws_surface_evaluate(&r11, surface, quad.u1,
+			quad.v1,
+			QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL);
 		if (status != QAWS_STATUS_OK)
 		{
 			free(stack); free(leaves); return status;
 		}
 
-		status = qaws_surface_evaluate(surface, u_mid, v_mid,
-			QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL,
-			&r_center);
+		status = qaws_surface_evaluate(&r_center, surface, u_mid,
+			v_mid,
+			QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL);
 		if (status != QAWS_STATUS_OK)
 		{
 			free(stack); free(leaves); return status;
@@ -4124,7 +4124,7 @@ static void compute_christoffel(
 
 	memset(gamma, 0, sizeof(qaws_scalar) * 8);
 	memset(&r, 0, sizeof(r));
-	qaws_surface_evaluate(surface, u, v, eval_flags, &r);
+	qaws_surface_evaluate(&r, surface, u, v, eval_flags);
 
 	E = r.du.x * r.du.x + r.du.y * r.du.y + r.du.z * r.du.z;
 	F = r.du.x * r.dv.x + r.du.y * r.dv.y + r.du.z * r.dv.z;
@@ -4147,12 +4147,12 @@ static void compute_christoffel(
 		u_clamp = u + h;
 		if (u_clamp > QAWS_ONE) u_clamp = QAWS_ONE;
 		memset(&rp, 0, sizeof(rp));
-		qaws_surface_evaluate(surface, u_clamp, v, eval_flags, &rp);
+		qaws_surface_evaluate(&rp, surface, u_clamp, v, eval_flags);
 
 		u_clamp = u - h;
 		if (u_clamp < QAWS_ZERO) u_clamp = QAWS_ZERO;
 		memset(&rm, 0, sizeof(rm));
-		qaws_surface_evaluate(surface, u_clamp, v, eval_flags, &rm);
+		qaws_surface_evaluate(&rm, surface, u_clamp, v, eval_flags);
 
 		Ep = rp.du.x * rp.du.x + rp.du.y * rp.du.y + rp.du.z * rp.du.z;
 		Fp = rp.du.x * rp.dv.x + rp.du.y * rp.dv.y + rp.du.z * rp.dv.z;
@@ -4169,12 +4169,12 @@ static void compute_christoffel(
 		u_clamp = v + h;
 		if (u_clamp > QAWS_ONE) u_clamp = QAWS_ONE;
 		memset(&rp, 0, sizeof(rp));
-		qaws_surface_evaluate(surface, u, u_clamp, eval_flags, &rp);
+		qaws_surface_evaluate(&rp, surface, u, u_clamp, eval_flags);
 
 		u_clamp = v - h;
 		if (u_clamp < QAWS_ZERO) u_clamp = QAWS_ZERO;
 		memset(&rm, 0, sizeof(rm));
-		qaws_surface_evaluate(surface, u, u_clamp, eval_flags, &rm);
+		qaws_surface_evaluate(&rm, surface, u, u_clamp, eval_flags);
 
 		Ep = rp.du.x * rp.du.x + rp.du.y * rp.du.y + rp.du.z * rp.du.z;
 		Fp = rp.du.x * rp.dv.x + rp.du.y * rp.dv.y + rp.du.z * rp.dv.z;
@@ -4514,9 +4514,9 @@ qaws_status qaws_surface_compute_geodesic(
 			qaws_scalar du2, dv2, d2;
 
 			memset(&sr, 0, sizeof(sr));
-			qaws_surface_evaluate(surface, qaws_clamp(u, QAWS_ZERO, QAWS_ONE),
-				qaws_clamp(v, QAWS_ZERO, QAWS_ONE),
-				QAWS_SURFACE_EVAL_POSITION, &sr);
+			qaws_surface_evaluate(&sr, surface,
+				qaws_clamp(u, QAWS_ZERO, QAWS_ONE),
+				qaws_clamp(v, QAWS_ZERO, QAWS_ONE), QAWS_SURFACE_EVAL_POSITION);
 			path_coords[actual_count * 3 + 0] = sr.position.x;
 			path_coords[actual_count * 3 + 1] = sr.position.y;
 			path_coords[actual_count * 3 + 2] = sr.position.z;
@@ -4539,8 +4539,8 @@ qaws_status qaws_surface_compute_geodesic(
 				{
 					qaws_surface_eval_result sr2;
 					memset(&sr2, 0, sizeof(sr2));
-					qaws_surface_evaluate(surface, u, v,
-						QAWS_SURFACE_EVAL_POSITION, &sr2);
+					qaws_surface_evaluate(&sr2, surface, u,
+						v, QAWS_SURFACE_EVAL_POSITION);
 					path_coords[actual_count * 3 + 0] = sr2.position.x;
 					path_coords[actual_count * 3 + 1] = sr2.position.y;
 					path_coords[actual_count * 3 + 2] = sr2.position.z;
@@ -4561,8 +4561,8 @@ qaws_status qaws_surface_compute_geodesic(
 		{
 			qaws_surface_eval_result end_sr;
 			memset(&end_sr, 0, sizeof(end_sr));
-			qaws_surface_evaluate(surface, end_u, end_v,
-				QAWS_SURFACE_EVAL_POSITION, &end_sr);
+			qaws_surface_evaluate(&end_sr, surface, end_u,
+				end_v, QAWS_SURFACE_EVAL_POSITION);
 			path_coords[actual_count * 3 + 0] = end_sr.position.x;
 			path_coords[actual_count * 3 + 1] = end_sr.position.y;
 			path_coords[actual_count * 3 + 2] = end_sr.position.z;
@@ -4647,8 +4647,8 @@ static qaws_status geodesic_tessellate_and_build(
 			unsigned int idx = i * (grid_n + 1) + j;
 
 			memset(&sr, 0, sizeof(sr));
-			status = qaws_surface_evaluate(surface, u, v,
-				QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL, &sr);
+			status = qaws_surface_evaluate(&sr, surface, u,
+				v, QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL);
 			if (status != QAWS_STATUS_OK)
 			{
 				free(verts); free(indices); free(positions); free(uvs);
@@ -5090,8 +5090,8 @@ qaws_status qaws_surface_compute_geodesic_flip(
 							+ t_along * uv_pts[(pi + 1) * 2 + 1];
 
 						memset(&sr, 0, sizeof(sr));
-						qaws_surface_evaluate(surface, new_u, new_v,
-							QAWS_SURFACE_EVAL_POSITION, &sr);
+						qaws_surface_evaluate(&sr, surface, new_u,
+							new_v, QAWS_SURFACE_EVAL_POSITION);
 
 						/* Check if new position is closer to the line */
 						{
@@ -5134,14 +5134,14 @@ qaws_status qaws_surface_compute_geodesic_flip(
 		{
 			qaws_surface_eval_result sr;
 			memset(&sr, 0, sizeof(sr));
-			qaws_surface_evaluate(surface, start_u, start_v,
-				QAWS_SURFACE_EVAL_POSITION, &sr);
+			qaws_surface_evaluate(&sr, surface, start_u,
+				start_v, QAWS_SURFACE_EVAL_POSITION);
 			pts[0] = sr.position.x;
 			pts[1] = sr.position.y;
 			pts[2] = sr.position.z;
 			memset(&sr, 0, sizeof(sr));
-			qaws_surface_evaluate(surface, end_u, end_v,
-				QAWS_SURFACE_EVAL_POSITION, &sr);
+			qaws_surface_evaluate(&sr, surface, end_u,
+				end_v, QAWS_SURFACE_EVAL_POSITION);
 			pts[(out_count - 1) * 3 + 0] = sr.position.x;
 			pts[(out_count - 1) * 3 + 1] = sr.position.y;
 			pts[(out_count - 1) * 3 + 2] = sr.position.z;
@@ -5838,13 +5838,13 @@ qaws_status qaws_surface_compute_geodesic_heat(
 		{
 			qaws_surface_eval_result sr;
 			memset(&sr, 0, sizeof(sr));
-			qaws_surface_evaluate(surface, start_u, start_v, QAWS_SURFACE_EVAL_POSITION, &sr);
+			qaws_surface_evaluate(&sr, surface, start_u, start_v, QAWS_SURFACE_EVAL_POSITION);
 			path_coords[0] = sr.position.x; path_coords[1] = sr.position.y; path_coords[2] = sr.position.z;
 		}
 		{
 			qaws_surface_eval_result sr;
 			memset(&sr, 0, sizeof(sr));
-			qaws_surface_evaluate(surface, end_u, end_v, QAWS_SURFACE_EVAL_POSITION, &sr);
+			qaws_surface_evaluate(&sr, surface, end_u, end_v, QAWS_SURFACE_EVAL_POSITION);
 			path_coords[(trace_count-1)*3+0] = sr.position.x;
 			path_coords[(trace_count-1)*3+1] = sr.position.y;
 			path_coords[(trace_count-1)*3+2] = sr.position.z;

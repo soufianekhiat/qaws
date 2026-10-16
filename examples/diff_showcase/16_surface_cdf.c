@@ -72,7 +72,7 @@ static void demo_surface_cdf(void)
 	d.control_points = (qaws_vec3 const*)cps;
 	d.u_point_count = 4;
 	d.v_point_count = 4;
-	qaws_surface_create_bezier(&d, &surf);
+	qaws_surface_create_bezier(&surf, &d);
 	/* jittered stratified points */
 	for (i = 0; i < SW_GRID; i++)
 		for (j = 0; j < SW_GRID; j++)

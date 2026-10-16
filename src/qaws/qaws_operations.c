@@ -3360,7 +3360,7 @@ qaws_status qaws_curve_offset_3d(
 			if (status != QAWS_STATUS_OK) { free(params); free(coords); return status; }
 
 			memset(&sr, 0, sizeof(sr));
-			qaws_surface_evaluate(surface, su, sv, QAWS_SURFACE_EVAL_NORMAL, &sr);
+			qaws_surface_evaluate(&sr, surface, su, sv, QAWS_SURFACE_EVAL_NORMAL);
 			offset_dir = sr.normal;
 		}
 

@@ -74,7 +74,7 @@ static void demo_blue_noise(void)
 	d.control_points = (qaws_vec3 const*)cps;
 	d.u_point_count = 4;
 	d.v_point_count = 4;
-	qaws_surface_create_bezier(&d, &surf);
+	qaws_surface_create_bezier(&surf, &d);
 	for (i = 0; i < 2 * BN_N; i++)
 	{
 		rng = rng * 1664525u + 1013904223u;

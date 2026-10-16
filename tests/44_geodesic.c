@@ -66,8 +66,8 @@ static void obj_heat_distance_mesh(
 		qaws_surface_eval_result r;
 		double cr, cg, cb;
 		memset(&r, 0, sizeof(r));
-		qaws_surface_evaluate(surf, u_buf[i], v_buf[i],
-			QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL, &r);
+		qaws_surface_evaluate(&r, surf, u_buf[i],
+			v_buf[i], QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL);
 		distance_color((double)dist[i] / (double)max_dist, &cr, &cg, &cb);
 		obj_vertex_color(w, r.position, cr, cg, cb);
 		obj_normal(w, r.normal);
@@ -148,8 +148,8 @@ static void obj_heat_surface_grid(
 			qaws_scalar d;
 
 			memset(&r, 0, sizeof(r));
-			qaws_surface_evaluate(surf, u, v,
-				QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL, &r);
+			qaws_surface_evaluate(&r, surf, u,
+				v, QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL);
 
 			/* IDW interpolation from K nearest heat vertices */
 			{
@@ -289,7 +289,7 @@ static qaws_status create_hilly_surface(qaws_surface** out_surf)
 	bd.u_knot_count = 0; /* auto uniform clamped */
 	bd.v_knot_count = 0;
 
-	return qaws_surface_create_bspline(&bd, out_surf);
+	return qaws_surface_create_bspline(out_surf, &bd);
 }
 
 /* ------------------------------------------------------------------ */
@@ -344,8 +344,8 @@ static void obj_tube_on_surface(obj_writer* w, qaws_curve const* curve,
 			if (use_projection)
 			{
 				memset(&sr, 0, sizeof(sr));
-				qaws_surface_evaluate(surface, out_u, out_v,
-					QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL, &sr);
+				qaws_surface_evaluate(&sr, surface, out_u,
+					out_v, QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL);
 				center.x = sr.position.x + radius * sr.normal.x;
 				center.y = sr.position.y + radius * sr.normal.y;
 				center.z = sr.position.z + radius * sr.normal.z;
@@ -497,7 +497,7 @@ static void test_geodesic_flip_flat(void)
 		bd.p10.x = 2; bd.p10.y = 0; bd.p10.z = 0;
 		bd.p01.x = 0; bd.p01.y = 2; bd.p01.z = 0;
 		bd.p11.x = 2; bd.p11.y = 2; bd.p11.z = 0;
-		s = qaws_surface_create_bilinear(&bd, &surf);
+		s = qaws_surface_create_bilinear(&surf, &bd);
 		TEST_ASSERT_STATUS(s);
 	}
 
@@ -587,7 +587,7 @@ static void test_geodesic_flip_dome(void)
 		bd.control_points[6].x = 0; bd.control_points[6].y = 2; bd.control_points[6].z = 0;
 		bd.control_points[7].x = 1; bd.control_points[7].y = 2; bd.control_points[7].z = 0;
 		bd.control_points[8].x = 2; bd.control_points[8].y = 2; bd.control_points[8].z = 0;
-		s = qaws_surface_create_biquadratic(&bd, &surf);
+		s = qaws_surface_create_biquadratic(&surf, &bd);
 		TEST_ASSERT_STATUS(s);
 	}
 
@@ -661,7 +661,7 @@ static void test_heat_distance_flat(void)
 		bd.p10.x = 2; bd.p10.y = 0; bd.p10.z = 0;
 		bd.p01.x = 0; bd.p01.y = 2; bd.p01.z = 0;
 		bd.p11.x = 2; bd.p11.y = 2; bd.p11.z = 0;
-		s = qaws_surface_create_bilinear(&bd, &surf);
+		s = qaws_surface_create_bilinear(&surf, &bd);
 		TEST_ASSERT_STATUS(s);
 	}
 
@@ -768,7 +768,7 @@ static void test_heat_distance_dome(void)
 		bd.control_points[6].x = 0; bd.control_points[6].y = 2; bd.control_points[6].z = 0;
 		bd.control_points[7].x = 1; bd.control_points[7].y = 2; bd.control_points[7].z = 0;
 		bd.control_points[8].x = 2; bd.control_points[8].y = 2; bd.control_points[8].z = 0;
-		s = qaws_surface_create_biquadratic(&bd, &surf);
+		s = qaws_surface_create_biquadratic(&surf, &bd);
 		TEST_ASSERT_STATUS(s);
 	}
 
@@ -844,7 +844,7 @@ static void test_heat_distance_buffer_check(void)
 		bd.p10.x = 1; bd.p10.y = 0; bd.p10.z = 0;
 		bd.p01.x = 0; bd.p01.y = 1; bd.p01.z = 0;
 		bd.p11.x = 1; bd.p11.y = 1; bd.p11.z = 0;
-		s = qaws_surface_create_bilinear(&bd, &surf);
+		s = qaws_surface_create_bilinear(&surf, &bd);
 		TEST_ASSERT_STATUS(s);
 	}
 
@@ -942,8 +942,8 @@ static void visual_obj_geodesic_comparison(void)
 
 		memset(&sr_start, 0, sizeof(sr_start));
 		memset(&sr_end, 0, sizeof(sr_end));
-		qaws_surface_evaluate(surf, su, sv, QAWS_SURFACE_EVAL_POSITION, &sr_start);
-		qaws_surface_evaluate(surf, eu, ev, QAWS_SURFACE_EVAL_POSITION, &sr_end);
+		qaws_surface_evaluate(&sr_start, surf, su, sv, QAWS_SURFACE_EVAL_POSITION);
+		qaws_surface_evaluate(&sr_end, surf, eu, ev, QAWS_SURFACE_EVAL_POSITION);
 		printf("  Start pos: (%.4f, %.4f, %.4f)\n",
 			(double)sr_start.position.x, (double)sr_start.position.y, (double)sr_start.position.z);
 		printf("  End   pos: (%.4f, %.4f, %.4f)\n",
@@ -1083,8 +1083,8 @@ static void visual_obj_geodesic_comparison(void)
 			{
 				qaws_surface_eval_result sr;
 				memset(&sr, 0, sizeof(sr));
-				qaws_surface_evaluate(surf, su, sv,
-					QAWS_SURFACE_EVAL_POSITION, &sr);
+				qaws_surface_evaluate(&sr, surf, su,
+					sv, QAWS_SURFACE_EVAL_POSITION);
 				obj_material(&obj, "start_pt", 0.0, 1.0, 0.0);
 				obj_group(&obj, "start_marker");
 				obj_use_material(&obj, "start_pt");
@@ -1095,8 +1095,8 @@ static void visual_obj_geodesic_comparison(void)
 			{
 				qaws_surface_eval_result sr;
 				memset(&sr, 0, sizeof(sr));
-				qaws_surface_evaluate(surf, eu, ev,
-					QAWS_SURFACE_EVAL_POSITION, &sr);
+				qaws_surface_evaluate(&sr, surf, eu,
+					ev, QAWS_SURFACE_EVAL_POSITION);
 				obj_material(&obj, "end_pt", 1.0, 0.0, 0.0);
 				obj_group(&obj, "end_marker");
 				obj_use_material(&obj, "end_pt");

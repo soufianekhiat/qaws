@@ -39,7 +39,7 @@ qaws_status qaws_internal_curve_point(qaws_curve const* c, unsigned int dim, qaw
 static qaws_status fl_surface_point(qaws_surface const* s, qaws_scalar u, qaws_scalar v, qaws_scalar* p)
 {
 	qaws_surface_eval_result r;
-	qaws_status st = qaws_surface_evaluate(s, u, v, QAWS_SURFACE_EVAL_POSITION, &r);
+	qaws_status st = qaws_surface_evaluate(&r, s, u, v, QAWS_SURFACE_EVAL_POSITION);
 	p[0] = r.position.x; p[1] = r.position.y; p[2] = r.position.z;
 	return st;
 }

@@ -269,7 +269,7 @@ static qaws_surface* ref_surface(qaws_scalar const* p)
 	d.u_knot_count = 9;
 	d.v_knots = knots;
 	d.v_knot_count = 9;
-	qaws_surface_create_bspline(&d, &s);
+	qaws_surface_create_bspline(&s, &d);
 	return s;
 }
 
@@ -345,7 +345,7 @@ static qaws_surface* fn_surface(qaws_scalar const* p)
 	d.control_points = (qaws_vec3 const*)p;
 	d.u_point_count = 4;
 	d.v_point_count = 4;
-	qaws_surface_create_bezier(&d, &s);
+	qaws_surface_create_bezier(&s, &d);
 	return s;
 }
 
@@ -575,7 +575,7 @@ static qaws_surface* sk_surface(qaws_scalar const* cps, qaws_scalar const* uk, q
 	d.u_knot_count = SK_KN;
 	d.v_knots = vk;
 	d.v_knot_count = SK_KN;
-	qaws_surface_create_bspline(&d, &s);
+	qaws_surface_create_bspline(&s, &d);
 	return s;
 }
 

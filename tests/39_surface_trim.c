@@ -77,7 +77,7 @@ static qaws_surface* make_flat_coons(
 
 	desc.c0 = *out_c0; desc.c1 = *out_c1;
 	desc.d0 = *out_d0; desc.d1 = *out_d1;
-	qaws_surface_create_coons(&desc, &surf);
+	qaws_surface_create_coons(&surf, &desc);
 	return surf;
 }
 
@@ -151,7 +151,7 @@ static void test_surface_trim_contains(void)
 	tdesc.base = base;
 	tdesc.loops = &loop;
 	tdesc.loop_count = 1;
-	s = qaws_surface_create_trimmed(&tdesc, &trimmed);
+	s = qaws_surface_create_trimmed(&trimmed, &tdesc);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(trimmed != NULL, "trimmed surface created");
 	TEST_ASSERT(qaws_surface_get_kind(trimmed) == QAWS_SURFACE_KIND_TRIMMED,
@@ -159,24 +159,24 @@ static void test_surface_trim_contains(void)
 
 	/* Center (0.5, 0.5) should be inside the trim */
 	inside = -1;
-	s = qaws_surface_trim_contains(trimmed,
-		(qaws_scalar)0.5, (qaws_scalar)0.5, &inside);
+	s = qaws_surface_trim_contains(&inside,
+		trimmed, (qaws_scalar)0.5, (qaws_scalar)0.5);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(inside == 1, "trim center is inside");
 
 	/* Corner (0.0, 0.0) should be outside the trim */
 	inside = -1;
-	s = qaws_surface_trim_contains(trimmed, 0, 0, &inside);
+	s = qaws_surface_trim_contains(&inside, trimmed, 0, 0);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(inside == 0, "trim corner is outside");
 
 	/* Eval at center should match base surface eval */
 	memset(&r_base, 0, sizeof(r_base));
 	memset(&r_trim, 0, sizeof(r_trim));
-	qaws_surface_evaluate(base, (qaws_scalar)0.5, (qaws_scalar)0.5,
-		QAWS_SURFACE_EVAL_POSITION, &r_base);
-	qaws_surface_evaluate(trimmed, (qaws_scalar)0.5, (qaws_scalar)0.5,
-		QAWS_SURFACE_EVAL_POSITION, &r_trim);
+	qaws_surface_evaluate(&r_base, base, (qaws_scalar)0.5,
+		(qaws_scalar)0.5, QAWS_SURFACE_EVAL_POSITION);
+	qaws_surface_evaluate(&r_trim, trimmed, (qaws_scalar)0.5,
+		(qaws_scalar)0.5, QAWS_SURFACE_EVAL_POSITION);
 	TEST_ASSERT(approx_eq_loose(r_base.position.x, r_trim.position.x),
 		"trim eval matches base x");
 	TEST_ASSERT(approx_eq_loose(r_base.position.y, r_trim.position.y),
@@ -227,21 +227,21 @@ static void test_surface_trim_hole(void)
 	tdesc.base = base;
 	tdesc.loops = &loop;
 	tdesc.loop_count = 1;
-	s = qaws_surface_create_trimmed(&tdesc, &trimmed);
+	s = qaws_surface_create_trimmed(&trimmed, &tdesc);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(trimmed != NULL, "trimmed surface with hole created");
 
 	/* Center (0.5, 0.5) is inside the hole, so OUTSIDE the trimmed region */
 	inside = -1;
-	s = qaws_surface_trim_contains(trimmed,
-		(qaws_scalar)0.5, (qaws_scalar)0.5, &inside);
+	s = qaws_surface_trim_contains(&inside,
+		trimmed, (qaws_scalar)0.5, (qaws_scalar)0.5);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(inside == 0, "hole center is outside trimmed region");
 
 	/* Corner (0.1, 0.1) is outside the hole, so INSIDE the trimmed region */
 	inside = -1;
-	s = qaws_surface_trim_contains(trimmed,
-		(qaws_scalar)0.1, (qaws_scalar)0.1, &inside);
+	s = qaws_surface_trim_contains(&inside,
+		trimmed, (qaws_scalar)0.1, (qaws_scalar)0.1);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(inside == 1, "hole corner is inside trimmed region");
 
@@ -289,7 +289,7 @@ static void visual_obj_trimmed(void)
 	{
 		qaws_surface_coons_desc desc;
 		desc.c0 = c0; desc.c1 = c1; desc.d0 = d0; desc.d1 = d1;
-		qaws_surface_create_coons(&desc, &base);
+		qaws_surface_create_coons(&base, &desc);
 	}
 	if (!base) goto cleanup_trim;
 
@@ -305,7 +305,7 @@ static void visual_obj_trimmed(void)
 	tdesc.base = base;
 	tdesc.loops = &loop;
 	tdesc.loop_count = 1;
-	qaws_surface_create_trimmed(&tdesc, &trimmed);
+	qaws_surface_create_trimmed(&trimmed, &tdesc);
 	if (!trimmed) goto cleanup_trim;
 
 	if (!obj_open(&w, OBJ_OUTPUT_DIR "/39_trimmed_surface.obj",
@@ -327,8 +327,8 @@ static void visual_obj_trimmed(void)
 			qaws_scalar v = (qaws_scalar)vi / (qaws_scalar)(res - 1);
 			qaws_surface_eval_result r;
 			memset(&r, 0, sizeof(r));
-			qaws_surface_evaluate(base, u, v,
-				QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL, &r);
+			qaws_surface_evaluate(&r, base, u,
+				v, QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL);
 			obj_vertex(&w, r.position);
 			obj_normal(&w, r.normal);
 		}
@@ -344,10 +344,10 @@ static void visual_obj_trimmed(void)
 			qaws_scalar v1 = (qaws_scalar)(vi + 1) / (qaws_scalar)(res - 1);
 			int in00 = 0, in01 = 0, in10 = 0, in11 = 0;
 
-			qaws_surface_trim_contains(trimmed, u0, v0, &in00);
-			qaws_surface_trim_contains(trimmed, u0, v1, &in01);
-			qaws_surface_trim_contains(trimmed, u1, v0, &in10);
-			qaws_surface_trim_contains(trimmed, u1, v1, &in11);
+			qaws_surface_trim_contains(&in00, trimmed, u0, v0);
+			qaws_surface_trim_contains(&in01, trimmed, u0, v1);
+			qaws_surface_trim_contains(&in10, trimmed, u1, v0);
+			qaws_surface_trim_contains(&in11, trimmed, u1, v1);
 
 			if (in00 && in01 && in10 && in11)
 			{

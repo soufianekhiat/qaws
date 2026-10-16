@@ -1188,7 +1188,7 @@ static qaws_status offset_surface_setup(offset_state* s, unsigned int i)
 	s->hinv[4 * i + 3] = a / det;
 	/* the offset uses the evaluated normal: match its orientation */
 	memset(&sr, 0, sizeof(sr));
-	qaws_surface_evaluate(s->surface, su, sv, QAWS_SURFACE_EVAL_NORMAL, &sr);
+	qaws_surface_evaluate(&sr, s->surface, su, sv, QAWS_SURFACE_EVAL_NORMAL);
 	cr = qaws_v3_cross(j->d[1], j->d[2]);
 	s->nsign[i] = qaws_v3_dot(cr, sr.normal) < QAWS_ZERO ? -QAWS_ONE : QAWS_ONE;
 	s->normals[i] = sr.normal;

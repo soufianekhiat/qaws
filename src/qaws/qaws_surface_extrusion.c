@@ -351,8 +351,8 @@ static qaws_surface_vtable const extrusion_surface_vtable = {
 };
 
 qaws_status qaws_surface_create_extrusion(
-	qaws_surface_extrusion_desc const* desc,
-	qaws_surface** out_surface)
+	qaws_surface** out_surface,
+	qaws_surface_extrusion_desc const* desc)
 {
 	qaws_surface* surface;
 	qaws_surface_extrusion_impl* impl;

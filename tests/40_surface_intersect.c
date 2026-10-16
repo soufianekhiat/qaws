@@ -61,7 +61,7 @@ static qaws_surface* make_dome_coons(
 
 	desc.c0 = *out_c0; desc.c1 = *out_c1;
 	desc.d0 = *out_d0; desc.d1 = *out_d1;
-	qaws_surface_create_coons(&desc, &surf);
+	qaws_surface_create_coons(&surf, &desc);
 	return surf;
 }
 
@@ -88,7 +88,7 @@ static void test_plane_plane_intersection(void)
 		bd.p10.x =  2; bd.p10.y = -2; bd.p10.z = 0;
 		bd.p01.x = -2; bd.p01.y =  2; bd.p01.z = 0;
 		bd.p11.x =  2; bd.p11.y =  2; bd.p11.z = 0;
-		s = qaws_surface_create_bilinear(&bd, &surf_a);
+		s = qaws_surface_create_bilinear(&surf_a, &bd);
 		TEST_ASSERT_STATUS(s);
 	}
 
@@ -99,7 +99,7 @@ static void test_plane_plane_intersection(void)
 		bd.p10.x =  2; bd.p10.y = 0; bd.p10.z = -2;
 		bd.p01.x = -2; bd.p01.y = 0; bd.p01.z =  2;
 		bd.p11.x =  2; bd.p11.y = 0; bd.p11.z =  2;
-		s = qaws_surface_create_bilinear(&bd, &surf_b);
+		s = qaws_surface_create_bilinear(&surf_b, &bd);
 		TEST_ASSERT_STATUS(s);
 	}
 
@@ -116,8 +116,8 @@ static void test_plane_plane_intersection(void)
 	memset(out_curves, 0, sizeof(out_curves));
 	memset(point_buffer, 0, sizeof(point_buffer));
 
-	s = qaws_surface_intersect(&desc, out_curves, 4, &curve_count,
-		point_buffer, 500);
+	s = qaws_surface_intersect(out_curves, &curve_count, point_buffer, 4,
+		500, &desc);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(curve_count >= 1, "plane-plane: at least 1 intersection curve");
 
@@ -166,7 +166,7 @@ static void test_sphere_plane_intersection(void)
 		bd.p10.x =  2; bd.p10.y = -1; bd.p10.z = (qaws_scalar)0.3;
 		bd.p01.x = -2; bd.p01.y =  2; bd.p01.z = (qaws_scalar)0.3;
 		bd.p11.x =  2; bd.p11.y =  2; bd.p11.z = (qaws_scalar)0.3;
-		s = qaws_surface_create_bilinear(&bd, &surf_b);
+		s = qaws_surface_create_bilinear(&surf_b, &bd);
 		TEST_ASSERT_STATUS(s);
 	}
 
@@ -182,8 +182,8 @@ static void test_sphere_plane_intersection(void)
 	memset(out_curves, 0, sizeof(out_curves));
 	memset(point_buffer, 0, sizeof(point_buffer));
 
-	s = qaws_surface_intersect(&desc, out_curves, 4, &curve_count,
-		point_buffer, 500);
+	s = qaws_surface_intersect(out_curves, &curve_count, point_buffer, 4,
+		500, &desc);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(curve_count >= 1, "dome-plane: at least 1 intersection curve");
 
@@ -238,7 +238,7 @@ static void visual_obj_intersection(void)
 		bd.control_points[6].x = -1; bd.control_points[6].y =  1; bd.control_points[6].z = (qaws_scalar)0.5;
 		bd.control_points[7].x =  0; bd.control_points[7].y =  1; bd.control_points[7].z = (qaws_scalar)0.5;
 		bd.control_points[8].x =  1; bd.control_points[8].y =  1; bd.control_points[8].z = (qaws_scalar)0.5;
-		s = qaws_surface_create_biquadratic(&bd, &surf_a);
+		s = qaws_surface_create_biquadratic(&surf_a, &bd);
 		if (s != QAWS_STATUS_OK) return;
 	}
 
@@ -249,7 +249,7 @@ static void visual_obj_intersection(void)
 		bd.p10.x = (qaws_scalar) 1.5; bd.p10.y = (qaws_scalar)-1.5; bd.p10.z = (qaws_scalar)0.25;
 		bd.p01.x = (qaws_scalar)-1.5; bd.p01.y = (qaws_scalar) 1.5; bd.p01.z = (qaws_scalar)0.25;
 		bd.p11.x = (qaws_scalar) 1.5; bd.p11.y = (qaws_scalar) 1.5; bd.p11.z = (qaws_scalar)0.25;
-		s = qaws_surface_create_bilinear(&bd, &surf_b);
+		s = qaws_surface_create_bilinear(&surf_b, &bd);
 		if (s != QAWS_STATUS_OK) { qaws_surface_destroy(surf_a); return; }
 	}
 
@@ -263,8 +263,8 @@ static void visual_obj_intersection(void)
 	memset(out_curves, 0, sizeof(out_curves));
 	memset(point_buffer, 0, sizeof(point_buffer));
 
-	s = qaws_surface_intersect(&desc, out_curves, 8, &curve_count,
-		point_buffer, 1000);
+	s = qaws_surface_intersect(out_curves, &curve_count, point_buffer, 8,
+		1000, &desc);
 	if (s != QAWS_STATUS_OK) goto cleanup_isect;
 
 	if (!obj_open(&w, OBJ_OUTPUT_DIR "/40_surface_intersection.obj",
@@ -327,7 +327,7 @@ static void visual_obj_intersection_tilted(void)
 		bd.p10.x = (qaws_scalar) 1.5; bd.p10.y = (qaws_scalar)-0.5; bd.p10.z = (qaws_scalar)0.6;
 		bd.p01.x = (qaws_scalar)-1.5; bd.p01.y = (qaws_scalar) 1.5; bd.p01.z = (qaws_scalar)0.2;
 		bd.p11.x = (qaws_scalar) 1.5; bd.p11.y = (qaws_scalar) 1.5; bd.p11.z = (qaws_scalar)0.8;
-		s = qaws_surface_create_bilinear(&bd, &surf_b);
+		s = qaws_surface_create_bilinear(&surf_b, &bd);
 		if (s != QAWS_STATUS_OK || !surf_b) goto cleanup_tilt;
 	}
 
@@ -338,8 +338,8 @@ static void visual_obj_intersection_tilted(void)
 	desc.grid_samples = 20;
 	memset(out_curves, 0, sizeof(out_curves));
 	memset(point_buffer, 0, sizeof(point_buffer));
-	s = qaws_surface_intersect(&desc, out_curves, 8, &curve_count,
-		point_buffer, 1000);
+	s = qaws_surface_intersect(out_curves, &curve_count, point_buffer, 8,
+		1000, &desc);
 
 	if (!obj_open(&w, OBJ_OUTPUT_DIR "/40_intersection_tilted.obj",
 		OBJ_OUTPUT_DIR "/40_intersection_tilted.mtl")) goto cleanup_tilt;
@@ -404,7 +404,7 @@ static void visual_obj_intersection_patches(void)
 		bd.control_points[6].x = -2; bd.control_points[6].y =  2; bd.control_points[6].z = 0;
 		bd.control_points[7].x =  0; bd.control_points[7].y =  2; bd.control_points[7].z = 0;
 		bd.control_points[8].x =  2; bd.control_points[8].y =  2; bd.control_points[8].z = 0;
-		s = qaws_surface_create_biquadratic(&bd, &surf_a);
+		s = qaws_surface_create_biquadratic(&surf_a, &bd);
 		if (s != QAWS_STATUS_OK) return;
 	}
 
@@ -420,7 +420,7 @@ static void visual_obj_intersection_patches(void)
 		bd.control_points[6].x = -2; bd.control_points[6].y = 0; bd.control_points[6].z =  2;
 		bd.control_points[7].x =  0; bd.control_points[7].y = 0; bd.control_points[7].z =  2;
 		bd.control_points[8].x =  2; bd.control_points[8].y = 0; bd.control_points[8].z =  2;
-		s = qaws_surface_create_biquadratic(&bd, &surf_b);
+		s = qaws_surface_create_biquadratic(&surf_b, &bd);
 		if (s != QAWS_STATUS_OK) { qaws_surface_destroy(surf_a); return; }
 	}
 
@@ -431,8 +431,8 @@ static void visual_obj_intersection_patches(void)
 	desc.grid_samples = 20;
 	memset(out_curves, 0, sizeof(out_curves));
 	memset(point_buffer, 0, sizeof(point_buffer));
-	s = qaws_surface_intersect(&desc, out_curves, 8, &curve_count,
-		point_buffer, 1000);
+	s = qaws_surface_intersect(out_curves, &curve_count, point_buffer, 8,
+		1000, &desc);
 
 	if (!obj_open(&w, OBJ_OUTPUT_DIR "/40_intersection_patches.obj",
 		OBJ_OUTPUT_DIR "/40_intersection_patches.mtl"))

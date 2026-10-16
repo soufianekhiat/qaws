@@ -31,7 +31,7 @@ static void sbf_fill(svg* s, qaws_surface_region const* r, qaws_surface const* s
 					qaws_surface_eval_result q;
 					double uu = e.position.x;
 					if (pu > 0) { uu = fmod(uu - ru.min_value, pu); if (uu < 0) uu += pu; uu += ru.min_value; }
-					qaws_surface_evaluate(surf, (qaws_scalar)uu, e.position.y, QAWS_SURFACE_EVAL_POSITION, &q);
+					qaws_surface_evaluate(&q, surf, (qaws_scalar)uu, e.position.y, QAWS_SURFACE_EVAL_POSITION);
 					sgf_project(view, q.position, &sx, &sy, NULL);
 				}
 				else
@@ -72,7 +72,7 @@ static void demo_surface_boolean(void)
 	for (i = 0; i < 16; i++) { cp[i].x = (qaws_scalar)((i / 4) / 3.0 * 2); cp[i].y = (qaws_scalar)((i % 4) / 3.0 * 2); cp[i].z = (qaws_scalar)z[i]; }
 	memset(&bd, 0, sizeof(bd));
 	bd.u_degree = 3; bd.v_degree = 3; bd.control_points = cp; bd.u_point_count = 4; bd.v_point_count = 4;
-	qaws_surface_create_bezier(&bd, &patch);
+	qaws_surface_create_bezier(&patch, &bd);
 	corner[0] = sgf_uv(0.15, 0.2); corner[1] = sgf_uv(0.62, 0.15); corner[2] = sgf_uv(0.67, 0.62); corner[3] = sgf_uv(0.2, 0.67);
 	for (i = 0; i < 4; i++) { qaws_surface_curve_create_geodesic(patch, corner[i], corner[(i + 1) % 4], 0, &sq[i]); psq[i] = sq[i]; }
 	qaws_surface_curve_create_geodesic_arc(patch, sgf_uv(0.62, 0.62), (qaws_scalar)0.55, 0, (qaws_scalar)(2 * pi), 0, &circle);

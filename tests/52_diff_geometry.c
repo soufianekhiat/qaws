@@ -92,7 +92,7 @@ static qaws_surface* make_surface(qaws_scalar const* cps, qaws_scalar const* w)
 	d.u_knot_count = 8;
 	d.v_knots = g_surf_knots;
 	d.v_knot_count = 8;
-	qaws_surface_create_nurbs(&d, &s);
+	qaws_surface_create_nurbs(&s, &d);
 	return s;
 }
 
@@ -476,7 +476,7 @@ static void test_surface_umbilic(void)
 	d.p10 = qaws_v3(1, 0, 0);
 	d.p01 = qaws_v3(0, 1, 0);
 	d.p11 = qaws_v3(1, 1, 0);
-	qaws_surface_create_bilinear(&d, &s);
+	qaws_surface_create_bilinear(&s, &d);
 	qaws_surface_eval_jet(&j, s, (qaws_scalar)0.3, (qaws_scalar)0.6, QAWS_SJET_ORDER2);
 	qaws_surface_geometry_eval(&g, NULL, NULL, &validity, &j, NULL, NULL);
 	TEST_ASSERT(validity == QAWS_DIFF_ILL_CONDITIONED, "plane is umbilic: principal curvatures flagged");

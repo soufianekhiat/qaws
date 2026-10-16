@@ -94,7 +94,7 @@ static void ssf_fill3d(svg* s, qaws_surface_region const* r, qaws_surface const*
 					for (m = 0; m < 4; m++)
 					{
 						qaws_surface_eval_result e;
-						qaws_surface_evaluate(surf, (qaws_scalar)cu[m], (qaws_scalar)cv[m], QAWS_SURFACE_EVAL_POSITION, &e);
+						qaws_surface_evaluate(&e, surf, (qaws_scalar)cu[m], (qaws_scalar)cv[m], QAWS_SURFACE_EVAL_POSITION);
 						sgf_project(view, e.position, &q[2 * m], &q[2 * m + 1], NULL);
 					}
 					fprintf(s->f, "<path d=\"M%.2f,%.2f L%.2f,%.2f L%.2f,%.2f L%.2f,%.2f Z\"/>\n", q[0], q[1], q[2], q[3], q[4], q[5], q[6], q[7]);
@@ -258,7 +258,7 @@ static void demo_surface_seams(void)
 		double P;
 		memset(&ed, 0, sizeof(ed));
 		ed.profile = circle; ed.direction.z = 1; ed.length = (qaws_scalar)H;
-		qaws_surface_create_extrusion(&ed, &cy);
+		qaws_surface_create_extrusion(&cy, &ed);
 		ru = qaws_surface_get_u_range(cy);
 		P = (double)ru.max_value - ru.min_value;
 		lo = ssf_line(cy, ru.min_value, 0.3, ru.max_value, 0.3, &k1);
