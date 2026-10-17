@@ -599,6 +599,49 @@ static void test_sheets(void)
 	qaws_repulsive_mesh_destroy(m);
 }
 
+/* collision-checked against an obstacle: a sphere grown toward a sheet
+   just above it (weighted too lightly to hold it by its energy) never
+   passes the sheet */
+static void test_obstacle_checked(void)
+{
+	enum { n = 6 };
+	double xd[3 * 70];
+	qaws_scalar x[3 * 70], ob[3 * n * n], v;
+	unsigned int tris[3 * 130], otris[3 * 2 * (n - 1) * (n - 1)], nv, nf, onf, i, k;
+	double top = -HUGE_VAL, V0;
+	qaws_repulsive_mesh* m;
+	qaws_repulsive_mesh_solve_desc sd;
+	qaws_repulsive_mesh_solver* s = NULL;
+	qaws_repulsive_obstacle od;
+	qaws_repulsive_report r;
+	qaws_status st;
+	char msg[300];
+	rm_sphere(2, xd, tris, &nv, &nf);
+	for (i = 0; i < 3 * nv; i++) x[i] = (qaws_scalar)xd[i];
+	onf = rm_sheet(ob, otris, 0, n, 1.1, 0);
+	for (i = 0; i < n * n; i++) { ob[3 * i] *= 3; ob[3 * i + 1] *= 3; }   /* (wider than the sphere) */
+	V0 = rm_volume_of(x, tris, nf);
+	m = rm_make(nv, tris, nf, 6);
+	memset(&od, 0, sizeof(od));
+	od.positions = ob; od.vertex_count = n * n; od.triangles = otris; od.triangle_count = onf; od.weight = (qaws_scalar)1e-6;
+	memset(&sd, 0, sizeof(sd));
+	sd.hold_volume = 1; sd.collision_checked = 1; sd.obstacles = &od; sd.obstacle_count = 1;
+	memset(&r, 0, sizeof(r));
+	st = qaws_repulsive_mesh_solver_create(m, &sd, x, &s);
+	for (k = 1; st == QAWS_STATUS_OK && k <= 12 && r.reason == QAWS_REPULSIVE_RUNNING; k++)
+	{
+		v = (qaws_scalar)(V0 * (1 + 0.05 * k));
+		st = qaws_repulsive_mesh_solver_set_targets(s, NULL, &v);
+		st = st == QAWS_STATUS_OK ? qaws_repulsive_mesh_solver_step(s, x, &r) : st;
+	}
+	qaws_repulsive_mesh_solver_destroy(s);
+	for (i = 0; i < nv; i++) top = fmax(top, (double)x[3 * i + 2]);
+	sprintf(msg, "an obstacle collision-checked: the sphere grown to %.3fx, its top %.4f under the sheet at 1.1; collisions refused %u",
+		rm_volume_of(x, tris, nf) / V0, top, r.rejected_collision);
+	TEST_ASSERT(st == QAWS_STATUS_OK && top < 1.1 && rm_volume_of(x, tris, nf) > 1.4 * V0, msg);
+	qaws_repulsive_mesh_destroy(m);
+}
+
 static void test_path_check(void)
 {
 	/* a triangle (0, 1, 2) and a separate edge (3, 4) with a free vertex 5
@@ -664,6 +707,7 @@ int test_114_repulsive_mesh_solve_main(void)
 	test_translations();
 	test_targets();
 	test_obstacles();
+	test_obstacle_checked();
 	test_path_check();
 	test_refusals();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);

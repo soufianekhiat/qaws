@@ -307,8 +307,17 @@ the report.
   against the surface's faces and normals. Each obstacle's tree is built
   once; a surface face visits it as in the Barnes-Hut energy, a far node
   by its forward and reverse terms (its averaged projector), a near leaf
-  item by item (then exactly). They add nothing to the metric, are not
-  collision-checked, and have no solution derivatives.
+  item by item (then exactly). They add nothing to the metric and have no
+  solution derivatives. `collision_checked` checks them as it checks the
+  mesh against itself: a mesh vertex against an obstacle's faces, a mesh
+  face against its vertices or points, edges against edges, each motion
+  keeping at least min(clearance, half the distance at its start). Their
+  energy alone repels, but a step lands where it lands: unchecked, a shrink
+  wrap passed between a sparse cloud's points, and an envelope through the
+  level inside it.
+- **Step cap.** `max_step` caps a step's largest vertex move, in mean edge
+  lengths (0: none; the trial size otherwise doubles after each accepted
+  step).
 
   The area and volume rows are divided by the mean edge length l and l^2,
   so that one tolerance (in lengths) serves every row.
@@ -365,6 +374,8 @@ vertex form's kernel is the constants only.
 | Translations (2), two spheres: each one's mean direction against its dual-area mean of the differential, less their mean; 10 steps part them with the overall barycenter kept; a pinned sphere stays while the other moves; the drift (1) refused with pins | within 1e-10 relative; the barycenter 1e-12 | 1e-4, 1e-5 |
 | Moving targets: the held area raised 5 % a step for 10 steps reaches 1.5 times its input; a volume not held and a negative area refused. The volume's deviation (3, toward twice the volume): the energy at the input against the unweighted + 3/4, the volume growing; a negative weight refused | 1e-8; 1e-10 relative | 1e-5; 1e-4 |
 | Obstacles: a sphere's mesh obstacle (weight 2, theta 0) against twice the two meshes' cross terms (the union's energy less each one's), and its gradient; hierarchical (0.25) within 5 %; a point cloud (weight 3) against the brute-force sum; drifting free (translations 1), the sphere moves away from it; a weight of 0 and an index out of range refused | 1e-10 relative, the gradient 1e-9 | same (in double) |
+| An obstacle collision-checked: a sphere's volume raised 1.6x toward a sheet just above it, weighted 1e-6 (too light to hold it by its energy): grown past 1.4x, its top stays under the sheet | | |
+| The step cap (0.005): no move over 5 steps beyond it, whatever the trial size grew to | | |
 
 Cost: the metric and the systems are dense, O(F^2) to assemble and
 (3V + k)^3 to factor. A 128-face sphere takes well under a second per

@@ -45,6 +45,10 @@ struct qaws_repulsive_mesh_solver
 	int keep;
 	qaws_internal_obstacle** obs;   /* nobs fixed obstacles' trees */
 	unsigned int nobs;
+	/* the obstacles for the collision check: their vertices and points (3
+	   each), faces and edges numbered after the mesh's vertices */
+	double* ox;
+	unsigned int onv, *otri, onf, *oedge, one;
 };
 
 /* the barycenter-type rows: 3 per group, or 3 for the held barycenter */
@@ -384,9 +388,13 @@ static double rm_move(double const* x0, double const* x1, unsigned int v)
    check = 0: whether no such pair touches at x0 (the input check) */
 /* the vertex-face and edge-edge pairs (with check 0: the still input, and
    edge-face crossings) through the grid broad phase over one box list:
-   vertices [0, nv), edges [nv, nv + ne), faces after. Each box holds its
-   element's straight motion x0 -> x1, grown by pad; boxes farther apart
-   than 2 pad hold elements that stay farther apart than the clearance. */
+   the mesh's vertices [0, nv), edges [nv, nv + ne), faces; then the
+   obstacles' vertices and points, edges, faces. Each box holds its
+   element's straight motion x0 -> x1 (an obstacle's still), grown by pad;
+   boxes farther apart than 2 pad hold elements that stay farther apart
+   than the clearance. Positions: the mesh's, then the obstacles' (fixed),
+   so one vertex number reads either. Obstacle pairs: a mesh vertex and an
+   obstacle face, a mesh face and an obstacle vertex or point, two edges. */
 typedef struct rm_bp
 {
 	qaws_repulsive_mesh_solver const* s;
@@ -394,66 +402,88 @@ typedef struct rm_bp
 	int check;
 } rm_bp;
 
-static int rm_bp_kind(rm_bp const* b, unsigned int i)
+/* an element's kind (0 vertex, 1 edge, 2 face; 3, 4, 5 the obstacles'),
+   and its vertices (numbers into the joint positions) */
+static int rm_bp_kind(rm_bp const* b, unsigned int i, unsigned int const** vs)
 {
-	return i < b->s->m->nv ? 0 : i < b->s->m->nv + b->s->ne ? 1 : 2;   /* vertex, edge, face */
+	qaws_repulsive_mesh_solver const* s = b->s;
+	unsigned int n0 = s->m->nv, n1 = n0 + s->ne, n2 = n1 + s->m->nf, n3 = n2 + s->onv, n4 = n3 + s->one;
+	if (i < n0) { *vs = NULL; return 0; }
+	if (i < n1) { *vs = s->edges + 2 * (i - n0); return 1; }
+	if (i < n2) { *vs = s->m->tris + 3 * (i - n1); return 2; }
+	if (i < n3) { *vs = NULL; return 3; }
+	if (i < n4) { *vs = s->oedge + 2 * (i - n3); return 4; }
+	*vs = s->otri + 3 * (i - n4);
+	return 5;
+}
+
+/* a vertex element's number into the joint positions */
+static unsigned int rm_bp_vertex(rm_bp const* b, unsigned int i, int kind)
+{
+	return kind == 0 ? i : b->s->m->nv + (i - b->s->m->nv - b->s->ne - b->s->m->nf);
+}
+
+/* the pair's two elements, the lower kind first */
+static void rm_bp_order(rm_bp const* b, unsigned int* i, unsigned int* j, int* ki, int* kj, unsigned int const** vi, unsigned int const** vj)
+{
+	*ki = rm_bp_kind(b, *i, vi); *kj = rm_bp_kind(b, *j, vj);
+	if (*ki > *kj)
+	{
+		unsigned int t = *i;
+		unsigned int const* v = *vi;
+		int k = *ki;
+		*i = *j; *j = t; *vi = *vj; *vj = v; *ki = *kj; *kj = k;
+	}
 }
 
 static int rm_bp_accept(void* user, unsigned int i, unsigned int j)
 {
 	rm_bp const* b = (rm_bp const*)user;
-	qaws_repulsive_mesh_solver const* s = b->s;
-	unsigned int nv = s->m->nv, ne = s->ne;
-	int ki = rm_bp_kind(b, i), kj = rm_bp_kind(b, j);
-	if (ki > kj) { unsigned int t = i; i = j; j = t; t = (unsigned int)ki; ki = kj; kj = (int)t; }
+	unsigned int const *vi, *vj;
+	int ki, kj;
+	rm_bp_order(b, &i, &j, &ki, &kj, &vi, &vj);
 	if (ki == 0 && kj == 2)
-	{
-		unsigned int const* t = s->m->tris + 3 * (j - nv - ne);
-		return t[0] != i && t[1] != i && t[2] != i;
-	}
+		return vj[0] != i && vj[1] != i && vj[2] != i;
 	if (ki == 1 && (kj == 1 || (kj == 2 && !b->check)))
 	{
-		unsigned int const* e = s->edges + 2 * (i - nv);
-		unsigned int const* o = kj == 1 ? s->edges + 2 * (j - nv) : s->m->tris + 3 * (j - nv - ne);
 		unsigned int n = kj == 1 ? 2 : 3, k;
 		for (k = 0; k < n; k++)
-			if (o[k] == e[0] || o[k] == e[1])
+			if (vj[k] == vi[0] || vj[k] == vi[1])
 				return 0;
 		return 1;
 	}
-	return 0;
+	/* (an obstacle's own pairs are never checked: it does not move) */
+	return (ki == 0 && kj == 5) || (ki == 2 && kj == 3) || (ki == 1 && kj == 4);
 }
 
 static qaws_status rm_bp_visit(void* user, unsigned int i, unsigned int j)
 {
 	rm_bp const* b = (rm_bp const*)user;
 	qaws_repulsive_mesh_solver const* s = b->s;
-	unsigned int nv = s->m->nv, ne = s->ne;
-	int ki = rm_bp_kind(b, i), kj = rm_bp_kind(b, j);
+	unsigned int const *vi, *vj;
+	int ki, kj;
 	double const *x0 = b->x0, *x1 = b->x1;
 	double d0, L;
 	rm_pair p;
-	if (ki > kj) { unsigned int t = i; i = j; j = t; t = (unsigned int)ki; ki = kj; kj = (int)t; }
+	rm_bp_order(b, &i, &j, &ki, &kj, &vi, &vj);
 	p.x0 = x0; p.x1 = x1;
 	if (ki == 1 && kj == 2)
 	{
 		/* the input: an edge through a face (motion from a clear state cannot reach this without a vertex-face or edge-edge contact first) */
-		unsigned int const* e = s->edges + 2 * (i - nv);
-		unsigned int const* t = s->m->tris + 3 * (j - nv - ne);
-		return rm_segtri(x0 + 3 * e[0], x0 + 3 * e[1], x0 + 3 * t[0], x0 + 3 * t[1], x0 + 3 * t[2]) ? QAWS_STATUS_NUMERICAL_FAILURE : QAWS_STATUS_OK;
+		return rm_segtri(x0 + 3 * vi[0], x0 + 3 * vi[1], x0 + 3 * vj[0], x0 + 3 * vj[1], x0 + 3 * vj[2]) ? QAWS_STATUS_NUMERICAL_FAILURE : QAWS_STATUS_OK;
 	}
-	if (ki == 0)
+	if (kj == 2 || kj == 5 || (ki == 2 && kj == 3))
 	{
-		unsigned int const* t = s->m->tris + 3 * (j - nv - ne);
-		p.vf = 1; p.v[0] = i; p.v[1] = t[0]; p.v[2] = t[1]; p.v[3] = t[2];
-		L = rm_move(x0, x1, i) + fmax(rm_move(x0, x1, t[0]), fmax(rm_move(x0, x1, t[1]), rm_move(x0, x1, t[2])));
+		/* a vertex and a face (either one the obstacle's) */
+		unsigned int v = ki == 2 ? rm_bp_vertex(b, j, kj) : rm_bp_vertex(b, i, ki);
+		unsigned int const* t = ki == 2 ? vi : vj;
+		p.vf = 1; p.v[0] = v; p.v[1] = t[0]; p.v[2] = t[1]; p.v[3] = t[2];
+		L = rm_move(x0, x1, v) + fmax(rm_move(x0, x1, t[0]), fmax(rm_move(x0, x1, t[1]), rm_move(x0, x1, t[2])));
 	}
 	else
 	{
-		unsigned int const* a = s->edges + 2 * (i - nv);
-		unsigned int const* c = s->edges + 2 * (j - nv);
-		p.vf = 0; p.v[0] = a[0]; p.v[1] = a[1]; p.v[2] = c[0]; p.v[3] = c[1];
-		L = fmax(rm_move(x0, x1, a[0]), rm_move(x0, x1, a[1])) + fmax(rm_move(x0, x1, c[0]), rm_move(x0, x1, c[1]));
+		p.vf = 0; p.v[0] = vi[0]; p.v[1] = vi[1]; p.v[2] = vj[0]; p.v[3] = vj[1];
+		L = fmax(rm_move(x0, x1, vi[0]), rm_move(x0, x1, vi[1])) + fmax(rm_move(x0, x1, vj[0]), rm_move(x0, x1, vj[1]));
 	}
 	d0 = rm_pair_at(&p, 0);
 	if (!b->check)
@@ -464,17 +494,36 @@ static qaws_status rm_bp_visit(void* user, unsigned int i, unsigned int j)
 static int rm_pairs_ok(qaws_repulsive_mesh_solver const* s, double const* x0, double const* x1, int check)
 {
 	qaws_repulsive_mesh const* m = s->m;
-	unsigned int nv = m->nv, ne = s->ne, n = nv + ne + m->nf, i, a, q;
+	unsigned int nv = m->nv, ne = s->ne, n = nv + ne + m->nf + s->onv + s->one + s->onf, i, a, q;
 	double pad = check ? 0.5 * s->core.clearance * (1 + 1e-9) : 1e-12 * s->core.lmean;
 	qaws_bp_box* box = (qaws_bp_box*)malloc(sizeof(qaws_bp_box) * (n + 1));
+	double *y0 = NULL, *y1 = NULL;
 	rm_bp b;
 	qaws_status st;
 	if (!box)
 		return 0;
+	if (s->onv)
+	{
+		/* the joint positions: the mesh's, then the obstacles' */
+		y0 = (double*)malloc(sizeof(double) * 3 * (nv + s->onv));
+		y1 = (double*)malloc(sizeof(double) * 3 * (nv + s->onv));
+		if (!y0 || !y1)
+		{
+			free(box); free(y0); free(y1);
+			return 0;
+		}
+		memcpy(y0, x0, sizeof(double) * 3 * nv); memcpy(y0 + 3 * nv, s->ox, sizeof(double) * 3 * s->onv);
+		memcpy(y1, x1, sizeof(double) * 3 * nv); memcpy(y1 + 3 * nv, s->ox, sizeof(double) * 3 * s->onv);
+		x0 = y0; x1 = y1;
+	}
+	b.s = s; b.x0 = x0; b.x1 = x1; b.check = check;
 	for (i = 0; i < n; i++)
 	{
-		unsigned int const* vs = i < nv ? &i : i < nv + ne ? s->edges + 2 * (i - nv) : m->tris + 3 * (i - nv - ne);
-		unsigned int k = i < nv ? 1 : i < nv + ne ? 2 : 3;
+		unsigned int const* vs;
+		unsigned int self[1];
+		int kind = rm_bp_kind(&b, i, &vs);
+		unsigned int k = kind % 3 == 0 ? 1 : kind % 3 == 1 ? 2 : 3;
+		if (!vs) { self[0] = rm_bp_vertex(&b, i, kind); vs = self; }
 		for (q = 0; q < 3; q++) { box[i].lo[q] = HUGE_VAL; box[i].hi[q] = -HUGE_VAL; }
 		for (a = 0; a < k; a++)
 			for (q = 0; q < 3; q++)
@@ -484,9 +533,8 @@ static int rm_pairs_ok(qaws_repulsive_mesh_solver const* s, double const* x0, do
 				box[i].hi[q] = fmax(box[i].hi[q], fmax(u, v) + pad);
 			}
 	}
-	b.s = s; b.x0 = x0; b.x1 = x1; b.check = check;
 	st = qaws_internal_rbh_box_pairs(box, n, 3, rm_bp_accept, rm_bp_visit, &b);
-	free(box);
+	free(box); free(y0); free(y1);
 	return st == QAWS_STATUS_OK;
 }
 
@@ -724,6 +772,7 @@ void qaws_repulsive_mesh_solver_destroy(qaws_repulsive_mesh_solver* s)
 		return;
 	free(s->pin); free(s->pin_target); free(s->fixed); free(s->edges); free(s->core.x); free(s->grp); free(s->gcnt);
 	for (i = 0; i < s->nobs; i++) qaws_internal_obstacle_destroy(s->obs[i]);
+	free(s->ox); free(s->otri); free(s->oedge);
 	free(s->obs);
 	free(s);
 }
@@ -811,6 +860,44 @@ qaws_status qaws_repulsive_mesh_solver_create(qaws_repulsive_mesh const* m, qaws
 				return st;
 			}
 			s->nobs++;
+		}
+		if (d.collision_checked)
+		{
+			/* their geometry for the collision check, numbered after the mesh's vertices */
+			unsigned int base = 0, fb = 0, o;
+			for (o = 0; o < d.obstacle_count; o++) { s->onv += d.obstacles[o].vertex_count; s->onf += d.obstacles[o].triangles ? d.obstacles[o].triangle_count : 0; }
+			s->ox = (double*)malloc(sizeof(double) * 3 * (s->onv + 1));
+			s->otri = (unsigned int*)malloc(sizeof(unsigned int) * 3 * (s->onf + 1));
+			s->oedge = (unsigned int*)malloc(sizeof(unsigned int) * 2 * (3 * s->onf + 1));
+			if (!s->ox || !s->otri || !s->oedge)
+			{
+				qaws_repulsive_mesh_solver_destroy(s);
+				return QAWS_STATUS_ALLOCATION_FAILURE;
+			}
+			for (o = 0; o < d.obstacle_count; o++)
+			{
+				qaws_repulsive_obstacle const* ob = d.obstacles + o;
+				for (i = 0; i < 3 * ob->vertex_count; i++) s->ox[3 * base + i] = (double)ob->positions[i];
+				if (ob->triangles)
+				{
+					qaws_repulsive_mesh tm;
+					unsigned int *e = NULL, ne = 0, j;
+					int cl;
+					memset(&tm, 0, sizeof(tm));
+					tm.nv = ob->vertex_count; tm.nf = ob->triangle_count; tm.tris = (unsigned int*)ob->triangles;   /* (read only) */
+					for (j = 0; j < 3 * ob->triangle_count; j++) s->otri[3 * fb + j] = m->nv + base + ob->triangles[j];
+					if (rm_edges(&tm, &e, &ne, &cl) != QAWS_STATUS_OK)
+					{
+						qaws_repulsive_mesh_solver_destroy(s);
+						return QAWS_STATUS_ALLOCATION_FAILURE;
+					}
+					for (j = 0; j < 2 * ne; j++) s->oedge[2 * s->one + j] = m->nv + base + e[j];
+					s->one += ne;
+					fb += ob->triangle_count;
+					free(e);
+				}
+				base += ob->vertex_count;
+			}
 		}
 	}
 	s->bary = d.hold_barycenter > 0 || (d.hold_barycenter == 0 && d.pinned_count == 0);

@@ -1965,6 +1965,7 @@ int main(int argc, char** argv)
 				memset(&sd, 0, sizeof(sd));
 				sd.hold_volume = 1; sd.translations = 1; sd.theta = (qaws_scalar)0.25;
 				sd.max_step = (qaws_scalar)0.4;   /* (as far as the paper's program moves: longer steps passed between the points) */
+				sd.collision_checked = 1;   /* (no step through the points: their energy alone let some pass) */
 				sd.obstacles = &od; sd.obstacle_count = 1;
 				rp_surface_figure(&m, "showcase/paper15_shrinkwrap.svg", "Repulsive Surfaces, Fig. 20: shrink wrapping a point cloud",
 					"the paper's scene: a sphere around the bunny's 14290 points (obstacle, 1), its volume to 0.11x over 200 steps, its barycenter free; p 6; remeshed",
@@ -2015,6 +2016,7 @@ int main(int argc, char** argv)
 					od.positions = ox; od.vertex_count = in->nv; od.triangles = in->t; od.triangle_count = in->nf; od.weight = 1;
 					memset(&sd, 0, sizeof(sd));
 					sd.hold_volume = 1; sd.translations = 1; sd.theta = (qaws_scalar)0.25; sd.max_step = (qaws_scalar)0.4;
+					sd.collision_checked = 1;   /* (strictly nested: no step through the level inside) */
 					sd.obstacles = &od; sd.obstacle_count = 1;
 					printf("  level %u: the volume to %.4g\n", nl, 1.15 * rp_mesh_volume(in));
 					rp_solve_mesh(&sph, 6, &sd, steps, 1, lv + nl, &rep, NULL, NULL, &o);

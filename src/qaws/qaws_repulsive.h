@@ -313,8 +313,10 @@ qaws_status qaws_repulsive_mesh_bh(qaws_repulsive_mesh const* mesh, qaws_scalar 
  * energy between the two is added to the energy, hierarchically with the
  * solver's theta. With triangles, both orders of each pair of faces (each
  * face's own normal); without, a point cloud, each point of weight 1 and
- * only the surface's normals. Obstacles add nothing to the metric, have no
- * solution derivatives, and are not collision-checked.
+ * only the surface's normals. Obstacles add nothing to the metric and have
+ * no solution derivatives. collision_checked checks them too: no vertex
+ * passes an obstacle's face, no face its vertex or point, no edge its edge
+ * (their energy alone repels, but a step lands where it lands).
  */
 typedef struct qaws_repulsive_obstacle
 {
