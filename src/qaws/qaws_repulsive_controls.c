@@ -518,7 +518,7 @@ static int rcs_path_ok(rs_core const* core, double const* P0, double const* P1)
 	return qaws_internal_repulsive_curves_path_clear(s->ctl->rc, core->clearance, s->x, s->x1);
 }
 
-static qaws_internal_rs_ops const rcs_ops = { rcs_energy, rcs_metric, rcs_constraints, rcs_path_ok, NULL, NULL, NULL, NULL };
+static qaws_internal_rs_ops const rcs_ops = { rcs_energy, rcs_metric, rcs_constraints, rcs_path_ok, NULL, NULL, NULL, NULL, NULL };
 
 void qaws_repulsive_controls_solver_destroy(qaws_repulsive_controls_solver* s)
 {

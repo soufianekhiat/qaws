@@ -325,6 +325,8 @@ qaws_status qaws_internal_rs_direction(rs_core const* s, qaws_scalar const* posi
 		st = s->ops->energy(s, x, &E, dE);
 		if (st == QAWS_STATUS_OK)
 			st = qaws_internal_rs_hdirection(s, x, dE, g, &H);
+		if (st == QAWS_STATUS_OK && s->ops->translate)
+			s->ops->translate(s, x, dE, g);
 		for (i = 0; st == QAWS_STATUS_OK && i < s->N; i++) out_direction[i] = (qaws_scalar)g[i];
 		qaws_internal_rs_hsys_free(H);
 		free(buf);
@@ -340,6 +342,8 @@ qaws_status qaws_internal_rs_direction(rs_core const* s, qaws_scalar const* posi
 	x = buf; dE = x + s->N; g = dE + s->N;
 	for (i = 0; i < s->N; i++) x[i] = (double)positions[i];
 	st = rs_direction(s, x, &D, dE, &E, g);
+	if (st == QAWS_STATUS_OK && s->ops->translate)
+		s->ops->translate(s, x, dE, g);
 	for (i = 0; st == QAWS_STATUS_OK && i < s->N; i++) out_direction[i] = (qaws_scalar)g[i];
 	free(buf); rs_dense_free(&D);
 	return st;
@@ -443,6 +447,8 @@ qaws_status qaws_internal_rs_step(rs_core* s, qaws_scalar* positions, qaws_repul
 		s->rep.reason = QAWS_REPULSIVE_NUMERICAL_FAILURE;
 		goto done;
 	}
+	if (s->ops->translate)
+		s->ops->translate(s, s->x, dE, g);
 	for (i = 0; i < s->N; i++) gdot += dE[i] * g[i];
 	for (v = 0; v < s->nv; v++) gmax = fmax(gmax, rs_vmove(s, s->x, g, v));
 	s->rep.energy = (qaws_scalar)E;
@@ -991,9 +997,9 @@ static void rs_c_constraints_hvp(rs_core const* core, double const* x, double co
 }
 
 static qaws_internal_rs_ops const rs_curve_ops = { rs_c_energy, rs_c_metric, rs_c_constraints, rs_c_path_ok, rs_c_hier, NULL, rs_c_hvp,
-	rs_c_constraints_hvp };
+	rs_c_constraints_hvp, NULL };
 /* with the space-time and room terms: no Hessian products, so no solution derivatives */
-static qaws_internal_rs_ops const rs_curve_ops_plain = { rs_c_energy, rs_c_metric, rs_c_constraints, rs_c_path_ok, rs_c_hier, NULL, NULL, NULL };
+static qaws_internal_rs_ops const rs_curve_ops_plain = { rs_c_energy, rs_c_metric, rs_c_constraints, rs_c_path_ok, rs_c_hier, NULL, NULL, NULL, NULL };
 
 /* the rows' targets from t (to rows, dir 0) or back (dir 1) */
 static void rs_c_targets(qaws_repulsive_curves_solver const* s, qaws_repulsive_targets* t, double* rows, int dir)

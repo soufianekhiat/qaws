@@ -287,6 +287,88 @@ static void test_area_weight(void)
 	qaws_repulsive_mesh_destroy(m);
 }
 
+/* translations added back (Repulsive Surfaces, Fig. 8): two spheres, each
+   solved with its barycenter held, then moved by its dual-area mean of dE */
+static void test_translations(void)
+{
+	double xd[3 * 20], w[2 * 20], t[2][4], keep[3] = { 0, 0, 0 }, err = 0, scale = 0, gap0, gap1, mean0[3] = { 0, 0, 0 }, drift = 0;
+	qaws_scalar x[6 * 20], x0[6 * 20], g[6 * 20], dE[6 * 20], E;
+	unsigned int tris[6 * 32], nv, nf, i, k, q, c, pins[20];
+	qaws_repulsive_mesh* m;
+	qaws_repulsive_mesh_solve_desc sd;
+	qaws_repulsive_mesh_solver* s = NULL;
+	qaws_repulsive_report r;
+	qaws_status st, s1, s2;
+	char msg[400];
+	rm_sphere(1, xd, tris, &nv, &nf);
+	for (k = 0; k < 2; k++)
+		for (i = 0; i < nv; i++)
+			for (q = 0; q < 3; q++)
+				x[3 * (k * nv + i) + q] = (qaws_scalar)(xd[3 * i + q] * (k ? 0.8 : 1) + (q == 0 && k ? 2.4 : 0) + (q == 1 && k ? 0.3 : 0));
+	for (i = 0; i < 3 * nf; i++) tris[3 * nf + i] = tris[i] + nv;
+	memcpy(x0, x, sizeof(x));
+	m = rm_make(2 * nv, tris, 2 * nf, 6);
+	memset(&sd, 0, sizeof(sd));
+	sd.translations = 2;
+	/* the direction: each sphere's mean of g is its dual-area mean of dE, less their vertex-weighted mean (the overall barycenter kept) */
+	memset(dE, 0, sizeof(dE));
+	st = qaws_repulsive_mesh_solver_create(m, &sd, x, &s);
+	st = st == QAWS_STATUS_OK ? qaws_repulsive_mesh_solver_direction(s, x, g) : st;
+	st = st == QAWS_STATUS_OK ? qaws_repulsive_mesh_gradient(m, x, (qaws_scalar)1, dE, &E) : st;
+	memset(w, 0, sizeof(w)); memset(t, 0, sizeof(t));
+	for (i = 0; i < 2 * nf; i++)
+	{
+		unsigned int const* f = tris + 3 * i;
+		double e1[3], e2[3], n[3];
+		for (q = 0; q < 3; q++) { e1[q] = (double)x[3 * f[1] + q] - (double)x[3 * f[0] + q]; e2[q] = (double)x[3 * f[2] + q] - (double)x[3 * f[0] + q]; }
+		n[0] = e1[1] * e2[2] - e1[2] * e2[1]; n[1] = e1[2] * e2[0] - e1[0] * e2[2]; n[2] = e1[0] * e2[1] - e1[1] * e2[0];
+		for (c = 0; c < 3; c++) w[f[c]] += sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]) / 6;
+	}
+	for (i = 0; i < 2 * nv; i++)
+	{
+		for (q = 0; q < 3; q++) t[i / nv][q] += w[i] * (double)dE[3 * i + q];
+		t[i / nv][3] += w[i];
+	}
+	for (k = 0; k < 2; k++) for (q = 0; q < 3; q++) { t[k][q] /= t[k][3]; keep[q] += t[k][q] / 2; }
+	for (k = 0; k < 2; k++)
+		for (q = 0; q < 3; q++)
+		{
+			double mg = 0;
+			for (i = 0; i < nv; i++) mg += (double)g[3 * (k * nv + i) + q] / nv;
+			err = fmax(err, fabs(mg - (t[k][q] - keep[q])));
+			scale = fmax(scale, fabs(t[k][q]));
+		}
+	/* ten steps: the spheres part, the overall barycenter stays */
+	for (k = 0; st == QAWS_STATUS_OK && k < 10; k++) st = qaws_repulsive_mesh_solver_step(s, x, &r);
+	qaws_repulsive_mesh_solver_destroy(s);
+	s = NULL;
+	gap1 = 0;
+	for (i = 0; i < 2 * nv; i++)
+	{
+		double sgn = i < nv ? -1.0 / nv : 1.0 / nv;
+		gap1 += sgn * (double)x[3 * i];
+		for (q = 0; q < 3; q++) mean0[q] += ((double)x[3 * i + q] - (double)x0[3 * i + q]) / (2 * nv);
+	}
+	for (q = 0; q < 3; q++) drift = fmax(drift, fabs(mean0[q]));
+	gap0 = 0;
+	for (i = 0; i < 2 * nv; i++) gap0 += (i < nv ? -1.0 / nv : 1.0 / nv) * (double)x0[3 * i];
+	/* a pinned sphere stays; the free one still moves; the whole-mesh drift refused with pins */
+	memcpy(x, x0, sizeof(x));
+	for (i = 0; i < nv; i++) pins[i] = i;
+	sd.pinned = pins; sd.pinned_count = nv;
+	s1 = qaws_repulsive_mesh_solver_create(m, &sd, x, &s);
+	for (k = 0; s1 == QAWS_STATUS_OK && k < 5; k++) s1 = qaws_repulsive_mesh_solver_step(s, x, &r);
+	qaws_repulsive_mesh_solver_destroy(s);
+	s = NULL;
+	sd.translations = 1;
+	s2 = qaws_repulsive_mesh_solver_create(m, &sd, x, &s);
+	sprintf(msg, "translations: each sphere's mean direction against its dual-area mean of dE %.2g (of %.3g); 10 steps: the centres %.4f -> %.4f apart, the overall barycenter %.2g; a pinned sphere %s; the drift with pins refused (%d)",
+		err, scale, gap0, gap1, drift, memcmp(x, x0, sizeof(qaws_scalar) * 3 * nv) == 0 && memcmp(x + 3 * nv, x0 + 3 * nv, sizeof(qaws_scalar) * 3 * nv) != 0 ? "kept, the other moved" : "MOVED", (int)s2);
+	TEST_ASSERT(st == QAWS_STATUS_OK && s1 == QAWS_STATUS_OK && err <= (RM_F32 ? 1e-4 : 1e-10) * scale && gap1 > gap0 && drift <= (RM_F32 ? 1e-5 : 1e-12) &&
+		memcmp(x, x0, sizeof(qaws_scalar) * 3 * nv) == 0 && memcmp(x + 3 * nv, x0 + 3 * nv, sizeof(qaws_scalar) * 3 * nv) != 0 && s2 == QAWS_STATUS_INVALID_ARGUMENT && s == NULL, msg);
+	qaws_repulsive_mesh_destroy(m);
+}
+
 /* a square sheet of n x n vertices at height z, its triangles from vertex base */
 static unsigned int rm_sheet(qaws_scalar* x, unsigned int* tris, unsigned int base, unsigned int n, double z, double bump)
 {
@@ -399,6 +481,7 @@ int test_114_repulsive_mesh_solve_main(void)
 	test_sphere();
 	test_sheets();
 	test_area_weight();
+	test_translations();
 	test_path_check();
 	test_refusals();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);

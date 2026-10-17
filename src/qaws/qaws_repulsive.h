@@ -324,6 +324,15 @@ typedef struct qaws_repulsive_mesh_solve_desc
 	                                          energy regularizing area minimization); no solution derivatives then */
 	qaws_scalar initial_step;              /* the first trial's largest vertex move over the mean edge length; 0 = 0.25
 	                                          (a solver made again, after remeshing, resumes with twice its last_step) */
+	int translations;                      /* how translations enter the direction (Repulsive Surfaces, Fig. 8):
+	                                          0: as hold_barycenter says;
+	                                          1: the whole mesh drifts: the direction solved with the barycenter held,
+	                                             then the dual-area mean of the differential added (the paper's program's
+	                                             allow_barycenter_shift; nothing pinned);
+	                                          2: each connected component so (one without a pinned vertex), the overall
+	                                             barycenter still held when hold_barycenter asks (3 rows a group:
+	                                             hierarchical, 32 rows at most, so about 10 components);
+	                                          no solution derivatives with 1 or 2 */
 } qaws_repulsive_mesh_solve_desc;
 
 typedef struct qaws_repulsive_mesh_solver qaws_repulsive_mesh_solver;

@@ -38,6 +38,10 @@ typedef struct qaws_internal_rs_ops
 	   energy's Hessian), and hv += sum_r lambda_r Hess(c_r) v */
 	qaws_status (*hvp)(qaws_internal_rs_core const* core, double const* x, double const* v, double* hv);
 	void (*constraints_hvp)(qaws_internal_rs_core const* core, double const* x, double const* lambda, double const* v, double* hv);
+	/* optional: g += the translations added back after the direction's solve
+	   (Repulsive Surfaces, Fig. 8: each group solved with its barycenter
+	   held, then moved by its mean of dE) */
+	void (*translate)(qaws_internal_rs_core const* core, double const* x, double const* dE, double* g);
 } qaws_internal_rs_ops;
 
 struct qaws_internal_rs_core

@@ -363,7 +363,7 @@ static double rsf_move(rs_core const* core, double const* q, double const* d, un
 	return sqrt(m);
 }
 
-static qaws_internal_rs_ops const rsf_ops = { rsf_energy, rsf_metric, rsf_constraints, rsf_path_ok, NULL, rsf_move, NULL, NULL };
+static qaws_internal_rs_ops const rsf_ops = { rsf_energy, rsf_metric, rsf_constraints, rsf_path_ok, NULL, rsf_move, NULL, NULL, NULL };
 
 void qaws_repulsive_surface_curves_solver_destroy(qaws_repulsive_surface_curves_solver* s)
 {

@@ -280,6 +280,17 @@ the report.
   move, over the mean edge length (0: 0.25). A solver made again on a
   remeshed surface resumes with twice its predecessor's `last_step`, where
   that solver would have tried next. A negative one is refused.
+- **Translations.** The fractional metric barely resists a component
+  moving as a whole, so its solve can let one rigid motion dominate the
+  direction. With `translations` 2, each connected component without a pin
+  is solved with its barycenter held, then moved by its dual-area mean of
+  the differential (Repulsive Surfaces, Fig. 8; the paper's published
+  program declares this constraint but never uses it). The overall
+  barycenter is still held when `hold_barycenter` asks. With 1 the whole
+  mesh does so and its barycenter drifts (the program's
+  `allow_barycenter_shift`; refused with pins). Each group takes 3 rows,
+  so the hierarchical mode (32 rows) takes about 10 components. No
+  solution derivatives with either.
 
   The area and volume rows are divided by the mean edge length l and l^2,
   so that one tolerance (in lengths) serves every row.
@@ -333,6 +344,7 @@ vertex form's kernel is the constants only.
 | Refusals: volume on an open mesh; an edge through a face in the collision-checked mode; free translations reported | | |
 | The area weight (2): the energy at the input against the unweighted energy + 2 A; 20 steps, the area 12.59 -> 4.16 (unweighted it inflates to 861); solution derivatives and a negative weight refused | within 1e-10 relative | within 1e-4 |
 | The initial step: the first move within a cap of 0.01 mean edges, longer with a cap of 1; a negative one refused | | |
+| Translations (2), two spheres: each one's mean direction against its dual-area mean of the differential, less their mean; 10 steps part them with the overall barycenter kept; a pinned sphere stays while the other moves; the drift (1) refused with pins | within 1e-10 relative; the barycenter 1e-12 | 1e-4, 1e-5 |
 
 Cost: the metric and the systems are dense, O(F^2) to assemble and
 (3V + k)^3 to factor. A 128-face sphere takes well under a second per

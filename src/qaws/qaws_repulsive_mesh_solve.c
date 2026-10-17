@@ -36,7 +36,19 @@ struct qaws_repulsive_mesh_solver
 	double *pin_target, bary0[3], A0, V0;
 	double area_w;                  /* > 0: the area weighted into the energy */
 	int bary, area, volume;
+	/* translations added back (desc's translations 1 or 2): each vertex's
+	   group (~0u: none, a component with a pin), the groups' sizes, 3 rows
+	   each (their barycenters held while solving, never corrected); keep:
+	   the added moves keep the overall vertex mean */
+	unsigned int *grp, *gcnt, ngrp;
+	int keep;
 };
+
+/* the barycenter-type rows: 3 per group, or 3 for the held barycenter */
+static unsigned int rm_brows(qaws_repulsive_mesh_solver const* s)
+{
+	return s->grp ? 3 * s->ngrp : s->bary ? 3 : 0;
+}
 
 /* ------------------------------------------------------------------------ */
 /*  Faces                                                                   */
@@ -226,7 +238,14 @@ static void rm_constraints(rs_core const* core, double const* x, double* phi, do
 	unsigned int N = core->N, r = 0, i, q;
 	double l = core->lmean, area, volume;
 	if (C) memset(C, 0, sizeof(double) * core->k * N);
-	if (s->bary)
+	if (s->grp)
+	{
+		/* (residuals 0: the groups move freely; only the direction keeps their means) */
+		for (r = 0; r < 3 * s->ngrp; r++) phi[r] = 0;
+		for (i = 0; C && i < core->nv; i++)
+			for (q = 0; q < 3 && s->grp[i] != ~0u; q++) C[(3 * s->grp[i] + q) * N + 3 * i + q] = 1.0 / s->gcnt[s->grp[i]];
+	}
+	else if (s->bary)
 		for (q = 0; q < 3; q++, r++)
 		{
 			double mm = 0;
@@ -519,7 +538,7 @@ static qaws_status rm_hvp(rs_core const* core, double const* x, double const* v,
 static void rm_constraints_hvp(rs_core const* core, double const* x, double const* lambda, double const* v, double* hv)
 {
 	qaws_repulsive_mesh_solver const* s = (qaws_repulsive_mesh_solver const*)core;
-	unsigned int r = (s->bary ? 3 : 0) + (core->theta > 0 ? 0 : 3 * s->npin), f, c, q;
+	unsigned int r = rm_brows(s) + (core->theta > 0 ? 0 : 3 * s->npin), f, c, q;
 	double la = s->area ? lambda[r] / core->lmean : 0, lv = s->volume ? lambda[r + (s->area ? 1 : 0)] / (core->lmean * core->lmean) : 0;
 	if (!s->area && !s->volume)
 		return;
@@ -561,9 +580,52 @@ static void rm_constraints_hvp(rs_core const* core, double const* x, double cons
 	}
 }
 
-static qaws_internal_rs_ops const rm_ops = { rm_energy, rm_metric_op, rm_constraints, rm_path_ok, rm_hier, NULL, rm_hvp, rm_constraints_hvp };
+/* g += each group's dual-area mean of dE (the groups' rows kept g's
+   vertex mean 0 in each); with keep, less their mean over the grouped
+   vertices, so the overall vertex mean stays */
+static void rm_translate(rs_core const* core, double const* x, double const* dE, double* g)
+{
+	qaws_repulsive_mesh_solver const* s = (qaws_repulsive_mesh_solver const*)core;
+	unsigned int nv = core->nv, i, f, q, c, n = 0;
+	double* w = (double*)calloc(nv + 4 * (size_t)s->ngrp, sizeof(double));
+	double* t;
+	double keep[3] = { 0, 0, 0 };
+	if (!w)
+		return;   /* shortcut: no memory, no translations added this step; the direction stays a descent direction */
+	t = w + nv;
+	for (f = 0; f < s->m->nf; f++)
+	{
+		unsigned int const* tri = s->m->tris + 3 * f;
+		double e1[3], e2[3], m[3], a;
+		for (q = 0; q < 3; q++) { e1[q] = x[3 * tri[1] + q] - x[3 * tri[0] + q]; e2[q] = x[3 * tri[2] + q] - x[3 * tri[0] + q]; }
+		rm_cross(e1, e2, m);
+		a = sqrt(rm_dot(m, m)) / 6;   /* (a third of the face's area) */
+		for (c = 0; c < 3; c++) w[tri[c]] += a;
+	}
+	for (i = 0; i < nv; i++)
+		if (s->grp[i] != ~0u)
+		{
+			double* tg = t + 4 * s->grp[i];
+			for (q = 0; q < 3; q++) tg[q] += w[i] * dE[3 * i + q];
+			tg[3] += w[i];
+		}
+	for (c = 0; c < s->ngrp; c++)
+		for (q = 0; q < 3; q++)
+		{
+			t[4 * c + q] = t[4 * c + 3] > 0 ? t[4 * c + q] / t[4 * c + 3] : 0;
+			keep[q] += s->gcnt[c] * t[4 * c + q];
+		}
+	for (c = 0; c < s->ngrp; c++) n += s->gcnt[c];
+	for (i = 0; i < nv; i++)
+		for (q = 0; q < 3 && s->grp[i] != ~0u; q++) g[3 * i + q] += t[4 * s->grp[i] + q] - (s->keep ? keep[q] / n : 0);
+	free(w);
+}
+
+static qaws_internal_rs_ops const rm_ops = { rm_energy, rm_metric_op, rm_constraints, rm_path_ok, rm_hier, NULL, rm_hvp, rm_constraints_hvp, NULL };
 /* with the area weighted: no Hessian products, so no solution derivatives */
-static qaws_internal_rs_ops const rm_ops_plain = { rm_energy, rm_metric_op, rm_constraints, rm_path_ok, rm_hier, NULL, NULL, NULL };
+static qaws_internal_rs_ops const rm_ops_plain = { rm_energy, rm_metric_op, rm_constraints, rm_path_ok, rm_hier, NULL, NULL, NULL, NULL };
+/* with translations added back: no solution derivatives either */
+static qaws_internal_rs_ops const rm_ops_translate = { rm_energy, rm_metric_op, rm_constraints, rm_path_ok, rm_hier, NULL, NULL, NULL, rm_translate };
 
 /* the rows' targets from t (to rows, dir 0) or back (dir 1) */
 static void rm_targets(qaws_repulsive_mesh_solver const* s, qaws_repulsive_targets* t, double* rows, int dir)
@@ -651,7 +713,7 @@ void qaws_repulsive_mesh_solver_destroy(qaws_repulsive_mesh_solver* s)
 {
 	if (!s)
 		return;
-	free(s->pin); free(s->pin_target); free(s->fixed); free(s->edges); free(s->core.x);
+	free(s->pin); free(s->pin_target); free(s->fixed); free(s->edges); free(s->core.x); free(s->grp); free(s->gcnt);
 	free(s);
 }
 
@@ -701,7 +763,8 @@ qaws_status qaws_repulsive_mesh_solver_create(qaws_repulsive_mesh const* m, qaws
 	*out_solver = NULL;
 	memset(&d, 0, sizeof(d));
 	if (desc) d = *desc;
-	if ((d.pinned_count && !d.pinned) || !(d.area_weight >= 0) || !(d.initial_step >= 0))
+	if ((d.pinned_count && !d.pinned) || !(d.area_weight >= 0) || !(d.initial_step >= 0) || d.translations < 0 || d.translations > 2 ||
+		(d.translations == 1 && d.pinned_count))
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	for (i = 0; i < d.pinned_count; i++) if (d.pinned[i] >= m->nv) return QAWS_STATUS_INVALID_ARGUMENT;
 	s = (qaws_repulsive_mesh_solver*)calloc(1, sizeof(*s));
@@ -744,6 +807,38 @@ qaws_status qaws_repulsive_mesh_solver_create(qaws_repulsive_mesh const* m, qaws
 		for (q = 0; q < 3; q++) s->pin_target[3 * i + q] = k->x[3 * d.pinned[i] + q];
 		s->fixed[d.pinned[i]] = 1;
 	}
+	if (d.translations)
+	{
+		/* the groups: one, or the connected components (union-find on the
+		   edges, each rooted at its least vertex) without a pin */
+		unsigned int* root = (unsigned int*)malloc(sizeof(unsigned int) * (m->nv + 1));
+		unsigned char* pinned = (unsigned char*)calloc(m->nv + 1, 1);
+		s->grp = (unsigned int*)malloc(sizeof(unsigned int) * (m->nv + 1));
+		s->gcnt = (unsigned int*)calloc(m->nv + 1, sizeof(unsigned int));
+		if (!root || !pinned || !s->grp || !s->gcnt)
+		{
+			free(root); free(pinned);
+			qaws_repulsive_mesh_solver_destroy(s);
+			return QAWS_STATUS_ALLOCATION_FAILURE;
+		}
+		for (i = 0; i < m->nv; i++) root[i] = d.translations == 1 ? 0 : i;
+		for (i = 0; d.translations == 2 && i < s->ne; i++)
+		{
+			unsigned int a = s->edges[2 * i], b = s->edges[2 * i + 1];
+			while (root[a] != a) a = root[a];
+			while (root[b] != b) b = root[b];
+			if (a < b) root[b] = a; else if (b < a) root[a] = b;
+		}
+		for (i = 0; i < m->nv; i++) root[i] = root[root[i]];   /* (a root precedes its vertices: one pass flattens) */
+		for (i = 0; i < s->npin; i++) pinned[root[d.pinned[i]]] = 1;
+		for (i = 0, s->ngrp = 0; i < m->nv; i++)
+			s->grp[i] = pinned[root[i]] ? ~0u : root[i] == i ? s->ngrp++ : s->grp[root[i]];
+		for (i = 0; i < m->nv; i++) if (s->grp[i] != ~0u) s->gcnt[s->grp[i]]++;
+		free(root); free(pinned);
+		s->keep = d.translations == 2 && s->bary;
+		s->bary = 0;   /* (the groups' rows replace the barycenter's) */
+		k->ops = &rm_ops_translate;
+	}
 	for (i = 0; i < s->ne; i++)
 	{
 		double e[3];
@@ -755,9 +850,9 @@ qaws_status qaws_repulsive_mesh_solver_create(qaws_repulsive_mesh const* m, qaws
 	k->theta = (double)d.theta;
 	k->executor = m->executor;
 	k->fixed = s->fixed;
-	k->translates = s->npin == 0 && !s->bary;
-	k->k = (s->bary ? 3 : 0) + (k->theta > 0 ? 0 : 3 * s->npin) + (s->area ? 1 : 0) + (s->volume ? 1 : 0);
-	if (!(d.theta >= 0))
+	k->translates = s->npin == 0 && !s->bary && !s->grp;
+	k->k = rm_brows(s) + (k->theta > 0 ? 0 : 3 * s->npin) + (s->area ? 1 : 0) + (s->volume ? 1 : 0);
+	if (!(d.theta >= 0) || (k->theta > 0 && k->k > QAWS_INTERNAL_RS_HROWS))
 	{
 		qaws_repulsive_mesh_solver_destroy(s);
 		return QAWS_STATUS_INVALID_ARGUMENT;
