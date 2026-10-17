@@ -214,6 +214,20 @@ static double rm_area_of(qaws_scalar const* x, unsigned int const* tris, unsigne
 	return A;
 }
 
+/* the enclosed volume: the sum of a . (b x c) / 6 over the faces */
+static double rm_volume_of(qaws_scalar const* x, unsigned int const* tris, unsigned int nf)
+{
+	double V = 0;
+	unsigned int f, q;
+	for (f = 0; f < nf; f++)
+	{
+		double a[3], b[3], c[3];
+		for (q = 0; q < 3; q++) { a[q] = x[3 * tris[3 * f] + q]; b[q] = x[3 * tris[3 * f + 1] + q]; c[q] = x[3 * tris[3 * f + 2] + q]; }
+		V += (a[0] * (b[1] * c[2] - b[2] * c[1]) + a[1] * (b[2] * c[0] - b[0] * c[2]) + a[2] * (b[0] * c[1] - b[1] * c[0])) / 6;
+	}
+	return V;
+}
+
 /* the area weighted into the energy (the paper's minimize area) */
 static void test_area_weight(void)
 {
@@ -369,6 +383,66 @@ static void test_translations(void)
 	qaws_repulsive_mesh_destroy(m);
 }
 
+/* the targets moved during a solve (a growth schedule), and the volume's
+   deviation weighted into the energy */
+static void test_targets(void)
+{
+	double xd[3 * 70], A0, A1, V0, V1, target = 0;
+	qaws_scalar x[3 * 70], xv[3 * 70], a, v;
+	unsigned int tris[3 * 130], nv, nf, i, k;
+	qaws_repulsive_mesh* m;
+	qaws_repulsive_mesh_solve_desc sd;
+	qaws_repulsive_mesh_solver* s = NULL;
+	qaws_repulsive_report r, rp, rw;
+	qaws_status st, sa, sv, sn;
+	char msg[400];
+	rm_sphere(2, xd, tris, &nv, &nf);
+	for (i = 0; i < nv; i++)
+	{
+		double rr = 1 + 0.2 * sin(4 * xd[3 * i]) * sin(3 * xd[3 * i + 2]);
+		for (k = 0; k < 3; k++) x[3 * i + k] = (qaws_scalar)(xd[3 * i + k] * rr);
+	}
+	memcpy(xv, x, sizeof(x));
+	A0 = rm_area_of(x, tris, nf);
+	m = rm_make(nv, tris, nf, 6);
+	/* the area grown 1.5x over 10 steps, held at its input value: the area follows */
+	memset(&sd, 0, sizeof(sd));
+	sd.hold_area = 1;
+	st = qaws_repulsive_mesh_solver_create(m, &sd, x, &s);
+	for (k = 1; st == QAWS_STATUS_OK && k <= 10; k++)
+	{
+		target = A0 * (1 + 0.05 * k);
+		a = (qaws_scalar)target;
+		st = qaws_repulsive_mesh_solver_set_targets(s, &a, NULL);
+		st = st == QAWS_STATUS_OK ? qaws_repulsive_mesh_solver_step(s, x, &r) : st;
+	}
+	A1 = rm_area_of(x, tris, nf);
+	v = 1;
+	sv = s ? qaws_repulsive_mesh_solver_set_targets(s, NULL, &v) : QAWS_STATUS_OK;   /* (the volume is not held) */
+	a = (qaws_scalar)-1;
+	sa = s ? qaws_repulsive_mesh_solver_set_targets(s, &a, NULL) : QAWS_STATUS_OK;
+	qaws_repulsive_mesh_solver_destroy(s);
+	s = NULL;
+	/* the volume's deviation: the energy at the input against the unweighted + w dev^2, and 20 steps toward twice the volume */
+	memset(&sd, 0, sizeof(sd));
+	sd.max_iterations = 1;
+	memcpy(x, xv, sizeof(x));
+	st = st == QAWS_STATUS_OK ? qaws_repulsive_mesh_solve(m, &sd, x, &rp) : st;   /* (one step, for the unweighted energy at the input) */
+	sd.volume_weight = (qaws_scalar)3;
+	V0 = rm_volume_of(xv, tris, nf);
+	sd.volume_target = (qaws_scalar)(2 * V0);
+	sd.max_iterations = 20;
+	st = st == QAWS_STATUS_OK ? qaws_repulsive_mesh_solve(m, &sd, xv, &rw) : st;
+	V1 = rm_volume_of(xv, tris, nf);
+	sd.volume_weight = (qaws_scalar)-1;
+	sn = qaws_repulsive_mesh_solver_create(m, &sd, x, &s);
+	sprintf(msg, "targets: the area grown to %.6f (target %.6f, input %.6f); refused: a volume not held (%d), a negative area (%d); the volume's deviation: E at the input %.9g against %.9g + 3 (1/2)^2, the volume %.4f -> %.4f (target %.4f); a negative weight refused (%d)",
+		A1, target, A0, (int)sv, (int)sa, (double)rw.initial_energy, (double)rp.initial_energy, V0, V1, 2 * V0, (int)sn);
+	TEST_ASSERT(st == QAWS_STATUS_OK && fabs(A1 - target) <= (RM_F32 ? 1e-5 : 1e-8) * target && sv == QAWS_STATUS_INVALID_ARGUMENT && sa == QAWS_STATUS_INVALID_ARGUMENT &&
+		fabs((double)rw.initial_energy - (double)rp.initial_energy - 0.75) <= (RM_F32 ? 1e-4 : 1e-10) * (double)rw.initial_energy && V1 > V0 && sn == QAWS_STATUS_INVALID_ARGUMENT && s == NULL, msg);
+	qaws_repulsive_mesh_destroy(m);
+}
+
 /* a square sheet of n x n vertices at height z, its triangles from vertex base */
 static unsigned int rm_sheet(qaws_scalar* x, unsigned int* tris, unsigned int base, unsigned int n, double z, double bump)
 {
@@ -482,6 +556,7 @@ int test_114_repulsive_mesh_solve_main(void)
 	test_sheets();
 	test_area_weight();
 	test_translations();
+	test_targets();
 	test_path_check();
 	test_refusals();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);

@@ -35,6 +35,7 @@ struct qaws_repulsive_mesh_solver
 	unsigned char* fixed;
 	double *pin_target, bary0[3], A0, V0;
 	double area_w;                  /* > 0: the area weighted into the energy */
+	double vol_w, vol_t;            /* > 0: the volume's deviation from vol_t weighted into it */
 	int bary, area, volume;
 	/* translations added back (desc's translations 1 or 2): each vertex's
 	   group (~0u: none, a component with a pin), the groups' sizes, 3 rows
@@ -171,16 +172,19 @@ static qaws_status rm_energy(rs_core const* core, double const* x, double* E, do
 	qaws_repulsive_mesh_solver const* s = (qaws_repulsive_mesh_solver const*)core;
 	qaws_repulsive_mesh const* m = s->m;
 	qaws_status st = qaws_internal_repulsive_mesh_bh(m, x, core->theta, E, grad);   /* (theta 0 opens every node: the direct terms, in closed form) */
-	if (st == QAWS_STATUS_OK && s->area_w > 0)
+	if (st == QAWS_STATUS_OK && (s->area_w > 0 || s->vol_w > 0))
 	{
-		/* the area weighted (the paper's minimize area) */
-		double area, volume, *gA = grad ? (double*)malloc(sizeof(double) * 3 * m->nv) : NULL;
+		/* the area weighted (the paper's minimize area); the volume's deviation
+		   (its program's volume_deviation: w ((V - Vt) / Vt)^2) */
+		double area, volume, dev, *gA = grad ? (double*)malloc(sizeof(double) * 6 * m->nv) : NULL;
+		double* gV = gA ? gA + 3 * m->nv : NULL;
 		unsigned int i;
 		if (grad && !gA)
 			return QAWS_STATUS_ALLOCATION_FAILURE;
-		rm_measures(m, x, &area, gA, &volume, NULL);
-		*E += s->area_w * area;
-		for (i = 0; gA && i < 3 * m->nv; i++) grad[i] += s->area_w * gA[i];
+		rm_measures(m, x, &area, gA, &volume, gV);
+		dev = s->vol_w > 0 ? (volume - s->vol_t) / s->vol_t : 0;
+		*E += s->area_w * area + s->vol_w * dev * dev;
+		for (i = 0; gA && i < 3 * m->nv; i++) grad[i] += s->area_w * gA[i] + 2 * s->vol_w * dev / s->vol_t * gV[i];
 		free(gA);
 	}
 	return st;
@@ -763,7 +767,7 @@ qaws_status qaws_repulsive_mesh_solver_create(qaws_repulsive_mesh const* m, qaws
 	*out_solver = NULL;
 	memset(&d, 0, sizeof(d));
 	if (desc) d = *desc;
-	if ((d.pinned_count && !d.pinned) || !(d.area_weight >= 0) || !(d.initial_step >= 0) || d.translations < 0 || d.translations > 2 ||
+	if ((d.pinned_count && !d.pinned) || !(d.area_weight >= 0) || !(d.initial_step >= 0) || !(d.volume_weight >= 0) || d.translations < 0 || d.translations > 2 ||
 		(d.translations == 1 && d.pinned_count))
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	for (i = 0; i < d.pinned_count; i++) if (d.pinned[i] >= m->nv) return QAWS_STATUS_INVALID_ARGUMENT;
@@ -776,7 +780,8 @@ qaws_status qaws_repulsive_mesh_solver_create(qaws_repulsive_mesh const* m, qaws
 	s->npin = d.pinned_count;
 	s->area = d.hold_area != 0; s->volume = d.hold_volume != 0;
 	s->area_w = (double)d.area_weight;
-	if (s->area_w > 0)
+	s->vol_w = (double)d.volume_weight;
+	if (s->area_w > 0 || s->vol_w > 0)
 		k->ops = &rm_ops_plain;
 	s->bary = d.hold_barycenter > 0 || (d.hold_barycenter == 0 && d.pinned_count == 0);
 	k->checked = d.collision_checked != 0;
@@ -789,7 +794,7 @@ qaws_status qaws_repulsive_mesh_solver_create(qaws_repulsive_mesh const* m, qaws
 		qaws_repulsive_mesh_solver_destroy(s);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
-	if (s->volume && !closed)
+	if ((s->volume || s->vol_w > 0) && !closed)
 	{
 		/* (an open mesh encloses no volume) */
 		qaws_repulsive_mesh_solver_destroy(s);
@@ -847,12 +852,13 @@ qaws_status qaws_repulsive_mesh_solver_create(qaws_repulsive_mesh const* m, qaws
 	}
 	k->lmean = total / s->ne;
 	rm_measures(m, k->x, &s->A0, NULL, &s->V0, NULL);
+	s->vol_t = d.volume_target != 0 ? (double)d.volume_target : s->V0;
 	k->theta = (double)d.theta;
 	k->executor = m->executor;
 	k->fixed = s->fixed;
 	k->translates = s->npin == 0 && !s->bary && !s->grp;
 	k->k = rm_brows(s) + (k->theta > 0 ? 0 : 3 * s->npin) + (s->area ? 1 : 0) + (s->volume ? 1 : 0);
-	if (!(d.theta >= 0) || (k->theta > 0 && k->k > QAWS_INTERNAL_RS_HROWS))
+	if (!(d.theta >= 0) || (k->theta > 0 && k->k > QAWS_INTERNAL_RS_HROWS) || (s->vol_w > 0 && !(s->vol_t != 0)))
 	{
 		qaws_repulsive_mesh_solver_destroy(s);
 		return QAWS_STATUS_INVALID_ARGUMENT;
@@ -882,6 +888,15 @@ qaws_status qaws_repulsive_mesh_solver_create(qaws_repulsive_mesh const* m, qaws
 qaws_status qaws_repulsive_mesh_solver_direction(qaws_repulsive_mesh_solver const* s, qaws_scalar const* positions, qaws_scalar* out_direction)
 {
 	return s ? qaws_internal_rs_direction(&s->core, positions, out_direction) : QAWS_STATUS_INVALID_ARGUMENT;
+}
+
+qaws_status qaws_repulsive_mesh_solver_set_targets(qaws_repulsive_mesh_solver* s, qaws_scalar const* area, qaws_scalar const* volume)
+{
+	if (!s || (area && (!s->area || !((double)*area > 0))) || (volume && (!s->volume || !((double)*volume == (double)*volume))))
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	if (area) s->A0 = (double)*area;
+	if (volume) s->V0 = (double)*volume;
+	return QAWS_STATUS_OK;
 }
 
 qaws_status qaws_repulsive_mesh_solver_step(qaws_repulsive_mesh_solver* s, qaws_scalar* positions, qaws_repulsive_report* out_report)

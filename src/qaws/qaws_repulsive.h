@@ -333,6 +333,9 @@ typedef struct qaws_repulsive_mesh_solve_desc
 	                                             barycenter still held when hold_barycenter asks (3 rows a group:
 	                                             hierarchical, 32 rows at most, so about 10 components);
 	                                          no solution derivatives with 1 or 2 */
+	qaws_scalar volume_weight;             /* > 0: weight ((V - volume_target) / volume_target)^2 added to the energy (the
+	                                          paper's program's volume_deviation; a closed mesh; no solution derivatives) */
+	qaws_scalar volume_target;             /* 0: the input's volume */
 } qaws_repulsive_mesh_solve_desc;
 
 typedef struct qaws_repulsive_mesh_solver qaws_repulsive_mesh_solver;
@@ -343,6 +346,11 @@ void qaws_repulsive_mesh_solver_destroy(qaws_repulsive_mesh_solver* solver);
 qaws_status qaws_repulsive_mesh_solver_step(qaws_repulsive_mesh_solver* solver, qaws_scalar* positions, qaws_repulsive_report* out_report);
 qaws_status qaws_repulsive_mesh_solver_direction(qaws_repulsive_mesh_solver const* solver, qaws_scalar const* positions,
 	qaws_scalar* out_direction);
+/* new targets for the held area and volume (NULL: kept), as a growth
+   schedule moves them: the next steps' projections head there, so change
+   them by little at a time. INVALID_ARGUMENT for a quantity not held, or
+   an area that is not positive. */
+qaws_status qaws_repulsive_mesh_solver_set_targets(qaws_repulsive_mesh_solver* solver, qaws_scalar const* area, qaws_scalar const* volume);
 qaws_status qaws_repulsive_mesh_solve(qaws_repulsive_mesh const* mesh, qaws_repulsive_mesh_solve_desc const* desc,
 	qaws_scalar* positions, qaws_repulsive_report* out_report);
 

@@ -291,6 +291,14 @@ the report.
   `allow_barycenter_shift`; refused with pins). Each group takes 3 rows,
   so the hierarchical mode (32 rows) takes about 10 components. No
   solution derivatives with either.
+- **Moving targets.** `qaws_repulsive_mesh_solver_set_targets` changes the
+  held area and volume between steps, as the paper's program's growth
+  schedules do (`constrain area 8 200`: the target raised a little each
+  step until 8 times the input's after 200). The next projections head
+  there, so the target should move by little at a time.
+- **Volume deviation.** `volume_weight` w > 0 adds w ((V - Vt) / Vt)^2 to
+  the energy, Vt = `volume_target` (0: the input's volume), the program's
+  `minimize volume_deviation`. A closed mesh; no solution derivatives.
 
   The area and volume rows are divided by the mean edge length l and l^2,
   so that one tolerance (in lengths) serves every row.
@@ -345,6 +353,7 @@ vertex form's kernel is the constants only.
 | The area weight (2): the energy at the input against the unweighted energy + 2 A; 20 steps, the area 12.59 -> 4.16 (unweighted it inflates to 861); solution derivatives and a negative weight refused | within 1e-10 relative | within 1e-4 |
 | The initial step: the first move within a cap of 0.01 mean edges, longer with a cap of 1; a negative one refused | | |
 | Translations (2), two spheres: each one's mean direction against its dual-area mean of the differential, less their mean; 10 steps part them with the overall barycenter kept; a pinned sphere stays while the other moves; the drift (1) refused with pins | within 1e-10 relative; the barycenter 1e-12 | 1e-4, 1e-5 |
+| Moving targets: the held area raised 5 % a step for 10 steps reaches 1.5 times its input; a volume not held and a negative area refused. The volume's deviation (3, toward twice the volume): the energy at the input against the unweighted + 3/4, the volume growing; a negative weight refused | 1e-8; 1e-10 relative | 1e-5; 1e-4 |
 
 Cost: the metric and the systems are dense, O(F^2) to assemble and
 (3V + k)^3 to factor. A 128-face sphere takes well under a second per
