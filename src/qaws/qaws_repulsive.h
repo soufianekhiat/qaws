@@ -307,6 +307,24 @@ qaws_status qaws_repulsive_mesh_bh(qaws_repulsive_mesh const* mesh, qaws_scalar 
  * between triangle meshes always begins at such a pair, so no two
  * triangles ever touch beyond their shared vertices and edges.
  */
+/*
+ * A fixed obstacle the surface is kept from (the paper's program's
+ * obstacle and point_cloud_obstacle): weight times the tangent-point
+ * energy between the two is added to the energy, hierarchically with the
+ * solver's theta. With triangles, both orders of each pair of faces (each
+ * face's own normal); without, a point cloud, each point of weight 1 and
+ * only the surface's normals. Obstacles add nothing to the metric, have no
+ * solution derivatives, and are not collision-checked.
+ */
+typedef struct qaws_repulsive_obstacle
+{
+	qaws_scalar const* positions;        /* 3 per vertex or point */
+	unsigned int vertex_count;
+	unsigned int const* triangles;       /* NULL: a point cloud */
+	unsigned int triangle_count;
+	qaws_scalar weight;                  /* > 0 */
+} qaws_repulsive_obstacle;
+
 typedef struct qaws_repulsive_mesh_solve_desc
 {
 	unsigned int const* pinned;
@@ -336,6 +354,8 @@ typedef struct qaws_repulsive_mesh_solve_desc
 	qaws_scalar volume_weight;             /* > 0: weight ((V - volume_target) / volume_target)^2 added to the energy (the
 	                                          paper's program's volume_deviation; a closed mesh; no solution derivatives) */
 	qaws_scalar volume_target;             /* 0: the input's volume */
+	qaws_repulsive_obstacle const* obstacles;   /* copied at creation */
+	unsigned int obstacle_count;
 } qaws_repulsive_mesh_solve_desc;
 
 typedef struct qaws_repulsive_mesh_solver qaws_repulsive_mesh_solver;

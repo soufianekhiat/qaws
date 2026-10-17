@@ -299,6 +299,16 @@ the report.
 - **Volume deviation.** `volume_weight` w > 0 adds w ((V - Vt) / Vt)^2 to
   the energy, Vt = `volume_target` (0: the input's volume), the program's
   `minimize volume_deviation`. A closed mesh; no solution derivatives.
+- **Obstacles.** `obstacles` (`qaws_repulsive_obstacle`: positions,
+  triangles or none, a weight) are fixed shapes the surface is kept from,
+  the program's `obstacle` and `point_cloud_obstacle`. The weight times
+  their tangent-point energy with the surface is added: with triangles,
+  both orders of each pair of faces; a point cloud, each point weighing 1
+  against the surface's faces and normals. Each obstacle's tree is built
+  once; a surface face visits it as in the Barnes-Hut energy, a far node
+  by its forward and reverse terms (its averaged projector), a near leaf
+  item by item (then exactly). They add nothing to the metric, are not
+  collision-checked, and have no solution derivatives.
 
   The area and volume rows are divided by the mean edge length l and l^2,
   so that one tolerance (in lengths) serves every row.
@@ -354,6 +364,7 @@ vertex form's kernel is the constants only.
 | The initial step: the first move within a cap of 0.01 mean edges, longer with a cap of 1; a negative one refused | | |
 | Translations (2), two spheres: each one's mean direction against its dual-area mean of the differential, less their mean; 10 steps part them with the overall barycenter kept; a pinned sphere stays while the other moves; the drift (1) refused with pins | within 1e-10 relative; the barycenter 1e-12 | 1e-4, 1e-5 |
 | Moving targets: the held area raised 5 % a step for 10 steps reaches 1.5 times its input; a volume not held and a negative area refused. The volume's deviation (3, toward twice the volume): the energy at the input against the unweighted + 3/4, the volume growing; a negative weight refused | 1e-8; 1e-10 relative | 1e-5; 1e-4 |
+| Obstacles: a sphere's mesh obstacle (weight 2, theta 0) against twice the two meshes' cross terms (the union's energy less each one's), and its gradient; hierarchical (0.25) within 5 %; a point cloud (weight 3) against the brute-force sum; drifting free (translations 1), the sphere moves away from it; a weight of 0 and an index out of range refused | 1e-10 relative, the gradient 1e-9 | same (in double) |
 
 Cost: the metric and the systems are dense, O(F^2) to assemble and
 (3V + k)^3 to factor. A 128-face sphere takes well under a second per

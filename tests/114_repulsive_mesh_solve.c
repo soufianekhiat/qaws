@@ -443,6 +443,95 @@ static void test_targets(void)
 	qaws_repulsive_mesh_destroy(m);
 }
 
+/* fixed obstacles: a mesh obstacle's energy (theta 0) is the two meshes'
+   cross terms, both orders; a point cloud's is the faces' terms against
+   its points; a surface drifting free moves away from one */
+static void test_obstacles(void)
+{
+	double xs[3 * 20], xd[6 * 20], gS[3 * 20], gM[6 * 20], gO[6 * 20], gob[3 * 20], ES = 0, EO = 0, EM = 0, Eob = 0, Ebh = 0, Epc = 0, Ebrute = 0, gerr = 0, gmax = 0;
+	double cx0 = 0, cx1 = 0;
+	qaws_scalar xo[3 * 20], x[3 * 20];
+	unsigned int tris[6 * 32], nv, nf, i, k, q, j;
+	qaws_repulsive_mesh *mS, *mM;
+	qaws_repulsive_obstacle od;
+	qaws_internal_obstacle *ob = NULL, *pc = NULL;
+	qaws_repulsive_mesh_solve_desc sd;
+	qaws_repulsive_mesh_solver* s = NULL;
+	qaws_repulsive_report r;
+	qaws_status st, sw, si;
+	unsigned int bad[3] = { 0, 1, 99 };
+	char msg[500];
+	rm_sphere(1, xs, tris, &nv, &nf);
+	for (i = 0; i < nv; i++)
+		for (q = 0; q < 3; q++)
+		{
+			xd[3 * i + q] = xs[3 * i + q];
+			xd[3 * (nv + i) + q] = 0.5 * xs[3 * i + q] + (q == 0 ? 1.9 : q == 1 ? 0.2 : 0);
+			xo[3 * i + q] = (qaws_scalar)xd[3 * (nv + i) + q];
+		}
+	for (i = 0; i < 3 * nf; i++) tris[3 * nf + i] = tris[i] + nv;
+	mS = rm_make(nv, tris, nf, 6); mM = rm_make(2 * nv, tris, 2 * nf, 6);
+	memset(gS, 0, sizeof(gS)); memset(gM, 0, sizeof(gM)); memset(gO, 0, sizeof(gO)); memset(gob, 0, sizeof(gob));
+	st = qaws_internal_repulsive_mesh_bh(mS, xd, 0, &ES, gS);
+	st = st == QAWS_STATUS_OK ? qaws_internal_repulsive_mesh_bh(mM, xd, 0, &EM, gM) : st;
+	{
+		/* the obstacle's own energy, on its own vertex numbering */
+		qaws_repulsive_mesh* m0 = rm_make(nv, tris, nf, 6);
+		st = st == QAWS_STATUS_OK ? qaws_internal_repulsive_mesh_bh(m0, xd + 3 * nv, 0, &EO, gO) : st;
+		qaws_repulsive_mesh_destroy(m0);
+	}
+	memset(&od, 0, sizeof(od));
+	od.positions = xo; od.vertex_count = nv; od.triangles = tris; od.triangle_count = nf; od.weight = (qaws_scalar)2;
+	st = st == QAWS_STATUS_OK ? qaws_internal_obstacle_create(&od, &ob) : st;
+	st = st == QAWS_STATUS_OK ? qaws_internal_obstacle_energy(ob, mS, xd, 0, &Eob, gob) : st;
+	st = st == QAWS_STATUS_OK ? qaws_internal_obstacle_energy(ob, mS, xd, 0.25, &Ebh, NULL) : st;
+	for (i = 0; i < 3 * nv; i++)
+	{
+		gerr = fmax(gerr, fabs(gob[i] - 2 * (gM[i] - gS[i])));
+		gmax = fmax(gmax, fabs(gob[i]));
+	}
+	/* the point cloud (weight 3): each face against each point, the face's normal only */
+	od.triangles = NULL; od.triangle_count = 0; od.weight = (qaws_scalar)3;
+	st = st == QAWS_STATUS_OK ? qaws_internal_obstacle_create(&od, &pc) : st;
+	st = st == QAWS_STATUS_OK ? qaws_internal_obstacle_energy(pc, mS, xd, 0, &Epc, NULL) : st;
+	for (k = 0; k < nf; k++)
+	{
+		unsigned int const* t = tris + 3 * k;
+		double e1[3], e2[3], m[3], a, X[3];
+		for (q = 0; q < 3; q++) { e1[q] = xd[3 * t[1] + q] - xd[3 * t[0] + q]; e2[q] = xd[3 * t[2] + q] - xd[3 * t[0] + q]; X[q] = (xd[3 * t[0] + q] + xd[3 * t[1] + q] + xd[3 * t[2] + q]) / 3; }
+		m[0] = e1[1] * e2[2] - e1[2] * e2[1]; m[1] = e1[2] * e2[0] - e1[0] * e2[2]; m[2] = e1[0] * e2[1] - e1[1] * e2[0];
+		a = sqrt(m[0] * m[0] + m[1] * m[1] + m[2] * m[2]);
+		for (j = 0; j < nv; j++)
+		{
+			double dd[3], s = 0, r2 = 0;
+			for (q = 0; q < 3; q++) { dd[q] = X[q] - (double)xo[3 * j + q]; s += m[q] / a * dd[q]; r2 += dd[q] * dd[q]; }
+			Ebrute += 3 * 0.5 * a * pow(fabs(s), 6) / pow(r2, 6);
+		}
+	}
+	/* the solver: the sphere drifting free (translations 1) moves away from the obstacle on its +x side */
+	for (i = 0; i < 3 * nv; i++) x[i] = (qaws_scalar)xs[i];
+	for (i = 0; i < nv; i++) cx0 += (double)x[3 * i] / nv;
+	od.triangles = tris; od.triangle_count = nf; od.weight = 1;
+	memset(&sd, 0, sizeof(sd));
+	sd.translations = 1; sd.hold_area = 1; sd.obstacles = &od; sd.obstacle_count = 1;
+	st = st == QAWS_STATUS_OK ? qaws_repulsive_mesh_solver_create(mS, &sd, x, &s) : st;
+	for (k = 0; st == QAWS_STATUS_OK && k < 10; k++) st = qaws_repulsive_mesh_solver_step(s, x, &r);
+	qaws_repulsive_mesh_solver_destroy(s);
+	s = NULL;
+	for (i = 0; i < nv; i++) cx1 += (double)x[3 * i] / nv;
+	/* refused: a weight not positive, a triangle index out of range */
+	od.weight = 0;
+	sw = qaws_repulsive_mesh_solver_create(mS, &sd, x, &s);
+	od.weight = 1; od.triangles = bad; od.triangle_count = 1;
+	si = s ? QAWS_STATUS_OK : qaws_repulsive_mesh_solver_create(mS, &sd, x, &s);
+	sprintf(msg, "obstacles: the mesh obstacle (2) %.12g against 2 x the cross terms %.12g, its gradient %.2g of %.3g; hierarchical (0.25) %.6g; the point cloud (3) %.12g against %.12g; drifting free, the sphere's centre x %.4f -> %.4f; refused: weight 0 (%d), an index out of range (%d)",
+		Eob, 2 * (EM - ES - EO), gerr, gmax, Ebh, Epc, Ebrute, cx0, cx1, (int)sw, (int)si);
+	TEST_ASSERT(st == QAWS_STATUS_OK && fabs(Eob - 2 * (EM - ES - EO)) <= 1e-10 * Eob && gerr <= 1e-9 * gmax && fabs(Ebh - Eob) <= 0.05 * Eob &&
+		fabs(Epc - Ebrute) <= 1e-10 * Ebrute && cx1 < cx0 - 1e-3 && sw == QAWS_STATUS_INVALID_ARGUMENT && si == QAWS_STATUS_INVALID_ARGUMENT && s == NULL, msg);
+	qaws_internal_obstacle_destroy(ob); qaws_internal_obstacle_destroy(pc);
+	qaws_repulsive_mesh_destroy(mS); qaws_repulsive_mesh_destroy(mM);
+}
+
 /* a square sheet of n x n vertices at height z, its triangles from vertex base */
 static unsigned int rm_sheet(qaws_scalar* x, unsigned int* tris, unsigned int base, unsigned int n, double z, double bump)
 {
@@ -557,6 +646,7 @@ int test_114_repulsive_mesh_solve_main(void)
 	test_area_weight();
 	test_translations();
 	test_targets();
+	test_obstacles();
 	test_path_check();
 	test_refusals();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);

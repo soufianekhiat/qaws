@@ -58,6 +58,17 @@ qaws_status qaws_internal_repulsive_mesh_hvp(qaws_repulsive_mesh const* mesh, do
 qaws_status qaws_internal_repulsive_curves_bh(qaws_repulsive_curves const* curves, double const* x, double theta, double* E, double* grad);
 qaws_status qaws_internal_repulsive_mesh_bh(qaws_repulsive_mesh const* mesh, double const* x, double theta, double* E, double* grad);
 
+/* A fixed obstacle for a mesh (qaws_repulsive_bh.c): its faces (both
+   orders of each pair with the mesh's faces) or points (each of weight 1,
+   the mesh's normals only), times weight, its tree built once. E += its
+   tangent-point energy with the mesh at x, grad (may be NULL) += the
+   gradient in the mesh's vertices; theta 0: every pair. */
+typedef struct qaws_internal_obstacle qaws_internal_obstacle;
+qaws_status qaws_internal_obstacle_create(qaws_repulsive_obstacle const* desc, qaws_internal_obstacle** out);
+void qaws_internal_obstacle_destroy(qaws_internal_obstacle* ob);
+qaws_status qaws_internal_obstacle_energy(qaws_internal_obstacle const* ob, qaws_repulsive_mesh const* mesh, double const* x, double theta,
+	double* E, double* grad);
+
 /* Hierarchical operators on vertex functions (qaws_repulsive_bh.c): the
    metric A = B + B0 at x, and the fractional operator sum over ordered
    pairs of distinct points of (u_i - u_j)(v_i - v_j) m_i m_j r^-ex; theta 0

@@ -43,6 +43,8 @@ struct qaws_repulsive_mesh_solver
 	   the added moves keep the overall vertex mean */
 	unsigned int *grp, *gcnt, ngrp;
 	int keep;
+	qaws_internal_obstacle** obs;   /* nobs fixed obstacles' trees */
+	unsigned int nobs;
 };
 
 /* the barycenter-type rows: 3 per group, or 3 for the held barycenter */
@@ -172,6 +174,8 @@ static qaws_status rm_energy(rs_core const* core, double const* x, double* E, do
 	qaws_repulsive_mesh_solver const* s = (qaws_repulsive_mesh_solver const*)core;
 	qaws_repulsive_mesh const* m = s->m;
 	qaws_status st = qaws_internal_repulsive_mesh_bh(m, x, core->theta, E, grad);   /* (theta 0 opens every node: the direct terms, in closed form) */
+	unsigned int o;
+	for (o = 0; st == QAWS_STATUS_OK && o < s->nobs; o++) st = qaws_internal_obstacle_energy(s->obs[o], m, x, core->theta, E, grad);
 	if (st == QAWS_STATUS_OK && (s->area_w > 0 || s->vol_w > 0))
 	{
 		/* the area weighted (the paper's minimize area); the volume's deviation
@@ -715,9 +719,12 @@ qaws_status qaws_repulsive_mesh_solver_solution_vjp(qaws_repulsive_mesh_solver c
 
 void qaws_repulsive_mesh_solver_destroy(qaws_repulsive_mesh_solver* s)
 {
+	unsigned int i;
 	if (!s)
 		return;
 	free(s->pin); free(s->pin_target); free(s->fixed); free(s->edges); free(s->core.x); free(s->grp); free(s->gcnt);
+	for (i = 0; i < s->nobs; i++) qaws_internal_obstacle_destroy(s->obs[i]);
+	free(s->obs);
 	free(s);
 }
 
@@ -781,8 +788,31 @@ qaws_status qaws_repulsive_mesh_solver_create(qaws_repulsive_mesh const* m, qaws
 	s->area = d.hold_area != 0; s->volume = d.hold_volume != 0;
 	s->area_w = (double)d.area_weight;
 	s->vol_w = (double)d.volume_weight;
-	if (s->area_w > 0 || s->vol_w > 0)
+	if (s->area_w > 0 || s->vol_w > 0 || d.obstacle_count)
 		k->ops = &rm_ops_plain;
+	if (d.obstacle_count)
+	{
+		if (!d.obstacles)
+		{
+			qaws_repulsive_mesh_solver_destroy(s);
+			return QAWS_STATUS_INVALID_ARGUMENT;
+		}
+		s->obs = (qaws_internal_obstacle**)calloc(d.obstacle_count, sizeof(qaws_internal_obstacle*));
+		if (!s->obs)
+		{
+			qaws_repulsive_mesh_solver_destroy(s);
+			return QAWS_STATUS_ALLOCATION_FAILURE;
+		}
+		for (i = 0; i < d.obstacle_count; i++)
+		{
+			if ((st = qaws_internal_obstacle_create(d.obstacles + i, s->obs + i)) != QAWS_STATUS_OK)
+			{
+				qaws_repulsive_mesh_solver_destroy(s);
+				return st;
+			}
+			s->nobs++;
+		}
+	}
 	s->bary = d.hold_barycenter > 0 || (d.hold_barycenter == 0 && d.pinned_count == 0);
 	k->checked = d.collision_checked != 0;
 	k->x = (double*)malloc(sizeof(double) * k->N);

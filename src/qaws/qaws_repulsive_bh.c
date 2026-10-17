@@ -214,6 +214,13 @@ struct bh_ctx
 	int (*far_g)(bh_ctx const*, unsigned int I, bh_node const* node, double* E, double* g);
 	/* e(A, B) in closed form, and if g its gradient in A's (which 0) or B's (1) vertices */
 	int (*near_g)(bh_ctx const*, unsigned int A, unsigned int B, int which, double* E, double* g);
+	/* an obstacle's traversal (NULL: the self traversal bh_visit): the tree t
+	   is the obstacle's, the targets' boxes tlo, thi; both: the far term's
+	   energy is forward and reverse, both orders of each pair */
+	void (*visit)(bh_ctx* c, unsigned int I, unsigned int id);
+	int both;
+	double const *tlo, *thi;
+	double const *oc, *ow, *oqp;    /* the obstacle's items: centers, weights, weighted projectors */
 };
 
 static int bh_shares(bh_ctx const* c, unsigned int I, unsigned int J)
@@ -534,7 +541,7 @@ static int bh_mesh_far_g(bh_ctx const* c, unsigned int I, bh_node const* node, d
 	inv = bh_pow(r2, -al);
 	F = 0.5 * W * bh_pow(a, 1 - al) * bh_pow(fabs(s), al) * inv;
 	*E = F;
-	if (!g)
+	if (!g && !c->both)
 		return 0;
 	{
 		/* forward: as the near pair with 1/4 |m_B| replaced by W / 2 */
@@ -544,6 +551,10 @@ static int bh_mesh_far_g(bh_ctx const* c, unsigned int I, bh_node const* node, d
 		for (q = 0; q < 3; q++) qd += d[q] * Pd[q];
 		qd = qd > 0 ? qd : 0;
 		R = 0.5 * W * a * bh_pow(qd, 0.5 * al) * inv;
+		if (c->both)
+			*E += R;   /* (an obstacle's node: both orders count, it has no traversal of its own) */
+		if (!g)
+			return 0;
 		/* reverse: dR = R m . dm / a^2 + W/2 a (p q^(p/2 - 1) Pd - 2p q^(p/2) d / r2) r2^-p . dd */
 		kq = 0.5 * W * a * (qd > 0 ? al * bh_pow(qd, 0.5 * al - 1) : (al == 2 ? 2 : 0)) * inv;
 		for (q = 0; q < 3; q++)
@@ -633,7 +644,7 @@ static qaws_status bh_chunk(void* user, unsigned int chunk, unsigned int begin, 
 	{
 		double e0 = c->E;
 		c->blk = p->blocks ? p->blocks + (size_t)slots * I : NULL;
-		bh_visit(c, I, 0);
+		if (c->visit) c->visit(c, I, 0); else bh_visit(c, I, 0);
 		p->share[I] = c->E - e0;
 	}
 	return c->status == 0 ? QAWS_STATUS_OK : c->status == 1 ? QAWS_STATUS_DEGENERATE_CURVE : QAWS_STATUS_NUMERICAL_FAILURE;
@@ -748,6 +759,174 @@ static void bh_mesh_ctx(bh_ctx* c, qaws_repulsive_mesh const* mesh, double theta
 	c->nitems = mesh->nf; c->k = 3; c->idx = mesh->tris; c->dim = 3; c->theta = theta;
 	c->alpha = mesh->p; c->beta = 2 * mesh->p; c->skip_shared = 0; c->executor = mesh->executor;
 	c->far_g = bh_mesh_far_g; c->near_g = bh_mesh_near_g;
+}
+
+/* ------------------------------------------------------------------------ */
+/*  Obstacles                                                               */
+/* ------------------------------------------------------------------------ */
+
+struct qaws_internal_obstacle
+{
+	bh_tree t;
+	double *lo, *hi, *c, *w, *qp;   /* items (faces or points): boxes, centers, weights (weight times area, or weight), weighted projectors */
+	unsigned int n;
+};
+
+void qaws_internal_obstacle_destroy(qaws_internal_obstacle* ob)
+{
+	if (!ob)
+		return;
+	free(ob->lo); free(ob->hi); free(ob->c); free(ob->w); free(ob->qp); free(ob->t.perm); free(ob->t.node);
+	free(ob);
+}
+
+qaws_status qaws_internal_obstacle_create(qaws_repulsive_obstacle const* d, qaws_internal_obstacle** out)
+{
+	qaws_internal_obstacle* ob;
+	unsigned int i, q, k, n;
+	*out = NULL;
+	if (!d || !d->positions || !d->vertex_count || !((double)d->weight > 0) || (d->triangles && !d->triangle_count))
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	for (i = 0; d->triangles && i < 3 * d->triangle_count; i++)
+		if (d->triangles[i] >= d->vertex_count)
+			return QAWS_STATUS_INVALID_ARGUMENT;
+	n = d->triangles ? d->triangle_count : d->vertex_count;
+	ob = (qaws_internal_obstacle*)calloc(1, sizeof(*ob));
+	if (!ob)
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	ob->n = n;
+	ob->lo = (double*)malloc(sizeof(double) * 3 * n); ob->hi = (double*)malloc(sizeof(double) * 3 * n); ob->c = (double*)malloc(sizeof(double) * 3 * n);
+	ob->w = (double*)malloc(sizeof(double) * n); ob->qp = (double*)calloc(6 * (size_t)n, sizeof(double));
+	ob->t.perm = (unsigned int*)malloc(sizeof(unsigned int) * n);
+	if (!ob->lo || !ob->hi || !ob->c || !ob->w || !ob->qp || !ob->t.perm)
+	{
+		qaws_internal_obstacle_destroy(ob);
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	}
+	for (i = 0; i < n; i++)
+	{
+		if (d->triangles)
+		{
+			/* a face: its barycenter, weight times its area, weight times a N N^T */
+			double p[3][3], e1[3], e2[3], m[3], mm;
+			for (k = 0; k < 3; k++) for (q = 0; q < 3; q++) p[k][q] = (double)d->positions[3 * d->triangles[3 * i + k] + q];
+			for (q = 0; q < 3; q++)
+			{
+				e1[q] = p[1][q] - p[0][q]; e2[q] = p[2][q] - p[0][q];
+				ob->lo[3 * i + q] = fmin(p[0][q], fmin(p[1][q], p[2][q])); ob->hi[3 * i + q] = fmax(p[0][q], fmax(p[1][q], p[2][q]));
+				ob->c[3 * i + q] = (p[0][q] + p[1][q] + p[2][q]) / 3;
+			}
+			m[0] = e1[1] * e2[2] - e1[2] * e2[1]; m[1] = e1[2] * e2[0] - e1[0] * e2[2]; m[2] = e1[0] * e2[1] - e1[1] * e2[0];
+			mm = sqrt(m[0] * m[0] + m[1] * m[1] + m[2] * m[2]);
+			ob->w[i] = (double)d->weight * 0.5 * mm;
+			if (mm > 0)
+			{
+				double s = (double)d->weight / (2 * mm);
+				ob->qp[6 * i] = s * m[0] * m[0]; ob->qp[6 * i + 1] = s * m[0] * m[1]; ob->qp[6 * i + 2] = s * m[0] * m[2];
+				ob->qp[6 * i + 3] = s * m[1] * m[1]; ob->qp[6 * i + 4] = s * m[1] * m[2]; ob->qp[6 * i + 5] = s * m[2] * m[2];
+			}
+		}
+		else
+		{
+			/* a point: weight, no normal */
+			for (q = 0; q < 3; q++) ob->lo[3 * i + q] = ob->hi[3 * i + q] = ob->c[3 * i + q] = (double)d->positions[3 * i + q];
+			ob->w[i] = (double)d->weight;
+		}
+		ob->t.perm[i] = i;
+	}
+	ob->t.dim = 3; ob->t.ilo = ob->lo; ob->t.ihi = ob->hi; ob->t.ic = ob->c;
+	if (bh_build(&ob->t, 0, n) < 0)
+	{
+		qaws_internal_obstacle_destroy(ob);
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	}
+	bh_sums(&ob->t, 0, ob->w, ob->qp);
+	*out = ob;
+	return QAWS_STATUS_OK;
+}
+
+/* target face I against the obstacle's node id: a far node at once; a near
+   leaf item by item, each as a node of its own (then the far form is the
+   exact pair: forward e(I, J), reverse e(J, I) from J's own projector) */
+static void bh_obstacle_visit(bh_ctx* c, unsigned int I, unsigned int id)
+{
+	bh_node const* n = &c->t.node[id];
+	double const* ilo = c->tlo + 3 * I;
+	double const* ihi = c->thi + 3 * I;
+	double ri = 0, d, e, gi[9];
+	unsigned int q, a, slots = c->grad ? 9 : 0;
+	int r;
+	if (c->status)
+		return;
+	for (q = 0; q < 3; q++) ri += 0.25 * (ihi[q] - ilo[q]) * (ihi[q] - ilo[q]);
+	ri = sqrt(ri);
+	d = bh_boxdist(ilo, ihi, n->lo, n->hi, 3);
+	if (c->theta > 0 && fmax(ri, n->r) <= c->theta * d)
+	{
+		if ((r = c->far_g(c, I, n, &e, c->grad ? gi : NULL)) != 0)
+		{
+			c->status = r;
+			return;
+		}
+		c->E += e;
+		c->far++;
+		for (a = 0; a < slots; a++) c->blk[a] += gi[a];
+		return;
+	}
+	if (n->child[0] >= 0)
+	{
+		bh_obstacle_visit(c, I, (unsigned int)n->child[0]);
+		bh_obstacle_visit(c, I, (unsigned int)n->child[1]);
+		return;
+	}
+	for (a = n->begin; a < n->end; a++)
+	{
+		unsigned int J = c->t.perm[a], s;
+		bh_node one;
+		if (!(c->ow[J] > 0))
+			continue;   /* (a degenerate obstacle face weighs nothing) */
+		memset(&one, 0, sizeof(one));
+		one.W = c->ow[J];
+		for (q = 0; q < 3; q++) one.S[q] = c->ow[J] * c->oc[3 * J + q];
+		for (q = 0; q < 6; q++) one.Q[q] = c->oqp[6 * J + q];
+		if ((r = c->far_g(c, I, &one, &e, c->grad ? gi : NULL)) != 0)
+		{
+			c->status = r;
+			return;
+		}
+		c->E += e;
+		c->near++;
+		for (s = 0; s < slots; s++) c->blk[s] += gi[s];
+	}
+}
+
+qaws_status qaws_internal_obstacle_energy(qaws_internal_obstacle const* ob, qaws_repulsive_mesh const* mesh, double const* x, double theta,
+	double* E, double* grad)
+{
+	bh_ctx c;
+	unsigned int f, k, q;
+	double* box = (double*)malloc(sizeof(double) * 6 * (mesh->nf + 1));
+	qaws_status st;
+	if (!box)
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	for (f = 0; f < mesh->nf; f++)
+		for (q = 0; q < 3; q++)
+		{
+			double lo = 1e300, hi = -1e300;
+			for (k = 0; k < 3; k++) { lo = fmin(lo, x[3 * mesh->tris[3 * f + k] + q]); hi = fmax(hi, x[3 * mesh->tris[3 * f + k] + q]); }
+			box[3 * f + q] = lo; box[3 * (mesh->nf + f) + q] = hi;
+		}
+	bh_mesh_ctx(&c, mesh, theta);
+	c.t = ob->t;
+	c.x = x; c.grad = grad;
+	c.visit = bh_obstacle_visit; c.both = 1;
+	c.tlo = box; c.thi = box + 3 * mesh->nf;
+	c.oc = ob->c; c.ow = ob->w; c.oqp = ob->qp;
+	st = bh_traverse(&c);
+	if (st == QAWS_STATUS_OK)
+		*E += c.E;
+	free(box);
+	return st;
 }
 
 qaws_status qaws_internal_repulsive_curves_bh(qaws_repulsive_curves const* curves, double const* x, double theta, double* E, double* grad)
