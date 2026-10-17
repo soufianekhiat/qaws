@@ -1502,7 +1502,7 @@ static void rp_mesh_panels(char const* svgname, char const* title, char const* s
 
 /* the shrink wrap seen with what it wraps (from figure 15's snapshots
    showcase/paper15_shrinkwrap_2.obj and _4.obj): the bunny's points alone,
-   the wrap see-through over them at 100 and 220 steps, and at 220 cut open
+   the wrap see-through over them at 100 steps and at its end, and there cut open
    by the plane through the points' centre facing the eye */
 static void rp_wrap_views(char const* sdir)
 {
@@ -1542,8 +1542,8 @@ static void rp_wrap_views(char const* sdir)
 	ex[3].cut[3] = -(eye[0] * c[0] + eye[1] * c[1] + eye[2] * c[2]);
 	sprintf(labels[0], "the bunny's %u points", pts.nv);
 	sprintf(labels[1], "100 steps, see-through");
-	sprintf(labels[2], "220 steps, see-through");
-	sprintf(labels[3], "220 steps, cut open");
+	sprintf(labels[2], "final, see-through");
+	sprintf(labels[3], "final, cut open");
 	rp_mesh_panels("showcase/paper15_shrinkwrap_views.svg", "Repulsive Surfaces, Fig. 20: the shrink wrap around the points",
 		"the wrap drawn see-through (opacity 0.3 a layer), then cut by the plane through the points' centre facing the eye", ms, labels, 4, &view, clay, ex);
 	for (k = 1; k < 4; k++) rp_free_mesh(ms + k);
