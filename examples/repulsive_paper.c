@@ -1964,6 +1964,7 @@ int main(int argc, char** argv)
 				od.positions = ox; od.vertex_count = ob.nv; od.triangles = NULL; od.triangle_count = 0; od.weight = 1;
 				memset(&sd, 0, sizeof(sd));
 				sd.hold_volume = 1; sd.translations = 1; sd.theta = (qaws_scalar)0.25;
+				sd.max_step = (qaws_scalar)0.4;   /* (as far as the paper's program moves: longer steps passed between the points) */
 				sd.obstacles = &od; sd.obstacle_count = 1;
 				rp_surface_figure(&m, "showcase/paper15_shrinkwrap.svg", "Repulsive Surfaces, Fig. 20: shrink wrapping a point cloud",
 					"the paper's scene: a sphere around the bunny's 14290 points (obstacle, 1), its volume to 0.11x over 200 steps, its barycenter free; p 6; remeshed",

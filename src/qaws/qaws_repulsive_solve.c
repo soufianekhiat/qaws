@@ -471,7 +471,7 @@ qaws_status qaws_internal_rs_step(rs_core* s, qaws_scalar* positions, qaws_repul
 			E = Eb;
 	}
 	/* backtracking on the largest vertex move h */
-	h = s->h;
+	h = s->hmax > 0 ? fmin(s->h, s->hmax) : s->h;
 	for (trial = 0; trial < RS_TRIALS; trial++, h *= 0.5)
 	{
 		double tau = h / gmax;

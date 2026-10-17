@@ -356,6 +356,10 @@ typedef struct qaws_repulsive_mesh_solve_desc
 	qaws_scalar volume_target;             /* 0: the input's volume */
 	qaws_repulsive_obstacle const* obstacles;   /* copied at creation */
 	unsigned int obstacle_count;
+	qaws_scalar max_step;                  /* > 0: no step's largest vertex move beyond this many mean edge lengths
+	                                          (0: none; the trial size doubles after each accepted step). A step lands
+	                                          where it lands: a long one can pass a thin barrier, as a sparse point
+	                                          cloud's, that shorter ones would feel */
 } qaws_repulsive_mesh_solve_desc;
 
 typedef struct qaws_repulsive_mesh_solver qaws_repulsive_mesh_solver;

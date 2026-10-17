@@ -51,6 +51,7 @@ struct qaws_internal_rs_core
 	int checked;
 	int full;                            /* the metric is N x N (parameters: not one per coordinate) */
 	double clearance, tol, ctol, lmean, h;
+	double hmax;                         /* > 0: the largest vertex move a step may take (0: none) */
 	double theta;                        /* 0: dense; > 0: hierarchical, pins eliminated */
 	qaws_batch_executor const* executor; /* optional: the hierarchical solves run through it */
 	int translates;                      /* nothing pinned, no barycenter held: a free translation */

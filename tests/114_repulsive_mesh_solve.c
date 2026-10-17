@@ -292,6 +292,23 @@ static void test_area_weight(void)
 			qaws_repulsive_mesh_solver_destroy(s);
 			s = NULL;
 		}
+		/* max_step caps every step, whatever the trial size grew to */
+		{
+			double most = 0;
+			memcpy(xw, x, sizeof(x));
+			sd.initial_step = 1; sd.max_step = (qaws_scalar)0.005;
+			st = st == QAWS_STATUS_OK ? qaws_repulsive_mesh_solver_create(m, &sd, xw, &s) : st;
+			for (k = 0; st == QAWS_STATUS_OK && k < 5; k++)
+			{
+				st = qaws_repulsive_mesh_solver_step(s, xw, &rw);
+				most = fmax(most, (double)rw.last_step);
+			}
+			qaws_repulsive_mesh_solver_destroy(s);
+			s = NULL;
+			sd.max_step = 0;
+			sprintf(msg, "max step 0.005: the largest move over 5 steps %.4g", most);
+			TEST_ASSERT(st == QAWS_STATUS_OK && most > 0 && most <= 0.005 * 1.001, msg);
+		}
 		sd.initial_step = (qaws_scalar)-1;
 		sn = qaws_repulsive_mesh_solver_create(m, &sd, x, &s);
 		sprintf(msg, "initial step: the first move %.4g (cap 0.01), %.4g (cap 1), a negative one refused (%d)", moved[0], moved[1], (int)sn);
