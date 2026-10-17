@@ -455,10 +455,20 @@ qaws_status qaws_internal_rs_step(rs_core* s, qaws_scalar* positions, qaws_repul
 	s->rep.stationarity = (qaws_scalar)(gmax > 0 && E > 0 ? gdot * s->lmean / (E * gmax) : 0);
 	s->ops->constraints(s, s->x, phi, NULL);
 	s->rep.constraint_residual = (qaws_scalar)(rs_phi_max(s, phi) / s->lmean);
-	if ((double)s->rep.stationarity <= s->tol)
+	if ((double)s->rep.stationarity <= s->tol && rs_phi_max(s, phi) <= s->ctol)   /* (not while moved targets are unmet) */
 	{
 		s->rep.reason = QAWS_REPULSIVE_CONVERGED;
 		goto done;
+	}
+	/* the targets moved since the last step (set_targets): the trials are
+	   judged against x carried onto them, not x, whose energy the move
+	   itself may raise */
+	if (rs_phi_max(s, phi) > s->ctol)
+	{
+		double Eb;
+		memcpy(y, s->x, sizeof(double) * s->N);
+		if ((dense ? rs_project(s, &D, y) : qaws_internal_rs_hproject(H, y)) && s->ops->energy(s, y, &Eb, NULL) == QAWS_STATUS_OK)
+			E = Eb;
 	}
 	/* backtracking on the largest vertex move h */
 	h = s->h;

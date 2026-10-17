@@ -20,8 +20,12 @@
  *   paper11_handcuffs.svg linked handcuffs to the unlinked double torus (Fig. 1)
  *   paper12_torus_ring.svg a double torus and a ring (a scene of the paper's code)
  *   paper13_figure8.svg   a broken figure-eight tube (a scene of the paper's code)
+ *   paper14_walnut.svg    growing a walnut inside its shell (Fig. 22, top)
+ *   paper15_shrinkwrap.svg shrink wrapping a point cloud (Fig. 20)
+ *   paper16_envelopes.svg nested envelopes around it (Fig. 21; after figure 15)
+ *   paper17_cobbles.svg   cobblestones grown in a slab (Fig. 22, bottom)
  *
- * Usage: qaws_repulsive_paper [data directory [figure 1 to 13 [most steps]]] (default
+ * Usage: qaws_repulsive_paper [data directory [figure 1 to 17 [most steps]]] (default
  * ../examples/data/repulsive_curves, from working_dir; every figure). Minutes, not
  * seconds: the scenes have 500 to 800 vertices and take hundreds of steps
  * (about 20 minutes on 20 threads).
@@ -916,18 +920,192 @@ static double rp_mesh_area(rp_mesh const* m)
 	return a;
 }
 
-/* the reference's Remesh(5, ...) without its splits and collapses: five
-   rounds of smoothing and Delaunay flips; then the area scaled back to
-   area0 about the vertex mean (the smoothing moves it slightly) */
-static int rp_remesh(rp_mesh* m, double area0)
+static double rp_dist(double const* a, double const* b)
 {
-	rp_edge_key* keys = (rp_edge_key*)malloc(sizeof(rp_edge_key) * 3 * m->nf);
-	unsigned int* twin = (unsigned int*)malloc(sizeof(unsigned int) * 3 * m->nf);
-	unsigned char* touched = (unsigned char*)malloc(m->nv);
-	double* acc = (double*)malloc(sizeof(double) * 10 * m->nv);
-	double c[3] = { 0, 0, 0 }, s;
+	return sqrt((a[0] - b[0]) * (a[0] - b[0]) + (a[1] - b[1]) * (a[1] - b[1]) + (a[2] - b[2]) * (a[2] - b[2]));
+}
+
+/* edges longer than 1.5 L split at their midpoints, each face once a pass
+   (so the twins stay valid), passes until none is left; 0: no memory */
+static int rp_split(rp_mesh* m, double L)
+{
+	unsigned int pass, splits = 1;
+	for (pass = 0; pass < 8 && splits; pass++)
+	{
+		unsigned int nf = m->nf, h;
+		rp_edge_key* keys = (rp_edge_key*)malloc(sizeof(rp_edge_key) * 3 * nf);
+		unsigned int* twin = (unsigned int*)malloc(sizeof(unsigned int) * 3 * nf);
+		unsigned char* done = (unsigned char*)calloc(nf, 1);
+		/* (at most nf / 2 splits a pass, each 1 vertex and 2 faces) */
+		double* x = (double*)realloc(m->x, sizeof(double) * 3 * (m->nv + nf / 2 + 1));
+		unsigned int* t = x ? (unsigned int*)realloc(m->t, sizeof(unsigned int) * 3 * (2 * nf + 1)) : NULL;
+		if (x) m->x = x;
+		if (t) m->t = t;
+		if (!keys || !twin || !done || !x || !t)
+		{
+			free(keys); free(twin); free(done);
+			return 0;
+		}
+		rp_twins(m, keys, twin);
+		for (splits = 0, h = 0; h < 3 * nf; h++)
+		{
+			unsigned int g = twin[h], f = h / 3, e = g / 3, u, v, w, z, c = m->nv, q;
+			if (g < h || done[f] || done[e])
+				continue;
+			u = t[h]; v = t[3 * f + (h + 1) % 3]; w = t[3 * f + (h + 2) % 3]; z = t[3 * e + (g + 2) % 3];
+			if (!(rp_dist(x + 3 * u, x + 3 * v) > 1.5 * L))
+				continue;
+			for (q = 0; q < 3; q++) x[3 * c + q] = 0.5 * (x[3 * u + q] + x[3 * v + q]);
+			m->nv++;
+			t[3 * f] = u; t[3 * f + 1] = c; t[3 * f + 2] = w;
+			t[3 * m->nf] = c; t[3 * m->nf + 1] = v; t[3 * m->nf + 2] = w; m->nf++;
+			t[3 * e] = v; t[3 * e + 1] = c; t[3 * e + 2] = z;
+			t[3 * m->nf] = c; t[3 * m->nf + 1] = u; t[3 * m->nf + 2] = z; m->nf++;
+			done[f] = done[e] = 1;
+			splits++;
+		}
+		free(keys); free(twin); free(done);
+	}
+	return 1;
+}
+
+/* the vertices around v (its faces' other corners), up to cap; their count */
+static unsigned int rp_ring(rp_mesh const* m, unsigned int const* vf, unsigned int const* vo, unsigned int v, unsigned int* out, unsigned int cap)
+{
+	unsigned int n = 0, i, c, j;
+	for (i = vo[v]; i < vo[v + 1]; i++)
+		for (c = 0; c < 3; c++)
+		{
+			unsigned int a = m->t[3 * vf[i] + c];
+			for (j = 0; j < n && out[j] != a; j++) {}
+			if (a != v && j == n && n < cap) out[n++] = a;
+		}
+	return n;
+}
+
+/* edges shorter than L / 2 collapsed to their midpoints, passes until none
+   is left: an edge u v only when its ends' rings share just its two
+   opposite corners (the link condition: the mesh stays manifold), those
+   keep more than 3 faces, and no face around turns over; a collapse's
+   neighbourhood untouched for the rest of its pass. 0: no memory */
+static int rp_collapse(rp_mesh* m, double L)
+{
+	enum { RING = 64 };
+	unsigned int pass, collapses = 1;
+	for (pass = 0; pass < 8 && collapses; pass++)
+	{
+		unsigned int nv = m->nv, nf = m->nf, h, i, c, nn, nk, a;
+		rp_edge_key* keys = (rp_edge_key*)malloc(sizeof(rp_edge_key) * 3 * nf);
+		unsigned int* twin = (unsigned int*)malloc(sizeof(unsigned int) * 3 * nf);
+		unsigned int* vo = (unsigned int*)calloc(nv + 1, sizeof(unsigned int));
+		unsigned int* vf = (unsigned int*)malloc(sizeof(unsigned int) * 3 * nf);
+		unsigned int* remap = (unsigned int*)malloc(sizeof(unsigned int) * (nv + 1));
+		unsigned char* busy = (unsigned char*)calloc(nv, 1);
+		unsigned char* dead = (unsigned char*)calloc(nf, 1);
+		unsigned char* gone = (unsigned char*)calloc(nv, 1);
+		if (!keys || !twin || !vo || !vf || !remap || !busy || !dead || !gone)
+		{
+			free(keys); free(twin); free(vo); free(vf); free(remap); free(busy); free(dead); free(gone);
+			return 0;
+		}
+		rp_twins(m, keys, twin);
+		for (i = 0; i < 3 * nf; i++) vo[m->t[i] + 1]++;
+		for (i = 0; i < nv; i++) vo[i + 1] += vo[i];
+		for (i = 0; i < nf; i++)
+			for (c = 0; c < 3; c++) vf[vo[m->t[3 * i + c]]++] = i;
+		for (i = nv; i > 0; i--) vo[i] = vo[i - 1];   /* (the offsets back to the starts) */
+		vo[0] = 0;
+		for (collapses = 0, h = 0; h < 3 * nf; h++)
+		{
+			unsigned int g = twin[h], f = h / 3, e = g / 3, u, v, w, z, ru[RING], rv[RING], a, b, shared = 0, ok = 1;
+			double mid[3];
+			if (g < h || dead[f] || dead[e])
+				continue;
+			u = m->t[h]; v = m->t[3 * f + (h + 1) % 3]; w = m->t[3 * f + (h + 2) % 3]; z = m->t[3 * e + (g + 2) % 3];
+			if (busy[u] || busy[v] || !(rp_dist(m->x + 3 * u, m->x + 3 * v) < 0.5 * L) || vo[w + 1] - vo[w] <= 3 || vo[z + 1] - vo[z] <= 3)
+				continue;
+			nn = rp_ring(m, vf, vo, u, ru, RING);
+			nk = rp_ring(m, vf, vo, v, rv, RING);
+			for (a = 0; a < nn && ok; a++)
+			{
+				ok = !busy[ru[a]];
+				for (b = 0; b < nk; b++) shared += ru[a] == rv[b];
+			}
+			for (b = 0; b < nk && ok; b++) ok = !busy[rv[b]];
+			if (!ok || shared != 2 || nn >= RING || nk >= RING)
+				continue;
+			/* no face around u or v (but the two going) turns over */
+			for (a = 0; a < 3; a++) mid[a] = 0.5 * (m->x[3 * u + a] + m->x[3 * v + a]);
+			for (a = 0; a < 2 && ok; a++)
+				for (i = vo[a ? v : u]; i < vo[(a ? v : u) + 1] && ok; i++)
+				{
+					unsigned int fi = vf[i], k;
+					double n0[3], n1[3], y[9];
+					if (fi == f || fi == e)
+						continue;
+					rp_face_normal(m, m->x, fi, n0);
+					for (k = 0; k < 3; k++)
+					{
+						unsigned int p = m->t[3 * fi + k];
+						for (c = 0; c < 3; c++) y[3 * k + c] = p == u || p == v ? mid[c] : m->x[3 * p + c];
+					}
+					{
+						double e1[3] = { y[3] - y[0], y[4] - y[1], y[5] - y[2] }, e2[3] = { y[6] - y[0], y[7] - y[1], y[8] - y[2] };
+						n1[0] = e1[1] * e2[2] - e1[2] * e2[1]; n1[1] = e1[2] * e2[0] - e1[0] * e2[2]; n1[2] = e1[0] * e2[1] - e1[1] * e2[0];
+					}
+					ok = n0[0] * n1[0] + n0[1] * n1[1] + n0[2] * n1[2] > 0;
+				}
+			if (!ok)
+				continue;
+			for (c = 0; c < 3; c++) m->x[3 * u + c] = mid[c];
+			for (i = vo[v]; i < vo[v + 1]; i++)
+				for (c = 0; c < 3; c++) if (m->t[3 * vf[i] + c] == v) m->t[3 * vf[i] + c] = u;
+			dead[f] = dead[e] = 1; gone[v] = 1;
+			busy[u] = busy[v] = 1;
+			for (a = 0; a < nn; a++) busy[ru[a]] = 1;
+			for (b = 0; b < nk; b++) busy[rv[b]] = 1;
+			collapses++;
+		}
+		/* the dead faces and gone vertices dropped */
+		for (i = 0, c = 0; i < nv; i++)
+			if (!gone[i])
+			{
+				remap[i] = c;
+				for (a = 0; a < 3; a++) m->x[3 * c + a] = m->x[3 * i + a];
+				c++;
+			}
+		m->nv = c;
+		for (i = 0, c = 0; i < nf; i++)
+			if (!dead[i])
+			{
+				for (a = 0; a < 3; a++) m->t[3 * c + a] = remap[m->t[3 * i + a]];
+				c++;
+			}
+		m->nf = c;
+		free(keys); free(twin); free(vo); free(vf); free(remap); free(busy); free(dead); free(gone);
+	}
+	return 1;
+}
+
+/* the reference's Remesh(5, true) (its interface's default after every
+   step): edges split above 1.5 L and collapsed below L / 2 (L the input's
+   mean edge), then five rounds of smoothing and Delaunay flips; then the
+   area scaled back to what it was before (the smoothing moves it slightly)
+   about the vertex mean */
+static int rp_remesh(rp_mesh* m, double L)
+{
+	rp_edge_key* keys;
+	unsigned int* twin;
+	unsigned char* touched;
+	double* acc;
+	double c[3] = { 0, 0, 0 }, s, area0 = rp_mesh_area(m);
 	unsigned int i, k;
-	int ok = keys && twin && touched && acc;
+	int ok = rp_split(m, L) && rp_collapse(m, L);
+	keys = (rp_edge_key*)malloc(sizeof(rp_edge_key) * 3 * m->nf);
+	twin = (unsigned int*)malloc(sizeof(unsigned int) * 3 * m->nf);
+	touched = (unsigned char*)malloc(m->nv);
+	acc = (double*)malloc(sizeof(double) * 10 * m->nv);
+	ok = ok && keys && twin && touched && acc;
 	for (i = 0; ok && i < 5; i++)
 	{
 		rp_smooth(m, acc);
@@ -939,6 +1117,90 @@ static int rp_remesh(rp_mesh* m, double area0)
 	for (i = 0; i < m->nv; i++) for (k = 0; k < 3; k++) c[k] += m->x[3 * i + k] / m->nv;
 	s = sqrt(area0 / rp_mesh_area(m));
 	for (i = 0; i < m->nv; i++) for (k = 0; k < 3; k++) m->x[3 * i + k] = c[k] + s * (m->x[3 * i + k] - c[k]);
+	return 1;
+}
+
+/* the cobblestones' scene: n x n spheres of radius r (an octahedron split
+   twice, onto the sphere) spaced s apart in the plane z = 0; and the slab
+   holding them, |x|, |y| <= n s / 2, |z| <= h / 2, its six sides as open
+   grids of cells about s / 10 wide (an obstacle: small faces near the
+   stones, where one point per face must do) */
+static int rp_cobbles(unsigned int n, double r, double s, double h, rp_mesh* m, rp_mesh* box)
+{
+	static double const ov[6][3] = { { 1, 0, 0 }, { -1, 0, 0 }, { 0, 1, 0 }, { 0, -1, 0 }, { 0, 0, 1 }, { 0, 0, -1 } };
+	static unsigned int const of[8][3] = { { 0, 2, 4 }, { 2, 1, 4 }, { 1, 3, 4 }, { 3, 0, 4 }, { 2, 0, 5 }, { 1, 2, 5 }, { 3, 1, 5 }, { 0, 3, 5 } };
+	double sx[66 * 3], half = 0.5 * n * s;
+	unsigned int st[128 * 3], t2[128 * 3], nv = 6, nf = 8, l, i, j, k, q, side, f = 0, v = 0;
+	unsigned int cells[3], gn[6][2];
+	memcpy(sx, ov, sizeof(ov)); memcpy(st, of, sizeof(of));
+	for (l = 0; l < 2; l++)
+	{
+		unsigned int nf2 = 0;
+		for (i = 0; i < nf; i++)
+		{
+			unsigned int mid[3];
+			for (k = 0; k < 3; k++)
+			{
+				unsigned int a = st[3 * i + k], b = st[3 * i + (k + 1) % 3];
+				double p[3], len;
+				for (q = 0; q < 3; q++) p[q] = 0.5 * (sx[3 * a + q] + sx[3 * b + q]);
+				len = sqrt(p[0] * p[0] + p[1] * p[1] + p[2] * p[2]);
+				for (q = 0; q < 3; q++) p[q] /= len;
+				for (j = 0; j < nv && rp_dist(sx + 3 * j, p) > 1e-12; j++) {}
+				if (j == nv) { for (q = 0; q < 3; q++) sx[3 * nv + q] = p[q]; nv++; }
+				mid[k] = j;
+			}
+			{
+				unsigned int const c0 = st[3 * i], c1 = st[3 * i + 1], c2 = st[3 * i + 2];
+				unsigned int nt[12] = { c0, mid[0], mid[2], mid[0], c1, mid[1], mid[2], mid[1], c2, mid[0], mid[1], mid[2] };
+				memcpy(t2 + 3 * nf2, nt, sizeof(nt));
+				nf2 += 4;
+			}
+		}
+		nf = nf2;
+		memcpy(st, t2, sizeof(unsigned int) * 3 * nf);
+	}
+	m->nv = n * n * nv; m->nf = n * n * nf;
+	m->x = (double*)malloc(sizeof(double) * 3 * m->nv);
+	m->t = (unsigned int*)malloc(sizeof(unsigned int) * 3 * m->nf);
+	if (!m->x || !m->t)
+		return 0;
+	for (i = 0; i < n * n; i++)
+	{
+		double c[3] = { -half + s * (0.5 + i % n), -half + s * (0.5 + i / n), 0 };
+		for (j = 0; j < nv; j++) for (q = 0; q < 3; q++) m->x[3 * (i * nv + j) + q] = c[q] + r * sx[3 * j + q];
+		for (j = 0; j < 3 * nf; j++) m->t[3 * i * nf + j] = st[j] + i * nv;
+	}
+	/* the box: per side, its two in-plane axes' cell counts */
+	cells[0] = cells[1] = (unsigned int)ceil(2 * half / (0.1 * s)); cells[2] = (unsigned int)ceil(h / (0.1 * s));
+	for (side = 0; side < 6; side++) { gn[side][0] = cells[side < 2 ? 0 : side < 4 ? 1 : 0]; gn[side][1] = cells[side < 2 ? 1 : 2]; }
+	box->nv = box->nf = 0;
+	for (side = 0; side < 6; side++) { box->nv += (gn[side][0] + 1) * (gn[side][1] + 1); box->nf += 2 * gn[side][0] * gn[side][1]; }
+	box->x = (double*)malloc(sizeof(double) * 3 * box->nv);
+	box->t = (unsigned int*)malloc(sizeof(unsigned int) * 3 * box->nf);
+	if (!box->x || !box->t)
+		return 0;
+	for (side = 0; side < 6; side++)
+	{
+		/* sides 0, 1: z = -+h/2 over x, y; 2, 3: x = -+half over y, z; 4, 5: y = -+half over x, z */
+		unsigned int a, b, base = v, na = gn[side][0], nb = gn[side][1];
+		double sg = side % 2 ? 1 : -1;
+		for (b = 0; b <= nb; b++)
+			for (a = 0; a <= na; a++, v++)
+			{
+				double u = (double)a / na, w = (double)b / nb, * p = box->x + 3 * v;
+				if (side < 2) { p[0] = -half + 2 * half * u; p[1] = -half + 2 * half * w; p[2] = sg * 0.5 * h; }
+				else if (side < 4) { p[0] = sg * half; p[1] = -half + 2 * half * u; p[2] = -0.5 * h + h * w; }
+				else { p[0] = -half + 2 * half * u; p[1] = sg * half; p[2] = -0.5 * h + h * w; }
+			}
+		for (b = 0; b < nb; b++)
+			for (a = 0; a < na; a++)
+			{
+				unsigned int c0 = base + b * (na + 1) + a, c1 = c0 + 1, c2 = c0 + na + 1, c3 = c2 + 1;
+				box->t[3 * f] = c0; box->t[3 * f + 1] = c1; box->t[3 * f + 2] = c3; f++;
+				box->t[3 * f] = c0; box->t[3 * f + 1] = c3; box->t[3 * f + 2] = c2; f++;
+			}
+	}
 	return 1;
 }
 
@@ -957,15 +1219,36 @@ static int rp_copy_mesh(rp_mesh const* a, rp_mesh* b)
 	return 1;
 }
 
+/* how a surface runs beyond its solve settings */
+typedef struct rp_opts
+{
+	int remesh;                     /* remeshed after every step and the solver made again (nothing pinned) */
+	double area_mult, volume_mult;  /* the held area and volume raised to these multiples of the input's (0: kept) */
+	unsigned int ramp;              /* a little each step over this many (the paper's program's growth schedules) */
+	double edge;                    /* the remeshing's target edge (0: the input's mean edge) */
+} rp_opts;
+
+static double rp_mesh_volume(rp_mesh const* m)
+{
+	double V = 0;
+	unsigned int f;
+	for (f = 0; f < m->nf; f++)
+	{
+		double const *a = m->x + 3 * m->t[3 * f], *b = m->x + 3 * m->t[3 * f + 1], *c = m->x + 3 * m->t[3 * f + 2];
+		V += (a[0] * (b[1] * c[2] - b[2] * c[1]) + a[1] * (b[2] * c[0] - b[0] * c[2]) + a[2] * (b[0] * c[1] - b[1] * c[0])) / 6;
+	}
+	return V;
+}
+
 /* solve the mesh (p, sd's settings) on the caller's threads; snapshots
    (their own copies of the mesh) after each of steps[0..nsnap), snapped (if
-   given) called after each. remesh: the mesh remeshed after every step and
-   the solver made again on it, the area held at its input value (nothing
-   pinned then) */
+   given) called after each; o (may be NULL) its remeshing and schedules */
 static void rp_solve_mesh(rp_mesh const* mesh, double p, qaws_repulsive_mesh_solve_desc const* sd0, unsigned int const* steps, unsigned int nsnap,
-	rp_mesh* snaps, qaws_repulsive_report* reps, void (*snapped)(void*, unsigned int), void* user, int remesh)
+	rp_mesh* snaps, qaws_repulsive_report* reps, void (*snapped)(void*, unsigned int), void* user, rp_opts const* o)
 {
 	unsigned int threads = rp_thread_count(), i, k, it = 0;
+	double A0 = rp_mesh_area(mesh), V0 = rp_mesh_volume(mesh), L = 0;
+	int remesh = o && o->remesh;
 	qaws_batch_executor ex;
 	qaws_repulsive_mesh_desc md;
 	qaws_repulsive_mesh* rm = NULL;
@@ -974,14 +1257,13 @@ static void rp_solve_mesh(rp_mesh const* mesh, double p, qaws_repulsive_mesh_sol
 	qaws_repulsive_report r;
 	qaws_scalar e0 = 0;
 	rp_mesh cur;
-	qaws_scalar* x = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * mesh->nv);
-	double area0 = rp_mesh_area(mesh);
+	qaws_scalar* x = NULL;
 	memset(&r, 0, sizeof(r));
-	if (!x || !rp_copy_mesh(mesh, &cur))
-	{
-		free(x);
+	if (!rp_copy_mesh(mesh, &cur))
 		return;
-	}
+	for (i = 0; i < 3 * mesh->nf; i++) L += rp_dist(mesh->x + 3 * mesh->t[i], mesh->x + 3 * mesh->t[3 * (i / 3) + (i + 1) % 3]) / (3 * mesh->nf);
+	if (o && o->edge > 0)
+		L = o->edge;
 	ex.parallel_for = rp_parallel_for; ex.user = &threads;
 	memset(&md, 0, sizeof(md));
 	md.p = (qaws_scalar)p; md.executor = &ex;
@@ -991,7 +1273,14 @@ static void rp_solve_mesh(rp_mesh const* mesh, double p, qaws_repulsive_mesh_sol
 		{
 			if (!s)
 			{
-				/* (made again after each remeshing: the triangles changed) */
+				/* (made again after each remeshing: the triangles, and their count, changed) */
+				qaws_scalar* nx = (qaws_scalar*)realloc(x, sizeof(qaws_scalar) * 3 * cur.nv);
+				if (!nx)
+				{
+					r.reason = QAWS_REPULSIVE_NUMERICAL_FAILURE;
+					break;
+				}
+				x = nx;
 				for (i = 0; i < 3 * cur.nv; i++) x[i] = (qaws_scalar)cur.x[i];
 				md.vertex_count = cur.nv; md.triangles = cur.t; md.triangle_count = cur.nf;
 				if (it)
@@ -1003,6 +1292,13 @@ static void rp_solve_mesh(rp_mesh const* mesh, double p, qaws_repulsive_mesh_sol
 					break;
 				}
 			}
+			if (o && o->ramp)
+			{
+				/* the growth schedules: this step's targets */
+				double f = (double)(it + 1 < o->ramp ? it + 1 : o->ramp) / o->ramp;
+				qaws_scalar a = (qaws_scalar)(A0 * (1 + (o->area_mult - 1) * f)), v = (qaws_scalar)(V0 * (1 + (o->volume_mult - 1) * f));
+				qaws_repulsive_mesh_solver_set_targets(s, sd.hold_area && o->area_mult > 0 ? &a : NULL, sd.hold_volume && o->volume_mult > 0 ? &v : NULL);
+			}
 			qaws_repulsive_mesh_solver_step(s, x, &r);
 			if (it == 0)
 				e0 = r.initial_energy;
@@ -1013,7 +1309,7 @@ static void rp_solve_mesh(rp_mesh const* mesh, double p, qaws_repulsive_mesh_sol
 			{
 				qaws_repulsive_mesh_solver_destroy(s); s = NULL;
 				qaws_repulsive_mesh_destroy(rm); rm = NULL;
-				rp_remesh(&cur, area0);
+				rp_remesh(&cur, L);
 			}
 			if (it % 25 == 0 && r.reason == QAWS_REPULSIVE_RUNNING)
 				printf("    %u steps: E %.6g, stationarity %.3g\n", it, (double)r.energy, (double)r.stationarity);
@@ -1100,10 +1396,23 @@ static void rp_surface_snapped(void* user, unsigned int last)
 	for (k = 0; k <= last; k++)
 		sprintf(labels[k + 1], "%s%u steps: E %.4g", f->reps[k].reason == QAWS_REPULSIVE_CONVERGED ? "converged, " : "", f->reps[k].iterations, (double)f->reps[k].energy);
 	rp_mesh_panels(f->svgname, f->title, f->subtitle, f->ms, labels, last + 2, f->view, f->tint);
+	{
+		/* the snapshot as an OBJ beside the figure (to score it elsewhere, or to start from it) */
+		char path[600];
+		FILE* o;
+		rp_mesh const* m = f->ms + last + 1;
+		sprintf(path, "%.*s_%u.obj", (int)strlen(f->svgname) - 4, f->svgname, last + 1);
+		if ((o = fopen(path, "w")) != NULL)
+		{
+			for (k = 0; k < m->nv; k++) fprintf(o, "v %.9g %.9g %.9g\n", m->x[3 * k], m->x[3 * k + 1], m->x[3 * k + 2]);
+			for (k = 0; k < m->nf; k++) fprintf(o, "f %u %u %u\n", m->t[3 * k] + 1, m->t[3 * k + 1] + 1, m->t[3 * k + 2] + 1);
+			fclose(o);
+		}
+	}
 }
 
 static void rp_surface_figure(rp_mesh const* m, char const* svgname, char const* title, char const* subtitle, double p,
-	qaws_repulsive_mesh_solve_desc const* sd, unsigned int const* steps, unsigned int nsnap, rp_view const* view, int const* tint, int remesh)
+	qaws_repulsive_mesh_solve_desc const* sd, unsigned int const* steps, unsigned int nsnap, rp_view const* view, int const* tint, rp_opts const* o)
 {
 	rp_surface_run f;
 	time_t t0 = time(NULL);
@@ -1111,7 +1420,7 @@ static void rp_surface_figure(rp_mesh const* m, char const* svgname, char const*
 	f.m = m; f.svgname = svgname; f.title = title; f.subtitle = subtitle; f.view = view; f.tint = tint;
 	f.ms[0] = *m;
 	printf("%s: %u vertices, %u faces\n", svgname, m->nv, m->nf);
-	rp_solve_mesh(m, p, sd, steps, nsnap, f.ms + 1, f.reps, rp_surface_snapped, &f, remesh);
+	rp_solve_mesh(m, p, sd, steps, nsnap, f.ms + 1, f.reps, rp_surface_snapped, &f, o);
 	for (k = 0; k < nsnap; k++) rp_free_mesh(f.ms + 1 + k);
 	printf("  %s, %.0f s\n", svgname, difftime(time(NULL), t0));
 }
@@ -1272,7 +1581,7 @@ static void rp_paths_figure(char const* dir)
 int main(int argc, char** argv)
 {
 	char const* dir = argc > 1 ? argv[1] : "../examples/data/repulsive_curves";
-	int only = argc > 2 ? atoi(argv[2]) : 0;   /* (one figure: 1 to 13) */
+	int only = argc > 2 ? atoi(argv[2]) : 0;   /* (one figure: 1 to 17) */
 	if (argc > 3)
 		rp_cap = (unsigned int)atoi(argv[3]);
 	setvbuf(stdout, NULL, _IONBF, 0);
@@ -1325,7 +1634,7 @@ int main(int argc, char** argv)
 			memset(&sd, 0, sizeof(sd));
 			sd.pinned = pins; sd.pinned_count = npin; sd.theta = (qaws_scalar)0.25;
 			rp_surface_figure(&m, "showcase/paper7_cylinder.svg", "Repulsive Surfaces, Fig. 9 (left): a cylinder with Dirichlet ends",
-				"both rims pinned; p 6; the hierarchical fractional Sobolev descent (theta 0.25)", 6, &sd, steps, 2, &view, NULL, 0);
+				"both rims pinned; p 6; the hierarchical fractional Sobolev descent (theta 0.25)", 6, &sd, steps, 2, &view, NULL, NULL);
 			free(pins);
 		}
 		rp_free_mesh(&m);
@@ -1356,7 +1665,7 @@ int main(int argc, char** argv)
 			{
 				sd.area_weight = (qaws_scalar)weights[k];
 				printf("paper10_neck: the area weighted by %g\n", weights[k]);
-				rp_solve_mesh(&m, 6, &sd, steps, 1, ms + 1 + k, reps + k, NULL, NULL, 0);
+				rp_solve_mesh(&m, 6, &sd, steps, 1, ms + 1 + k, reps + k, NULL, NULL, NULL);
 				sprintf(labels[k + 1], "area weight %g: %u steps, E %.4g", weights[k], reps[k].iterations, (double)reps[k].energy);
 			}
 			rp_mesh_panels("showcase/paper10_neck.svg", "Repulsive Surfaces, Fig. 9 (centre): area minimization without pinching off",
@@ -1392,7 +1701,7 @@ int main(int argc, char** argv)
 			memset(&sd, 0, sizeof(sd));
 			sd.hold_area = 1; sd.theta = (qaws_scalar)0.25;
 			rp_surface_figure(&m, svgs[k], titles[k], "p 6; the area and the barycenter held; the hierarchical fractional Sobolev descent (theta 0.25)", 6, &sd,
-				steps[k], 2, &view, NULL, 0);
+				steps[k], 2, &view, NULL, NULL);
 			rp_free_mesh(&m);
 		}
 	}
@@ -1410,6 +1719,7 @@ int main(int argc, char** argv)
 		   between 500 and 750 steps there) */
 		static unsigned int const steps[3][4] = { { 100, 200, 350, 700 }, { 100, 300, 600, 1000 }, { 50, 100, 250, 500 } };
 		static int const copper[3] = { 214, 128, 96 };
+		static rp_opts const remeshed = { 1, 0, 0, 0, 0 };
 		char sdir[1024];
 		unsigned int k;
 		sprintf(sdir, "%s/../repulsive_surfaces", dir);
@@ -1425,8 +1735,164 @@ int main(int argc, char** argv)
 			memset(&sd, 0, sizeof(sd));
 			sd.hold_area = 1; sd.theta = (qaws_scalar)0.25;
 			rp_surface_figure(&m, svgs[k], titles[k], "the paper's mesh; p 6; the area and the barycenter held; the hierarchical fractional Sobolev descent (theta 0.25)",
-				6, &sd, steps[k], 4, &view, k == 0 ? copper : NULL, 1);
+				6, &sd, steps[k], 4, &view, k == 0 ? copper : NULL, &remeshed);
 			rp_free_mesh(&m);
+		}
+	}
+	/* Repulsive Surfaces, Fig. 22 (top) and Fig. 20: growing a surface inside
+	   an obstacle, and shrink wrapping a point cloud; the paper's scenes
+	   (Walnut; Reconstruction with its bunny, the sphere at a quarter of the
+	   faces), remeshed after every step as its program does */
+	{
+		char sdir[1024];
+		rp_mesh m, ob;
+		qaws_repulsive_mesh_solve_desc sd;
+		qaws_repulsive_obstacle od;
+		qaws_scalar* ox = NULL;
+		unsigned int i;
+		sprintf(sdir, "%s/../repulsive_surfaces", dir);
+		memset(&ob, 0, sizeof(ob));
+		memset(&od, 0, sizeof(od));
+		if ((!only || only == 14) && rp_load_mesh(sdir, "walnut_inside.obj", &m))
+		{
+			/* the area grown 8x over 200 steps inside a sphere (weight 0.5), the volume kept softly (10) */
+			static unsigned int const steps[4] = { 25, 75, 150, 220 };
+			static rp_opts const grow = { 1, 8, 0, 200, 0 };
+			static int const kernel[3] = { 200, 160, 110 };
+			rp_view view = { 0.4, -0.35 };
+			if (rp_load_mesh(sdir, "walnut_shell.obj", &ob) && (ox = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * ob.nv)) != NULL)
+			{
+				for (i = 0; i < 3 * ob.nv; i++) ox[i] = (qaws_scalar)ob.x[i];
+				od.positions = ox; od.vertex_count = ob.nv; od.triangles = ob.t; od.triangle_count = ob.nf; od.weight = (qaws_scalar)0.5;
+				memset(&sd, 0, sizeof(sd));
+				sd.hold_area = 1; sd.theta = (qaws_scalar)0.25;
+				sd.volume_weight = 10; sd.volume_target = (qaws_scalar)rp_mesh_volume(&m);   /* (absolute: the solver is made again each step) */
+				sd.obstacles = &od; sd.obstacle_count = 1;
+				rp_surface_figure(&m, "showcase/paper14_walnut.svg", "Repulsive Surfaces, Fig. 22 (top): growing a walnut inside its shell",
+					"the paper's scene; p 6; the area grown 8x over 200 steps, the volume kept softly (10), a sphere for the shell (obstacle, 0.5); remeshed",
+					6, &sd, steps, 4, &view, kernel, &grow);
+			}
+			free(ox); ox = NULL;
+			rp_free_mesh(&ob); rp_free_mesh(&m);
+		}
+		if ((!only || only == 15) && rp_load_mesh(sdir, "sphere20k.obj", &m))
+		{
+			/* a sphere around the bunny's points, its volume brought down to 0.11x over 200 steps, its barycenter free */
+			static unsigned int const steps[4] = { 50, 100, 150, 220 };
+			static rp_opts const shrink = { 1, 0, 0.11, 200, 0 };
+			static int const clay[3] = { 205, 196, 186 };
+			rp_view view = { 0.5, -0.25 };
+			for (i = 0; i < 3 * m.nv; i++) m.x[i] *= 0.6;   /* (the scene's sphere has radius 1.32) */
+			if (rp_load_mesh(sdir, "bunny_points.obj", &ob) && (ox = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * ob.nv)) != NULL)
+			{
+				for (i = 0; i < 3 * ob.nv; i++) ox[i] = (qaws_scalar)ob.x[i];
+				od.positions = ox; od.vertex_count = ob.nv; od.triangles = NULL; od.triangle_count = 0; od.weight = 1;
+				memset(&sd, 0, sizeof(sd));
+				sd.hold_volume = 1; sd.translations = 1; sd.theta = (qaws_scalar)0.25;
+				sd.obstacles = &od; sd.obstacle_count = 1;
+				rp_surface_figure(&m, "showcase/paper15_shrinkwrap.svg", "Repulsive Surfaces, Fig. 20: shrink wrapping a point cloud",
+					"the paper's scene: a sphere around the bunny's 14290 points (obstacle, 1), its volume to 0.11x over 200 steps, its barycenter free; p 6; remeshed",
+					6, &sd, steps, 4, &view, clay, &shrink);
+			}
+			free(ox); ox = NULL;
+			rp_free_mesh(&ob); rp_free_mesh(&m);
+		}
+		if (!only || only == 16)
+		{
+			/* Fig. 21: nested envelopes around the shrink-wrapped bunny (figure
+			   15's last snapshot): each level starts from the one inside it
+			   pushed out by a fifth of an edge along its normals, then its
+			   volume is raised 1.15x over 40 steps with that one as its
+			   obstacle, remeshed 1.25x coarser a level */
+			enum { LEVELS = 4 };
+			static unsigned int const steps[1] = { 60 };
+			static int const sand[3] = { 214, 196, 160 };
+			rp_view view = { 0.5, -0.25 };
+			rp_mesh lv[LEVELS + 1];
+			char labels[LEVELS + 1][200];
+			unsigned int nl, q, k;
+			double L = 0, V0;
+			memset(lv, 0, sizeof(lv));
+			if (rp_load_mesh("showcase", "paper15_shrinkwrap_4.obj", lv))
+			{
+				time_t t0 = time(NULL);
+				for (i = 0; i < 3 * lv[0].nf; i++) L += rp_dist(lv[0].x + 3 * lv[0].t[i], lv[0].x + 3 * lv[0].t[3 * (i / 3) + (i + 1) % 3]) / (3 * lv[0].nf);
+				V0 = rp_mesh_volume(lv);
+				sprintf(labels[0], "the shrink wrap (Fig. 20): %u faces", lv[0].nf);
+				printf("showcase/paper16_envelopes.svg: from %u faces\n", lv[0].nf);
+				for (nl = 1; nl <= LEVELS; nl++)
+				{
+					rp_mesh const* in = lv + nl - 1;
+					rp_mesh start;
+					qaws_repulsive_report rep;
+					rp_opts o;
+					double* nrm = (double*)calloc(3 * (size_t)in->nv, sizeof(double)), push = 0.2 * L * pow(1.25, nl - 1);
+					memset(&o, 0, sizeof(o));
+					o.remesh = 1; o.volume_mult = 1.15; o.ramp = 40; o.edge = L * pow(1.25, nl);
+					ox = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * in->nv);
+					if (!nrm || !ox || !rp_copy_mesh(in, &start))
+					{
+						free(nrm); free(ox); ox = NULL;
+						break;
+					}
+					for (i = 0; i < 3 * in->nv; i++) ox[i] = (qaws_scalar)in->x[i];
+					for (k = 0; k < in->nf; k++)
+					{
+						double n[3];
+						rp_face_normal(in, in->x, k, n);   /* (area-weighted: twice the area times the normal) */
+						for (q = 0; q < 3; q++) { nrm[3 * in->t[3 * k] + q] += n[q]; nrm[3 * in->t[3 * k + 1] + q] += n[q]; nrm[3 * in->t[3 * k + 2] + q] += n[q]; }
+					}
+					for (i = 0; i < in->nv; i++)
+					{
+						double l = sqrt(nrm[3 * i] * nrm[3 * i] + nrm[3 * i + 1] * nrm[3 * i + 1] + nrm[3 * i + 2] * nrm[3 * i + 2]);
+						for (q = 0; q < 3 && l > 0; q++) start.x[3 * i + q] += push * nrm[3 * i + q] / l;
+					}
+					od.positions = ox; od.vertex_count = in->nv; od.triangles = in->t; od.triangle_count = in->nf; od.weight = 1;
+					memset(&sd, 0, sizeof(sd));
+					sd.hold_volume = 1; sd.theta = (qaws_scalar)0.25;
+					sd.obstacles = &od; sd.obstacle_count = 1;
+					printf("  level %u\n", nl);
+					rp_solve_mesh(&start, 6, &sd, steps, 1, lv + nl, &rep, NULL, NULL, &o);
+					free(nrm); free(ox); ox = NULL;
+					rp_free_mesh(&start);
+					if (!lv[nl].nv)
+						break;
+					sprintf(labels[nl], "level %u: %.3gx the volume, %u faces", nl, rp_mesh_volume(lv + nl) / V0, lv[nl].nf);
+				}
+				rp_mesh_panels("showcase/paper16_envelopes.svg", "Repulsive Surfaces, Fig. 21: nested envelopes",
+					"each level the one inside it pushed out, its volume raised 1.15x with that one as the obstacle (1), remeshed 1.25x coarser; p 6",
+					lv, labels, nl, &view, sand);
+				for (k = 0; k < nl; k++) rp_free_mesh(lv + k);
+				printf("  showcase/paper16_envelopes.svg, %.0f s\n", difftime(time(NULL), t0));
+			}
+			else
+				printf("paper16_envelopes: run figure 15 first (the envelopes start from its shrink wrap)\n");
+		}
+		if (!only || only == 17)
+		{
+			/* Fig. 22 (bottom): many small spheres grown inside a slab, the
+			   walnut's technique (its scene is not among the published ones):
+			   16 spheres, their volume raised 6x and their area 3.6x over 200
+			   steps (a sphere's would be 3.3x: room to flatten against the
+			   others), the slab an obstacle (0.5) */
+			static unsigned int const steps[4] = { 50, 100, 200, 250 };
+			static rp_opts const grow = { 1, 3.6, 6, 200, 0 };
+			static int const stone[3] = { 168, 162, 152 };
+			rp_view view = { 0.35, 1.15 };   /* (from above, tilted) */
+			memset(&m, 0, sizeof(m));
+			if (rp_cobbles(4, 0.25, 1, 0.7, &m, &ob) && (ox = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * ob.nv)) != NULL)
+			{
+				for (i = 0; i < 3 * ob.nv; i++) ox[i] = (qaws_scalar)ob.x[i];
+				od.positions = ox; od.vertex_count = ob.nv; od.triangles = ob.t; od.triangle_count = ob.nf; od.weight = (qaws_scalar)0.5;
+				memset(&sd, 0, sizeof(sd));
+				sd.hold_area = 1; sd.hold_volume = 1; sd.theta = (qaws_scalar)0.25;
+				sd.obstacles = &od; sd.obstacle_count = 1;
+				rp_surface_figure(&m, "showcase/paper17_cobbles.svg", "Repulsive Surfaces, Fig. 22 (bottom): cobblestones grown in a slab",
+					"16 spheres in a 4 x 4 x 0.7 slab (obstacle, 0.5); the volume raised 6x and the area 3.6x over 200 steps; p 6; remeshed",
+					6, &sd, steps, 4, &view, stone, &grow);
+			}
+			free(ox); ox = NULL;
+			rp_free_mesh(&ob); rp_free_mesh(&m);
 		}
 	}
 	return 0;
