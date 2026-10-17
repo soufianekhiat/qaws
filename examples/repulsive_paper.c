@@ -14,11 +14,14 @@
  *   paper6_paths.svg      four agents' paths planned in space-time (Fig. 31)
  * and from Repulsive Surfaces (Yu, Brakensiek, Schumacher, Crane, ACM TOG 2021):
  *   paper7_cylinder.svg   a cylinder with Dirichlet ends (Fig. 9, left)
- *   paper8_hopf.svg       a Hopf link to its canonical shape (Fig. 11)
- *   paper9_borromean.svg  Borromean rings to their canonical shape (Fig. 11)
+ *   paper8_hopf.svg       a Hopf link to its canonical shape (a scene of the paper's code)
+ *   paper9_borromean.svg  Borromean rings to their canonical shape (a scene of the paper's code)
  *   paper10_neck.svg      area minimization regularized: no pinch-off (Fig. 9, centre)
+ *   paper11_handcuffs.svg linked handcuffs to the unlinked double torus (Fig. 1)
+ *   paper12_torus_ring.svg a double torus and a ring (a scene of the paper's code)
+ *   paper13_figure8.svg   a broken figure-eight tube (a scene of the paper's code)
  *
- * Usage: qaws_repulsive_paper [data directory [figure 1 to 10 [most steps]]] (default
+ * Usage: qaws_repulsive_paper [data directory [figure 1 to 13 [most steps]]] (default
  * ../examples/data/repulsive_curves, from working_dir; every figure). Minutes, not
  * seconds: the scenes have 500 to 800 vertices and take hundreds of steps
  * (about 20 minutes on 20 threads).
@@ -764,10 +767,203 @@ static int* rp_face_colours(rp_mesh const* m)
 	return rgb;
 }
 
-/* solve the mesh (p, sd's settings) on the
-   caller's threads; snapshots after each of steps[0..nsnap) */
+/* ---- dynamic remeshing, as the paper's program does after every step -- */
+
+typedef struct rp_edge_key { unsigned int lo, hi, h; } rp_edge_key;
+
+static int rp_edge_cmp(void const* a, void const* b)
+{
+	rp_edge_key const *p = (rp_edge_key const*)a, *q = (rp_edge_key const*)b;
+	return p->lo != q->lo ? (p->lo < q->lo ? -1 : 1) : p->hi != q->hi ? (p->hi < q->hi ? -1 : 1) : 0;
+}
+
+/* half-edge h = 3 f + c runs from t[h] to the face's next corner; twin[h]
+   is the opposite one (a closed manifold mesh); keys sorted by edge */
+static void rp_twins(rp_mesh const* m, rp_edge_key* keys, unsigned int* twin)
+{
+	unsigned int h, n = 3 * m->nf;
+	for (h = 0; h < n; h++)
+	{
+		unsigned int a = m->t[h], b = m->t[3 * (h / 3) + (h + 1) % 3];
+		keys[h].lo = a < b ? a : b; keys[h].hi = a < b ? b : a; keys[h].h = h;
+	}
+	qsort(keys, n, sizeof(rp_edge_key), rp_edge_cmp);
+	for (h = 0; h + 1 < n; h += 2) { twin[keys[h].h] = keys[h + 1].h; twin[keys[h + 1].h] = keys[h].h; }
+}
+
+static double rp_corner_angle(double const* a, double const* b, double const* c)   /* at a */
+{
+	double u[3], v[3], cr[3];
+	unsigned int k;
+	for (k = 0; k < 3; k++) { u[k] = b[k] - a[k]; v[k] = c[k] - a[k]; }
+	cr[0] = u[1] * v[2] - u[2] * v[1]; cr[1] = u[2] * v[0] - u[0] * v[2]; cr[2] = u[0] * v[1] - u[1] * v[0];
+	return atan2(sqrt(cr[0] * cr[0] + cr[1] * cr[1] + cr[2] * cr[2]), u[0] * v[0] + u[1] * v[1] + u[2] * v[2]);
+}
+
+/* flips every edge whose opposite angles sum past pi, in passes that touch a
+   vertex once each (so the twins stay valid), until none is left */
+static void rp_delaunay(rp_mesh* m, rp_edge_key* keys, unsigned int* twin, unsigned char* touched)
+{
+	unsigned int pass, flips = 1;
+	for (pass = 0; pass < 100 && flips; pass++)
+	{
+		unsigned int h;
+		rp_twins(m, keys, twin);
+		memset(touched, 0, m->nv);
+		for (flips = 0, h = 0; h < 3 * m->nf; h++)
+		{
+			unsigned int g = twin[h], f = h / 3, e = g / 3;
+			unsigned int u = m->t[h], v = m->t[3 * f + (h + 1) % 3], w = m->t[3 * f + (h + 2) % 3], z = m->t[3 * e + (g + 2) % 3];
+			rp_edge_key key;
+			if (g < h || touched[u] || touched[v] || touched[w] || touched[z] || w == z)
+				continue;
+			if (rp_corner_angle(m->x + 3 * w, m->x + 3 * u, m->x + 3 * v) + rp_corner_angle(m->x + 3 * z, m->x + 3 * u, m->x + 3 * v) <= PI)
+				continue;
+			key.lo = w < z ? w : z; key.hi = w < z ? z : w;
+			if (bsearch(&key, keys, 3 * m->nf, sizeof(rp_edge_key), rp_edge_cmp))
+				continue;   /* (w z already an edge: the flip would make the mesh non-manifold) */
+			m->t[3 * f] = w; m->t[3 * f + 1] = u; m->t[3 * f + 2] = z;
+			m->t[3 * e] = z; m->t[3 * e + 1] = v; m->t[3 * e + 2] = w;
+			touched[u] = touched[v] = touched[w] = touched[z] = 1;
+			flips++;
+		}
+	}
+}
+
+static void rp_face_normal(rp_mesh const* m, double const* x, unsigned int f, double* n)
+{
+	unsigned int const* t = m->t + 3 * f;
+	double const *p = x + 3 * t[0], *q = x + 3 * t[1], *r = x + 3 * t[2];
+	double u[3] = { q[0] - p[0], q[1] - p[1], q[2] - p[2] }, w[3] = { r[0] - p[0], r[1] - p[1], r[2] - p[2] };
+	n[0] = u[1] * w[2] - u[2] * w[1]; n[1] = u[2] * w[0] - u[0] * w[2]; n[2] = u[0] * w[1] - u[1] * w[0];
+}
+
+/* each vertex half way toward the area-weighted circumcentres of its faces,
+   in its tangent plane (the reference's smoothByCircumcenter); a face that
+   would turn by more than 90 degrees keeps its vertices where they were
+   (an obtuse face's circumcentre lies outside it: unguarded, the smoothing
+   can fold a face through its neighbours) */
+static void rp_smooth(rp_mesh* m, double* acc)
+{
+	unsigned int f, v, k, round, reverted = 1;
+	double* nrm = acc + 3 * m->nv;
+	double* area = nrm + 3 * m->nv;
+	double* old = area + m->nv;
+	memcpy(old, m->x, sizeof(double) * 3 * m->nv);
+	memset(acc, 0, sizeof(double) * 7 * m->nv);
+	for (f = 0; f < m->nf; f++)
+	{
+		unsigned int const* t = m->t + 3 * f;
+		double const *p1 = m->x + 3 * t[0], *p2 = m->x + 3 * t[1], *p3 = m->x + 3 * t[2];
+		double u[3], w[3], n[3], a2 = 0, b2 = 0, c2 = 0, o[3], A, s;
+		for (k = 0; k < 3; k++)
+		{
+			u[k] = p2[k] - p1[k]; w[k] = p3[k] - p1[k];
+			a2 += (p3[k] - p2[k]) * (p3[k] - p2[k]); b2 += w[k] * w[k]; c2 += u[k] * u[k];
+		}
+		n[0] = u[1] * w[2] - u[2] * w[1]; n[1] = u[2] * w[0] - u[0] * w[2]; n[2] = u[0] * w[1] - u[1] * w[0];
+		A = 0.5 * sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+		o[0] = a2 * (b2 + c2 - a2); o[1] = b2 * (c2 + a2 - b2); o[2] = c2 * (a2 + b2 - c2);
+		s = o[0] + o[1] + o[2];
+		if (!(A > 0) || s == 0)
+			continue;
+		for (v = 0; v < 3; v++)
+			for (k = 0; k < 3; k++)
+			{
+				double cc = (o[0] * p1[k] + o[1] * p2[k] + o[2] * p3[k]) / s;
+				acc[3 * t[v] + k] += A * (cc - m->x[3 * t[v] + k]);
+				nrm[3 * t[v] + k] += n[k];
+			}
+		for (v = 0; v < 3; v++) area[t[v]] += A;
+	}
+	for (v = 0; v < m->nv; v++)
+	{
+		double* d = acc + 3 * v;
+		double const* n = nrm + 3 * v;
+		double nn = n[0] * n[0] + n[1] * n[1] + n[2] * n[2], dn;
+		if (!(area[v] > 0) || !(nn > 0))
+			continue;
+		dn = (d[0] * n[0] + d[1] * n[1] + d[2] * n[2]) / nn;
+		for (k = 0; k < 3; k++) m->x[3 * v + k] += 0.5 * (d[k] - dn * n[k]) / area[v];
+	}
+	for (round = 0; round < 20 && reverted; round++)
+		for (reverted = 0, f = 0; f < m->nf; f++)
+		{
+			double a[3], b[3];
+			rp_face_normal(m, old, f, a);
+			rp_face_normal(m, m->x, f, b);
+			if (a[0] * b[0] + a[1] * b[1] + a[2] * b[2] > 0)
+				continue;
+			for (v = 0; v < 3; v++)
+			{
+				unsigned int i = m->t[3 * f + v];
+				reverted += memcmp(m->x + 3 * i, old + 3 * i, sizeof(double) * 3) != 0;
+				memcpy(m->x + 3 * i, old + 3 * i, sizeof(double) * 3);
+			}
+		}
+}
+
+static double rp_mesh_area(rp_mesh const* m)
+{
+	double a = 0;
+	unsigned int f;
+	for (f = 0; f < m->nf; f++)
+	{
+		double n[3];
+		rp_face_normal(m, m->x, f, n);
+		a += 0.5 * sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+	}
+	return a;
+}
+
+/* the reference's Remesh(5, ...) without its splits and collapses: five
+   rounds of smoothing and Delaunay flips; then the area scaled back to
+   area0 about the vertex mean (the smoothing moves it slightly) */
+static int rp_remesh(rp_mesh* m, double area0)
+{
+	rp_edge_key* keys = (rp_edge_key*)malloc(sizeof(rp_edge_key) * 3 * m->nf);
+	unsigned int* twin = (unsigned int*)malloc(sizeof(unsigned int) * 3 * m->nf);
+	unsigned char* touched = (unsigned char*)malloc(m->nv);
+	double* acc = (double*)malloc(sizeof(double) * 10 * m->nv);
+	double c[3] = { 0, 0, 0 }, s;
+	unsigned int i, k;
+	int ok = keys && twin && touched && acc;
+	for (i = 0; ok && i < 5; i++)
+	{
+		rp_smooth(m, acc);
+		rp_delaunay(m, keys, twin, touched);
+	}
+	free(keys); free(twin); free(touched); free(acc);
+	if (!ok)
+		return 0;
+	for (i = 0; i < m->nv; i++) for (k = 0; k < 3; k++) c[k] += m->x[3 * i + k] / m->nv;
+	s = sqrt(area0 / rp_mesh_area(m));
+	for (i = 0; i < m->nv; i++) for (k = 0; k < 3; k++) m->x[3 * i + k] = c[k] + s * (m->x[3 * i + k] - c[k]);
+	return 1;
+}
+
+static int rp_copy_mesh(rp_mesh const* a, rp_mesh* b)
+{
+	b->nv = a->nv; b->nf = a->nf;
+	b->x = (double*)malloc(sizeof(double) * 3 * a->nv);
+	b->t = (unsigned int*)malloc(sizeof(unsigned int) * 3 * a->nf);
+	if (!b->x || !b->t)
+	{
+		rp_free_mesh(b);
+		return 0;
+	}
+	memcpy(b->x, a->x, sizeof(double) * 3 * a->nv);
+	memcpy(b->t, a->t, sizeof(unsigned int) * 3 * a->nf);
+	return 1;
+}
+
+/* solve the mesh (p, sd's settings) on the caller's threads; snapshots
+   (their own copies of the mesh) after each of steps[0..nsnap), snapped (if
+   given) called after each. remesh: the mesh remeshed after every step and
+   the solver made again on it, the area held at its input value (nothing
+   pinned then) */
 static void rp_solve_mesh(rp_mesh const* mesh, double p, qaws_repulsive_mesh_solve_desc const* sd0, unsigned int const* steps, unsigned int nsnap,
-	double** snaps, qaws_repulsive_report* reps)
+	rp_mesh* snaps, qaws_repulsive_report* reps, void (*snapped)(void*, unsigned int), void* user, int remesh)
 {
 	unsigned int threads = rp_thread_count(), i, k, it = 0;
 	qaws_batch_executor ex;
@@ -776,38 +972,70 @@ static void rp_solve_mesh(rp_mesh const* mesh, double p, qaws_repulsive_mesh_sol
 	qaws_repulsive_mesh_solve_desc sd = *sd0;
 	qaws_repulsive_mesh_solver* s = NULL;
 	qaws_repulsive_report r;
+	qaws_scalar e0 = 0;
+	rp_mesh cur;
 	qaws_scalar* x = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * mesh->nv);
+	double area0 = rp_mesh_area(mesh);
 	memset(&r, 0, sizeof(r));
-	for (i = 0; i < 3 * mesh->nv; i++) x[i] = (qaws_scalar)mesh->x[i];
+	if (!x || !rp_copy_mesh(mesh, &cur))
+	{
+		free(x);
+		return;
+	}
 	ex.parallel_for = rp_parallel_for; ex.user = &threads;
 	memset(&md, 0, sizeof(md));
-	md.vertex_count = mesh->nv; md.triangles = mesh->t; md.triangle_count = mesh->nf; md.p = (qaws_scalar)p; md.executor = &ex;
-	if (qaws_repulsive_mesh_create(&md, &rm) != QAWS_STATUS_OK || qaws_repulsive_mesh_solver_create(rm, &sd, x, &s) != QAWS_STATUS_OK)
-		printf("  the scene was refused\n");
+	md.p = (qaws_scalar)p; md.executor = &ex;
 	for (k = 0; k < nsnap; k++)
 	{
-		while (s && it < steps[k] && it < rp_cap && r.reason == QAWS_REPULSIVE_RUNNING)
+		while (it < steps[k] && it < rp_cap && r.reason == QAWS_REPULSIVE_RUNNING)
 		{
+			if (!s)
+			{
+				/* (made again after each remeshing: the triangles changed) */
+				for (i = 0; i < 3 * cur.nv; i++) x[i] = (qaws_scalar)cur.x[i];
+				md.vertex_count = cur.nv; md.triangles = cur.t; md.triangle_count = cur.nf;
+				if (it)
+					sd.initial_step = 2 * r.last_step;   /* (where the last solver would have tried next) */
+				if (qaws_repulsive_mesh_create(&md, &rm) != QAWS_STATUS_OK || qaws_repulsive_mesh_solver_create(rm, &sd, x, &s) != QAWS_STATUS_OK)
+				{
+					printf("  the scene was refused\n");
+					r.reason = QAWS_REPULSIVE_NUMERICAL_FAILURE;
+					break;
+				}
+			}
 			qaws_repulsive_mesh_solver_step(s, x, &r);
-			it = r.iterations;
+			if (it == 0)
+				e0 = r.initial_energy;
+			r.initial_energy = e0;
+			r.iterations = ++it;
+			for (i = 0; i < 3 * cur.nv; i++) cur.x[i] = (double)x[i];
+			if (remesh && r.reason == QAWS_REPULSIVE_RUNNING)
+			{
+				qaws_repulsive_mesh_solver_destroy(s); s = NULL;
+				qaws_repulsive_mesh_destroy(rm); rm = NULL;
+				rp_remesh(&cur, area0);
+			}
 			if (it % 25 == 0 && r.reason == QAWS_REPULSIVE_RUNNING)
 				printf("    %u steps: E %.6g, stationarity %.3g\n", it, (double)r.energy, (double)r.stationarity);
 		}
 		reps[k] = r;
-		snaps[k] = (double*)malloc(sizeof(double) * 3 * mesh->nv);
-		for (i = 0; i < 3 * mesh->nv; i++) snaps[k][i] = (double)x[i];
+		if (!rp_copy_mesh(&cur, snaps + k))
+			memset(snaps + k, 0, sizeof(rp_mesh));
 		printf("  %u steps: E %.6g, stationarity %.3g, reason %d\n", it, (double)r.energy, (double)r.stationarity, (int)r.reason);
+		fflush(stdout);
+		if (snapped)
+			snapped(user, k);
 	}
 	qaws_repulsive_mesh_solver_destroy(s);
 	qaws_repulsive_mesh_destroy(rm);
+	rp_free_mesh(&cur);
 	free(x);
 }
 
-/* a surfaces figure: the input and nsnap snapshots, every panel fitted to
-   the input's view */
-/* panels of the mesh at positions xs[0..n), labelled, one scale for all */
-static void rp_mesh_panels(char const* svgname, char const* title, char const* subtitle, rp_mesh const* m, double const* const* xs,
-	char const (*labels)[200], unsigned int n, rp_view const* view, int const* rgbs)
+/* panels of the meshes ms[0..n), labelled, one scale for all; each face
+   coloured by its component, or tint for all */
+static void rp_mesh_panels(char const* svgname, char const* title, char const* subtitle, rp_mesh const* ms,
+	char const (*labels)[200], unsigned int n, rp_view const* view, int const* tint)
 {
 	static int const rgb[3] = { 72, 132, 222 };   /* (the paper's blue) */
 	double const pw = 300, ph = 300;
@@ -821,7 +1049,7 @@ static void rp_mesh_panels(char const* svgname, char const* title, char const* s
 		v.y0 = 84; v.w = pw; v.h = ph; v.xmin = v.ymin = 0; v.xmax = v.ymax = 1; v.x0 = 24;
 		for (k = 0; k < n; k++)
 		{
-			rp_fit_points(&v, view, xs[k], m->nv, &fit);
+			rp_fit_points(&v, view, ms[k].x, ms[k].nv, &fit);
 			scale = fmin(scale, fit.scale);   /* (one scale for every panel: sizes compare) */
 		}
 		for (k = 0; k < n; k++)
@@ -829,45 +1057,62 @@ static void rp_mesh_panels(char const* svgname, char const* title, char const* s
 			char png[600];
 			char const* base;
 			size_t stem = strlen(svgname) > 4 ? strlen(svgname) - 4 : strlen(svgname);   /* (without .svg) */
+			rp_mesh const* m = ms + k;
+			int* rgbs = rp_face_colours(m);
+			unsigned int i;
+			for (i = 0; tint && rgbs && i < 3 * m->nf; i++) rgbs[i] = tint[i % 3];
 			v.x0 = 24 + k * (pw + 12);
 			svg_panel(&s, &v, NULL);
-			rp_fit_points(&v, view, xs[k], m->nv, &fit);
+			rp_fit_points(&v, view, m->x, m->nv, &fit);
 			fit.cx = v.x0 + 0.5 * v.w + (fit.cx - v.x0 - 0.5 * v.w) * scale / fit.scale;
 			fit.cy = v.y0 + 0.5 * v.h + (fit.cy - v.y0 - 0.5 * v.h) * scale / fit.scale;
 			fit.scale = scale;
 			/* the panel rendered at twice its size, beside the SVG */
 			sprintf(png, "%.*s_%u.png", (int)stem, svgname, k);
 			base = strrchr(png, '/') ? strrchr(png, '/') + 1 : png;
-			if (rp_render(png, (int)(2 * pw), (int)(2 * ph), v.x0, v.y0, 2, &fit, view, xs[k], m->nv, m->t, m->nf, rgb, rgbs))
+			if (rp_render(png, (int)(2 * pw), (int)(2 * ph), v.x0, v.y0, 2, &fit, view, m->x, m->nv, m->t, m->nf, rgb, rgbs))
 				fprintf(s.f, "<image href=\"%s\" x=\"%.1f\" y=\"%.1f\" width=\"%.1f\" height=\"%.1f\"/>\n", base, v.x0, v.y0, pw, ph);
 			fprintf(s.f, "<text x=\"%.1f\" y=\"%.1f\" font-size=\"13\" font-weight=\"600\" fill=\"#24292f\">%s</text>\n", v.x0 + 10, v.y0 + 20, labels[k]);
+			free(rgbs);
 		}
 		svg_close(&s);
 	}
 }
 
-static void rp_surface_figure(rp_mesh const* m, char const* svgname, char const* title, char const* subtitle, double p,
-	qaws_repulsive_mesh_solve_desc const* sd, unsigned int const* steps, unsigned int nsnap, rp_view const* view)
+typedef struct rp_surface_run
 {
-	double* snaps[8];
+	rp_mesh const* m;
+	char const *svgname, *title, *subtitle;
+	rp_view const* view;
+	int const* tint;
+	rp_mesh ms[9];   /* the input, then the snapshots */
 	qaws_repulsive_report reps[8];
+} rp_surface_run;
+
+/* the figure so far, rewritten at each snapshot: a long run shows its
+   progress, and a run stopped early keeps the panels it reached */
+static void rp_surface_snapped(void* user, unsigned int last)
+{
+	rp_surface_run const* f = (rp_surface_run const*)user;
+	char labels[9][200];
+	unsigned int k;
+	sprintf(labels[0], "input: %u faces, E %.4g", f->m->nf, (double)f->reps[0].initial_energy);
+	for (k = 0; k <= last; k++)
+		sprintf(labels[k + 1], "%s%u steps: E %.4g", f->reps[k].reason == QAWS_REPULSIVE_CONVERGED ? "converged, " : "", f->reps[k].iterations, (double)f->reps[k].energy);
+	rp_mesh_panels(f->svgname, f->title, f->subtitle, f->ms, labels, last + 2, f->view, f->tint);
+}
+
+static void rp_surface_figure(rp_mesh const* m, char const* svgname, char const* title, char const* subtitle, double p,
+	qaws_repulsive_mesh_solve_desc const* sd, unsigned int const* steps, unsigned int nsnap, rp_view const* view, int const* tint, int remesh)
+{
+	rp_surface_run f;
 	time_t t0 = time(NULL);
 	unsigned int k;
-	int* rgbs = rp_face_colours(m);
-	double const* xs[9];
-	char labels[9][200];
+	f.m = m; f.svgname = svgname; f.title = title; f.subtitle = subtitle; f.view = view; f.tint = tint;
+	f.ms[0] = *m;
 	printf("%s: %u vertices, %u faces\n", svgname, m->nv, m->nf);
-	rp_solve_mesh(m, p, sd, steps, nsnap, snaps, reps);
-	xs[0] = m->x;
-	sprintf(labels[0], "input: %u faces, E %.4g", m->nf, (double)reps[0].initial_energy);
-	for (k = 0; k < nsnap; k++)
-	{
-		xs[k + 1] = snaps[k];
-		sprintf(labels[k + 1], "%s%u steps: E %.4g", reps[k].reason == QAWS_REPULSIVE_CONVERGED ? "converged, " : "", reps[k].iterations, (double)reps[k].energy);
-	}
-	rp_mesh_panels(svgname, title, subtitle, m, xs, labels, nsnap + 1, view, rgbs);
-	for (k = 0; k < nsnap; k++) free(snaps[k]);
-	free(rgbs);
+	rp_solve_mesh(m, p, sd, steps, nsnap, f.ms + 1, f.reps, rp_surface_snapped, &f, remesh);
+	for (k = 0; k < nsnap; k++) rp_free_mesh(f.ms + 1 + k);
 	printf("  %s, %.0f s\n", svgname, difftime(time(NULL), t0));
 }
 
@@ -1027,7 +1272,7 @@ static void rp_paths_figure(char const* dir)
 int main(int argc, char** argv)
 {
 	char const* dir = argc > 1 ? argv[1] : "../examples/data/repulsive_curves";
-	int only = argc > 2 ? atoi(argv[2]) : 0;   /* (one figure: 1 to 10) */
+	int only = argc > 2 ? atoi(argv[2]) : 0;   /* (one figure: 1 to 13) */
 	if (argc > 3)
 		rp_cap = (unsigned int)atoi(argv[3]);
 	setvbuf(stdout, NULL, _IONBF, 0);
@@ -1080,7 +1325,7 @@ int main(int argc, char** argv)
 			memset(&sd, 0, sizeof(sd));
 			sd.pinned = pins; sd.pinned_count = npin; sd.theta = (qaws_scalar)0.25;
 			rp_surface_figure(&m, "showcase/paper7_cylinder.svg", "Repulsive Surfaces, Fig. 9 (left): a cylinder with Dirichlet ends",
-				"both rims pinned; p 6; the hierarchical fractional Sobolev descent (theta 0.25)", 6, &sd, steps, 2, &view);
+				"both rims pinned; p 6; the hierarchical fractional Sobolev descent (theta 0.25)", 6, &sd, steps, 2, &view, NULL, 0);
 			free(pins);
 		}
 		rp_free_mesh(&m);
@@ -1100,38 +1345,36 @@ int main(int argc, char** argv)
 		time_t t0 = time(NULL);
 		if (rp_cylinder(48, 28, 1, 3, &m) && (pins = rp_boundary(&m, &npin)) != NULL)
 		{
-			double* snaps[3];
+			rp_mesh ms[4];   /* the input, then each weight's result */
 			qaws_repulsive_report reps[3];
-			double const* xs[4];
 			char labels[4][200];
 			memset(&sd, 0, sizeof(sd));
 			sd.pinned = pins; sd.pinned_count = npin; sd.theta = (qaws_scalar)0.25;
-			xs[0] = m.x;
+			ms[0] = m;
 			sprintf(labels[0], "input: %u faces", m.nf);
 			for (k = 0; k < 3; k++)
 			{
 				sd.area_weight = (qaws_scalar)weights[k];
 				printf("paper10_neck: the area weighted by %g\n", weights[k]);
-				rp_solve_mesh(&m, 6, &sd, steps, 1, snaps + k, reps + k);
-				xs[k + 1] = snaps[k];
+				rp_solve_mesh(&m, 6, &sd, steps, 1, ms + 1 + k, reps + k, NULL, NULL, 0);
 				sprintf(labels[k + 1], "area weight %g: %u steps, E %.4g", weights[k], reps[k].iterations, (double)reps[k].energy);
 			}
 			rp_mesh_panels("showcase/paper10_neck.svg", "Repulsive Surfaces, Fig. 9 (centre): area minimization without pinching off",
 				"two rings 3 apart (radius 1: far past the catenoid's limit of 1.33), pinned; the area weighted, the tangent-point energy (p 6) keeping a neck",
-				&m, xs, labels, 4, &view, NULL);
-			for (k = 0; k < 3; k++) free(snaps[k]);
+				ms, labels, 4, &view, NULL);
+			for (k = 0; k < 3; k++) rp_free_mesh(ms + 1 + k);
 			free(pins);
 		}
 		rp_free_mesh(&m);
 		printf("  showcase/paper10_neck.svg, %.0f s\n", difftime(time(NULL), t0));
 	}
-	/* Repulsive Surfaces, Fig. 11 (the gallery): linked surfaces flowing to
+	/* Repulsive Surfaces, scenes of the paper's code (not figures): linked surfaces flowing to
 	   their canonical embeddings; the paper's meshes, the area and the
 	   barycenter held as in the paper's scene files */
 	{
 		static char const* const files[2] = { "hopf.obj", "borromean.obj" };
 		static char const* const svgs[2] = { "showcase/paper8_hopf.svg", "showcase/paper9_borromean.svg" };
-		static char const* const titles[2] = { "Repulsive Surfaces, Fig. 11: a Hopf link", "Repulsive Surfaces, Fig. 11: Borromean rings" };
+		static char const* const titles[2] = { "Repulsive Surfaces, a scene of its code: a Hopf link", "Repulsive Surfaces, a scene of its code: Borromean rings" };
 		/* shortcut: the rings stopped at the scene's 350 steps (9 s a step, every step backtracked to 1/32), far from the stationarity floor */
 		static unsigned int const steps[2][2] = { { 25, RP_UNTIL }, { 175, 350 } };
 		char sdir[1024];
@@ -1149,7 +1392,40 @@ int main(int argc, char** argv)
 			memset(&sd, 0, sizeof(sd));
 			sd.hold_area = 1; sd.theta = (qaws_scalar)0.25;
 			rp_surface_figure(&m, svgs[k], titles[k], "p 6; the area and the barycenter held; the hierarchical fractional Sobolev descent (theta 0.25)", 6, &sd,
-				steps[k], 2, &view);
+				steps[k], 2, &view, NULL, 0);
+			rp_free_mesh(&m);
+		}
+	}
+	/* Repulsive Surfaces: genus-2 scenes of the paper's code, its meshes and
+	   settings (the area and the barycenter held, its iteration limits).
+	   Fig. 1: linked handcuffs flowing to the unlinked double torus, in its
+	   copper; a double torus with a ring through it; a figure-eight tube */
+	{
+		static char const* const files[3] = { "doubletorus10k.obj", "doubletorusring.obj", "figure8tube.obj" };
+		static char const* const svgs[3] = { "showcase/paper11_handcuffs.svg", "showcase/paper12_torus_ring.svg", "showcase/paper13_figure8.svg" };
+		static char const* const titles[3] = { "Repulsive Surfaces, Fig. 1: linked handcuffs to the unlinked double torus",
+			"Repulsive Surfaces, a scene of its code: a double torus and a ring", "Repulsive Surfaces, a scene of its code: a broken figure-eight tube" };
+		/* (the ring: past its scene's 200 iterations, where the paper's code
+		   too is still threaded through both holes; one handle comes free
+		   between 500 and 750 steps there) */
+		static unsigned int const steps[3][4] = { { 100, 200, 350, 700 }, { 100, 300, 600, 1000 }, { 50, 100, 250, 500 } };
+		static int const copper[3] = { 214, 128, 96 };
+		char sdir[1024];
+		unsigned int k;
+		sprintf(sdir, "%s/../repulsive_surfaces", dir);
+		for (k = 0; k < 3; k++)
+		{
+			rp_view view = { 0.3, k == 0 ? 1.4 : -0.3 };   /* (the double torus from above: both holes seen) */
+			rp_mesh m;
+			qaws_repulsive_mesh_solve_desc sd;
+			if (only && only != 11 + (int)k)
+				continue;
+			if (!rp_load_mesh(sdir, files[k], &m))
+				continue;
+			memset(&sd, 0, sizeof(sd));
+			sd.hold_area = 1; sd.theta = (qaws_scalar)0.25;
+			rp_surface_figure(&m, svgs[k], titles[k], "the paper's mesh; p 6; the area and the barycenter held; the hierarchical fractional Sobolev descent (theta 0.25)",
+				6, &sd, steps[k], 4, &view, k == 0 ? copper : NULL, 1);
 			rp_free_mesh(&m);
 		}
 	}

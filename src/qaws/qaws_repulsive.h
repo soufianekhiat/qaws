@@ -322,6 +322,8 @@ typedef struct qaws_repulsive_mesh_solve_desc
 	qaws_scalar theta;                     /* 0: dense; > 0: hierarchical, as for curves */
 	qaws_scalar area_weight;               /* > 0: weight * the area added to the energy (the paper's minimize area: tangent-point
 	                                          energy regularizing area minimization); no solution derivatives then */
+	qaws_scalar initial_step;              /* the first trial's largest vertex move over the mean edge length; 0 = 0.25
+	                                          (a solver made again, after remeshing, resumes with twice its last_step) */
 } qaws_repulsive_mesh_solve_desc;
 
 typedef struct qaws_repulsive_mesh_solver qaws_repulsive_mesh_solver;

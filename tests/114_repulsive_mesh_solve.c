@@ -261,6 +261,29 @@ static void test_area_weight(void)
 		(int)qaws_repulsive_mesh_solver_create(m, &sd, x, &s));
 	TEST_ASSERT(st == QAWS_STATUS_OK && sj == QAWS_STATUS_UNSUPPORTED_OPERATION && s == NULL, msg);
 	qaws_repulsive_mesh_solver_destroy(s);
+	s = NULL;
+	/* the first step's largest move capped by initial_step (a solver made again resuming its step); a negative one refused */
+	{
+		static double const caps[2] = { 0.01, 1 };
+		double moved[2] = { 0, 0 };
+		qaws_status sn;
+		sd.area_weight = 0;
+		for (k = 0; k < 2; k++)
+		{
+			memcpy(xw, x, sizeof(x));
+			sd.initial_step = (qaws_scalar)caps[k];
+			st = st == QAWS_STATUS_OK ? qaws_repulsive_mesh_solver_create(m, &sd, xw, &s) : st;
+			st = st == QAWS_STATUS_OK ? qaws_repulsive_mesh_solver_step(s, xw, &rw) : st;
+			moved[k] = (double)rw.last_step;
+			qaws_repulsive_mesh_solver_destroy(s);
+			s = NULL;
+		}
+		sd.initial_step = (qaws_scalar)-1;
+		sn = qaws_repulsive_mesh_solver_create(m, &sd, x, &s);
+		sprintf(msg, "initial step: the first move %.4g (cap 0.01), %.4g (cap 1), a negative one refused (%d)", moved[0], moved[1], (int)sn);
+		TEST_ASSERT(st == QAWS_STATUS_OK && moved[0] > 0 && moved[0] <= 0.01 * 1.001 && moved[1] > moved[0] && s == NULL, msg);
+		qaws_repulsive_mesh_solver_destroy(s);
+	}
 	qaws_repulsive_mesh_destroy(m);
 }
 

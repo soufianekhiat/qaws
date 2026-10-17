@@ -276,6 +276,10 @@ the report.
   energy: the paper's "minimize area" (Fig. 9, centre). The descent then
   runs without the energy's Hessian-vector product, and the solution's
   derivatives are refused (unsupported). A negative weight is refused.
+- **Initial step.** `initial_step` sets the first trial's largest vertex
+  move, over the mean edge length (0: 0.25). A solver made again on a
+  remeshed surface resumes with twice its predecessor's `last_step`, where
+  that solver would have tried next. A negative one is refused.
 
   The area and volume rows are divided by the mean edge length l and l^2,
   so that one tolerance (in lengths) serves every row.
@@ -328,6 +332,7 @@ vertex form's kernel is the constants only.
 | The path check: a vertex through a face and an edge through an edge, both ends clear, caught | | |
 | Refusals: volume on an open mesh; an edge through a face in the collision-checked mode; free translations reported | | |
 | The area weight (2): the energy at the input against the unweighted energy + 2 A; 20 steps, the area 12.59 -> 4.16 (unweighted it inflates to 861); solution derivatives and a negative weight refused | within 1e-10 relative | within 1e-4 |
+| The initial step: the first move within a cap of 0.01 mean edges, longer with a cap of 1; a negative one refused | | |
 
 Cost: the metric and the systems are dense, O(F^2) to assemble and
 (3V + k)^3 to factor. A 128-face sphere takes well under a second per
@@ -725,9 +730,9 @@ CurveInterpolation). They need objectives on the lengths' differences.
 
 ### Repulsive Surfaces
 
-The same program reproduces figures of Repulsive Surfaces. The Hopf link
-and the Borromean rings are the paper's meshes, copied under their MIT
-license into `examples/data/repulsive_surfaces`. The cylinders are
+The same program reproduces figures of Repulsive Surfaces. The Hopf link,
+the Borromean rings and the genus-2 scenes are the paper's meshes, copied
+under their MIT license into `examples/data/repulsive_surfaces`. The cylinders are
 generated, in the paper's proportions. Each runs the hierarchical mode
 (theta 0.25, p 6) until it stalls at the hierarchical stationarity floor
 (about 6e-3). The surfaces are rendered by a small z-buffered rasterizer
@@ -738,21 +743,39 @@ beside the figure's SVG:
 |---|---|---|---|---|
 | 9 (left) | a cylinder twice as tall as wide, both rims pinned, ballooning to a near-sphere | 3360 | 82 | 2.244 -> 0.397 |
 | 9 (centre) | two pinned rings 3 apart (radius 1), the area weighted 1, 10 and 100: a neck kept in each | 2592 | 30, 29, 38 | 18.6, 134.9, 1077 |
-| 11 | a Hopf link, the area held | 9216 | 40 | 842.5 -> 303.3 (256 s) |
+| (a scene of the paper's code) | a Hopf link, the area held | 9216 | 40 | 842.5 -> 303.3 (256 s) |
+| 1 | linked handcuffs (genus 2) to the unlinked double torus, the area held, remeshed after every step | 10506 | 700 | 376 -> 7.551 (75 min) |
 
 The links hold the area and the barycenter, as the paper's own scene
 files do (with limits of 200 and 350 iterations): unconstrained, they
 inflate (the energy falls toward 0 as the surfaces grow).
 
+The paper's program remeshes the surface after every step by default (a
+setting of its interface, not of its scene files). Without it, its
+Fig. 1 never unlinks: after the scene's 700 iterations it is still
+interlocked (E 76.1 exact; this solver 77.1), and 300 more steps leave
+it so (71.2). The
+figures of closed surfaces therefore remesh as it does, without its edge
+splits and collapses (the reference run without them unlinks the same
+way): five rounds of smoothing (each vertex half way to the area-weighted
+circumcentres of its faces, in its tangent plane) and Delaunay flips,
+the area scaled back, and the solver made again, resuming its step. A
+face the smoothing would turn over keeps its vertices where they were:
+unguarded, one round on a mesh that had not been remeshed folded 81 face
+pairs through each other. Remeshed, Fig. 1 unlinks in about 300 steps;
+after 700 its energy is 7.551, the paper's program 7.548 (exact).
+
 Against the reference implementation (the paper's code, scored by its
 exact all-pairs energy): on the Fig. 9 (left) cylinder it reaches 0.3823
 and this solver 0.3852; on the Hopf link 303.25 against 303.69. On the
 Borromean rings it descends much faster (4686 against 7033 after 350
-steps): its approximate direction opens a pinch between two rings that
-this solver's exact one, held by its largest-vertex step, does not.
+steps), but only by passing the rings through each other (24 to 28
+intersecting face pairs between rings over its first 9 steps; the linking
+numbers come back 0); this solver's step, held by its largest vertex
+move, keeps them apart.
 
-Not reproduced: the scenes that need remeshing, implicit obstacles,
-growth schedules, or p <= 4 (the solver needs p > 4).
+Not reproduced: implicit obstacles, growth schedules, remeshing of surfaces
+with a boundary, or p <= 4 (the solver needs p > 4).
 
 ## Space-time paths and rooms (Sec. 8.5)
 

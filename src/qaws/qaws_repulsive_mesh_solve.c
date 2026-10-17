@@ -701,7 +701,7 @@ qaws_status qaws_repulsive_mesh_solver_create(qaws_repulsive_mesh const* m, qaws
 	*out_solver = NULL;
 	memset(&d, 0, sizeof(d));
 	if (desc) d = *desc;
-	if ((d.pinned_count && !d.pinned) || !(d.area_weight >= 0))
+	if ((d.pinned_count && !d.pinned) || !(d.area_weight >= 0) || !(d.initial_step >= 0))
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	for (i = 0; i < d.pinned_count; i++) if (d.pinned[i] >= m->nv) return QAWS_STATUS_INVALID_ARGUMENT;
 	s = (qaws_repulsive_mesh_solver*)calloc(1, sizeof(*s));
@@ -765,7 +765,7 @@ qaws_status qaws_repulsive_mesh_solver_create(qaws_repulsive_mesh const* m, qaws
 	k->clearance = d.clearance > 0 ? (double)d.clearance : 1e-3 * k->lmean;
 	k->tol = d.tolerance > 0 ? (double)d.tolerance : 1e-4;
 	k->ctol = (d.constraint_tolerance > 0 ? (double)d.constraint_tolerance : RM_CTOL) * k->lmean;
-	k->h = 0.25 * k->lmean;
+	k->h = (d.initial_step > 0 ? (double)d.initial_step : 0.25) * k->lmean;
 	k->rep.reason = QAWS_REPULSIVE_RUNNING;
 	k->rep.stationarity = 1;
 	if ((st = k->ops->energy(k, k->x, &E, NULL)) != QAWS_STATUS_OK)
