@@ -1978,74 +1978,86 @@ int main(int argc, char** argv)
 			rp_wrap_views(sdir);   /* (figure 15's views alone, from its snapshots) */
 		if (!only || only == 16)
 		{
-			/* Fig. 21: nested envelopes around the shrink-wrapped bunny (figure
-			   15's last snapshot): each level starts from the one inside it
-			   pushed out by a fifth of an edge along its normals, then its
-			   volume is raised 1.15x over 40 steps with that one as its
-			   obstacle, remeshed 1.25x coarser a level */
-			enum { LEVELS = 4 };
-			static unsigned int const steps[1] = { 60 };
-			static int const sand[3] = { 214, 196, 160 };
+			/* Fig. 21: nested envelopes by recursive shrink wrapping, around
+			   the shrink-wrapped bunny (figure 15's last snapshot): each level
+			   the scene's sphere shrunk onto the one inside it (an obstacle,
+			   1), its volume brought down over 150 steps to 1.15x that one's,
+			   remeshed coarser a level (2x, 2.5x, 3.1x the sphere's edge) */
+			enum { LEVELS = 3 };
+			static unsigned int const steps[1] = { 170 };
 			rp_view view = { 0.3, -1.4 };
-			rp_mesh lv[LEVELS + 1];
-			char labels[LEVELS + 1][200];
-			unsigned int nl, q, k;
-			double L = 0, V0;
-			memset(lv, 0, sizeof(lv));
-			if (rp_load_mesh("showcase", "paper15_shrinkwrap_4.obj", lv))
+			rp_mesh lv[LEVELS + 2], sph;
+			rp_extra ex[LEVELS + 2];
+			char labels[LEVELS + 2][200];
+			unsigned int nl, k, base;
+			double L = 0, Vsph;
+			memset(lv, 0, sizeof(lv)); memset(ex, 0, sizeof(ex)); memset(&sph, 0, sizeof(sph));
+			if (rp_load_mesh("showcase", "paper15_shrinkwrap_4.obj", lv) && rp_load_mesh(sdir, "sphere20k.obj", &sph))
 			{
 				time_t t0 = time(NULL);
-				for (i = 0; i < 3 * lv[0].nf; i++) L += rp_dist(lv[0].x + 3 * lv[0].t[i], lv[0].x + 3 * lv[0].t[3 * (i / 3) + (i + 1) % 3]) / (3 * lv[0].nf);
-				V0 = rp_mesh_volume(lv);
-				sprintf(labels[0], "the shrink wrap (Fig. 20): %u faces", lv[0].nf);
-				printf("showcase/paper16_envelopes.svg: from %u faces\n", lv[0].nf);
+				for (i = 0; i < 3 * sph.nv; i++) sph.x[i] *= 0.6;   /* (as figure 15's) */
+				for (i = 0; i < 3 * sph.nf; i++) L += rp_dist(sph.x + 3 * sph.t[i], sph.x + 3 * sph.t[3 * (i / 3) + (i + 1) % 3]) / (3 * sph.nf);
+				Vsph = rp_mesh_volume(&sph);
+				sprintf(labels[0], "level 0, the shrink wrap: %u faces", lv[0].nf);
+				printf("showcase/paper16_envelopes.svg: around %u faces\n", lv[0].nf);
 				for (nl = 1; nl <= LEVELS; nl++)
 				{
 					rp_mesh const* in = lv + nl - 1;
-					rp_mesh start;
 					qaws_repulsive_report rep;
 					rp_opts o;
-					double* nrm = (double*)calloc(3 * (size_t)in->nv, sizeof(double)), push = 0.2 * L * pow(1.25, nl - 1);
 					memset(&o, 0, sizeof(o));
-					o.remesh = 1; o.volume_mult = 1.15; o.ramp = 40; o.edge = L * pow(1.25, nl);
+					o.remesh = 1; o.ramp = 150; o.edge = 2 * L * pow(1.25, nl - 1);
+					o.volume_mult = 1.15 * rp_mesh_volume(in) / Vsph;
 					ox = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * in->nv);
-					if (!nrm || !ox || !rp_copy_mesh(in, &start))
-					{
-						free(nrm); free(ox); ox = NULL;
+					if (!ox)
 						break;
-					}
 					for (i = 0; i < 3 * in->nv; i++) ox[i] = (qaws_scalar)in->x[i];
-					for (k = 0; k < in->nf; k++)
-					{
-						double n[3];
-						rp_face_normal(in, in->x, k, n);   /* (area-weighted: twice the area times the normal) */
-						for (q = 0; q < 3; q++) { nrm[3 * in->t[3 * k] + q] += n[q]; nrm[3 * in->t[3 * k + 1] + q] += n[q]; nrm[3 * in->t[3 * k + 2] + q] += n[q]; }
-					}
-					for (i = 0; i < in->nv; i++)
-					{
-						double l = sqrt(nrm[3 * i] * nrm[3 * i] + nrm[3 * i + 1] * nrm[3 * i + 1] + nrm[3 * i + 2] * nrm[3 * i + 2]);
-						for (q = 0; q < 3 && l > 0; q++) start.x[3 * i + q] += push * nrm[3 * i + q] / l;
-					}
 					od.positions = ox; od.vertex_count = in->nv; od.triangles = in->t; od.triangle_count = in->nf; od.weight = 1;
 					memset(&sd, 0, sizeof(sd));
-					sd.hold_volume = 1; sd.theta = (qaws_scalar)0.25;
+					sd.hold_volume = 1; sd.translations = 1; sd.theta = (qaws_scalar)0.25; sd.max_step = (qaws_scalar)0.4;
 					sd.obstacles = &od; sd.obstacle_count = 1;
-					printf("  level %u\n", nl);
-					rp_solve_mesh(&start, 6, &sd, steps, 1, lv + nl, &rep, NULL, NULL, &o);
-					free(nrm); free(ox); ox = NULL;
-					rp_free_mesh(&start);
+					printf("  level %u: the volume to %.4g\n", nl, 1.15 * rp_mesh_volume(in));
+					rp_solve_mesh(&sph, 6, &sd, steps, 1, lv + nl, &rep, NULL, NULL, &o);
+					free(ox); ox = NULL;
 					if (!lv[nl].nv)
 						break;
-					sprintf(labels[nl], "level %u: %.3gx the volume, %u faces", nl, rp_mesh_volume(lv + nl) / V0, lv[nl].nf);
+					sprintf(labels[nl], "level %u: %.3gx the level inside, %u faces", nl, rp_mesh_volume(lv + nl) / rp_mesh_volume(in), lv[nl].nf);
 				}
-				rp_mesh_panels("showcase/paper16_envelopes.svg", "Repulsive Surfaces, Fig. 21: nested envelopes",
-					"each level the one inside it pushed out, its volume raised 1.15x with that one as the obstacle (1), remeshed 1.25x coarser; p 6",
-					lv, labels, nl, &view, sand, NULL);
-				for (k = 0; k < nl; k++) rp_free_mesh(lv + k);
+				/* all levels at once, cut open by the plane through their centre facing the eye (one colour each) */
+				for (k = 0, base = 0; k < nl; k++) { lv[nl].nv += lv[k].nv; lv[nl].nf += lv[k].nf; }
+				lv[nl].x = (double*)malloc(sizeof(double) * 3 * (lv[nl].nv + 1));
+				lv[nl].t = (unsigned int*)malloc(sizeof(unsigned int) * 3 * (lv[nl].nf + 1));
+				if (lv[nl].x && lv[nl].t)
+				{
+					double c[3] = { 0, 0, 0 }, eye[3];
+					unsigned int f = 0;
+					for (k = 0; k < nl; k++)
+					{
+						memcpy(lv[nl].x + 3 * base, lv[k].x, sizeof(double) * 3 * lv[k].nv);
+						for (i = 0; i < 3 * lv[k].nf; i++) lv[nl].t[3 * f + i] = lv[k].t[i] + base;
+						base += lv[k].nv; f += lv[k].nf;
+					}
+					for (i = 0; i < lv[0].nv; i++) for (k = 0; k < 3; k++) c[k] += lv[0].x[3 * i + k] / lv[0].nv;
+					for (k = 0; k < 3; k++)
+					{
+						double e[3] = { 0, 0, 0 }, re[3];
+						e[k] = 1;
+						rp_rotate(&view, e, re);
+						eye[k] = -re[2];
+					}
+					for (k = 0; k < 3; k++) ex[nl].cut[k] = eye[k];
+					ex[nl].cut[3] = -(eye[0] * c[0] + eye[1] * c[1] + eye[2] * c[2]);
+					sprintf(labels[nl], "all levels, cut open");
+					rp_mesh_panels("showcase/paper16_envelopes.svg", "Repulsive Surfaces, Fig. 21: nested envelopes by recursive shrink wrapping",
+						"each level the sphere shrunk onto the one inside it (obstacle, 1) to 1.15x its volume, remeshed coarser; p 6; the last panel cut open",
+						lv, labels, nl + 1, &view, NULL, ex);
+				}
+				for (k = 0; k <= nl; k++) rp_free_mesh(lv + k);
 				printf("  showcase/paper16_envelopes.svg, %.0f s\n", difftime(time(NULL), t0));
 			}
 			else
 				printf("paper16_envelopes: run figure 15 first (the envelopes start from its shrink wrap)\n");
+			rp_free_mesh(&sph);
 		}
 		if (!only || only == 17)
 		{
