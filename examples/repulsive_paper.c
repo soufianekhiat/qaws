@@ -24,8 +24,9 @@
  *   paper15_shrinkwrap.svg shrink wrapping a point cloud (Fig. 20)
  *   paper16_envelopes.svg nested envelopes around it (Fig. 21; after figure 15)
  *   paper17_cobbles.svg   cobblestones grown in a slab (Fig. 22, bottom)
+ *   paper15_shrinkwrap_views.svg the wrap see-through and cut open over the points (with 15; alone: 18)
  *
- * Usage: qaws_repulsive_paper [data directory [figure 1 to 17 [most steps]]] (default
+ * Usage: qaws_repulsive_paper [data directory [figure 1 to 18 [most steps]]] (default
  * ../examples/data/repulsive_curves, from working_dir; every figure). Minutes, not
  * seconds: the scenes have 500 to 800 vertices and take hundreds of steps
  * (about 20 minutes on 20 threads).
@@ -473,7 +474,7 @@ static int rp_load_mesh(char const* dir, char const* name, rp_mesh* m)
 	for (cf = 0; m->x && m->t && cf < 3 * m->nf; cf++)
 		if (m->t[cf] >= m->nv)
 			return 0;
-	return m->x && m->t && m->nf > 0;
+	return m->x && m->t && m->nv > 0;   /* (no faces: a point cloud) */
 }
 
 static void rp_free_mesh(rp_mesh* m) { free(m->x); free(m->t); }
@@ -565,25 +566,53 @@ static int rp_png_write(char const* path, int w, int h, unsigned char const* rgb
 
 #define RP_SS 3   /* supersamples per output pixel, each way */
 
+/* what a panel adds to its mesh (rp_render): points drawn as small shaded
+   balls (a point cloud), the mesh drawn see-through over them, and its
+   faces on one side of a plane cut away */
+typedef struct rp_extra
+{
+	double const* points;
+	unsigned int npoints;
+	double radius;                  /* the balls', in output pixels */
+	int prgb[3];
+	double alpha;                   /* the mesh's opacity; 0 or 1: opaque */
+	double cut[4];                  /* faces whose centroid c has cut . (c, 1) > 0 dropped; all 0: none */
+} rp_extra;
+
+/* Blinn-Phong with a key and a fill light, n the unit normal facing the eye */
+static void rp_shade(double const* n, int const* c, double shade, double const* key, double const* fill, double const* hk, double* out)
+{
+	double dk = fmax(0, n[0] * key[0] + n[1] * key[1] + n[2] * key[2]);
+	double df = fmax(0, n[0] * fill[0] + n[1] * fill[1] + n[2] * fill[2]);
+	double sp = pow(fmax(0, n[0] * hk[0] + n[1] * hk[1] + n[2] * hk[2]), 36);
+	unsigned int k;
+	for (k = 0; k < 3; k++) out[k] = fmin(255, fmax(0, shade * (c[k] * (0.34 + 0.10 * n[1] + 0.62 * dk + 0.30 * df) + 255 * 0.35 * sp)));
+}
+
 /* the faces of x rendered into a w x h RGBA image, transparent where empty:
    pixel (px, py) is the panel point (x0 + px / res, y0 + py / res) under the
    fit. Smooth shaded by the area-weighted vertex normals (Blinn-Phong, a key
    and a fill light); both sides lit, the side facing away darker; a face's
-   colour from rgbs[face] if given */
+   colour from rgbs[face] if given; ex (may be NULL) adds points, see-through
+   and a cut. See-through: the points drawn first, then each pixel's mesh
+   layers in front of them averaged and laid over with 1 - (1 - alpha)^layers */
 static int rp_render(char const* path, int w, int h, double x0, double y0, double res, rp_fit const* fit, rp_view const* view,
-	double const* x, unsigned int nv, unsigned int const* tri, unsigned int nf, int const* rgb, int const* rgbs)
+	double const* x, unsigned int nv, unsigned int const* tri, unsigned int nf, int const* rgb, int const* rgbs, rp_extra const* ex)
 {
 	static double const key[3] = { -0.42, 0.62, -0.66 }, fill[3] = { 0.65, 0.05, -0.76 };   /* (view space: y up, the eye toward -z) */
 	int W = w * RP_SS, H = h * RP_SS, px, py;
+	int glass = ex && ex->alpha > 0 && ex->alpha < 1, cut = ex && (ex->cut[0] != 0 || ex->cut[1] != 0 || ex->cut[2] != 0);
 	double r = res * RP_SS, hk[3], hl;
 	double* q = (double*)malloc(sizeof(double) * 3 * nv);
 	double* vn = (double*)calloc(3 * (size_t)nv, sizeof(double));
 	float* zb = (float*)malloc(sizeof(float) * (size_t)W * H);
 	unsigned char* hi = (unsigned char*)calloc(4 * (size_t)W * H, 1);
 	unsigned char* out = (unsigned char*)malloc(4 * (size_t)w * h);
+	float* acc = glass ? (float*)calloc(3 * (size_t)W * H, sizeof(float)) : NULL;   /* (see-through: the layers' colours summed, and counted) */
+	unsigned short* cnt = glass ? (unsigned short*)calloc((size_t)W * H, sizeof(unsigned short)) : NULL;
 	unsigned int i, k;
 	int ok = 0;
-	if (!q || !vn || !zb || !hi || !out)
+	if (!q || !vn || !zb || !hi || !out || (glass && (!acc || !cnt)))
 		goto done;
 	hk[0] = key[0]; hk[1] = key[1]; hk[2] = key[2] - 1;   /* (the half vector toward the eye) */
 	hl = sqrt(hk[0] * hk[0] + hk[1] * hk[1] + hk[2] * hk[2]);
@@ -610,6 +639,32 @@ static int rp_render(char const* path, int w, int h, double x0, double y0, doubl
 		for (k = 0; k < 3; k++) { vn[3 * t[0] + k] += n[k]; vn[3 * t[1] + k] += n[k]; vn[3 * t[2] + k] += n[k]; }
 	}
 	for (i = 0; i < (unsigned int)(W * H); i++) zb[i] = 1e30f;
+	for (i = 0; ex && i < ex->npoints; i++)
+	{
+		/* a point: a ball of the given radius, its depth and normal from its disc */
+		double p[3], R = ex->radius * RP_SS, cx, cy;
+		int xa, xb, ya, yb;
+		rp_rotate(view, ex->points + 3 * i, p);
+		cx = (fit->cx + fit->scale * p[0] - x0) * r; cy = (fit->cy - fit->scale * p[1] - y0) * r; p[2] *= fit->scale * r;
+		xa = (int)fmax(0, floor(cx - R)); xb = (int)fmin(W - 1, ceil(cx + R)); ya = (int)fmax(0, floor(cy - R)); yb = (int)fmin(H - 1, ceil(cy + R));
+		for (py = ya; py <= yb; py++)
+			for (px = xa; px <= xb; px++)
+			{
+				double u = (px + 0.5 - cx) / R, v = (py + 0.5 - cy) / R, s2 = u * u + v * v, n[3], col[3], d;
+				unsigned char* o;
+				if (s2 >= 1)
+					continue;
+				n[0] = u; n[1] = -v; n[2] = -sqrt(1 - s2);
+				d = p[2] + n[2] * R;
+				if (d >= zb[(size_t)py * W + px])
+					continue;
+				zb[(size_t)py * W + px] = (float)d;
+				rp_shade(n, ex->prgb, 1, key, fill, hk, col);
+				o = hi + 4 * ((size_t)py * W + px);
+				for (k = 0; k < 3; k++) o[k] = (unsigned char)col[k];
+				o[3] = 255;
+			}
+	}
 	for (i = 0; i < nf; i++)
 	{
 		unsigned int const* t = tri + 3 * i;
@@ -619,12 +674,19 @@ static int rp_render(char const* path, int w, int h, double x0, double y0, doubl
 		int xa, xb, ya, yb;
 		if (fabs(area) < 1e-12)
 			continue;
+		if (cut)
+		{
+			double s = ex->cut[3];
+			for (k = 0; k < 3; k++) s += ex->cut[k] * (x[3 * t[0] + k] + x[3 * t[1] + k] + x[3 * t[2] + k]) / 3;
+			if (s > 0)
+				continue;
+		}
 		xa = (int)fmax(0, floor(fmin(A[0], fmin(B[0], C[0])))); xb = (int)fmin(W - 1, ceil(fmax(A[0], fmax(B[0], C[0]))));
 		ya = (int)fmax(0, floor(fmin(A[1], fmin(B[1], C[1])))); yb = (int)fmin(H - 1, ceil(fmax(A[1], fmax(B[1], C[1]))));
 		for (py = ya; py <= yb; py++)
 			for (px = xa; px <= xb; px++)
 			{
-				double sx = px + 0.5, sy = py + 0.5, l0, l1, l2, d, n[3], nl, dk, df, sp, shade = 1;
+				double sx = px + 0.5, sy = py + 0.5, l0, l1, l2, d, n[3], nl, col[3], shade = 1;
 				unsigned char* o;
 				l0 = ((B[0] - sx) * (C[1] - sy) - (B[1] - sy) * (C[0] - sx)) / area;
 				l1 = ((C[0] - sx) * (A[1] - sy) - (C[1] - sy) * (A[0] - sx)) / area;
@@ -634,7 +696,8 @@ static int rp_render(char const* path, int w, int h, double x0, double y0, doubl
 				d = l0 * A[2] + l1 * B[2] + l2 * C[2];
 				if (d >= zb[(size_t)py * W + px])
 					continue;
-				zb[(size_t)py * W + px] = (float)d;
+				if (!glass)
+					zb[(size_t)py * W + px] = (float)d;
 				for (k = 0; k < 3; k++) n[k] = l0 * vn[3 * t[0] + k] + l1 * vn[3 * t[1] + k] + l2 * vn[3 * t[2] + k];
 				nl = sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
 				if (nl == 0)
@@ -645,14 +708,33 @@ static int rp_render(char const* path, int w, int h, double x0, double y0, doubl
 					for (k = 0; k < 3; k++) n[k] = -n[k];   /* (the side facing away, as seen) */
 					shade = 0.72;
 				}
-				dk = fmax(0, n[0] * key[0] + n[1] * key[1] + n[2] * key[2]);
-				df = fmax(0, n[0] * fill[0] + n[1] * fill[1] + n[2] * fill[2]);
-				sp = pow(fmax(0, n[0] * hk[0] + n[1] * hk[1] + n[2] * hk[2]), 36);
+				rp_shade(n, c, shade, key, fill, hk, col);
+				if (glass)
+				{
+					float* a = acc + 3 * ((size_t)py * W + px);
+					for (k = 0; k < 3; k++) a[k] += (float)col[k];
+					if (cnt[(size_t)py * W + px] < 65535) cnt[(size_t)py * W + px]++;
+					continue;
+				}
 				o = hi + 4 * ((size_t)py * W + px);
-				for (k = 0; k < 3; k++)
-					o[k] = (unsigned char)fmin(255, fmax(0, shade * (c[k] * (0.34 + 0.10 * n[1] + 0.62 * dk + 0.30 * df) + 255 * 0.35 * sp)));
+				for (k = 0; k < 3; k++) o[k] = (unsigned char)col[k];
 				o[3] = 255;
 			}
+	}
+	for (i = 0; glass && i < (unsigned int)(W * H); i++)
+	{
+		/* the see-through layers over what lies behind them */
+		unsigned char* o = hi + 4 * (size_t)i;
+		double T, m;
+		if (!cnt[i])
+			continue;
+		T = pow(1 - ex->alpha, cnt[i]);
+		for (k = 0; k < 3; k++)
+		{
+			m = acc[3 * (size_t)i + k] / cnt[i];
+			o[k] = (unsigned char)fmin(255, o[3] ? o[k] * T + m * (1 - T) : m);
+		}
+		o[3] = (unsigned char)(o[3] ? 255 : 255 * (1 - T));
 	}
 	/* box-filter the supersamples, colour weighted by coverage */
 	for (py = 0; py < h; py++)
@@ -672,7 +754,7 @@ static int rp_render(char const* path, int w, int h, double x0, double y0, doubl
 		}
 	ok = rp_png_write(path, w, h, out);
 done:
-	free(q); free(vn); free(zb); free(hi); free(out);
+	free(q); free(vn); free(zb); free(hi); free(out); free(acc); free(cnt);
 	return ok;
 }
 
@@ -1120,17 +1202,26 @@ static int rp_remesh(rp_mesh* m, double L)
 	return 1;
 }
 
-/* the cobblestones' scene: n x n spheres of radius r (an octahedron split
-   twice, onto the sphere) spaced s apart in the plane z = 0; and the slab
-   holding them, |x|, |y| <= n s / 2, |z| <= h / 2, its six sides as open
-   grids of cells about s / 10 wide (an obstacle: small faces near the
-   stones, where one point per face must do) */
-static int rp_cobbles(unsigned int n, double r, double s, double h, rp_mesh* m, rp_mesh* box)
+/* a small deterministic generator: [0, 1) */
+static double rp_rand(unsigned int* state)
+{
+	*state = *state * 1664525u + 1013904223u;
+	return (*state >> 8) / 16777216.0;
+}
+
+/* the cobblestones' scene: n stones scattered without overlap (the seed
+   fixes them) in the slab |x|, |y| <= w / 2, |z| <= h / 2, as a wall built
+   by hand: each an ellipsoid (an octahedron split twice, onto the sphere)
+   of radius 0.18 to 0.36 times w / 4, stretched by up to 12 % across, its
+   height 0.4 to 0.65 of that, turned about z; and the slab, its six sides
+   as open grids of cells about w / 40 wide (an obstacle: small faces near
+   the stones, where one point per face must do) */
+static int rp_cobbles(unsigned int n, double w, double h, unsigned int seed, rp_mesh* m, rp_mesh* box)
 {
 	static double const ov[6][3] = { { 1, 0, 0 }, { -1, 0, 0 }, { 0, 1, 0 }, { 0, -1, 0 }, { 0, 0, 1 }, { 0, 0, -1 } };
 	static unsigned int const of[8][3] = { { 0, 2, 4 }, { 2, 1, 4 }, { 1, 3, 4 }, { 3, 0, 4 }, { 2, 0, 5 }, { 1, 2, 5 }, { 3, 1, 5 }, { 0, 3, 5 } };
-	double sx[66 * 3], half = 0.5 * n * s;
-	unsigned int st[128 * 3], t2[128 * 3], nv = 6, nf = 8, l, i, j, k, q, side, f = 0, v = 0;
+	double sx[66 * 3], half = 0.5 * w, s = 0.25 * w, (*stone)[7];
+	unsigned int st[128 * 3], t2[128 * 3], nv = 6, nf = 8, l, i, j, k, q, side, f = 0, v = 0, placed = 0, tries;
 	unsigned int cells[3], gn[6][2];
 	memcpy(sx, ov, sizeof(ov)); memcpy(st, of, sizeof(of));
 	for (l = 0; l < 2; l++)
@@ -1160,17 +1251,50 @@ static int rp_cobbles(unsigned int n, double r, double s, double h, rp_mesh* m, 
 		nf = nf2;
 		memcpy(st, t2, sizeof(unsigned int) * 3 * nf);
 	}
-	m->nv = n * n * nv; m->nf = n * n * nf;
+	/* the stones: centre x, y, z, a radius across r, the other over r, the height over r, the turn; placed where none overlaps */
+	stone = (double(*)[7])malloc(sizeof(double[7]) * (n + 1));
+	m->nv = n * nv; m->nf = n * nf;
 	m->x = (double*)malloc(sizeof(double) * 3 * m->nv);
 	m->t = (unsigned int*)malloc(sizeof(unsigned int) * 3 * m->nf);
-	if (!m->x || !m->t)
-		return 0;
-	for (i = 0; i < n * n; i++)
+	if (!stone || !m->x || !m->t)
 	{
-		double c[3] = { -half + s * (0.5 + i % n), -half + s * (0.5 + i / n), 0 };
-		for (j = 0; j < nv; j++) for (q = 0; q < 3; q++) m->x[3 * (i * nv + j) + q] = c[q] + r * sx[3 * j + q];
+		free(stone);
+		return 0;
+	}
+	for (tries = 0; placed < n && tries < 100000; tries++)
+	{
+		double r = s * (0.18 + 0.18 * rp_rand(&seed)), c[2], ok = 1;
+		c[0] = -half + r + (w - 2 * r) * rp_rand(&seed);
+		c[1] = -half + r + (w - 2 * r) * rp_rand(&seed);
+		for (j = 0; j < placed && ok; j++)
+			ok = hypot(c[0] - stone[j][0], c[1] - stone[j][1]) > r + stone[j][3] + 0.04 * s;
+		if (!ok)
+			continue;
+		stone[placed][0] = c[0]; stone[placed][1] = c[1]; stone[placed][2] = 0.04 * s * (rp_rand(&seed) - 0.5);
+		stone[placed][3] = r;
+		stone[placed][4] = 0.88 + 0.12 * rp_rand(&seed);                 /* (the other radius across, over r) */
+		stone[placed][5] = 0.4 + 0.25 * rp_rand(&seed);                   /* (the height over r) */
+		stone[placed][6] = 6.283185307179586 * rp_rand(&seed);             /* (the turn about z) */
+		placed++;
+	}
+	if (placed < n)
+	{
+		free(stone);
+		return 0;
+	}
+	for (i = 0; i < n; i++)
+	{
+		double r = stone[i][3], ra = r, rb = r * stone[i][4], hz = r * stone[i][5], ang = stone[i][6];
+		double ca = cos(ang), sa = sin(ang);
+		for (j = 0; j < nv; j++)
+		{
+			double px = ra * sx[3 * j], py = rb * sx[3 * j + 1];
+			double* p = m->x + 3 * (i * nv + j);
+			p[0] = stone[i][0] + ca * px - sa * py; p[1] = stone[i][1] + sa * px + ca * py; p[2] = stone[i][2] + hz * sx[3 * j + 2];
+		}
 		for (j = 0; j < 3 * nf; j++) m->t[3 * i * nf + j] = st[j] + i * nv;
 	}
+	free(stone);
 	/* the box: per side, its two in-plane axes' cell counts */
 	cells[0] = cells[1] = (unsigned int)ceil(2 * half / (0.1 * s)); cells[2] = (unsigned int)ceil(h / (0.1 * s));
 	for (side = 0; side < 6; side++) { gn[side][0] = cells[side < 2 ? 0 : side < 4 ? 1 : 0]; gn[side][1] = cells[side < 2 ? 1 : 2]; }
@@ -1329,9 +1453,10 @@ static void rp_solve_mesh(rp_mesh const* mesh, double p, qaws_repulsive_mesh_sol
 }
 
 /* panels of the meshes ms[0..n), labelled, one scale for all; each face
-   coloured by its component, or tint for all */
+   coloured by its component, or tint for all; ex (NULL, or one per panel)
+   their points, see-through and cuts */
 static void rp_mesh_panels(char const* svgname, char const* title, char const* subtitle, rp_mesh const* ms,
-	char const (*labels)[200], unsigned int n, rp_view const* view, int const* tint)
+	char const (*labels)[200], unsigned int n, rp_view const* view, int const* tint, rp_extra const* ex)
 {
 	static int const rgb[3] = { 72, 132, 222 };   /* (the paper's blue) */
 	double const pw = 300, ph = 300;
@@ -1366,13 +1491,63 @@ static void rp_mesh_panels(char const* svgname, char const* title, char const* s
 			/* the panel rendered at twice its size, beside the SVG */
 			sprintf(png, "%.*s_%u.png", (int)stem, svgname, k);
 			base = strrchr(png, '/') ? strrchr(png, '/') + 1 : png;
-			if (rp_render(png, (int)(2 * pw), (int)(2 * ph), v.x0, v.y0, 2, &fit, view, m->x, m->nv, m->t, m->nf, rgb, rgbs))
+			if (rp_render(png, (int)(2 * pw), (int)(2 * ph), v.x0, v.y0, 2, &fit, view, m->x, m->nv, m->t, m->nf, rgb, rgbs, ex ? ex + k : NULL))
 				fprintf(s.f, "<image href=\"%s\" x=\"%.1f\" y=\"%.1f\" width=\"%.1f\" height=\"%.1f\"/>\n", base, v.x0, v.y0, pw, ph);
 			fprintf(s.f, "<text x=\"%.1f\" y=\"%.1f\" font-size=\"13\" font-weight=\"600\" fill=\"#24292f\">%s</text>\n", v.x0 + 10, v.y0 + 20, labels[k]);
 			free(rgbs);
 		}
 		svg_close(&s);
 	}
+}
+
+/* the shrink wrap seen with what it wraps (from figure 15's snapshots
+   showcase/paper15_shrinkwrap_2.obj and _4.obj): the bunny's points alone,
+   the wrap see-through over them at 100 and 220 steps, and at 220 cut open
+   by the plane through the points' centre facing the eye */
+static void rp_wrap_views(char const* sdir)
+{
+	static int const clay[3] = { 205, 196, 186 };
+	rp_view view = { 0.3, -1.4 };   /* (the bunny side on: its data has z up) */
+	rp_mesh ms[4], pts;
+	rp_extra ex[4];
+	char labels[4][200];
+	double c[3] = { 0, 0, 0 }, eye[3] = { 0, 0, 0 };
+	unsigned int i, k;
+	memset(ms, 0, sizeof(ms)); memset(ex, 0, sizeof(ex));
+	if (!rp_load_mesh(sdir, "bunny_points.obj", &pts) || !rp_load_mesh("showcase", "paper15_shrinkwrap_2.obj", ms + 1) ||
+		!rp_load_mesh("showcase", "paper15_shrinkwrap_4.obj", ms + 2) || !rp_copy_mesh(ms + 2, ms + 3))
+	{
+		printf("paper15_shrinkwrap_views: run figure 15 first (its snapshots)\n");
+		rp_free_mesh(&pts);
+		for (k = 0; k < 4; k++) rp_free_mesh(ms + k);
+		return;
+	}
+	ms[0] = pts; ms[0].nf = 0;   /* (the points alone: a mesh of no faces, drawn by its points) */
+	for (i = 0; i < pts.nv; i++) for (k = 0; k < 3; k++) c[k] += pts.x[3 * i + k] / pts.nv;
+	for (k = 0; k < 3; k++)
+	{
+		/* toward the eye in the mesh's frame: the rotation's transpose applied to (0, 0, -1) */
+		double e[3] = { 0, 0, 0 }, re[3];
+		e[k] = 1;
+		rp_rotate(&view, e, re);
+		eye[k] = -re[2];
+	}
+	for (k = 0; k < 4; k++)
+	{
+		ex[k].points = pts.x; ex[k].npoints = pts.nv; ex[k].radius = 1.1;
+		ex[k].prgb[0] = 176; ex[k].prgb[1] = 64; ex[k].prgb[2] = 52;
+	}
+	ex[1].alpha = ex[2].alpha = 0.3;
+	for (k = 0; k < 3; k++) ex[3].cut[k] = eye[k];
+	ex[3].cut[3] = -(eye[0] * c[0] + eye[1] * c[1] + eye[2] * c[2]);
+	sprintf(labels[0], "the bunny's %u points", pts.nv);
+	sprintf(labels[1], "100 steps, see-through");
+	sprintf(labels[2], "220 steps, see-through");
+	sprintf(labels[3], "220 steps, cut open");
+	rp_mesh_panels("showcase/paper15_shrinkwrap_views.svg", "Repulsive Surfaces, Fig. 20: the shrink wrap around the points",
+		"the wrap drawn see-through (opacity 0.3 a layer), then cut by the plane through the points' centre facing the eye", ms, labels, 4, &view, clay, ex);
+	for (k = 1; k < 4; k++) rp_free_mesh(ms + k);
+	rp_free_mesh(&pts);
 }
 
 typedef struct rp_surface_run
@@ -1395,7 +1570,7 @@ static void rp_surface_snapped(void* user, unsigned int last)
 	sprintf(labels[0], "input: %u faces, E %.4g", f->m->nf, (double)f->reps[0].initial_energy);
 	for (k = 0; k <= last; k++)
 		sprintf(labels[k + 1], "%s%u steps: E %.4g", f->reps[k].reason == QAWS_REPULSIVE_CONVERGED ? "converged, " : "", f->reps[k].iterations, (double)f->reps[k].energy);
-	rp_mesh_panels(f->svgname, f->title, f->subtitle, f->ms, labels, last + 2, f->view, f->tint);
+	rp_mesh_panels(f->svgname, f->title, f->subtitle, f->ms, labels, last + 2, f->view, f->tint, NULL);
 	{
 		/* the snapshot as an OBJ beside the figure (to score it elsewhere, or to start from it) */
 		char path[600];
@@ -1581,7 +1756,7 @@ static void rp_paths_figure(char const* dir)
 int main(int argc, char** argv)
 {
 	char const* dir = argc > 1 ? argv[1] : "../examples/data/repulsive_curves";
-	int only = argc > 2 ? atoi(argv[2]) : 0;   /* (one figure: 1 to 17) */
+	int only = argc > 2 ? atoi(argv[2]) : 0;   /* (one figure: 1 to 18) */
 	if (argc > 3)
 		rp_cap = (unsigned int)atoi(argv[3]);
 	setvbuf(stdout, NULL, _IONBF, 0);
@@ -1670,7 +1845,7 @@ int main(int argc, char** argv)
 			}
 			rp_mesh_panels("showcase/paper10_neck.svg", "Repulsive Surfaces, Fig. 9 (centre): area minimization without pinching off",
 				"two rings 3 apart (radius 1: far past the catenoid's limit of 1.33), pinned; the area weighted, the tangent-point energy (p 6) keeping a neck",
-				ms, labels, 4, &view, NULL);
+				ms, labels, 4, &view, NULL, NULL);
 			for (k = 0; k < 3; k++) rp_free_mesh(ms + 1 + k);
 			free(pins);
 		}
@@ -1781,7 +1956,7 @@ int main(int argc, char** argv)
 			static unsigned int const steps[4] = { 50, 100, 150, 220 };
 			static rp_opts const shrink = { 1, 0, 0.11, 200, 0 };
 			static int const clay[3] = { 205, 196, 186 };
-			rp_view view = { 0.5, -0.25 };
+			rp_view view = { 0.3, -1.4 };   /* (the bunny side on: its data has z up) */
 			for (i = 0; i < 3 * m.nv; i++) m.x[i] *= 0.6;   /* (the scene's sphere has radius 1.32) */
 			if (rp_load_mesh(sdir, "bunny_points.obj", &ob) && (ox = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * ob.nv)) != NULL)
 			{
@@ -1793,10 +1968,13 @@ int main(int argc, char** argv)
 				rp_surface_figure(&m, "showcase/paper15_shrinkwrap.svg", "Repulsive Surfaces, Fig. 20: shrink wrapping a point cloud",
 					"the paper's scene: a sphere around the bunny's 14290 points (obstacle, 1), its volume to 0.11x over 200 steps, its barycenter free; p 6; remeshed",
 					6, &sd, steps, 4, &view, clay, &shrink);
+				rp_wrap_views(sdir);
 			}
 			free(ox); ox = NULL;
 			rp_free_mesh(&ob); rp_free_mesh(&m);
 		}
+		if (only == 18)
+			rp_wrap_views(sdir);   /* (figure 15's views alone, from its snapshots) */
 		if (!only || only == 16)
 		{
 			/* Fig. 21: nested envelopes around the shrink-wrapped bunny (figure
@@ -1807,7 +1985,7 @@ int main(int argc, char** argv)
 			enum { LEVELS = 4 };
 			static unsigned int const steps[1] = { 60 };
 			static int const sand[3] = { 214, 196, 160 };
-			rp_view view = { 0.5, -0.25 };
+			rp_view view = { 0.3, -1.4 };
 			rp_mesh lv[LEVELS + 1];
 			char labels[LEVELS + 1][200];
 			unsigned int nl, q, k;
@@ -1861,7 +2039,7 @@ int main(int argc, char** argv)
 				}
 				rp_mesh_panels("showcase/paper16_envelopes.svg", "Repulsive Surfaces, Fig. 21: nested envelopes",
 					"each level the one inside it pushed out, its volume raised 1.15x with that one as the obstacle (1), remeshed 1.25x coarser; p 6",
-					lv, labels, nl, &view, sand);
+					lv, labels, nl, &view, sand, NULL);
 				for (k = 0; k < nl; k++) rp_free_mesh(lv + k);
 				printf("  showcase/paper16_envelopes.svg, %.0f s\n", difftime(time(NULL), t0));
 			}
@@ -1870,25 +2048,33 @@ int main(int argc, char** argv)
 		}
 		if (!only || only == 17)
 		{
-			/* Fig. 22 (bottom): many small spheres grown inside a slab, the
+			/* Fig. 22 (bottom): many small stones grown inside a slab, the
 			   walnut's technique (its scene is not among the published ones):
-			   16 spheres, their volume raised 6x and their area 3.6x over 200
-			   steps (a sphere's would be 3.3x: room to flatten against the
-			   others), the slab an obstacle (0.5) */
+			   24 flattened ellipsoids of different sizes, shapes and turns
+			   scattered as by hand (a sphere already encloses the most for its
+			   area, so its volume could not outgrow its area), their total
+			   volume raised to 60 % of the slab's and their total area 1.15x
+			   what that volume's growth would take on its own, over 200 steps:
+			   each stone fills the gaps its neighbours leave; the slab an
+			   obstacle (0.1, as the program's Hamburger) */
 			static unsigned int const steps[4] = { 50, 100, 200, 250 };
-			static rp_opts const grow = { 1, 3.6, 6, 200, 0 };
 			static int const stone[3] = { 168, 162, 152 };
 			rp_view view = { 0.35, 1.15 };   /* (from above, tilted) */
+			rp_opts grow;
 			memset(&m, 0, sizeof(m));
-			if (rp_cobbles(4, 0.25, 1, 0.7, &m, &ob) && (ox = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * ob.nv)) != NULL)
+			memset(&grow, 0, sizeof(grow));
+			if (rp_cobbles(24, 4, 0.7, 7, &m, &ob) && (ox = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * ob.nv)) != NULL)
 			{
+				grow.remesh = 1; grow.ramp = 200;
+				grow.volume_mult = 0.6 * 4 * 4 * 0.7 / rp_mesh_volume(&m);
+				grow.area_mult = 1.15 * pow(grow.volume_mult, 2.0 / 3);
 				for (i = 0; i < 3 * ob.nv; i++) ox[i] = (qaws_scalar)ob.x[i];
-				od.positions = ox; od.vertex_count = ob.nv; od.triangles = ob.t; od.triangle_count = ob.nf; od.weight = (qaws_scalar)0.5;
+				od.positions = ox; od.vertex_count = ob.nv; od.triangles = ob.t; od.triangle_count = ob.nf; od.weight = (qaws_scalar)0.1;
 				memset(&sd, 0, sizeof(sd));
 				sd.hold_area = 1; sd.hold_volume = 1; sd.theta = (qaws_scalar)0.25;
 				sd.obstacles = &od; sd.obstacle_count = 1;
 				rp_surface_figure(&m, "showcase/paper17_cobbles.svg", "Repulsive Surfaces, Fig. 22 (bottom): cobblestones grown in a slab",
-					"16 spheres in a 4 x 4 x 0.7 slab (obstacle, 0.5); the volume raised 6x and the area 3.6x over 200 steps; p 6; remeshed",
+					"24 flattened stones scattered in a 4 x 4 x 0.7 slab (obstacle, 0.1); the volume raised to 60 % of the slab's over 200 steps; p 6; remeshed",
 					6, &sd, steps, 4, &view, stone, &grow);
 			}
 			free(ox); ox = NULL;
