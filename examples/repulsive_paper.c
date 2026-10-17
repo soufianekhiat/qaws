@@ -25,8 +25,9 @@
  *   paper16_envelopes.svg nested envelopes around it (Fig. 21; after figure 15)
  *   paper17_cobbles.svg   cobblestones grown in a slab (Fig. 22, bottom)
  *   paper15_shrinkwrap_views.svg the wrap see-through and cut open over the points (with 15; alone: 18)
+ *   paper19_vines.svg     vines climbing a vase: curves growing on a surface (an application)
  *
- * Usage: qaws_repulsive_paper [data directory [figure 1 to 18 [most steps]]] (default
+ * Usage: qaws_repulsive_paper [data directory [figure 1 to 19 [most steps]]] (default
  * ../examples/data/repulsive_curves, from working_dir; every figure). Minutes, not
  * seconds: the scenes have 500 to 800 vertices and take hundreds of steps
  * (about 20 minutes on 20 threads).
@@ -577,6 +578,7 @@ typedef struct rp_extra
 	int prgb[3];
 	double alpha;                   /* the mesh's opacity; 0 or 1: opaque */
 	double cut[4];                  /* faces whose centroid c has cut . (c, 1) > 0 dropped; all 0: none */
+	int const* face_rgb;            /* each face's colour (3 each), over the components' and the tint */
 } rp_extra;
 
 /* Blinn-Phong with a key and a fill light, n the unit normal facing the eye */
@@ -1482,6 +1484,7 @@ static void rp_mesh_panels(char const* svgname, char const* title, char const* s
 			int* rgbs = rp_face_colours(m);
 			unsigned int i;
 			for (i = 0; tint && rgbs && i < 3 * m->nf; i++) rgbs[i] = tint[i % 3];
+			for (i = 0; ex && ex[k].face_rgb && rgbs && i < 3 * m->nf; i++) rgbs[i] = ex[k].face_rgb[i];
 			v.x0 = 24 + k * (pw + 12);
 			svg_panel(&s, &v, NULL);
 			rp_fit_points(&v, view, m->x, m->nv, &fit);
@@ -1753,10 +1756,343 @@ static void rp_paths_figure(char const* dir)
 	printf("  showcase/paper6_paths.svg, %.0f s\n", difftime(time(NULL), t0));
 }
 
+/* ------------------------------------------------------------------ */
+/*  Vines: repulsive curves growing over a surface                    */
+/* ------------------------------------------------------------------ */
+
+enum { RP_VMAX = 900 };   /* the most vine vertices */
+
+typedef struct rp_vines
+{
+	qaws_repulsive_surface_desc sd;
+	qaws_scalar uv[2 * RP_VMAX];        /* each vertex's surface parameters */
+	unsigned int e[2 * RP_VMAX];        /* edges, each from the vertex it grew from */
+	int parent[RP_VMAX];                /* -1: a root */
+	unsigned int age[RP_VMAX];          /* the stage it grew in */
+	unsigned char grow[RP_VMAX];        /* a tip still growing */
+	unsigned int nv, ne;
+} rp_vines;
+
+/* the surface point and its unit normal (outward from the z axis) at uv */
+static void rp_vine_frame(rp_vines const* g, qaws_scalar const* uv, double* x, double* n)
+{
+	qaws_range rv = qaws_surface_get_v_range(g->sd.surface);
+	double h = 1e-4 * ((double)rv.max_value - rv.min_value), dv = (double)uv[1] + h > (double)rv.max_value ? -h : h;
+	qaws_scalar q[6] = { uv[0], uv[1], (qaws_scalar)((double)uv[0] + h), uv[1], uv[0], (qaws_scalar)((double)uv[1] + dv) }, p[9];
+	double a[3], b[3], l;
+	unsigned int k;
+	qaws_repulsive_surface_positions(&g->sd, q, 3, p);
+	for (k = 0; k < 3; k++) { x[k] = (double)p[k]; a[k] = (double)p[3 + k] - p[k]; b[k] = ((double)p[6 + k] - p[k]) * (dv > 0 ? 1 : -1); }
+	n[0] = a[1] * b[2] - a[2] * b[1]; n[1] = a[2] * b[0] - a[0] * b[2]; n[2] = a[0] * b[1] - a[1] * b[0];
+	l = sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+	if (n[0] * x[0] + n[1] * x[1] < 0) l = -l;
+	for (k = 0; k < 3; k++) n[k] /= l;
+}
+
+/* a new vertex grown from vertex t along the parameter direction d, one
+   edge length L away in 3D (the direction rescaled by its image's length);
+   -1 when it would pass the top of the surface's v range (the rim), 0 the
+   bottom, or when there is no room */
+static int rp_vine_add(rp_vines* g, unsigned int t, double du, double dv, double L, unsigned int stage)
+{
+	qaws_range rv = qaws_surface_get_v_range(g->sd.surface);
+	qaws_scalar q[4];
+	double x0[3], x1[3], n[3], s, len;
+	unsigned int n2 = g->nv;
+	if (n2 >= RP_VMAX)
+		return 0;
+	q[0] = g->uv[2 * t]; q[1] = g->uv[2 * t + 1];
+	q[2] = (qaws_scalar)((double)q[0] + du); q[3] = (qaws_scalar)((double)q[1] + dv);
+	rp_vine_frame(g, q, x0, n);
+	rp_vine_frame(g, q + 2, x1, n);
+	len = rp_dist(x0, x1);
+	if (!(len > 0))
+		return 0;
+	s = L / len;
+	q[2] = (qaws_scalar)((double)q[0] + s * du); q[3] = (qaws_scalar)((double)q[1] + s * dv);
+	if ((double)q[3] > (double)rv.max_value - 0.02 * ((double)rv.max_value - rv.min_value))
+		return -1;
+	if ((double)q[3] < (double)rv.min_value)
+		return 0;
+	{
+		/* no room: it would land on another vine (growth is not collision-checked; the descent then starts from a near contact) */
+		unsigned int j;
+		rp_vine_frame(g, q + 2, x1, n);
+		for (j = 0; j < g->nv; j++)
+		{
+			double y[3];
+			if (j == t)
+				continue;
+			rp_vine_frame(g, g->uv + 2 * j, y, n);
+			if (rp_dist(x1, y) < 0.6 * L)
+				return 0;
+		}
+	}
+	g->uv[2 * n2] = q[2]; g->uv[2 * n2 + 1] = q[3];
+	g->parent[n2] = (int)t; g->age[n2] = stage; g->grow[n2] = 1;
+	g->e[2 * g->ne] = t; g->e[2 * g->ne + 1] = n2; g->ne++;
+	g->nv++;
+	return 1;
+}
+
+/* the vase and the vines (6-sided tubes, older segments thicker, sitting on
+   the surface) and leaves (every third vertex, alternating sides) as one
+   mesh, each face's colour in rgb */
+static int rp_vine_mesh(rp_vines const* g, unsigned int stage, rp_mesh* m, int** rgb)
+{
+	enum { NU = 96, NV = 48, SIDES = 6 };
+	static int const vase[3] = { 196, 122, 86 }, bark[3] = { 104, 76, 48 };
+	qaws_range ru = qaws_surface_get_u_range(g->sd.surface), rv = qaws_surface_get_v_range(g->sd.surface);
+	unsigned int maxv = NU * (NV + 1) + g->ne * 2 * SIDES + g->nv * 4, maxf = 2 * NU * NV + g->ne * 2 * SIDES + g->nv * 2;
+	double* X = (double*)malloc(sizeof(double) * 3 * g->nv);
+	double* N = (double*)malloc(sizeof(double) * 3 * g->nv);
+	double* R = (double*)malloc(sizeof(double) * g->nv);
+	unsigned int i, j, k, q, v = 0, f = 0, seed = 11;
+	m->x = (double*)malloc(sizeof(double) * 3 * maxv);
+	m->t = (unsigned int*)malloc(sizeof(unsigned int) * 3 * maxf);
+	*rgb = (int*)malloc(sizeof(int) * 3 * maxf);
+	if (!X || !N || !R || !m->x || !m->t || !*rgb)
+	{
+		free(X); free(N); free(R);
+		return 0;
+	}
+	/* the vase */
+	for (j = 0; j <= NV; j++)
+		for (i = 0; i < NU; i++)
+		{
+			qaws_scalar q2[2];
+			double n[3];
+			q2[0] = (qaws_scalar)((double)ru.min_value + ((double)ru.max_value - ru.min_value) * i / NU);
+			q2[1] = (qaws_scalar)((double)rv.min_value + ((double)rv.max_value - rv.min_value) * j / NV);
+			rp_vine_frame(g, q2, m->x + 3 * v, n);
+			v++;
+		}
+	for (j = 0; j < NV; j++)
+		for (i = 0; i < NU; i++)
+		{
+			unsigned int a = j * NU + i, b = j * NU + (i + 1) % NU, c = a + NU, d = b + NU;
+			m->t[3 * f] = a; m->t[3 * f + 1] = b; m->t[3 * f + 2] = d; for (q = 0; q < 3; q++) (*rgb)[3 * f + q] = vase[q]; f++;
+			m->t[3 * f] = a; m->t[3 * f + 1] = d; m->t[3 * f + 2] = c; for (q = 0; q < 3; q++) (*rgb)[3 * f + q] = vase[q]; f++;
+		}
+	/* the vines: radius by age, the tube's axis lifted off the surface by it */
+	for (i = 0; i < g->nv; i++)
+	{
+		double frac = stage > 0 ? (double)(stage - (g->age[i] < stage ? g->age[i] : stage)) / stage : 0;
+		R[i] = 0.004 + 0.011 * frac;
+		rp_vine_frame(g, g->uv + 2 * i, X + 3 * i, N + 3 * i);
+		for (k = 0; k < 3; k++) X[3 * i + k] += R[i] * N[3 * i + k];
+	}
+	for (i = 0; i < g->ne; i++)
+	{
+		unsigned int a = g->e[2 * i], b = g->e[2 * i + 1], base = v;
+		double t[3], w[3], u2[3], l;
+		for (k = 0; k < 3; k++) t[k] = X[3 * b + k] - X[3 * a + k];
+		l = sqrt(t[0] * t[0] + t[1] * t[1] + t[2] * t[2]);
+		if (!(l > 0))
+			continue;
+		for (k = 0; k < 3; k++) t[k] /= l;
+		w[0] = t[1] * N[3 * a + 2] - t[2] * N[3 * a + 1]; w[1] = t[2] * N[3 * a] - t[0] * N[3 * a + 2]; w[2] = t[0] * N[3 * a + 1] - t[1] * N[3 * a];
+		l = sqrt(w[0] * w[0] + w[1] * w[1] + w[2] * w[2]);
+		for (k = 0; k < 3; k++) w[k] /= l;
+		u2[0] = t[1] * w[2] - t[2] * w[1]; u2[1] = t[2] * w[0] - t[0] * w[2]; u2[2] = t[0] * w[1] - t[1] * w[0];
+		for (j = 0; j < 2 * SIDES; j++)
+		{
+			unsigned int end = j / SIDES;
+			double ang = 6.283185307179586 * (j % SIDES) / SIDES, r = R[end ? b : a];
+			for (k = 0; k < 3; k++) m->x[3 * v + k] = X[3 * (end ? b : a) + k] + r * (cos(ang) * w[k] + sin(ang) * u2[k]);
+			v++;
+		}
+		for (j = 0; j < SIDES; j++)
+		{
+			unsigned int p0 = base + j, p1 = base + (j + 1) % SIDES, p2 = p0 + SIDES, p3 = p1 + SIDES;
+			m->t[3 * f] = p0; m->t[3 * f + 1] = p1; m->t[3 * f + 2] = p3; for (q = 0; q < 3; q++) (*rgb)[3 * f + q] = bark[q]; f++;
+			m->t[3 * f] = p0; m->t[3 * f + 1] = p3; m->t[3 * f + 2] = p2; for (q = 0; q < 3; q++) (*rgb)[3 * f + q] = bark[q]; f++;
+		}
+	}
+	/* the leaves: a diamond in the surface's tangent plane, turned 65 degrees off the vine, alternating sides */
+	for (i = 0; i < g->nv; i++)
+	{
+		double t[3], d[3], s[3], c[3], len = 0.07, wid = 0.035, sg = (i / 3) % 2 ? 1 : -1, l;
+		int const* n = NULL;
+		int green[3];
+		if (g->parent[i] < 0 || i % 3 || g->age[i] + 2 > stage)
+			continue;
+		for (k = 0; k < 3; k++) t[k] = X[3 * i + k] - X[3 * g->parent[i] + k];
+		l = sqrt(t[0] * t[0] + t[1] * t[1] + t[2] * t[2]);
+		if (!(l > 0))
+			continue;
+		for (k = 0; k < 3; k++) t[k] /= l;
+		s[0] = N[3 * i + 1] * t[2] - N[3 * i + 2] * t[1]; s[1] = N[3 * i + 2] * t[0] - N[3 * i] * t[2]; s[2] = N[3 * i] * t[1] - N[3 * i + 1] * t[0];
+		for (k = 0; k < 3; k++) d[k] = cos(1.13) * t[k] + sg * sin(1.13) * s[k];
+		s[0] = N[3 * i + 1] * d[2] - N[3 * i + 2] * d[1]; s[1] = N[3 * i + 2] * d[0] - N[3 * i] * d[2]; s[2] = N[3 * i] * d[1] - N[3 * i + 1] * d[0];
+		for (k = 0; k < 3; k++) c[k] = X[3 * i + k] + 0.6 * R[i] * N[3 * i + k];
+		for (k = 0; k < 3; k++)
+		{
+			m->x[3 * v + k] = c[k];
+			m->x[3 * (v + 1) + k] = c[k] + 0.45 * len * d[k] + 0.5 * wid * s[k] + 0.012 * N[3 * i + k];
+			m->x[3 * (v + 2) + k] = c[k] + len * d[k] + 0.004 * N[3 * i + k];
+			m->x[3 * (v + 3) + k] = c[k] + 0.45 * len * d[k] - 0.5 * wid * s[k] + 0.012 * N[3 * i + k];
+		}
+		green[0] = 58 + (int)(30 * rp_rand(&seed)); green[1] = 118 + (int)(40 * rp_rand(&seed)); green[2] = 44 + (int)(20 * rp_rand(&seed));
+		n = green;
+		m->t[3 * f] = v; m->t[3 * f + 1] = v + 1; m->t[3 * f + 2] = v + 2; for (q = 0; q < 3; q++) (*rgb)[3 * f + q] = n[q]; f++;
+		m->t[3 * f] = v; m->t[3 * f + 1] = v + 2; m->t[3 * f + 2] = v + 3; for (q = 0; q < 3; q++) (*rgb)[3 * f + q] = n[q]; f++;
+		v += 4;
+	}
+	m->nv = v; m->nf = f;
+	free(X); free(N); free(R);
+	return 1;
+}
+
+/* vines climbing a vase: roots pinned around its foot, every stage a few
+   descent steps (the total length held, collision-checked, the curves
+   on the surface exactly) then each tip grown by an edge, and now and then
+   a branch from three vertices back; the curves' repulsion spreads them */
+static void rp_vines_figure(void)
+{
+	enum { ROOTS = 7, STAGES = 150, SNAPS = 4 };
+	static unsigned int const snap_at[SNAPS] = { 20, 60, 100, 150 };
+	static qaws_scalar const prof[14] = { (qaws_scalar)0.5, 0, (qaws_scalar)0.78, (qaws_scalar)0.2, (qaws_scalar)0.95, (qaws_scalar)0.62,
+		(qaws_scalar)0.62, (qaws_scalar)1.15, (qaws_scalar)0.38, (qaws_scalar)1.5, (qaws_scalar)0.5, (qaws_scalar)1.82, (qaws_scalar)0.68, 2 };
+	static qaws_scalar const knots[11] = { 0, 0, 0, 0, (qaws_scalar)0.25, (qaws_scalar)0.5, (qaws_scalar)0.75, 1, 1, 1, 1 };
+	double const L = 0.045;
+	qaws_curve* profile = NULL;
+	qaws_surface* vase = NULL;
+	qaws_bspline_desc bd;
+	qaws_surface_revolution_desc rd;
+	qaws_range ru, rv;
+	rp_vines* g = (rp_vines*)calloc(1, sizeof(rp_vines));
+	rp_mesh ms[SNAPS];
+	rp_extra ex[SNAPS];
+	int* rgbs[SNAPS];
+	char labels[SNAPS][200];
+	unsigned int pins[RP_VMAX], np = 0, s, k, i, ns = 0, seed = 5;   /* (the roots, then the vertices that reached the foot or the rim) */
+	unsigned char held[RP_VMAX];
+	rp_view view = { 0.35, -0.3 };
+	time_t t0 = time(NULL);
+	memset(ms, 0, sizeof(ms)); memset(ex, 0, sizeof(ex)); memset(rgbs, 0, sizeof(rgbs)); memset(held, 0, sizeof(held));
+	memset(&bd, 0, sizeof(bd));
+	bd.dimension = QAWS_DIMENSION_2D; bd.degree = 3; bd.control_points = prof; bd.control_point_count = 7; bd.knots = knots; bd.knot_count = 11;
+	memset(&rd, 0, sizeof(rd));
+	if (!g || qaws_curve_create_bspline(&bd, &profile) != QAWS_STATUS_OK)
+	{
+		free(g);
+		return;
+	}
+	rd.profile = profile; rd.axis_direction.z = 1;
+	if (qaws_surface_create_revolution(&rd, &vase) != QAWS_STATUS_OK)
+	{
+		qaws_curve_destroy(profile);
+		free(g);
+		return;
+	}
+	g->sd.surface = vase; g->sd.periodic_u = 1;
+	ru = qaws_surface_get_u_range(vase); rv = qaws_surface_get_v_range(vase);
+	printf("showcase/paper19_vines.svg: %u roots, %u stages\n", ROOTS, STAGES);
+	/* the roots around the foot, each with a first shoot upward */
+	for (k = 0; k < ROOTS; k++)
+	{
+		g->uv[2 * g->nv] = (qaws_scalar)((double)ru.min_value + ((double)ru.max_value - ru.min_value) * (k + 0.7 * rp_rand(&seed)) / ROOTS);
+		g->uv[2 * g->nv + 1] = (qaws_scalar)((double)rv.min_value + 0.01 * ((double)rv.max_value - rv.min_value));
+		g->parent[g->nv] = -1; g->age[g->nv] = 0; g->grow[g->nv] = 0;
+		held[g->nv] = 1;
+		pins[np++] = g->nv++;
+		rp_vine_add(g, pins[np - 1], 0.02 * (rp_rand(&seed) - 0.5), 0.01, L, 0);
+	}
+	for (s = 1; s <= STAGES && ns < SNAPS; s++)
+	{
+		qaws_repulsive_curves_desc cd;
+		qaws_repulsive_curves* c = NULL;
+		qaws_repulsive_curves_solve_desc d;
+		qaws_repulsive_report r;
+		unsigned int n0 = g->nv;
+		qaws_status st;
+		/* a vine at the foot or the rim holds on there: a vertex at the parameter range's edge could not move outward at all
+		   (the surface solver refuses any step leaving it), so every step would fail */
+		for (i = 0; i < g->nv; i++)
+		{
+			double v = (double)g->uv[2 * i + 1], span = (double)rv.max_value - rv.min_value;
+			if (!held[i] && (v < (double)rv.min_value + 0.015 * span || v > (double)rv.max_value - 0.015 * span))
+			{
+				held[i] = 1;
+				pins[np++] = i;
+			}
+		}
+		memset(&cd, 0, sizeof(cd));
+		cd.dimension = 3; cd.vertex_count = g->nv; cd.edges = g->e; cd.edge_count = g->ne;
+		memset(&d, 0, sizeof(d));
+		d.hold_total_length = 1; d.collision_checked = 1; d.max_iterations = 3; d.pinned = pins; d.pinned_count = np;
+		/* (the total length, one row: every edge's, hundreds of rows pulled back through the surface, stalled the projection once the vines filled out) */
+		memset(&r, 0, sizeof(r));
+		st = qaws_repulsive_curves_create(&cd, &c);
+		st = st == QAWS_STATUS_OK ? qaws_repulsive_surface_curves_solve(c, &g->sd, &d, g->uv, &r) : st;
+		qaws_repulsive_curves_destroy(c);
+		if (st != QAWS_STATUS_OK)
+		{
+			printf("  stage %u: the solve failed (%d)\n", s, (int)st);
+			break;
+		}
+		/* each tip grown one edge on: its direction kept, drawn a little upward, turned a little */
+		for (i = 0; i < n0; i++)
+		{
+			double du, dv, a = 0.5 * (rp_rand(&seed) - 0.5), ca = cos(a), sa = sin(a), l;
+			if (!g->grow[i])
+				continue;
+			g->grow[i] = 0;
+			du = (double)g->uv[2 * i] - g->uv[2 * g->parent[i]];
+			dv = (double)g->uv[2 * i + 1] - g->uv[2 * g->parent[i] + 1];
+			l = sqrt(du * du + dv * dv);
+			dv += 0.3 * l;
+			if (rp_vine_add(g, i, ca * du - sa * dv, sa * du + ca * dv, L, s) < 0)
+				held[i] = 1, pins[np++] = i;   /* (at the rim: it holds on there) */
+		}
+		/* now and then a branch from three vertices behind a new tip, turned 60 degrees off the vine there */
+		if (s % 12 == 6)
+		{
+			unsigned int n1 = g->nv, t;
+			for (t = n0; t < n1; t++)
+			{
+				int b = (int)t, up;
+				unsigned int deg = 0, j;
+				double du, dv, a = (rp_rand(&seed) < 0.5 ? -1 : 1) * 1.05;
+				if (rp_rand(&seed) > 0.25)
+					continue;
+				for (k = 0; k < 3 && g->parent[b] >= 0; k++) b = g->parent[b];
+				up = g->parent[b];
+				for (j = 0; j < g->ne; j++) deg += g->e[2 * j] == (unsigned int)b || g->e[2 * j + 1] == (unsigned int)b;
+				if (up < 0 || deg >= 3)
+					continue;
+				du = (double)g->uv[2 * b] - g->uv[2 * up]; dv = (double)g->uv[2 * b + 1] - g->uv[2 * up + 1];
+				rp_vine_add(g, (unsigned int)b, cos(a) * du - sin(a) * dv, sin(a) * du + cos(a) * dv, L, s);
+			}
+		}
+		if (s % 10 == 0)
+			printf("    stage %u: %u vertices, E %.5g, reason %d, %u steps (refused: energy %u, collision %u, projection %u)\n", s, g->nv, (double)r.energy,
+				(int)r.reason, r.iterations, r.rejected_energy, r.rejected_collision, r.rejected_projection);
+		if (s == snap_at[ns])
+		{
+			if (rp_vine_mesh(g, s, ms + ns, rgbs + ns))
+			{
+				ex[ns].face_rgb = rgbs[ns];
+				sprintf(labels[ns], "stage %u: %u vertices, %u edges", s, g->nv, g->ne);
+				ns++;
+				rp_mesh_panels("showcase/paper19_vines.svg", "Vines climbing a vase: repulsive curves growing on a surface",
+					"7 roots pinned; each stage 3 steps (the total length held, collision-checked, on the surface exactly), then every tip grown and now and then a branch",
+					ms, labels, ns, &view, NULL, ex);
+			}
+		}
+	}
+	for (k = 0; k < ns; k++) { rp_free_mesh(ms + k); free(rgbs[k]); }
+	qaws_surface_destroy(vase);
+	qaws_curve_destroy(profile);
+	free(g);
+	printf("  showcase/paper19_vines.svg, %.0f s\n", difftime(time(NULL), t0));
+}
+
 int main(int argc, char** argv)
 {
 	char const* dir = argc > 1 ? argv[1] : "../examples/data/repulsive_curves";
-	int only = argc > 2 ? atoi(argv[2]) : 0;   /* (one figure: 1 to 18) */
+	int only = argc > 2 ? atoi(argv[2]) : 0;   /* (one figure: 1 to 19) */
 	if (argc > 3)
 		rp_cap = (unsigned int)atoi(argv[3]);
 	setvbuf(stdout, NULL, _IONBF, 0);
@@ -1975,6 +2311,8 @@ int main(int argc, char** argv)
 			free(ox); ox = NULL;
 			rp_free_mesh(&ob); rp_free_mesh(&m);
 		}
+		if (!only || only == 19)
+			rp_vines_figure();
 		if (only == 18)
 			rp_wrap_views(sdir);   /* (figure 15's views alone, from its snapshots) */
 		if (!only || only == 16)
