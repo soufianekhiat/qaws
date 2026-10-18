@@ -149,6 +149,71 @@ qaws_status qaws_mesh_quadrangulate(qaws_mesh_3d const* mesh, qaws_quadrangulate
   are read, so quads follow sharp edges. `PAIRING`, `SPLIT`, `GLOBAL`
   (integer-grid maps) and `LAYOUT` are reserved.
 
+## Measures
+
+```c
+qaws_status qaws_mesh_3d_measure_shape(qaws_mesh_3d const* mesh, qaws_shape_quality* out, unsigned int* out_ideal);
+qaws_status qaws_mesh_3d_measure_deviation(qaws_mesh_3d const* mesh, qaws_mesh_reference const* reference,
+	qaws_deviation_desc const* desc, qaws_mesh_deviation* out);
+```
+
+`qaws_mesh_measure.h` reports a mesh the way remeshing papers do (Hu et
+al. 2017 and Wang et al. 2019 for triangles, QuadWild for quads).
+`qaws_mesh_quality` and the operators' reports stay as they were.
+
+- **Shape**, in one pass over the faces:
+  - triangles: Q = 2 sqrt(3) r / h_max (1 when equilateral), min and mean;
+    the smallest, mean smallest and largest angle; the shares of corners
+    under 30 and over 90 degrees;
+  - quads: each quad's smallest corner scaled Jacobian, along the unit
+    Newell normal (min and mean over quads), and AD, the mean |angle - 90|
+    over quad corners;
+  - ED, the edges' standard deviation over their mean length.
+- **Ideal valence**, from the corners rather than one number for all:
+  - a smooth interior vertex (off the border and the features) wants 6, or
+    4 when quads are the majority; V567 is the share of those at 5 to 7;
+  - a border, crease or corner vertex wants as many faces as its corners'
+    angles hold ideal corners (60 degrees per triangle, 90 per quad), plus
+    one edge on the border. It is regular within a half face.
+  - So a box's corners (3 quads) and edges (4), and a quad grid's straight
+    border (3 edges) and corners (2), are regular. A creased quad cube
+    counts 0 irregular vertices, where `qaws_mesh_quality` counts 8.
+    `out_ideal` gives each vertex's rounded ideal valence.
+- **Deviation, certified both ways**: lower and upper bounds of the sup of
+  the distance from the mesh to the reference, and from the reference to
+  the mesh, their Hausdorff interval, the area-weighted RMS (projected, not
+  certified), and the point where each lower bound is reached. One branch
+  and bound serves both directions; the mesh enters as its LINEAR
+  reference, so polygons count as their corner fans.
+  - A triangle of the side measured is matched affinely to the other
+    side. Each corner goes to its closest point there. A triangle whose
+    corners land on different triangles is cut along a flat unfolding of
+    the other side round a shared vertex.
+  - Over each piece, the difference of the two cubic patches is a cubic
+    Bezier triangle. Its control points (blossoms) bound it by the convex
+    hull property, and they are refined by subdivision while above the
+    goal. A flat side adds the distance's Lipschitz bound from its corners.
+  - The largest bound is split into four until it is within `precision`
+    (a share of the reference's box diagonal, default 1e-4) of the largest
+    distance found. A face or patch splits `budget` times (default 256) past
+    the splits that bring it down to the other side's triangle size.
+    `converged` is 0 when a budget ran out first; the bounds are then wider
+    but still hold.
+- **What is certified**:
+  - the upper bounds hold unconditionally: any point of a patch is a point
+    of the surface, so a poor match only widens them;
+  - the reference-to-mesh lower bound is an exact distance to the flat
+    triangles (Ericson's closest point, the grid's rings searched outward);
+  - the mesh-to-reference lower bound is a distance found by projection:
+    exact on LINEAR references, and on PN up to the patch projection
+    (Gauss-Newton);
+  - both are widened by a few units in the last place, and stored outward
+    in float builds.
+
+On figure 3's 3752-triangle blob both directions converge in 0.2 to 0.5 s;
+a 10.7k-face remesh takes 0.5 s (Release). Showcase figure 9 tabulates
+figures 3 and 4's meshes: the baseline the remeshing items quote.
+
 ## Meshes of exact geometry
 
 ```c
