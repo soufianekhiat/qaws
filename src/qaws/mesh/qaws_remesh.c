@@ -1807,13 +1807,15 @@ static qaws_status rm_begin(rmsh* w, qaws_mesh_3d const* in, qaws_mesh_3d** out)
 		}
 		hm_attr_at(m, w->ra, i)[0] = reg;
 	}
-	/* footpoints: the input's when it has them, else projected (feature vertices onto the creases) */
+	/* footpoints: the input's when they are on this reference (they evaluate to the vertex: a generated mesh's are on its
+	   surfaces, its faces and (u, v)), else projected (feature vertices onto the creases) */
 	for (i = 0; i < m->nv; i++)
 	{
 		qaws_mesh_location l;
 		double x[3];
 		unsigned int src = m->vsrc[i];
-		if (in->hm.foot && src < in->hm.nv && in->hm.foot[src].patch < w->r->nt)
+		if (in->hm.foot && src < in->hm.nv && in->hm.foot[src].patch < w->r->nt
+			&& (mr_eval(w->r, &in->hm.foot[src], x, NULL), fabs(x[0] - rm_x(m, i)[0]) + fabs(x[1] - rm_x(m, i)[1]) + fabs(x[2] - rm_x(m, i)[2]) <= 1e-6 * w->r->extent))
 			l = in->hm.foot[src];
 		else if (hm_feature_degree(m, i) && mr_project_crease(w->r, rm_x(m, i), HM_NONE, &w->s, &l) != HUGE_VAL && l.patch != HM_NONE)
 		{

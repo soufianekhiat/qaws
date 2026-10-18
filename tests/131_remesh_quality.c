@@ -21,6 +21,11 @@
  *   - in every mode: input corners kept where they were, output corners
  *     at input vertices, crease vertices on creases (the border counted),
  *     footpoints evaluated, valid, closed, genus kept;
+ *   - open meshes from qaws_mesh_generate_surface (the showcase's wavy
+ *     patch, a bilinear square, a cylinder piece; their footpoints on the
+ *     surfaces, not on their own reference) at 0.1 and 0.06: area and
+ *     border within 2%, faces near area / (0.43 L^2) (before: 4 to 23
+ *     faces, the input's (face, u, v) read as reference locations);
  *   - refusals; timings printed.
  *
  * By default the blob's tolerance is 5e-3, and the cube at 0.08 and 0.15,
@@ -38,6 +43,7 @@
 
 #include "test_common.h"
 #include "qaws_remesh.h"
+#include "qaws_mesh_generate.h"
 #include <math.h>
 #include <string.h>
 #include <stdlib.h>
@@ -877,6 +883,145 @@ static void test_tolerance(rq_shapes const* s)
 	}
 }
 
+
+/* ---- open generated meshes --------------------------------------------- */
+
+/* the showcase's wavy patch (figure 5, 0), a bilinear square (1) and a quarter-cylinder piece (2), meshed by qaws_mesh_generate_surface */
+static qaws_mesh_3d* rq_generated(unsigned int which, double L)
+{
+	qaws_vec3 cp[49];
+	qaws_surface_bspline_desc d;
+	qaws_surface_bilinear_desc b;
+	qaws_generate_desc g;
+	qaws_surface* srf = NULL;
+	qaws_mesh_3d* out = NULL;
+	unsigned int i, j;
+	memset(&d, 0, sizeof d);
+	if (which == 0)
+	{
+		for (i = 0; i < 7; i++)
+			for (j = 0; j < 7; j++)
+			{
+				cp[i * 7 + j].x = (qaws_scalar)(i / 3.0 - 1);
+				cp[i * 7 + j].y = (qaws_scalar)(j / 3.0 - 1);
+				cp[i * 7 + j].z = (qaws_scalar)(0.55 * sin(1.7 * i) * cos(1.3 * j) + (i == 3 && j == 3 ? 0.6 : 0));
+			}
+		d.u_degree = d.v_degree = 3;
+		d.u_point_count = d.v_point_count = 7;
+	}
+	else if (which == 2)
+	{
+		static double const cx[3] = { 1, 1, 0 }, cy[3] = { 0, 1, 1 };
+		for (i = 0; i < 3; i++)
+			for (j = 0; j < 2; j++)
+			{
+				cp[i * 2 + j].x = (qaws_scalar)cx[i];
+				cp[i * 2 + j].y = (qaws_scalar)cy[i];
+				cp[i * 2 + j].z = (qaws_scalar)(1.5 * j);
+			}
+		d.u_degree = 2;
+		d.v_degree = 1;
+		d.u_point_count = 3;
+		d.v_point_count = 2;
+	}
+	d.control_points = cp;
+	memset(&b, 0, sizeof b);
+	b.p10.x = b.p11.x = b.p01.y = b.p11.y = 2;
+	if ((which == 1 ? qaws_surface_create_bilinear(&b, &srf) : qaws_surface_create_bspline(&d, &srf)) != QAWS_STATUS_OK)
+		return NULL;
+	memset(&g, 0, sizeof g);
+	g.elements = QAWS_ELEMENTS_TRIANGLES;
+	g.target_length = (qaws_scalar)L;
+	if (qaws_mesh_generate_surface(srf, &g, &out, NULL) != QAWS_STATUS_OK)
+		out = NULL;
+	qaws_surface_destroy(srf);
+	return out;
+}
+
+/* the area and the border's length (its edges in one triangle) */
+static void rq_area_border(qaws_mesh_3d const* m, double* area, double* border)
+{
+	unsigned int nv = qaws_mesh_3d_get_vertex_count(m), nf = qaws_mesh_3d_get_triangle_count(m), i, k, n;
+	qaws_scalar* p = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * nv);
+	unsigned int* t = (unsigned int*)malloc(sizeof(unsigned int) * 3 * nf);
+	unsigned long long* keys = (unsigned long long*)malloc(sizeof(unsigned long long) * 3 * nf);
+	qaws_mesh_3d_get_positions(m, p);
+	qaws_mesh_3d_get_triangles(m, t);
+	*area = *border = 0;
+	for (i = 0; i < nf; i++)
+	{
+		qaws_scalar const *a = p + 3 * t[3 * i], *b = p + 3 * t[3 * i + 1], *c = p + 3 * t[3 * i + 2];
+		double u[3], w[3], x, y, z;
+		for (k = 0; k < 3; k++)
+		{
+			u[k] = b[k] - a[k];
+			w[k] = c[k] - a[k];
+			keys[3 * i + k] = rq_key(t[3 * i + k], t[3 * i + (k + 1) % 3]);
+		}
+		x = u[1] * w[2] - u[2] * w[1];
+		y = u[2] * w[0] - u[0] * w[2];
+		z = u[0] * w[1] - u[1] * w[0];
+		*area += 0.5 * sqrt(x * x + y * y + z * z);
+	}
+	n = 3 * nf;
+	qsort(keys, n, sizeof *keys, rq_key_cmp);
+	for (i = 0; i < n; i++)
+	{
+		unsigned int a, b;
+		if ((i > 0 && keys[i - 1] == keys[i]) || (i + 1 < n && keys[i + 1] == keys[i]))
+			continue;
+		a = (unsigned int)(keys[i] >> 32);
+		b = (unsigned int)(keys[i] & 0xFFFFFFFFu);
+		*border += sqrt((p[3 * a] - p[3 * b]) * (p[3 * a] - p[3 * b]) + (p[3 * a + 1] - p[3 * b + 1]) * (p[3 * a + 1] - p[3 * b + 1])
+			+ (p[3 * a + 2] - p[3 * b + 2]) * (p[3 * a + 2] - p[3 * b + 2]));
+	}
+	free(p); free(t); free(keys);
+}
+
+/* LOCAL on the meshes qaws_mesh_generate_surface makes of open patches: their area and border kept, faces near area / (0.43 L^2) */
+static void test_open_generated(void)
+{
+	static char const* const name[3] = { "wavy patch", "bilinear square", "cylinder piece" };
+	static double const sizes[2] = { 0.1, 0.06 };
+	unsigned int w, k;
+	for (w = 0; w < 3; w++)
+	{
+		qaws_mesh_3d* g = rq_generated(w, 0.1);
+		qaws_mesh_reference* r = NULL;
+		double a0, b0;
+		if (!g || qaws_mesh_reference_create(g, NULL, &r) != QAWS_STATUS_OK)
+		{
+			TEST_ASSERT(0, "open generated: the patch meshed");
+			qaws_mesh_3d_destroy(g);
+			continue;
+		}
+		rq_area_border(g, &a0, &b0);
+		for (k = 0; k < 2; k++)
+		{
+			qaws_mesh_report rep;
+			qaws_mesh_3d* out = rq_remesh(g, r, sizes[k], NULL, 0, 0, 0, &rep, NULL);
+			char msg[400], inv[300];
+			double a, b, want = a0 / (0.43 * sizes[k] * sizes[k]);
+			unsigned int nf;
+			if (!out)
+			{
+				TEST_ASSERT(0, "open generated: remeshed");
+				continue;
+			}
+			rq_area_border(out, &a, &b);
+			nf = qaws_mesh_3d_get_triangle_count(out);
+			sprintf(msg, "open generated, %s (%u triangles) at %.2f: %u triangles (about %.0f), area %.4f (%.2f%% off), border %.4f (%.2f%% off)",
+				name[w], qaws_mesh_3d_get_triangle_count(g), sizes[k], nf, want, a, 100 * (a / a0 - 1), b, 100 * (b / b0 - 1));
+			printf("  %s\n", msg);
+			TEST_ASSERT(fabs(a / a0 - 1) <= 0.02 && fabs(b / b0 - 1) <= 0.02 && nf > 0.75 * want && nf < 1.33 * want, msg);
+			TEST_ASSERT(rq_invariants(g, out, r, inv), inv);
+			qaws_mesh_3d_destroy(out);
+		}
+		qaws_mesh_reference_destroy(r);
+		qaws_mesh_3d_destroy(g);
+	}
+}
+
 static void test_refusals(rq_shapes const* s)
 {
 	static double const bad[5][3] = { { 0.7, 0.6, 0 }, { -0.1, 0, 0 }, { M_PI / 3, 0, 0 }, { 0, 1.0, 0 }, { 0, 0, -1 } };
@@ -914,6 +1059,7 @@ int test_131_remesh_quality_main(void)
 		test_default(&s);
 		test_angles(&s);
 		test_tolerance(&s);
+		test_open_generated();
 		test_refusals(&s);
 	}
 	rq_shapes_free(&s);
