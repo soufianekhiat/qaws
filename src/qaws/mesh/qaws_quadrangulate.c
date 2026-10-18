@@ -291,7 +291,8 @@ static qaws_status qd_extract(qaws_hm const* dm, mf_hier const* h, int const* T,
 			if (o[o[3]] == v && o[(o[3] + 1) % 3] == u)
 				break;
 		}
-		if (hash[j] == HM_NONE || paired[hash[j]])
+		/* (a partner on the same three clusters is a pillow, not a quad: both left as triangles) */
+		if (hash[j] == HM_NONE || paired[hash[j]] || tri[4 * (size_t)hash[j] + (tri[4 * (size_t)hash[j] + 3] + 2) % 3] == w)
 			continue;
 		{
 			unsigned int const* o = tri + 4 * (size_t)hash[j];
@@ -360,8 +361,10 @@ done:
    or 5), or to all of them (a fan, its triangles left to pair with the half cells across). */
 static qaws_status qd_fill(qd_out* o, qaws_mesh_reference const* r, mr_scratch* s, double const* cone, unsigned int ncone, double rho)
 {
-	unsigned int f, k, c0, mask, *h, *start, nadd = 0, added = 0, *nf, *nfs, nv0 = o->nv;
+	unsigned int f, k, c0, mask, *h, *start, nadd = 0, added = 0, *nf, *nfs, nv0 = o->nv, open = 0;
 	qaws_status st = QAWS_STATUS_OK;
+	for (k = 0; k < 3 * r->nt && !open; k++)
+		open = r->ta[k] == HM_NONE;
 	for (mask = 1; mask < 2 * o->nc + 2; mask <<= 1) {}
 	h = (unsigned int*)malloc(sizeof(unsigned int) * 2 * mask);
 	start = (unsigned int*)malloc(sizeof(unsigned int) * (o->nv + 1));
@@ -399,8 +402,8 @@ static qaws_status qd_fill(qd_out* o, qaws_mesh_reference const* r, mr_scratch* 
 	nf = (unsigned int*)malloc(sizeof(unsigned int) * (o->nc + 8 * (size_t)o->nv + 1));
 	nfs = (unsigned int*)malloc(sizeof(unsigned int) * (o->nf + o->nv + 1));
 	{
-		/* (room for a centre per loop of six or more, the loops sharing no vertex) */
-		size_t nmax = (size_t)o->nv + o->nv / 6 + 1;
+		/* (room for a centre per loop, the loops of three or more sharing no vertex) */
+		size_t nmax = (size_t)o->nv + o->nv / 3 + 1;
 		double* x = (double*)realloc(o->x, sizeof(double) * 3 * nmax);
 		qaws_mesh_location* foot;
 		unsigned char* kind;
@@ -438,10 +441,13 @@ static qaws_status qd_fill(qd_out* o, qaws_mesh_reference const* r, mr_scratch* 
 				break;
 			}
 		}
-		for (j = 0; j < len; j++)
+		for (j = 0, q = 0; j < len; j++)
+		{
 			start[loop[j]] = HM_NONE;   /* (each hole once) */
-		if (!ok || len < 3 || len > 10)
-			continue;
+			q += o->kind[loop[j]] != 0;
+		}
+		if (!ok || len < 3 || len > 10 || (open && q == len))
+			continue;   /* (on an open reference a loop all on its lines is taken for its border, left open) */
 		if (len == 8 || ncone)
 		{
 			double m[3] = { 0, 0, 0 }, near = HUGE_VAL, sum[2] = { 0, 0 };
@@ -650,7 +656,7 @@ static qaws_status qd_pair_triangles(qd_out* o)
 				if (o->fs[g] != 3 || mate[g] != HM_NONE)
 					continue;
 				for (j = 0; j < 3; j++)
-					if (u[j] == t[(k + 1) % 3] && u[(j + 1) % 3] == t[k])
+					if (u[j] == t[(k + 1) % 3] && u[(j + 1) % 3] == t[k] && u[(j + 2) % 3] != t[(k + 2) % 3])
 					{
 						mate[f] = g;
 						mate[g] = f;
@@ -962,8 +968,8 @@ qaws_status qaws_mesh_quadrangulate(qaws_mesh_3d const* mesh, qaws_quadrangulate
 	}
 	mf_positions(&h, rf, desc->sweeps ? desc->sweeps : 8);
 	/* 3. the steps between lattice points made to close round every face, the mesh read off them; all quads at the
-	   target when that leaves no other face, else (a hole or a cone off its lattice point left) the same at twice the
-	   target, every face split */
+	   target when that leaves no other face, else (a triangle or a polygon left) the same at twice the target, every face
+	   split; holes left are not looked for, the split would not close them either */
 	T = (int*)malloc(sizeof(int) * (2 * (size_t)dense->hm.nc + 2));
 	K = (unsigned char*)malloc((size_t)dense->hm.nc + 1);
 	if (!T || !K)
@@ -975,9 +981,18 @@ qaws_status qaws_mesh_quadrangulate(qaws_mesh_3d const* mesh, qaws_quadrangulate
 	for (f = 0; st == QAWS_STATUS_OK && desc->pure && f < o.nf && o.fs[f] == 4; f++) {}
 	if (st == QAWS_STATUS_OK && desc->pure && f < o.nf)
 	{
-		qd_out_free(&o);
+		qd_out o2;
+		memset(&o2, 0, sizeof o2);
 		mf_positions(&h, 2 * rho, desc->sweeps ? desc->sweeps : 8);
-		st = qd_lattice(&dense->hm, &h, 2 * rho, T, K, r, &s, &o);
+		st = qd_lattice(&dense->hm, &h, 2 * rho, T, K, r, &s, &o2);
+		/* (nothing at twice a target about the shape's own size: the first mesh split instead) */
+		if (st == QAWS_STATUS_OK && o2.nf)
+		{
+			qd_out_free(&o);
+			o = o2;
+		}
+		else
+			qd_out_free(&o2);
 		if (st == QAWS_STATUS_OK)
 			st = qd_split(&o, r, &s);
 	}

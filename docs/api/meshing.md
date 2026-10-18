@@ -414,12 +414,23 @@ Guibas 2018):
 - `pure` runs at the target spacing. Only when a face other than a quad
   is left does it fall back to fields at twice the target with every face
   split in four.
-Measured (test 134, figure 13): the blob quad-dominant at 0.16 has no face
-but quads and 8 irregular vertices (were 5 triangles and a pentagon); all
-quads at 0.11, 10 irregular at the target spacing (were 12, split from
-twice it); the can, 12 (were 22); a torus at 0.3, 697 quads and none
-irregular; a wavy B-spline patch in quads, none (were 4). Consistency takes
-about 0.5 s on 50k dense faces.
+
+Measured (test 134, figure 13). The integer steps turn a change of
+1e-12 in the input into another mesh, so the blob and the can are each
+run six times, scaled by 1 + k 1e-12, and the counts are means over the
+six (before: e280d24 on the same inputs):
+
+- the blob quad-dominant at 0.16: no face but quads on all six (were 6 to
+  8 triangles each), but more irregular vertices, 11.0 (8 to 14; were
+  8.3): each cone left off its vertices is a 3-5 pair;
+- the blob all quads at 0.11, at the target spacing: 9.3 irregular (8 to
+  10; were 13.2, split from twice the target);
+- the can all quads at 0.14: 11.0 (8 to 15; were 17.2);
+- a torus at 0.3: 697 quads, none irregular; a wavy B-spline patch in
+  quads: none (were 4).
+
+Figure 13's blob (figure 4's, its coordinates rounded otherwise) gives 11
+and 12 (were 8 and 12). Consistency takes about 0.5 s on 50k dense faces.
 
 ## Meshes of exact geometry
 

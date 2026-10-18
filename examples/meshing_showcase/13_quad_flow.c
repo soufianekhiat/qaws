@@ -160,8 +160,8 @@ static void demo_quad_flow(void)
 	q1 = ms_quads(blob, 0.16, 0, &rep);
 	if (q1)
 	{
-		sprintf(sub, "%u quads, %u others (were 6), %u irregular", rep.quality.quads, rep.quality.triangles + rep.quality.polygons,
-			rep.quality.irregular);
+		/* (the quad count on stdout: the line fits the panel without it) */
+		sprintf(sub, "%u others (were 6), %u irregular (were 8)", rep.quality.triangles + rep.quality.polygons, rep.quality.irregular);
 		ms_panel(c, 550, 0, 550, 640, q1, 0.6, 0.5, "quad-dominant", sub);
 		ms_draw(c, q1, tint, NULL, 1, wire, 1.1);
 		mq_mark_others(c, q1);
