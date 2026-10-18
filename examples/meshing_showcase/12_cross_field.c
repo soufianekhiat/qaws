@@ -3,8 +3,9 @@
  *   - the blob and the can (dense remeshes, the can's rims held): Instant
  *     Meshes' LOCAL field above, the globally SMOOTHEST below; singular faces
  *     dotted (red +1, blue -1);
- *   - the can all quads by INSTANT, which now keeps the global field: its
- *     caps O-grids, the irregular vertices dotted (red 3, blue 5 and more);
+ *   - the can all quads by INSTANT, which now keeps the global field, from
+ *     above and below: the irregular vertices dotted (red 3, blue 5 and
+ *     more) and counted per cap;
  *   - a torus: the smoothest field (pairs of singularities on a fat torus)
  *     and the one drawn to curvature (none, along the parallels).
  */
@@ -79,8 +80,9 @@ static void ms_field_panel(er_canvas* c, int x, int y, qaws_mesh_3d const* m, qa
 	free(idx);
 }
 
-/* the quads' irregular vertices dotted (red: 3 faces, blue: 5 or more) */
-static unsigned int ms_irregular(er_canvas* c, qaws_mesh_3d const* q)
+/* the quads' irregular vertices dotted (red: 3 faces, blue: 5 or more; c NULL: only counted), those on the can's top and
+   bottom caps (rims included) counted */
+static unsigned int ms_irregular(er_canvas* c, qaws_mesh_3d const* q, unsigned int* top, unsigned int* bottom)
 {
 	static double const red[3] = { 214, 39, 40 }, blue[3] = { 31, 90, 200 };
 	unsigned int nv = qaws_mesh_3d_get_vertex_count(q), nf = qaws_mesh_3d_get_face_count(q), nc = qaws_mesh_3d_get_corner_count(q), i, n = 0;
@@ -90,10 +92,14 @@ static unsigned int ms_irregular(er_canvas* c, qaws_mesh_3d const* q)
 	qaws_mesh_3d_get_faces(q, fv, fs);
 	for (i = 0; i < nc; i++)
 		val[fv[i]]++;
+	*top = *bottom = 0;
 	for (i = 0; i < nv; i++)
 		if (val[i] != 4)
 		{
-			er_point(c, p + 3 * i, val[i] < 4 ? red : blue, 7);
+			if (c)
+				er_point(c, p + 3 * i, val[i] < 4 ? red : blue, 7);
+			*top += p[3 * i + 2] > 0.8 - 1e-6;
+			*bottom += p[3 * i + 2] < -0.8 + 1e-6;
 			n++;
 		}
 	free(fv); free(fs); free(val); free(p);
@@ -155,23 +161,27 @@ static void demo_cross_field(void)
 		qaws_mesh_quadrangulate(can, &qd, &q, &rep);
 		if (q)
 		{
-			unsigned int nfe = qaws_mesh_3d_get_feature_edge_count(q), *fe = (unsigned int*)malloc(sizeof(unsigned int) * 2 * (nfe + 1)), i, n;
+			unsigned int nfe = qaws_mesh_3d_get_feature_edge_count(q), *fe = (unsigned int*)malloc(sizeof(unsigned int) * 2 * (nfe + 1)), i, n, top, bottom;
 			double* p = ms_positions(q);
 			static double const red[3] = { 214, 39, 40 };
+			char sub2[200];
+			double sec = (double)(clock() - t0) / CLOCKS_PER_SEC;
 			qaws_mesh_3d_get_feature_edges(q, fe);
-			sprintf(sub, "%u quads, %u irregular (22 before); %.2f s", rep.quality.quads, rep.quality.irregular,
-				(double)(clock() - t0) / CLOCKS_PER_SEC);
+			n = ms_irregular(NULL, q, &top, &bottom);
+			/* the count before this item was measured on the LOCAL field alone: no setting brings that field back */
+			sprintf(sub, "%u irregular (22 measured before); top cap %u", rep.quality.irregular, top);
+			sprintf(sub2, "%u quads; bottom cap %u irregular; %.2f s", rep.quality.quads, bottom, sec);
 			ms_panel(c, 1100, 0, 550, 600, q, 0.35, 1.0, "INSTANT quads, the top", sub);
 			ms_draw(c, q, warm, NULL, 1, wire, 1.0);
 			for (i = 0; i < nfe; i++)
 				er_line(c, p + 3 * fe[2 * i], p + 3 * fe[2 * i + 1], red, 2.2);
-			n = ms_irregular(c, q);
-			ms_panel(c, 1100, 600, 550, 600, q, 0.35, -1.0, "INSTANT quads, the bottom", "the caps O-grids, the side a grid");
+			ms_irregular(c, q, &top, &bottom);
+			ms_panel(c, 1100, 600, 550, 600, q, 0.35, -1.0, "INSTANT quads, the bottom", sub2);
 			ms_draw(c, q, warm, NULL, 1, wire, 1.0);
 			for (i = 0; i < nfe; i++)
 				er_line(c, p + 3 * fe[2 * i], p + 3 * fe[2 * i + 1], red, 2.2);
-			ms_irregular(c, q);
-			printf("  can all quads: %s; %u vertices not of 4 faces, %u crease edges\n", sub, n, nfe);
+			ms_irregular(c, q, &top, &bottom);
+			printf("  can all quads: %s; %s; %u vertices not of 4 faces (side %u), %u crease edges\n", sub, sub2, n, n - top - bottom, nfe);
 			free(fe);
 			free(p);
 		}

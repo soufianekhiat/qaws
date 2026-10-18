@@ -140,11 +140,12 @@ int curvature_aligned;                /* SMOOTHEST: drawn to the principal curva
   the s = 0 connection, without the paper's holonomy correction). One
   sparse factor of the connection Laplacian (cotangent weights) serves it
   all: vertices along feature lines and the border held along their lines
-  (corners free), the rest from one solve; a closed surface without lines
-  takes the smallest eigenvector (inverse power iteration, at most 20
-  steps). Face indices are in 1/n turns and sum to n chi: 8, 12 and 4 on a
-  sphere for n = 4, 6, 2; the held vertices lie along their creases to
-  rounding.
+  (corners free), the rest from one solve; a connected part without lines
+  (a closed surface) takes its own smallest eigenvector (inverse power
+  iteration, at most 20 steps). Face indices are in 1/n turns and sum to
+  n chi, coarse meshes included (an octahedron, an icosahedron, a cube): 8,
+  12 and 4 on a sphere for n = 4, 6, 2; the held vertices lie along their
+  creases to rounding.
 - **curvature_aligned** draws the field to the direction of largest
   curvature on the mesh's PN reference, as strongly as the surface bends one
   way more than the other (Knoppel's lambda_t = 0, the same factor): a torus
@@ -153,14 +154,17 @@ int curvature_aligned;                /* SMOOTHEST: drawn to the principal curva
   share) is a sparse LDL^T: rows ordered by geometric nested dissection,
   Davis's elimination tree and column counts, then supernodal left-looking
   with dense panels. A 50k-vertex sphere's field takes about 1.3 s
-  (factor 0.8 s, solves 0.03 s each).
+  (factor 0.8 s, solves 0.03 s each). Solves work in the factor's own
+  workspace: one factor is not for concurrent threads.
 - **INSTANT** quads now also try the global fields (the smoothest, kept on a
   tie, and the one drawn to curvature, kept when it has fewer
   singularities); where lines hold the field it is first relaxed at the
-  lattice's scale (Ginzburg-Landau by MBO steps, a second factor), which
-  parts the zeros the relaxed energy lets coincide. The can of figure 4
-  (all quads, 0.14) drops from 22 irregular vertices to 10, its caps
-  O-grids; the blob stays at 12, the torus at 0.
+  lattice's scale (Ginzburg-Landau by MBO steps, a second factor shared by
+  both), which parts the zeros the relaxed energy lets coincide. The can of
+  figure 4 (all quads, 0.14) drops from 22 irregular vertices to 10, all
+  on the caps (6 on the top, a +1/-1 pair of them near its rim; 4 on the
+  bottom); the blob stays at 12 with 8% fewer quads (mean edge 0.115 for
+  0.11), the torus at 0.
 - Limits: SMOOTHEST is the relaxed optimum, so where symmetry lets zeros
   coincide they sit close together (a disc held by its border: its four
   cones near the centre; INSTANT parts them, the public field does not).

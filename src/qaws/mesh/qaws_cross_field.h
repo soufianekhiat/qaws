@@ -10,9 +10,9 @@
  * without its holonomy correction, fine on the dense meshes it serves). The
  * energy sum w |u_j - r_ij u_i|^2 (cotangent weights) is minimized with the
  * vertices along feature lines and the border held to their lines, corners
- * free; one sparse LDL^T factor serves the smoothest field (one solve, or
- * inverse power iteration on a closed surface without lines) and the one
- * drawn to a guide (lambda_t = 0).
+ * free; one sparse LDL^T factor serves the smoothest field (per connected
+ * component one solve when lines hold it, else inverse power iteration)
+ * and the one drawn to a guide (lambda_t = 0).
  */
 
 #include "qaws_mesh_internal.h"
@@ -26,8 +26,8 @@ qaws_status cf_create(qaws_hm const* m, double const* nrm, mf_level const* L0, u
 qaws_status cf_smoothest(cf_system* sys, double* out_q);
 /* the field drawn to guide (3 per vertex, a direction scaled by its strength; 0: none) */
 qaws_status cf_aligned(cf_system* sys, double const* guide, double* out_q);
-/* the last field, when it has held vertices, relaxed toward Ginzburg-Landau's at the scale eps (at most steps MBO steps,
-   a second factor): its coinciding zeros parted */
+/* the last field, on the components with held vertices, relaxed toward Ginzburg-Landau's at the scale eps (at most steps
+   MBO steps, a second factor, kept for further calls at the same eps): its coinciding zeros parted */
 qaws_status cf_relax(cf_system* sys, double eps, unsigned int steps, double* out_q);
 /* per face the index of the last field computed, in 1/n turns */
 void cf_index(cf_system const* sys, int* out_face_index);

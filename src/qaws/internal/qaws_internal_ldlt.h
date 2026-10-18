@@ -33,7 +33,7 @@ typedef struct qaws_internal_ldlt
    after 3 retries */
 qaws_status qaws_internal_ldlt_factor(qaws_internal_ldlt* f, unsigned int n, unsigned int const* row_ptr, unsigned int const* col,
 	double const* val, double const* xyz, double shift);
-/* A x = b; b and x may alias */
+/* A x = b; b and x may alias. The solve works in f's workspace: solves on one factor are not for concurrent threads */
 void qaws_internal_ldlt_solve(qaws_internal_ldlt const* f, double const* b, double* x);
 void qaws_internal_ldlt_free(qaws_internal_ldlt* f);
 

@@ -11,8 +11,10 @@ struct cf_system
 	qaws_hm const* m;
 	double const* nrm;
 	unsigned int n, nfree;
-	int held;                       /* some vertex held to its line */
-	double *th, *as, *ar;           /* per corner slot: its edge's rescaled angle at its vertex; its rescaled and real angle */
+	int held, loose;                /* some vertex held to its line; some unknown in a component without one */
+	unsigned int ncp, *cp;          /* the connected components, per vertex its own */
+	unsigned char* ch;              /* per component: some vertex held */
+	double *th, *as, *ar;          /* per corner slot: its edge's rescaled angle at its vertex; its rescaled and real angle */
 	double *rr, *we;                /* per corner slot: its edge's transport (cos, sin of n rho); its edge's weight */
 	unsigned int *e0, *enb;         /* per vertex its edges (CSR): the neighbour, */
 	double *ew, *ez;                /* the weight, the transport from the neighbour (2) */
@@ -20,7 +22,8 @@ struct cf_system
 	unsigned int* id;               /* per vertex: its unknown, HM_NONE when held */
 	double *b, *x;                  /* 2 per unknown */
 	double nnz_a;                   /* the matrix's lower triangle */
-	qaws_internal_ldlt f;
+	qaws_internal_ldlt f, g;        /* A_FF + 1e-8 M_FF; the relaxation's A_FF + M_FF / geps^2, factored once for its geps */
+	double geps;
 };
 
 static double cf_dot(double const* a, double const* b)
@@ -75,8 +78,9 @@ void cf_free(cf_system* s)
 	if (!s)
 		return;
 	free(s->th); free(s->as); free(s->ar); free(s->rr); free(s->we); free(s->e0); free(s->enb); free(s->ew); free(s->ez);
-	free(s->mass); free(s->u); free(s->id); free(s->b); free(s->x);
+	free(s->mass); free(s->u); free(s->id); free(s->b); free(s->x); free(s->cp); free(s->ch);
 	qaws_internal_ldlt_free(&s->f);
+	qaws_internal_ldlt_free(&s->g);
 	free(s);
 }
 
@@ -290,6 +294,32 @@ qaws_status cf_create(qaws_hm const* m, double const* nrm, mf_level const* L0, u
 		}
 	}
 	s->e0[nv] = at;
+	/* the connected components (id the stack, set below): each solved by its lines when it has some, else for its
+	   eigenvector */
+	s->cp = (unsigned int*)malloc(sizeof(unsigned int) * (nv + 1));
+	if (!s->cp)
+		goto done;
+	for (v = 0; v < nv; v++)
+		s->cp[v] = HM_NONE;
+	for (v = 0; v < nv; v++)
+	{
+		unsigned int top = 0;
+		if (s->cp[v] != HM_NONE)
+			continue;
+		s->cp[v] = s->ncp;
+		s->id[top++] = v;
+		while (top)
+			for (c = s->id[--top], k = s->e0[c]; k < s->e0[c + 1]; k++)
+				if (s->cp[s->enb[k]] == HM_NONE)
+				{
+					s->cp[s->enb[k]] = s->ncp;
+					s->id[top++] = s->enb[k];
+				}
+		s->ncp++;
+	}
+	s->ch = (unsigned char*)calloc((size_t)s->ncp + 1, 1);
+	if (!s->ch)
+		goto done;
 	/* held: off the corners, along the vertex's two feature (or border) edges, the mean of their directions' n-th powers
 	   (alike on a straight line: n pi is a whole turn for even n); left free where the two disagree by more than 45 degrees */
 	for (v = 0; v < nv; v++)
@@ -325,12 +355,14 @@ qaws_status cf_create(qaws_hm const* m, double const* nrm, mf_level const* L0, u
 				s->u[2 * (size_t)v] = (z[0][0] + z[1][0]) / r;
 				s->u[2 * (size_t)v + 1] = (z[0][1] + z[1][1]) / r;
 				s->id[v] = HM_NONE;
-				s->held = 1;
+				s->held = s->ch[s->cp[v]] = 1;
 				continue;
 			}
 		}
 		s->id[v] = s->nfree++;
 	}
+	for (v = 0; v < nv; v++)
+		s->loose |= s->id[v] != HM_NONE && !s->ch[s->cp[v]];
 	s->b = (double*)malloc(sizeof(double) * (2 * (size_t)s->nfree + 1));
 	s->x = (double*)malloc(sizeof(double) * (2 * (size_t)s->nfree + 1));
 	if (s->b && s->x)
@@ -351,8 +383,9 @@ void cf_fill(cf_system const* s, double* out_factor, double* out_matrix)
 	*out_matrix = s->nnz_a;
 }
 
-/* the free unknowns from M q - A_FC u_C (q: 2 per vertex, NULL: none) by f (A_FF + sigma M_FF) */
-static void cf_solve(cf_system* s, qaws_internal_ldlt const* f, double const* q)
+/* the free unknowns from M q - A_FC u_C (q: 2 per vertex, NULL: none) by f (A_FF + sigma M_FF); held_only: only the
+   components held by lines take theirs (the matrix is block diagonal across components) */
+static void cf_solve(cf_system* s, qaws_internal_ldlt const* f, double const* q, int held_only)
 {
 	qaws_hm const* m = s->m;
 	unsigned int v, k;
@@ -381,7 +414,7 @@ static void cf_solve(cf_system* s, qaws_internal_ldlt const* f, double const* q)
 	}
 	qaws_internal_ldlt_solve(f, s->b, s->x);
 	for (v = 0; v < m->nv; v++)
-		if (s->id[v] != HM_NONE)
+		if (s->id[v] != HM_NONE && (!held_only || s->ch[s->cp[v]]))
 		{
 			s->u[2 * (size_t)v] = s->x[2 * (size_t)s->id[v]];
 			s->u[2 * (size_t)v + 1] = s->x[2 * (size_t)s->id[v] + 1];
@@ -435,41 +468,50 @@ static void cf_directions(cf_system const* s, double* out_q)
 qaws_status cf_smoothest(cf_system* s, double* out_q)
 {
 	qaws_hm const* m = s->m;
-	unsigned int v, it;
-	if (s->nfree && s->held)
-		cf_solve(s, &s->f, NULL);
-	else if (s->nfree)
+	unsigned int v, c, it;
+	double *q = (double*)calloc(2 * (size_t)m->nv + 2, sizeof(double)), *nn = (double*)malloc(sizeof(double) * ((size_t)s->ncp + 1));
+	if (!q || !nn)
 	{
-		/* closed and free: inverse power iteration toward the smallest eigenvector, x = A^-1 M u normalized in M, 20 steps
-		   or until a step moves u by less than 1e-6 in M */
-		for (it = 0; it < 20; it++)
-		{
-			double nn = 0, moved = 0;
-			for (v = 0; v < m->nv; v++)
-				if (s->id[v] != HM_NONE)
-				{
-					s->b[2 * (size_t)s->id[v]] = it ? s->mass[v] * s->u[2 * (size_t)v] : s->mass[v];
-					s->b[2 * (size_t)s->id[v] + 1] = it ? s->mass[v] * s->u[2 * (size_t)v + 1] : 0;
-				}
-			qaws_internal_ldlt_solve(&s->f, s->b, s->x);
-			for (v = 0; v < m->nv; v++)
-				if (s->id[v] != HM_NONE)
-					nn += s->mass[v] * (s->x[2 * (size_t)s->id[v]] * s->x[2 * (size_t)s->id[v]] + s->x[2 * (size_t)s->id[v] + 1] * s->x[2 * (size_t)s->id[v] + 1]);
-			if (!(nn > 0))
-				break;
-			nn = 1 / sqrt(nn);
-			for (v = 0; v < m->nv; v++)
-				if (s->id[v] != HM_NONE)
-				{
-					double a = s->x[2 * (size_t)s->id[v]] * nn - s->u[2 * (size_t)v], b = s->x[2 * (size_t)s->id[v] + 1] * nn - s->u[2 * (size_t)v + 1];
-					moved += s->mass[v] * (a * a + b * b);
-					s->u[2 * (size_t)v] += a;
-					s->u[2 * (size_t)v + 1] += b;
-				}
-			if (it && moved < 1e-12)
-				break;
-		}
+		free(q);
+		free(nn);
+		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
+	/* a component held by lines: one solve, A_FF u_F = -A_FC u_C (q 0 there); one without: inverse power iteration toward
+	   its smallest eigenvector, u = A^-1 M u normalized in M, 20 steps or until a step moves u by less than 1e-6 in M. The
+	   matrix is block diagonal across components: each solve serves both */
+	for (it = 0; s->nfree && it < 20; it++)
+	{
+		double moved = 0;
+		for (v = 0; v < m->nv; v++)
+			if (s->id[v] != HM_NONE && !s->ch[s->cp[v]])
+			{
+				q[2 * (size_t)v] = it ? s->u[2 * (size_t)v] : 1;
+				q[2 * (size_t)v + 1] = it ? s->u[2 * (size_t)v + 1] : 0;
+			}
+		cf_solve(s, &s->f, q, 0);
+		if (!s->loose)
+			break;
+		memset(nn, 0, sizeof(double) * s->ncp);
+		for (v = 0; v < m->nv; v++)
+			if (s->id[v] != HM_NONE && !s->ch[s->cp[v]])
+				nn[s->cp[v]] += s->mass[v] * (s->u[2 * (size_t)v] * s->u[2 * (size_t)v] + s->u[2 * (size_t)v + 1] * s->u[2 * (size_t)v + 1]);
+		for (c = 0; c < s->ncp; c++)
+			nn[c] = nn[c] > 0 ? 1 / sqrt(nn[c]) : 1;
+		for (v = 0; v < m->nv; v++)
+			if (s->id[v] != HM_NONE && !s->ch[s->cp[v]])
+			{
+				double a, b;
+				s->u[2 * (size_t)v] *= nn[s->cp[v]];
+				s->u[2 * (size_t)v + 1] *= nn[s->cp[v]];
+				a = s->u[2 * (size_t)v] - q[2 * (size_t)v];
+				b = s->u[2 * (size_t)v + 1] - q[2 * (size_t)v + 1];
+				moved += s->mass[v] * (a * a + b * b);
+			}
+		if (it && moved < 1e-12)
+			break;
+	}
+	free(q);
+	free(nn);
 	cf_directions(s, out_q);
 	return QAWS_STATUS_OK;
 }
@@ -503,10 +545,16 @@ static double cf_angle(cf_system const* s, unsigned int v, double const* g)
 qaws_status cf_aligned(cf_system* s, double const* guide, double* out_q)
 {
 	qaws_hm const* m = s->m;
-	double *q = (double*)malloc(sizeof(double) * 2 * (m->nv + 1)), nn = 0;
+	double *q = (double*)malloc(sizeof(double) * 2 * (m->nv + 1)), *gc = (double*)calloc((size_t)s->ncp + 1, sizeof(double)), nn = 0;
 	unsigned int v;
-	if (!q)
+	int bare = 0;
+	qaws_status st;
+	if (!q || !gc)
+	{
+		free(q);
+		free(gc);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
+	}
 	/* q = |g|^2 exp(i n phi), normalized to 1 / sqrt(area) in M (the pull then weighs as the held lines at any scale) */
 	for (v = 0; v < m->nv; v++)
 	{
@@ -519,17 +567,33 @@ qaws_status cf_aligned(cf_system* s, double const* guide, double* out_q)
 		q[2 * (size_t)v] = g2 * cos(s->n * phi);
 		q[2 * (size_t)v + 1] = g2 * sin(s->n * phi);
 		nn += s->mass[v] * g2 * g2;
+		gc[s->cp[v]] += g2;
 	}
-	if (!(nn > 0) || !(s->area > 0))
+	/* a component with neither lines nor guide would come out 0: drawn to its smoothest field instead */
+	for (v = 0; v < m->nv; v++)
+		bare |= s->id[v] != HM_NONE && !s->ch[s->cp[v]] && !(gc[s->cp[v]] > 0);
+	if (!(nn > 0) || !(s->area > 0) || bare)
 	{
-		free(q);
-		return cf_smoothest(s, out_q);
+		st = cf_smoothest(s, out_q);
+		for (v = 0; st == QAWS_STATUS_OK && v < m->nv; v++)
+			if (!s->ch[s->cp[v]] && !(gc[s->cp[v]] > 0))
+			{
+				q[2 * (size_t)v] = s->u[2 * (size_t)v];
+				q[2 * (size_t)v + 1] = s->u[2 * (size_t)v + 1];
+			}
+		if (st != QAWS_STATUS_OK || !(nn > 0) || !(s->area > 0))
+		{
+			free(q);
+			free(gc);
+			return st;
+		}
 	}
+	free(gc);
 	nn = 1 / sqrt(nn * s->area);
 	for (v = 0; v < 2 * m->nv; v++)
 		q[v] *= nn;
 	if (s->nfree)
-		cf_solve(s, &s->f, q);
+		cf_solve(s, &s->f, q, 0);
 	free(q);
 	cf_directions(s, out_q);
 	return QAWS_STATUS_OK;
@@ -538,35 +602,41 @@ qaws_status cf_aligned(cf_system* s, double const* guide, double* out_q)
 /* Ginzburg-Landau by MBO steps (Merriman, Bence, Osher 1994; Viertel, Osting 2019 for cross fields): the last field
    normalized and diffused for a time eps^2 ((A + M / eps^2) v = M u / eps^2, the held values kept), at most steps
    times, until no normalized value moves by 1e-3. The relaxed field's coinciding zeros (a disc held by its border: one
-   zero of order n at its centre, z^n) part into simple ones some eps apart. A field without held vertices is left as
-   it is (the eigenvector's zeros are simple) */
+   zero of order n at its centre, z^n) part into simple ones some eps apart. Components without held vertices are left
+   as they are (the eigenvector's zeros are simple). The factor is kept for the next call at the same eps */
 qaws_status cf_relax(cf_system* s, double eps, unsigned int steps, double* out_q)
 {
 	qaws_hm const* m = s->m;
-	qaws_internal_ldlt g;
 	double *q, sigma = 1 / (eps * eps);
 	unsigned int v, it;
 	qaws_status st = QAWS_STATUS_OK;
 	if (s->nfree && s->held && eps > 0 && steps)
 	{
 		q = (double*)calloc(2 * (size_t)m->nv + 2, sizeof(double));
-		st = q ? cf_factor(s, sigma, &g) : QAWS_STATUS_ALLOCATION_FAILURE;
+		if (!q)
+			return QAWS_STATUS_ALLOCATION_FAILURE;
+		if (s->geps != eps)
+		{
+			qaws_internal_ldlt_free(&s->g);
+			s->geps = 0;
+			st = cf_factor(s, sigma, &s->g);
+			s->geps = st == QAWS_STATUS_OK ? eps : 0;
+		}
 		for (it = 0; st == QAWS_STATUS_OK && it < steps; it++)
 		{
 			double moved = 0;
 			for (v = 0; v < m->nv; v++)
 			{
 				double l = hypot(s->u[2 * (size_t)v], s->u[2 * (size_t)v + 1]), a = q[2 * (size_t)v], b = q[2 * (size_t)v + 1];
-				q[2 * (size_t)v] = s->id[v] != HM_NONE && l > 0 ? sigma * s->u[2 * (size_t)v] / l : 0;
-				q[2 * (size_t)v + 1] = s->id[v] != HM_NONE && l > 0 ? sigma * s->u[2 * (size_t)v + 1] / l : 0;
+				int on = s->id[v] != HM_NONE && s->ch[s->cp[v]] && l > 0;
+				q[2 * (size_t)v] = on ? sigma * s->u[2 * (size_t)v] / l : 0;
+				q[2 * (size_t)v + 1] = on ? sigma * s->u[2 * (size_t)v + 1] / l : 0;
 				moved = fmax(moved, hypot(q[2 * (size_t)v] - a, q[2 * (size_t)v + 1] - b) / sigma);
 			}
 			if (moved < 1e-3)
 				break;
-			cf_solve(s, &g, q);
+			cf_solve(s, &s->g, q, 1);
 		}
-		if (q && st == QAWS_STATUS_OK)
-			qaws_internal_ldlt_free(&g);
 		free(q);
 	}
 	if (st == QAWS_STATUS_OK)
@@ -574,24 +644,23 @@ qaws_status cf_relax(cf_system* s, double eps, unsigned int steps, double* out_q
 	return st;
 }
 
-/* per face: the field's turns along its edges against the transport, with the transport's own turn round it */
+/* per face: the field's turns along its edges against the transport, with the transport's own turn round it, n times
+   the face's rescaled angle excess, taken whole (wrapped into a half turn it loses whole turns on coarse faces; whole,
+   the faces' excesses sum to 2 pi chi) */
 void cf_index(cf_system const* s, int* out)
 {
 	qaws_hm const* m = s->m;
 	unsigned int f, c;
 	for (f = 0; f < m->nf; f++)
 	{
-		double sum = 0, pr = 1, pi = 0;
+		double sum = -(double)s->n * (m->fn[f] - 2.0) * CF_PI;
 		for (c = m->fc[f]; c < m->fc[f] + m->fn[f]; c++)
 		{
 			double const *ui = s->u + 2 * (size_t)m->cv[c], *uj = s->u + 2 * (size_t)hm_to(m, c), *r = s->rr + 2 * (size_t)c;
-			double ar = r[0] * ui[0] - r[1] * ui[1], ai = r[0] * ui[1] + r[1] * ui[0], t;
-			sum += atan2(uj[1] * ar - uj[0] * ai, uj[0] * ar + uj[1] * ai);
-			t = pr * r[0] - pi * r[1];
-			pi = pr * r[1] + pi * r[0];
-			pr = t;
+			double ar = r[0] * ui[0] - r[1] * ui[1], ai = r[0] * ui[1] + r[1] * ui[0];
+			sum += atan2(uj[1] * ar - uj[0] * ai, uj[0] * ar + uj[1] * ai) + s->n * s->as[c];
 		}
-		out[f] = (int)floor((sum + atan2(pi, pr)) / (2 * CF_PI) + 0.5);
+		out[f] = (int)floor(sum / (2 * CF_PI) + 0.5);
 	}
 }
 

@@ -6,7 +6,9 @@
  *     against 12 n log2(sqrt n); a complex Hermitian system in 2 x 2
  *     blocks against dense elimination; a semidefinite Laplacian shifted;
  *   - SMOOTHEST through the public API: indices summing to n chi exactly
- *     (icosphere for n = 2, 4, 6; torus; a disc held by its border), the
+ *     (icosphere for n = 2, 4, 6; torus; a disc held by its border; the
+ *     octahedron, icosahedron and cubes, whose faces' excesses pass half
+ *     a turn), a sphere beside a held grid in one mesh solved as alone, the
  *     can's cones inside its caps, a cube's crease vertices along their
  *     creases to rounding with its cones at the corners; drawn to
  *     curvature on a torus, along the parallels; determinism; refusals;
@@ -21,6 +23,7 @@
 #include "qaws_remesh.h"
 #include "internal/qaws_internal_ldlt.h"
 #include "internal/qaws_internal_sparse.h"
+#include "mesh/qaws_cross_field.h"
 #include <math.h>
 #include <string.h>
 #include <stdlib.h>
@@ -553,6 +556,134 @@ static void test_indices(void)
 	qaws_mesh_3d_destroy(disc);
 }
 
+/* the SMOOTHEST field's index sum over faces [f0, f1) (all when f1 is 0) */
+static int cft_sum(qaws_mesh_3d const* m, unsigned int n, unsigned int f0, unsigned int f1, qaws_status* st)
+{
+	unsigned int nf = qaws_mesh_3d_get_face_count(m), plus, other, f;
+	int* idx = (int*)malloc(sizeof(int) * (nf + 1)), sum = 0;
+	*st = cft_field(m, n, 0, NULL, idx, &plus, &other);
+	for (f = f0; *st == QAWS_STATUS_OK && f < (f1 ? f1 : nf); f++)
+		sum += idx[f];
+	free(idx);
+	return sum;
+}
+
+/* coarse closed meshes, where n times a face's rescaled angle excess passes half a turn: the indices still sum to 2 n */
+static void test_coarse(void)
+{
+	static double const ox[18] = { 1, 0, 0, -1, 0, 0, 0, 1, 0, 0, -1, 0, 0, 0, 1, 0, 0, -1 };
+	static unsigned int const of[24] = { 0, 2, 4, 1, 4, 2, 0, 4, 3, 1, 3, 4, 0, 5, 2, 1, 2, 5, 0, 3, 5, 1, 5, 3 };
+	static double const cx[24] = { -1, -1, -1, 1, -1, -1, 1, 1, -1, -1, 1, -1, -1, -1, 1, 1, -1, 1, 1, 1, 1, -1, 1, 1 };
+	static unsigned int const cf[24] = { 0, 3, 2, 1, 4, 5, 6, 7, 0, 1, 5, 4, 1, 2, 6, 5, 2, 3, 7, 6, 3, 0, 4, 7 };
+	static unsigned int const cs[6] = { 4, 4, 4, 4, 4, 4 };
+	unsigned int ct[36], i;
+	qaws_mesh_3d *oct = cft_make(ox, 6, of, NULL, 8), *ico = cft_sphere(1), *cube, *creased, *quads = cft_make(cx, 8, cf, cs, 6);
+	qaws_status st[8];
+	int sum[8], ok = 1;
+	char msg[400];
+	for (i = 0; i < 6; i++)
+	{
+		ct[6 * i] = cf[4 * i]; ct[6 * i + 1] = cf[4 * i + 1]; ct[6 * i + 2] = cf[4 * i + 2];
+		ct[6 * i + 3] = cf[4 * i]; ct[6 * i + 4] = cf[4 * i + 2]; ct[6 * i + 5] = cf[4 * i + 3];
+	}
+	cube = cft_make(cx, 8, ct, NULL, 12);
+	creased = cft_make(cx, 8, ct, NULL, 12);
+	qaws_mesh_3d_detect_features(creased, (qaws_scalar)(M_PI / 6), 0, 0);
+	sum[0] = cft_sum(oct, 4, 0, 0, &st[0]);
+	sum[1] = cft_sum(oct, 6, 0, 0, &st[1]);
+	sum[2] = cft_sum(ico, 4, 0, 0, &st[2]);
+	sum[3] = cft_sum(ico, 6, 0, 0, &st[3]);
+	sum[4] = cft_sum(cube, 4, 0, 0, &st[4]);
+	sum[5] = cft_sum(cube, 6, 0, 0, &st[5]);
+	sum[6] = cft_sum(creased, 4, 0, 0, &st[6]);
+	sum[7] = cft_sum(quads, 4, 0, 0, &st[7]);
+	for (i = 0; i < 8; i++)
+		ok &= st[i] == QAWS_STATUS_OK && sum[i] == (i == 1 || i == 3 || i == 5 ? 12 : 8);
+	sprintf(msg, "coarse index sums: octahedron n = 4: %d (8), n = 6: %d (12); icosahedron %d (8), %d (12); 12-triangle cube %d (8), %d (12), creased %d (8); 6-quad cube %d (8)",
+		sum[0], sum[1], sum[2], sum[3], sum[4], sum[5], sum[6], sum[7]);
+	printf("  %s\n", msg);
+	TEST_ASSERT(ok, msg);
+	qaws_mesh_3d_destroy(oct);
+	qaws_mesh_3d_destroy(ico);
+	qaws_mesh_3d_destroy(cube);
+	qaws_mesh_3d_destroy(creased);
+	qaws_mesh_3d_destroy(quads);
+}
+
+/* the singular faces among [f0, f1): +1 and others */
+static void cft_count(int const* idx, unsigned int f0, unsigned int f1, unsigned int* plus, unsigned int* other)
+{
+	unsigned int f;
+	*plus = *other = 0;
+	for (f = f0; f < f1; f++)
+	{
+		*plus += idx[f] == 1;
+		*other += idx[f] != 0 && idx[f] != 1;
+	}
+}
+
+/* two components in one mesh, an icosphere without lines and a flat grid held by its border: the sphere's field its
+   own eigenvector (smoothest; drawn to a guide only the grid has; left by the relaxation of the held grid) */
+static void test_components(void)
+{
+	qaws_mesh_3d *s = cft_sphere(8), *m;
+	unsigned int ns = qaws_mesh_3d_get_vertex_count(s), nfs = qaws_mesh_3d_get_face_count(s), k = 13, nv = ns + k * k, nf = nfs + 2 * (k - 1) * (k - 1);
+	unsigned int i, j, at = 3 * nfs, p[4], o[4];
+	double *x = (double*)malloc(sizeof(double) * 3 * nv), *xs = cft_positions(s), *g = (double*)calloc(3 * (size_t)nv, sizeof(double));
+	double* q = (double*)malloc(sizeof(double) * 3 * nv);
+	unsigned int* t = (unsigned int*)malloc(sizeof(unsigned int) * 3 * nf);
+	int* idx = (int*)calloc(nf, sizeof(int));
+	qaws_status st = QAWS_STATUS_INTERNAL_ERROR;
+	mf_hier h;
+	cf_system* sys = NULL;
+	char msg[400];
+	memcpy(x, xs, sizeof(double) * 3 * ns);
+	qaws_mesh_3d_get_triangles(s, t);
+	for (j = 0; j < k; j++)
+		for (i = 0; i < k; i++)
+		{
+			double* y = x + 3 * (ns + j * k + i);
+			y[0] = 3 + 0.1 * i; y[1] = 0.1 * j; y[2] = 0;
+			g[3 * (ns + j * k + i)] = 1;
+		}
+	for (j = 0; j + 1 < k; j++)
+		for (i = 0; i + 1 < k; i++)
+		{
+			unsigned int a = ns + j * k + i;
+			t[at++] = a; t[at++] = a + 1; t[at++] = a + k + 1;
+			t[at++] = a; t[at++] = a + k + 1; t[at++] = a + k;
+		}
+	m = cft_make(x, nv, t, NULL, nf);
+	memset(p, 0, sizeof p);
+	memset(o, 0xFF, sizeof o);
+	if (cft_field(m, 4, 0, NULL, idx, &i, &j) == QAWS_STATUS_OK)
+		cft_count(idx, 0, nfs, &p[0], &o[0]);
+	if (mf_build(&h, &m->hm, NULL) == QAWS_STATUS_OK)
+	{
+		if (cf_create(&m->hm, h.lv[0].nrm, &h.lv[0], 4, &sys) == QAWS_STATUS_OK)
+		{
+			st = cf_aligned(sys, g, q);
+			cf_index(sys, idx);
+			cft_count(idx, 0, nfs, &p[1], &o[1]);
+			if (st == QAWS_STATUS_OK)
+				st = cf_smoothest(sys, q);
+			if (st == QAWS_STATUS_OK)
+				st = cf_relax(sys, 0.2, 100, q);
+			cf_index(sys, idx);
+			cft_count(idx, 0, nfs, &p[2], &o[2]);
+			cf_free(sys);
+		}
+		mf_free(&h);
+	}
+	sprintf(msg, "two components, the sphere's faces: smoothest %u of +1, %u others; drawn to the grid's guide %u, %u; after relaxing the grid %u, %u (8, 0 each)",
+		p[0], o[0], p[1], o[1], p[2], o[2]);
+	printf("  %s\n", msg);
+	TEST_ASSERT(st == QAWS_STATUS_OK && p[0] == 8 && o[0] == 0 && p[1] == 8 && o[1] == 0 && p[2] == 8 && o[2] == 0, msg);
+	free(x); free(xs); free(g); free(q); free(t); free(idx);
+	qaws_mesh_3d_destroy(s);
+	qaws_mesh_3d_destroy(m);
+}
+
 static void test_can(void)
 {
 	qaws_mesh_3d *can = cft_can(), *d = NULL;
@@ -743,7 +874,7 @@ static void test_refusals(void)
 	qaws_mesh_3d_destroy(t);
 }
 
-static unsigned int cft_quads(qaws_mesh_3d const* m, double L, qaws_status* st)
+static unsigned int cft_quads(qaws_mesh_3d const* m, double L, qaws_status* st, double* mean, unsigned int* quads)
 {
 	qaws_quadrangulate_desc d;
 	qaws_mesh_3d* out = NULL;
@@ -754,6 +885,8 @@ static unsigned int cft_quads(qaws_mesh_3d const* m, double L, qaws_status* st)
 	d.pure = 1;
 	*st = qaws_mesh_quadrangulate(m, &d, &out, &rep);
 	qaws_mesh_3d_destroy(out);
+	*mean = (double)rep.quality.mean_edge;
+	*quads = rep.quality.quads;
 	return *st == QAWS_STATUS_OK ? rep.quality.irregular : 0xFFFFFFFFu;
 }
 
@@ -761,17 +894,21 @@ static void test_instant(void)
 {
 	qaws_mesh_3d *can = cft_can(), *blob = cft_blob(), *torus = cft_torus(24, 10, 2, 0.75);
 	qaws_status s1, s2, s3;
-	unsigned int ic, ib, it;
-	char msg[300];
+	unsigned int ic, ib, it, qc, qb, qt;
+	double ec, eb, et;
+	char msg[400];
 	clock_t t0 = clock();
 	qaws_mesh_3d_detect_features(can, (qaws_scalar)(50 * M_PI / 180), 0, 0);
-	ic = cft_quads(can, 0.14, &s1);
-	ib = cft_quads(blob, 0.11, &s2);
-	it = cft_quads(torus, 0.3, &s3);
-	/* the targets: the can 18 or fewer (from 22), the blob no more than 12, the torus none */
-	sprintf(msg, "INSTANT, all quads: can %u irregular (18; was 22), blob %u (12), torus %u (0); %.2f s", ic, ib, it, (double)(clock() - t0) / CLOCKS_PER_SEC);
+	ic = cft_quads(can, 0.14, &s1, &ec, &qc);
+	ib = cft_quads(blob, 0.11, &s2, &eb, &qb);
+	it = cft_quads(torus, 0.3, &s3, &et, &qt);
+	/* the targets: the can 18 or fewer (from 22), the blob no more than 12, the torus none; the mean edges near their
+	   targets (the blob's quads grew with the global field, 4% longer) */
+	sprintf(msg, "INSTANT, all quads: can %u irregular (18; was 22), %u quads, mean edge %.4f (0.14); blob %u (12), %u quads, mean edge %.4f (0.11); torus %u (0), %u quads, mean edge %.4f (0.3); %.2f s",
+		ic, qc, ec, ib, qb, eb, it, qt, et, (double)(clock() - t0) / CLOCKS_PER_SEC);
 	printf("  %s\n", msg);
 	TEST_ASSERT(s1 == QAWS_STATUS_OK && s2 == QAWS_STATUS_OK && s3 == QAWS_STATUS_OK && ic <= 18 && ib <= 12 && it == 0, msg);
+	TEST_ASSERT(fabs(ec - 0.14) < 0.15 * 0.14 && fabs(eb - 0.11) < 0.15 * 0.11 && fabs(et - 0.3) < 0.15 * 0.3, msg);
 	qaws_mesh_3d_destroy(can);
 	qaws_mesh_3d_destroy(blob);
 	qaws_mesh_3d_destroy(torus);
@@ -802,6 +939,8 @@ int test_133_cross_field_main(void)
 	printf("Test 133: smoothest cross fields\n");
 	test_ldlt();
 	test_indices();
+	test_coarse();
+	test_components();
 	test_can();
 	test_cube();
 	test_aligned();
