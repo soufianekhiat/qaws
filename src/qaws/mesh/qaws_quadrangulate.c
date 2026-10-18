@@ -291,9 +291,14 @@ static qaws_status qd_extract(qaws_hm const* dm, mf_hier const* h, int const* T,
 			if (o[o[3]] == v && o[(o[3] + 1) % 3] == u)
 				break;
 		}
-		/* (a partner on the same three clusters is a pillow, not a quad: both left as triangles) */
-		if (hash[j] == HM_NONE || paired[hash[j]] || tri[4 * (size_t)hash[j] + (tri[4 * (size_t)hash[j] + 3] + 2) % 3] == w)
+		if (hash[j] == HM_NONE || paired[hash[j]])
 			continue;
+		/* (a partner on the same three clusters is a pillow, a fold: both dropped, qd_fill closes the hole if one is left) */
+		if (tri[4 * (size_t)hash[j] + (tri[4 * (size_t)hash[j] + 3] + 2) % 3] == w)
+		{
+			paired[i] = paired[hash[j]] = 2;
+			continue;
+		}
 		{
 			unsigned int const* o = tri + 4 * (size_t)hash[j];
 			unsigned int* q = out->fv + out->nc;
