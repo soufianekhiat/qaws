@@ -316,7 +316,7 @@ Measured (test 132, against LOCAL on the same input):
 | Blob at 0.11: irregular vertices | 5.4% | 22.4% |
 | Cube with creases at 0.25: angles, crease edges | 36..97, 96, exact | 22..122, 96 |
 | Adaptive bump: mean edge / size - 1 | 0.045 | 0.106 |
-| Slab 0.02 thick at 0.05: angles, folds | 18..99, none | 16..129, none |
+| Slab 0.02 thick at 0.05: angles, folds | 18..97, none | 18..91, none (16..129 before its cap flips) |
 | Ellipsoid 0.3 thick at 0.06: angles, faces turned over | 39..99, none | 34..102, none |
 | 2.4k vertices | about 2 s (75 energy evaluations) | about 5 times faster |
 
