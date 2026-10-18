@@ -26,25 +26,12 @@ static void mg_v3(qaws_vec3 v, double* out)
 	out[2] = (double)v.z;
 }
 
-/* the closest point of s to p by Gauss-Newton from (u, v), kept in the domain; a start on a side of the
-   domain (the border, or a face's edge) kept on that side
-   shortcut: a trimmed face's vertices on its trim curve are snapped onto the surface, not the curve (off it
-   by the dense mesh's error), the trim curve to be followed when trimmed shells need it */
-static void mg_snap(qaws_surface const* s, double const* p, double* u, double* v, double* x)
+/* the closest point of s to p by Gauss-Newton from (u, v), kept in the domain; fixed[0], fixed[1]: u, v held */
+static void mg_newton(qaws_surface const* s, double const* p, double* u, double* v, int const* fixed)
 {
 	qaws_range ur = qaws_surface_get_u_range(s), vr = qaws_surface_get_v_range(s);
 	double lo[2] = { (double)ur.min_value, (double)vr.min_value }, hi[2] = { (double)ur.max_value, (double)vr.max_value };
-	double* uv[2];
-	int it, fixed[2], j;
-	uv[0] = u;
-	uv[1] = v;
-	for (j = 0; j < 2; j++)
-	{
-		double tol = 1e-9 * (hi[j] - lo[j]);
-		fixed[j] = fabs(*uv[j] - lo[j]) <= tol || fabs(*uv[j] - hi[j]) <= tol;
-		if (fixed[j])
-			*uv[j] = fabs(*uv[j] - lo[j]) <= tol ? lo[j] : hi[j];
-	}
+	int it;
 	for (it = 0; it < 30 && !(fixed[0] && fixed[1]); it++)
 	{
 		qaws_surface_eval_result e;
@@ -72,6 +59,34 @@ static void mg_snap(qaws_surface const* s, double const* p, double* u, double* v
 		if (fabs(du) <= 1e-14 * (hi[0] - lo[0] + 1) && fabs(dv) <= 1e-14 * (hi[1] - lo[1] + 1))
 			break;
 	}
+}
+
+/* p onto s from (u, v); `on`: 1 a vertex of the border or a crease, held on the side of the domain nearest
+   its free snap (within a hundredth of the domain), 2 a corner, held at the nearest corner of the domain
+   shortcut: a trimmed face's vertices on its trim curve are snapped onto the surface, not the curve (off it
+   by the dense mesh's error), the trim curve to be followed when trimmed shells need it */
+static void mg_snap(qaws_surface const* s, double const* p, double* u, double* v, int on, double* x)
+{
+	qaws_range ur = qaws_surface_get_u_range(s), vr = qaws_surface_get_v_range(s);
+	double lo[2] = { (double)ur.min_value, (double)vr.min_value }, hi[2] = { (double)ur.max_value, (double)vr.max_value }, d[2];
+	double* uv[2];
+	int fixed[2] = { 0, 0 }, low[2], j;
+	uv[0] = u;
+	uv[1] = v;
+	mg_newton(s, p, u, v, fixed);
+	for (j = 0; j < 2; j++)
+	{
+		double a = (*uv[j] - lo[j]) / (hi[j] - lo[j]), b = (hi[j] - *uv[j]) / (hi[j] - lo[j]);
+		d[j] = fmin(a, b);
+		low[j] = a <= b;
+	}
+	for (j = 0; j < 2; j++)
+		fixed[j] = on && d[j] <= 0.01 && (on == 2 || d[j] <= d[1 - j]);
+	for (j = 0; j < 2; j++)
+		if (fixed[j])
+			*uv[j] = low[j] ? lo[j] : hi[j];
+	if (fixed[0] || fixed[1])
+		mg_newton(s, p, u, v, fixed);
 	{
 		qaws_surface_eval_result e;
 		memset(&e, 0, sizeof e);
@@ -265,7 +280,7 @@ static qaws_status mg_finish(mg_src const* src, double const* x, qaws_shell_poin
 			w[2] = (double)l.b;
 			w[0] = 1 - w[1] - w[2];
 			mg_start(s, dvp, tv, w, F, m->x + 3 * (size_t)i, &u, &v);
-			mg_snap(s, m->x + 3 * (size_t)i, &u, &v, y);
+			mg_snap(s, m->x + 3 * (size_t)i, &u, &v, (m->vflag[i] & HM_CORNER) ? 2 : hm_feature_degree(m, i) || hm_is_border_vertex(m, i) ? 1 : 0, y);
 			d = sqrt((y[0] - m->x[3 * (size_t)i]) * (y[0] - m->x[3 * (size_t)i]) + (y[1] - m->x[3 * (size_t)i + 1]) * (y[1] - m->x[3 * (size_t)i + 1])
 				+ (y[2] - m->x[3 * (size_t)i + 2]) * (y[2] - m->x[3 * (size_t)i + 2]));
 			dmax = d > dmax ? d : dmax;

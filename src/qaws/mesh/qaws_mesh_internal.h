@@ -9,6 +9,7 @@
 #include "qaws_mesh_core.h"
 #include "../qaws_mesh_reference.h"
 #include "../qaws_mesh_field.h"
+#include "../qaws_volume_mesh.h"
 #include "../internal/qaws_internal_broadphase.h"
 
 /* ---- interpolants ------------------------------------------------------
@@ -141,5 +142,25 @@ void mf_compat_position(double const* x0, double const* n0, double const* q0, do
 int mf_rotation(double const* q0, double const* n0, double const* q1, double const* n1);
 /* p, a point of x1's tangent plane, turned into x0's about the point near both (the rotation taking n1 onto n0): unfolded across a crease */
 void mf_unfold(double const* x0, double const* n0, double const* x1, double const* n1, double const* p, double* out);
+
+/* ---- volume meshes ------------------------------------------------------ */
+
+struct qaws_volume_mesh
+{
+	double* x;                      /* 3 per vertex */
+	unsigned int nv;
+	unsigned char* type;            /* per cell, a qaws_cell_type */
+	unsigned int *c0, *cv;          /* per cell its first corner (nc + 1 of them); per corner its vertex */
+	unsigned int *f0, *fo;          /* per cell its first facet (nc + 1); per facet the facet across, HM_NONE on the border */
+	unsigned int nc;
+};
+
+/* corners and facets per cell type; facet f's corners, outward (*n of them) */
+extern unsigned char const vm_corners[4], vm_facets[4];
+unsigned char const* vm_facet(unsigned int type, unsigned int f, unsigned int* n);
+/* a mesh from its arrays (the facets matched here); INVALID_ARGUMENT for a bad index or type, INVALID_TOPOLOGY for unmatched facets */
+qaws_status vm_create(double const* x, unsigned int nv, unsigned int const* cv, unsigned char const* type, unsigned int nc, qaws_volume_mesh** out);
+/* a hexahedron's smallest scaled Jacobian over its corners (1 for a cube, negative when a corner turns over) */
+double vm_hex_quality(double const* x, unsigned int const* v);
 
 #endif /* QAWS_MESH_INTERNAL_H */

@@ -15,6 +15,8 @@
  *                      its singularities, quad-dominant and pure, along creases, a torus
  *   mesh5_generate.png meshes of exact geometry: a B-spline patch in triangles,
  *                      quads and adaptive, a NURBS torus, a shell of six faces
+ *   mesh6_tets.png     tetrahedra filling closed surfaces, cut open: a torus, a box,
+ *                      a blob
  *
  * Each figure lives in meshing_showcase/NN_*.c, compiled as one translation
  * unit with the rasterizer in example_raster.h.
@@ -150,6 +152,7 @@ static void ms_panel(er_canvas* c, int x, int y, int w, int h, qaws_mesh_3d cons
 #include "meshing_showcase/03_remesh.c"
 #include "meshing_showcase/04_quads.c"
 #include "meshing_showcase/05_generate.c"
+#include "meshing_showcase/06_tets.c"
 
 int main(void)
 {
@@ -160,5 +163,6 @@ int main(void)
 	demo_remesh();
 	demo_quads();
 	demo_generate();
+	demo_tets();
 	return 0;
 }

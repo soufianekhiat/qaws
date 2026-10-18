@@ -796,6 +796,20 @@ qaws_status qaws_mesh_quadrangulate(qaws_mesh_3d const* mesh, qaws_quadrangulate
 			if (kind[v] == 2)
 				out->hm.vflag[v] |= HM_CORNER;
 		}
+		/* border vertices near the reference's border but off it (a lattice point by the border whose cluster had no
+		   border vertex, or a midpoint next to one): onto it */
+		for (v = 0; v < out->hm.nv; v++)
+		{
+			qaws_mesh_location l;
+			if (kind[v] || !hm_is_border_vertex(&out->hm, v))
+				continue;
+			if (mr_project_crease(r, out->hm.x + 3 * (size_t)v, out->hm.foot[v].patch, &s, &l) < 0.25 * rf * rf && l.patch != HM_NONE)
+			{
+				mr_eval(r, &l, out->hm.x + 3 * (size_t)v, NULL);
+				out->hm.foot[v] = l;
+				kind[v] = 1;
+			}
+		}
 		/* feature edges: between feature vertices, along a crease */
 		for (c = 0; c < out->hm.nc; c++)
 		{

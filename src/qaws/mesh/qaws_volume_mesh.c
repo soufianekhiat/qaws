@@ -1,0 +1,560 @@
+/*
+ * Volume meshes: cells as runs of corners, facets matched pairwise at
+ * creation (sorted by their vertex sets), the border read back as a surface.
+ */
+
+#include "qaws_mesh_internal.h"
+#include "../qaws_volume_mesh.h"
+#include <stdlib.h>
+#include <string.h>
+#include <math.h>
+
+unsigned char const vm_corners[4] = { 4, 8, 6, 5 }, vm_facets[4] = { 4, 6, 5, 5 };
+
+static unsigned char const vm_tet_f[4][4] = { { 1, 2, 3 }, { 0, 3, 2 }, { 0, 1, 3 }, { 0, 2, 1 } };
+static unsigned char const vm_hex_f[6][4] = { { 0, 3, 2, 1 }, { 4, 5, 6, 7 }, { 0, 1, 5, 4 }, { 1, 2, 6, 5 }, { 2, 3, 7, 6 }, { 3, 0, 4, 7 } };
+static unsigned char const vm_prism_f[5][4] = { { 0, 2, 1 }, { 3, 4, 5 }, { 0, 1, 4, 3 }, { 1, 2, 5, 4 }, { 2, 0, 3, 5 } };
+static unsigned char const vm_pyr_f[5][4] = { { 0, 3, 2, 1 }, { 0, 1, 4 }, { 1, 2, 4 }, { 2, 3, 4 }, { 3, 0, 4 } };
+static unsigned char const vm_prism_n[5] = { 3, 3, 4, 4, 4 }, vm_pyr_n[5] = { 4, 3, 3, 3, 3 };
+
+unsigned char const* vm_facet(unsigned int type, unsigned int f, unsigned int* n)
+{
+	switch (type)
+	{
+	case QAWS_CELL_TETRAHEDRON: *n = 3; return vm_tet_f[f];
+	case QAWS_CELL_HEXAHEDRON: *n = 4; return vm_hex_f[f];
+	case QAWS_CELL_PRISM: *n = vm_prism_n[f]; return vm_prism_f[f];
+	default: *n = vm_pyr_n[f]; return vm_pyr_f[f];
+	}
+}
+
+/* each type's edges, as corner pairs */
+static unsigned char const vm_edges_tet[6][2] = { { 0, 1 }, { 0, 2 }, { 0, 3 }, { 1, 2 }, { 1, 3 }, { 2, 3 } };
+static unsigned char const vm_edges_hex[12][2] = { { 0, 1 }, { 1, 2 }, { 2, 3 }, { 3, 0 }, { 4, 5 }, { 5, 6 }, { 6, 7 }, { 7, 4 }, { 0, 4 }, { 1, 5 }, { 2, 6 }, { 3, 7 } };
+static unsigned char const vm_edges_prism[9][2] = { { 0, 1 }, { 1, 2 }, { 2, 0 }, { 3, 4 }, { 4, 5 }, { 5, 3 }, { 0, 3 }, { 1, 4 }, { 2, 5 } };
+static unsigned char const vm_edges_pyr[8][2] = { { 0, 1 }, { 1, 2 }, { 2, 3 }, { 3, 0 }, { 0, 4 }, { 1, 4 }, { 2, 4 }, { 3, 4 } };
+
+static unsigned char const (*vm_edges(unsigned int type, unsigned int* n))[2]
+{
+	switch (type)
+	{
+	case QAWS_CELL_TETRAHEDRON: *n = 6; return vm_edges_tet;
+	case QAWS_CELL_HEXAHEDRON: *n = 12; return vm_edges_hex;
+	case QAWS_CELL_PRISM: *n = 9; return vm_edges_prism;
+	default: *n = 8; return vm_edges_pyr;
+	}
+}
+
+static double vm_det(double const* a, double const* b, double const* c, double const* d)
+{
+	double u[3] = { b[0] - a[0], b[1] - a[1], b[2] - a[2] }, v[3] = { c[0] - a[0], c[1] - a[1], c[2] - a[2] };
+	double w[3] = { d[0] - a[0], d[1] - a[1], d[2] - a[2] };
+	return u[0] * (v[1] * w[2] - v[2] * w[1]) + u[1] * (v[2] * w[0] - v[0] * w[2]) + u[2] * (v[0] * w[1] - v[1] * w[0]);
+}
+
+/* ======================================================================== */
+/*  Creation                                                                */
+/* ======================================================================== */
+
+typedef struct vm_key
+{
+	unsigned int v[4];              /* the facet's vertices sorted (HM_NONE padding) */
+	unsigned int facet;
+} vm_key;
+
+static int vm_key_cmp(void const* x, void const* y)
+{
+	vm_key const *a = (vm_key const*)x, *b = (vm_key const*)y;
+	int k;
+	for (k = 0; k < 4; k++)
+		if (a->v[k] != b->v[k])
+			return a->v[k] < b->v[k] ? -1 : 1;
+	return a->facet < b->facet ? -1 : a->facet > b->facet ? 1 : 0;
+}
+
+/* the cell owning facet f */
+static unsigned int vm_facet_cell(qaws_volume_mesh const* m, unsigned int f)
+{
+	unsigned int lo = 0, hi = m->nc;
+	while (hi - lo > 1)
+	{
+		unsigned int mid = (lo + hi) / 2;
+		if (m->f0[mid] <= f)
+			lo = mid;
+		else
+			hi = mid;
+	}
+	return lo;
+}
+
+/* facet f's vertices, outward; their count */
+static unsigned int vm_facet_vertices(qaws_volume_mesh const* m, unsigned int f, unsigned int* out)
+{
+	unsigned int c = vm_facet_cell(m, f), n, k;
+	unsigned char const* loc = vm_facet(m->type[c], f - m->f0[c], &n);
+	for (k = 0; k < n; k++)
+		out[k] = m->cv[m->c0[c] + loc[k]];
+	return n;
+}
+
+/* do two facets on the same vertices turn opposite ways */
+static int vm_opposite(unsigned int const* a, unsigned int const* b, unsigned int n)
+{
+	unsigned int k, i;
+	for (k = 0; k < n && b[k] != a[0]; k++) {}
+	if (k == n)
+		return 0;
+	for (i = 0; i < n; i++)
+		if (b[(k + i) % n] != a[(n - i) % n])
+			return 0;
+	return 1;
+}
+
+void qaws_volume_mesh_destroy(qaws_volume_mesh* m)
+{
+	if (!m)
+		return;
+	free(m->x); free(m->type); free(m->c0); free(m->cv); free(m->f0); free(m->fo);
+	free(m);
+}
+
+qaws_status vm_create(double const* x, unsigned int nv, unsigned int const* cv, unsigned char const* type, unsigned int nc, qaws_volume_mesh** out)
+{
+	qaws_volume_mesh* m;
+	vm_key* keys = NULL;
+	unsigned int c, k, f, ncorner = 0, nfacet = 0, i;
+	qaws_status st = QAWS_STATUS_ALLOCATION_FAILURE;
+	*out = NULL;
+	for (c = 0; c < nc; c++)
+	{
+		if (type[c] > QAWS_CELL_PYRAMID)
+			return QAWS_STATUS_INVALID_ARGUMENT;
+		for (k = 0; k < vm_corners[type[c]]; k++)
+			if (cv[ncorner + k] >= nv)
+				return QAWS_STATUS_INVALID_ARGUMENT;
+		ncorner += vm_corners[type[c]];
+		nfacet += vm_facets[type[c]];
+	}
+	m = (qaws_volume_mesh*)calloc(1, sizeof *m);
+	if (!m)
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	m->nv = nv;
+	m->nc = nc;
+	m->x = (double*)malloc(sizeof(double) * (3 * (size_t)nv + 1));
+	m->type = (unsigned char*)malloc((size_t)nc + 1);
+	m->c0 = (unsigned int*)malloc(sizeof(unsigned int) * ((size_t)nc + 1));
+	m->f0 = (unsigned int*)malloc(sizeof(unsigned int) * ((size_t)nc + 1));
+	m->cv = (unsigned int*)malloc(sizeof(unsigned int) * ((size_t)ncorner + 1));
+	m->fo = (unsigned int*)malloc(sizeof(unsigned int) * ((size_t)nfacet + 1));
+	keys = (vm_key*)malloc(sizeof(vm_key) * ((size_t)nfacet + 1));
+	if (!m->x || !m->type || !m->c0 || !m->f0 || !m->cv || !m->fo || !keys)
+		goto done;
+	memcpy(m->x, x, sizeof(double) * 3 * nv);
+	memcpy(m->type, type, nc);
+	memcpy(m->cv, cv, sizeof(unsigned int) * ncorner);
+	m->c0[0] = m->f0[0] = 0;
+	for (c = 0; c < nc; c++)
+	{
+		m->c0[c + 1] = m->c0[c] + vm_corners[type[c]];
+		m->f0[c + 1] = m->f0[c] + vm_facets[type[c]];
+	}
+	/* facets with the same vertex set side by side */
+	for (f = 0; f < nfacet; f++)
+	{
+		unsigned int v[4], n = vm_facet_vertices(m, f, v), j;
+		for (k = n; k < 4; k++)
+			v[k] = HM_NONE;
+		for (k = 1; k < 4; k++)
+			for (j = k; j > 0 && v[j - 1] > v[j]; j--)
+			{
+				unsigned int t = v[j];
+				v[j] = v[j - 1];
+				v[j - 1] = t;
+			}
+		memcpy(keys[f].v, v, sizeof v);
+		keys[f].facet = f;
+		m->fo[f] = HM_NONE;
+	}
+	qsort(keys, nfacet, sizeof(vm_key), vm_key_cmp);
+	st = QAWS_STATUS_OK;
+	for (i = 0; i < nfacet && st == QAWS_STATUS_OK; )
+	{
+		unsigned int j = i + 1;
+		while (j < nfacet && !memcmp(keys[j].v, keys[i].v, sizeof keys[i].v))
+			j++;
+		if (j - i == 2)
+		{
+			unsigned int a[4], b[4], n = vm_facet_vertices(m, keys[i].facet, a);
+			vm_facet_vertices(m, keys[i + 1].facet, b);
+			if (!vm_opposite(a, b, n))
+				st = QAWS_STATUS_INVALID_TOPOLOGY;
+			m->fo[keys[i].facet] = keys[i + 1].facet;
+			m->fo[keys[i + 1].facet] = keys[i].facet;
+		}
+		else if (j - i > 2)
+			st = QAWS_STATUS_INVALID_TOPOLOGY;
+		i = j;
+	}
+done:
+	free(keys);
+	if (st != QAWS_STATUS_OK)
+	{
+		qaws_volume_mesh_destroy(m);
+		return st;
+	}
+	*out = m;
+	return QAWS_STATUS_OK;
+}
+
+qaws_status qaws_volume_mesh_create(qaws_volume_mesh_desc const* desc, qaws_volume_mesh** out_mesh)
+{
+	double* x;
+	unsigned char* type;
+	unsigned int i;
+	qaws_status st;
+	if (!out_mesh)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	*out_mesh = NULL;
+	if (!desc || (desc->vertex_count && !desc->positions) || (desc->cell_count && !desc->cell_vertices))
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	x = (double*)malloc(sizeof(double) * (3 * (size_t)desc->vertex_count + 1));
+	type = (unsigned char*)malloc((size_t)desc->cell_count + 1);
+	if (!x || !type)
+	{
+		free(x);
+		free(type);
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	}
+	for (i = 0; i < 3 * desc->vertex_count; i++)
+		x[i] = (double)desc->positions[i];
+	for (i = 0; i < desc->cell_count; i++)
+		type[i] = (unsigned char)(desc->cell_types ? ((unsigned int)desc->cell_types[i] <= QAWS_CELL_PYRAMID ? desc->cell_types[i] : 255) : QAWS_CELL_TETRAHEDRON);
+	st = vm_create(x, desc->vertex_count, desc->cell_vertices, type, desc->cell_count, out_mesh);
+	free(x);
+	free(type);
+	return st;
+}
+
+qaws_status qaws_volume_mesh_clone(qaws_volume_mesh const* m, qaws_volume_mesh** out_mesh)
+{
+	if (!out_mesh)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	*out_mesh = NULL;
+	if (!m)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	return vm_create(m->x, m->nv, m->cv, m->type, m->nc, out_mesh);
+}
+
+/* ======================================================================== */
+/*  Reading                                                                 */
+/* ======================================================================== */
+
+unsigned int qaws_volume_mesh_get_vertex_count(qaws_volume_mesh const* m)
+{
+	return m ? m->nv : 0;
+}
+
+unsigned int qaws_volume_mesh_get_cell_count(qaws_volume_mesh const* m)
+{
+	return m ? m->nc : 0;
+}
+
+unsigned int qaws_volume_mesh_get_corner_count(qaws_volume_mesh const* m)
+{
+	return m ? m->c0[m->nc] : 0;
+}
+
+unsigned int qaws_volume_mesh_get_facet_count(qaws_volume_mesh const* m)
+{
+	return m ? m->f0[m->nc] : 0;
+}
+
+qaws_status qaws_volume_mesh_get_positions(qaws_volume_mesh const* m, qaws_scalar* out)
+{
+	unsigned int i;
+	if (!m || (m->nv && !out))
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	for (i = 0; i < 3 * m->nv; i++)
+		out[i] = (qaws_scalar)m->x[i];
+	return QAWS_STATUS_OK;
+}
+
+qaws_status qaws_volume_mesh_get_cells(qaws_volume_mesh const* m, unsigned int* out_cell_vertices, qaws_cell_type* out_cell_types)
+{
+	unsigned int c;
+	if (!m || (m->nc && !out_cell_vertices))
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	memcpy(out_cell_vertices, m->cv, sizeof(unsigned int) * m->c0[m->nc]);
+	for (c = 0; out_cell_types && c < m->nc; c++)
+		out_cell_types[c] = (qaws_cell_type)m->type[c];
+	return QAWS_STATUS_OK;
+}
+
+qaws_status qaws_volume_mesh_get_cell_adjacency(qaws_volume_mesh const* m, unsigned int* out_cells)
+{
+	unsigned int f;
+	if (!m || (m->nc && !out_cells))
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	for (f = 0; f < m->f0[m->nc]; f++)
+		out_cells[f] = m->fo[f] == HM_NONE ? QAWS_MESH_NONE : vm_facet_cell(m, m->fo[f]);
+	return QAWS_STATUS_OK;
+}
+
+qaws_status qaws_volume_mesh_get_boundary(qaws_volume_mesh const* m, qaws_mesh_3d** out_surface)
+{
+	unsigned int *map = NULL, *fv = NULL, *fs = NULL, *src = NULL, *fcell = NULL, nb = 0, nfv = 0, nvb = 0, f, k;
+	double* xb = NULL;
+	qaws_scalar* vals = NULL;
+	qaws_mesh_3d* s = NULL;
+	qaws_status st = QAWS_STATUS_ALLOCATION_FAILURE;
+	if (!out_surface)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	*out_surface = NULL;
+	if (!m)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	map = (unsigned int*)malloc(sizeof(unsigned int) * ((size_t)m->nv + 1));
+	src = (unsigned int*)malloc(sizeof(unsigned int) * ((size_t)m->nv + 1));
+	fv = (unsigned int*)malloc(sizeof(unsigned int) * (4 * (size_t)m->f0[m->nc] + 1));
+	fs = (unsigned int*)malloc(sizeof(unsigned int) * ((size_t)m->f0[m->nc] + 1));
+	fcell = (unsigned int*)malloc(sizeof(unsigned int) * ((size_t)m->f0[m->nc] + 1));
+	xb = (double*)malloc(sizeof(double) * (3 * (size_t)m->nv + 1));
+	if (!map || !src || !fv || !fs || !fcell || !xb)
+		goto done;
+	for (k = 0; k < m->nv; k++)
+		map[k] = HM_NONE;
+	for (f = 0; f < m->f0[m->nc]; f++)
+	{
+		unsigned int v[4], n;
+		if (m->fo[f] != HM_NONE)
+			continue;
+		n = vm_facet_vertices(m, f, v);
+		for (k = 0; k < n; k++)
+		{
+			if (map[v[k]] == HM_NONE)
+			{
+				memcpy(xb + 3 * (size_t)nvb, m->x + 3 * (size_t)v[k], sizeof(double) * 3);
+				src[nvb] = v[k];
+				map[v[k]] = nvb++;
+			}
+			fv[nfv++] = map[v[k]];
+		}
+		fcell[nb] = vm_facet_cell(m, f);
+		fs[nb++] = n;
+	}
+	st = hm_mesh_3d_create(xb, nvb, fv, fs, nb, &s);
+	if (st != QAWS_STATUS_OK)
+		goto done;
+	vals = (qaws_scalar*)malloc(sizeof(qaws_scalar) * ((size_t)s->hm.nv + nb + 1));
+	if (!vals)
+	{
+		st = QAWS_STATUS_ALLOCATION_FAILURE;
+		goto done;
+	}
+	{
+		qaws_attribute_desc ad;
+		memset(&ad, 0, sizeof ad);
+		ad.name = "vertex";
+		ad.element = QAWS_MESH_VERTEX;
+		ad.components = 1;
+		ad.rule = QAWS_ATTRIBUTE_NEAREST;
+		/* (copies split off at creation: their source's) */
+		for (k = 0; k < s->hm.nv; k++)
+			vals[k] = (qaws_scalar)src[s->hm.vsrc[k] < nvb ? s->hm.vsrc[k] : 0];
+		st = qaws_mesh_3d_add_attribute(s, &ad, vals, NULL);
+		if (st == QAWS_STATUS_OK)
+		{
+			ad.name = "cell";
+			ad.element = QAWS_MESH_FACE;
+			for (k = 0; k < nb; k++)
+				vals[k] = (qaws_scalar)fcell[k];
+			st = qaws_mesh_3d_add_attribute(s, &ad, vals, NULL);
+		}
+	}
+done:
+	free(map); free(src); free(fv); free(fs); free(fcell); free(xb); free(vals);
+	if (st != QAWS_STATUS_OK)
+	{
+		qaws_mesh_3d_destroy(s);
+		return st;
+	}
+	*out_surface = s;
+	return QAWS_STATUS_OK;
+}
+
+/* a cell's signed volume: its facets' fans against its centroid */
+static double vm_volume(qaws_volume_mesh const* m, unsigned int c)
+{
+	double cen[3] = { 0, 0, 0 }, vol = 0;
+	unsigned int k, f, n = vm_corners[m->type[c]];
+	for (k = 0; k < n; k++)
+		for (f = 0; f < 3; f++)
+			cen[f] += m->x[3 * (size_t)m->cv[m->c0[c] + k] + f] / n;
+	for (f = 0; f < vm_facets[m->type[c]]; f++)
+	{
+		unsigned int nf;
+		unsigned char const* loc = vm_facet(m->type[c], f, &nf);
+		for (k = 1; k + 1 < nf; k++)
+			vol += vm_det(cen, m->x + 3 * (size_t)m->cv[m->c0[c] + loc[0]], m->x + 3 * (size_t)m->cv[m->c0[c] + loc[k]],
+				m->x + 3 * (size_t)m->cv[m->c0[c] + loc[k + 1]]) / 6;
+	}
+	return vol;
+}
+
+qaws_status qaws_volume_mesh_validate(qaws_volume_mesh const* m)
+{
+	unsigned int c, f;
+	if (!m)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	for (c = 0; c < m->nc; c++)
+		if (!(vm_volume(m, c) > 0))
+			return QAWS_STATUS_INVALID_TOPOLOGY;
+	for (f = 0; f < m->f0[m->nc]; f++)
+	{
+		unsigned int a[4], b[4], n;
+		if (m->fo[f] == HM_NONE)
+			continue;
+		if (m->fo[f] >= m->f0[m->nc] || m->fo[m->fo[f]] != f)
+			return QAWS_STATUS_INVALID_TOPOLOGY;
+		n = vm_facet_vertices(m, f, a);
+		if (vm_facet_vertices(m, m->fo[f], b) != n || !vm_opposite(a, b, n))
+			return QAWS_STATUS_INVALID_TOPOLOGY;
+	}
+	return QAWS_STATUS_OK;
+}
+
+/* ======================================================================== */
+/*  Quality                                                                 */
+/* ======================================================================== */
+
+static void vm_sub(double const* a, double const* b, double* o)
+{
+	o[0] = a[0] - b[0];
+	o[1] = a[1] - b[1];
+	o[2] = a[2] - b[2];
+}
+
+static void vm_cross(double const* a, double const* b, double* o)
+{
+	o[0] = a[1] * b[2] - a[2] * b[1];
+	o[1] = a[2] * b[0] - a[0] * b[2];
+	o[2] = a[0] * b[1] - a[1] * b[0];
+}
+
+static double vm_dot(double const* a, double const* b)
+{
+	return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+}
+
+double vm_hex_quality(double const* x, unsigned int const* v)
+{
+	static unsigned char const nb[8][3] = { { 1, 3, 4 }, { 2, 0, 5 }, { 3, 1, 6 }, { 0, 2, 7 }, { 7, 5, 0 }, { 4, 6, 1 }, { 5, 7, 2 }, { 6, 4, 3 } };
+	double q = 1;
+	unsigned int k;
+	for (k = 0; k < 8; k++)
+	{
+		double a[3], b[3], d[3], cr[3], l;
+		vm_sub(x + 3 * (size_t)v[nb[k][0]], x + 3 * (size_t)v[k], a);
+		vm_sub(x + 3 * (size_t)v[nb[k][1]], x + 3 * (size_t)v[k], b);
+		vm_sub(x + 3 * (size_t)v[nb[k][2]], x + 3 * (size_t)v[k], d);
+		vm_cross(b, d, cr);
+		l = sqrt(vm_dot(a, a) * vm_dot(b, b) * vm_dot(d, d));
+		q = fmin(q, l > 0 ? vm_dot(a, cr) / l : -1);
+	}
+	return q;
+}
+
+qaws_status qaws_volume_mesh_measure_quality(qaws_volume_mesh const* m, qaws_volume_quality* out)
+{
+	double mind = 180, maxd = 0, maxre = 0, minsj = 1, mine = HUGE_VAL, maxe = 0, sume = 0, vol = 0;
+	unsigned int c, k, ne = 0;
+	if (!m || !out)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	memset(out, 0, sizeof *out);
+	for (c = 0; c < m->nc; c++)
+	{
+		unsigned int const* v = m->cv + m->c0[c];
+		unsigned int n;
+		unsigned char const(*e)[2] = vm_edges(m->type[c], &n);
+		double shortest = HUGE_VAL;
+		vol += vm_volume(m, c);
+		for (k = 0; k < n; k++)
+		{
+			double d[3], l;
+			vm_sub(m->x + 3 * (size_t)v[e[k][1]], m->x + 3 * (size_t)v[e[k][0]], d);
+			l = sqrt(vm_dot(d, d));
+			mine = fmin(mine, l);
+			maxe = fmax(maxe, l);
+			shortest = fmin(shortest, l);
+			sume += l;
+			ne++;
+		}
+		switch (m->type[c])
+		{
+		case QAWS_CELL_TETRAHEDRON:
+		{
+			double nrm[4][3], d1[3], d2[3], d3[3], cr[3], l1, l2, l3, det, cc[3];
+			unsigned int i, j;
+			out->tetrahedra++;
+			for (i = 0; i < 4; i++)
+			{
+				unsigned int nf;
+				unsigned char const* loc = vm_facet(QAWS_CELL_TETRAHEDRON, i, &nf);
+				double a[3], b[3];
+				vm_sub(m->x + 3 * (size_t)v[loc[1]], m->x + 3 * (size_t)v[loc[0]], a);
+				vm_sub(m->x + 3 * (size_t)v[loc[2]], m->x + 3 * (size_t)v[loc[0]], b);
+				vm_cross(a, b, nrm[i]);
+			}
+			/* the dihedral angle at the edge between facets i and j (opposite vertices i and j) */
+			for (i = 0; i < 4; i++)
+				for (j = i + 1; j < 4; j++)
+				{
+					double cs = -vm_dot(nrm[i], nrm[j]) / sqrt(vm_dot(nrm[i], nrm[i]) * vm_dot(nrm[j], nrm[j])), ang;
+					ang = acos(cs > 1 ? 1 : cs < -1 ? -1 : cs) * 180 / 3.14159265358979323846;
+					mind = fmin(mind, ang);
+					maxd = fmax(maxd, ang);
+				}
+			/* the circumcentre from vertex 0 */
+			vm_sub(m->x + 3 * (size_t)v[1], m->x + 3 * (size_t)v[0], d1);
+			vm_sub(m->x + 3 * (size_t)v[2], m->x + 3 * (size_t)v[0], d2);
+			vm_sub(m->x + 3 * (size_t)v[3], m->x + 3 * (size_t)v[0], d3);
+			l1 = vm_dot(d1, d1); l2 = vm_dot(d2, d2); l3 = vm_dot(d3, d3);
+			vm_cross(d2, d3, cr);
+			det = 2 * vm_dot(d1, cr);
+			for (i = 0; i < 3; i++)
+				cc[i] = 0;
+			if (det != 0)
+			{
+				double c23[3], c31[3], c12[3];
+				vm_cross(d2, d3, c23);
+				vm_cross(d3, d1, c31);
+				vm_cross(d1, d2, c12);
+				for (i = 0; i < 3; i++)
+					cc[i] = (l1 * c23[i] + l2 * c31[i] + l3 * c12[i]) / det;
+				maxre = fmax(maxre, sqrt(vm_dot(cc, cc)) / shortest);
+			}
+			else
+				maxre = HUGE_VAL;
+			break;
+		}
+		case QAWS_CELL_HEXAHEDRON:
+			out->hexahedra++;
+			minsj = fmin(minsj, vm_hex_quality(m->x, v));
+			break;
+		case QAWS_CELL_PRISM:
+			out->prisms++;
+			break;
+		default:
+			out->pyramids++;
+			break;
+		}
+	}
+	out->min_dihedral = (qaws_scalar)(out->tetrahedra ? mind : 0);
+	out->max_dihedral = (qaws_scalar)(out->tetrahedra ? maxd : 0);
+	out->max_radius_edge = (qaws_scalar)maxre;
+	out->min_scaled_jacobian = (qaws_scalar)(out->hexahedra ? minsj : 0);
+	out->min_edge = (qaws_scalar)(ne ? mine : 0);
+	out->max_edge = (qaws_scalar)maxe;
+	out->mean_edge = (qaws_scalar)(ne ? sume / ne : 0);
+	out->volume = (qaws_scalar)vol;
+	return QAWS_STATUS_OK;
+}
