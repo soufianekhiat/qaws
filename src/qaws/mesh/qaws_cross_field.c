@@ -423,7 +423,7 @@ static void cf_solve(cf_system* s, qaws_internal_ldlt const* f, double const* q,
 
 /* back to 3D: the direction psi = arg(u) / n found in the wedge between consecutive edges that holds it, its share of
    the wedge's rescaled angle turned from the wedge's first edge within the wedge's face by that share of its real angle,
-   then laid in the tangent plane */
+   then turned with the wedge's plane into the tangent plane */
 static void cf_directions(cf_system const* s, double* out_q)
 {
 	qaws_hm const* m = s->m;
@@ -461,6 +461,21 @@ static void cf_directions(cf_system const* s, double* out_q)
 		cf_unit(e2);
 		for (k = 0; k < 3; k++)
 			d[k] = cos(t * s->ar[w]) * e1[k] + sin(t * s->ar[w]) * e2[k];
+		{
+			/* turned from the wedge's plane into the tangent plane, not projected: on a crease the normal is one side's,
+			   and a direction across the crease on the other side is that normal (projected, it would be noise) */
+			double f[3], a[3], ad[3], cs, da;
+			cf_cross(e1, e2, f);
+			cf_cross(f, nv, a);
+			cs = cf_dot(f, nv);
+			if (cs > -0.5)
+			{
+				cf_cross(a, d, ad);
+				da = cf_dot(a, d) / (1 + cs);
+				for (k = 0; k < 3; k++)
+					d[k] = cs * d[k] + ad[k] + da * a[k];
+			}
+		}
 		cf_tangent(d, nv);
 	}
 }
