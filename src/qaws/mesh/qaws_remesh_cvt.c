@@ -4,14 +4,16 @@
  * et al. 2009), Lloyd then L-BFGS (Liu et al. 2009, geogram's 5 and 30).
  *
  * The seeds are the working mesh's vertices after LOCAL: their number set
- * from the size (each takes a hexagon of the target), the creases'
- * vertices spread along them by a one-dimensional Lloyd and locked, the
- * others moved on the energy of the Voronoi diagram restricted to the
- * reference, density size^-4. The reference is sampled into flat
- * sub-triangles once; a cell is clipped from them (Sutherland-Hodgman, the
- * bisectors of its nearest seeds up to Levy and Bonneel's radius of
- * security), found breadth first from its seed, region by region, so that
- * no cell crosses a crease. The connectivity stays the working mesh's,
+ * from the size (each takes a hexagon of the target), each feature line
+ * given as many vertices as its length over the size and spread along it
+ * by the size (a one-dimensional CVT; lines alike, as the two sides of a
+ * part thinner than the size, come out alike, their vertices facing each
+ * other across it) and locked, the others moved on the energy of the
+ * Voronoi diagram restricted to the reference, density size^-4. The
+ * reference is sampled into flat sub-triangles once; a cell is clipped
+ * from them (Sutherland-Hodgman, the bisectors of its nearest seeds up to
+ * Levy and Bonneel's radius of security), found breadth first from its
+ * seed, region by region, so that no cell crosses a crease. The connectivity stays the working mesh's,
  * kept extrinsic-Delaunay by flips: on a well-sampled surface this is the
  * restricted Delaunay triangulation, and it stays a manifold whatever the
  * seeds do.
@@ -24,12 +26,13 @@
  *
  * Lloyd and L-BFGS anneal a lattice's dislocations (5-7 pairs) slowly: 30
  * steps leave a fifth of the vertices irregular. So the seeds are solved
- * twice: a coarse level first (a quarter of them at twice the size, every
- * other vertex of the feature lines merged), each triangle then split in
- * four, which keeps every vertex's valence and gives the lines back their
- * count, and the full level relaxed from there; the irregular share drops
- * about fourfold for about twice the time. Where the split folds faces (a
- * part curved tighter than twice the size) the coarse level is dropped.
+ * twice: a coarse level first (a quarter of them at twice the size, the
+ * feature lines at twice the spacing), each triangle then split in four,
+ * which keeps every vertex's valence and doubles the lines (kept within 5%
+ * of the size), and the full level relaxed from there; the irregular
+ * share drops about fourfold for about twice the time. Where the split
+ * folds faces (a part curved tighter than twice the size) the coarse level
+ * is dropped. Below 200 seeds, a single level.
  */
 
 #include "qaws_remesh_cvt.h"
@@ -88,6 +91,7 @@ typedef struct rv_cvt
 	unsigned int evaluations;
 	double scale;                   /* the size attribute over the size: 2 on the coarse level */
 	double mass, covered;            /* the integral of the density over the reference, over the cells at the last evaluation */
+	double slack;                   /* a line keeps its count while within this share of its length over the size (or half a segment) */
 } rv_cvt;
 
 static double rv_dot(double const* a, double const* b)
@@ -575,60 +579,10 @@ static int rv_count(rv_cvt* w, double nstar, int lines)
 	return 1;
 }
 
-/* every other vertex of each feature line merged into its neighbour along it, the lines' ends and corners kept: a coarse level's
-   lines at twice LOCAL's spacing, which the split in four gives back; 0 on allocation failure */
-static int rv_halve(rv_cvt* w)
-{
-	qaws_hm* m = w->m;
-	unsigned int v, pass, nv = m->nv;
-	unsigned char* seen = (unsigned char*)calloc((size_t)nv + 1, 1);
-	if (!seen)
-		return 0;
-	/* the chains from their ends first, then the closed loops from their least vertex */
-	for (pass = 0; pass < 2; pass++)
-		for (v = 0; v < nv; v++)
-		{
-			unsigned int f[16], nf, s;
-			if ((m->vflag[v] & HM_DELETED) || seen[v] || !hm_feature_degree(m, v) || rv_line_end(m, v) != (pass == 0))
-				continue;
-			seen[v] = 1;
-			nf = rv_line(m, v, f, 16);
-			for (s = 0; s < nf && (pass == 0 || s < 1); s++)
-			{
-				unsigned int prev = v, cur = f[s], idx = 1, g[2], c = HM_NONE;
-				while (!seen[cur] && !rv_line_end(m, cur) && rv_line(m, cur, g, 2) == 2)
-				{
-					unsigned int next = g[0] == prev ? g[1] : g[0], y = HM_NONE, side;
-					seen[cur] = 1;
-					/* an odd one into the vertex kept before it, or else into the one after it */
-					for (side = 0; (idx & 1) && side < 2 && y == HM_NONE; side++)
-						if ((c = hm_find_edge(m, cur, side ? next : prev)) != HM_NONE && rv_can_remove(w, c, cur, side ? next : prev))
-							y = side ? next : prev;
-					if (y != HM_NONE)
-					{
-						if (!hm_collapse(m, c, cur, 1, rv_x(m, y)))
-						{
-							free(seen);
-							return 0;
-						}
-						w->rep->collapses++;
-					}
-					else
-						prev = cur;   /* (else prev stays next's neighbour along the line) */
-					idx++;
-					cur = next;
-				}
-			}
-		}
-	free(seen);
-	hm_compact(m);
-	return 1;
-}
-
 /* every edge split at its middle on the reference (on the creases for a feature edge), then the new vertices' edges to the
    old ones across the faces flipped: each triangle in four, every old vertex keeping its valence; 0 on allocation failure.
    Left whole: an edge between two features that is not one (across a thin part), a feature edge no longer than 4/3 of the
-   size (one halving left, at a line's end or where a collapse was refused), so that the lines come back to LOCAL's count */
+   size (a coarse line kept short: one too short to split, or where a collapse was refused) */
 static int rv_subdivide(rv_cvt* w)
 {
 	qaws_hm* m = w->m;
@@ -656,7 +610,7 @@ static int rv_subdivide(rv_cvt* w)
 		if (cc == HM_NONE || (!(m->cflag[cc] & HM_FEATURE) && hm_feature_degree(m, a) && hm_feature_degree(m, b)))
 			continue;   /* (across a part narrower than twice the size: no vertex inside it) */
 		if ((m->cflag[cc] & HM_FEATURE) && rv_d2(rv_x(m, a), rv_x(m, b)) <= (4.0 / 9) * (rv_h(w, a) + rv_h(w, b)) * (rv_h(w, a) + rv_h(w, b)))
-			continue;   /* (a feature edge no longer than 4/3 of its size: one that halving left whole) */
+			continue;   /* (a feature edge no longer than 4/3 of its size: one the coarse line left short) */
 		for (k = 0; k < 3; k++)
 			mid[k] = 0.5 * (rv_x(m, a)[k] + rv_x(m, b)[k]);
 		if (m->cflag[cc] & HM_FEATURE)
@@ -715,41 +669,227 @@ static int rv_subdivide(rv_cvt* w)
 
 /* ---- creases ------------------------------------------------------------ */
 
-/* the vertices on feature lines moved, 10 times, to the centre of their cells along the line (density h^-3 at the half-edges'
-   middles), back onto the creases; corners stay */
-static void rv_creases(rv_cvt* w)
+/* the vertex of chain ch (n segments) at metric parameter t of the polyline (cumulative arc over the size in s) */
+static void rv_at(rv_cvt const* w, unsigned int const* ch, double const* s, unsigned int n, double t, double* y)
+{
+	unsigned int i = 0, k;
+	double u;
+	while (i + 1 < n && s[i + 1] < t)
+		i++;
+	u = s[i + 1] > s[i] ? (t - s[i]) / (s[i + 1] - s[i]) : 0;
+	u = u < 0 ? 0 : u > 1 ? 1 : u;
+	for (k = 0; k < 3; k++)
+		y[k] = rv_x(w->m, ch[i])[k] + u * (rv_x(w->m, ch[i + 1])[k] - rv_x(w->m, ch[i])[k]);
+}
+
+/* chain ch's cumulative arc over the size, s[0..n]; its total */
+static double rv_arc(rv_cvt const* w, unsigned int const* ch, unsigned int n, double* s)
+{
+	unsigned int i;
+	s[0] = 0;
+	for (i = 0; i < n; i++)
+		s[i + 1] = s[i] + sqrt(rv_d2(rv_x(w->m, ch[i]), rv_x(w->m, ch[i + 1]))) / (0.5 * (rv_h(w, ch[i]) + rv_h(w, ch[i + 1])));
+	return s[n];
+}
+
+/* one chain of a feature line, ch[0..n] (its ends fixed; a loop's end its start): as many segments as its length over the
+   size (rounded; a loop at least 3), the longest split or the vertex between the shortest pair merged along it, then each
+   vertex moved, a few sweeps, to its share of the length over the size (a 1D CVT of density size^-3, which spaces the
+   vertices by the size), back onto the creases, unless a face round it would fold. Lines alike (the two sides of a part
+   thinner than the size, between the same corners) come out alike, so their vertices face each other across it. ch holds
+   room for cap vertices; the chain's segments at the end */
+static unsigned int rv_chain(rv_cvt* w, unsigned int* ch, unsigned int n, unsigned int cap, double* s, int loop)
 {
 	qaws_hm* m = w->m;
-	unsigned int sweep, v, k;
-	for (sweep = 0; sweep < 10; sweep++)
-		for (v = 0; v < m->nv; v++)
+	unsigned int want, i, k, sweep;
+	double total = rv_arc(w, ch, n, s);
+	want = fabs(n - total) <= fmax(0.5, w->slack * total) ? n : (unsigned int)floor(total + 0.5);
+	want = want < (loop ? 3u : 1u) ? (loop ? 3u : 1u) : want;
+	while (n < want && n + 1 < cap)
+	{
+		unsigned int best = 0, c, v;
+		double mid[3], p[3];
+		qaws_mesh_location l;
+		for (i = 1; i < n; i++)
+			if (s[i + 1] - s[i] > s[best + 1] - s[best])
+				best = i;
+		c = hm_find_edge(m, ch[best], ch[best + 1]);
+		for (k = 0; k < 3; k++)
+			mid[k] = 0.5 * (rv_x(m, ch[best])[k] + rv_x(m, ch[best + 1])[k]);
+		if (c == HM_NONE || mr_project_crease(w->r, mid, m->foot[ch[best]].patch, w->s, &l) == HUGE_VAL || l.patch == HM_NONE)
+			break;
+		mr_eval(w->r, &l, p, NULL);
+		if ((v = hm_split_edge(m, c, 0.5, p, 1)) == HM_NONE)
+			return 0;
+		m->foot[v] = l;
+		hm_attr_at(m, w->sa, v)[0] = w->scale * rv_size(w, &l, p);
+		w->rep->splits++;
+		memmove(ch + best + 2, ch + best + 1, sizeof(unsigned int) * (n - best));
+		ch[best + 1] = v;
+		n++;
+		rv_arc(w, ch, n, s);
+	}
+	while (n > want)
+	{
+		/* the inner vertex whose two segments are the shortest that may go into a neighbour along the line */
+		unsigned int best = 0, side = 0, tries, last = 0;
+		double used = -1;
+		for (tries = 0; tries < n && !best; tries++)
 		{
-			unsigned int f[2];
-			double const* p = rv_x(m, v);
-			double la, lb, ma, mb, sc, y[3], x[3], n[3];
-			qaws_mesh_location l;
-			if ((m->vflag[v] & (HM_DELETED | HM_CORNER)) || m->vc[v] == HM_NONE || hm_feature_degree(m, v) != 2 || rv_line(m, v, f, 2) != 2)
-				continue;
-			la = 0.5 * sqrt(rv_d2(p, rv_x(m, f[0])));
-			lb = 0.5 * sqrt(rv_d2(p, rv_x(m, f[1])));
-			if (la <= 0 || lb <= 0)
-				continue;
-			ma = la * pow(w->L / (0.75 * rv_h(w, v) + 0.25 * rv_h(w, f[0])), 3);
-			mb = lb * pow(w->L / (0.75 * rv_h(w, v) + 0.25 * rv_h(w, f[1])), 3);
-			sc = 0.5 * (mb * lb - ma * la) / (ma + mb);
-			for (k = 0; k < 3; k++)
-				y[k] = sc < 0 ? p[k] + (-sc / (2 * la)) * (rv_x(m, f[0])[k] - p[k]) : p[k] + (sc / (2 * lb)) * (rv_x(m, f[1])[k] - p[k]);
-			if (mr_project_crease(w->r, y, m->foot[v].patch, w->s, &l) == HUGE_VAL || l.patch == HM_NONE)
-				continue;
-			mr_eval(w->r, &l, x, n);
-			if (rv_folds(w, v, x, n, HM_NONE, 0.2))
-				continue;
-			for (k = 0; k < 3; k++)
-				rv_x(m, v)[k] = x[k];
-			m->foot[v] = l;
-			hm_attr_at(m, w->sa, v)[0] = w->scale * rv_size(w, &l, x);
-			w->rep->moves++;
+			double low = HUGE_VAL, key;
+			unsigned int q;
+			best = 0;
+			for (i = 1; i < n; i++)
+				if ((key = s[i + 1] - s[i - 1]) < low && (key > used || (key == used && i > last)))
+				{
+					low = key;
+					best = i;
+				}
+			if (!best)
+				break;
+			used = low;
+			last = best;
+			for (q = 0; q < 2; q++)
+			{
+				/* (into the nearer one first) */
+				unsigned int y = (q == 0) == (s[best + 1] - s[best] < s[best] - s[best - 1]) ? ch[best + 1] : ch[best - 1];
+				unsigned int c = hm_find_edge(m, ch[best], y);
+				if (c != HM_NONE && rv_can_remove(w, c, ch[best], y))
+				{
+					if (!hm_collapse(m, c, ch[best], 1, rv_x(m, y)))
+						return 0;
+					w->rep->collapses++;
+					side = 1;
+					break;
+				}
+			}
+			if (!side)
+				best = 0;
 		}
+		if (!side)
+			break;
+		memmove(ch + best, ch + best + 1, sizeof(unsigned int) * (n - best));
+		n--;
+		rv_arc(w, ch, n, s);
+	}
+	for (sweep = 0; sweep < 4 && n > 1; sweep++)
+	{
+		double* t = s + cap;
+		total = rv_arc(w, ch, n, s);
+		for (i = 1; i < n; i++)
+			rv_at(w, ch, s, n, total * i / n, t + 3 * (size_t)i);   /* (the targets from the line as it was) */
+		for (i = 1; i < n; i++)
+		{
+			unsigned int v = ch[i], half;
+			double y[3], x[3], nr[3], p[3];
+			qaws_mesh_location l;
+			memcpy(y, t + 3 * (size_t)i, sizeof y);
+			memcpy(p, rv_x(m, v), sizeof p);
+			for (half = 0; half < 3; half++, y[0] = 0.5 * (y[0] + p[0]), y[1] = 0.5 * (y[1] + p[1]), y[2] = 0.5 * (y[2] + p[2]))
+			{
+				if (mr_project_crease(w->r, y, m->foot[v].patch, w->s, &l) == HUGE_VAL || l.patch == HM_NONE)
+					continue;
+				mr_eval(w->r, &l, x, nr);
+				if (rv_folds(w, v, x, nr, HM_NONE, 0.2))
+					continue;
+				memcpy(rv_x(m, v), x, sizeof x);
+				m->foot[v] = l;
+				hm_attr_at(m, w->sa, v)[0] = w->scale * rv_size(w, &l, x);
+				w->rep->moves++;
+				break;
+			}
+		}
+	}
+	return n;
+}
+
+/* every feature line's vertices from the size (rv_chain), chain by chain: from the lines' ends and corners, then the closed
+   loops; corners stay; 0 on allocation failure */
+static int rv_lines(rv_cvt* w)
+{
+	qaws_hm* m = w->m;
+	unsigned int v, pass, nv = m->nv, cap = 0, *ch = NULL;
+	unsigned char* seen = (unsigned char*)calloc((size_t)nv + 1, 1);
+	double* s = NULL;
+	int ok = seen != NULL;
+	for (pass = 0; ok && pass < 2; pass++)
+		for (v = 0; ok && v < nv; v++)
+		{
+			unsigned int f[16], nf, q;
+			if ((m->vflag[v] & HM_DELETED) || m->vc[v] == HM_NONE || seen[v] || !hm_feature_degree(m, v) || rv_line_end(m, v) != (pass == 0))
+				continue;
+			if (pass == 1)
+				seen[v] = 1;
+			nf = rv_line(m, v, f, 16);
+			for (q = 0; ok && q < nf && (pass == 0 || q < 1); q++)
+			{
+				unsigned int prev = v, cur = f[q], n = 0, g[2];
+				if (cur >= nv || seen[cur])
+					continue;   /* (a vertex added on a chain done) */
+				if (rv_line_end(m, cur) && cur < v)
+					continue;   /* (a single segment between two ends: once) */
+				for (;;)
+				{
+					if (n + 2 >= cap)
+					{
+						unsigned int* c2;
+						double* s2;
+						cap = 2 * cap + 64;
+						c2 = (unsigned int*)realloc(ch, sizeof(unsigned int) * cap);
+						s2 = (double*)realloc(s, sizeof(double) * 4 * (size_t)cap);
+						if (c2)
+							ch = c2;
+						if (s2)
+							s = s2;
+						if (!c2 || !s2)
+						{
+							ok = 0;
+							break;
+						}
+					}
+					if (!n)
+						ch[n++] = v;
+					ch[n++] = cur;
+					if (cur == v || rv_line_end(m, cur) || rv_line(m, cur, g, 2) != 2)
+						break;
+					seen[cur] = 1;
+					{
+						unsigned int next = g[0] == prev ? g[1] : g[0];
+						prev = cur;
+						cur = next;
+					}
+				}
+				if (!ok)
+					break;
+				/* room for the splits: the length over the size, twice */
+				{
+					double need = 2 * rv_arc(w, ch, n - 1, s) + 8;
+					if (need > cap)
+					{
+						unsigned int* c2;
+						double* s2;
+						cap = (unsigned int)need;
+						c2 = (unsigned int*)realloc(ch, sizeof(unsigned int) * cap);
+						s2 = (double*)realloc(s, sizeof(double) * 4 * (size_t)cap);
+						if (c2)
+							ch = c2;
+						if (s2)
+							s = s2;
+						if (!c2 || !s2)
+						{
+							ok = 0;
+							break;
+						}
+					}
+				}
+				ok = rv_chain(w, ch, n - 1, cap, s, ch[n - 1] == v) != 0;
+			}
+		}
+	free(seen);
+	free(ch);
+	free(s);
+	hm_compact(m);
+	return ok;
 }
 
 /* ---- flips -------------------------------------------------------------- */
@@ -1454,12 +1594,10 @@ static void rv_resize(rv_cvt* w, double s)
 			hm_attr_at(m, w->sa, v)[0] = s * rv_size(w, &m->foot[v], rv_x(m, v));
 }
 
-/* one level: (a coarse one's feature lines halved) the count, the creases, Delaunay, the seeds solved */
+/* one level: the feature lines from the size, the count, Delaunay, the seeds solved */
 static int rv_level(rv_cvt* w, double nstar, int coarse, unsigned int steps)
 {
-	int ok = (!coarse || rv_halve(w)) && rv_count(w, nstar, coarse);
-	if (ok)
-		rv_creases(w);
+	int ok = rv_lines(w) && rv_count(w, nstar, coarse);
 	ok = ok && rv_delaunay(w) && rv_seeds(w) && rv_solve(w, steps);
 	rv_seeds_free(w);
 	return ok;
@@ -1494,7 +1632,7 @@ int rv_optimize(qaws_hm* m, qaws_mesh_reference const* r, qaws_size_field const*
 	/* a coarse level first (a quarter of the seeds at twice the size, on sub-triangles twice as large: dislocations anneal four
 	   times sooner), each triangle then split in four, which keeps every vertex's valence; dropped, the working mesh put back,
 	   where the split folds faces: a part curved tighter than twice the size */
-	if (ok && nstar >= 400)
+	if (ok && nstar >= 200)
 	{
 		qaws_hm keep;
 		unsigned int before = rv_folded(&w);
@@ -1511,7 +1649,10 @@ int rv_optimize(qaws_hm* m, qaws_mesh_reference const* r, qaws_size_field const*
 				*m = keep;
 			}
 			else
+			{
 				hm_free(&keep);
+				w.slack = 0.05;   /* (the split doubled the coarse lines: kept within 5% of the size, the split's structure with them) */
+			}
 		}
 	}
 	rv_unbuild(&w);

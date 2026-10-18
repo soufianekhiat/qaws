@@ -6,7 +6,9 @@
  *   - the can by CVT with the dual of its Delaunay mesh on the reference
  *     (circumcentres projected; the solver's own restricted Voronoi cells
  *     are not exported), the caps and the side tinted: no cell crosses a rim;
- *   - the cube with creases by CVT, the crease seeds (locked) marked.
+ *   - the cube with creases by CVT, the crease seeds (locked, as many
+ *     per edge as its length over the size) marked, the others coloured
+ *     by valence.
  */
 
 #include <time.h>
@@ -235,6 +237,15 @@ static void demo_remesh_cvt(void)
 			ms_draw(c, rcube, tints[2], NULL, 0, wire, 1.0);
 			for (i = 0; i < nfe; i++)
 				er_line(c, p + 3 * fe[2 * i], p + 3 * fe[2 * i + 1], red, 2.4);
+			for (i = 0; i < nv; i++)
+				if (!on[i])
+				{
+					unsigned int ring[64], n = 0;
+					double rgb[3];
+					qaws_mesh_3d_get_vertex_ring(rcube, i, ring, 64, &n);
+					ms_valence_rgb(n, rgb);
+					er_point(c, p + 3 * i, rgb, n == 6 ? 2.2 : 3.6);
+				}
 			for (i = 0; i < nv; i++)
 				if (on[i])
 					er_point(c, p + 3 * i, qaws_mesh_3d_is_feature_corner(rcube, i) ? dark : white, qaws_mesh_3d_is_feature_corner(rcube, i) ? 6.0 : 4.0);

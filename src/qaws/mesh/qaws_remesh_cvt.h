@@ -6,7 +6,7 @@
 #include "qaws_mesh_internal.h"
 
 /* the working mesh's free vertices moved to a centroidal Voronoi tessellation of the reference (density size^-4), its
-   creases' vertices first spread along them and locked, its edges kept Delaunay by flips; 0 on allocation failure */
+   feature lines' vertices first set from the size (count and spacing) and locked, its edges kept Delaunay by flips; 0 on allocation failure */
 int rv_optimize(qaws_hm* m, qaws_mesh_reference const* r, qaws_size_field const* size, double L, unsigned int size_attr, unsigned int region_attr,
 	mr_scratch* s, unsigned int steps, qaws_mesh_report* rep);
 
