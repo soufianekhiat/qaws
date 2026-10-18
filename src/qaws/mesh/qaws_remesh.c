@@ -34,6 +34,8 @@ typedef struct rmsh
 	unsigned int* ep;               /* the edges as vertex pairs at a pass's start (the Delaunay pass's queue) */
 	unsigned int nep, cep;
 	double tol;                     /* the distance guard (0: none) */
+	qaws_size_field* tsize;         /* with a tolerance: the sizes its chord gap allows where the surface bends (under the target) */
+	int strict;                     /* after the loop: the guard samples quarter points too, and holds where faces strayed already */
 	double lo, hi;                  /* the angle bounds in radians (0: none), set for the angle pass */
 	int bounded;                    /* operations held to the bounds (in the angle pass) */
 	double moved;                   /* the longest move since it was cleared */
@@ -65,7 +67,10 @@ static double rm_target(rmsh const* w, unsigned int a, unsigned int b)
 /* the size at v from its footpoint */
 static void rm_set_size(rmsh* w, unsigned int v)
 {
-	hm_attr_at(w->m, w->sa, v)[0] = w->size ? sf_eval(w->size, &w->m->foot[v], rm_x(w->m, v)) : w->L;
+	double h = w->size ? sf_eval(w->size, &w->m->foot[v], rm_x(w->m, v)) : w->L;
+	if (w->tsize)
+		h = fmin(h, sf_eval(w->tsize, &w->m->foot[v], rm_x(w->m, v)));
+	hm_attr_at(w->m, w->sa, v)[0] = h;
 }
 
 /* a triangle's shape: 4 sqrt(3) area over the sum of its squared edges (1 equilateral, 0 flat) */
@@ -449,11 +454,11 @@ static int rm_near(qaws_mesh_reference const* r, unsigned int t, double const* p
 	return -1;
 }
 
-/* the first sample of the face (A, B, C) of region reg, its corners' footpoints LA, LB, LC, farther from the reference than
-   the tolerance: edge i (from corner i) or 3 (its centre); -1 when none is. The samples: the centre and the edges' midpoints,
-   with fine their quarter points too */
-static int rm_stray(rmsh* w, double const* A, double const* B, double const* C, qaws_mesh_location const* LA, qaws_mesh_location const* LB,
-	qaws_mesh_location const* LC, unsigned int reg, int fine)
+/* is every sample of the face (A, B, C) of region reg, its corners' footpoints LA, LB, LC, within the tolerance of the
+   reference: its centre, its edges' midpoints (and their quarter points once strict). shortcut: samples only, a face bulging
+   between them passes (dense sampling of the blob at 2e-3 finds 2.38e-3); upgrade to 130's certified deviation */
+static int rm_within(rmsh* w, double const* A, double const* B, double const* C, qaws_mesh_location const* LA, qaws_mesh_location const* LB,
+	qaws_mesh_location const* LC, unsigned int reg)
 {
 	static double const at[3] = { 0.5, 0.25, 0.75 };
 	double const* P[3];
@@ -463,17 +468,17 @@ static int rm_stray(rmsh* w, double const* A, double const* B, double const* C, 
 	unsigned int i, j, k;
 	int one;
 	if (w->tol <= 0)
-		return -1;
+		return 1;
 	P[0] = A; P[1] = B; P[2] = C;
 	L[0] = LA; L[1] = LB; L[2] = LC;
 	for (i = 0; i < 3; i++)
 		e2 = fmax(e2, rm_d2(P[i], P[(i + 1) % 3]));
 	/* every point of a face is within its longest edge over sqrt 3 of a corner, and the corners are on the reference */
 	if (e2 <= 3 * t2)
-		return -1;
+		return 1;
 	one = LB->patch == LA->patch && LC->patch == LA->patch;
 	for (i = 0; i < 4; i++)
-		for (j = 0; j < (i < 3 && fine ? 3u : 1u); j++)
+		for (j = 0; j < (i < 3 && w->strict ? 3u : 1u); j++)
 		{
 			double t = at[j];
 			int near = 0, h;
@@ -496,21 +501,43 @@ static int rm_stray(rmsh* w, double const* A, double const* B, double const* C, 
 			if (near > 0)
 				continue;
 			if (!near || mr_project_region(w->r, s, LA->patch, reg, &w->s, &l) > t2)
-				return (int)i;
+				return 0;
 		}
-	return -1;
+	return 1;
 }
 
-/* is the face (A, B, C) within the tolerance at its centre and its edges' midpoints (the last pass samples the quarter
-   points too). shortcut: four samples, a face bulging between them passes; upgrade to 130's certified deviation when a
-   reference can fold within one face */
-static int rm_within(rmsh* w, double const* A, double const* B, double const* C, qaws_mesh_location const* LA, qaws_mesh_location const* LB,
-	qaws_mesh_location const* LC, unsigned int reg)
+/* the edge to split when face f strays past the tolerance: its longest (Rivara's bisection: no angle falls under half the
+   smallest there was); HM_NONE when it does not stray */
+static unsigned int rm_face_stray(rmsh* w, unsigned int f)
 {
-	return rm_stray(w, A, B, C, LA, LB, LC, reg, 0) < 0;
+	qaws_hm const* m = w->m;
+	unsigned int c = m->fc[f], a = m->cv[c], b = m->cv[c + 1], d = m->cv[c + 2];
+	return rm_within(w, rm_x(m, a), rm_x(m, b), rm_x(m, d), &m->foot[a], &m->foot[b], &m->foot[d], rm_region(w, f)) ? HM_NONE : rm_longest(m, f);
 }
 
-/* would the faces round v (and u, as in rm_star) stay within the tolerance once moved to y, its footpoint ly */
+/* does the guard let an operation leave a straying face: in the loop, when one of the faces it replaces (fa, fb, or those
+   round v and u) strays already (the splits refine those; held, a mesh still far from the tolerance could not be cleaned up) */
+static int rm_lenient(rmsh* w, unsigned int fa, unsigned int fb, unsigned int v, unsigned int u)
+{
+	qaws_hm const* m = w->m;
+	unsigned int i, c;
+	if (w->strict)
+		return 0;
+	if ((fa != HM_NONE && rm_face_stray(w, fa) != HM_NONE) || (fb != HM_NONE && rm_face_stray(w, fb) != HM_NONE))
+		return 1;
+	for (i = 0; i < 2; i++)
+	{
+		unsigned int s = i ? u : v;
+		if (s != HM_NONE)
+			for (c = m->vc[s]; c != HM_NONE; c = hm_round(m, s, c))
+				if (rm_face_stray(w, m->cf[c]) != HM_NONE)
+					return 1;
+	}
+	return 0;
+}
+
+/* would the faces round v (and u, as in rm_star) stay within the tolerance once moved to y, its footpoint ly (or may they
+   stray, as rm_lenient says) */
 static int rm_star_within(rmsh* w, unsigned int v, unsigned int u, double const* y, qaws_mesh_location const* ly)
 {
 	qaws_hm const* m = w->m;
@@ -528,19 +555,10 @@ static int rm_star_within(rmsh* w, unsigned int v, unsigned int u, double const*
 			if (A == o || B == o)
 				continue;
 			if (!rm_within(w, y, rm_x(m, A), rm_x(m, B), ly, &m->foot[A], &m->foot[B], rm_region(w, m->cf[c])))
-				return 0;
+				return rm_lenient(w, HM_NONE, HM_NONE, v, u);
 		}
 	}
 	return 1;
-}
-
-/* face f's corner whose edge strays past the tolerance (its longest edge when its centre does), finely sampled; HM_NONE: none */
-static unsigned int rm_face_stray(rmsh* w, unsigned int f)
-{
-	qaws_hm const* m = w->m;
-	unsigned int c = m->fc[f], a = m->cv[c], b = m->cv[c + 1], d = m->cv[c + 2];
-	int i = rm_stray(w, rm_x(m, a), rm_x(m, b), rm_x(m, d), &m->foot[a], &m->foot[b], &m->foot[d], rm_region(w, f), 1);
-	return i < 0 ? HM_NONE : i < 3 ? c + (unsigned int)i : rm_longest(m, f);
 }
 
 /* ---- splits ------------------------------------------------------------- */
@@ -837,7 +855,8 @@ static int rm_flip_ok(rmsh* w, unsigned int c)
 	if (w->tol > 0)
 	{
 		unsigned int reg = rm_region(w, m->cf[c]);
-		if (!rm_within(w, A, Q, P, &m->foot[a], &m->foot[q], &m->foot[p], reg) || !rm_within(w, Q, B, P, &m->foot[q], &m->foot[b], &m->foot[p], reg))
+		if ((!rm_within(w, A, Q, P, &m->foot[a], &m->foot[q], &m->foot[p], reg) || !rm_within(w, Q, B, P, &m->foot[q], &m->foot[b], &m->foot[p], reg))
+			&& !rm_lenient(w, m->cf[c], m->cf[d], HM_NONE, HM_NONE))
 			return 0;
 	}
 	return 1;
@@ -919,8 +938,9 @@ static void rm_caps(rmsh* w)
 		if (w->tol > 0)
 		{
 			unsigned int reg = rm_region(w, m->cf[c]);
-			if (!rm_within(w, A, Q, P, &m->foot[m->cv[c]], &m->foot[m->cv[hm_prev(m, d)]], &m->foot[m->cv[hm_prev(m, c)]], reg)
+			if ((!rm_within(w, A, Q, P, &m->foot[m->cv[c]], &m->foot[m->cv[hm_prev(m, d)]], &m->foot[m->cv[hm_prev(m, c)]], reg)
 				|| !rm_within(w, Q, B, P, &m->foot[m->cv[hm_prev(m, d)]], &m->foot[hm_to(m, c)], &m->foot[m->cv[hm_prev(m, c)]], reg))
+				&& !rm_lenient(w, m->cf[c], m->cf[d], HM_NONE, HM_NONE))
 				continue;
 		}
 		if (!hm_flip(m, c))
@@ -1084,7 +1104,8 @@ static void rm_smooth(rmsh* w)
 
 /* ---- the distance guard made good ---------------------------------------- */
 
-/* every face within the tolerance: the longest edge of a face whose samples stray split, round after round */
+/* every face within the tolerance: the longest edge of a face whose samples stray split, round after round, each round
+   finished by Delaunay flips; then needles collapsed and a relaxation sweep (all under the guard) */
 static void rm_tolerance(rmsh* w)
 {
 	qaws_hm* m = w->m;
@@ -1108,8 +1129,11 @@ static void rm_tolerance(rmsh* w)
 		hm_compact(m);
 		if (!n)
 			break;
-		rm_smooth(w);
+		rm_delaunay(w);
 	}
+	rm_needles(w);
+	hm_compact(m);
+	rm_smooth(w);
 }
 
 /* ---- the angle-bounded pass (Wang, Yan et al. 2019) ---------------------- */
@@ -1239,8 +1263,9 @@ static double rm_score(rm_stat const* s)
 
 /* the large-angle split: e's edge split at its midpoint on the reference; then (off the features) no flip or the flip of one
    of the sides round the new vertex away from the apex (the large corner's vertex), each tried with the new vertex and its
-   ring settled, the best kept; all of it undone unless the angles round it got better */
-static int rm_split_large(rmsh* w, unsigned int e, unsigned int apex)
+   ring settled, the best kept; all of it undone unless the angles round it got better, or (need) the apex's sector has too
+   few faces to be inside the bounds at all: then the face it gains is kept for later rounds to polish */
+static int rm_split_large(rmsh* w, unsigned int e, unsigned int apex, int need)
 {
 	qaws_hm* m = w->m;
 	unsigned int vs[16], nvs = 0, j, k, v, a = m->cv[e], c, side[2], opt[8][2], no = 1, o, best = 0, far = HM_NONE;
@@ -1326,7 +1351,7 @@ static int rm_split_large(rmsh* w, unsigned int e, unsigned int apex)
 			return 1;
 		}
 	}
-	if (rm_better(&sb, &sa, 0) && rm_star_within(w, v, HM_NONE, rm_x(m, v), &m->foot[v]))
+	if ((need || rm_better(&sb, &sa, 0)) && rm_star_within(w, v, HM_NONE, rm_x(m, v), &m->foot[v]))
 	{
 		unsigned int ring[32], nr = hm_ring(m, v, ring, 32);
 		rm_touch(w, v);
@@ -1360,10 +1385,10 @@ static int rm_split_large(rmsh* w, unsigned int e, unsigned int apex)
 	return 0;
 }
 
-/* v moved by a pattern search on the reference: 8 directions in its tangent plane (2 along its line on a feature), the step
+/* v moved by a pattern search on the reference: 16 directions in its tangent plane (2 along its line on a feature), the step
    halved from a quarter of its size, toward the smallest worst violation of the bounds in its star (for a small angle, its
    largest smallest angle). shortcut: a pattern search, not Wang et al.'s exact feasible region; upgrade if the pass stalls
-   on stars whose feasible region is a sliver the 8 directions miss */
+   on stars whose feasible region is a sliver the 16 directions miss (8 left the cube at 0.15 one corner at 86.45) */
 static int rm_relocate(rmsh* w, unsigned int v)
 {
 	qaws_hm* m = w->m;
@@ -1395,7 +1420,7 @@ static int rm_relocate(rmsh* w, unsigned int v)
 	cur = b0.worst;
 	memcpy(cx, rm_x(m, v), sizeof cx);
 	cl = m->foot[v];
-	dirs = fd ? 2 : 8;
+	dirs = fd ? 2 : 16;
 	for (it = 0, step = 0.25 * rm_size_of(w, v); it < 10; it++)
 	{
 		int improved = 0;
@@ -1518,15 +1543,19 @@ static int rm_flip_bounded(rmsh* w, unsigned int c)
 static int rm_large(rmsh* w, rm_bad const* t)
 {
 	qaws_hm* m = w->m;
-	unsigned int f = rm_face_of(m, t), apex;
-	double ex;
+	unsigned int f = rm_face_of(m, t), apex, nf;
+	double ex, th;
+	int need;
 	if (f == HM_NONE || (apex = rm_worst(w, f, 1, &ex)) == HM_NONE)
 		return 0;
 	if (rm_flip_bounded(w, hm_next(m, apex)) || w->failed || rm_relocate_face(w, t, apex, 1) || w->failed)
 		return 1;
 	if ((f = rm_face_of(m, t)) == HM_NONE || (apex = rm_worst(w, f, 1, &ex)) == HM_NONE)
 		return 1;
-	if (rm_split_large(w, rm_longest(m, f), m->cv[apex]) || w->failed || (f = rm_face_of(m, t)) == HM_NONE
+	/* (a sector with fewer faces than its angle over the upper bound cannot be inside: it must gain one) */
+	th = rm_sector(m, apex, &nf);
+	need = th > 0 && nf < (unsigned int)ceil(th / w->hi - 1e-9);
+	if (rm_split_large(w, rm_longest(m, f), m->cv[apex], need && rm_longest(m, f) == hm_next(m, apex)) || w->failed || (f = rm_face_of(m, t)) == HM_NONE
 		|| (apex = rm_worst(w, f, 1, &ex)) == HM_NONE)
 		return 1;
 	/* else the edge across the apex in a neighbouring face of its sector (a sector of too few faces gets one more either way) */
@@ -1544,7 +1573,7 @@ static int rm_large(rmsh* w, rm_bad const* t)
 		}
 		/* (by vertices: a split undone leaves new corner slots) */
 		for (i = 0; i < n && !w->failed; i++)
-			if ((c = hm_find(m, e[i][0], e[i][1])) != HM_NONE && rm_split_large(w, c, v))
+			if ((c = hm_find(m, e[i][0], e[i][1])) != HM_NONE && rm_split_large(w, c, v, need))
 				return 1;
 	}
 	return 0;
@@ -1616,7 +1645,7 @@ static void rm_smooth_changed(rmsh* w)
 static void rm_angles(rmsh* w)
 {
 	rm_bad* list = NULL;
-	unsigned int cap = 0, n, i, k, done, round, stall = 0, nbest = 0xFFFFFFFFu, bad;
+	unsigned int cap = 0, n, i, k, done, tries, round, stall = 0, nbest = 0xFFFFFFFFu, bad;
 	double best = HUGE_VAL, worst;
 	w->bounded = 1;
 	for (round = 0; round < 50 && !w->failed; round++)
@@ -1625,7 +1654,8 @@ static void rm_angles(rmsh* w)
 		worst = rm_census(w, &bad);
 		if (!bad)
 			break;
-		if (worst < best - 1e-9 || bad < nbest)
+		/* (progress: the worst a tenth of a degree better, or a twentieth fewer out) */
+		if (worst < best - 0.1 * RM_DEG || bad + nbest / 20 < nbest)
 		{
 			stall = 0;
 			best = fmin(best, worst);
@@ -1634,16 +1664,25 @@ static void rm_angles(rmsh* w)
 		else if (++stall >= 3)
 			break;
 		k = bad / 5 > 1 ? bad / 5 : 1;
-		/* (k faces fixed in each half, worst first: the ones that resist do not hold the others up) */
+		/* (k faces fixed in each half, worst first, out of 2k + 16 tried: the ones that resist do not hold the others
+		   up, nor cost more than their share; with 2k alone the last few stalled, 13 left out on the cube at 0.6) */
 		n = rm_gather(w, 1, &list, &cap);
-		for (i = 0, done = 0; i < n && done < k && !w->failed; i++)
-			done += (unsigned int)rm_large(w, &list[i]);
+		for (i = 0, done = 0, tries = 0; i < n && done < k && tries < 2 * k + 16 && !w->failed; i++)
+			if (!rm_fixed(w, &list[i], 1))
+			{
+				tries++;
+				done += (unsigned int)rm_large(w, &list[i]);
+			}
 		rm_flip(w);
 		rm_smooth_changed(w);
 		hm_compact(w->m);
 		n = rm_gather(w, 0, &list, &cap);
-		for (i = 0, done = 0; i < n && done < k && !w->failed; i++)
-			done += (unsigned int)rm_small(w, &list[i]);
+		for (i = 0, done = 0, tries = 0; i < n && done < k && tries < 2 * k + 16 && !w->failed; i++)
+			if (!rm_fixed(w, &list[i], 0))
+			{
+				tries++;
+				done += (unsigned int)rm_small(w, &list[i]);
+			}
 		rm_flip(w);
 		rm_smooth_changed(w);
 	}
@@ -1652,12 +1691,14 @@ static void rm_angles(rmsh* w)
 	free(list);
 }
 
-/* after the loop: the distance guard made good on every face, the Delaunay flips, the angle-bounded pass */
+/* after the loop: the distance guard made good on every face (and strict from here on), the Delaunay flips, the
+   angle-bounded pass */
 static void rm_post(rmsh* w, qaws_remesh_desc const* desc)
 {
 	if (!w->ready || w->failed)
 		return;
 	hm_compact(w->m);
+	w->strict = 1;
 	rm_tolerance(w);
 	rm_delaunay(w);
 	hm_compact(w->m);
@@ -1914,7 +1955,7 @@ qaws_status qaws_mesh_remesh(qaws_mesh_3d const* mesh, qaws_remesh_desc const* d
 	qaws_mesh_reference* own = NULL;
 	qaws_mesh_3d* out = NULL;
 	qaws_status st;
-	unsigned int it, iterations;
+	unsigned int it, iterations, relax;
 	if (!out_mesh)
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	*out_mesh = NULL;
@@ -1954,6 +1995,22 @@ qaws_status qaws_mesh_remesh(qaws_mesh_3d const* mesh, qaws_remesh_desc const* d
 		qaws_mesh_3d_measure_quality(mesh, &q);
 		w.L = q.mean_edge > 0 ? (double)q.mean_edge : 1;
 	}
+	/* a tolerance shrinks the sizes where the surface bends, as Mmgs's hausd does: an edge's chord gap at most 3/4 of it */
+	if (w.tol > 0)
+	{
+		qaws_curvature_size_desc cd;
+		memset(&cd, 0, sizeof cd);
+		cd.chord_tolerance = (qaws_scalar)(0.75 * w.tol);
+		cd.max_length = (qaws_scalar)w.r->extent;
+		st = qaws_size_field_create_curvature(w.r, &cd, &w.tsize);
+		if (st != QAWS_STATUS_OK)
+		{
+			qaws_mesh_reference_destroy(own);
+			return st;
+		}
+	}
+	/* (three relaxation sweeps in the last third only for graded or bounded meshes: INSTANT's dense mesh does better with one) */
+	relax = desc->size || w.tol > 0 || desc->min_angle > 0 || desc->max_angle > 0 ? 3 : 1;
 	iterations = desc->method == QAWS_REMESH_CVT ? 10 : desc->iterations ? desc->iterations : 10;
 	st = rm_begin(&w, mesh, &out);
 	for (it = 0; st == QAWS_STATUS_OK && it < iterations && !w.failed; it++)
@@ -1963,16 +2020,15 @@ qaws_status qaws_mesh_remesh(qaws_mesh_3d const* mesh, qaws_remesh_desc const* d
 		hm_compact(w.m);
 		rm_collapse(&w);
 		hm_compact(w.m);
-		/* (flip passes while they find flips, three at most) */
+		/* (flip passes while they find flips, two at most) */
 		for (sweep = 0; sweep < 2 && flips != w.rep.flips; sweep++)
 		{
 			flips = w.rep.flips;
 			rm_flip(&w);
 		}
 		hm_compact(w.m);
-		/* (three sweeps in the last third) */
 		w.moved = 0;
-		for (sweep = 3 * it >= 2 * iterations ? 3 : 1; sweep > 0; sweep--)
+		for (sweep = 3 * it >= 2 * iterations ? relax : 1; sweep > 0; sweep--)
 			rm_smooth(&w);
 		rm_caps(&w);
 		rm_needles(&w);
@@ -1992,6 +2048,7 @@ qaws_status qaws_mesh_remesh(qaws_mesh_3d const* mesh, qaws_remesh_desc const* d
 	mr_scratch_free(&w.s);
 	free(w.ep);
 	free(w.chg);
+	qaws_size_field_destroy(w.tsize);
 	qaws_mesh_reference_destroy(own);
 	if (st != QAWS_STATUS_OK)
 	{

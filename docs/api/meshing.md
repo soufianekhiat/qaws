@@ -339,7 +339,9 @@ d.tolerance = 2e-3f;                           /* optional: Mmgs's hausd */
 qaws_mesh_remesh(mesh, &d, &out, &report);
 By default LOCAL now does what pmp, geometry-central and Mmgs do:
 relaxation to the ring's area centroid weighted by the size field (a
-graded mesh keeps its grading), collapses onto the edge's midpoint on the
+graded mesh keeps its grading; three sweeps in the last third of the
+iterations with a size field, angle bounds or a tolerance, one otherwise,
+since INSTANT's dense mesh keeps fewer singularities with one), collapses onto the edge's midpoint on the
 reference (or on the crease) and refused when a corner would open past 120
 degrees, flips toward each sector's ideal valence (a smooth crease side or
 a straight border wants 3 faces of 60 degrees) refused when they lower the
@@ -357,19 +359,33 @@ finish, and a stop once nothing changes. The new fields are appended to
   inside the bounds (a 20-degree wedge is; a cube's 90-degree sector is
   not). `INVALID_ARGUMENT` for a negative value, `min_angle` of 60 degrees
   or more, `max_angle` of 60 or less, or `min_angle >= max_angle`.
-- `tolerance` (> 0): no collapse, flip or move leaves a face whose centre
-  or edge midpoints are farther than it from the reference; edges whose
-  midpoint is farther are split whatever their length; faces still farther
-  (quarter points sampled too) have the straying edge split at the end. It
-  wins over the angle bounds.
-Measured (test 131, figure 10): the can of test 125 at 0.12 runs 34.0 to
-106.2 degrees by default (27.2 to 117.4 before); the blob at 0.11 has its
-mean edge 1.5% over the target (7% under before), 82.4% of its vertices of
-valence 6 (78%), all Delaunay; with [35, 86] every angle of the icosphere,
-the blob, the adaptive bumped sphere and the can is inside, and the can
-fits [30, 90]; with a tolerance of 2e-3 every sampled point of the blob is
-within it (25% more vertices). The angle pass costs about 1.2 times the
-default remesh.
+- `tolerance` (> 0), as Mmgs's hausd: the sizes shrink where the surface
+  bends (an edge's chord gap at most 3/4 of it); no collapse, flip or move
+  leaves a face whose centre or edge midpoints are farther than it from the
+  reference (in the loop, unless a face it replaces was farther already);
+  edges whose midpoint is farther are split whatever their length. After
+  the loop the guard samples the edges' quarter points too: faces farther
+  have their longest edge split, and the Delaunay flips and the angle pass
+  are held to it. The guard is sampled: between samples a face may bulge
+  farther (dense sampling of the blob at 2e-3 finds 2.38e-3). It wins over
+  the angle bounds.
+
+Measured (test 131, figure 10): the can of test 125 at 0.12 runs 33.9 to
+108.0 degrees by default (27.2 to 117.4 before); the blob at 0.11 has its
+mean edge 1.5% over the target (7% under before), 82.5% of its vertices of
+valence 6 (78%), all Delaunay; with [35, 86] every angle not exempt is
+inside on the icosphere, the blob, the adaptive bumped sphere, the can, a
+cube at 0.08, 0.15, 0.25 and 0.6 and an open square, and the can fits
+[30, 90]. With a tolerance every sample (centre, edge midpoints, quarter
+points) is within it: on the blob 2e-3 takes 66% more vertices, 5e-4 and
+2e-4 keep every angle within 9.8..145 degrees, and with [35, 86] too the
+bounds hold. The angle pass costs 1.1 times the default remesh on the
+blob, but more where it fights to the last corners: about 3 s on the cube
+at 0.15 (16 times its default), 1.5 s at 0.6 (80 times a 20 ms remesh). A
+tolerance costs 5 to 10 times the default at the same density (the guard
+on every move). Figure 3 runs about 1.05 times as long as before. Not
+reached: a strip narrower than the target (its border corners stay near 26
+degrees), and the faces next to a 20-degree corner.
 
 ## Meshes of exact geometry
 

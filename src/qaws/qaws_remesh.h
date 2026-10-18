@@ -24,7 +24,10 @@
  *          when the new pair's smallest angle stays above the old pair's
  *          or 30 degrees; vertices moved to their ring's area
  *          centroid weighted by the size field (a graded mesh keeps its
- *          grading), walked on the reference; needles (under 15 degrees)
+ *          grading), walked on the reference (three sweeps in the last
+ *          third of the iterations with a size field, angle bounds or a
+ *          tolerance, one otherwise: INSTANT's dense mesh keeps fewer
+ *          singularities with one); needles (under 15 degrees)
  *          collapsed, caps (over 120) flipped; Delaunay flips to finish.
  *          Features kept: feature corners never move, vertices on feature
  *          lines (and the border) slide along them, feature edges are never
@@ -47,11 +50,16 @@
  *          sector (between two feature or border edges) of angle theta when
  *          no whole number k >= 1 has theta / k inside the bounds (a
  *          20-degree wedge; not a cube's 90-degree corner, 2 corners of 45).
- *          tolerance: no operation leaves a face whose centre or edge
- *          midpoints are farther than it from the reference, edges whose
- *          midpoint is farther are split whatever their length, and faces
- *          still farther at the end have their longest edge split (as
- *          Mmgs's hausd); it wins over the angle bounds.
+ *          tolerance (as Mmgs's hausd): the sizes shrink where the surface
+ *          bends (an edge's chord gap at most 3/4 of it); no operation
+ *          leaves a face whose centre or edge midpoints are farther than it
+ *          from the reference (unless a face it replaces was farther
+ *          already, in the loop), edges whose midpoint is farther are split
+ *          whatever their length; after the loop the guard samples the
+ *          edges' quarter points too, faces farther have their longest
+ *          edge split, and every later operation (Delaunay flips, the
+ *          angle pass) is held to it. Sampled only: a face may bulge
+ *          farther between its samples. It wins over the angle bounds.
  *   CVT    a centroidal Voronoi tessellation of the reference (Lloyd,
  *          then L-BFGS; Yan, Levy et al. 2009, Liu et al. 2009): LOCAL
  *          first (10 iterations), the vertex count set from the size (a
