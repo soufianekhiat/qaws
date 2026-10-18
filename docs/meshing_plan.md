@@ -42,7 +42,7 @@ On branch `meshing`, one method per operator (the others reserved behind
 | References | PN (default) and LINEAR, creases, curvature, project, walk, attributes; Mathematica fixture | PHONG, NAGATA, G1, SUBDIVISION, MLS |
 | Fields | size fields (uniform, curvature with tolerances and gradation, vertices, callback, min); cross fields with indices; frame fields by a global spherical-harmonic solve (Ray et al. 2016), singular edges, combing | anisotropic metrics; meshable frame fields (singularity constraints) |
 | Remeshing | LOCAL (Botsch-Kobbelt) on the reference, features, attribute transfer | CVT, FIELD_ALIGNED; simplification |
-| Quads | INSTANT (Instant Meshes), quad-dominant or pure | PAIRING, SPLIT, GLOBAL (QuadriFlow, integer-grid maps), LAYOUT |
+| Quads | INSTANT (Instant Meshes, QuadriFlow's consistency by greedy cancellation, the field drawn to curvature where it helps, doublets removed), quad-dominant or pure | PAIRING, SPLIT, GLOBAL (QuadriFlow, integer-grid maps), LAYOUT |
 | Generation | REMESH for surfaces and shells, snapped onto the exact faces, footpoints (face, u, v) | PARAMETRIC, RESTRICTED_DELAUNAY, STRUCTURED; trim curves followed |
 | Volumes | `qaws_volume_mesh` (tetrahedra, hexahedra, prisms, pyramids; facets' adjacency stored) | attributes on volumes |
 | Tetrahedra | DELAUNAY: exact lattice Bowyer-Watson, border recovery, BCC fill, refinement, flips and smoothing | ENVELOPE (fTetWild), STUFFING; Klingner-Shewchuk improvement; CDT recovery (Diazzi et al. 2023) |

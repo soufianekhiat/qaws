@@ -120,6 +120,7 @@ typedef struct mf_level
 #define MF_ALONG 1u
 #define MF_ON_LINE 2u
 #define MF_PINNED 4u
+#define MF_PREFER 8u                    /* q drawn toward cq, as much as |cq| times its neighbours together */
 
 typedef struct mf_hier
 {
@@ -130,8 +131,9 @@ typedef struct mf_hier
 /* level 0: the vertices of a triangle store, its edges, normals (NULL: angle-weighted), constraints from its features */
 qaws_status mf_build(mf_hier* h, qaws_hm const* m, double const* normals);
 void mf_free(mf_hier* h);
-/* init (3 per level-0 vertex, zero: none) may be NULL: a preferred start, carried up the levels */
-void mf_orientations(mf_hier* h, unsigned int sweeps, double const* init);
+/* init (3 per level-0 vertex, zero: none) may be NULL: a preferred direction carried up the levels, the start; with pull also
+   a pull on every level as strong as its length (1: as much as the neighbours together) */
+void mf_orientations(mf_hier* h, unsigned int sweeps, double const* init, int pull);
 void mf_positions(mf_hier* h, double scale, unsigned int sweeps);
 /* the 4-symmetric copies of q0 and q1 closest to each other */
 void mf_compat_orientation(double const* q0, double const* n0, double const* q1, double const* n1, double* out0, double* out1);

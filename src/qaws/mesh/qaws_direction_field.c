@@ -504,11 +504,20 @@ static void mf_sweep_q(mf_level* L, unsigned int sweeps)
 				ws += 1;
 				mf_tangent(qi, n);
 			}
+			if (L->con[i] & MF_PREFER)
+			{
+				double a[3], b[3];
+				unsigned int q;
+				mf_compat_orientation(qi, n, L->cq + 3 * (size_t)i, n, a, b);
+				for (q = 0; q < 3; q++)
+					qi[q] = (a[q] + b[q]) * ws;   /* (b as long as cq: |cq| times the neighbours) */
+				mf_tangent(qi, n);
+			}
 			memcpy(L->q + 3 * (size_t)i, qi, sizeof qi);
 		}
 }
 
-void mf_orientations(mf_hier* h, unsigned int sweeps, double const* init)
+void mf_orientations(mf_hier* h, unsigned int sweeps, double const* init, int pull)
 {
 	int l;
 	unsigned int i, k, c;
@@ -516,20 +525,30 @@ void mf_orientations(mf_hier* h, unsigned int sweeps, double const* init)
 	/* a preferred start (level 0) carried up: each vertex its children's, matched to the first one's */
 	if (init)
 	{
-		memcpy(h->lv[0].q, init, sizeof(double) * 3 * h->lv[0].n);
+		mf_level* L0 = &h->lv[0];
+		memcpy(L0->q, init, sizeof(double) * 3 * L0->n);
+		for (i = 0; i < L0->n; i++)
+			if (pull && !(L0->con[i] & MF_ALONG) && (init[3 * (size_t)i] != 0 || init[3 * (size_t)i + 1] != 0 || init[3 * (size_t)i + 2] != 0))
+			{
+				memcpy(L0->cq + 3 * (size_t)i, init + 3 * (size_t)i, sizeof(double) * 3);
+				L0->con[i] |= MF_PREFER;
+			}
 		for (l = 1; l < (int)h->nl; l++)
 		{
 			mf_level *L = &h->lv[l], *F = &h->lv[l - 1];
 			for (i = 0; i < L->n; i++)
 			{
 				double* q = L->q + 3 * (size_t)i;
-				double ref[3] = { 0, 0, 0 };
+				double ref[3] = { 0, 0, 0 }, w = 0;
 				int have = 0;
 				q[0] = q[1] = q[2] = 0;
 				for (c = L->child0[i]; c < L->child0[i + 1]; c++)
 				{
-					double const* cq = F->q + 3 * (size_t)L->child[c];
+					unsigned int ch = L->child[c];
+					double const* cq = F->q + 3 * (size_t)ch;
 					double a[3], b[3];
+					if (F->con[ch] & MF_PREFER)
+						w += sqrt(mf_dot(F->cq + 3 * (size_t)ch, F->cq + 3 * (size_t)ch)) / (L->child0[i + 1] - L->child0[i]);
 					if (cq[0] == 0 && cq[1] == 0 && cq[2] == 0)
 						continue;
 					if (!have)
@@ -537,12 +556,20 @@ void mf_orientations(mf_hier* h, unsigned int sweeps, double const* init)
 						memcpy(ref, cq, sizeof ref);
 						have = 1;
 					}
-					mf_compat_orientation(ref, L->nrm + 3 * (size_t)i, cq, F->nrm + 3 * (size_t)L->child[c], a, b);
+					mf_compat_orientation(ref, L->nrm + 3 * (size_t)i, cq, F->nrm + 3 * (size_t)ch, a, b);
 					for (k = 0; k < 3; k++)
 						q[k] += b[k];
 				}
 				if (have)
+				{
 					mf_tangent(q, L->nrm + 3 * (size_t)i);
+					if (pull && w > 0 && !(L->con[i] & MF_ALONG))
+					{
+						for (k = 0; k < 3; k++)
+							L->cq[3 * (size_t)i + k] = q[k] * w;
+						L->con[i] |= MF_PREFER;
+					}
+				}
 			}
 		}
 	}
@@ -665,7 +692,7 @@ qaws_status qaws_mesh_3d_direction_field(qaws_mesh_3d const* mesh, qaws_directio
 	st = mf_build(&h, m, NULL);
 	if (st != QAWS_STATUS_OK)
 		return st;
-	mf_orientations(&h, desc && desc->sweeps ? desc->sweeps : 8, NULL);
+	mf_orientations(&h, desc && desc->sweeps ? desc->sweeps : 8, NULL, 0);
 	for (v = 0; out_directions && v < m->nv; v++)
 		for (k = 0; k < 3; k++)
 			out_directions[3 * (size_t)v + k] = (qaws_scalar)h.lv[0].q[3 * (size_t)v + k];

@@ -137,12 +137,17 @@ qaws_status qaws_mesh_quadrangulate(qaws_mesh_3d const* mesh, qaws_quadrangulate
   operation leaves a poor triangle poorer. Attributes are transferred from
   the reference's mesh at the footpoints, seams kept per side. `CVT` and
   `FIELD_ALIGNED` are reserved.
-- **INSTANT** quads (Jakob et al. 2015): a dense remesh, a cross field and
-  a lattice position field, the mesh read off them; quad-dominant, or all
-  quads with `pure`. Lattice points are unfolded across creases before
-  their offsets are read, so quads follow sharp edges. `PAIRING`, `SPLIT`,
-  `GLOBAL` (QuadriFlow's consistency, integer-grid maps) and `LAYOUT` are
-  reserved.
+- **INSTANT** quads (Jakob et al. 2015, with QuadriFlow's consistency,
+  Huang et al. 2018): a dense remesh, a cross field (drawn to the
+  principal curvature directions where that leaves fewer singularities)
+  and a lattice position field; the lattice steps between neighbours made
+  to agree round every triangle (dislocations cancelled in pairs along the
+  cheapest paths), the mesh read off them, doublets removed; quad-dominant,
+  or all quads with `pure`. Irregular vertices stay at the field's
+  singularities: a torus is a grid along its parallels, a box's faces are
+  grids. Lattice points are unfolded across creases before their offsets
+  are read, so quads follow sharp edges. `PAIRING`, `SPLIT`, `GLOBAL`
+  (integer-grid maps) and `LAYOUT` are reserved.
 
 ## Meshes of exact geometry
 
@@ -269,8 +274,10 @@ listing figure numbers (`58`) draws those alone.
 
 ## Known limits
 
-- Quads: the read-off keeps the position field's local inconsistencies (a
-  few extra singularities); QuadriFlow's global consistency is `GLOBAL`.
+- Quads: dislocations are paired greedily by cost, not by QuadriFlow's
+  min-cost flow; the field's singularities are those of a smooth field
+  (or one drawn to curvature), not placed for the fewest irregular
+  vertices.
 - Generation: vertices on a trimmed face's trim curve are snapped onto the
   surface, not the curve.
 - Tetrahedra: improvement by flips and smoothing only (no edge removal or

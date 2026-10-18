@@ -6,10 +6,11 @@
  *     footpoint (face 0, u, v), edges near the target; in quads: all quads;
  *     adaptive by a chord tolerance: edges graded within the bounds;
  *   - a rational NURBS torus in quads: closed, genus 1, every vertex on the
- *     torus;
+ *     torus, a grid along its parallels (no irregular vertex);
  *   - a box of six bilinear faces as a shell, in quads: closed, genus 0,
  *     every face on the box face its "face" attribute names, the eight
- *     corners vertices, no vertex near an edge but off it;
+ *     corners vertices, no vertex near an edge but off it, grids on the
+ *     faces (irregular vertices only at the corners);
  *   - refusals: the reserved methods, no description, a negative length.
  */
 
@@ -272,10 +273,10 @@ static void test_torus(void)
 			double rho = sqrt(p[0] * p[0] + p[1] * p[1]);
 			off = fmax(off, fabs(sqrt((rho - 2) * (rho - 2) + p[2] * p[2]) - 0.7));
 		}
-		sprintf(msg, "torus quads: %u faces (%u quads), closed %d genus %u, off the torus %.2e, footpoints to %.2e", t.nf, t.q.quads, t.top.closed,
-			t.top.genus, off, err);
-		TEST_ASSERT(qaws_mesh_3d_validate(m) == QAWS_STATUS_OK && t.q.quads == t.nf && t.nf > 300 && t.top.closed && t.top.genus == 1 && off < 1e-9
-			&& err < 1e-9, msg);
+		sprintf(msg, "torus quads: %u faces (%u quads), %u irregular vertices, closed %d genus %u, off the torus %.2e, footpoints to %.2e", t.nf,
+			t.q.quads, t.q.irregular, t.top.closed, t.top.genus, off, err);
+		TEST_ASSERT(qaws_mesh_3d_validate(m) == QAWS_STATUS_OK && t.q.quads == t.nf && t.nf > 300 && t.q.irregular == 0 && t.top.closed
+			&& t.top.genus == 1 && off < 1e-9 && err < 1e-9, msg);
 		tg_free(&t);
 	}
 	qaws_mesh_3d_destroy(m);
@@ -345,9 +346,9 @@ static void test_box(void)
 			}
 			near += close >= 2 && on < 2;
 		}
-		sprintf(msg, "box quads: %u faces (%u quads), closed %d genus %u, %u corners of 8, %u vertices off their face, %u near an edge but off it, "
-			"footpoints to %.2e", t.nf, t.q.quads, t.top.closed, t.top.genus, corners, offface, near, err);
-		TEST_ASSERT(qaws_mesh_3d_validate(m) == QAWS_STATUS_OK && t.q.quads == t.nf && t.nf > 200 && t.top.closed && t.top.genus == 0
+		sprintf(msg, "box quads: %u faces (%u quads), %u irregular vertices, closed %d genus %u, %u corners of 8, %u vertices off their face, "
+			"%u near an edge but off it, footpoints to %.2e", t.nf, t.q.quads, t.q.irregular, t.top.closed, t.top.genus, corners, offface, near, err);
+		TEST_ASSERT(qaws_mesh_3d_validate(m) == QAWS_STATUS_OK && t.q.quads == t.nf && t.nf > 200 && t.q.irregular == 8 && t.top.closed && t.top.genus == 0
 			&& fa != QAWS_MESH_NONE && offface == 0 && corners == 8 && near == 0 && err < 1e-9, msg);
 		tg_free(&t);
 	}
