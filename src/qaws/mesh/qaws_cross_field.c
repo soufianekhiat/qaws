@@ -24,6 +24,7 @@ struct cf_system
 	double nnz_a;                   /* the matrix's lower triangle */
 	qaws_internal_ldlt f, g;        /* A_FF + 1e-8 M_FF; the relaxation's A_FF + M_FF / geps^2, factored once for its geps */
 	double geps;
+	double *pw, *pg;               /* per vertex (NULL: none): a guide's penalty weight, its value (2) */
 };
 
 static double cf_dot(double const* a, double const* b)
@@ -78,7 +79,7 @@ void cf_free(cf_system* s)
 	if (!s)
 		return;
 	free(s->th); free(s->as); free(s->ar); free(s->rr); free(s->we); free(s->e0); free(s->enb); free(s->ew); free(s->ez);
-	free(s->mass); free(s->u); free(s->id); free(s->b); free(s->x); free(s->cp); free(s->ch);
+	free(s->mass); free(s->u); free(s->id); free(s->b); free(s->x); free(s->cp); free(s->ch); free(s->pw); free(s->pg);
 	qaws_internal_ldlt_free(&s->f);
 	qaws_internal_ldlt_free(&s->g);
 	free(s);
@@ -122,6 +123,8 @@ static qaws_status cf_factor(cf_system* s, double sigma, qaws_internal_ldlt* f)
 			continue;
 		for (k = s->e0[v]; k < s->e0[v + 1]; k++)
 			d += s->ew[k];
+		if (s->pw)
+			d += s->pw[v];
 		p0 = rp[2 * a];
 		p1 = rp[2 * a + 1];
 		cj[p0] = 2 * a;
@@ -148,6 +151,8 @@ done:
 	free(rp); free(cj); free(cx); free(xyz);
 	return st;
 }
+
+static double cf_angle(cf_system const* s, unsigned int v, double const* g);
 
 qaws_status cf_create(qaws_hm const* m, double const* nrm, mf_level const* L0, unsigned int n, cf_system** out)
 {
@@ -358,6 +363,16 @@ qaws_status cf_create(qaws_hm const* m, double const* nrm, mf_level const* L0, u
 				s->held = s->ch[s->cp[v]] = 1;
 				continue;
 			}
+			if (cnt == 0)
+			{
+				/* held off the lines: a guide's direction */
+				double phi = cf_angle(s, v, L0->cq + 3 * (size_t)v);
+				s->u[2 * (size_t)v] = cos(n * phi);
+				s->u[2 * (size_t)v + 1] = sin(n * phi);
+				s->id[v] = HM_NONE;
+				s->held = s->ch[s->cp[v]] = 1;
+				continue;
+			}
 		}
 		s->id[v] = s->nfree++;
 	}
@@ -399,6 +414,11 @@ static void cf_solve(cf_system* s, qaws_internal_ldlt const* f, double const* q,
 		{
 			br = s->mass[v] * q[2 * (size_t)v];
 			bi = s->mass[v] * q[2 * (size_t)v + 1];
+		}
+		if (s->pw)
+		{
+			br += s->pw[v] * s->pg[2 * (size_t)v];
+			bi += s->pw[v] * s->pg[2 * (size_t)v + 1];
 		}
 		for (k = s->e0[v]; k < s->e0[v + 1]; k++)
 		{
@@ -614,6 +634,45 @@ qaws_status cf_aligned(cf_system* s, double const* guide, double* out_q)
 	return QAWS_STATUS_OK;
 }
 
+qaws_status cf_guide(cf_system* s, double const* g)
+{
+	qaws_hm const* m = s->m;
+	unsigned int v, k, any = 0;
+	if (!s->pw)
+	{
+		s->pw = (double*)calloc((size_t)m->nv + 1, sizeof(double));
+		s->pg = (double*)calloc(2 * (size_t)m->nv + 2, sizeof(double));
+		if (!s->pw || !s->pg)
+			return QAWS_STATUS_ALLOCATION_FAILURE;
+	}
+	/* w (the vertex's edge weights) |u - exp(i n phi)|^2: as strong as w times the neighbours together, as LOCAL's pull */
+	for (v = 0; v < m->nv; v++)
+	{
+		double w = sqrt(cf_dot(g + 3 * (size_t)v, g + 3 * (size_t)v)), d = 0, phi;
+		s->pw[v] = 0;
+		if (s->id[v] == HM_NONE || !(w > 0))
+			continue;
+		for (k = s->e0[v]; k < s->e0[v + 1]; k++)
+			d += s->ew[k];
+		phi = cf_angle(s, v, g + 3 * (size_t)v);
+		s->pw[v] = w * d;
+		s->pg[2 * (size_t)v] = cos(s->n * phi);
+		s->pg[2 * (size_t)v + 1] = sin(s->n * phi);
+		s->held = s->ch[s->cp[v]] = 1;   /* (its component then solved once, not for its eigenvector) */
+		any = 1;
+	}
+	if (!any)
+		return QAWS_STATUS_OK;
+	s->loose = 0;
+	for (v = 0; v < m->nv; v++)
+		s->loose |= s->id[v] != HM_NONE && !s->ch[s->cp[v]];
+	qaws_internal_ldlt_free(&s->f);
+	qaws_internal_ldlt_free(&s->g);
+	s->geps = 0;
+	s->nnz_a = 0;
+	return s->nfree ? cf_factor(s, 1e-8, &s->f) : QAWS_STATUS_OK;
+}
+
 /* Ginzburg-Landau by MBO steps (Merriman, Bence, Osher 1994; Viertel, Osting 2019 for cross fields): the last field
    normalized and diffused for a time eps^2 ((A + M / eps^2) v = M u / eps^2, the held values kept), at most steps
    times, until no normalized value moves by 1e-3. The relaxed field's coinciding zeros (a disc held by its border: one
@@ -728,6 +787,16 @@ qaws_status cf_direction_field(qaws_mesh_3d const* mesh, mf_hier const* h, unsig
 	{
 		st = QAWS_STATUS_ALLOCATION_FAILURE;
 		goto done;
+	}
+	for (v = 0; v < m->nv && !(h->lv[0].con[v] & MF_PREFER); v++) {}
+	if (v < m->nv)
+	{
+		/* the guidance's pulls (mf_guide on level 0) as penalties */
+		for (v = 0; v < 3 * m->nv; v++)
+			q[v] = (h->lv[0].con[v / 3] & MF_PREFER) ? h->lv[0].cq[v] : 0;
+		st = cf_guide(sys, q);
+		if (st != QAWS_STATUS_OK)
+			goto done;
 	}
 	if (aligned)
 	{

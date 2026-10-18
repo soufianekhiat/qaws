@@ -23,6 +23,8 @@
  *                      box against the grid, a bent bar, a twisted bar
  *   mesh9..mesh14      quality measures, angle-bounded remeshing, CVT remeshing,
  *                      smoothest cross fields, quads by min-cost flow, quad finishing
+ *   mesh16_guidance.png  quads guided: density paint, a stroke of directions, an
+ *                      edge loop, pinned vertices
  *
  * Each figure lives in meshing_showcase/NN_*.c, compiled as one translation
  * unit with the rasterizer in example_raster.h.

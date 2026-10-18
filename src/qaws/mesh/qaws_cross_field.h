@@ -20,8 +20,12 @@
 typedef struct cf_system cf_system;
 
 /* the n-direction connection Laplacian of m's vertices (unit normals nrm), the held values from L0->con & MF_ALONG (but
-   not MF_PINNED: corners free) along m's feature and border edges, factored once */
+   not MF_PINNED: corners free) along m's feature and border edges, or off them along L0->cq (a held guide), factored once */
 qaws_status cf_create(qaws_hm const* m, double const* nrm, mf_level const* L0, unsigned int n, cf_system** out);
+/* soft guidance (g: 3 per vertex, a tangent direction, its length the weight, 0 none): a penalty w d_v |u_v - g_v|^2 per
+   free vertex (d_v the sum of its edges' weights: w = 1 is as strong as its neighbours together), its component then
+   solved once like a held one; refactors. Call again to replace it */
+qaws_status cf_guide(cf_system* sys, double const* g);
 /* the smoothest field: 3 per vertex, unit tangents (for n = 4 in the mf_level q convention) */
 qaws_status cf_smoothest(cf_system* sys, double* out_q);
 /* the field drawn to guide (3 per vertex, a direction scaled by its strength; 0: none) */

@@ -76,6 +76,12 @@
  *          edges on target; about five times slower than LOCAL.
  *   FIELD_ALIGNED  reserved (UNSUPPORTED_OPERATION today).
  *
+ * Pinned vertices (`pinned`, indices of the input's vertices) are kept as
+ * feature corners are: never moved or collapsed away, at their input
+ * positions, and they come out flagged as corners
+ * (qaws_mesh_3d_is_feature_corner). INVALID_ARGUMENT for an index past the
+ * input's vertices.
+ *
  * The reference is the surface: by default the input's own (PN, its
  * features as creases). Every output vertex keeps its location on the
  * reference (qaws_mesh_3d_get_footpoints), and every attribute of the
@@ -102,6 +108,8 @@ typedef struct qaws_remesh_desc
 	qaws_scalar min_angle;                  /* radians, below 60 degrees; > 0: the angle-bounded pass lifts angles to it */
 	qaws_scalar max_angle;                  /* radians, above 60 degrees; > 0: the angle-bounded pass brings angles under it */
 	qaws_scalar tolerance;                  /* > 0: the distance from the reference no face's sampled points pass */
+	unsigned int const* pinned;             /* input vertices kept where they are, as feature corners (LOCAL and CVT) */
+	unsigned int pinned_count;
 } qaws_remesh_desc;
 
 /* out_report may be NULL */

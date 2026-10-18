@@ -9,7 +9,7 @@
 #include <string.h>
 #include <math.h>
 
-enum { SF_UNIFORM, SF_VERTICES, SF_SAMPLES, SF_CALLBACK, SF_MIN };
+enum { SF_UNIFORM, SF_VERTICES, SF_SAMPLES, SF_CALLBACK, SF_MIN, SF_SCALED };
 
 struct qaws_size_field
 {
@@ -75,6 +75,8 @@ double sf_eval(qaws_size_field const* f, qaws_mesh_location const* l, double con
 		p[0] = (qaws_scalar)x[0]; p[1] = (qaws_scalar)x[1]; p[2] = (qaws_scalar)x[2];
 		return (double)f->fn(f->user, p);
 	}
+	case SF_SCALED:
+		return f->length * sf_eval(f->a, l, x);
 	default:
 	{
 		double u = sf_eval(f->a, l, x), v = sf_eval(f->b, l, x);
@@ -859,6 +861,8 @@ qaws_mesh_reference const* qaws_size_field_get_reference(qaws_size_field const* 
 		return NULL;
 	if (f->kind == SF_VERTICES || f->kind == SF_SAMPLES)
 		return f->ref;
+	if (f->kind == SF_SCALED)
+		return qaws_size_field_get_reference(f->a);
 	if (f->kind != SF_MIN)
 		return NULL;
 	r = qaws_size_field_get_reference(f->a);
@@ -886,5 +890,15 @@ qaws_status qaws_size_field_evaluate(qaws_size_field const* f, qaws_mesh_locatio
 		x[2] = (double)points[3 * (size_t)i + 2];
 		out[i] = (qaws_scalar)sf_eval(f, loc ? &loc[i] : NULL, x);
 	}
+	return QAWS_STATUS_OK;
+}
+
+qaws_status sf_create_scaled(qaws_size_field const* a, double factor, qaws_size_field** out)
+{
+	*out = sf_new(SF_SCALED);
+	if (!*out)
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	(*out)->a = a;
+	(*out)->length = factor;
 	return QAWS_STATUS_OK;
 }

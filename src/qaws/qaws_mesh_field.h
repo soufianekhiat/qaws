@@ -112,6 +112,15 @@ qaws_status qaws_size_field_evaluate(qaws_size_field const* field, qaws_mesh_loc
  * Its index round each face, in 1/n turns, marks the singularities (they
  * sum to n times the Euler characteristic): for crosses -1 and +1 where a
  * quad mesh following the field has vertices of valence 3 and 5.
+ *
+ * Guidance (Instant Meshes' orientation strokes): a direction per vertex
+ * with a weight. A positive weight pulls the field toward it (1: as much as
+ * the vertex's neighbours together; LOCAL on every level, SMOOTHEST as a
+ * penalty w (sum of the vertex's edge weights) |u - g|^2 in the one solve),
+ * a negative or infinite one holds it there (LOCAL keeps it on every level,
+ * SMOOTHEST takes it as a held value), 0 none. Feature lines and the border
+ * win where they meet one. Directions are taken in the tangent plane (one
+ * of the field's n is drawn to it; a direction along the normal is none).
  */
 typedef enum qaws_direction_field_method
 {
@@ -126,6 +135,9 @@ typedef struct qaws_direction_field_desc
 	qaws_direction_field_method method; /* LOCAL: Instant Meshes, the default */
 	int curvature_aligned;              /* SMOOTHEST: drawn to the principal directions where the surface bends one way more
 	                                       than the other (Knoppel's lambda_t = 0) */
+	qaws_scalar const* guide_directions;   /* 3 per vertex, NULL: no guidance; a zero vector: none at that vertex */
+	qaws_scalar const* guide_weights;      /* per vertex: > 0 a pull, < 0 or infinite held, 0 none; NULL: 1 wherever a
+	                                          direction is given */
 } qaws_direction_field_desc;
 
 /* per vertex a unit tangent (3); per face the index round it; either output

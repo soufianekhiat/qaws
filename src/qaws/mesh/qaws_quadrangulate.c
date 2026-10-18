@@ -175,7 +175,7 @@ static qaws_status qd_extract(qaws_hm const* dm, mf_hier const* h, int const* T,
 	mf_level const* L = &h->lv[0];
 	unsigned int n = dm->nv, i, c, f, k, ncl = 0, nt = 0, mask;
 	unsigned int *uf = NULL, *cl = NULL, *member = NULL, *tri = NULL, *hash = NULL, *used = NULL;
-	double *cx = NULL, *cw = NULL;
+	double *cx = NULL, *cw = NULL, *gx = NULL;
 	unsigned char *ckind = NULL, *paired = NULL;
 	qaws_status st = QAWS_STATUS_ALLOCATION_FAILURE;
 	memset(out, 0, sizeof *out);
@@ -184,10 +184,11 @@ static qaws_status qd_extract(qaws_hm const* dm, mf_hier const* h, int const* T,
 	member = (unsigned int*)malloc(sizeof(unsigned int) * (n + 1));
 	cx = (double*)calloc(3 * (size_t)n + 3, sizeof(double));
 	cw = (double*)calloc((size_t)n + 1, sizeof(double));
+	gx = (double*)calloc(4 * (size_t)n + 4, sizeof(double));   /* (per cluster its guide members' lattice points summed, their count) */
 	ckind = (unsigned char*)calloc((size_t)n + 1, 1);
 	tri = (unsigned int*)malloc(sizeof(unsigned int) * (4 * (size_t)dm->nf + 4));
 	paired = (unsigned char*)calloc((size_t)dm->nf + 1, 1);
-	if (!uf || !cl || !member || !cx || !cw || !ckind || !tri || !paired)
+	if (!uf || !cl || !member || !cx || !cw || !gx || !ckind || !tri || !paired)
 		goto done;
 	/* the clusters */
 	for (i = 0; i < n; i++)
@@ -220,7 +221,19 @@ static qaws_status qd_extract(qaws_hm const* dm, mf_hier const* h, int const* T,
 			ckind[q] = 2;
 			member[q] = i;
 		}
-		else if ((L->con[i] & MF_ON_LINE) && ckind[q] < 1)
+		else if (L->con[i] & MF_GUIDE)
+		{
+			/* on a guide line (3, below the creases): placed at its guide members' lattice point */
+			for (k = 0; k < 3; k++)
+				gx[4 * (size_t)q + k] += L->o[3 * (size_t)i + k];
+			gx[4 * (size_t)q + 3] += 1;
+			if (!ckind[q])
+			{
+				ckind[q] = 3;
+				member[q] = i;
+			}
+		}
+		else if ((L->con[i] & MF_ON_LINE) && (ckind[q] < 1 || ckind[q] == 3))
 			ckind[q] = 1;
 	}
 	for (i = 0; i < ncl; i++)
@@ -345,6 +358,13 @@ static qaws_status qd_extract(qaws_hm const* dm, mf_hier const* h, int const* T,
 			memcpy(out->x + 3 * (size_t)q, dm->x + 3 * (size_t)member[i], sizeof(double) * 3);
 			out->foot[q] = dm->foot[member[i]];
 		}
+		else if (ckind[i] == 3)
+		{
+			double g[3];
+			for (k = 0; k < 3; k++)
+				g[k] = gx[4 * (size_t)i + k] / gx[4 * (size_t)i + 3];
+			qd_place(r, s, g, dm->foot[member[i]], 0, out->x + 3 * (size_t)q, &out->foot[q]);
+		}
 		else
 			qd_place(r, s, cx + 3 * (size_t)i, dm->foot[member[i]], ckind[i] != 0, out->x + 3 * (size_t)q, &out->foot[q]);
 		out->kind[q] = ckind[i];
@@ -354,7 +374,7 @@ static qaws_status qd_extract(qaws_hm const* dm, mf_hier const* h, int const* T,
 	st = QAWS_STATUS_OK;
 done:
 	free(uf); free(cl); free(member); free(tri); free(hash); free(used);
-	free(cx); free(cw); free(ckind); free(paired);
+	free(cx); free(cw); free(gx); free(ckind); free(paired);
 	if (st != QAWS_STATUS_OK)
 		qd_out_free(out);
 	return st;
@@ -590,7 +610,7 @@ static qaws_status qd_split(qd_out* o, qaws_mesh_reference const* r, mr_scratch*
 					m2[q] = 0.5 * (o->x[3 * (size_t)a + q] + o->x[3 * (size_t)b + q]);
 					d2 += (o->x[3 * (size_t)a + q] - o->x[3 * (size_t)b + q]) * (o->x[3 * (size_t)a + q] - o->x[3 * (size_t)b + q]);
 				}
-				if (o->kind[a] && o->kind[b])
+				if (o->kind[a] && o->kind[b] && o->kind[a] != 3 && o->kind[b] != 3)
 					along = mr_project_crease(r, m2, o->foot[a].patch, s, &l) < 0.01 * d2;
 				if (along)
 					mr_eval(r, &l, n.x + 3 * (size_t)nv2, NULL);
@@ -602,7 +622,7 @@ static qaws_status qd_split(qd_out* o, qaws_mesh_reference const* r, mr_scratch*
 					mr_eval(r, &l, n.x + 3 * (size_t)nv2, NULL);
 				}
 				n.foot[nv2] = l;
-				n.kind[nv2] = (unsigned char)along;
+				n.kind[nv2] = (unsigned char)(o->kind[a] == 3 && o->kind[b] == 3 ? 3 : along);   /* (along a guide line: on it) */
 				keys[3 * j] = lo; keys[3 * j + 1] = hi; keys[3 * j + 2] = nv2;
 				found = nv2++;
 			}
@@ -819,6 +839,160 @@ static void qd_relax(qaws_hm* m, qaws_mesh_reference const* r, mr_scratch* s, un
 		}
 }
 
+/* The guidance carried onto the dense mesh dm (level 0 of h, normals nrm). Density: each vertex's size at its footpoint,
+   the lattice's spacing (rho becomes the smallest, sc the rest over it). Directions: each dense vertex's from the input
+   vertices of its footpoint's triangle (crosses matched to the first), a pull weighed by the barycentrics (fading to 0
+   at the vertices without one), held where the nearest corner holds. Guide edges: the dense vertices within half a dense
+   edge of a segment held along it and on it (moved onto it, MF_GUIDE). out_soft: the pulls (3 per vertex, weight times
+   direction) for SMOOTHEST, NULL when none. */
+static qaws_status qd_guide(qaws_quadrangulate_desc const* desc, qaws_mesh_3d const* mesh, qaws_mesh_reference const* r, qaws_hm const* dm,
+	double const* nrm, mf_hier* h, double* rho, double** out_soft)
+{
+	mf_level* L = &h->lv[0];
+	unsigned int n = dm->nv, v, i, k, e, any = 0, *band = NULL;
+	double *dir = NULL, *w = NULL, *sz = NULL;
+	qaws_status st = QAWS_STATUS_ALLOCATION_FAILURE;
+	*out_soft = NULL;
+	if (desc->size)
+	{
+		double lo = HUGE_VAL;
+		sz = (double*)malloc(sizeof(double) * (n + 1));
+		if (!sz)
+			return st;
+		for (v = 0; v < n; v++)
+		{
+			sz[v] = sf_eval(desc->size, &dm->foot[v], dm->x + 3 * (size_t)v);
+			if (!(sz[v] > 0) || sz[v] == HUGE_VAL)
+			{
+				free(sz);
+				return QAWS_STATUS_INVALID_ARGUMENT;
+			}
+			lo = sz[v] < lo ? sz[v] : lo;
+		}
+		*rho = n ? lo : *rho;
+		for (v = 0; v < n; v++)
+			sz[v] /= *rho;
+		k = (unsigned int)mf_scales(h, sz);
+		free(sz);
+		if (!k)
+			return st;
+	}
+	if (!desc->guide_directions && !desc->guide_edge_count)
+		return QAWS_STATUS_OK;
+	dir = (double*)calloc(3 * (size_t)n + 3, sizeof(double));
+	w = (double*)calloc((size_t)n + 1, sizeof(double));
+	band = (unsigned int*)malloc(sizeof(unsigned int) * (n + 1));
+	if (!dir || !w || !band)
+		goto done;
+	for (v = 0; desc->guide_directions && v < n; v++)
+	{
+		qaws_mesh_location const* l = &dm->foot[v];
+		unsigned int const* tv = r->tv + 3 * (size_t)l->patch;
+		double bc[3], ref[3], ws = 0, best = -1;
+		int have = 0, hard = 0;
+		bc[0] = 1 - (double)l->a - (double)l->b;
+		bc[1] = (double)l->a;
+		bc[2] = (double)l->b;
+		for (i = 0; i < 3; i++)
+		{
+			double wi = desc->guide_weights ? (double)desc->guide_weights[tv[i]] : 1, d[3], a[3], b[3], dn;
+			int held = !(wi > 0 && wi < HUGE_VAL);
+			for (k = 0; k < 3; k++)
+				d[k] = (double)desc->guide_directions[3 * (size_t)tv[i] + k];
+			dn = qd_dot(d, nrm + 3 * (size_t)v);
+			for (k = 0; k < 3; k++)
+				d[k] -= dn * nrm[3 * (size_t)v + k];
+			dn = sqrt(qd_dot(d, d));
+			if (bc[i] > best)
+			{
+				best = bc[i];
+				hard = 0;
+			}
+			if (wi == 0 || wi != wi || !(dn > 0))
+				continue;
+			hard = bc[i] == best && held;
+			for (k = 0; k < 3; k++)
+				d[k] /= dn;
+			if (!have)
+				memcpy(ref, d, sizeof ref);
+			have = 1;
+			mf_compat_orientation(ref, nrm + 3 * (size_t)v, d, nrm + 3 * (size_t)v, a, b);
+			for (k = 0; k < 3; k++)
+				dir[3 * (size_t)v + k] += bc[i] * (held ? 1 : wi) * b[k];
+			ws += bc[i] * (held ? 1 : wi);
+		}
+		w[v] = hard ? -1 : ws;
+		any |= w[v] != 0;
+	}
+	/* guide edges: the nearest segment within half a dense edge (a third of the lattice's spacing), held along it.
+	   shortcut: every vertex against every segment (with a box test); a grid of the segments when guides get long */
+	for (v = 0; v < n; v++)
+	{
+		double const* x = dm->x + 3 * (size_t)v;
+		double tol = 0.5 * mf_pair_scale(L, v, v, *rho) / 3, bd = tol * tol, bp[3] = { 0, 0, 0 }, bdir[3] = { 0, 0, 0 };
+		band[v] = 0;
+		for (e = 0; e < desc->guide_edge_count; e++)
+		{
+			double const *pa = mesh->hm.x + 3 * (size_t)desc->guide_edges[2 * e], *pb = mesh->hm.x + 3 * (size_t)desc->guide_edges[2 * e + 1];
+			double ab[3], t, d2 = 0, p[3];
+			for (k = 0; k < 3; k++)
+				if (x[k] < fmin(pa[k], pb[k]) - tol || x[k] > fmax(pa[k], pb[k]) + tol)
+					break;
+			if (k < 3)
+				continue;
+			for (k = 0; k < 3; k++)
+				ab[k] = pb[k] - pa[k];
+			t = qd_dot(ab, ab) > 0 ? ((x[0] - pa[0]) * ab[0] + (x[1] - pa[1]) * ab[1] + (x[2] - pa[2]) * ab[2]) / qd_dot(ab, ab) : 0;
+			t = t < 0 ? 0 : t > 1 ? 1 : t;
+			for (k = 0; k < 3; k++)
+			{
+				p[k] = pa[k] + t * ab[k];
+				d2 += (p[k] - x[k]) * (p[k] - x[k]);
+			}
+			if (d2 <= bd && qd_dot(ab, ab) > 0)
+			{
+				bd = d2;
+				memcpy(bp, p, sizeof bp);
+				memcpy(bdir, ab, sizeof bdir);
+				band[v] = 1;
+			}
+		}
+		if (!band[v] || (L->con[v] & MF_ALONG))
+		{
+			band[v] = 0;
+			continue;   /* (a feature line wins) */
+		}
+		memcpy(dir + 3 * (size_t)v, bdir, sizeof bdir);
+		w[v] = -1;
+		memcpy(L->x + 3 * (size_t)v, bp, sizeof bp);
+		any = 1;
+	}
+	if (!any)
+	{
+		st = QAWS_STATUS_OK;
+		goto done;
+	}
+	mf_guide(h, dir, w);
+	for (v = 0; v < n; v++)
+		if (band[v])
+			L->con[v] |= MF_ON_LINE | MF_GUIDE;
+	/* the pulls, as mf_guide left them */
+	for (v = 0; v < n && !(L->con[v] & MF_PREFER); v++) {}
+	if (v < n)
+	{
+		*out_soft = dir;
+		for (v = 0; v < 3 * n; v++)
+			dir[v] = (L->con[v / 3] & MF_PREFER) ? L->cq[v] : 0;
+		dir = NULL;
+	}
+	st = QAWS_STATUS_OK;
+done:
+	free(dir);
+	free(w);
+	free(band);
+	return st;
+}
+
 qaws_status qaws_mesh_quadrangulate(qaws_mesh_3d const* mesh, qaws_quadrangulate_desc const* desc, qaws_mesh_3d** out_mesh, qaws_mesh_report* out_report)
 {
 	qaws_mesh_reference* own = NULL;
@@ -830,7 +1004,8 @@ qaws_status qaws_mesh_quadrangulate(qaws_mesh_3d const* mesh, qaws_quadrangulate
 	mr_scratch s;
 	qd_out o;
 	qaws_mesh_location* fl = NULL;
-	double rho, rf, *nrm = NULL;
+	double rho, rf, *nrm = NULL, *soft = NULL;
+	qaws_size_field* dsize = NULL;
 	int* T = NULL;
 	unsigned char* K = NULL;
 	unsigned int v, f, c, k;
@@ -842,6 +1017,12 @@ qaws_status qaws_mesh_quadrangulate(qaws_mesh_3d const* mesh, qaws_quadrangulate
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	if (desc->method != QAWS_QUADS_INSTANT)
 		return QAWS_STATUS_UNSUPPORTED_OPERATION;
+	for (v = 0; v < desc->pinned_count; v++)
+		if (!desc->pinned || desc->pinned[v] >= mesh->hm.nv)
+			return QAWS_STATUS_INVALID_ARGUMENT;
+	for (v = 0; v < 2 * desc->guide_edge_count; v++)
+		if (!desc->guide_edges || desc->guide_edges[v] >= mesh->hm.nv)
+			return QAWS_STATUS_INVALID_ARGUMENT;
 	memset(&h, 0, sizeof h);
 	memset(&s, 0, sizeof s);
 	memset(&o, 0, sizeof o);
@@ -853,6 +1034,11 @@ qaws_status qaws_mesh_quadrangulate(qaws_mesh_3d const* mesh, qaws_quadrangulate
 		if (st != QAWS_STATUS_OK)
 			return st;
 		r = own;
+	}
+	if (desc->guide_directions && r->mesh->hm.nv != mesh->hm.nv)
+	{
+		qaws_mesh_reference_destroy(own);
+		return QAWS_STATUS_INVALID_ARGUMENT;   /* (directions per input vertex, carried through the reference's triangles) */
 	}
 	rho = (double)desc->target_length;
 	if (rho == 0)
@@ -867,7 +1053,12 @@ qaws_status qaws_mesh_quadrangulate(qaws_mesh_3d const* mesh, qaws_quadrangulate
 	rd.reference = r;
 	rd.target_length = (qaws_scalar)(rf / 3);
 	rd.iterations = 6;
-	st = qaws_mesh_remesh(mesh, &rd, &dense, NULL);
+	rd.pinned = desc->pinned;
+	rd.pinned_count = desc->pinned_count;
+	st = desc->size ? sf_create_scaled(desc->size, 1.0 / 3, &dsize) : QAWS_STATUS_OK;
+	rd.size = dsize;
+	if (st == QAWS_STATUS_OK)
+		st = qaws_mesh_remesh(mesh, &rd, &dense, NULL);
 	if (st != QAWS_STATUS_OK)
 		goto done;
 	/* 2. the fields, with the reference's normals */
@@ -882,6 +1073,10 @@ qaws_status qaws_mesh_quadrangulate(qaws_mesh_3d const* mesh, qaws_quadrangulate
 	st = mf_build(&h, &dense->hm, nrm);
 	if (st != QAWS_STATUS_OK)
 		goto done;
+	st = qd_guide(desc, mesh, r, &dense->hm, nrm, &h, &rho, &soft);
+	if (st != QAWS_STATUS_OK)
+		goto done;
+	rf = rho;
 	{
 		/* the cross field twice from the direction of largest curvature: free (Instant Meshes, along the features), and drawn
 		   to it on every level, as strongly as the surface bends one way more than the other (1 round a cylinder
@@ -915,6 +1110,8 @@ qaws_status qaws_mesh_quadrangulate(qaws_mesh_3d const* mesh, qaws_quadrangulate
 					init[3 * (size_t)v + k] = d1[k] * an;
 				pulled++;
 			}
+			if (soft && (soft[3 * (size_t)v] != 0 || soft[3 * (size_t)v + 1] != 0 || soft[3 * (size_t)v + 2] != 0))
+				memcpy(init + 3 * (size_t)v, soft + 3 * (size_t)v, sizeof(double) * 3);   /* (the user's pull, not the curvature's) */
 		}
 		mf_orientations(&h, desc->sweeps ? desc->sweeps : 8, init, 0);
 		for (total = 0, l = 0; l < h.nl; l++)
@@ -945,7 +1142,7 @@ qaws_status qaws_mesh_quadrangulate(qaws_mesh_3d const* mesh, qaws_quadrangulate
 			}
 			else
 			{
-				if (t == 1 && cf_create(&dense->hm, nrm, &h.lv[0], 4, &sys) != QAWS_STATUS_OK)
+				if (t == 1 && (cf_create(&dense->hm, nrm, &h.lv[0], 4, &sys) != QAWS_STATUS_OK || (soft && cf_guide(sys, soft) != QAWS_STATUS_OK)))
 					break;
 				if (t == 2 && !pulled)
 					break;
@@ -1061,6 +1258,8 @@ qaws_status qaws_mesh_quadrangulate(qaws_mesh_3d const* mesh, qaws_quadrangulate
 			if (mr_project_crease(r, mid, out->hm.foot[a].patch, &s, &l) < 0.01 * d2)
 				out->hm.cflag[c] |= HM_FEATURE;
 		}
+		for (v = 0; v < out->hm.nv; v++)
+			kind[v] = kind[v] == 3 ? 2 : kind[v];   /* (guide lines held by the relaxation and the finishing, not corners) */
 		qd_relax(&out->hm, r, &s, kind, 10); if (qi_improve(&out->hm, r, &s, kind, rho, 4) == HM_NONE) { free(kind); st = QAWS_STATUS_ALLOCATION_FAILURE; goto done; }
 		free(kind);
 	}
@@ -1088,6 +1287,8 @@ qaws_status qaws_mesh_quadrangulate(qaws_mesh_3d const* mesh, qaws_quadrangulate
 done:
 	free(fl);
 	free(nrm);
+	free(soft);
+	qaws_size_field_destroy(dsize);
 	free(T);
 	free(K);
 	qd_out_free(&o);

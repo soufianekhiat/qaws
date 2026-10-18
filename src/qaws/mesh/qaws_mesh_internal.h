@@ -91,6 +91,8 @@ void mr_eval(qaws_mesh_reference const* r, qaws_mesh_location const* l, double* 
 /* ---- size fields -------------------------------------------------------- */
 
 double sf_eval(qaws_size_field const* f, qaws_mesh_location const* l, double const* x);
+/* a times factor (a must outlive it) */
+qaws_status sf_create_scaled(qaws_size_field const* a, double factor, qaws_size_field** out);
 
 /* the reference mesh's attributes onto m, at its vertices' footpoints and its faces' centre locations fl (remeshing, quads) */
 qaws_status mx_transfer(qaws_hm* m, qaws_mesh_reference const* r, qaws_mesh_location const* fl);
@@ -115,12 +117,14 @@ typedef struct mf_level
 	double *q, *o;
 	double* cq;                     /* constraint direction (zero: none) */
 	unsigned char* con;             /* MF_ALONG: q along cq; MF_ON_LINE: o on the line x + t cq; MF_PINNED: o at x */
+	double* sc;                     /* the lattice's local spacing over the scale (NULL: 1 everywhere; mf_scales) */
 } mf_level;
 
 #define MF_ALONG 1u
 #define MF_ON_LINE 2u
 #define MF_PINNED 4u
 #define MF_PREFER 8u                    /* q drawn toward cq, as much as |cq| times its neighbours together */
+#define MF_GUIDE 16u                    /* on a user's guide line (with MF_ALONG and MF_ON_LINE), not a crease */
 
 typedef struct mf_hier
 {
@@ -135,6 +139,13 @@ void mf_free(mf_hier* h);
    a pull on every level as strong as its length (1: as much as the neighbours together) */
 void mf_orientations(mf_hier* h, unsigned int sweeps, double const* init, int pull);
 void mf_positions(mf_hier* h, double scale, unsigned int sweeps);
+/* user guidance on level 0, carried up the levels: per vertex a direction (3) and a weight w (> 0: MF_PREFER, cq the
+   direction made tangent times w; < 0 or infinite: MF_ALONG; 0: none); vertices already MF_ALONG keep theirs */
+void mf_guide(mf_hier* h, double const* dir, double const* w);
+/* per level-0 vertex the lattice's spacing over the scale (all positive), carried up area-weighted; 0 on allocation failure */
+int mf_scales(mf_hier* h, double const* s0);
+/* the spacing between vertices i and j of L at the scale: scale times their mean sc */
+double mf_pair_scale(mf_level const* L, unsigned int i, unsigned int j, double scale);
 /* the 4-symmetric copies of q0 and q1 closest to each other */
 void mf_compat_orientation(double const* q0, double const* n0, double const* q1, double const* n1, double* out0, double* out1);
 /* the lattice points of (q0, o0) and (q1, o1) closest to each other near x0 and x1 */

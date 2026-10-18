@@ -438,6 +438,56 @@ pairs two edges apart and lone cones; the can's rims keep slivers with
 three crease vertices in a row (SJ near 0 or below), which only a collapse
 along the crease would remove.
 
+### Guiding the mesh
+What a modelling tool's user steers with (Instant Meshes' strokes and
+painting). All of it is arrays appended to the descs; zeroed fields keep
+today's results exactly (tests 125, 126, 133 to 135 unchanged to the byte).
+
+```c
+qaws_quadrangulate_desc d = {0};
+d.target_length = 0.12f;
+d.pure = 1;
+d.size = painted;                    /* qaws_size_field_create_vertices on d.reference */
+d.guide_directions = dirs;           /* 3 per input vertex, zero: none */
+d.guide_weights = weights;           /* > 0 pull (1: as much as the neighbours), < 0 or inf held, 0 none */
+d.guide_edges = loop;                /* pairs of input vertices */
+d.guide_edge_count = n_loop;
+d.pinned = pins;                     /* input vertices */
+d.pinned_count = n_pins;
+qaws_mesh_quadrangulate(mesh, &d, &quads, &report);
+```
+
+| Input | Field | What honours it |
+|---|---|---|
+| Density paint | `qaws_quadrangulate_desc.size` | the dense remesh graded by a third of it; the lattice's spacing per vertex (positions, steps, refit at each pair's mean spacing); faces whose spacings differ by over 2% may keep a dislocation (the extra row a graded lattice needs) at the price of three unit changes, so they are not sheared away; with `pure` its pentagons go through the twice-and-split path |
+| Directions | `guide_directions`, `guide_weights` in `qaws_direction_field_desc` and `qaws_quadrangulate_desc` | LOCAL: MF_PREFER (pull) or MF_ALONG (hold) on level 0, carried up every level; SMOOTHEST: a held value, or a penalty w d_v \|u - g\|^2 (d_v the vertex's edge weights) in the one factor; quads: carried to the dense mesh through each vertex's footpoint triangle (pulls fade across it, holds cover the dense vertices nearest a held input vertex), every candidate field honours it |
+| Edge loops | `guide_edges`, `guide_edge_count` | the dense vertices within half a dense edge of a segment moved onto it, held along it and on one lattice line (MF_GUIDE), the flow changing their steps along the line only; their quad vertices placed at their lattice points on it and held by the relaxation and the finishing; not creases, never flagged as features |
+| Pinned vertices | `pinned`, `pinned_count` (also `qaws_remesh_desc`) | LOCAL and CVT keep them as corners (never moved, collapsed or placed); the lattice holds a point there (MF_PINNED); the quad vertex is the input vertex exactly, flagged a corner |
+
+Measured (test 137, figure 16, a latitude-longitude unit sphere of 1106
+vertices):
+- density 0.08 above the equator, 0.16 below, all quads: mean edges 0.081
+  and 0.137 away from the transition (without the dislocations: 0.088 and
+  0.110), every quad's scaled Jacobian above 0.68, 33 irregular vertices;
+- a stroke round the equator at 30 degrees to it: the field on the stroke
+  within 0.01 degrees (LOCAL, pulled or held) and 0.07 (SMOOTHEST, the mesh
+  normals against the sphere's); the quads' edges there 8.5 degrees off its
+  crosses on average, 17.0 without it (14 irregular against 8);
+- a parallel as guide edges at 0.12: every segment within 0.003 of a quad
+  edge (0.06 without), all quads, 8 irregular;
+- pins: the quad, LOCAL and CVT vertices at the input positions to the bit,
+  flagged corners.
+
+Limits: a pull and a hold are honoured by the field, not by the lattice: a
+lattice turned against the sphere's natural one ends rows near the stroke,
+so the quads there are a few degrees off and add 3-5 pairs. Density
+transitions are dislocations (pentagons, or 3-5 pairs after the split), not
+smooth gradings; the finishing's length energy and guards use the smallest
+painted size. Guide edges are matched to dense vertices by a brute-force
+search (every vertex against every segment); crossing loops get no pinned
+crossing; a loop through a cone of the field cannot stay one lattice line.
+Directions need the reference made from the input.
+
 ## Measures
 
 ```c

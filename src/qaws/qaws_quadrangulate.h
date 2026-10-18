@@ -2,6 +2,7 @@
 #define QAWS_QUADRANGULATE_H
 
 #include "qaws_mesh_reference.h"
+#include "qaws_mesh_field.h"
 
 /*
  * Quadrangulation: a quad mesh of a surface, its edges near a target
@@ -43,6 +44,29 @@
  * As remeshing: footpoints kept, the reference mesh's attributes
  * transferred, the input unchanged. The report counts the singularities
  * (`quality.irregular`) and the faces by size.
+ *
+ * Guidance (INSTANT; all of it indexes the input's vertices):
+ *   size        density paint: the quads' edges follow the field (as
+ *               remeshing's, over target_length): the dense mesh graded
+ *               by it, the lattice's spacing per vertex (Instant Meshes'
+ *               position field at a local scale); where the spacing
+ *               changes the lattice needs extra rows, which the flow lets
+ *               end there (each a pentagon or a 3-5 pair).
+ *   guide_directions, guide_weights  as the direction field's guidance
+ *               (qaws_mesh_field.h), carried to the dense mesh through its
+ *               footpoints (a pull fades across the triangles round its
+ *               vertex, a hold covers the dense vertices nearest it); every
+ *               candidate field honours it. Needs the reference made from
+ *               the input (INVALID_ARGUMENT otherwise).
+ *   guide_edges edge loops: pairs of input vertices, segments the quads'
+ *               edges run along without their being creases (Instant
+ *               Meshes' edge strokes): the dense vertices within half a
+ *               dense edge of one held along it, their lattice points on
+ *               one lattice line, its quad vertices placed on the segments
+ *               and kept there by the relaxation and the finishing.
+ *   pinned      input vertices that become quad vertices where they are
+ *               (the dense remesh keeps them, as LOCAL does, the lattice
+ *               holds a point there); they come out as feature corners.
  */
 
 typedef enum qaws_quad_method
@@ -61,6 +85,13 @@ typedef struct qaws_quadrangulate_desc
 	qaws_scalar target_length;              /* the quads' edges; 0: twice the input's mean edge */
 	int pure;                               /* all quads */
 	unsigned int sweeps;                    /* field smoothing sweeps per level; 0: 8 */
+	qaws_size_field const* size;            /* density: the quads' edges, over target_length; on `reference` when sampled on one */
+	qaws_scalar const* guide_directions;    /* 3 per input vertex (NULL: none) */
+	qaws_scalar const* guide_weights;       /* per input vertex: > 0 a pull, < 0 or infinite held, 0 none; NULL: 1 where given */
+	unsigned int const* guide_edges;        /* pairs of input vertices: segments quad edges run along */
+	unsigned int guide_edge_count;
+	unsigned int const* pinned;             /* input vertices kept as quad vertices */
+	unsigned int pinned_count;
 } qaws_quadrangulate_desc;
 
 qaws_status qaws_mesh_quadrangulate(qaws_mesh_3d const* mesh, qaws_quadrangulate_desc const* desc, qaws_mesh_3d** out_mesh,

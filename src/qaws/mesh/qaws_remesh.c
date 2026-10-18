@@ -650,8 +650,8 @@ static int rm_place(rmsh* w, unsigned int c, double* y, qaws_mesh_location* l)
 {
 	qaws_hm const* m = w->m;
 	unsigned int a = m->cv[c], b = hm_to(m, c), fa = hm_feature_degree(m, a), fb = hm_feature_degree(m, b);
-	if ((fa || fb) && (!(m->cflag[c] & HM_FEATURE) || fa != 2 || fb != 2 || ((m->vflag[a] | m->vflag[b]) & HM_CORNER)))
-		return 0;
+	if (((fa || fb) && (!(m->cflag[c] & HM_FEATURE) || fa != 2 || fb != 2)) || ((m->vflag[a] | m->vflag[b]) & HM_CORNER))
+		return 0;   /* (a corner stays, a pinned one off the lines too) */
 	return rm_mid(w, c, y, l);
 }
 
@@ -1967,6 +1967,9 @@ qaws_status qaws_mesh_remesh(qaws_mesh_3d const* mesh, qaws_remesh_desc const* d
 	if (desc->min_angle < 0 || desc->max_angle < 0 || desc->tolerance < 0 || (desc->min_angle > 0 && (double)desc->min_angle >= RM_PI / 3)
 		|| (desc->max_angle > 0 && (double)desc->max_angle <= RM_PI / 3) || (desc->min_angle > 0 && desc->max_angle > 0 && desc->min_angle >= desc->max_angle))
 		return QAWS_STATUS_INVALID_ARGUMENT;
+	for (it = 0; it < desc->pinned_count; it++)
+		if (!desc->pinned || desc->pinned[it] >= mesh->hm.nv)
+			return QAWS_STATUS_INVALID_ARGUMENT;
 	memset(&w, 0, sizeof w);
 	w.r = desc->reference;
 	w.tol = desc->tolerance > 0 ? (double)desc->tolerance : 0;
@@ -2013,6 +2016,9 @@ qaws_status qaws_mesh_remesh(qaws_mesh_3d const* mesh, qaws_remesh_desc const* d
 	relax = desc->size || w.tol > 0 || desc->min_angle > 0 || desc->max_angle > 0 ? 3 : 1;
 	iterations = desc->method == QAWS_REMESH_CVT ? 10 : desc->iterations ? desc->iterations : 10;
 	st = rm_begin(&w, mesh, &out);
+	/* pinned vertices: corners (never moved or collapsed away) */
+	for (it = 0; st == QAWS_STATUS_OK && it < desc->pinned_count; it++)
+		w.m->vflag[desc->pinned[it]] |= HM_CORNER;
 	for (it = 0; st == QAWS_STATUS_OK && it < iterations && !w.failed; it++)
 	{
 		unsigned int ops = w.rep.splits + w.rep.collapses + w.rep.flips, sweep, flips = ~0u;

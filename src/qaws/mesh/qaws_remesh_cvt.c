@@ -546,7 +546,7 @@ static int rv_count(rv_cvt* w, double nstar, int lines)
 			{
 				x = side ? a : b;
 				y = side ? b : a;
-				if (!hm_feature_degree(m, x) && rv_can_remove(w, cc, x, y))
+				if (!hm_feature_degree(m, x) && !(m->vflag[x] & HM_CORNER) && rv_can_remove(w, cc, x, y))
 					break;
 			}
 			if (side == 2)
@@ -1204,7 +1204,7 @@ static int rv_seeds(rv_cvt* w)
 			w->locked[i] = 1;   /* (an isolated vertex, or one off the reference, holds no cell) */
 			if (m->vc[i] == HM_NONE || m->foot[i].patch >= w->r->nt)
 				continue;
-			w->locked[i] = hm_feature_degree(m, i) != 0;
+			w->locked[i] = hm_feature_degree(m, i) != 0 || (m->vflag[i] & HM_CORNER);   /* (a pinned corner off the lines too) */
 			if (!w->locked[i])
 			{
 				if (pass == 1)

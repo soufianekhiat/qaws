@@ -185,7 +185,7 @@ void mf_compat_position(double const* x0, double const* n0, double const* q0, do
 static void mf_level_free(mf_level* L)
 {
 	free(L->x); free(L->nrm); free(L->area); free(L->adj0); free(L->adj); free(L->parent);
-	free(L->child0); free(L->child); free(L->q); free(L->o); free(L->cq); free(L->con);
+	free(L->child0); free(L->child); free(L->q); free(L->o); free(L->cq); free(L->con); free(L->sc);
 	memset(L, 0, sizeof *L);
 }
 
@@ -420,7 +420,11 @@ qaws_status mf_build(mf_hier* h, qaws_hm const* m, double const* normals)
 			n++;
 		}
 		if (n == 0)
+		{
+			if (m->vflag[v] & HM_CORNER)
+				L->con[v] = MF_PINNED;   /* (a corner off the lines: a pinned vertex) */
 			continue;
+		}
 		{
 			double* q = L->cq + 3 * (size_t)v;
 			unsigned int k;
@@ -621,7 +625,7 @@ static void mf_settle(mf_level* L, unsigned int i, double* o, double scale)
 			o[k] = x[k] + d * c[k];
 	}
 	mf_cross(n, q, t);
-	mf_lattice(o, q, t, x, scale, 1, o);
+	mf_lattice(o, q, t, x, L->sc ? scale * L->sc[i] : scale, 1, o);
 }
 
 static void mf_sweep_o(mf_level* L, double scale, unsigned int sweeps)
@@ -638,7 +642,8 @@ static void mf_sweep_o(mf_level* L, double scale, unsigned int sweeps)
 				unsigned int j = L->adj[k];
 				double qa[3], qb[3], a[3], b[3], d;
 				mf_compat_orientation(qi, n, L->q + 3 * (size_t)j, L->nrm + 3 * (size_t)j, qa, qb);
-				mf_compat_position(x, n, qi, sum, L->x + 3 * (size_t)j, L->nrm + 3 * (size_t)j, qb, L->o + 3 * (size_t)j, scale, a, b);
+				mf_compat_position(x, n, qi, sum, L->x + 3 * (size_t)j, L->nrm + 3 * (size_t)j, qb, L->o + 3 * (size_t)j,
+					mf_pair_scale(L, i, j, scale), a, b);
 				for (q = 0; q < 3; q++)
 					sum[q] = (a[q] * ws + b[q]) / (ws + 1);
 				ws += 1;
@@ -672,6 +677,106 @@ void mf_positions(mf_hier* h, double scale, unsigned int sweeps)
 	}
 }
 
+double mf_pair_scale(mf_level const* L, unsigned int i, unsigned int j, double scale)
+{
+	return L->sc ? 0.5 * scale * (L->sc[i] + L->sc[j]) : scale;
+}
+
+int mf_scales(mf_hier* h, double const* s0)
+{
+	unsigned int l, i, c;
+	for (l = 0; l < h->nl; l++)
+	{
+		mf_level *L = &h->lv[l], *F = l ? &h->lv[l - 1] : NULL;
+		free(L->sc);
+		L->sc = (double*)malloc(sizeof(double) * (L->n + 1));
+		if (!L->sc)
+			return 0;
+		for (i = 0; i < L->n; i++)
+		{
+			double s = 0, a = 0;
+			if (!F)
+			{
+				L->sc[i] = s0[i];
+				continue;
+			}
+			for (c = L->child0[i]; c < L->child0[i + 1]; c++)
+			{
+				unsigned int ch = L->child[c];
+				double w = F->area[ch] > 0 ? F->area[ch] : 1e-300;
+				s += w * F->sc[ch];
+				a += w;
+			}
+			L->sc[i] = s / a;
+		}
+	}
+	return 1;
+}
+
+void mf_guide(mf_hier* h, double const* dir, double const* w)
+{
+	mf_level* L0 = &h->lv[0];
+	unsigned int l, i, c, k;
+	for (i = 0; i < L0->n; i++)
+	{
+		double* q = L0->cq + 3 * (size_t)i;
+		double d = mf_dot(dir + 3 * (size_t)i, L0->nrm + 3 * (size_t)i), t[3];
+		if (w[i] == 0 || w[i] != w[i] || (L0->con[i] & MF_ALONG))
+			continue;
+		for (k = 0; k < 3; k++)
+			t[k] = dir[3 * (size_t)i + k] - d * L0->nrm[3 * (size_t)i + k];
+		if (mf_unit(t) == 0)
+			continue;   /* (along the normal: none) */
+		for (k = 0; k < 3; k++)
+			q[k] = w[i] > 0 && w[i] < HUGE_VAL ? t[k] * w[i] : t[k];
+		L0->con[i] |= w[i] > 0 && w[i] < HUGE_VAL ? MF_PREFER : MF_ALONG;
+	}
+	/* up: held by a held child (as the lines are), else drawn to its drawn children's directions, as strongly as their mean */
+	for (l = 1; l < h->nl; l++)
+	{
+		mf_level *L = &h->lv[l], *F = &h->lv[l - 1];
+		for (i = 0; i < L->n; i++)
+		{
+			double sum[3] = { 0, 0, 0 }, ref[3], wsum = 0;
+			unsigned int n = L->child0[i + 1] - L->child0[i], have = 0;
+			if (L->con[i] & MF_ALONG)
+				continue;
+			for (c = L->child0[i]; c < L->child0[i + 1]; c++)
+			{
+				unsigned int ch = L->child[c];
+				double const* cq = F->cq + 3 * (size_t)ch;
+				double a[3], b[3], u[3];
+				if (F->con[ch] & MF_ALONG)
+				{
+					memcpy(L->cq + 3 * (size_t)i, cq, sizeof(double) * 3);
+					mf_tangent(L->cq + 3 * (size_t)i, L->nrm + 3 * (size_t)i);
+					L->con[i] = (unsigned char)((L->con[i] & ~MF_PREFER) | MF_ALONG);
+					break;
+				}
+				if (!(F->con[ch] & MF_PREFER))
+					continue;
+				wsum += sqrt(mf_dot(cq, cq)) / n;
+				memcpy(u, cq, sizeof u);
+				mf_unit(u);
+				if (!have)
+				{
+					memcpy(ref, u, sizeof ref);
+					have = 1;
+				}
+				mf_compat_orientation(ref, L->nrm + 3 * (size_t)i, u, F->nrm + 3 * (size_t)ch, a, b);
+				for (k = 0; k < 3; k++)
+					sum[k] += b[k];
+			}
+			if (c < L->child0[i + 1] || !have)
+				continue;
+			mf_tangent(sum, L->nrm + 3 * (size_t)i);
+			for (k = 0; k < 3; k++)
+				L->cq[3 * (size_t)i + k] = sum[k] * wsum;
+			L->con[i] |= MF_PREFER;
+		}
+	}
+}
+
 /* ======================================================================== */
 /*  The public cross field                                                  */
 /* ======================================================================== */
@@ -694,6 +799,27 @@ qaws_status qaws_mesh_3d_direction_field(qaws_mesh_3d const* mesh, qaws_directio
 	st = mf_build(&h, m, NULL);
 	if (st != QAWS_STATUS_OK)
 		return st;
+	if (desc && desc->guide_directions)
+	{
+		/* the guidance on every level (SMOOTHEST takes level 0's: held values and penalties) */
+		double *g = (double*)malloc(sizeof(double) * 3 * (m->nv + 1)), *w = (double*)malloc(sizeof(double) * (m->nv + 1));
+		if (!g || !w)
+		{
+			free(g);
+			free(w);
+			mf_free(&h);
+			return QAWS_STATUS_ALLOCATION_FAILURE;
+		}
+		for (v = 0; v < m->nv; v++)
+		{
+			for (k = 0; k < 3; k++)
+				g[3 * (size_t)v + k] = (double)desc->guide_directions[3 * (size_t)v + k];
+			w[v] = desc->guide_weights ? (double)desc->guide_weights[v] : 1;
+		}
+		mf_guide(&h, g, w);
+		free(g);
+		free(w);
+	}
 	if (smoothest)
 	{
 		/* one global solve (qaws_cross_field.c), the hierarchy's level 0 for the lines and normals */

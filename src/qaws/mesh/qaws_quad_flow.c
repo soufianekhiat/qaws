@@ -50,29 +50,30 @@ void qf_steps(qaws_hm const* dm, mf_level const* L, double rho, int* T, unsigned
 	for (c = 0; c < dm->nc; c++)
 	{
 		unsigned int a, b, o = dm->co[c];
-		double ob[3], xb[3], d[3], g[3], t[3];
+		double ob[3], xb[3], d[3], g[3], t[3], re;
 		if (dm->cf[c] == HM_NONE || (o != HM_NONE && o < c))
 			continue;
 		a = dm->cv[c];
 		b = hm_to(dm, c);
+		re = mf_pair_scale(L, a, b, rho);
 		K[c] = (unsigned char)mf_rotation(L->q + 3 * (size_t)a, L->nrm + 3 * (size_t)a, L->q + 3 * (size_t)b, L->nrm + 3 * (size_t)b);
 		mf_unfold(L->x + 3 * (size_t)a, L->nrm + 3 * (size_t)a, L->x + 3 * (size_t)b, L->nrm + 3 * (size_t)b, L->o + 3 * (size_t)b, ob);
 		mf_unfold(L->x + 3 * (size_t)a, L->nrm + 3 * (size_t)a, L->x + 3 * (size_t)b, L->nrm + 3 * (size_t)b, L->x + 3 * (size_t)b, xb);
 		for (k = 0; k < 3; k++)
 			d[k] = ob[k] - L->o[3 * (size_t)a + k];
 		qf_cross(L->nrm + 3 * (size_t)a, L->q + 3 * (size_t)a, t);
-		T[2 * (size_t)c] = (int)floor(qf_dot(d, L->q + 3 * (size_t)a) / rho + 0.5);
-		T[2 * (size_t)c + 1] = (int)floor(qf_dot(d, t) / rho + 0.5);
+		T[2 * (size_t)c] = (int)floor(qf_dot(d, L->q + 3 * (size_t)a) / re + 0.5);
+		T[2 * (size_t)c + 1] = (int)floor(qf_dot(d, t) / re + 0.5);
 		/* each end's place in its cell, in a's frame (the lattice points' own step is whole but for noise) */
 		for (k = 0; k < 3; k++)
 		{
 			d[k] = L->x[3 * (size_t)a + k] - L->o[3 * (size_t)a + k];
 			g[k] = xb[k] - ob[k];
 		}
-		Tc[4 * (size_t)c] = qf_dot(d, L->q + 3 * (size_t)a) / rho;
-		Tc[4 * (size_t)c + 1] = qf_dot(d, t) / rho;
-		Tc[4 * (size_t)c + 2] = qf_dot(g, L->q + 3 * (size_t)a) / rho;
-		Tc[4 * (size_t)c + 3] = qf_dot(g, t) / rho;
+		Tc[4 * (size_t)c] = qf_dot(d, L->q + 3 * (size_t)a) / re;
+		Tc[4 * (size_t)c + 1] = qf_dot(d, t) / re;
+		Tc[4 * (size_t)c + 2] = qf_dot(g, L->q + 3 * (size_t)a) / re;
+		Tc[4 * (size_t)c + 3] = qf_dot(g, t) / re;
 		if (o != HM_NONE)
 		{
 			int m[2];
@@ -129,6 +130,8 @@ static long long qf_cost(int t, double fa, double fb, int s, int second)
    border; closing, the cones too, at a price). rec per arc: corner * 4 + component * 2 + (1: lowers the step), HM_NONE
    for a cone's arcs to the sink. */
 #define QF_CONE 3000000
+#define QF_SLIP 3000000                 /* a dislocation left where the lattice's spacing changes (its extra row ends there) */
+#define QF_GRADED 0.02                  /* across a face whose spacings differ by more (relatively) */
 typedef struct qf_net
 {
 	qaws_flow* flow;
@@ -167,8 +170,8 @@ static qaws_status qf_network(qaws_hm const* dm, mf_level const* L, int const* T
 	memset(net, 0, sizeof *net);
 	for (c = 0; c < dm->nc; c++)
 		ne += dm->cf[c] != HM_NONE && (dm->co[c] == HM_NONE || c < dm->co[c]);
-	st = qaws_flow_create(2 * nf + 1, 8 * ne + 6 * nf + 1, &net->flow);
-	net->rec = (unsigned int*)malloc(sizeof(unsigned int) * (8 * (size_t)ne + 6 * (size_t)nf + 1));
+	st = qaws_flow_create(2 * nf + 1, 8 * ne + 10 * nf + 1, &net->flow);
+	net->rec = (unsigned int*)malloc(sizeof(unsigned int) * (8 * (size_t)ne + 10 * (size_t)nf + 1));
 	if (st != QAWS_STATUS_OK || !net->rec)
 	{
 		qf_net_free(net);
@@ -184,6 +187,15 @@ static qaws_status qf_network(qaws_hm const* dm, mf_level const* L, int const* T
 		/* feature and border edges are lattice lines: steps along themselves only */
 		lined = o == HM_NONE || ((dm->cflag[c] | dm->cflag[o]) & HM_FEATURE);
 		ax = lined ? qf_axis(dm, L, c) : 0;
+		if (!lined && (L->con[dm->cv[c]] & L->con[hm_to(dm, c)] & MF_GUIDE))
+		{
+			/* between two vertices of a guide line (either side of it): steps along the line only */
+			double tq[3];
+			double const* cq = L->cq + 3 * (size_t)dm->cv[c];
+			qf_cross(L->nrm + 3 * (size_t)dm->cv[c], L->q + 3 * (size_t)dm->cv[c], tq);
+			lined = 1;
+			ax = fabs(qf_dot(cq, L->q + 3 * (size_t)dm->cv[c])) >= fabs(qf_dot(cq, tq)) ? 0 : 1;
+		}
 		for (j = 0; j < 2; j++)
 		{
 			unsigned int nF, nG, P, Q, a, k;
@@ -236,6 +248,28 @@ static qaws_status qf_network(qaws_hm const* dm, mf_level const* L, int const* T
 				net->na = a + 1;
 			}
 		}
+	/* a graded lattice needs extra rows (dislocations) where its spacing changes: a face there may keep one, at a price (a
+	   few edges' changes: pairs of slips the field left by noise still close) */
+	for (j = 0; !parity && L->sc && j < nf; j++)
+	{
+		double lo = HUGE_VAL, hi = 0;
+		if (sing[j])
+			continue;
+		for (c = dm->fc[j]; c < dm->fc[j] + 3; c++)
+		{
+			lo = fmin(lo, L->sc[dm->cv[c]]);
+			hi = fmax(hi, L->sc[dm->cv[c]]);
+		}
+		for (c = 0; hi > (1 + QF_GRADED) * lo && c < 4; c++)
+		{
+			unsigned int a = qaws_flow_arc(net->flow, c & 1 ? Z : 2 * j + (c >> 1), c & 1 ? 2 * j + (c >> 1) : Z, 1, QF_SLIP);
+			if (a != QAWS_FLOW_NONE)
+			{
+				net->rec[a] = HM_NONE;
+				net->na = a + 1;
+			}
+		}
+	}
 	return QAWS_STATUS_OK;
 }
 
@@ -791,7 +825,7 @@ void qf_refit(qaws_hm const* dm, mf_level* L, double rho, int const* T, unsigned
 				double ob[3];
 				mf_unfold(xa, na, L->x + 3 * (size_t)b, L->nrm + 3 * (size_t)b, L->o + 3 * (size_t)b, ob);
 				for (k = 0; k < 3; k++)
-					sum[k] += ob[k] - rho * (t[0] * qa[k] + t[1] * ta[k]);
+					sum[k] += ob[k] - mf_pair_scale(L, a, b, rho) * (t[0] * qa[k] + t[1] * ta[k]);
 				n++;
 				last = c;
 			}
@@ -808,7 +842,7 @@ void qf_refit(qaws_hm const* dm, mf_level* L, double rho, int const* T, unsigned
 					qf_turn(m, K[p], t);
 					mf_unfold(xa, na, L->x + 3 * (size_t)b, L->nrm + 3 * (size_t)b, L->o + 3 * (size_t)b, ob);
 					for (k = 0; k < 3; k++)
-						sum[k] += ob[k] - rho * (t[0] * qa[k] + t[1] * ta[k]);
+						sum[k] += ob[k] - mf_pair_scale(L, a, b, rho) * (t[0] * qa[k] + t[1] * ta[k]);
 					n++;
 				}
 			}
