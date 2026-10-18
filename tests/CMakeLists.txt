@@ -129,6 +129,7 @@ add_executable(
   125_quadrangulate.c
   126_mesh_generate.c
   127_tetrahedralize.c
+  128_hexahedralize.c
 )
 
 # The amalgamated library exports exactly the same symbols, so the tests can

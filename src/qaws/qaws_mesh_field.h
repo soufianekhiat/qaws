@@ -76,4 +76,28 @@ typedef struct qaws_direction_field_desc
 qaws_status qaws_mesh_3d_direction_field(qaws_mesh_3d const* mesh, qaws_direction_field_desc const* desc, qaws_scalar* out_directions,
 	int* out_face_index);
 
+/*
+ * Frame fields in volumes: per tetrahedron an octahedral frame (three
+ * orthonormal axes, one with its 24 turns that map a cube to itself),
+ * smooth across facets, the cells on the border holding an axis along its
+ * normal (two where they touch two faces of the border meeting square),
+ * smoothed by Gauss-Seidel on the cells' stored adjacency, each neighbour's
+ * frame matched to the cell's (the signed permutation of its axes nearest)
+ * before averaging. An edge is singular where the matchings round it
+ * compose to a turn: hexahedra following the field meet there three or five
+ * round an edge.
+ */
+typedef struct qaws_frame_field_desc
+{
+	unsigned int sweeps;                /* 0: 60 */
+} qaws_frame_field_desc;
+
+struct qaws_volume_mesh;
+
+/* per cell three unit axes (9); per cell its singular edges (may be NULL):
+   bit e for edge e of 0-1, 0-2, 0-3, 1-2, 1-3, 2-3; tetrahedral meshes only
+   (UNSUPPORTED_OPERATION otherwise); desc NULL: the defaults */
+qaws_status qaws_volume_mesh_frame_field(struct qaws_volume_mesh const* mesh, qaws_frame_field_desc const* desc, qaws_scalar* out_frames,
+	unsigned char* out_singular);
+
 #endif /* QAWS_MESH_FIELD_H */

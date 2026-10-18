@@ -139,6 +139,7 @@ extern int test_124_remesh_main(void);
 extern int test_125_quadrangulate_main(void);
 extern int test_126_mesh_generate_main(void);
 extern int test_127_tetrahedralize_main(void);
+extern int test_128_hexahedralize_main(void);
 
 /* Test registry */
 typedef struct {
@@ -275,6 +276,7 @@ static test_suite const g_test_suites[] = {
 	{"125_quadrangulate", test_125_quadrangulate_main},
 	{"126_mesh_generate", test_126_mesh_generate_main},
 	{"127_tetrahedralize", test_127_tetrahedralize_main},
+	{"128_hexahedralize", test_128_hexahedralize_main},
 };
 
 int main(void) {

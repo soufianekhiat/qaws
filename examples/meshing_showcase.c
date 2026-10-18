@@ -17,6 +17,8 @@
  *                      quads and adaptive, a NURBS torus, a shell of six faces
  *   mesh6_tets.png     tetrahedra filling closed surfaces, cut open: a torus, a box,
  *                      a blob
+ *   mesh7_hexes.png    hexahedra on a grid padded to the surface (a box, a torus) and
+ *                      the torus's frame field with its singular edges
  *
  * Each figure lives in meshing_showcase/NN_*.c, compiled as one translation
  * unit with the rasterizer in example_raster.h.
@@ -153,6 +155,7 @@ static void ms_panel(er_canvas* c, int x, int y, int w, int h, qaws_mesh_3d cons
 #include "meshing_showcase/04_quads.c"
 #include "meshing_showcase/05_generate.c"
 #include "meshing_showcase/06_tets.c"
+#include "meshing_showcase/07_hexes.c"
 
 int main(void)
 {
@@ -164,5 +167,6 @@ int main(void)
 	demo_quads();
 	demo_generate();
 	demo_tets();
+	demo_hexes();
 	return 0;
 }
