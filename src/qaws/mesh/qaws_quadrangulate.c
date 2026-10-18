@@ -1061,7 +1061,7 @@ qaws_status qaws_mesh_quadrangulate(qaws_mesh_3d const* mesh, qaws_quadrangulate
 			if (mr_project_crease(r, mid, out->hm.foot[a].patch, &s, &l) < 0.01 * d2)
 				out->hm.cflag[c] |= HM_FEATURE;
 		}
-		qd_relax(&out->hm, r, &s, kind, 30);
+		qd_relax(&out->hm, r, &s, kind, 10); if (qi_improve(&out->hm, r, &s, kind, rho, 4) == HM_NONE) { free(kind); st = QAWS_STATUS_ALLOCATION_FAILURE; goto done; }
 		free(kind);
 	}
 	/* 4. attributes and the report */

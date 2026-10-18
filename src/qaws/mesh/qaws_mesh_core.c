@@ -1408,3 +1408,171 @@ unsigned int hm_feature_degree(qaws_hm const* m, unsigned int v)
 		n += (m->cflag[hm_prev(m, last)] & HM_FEATURE) != 0;
 	return n;
 }
+
+/* ======================================================================== */
+/*  Quad operations (Tarini et al. 2010)                                    */
+/* ======================================================================== */
+
+/* the hexagon round the two quads at c's edge (a, b): b, f2, f3, a, g2, g3 counter-clockwise (f = a b f2 f3, g = b a g2 g3);
+   0 when the faces are not two quads sharing only that edge */
+static int hm_hexagon(qaws_hm const* m, unsigned int c, unsigned int* h)
+{
+	unsigned int d = m->co[c], i, j;
+	if (d == HM_NONE || m->cf[c] == m->cf[d] || m->fn[m->cf[c]] != 4 || m->fn[m->cf[d]] != 4)
+		return 0;
+	h[0] = hm_to(m, c);
+	h[1] = m->cv[hm_next(m, hm_next(m, c))];
+	h[2] = m->cv[hm_prev(m, c)];
+	h[3] = m->cv[c];
+	h[4] = m->cv[hm_next(m, hm_next(m, d))];
+	h[5] = m->cv[hm_prev(m, d)];
+	for (i = 0; i < 6; i++)
+		for (j = i + 1; j < 6; j++)
+			if (h[i] == h[j])
+				return 0;
+	return 1;
+}
+
+/* an end keeping three edges (two on the border) */
+static int hm_keeps(qaws_hm const* m, unsigned int v)
+{
+	return hm_valence(m, v) >= 4u - (unsigned int)hm_is_border_vertex(m, v);
+}
+
+int hm_can_rotate(qaws_hm const* m, unsigned int c, int dir)
+{
+	unsigned int h[6], p, q;
+	if (c >= m->nc || m->cf[c] == HM_NONE || (m->cflag[c] & HM_FEATURE) || !hm_hexagon(m, c, h))
+		return 0;
+	p = dir > 0 ? h[1] : h[5];
+	q = dir > 0 ? h[4] : h[2];
+	if (((m->vflag[h[0]] | m->vflag[h[3]] | m->vflag[p] | m->vflag[q]) & HM_CORNER) || hm_find_edge(m, p, q) != HM_NONE)
+		return 0;
+	return hm_keeps(m, h[0]) && hm_keeps(m, h[3]);
+}
+
+int hm_rotate(qaws_hm* m, unsigned int c, int dir)
+{
+	unsigned int h[6], kf, kg, s = dir > 0 ? 1 : 5, i, j;
+	if (!hm_can_rotate(m, c, dir))
+		return 0;
+	hm_hexagon(m, c, h);
+	pb_reset(m);
+	kf = pb_old(m, m->cf[c]);
+	kg = pb_old(m, m->cf[m->co[c]]);
+	/* the hexagon cut from h[s] to h[s + 3]; each corner from the old face it was in (f: h0..h3) */
+	for (i = 0; i < 2; i++)
+	{
+		pb_face(m, i ? kg : kf);
+		for (j = 0; j < 4; j++)
+		{
+			unsigned int at = (s + 3 * i + j) % 6;
+			pb_copy(m, h[at], at <= 3 ? kf : kg, 0);
+		}
+	}
+	return hm_replace(m, HM_NONE, HM_NONE);
+}
+
+int hm_can_collapse_diagonal(qaws_hm const* m, unsigned int f, unsigned int k)
+{
+	unsigned int c0, A, B, C, D, c, e;
+	if (f >= m->nf || (m->fflag[f] & HM_DELETED) || m->fn[f] != 4 || k > 3)
+		return 0;
+	c0 = m->fc[f];
+	A = m->cv[c0 + k];
+	B = m->cv[c0 + (k + 1) % 4];
+	C = m->cv[c0 + (k + 2) % 4];
+	D = m->cv[c0 + (k + 3) % 4];
+	if (A == C || B == D || ((m->vflag[A] | m->vflag[C]) & HM_CORNER))
+		return 0;
+	/* C goes: inside, off the features (A keeps the lines it is on) */
+	if (hm_is_border_vertex(m, C) || hm_feature_degree(m, C) || !hm_keeps(m, B) || !hm_keeps(m, D) || hm_valence(m, A) + hm_valence(m, C) < 5)
+		return 0;
+	/* C's neighbours but B and D not A's, and no face but f holds both */
+	for (c = m->vc[C]; c != HM_NONE; c = hm_round(m, C, c))
+	{
+		unsigned int w = hm_to(m, c), h = m->cf[c];
+		if (w != B && w != D && (w == A || hm_find_edge(m, w, A) != HM_NONE))
+			return 0;
+		if (h != f)
+			for (e = m->fc[h]; e < m->fc[h] + m->fn[h]; e++)
+				if (m->cv[e] == A)
+					return 0;
+	}
+	return 1;
+}
+
+int hm_collapse_diagonal(qaws_hm* m, unsigned int f, unsigned int k, double const* x)
+{
+	unsigned int A, C, c, e, i;
+	double t = 0, l = 0;
+	if (!hm_can_collapse_diagonal(m, f, k))
+		return 0;
+	A = m->cv[m->fc[f] + k];
+	C = m->cv[m->fc[f] + (k + 2) % 4];
+	pb_reset(m);
+	/* C's faces but f keep their indices, A for C; f goes */
+	for (c = m->vc[C]; c != HM_NONE; c = hm_round(m, C, c))
+		if (m->cf[c] != f)
+			pb_old(m, m->cf[c]);
+	pb_old(m, f);
+	for (i = 0; i + 1 < m->pb.nold && !m->pb.failed; i++)
+	{
+		unsigned int h = m->pb.old[i];
+		pb_face(m, i);
+		for (e = m->fc[h]; e < m->fc[h] + m->fn[h]; e++)
+		{
+			pb_corner(m, m->cv[e] == C ? A : m->cv[e], 0);
+			pb_src(m, pb_cpos(m, i, e), 1);
+		}
+	}
+	if (m->pb.failed || !hm_replace(m, C, A))
+		return 0;
+	/* A's vertex attributes from A's and C's, at x's place along A to C */
+	for (i = 0; i < m->dim; i++)
+	{
+		double u = m->x[(size_t)m->dim * C + i] - m->x[(size_t)m->dim * A + i];
+		t += (x[i] - m->x[(size_t)m->dim * A + i]) * u;
+		l += u * u;
+	}
+	t = l > 0 ? t / l : 0;
+	t = t < 0 ? 0 : t > 1 ? 1 : t;
+	for (i = 0; i < m->na; i++)
+		if (m->attr[i].element == QAWS_MESH_VERTEX)
+			hm_lerp(hm_attr_at(m, i, A), hm_attr_at(m, i, A), hm_attr_at(m, i, C), t, m->attr[i].n, m->attr[i].rule);
+	for (i = 0; i < m->dim; i++)
+		m->x[(size_t)m->dim * A + i] = x[i];
+	hm_kill_vertex(m, C);
+	return 1;
+}
+
+int hm_remove_doublet(qaws_hm* m, unsigned int v)
+{
+	unsigned int c, d, a, b, x, y, kf, kg;
+	if (v >= m->nv || m->vc[v] == HM_NONE || (m->vflag[v] & (HM_DELETED | HM_CORNER)) || hm_is_border_vertex(m, v) || hm_valence(m, v) != 2
+		|| hm_feature_degree(m, v))
+		return 0;
+	/* f = v a x b and g = v b y a become a x b y */
+	c = m->vc[v];
+	d = hm_ccw(m, c);
+	if (d == HM_NONE || m->cf[c] == m->cf[d] || m->fn[m->cf[c]] != 4 || m->fn[m->cf[d]] != 4)
+		return 0;
+	a = hm_to(m, c);
+	x = m->cv[hm_next(m, hm_next(m, c))];
+	b = m->cv[hm_prev(m, c)];
+	y = m->cv[hm_next(m, hm_next(m, d))];
+	if (hm_to(m, d) != b || m->cv[hm_prev(m, d)] != a || a == b || x == y || hm_valence(m, a) < 3 || hm_valence(m, b) < 3)
+		return 0;
+	pb_reset(m);
+	kf = pb_old(m, m->cf[c]);
+	kg = pb_old(m, m->cf[d]);
+	pb_face(m, kf);
+	pb_copy(m, a, kf, 0);
+	pb_copy(m, x, kf, 0);
+	pb_copy(m, b, kf, 0);
+	pb_copy(m, y, kg, 0);
+	if (!hm_replace(m, HM_NONE, HM_NONE))
+		return 0;
+	hm_kill_vertex(m, v);
+	return 1;
+}

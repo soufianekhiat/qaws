@@ -150,4 +150,19 @@ unsigned int hm_feature_degree(qaws_hm const* m, unsigned int v);   /* feature e
 qaws_status hm_mesh_3d_create(double const* x, unsigned int nv, unsigned int const* fv, unsigned int const* fs, unsigned int nf,
 	qaws_mesh_3d** out_mesh);
 
+/* ---- quad operations: 0 and nothing changed when illegal (a border or
+   feature edge, a corner vertex, a non-manifold result, two faces sharing
+   more than the edge) or on allocation failure ------------------------- */
+
+/* the edge of corner c, between two quads, turned to the next (dir +1) or previous (-1) diagonal of their hexagon: the
+   edge's ends lose an edge, the new diagonal's gain one; the same turn back restores the faces and their indices */
+int hm_can_rotate(qaws_hm const* m, unsigned int c, int dir);
+int hm_rotate(qaws_hm* m, unsigned int c, int dir);
+/* quad f's corners k and k + 2 merged at x (the quad removed): corner k's vertex stays, k + 2's (inside, off the features)
+   goes; the other two lose an edge */
+int hm_can_collapse_diagonal(qaws_hm const* m, unsigned int f, unsigned int k);
+int hm_collapse_diagonal(qaws_hm* m, unsigned int f, unsigned int k, double const* x);
+/* an interior vertex of valence 2 between two quads (off the features): the two merged into one */
+int hm_remove_doublet(qaws_hm* m, unsigned int v);
+
 #endif /* QAWS_MESH_CORE_H */

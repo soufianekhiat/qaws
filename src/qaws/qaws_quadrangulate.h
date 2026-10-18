@@ -28,7 +28,12 @@
  *            Quad-dominant; `pure` makes all quads at the target spacing, or
  *            where that leaves another face, from fields at twice the target
  *            with every face split in four. Relaxation on the
- *            reference follows, creases and the border along themselves.
+ *            reference follows, creases and the border along themselves;
+ *            then finishing: valence pairs cancelled by local quad
+ *            operations (edge rotations, diagonal collapses, doublets)
+ *            against a feature-aware ideal valence (a box's corners keep
+ *            3), and the quads relaxed by their angles on the reference,
+ *            no move lowering the scaled Jacobian round it.
  *            The default.
  *   PAIRING, SPLIT, GLOBAL, LAYOUT  reserved (UNSUPPORTED_OPERATION today):
  *            triangles paired by matching, all-quad splitting, integer-grid

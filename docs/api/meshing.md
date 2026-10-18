@@ -431,6 +431,45 @@ six (before: e280d24 on the same inputs):
 
 Figure 13's blob (figure 4's, its coordinates rounded otherwise) gives 11
 and 12 (were 8 and 12). Consistency takes about 0.5 s on 50k dense faces.
+### Quad finishing
+INSTANT's quads are finished before the attributes are transferred
+(`src/qaws/mesh/qaws_quad_improve.c`, internal; no public change):
+- **Ideal valence** per vertex: 4 inside; on a crease, the border or a
+  corner, the quads its corner angles hold (an n-gon's corner counts as
+  n - 2 of n straight angles), plus one on the border. A box's corners want
+  3, its edges 4, a straight border 3, a square corner 2. E sums the
+  squared deviations.
+- **Operations** on the corner store (`qaws_mesh_core.h`): `hm_rotate` (the
+  edge between two quads turned to the next or previous diagonal of their
+  hexagon; turned back, the same faces at the same indices),
+  `hm_collapse_diagonal` (a quad's opposite corners merged, the quad
+  removed) and `hm_remove_doublet` (a vertex of valence 2 between two quads),
+  each with its legality check: border and feature edges, corner vertices,
+  non-manifold results and faces sharing more than the edge are refused;
+  feature flags and corner attributes are kept.
+- **Cancellation** round the vertices off their ideal, the largest drop of
+  E first. An operation is made only when E drops with no more vertices off
+  their ideal, corners keep their valence, line vertices never go below
+  theirs, and its patch, relaxed on a copy first, keeps its smallest scaled
+  Jacobian (at least max(0.3, before - 0.1), no lower where it was poorer)
+  with no face newly turned against the reference. Where no operation alone
+  helps, a rotation and a second operation beside it.
+- **Relaxation** on the reference, vertex by vertex while their
+  neighbourhoods move (at most 30 sweeps): a free vertex goes to the better
+  of Zhou and Shimada's angle target and a Newton step down its corners'
+  angle energy, walked; a line vertex to the middle of its line neighbours
+  along the creases; no move lowers the scaled Jacobian round the vertex.
+  Then the quads under 0.5, worst first, their free vertices searched in
+  eight directions.
+Measured (test 135, figure 14), all quads: the can at 0.14 from 22 to 20
+irregular vertices, SJ mean 0.966 to 0.974, angle deviation 5.8 to 4.3
+degrees; the blob at 0.11 keeps 12, SJ min 0.72 to 0.83, angle deviation
+5.7 to 4.7; the wavy patch keeps 4, angle deviation 4.6 to 3.6; about 10 to
+15% more time. The box keeps its 8 corners of valence 3, the tori stay
+grids. Limits: the singularities INSTANT leaves are mostly 3-5 pairs two
+edges apart and lone cones, which no local operation (nor two) cancels; the
+can's rims keep slivers with three crease vertices in a row (SJ near 0 or
+below), which only a collapse along the crease would remove.
 
 ## Meshes of exact geometry
 
