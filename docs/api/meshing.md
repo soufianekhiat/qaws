@@ -329,6 +329,47 @@ a smooth part about as thin as the size, with no crease along its rim
 there, as LOCAL does; near locked corners and borders angles reach 29
 degrees; a surface curved tighter than twice the size loses the coarse
 level (about 80% valence 6 instead of 95%) and pays for it in time.
+### LOCAL: quality by default, bounded angles, a distance guard
+qaws_remesh_desc d;
+memset(&d, 0, sizeof d);                       /* LOCAL, defaults */
+d.target_length = 0.11f;
+d.min_angle = (qaws_scalar)(35 * M_PI / 180);  /* optional: Wang et al. 2019's bounds */
+d.max_angle = (qaws_scalar)(86 * M_PI / 180);
+d.tolerance = 2e-3f;                           /* optional: Mmgs's hausd */
+qaws_mesh_remesh(mesh, &d, &out, &report);
+By default LOCAL now does what pmp, geometry-central and Mmgs do:
+relaxation to the ring's area centroid weighted by the size field (a
+graded mesh keeps its grading), collapses onto the edge's midpoint on the
+reference (or on the crease) and refused when a corner would open past 120
+degrees, flips toward each sector's ideal valence (a smooth crease side or
+a straight border wants 3 faces of 60 degrees) refused when they lower the
+smallest angle below 30, needles collapsed, caps flipped, Delaunay flips to
+finish, and a stop once nothing changes. The new fields are appended to
+`qaws_remesh_desc`; zero keeps the defaults.
+- `min_angle`, `max_angle` (radians, either may be 0) run the
+  angle-bounded pass after the loop: rounds over the worst faces, large
+  angles cut by a flip, moved away (a pattern search over the face's
+  corners) or split away (the longest edge split, the flip round the new
+  vertex that settles best), small ones collapsed, flipped or moved away;
+  an operation is kept only when the worst angle of its star gets better
+  and no angle inside the bounds leaves them. At border, crease and corner
+  vertices a sector of angle theta is exempt when no whole k has theta / k
+  inside the bounds (a 20-degree wedge is; a cube's 90-degree sector is
+  not). `INVALID_ARGUMENT` for a negative value, `min_angle` of 60 degrees
+  or more, `max_angle` of 60 or less, or `min_angle >= max_angle`.
+- `tolerance` (> 0): no collapse, flip or move leaves a face whose centre
+  or edge midpoints are farther than it from the reference; edges whose
+  midpoint is farther are split whatever their length; faces still farther
+  (quarter points sampled too) have the straying edge split at the end. It
+  wins over the angle bounds.
+Measured (test 131, figure 10): the can of test 125 at 0.12 runs 34.0 to
+106.2 degrees by default (27.2 to 117.4 before); the blob at 0.11 has its
+mean edge 1.5% over the target (7% under before), 82.4% of its vertices of
+valence 6 (78%), all Delaunay; with [35, 86] every angle of the icosphere,
+the blob, the adaptive bumped sphere and the can is inside, and the can
+fits [30, 90]; with a tolerance of 2e-3 every sampled point of the blob is
+within it (25% more vertices). The angle pass costs about 1.2 times the
+default remesh.
 
 ## Meshes of exact geometry
 

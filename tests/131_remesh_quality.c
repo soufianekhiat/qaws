@@ -1,14 +1,795 @@
 /*
- * Test 131: remeshing quality (to come)
+ * Test 131: remeshing quality (LOCAL's defaults, the angle-bounded pass, the
+ * distance guard)
+ *
+ *   - default: the can of test 125 (8 sides, creases at 50 degrees) within
+ *     [30, 110] degrees; the bumpy blob of showcase figure 2 with its mean
+ *     edge within 4% of the target, 80% of its vertices of valence 6, 99%
+ *     of valence 5 to 7, 99% of its edges Delaunay; the adaptive bumped
+ *     sphere of test 124 twice as fine on the bump as far from it;
+ *   - angles bounded to [35, 86] degrees (Wang et al. 2019's defaults) on an
+ *     icosphere, the blob and the adaptive sphere, 98% of valence 5 to 7,
+ *     the mean edge within 10% of the target (the uniform ones); [30, 90]
+ *     and [35, 86] on the can, corners out of bounds only in exempt
+ *     sectors; a cube's corners and creases kept through the pass;
+ *   - a tolerance of 2e-3 on the blob: every sampled point (face centres,
+ *     edge midpoints and quarter points) within it;
+ *   - in every mode: corners kept, crease vertices on creases, footpoints
+ *     evaluated, valid, closed, genus kept;
+ *   - refusals; timings printed.
+ *
+ * Measured when written (all targets met): the can 34.0..106.2 degrees
+ * (27.2..117.4 before); the blob's mean edge +1.5% (-7%), valence 6 at
+ * 82.4% (78%), Delaunay 100%; every bounded case 0 corners out; the
+ * tolerance held at 2.000e-3 with 25% more vertices; the angle pass about
+ * 1.2 times the default remesh's time.
  */
 
 #include "test_common.h"
+#include "qaws_remesh.h"
+#include <math.h>
+#include <string.h>
+#include <stdlib.h>
+#include <time.h>
+
+static qaws_mesh_3d* rq_make(double const* x, unsigned int nv, unsigned int const* f, unsigned int const* fs, unsigned int nf)
+{
+	qaws_mesh_3d_desc d;
+	qaws_mesh_3d* m = NULL;
+	qaws_scalar* p = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * nv);
+	unsigned int i;
+	for (i = 0; i < 3 * nv; i++)
+		p[i] = (qaws_scalar)x[i];
+	memset(&d, 0, sizeof d);
+	d.positions = p;
+	d.vertex_count = nv;
+	d.face_vertices = f;
+	d.face_sizes = fs;
+	d.face_count = nf;
+	qaws_mesh_3d_create(&d, &m);
+	free(p);
+	return m;
+}
+
+/* test 124's icosahedron split once, on the unit sphere, with its radial normals */
+static qaws_mesh_3d* rq_icosphere(qaws_scalar* normals)
+{
+	static unsigned int const f0[60] = { 0, 11, 5, 0, 5, 1, 0, 1, 7, 0, 7, 10, 0, 10, 11, 1, 5, 9, 5, 11, 4, 11, 10, 2, 10, 7, 6, 7, 1, 8,
+		3, 9, 4, 3, 4, 2, 3, 2, 6, 3, 6, 8, 3, 8, 9, 4, 9, 5, 2, 4, 11, 6, 2, 10, 8, 6, 7, 9, 8, 1 };
+	double g = (1 + sqrt(5.0)) / 2, x[3 * 42];
+	double const v0[36] = { -1, g, 0, 1, g, 0, -1, -g, 0, 1, -g, 0, 0, -1, g, 0, 1, g, 0, -1, -g, 0, 1, -g, g, 0, -1, g, 0, 1, -g, 0, -1, -g, 0, 1 };
+	unsigned int f[240], keys[3 * 30], nk = 0, nv = 12, nf = 0, i, j, q, k;
+	memcpy(x, v0, sizeof v0);
+	for (i = 0; i < 20; i++)
+	{
+		unsigned int e[3];
+		for (j = 0; j < 3; j++)
+		{
+			unsigned int a = f0[3 * i + j], b = f0[3 * i + (j + 1) % 3], lo = a < b ? a : b, hi = a < b ? b : a;
+			e[j] = 0xFFFFFFFFu;
+			for (q = 0; q < nk; q++)
+				if (keys[3 * q] == lo && keys[3 * q + 1] == hi)
+					e[j] = keys[3 * q + 2];
+			if (e[j] == 0xFFFFFFFFu)
+			{
+				for (k = 0; k < 3; k++)
+					x[3 * nv + k] = 0.5 * (x[3 * a + k] + x[3 * b + k]);
+				keys[3 * nk] = lo; keys[3 * nk + 1] = hi; keys[3 * nk + 2] = nv;
+				e[j] = nv++;
+				nk++;
+			}
+		}
+		{
+			unsigned int a = f0[3 * i], b = f0[3 * i + 1], c = f0[3 * i + 2];
+			unsigned int t[12] = { a, e[0], e[2], e[0], b, e[1], e[2], e[1], c, e[0], e[1], e[2] };
+			memcpy(f + 3 * nf, t, sizeof t);
+			nf += 4;
+		}
+	}
+	for (i = 0; i < nv; i++)
+	{
+		double r = sqrt(x[3 * i] * x[3 * i] + x[3 * i + 1] * x[3 * i + 1] + x[3 * i + 2] * x[3 * i + 2]);
+		for (k = 0; k < 3; k++)
+		{
+			x[3 * i + k] /= r;
+			if (normals)
+				normals[3 * i + k] = (qaws_scalar)x[3 * i + k];
+		}
+	}
+	return rq_make(x, nv, f, NULL, nf);
+}
+
+/* test 124's icosphere bumped at its pole */
+static qaws_mesh_3d* rq_bumped(void)
+{
+	qaws_mesh_3d* m = rq_icosphere(NULL);
+	unsigned int nv = qaws_mesh_3d_get_vertex_count(m), i;
+	qaws_scalar* p = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * nv);
+	qaws_mesh_3d_get_positions(m, p);
+	for (i = 0; i < nv; i++)
+	{
+		double d = p[3 * i] * p[3 * i] + p[3 * i + 1] * p[3 * i + 1] + (p[3 * i + 2] - 1) * (p[3 * i + 2] - 1), s = 1 + 0.6 * exp(-6 * d);
+		p[3 * i] = (qaws_scalar)(p[3 * i] * s);
+		p[3 * i + 1] = (qaws_scalar)(p[3 * i + 1] * s);
+		p[3 * i + 2] = (qaws_scalar)(p[3 * i + 2] * s);
+	}
+	qaws_mesh_3d_set_positions(m, p);
+	free(p);
+	return m;
+}
+
+/* showcase figure 2's blob: the icosahedron split once by edge splits and flips, pushed in and out smoothly */
+static qaws_mesh_3d* rq_blob(void)
+{
+	static unsigned int const f[60] = { 0, 11, 5, 0, 5, 1, 0, 1, 7, 0, 7, 10, 0, 10, 11, 1, 5, 9, 5, 11, 4, 11, 10, 2, 10, 7, 6, 7, 1, 8,
+		3, 9, 4, 3, 4, 2, 3, 2, 6, 3, 6, 8, 3, 8, 9, 4, 9, 5, 2, 4, 11, 6, 2, 10, 8, 6, 7, 9, 8, 1 };
+	double g = (1 + sqrt(5.0)) / 2, x[36];
+	double const v[36] = { -1, g, 0, 1, g, 0, -1, -g, 0, 1, -g, 0, 0, -1, g, 0, 1, g, 0, -1, -g, 0, 1, -g, g, 0, -1, g, 0, 1, -g, 0, -1, -g, 0, 1 };
+	qaws_mesh_3d* m;
+	unsigned int i, n, ne, nv0, vn;
+	unsigned int *e, *src;
+	qaws_scalar* p;
+	for (i = 0; i < 36; i++)
+		x[i] = v[i] / sqrt(1 + g * g);
+	m = rq_make(x, 12, f, NULL, 20);
+	ne = qaws_mesh_3d_get_edge_count(m);
+	nv0 = qaws_mesh_3d_get_vertex_count(m);
+	e = (unsigned int*)malloc(sizeof(unsigned int) * 2 * ne);
+	src = (unsigned int*)malloc(sizeof(unsigned int) * 2 * ne);
+	qaws_mesh_3d_get_edges(m, e);
+	for (i = 0; i < ne; i++)
+		if (qaws_mesh_3d_split_edge(m, e[2 * i], e[2 * i + 1], NULL, NULL, &vn) == QAWS_STATUS_OK)
+		{
+			src[2 * (vn - nv0)] = e[2 * i];
+			src[2 * (vn - nv0) + 1] = e[2 * i + 1];
+		}
+	free(e);
+	ne = qaws_mesh_3d_get_edge_count(m);
+	e = (unsigned int*)malloc(sizeof(unsigned int) * 2 * ne);
+	qaws_mesh_3d_get_edges(m, e);
+	for (i = 0; i < ne; i++)
+	{
+		unsigned int a = e[2 * i], b = e[2 * i + 1], nw, old;
+		if ((a >= nv0) == (b >= nv0))
+			continue;
+		nw = a >= nv0 ? a : b;
+		old = a >= nv0 ? b : a;
+		if (old != src[2 * (nw - nv0)] && old != src[2 * (nw - nv0) + 1] && qaws_mesh_3d_can_flip_edge(m, a, b))
+			qaws_mesh_3d_flip_edge(m, a, b);
+	}
+	free(e);
+	free(src);
+	n = qaws_mesh_3d_get_vertex_count(m);
+	p = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * n);
+	qaws_mesh_3d_get_positions(m, p);
+	for (i = 0; i < n; i++)
+	{
+		double q[3], l, s;
+		q[0] = p[3 * i]; q[1] = p[3 * i + 1]; q[2] = p[3 * i + 2];
+		l = sqrt(q[0] * q[0] + q[1] * q[1] + q[2] * q[2]);
+		q[0] /= l; q[1] /= l; q[2] /= l;
+		s = 1 + 0.32 * sin(2.2 * q[0] + 0.4) * cos(1.7 * q[1]) + 0.2 * q[2] * q[2];
+		p[3 * i] = (qaws_scalar)(q[0] * 1.25 * s);
+		p[3 * i + 1] = (qaws_scalar)(q[1] * s);
+		p[3 * i + 2] = (qaws_scalar)(q[2] * 0.9 * s);
+	}
+	qaws_mesh_3d_set_positions(m, p);
+	free(p);
+	return m;
+}
+
+/* test 125's can: 8 sides, its rims creases (the sides meet at 45 degrees, under the 50 detected) */
+static qaws_mesh_3d* rq_can(void)
+{
+	unsigned int n = 8, i, k = 0;
+	double x[3 * 18];
+	unsigned int fv[3 * 32];
+	qaws_mesh_3d* can;
+	for (i = 0; i < n; i++)
+	{
+		double a = 2 * M_PI * i / n;
+		x[3 * i] = cos(a); x[3 * i + 1] = sin(a); x[3 * i + 2] = -0.8;
+		x[3 * (n + i)] = cos(a); x[3 * (n + i) + 1] = sin(a); x[3 * (n + i) + 2] = 0.8;
+	}
+	x[6 * n] = 0; x[6 * n + 1] = 0; x[6 * n + 2] = -0.8;
+	x[6 * n + 3] = 0; x[6 * n + 4] = 0; x[6 * n + 5] = 0.8;
+	for (i = 0; i < n; i++)
+	{
+		unsigned int a = i, b = (i + 1) % n;
+		fv[k++] = a; fv[k++] = b; fv[k++] = n + b;
+		fv[k++] = a; fv[k++] = n + b; fv[k++] = n + a;
+		fv[k++] = 2 * n; fv[k++] = b; fv[k++] = a;
+		fv[k++] = 2 * n + 1; fv[k++] = n + a; fv[k++] = n + b;
+	}
+	can = rq_make(x, 2 * n + 2, fv, NULL, 4 * n);
+	qaws_mesh_3d_detect_features(can, (qaws_scalar)(50 * M_PI / 180), 0, 0);
+	return can;
+}
+
+/* test 124's cube of quads with its creases */
+static qaws_mesh_3d* rq_cube(void)
+{
+	static double const x[24] = { -1, -1, -1, 1, -1, -1, 1, 1, -1, -1, 1, -1, -1, -1, 1, 1, -1, 1, 1, 1, 1, -1, 1, 1 };
+	static unsigned int const f[24] = { 0, 3, 2, 1, 4, 5, 6, 7, 0, 1, 5, 4, 1, 2, 6, 5, 2, 3, 7, 6, 3, 0, 4, 7 };
+	static unsigned int const fs[6] = { 4, 4, 4, 4, 4, 4 };
+	qaws_mesh_3d* m = rq_make(x, 8, f, fs, 6);
+	qaws_mesh_3d_detect_features(m, (qaws_scalar)(M_PI / 6), 0, 0);
+	return m;
+}
+
+static qaws_mesh_3d* rq_remesh(qaws_mesh_3d const* m, qaws_mesh_reference const* r, double L, qaws_size_field const* sf, double lo, double hi,
+	double tol, qaws_mesh_report* rep, double* seconds)
+{
+	qaws_remesh_desc d;
+	qaws_mesh_3d* out = NULL;
+	clock_t t0 = clock();
+	memset(&d, 0, sizeof d);
+	d.reference = r;
+	d.target_length = (qaws_scalar)L;
+	d.size = sf;
+	d.min_angle = (qaws_scalar)(lo * M_PI / 180);
+	d.max_angle = (qaws_scalar)(hi * M_PI / 180);
+	d.tolerance = (qaws_scalar)tol;
+	if (qaws_mesh_remesh(m, &d, &out, rep) != QAWS_STATUS_OK)
+		out = NULL;
+	if (seconds)
+		*seconds = (double)(clock() - t0) / CLOCKS_PER_SEC;
+	return out;
+}
+
+/* ---- measures ---------------------------------------------------------- */
+
+typedef struct rq_meas
+{
+	double amin, amax;              /* every corner, degrees */
+	double emin, emax;              /* the corners not exempt */
+	unsigned int corners, inside;   /* all corners; inside the bounds */
+	unsigned int out_free;          /* out of the bounds and not exempt */
+	double v6, v567;                /* shares of the vertices off features and the border */
+	double mean_edge;
+	double delaunay;                /* share of the inner edges off the features with their opposite angles at most pi */
+	unsigned int nv, nf;
+} rq_meas;
+
+static int rq_key_cmp(void const* a, void const* b)
+{
+	unsigned long long x = *(unsigned long long const*)a, y = *(unsigned long long const*)b;
+	return x < y ? -1 : x > y;
+}
+
+static unsigned long long rq_key(unsigned int a, unsigned int b)
+{
+	return a < b ? ((unsigned long long)a << 32) | b : ((unsigned long long)b << 32) | a;
+}
+
+static double rq_angle(qaws_scalar const* p, unsigned int v, unsigned int a, unsigned int b)
+{
+	double u[3], t[3], uu = 0, tt = 0, ut = 0, c;
+	unsigned int k;
+	for (k = 0; k < 3; k++)
+	{
+		u[k] = p[3 * a + k] - p[3 * v + k];
+		t[k] = p[3 * b + k] - p[3 * v + k];
+		uu += u[k] * u[k]; tt += t[k] * t[k]; ut += u[k] * t[k];
+	}
+	c = ut / sqrt(uu * tt);
+	return acos(c < -1 ? -1 : c > 1 ? 1 : c) * 180 / M_PI;
+}
+
+/* the angles (exempt as the header says: a sector of a feature or border vertex no whole number of corners within [lo, hi]
+   divides), valences, edges, the Delaunay share */
+static void rq_measure(qaws_mesh_3d const* m, double lo, double hi, rq_meas* q)
+{
+	unsigned int nv = qaws_mesh_3d_get_vertex_count(m), nf = qaws_mesh_3d_get_triangle_count(m), ne = qaws_mesh_3d_get_edge_count(m);
+	unsigned int nfe = qaws_mesh_3d_get_feature_edge_count(m), i, j, k, *t, *fe, *e, *first, *list, *grp, *cnt, *onf, ninner = 0, n6 = 0, n567 = 0;
+	unsigned int ndel = 0, nin = 0;
+	unsigned long long* keys;
+	double *ang, *sec, len = 0;
+	qaws_scalar* p = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * nv);
+	t = (unsigned int*)malloc(sizeof(unsigned int) * 3 * nf);
+	fe = (unsigned int*)malloc(sizeof(unsigned int) * 2 * (nfe + 1));
+	e = (unsigned int*)malloc(sizeof(unsigned int) * 2 * ne);
+	keys = (unsigned long long*)malloc(sizeof(unsigned long long) * (nfe + 1));
+	first = (unsigned int*)calloc(nv + 1, sizeof(unsigned int));
+	list = (unsigned int*)malloc(sizeof(unsigned int) * 3 * nf);
+	grp = (unsigned int*)malloc(sizeof(unsigned int) * 3 * nf);
+	cnt = (unsigned int*)calloc(nv + 1, sizeof(unsigned int));
+	onf = (unsigned int*)calloc(nv + 1, sizeof(unsigned int));
+	ang = (double*)malloc(sizeof(double) * 3 * nf);
+	sec = (double*)malloc(sizeof(double) * 3 * nf);
+	qaws_mesh_3d_get_positions(m, p);
+	qaws_mesh_3d_get_triangles(m, t);
+	qaws_mesh_3d_get_feature_edges(m, fe);
+	qaws_mesh_3d_get_edges(m, e);
+	for (i = 0; i < nfe; i++)
+	{
+		keys[i] = rq_key(fe[2 * i], fe[2 * i + 1]);
+		onf[fe[2 * i]] = onf[fe[2 * i + 1]] = 1;
+	}
+	qsort(keys, nfe, sizeof *keys, rq_key_cmp);
+	for (i = 0; i < nv; i++)
+		onf[i] |= qaws_mesh_3d_is_boundary_vertex(m, i);
+	/* corners grouped per vertex, then into sectors across the edges that are not features */
+	for (i = 0; i < 3 * nf; i++)
+		first[t[i] + 1]++;
+	for (i = 0; i < nv; i++)
+		first[i + 1] += first[i];
+	for (i = 0; i < 3 * nf; i++)
+	{
+		list[first[t[i]] + cnt[t[i]]++] = i;
+		ang[i] = rq_angle(p, t[i], t[3 * (i / 3) + (i + 1) % 3], t[3 * (i / 3) + (i + 2) % 3]);
+		grp[i] = i;
+	}
+	for (i = 0; i < nv; i++)
+		for (j = first[i]; j < first[i + 1]; j++)
+			for (k = j + 1; k < first[i + 1]; k++)
+			{
+				unsigned int a = list[j], b = list[k], s, x = 0xFFFFFFFFu;
+				/* a shared neighbour: an edge (i, x) both corners hold */
+				for (s = 1; s < 3 && x == 0xFFFFFFFFu; s++)
+				{
+					unsigned int na = t[3 * (a / 3) + (a + s) % 3], r;
+					for (r = 1; r < 3; r++)
+						if (t[3 * (b / 3) + (b + r) % 3] == na)
+							x = na;
+				}
+				if (x == 0xFFFFFFFFu)
+				{
+					continue;
+				}
+				{
+					unsigned long long key = rq_key(i, x);
+					if (nfe && bsearch(&key, keys, nfe, sizeof *keys, rq_key_cmp))
+						continue;
+				}
+				/* union: relabel b's group as a's */
+				{
+					unsigned int ga = grp[a], gb = grp[b], r;
+					if (ga == gb)
+						continue;
+					for (r = first[i]; r < first[i + 1]; r++)
+						if (grp[list[r]] == gb)
+							grp[list[r]] = ga;
+				}
+			}
+	for (i = 0; i < 3 * nf; i++)
+		sec[i] = 0;
+	for (i = 0; i < 3 * nf; i++)
+		sec[grp[i]] += ang[i];
+	q->amin = q->emin = 1e9;
+	q->amax = q->emax = 0;
+	q->corners = 3 * nf;
+	q->inside = 0;
+	q->out_free = 0;
+	for (i = 0; i < 3 * nf; i++)
+	{
+		int ex = 0, in = (lo <= 0 || ang[i] >= lo) && (hi <= 0 || ang[i] <= hi);
+		if (onf[t[i]] && lo > 0)
+		{
+			double th = sec[grp[i]], kk = floor(th / lo);
+			ex = kk < 1 || (hi > 0 && th / kk > hi);
+		}
+		q->amin = fmin(q->amin, ang[i]);
+		q->amax = fmax(q->amax, ang[i]);
+		q->inside += in;
+		if (!ex)
+		{
+			q->emin = fmin(q->emin, ang[i]);
+			q->emax = fmax(q->emax, ang[i]);
+			q->out_free += !in;
+		}
+	}
+	for (i = 0; i < nv; i++)
+	{
+		unsigned int val = first[i + 1] - first[i];
+		if (onf[i])
+			continue;
+		ninner++;
+		n6 += val == 6;
+		n567 += val >= 5 && val <= 7;
+	}
+	q->v6 = ninner ? (double)n6 / ninner : 1;
+	q->v567 = ninner ? (double)n567 / ninner : 1;
+	/* the inner edges off the features: the angles across them */
+	for (i = 0; i < 3 * nf; i++)
+	{
+		unsigned int a = t[i], b = t[3 * (i / 3) + (i + 1) % 3], j2;
+		unsigned long long key = rq_key(a, b);
+		if (a > b || (nfe && bsearch(&key, keys, nfe, sizeof *keys, rq_key_cmp)))
+			continue;
+		/* the other face holding (b, a) */
+		for (j2 = first[a]; j2 < first[a + 1]; j2++)
+		{
+			unsigned int c = list[j2];
+			if (t[3 * (c / 3) + (c + 2) % 3] == b)
+			{
+				double s = ang[3 * (i / 3) + (i + 2) % 3] + ang[3 * (c / 3) + (c + 1) % 3];
+				nin++;
+				ndel += s <= 180 + 1e-6 * 180 / M_PI;
+			}
+		}
+	}
+	q->delaunay = nin ? (double)ndel / nin : 1;
+	for (i = 0; i < ne; i++)
+	{
+		qaws_scalar const *a = p + 3 * e[2 * i], *b = p + 3 * e[2 * i + 1];
+		len += sqrt((a[0] - b[0]) * (a[0] - b[0]) + (a[1] - b[1]) * (a[1] - b[1]) + (a[2] - b[2]) * (a[2] - b[2]));
+	}
+	q->mean_edge = ne ? len / ne : 0;
+	q->nv = nv;
+	q->nf = nf;
+	free(p); free(t); free(fe); free(e); free(keys); free(first); free(list); free(grp); free(cnt); free(onf); free(ang); free(sec);
+}
+
+/* the largest distance to the reference of the faces' centres, edge midpoints and quarter points */
+static double rq_deviation(qaws_mesh_3d const* m, qaws_mesh_reference const* r)
+{
+	unsigned int nv = qaws_mesh_3d_get_vertex_count(m), nf = qaws_mesh_3d_get_triangle_count(m), i, j, k, n = 0;
+	unsigned int* t = (unsigned int*)malloc(sizeof(unsigned int) * 3 * nf);
+	qaws_scalar *p = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * nv), *s = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * 10 * nf);
+	qaws_scalar* d = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 10 * nf);
+	qaws_mesh_location* l = (qaws_mesh_location*)malloc(sizeof(qaws_mesh_location) * 10 * nf);
+	double dmax = 0;
+	qaws_mesh_3d_get_positions(m, p);
+	qaws_mesh_3d_get_triangles(m, t);
+	for (i = 0; i < nf; i++)
+	{
+		for (k = 0; k < 3; k++)
+			s[3 * n + k] = (p[3 * t[3 * i] + k] + p[3 * t[3 * i + 1] + k] + p[3 * t[3 * i + 2] + k]) / 3;
+		n++;
+		for (j = 0; j < 3; j++)
+		{
+			qaws_scalar const *a = p + 3 * t[3 * i + j], *b = p + 3 * t[3 * i + (j + 1) % 3];
+			double w[3] = { 0.25, 0.5, 0.75 };
+			unsigned int h;
+			for (h = 0; h < 3; h++, n++)
+				for (k = 0; k < 3; k++)
+					s[3 * n + k] = (qaws_scalar)((1 - w[h]) * a[k] + w[h] * b[k]);
+		}
+	}
+	qaws_mesh_reference_project(r, s, n, NULL, l, d);
+	for (i = 0; i < n; i++)
+		dmax = fmax(dmax, d[i]);
+	free(t); free(p); free(s); free(d); free(l);
+	return dmax;
+}
+
+/* the invariants of every mode: valid, closedness and genus kept, footpoints evaluated, feature corners at input vertices,
+   vertices on features with their footpoints on the reference's creases */
+static int rq_invariants(qaws_mesh_3d const* in, qaws_mesh_3d const* out, qaws_mesh_reference const* r, char* why)
+{
+	unsigned int nv = qaws_mesh_3d_get_vertex_count(out), nvi = qaws_mesh_3d_get_vertex_count(in), nfe = qaws_mesh_3d_get_feature_edge_count(out);
+	unsigned int nfi = qaws_mesh_3d_get_feature_edge_count(in), i, j, k, *fe, *fi, corners = 1, crease = 1;
+	unsigned long long* keys;
+	unsigned char* onf;
+	qaws_scalar *x = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * nv), *y = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * nv);
+	qaws_scalar* xi = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * nvi);
+	qaws_mesh_location* l = (qaws_mesh_location*)malloc(sizeof(qaws_mesh_location) * nv);
+	qaws_mesh_topology t0, t1;
+	double foot = 0;
+	int ok;
+	fe = (unsigned int*)malloc(sizeof(unsigned int) * 2 * (nfe + 1));
+	fi = (unsigned int*)malloc(sizeof(unsigned int) * 2 * (nfi + 1));
+	keys = (unsigned long long*)malloc(sizeof(unsigned long long) * (nfi + 1));
+	onf = (unsigned char*)calloc(nvi + 1, 1);
+	qaws_mesh_3d_get_positions(out, x);
+	qaws_mesh_3d_get_positions(in, xi);
+	qaws_mesh_3d_get_footpoints(out, l);
+	qaws_mesh_reference_evaluate(r, l, nv, y, NULL, NULL);
+	qaws_mesh_3d_get_feature_edges(out, fe);
+	qaws_mesh_3d_get_feature_edges(in, fi);
+	for (i = 0; i < nfi; i++)
+	{
+		keys[i] = rq_key(fi[2 * i], fi[2 * i + 1]);
+		onf[fi[2 * i]] = onf[fi[2 * i + 1]] = 1;
+	}
+	qsort(keys, nfi, sizeof *keys, rq_key_cmp);
+	for (i = 0; i < nv; i++)
+	{
+		foot = fmax(foot, fabs(x[3 * i] - y[3 * i]) + fabs(x[3 * i + 1] - y[3 * i + 1]) + fabs(x[3 * i + 2] - y[3 * i + 2]));
+		if (qaws_mesh_3d_is_feature_corner(out, i))
+		{
+			int found = 0;
+			for (j = 0; j < nvi && !found; j++)
+				found = fabs(x[3 * i] - xi[3 * j]) + fabs(x[3 * i + 1] - xi[3 * j + 1]) + fabs(x[3 * i + 2] - xi[3 * j + 2]) < 1e-12;
+			corners &= found;
+		}
+	}
+	/* each end of a feature edge: its footpoint on a crease edge of its reference triangle (or at a vertex on one) */
+	for (i = 0; i < 2 * nfe; i++)
+	{
+		qaws_mesh_location const* f = &l[fe[i]];
+		unsigned int tv[3], on = 0;
+		double b[3];
+		qaws_mesh_reference_get_triangle(r, f->patch, tv);
+		b[0] = 1 - f->a - f->b;
+		b[1] = f->a;
+		b[2] = f->b;
+		for (k = 0; k < 3; k++)
+		{
+			unsigned long long key = rq_key(tv[k], tv[(k + 1) % 3]);
+			if (b[(k + 2) % 3] <= 1e-9 && nfi && bsearch(&key, keys, nfi, sizeof *keys, rq_key_cmp))
+				on = 1;
+			if (b[k] >= 1 - 1e-9 && onf[tv[k]])
+				on = 1;
+		}
+		crease &= on;
+	}
+	qaws_mesh_3d_get_topology(in, &t0);
+	qaws_mesh_3d_get_topology(out, &t1);
+	ok = qaws_mesh_3d_validate(out) == QAWS_STATUS_OK && t0.closed == t1.closed && t0.genus == t1.genus && foot <= 1e-9 && corners && crease;
+	sprintf(why, "valid %d, closed %d genus %u (input %d, %u), footpoints %.1e, corners kept %d, crease vertices on creases %d",
+		qaws_mesh_3d_validate(out) == QAWS_STATUS_OK, t1.closed, t1.genus, t0.closed, t0.genus, foot, corners, crease);
+	free(x); free(y); free(xi); free(l); free(fe); free(fi); free(keys); free(onf);
+	return ok;
+}
+
+/* the adaptive mesh's mean edges on the bump and far from it */
+static double rq_bump_ratio(qaws_mesh_3d const* out)
+{
+	unsigned int nv = qaws_mesh_3d_get_vertex_count(out), ne = qaws_mesh_3d_get_edge_count(out), i, nb = 0, nfar = 0;
+	qaws_scalar* p = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * nv);
+	unsigned int* e = (unsigned int*)malloc(sizeof(unsigned int) * 2 * ne);
+	double lb = 0, lf = 0;
+	qaws_mesh_3d_get_positions(out, p);
+	qaws_mesh_3d_get_edges(out, e);
+	for (i = 0; i < ne; i++)
+	{
+		qaws_scalar const *a = p + 3 * e[2 * i], *b = p + 3 * e[2 * i + 1];
+		double l = sqrt((a[0] - b[0]) * (a[0] - b[0]) + (a[1] - b[1]) * (a[1] - b[1]) + (a[2] - b[2]) * (a[2] - b[2]));
+		if (a[2] > 1.25 && b[2] > 1.25)
+		{
+			lb += l;
+			nb++;
+		}
+		else if (a[2] < -0.3 && b[2] < -0.3)
+		{
+			lf += l;
+			nfar++;
+		}
+	}
+	free(p);
+	free(e);
+	return nb > 10 && nfar > 10 ? (lb / nb) / (lf / nfar) : 1;
+}
+
+/* ---- the cases --------------------------------------------------------- */
+
+typedef struct rq_shapes
+{
+	qaws_mesh_3d *ico, *blob, *bump, *can, *cube;
+	qaws_mesh_reference *rico, *rblob, *rbump, *rcan, *rcube;
+	qaws_size_field* sf;
+} rq_shapes;
+
+static void rq_shapes_make(rq_shapes* s)
+{
+	qaws_scalar nrm[3 * 42];
+	qaws_mesh_reference_desc rd;
+	qaws_curvature_size_desc cd;
+	memset(s, 0, sizeof *s);
+	s->ico = rq_icosphere(nrm);
+	memset(&rd, 0, sizeof rd);
+	rd.normals = nrm;
+	qaws_mesh_reference_create(s->ico, &rd, &s->rico);
+	s->blob = rq_blob();
+	qaws_mesh_reference_create(s->blob, NULL, &s->rblob);
+	s->bump = rq_bumped();
+	qaws_mesh_reference_create(s->bump, NULL, &s->rbump);
+	memset(&cd, 0, sizeof cd);
+	cd.angle_tolerance = (qaws_scalar)0.2;
+	cd.min_length = (qaws_scalar)0.02;
+	cd.max_length = (qaws_scalar)0.4;
+	cd.gradation = (qaws_scalar)0.4;
+	if (s->rbump)
+		qaws_size_field_create_curvature(s->rbump, &cd, &s->sf);
+	s->can = rq_can();
+	qaws_mesh_reference_create(s->can, NULL, &s->rcan);
+	s->cube = rq_cube();
+	qaws_mesh_reference_create(s->cube, NULL, &s->rcube);
+}
+
+static void rq_shapes_free(rq_shapes* s)
+{
+	qaws_size_field_destroy(s->sf);
+	qaws_mesh_reference_destroy(s->rico);
+	qaws_mesh_reference_destroy(s->rblob);
+	qaws_mesh_reference_destroy(s->rbump);
+	qaws_mesh_reference_destroy(s->rcan);
+	qaws_mesh_reference_destroy(s->rcube);
+	qaws_mesh_3d_destroy(s->ico);
+	qaws_mesh_3d_destroy(s->blob);
+	qaws_mesh_3d_destroy(s->bump);
+	qaws_mesh_3d_destroy(s->can);
+	qaws_mesh_3d_destroy(s->cube);
+}
+
+static double g_blob_seconds;   /* the default remesh of the blob, for the angle pass's timing */
+
+static void test_default(rq_shapes const* s)
+{
+	qaws_mesh_3d *can, *blob, *bump;
+	qaws_mesh_report rep;
+	rq_meas q;
+	char msg[600], inv[300];
+	double sec, ratio;
+	/* the can at 0.12: before this round its angles ran 27.2..117.4 */
+	can = rq_remesh(s->can, s->rcan, 0.12, NULL, 0, 0, 0, &rep, &sec);
+	if (!can)
+	{
+		TEST_ASSERT(0, "default: the can remeshed");
+		return;
+	}
+	rq_measure(can, 0, 0, &q);
+	sprintf(msg, "default, the can at 0.12: %u triangles, angles %.1f..%.1f (want [30, 110]); %.3f s", q.nf, q.amin, q.amax, sec);
+	TEST_ASSERT(q.amin >= 30 && q.amax <= 110, msg);
+	TEST_ASSERT(rq_invariants(s->can, can, s->rcan, inv), inv);
+	/* the blob at 0.11: before, its mean edge 7% short, 78% of valence 6 */
+	blob = rq_remesh(s->blob, s->rblob, 0.11, NULL, 0, 0, 0, &rep, &g_blob_seconds);
+	if (blob)
+	{
+		rq_measure(blob, 0, 0, &q);
+		sprintf(msg, "default, the blob at 0.11: %u triangles, mean edge %.4f (%.1f%% off), valence 6 at %.1f%%, 5..7 at %.1f%%, Delaunay %.2f%%, angles %.1f..%.1f, deviation %.2e; %.3f s",
+			q.nf, q.mean_edge, 100 * (q.mean_edge / 0.11 - 1), 100 * q.v6, 100 * q.v567, 100 * q.delaunay, q.amin, q.amax, (double)rep.max_deviation, g_blob_seconds);
+		TEST_ASSERT(fabs(q.mean_edge / 0.11 - 1) <= 0.04 && q.v6 >= 0.8 && q.v567 >= 0.99 && q.delaunay >= 0.99, msg);
+		TEST_ASSERT(rq_invariants(s->blob, blob, s->rblob, inv), inv);
+	}
+	else
+		TEST_ASSERT(0, "default: the blob remeshed");
+	/* adaptive: test 124 asserts the bump's edges under 0.6 of those far from it */
+	bump = s->sf ? rq_remesh(s->bump, s->rbump, 0, s->sf, 0, 0, 0, &rep, &sec) : NULL;
+	if (bump)
+	{
+		ratio = rq_bump_ratio(bump);
+		rq_measure(bump, 0, 0, &q);
+		sprintf(msg, "default, adaptive bumped sphere: %u triangles, mean edge on the bump over far from it %.3f (want < 0.5), angles %.1f..%.1f; %.3f s",
+			q.nf, ratio, q.amin, q.amax, sec);
+		TEST_ASSERT(ratio < 0.5, msg);
+		TEST_ASSERT(rq_invariants(s->bump, bump, s->rbump, inv), inv);
+	}
+	else
+		TEST_ASSERT(0, "default: the bumped sphere remeshed");
+	qaws_mesh_3d_destroy(can);
+	qaws_mesh_3d_destroy(blob);
+	qaws_mesh_3d_destroy(bump);
+}
+
+static void test_angles(rq_shapes const* s)
+{
+	struct
+	{
+		char const* name;
+		qaws_mesh_3d const* m;
+		qaws_mesh_reference const* r;
+		double L;
+		qaws_size_field const* sf;
+	} const c[3] = { { "icosphere at 0.12", s->ico, s->rico, 0.12, NULL }, { "blob at 0.11", s->blob, s->rblob, 0.11, NULL },
+		{ "adaptive bumped sphere", s->bump, s->rbump, 0, s->sf } };
+	unsigned int i;
+	char msg[600], inv[300];
+	for (i = 0; i < 3; i++)
+	{
+		qaws_mesh_report rep;
+		rq_meas q;
+		double sec;
+		qaws_mesh_3d* out = c[i].m && c[i].r ? rq_remesh(c[i].m, c[i].r, c[i].L, c[i].sf, 35, 86, 0, &rep, &sec) : NULL;
+		if (!out)
+		{
+			TEST_ASSERT(0, "angles: remeshed");
+			continue;
+		}
+		rq_measure(out, 35, 86, &q);
+		sprintf(msg, "angles in [35, 86], the %s: %u triangles, angles %.2f..%.2f, %.2f%% of the corners inside (%u out), valence 5..7 at %.1f%%, mean edge %.4f; %.3f s",
+			c[i].name, q.nf, q.emin, q.emax, 100.0 * q.inside / q.corners, q.out_free, 100 * q.v567, q.mean_edge, sec);
+		TEST_ASSERT(q.out_free == 0 && q.v567 >= 0.98 && (c[i].L == 0 || fabs(q.mean_edge / c[i].L - 1) <= 0.1), msg);
+		TEST_ASSERT(rq_invariants(c[i].m, out, c[i].r, inv), inv);
+		if (i == 1)
+			printf("  the angle pass on the blob: %.3f s against %.3f s by default (%.2fx)\n", sec, g_blob_seconds, g_blob_seconds > 0 ? sec / g_blob_seconds : 0);
+		qaws_mesh_3d_destroy(out);
+	}
+	/* the can: [30, 90] every corner not exempt, [35, 86] 99.5% of them */
+	{
+		qaws_mesh_report rep;
+		rq_meas q, q2;
+		double sec, sec2;
+		qaws_mesh_3d *a = rq_remesh(s->can, s->rcan, 0.12, NULL, 30, 90, 0, &rep, &sec), *b = rq_remesh(s->can, s->rcan, 0.12, NULL, 35, 86, 0, &rep, &sec2);
+		if (a && b)
+		{
+			rq_measure(a, 30, 90, &q);
+			rq_measure(b, 35, 86, &q2);
+			sprintf(msg, "angles on the can at 0.12: [30, 90]: %.2f..%.2f, %u out not exempt; [35, 86]: %.2f..%.2f, %.2f%% inside, %u out not exempt; %.3f s, %.3f s",
+				q.emin, q.emax, q.out_free, q2.emin, q2.emax, 100.0 * q2.inside / q2.corners, q2.out_free, sec, sec2);
+			TEST_ASSERT(q.out_free == 0 && q2.inside >= 0.995 * q2.corners && q2.out_free == 0, msg);
+			TEST_ASSERT(rq_invariants(s->can, a, s->rcan, inv), inv);
+			TEST_ASSERT(rq_invariants(s->can, b, s->rcan, inv), inv);
+		}
+		else
+			TEST_ASSERT(0, "angles: the can remeshed");
+		qaws_mesh_3d_destroy(a);
+		qaws_mesh_3d_destroy(b);
+	}
+	/* a cube's creases and corners kept through the pass */
+	{
+		qaws_mesh_report rep;
+		rq_meas q;
+		double sec;
+		qaws_mesh_3d* a = rq_remesh(s->cube, s->rcube, 0.25, NULL, 35, 86, 0, &rep, &sec);
+		if (a)
+		{
+			rq_measure(a, 35, 86, &q);
+			sprintf(msg, "angles on the cube at 0.25 in [35, 86]: %.2f..%.2f, %u out not exempt; %.3f s", q.emin, q.emax, q.out_free, sec);
+			printf("  %s\n", msg);
+			TEST_ASSERT(rq_invariants(s->cube, a, s->rcube, inv), inv);
+		}
+		else
+			TEST_ASSERT(0, "angles: the cube remeshed");
+		qaws_mesh_3d_destroy(a);
+	}
+}
+
+static void test_tolerance(rq_shapes const* s)
+{
+	qaws_mesh_report rep, rep0;
+	double sec, d0, d1;
+	qaws_mesh_3d *a = rq_remesh(s->blob, s->rblob, 0.11, NULL, 0, 0, 0, &rep0, NULL), *b = rq_remesh(s->blob, s->rblob, 0.11, NULL, 0, 0, 2e-3, &rep, &sec);
+	char msg[400], inv[300];
+	if (!a || !b)
+	{
+		TEST_ASSERT(0, "tolerance: remeshed");
+		qaws_mesh_3d_destroy(a);
+		qaws_mesh_3d_destroy(b);
+		return;
+	}
+	d0 = rq_deviation(a, s->rblob);
+	d1 = rq_deviation(b, s->rblob);
+	sprintf(msg, "tolerance 2e-3 on the blob at 0.11: sampled deviation %.3e (by default %.3e), %u vertices against %u (+%.0f%%), min angle %.1f; %.3f s",
+		d1, d0, qaws_mesh_3d_get_vertex_count(b), qaws_mesh_3d_get_vertex_count(a),
+		100.0 * qaws_mesh_3d_get_vertex_count(b) / qaws_mesh_3d_get_vertex_count(a) - 100, (double)rep.quality.min_angle, sec);
+	TEST_ASSERT(d1 <= 2e-3 + 1e-9, msg);
+	TEST_ASSERT(rq_invariants(s->blob, b, s->rblob, inv), inv);
+	qaws_mesh_3d_destroy(a);
+	qaws_mesh_3d_destroy(b);
+}
+
+static void test_refusals(rq_shapes const* s)
+{
+	static double const bad[5][3] = { { 0.7, 0.6, 0 }, { -0.1, 0, 0 }, { M_PI / 3, 0, 0 }, { 0, 1.0, 0 }, { 0, 0, -1 } };
+	qaws_status st[5];
+	qaws_mesh_3d* out = NULL;
+	unsigned int i, ok = 1;
+	char msg[400];
+	for (i = 0; i < 5; i++)
+	{
+		qaws_remesh_desc d;
+		memset(&d, 0, sizeof d);
+		d.min_angle = (qaws_scalar)bad[i][0];
+		d.max_angle = (qaws_scalar)bad[i][1];
+		d.tolerance = (qaws_scalar)bad[i][2];
+		st[i] = qaws_mesh_remesh(s->ico, &d, &out, NULL);
+		ok &= st[i] == QAWS_STATUS_INVALID_ARGUMENT && !out;
+	}
+	sprintf(msg, "refusals: min 0.7 over max 0.6 %s, min -0.1 %s, min pi/3 %s, max 1.0 %s, tolerance -1 %s", qaws_status_to_string(st[0]),
+		qaws_status_to_string(st[1]), qaws_status_to_string(st[2]), qaws_status_to_string(st[3]), qaws_status_to_string(st[4]));
+	TEST_ASSERT(ok, msg);
+}
 
 int test_131_remesh_quality_main(void)
 {
+	rq_shapes s;
 	g_pass = 0;
 	g_fail = 0;
 	printf("Test 131: remeshing quality\n");
+	rq_shapes_make(&s);
+	if (!s.rico || !s.rblob || !s.rbump || !s.rcan || !s.rcube || !s.sf)
+		TEST_ASSERT(0, "shapes and references made");
+	else
+	{
+		test_default(&s);
+		test_angles(&s);
+		test_tolerance(&s);
+		test_refusals(&s);
+	}
+	rq_shapes_free(&s);
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
 }
