@@ -8,6 +8,7 @@
 
 #include "qaws_mesh_internal.h"
 #include "../qaws_remesh.h"
+#include "qaws_remesh_cvt.h"
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>

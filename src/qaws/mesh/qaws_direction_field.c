@@ -7,6 +7,7 @@
  */
 
 #include "qaws_mesh_internal.h"
+#include "qaws_cross_field.h"
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>

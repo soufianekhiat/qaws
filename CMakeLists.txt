@@ -108,6 +108,11 @@ src/qaws/mesh/qaws_volume_mesh.c
 src/qaws/mesh/qaws_tetrahedralize.c
 src/qaws/mesh/qaws_hexahedralize.c
 src/qaws/mesh/qaws_frame_field.c
+src/qaws/mesh/qaws_mesh_measure.c
+src/qaws/mesh/qaws_remesh_cvt.c
+src/qaws/mesh/qaws_cross_field.c
+src/qaws/mesh/qaws_quad_flow.c
+src/qaws/mesh/qaws_quad_improve.c
   src/qaws/qaws_convert.c
   src/qaws/qaws_export.c
   src/qaws/qaws_import.c
@@ -160,6 +165,8 @@ src/qaws/mesh/qaws_frame_field.c
   src/qaws/internal/qaws_internal_sparse.c
   src/qaws/internal/qaws_internal_diff.c
   src/qaws/internal/qaws_internal_broadphase.c
+src/qaws/internal/qaws_internal_ldlt.c
+src/qaws/internal/qaws_internal_flow.c
   src/qaws/internal/qaws_internal_flatten.c
   src/qaws/internal/qaws_internal_parallel.c
 )

@@ -141,6 +141,12 @@ extern int test_126_mesh_generate_main(void);
 extern int test_127_tetrahedralize_main(void);
 extern int test_128_hexahedralize_main(void);
 extern int test_129_mesh_2d_main(void);
+extern int test_130_mesh_measure_main(void);
+extern int test_131_remesh_quality_main(void);
+extern int test_132_remesh_cvt_main(void);
+extern int test_133_cross_field_main(void);
+extern int test_134_quad_flow_main(void);
+extern int test_135_quad_improve_main(void);
 
 /* Test registry */
 typedef struct {
@@ -279,6 +285,12 @@ static test_suite const g_test_suites[] = {
 	{"127_tetrahedralize", test_127_tetrahedralize_main},
 	{"128_hexahedralize", test_128_hexahedralize_main},
 	{"129_mesh_2d", test_129_mesh_2d_main},
+{"130_mesh_measure", test_130_mesh_measure_main},
+{"131_remesh_quality", test_131_remesh_quality_main},
+{"132_remesh_cvt", test_132_remesh_cvt_main},
+{"133_cross_field", test_133_cross_field_main},
+{"134_quad_flow", test_134_quad_flow_main},
+{"135_quad_improve", test_135_quad_improve_main},
 };
 
 int main(void) {

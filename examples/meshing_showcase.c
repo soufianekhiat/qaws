@@ -21,6 +21,8 @@
  *                      the torus's frame field with its singular edges
  *   mesh8_frame_hexes.png  hexahedra following frame fields (integer-grid maps): a turned
  *                      box against the grid, a bent bar, a twisted bar
+ *   mesh9..mesh14      quality measures, angle-bounded remeshing, CVT remeshing,
+ *                      smoothest cross fields, quads by min-cost flow, quad finishing
  *
  * Each figure lives in meshing_showcase/NN_*.c, compiled as one translation
  * unit with the rasterizer in example_raster.h.
@@ -159,16 +161,24 @@ static void ms_panel(er_canvas* c, int x, int y, int w, int h, qaws_mesh_3d cons
 #include "meshing_showcase/06_tets.c"
 #include "meshing_showcase/07_hexes.c"
 #include "meshing_showcase/08_frame_hexes.c"
+#include "meshing_showcase/09_measures.c"
+#include "meshing_showcase/10_remesh_angles.c"
+#include "meshing_showcase/11_remesh_cvt.c"
+#include "meshing_showcase/12_cross_field.c"
+#include "meshing_showcase/13_quad_flow.c"
+#include "meshing_showcase/14_quad_improve.c"
 
-/* the figures to draw: all, or those whose numbers the first argument lists ("58") */
+/* the figures to draw: all, or those whose keys the first argument lists ("58"; figures 10 to 14 are a to e) */
 int main(int argc, char** argv)
 {
-	static void (*const demo[8])(void) = { demo_core, demo_reference, demo_remesh, demo_quads, demo_generate, demo_tets, demo_hexes, demo_frame_hexes };
-	int i;
+	static void (*const demo[])(void) = { demo_core, demo_reference, demo_remesh, demo_quads, demo_generate, demo_tets, demo_hexes, demo_frame_hexes,
+		demo_measures, demo_remesh_angles, demo_remesh_cvt, demo_cross_field, demo_quad_flow, demo_quad_improve };
+	static char const key[] = "123456789abcde";
+	unsigned int i;
 	setvbuf(stdout, NULL, _IONBF, 0);
 	MAKE_DIR("showcase");
-	for (i = 0; i < 8; i++)
-		if (argc < 2 || strchr(argv[1], '1' + i))
+	for (i = 0; i < sizeof demo / sizeof *demo; i++)
+		if (argc < 2 || strchr(argv[1], key[i]))
 			demo[i]();
 	return 0;
 }

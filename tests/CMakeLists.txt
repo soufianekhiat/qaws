@@ -131,6 +131,12 @@ add_executable(
   127_tetrahedralize.c
   128_hexahedralize.c
   129_mesh_2d.c
+130_mesh_measure.c
+131_remesh_quality.c
+132_remesh_cvt.c
+133_cross_field.c
+134_quad_flow.c
+135_quad_improve.c
 )
 
 # The amalgamated library exports exactly the same symbols, so the tests can
