@@ -112,6 +112,27 @@ static void mf_middle(double const* p0, double const* n0, double const* p1, doub
 		out[k] = 0.5 * (p0[k] + p1[k]) - 0.25 * (n0[k] * l0 + n1[k] * l1);
 }
 
+void mf_unfold(double const* x0, double const* n0, double const* x1, double const* n1, double const* p, double* out)
+{
+	double mid[3], axis[3], v[3], w[3], c = mf_dot(n1, n0), s2, f;
+	int k;
+	mf_cross(n1, n0, axis);
+	s2 = mf_dot(axis, axis);
+	if (c > 0.9999 || s2 < 1e-12)
+	{
+		memcpy(out, p, sizeof(double) * 3);   /* (alike normals: nothing to unfold; opposite ones: no hinge) */
+		return;
+	}
+	mf_middle(x0, n0, x1, n1, mid);
+	for (k = 0; k < 3; k++)
+		v[k] = p[k] - mid[k];
+	/* Rodrigues with the unnormalized axis n1 x n0 (its length the sine) */
+	f = (1 - c) / s2;
+	mf_cross(axis, v, w);
+	for (k = 0; k < 3; k++)
+		out[k] = mid[k] + v[k] * c + w[k] + axis[k] * mf_dot(axis, v) * f;
+}
+
 /* the lattice point of (o, q, t) below p (floor) or nearest it (round) */
 static void mf_lattice(double const* o, double const* q, double const* t, double const* p, double scale, int round_it, double* out)
 {

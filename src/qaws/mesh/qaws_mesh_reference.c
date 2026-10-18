@@ -696,7 +696,8 @@ static double mr_query_run(qaws_mesh_reference const* r, double const* p, unsign
 	}
 	if (hint < r->nt && (region == HM_NONE || r->treg[hint] == region))
 	{
-		/* the triangles reachable from the hint's across edges (within the region), each box no farther than the best so far */
+		/* the triangles reachable from the hint's across edges (within the region), each box within twice the best distance so
+		   far (a path to the closest point may pass a little farther than the best found before it) */
 		unsigned int head = 0, tail = 0;
 		s->queue[tail++] = hint;
 		s->queued[hint] = s->gen;
@@ -710,7 +711,7 @@ static double mr_query_run(qaws_mesh_reference const* r, double const* p, unsign
 				if (u == HM_NONE || (region != HM_NONE && r->treg[u / 3] != region))
 					continue;
 				u /= 3;
-				if (s->queued[u] != s->gen && mr_box_d2(&r->box[u], q.p) < q.best)
+				if (s->queued[u] != s->gen && mr_box_d2(&r->box[u], q.p) < 4 * q.best)
 				{
 					s->queued[u] = s->gen;
 					s->queue[tail++] = u;

@@ -67,6 +67,7 @@
 #include "qaws_mesh_field.h"
 #include "qaws_remesh.h"
 #include "qaws_quadrangulate.h"
+#include "qaws_mesh_generate.h"
 #include "qaws_triangulate.h"
 #include "qaws_region_sample.h"
 #include "qaws_mean_value.h"

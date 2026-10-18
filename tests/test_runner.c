@@ -137,6 +137,7 @@ extern int test_122_mesh_reference_main(void);
 extern int test_123_size_field_main(void);
 extern int test_124_remesh_main(void);
 extern int test_125_quadrangulate_main(void);
+extern int test_126_mesh_generate_main(void);
 
 /* Test registry */
 typedef struct {
@@ -271,6 +272,7 @@ static test_suite const g_test_suites[] = {
 	{"123_size_field", test_123_size_field_main},
 	{"124_remesh", test_124_remesh_main},
 	{"125_quadrangulate", test_125_quadrangulate_main},
+	{"126_mesh_generate", test_126_mesh_generate_main},
 };
 
 int main(void) {

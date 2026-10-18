@@ -127,6 +127,7 @@ add_executable(
   123_size_field.c
   124_remesh.c
   125_quadrangulate.c
+  126_mesh_generate.c
 )
 
 # The amalgamated library exports exactly the same symbols, so the tests can

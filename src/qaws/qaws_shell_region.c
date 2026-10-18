@@ -2565,6 +2565,32 @@ static qaws_status sh_face_region(qaws_shell_atlas const* a, unsigned int f, qaw
 	return st;
 }
 
+qaws_status qaws_shell_region_create_whole(qaws_shell_atlas const* a, qaws_shell_region** out_region)
+{
+	qaws_shell_region* r;
+	unsigned int f;
+	qaws_status st = QAWS_STATUS_OK;
+	if (!a || !out_region)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	*out_region = NULL;
+	r = (qaws_shell_region*)calloc(1, sizeof(*r));
+	if (!r)
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	r->a = a;
+	r->f = (qaws_surface_region**)calloc(a->nf + 1, sizeof(qaws_surface_region*));
+	if (!r->f)
+		st = QAWS_STATUS_ALLOCATION_FAILURE;
+	for (f = 0; f < a->nf && st == QAWS_STATUS_OK; f++)
+		st = sh_full_face(a, f, &r->f[f]);
+	if (st != QAWS_STATUS_OK)
+	{
+		qaws_shell_region_destroy(r);
+		return st;
+	}
+	*out_region = r;
+	return QAWS_STATUS_OK;
+}
+
 qaws_status qaws_shell_region_create(qaws_shell_atlas const* a, qaws_shell_curve const* const* loops, unsigned int nl,
 	qaws_shell_region** out_region)
 {
@@ -4561,14 +4587,15 @@ struct qaws_shell_mesh
 	qaws_vec3* vx;
 	unsigned int nv, capv, capx;
 	unsigned int* tri;
-	unsigned int nt, capt;
+	unsigned int* tface;           /* per triangle: its face */
+	unsigned int nt, capt, captf;
 };
 
 void qaws_shell_mesh_destroy(qaws_shell_mesh* mesh)
 {
 	if (!mesh)
 		return;
-	free(mesh->vp); free(mesh->vx); free(mesh->tri);
+	free(mesh->vp); free(mesh->vx); free(mesh->tri); free(mesh->tface);
 	free(mesh);
 }
 
@@ -4592,6 +4619,11 @@ qaws_status qaws_shell_mesh_get_triangle(qaws_shell_mesh const* mesh, unsigned i
 	return QAWS_STATUS_OK;
 }
 
+unsigned int qaws_shell_mesh_get_triangle_face(qaws_shell_mesh const* mesh, unsigned int index)
+{
+	return mesh && index < mesh->nt ? mesh->tface[index] : 0xFFFFFFFFu;
+}
+
 static int sm_grow(void** p, unsigned int* cap, unsigned int need, size_t size)
 {
 	void* g;
@@ -4608,11 +4640,12 @@ static int sm_grow(void** p, unsigned int* cap, unsigned int need, size_t size)
 	return 1;
 }
 
-static int sm_add_tri(qaws_shell_mesh* m, unsigned int a, unsigned int b, unsigned int c)
+static int sm_add_tri(qaws_shell_mesh* m, unsigned int a, unsigned int b, unsigned int c, unsigned int face)
 {
-	if (!sm_grow((void**)&m->tri, &m->capt, 3 * (m->nt + 1), sizeof(unsigned int)))
+	if (!sm_grow((void**)&m->tri, &m->capt, 3 * (m->nt + 1), sizeof(unsigned int)) || !sm_grow((void**)&m->tface, &m->captf, m->nt + 1, sizeof(unsigned int)))
 		return 0;
 	m->tri[3 * m->nt] = a; m->tri[3 * m->nt + 1] = b; m->tri[3 * m->nt + 2] = c;
+	m->tface[m->nt] = face;
 	m->nt++;
 	return 1;
 }
@@ -4696,7 +4729,7 @@ qaws_status qaws_shell_region_triangulate(qaws_shell_region const* region, qaws_
 		{
 			unsigned int t[3];
 			qaws_mesh_2d_get_triangle(mm, i, t);
-			if (!sm_add_tri(m, map[t[0]], map[t[1]], map[t[2]]))
+			if (!sm_add_tri(m, map[t[0]], map[t[1]], map[t[2]], f))
 				st = QAWS_STATUS_ALLOCATION_FAILURE;
 		}
 		for (i = 0; i < qaws_mesh_2d_get_boundary_edge_count(mm) && st == QAWS_STATUS_OK; i++)
@@ -4784,11 +4817,11 @@ qaws_status qaws_shell_region_triangulate(qaws_shell_region const* region, qaws_
 					prev = ws[0];
 					for (i = 1; i < n && st == QAWS_STATUS_OK; i++)
 					{
-						if (!sm_add_tri(m, prev, ws[i], c))
+						if (!sm_add_tri(m, prev, ws[i], c, f))
 							st = QAWS_STATUS_ALLOCATION_FAILURE;
 						prev = ws[i];
 					}
-					if (st == QAWS_STATUS_OK && !sm_add_tri(m, prev, b, c))
+					if (st == QAWS_STATUS_OK && !sm_add_tri(m, prev, b, c, f))
 						st = QAWS_STATUS_ALLOCATION_FAILURE;
 					break;
 				}

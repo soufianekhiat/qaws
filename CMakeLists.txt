@@ -103,6 +103,7 @@ src/qaws/mesh/qaws_size_field.c
 src/qaws/mesh/qaws_remesh.c
 src/qaws/mesh/qaws_direction_field.c
 src/qaws/mesh/qaws_quadrangulate.c
+src/qaws/mesh/qaws_mesh_generate.c
   src/qaws/qaws_convert.c
   src/qaws/qaws_export.c
   src/qaws/qaws_import.c

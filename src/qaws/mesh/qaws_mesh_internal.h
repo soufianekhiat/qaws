@@ -139,5 +139,7 @@ void mf_compat_position(double const* x0, double const* n0, double const* q0, do
 	double const* q1, double const* o1, double scale, double* out0, double* out1);
 /* the quarter turns taking q1 onto q0 (0 to 3) */
 int mf_rotation(double const* q0, double const* n0, double const* q1, double const* n1);
+/* p, a point of x1's tangent plane, turned into x0's about the point near both (the rotation taking n1 onto n0): unfolded across a crease */
+void mf_unfold(double const* x0, double const* n0, double const* x1, double const* n1, double const* p, double* out);
 
 #endif /* QAWS_MESH_INTERNAL_H */

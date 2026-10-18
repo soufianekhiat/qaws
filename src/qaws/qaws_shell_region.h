@@ -132,6 +132,8 @@ qaws_status qaws_shell_curve_get_length(qaws_shell_curve const* curve, qaws_scal
    surface curves through qaws_shell_region_create_on_face). */
 qaws_status qaws_shell_region_create(qaws_shell_atlas const* atlas, qaws_shell_curve const* const* loops, unsigned int loop_count,
 	qaws_shell_region** out_region);
+/* The whole shell: every face whole (its trimmed domain). */
+qaws_status qaws_shell_region_create_whole(qaws_shell_atlas const* atlas, qaws_shell_region** out_region);
 
 /* The geodesic disk of radius r about the centre: the points within r
    along the shell. With no shell vertex inside, the region of
@@ -192,5 +194,7 @@ unsigned int qaws_shell_mesh_get_vertex_count(qaws_shell_mesh const* mesh);
 qaws_status qaws_shell_mesh_get_vertex(qaws_shell_mesh const* mesh, unsigned int index, qaws_shell_point* out_point, qaws_vec3* out_xyz);
 unsigned int qaws_shell_mesh_get_triangle_count(qaws_shell_mesh const* mesh);
 qaws_status qaws_shell_mesh_get_triangle(qaws_shell_mesh const* mesh, unsigned int index, unsigned int out_vertices[3]);
+/* the face a triangle lies on */
+unsigned int qaws_shell_mesh_get_triangle_face(qaws_shell_mesh const* mesh, unsigned int index);
 
 #endif /* QAWS_SHELL_REGION_H */

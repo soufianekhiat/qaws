@@ -3,7 +3,7 @@
  * densely on the reference, a cross field and a lattice position field on
  * it, the quad mesh read off the fields (coinciding lattice points merged,
  * neighbours one step apart joined, faces traced round each vertex's
-ma * neighbours in turn), optionally split into all quads, relaxed on the
+ * neighbours in turn), optionally split into all quads, relaxed on the
  * reference; footpoints and attributes as remeshing.
  *
  * shortcut: the read-off keeps the position field's local inconsistencies
@@ -67,6 +67,31 @@ static int qd_spoke_cmp(void const* x, void const* y)
 	return a < b ? -1 : a > b ? 1 : 0;
 }
 
+typedef struct qd_near
+{
+	unsigned int* uf;
+	unsigned int const* member;
+	double const *cx, *cn;
+	double h2;
+} qd_near;
+
+static qaws_status qd_near_visit(void* user, unsigned int i, unsigned int j)
+{
+	qd_near const* w = (qd_near const*)user;
+	double const *a = w->cx + 3 * (size_t)i, *b = w->cx + 3 * (size_t)j;
+	double d[3];
+	d[0] = a[0] - b[0];
+	d[1] = a[1] - b[1];
+	d[2] = a[2] - b[2];
+	if (qd_dot(d, d) < w->h2 && qd_dot(w->cn + 3 * (size_t)i, w->cn + 3 * (size_t)j) > 0)
+	{
+		unsigned int ra = qd_find(w->uf, w->member[i]), rb = qd_find(w->uf, w->member[j]);
+		if (ra != rb)
+			w->uf[ra] = rb;
+	}
+	return QAWS_STATUS_OK;
+}
+
 /* where an output vertex goes on the reference: the creases for one made of
    feature vertices, else the region of its first member's footpoint */
 static void qd_place(qaws_mesh_reference const* r, mr_scratch* s, double const* p, qaws_mesh_location hint, int feature, double* x,
@@ -105,7 +130,7 @@ static void qd_out_free(qd_out* o)
 static qaws_status qd_extract(qaws_hm const* dm, mf_hier const* h, double rho, qaws_mesh_reference const* r, mr_scratch* s, qd_out* out)
 {
 	mf_level const* L = &h->lv[0];
-	unsigned int n = dm->nv, i, c, np = 0, ncl = 0, k, changed;
+	unsigned int n = dm->nv, i, c, np = 0, ncl = 0, k, changed, pass;
 	unsigned int *uf = NULL, *cl = NULL, *deg = NULL, *first = NULL, *adj = NULL, *member = NULL, *used = NULL, *face = NULL;
 	double *cx = NULL, *cn = NULL, *cw = NULL;
 	qd_pair* pairs = NULL;
@@ -123,17 +148,16 @@ static qaws_status qd_extract(qaws_hm const* dm, mf_hier const* h, double rho, q
 	for (c = 0; c < dm->nc; c++)
 	{
 		unsigned int a, b;
-		double qa[3], qb[3], oa[3], ob[3], d[3], t[3], dx, dy;
+		double qa[3], qb[3], ob[3], d[3], t[3], dx, dy;
 		if (dm->cf[c] == HM_NONE || (dm->co[c] != HM_NONE && dm->co[c] < c))
 			continue;
 		a = dm->cv[c];
 		b = hm_to(dm, c);
-		/* the two vertices' own lattice points, their offset in steps of a's lattice */
+		/* the two vertices' own lattice points, their offset in steps of a's lattice, b's unfolded into a's tangent plane (across a crease) */
 		mf_compat_orientation(L->q + 3 * (size_t)a, L->nrm + 3 * (size_t)a, L->q + 3 * (size_t)b, L->nrm + 3 * (size_t)b, qa, qb);
-		memcpy(oa, L->o + 3 * (size_t)a, sizeof oa);
-		memcpy(ob, L->o + 3 * (size_t)b, sizeof ob);
+		mf_unfold(L->x + 3 * (size_t)a, L->nrm + 3 * (size_t)a, L->x + 3 * (size_t)b, L->nrm + 3 * (size_t)b, L->o + 3 * (size_t)b, ob);
 		for (k = 0; k < 3; k++)
-			d[k] = ob[k] - oa[k];
+			d[k] = ob[k] - L->o[3 * (size_t)a + k];
 		qd_cross(L->nrm + 3 * (size_t)a, qa, t);
 		dx = floor(qd_dot(d, qa) / rho + 0.5);
 		dy = floor(qd_dot(d, t) / rho + 0.5);
@@ -150,50 +174,82 @@ static qaws_status qd_extract(qaws_hm const* dm, mf_hier const* h, double rho, q
 			np++;
 		}
 	}
-	/* the clusters: their lattice points averaged */
+	/* the clusters: their lattice points averaged; then clusters closer than a third of a step, alike in normal, merged
+	   (one lattice point the dense edges did not tie: a vertex near a cell's centre rounding to a corner no neighbour did) */
 	cl = (unsigned int*)malloc(sizeof(unsigned int) * (n + 1));
 	member = (unsigned int*)malloc(sizeof(unsigned int) * (n + 1));
-	if (!cl || !member)
+	cx = (double*)malloc(sizeof(double) * (3 * (size_t)n + 3));
+	cn = (double*)malloc(sizeof(double) * (3 * (size_t)n + 3));
+	cw = (double*)malloc(sizeof(double) * ((size_t)n + 1));
+	ckind = (unsigned char*)malloc((size_t)n + 1);
+	if (!cl || !member || !cx || !cn || !cw || !ckind)
 		goto done;
-	for (i = 0; i < n; i++)
-		cl[i] = HM_NONE;
-	for (i = 0; i < n; i++)
+	for (pass = 0; pass < 2; pass++)
 	{
-		unsigned int root = qd_find(uf, i);
-		if (cl[root] == HM_NONE)
+		ncl = 0;
+		for (i = 0; i < n; i++)
+			cl[i] = HM_NONE;
+		for (i = 0; i < n; i++)
 		{
-			member[ncl] = i;
-			cl[root] = ncl++;
+			unsigned int root = qd_find(uf, i);
+			if (cl[root] == HM_NONE)
+			{
+				member[ncl] = i;
+				cl[root] = ncl++;
+			}
+			cl[i] = cl[root];
 		}
-		cl[i] = cl[root];
-	}
-	cx = (double*)calloc(3 * (size_t)ncl + 3, sizeof(double));
-	cn = (double*)calloc(3 * (size_t)ncl + 3, sizeof(double));
-	cw = (double*)calloc((size_t)ncl + 1, sizeof(double));
-	ckind = (unsigned char*)calloc((size_t)ncl + 1, 1);
-	if (!cx || !cn || !cw || !ckind)
-		goto done;
-	for (i = 0; i < n; i++)
-	{
-		unsigned int q = cl[i];
-		for (k = 0; k < 3; k++)
+		memset(cx, 0, sizeof(double) * 3 * ncl);
+		memset(cn, 0, sizeof(double) * 3 * ncl);
+		memset(cw, 0, sizeof(double) * ncl);
+		memset(ckind, 0, ncl);
+		for (i = 0; i < n; i++)
 		{
-			cx[3 * (size_t)q + k] += L->o[3 * (size_t)i + k];
-			cn[3 * (size_t)q + k] += L->nrm[3 * (size_t)i + k];
+			unsigned int q = cl[i];
+			for (k = 0; k < 3; k++)
+			{
+				cx[3 * (size_t)q + k] += L->o[3 * (size_t)i + k];
+				cn[3 * (size_t)q + k] += L->nrm[3 * (size_t)i + k];
+			}
+			cw[q] += 1;
+			if (L->con[i] & MF_PINNED)
+			{
+				ckind[q] = 2;
+				member[q] = i;
+			}
+			else if ((L->con[i] & MF_ON_LINE) && ckind[q] < 1)
+				ckind[q] = 1;
 		}
-		cw[q] += 1;
-		if (L->con[i] & MF_PINNED)
-			ckind[q] = 2;
-		else if ((L->con[i] & MF_ON_LINE) && ckind[q] < 1)
-			ckind[q] = 1;
-	}
-	for (i = 0; i < ncl; i++)
-	{
-		double l = sqrt(qd_dot(cn + 3 * (size_t)i, cn + 3 * (size_t)i));
-		for (k = 0; k < 3; k++)
+		for (i = 0; i < ncl; i++)
 		{
-			cx[3 * (size_t)i + k] /= cw[i];
-			cn[3 * (size_t)i + k] /= l > 0 ? l : 1;
+			double l = sqrt(qd_dot(cn + 3 * (size_t)i, cn + 3 * (size_t)i));
+			for (k = 0; k < 3; k++)
+			{
+				cx[3 * (size_t)i + k] /= cw[i];
+				cn[3 * (size_t)i + k] /= l > 0 ? l : 1;
+			}
+		}
+		if (pass == 0)
+		{
+			qd_near w;
+			qaws_bp_box* box = (qaws_bp_box*)malloc(sizeof(qaws_bp_box) * (ncl + 1));
+			if (!box)
+				goto done;
+			for (i = 0; i < ncl; i++)
+				for (k = 0; k < 3; k++)
+				{
+					box[i].lo[k] = cx[3 * (size_t)i + k] - 0.15 * rho;
+					box[i].hi[k] = cx[3 * (size_t)i + k] + 0.15 * rho;
+				}
+			w.uf = uf;
+			w.member = member;
+			w.cx = cx;
+			w.cn = cn;
+			w.h2 = 0.09 * rho * rho;
+			k = qaws_internal_broadphase(box, ncl, 3, NULL, qd_near_visit, &w, NULL) == QAWS_STATUS_OK;
+			free(box);
+			if (!k)
+				goto done;
 		}
 	}
 	/* the clusters' edges, once each */
@@ -358,7 +414,14 @@ static qaws_status qd_extract(qaws_hm const* dm, mf_hier const* h, double rho, q
 		unsigned int q = used[i];
 		if (q == HM_NONE)
 			continue;
-		qd_place(r, s, cx + 3 * (size_t)i, dm->foot[member[i]], ckind[i] != 0, out->x + 3 * (size_t)q, &out->foot[q]);
+		if (ckind[i] == 2)
+		{
+			/* a corner: where its pinned vertex is */
+			memcpy(out->x + 3 * (size_t)q, dm->x + 3 * (size_t)member[i], sizeof(double) * 3);
+			out->foot[q] = dm->foot[member[i]];
+		}
+		else
+			qd_place(r, s, cx + 3 * (size_t)i, dm->foot[member[i]], ckind[i] != 0, out->x + 3 * (size_t)q, &out->foot[q]);
 		out->kind[q] = ckind[i];
 	}
 	for (i = 0; i < out->nc; i++)
@@ -600,7 +663,7 @@ static void qd_relax(qaws_hm* m, qaws_mesh_reference const* r, unsigned char con
 			if (mr_walk(r, m->foot[v], d, 1, &l))
 				continue;
 			mr_eval(r, &l, x, NULL);
-			/* no face round v turned over */
+			/* no face round v turned against the surface (one turned already may be turned back) */
 			for (c = m->vc[v]; c != HM_NONE && !bad; c = hm_round(m, v, c))
 			{
 				double n0[3], n1[3], keep[3];
@@ -609,7 +672,7 @@ static void qd_relax(qaws_hm* m, qaws_mesh_reference const* r, unsigned char con
 				memcpy(m->x + 3 * (size_t)v, x, sizeof keep);
 				hm_face_normal(m, m->cf[c], n1);
 				memcpy(m->x + 3 * (size_t)v, keep, sizeof keep);
-				bad = qd_dot(n0, n1) <= 0;
+				bad = qd_dot(n1, nrm) <= 0 && qd_dot(n0, nrm) > 0;
 			}
 			if (bad)
 				continue;
