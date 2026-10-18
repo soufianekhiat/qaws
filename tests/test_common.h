@@ -64,6 +64,13 @@ static int approx_eq(qaws_scalar a, qaws_scalar b)
 	return diff < TOLERANCE;
 }
 
+/* QAWS_TEST_HEAVY=1: also run the slow checks (timings on large meshes, robustness sweeps, the smallest tolerances) */
+static int test_heavy(void)
+{
+	char const* h = getenv("QAWS_TEST_HEAVY");
+	return h && atoi(h) != 0;
+}
+
 /* ================================================================== */
 /* Trivial SVG writer                                                  */
 /* ================================================================== */

@@ -12,6 +12,9 @@
  *   - FRAME_FIELD: a turned box in perfect cubes along it, its volume exact;
  *     a bent bar; a round torus (singular edges) refused;
  *   - refusals: an open surface, the reserved methods, a field on hexahedra.
+ *
+ * By default the surfaces and the cells are coarser (twice the sizes or
+ * about); QAWS_TEST_HEAVY=1 runs the sizes this test was written at.
  */
 
 #include "test_common.h"
@@ -52,7 +55,7 @@ static qaws_mesh_3d* th_box(qaws_shell_atlas** out_atlas, qaws_surface** f)
 	if (qaws_shell_atlas_create((qaws_surface const* const*)f, 6, 0, out_atlas) != QAWS_STATUS_OK)
 		return NULL;
 	memset(&g, 0, sizeof g);
-	g.target_length = (qaws_scalar)0.1;
+	g.target_length = (qaws_scalar)(test_heavy() ? 0.1 : 0.2);
 	qaws_mesh_generate_shell(*out_atlas, &g, &s, NULL);
 	return s;
 }
@@ -186,10 +189,10 @@ static void test_torus(void)
 	qaws_status st;
 	char msg[400];
 	memset(&g, 0, sizeof g);
-	g.target_length = (qaws_scalar)0.2;
+	g.target_length = (qaws_scalar)(test_heavy() ? 0.2 : 0.3);
 	st = qaws_mesh_generate_surface(t, &g, &s, NULL);
 	memset(&d, 0, sizeof d);
-	d.cell_size = (qaws_scalar)0.22;
+	d.cell_size = (qaws_scalar)(test_heavy() ? 0.22 : 0.25);
 	if (st == QAWS_STATUS_OK)
 		st = qaws_volume_mesh_hexahedralize(s, &d, &v, NULL);
 	if (st != QAWS_STATUS_OK || !v)
@@ -339,8 +342,12 @@ static void th_bent_bar(double const* p, double* x)
 
 static void test_frame_field(void)
 {
-	static unsigned int const nbox[3] = { 16, 12, 8 }, nbent[3] = { 8, 20, 8 };
-	qaws_mesh_3d *box = th_lattice(nbox, th_turned_box), *bent = th_lattice(nbent, th_bent_bar), *ts = NULL;
+	/* (by default the lattices at half their counts and the cells twice the size, the edge bounds and the count following the size;
+	   the torus refused at 0.6) */
+	static unsigned int const nbox_h[3] = { 16, 12, 8 }, nbent_h[3] = { 8, 20, 8 }, nbox_l[3] = { 8, 6, 4 }, nbent_l[3] = { 4, 10, 4 };
+	int const heavy = test_heavy();
+	double const c = heavy ? 0.15 : 0.3, ct = heavy ? 0.25 : 0.6;
+	qaws_mesh_3d *box = th_lattice(heavy ? nbox_h : nbox_l, th_turned_box), *bent = th_lattice(heavy ? nbent_h : nbent_l, th_bent_bar), *ts = NULL;
 	qaws_surface* t = th_torus(2, 0.7);
 	qaws_generate_desc g;
 	qaws_hexahedralize_desc d;
@@ -350,13 +357,13 @@ static void test_frame_field(void)
 	char msg[400];
 	memset(&d, 0, sizeof d);
 	d.method = QAWS_HEXES_FRAME_FIELD;
-	d.cell_size = (qaws_scalar)0.15;
+	d.cell_size = (qaws_scalar)c;
 	s1 = qaws_volume_mesh_hexahedralize(box, &d, &v1, NULL);
 	s2 = qaws_volume_mesh_hexahedralize(bent, &d, &v2, NULL);
 	memset(&g, 0, sizeof g);
-	g.target_length = (qaws_scalar)0.25;
+	g.target_length = (qaws_scalar)ct;
 	qaws_mesh_generate_surface(t, &g, &ts, NULL);
-	d.cell_size = (qaws_scalar)0.25;
+	d.cell_size = (qaws_scalar)ct;
 	s3 = qaws_volume_mesh_hexahedralize(ts, &d, &v3, NULL);
 	memset(&q1, 0, sizeof q1);
 	memset(&q2, 0, sizeof q2);
@@ -368,12 +375,12 @@ static void test_frame_field(void)
 		qaws_status_to_string(s1), q1.hexahedra, v1 ? qaws_status_to_string(qaws_volume_mesh_validate(v1)) : "-", (double)q1.min_scaled_jacobian,
 		(double)q1.volume, (double)q1.min_edge, (double)q1.max_edge);
 	TEST_ASSERT(s1 == QAWS_STATUS_OK && v1 && qaws_volume_mesh_validate(v1) == QAWS_STATUS_OK && q1.hexahedra == qaws_volume_mesh_get_cell_count(v1)
-		&& q1.hexahedra > 500 && (double)q1.min_scaled_jacobian > 0.99 && fabs((double)q1.volume - 2.8) < 1e-9 && (double)q1.min_edge > 0.12
-		&& (double)q1.max_edge < 0.18, msg);
+		&& q1.hexahedra > 500 * pow(0.15 / c, 3) && (double)q1.min_scaled_jacobian > 0.99 && fabs((double)q1.volume - 2.8) < 1e-9 && (double)q1.min_edge > 0.8 * c
+		&& (double)q1.max_edge < 1.2 * c, msg);
 	sprintf(msg, "bent bar along its field: %s, %u hexahedra, validate %s, scaled Jacobian from %.4f, volume %.5f for 3 pi / 4", qaws_status_to_string(s2),
 		q2.hexahedra, v2 ? qaws_status_to_string(qaws_volume_mesh_validate(v2)) : "-", (double)q2.min_scaled_jacobian, (double)q2.volume);
 	TEST_ASSERT(s2 == QAWS_STATUS_OK && v2 && qaws_volume_mesh_validate(v2) == QAWS_STATUS_OK && (double)q2.min_scaled_jacobian > 0.9
-		&& fabs((double)q2.volume - 0.75 * M_PI) < 0.01 * 0.75 * M_PI, msg);
+		&& fabs((double)q2.volume - 0.75 * M_PI) < (heavy ? 0.01 : 0.02) * 0.75 * M_PI, msg);   /* (by default 2%: 1.0% measured at 0.3) */
 	sprintf(msg, "round torus along its field (singular edges): %s", qaws_status_to_string(s3));
 	TEST_ASSERT(s3 == QAWS_STATUS_UNSUPPORTED_OPERATION && !v3, msg);
 	qaws_volume_mesh_destroy(v1);

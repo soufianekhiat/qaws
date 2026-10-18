@@ -19,6 +19,11 @@
  *     fallback, and coarse, by the first mesh split; a wavy B-spline patch
  *     generated in quads;
  *   - the same quads twice; consistency timed on a dense blob.
+ *
+ * By default one draw of the blob (quad-dominant) and of the can, the
+ * torus at 0.45, two spacings of the disk, the disk twice; the sweeps, the
+ * pure blob, the pillow cases at 0.10 (blob), 0.15 (can) and 1.6 (torus)
+ * and the timing with QAWS_TEST_HEAVY=1 (about 150 s of the 175).
  */
 
 #include "test_common.h"
@@ -501,23 +506,49 @@ static qaws_mesh_3d* tq_quads(qaws_mesh_3d const* m, double L, int pure, qaws_me
 	return out;
 }
 
+/* the same vertices and faces */
+static int tq_identical(qaws_mesh_3d const* q2, qaws_mesh_3d const* q3)
+{
+	unsigned int nf = q2 ? qaws_mesh_3d_get_face_count(q2) : 0;
+	int same = q2 && q3 && qaws_mesh_3d_get_vertex_count(q2) == qaws_mesh_3d_get_vertex_count(q3) && qaws_mesh_3d_get_face_count(q3) == nf
+		&& qaws_mesh_3d_get_corner_count(q2) == qaws_mesh_3d_get_corner_count(q3);
+	if (same)
+	{
+		unsigned int nv = qaws_mesh_3d_get_vertex_count(q2), nc = qaws_mesh_3d_get_corner_count(q2);
+		qaws_scalar *p2 = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * nv), *p3 = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * nv);
+		unsigned int *f2 = (unsigned int*)malloc(sizeof(unsigned int) * (nc + nf)), *f3 = (unsigned int*)malloc(sizeof(unsigned int) * (nc + nf));
+		qaws_mesh_3d_get_positions(q2, p2);
+		qaws_mesh_3d_get_positions(q3, p3);
+		qaws_mesh_3d_get_faces(q2, f2, f2 + nc);
+		qaws_mesh_3d_get_faces(q3, f3, f3 + nc);
+		same = !memcmp(p2, p3, sizeof(qaws_scalar) * 3 * nv) && !memcmp(f2, f3, sizeof(unsigned int) * (nc + nf));
+		free(p2); free(p3); free(f2); free(f3);
+	}
+	return same;
+}
+
 /* the blob scaled by 1 + k 1e-12, k = 0..5. Before (e280d24) on the same six: quad-dominant 6 to 8 triangles each and
-   14, 10, 10, 6, 4, 6 irregular (a mean of 8.3); pure 12, 15, 12, 12, 16, 12 (13.2) */
+   14, 10, 10, 6, 4, 6 irregular (a mean of 8.3); pure 12, 15, 12, 12, 16, 12 (13.2). By default k = 0 alone, quad-dominant
+   alone (2.5 s of the 60: the pure blob at 0.11 is test 135's by default); the six, pure, at 0.10 and twice with
+   QAWS_TEST_HEAVY=1 */
 static void test_blob(void)
 {
+	int const heavy = test_heavy();
+	unsigned int const nk = heavy ? 6 : 1;
 	qaws_mesh_3d *blob = NULL, *q1, *q2 = NULL, *q3;
 	qaws_mesh_quality a, c, in;
 	qaws_mesh_topology top;
 	char msg[400];
 	double t1 = 0, t2 = 0, area, irr1 = 0, irr2 = 0;
 	unsigned int nf = 0, k, others = 0, bad = 0, max2 = 0;
-	for (k = 0; k < 6; k++)
+	memset(&c, 0, sizeof c);
+	for (k = 0; k < nk; k++)
 	{
 		qaws_mesh_3d* bk = tq_blob(1 + 1e-12 * k);
 		qaws_mesh_3d_measure_quality(bk, &in);
 		area = (double)in.area;
 		q1 = tq_quads(bk, 0.16, 0, &a, &t1);
-		q3 = tq_quads(bk, 0.11, 1, &c, &t2);
+		q3 = heavy ? tq_quads(bk, 0.11, 1, &c, &t2) : NULL;
 		nf = q3 ? qaws_mesh_3d_get_face_count(q3) : 0;
 		memset(&top, 0, sizeof top);
 		if (q3)
@@ -541,13 +572,19 @@ static void test_blob(void)
 		qaws_mesh_3d_destroy(q3);
 		qaws_mesh_3d_destroy(bk);
 	}
-	sprintf(msg, "blob x6 quad-dominant at 0.16: %u faces not quads in all (0; was 6 or more each), mean irregular %.1f (target 10; "
-		"was 8.3)", others, irr1 / 6);
+	sprintf(msg, "blob x%u quad-dominant at 0.16: %u faces not quads in all (0; was 6 or more each), mean irregular %.1f (target 10; "
+		"was 8.3)", nk, others, irr1 / nk);
 	printf("  %s\n", msg);
 	/* (measured 8 on all six, with 131's dense mesh, 133's field and cones placed at up to two steps of two; on e280d24's
 	   LOCAL 8, 12, 14, 11, 10, 11, a mean of 11.0: each cone no vertex of its face reached is fan-filled, a 3-5 pair
-	   beside it; the triangles that were there are gone on all six) */
-	TEST_ASSERT(others == 0 && irr1 / 6 <= 10, msg);
+	   beside it; the triangles that were there are gone on all six. On the integrated branch 10, 8, 8, 8, 8, 8: the one draw
+	   of the default run at the bound) */
+	TEST_ASSERT(others == 0 && irr1 / nk <= 10, msg);
+	if (!heavy)
+	{
+		qaws_mesh_3d_destroy(blob);
+		return;
+	}
 	/* (measured 10, 8, 8, 8, 11, 8, a mean of 8.8: the target on four of the six. The field has 8 singular faces on all six;
 	   the rest are cones left off their vertices (one on the first and on the fifth), fan-filled. On e280d24's LOCAL
 	   10, 10, 8, 8, 10, 10 (9.3); with 131 and 133 but a cone placed at one step of two only, 12, 8, 10, 10, 11, 10 (10.2)) */
@@ -568,31 +605,17 @@ static void test_blob(void)
 	qaws_mesh_3d_destroy(q3);
 	/* the same twice */
 	q3 = tq_quads(blob, 0.11, 1, &c, NULL);
-	nf = q2 ? qaws_mesh_3d_get_face_count(q2) : 0;
-	{
-		int same = q2 && q3 && qaws_mesh_3d_get_vertex_count(q2) == qaws_mesh_3d_get_vertex_count(q3) && qaws_mesh_3d_get_face_count(q2) == nf;
-		if (same)
-		{
-			unsigned int nv = qaws_mesh_3d_get_vertex_count(q2), nc = qaws_mesh_3d_get_corner_count(q2);
-			qaws_scalar *p2 = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * nv), *p3 = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * nv);
-			unsigned int *f2 = (unsigned int*)malloc(sizeof(unsigned int) * (nc + nf)), *f3 = (unsigned int*)malloc(sizeof(unsigned int) * (nc + nf));
-			qaws_mesh_3d_get_positions(q2, p2);
-			qaws_mesh_3d_get_positions(q3, p3);
-			qaws_mesh_3d_get_faces(q2, f2, f2 + nc);
-			qaws_mesh_3d_get_faces(q3, f3, f3 + nc);
-			same = !memcmp(p2, p3, sizeof(qaws_scalar) * 3 * nv) && !memcmp(f2, f3, sizeof(unsigned int) * (nc + nf));
-			free(p2); free(p3); free(f2); free(f3);
-		}
-		sprintf(msg, "blob pure twice: identical arrays %d", same);
-		TEST_ASSERT(same, msg);
-	}
+	sprintf(msg, "blob pure twice: identical arrays %d", tq_identical(q2, q3));
+	TEST_ASSERT(tq_identical(q2, q3), msg);
 	qaws_mesh_3d_destroy(q2);
 	qaws_mesh_3d_destroy(q3);
 	qaws_mesh_3d_destroy(blob);
 }
 
 /* the can scaled by 1 + k 1e-12, k = 0..5, each all quads, valid, closed, none turned in, its creases on the rims.
-   Before (e280d24) on the same six: irregular 22, 16, 19, 14, 17, 15 (a mean of 17.2); now 12, 8, 8, 14, 9, 15 */
+   Before (e280d24) on the same six: irregular 22, 16, 19, 14, 17, 15 (a mean of 17.2); now 12, 8, 8, 14, 9, 15 (on the
+   integrated branch 8 on all six). By default k = 0 alone (4 s of the 25), and the quad-dominant can at 0.15 with
+   QAWS_TEST_HEAVY=1 only (3.5 s) */
 static void test_can(void)
 {
 	qaws_mesh_quality a;
@@ -600,7 +623,8 @@ static void test_can(void)
 	char msg[400];
 	unsigned int nf, nfe, f, c0, i, k, fails = 0, most = 0, nfe_min = HM_NONE;
 	double t = 0, irr = 0;
-	for (k = 0; k < 6; k++)
+	unsigned int const nk = test_heavy() ? 6 : 1;
+	for (k = 0; k < nk; k++)
 	{
 		qaws_mesh_3d *can = tq_can(1 + 1e-12 * k), *q;
 		unsigned int bad = 0, onrim = 1, ok;
@@ -651,11 +675,12 @@ static void test_can(void)
 		qaws_mesh_3d_destroy(q);
 		qaws_mesh_3d_destroy(can);
 	}
-	sprintf(msg, "can x6 pure at 0.14: %u not all quads, valid, closed, upright with > 40 crease edges on the rims (fewest %u); mean "
-		"irregular %.1f (target 12; was 17.2), the most %u (floor 16)", fails, nfe_min, irr / 6, most);
+	sprintf(msg, "can x%u pure at 0.14: %u not all quads, valid, closed, upright with > 40 crease edges on the rims (fewest %u); mean "
+		"irregular %.1f (target 12; was 17.2), the most %u (floor 16)", nk, fails, nfe_min, irr / nk, most);
 	printf("  %s\n", msg);
-	TEST_ASSERT(fails == 0 && irr / 6 <= 12 && most <= 16, msg);
+	TEST_ASSERT(fails == 0 && irr / nk <= 12 && most <= 16, msg);
 	/* quad-dominant at 0.15, where a pillow once split the mesh in three */
+	if (test_heavy())
 	{
 		qaws_mesh_3d *can = tq_can(1), *q = tq_quads(can, 0.15, 0, &a, NULL);
 		memset(&top, 0, sizeof top);
@@ -678,19 +703,20 @@ static void test_torus(void)
 	double area = 4 * M_PI * M_PI * 2 * 0.75, L;
 	unsigned int nf, ok, pure;
 	memset(&top, 0, sizeof top);
-	q = tq_quads(t, 0.3, 1, &a, NULL);
+	L = test_heavy() ? 0.3 : 0.45;   /* (by default 0.45, as test 125's torus: the quadrangulation 2.25 times cheaper) */
+	q = tq_quads(t, L, 1, &a, NULL);
 	nf = q ? qaws_mesh_3d_get_face_count(q) : 0;
 	if (q)
 		qaws_mesh_3d_get_topology(q, &top);
-	sprintf(msg, "torus pure at 0.3: %u quads of %u (area / 0.09 = %.0f, +-15%%), closed %d, valid %d, irregular %u (0)", q ? a.quads : 0, nf,
-		area / 0.09, top.closed, q && qaws_mesh_3d_validate(q) == QAWS_STATUS_OK, q ? a.irregular : 0);
+	sprintf(msg, "torus pure at %.2f: %u quads of %u (area / L^2 = %.0f, +-15%%), closed %d, valid %d, irregular %u (0)", L, q ? a.quads : 0, nf,
+		area / (L * L), top.closed, q && qaws_mesh_3d_validate(q) == QAWS_STATUS_OK, q ? a.irregular : 0);
 	printf("  %s\n", msg);
 	TEST_ASSERT(q && a.quads == nf && top.closed && qaws_mesh_3d_validate(q) == QAWS_STATUS_OK && a.irregular == 0
-		&& fabs(a.quads - area / 0.09) < 0.15 * area / 0.09, msg);
+		&& fabs(a.quads - area / (L * L)) < 0.15 * area / (L * L), msg);
 	qaws_mesh_3d_destroy(q);
 	/* spacings about the tube's diameter: two half cells on the same three lattice points (a pillow) once made a quad with a
 	   vertex twice, and the call failed */
-	for (ok = 1, L = 1.5; L < 1.65; L += 0.1)
+	for (ok = 1, L = 1.5; L < (test_heavy() ? 1.65 : 1.55); L += 0.1)   /* (1.6 heavy only) */
 		for (pure = 0; pure < 2; pure++)
 		{
 			q = tq_quads(t, L, (int)pure, &a, NULL);
@@ -741,17 +767,22 @@ static qaws_mesh_3d* tq_disk(unsigned int rings, unsigned int sec)
    its quad-dominant mesh once failed by a pillow, then kept it as two coincident triangles, a component apart), elsewhere
    the quad-dominant mesh itself. 0.12 alone was the case on e280d24's LOCAL (1 not a quad); with 131's dense mesh and
    133's field it is 183 quads round 4 cones (an O-grid), so the spacings are swept and the fallback asserted taken on one
-   (0.14 and 0.18 now). Coarse at 0.42, where a short border once was taken for a hole and capped */
+   (0.14 and 0.18 now); by default 0.18 and 0.20 alone (2 s of the 9), the pure mesh at 0.20 made twice alike. Coarse at
+   0.42, where a short border once was taken for a hole and capped */
 static void test_disk(void)
 {
 	qaws_mesh_3d *d = tq_disk(12, 48), *q1, *q2, *q3;
 	qaws_mesh_quality a, b, c;
 	qaws_mesh_topology t1, t2, t3;
 	char msg[400];
-	unsigned int i, n1, n2, fell = 0, bad = 0;
+	unsigned int i, n1, n2, fell = 0, bad = 0, ran = 0;
+	int same = 0;
 	for (i = 0; i < 6; i++)
 	{
 		double L = 0.10 + 0.02 * i;
+		if (i < 4 && !test_heavy())
+			continue;
+		ran++;
 		memset(&t1, 0, sizeof t1);
 		memset(&t2, 0, sizeof t2);
 		q1 = tq_quads(d, L, 0, &a, NULL);
@@ -768,6 +799,12 @@ static void test_disk(void)
 		fell += q1 && a.triangles + a.polygons > 0;
 		bad += !q1 || t1.components != 1 || qaws_mesh_3d_validate(q1) != QAWS_STATUS_OK || !q2 || b.quads != n2
 			|| qaws_mesh_3d_validate(q2) != QAWS_STATUS_OK || t2.closed || t2.components != 1 || (a.triangles + a.polygons == 0 && n2 != n1);
+		if (i == 5)
+		{
+			q3 = tq_quads(d, L, 1, &c, NULL);
+			same = tq_identical(q2, q3);
+			qaws_mesh_3d_destroy(q3);
+		}
 		qaws_mesh_3d_destroy(q1);
 		qaws_mesh_3d_destroy(q2);
 	}
@@ -775,11 +812,12 @@ static void test_disk(void)
 	q3 = tq_quads(d, 0.42, 0, &c, NULL);
 	if (q3)
 		qaws_mesh_3d_get_topology(q3, &t3);
-	sprintf(msg, "disk at 0.10 to 0.20: %u of 6 not one valid component quad-dominant, or pure not all quads, valid, open and one "
+	sprintf(msg, "disk at 0.10 to 0.20: %u of %u not one valid component quad-dominant, or pure not all quads, valid, open and one "
 		"component (or not the quad-dominant mesh where that is all quads); pure's fallback taken at %u (one at least); at 0.42 "
-		"quad-dominant open %d, valid %d, components %u", bad, fell, !t3.closed, q3 && qaws_mesh_3d_validate(q3) == QAWS_STATUS_OK, t3.components);
+		"quad-dominant open %d, valid %d, components %u", bad, ran, fell, !t3.closed, q3 && qaws_mesh_3d_validate(q3) == QAWS_STATUS_OK, t3.components);
 	printf("  %s\n", msg);
 	TEST_ASSERT(bad == 0 && fell > 0 && q3 && !t3.closed && t3.components == 1 && qaws_mesh_3d_validate(q3) == QAWS_STATUS_OK, msg);
+	TEST_ASSERT(same, "disk pure at 0.20 twice: identical arrays");
 	qaws_mesh_3d_destroy(q3);
 	/* at 0.9, about the radius: pure all quads, the quad-dominant mesh where that is all quads, else split (where twice the
 	   target leaves no face, the first mesh: once an empty mesh). On e280d24's LOCAL quad-dominant was 4 faces, 3 not quads,
@@ -891,7 +929,8 @@ int test_134_quad_flow_main(void)
 	printf("Test 134: quads by min-cost flow\n");
 	test_flow_module();
 	test_synthetic();
-	test_timing();
+	if (test_heavy())
+		test_timing();
 	test_blob();
 	test_can();
 	test_torus();

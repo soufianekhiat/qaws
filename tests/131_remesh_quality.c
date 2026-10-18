@@ -23,6 +23,10 @@
  *     footpoints evaluated, valid, closed, genus kept;
  *   - refusals; timings printed.
  *
+ * By default the blob's tolerance is 5e-3, and the cube at 0.08 and 0.15,
+ * the can in [35, 86] and the smaller tolerances and those with the angle
+ * bounds run with QAWS_TEST_HEAVY=1 only (about 80 s of the 100).
+ *
  * Measured when written (all targets met): the can 33.9..108.0 degrees
  * (27.2..117.4 before); the blob's mean edge +1.5% (-7%), valence 6 at
  * 82.5% (78%), Delaunay 100%; every bounded case 0 corners out (the cube
@@ -751,22 +755,29 @@ static void test_angles(rq_shapes const* s)
 			printf("  the angle pass on the blob: %.3f s against %.3f s by default (%.2fx)\n", sec, g_blob_seconds, g_blob_seconds > 0 ? sec / g_blob_seconds : 0);
 		qaws_mesh_3d_destroy(out);
 	}
-	/* the can: [30, 90] every corner not exempt, [35, 86] 99.5% of them */
+	/* the can: [30, 90] every corner not exempt, [35, 86] (heavy only, 1.5 s) 99.5% of them */
 	{
 		qaws_mesh_report rep;
 		rq_meas q, q2;
-		double sec, sec2;
-		qaws_mesh_3d *a = rq_remesh(s->can, s->rcan, 0.12, NULL, 30, 90, 0, &rep, &sec), *b = rq_remesh(s->can, s->rcan, 0.12, NULL, 35, 86, 0, &rep, &sec2);
-		if (a && b)
+		double sec, sec2 = 0;
+		qaws_mesh_3d *a = rq_remesh(s->can, s->rcan, 0.12, NULL, 30, 90, 0, &rep, &sec);
+		qaws_mesh_3d *b = test_heavy() ? rq_remesh(s->can, s->rcan, 0.12, NULL, 35, 86, 0, &rep, &sec2) : NULL;
+		if (a && (b || !test_heavy()))
 		{
 			rq_measure(a, 30, 90, &q);
-			rq_measure(b, 35, 86, &q2);
-			sprintf(msg, "angles on the can at 0.12: [30, 90]: %.2f..%.2f, %u out not exempt; [35, 86]: %.2f..%.2f, %.2f%% inside, %u out not exempt; %.3f s, %.3f s",
-				q.emin, q.emax, q.out_free, q2.emin, q2.emax, 100.0 * q2.inside / q2.corners, q2.out_free, sec, sec2);
+			sprintf(msg, "angles on the can at 0.12 in [30, 90]: %.2f..%.2f, %u out not exempt; %.3f s", q.emin, q.emax, q.out_free, sec);
 			printf("  %s\n", msg);
-			TEST_ASSERT(q.out_free == 0 && q2.inside >= 0.995 * q2.corners && q2.out_free == 0, msg);
+			TEST_ASSERT(q.out_free == 0, msg);
 			TEST_ASSERT(rq_invariants(s->can, a, s->rcan, inv), inv);
-			TEST_ASSERT(rq_invariants(s->can, b, s->rcan, inv), inv);
+			if (b)
+			{
+				rq_measure(b, 35, 86, &q2);
+				sprintf(msg, "angles on the can at 0.12 in [35, 86]: %.2f..%.2f, %.2f%% inside, %u out not exempt; %.3f s", q2.emin, q2.emax,
+					100.0 * q2.inside / q2.corners, q2.out_free, sec2);
+				printf("  %s\n", msg);
+				TEST_ASSERT(q2.inside >= 0.995 * q2.corners && q2.out_free == 0, msg);
+				TEST_ASSERT(rq_invariants(s->can, b, s->rcan, inv), inv);
+			}
 		}
 		else
 			TEST_ASSERT(0, "angles: the can remeshed");
@@ -779,6 +790,8 @@ static void test_angles(rq_shapes const* s)
 		static double const L[5] = { 0.08, 0.15, 0.25, 0.6, 0.15 };
 		for (i = 0; i < 5; i++)
 		{
+			if (i < 2 && !test_heavy())
+				continue;   /* (the cube at 0.08 and 0.15, 5 s and 2.5 s: heavy only; 0.25 and 0.6 are the coarse sizes) */
 			qaws_mesh_report rep;
 			rq_meas q;
 			double sec, sec0;
@@ -806,26 +819,32 @@ static void test_tolerance(rq_shapes const* s)
 {
 	qaws_mesh_report rep, rep0;
 	double sec, d0, d1;
-	qaws_mesh_3d *a = rq_remesh(s->blob, s->rblob, 0.11, NULL, 0, 0, 0, &rep0, NULL), *b = rq_remesh(s->blob, s->rblob, 0.11, NULL, 0, 0, 2e-3, &rep, &sec);
+	/* (by default 5e-3, the guard's cost growing as the tolerance shrinks, and the default remesh to compare with heavy only: its
+	   sampled deviation 1.5 s; measured 4.99e-3 against 6.63e-3, 1587 vertices against 1581, in 2 s against 5) */
+	double const tol = test_heavy() ? 2e-3 : 5e-3;
+	qaws_mesh_3d *a = test_heavy() ? rq_remesh(s->blob, s->rblob, 0.11, NULL, 0, 0, 0, &rep0, NULL) : NULL;
+	qaws_mesh_3d *b = rq_remesh(s->blob, s->rblob, 0.11, NULL, 0, 0, tol, &rep, &sec);
 	char msg[400], inv[300];
-	if (!a || !b)
+	if ((!a && test_heavy()) || !b)
 	{
 		TEST_ASSERT(0, "tolerance: remeshed");
 		qaws_mesh_3d_destroy(a);
 		qaws_mesh_3d_destroy(b);
 		return;
 	}
-	d0 = rq_deviation(a, s->rblob);
+	d0 = a ? rq_deviation(a, s->rblob) : 0;
 	d1 = rq_deviation(b, s->rblob);
-	sprintf(msg, "tolerance 2e-3 on the blob at 0.11: sampled deviation %.3e (by default %.3e), %u vertices against %u (+%.0f%%), min angle %.1f; %.3f s",
-		d1, d0, qaws_mesh_3d_get_vertex_count(b), qaws_mesh_3d_get_vertex_count(a),
-		100.0 * qaws_mesh_3d_get_vertex_count(b) / qaws_mesh_3d_get_vertex_count(a) - 100, (double)rep.quality.min_angle, sec);
+	sprintf(msg, "tolerance %.0e on the blob at 0.11: sampled deviation %.3e (by default %.3e), %u vertices against %u (+%.0f%%), min angle %.1f; %.3f s",
+		tol, d1, d0, qaws_mesh_3d_get_vertex_count(b), a ? qaws_mesh_3d_get_vertex_count(a) : 0,
+		a ? 100.0 * qaws_mesh_3d_get_vertex_count(b) / qaws_mesh_3d_get_vertex_count(a) - 100 : 0, (double)rep.quality.min_angle, sec);
 	printf("  %s\n", msg);
-	TEST_ASSERT(d1 <= 2e-3 + 1e-9, msg);
+	TEST_ASSERT(d1 <= tol + 1e-9, msg);
 	TEST_ASSERT(rq_invariants(s->blob, b, s->rblob, inv), inv);
 	qaws_mesh_3d_destroy(a);
 	qaws_mesh_3d_destroy(b);
-	/* smaller tolerances, and the tolerance with the angle bounds: every sample within it, no sliver (none past 170 degrees) */
+	/* smaller tolerances, and the tolerance with the angle bounds: every sample within it, no sliver (none past 170 degrees); heavy
+	   only (9 s, 46 s, 6 s and 7 s) */
+	if (test_heavy())
 	{
 		struct
 		{

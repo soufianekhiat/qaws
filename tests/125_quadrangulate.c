@@ -167,8 +167,9 @@ static void test_torus(void)
 	unsigned int nv = 0, i;
 	double foot = 0, off = 0;
 	char msg[500];
-	q = qt_quads(t, 0.3, 0, &rep, &st);
-	p = qt_quads(t, 0.3, 1, &rep2, &st2);
+	double const L = test_heavy() ? 0.3 : 0.45;   /* (by default 0.45: the quadrangulations 2.25 times cheaper; the edge bound follows) */
+	q = qt_quads(t, L, 0, &rep, &st);
+	p = qt_quads(t, L, 1, &rep2, &st2);
 	qaws_mesh_reference_create(t, NULL, &r);
 	if (!q || !p || !r)
 	{
@@ -191,11 +192,11 @@ static void test_torus(void)
 		}
 		free(l); free(x); free(y);
 	}
-	sprintf(msg, "torus quadrangulated to 0.3: valid %d, closed %d, genus %u; %u quads of %u faces; footpoints %.2g, off the torus %.2g; mean edge %.3g; pure: %u quads of %u, valid %d",
-		qaws_mesh_3d_validate(q) == QAWS_STATUS_OK, top.closed, top.genus, rep.quality.quads, qaws_mesh_3d_get_face_count(q), foot, off,
+	sprintf(msg, "torus quadrangulated to %.2f: valid %d, closed %d, genus %u; %u quads of %u faces; footpoints %.2g, off the torus %.2g; mean edge %.3g; pure: %u quads of %u, valid %d",
+		L, qaws_mesh_3d_validate(q) == QAWS_STATUS_OK, top.closed, top.genus, rep.quality.quads, qaws_mesh_3d_get_face_count(q), foot, off,
 		(double)rep.quality.mean_edge, rep2.quality.quads, qaws_mesh_3d_get_face_count(p), qaws_mesh_3d_validate(p) == QAWS_STATUS_OK);
 	TEST_ASSERT(st == QAWS_STATUS_OK && st2 == QAWS_STATUS_OK && qaws_mesh_3d_validate(q) == QAWS_STATUS_OK && top.closed && top.genus == 1
-		&& rep.quality.quads > 0.85 * qaws_mesh_3d_get_face_count(q) && foot < 1e-9 && off < 0.02 && fabs(rep.quality.mean_edge - 0.3) < 0.08
+		&& rep.quality.quads > 0.85 * qaws_mesh_3d_get_face_count(q) && foot < 1e-9 && off < 0.02 && fabs(rep.quality.mean_edge - L) < 0.08 * L / 0.3
 		&& rep2.quality.quads == qaws_mesh_3d_get_face_count(p) && qaws_mesh_3d_validate(p) == QAWS_STATUS_OK, msg);
 done:
 	qaws_mesh_reference_destroy(r);
@@ -214,6 +215,7 @@ static void test_can_and_cube(void)
 	qaws_mesh_topology top;
 	qaws_status st = QAWS_STATUS_INTERNAL_ERROR, st2 = QAWS_STATUS_INTERNAL_ERROR;
 	char msg[500];
+	double const L = test_heavy() ? 0.16 : 0.24, Lc = test_heavy() ? 0.3 : 0.5;   /* (by default coarser, more than 40 crease edges still) */
 	for (i = 0; i < n; i++)
 	{
 		double a = 2 * M_PI * i / n;
@@ -232,7 +234,7 @@ static void test_can_and_cube(void)
 	}
 	can = qt_make(x, 2 * n + 2, fv, NULL, 4 * n);
 	qaws_mesh_3d_detect_features(can, (qaws_scalar)(M_PI / 3), 0, 0);   /* (the rims at 90 degrees; the sides meet at 45) */
-	q = qt_quads(can, 0.16, 1, &rep, &st);
+	q = qt_quads(can, L, 1, &rep, &st);
 	if (!q)
 	{
 		TEST_ASSERT(0, "can: quadrangulated");
@@ -287,7 +289,7 @@ static void test_can_and_cube(void)
 		ad.name = "f"; ad.element = QAWS_MESH_VERTEX; ad.components = 1;
 		qaws_mesh_3d_add_attribute(cube, &ad, vals, &a);
 		qaws_mesh_3d_detect_features(cube, (qaws_scalar)(M_PI / 6), 0, 0);
-		qc = qt_quads(cube, 0.3, 1, &rep, &st2);
+		qc = qt_quads(cube, Lc, 1, &rep, &st2);
 		if (qc && qaws_mesh_3d_find_attribute(qc, "f", &a) == QAWS_STATUS_OK)
 		{
 			qaws_scalar *p, *v;

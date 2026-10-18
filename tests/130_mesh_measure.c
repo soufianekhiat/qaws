@@ -18,7 +18,7 @@
  *     witnesses checked apart from the library; a pentagon fanned into a
  *     zero-area triangle;
  *   - consistency with the remesher's one-sided report;
- *   - refusals, and the timing on a 10k-face remesh.
+ *   - refusals, and the timing on a 10k-face remesh (QAWS_TEST_HEAVY=1 only).
  */
 
 #include "test_common.h"
@@ -582,8 +582,8 @@ static void test_consistency_and_timing(void)
 	sprintf(msg, "remeshed at 0.12: the certified bound %.9g over the report's face-centre deviation %.9g, converged %d",
 		out ? (double)d.to_reference[1] : 0, out ? (double)rep.max_deviation : 0, out ? d.converged : 0);
 	TEST_ASSERT(out && st == QAWS_STATUS_OK && d.to_reference[1] >= rep.max_deviation - 1e-12 && d.to_reference[0] <= d.to_reference[1] && d.converged == 1, msg);
-	/* timing on about 10k faces */
-	big = r ? mm_remesh(m, r, 0.058, &rep) : NULL;
+	/* timing on about 10k faces (heavy only: its remesh and measure are most of this test's time) */
+	big = r && test_heavy() ? mm_remesh(m, r, 0.058, &rep) : NULL;
 	if (big)
 	{
 		clock_t c0 = clock(), c1, c2;
@@ -601,7 +601,7 @@ static void test_consistency_and_timing(void)
 			1000.0 * (double)(c1 - c0) / CLOCKS_PER_SEC / rounds, (double)(c2 - c1) / CLOCKS_PER_SEC);
 		TEST_ASSERT(st == QAWS_STATUS_OK && (double)(c2 - c1) / CLOCKS_PER_SEC < 5 && qaws_mesh_3d_get_face_count(big) > 8000, msg);
 	}
-	else
+	else if (test_heavy())
 		TEST_ASSERT(0, "timing: remeshed");
 	qaws_mesh_reference_destroy(r);
 	qaws_mesh_3d_destroy(m);

@@ -15,6 +15,10 @@
  *   - INSTANT keeping the best of the fields: the can, the blob and a
  *     torus all quads, their irregular vertices;
  *   - the time of a 50k-vertex field.
+ *
+ * INSTANT's three meshes (16 s) and the 50k-vertex field run with
+ * QAWS_TEST_HEAVY=1 only; test 135 quadrangulates the same can and blob by
+ * default, with tighter bounds on their irregular vertices.
  */
 
 #include "test_common.h"
@@ -945,8 +949,11 @@ int test_133_cross_field_main(void)
 	test_cube();
 	test_aligned();
 	test_refusals();
-	test_instant();
-	test_timing();
+	if (test_heavy())
+	{
+		test_instant();
+		test_timing();
+	}
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
 }

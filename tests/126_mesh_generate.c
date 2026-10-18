@@ -12,6 +12,9 @@
  *     corners vertices, no vertex near an edge but off it, grids on the
  *     faces (irregular vertices only at the corners);
  *   - refusals: the reserved methods, no description, a negative length.
+ *
+ * By default the torus at 0.4 and the box at 0.25 (written at 0.25 and
+ * 0.15, run so with QAWS_TEST_HEAVY=1).
  */
 
 #include "test_common.h"
@@ -254,9 +257,10 @@ static void test_torus(void)
 	qaws_mesh_3d* m = NULL;
 	qaws_status st;
 	char msg[300];
+	double const L = test_heavy() ? 0.25 : 0.4;   /* (by default 0.4: 2.5 times fewer quads; the face count follows) */
 	memset(&d, 0, sizeof d);
 	d.elements = QAWS_ELEMENTS_QUADS;
-	d.target_length = (qaws_scalar)0.25;
+	d.target_length = (qaws_scalar)L;
 	st = qaws_mesh_generate_surface(s, &d, &m, NULL);
 	if (st != QAWS_STATUS_OK || !m)
 		TEST_ASSERT(0, "torus: generated");
@@ -275,7 +279,7 @@ static void test_torus(void)
 		}
 		sprintf(msg, "torus quads: %u faces (%u quads), %u irregular vertices, closed %d genus %u, off the torus %.2e, footpoints to %.2e", t.nf,
 			t.q.quads, t.q.irregular, t.top.closed, t.top.genus, off, err);
-		TEST_ASSERT(qaws_mesh_3d_validate(m) == QAWS_STATUS_OK && t.q.quads == t.nf && t.nf > 300 && t.q.irregular == 0 && t.top.closed
+		TEST_ASSERT(qaws_mesh_3d_validate(m) == QAWS_STATUS_OK && t.q.quads == t.nf && t.nf > 300 * pow(0.25 / L, 2) && t.q.irregular == 0 && t.top.closed
 			&& t.top.genus == 1 && off < 1e-9 && err < 1e-9, msg);
 		tg_free(&t);
 	}
@@ -293,12 +297,13 @@ static void test_box(void)
 	qaws_mesh_3d* m = NULL;
 	qaws_status st;
 	char msg[400];
+	double const L = test_heavy() ? 0.15 : 0.25;   /* (by default 0.25: 2.8 times fewer quads; the face count and the edge band follow) */
 	unsigned int i;
 	tg_box(box, h);
 	st = qaws_shell_atlas_create((qaws_surface const* const*)box, 6, 0, &atlas);
 	memset(&d, 0, sizeof d);
 	d.elements = QAWS_ELEMENTS_QUADS;
-	d.target_length = (qaws_scalar)0.15;
+	d.target_length = (qaws_scalar)L;
 	if (st == QAWS_STATUS_OK)
 		st = qaws_mesh_generate_shell(atlas, &d, &m, &rep);
 	if (st != QAWS_STATUS_OK || !m)
@@ -342,13 +347,13 @@ static void test_box(void)
 			{
 				double gap = h[k] - fabs(t.x[3 * i + k]);
 				on += gap < 1e-9;
-				close += gap < 0.3 * 0.15;
+				close += gap < 0.3 * L;
 			}
 			near += close >= 2 && on < 2;
 		}
 		sprintf(msg, "box quads: %u faces (%u quads), %u irregular vertices, closed %d genus %u, %u corners of 8, %u vertices off their face, "
 			"%u near an edge but off it, footpoints to %.2e", t.nf, t.q.quads, t.q.irregular, t.top.closed, t.top.genus, corners, offface, near, err);
-		TEST_ASSERT(qaws_mesh_3d_validate(m) == QAWS_STATUS_OK && t.q.quads == t.nf && t.nf > 200 && t.q.irregular == 8 && t.top.closed && t.top.genus == 0
+		TEST_ASSERT(qaws_mesh_3d_validate(m) == QAWS_STATUS_OK && t.q.quads == t.nf && t.nf > 200 * pow(0.15 / L, 2) && t.q.irregular == 8 && t.top.closed && t.top.genus == 0
 			&& fa != QAWS_MESH_NONE && offface == 0 && corners == 8 && near == 0 && err < 1e-9, msg);
 		tg_free(&t);
 	}

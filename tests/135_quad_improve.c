@@ -10,7 +10,8 @@
  *   - the showcase's can (pure, 0.14), blob (pure, 0.11) and wavy patch
  *     (generated in quads, 0.1), and test 125's torus (pure, 0.3): irregular
  *     counts, scaled Jacobians, angle deviations, edge lengths, validity,
- *     topology, creases on the rims, footpoints; timing printed.
+ *     topology, creases on the rims, footpoints; timing printed. By default
+ *     the blob alone, the four with QAWS_TEST_HEAVY=1.
  *
  * The baseline, today's relaxation alone (qd_relax, 30 steps), measured on
  * the integrated branch (the flow's extraction, the smoothest fields with
@@ -615,8 +616,11 @@ static unsigned int tq_creases(qaws_mesh_3d const* q, int* on_rims)
 	return n;
 }
 
+/* By default the blob alone (7 s of the 15; its quads turned inside out the case the finishing last fixed); the can, the wavy
+   patch and the torus with QAWS_TEST_HEAVY=1 (test 134 quadrangulates the same can by default, and the torus at 0.45) */
 static void test_quads(void)
 {
+	int const heavy = test_heavy();
 	qaws_mesh_3d *can = tq_can(), *blob = tq_blob(), *torus = tq_torus(30, 12, 2, 0.75), *q[4] = { NULL, NULL, NULL, NULL };
 	qaws_mesh_reference *rc = NULL, *rb = NULL, *rt = NULL;
 	qaws_mesh_topology tc, tb;
@@ -625,10 +629,32 @@ static void test_quads(void)
 	unsigned int ne;
 	int rims;
 	char msg[600];
-	qaws_mesh_reference_create(can, NULL, &rc);
 	qaws_mesh_reference_create(blob, NULL, &rb);
-	q[0] = rc ? tq_quads(can, 0.14, rc, &a) : NULL;
 	q[1] = rb ? tq_quads(blob, 0.11, rb, &b) : NULL;
+	if (!heavy)
+	{
+		if (!q[1])
+		{
+			TEST_ASSERT(0, "blob: quadrangulated");
+			goto done;
+		}
+		tq_print("blob", &b);
+		qaws_mesh_3d_get_topology(q[1], &tb);
+		fb = tq_foot(q[1], rb);
+		/* the blob's bounds as below */
+		sprintf(msg, "blob, all quads at 0.11: %u irregular (8 before), SJ min %.3f (0.761) mean %.3f (0.991), AD %.2f (3.68, %.0f%% lower)",
+			b.irregular, b.sjmin, b.sjmean, b.ad, 100 * (1 - b.ad / 3.68));
+		TEST_ASSERT(b.irregular <= 8 && b.sjmin >= 0.761 && b.ad <= 0.95 * 3.68, msg);
+		sprintf(msg, "blob lengths against the baseline: thin quads %u (0); shortest edge %.4f (0.0449); ED %.3f (0.113)", b.thin, b.emin, b.ed);
+		TEST_ASSERT(b.thin == 0 && b.emin >= fmin(0.0449, 0.055) && b.ed <= 1.2 * 0.113, msg);
+		sprintf(msg, "blob invariants: valid %d, closed %d genus %u, footpoints to %.1e, SJ > 0 (%.3f)", qaws_mesh_3d_validate(q[1]) == QAWS_STATUS_OK,
+			tb.closed, tb.genus, fb, b.sjmin);
+		TEST_ASSERT(qaws_mesh_3d_validate(q[1]) == QAWS_STATUS_OK && tb.closed && tb.genus == 0 && fb < 1e-9 && b.sjmin > 0, msg);
+		printf("  quadrangulation with the finishing: blob %.0f ms\n", b.ms);
+		goto done;
+	}
+	qaws_mesh_reference_create(can, NULL, &rc);
+	q[0] = rc ? tq_quads(can, 0.14, rc, &a) : NULL;
 	q[2] = tq_wavy(&c);
 	qaws_mesh_reference_create(torus, NULL, &rt);
 	q[3] = rt ? tq_quads(torus, 0.3, rt, &t) : NULL;
