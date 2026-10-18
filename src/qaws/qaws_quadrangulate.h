@@ -32,8 +32,9 @@
  *            then finishing: valence pairs cancelled by local quad
  *            operations (edge rotations, diagonal collapses, doublets)
  *            against a feature-aware ideal valence (a box's corners keep
- *            3), and the quads relaxed by their angles on the reference,
- *            no move lowering the scaled Jacobian round it.
+ *            3), and the quads relaxed by their angles and lengths on the
+ *            reference, no move lowering the scaled Jacobian round it or
+ *            squeezing its quads toward triangles.
  *            The default.
  *   PAIRING, SPLIT, GLOBAL, LAYOUT  reserved (UNSUPPORTED_OPERATION today):
  *            triangles paired by matching, all-quad splitting, integer-grid

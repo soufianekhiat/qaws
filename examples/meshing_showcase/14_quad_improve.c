@@ -1,11 +1,13 @@
 /*
  * Figure 14: quad finishing (valence pairs cancelled by local quad
- * operations, relaxation by angles guarded by the scaled Jacobian).
+ * operations, relaxation by angles and lengths guarded by the scaled
+ * Jacobian and the edges).
  *   - the can (from below: its rims' slivers stay) and the blob, all quads,
  *     and the wavy patch generated in quads, as INSTANT leaves them now:
  *     each quad coloured by its smallest scaled Jacobian (light at 1, amber
  *     toward 0.5, red under), irregular vertices dotted (valence 3 blue, 5
- *     red, others purple); the numbers before the finishing (the plain
+ *     red, others purple), quads whose shortest edge is under 0.2 of their
+ *     longest teal; the numbers before the finishing (the plain
  *     relaxation, measured once in test 135) in the subtitles;
  *   - a planar 8 x 8 grid with one edge turned (two 3-5 pairs), and the
  *     same after the finishing: the grid again.
@@ -47,12 +49,20 @@ static double ms_quad_sj(double const* p, unsigned int const* v)
 	return worst;
 }
 
-/* the mesh drawn face by face coloured by its smallest scaled Jacobian, its edges, its irregular vertices dotted; the
-   numbers: SJ min and mean, AD (mean |angle - 90| at the quads' corners), irregular count */
-static void ms_sj_draw(er_canvas* c, qaws_mesh_3d const* m, double* out_min, double* out_mean, double* out_ad, unsigned int* out_irr)
+/* what a panel shows: SJ min and mean, AD (mean |angle - ideal| at the corners), ED (mean |l - mean| / mean over the edges),
+   the shortest edge, the irregular vertices, the thin quads (shortest edge under 0.2 of the longest) */
+typedef struct ms_qi_stats
+{
+	double smin, smean, ad, ed, emin;
+	unsigned int irr, thin;
+} ms_qi_stats;
+
+/* the mesh drawn face by face coloured by its smallest scaled Jacobian (thin quads teal), its edges, its irregular vertices
+   dotted */
+static void ms_sj_draw(er_canvas* c, qaws_mesh_3d const* m, ms_qi_stats* st)
 {
 	static double const wire[3] = { 45, 50, 62 }, good[3] = { 196, 210, 228 }, warn[3] = { 240, 196, 120 }, red[3] = { 214, 39, 40 },
-		blue[3] = { 31, 90, 200 }, purple[3] = { 140, 60, 170 };
+		blue[3] = { 31, 90, 200 }, purple[3] = { 140, 60, 170 }, teal[3] = { 20, 150, 150 };
 	unsigned int nv = qaws_mesh_3d_get_vertex_count(m), nf = qaws_mesh_3d_get_face_count(m), ne = qaws_mesh_3d_get_edge_count(m);
 	unsigned int *fv = (unsigned int*)malloc(sizeof(unsigned int) * (qaws_mesh_3d_get_corner_count(m) + 1));
 	unsigned int *fs = (unsigned int*)malloc(sizeof(unsigned int) * (nf + 1));
@@ -62,7 +72,10 @@ static void ms_sj_draw(er_canvas* c, qaws_mesh_3d const* m, double* out_min, dou
 	double* p = ms_positions(m);
 	double* n = (double*)malloc(sizeof(double) * 3 * (nv + 1));
 	qaws_scalar* ns = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * (nv + 1));
-	double smin = 1, ssum = 0, ad = 0;
+	double ssum = 0, lsum = 0;
+	memset(st, 0, sizeof *st);
+	st->smin = 1;
+	st->emin = HUGE_VAL;
 	qaws_mesh_3d_get_faces(m, fv, fs);
 	qaws_mesh_3d_get_edges(m, e);
 	qaws_mesh_3d_get_face_adjacency(m, across);
@@ -71,48 +84,58 @@ static void ms_sj_draw(er_canvas* c, qaws_mesh_3d const* m, double* out_min, dou
 		n[k] = (double)ns[k];
 	for (f = 0, c0 = 0; f < nf; c0 += fs[f], f++)
 	{
-		double col[3], s = fs[f] == 4 ? ms_quad_sj(p, fv + c0) : 1, t;
+		double col[3], s = fs[f] == 4 ? ms_quad_sj(p, fv + c0) : 1, t, lo = HUGE_VAL, hi = 0;
 		for (k = 0; k < fs[f]; k++)
 		{
 			double const *o = p + 3 * fv[c0 + k], *a = p + 3 * fv[c0 + (k + 1) % fs[f]], *b = p + 3 * fv[c0 + (k + fs[f] - 1) % fs[f]];
-			double d = ((a[0] - o[0]) * (b[0] - o[0]) + (a[1] - o[1]) * (b[1] - o[1]) + (a[2] - o[2]) * (b[2] - o[2]))
-				/ sqrt(((a[0] - o[0]) * (a[0] - o[0]) + (a[1] - o[1]) * (a[1] - o[1]) + (a[2] - o[2]) * (a[2] - o[2]))
-					* ((b[0] - o[0]) * (b[0] - o[0]) + (b[1] - o[1]) * (b[1] - o[1]) + (b[2] - o[2]) * (b[2] - o[2])));
-			ad += fabs(acos(fmax(-1, fmin(1, d))) * 180 / MS_PI - 180.0 * (fs[f] - 2) / fs[f]);
+			double la = sqrt((a[0] - o[0]) * (a[0] - o[0]) + (a[1] - o[1]) * (a[1] - o[1]) + (a[2] - o[2]) * (a[2] - o[2]));
+			double lb = sqrt((b[0] - o[0]) * (b[0] - o[0]) + (b[1] - o[1]) * (b[1] - o[1]) + (b[2] - o[2]) * (b[2] - o[2]));
+			double d = ((a[0] - o[0]) * (b[0] - o[0]) + (a[1] - o[1]) * (b[1] - o[1]) + (a[2] - o[2]) * (b[2] - o[2])) / (la * lb);
+			st->ad += fabs(acos(fmax(-1, fmin(1, d))) * 180 / MS_PI - 180.0 * (fs[f] - 2) / fs[f]);
 			nc++;
+			lo = fmin(lo, la);
+			hi = fmax(hi, la);
 			if (across[c0 + k] == QAWS_MESH_NONE)
 				border[fv[c0 + k]] = border[fv[c0 + (k + 1) % fs[f]]] = 1;
 		}
 		if (fs[f] == 4)
 		{
-			smin = fmin(smin, s);
+			st->smin = fmin(st->smin, s);
 			ssum += s;
 			nq++;
+			st->thin += lo < 0.2 * hi;
 		}
-		/* light at 1, amber toward 0.5, red under */
+		/* light at 1, amber toward 0.5, red under; thin quads teal */
 		t = (1 - s) / 0.5;
 		for (k = 0; k < 3; k++)
-			col[k] = s < 0.5 ? red[k] : good[k] + fmin(1, t) * (warn[k] - good[k]);
+			col[k] = s < 0.5 ? red[k] : fs[f] == 4 && lo < 0.2 * hi ? teal[k] : good[k] + fmin(1, t) * (warn[k] - good[k]);
 		for (k = 1; k + 1 < fs[f]; k++)
 			er_triangle(c, p + 3 * fv[c0], p + 3 * fv[c0 + k], p + 3 * fv[c0 + k + 1], n + 3 * fv[c0], n + 3 * fv[c0 + k], n + 3 * fv[c0 + k + 1],
 				col, col, col);
 	}
 	for (k = 0; k < ne; k++)
 	{
-		er_line(c, p + 3 * e[2 * k], p + 3 * e[2 * k + 1], wire, 1.0);
+		double const *a = p + 3 * e[2 * k], *b = p + 3 * e[2 * k + 1];
+		double l = sqrt((a[0] - b[0]) * (a[0] - b[0]) + (a[1] - b[1]) * (a[1] - b[1]) + (a[2] - b[2]) * (a[2] - b[2]));
+		er_line(c, a, b, wire, 1.0);
 		deg[e[2 * k]]++;
 		deg[e[2 * k + 1]]++;
+		lsum += l;
+		st->emin = fmin(st->emin, l);
 	}
-	*out_irr = 0;
+	for (k = 0; k < ne && lsum > 0; k++)
+	{
+		double const *a = p + 3 * e[2 * k], *b = p + 3 * e[2 * k + 1];
+		st->ed += fabs(sqrt((a[0] - b[0]) * (a[0] - b[0]) + (a[1] - b[1]) * (a[1] - b[1]) + (a[2] - b[2]) * (a[2] - b[2])) - lsum / ne) / lsum;
+	}
 	for (k = 0; k < nv; k++)
 		if (!border[k] && deg[k] != 4)
 		{
 			er_point(c, p + 3 * k, deg[k] == 3 ? blue : deg[k] == 5 ? red : purple, 6);
-			(*out_irr)++;
+			st->irr++;
 		}
-	*out_min = smin;
-	*out_mean = nq ? ssum / nq : 0;
-	*out_ad = nc ? ad / nc : 0;
+	st->smean = nq ? ssum / nq : 0;
+	st->ad = nc ? st->ad / nc : 0;
 	free(fv); free(fs); free(e); free(deg); free(border); free(across); free(p); free(n); free(ns);
 }
 
@@ -139,16 +162,18 @@ static qaws_mesh_3d* ms_grid8(void)
 
 static void demo_quad_improve(void)
 {
-	/* before the finishing (qd_relax alone, measured once in test 135) */
-	static char const* const was[3] = { "before: 22 irregular, SJ min -0.60, AD 5.8", "before: 12 irregular, SJ min 0.72, AD 5.7",
-		"before: 4 irregular, SJ min 0.80, AD 4.6" };
+	/* before the finishing (qd_relax alone, measured once in test 135; irr: irregular, SJ: the smallest scaled Jacobian) */
+	static char const* const was[3] = { "before: 22 irr, SJ -0.60, AD 5.8, ED 0.12", "before: 12 irr, SJ 0.72, AD 5.7, ED 0.11",
+		"before: 4 irr, SJ 0.80, AD 4.6, ED 0.13" };
+	static double const L[3] = { 0.14, 0.11, 0.1 }, ms0[3] = { 280, 490, 0 };
 	er_canvas* c = er_create(2750, 640, 3, 252, 252, 250);
 	qaws_mesh_3d *can = ms_can(8, 1, 1.6), *blob = ms_blob(1), *q[3] = { NULL, NULL, NULL }, *g = NULL;
 	qaws_surface* wavy = ms_wavy();
 	qaws_mesh_report rep;
+	ms_qi_stats st;
 	char sub[200];
-	double smin, smean, ad, ms[3] = { 0, 0, 0 };
-	unsigned int irr, i;
+	double ms[3] = { 0, 0, 0 };
+	unsigned int i;
 	static char const* const title[3] = { "the can, from below", "the blob", "the wavy patch" };
 	if (!c || !can || !blob || !wavy)
 		return;
@@ -161,11 +186,16 @@ static void demo_quad_improve(void)
 		if (!q[i])
 			continue;
 		ms_panel(c, 550 * (int)i, 0, 550, 640, q[i], i == 0 ? 0.35 : 0.6, i == 0 ? -0.55 : i == 2 ? 0.65 : 0.5, title[i], was[i]);
-		ms_sj_draw(c, q[i], &smin, &smean, &ad, &irr);
-		sprintf(sub, "after:  %u irregular, SJ min %.2f, AD %.1f", irr, smin, ad);
-		er_text(c, 550 * (int)i + 14, 76, sub, 2, 95, 95, 95);
-		printf("  %s: %u faces, irregular %u, SJ min %.3f mean %.3f, AD %.2f deg, edges %.3f..%.3f, %.0f ms\n", title[i] + 4, rep.quality.quads, irr, smin,
-			smean, ad, (double)rep.quality.min_edge, (double)rep.quality.max_edge, ms[i]);
+		ms_sj_draw(c, q[i], &st);
+		sprintf(sub, "after:  %u irr, SJ %.2f, AD %.1f, ED %.2f", st.irr, st.smin, st.ad, st.ed);
+		er_text(c, 550 * (int)i + 14, 66, sub, 2, 95, 95, 95);
+		sprintf(sub, "%u thin (teal), shortest edge %.2f L", st.thin, st.emin / L[i]);
+		er_text(c, 550 * (int)i + 14, 84, sub, 2, 95, 95, 95);
+		printf("  %s: %u faces, irregular %u, SJ min %.3f mean %.3f, AD %.2f deg, ED %.3f, shortest edge %.3f L, %u thin quads, %.0f ms", title[i] + 4,
+			rep.quality.quads, st.irr, st.smin, st.smean, st.ad, st.ed, st.emin / L[i], st.thin, ms[i]);
+		if (ms0[i] > 0)
+			printf(" (the plain relaxation about %.0f ms on a quiet machine, test 135)", ms0[i]);
+		printf("\n");
 	}
 	/* the grid with an edge turned, then finished */
 	g = ms_grid8();
@@ -174,7 +204,7 @@ static void demo_quad_improve(void)
 		qaws_mesh_reference* r = NULL;
 		qaws_hm* m = &g->hm;
 		unsigned char kind[82];
-		unsigned int v, ops = 0;
+		unsigned int v, ops = 0, nf0 = m->nf;
 		qaws_mesh_reference_create(g, NULL, &r);
 		hm_foot_enable(m);
 		for (v = 0; v < m->nv; v++)
@@ -188,13 +218,13 @@ static void demo_quad_improve(void)
 		for (i = 0; i < 2; i++)
 		{
 			ms_panel(c, 1650 + 550 * (int)i, 0, 550, 640, g, 0.0, 1.2, i ? "the grid, finished" : "a grid, one edge turned", NULL);
-			ms_sj_draw(c, g, &smin, &smean, &ad, &irr);
+			ms_sj_draw(c, g, &st);
 			if (i)
-				sprintf(sub, "%u operation(s): %u irregular, SJ min %.2f", ops, irr, smin);
+				sprintf(sub, "%u operation(s): %u irregular, SJ min %.2f", ops, st.irr, st.smin);
 			else
-				sprintf(sub, "two 3-5 pairs: %u irregular, SJ min %.2f", irr, smin);
+				sprintf(sub, "two 3-5 pairs: %u irregular, SJ min %.2f", st.irr, st.smin);
 			er_text(c, 1650 + 550 * (int)i + 14, 46, sub, 2, 95, 95, 95);
-			printf("  grid %s: irregular %u, SJ min %.3f\n", i ? "finished" : "turned", irr, smin);
+			printf("  grid %s: irregular %u, SJ min %.3f, ED %.3f\n", i ? "finished" : "turned", st.irr, st.smin, st.ed);
 			if (!i && r)
 			{
 				mr_scratch s;
@@ -203,7 +233,8 @@ static void demo_quad_improve(void)
 					ops = qi_improve(m, r, &s, kind, 1, 4);
 					mr_scratch_free(&s);
 				}
-				printf("  grid: %u operation(s)\n", ops);
+				/* (a collapse or a doublet removal takes a quad, a rotation none) */
+				printf("  grid: %u operation(s): %u rotation(s), %u collapse(s) or doublet removal(s)\n", ops, ops - (nf0 - m->nf), nf0 - m->nf);
 			}
 		}
 		qaws_mesh_reference_destroy(r);

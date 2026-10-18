@@ -448,28 +448,42 @@ INSTANT's quads are finished before the attributes are transferred
   non-manifold results and faces sharing more than the edge are refused;
   feature flags and corner attributes are kept.
 - **Cancellation** round the vertices off their ideal, the largest drop of
-  E first. An operation is made only when E drops with no more vertices off
-  their ideal, corners keep their valence, line vertices never go below
-  theirs, and its patch, relaxed on a copy first, keeps its smallest scaled
-  Jacobian (at least max(0.3, before - 0.1), no lower where it was poorer)
-  with no face newly turned against the reference. Where no operation alone
-  helps, a rotation and a second operation beside it.
+  E first (the candidates collected once per pass, at most four passes). An
+  operation is made only when E drops with no more vertices off their
+  ideal, corners keep their valence, line vertices never go below theirs,
+  and its patch, relaxed on a copy first, keeps its smallest scaled Jacobian
+  (at least max(0.3, before - 0.1), no lower where it was poorer) with no
+  face newly turned against the reference. Where no operation alone helps,
+  a rotation and a second operation beside it, judged together against the
+  quads as they were before the rotation.
 - **Relaxation** on the reference, vertex by vertex while their
   neighbourhoods move (at most 30 sweeps): a free vertex goes to the better
-  of Zhou and Shimada's angle target and a Newton step down its corners'
-  angle energy, walked; a line vertex to the middle of its line neighbours
-  along the creases; no move lowers the scaled Jacobian round the vertex.
-  Then the quads under 0.5, worst first, their free vertices searched in
-  eight directions.
+  of Zhou and Shimada's angle target and a Newton step down a shape energy
+  (its corners' angles against the regular polygons', its edges' lengths
+  against the target length, weighted 0.1), walked; a line vertex to the
+  middle of its line neighbours along the creases. No move lowers the
+  scaled Jacobian round the vertex, shortens its shortest edge below half
+  the target length (or below what it was), or takes a quad's shortest to
+  longest edge under 0.3 (or lower where it was already). Then the quads
+  under 0.5, worst first, their free vertices searched in eight directions
+  under the same guards.
+
 Measured (test 135, figure 14), all quads: the can at 0.14 from 22 to 20
-irregular vertices, SJ mean 0.966 to 0.974, angle deviation 5.8 to 4.3
-degrees; the blob at 0.11 keeps 12, SJ min 0.72 to 0.83, angle deviation
-5.7 to 4.7; the wavy patch keeps 4, angle deviation 4.6 to 3.6; about 10 to
-15% more time. The box keeps its 8 corners of valence 3, the tori stay
-grids. Limits: the singularities INSTANT leaves are mostly 3-5 pairs two
-edges apart and lone cones, which no local operation (nor two) cancels; the
-can's rims keep slivers with three crease vertices in a row (SJ near 0 or
-below), which only a collapse along the crease would remove.
+irregular vertices, SJ mean 0.966 to 0.974, angle deviation 5.8 to 4.7
+degrees; the blob at 0.11 keeps 12, angle deviation 5.7 to 4.8; the wavy
+patch keeps 4, angle deviation 4.6 to 3.7; test 125's torus at 0.3 from 12
+to 11, SJ min -0.55 to 0.74. Quads with an edge under 0.2 of their longest
+and the shortest edge stay at the plain relaxation's or better; the mean
+edge-length deviation rises from 0.124 to 0.146 on the can and from 0.105
+to 0.118 on the blob (the angles bought with the lengths). About 20% more
+time (medians of alternating runs: can 353 to 414 ms, blob 668 to 793 ms,
+on a loaded machine). The box keeps its 8 corners of valence 3, the tori
+stay grids. Limits: single operations that lower E exist but each would add
+vertices off their ideal (a 6 split into two 5s and the like) and is
+refused on purpose, so the gains come from pairs; what is left are 3-5
+pairs two edges apart and lone cones; the can's rims keep slivers with
+three crease vertices in a row (SJ near 0 or below), which only a collapse
+along the crease would remove.
 
 ## Meshes of exact geometry
 
