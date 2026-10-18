@@ -11,6 +11,8 @@
  *                      and sharp with its creases, curvature from the reference
  *   mesh3_remesh.png   remeshing on the reference: uniform and adaptive by
  *                      curvature, creases kept, attributes and their seams transferred
+ *   mesh4_quads.png    quads by Instant Meshes on the reference: a cross field and
+ *                      its singularities, quad-dominant and pure, along creases, a torus
  *
  * Each figure lives in meshing_showcase/NN_*.c, compiled as one translation
  * unit with the rasterizer in example_raster.h.
@@ -144,6 +146,7 @@ static void ms_panel(er_canvas* c, int x, int y, int w, int h, qaws_mesh_3d cons
 #include "meshing_showcase/01_core.c"
 #include "meshing_showcase/02_reference.c"
 #include "meshing_showcase/03_remesh.c"
+#include "meshing_showcase/04_quads.c"
 
 int main(void)
 {
@@ -152,5 +155,6 @@ int main(void)
 	demo_core();
 	demo_reference();
 	demo_remesh();
+	demo_quads();
 	return 0;
 }

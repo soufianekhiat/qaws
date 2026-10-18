@@ -56,4 +56,24 @@ qaws_mesh_reference const* qaws_size_field_get_reference(qaws_size_field const* 
 qaws_status qaws_size_field_evaluate(qaws_size_field const* field, qaws_mesh_location const* locations, qaws_scalar const* points,
 	unsigned int count, qaws_scalar* out_sizes);
 
+/*
+ * Direction fields: a cross field on a mesh's vertices (4-symmetric: a
+ * direction and its quarter turns are one), smoothed by Instant Meshes'
+ * multiresolution Gauss-Seidel (pairs of vertices merged level by level,
+ * each level smoothed and handed to the finer one), along feature edges and
+ * the border. Its index round each face, in quarter turns, marks the
+ * singularities: -1 and +1 where a quad mesh following the field has
+ * vertices of valence 3 and 5.
+ */
+typedef struct qaws_direction_field_desc
+{
+	unsigned int symmetry;              /* 4: crosses (0: 4); 2 and 6 reserved */
+	unsigned int sweeps;                /* Gauss-Seidel sweeps per level; 0: 8 */
+} qaws_direction_field_desc;
+
+/* per vertex a unit tangent (3); per face the index round it; either output
+   may be NULL; desc NULL: the defaults */
+qaws_status qaws_mesh_3d_direction_field(qaws_mesh_3d const* mesh, qaws_direction_field_desc const* desc, qaws_scalar* out_directions,
+	int* out_face_index);
+
 #endif /* QAWS_MESH_FIELD_H */

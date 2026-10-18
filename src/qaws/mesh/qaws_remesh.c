@@ -612,13 +612,65 @@ static void rm_bary(qaws_mesh_reference const* r, unsigned int t, double const* 
 	*b = v;
 }
 
+/* the reference mesh's attributes onto m by its footpoints and its faces' centre locations fl */
+qaws_status mx_transfer(qaws_hm* m, qaws_mesh_reference const* r, qaws_mesh_location const* fl)
+{
+	qaws_hm const* src = &r->mesh->hm;
+	unsigned int f, k, v, c;
+	for (k = 0; k < src->na; k++)
+	{
+		hm_attr const* at = &src->attr[k];
+		unsigned int a = hm_attr_add(m, at->name, at->element, at->rule, at->n);
+		qaws_scalar vals[16];
+		if (a == HM_NONE)
+		{
+			return QAWS_STATUS_ALLOCATION_FAILURE;
+		}
+		if (at->element == QAWS_MESH_VERTEX)
+			for (v = 0; v < m->nv; v++)
+			{
+				unsigned int q;
+				qaws_mesh_reference_evaluate_attribute(r, k, &m->foot[v], 1, vals);
+				for (q = 0; q < at->n; q++)
+					hm_attr_at(m, a, v)[q] = (double)vals[q];
+			}
+		else
+			for (f = 0; f < m->nf; f++)
+			{
+				unsigned int q;
+				if (fl[f].patch == HM_NONE)
+					continue;
+				if (at->element == QAWS_MESH_FACE)
+				{
+					qaws_mesh_reference_evaluate_attribute(r, k, &fl[f], 1, vals);
+					for (q = 0; q < at->n; q++)
+						hm_attr_at(m, a, f)[q] = (double)vals[q];
+					continue;
+				}
+				/* corners: the vertex in the reference triangle under the face's centre */
+				for (c = m->fc[f]; c < m->fc[f] + m->fn[f]; c++)
+				{
+					qaws_mesh_location l;
+					double ba, bb;
+					rm_bary(r, fl[f].patch, rm_x(m, m->cv[c]), &ba, &bb);
+					l.patch = fl[f].patch;
+					l.a = (qaws_scalar)ba;
+					l.b = (qaws_scalar)bb;
+					qaws_mesh_reference_evaluate_attribute(r, k, &l, 1, vals);
+					for (q = 0; q < at->n; q++)
+						hm_attr_at(m, a, c)[q] = (double)vals[q];
+				}
+			}
+	}
+	return QAWS_STATUS_OK;
+}
+
 /* the reference mesh's attributes onto the result; the faces' deviations */
 static qaws_status rm_end(rmsh* w)
 {
 	qaws_hm* m = w->m;
-	qaws_hm const* src = &w->r->mesh->hm;
 	qaws_mesh_location* fl;
-	unsigned int f, k, v, c;
+	unsigned int f, k, c;
 	double dmax = 0, dsum = 0;
 	hm_compact(m);
 	fl = (qaws_mesh_location*)malloc(sizeof(qaws_mesh_location) * (m->nf + 1));
@@ -642,54 +694,11 @@ static qaws_status rm_end(rmsh* w)
 	hm_attr_remove(m, w->ra > w->sa ? w->sa : w->ra);
 	w->rep.max_deviation = (qaws_scalar)dmax;
 	w->rep.mean_deviation = (qaws_scalar)(m->nf ? dsum / m->nf : 0);
-	for (k = 0; k < src->na; k++)
 	{
-		hm_attr const* at = &src->attr[k];
-		unsigned int a = hm_attr_add(m, at->name, at->element, at->rule, at->n);
-		qaws_scalar vals[16];
-		if (a == HM_NONE)
-		{
-			free(fl);
-			return QAWS_STATUS_ALLOCATION_FAILURE;
-		}
-		if (at->element == QAWS_MESH_VERTEX)
-			for (v = 0; v < m->nv; v++)
-			{
-				unsigned int q;
-				qaws_mesh_reference_evaluate_attribute(w->r, k, &m->foot[v], 1, vals);
-				for (q = 0; q < at->n; q++)
-					hm_attr_at(m, a, v)[q] = (double)vals[q];
-			}
-		else
-			for (f = 0; f < m->nf; f++)
-			{
-				unsigned int q;
-				if (fl[f].patch == HM_NONE)
-					continue;
-				if (at->element == QAWS_MESH_FACE)
-				{
-					qaws_mesh_reference_evaluate_attribute(w->r, k, &fl[f], 1, vals);
-					for (q = 0; q < at->n; q++)
-						hm_attr_at(m, a, f)[q] = (double)vals[q];
-					continue;
-				}
-				/* corners: the vertex in the reference triangle under the face's centre */
-				for (c = m->fc[f]; c < m->fc[f] + m->fn[f]; c++)
-				{
-					qaws_mesh_location l;
-					double ba, bb;
-					rm_bary(w->r, fl[f].patch, rm_x(m, m->cv[c]), &ba, &bb);
-					l.patch = fl[f].patch;
-					l.a = (qaws_scalar)ba;
-					l.b = (qaws_scalar)bb;
-					qaws_mesh_reference_evaluate_attribute(w->r, k, &l, 1, vals);
-					for (q = 0; q < at->n; q++)
-						hm_attr_at(m, a, c)[q] = (double)vals[q];
-				}
-			}
+		qaws_status st = mx_transfer(m, w->r, fl);
+		free(fl);
+		return st;
 	}
-	free(fl);
-	return QAWS_STATUS_OK;
 }
 
 qaws_status qaws_mesh_remesh(qaws_mesh_3d const* mesh, qaws_remesh_desc const* desc, qaws_mesh_3d** out_mesh, qaws_mesh_report* out_report)

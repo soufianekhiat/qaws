@@ -91,4 +91,53 @@ void mr_eval(qaws_mesh_reference const* r, qaws_mesh_location const* l, double* 
 
 double sf_eval(qaws_size_field const* f, qaws_mesh_location const* l, double const* x);
 
+/* the reference mesh's attributes onto m, at its vertices' footpoints and its faces' centre locations fl (remeshing, quads) */
+qaws_status mx_transfer(qaws_hm* m, qaws_mesh_reference const* r, qaws_mesh_location const* fl);
+
+/* ---- direction and position fields (Instant Meshes) ---------------------
+ *
+ * A hierarchy of a mesh's vertices, pairs merged level by level; per vertex
+ * a 4-symmetric orientation q (a unit tangent: q and n x q up to sign) and a
+ * position o (a lattice point near the vertex: the lattice o + scale (i q +
+ * j n x q)). Solved coarse to fine by Gauss-Seidel, constraints from feature
+ * edges and the border (the orientation along them, the position on them;
+ * corners pin the lattice).
+ */
+
+typedef struct mf_level
+{
+	unsigned int n;
+	double *x, *nrm, *area;
+	unsigned int *adj0, *adj;       /* neighbours (CSR) */
+	unsigned int* parent;           /* at the next level */
+	unsigned int *child0, *child;   /* at the previous level (CSR) */
+	double *q, *o;
+	double* cq;                     /* constraint direction (zero: none) */
+	unsigned char* con;             /* MF_ALONG: q along cq; MF_ON_LINE: o on the line x + t cq; MF_PINNED: o at x */
+} mf_level;
+
+#define MF_ALONG 1u
+#define MF_ON_LINE 2u
+#define MF_PINNED 4u
+
+typedef struct mf_hier
+{
+	mf_level* lv;
+	unsigned int nl;
+} mf_hier;
+
+/* level 0: the vertices of a triangle store, its edges, normals (NULL: angle-weighted), constraints from its features */
+qaws_status mf_build(mf_hier* h, qaws_hm const* m, double const* normals);
+void mf_free(mf_hier* h);
+/* init (3 per level-0 vertex, zero: none) may be NULL: a preferred start, carried up the levels */
+void mf_orientations(mf_hier* h, unsigned int sweeps, double const* init);
+void mf_positions(mf_hier* h, double scale, unsigned int sweeps);
+/* the 4-symmetric copies of q0 and q1 closest to each other */
+void mf_compat_orientation(double const* q0, double const* n0, double const* q1, double const* n1, double* out0, double* out1);
+/* the lattice points of (q0, o0) and (q1, o1) closest to each other near x0 and x1 */
+void mf_compat_position(double const* x0, double const* n0, double const* q0, double const* o0, double const* x1, double const* n1,
+	double const* q1, double const* o1, double scale, double* out0, double* out1);
+/* the quarter turns taking q1 onto q0 (0 to 3) */
+int mf_rotation(double const* q0, double const* n0, double const* q1, double const* n1);
+
 #endif /* QAWS_MESH_INTERNAL_H */
