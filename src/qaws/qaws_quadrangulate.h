@@ -18,14 +18,16 @@
  *            field on a lattice of the target spacing (multiresolution,
  *            along feature edges and the border, lattice points pinned at
  *            feature corners). The lattice steps between neighbours are made
- *            to agree round every triangle (QuadriFlow's consistency, Huang
- *            et al. 2018: dislocations cancelled in pairs), so irregular
+ *            to agree round every triangle by a min-cost flow (QuadriFlow:
+ *            Huang, Zhou, Niessner, Shewchuk, Guibas 2018), each cone of the
+ *            field put on a lattice point (and on a vertex where that is
+ *            cheap), the folds the changes leave undone, so irregular
  *            vertices stay at the field's singularities; then the mesh read
- *            off them: vertices of one lattice point merged, neighbours one
- *            step apart joined, faces traced, doublets removed.
- *            Quad-dominant (a triangle or a pentagon where a singularity
- *            falls inside a cell); `pure` makes all quads by splitting every
- *            face (the fields at twice the target). Relaxation on the
+ *            off them: vertices of one lattice point merged, the triangles'
+ *            half cells paired into quads, holes filled, doublets removed.
+ *            Quad-dominant; `pure` makes all quads at the target spacing, or
+ *            where that leaves another face, from fields at twice the target
+ *            with every face split in four. Relaxation on the
  *            reference follows, creases and the border along themselves.
  *            The default.
  *   PAIRING, SPLIT, GLOBAL, LAYOUT  reserved (UNSUPPORTED_OPERATION today):

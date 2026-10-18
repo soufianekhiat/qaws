@@ -386,6 +386,40 @@ tolerance costs 5 to 10 times the default at the same density (the guard
 on every move). Figure 3 runs about 1.05 times as long as before. Not
 reached: a strip narrower than the target (its border corners stay near 26
 degrees), and the faces next to a 20-degree corner.
+### Quads by min-cost flow
+INSTANT's consistency follows QuadriFlow (Huang, Zhou, Niessner, Shewchuk,
+Guibas 2018):
+- The rounded lattice steps are made to close round every dense triangle
+  by a min-cost flow. Each face has two nodes, the rows of its closure sum
+  in frames combed across the faces; a unit of an edge's step is a unit of
+  flow between the rows it enters. The border is a sink, and a cone takes
+  units at a price. A change costs how far it takes the cheaper end of its
+  edge from its own lattice point, so extra rows run where the rounding
+  was nearly tied. The solver is generic (`qaws_internal_flow.h`:
+  successive shortest paths, Dijkstra on reduced costs, potentials moved
+  only where a search went, deterministic).
+- Each cone where the field turns by a quarter is put on a lattice point
+  (its closure sum made even, since det(I - R) = 2) by unit paths to
+  another odd cone or the border, then onto a vertex of its face where
+  moving that vertex's lattice point there is cheap. A cone left off its
+  vertices leaves a hole, filled from its centre: quads round a vertex of
+  valence 3 or 5, or a fan whose triangles pair with their neighbours.
+- Faces the changes turn over in the lattice are undone by flip removal:
+  vertices moved by a lattice step, alone, with a neighbour or with the
+  rest of their lattice point, while that leaves fewer turned over.
+- Positions are refitted to the mended steps, and the mesh is read off the
+  steps alone: a dense triangle spanning half a cell is that half cell,
+  two sharing their diagonal are its quad, so cells sheared in space come
+  out whole.
+- `pure` runs at the target spacing. Only when a face other than a quad
+  is left does it fall back to fields at twice the target with every face
+  split in four.
+Measured (test 134, figure 13): the blob quad-dominant at 0.16 has no face
+but quads and 8 irregular vertices (were 5 triangles and a pentagon); all
+quads at 0.11, 10 irregular at the target spacing (were 12, split from
+twice it); the can, 12 (were 22); a torus at 0.3, 697 quads and none
+irregular; a wavy B-spline patch in quads, none (were 4). Consistency takes
+about 0.5 s on 50k dense faces.
 
 ## Meshes of exact geometry
 
@@ -512,8 +546,9 @@ listing figure numbers (`58`) draws those alone.
 
 ## Known limits
 
-- Quads: dislocations are paired greedily by cost, not by QuadriFlow's
-  min-cost flow; the field's singularities are those of a smooth field
+- Quads: a cone that no vertex of its face can reach cheaply stays off
+  its vertices (a 3-5 pair beside it); positions are refitted by sweeps,
+  not a global solve; the field's singularities are those of a smooth field
   (or one drawn to curvature), not placed for the fewest irregular
   vertices.
 - Generation: vertices on a trimmed face's trim curve are snapped onto the

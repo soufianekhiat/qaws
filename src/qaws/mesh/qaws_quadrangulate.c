@@ -4,11 +4,12 @@
  * (twice: free, and drawn to the principal curvature directions; the one
  * with fewer singularities kept) and a lattice position field on it; each
  * dense edge's step between lattice points rounded, then mended until the
- * steps close round every face (dislocations cancelled in pairs along the
- * cheapest paths); the quad mesh read off the steps (lattice points merged,
- * neighbours one step apart joined, faces traced round each vertex's
- * neighbours in turn, doublets removed), optionally split into all quads,
- * relaxed on the reference (creases and the border along themselves);
+ * steps close round every face (a min-cost flow, qaws_quad_flow.h: the
+ * cones on lattice points, folds undone, positions refitted); the quad mesh
+ * read off the steps (lattice points merged, the dense faces' half cells
+ * paired across their diagonals into quads, holes filled, doublets
+ * removed), for all quads at the target spacing or else split from twice
+ * it, relaxed on the reference (creases and the border along themselves);
  * footpoints and attributes as remeshing.
  */
 
@@ -27,13 +28,6 @@ static double qd_dot(double const* a, double const* b)
 	return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 }
 
-static void qd_cross(double const* a, double const* b, double* o)
-{
-	o[0] = a[1] * b[2] - a[2] * b[1];
-	o[1] = a[2] * b[0] - a[0] * b[2];
-	o[2] = a[0] * b[1] - a[1] * b[0];
-}
-
 static unsigned int qd_find(unsigned int* uf, unsigned int i)
 {
 	while (uf[i] != i)
@@ -42,295 +36,6 @@ static unsigned int qd_find(unsigned int* uf, unsigned int i)
 		i = uf[i];
 	}
 	return i;
-}
-
-typedef struct qd_pair
-{
-	unsigned int a, b;
-} qd_pair;
-
-static int qd_pair_cmp(void const* x, void const* y)
-{
-	qd_pair const *p = (qd_pair const*)x, *q = (qd_pair const*)y;
-	if (p->a != q->a)
-		return p->a < q->a ? -1 : 1;
-	return p->b < q->b ? -1 : p->b > q->b ? 1 : 0;
-}
-
-/* a neighbour seen round its vertex: the angle, in the vertex's tangent frame */
-typedef struct qd_spoke
-{
-	double ang;
-	unsigned int to;
-} qd_spoke;
-
-static int qd_spoke_cmp(void const* x, void const* y)
-{
-	double a = ((qd_spoke const*)x)->ang, b = ((qd_spoke const*)y)->ang;
-	return a < b ? -1 : a > b ? 1 : 0;
-}
-
-typedef struct qd_near
-{
-	unsigned int* uf;
-	unsigned int const* member;
-	double const *cx, *cn;
-	double h2;
-} qd_near;
-
-static qaws_status qd_near_visit(void* user, unsigned int i, unsigned int j)
-{
-	qd_near const* w = (qd_near const*)user;
-	double const *a = w->cx + 3 * (size_t)i, *b = w->cx + 3 * (size_t)j;
-	double d[3];
-	d[0] = a[0] - b[0];
-	d[1] = a[1] - b[1];
-	d[2] = a[2] - b[2];
-	if (qd_dot(d, d) < w->h2 && qd_dot(w->cn + 3 * (size_t)i, w->cn + 3 * (size_t)j) > 0)
-	{
-		unsigned int ra = qd_find(w->uf, w->member[i]), rb = qd_find(w->uf, w->member[j]);
-		if (ra != rb)
-			w->uf[ra] = rb;
-	}
-	return QAWS_STATUS_OK;
-}
-
-/* the lattice coordinates c turned by k quarter turns counter-clockwise */
-static void qd_turn(int const* c, int k, int* o)
-{
-	int x = c[0], y = c[1];
-	switch (k & 3)
-	{
-	case 0: o[0] = x; o[1] = y; break;
-	case 1: o[0] = -y; o[1] = x; break;
-	case 2: o[0] = -x; o[1] = -y; break;
-	default: o[0] = y; o[1] = -x; break;
-	}
-}
-
-/* Per corner of the dense mesh (the edge from its vertex a to the next, b): T, the step from a's lattice point to b's in
-   whole steps of a's frame (q, n x q); K, the quarter turns taking b's frame onto a's (coordinates in b's frame are those
-   in a's turned by K). The two corners of an edge are kept opposite. */
-static void qd_steps(qaws_hm const* dm, mf_level const* L, double rho, int* T, unsigned char* K)
-{
-	unsigned int c, k;
-	for (c = 0; c < dm->nc; c++)
-	{
-		unsigned int a, b, o = dm->co[c];
-		double ob[3], d[3], t[3];
-		if (dm->cf[c] == HM_NONE || (o != HM_NONE && o < c))
-			continue;
-		a = dm->cv[c];
-		b = hm_to(dm, c);
-		K[c] = (unsigned char)mf_rotation(L->q + 3 * (size_t)a, L->nrm + 3 * (size_t)a, L->q + 3 * (size_t)b, L->nrm + 3 * (size_t)b);
-		mf_unfold(L->x + 3 * (size_t)a, L->nrm + 3 * (size_t)a, L->x + 3 * (size_t)b, L->nrm + 3 * (size_t)b, L->o + 3 * (size_t)b, ob);
-		for (k = 0; k < 3; k++)
-			d[k] = ob[k] - L->o[3 * (size_t)a + k];
-		qd_cross(L->nrm + 3 * (size_t)a, L->q + 3 * (size_t)a, t);
-		T[2 * (size_t)c] = (int)floor(qd_dot(d, L->q + 3 * (size_t)a) / rho + 0.5);
-		T[2 * (size_t)c + 1] = (int)floor(qd_dot(d, t) / rho + 0.5);
-		if (o != HM_NONE)
-		{
-			int m[2];
-			m[0] = -T[2 * (size_t)c];
-			m[1] = -T[2 * (size_t)c + 1];
-			K[o] = (unsigned char)((4 - K[c]) & 3);
-			qd_turn(m, K[c], T + 2 * (size_t)o);
-		}
-	}
-}
-
-/* face f's steps summed in its first vertex's frame (zero: the lattice closes round it); fr per corner: the quarter turns
-   from its vertex's frame to the face's. Nonzero return: the frames turn round f (a singularity of the cross field). */
-static int qd_closure(qaws_hm const* dm, unsigned int f, int const* T, unsigned char const* K, unsigned char* fr, int* S)
-{
-	unsigned int c0 = dm->fc[f], i;
-	int turn = 0, s[2];
-	S[0] = S[1] = 0;
-	for (i = 0; i < 3; i++)
-	{
-		fr[c0 + i] = (unsigned char)(turn & 3);
-		qd_turn(T + 2 * (size_t)(c0 + i), turn, s);
-		S[0] += s[0];
-		S[1] += s[1];
-		turn -= K[c0 + i];
-	}
-	return (turn & 3) != 0;
-}
-
-/* the lattice axis (0: q, 1: n x q of its vertex) corner c's edge runs along */
-static int qd_axis(qaws_hm const* dm, mf_level const* L, unsigned int c)
-{
-	unsigned int a = dm->cv[c], b = hm_to(dm, c), k;
-	double d[3], t[3];
-	for (k = 0; k < 3; k++)
-		d[k] = L->x[3 * (size_t)b + k] - L->x[3 * (size_t)a + k];
-	qd_cross(L->nrm + 3 * (size_t)a, L->q + 3 * (size_t)a, t);
-	return fabs(qd_dot(d, L->q + 3 * (size_t)a)) >= fabs(qd_dot(d, t)) ? 0 : 1;
-}
-
-/* a binary heap of (cost, node), cheapest on top */
-typedef struct qd_item
-{
-	double d;
-	unsigned int n;
-} qd_item;
-
-static void qd_push(qd_item* h, unsigned int* n, double d, unsigned int v)
-{
-	unsigned int i = (*n)++;
-	while (i > 0 && h[(i - 1) / 2].d > d)
-	{
-		h[i] = h[(i - 1) / 2];
-		i = (i - 1) / 2;
-	}
-	h[i].d = d;
-	h[i].n = v;
-}
-
-static qd_item qd_pop(qd_item* h, unsigned int* n)
-{
-	qd_item top = h[0], last = h[--(*n)];
-	unsigned int i = 0, j;
-	while ((j = 2 * i + 1) < *n)
-	{
-		if (j + 1 < *n && h[j + 1].d < h[j].d)
-			j++;
-		if (h[j].d >= last.d)
-			break;
-		h[i] = h[j];
-		i = j;
-	}
-	h[i] = last;
-	return top;
-}
-
-/* the cost of an edge's step t becoming n: lattice points merged cheapest, a lattice line between the two next, a step
-   turned or made diagonal (the cells shear) dear, a step of two (a lattice point with no vertex) a last resort */
-static double qd_cost(int const* t, int const* n)
-{
-	int a0 = abs(t[0]) + abs(t[1]), a1 = abs(n[0]) + abs(n[1]);
-	if (abs(n[0]) > 1 || abs(n[1]) > 1)
-		return 50;
-	if (a1 < a0)
-		return 1;
-	return a0 == 0 ? 2 : 6;
-}
-
-/* corner c's edge takes the unit step u (in the frame of the path's first face; tr: its turn into c's face): -u off c's
-   face's sum, +u onto the face across */
-static void qd_step(qaws_hm const* dm, int* T, unsigned char const* K, unsigned char const* fr, unsigned char const* tr, int const* u, unsigned int c)
-{
-	unsigned int o = dm->co[c];
-	int uP[2], dd[2], m[2];
-	qd_turn(u, tr[dm->cf[c]], uP);
-	qd_turn(uP, -(int)fr[c], dd);
-	T[2 * (size_t)c] -= dd[0];
-	T[2 * (size_t)c + 1] -= dd[1];
-	if (o != HM_NONE)
-	{
-		qd_turn(dd, K[c], m);
-		T[2 * (size_t)o] += m[0];
-		T[2 * (size_t)o + 1] += m[1];
-	}
-}
-
-/* QuadriFlow's consistency (Huang, Zhou, Funkhouser, Niessner 2018): a face whose steps do not close holds a dislocation
-   (an extra half row of the lattice ends there). Dislocations cancelled in pairs, or at the border, along shortest paths
-   across the faces: each edge crossed takes the unit step, the faces between keep their sums. Feature and border edges,
-   lattice lines, take steps along themselves only. Returns the dislocations left (round singular faces, or alone).
-   shortcut: nearest partners in turn and paths around singular faces stand in for its min-cost flow; the flow when
-   the extra rows should go where the stretch is least. */
-static unsigned int qd_consistent(qaws_hm const* dm, mf_level const* L, int* T, unsigned char const* K)
-{
-	unsigned int nf = dm->nf, f0, f, run = 0, left = 0;
-	unsigned int* from = (unsigned int*)malloc(sizeof(unsigned int) * (nf + 1));
-	unsigned int* stamp = (unsigned int*)calloc((size_t)nf + 1, sizeof(unsigned int));
-	unsigned char *fr = (unsigned char*)malloc((size_t)dm->nc + 1), *tr = (unsigned char*)malloc((size_t)nf + 1), *sing = (unsigned char*)malloc((size_t)nf + 1);
-	int* S = (int*)malloc(sizeof(int) * (2 * (size_t)nf + 2));
-	double* dist = (double*)malloc(sizeof(double) * (nf + 1));
-	qd_item* heap = (qd_item*)malloc(sizeof(qd_item) * (3 * (size_t)nf + dm->nc + 8));   /* (each face pushed at most thrice, each exit once) */
-	if (!from || !stamp || !fr || !tr || !sing || !S || !dist || !heap)
-	{
-		left = HM_NONE;
-		goto done;
-	}
-	for (f = 0; f < nf; f++)
-		sing[f] = (unsigned char)qd_closure(dm, f, T, K, fr, S + 2 * (size_t)f);
-	for (f0 = 0; f0 < nf; f0++)
-		while (!sing[f0] && (S[2 * (size_t)f0] || S[2 * (size_t)f0 + 1]))
-		{
-			int u[2], ax = abs(S[2 * (size_t)f0]) >= abs(S[2 * (size_t)f0 + 1]) ? 0 : 1;
-			unsigned int hn = 0, hit = HM_NONE, exitc = HM_NONE, B;
-			u[0] = u[1] = 0;
-			u[ax] = S[2 * (size_t)f0 + ax] > 0 ? 1 : -1;
-			stamp[f0] = ++run;
-			dist[f0] = 0;
-			tr[f0] = 0;
-			from[f0] = HM_NONE;
-			qd_push(heap, &hn, 0, f0);
-			/* the cheapest path from f0 to a face holding the opposite step, or out through the border */
-			while (hn && hit == HM_NONE)
-			{
-				qd_item it = qd_pop(heap, &hn);
-				unsigned int A = it.n, c;
-				int uA[2];
-				if (A >= nf)
-				{
-					/* out through the border (along it: checked when pushed) */
-					exitc = A - nf;
-					hit = dm->cf[exitc];
-					break;
-				}
-				if (it.d > dist[A])
-					continue;
-				qd_turn(u, tr[A], uA);
-				if (A != f0 && S[2 * (size_t)A] * uA[0] + S[2 * (size_t)A + 1] * uA[1] < 0)
-				{
-					hit = A;
-					break;
-				}
-				for (c = dm->fc[A]; c < dm->fc[A] + 3; c++)
-				{
-					unsigned int o = dm->co[c];
-					int ua[2], nt[2];
-					double w;
-					qd_turn(uA, -(int)fr[c], ua);
-					if ((o == HM_NONE || ((dm->cflag[c] | dm->cflag[o]) & HM_FEATURE)) && ua[qd_axis(dm, L, c) ^ 1] != 0)
-						continue;
-					nt[0] = T[2 * (size_t)c] - ua[0];
-					nt[1] = T[2 * (size_t)c + 1] - ua[1];
-					w = it.d + qd_cost(T + 2 * (size_t)c, nt);
-					if (o == HM_NONE)
-					{
-						qd_push(heap, &hn, w, nf + c);
-						continue;
-					}
-					B = dm->cf[o];
-					if (sing[B] || (stamp[B] == run && dist[B] <= w))
-						continue;
-					stamp[B] = run;
-					dist[B] = w;
-					tr[B] = (unsigned char)((tr[A] - fr[c] + K[c] + fr[o]) & 3);
-					from[B] = c;
-					qd_push(heap, &hn, w, B);
-				}
-			}
-			if (hit == HM_NONE)
-				break;   /* (no partner: left) */
-			/* each edge on the way takes the step: -u off the face before it, +u onto the one after (the border: none) */
-			if (exitc != HM_NONE)
-				qd_step(dm, T, K, fr, tr, u, exitc);
-			for (B = hit; from[B] != HM_NONE; B = dm->cf[from[B]])
-				qd_step(dm, T, K, fr, tr, u, from[B]);
-			qd_closure(dm, f0, T, K, fr, S + 2 * (size_t)f0);
-			qd_closure(dm, hit, T, K, fr, S + 2 * (size_t)hit);
-		}
-	for (f = 0; f < nf; f++)
-		left += !sing[f] && (S[2 * (size_t)f] || S[2 * (size_t)f + 1]);
-done:
-	free(from); free(stamp); free(fr); free(tr); free(sing); free(S); free(dist); free(heap);
-	return left;
 }
 
 /* the faces round which the cross field turns (its singularities) */
@@ -459,270 +164,154 @@ static void qd_out_free(qd_out* o)
 	memset(o, 0, sizeof *o);
 }
 
-static qaws_status qd_extract(qaws_hm const* dm, mf_hier const* h, double rho, int const* T, qaws_mesh_reference const* r, mr_scratch* s,
-	qd_out* out)
+/* The mesh read off consistent steps (QuadriFlow's extraction): dense vertices joined by zero steps are one lattice point
+   (a cluster, placed at its members' refitted lattice points); a dense face whose steps close and span half a cell (area
+   1/2, no step longer than one) is that half cell, and two half cells sharing their diagonal are its quad. The topology
+   comes from the steps alone, so a cell sheared or folded in space still comes out whole. Half cells left alone stay
+   triangles; faces over a fold (negative area), a step of two or a cone off the lattice leave holes. */
+static qaws_status qd_extract(qaws_hm const* dm, mf_hier const* h, int const* T, unsigned char const* K, qaws_mesh_reference const* r,
+	mr_scratch* s, qd_out* out)
 {
 	mf_level const* L = &h->lv[0];
-	unsigned int n = dm->nv, i, c, np = 0, ncl = 0, k, changed, pass;
-	unsigned int *uf = NULL, *cl = NULL, *deg = NULL, *first = NULL, *adj = NULL, *member = NULL, *used = NULL, *face = NULL;
-	double *cx = NULL, *cn = NULL, *cw = NULL;
-	qd_pair* pairs = NULL;
-	qd_spoke* spokes = NULL;
-	unsigned char *ckind = NULL, *dirused = NULL;
+	unsigned int n = dm->nv, i, c, f, k, ncl = 0, nt = 0, mask;
+	unsigned int *uf = NULL, *cl = NULL, *member = NULL, *tri = NULL, *hash = NULL, *used = NULL;
+	double *cx = NULL, *cw = NULL;
+	unsigned char *ckind = NULL, *paired = NULL;
 	qaws_status st = QAWS_STATUS_ALLOCATION_FAILURE;
 	memset(out, 0, sizeof *out);
 	uf = (unsigned int*)malloc(sizeof(unsigned int) * (n + 1));
-	pairs = (qd_pair*)malloc(sizeof(qd_pair) * (dm->nc + 1));
-	if (!uf || !pairs)
+	cl = (unsigned int*)malloc(sizeof(unsigned int) * (n + 1));
+	member = (unsigned int*)malloc(sizeof(unsigned int) * (n + 1));
+	cx = (double*)calloc(3 * (size_t)n + 3, sizeof(double));
+	cw = (double*)calloc((size_t)n + 1, sizeof(double));
+	ckind = (unsigned char*)calloc((size_t)n + 1, 1);
+	tri = (unsigned int*)malloc(sizeof(unsigned int) * (4 * (size_t)dm->nf + 4));
+	paired = (unsigned char*)calloc((size_t)dm->nf + 1, 1);
+	if (!uf || !cl || !member || !cx || !cw || !ckind || !tri || !paired)
 		goto done;
+	/* the clusters */
 	for (i = 0; i < n; i++)
 		uf[i] = i;
-	/* each dense edge: the same lattice point (merged), one step apart (joined), or neither */
 	for (c = 0; c < dm->nc; c++)
-	{
-		unsigned int a, b;
-		int dx, dy;
-		if (dm->cf[c] == HM_NONE || (dm->co[c] != HM_NONE && dm->co[c] < c))
-			continue;
-		a = dm->cv[c];
-		b = hm_to(dm, c);
-		dx = T[2 * (size_t)c];
-		dy = T[2 * (size_t)c + 1];
-		if (dx == 0 && dy == 0)
+		if (dm->cf[c] != HM_NONE && (dm->co[c] == HM_NONE || c < dm->co[c]) && !T[2 * (size_t)c] && !T[2 * (size_t)c + 1])
 		{
-			unsigned int ra = qd_find(uf, a), rb = qd_find(uf, b);
+			unsigned int ra = qd_find(uf, dm->cv[c]), rb = qd_find(uf, hm_to(dm, c));
 			if (ra != rb)
 				uf[ra] = rb;
 		}
-		else if (abs(dx) + abs(dy) == 1)
-		{
-			pairs[np].a = a;
-			pairs[np].b = b;
-			np++;
-		}
-	}
-	/* the clusters: their members' positions averaged (the mended steps may join members of different lattice points);
-	   then clusters closer than a third of a step, alike in normal, merged
-	   (one lattice point the dense edges did not tie: a vertex near a cell's centre rounding to a corner no neighbour did) */
-	cl = (unsigned int*)malloc(sizeof(unsigned int) * (n + 1));
-	member = (unsigned int*)malloc(sizeof(unsigned int) * (n + 1));
-	cx = (double*)malloc(sizeof(double) * (3 * (size_t)n + 3));
-	cn = (double*)malloc(sizeof(double) * (3 * (size_t)n + 3));
-	cw = (double*)malloc(sizeof(double) * ((size_t)n + 1));
-	ckind = (unsigned char*)malloc((size_t)n + 1);
-	if (!cl || !member || !cx || !cn || !cw || !ckind)
-		goto done;
-	for (pass = 0; pass < 2; pass++)
+	for (i = 0; i < n; i++)
+		cl[i] = HM_NONE;
+	for (i = 0; i < n; i++)
 	{
-		ncl = 0;
-		for (i = 0; i < n; i++)
-			cl[i] = HM_NONE;
-		for (i = 0; i < n; i++)
+		unsigned int root = qd_find(uf, i), q;
+		if (cl[root] == HM_NONE)
 		{
-			unsigned int root = qd_find(uf, i);
-			if (cl[root] == HM_NONE)
-			{
-				member[ncl] = i;
-				cl[root] = ncl++;
-			}
-			cl[i] = cl[root];
+			member[ncl] = i;
+			cl[root] = ncl++;
 		}
-		memset(cx, 0, sizeof(double) * 3 * ncl);
-		memset(cn, 0, sizeof(double) * 3 * ncl);
-		memset(cw, 0, sizeof(double) * ncl);
-		memset(ckind, 0, ncl);
-		for (i = 0; i < n; i++)
+		q = cl[i] = cl[root];
+		for (k = 0; k < 3; k++)
 		{
-			unsigned int q = cl[i];
-			for (k = 0; k < 3; k++)
-			{
-				cx[3 * (size_t)q + k] += L->x[3 * (size_t)i + k];
-				cn[3 * (size_t)q + k] += L->nrm[3 * (size_t)i + k];
-			}
-			cw[q] += 1;
-			if (L->con[i] & MF_PINNED)
-			{
-				ckind[q] = 2;
-				member[q] = i;
-			}
-			else if ((L->con[i] & MF_ON_LINE) && ckind[q] < 1)
-				ckind[q] = 1;
+			cx[3 * (size_t)q + k] += L->o[3 * (size_t)i + k];
 		}
-		for (i = 0; i < ncl; i++)
+		cw[q] += 1;
+		if (L->con[i] & MF_PINNED)
 		{
-			double l = sqrt(qd_dot(cn + 3 * (size_t)i, cn + 3 * (size_t)i));
-			for (k = 0; k < 3; k++)
-			{
-				cx[3 * (size_t)i + k] /= cw[i];
-				cn[3 * (size_t)i + k] /= l > 0 ? l : 1;
-			}
+			ckind[q] = 2;
+			member[q] = i;
 		}
-		if (pass == 0)
-		{
-			qd_near w;
-			qaws_bp_box* box = (qaws_bp_box*)malloc(sizeof(qaws_bp_box) * (ncl + 1));
-			if (!box)
-				goto done;
-			for (i = 0; i < ncl; i++)
-				for (k = 0; k < 3; k++)
-				{
-					box[i].lo[k] = cx[3 * (size_t)i + k] - 0.15 * rho;
-					box[i].hi[k] = cx[3 * (size_t)i + k] + 0.15 * rho;
-				}
-			w.uf = uf;
-			w.member = member;
-			w.cx = cx;
-			w.cn = cn;
-			w.h2 = 0.09 * rho * rho;
-			k = qaws_internal_broadphase(box, ncl, 3, NULL, qd_near_visit, &w, NULL) == QAWS_STATUS_OK;
-			free(box);
-			if (!k)
-				goto done;
-		}
+		else if ((L->con[i] & MF_ON_LINE) && ckind[q] < 1)
+			ckind[q] = 1;
 	}
-	/* the clusters' edges, once each */
-	for (k = 0, i = 0; i < np; i++)
+	for (i = 0; i < ncl; i++)
+		for (k = 0; k < 3; k++)
+			cx[3 * (size_t)i + k] /= cw[i];
+	/* the half cells: per face its three clusters and which of its edges is the cell's diagonal */
+	for (f = 0; f < dm->nf; f++)
 	{
-		unsigned int a = cl[pairs[i].a], b = cl[pairs[i].b];
-		if (a == b)
+		unsigned int c0 = dm->fc[f], a, b, d = 3;
+		int e[6], j, i0 = qf_image(dm, f, T, K, e);
+		if (i0 < 0)
 			continue;
-		pairs[k].a = a < b ? a : b;
-		pairs[k].b = a < b ? b : a;
-		k++;
+		for (j = 0; j < 3; j++)
+		{
+			if (abs(e[2 * j]) > 1 || abs(e[2 * j + 1]) > 1)
+				break;
+			if (abs(e[2 * j]) == 1 && abs(e[2 * j + 1]) == 1)
+				d = (unsigned int)j;
+		}
+		if (j < 3 || d == 3 || e[0] * e[3] - e[1] * e[2] != 1)
+			continue;
+		a = cl[dm->cv[c0 + i0]];
+		b = cl[dm->cv[c0 + (i0 + 1) % 3]];
+		c = cl[dm->cv[c0 + (i0 + 2) % 3]];
+		if (a == b || b == c || a == c)
+			continue;
+		tri[4 * (size_t)nt] = a;
+		tri[4 * (size_t)nt + 1] = b;
+		tri[4 * (size_t)nt + 2] = c;
+		tri[4 * (size_t)nt + 3] = d;
+		nt++;
 	}
-	np = k;
-	qsort(pairs, np, sizeof(qd_pair), qd_pair_cmp);
-	for (k = 0, i = 0; i < np; i++)
-		if (i == 0 || pairs[i].a != pairs[k - 1].a || pairs[i].b != pairs[k - 1].b)
-			pairs[k++] = pairs[i];
-	np = k;
-	/* vertices on fewer than two edges go, until none */
-	deg = (unsigned int*)calloc((size_t)ncl + 1, sizeof(unsigned int));
-	if (!deg)
+	/* each diagonal once in a hash (a second half cell on the same side of it overlaps the first: dropped) */
+	for (mask = 1; mask < 2 * nt + 2; mask <<= 1) {}
+	hash = (unsigned int*)malloc(sizeof(unsigned int) * mask);
+	out->fv = (unsigned int*)malloc(sizeof(unsigned int) * (4 * (size_t)nt + 1));
+	out->fs = (unsigned int*)malloc(sizeof(unsigned int) * ((size_t)nt + 1));
+	if (!hash || !out->fv || !out->fs)
 		goto done;
-	do
+	for (i = 0; i < mask; i++)
+		hash[i] = HM_NONE;
+	mask -= 1;
+	for (i = 0; i < nt; i++)
 	{
-		changed = 0;
-		memset(deg, 0, sizeof(unsigned int) * (ncl + 1));
-		for (i = 0; i < np; i++)
+		unsigned int const* t = tri + 4 * (size_t)i;
+		unsigned int u = t[t[3]], v = t[(t[3] + 1) % 3], j;
+		for (j = (u * 2654435761u ^ v * 40503u) & mask; hash[j] != HM_NONE; j = (j + 1) & mask)
 		{
-			deg[pairs[i].a]++;
-			deg[pairs[i].b]++;
+			unsigned int const* o = tri + 4 * (size_t)hash[j];
+			if (o[o[3]] == u && o[(o[3] + 1) % 3] == v)
+				break;
 		}
-		for (k = 0, i = 0; i < np; i++)
-			if (deg[pairs[i].a] >= 2 && deg[pairs[i].b] >= 2)
-				pairs[k++] = pairs[i];
-			else
-				changed = 1;
-		np = k;
-	} while (changed);
-	/* each vertex's neighbours in turn round its normal */
-	first = (unsigned int*)calloc((size_t)ncl + 2, sizeof(unsigned int));
-	adj = (unsigned int*)malloc(sizeof(unsigned int) * (2 * (size_t)np + 1));
-	spokes = (qd_spoke*)malloc(sizeof(qd_spoke) * (2 * (size_t)np + 1));
-	dirused = (unsigned char*)calloc(2 * (size_t)np + 1, 1);
-	if (!first || !adj || !spokes || !dirused)
-		goto done;
-	for (i = 0; i < np; i++)
-	{
-		first[pairs[i].a + 1]++;
-		first[pairs[i].b + 1]++;
+		if (hash[j] != HM_NONE)
+			paired[i] = 2;
+		else
+			hash[j] = i;
 	}
-	for (i = 0; i < ncl; i++)
-		first[i + 1] += first[i];
+	/* quads: a half cell and the one across its diagonal; then the half cells left, as triangles */
+	for (i = 0; i < nt; i++)
 	{
-		unsigned int* fill = (unsigned int*)malloc(sizeof(unsigned int) * (ncl + 1));
-		if (!fill)
-			goto done;
-		memcpy(fill, first, sizeof(unsigned int) * (ncl + 1));
-		for (i = 0; i < np; i++)
+		unsigned int const* t = tri + 4 * (size_t)i;
+		unsigned int u = t[t[3]], v = t[(t[3] + 1) % 3], w = t[(t[3] + 2) % 3], j;
+		if (paired[i])
+			continue;
+		for (j = (v * 2654435761u ^ u * 40503u) & mask; hash[j] != HM_NONE; j = (j + 1) & mask)
 		{
-			adj[fill[pairs[i].a]++] = pairs[i].b;
-			adj[fill[pairs[i].b]++] = pairs[i].a;
+			unsigned int const* o = tri + 4 * (size_t)hash[j];
+			if (o[o[3]] == v && o[(o[3] + 1) % 3] == u)
+				break;
 		}
-		free(fill);
-	}
-	for (i = 0; i < ncl; i++)
-	{
-		double const *p = cx + 3 * (size_t)i, *nn = cn + 3 * (size_t)i;
-		double u[3], w[3], a[3] = { 1, 0, 0 };
-		unsigned int j;
-		if (fabs(nn[0]) > 0.9)
+		if (hash[j] == HM_NONE || paired[hash[j]])
+			continue;
 		{
-			a[0] = 0;
-			a[1] = 1;
-		}
-		qd_cross(nn, a, u);
-		{
-			double l = sqrt(qd_dot(u, u));
-			for (k = 0; k < 3; k++)
-				u[k] /= l;
-		}
-		qd_cross(nn, u, w);
-		for (j = first[i]; j < first[i + 1]; j++)
-		{
-			double d[3];
-			for (k = 0; k < 3; k++)
-				d[k] = cx[3 * (size_t)adj[j] + k] - p[k];
-			spokes[j].ang = atan2(qd_dot(d, w), qd_dot(d, u));
-			spokes[j].to = adj[j];
-		}
-		qsort(spokes + first[i], first[i + 1] - first[i], sizeof(qd_spoke), qd_spoke_cmp);
-		for (j = first[i]; j < first[i + 1]; j++)
-			adj[j] = spokes[j].to;
-	}
-	/* faces: from a to b, then the neighbour of b just before a counter-clockwise */
-	out->fv = (unsigned int*)malloc(sizeof(unsigned int) * (2 * (size_t)np + 1));
-	out->fs = (unsigned int*)malloc(sizeof(unsigned int) * (2 * (size_t)np + 1));
-	face = (unsigned int*)malloc(sizeof(unsigned int) * 8);
-	if (!out->fv || !out->fs || !face)
-		goto done;
-	for (i = 0; i < ncl; i++)
-	{
-		unsigned int e;
-		for (e = first[i]; e < first[i + 1]; e++)
-		{
-			unsigned int a = i, b = adj[e], len = 0, ok = 1, cur = e, guard;
-			if (dirused[e])
-				continue;
-			for (guard = 0; guard < 8; guard++)
-			{
-				unsigned int j, at = HM_NONE, nx;
-				if (len == 8)
-				{
-					ok = 0;
-					break;
-				}
-				face[len++] = a;
-				dirused[cur] = 1;
-				/* at b: where a is in its list, then the one before */
-				for (j = first[b]; j < first[b + 1]; j++)
-					if (adj[j] == a)
-						at = j;
-				if (at == HM_NONE)
-				{
-					ok = 0;
-					break;
-				}
-				nx = at == first[b] ? first[b + 1] - 1 : at - 1;
-				a = b;
-				b = adj[nx];
-				cur = nx;
-				if (a == i && cur == e)
-					break;
-				if (dirused[cur])
-				{
-					ok = a == i && cur == e;
-					break;
-				}
-			}
-			if (!ok || guard == 8 || len < 3 || len > 6)
-				continue;
-			memcpy(out->fv + out->nc, face, sizeof(unsigned int) * len);
-			out->fs[out->nf++] = len;
-			out->nc += len;
+			unsigned int const* o = tri + 4 * (size_t)hash[j];
+			unsigned int* q = out->fv + out->nc;
+			q[0] = v;
+			q[1] = w;
+			q[2] = u;
+			q[3] = o[(o[3] + 2) % 3];
+			out->fs[out->nf++] = 4;
+			out->nc += 4;
+			paired[i] = paired[hash[j]] = 1;
 		}
 	}
+	for (i = 0; i < nt; i++)
+		if (!paired[i])
+		{
+			memcpy(out->fv + out->nc, tri + 4 * (size_t)i, sizeof(unsigned int) * 3);
+			out->fs[out->nf++] = 3;
+			out->nc += 3;
+		}
 	if (qd_doublets(out->fv, out->fs, &out->nf, &out->nc, ncl, ckind) != QAWS_STATUS_OK)
 		goto done;
 	/* the vertices the faces use, placed on the reference */
@@ -758,17 +347,20 @@ static qaws_status qd_extract(qaws_hm const* dm, mf_hier const* h, double rho, i
 		out->fv[i] = used[out->fv[i]];
 	st = QAWS_STATUS_OK;
 done:
-	free(uf); free(cl); free(deg); free(first); free(adj); free(member); free(used); free(face);
-	free(cx); free(cn); free(cw); free(pairs); free(spokes); free(ckind); free(dirused);
+	free(uf); free(cl); free(member); free(tri); free(hash); free(used);
+	free(cx); free(cw); free(ckind); free(paired);
 	if (st != QAWS_STATUS_OK)
 		qd_out_free(out);
 	return st;
 }
 
-/* small holes the tracing left (a loop of at most 8 border edges) closed by a face each */
-static qaws_status qd_fill(qd_out* o)
+/* Small holes the extraction left (a loop of at most 8 border edges) closed by a face each; a loop round a lattice point
+   with no vertex (8 edges, or up to 10 round a cone on a lattice point off its face's vertices: cone holds those faces'
+   centres) by a vertex there: joined to every other loop vertex (6, 8, 10 edges: quads round a vertex of valence 3, 4
+   or 5), or to all of them (a fan, its triangles left to pair with the half cells across). */
+static qaws_status qd_fill(qd_out* o, qaws_mesh_reference const* r, mr_scratch* s, double const* cone, unsigned int ncone, double rho)
 {
-	unsigned int f, k, c0, mask, *h, *start, nadd = 0, added = 0, *nf, *nfs;
+	unsigned int f, k, c0, mask, *h, *start, nadd = 0, added = 0, *nf, *nfs, nv0 = o->nv;
 	qaws_status st = QAWS_STATUS_OK;
 	for (mask = 1; mask < 2 * o->nc + 2; mask <<= 1) {}
 	h = (unsigned int*)malloc(sizeof(unsigned int) * 2 * mask);
@@ -806,19 +398,34 @@ static qaws_status qd_fill(qd_out* o)
 		}
 	nf = (unsigned int*)malloc(sizeof(unsigned int) * (o->nc + 8 * (size_t)o->nv + 1));
 	nfs = (unsigned int*)malloc(sizeof(unsigned int) * (o->nf + o->nv + 1));
-	if (!nf || !nfs)
 	{
-		st = QAWS_STATUS_ALLOCATION_FAILURE;
-		goto done;
+		/* (room for a centre per loop of six or more, the loops sharing no vertex) */
+		size_t nmax = (size_t)o->nv + o->nv / 6 + 1;
+		double* x = (double*)realloc(o->x, sizeof(double) * 3 * nmax);
+		qaws_mesh_location* foot;
+		unsigned char* kind;
+		if (x)
+			o->x = x;
+		foot = x ? (qaws_mesh_location*)realloc(o->foot, sizeof(qaws_mesh_location) * nmax) : NULL;
+		if (foot)
+			o->foot = foot;
+		kind = foot ? (unsigned char*)realloc(o->kind, nmax) : NULL;
+		if (kind)
+			o->kind = kind;
+		if (!nf || !nfs || !kind)
+		{
+			st = QAWS_STATUS_ALLOCATION_FAILURE;
+			goto done;
+		}
 	}
 	memcpy(nf, o->fv, sizeof(unsigned int) * o->nc);
 	memcpy(nfs, o->fs, sizeof(unsigned int) * o->nf);
-	for (k = 0; k < o->nv; k++)
+	for (k = 0; k < nv0; k++)
 	{
-		unsigned int loop[9], len = 0, v = k, ok = 0, j;
+		unsigned int loop[11], len = 0, v = k, ok = 0, j, q;
 		if (start[k] >= HM_NONE - 1)
 			continue;
-		while (len < 9)
+		while (len < 11)
 		{
 			unsigned int nx = start[v];
 			if (nx >= HM_NONE - 1)
@@ -833,7 +440,59 @@ static qaws_status qd_fill(qd_out* o)
 		}
 		for (j = 0; j < len; j++)
 			start[loop[j]] = HM_NONE;   /* (each hole once) */
-		if (!ok || len < 3 || len > 8)
+		if (!ok || len < 3 || len > 10)
+			continue;
+		if (len == 8 || ncone)
+		{
+			double m[3] = { 0, 0, 0 }, near = HUGE_VAL, sum[2] = { 0, 0 };
+			for (j = 0; j < len; j++)
+				for (q = 0; q < 3; q++)
+					m[q] += o->x[3 * (size_t)loop[j] + q] / len;
+			for (j = 0; j < ncone && len != 8; j++)
+			{
+				double d2 = 0;
+				for (q = 0; q < 3; q++)
+					d2 += (cone[3 * (size_t)j + q] - m[q]) * (cone[3 * (size_t)j + q] - m[q]);
+				near = d2 < near ? d2 : near;
+			}
+			if (len == 8 || near < rho * rho)
+			{
+				unsigned int c = o->nv++, off;
+				/* the spokes to the loop's nearer half (the lattice neighbours, not the cells' far corners) */
+				for (j = 0; j < len; j++)
+				{
+					double d2 = 0;
+					for (q = 0; q < 3; q++)
+						d2 += (o->x[3 * (size_t)loop[j] + q] - m[q]) * (o->x[3 * (size_t)loop[j] + q] - m[q]);
+					sum[j & 1] += sqrt(d2);
+				}
+				off = sum[1] < sum[0];
+				qd_place(r, s, m, o->foot[loop[0]], 0, o->x + 3 * (size_t)c, &o->foot[c]);
+				o->kind[c] = 0;
+				for (j = 0; (len & 1) || len == 4 ? j < len : 0; j++)
+				{
+					/* (a loop of the cells' diagonals, or of some: a fan, its triangles then paired with the half cells across) */
+					unsigned int* t = nf + o->nc + added;
+					t[0] = loop[j];
+					t[1] = loop[(j + 1) % len];
+					t[2] = c;
+					nfs[o->nf + nadd++] = 3;
+					added += 3;
+				}
+				for (j = 0; (len & 1) || len == 4 ? 0 : j < len / 2; j++)
+				{
+					unsigned int* t = nf + o->nc + added;
+					t[0] = loop[(off + 2 * j) % len];
+					t[1] = loop[(off + 2 * j + 1) % len];
+					t[2] = loop[(off + 2 * j + 2) % len];
+					t[3] = c;
+					nfs[o->nf + nadd++] = 4;
+					added += 4;
+				}
+				continue;
+			}
+		}
+		if (len > 8)
 			continue;
 		memcpy(nf + o->nc + added, loop, sizeof(unsigned int) * len);
 		nfs[o->nf + nadd++] = len;
@@ -965,6 +624,112 @@ static qaws_status qd_split(qd_out* o, qaws_mesh_reference const* r, mr_scratch*
 	return QAWS_STATUS_OK;
 }
 
+/* triangles that share a side merged into a quad each (a half cell and its neighbour across a fold, a hole's filling).
+   shortcut: pairs found by a scan over all triangle pairs, fine for the few left; a hash of their sides if many are */
+static qaws_status qd_pair_triangles(qd_out* o)
+{
+	unsigned int f, g, k, j, c0, nf = 0, nc = 0;
+	unsigned int *at = (unsigned int*)malloc(sizeof(unsigned int) * ((size_t)o->nf + 1)), *mate = (unsigned int*)malloc(sizeof(unsigned int) * ((size_t)o->nf + 1));
+	unsigned int *nfv = (unsigned int*)malloc(sizeof(unsigned int) * ((size_t)o->nc + 1)), *nfs = (unsigned int*)malloc(sizeof(unsigned int) * ((size_t)o->nf + 1));
+	unsigned char* side = (unsigned char*)malloc((size_t)o->nf + 1);
+	if (!at || !mate || !nfv || !nfs || !side)
+	{
+		free(at); free(mate); free(nfv); free(nfs); free(side);
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	}
+	for (f = 0, c0 = 0; f < o->nf; c0 += o->fs[f], f++)
+	{
+		at[f] = c0;
+		mate[f] = HM_NONE;
+	}
+	for (f = 0; f < o->nf; f++)
+		for (k = 0; k < 3 && o->fs[f] == 3 && mate[f] == HM_NONE; k++)
+			for (g = f + 1; g < o->nf && mate[f] == HM_NONE; g++)
+			{
+				unsigned int const *t = o->fv + at[f], *u = o->fv + at[g];
+				if (o->fs[g] != 3 || mate[g] != HM_NONE)
+					continue;
+				for (j = 0; j < 3; j++)
+					if (u[j] == t[(k + 1) % 3] && u[(j + 1) % 3] == t[k])
+					{
+						mate[f] = g;
+						mate[g] = f;
+						side[f] = (unsigned char)k;
+						side[g] = (unsigned char)j;
+						break;
+					}
+			}
+	for (f = 0; f < o->nf; f++)
+	{
+		unsigned int const* t = o->fv + at[f];
+		if (mate[f] == HM_NONE)
+		{
+			memcpy(nfv + nc, t, sizeof(unsigned int) * o->fs[f]);
+			nfs[nf++] = o->fs[f];
+			nc += o->fs[f];
+		}
+		else if (f < mate[f])
+		{
+			unsigned int const* u = o->fv + at[mate[f]];
+			k = side[f];
+			j = side[mate[f]];
+			nfv[nc] = t[(k + 1) % 3];
+			nfv[nc + 1] = t[(k + 2) % 3];
+			nfv[nc + 2] = t[k];
+			nfv[nc + 3] = u[(j + 2) % 3];
+			nfs[nf++] = 4;
+			nc += 4;
+		}
+	}
+	free(o->fv);
+	free(o->fs);
+	o->fv = nfv;
+	o->fs = nfs;
+	o->nf = nf;
+	o->nc = nc;
+	free(at); free(mate); free(side);
+	return QAWS_STATUS_OK;
+}
+
+/* The quad mesh at lattice spacing rho from the fields of the dense mesh dm (level 0 of h): the steps rounded, made
+   consistent (qaws_quad_flow.h), the positions refitted to them, the mesh read off, its holes filled (the cones on
+   lattice points their centres). T and K: room per corner of dm. */
+static qaws_status qd_lattice(qaws_hm const* dm, mf_hier* h, double rho, int* T, unsigned char* K, qaws_mesh_reference const* r,
+	mr_scratch* s, qd_out* o)
+{
+	mf_level* L = &h->lv[0];
+	unsigned int f, k, odd, ncone = 0;
+	double *Tc = (double*)malloc(sizeof(double) * (4 * (size_t)dm->nc + 4)), *cone = (double*)malloc(sizeof(double) * (3 * (size_t)dm->nf + 3));
+	unsigned char* fr = (unsigned char*)malloc((size_t)dm->nc + 1);
+	qaws_status st = QAWS_STATUS_ALLOCATION_FAILURE;
+	if (!Tc || !cone || !fr)
+		goto done;
+	qf_steps(dm, L, rho, T, K, Tc);
+	if (qf_consistent(dm, L, T, K, Tc, &odd, NULL) == HM_NONE)
+		goto done;
+	qf_refit(dm, L, rho, T, K, 10);
+	for (f = 0; f < dm->nf; f++)
+	{
+		int S[2], e[6], t = qf_closure(dm, f, T, K, fr, S);
+		if (!(t & 1) || ((S[0] + S[1]) & 1) || qf_image(dm, f, T, K, e) >= 0)
+			continue;   /* (a cone off the lattice, or on a vertex: no hole) */
+		for (k = 0; k < 3; k++)
+			cone[3 * (size_t)ncone + k] = (L->x[3 * (size_t)dm->cv[dm->fc[f]] + k] + L->x[3 * (size_t)dm->cv[dm->fc[f] + 1] + k]
+				+ L->x[3 * (size_t)dm->cv[dm->fc[f] + 2] + k]) / 3;
+		ncone++;
+	}
+	st = qd_extract(dm, h, T, K, r, s, o);
+	if (st == QAWS_STATUS_OK)
+		st = qd_fill(o, r, s, cone, ncone, rho);
+	if (st == QAWS_STATUS_OK)
+		st = qd_pair_triangles(o);
+done:
+	free(Tc);
+	free(cone);
+	free(fr);
+	return st;
+}
+
 /* a few steps of each free vertex toward its neighbours' centre, along the reference */
 static void qd_relax(qaws_hm* m, qaws_mesh_reference const* r, mr_scratch* s, unsigned char const* kind, unsigned int steps)
 {
@@ -1085,7 +850,7 @@ qaws_status qaws_mesh_quadrangulate(qaws_mesh_3d const* mesh, qaws_quadrangulate
 		qaws_mesh_3d_measure_quality(mesh, &q);
 		rho = q.mean_edge > 0 ? 2 * (double)q.mean_edge : 1;
 	}
-	rf = desc->pure ? 2 * rho : rho;
+	rf = rho;
 	/* 1. a dense sampling of the surface */
 	memset(&rd, 0, sizeof rd);
 	rd.reference = r;
@@ -1196,7 +961,9 @@ qaws_status qaws_mesh_quadrangulate(qaws_mesh_3d const* mesh, qaws_quadrangulate
 		free(init);
 	}
 	mf_positions(&h, rf, desc->sweeps ? desc->sweeps : 8);
-	/* 3. the steps between lattice points made to close round every face, the mesh read off them */
+	/* 3. the steps between lattice points made to close round every face, the mesh read off them; all quads at the
+	   target when that leaves no other face, else (a hole or a cone off its lattice point left) the same at twice the
+	   target, every face split */
 	T = (int*)malloc(sizeof(int) * (2 * (size_t)dense->hm.nc + 2));
 	K = (unsigned char*)malloc((size_t)dense->hm.nc + 1);
 	if (!T || !K)
@@ -1204,17 +971,16 @@ qaws_status qaws_mesh_quadrangulate(qaws_mesh_3d const* mesh, qaws_quadrangulate
 		st = QAWS_STATUS_ALLOCATION_FAILURE;
 		goto done;
 	}
-	qd_steps(&dense->hm, &h.lv[0], rf, T, K);
-	if (qd_consistent(&dense->hm, &h.lv[0], T, K) == HM_NONE)
+	st = qd_lattice(&dense->hm, &h, rf, T, K, r, &s, &o);
+	for (f = 0; st == QAWS_STATUS_OK && desc->pure && f < o.nf && o.fs[f] == 4; f++) {}
+	if (st == QAWS_STATUS_OK && desc->pure && f < o.nf)
 	{
-		st = QAWS_STATUS_ALLOCATION_FAILURE;
-		goto done;
+		qd_out_free(&o);
+		mf_positions(&h, 2 * rho, desc->sweeps ? desc->sweeps : 8);
+		st = qd_lattice(&dense->hm, &h, 2 * rho, T, K, r, &s, &o);
+		if (st == QAWS_STATUS_OK)
+			st = qd_split(&o, r, &s);
 	}
-	st = qd_extract(&dense->hm, &h, rf, T, r, &s, &o);
-	if (st == QAWS_STATUS_OK)
-		st = qd_fill(&o);
-	if (st == QAWS_STATUS_OK && desc->pure)
-		st = qd_split(&o, r, &s);
 	if (st != QAWS_STATUS_OK)
 		goto done;
 	st = hm_mesh_3d_create(o.x, o.nv, o.fv, o.fs, o.nf, &out);
