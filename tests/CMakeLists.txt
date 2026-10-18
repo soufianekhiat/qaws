@@ -137,6 +137,9 @@ add_executable(
 133_cross_field.c
 134_quad_flow.c
 135_quad_improve.c
+136_quad_global.c
+137_mesh_guidance.c
+138_feature_size.c
 )
 
 # The amalgamated library exports exactly the same symbols, so the tests can

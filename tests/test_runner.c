@@ -147,6 +147,9 @@ extern int test_132_remesh_cvt_main(void);
 extern int test_133_cross_field_main(void);
 extern int test_134_quad_flow_main(void);
 extern int test_135_quad_improve_main(void);
+extern int test_136_quad_global_main(void);
+extern int test_137_mesh_guidance_main(void);
+extern int test_138_feature_size_main(void);
 
 /* Test registry */
 typedef struct {
@@ -291,6 +294,9 @@ static test_suite const g_test_suites[] = {
 {"133_cross_field", test_133_cross_field_main},
 {"134_quad_flow", test_134_quad_flow_main},
 {"135_quad_improve", test_135_quad_improve_main},
+{"136_quad_global", test_136_quad_global_main},
+{"137_mesh_guidance", test_137_mesh_guidance_main},
+{"138_feature_size", test_138_feature_size_main},
 };
 
 int main(void) {
