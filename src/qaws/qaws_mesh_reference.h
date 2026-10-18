@@ -19,7 +19,8 @@
  *            feature edge (a crease) the curve follows the crease line
  *            instead (its tangent from the neighbouring crease vertices,
  *            straight at feature corners), and each side uses its own
- *            normals: creases stay sharp, without cracks. The default.
+ *            normals: creases stay sharp, without cracks. The border is a
+ *            crease too (its curves from the border alone). The default.
  *   LINEAR   the flat triangles, normals interpolated (for shading and
  *            curvature only): for meshes that are the truth.
  *

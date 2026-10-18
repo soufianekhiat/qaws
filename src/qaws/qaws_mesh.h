@@ -240,4 +240,15 @@ typedef struct qaws_mesh_quality
 
 qaws_status qaws_mesh_3d_measure_quality(qaws_mesh_3d const* mesh, qaws_mesh_quality* out_quality);
 
+/* What a meshing operator did and reached. A target not reached is not an
+   error: the mesh is valid, the report says how far it got. */
+typedef struct qaws_mesh_report
+{
+	unsigned int iterations;
+	unsigned int splits, collapses, flips, moves;
+	qaws_scalar max_deviation;          /* the result's face centres from the reference */
+	qaws_scalar mean_deviation;
+	qaws_mesh_quality quality;          /* of the result */
+} qaws_mesh_report;
+
 #endif /* QAWS_MESH_H */

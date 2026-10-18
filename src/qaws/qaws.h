@@ -64,6 +64,8 @@
 #include "qaws_stack.h"
 #include "qaws_mesh.h"
 #include "qaws_mesh_reference.h"
+#include "qaws_mesh_field.h"
+#include "qaws_remesh.h"
 #include "qaws_triangulate.h"
 #include "qaws_region_sample.h"
 #include "qaws_mean_value.h"

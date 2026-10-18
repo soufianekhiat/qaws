@@ -8,6 +8,7 @@
 
 #include "qaws_mesh_core.h"
 #include "../qaws_mesh_reference.h"
+#include "../qaws_mesh_field.h"
 #include "../internal/qaws_internal_broadphase.h"
 
 /* ---- interpolants ------------------------------------------------------
@@ -52,6 +53,8 @@ struct qaws_mesh_reference
 	unsigned int* tf;               /* per triangle: its face */
 	unsigned int* ta;               /* per triangle edge (3): the neighbour's triangle * 3 + edge, or HM_NONE */
 	unsigned char* tcrease;         /* per triangle edge: on a feature */
+	unsigned int* treg;             /* per triangle: its region (connected across edges that are not creases) */
+	unsigned int nreg;
 	mi_tri* patch;
 	qaws_bp_box* box;               /* per triangle: its control net's box */
 	qaws_bp_grid* grid;
@@ -61,5 +64,31 @@ struct qaws_mesh_reference
 
 /* the closest point of patch t to p: its location (a, b) and squared distance */
 double mr_closest_on_patch(qaws_mesh_reference const* r, unsigned int t, double const* p, double* out_a, double* out_b);
+
+/* scratch for repeated projections (stamps per triangle, no clearing) */
+typedef struct mr_scratch
+{
+	unsigned int* tried;
+	unsigned int* queued;
+	unsigned int* queue;
+	unsigned int gen;
+} mr_scratch;
+
+int mr_scratch_init(mr_scratch* s, unsigned int nt);
+void mr_scratch_free(mr_scratch* s);
+/* the closest location to p: reachable from triangle `hint` (HM_NONE: anywhere); its squared distance */
+double mr_project(qaws_mesh_reference const* r, double const* p, unsigned int hint, mr_scratch* s, qaws_mesh_location* out);
+/* the closest location to p on the creases and the border reachable from `hint`; HUGE_VAL when none */
+double mr_project_crease(qaws_mesh_reference const* r, double const* p, unsigned int hint, mr_scratch* s, qaws_mesh_location* out);
+/* as mr_project, within a region (the triangles between creases): a hint outside it is ignored */
+double mr_project_region(qaws_mesh_reference const* r, double const* p, unsigned int hint, unsigned int region, mr_scratch* s,
+	qaws_mesh_location* out);
+/* the straightest walk by a tangent vector; with stop_at_creases it ends just short of a crease it meets, and returns 1 */
+int mr_walk(qaws_mesh_reference const* r, qaws_mesh_location from, double const* tangent, int stop_at_creases, qaws_mesh_location* out_to);
+void mr_eval(qaws_mesh_reference const* r, qaws_mesh_location const* l, double* x, double* n);
+
+/* ---- size fields -------------------------------------------------------- */
+
+double sf_eval(qaws_size_field const* f, qaws_mesh_location const* l, double const* x);
 
 #endif /* QAWS_MESH_INTERNAL_H */

@@ -9,6 +9,8 @@
  *   mesh2_reference.png  the surface between the vertices: a coarse blob flat and
  *                      as its PN reference, a coarse can rounded without features
  *                      and sharp with its creases, curvature from the reference
+ *   mesh3_remesh.png   remeshing on the reference: uniform and adaptive by
+ *                      curvature, creases kept, attributes and their seams transferred
  *
  * Each figure lives in meshing_showcase/NN_*.c, compiled as one translation
  * unit with the rasterizer in example_raster.h.
@@ -141,6 +143,7 @@ static void ms_panel(er_canvas* c, int x, int y, int w, int h, qaws_mesh_3d cons
 
 #include "meshing_showcase/01_core.c"
 #include "meshing_showcase/02_reference.c"
+#include "meshing_showcase/03_remesh.c"
 
 int main(void)
 {
@@ -148,5 +151,6 @@ int main(void)
 	MAKE_DIR("showcase");
 	demo_core();
 	demo_reference();
+	demo_remesh();
 	return 0;
 }

@@ -117,8 +117,9 @@ static void mr_corner_normals(qaws_hm const* m, double* cn, double* fnrm)
 	}
 }
 
-/* per vertex on a feature line (two feature edges, not a corner): the line's
-   tangent there, from its two neighbours along the line; 0 elsewhere */
+/* per vertex on a feature line (two feature or border edges, not a corner,
+   turning by less than 60 degrees): the line's tangent there, from its two
+   neighbours along the line; 0 elsewhere */
 static void mr_crease_tangents(qaws_hm const* m, double* tan, unsigned char* has)
 {
 	unsigned int v, c;
@@ -130,19 +131,33 @@ static void mr_crease_tangents(qaws_hm const* m, double* tan, unsigned char* has
 			continue;
 		for (c = m->vc[v]; c != HM_NONE; c = hm_round(m, v, c))
 		{
-			if ((m->cflag[c] & HM_FEATURE) && n < 2)
+			int line = (m->cflag[c] & HM_FEATURE) || m->co[c] == HM_NONE;
+			if (line && n < 2)
 				w[n] = hm_to(m, c);
-			n += (m->cflag[c] & HM_FEATURE) != 0;
+			n += line;
 			last = c;
 		}
-		if (last != HM_NONE && hm_is_border_vertex(m, v) && (m->cflag[hm_prev(m, last)] & HM_FEATURE))
+		if (last != HM_NONE && hm_is_border_vertex(m, v))
 		{
+			/* (the border edge into v is a line edge) */
 			if (n < 2)
 				w[n] = m->cv[hm_prev(m, last)];
 			n++;
 		}
 		if (n != 2)
 			continue;
+		{
+			double const *p = m->x + 3 * (size_t)v, *a = m->x + 3 * (size_t)w[0], *b = m->x + 3 * (size_t)w[1];
+			double u[3], s[3];
+			unsigned int k;
+			for (k = 0; k < 3; k++)
+			{
+				u[k] = p[k] - a[k];
+				s[k] = b[k] - p[k];
+			}
+			if (mr_dot(u, s) < 0.5 * sqrt(mr_dot(u, u) * mr_dot(s, s)))
+				continue;   /* (turning by more than 60 degrees: a corner) */
+		}
 		tan[3 * (size_t)v] = m->x[3 * (size_t)w[1]] - m->x[3 * (size_t)w[0]];
 		tan[3 * (size_t)v + 1] = m->x[3 * (size_t)w[1] + 1] - m->x[3 * (size_t)w[0] + 1];
 		tan[3 * (size_t)v + 2] = m->x[3 * (size_t)w[1] + 2] - m->x[3 * (size_t)w[0] + 2];
@@ -155,7 +170,7 @@ void qaws_mesh_reference_destroy(qaws_mesh_reference* r)
 	if (!r)
 		return;
 	qaws_mesh_3d_destroy(r->mesh);
-	free(r->tv); free(r->tc); free(r->tf); free(r->ta); free(r->tcrease);
+	free(r->tv); free(r->tc); free(r->tf); free(r->ta); free(r->tcrease); free(r->treg);
 	free(r->patch); free(r->box); free(r->vloc);
 	qaws_internal_grid_destroy(r->grid);
 	free(r);
@@ -198,6 +213,7 @@ qaws_status qaws_mesh_reference_create(qaws_mesh_3d const* mesh, qaws_mesh_refer
 	r->tf = (unsigned int*)malloc(sizeof(unsigned int) * (nt + 1));
 	r->ta = (unsigned int*)malloc(sizeof(unsigned int) * 3 * (nt + 1));
 	r->tcrease = (unsigned char*)calloc(3 * (size_t)nt + 1, 1);
+	r->treg = (unsigned int*)malloc(sizeof(unsigned int) * (nt + 1));
 	r->patch = (mi_tri*)malloc(sizeof(mi_tri) * (nt + 1));
 	r->box = (qaws_bp_box*)malloc(sizeof(qaws_bp_box) * (nt + 1));
 	r->vloc = (unsigned int*)malloc(sizeof(unsigned int) * (m->nv + 1));
@@ -206,7 +222,7 @@ qaws_status qaws_mesh_reference_create(qaws_mesh_3d const* mesh, qaws_mesh_refer
 	fnrm = (double*)malloc(sizeof(double) * 3 * (m->nf + 1));
 	tan = (double*)calloc(3 * (size_t)m->nv + 1, sizeof(double));
 	has = (unsigned char*)calloc((size_t)m->nv + 1, 1);
-	if (!r->tv || !r->tc || !r->tf || !r->ta || !r->tcrease || !r->patch || !r->box || !r->vloc || !ce2t || !cn || !fnrm || !tan || !has)
+	if (!r->tv || !r->tc || !r->tf || !r->ta || !r->tcrease || !r->treg || !r->patch || !r->box || !r->vloc || !ce2t || !cn || !fnrm || !tan || !has)
 	{
 		st = QAWS_STATUS_ALLOCATION_FAILURE;
 		goto done;
@@ -237,7 +253,7 @@ qaws_status qaws_mesh_reference_create(qaws_mesh_3d const* mesh, qaws_mesh_refer
 		{
 			unsigned int e = ce2t[i];
 			r->ta[e] = m->co[i] == HM_NONE ? HM_NONE : ce2t[m->co[i]];
-			r->tcrease[e] = (m->cflag[i] & HM_FEATURE) != 0;
+			r->tcrease[e] = (m->cflag[i] & HM_FEATURE) != 0 || m->co[i] == HM_NONE;   /* (the border: a crease) */
 		}
 	/* normals per corner slot */
 	if (desc && desc->normals)
@@ -306,6 +322,30 @@ qaws_status qaws_mesh_reference_create(qaws_mesh_3d const* mesh, qaws_mesh_refer
 	for (t = nt; t > 0; t--)
 		for (k = 0; k < 3; k++)
 			r->vloc[r->tv[3 * (t - 1) + k]] = 3 * (t - 1) + k;
+	/* regions: triangles connected across edges that are not creases */
+	for (t = 0; t < nt; t++)
+		r->treg[t] = HM_NONE;
+	for (t = 0; t < nt; t++)
+	{
+		unsigned int head = 0, tail = 0, *queue = ce2t;   /* (ce2t is free now: nc >= nt) */
+		if (r->treg[t] != HM_NONE)
+			continue;
+		r->treg[t] = r->nreg;
+		queue[tail++] = t;
+		while (head < tail)
+		{
+			unsigned int u = queue[head++], e;
+			for (e = 0; e < 3; e++)
+			{
+				unsigned int nb = r->ta[3 * u + e];
+				if (nb == HM_NONE || r->tcrease[3 * u + e] || r->treg[nb / 3] != HM_NONE)
+					continue;
+				r->treg[nb / 3] = r->nreg;
+				queue[tail++] = nb / 3;
+			}
+		}
+		r->nreg++;
+	}
 	st = nt ? qaws_internal_grid_create(r->box, nt, 3, &r->grid) : QAWS_STATUS_OK;
 done:
 	free(ce2t); free(cn); free(fnrm); free(tan); free(has);
@@ -516,28 +556,96 @@ typedef struct mr_query
 	qaws_mesh_reference const* r;
 	double p[3];
 	double best;                    /* squared */
-	unsigned int bt;
-	double ba, bb;
-	unsigned int* stamp;
-	unsigned int gen;
+	qaws_mesh_location loc;
+	mr_scratch* s;
+	int crease;                     /* only the creases and the border */
+	unsigned int region;            /* only this region's triangles; HM_NONE: any */
 } mr_query;
+
+/* the closest point of the edge curve e of patch t (from corner e to e + 1) to p: (a, b) and the squared distance */
+static double mr_closest_on_edge(qaws_mesh_reference const* r, unsigned int t, unsigned int e, double const* p, double* oa, double* ob)
+{
+	static double const a0[3] = { 0, 1, 0 }, b0[3] = { 0, 0, 1 }, da[3] = { 1, -1, 0 }, db[3] = { 0, 1, -1 };
+	mi_tri const* P = &r->patch[t];
+	double s, best = HUGE_VAL, bs = 0;
+	int it, k;
+	/* start from the chord's closest point */
+	{
+		double const *A = P->p[e], *B = P->p[(e + 1) % 3];
+		double d[3], w = 0, l = 0;
+		for (k = 0; k < 3; k++)
+		{
+			d[k] = B[k] - A[k];
+			w += (p[k] - A[k]) * d[k];
+			l += d[k] * d[k];
+		}
+		s = l > 0 ? w / l : 0;
+		s = s < 0 ? 0 : s > 1 ? 1 : s;
+	}
+	for (it = 0; it < 20; it++)
+	{
+		double x[3], xa[3], xb[3], c1[3], g = 0, h = 0, dist = 0, ns;
+		mi_eval(P, a0[e] + s * da[e], b0[e] + s * db[e], x, xa, xb, NULL, NULL, NULL, NULL, NULL, NULL);
+		for (k = 0; k < 3; k++)
+		{
+			c1[k] = da[e] * xa[k] + db[e] * xb[k];
+			g += c1[k] * (x[k] - p[k]);
+			h += c1[k] * c1[k];
+			dist += (x[k] - p[k]) * (x[k] - p[k]);
+		}
+		if (dist < best)
+		{
+			best = dist;
+			bs = s;
+		}
+		if (h <= 0)
+			break;
+		ns = s - g / h;
+		ns = ns < 0 ? 0 : ns > 1 ? 1 : ns;
+		if (fabs(ns - s) < 1e-14)
+			break;
+		s = ns;
+	}
+	*oa = a0[e] + bs * da[e];
+	*ob = b0[e] + bs * db[e];
+	return best;
+}
 
 static void mr_try(mr_query* q, unsigned int t)
 {
 	double a, b, d;
-	if (q->stamp[t] == q->gen)
+	unsigned int e;
+	if (q->s->tried[t] == q->s->gen)
 		return;
-	q->stamp[t] = q->gen;
+	q->s->tried[t] = q->s->gen;
+	if (q->region != HM_NONE && q->r->treg[t] != q->region)
+		return;
 	if (mr_box_d2(&q->r->box[t], q->p) >= q->best)
 		return;
-	d = mr_closest_on_patch(q->r, t, q->p, &a, &b);
-	if (d < q->best)
+	if (!q->crease)
 	{
-		q->best = d;
-		q->bt = t;
-		q->ba = a;
-		q->bb = b;
+		d = mr_closest_on_patch(q->r, t, q->p, &a, &b);
+		if (d < q->best)
+		{
+			q->best = d;
+			q->loc.patch = t;
+			q->loc.a = (qaws_scalar)a;
+			q->loc.b = (qaws_scalar)b;
+		}
+		return;
 	}
+	for (e = 0; e < 3; e++)
+		if (q->r->tcrease[3 * t + e] || q->r->ta[3 * t + e] == HM_NONE)
+		{
+			d = mr_closest_on_edge(q->r, t, e, q->p, &a, &b);
+			if (d < q->best)
+			{
+				q->best = d;
+				q->loc.patch = t;
+				q->loc.a = (qaws_scalar)a;
+				q->loc.b = (qaws_scalar)b;
+			}
+		}
 }
 
 static void mr_visit(void* user, unsigned int item)
@@ -545,79 +653,128 @@ static void mr_visit(void* user, unsigned int item)
 	mr_try((mr_query*)user, item);
 }
 
+int mr_scratch_init(mr_scratch* s, unsigned int nt)
+{
+	s->tried = (unsigned int*)calloc((size_t)nt + 1, sizeof(unsigned int));
+	s->queued = (unsigned int*)calloc((size_t)nt + 1, sizeof(unsigned int));
+	s->queue = (unsigned int*)malloc(sizeof(unsigned int) * ((size_t)nt + 1));
+	s->gen = 0;
+	if (!s->tried || !s->queued || !s->queue)
+	{
+		mr_scratch_free(s);
+		return 0;
+	}
+	return 1;
+}
+
+void mr_scratch_free(mr_scratch* s)
+{
+	free(s->tried);
+	free(s->queued);
+	free(s->queue);
+	memset(s, 0, sizeof *s);
+}
+
+static double mr_query_run(qaws_mesh_reference const* r, double const* p, unsigned int hint, mr_scratch* s, int crease, unsigned int region,
+	qaws_mesh_location* out)
+{
+	mr_query q;
+	q.r = r;
+	q.p[0] = p[0]; q.p[1] = p[1]; q.p[2] = p[2];
+	q.best = HUGE_VAL;
+	q.loc.patch = HM_NONE;
+	q.loc.a = q.loc.b = 0;
+	q.s = s;
+	q.crease = crease;
+	q.region = region;
+	if (++s->gen == 0)
+	{
+		/* (the stamps wrapped round: cleared once in 2^32 queries) */
+		memset(s->tried, 0, sizeof(unsigned int) * r->nt);
+		memset(s->queued, 0, sizeof(unsigned int) * r->nt);
+		s->gen = 1;
+	}
+	if (hint < r->nt && (region == HM_NONE || r->treg[hint] == region))
+	{
+		/* the triangles reachable from the hint's across edges (within the region), each box no farther than the best so far */
+		unsigned int head = 0, tail = 0;
+		s->queue[tail++] = hint;
+		s->queued[hint] = s->gen;
+		while (head < tail)
+		{
+			unsigned int t = s->queue[head++], e;
+			mr_try(&q, t);
+			for (e = 0; e < 3; e++)
+			{
+				unsigned int u = r->ta[3 * t + e];
+				if (u == HM_NONE || (region != HM_NONE && r->treg[u / 3] != region))
+					continue;
+				u /= 3;
+				if (s->queued[u] != s->gen && mr_box_d2(&r->box[u], q.p) < q.best)
+				{
+					s->queued[u] = s->gen;
+					s->queue[tail++] = u;
+				}
+			}
+		}
+	}
+	else
+	{
+		unsigned int ring;
+		for (ring = 0;; ring++)
+		{
+			double lb = qaws_internal_grid_ring(r->grid, q.p, ring, mr_visit, &q);
+			if (lb == HUGE_VAL || lb * lb > q.best)
+				break;
+		}
+	}
+	*out = q.loc;
+	return q.best;
+}
+
+double mr_project(qaws_mesh_reference const* r, double const* p, unsigned int hint, mr_scratch* s, qaws_mesh_location* out)
+{
+	return mr_query_run(r, p, hint, s, 0, HM_NONE, out);
+}
+
+double mr_project_region(qaws_mesh_reference const* r, double const* p, unsigned int hint, unsigned int region, mr_scratch* s,
+	qaws_mesh_location* out)
+{
+	return mr_query_run(r, p, hint, s, 0, region, out);
+}
+
+double mr_project_crease(qaws_mesh_reference const* r, double const* p, unsigned int hint, mr_scratch* s, qaws_mesh_location* out)
+{
+	return mr_query_run(r, p, hint, s, 1, HM_NONE, out);
+}
+
+void mr_eval(qaws_mesh_reference const* r, qaws_mesh_location const* l, double* x, double* n)
+{
+	mi_eval(&r->patch[l->patch], (double)l->a, (double)l->b, x, NULL, NULL, NULL, NULL, NULL, n, NULL, NULL);
+}
+
 qaws_status qaws_mesh_reference_project(qaws_mesh_reference const* r, qaws_scalar const* points, unsigned int count,
 	qaws_mesh_location const* hints, qaws_mesh_location* out_loc, qaws_scalar* out_dist)
 {
-	mr_query q;
-	unsigned int i, *queue = NULL;
-	unsigned char* inq = NULL;
+	mr_scratch s;
+	unsigned int i;
 	if (!r || (count && (!points || !out_loc)))
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	if (!r->nt)
 		return count ? QAWS_STATUS_INVALID_ARGUMENT : QAWS_STATUS_OK;
-	memset(&q, 0, sizeof q);
-	q.r = r;
-	q.stamp = (unsigned int*)calloc(r->nt, sizeof(unsigned int));
-	if (hints)
-	{
-		queue = (unsigned int*)malloc(sizeof(unsigned int) * r->nt);
-		inq = (unsigned char*)malloc(r->nt);
-	}
-	if (!q.stamp || (hints && (!queue || !inq)))
-	{
-		free(q.stamp); free(queue); free(inq);
+	if (!mr_scratch_init(&s, r->nt))
 		return QAWS_STATUS_ALLOCATION_FAILURE;
-	}
 	for (i = 0; i < count; i++)
 	{
-		q.p[0] = (double)points[3 * (size_t)i];
-		q.p[1] = (double)points[3 * (size_t)i + 1];
-		q.p[2] = (double)points[3 * (size_t)i + 2];
-		q.best = HUGE_VAL;
-		q.bt = HM_NONE;
-		q.gen++;
-		if (hints && hints[i].patch < r->nt)
-		{
-			/* the triangles reachable from the hint's across edges, each no farther than the best so far */
-			unsigned int head = 0, tail = 0;
-			memset(inq, 0, r->nt);
-			queue[tail++] = hints[i].patch;
-			inq[hints[i].patch] = 1;
-			while (head < tail)
-			{
-				unsigned int t = queue[head++], e;
-				mr_try(&q, t);
-				for (e = 0; e < 3; e++)
-				{
-					unsigned int u = r->ta[3 * t + e];
-					if (u == HM_NONE)
-						continue;
-					u /= 3;
-					if (!inq[u] && mr_box_d2(&r->box[u], q.p) < q.best)
-					{
-						inq[u] = 1;
-						queue[tail++] = u;
-					}
-				}
-			}
-		}
-		else
-		{
-			unsigned int ring;
-			for (ring = 0;; ring++)
-			{
-				double lb = qaws_internal_grid_ring(r->grid, q.p, ring, mr_visit, &q);
-				if (lb == HUGE_VAL || lb * lb > q.best)
-					break;
-			}
-		}
-		out_loc[i].patch = q.bt;
-		out_loc[i].a = (qaws_scalar)q.ba;
-		out_loc[i].b = (qaws_scalar)q.bb;
+		double p[3], d;
+		p[0] = (double)points[3 * (size_t)i];
+		p[1] = (double)points[3 * (size_t)i + 1];
+		p[2] = (double)points[3 * (size_t)i + 2];
+		d = mr_project(r, p, hints && hints[i].patch < r->nt ? hints[i].patch : HM_NONE, &s, &out_loc[i]);
 		if (out_dist)
-			out_dist[i] = (qaws_scalar)sqrt(q.best);
+			out_dist[i] = (qaws_scalar)sqrt(d);
 	}
-	free(q.stamp); free(queue); free(inq);
+	mr_scratch_free(&s);
 	return QAWS_STATUS_OK;
 }
 
@@ -625,19 +782,17 @@ qaws_status qaws_mesh_reference_project(qaws_mesh_reference const* r, qaws_scala
 /*  Walking                                                                 */
 /* ======================================================================== */
 
-qaws_status qaws_mesh_reference_walk(qaws_mesh_reference const* r, qaws_mesh_location from, qaws_scalar const* tangent,
-	qaws_mesh_location* out_to)
+int mr_walk(qaws_mesh_reference const* r, qaws_mesh_location from, double const* tangent, int stop_at_creases, qaws_mesh_location* out_to)
 {
 	double w[3], dir[3], rem, b[3];
 	unsigned int t, k, guard, stalls = 0;
-	if (!r || !tangent || !out_to || from.patch >= r->nt)
-		return QAWS_STATUS_INVALID_ARGUMENT;
+	int stopped = 0;
 	t = from.patch;
 	b[1] = (double)from.a;
 	b[2] = (double)from.b;
 	b[0] = 1 - b[1] - b[2];
 	for (k = 0; k < 3; k++)
-		w[k] = (double)tangent[k];
+		w[k] = tangent[k];
 	rem = sqrt(mr_dot(w, w));
 	for (guard = 0; rem > 0 && guard < 100000; guard++)
 	{
@@ -695,6 +850,15 @@ qaws_status qaws_mesh_reference_walk(qaws_mesh_reference const* r, qaws_mesh_loc
 			double ax[3], mt[3], mu[3], n2[3], lam, de, dm, tw[3];
 			if (nb == HM_NONE)
 				break;   /* the border */
+			if (stop_at_creases && r->tcrease[3 * t + e])
+			{
+				/* just short of the crease, on this side */
+				b[hit] = 1e-6;
+				b[c0] -= 0.5e-6;
+				b[c1] -= 0.5e-6;
+				stopped = 1;
+				break;
+			}
 			u = nb / 3;
 			ue = nb % 3;
 			for (k = 0; k < 3; k++)
@@ -733,6 +897,19 @@ qaws_status qaws_mesh_reference_walk(qaws_mesh_reference const* r, qaws_mesh_loc
 	out_to->patch = t;
 	out_to->a = (qaws_scalar)(b[1] < 0 ? 0 : b[1]);
 	out_to->b = (qaws_scalar)(b[2] < 0 ? 0 : b[2]);
+	return stopped;
+}
+
+qaws_status qaws_mesh_reference_walk(qaws_mesh_reference const* r, qaws_mesh_location from, qaws_scalar const* tangent,
+	qaws_mesh_location* out_to)
+{
+	double w[3];
+	if (!r || !tangent || !out_to || from.patch >= r->nt)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	w[0] = (double)tangent[0];
+	w[1] = (double)tangent[1];
+	w[2] = (double)tangent[2];
+	mr_walk(r, from, w, 0, out_to);
 	return QAWS_STATUS_OK;
 }
 

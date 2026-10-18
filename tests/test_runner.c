@@ -134,6 +134,8 @@ extern int test_119_repulsive_core_main(void);
 extern int test_120_repulsive_spacetime_main(void);
 extern int test_121_mesh_main(void);
 extern int test_122_mesh_reference_main(void);
+extern int test_123_size_field_main(void);
+extern int test_124_remesh_main(void);
 
 /* Test registry */
 typedef struct {
@@ -265,6 +267,8 @@ static test_suite const g_test_suites[] = {
 	{"120_repulsive_spacetime", test_120_repulsive_spacetime_main},
 	{"121_mesh", test_121_mesh_main},
 	{"122_mesh_reference", test_122_mesh_reference_main},
+	{"123_size_field", test_123_size_field_main},
+	{"124_remesh", test_124_remesh_main},
 };
 
 int main(void) {
