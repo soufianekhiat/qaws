@@ -369,7 +369,7 @@ static void test_adaptive_and_refusals(void)
 		qaws_remesh_desc d;
 		qaws_mesh_3d* bad = NULL;
 		memset(&d, 0, sizeof d);
-		d.method = QAWS_REMESH_CVT;
+		d.method = QAWS_REMESH_FIELD_ALIGNED;
 		s1 = qaws_mesh_remesh(m, &d, &bad, NULL);
 		qaws_mesh_reference_create(other, NULL, &ro);
 		if (ro)

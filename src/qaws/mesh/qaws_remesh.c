@@ -714,7 +714,7 @@ qaws_status qaws_mesh_remesh(qaws_mesh_3d const* mesh, qaws_remesh_desc const* d
 	*out_mesh = NULL;
 	if (!mesh || !desc || (unsigned int)desc->method > QAWS_REMESH_FIELD_ALIGNED || desc->target_length < 0)
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	if (desc->method != QAWS_REMESH_LOCAL)
+	if (desc->method == QAWS_REMESH_FIELD_ALIGNED)
 		return QAWS_STATUS_UNSUPPORTED_OPERATION;
 	memset(&w, 0, sizeof w);
 	w.r = desc->reference;
@@ -743,7 +743,7 @@ qaws_status qaws_mesh_remesh(qaws_mesh_3d const* mesh, qaws_remesh_desc const* d
 		qaws_mesh_3d_measure_quality(mesh, &q);
 		w.L = q.mean_edge > 0 ? (double)q.mean_edge : 1;
 	}
-	iterations = desc->iterations ? desc->iterations : 10;
+	iterations = desc->method == QAWS_REMESH_CVT ? 5 : desc->iterations ? desc->iterations : 10;
 	st = rm_begin(&w, mesh, &out);
 	for (it = 0; st == QAWS_STATUS_OK && it < iterations && !w.failed; it++)
 	{
@@ -758,6 +758,8 @@ qaws_status qaws_mesh_remesh(qaws_mesh_3d const* mesh, qaws_remesh_desc const* d
 		hm_compact(w.m);
 		w.rep.iterations++;
 	}
+	if (st == QAWS_STATUS_OK && !w.failed && desc->method == QAWS_REMESH_CVT && !rv_optimize(w.m, w.r, w.size, w.L, w.sa, w.ra, &w.s, desc->iterations ? desc->iterations : 30, &w.rep))
+		w.failed = 1;
 	if (w.failed && st == QAWS_STATUS_OK)
 		st = QAWS_STATUS_ALLOCATION_FAILURE;
 	if (st == QAWS_STATUS_OK)

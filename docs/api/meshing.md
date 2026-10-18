@@ -272,6 +272,49 @@ al. 2017 and Wang et al. 2019 for triangles, QuadWild for quads).
 On figure 3's 3752-triangle blob both directions converge in 0.2 to 0.5 s;
 a 10.7k-face remesh takes 0.5 to 0.8 s (Release). Showcase figure 9 tabulates
 figures 3 and 4's meshes: the baseline the remeshing items quote.
+### CVT remeshing
+`QAWS_REMESH_CVT` places the vertices at a centroidal Voronoi tessellation
+of the reference (Du, Faber, Gunzburger 1999), on its restricted Voronoi
+diagram (Yan, Levy et al. 2009), by Lloyd then L-BFGS (Liu et al. 2009):
+the most uniform and regular isotropic triangles. It takes `reference`,
+`target_length` and `size` as LOCAL does; `iterations` counts the L-BFGS
+steps after 5 Lloyd steps, per level (0: 30).
+1. LOCAL runs 5 iterations: a valid start with features and footpoints.
+2. The vertex count is set from the size: the integral of
+   2 / (sqrt(3) h^2) over the reference, one hexagon of side h per vertex
+   (the shortest free edges collapsed or the longest split, to 1%).
+3. Vertices on feature lines and the border are spread along them by a
+   one-dimensional Lloyd (density h^-3), then locked. Corners stay.
+4. The free vertices move on the CVT energy, density h^-4. The reference is
+   sampled once into flat sub-triangles (up to 16 per edge, about the
+   size); each cell is cut from them by its neighbours' bisectors, up to
+   the radius of security, region by region, so no cell crosses a crease.
+   Steps are projected back onto the region, at most half the size each.
+5. The connectivity stays the working mesh's, kept extrinsic-Delaunay by
+   flips (never across or along a crease): the restricted Delaunay
+   triangulation on a well-sampled surface, a manifold whatever the seeds
+   do.
+Lloyd and L-BFGS remove a lattice's dislocations slowly, so when the
+surface takes 400 vertices or more, steps 2 to 4 run first on a coarse
+level: a quarter of the vertices at twice the size, feature lines
+decimated too. Each triangle is then split in four, which keeps every
+vertex's valence, and the full level is relaxed from there.
+Measured (test 132, against LOCAL on the same input):
+| Case | CVT | LOCAL |
+|---|---|---|
+| Icosphere at 0.12: valence 6 | 95.8% (5 to 7: 100%) | 77.6% |
+| Icosphere: angles, edge CV, mean edge | 40..95, 0.053, +0.7% | 36..105, 0.117, -6.6% |
+| Blob at 0.11: irregular vertices | 6.0% | 22.4% |
+| Cube with creases at 0.25: angles | 35.5..100.1, creases exact | |
+| Adaptive bump: mean edge / size - 1 | 0.047 | 0.106 |
+| 2.4k vertices | 1.9 s (74 energy evaluations) | about 5 times faster |
+Features and attributes are as exact as LOCAL's: crease vertices on the
+creases, corners kept, attributes transferred at the footpoints. Known
+limits: cells are found breadth first over connected sub-triangles, so a
+cell does not reach across empty space (thin parts are sampled per side);
+a part thinner than the size keeps poor triangles across it (a slab 0.02
+thick at 0.05: valid, closed, angles 11..148); near locked corners and
+borders angles reach 29 degrees.
 
 ## Meshes of exact geometry
 
