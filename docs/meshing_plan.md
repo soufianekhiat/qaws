@@ -56,6 +56,31 @@ On branch `meshing`, one method per operator (the others reserved behind
 
 Tests 121 to 135; showcase figures 1 to 14 (`qaws_meshing_showcase`, keys 1 to 9 then a to e).
 
+### Next, beyond the reserved methods
+
+User guidance (what a modelling tool's user steers with):
+
+| Input | Today | Next |
+|---|---|---|
+| Edges to keep | `qaws_mesh_3d_set_feature_edges`, honoured by LOCAL, CVT, quads and generation; corners where lines meet or end | per-line options (keep straight, quads' edge loops along it) |
+| Density paint | `qaws_size_field_create_vertices` (a size per reference vertex), callback, min; LOCAL and CVT | the size field in quadrangulation (`target_length` only today), quad density by the lattice's local scale |
+| Directions | none: the cross field takes no user input | strokes as soft or hard direction constraints (Instant Meshes' orientation strokes), per-vertex guide directions with weights, symmetry |
+| Singularities | none | placed, attracting or repelling cones (Instant Meshes' attractors), a cone budget |
+| Edge loops | none | position strokes: lattice lines through a user curve (Instant Meshes' edge strokes) |
+| Pinned vertices | only as feature corners | vertices kept where they are, also as quad vertices |
+
+Quality and reach:
+
+1. Curved high-order elements (P2, P3): edge and face nodes on the exact surface from the footpoints every vertex already carries.
+2. Boundary layers: prisms grown from the surface (the volume mesh stores prisms; nothing makes them).
+3. Metric-driven adaptation: remeshing to an anisotropic metric per vertex (as Mmg), for a solution field rather than curvature.
+4. Sizing by local feature size: the distance across thin parts and gaps (the medial axis, opposite surfaces), where angle bounds and CVT now fail.
+5. Input repair: self-intersections, holes, degenerate faces (non-manifold input is only split today).
+6. Scale: benchmarks past 10^6 elements, parallel field solves and local operations.
+7. Faster tests: a fast default per suite and a heavy tier apart (test 131 alone takes about 100 s).
+
+Suggested order: GLOBAL quads, the user guidance above, local feature size sizing, faster tests.
+
 ## 0. Scope
 
 In:
