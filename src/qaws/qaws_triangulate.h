@@ -4,6 +4,7 @@
 #include "qaws_types.h"
 #include "qaws_status.h"
 #include "qaws_path.h"
+#include "qaws_mesh.h"
 
 /*
  * Triangulating regions of curves.
@@ -110,5 +111,46 @@ qaws_status qaws_mesh_2d_quadrangulate(qaws_mesh_2d* mesh, int all_quads, unsign
 unsigned int qaws_mesh_2d_get_quad_count(qaws_mesh_2d const* mesh);
 /* counter-clockwise vertex indices */
 void qaws_mesh_2d_get_quad(qaws_mesh_2d const* mesh, unsigned int quad, unsigned int out_vertices[4]);
+
+/*
+ * The mesh as a corner store (the meshing module's, qaws_mesh.h).
+ *
+ * Every planar mesh is also held in the corner store of the surface meshes,
+ * at z = 0: qaws_mesh_2d_get_mesh gives it as a qaws_mesh_3d to read with
+ * qaws_mesh.h (faces of any size and their adjacency, the dual, topology,
+ * quality, features: the boundary and constraint edges; attributes).
+ * Its vertex and face indices are the ones above (triangles, then quads),
+ * but where the region pinches: a vertex two boundary loops touch is split
+ * there, its copies appended. The view is rebuilt by remeshing and
+ * quadrangulation (attributes on it dropped).
+ *
+ * Meshes can be made from arrays and edited here, each edit checked as
+ * qaws_mesh.h's are (INVALID_TOPOLOGY when refused) and the getters above
+ * kept in step. Such a mesh has no curves under its vertices
+ * (qaws_mesh_2d_get_vertex_source reports none): remeshing and
+ * quadrangulation, which follow the curves, return UNSUPPORTED_OPERATION on
+ * it.
+ */
+typedef struct qaws_mesh_2d_desc
+{
+	qaws_scalar const* positions;           /* 2 per vertex */
+	unsigned int vertex_count;
+	unsigned int const* face_vertices;      /* each face's vertices counter-clockwise, in turn */
+	unsigned int const* face_sizes;         /* NULL: triangles */
+	unsigned int face_count;
+} qaws_mesh_2d_desc;
+
+qaws_status qaws_mesh_2d_create(qaws_mesh_2d_desc const* desc, qaws_mesh_2d** out_mesh);
+qaws_mesh_3d const* qaws_mesh_2d_get_mesh(qaws_mesh_2d const* mesh);
+
+/* positions: 2 (NULL: the edge's midpoint, the far vertex, the face's centroid) */
+qaws_status qaws_mesh_2d_split_edge(qaws_mesh_2d* mesh, unsigned int a, unsigned int b, qaws_scalar const* position, unsigned int* out_vertex);
+qaws_status qaws_mesh_2d_collapse_edge(qaws_mesh_2d* mesh, unsigned int a, unsigned int b, qaws_scalar const* position);
+qaws_status qaws_mesh_2d_flip_edge(qaws_mesh_2d* mesh, unsigned int a, unsigned int b);
+qaws_status qaws_mesh_2d_split_face(qaws_mesh_2d* mesh, unsigned int face, qaws_scalar const* position, unsigned int* out_vertex);
+
+qaws_status qaws_mesh_2d_add_attribute(qaws_mesh_2d* mesh, qaws_attribute_desc const* desc, qaws_scalar const* values, unsigned int* out_attribute);
+qaws_status qaws_mesh_2d_set_attribute(qaws_mesh_2d* mesh, unsigned int attribute, qaws_scalar const* values);
+qaws_status qaws_mesh_2d_remove_attribute(qaws_mesh_2d* mesh, unsigned int attribute);
 
 #endif /* QAWS_TRIANGULATE_H */

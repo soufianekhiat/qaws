@@ -13,6 +13,7 @@
 #include "qaws_platform.h"
 #include "internal/qaws_internal_types.h"
 #include "internal/qaws_internal_wide.h"
+#include "mesh/qaws_mesh_core.h"
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -66,6 +67,8 @@ struct qaws_mesh_2d
 	double origin[2], step, ext, tol;
 	unsigned int last;          /* where walks start */
 	int failed;
+	qaws_mesh_3d* core;         /* the output as a corner store (z = 0): qaws_mesh_2d_get_mesh */
+	int edited;                 /* made from arrays or edited through the core: no curves under the output */
 	/* the output, compacted */
 	double* ov;
 	unsigned int onv;
@@ -86,6 +89,134 @@ struct qaws_mesh_2d
 	unsigned int* cav;
 	unsigned int ncav, capcav;
 };
+
+/* ======================================================================== */
+/*  The output as a corner store                                            */
+/* ======================================================================== */
+
+/* the output's faces (triangles, then quads) mirrored into a corner store at z = 0, the boundary and constraint edges
+   its features (a vertex where the region pinches is split there, appended) */
+static int tm_core_sync(qaws_mesh_2d* m)
+{
+	double* x = (double*)malloc(sizeof(double) * (3 * (size_t)m->onv + 1));
+	unsigned int* fv = (unsigned int*)malloc(sizeof(unsigned int) * (3 * (size_t)m->ont + 4 * (size_t)m->onq + 1));
+	unsigned int* fs = (unsigned int*)malloc(sizeof(unsigned int) * ((size_t)m->ont + m->onq + 1));
+	qaws_mesh_3d* core = NULL;
+	unsigned int i;
+	int ok = 0;
+	if (!x || !fv || !fs)
+		goto done;
+	for (i = 0; i < m->onv; i++)
+	{
+		x[3 * (size_t)i] = m->ov[2 * (size_t)i];
+		x[3 * (size_t)i + 1] = m->ov[2 * (size_t)i + 1];
+		x[3 * (size_t)i + 2] = 0;
+	}
+	if (m->ont)
+		memcpy(fv, m->otri, sizeof(unsigned int) * 3 * m->ont);
+	if (m->onq)
+		memcpy(fv + 3 * (size_t)m->ont, m->oquad, sizeof(unsigned int) * 4 * m->onq);
+	for (i = 0; i < m->ont + m->onq; i++)
+		fs[i] = i < m->ont ? 3 : 4;
+	if (hm_mesh_3d_create(x, m->onv, fv, fs, m->ont + m->onq, &core) != QAWS_STATUS_OK)
+		goto done;
+	for (i = 0; i < m->onbe + m->once; i++)
+	{
+		unsigned int c = hm_find_edge(&core->hm, m->obe[2 * (size_t)i], m->obe[2 * (size_t)i + 1]);
+		if (c == HM_NONE)
+			continue;
+		core->hm.cflag[c] |= HM_FEATURE;
+		if (core->hm.co[c] != HM_NONE)
+			core->hm.cflag[core->hm.co[c]] |= HM_FEATURE;
+	}
+	for (i = 0; i < core->hm.nv; i++)
+	{
+		unsigned int fd = hm_feature_degree(&core->hm, i);
+		if (fd != 0 && fd != 2)
+			core->hm.vflag[i] |= HM_CORNER;
+	}
+	qaws_mesh_3d_destroy(m->core);
+	m->core = core;
+	core = NULL;
+	ok = 1;
+done:
+	free(x); free(fv); free(fs);
+	qaws_mesh_3d_destroy(core);
+	return ok;
+}
+
+/* the output rebuilt from the corner store after an edit there: its vertices (no curves under them now), triangles,
+   quads, the border's edges (the region on their left) and the inner feature edges as constraints */
+static int tm_from_core(qaws_mesh_2d* m)
+{
+	qaws_hm const* h = &m->core->hm;
+	unsigned int nt = 0, nq = 0, nb = 0, nk = 0, f, c, i, kt = 0, kq = 0, kind;
+	double *ov, *ovt, *obt;
+	unsigned int *ovc, *otri, *oquad, *obe, *obc;
+	unsigned char* obk;
+	for (f = 0; f < h->nf; f++)
+	{
+		nt += h->fn[f] == 3;
+		nq += h->fn[f] == 4;
+	}
+	for (c = 0; c < h->nc; c++)
+		if (h->cf[c] != HM_NONE)
+		{
+			nb += h->co[c] == HM_NONE;
+			nk += h->co[c] != HM_NONE && c < h->co[c] && (h->cflag[c] & HM_FEATURE);
+		}
+	ov = (double*)malloc(sizeof(double) * (2 * (size_t)h->nv + 1));
+	ovt = (double*)calloc((size_t)h->nv + 1, sizeof(double));
+	ovc = (unsigned int*)malloc(sizeof(unsigned int) * ((size_t)h->nv + 1));
+	otri = (unsigned int*)malloc(sizeof(unsigned int) * (3 * (size_t)nt + 1));
+	oquad = (unsigned int*)malloc(sizeof(unsigned int) * (4 * (size_t)nq + 1));
+	obe = (unsigned int*)malloc(sizeof(unsigned int) * (2 * ((size_t)nb + nk) + 1));
+	obc = (unsigned int*)malloc(sizeof(unsigned int) * ((size_t)nb + nk + 1));
+	obt = (double*)calloc(2 * ((size_t)nb + nk) + 1, sizeof(double));
+	obk = (unsigned char*)malloc((size_t)nb + nk + 1);
+	if (!ov || !ovt || !ovc || !otri || !oquad || !obe || !obc || !obt || !obk)
+	{
+		free(ov); free(ovt); free(ovc); free(otri); free(oquad); free(obe); free(obc); free(obt); free(obk);
+		return 0;
+	}
+	for (i = 0; i < h->nv; i++)
+	{
+		ov[2 * (size_t)i] = h->x[3 * (size_t)i];
+		ov[2 * (size_t)i + 1] = h->x[3 * (size_t)i + 1];
+		ovc[i] = TM_NONE;
+	}
+	for (f = 0; f < h->nf; f++)
+		for (c = h->fc[f]; c < h->fc[f] + h->fn[f] && h->fn[f] <= 4; c++)
+		{
+			if (h->fn[f] == 3)
+				otri[kt++] = h->cv[c];
+			else if (h->fn[f] == 4)
+				oquad[kq++] = h->cv[c];
+		}
+	free(m->ov); free(m->ovt); free(m->ovc); free(m->otri); free(m->oquad); free(m->obe); free(m->obc); free(m->obt); free(m->obk);
+	m->ov = ov; m->ovt = ovt; m->ovc = ovc; m->otri = otri; m->oquad = oquad; m->obe = obe; m->obc = obc; m->obt = obt; m->obk = obk;
+	m->onv = h->nv;
+	m->ont = nt;
+	m->onq = nq;
+	m->onbe = m->once = 0;
+	for (kind = 0; kind < 2; kind++)
+		for (c = 0; c < h->nc; c++)
+		{
+			unsigned int e = m->onbe + m->once;
+			if (h->cf[c] == HM_NONE || (kind ? h->co[c] == HM_NONE || c > h->co[c] || !(h->cflag[c] & HM_FEATURE) : h->co[c] != HM_NONE))
+				continue;
+			obe[2 * (size_t)e] = h->cv[c];
+			obe[2 * (size_t)e + 1] = hm_to(h, c);
+			obc[e] = TM_NONE;
+			obk[e] = (unsigned char)kind;
+			if (kind)
+				m->once++;
+			else
+				m->onbe++;
+		}
+	m->edited = 1;
+	return 1;
+}
 
 /* ======================================================================== */
 /*  Lattice and exact predicates                                            */
@@ -1235,7 +1366,7 @@ static int tm_compact(qaws_mesh_2d* m)
 				}
 		}
 	free(map);
-	return 1;
+	return tm_core_sync(m);
 }
 
 /* ======================================================================== */
@@ -1251,7 +1382,117 @@ void qaws_mesh_2d_destroy(qaws_mesh_2d* m)
 	free(m->v); free(m->t); free(m->dead); free(m->sg);
 	free(m->ov); free(m->otri); free(m->ovc); free(m->ovt); free(m->obe); free(m->obc); free(m->obt); free(m->obk); free(m->oquad);
 	free(m->stack); free(m->cav);
+	qaws_mesh_3d_destroy(m->core);
 	free(m);
+}
+
+qaws_status qaws_mesh_2d_create(qaws_mesh_2d_desc const* desc, qaws_mesh_2d** out_mesh)
+{
+	qaws_mesh_2d* m;
+	double* x;
+	unsigned int i;
+	qaws_status st;
+	if (!out_mesh)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	*out_mesh = NULL;
+	if (!desc || (desc->vertex_count && !desc->positions) || (desc->face_count && !desc->face_vertices))
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	m = (qaws_mesh_2d*)calloc(1, sizeof *m);
+	x = (double*)malloc(sizeof(double) * (3 * (size_t)desc->vertex_count + 1));
+	if (!m || !x)
+	{
+		free(m);
+		free(x);
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	}
+	for (i = 0; i < desc->vertex_count; i++)
+	{
+		x[3 * (size_t)i] = (double)desc->positions[2 * (size_t)i];
+		x[3 * (size_t)i + 1] = (double)desc->positions[2 * (size_t)i + 1];
+		x[3 * (size_t)i + 2] = 0;
+	}
+	st = hm_mesh_3d_create(x, desc->vertex_count, desc->face_vertices, desc->face_sizes, desc->face_count, &m->core);
+	free(x);
+	if (st == QAWS_STATUS_OK && !tm_from_core(m))
+		st = QAWS_STATUS_ALLOCATION_FAILURE;
+	if (st != QAWS_STATUS_OK)
+	{
+		qaws_mesh_2d_destroy(m);
+		return st;
+	}
+	*out_mesh = m;
+	return QAWS_STATUS_OK;
+}
+
+qaws_mesh_3d const* qaws_mesh_2d_get_mesh(qaws_mesh_2d const* mesh)
+{
+	return mesh ? mesh->core : NULL;
+}
+
+/* an edit through the core, the output rebuilt after it */
+static qaws_status tm_edited(qaws_mesh_2d* m, qaws_status st)
+{
+	if (st == QAWS_STATUS_OK && !tm_from_core(m))
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	return st;
+}
+
+static qaws_scalar const* tm_lift(qaws_scalar const* p, qaws_scalar* out)
+{
+	if (!p)
+		return NULL;
+	out[0] = p[0];
+	out[1] = p[1];
+	out[2] = 0;
+	return out;
+}
+
+qaws_status qaws_mesh_2d_split_edge(qaws_mesh_2d* mesh, unsigned int a, unsigned int b, qaws_scalar const* position, unsigned int* out_vertex)
+{
+	qaws_scalar p[3];
+	if (!mesh || !mesh->core)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	return tm_edited(mesh, qaws_mesh_3d_split_edge(mesh->core, a, b, tm_lift(position, p), NULL, out_vertex));
+}
+
+qaws_status qaws_mesh_2d_collapse_edge(qaws_mesh_2d* mesh, unsigned int a, unsigned int b, qaws_scalar const* position)
+{
+	qaws_scalar p[3];
+	if (!mesh || !mesh->core)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	return tm_edited(mesh, qaws_mesh_3d_collapse_edge(mesh->core, a, b, tm_lift(position, p), NULL));
+}
+
+qaws_status qaws_mesh_2d_flip_edge(qaws_mesh_2d* mesh, unsigned int a, unsigned int b)
+{
+	if (!mesh || !mesh->core)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	return tm_edited(mesh, qaws_mesh_3d_flip_edge(mesh->core, a, b));
+}
+
+qaws_status qaws_mesh_2d_split_face(qaws_mesh_2d* mesh, unsigned int face, qaws_scalar const* position, unsigned int* out_vertex)
+{
+	qaws_scalar p[3];
+	if (!mesh || !mesh->core)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	return tm_edited(mesh, qaws_mesh_3d_split_face(mesh->core, face, tm_lift(position, p), NULL, out_vertex));
+}
+
+qaws_status qaws_mesh_2d_add_attribute(qaws_mesh_2d* mesh, qaws_attribute_desc const* desc, qaws_scalar const* values, unsigned int* out_attribute)
+{
+	if (out_attribute)
+		*out_attribute = QAWS_MESH_NONE;
+	return mesh ? qaws_mesh_3d_add_attribute(mesh->core, desc, values, out_attribute) : QAWS_STATUS_INVALID_ARGUMENT;
+}
+
+qaws_status qaws_mesh_2d_set_attribute(qaws_mesh_2d* mesh, unsigned int attribute, qaws_scalar const* values)
+{
+	return mesh ? qaws_mesh_3d_set_attribute(mesh->core, attribute, values) : QAWS_STATUS_INVALID_ARGUMENT;
+}
+
+qaws_status qaws_mesh_2d_remove_attribute(qaws_mesh_2d* mesh, unsigned int attribute)
+{
+	return mesh ? qaws_mesh_3d_remove_attribute(mesh->core, attribute) : QAWS_STATUS_INVALID_ARGUMENT;
 }
 
 qaws_status qaws_triangulate_region_2d(qaws_triangulate_desc const* d, qaws_mesh_2d** out)
@@ -2084,7 +2325,7 @@ static int rm_store(rm_ctx* x, unsigned int const* quads, unsigned int nq)
 			if (kind) m->once++; else m->onbe++;
 		}
 	free(map);
-	return 1;
+	return tm_core_sync(m);
 }
 
 static void rm_free(rm_ctx* x)
@@ -2157,7 +2398,7 @@ qaws_status qaws_mesh_2d_remesh(qaws_mesh_2d* mesh, qaws_scalar target_length, q
 	unsigned int it;
 	int ok = 1;
 	if (!mesh || (!(target_length > 0) && !size_fn)) return QAWS_STATUS_INVALID_ARGUMENT;
-	if (mesh->onq) return QAWS_STATUS_UNSUPPORTED_OPERATION;
+	if (mesh->onq || mesh->edited) return QAWS_STATUS_UNSUPPORTED_OPERATION;
 	memset(&x, 0, sizeof(x));
 	x.m = mesh;
 	x.len = (double)target_length;
@@ -2447,7 +2688,7 @@ qaws_status qaws_mesh_2d_quadrangulate(qaws_mesh_2d* mesh, int all_quads, unsign
 	unsigned int i, nc = 0, it, *cq = NULL;
 	int ok = 1;
 	if (!mesh) return QAWS_STATUS_INVALID_ARGUMENT;
-	if (mesh->onq) return QAWS_STATUS_UNSUPPORTED_OPERATION;
+	if (mesh->onq || mesh->edited) return QAWS_STATUS_UNSUPPORTED_OPERATION;
 	memset(&x, 0, sizeof(x));
 	memset(&faces, 0, sizeof(faces));
 	x.m = mesh;

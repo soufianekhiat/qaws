@@ -8,6 +8,7 @@ enters and leaves as arrays; qaws reads and writes no files.
 | Header | What |
 |---|---|
 | `qaws_mesh.h` | `qaws_mesh_3d`: polygon meshes in space, edits, features, attributes, footpoints, quality |
+| `qaws_triangulate.h` | `qaws_mesh_2d`: planar meshes, the same store at z = 0 ([triangulate](triangulate.md)) |
 | `qaws_mesh_reference.h` | `qaws_mesh_reference`: the smooth surface a mesh with normals implies (PN) |
 | `qaws_mesh_field.h` | size fields; cross fields on surfaces; frame fields in volumes |
 | `qaws_remesh.h` | surface remeshing (LOCAL) |

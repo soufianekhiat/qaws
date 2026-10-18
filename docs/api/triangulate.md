@@ -135,3 +135,37 @@ Test 91 checks these in f64 and f32:
 | Quads on a disc | quad-dominant: at most a fifth triangles; all quads; every quad convex; boundary on the circle |
 
 Figure 8 of `qaws_better2d_showcase` draws nine of these meshes.
+
+## The mesh as a corner store
+
+```c
+qaws_status qaws_mesh_2d_create(qaws_mesh_2d_desc const* desc, qaws_mesh_2d** out_mesh);
+qaws_mesh_3d const* qaws_mesh_2d_get_mesh(qaws_mesh_2d const* mesh);
+qaws_status qaws_mesh_2d_split_edge(qaws_mesh_2d* mesh, unsigned int a, unsigned int b, qaws_scalar const* position, unsigned int* out_vertex);
+qaws_status qaws_mesh_2d_collapse_edge(qaws_mesh_2d* mesh, unsigned int a, unsigned int b, qaws_scalar const* position);
+qaws_status qaws_mesh_2d_flip_edge(qaws_mesh_2d* mesh, unsigned int a, unsigned int b);
+qaws_status qaws_mesh_2d_split_face(qaws_mesh_2d* mesh, unsigned int face, qaws_scalar const* position, unsigned int* out_vertex);
+qaws_status qaws_mesh_2d_add_attribute(qaws_mesh_2d* mesh, qaws_attribute_desc const* desc, qaws_scalar const* values, unsigned int* out_attribute);
+```
+
+Every planar mesh is also held in the meshing module's corner store
+([meshing](meshing.md)), at z = 0. `qaws_mesh_2d_get_mesh` returns it as a
+`qaws_mesh_3d`, so all of `qaws_mesh.h` reads it: faces of any size and their
+adjacency, the dual, topology, quality, attributes. Its features are the
+boundary and constraint edges.
+
+- Indices are the ones the getters above use (triangles, then quads). The
+  one exception is where the region pinches: a vertex that two boundary
+  loops touch is split there, and its copies are appended.
+- Remeshing and quadrangulation rebuild the view, dropping its
+  attributes.
+- A mesh can be made from arrays (`qaws_mesh_2d_create`) and edited
+  through the functions above. Each edit is checked as `qaws_mesh.h`'s are
+  (`INVALID_TOPOLOGY` when refused), and the getters above stay in step.
+- Such a mesh has no curves under its vertices
+  (`qaws_mesh_2d_get_vertex_source` reports none). Remeshing and
+  quadrangulation follow the curves, so they return
+  `UNSUPPORTED_OPERATION` on it.
+
+Test 129 reads an annulus through the view, before and after
+quadrangulation, and edits a square made from arrays.

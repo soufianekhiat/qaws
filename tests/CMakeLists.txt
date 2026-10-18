@@ -130,6 +130,7 @@ add_executable(
   126_mesh_generate.c
   127_tetrahedralize.c
   128_hexahedralize.c
+  129_mesh_2d.c
 )
 
 # The amalgamated library exports exactly the same symbols, so the tests can
