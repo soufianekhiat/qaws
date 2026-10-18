@@ -12,6 +12,7 @@
 #include "qaws_platform.h"
 #include "internal/qaws_internal_types.h"
 #include "internal/qaws_internal_parallel.h"
+#include "mesh/qaws_mesh_core.h"
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -20,16 +21,16 @@
 #define SM_DENSE 32             /* samples per span to measure arc length */
 #define SM_CORNER 0.9            /* a turn over about 25 degrees between dense points: a corner */
 
-struct qaws_mesh_3d
+typedef struct sm_mesh
 {
 	double* v;                  /* 3 per vertex */
 	unsigned int nv, capv;
 	unsigned int* t;            /* 3 per triangle */
 	unsigned int nt, capt;
 	int failed;
-};
+} sm_mesh;
 
-static unsigned int sm_vert(qaws_mesh_3d* m, double x, double y, double z)
+static unsigned int sm_vert(sm_mesh* m, double x, double y, double z)
 {
 	if (m->nv == m->capv)
 	{
@@ -43,7 +44,7 @@ static unsigned int sm_vert(qaws_mesh_3d* m, double x, double y, double z)
 	return m->nv++;
 }
 
-static void sm_tri(qaws_mesh_3d* m, unsigned int a, unsigned int b, unsigned int c)
+static void sm_tri(sm_mesh* m, unsigned int a, unsigned int b, unsigned int c)
 {
 	if (a == b || b == c || a == c) return;
 	if (m->nt == m->capt)
@@ -207,7 +208,7 @@ static void sm_at(sm_contour const* c, sm_dense const* d, double s, double* p)
 /* the contour's samples into the mesh: on its corners (turns over SM_CORNER
    between dense points, where pieces meet or polylines kink), and by arc
    length between them; about n in all (c->n is updated) */
-static int sm_emit(qaws_mesh_3d* m, sm_contour* c, double z)
+static int sm_emit(sm_mesh* m, sm_contour* c, double z)
 {
 	sm_dense d;
 	double* corner;
@@ -268,13 +269,13 @@ static int sm_emit(qaws_mesh_3d* m, sm_contour* c, double z)
 /*  Pairing, bands, fans, caps                                              */
 /* ======================================================================== */
 
-static double sm_d2(qaws_mesh_3d const* m, unsigned int a, unsigned int b)
+static double sm_d2(sm_mesh const* m, unsigned int a, unsigned int b)
 {
 	double dx = m->v[3 * a] - m->v[3 * b], dy = m->v[3 * a + 1] - m->v[3 * b + 1], dz = m->v[3 * a + 2] - m->v[3 * b + 2];
 	return dx * dx + dy * dy + dz * dz;
 }
 
-static double sm_d2xy(qaws_mesh_3d const* m, unsigned int a, unsigned int b)
+static double sm_d2xy(sm_mesh const* m, unsigned int a, unsigned int b)
 {
 	double dx = m->v[3 * a] - m->v[3 * b], dy = m->v[3 * a + 1] - m->v[3 * b + 1];
 	return dx * dx + dy * dy;
@@ -283,7 +284,7 @@ static double sm_d2xy(qaws_mesh_3d const* m, unsigned int a, unsigned int b)
 /* a band between the closed loops P (below, n vertices) and Q (above, k),
    both in the contours' travel: Q's start nearest P's, then the greedy
    stitch (the shorter diagonal first), n + k triangles */
-static void sm_stitch(qaws_mesh_3d* m, unsigned int const* P, unsigned int n, unsigned int const* Q, unsigned int k)
+static void sm_stitch(sm_mesh* m, unsigned int const* P, unsigned int n, unsigned int const* Q, unsigned int k)
 {
 	unsigned int s = 0, i = 0, j = 0, t;
 	double bd = 1e300;
@@ -310,7 +311,7 @@ static unsigned int* sm_loop(sm_contour const* c)
 
 /* a strip between the open chains P (below, np vertices) and Q (above, nq):
    the greedy stitch, np + nq - 2 triangles */
-static void sm_strip(qaws_mesh_3d* m, unsigned int const* P, unsigned int np, unsigned int const* Q, unsigned int nq)
+static void sm_strip(sm_mesh* m, unsigned int const* P, unsigned int np, unsigned int const* Q, unsigned int nq)
 {
 	unsigned int i = 0, j = 0;
 	while (i + 1 < np || j + 1 < nq)
@@ -332,7 +333,7 @@ static unsigned int sm_chain(sm_contour const* c, unsigned int g, unsigned int* 
 
 /* the band between p and q: corner to corner when they have as many corners
    (the creases run straight up), else one stitch round */
-static void sm_band(qaws_mesh_3d* m, sm_contour const* p, sm_contour const* q)
+static void sm_band(sm_mesh* m, sm_contour const* p, sm_contour const* q)
 {
 	if (p->nk && p->nk == q->nk)
 	{
@@ -367,7 +368,7 @@ static void sm_band(qaws_mesh_3d* m, sm_contour const* p, sm_contour const* q)
 }
 
 /* is (x, y) inside contour c (crossings over its samples)? */
-static int sm_inside(qaws_mesh_3d const* m, sm_contour const* c, double x, double y)
+static int sm_inside(sm_mesh const* m, sm_contour const* c, double x, double y)
 {
 	unsigned int i;
 	int in = 0;
@@ -382,7 +383,7 @@ static int sm_inside(qaws_mesh_3d const* m, sm_contour const* c, double x, doubl
 
 /* do contours a and b (neighbouring heights) overlap in plan: the same
    orientation, and a sample of one inside the other */
-static int sm_overlap(qaws_mesh_3d const* m, sm_contour const* a, sm_contour const* b)
+static int sm_overlap(sm_mesh const* m, sm_contour const* a, sm_contour const* b)
 {
 	unsigned int i, step;
 	if ((a->area > 0) != (b->area > 0)) return 0;
@@ -403,7 +404,7 @@ static int sm_overlap(qaws_mesh_3d const* m, sm_contour const* a, sm_contour con
    loop is banded to its partner; more than two partners also close the
    polygon of the cut points. Returns 0 when the runs do not give one per
    partner (the caller falls back). */
-static int sm_branch(qaws_mesh_3d* m, sm_contour const* x, sm_contour const* const* ys, unsigned int k, int x_below)
+static int sm_branch(sm_mesh* m, sm_contour const* x, sm_contour const* const* ys, unsigned int k, int x_below)
 {
 	unsigned int* own = (unsigned int*)malloc(sizeof(unsigned int) * (x->n + 1));
 	unsigned int* start = (unsigned int*)malloc(sizeof(unsigned int) * (x->n + 1));
@@ -501,7 +502,7 @@ static void sm_shares(sm_section* a, unsigned int const* qa, unsigned int nqa, s
    grouped; one to one banded, one to several (a split) or several to one
    (a merge) branched, anything else paired by nearest centres. Linked
    contours are marked (up on a's, down on b's). */
-static int sm_link(qaws_mesh_3d* m, sm_section* a, sm_section* b)
+static int sm_link(sm_mesh* m, sm_section* a, sm_section* b)
 {
 	unsigned int na = a->nc, nb = b->nc, i, j;
 	unsigned char* ov;
@@ -604,7 +605,7 @@ static double sm_tip(sm_contour const* c, int linked_back, double area_back, dou
 
 /* a fan from contour p to its centre at height z (up: the tip above p;
    the triangles keep the contour's travel, so holes need no turn) */
-static void sm_fan(qaws_mesh_3d* m, sm_contour const* p, double z, int up)
+static void sm_fan(sm_mesh* m, sm_contour const* p, double z, int up)
 {
 	unsigned int apex = sm_vert(m, p->c[0], p->c[1], z), i;
 	if (apex == SM_NONE) return;
@@ -619,7 +620,7 @@ static void sm_fan(qaws_mesh_3d* m, sm_contour const* p, double z, int up)
 /* the samples strictly between u and w along their contour (in either
    travel) when they all lie on the segment u w (a straight run the
    triangulation merged): their count, the first into *from, the step */
-static unsigned int sm_between(qaws_mesh_3d const* m, sm_contour const* const* cs, unsigned int n, unsigned int u, unsigned int w,
+static unsigned int sm_between(sm_mesh const* m, sm_contour const* const* cs, unsigned int n, unsigned int u, unsigned int w,
 	unsigned int* from, int* step)
 {
 	unsigned int c, dir;
@@ -654,7 +655,7 @@ static unsigned int sm_between(qaws_mesh_3d const* m, sm_contour const* const* c
 
 /* a cap triangle, its edges split again through the samples on them (a
    fan from the opposite corner), so the cap meets the band edge for edge */
-static void sm_cap_tri(qaws_mesh_3d* m, sm_contour const* const* cs, unsigned int n, unsigned int a, unsigned int b, unsigned int c)
+static void sm_cap_tri(sm_mesh* m, sm_contour const* const* cs, unsigned int n, unsigned int a, unsigned int b, unsigned int c)
 {
 	unsigned int t[3], e;
 	t[0] = a; t[1] = b; t[2] = c;
@@ -684,7 +685,7 @@ static void sm_cap_tri(qaws_mesh_3d* m, sm_contour const* const* cs, unsigned in
 /* flat faces over the contours cs (their samples' rings) at their height:
    facing up when up, down otherwise; the triangulation uses the samples as
    its only vertices */
-static int sm_cap(qaws_mesh_3d* m, sm_contour const* const* cs, unsigned int n, int up)
+static int sm_cap(sm_mesh* m, sm_contour const* const* cs, unsigned int n, int up)
 {
 	qaws_curve** rings = (qaws_curve**)calloc(n + 1, sizeof(qaws_curve*));
 	qaws_curve const** views = (qaws_curve const**)malloc(sizeof(qaws_curve*) * (n + 1));
@@ -767,7 +768,7 @@ static int sm_cap(qaws_mesh_3d* m, sm_contour const* const* cs, unsigned int n, 
 qaws_status qaws_stack_mesh_3d(qaws_stack_mesh_desc const* desc, qaws_mesh_3d** out)
 {
 	qaws_stack_2d const* st;
-	qaws_mesh_3d* m;
+	sm_mesh* m;
 	sm_section* s = NULL;
 	unsigned int ns = 0, i, j, per;
 	double spacing, ext = 0;
@@ -776,9 +777,9 @@ qaws_status qaws_stack_mesh_3d(qaws_stack_mesh_desc const* desc, qaws_mesh_3d** 
 	if (!desc || !out || !desc->stack) return QAWS_STATUS_INVALID_ARGUMENT;
 	*out = NULL;
 	st = desc->stack;
-	m = (qaws_mesh_3d*)calloc(1, sizeof(qaws_mesh_3d));
+	if (st->level_count == 0) return hm_mesh_3d_create(NULL, 0, NULL, NULL, 0, out);
+	m = (sm_mesh*)calloc(1, sizeof(sm_mesh));
 	if (!m) return QAWS_STATUS_ALLOCATION_FAILURE;
-	if (st->level_count == 0) { *out = m; return QAWS_STATUS_OK; }
 	/* the heights: every level, and the sections between */
 	per = desc->sections + 1;
 	s = (sm_section*)calloc((st->level_count - 1) * per + 1, sizeof(sm_section));
@@ -868,35 +869,11 @@ qaws_status qaws_stack_mesh_3d(qaws_stack_mesh_desc const* desc, qaws_mesh_3d** 
 		free(s[i].c);
 	}
 	free(s);
-	if (status != QAWS_STATUS_OK) { qaws_mesh_3d_destroy(m); return status; }
-	*out = m;
-	return QAWS_STATUS_OK;
-}
-
-void qaws_mesh_3d_destroy(qaws_mesh_3d* m)
-{
-	if (!m) return;
+	/* the triangles as a mesh (the corner store; a non-manifold cap split there) */
+	if (status == QAWS_STATUS_OK)
+		status = hm_mesh_3d_create(m->v, m->nv, m->t, NULL, m->nt, out);
 	free(m->v);
 	free(m->t);
 	free(m);
-}
-
-unsigned int qaws_mesh_3d_get_vertex_count(qaws_mesh_3d const* m) { return m ? m->nv : 0; }
-
-qaws_vec3 qaws_mesh_3d_get_vertex(qaws_mesh_3d const* m, unsigned int i)
-{
-	qaws_vec3 r;
-	r.x = (qaws_scalar)m->v[3 * i];
-	r.y = (qaws_scalar)m->v[3 * i + 1];
-	r.z = (qaws_scalar)m->v[3 * i + 2];
-	return r;
-}
-
-unsigned int qaws_mesh_3d_get_triangle_count(qaws_mesh_3d const* m) { return m ? m->nt : 0; }
-
-void qaws_mesh_3d_get_triangle(qaws_mesh_3d const* m, unsigned int t, unsigned int out[3])
-{
-	out[0] = m->t[3 * t];
-	out[1] = m->t[3 * t + 1];
-	out[2] = m->t[3 * t + 2];
+	return status;
 }

@@ -6,6 +6,7 @@
 #include "qaws_path.h"
 #include "qaws_clip.h"
 #include "qaws_batch_executor.h"
+#include "qaws_mesh.h"
 
 /*
  * 2.5D shapes as stacks of parallel contours.
@@ -100,9 +101,9 @@ qaws_clip_result const* qaws_stack_result_get_level(qaws_stack_result const* res
  * height. With caps, the first and last sections are closed by flat faces
  * triangulated on the same samples: the mesh is then closed except where a
  * split or merge leaves a cap through the surface. Triangles turn
- * counter-clockwise seen from outside.
+ * counter-clockwise seen from outside. The result is a qaws_mesh_3d
+ * (qaws_mesh.h): editable, with attributes, features and footpoints.
  */
-typedef struct qaws_mesh_3d qaws_mesh_3d;
 
 typedef struct qaws_stack_mesh_desc
 {
@@ -114,10 +115,5 @@ typedef struct qaws_stack_mesh_desc
 } qaws_stack_mesh_desc;
 
 qaws_status qaws_stack_mesh_3d(qaws_stack_mesh_desc const* desc, qaws_mesh_3d** out_mesh);
-void qaws_mesh_3d_destroy(qaws_mesh_3d* mesh);
-unsigned int qaws_mesh_3d_get_vertex_count(qaws_mesh_3d const* mesh);
-qaws_vec3 qaws_mesh_3d_get_vertex(qaws_mesh_3d const* mesh, unsigned int vertex);
-unsigned int qaws_mesh_3d_get_triangle_count(qaws_mesh_3d const* mesh);
-void qaws_mesh_3d_get_triangle(qaws_mesh_3d const* mesh, unsigned int triangle, unsigned int out_vertices[3]);
 
 #endif /* QAWS_STACK_H */

@@ -27,7 +27,9 @@ typedef enum qaws_status
 	QAWS_STATUS_CERTIFICATION_FAILED,
 	/* a result defined at convergence asked for before it (repulsive
 	   solution derivatives) */
-	QAWS_STATUS_NOT_CONVERGED
+	QAWS_STATUS_NOT_CONVERGED,
+	/* a mesh edit refused by its validity checks (the mesh is unchanged) */
+	QAWS_STATUS_INVALID_TOPOLOGY
 } qaws_status;
 
 char const* qaws_status_to_string(qaws_status status);

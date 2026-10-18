@@ -23,6 +23,13 @@ and an order of work; the questions it raised are kept in section 13.
 6. **Hexahedra include frame fields** (after the grid method).
 7. **Branch `meshing`** (from `repulsive`), pushed as work lands, results
    shown as images along the way.
+8. **Storage: a corner store**, as geogram's facet corners (and Atelier's
+   structure): faces are runs of corners, each corner holding its vertex
+   and the opposite corner across its edge (the corner table). A corner is
+   a half-edge, so navigation is a half-edge view of the faces, and faces'
+   adjacency, the dual graph, is stored (`qaws_mesh_3d_get_face_adjacency`,
+   `qaws_mesh_3d_create_dual`). Volumes follow the same pattern (cell
+   corners, cell facets' adjacency).
 
 ## 0. Scope
 

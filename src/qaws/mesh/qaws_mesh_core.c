@@ -1,0 +1,1410 @@
+/*
+ * The corner store: building from faces (input that is not a manifold split
+ * into one), navigation, local operations (a patch of faces replaced by new
+ * ones and re-stitched to its surroundings) and compaction.
+ */
+
+#include "qaws_mesh_core.h"
+#include <stdlib.h>
+#include <string.h>
+#include <math.h>
+
+static int hm_re(void** p, size_t bytes)
+{
+	void* q = realloc(*p, bytes ? bytes : 1);
+	if (!q)
+		return 0;
+	*p = q;
+	return 1;
+}
+
+int hm_reserve(qaws_hm* m, unsigned int dv, unsigned int dc, unsigned int df)
+{
+	unsigned int i, c;
+	if (m->nv + dv > m->capv)
+	{
+		for (c = m->capv ? m->capv : 16; c < m->nv + dv; c *= 2) {}
+		if (!hm_re((void**)&m->x, sizeof(double) * m->dim * c) || !hm_re((void**)&m->vc, sizeof(unsigned int) * c)
+			|| !hm_re((void**)&m->vsrc, sizeof(unsigned int) * c) || !hm_re((void**)&m->vflag, c)
+			|| !hm_re((void**)&m->hole[0], sizeof(unsigned int) * c)
+			|| (m->foot && !hm_re((void**)&m->foot, sizeof(qaws_mesh_location) * c)))
+			return 0;
+		for (i = 0; i < m->na; i++)
+			if (m->attr[i].element == QAWS_MESH_VERTEX && !hm_re((void**)&m->attr[i].v, sizeof(double) * m->attr[i].n * c))
+				return 0;
+		m->capv = c;
+	}
+	if (m->nc + dc > m->capc)
+	{
+		for (c = m->capc ? m->capc : 64; c < m->nc + dc; c *= 2) {}
+		if (!hm_re((void**)&m->cv, sizeof(unsigned int) * c) || !hm_re((void**)&m->co, sizeof(unsigned int) * c)
+			|| !hm_re((void**)&m->cf, sizeof(unsigned int) * c) || !hm_re((void**)&m->cflag, c))
+			return 0;
+		for (i = 0; i < m->na; i++)
+			if (m->attr[i].element == QAWS_MESH_CORNER && !hm_re((void**)&m->attr[i].v, sizeof(double) * m->attr[i].n * c))
+				return 0;
+		m->capc = c;
+	}
+	if (m->nf + df > m->capf)
+	{
+		for (c = m->capf ? m->capf : 16; c < m->nf + df; c *= 2) {}
+		if (!hm_re((void**)&m->fc, sizeof(unsigned int) * c) || !hm_re((void**)&m->fn, sizeof(unsigned int) * c)
+			|| !hm_re((void**)&m->fflag, c) || !hm_re((void**)&m->hole[1], sizeof(unsigned int) * c))
+			return 0;
+		for (i = 0; i < m->na; i++)
+			if (m->attr[i].element == QAWS_MESH_FACE && !hm_re((void**)&m->attr[i].v, sizeof(double) * m->attr[i].n * c))
+				return 0;
+		m->capf = c;
+	}
+	return 1;
+}
+
+void hm_free(qaws_hm* m)
+{
+	unsigned int i;
+	hm_patch* p;
+	if (!m)
+		return;
+	p = &m->pb;
+	free(m->x); free(m->vc); free(m->vsrc); free(m->vflag);
+	free(m->cv); free(m->co); free(m->cf); free(m->cflag);
+	free(m->fc); free(m->fn); free(m->fflag);
+	for (i = 0; i < m->na; i++)
+		free(m->attr[i].v);
+	free(m->attr);
+	free(m->foot);
+	free(m->hole[0]); free(m->hole[1]);
+	free(p->old); free(p->off); free(p->fs); free(p->fa); free(p->fv); free(p->s0); free(p->sn); free(p->hint);
+	free(p->sp); free(p->sw);
+	memset(m, 0, sizeof *m);
+}
+
+double* hm_attr_at(qaws_hm const* m, unsigned int a, unsigned int i)
+{
+	return m->attr[a].v + (size_t)m->attr[a].n * i;
+}
+
+unsigned int hm_new_vertex(qaws_hm* m, double const* x)
+{
+	unsigned int v = m->nv++, k;
+	for (k = 0; k < m->dim; k++)
+		m->x[(size_t)m->dim * v + k] = x[k];
+	m->vc[v] = HM_NONE;
+	m->vsrc[v] = HM_NONE;
+	m->vflag[v] = 0;
+	if (m->foot)
+	{
+		m->foot[v].patch = HM_NONE;
+		m->foot[v].a = m->foot[v].b = 0;
+	}
+	for (k = 0; k < m->na; k++)
+		if (m->attr[k].element == QAWS_MESH_VERTEX)
+			memset(hm_attr_at(m, k, v), 0, sizeof(double) * m->attr[k].n);
+	return v;
+}
+
+void hm_kill_vertex(qaws_hm* m, unsigned int v)
+{
+	m->vflag[v] |= HM_DELETED;
+	m->vc[v] = HM_NONE;
+	m->hole[0][m->nhole[0]++] = v;
+}
+
+void hm_lerp(double* dst, double const* a, double const* b, double t, unsigned int n, unsigned int rule)
+{
+	double tmp[16], l = 0;
+	unsigned int k;
+	if (rule == QAWS_ATTRIBUTE_NEAREST)
+	{
+		memmove(dst, t < 0.5 ? a : b, sizeof(double) * n);
+		return;
+	}
+	for (k = 0; k < n; k++)
+	{
+		tmp[k] = (1 - t) * a[k] + t * b[k];
+		l += tmp[k] * tmp[k];
+	}
+	if (rule == QAWS_ATTRIBUTE_NORMALIZED && l > 0)
+		for (l = 1 / sqrt(l), k = 0; k < n; k++)
+			tmp[k] *= l;
+	memcpy(dst, tmp, sizeof(double) * n);
+}
+
+/* the weighted mean of s values (vals + stride * pos[i]) by rule; NEAREST: the heaviest */
+static void hm_blend(double* out, double const* vals, unsigned int stride, unsigned int const* pos, double const* w,
+	unsigned int s, unsigned int n, unsigned int rule)
+{
+	unsigned int i, j;
+	double best = -1, l = 0;
+	memset(out, 0, sizeof(double) * n);
+	for (i = 0; i < s; i++)
+	{
+		double const* v = vals + (size_t)stride * pos[i];
+		if (rule == QAWS_ATTRIBUTE_NEAREST)
+		{
+			if (w[i] > best)
+			{
+				best = w[i];
+				memcpy(out, v, sizeof(double) * n);
+			}
+			continue;
+		}
+		for (j = 0; j < n; j++)
+			out[j] += w[i] * v[j];
+	}
+	if (rule != QAWS_ATTRIBUTE_NORMALIZED)
+		return;
+	for (j = 0; j < n; j++)
+		l += out[j] * out[j];
+	if (l > 0)
+		for (l = 1 / sqrt(l), j = 0; j < n; j++)
+			out[j] *= l;
+}
+
+/* ======================================================================== */
+/*  Navigation                                                              */
+/* ======================================================================== */
+
+unsigned int hm_next(qaws_hm const* m, unsigned int c)
+{
+	unsigned int f = m->cf[c];
+	return c + 1 < m->fc[f] + m->fn[f] ? c + 1 : m->fc[f];
+}
+
+unsigned int hm_prev(qaws_hm const* m, unsigned int c)
+{
+	unsigned int f = m->cf[c];
+	return c > m->fc[f] ? c - 1 : m->fc[f] + m->fn[f] - 1;
+}
+
+unsigned int hm_to(qaws_hm const* m, unsigned int c)
+{
+	return m->cv[hm_next(m, c)];
+}
+
+unsigned int hm_ccw(qaws_hm const* m, unsigned int c)
+{
+	return m->co[hm_prev(m, c)];
+}
+
+unsigned int hm_cw(qaws_hm const* m, unsigned int c)
+{
+	unsigned int o = m->co[c];
+	return o == HM_NONE ? HM_NONE : hm_next(m, o);
+}
+
+/* the corner after c round vertex v counter-clockwise, HM_NONE past the last */
+unsigned int hm_round(qaws_hm const* m, unsigned int v, unsigned int c)
+{
+	unsigned int n = hm_ccw(m, c);
+	return n == m->vc[v] ? HM_NONE : n;
+}
+
+unsigned int hm_find(qaws_hm const* m, unsigned int a, unsigned int b)
+{
+	unsigned int c;
+	for (c = m->vc[a]; c != HM_NONE; c = hm_round(m, a, c))
+		if (hm_to(m, c) == b)
+			return c;
+	return HM_NONE;
+}
+
+unsigned int hm_find_edge(qaws_hm const* m, unsigned int a, unsigned int b)
+{
+	unsigned int c = hm_find(m, a, b);
+	return c != HM_NONE ? c : hm_find(m, b, a);
+}
+
+int hm_is_border_vertex(qaws_hm const* m, unsigned int v)
+{
+	return m->vc[v] != HM_NONE && m->co[m->vc[v]] == HM_NONE;
+}
+
+unsigned int hm_valence(qaws_hm const* m, unsigned int v)
+{
+	unsigned int c, n = 0;
+	for (c = m->vc[v]; c != HM_NONE; c = hm_round(m, v, c))
+		n++;
+	return n + (unsigned int)hm_is_border_vertex(m, v);
+}
+
+unsigned int hm_ring(qaws_hm const* m, unsigned int v, unsigned int* out, unsigned int cap)
+{
+	unsigned int c, last = HM_NONE, n = 0;
+	for (c = m->vc[v]; c != HM_NONE; c = hm_round(m, v, c))
+	{
+		if (n < cap)
+			out[n] = hm_to(m, c);
+		n++;
+		last = c;
+	}
+	if (last != HM_NONE && hm_is_border_vertex(m, v))
+	{
+		/* the neighbour across the border edge into v */
+		if (n < cap)
+			out[n] = m->cv[hm_prev(m, last)];
+		n++;
+	}
+	return n;
+}
+
+void hm_fix_vertex(qaws_hm* m, unsigned int v, unsigned int c)
+{
+	unsigned int k = c, n = c;
+	if (c == HM_NONE)
+	{
+		m->vc[v] = HM_NONE;
+		return;
+	}
+	for (;;)
+	{
+		n = hm_cw(m, k);
+		if (n == HM_NONE || n == c)
+			break;
+		k = n;
+	}
+	m->vc[v] = n == HM_NONE ? k : c;
+}
+
+double hm_length(qaws_hm const* m, unsigned int c)
+{
+	double const *a = m->x + (size_t)m->dim * m->cv[c], *b = m->x + (size_t)m->dim * hm_to(m, c);
+	double s = 0;
+	unsigned int k;
+	for (k = 0; k < m->dim; k++)
+		s += (b[k] - a[k]) * (b[k] - a[k]);
+	return sqrt(s);
+}
+
+void hm_face_normal(qaws_hm const* m, unsigned int f, double* out)
+{
+	unsigned int c, e = m->fc[f] + m->fn[f];
+	out[0] = out[1] = out[2] = 0;
+	for (c = m->fc[f]; c < e; c++)
+	{
+		double const *p = m->x + 3 * (size_t)m->cv[c], *q = m->x + 3 * (size_t)m->cv[c + 1 < e ? c + 1 : m->fc[f]];
+		out[0] += (p[1] - q[1]) * (p[2] + q[2]);
+		out[1] += (p[2] - q[2]) * (p[0] + q[0]);
+		out[2] += (p[0] - q[0]) * (p[1] + q[1]);
+	}
+	out[0] *= 0.5; out[1] *= 0.5; out[2] *= 0.5;
+}
+
+unsigned int hm_edge_count(qaws_hm const* m)
+{
+	unsigned int c, n = 0;
+	for (c = 0; c < m->nc; c++)
+		if (m->cf[c] != HM_NONE && (m->co[c] == HM_NONE || c < m->co[c]))
+			n++;
+	return n;
+}
+
+/* ======================================================================== */
+/*  Building                                                                */
+/* ======================================================================== */
+
+static unsigned int hm_hkey(unsigned int a, unsigned int b)
+{
+	return a * 2654435761u ^ (b * 40503u + (b >> 7));
+}
+
+/* the corner of half-edge a -> b in the table, with the free slot where it would go */
+static unsigned int hm_lookup(qaws_hm const* m, unsigned int const* slot, unsigned int mask, unsigned int a, unsigned int b,
+	unsigned int* out_pos)
+{
+	unsigned int i = hm_hkey(a, b) & mask;
+	while (slot[i] != HM_NONE)
+	{
+		unsigned int c = slot[i];
+		if (m->cv[c] == a && hm_to(m, c) == b)
+			return c;
+		i = (i + 1) & mask;
+	}
+	if (out_pos)
+		*out_pos = i;
+	return HM_NONE;
+}
+
+qaws_status hm_build(qaws_hm* m, unsigned int dim, double const* x, unsigned int nv, unsigned int const* fv,
+	unsigned int const* fs, unsigned int nf)
+{
+	size_t total = 0;
+	unsigned int f, i, j, off, mask, v, n, c, smax = 3;
+	unsigned int *stamp = NULL, *slot = NULL, *vn = NULL, *vl = NULL, *rep = NULL;
+	unsigned char* seen = NULL;
+	qaws_status st = QAWS_STATUS_OK;
+	memset(m, 0, sizeof *m);
+	m->dim = dim;
+	for (f = 0; f < nf; f++)
+	{
+		unsigned int s = fs ? fs[f] : 3;
+		if (s < 3)
+			return QAWS_STATUS_INVALID_ARGUMENT;
+		if (s > smax)
+			smax = s;
+		total += s;
+	}
+	if (total > 0x3FFFFFFFu)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	stamp = (unsigned int*)calloc(nv ? nv : 1, sizeof(unsigned int));
+	if (!stamp)
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	for (f = 0, off = 0; f < nf; f++)
+	{
+		unsigned int s = fs ? fs[f] : 3;
+		for (i = 0; i < s; i++)
+		{
+			v = fv[off + i];
+			if (v >= nv || stamp[v] == f + 1)
+			{
+				free(stamp);
+				return QAWS_STATUS_INVALID_ARGUMENT;
+			}
+			stamp[v] = f + 1;
+		}
+		off += s;
+	}
+	free(stamp);
+	for (mask = 1; mask < 2 * total; mask <<= 1) {}
+	slot = (unsigned int*)malloc(sizeof(unsigned int) * mask);
+	rep = (unsigned int*)malloc(sizeof(unsigned int) * smax);
+	if (!slot || !rep || !hm_reserve(m, nv, (unsigned int)total, nf))
+		goto oom;
+	memset(slot, 0xFF, sizeof(unsigned int) * mask);
+	mask -= 1;
+	for (i = 0; i < nv; i++)
+	{
+		hm_new_vertex(m, x + (size_t)dim * i);
+		m->vsrc[i] = i;
+	}
+	for (f = 0, off = 0; f < nf; f++)
+	{
+		unsigned int s = fs ? fs[f] : 3, first = m->nc;
+		m->fc[f] = first;
+		m->fn[f] = s;
+		m->fflag[f] = 0;
+		for (i = 0; i < s; i++)
+		{
+			m->cv[first + i] = fv[off + i];
+			m->co[first + i] = HM_NONE;
+			m->cf[first + i] = f;
+			m->cflag[first + i] = 0;
+		}
+		off += s;
+		m->nc += s;
+		m->nf++;
+		/* an edge used the same way already, or by two faces already: this
+		   face gets its own copies of the edge's ends */
+		for (i = 0; i < s; i++)
+		{
+			unsigned int a = m->cv[first + i], b = m->cv[first + (i + 1) % s], o = hm_lookup(m, slot, mask, b, a, NULL);
+			if (hm_lookup(m, slot, mask, a, b, NULL) != HM_NONE || (o != HM_NONE && m->co[o] != HM_NONE))
+				m->cflag[first + i] |= HM_MARK;
+		}
+		for (i = 0; i < s; i++)
+		{
+			unsigned int src = m->cv[first + i];
+			rep[i] = src;
+			if ((m->cflag[first + i] | m->cflag[first + (i + s - 1) % s]) & HM_MARK)
+			{
+				if (!hm_reserve(m, 1, 0, 0))
+					goto oom;
+				rep[i] = hm_new_vertex(m, m->x + (size_t)dim * src);
+				m->vsrc[rep[i]] = m->vsrc[src];
+			}
+		}
+		for (i = 0; i < s; i++)
+		{
+			m->cv[first + i] = rep[i];
+			m->cflag[first + i] = 0;
+		}
+		for (i = 0; i < s; i++)
+		{
+			unsigned int a = m->cv[first + i], b = m->cv[first + (i + 1) % s], pos = 0, o;
+			if (hm_lookup(m, slot, mask, a, b, &pos) != HM_NONE)
+				continue;   /* (not after the copies) */
+			slot[pos] = first + i;
+			o = hm_lookup(m, slot, mask, b, a, NULL);
+			if (o != HM_NONE && m->co[o] == HM_NONE)
+			{
+				m->co[first + i] = o;
+				m->co[o] = first + i;
+			}
+		}
+	}
+	/* each vertex's fans: a vertex on several gets a copy per fan past the first */
+	n = m->nv;
+	vn = (unsigned int*)calloc((size_t)n + 1, sizeof(unsigned int));
+	vl = (unsigned int*)malloc(sizeof(unsigned int) * (m->nc + 1));
+	seen = (unsigned char*)calloc((size_t)m->nc + 1, 1);
+	if (!vn || !vl || !seen)
+		goto oom;
+	for (c = 0; c < m->nc; c++)
+		vn[m->cv[c] + 1]++;
+	for (v = 0; v < n; v++)
+		vn[v + 1] += vn[v];
+	for (c = 0; c < m->nc; c++)
+		vl[vn[m->cv[c]]++] = c;
+	for (v = n; v > 0; v--)
+		vn[v] = vn[v - 1];
+	vn[0] = 0;
+	for (v = 0; v < n; v++)
+	{
+		unsigned int fans = 0;
+		for (j = vn[v]; j < vn[v + 1]; j++)
+		{
+			unsigned int k0 = vl[j], k, nk = HM_NONE, start, w = v;
+			if (seen[k0])
+				continue;
+			if (fans++)
+			{
+				if (!hm_reserve(m, 1, 0, 0))
+					goto oom;
+				w = hm_new_vertex(m, m->x + (size_t)dim * v);
+				m->vsrc[w] = m->vsrc[v];
+			}
+			/* the fan from its clockwise end, counter-clockwise (navigation
+			   does not read the corners' vertices: renaming on the way is safe) */
+			for (k = k0;;)
+			{
+				nk = hm_cw(m, k);
+				if (nk == HM_NONE || nk == k0)
+					break;
+				k = nk;
+			}
+			start = nk == HM_NONE ? k : k0;
+			for (k = start;;)
+			{
+				seen[k] = 1;
+				m->cv[k] = w;
+				nk = hm_ccw(m, k);
+				if (nk == HM_NONE || nk == start)
+					break;
+				k = nk;
+			}
+			m->vc[w] = start;
+		}
+	}
+	goto done;
+oom:
+	st = QAWS_STATUS_ALLOCATION_FAILURE;
+done:
+	free(slot); free(rep); free(vn); free(vl); free(seen);
+	if (st != QAWS_STATUS_OK)
+		hm_free(m);
+	return st;
+}
+
+qaws_status hm_copy(qaws_hm* d, qaws_hm const* s)
+{
+	unsigned int i;
+	memset(d, 0, sizeof *d);
+	d->dim = s->dim;
+	if (s->foot && !hm_foot_enable(d))
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	for (i = 0; i < s->na; i++)
+		if (hm_attr_add(d, s->attr[i].name, s->attr[i].element, s->attr[i].rule, s->attr[i].n) == HM_NONE)
+		{
+			hm_free(d);
+			return QAWS_STATUS_ALLOCATION_FAILURE;
+		}
+	if (!hm_reserve(d, s->nv, s->nc, s->nf))
+	{
+		hm_free(d);
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	}
+	d->nv = s->nv; d->nc = s->nc; d->nf = s->nf; d->cfree = s->cfree;
+	memcpy(d->x, s->x, sizeof(double) * s->dim * s->nv);
+	memcpy(d->vc, s->vc, sizeof(unsigned int) * s->nv);
+	memcpy(d->vsrc, s->vsrc, sizeof(unsigned int) * s->nv);
+	memcpy(d->vflag, s->vflag, s->nv);
+	if (s->foot)
+		memcpy(d->foot, s->foot, sizeof(qaws_mesh_location) * s->nv);
+	memcpy(d->cv, s->cv, sizeof(unsigned int) * s->nc);
+	memcpy(d->co, s->co, sizeof(unsigned int) * s->nc);
+	memcpy(d->cf, s->cf, sizeof(unsigned int) * s->nc);
+	memcpy(d->cflag, s->cflag, s->nc);
+	memcpy(d->fc, s->fc, sizeof(unsigned int) * s->nf);
+	memcpy(d->fn, s->fn, sizeof(unsigned int) * s->nf);
+	memcpy(d->fflag, s->fflag, s->nf);
+	for (i = 0; i < s->na; i++)
+	{
+		unsigned int count = s->attr[i].element == QAWS_MESH_VERTEX ? s->nv : s->attr[i].element == QAWS_MESH_CORNER ? s->nc : s->nf;
+		memcpy(d->attr[i].v, s->attr[i].v, sizeof(double) * s->attr[i].n * count);
+	}
+	for (i = 0; i < 2; i++)
+	{
+		d->nhole[i] = s->nhole[i];
+		if (s->nhole[i])
+			memcpy(d->hole[i], s->hole[i], sizeof(unsigned int) * s->nhole[i]);
+	}
+	return QAWS_STATUS_OK;
+}
+
+/* ======================================================================== */
+/*  Checking                                                                */
+/* ======================================================================== */
+
+qaws_status hm_check(qaws_hm const* m)
+{
+	unsigned int c, v, f, nfree = 0, *deg;
+	qaws_status st = QAWS_STATUS_INTERNAL_ERROR;
+	deg = (unsigned int*)calloc((size_t)m->nv + 1, sizeof(unsigned int));
+	if (!deg)
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	for (f = 0; f < m->nf; f++)
+	{
+		if (m->fflag[f] & HM_DELETED)
+			continue;
+		if (m->fn[f] < 3 || m->fc[f] + m->fn[f] > m->nc)
+			goto done;
+		for (c = m->fc[f]; c < m->fc[f] + m->fn[f]; c++)
+			if (m->cf[c] != f)
+				goto done;
+	}
+	for (c = 0; c < m->nc; c++)
+	{
+		unsigned int o = m->co[c], fa = m->cf[c];
+		if (fa == HM_NONE)
+		{
+			nfree++;
+			continue;
+		}
+		if (fa >= m->nf || (m->fflag[fa] & HM_DELETED) || c < m->fc[fa] || c >= m->fc[fa] + m->fn[fa])
+			goto done;
+		if (m->cv[c] >= m->nv || (m->vflag[m->cv[c]] & HM_DELETED) || m->cv[c] == hm_to(m, c))
+			goto done;
+		if (o != HM_NONE)
+		{
+			if (o >= m->nc || m->cf[o] == HM_NONE || m->co[o] != c || m->cv[o] != hm_to(m, c) || hm_to(m, o) != m->cv[c])
+				goto done;
+			if ((m->cflag[o] ^ m->cflag[c]) & HM_FEATURE)
+				goto done;
+		}
+		deg[m->cv[c]]++;
+	}
+	if (nfree != m->cfree)
+		goto done;
+	for (v = 0; v < m->nv; v++)
+	{
+		unsigned int n = 0, k, nk;
+		if (m->vflag[v] & HM_DELETED)
+			continue;
+		c = m->vc[v];
+		if (c == HM_NONE)
+		{
+			if (deg[v])
+				goto done;
+			continue;
+		}
+		if (c >= m->nc || m->cf[c] == HM_NONE || m->cv[c] != v)
+			goto done;
+		/* round the vertex: a border start ends at the border, an interior one closes */
+		for (k = c;;)
+		{
+			if (m->cv[k] != v || ++n > deg[v])
+				goto done;
+			nk = hm_ccw(m, k);
+			if (nk == HM_NONE)
+			{
+				if (m->co[c] != HM_NONE)
+					goto done;
+				break;
+			}
+			if (nk == c)
+				break;
+			k = nk;
+		}
+		if (n != deg[v])
+			goto done;
+	}
+	st = QAWS_STATUS_OK;
+done:
+	free(deg);
+	return st;
+}
+
+/* ======================================================================== */
+/*  Patches: the operations                                                 */
+/* ======================================================================== */
+
+static int hm_grow(void** p, unsigned int* cap, unsigned int need, size_t size)
+{
+	unsigned int c;
+	if (need <= *cap)
+		return 1;
+	for (c = *cap ? *cap : 16; c < need; c *= 2) {}
+	if (!hm_re(p, (size_t)c * size))
+		return 0;
+	*cap = c;
+	return 1;
+}
+
+static void pb_reset(qaws_hm* m)
+{
+	hm_patch* p = &m->pb;
+	p->nold = p->nnew = p->ncv = p->nsrc = p->total = 0;
+	p->failed = 0;
+}
+
+/* face f into the patch; its index there */
+static unsigned int pb_old(qaws_hm* m, unsigned int f)
+{
+	hm_patch* p = &m->pb;
+	unsigned int c = p->cold;
+	if (p->failed || !hm_grow((void**)&p->old, &c, p->nold + 1, sizeof(unsigned int))
+		|| !hm_grow((void**)&p->off, &p->cold, p->nold + 1, sizeof(unsigned int)))
+	{
+		p->failed = 1;
+		return 0;
+	}
+	p->old[p->nold] = f;
+	p->off[p->nold] = p->total;
+	p->total += m->fn[f];
+	return p->nold++;
+}
+
+/* a new face taking old face k's face attributes (HM_NONE: zeros) */
+static void pb_face(qaws_hm* m, unsigned int k)
+{
+	hm_patch* p = &m->pb;
+	unsigned int c = p->cnew;
+	if (p->failed || !hm_grow((void**)&p->fs, &c, p->nnew + 1, sizeof(unsigned int))
+		|| !hm_grow((void**)&p->fa, &p->cnew, p->nnew + 1, sizeof(unsigned int)))
+	{
+		p->failed = 1;
+		return;
+	}
+	p->fs[p->nnew] = 0;
+	p->fa[p->nnew] = k;
+	p->nnew++;
+}
+
+/* a corner of the last new face at v, its edge's flags or'ed with hint */
+static void pb_corner(qaws_hm* m, unsigned int v, unsigned char hint)
+{
+	hm_patch* p = &m->pb;
+	unsigned int c1 = p->ccv, c2 = p->ccv, c3 = p->ccv;
+	if (p->failed || !p->nnew || !hm_grow((void**)&p->fv, &c1, p->ncv + 1, sizeof(unsigned int))
+		|| !hm_grow((void**)&p->s0, &c2, p->ncv + 1, sizeof(unsigned int)) || !hm_grow((void**)&p->sn, &c3, p->ncv + 1, sizeof(unsigned int))
+		|| !hm_grow((void**)&p->hint, &p->ccv, p->ncv + 1, 1))
+	{
+		p->failed = 1;
+		return;
+	}
+	p->fv[p->ncv] = v;
+	p->s0[p->ncv] = p->nsrc;
+	p->sn[p->ncv] = 0;
+	p->hint[p->ncv] = hint;
+	p->ncv++;
+	p->fs[p->nnew - 1]++;
+}
+
+/* an attribute source of the last corner: an old corner's position, weighted */
+static void pb_src(qaws_hm* m, unsigned int pos, double w)
+{
+	hm_patch* p = &m->pb;
+	unsigned int c = p->csrc;
+	if (p->failed || pos == HM_NONE || !hm_grow((void**)&p->sp, &c, p->nsrc + 1, sizeof(unsigned int))
+		|| !hm_grow((void**)&p->sw, &p->csrc, p->nsrc + 1, sizeof(double)))
+	{
+		p->failed = 1;
+		return;
+	}
+	p->sp[p->nsrc] = pos;
+	p->sw[p->nsrc] = w;
+	p->nsrc++;
+	p->sn[p->ncv - 1]++;
+}
+
+/* the patch position of old face k's corner c */
+static unsigned int pb_cpos(qaws_hm const* m, unsigned int k, unsigned int c)
+{
+	return m->pb.off[k] + (c - m->fc[m->pb.old[k]]);
+}
+
+/* the patch position of old face k's corner at vertex v */
+static unsigned int pb_pos(qaws_hm const* m, unsigned int k, unsigned int v)
+{
+	unsigned int f = m->pb.old[k], j;
+	for (j = 0; j < m->fn[f]; j++)
+		if (m->cv[m->fc[f] + j] == v)
+			return m->pb.off[k] + j;
+	return HM_NONE;
+}
+
+/* a new corner at v copying old face k's corner there */
+static void pb_copy(qaws_hm* m, unsigned int v, unsigned int k, unsigned char hint)
+{
+	pb_corner(m, v, hint);
+	pb_src(m, pb_pos(m, k, v), 1);
+}
+
+/* a live corner at v among the patch's new corners and outside neighbours */
+static unsigned int hm_any_corner(qaws_hm const* m, unsigned int v, unsigned int const* nc, unsigned int nnc,
+	unsigned int const* otw, unsigned int nt)
+{
+	unsigned int i, o;
+	if (m->vc[v] != HM_NONE && m->cf[m->vc[v]] != HM_NONE)
+		return m->vc[v];
+	for (i = 0; i < nnc; i++)
+		if (m->cv[nc[i]] == v)
+			return nc[i];
+	for (i = 0; i < nt; i++)
+		if ((o = otw[i]) != HM_NONE)
+		{
+			if (m->cv[o] == v)
+				return o;
+			if (m->cv[hm_next(m, o)] == v)
+				return hm_next(m, o);
+		}
+	return HM_NONE;
+}
+
+/* The old faces replaced by the new ones, old vertex `from` read as `to` (a
+   collapse): new corners stitched to each other and to the old faces'
+   outside neighbours by their edges (an outside neighbour left alone is on
+   the border now), feature flags kept by edge, corner attributes blended
+   from their sources, the touched vertices' corners fixed. */
+static int hm_replace(qaws_hm* m, unsigned int from, unsigned int to)
+{
+	hm_patch* p = &m->pb;
+	unsigned int nt = p->total, ext = p->nnew > p->nold ? p->nnew - p->nold : 0, i, j, k, c, t;
+	unsigned int ca = 0, fa = 0, *oc, *ou, *ow, *otw, *oflag, *nc, *buf;
+	double *cvals = NULL, *fvals = NULL;
+	if (p->failed)
+		return 0;
+	for (k = 0; k < m->na; k++)
+	{
+		if (m->attr[k].element == QAWS_MESH_CORNER)
+			ca += m->attr[k].n;
+		if (m->attr[k].element == QAWS_MESH_FACE)
+			fa += m->attr[k].n;
+	}
+	if (!hm_reserve(m, 0, p->ncv, ext))
+		return 0;
+	buf = (unsigned int*)malloc(sizeof(unsigned int) * (5 * (size_t)nt + p->ncv + 1));
+	if (ca)
+		cvals = (double*)malloc(sizeof(double) * ca * (nt ? nt : 1));
+	if (fa)
+		fvals = (double*)malloc(sizeof(double) * fa * (p->nold ? p->nold : 1));
+	if (!buf || (ca && !cvals) || (fa && !fvals))
+	{
+		free(buf); free(cvals); free(fvals);
+		return 0;
+	}
+	oc = buf; ou = oc + nt; ow = ou + nt; otw = ow + nt; oflag = otw + nt; nc = oflag + nt;
+	for (i = 0; i < p->nold; i++)
+		m->fflag[p->old[i]] |= HM_MARK;
+	/* the old corners: edges (read with the renaming), outside neighbours, flags, attributes */
+	for (i = 0; i < p->nold; i++)
+	{
+		unsigned int f = p->old[i];
+		for (j = 0; j < m->fn[f]; j++)
+		{
+			unsigned int pos = p->off[i] + j, o, a = 0;
+			c = m->fc[f] + j;
+			o = m->co[c];
+			oc[pos] = c;
+			ou[pos] = m->cv[c] == from ? to : m->cv[c];
+			ow[pos] = hm_to(m, c) == from ? to : hm_to(m, c);
+			otw[pos] = o != HM_NONE && !(m->fflag[m->cf[o]] & HM_MARK) ? o : HM_NONE;
+			oflag[pos] = m->cflag[c] & HM_FEATURE;
+			for (k = 0; k < m->na; k++)
+				if (m->attr[k].element == QAWS_MESH_CORNER)
+				{
+					memcpy(cvals + (size_t)ca * pos + a, hm_attr_at(m, k, c), sizeof(double) * m->attr[k].n);
+					a += m->attr[k].n;
+				}
+		}
+		for (k = 0, j = 0; k < m->na; k++)
+			if (m->attr[k].element == QAWS_MESH_FACE)
+			{
+				memcpy(fvals + (size_t)fa * i + j, hm_attr_at(m, k, f), sizeof(double) * m->attr[k].n);
+				j += m->attr[k].n;
+			}
+	}
+	for (i = 0; i < p->nold; i++)
+	{
+		unsigned int f = p->old[i];
+		m->fflag[f] &= (unsigned char)(0xFFu & ~HM_MARK);
+		for (c = m->fc[f]; c < m->fc[f] + m->fn[f]; c++)
+			m->cf[c] = HM_NONE;   /* (freed; its vertex stays readable) */
+		m->cfree += m->fn[f];
+	}
+	/* the new faces: the old faces' indices first, then appended */
+	for (i = 0, t = 0; i < p->nnew; i++)
+	{
+		unsigned int f = i < p->nold ? p->old[i] : m->nf++, a;
+		m->fc[f] = m->nc;
+		m->fn[f] = p->fs[i];
+		m->fflag[f] = 0;
+		for (j = 0; j < p->fs[i]; j++, t++)
+		{
+			c = m->nc++;
+			m->cv[c] = p->fv[t];
+			m->co[c] = HM_NONE;
+			m->cf[c] = f;
+			m->cflag[c] = p->hint[t];
+			nc[t] = c;
+		}
+		for (k = 0, a = 0; k < m->na; k++)
+			if (m->attr[k].element == QAWS_MESH_FACE)
+			{
+				if (p->fa[i] == HM_NONE)
+					memset(hm_attr_at(m, k, f), 0, sizeof(double) * m->attr[k].n);
+				else
+					memcpy(hm_attr_at(m, k, f), fvals + (size_t)fa * p->fa[i] + a, sizeof(double) * m->attr[k].n);
+				a += m->attr[k].n;
+			}
+	}
+	for (i = p->nnew; i < p->nold; i++)
+	{
+		m->fflag[p->old[i]] |= HM_DELETED;
+		m->hole[1][m->nhole[1]++] = p->old[i];
+	}
+	/* stitching by edges, flags by edge */
+	for (t = 0; t < p->ncv; t++)
+	{
+		unsigned int u, w, s, fl = 0;
+		c = nc[t];
+		u = m->cv[c];
+		w = hm_to(m, c);
+		for (j = 0; j < nt; j++)
+			if ((ou[j] == u && ow[j] == w) || (ou[j] == w && ow[j] == u))
+				fl |= oflag[j];
+		m->cflag[c] |= (unsigned char)fl;
+		if (m->co[c] != HM_NONE)
+			continue;
+		for (s = t + 1; s < p->ncv; s++)
+		{
+			unsigned int d = nc[s];
+			if (m->co[d] == HM_NONE && m->cv[d] == w && hm_to(m, d) == u)
+			{
+				m->co[c] = d;
+				m->co[d] = c;
+				break;
+			}
+		}
+		if (m->co[c] == HM_NONE)
+			for (j = 0; j < nt; j++)
+				if (otw[j] != HM_NONE && ou[j] == u && ow[j] == w)
+				{
+					m->co[c] = otw[j];
+					m->co[otw[j]] = c;
+					break;
+				}
+	}
+	for (j = 0; j < nt; j++)
+		if (otw[j] != HM_NONE && m->co[otw[j]] != HM_NONE && m->cf[m->co[otw[j]]] == HM_NONE)
+			m->co[otw[j]] = HM_NONE;   /* (its edge has nothing on the patch's side now) */
+	for (t = 0; t < p->ncv; t++)
+	{
+		unsigned int o = m->co[nc[t]];
+		unsigned char fl;
+		if (o == HM_NONE)
+			continue;
+		fl = (unsigned char)((m->cflag[nc[t]] | m->cflag[o]) & HM_FEATURE);
+		m->cflag[nc[t]] = (unsigned char)((m->cflag[nc[t]] & ~HM_FEATURE) | fl);
+		m->cflag[o] = (unsigned char)((m->cflag[o] & ~HM_FEATURE) | fl);
+	}
+	/* corner attributes from their sources */
+	for (t = 0; ca && t < p->ncv; t++)
+	{
+		unsigned int a = 0;
+		for (k = 0; k < m->na; k++)
+			if (m->attr[k].element == QAWS_MESH_CORNER)
+			{
+				hm_blend(hm_attr_at(m, k, nc[t]), cvals + a, ca, p->sp + p->s0[t], p->sw + p->s0[t], p->sn[t], m->attr[k].n, m->attr[k].rule);
+				a += m->attr[k].n;
+			}
+	}
+	/* every touched vertex's corner */
+	for (t = 0; t < p->ncv + 3 * nt; t++)
+	{
+		unsigned int v = HM_NONE;
+		if (t < p->ncv)
+			v = m->cv[nc[t]];
+		else
+		{
+			j = (t - p->ncv) / 3;
+			k = (t - p->ncv) % 3;
+			if (k == 0)
+				v = m->cv[oc[j]];
+			else if (otw[j] != HM_NONE)
+				v = k == 1 ? m->cv[otw[j]] : hm_to(m, otw[j]);
+		}
+		if (v == HM_NONE || (m->vflag[v] & HM_DELETED))
+			continue;
+		hm_fix_vertex(m, v, hm_any_corner(m, v, nc, p->ncv, otw, nt));
+	}
+	free(buf); free(cvals); free(fvals);
+	return 1;
+}
+
+unsigned int hm_split_edge(qaws_hm* m, unsigned int c, double t, double const* x, int triangulate)
+{
+	unsigned int d = m->co[c], f = m->cf[c], g = d == HM_NONE ? HM_NONE : m->cf[d], a = m->cv[c], b = hm_to(m, c);
+	unsigned int v = m->nv, kf, kg = 0, k, p = 0, q = 0;
+	unsigned char feat = (unsigned char)(m->cflag[c] & HM_FEATURE);
+	int ftri = triangulate && m->fn[f] == 3, gtri = triangulate && g != HM_NONE && m->fn[g] == 3;
+	if (!hm_reserve(m, 1, 0, 0))
+		return HM_NONE;
+	pb_reset(m);
+	kf = pb_old(m, f);
+	if (g != HM_NONE)
+		kg = pb_old(m, g);
+	/* the faces' first parts keep their indices, the second halves follow */
+	pb_face(m, kf);
+	if (ftri)
+	{
+		p = m->cv[hm_prev(m, c)];
+		pb_copy(m, a, kf, feat);
+		pb_corner(m, v, 0); pb_src(m, pb_pos(m, kf, a), 1 - t); pb_src(m, pb_pos(m, kf, b), t);
+		pb_copy(m, p, kf, 0);
+	}
+	else
+		for (k = c;; k = hm_next(m, k))
+		{
+			pb_copy(m, m->cv[k], kf, k == c ? feat : 0);
+			if (k == c)
+			{
+				pb_corner(m, v, feat); pb_src(m, pb_pos(m, kf, a), 1 - t); pb_src(m, pb_pos(m, kf, b), t);
+			}
+			if (hm_next(m, k) == c)
+				break;
+		}
+	if (g != HM_NONE)
+	{
+		pb_face(m, kg);
+		if (gtri)
+		{
+			q = m->cv[hm_prev(m, d)];
+			pb_copy(m, b, kg, feat);
+			pb_corner(m, v, 0); pb_src(m, pb_pos(m, kg, a), 1 - t); pb_src(m, pb_pos(m, kg, b), t);
+			pb_copy(m, q, kg, 0);
+		}
+		else
+			for (k = d;; k = hm_next(m, k))
+			{
+				pb_copy(m, m->cv[k], kg, k == d ? feat : 0);
+				if (k == d)
+				{
+					pb_corner(m, v, feat); pb_src(m, pb_pos(m, kg, a), 1 - t); pb_src(m, pb_pos(m, kg, b), t);
+				}
+				if (hm_next(m, k) == d)
+					break;
+			}
+	}
+	if (ftri)
+	{
+		pb_face(m, kf);
+		pb_corner(m, v, feat); pb_src(m, pb_pos(m, kf, a), 1 - t); pb_src(m, pb_pos(m, kf, b), t);
+		pb_copy(m, b, kf, 0);
+		pb_copy(m, p, kf, 0);
+	}
+	if (gtri)
+	{
+		pb_face(m, kg);
+		pb_corner(m, v, feat); pb_src(m, pb_pos(m, kg, a), 1 - t); pb_src(m, pb_pos(m, kg, b), t);
+		pb_copy(m, a, kg, 0);
+		pb_copy(m, q, kg, 0);
+	}
+	if (m->pb.failed)
+		return HM_NONE;
+	hm_new_vertex(m, x);
+	for (k = 0; k < m->na; k++)
+		if (m->attr[k].element == QAWS_MESH_VERTEX)
+			hm_lerp(hm_attr_at(m, k, v), hm_attr_at(m, k, a), hm_attr_at(m, k, b), t, m->attr[k].n, m->attr[k].rule);
+	if (!hm_replace(m, HM_NONE, HM_NONE))
+	{
+		m->nv--;
+		return HM_NONE;
+	}
+	return v;
+}
+
+unsigned int hm_split_face(qaws_hm* m, unsigned int f, double const* x)
+{
+	unsigned int s = m->fn[f], i, j, k, v = m->nv, kf, first = m->fc[f], vx3[3], *vx;
+	double w3[3], *w, cx[16];
+	int centroid = x == NULL;
+	if (!hm_reserve(m, 1, 0, 0))
+		return HM_NONE;
+	w = s == 3 ? w3 : (double*)malloc(sizeof(double) * s);
+	vx = s == 3 ? vx3 : (unsigned int*)malloc(sizeof(unsigned int) * s);
+	if (!w || !vx)
+	{
+		if (w != w3)
+			free(w);
+		if (vx != vx3)
+			free(vx);
+		return HM_NONE;
+	}
+	for (i = 0; i < s; i++)
+		w[i] = 1.0 / s;
+	if (centroid)
+	{
+		/* the centroid: equal weights, exactly */
+		for (k = 0; k < m->dim; k++)
+			for (cx[k] = 0, i = 0; i < s; i++)
+				cx[k] += m->x[(size_t)m->dim * m->cv[first + i] + k] / s;
+		x = cx;
+	}
+	else if (s == 3)
+	{
+		/* barycentric in the triangle (equal weights when it is too thin to tell) */
+		double const *p0 = m->x + (size_t)m->dim * m->cv[first], *p1 = m->x + (size_t)m->dim * m->cv[first + 1],
+			*p2 = m->x + (size_t)m->dim * m->cv[first + 2];
+		double d00 = 0, d01 = 0, d11 = 0, d20 = 0, d21 = 0, den;
+		for (k = 0; k < m->dim; k++)
+		{
+			double u0 = p1[k] - p0[k], u1 = p2[k] - p0[k], q = x[k] - p0[k];
+			d00 += u0 * u0; d01 += u0 * u1; d11 += u1 * u1; d20 += q * u0; d21 += q * u1;
+		}
+		den = d00 * d11 - d01 * d01;
+		if (den > 1e-12 * d00 * d11)
+		{
+			w[1] = (d11 * d20 - d01 * d21) / den;
+			w[2] = (d00 * d21 - d01 * d20) / den;
+			w[0] = 1 - w[1] - w[2];
+		}
+	}
+	pb_reset(m);
+	kf = pb_old(m, f);
+	for (i = 0; i < s; i++)
+	{
+		pb_face(m, kf);
+		pb_corner(m, m->cv[first + i], 0); pb_src(m, m->pb.off[kf] + i, 1);
+		pb_corner(m, m->cv[first + (i + 1) % s], 0); pb_src(m, m->pb.off[kf] + (i + 1) % s, 1);
+		pb_corner(m, v, 0);
+		for (j = 0; j < s; j++)
+			pb_src(m, m->pb.off[kf] + j, w[j]);
+	}
+	if (!m->pb.failed)
+	{
+		hm_new_vertex(m, x);
+		for (j = 0; j < s; j++)
+			vx[j] = m->cv[first + j];
+		for (k = 0; k < m->na; k++)
+			if (m->attr[k].element == QAWS_MESH_VERTEX)
+				hm_blend(hm_attr_at(m, k, v), m->attr[k].v, m->attr[k].n, vx, w, s, m->attr[k].n, m->attr[k].rule);
+	}
+	if (w != w3)
+		free(w);
+	if (vx != vx3)
+		free(vx);
+	if (m->pb.failed)
+		return HM_NONE;
+	if (!hm_replace(m, HM_NONE, HM_NONE))
+	{
+		m->nv--;
+		return HM_NONE;
+	}
+	return v;
+}
+
+int hm_cut_face(qaws_hm* m, unsigned int c0, unsigned int c1)
+{
+	unsigned int f = m->cf[c0], k, kf;
+	pb_reset(m);
+	kf = pb_old(m, f);
+	pb_face(m, kf);
+	for (k = c0;; k = hm_next(m, k))
+	{
+		pb_corner(m, m->cv[k], 0);
+		pb_src(m, pb_cpos(m, kf, k), 1);
+		if (k == c1)
+			break;
+	}
+	pb_face(m, kf);
+	for (k = c1;; k = hm_next(m, k))
+	{
+		pb_corner(m, m->cv[k], 0);
+		pb_src(m, pb_cpos(m, kf, k), 1);
+		if (k == c0)
+			break;
+	}
+	return hm_replace(m, HM_NONE, HM_NONE);
+}
+
+int hm_can_collapse(qaws_hm const* m, unsigned int c, unsigned int a)
+{
+	unsigned int d = m->co[c], f = m->cf[c], g = d == HM_NONE ? HM_NONE : m->cf[d], b = a == m->cv[c] ? hm_to(m, c) : m->cv[c];
+	unsigned int vl = HM_NONE, vr = HM_NONE, k, last = HM_NONE;
+	if (m->fn[f] == 3)
+	{
+		vl = m->cv[hm_prev(m, c)];
+		if (m->co[hm_next(m, c)] == HM_NONE && m->co[hm_prev(m, c)] == HM_NONE)
+			return 0;
+	}
+	if (g != HM_NONE && m->fn[g] == 3)
+	{
+		vr = m->cv[hm_prev(m, d)];
+		if (m->co[hm_next(m, d)] == HM_NONE && m->co[hm_prev(m, d)] == HM_NONE)
+			return 0;
+	}
+	if (vl != HM_NONE && vl == vr)
+		return 0;
+	if (d != HM_NONE && hm_is_border_vertex(m, a) && hm_is_border_vertex(m, b))
+		return 0;
+	/* a triangle's third corner left with two edges would fold (a tetrahedron's edge) */
+	if ((vl != HM_NONE && !hm_is_border_vertex(m, vl) && hm_valence(m, vl) <= 3)
+		|| (vr != HM_NONE && !hm_is_border_vertex(m, vr) && hm_valence(m, vr) <= 3))
+		return 0;
+	/* the one-rings meet only at the edge's triangles' third corners, and no
+	   other face round a holds b */
+	for (k = m->vc[a]; k != HM_NONE; k = hm_round(m, a, k))
+	{
+		unsigned int w = hm_to(m, k), e, h = m->cf[k];
+		if (w != b && w != vl && w != vr && hm_find_edge(m, w, b) != HM_NONE)
+			return 0;
+		if (h != f && h != g)
+			for (e = m->fc[h]; e < m->fc[h] + m->fn[h]; e++)
+				if (m->cv[e] == b)
+					return 0;
+		last = k;
+	}
+	if (last != HM_NONE && hm_is_border_vertex(m, a))
+	{
+		unsigned int w = m->cv[hm_prev(m, last)];
+		if (w != b && w != vl && w != vr && hm_find_edge(m, w, b) != HM_NONE)
+			return 0;
+	}
+	return 1;
+}
+
+int hm_collapse(qaws_hm* m, unsigned int c, unsigned int a, double t, double const* x)
+{
+	unsigned int d = m->co[c], f = m->cf[c], g = d == HM_NONE ? HM_NONE : m->cf[d], b = a == m->cv[c] ? hm_to(m, c) : m->cv[c], k, e, i;
+	pb_reset(m);
+	/* a's faces: those off the edge keep their indices, polygons on the edge shrink, its triangles go */
+	for (k = m->vc[a]; k != HM_NONE; k = hm_round(m, a, k))
+		if (m->cf[k] != f && m->cf[k] != g)
+			pb_old(m, m->cf[k]);
+	if (m->fn[f] > 3)
+		pb_old(m, f);
+	if (g != HM_NONE && m->fn[g] > 3)
+		pb_old(m, g);
+	if (m->fn[f] == 3)
+		pb_old(m, f);
+	if (g != HM_NONE && m->fn[g] == 3)
+		pb_old(m, g);
+	for (i = 0; i < m->pb.nold && !m->pb.failed; i++)
+	{
+		unsigned int h = m->pb.old[i], edge = h == f || h == g;
+		if (edge && m->fn[h] == 3)
+			break;
+		pb_face(m, i);
+		for (e = m->fc[h]; e < m->fc[h] + m->fn[h]; e++)
+		{
+			if (edge && m->cv[e] == a)
+				continue;   /* (the polygon loses a, b stays) */
+			pb_corner(m, m->cv[e] == a ? b : m->cv[e], 0);
+			pb_src(m, pb_cpos(m, i, e), 1);
+		}
+	}
+	if (m->pb.failed)
+		return 0;
+	if (!hm_replace(m, a, b))
+		return 0;
+	for (k = 0; k < m->na; k++)
+		if (m->attr[k].element == QAWS_MESH_VERTEX)
+			hm_lerp(hm_attr_at(m, k, b), hm_attr_at(m, k, a), hm_attr_at(m, k, b), t, m->attr[k].n, m->attr[k].rule);
+	for (k = 0; k < m->dim; k++)
+		m->x[(size_t)m->dim * b + k] = x[k];
+	m->vflag[b] |= m->vflag[a] & HM_CORNER;
+	hm_kill_vertex(m, a);
+	return 1;
+}
+
+int hm_can_flip(qaws_hm const* m, unsigned int c)
+{
+	unsigned int d = m->co[c], p, q, a, b;
+	if (d == HM_NONE || m->fn[m->cf[c]] != 3 || m->fn[m->cf[d]] != 3)
+		return 0;
+	a = m->cv[c];
+	b = hm_to(m, c);
+	p = m->cv[hm_prev(m, c)];
+	q = m->cv[hm_prev(m, d)];
+	if (p == q || hm_find_edge(m, p, q) != HM_NONE)
+		return 0;
+	/* an interior end left with two edges would fold its faces together */
+	if ((!hm_is_border_vertex(m, a) && hm_valence(m, a) <= 3) || (!hm_is_border_vertex(m, b) && hm_valence(m, b) <= 3))
+		return 0;
+	return 1;
+}
+
+int hm_flip(qaws_hm* m, unsigned int c)
+{
+	unsigned int d = m->co[c], f = m->cf[c], g = m->cf[d], a = m->cv[c], b = hm_to(m, c);
+	unsigned int p = m->cv[hm_prev(m, c)], q = m->cv[hm_prev(m, d)], kf, kg;
+	pb_reset(m);
+	kf = pb_old(m, f);
+	kg = pb_old(m, g);
+	/* (a, b, p) and (b, a, q) become (a, q, p) and (q, b, p) */
+	pb_face(m, kf); pb_copy(m, a, kf, 0); pb_copy(m, q, kg, 0); pb_copy(m, p, kf, 0);
+	pb_face(m, kg); pb_copy(m, q, kg, 0); pb_copy(m, b, kg, 0); pb_copy(m, p, kf, 0);
+	return hm_replace(m, HM_NONE, HM_NONE);
+}
+
+/* ======================================================================== */
+/*  Compaction                                                              */
+/* ======================================================================== */
+
+static void hm_move_vertex(qaws_hm* m, unsigned int j, unsigned int i)
+{
+	unsigned int c, k;
+	for (c = m->vc[j]; c != HM_NONE; c = hm_round(m, j, c))
+		m->cv[c] = i;
+	memcpy(m->x + (size_t)m->dim * i, m->x + (size_t)m->dim * j, sizeof(double) * m->dim);
+	m->vc[i] = m->vc[j];
+	m->vsrc[i] = m->vsrc[j];
+	m->vflag[i] = m->vflag[j];
+	if (m->foot)
+		m->foot[i] = m->foot[j];
+	for (k = 0; k < m->na; k++)
+		if (m->attr[k].element == QAWS_MESH_VERTEX)
+			memcpy(hm_attr_at(m, k, i), hm_attr_at(m, k, j), sizeof(double) * m->attr[k].n);
+}
+
+static void hm_move_face(qaws_hm* m, unsigned int j, unsigned int i)
+{
+	unsigned int c, k;
+	for (c = m->fc[j]; c < m->fc[j] + m->fn[j]; c++)
+		m->cf[c] = i;
+	m->fc[i] = m->fc[j];
+	m->fn[i] = m->fn[j];
+	m->fflag[i] = m->fflag[j];
+	for (k = 0; k < m->na; k++)
+		if (m->attr[k].element == QAWS_MESH_FACE)
+			memcpy(hm_attr_at(m, k, i), hm_attr_at(m, k, j), sizeof(double) * m->attr[k].n);
+}
+
+/* the corner pool without its free slots (runs keep their order) */
+static void hm_pool(qaws_hm* m)
+{
+	unsigned int* map = (unsigned int*)malloc(sizeof(unsigned int) * (m->nc + 1));
+	unsigned int c, n = 0, k, v;
+	if (!map)
+		return;   /* (the garbage stays) */
+	for (c = 0; c < m->nc; c++)
+		map[c] = m->cf[c] == HM_NONE ? HM_NONE : n++;
+	for (c = 0; c < m->nc; c++)
+	{
+		unsigned int d = map[c];
+		if (d == HM_NONE)
+			continue;
+		if (m->fc[m->cf[c]] == c)
+			m->fc[m->cf[c]] = d;
+		m->cv[d] = m->cv[c];
+		m->co[d] = m->co[c];
+		m->cf[d] = m->cf[c];
+		m->cflag[d] = m->cflag[c];
+		for (k = 0; k < m->na; k++)
+			if (m->attr[k].element == QAWS_MESH_CORNER && d != c)
+				memcpy(hm_attr_at(m, k, d), hm_attr_at(m, k, c), sizeof(double) * m->attr[k].n);
+	}
+	for (c = 0; c < n; c++)
+		if (m->co[c] != HM_NONE)
+			m->co[c] = map[m->co[c]];
+	for (v = 0; v < m->nv; v++)
+		if (m->vc[v] != HM_NONE)
+			m->vc[v] = map[m->vc[v]];
+	m->nc = n;
+	m->cfree = 0;
+	free(map);
+}
+
+void hm_compact(qaws_hm* m)
+{
+	unsigned int kind, k;
+	for (kind = 0; kind < 2; kind++)
+	{
+		unsigned int* n = kind == 0 ? &m->nv : &m->nf;
+		unsigned char* fl = kind == 0 ? m->vflag : m->fflag;
+		for (k = 0; k < m->nhole[kind]; k++)
+		{
+			unsigned int i = m->hole[kind][k];
+			while (*n > 0 && (fl[*n - 1] & HM_DELETED))
+				(*n)--;
+			if (i >= *n)
+				continue;
+			if (kind == 0)
+				hm_move_vertex(m, *n - 1, i);
+			else
+				hm_move_face(m, *n - 1, i);
+			(*n)--;
+		}
+		while (*n > 0 && (fl[*n - 1] & HM_DELETED))
+			(*n)--;
+		m->nhole[kind] = 0;
+	}
+	if (m->cfree && 2 * m->cfree >= m->nc)
+		hm_pool(m);
+}
+
+/* ======================================================================== */
+/*  Attributes and footpoints                                               */
+/* ======================================================================== */
+
+unsigned int hm_attr_add(qaws_hm* m, char const* name, unsigned int element, unsigned int rule, unsigned int n)
+{
+	hm_attr* g = (hm_attr*)realloc(m->attr, sizeof(hm_attr) * (m->na + 1));
+	hm_attr* a;
+	size_t slots;
+	if (!g)
+		return HM_NONE;
+	m->attr = g;
+	a = &g[m->na];
+	memset(a, 0, sizeof *a);
+	slots = element == QAWS_MESH_VERTEX ? m->capv : element == QAWS_MESH_CORNER ? m->capc : m->capf;
+	a->v = (double*)calloc(slots ? slots * n : 1, sizeof(double));
+	if (!a->v)
+		return HM_NONE;
+	if (name)
+	{
+		strncpy(a->name, name, sizeof a->name - 1);
+		a->name[sizeof a->name - 1] = 0;
+	}
+	a->element = element;
+	a->rule = rule;
+	a->n = n;
+	return m->na++;
+}
+
+void hm_attr_remove(qaws_hm* m, unsigned int a)
+{
+	free(m->attr[a].v);
+	memmove(m->attr + a, m->attr + a + 1, sizeof(hm_attr) * (m->na - a - 1));
+	m->na--;
+}
+
+int hm_foot_enable(qaws_hm* m)
+{
+	unsigned int v;
+	if (m->foot)
+		return 1;
+	m->foot = (qaws_mesh_location*)malloc(sizeof(qaws_mesh_location) * (m->capv ? m->capv : 1));
+	if (!m->foot)
+		return 0;
+	for (v = 0; v < m->nv; v++)
+	{
+		m->foot[v].patch = HM_NONE;
+		m->foot[v].a = m->foot[v].b = 0;
+	}
+	return 1;
+}
+
+unsigned int hm_feature_degree(qaws_hm const* m, unsigned int v)
+{
+	unsigned int c, last = HM_NONE, n = 0;
+	for (c = m->vc[v]; c != HM_NONE; c = hm_round(m, v, c))
+	{
+		n += (m->cflag[c] & HM_FEATURE) != 0;
+		last = c;
+	}
+	if (last != HM_NONE && hm_is_border_vertex(m, v))
+		n += (m->cflag[hm_prev(m, last)] & HM_FEATURE) != 0;
+	return n;
+}

@@ -45,6 +45,8 @@ const char *qaws_status_to_string(qaws_status status)
 		return "QAWS_STATUS_CERTIFICATION_FAILED";
 	case QAWS_STATUS_NOT_CONVERGED:
 		return "QAWS_STATUS_NOT_CONVERGED";
+	case QAWS_STATUS_INVALID_TOPOLOGY:
+		return "QAWS_STATUS_INVALID_TOPOLOGY";
 	default:
 		return "QAWS_STATUS_UNKNOWN";
 	}

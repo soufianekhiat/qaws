@@ -95,6 +95,8 @@ src/qaws/qaws_repulsive_sens.c
 src/qaws/qaws_surface_query.c
 src/qaws/qaws_shell_region.c
 src/qaws/qaws_skeleton.c
+src/qaws/mesh/qaws_mesh_core.c
+src/qaws/mesh/qaws_mesh_3d.c
   src/qaws/qaws_convert.c
   src/qaws/qaws_export.c
   src/qaws/qaws_import.c
@@ -410,6 +412,16 @@ if(QAWS_BUILD_EXAMPLES)
     target_compile_definitions(qaws_better2d_showcase PRIVATE _CRT_SECURE_NO_WARNINGS)
   endif()
   set_target_properties(qaws_better2d_showcase PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/working_dir"
+    RUNTIME_OUTPUT_DIRECTORY_RELEASE "${PROJECT_SOURCE_DIR}/working_dir"
+    RUNTIME_OUTPUT_DIRECTORY_DEBUG "${PROJECT_SOURCE_DIR}/working_dir")
+  add_executable(qaws_meshing_showcase examples/meshing_showcase.c)
+  target_link_libraries(qaws_meshing_showcase PRIVATE Qaws::qaws)
+  target_include_directories(qaws_meshing_showcase PRIVATE "${PROJECT_SOURCE_DIR}/src/qaws")
+  if(MSVC)
+    target_compile_definitions(qaws_meshing_showcase PRIVATE _CRT_SECURE_NO_WARNINGS)
+  endif()
+  set_target_properties(qaws_meshing_showcase PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/working_dir"
     RUNTIME_OUTPUT_DIRECTORY_RELEASE "${PROJECT_SOURCE_DIR}/working_dir"
     RUNTIME_OUTPUT_DIRECTORY_DEBUG "${PROJECT_SOURCE_DIR}/working_dir")
