@@ -71,6 +71,10 @@ Per-header documentation with all function signatures and parameters:
 
 - [qaws_diff*.h](api/diff.md) -- Fields, views, jets, tangents, adjoints, geometry, implicit operations, differential maps, integral functionals
 
+### Meshing
+
+- [meshing](api/meshing.md) -- Surface and volume meshes (`qaws_mesh.h`, `qaws_volume_mesh.h`), references, size, direction and frame fields, remeshing, quads, generation from surfaces and shells, tetrahedra, hexahedra
+
 ### Headers without dedicated doc pages yet
 
 The following APIs are implemented and available via their headers but do not have standalone documentation pages. See the header files in `src/qaws/` for signatures and usage.

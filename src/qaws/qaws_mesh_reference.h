@@ -38,8 +38,9 @@
  *             operator; positive where the surface bends away from its
  *             normals, as on a sphere with outward normals);
  *   project   a point's closest location; with hints, the closest one
- *             reachable from the hint's triangle across triangles at most
- *             as far as the best found (a sheet nearby is not jumped to);
+ *             reachable from the hint's triangle across triangles within
+ *             twice the best distance found (a sheet nearby is not jumped
+ *             to);
  *   walk      the straightest path from a location along a tangent
  *             vector, on the triangles (unfolded across each edge), its
  *             end carried onto the patch: tangential moves that stay on the
