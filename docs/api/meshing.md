@@ -117,8 +117,10 @@ qaws_status qaws_volume_mesh_frame_field(qaws_volume_mesh const* mesh, qaws_fram
   multiresolution smoothing along features); the index round each face in
   quarter turns marks the singularities, summing to 4 times the Euler
   characteristic.
-- **Frame fields** in tetrahedral volumes: an octahedral frame per cell,
-  the border's normals held, smoothed over the stored facet adjacency;
+- **Frame fields** in tetrahedral volumes: an octahedral frame per cell from
+  a global solve of its spherical-harmonic coefficients (Huang et al. 2011;
+  Ray, Sokolov, Levy 2016), the border's normals held, each cell projected
+  onto the nearest frame, then polished over the stored facet adjacency;
   singular edges reported per cell as a mask of its six edges.
 
 ## Remeshing and quads
@@ -229,9 +231,18 @@ layer of hexahedra padding the staircase to the surface. Each border vertex
 of the staircase goes onto the surface's PN reference, onto a crease where
 the staircase turns once and onto a corner where it turns twice, so boxes
 keep their edges and corners. Smoothing follows, each move kept when it
-raises the worst scaled Jacobian. `POLYCUBE` and `FRAME_FIELD` (the frame
-field's integer-grid map) are reserved; the frame field itself is
-`qaws_volume_mesh_frame_field`.
+raises the worst scaled Jacobian.
+
+`FRAME_FIELD` (an integer-grid map, after CubeCover): the inside
+tetrahedralized at half the cell size, its frame field combed into one
+gauge, then a map fitted by three Poisson solves so that its gradient
+follows the frames at the cell size, each border patch (facets whose normal
+follows one axis) held on a whole-number plane of that axis. The hexahedra
+are the unit cubes of the integer lattice in the map's image, their
+vertices mapped back: a turned box comes out as a grid aligned with it, a
+bent or twisted bar as a bent or twisted grid. Fields with singular edges
+(a sphere, a round torus) or that turn round a hole give
+`QAWS_STATUS_UNSUPPORTED_OPERATION`. `POLYCUBE` is reserved.
 
 ## Example: a NURBS torus, its surface, tetrahedra and hexahedra
 
@@ -251,9 +262,10 @@ hd.cell_size = 0.22;
 qaws_volume_mesh_hexahedralize(surface, &hd, &hexes, NULL);
 ```
 
-The showcase `qaws_meshing_showcase` draws figures 1 to 7: the corner
-store, references, remeshing, quads, generation, tetrahedra and hexahedra
-(`examples/meshing_showcase/`).
+The showcase `qaws_meshing_showcase` draws figures 1 to 8: the corner
+store, references, remeshing, quads, generation, tetrahedra, hexahedra and
+hexahedra along frame fields (`examples/meshing_showcase/`); an argument
+listing figure numbers (`58`) draws those alone.
 
 ## Known limits
 
@@ -264,7 +276,8 @@ store, references, remeshing, quads, generation, tetrahedra and hexahedra
 - Tetrahedra: improvement by flips and smoothing only (no edge removal or
   sliver exudation); no protection of sharp angles between border
   triangles, where recovery may stop (`QAWS_STATUS_NOT_CONVERGED`).
-- Hexahedra: a uniform grid (no octree), features kept only where the
-  staircase turns near them.
-- Frame fields: local smoothing; on curved shapes the singular edges are
-  more numerous and less regular than a global optimization gives.
+- Hexahedra: GRID is a uniform grid (no octree), features kept only where
+  the staircase turns near them; FRAME_FIELD needs a field without singular
+  edges.
+- Frame fields: the singular edges are those of the smoothest field, not
+  constrained to be meshable (Liu, Bommes 2023).

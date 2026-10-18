@@ -163,4 +163,11 @@ qaws_status vm_create(double const* x, unsigned int nv, unsigned int const* cv, 
 /* a hexahedron's smallest scaled Jacobian over its corners (1 for a cube, negative when a corner turns over) */
 double vm_hex_quality(double const* x, unsigned int const* v);
 
+/* frame fields on tetrahedra (qaws_frame_field.c): per cell its axes (9 doubles, R allocated by the caller), the
+   singular edges' masks (may be NULL) */
+qaws_status ff_frames(qaws_volume_mesh const* m, unsigned int sweeps, double* R, unsigned char* singular);
+/* the frames combed into one gauge (each cell's axes permuted onto its neighbour's, breadth first); 1 when every facet
+   then agrees without a permutation (no singular edge, no turn round a hole), 0 else or on allocation failure */
+int ff_comb(qaws_volume_mesh const* m, double* R);
+
 #endif /* QAWS_MESH_INTERNAL_H */

@@ -80,16 +80,19 @@ qaws_status qaws_mesh_3d_direction_field(qaws_mesh_3d const* mesh, qaws_directio
  * Frame fields in volumes: per tetrahedron an octahedral frame (three
  * orthonormal axes, one with its 24 turns that map a cube to itself),
  * smooth across facets, the cells on the border holding an axis along its
- * normal (two where they touch two faces of the border meeting square),
- * smoothed by Gauss-Seidel on the cells' stored adjacency, each neighbour's
- * frame matched to the cell's (the signed permutation of its axes nearest)
- * before averaging. An edge is singular where the matchings round it
+ * normal (two where they touch two faces of the border meeting square).
+ * Each frame is taken as its function on the sphere (band-4 spherical
+ * harmonics, Ray, Sokolov, Levy 2016): the smoothest field of such
+ * functions comes from one linear solve over all cells, each cell's frame
+ * then the one nearest its function, polished by Gauss-Seidel sweeps over
+ * the cells' stored adjacency (neighbours matched by the signed permutation
+ * of their axes nearest). An edge is singular where the matchings round it
  * compose to a turn: hexahedra following the field meet there three or five
  * round an edge.
  */
 typedef struct qaws_frame_field_desc
 {
-	unsigned int sweeps;                /* 0: 60 */
+	unsigned int sweeps;                /* the polishing sweeps; 0: 60 */
 } qaws_frame_field_desc;
 
 struct qaws_volume_mesh;

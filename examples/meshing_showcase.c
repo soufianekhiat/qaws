@@ -19,6 +19,8 @@
  *                      a blob
  *   mesh7_hexes.png    hexahedra on a grid padded to the surface (a box, a torus) and
  *                      the torus's frame field with its singular edges
+ *   mesh8_frame_hexes.png  hexahedra following frame fields (integer-grid maps): a turned
+ *                      box against the grid, a bent bar, a twisted bar
  *
  * Each figure lives in meshing_showcase/NN_*.c, compiled as one translation
  * unit with the rasterizer in example_raster.h.
@@ -156,17 +158,17 @@ static void ms_panel(er_canvas* c, int x, int y, int w, int h, qaws_mesh_3d cons
 #include "meshing_showcase/05_generate.c"
 #include "meshing_showcase/06_tets.c"
 #include "meshing_showcase/07_hexes.c"
+#include "meshing_showcase/08_frame_hexes.c"
 
-int main(void)
+/* the figures to draw: all, or those whose numbers the first argument lists ("58") */
+int main(int argc, char** argv)
 {
+	static void (*const demo[8])(void) = { demo_core, demo_reference, demo_remesh, demo_quads, demo_generate, demo_tets, demo_hexes, demo_frame_hexes };
+	int i;
 	setvbuf(stdout, NULL, _IONBF, 0);
 	MAKE_DIR("showcase");
-	demo_core();
-	demo_reference();
-	demo_remesh();
-	demo_quads();
-	demo_generate();
-	demo_tets();
-	demo_hexes();
+	for (i = 0; i < 8; i++)
+		if (argc < 2 || strchr(argv[1], '1' + i))
+			demo[i]();
 	return 0;
 }

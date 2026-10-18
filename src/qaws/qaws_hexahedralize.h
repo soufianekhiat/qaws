@@ -21,9 +21,19 @@
  *                the cubes fit in; the elements by the surface are the
  *                poorest (a sharp concave feature can turn some over:
  *                qaws_volume_mesh_measure_quality tells). The default.
- *   POLYCUBE, FRAME_FIELD  reserved (UNSUPPORTED_OPERATION): a polycube map;
- *                a frame field's integer-grid map (qaws_volume_mesh_frame_field
- *                computes the field).
+ *   FRAME_FIELD  hexahedra following a frame field (an integer-grid map,
+ *                CubeCover's idea): the inside tetrahedralized (DELAUNAY, half
+ *                the cell size), its frame field (qaws_volume_mesh_frame_field)
+ *                combed into one gauge, then a map u fitted by three Poisson
+ *                solves so that its gradient follows the frames at the cell
+ *                size, each border patch (facets whose normal follows one
+ *                axis) held on a whole-number plane of that axis; the
+ *                hexahedra are the unit cubes of the integer lattice in the
+ *                map's image, their vertices mapped back. A rotated box comes
+ *                out as a grid aligned with it, a bent bar as a bent grid.
+ *                Fields with singular edges (a sphere, a round torus) or that
+ *                turn round a hole: UNSUPPORTED_OPERATION for now.
+ *   POLYCUBE     reserved (UNSUPPORTED_OPERATION): a polycube map.
  *
  * The border: a closed qaws_mesh_3d turned outward. INVALID_TOPOLOGY when it
  * is not closed; INVALID_ARGUMENT when no cube fits inside.

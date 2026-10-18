@@ -40,15 +40,15 @@ On branch `meshing`, one method per operator (the others reserved behind
 |---|---|---|
 | Core | the corner store (`qaws_mesh_core.h`), `qaws_mesh_3d` over it: creation from arrays (non-manifold input split), edits with checks, features, attributes, footpoints, quality, topology, dual; `qaws_mesh_2d` held in it at z = 0 (`qaws_mesh_2d_get_mesh`), made from arrays and edited there | the planar mesher working in the store directly (it keeps its own arrays and mirrors them) |
 | References | PN (default) and LINEAR, creases, curvature, project, walk, attributes; Mathematica fixture | PHONG, NAGATA, G1, SUBDIVISION, MLS |
-| Fields | size fields (uniform, curvature with tolerances and gradation, vertices, callback, min); cross fields with indices; frame fields with singular edges | anisotropic metrics; globally optimized frames (Ray et al. 2016) |
+| Fields | size fields (uniform, curvature with tolerances and gradation, vertices, callback, min); cross fields with indices; frame fields by a global spherical-harmonic solve (Ray et al. 2016), singular edges, combing | anisotropic metrics; meshable frame fields (singularity constraints) |
 | Remeshing | LOCAL (Botsch-Kobbelt) on the reference, features, attribute transfer | CVT, FIELD_ALIGNED; simplification |
 | Quads | INSTANT (Instant Meshes), quad-dominant or pure | PAIRING, SPLIT, GLOBAL (QuadriFlow, integer-grid maps), LAYOUT |
 | Generation | REMESH for surfaces and shells, snapped onto the exact faces, footpoints (face, u, v) | PARAMETRIC, RESTRICTED_DELAUNAY, STRUCTURED; trim curves followed |
 | Volumes | `qaws_volume_mesh` (tetrahedra, hexahedra, prisms, pyramids; facets' adjacency stored) | attributes on volumes |
 | Tetrahedra | DELAUNAY: exact lattice Bowyer-Watson, border recovery, BCC fill, refinement, flips and smoothing | ENVELOPE (fTetWild), STUFFING; Klingner-Shewchuk improvement; CDT recovery (Diazzi et al. 2023) |
-| Hexahedra | GRID: staircase padded to the surface, creases and corners kept | POLYCUBE; FRAME_FIELD (integer-grid map and extraction on top of the frame field); octree |
+| Hexahedra | GRID: staircase padded to the surface, creases and corners kept; FRAME_FIELD: integer-grid map of a field without singular edges, its lattice cubes | POLYCUBE; FRAME_FIELD through singular edges (HexEx extraction); octree |
 
-Tests 121 to 129; showcase figures 1 to 7 (`qaws_meshing_showcase`).
+Tests 121 to 129; showcase figures 1 to 8 (`qaws_meshing_showcase`).
 
 ## 0. Scope
 

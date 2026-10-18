@@ -9,6 +9,8 @@
  *   - the frame field of the box's tetrahedra: no singular edge, every
  *     frame the world's axes; of the torus's: orthonormal frames, the
  *     border's cells holding an axis along its normal;
+ *   - FRAME_FIELD: a turned box in perfect cubes along it, its volume exact;
+ *     a bent bar; a round torus (singular edges) refused;
  *   - refusals: an open surface, the reserved methods, a field on hexahedra.
  */
 
@@ -265,6 +267,124 @@ static void test_torus(void)
 	qaws_surface_destroy(t);
 }
 
+/* the border of the lattice block n[0] x n[1] x n[2] as quads, mapped by f */
+static qaws_mesh_3d* th_lattice(unsigned int const* n, void (*f)(double const* p, double* x))
+{
+	static unsigned char const F[6][4] = { { 0, 3, 2, 1 }, { 4, 5, 6, 7 }, { 0, 1, 5, 4 }, { 1, 2, 6, 5 }, { 2, 3, 7, 6 }, { 3, 0, 4, 7 } };
+	static int const FN[6][3] = { { 0, 0, -1 }, { 0, 0, 1 }, { 0, -1, 0 }, { 1, 0, 0 }, { 0, 1, 0 }, { -1, 0, 0 } };
+	static int const CO[8][3] = { { 0, 0, 0 }, { 1, 0, 0 }, { 1, 1, 0 }, { 0, 1, 0 }, { 0, 0, 1 }, { 1, 0, 1 }, { 1, 1, 1 }, { 0, 1, 1 } };
+	unsigned int nv = (n[0] + 1) * (n[1] + 1) * (n[2] + 1), *map = (unsigned int*)malloc(sizeof(unsigned int) * nv), i, j, k, q, used = 0, nf = 0;
+	unsigned int* fv = (unsigned int*)malloc(sizeof(unsigned int) * 4 * 2 * (n[0] * n[1] + n[1] * n[2] + n[0] * n[2]));
+	unsigned int* fs = (unsigned int*)malloc(sizeof(unsigned int) * 2 * (n[0] * n[1] + n[1] * n[2] + n[0] * n[2]));
+	qaws_scalar* x = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * nv);
+	qaws_mesh_3d_desc d;
+	qaws_mesh_3d* m = NULL;
+	for (i = 0; i < nv; i++)
+		map[i] = QAWS_MESH_NONE;
+	for (k = 0; k < n[2]; k++)
+		for (j = 0; j < n[1]; j++)
+			for (i = 0; i < n[0]; i++)
+				for (q = 0; q < 6; q++)
+				{
+					long a = (long)i + FN[q][0], b = (long)j + FN[q][1], c = (long)k + FN[q][2];
+					unsigned int e;
+					if (a >= 0 && b >= 0 && c >= 0 && a < (long)n[0] && b < (long)n[1] && c < (long)n[2])
+						continue;
+					for (e = 0; e < 4; e++)
+					{
+						unsigned int ci = i + CO[F[q][e]][0], cj = j + CO[F[q][e]][1], ck = k + CO[F[q][e]][2];
+						unsigned int v = ci + (n[0] + 1) * (cj + (n[1] + 1) * ck);
+						if (map[v] == QAWS_MESH_NONE)
+						{
+							double p[3], y[3];
+							p[0] = (double)ci / n[0];
+							p[1] = (double)cj / n[1];
+							p[2] = (double)ck / n[2];
+							f(p, y);
+							x[3 * used] = (qaws_scalar)y[0];
+							x[3 * used + 1] = (qaws_scalar)y[1];
+							x[3 * used + 2] = (qaws_scalar)y[2];
+							map[v] = used++;
+						}
+						fv[4 * nf + e] = map[v];
+					}
+					fs[nf++] = 4;
+				}
+	memset(&d, 0, sizeof d);
+	d.positions = x;
+	d.vertex_count = used;
+	d.face_vertices = fv;
+	d.face_sizes = fs;
+	d.face_count = nf;
+	qaws_mesh_3d_create(&d, &m);
+	free(map); free(fv); free(fs); free(x);
+	return m;
+}
+
+static void th_turned_box(double const* p, double* x)
+{
+	double a = p[0] * 2 - 1, b = (p[1] * 2 - 1) * 0.7, c = (p[2] * 2 - 1) * 0.5, y0 = a * cos(0.5) - b * sin(0.5), y1 = a * sin(0.5) + b * cos(0.5);
+	x[0] = y0;
+	x[1] = y1 * cos(0.3) - c * sin(0.3);
+	x[2] = y1 * sin(0.3) + c * cos(0.3);
+}
+
+static void th_bent_bar(double const* p, double* x)
+{
+	double r = 1 + p[0], t = M_PI / 2 * p[1];
+	x[0] = r * cos(t);
+	x[1] = r * sin(t);
+	x[2] = p[2];
+}
+
+static void test_frame_field(void)
+{
+	static unsigned int const nbox[3] = { 16, 12, 8 }, nbent[3] = { 8, 20, 8 };
+	qaws_mesh_3d *box = th_lattice(nbox, th_turned_box), *bent = th_lattice(nbent, th_bent_bar), *ts = NULL;
+	qaws_surface* t = th_torus(2, 0.7);
+	qaws_generate_desc g;
+	qaws_hexahedralize_desc d;
+	qaws_volume_mesh *v1 = NULL, *v2 = NULL, *v3 = NULL;
+	qaws_volume_quality q1, q2;
+	qaws_status s1, s2, s3;
+	char msg[400];
+	memset(&d, 0, sizeof d);
+	d.method = QAWS_HEXES_FRAME_FIELD;
+	d.cell_size = (qaws_scalar)0.15;
+	s1 = qaws_volume_mesh_hexahedralize(box, &d, &v1, NULL);
+	s2 = qaws_volume_mesh_hexahedralize(bent, &d, &v2, NULL);
+	memset(&g, 0, sizeof g);
+	g.target_length = (qaws_scalar)0.25;
+	qaws_mesh_generate_surface(t, &g, &ts, NULL);
+	d.cell_size = (qaws_scalar)0.25;
+	s3 = qaws_volume_mesh_hexahedralize(ts, &d, &v3, NULL);
+	memset(&q1, 0, sizeof q1);
+	memset(&q2, 0, sizeof q2);
+	if (v1)
+		qaws_volume_mesh_measure_quality(v1, &q1);
+	if (v2)
+		qaws_volume_mesh_measure_quality(v2, &q2);
+	sprintf(msg, "turned box along its field: %s, %u hexahedra, validate %s, scaled Jacobian from %.4f, volume %.12f, edges %.3f..%.3f",
+		qaws_status_to_string(s1), q1.hexahedra, v1 ? qaws_status_to_string(qaws_volume_mesh_validate(v1)) : "-", (double)q1.min_scaled_jacobian,
+		(double)q1.volume, (double)q1.min_edge, (double)q1.max_edge);
+	TEST_ASSERT(s1 == QAWS_STATUS_OK && v1 && qaws_volume_mesh_validate(v1) == QAWS_STATUS_OK && q1.hexahedra == qaws_volume_mesh_get_cell_count(v1)
+		&& q1.hexahedra > 500 && (double)q1.min_scaled_jacobian > 0.99 && fabs((double)q1.volume - 2.8) < 1e-9 && (double)q1.min_edge > 0.12
+		&& (double)q1.max_edge < 0.18, msg);
+	sprintf(msg, "bent bar along its field: %s, %u hexahedra, validate %s, scaled Jacobian from %.4f, volume %.5f for 3 pi / 4", qaws_status_to_string(s2),
+		q2.hexahedra, v2 ? qaws_status_to_string(qaws_volume_mesh_validate(v2)) : "-", (double)q2.min_scaled_jacobian, (double)q2.volume);
+	TEST_ASSERT(s2 == QAWS_STATUS_OK && v2 && qaws_volume_mesh_validate(v2) == QAWS_STATUS_OK && (double)q2.min_scaled_jacobian > 0.9
+		&& fabs((double)q2.volume - 0.75 * M_PI) < 0.01 * 0.75 * M_PI, msg);
+	sprintf(msg, "round torus along its field (singular edges): %s", qaws_status_to_string(s3));
+	TEST_ASSERT(s3 == QAWS_STATUS_UNSUPPORTED_OPERATION && !v3, msg);
+	qaws_volume_mesh_destroy(v1);
+	qaws_volume_mesh_destroy(v2);
+	qaws_volume_mesh_destroy(v3);
+	qaws_mesh_3d_destroy(box);
+	qaws_mesh_3d_destroy(bent);
+	qaws_mesh_3d_destroy(ts);
+	qaws_surface_destroy(t);
+}
+
 static void test_refusals(void)
 {
 	static qaws_scalar const p[12] = { 0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0 }, cube[24] = { 0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 0, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1 };
@@ -288,7 +408,7 @@ static void test_refusals(void)
 	qaws_mesh_3d_create(&md, &open);
 	memset(&d, 0, sizeof d);
 	s1 = qaws_volume_mesh_hexahedralize(open, &d, &v, NULL);
-	d.method = QAWS_HEXES_FRAME_FIELD;
+	d.method = QAWS_HEXES_POLYCUBE;
 	s2 = qaws_volume_mesh_hexahedralize(open, &d, &v, NULL);
 	memset(&vd, 0, sizeof vd);
 	vd.positions = cube;
@@ -298,7 +418,7 @@ static void test_refusals(void)
 	vd.cell_count = 1;
 	qaws_volume_mesh_create(&vd, &h);
 	s3 = qaws_volume_mesh_frame_field(h, NULL, fr, NULL);
-	sprintf(msg, "refusals: an open surface %s, FRAME_FIELD %s, a field on hexahedra %s", qaws_status_to_string(s1), qaws_status_to_string(s2),
+	sprintf(msg, "refusals: an open surface %s, POLYCUBE %s, a field on hexahedra %s", qaws_status_to_string(s1), qaws_status_to_string(s2),
 		qaws_status_to_string(s3));
 	TEST_ASSERT(s1 == QAWS_STATUS_INVALID_TOPOLOGY && s2 == QAWS_STATUS_UNSUPPORTED_OPERATION && s3 == QAWS_STATUS_UNSUPPORTED_OPERATION && !v, msg);
 	qaws_mesh_3d_destroy(open);
@@ -312,6 +432,7 @@ int test_128_hexahedralize_main(void)
 	printf("Test 128: hexahedra and frame fields\n");
 	test_box();
 	test_torus();
+	test_frame_field();
 	test_refusals();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
