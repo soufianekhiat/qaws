@@ -63,6 +63,7 @@
 #include "qaws_rectclip.h"
 #include "qaws_stack.h"
 #include "qaws_mesh.h"
+#include "qaws_mesh_reference.h"
 #include "qaws_triangulate.h"
 #include "qaws_region_sample.h"
 #include "qaws_mean_value.h"

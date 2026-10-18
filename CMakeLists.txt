@@ -97,6 +97,8 @@ src/qaws/qaws_shell_region.c
 src/qaws/qaws_skeleton.c
 src/qaws/mesh/qaws_mesh_core.c
 src/qaws/mesh/qaws_mesh_3d.c
+src/qaws/mesh/qaws_mesh_interpolant.c
+src/qaws/mesh/qaws_mesh_reference.c
   src/qaws/qaws_convert.c
   src/qaws/qaws_export.c
   src/qaws/qaws_import.c

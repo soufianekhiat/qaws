@@ -6,6 +6,9 @@
  *   mesh1_core.png     the corner store: a torus and its dual (the stored
  *                      adjacency), a cube's creases kept through random edits,
  *                      a linear attribute kept exact through edits
+ *   mesh2_reference.png  the surface between the vertices: a coarse blob flat and
+ *                      as its PN reference, a coarse can rounded without features
+ *                      and sharp with its creases, curvature from the reference
  *
  * Each figure lives in meshing_showcase/NN_*.c, compiled as one translation
  * unit with the rasterizer in example_raster.h.
@@ -109,7 +112,7 @@ static void ms_draw(er_canvas* c, qaws_mesh_3d const* m, double const* rgb, doub
 			n[i] = (double)ns[i];
 		free(ns);
 	}
-	for (i = 0; i < nt; i++)
+	for (i = 0; (rgb || vrgb) && i < nt; i++)   /* (no colour: the edges only) */
 	{
 		unsigned int a = t[3 * i], b = t[3 * i + 1], d = t[3 * i + 2];
 		er_triangle(c, x + 3 * a, x + 3 * b, x + 3 * d, n ? n + 3 * a : NULL, n ? n + 3 * b : NULL, n ? n + 3 * d : NULL,
@@ -137,11 +140,13 @@ static void ms_panel(er_canvas* c, int x, int y, int w, int h, qaws_mesh_3d cons
 }
 
 #include "meshing_showcase/01_core.c"
+#include "meshing_showcase/02_reference.c"
 
 int main(void)
 {
 	setvbuf(stdout, NULL, _IONBF, 0);
 	MAKE_DIR("showcase");
 	demo_core();
+	demo_reference();
 	return 0;
 }

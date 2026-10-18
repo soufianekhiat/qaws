@@ -1,0 +1,592 @@
+/*
+ * Test 122: mesh references (qaws_mesh_reference)
+ *
+ *   - a PN triangle against Mathematica's from the paper's definitions
+ *     (reference/122_pn_triangle.wls): position, first and second
+ *     derivatives, the normal field and its derivatives, the curvatures;
+ *   - an icosphere with its radial normals: the vertices interpolated, the
+ *     patches meeting along their edges (positions and normals), PN far
+ *     closer to the sphere than the flat triangles, curvatures near 1;
+ *   - a cylinder: curvatures 1 / r and 0, the first direction round it;
+ *   - a cube with its creases detected: every PN point on the cube;
+ *   - projection against brute force (LINEAR and PN), and with a hint the
+ *     sheet the hint is on, not a nearer one;
+ *   - walking: straight on a plane across triangles, and round a prism
+ *     against the prism unrolled;
+ *   - attributes at locations; refusals.
+ */
+
+#include "test_common.h"
+#include "qaws_mesh_reference.h"
+#include "mesh/qaws_mesh_internal.h"
+#include "reference/122_pn_triangle.h"
+#include <math.h>
+#include <string.h>
+#include <stdlib.h>
+
+typedef struct ts_mesh
+{
+	double* x;
+	unsigned int nv, cap;
+	unsigned int* f;
+	unsigned int nf, capf;
+} ts_mesh;
+
+static unsigned int ts_vert(ts_mesh* m, double x, double y, double z)
+{
+	if (m->nv == m->cap)
+	{
+		m->cap = m->cap ? 2 * m->cap : 64;
+		m->x = (double*)realloc(m->x, sizeof(double) * 3 * m->cap);
+	}
+	m->x[3 * m->nv] = x; m->x[3 * m->nv + 1] = y; m->x[3 * m->nv + 2] = z;
+	return m->nv++;
+}
+
+static void ts_tri(ts_mesh* m, unsigned int a, unsigned int b, unsigned int c)
+{
+	if (m->nf == m->capf)
+	{
+		m->capf = m->capf ? 2 * m->capf : 64;
+		m->f = (unsigned int*)realloc(m->f, sizeof(unsigned int) * 3 * m->capf);
+	}
+	m->f[3 * m->nf] = a; m->f[3 * m->nf + 1] = b; m->f[3 * m->nf + 2] = c;
+	m->nf++;
+}
+
+static qaws_mesh_3d* ts_make(ts_mesh const* t)
+{
+	qaws_mesh_3d_desc d;
+	qaws_mesh_3d* m = NULL;
+	qaws_scalar* p = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * t->nv);
+	unsigned int i;
+	for (i = 0; i < 3 * t->nv; i++)
+		p[i] = (qaws_scalar)t->x[i];
+	memset(&d, 0, sizeof d);
+	d.positions = p;
+	d.vertex_count = t->nv;
+	d.face_vertices = t->f;
+	d.face_count = t->nf;
+	qaws_mesh_3d_create(&d, &m);
+	free(p);
+	return m;
+}
+
+/* the midpoint vertex of edge (a, b), made once (pairs kept in a list) */
+static unsigned int ts_mid(ts_mesh* m, unsigned int* keys, unsigned int* nk, unsigned int a, unsigned int b)
+{
+	unsigned int lo = a < b ? a : b, hi = a < b ? b : a, i, v;
+	for (i = 0; i < *nk; i++)
+		if (keys[3 * i] == lo && keys[3 * i + 1] == hi)
+			return keys[3 * i + 2];
+	v = ts_vert(m, (m->x[3 * a] + m->x[3 * b]) / 2, (m->x[3 * a + 1] + m->x[3 * b + 1]) / 2, (m->x[3 * a + 2] + m->x[3 * b + 2]) / 2);
+	keys[3 * *nk] = lo; keys[3 * *nk + 1] = hi; keys[3 * *nk + 2] = v;
+	(*nk)++;
+	return v;
+}
+
+static void ts_icosphere(ts_mesh* m, unsigned int level)
+{
+	static unsigned int const f[60] = { 0, 11, 5, 0, 5, 1, 0, 1, 7, 0, 7, 10, 0, 10, 11, 1, 5, 9, 5, 11, 4, 11, 10, 2, 10, 7, 6, 7, 1, 8,
+		3, 9, 4, 3, 4, 2, 3, 2, 6, 3, 6, 8, 3, 8, 9, 4, 9, 5, 2, 4, 11, 6, 2, 10, 8, 6, 7, 9, 8, 1 };
+	double g = (1 + sqrt(5.0)) / 2;
+	double const v[36] = { -1, g, 0, 1, g, 0, -1, -g, 0, 1, -g, 0, 0, -1, g, 0, 1, g, 0, -1, -g, 0, 1, -g, g, 0, -1, g, 0, 1, -g, 0, -1, -g, 0, 1 };
+	unsigned int i, l;
+	memset(m, 0, sizeof *m);
+	for (i = 0; i < 12; i++)
+		ts_vert(m, v[3 * i], v[3 * i + 1], v[3 * i + 2]);
+	for (i = 0; i < 20; i++)
+		ts_tri(m, f[3 * i], f[3 * i + 1], f[3 * i + 2]);
+	for (l = 0; l < level; l++)
+	{
+		unsigned int nf = m->nf, *old = (unsigned int*)malloc(sizeof(unsigned int) * 3 * nf), *keys = (unsigned int*)malloc(sizeof(unsigned int) * 9 * nf), nk = 0;
+		memcpy(old, m->f, sizeof(unsigned int) * 3 * nf);
+		m->nf = 0;
+		for (i = 0; i < nf; i++)
+		{
+			unsigned int a = old[3 * i], b = old[3 * i + 1], c = old[3 * i + 2];
+			unsigned int ab = ts_mid(m, keys, &nk, a, b), bc = ts_mid(m, keys, &nk, b, c), ca = ts_mid(m, keys, &nk, c, a);
+			ts_tri(m, a, ab, ca); ts_tri(m, ab, b, bc); ts_tri(m, ca, bc, c); ts_tri(m, ab, bc, ca);
+		}
+		free(old);
+		free(keys);
+	}
+	for (i = 0; i < m->nv; i++)
+	{
+		double* p = m->x + 3 * i, r = sqrt(p[0] * p[0] + p[1] * p[1] + p[2] * p[2]);
+		p[0] /= r; p[1] /= r; p[2] /= r;
+	}
+}
+
+/* a prism of n sides, radius R (at its vertices), rings at heights 0..h */
+static void ts_prism(ts_mesh* m, unsigned int n, unsigned int rings, double R, double h)
+{
+	unsigned int i, j;
+	memset(m, 0, sizeof *m);
+	for (j = 0; j < rings; j++)
+		for (i = 0; i < n; i++)
+			ts_vert(m, R * cos(2 * M_PI * i / n), R * sin(2 * M_PI * i / n), h * j / (rings - 1));
+	for (j = 0; j + 1 < rings; j++)
+		for (i = 0; i < n; i++)
+		{
+			unsigned int a = j * n + i, b = j * n + (i + 1) % n, c = (j + 1) * n + (i + 1) % n, d = (j + 1) * n + i;
+			ts_tri(m, a, b, c);
+			ts_tri(m, a, c, d);
+		}
+}
+
+static void ts_free(ts_mesh* m)
+{
+	free(m->x);
+	free(m->f);
+}
+
+static qaws_mesh_reference* ts_ref(qaws_mesh_3d const* m, qaws_interpolant kind, qaws_scalar const* normals)
+{
+	qaws_mesh_reference_desc d;
+	qaws_mesh_reference* r = NULL;
+	memset(&d, 0, sizeof d);
+	d.interpolant = kind;
+	d.normals = normals;
+	qaws_mesh_reference_create(m, &d, &r);
+	return r;
+}
+
+static unsigned int ts_rand(unsigned int* s)
+{
+	*s = *s * 1664525u + 1013904223u;
+	return *s >> 8;
+}
+
+static double ts_u(unsigned int* s)
+{
+	return (ts_rand(s) & 0xFFFFFF) / (double)0x1000000;
+}
+
+static qaws_mesh_location ts_loc(unsigned int* s, unsigned int nt)
+{
+	qaws_mesh_location l;
+	double a = ts_u(s), b = ts_u(s);
+	if (a + b > 1)
+	{
+		a = 1 - a;
+		b = 1 - b;
+	}
+	l.patch = ts_rand(s) % nt;
+	l.a = (qaws_scalar)a;
+	l.b = (qaws_scalar)b;
+	return l;
+}
+
+static void test_pn_against_mathematica(void)
+{
+	mi_tri t;
+	double const *P[3], *N[3];
+	double emax = 0, scale = 0;
+	unsigned int i, k, q;
+	char msg[300];
+	for (k = 0; k < 3; k++)
+	{
+		P[k] = g122_P + 3 * k;
+		N[k] = g122_N + 3 * k;
+	}
+	mi_build(&t, QAWS_INTERPOLANT_PN, P, N, NULL);
+	for (i = 0; i < 5; i++)
+	{
+		double v[27], k1, k2, d1[3], d2[3];
+		double const* want = g122_rows + 29 * i;
+		mi_eval(&t, g122_pts[2 * i], g122_pts[2 * i + 1], v, v + 3, v + 6, v + 9, v + 12, v + 15, v + 18, v + 21, v + 24);
+		mi_curvature(v + 3, v + 6, v + 18, v + 21, v + 24, &k1, &k2, d1, d2);
+		for (q = 0; q < 27; q++)
+		{
+			emax = fmax(emax, fabs(v[q] - want[q]));
+			scale = fmax(scale, fabs(want[q]));
+		}
+		emax = fmax(emax, fmax(fabs(k1 - want[27]), fabs(k2 - want[28])));
+	}
+	sprintf(msg, "PN triangle against Mathematica at 5 points: position, derivatives to second order, normal field and its derivatives, curvatures: error %.2g (of %.3g)",
+		emax, scale);
+	TEST_ASSERT(emax < 1e-12 * fmax(1, scale), msg);
+}
+
+static void test_sphere(void)
+{
+	ts_mesh t;
+	qaws_mesh_3d* m;
+	qaws_mesh_reference *pn, *lin;
+	qaws_scalar* nrm;
+	unsigned int i, s = 5, nt, okv = 1;
+	double vmax = 0, cmax = 0, nmax = 0, epn = 0, elin = 0, kmax = 0;
+	char msg[400];
+	ts_icosphere(&t, 2);
+	m = ts_make(&t);
+	nrm = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * t.nv);
+	for (i = 0; i < 3 * t.nv; i++)
+		nrm[i] = (qaws_scalar)t.x[i];
+	pn = ts_ref(m, QAWS_INTERPOLANT_PN, nrm);
+	lin = ts_ref(m, QAWS_INTERPOLANT_LINEAR, nrm);
+	if (!m || !pn || !lin)
+	{
+		TEST_ASSERT(0, "sphere: the references");
+		goto done;
+	}
+	nt = qaws_mesh_reference_get_triangle_count(pn);
+	/* the vertices interpolated */
+	for (i = 0; i < t.nv; i++)
+	{
+		qaws_mesh_location l;
+		qaws_scalar x[3];
+		okv &= qaws_mesh_reference_get_vertex_location(pn, i, &l) == QAWS_STATUS_OK;
+		qaws_mesh_reference_evaluate(pn, &l, 1, x, NULL, NULL);
+		vmax = fmax(vmax, fabs(x[0] - t.x[3 * i]) + fabs(x[1] - t.x[3 * i + 1]) + fabs(x[2] - t.x[3 * i + 2]));
+	}
+	/* the patches meet along their edges: each triangle edge's points from both sides */
+	for (i = 0; i < 3 * nt; i++)
+	{
+		unsigned int nb = pn->ta[i], tt = i / 3, e = i % 3, j;
+		if (nb == HM_NONE)
+			continue;
+		for (j = 1; j < 4; j++)
+		{
+			double lam = j / 4.0, b1[3] = { 0, 0, 0 }, b2[3] = { 0, 0, 0 }, x1[3], x2[3], n1[3], n2[3];
+			unsigned int u = nb / 3, ue = nb % 3;
+			b1[e] = 1 - lam; b1[(e + 1) % 3] = lam;
+			b2[ue] = lam; b2[(ue + 1) % 3] = 1 - lam;
+			mi_eval(&pn->patch[tt], b1[1], b1[2], x1, NULL, NULL, NULL, NULL, NULL, n1, NULL, NULL);
+			mi_eval(&pn->patch[u], b2[1], b2[2], x2, NULL, NULL, NULL, NULL, NULL, n2, NULL, NULL);
+			cmax = fmax(cmax, fabs(x1[0] - x2[0]) + fabs(x1[1] - x2[1]) + fabs(x1[2] - x2[2]));
+			nmax = fmax(nmax, fabs(n1[0] - n2[0]) + fabs(n1[1] - n2[1]) + fabs(n1[2] - n2[2]));
+		}
+	}
+	sprintf(msg, "icosphere: vertices interpolated (%.2g), patches meet along edges (positions %.2g, normals %.2g)", vmax, cmax, nmax);
+	TEST_ASSERT(okv && vmax < 1e-12 && cmax < 1e-12 && nmax < 1e-12, msg);
+	/* closer to the sphere than the flat triangles; curvatures near 1 */
+	for (i = 0; i < 2000; i++)
+	{
+		qaws_mesh_location l = ts_loc(&s, nt);
+		qaws_scalar x[3], y[3], k[8];
+		qaws_mesh_reference_evaluate(pn, &l, 1, x, NULL, k);
+		qaws_mesh_reference_evaluate(lin, &l, 1, y, NULL, NULL);
+		epn = fmax(epn, fabs(sqrt(x[0] * x[0] + x[1] * x[1] + x[2] * x[2]) - 1));
+		elin = fmax(elin, fabs(sqrt(y[0] * y[0] + y[1] * y[1] + y[2] * y[2]) - 1));
+		kmax = fmax(kmax, fmax(fabs(k[0] - 1), fabs(k[1] - 1)));
+	}
+	sprintf(msg, "icosphere of %u triangles: off the sphere PN %.3g, flat %.3g (%.0fx); PN curvatures off 1 by %.3g", nt, epn, elin, elin / epn, kmax);
+	TEST_ASSERT(epn < elin / 10 && kmax < 0.08, msg);
+done:
+	qaws_mesh_reference_destroy(pn);
+	qaws_mesh_reference_destroy(lin);
+	qaws_mesh_3d_destroy(m);
+	free(nrm);
+	ts_free(&t);
+}
+
+static void test_cylinder_and_cube(void)
+{
+	ts_mesh t;
+	qaws_mesh_3d *m, *cube = NULL;
+	qaws_mesh_reference *r = NULL, *rc = NULL;
+	qaws_scalar* nrm;
+	unsigned int i, s = 9, nt;
+	double k1e = 0, k2e = 0, dax = 0, off = 0, onface = 0;
+	char msg[400];
+	ts_prism(&t, 48, 6, 1.5, 3);
+	m = ts_make(&t);
+	nrm = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * t.nv);
+	for (i = 0; i < t.nv; i++)
+	{
+		nrm[3 * i] = (qaws_scalar)(t.x[3 * i] / 1.5);
+		nrm[3 * i + 1] = (qaws_scalar)(t.x[3 * i + 1] / 1.5);
+		nrm[3 * i + 2] = 0;
+	}
+	r = ts_ref(m, QAWS_INTERPOLANT_PN, nrm);
+	if (!r)
+	{
+		TEST_ASSERT(0, "cylinder: the reference");
+		goto done;
+	}
+	nt = qaws_mesh_reference_get_triangle_count(r);
+	for (i = 0; i < 1000; i++)
+	{
+		qaws_mesh_location l = ts_loc(&s, nt);
+		qaws_scalar k[8];
+		qaws_mesh_reference_evaluate(r, &l, 1, NULL, NULL, k);
+		k1e = fmax(k1e, fabs(k[0] - 1 / 1.5));
+		k2e = fmax(k2e, fabs(k[1]));
+		dax = fmax(dax, fabs(k[4]));   /* (d1's z: round the cylinder, not along it) */
+	}
+	sprintf(msg, "cylinder r 1.5: k1 off 1/r by %.3g, k2 off 0 by %.3g, the first direction's axial part %.3g", k1e, k2e, dax);
+	TEST_ASSERT(k1e < 0.01 && k2e < 0.01 && dax < 0.05, msg);
+	/* a cube, its creases detected: PN stays on the cube */
+	{
+		static qaws_scalar const x[24] = { -1, -1, -1, 1, -1, -1, 1, 1, -1, -1, 1, -1, -1, -1, 1, 1, -1, 1, 1, 1, 1, -1, 1, 1 };
+		static unsigned int const f[24] = { 0, 3, 2, 1, 4, 5, 6, 7, 0, 1, 5, 4, 1, 2, 6, 5, 2, 3, 7, 6, 3, 0, 4, 7 };
+		static unsigned int const fs[6] = { 4, 4, 4, 4, 4, 4 };
+		qaws_mesh_3d_desc d;
+		memset(&d, 0, sizeof d);
+		d.positions = x; d.vertex_count = 8; d.face_vertices = f; d.face_sizes = fs; d.face_count = 6;
+		qaws_mesh_3d_create(&d, &cube);
+		for (i = 0; cube && i < 6; i++)
+			qaws_mesh_3d_split_face(cube, i, NULL, NULL, NULL);
+		if (cube)
+			qaws_mesh_3d_detect_features(cube, (qaws_scalar)(M_PI / 6), 0, 0);
+		rc = cube ? ts_ref(cube, QAWS_INTERPOLANT_PN, NULL) : NULL;
+	}
+	if (rc)
+	{
+		nt = qaws_mesh_reference_get_triangle_count(rc);
+		for (i = 0; i < 2000; i++)
+		{
+			qaws_mesh_location l = ts_loc(&s, nt);
+			qaws_scalar x[3];
+			double mx;
+			qaws_mesh_reference_evaluate(rc, &l, 1, x, NULL, NULL);
+			mx = fmax(fabs(x[0]), fmax(fabs(x[1]), fabs(x[2])));
+			off = fmax(off, mx - 1);
+			onface = fmax(onface, 1 - mx);
+		}
+	}
+	sprintf(msg, "cube with creases, PN with split normals: points beyond the cube %.2g, inside its faces %.2g", off, onface);
+	TEST_ASSERT(rc && off < 1e-12 && onface < 1e-12, msg);
+done:
+	qaws_mesh_reference_destroy(r);
+	qaws_mesh_reference_destroy(rc);
+	qaws_mesh_3d_destroy(m);
+	qaws_mesh_3d_destroy(cube);
+	free(nrm);
+	ts_free(&t);
+}
+
+static void test_projection(void)
+{
+	ts_mesh t;
+	qaws_mesh_3d* m;
+	qaws_mesh_reference *pn, *lin;
+	unsigned int i, s = 13, nt, kind;
+	double emax[2] = { 0, 0 }, smax = 0;
+	char msg[400];
+	ts_icosphere(&t, 1);
+	/* bumps: a non-convex shape */
+	for (i = 0; i < t.nv; i++)
+	{
+		double* p = t.x + 3 * i, f = 1 + 0.15 * sin(3 * p[0]) * cos(2 * p[1]);
+		p[0] *= f; p[1] *= f; p[2] *= f;
+	}
+	m = ts_make(&t);
+	pn = ts_ref(m, QAWS_INTERPOLANT_PN, NULL);
+	lin = ts_ref(m, QAWS_INTERPOLANT_LINEAR, NULL);
+	if (!pn || !lin)
+	{
+		TEST_ASSERT(0, "projection: the references");
+		goto done;
+	}
+	nt = qaws_mesh_reference_get_triangle_count(pn);
+	for (kind = 0; kind < 2; kind++)
+	{
+		qaws_mesh_reference const* r = kind ? lin : pn;
+		for (i = 0; i < 300; i++)
+		{
+			qaws_scalar p[3], d;
+			qaws_mesh_location l;
+			double q[3], best = HUGE_VAL, a, b;
+			unsigned int tt;
+			q[0] = 2.6 * ts_u(&s) - 1.3; q[1] = 2.6 * ts_u(&s) - 1.3; q[2] = 2.6 * ts_u(&s) - 1.3;
+			p[0] = (qaws_scalar)q[0]; p[1] = (qaws_scalar)q[1]; p[2] = (qaws_scalar)q[2];
+			qaws_mesh_reference_project(r, p, 1, NULL, &l, &d);
+			for (tt = 0; tt < nt; tt++)
+				best = fmin(best, mr_closest_on_patch(r, tt, q, &a, &b));
+			emax[kind] = fmax(emax[kind], fabs(d - sqrt(best)));
+			smax = fmax(smax, sqrt(best));
+		}
+	}
+	sprintf(msg, "projection of 300 points against brute force: PN %.2g, LINEAR %.2g (distances up to %.3g)", emax[0], emax[1], smax);
+	TEST_ASSERT(emax[0] < 1e-9 && emax[1] < 1e-12, msg);
+	/* two sheets: the hint's, not the nearer one */
+	{
+		static qaws_scalar const x[24] = { 0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 0, 0.1f, 1, 0, 0.1f, 1, 1, 0.1f, 0, 1, 0.1f };
+		static unsigned int const f[12] = { 0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7 };
+		qaws_mesh_3d_desc d;
+		qaws_mesh_3d* two = NULL;
+		qaws_mesh_reference* r = NULL;
+		qaws_scalar p[3] = { 0.5f, 0.4f, 0.06f }, d0 = 0, d1 = 0;
+		qaws_mesh_location l0, l1, hint;
+		memset(&d, 0, sizeof d);
+		d.positions = x; d.vertex_count = 8; d.face_vertices = f; d.face_count = 4;
+		qaws_mesh_3d_create(&d, &two);
+		r = two ? ts_ref(two, QAWS_INTERPOLANT_PN, NULL) : NULL;
+		hint.patch = 0; hint.a = (qaws_scalar)0.2; hint.b = (qaws_scalar)0.2;
+		if (r)
+		{
+			qaws_mesh_reference_project(r, p, 1, NULL, &l0, &d0);
+			qaws_mesh_reference_project(r, p, 1, &hint, &l1, &d1);
+		}
+		sprintf(msg, "two sheets 0.1 apart, a point 0.06 above the first: unhinted to triangle %u at %.4g, hinted on the first to triangle %u at %.4g",
+			l0.patch, (double)d0, l1.patch, (double)d1);
+		TEST_ASSERT(r && l0.patch >= 2 && fabs(d0 - 0.04) < 1e-6 && l1.patch < 2 && fabs(d1 - 0.06) < 1e-6, msg);
+		qaws_mesh_reference_destroy(r);
+		qaws_mesh_3d_destroy(two);
+	}
+done:
+	qaws_mesh_reference_destroy(pn);
+	qaws_mesh_reference_destroy(lin);
+	qaws_mesh_3d_destroy(m);
+	ts_free(&t);
+}
+
+static void test_walk(void)
+{
+	ts_mesh t;
+	qaws_mesh_3d *m, *pm = NULL;
+	qaws_mesh_reference *r = NULL, *rp = NULL;
+	unsigned int i, j, n = 12;
+	double e1 = 0, e2 = 0;
+	char msg[400];
+	/* a plane of 10 x 10 squares */
+	memset(&t, 0, sizeof t);
+	for (j = 0; j <= 10; j++)
+		for (i = 0; i <= 10; i++)
+			ts_vert(&t, i * 0.1, j * 0.1, 0);
+	for (j = 0; j < 10; j++)
+		for (i = 0; i < 10; i++)
+		{
+			unsigned int a = j * 11 + i;
+			ts_tri(&t, a, a + 1, a + 12);
+			ts_tri(&t, a, a + 12, a + 11);
+		}
+	m = ts_make(&t);
+	r = m ? ts_ref(m, QAWS_INTERPOLANT_LINEAR, NULL) : NULL;
+	if (r)
+	{
+		qaws_mesh_location from, to;
+		qaws_scalar p[3] = { 0.43f, 0.51f, 0 }, x[3];
+		for (i = 0; i < 20; i++)
+		{
+			double ang = 2 * M_PI * i / 20, len = 0.05 + 0.02 * i;
+			qaws_scalar w[3];
+			w[0] = (qaws_scalar)(len * cos(ang)); w[1] = (qaws_scalar)(len * sin(ang)); w[2] = 0;
+			qaws_mesh_reference_project(r, p, 1, NULL, &from, NULL);
+			qaws_mesh_reference_walk(r, from, w, &to);
+			qaws_mesh_reference_evaluate(r, &to, 1, x, NULL, NULL);
+			e1 = fmax(e1, fabs(x[0] - (p[0] + w[0])) + fabs(x[1] - (p[1] + w[1])));
+		}
+	}
+	sprintf(msg, "walking straight on a plane across triangles: 20 directions, error %.2g", e1);
+	TEST_ASSERT(r && e1 < 1e-12, msg);
+	/* round a 12-sided prism: against the prism unrolled */
+	ts_free(&t);
+	ts_prism(&t, n, 5, 1, 4);
+	pm = ts_make(&t);
+	rp = pm ? ts_ref(pm, QAWS_INTERPOLANT_LINEAR, NULL) : NULL;
+	if (rp)
+	{
+		double side = 2 * sin(M_PI / n);
+		for (i = 0; i < 12; i++)
+		{
+			double th = 0.15 + 0.07 * i, L = 2.5 + 0.3 * i, z0 = 1.0, p0 = 0.5 * side, pp, zz, want[3];
+			double c0[3] = { 1, 0, 0 }, c1[3] = { cos(2 * M_PI / n), sin(2 * M_PI / n), 0 }, u[3];
+			qaws_scalar start[3], w[3], x[3];
+			qaws_mesh_location from, to;
+			unsigned int k, face;
+			for (k = 0; k < 3; k++)
+				u[k] = (c1[k] - c0[k]) / side;
+			start[0] = (qaws_scalar)((c0[0] + c1[0]) / 2); start[1] = (qaws_scalar)((c0[1] + c1[1]) / 2); start[2] = (qaws_scalar)z0;
+			for (k = 0; k < 3; k++)
+				w[k] = (qaws_scalar)(L * (cos(th) * u[k] + (k == 2 ? sin(th) * 0.4 : 0)));
+			{
+				/* the walked length is |w|: unrolled, its horizontal and vertical parts */
+				double h = L * cos(th), v = L * sin(th) * 0.4, len = sqrt(h * h + v * v);
+				qaws_mesh_reference_project(rp, start, 1, NULL, &from, NULL);
+				qaws_mesh_reference_walk(rp, from, w, &to);
+				qaws_mesh_reference_evaluate(rp, &to, 1, x, NULL, NULL);
+				(void)len;
+				pp = p0 + h;
+				zz = z0 + v;
+			}
+			face = (unsigned int)floor(pp / side) % n;
+			{
+				double f = fmod(pp, side) / side, a0 = 2 * M_PI * face / n, a1 = 2 * M_PI * (face + 1) / n;
+				want[0] = (1 - f) * cos(a0) + f * cos(a1);
+				want[1] = (1 - f) * sin(a0) + f * sin(a1);
+				want[2] = zz;
+			}
+			e2 = fmax(e2, fabs(x[0] - want[0]) + fabs(x[1] - want[1]) + fabs(x[2] - want[2]));
+		}
+	}
+	sprintf(msg, "walking round a 12-sided prism, 12 helical paths over several faces: against the prism unrolled %.2g", e2);
+	TEST_ASSERT(rp && e2 < 1e-9, msg);
+	qaws_mesh_reference_destroy(r);
+	qaws_mesh_reference_destroy(rp);
+	qaws_mesh_3d_destroy(m);
+	qaws_mesh_3d_destroy(pm);
+	ts_free(&t);
+}
+
+static void test_attributes_and_refusals(void)
+{
+	ts_mesh t;
+	qaws_mesh_3d* m;
+	qaws_mesh_reference* r = NULL;
+	qaws_attribute_desc d;
+	unsigned int i, s = 21, va = 0, fa = 0, nt;
+	double ev = 0, ef = 0;
+	qaws_scalar* vals;
+	char msg[300];
+	ts_icosphere(&t, 1);
+	m = ts_make(&t);
+	vals = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (t.nv > t.nf ? t.nv : t.nf));
+	for (i = 0; i < t.nv; i++)
+		vals[i] = (qaws_scalar)(t.x[3 * i] - 2 * t.x[3 * i + 1]);
+	memset(&d, 0, sizeof d);
+	d.name = "f"; d.element = QAWS_MESH_VERTEX; d.components = 1;
+	qaws_mesh_3d_add_attribute(m, &d, vals, &va);
+	for (i = 0; i < t.nf; i++)
+		vals[i] = (qaws_scalar)i;
+	d.name = "id"; d.element = QAWS_MESH_FACE; d.rule = QAWS_ATTRIBUTE_NEAREST;
+	qaws_mesh_3d_add_attribute(m, &d, vals, &fa);
+	r = ts_ref(m, QAWS_INTERPOLANT_LINEAR, NULL);
+	nt = r ? qaws_mesh_reference_get_triangle_count(r) : 0;
+	for (i = 0; r && i < 500; i++)
+	{
+		qaws_mesh_location l = ts_loc(&s, nt);
+		qaws_scalar x[3], v, id;
+		qaws_mesh_reference_evaluate(r, &l, 1, x, NULL, NULL);
+		qaws_mesh_reference_evaluate_attribute(r, va, &l, 1, &v);
+		qaws_mesh_reference_evaluate_attribute(r, fa, &l, 1, &id);
+		ev = fmax(ev, fabs(v - (x[0] - 2 * x[1])));
+		ef = fmax(ef, fabs(id - (double)l.patch));
+	}
+	sprintf(msg, "attributes at 500 locations of the flat reference: a linear vertex attribute %.2g, the face ids %.2g", ev, ef);
+	TEST_ASSERT(r && ev < 1e-12 && ef == 0, msg);
+	{
+		qaws_mesh_reference_desc dd;
+		qaws_mesh_reference* bad = NULL;
+		qaws_mesh_location l;
+		qaws_status s1, s2;
+		memset(&dd, 0, sizeof dd);
+		dd.interpolant = QAWS_INTERPOLANT_NAGATA;
+		s1 = qaws_mesh_reference_create(m, &dd, &bad);
+		l.patch = 100000; l.a = 0; l.b = 0;
+		s2 = r ? qaws_mesh_reference_evaluate(r, &l, 1, NULL, NULL, NULL) : QAWS_STATUS_OK;
+		sprintf(msg, "refusals: a reserved interpolant %s, a location off the triangles %s", qaws_status_to_string(s1), qaws_status_to_string(s2));
+		TEST_ASSERT(s1 == QAWS_STATUS_UNSUPPORTED_OPERATION && !bad && s2 == QAWS_STATUS_INVALID_ARGUMENT, msg);
+	}
+	qaws_mesh_reference_destroy(r);
+	qaws_mesh_3d_destroy(m);
+	free(vals);
+	ts_free(&t);
+}
+
+int test_122_mesh_reference_main(void)
+{
+	g_pass = 0;
+	g_fail = 0;
+	printf("Test 122: mesh references\n");
+	test_pn_against_mathematica();
+	test_sphere();
+	test_cylinder_and_cube();
+	test_projection();
+	test_walk();
+	test_attributes_and_refusals();
+	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
+	return g_fail;
+}

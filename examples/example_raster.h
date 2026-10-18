@@ -129,7 +129,7 @@ static void er_shade(er_canvas const* c, double const* n, double const* col, dou
 static void er_triangle(er_canvas* c, double const* p0, double const* p1, double const* p2, double const* n0, double const* n1,
 	double const* n2, double const* c0, double const* c1, double const* c2)
 {
-	double A[3], B[3], C[3], area, fn[3], u[3], v[3], vn[3][3];
+	double A[3], B[3], C[3], area, fn[3], u[3], v[3], vn[3][3], gn[3];
 	double const* P[3] = { p0, p1, p2 };
 	double const* N[3] = { n0, n1, n2 };
 	int xa, xb, ya, yb, x, y, k, j;
@@ -139,6 +139,14 @@ static void er_triangle(er_canvas* c, double const* p0, double const* p1, double
 		return;
 	for (k = 0; k < 3; k++) { u[k] = P[1][k] - P[0][k]; v[k] = P[2][k] - P[0][k]; }
 	fn[0] = u[1] * v[2] - u[2] * v[1]; fn[1] = u[2] * v[0] - u[0] * v[2]; fn[2] = u[0] * v[1] - u[1] * v[0];
+	{
+		/* the geometric normal in view space: which side faces the eye */
+		double l;
+		er_to_view(c, fn, gn);
+		l = sqrt(gn[0] * gn[0] + gn[1] * gn[1] + gn[2] * gn[2]);
+		if (l > 0)
+			for (k = 0; k < 3; k++) gn[k] /= l;
+	}
 	for (j = 0; j < 3; j++)
 	{
 		double const* src = N[j] ? N[j] : fn;
@@ -173,10 +181,15 @@ static void er_triangle(er_canvas* c, double const* p0, double const* p1, double
 			if (nl == 0)
 				continue;
 			for (k = 0; k < 3; k++) n[k] /= nl;
-			if (n[2] < 0)
+			if (gn[2] < 0)
 			{
 				/* the back side: darker */
 				for (k = 0; k < 3; k++) { n[k] = -n[k]; col[k] *= 0.6; }
+			}
+			if (n[2] < 0)
+			{
+				/* a shading normal turned away on a side facing the eye: the face's own */
+				for (k = 0; k < 3; k++) n[k] = gn[2] < 0 ? -gn[k] : gn[k];
 			}
 			er_shade(c, n, col, out);
 			for (k = 0; k < 3; k++) c->rgb[3 * i + k] = (unsigned char)out[k];

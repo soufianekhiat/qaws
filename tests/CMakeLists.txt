@@ -123,6 +123,7 @@ add_executable(
   119_repulsive_core.c
   120_repulsive_spacetime.c
   121_mesh.c
+  122_mesh_reference.c
 )
 
 # The amalgamated library exports exactly the same symbols, so the tests can
