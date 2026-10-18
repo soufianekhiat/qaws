@@ -18,6 +18,29 @@
  *                vertices, its growth limited (gradation: a size grows by
  *                at most `gradation` times the distance), interpolated
  *                across the triangles;
+ *   feature size the width of the part or gap at each point (twice the
+ *                local feature size, the distance to the medial axis) over
+ *                `cells_across`, so that thin parts and narrow gaps get that
+ *                many edges across. Medial balls by the shrinking-ball
+ *                method (Ma, Bae, Choi, Kim 2012) on samples of the
+ *                reference (a barycentric grid per triangle, a k-d tree for
+ *                the nearest-point queries), on both sides of each sample
+ *                (inward: thickness; outward: gaps), each ball's contact
+ *                then carried onto the reference's patches. A point counts
+ *                as an opposite sheet where its normal is within 60 degrees
+ *                of opposite to the sample's, or within 60 degrees of the
+ *                same and 45 degrees of the ball's axis (an open sheet
+ *                oriented the other way): a face across a crease (a box's
+ *                edge, a thin part's narrow side) and the sample's own
+ *                sheet never shrink a ball. Sampled at half the largest
+ *                size, then again at a sample per size where the sizes are
+ *                smaller; clamped to [min_length, max_length], graded as
+ *                the curvature field (Dijkstra, through the samples within
+ *                1.5 spacings of each other), interpolated over the grid.
+ *                Curvature is left to the curvature field: combine the two
+ *                with min. Without gradation a narrow side of a thin part
+ *                (a strip between two creases) keeps the largest size: the
+ *                gradation from the faces beside it is what refines it;
  *   vertices     sizes given at a reference's mesh vertices, interpolated;
  *   callback     a function of the position;
  *   min          the smaller of two fields.
@@ -39,8 +62,19 @@ typedef struct qaws_curvature_size_desc
 	qaws_scalar gradation;              /* the largest growth of the size per unit of distance; 0: unlimited */
 } qaws_curvature_size_desc;
 
+typedef struct qaws_feature_size_desc
+{
+	qaws_scalar cells_across;           /* the edges across any thin part or gap; 0: 3 */
+	qaws_scalar min_length;             /* 0: a thousandth of the reference's size */
+	qaws_scalar max_length;             /* 0: a tenth of the reference's size */
+	qaws_scalar gradation;              /* the largest growth of the size per unit of distance; 0: unlimited (the samples' own sizes) */
+} qaws_feature_size_desc;
+
 qaws_status qaws_size_field_create_uniform(qaws_scalar length, qaws_size_field** out_field);
 qaws_status qaws_size_field_create_curvature(qaws_mesh_reference const* reference, qaws_curvature_size_desc const* desc,
+	qaws_size_field** out_field);
+/* desc NULL: the defaults */
+qaws_status qaws_size_field_create_feature_size(qaws_mesh_reference const* reference, qaws_feature_size_desc const* desc,
 	qaws_size_field** out_field);
 /* sizes: one per vertex of the reference's mesh (all positive) */
 qaws_status qaws_size_field_create_vertices(qaws_mesh_reference const* reference, qaws_scalar const* sizes, qaws_size_field** out_field);

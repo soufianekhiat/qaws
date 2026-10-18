@@ -103,6 +103,7 @@ derivatives and curvatures are checked against Mathematica
 ```c
 qaws_status qaws_size_field_create_uniform(qaws_scalar length, qaws_size_field** out);
 qaws_status qaws_size_field_create_curvature(qaws_mesh_reference const* r, qaws_curvature_size_desc const* desc, qaws_size_field** out);
+qaws_status qaws_size_field_create_feature_size(qaws_mesh_reference const* r, qaws_feature_size_desc const* desc, qaws_size_field** out);
 qaws_status qaws_mesh_3d_direction_field(qaws_mesh_3d const* mesh, qaws_direction_field_desc const* desc, qaws_scalar* out_directions,
 	int* out_face_index);
 qaws_status qaws_volume_mesh_frame_field(qaws_volume_mesh const* mesh, qaws_frame_field_desc const* desc, qaws_scalar* out_frames,
@@ -112,7 +113,16 @@ qaws_status qaws_volume_mesh_frame_field(qaws_volume_mesh const* mesh, qaws_fram
 - **Size fields** give the target edge length at each point: uniform; by
   curvature from chord and angle tolerances (clamped, graded so sizes grow
   at most by `gradation` times the distance); per reference vertex; a
-  callback; the smaller of two.
+  callback; the smaller of two; by local feature size: the width across
+  thin parts and gaps over `cells_across` (default 3), so they get that
+  many edges across. Medial balls by shrinking (Ma, Bae, Choi, Kim 2012) on
+  both sides of samples of the reference (thickness inward, gaps outward),
+  their contacts carried onto the patches; a face across a crease never
+  counts as opposite (normals within 60 degrees of perpendicular), so box
+  edges are not refined. Clamped to `[min_length, max_length]` (defaults a
+  thousandth and a tenth of the reference's size), graded as the curvature
+  field; curvature is not included: combine with the curvature field by
+  min. A fin 0.02 thick at 3 cells: 0.00667 on its faces, in 0.5 s.
 - **Cross fields** on surfaces (4-symmetric, Instant Meshes'
   multiresolution smoothing along features); the index round each face in
   quarter turns marks the singularities, summing to 4 times the Euler
