@@ -12,10 +12,11 @@
  * the corners' closest triangles, cut where the unfolding changes triangle),
  * the difference of the two patches over each piece a cubic Bezier
  * triangle whose control points (blossoms) bound it by the convex hull
- * property; on a flat S also the distance's Lipschitz bound from the
- * corners. The lower bound is the largest corner distance projected. Any
- * domain point of R is a point of the surface, so a poor match only widens
- * a bound, never breaks it.
+ * property; also the distance's Lipschitz bound from the corners (on a
+ * curved S widened by how far its net strays from the corners' plane),
+ * which still shrinks where the closest place on R jumps. The lower bound is
+ * the largest corner distance projected. Any domain point of R is a point of
+ * the surface, so a poor match only widens a bound, never breaks it.
  */
 
 #include "qaws_mesh_internal.h"
@@ -191,7 +192,8 @@ qaws_status qaws_mesh_3d_measure_shape(qaws_mesh_3d const* mesh, qaws_shape_qual
 		}
 		else
 		{
-			/* x: the faces the corners' angles hold at their ideal corner angles; regular within a half */
+			/* x: the faces the corners' angles hold at their ideal corner angles; regular within a half (so a tie at a half
+			   rounds to the vertex's own count), one face at the least */
 			double x = 0;
 			unsigned int nf = 0;
 			for (c = m->vc[v]; c != HM_NONE; c = hm_round(m, v, c))
@@ -200,9 +202,9 @@ qaws_status qaws_mesh_3d_measure_shape(qaws_mesh_3d const* mesh, qaws_shape_qual
 				x += ms_angle(m, c) / (n == 3 ? 60.0 : n == 4 ? 90.0 : 180.0 * (n - 2) / n);
 				nf++;
 			}
-			irr = fabs((double)nf - x) > 0.5 + 1e-9;
-			ideal = (unsigned int)floor(x + 0.5);
+			ideal = fabs((double)nf - x) <= 0.5 + 1e-9 ? nf : (unsigned int)floor(x + 0.5);
 			ideal = (ideal < 1 ? 1 : ideal) + border;
+			irr = val != ideal;
 		}
 		out->irregular += irr;
 		out->valence_excess += val > ideal ? val - ideal : ideal - val;
@@ -364,83 +366,6 @@ static double ms_flat_closest(double const* A, double const* B, double const* C,
 	return ms_dot(x, x);
 }
 
-/* a cubic patch at barycentrics w by de Casteljau, its derivatives along a = w1 and b = w2 (xa, xb may be NULL) */
-static void ms_eval(double const (*p)[3], double const* w, double* x, double* xa, double* xb)
-{
-	static unsigned char const from3[6][3] = { { 0, 3, 8 }, { 4, 1, 5 }, { 7, 6, 2 }, { 3, 4, 9 }, { 9, 5, 6 }, { 8, 9, 7 } };
-	static unsigned char const from2[3][3] = { { 0, 3, 5 }, { 3, 1, 4 }, { 5, 4, 2 } };
-	double l2[6][3], l1[3][3];
-	unsigned int i, k;
-	for (i = 0; i < 6; i++)
-		for (k = 0; k < 3; k++)
-			l2[i][k] = w[0] * p[from3[i][0]][k] + w[1] * p[from3[i][1]][k] + w[2] * p[from3[i][2]][k];
-	for (i = 0; i < 3; i++)
-		for (k = 0; k < 3; k++)
-			l1[i][k] = w[0] * l2[from2[i][0]][k] + w[1] * l2[from2[i][1]][k] + w[2] * l2[from2[i][2]][k];
-	for (k = 0; k < 3; k++)
-	{
-		x[k] = w[0] * l1[0][k] + w[1] * l1[1][k] + w[2] * l1[2][k];
-		if (xa)
-			xa[k] = 3 * (l1[1][k] - l1[0][k]);
-		if (xb)
-			xb[k] = 3 * (l1[2][k] - l1[0][k]);
-	}
-}
-
-/* the closest point of R's patch t to y: its barycentrics b, its squared distance. Flat: exact (Ericson); curved:
-   projected Gauss-Newton from start (NULL: the flat triangle's closest point), the step halved while it does not improve */
-static double ms_on_patch(qaws_mesh_reference const* R, unsigned int t, double const* y, double const* start, double* b)
-{
-	double const(*p)[3] = (double const(*)[3])R->patch[t].p;
-	double x[3], xa[3], xb[3], best;
-	unsigned int it, k;
-	if (R->kind == QAWS_INTERPOLANT_LINEAR || !start)
-	{
-		best = ms_flat_closest(p[0], p[1], p[2], y, b);
-		if (R->kind == QAWS_INTERPOLANT_LINEAR)
-			return best;
-	}
-	else
-		memcpy(b, start, sizeof(double) * 3);
-	ms_eval(p, b, x, xa, xb);
-	best = (x[0] - y[0]) * (x[0] - y[0]) + (x[1] - y[1]) * (x[1] - y[1]) + (x[2] - y[2]) * (x[2] - y[2]);
-	for (it = 0; it < 24; it++)
-	{
-		double r[3], g0, g1, h00, h01, h11, det, da, db, s;
-		int improved = 0;
-		for (k = 0; k < 3; k++)
-			r[k] = x[k] - y[k];
-		g0 = ms_dot(xa, r); g1 = ms_dot(xb, r);
-		h00 = ms_dot(xa, xa); h01 = ms_dot(xa, xb); h11 = ms_dot(xb, xb);
-		det = h00 * h11 - h01 * h01;
-		if (det <= 1e-300)
-			break;
-		da = -(h11 * g0 - h01 * g1) / det;
-		db = -(h00 * g1 - h01 * g0) / det;
-		for (s = 1; s > 1e-4; s *= 0.5)
-		{
-			double na = b[1] + s * da, nb = b[2] + s * db, w[3], z[3], d;
-			ms_clamp(&na, &nb);
-			w[0] = 1 - na - nb;
-			w[1] = na;
-			w[2] = nb;
-			ms_eval(p, w, z, NULL, NULL);
-			d = (z[0] - y[0]) * (z[0] - y[0]) + (z[1] - y[1]) * (z[1] - y[1]) + (z[2] - y[2]) * (z[2] - y[2]);
-			if (d < best)
-			{
-				improved = fabs(na - b[1]) + fabs(nb - b[2]) > 1e-14;
-				memcpy(b, w, sizeof w);
-				best = d;
-				break;
-			}
-		}
-		if (!improved)
-			break;
-		ms_eval(p, b, x, xa, xb);
-	}
-	return best;
-}
-
 /* the exact closest point of a flat R: the grid's rings outward, Ericson per triangle, until a ring's lower bound passes the best */
 typedef struct ms_query
 {
@@ -502,6 +427,145 @@ static double ms_flat_project(qaws_mesh_reference const* R, mr_scratch* s, doubl
 	return q.best;
 }
 
+/* a cubic patch at barycentrics w by de Casteljau, its derivatives along a = w1 and b = w2 (xa, xb may be NULL; mi_eval's
+   power form, with its second derivatives, costs several times as much in the projections' inner loop) */
+static void ms_eval(double const (*p)[3], double const* w, double* x, double* xa, double* xb)
+{
+	static unsigned char const from3[6][3] = { { 0, 3, 8 }, { 4, 1, 5 }, { 7, 6, 2 }, { 3, 4, 9 }, { 9, 5, 6 }, { 8, 9, 7 } };
+	static unsigned char const from2[3][3] = { { 0, 3, 5 }, { 3, 1, 4 }, { 5, 4, 2 } };
+	double l2[6][3], l1[3][3];
+	unsigned int i, k;
+	for (i = 0; i < 6; i++)
+		for (k = 0; k < 3; k++)
+			l2[i][k] = w[0] * p[from3[i][0]][k] + w[1] * p[from3[i][1]][k] + w[2] * p[from3[i][2]][k];
+	for (i = 0; i < 3; i++)
+		for (k = 0; k < 3; k++)
+			l1[i][k] = w[0] * l2[from2[i][0]][k] + w[1] * l2[from2[i][1]][k] + w[2] * l2[from2[i][2]][k];
+	for (k = 0; k < 3; k++)
+	{
+		x[k] = w[0] * l1[0][k] + w[1] * l1[1][k] + w[2] * l1[2][k];
+		if (xa)
+			xa[k] = 3 * (l1[1][k] - l1[0][k]);
+		if (xb)
+			xb[k] = 3 * (l1[2][k] - l1[0][k]);
+	}
+}
+
+/* Descent on R's curved patch P to y from barycentrics b (in, out), its squared distance: projected Gauss-Newton whose step, at
+   a side the gradient leads out of, runs along that side alone (the active set; the reference's plain projected step stalls
+   there short of the side's closest point), halved while it does not improve. */
+static double ms_descend(mi_tri const* P, double const* y, double* b)
+{
+	double const(*p)[3] = (double const(*)[3])P->p;
+	double x[3], xa[3], xb[3], best;
+	unsigned int it, k;
+	ms_eval(p, b, x, xa, xb);
+	best = (x[0] - y[0]) * (x[0] - y[0]) + (x[1] - y[1]) * (x[1] - y[1]) + (x[2] - y[2]) * (x[2] - y[2]);
+	for (it = 0; it < 32; it++)
+	{
+		double r[3], g0, g1, da, db, s, a = b[1], c = b[2];
+		int improved = 0, out0, out1, out2;
+		for (k = 0; k < 3; k++)
+			r[k] = x[k] - y[k];
+		g0 = ms_dot(xa, r);
+		g1 = ms_dot(xb, r);
+		out0 = a <= 0 && g0 > 0;
+		out1 = c <= 0 && g1 > 0;
+		out2 = b[0] <= 0 && g0 + g1 < 0;
+		if (out0 + out1 + out2 > 1)
+			break;   /* (a corner the descent leads out of both ways) */
+		if (out0 || out1 || out2)
+		{
+			/* along the side: a fixed at 0, c at 0, or a + c at 1 */
+			double e0 = out0 ? 0 : 1, e1 = out1 ? 0 : out2 ? -1 : 1, xe[3], h;
+			for (k = 0; k < 3; k++)
+				xe[k] = e0 * xa[k] + e1 * xb[k];
+			h = ms_dot(xe, xe);
+			if (h <= 1e-300)
+				break;
+			s = -ms_dot(xe, r) / h;
+			da = s * e0;
+			db = s * e1;
+		}
+		else
+		{
+			double h00 = ms_dot(xa, xa), h01 = ms_dot(xa, xb), h11 = ms_dot(xb, xb), det = h00 * h11 - h01 * h01;
+			if (det <= 1e-300)
+				break;
+			da = -(h11 * g0 - h01 * g1) / det;
+			db = -(h00 * g1 - h01 * g0) / det;
+		}
+		if (fabs(da) + fabs(db) <= 1e-14)
+			break;   /* (converged) */
+		for (s = 1; s > 1e-4; s *= 0.5)
+		{
+			double w[3], z[3], d;
+			w[1] = a + s * da;
+			w[2] = c + s * db;
+			ms_clamp(&w[1], &w[2]);
+			w[0] = 1 - w[1] - w[2];
+			ms_eval(p, w, z, NULL, NULL);
+			d = (z[0] - y[0]) * (z[0] - y[0]) + (z[1] - y[1]) * (z[1] - y[1]) + (z[2] - y[2]) * (z[2] - y[2]);
+			if (d < best)
+			{
+				improved = fabs(w[1] - a) + fabs(w[2] - c) > 1e-14;
+				memcpy(b, w, sizeof w);
+				best = d;
+				break;
+			}
+		}
+		if (!improved)
+			break;
+		ms_eval(p, b, x, xa, xb);
+	}
+	return best;
+}
+
+/* the closest point of R's patch t to y: its barycentrics b, its squared distance; LINEAR exact (Ericson), curved the descent from
+   the flat triangle's */
+static double ms_closest(qaws_mesh_reference const* R, unsigned int t, double const* y, double* b)
+{
+	double d = ms_flat_closest(R->patch[t].p[0], R->patch[t].p[1], R->patch[t].p[2], y, b);
+	return R->kind == QAWS_INTERPOLANT_LINEAR ? d : ms_descend(&R->patch[t], y, b);
+}
+
+/* The closest point of R's patch *t to y, its barycentrics b, its squared distance. LINEAR: exact (Ericson). Curved: the
+   descent from b (in), then on across the side it ends on into the neighbour while that is closer (*t follows). */
+static double ms_polish(qaws_mesh_reference const* R, unsigned int* t, double const* y, double* b)
+{
+	double best;
+	unsigned int hop, i;
+	if (R->kind == QAWS_INTERPOLANT_LINEAR)
+		return ms_closest(R, *t, y, b);
+	best = ms_descend(&R->patch[*t], y, b);
+	for (hop = 0; hop < 4; hop++)
+	{
+		double w[3], d;
+		unsigned int e, nb, u, k;
+		for (i = 0; i < 3 && b[i] > 1e-12; i++)
+			;
+		if (i == 3)
+			break;
+		/* the side from corner e to e + 1 (b[i] = 0 there); across it corner k is our e + 1, k + 1 our e (the weights summing to 1) */
+		e = (i + 1) % 3;
+		nb = R->ta[3 * *t + e];
+		if (nb == HM_NONE)
+			break;
+		u = nb / 3;
+		k = nb % 3;
+		w[k] = b[(e + 1) % 3];
+		w[(k + 1) % 3] = 1 - w[k];
+		w[(k + 2) % 3] = 0;
+		d = ms_descend(&R->patch[u], y, w);
+		if (!(d < best))
+			break;
+		best = d;
+		*t = u;
+		memcpy(b, w, sizeof w);
+	}
+	return best;
+}
+
 /* A point of S projected onto R (project 0: a vertex no triangle uses, kept out of the bounds). First onto the hint triangles
    (HM_NONE: none; on a flat R also their neighbours): a distance there no larger than the lower bound cannot raise it, and
    any point of R serves the upper bounds. Else the global search (the grid's rings over all of R): a hinted one could stop
@@ -542,7 +606,7 @@ static unsigned int ms_point_add(ms_side* q, double const* y, int project, unsig
 			if (t == HM_NONE)
 				continue;
 			t = e == 0 ? t : t / 3;
-			d = ms_on_patch(R, t, y, NULL, b);
+			d = ms_closest(R, t, y, b);
 			if (d < best)
 			{
 				best = d;
@@ -553,16 +617,30 @@ static unsigned int ms_point_add(ms_side* q, double const* y, int project, unsig
 	p->d = sqrt(best);
 	if (p->d <= q->lower && p->b[0] > 1e-12 && p->b[1] > 1e-12 && p->b[2] > 1e-12)
 		return q->np++;   /* (inside its triangle: not clamped short of a closer neighbour) */
-	if (R->kind == QAWS_INTERPOLANT_LINEAR)
-		p->d = sqrt(ms_flat_project(R, &q->s, y, &p->t, p->b));
-	else
+	/* the global search: on a curved R the reference's, polished from its location (read back from qaws_scalar into the
+	   triangle) since its patch projection can stall on a side; the closest point found kept */
 	{
-		p->d = sqrt(mr_project(R, y, HM_NONE, &q->s, &l));
-		p->t = l.patch;
-		p->b[1] = (double)l.a;
-		p->b[2] = (double)l.b;
-		p->b[0] = 1 - p->b[1] - p->b[2];
+		unsigned int t = HM_NONE;
+		double b[3], d = HUGE_VAL;
+		if (R->kind == QAWS_INTERPOLANT_LINEAR)
+			d = ms_flat_project(R, &q->s, y, &t, b);
+		else if (mr_project(R, y, HM_NONE, &q->s, &l) < HUGE_VAL && l.patch < R->nt)
+		{
+			t = l.patch;
+			b[1] = (double)l.a;
+			b[2] = (double)l.b;
+			ms_clamp(&b[1], &b[2]);
+			b[0] = 1 - b[1] - b[2];
+			d = ms_polish(R, &t, y, b);
+		}
+		if (d < best)
+		{
+			best = d;
+			p->t = t;
+			memcpy(p->b, b, sizeof b);
+		}
 	}
+	p->d = sqrt(best);
 	if (p->d > q->lower)
 	{
 		q->lower = p->d;
@@ -796,18 +874,24 @@ static double ms_chart(ms_side const* q, ms_tri const* T, ms_point const* const*
 	area = (tau[1].c[0] - tau[0].c[0]) * (tau[2].c[1] - tau[0].c[1]) - (tau[1].c[1] - tau[0].c[1]) * (tau[2].c[0] - tau[0].c[0]);
 	if (!(fabs(area) > 1e-12 * size))
 		return HUGE_VAL;
-	/* the wedges in angular order, clipped to [mid - 2 pi, mid] and stretched to it at the ends, wide ones halved */
+	/* the wedges in angular order, clipped to [mid - 2 pi, mid] and stretched to it at the ends, wide ones halved; a zero-area
+	   triangle's wedge maps nothing (every point to the centre), its range goes to its neighbours */
 	{
-		unsigned int first = F.closed ? (jj[0] + (F.n - 1) / 2 + 1) % F.n : 0, i;
+		unsigned int first = F.closed ? (jj[0] + (F.n - 1) / 2 + 1) % F.n : 0, i, last = F.n;
 		double a0 = F.th[first], a1 = F.th[(first + F.n - 1) % F.n] + F.al[(first + F.n - 1) % F.n];
 		mid = 0.5 * (a0 + a1 + 2 * MS_PI);
+		for (i = 0; i < F.n; i++)
+			if (sin(F.al[(first + i) % F.n]) > 1e-12)
+				last = i;
 		for (i = 0; i < F.n; i++)
 		{
 			unsigned int jw = (first + i) % F.n;
 			double l = F.th[jw] > mid - 2 * MS_PI ? F.th[jw] : mid - 2 * MS_PI, h = F.th[jw] + F.al[jw] < mid ? F.th[jw] + F.al[jw] : mid;
-			if (i == 0 || nw == 0)
+			if (!(sin(F.al[jw]) > 1e-12))
+				continue;
+			if (nw == 0)
 				l = mid - 2 * MS_PI;
-			if (i + 1 == F.n)
+			if (i == last)
 				h = mid;
 			while (h > l)
 			{
@@ -836,25 +920,23 @@ static double ms_chart(ms_side const* q, ms_tri const* T, ms_point const* const*
 		for (i = 1; i + 1 < n; i++)
 		{
 			ms_vtx const* v3[3];
-			double W[3][3], u[3][3], b;
+			double W[3][3], u[3][3], b, piece;
 			unsigned int e, z;
 			v3[0] = &p2[0];
 			v3[1] = &p2[i];
 			v3[2] = &p2[i + 1];
-			cover += fabs(v3[0]->l[0] * (v3[1]->l[1] * v3[2]->l[2] - v3[1]->l[2] * v3[2]->l[1])
+			piece = fabs(v3[0]->l[0] * (v3[1]->l[1] * v3[2]->l[2] - v3[1]->l[2] * v3[2]->l[1])
 				- v3[0]->l[1] * (v3[1]->l[0] * v3[2]->l[2] - v3[1]->l[2] * v3[2]->l[0])
 				+ v3[0]->l[2] * (v3[1]->l[0] * v3[2]->l[1] - v3[1]->l[1] * v3[2]->l[0]));
+			if (piece == 0)
+				continue;   /* (a sliver on a ray: the closed pieces round it hold it) */
+			cover += piece;
 			for (e = 0; e < 3; e++)
 			{
-				double s = 0, r = 0;
+				double s = (v3[e]->c[0] * B[1] - v3[e]->c[1] * B[0]) / det, r = (A[0] * v3[e]->c[1] - A[1] * v3[e]->c[0]) / det;
 				for (z = 0; z < 3; z++)
 					W[e][z] = v3[e]->l[0] * T->w[0][z] + v3[e]->l[1] * T->w[1][z] + v3[e]->l[2] * T->w[2][z];
-				if (det != 0)
-				{
-					s = (v3[e]->c[0] * B[1] - v3[e]->c[1] * B[0]) / det;
-					r = (A[0] * v3[e]->c[1] - A[1] * v3[e]->c[0]) / det;
-					ms_clamp(&s, &r);
-				}
+				ms_clamp(&s, &r);
 				u[e][c] = 1 - s - r;
 				u[e][(c + 1) % 3] = s;
 				u[e][(c + 2) % 3] = r;
@@ -882,7 +964,7 @@ static double ms_candidates(ms_side const* q, ms_tri const* T, ms_point const* c
 			if (P[k]->t == t)
 				memcpy(u[k], P[k]->b, sizeof u[k]);
 			else
-				ms_on_patch(q->R, t, P[k]->y, NULL, u[k]);
+				ms_closest(q->R, t, P[k]->y, u[k]);
 		b = ms_pair(q, T->root, (double const(*)[3])T->w, t, (double const(*)[3])u, q->goal);
 		U = b < U ? b : U;
 	}
@@ -918,12 +1000,30 @@ static double ms_lipschitz(ms_point const* const* P)
 static double ms_bound(ms_side const* q, ms_tri const* T)
 {
 	ms_point const* P[3];
-	double U = HUGE_VAL;
+	double U;
 	unsigned int k;
 	for (k = 0; k < 3; k++)
 		P[k] = &q->pt[T->p[k]];
-	if (q->S->kind == QAWS_INTERPOLANT_LINEAR)
-		U = ms_lipschitz(P);
+	/* Lipschitz from the corners: over their flat triangle, on a curved S plus the farthest the sub-patch's net strays from that
+	   triangle's (degree-elevated) net, since a point of the sub-patch and its flat twin are the same combination of the two
+	   nets. It holds where the closest place on R jumps (the matched maps below do not shrink there), and on any R. */
+	U = ms_lipschitz(P);
+	if (q->S->kind != QAWS_INTERPOLANT_LINEAR)
+	{
+		static unsigned char const pw[10][3] = { { 3, 0, 0 }, { 0, 3, 0 }, { 0, 0, 3 }, { 2, 1, 0 }, { 1, 2, 0 }, { 0, 2, 1 }, { 0, 1, 2 }, { 1, 0, 2 },
+			{ 2, 0, 1 }, { 1, 1, 1 } };
+		double N[10][3], e = 0;
+		unsigned int i;
+		ms_blossom((double const(*)[3])q->S->patch[T->root].p, T->w, N);
+		for (i = 0; i < 10; i++)
+		{
+			double d[3];
+			for (k = 0; k < 3; k++)
+				d[k] = N[i][k] - (pw[i][0] * P[0]->y[k] + pw[i][1] * P[1]->y[k] + pw[i][2] * P[2]->y[k]) / 3;
+			e = fmax(e, ms_dot(d, d));
+		}
+		U += sqrt(e);
+	}
 	if (U <= q->goal)
 		return U;
 	if (P[0]->t == P[1]->t && P[1]->t == P[2]->t)
@@ -934,7 +1034,8 @@ static double ms_bound(ms_side const* q, ms_tri const* T)
 		return fmin(U, ms_pair(q, T->root, (double const(*)[3])T->w, P[0]->t, (double const(*)[3])u, q->goal));
 	}
 	{
-		/* centres: the vertices of the corners' triangles, those most of them hold first */
+		/* centres: the vertices of the corners' triangles, those most of them hold first; each chart that applies, until one
+		   is within the goal (a poor match, as round a zero-area triangle, only widens its own) */
 		unsigned int cand[9], score[9], nc = 0, i, j;
 		double b = HUGE_VAL;
 		for (k = 0; k < 3; k++)
@@ -950,7 +1051,7 @@ static double ms_bound(ms_side const* q, ms_tri const* T)
 				}
 				score[j]++;
 			}
-		for (i = 0; i < nc && b == HUGE_VAL; i++)
+		for (i = 0; i < nc && b > q->goal; i++)
 		{
 			unsigned int best = 0;
 			for (j = 1; j < nc; j++)
@@ -967,13 +1068,13 @@ static double ms_bound(ms_side const* q, ms_tri const* T)
 					break;
 			}
 			if (k == 3)
-				b = ms_chart(q, T, P, cand[best]);
+				b = fmin(b, ms_chart(q, T, P, cand[best]));
 		}
 		/* shortcut: corners that share no vertex star (a triangle over a ring of R's, or coarser) are matched to one of their
 		   triangles at a time, which converges only linearly until the splits bring them into a star; a chart round a
 		   triangle and its neighbours would cut a level where R is much finer than S */
-		if (b == HUGE_VAL)
-			b = ms_candidates(q, T, P);
+		if (b > q->goal)
+			b = fmin(b, ms_candidates(q, T, P));
 		return fmin(U, b);
 	}
 }
@@ -1074,7 +1175,7 @@ static qaws_status ms_run(qaws_mesh_reference const* S, qaws_mesh_reference cons
 			{
 				ms_point const *c0 = &q.pt[S->tv[3 * t]], *c1 = &q.pt[S->tv[3 * t + 1]], *c2 = &q.pt[S->tv[3 * t + 2]];
 				qaws_mesh_location l;
-				double b[3], e[3], d;
+				double b[3], d;
 				unsigned int near = S->tv[3 * t + (g[i][1] >= g[i][2] && g[i][1] >= g[i][3] ? 0 : g[i][2] >= g[i][3] ? 1 : 2)], tn;
 				for (k = 0; k < 3; k++)
 				{
@@ -1082,12 +1183,11 @@ static qaws_status ms_run(qaws_mesh_reference const* S, qaws_mesh_reference cons
 					b[k] = g[i][1] * c0->b[k] + g[i][2] * c1->b[k] + g[i][3] * c2->b[k];
 				}
 				/* the corners on one patch: from their barycentrics interpolated there; else hinted by the nearest corner's */
+				tn = c0->t;
 				if (c0->t == c1->t && c1->t == c2->t)
-					d = ms_on_patch(R, c0->t, x, b, e);
-				else if (R->kind == QAWS_INTERPOLANT_LINEAR)
-					d = ms_flat_project(R, &q.s, x, &tn, e);
+					d = ms_polish(R, &tn, x, b);
 				else
-					d = mr_project(R, x, q.pt[near].t, &q.s, &l);
+					d = R->kind == QAWS_INTERPOLANT_LINEAR ? ms_flat_project(R, &q.s, x, &tn, b) : mr_project(R, x, q.pt[near].t, &q.s, &l);
 				s += g[i][0] * d;
 			}
 			sum += A * s;

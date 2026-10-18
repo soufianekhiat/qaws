@@ -13,6 +13,10 @@
  *   - deviation against brute force: a flat square against a PN grid with a
  *     raised centre, each direction's bounds bracketing dense sampling;
  *   - two-sidedness: a bump of 0.2 a flat square does not see from above;
+ *   - a PN saddle against its own triangles (the closest place jumping
+ *     across concave edges, the patch projection stalling on sides), its
+ *     witnesses checked apart from the library; a pentagon fanned into a
+ *     zero-area triangle;
  *   - consistency with the remesher's one-sided report;
  *   - refusals, and the timing on a 10k-face remesh.
  */
@@ -427,6 +431,128 @@ static void test_two_sided(void)
 	qaws_mesh_3d_destroy(m);
 }
 
+static double mm_saddle(double x, double y)
+{
+	return 0.25 * sin(7 * x) * sin(7 * y);
+}
+
+/* the distance from p to a reference by sampling every patch n x n: at least the true one, apart from the library's projection */
+static double mm_dense(qaws_mesh_reference const* r, double const* p, unsigned int n)
+{
+	unsigned int nt = qaws_mesh_reference_get_triangle_count(r), np = (n + 1) * (n + 2) / 2, f, i, j, q, k;
+	qaws_mesh_location* loc = (qaws_mesh_location*)malloc(sizeof(qaws_mesh_location) * np);
+	qaws_scalar* pts = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * np);
+	double best = HUGE_VAL;
+	for (f = 0; f < nt; f++)
+	{
+		for (j = 0, q = 0; j <= n; j++)
+			for (i = 0; i + j <= n; i++, q++)
+			{
+				loc[q].patch = f;
+				loc[q].a = (qaws_scalar)((double)i / n);
+				loc[q].b = (qaws_scalar)((double)j / n);
+			}
+		qaws_mesh_reference_evaluate(r, loc, np, pts, NULL, NULL);
+		for (q = 0; q < np; q++)
+		{
+			double e = 0;
+			for (k = 0; k < 3; k++)
+				e += (pts[3 * q + k] - p[k]) * (pts[3 * q + k] - p[k]);
+			best = e < best ? e : best;
+		}
+	}
+	free(loc);
+	free(pts);
+	return sqrt(best);
+}
+
+/* A PN saddle against its own triangles: the reference passes over its mesh's valleys, where the closest place on the mesh jumps
+   across a concave edge (the matched cubic maps do not shrink there, the Lipschitz bound through the net does), and its patch
+   projection stalls on the patches' sides (the lower bound polished past it). Both witnesses checked apart from the library:
+   the one on the mesh by sampling the reference densely, the one on the reference exactly against the mesh's triangles; the
+   reference sampled against the mesh under the upper bound. */
+static void test_saddle(void)
+{
+	qaws_mesh_3d* g = mm_grid(12, 0, mm_saddle);
+	qaws_mesh_reference *r = NULL, *lin = NULL;
+	qaws_mesh_reference_desc rd;
+	qaws_mesh_deviation d;
+	qaws_mesh_location l, *loc;
+	qaws_scalar at[3], dist, *pts, *dd;
+	qaws_status st;
+	unsigned int nt, n = 24, np = (n + 1) * (n + 2) / 2, f, i, j, q, k;
+	double tol, wt[3], at_to, at_from, sup = 0;
+	char msg[500];
+	memset(&rd, 0, sizeof rd);
+	rd.interpolant = QAWS_INTERPOLANT_LINEAR;
+	qaws_mesh_reference_create(g, NULL, &r);
+	qaws_mesh_reference_create(g, &rd, &lin);
+	st = qaws_mesh_3d_measure_deviation(g, r, NULL, &d);
+	mm_print("a PN saddle against its own triangles", &d);
+	tol = 1e-4 * d.diagonal;
+	for (k = 0; k < 3; k++)
+	{
+		wt[k] = (double)d.to_reference_at[k];
+		at[k] = d.from_reference_at[k];
+	}
+	at_to = mm_dense(r, wt, 100);
+	qaws_mesh_reference_project(lin, at, 1, NULL, &l, &dist);
+	at_from = (double)dist;
+	nt = qaws_mesh_reference_get_triangle_count(r);
+	loc = (qaws_mesh_location*)malloc(sizeof(qaws_mesh_location) * np);
+	pts = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * np);
+	dd = (qaws_scalar*)malloc(sizeof(qaws_scalar) * np);
+	for (f = 0; f < nt; f++)
+	{
+		for (j = 0, q = 0; j <= n; j++)
+			for (i = 0; i + j <= n; i++, q++)
+			{
+				loc[q].patch = f;
+				loc[q].a = (qaws_scalar)((double)i / n);
+				loc[q].b = (qaws_scalar)((double)j / n);
+			}
+		qaws_mesh_reference_evaluate(r, loc, np, pts, NULL, NULL);
+		qaws_mesh_reference_project(lin, pts, np, NULL, loc, dd);
+		for (q = 0; q < np; q++)
+			sup = dd[q] > sup ? dd[q] : sup;
+	}
+	sprintf(msg, "PN saddle against its own triangles: to [%.9g, %.9g] (D at its witness %.9g, densely), from [%.9g, %.9g] (D at its witness %.9g, "
+		"sampled sup %.9g), tol %.3g, converged %d", (double)d.to_reference[0], (double)d.to_reference[1], at_to, (double)d.from_reference[0],
+		(double)d.from_reference[1], at_from, sup, tol, d.converged);
+	TEST_ASSERT(st == QAWS_STATUS_OK && d.converged == 1 && d.to_reference[1] - d.to_reference[0] <= tol && d.from_reference[1] - d.from_reference[0] <= tol
+		&& d.to_reference[0] <= at_to + 1e-12 && d.from_reference[0] <= at_from + 1e-12 && sup <= d.from_reference[1] + 1e-12, msg);
+	free(loc);
+	free(pts);
+	free(dd);
+	qaws_mesh_reference_destroy(r);
+	qaws_mesh_reference_destroy(lin);
+	qaws_mesh_3d_destroy(g);
+}
+
+/* A pentagon with a straight corner, fanned from its first vertex into a zero-area triangle first: the reference's bound to it
+   does not stick on that triangle's wedge (every point mapped to its centre), in either face order */
+static void test_pentagon(void)
+{
+	static double const x[15] = { 0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0.5, 0, 0 };
+	static unsigned int const f[5] = { 0, 4, 1, 2, 3 }, five = 5;
+	qaws_mesh_3d *m = mm_make(x, 5, f, &five, 1), *g = mm_grid(8, 0, mm_saddle);
+	qaws_mesh_reference* r = NULL;
+	qaws_mesh_deviation d;
+	qaws_status st;
+	double tol;
+	char msg[300];
+	qaws_mesh_reference_create(g, NULL, &r);
+	st = qaws_mesh_3d_measure_deviation(m, r, NULL, &d);
+	mm_print("a pentagon with a straight corner against a PN saddle", &d);
+	tol = 1e-4 * d.diagonal;
+	sprintf(msg, "a pentagon with a straight corner: from the reference [%.9g, %.9g], to it [%.9g, %.9g], tol %.3g, converged %d", (double)d.from_reference[0],
+		(double)d.from_reference[1], (double)d.to_reference[0], (double)d.to_reference[1], tol, d.converged);
+	TEST_ASSERT(st == QAWS_STATUS_OK && d.converged == 1 && d.from_reference[1] - d.from_reference[0] <= tol && d.to_reference[1] - d.to_reference[0] <= tol, msg);
+	qaws_mesh_reference_destroy(r);
+	qaws_mesh_3d_destroy(g);
+	qaws_mesh_3d_destroy(m);
+}
+
 static qaws_mesh_3d* mm_remesh(qaws_mesh_3d const* m, qaws_mesh_reference const* r, double L, qaws_mesh_report* rep)
 {
 	qaws_remesh_desc d;
@@ -525,6 +651,8 @@ int test_130_mesh_measure_main(void)
 	test_brute();
 	test_two_sided();
 	test_consistency_and_timing();
+	test_saddle();
+	test_pentagon();
 	test_refusals();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;

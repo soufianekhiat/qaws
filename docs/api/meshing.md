@@ -174,7 +174,9 @@ al. 2017 and Wang et al. 2019 for triangles, QuadWild for quads).
     4 when quads are the majority; V567 is the share of those at 5 to 7;
   - a border, crease or corner vertex wants as many faces as its corners'
     angles hold ideal corners (60 degrees per triangle, 90 per quad), plus
-    one edge on the border. It is regular within a half face.
+    one edge on the border. It is regular within a half face (a tie at a
+    half rounds to its own count, one face at the least); `irregular`
+    counts the vertices off that rounded ideal.
   - So a box's corners (3 quads) and edges (4), and a quad grid's straight
     border (3 edges) and corners (2), are regular. A creased quad cube
     counts 0 irregular vertices, where `qaws_mesh_quality` counts 8.
@@ -192,7 +194,13 @@ al. 2017 and Wang et al. 2019 for triangles, QuadWild for quads).
   - Over each piece, the difference of the two cubic patches is a cubic
     Bezier triangle. Its control points (blossoms) bound it by the convex
     hull property, and they are refined by subdivision while above the
-    goal. A flat side adds the distance's Lipschitz bound from its corners.
+    goal. The distance's Lipschitz bound from the corners is taken too,
+    over their flat triangle and, on a curved side, widened by the farthest
+    its sub-patch's net strays from that triangle's: it still shrinks where
+    the closest place on the other side jumps across a concave edge, which
+    the matched patches do not. A zero-area triangle's wedge (a polygon
+    with a straight corner, fanned) maps nothing and is left to its
+    neighbours.
   - The largest bound is split into four until it is within `precision`
     (a share of the reference's box diagonal, default 1e-4) of the largest
     distance found. A face or patch splits `budget` times (default 256) past
@@ -206,12 +214,14 @@ al. 2017 and Wang et al. 2019 for triangles, QuadWild for quads).
     triangles (Ericson's closest point, the grid's rings searched outward);
   - the mesh-to-reference lower bound is a distance found by projection:
     exact on LINEAR references, and on PN up to the patch projection
-    (Gauss-Newton);
+    (the reference's Gauss-Newton, then a descent that runs along a
+    patch's side where the gradient leads out, and on into the neighbour
+    across it);
   - both are widened by a few units in the last place, and stored outward
     in float builds.
 
 On figure 3's 3752-triangle blob both directions converge in 0.2 to 0.5 s;
-a 10.7k-face remesh takes 0.5 s (Release). Showcase figure 9 tabulates
+a 10.7k-face remesh takes 0.5 to 0.8 s (Release). Showcase figure 9 tabulates
 figures 3 and 4's meshes: the baseline the remeshing items quote.
 
 ## Meshes of exact geometry

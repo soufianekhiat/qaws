@@ -3,9 +3,10 @@
  * bounded from both sides.
  *   - figure 3's uniform blob (LOCAL at 0.11): faces by Q, the vertices off
  *     their ideal valence dotted (blue below it, red above);
- *   - figure 4's can in quads (INSTANT, pure, at 0.14): quads by their
- *     smallest scaled Jacobian (red under 0.5), irregular vertices dotted,
- *     the creases' corners and edges regular;
+ *   - figure 4's can in quads (INSTANT, pure, at 0.14), turned toward its
+ *     worst quad (ringed): quads by their smallest scaled Jacobian (red
+ *     under 0.5), irregular vertices dotted (the library's rule), the
+ *     creases' corners and edges regular;
  *   - the blob's faces by their centres' distance to the reference, the
  *     worst point of each direction marked, both certified intervals;
  *   - the baseline of figures 3 and 4's meshes (the full table on stdout).
@@ -233,26 +234,63 @@ static void demo_measures(void)
 		ms_dot_irregular(c, m, ideal);
 		free(q); free(col); free(ideal);
 	}
-	/* (b) the can's quads by their smallest scaled Jacobian */
+	/* (b) the can's quads by their smallest scaled Jacobian, turned toward the worst one (ringed) */
 	if (row[6].mesh)
 	{
 		qaws_mesh_3d* m = row[6].mesh;
-		unsigned int nf = qaws_mesh_3d_get_face_count(m), nfe = qaws_mesh_3d_get_feature_edge_count(m), *fe = (unsigned int*)malloc(sizeof(unsigned int) * 2 * (nfe + 1));
-		unsigned int* ideal = (unsigned int*)malloc(sizeof(unsigned int) * qaws_mesh_3d_get_vertex_count(m));
-		double *q = ms_face_quality(m), *col = (double*)malloc(sizeof(double) * 3 * nf), *p = ms_positions(m);
+		unsigned int nf = qaws_mesh_3d_get_face_count(m), nv = qaws_mesh_3d_get_vertex_count(m), nfe = qaws_mesh_3d_get_feature_edge_count(m);
+		unsigned int *fe = (unsigned int*)malloc(sizeof(unsigned int) * 2 * (nfe + 1)), *ideal = (unsigned int*)malloc(sizeof(unsigned int) * nv);
+		unsigned int *fv = (unsigned int*)malloc(sizeof(unsigned int) * (qaws_mesh_3d_get_corner_count(m) + 1)), *fs = (unsigned int*)malloc(sizeof(unsigned int) * (nf + 1));
+		unsigned int w = 0, wo = 0, o = 0;
+		double *q = ms_face_quality(m), *col = (double*)malloc(sizeof(double) * 3 * nf), *p = ms_positions(m), cen[3] = { 0, 0, 0 }, dir[3], l;
 		qaws_shape_quality s;
 		for (i = 0; i < nf; i++)
 			ms_quality_colour(q[i] < 0.5 ? -1 : (q[i] - 0.5) / 0.5, col + 3 * i);
+		qaws_mesh_3d_get_faces(m, fv, fs);
+		for (i = 0; i < nf; o += fs[i++])
+			if (q[i] < q[w])
+			{
+				w = i;
+				wo = o;
+			}
+		/* from the can's centre toward the worst quad's: the view's direction, tilted 40 degrees at most */
+		for (i = 0; i < fs[w]; i++)
+			for (k = 0; k < 3; k++)
+				cen[k] += p[3 * fv[wo + i] + k] / fs[w];
+		memcpy(dir, cen, sizeof dir);
+		for (i = 0; i < nv; i++)
+			for (k = 0; k < 3; k++)
+				dir[k] -= p[3 * i + k] / nv;
+		l = sqrt(dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]);
 		qaws_mesh_3d_measure_shape(m, &s, ideal);
 		sprintf(sub, "SJ min %.2f mean %.3f, %u irregular", (double)s.min_jacobian, (double)s.mean_jacobian, s.irregular);
-		ms_panel(c, 550, 0, 550, 640, m, 0.35, 0.5, "quads by scaled Jacobian", sub);
+		ms_panel(c, 550, 0, 550, 640, m, atan2(-dir[0], -dir[1]), asin(fmax(-0.7, fmin(0.7, l > 0 ? dir[2] / l : 0.5))), "quads by SJ, the worst ringed", sub);
 		ms_draw_faces(c, m, col);
 		ms_draw(c, m, NULL, NULL, 0, wire, 0.8);
 		qaws_mesh_3d_get_feature_edges(m, fe);
 		for (i = 0; i < nfe; i++)
 			er_line(c, p + 3 * fe[2 * i], p + 3 * fe[2 * i + 1], dark, 2.0);
 		ms_dot_irregular(c, m, ideal);
-		free(q); free(col); free(ideal); free(fe); free(p);
+		{
+			/* the ring: a circle in the view's plane, moved toward the eye (the view is orthographic) so no face hides it */
+			double yaw = atan2(-dir[0], -dir[1]), pitch = asin(fmax(-0.7, fmin(0.7, l > 0 ? dir[2] / l : 0.5))), a[3], b[3];
+			double right[3], up[3], eye[3];
+			right[0] = cos(yaw); right[1] = -sin(yaw); right[2] = 0;
+			up[0] = sin(pitch) * sin(yaw); up[1] = sin(pitch) * cos(yaw); up[2] = cos(pitch);
+			eye[0] = -cos(pitch) * sin(yaw); eye[1] = -cos(pitch) * cos(yaw); eye[2] = sin(pitch);
+			for (i = 0; i < 32; i++)
+			{
+				double t0 = 2 * MS_PI * i / 32, t1 = 2 * MS_PI * (i + 1) / 32;
+				for (k = 0; k < 3; k++)
+				{
+					a[k] = cen[k] + 0.5 * eye[k] + 0.14 * (cos(t0) * right[k] + sin(t0) * up[k]);
+					b[k] = cen[k] + 0.5 * eye[k] + 0.14 * (cos(t1) * right[k] + sin(t1) * up[k]);
+				}
+				er_line(c, a, b, dark, 3.0);
+			}
+		}
+		printf("  can pure: worst quad %u, SJ %.3f, its centre %.3f %.3f %.3f off the can's\n", w, q[w], dir[0], dir[1], dir[2]);
+		free(q); free(col); free(ideal); free(fe); free(p); free(fv); free(fs);
 	}
 	/* (c) the blob's deviation: faces by their centres' distance, the worst point each way */
 	if (row[0].mesh && rb)
@@ -316,6 +354,7 @@ static void demo_measures(void)
 	er_text(c, 1664, 492, "a straight border 3; smooth vertices 6 or 4", 2, 95, 95, 95);
 	er_text(c, 1664, 530, "dots: blue below the ideal, red above", 2, 95, 95, 95);
 	er_text(c, 1664, 556, "worst points: red on the mesh, blue on the reference", 2, 95, 95, 95);
+	er_text(c, 1664, 582, "ring: the can's worst quad (red: SJ under 0.5)", 2, 95, 95, 95);
 	er_save(c, "showcase/mesh9_measures.png");
 	printf("mesh9_measures.png\n");
 	for (i = 0; i < 8; i++)

@@ -23,9 +23,11 @@
  *               triangles are the most, else 4; a border, crease or corner
  *               vertex wants as many faces as its corners' angles hold ideal
  *               corners (60 degrees for a triangle, 90 for a quad), within a
- *               half, plus 1 on the border. A box's corners (3 quads), its
- *               edges (4), a quad grid's straight border (3 edges) and its
- *               corners (2) are all regular.
+ *               half (a tie at a half rounds to the vertex's own count, one
+ *               face at the least), plus 1 on the border; a vertex is irregular
+ *               when its valence is not that ideal. A box's corners (3 quads),
+ *               its edges (4), a quad grid's straight border (3 edges) and
+ *               its corners (2) are all regular.
  *
  * Deviation, certified: the sup over the mesh of the distance to the
  * reference and the sup over the reference of the distance to the mesh, each
@@ -34,7 +36,8 @@
  * surfaces over matched triangles, never from footpoints). The upper bounds
  * and the reference-to-mesh lower bound hold unconditionally; the
  * mesh-to-reference lower bound is a distance found by projection, exact on
- * LINEAR references and, on PN, up to the patch projection (Gauss-Newton).
+ * LINEAR references and, on PN, up to the patch projection (the
+ * reference's, then polished along the patches' sides and across them).
  *
  * Polygons are measured as their corner fans: a non-planar quad counts as
  * its two triangles (from its first vertex).
@@ -55,13 +58,14 @@ typedef struct qaws_shape_quality
 	unsigned int valence_excess;             /* sum of |valence - rounded ideal| */
 } qaws_shape_quality;
 
-/* out_ideal (may be NULL): per vertex its rounded ideal valence (0 for an isolated vertex) */
+/* out_ideal (may be NULL): per vertex its rounded ideal valence (0 for an isolated vertex); irregular counts the vertices off it */
 qaws_status qaws_mesh_3d_measure_shape(qaws_mesh_3d const* mesh, qaws_shape_quality* out_quality, unsigned int* out_ideal);
 
 typedef struct qaws_deviation_desc
 {
 	qaws_scalar precision;   /* target gap (upper - lower) as a share of the reference's box diagonal; 0: 1e-4 */
-	unsigned int budget;     /* subdivisions per face or patch at most; 0: 256 */
+	unsigned int budget;     /* subdivisions per face or patch past those that bring it down to the other side's mean
+	                            triangle size (2 x their areas' ratio, the memory growing with it); 0: 256 */
 } qaws_deviation_desc;
 
 typedef struct qaws_mesh_deviation
