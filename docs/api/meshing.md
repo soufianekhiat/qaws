@@ -180,155 +180,32 @@ qaws_status qaws_mesh_quadrangulate(qaws_mesh_3d const* mesh, qaws_quadrangulate
 	qaws_mesh_report* report);
 ```
 
-- **LOCAL** remeshing (Botsch and Kobbelt 2004): split, collapse, flip,
-  relax along the reference (walked, never projected), toward a uniform
-  length or a size field. Feature corners stay, feature lines slide, no
-  operation leaves a poor triangle poorer. Attributes are transferred from
-  the reference's mesh at the footpoints, seams kept per side. `CVT` and
-  `FIELD_ALIGNED` are reserved.
+- **LOCAL** remeshing (Botsch and Kobbelt 2004, as pmp, geometry-central
+  and Mmgs refine them): split, collapse, flip toward each vertex's ideal
+  valence, relax along the reference (walked, never projected), toward a
+  uniform length or a size field; optionally every angle within bounds
+  (Wang, Yan et al. 2019) and every face within a distance of the
+  reference (as Mmgs's hausd). Feature corners stay, feature lines slide.
+  Attributes are transferred from the reference's mesh at the footpoints,
+  seams kept per side. The default.
+- **CVT** remeshing: a centroidal Voronoi tessellation restricted to the
+  reference (Lloyd, then L-BFGS), creases locked: the most regular and
+  uniform triangles, about five times slower. `FIELD_ALIGNED` is reserved.
 - **INSTANT** quads (Jakob et al. 2015, with QuadriFlow's consistency,
-  Huang et al. 2018): a dense remesh, a cross field (drawn to the
-  principal curvature directions where that leaves fewer singularities)
-  and a lattice position field; the lattice steps between neighbours made
-  to agree round every triangle (dislocations cancelled in pairs along the
-  cheapest paths), the mesh read off them, doublets removed; quad-dominant,
-  or all quads with `pure`. Irregular vertices stay at the field's
+  Huang et al. 2018): a dense remesh; a cross field, the best of Instant
+  Meshes' local one and the globally smoothest ones (free, or drawn to the
+  principal curvature directions; Knoppel et al. 2013); a lattice position
+  field; the lattice steps between neighbours made to agree round every
+  triangle by a min-cost flow, cones on lattice points; the mesh read off
+  them, half cells paired into quads, doublets removed; then finishing
+  (valence pairs cancelled by local quad operations, the quads relaxed by
+  their angles). Quad-dominant, or all quads with `pure` at the target
+  spacing. Irregular vertices stay at the field's
   singularities: a torus is a grid along its parallels, a box's faces are
   grids. Lattice points are unfolded across creases before their offsets
   are read, so quads follow sharp edges. `PAIRING`, `SPLIT`, `GLOBAL`
   (integer-grid maps) and `LAYOUT` are reserved.
 
-## Measures
-
-```c
-qaws_status qaws_mesh_3d_measure_shape(qaws_mesh_3d const* mesh, qaws_shape_quality* out, unsigned int* out_ideal);
-qaws_status qaws_mesh_3d_measure_deviation(qaws_mesh_3d const* mesh, qaws_mesh_reference const* reference,
-	qaws_deviation_desc const* desc, qaws_mesh_deviation* out);
-```
-
-`qaws_mesh_measure.h` reports a mesh the way remeshing papers do (Hu et
-al. 2017 and Wang et al. 2019 for triangles, QuadWild for quads).
-`qaws_mesh_quality` and the operators' reports stay as they were.
-
-- **Shape**, in one pass over the faces:
-  - triangles: Q = 2 sqrt(3) r / h_max (1 when equilateral), min and mean;
-    the smallest, mean smallest and largest angle; the shares of corners
-    under 30 and over 90 degrees;
-  - quads: each quad's smallest corner scaled Jacobian, along the unit
-    Newell normal (min and mean over quads), and AD, the mean |angle - 90|
-    over quad corners;
-  - ED, the edges' standard deviation over their mean length.
-- **Ideal valence**, from the corners rather than one number for all:
-  - a smooth interior vertex (off the border and the features) wants 6, or
-    4 when quads are the majority; V567 is the share of those at 5 to 7;
-  - a border, crease or corner vertex wants as many faces as its corners'
-    angles hold ideal corners (60 degrees per triangle, 90 per quad), plus
-    one edge on the border. It is regular within a half face (a tie at a
-    half rounds to its own count, one face at the least); `irregular`
-    counts the vertices off that rounded ideal.
-  - So a box's corners (3 quads) and edges (4), and a quad grid's straight
-    border (3 edges) and corners (2), are regular. A creased quad cube
-    counts 0 irregular vertices, where `qaws_mesh_quality` counts 8.
-    `out_ideal` gives each vertex's rounded ideal valence.
-- **Deviation, certified both ways**: lower and upper bounds of the sup of
-  the distance from the mesh to the reference, and from the reference to
-  the mesh, their Hausdorff interval, the area-weighted RMS (projected, not
-  certified), and the point where each lower bound is reached. One branch
-  and bound serves both directions; the mesh enters as its LINEAR
-  reference, so polygons count as their corner fans.
-  - A triangle of the side measured is matched affinely to the other
-    side. Each corner goes to its closest point there. A triangle whose
-    corners land on different triangles is cut along a flat unfolding of
-    the other side round a shared vertex.
-  - Over each piece, the difference of the two cubic patches is a cubic
-    Bezier triangle. Its control points (blossoms) bound it by the convex
-    hull property, and they are refined by subdivision while above the
-    goal. The distance's Lipschitz bound from the corners is taken too,
-    over their flat triangle and, on a curved side, widened by the farthest
-    its sub-patch's net strays from that triangle's: it still shrinks where
-    the closest place on the other side jumps across a concave edge, which
-    the matched patches do not. A zero-area triangle's wedge (a polygon
-    with a straight corner, fanned) maps nothing and is left to its
-    neighbours.
-  - The largest bound is split into four until it is within `precision`
-    (a share of the reference's box diagonal, default 1e-4) of the largest
-    distance found. A face or patch splits `budget` times (default 256) past
-    the splits that bring it down to the other side's triangle size.
-    `converged` is 0 when a budget ran out first; the bounds are then wider
-    but still hold.
-- **What is certified**:
-  - the upper bounds hold unconditionally: any point of a patch is a point
-    of the surface, so a poor match only widens them;
-  - the reference-to-mesh lower bound is an exact distance to the flat
-    triangles (Ericson's closest point, the grid's rings searched outward);
-  - the mesh-to-reference lower bound is a distance found by projection:
-    exact on LINEAR references, and on PN up to the patch projection
-    (the reference's Gauss-Newton, then a descent that runs along a
-    patch's side where the gradient leads out, and on into the neighbour
-    across it);
-  - both are widened by a few units in the last place, and stored outward
-    in float builds.
-
-On figure 3's 3752-triangle blob both directions converge in 0.2 to 0.5 s;
-a 10.7k-face remesh takes 0.5 to 0.8 s (Release). Showcase figure 9 tabulates
-figures 3 and 4's meshes: the baseline the remeshing items quote.
-### CVT remeshing
-`QAWS_REMESH_CVT` places the vertices at a centroidal Voronoi tessellation
-of the reference (Du, Faber, Gunzburger 1999), on its restricted Voronoi
-diagram (Yan, Levy et al. 2009), by Lloyd then L-BFGS (Liu et al. 2009):
-the most uniform and regular isotropic triangles. It takes `reference`,
-`target_length` and `size` as LOCAL does; `iterations` counts the L-BFGS
-steps after 5 Lloyd steps, per level (0: 30).
-
-1. LOCAL runs its 10 iterations: a valid start with features and
-   footpoints, and no vertex left inside a part thinner than the size.
-2. The vertex count is set from the size: the integral of
-   2 / (sqrt(3) h^2) over the reference, one hexagon of side h per vertex
-   (the shortest free edges collapsed or the longest split, to 1%).
-3. Vertices on feature lines and the border are spread along them by a
-   one-dimensional Lloyd (density h^-3), then locked. Corners stay.
-4. The free vertices move on the CVT energy, density h^-4. The reference is
-   sampled once into flat sub-triangles (up to 16 per edge, about the
-   size, fewer on slivers); each cell is cut from them by its neighbours'
-   bisectors, up to the radius of security, region by region, so no cell
-   crosses a crease (a locked vertex's cell starts on every side of its
-   creases). A vertex walks along the reference, at most half the size
-   per step, never onto the other side of a thin part, and no move turns
-   a face by more than 60 degrees or against the reference's normals.
-5. The connectivity stays the working mesh's, kept extrinsic-Delaunay by
-   flips (never across or along a crease): the restricted Delaunay
-   triangulation on a well-sampled surface, a manifold whatever the seeds
-   do.
-Lloyd and L-BFGS remove a lattice's dislocations slowly, so when the
-surface takes 400 vertices or more, steps 2 to 4 run first on a coarse
-level: a quarter of the vertices at twice the size, every other vertex of
-each feature line merged. Each triangle is then split in four, which keeps
-every vertex's valence and gives the lines back LOCAL's count, and the full
-level is relaxed from there. Where the split would fold faces (a part
-curved tighter than twice the size) the coarse level is dropped.
-
-Measured (test 132, against LOCAL on the same input):
-| Case | CVT | LOCAL |
-|---|---|---|
-| Cube with creases at 0.25: angles | 35.5..100.1, creases exact | |
-| Icosphere at 0.12: valence 6 | 95.2% (5 to 7: 100%) | 77.6% |
-| Icosphere: angles, edge CV, mean edge | 40..95, 0.058, +0.8% | 36..105, 0.117, -6.6% |
-| Blob at 0.11: irregular vertices | 5.4% | 22.4% |
-| Cube with creases at 0.25: angles, crease edges | 36..97, 96, exact | 22..122, 96 |
-| Adaptive bump: mean edge / size - 1 | 0.045 | 0.106 |
-| Slab 0.02 thick at 0.05: angles, folds | 18..97, none | 18..91, none (16..129 before its cap flips) |
-| Ellipsoid 0.3 thick at 0.06: angles, faces turned over | 39..99, none | 34..102, none |
-| 2.4k vertices | about 2 s (75 energy evaluations) | about 5 times faster |
-
-Features and attributes are as exact as LOCAL's: crease vertices on the
-creases, corners kept, attributes transferred at the footpoints. Known
-limits: cells are found breadth first over connected sub-triangles, so a
-cell does not reach across empty space (thin parts are sampled per side);
-a smooth part about as thin as the size, with no crease along its rim
-(an ellipsoid 0.06 thick at 0.06), keeps poor triangles and sharp folds
-there, as LOCAL does; near locked corners and borders angles reach 29
-degrees; a surface curved tighter than twice the size loses the coarse
-level (about 80% valence 6 instead of 95%) and pays for it in time.
 ### LOCAL: quality by default, bounded angles, a distance guard
 qaws_remesh_desc d;
 memset(&d, 0, sizeof d);                       /* LOCAL, defaults */
@@ -386,6 +263,63 @@ tolerance costs 5 to 10 times the default at the same density (the guard
 on every move). Figure 3 runs about 1.05 times as long as before. Not
 reached: a strip narrower than the target (its border corners stay near 26
 degrees), and the faces next to a 20-degree corner.
+### CVT remeshing
+`QAWS_REMESH_CVT` places the vertices at a centroidal Voronoi tessellation
+of the reference (Du, Faber, Gunzburger 1999), on its restricted Voronoi
+diagram (Yan, Levy et al. 2009), by Lloyd then L-BFGS (Liu et al. 2009):
+the most uniform and regular isotropic triangles. It takes `reference`,
+`target_length` and `size` as LOCAL does; `iterations` counts the L-BFGS
+steps after 5 Lloyd steps, per level (0: 30).
+
+1. LOCAL runs its 10 iterations: a valid start with features and
+   footpoints, and no vertex left inside a part thinner than the size.
+2. The vertex count is set from the size: the integral of
+   2 / (sqrt(3) h^2) over the reference, one hexagon of side h per vertex
+   (the shortest free edges collapsed or the longest split, to 1%).
+3. Vertices on feature lines and the border are spread along them by a
+   one-dimensional Lloyd (density h^-3), then locked. Corners stay.
+4. The free vertices move on the CVT energy, density h^-4. The reference is
+   sampled once into flat sub-triangles (up to 16 per edge, about the
+   size, fewer on slivers); each cell is cut from them by its neighbours'
+   bisectors, up to the radius of security, region by region, so no cell
+   crosses a crease (a locked vertex's cell starts on every side of its
+   creases). A vertex walks along the reference, at most half the size
+   per step, never onto the other side of a thin part, and no move turns
+   a face by more than 60 degrees or against the reference's normals.
+5. The connectivity stays the working mesh's, kept extrinsic-Delaunay by
+   flips (never across or along a crease): the restricted Delaunay
+   triangulation on a well-sampled surface, a manifold whatever the seeds
+   do.
+Lloyd and L-BFGS remove a lattice's dislocations slowly, so when the
+surface takes 400 vertices or more, steps 2 to 4 run first on a coarse
+level: a quarter of the vertices at twice the size, every other vertex of
+each feature line merged. Each triangle is then split in four, which keeps
+every vertex's valence and gives the lines back LOCAL's count, and the full
+level is relaxed from there. Where the split would fold faces (a part
+curved tighter than twice the size) the coarse level is dropped.
+
+Measured (test 132, against LOCAL on the same input):
+| Case | CVT | LOCAL |
+|---|---|---|
+| Cube with creases at 0.25: angles | 35.5..100.1, creases exact | |
+| Icosphere at 0.12: valence 6 | 95.2% (5 to 7: 100%) | 77.6% |
+| Icosphere: angles, edge CV, mean edge | 40..95, 0.058, +0.8% | 36..105, 0.117, -6.6% |
+| Blob at 0.11: irregular vertices | 5.4% | 22.4% |
+| Cube with creases at 0.25: angles, crease edges | 36..97, 96, exact | 22..122, 96 |
+| Adaptive bump: mean edge / size - 1 | 0.045 | 0.106 |
+| Slab 0.02 thick at 0.05: angles, folds | 18..97, none | 18..91, none (16..129 before its cap flips) |
+| Ellipsoid 0.3 thick at 0.06: angles, faces turned over | 39..99, none | 34..102, none |
+| 2.4k vertices | about 2 s (75 energy evaluations) | about 5 times faster |
+
+Features and attributes are as exact as LOCAL's: crease vertices on the
+creases, corners kept, attributes transferred at the footpoints. Known
+limits: cells are found breadth first over connected sub-triangles, so a
+cell does not reach across empty space (thin parts are sampled per side);
+a smooth part about as thin as the size, with no crease along its rim
+(an ellipsoid 0.06 thick at 0.06), keeps poor triangles and sharp folds
+there, as LOCAL does; near locked corners and borders angles reach 29
+degrees; a surface curved tighter than twice the size loses the coarse
+level (about 80% valence 6 instead of 95%) and pays for it in time.
 ### Quads by min-cost flow
 INSTANT's consistency follows QuadriFlow (Huang, Zhou, Niessner, Shewchuk,
 Guibas 2018):
@@ -494,6 +428,80 @@ pairs two edges apart and lone cones; the can's rims keep slivers with
 three crease vertices in a row (SJ near 0 or below), which only a collapse
 along the crease would remove.
 
+## Measures
+
+```c
+qaws_status qaws_mesh_3d_measure_shape(qaws_mesh_3d const* mesh, qaws_shape_quality* out, unsigned int* out_ideal);
+qaws_status qaws_mesh_3d_measure_deviation(qaws_mesh_3d const* mesh, qaws_mesh_reference const* reference,
+	qaws_deviation_desc const* desc, qaws_mesh_deviation* out);
+```
+
+`qaws_mesh_measure.h` reports a mesh the way remeshing papers do (Hu et
+al. 2017 and Wang et al. 2019 for triangles, QuadWild for quads).
+`qaws_mesh_quality` and the operators' reports stay as they were.
+
+- **Shape**, in one pass over the faces:
+  - triangles: Q = 2 sqrt(3) r / h_max (1 when equilateral), min and mean;
+    the smallest, mean smallest and largest angle; the shares of corners
+    under 30 and over 90 degrees;
+  - quads: each quad's smallest corner scaled Jacobian, along the unit
+    Newell normal (min and mean over quads), and AD, the mean |angle - 90|
+    over quad corners;
+  - ED, the edges' standard deviation over their mean length.
+- **Ideal valence**, from the corners rather than one number for all:
+  - a smooth interior vertex (off the border and the features) wants 6, or
+    4 when quads are the majority; V567 is the share of those at 5 to 7;
+  - a border, crease or corner vertex wants as many faces as its corners'
+    angles hold ideal corners (60 degrees per triangle, 90 per quad), plus
+    one edge on the border. It is regular within a half face (a tie at a
+    half rounds to its own count, one face at the least); `irregular`
+    counts the vertices off that rounded ideal.
+  - So a box's corners (3 quads) and edges (4), and a quad grid's straight
+    border (3 edges) and corners (2), are regular. A creased quad cube
+    counts 0 irregular vertices, where `qaws_mesh_quality` counts 8.
+    `out_ideal` gives each vertex's rounded ideal valence.
+- **Deviation, certified both ways**: lower and upper bounds of the sup of
+  the distance from the mesh to the reference, and from the reference to
+  the mesh, their Hausdorff interval, the area-weighted RMS (projected, not
+  certified), and the point where each lower bound is reached. One branch
+  and bound serves both directions; the mesh enters as its LINEAR
+  reference, so polygons count as their corner fans.
+  - A triangle of the side measured is matched affinely to the other
+    side. Each corner goes to its closest point there. A triangle whose
+    corners land on different triangles is cut along a flat unfolding of
+    the other side round a shared vertex.
+  - Over each piece, the difference of the two cubic patches is a cubic
+    Bezier triangle. Its control points (blossoms) bound it by the convex
+    hull property, and they are refined by subdivision while above the
+    goal. The distance's Lipschitz bound from the corners is taken too,
+    over their flat triangle and, on a curved side, widened by the farthest
+    its sub-patch's net strays from that triangle's: it still shrinks where
+    the closest place on the other side jumps across a concave edge, which
+    the matched patches do not. A zero-area triangle's wedge (a polygon
+    with a straight corner, fanned) maps nothing and is left to its
+    neighbours.
+  - The largest bound is split into four until it is within `precision`
+    (a share of the reference's box diagonal, default 1e-4) of the largest
+    distance found. A face or patch splits `budget` times (default 256) past
+    the splits that bring it down to the other side's triangle size.
+    `converged` is 0 when a budget ran out first; the bounds are then wider
+    but still hold.
+- **What is certified**:
+  - the upper bounds hold unconditionally: any point of a patch is a point
+    of the surface, so a poor match only widens them;
+  - the reference-to-mesh lower bound is an exact distance to the flat
+    triangles (Ericson's closest point, the grid's rings searched outward);
+  - the mesh-to-reference lower bound is a distance found by projection:
+    exact on LINEAR references, and on PN up to the patch projection
+    (the reference's Gauss-Newton, then a descent that runs along a
+    patch's side where the gradient leads out, and on into the neighbour
+    across it);
+  - both are widened by a few units in the last place, and stored outward
+    in float builds.
+
+On figure 3's 3752-triangle blob both directions converge in 0.2 to 0.5 s;
+a 10.7k-face remesh takes 0.5 to 0.8 s (Release). Showcase figure 9 tabulates
+figures 3 and 4's meshes: the baseline the remeshing items quote.
 ## Meshes of exact geometry
 
 ```c
@@ -612,18 +620,27 @@ hd.cell_size = 0.22;
 qaws_volume_mesh_hexahedralize(surface, &hd, &hexes, NULL);
 ```
 
-The showcase `qaws_meshing_showcase` draws figures 1 to 8: the corner
-store, references, remeshing, quads, generation, tetrahedra, hexahedra and
-hexahedra along frame fields (`examples/meshing_showcase/`); an argument
-listing figure numbers (`58`) draws those alone.
+The showcase `qaws_meshing_showcase` draws figures 1 to 14: the corner
+store, references, remeshing, quads, generation, tetrahedra, hexahedra,
+hexahedra along frame fields, measures, angle-bounded LOCAL, CVT,
+smoothest cross fields, quads by min-cost flow and quad finishing
+(`examples/meshing_showcase/`); an argument listing figure keys draws
+those alone (1 to 9, then a to e for figures 10 to 14: `5c` draws 5 and
+12).
 
 ## Known limits
 
+- Remeshing: the angle bounds are not reached on parts thinner than the
+  target or next to sharp corners (exempt sectors aside), and on very
+  coarse meshes the angle pass can end worse than the default; the
+  distance guard is sampled (a face may bulge past it between samples);
+  CVT keeps the crease spacing LOCAL gave it.
 - Quads: a cone that no vertex of its face can reach cheaply stays off
   its vertices (a 3-5 pair beside it); positions are refitted by sweeps,
   not a global solve; the field's singularities are those of a smooth field
   (or one drawn to curvature), not placed for the fewest irregular
-  vertices.
+  vertices; the pipeline is sensitive to tiny changes of the input (a
+  scale of 1e-12 can change the quads, not their quality).
 - Generation: vertices on a trimmed face's trim curve are snapped onto the
   surface, not the curve.
 - Tetrahedra: improvement by flips and smoothing only (no edge removal or
