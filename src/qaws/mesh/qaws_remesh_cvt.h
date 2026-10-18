@@ -11,11 +11,11 @@ int rv_optimize(qaws_hm* m, qaws_mesh_reference const* r, qaws_size_field const*
 	mr_scratch* s, unsigned int steps, qaws_mesh_report* rep);
 
 /* what the last optimisation reached, written when rv_trace is set (the tests): the energy after the Lloyd steps and at
-   the end, the energy evaluations; shortcut: a global probe, not for threads; when remeshing runs in threads, report the
-   energies through qaws_mesh_report */
+   the end, the energy evaluations, the share of the reference's mass its cells cover at the end (1 when they tile it);
+   shortcut: a global probe, not for threads; when remeshing runs in threads, report the energies through qaws_mesh_report */
 typedef struct rv_probe
 {
-	double lloyd_energy, energy;
+	double lloyd_energy, energy, coverage;
 	unsigned int evaluations;
 } rv_probe;
 

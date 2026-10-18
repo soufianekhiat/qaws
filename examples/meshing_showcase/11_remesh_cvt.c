@@ -3,9 +3,9 @@
  *   - the blob by LOCAL and by CVT at the same target, the vertices
  *     coloured by valence (5 blue, 6 white, 7 red): CVT's lattice is
  *     regular but for a few defects;
- *   - the can by CVT with its Voronoi cells on the reference (the dual of
- *     the Delaunay mesh: circumcentres projected), the regions between
- *     creases tinted: no cell crosses a rim;
+ *   - the can by CVT with the dual of its Delaunay mesh on the reference
+ *     (circumcentres projected; the solver's own restricted Voronoi cells
+ *     are not exported), the caps and the side tinted: no cell crosses a rim;
  *   - the cube with creases by CVT, the crease seeds (locked) marked.
  */
 
@@ -110,7 +110,7 @@ static void ms_circumcentre(double const* a, double const* b, double const* c, d
 static void demo_remesh_cvt(void)
 {
 	static double const wire[3] = { 40, 45, 60 }, red[3] = { 214, 39, 40 }, dark[3] = { 25, 25, 30 }, white[3] = { 245, 245, 245 };
-	static double const tints[3][3] = { { 226, 200, 160 }, { 170, 200, 170 }, { 178, 192, 212 } };
+	static double const tints[4][3] = { { 226, 200, 160 }, { 170, 200, 170 }, { 178, 192, 212 }, { 205, 185, 220 } };
 	er_canvas* c = er_create(2200, 640, 3, 252, 252, 250);
 	qaws_mesh_3d *blob = ms_blob(1), *can = ms_can(8, 1, 1.6), *loc = NULL, *cvt = NULL, *rcan = NULL, *cube = NULL, *rcube = NULL;
 	qaws_mesh_reference *rb = NULL, *rc = NULL;
@@ -127,7 +127,8 @@ static void demo_remesh_cvt(void)
 	cvt = ms_remesh_by(blob, rb, QAWS_REMESH_CVT, 0.11, &rep, &sec);
 	if (cvt)
 		ms_valence_panel(c, 550, cvt, &rep, sec, "the blob by CVT");
-	/* the can's Voronoi cells: per edge, its faces' circumcentres joined (to the edge's middle on a crease), on the reference */
+	/* the dual of the can's Delaunay mesh: per edge, its faces' circumcentres joined (to the edge's middle on a crease), on the
+	   reference */
 	qaws_mesh_3d_detect_features(can, (qaws_scalar)(50 * MS_PI / 180), 0, 0);
 	qaws_mesh_reference_create(can, NULL, &rc);
 	rcan = rc ? ms_remesh_by(can, rc, QAWS_REMESH_CVT, 0.12, &rep, &sec) : NULL;
@@ -154,15 +155,15 @@ static void demo_remesh_cvt(void)
 		}
 		ms_regularity(rcan, &v6, &cv);
 		sprintf(sub, "valence 6: %.1f%%, angles %.0f..%.0f", v6, (double)rep.quality.min_angle, (double)rep.quality.max_angle);
-		ms_panel(c, 1100, 0, 550, 640, rcan, 0.35, 0.5, "the can's Voronoi cells", sub);
-		sprintf(sub, "regions tinted, edge CV %.3f, %.2f s", cv, sec);
+		ms_panel(c, 1100, 0, 550, 640, rcan, 0.35, 0.5, "the can's Delaunay dual", sub);
+		sprintf(sub, "caps and side tinted, edge CV %.3f, %.2f s", cv, sec);
 		er_text(c, 1100 + 14, 68, sub, 2, 95, 95, 95);
-		/* the regions tinted (a cap, the other cap, the side), flat */
+		/* the caps and the side tinted by height, flat */
 		for (i = 0; i < nt; i++)
 		{
 			double const *a = p + 3 * t[3 * i], *b = p + 3 * t[3 * i + 1], *d = p + 3 * t[3 * i + 2];
 			double z = (a[2] + b[2] + d[2]) / 3;
-			double const* col = tints[z > 0.79 ? 0 : z < -0.79 ? 1 : 2];
+			double const* col = tints[z > 0.79 ? 0 : z < -0.79 ? 1 : 3];
 			er_triangle(c, a, b, d, NULL, NULL, NULL, col, col, col);
 		}
 		/* circumcentres (faces) and edge middles, projected onto the reference */
@@ -220,18 +221,20 @@ static void demo_remesh_cvt(void)
 			unsigned int* fe = (unsigned int*)malloc(sizeof(unsigned int) * 2 * (nfe + 1));
 			unsigned char* on = (unsigned char*)calloc(nv, 1);
 			double* p = ms_positions(rcube), v6, cv;
+			unsigned int seeds = 0;
 			ms_regularity(rcube, &v6, &cv);
-			sprintf(sub, "%u crease seeds, locked", nfe);
-			ms_panel(c, 1650, 0, 550, 640, rcube, 0.62, 0.55, "the cube with creases", sub);
-			sprintf(sub, "angles %.0f..%.0f, edge CV %.3f", (double)rep.quality.min_angle, (double)rep.quality.max_angle, cv);
-			er_text(c, 1650 + 14, 68, sub, 2, 95, 95, 95);
-			ms_draw(c, rcube, tints[2], NULL, 0, wire, 1.0);
 			qaws_mesh_3d_get_feature_edges(rcube, fe);
 			for (i = 0; i < nfe; i++)
-			{
-				er_line(c, p + 3 * fe[2 * i], p + 3 * fe[2 * i + 1], red, 2.4);
 				on[fe[2 * i]] = on[fe[2 * i + 1]] = 1;
-			}
+			for (i = 0; i < nv; i++)
+				seeds += on[i];
+			sprintf(sub, "%u crease seeds (locked), %u edges", seeds, nfe);
+			ms_panel(c, 1650, 0, 550, 640, rcube, 0.62, 0.55, "the cube with creases", sub);
+			sprintf(sub, "valence 6 %.1f%%, angles %.0f..%.0f, CV %.3f", v6, (double)rep.quality.min_angle, (double)rep.quality.max_angle, cv);
+			er_text(c, 1650 + 14, 68, sub, 2, 95, 95, 95);
+			ms_draw(c, rcube, tints[2], NULL, 0, wire, 1.0);
+			for (i = 0; i < nfe; i++)
+				er_line(c, p + 3 * fe[2 * i], p + 3 * fe[2 * i + 1], red, 2.4);
 			for (i = 0; i < nv; i++)
 				if (on[i])
 					er_point(c, p + 3 * i, qaws_mesh_3d_is_feature_corner(rcube, i) ? dark : white, qaws_mesh_3d_is_feature_corner(rcube, i) ? 6.0 : 4.0);

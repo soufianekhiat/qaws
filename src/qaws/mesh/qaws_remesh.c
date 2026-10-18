@@ -743,7 +743,7 @@ qaws_status qaws_mesh_remesh(qaws_mesh_3d const* mesh, qaws_remesh_desc const* d
 		qaws_mesh_3d_measure_quality(mesh, &q);
 		w.L = q.mean_edge > 0 ? (double)q.mean_edge : 1;
 	}
-	iterations = desc->method == QAWS_REMESH_CVT ? 5 : desc->iterations ? desc->iterations : 10;
+	iterations = desc->method == QAWS_REMESH_CVT ? 10 : desc->iterations ? desc->iterations : 10;
 	st = rm_begin(&w, mesh, &out);
 	for (it = 0; st == QAWS_STATUS_OK && it < iterations && !w.failed; it++)
 	{

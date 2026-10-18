@@ -22,13 +22,15 @@
  *          corner there). The default.
  *   CVT    a centroidal Voronoi tessellation of the reference (Lloyd,
  *          then L-BFGS; Yan, Levy et al. 2009, Liu et al. 2009): LOCAL
- *          for 5 iterations, the vertex count set from the size (a
+ *          first (10 iterations), the vertex count set from the size (a
  *          hexagon of the target each), the vertices on feature lines
  *          spread along them and fixed, the others moved to the centroids
  *          of their Voronoi cells restricted to the reference (density
  *          size^-4, region by region: no cell crosses a crease), the edges
- *          kept Delaunay by flips; solved on a coarse level first (a
- *          quarter of the vertices, then each triangle split in four).
+ *          kept Delaunay by flips, no move folding a face; solved on a
+ *          coarse level first (a quarter of the vertices, then each
+ *          triangle split in four) unless the surface bends tighter than
+ *          twice the size.
  *          `iterations` counts the L-BFGS steps after 5 Lloyd steps, per
  *          level (0: 30). The most uniform and regular triangles, the
  *          edges on target; about five times slower than LOCAL.

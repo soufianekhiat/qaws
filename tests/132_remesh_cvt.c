@@ -7,13 +7,20 @@
  *     spread than LOCAL's, the vertices on the reference;
  *   - the showcase blob at 0.11: few irregular vertices, angles above 30;
  *   - a cube with its creases: corners kept, vertices on the cube, the
- *     crease edges along its edges (length 24), a linear attribute exact;
+ *     crease edges along its edges (length 24, as many as LOCAL's), a
+ *     linear attribute exact;
  *   - adaptive: test 124's curvature field on a bumped sphere, edges near
  *     the size (closer than LOCAL's), short on the bump;
  *   - convergence: the energy no higher after L-BFGS than after Lloyd,
  *     edges no more spread after 30 steps than after 1;
- *   - a closed slab thinner than the target: a valid closed genus 0 mesh;
- *     an open bumpy square: its border kept, its corners, angles above 25;
+ *   - a closed slab thinner than the target: a valid closed genus 0 mesh,
+ *     no fold on its flat sides, angles no worse than LOCAL's;
+ *   - an ellipsoid 0.3 thick at 0.06 (its rim bends tighter than the
+ *     size): no face turned against the surface, angles no worse than
+ *     LOCAL's;
+ *   - a ridge fading out (a crease with one region round it): the cells
+ *     tile the reference, the crease keeps LOCAL's count;
+ *   - an open bumpy square: its border kept, its corners, angles above 25;
  *   - determinism: two runs, the same arrays;
  *   - about 2.4k seeds: the time printed.
  */
@@ -258,9 +265,9 @@ static void test_cube(void)
 	static double const x[24] = { -1, -1, -1, 1, -1, -1, 1, 1, -1, -1, 1, -1, -1, -1, 1, 1, -1, 1, 1, 1, 1, -1, 1, 1 };
 	static unsigned int const f[24] = { 0, 3, 2, 1, 4, 5, 6, 7, 0, 1, 5, 4, 1, 2, 6, 5, 2, 3, 7, 6, 3, 0, 4, 7 };
 	static unsigned int const fs[6] = { 4, 4, 4, 4, 4, 4 };
-	qaws_mesh_3d *m = ct_make(x, 8, f, fs, 6), *out = NULL;
-	qaws_mesh_report rep;
-	qaws_status st = QAWS_STATUS_INTERNAL_ERROR;
+	qaws_mesh_3d *m = ct_make(x, 8, f, fs, 6), *out = NULL, *loc = NULL;
+	qaws_mesh_report rep, lrep;
+	qaws_status st = QAWS_STATUS_INTERNAL_ERROR, ls = QAWS_STATUS_INTERNAL_ERROR;
 	qaws_attribute_desc ad;
 	qaws_scalar vals[8];
 	unsigned int i, va = 0, nv, nfe, corners = 0, found[8] = { 0 }, a2 = 0;
@@ -273,7 +280,8 @@ static void test_cube(void)
 	qaws_mesh_3d_add_attribute(m, &ad, vals, &va);
 	qaws_mesh_3d_detect_features(m, (qaws_scalar)(M_PI / 6), 0, 0);
 	out = ct_remesh(m, NULL, QAWS_REMESH_CVT, 0.25, NULL, 0, &rep, &st, NULL);
-	if (!out)
+	loc = ct_remesh(m, NULL, QAWS_REMESH_LOCAL, 0.25, NULL, 0, &lrep, &ls, NULL);
+	if (!out || !loc)
 	{
 		TEST_ASSERT(0, "cube: remeshed");
 		goto done;
@@ -310,14 +318,16 @@ static void test_cube(void)
 			corners = corners >= 8 && found[k] ? corners : 0;
 		free(p); free(fv); free(fe);
 	}
-	sprintf(msg, "cube by CVT at 0.25: %u vertices, valid %d, on the cube %.2g, corners %u, %u crease edges of length %.12g (%.0f off the cube's edges), linear attribute %.2g, angles %.1f..%.1f",
-		nv, qaws_mesh_3d_validate(out) == QAWS_STATUS_OK, onc, corners, nfe, flen, fon, ev, (double)rep.quality.min_angle, (double)rep.quality.max_angle);
+	sprintf(msg, "cube by CVT at 0.25: %u vertices, valid %d, on the cube %.2g, corners %u, %u crease edges (LOCAL %u) of length %.12g (%.0f off the cube's edges), linear attribute %.2g, angles %.1f..%.1f",
+		nv, qaws_mesh_3d_validate(out) == QAWS_STATUS_OK, onc, corners, nfe, qaws_mesh_3d_get_feature_edge_count(loc), flen, fon, ev,
+		(double)rep.quality.min_angle, (double)rep.quality.max_angle);
 	printf("  %s\n", msg);
-	TEST_ASSERT(st == QAWS_STATUS_OK && qaws_mesh_3d_validate(out) == QAWS_STATUS_OK && onc < 1e-9 && corners >= 8 && fabs(flen - 24) < 1e-9 && fon == 0
-		&& ev < 1e-9 && rep.quality.min_angle >= 30, msg);
+	TEST_ASSERT(st == QAWS_STATUS_OK && ls == QAWS_STATUS_OK && qaws_mesh_3d_validate(out) == QAWS_STATUS_OK && onc < 1e-9 && corners >= 8
+		&& fabs(flen - 24) < 1e-9 && fon == 0 && nfe == qaws_mesh_3d_get_feature_edge_count(loc) && ev < 1e-9 && rep.quality.min_angle >= 30, msg);
 done:
 	qaws_mesh_3d_destroy(m);
 	qaws_mesh_3d_destroy(out);
+	qaws_mesh_3d_destroy(loc);
 }
 
 /* the mean of |edge / size - 1| (the size the mean of the ends'), and the mean edge on the bump and far from it */
@@ -450,32 +460,215 @@ done:
 	qaws_mesh_3d_destroy(b);
 }
 
+typedef struct ct_edge
+{
+	unsigned int a, b, f;
+} ct_edge;
+
+static int ct_edge_cmp(void const* p, void const* q)
+{
+	ct_edge const *u = (ct_edge const*)p, *v = (ct_edge const*)q;
+	return u->a != v->a ? (u->a < v->a ? -1 : 1) : u->b != v->b ? (u->b < v->b ? -1 : 1) : (u->f > v->f) - (u->f < v->f);
+}
+
+/* the smallest cosine between the normals of two faces across an edge off the features: below 0 a fold where the surface is
+   flat between its creases */
+static double ct_fold(qaws_mesh_3d const* m)
+{
+	unsigned int nv = qaws_mesh_3d_get_vertex_count(m), nt = qaws_mesh_3d_get_triangle_count(m), nfe = qaws_mesh_3d_get_feature_edge_count(m), i, k;
+	unsigned int *t = (unsigned int*)malloc(sizeof(unsigned int) * 3 * (nt + 1)), *fe = (unsigned int*)malloc(sizeof(unsigned int) * 2 * (nfe + 1));
+	qaws_scalar* p = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * (nv + 1));
+	double* n = (double*)malloc(sizeof(double) * 3 * (nt + 1)), worst = 1;
+	ct_edge *e = (ct_edge*)malloc(sizeof(ct_edge) * 3 * (nt + 1)), *fk = (ct_edge*)malloc(sizeof(ct_edge) * (nfe + 1));
+	qaws_mesh_3d_get_triangles(m, t);
+	qaws_mesh_3d_get_positions(m, p);
+	qaws_mesh_3d_get_feature_edges(m, fe);
+	for (i = 0; i < nt; i++)
+	{
+		qaws_scalar const *A = p + 3 * t[3 * i], *B = p + 3 * t[3 * i + 1], *C = p + 3 * t[3 * i + 2];
+		double u[3], v[3], l;
+		for (k = 0; k < 3; k++) { u[k] = B[k] - A[k]; v[k] = C[k] - A[k]; }
+		n[3 * i] = u[1] * v[2] - u[2] * v[1];
+		n[3 * i + 1] = u[2] * v[0] - u[0] * v[2];
+		n[3 * i + 2] = u[0] * v[1] - u[1] * v[0];
+		l = sqrt(n[3 * i] * n[3 * i] + n[3 * i + 1] * n[3 * i + 1] + n[3 * i + 2] * n[3 * i + 2]);
+		for (k = 0; k < 3; k++)
+		{
+			unsigned int a = t[3 * i + k], b = t[3 * i + (k + 1) % 3];
+			n[3 * i + k] = l > 0 ? n[3 * i + k] / l : 0;
+			e[3 * i + k].a = a < b ? a : b;
+			e[3 * i + k].b = a < b ? b : a;
+			e[3 * i + k].f = i;
+		}
+	}
+	for (i = 0; i < nfe; i++)
+	{
+		fk[i].a = fe[2 * i] < fe[2 * i + 1] ? fe[2 * i] : fe[2 * i + 1];
+		fk[i].b = fe[2 * i] < fe[2 * i + 1] ? fe[2 * i + 1] : fe[2 * i];
+		fk[i].f = 0;
+	}
+	qsort(e, 3 * nt, sizeof *e, ct_edge_cmp);
+	qsort(fk, nfe, sizeof *fk, ct_edge_cmp);
+	for (i = 0; i + 1 < 3 * nt; i++)
+		if (e[i].a == e[i + 1].a && e[i].b == e[i + 1].b)
+		{
+			ct_edge key = e[i];
+			key.f = 0;
+			if (!nfe || !bsearch(&key, fk, nfe, sizeof *fk, ct_edge_cmp))
+				worst = fmin(worst, n[3 * e[i].f] * n[3 * e[i + 1].f] + n[3 * e[i].f + 1] * n[3 * e[i + 1].f + 1] + n[3 * e[i].f + 2] * n[3 * e[i + 1].f + 2]);
+		}
+	free(t); free(fe); free(p); free(n); free(e); free(fk);
+	return worst;
+}
+
 static void test_slab(void)
 {
 	static double const x[24] = { -0.5, -0.5, -0.01, 0.5, -0.5, -0.01, 0.5, 0.5, -0.01, -0.5, 0.5, -0.01, -0.5, -0.5, 0.01, 0.5, -0.5, 0.01, 0.5, 0.5, 0.01,
 		-0.5, 0.5, 0.01 };
 	static unsigned int const f[24] = { 0, 3, 2, 1, 4, 5, 6, 7, 0, 1, 5, 4, 1, 2, 6, 5, 2, 3, 7, 6, 3, 0, 4, 7 };
 	static unsigned int const fs[6] = { 4, 4, 4, 4, 4, 4 };
-	qaws_mesh_3d *m = ct_make(x, 8, f, fs, 6), *out = NULL;
-	qaws_mesh_report rep;
+	qaws_mesh_3d *m = ct_make(x, 8, f, fs, 6), *out = NULL, *loc = NULL;
+	qaws_mesh_report rep, lrep;
 	qaws_mesh_topology t;
-	qaws_status st = QAWS_STATUS_INTERNAL_ERROR;
-	char msg[300];
+	qaws_status st = QAWS_STATUS_INTERNAL_ERROR, ls = QAWS_STATUS_INTERNAL_ERROR;
+	double fold = -1;
+	char msg[400];
 	qaws_mesh_3d_detect_features(m, (qaws_scalar)(M_PI / 6), 0, 0);
 	out = ct_remesh(m, NULL, QAWS_REMESH_CVT, 0.05, NULL, 0, &rep, &st, NULL);
-	if (!out)
+	loc = ct_remesh(m, NULL, QAWS_REMESH_LOCAL, 0.05, NULL, 0, &lrep, &ls, NULL);
+	if (!out || !loc)
 	{
 		TEST_ASSERT(0, "slab: remeshed");
 		goto done;
 	}
 	qaws_mesh_3d_get_topology(out, &t);
-	sprintf(msg, "a slab 0.02 thick by CVT at 0.05: %u vertices, valid %d, closed %d, genus %u, angles %.1f..%.1f", qaws_mesh_3d_get_vertex_count(out),
-		qaws_mesh_3d_validate(out) == QAWS_STATUS_OK, t.closed, t.genus, (double)rep.quality.min_angle, (double)rep.quality.max_angle);
+	fold = ct_fold(out);
+	sprintf(msg, "a slab 0.02 thick by CVT at 0.05: %u vertices, valid %d, closed %d, genus %u, faces across edges off the creases at cosine %.3f and above, angles %.1f..%.1f (LOCAL %.1f..%.1f)",
+		qaws_mesh_3d_get_vertex_count(out), qaws_mesh_3d_validate(out) == QAWS_STATUS_OK, t.closed, t.genus, fold, (double)rep.quality.min_angle,
+		(double)rep.quality.max_angle, (double)lrep.quality.min_angle, (double)lrep.quality.max_angle);
 	printf("  %s\n", msg);
-	TEST_ASSERT(st == QAWS_STATUS_OK && qaws_mesh_3d_validate(out) == QAWS_STATUS_OK && t.closed && t.genus == 0 && t.components == 1, msg);
+	TEST_ASSERT(st == QAWS_STATUS_OK && ls == QAWS_STATUS_OK && qaws_mesh_3d_validate(out) == QAWS_STATUS_OK && t.closed && t.genus == 0 && t.components == 1
+		&& fold > 0 && rep.quality.min_angle >= lrep.quality.min_angle && rep.quality.max_angle <= lrep.quality.max_angle, msg);
 done:
 	qaws_mesh_3d_destroy(m);
 	qaws_mesh_3d_destroy(out);
+	qaws_mesh_3d_destroy(loc);
+}
+
+/* the faces of the ellipsoid x^2 + y^2 + (z / c)^2 = 1 facing against its normal at all three of their corners */
+static unsigned int ct_inverted(qaws_mesh_3d const* m, double c)
+{
+	unsigned int nv = qaws_mesh_3d_get_vertex_count(m), nt = qaws_mesh_3d_get_triangle_count(m), i, k, q, bad = 0;
+	unsigned int* t = (unsigned int*)malloc(sizeof(unsigned int) * 3 * (nt + 1));
+	qaws_scalar* p = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * (nv + 1));
+	qaws_mesh_3d_get_triangles(m, t);
+	qaws_mesh_3d_get_positions(m, p);
+	for (i = 0; i < nt; i++)
+	{
+		qaws_scalar const *A = p + 3 * t[3 * i], *B = p + 3 * t[3 * i + 1], *C = p + 3 * t[3 * i + 2];
+		double u[3], v[3], n[3];
+		unsigned int against = 0;
+		for (k = 0; k < 3; k++) { u[k] = B[k] - A[k]; v[k] = C[k] - A[k]; }
+		n[0] = u[1] * v[2] - u[2] * v[1];
+		n[1] = u[2] * v[0] - u[0] * v[2];
+		n[2] = u[0] * v[1] - u[1] * v[0];
+		for (q = 0; q < 3; q++)
+		{
+			qaws_scalar const* P = p + 3 * t[3 * i + q];
+			against += n[0] * P[0] + n[1] * P[1] + n[2] * P[2] / (c * c) < 0;
+		}
+		bad += against == 3;
+	}
+	free(t); free(p);
+	return bad;
+}
+
+/* an icosphere flattened to an ellipsoid of semi-axes (1, 1, 0.15) at 0.06: its rim bends tighter than the size, and no face
+   comes out turned over against it; angles no worse than LOCAL's */
+static void test_thin(void)
+{
+	qaws_mesh_3d *m = ct_icosphere(NULL, 0), *out = NULL, *loc = NULL;
+	qaws_mesh_report rep, lrep;
+	qaws_status st = QAWS_STATUS_INTERNAL_ERROR, ls = QAWS_STATUS_INTERNAL_ERROR;
+	unsigned int nv = qaws_mesh_3d_get_vertex_count(m), i, bad = 0, lbad = 0;
+	qaws_scalar* p = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * nv);
+	char msg[400];
+	qaws_mesh_3d_get_positions(m, p);
+	for (i = 0; i < nv; i++)
+		p[3 * i + 2] *= (qaws_scalar)0.15;
+	qaws_mesh_3d_set_positions(m, p);
+	free(p);
+	out = ct_remesh(m, NULL, QAWS_REMESH_CVT, 0.06, NULL, 0, &rep, &st, NULL);
+	loc = ct_remesh(m, NULL, QAWS_REMESH_LOCAL, 0.06, NULL, 0, &lrep, &ls, NULL);
+	if (!out || !loc)
+	{
+		TEST_ASSERT(0, "thin ellipsoid: remeshed");
+		goto done;
+	}
+	bad = ct_inverted(out, 0.15);
+	lbad = ct_inverted(loc, 0.15);
+	sprintf(msg, "an ellipsoid 0.3 thick by CVT at 0.06: %u vertices, valid %d, %u faces turned against the surface (LOCAL %u), angles %.1f..%.1f (LOCAL %.1f..%.1f)",
+		qaws_mesh_3d_get_vertex_count(out), qaws_mesh_3d_validate(out) == QAWS_STATUS_OK, bad, lbad, (double)rep.quality.min_angle,
+		(double)rep.quality.max_angle, (double)lrep.quality.min_angle, (double)lrep.quality.max_angle);
+	printf("  %s\n", msg);
+	TEST_ASSERT(st == QAWS_STATUS_OK && ls == QAWS_STATUS_OK && qaws_mesh_3d_validate(out) == QAWS_STATUS_OK && bad == 0
+		&& rep.quality.min_angle >= lrep.quality.min_angle && rep.quality.max_angle <= lrep.quality.max_angle, msg);
+done:
+	qaws_mesh_3d_destroy(m);
+	qaws_mesh_3d_destroy(out);
+	qaws_mesh_3d_destroy(loc);
+}
+
+/* an open square folded along a ridge that fades out: a crease with one region round it, whose seeds' cells take both its
+   sides; the cells tile the reference, the crease keeps LOCAL's count */
+static void test_dangling(void)
+{
+	unsigned int n = 20, i, j, k = 0, *f = (unsigned int*)malloc(sizeof(unsigned int) * 6 * 20 * 20);
+	double* x = (double*)malloc(sizeof(double) * 3 * 21 * 21);
+	qaws_mesh_3d *m, *out = NULL, *loc = NULL;
+	qaws_mesh_report rep, lrep;
+	qaws_status st = QAWS_STATUS_INTERNAL_ERROR, ls = QAWS_STATUS_INTERNAL_ERROR;
+	rv_probe pr;
+	char msg[400];
+	for (j = 0; j <= n; j++)
+		for (i = 0; i <= n; i++)
+		{
+			double u = (double)i / n, v = (double)j / n, s = v < 0.4 ? 1 : v > 0.8 ? 0 : (0.8 - v) / 0.4;
+			x[3 * (j * (n + 1) + i)] = u;
+			x[3 * (j * (n + 1) + i) + 1] = v;
+			x[3 * (j * (n + 1) + i) + 2] = 0.8 * fabs(u - 0.5) * s;
+		}
+	for (j = 0; j < n; j++)
+		for (i = 0; i < n; i++)
+		{
+			unsigned int a = j * (n + 1) + i;
+			f[k++] = a; f[k++] = a + 1; f[k++] = a + n + 2;
+			f[k++] = a; f[k++] = a + n + 2; f[k++] = a + n + 1;
+		}
+	m = ct_make(x, (n + 1) * (n + 1), f, NULL, 2 * n * n);
+	free(x);
+	free(f);
+	qaws_mesh_3d_detect_features(m, (qaws_scalar)(40 * M_PI / 180), 0, 0);
+	memset(&pr, 0, sizeof pr);
+	rv_trace = &pr;
+	out = ct_remesh(m, NULL, QAWS_REMESH_CVT, 0.03, NULL, 0, &rep, &st, NULL);
+	rv_trace = NULL;
+	loc = ct_remesh(m, NULL, QAWS_REMESH_LOCAL, 0.03, NULL, 0, &lrep, &ls, NULL);
+	if (!out || !loc)
+	{
+		TEST_ASSERT(0, "dangling crease: remeshed");
+		goto done;
+	}
+	sprintf(msg, "a ridge fading out by CVT at 0.03: valid %d, the cells cover %.9f of the reference's mass, %u crease and border edges (LOCAL %u), angles %.1f..%.1f (LOCAL %.1f..%.1f)",
+		qaws_mesh_3d_validate(out) == QAWS_STATUS_OK, pr.coverage, qaws_mesh_3d_get_feature_edge_count(out), qaws_mesh_3d_get_feature_edge_count(loc),
+		(double)rep.quality.min_angle, (double)rep.quality.max_angle, (double)lrep.quality.min_angle, (double)lrep.quality.max_angle);
+	printf("  %s\n", msg);
+	TEST_ASSERT(st == QAWS_STATUS_OK && ls == QAWS_STATUS_OK && qaws_mesh_3d_validate(out) == QAWS_STATUS_OK && fabs(pr.coverage - 1) < 1e-9
+		&& qaws_mesh_3d_get_feature_edge_count(out) == qaws_mesh_3d_get_feature_edge_count(loc) && rep.quality.min_angle >= 30, msg);
+done:
+	qaws_mesh_3d_destroy(m);
+	qaws_mesh_3d_destroy(out);
+	qaws_mesh_3d_destroy(loc);
 }
 
 /* an open bumpy square (test 124's): its border a locked line like a crease */
@@ -530,7 +723,7 @@ static void test_open(void)
 		qaws_mesh_3d_validate(out) == QAWS_STATUS_OK, t.boundary_loops, nb, okb, found, (double)rep.quality.min_angle, (double)rep.quality.max_angle);
 	printf("  %s\n", msg);
 	TEST_ASSERT(st == QAWS_STATUS_OK && qaws_mesh_3d_validate(out) == QAWS_STATUS_OK && t.boundary_loops == 1 && okb && found == 4 && nb > 40
-		&& rep.quality.min_angle >= 25, msg);   /* (measured 28.8: the triangles at the locked corners) */
+		&& rep.quality.min_angle >= 25, msg);   /* (measured 29.8: the triangles at the locked corners) */
 done:
 	qaws_mesh_3d_destroy(m);
 	qaws_mesh_3d_destroy(out);
@@ -598,6 +791,8 @@ int test_132_remesh_cvt_main(void)
 	test_adaptive();
 	test_convergence();
 	test_slab();
+	test_thin();
+	test_dangling();
 	test_open();
 	test_determinism();
 	test_timing();
