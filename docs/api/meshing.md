@@ -457,6 +457,13 @@ d.guide_edges = loop;                /* pairs of input vertices */
 d.guide_edge_count = n_loop;
 d.pinned = pins;                     /* input vertices */
 d.pinned_count = n_pins;
+d.cone_vertices = corners;           /* input vertices made irregular */
+d.cone_indices = turns;              /* quarter turns: +1 valence 3, -1 valence 5 */
+d.cone_count = n_cones;              /* a closed surface: they sum to 4 chi */
+d.attractors = points;               /* 3 each: free singularities drawn there */
+d.attractor_strengths = strengths;   /* SMOOTHEST in cones, < 0 pushes */
+d.attractor_count = n_points;
+d.attractor_radius = 0.12f;          /* near the spacing */
 qaws_mesh_quadrangulate(mesh, &d, &quads, &report);
 ```
 
@@ -466,6 +473,8 @@ qaws_mesh_quadrangulate(mesh, &d, &quads, &report);
 | Directions | `guide_directions`, `guide_weights` in `qaws_direction_field_desc` and `qaws_quadrangulate_desc` | LOCAL: MF_PREFER (pull) or MF_ALONG (hold) on level 0, carried up every level; SMOOTHEST: a held value, or a penalty w d_v \|u - g\|^2 (d_v the vertex's edge weights) in the one factor; quads: carried to the dense mesh through each vertex's footpoint triangle (pulls fade across it, holds cover the dense vertices nearest a held input vertex), every candidate field honours it |
 | Edge loops | `guide_edges`, `guide_edge_count` | the dense vertices within half a dense edge of a segment moved onto it, held along it and on one lattice line (MF_GUIDE), the flow changing their steps along the line only; their quad vertices placed at their lattice points on it and held by the relaxation and the finishing; not creases, never flagged as features |
 | Pinned vertices | `pinned`, `pinned_count` (also `qaws_remesh_desc`) | LOCAL and CVT keep them as corners (never moved, collapsed or placed); the lattice holds a point there (MF_PINNED); the quad vertex is the input vertex exactly, flagged a corner |
+| Placed cones | `cone_vertices`, `cone_indices`, `cone_count` in `qaws_direction_field_desc` (SMOOTHEST; LOCAL: UNSUPPORTED_OPERATION) and `qaws_quadrangulate_desc` | SMOOTHEST: the smoothest field for a connection adjusted to the cones (Crane, Desbrun, Schroder 2010; Knoppel et al. 2013, 6.1): the least change of every edge's transport (min-norm, one sparse LDL^T of the faces' D D^T) that turns each face by its angle share of the cones round it instead of its own excess, so the field winds at the cones and nowhere else; edges between two held vertices keep theirs. Poincare-Hopf: a closed component without held vertices needs the indices to sum to n chi (8 quarter turns on a sphere), else INVALID_ARGUMENT; with lines or a border the remainder is left free (spread evenly over the faces that cannot close it, the solve places it). Quads: the dense remesh keeps each cone vertex, only the SMOOTHEST candidate with the cones is used, the lattice points round the cone's star are set on its vertex; with a border the flow keeps the star's steps (MF_CONE) and the vertex stays pinned, so the cone's quad vertex is the input vertex; on a closed surface the cones must absorb the lattice's mismatch (at a hundred times a free cone's price), so they may move a step and the nearest quad vertex of valence 4 - index within the spacing is moved onto the cone; either way it is held by the relaxation and the finishing like a corner, not flagged one |
+| Attractors | `attractors`, `attractor_strengths`, `attractor_count`, `attractor_radius` (0: a tenth of the bounding diagonal) in both descs | a Gaussian exp(-d^2 / r^2) round each point. SMOOTHEST: the strength in cones (1: a +1 cone's turn) spread by area times the Gaussian, added to the adjusted connection's turns and taken back from every face by its area: a free cone forms there; negative pushes them off. LOCAL: the smoothing's edge weights times exp(-strength Gaussian) on every level. Quads: both candidates |
 
 Measured (test 137, figure 16, a latitude-longitude unit sphere of 1106
 vertices):
@@ -480,6 +489,19 @@ vertices):
   edge (0.06 without), all quads, 8 irregular;
 - pins: the quad, LOCAL and CVT vertices at the input positions to the bit,
   flagged corners.
+- cones placed: eight +1 at a cube's corner directions on the sphere: the
+  SMOOTHEST field's 8 singular faces each round its cone vertex; the quads
+  at 0.15 (pure) a cube-sphere of 592 quads with exactly 8 irregular
+  vertices, of valence 3, at the input vertices to the bit, not corners
+  (SJ above 0.56 INSTANT, 0.69 GLOBAL by the map); seven cones refused
+  (INVALID_ARGUMENT); a +1 / -1 pair on a 24 x 24 square: 2 singular faces
+  (the corners take the border's turn), quads at 0.12 with exactly two
+  irregular inside, valence 3 and 5 on the vertices (INSTANT, GLOBAL);
+- attractors (reach 0.3 on the field): SMOOTHEST's nearest cone to a point
+  0.435 free, 0.074 drawn (strength 1), a free cone pushed 1.68 off
+  (strength -1), 8 singular faces each time; LOCAL 0.137 free, 0.074 drawn
+  (3); quads at 0.15 with strength 1, reach 0.1: the nearest irregular
+  vertex 0.042 from the point (0.415 without), still 8 irregular.
 
 Limits: a pull and a hold are honoured by the field, not by the lattice: a
 lattice turned against the sphere's natural one ends rows near the stroke,
@@ -490,6 +512,17 @@ painted size. Guide edges are matched to dense vertices by a brute-force
 search (every vertex against every segment); crossing loops get no pinned
 crossing; a loop through a cone of the field cannot stay one lattice line.
 Directions need the reference made from the input.
+Placed cones honour the field on the cones' vertices (in one face round
+each); on a closed surface the lattice cannot hold every cone at a fixed
+spacing, so a cone may be a step off its vertex before its quad vertex is
+moved onto it (the quads there stretched by up to a step); with a border
+the border takes the mismatch. On higher genus the transport's turns round
+the handles are the least change's, not chosen (Crane et al.'s
+generators). Index sums are checked only on closed components without held
+vertices. An attractor reaching far beyond the lattice's spacing bends the
+field away from the surface's parallel transport over that reach, which the
+lattice pays for in 3-5 pairs (reach 0.3 at spacing 0.15 on the sphere:
+16 irregular instead of 8): keep the reach near the spacing.
 ### Quads by integer-grid maps (GLOBAL)
 `QAWS_QUADS_GLOBAL` (`src/qaws/mesh/qaws_quad_global.c`) follows
 Mixed-Integer Quadrangulation and integer-grid maps (Bommes, Zimmer,

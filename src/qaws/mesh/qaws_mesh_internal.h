@@ -118,6 +118,7 @@ typedef struct mf_level
 	double* cq;                     /* constraint direction (zero: none) */
 	unsigned char* con;             /* MF_ALONG: q along cq; MF_ON_LINE: o on the line x + t cq; MF_PINNED: o at x */
 	double* sc;                     /* the lattice's local spacing over the scale (NULL: 1 everywhere; mf_scales) */
+	double* wt;                     /* per vertex its weight in the orientations' smoothing, an edge the mean of its ends' (NULL: 1; mf_weights) */
 } mf_level;
 
 #define MF_ALONG 1u
@@ -125,6 +126,7 @@ typedef struct mf_level
 #define MF_PINNED 4u
 #define MF_PREFER 8u                    /* q drawn toward cq, as much as |cq| times its neighbours together */
 #define MF_GUIDE 16u                    /* on a user's guide line (with MF_ALONG and MF_ON_LINE), not a crease */
+#define MF_CONE 32u                     /* a placed cone's vertex: the steps round its star kept by the flow (qaws_quad_flow.c) */
 
 typedef struct mf_hier
 {
@@ -146,6 +148,13 @@ void mf_guide(mf_hier* h, double const* dir, double const* w);
 int mf_scales(mf_hier* h, double const* s0);
 /* the spacing between vertices i and j of L at the scale: scale times their mean sc */
 double mf_pair_scale(mf_level const* L, unsigned int i, unsigned int j, double scale);
+/* per level-0 vertex a weight for the orientations' smoothing (all positive), carried up area-weighted; 0 on allocation failure */
+int mf_weights(mf_hier* h, double const* w0);
+/* singularity attractors, points p_a of strength s_a (> 0 draws singularities, < 0 pushes them off) reaching r, at the n
+   points x of areas area: out[0, n), LOCAL's smoothing weight exp(-sum s_a exp(-|x - p_a|^2 / r^2)) (singularities cost
+   less where it is low); out[n, 2 n), SMOOTHEST's share of cones (s_a spread by area times that Gaussian, cf_steer) */
+void mf_attract(double const* x, double const* area, unsigned int n, qaws_scalar const* points, qaws_scalar const* strengths, unsigned int count,
+	double r, double* out);
 /* the 4-symmetric copies of q0 and q1 closest to each other */
 void mf_compat_orientation(double const* q0, double const* n0, double const* q1, double const* n1, double* out0, double* out1);
 /* the lattice points of (q0, o0) and (q1, o1) closest to each other near x0 and x1 */

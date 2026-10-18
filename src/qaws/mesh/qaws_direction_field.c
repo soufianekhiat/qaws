@@ -185,7 +185,7 @@ void mf_compat_position(double const* x0, double const* n0, double const* q0, do
 static void mf_level_free(mf_level* L)
 {
 	free(L->x); free(L->nrm); free(L->area); free(L->adj0); free(L->adj); free(L->parent);
-	free(L->child0); free(L->child); free(L->q); free(L->o); free(L->cq); free(L->con); free(L->sc);
+	free(L->child0); free(L->child); free(L->q); free(L->o); free(L->cq); free(L->con); free(L->sc); free(L->wt);
 	memset(L, 0, sizeof *L);
 }
 
@@ -502,11 +502,11 @@ static void mf_sweep_q(mf_level* L, unsigned int sweeps)
 			for (k = L->adj0[i]; k < L->adj0[i + 1]; k++)
 			{
 				unsigned int j = L->adj[k], q;
-				double a[3], b[3];
+				double a[3], b[3], wj = L->wt ? 0.5 * (L->wt[i] + L->wt[j]) : 1;
 				mf_compat_orientation(qi, n, L->q + 3 * (size_t)j, L->nrm + 3 * (size_t)j, a, b);
 				for (q = 0; q < 3; q++)
-					qi[q] = a[q] * ws + b[q];
-				ws += 1;
+					qi[q] = a[q] * ws + b[q] * wj;
+				ws += wj;
 				mf_tangent(qi, n);
 			}
 			if (L->con[i] & MF_PREFER)
@@ -682,35 +682,74 @@ double mf_pair_scale(mf_level const* L, unsigned int i, unsigned int j, double s
 	return L->sc ? 0.5 * scale * (L->sc[i] + L->sc[j]) : scale;
 }
 
-int mf_scales(mf_hier* h, double const* s0)
+/* per level-0 vertex a value (sc or wt) carried up the levels, each coarse vertex its children's mean by area */
+static int mf_carry(mf_hier* h, double const* v0, int weights)
 {
 	unsigned int l, i, c;
 	for (l = 0; l < h->nl; l++)
 	{
 		mf_level *L = &h->lv[l], *F = l ? &h->lv[l - 1] : NULL;
-		free(L->sc);
-		L->sc = (double*)malloc(sizeof(double) * (L->n + 1));
-		if (!L->sc)
+		double **slot = weights ? &L->wt : &L->sc, *fv = F ? (weights ? F->wt : F->sc) : NULL;
+		free(*slot);
+		*slot = (double*)malloc(sizeof(double) * (L->n + 1));
+		if (!*slot)
 			return 0;
 		for (i = 0; i < L->n; i++)
 		{
 			double s = 0, a = 0;
 			if (!F)
 			{
-				L->sc[i] = s0[i];
+				(*slot)[i] = v0[i];
 				continue;
 			}
 			for (c = L->child0[i]; c < L->child0[i + 1]; c++)
 			{
 				unsigned int ch = L->child[c];
 				double w = F->area[ch] > 0 ? F->area[ch] : 1e-300;
-				s += w * F->sc[ch];
+				s += w * fv[ch];
 				a += w;
 			}
-			L->sc[i] = s / a;
+			(*slot)[i] = s / a;
 		}
 	}
 	return 1;
+}
+
+int mf_scales(mf_hier* h, double const* s0)
+{
+	return mf_carry(h, s0, 0);
+}
+
+int mf_weights(mf_hier* h, double const* w0)
+{
+	return mf_carry(h, w0, 1);
+}
+
+void mf_attract(double const* x, double const* area, unsigned int n, qaws_scalar const* points, qaws_scalar const* strengths, unsigned int count,
+	double r, double* out)
+{
+	unsigned int i, a, k, pass;
+	for (i = 0; i < 2 * n; i++)
+		out[i] = i < n ? 1 : 0;
+	for (a = 0; a < count; a++)
+	{
+		double sum = 0, sa = (double)strengths[a];
+		for (pass = 0; pass < 2; pass++)
+			for (i = 0; i < n; i++)
+			{
+				double d2 = 0, g;
+				for (k = 0; k < 3; k++)
+					d2 += (x[3 * (size_t)i + k] - (double)points[3 * (size_t)a + k]) * (x[3 * (size_t)i + k] - (double)points[3 * (size_t)a + k]);
+				g = exp(-d2 / (r * r));
+				if (!pass)
+				{
+					out[i] *= exp(-sa * g);
+					sum += area[i] * g;
+				}
+				else if (sum > 0)
+					out[n + i] += sa * area[i] * g / sum;
+			}
+	}
 }
 
 void mf_guide(mf_hier* h, double const* dir, double const* w)
@@ -788,17 +827,58 @@ qaws_status qaws_mesh_3d_direction_field(qaws_mesh_3d const* mesh, qaws_directio
 	qaws_hm const* m;
 	unsigned int v, f, c, k, n = desc && desc->symmetry ? desc->symmetry : 4;
 	int smoothest = desc && desc->method == QAWS_DIRECTION_FIELD_SMOOTHEST;
+	int* cone = NULL;
+	double* vw = NULL;
 	qaws_status st;
 	if (!mesh || (desc && (unsigned int)desc->method > QAWS_DIRECTION_FIELD_SMOOTHEST))
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	if (smoothest ? n != 2 && n != 4 && n != 6 : n != 4)
 		return QAWS_STATUS_UNSUPPORTED_OPERATION;
 	m = &mesh->hm;
+	if (desc && ((desc->cone_count && (!desc->cone_vertices || !desc->cone_indices))
+		|| (desc->attractor_count && (!desc->attractors || !desc->attractor_strengths)) || !(desc->attractor_radius >= 0)))
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	for (v = 0; desc && v < desc->cone_count; v++)
+		if (desc->cone_vertices[v] >= m->nv)
+			return QAWS_STATUS_INVALID_ARGUMENT;
+	if (desc && desc->cone_count && !smoothest)
+		return QAWS_STATUS_UNSUPPORTED_OPERATION;
 	if (!m->nv)
 		return QAWS_STATUS_OK;
 	st = mf_build(&h, m, NULL);
 	if (st != QAWS_STATUS_OK)
 		return st;
+	if (desc && (desc->cone_count || desc->attractor_count))
+	{
+		/* per vertex its cones' indices summed; the attractors' weights */
+		double lo[3] = { HUGE_VAL, HUGE_VAL, HUGE_VAL }, hi[3] = { -HUGE_VAL, -HUGE_VAL, -HUGE_VAL }, r = (double)desc->attractor_radius;
+		cone = desc->cone_count ? (int*)calloc((size_t)m->nv + 1, sizeof(int)) : NULL;
+		vw = desc->attractor_count ? (double*)malloc(sizeof(double) * 2 * (m->nv + 1)) : NULL;
+		if ((desc->cone_count && !cone) || (desc->attractor_count && !vw))
+		{
+			st = QAWS_STATUS_ALLOCATION_FAILURE;
+			goto done;
+		}
+		for (v = 0; v < desc->cone_count; v++)
+			cone[desc->cone_vertices[v]] += desc->cone_indices[v];
+		for (v = 0; v < m->nv; v++)
+			for (k = 0; k < 3; k++)
+			{
+				lo[k] = fmin(lo[k], m->x[3 * (size_t)v + k]);
+				hi[k] = fmax(hi[k], m->x[3 * (size_t)v + k]);
+			}
+		if (r == 0)
+			r = 0.1 * sqrt((hi[0] - lo[0]) * (hi[0] - lo[0]) + (hi[1] - lo[1]) * (hi[1] - lo[1]) + (hi[2] - lo[2]) * (hi[2] - lo[2]));
+		if (vw)
+		{
+			mf_attract(m->x, h.lv[0].area, m->nv, desc->attractors, desc->attractor_strengths, desc->attractor_count, r > 0 ? r : 1, vw);
+			if (!smoothest && !mf_weights(&h, vw))
+			{
+				st = QAWS_STATUS_ALLOCATION_FAILURE;
+				goto done;
+			}
+		}
+	}
 	if (desc && desc->guide_directions)
 	{
 		/* the guidance on every level (SMOOTHEST takes level 0's: held values and penalties) */
@@ -807,8 +887,8 @@ qaws_status qaws_mesh_3d_direction_field(qaws_mesh_3d const* mesh, qaws_directio
 		{
 			free(g);
 			free(w);
-			mf_free(&h);
-			return QAWS_STATUS_ALLOCATION_FAILURE;
+			st = QAWS_STATUS_ALLOCATION_FAILURE;
+			goto done;
 		}
 		for (v = 0; v < m->nv; v++)
 		{
@@ -823,9 +903,8 @@ qaws_status qaws_mesh_3d_direction_field(qaws_mesh_3d const* mesh, qaws_directio
 	if (smoothest)
 	{
 		/* one global solve (qaws_cross_field.c), the hierarchy's level 0 for the lines and normals */
-		st = cf_direction_field(mesh, &h, n, desc->curvature_aligned, out_directions, out_face_index);
-		mf_free(&h);
-		return st;
+		st = cf_direction_field(mesh, &h, n, desc->curvature_aligned, vw ? vw + m->nv : NULL, cone, out_directions, out_face_index);
+		goto done;
 	}
 	mf_orientations(&h, desc && desc->sweeps ? desc->sweeps : 8, NULL, 0);
 	for (v = 0; out_directions && v < m->nv; v++)
@@ -843,6 +922,9 @@ qaws_status qaws_mesh_3d_direction_field(qaws_mesh_3d const* mesh, qaws_directio
 		r %= 4;
 		out_face_index[f] = r == 3 ? -1 : r;
 	}
+done:
+	free(cone);
+	free(vw);
 	mf_free(&h);
-	return QAWS_STATUS_OK;
+	return st;
 }

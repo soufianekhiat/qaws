@@ -12,6 +12,13 @@
  *     closer than without;
  *   - pinned vertices: quad vertices where they are, flagged corners; kept
  *     by LOCAL and CVT remeshing;
+ *   - placed cones: eight +1 at a cube's corner directions on the sphere
+ *     (SMOOTHEST: 8 singular faces, each round its vertex; seven refused by
+ *     Poincare-Hopf; LOCAL refused), quads a cube-sphere with exactly 8
+ *     valence-3 vertices on them (INSTANT, GLOBAL); a +1 / -1 pair on a
+ *     square (the field, and quads with valence 3 and 5 on them);
+ *   - attractors: a free cone of the smoothest field drawn to a point and
+ *     pushed off one (SMOOTHEST, LOCAL); quads' irregular vertex drawn;
  *   - refusals: bad indices, directions on a foreign reference.
  */
 
@@ -527,6 +534,386 @@ static void test_pinned(void)
 	qaws_mesh_3d_destroy(s);
 }
 
+
+/* a square [-1, 1]^2 at z = 0, an (n + 1)^2 grid split along alternating diagonals (vertex j (n + 1) + i) */
+static qaws_mesh_3d* gd_square(unsigned int n, double** out_x, unsigned int* out_nv)
+{
+	unsigned int nv = (n + 1) * (n + 1), nf = 2 * n * n, i, j, k = 0;
+	double* x = (double*)malloc(sizeof(double) * 3 * nv);
+	unsigned int* f = (unsigned int*)malloc(sizeof(unsigned int) * 3 * nf);
+	qaws_scalar* p = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * nv);
+	qaws_mesh_3d_desc d;
+	qaws_mesh_3d* m = NULL;
+	for (j = 0; j <= n; j++)
+		for (i = 0; i <= n; i++)
+		{
+			x[3 * (j * (n + 1) + i)] = -1 + 2.0 * i / n;
+			x[3 * (j * (n + 1) + i) + 1] = -1 + 2.0 * j / n;
+			x[3 * (j * (n + 1) + i) + 2] = 0;
+		}
+	for (j = 0; j < n; j++)
+		for (i = 0; i < n; i++)
+		{
+			unsigned int a = j * (n + 1) + i, b = a + 1, c = a + n + 1, e = c + 1;
+			if ((i + j) & 1)
+			{
+				f[k++] = a; f[k++] = b; f[k++] = e;
+				f[k++] = a; f[k++] = e; f[k++] = c;
+			}
+			else
+			{
+				f[k++] = a; f[k++] = b; f[k++] = c;
+				f[k++] = b; f[k++] = e; f[k++] = c;
+			}
+		}
+	for (i = 0; i < 3 * nv; i++)
+		p[i] = (qaws_scalar)x[i];
+	memset(&d, 0, sizeof d);
+	d.positions = p;
+	d.vertex_count = nv;
+	d.face_vertices = f;
+	d.face_count = nf;
+	qaws_mesh_3d_create(&d, &m);
+	free(p);
+	free(f);
+	*out_x = x;
+	*out_nv = nv;
+	return m;
+}
+
+/* the vertex of x (nv of them) nearest the point p */
+static unsigned int gd_nearest(double const* x, unsigned int nv, double const* p)
+{
+	unsigned int i, best = 0;
+	double bd = HUGE_VAL;
+	for (i = 0; i < nv; i++)
+	{
+		double a = x[3 * i] - p[0], b = x[3 * i + 1] - p[1], c = x[3 * i + 2] - p[2];
+		if (a * a + b * b + c * c < bd)
+		{
+			bd = a * a + b * b + c * c;
+			best = i;
+		}
+	}
+	return best;
+}
+
+/* a field's singular faces: their count; at_v: how many have index want and v among their vertices */
+static unsigned int gd_singular(gd_arrays const* a, int const* idx, unsigned int v, int want, unsigned int* at_v)
+{
+	unsigned int f, c0, n = 0, i;
+	*at_v = 0;
+	for (f = 0, c0 = 0; f < a->nf; c0 += a->fs[f], f++)
+	{
+		if (!idx[f])
+			continue;
+		n++;
+		for (i = 0; i < a->fs[f]; i++)
+			*at_v += a->fv[c0 + i] == v && idx[f] == want;
+	}
+	return n;
+}
+
+/* the singular face whose centroid is nearest p: its distance, its centroid (may be NULL) */
+static double gd_cone_distance(gd_arrays const* a, int const* idx, double const* p, double* out_c)
+{
+	unsigned int f, c0, i, k;
+	double best = HUGE_VAL;
+	for (f = 0, c0 = 0; f < a->nf; c0 += a->fs[f], f++)
+	{
+		double c[3] = { 0, 0, 0 }, d2 = 0;
+		if (!idx[f])
+			continue;
+		for (i = 0; i < a->fs[f]; i++)
+			for (k = 0; k < 3; k++)
+				c[k] += a->x[3 * a->fv[c0 + i] + k] / a->fs[f];
+		for (k = 0; k < 3; k++)
+			d2 += (c[k] - p[k]) * (c[k] - p[k]);
+		if (sqrt(d2) < best)
+		{
+			best = sqrt(d2);
+			if (out_c)
+				memcpy(out_c, c, sizeof c);
+		}
+	}
+	return best;
+}
+
+/* the quads' vertices off the border whose valence is not 4 (counted; the distance from to to the nearest, when to is given,
+   lowered into out_near); per cone (3 each) the distance to the nearest vertex
+   (the worst kept) and that vertex's valence */
+static unsigned int gd_irregular(gd_arrays const* a, double const* cones, unsigned int ncone, double* worst, unsigned int* val, double const* to,
+	double* out_near)
+{
+	unsigned int *deg = (unsigned int*)calloc(a->nv, sizeof(unsigned int)), *edges = (unsigned int*)calloc(a->nv, sizeof(unsigned int));
+	unsigned int i, j, k, n = 0, c0, f;
+	/* faces and edges round each vertex: as many off the border, one edge more on it */
+	for (f = 0, c0 = 0; f < a->nf; c0 += a->fs[f], f++)
+		for (i = 0; i < a->fs[f]; i++)
+			deg[a->fv[c0 + i]]++;
+	for (i = 0; i < a->ne; i++)
+	{
+		edges[a->e[2 * i]]++;
+		edges[a->e[2 * i + 1]]++;
+	}
+	for (i = 0; i < a->nv; i++)
+		if (edges[i] == deg[i] && deg[i] != 4)
+		{
+			n++;
+			if (to)
+				*out_near = fmin(*out_near, sqrt((a->x[3 * i] - to[0]) * (a->x[3 * i] - to[0]) + (a->x[3 * i + 1] - to[1]) * (a->x[3 * i + 1] - to[1])
+					+ (a->x[3 * i + 2] - to[2]) * (a->x[3 * i + 2] - to[2])));
+		}
+	*worst = 0;
+	for (j = 0; j < ncone; j++)
+	{
+		unsigned int bv = gd_nearest(a->x, a->nv, cones + 3 * j);
+		double d2 = 0;
+		for (k = 0; k < 3; k++)
+			d2 += (a->x[3 * bv + k] - cones[3 * j + k]) * (a->x[3 * bv + k] - cones[3 * j + k]);
+		*worst = fmax(*worst, sqrt(d2));
+		val[j] = deg[bv];
+	}
+	free(deg);
+	free(edges);
+	return n;
+}
+
+static void test_cones(void)
+{
+	double *x0, *xs, cube[24], pair[6], worst, sj;
+	unsigned int nv0, nvs, i, k, j, cv[8], pv[2], n = 0, at, at2, val[8], corners, nonq;
+	int ci[8] = { 1, 1, 1, 1, 1, 1, 1, 1 }, pi[2] = { 1, -1 }, *idx;
+	qaws_mesh_3d *s = gd_sphere(24, 48, &x0, &nv0), *sq = gd_square(24, &xs, &nvs), *q = NULL;
+	qaws_direction_field_desc dd;
+	qaws_quadrangulate_desc qd;
+	qaws_mesh_report rep;
+	qaws_status st, s2, s3;
+	gd_arrays a;
+	char msg[600];
+	/* the sphere: eight +1 cones at a cube's corner directions */
+	for (i = 0; i < 8; i++)
+	{
+		double d[3];
+		d[0] = (i & 1 ? 1 : -1) / sqrt(3.0);
+		d[1] = (i & 2 ? 1 : -1) / sqrt(3.0);
+		d[2] = (i & 4 ? 1 : -1) / sqrt(3.0);
+		cv[i] = gd_nearest(x0, nv0, d);
+		for (k = 0; k < 3; k++)
+			cube[3 * i + k] = x0[3 * cv[i] + k];
+	}
+	gd_get(s, &a);
+	idx = (int*)malloc(sizeof(int) * a.nf);
+	memset(&dd, 0, sizeof dd);
+	dd.method = QAWS_DIRECTION_FIELD_SMOOTHEST;
+	dd.cone_vertices = cv;
+	dd.cone_indices = ci;
+	dd.cone_count = 8;
+	st = qaws_mesh_3d_direction_field(s, &dd, NULL, idx);
+	for (i = 0, at = 0; i < 8; i++)
+	{
+		n = gd_singular(&a, idx, cv[i], 1, &at2);
+		at += at2 == 1;
+	}
+	dd.cone_count = 7;
+	s2 = qaws_mesh_3d_direction_field(s, &dd, NULL, idx);
+	dd.cone_count = 8;
+	dd.method = QAWS_DIRECTION_FIELD_LOCAL;
+	s3 = qaws_mesh_3d_direction_field(s, &dd, NULL, idx);
+	sprintf(msg, "sphere, 8 cones placed (SMOOTHEST): %s, %u singular faces, %u of 8 cones +1 on a face round their vertex; 7 cones %s; LOCAL %s",
+		qaws_status_to_string(st), n, at, qaws_status_to_string(s2), qaws_status_to_string(s3));
+	printf("  %s\n", msg);
+	TEST_ASSERT(st == QAWS_STATUS_OK && n == 8 && at == 8 && s2 == QAWS_STATUS_INVALID_ARGUMENT && s3 == QAWS_STATUS_UNSUPPORTED_OPERATION, msg);
+	free(idx);
+	gd_free(&a);
+	/* quads: a cube-sphere, its eight valence-3 vertices exactly on the cones (INSTANT, GLOBAL) */
+	for (j = 0; j < 2; j++)
+	{
+		memset(&qd, 0, sizeof qd);
+		qd.method = j ? QAWS_QUADS_GLOBAL : QAWS_QUADS_INSTANT;
+		qd.target_length = (qaws_scalar)0.15;
+		qd.pure = 1;
+		qd.cone_vertices = cv;
+		qd.cone_indices = ci;
+		qd.cone_count = 8;
+		memset(&rep, 0, sizeof rep);
+		q = gd_quadrangulate(s, &qd, &rep, &st);
+		memset(&a, 0, sizeof a);
+		n = 0;
+		worst = HUGE_VAL;
+		at = 0;
+		corners = 0;
+		nonq = 1;
+		sj = -1;
+		if (q)
+		{
+			gd_get(q, &a);
+			n = gd_irregular(&a, cube, 8, &worst, val, NULL, NULL);
+			sj = gd_quads(&a, &nonq);
+			for (i = 0; i < 8; i++)
+				at += val[i] == 3;
+			for (i = 0; i < a.nv; i++)
+				corners += qaws_mesh_3d_is_feature_corner(q, i) != 0;
+			sprintf(msg, "cube-sphere %s: %s, %u faces (%u not quads), SJ min %.3f, %u irregular; cones: nearest vertex %.2g, %u of 8 of valence 3; %u corners; map %u",
+				j ? "GLOBAL" : "INSTANT", qaws_status_to_string(st), a.nf, nonq, sj, n, worst, at, corners, (unsigned int)rep.iterations);
+		}
+		else
+			sprintf(msg, "cube-sphere %s: %s", j ? "GLOBAL" : "INSTANT", qaws_status_to_string(st));
+		printf("  %s\n", msg);
+		TEST_ASSERT(st == QAWS_STATUS_OK && n == 8 && worst < 1e-12 && at == 8 && corners == 0 && nonq == 0 && sj > 0.3, msg);
+		gd_free(&a);
+		qaws_mesh_3d_destroy(q);
+	}
+	memset(&qd, 0, sizeof qd);
+	qd.cone_vertices = cv;
+	qd.cone_indices = ci;
+	qd.cone_count = 7;
+	q = gd_quadrangulate(s, &qd, &rep, &st);
+	sprintf(msg, "quads with 7 cones on a sphere: %s", qaws_status_to_string(st));
+	printf("  %s\n", msg);
+	TEST_ASSERT(st == QAWS_STATUS_INVALID_ARGUMENT && !q, msg);
+	/* the square: a +1 and -1 pair, the border's corners take the rest */
+	{
+		double da[3] = { -0.5, 0.1, 0 }, db[3] = { 0.5, -0.1, 0 };
+		unsigned int ia, ib;
+		pv[0] = gd_nearest(xs, nvs, da);
+		pv[1] = gd_nearest(xs, nvs, db);
+		for (k = 0; k < 3; k++)
+		{
+			pair[k] = xs[3 * pv[0] + k];
+			pair[3 + k] = xs[3 * pv[1] + k];
+		}
+		gd_get(sq, &a);
+		idx = (int*)malloc(sizeof(int) * a.nf);
+		memset(&dd, 0, sizeof dd);
+		dd.method = QAWS_DIRECTION_FIELD_SMOOTHEST;
+		dd.cone_vertices = pv;
+		dd.cone_indices = pi;
+		dd.cone_count = 2;
+		st = qaws_mesh_3d_direction_field(sq, &dd, NULL, idx);
+		n = gd_singular(&a, idx, pv[0], 1, &ia);
+		gd_singular(&a, idx, pv[1], -1, &ib);
+		sprintf(msg, "square, a +1 and -1 pair placed (SMOOTHEST): %s, %u singular faces, +1 at its vertex %u, -1 at its %u", qaws_status_to_string(st), n,
+			ia, ib);
+		printf("  %s\n", msg);
+		TEST_ASSERT(st == QAWS_STATUS_OK && n == 2 && ia == 1 && ib == 1, msg);
+		free(idx);
+		gd_free(&a);
+		for (j = 0; j < 2; j++)
+		{
+			memset(&qd, 0, sizeof qd);
+			qd.method = j ? QAWS_QUADS_GLOBAL : QAWS_QUADS_INSTANT;
+			qd.target_length = (qaws_scalar)0.12;
+			qd.pure = 1;
+			qd.cone_vertices = pv;
+			qd.cone_indices = pi;
+			qd.cone_count = 2;
+			memset(&rep, 0, sizeof rep);
+			q = gd_quadrangulate(sq, &qd, &rep, &st);
+			memset(&a, 0, sizeof a);
+			n = 0;
+			worst = HUGE_VAL;
+			val[0] = val[1] = 0;
+			if (q)
+			{
+				gd_get(q, &a);
+				n = gd_irregular(&a, pair, 2, &worst, val, NULL, NULL);
+			}
+			sprintf(msg, "square quads %s with the pair: %s, %u faces, %u irregular inside; cones: nearest vertex %.2g, valences %u and %u; map %u",
+				j ? "GLOBAL" : "INSTANT", qaws_status_to_string(st), a.nf, n, worst, val[0], val[1], (unsigned int)rep.iterations);
+			printf("  %s\n", msg);
+			TEST_ASSERT(st == QAWS_STATUS_OK && n == 2 && worst < 1e-12 && val[0] == 3 && val[1] == 5, msg);
+			gd_free(&a);
+			qaws_mesh_3d_destroy(q);
+		}
+	}
+	qaws_mesh_3d_destroy(s);
+	qaws_mesh_3d_destroy(sq);
+	free(x0);
+	free(xs);
+}
+
+/* attractors: a free cone of the sphere's smoothest field drawn to a point, and pushed off one */
+static void test_attractors(void)
+{
+	double* x0;
+	unsigned int nv0, j;
+	qaws_mesh_3d* s = gd_sphere(24, 48, &x0, &nv0);
+	qaws_direction_field_desc dd;
+	gd_arrays a;
+	int* idx;
+	double dist[6], p[3], c0[3] = { 0, 0, 1 };
+	unsigned int ns[6], tmp;
+	qaws_scalar ap[3], str;
+	char msg[500];
+	gd_get(s, &a);
+	idx = (int*)malloc(sizeof(int) * a.nf);
+	/* p off the free cones (the direction (1, 2, 3)); the repeller on the free cone nearest it */
+	p[0] = 1 / sqrt(14.0);
+	p[1] = 2 / sqrt(14.0);
+	p[2] = 3 / sqrt(14.0);
+	for (j = 0; j < 6; j++)
+	{
+		double const* at = j % 3 == 2 ? c0 : p;
+		memset(&dd, 0, sizeof dd);
+		dd.method = j < 3 ? QAWS_DIRECTION_FIELD_SMOOTHEST : QAWS_DIRECTION_FIELD_LOCAL;
+		str = (qaws_scalar)((j % 3 == 0 ? 0 : j % 3 == 1 ? 1 : -1) * (j < 3 ? 1 : 3));   /* (SMOOTHEST in cones, LOCAL in weights) */
+		ap[0] = (qaws_scalar)at[0];
+		ap[1] = (qaws_scalar)at[1];
+		ap[2] = (qaws_scalar)at[2];
+		dd.attractors = ap;
+		dd.attractor_strengths = &str;
+		dd.attractor_count = str != 0;
+		dd.attractor_radius = (qaws_scalar)0.3;
+		qaws_mesh_3d_direction_field(s, &dd, NULL, idx);
+		dist[j] = gd_cone_distance(&a, idx, at, j % 3 == 0 ? c0 : NULL);
+		ns[j] = gd_singular(&a, idx, 0, 0, &tmp);
+	}
+	sprintf(msg, "attractors on the sphere (radius 0.3), the nearest cone: SMOOTHEST to p %.3f free, %.3f drawn (strength 1), to a free cone %.3f pushed off it (-1); LOCAL %.3f, %.3f (3), %.3f (-3); singular faces %u %u %u, %u %u %u",
+		dist[0], dist[1], dist[2], dist[3], dist[4], dist[5], ns[0], ns[1], ns[2], ns[3], ns[4], ns[5]);
+	printf("  %s\n", msg);
+	TEST_ASSERT(dist[1] < 0.1 && dist[1] < 0.5 * dist[0] && dist[2] > 0.2 && dist[4] < dist[3] && dist[5] > 0.2 && ns[0] == 8 && ns[1] == 8 && ns[2] == 8, msg);
+	free(idx);
+	gd_free(&a);
+	{
+		/* quads at 0.15: an irregular vertex drawn to a point (strength 1, reach 0.1, about the lattice's spacing) */
+		double near[2] = { HUGE_VAL, HUGE_VAL }, worst, pq[3] = { 0.62, -0.45, 0.64 }, l = sqrt(0.62 * 0.62 + 0.45 * 0.45 + 0.64 * 0.64);
+		unsigned int irr[2] = { 0, 0 }, val[1], k;
+		qaws_status st[2];
+		for (k = 0; k < 3; k++)
+		{
+			pq[k] /= l;
+			ap[k] = (qaws_scalar)pq[k];
+		}
+		str = 1;
+		for (j = 0; j < 2; j++)
+		{
+			qaws_quadrangulate_desc qd;
+			qaws_mesh_3d* q;
+			memset(&qd, 0, sizeof qd);
+			qd.target_length = (qaws_scalar)0.15;
+			qd.pure = 1;
+			qd.attractors = ap;
+			qd.attractor_strengths = &str;
+			qd.attractor_count = j;
+			qd.attractor_radius = (qaws_scalar)0.1;
+			q = gd_quadrangulate(s, &qd, NULL, &st[j]);
+			if (!q)
+				continue;
+			gd_get(q, &a);
+			irr[j] = gd_irregular(&a, pq, 1, &worst, val, pq, &near[j]);
+			gd_free(&a);
+			qaws_mesh_3d_destroy(q);
+		}
+		sprintf(msg, "quads with an attractor (strength 1, reach 0.1): %s, the nearest irregular vertex %.3f (%u irregular), %.3f without (%u)",
+			qaws_status_to_string(st[1]), near[1], irr[1], near[0], irr[0]);
+		printf("  %s\n", msg);
+		TEST_ASSERT(st[0] == QAWS_STATUS_OK && st[1] == QAWS_STATUS_OK && near[1] < 0.1 && near[0] > 0.3 && irr[1] == 8, msg);
+	}
+	qaws_mesh_3d_destroy(s);
+	free(x0);
+}
+
 static void test_refusals(void)
 {
 	double *x0, *x1;
@@ -572,6 +959,8 @@ int test_137_mesh_guidance_main(void)
 	printf("Test 137: user guidance\n");
 	test_refusals();
 	test_pinned();
+	test_cones();
+	test_attractors();
 	test_directions();
 	test_edge_loops();
 	test_density();

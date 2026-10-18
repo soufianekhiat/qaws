@@ -165,11 +165,14 @@ static unsigned int qf_node(unsigned int f, unsigned char const* sing, unsigned 
 static qaws_status qf_network(qaws_hm const* dm, mf_level const* L, int const* T, unsigned char const* K, double const* Tc, unsigned char const* fr,
 	unsigned char const* sing, unsigned char const* g, int parity, qf_net* net)
 {
-	unsigned int nf = dm->nf, Z = 2 * nf, c, ne = 0, j;
+	unsigned int nf = dm->nf, Z = 2 * nf, c, ne = 0, j, open = 0;
 	qaws_status st;
 	memset(net, 0, sizeof *net);
 	for (c = 0; c < dm->nc; c++)
+	{
 		ne += dm->cf[c] != HM_NONE && (dm->co[c] == HM_NONE || c < dm->co[c]);
+		open |= dm->cf[c] != HM_NONE && dm->co[c] == HM_NONE;
+	}
 	st = qaws_flow_create(2 * nf + 1, 8 * ne + 10 * nf + 1, &net->flow);
 	net->rec = (unsigned int*)malloc(sizeof(unsigned int) * (8 * (size_t)ne + 10 * (size_t)nf + 1));
 	if (st != QAWS_STATUS_OK || !net->rec)
@@ -184,6 +187,10 @@ static qaws_status qf_network(qaws_hm const* dm, mf_level const* L, int const* T
 		if (F == HM_NONE || (o != HM_NONE && o < c))
 			continue;
 		G = o != HM_NONE ? dm->cf[o] : HM_NONE;
+		if (open && ((L->con[dm->cv[c]] | L->con[hm_to(dm, c)] | L->con[dm->cv[hm_prev(dm, c)]] | (o != HM_NONE ? L->con[dm->cv[hm_prev(dm, o)]] : 0))
+			& MF_CONE))
+			continue;   /* (an edge of a placed cone's star kept, the cone on its vertex's lattice point: the border takes what
+			               cannot close; on a closed surface the cones must, at their price below) */
 		/* feature and border edges are lattice lines: steps along themselves only */
 		lined = o == HM_NONE || ((dm->cflag[c] | dm->cflag[o]) & HM_FEATURE);
 		ax = lined ? qf_axis(dm, L, c) : 0;
@@ -241,7 +248,10 @@ static qaws_status qf_network(qaws_hm const* dm, mf_level const* L, int const* T
 	for (j = 0; !parity && j < nf; j++)
 		for (c = 0; sing[j] && c < 6; c++)
 		{
-			unsigned int a = qaws_flow_arc(net->flow, c & 1 ? Z : 2 * j, c & 1 ? 2 * j : Z, c < 4 ? 1 : (int)nf, QF_CONE * (c < 2 ? 1 : c < 4 ? 3 : 10));
+			/* (a placed cone, MF_CONE, a hundred times dearer: it moves only where the lattice cannot close otherwise) */
+			long long w = QF_CONE * (c < 2 ? 1 : c < 4 ? 3 : 10) * (((L->con[dm->cv[dm->fc[j]]] | L->con[dm->cv[dm->fc[j] + 1]]
+				| L->con[dm->cv[dm->fc[j] + 2]]) & MF_CONE) ? 100 : 1);
+			unsigned int a = qaws_flow_arc(net->flow, c & 1 ? Z : 2 * j, c & 1 ? 2 * j : Z, c < 4 ? 1 : (int)nf, w);
 			if (a != QAWS_FLOW_NONE)
 			{
 				net->rec[a] = HM_NONE;

@@ -82,6 +82,28 @@
  *   pinned      input vertices that become quad vertices where they are
  *               (the dense remesh keeps them, as LOCAL does, the lattice
  *               holds a point there); they come out as feature corners.
+ *   cone_vertices, cone_indices  singularities placed (INSTANT and
+ *               GLOBAL): the dense remesh keeps each such vertex, the
+ *               field is the smoothest with its cones there (the
+ *               direction field's SMOOTHEST with cones, then relaxed where
+ *               lines hold it; Instant Meshes' own fields are not tried),
+ *               the lattice points round it set on it. With a border the
+ *               flow keeps the steps round the cone (the border takes what
+ *               cannot close), so the cone's quad vertex is the input
+ *               vertex; on a closed surface the cones must take the
+ *               lattice's mismatch and may move a step, and the nearest
+ *               quad vertex of valence 4 - index is moved onto the cone.
+ *               Either way a quad vertex of valence 4 - index sits exactly
+ *               there (kept by the relaxation and the finishing, not
+ *               flagged a corner). Poincare-Hopf as the direction
+ *               field's: on a closed surface without feature lines the
+ *               indices sum to 4 chi (8 on a sphere: a cube-sphere from
+ *               eight +1 cones), else INVALID_ARGUMENT; with lines or a
+ *               border what they leave over is placed freely.
+ *   attractors, attractor_strengths, attractor_radius  the direction
+ *               field's attractors on every candidate field (LOCAL's
+ *               smoothing and SMOOTHEST's edge weights): free singularities
+ *               drawn to or pushed from points.
  */
 
 typedef enum qaws_quad_method
@@ -107,6 +129,13 @@ typedef struct qaws_quadrangulate_desc
 	unsigned int guide_edge_count;
 	unsigned int const* pinned;             /* input vertices kept as quad vertices */
 	unsigned int pinned_count;
+	unsigned int const* cone_vertices;      /* input vertices made irregular quad vertices */
+	int const* cone_indices;                /* per cone in quarter turns: +1 valence 3, -1 valence 5 (+2 valence 2, ...) */
+	unsigned int cone_count;
+	qaws_scalar const* attractors;          /* 3 per point: the field's singularities drawn to it or pushed off */
+	qaws_scalar const* attractor_strengths; /* per point: > 0 draws, < 0 pushes (the direction field's) */
+	unsigned int attractor_count;
+	qaws_scalar attractor_radius;           /* 0: a tenth of the input's bounding diagonal */
 } qaws_quadrangulate_desc;
 
 qaws_status qaws_mesh_quadrangulate(qaws_mesh_3d const* mesh, qaws_quadrangulate_desc const* desc, qaws_mesh_3d** out_mesh,

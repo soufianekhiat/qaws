@@ -26,6 +26,13 @@ qaws_status cf_create(qaws_hm const* m, double const* nrm, mf_level const* L0, u
    free vertex (d_v the sum of its edges' weights: w = 1 is as strong as its neighbours together), its component then
    solved once like a held one; refactors. Call again to replace it */
 qaws_status cf_guide(cf_system* sys, double const* g);
+/* placed cones and attractors, before cf_guide: cone (NULL: none) per vertex an index in 1/n turns, att (NULL: none) per
+   vertex a share of a cone (mf_attract). Each edge's transport changed least (min-norm, Crane et al. 2010) so that every
+   face turns by its share of the cones round it (by its angles) in place of its own excess, plus its share of the
+   attractors less their total spread over all faces by area (the surface's own turn kept where there are no cones);
+   edges between held vertices kept. INVALID_ARGUMENT when the cones of a closed component with no held vertex do not
+   sum to n chi; elsewhere the turn left over is spread evenly over the faces it cannot close on. Refactors */
+qaws_status cf_steer(cf_system* sys, double const* att, int const* cone);
 /* the smoothest field: 3 per vertex, unit tangents (for n = 4 in the mf_level q convention) */
 qaws_status cf_smoothest(cf_system* sys, double* out_q);
 /* the field drawn to guide (3 per vertex, a direction scaled by its strength; 0: none) */
@@ -41,8 +48,8 @@ void cf_free(cf_system* sys);
 /* level 0's q carried up the levels (each coarse vertex its children's, area-weighted); vertices along lines keep cq */
 void cf_restrict(mf_hier* h);
 /* qaws_mesh_3d_direction_field's SMOOTHEST: h from mf_build on the mesh, n its symmetry; aligned draws it to the
-   principal curvature directions of the mesh's PN reference */
-qaws_status cf_direction_field(qaws_mesh_3d const* mesh, mf_hier const* h, unsigned int n, int aligned, qaws_scalar* out_directions,
-	int* out_face_index);
+   principal curvature directions of the mesh's PN reference; att and cone as cf_steer (NULL: none) */
+qaws_status cf_direction_field(qaws_mesh_3d const* mesh, mf_hier const* h, unsigned int n, int aligned, double const* att, int const* cone,
+	qaws_scalar* out_directions, int* out_face_index);
 
 #endif /* QAWS_CROSS_FIELD_H */

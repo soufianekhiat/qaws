@@ -66,7 +66,7 @@ User guidance (what a modelling tool's user steers with):
 | Edges to keep | `qaws_mesh_3d_set_feature_edges`, honoured by LOCAL, CVT, quads and generation; corners where lines meet or end | per-line options (keep straight) |
 | Density paint | `qaws_size_field_create_vertices` (a size per reference vertex), callback, min; LOCAL, CVT and quads (`qaws_quadrangulate_desc.size`: the lattice at a local spacing, dislocations kept where it changes; test 137) | smooth gradings without dislocations (cones placed for them), the finishing graded too |
 | Directions | `guide_directions`, `guide_weights` (pulls and holds per vertex) in the direction field (LOCAL, SMOOTHEST) and quads | strokes as curves (sampled for the user), symmetry |
-| Singularities | none | placed, attracting or repelling cones (Instant Meshes' attractors), a cone budget |
+| Singularities | `cone_vertices`, `cone_indices` (placed: SMOOTHEST by a connection adjusted to them, Poincare-Hopf checked on closed surfaces; quads with irregular vertices exactly on them, INSTANT and GLOBAL) and `attractors` with strengths and a reach (SMOOTHEST: a share of a cone's turn round the point; LOCAL: lighter smoothing) in the direction field and quads; test 137, figure 16 | a cone budget, cones on feature lines, chosen turns round handles |
 | Edge loops | `guide_edges` in quads: segments the quads' edges run along (one lattice line, quad vertices on them) | crossings pinned, loops through cones |
 | Pinned vertices | `pinned` in quads and in LOCAL and CVT remeshing: kept where they are, as corners | pins that may slide |
 

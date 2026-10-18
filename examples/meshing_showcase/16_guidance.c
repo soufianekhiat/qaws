@@ -8,6 +8,12 @@
  *   - an edge loop: a parallel of the input given as guide edges (red), the
  *     quads' edges along it;
  *   - pinned vertices (red balls) kept as quad vertices where they are.
+ * Second row, singularities (irregular vertices: blue valence 3, orange 5):
+ *   - eight +1 cones placed at a cube's corner directions (red balls), by
+ *     INSTANT and GLOBAL: a cube-sphere, its valence-3 vertices on them;
+ *   - a +1 (red) and -1 (purple) pair placed on a square patch;
+ *   - an attractor (strength 1, reach 0.1) drawing a free cone to a point:
+ *     the quads without it, then with it.
  */
 
 /* a latitude-longitude sphere: the poles, then nlat - 1 parallels of nlon vertices (vertex 1 + (j - 1) nlon + i) */
@@ -105,11 +111,209 @@ static double ms_stroke_angle(qaws_mesh_3d const* m)
 	return n ? sum / n : 0;
 }
 
+
+/* a square [-1, 1]^2 at z = 0, an (n + 1)^2 grid split along alternating diagonals (vertex j (n + 1) + i) */
+static qaws_mesh_3d* ms_square(unsigned int n, double** out_x, unsigned int* out_nv)
+{
+	unsigned int nv = (n + 1) * (n + 1), nf = 2 * n * n, i, j, k = 0;
+	double* x = (double*)malloc(sizeof(double) * 3 * nv);
+	unsigned int* f = (unsigned int*)malloc(sizeof(unsigned int) * 3 * nf);
+	qaws_mesh_3d* m;
+	for (j = 0; j <= n; j++)
+		for (i = 0; i <= n; i++)
+		{
+			x[3 * (j * (n + 1) + i)] = -1 + 2.0 * i / n;
+			x[3 * (j * (n + 1) + i) + 1] = -1 + 2.0 * j / n;
+			x[3 * (j * (n + 1) + i) + 2] = 0;
+		}
+	for (j = 0; j < n; j++)
+		for (i = 0; i < n; i++)
+		{
+			unsigned int a = j * (n + 1) + i, b = a + 1, c = a + n + 1, e = c + 1;
+			if ((i + j) & 1)
+			{
+				f[k++] = a; f[k++] = b; f[k++] = e;
+				f[k++] = a; f[k++] = e; f[k++] = c;
+			}
+			else
+			{
+				f[k++] = a; f[k++] = b; f[k++] = c;
+				f[k++] = b; f[k++] = e; f[k++] = c;
+			}
+		}
+	m = ms_make(x, nv, f, NULL, nf);
+	free(f);
+	*out_x = x;
+	*out_nv = nv;
+	return m;
+}
+
+/* the vertex of x (nv of them) nearest p */
+static unsigned int ms_nearest(double const* x, unsigned int nv, double const* p)
+{
+	unsigned int i, best = 0;
+	double bd = HUGE_VAL;
+	for (i = 0; i < nv; i++)
+	{
+		double a = x[3 * i] - p[0], b = x[3 * i + 1] - p[1], d = x[3 * i + 2] - p[2];
+		if (a * a + b * b + d * d < bd)
+		{
+			bd = a * a + b * b + d * d;
+			best = i;
+		}
+	}
+	return best;
+}
+
+/* the interior vertices of valence 3 (blue) and 5 or more (orange) as balls, lifted by lift along their position (0: none);
+   returns the distance from to (may be NULL) to the nearest of them */
+static double ms_mark_irregular(er_canvas* c, qaws_mesh_3d const* m, double lift, double const* to)
+{
+	static double const three[3] = { 40, 110, 210 }, five[3] = { 240, 150, 30 };
+	unsigned int nv = qaws_mesh_3d_get_vertex_count(m), nf = qaws_mesh_3d_get_face_count(m), ne = qaws_mesh_3d_get_edge_count(m), i, f, c0;
+	unsigned int *fv = (unsigned int*)malloc(sizeof(unsigned int) * (qaws_mesh_3d_get_corner_count(m) + 1)), *fs = (unsigned int*)malloc(sizeof(unsigned int) * (nf + 1));
+	unsigned int *e = (unsigned int*)malloc(sizeof(unsigned int) * (2 * ne + 2)), *deg = (unsigned int*)calloc(nv + 1, sizeof(unsigned int));
+	unsigned int* ed = (unsigned int*)calloc(nv + 1, sizeof(unsigned int));
+	double* x = ms_positions(m), near = HUGE_VAL;
+	qaws_mesh_3d_get_faces(m, fv, fs);
+	qaws_mesh_3d_get_edges(m, e);
+	for (f = 0, c0 = 0; f < nf; c0 += fs[f], f++)
+		for (i = 0; i < fs[f]; i++)
+			deg[fv[c0 + i]]++;
+	for (i = 0; i < ne; i++)
+	{
+		ed[e[2 * i]]++;
+		ed[e[2 * i + 1]]++;
+	}
+	for (i = 0; i < nv; i++)
+		if (ed[i] == deg[i] && deg[i] != 4)
+		{
+			double p[3];
+			unsigned int k;
+			for (k = 0; k < 3; k++)
+				p[k] = x[3 * i + k] * (1 + lift);
+			if (to)
+				near = fmin(near, sqrt((x[3 * i] - to[0]) * (x[3 * i] - to[0]) + (x[3 * i + 1] - to[1]) * (x[3 * i + 1] - to[1]) + (x[3 * i + 2] - to[2]) * (x[3 * i + 2] - to[2])));
+			if (lift == 0)
+				p[2] += 0.01;
+			er_point(c, p, deg[i] < 4 ? three : five, 6);
+		}
+	free(fv); free(fs); free(e); free(deg); free(ed); free(x);
+	return near;
+}
+
+/* the second row: placed cones (a cube-sphere by INSTANT and GLOBAL, a +1 / -1 pair on a square) and an attractor */
+static void demo_cones(er_canvas* c, int y)
+{
+	static double const wire[3] = { 40, 45, 60 }, tint[3] = { 178, 192, 212 }, red[3] = { 214, 39, 40 }, sand[3] = { 226, 214, 186 };
+	static double const purple[3] = { 150, 60, 170 };
+	double *x0, *xs, ap[3];
+	unsigned int nv0, nvs, i, k, cv[8], pv[2];
+	int ci[8] = { 1, 1, 1, 1, 1, 1, 1, 1 }, pi[2] = { 1, -1 };
+	qaws_mesh_3d *s = ms_uv_sphere(24, 48, &x0, &nv0), *sq = ms_square(24, &xs, &nvs), *q[5] = { NULL, NULL, NULL, NULL, NULL };
+	qaws_scalar apt[3], str = 1;
+	qaws_quadrangulate_desc d;
+	qaws_mesh_report rep[5];
+	char sub[200];
+	for (i = 0; i < 8; i++)
+	{
+		double dd[3];
+		dd[0] = (i & 1 ? 1 : -1) / sqrt(3.0);
+		dd[1] = (i & 2 ? 1 : -1) / sqrt(3.0);
+		dd[2] = (i & 4 ? 1 : -1) / sqrt(3.0);
+		cv[i] = ms_nearest(x0, nv0, dd);
+	}
+	{
+		double da[3] = { -0.5, 0.1, 0 }, db[3] = { 0.5, -0.1, 0 };
+		pv[0] = ms_nearest(xs, nvs, da);
+		pv[1] = ms_nearest(xs, nvs, db);
+	}
+	ap[0] = 0.62; ap[1] = -0.45; ap[2] = 0.64;
+	{
+		double l = sqrt(ap[0] * ap[0] + ap[1] * ap[1] + ap[2] * ap[2]);
+		for (k = 0; k < 3; k++)
+		{
+			ap[k] /= l;
+			apt[k] = (qaws_scalar)ap[k];
+		}
+	}
+	for (i = 0; i < 5; i++)
+	{
+		clock_t t0 = clock();
+		qaws_status st;
+		memset(&d, 0, sizeof d);
+		d.target_length = (qaws_scalar)(i == 2 ? 0.12 : 0.15);
+		d.pure = 1;
+		d.method = i == 1 ? QAWS_QUADS_GLOBAL : QAWS_QUADS_INSTANT;
+		if (i < 2)
+		{
+			d.cone_vertices = cv;
+			d.cone_indices = ci;
+			d.cone_count = 8;
+		}
+		if (i == 2)
+		{
+			d.cone_vertices = pv;
+			d.cone_indices = pi;
+			d.cone_count = 2;
+		}
+		if (i == 4)
+		{
+			d.attractors = apt;
+			d.attractor_strengths = &str;
+			d.attractor_count = 1;
+			d.attractor_radius = (qaws_scalar)0.1;
+		}
+		st = qaws_mesh_quadrangulate(i == 2 ? sq : s, &d, &q[i], &rep[i]);
+		printf("  cones panel %u: %s, %u quads, %u others, %u singular, %.1f s\n", i, qaws_status_to_string(st), rep[i].quality.quads,
+			rep[i].quality.triangles + rep[i].quality.polygons, rep[i].quality.irregular, (double)(clock() - t0) / CLOCKS_PER_SEC);
+	}
+	for (i = 0; i < 2; i++)
+		if (q[i])
+		{
+			sprintf(sub, "+1 at a cube's corners: %u irregular", rep[i].quality.irregular);
+			ms_panel(c, 550 * (int)i, y, 550, 640, q[i], 0.5, 0.45, i ? "placed cones, GLOBAL" : "placed cones, INSTANT", sub);
+			ms_draw(c, q[i], tint, NULL, 1, wire, 1.0);
+			for (k = 0; k < 8; k++)
+				er_point(c, x0 + 3 * cv[k], red, 9);
+			ms_mark_irregular(c, q[i], 0.01, NULL);
+		}
+	if (q[2])
+	{
+		sprintf(sub, "+1 (red), -1 (purple): %u irregular", rep[2].quality.irregular);
+		ms_panel(c, 1100, y, 550, 640, q[2], 0.0, 1.25, "a cone pair on a patch", sub);
+		ms_draw(c, q[2], sand, NULL, 0, wire, 1.0);
+		er_point(c, xs + 3 * pv[0], red, 9);
+		er_point(c, xs + 3 * pv[1], purple, 9);
+		ms_mark_irregular(c, q[2], 0, NULL);
+	}
+	for (i = 3; i < 5; i++)
+		if (q[i])
+		{
+			double lifted[3], near;
+			ms_panel(c, 550 * (int)i, y, 550, 640, q[i], 0.5, 0.45, i == 3 ? "no attractor" : "an attractor (red, 1, 0.1)", NULL);
+			ms_draw(c, q[i], tint, NULL, 1, wire, 1.0);
+			for (k = 0; k < 3; k++)
+				lifted[k] = 1.02 * ap[k];
+			er_point(c, lifted, i == 4 ? red : wire, 7);
+			near = ms_mark_irregular(c, q[i], 0.01, ap);
+			sprintf(sub, "%u irregular, the nearest %.3f from it", rep[i].quality.irregular, near);
+			er_text(c, 550 * (int)i + 14, y + 46, sub, 2, 95, 95, 95);
+			printf("  %s\n", sub);
+		}
+	for (i = 0; i < 5; i++)
+		qaws_mesh_3d_destroy(q[i]);
+	qaws_mesh_3d_destroy(s);
+	qaws_mesh_3d_destroy(sq);
+	free(x0);
+	free(xs);
+}
+
 static void demo_guidance(void)
 {
 	static double const wire[3] = { 40, 45, 60 }, tint[3] = { 178, 192, 212 }, warm[3] = { 232, 196, 150 }, cool[3] = { 160, 190, 222 };
 	static double const red[3] = { 214, 39, 40 }, dark[3] = { 30, 30, 40 }, green[3] = { 170, 205, 160 };
-	er_canvas* c = er_create(2750, 640, 3, 252, 252, 250);
+	er_canvas* c = er_create(2750, 1280, 3, 252, 252, 250);
 	double* x0;
 	unsigned int nv0, i, k, nlon = 48, ring = 8, pins[6] = { 101, 377, 610, 845, 290, 700 };
 	qaws_mesh_3d* s = ms_uv_sphere(24, nlon, &x0, &nv0);
@@ -255,6 +459,7 @@ static void demo_guidance(void)
 		for (i = 0; i < 6; i++)
 			er_point(c, x0 + 3 * pins[i], red, 7);
 	}
+	demo_cones(c, 640);
 	er_save(c, "showcase/mesh16_guidance.png");
 	printf("mesh16_guidance.png\n");
 	for (i = 0; i < 5; i++)

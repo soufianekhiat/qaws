@@ -836,13 +836,15 @@ static void qd_relax(qaws_hm* m, qaws_mesh_reference const* r, mr_scratch* s, un
    edge of a segment held along it and on it (moved onto it, MF_GUIDE). out_soft: the pulls (3 per vertex, weight times
    direction) for SMOOTHEST, NULL when none. */
 static qaws_status qd_guide(qaws_quadrangulate_desc const* desc, qaws_mesh_3d const* mesh, qaws_mesh_reference const* r, qaws_hm const* dm,
-	double const* nrm, mf_hier* h, double* rho, double** out_soft)
+	double const* nrm, mf_hier* h, double* rho, double** out_soft, int** out_cone, double** out_vw)
 {
 	mf_level* L = &h->lv[0];
-	unsigned int n = dm->nv, v, i, k, e, any = 0, *band = NULL;
+	unsigned int n = dm->nv, v, i, k, e, c, any = 0, *band = NULL;
 	double *dir = NULL, *w = NULL, *sz = NULL;
 	qaws_status st = QAWS_STATUS_ALLOCATION_FAILURE;
 	*out_soft = NULL;
+	*out_cone = NULL;
+	*out_vw = NULL;
 	if (desc->size)
 	{
 		double lo = HUGE_VAL;
@@ -866,6 +868,59 @@ static qaws_status qd_guide(qaws_quadrangulate_desc const* desc, qaws_mesh_3d co
 		free(sz);
 		if (!k)
 			return st;
+	}
+	if (desc->cone_count || desc->attractor_count)
+	{
+		/* cones: on the dense vertex the remesh kept at each (pinned there); attractors: the weights at the dense vertices */
+		double lo[3] = { HUGE_VAL, HUGE_VAL, HUGE_VAL }, hi[3] = { -HUGE_VAL, -HUGE_VAL, -HUGE_VAL }, rad = (double)desc->attractor_radius;
+		int* cone = desc->cone_count ? (int*)calloc((size_t)n + 1, sizeof(int)) : NULL;
+		double* vw = desc->attractor_count ? (double*)malloc(sizeof(double) * 2 * (n + 1)) : NULL;
+		if ((desc->cone_count && !cone) || (desc->attractor_count && !vw))
+		{
+			free(cone);
+			free(vw);
+			return st;
+		}
+		*out_cone = cone;
+		*out_vw = vw;
+		/* (with a border the flow keeps each cone's star, the border taking what cannot close: the cone stays on its pinned
+		   vertex's lattice point. On a closed surface the cones must take it, so they may move a step: their vertices
+		   are not pinned, the quad vertex is moved onto them after) */
+		for (c = 0; c < dm->nc && (dm->cf[c] == HM_NONE || dm->co[c] != HM_NONE); c++) {}
+		for (e = 0; e < desc->cone_count; e++)
+		{
+			double const* p = mesh->hm.x + 3 * (size_t)desc->cone_vertices[e];
+			double best = HUGE_VAL;
+			unsigned int bv = 0;
+			for (v = 0; v < n; v++)
+			{
+				double d2 = 0;
+				for (k = 0; k < 3; k++)
+					d2 += (dm->x[3 * (size_t)v + k] - p[k]) * (dm->x[3 * (size_t)v + k] - p[k]);
+				if (d2 < best)
+				{
+					best = d2;
+					bv = v;
+				}
+			}
+			cone[bv] += desc->cone_indices[e];
+			for (i = 0; i < desc->pinned_count && desc->pinned[i] != desc->cone_vertices[e]; i++) {}
+			L->con[bv] = (unsigned char)(c == dm->nc && i == desc->pinned_count && L->con[bv] == MF_PINNED ? MF_CONE : L->con[bv] | MF_CONE);
+		}
+		for (v = 0; v < mesh->hm.nv; v++)
+			for (k = 0; k < 3; k++)
+			{
+				lo[k] = fmin(lo[k], mesh->hm.x[3 * (size_t)v + k]);
+				hi[k] = fmax(hi[k], mesh->hm.x[3 * (size_t)v + k]);
+			}
+		if (rad == 0)
+			rad = 0.1 * sqrt((hi[0] - lo[0]) * (hi[0] - lo[0]) + (hi[1] - lo[1]) * (hi[1] - lo[1]) + (hi[2] - lo[2]) * (hi[2] - lo[2]));
+		if (vw)
+		{
+			mf_attract(dm->x, L->area, n, desc->attractors, desc->attractor_strengths, desc->attractor_count, rad > 0 ? rad : 1, vw);
+			if (!mf_weights(h, vw))
+				return st;
+		}
 	}
 	if (!desc->guide_directions && !desc->guide_edge_count)
 		return QAWS_STATUS_OK;
@@ -983,6 +1038,21 @@ done:
 	return st;
 }
 
+/* each placed cone's lattice point on its dense vertex, its neighbours' on it too: the steps round the cone's star 0, so
+   the cone sits on that point whatever turn its face makes (the point a rotation about it keeps) */
+static void qd_cone_points(mf_hier* h, int const* cone)
+{
+	mf_level* L = &h->lv[0];
+	unsigned int v, k;
+	for (v = 0; cone && v < L->n; v++)
+		if (cone[v])
+		{
+			memcpy(L->o + 3 * (size_t)v, L->x + 3 * (size_t)v, sizeof(double) * 3);
+			for (k = L->adj0[v]; k < L->adj0[v + 1]; k++)
+				memcpy(L->o + 3 * (size_t)L->adj[k], L->x + 3 * (size_t)v, sizeof(double) * 3);
+		}
+}
+
 /* qaws_mesh_quadrangulate; map (may be NULL): GLOBAL's integer-grid map kept (left empty when it fell back) */
 static qaws_status qd_run(qaws_mesh_3d const* mesh, qaws_quadrangulate_desc const* desc, qaws_mesh_3d** out_mesh, qaws_mesh_report* out_report,
 	qg_map* map)
@@ -996,7 +1066,9 @@ static qaws_status qd_run(qaws_mesh_3d const* mesh, qaws_quadrangulate_desc cons
 	mr_scratch s;
 	qd_out o;
 	qaws_mesh_location* fl = NULL;
-	double rho, rf, *nrm = NULL, *soft = NULL;
+	double rho, rf, *nrm = NULL, *soft = NULL, *vw = NULL;
+	int* dcone = NULL;
+	unsigned int* pins = NULL;
 	qaws_size_field* dsize = NULL;
 	int* T = NULL;
 	unsigned char* K = NULL;
@@ -1015,6 +1087,11 @@ static qaws_status qd_run(qaws_mesh_3d const* mesh, qaws_quadrangulate_desc cons
 	for (v = 0; v < 2 * desc->guide_edge_count; v++)
 		if (!desc->guide_edges || desc->guide_edges[v] >= mesh->hm.nv)
 			return QAWS_STATUS_INVALID_ARGUMENT;
+	for (v = 0; v < desc->cone_count; v++)
+		if (!desc->cone_vertices || !desc->cone_indices || desc->cone_vertices[v] >= mesh->hm.nv)
+			return QAWS_STATUS_INVALID_ARGUMENT;
+	if ((desc->attractor_count && (!desc->attractors || !desc->attractor_strengths)) || !(desc->attractor_radius >= 0))
+		return QAWS_STATUS_INVALID_ARGUMENT;
 	memset(&h, 0, sizeof h);
 	memset(&s, 0, sizeof s);
 	memset(&o, 0, sizeof o);
@@ -1045,8 +1122,21 @@ static qaws_status qd_run(qaws_mesh_3d const* mesh, qaws_quadrangulate_desc cons
 	rd.reference = r;
 	rd.target_length = (qaws_scalar)(rf / 3);
 	rd.iterations = 6;
-	rd.pinned = desc->pinned;
-	rd.pinned_count = desc->pinned_count;
+	if (desc->cone_count)
+	{
+		/* the cones' vertices kept by the dense remesh too */
+		pins = (unsigned int*)malloc(sizeof(unsigned int) * ((size_t)desc->pinned_count + desc->cone_count + 1));
+		if (!pins)
+		{
+			st = QAWS_STATUS_ALLOCATION_FAILURE;
+			goto done;
+		}
+		if (desc->pinned_count)
+			memcpy(pins, desc->pinned, sizeof(unsigned int) * desc->pinned_count);
+		memcpy(pins + desc->pinned_count, desc->cone_vertices, sizeof(unsigned int) * desc->cone_count);
+	}
+	rd.pinned = pins ? pins : desc->pinned;
+	rd.pinned_count = desc->pinned_count + desc->cone_count;
 	st = desc->size ? sf_create_scaled(desc->size, 1.0 / 3, &dsize) : QAWS_STATUS_OK;
 	rd.size = dsize;
 	if (st == QAWS_STATUS_OK)
@@ -1065,7 +1155,7 @@ static qaws_status qd_run(qaws_mesh_3d const* mesh, qaws_quadrangulate_desc cons
 	st = mf_build(&h, &dense->hm, nrm);
 	if (st != QAWS_STATUS_OK)
 		goto done;
-	st = qd_guide(desc, mesh, r, &dense->hm, nrm, &h, &rho, &soft);
+	st = qd_guide(desc, mesh, r, &dense->hm, nrm, &h, &rho, &soft, &dcone, &vw);
 	if (st != QAWS_STATUS_OK)
 		goto done;
 	rf = rho;
@@ -1081,7 +1171,8 @@ static qaws_status qd_run(qaws_mesh_3d const* mesh, qaws_quadrangulate_desc cons
 		   O-grid), neither one at its centre nor four on its rim. Any failure there keeps the field there is */
 		double* init = (double*)calloc(3 * (size_t)dense->hm.nv + 3, sizeof(double));
 		double *keep = NULL, *cand = NULL;
-		unsigned int pulled = 0, s0, l, t;
+		unsigned int pulled = 0, s0, l, t, placed = 0;
+		qaws_status fst = QAWS_STATUS_OK;
 		size_t at, total;
 		cf_system* sys = NULL;
 		if (!init)
@@ -1128,24 +1219,27 @@ static qaws_status qd_run(qaws_mesh_3d const* mesh, qaws_quadrangulate_desc cons
 			int better;
 			if (t == 0)
 			{
-				if (!pulled)
+				if (!pulled || dcone)
 					continue;
 				mf_orientations(&h, desc->sweeps ? desc->sweeps : 8, init, 1);
 			}
 			else
 			{
-				if (t == 1 && (cf_create(&dense->hm, nrm, &h.lv[0], 4, &sys) != QAWS_STATUS_OK || (soft && cf_guide(sys, soft) != QAWS_STATUS_OK)))
+				if (t == 1 && ((fst = cf_create(&dense->hm, nrm, &h.lv[0], 4, &sys)) != QAWS_STATUS_OK
+					|| (fst = cf_steer(sys, vw ? vw + dense->hm.nv : NULL, dcone)) != QAWS_STATUS_OK
+					|| (soft && (fst = cf_guide(sys, soft)) != QAWS_STATUS_OK)))
 					break;
 				if (t == 2 && !pulled)
 					break;
-				if ((t == 1 ? cf_smoothest(sys, cand) : cf_aligned(sys, init, cand)) != QAWS_STATUS_OK)
+				if ((fst = t == 1 ? cf_smoothest(sys, cand) : cf_aligned(sys, init, cand)) != QAWS_STATUS_OK)
 					continue;
-				if (cf_relax(sys, rf, 100, cand) != QAWS_STATUS_OK)
+				if ((fst = cf_relax(sys, rf, 100, cand)) != QAWS_STATUS_OK)
 					continue;
 				memcpy(h.lv[0].q, cand, sizeof(double) * 3 * dense->hm.nv);
 			}
 			s1 = qd_singular(&dense->hm, &h.lv[0]);
-			better = t == 1 ? s1 <= s0 : s1 < s0;
+			better = t == 1 ? s1 <= s0 || dcone : s1 < s0;   /* (placed cones: the field with them, whatever it costs) */
+			placed |= better && t;
 			if (better && t)
 				cf_restrict(&h);
 			s0 = better ? s1 : s0;
@@ -1159,8 +1253,14 @@ static qaws_status qd_run(qaws_mesh_3d const* mesh, qaws_quadrangulate_desc cons
 		free(keep);
 		free(cand);
 		free(init);
+		if (dcone && !placed)
+		{
+			st = fst != QAWS_STATUS_OK ? fst : QAWS_STATUS_INTERNAL_ERROR;   /* (the cones refused: Poincare-Hopf) */
+			goto done;
+		}
 	}
 	mf_positions(&h, rf, desc->sweeps ? desc->sweeps : 8);
+	qd_cone_points(&h, dcone);
 	/* 3. the steps between lattice points made to close round every face, the mesh read off them; all quads at the
 	   target when that leaves no other face, else (a triangle or a polygon left) the same at twice the target, every face
 	   split; holes left are not looked for, the split would not close them either */
@@ -1200,6 +1300,7 @@ static qaws_status qd_run(qaws_mesh_3d const* mesh, qaws_quadrangulate_desc cons
 		qd_out o2;
 		memset(&o2, 0, sizeof o2);
 		mf_positions(&h, 2 * rho, desc->sweeps ? desc->sweeps : 8);
+		qd_cone_points(&h, dcone);
 		st = qd_lattice(&dense->hm, &h, 2 * rho, T, K, r, &s, &o2);
 		/* (nothing at twice a target about the shape's own size: the first mesh split instead) */
 		if (st == QAWS_STATUS_OK && o2.nf)
@@ -1237,6 +1338,40 @@ static qaws_status qd_run(qaws_mesh_3d const* mesh, qaws_quadrangulate_desc cons
 			kind[v] = o.kind[src];
 			if (kind[v] == 2)
 				out->hm.vflag[v] |= HM_CORNER;
+		}
+		/* each cone's quad vertex: the nearest within the spacing of its valence (4 - index), else the nearest; moved onto
+		   the cone's vertex and held there like a corner (not flagged one) by the relaxation and the finishing */
+		for (c = 0; c < desc->cone_count; c++)
+		{
+			double const* p = mesh->hm.x + 3 * (size_t)desc->cone_vertices[c];
+			double best[2] = { HUGE_VAL, HUGE_VAL };
+			unsigned int bv[2] = { HM_NONE, HM_NONE }, want = (unsigned int)(4 - desc->cone_indices[c]);
+			for (v = 0; v < out->hm.nv; v++)
+			{
+				double d2 = 0;
+				if (out->hm.vc[v] == HM_NONE)
+					continue;
+				for (k = 0; k < 3; k++)
+					d2 += (out->hm.x[3 * (size_t)v + k] - p[k]) * (out->hm.x[3 * (size_t)v + k] - p[k]);
+				if (kind[v] == 2 && d2 == 0)
+				{
+					for (k = 0; k < desc->pinned_count && desc->pinned[k] != desc->cone_vertices[c]; k++) {}
+					if (k == desc->pinned_count)
+						out->hm.vflag[v] = (unsigned char)(out->hm.vflag[v] & ~HM_CORNER);
+					break;   /* (pinned there: the dense vertex held its lattice point) */
+				}
+				for (f = 0; kind[v] != 2 && f < 2; f++)
+					if (d2 < best[f] && (f || (hm_valence(&out->hm, v) == want && !hm_is_border_vertex(&out->hm, v) && d2 < rf * rf)))
+					{
+						best[f] = d2;
+						bv[f] = v;
+					}
+			}
+			v = v < out->hm.nv ? HM_NONE : bv[0] != HM_NONE ? bv[0] : bv[1];
+			if (v == HM_NONE)
+				continue;
+			qd_place(r, &s, p, out->hm.foot[v], 0, out->hm.x + 3 * (size_t)v, &out->hm.foot[v]);
+			kind[v] = 2;
 		}
 		/* border vertices near the reference's border but off it (a lattice point by the border whose cluster had no
 		   border vertex, or a midpoint next to one): onto it */
@@ -1302,6 +1437,9 @@ done:
 	free(fl);
 	free(nrm);
 	free(soft);
+	free(vw);
+	free(dcone);
+	free(pins);
 	qaws_size_field_destroy(dsize);
 	free(T);
 	free(K);

@@ -121,6 +121,30 @@ qaws_status qaws_size_field_evaluate(qaws_size_field const* field, qaws_mesh_loc
  * SMOOTHEST takes it as a held value), 0 none. Feature lines and the border
  * win where they meet one. Directions are taken in the tangent plane (one
  * of the field's n is drawn to it; a direction along the normal is none).
+ *
+ * Singularities (SMOOTHEST; LOCAL refuses cones with UNSUPPORTED_OPERATION):
+ * cones placed at vertices with an index each (in 1/n turns; a vertex given
+ * twice sums them). The field is the smoothest for a connection adjusted to
+ * them (Crane, Desbrun, Schroder 2010, "Trivial connections"; Knoppel et
+ * al. 2013, 6.1): the least change of each edge's transport that leaves
+ * every face flat but the cone's star, which turns by its index (spread
+ * over the star's faces by their angles), so the field winds there and
+ * nowhere else: the index shows on one face round the vertex. On a closed
+ * component without feature lines the indices must sum to n times its
+ * Euler characteristic (Poincare-Hopf; 8 quarter turns on a sphere), else
+ * INVALID_ARGUMENT. Where lines or the border hold the field, the index
+ * they demand beyond the cones' is left free: the solve places it (the
+ * change of transport spread evenly where it cannot close). Edges between
+ * two held vertices keep their transport. On higher genus the transport's
+ * turns round the handles are the least change's, not chosen.
+ * Attractors: points with a strength (> 0 draws the free singularities, < 0
+ * pushes them away; placed cones stay), reaching r (a Gaussian
+ * exp(-d^2 / r^2) of the distance). SMOOTHEST: the strength in cones (1:
+ * the turn of a +1 cone) spread round the point by area times the Gaussian,
+ * added to the adjusted connection's turns and taken back from every face
+ * by its area, so a cone forms there (a free one moves to it). LOCAL: the
+ * smoothing's edge weights times exp(-strength Gaussian): singularities
+ * cost less where they are low.
  */
 typedef enum qaws_direction_field_method
 {
@@ -138,6 +162,13 @@ typedef struct qaws_direction_field_desc
 	qaws_scalar const* guide_directions;   /* 3 per vertex, NULL: no guidance; a zero vector: none at that vertex */
 	qaws_scalar const* guide_weights;      /* per vertex: > 0 a pull, < 0 or infinite held, 0 none; NULL: 1 wherever a
 	                                          direction is given */
+	unsigned int const* cone_vertices;     /* SMOOTHEST: vertices given a singularity of the index in cone_indices */
+	int const* cone_indices;               /* per cone, in 1/n turns (crosses: +1 a valence-3 corner, -1 a valence-5 one) */
+	unsigned int cone_count;
+	qaws_scalar const* attractors;         /* 3 per point: singularities drawn to it (strength > 0) or pushed off (< 0) */
+	qaws_scalar const* attractor_strengths;   /* per point: SMOOTHEST in cones (1: a +1 cone's turn), LOCAL the weights times exp(-it) */
+	unsigned int attractor_count;
+	qaws_scalar attractor_radius;          /* every point's reach (a Gaussian's); 0: a tenth of the mesh's bounding diagonal */
 } qaws_direction_field_desc;
 
 /* per vertex a unit tangent (3); per face the index round it; either output

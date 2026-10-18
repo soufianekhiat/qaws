@@ -500,6 +500,209 @@ static void cf_directions(cf_system const* s, double* out_q)
 	}
 }
 
+static unsigned int cf_root(unsigned int* uf, unsigned int i)
+{
+	while (uf[i] != i)
+	{
+		uf[i] = uf[uf[i]];
+		i = uf[i];
+	}
+	return i;
+}
+
+/* the least change of the transports (per corner, delta[o] = -delta[c]) turning each face by 2 pi k_f / n - K_f (K_f its
+   rescaled angle excess, k_f its share of the cones round it): delta = D^T (D D^T)^-1 b over the edges not between two held
+   vertices, D the faces' sums of their corners' changes; a set of faces joined by such edges with none of them on the border
+   (D D^T singular there) first has its mean b taken off, the turn it cannot close spread evenly */
+static qaws_status cf_connection(cf_system* s, int const* cone, double const* att, double* delta)
+{
+	qaws_hm const* m = s->m;
+	unsigned int nf = m->nf, f, c, k, at, *uf = NULL, *rp = NULL, *cj = NULL;
+	double *b = NULL, *cx = NULL, *xyz = NULL, *sum = NULL, *cnt = NULL, total = 0;
+	unsigned char* grounded = NULL;
+	qaws_internal_ldlt L;
+	qaws_status st = QAWS_STATUS_ALLOCATION_FAILURE;
+	memset(&L, 0, sizeof L);
+	memset(delta, 0, sizeof(double) * m->nc);
+	if (!nf)
+		return QAWS_STATUS_OK;
+	uf = (unsigned int*)malloc(sizeof(unsigned int) * (nf + 1));
+	rp = (unsigned int*)malloc(sizeof(unsigned int) * (nf + 1));
+	cj = (unsigned int*)malloc(sizeof(unsigned int) * ((size_t)m->nc + nf + 1));
+	cx = (double*)malloc(sizeof(double) * ((size_t)m->nc + nf + 1));
+	b = (double*)malloc(sizeof(double) * (2 * (size_t)nf + 1));
+	xyz = (double*)calloc(3 * (size_t)nf + 3, sizeof(double));
+	sum = (double*)calloc((size_t)nf + 1, sizeof(double));
+	cnt = (double*)calloc((size_t)nf + 1, sizeof(double));
+	grounded = (unsigned char*)calloc((size_t)nf + 1, 1);
+	if (!uf || !rp || !cj || !cx || !b || !xyz || !sum || !cnt || !grounded)
+		goto done;
+	for (f = 0; f < nf; f++)
+		uf[f] = f;
+	for (f = 0; att && f < m->nv; f++)
+		total += m->vc[f] != HM_NONE ? att[f] : 0;
+	/* b per face; the faces joined across free edges */
+	for (f = 0; f < nf; f++)
+	{
+		unsigned int fn = m->fn[f];
+		double kf = 0, af = 0, ex = -(fn - 2.0) * CF_PI, nn[3], sh;
+		for (c = m->fc[f]; c < m->fc[f] + fn; c++)
+		{
+			unsigned int v = m->cv[c], o = m->co[c], w = hm_to(m, c);
+			ex += s->as[c];
+			sh = s->as[c] / (hm_is_border_vertex(m, v) ? CF_PI : 2 * CF_PI);
+			if (att)
+				af += att[v] * sh;
+			if (cone && cone[v])
+				kf += cone[v] * sh;
+			for (k = 0; k < 3; k++)
+				xyz[3 * (size_t)f + k] += m->x[3 * (size_t)v + k] / fn;
+			if (s->id[v] == HM_NONE && s->id[w] == HM_NONE)
+				continue;
+			if (o == HM_NONE)
+				grounded[f] = 1;
+			else
+			{
+				unsigned int ra = cf_root(uf, f), rb = cf_root(uf, m->cf[o]);
+				if (ra != rb)
+					uf[ra] = rb;
+			}
+		}
+		/* the cones' turn in place of the surface's own; the attractors' added, as much taken off every face by its area */
+		hm_face_normal(m, f, nn);
+		b[f] = (cone ? 2 * CF_PI * kf / s->n - ex : 0) + (att ? 2 * CF_PI * (af - total * sqrt(cf_dot(nn, nn)) / s->area) / s->n : 0);
+	}
+	for (f = 0; f < nf; f++)
+	{
+		unsigned int r = cf_root(uf, f);
+		grounded[r] |= grounded[f];
+		sum[r] += b[f];
+		cnt[r] += 1;
+	}
+	for (f = 0; f < nf; f++)
+	{
+		unsigned int r = cf_root(uf, f);
+		if (!grounded[r])
+			b[f] -= sum[r] / cnt[r];
+	}
+	/* D D^T (+ 1e-9 on the diagonal: the ungrounded sets' constant, which D^T takes to 0) */
+	for (f = 0, at = 0; f < nf; f++)
+	{
+		unsigned int d0 = at++;
+		rp[f] = d0;
+		cj[d0] = f;
+		cx[d0] = 1e-9;
+		for (c = m->fc[f]; c < m->fc[f] + m->fn[f]; c++)
+		{
+			unsigned int o = m->co[c], g, q;
+			if (s->id[m->cv[c]] == HM_NONE && s->id[hm_to(m, c)] == HM_NONE)
+				continue;
+			cx[d0] += 1;
+			if (o == HM_NONE)
+				continue;
+			g = m->cf[o];
+			for (q = d0 + 1; q < at && cj[q] != g; q++) {}
+			if (q < at)
+				cx[q] -= 1;
+			else
+			{
+				cj[at] = g;
+				cx[at++] = -1;
+			}
+		}
+	}
+	rp[nf] = at;
+	st = qaws_internal_ldlt_factor(&L, nf, rp, cj, cx, xyz, 0);
+	if (st != QAWS_STATUS_OK)
+		goto done;
+	qaws_internal_ldlt_solve(&L, b, b + nf);
+	for (f = 0; f < nf; f++)
+		for (c = m->fc[f]; c < m->fc[f] + m->fn[f]; c++)
+		{
+			unsigned int o = m->co[c];
+			if (s->id[m->cv[c]] == HM_NONE && s->id[hm_to(m, c)] == HM_NONE)
+				continue;
+			delta[c] = b[nf + f] - (o == HM_NONE ? 0 : b[nf + m->cf[o]]);
+		}
+done:
+	qaws_internal_ldlt_free(&L);
+	free(uf); free(rp); free(cj); free(cx); free(b); free(xyz); free(sum); free(cnt); free(grounded);
+	return st;
+}
+
+qaws_status cf_steer(cf_system* s, double const* att, int const* cone)
+{
+	qaws_hm const* m = s->m;
+	unsigned int v, c, k, nv = m->nv;
+	double* delta;
+	qaws_status st = QAWS_STATUS_OK;
+	if (!att && !cone)
+		return QAWS_STATUS_OK;
+	if (cone)
+	{
+		/* Poincare-Hopf on each closed component with nothing held: sum k = n (V - E + F) */
+		long *chi = (long*)calloc((size_t)s->ncp + 1, sizeof(long)), *ks = (long*)calloc((size_t)s->ncp + 1, sizeof(long));
+		unsigned char* open = (unsigned char*)calloc((size_t)s->ncp + 1, 1);
+		st = chi && ks && open ? QAWS_STATUS_OK : QAWS_STATUS_ALLOCATION_FAILURE;
+		for (v = 0; st == QAWS_STATUS_OK && v < nv; v++)
+		{
+			if (m->vc[v] == HM_NONE)
+				continue;
+			chi[s->cp[v]]++;
+			ks[s->cp[v]] += cone[v];
+			open[s->cp[v]] |= s->id[v] == HM_NONE || hm_is_border_vertex(m, v);
+		}
+		for (v = 0; st == QAWS_STATUS_OK && v < m->nf; v++)
+		{
+			unsigned int p = s->cp[m->cv[m->fc[v]]];
+			chi[p]++;
+			for (c = m->fc[v]; c < m->fc[v] + m->fn[v]; c++)
+				chi[p] -= m->co[c] == HM_NONE || c < m->co[c];
+		}
+		for (v = 0; st == QAWS_STATUS_OK && v < s->ncp; v++)
+			if (!open[v] && ks[v] != (long)s->n * chi[v])
+				st = QAWS_STATUS_INVALID_ARGUMENT;
+		free(chi); free(ks); free(open);
+		if (st != QAWS_STATUS_OK)
+			return st;
+	}
+	delta = (double*)malloc(sizeof(double) * ((size_t)m->nc + 1));
+	if (!delta)
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	st = cf_connection(s, cone, att, delta);
+	/* each edge slot as cf_create made them: out along v's corners (from the neighbour: conj r_c, changed by -delta_c), on
+	   the border in along the last (r_p, changed by +delta_p) */
+	for (v = 0, k = 0; st == QAWS_STATUS_OK && v < nv; v++)
+	{
+		unsigned int last = HM_NONE;
+		if (m->vc[v] == HM_NONE)
+			continue;
+		for (c = m->vc[v]; c != HM_NONE; c = hm_round(m, v, c), k++)
+		{
+			double a = -(double)s->n * delta[c], zr = s->ez[2 * (size_t)k], zi = s->ez[2 * (size_t)k + 1];
+			s->ez[2 * (size_t)k] = zr * cos(a) - zi * sin(a);
+			s->ez[2 * (size_t)k + 1] = zr * sin(a) + zi * cos(a);
+			last = c;
+		}
+		if (hm_is_border_vertex(m, v))
+		{
+			unsigned int p = hm_prev(m, last);
+			double a = (double)s->n * delta[p], zr = s->ez[2 * (size_t)k], zi = s->ez[2 * (size_t)k + 1];
+			s->ez[2 * (size_t)k] = zr * cos(a) - zi * sin(a);
+			s->ez[2 * (size_t)k + 1] = zr * sin(a) + zi * cos(a);
+			k++;
+		}
+	}
+	free(delta);
+	if (st != QAWS_STATUS_OK)
+		return st;
+	qaws_internal_ldlt_free(&s->f);
+	qaws_internal_ldlt_free(&s->g);
+	s->geps = 0;
+	s->nnz_a = 0;
+	return s->nfree ? cf_factor(s, 1e-8, &s->f) : QAWS_STATUS_OK;
+}
+
 qaws_status cf_smoothest(cf_system* s, double* out_q)
 {
 	qaws_hm const* m = s->m;
@@ -771,8 +974,8 @@ void cf_restrict(mf_hier* h)
 	}
 }
 
-qaws_status cf_direction_field(qaws_mesh_3d const* mesh, mf_hier const* h, unsigned int n, int aligned, qaws_scalar* out_directions,
-	int* out_face_index)
+qaws_status cf_direction_field(qaws_mesh_3d const* mesh, mf_hier const* h, unsigned int n, int aligned, double const* att, int const* cone,
+	qaws_scalar* out_directions, int* out_face_index)
 {
 	qaws_hm const* m = &mesh->hm;
 	cf_system* sys = NULL;
@@ -780,8 +983,13 @@ qaws_status cf_direction_field(qaws_mesh_3d const* mesh, mf_hier const* h, unsig
 	double *q = NULL, *g = NULL;
 	unsigned int v, k;
 	qaws_status st = cf_create(m, h->lv[0].nrm, &h->lv[0], n, &sys);
+	if (st == QAWS_STATUS_OK)
+		st = cf_steer(sys, att, cone);
 	if (st != QAWS_STATUS_OK)
+	{
+		cf_free(sys);
 		return st;
+	}
 	q = (double*)malloc(sizeof(double) * 3 * (m->nv + 1));
 	if (!q)
 	{
