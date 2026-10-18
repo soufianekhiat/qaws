@@ -213,8 +213,11 @@ qaws_status qaws_mesh_quadrangulate(qaws_mesh_3d const* mesh, qaws_quadrangulate
   spacing. Irregular vertices stay at the field's
   singularities: a torus is a grid along its parallels, a box's faces are
   grids. Lattice points are unfolded across creases before their offsets
-  are read, so quads follow sharp edges. `PAIRING`, `SPLIT`, `GLOBAL`
-  (integer-grid maps) and `LAYOUT` are reserved.
+  are read, so quads follow sharp edges.
+- **GLOBAL** quads: an integer-grid map on INSTANT's dense mesh, read off
+  as QEx does (below); all quads, the best layouts in the library, INSTANT's
+  mesh returned when no valid map comes out. `PAIRING`, `SPLIT` and
+  `LAYOUT` are reserved.
 
 ### LOCAL: quality by default, bounded angles, a distance guard
 qaws_remesh_desc d;
@@ -487,6 +490,47 @@ painted size. Guide edges are matched to dense vertices by a brute-force
 search (every vertex against every segment); crossing loops get no pinned
 crossing; a loop through a cone of the field cannot stay one lattice line.
 Directions need the reference made from the input.
+### Quads by integer-grid maps (GLOBAL)
+`QAWS_QUADS_GLOBAL` (`src/qaws/mesh/qaws_quad_global.c`) follows
+Mixed-Integer Quadrangulation and integer-grid maps (Bommes, Zimmer,
+Kobbelt 2009; Bommes et al. 2013) with QEx's extraction (Ebke, Bommes,
+Chen, Kobbelt 2013), on INSTANT's dense mesh and fields:
+- **Integers**: the lattice steps INSTANT's min-cost flow made consistent.
+  Each dense vertex keeps two unknowns, its place in its lattice cell in
+  its own frame; every edge's transition is a quarter turn and a whole
+  shift, so no cut graph is needed. A singular face whose cone sits on a
+  vertex's lattice point makes that vertex the cone (held on the point),
+  else it is split in three round its cone at the face's centroid; feature
+  corners are cones on their own lattice points, charted from their
+  neighbours (a corner's frame lies in none of its faces); edges between
+  line vertices on different creases by a corner have their steps read
+  again in their faces' plane.
+- **Places**: one sparse LDL^T solve of sum A (|grad u - X/h|^2 +
+  |grad v - Y/h|^2) over the triangles (the field turned into each
+  triangle's plane), line vertices held on their whole isoline, corners
+  and cones on their lattice points. Folds left are undone vertex by
+  vertex (each moved to the point of its kernel farthest from its
+  triangles' far sides, a ring wider every 8 rounds, at most 64).
+- **Extraction**: the lattice points of each triangle are the vertices,
+  registered in every triangle round them; from each, its unit isolines are
+  traced across the triangles through the transitions, each nudged a
+  millionth to its left so it never runs along an edge or through a
+  vertex (a border or crease isoline is traced from the side it bounds);
+  a face's next edge is a quarter turn left at each point. All faces must
+  close in fours, else INSTANT's mesh is returned. Vertices are placed at
+  their barycentric points and projected on the reference (creases for
+  line points, corners exactly), then INSTANT's relaxation and finishing.
+- **Report**: `iterations` 1 when the map made the mesh, 0 when INSTANT's
+  was returned.
+Measured (test 136, figure 15; GLOBAL against INSTANT, all quads): torus
+at 0.3 640 quads both, 0 irregular, SJ min 0.994 (0.985), AD 3.13 (3.60);
+creased box at 0.1 376 quads, AD 0.00 (0.04); blob at 0.11 1397 quads
+(INSTANT 1276, from twice the target split), 8 irregular both, SJ min
+0.815 (0.772), AD 2.74 (3.27); can at 0.14 766 quads both, 8 irregular,
+SJ min 0.853 (0.801), AD 2.23 (2.23), ED 0.129 (0.138); wavy patch at 0.1
+498 quads, 2 irregular, AD 2.97 (3.22). About INSTANT's time plus 10%.
+Over the five shapes at 0.75 to 2.2 times these targets the map made 14
+of 20; the rest returned INSTANT's mesh.
 
 ## Measures
 
@@ -700,7 +744,12 @@ those alone (1 to 9, then a to e for figures 10 to 14: `5c` draws 5 and
   not a global solve; the field's singularities are those of a smooth field
   (or one drawn to curvature), not placed for the fewest irregular
   vertices; the pipeline is sensitive to tiny changes of the input (a
-  scale of 1e-12 can change the quads, not their quality).
+  scale of 1e-12 can change the quads, not their quality). GLOBAL takes
+  its integers from INSTANT's flow (no quantization of its own) and falls
+  back on INSTANT when a fold survives the untangling (seen near cones on
+  the can at coarse targets and at a box corner), when a cone's map winds
+  to 90 degrees instead of 450 (faces then fail to close), or when a
+  transition disagrees at its two ends.
 - Generation: vertices on a trimmed face's trim curve are snapped onto the
   surface, not the curve.
 - Tetrahedra: improvement by flips and smoothing only (no edge removal or

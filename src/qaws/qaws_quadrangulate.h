@@ -37,9 +37,24 @@
  *            reference, no move lowering the scaled Jacobian round it or
  *            squeezing its quads toward triangles.
  *            The default.
- *   PAIRING, SPLIT, GLOBAL, LAYOUT  reserved (UNSUPPORTED_OPERATION today):
- *            triangles paired by matching, all-quad splitting, integer-grid
- *            maps, patch layouts.
+ *   GLOBAL   an integer-grid map (Bommes, Zimmer, Kobbelt 2009; Bommes et
+ *            al. 2013) on INSTANT's dense mesh and fields: the lattice
+ *            steps INSTANT's flow made consistent are the map's integers
+ *            (cones on lattice points, feature lines and the border on
+ *            whole isolines, corners on lattice points), each vertex's place
+ *            in its cell solved globally (one sparse LDL^T, the energy of
+ *            Mixed-Integer Quadrangulation), folds left undone vertex by
+ *            vertex; the quads read off the map as QEx does (Ebke et al.
+ *            2013): its lattice points the vertices, its unit isolines
+ *            traced across the triangles the edges. All quads, irregular
+ *            vertices only at the cones; the same finishing as INSTANT.
+ *            When the steps leave no map, the map keeps a fold, or its
+ *            isolines do not close into quads, INSTANT's mesh is returned:
+ *            the report's `iterations` is 1 when the map made the mesh, 0
+ *            when it fell back.
+ *   PAIRING, SPLIT, LAYOUT  reserved (UNSUPPORTED_OPERATION today):
+ *            triangles paired by matching, all-quad splitting, patch
+ *            layouts.
  *
  * As remeshing: footpoints kept, the reference mesh's attributes
  * transferred, the input unchanged. The report counts the singularities

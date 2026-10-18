@@ -19,6 +19,7 @@
 #include "qaws_cross_field.h"
 #include "qaws_quad_flow.h"
 #include "qaws_quad_improve.h"
+#include "qaws_quad_global.h"
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -147,18 +148,7 @@ static void qd_place(qaws_mesh_reference const* r, mr_scratch* s, double const* 
 	mr_eval(r, l, x, NULL);
 }
 
-/* The quad mesh read off the fields of the dense mesh dm (level 0 of h):
-   vertices x (3 each) with footpoints, kind (2: pinned, 1: on a line), faces. */
-typedef struct qd_out
-{
-	double* x;
-	qaws_mesh_location* foot;
-	unsigned char* kind;
-	unsigned int nv;
-	unsigned int *fv, *fs, nf, nc;
-} qd_out;
-
-static void qd_out_free(qd_out* o)
+void qd_out_free(qd_out* o)
 {
 	free(o->x); free(o->foot); free(o->kind); free(o->fv); free(o->fs);
 	memset(o, 0, sizeof *o);
@@ -993,7 +983,9 @@ done:
 	return st;
 }
 
-qaws_status qaws_mesh_quadrangulate(qaws_mesh_3d const* mesh, qaws_quadrangulate_desc const* desc, qaws_mesh_3d** out_mesh, qaws_mesh_report* out_report)
+/* qaws_mesh_quadrangulate; map (may be NULL): GLOBAL's integer-grid map kept (left empty when it fell back) */
+static qaws_status qd_run(qaws_mesh_3d const* mesh, qaws_quadrangulate_desc const* desc, qaws_mesh_3d** out_mesh, qaws_mesh_report* out_report,
+	qg_map* map)
 {
 	qaws_mesh_reference* own = NULL;
 	qaws_mesh_reference const* r;
@@ -1015,7 +1007,7 @@ qaws_status qaws_mesh_quadrangulate(qaws_mesh_3d const* mesh, qaws_quadrangulate
 	*out_mesh = NULL;
 	if (!mesh || !desc || (unsigned int)desc->method > QAWS_QUADS_LAYOUT || desc->target_length < 0)
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	if (desc->method != QAWS_QUADS_INSTANT)
+	if (desc->method != QAWS_QUADS_INSTANT && desc->method != QAWS_QUADS_GLOBAL)
 		return QAWS_STATUS_UNSUPPORTED_OPERATION;
 	for (v = 0; v < desc->pinned_count; v++)
 		if (!desc->pinned || desc->pinned[v] >= mesh->hm.nv)
@@ -1180,8 +1172,30 @@ qaws_status qaws_mesh_quadrangulate(qaws_mesh_3d const* mesh, qaws_quadrangulate
 		goto done;
 	}
 	st = qd_lattice(&dense->hm, &h, rf, T, K, r, &s, &o);
-	for (f = 0; st == QAWS_STATUS_OK && desc->pure && f < o.nf && o.fs[f] == 4; f++) {}
-	if (st == QAWS_STATUS_OK && desc->pure && f < o.nf)
+	if (st == QAWS_STATUS_OK && desc->method == QAWS_QUADS_GLOBAL)
+	{
+		/* GLOBAL: the integer-grid map of the same steps, its quads placed on the reference; INSTANT's kept when it gives
+		   none */
+		qd_out g;
+		st = qg_quads(&dense->hm, &h.lv[0], rf, T, K, &g, map);
+		if (st == QAWS_STATUS_OK)
+		{
+			for (v = 0; v < g.nv; v++)
+				if (g.kind[v] != 2)
+				{
+					double p[3];
+					memcpy(p, g.x + 3 * (size_t)v, sizeof p);
+					qd_place(r, &s, p, g.foot[v], g.kind[v] != 0, g.x + 3 * (size_t)v, &g.foot[v]);
+				}
+			qd_out_free(&o);
+			o = g;
+			rep.iterations = 1;
+		}
+		else if (st == QAWS_STATUS_INVALID_TOPOLOGY)
+			st = QAWS_STATUS_OK;
+	}
+	for (f = 0; st == QAWS_STATUS_OK && desc->pure && !rep.iterations && f < o.nf && o.fs[f] == 4; f++) {}
+	if (st == QAWS_STATUS_OK && desc->pure && !rep.iterations && f < o.nf)
 	{
 		qd_out o2;
 		memset(&o2, 0, sizeof o2);
@@ -1305,4 +1319,25 @@ done:
 		*out_report = rep;
 	*out_mesh = out;
 	return QAWS_STATUS_OK;
+}
+
+qaws_status qaws_mesh_quadrangulate(qaws_mesh_3d const* mesh, qaws_quadrangulate_desc const* desc, qaws_mesh_3d** out_mesh, qaws_mesh_report* out_report)
+{
+	return qd_run(mesh, desc, out_mesh, out_report, NULL);
+}
+
+qaws_status qg_parametrization(qaws_mesh_3d const* mesh, qaws_quadrangulate_desc const* desc, qg_map* out)
+{
+	qaws_mesh_3d* q = NULL;
+	qaws_status st;
+	memset(out, 0, sizeof *out);
+	if (!desc || desc->method != QAWS_QUADS_GLOBAL)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	st = qd_run(mesh, desc, &q, NULL, out);
+	qaws_mesh_3d_destroy(q);
+	if (st == QAWS_STATUS_OK && !out->nt)
+		st = QAWS_STATUS_INVALID_TOPOLOGY;
+	if (st != QAWS_STATUS_OK)
+		qg_map_free(out);
+	return st;
 }

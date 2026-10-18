@@ -322,12 +322,12 @@ static void test_refusals(void)
 	qaws_status s1, s2;
 	char msg[200];
 	memset(&d, 0, sizeof d);
-	d.method = QAWS_QUADS_GLOBAL;
+	d.method = QAWS_QUADS_LAYOUT;
 	s1 = qaws_mesh_quadrangulate(t, &d, &out, NULL);
 	memset(&dd, 0, sizeof dd);
 	dd.symmetry = 6;
 	s2 = qaws_mesh_3d_direction_field(t, &dd, NULL, NULL);
-	sprintf(msg, "refusals: GLOBAL %s, a 6-symmetric field %s", qaws_status_to_string(s1), qaws_status_to_string(s2));
+	sprintf(msg, "refusals: LAYOUT %s, a 6-symmetric field %s", qaws_status_to_string(s1), qaws_status_to_string(s2));
 	TEST_ASSERT(s1 == QAWS_STATUS_UNSUPPORTED_OPERATION && !out && s2 == QAWS_STATUS_UNSUPPORTED_OPERATION, msg);
 	qaws_mesh_3d_destroy(t);
 }
