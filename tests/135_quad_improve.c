@@ -13,39 +13,47 @@
  *     topology, creases on the rims, footpoints; timing printed.
  *
  * The baseline, today's relaxation alone (qd_relax, 30 steps), measured
- * once in this worktree (SJ: each quad's smallest scaled Jacobian about its
+ * again on the integrated branch (the flow's extraction, the smoothest
+ * fields, LOCAL upgraded; SJ: each quad's smallest scaled Jacobian about its
  * Newell normal; AD: the mean |angle - 90| over the corners; ED: the mean
  * |l - mean| / mean over the edges; thin: quads whose shortest edge is under
  * 0.2 of their longest; min: the shortest edge):
- *   can:   22 irregular, SJ min -0.597 mean 0.966, AD 5.83, ED 0.124,
- *          thin 3, min 0.0058, about 280 ms
- *   blob:  12 irregular, SJ min  0.722 mean 0.987, AD 5.70, ED 0.105,
- *          thin 0, min 0.0434, about 490 ms
- *   wavy:   4 irregular, SJ min  0.796 mean 0.978, AD 4.59, ED 0.131
- *   torus: 12 irregular, SJ min -0.548 mean 0.960, AD 8.45, ED 0.269,
- *          thin 2, min 0.0262
- * Measured with the finishing: can 20, SJ min -0.15 mean 0.974, AD 4.66,
- * ED 0.146, thin 3, min 0.0096; blob 12, SJ min 0.72 mean 0.989, AD 4.81,
- * ED 0.118, thin 0, min 0.0474; wavy 4, AD 3.74; torus 11, SJ min 0.74,
- * AD 5.80, ED 0.249, thin 2, min 0.0678. Targets not reached, floors
- * asserted instead:
- *   - irregular: can <= 16, blob <= 10, wavy <= 2. Single operations that
- *     lower E exist (8 on the can, 18 on the torus) but each would add
- *     vertices off their ideal (a 6 split into two 5s and the like) and is
- *     refused on purpose (without the rule the can ends at 21); the gains
- *     come from rotation-and-operation pairs. What is left are 3-5 pairs two
- *     edges apart and lone cones. Floors (20, 12, 4) asserted.
- *   - can SJ min >= 0.5 (floor 0.3): its worst quads are slivers along the
- *     rims with three crease vertices in a row (a corner of about 172
- *     degrees on the crease caps their SJ near 0.14); only collapsing along
- *     the crease would remove them, which the finishing must not do. The
- *     can asserts SJ min > -0.3 (from -0.6).
- *   - AD 20% lower: can 20%, blob 16% (floor 10% asserted on both).
- *   - ED: the relaxation trades lengths for angles (with the lengths alone
- *     weighted fully, the can's AD falls 9% only); thin quads and the
- *     shortest edge are held at the baseline or better, ED within 20% of it
- *     on the can and the blob (and the can is at 0.130 before the finishing's
- *     relaxation already: 10 plain steps instead of 30).
+ *   can:    8 irregular, SJ min  0.168 mean 0.985, AD 3.79, ED 0.066,
+ *          thin 0, min 0.0587
+ *   blob:  15 irregular, SJ min -0.823 mean 0.988, AD 3.00, ED 0.118,
+ *          thin 2, min 0.0052 (the extraction leaves quads turned inside
+ *          out: six at SJ <= 0, the worst -0.999, which the plain relaxation
+ *          does not undo)
+ *   wavy:   2 irregular, SJ min  0.794 mean 0.981, AD 4.03, ED 0.126
+ *   torus:  0 irregular, SJ min  0.979 mean 0.994, AD 3.85, ED 0.205,
+ *          thin 0, min 0.1768
+ * (Before, on the greedy extraction: can 22 irregular, SJ min -0.597, AD
+ * 5.83, ED 0.124; blob 12, 0.722, 5.70, 0.105; wavy 4, AD 4.59; torus 12,
+ * -0.548, 8.45, 0.269.)
+ * Measured with the finishing: can 8, SJ min 0.167 mean 0.992, AD 2.42,
+ * ED 0.099, thin 0, min 0.0656; blob 12, SJ min 0.659 mean 0.994, AD 2.38,
+ * ED 0.119, thin 0, min 0.0327; wavy 2, AD 2.98; torus 0, SJ min 0.985,
+ * AD 3.61, ED 0.174, thin 0, min 0.1717. The can, the wavy patch and the
+ * torus are at their irregular baselines (asserted no higher). Targets not
+ * reached, floors asserted instead:
+ *   - irregular: blob <= 10. Single operations that lower E exist but each
+ *     would add vertices off their ideal (a 6 split into two 5s and the
+ *     like) and is refused on purpose; the gains come from
+ *     rotation-and-operation pairs. What is left are 3-5 pairs two edges
+ *     apart and lone cones. Floor 12 asserted.
+ *   - can SJ min >= 0.5: its worst quads are slivers along the rims with
+ *     three crease vertices in a row (a corner of about 172 degrees on the
+ *     crease caps their SJ near 0.17); only collapsing along the crease
+ *     would remove them, which the finishing must not do. Floor 0.15.
+ *   - AD 20% lower: can 36%, blob 21% (floor 10% asserted on the blob).
+ *   - ED within 20% of the baseline: the blob 0.119 (0.118), the torus lower;
+ *     not the can: the flow's extraction comes out evenly spaced there and
+ *     the relaxation trades lengths for angles, 0.099 (+50%) for AD 36%
+ *     lower (with the lengths weighted 1 instead of 0.1: ED 0.078, +18%, AD
+ *     17% lower only). The can's floor: 1.6 times its baseline. Thin quads
+ *     are held at the baseline or better, the shortest edge at the
+ *     baseline's or half the target length, whichever is shorter (as the
+ *     relaxation guards it).
  */
 
 #include "test_common.h"
@@ -654,26 +662,28 @@ static void test_quads(void)
 	fc = tq_foot(q[0], rc);
 	fb = tq_foot(q[1], rb);
 	ne = tq_creases(q[0], &rims);
-	/* the can: irregular target 16, its floor 20; SJ mean target 0.92; SJ min target 0.5 (floor 0.3) not reached: > -0.3; AD target 20%
-	   lower, floor 10% */
-	sprintf(msg, "can, all quads at 0.14: %u irregular (22 before), SJ min %.3f (-0.597) mean %.3f (0.966), AD %.2f (5.83, %.0f%% lower)",
-		a.irregular, a.sjmin, a.sjmean, a.ad, 100 * (1 - a.ad / 5.83));
-	TEST_ASSERT(a.irregular <= 20 && a.sjmin > -0.3 && a.sjmean >= 0.92 && a.ad <= 0.9 * 5.83, msg);
-	/* the blob: irregular target 10, its floor 12; AD target 20% lower, floor 10% */
-	sprintf(msg, "blob, all quads at 0.11: %u irregular (12 before), SJ min %.3f (0.722) mean %.3f (0.987), AD %.2f (5.70, %.0f%% lower)", b.irregular,
-		b.sjmin, b.sjmean, b.ad, 100 * (1 - b.ad / 5.70));
-	TEST_ASSERT(b.irregular <= 12 && b.sjmin >= 0.5 && b.ad <= 0.9 * 5.70, msg);
-	/* the wavy patch: irregular target 2, its floor 4 */
-	sprintf(msg, "wavy patch generated in quads: %u irregular (4 before), SJ min %.3f, AD %.2f (4.59)", c.irregular, c.sjmin, c.ad);
-	TEST_ASSERT(c.irregular <= 4 && c.sjmin > 0 && c.ad < 4.59, msg);
-	/* the lengths: no more thin quads, no shorter edge than the baseline's, ED within 20% of it on the can and the blob */
-	sprintf(msg, "lengths against the baseline: thin quads can %u (3) blob %u (0) torus %u (2); shortest edge can %.4f (0.0058) blob %.4f (0.0434) "
-		"torus %.4f (0.0262); ED can %.3f (0.124) blob %.3f (0.105) torus %.3f (0.269)", a.thin, b.thin, t.thin, a.emin, b.emin, t.emin, a.ed, b.ed, t.ed);
-	TEST_ASSERT(a.thin <= 3 && b.thin == 0 && t.thin <= 2 && a.emin >= 0.0058 && b.emin >= 0.0434 && t.emin >= 0.0262 && a.ed <= 1.2 * 0.124
-		&& b.ed <= 1.2 * 0.105 && t.ed <= 0.269, msg);
-	/* the torus: no more singularities, its quads facing out */
-	sprintf(msg, "torus, all quads at 0.3: %u irregular (12 before), SJ min %.3f (-0.548), AD %.2f (8.45)", t.irregular, t.sjmin, t.ad);
-	TEST_ASSERT(t.irregular <= 12 && t.sjmin > 0 && t.ad < 8.45, msg);
+	/* the can: irregular at its baseline; SJ mean no lower; SJ min target 0.5 not reached (rim slivers): floor 0.15; AD target 20%
+	   lower */
+	sprintf(msg, "can, all quads at 0.14: %u irregular (8 before), SJ min %.3f (0.168) mean %.3f (0.985), AD %.2f (3.79, %.0f%% lower)",
+		a.irregular, a.sjmin, a.sjmean, a.ad, 100 * (1 - a.ad / 3.79));
+	TEST_ASSERT(a.irregular <= 8 && a.sjmin >= 0.15 && a.sjmean >= 0.985 && a.ad <= 0.8 * 3.79, msg);
+	/* the blob: irregular target 10, its floor 12; its quads turned inside out undone; AD target 20% lower, floor 10% */
+	sprintf(msg, "blob, all quads at 0.11: %u irregular (15 before), SJ min %.3f (-0.823) mean %.3f (0.988), AD %.2f (3.00, %.0f%% lower)",
+		b.irregular, b.sjmin, b.sjmean, b.ad, 100 * (1 - b.ad / 3.00));
+	TEST_ASSERT(b.irregular <= 12 && b.sjmin >= 0.5 && b.ad <= 0.9 * 3.00, msg);
+	/* the wavy patch: irregular at its baseline */
+	sprintf(msg, "wavy patch generated in quads: %u irregular (2 before), SJ min %.3f, AD %.2f (4.03)", c.irregular, c.sjmin, c.ad);
+	TEST_ASSERT(c.irregular <= 2 && c.sjmin > 0 && c.ad < 4.03, msg);
+	/* the lengths: no more thin quads; no edge shorter than the baseline's or half the target, whichever is shorter; ED within 20%
+	   of the baseline on the blob, no higher on the torus, 1.6 times it on the can (its floor: lengths traded for angles) */
+	sprintf(msg, "lengths against the baseline: thin quads can %u (0) blob %u (2) torus %u (0); shortest edge can %.4f (0.0587) blob %.4f (0.0052) "
+		"torus %.4f (0.1768, half the target 0.15); ED can %.3f (0.066) blob %.3f (0.118) torus %.3f (0.205)", a.thin, b.thin, t.thin, a.emin, b.emin,
+		t.emin, a.ed, b.ed, t.ed);
+	TEST_ASSERT(a.thin == 0 && b.thin == 0 && t.thin == 0 && a.emin >= fmin(0.0587, 0.07) && b.emin >= fmin(0.0052, 0.055)
+		&& t.emin >= fmin(0.1768, 0.15) && a.ed <= 1.6 * 0.066 && b.ed <= 1.2 * 0.118 && t.ed <= 0.205, msg);
+	/* the torus: no singularity added, its quads facing out */
+	sprintf(msg, "torus, all quads at 0.3: %u irregular (0 before), SJ min %.3f (0.979), AD %.2f (3.85)", t.irregular, t.sjmin, t.ad);
+	TEST_ASSERT(t.irregular == 0 && t.sjmin > 0 && t.ad < 3.85, msg);
 	sprintf(msg, "invariants: valid %d %d %d; can closed %d genus %u, blob closed %d genus %u; "
 		"can %u crease edges on the rims %d; footpoints to %.1e, %.1e; "
 		"SJ > 0 on the blob and the patch (%.3f, %.3f)", qaws_mesh_3d_validate(q[0]) == QAWS_STATUS_OK, qaws_mesh_3d_validate(q[1]) == QAWS_STATUS_OK,
@@ -681,9 +691,9 @@ static void test_quads(void)
 	TEST_ASSERT(qaws_mesh_3d_validate(q[0]) == QAWS_STATUS_OK && qaws_mesh_3d_validate(q[1]) == QAWS_STATUS_OK 
 		&& qaws_mesh_3d_validate(q[2]) == QAWS_STATUS_OK
 		&& tc.closed && tc.genus == 0 && tb.closed && tb.genus == 0 && ne > 40 && rims && fc < 1e-9 && fb < 1e-9 && b.sjmin > 0 && c.sjmin > 0, msg);
-	/* the time against the plain relaxation's, measured once (the machine's load varies: printed, not asserted) */
-	printf("  quadrangulation with the finishing: can %.0f ms (280 before, %+.0f%%), blob %.0f ms (490 before, %+.0f%%)\n", a.ms,
-		100 * (a.ms / 280 - 1), b.ms, 100 * (b.ms / 490 - 1));
+	/* the time (the machine's load varies: printed, not asserted); the finishing's own share, measured once on the integrated branch,
+	   about 270 ms on the can and 260 on the blob, the steps before it the rest */
+	printf("  quadrangulation with the finishing: can %.0f ms, blob %.0f ms\n", a.ms, b.ms);
 done:
 	qaws_mesh_reference_destroy(rc);
 	qaws_mesh_reference_destroy(rb);

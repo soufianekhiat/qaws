@@ -163,9 +163,9 @@ static qaws_mesh_3d* ms_grid8(void)
 static void demo_quad_improve(void)
 {
 	/* before the finishing (qd_relax alone, measured once in test 135; irr: irregular, SJ: the smallest scaled Jacobian) */
-	static char const* const was[3] = { "before: 22 irr, SJ -0.60, AD 5.8, ED 0.12", "before: 12 irr, SJ 0.72, AD 5.7, ED 0.11",
-		"before: 4 irr, SJ 0.80, AD 4.6, ED 0.13" };
-	static double const L[3] = { 0.14, 0.11, 0.1 }, ms0[3] = { 280, 490, 0 };
+	static char const* const was[3] = { "before: 8 irr, SJ 0.17, AD 3.8, ED 0.07", "before: 15 irr, SJ -0.82, AD 3.0, ED 0.12",
+		"before: 2 irr, SJ 0.79, AD 4.0, ED 0.13" };
+	static double const L[3] = { 0.14, 0.11, 0.1 };
 	er_canvas* c = er_create(2750, 640, 3, 252, 252, 250);
 	qaws_mesh_3d *can = ms_can(8, 1, 1.6), *blob = ms_blob(1), *q[3] = { NULL, NULL, NULL }, *g = NULL;
 	qaws_surface* wavy = ms_wavy();
@@ -193,8 +193,6 @@ static void demo_quad_improve(void)
 		er_text(c, 550 * (int)i + 14, 84, sub, 2, 95, 95, 95);
 		printf("  %s: %u faces, irregular %u, SJ min %.3f mean %.3f, AD %.2f deg, ED %.3f, shortest edge %.3f L, %u thin quads, %.0f ms", title[i] + 4,
 			rep.quality.quads, st.irr, st.smin, st.smean, st.ad, st.ed, st.emin / L[i], st.thin, ms[i]);
-		if (ms0[i] > 0)
-			printf(" (the plain relaxation about %.0f ms on a quiet machine, test 135)", ms0[i]);
 		printf("\n");
 	}
 	/* the grid with an edge turned, then finished */

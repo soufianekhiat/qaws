@@ -9,7 +9,9 @@
  * where none alone helps), each tried first on a copy of its patch, relaxed
  * there, and kept only when its quads stay shapely and face the reference.
  * Corners keep their valence, line vertices never go below theirs, feature
- * edges are never touched.
+ * edges are never touched. A quad turned inside out (the extraction may
+ * leave a few) has its diagonals collapsed whatever E says, kept only when
+ * its patch's smallest scaled Jacobian rises.
  *
  * Then relaxation on the reference, vertex by vertex while their
  * neighbourhoods move: a free vertex goes to the better of Zhou and Shimada's
@@ -18,9 +20,10 @@
  * down a shape energy (the angles' deviations from the regular polygons',
  * the edges' from the target length, weighted lightly), walked; a line
  * vertex to the middle of its line neighbours along the creases; a move kept
- * only when the smallest scaled Jacobian round the vertex does not drop, no
- * edge there gets shorter than half the target length (or than it was) and
- * no quad's edge ratio falls under 0.3 (or than it was), and for free
+ * only when the smallest scaled Jacobian round the vertex does not drop (and
+ * no more of its quads are at or under 0), no edge there gets shorter than
+ * half the target length (or than it was) and no quad's edge ratio falls
+ * under 0.3 (or than it was), and for free
  * vertices the energy drops. Last, the quads under 0.5 worst first: their
  * free vertices searched in eight directions under the same guards.
  */
@@ -255,11 +258,13 @@ static int qi_fan_local(qi_local const* L, unsigned int i, double rho, qi_fan* f
 }
 
 /* the fan with its centre at x: its smallest scaled Jacobian, its shortest edge at the centre (len), its quads' smallest ratio
-   of shortest to longest edge (ratio), no face turned against the reference (up), its shape energy (en, qi_fan_energy) */
+   of shortest to longest edge (ratio), no face turned against the reference (up), its quads with a corner at SJ <= 0 (neg),
+   its shape energy (en, qi_fan_energy) */
 typedef struct qi_state
 {
 	double sj, len, ratio, en;
 	int up;
+	unsigned int neg;
 } qi_state;
 
 /* the shape energy the fan's centre moves, the centre at x: the squared deviations of the corners' angles (its own and its
@@ -305,6 +310,7 @@ static void qi_fan_eval(qi_fan const* fan, double const* x, qi_state* st)
 	st->len = HUGE_VAL;
 	st->ratio = 1;
 	st->up = 1;
+	st->neg = 0;
 	for (i = 0; i < fan->n; i++)
 	{
 		double const* q[QI_FS];
@@ -324,6 +330,7 @@ static void qi_fan_eval(qi_fan const* fan, double const* x, qi_state* st)
 		if (fan->fs[i] == 4)
 			st->ratio = fmin(st->ratio, hi > 0 ? sqrt(lo / hi) : 0);
 		s = qi_sj(q, fan->fs[i], fan->nrm[i]);
+		st->neg += s <= 0 ? 1u : 0u;
 		if (s < st->sj)
 			st->sj = s;
 		st->up &= qi_up(q, fan->fs[i], fan->nrm[i]);
@@ -335,11 +342,12 @@ static void qi_fan_eval(qi_fan const* fan, double const* x, qi_state* st)
 /* a move from the state s0 to s1 kept: the smallest scaled Jacobian not lower, the shortest edge at the centre not under
    min(its length before, half the target length), the quads' smallest edge ratio not under min(its value before,
    QI_RATIO) (the scaled Jacobian ignores the lengths, and the quads were squeezed toward triangles), no face turned against
-   the reference (one turned may turn back), with en the shape energy lower */
+   the reference (one turned may turn back), no more quads at SJ <= 0 (the worst lifted, another may not sink), with en
+   the shape energy lower */
 static int qi_better(qi_state const* s0, qi_state const* s1, double rho, int en)
 {
-	return s1->sj >= s0->sj && s1->len >= fmin(s0->len, 0.5 * rho) && s1->ratio >= fmin(s0->ratio, QI_RATIO) && (s1->up || !s0->up)
-		&& (!en || s1->en < s0->en);
+	return s1->sj >= s0->sj && s1->neg <= s0->neg && s1->len >= fmin(s0->len, 0.5 * rho) && s1->ratio >= fmin(s0->ratio, QI_RATIO)
+		&& (s1->up || !s0->up) && (!en || s1->en < s0->en);
 }
 
 /* Zhou and Shimada's target for the fan's centre: each neighbour's edge to it turned about n, at the neighbour, by half the
@@ -587,7 +595,7 @@ static int qi_op_collapse(qi_work* w, unsigned int f, unsigned int k, int place,
 			o->nvx[i++] = m->cv[e] == C ? A : m->cv[e];
 		o->ns[o->nn++] = m->fn[h];
 	}
-	if (!place || o->de >= 0)
+	if (!place)
 		return 1;
 	if (qi_line(w, A))
 	{
@@ -778,13 +786,15 @@ static int qi_in(unsigned int const* a, unsigned int n, unsigned int x)
 /* o evaluated on a copy of its patch (its free vertices relaxed there three times), made when E drops with no more
    vertices off their ideal, the patch's smallest scaled Jacobian stays at least max(0.3, its value before - 0.1) (where
    it was under 0.3: no lower) and no more of its faces turn against the reference than before; for the second of a pair
-   (pre), before is before the first rotation and its quads are judged after too */
+   (pre), before is before the first rotation and its quads are judged after too. On a patch holding a quad turned inside
+   out (SJ <= 0 before) E may stay or rise: the shape alone judges it, and its smallest scaled Jacobian must then rise. */
 static int qi_try(qi_work* w, qi_op const* o, qi_pre const* pre)
 {
 	qi_local* L = &w->L;
 	double before = 1, after = 1;
 	unsigned int i, f, sweep, down0 = 0, down1 = 0;
-	if (o->de >= 0 || o->dn > 0 || !qi_patch(w, o, L))
+	int shape;
+	if (!qi_patch(w, o, L))
 		return 0;
 	for (i = 0; i < o->nold; i++)
 		if (!pre || !qi_in(pre->g, 2, o->old[i]))
@@ -800,6 +810,9 @@ static int qi_try(qi_work* w, qi_op const* o, qi_pre const* pre)
 			if (!qi_in(o->old, o->nold, pre->g[i]) && !qi_in(L->face, L->nf, pre->g[i]))
 				after = fmin(after, qi_face_sj(w, pre->g[i], &down1));
 	}
+	shape = o->de >= 0 || o->dn > 0;
+	if (shape && before > 0)
+		return 0;
 	for (sweep = 0; sweep < 3; sweep++)
 		for (i = 0; i < L->nv; i++)
 		{
@@ -819,7 +832,7 @@ static int qi_try(qi_work* w, qi_op const* o, qi_pre const* pre)
 		after = fmin(after, qi_sj(q, L->fs[f], L->nrm[f]));
 		down1 += !qi_up(q, L->fs[f], L->nrm[f]);
 	}
-	if (down1 > down0 || after < (before < 0.3 ? before : fmax(0.3, before - 0.1)))
+	if (down1 > down0 || after < (before < 0.3 ? before : fmax(0.3, before - 0.1)) || (shape && before <= 0 && after <= before))
 		return 0;
 	return qi_commit(w, o, L);
 }
@@ -884,7 +897,7 @@ static int qi_rebuild(qi_work* w, qi_cand const* q, qi_op* o)
 static unsigned int qi_pass(qi_work* w)
 {
 	qaws_hm const* m = w->m;
-	unsigned int v, c, i, done = 0;
+	unsigned int v, c, i, f, k, done = 0;
 	qi_op o;
 	w->ncand = 0;
 	w->gen++;
@@ -904,7 +917,7 @@ static unsigned int qi_pass(qi_work* w)
 			continue;
 		for (c = m->vc[v]; c != HM_NONE; c = hm_round(m, v, c))
 		{
-			unsigned int u = hm_to(m, c), h = m->cf[c], k;
+			unsigned int u = hm_to(m, c), h = m->cf[c];
 			int dir;
 			if (m->co[c] != HM_NONE && !(w->stamp[u] == w->gen && u < v))
 				for (dir = -1; dir <= 1; dir += 2)
@@ -921,6 +934,13 @@ static unsigned int qi_pass(qi_work* w)
 		if (qi_op_doublet(w, v, &o) && o.de < 0 && !qi_push(w, &o, v, v))
 			return HM_NONE;
 	}
+	/* the quads turned inside out: their diagonals collapsed whatever E says (qi_try judges those by shape) */
+	for (f = 0; f < m->nf; f++)
+		if (!(m->fflag[f] & HM_DELETED) && m->fn[f] == 4 && qi_face_sj(w, f, NULL) <= 0)
+			for (k = 0; k < 2; k++)
+				if (qi_op_collapse(w, f, k, 0, &o) && (o.de >= 0 || w->fstamp[f] != w->gen)
+					&& !qi_push(w, &o, m->cv[m->fc[f] + o.k], m->cv[m->fc[f] + (o.k + 2) % 4]))
+					return HM_NONE;
 	qsort(w->cand, w->ncand, sizeof(qi_cand), qi_cand_cmp);
 	for (i = 0; i < w->ncand; i++)
 		if (qi_rebuild(w, &w->cand[i], &o))
@@ -1050,20 +1070,21 @@ static int qi_line_neighbours(qaws_hm const* m, unsigned int v, unsigned int* nb
 }
 
 /* the best of eight tangent steps from v, halving from a quarter of the length to a thousandth, by the smallest scaled
-   Jacobian round it (its shortest edge and edge ratio held as qi_better holds them) */
+   Jacobian round it (its shortest edge, edge ratio and quads at SJ <= 0 held as qi_better holds them) */
 static void qi_search(qi_work* w, unsigned int v)
 {
 	qaws_hm* m = w->m;
 	qi_fan fan;
 	qi_state st;
 	double best, step, n[3], t1[3], t2[3], a[3] = { 1, 0, 0 }, l, len, ratio;
-	unsigned int k, tries;
+	unsigned int k, tries, neg;
 	if (!qi_fan_mesh(w, v, &fan))
 		return;
 	qi_fan_eval(&fan, m->x + 3 * (size_t)v, &st);
 	best = st.sj;
 	len = fmin(st.len, 0.5 * w->rho);
 	ratio = fmin(st.ratio, QI_RATIO);
+	neg = st.neg;
 	for (step = 0.25 * w->rho; step >= 1e-3 * w->rho; step *= 0.5)
 		for (tries = 0; tries < 4; tries++)
 		{
@@ -1090,7 +1111,7 @@ static void qi_search(qi_work* w, unsigned int v)
 					continue;
 				mr_eval(w->r, &to, y, NULL);
 				qi_fan_eval(&fan, y, &st);
-				if (st.sj > best + 1e-9 && st.up && st.len >= len && st.ratio >= ratio)
+				if (st.sj > best + 1e-9 && st.up && st.neg <= neg && st.len >= len && st.ratio >= ratio)
 				{
 					best = st.sj;
 					memcpy(m->x + 3 * (size_t)v, y, sizeof y);

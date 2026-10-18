@@ -460,16 +460,20 @@ INSTANT's quads are finished before the attributes are transferred
   (at least max(0.3, before - 0.1), no lower where it was poorer) with no
   face newly turned against the reference. Where no operation alone helps,
   a rotation and a second operation beside it, judged together against the
-  quads as they were before the rotation.
+  quads as they were before the rotation. A quad turned inside out (scaled
+  Jacobian at or under 0; the extraction may leave a few) has its diagonals
+  collapsed whatever E says, made only when its patch's smallest scaled
+  Jacobian rises.
 - **Relaxation** on the reference, vertex by vertex while their
   neighbourhoods move (at most 30 sweeps): a free vertex goes to the better
   of Zhou and Shimada's angle target and a Newton step down a shape energy
   (its corners' angles against the regular polygons', its edges' lengths
   against the target length, weighted 0.1), walked; a line vertex to the
   middle of its line neighbours along the creases. No move lowers the
-  scaled Jacobian round the vertex, shortens its shortest edge below half
-  the target length (or below what it was), or takes a quad's shortest to
-  longest edge under 0.3 (or lower where it was already). Then the quads
+  scaled Jacobian round the vertex (or adds a quad at or under 0 there),
+  shortens its shortest edge below half the target length (or below what it
+  was), or takes a quad's shortest to longest edge under 0.3 (or lower where
+  it was already). Then the quads
   under 0.5, worst first, their free vertices searched in eight directions
   under the same guards.
 
