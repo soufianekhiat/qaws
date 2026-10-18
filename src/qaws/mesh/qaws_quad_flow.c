@@ -392,8 +392,9 @@ static unsigned int qf_cluster(qaws_hm const* dm, mf_level const* L, int const* 
 
 /* The cone of a singular face whose sum is even (a lattice point) put on one of its vertices: that vertex's lattice
    point moved onto the cone, (I - R^k)^-1 S away (its sum then 0), alone or with the rest of its lattice point (the
-   vertices joined to it by zero steps), whichever adds the least harm and no more than a step of two and two faces
-   turned over; returns the cones placed.
+   vertices joined to it by zero steps), whichever adds the least harm and no more than two steps of two and two faces
+   turned over (flip removal mends those; a cone left off its vertices is a 3-5 pair for sure: with one step of two
+   allowed, test 134's six blobs pure at 0.11 left 6 cones off, with two 2); returns the cones placed.
    shortcut: a cone no vertex can reach that cheaply stays off its vertices (its hole is filled by a fan, a 3-5 pair
    beside it); route units to change its face's sum instead when those pairs matter */
 static unsigned int qf_cones(qaws_hm const* dm, mf_level const* L, int* T, unsigned char const* K, unsigned char* fr)
@@ -467,7 +468,7 @@ static unsigned int qf_cones(qaws_hm const* dm, mf_level const* L, int* T, unsig
 					qf_turn(d, rot[q] + 2, dq);
 					qf_move(dm, T, K, list[q], dq);
 				}
-				if (!closed || after[1] > before[1] + 1 || after[0] > before[0] + 2)
+				if (!closed || after[1] > before[1] + 2 || after[0] > before[0] + 2)
 					continue;
 				if (!bm || b1 - b0 < bb)
 				{

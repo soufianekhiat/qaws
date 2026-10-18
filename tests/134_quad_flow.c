@@ -541,13 +541,16 @@ static void test_blob(void)
 		qaws_mesh_3d_destroy(q3);
 		qaws_mesh_3d_destroy(bk);
 	}
-	sprintf(msg, "blob x6 quad-dominant at 0.16: %u faces not quads in all (0; was 6 or more each), mean irregular %.1f (floor 12; target 10; "
+	sprintf(msg, "blob x6 quad-dominant at 0.16: %u faces not quads in all (0; was 6 or more each), mean irregular %.1f (target 10; "
 		"was 8.3)", others, irr1 / 6);
 	printf("  %s\n", msg);
-	/* (the target missed: measured 8, 12, 14, 11, 10, 11, a mean of 11.0, more than before: each cone no vertex of its face
-	   reaches without steps of two is fan-filled, a 3-5 pair beside it; the triangles that were there are gone on all six) */
-	TEST_ASSERT(others == 0 && irr1 / 6 <= 12, msg);
-	/* (measured 10, 10, 8, 8, 10, 10, a mean of 9.3: the target reached on two of the six) */
+	/* (measured 8 on all six, with 131's dense mesh, 133's field and cones placed at up to two steps of two; on e280d24's
+	   LOCAL 8, 12, 14, 11, 10, 11, a mean of 11.0: each cone no vertex of its face reached is fan-filled, a 3-5 pair
+	   beside it; the triangles that were there are gone on all six) */
+	TEST_ASSERT(others == 0 && irr1 / 6 <= 10, msg);
+	/* (measured 10, 8, 8, 8, 11, 8, a mean of 8.8: the target on four of the six. The field has 8 singular faces on all six;
+	   the rest are cones left off their vertices (one on the first and on the fifth), fan-filled. On e280d24's LOCAL
+	   10, 10, 8, 8, 10, 10 (9.3); with 131 and 133 but a cone placed at one step of two only, 12, 8, 10, 10, 11, 10 (10.2)) */
 	sprintf(msg, "blob x6 pure at 0.11: %u not all quads, closed and valid at the spacing, mean irregular %.1f (target 8; floor 10; "
 		"was 13.2), the most %u (12)", bad, irr2 / 6, max2);
 	printf("  %s\n", msg);
@@ -734,46 +737,64 @@ static qaws_mesh_3d* tq_disk(unsigned int rings, unsigned int sec)
 	return m;
 }
 
-/* the disk: pure where the target spacing leaves a triangle (the fallback: twice the target, split; its quad-dominant mesh
-   once failed by a pillow, then kept it as two coincident triangles, a component apart), and coarse, where a short border once
-   was taken for a hole and capped */
+/* the disk from 0.10 to 0.20: pure where the target spacing leaves a triangle (the fallback: twice the target, split; there
+   its quad-dominant mesh once failed by a pillow, then kept it as two coincident triangles, a component apart), elsewhere
+   the quad-dominant mesh itself. 0.12 alone was the case on e280d24's LOCAL (1 not a quad); with 131's dense mesh and
+   133's field it is 183 quads round 4 cones (an O-grid), so the spacings are swept and the fallback asserted taken on one
+   (0.14 and 0.18 now). Coarse at 0.42, where a short border once was taken for a hole and capped */
 static void test_disk(void)
 {
 	qaws_mesh_3d *d = tq_disk(12, 48), *q1, *q2, *q3;
 	qaws_mesh_quality a, b, c;
 	qaws_mesh_topology t1, t2, t3;
 	char msg[400];
-	memset(&t1, 0, sizeof t1);
-	memset(&t2, 0, sizeof t2);
+	unsigned int i, n1, n2, fell = 0, bad = 0;
+	for (i = 0; i < 6; i++)
+	{
+		double L = 0.10 + 0.02 * i;
+		memset(&t1, 0, sizeof t1);
+		memset(&t2, 0, sizeof t2);
+		q1 = tq_quads(d, L, 0, &a, NULL);
+		q2 = tq_quads(d, L, 1, &b, NULL);
+		if (q1)
+			qaws_mesh_3d_get_topology(q1, &t1);
+		if (q2)
+			qaws_mesh_3d_get_topology(q2, &t2);
+		n1 = q1 ? qaws_mesh_3d_get_face_count(q1) : 0;
+		n2 = q2 ? qaws_mesh_3d_get_face_count(q2) : 0;
+		printf("  disk at %.2f: quad-dominant %u faces, %u not quads, components %u; pure %u quads of %u, mean edge %.3f, open %d, "
+			"components %u\n", L, n1, q1 ? a.triangles + a.polygons : 0, t1.components, q2 ? b.quads : 0, n2, q2 ? (double)b.mean_edge : 0,
+			!t2.closed, t2.components);
+		fell += q1 && a.triangles + a.polygons > 0;
+		bad += !q1 || t1.components != 1 || qaws_mesh_3d_validate(q1) != QAWS_STATUS_OK || !q2 || b.quads != n2
+			|| qaws_mesh_3d_validate(q2) != QAWS_STATUS_OK || t2.closed || t2.components != 1 || (a.triangles + a.polygons == 0 && n2 != n1);
+		qaws_mesh_3d_destroy(q1);
+		qaws_mesh_3d_destroy(q2);
+	}
 	memset(&t3, 0, sizeof t3);
-	q1 = tq_quads(d, 0.12, 0, &a, NULL);
-	q2 = tq_quads(d, 0.12, 1, &b, NULL);
 	q3 = tq_quads(d, 0.42, 0, &c, NULL);
-	if (q1)
-		qaws_mesh_3d_get_topology(q1, &t1);
-	if (q2)
-		qaws_mesh_3d_get_topology(q2, &t2);
 	if (q3)
 		qaws_mesh_3d_get_topology(q3, &t3);
-	sprintf(msg, "disk at 0.12: quad-dominant %u not quads, components %u; pure (fallback) %u quads of %u, mean edge %.3f, valid %d, "
-		"open %d, components %u; at 0.42 quad-dominant open %d, valid %d, components %u", q1 ? a.triangles + a.polygons : 0, t1.components,
-		q2 ? b.quads : 0, q2 ? qaws_mesh_3d_get_face_count(q2) : 0, q2 ? (double)b.mean_edge : 0, q2 && qaws_mesh_3d_validate(q2) == QAWS_STATUS_OK,
-		!t2.closed, t2.components, !t3.closed, q3 && qaws_mesh_3d_validate(q3) == QAWS_STATUS_OK, t3.components);
+	sprintf(msg, "disk at 0.10 to 0.20: %u of 6 not one valid component quad-dominant, or pure not all quads, valid, open and one "
+		"component (or not the quad-dominant mesh where that is all quads); pure's fallback taken at %u (one at least); at 0.42 "
+		"quad-dominant open %d, valid %d, components %u", bad, fell, !t3.closed, q3 && qaws_mesh_3d_validate(q3) == QAWS_STATUS_OK, t3.components);
 	printf("  %s\n", msg);
-	TEST_ASSERT(q1 && a.triangles + a.polygons > 0 && t1.components == 1 && q2 && b.quads == qaws_mesh_3d_get_face_count(q2)
-		&& qaws_mesh_3d_validate(q2) == QAWS_STATUS_OK && !t2.closed && t2.components == 1 && q3 && !t3.closed && t3.components == 1
-		&& qaws_mesh_3d_validate(q3) == QAWS_STATUS_OK, msg);
-	qaws_mesh_3d_destroy(q1);
-	qaws_mesh_3d_destroy(q2);
+	TEST_ASSERT(bad == 0 && fell > 0 && q3 && !t3.closed && t3.components == 1 && qaws_mesh_3d_validate(q3) == QAWS_STATUS_OK, msg);
 	qaws_mesh_3d_destroy(q3);
-	/* at 0.9 twice the target leaves no face: pure splits the first mesh (once an empty mesh, valid too) */
+	/* at 0.9, about the radius: pure all quads, the quad-dominant mesh where that is all quads, else split (where twice the
+	   target leaves no face, the first mesh: once an empty mesh). On e280d24's LOCAL quad-dominant was 4 faces, 3 not quads,
+	   split to 16; with 131's dense mesh and 133's field it is one quad, and no input here reaches the first mesh's split.
+	   shortcut: a target about the shape's size is a knife edge, 0.9 + 4e-16 leaves no face in either mode (0.82 to 1.20 by
+	   0.02: 10 of 20 empty, 2 on e280d24's LOCAL); assert faces there once INSTANT falls back to a finer lattice when none is
+	   left */
 	q1 = tq_quads(d, 0.9, 0, &a, NULL);
 	q2 = tq_quads(d, 0.9, 1, &b, NULL);
-	sprintf(msg, "disk at 0.9: quad-dominant %u faces (%u not quads); pure (its split) %u quads of %u, valid %d", q1 ? qaws_mesh_3d_get_face_count(q1) : 0,
-		q1 ? a.triangles + a.polygons : 0, q2 ? b.quads : 0, q2 ? qaws_mesh_3d_get_face_count(q2) : 0, q2 && qaws_mesh_3d_validate(q2) == QAWS_STATUS_OK);
+	n1 = q1 ? qaws_mesh_3d_get_face_count(q1) : 0;
+	n2 = q2 ? qaws_mesh_3d_get_face_count(q2) : 0;
+	sprintf(msg, "disk at 0.9: quad-dominant %u faces (%u not quads); pure %u quads of %u, valid %d", n1, q1 ? a.triangles + a.polygons : 0,
+		q2 ? b.quads : 0, n2, q2 && qaws_mesh_3d_validate(q2) == QAWS_STATUS_OK);
 	printf("  %s\n", msg);
-	TEST_ASSERT(q1 && q2 && b.quads == qaws_mesh_3d_get_face_count(q2) && b.quads > qaws_mesh_3d_get_face_count(q1)
-		&& qaws_mesh_3d_validate(q2) == QAWS_STATUS_OK, msg);
+	TEST_ASSERT(q1 && q2 && b.quads == n2 && qaws_mesh_3d_validate(q2) == QAWS_STATUS_OK && (a.triangles + a.polygons ? n2 > 0 : n2 == n1), msg);
 	qaws_mesh_3d_destroy(q1);
 	qaws_mesh_3d_destroy(q2);
 	qaws_mesh_3d_destroy(d);

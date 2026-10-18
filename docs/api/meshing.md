@@ -418,19 +418,24 @@ Guibas 2018):
 Measured (test 134, figure 13). The integer steps turn a change of
 1e-12 in the input into another mesh, so the blob and the can are each
 run six times, scaled by 1 + k 1e-12, and the counts are means over the
-six (before: e280d24 on the same inputs):
+six (before: e280d24 on the same inputs), with 131's LOCAL, 133's field
+and 135's finishing in place:
 
 - the blob quad-dominant at 0.16: no face but quads on all six (were 6 to
-  8 triangles each), but more irregular vertices, 11.0 (8 to 14; were
-  8.3): each cone left off its vertices is a 3-5 pair;
-- the blob all quads at 0.11, at the target spacing: 9.3 irregular (8 to
-  10; were 13.2, split from twice the target);
-- the can all quads at 0.14: 11.0 (8 to 15; were 17.2);
-- a torus at 0.3: 697 quads, none irregular; a wavy B-spline patch in
+  8 triangles each), 8.0 irregular (8 on all six; were 8.3);
+- the blob all quads at 0.11, at the target spacing: 8.8 irregular (8 to
+  11; were 13.2, split from twice the target). The field has 8 singular
+  faces on all six; each cone left off its vertices is a 3-5 pair (one on
+  two of the six). A cone is placed at up to two steps of two, which flip
+  removal mends: at one, 10.2;
+- the can all quads at 0.14: 8.0 (8 on all six; were 17.2);
+- a torus at 0.3: 640 quads, none irregular; a wavy B-spline patch in
   quads: none (were 4).
 
-Figure 13's blob (figure 4's, its coordinates rounded otherwise) gives 11
-and 12 (were 8 and 12). Consistency takes about 0.5 s on 50k dense faces.
+Figure 13's blob (figure 4's, its coordinates rounded otherwise) gives 8
+and 10 (were 8 and 12). Consistency takes about 0.5 s on 50k dense faces.
+A target about the shape's size is a knife edge: a disc of radius 1 at
+0.82 to 1.20 comes out empty at half the spacings in either mode.
 ### Quad finishing
 INSTANT's quads are finished before the attributes are transferred
 (`src/qaws/mesh/qaws_quad_improve.c`, internal; no public change):
