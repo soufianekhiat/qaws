@@ -20,10 +20,17 @@
  * min 0.815 (0.772), AD 2.74 (3.27), ED 0.139 (0.175); can at 0.14 766
  * quads both, 8 irregular, SJ min 0.853 (0.801), AD 2.23 (2.23), ED 0.129
  * (0.138); wavy patch at 0.1 498 quads both, 2 irregular, AD 2.97 (3.22).
- * Over the five shapes at 0.75, 1.25, 1.6 and 2.2 times these targets the
- * map made 14 of 20 (the rest INSTANT's: folds left on the can at 1.25 and
- * 1.6 and the box at 2.2, a cone wound to 90 degrees on the patch at 0.75
- * and 1.25, a transition off at a box corner at 0.75).
+ *   - a sweep of the five shapes at 0.75, 1.25, 1.6 and 2.2 times these
+ *     targets (three of them by default, all heavy): every one by the map,
+ *     valid, all quads, SJ above 0.
+ *
+ * Over the sweep the map made 14 of 20 with the flow's integers alone (the
+ * rest INSTANT's: folds left on the can at 1.25 and 1.6, the box at 2.2
+ * from corner steps read in the wrong plane, a cone wound to 90 degrees on
+ * the patch at 0.75 and 1.25, a transition off at a box corner at 0.75);
+ * now 20 of 20, the can and the patch by the quantized integers: can at
+ * 1.25 512 quads, SJ min 0.860 (INSTANT 0.178), AD 2.41 (2.78); patch at
+ * 1.25 2 irregular (3), AD 3.59 (4.08); box at 2.2 AD 0.00.
  */
 
 #include "test_common.h"
@@ -438,6 +445,49 @@ static void test_shapes(void)
 		msg);
 }
 
+/* ---- a sweep of targets ------------------------------------------------- */
+
+/* the shapes at 0.75, 1.25, 1.6 and 2.2 times their targets (heavy; by default three the flow's integers alone gave no
+   map for: the box at 2.2, its corner steps read in the wrong plane; the can at 1.25, folds by its caps' cones; the patch
+   at 1.25, a cone wound a full turn short): each made by the map, valid, all quads, no quad turned */
+static void test_sweep(void)
+{
+	static char const* const name[5] = { "torus", "box", "blob", "can", "wavy patch" };
+	static double const L[5] = { 0.3, 0.1, 0.11, 0.14, 0.1 }, all[4] = { 0.75, 1.25, 1.6, 2.2 };
+	static unsigned char const light[5][4] = { { 0, 0, 0, 0 }, { 0, 0, 0, 1 }, { 0, 0, 0, 0 }, { 0, 1, 0, 0 }, { 0, 1, 0, 0 } };
+	unsigned int i, j, runs = 0, made = 0, good = 0;
+	int heavy = test_heavy();
+	char msg[300], fail[400] = "";
+	for (i = 0; i < 5; i++)
+	{
+		qaws_mesh_3d* in;
+		for (j = 0; j < 4 && !heavy && !light[i][j]; j++) {}
+		if (j == 4)
+			continue;
+		in = i == 0 ? tg_torus(30, 12, 2, 0.75) : i == 1 ? tg_box(4) : i == 2 ? tg_blob() : i == 3 ? tg_can() : tg_wavy(41);
+		for (j = 0; j < 4 && in; j++)
+		{
+			tg_res s;
+			qaws_mesh_3d* q;
+			if (!heavy && !light[i][j])
+				continue;
+			q = tg_quads(in, L[i] * all[j], QAWS_QUADS_GLOBAL, &s);
+			runs++;
+			made += q && s.made == 1;
+			good += q && s.valid && s.quads == s.faces && s.faces && s.s.min_jacobian > 0;
+			if (!q || s.made != 1)
+				sprintf(fail + strlen(fail), " %s x%.2f", name[i], all[j]);
+			if (q)
+				printf("  sweep %s x%.2f: %u quads, irregular %u, SJ min %.3f, AD %.2f, %s\n", name[i], all[j], s.faces, s.s.irregular,
+					(double)s.s.min_jacobian, (double)s.s.angle_deviation, s.made ? "by the map" : "INSTANT's");
+			qaws_mesh_3d_destroy(q);
+		}
+		qaws_mesh_3d_destroy(in);
+	}
+	sprintf(msg, "sweep: %u of %u by the map (missed:%s), %u valid, all quads, SJ > 0", made, runs, fail, good);
+	TEST_ASSERT(runs && made == runs && good == runs, msg);
+}
+
 int test_136_quad_global_main(void)
 {
 	g_pass = 0;
@@ -445,6 +495,7 @@ int test_136_quad_global_main(void)
 	printf("Test 136: quads by integer-grid maps\n");
 	test_map();
 	test_shapes();
+	test_sweep();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
 }

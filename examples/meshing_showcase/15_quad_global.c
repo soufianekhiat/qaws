@@ -1,7 +1,8 @@
 /*
  * Figure 15: quads by integer-grid maps (GLOBAL) against INSTANT.
- *   - the blob (0.11) and the can from below (0.14), all quads, by GLOBAL
- *     and by INSTANT side by side: each quad coloured by its smallest
+ *   - the blob (0.11) and the can from below (0.175, where the flow's
+ *     integers give no map and GLOBAL's own quantization does), all quads,
+ *     by GLOBAL and by INSTANT side by side: each quad coloured by its smallest
  *     scaled Jacobian (light at 1, amber toward 0.5, red under), irregular
  *     vertices dotted (valence 3 blue, 5 red);
  *   - the blob's map: its dense triangles with the lattice's isolines
@@ -87,7 +88,7 @@ static void demo_quad_global(void)
 	for (i = 0; i < 4; i++)
 	{
 		memset(&rep, 0, sizeof rep);
-		q[i] = ms_quads_by(i < 2 ? blob : can, i < 2 ? 0.11 : 0.14, (i & 1) ? QAWS_QUADS_INSTANT : QAWS_QUADS_GLOBAL, &rep);
+		q[i] = ms_quads_by(i < 2 ? blob : can, i < 2 ? 0.11 : 0.175, (i & 1) ? QAWS_QUADS_INSTANT : QAWS_QUADS_GLOBAL, &rep);
 		if (!q[i])
 			continue;
 		ms_panel(c, 550 * (int)i, 0, 550, 640, q[i], i < 2 ? 0.5 : 0.35, i < 2 ? 0.5 : -0.55, title[i], NULL);

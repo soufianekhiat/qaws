@@ -495,22 +495,40 @@ Directions need the reference made from the input.
 Mixed-Integer Quadrangulation and integer-grid maps (Bommes, Zimmer,
 Kobbelt 2009; Bommes et al. 2013) with QEx's extraction (Ebke, Bommes,
 Chen, Kobbelt 2013), on INSTANT's dense mesh and fields:
-- **Integers**: the lattice steps INSTANT's min-cost flow made consistent.
-  Each dense vertex keeps two unknowns, its place in its lattice cell in
-  its own frame; every edge's transition is a quarter turn and a whole
-  shift, so no cut graph is needed. A singular face whose cone sits on a
-  vertex's lattice point makes that vertex the cone (held on the point),
-  else it is split in three round its cone at the face's centroid; feature
-  corners are cones on their own lattice points, charted from their
-  neighbours (a corner's frame lies in none of its faces); edges between
-  line vertices on different creases by a corner have their steps read
-  again in their faces' plane.
+- **Integers, first try**: the lattice steps INSTANT's min-cost flow made
+  consistent. Each dense vertex keeps two unknowns, its place in its
+  lattice cell in its own frame; every edge's transition is a quarter turn
+  and a whole shift, so no cut graph is needed. A singular face whose cone
+  sits on a vertex's lattice point makes that vertex the cone (held on the
+  point), else it is split in three round its cone at the face's centroid;
+  feature corners are cones on their own lattice points, charted from
+  their neighbours, the corner's place carried round its triangles from
+  the fixed point of the turn round it (so neighbouring triangles agree on
+  it); edges between line vertices on different creases by a corner have
+  their steps read again in their faces' plane.
+- **Integers, when those give no map**: quantized on the map. The cones
+  (singular faces, corners going all the way round) are the nodes of a
+  spanning tree over the faces whose paths cross no crease or border; the
+  unknowns are whole steps along a node's path to its parent (two per
+  node, steps that keep both ends on lattice points) and, for a singular
+  face, along its path to the nearest border edge of each direction (two
+  steps along the border). Every face between stays closed. The map's
+  energy over those unknowns is a small dense quadratic: a step changes
+  the triangles' translations along its path only, and the places respond
+  by one back substitution each on the base map's factor. It is rounded
+  greedily as MIQ does (the closest to whole first with those within a
+  tenth, the rest solved again), then improved by whole steps from the
+  rounding or from the flow's integers, whichever is lower. Each cone then
+  goes onto the free vertex nearest it in the map with the cones split
+  (that vertex's lattice point shifted onto it), as MIQ keeps its cones on
+  vertices.
 - **Places**: one sparse LDL^T solve of sum A (|grad u - X/h|^2 +
   |grad v - Y/h|^2) over the triangles (the field turned into each
   triangle's plane), line vertices held on their whole isoline, corners
   and cones on their lattice points. Folds left are undone vertex by
   vertex (each moved to the point of its kernel farthest from its
-  triangles' far sides, a ring wider every 8 rounds, at most 64).
+  triangles' far sides, a ring wider every 8 rounds, at most 64). A free
+  vertex wound twice round (a cone beside it a full turn short) is no map.
 - **Extraction**: the lattice points of each triangle are the vertices,
   registered in every triangle round them; from each, its unit isolines are
   traced across the triangles through the transitions, each nudged a
@@ -528,9 +546,15 @@ creased box at 0.1 376 quads, AD 0.00 (0.04); blob at 0.11 1397 quads
 (INSTANT 1276, from twice the target split), 8 irregular both, SJ min
 0.815 (0.772), AD 2.74 (3.27); can at 0.14 766 quads both, 8 irregular,
 SJ min 0.853 (0.801), AD 2.23 (2.23), ED 0.129 (0.138); wavy patch at 0.1
-498 quads, 2 irregular, AD 2.97 (3.22). About INSTANT's time plus 10%.
-Over the five shapes at 0.75 to 2.2 times these targets the map made 14
-of 20; the rest returned INSTANT's mesh.
+498 quads, 2 irregular, AD 2.97 (3.22). About INSTANT's time plus 10%;
+the quantization, when it runs, adds about two more solves.
+Over the five shapes at 0.75, 1.25, 1.6 and 2.2 times these targets the
+map makes all 20 (was 14). Those the flow's integers alone missed: can
+at 1.25 512 quads, SJ min 0.860 (INSTANT 0.178), AD 2.41 (2.78); can at
+1.6 SJ min 0.854 (0.223), AD 2.71 (2.81); wavy patch at 0.75 2 irregular
+(3), AD 2.41 (2.39); at 1.25 2 irregular (3), SJ min 0.793 (0.751), AD
+3.59 (4.08); box at 2.2 AD 0.00 (0.03); box at 0.75 SJ min 0.029 (0.000),
+2 irregular (2), AD 2.50 (1.45).
 
 ## Measures
 
@@ -744,12 +768,19 @@ those alone (1 to 9, then a to e for figures 10 to 14: `5c` draws 5 and
   not a global solve; the field's singularities are those of a smooth field
   (or one drawn to curvature), not placed for the fewest irregular
   vertices; the pipeline is sensitive to tiny changes of the input (a
-  scale of 1e-12 can change the quads, not their quality). GLOBAL takes
-  its integers from INSTANT's flow (no quantization of its own) and falls
-  back on INSTANT when a fold survives the untangling (seen near cones on
-  the can at coarse targets and at a box corner), when a cone's map winds
-  to 90 degrees instead of 450 (faces then fail to close), or when a
-  transition disagrees at its two ends.
+  scale of 1e-12 can change the quads, not their quality). GLOBAL keeps
+  the flow's integers whenever they give a map, even a poorer one than its
+  own quantization would (the box at 0.75 times its target: 2 irregular
+  vertices, SJ min 0.03, where the quantized integers give 0 and 0.49;
+  the two are not both run, to keep the time); on the blob the quantized
+  integers, lower in the map's energy, come out with a larger angle
+  deviation (3.5 against 2.7), so they are only the second try. The
+  quantization moves cones only: the isovalues of creases (parallel
+  creases a step too close or too far) and a torus's periods stay the
+  flow's, a corner whose turn fixes no lattice point stops it, and it
+  gives up past 48 cones. Paths to the border exist for singular faces,
+  not for corners. INSTANT's mesh is still returned when neither set of
+  integers leaves a fold-free map that winds once round every free vertex.
 - Generation: vertices on a trimmed face's trim curve are snapped onto the
   surface, not the curve.
 - Tetrahedra: improvement by flips and smoothing only (no edge removal or
