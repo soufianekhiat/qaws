@@ -681,11 +681,12 @@ qaws_status qaws_mesh_3d_direction_field(qaws_mesh_3d const* mesh, qaws_directio
 {
 	mf_hier h;
 	qaws_hm const* m;
-	unsigned int v, f, c, k;
+	unsigned int v, f, c, k, n = desc && desc->symmetry ? desc->symmetry : 4;
+	int smoothest = desc && desc->method == QAWS_DIRECTION_FIELD_SMOOTHEST;
 	qaws_status st;
-	if (!mesh)
+	if (!mesh || (desc && (unsigned int)desc->method > QAWS_DIRECTION_FIELD_SMOOTHEST))
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	if (desc && desc->symmetry != 0 && desc->symmetry != 4)
+	if (smoothest ? n != 2 && n != 4 && n != 6 : n != 4)
 		return QAWS_STATUS_UNSUPPORTED_OPERATION;
 	m = &mesh->hm;
 	if (!m->nv)
@@ -693,6 +694,13 @@ qaws_status qaws_mesh_3d_direction_field(qaws_mesh_3d const* mesh, qaws_directio
 	st = mf_build(&h, m, NULL);
 	if (st != QAWS_STATUS_OK)
 		return st;
+	if (smoothest)
+	{
+		/* one global solve (qaws_cross_field.c), the hierarchy's level 0 for the lines and normals */
+		st = cf_direction_field(mesh, &h, n, desc->curvature_aligned, out_directions, out_face_index);
+		mf_free(&h);
+		return st;
+	}
 	mf_orientations(&h, desc && desc->sweeps ? desc->sweeps : 8, NULL, 0);
 	for (v = 0; out_directions && v < m->nv; v++)
 		for (k = 0; k < 3; k++)

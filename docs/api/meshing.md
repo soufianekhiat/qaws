@@ -123,6 +123,51 @@ qaws_status qaws_volume_mesh_frame_field(qaws_volume_mesh const* mesh, qaws_fram
   onto the nearest frame, then polished over the stored facet adjacency;
   singular edges reported per cell as a mask of its six edges.
 
+### Smoothest direction fields
+
+```c
+typedef enum qaws_direction_field_method { QAWS_DIRECTION_FIELD_LOCAL = 0, QAWS_DIRECTION_FIELD_SMOOTHEST } qaws_direction_field_method;
+/* appended to qaws_direction_field_desc */
+qaws_direction_field_method method;   /* LOCAL: Instant Meshes, the default */
+int curvature_aligned;                /* SMOOTHEST: drawn to the principal curvature directions */
+```
+
+- **SMOOTHEST** is the globally smoothest n-direction field of Knoppel,
+  Crane, Pinkall and Schroder (2013), n = 2, 4 or 6 (LOCAL stays crosses
+  only). Per vertex a complex number whose argument is n times the
+  direction's angle; neighbours compared through their edge's transport
+  (corner angles rescaled to sum to 2 pi round a vertex, pi on the border:
+  the s = 0 connection, without the paper's holonomy correction). One
+  sparse factor of the connection Laplacian (cotangent weights) serves it
+  all: vertices along feature lines and the border held along their lines
+  (corners free), the rest from one solve; a closed surface without lines
+  takes the smallest eigenvector (inverse power iteration, at most 20
+  steps). Face indices are in 1/n turns and sum to n chi: 8, 12 and 4 on a
+  sphere for n = 4, 6, 2; the held vertices lie along their creases to
+  rounding.
+- **curvature_aligned** draws the field to the direction of largest
+  curvature on the mesh's PN reference, as strongly as the surface bends one
+  way more than the other (Knoppel's lambda_t = 0, the same factor): a torus
+  comes out along its parallels without a singularity.
+- **The factor** (`internal/qaws_internal_ldlt.h`, for other solvers to
+  share) is a sparse LDL^T: rows ordered by geometric nested dissection,
+  Davis's elimination tree and column counts, then supernodal left-looking
+  with dense panels. A 50k-vertex sphere's field takes about 1.3 s
+  (factor 0.8 s, solves 0.03 s each).
+- **INSTANT** quads now also try the global fields (the smoothest, kept on a
+  tie, and the one drawn to curvature, kept when it has fewer
+  singularities); where lines hold the field it is first relaxed at the
+  lattice's scale (Ginzburg-Landau by MBO steps, a second factor), which
+  parts the zeros the relaxed energy lets coincide. The can of figure 4
+  (all quads, 0.14) drops from 22 irregular vertices to 10, its caps
+  O-grids; the blob stays at 12, the torus at 0.
+- Limits: SMOOTHEST is the relaxed optimum, so where symmetry lets zeros
+  coincide they sit close together (a disc held by its border: its four
+  cones near the centre; INSTANT parts them, the public field does not).
+  The smoothest field of a fat torus has pairs of singularities (+1
+  outside, -1 inside); ask for `curvature_aligned` to avoid them. Polygons
+  are weighted by their centroid's dual length, not a polygon Laplacian.
+
 ## Remeshing and quads
 
 ```c

@@ -9,9 +9,12 @@
  *
  *   INSTANT  Instant Meshes (Jakob, Tarini, Panozzo, Sorkine-Hornung 2015)
  *            on the reference: the input remeshed densely first (a third of
- *            the target), then a cross field (drawn to the principal
- *            curvature directions where that leaves fewer singularities: a
- *            torus comes out as a grid along its parallels) and a position
+ *            the target), then a cross field (the fewest singularities of
+ *            Instant Meshes' own, free or drawn to the principal curvature
+ *            directions, and the globally smoothest field of Knoppel et al.
+ *            2013, free or drawn alike, relaxed at the lattice's scale
+ *            where lines hold it: a torus comes out as a grid along its
+ *            parallels, a can's caps as O-grids) and a position
  *            field on a lattice of the target spacing (multiresolution,
  *            along feature edges and the border, lattice points pinned at
  *            feature corners). The lattice steps between neighbours are made

@@ -57,18 +57,41 @@ qaws_status qaws_size_field_evaluate(qaws_size_field const* field, qaws_mesh_loc
 	unsigned int count, qaws_scalar* out_sizes);
 
 /*
- * Direction fields: a cross field on a mesh's vertices (4-symmetric: a
- * direction and its quarter turns are one), smoothed by Instant Meshes'
- * multiresolution Gauss-Seidel (pairs of vertices merged level by level,
- * each level smoothed and handed to the finer one), along feature edges and
- * the border. Its index round each face, in quarter turns, marks the
- * singularities: -1 and +1 where a quad mesh following the field has
- * vertices of valence 3 and 5.
+ * Direction fields: an n-direction field on a mesh's vertices (a direction
+ * and its turns by 1/n of a turn are one; crosses for n = 4), along feature
+ * edges and the border.
+ *
+ *   LOCAL      Instant Meshes' multiresolution Gauss-Seidel (pairs of
+ *              vertices merged level by level, each level smoothed and
+ *              handed to the finer one); crosses only. The default.
+ *   SMOOTHEST  the globally smoothest field (Knoppel, Crane, Pinkall,
+ *              Schroder 2013): one global solve (a sparse LDL^T of the
+ *              vertices' connection Laplacian), the vertices of feature
+ *              lines and the border held along their lines, corners free;
+ *              on a closed surface without lines the smallest eigenvector.
+ *              With `curvature_aligned`, drawn to the principal curvature
+ *              directions where the surface bends one way more than the
+ *              other. n = 2, 4 or 6. The relaxed optimum: where symmetry
+ *              lets zeros coincide (a disc held by its border) its
+ *              singularities sit close together.
+ *
+ * Its index round each face, in 1/n turns, marks the singularities (they
+ * sum to n times the Euler characteristic): for crosses -1 and +1 where a
+ * quad mesh following the field has vertices of valence 3 and 5.
  */
+typedef enum qaws_direction_field_method
+{
+	QAWS_DIRECTION_FIELD_LOCAL = 0,
+	QAWS_DIRECTION_FIELD_SMOOTHEST
+} qaws_direction_field_method;
+
 typedef struct qaws_direction_field_desc
 {
-	unsigned int symmetry;              /* 4: crosses (0: 4); 2 and 6 reserved */
-	unsigned int sweeps;                /* Gauss-Seidel sweeps per level; 0: 8 */
+	unsigned int symmetry;              /* n: 4 (0: 4); SMOOTHEST also 2 and 6 */
+	unsigned int sweeps;                /* LOCAL: Gauss-Seidel sweeps per level; 0: 8 */
+	qaws_direction_field_method method; /* LOCAL: Instant Meshes, the default */
+	int curvature_aligned;              /* SMOOTHEST: drawn to the principal directions where the surface bends one way more
+	                                       than the other (Knoppel's lambda_t = 0) */
 } qaws_direction_field_desc;
 
 /* per vertex a unit tangent (3); per face the index round it; either output

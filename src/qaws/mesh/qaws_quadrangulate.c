@@ -1110,11 +1110,17 @@ qaws_status qaws_mesh_quadrangulate(qaws_mesh_3d const* mesh, qaws_quadrangulate
 		/* the cross field twice from the direction of largest curvature: free (Instant Meshes, along the features), and drawn
 		   to it on every level, as strongly as the surface bends one way more than the other (1 round a cylinder
 		   or a torus, none where it bends alike or hardly at the lattice's scale); the one with fewer singularities kept
-		   (a closed tube wants the pull, a patch held by its border not) */
+		   (a closed tube wants the pull, a patch held by its border not). Then twice globally (Knoppel et al. 2013, one
+		   factor): the smoothest field, kept when it has no more singularities than the best so far, and the one drawn to
+		   the same direction, kept when it has fewer; the singularities sit where the whole surface wants them, not where
+		   a coarse start left them. Held by lines, either is first relaxed at the lattice's scale (Ginzburg-Landau), which
+		   parts the zeros the relaxed energy lets coincide: a disc held by its border gets four cones well inside it (an
+		   O-grid), neither one at its centre nor four on its rim. Any failure there keeps the field there is */
 		double* init = (double*)calloc(3 * (size_t)dense->hm.nv + 3, sizeof(double));
-		double* keep = NULL;
-		unsigned int pulled = 0, s0, l;
-		size_t at;
+		double *keep = NULL, *cand = NULL;
+		unsigned int pulled = 0, s0, l, t;
+		size_t at, total;
+		cf_system* sys = NULL;
 		if (!init)
 		{
 			st = QAWS_STATUS_ALLOCATION_FAILURE;
@@ -1135,26 +1141,58 @@ qaws_status qaws_mesh_quadrangulate(qaws_mesh_3d const* mesh, qaws_quadrangulate
 			}
 		}
 		mf_orientations(&h, desc->sweeps ? desc->sweeps : 8, init, 0);
-		if (pulled)
+		for (total = 0, l = 0; l < h.nl; l++)
+			total += 3 * (size_t)h.lv[l].n;
+		keep = (double*)malloc(sizeof(double) * (total + 1));
+		cand = (double*)malloc(sizeof(double) * (3 * (size_t)dense->hm.nv + 3));
+		if (!keep || !cand)
 		{
-			for (at = 0, l = 0; l < h.nl; l++)
-				at += 3 * (size_t)h.lv[l].n;
-			keep = (double*)malloc(sizeof(double) * (at + 1));
-			if (!keep)
-			{
-				free(init);
-				st = QAWS_STATUS_ALLOCATION_FAILURE;
-				goto done;
-			}
-			for (at = 0, l = 0; l < h.nl; at += 3 * (size_t)h.lv[l].n, l++)
-				memcpy(keep + at, h.lv[l].q, sizeof(double) * 3 * h.lv[l].n);
-			s0 = qd_singular(&dense->hm, &h.lv[0]);
-			mf_orientations(&h, desc->sweeps ? desc->sweeps : 8, init, 1);
-			if (qd_singular(&dense->hm, &h.lv[0]) >= s0)
-				for (at = 0, l = 0; l < h.nl; at += 3 * (size_t)h.lv[l].n, l++)
-					memcpy(h.lv[l].q, keep + at, sizeof(double) * 3 * h.lv[l].n);
+			free(init);
 			free(keep);
+			free(cand);
+			st = QAWS_STATUS_ALLOCATION_FAILURE;
+			goto done;
 		}
+		for (at = 0, l = 0; l < h.nl; at += 3 * (size_t)h.lv[l].n, l++)
+			memcpy(keep + at, h.lv[l].q, sizeof(double) * 3 * h.lv[l].n);
+		s0 = qd_singular(&dense->hm, &h.lv[0]);
+		/* each candidate: kept (into keep) when it has fewer singularities (the smoothest: no more), else undone */
+		for (t = 0; t < 3; t++)
+		{
+			unsigned int s1;
+			int better;
+			if (t == 0)
+			{
+				if (!pulled)
+					continue;
+				mf_orientations(&h, desc->sweeps ? desc->sweeps : 8, init, 1);
+			}
+			else
+			{
+				if (t == 1 && cf_create(&dense->hm, nrm, &h.lv[0], 4, &sys) != QAWS_STATUS_OK)
+					break;
+				if (t == 2 && !pulled)
+					break;
+				if ((t == 1 ? cf_smoothest(sys, cand) : cf_aligned(sys, init, cand)) != QAWS_STATUS_OK)
+					continue;
+				if (cf_relax(sys, rf, 100, cand) != QAWS_STATUS_OK)
+					continue;
+				memcpy(h.lv[0].q, cand, sizeof(double) * 3 * dense->hm.nv);
+			}
+			s1 = qd_singular(&dense->hm, &h.lv[0]);
+			better = t == 1 ? s1 <= s0 : s1 < s0;
+			if (better && t)
+				cf_restrict(&h);
+			s0 = better ? s1 : s0;
+			for (at = 0, l = 0; l < h.nl; at += 3 * (size_t)h.lv[l].n, l++)
+				if (better)
+					memcpy(keep + at, h.lv[l].q, sizeof(double) * 3 * h.lv[l].n);
+				else
+					memcpy(h.lv[l].q, keep + at, sizeof(double) * 3 * h.lv[l].n);
+		}
+		cf_free(sys);
+		free(keep);
+		free(cand);
 		free(init);
 	}
 	mf_positions(&h, rf, desc->sweeps ? desc->sweeps : 8);
