@@ -3,6 +3,11 @@
 
 #include "../qaws_types.h"
 
+/* The degrees these kernels hold on the stack: B-spline basis functions and their derivatives (left, right and ndu arrays
+   of order 32), de Casteljau (192 scalars: 48 homogeneous 3D points). Constructors refuse more. */
+#define QAWS_INTERNAL_BASIS_MAX_DEGREE 31
+#define QAWS_INTERNAL_DECASTELJAU_MAX_DEGREE 47
+
 /* De Casteljau evaluation for Bezier curves.
    control_points: flat array of dim_count scalars per point.
    degree: polynomial degree (point_count - 1).

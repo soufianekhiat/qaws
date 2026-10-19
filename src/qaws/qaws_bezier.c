@@ -224,7 +224,8 @@ qaws_status qaws_curve_create_bezier_ex(
 	if (!desc || !out_curve) return QAWS_STATUS_INVALID_ARGUMENT;
 	if (qaws_internal_validate_dimension(desc->dimension) != QAWS_STATUS_OK)
 		return QAWS_STATUS_INVALID_DIMENSION;
-	if (desc->degree < 1) return QAWS_STATUS_INVALID_DEGREE;
+	/* (the evaluation runs on the core kernels: degree at most QAWS_CORE_MAX_DEGREE) */
+	if (desc->degree < 1 || desc->degree > QAWS_CORE_MAX_DEGREE) return QAWS_STATUS_INVALID_DEGREE;
 	if (desc->control_point_count != desc->degree + 1) return QAWS_STATUS_INVALID_CONTROL_POINT_COUNT;
 	if (!desc->control_points) return QAWS_STATUS_INVALID_ARGUMENT;
 

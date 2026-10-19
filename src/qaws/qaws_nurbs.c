@@ -524,7 +524,7 @@ qaws_status qaws_curve_create_nurbs_ex(
 	dim_count = (unsigned int)desc->dimension;
 	degree = desc->degree;
 
-	if (degree < 1)
+	if (degree < 1 || degree > QAWS_INTERNAL_BASIS_MAX_DEGREE)
 		return QAWS_STATUS_INVALID_DEGREE;
 
 	control_point_count = desc->control_point_count;

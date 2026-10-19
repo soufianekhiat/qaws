@@ -285,7 +285,8 @@ qaws_status qaws_surface_create_bezier_ex(
 	qaws_range u_range, v_range;
 
 	if (!desc || !out_surface) return QAWS_STATUS_INVALID_ARGUMENT;
-	if (desc->u_degree < 1 || desc->v_degree < 1) return QAWS_STATUS_INVALID_DEGREE;
+	if (desc->u_degree < 1 || desc->v_degree < 1 || desc->u_degree > 63 || desc->v_degree > 63)
+		return QAWS_STATUS_INVALID_DEGREE;   /* (the evaluation's columns hold 64 points) */
 	if (desc->u_point_count != desc->u_degree + 1)
 		return QAWS_STATUS_INVALID_CONTROL_POINT_COUNT;
 	if (desc->v_point_count != desc->v_degree + 1)

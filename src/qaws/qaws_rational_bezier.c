@@ -436,7 +436,7 @@ qaws_status qaws_curve_create_rational_bezier(
 
 	dim_count = (unsigned int)desc->dimension;
 
-	if (desc->degree < 1) return QAWS_STATUS_INVALID_DEGREE;
+	if (desc->degree < 1 || desc->degree > QAWS_INTERNAL_DECASTELJAU_MAX_DEGREE) return QAWS_STATUS_INVALID_DEGREE;
 
 	n_pts = desc->degree + 1;
 	if (desc->control_point_count != n_pts)

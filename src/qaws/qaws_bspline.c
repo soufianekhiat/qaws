@@ -70,7 +70,7 @@ static qaws_status bspline_eval_span_2d(
 	unsigned int knot_span;
 	unsigned int max_deriv_order = 0;
 	unsigned int stride;
-	qaws_scalar ders_buf[4 * QAWS_CORE_MAX_POINTS]; /* (max_deriv+1) * (degree+1), bounded */
+	qaws_scalar ders_buf[4 * (QAWS_INTERNAL_BASIS_MAX_DEGREE + 1)]; /* (max_deriv+1) * (degree+1) */
 	unsigned int j;
 
 	memset(out_result, 0, sizeof(*out_result));
@@ -187,7 +187,7 @@ static qaws_status bspline_eval_span_3d(
 	unsigned int knot_span;
 	unsigned int max_deriv_order = 0;
 	unsigned int stride;
-	qaws_scalar ders_buf[4 * QAWS_CORE_MAX_POINTS]; /* (max_deriv+1) * (degree+1), bounded */
+	qaws_scalar ders_buf[4 * (QAWS_INTERNAL_BASIS_MAX_DEGREE + 1)]; /* (max_deriv+1) * (degree+1) */
 	unsigned int j;
 
 	memset(out_result, 0, sizeof(*out_result));
@@ -507,7 +507,7 @@ qaws_status qaws_curve_create_bspline_ex(
 		return QAWS_STATUS_INVALID_ARGUMENT;
 
 	degree = desc->degree;
-	if (degree < 1)
+	if (degree < 1 || degree > QAWS_INTERNAL_BASIS_MAX_DEGREE)
 		return QAWS_STATUS_INVALID_DEGREE;
 
 	N = desc->control_point_count;
