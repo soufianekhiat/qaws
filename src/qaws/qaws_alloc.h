@@ -74,8 +74,9 @@ void qaws_exchange_thread_allocator(qaws_allocator const* allocator, qaws_alloca
  * An allocator over caller memory (sized interface): a mapped file, pinned memory, a host frame arena. The memory must
  * be CPU-accessible and coherent for the CPU; placing the library's data there does not move any computation to a GPU.
  *
- * Blocks are cut in order, aligned to QAWS_MEMORY_ALIGNMENT. The latest block grows and shrinks in place and is released
- * when freed; other freed blocks are released at qaws_arena_reset. It is a hard bound: when full, allocation fails and
+ * Blocks are cut in order, aligned to QAWS_MEMORY_ALIGNMENT, each after a small header. The latest block grows and shrinks
+ * in place. A freed block is marked, and the freed blocks at the top give their space back, so blocks released in any
+ * last-in-first-out order (nested scratch) are reclaimed at once; others wait for the blocks above them, or the reset. It is a hard bound: when full, allocation fails and
  * calls return QAWS_STATUS_ALLOCATION_FAILURE; nothing falls back to the heap. One thread at a time (one arena per
  * worker with qaws_set_thread_allocator). Pass &arena.allocator wherever an allocator is taken.
  *
@@ -91,7 +92,7 @@ typedef struct qaws_arena
 	size_t size;
 	size_t used;                        /* bytes up to the end of the latest block */
 	size_t peak;                        /* most bytes used since init */
-	size_t last;                        /* the latest block's offset */
+	size_t last;                        /* the latest block's header offset ((size_t)-1: none) */
 	size_t live;                        /* blocks held */
 	size_t failures;                    /* allocations refused for room */
 	size_t invalid_frees;

@@ -370,52 +370,105 @@ size_t qaws_internal_block_size(void const* ptr)
 
 /* ---- arena over caller memory ------------------------------------------- */
 
-/* a block at the next aligned offset; NULL past the end (no arithmetic overflows) */
+/* Each block has a small header before it: the offset of the block allocated before it and its size with a freed flag.
+   A freed block is marked; the freed blocks at the top are then reclaimed, so blocks released in any last-in-first-out
+   order (nested scratch) give their space back at once, and the rest at qaws_arena_reset. */
+typedef struct arena_head
+{
+	size_t prev;                        /* the previous block's header offset, ARENA_NONE for the first */
+	size_t size;                        /* the block's bytes */
+	size_t freed;
+} arena_head;
+
+#define ARENA_NONE ((size_t)-1)
+#define ARENA_HEAD MEM_ROUND(sizeof(arena_head))
+
+static arena_head arena_read(qaws_arena const* a, size_t at)
+{
+	arena_head h;
+	memcpy(&h, a->base + at, sizeof h);
+	return h;
+}
+
+static void arena_write(qaws_arena* a, size_t at, arena_head const* h)
+{
+	memcpy(a->base + at, h, sizeof *h);
+}
+
+/* a block after an aligned header; NULL past the end (no arithmetic overflows) */
 static void* arena_alloc(size_t size, size_t alignment, void* user)
 {
 	qaws_arena* a = (qaws_arena*)user;
-	size_t pad = (alignment - a->used % alignment) % alignment;
-	if (pad > a->size - a->used || size > a->size - a->used - pad)
+	size_t align = alignment > MEM_ALIGN ? alignment : MEM_ALIGN;
+	size_t pad = (align - a->used % align) % align;
+	arena_head h;
+	if (pad > a->size - a->used || ARENA_HEAD > a->size - a->used - pad || size > a->size - a->used - pad - ARENA_HEAD)
 	{
 		a->failures++;
 		return NULL;
 	}
+	h.prev = a->last;
+	h.size = size;
+	h.freed = 0;
 	a->last = a->used + pad;
-	a->used = a->last + size;
+	arena_write(a, a->last, &h);
+	a->used = a->last + ARENA_HEAD + size;
 	a->live++;
 	if (a->used > a->peak)
 		a->peak = a->used;
-	return a->base + a->last;
+	return a->base + a->last + ARENA_HEAD;
 }
 
-/* the latest block is released (its space reused); the others at qaws_arena_reset */
+/* the header offset of a block it holds, ARENA_NONE otherwise */
+static size_t arena_find(qaws_arena const* a, void const* ptr)
+{
+	unsigned char const* p = (unsigned char const*)ptr;
+	size_t at;
+	if (!p || p < a->base + ARENA_HEAD || p >= a->base + a->used)
+		return ARENA_NONE;
+	at = (size_t)(p - a->base) - ARENA_HEAD;
+	return at % MEM_ALIGN == 0 ? at : ARENA_NONE;
+}
+
 static void arena_dealloc(void* ptr, size_t size, size_t alignment, void* user)
 {
 	qaws_arena* a = (qaws_arena*)user;
-	unsigned char* p = (unsigned char*)ptr;
+	size_t at = arena_find(a, ptr);
+	arena_head h;
 	(void)size;
 	(void)alignment;
-	if (!p || p < a->base || p >= a->base + a->used || a->live == 0)
+	if (at == ARENA_NONE || (h = arena_read(a, at)).freed || a->live == 0)
 	{
 		/* a block from another generation, another arena, or freed twice */
 		assert(!"qaws_arena: a block it does not hold");
 		a->invalid_frees++;
 		return;
 	}
+	h.freed = 1;
+	arena_write(a, at, &h);
 	a->live--;
-	if (p == a->base + a->last)
+	/* the freed blocks at the top give their space back */
+	while (a->last != ARENA_NONE && (h = arena_read(a, a->last)).freed)
+	{
 		a->used = a->last;
+		a->last = h.prev;
+	}
 }
 
 /* the latest block grows or shrinks in place */
 static int arena_resize(void* ptr, size_t old_size, size_t new_size, size_t alignment, void* user)
 {
 	qaws_arena* a = (qaws_arena*)user;
+	size_t at = arena_find(a, ptr);
+	arena_head h;
 	(void)old_size;
 	(void)alignment;
-	if ((unsigned char*)ptr != a->base + a->last || new_size > a->size - a->last)
+	if (at == ARENA_NONE || at != a->last || new_size > a->size - at - ARENA_HEAD)
 		return 0;
-	a->used = a->last + new_size;
+	h = arena_read(a, at);
+	h.size = new_size;
+	arena_write(a, at, &h);
+	a->used = at + ARENA_HEAD + new_size;
 	if (a->used > a->peak)
 		a->peak = a->used;
 	return 1;
@@ -427,6 +480,7 @@ void qaws_arena_init(qaws_arena* arena, void* memory, size_t size)
 	memset(arena, 0, sizeof *arena);
 	arena->base = (unsigned char*)memory + (skip < size ? skip : size);
 	arena->size = skip < size ? size - skip : 0;
+	arena->last = ARENA_NONE;
 	arena->allocator.alloc = qaws_allocator_extended;
 	arena->allocator.alloc_sized = arena_alloc;
 	arena->allocator.dealloc_sized = arena_dealloc;
@@ -440,7 +494,7 @@ qaws_status qaws_arena_reset(qaws_arena* arena)
 	if (arena->live)
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	arena->used = 0;
-	arena->last = 0;
+	arena->last = ARENA_NONE;
 	arena->generation++;
 	return QAWS_STATUS_OK;
 }

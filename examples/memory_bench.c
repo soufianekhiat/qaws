@@ -261,9 +261,20 @@ int main(void)
 		ok2 = ops[i].run();
 		qaws_set_thread_allocator(&prev);
 		/* arena */
+		/* arena: the same repetitions, reset between runs (a frame arena) */
 		qaws_arena_init(&arena, memory, arena_bytes);
 		qaws_exchange_thread_allocator(&arena.allocator, &prev);
-		ta = mb_seconds(ops[i].run, 1, &ok3);
+		{
+			clock_t t0 = clock();
+			int rr;
+			ok3 = 1;
+			for (rr = 0; rr < ops[i].reps; rr++)
+			{
+				ok3 &= ops[i].run();
+				ok3 &= qaws_arena_reset(&arena) == QAWS_STATUS_OK;
+			}
+			ta = (double)(clock() - t0) / CLOCKS_PER_SEC / ops[i].reps;
+		}
 		qaws_set_thread_allocator(&prev);
 		printf("%-34s %12.3f %12.3f %10ld %14lu %14lu %8.2f%s\n", ops[i].name, th * 1e3, ta * 1e3, c.blocks, (unsigned long)c.peak,
 			(unsigned long)arena.peak, c.peak ? (double)arena.peak / (double)c.peak : 0.0, ok1 && ok2 && ok3 ? "" : "  (a run failed)");
