@@ -1,4 +1,5 @@
 #include "qaws_internal_parallel.h"
+#include "qaws_internal_memory.h"
 #include <stdlib.h>
 
 #define PAR_MAX_CHUNKS 256
@@ -53,7 +54,7 @@ qaws_status qaws_internal_parallel(qaws_batch_executor const* executor, unsigned
 	w.ctx = ctx;
 	if (w.chunks == 0)
 		return QAWS_STATUS_OK;
-	w.status = (qaws_status*)malloc(w.chunks * sizeof(qaws_status));
+	w.status = (qaws_status*)qaws_internal_malloc(w.chunks * sizeof(qaws_status));
 	if (!w.status)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	for (k = 0; k < w.chunks; k++)
@@ -64,6 +65,6 @@ qaws_status qaws_internal_parallel(qaws_batch_executor const* executor, unsigned
 		par_task(&w, 0, w.chunks);
 	for (k = 0; k < w.chunks && s == QAWS_STATUS_OK; k++)
 		s = w.status[k];
-	free(w.status);
+	qaws_internal_free(w.status);
 	return s;
 }

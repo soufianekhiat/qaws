@@ -3,6 +3,7 @@
  */
 
 #include "qaws_rectclip.h"
+#include "internal/qaws_internal_memory.h"
 #include "qaws_curve.h"
 #include "internal/qaws_internal_clip.h"
 #include <stdlib.h>
@@ -179,20 +180,20 @@ static qaws_status mk_float(qaws_scalar const* pattern, unsigned int np, qaws_sc
 	if (!pattern || !path || !out || np < 1 || nq < 1)
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	*out = NULL;
-	pat = (double*)malloc(sizeof(double) * 2 * np);
-	pth = (double*)malloc(sizeof(double) * 2 * nq);
-	quads = (double*)malloc(sizeof(double) * 8 * (nq * np + 1));
+	pat = (double*)qaws_internal_malloc(sizeof(double) * 2 * np);
+	pth = (double*)qaws_internal_malloc(sizeof(double) * 2 * nq);
+	quads = (double*)qaws_internal_malloc(sizeof(double) * 8 * (nq * np + 1));
 	if (!pat || !pth || !quads)
 	{
-		free(pat); free(pth); free(quads);
+		qaws_internal_free(pat); qaws_internal_free(pth); qaws_internal_free(quads);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 	for (i = 0; i < 2 * np; i++) pat[i] = pattern[i];
 	for (i = 0; i < 2 * nq; i++) pth[i] = path[i];
 	nquad = nq >= 2 ? mk_quads(pat, np, pth, nq, closed, sign, quads) : 0;
-	cs = (qaws_curve**)calloc(nquad + 1, sizeof(qaws_curve*));
-	views = (qaws_curve const**)calloc(nquad + 1, sizeof(qaws_curve*));
-	paths = (qaws_path_2d*)calloc(nquad + 1, sizeof(qaws_path_2d));
+	cs = (qaws_curve**)qaws_internal_zalloc(nquad + 1, sizeof(qaws_curve*));
+	views = (qaws_curve const**)qaws_internal_zalloc(nquad + 1, sizeof(qaws_curve*));
+	paths = (qaws_path_2d*)qaws_internal_zalloc(nquad + 1, sizeof(qaws_path_2d));
 	if (!cs || !views || !paths)
 		s = QAWS_STATUS_ALLOCATION_FAILURE;
 	for (i = 0; i < nquad && s == QAWS_STATUS_OK; i++)
@@ -208,8 +209,8 @@ static qaws_status mk_float(qaws_scalar const* pattern, unsigned int np, qaws_sc
 	if (s == QAWS_STATUS_OK)
 		s = qaws_clip_boolean(QAWS_CLIP_UNION, QAWS_FILL_NON_ZERO, paths, nquad, NULL, 0, out);
 	for (i = 0; cs && i < nquad; i++) qaws_curve_destroy(cs[i]);
-	free(cs); free((void*)views); free(paths);
-	free(pat); free(pth); free(quads);
+	qaws_internal_free(cs); qaws_internal_free((void*)views); qaws_internal_free(paths);
+	qaws_internal_free(pat); qaws_internal_free(pth); qaws_internal_free(quads);
 	return s;
 }
 
@@ -225,11 +226,11 @@ static qaws_status mk_64(int64_t const* pattern, unsigned int np, int64_t const*
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	*out = NULL;
 	nquad = nq >= 2 ? (closed ? nq : nq - 1) * np : 0;
-	q64 = (int64_t*)malloc(sizeof(int64_t) * 8 * (nquad + 1));
-	paths = (qaws_path64*)malloc(sizeof(qaws_path64) * (nquad + 1));
+	q64 = (int64_t*)qaws_internal_malloc(sizeof(int64_t) * 8 * (nquad + 1));
+	paths = (qaws_path64*)qaws_internal_malloc(sizeof(qaws_path64) * (nquad + 1));
 	if (!q64 || !paths)
 	{
-		free(q64); free(paths);
+		qaws_internal_free(q64); qaws_internal_free(paths);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 	{
@@ -268,7 +269,7 @@ static qaws_status mk_64(int64_t const* pattern, unsigned int np, int64_t const*
 	d.clip_type = QAWS_CLIP_UNION;
 	d.fill_rule = QAWS_FILL_NON_ZERO;
 	s = qaws_clip64_execute(&d, out);
-	free(q64); free(paths);
+	qaws_internal_free(q64); qaws_internal_free(paths);
 	return s;
 }
 

@@ -17,6 +17,7 @@
  * the kernel peaks with a width of the distance.
  */
 #include "qaws_mean_value.h"
+#include "internal/qaws_internal_memory.h"
 #include "qaws_inspect.h"
 #include "qaws_eval.h"
 #include "qaws_curve.h"
@@ -69,7 +70,7 @@ static int mv_grow(void** p, unsigned int* cap, unsigned int need, size_t size)
 		return 1;
 	n = *cap ? *cap : 16;
 	while (n < need) n *= 2;
-	q = realloc(*p, size * n);
+	q = qaws_internal_realloc(*p, size * n);
 	if (!q)
 		return 0;
 	*p = q;
@@ -169,7 +170,7 @@ static qaws_status mv_add_spline(qaws_mean_value* m, double const* cp, double co
 	unsigned int i, s;
 	if (p > MV_MAXD || p == 0 || n < p + 1)
 		return QAWS_STATUS_UNSUPPORTED_OPERATION;
-	hid = (unsigned int*)malloc(sizeof(unsigned int) * n);
+	hid = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * n);
 	if (!hid)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	for (i = 0; i < n; i++)
@@ -177,7 +178,7 @@ static qaws_status mv_add_spline(qaws_mean_value* m, double const* cp, double co
 		hid[i] = mv_handle(m, cp[2 * i], cp[2 * i + 1], i == 0 ? mv_last(m, loop_first) : 0xFFFFFFFFu);
 		if (hid[i] == 0xFFFFFFFFu)
 		{
-			free(hid);
+			qaws_internal_free(hid);
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 		}
 	}
@@ -258,7 +259,7 @@ static qaws_status mv_add_spline(qaws_mean_value* m, double const* cp, double co
 		pc = mv_piece_new(m);
 		if (!pc)
 		{
-			free(hid);
+			qaws_internal_free(hid);
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 		}
 		pc->deg = p;
@@ -285,7 +286,7 @@ static qaws_status mv_add_spline(qaws_mean_value* m, double const* cp, double co
 		}
 		pc->line = p == 1 && pc->w[0] == pc->w[1];
 	}
-	free(hid);
+	qaws_internal_free(hid);
 	return QAWS_STATUS_OK;
 }
 
@@ -355,11 +356,11 @@ static qaws_status mv_add_curve(qaws_mean_value* m, qaws_curve const* c, unsigne
 			nk = 2 * (deg + 1);
 		if (n == 0 || n > 100000 || nk > 200000)
 			return QAWS_STATUS_INVALID_ARGUMENT;
-		buf = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (2 * n + nk + n));
-		cp = (double*)malloc(sizeof(double) * (2 * n + nk + n));
+		buf = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * (2 * n + nk + n));
+		cp = (double*)qaws_internal_malloc(sizeof(double) * (2 * n + nk + n));
 		if (!buf || !cp)
 		{
-			free(buf); free(cp);
+			qaws_internal_free(buf); qaws_internal_free(cp);
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 		}
 		kn = cp + 2 * n;
@@ -393,7 +394,7 @@ static qaws_status mv_add_curve(qaws_mean_value* m, qaws_curve const* c, unsigne
 		}
 		if (st == QAWS_STATUS_OK)
 			st = mv_add_spline(m, cp, w, n, deg, kn, nk, path, curve, loop_first);
-		free(buf); free(cp);
+		qaws_internal_free(buf); qaws_internal_free(cp);
 		return st;
 	}
 	{
@@ -727,11 +728,11 @@ qaws_status qaws_mean_value_create(qaws_mean_value_desc const* desc, qaws_mean_v
 	if (!desc || !out_coords || !desc->paths || desc->path_count == 0)
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	*out_coords = NULL;
-	m = (qaws_mean_value*)calloc(1, sizeof(*m));
-	loop_piece = (unsigned int*)malloc(sizeof(unsigned int) * (desc->path_count + 1));
+	m = (qaws_mean_value*)qaws_internal_zalloc(1, sizeof(*m));
+	loop_piece = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (desc->path_count + 1));
 	if (!m || !loop_piece)
 	{
-		free(m); free(loop_piece);
+		qaws_internal_free(m); qaws_internal_free(loop_piece);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 #if QAWS_SCALAR_IS_FLOAT
@@ -813,7 +814,7 @@ qaws_status qaws_mean_value_create(qaws_mean_value_desc const* desc, qaws_mean_v
 				m->pc[k].sign = ((depth & 1) ? -1.0 : 1.0) * (area2 >= 0 ? 1.0 : -1.0);
 		}
 	}
-	free(loop_piece);
+	qaws_internal_free(loop_piece);
 	if (st != QAWS_STATUS_OK)
 	{
 		qaws_mean_value_destroy(m);
@@ -827,9 +828,9 @@ void qaws_mean_value_destroy(qaws_mean_value* coords)
 {
 	if (!coords)
 		return;
-	free(coords->pc);
-	free(coords->hp);
-	free(coords);
+	qaws_internal_free(coords->pc);
+	qaws_internal_free(coords->hp);
+	qaws_internal_free(coords);
 }
 
 unsigned int qaws_mean_value_get_handle_count(qaws_mean_value const* coords)
@@ -853,14 +854,14 @@ qaws_status qaws_mean_value_coordinates(qaws_mean_value const* coords, qaws_vec2
 	qaws_status st;
 	if (!coords || !out_weights)
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	w = (double*)malloc(sizeof(double) * (coords->nh + 1));
+	w = (double*)qaws_internal_malloc(sizeof(double) * (coords->nh + 1));
 	if (!w)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	x[0] = (double)point.x; x[1] = (double)point.y;
 	st = mv_coordinates(coords, x, w);
 	for (i = 0; i < coords->nh; i++)
 		out_weights[i] = (qaws_scalar)w[i];
-	free(w);
+	qaws_internal_free(w);
 	return st;
 }
 
@@ -876,7 +877,7 @@ typedef struct mv_deform_ctx
 static void mv_deform_task(void* ctx_, unsigned int begin, unsigned int end)
 {
 	mv_deform_ctx* ctx = (mv_deform_ctx*)ctx_;
-	double* w = (double*)malloc(sizeof(double) * (ctx->m->nh + 1));
+	double* w = (double*)qaws_internal_malloc(sizeof(double) * (ctx->m->nh + 1));
 	unsigned int i, k;
 	if (!w)
 	{
@@ -901,7 +902,7 @@ static void mv_deform_task(void* ctx_, unsigned int begin, unsigned int end)
 		ctx->out[i].x = (qaws_scalar)y[0];
 		ctx->out[i].y = (qaws_scalar)y[1];
 	}
-	free(w);
+	qaws_internal_free(w);
 }
 
 qaws_status qaws_mean_value_deform(qaws_mean_value const* coords, qaws_vec2 const* moved_handles,
@@ -937,11 +938,11 @@ qaws_status qaws_mean_value_interpolate(qaws_mean_value const* coords, qaws_vec2
 		fn(user, p->path, p->curve, (qaws_scalar)mv_param(p, u, c), pt, out_values);
 		return QAWS_STATUS_OK;
 	}
-	acc = (double*)calloc(dim + 1, sizeof(double));
-	tmp = (qaws_scalar*)malloc(sizeof(qaws_scalar) * dim + sizeof(double) * dim);
+	acc = (double*)qaws_internal_zalloc(dim + 1, sizeof(double));
+	tmp = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * dim + sizeof(double) * dim);
 	if (!acc || !tmp)
 	{
-		free(acc); free(tmp);
+		qaws_internal_free(acc); qaws_internal_free(tmp);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 	floor = coords->tol * 2 * MV_PI / (coords->ext * (coords->npc + 1));
@@ -956,11 +957,11 @@ qaws_status qaws_mean_value_interpolate(qaws_mean_value const* coords, qaws_vec2
 	total = acc[dim];
 	if (!(fabs(total) > 1e-13 * 2 * MV_PI / coords->ext))
 	{
-		free(acc); free(tmp);
+		qaws_internal_free(acc); qaws_internal_free(tmp);
 		return QAWS_STATUS_NUMERICAL_FAILURE;
 	}
 	for (j = 0; j < dim; j++)
 		out_values[j] = (qaws_scalar)(acc[j] / total);
-	free(acc); free(tmp);
+	qaws_internal_free(acc); qaws_internal_free(tmp);
 	return QAWS_STATUS_OK;
 }

@@ -1,22 +1,18 @@
 #include "qaws_internal_curve.h"
+#include "qaws_internal_memory.h"
 #include <stdlib.h>
 #include <string.h>
 
 void* qaws_internal_alloc(qaws_allocator const* allocator, unsigned long size)
 {
-	if (allocator && allocator->alloc)
-		return allocator->alloc(size, allocator->user_data);
-	return malloc((size_t)size);
+	return qaws_internal_alloc_from(allocator, (size_t)size);
 }
 
+/* the block knows its allocator (qaws_internal_memory.h) */
 void qaws_internal_dealloc(qaws_allocator const* allocator, void* ptr)
 {
-	if (allocator && allocator->dealloc)
-	{
-		allocator->dealloc(ptr, allocator->user_data);
-		return;
-	}
-	free(ptr);
+	(void)allocator;
+	qaws_internal_free(ptr);
 }
 
 void* qaws_internal_scratch(qaws_allocator const* allocator, void* stack, size_t stack_bytes, size_t bytes)

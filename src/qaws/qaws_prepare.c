@@ -1,4 +1,5 @@
 #include "qaws_prepare.h"
+#include "internal/qaws_internal_memory.h"
 #include "qaws_platform.h"
 #include <string.h>
 #include <stdlib.h>
@@ -379,7 +380,7 @@ qaws_status qaws_trajectory_prepare_2d(
 	pos = (const qaws_scalar*)positions;
 
 	if (key_count * dim_count > 128) {
-		velocities = (qaws_scalar*)malloc(key_count * dim_count * sizeof(qaws_scalar));
+		velocities = (qaws_scalar*)qaws_internal_malloc(key_count * dim_count * sizeof(qaws_scalar));
 		if (!velocities) return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 
@@ -399,7 +400,7 @@ qaws_status qaws_trajectory_prepare_2d(
 		}
 	}
 
-	if (velocities != vel_stack) free(velocities);
+	if (velocities != vel_stack) qaws_internal_free(velocities);
 	return QAWS_STATUS_OK;
 }
 
@@ -432,7 +433,7 @@ qaws_status qaws_trajectory_prepare_3d(
 	pos = (const qaws_scalar*)positions;
 
 	if (key_count * dim_count > 192) {
-		velocities = (qaws_scalar*)malloc(key_count * dim_count * sizeof(qaws_scalar));
+		velocities = (qaws_scalar*)qaws_internal_malloc(key_count * dim_count * sizeof(qaws_scalar));
 		if (!velocities) return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 
@@ -453,7 +454,7 @@ qaws_status qaws_trajectory_prepare_3d(
 		}
 	}
 
-	if (velocities != vel_stack) free(velocities);
+	if (velocities != vel_stack) qaws_internal_free(velocities);
 	return QAWS_STATUS_OK;
 }
 

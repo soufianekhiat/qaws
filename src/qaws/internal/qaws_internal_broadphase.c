@@ -1,4 +1,5 @@
 #include "qaws_internal_broadphase.h"
+#include "qaws_internal_memory.h"
 #include "qaws_internal_parallel.h"
 #include "../qaws_platform.h"
 #include <math.h>
@@ -134,8 +135,8 @@ static qaws_status bp_build(qaws_bp_box const* boxes, unsigned int count, unsign
 	ncell = G.g[0] * G.g[1] * G.g[2];
 
 	/* count, prefix, fill */
-	start = (unsigned int*)calloc((size_t)ncell + 1, sizeof(unsigned int));
-	fill = (unsigned int*)malloc(((size_t)ncell + 1) * sizeof(unsigned int));
+	start = (unsigned int*)qaws_internal_zalloc((size_t)ncell + 1, sizeof(unsigned int));
+	fill = (unsigned int*)qaws_internal_malloc(((size_t)ncell + 1) * sizeof(unsigned int));
 	if (!start || !fill)
 	{
 		goto done;
@@ -157,7 +158,7 @@ static qaws_status bp_build(qaws_bp_box const* boxes, unsigned int count, unsign
 	}
 	start[ncell] = total;
 	memcpy(fill, start, ((size_t)ncell + 1) * sizeof(unsigned int));
-	items = (unsigned int*)malloc((size_t)(total ? total : 1) * sizeof(unsigned int));
+	items = (unsigned int*)qaws_internal_malloc((size_t)(total ? total : 1) * sizeof(unsigned int));
 	if (!items)
 	{
 		goto done;
@@ -171,7 +172,7 @@ static qaws_status bp_build(qaws_bp_box const* boxes, unsigned int count, unsign
 				for (a = c0[0]; a <= c1[0]; a++)
 					items[fill[(c * G.g[1] + b) * G.g[0] + a]++] = i;
 	}
-	free(fill);
+	qaws_internal_free(fill);
 	B->G = G;
 	B->dim = dim;
 	B->count = count;
@@ -188,9 +189,9 @@ static qaws_status bp_build(qaws_bp_box const* boxes, unsigned int count, unsign
 		B->hmin = 0;
 	return QAWS_STATUS_OK;
 done:
-	free(start);
-	free(fill);
-	free(items);
+	qaws_internal_free(start);
+	qaws_internal_free(fill);
+	qaws_internal_free(items);
 	return QAWS_STATUS_ALLOCATION_FAILURE;
 }
 
@@ -286,7 +287,7 @@ static unsigned int bp_axis(qaws_bp_box const* boxes, unsigned int count, unsign
 /* bounded boxes sorted by their low end on the axis (unbounded ones counted apart) */
 static bp_key* bp_sorted(qaws_bp_box const* boxes, unsigned int count, unsigned int dim, unsigned int axis, unsigned int* out_n)
 {
-	bp_key* keys = (bp_key*)malloc(sizeof(bp_key) * (count ? count : 1));
+	bp_key* keys = (bp_key*)qaws_internal_malloc(sizeof(bp_key) * (count ? count : 1));
 	unsigned int i, n = 0;
 	if (!keys)
 		return NULL;
@@ -426,12 +427,12 @@ qaws_status qaws_internal_broadphase(
 			s = bp_sweep(boxes, count, dim, axis, keys, n, accept, user, bp_serial_visit, &b, &candidates);
 		else
 			s = bp_cells(&GR, boxes, accept, user, bp_serial_visit, &b, 0, 0, GR.ncell, &candidates);
-		free(keys);
+		qaws_internal_free(keys);
 	}
 	if (out_stats)
 		out_stats->candidate_count = candidates;
-	free(GR.start);
-	free(GR.items);
+	qaws_internal_free(GR.start);
+	qaws_internal_free(GR.items);
 	return s;
 }
 
@@ -440,13 +441,13 @@ qaws_status qaws_internal_grid_create(qaws_bp_box const* boxes, unsigned int cou
 	struct qaws_bp_grid* g;
 	qaws_status s;
 	*out_grid = NULL;
-	g = (struct qaws_bp_grid*)malloc(sizeof(struct qaws_bp_grid));
+	g = (struct qaws_bp_grid*)qaws_internal_malloc(sizeof(struct qaws_bp_grid));
 	if (!g)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	s = bp_build(boxes, count, dim, g);
 	if (s != QAWS_STATUS_OK)
 	{
-		free(g);
+		qaws_internal_free(g);
 		return s;
 	}
 	*out_grid = g;
@@ -457,9 +458,9 @@ void qaws_internal_grid_destroy(qaws_bp_grid* grid)
 {
 	if (!grid)
 		return;
-	free(grid->start);
-	free(grid->items);
-	free(grid);
+	qaws_internal_free(grid->start);
+	qaws_internal_free(grid->items);
+	qaws_internal_free(grid);
 }
 
 double qaws_internal_grid_ring(qaws_bp_grid const* g, double const* p, unsigned int r, void (*visit)(void* user, unsigned int item), void* user)
@@ -620,7 +621,7 @@ qaws_status qaws_internal_grid_pairs(qaws_bp_grid const* grid, qaws_bp_box const
 	P.accept_user = accept_user;
 	P.visit = visit;
 	P.visit_user = visit_user;
-	P.candidates = (unsigned int*)calloc(n, sizeof(unsigned int));
+	P.candidates = (unsigned int*)qaws_internal_zalloc(n, sizeof(unsigned int));
 	if (!P.candidates)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	{
@@ -631,11 +632,11 @@ qaws_status qaws_internal_grid_pairs(qaws_bp_grid const* grid, qaws_bp_box const
 			s = bp_sweep(boxes, grid->count, grid->dim, axis, keys, nk, accept, accept_user, visit, visit_user, &P.candidates[0]);
 		else
 			s = qaws_internal_parallel(executor, grid->ncell, BP_PAIR_GRAIN, bp_par_job, &P);
-		free(keys);
+		qaws_internal_free(keys);
 	}
 	for (k = 0; k < n && out_candidates; k++)
 		*out_candidates += P.candidates[k];
-	free(P.candidates);
+	qaws_internal_free(P.candidates);
 	return s;
 }
 

@@ -5,6 +5,7 @@
  */
 
 #include "qaws_repulsive.h"
+#include "internal/qaws_internal_memory.h"
 #include "qaws_curve.h"
 #include "qaws_eval.h"
 #include "qaws_inspect.h"
@@ -161,11 +162,11 @@ qaws_status qaws_repulsive_polyline_to_curve(unsigned int dimension, qaws_scalar
 		if (source_curve[i] == curve) { if (!m) first = i; m++; }
 	if (m < 2)
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	cp = (qaws_scalar*)malloc(sizeof(qaws_scalar) * dimension * (m + 1));
-	kn = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (m + 3));
+	cp = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * dimension * (m + 1));
+	kn = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * (m + 3));
 	if (!cp || !kn)
 	{
-		free(cp); free(kn);
+		qaws_internal_free(cp); qaws_internal_free(kn);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 	/* the vertices in their order, knots at their parameters (clamped) */
@@ -189,6 +190,6 @@ qaws_status qaws_repulsive_polyline_to_curve(unsigned int dimension, qaws_scalar
 	d.dimension = (qaws_dimension)dimension; d.degree = 1; d.control_points = cp; d.control_point_count = m;
 	d.knots = kn; d.knot_count = m + 2;
 	st = qaws_curve_create_bspline(&d, out_curve);
-	free(cp); free(kn);
+	qaws_internal_free(cp); qaws_internal_free(kn);
 	return st;
 }

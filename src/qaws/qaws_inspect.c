@@ -1,4 +1,5 @@
 #include "qaws_alloc.h"
+#include "internal/qaws_internal_memory.h"
 #include "qaws_inspect.h"
 #include "qaws_eval.h"
 #include "qaws_surface.h"
@@ -2049,9 +2050,9 @@ qaws_status qaws_curve_find_self_intersections_2d(
 	range_min = curve->parameter_range.min_value;
 	range_max = curve->parameter_range.max_value;
 
-	params = (qaws_scalar *)malloc(n * sizeof(qaws_scalar));
-	pts = (qaws_vec2 *)malloc(n * sizeof(qaws_vec2));
-	if (!params || !pts) { free(params); free(pts); return QAWS_STATUS_ALLOCATION_FAILURE; }
+	params = (qaws_scalar *)qaws_internal_malloc(n * sizeof(qaws_scalar));
+	pts = (qaws_vec2 *)qaws_internal_malloc(n * sizeof(qaws_vec2));
+	if (!params || !pts) { qaws_internal_free(params); qaws_internal_free(pts); return QAWS_STATUS_ALLOCATION_FAILURE; }
 
 	/* Dense sampling */
 	for (i = 0; i < n; ++i)
@@ -2059,7 +2060,7 @@ qaws_status qaws_curve_find_self_intersections_2d(
 		qaws_eval_result_2d r;
 		params[i] = range_min + (qaws_scalar)i * (range_max - range_min) / (qaws_scalar)(n - 1);
 		s = qaws_curve_evaluate_2d(curve, params[i], QAWS_EVAL_FLAG_POSITION, &r);
-		if (s != QAWS_STATUS_OK) { free(params); free(pts); return s; }
+		if (s != QAWS_STATUS_OK) { qaws_internal_free(params); qaws_internal_free(pts); return s; }
 		pts[i] = r.position;
 	}
 
@@ -2124,8 +2125,8 @@ qaws_status qaws_curve_find_self_intersections_2d(
 		}
 	}
 
-	free(params);
-	free(pts);
+	qaws_internal_free(params);
+	qaws_internal_free(pts);
 	*out_count = found;
 	return QAWS_STATUS_OK;
 }
@@ -2155,16 +2156,16 @@ qaws_status qaws_curve_find_self_intersections_3d(
 	range_min = curve->parameter_range.min_value;
 	range_max = curve->parameter_range.max_value;
 
-	params = (qaws_scalar *)malloc(n * sizeof(qaws_scalar));
-	pts = (qaws_vec3 *)malloc(n * sizeof(qaws_vec3));
-	if (!params || !pts) { free(params); free(pts); return QAWS_STATUS_ALLOCATION_FAILURE; }
+	params = (qaws_scalar *)qaws_internal_malloc(n * sizeof(qaws_scalar));
+	pts = (qaws_vec3 *)qaws_internal_malloc(n * sizeof(qaws_vec3));
+	if (!params || !pts) { qaws_internal_free(params); qaws_internal_free(pts); return QAWS_STATUS_ALLOCATION_FAILURE; }
 
 	for (i = 0; i < n; ++i)
 	{
 		qaws_eval_result_3d r;
 		params[i] = range_min + (qaws_scalar)i * (range_max - range_min) / (qaws_scalar)(n - 1);
 		s = qaws_curve_evaluate_3d(curve, params[i], QAWS_EVAL_FLAG_POSITION, &r);
-		if (s != QAWS_STATUS_OK) { free(params); free(pts); return s; }
+		if (s != QAWS_STATUS_OK) { qaws_internal_free(params); qaws_internal_free(pts); return s; }
 		pts[i] = r.position;
 	}
 
@@ -2218,8 +2219,8 @@ qaws_status qaws_curve_find_self_intersections_3d(
 		}
 	}
 
-	free(params);
-	free(pts);
+	qaws_internal_free(params);
+	qaws_internal_free(pts);
 	*out_count = found;
 	return QAWS_STATUS_OK;
 }
@@ -2258,13 +2259,13 @@ qaws_status qaws_curve_find_intersections_2d(
 	b_min = curve_b->parameter_range.min_value;
 	b_max = curve_b->parameter_range.max_value;
 
-	params_a = (qaws_scalar *)malloc(na * sizeof(qaws_scalar));
-	pts_a = (qaws_vec2 *)malloc(na * sizeof(qaws_vec2));
-	params_b = (qaws_scalar *)malloc(nb * sizeof(qaws_scalar));
-	pts_b = (qaws_vec2 *)malloc(nb * sizeof(qaws_vec2));
+	params_a = (qaws_scalar *)qaws_internal_malloc(na * sizeof(qaws_scalar));
+	pts_a = (qaws_vec2 *)qaws_internal_malloc(na * sizeof(qaws_vec2));
+	params_b = (qaws_scalar *)qaws_internal_malloc(nb * sizeof(qaws_scalar));
+	pts_b = (qaws_vec2 *)qaws_internal_malloc(nb * sizeof(qaws_vec2));
 	if (!params_a || !pts_a || !params_b || !pts_b)
 	{
-		free(params_a); free(pts_a); free(params_b); free(pts_b);
+		qaws_internal_free(params_a); qaws_internal_free(pts_a); qaws_internal_free(params_b); qaws_internal_free(pts_b);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 
@@ -2329,7 +2330,7 @@ qaws_status qaws_curve_find_intersections_2d(
 	s = QAWS_STATUS_OK;
 
 cleanup_2d:
-	free(params_a); free(pts_a); free(params_b); free(pts_b);
+	qaws_internal_free(params_a); qaws_internal_free(pts_a); qaws_internal_free(params_b); qaws_internal_free(pts_b);
 	*out_count = found;
 	return s;
 }
@@ -2364,13 +2365,13 @@ qaws_status qaws_curve_find_intersections_3d(
 	b_min = curve_b->parameter_range.min_value;
 	b_max = curve_b->parameter_range.max_value;
 
-	params_a = (qaws_scalar *)malloc(na * sizeof(qaws_scalar));
-	pts_a = (qaws_vec3 *)malloc(na * sizeof(qaws_vec3));
-	params_b = (qaws_scalar *)malloc(nb * sizeof(qaws_scalar));
-	pts_b = (qaws_vec3 *)malloc(nb * sizeof(qaws_vec3));
+	params_a = (qaws_scalar *)qaws_internal_malloc(na * sizeof(qaws_scalar));
+	pts_a = (qaws_vec3 *)qaws_internal_malloc(na * sizeof(qaws_vec3));
+	params_b = (qaws_scalar *)qaws_internal_malloc(nb * sizeof(qaws_scalar));
+	pts_b = (qaws_vec3 *)qaws_internal_malloc(nb * sizeof(qaws_vec3));
 	if (!params_a || !pts_a || !params_b || !pts_b)
 	{
-		free(params_a); free(pts_a); free(params_b); free(pts_b);
+		qaws_internal_free(params_a); qaws_internal_free(pts_a); qaws_internal_free(params_b); qaws_internal_free(pts_b);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 
@@ -2431,7 +2432,7 @@ qaws_status qaws_curve_find_intersections_3d(
 	s = QAWS_STATUS_OK;
 
 cleanup_3d:
-	free(params_a); free(pts_a); free(params_b); free(pts_b);
+	qaws_internal_free(params_a); qaws_internal_free(pts_a); qaws_internal_free(params_b); qaws_internal_free(pts_b);
 	*out_count = found;
 	return s;
 }
@@ -3873,14 +3874,14 @@ qaws_status qaws_surface_tessellate(
 	/* Allocate work structures */
 	stack_capacity = 4096;
 	leaf_capacity = 4096;
-	stack = (qaws_tess_quad *)malloc(
+	stack = (qaws_tess_quad *)qaws_internal_malloc(
 		stack_capacity * sizeof(qaws_tess_quad));
-	leaves = (qaws_tess_leaf *)malloc(
+	leaves = (qaws_tess_leaf *)qaws_internal_malloc(
 		leaf_capacity * sizeof(qaws_tess_leaf));
 	if (!stack || !leaves)
 	{
-		free(stack);
-		free(leaves);
+		qaws_internal_free(stack);
+		qaws_internal_free(leaves);
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	}
 
@@ -3915,7 +3916,7 @@ qaws_status qaws_surface_tessellate(
 			&r00);
 		if (status != QAWS_STATUS_OK)
 		{
-			free(stack); free(leaves); return status;
+			qaws_internal_free(stack); qaws_internal_free(leaves); return status;
 		}
 
 		status = qaws_surface_evaluate(surface, quad.u1, quad.v0,
@@ -3923,7 +3924,7 @@ qaws_status qaws_surface_tessellate(
 			&r10);
 		if (status != QAWS_STATUS_OK)
 		{
-			free(stack); free(leaves); return status;
+			qaws_internal_free(stack); qaws_internal_free(leaves); return status;
 		}
 
 		status = qaws_surface_evaluate(surface, quad.u0, quad.v1,
@@ -3931,7 +3932,7 @@ qaws_status qaws_surface_tessellate(
 			&r01);
 		if (status != QAWS_STATUS_OK)
 		{
-			free(stack); free(leaves); return status;
+			qaws_internal_free(stack); qaws_internal_free(leaves); return status;
 		}
 
 		status = qaws_surface_evaluate(surface, quad.u1, quad.v1,
@@ -3939,7 +3940,7 @@ qaws_status qaws_surface_tessellate(
 			&r11);
 		if (status != QAWS_STATUS_OK)
 		{
-			free(stack); free(leaves); return status;
+			qaws_internal_free(stack); qaws_internal_free(leaves); return status;
 		}
 
 		status = qaws_surface_evaluate(surface, u_mid, v_mid,
@@ -3947,7 +3948,7 @@ qaws_status qaws_surface_tessellate(
 			&r_center);
 		if (status != QAWS_STATUS_OK)
 		{
-			free(stack); free(leaves); return status;
+			qaws_internal_free(stack); qaws_internal_free(leaves); return status;
 		}
 
 		/* Check subdivision criteria */
@@ -4010,11 +4011,11 @@ qaws_status qaws_surface_tessellate(
 		if (subdivide && stack_top + 4 > stack_capacity)
 		{
 			unsigned int new_cap = stack_capacity * 2;
-			qaws_tess_quad* new_stack = (qaws_tess_quad*)realloc(
+			qaws_tess_quad* new_stack = (qaws_tess_quad*)qaws_internal_realloc(
 				stack, new_cap * sizeof(qaws_tess_quad));
 			if (!new_stack)
 			{
-				free(stack); free(leaves);
+				qaws_internal_free(stack); qaws_internal_free(leaves);
 				return QAWS_STATUS_ALLOCATION_FAILURE;
 			}
 			stack = new_stack;
@@ -4057,11 +4058,11 @@ qaws_status qaws_surface_tessellate(
 			if (leaf_count >= leaf_capacity)
 			{
 				unsigned int new_cap = leaf_capacity * 2;
-				qaws_tess_leaf* new_leaves = (qaws_tess_leaf*)realloc(
+				qaws_tess_leaf* new_leaves = (qaws_tess_leaf*)qaws_internal_realloc(
 					leaves, new_cap * sizeof(qaws_tess_leaf));
 				if (!new_leaves)
 				{
-					free(stack); free(leaves);
+					qaws_internal_free(stack); qaws_internal_free(leaves);
 					return QAWS_STATUS_ALLOCATION_FAILURE;
 				}
 				leaves = new_leaves;
@@ -4075,7 +4076,7 @@ qaws_status qaws_surface_tessellate(
 		}
 	}
 
-	free(stack);
+	qaws_internal_free(stack);
 
 	/* ---- Phase 2: Add all leaf corner vertices ---- */
 	status = QAWS_STATUS_OK;
@@ -4083,16 +4084,16 @@ qaws_status qaws_surface_tessellate(
 	{
 		qaws_tess_eval_add(surface, out_vertices, &vert_count,
 			vertex_capacity, leaves[li].u0, leaves[li].v0, &status);
-		if (status != QAWS_STATUS_OK) { free(leaves); return status; }
+		if (status != QAWS_STATUS_OK) { qaws_internal_free(leaves); return status; }
 		qaws_tess_eval_add(surface, out_vertices, &vert_count,
 			vertex_capacity, leaves[li].u1, leaves[li].v0, &status);
-		if (status != QAWS_STATUS_OK) { free(leaves); return status; }
+		if (status != QAWS_STATUS_OK) { qaws_internal_free(leaves); return status; }
 		qaws_tess_eval_add(surface, out_vertices, &vert_count,
 			vertex_capacity, leaves[li].u0, leaves[li].v1, &status);
-		if (status != QAWS_STATUS_OK) { free(leaves); return status; }
+		if (status != QAWS_STATUS_OK) { qaws_internal_free(leaves); return status; }
 		qaws_tess_eval_add(surface, out_vertices, &vert_count,
 			vertex_capacity, leaves[li].u1, leaves[li].v1, &status);
-		if (status != QAWS_STATUS_OK) { free(leaves); return status; }
+		if (status != QAWS_STATUS_OK) { qaws_internal_free(leaves); return status; }
 	}
 
 	/* ---- Phase 3: Triangulate each leaf with T-junction stitching ----
@@ -4164,7 +4165,7 @@ qaws_status qaws_surface_tessellate(
 		/* Add center vertex for fan */
 		i_center = qaws_tess_eval_add(surface, out_vertices, &vert_count,
 			vertex_capacity, u_mid, v_mid, &status);
-		if (status != QAWS_STATUS_OK) { free(leaves); return status; }
+		if (status != QAWS_STATUS_OK) { qaws_internal_free(leaves); return status; }
 
 		/* Emit fan triangles: (center, perim[k], perim[k+1]) */
 		for (k = 0; k < perim_count; ++k)
@@ -4179,7 +4180,7 @@ qaws_status qaws_surface_tessellate(
 		}
 	}
 
-	free(leaves);
+	qaws_internal_free(leaves);
 
 	*out_vertex_count = vert_count;
 	*out_index_count = idx_count;
@@ -4213,11 +4214,11 @@ qaws_status qaws_surface_project_curve(
 	n_samples = sample_count > 0 ? sample_count : 128;
 	range = qaws_curve_get_parameter_range(curve);
 
-	params = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (size_t)n_samples);
-	uv_coords = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (size_t)n_samples * 2);
+	params = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * (size_t)n_samples);
+	uv_coords = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * (size_t)n_samples * 2);
 	if (!params || !uv_coords)
 	{
-		free(params); free(uv_coords);
+		qaws_internal_free(params); qaws_internal_free(uv_coords);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 
@@ -4231,10 +4232,10 @@ qaws_status qaws_surface_project_curve(
 
 		memset(&er, 0, sizeof(er));
 		status = qaws_curve_evaluate_3d(curve, t, QAWS_EVAL_FLAG_POSITION, &er);
-		if (status != QAWS_STATUS_OK) { free(params); free(uv_coords); return status; }
+		if (status != QAWS_STATUS_OK) { qaws_internal_free(params); qaws_internal_free(uv_coords); return status; }
 
 		status = qaws_surface_find_closest_point(surface, er.position, &u, &v, &closest);
-		if (status != QAWS_STATUS_OK) { free(params); free(uv_coords); return status; }
+		if (status != QAWS_STATUS_OK) { qaws_internal_free(params); qaws_internal_free(uv_coords); return status; }
 
 		params[i] = t;
 		uv_coords[i * 2 + 0] = u;
@@ -4252,8 +4253,8 @@ qaws_status qaws_surface_project_curve(
 		n_samples, n_cp,
 		out_uv_curve);
 
-	free(params);
-	free(uv_coords);
+	qaws_internal_free(params);
+	qaws_internal_free(uv_coords);
 	return status;
 }
 
@@ -4416,7 +4417,7 @@ static qaws_status create_path_bspline(
 	}
 
 	/* Generate uniform parameters [0, 1] */
-	params = (qaws_scalar*)malloc(point_count * sizeof(qaws_scalar));
+	params = (qaws_scalar*)qaws_internal_malloc(point_count * sizeof(qaws_scalar));
 	if (!params) return QAWS_STATUS_ALLOCATION_FAILURE;
 	for (i = 0; i < point_count; i++)
 		params[i] = (qaws_scalar)i / (qaws_scalar)(point_count - 1);
@@ -4426,7 +4427,7 @@ static qaws_status create_path_bspline(
 		params, path_coords,
 		point_count, n_cp,
 		out_curve);
-	free(params);
+	qaws_internal_free(params);
 
 	if (status != QAWS_STATUS_OK)
 		return status;
@@ -4544,7 +4545,7 @@ qaws_status qaws_surface_compute_geodesic(
 	if (dist_target < QAWS_LITERAL(1e-10))
 		return QAWS_STATUS_DEGENERATE_CURVE;
 
-	path_coords = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (size_t)(n_steps + 2) * 3);
+	path_coords = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * (size_t)(n_steps + 2) * 3);
 	if (!path_coords)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 
@@ -4735,7 +4736,7 @@ qaws_status qaws_surface_compute_geodesic(
 			path_coords, actual_count, 150, out_curve);
 	}
 
-	free(path_coords);
+	qaws_internal_free(path_coords);
 	return status;
 }
 
@@ -4786,14 +4787,14 @@ static qaws_status geodesic_tessellate_and_build(
 	tri_count = grid_n * grid_n * 2;
 	idx_count = tri_count * 3;
 
-	verts = (qaws_tessellation_vertex*)malloc(vert_count * sizeof(qaws_tessellation_vertex));
-	indices = (unsigned int*)malloc(idx_count * sizeof(unsigned int));
-	positions = (qaws_scalar*)malloc(vert_count * 3 * sizeof(qaws_scalar));
-	uvs = (qaws_scalar*)malloc(vert_count * 2 * sizeof(qaws_scalar));
+	verts = (qaws_tessellation_vertex*)qaws_internal_malloc(vert_count * sizeof(qaws_tessellation_vertex));
+	indices = (unsigned int*)qaws_internal_malloc(idx_count * sizeof(unsigned int));
+	positions = (qaws_scalar*)qaws_internal_malloc(vert_count * 3 * sizeof(qaws_scalar));
+	uvs = (qaws_scalar*)qaws_internal_malloc(vert_count * 2 * sizeof(qaws_scalar));
 
 	if (!verts || !indices || !positions || !uvs)
 	{
-		free(verts); free(indices); free(positions); free(uvs);
+		qaws_internal_free(verts); qaws_internal_free(indices); qaws_internal_free(positions); qaws_internal_free(uvs);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 
@@ -4812,7 +4813,7 @@ static qaws_status geodesic_tessellate_and_build(
 				QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL, &sr);
 			if (status != QAWS_STATUS_OK)
 			{
-				free(verts); free(indices); free(positions); free(uvs);
+				qaws_internal_free(verts); qaws_internal_free(indices); qaws_internal_free(positions); qaws_internal_free(uvs);
 				return status;
 			}
 
@@ -4860,7 +4861,7 @@ static qaws_status geodesic_tessellate_and_build(
 
 	if (status != QAWS_STATUS_OK)
 	{
-		free(verts); free(indices); free(positions); free(uvs);
+		qaws_internal_free(verts); qaws_internal_free(indices); qaws_internal_free(positions); qaws_internal_free(uvs);
 		return status;
 	}
 
@@ -4919,25 +4920,25 @@ qaws_status qaws_surface_compute_geodesic_flip(
 	if (src_v == dst_v)
 	{
 		qaws_internal_mesh_destroy(&mesh);
-		free(verts); free(indices); free(positions); free(uvs);
+		qaws_internal_free(verts); qaws_internal_free(indices); qaws_internal_free(positions); qaws_internal_free(uvs);
 		return QAWS_STATUS_DEGENERATE_CURVE;
 	}
 
 	/* Dijkstra shortest path */
-	path = (unsigned int*)malloc(vert_count * sizeof(unsigned int));
+	path = (unsigned int*)qaws_internal_malloc(vert_count * sizeof(unsigned int));
 	if (!path)
 	{
 		qaws_internal_mesh_destroy(&mesh);
-		free(verts); free(indices); free(positions); free(uvs);
+		qaws_internal_free(verts); qaws_internal_free(indices); qaws_internal_free(positions); qaws_internal_free(uvs);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 
 	status = qaws_internal_mesh_dijkstra(&mesh, src_v, dst_v, path, &path_count);
 	if (status != QAWS_STATUS_OK || path_count < 2)
 	{
-		free(path);
+		qaws_internal_free(path);
 		qaws_internal_mesh_destroy(&mesh);
-		free(verts); free(indices); free(positions); free(uvs);
+		qaws_internal_free(verts); qaws_internal_free(indices); qaws_internal_free(positions); qaws_internal_free(uvs);
 		return status != QAWS_STATUS_OK ? status : QAWS_STATUS_NUMERICAL_FAILURE;
 	}
 
@@ -4956,14 +4957,14 @@ qaws_status qaws_surface_compute_geodesic_flip(
 		qaws_scalar* uv_pts = NULL; /* 2 * out_count */
 
 		out_count = path_count;
-		pts = (qaws_scalar*)malloc(out_count * 3 * sizeof(qaws_scalar));
-		uv_pts = (qaws_scalar*)malloc(out_count * 2 * sizeof(qaws_scalar));
+		pts = (qaws_scalar*)qaws_internal_malloc(out_count * 3 * sizeof(qaws_scalar));
+		uv_pts = (qaws_scalar*)qaws_internal_malloc(out_count * 2 * sizeof(qaws_scalar));
 		if (!pts || !uv_pts)
 		{
-			free(pts); free(uv_pts);
-			free(path);
+			qaws_internal_free(pts); qaws_internal_free(uv_pts);
+			qaws_internal_free(path);
 			qaws_internal_mesh_destroy(&mesh);
-			free(verts); free(indices); free(positions); free(uvs);
+			qaws_internal_free(verts); qaws_internal_free(indices); qaws_internal_free(positions); qaws_internal_free(uvs);
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 		}
 
@@ -5310,16 +5311,16 @@ qaws_status qaws_surface_compute_geodesic_flip(
 
 		status = create_path_bspline(pts, out_count, 150, out_curve);
 
-		free(pts);
-		free(uv_pts);
+		qaws_internal_free(pts);
+		qaws_internal_free(uv_pts);
 	}
 
-	free(path);
+	qaws_internal_free(path);
 	qaws_internal_mesh_destroy(&mesh);
-	free(verts);
-	free(indices);
-	free(positions);
-	free(uvs);
+	qaws_internal_free(verts);
+	qaws_internal_free(indices);
+	qaws_internal_free(positions);
+	qaws_internal_free(uvs);
 
 	return status;
 }
@@ -5352,11 +5353,11 @@ static qaws_status heat_solve_distances(
 	memset(&L_reg, 0, sizeof(L_reg));
 
 	/* Build Laplacian and mass matrix */
-	mass_diag = (qaws_scalar*)malloc(vert_count * sizeof(qaws_scalar));
+	mass_diag = (qaws_scalar*)qaws_internal_malloc(vert_count * sizeof(qaws_scalar));
 	if (!mass_diag) return QAWS_STATUS_ALLOCATION_FAILURE;
 
 	status = qaws_internal_build_laplacian(mesh, &L, mass_diag);
-	if (status != QAWS_STATUS_OK) { free(mass_diag); return status; }
+	if (status != QAWS_STATUS_OK) { qaws_internal_free(mass_diag); return status; }
 
 	/* Compute mean edge length */
 	{
@@ -5405,8 +5406,8 @@ static qaws_status heat_solve_distances(
 			A_minus_tL.values[A_minus_tL.row_ptr[vi]] += mass_diag[vi];
 	}
 
-	heat = (qaws_scalar*)calloc(vert_count, sizeof(qaws_scalar));
-	rhs = (qaws_scalar*)calloc(vert_count, sizeof(qaws_scalar));
+	heat = (qaws_scalar*)qaws_internal_zalloc(vert_count, sizeof(qaws_scalar));
+	rhs = (qaws_scalar*)qaws_internal_zalloc(vert_count, sizeof(qaws_scalar));
 	if (!heat || !rhs) { status = QAWS_STATUS_ALLOCATION_FAILURE; goto cleanup; }
 
 	rhs[src_v] = QAWS_ONE;
@@ -5416,7 +5417,7 @@ static qaws_status heat_solve_distances(
 
 	/* Step II: Per-triangle gradient X = -grad(u) / |grad(u)| */
 	/* Step III: Integrated divergence div(X) at each vertex */
-	div_X = (qaws_scalar*)calloc(vert_count, sizeof(qaws_scalar));
+	div_X = (qaws_scalar*)qaws_internal_zalloc(vert_count, sizeof(qaws_scalar));
 	if (!div_X) { status = QAWS_STATUS_ALLOCATION_FAILURE; goto cleanup; }
 
 	for (ti = 0; ti < mesh->tri_count; ti++)
@@ -5570,10 +5571,10 @@ cleanup:
 	qaws_internal_csr_free(&L_reg);
 	qaws_internal_csr_free(&A_minus_tL);
 	qaws_internal_csr_free(&L);
-	free(div_X);
-	free(heat);
-	free(rhs);
-	free(mass_diag);
+	qaws_internal_free(div_X);
+	qaws_internal_free(heat);
+	qaws_internal_free(rhs);
+	qaws_internal_free(mass_diag);
 	return status;
 }
 
@@ -5618,7 +5619,7 @@ qaws_status qaws_surface_compute_geodesic_distance(
 	{
 		*out_count = vert_count;
 		qaws_internal_mesh_destroy(&mesh);
-		free(verts); free(indices); free(positions); free(uvs_buf);
+		qaws_internal_free(verts); qaws_internal_free(indices); qaws_internal_free(positions); qaws_internal_free(uvs_buf);
 		return QAWS_STATUS_BUFFER_TOO_SMALL;
 	}
 
@@ -5636,12 +5637,12 @@ qaws_status qaws_surface_compute_geodesic_distance(
 	*out_count = vert_count;
 
 cleanup:
-	free(distances);
+	qaws_internal_free(distances);
 	qaws_internal_mesh_destroy(&mesh);
-	free(verts);
-	free(indices);
-	free(positions);
-	free(uvs_buf);
+	qaws_internal_free(verts);
+	qaws_internal_free(indices);
+	qaws_internal_free(positions);
+	qaws_internal_free(uvs_buf);
 
 	return status;
 }
@@ -5701,7 +5702,7 @@ qaws_status qaws_surface_compute_geodesic_heat(
 		unsigned int entry_edge; /* edge we entered from (UINT_MAX = none) */
 		unsigned int trace_iter;
 
-		trace_coords = (qaws_scalar*)malloc(max_trace * 3 * sizeof(qaws_scalar));
+		trace_coords = (qaws_scalar*)qaws_internal_malloc(max_trace * 3 * sizeof(qaws_scalar));
 		if (!trace_coords) { status = QAWS_STATUS_ALLOCATION_FAILURE; goto cleanup; }
 
 		/* Find triangle containing (end_u, end_v) via UV barycentric test */
@@ -5753,7 +5754,7 @@ qaws_status qaws_surface_compute_geodesic_heat(
 		}
 		if (cur_tri == UINT_MAX)
 		{
-			free(trace_coords);
+			qaws_internal_free(trace_coords);
 			status = QAWS_STATUS_NUMERICAL_FAILURE;
 			goto cleanup;
 		}
@@ -5979,14 +5980,14 @@ qaws_status qaws_surface_compute_geodesic_heat(
 
 		if (trace_count < 2)
 		{
-			free(trace_coords);
+			qaws_internal_free(trace_coords);
 			status = QAWS_STATUS_NUMERICAL_FAILURE;
 			goto cleanup;
 		}
 
 		/* Reverse trace (end→start → start→end), fix exact endpoints */
-		path_coords = (qaws_scalar*)malloc(trace_count * 3 * sizeof(qaws_scalar));
-		if (!path_coords) { free(trace_coords); status = QAWS_STATUS_ALLOCATION_FAILURE; goto cleanup; }
+		path_coords = (qaws_scalar*)qaws_internal_malloc(trace_count * 3 * sizeof(qaws_scalar));
+		if (!path_coords) { qaws_internal_free(trace_coords); status = QAWS_STATUS_ALLOCATION_FAILURE; goto cleanup; }
 		{
 			unsigned int pi;
 			for (pi = 0; pi < trace_count; pi++)
@@ -6012,17 +6013,17 @@ qaws_status qaws_surface_compute_geodesic_heat(
 		}
 
 		status = create_path_bspline(path_coords, trace_count, 50, out_curve);
-		free(trace_coords);
-		free(path_coords);
+		qaws_internal_free(trace_coords);
+		qaws_internal_free(path_coords);
 	}
 
 cleanup:
-	free(distances);
+	qaws_internal_free(distances);
 	qaws_internal_mesh_destroy(&mesh);
-	free(verts);
-	free(indices);
-	free(positions);
-	free(uvs_buf);
+	qaws_internal_free(verts);
+	qaws_internal_free(indices);
+	qaws_internal_free(positions);
+	qaws_internal_free(uvs_buf);
 
 	return status;
 }

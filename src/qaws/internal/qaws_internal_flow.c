@@ -10,6 +10,7 @@
  */
 
 #include "qaws_internal_flow.h"
+#include "qaws_internal_memory.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -38,9 +39,9 @@ void qaws_flow_destroy(qaws_flow* f)
 {
 	if (!f)
 		return;
-	free(f->from); free(f->to); free(f->room); free(f->flow); free(f->cost); free(f->excess); free(f->pi); free(f->dist);
-	free(f->first); free(f->res); free(f->pred); free(f->seen); free(f->done); free(f->settled); free(f->target); free(f->heap);
-	free(f);
+	qaws_internal_free(f->from); qaws_internal_free(f->to); qaws_internal_free(f->room); qaws_internal_free(f->flow); qaws_internal_free(f->cost); qaws_internal_free(f->excess); qaws_internal_free(f->pi); qaws_internal_free(f->dist);
+	qaws_internal_free(f->first); qaws_internal_free(f->res); qaws_internal_free(f->pred); qaws_internal_free(f->seen); qaws_internal_free(f->done); qaws_internal_free(f->settled); qaws_internal_free(f->target); qaws_internal_free(f->heap);
+	qaws_internal_free(f);
 }
 
 qaws_status qaws_flow_create(unsigned int nodes, unsigned int arc_capacity, qaws_flow** out)
@@ -50,27 +51,27 @@ qaws_status qaws_flow_create(unsigned int nodes, unsigned int arc_capacity, qaws
 	if (!out)
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	*out = NULL;
-	f = (qaws_flow*)calloc(1, sizeof *f);
+	f = (qaws_flow*)qaws_internal_zalloc(1, sizeof *f);
 	if (!f)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	f->n = nodes;
 	f->cap = arc_capacity;
-	f->from = (unsigned int*)malloc(sizeof(unsigned int) * a);
-	f->to = (unsigned int*)malloc(sizeof(unsigned int) * a);
-	f->room = (int*)malloc(sizeof(int) * a);
-	f->flow = (int*)malloc(sizeof(int) * a);
-	f->cost = (long long*)malloc(sizeof(long long) * a);
-	f->excess = (int*)calloc(n, sizeof(int));
-	f->pi = (long long*)calloc(n, sizeof(long long));
-	f->dist = (long long*)malloc(sizeof(long long) * n);
-	f->first = (unsigned int*)malloc(sizeof(unsigned int) * (n + 1));
-	f->res = (unsigned int*)malloc(sizeof(unsigned int) * 2 * a);
-	f->pred = (unsigned int*)malloc(sizeof(unsigned int) * n);
-	f->seen = (unsigned int*)calloc(n, sizeof(unsigned int));
-	f->done = (unsigned int*)calloc(n, sizeof(unsigned int));
-	f->settled = (unsigned int*)malloc(sizeof(unsigned int) * n);
-	f->target = (unsigned char*)calloc(n, 1);
-	f->heap = (fl_item*)malloc(sizeof(fl_item) * (2 * a + 1));   /* (a search relaxes each residual arc at most once) */
+	f->from = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * a);
+	f->to = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * a);
+	f->room = (int*)qaws_internal_malloc(sizeof(int) * a);
+	f->flow = (int*)qaws_internal_malloc(sizeof(int) * a);
+	f->cost = (long long*)qaws_internal_malloc(sizeof(long long) * a);
+	f->excess = (int*)qaws_internal_zalloc(n, sizeof(int));
+	f->pi = (long long*)qaws_internal_zalloc(n, sizeof(long long));
+	f->dist = (long long*)qaws_internal_malloc(sizeof(long long) * n);
+	f->first = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (n + 1));
+	f->res = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * 2 * a);
+	f->pred = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * n);
+	f->seen = (unsigned int*)qaws_internal_zalloc(n, sizeof(unsigned int));
+	f->done = (unsigned int*)qaws_internal_zalloc(n, sizeof(unsigned int));
+	f->settled = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * n);
+	f->target = (unsigned char*)qaws_internal_zalloc(n, 1);
+	f->heap = (fl_item*)qaws_internal_malloc(sizeof(fl_item) * (2 * a + 1));   /* (a search relaxes each residual arc at most once) */
 	if (!f->from || !f->to || !f->room || !f->flow || !f->cost || !f->excess || !f->pi || !f->dist || !f->first || !f->res || !f->pred
 		|| !f->seen || !f->done || !f->settled || !f->target || !f->heap)
 	{

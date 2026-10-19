@@ -20,6 +20,7 @@
  */
 
 #include "qaws_mesh_internal.h"
+#include "../internal/qaws_internal_memory.h"
 #include "../qaws_mesh_measure.h"
 #include <stdlib.h>
 #include <string.h>
@@ -580,7 +581,7 @@ static unsigned int ms_point_add(ms_side* q, double const* y, int project, unsig
 	if (q->np == q->cap)
 	{
 		unsigned int cap = q->cap ? 2 * q->cap : 1024;
-		ms_point* g = (ms_point*)realloc(q->pt, sizeof(ms_point) * cap);
+		ms_point* g = (ms_point*)qaws_internal_realloc(q->pt, sizeof(ms_point) * cap);
 		if (!g)
 		{
 			q->failed = 1;
@@ -1085,7 +1086,7 @@ static int ms_push(ms_side* q, ms_tri const* T)
 	if (q->nh == q->caph)
 	{
 		unsigned int cap = q->caph ? 2 * q->caph : 1024;
-		ms_tri* g = (ms_tri*)realloc(q->heap, sizeof(ms_tri) * cap);
+		ms_tri* g = (ms_tri*)qaws_internal_realloc(q->heap, sizeof(ms_tri) * cap);
 		if (!g)
 		{
 			q->failed = 1;
@@ -1138,10 +1139,10 @@ static qaws_status ms_run(qaws_mesh_reference const* S, qaws_mesh_reference cons
 	q.R = R;
 	q.tol = tol;
 	q.goal = tol;
-	q.splits = (unsigned int*)calloc((size_t)S->nt + 1, sizeof(unsigned int));
+	q.splits = (unsigned int*)qaws_internal_zalloc((size_t)S->nt + 1, sizeof(unsigned int));
 	if (!q.splits || !mr_scratch_init(&q.s, R->nt))
 	{
-		free(q.splits);
+		qaws_internal_free(q.splits);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 	/* S's vertices are its first points; those of no triangle are left out of the bounds */
@@ -1267,9 +1268,9 @@ static qaws_status ms_run(qaws_mesh_reference const* S, qaws_mesh_reference cons
 	memcpy(worst, q.worst, sizeof q.worst);
 	*converged = bounds[1] - bounds[0] <= tol + 2 * scale;
 	mr_scratch_free(&q.s);
-	free(q.pt);
-	free(q.heap);
-	free(q.splits);
+	qaws_internal_free(q.pt);
+	qaws_internal_free(q.heap);
+	qaws_internal_free(q.splits);
 	return q.failed ? QAWS_STATUS_ALLOCATION_FAILURE : QAWS_STATUS_OK;
 }
 

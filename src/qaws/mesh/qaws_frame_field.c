@@ -17,6 +17,7 @@
  */
 
 #include "qaws_mesh_internal.h"
+#include "../internal/qaws_internal_memory.h"
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -422,13 +423,13 @@ static void ff_apply(ff_sys const* S, qaws_volume_mesh const* m, double const* v
 /* the smoothest coefficients: preconditioned conjugate gradients on the normal equations; 0 on allocation failure */
 static int ff_solve(ff_sys const* S, qaws_volume_mesh const* m, double* z)
 {
-	double *r = (double*)malloc(sizeof(double) * ((size_t)S->nz + 1)), *p = (double*)malloc(sizeof(double) * ((size_t)S->nz + 1));
-	double *Hp = (double*)malloc(sizeof(double) * ((size_t)S->nz + 1)), *dg = (double*)calloc((size_t)S->nz + 1, sizeof(double));
-	double *zz = (double*)malloc(sizeof(double) * ((size_t)S->nz + 1)), rz, r0;
+	double *r = (double*)qaws_internal_malloc(sizeof(double) * ((size_t)S->nz + 1)), *p = (double*)qaws_internal_malloc(sizeof(double) * ((size_t)S->nz + 1));
+	double *Hp = (double*)qaws_internal_malloc(sizeof(double) * ((size_t)S->nz + 1)), *dg = (double*)qaws_internal_zalloc((size_t)S->nz + 1, sizeof(double));
+	double *zz = (double*)qaws_internal_malloc(sizeof(double) * ((size_t)S->nz + 1)), rz, r0;
 	unsigned int c, f, i, it;
 	if (!r || !p || !Hp || !dg || !zz)
 	{
-		free(r); free(p); free(Hp); free(dg); free(zz);
+		qaws_internal_free(r); qaws_internal_free(p); qaws_internal_free(Hp); qaws_internal_free(dg); qaws_internal_free(zz);
 		return 0;
 	}
 	/* the diagonal: a facet adds J^T J's diagonal on each side */
@@ -483,7 +484,7 @@ static int ff_solve(ff_sys const* S, qaws_volume_mesh const* m, double* z)
 			p[i] = zz[i] + rz2 / rz * p[i];
 		rz = rz2;
 	}
-	free(r); free(p); free(Hp); free(dg); free(zz);
+	qaws_internal_free(r); qaws_internal_free(p); qaws_internal_free(Hp); qaws_internal_free(dg); qaws_internal_free(zz);
 	return 1;
 }
 
@@ -495,20 +496,20 @@ qaws_status qaws_volume_mesh_frame_field(struct qaws_volume_mesh const* mesh, qa
 	qaws_status st;
 	if (!mesh || (mesh->nc && !out_frames))
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	R = (double*)malloc(sizeof(double) * (9 * (size_t)mesh->nc + 1));
+	R = (double*)qaws_internal_malloc(sizeof(double) * (9 * (size_t)mesh->nc + 1));
 	if (!R)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	st = ff_frames(mesh, desc && desc->sweeps ? desc->sweeps : 60, R, out_singular);
 	for (c = 0; st == QAWS_STATUS_OK && c < 9 * mesh->nc; c++)
 		out_frames[c] = (qaws_scalar)R[c];
-	free(R);
+	qaws_internal_free(R);
 	return st;
 }
 
 int ff_comb(qaws_volume_mesh const* m, double* R)
 {
-	unsigned int *queue = (unsigned int*)malloc(sizeof(unsigned int) * ((size_t)m->nc + 1)), nq = 0, head, c, f;
-	unsigned char* set = (unsigned char*)calloc((size_t)m->nc + 1, 1);
+	unsigned int *queue = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)m->nc + 1)), nq = 0, head, c, f;
+	unsigned char* set = (unsigned char*)qaws_internal_zalloc((size_t)m->nc + 1, 1);
 	int ok = queue && set;
 	for (c = 0; ok && c < m->nc; c++)
 	{
@@ -552,8 +553,8 @@ int ff_comb(qaws_volume_mesh const* m, double* R)
 			ff_match(R + 9 * (size_t)c, R + 9 * (size_t)(o / 4), P);
 			ok = P[0] == 1 && P[1] == 2 && P[2] == 3;
 		}
-	free(queue);
-	free(set);
+	qaws_internal_free(queue);
+	qaws_internal_free(set);
 	return ok;
 }
 
@@ -566,8 +567,8 @@ qaws_status ff_frames(qaws_volume_mesh const* m, unsigned int sweeps, double* R,
 	for (c = 0; c < m->nc; c++)
 		if (m->type[c] != QAWS_CELL_TETRAHEDRON)
 			return QAWS_STATUS_UNSUPPORTED_OPERATION;
-	nrm = (double*)calloc(6 * (size_t)m->nc + 1, sizeof(double));
-	ncon = (unsigned char*)calloc((size_t)m->nc + 1, 1);
+	nrm = (double*)qaws_internal_zalloc(6 * (size_t)m->nc + 1, sizeof(double));
+	ncon = (unsigned char*)qaws_internal_zalloc((size_t)m->nc + 1, 1);
 	if (!nrm || !ncon)
 		goto done;
 	/* the border's normals in its cells: one, or two meeting near square */
@@ -612,16 +613,16 @@ qaws_status ff_frames(qaws_volume_mesh const* m, unsigned int sweeps, double* R,
 	{
 		double Y[9][15], *z = NULL;
 		ff_sys S;
-		unsigned int *queue = (unsigned int*)malloc(sizeof(unsigned int) * ((size_t)m->nc + 1)), nq = 0, head;
-		unsigned char* set = (unsigned char*)calloc((size_t)m->nc + 1, 1);
+		unsigned int *queue = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)m->nc + 1)), nq = 0, head;
+		unsigned char* set = (unsigned char*)qaws_internal_zalloc((size_t)m->nc + 1, 1);
 		int ok;
 		memset(&S, 0, sizeof S);
 		ff_basis(Y);
 		S.kind = ncon;
-		S.off = (unsigned int*)malloc(sizeof(unsigned int) * ((size_t)m->nc + 1));
-		S.A = (double*)calloc(9 * (size_t)m->nc + 1, sizeof(double));
-		S.B = (double*)calloc(9 * (size_t)m->nc + 1, sizeof(double));
-		S.C = (double*)calloc(9 * (size_t)m->nc + 1, sizeof(double));
+		S.off = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)m->nc + 1));
+		S.A = (double*)qaws_internal_zalloc(9 * (size_t)m->nc + 1, sizeof(double));
+		S.B = (double*)qaws_internal_zalloc(9 * (size_t)m->nc + 1, sizeof(double));
+		S.C = (double*)qaws_internal_zalloc(9 * (size_t)m->nc + 1, sizeof(double));
 		ok = queue && set && S.off && S.A && S.B && S.C;
 		for (c = 0; ok && c < m->nc; c++)
 		{
@@ -656,7 +657,7 @@ qaws_status ff_frames(qaws_volume_mesh const* m, unsigned int sweeps, double* R,
 				S.C[9 * (size_t)c + k] = s1[k] - S.A[9 * (size_t)c + k];
 			}
 		}
-		z = ok ? (double*)calloc((size_t)S.nz + 1, sizeof(double)) : NULL;
+		z = ok ? (double*)qaws_internal_zalloc((size_t)S.nz + 1, sizeof(double)) : NULL;
 		ok = ok && z && ff_solve(&S, m, z);
 		/* the border's frames: fixed, or turned about the normal by the angle the solve chose */
 		for (c = 0; ok && c < m->nc; c++)
@@ -711,7 +712,7 @@ qaws_status ff_frames(qaws_volume_mesh const* m, unsigned int sweeps, double* R,
 				queue[nq++] = u;
 			}
 		}
-		free(z); free(queue); free(set); free(S.off); free(S.A); free(S.B); free(S.C);
+		qaws_internal_free(z); qaws_internal_free(queue); qaws_internal_free(set); qaws_internal_free(S.off); qaws_internal_free(S.A); qaws_internal_free(S.B); qaws_internal_free(S.C);
 		if (!ok)
 			goto done;
 	}
@@ -813,7 +814,7 @@ qaws_status ff_frames(qaws_volume_mesh const* m, unsigned int sweeps, double* R,
 	}
 	st = QAWS_STATUS_OK;
 done:
-	free(nrm);
-	free(ncon);
+	qaws_internal_free(nrm);
+	qaws_internal_free(ncon);
 	return st;
 }

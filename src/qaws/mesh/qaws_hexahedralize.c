@@ -10,6 +10,7 @@
  */
 
 #include "qaws_mesh_internal.h"
+#include "../internal/qaws_internal_memory.h"
 #include "../qaws_hexahedralize.h"
 #include "../qaws_tetrahedralize.h"
 #include <stdlib.h>
@@ -80,9 +81,9 @@ static unsigned int hx_component(unsigned int mask, unsigned int o)
 static int hx_inside(hx_grid* g, double const* x, unsigned int const* tri, unsigned int nt)
 {
 	unsigned int nl = (g->n[1] + 1) * (g->n[2] + 1), t, i, *l0 = NULL, *lt = NULL, *fill = NULL, cap = 16;
-	double* cross = (double*)malloc(sizeof(double) * cap);
+	double* cross = (double*)qaws_internal_malloc(sizeof(double) * cap);
 	int ok = 0;
-	l0 = (unsigned int*)calloc((size_t)nl + 1, sizeof(unsigned int));
+	l0 = (unsigned int*)qaws_internal_zalloc((size_t)nl + 1, sizeof(unsigned int));
 	if (!cross || !l0)
 		goto done;
 	/* the triangles by the lines their (y, z) box covers */
@@ -104,8 +105,8 @@ static int hx_inside(hx_grid* g, double const* x, unsigned int const* tri, unsig
 	}
 	for (i = 0; i < nl; i++)
 		l0[i + 1] += l0[i];
-	lt = (unsigned int*)malloc(sizeof(unsigned int) * ((size_t)l0[nl] + 1));
-	fill = (unsigned int*)malloc(sizeof(unsigned int) * ((size_t)nl + 1));
+	lt = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)l0[nl] + 1));
+	fill = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)nl + 1));
 	if (!lt || !fill)
 		goto done;
 	memcpy(fill, l0, sizeof(unsigned int) * nl);
@@ -142,7 +143,7 @@ static int hx_inside(hx_grid* g, double const* x, unsigned int const* tri, unsig
 					continue;
 				if (nc == cap)
 				{
-					double* gr = (double*)realloc(cross, sizeof(double) * 2 * cap);
+					double* gr = (double*)qaws_internal_realloc(cross, sizeof(double) * 2 * cap);
 					if (!gr)
 						goto done;
 					cross = gr;
@@ -165,7 +166,7 @@ static int hx_inside(hx_grid* g, double const* x, unsigned int const* tri, unsig
 	}
 	ok = 1;
 done:
-	free(cross); free(l0); free(lt); free(fill);
+	qaws_internal_free(cross); qaws_internal_free(l0); qaws_internal_free(lt); qaws_internal_free(fill);
 	return ok;
 }
 
@@ -228,12 +229,12 @@ typedef struct hx_csr
 static int hx_csr_build(hx_csr* s, unsigned int nv, unsigned int const* cells, unsigned int nc)
 {
 	unsigned int i, *fill;
-	s->v0 = (unsigned int*)calloc((size_t)nv + 1, sizeof(unsigned int));
-	s->cell = (unsigned int*)malloc(sizeof(unsigned int) * (8 * (size_t)nc + 1));
-	fill = (unsigned int*)malloc(sizeof(unsigned int) * ((size_t)nv + 1));
+	s->v0 = (unsigned int*)qaws_internal_zalloc((size_t)nv + 1, sizeof(unsigned int));
+	s->cell = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (8 * (size_t)nc + 1));
+	fill = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)nv + 1));
 	if (!s->v0 || !s->cell || !fill)
 	{
-		free(fill);
+		qaws_internal_free(fill);
 		return 0;
 	}
 	for (i = 0; i < 8 * nc; i++)
@@ -243,7 +244,7 @@ static int hx_csr_build(hx_csr* s, unsigned int nv, unsigned int const* cells, u
 	memcpy(fill, s->v0, sizeof(unsigned int) * nv);
 	for (i = 0; i < 8 * nc; i++)
 		s->cell[fill[cells[i]]++] = i / 8;
-	free(fill);
+	qaws_internal_free(fill);
 	return 1;
 }
 
@@ -321,7 +322,7 @@ static double hx_grads(qaws_volume_mesh const* t, unsigned int c, double g[4][3]
 /* the stiffness of the tetrahedra (sum of V g_i . g_j) */
 static int hx_stiffness(qaws_volume_mesh const* t, hx_mat* K)
 {
-	hx_trip* tr = (hx_trip*)malloc(sizeof(hx_trip) * (16 * (size_t)t->nc + 1));
+	hx_trip* tr = (hx_trip*)qaws_internal_malloc(sizeof(hx_trip) * (16 * (size_t)t->nc + 1));
 	unsigned int c, i, j, n = 0, k;
 	memset(K, 0, sizeof *K);
 	if (!tr)
@@ -339,12 +340,12 @@ static int hx_stiffness(qaws_volume_mesh const* t, hx_mat* K)
 	}
 	qsort(tr, n, sizeof(hx_trip), hx_trip_cmp);
 	K->n = t->nv;
-	K->r0 = (unsigned int*)calloc((size_t)t->nv + 1, sizeof(unsigned int));
-	K->col = (unsigned int*)malloc(sizeof(unsigned int) * ((size_t)n + 1));
-	K->val = (double*)malloc(sizeof(double) * ((size_t)n + 1));
+	K->r0 = (unsigned int*)qaws_internal_zalloc((size_t)t->nv + 1, sizeof(unsigned int));
+	K->col = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)n + 1));
+	K->val = (double*)qaws_internal_malloc(sizeof(double) * ((size_t)n + 1));
 	if (!K->r0 || !K->col || !K->val)
 	{
-		free(tr);
+		qaws_internal_free(tr);
 		return 0;
 	}
 	for (i = 0, k = 0; i < n; i++)
@@ -361,7 +362,7 @@ static int hx_stiffness(qaws_volume_mesh const* t, hx_mat* K)
 	}
 	for (i = 0; i < t->nv; i++)
 		K->r0[i + 1] += K->r0[i];
-	free(tr);
+	qaws_internal_free(tr);
 	return 1;
 }
 
@@ -369,11 +370,11 @@ static int hx_stiffness(qaws_volume_mesh const* t, hx_mat* K)
 static int hx_cg(hx_mat const* K, double const* b, unsigned char const* fixed, double* u)
 {
 	unsigned int n = K->n, i, it, j;
-	double *r = (double*)malloc(sizeof(double) * ((size_t)n + 1)), *p = (double*)malloc(sizeof(double) * ((size_t)n + 1));
-	double *Ap = (double*)malloc(sizeof(double) * ((size_t)n + 1)), *dinv = (double*)malloc(sizeof(double) * ((size_t)n + 1)), rz = 0, r0;
+	double *r = (double*)qaws_internal_malloc(sizeof(double) * ((size_t)n + 1)), *p = (double*)qaws_internal_malloc(sizeof(double) * ((size_t)n + 1));
+	double *Ap = (double*)qaws_internal_malloc(sizeof(double) * ((size_t)n + 1)), *dinv = (double*)qaws_internal_malloc(sizeof(double) * ((size_t)n + 1)), rz = 0, r0;
 	if (!r || !p || !Ap || !dinv)
 	{
-		free(r); free(p); free(Ap); free(dinv);
+		qaws_internal_free(r); qaws_internal_free(p); qaws_internal_free(Ap); qaws_internal_free(dinv);
 		return 0;
 	}
 	for (i = 0; i < n; i++)
@@ -415,7 +416,7 @@ static int hx_cg(hx_mat const* K, double const* b, unsigned char const* fixed, d
 			p[i] = dinv[i] * r[i] + rz2 / rz * p[i];
 		rz = rz2;
 	}
-	free(r); free(p); free(Ap); free(dinv);
+	qaws_internal_free(r); qaws_internal_free(p); qaws_internal_free(Ap); qaws_internal_free(dinv);
 	return 1;
 }
 
@@ -464,20 +465,20 @@ static int hx_pput(hx_pmap* h, unsigned long long key, unsigned int val)
 		unsigned int i;
 		g.cap = h->cap ? 2 * h->cap : 1024;
 		g.n = 0;
-		g.key = (unsigned long long*)malloc(sizeof(unsigned long long) * g.cap);
-		g.val = (unsigned int*)malloc(sizeof(unsigned int) * g.cap);
+		g.key = (unsigned long long*)qaws_internal_malloc(sizeof(unsigned long long) * g.cap);
+		g.val = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * g.cap);
 		if (!g.key || !g.val)
 		{
-			free(g.key);
-			free(g.val);
+			qaws_internal_free(g.key);
+			qaws_internal_free(g.val);
 			return 0;
 		}
 		memset(g.key, 0xFF, sizeof(unsigned long long) * g.cap);
 		for (i = 0; i < h->cap; i++)
 			if (h->key[i] != ~0ull)
 				hx_pput(&g, h->key[i], h->val[i]);
-		free(h->key);
-		free(h->val);
+		qaws_internal_free(h->key);
+		qaws_internal_free(h->val);
 		*h = g;
 	}
 	s = (unsigned int)(key * 0x9E3779B97F4A7C15ull >> 32) & (h->cap - 1);
@@ -516,8 +517,8 @@ static qaws_status hx_frame_field(qaws_mesh_3d const* boundary, double h, qaws_v
 	if (st != QAWS_STATUS_OK)
 		return st;
 	st = QAWS_STATUS_ALLOCATION_FAILURE;
-	R = (double*)malloc(sizeof(double) * (9 * (size_t)t->nc + 1));
-	sing = (unsigned char*)malloc((size_t)t->nc + 1);
+	R = (double*)qaws_internal_malloc(sizeof(double) * (9 * (size_t)t->nc + 1));
+	sing = (unsigned char*)qaws_internal_malloc((size_t)t->nc + 1);
 	if (!R || !sing)
 		goto done;
 	st = ff_frames(t, 60, R, sing);
@@ -531,9 +532,9 @@ static qaws_status hx_frame_field(qaws_mesh_3d const* boundary, double h, qaws_v
 		goto done;
 	st = QAWS_STATUS_ALLOCATION_FAILURE;
 	/* the border's facets labelled by the axis their normal follows (and its side), patches of like neighbours */
-	bf = (unsigned int*)malloc(sizeof(unsigned int) * (4 * (size_t)t->nc + 1));
-	lab = (unsigned int*)malloc(sizeof(unsigned int) * (4 * (size_t)t->nc + 1));
-	uf = (unsigned int*)malloc(sizeof(unsigned int) * (4 * (size_t)t->nc + 1));
+	bf = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (4 * (size_t)t->nc + 1));
+	lab = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (4 * (size_t)t->nc + 1));
+	uf = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (4 * (size_t)t->nc + 1));
 	if (!bf || !lab || !uf)
 		goto done;
 	for (c = 0; c < t->nc; c++)
@@ -588,8 +589,8 @@ static qaws_status hx_frame_field(qaws_mesh_3d const* boundary, double h, qaws_v
 				{
 					if (!hx_pput(&em, key, i))
 					{
-						free(em.key);
-						free(em.val);
+						qaws_internal_free(em.key);
+						qaws_internal_free(em.val);
 						goto done;
 					}
 				}
@@ -601,26 +602,26 @@ static qaws_status hx_frame_field(qaws_mesh_3d const* boundary, double h, qaws_v
 				}
 			}
 		}
-		free(em.key);
-		free(em.val);
+		qaws_internal_free(em.key);
+		qaws_internal_free(em.val);
 	}
 	/* the map: a free solve per axis (one vertex pinned), each patch's plane its mean rounded, then solved again with them */
 	if (!hx_stiffness(t, &K))
 		goto done;
-	U = (double*)calloc(3 * (size_t)t->nv + 1, sizeof(double));
-	b = (double*)malloc(sizeof(double) * ((size_t)t->nv + 1));
-	u = (double*)malloc(sizeof(double) * ((size_t)t->nv + 1));
-	fixed = (unsigned char*)malloc((size_t)t->nv + 1);
+	U = (double*)qaws_internal_zalloc(3 * (size_t)t->nv + 1, sizeof(double));
+	b = (double*)qaws_internal_malloc(sizeof(double) * ((size_t)t->nv + 1));
+	u = (double*)qaws_internal_malloc(sizeof(double) * ((size_t)t->nv + 1));
+	fixed = (unsigned char*)qaws_internal_malloc((size_t)t->nv + 1);
 	if (!U || !b || !u || !fixed)
 		goto done;
 	for (k = 0; k < 3; k++)
 	{
-		double *sum = (double*)calloc((size_t)nb + 1, sizeof(double)), *cnt = (double*)calloc((size_t)nb + 1, sizeof(double));
+		double *sum = (double*)qaws_internal_zalloc((size_t)nb + 1, sizeof(double)), *cnt = (double*)qaws_internal_zalloc((size_t)nb + 1, sizeof(double));
 		int pass;
 		if (!sum || !cnt)
 		{
-			free(sum);
-			free(cnt);
+			qaws_internal_free(sum);
+			qaws_internal_free(cnt);
 			goto done;
 		}
 		/* the right-hand side: sum over cells of V g_i . (axis k / h) */
@@ -673,15 +674,15 @@ static qaws_status hx_frame_field(qaws_mesh_3d const* boundary, double h, qaws_v
 			}
 			if (!hx_cg(&K, b, fixed, u))
 			{
-				free(sum);
-				free(cnt);
+				qaws_internal_free(sum);
+				qaws_internal_free(cnt);
 				goto done;
 			}
 		}
 		for (i = 0; i < t->nv; i++)
 			U[3 * (size_t)i + k] = u[i];
-		free(sum);
-		free(cnt);
+		qaws_internal_free(sum);
+		qaws_internal_free(cnt);
 	}
 	/* the lattice: each cell's integer points and cube centres in its image, located by barycentric coordinates */
 	for (c = 0; c < t->nc; c++)
@@ -742,7 +743,7 @@ static qaws_status hx_frame_field(qaws_mesh_3d const* boundary, double h, qaws_v
 							continue;
 						if (np + 1 > capp)
 						{
-							double* g2 = (double*)realloc(px, sizeof(double) * 3 * (capp ? 2 * capp : 1024));
+							double* g2 = (double*)qaws_internal_realloc(px, sizeof(double) * 3 * (capp ? 2 * capp : 1024));
 							if (!g2)
 								goto done;
 							px = g2;
@@ -777,7 +778,7 @@ static qaws_status hx_frame_field(qaws_mesh_3d const* boundary, double h, qaws_v
 			continue;
 		if (ncell + 1 > capc)
 		{
-			unsigned int* g2 = (unsigned int*)realloc(cells, sizeof(unsigned int) * 8 * (capc ? 2 * capc : 256));
+			unsigned int* g2 = (unsigned int*)qaws_internal_realloc(cells, sizeof(unsigned int) * 8 * (capc ? 2 * capc : 256));
 			if (!g2)
 				goto done;
 			cells = g2;
@@ -792,12 +793,12 @@ static qaws_status hx_frame_field(qaws_mesh_3d const* boundary, double h, qaws_v
 	}
 	{
 		/* the vertices the hexahedra use, compacted */
-		unsigned int* map = (unsigned int*)malloc(sizeof(unsigned int) * ((size_t)np + 1)), nv2 = 0;
-		double* x2 = (double*)malloc(sizeof(double) * (3 * (size_t)np + 1));
-		unsigned char* types = (unsigned char*)malloc((size_t)ncell + 1);
+		unsigned int* map = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)np + 1)), nv2 = 0;
+		double* x2 = (double*)qaws_internal_malloc(sizeof(double) * (3 * (size_t)np + 1));
+		unsigned char* types = (unsigned char*)qaws_internal_malloc((size_t)ncell + 1);
 		if (!map || !x2 || !types)
 		{
-			free(map); free(x2); free(types);
+			qaws_internal_free(map); qaws_internal_free(x2); qaws_internal_free(types);
 			goto done;
 		}
 		for (i = 0; i < np; i++)
@@ -813,7 +814,7 @@ static qaws_status hx_frame_field(qaws_mesh_3d const* boundary, double h, qaws_v
 		}
 		memset(types, QAWS_CELL_HEXAHEDRON, ncell);
 		st = vm_create(x2, nv2, cells, types, ncell, out_mesh);
-		free(map); free(x2); free(types);
+		qaws_internal_free(map); qaws_internal_free(x2); qaws_internal_free(types);
 	}
 	if (st == QAWS_STATUS_OK)
 	{
@@ -823,9 +824,9 @@ static qaws_status hx_frame_field(qaws_mesh_3d const* boundary, double h, qaws_v
 		qaws_mesh_3d_destroy(bd);
 	}
 done:
-	free(R); free(sing); free(bf); free(uf); free(lab); free(U); free(b); free(u); free(fixed); free(px); free(cells);
-	free(K.r0); free(K.col); free(K.val);
-	free(pts.key); free(pts.val); free(cen.key); free(cen.val);
+	qaws_internal_free(R); qaws_internal_free(sing); qaws_internal_free(bf); qaws_internal_free(uf); qaws_internal_free(lab); qaws_internal_free(U); qaws_internal_free(b); qaws_internal_free(u); qaws_internal_free(fixed); qaws_internal_free(px); qaws_internal_free(cells);
+	qaws_internal_free(K.r0); qaws_internal_free(K.col); qaws_internal_free(K.val);
+	qaws_internal_free(pts.key); qaws_internal_free(pts.val); qaws_internal_free(cen.key); qaws_internal_free(cen.val);
 	qaws_volume_mesh_destroy(t);
 	return st;
 }
@@ -868,8 +869,8 @@ qaws_status qaws_volume_mesh_hexahedralize(qaws_mesh_3d const* boundary, qaws_he
 	memset(&rep, 0, sizeof rep);
 	/* the surface's triangles, its box, its mean edge */
 	nt = qaws_mesh_3d_get_triangle_count(boundary);
-	tri = (unsigned int*)malloc(sizeof(unsigned int) * (3 * (size_t)nt + 1));
-	x = (double*)malloc(sizeof(double) * (3 * (size_t)hm->nv + 1));
+	tri = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (3 * (size_t)nt + 1));
+	x = (double*)qaws_internal_malloc(sizeof(double) * (3 * (size_t)hm->nv + 1));
 	if (!tri || !x)
 		goto done;
 	qaws_mesh_3d_get_triangles(boundary, tri);
@@ -923,8 +924,8 @@ qaws_status qaws_volume_mesh_hexahedralize(qaws_mesh_3d const* boundary, qaws_he
 		st = QAWS_STATUS_INVALID_ARGUMENT;
 		goto done;
 	}
-	g.in = (unsigned char*)calloc(ngv, 1);
-	g.keep = (unsigned char*)calloc((size_t)g.n[0] * g.n[1] * g.n[2] + 1, 1);
+	g.in = (unsigned char*)qaws_internal_zalloc(ngv, 1);
+	g.keep = (unsigned char*)qaws_internal_zalloc((size_t)g.n[0] * g.n[1] * g.n[2] + 1, 1);
 	if (!g.in || !g.keep || !hx_inside(&g, x, tri, nt))
 		goto done;
 	/* the reference: projections, the margin from the surface */
@@ -964,14 +965,14 @@ qaws_status qaws_volume_mesh_hexahedralize(qaws_mesh_3d const* boundary, qaws_he
 	}
 	hx_manifold(&g);
 	/* the staircase: its cells and vertices */
-	vid = (unsigned int*)malloc(sizeof(unsigned int) * ngv);
+	vid = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ngv);
 	if (!vid)
 		goto done;
 	for (i = 0; i < ngv; i++)
 		vid[i] = HM_NONE;
 	{
 		unsigned int a, b, d, capv = 1024;
-		cx = (double*)malloc(sizeof(double) * 3 * capv);
+		cx = (double*)qaws_internal_malloc(sizeof(double) * 3 * capv);
 		if (!cx)
 			goto done;
 		for (d = 0; d < g.n[2]; d++)
@@ -983,7 +984,7 @@ qaws_status qaws_volume_mesh_hexahedralize(qaws_mesh_3d const* boundary, qaws_he
 						continue;
 					if (ncell + 1 > capc)
 					{
-						unsigned int* gr = (unsigned int*)realloc(cells, sizeof(unsigned int) * 8 * (capc ? 2 * capc : 256));
+						unsigned int* gr = (unsigned int*)qaws_internal_realloc(cells, sizeof(unsigned int) * 8 * (capc ? 2 * capc : 256));
 						if (!gr)
 							goto done;
 						cells = gr;
@@ -997,7 +998,7 @@ qaws_status qaws_volume_mesh_hexahedralize(qaws_mesh_3d const* boundary, qaws_he
 						{
 							if (nvx == capv)
 							{
-								double* gr = (double*)realloc(cx, sizeof(double) * 6 * capv);
+								double* gr = (double*)qaws_internal_realloc(cx, sizeof(double) * 6 * capv);
 								if (!gr)
 									goto done;
 								cx = gr;
@@ -1018,13 +1019,13 @@ qaws_status qaws_volume_mesh_hexahedralize(qaws_mesh_3d const* boundary, qaws_he
 		}
 		/* the staircase's border quads, each padded out to the surface by a hexahedron (at most one projection a vertex) */
 		{
-			double* gr = (double*)realloc(cx, sizeof(double) * 6 * ((size_t)nvx + 1));
+			double* gr = (double*)qaws_internal_realloc(cx, sizeof(double) * 6 * ((size_t)nvx + 1));
 			if (!gr)
 				goto done;
 			cx = gr;
 		}
-		outer = (unsigned int*)malloc(sizeof(unsigned int) * (2 * (size_t)nvx + 1));
-		kind = (unsigned char*)calloc(2 * (size_t)nvx + 1, 1);
+		outer = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (2 * (size_t)nvx + 1));
+		kind = (unsigned char*)qaws_internal_zalloc(2 * (size_t)nvx + 1, 1);
 		if (!outer || !kind)
 			goto done;
 		for (i = 0; i < 2 * nvx; i++)
@@ -1032,7 +1033,7 @@ qaws_status qaws_volume_mesh_hexahedralize(qaws_mesh_3d const* boundary, qaws_he
 		for (k = 0; k < ref->mesh->hm.nv; k++)
 			if (ref->mesh->hm.vflag[k] & HM_CORNER)
 				ncorner++;
-		corners = (unsigned int*)malloc(sizeof(unsigned int) * ((size_t)ncorner + 1));
+		corners = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)ncorner + 1));
 		if (!corners)
 			goto done;
 		for (k = 0, ncorner = 0; k < ref->mesh->hm.nv; k++)
@@ -1095,7 +1096,7 @@ qaws_status qaws_volume_mesh_hexahedralize(qaws_mesh_3d const* boundary, qaws_he
 				}
 				if (ncell + 1 > capc)
 				{
-					unsigned int* gr = (unsigned int*)realloc(cells, sizeof(unsigned int) * 8 * 2 * capc);
+					unsigned int* gr = (unsigned int*)qaws_internal_realloc(cells, sizeof(unsigned int) * 8 * 2 * capc);
 					if (!gr)
 						goto done;
 					cells = gr;
@@ -1112,7 +1113,7 @@ qaws_status qaws_volume_mesh_hexahedralize(qaws_mesh_3d const* boundary, qaws_he
 	}
 	/* smoothed: each free vertex to the centre of its neighbours (a surface vertex then back onto the surface), kept when
 	   the worst scaled Jacobian round it rises */
-	fixed = (unsigned char*)calloc((size_t)nvx + 1, 1);
+	fixed = (unsigned char*)qaws_internal_zalloc((size_t)nvx + 1, 1);
 	if (!fixed || !hx_csr_build(&csr, nvx, cells, ncell))
 		goto done;
 	for (i = 0; i < nvx; i++)
@@ -1164,12 +1165,12 @@ qaws_status qaws_volume_mesh_hexahedralize(qaws_mesh_3d const* boundary, qaws_he
 				memcpy(cx + 3 * (size_t)i, keep, sizeof keep);
 		}
 	{
-		unsigned char* types = (unsigned char*)malloc((size_t)ncell + 1);
+		unsigned char* types = (unsigned char*)qaws_internal_malloc((size_t)ncell + 1);
 		if (!types)
 			goto done;
 		memset(types, QAWS_CELL_HEXAHEDRON, ncell);
 		st = vm_create(cx, nvx, cells, types, ncell, out_mesh);
-		free(types);
+		qaws_internal_free(types);
 	}
 	if (st == QAWS_STATUS_OK)
 	{
@@ -1179,9 +1180,9 @@ qaws_status qaws_volume_mesh_hexahedralize(qaws_mesh_3d const* boundary, qaws_he
 		qaws_mesh_3d_destroy(b);
 	}
 done:
-	free(x); free(tri); free(vid); free(cells); free(outer); free(cx); free(fixed); free(kind); free(corners);
-	free(g.in); free(g.keep);
-	free(csr.v0); free(csr.cell);
+	qaws_internal_free(x); qaws_internal_free(tri); qaws_internal_free(vid); qaws_internal_free(cells); qaws_internal_free(outer); qaws_internal_free(cx); qaws_internal_free(fixed); qaws_internal_free(kind); qaws_internal_free(corners);
+	qaws_internal_free(g.in); qaws_internal_free(g.keep);
+	qaws_internal_free(csr.v0); qaws_internal_free(csr.cell);
 	mr_scratch_free(&s);
 	qaws_mesh_reference_destroy(ref);
 	if (st != QAWS_STATUS_OK)

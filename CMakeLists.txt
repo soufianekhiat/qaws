@@ -161,6 +161,7 @@ src/qaws/mesh/qaws_mesh_repair.c
   src/qaws/qaws_diff_functionals.c
   src/qaws/qaws_diff_sampling.c
   src/qaws/internal/qaws_internal_curve.c
+  src/qaws/internal/qaws_internal_memory.c
   src/qaws/internal/qaws_internal_basis.c
   src/qaws/internal/qaws_internal_span.c
   src/qaws/internal/qaws_internal_arc_length.c

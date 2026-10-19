@@ -1,4 +1,5 @@
 #include "qaws_alloc.h"
+#include "internal/qaws_internal_memory.h"
 #include "qaws_convert.h"
 #include "qaws_bezier.h"
 #include "qaws_hermite.h"
@@ -51,7 +52,7 @@ qaws_status qaws_curve_convert_hermite_to_bezier(
 	M1 = impl->tangents + (span_index + 1) * dim_count;
 
 	cp_size = (size_t)(4 * dim_count) * sizeof(qaws_scalar);
-	cp = (qaws_scalar *)malloc(cp_size);
+	cp = (qaws_scalar *)qaws_internal_malloc(cp_size);
 	if (!cp)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 
@@ -69,7 +70,7 @@ qaws_status qaws_curve_convert_hermite_to_bezier(
 	desc.control_point_count = 4;
 
 	status = qaws_curve_create_bezier_ex(&desc, curve->allocator, out_bezier);
-	free(cp);
+	qaws_internal_free(cp);
 	return status;
 }
 
@@ -106,7 +107,7 @@ qaws_status qaws_curve_convert_catmull_rom_to_bezier(
 	dim_count = (unsigned int)curve->dimension;
 
 	cp_size = (size_t)(4 * dim_count) * sizeof(qaws_scalar);
-	cp = (qaws_scalar *)malloc(cp_size);
+	cp = (qaws_scalar *)qaws_internal_malloc(cp_size);
 	if (!cp)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 
@@ -144,7 +145,7 @@ qaws_status qaws_curve_convert_catmull_rom_to_bezier(
 	desc.control_point_count = 4;
 
 	status = qaws_curve_create_bezier_ex(&desc, curve->allocator, out_bezier);
-	free(cp);
+	qaws_internal_free(cp);
 	return status;
 }
 
@@ -177,7 +178,7 @@ qaws_status qaws_curve_convert_bezier_to_bspline(
 
 	/* Clamped knot vector: [0,...,0, 1,...,1] with (degree+1) repeats each */
 	knot_count = 2 * (degree + 1);
-	knots = (qaws_scalar *)malloc((size_t)knot_count * sizeof(qaws_scalar));
+	knots = (qaws_scalar *)qaws_internal_malloc((size_t)knot_count * sizeof(qaws_scalar));
 	if (!knots)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 
@@ -197,7 +198,7 @@ qaws_status qaws_curve_convert_bezier_to_bspline(
 	desc.is_closed = 0;
 
 	status = qaws_curve_create_bspline_ex(&desc, curve->allocator, out_bspline);
-	free(knots);
+	qaws_internal_free(knots);
 	return status;
 }
 
@@ -228,7 +229,7 @@ qaws_status qaws_curve_convert_bspline_to_nurbs(
 	cp_count = impl->control_point_count;
 
 	/* All weights = 1.0 for a non-rational B-Spline */
-	weights = (qaws_scalar *)malloc((size_t)cp_count * sizeof(qaws_scalar));
+	weights = (qaws_scalar *)qaws_internal_malloc((size_t)cp_count * sizeof(qaws_scalar));
 	if (!weights)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 
@@ -247,7 +248,7 @@ qaws_status qaws_curve_convert_bspline_to_nurbs(
 	desc.is_closed = 0;
 
 	status = qaws_curve_create_nurbs_ex(&desc, curve->allocator, out_nurbs);
-	free(weights);
+	qaws_internal_free(weights);
 	return status;
 }
 
@@ -283,7 +284,7 @@ qaws_status qaws_curve_elevate_degree(
 	new_count = n + 2;
 
 	new_cp_size = (size_t)(new_count * dim_count) * sizeof(qaws_scalar);
-	new_cp = (qaws_scalar *)malloc(new_cp_size);
+	new_cp = (qaws_scalar *)qaws_internal_malloc(new_cp_size);
 	if (!new_cp)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 
@@ -313,7 +314,7 @@ qaws_status qaws_curve_elevate_degree(
 	desc.control_point_count = new_count;
 
 	status = qaws_curve_create_bezier_ex(&desc, curve->allocator, out_elevated);
-	free(new_cp);
+	qaws_internal_free(new_cp);
 	return status;
 }
 
@@ -447,7 +448,7 @@ qaws_status qaws_curve_reduce_degree(
 	sys_n = m - 1;     /* number of interior unknowns (indices 1..m-1) */
 
 	new_cp_size = (size_t)(new_count * dim_count) * sizeof(qaws_scalar);
-	new_cp = (qaws_scalar *)malloc(new_cp_size);
+	new_cp = (qaws_scalar *)qaws_internal_malloc(new_cp_size);
 	if (!new_cp)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 
@@ -465,7 +466,7 @@ qaws_status qaws_curve_reduce_degree(
 		desc.control_points = new_cp;
 		desc.control_point_count = new_count;
 		status = qaws_curve_create_bezier_ex(&desc, curve->allocator, out_reduced);
-		free(new_cp);
+		qaws_internal_free(new_cp);
 		return status;
 	}
 
@@ -475,9 +476,9 @@ qaws_status qaws_curve_reduce_degree(
 	 *
 	 * Note: m + n = (n-1) + n = 2n - 1, so denominator = 2n * C(2n-1, i+k).
 	 */
-	cross_mat = (double *)malloc((size_t)(new_count) * (size_t)(n + 1) * sizeof(double));
+	cross_mat = (double *)qaws_internal_malloc((size_t)(new_count) * (size_t)(n + 1) * sizeof(double));
 	if (!cross_mat) {
-		free(new_cp);
+		qaws_internal_free(new_cp);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 	for (i = 0; i <= m; i++) {
@@ -493,10 +494,10 @@ qaws_status qaws_curve_reduce_degree(
 	 * Gram[a][b] = <B_{a+1}^m, B_{b+1}^m>
 	 *            = C(m, a+1)*C(m, b+1) / ((2m+1)*C(2m, a+1+b+1))
 	 */
-	gram = (double *)malloc((size_t)(sys_n) * (size_t)(sys_n) * sizeof(double));
+	gram = (double *)qaws_internal_malloc((size_t)(sys_n) * (size_t)(sys_n) * sizeof(double));
 	if (!gram) {
-		free(cross_mat);
-		free(new_cp);
+		qaws_internal_free(cross_mat);
+		qaws_internal_free(new_cp);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 	for (i = 0; i < sys_n; i++) {
@@ -510,14 +511,14 @@ qaws_status qaws_curve_reduce_degree(
 	}
 
 	/* Allocate workspace for RHS and Gram copy */
-	rhs = (double *)malloc((size_t)sys_n * sizeof(double));
-	A_copy = (double *)malloc((size_t)(sys_n) * (size_t)(sys_n) * sizeof(double));
+	rhs = (double *)qaws_internal_malloc((size_t)sys_n * sizeof(double));
+	A_copy = (double *)qaws_internal_malloc((size_t)(sys_n) * (size_t)(sys_n) * sizeof(double));
 	if (!rhs || !A_copy) {
-		free(A_copy);
-		free(rhs);
-		free(gram);
-		free(cross_mat);
-		free(new_cp);
+		qaws_internal_free(A_copy);
+		qaws_internal_free(rhs);
+		qaws_internal_free(gram);
+		qaws_internal_free(cross_mat);
+		qaws_internal_free(new_cp);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 
@@ -569,11 +570,11 @@ qaws_status qaws_curve_reduce_degree(
 
 		/* Solve */
 		if (deg_reduce_gauss_solve(A_copy, rhs, sys_n) != 0) {
-			free(A_copy);
-			free(rhs);
-			free(gram);
-			free(cross_mat);
-			free(new_cp);
+			qaws_internal_free(A_copy);
+			qaws_internal_free(rhs);
+			qaws_internal_free(gram);
+			qaws_internal_free(cross_mat);
+			qaws_internal_free(new_cp);
 			return QAWS_STATUS_NUMERICAL_FAILURE;
 		}
 
@@ -582,10 +583,10 @@ qaws_status qaws_curve_reduce_degree(
 			new_cp[(i + 1) * dim_count + d] = (qaws_scalar)rhs[i];
 	}
 
-	free(A_copy);
-	free(rhs);
-	free(gram);
-	free(cross_mat);
+	qaws_internal_free(A_copy);
+	qaws_internal_free(rhs);
+	qaws_internal_free(gram);
+	qaws_internal_free(cross_mat);
 
 	memset(&desc, 0, sizeof(desc));
 	desc.dimension = curve->dimension;
@@ -594,6 +595,6 @@ qaws_status qaws_curve_reduce_degree(
 	desc.control_point_count = new_count;
 
 	status = qaws_curve_create_bezier_ex(&desc, curve->allocator, out_reduced);
-	free(new_cp);
+	qaws_internal_free(new_cp);
 	return status;
 }

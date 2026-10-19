@@ -1,4 +1,5 @@
 #include "qaws_sampling.h"
+#include "internal/qaws_internal_memory.h"
 #include "qaws_eval.h"
 #include "qaws_inspect.h"
 #include "internal/qaws_internal_types.h"
@@ -25,7 +26,7 @@ static int adaptive_buf_2d_push(struct adaptive_buf_2d *buf, qaws_vec2 pt)
 	if (buf->count >= buf->capacity)
 	{
 		unsigned int new_cap = buf->capacity * 2;
-		qaws_vec2 *new_ptr = (qaws_vec2 *)realloc(
+		qaws_vec2 *new_ptr = (qaws_vec2 *)qaws_internal_realloc(
 			buf->points, new_cap * sizeof(qaws_vec2));
 		if (!new_ptr)
 			return 0;
@@ -104,7 +105,7 @@ static int adaptive_buf_3d_push(struct adaptive_buf_3d *buf, qaws_vec3 pt)
 	if (buf->count >= buf->capacity)
 	{
 		unsigned int new_cap = buf->capacity * 2;
-		qaws_vec3 *new_ptr = (qaws_vec3 *)realloc(
+		qaws_vec3 *new_ptr = (qaws_vec3 *)qaws_internal_realloc(
 			buf->points, new_cap * sizeof(qaws_vec3));
 		if (!new_ptr)
 			return 0;
@@ -203,7 +204,7 @@ static qaws_status adaptive_sample_2d(
 
 	buf.capacity = initial_count * 4;
 	buf.count = 0;
-	buf.points = (qaws_vec2 *)malloc(buf.capacity * sizeof(qaws_vec2));
+	buf.points = (qaws_vec2 *)qaws_internal_malloc(buf.capacity * sizeof(qaws_vec2));
 	if (!buf.points)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 
@@ -212,13 +213,13 @@ static qaws_status adaptive_sample_2d(
 		curve, range_min, QAWS_EVAL_FLAG_POSITION, &result);
 	if (status != QAWS_STATUS_OK)
 	{
-		free(buf.points);
+		qaws_internal_free(buf.points);
 		return status;
 	}
 	p0 = result.position;
 	if (!adaptive_buf_2d_push(&buf, p0))
 	{
-		free(buf.points);
+		qaws_internal_free(buf.points);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 
@@ -233,7 +234,7 @@ static qaws_status adaptive_sample_2d(
 			curve, t1, QAWS_EVAL_FLAG_POSITION, &result);
 		if (status != QAWS_STATUS_OK)
 		{
-			free(buf.points);
+			qaws_internal_free(buf.points);
 			return status;
 		}
 		p1 = result.position;
@@ -242,7 +243,7 @@ static qaws_status adaptive_sample_2d(
 			curve, t0, p0, t1, p1, tolerance, 0, &buf);
 		if (status != QAWS_STATUS_OK)
 		{
-			free(buf.points);
+			qaws_internal_free(buf.points);
 			return status;
 		}
 
@@ -252,7 +253,7 @@ static qaws_status adaptive_sample_2d(
 	copy_count = buf.count;
 	if (copy_count > position_capacity)
 	{
-		free(buf.points);
+		qaws_internal_free(buf.points);
 		*out_position_count = copy_count;
 		return QAWS_STATUS_BUFFER_TOO_SMALL;
 	}
@@ -261,7 +262,7 @@ static qaws_status adaptive_sample_2d(
 		out_positions[i] = buf.points[i];
 
 	*out_position_count = copy_count;
-	free(buf.points);
+	qaws_internal_free(buf.points);
 	return QAWS_STATUS_OK;
 }
 
@@ -296,7 +297,7 @@ static qaws_status adaptive_sample_3d(
 
 	buf.capacity = initial_count * 4;
 	buf.count = 0;
-	buf.points = (qaws_vec3 *)malloc(buf.capacity * sizeof(qaws_vec3));
+	buf.points = (qaws_vec3 *)qaws_internal_malloc(buf.capacity * sizeof(qaws_vec3));
 	if (!buf.points)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 
@@ -304,13 +305,13 @@ static qaws_status adaptive_sample_3d(
 		curve, range_min, QAWS_EVAL_FLAG_POSITION, &result);
 	if (status != QAWS_STATUS_OK)
 	{
-		free(buf.points);
+		qaws_internal_free(buf.points);
 		return status;
 	}
 	p0 = result.position;
 	if (!adaptive_buf_3d_push(&buf, p0))
 	{
-		free(buf.points);
+		qaws_internal_free(buf.points);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 
@@ -325,7 +326,7 @@ static qaws_status adaptive_sample_3d(
 			curve, t1, QAWS_EVAL_FLAG_POSITION, &result);
 		if (status != QAWS_STATUS_OK)
 		{
-			free(buf.points);
+			qaws_internal_free(buf.points);
 			return status;
 		}
 		p1 = result.position;
@@ -334,7 +335,7 @@ static qaws_status adaptive_sample_3d(
 			curve, t0, p0, t1, p1, tolerance, 0, &buf);
 		if (status != QAWS_STATUS_OK)
 		{
-			free(buf.points);
+			qaws_internal_free(buf.points);
 			return status;
 		}
 
@@ -344,7 +345,7 @@ static qaws_status adaptive_sample_3d(
 	copy_count = buf.count;
 	if (copy_count > position_capacity)
 	{
-		free(buf.points);
+		qaws_internal_free(buf.points);
 		*out_position_count = copy_count;
 		return QAWS_STATUS_BUFFER_TOO_SMALL;
 	}
@@ -353,7 +354,7 @@ static qaws_status adaptive_sample_3d(
 		out_positions[i] = buf.points[i];
 
 	*out_position_count = copy_count;
-	free(buf.points);
+	qaws_internal_free(buf.points);
 	return QAWS_STATUS_OK;
 }
 
@@ -374,7 +375,7 @@ static int adaptive_eval_buf_2d_push(struct adaptive_eval_buf_2d *buf,
 	if (buf->count >= buf->capacity)
 	{
 		unsigned int new_cap = buf->capacity * 2;
-		qaws_eval_result_2d *new_ptr = (qaws_eval_result_2d *)realloc(
+		qaws_eval_result_2d *new_ptr = (qaws_eval_result_2d *)qaws_internal_realloc(
 			buf->samples, new_cap * sizeof(qaws_eval_result_2d));
 		if (!new_ptr)
 			return 0;
@@ -467,7 +468,7 @@ static int adaptive_eval_buf_3d_push(struct adaptive_eval_buf_3d *buf,
 	if (buf->count >= buf->capacity)
 	{
 		unsigned int new_cap = buf->capacity * 2;
-		qaws_eval_result_3d *new_ptr = (qaws_eval_result_3d *)realloc(
+		qaws_eval_result_3d *new_ptr = (qaws_eval_result_3d *)qaws_internal_realloc(
 			buf->samples, new_cap * sizeof(qaws_eval_result_3d));
 		if (!new_ptr)
 			return 0;
@@ -583,7 +584,7 @@ static qaws_status adaptive_sample_eval_2d(
 
 	buf.capacity = initial_count * 4;
 	buf.count = 0;
-	buf.samples = (qaws_eval_result_2d *)malloc(
+	buf.samples = (qaws_eval_result_2d *)qaws_internal_malloc(
 		buf.capacity * sizeof(qaws_eval_result_2d));
 	if (!buf.samples)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
@@ -593,13 +594,13 @@ static qaws_status adaptive_sample_eval_2d(
 		curve, range_min, eval_flags, &result);
 	if (status != QAWS_STATUS_OK)
 	{
-		free(buf.samples);
+		qaws_internal_free(buf.samples);
 		return status;
 	}
 	p0 = result.position;
 	if (!adaptive_eval_buf_2d_push(&buf, result))
 	{
-		free(buf.samples);
+		qaws_internal_free(buf.samples);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 
@@ -614,7 +615,7 @@ static qaws_status adaptive_sample_eval_2d(
 			curve, t1, eval_flags, &result);
 		if (status != QAWS_STATUS_OK)
 		{
-			free(buf.samples);
+			qaws_internal_free(buf.samples);
 			return status;
 		}
 		p1 = result.position;
@@ -623,7 +624,7 @@ static qaws_status adaptive_sample_eval_2d(
 			curve, t0, p0, t1, p1, tolerance, 0, &buf);
 		if (status != QAWS_STATUS_OK)
 		{
-			free(buf.samples);
+			qaws_internal_free(buf.samples);
 			return status;
 		}
 
@@ -633,7 +634,7 @@ static qaws_status adaptive_sample_eval_2d(
 	copy_count = buf.count;
 	if (copy_count > sample_capacity)
 	{
-		free(buf.samples);
+		qaws_internal_free(buf.samples);
 		*out_sample_count = copy_count;
 		return QAWS_STATUS_BUFFER_TOO_SMALL;
 	}
@@ -642,7 +643,7 @@ static qaws_status adaptive_sample_eval_2d(
 		out_samples[i] = buf.samples[i];
 
 	*out_sample_count = copy_count;
-	free(buf.samples);
+	qaws_internal_free(buf.samples);
 	return QAWS_STATUS_OK;
 }
 
@@ -681,7 +682,7 @@ static qaws_status adaptive_sample_eval_3d(
 
 	buf.capacity = initial_count * 4;
 	buf.count = 0;
-	buf.samples = (qaws_eval_result_3d *)malloc(
+	buf.samples = (qaws_eval_result_3d *)qaws_internal_malloc(
 		buf.capacity * sizeof(qaws_eval_result_3d));
 	if (!buf.samples)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
@@ -691,13 +692,13 @@ static qaws_status adaptive_sample_eval_3d(
 		curve, range_min, eval_flags, &result);
 	if (status != QAWS_STATUS_OK)
 	{
-		free(buf.samples);
+		qaws_internal_free(buf.samples);
 		return status;
 	}
 	p0 = result.position;
 	if (!adaptive_eval_buf_3d_push(&buf, result))
 	{
-		free(buf.samples);
+		qaws_internal_free(buf.samples);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 
@@ -712,7 +713,7 @@ static qaws_status adaptive_sample_eval_3d(
 			curve, t1, eval_flags, &result);
 		if (status != QAWS_STATUS_OK)
 		{
-			free(buf.samples);
+			qaws_internal_free(buf.samples);
 			return status;
 		}
 		p1 = result.position;
@@ -721,7 +722,7 @@ static qaws_status adaptive_sample_eval_3d(
 			curve, t0, p0, t1, p1, tolerance, 0, &buf);
 		if (status != QAWS_STATUS_OK)
 		{
-			free(buf.samples);
+			qaws_internal_free(buf.samples);
 			return status;
 		}
 
@@ -731,7 +732,7 @@ static qaws_status adaptive_sample_eval_3d(
 	copy_count = buf.count;
 	if (copy_count > sample_capacity)
 	{
-		free(buf.samples);
+		qaws_internal_free(buf.samples);
 		*out_sample_count = copy_count;
 		return QAWS_STATUS_BUFFER_TOO_SMALL;
 	}
@@ -740,7 +741,7 @@ static qaws_status adaptive_sample_eval_3d(
 		out_samples[i] = buf.samples[i];
 
 	*out_sample_count = copy_count;
-	free(buf.samples);
+	qaws_internal_free(buf.samples);
 	return QAWS_STATUS_OK;
 }
 
@@ -806,14 +807,14 @@ qaws_status qaws_curve_sample_2d(
 		qaws_scalar target_dist;
 		qaws_scalar param;
 
-		table_params = (qaws_scalar *)malloc(table_size * sizeof(qaws_scalar));
+		table_params = (qaws_scalar *)qaws_internal_malloc(table_size * sizeof(qaws_scalar));
 		if (!table_params)
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 
-		table_distances = (qaws_scalar *)malloc(table_size * sizeof(qaws_scalar));
+		table_distances = (qaws_scalar *)qaws_internal_malloc(table_size * sizeof(qaws_scalar));
 		if (!table_distances)
 		{
-			free(table_params);
+			qaws_internal_free(table_params);
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 		}
 
@@ -821,8 +822,8 @@ qaws_status qaws_curve_sample_2d(
 			curve, table_size, table_params, table_distances);
 		if (status != QAWS_STATUS_OK)
 		{
-			free(table_params);
-			free(table_distances);
+			qaws_internal_free(table_params);
+			qaws_internal_free(table_distances);
 			return status;
 		}
 
@@ -842,16 +843,16 @@ qaws_status qaws_curve_sample_2d(
 				curve, param, QAWS_EVAL_FLAG_POSITION, &result);
 			if (status != QAWS_STATUS_OK)
 			{
-				free(table_params);
-				free(table_distances);
+				qaws_internal_free(table_params);
+				qaws_internal_free(table_distances);
 				return status;
 			}
 
 			out_positions[i] = result.position;
 		}
 
-		free(table_params);
-		free(table_distances);
+		qaws_internal_free(table_params);
+		qaws_internal_free(table_distances);
 	}
 	else
 	{
@@ -922,14 +923,14 @@ qaws_status qaws_curve_sample_3d(
 		qaws_scalar target_dist;
 		qaws_scalar param;
 
-		table_params = (qaws_scalar *)malloc(table_size * sizeof(qaws_scalar));
+		table_params = (qaws_scalar *)qaws_internal_malloc(table_size * sizeof(qaws_scalar));
 		if (!table_params)
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 
-		table_distances = (qaws_scalar *)malloc(table_size * sizeof(qaws_scalar));
+		table_distances = (qaws_scalar *)qaws_internal_malloc(table_size * sizeof(qaws_scalar));
 		if (!table_distances)
 		{
-			free(table_params);
+			qaws_internal_free(table_params);
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 		}
 
@@ -937,8 +938,8 @@ qaws_status qaws_curve_sample_3d(
 			curve, table_size, table_params, table_distances);
 		if (status != QAWS_STATUS_OK)
 		{
-			free(table_params);
-			free(table_distances);
+			qaws_internal_free(table_params);
+			qaws_internal_free(table_distances);
 			return status;
 		}
 
@@ -958,16 +959,16 @@ qaws_status qaws_curve_sample_3d(
 				curve, param, QAWS_EVAL_FLAG_POSITION, &result);
 			if (status != QAWS_STATUS_OK)
 			{
-				free(table_params);
-				free(table_distances);
+				qaws_internal_free(table_params);
+				qaws_internal_free(table_distances);
 				return status;
 			}
 
 			out_positions[i] = result.position;
 		}
 
-		free(table_params);
-		free(table_distances);
+		qaws_internal_free(table_params);
+		qaws_internal_free(table_distances);
 	}
 	else
 	{
@@ -1041,14 +1042,14 @@ qaws_status qaws_curve_sample_eval_2d(
 		qaws_scalar target_dist;
 		qaws_scalar param;
 
-		table_params = (qaws_scalar *)malloc(table_size * sizeof(qaws_scalar));
+		table_params = (qaws_scalar *)qaws_internal_malloc(table_size * sizeof(qaws_scalar));
 		if (!table_params)
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 
-		table_distances = (qaws_scalar *)malloc(table_size * sizeof(qaws_scalar));
+		table_distances = (qaws_scalar *)qaws_internal_malloc(table_size * sizeof(qaws_scalar));
 		if (!table_distances)
 		{
-			free(table_params);
+			qaws_internal_free(table_params);
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 		}
 
@@ -1056,8 +1057,8 @@ qaws_status qaws_curve_sample_eval_2d(
 			curve, table_size, table_params, table_distances);
 		if (status != QAWS_STATUS_OK)
 		{
-			free(table_params);
-			free(table_distances);
+			qaws_internal_free(table_params);
+			qaws_internal_free(table_distances);
 			return status;
 		}
 
@@ -1077,14 +1078,14 @@ qaws_status qaws_curve_sample_eval_2d(
 				curve, param, eval_flags, &out_samples[i]);
 			if (status != QAWS_STATUS_OK)
 			{
-				free(table_params);
-				free(table_distances);
+				qaws_internal_free(table_params);
+				qaws_internal_free(table_distances);
 				return status;
 			}
 		}
 
-		free(table_params);
-		free(table_distances);
+		qaws_internal_free(table_params);
+		qaws_internal_free(table_distances);
 	}
 	else
 	{
@@ -1156,14 +1157,14 @@ qaws_status qaws_curve_sample_eval_3d(
 		qaws_scalar target_dist;
 		qaws_scalar param;
 
-		table_params = (qaws_scalar *)malloc(table_size * sizeof(qaws_scalar));
+		table_params = (qaws_scalar *)qaws_internal_malloc(table_size * sizeof(qaws_scalar));
 		if (!table_params)
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 
-		table_distances = (qaws_scalar *)malloc(table_size * sizeof(qaws_scalar));
+		table_distances = (qaws_scalar *)qaws_internal_malloc(table_size * sizeof(qaws_scalar));
 		if (!table_distances)
 		{
-			free(table_params);
+			qaws_internal_free(table_params);
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 		}
 
@@ -1171,8 +1172,8 @@ qaws_status qaws_curve_sample_eval_3d(
 			curve, table_size, table_params, table_distances);
 		if (status != QAWS_STATUS_OK)
 		{
-			free(table_params);
-			free(table_distances);
+			qaws_internal_free(table_params);
+			qaws_internal_free(table_distances);
 			return status;
 		}
 
@@ -1192,14 +1193,14 @@ qaws_status qaws_curve_sample_eval_3d(
 				curve, param, eval_flags, &out_samples[i]);
 			if (status != QAWS_STATUS_OK)
 			{
-				free(table_params);
-				free(table_distances);
+				qaws_internal_free(table_params);
+				qaws_internal_free(table_distances);
 				return status;
 			}
 		}
 
-		free(table_params);
-		free(table_distances);
+		qaws_internal_free(table_params);
+		qaws_internal_free(table_distances);
 	}
 	else
 	{
@@ -1268,22 +1269,22 @@ qaws_status qaws_curve_sample_curvature_weighted_2d(
 	range_max = curve->parameter_range.max_value;
 	epsilon = (qaws_scalar)1e-6;
 
-	t_table = (qaws_scalar *)malloc(n * sizeof(qaws_scalar));
+	t_table = (qaws_scalar *)qaws_internal_malloc(n * sizeof(qaws_scalar));
 	if (!t_table)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 
-	curv_table = (qaws_scalar *)malloc(n * sizeof(qaws_scalar));
+	curv_table = (qaws_scalar *)qaws_internal_malloc(n * sizeof(qaws_scalar));
 	if (!curv_table)
 	{
-		free(t_table);
+		qaws_internal_free(t_table);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 
-	cum_weight = (qaws_scalar *)malloc(n * sizeof(qaws_scalar));
+	cum_weight = (qaws_scalar *)qaws_internal_malloc(n * sizeof(qaws_scalar));
 	if (!cum_weight)
 	{
-		free(t_table);
-		free(curv_table);
+		qaws_internal_free(t_table);
+		qaws_internal_free(curv_table);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 
@@ -1299,9 +1300,9 @@ qaws_status qaws_curve_sample_curvature_weighted_2d(
 			curve, t_table[i], &kappa);
 		if (status != QAWS_STATUS_OK)
 		{
-			free(t_table);
-			free(curv_table);
-			free(cum_weight);
+			qaws_internal_free(t_table);
+			qaws_internal_free(curv_table);
+			qaws_internal_free(cum_weight);
 			return status;
 		}
 
@@ -1359,18 +1360,18 @@ qaws_status qaws_curve_sample_curvature_weighted_2d(
 			curve, t_val, QAWS_EVAL_FLAG_POSITION, &result);
 		if (status != QAWS_STATUS_OK)
 		{
-			free(t_table);
-			free(curv_table);
-			free(cum_weight);
+			qaws_internal_free(t_table);
+			qaws_internal_free(curv_table);
+			qaws_internal_free(cum_weight);
 			return status;
 		}
 
 		out_positions[i] = result.position;
 	}
 
-	free(t_table);
-	free(curv_table);
-	free(cum_weight);
+	qaws_internal_free(t_table);
+	qaws_internal_free(curv_table);
+	qaws_internal_free(cum_weight);
 
 	*out_position_count = sample_count;
 	return QAWS_STATUS_OK;
@@ -1416,22 +1417,22 @@ qaws_status qaws_curve_sample_curvature_weighted_3d(
 	range_max = curve->parameter_range.max_value;
 	epsilon = (qaws_scalar)1e-6;
 
-	t_table = (qaws_scalar *)malloc(n * sizeof(qaws_scalar));
+	t_table = (qaws_scalar *)qaws_internal_malloc(n * sizeof(qaws_scalar));
 	if (!t_table)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 
-	curv_table = (qaws_scalar *)malloc(n * sizeof(qaws_scalar));
+	curv_table = (qaws_scalar *)qaws_internal_malloc(n * sizeof(qaws_scalar));
 	if (!curv_table)
 	{
-		free(t_table);
+		qaws_internal_free(t_table);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 
-	cum_weight = (qaws_scalar *)malloc(n * sizeof(qaws_scalar));
+	cum_weight = (qaws_scalar *)qaws_internal_malloc(n * sizeof(qaws_scalar));
 	if (!cum_weight)
 	{
-		free(t_table);
-		free(curv_table);
+		qaws_internal_free(t_table);
+		qaws_internal_free(curv_table);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 
@@ -1447,9 +1448,9 @@ qaws_status qaws_curve_sample_curvature_weighted_3d(
 			curve, t_table[i], &kappa);
 		if (status != QAWS_STATUS_OK)
 		{
-			free(t_table);
-			free(curv_table);
-			free(cum_weight);
+			qaws_internal_free(t_table);
+			qaws_internal_free(curv_table);
+			qaws_internal_free(cum_weight);
 			return status;
 		}
 
@@ -1507,18 +1508,18 @@ qaws_status qaws_curve_sample_curvature_weighted_3d(
 			curve, t_val, QAWS_EVAL_FLAG_POSITION, &result);
 		if (status != QAWS_STATUS_OK)
 		{
-			free(t_table);
-			free(curv_table);
-			free(cum_weight);
+			qaws_internal_free(t_table);
+			qaws_internal_free(curv_table);
+			qaws_internal_free(cum_weight);
 			return status;
 		}
 
 		out_positions[i] = result.position;
 	}
 
-	free(t_table);
-	free(curv_table);
-	free(cum_weight);
+	qaws_internal_free(t_table);
+	qaws_internal_free(curv_table);
+	qaws_internal_free(cum_weight);
 
 	*out_position_count = sample_count;
 	return QAWS_STATUS_OK;
@@ -1605,7 +1606,7 @@ qaws_status qaws_curve_sample_feature_preserving_2d(
 		+ FEATURE_MAX_INFLECTIONS
 		+ FEATURE_MAX_EXTREMA_PER_AXIS * 2;
 
-	params = (qaws_scalar *)malloc(max_params * sizeof(qaws_scalar));
+	params = (qaws_scalar *)qaws_internal_malloc(max_params * sizeof(qaws_scalar));
 	if (!params)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 
@@ -1657,7 +1658,7 @@ qaws_status qaws_curve_sample_feature_preserving_2d(
 	if (param_count > position_capacity)
 	{
 		*out_position_count = param_count;
-		free(params);
+		qaws_internal_free(params);
 		return QAWS_STATUS_BUFFER_TOO_SMALL;
 	}
 
@@ -1668,14 +1669,14 @@ qaws_status qaws_curve_sample_feature_preserving_2d(
 			curve, params[i], QAWS_EVAL_FLAG_POSITION, &result);
 		if (status != QAWS_STATUS_OK)
 		{
-			free(params);
+			qaws_internal_free(params);
 			return status;
 		}
 		out_positions[i] = result.position;
 	}
 
 	*out_position_count = param_count;
-	free(params);
+	qaws_internal_free(params);
 	return QAWS_STATUS_OK;
 }
 
@@ -1717,7 +1718,7 @@ qaws_status qaws_curve_sample_feature_preserving_3d(
 		+ FEATURE_MAX_INFLECTIONS
 		+ FEATURE_MAX_EXTREMA_PER_AXIS * 3;
 
-	params = (qaws_scalar *)malloc(max_params * sizeof(qaws_scalar));
+	params = (qaws_scalar *)qaws_internal_malloc(max_params * sizeof(qaws_scalar));
 	if (!params)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 
@@ -1769,7 +1770,7 @@ qaws_status qaws_curve_sample_feature_preserving_3d(
 	if (param_count > position_capacity)
 	{
 		*out_position_count = param_count;
-		free(params);
+		qaws_internal_free(params);
 		return QAWS_STATUS_BUFFER_TOO_SMALL;
 	}
 
@@ -1780,14 +1781,14 @@ qaws_status qaws_curve_sample_feature_preserving_3d(
 			curve, params[i], QAWS_EVAL_FLAG_POSITION, &result);
 		if (status != QAWS_STATUS_OK)
 		{
-			free(params);
+			qaws_internal_free(params);
 			return status;
 		}
 		out_positions[i] = result.position;
 	}
 
 	*out_position_count = param_count;
-	free(params);
+	qaws_internal_free(params);
 	return QAWS_STATUS_OK;
 }
 
@@ -1827,14 +1828,14 @@ qaws_status qaws_curve_sample_streaming_2d(
 		qaws_scalar target_dist;
 		qaws_scalar param;
 
-		table_params = (qaws_scalar *)malloc(table_size * sizeof(qaws_scalar));
+		table_params = (qaws_scalar *)qaws_internal_malloc(table_size * sizeof(qaws_scalar));
 		if (!table_params)
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 
-		table_distances = (qaws_scalar *)malloc(table_size * sizeof(qaws_scalar));
+		table_distances = (qaws_scalar *)qaws_internal_malloc(table_size * sizeof(qaws_scalar));
 		if (!table_distances)
 		{
-			free(table_params);
+			qaws_internal_free(table_params);
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 		}
 
@@ -1842,8 +1843,8 @@ qaws_status qaws_curve_sample_streaming_2d(
 			curve, table_size, table_params, table_distances);
 		if (status != QAWS_STATUS_OK)
 		{
-			free(table_params);
-			free(table_distances);
+			qaws_internal_free(table_params);
+			qaws_internal_free(table_distances);
 			return status;
 		}
 
@@ -1864,21 +1865,21 @@ qaws_status qaws_curve_sample_streaming_2d(
 				curve, param, QAWS_EVAL_FLAG_POSITION, &result);
 			if (status != QAWS_STATUS_OK)
 			{
-				free(table_params);
-				free(table_distances);
+				qaws_internal_free(table_params);
+				qaws_internal_free(table_distances);
 				return status;
 			}
 
 			if (!callback(param, &result.position, user_data))
 			{
-				free(table_params);
-				free(table_distances);
+				qaws_internal_free(table_params);
+				qaws_internal_free(table_distances);
 				return QAWS_STATUS_OK;
 			}
 		}
 
-		free(table_params);
-		free(table_distances);
+		qaws_internal_free(table_params);
+		qaws_internal_free(table_distances);
 	}
 	else
 	{
@@ -1936,14 +1937,14 @@ qaws_status qaws_curve_sample_streaming_3d(
 		qaws_scalar target_dist;
 		qaws_scalar param;
 
-		table_params = (qaws_scalar *)malloc(table_size * sizeof(qaws_scalar));
+		table_params = (qaws_scalar *)qaws_internal_malloc(table_size * sizeof(qaws_scalar));
 		if (!table_params)
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 
-		table_distances = (qaws_scalar *)malloc(table_size * sizeof(qaws_scalar));
+		table_distances = (qaws_scalar *)qaws_internal_malloc(table_size * sizeof(qaws_scalar));
 		if (!table_distances)
 		{
-			free(table_params);
+			qaws_internal_free(table_params);
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 		}
 
@@ -1951,8 +1952,8 @@ qaws_status qaws_curve_sample_streaming_3d(
 			curve, table_size, table_params, table_distances);
 		if (status != QAWS_STATUS_OK)
 		{
-			free(table_params);
-			free(table_distances);
+			qaws_internal_free(table_params);
+			qaws_internal_free(table_distances);
 			return status;
 		}
 
@@ -1973,21 +1974,21 @@ qaws_status qaws_curve_sample_streaming_3d(
 				curve, param, QAWS_EVAL_FLAG_POSITION, &result);
 			if (status != QAWS_STATUS_OK)
 			{
-				free(table_params);
-				free(table_distances);
+				qaws_internal_free(table_params);
+				qaws_internal_free(table_distances);
 				return status;
 			}
 
 			if (!callback(param, &result.position, user_data))
 			{
-				free(table_params);
-				free(table_distances);
+				qaws_internal_free(table_params);
+				qaws_internal_free(table_distances);
 				return QAWS_STATUS_OK;
 			}
 		}
 
-		free(table_params);
-		free(table_distances);
+		qaws_internal_free(table_params);
+		qaws_internal_free(table_distances);
 	}
 	else
 	{

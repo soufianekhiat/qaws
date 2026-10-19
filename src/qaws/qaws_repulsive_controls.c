@@ -11,6 +11,7 @@
  */
 
 #include "qaws_repulsive.h"
+#include "internal/qaws_internal_memory.h"
 #include "qaws_curve.h"
 #include "qaws_diff.h"
 #include "internal/qaws_internal_repulsive.h"
@@ -39,9 +40,9 @@ void qaws_repulsive_controls_destroy(qaws_repulsive_controls* ctl)
 	if (!ctl)
 		return;
 	qaws_repulsive_curves_destroy(ctl->rc);
-	free(ctl->curves); free(ctl->first); free(ctl->edges); free(ctl->src); free(ctl->t);
-	free(ctl->brow); free(ctl->bcol); free(ctl->bval); free(ctl->P0);
-	free(ctl);
+	qaws_internal_free(ctl->curves); qaws_internal_free(ctl->first); qaws_internal_free(ctl->edges); qaws_internal_free(ctl->src); qaws_internal_free(ctl->t);
+	qaws_internal_free(ctl->brow); qaws_internal_free(ctl->bcol); qaws_internal_free(ctl->bval); qaws_internal_free(ctl->P0);
+	qaws_internal_free(ctl);
 }
 
 /* x = B P (dim each), in double */
@@ -71,10 +72,10 @@ static qaws_status rc_columns(qaws_repulsive_controls* ctl, unsigned int ci, uns
 	unsigned int* nt, unsigned int* cap)
 {
 	unsigned int dim = ctl->dim, ns = 0, s, k, i;
-	qaws_scalar *ts = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (ctl->nv + 1)), *dir = (qaws_scalar*)calloc(dim * ncc + 1, sizeof(qaws_scalar));
-	unsigned int* rows = (unsigned int*)malloc(sizeof(unsigned int) * (ctl->nv + 1));
-	qaws_curve_jet_3d* j3 = (qaws_curve_jet_3d*)malloc(sizeof(qaws_curve_jet_3d) * (ctl->nv + 1));
-	qaws_curve_jet_2d* j2 = (qaws_curve_jet_2d*)malloc(sizeof(qaws_curve_jet_2d) * (ctl->nv + 1));
+	qaws_scalar *ts = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * (ctl->nv + 1)), *dir = (qaws_scalar*)qaws_internal_zalloc(dim * ncc + 1, sizeof(qaws_scalar));
+	unsigned int* rows = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (ctl->nv + 1));
+	qaws_curve_jet_3d* j3 = (qaws_curve_jet_3d*)qaws_internal_malloc(sizeof(qaws_curve_jet_3d) * (ctl->nv + 1));
+	qaws_curve_jet_2d* j2 = (qaws_curve_jet_2d*)qaws_internal_malloc(sizeof(qaws_curve_jet_2d) * (ctl->nv + 1));
 	qaws_field_view view;
 	qaws_diff_views views;
 	qaws_status st = QAWS_STATUS_OK;
@@ -108,12 +109,12 @@ static qaws_status rc_columns(qaws_repulsive_controls* ctl, unsigned int ci, uns
 			if (*nt == *cap)
 			{
 				unsigned int nc2 = *cap ? 2 * *cap : 1024;
-				unsigned int *r2 = (unsigned int*)realloc(*tr, sizeof(unsigned int) * nc2), *c2;
+				unsigned int *r2 = (unsigned int*)qaws_internal_realloc(*tr, sizeof(unsigned int) * nc2), *c2;
 				double* v2;
 				if (r2) *tr = r2;
-				c2 = (unsigned int*)realloc(*tc, sizeof(unsigned int) * nc2);
+				c2 = (unsigned int*)qaws_internal_realloc(*tc, sizeof(unsigned int) * nc2);
 				if (c2) *tc = c2;
-				v2 = (double*)realloc(*tv, sizeof(double) * nc2);
+				v2 = (double*)qaws_internal_realloc(*tv, sizeof(double) * nc2);
 				if (v2) *tv = v2;
 				if (!r2 || !c2 || !v2)
 				{
@@ -126,7 +127,7 @@ static qaws_status rc_columns(qaws_repulsive_controls* ctl, unsigned int ci, uns
 		}
 	}
 done:
-	free(ts); free(dir); free(rows); free(j3); free(j2);
+	qaws_internal_free(ts); qaws_internal_free(dir); qaws_internal_free(rows); qaws_internal_free(j3); qaws_internal_free(j2);
 	return st;
 }
 
@@ -142,7 +143,7 @@ qaws_status qaws_repulsive_controls_create(qaws_repulsive_controls_desc const* d
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	*out = NULL;
 	dim = desc->polyline.dimension;
-	ctl = (qaws_repulsive_controls*)calloc(1, sizeof(*ctl));
+	ctl = (qaws_repulsive_controls*)qaws_internal_zalloc(1, sizeof(*ctl));
 	if (!ctl)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	ctl->dim = dim; ctl->ncurve = desc->polyline.curve_count;
@@ -150,12 +151,12 @@ qaws_status qaws_repulsive_controls_create(qaws_repulsive_controls_desc const* d
 	st = qaws_repulsive_polyline_from_curves(&desc->polyline, NULL, 0, NULL, 0, NULL, NULL, &ctl->nv, &ctl->ne);
 	if (st != QAWS_STATUS_OK && st != QAWS_STATUS_BUFFER_TOO_SMALL)
 		goto fail;
-	pos = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (dim * ctl->nv + 1));
-	ctl->edges = (unsigned int*)malloc(sizeof(unsigned int) * (2 * ctl->ne + 1));
-	ctl->src = (unsigned int*)malloc(sizeof(unsigned int) * (ctl->nv + 1));
-	ctl->t = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (ctl->nv + 1));
-	ctl->curves = (qaws_curve const**)malloc(sizeof(qaws_curve const*) * ctl->ncurve);
-	ctl->first = (unsigned int*)malloc(sizeof(unsigned int) * (ctl->ncurve + 1));
+	pos = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * (dim * ctl->nv + 1));
+	ctl->edges = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (2 * ctl->ne + 1));
+	ctl->src = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (ctl->nv + 1));
+	ctl->t = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * (ctl->nv + 1));
+	ctl->curves = (qaws_curve const**)qaws_internal_malloc(sizeof(qaws_curve const*) * ctl->ncurve);
+	ctl->first = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (ctl->ncurve + 1));
 	if (!pos || !ctl->edges || !ctl->src || !ctl->t || !ctl->curves || !ctl->first)
 	{
 		st = QAWS_STATUS_ALLOCATION_FAILURE;
@@ -184,7 +185,7 @@ qaws_status qaws_repulsive_controls_create(qaws_repulsive_controls_desc const* d
 		ctl->first[ci + 1] = ctl->first[ci] + ncc;
 	}
 	ctl->nc = ctl->first[ctl->ncurve];
-	ctl->P0 = (double*)malloc(sizeof(double) * (dim * ctl->nc + 1));
+	ctl->P0 = (double*)qaws_internal_malloc(sizeof(double) * (dim * ctl->nc + 1));
 	if (!ctl->P0)
 	{
 		st = QAWS_STATUS_ALLOCATION_FAILURE;
@@ -193,7 +194,7 @@ qaws_status qaws_repulsive_controls_create(qaws_repulsive_controls_desc const* d
 	for (ci = 0; ci < ctl->ncurve; ci++)
 	{
 		unsigned int ncc = ctl->first[ci + 1] - ctl->first[ci], got = 0;
-		qaws_scalar* buf = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (dim * ncc + 1));
+		qaws_scalar* buf = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * (dim * ncc + 1));
 		if (!buf)
 		{
 			st = QAWS_STATUS_ALLOCATION_FAILURE;
@@ -201,7 +202,7 @@ qaws_status qaws_repulsive_controls_create(qaws_repulsive_controls_desc const* d
 		}
 		st = qaws_curve_read_field(ctl->curves[ci], QAWS_FIELD_CONTROL_POINTS, buf, dim * ncc, &got);
 		for (i = 0; st == QAWS_STATUS_OK && i < dim * ncc; i++) ctl->P0[dim * ctl->first[ci] + i] = (double)buf[i];
-		free(buf);
+		qaws_internal_free(buf);
 		if (st != QAWS_STATUS_OK || got != dim * ncc)
 		{
 			st = st != QAWS_STATUS_OK ? st : QAWS_STATUS_UNSUPPORTED_OPERATION;
@@ -211,9 +212,9 @@ qaws_status qaws_repulsive_controls_create(qaws_repulsive_controls_desc const* d
 			goto fail;
 	}
 	/* B by rows */
-	ctl->brow = (unsigned int*)calloc(ctl->nv + 2, sizeof(unsigned int));
-	ctl->bcol = (unsigned int*)malloc(sizeof(unsigned int) * (nt + 1));
-	ctl->bval = (double*)malloc(sizeof(double) * (nt + 1));
+	ctl->brow = (unsigned int*)qaws_internal_zalloc(ctl->nv + 2, sizeof(unsigned int));
+	ctl->bcol = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (nt + 1));
+	ctl->bval = (double*)qaws_internal_malloc(sizeof(double) * (nt + 1));
 	if (!ctl->brow || !ctl->bcol || !ctl->bval)
 	{
 		st = QAWS_STATUS_ALLOCATION_FAILURE;
@@ -222,7 +223,7 @@ qaws_status qaws_repulsive_controls_create(qaws_repulsive_controls_desc const* d
 	for (i = 0; i < nt; i++) ctl->brow[tr[i] + 1]++;
 	for (i = 0; i < ctl->nv; i++) ctl->brow[i + 1] += ctl->brow[i];
 	{
-		unsigned int* fill = (unsigned int*)calloc(ctl->nv + 1, sizeof(unsigned int));
+		unsigned int* fill = (unsigned int*)qaws_internal_zalloc(ctl->nv + 1, sizeof(unsigned int));
 		if (!fill)
 		{
 			st = QAWS_STATUS_ALLOCATION_FAILURE;
@@ -233,11 +234,11 @@ qaws_status qaws_repulsive_controls_create(qaws_repulsive_controls_desc const* d
 			unsigned int at = ctl->brow[tr[i]] + fill[tr[i]]++;
 			ctl->bcol[at] = tc[i]; ctl->bval[at] = tv[i];
 		}
-		free(fill);
+		qaws_internal_free(fill);
 	}
 	/* linear in the controls: B P reproduces the samples */
 	{
-		double* x = (double*)malloc(sizeof(double) * (dim * ctl->nv + 1));
+		double* x = (double*)qaws_internal_malloc(sizeof(double) * (dim * ctl->nv + 1));
 		double err = 0, ext = 0;
 		if (!x)
 		{
@@ -246,7 +247,7 @@ qaws_status qaws_repulsive_controls_create(qaws_repulsive_controls_desc const* d
 		}
 		rc_apply(ctl, ctl->P0, x);
 		for (i = 0; i < dim * ctl->nv; i++) { err = fmax(err, fabs(x[i] - (double)pos[i])); ext = fmax(ext, fabs((double)pos[i])); }
-		free(x);
+		qaws_internal_free(x);
 		if (!(err <= (sizeof(qaws_scalar) == 4 ? 1e-4 : 1e-9) * (ext + 1)))
 		{
 			st = QAWS_STATUS_UNSUPPORTED_OPERATION;   /* (not linear in its control points) */
@@ -258,11 +259,11 @@ qaws_status qaws_repulsive_controls_create(qaws_repulsive_controls_desc const* d
 	cd.alpha = desc->alpha; cd.beta = desc->beta;
 	if ((st = qaws_repulsive_curves_create(&cd, &ctl->rc)) != QAWS_STATUS_OK)
 		goto fail;
-	free(pos); free(tr); free(tc); free(tv);
+	qaws_internal_free(pos); qaws_internal_free(tr); qaws_internal_free(tc); qaws_internal_free(tv);
 	*out = ctl;
 	return QAWS_STATUS_OK;
 fail:
-	free(pos); free(tr); free(tc); free(tv);
+	qaws_internal_free(pos); qaws_internal_free(tr); qaws_internal_free(tc); qaws_internal_free(tv);
 	qaws_repulsive_controls_destroy(ctl);
 	return st;
 }
@@ -293,10 +294,10 @@ static qaws_status rc_positions(qaws_repulsive_controls const* ctl, qaws_scalar 
 	qaws_scalar* dx)
 {
 	unsigned int i, n = ctl->dim * ctl->nc, m = ctl->dim * ctl->nv;
-	double *P = (double*)malloc(sizeof(double) * (n + 1)), *y = (double*)malloc(sizeof(double) * (m + 1));
+	double *P = (double*)qaws_internal_malloc(sizeof(double) * (n + 1)), *y = (double*)qaws_internal_malloc(sizeof(double) * (m + 1));
 	if (!P || !y)
 	{
-		free(P); free(y);
+		qaws_internal_free(P); qaws_internal_free(y);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 	for (i = 0; i < n; i++) P[i] = (double)controls[i];
@@ -308,7 +309,7 @@ static qaws_status rc_positions(qaws_repulsive_controls const* ctl, qaws_scalar 
 		rc_apply(ctl, P, y);
 		for (i = 0; i < m; i++) dx[i] = (qaws_scalar)y[i];
 	}
-	free(P); free(y);
+	qaws_internal_free(P); qaws_internal_free(y);
 	return QAWS_STATUS_OK;
 }
 
@@ -324,12 +325,12 @@ qaws_status qaws_repulsive_controls_eval(qaws_repulsive_controls const* ctl, qaw
 	qaws_status st;
 	if (!ctl || !controls)
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	x = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (ctl->dim * ctl->nv + 1));
-	dx = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (ctl->dim * ctl->nv + 1));
+	x = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * (ctl->dim * ctl->nv + 1));
+	dx = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * (ctl->dim * ctl->nv + 1));
 	st = !x || !dx ? QAWS_STATUS_ALLOCATION_FAILURE : rc_positions(ctl, controls, direction, x, direction ? dx : NULL);
 	if (st == QAWS_STATUS_OK)
 		st = qaws_repulsive_curves_eval(ctl->rc, x, direction ? dx : NULL, out_value, out_tangent, out_tangent2);
-	free(x); free(dx);
+	qaws_internal_free(x); qaws_internal_free(dx);
 	return st;
 }
 
@@ -343,10 +344,10 @@ qaws_status qaws_repulsive_controls_gradient(qaws_repulsive_controls const* ctl,
 	if (!ctl || !controls || !gradient)
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	m = ctl->dim * ctl->nv;
-	x = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (m + 1));
-	g = (qaws_scalar*)calloc(m + 1, sizeof(qaws_scalar));
-	gd = (double*)malloc(sizeof(double) * (m + 1));
-	acc = (double*)calloc(ctl->dim * ctl->nc + 1, sizeof(double));
+	x = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * (m + 1));
+	g = (qaws_scalar*)qaws_internal_zalloc(m + 1, sizeof(qaws_scalar));
+	gd = (double*)qaws_internal_malloc(sizeof(double) * (m + 1));
+	acc = (double*)qaws_internal_zalloc(ctl->dim * ctl->nc + 1, sizeof(double));
 	st = !x || !g || !gd || !acc ? QAWS_STATUS_ALLOCATION_FAILURE : rc_positions(ctl, controls, NULL, x, NULL);
 	if (st == QAWS_STATUS_OK)
 		st = qaws_repulsive_curves_gradient(ctl->rc, x, 1, g, out_value);
@@ -356,7 +357,7 @@ qaws_status qaws_repulsive_controls_gradient(qaws_repulsive_controls const* ctl,
 		rc_apply_t(ctl, gd, (double)seed, acc);
 		for (i = 0; i < ctl->dim * ctl->nc; i++) gradient[i] = (qaws_scalar)((double)gradient[i] + acc[i]);
 	}
-	free(x); free(g); free(gd); free(acc);
+	qaws_internal_free(x); qaws_internal_free(g); qaws_internal_free(gd); qaws_internal_free(acc);
 	return st;
 }
 
@@ -369,11 +370,11 @@ qaws_status qaws_repulsive_controls_hvp(qaws_repulsive_controls const* ctl, qaws
 	if (!ctl || !controls || !direction || !out_hv)
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	m = ctl->dim * ctl->nv;
-	x = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (m + 1));
-	dx = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (m + 1));
-	h = (qaws_scalar*)calloc(m + 1, sizeof(qaws_scalar));
-	hd = (double*)malloc(sizeof(double) * (m + 1));
-	acc = (double*)calloc(ctl->dim * ctl->nc + 1, sizeof(double));
+	x = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * (m + 1));
+	dx = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * (m + 1));
+	h = (qaws_scalar*)qaws_internal_zalloc(m + 1, sizeof(qaws_scalar));
+	hd = (double*)qaws_internal_malloc(sizeof(double) * (m + 1));
+	acc = (double*)qaws_internal_zalloc(ctl->dim * ctl->nc + 1, sizeof(double));
 	st = !x || !dx || !h || !hd || !acc ? QAWS_STATUS_ALLOCATION_FAILURE : rc_positions(ctl, controls, direction, x, dx);
 	if (st == QAWS_STATUS_OK)
 		st = qaws_repulsive_curves_hvp(ctl->rc, x, dx, h);   /* (B^T H B v: the map is linear) */
@@ -383,7 +384,7 @@ qaws_status qaws_repulsive_controls_hvp(qaws_repulsive_controls const* ctl, qaws
 		rc_apply_t(ctl, hd, 1, acc);
 		for (i = 0; i < ctl->dim * ctl->nc; i++) out_hv[i] = (qaws_scalar)((double)out_hv[i] + acc[i]);
 	}
-	free(x); free(dx); free(h); free(hd); free(acc);
+	qaws_internal_free(x); qaws_internal_free(dx); qaws_internal_free(h); qaws_internal_free(hd); qaws_internal_free(acc);
 	return st;
 }
 
@@ -525,9 +526,9 @@ void qaws_repulsive_controls_solver_destroy(qaws_repulsive_controls_solver* s)
 	if (!s)
 		return;
 	qaws_repulsive_curves_solver_destroy(s->inner);
-	free(s->core.x); free(s->pin); free(s->fixed); free(s->pin_target); free(s->x); free(s->x1); free(s->Cx); free(s->A); free(s->gx); free(s->col);
-	free(s->bsum);
-	free(s);
+	qaws_internal_free(s->core.x); qaws_internal_free(s->pin); qaws_internal_free(s->fixed); qaws_internal_free(s->pin_target); qaws_internal_free(s->x); qaws_internal_free(s->x1); qaws_internal_free(s->Cx); qaws_internal_free(s->A); qaws_internal_free(s->gx); qaws_internal_free(s->col);
+	qaws_internal_free(s->bsum);
+	qaws_internal_free(s);
 }
 
 qaws_status qaws_repulsive_controls_solver_create(qaws_repulsive_controls const* ctl, qaws_repulsive_curves_solve_desc const* desc,
@@ -550,22 +551,22 @@ qaws_status qaws_repulsive_controls_solver_create(qaws_repulsive_controls const*
 	if ((d.pinned_count && !d.pinned) || !(d.theta >= 0))
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	for (i = 0; i < d.pinned_count; i++) if (d.pinned[i] >= nc) return QAWS_STATUS_INVALID_ARGUMENT;   /* (pins name controls) */
-	s = (qaws_repulsive_controls_solver*)calloc(1, sizeof(*s));
+	s = (qaws_repulsive_controls_solver*)qaws_internal_zalloc(1, sizeof(*s));
 	if (!s)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	s->ctl = ctl; s->theta = (double)d.theta;
 	k = &s->core;
 	k->ops = &rcs_ops; k->dim = dim; k->nv = nc; k->N = dim * nc;
-	k->x = (double*)malloc(sizeof(double) * (dim * nc + 1));
-	s->pin = (unsigned int*)malloc(sizeof(unsigned int) * (d.pinned_count + 1));
-	s->fixed = (unsigned char*)calloc(nc + 1, 1);
-	s->pin_target = (double*)malloc(sizeof(double) * (dim * d.pinned_count + 1));
-	s->x = (double*)malloc(sizeof(double) * (dim * nv + 1)); s->x1 = (double*)malloc(sizeof(double) * (dim * nv + 1));
-	s->A = s->theta > 0 ? NULL : (double*)malloc(sizeof(double) * ((size_t)nv * nv + 1));
-	s->gx = (double*)malloc(sizeof(double) * (dim * nv + 1));
-	s->col = (double*)malloc(sizeof(double) * (2 * nv + 1));
-	s->bsum = (double*)calloc(nc + 1, sizeof(double));
-	xs = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (dim * nv + 1));
+	k->x = (double*)qaws_internal_malloc(sizeof(double) * (dim * nc + 1));
+	s->pin = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (d.pinned_count + 1));
+	s->fixed = (unsigned char*)qaws_internal_zalloc(nc + 1, 1);
+	s->pin_target = (double*)qaws_internal_malloc(sizeof(double) * (dim * d.pinned_count + 1));
+	s->x = (double*)qaws_internal_malloc(sizeof(double) * (dim * nv + 1)); s->x1 = (double*)qaws_internal_malloc(sizeof(double) * (dim * nv + 1));
+	s->A = s->theta > 0 ? NULL : (double*)qaws_internal_malloc(sizeof(double) * ((size_t)nv * nv + 1));
+	s->gx = (double*)qaws_internal_malloc(sizeof(double) * (dim * nv + 1));
+	s->col = (double*)qaws_internal_malloc(sizeof(double) * (2 * nv + 1));
+	s->bsum = (double*)qaws_internal_zalloc(nc + 1, sizeof(double));
+	xs = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * (dim * nv + 1));
 	if (!k->x || !s->pin || !s->fixed || !s->pin_target || !s->x || !s->x1 || (!s->A && s->theta <= 0) || !s->gx || !s->col || !s->bsum || !xs)
 	{
 		st = QAWS_STATUS_ALLOCATION_FAILURE;
@@ -583,7 +584,7 @@ qaws_status qaws_repulsive_controls_solver_create(qaws_repulsive_controls const*
 		goto fail;
 	in = (rs_core const*)s->inner;
 	s->kin = in->k;
-	s->Cx = (double*)malloc(sizeof(double) * ((size_t)s->kin * dim * nv + 1));
+	s->Cx = (double*)qaws_internal_malloc(sizeof(double) * ((size_t)s->kin * dim * nv + 1));
 	if (!s->Cx)
 	{
 		st = QAWS_STATUS_ALLOCATION_FAILURE;
@@ -613,11 +614,11 @@ qaws_status qaws_repulsive_controls_solver_create(qaws_repulsive_controls const*
 	if ((st = rcs_energy(k, k->x, &E, NULL)) != QAWS_STATUS_OK)
 		goto fail;
 	k->rep.initial_energy = k->rep.energy = (qaws_scalar)E;
-	free(xs);
+	qaws_internal_free(xs);
 	*out_solver = s;
 	return QAWS_STATUS_OK;
 fail:
-	free(xs);
+	qaws_internal_free(xs);
 	qaws_repulsive_controls_solver_destroy(s);
 	return st;
 }

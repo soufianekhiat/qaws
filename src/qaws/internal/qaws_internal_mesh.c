@@ -1,4 +1,5 @@
 #include "qaws_internal_mesh.h"
+#include "qaws_internal_memory.h"
 #include "../qaws_platform.h"
 #include <stdlib.h>
 #include <string.h>
@@ -55,20 +56,20 @@ qaws_status qaws_internal_mesh_build(
 	mesh->vertex_count = vertex_count;
 	mesh->tri_count = tri_count;
 
-	mesh->tris = (qaws_internal_tri*)calloc(tri_count, sizeof(qaws_internal_tri));
+	mesh->tris = (qaws_internal_tri*)qaws_internal_zalloc(tri_count, sizeof(qaws_internal_tri));
 	if (!mesh->tris) goto fail;
 
 	/* Maximum possible edges: 3 * tri_count (before dedup) */
 	max_edges = 3 * tri_count;
-	mesh->edges = (qaws_internal_edge*)calloc(max_edges, sizeof(qaws_internal_edge));
+	mesh->edges = (qaws_internal_edge*)qaws_internal_zalloc(max_edges, sizeof(qaws_internal_edge));
 	if (!mesh->edges) goto fail;
 
 	/* Hash table for edge dedup */
 	hash_cap = max_edges * 2 + 1;
-	hash_table = (unsigned int*)malloc(hash_cap * sizeof(unsigned int));
-	hash_next = (unsigned int*)malloc(max_edges * sizeof(unsigned int));
-	hash_keys = (edge_key*)malloc(max_edges * sizeof(edge_key));
-	hash_edge_idx = (unsigned int*)malloc(max_edges * sizeof(unsigned int));
+	hash_table = (unsigned int*)qaws_internal_malloc(hash_cap * sizeof(unsigned int));
+	hash_next = (unsigned int*)qaws_internal_malloc(max_edges * sizeof(unsigned int));
+	hash_keys = (edge_key*)qaws_internal_malloc(max_edges * sizeof(edge_key));
+	hash_edge_idx = (unsigned int*)qaws_internal_malloc(max_edges * sizeof(unsigned int));
 	if (!hash_table || !hash_next || !hash_keys || !hash_edge_idx) goto fail;
 
 	memset(hash_table, 0xFF, hash_cap * sizeof(unsigned int)); /* UINT_MAX = empty */
@@ -134,13 +135,13 @@ qaws_status qaws_internal_mesh_build(
 
 	mesh->edge_count = edge_count;
 
-	free(hash_table); hash_table = NULL;
-	free(hash_next); hash_next = NULL;
-	free(hash_keys); hash_keys = NULL;
-	free(hash_edge_idx); hash_edge_idx = NULL;
+	qaws_internal_free(hash_table); hash_table = NULL;
+	qaws_internal_free(hash_next); hash_next = NULL;
+	qaws_internal_free(hash_keys); hash_keys = NULL;
+	qaws_internal_free(hash_edge_idx); hash_edge_idx = NULL;
 
 	/* Build vertex-to-edge adjacency (CSR) */
-	vert_degree = (unsigned int*)calloc(vertex_count, sizeof(unsigned int));
+	vert_degree = (unsigned int*)qaws_internal_zalloc(vertex_count, sizeof(unsigned int));
 	if (!vert_degree) goto fail;
 
 	for (ei = 0; ei < edge_count; ei++)
@@ -149,8 +150,8 @@ qaws_status qaws_internal_mesh_build(
 		vert_degree[mesh->edges[ei].v[1]]++;
 	}
 
-	mesh->vert_edge_offset = (unsigned int*)malloc((vertex_count + 1) * sizeof(unsigned int));
-	if (!mesh->vert_edge_offset) { free(vert_degree); goto fail; }
+	mesh->vert_edge_offset = (unsigned int*)qaws_internal_malloc((vertex_count + 1) * sizeof(unsigned int));
+	if (!mesh->vert_edge_offset) { qaws_internal_free(vert_degree); goto fail; }
 
 	mesh->vert_edge_offset[0] = 0;
 	for (vi = 0; vi < vertex_count; vi++)
@@ -159,8 +160,8 @@ qaws_status qaws_internal_mesh_build(
 		total_vert_edges += vert_degree[vi];
 	}
 
-	mesh->vert_edges = (unsigned int*)malloc(total_vert_edges * sizeof(unsigned int));
-	if (!mesh->vert_edges) { free(vert_degree); goto fail; }
+	mesh->vert_edges = (unsigned int*)qaws_internal_malloc(total_vert_edges * sizeof(unsigned int));
+	if (!mesh->vert_edges) { qaws_internal_free(vert_degree); goto fail; }
 
 	memset(vert_degree, 0, vertex_count * sizeof(unsigned int));
 	for (ei = 0; ei < edge_count; ei++)
@@ -171,14 +172,14 @@ qaws_status qaws_internal_mesh_build(
 		mesh->vert_edges[mesh->vert_edge_offset[vb] + vert_degree[vb]++] = ei;
 	}
 
-	free(vert_degree);
+	qaws_internal_free(vert_degree);
 	return QAWS_STATUS_OK;
 
 fail:
-	free(hash_table);
-	free(hash_next);
-	free(hash_keys);
-	free(hash_edge_idx);
+	qaws_internal_free(hash_table);
+	qaws_internal_free(hash_next);
+	qaws_internal_free(hash_keys);
+	qaws_internal_free(hash_edge_idx);
 	qaws_internal_mesh_destroy(mesh);
 	return QAWS_STATUS_ALLOCATION_FAILURE;
 }
@@ -186,10 +187,10 @@ fail:
 void qaws_internal_mesh_destroy(qaws_internal_mesh* mesh)
 {
 	if (!mesh) return;
-	free(mesh->tris);
-	free(mesh->edges);
-	free(mesh->vert_edge_offset);
-	free(mesh->vert_edges);
+	qaws_internal_free(mesh->tris);
+	qaws_internal_free(mesh->edges);
+	qaws_internal_free(mesh->vert_edge_offset);
+	qaws_internal_free(mesh->vert_edges);
 	memset(mesh, 0, sizeof(*mesh));
 }
 
@@ -279,10 +280,10 @@ qaws_status qaws_internal_mesh_dijkstra(
 	unsigned int vi, count;
 	qaws_status status = QAWS_STATUS_OK;
 
-	dist = (qaws_scalar*)malloc(n * sizeof(qaws_scalar));
-	prev = (unsigned int*)malloc(n * sizeof(unsigned int));
-	visited = (int*)calloc(n, sizeof(int));
-	heap = (dijk_entry*)malloc(n * 4 * sizeof(dijk_entry));
+	dist = (qaws_scalar*)qaws_internal_malloc(n * sizeof(qaws_scalar));
+	prev = (unsigned int*)qaws_internal_malloc(n * sizeof(unsigned int));
+	visited = (int*)qaws_internal_zalloc(n, sizeof(int));
+	heap = (dijk_entry*)qaws_internal_malloc(n * 4 * sizeof(dijk_entry));
 	if (!dist || !prev || !visited || !heap)
 	{
 		status = QAWS_STATUS_ALLOCATION_FAILURE;
@@ -370,10 +371,10 @@ qaws_status qaws_internal_mesh_dijkstra(
 	*out_path_count = count;
 
 cleanup:
-	free(dist);
-	free(prev);
-	free(visited);
-	free(heap);
+	qaws_internal_free(dist);
+	qaws_internal_free(prev);
+	qaws_internal_free(visited);
+	qaws_internal_free(heap);
 	return status;
 }
 

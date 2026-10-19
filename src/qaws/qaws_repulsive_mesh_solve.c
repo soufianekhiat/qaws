@@ -12,6 +12,7 @@
  */
 
 #include "qaws_repulsive.h"
+#include "internal/qaws_internal_memory.h"
 #include "internal/qaws_internal_repulsive.h"
 #include "internal/qaws_internal_repulsive_solve.h"
 #include "internal/qaws_internal_broadphase.h"
@@ -135,12 +136,12 @@ static qaws_status rm_metric(qaws_repulsive_mesh const* m, double const* x, doub
 {
 	double s = 2 - 2 / m->p, sigma = s - 1, ex = 2 * sigma + 2;
 	unsigned int S, T, a, b, nv = m->nv;
-	rm_face* f = (rm_face*)malloc(sizeof(rm_face) * (m->nf + 1));
+	rm_face* f = (rm_face*)qaws_internal_malloc(sizeof(rm_face) * (m->nf + 1));
 	if (!f)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	if (!rm_faces(m, x, f))
 	{
-		free(f);
+		qaws_internal_free(f);
 		return QAWS_STATUS_DEGENERATE_CURVE;
 	}
 	memset(A, 0, sizeof(double) * nv * nv);
@@ -153,7 +154,7 @@ static qaws_status rm_metric(qaws_repulsive_mesh const* m, double const* x, doub
 			r2 = rm_dot(d, d);
 			if (!(r2 > 0))
 			{
-				free(f);
+				qaws_internal_free(f);
 				return QAWS_STATUS_NUMERICAL_FAILURE;
 			}
 			w = f[S].a * f[T].a * pow(r2, -0.5 * ex);
@@ -163,7 +164,7 @@ static qaws_status rm_metric(qaws_repulsive_mesh const* m, double const* x, doub
 				for (b = 0; b < n; b++)
 					A[id[a] * nv + id[b]] += 2 * w * rm_dot(G[a], G[b]) + w * K * h[a] * h[b];
 		}
-	free(f);
+	qaws_internal_free(f);
 	return QAWS_STATUS_OK;
 }
 
@@ -184,7 +185,7 @@ static qaws_status rm_energy(rs_core const* core, double const* x, double* E, do
 	{
 		/* the area weighted (the paper's minimize area); the volume's deviation
 		   (its program's volume_deviation: w ((V - Vt) / Vt)^2) */
-		double area, volume, dev, *gA = grad ? (double*)malloc(sizeof(double) * 6 * m->nv) : NULL;
+		double area, volume, dev, *gA = grad ? (double*)qaws_internal_malloc(sizeof(double) * 6 * m->nv) : NULL;
 		double* gV = gA ? gA + 3 * m->nv : NULL;
 		unsigned int i;
 		if (grad && !gA)
@@ -193,7 +194,7 @@ static qaws_status rm_energy(rs_core const* core, double const* x, double* E, do
 		dev = s->vol_w > 0 ? (volume - s->vol_t) / s->vol_t : 0;
 		*E += s->area_w * area + s->vol_w * dev * dev;
 		for (i = 0; gA && i < 3 * m->nv; i++) grad[i] += s->area_w * gA[i] + 2 * s->vol_w * dev / s->vol_t * gV[i];
-		free(gA);
+		qaws_internal_free(gA);
 	}
 	return st;
 }
@@ -496,7 +497,7 @@ static int rm_pairs_ok(qaws_repulsive_mesh_solver const* s, double const* x0, do
 	qaws_repulsive_mesh const* m = s->m;
 	unsigned int nv = m->nv, ne = s->ne, n = nv + ne + m->nf + s->onv + s->one + s->onf, i, a, q;
 	double pad = check ? 0.5 * s->core.clearance * (1 + 1e-9) : 1e-12 * s->core.lmean;
-	qaws_bp_box* box = (qaws_bp_box*)malloc(sizeof(qaws_bp_box) * (n + 1));
+	qaws_bp_box* box = (qaws_bp_box*)qaws_internal_malloc(sizeof(qaws_bp_box) * (n + 1));
 	double *y0 = NULL, *y1 = NULL;
 	rm_bp b;
 	qaws_status st;
@@ -505,11 +506,11 @@ static int rm_pairs_ok(qaws_repulsive_mesh_solver const* s, double const* x0, do
 	if (s->onv)
 	{
 		/* the joint positions: the mesh's, then the obstacles' */
-		y0 = (double*)malloc(sizeof(double) * 3 * (nv + s->onv));
-		y1 = (double*)malloc(sizeof(double) * 3 * (nv + s->onv));
+		y0 = (double*)qaws_internal_malloc(sizeof(double) * 3 * (nv + s->onv));
+		y1 = (double*)qaws_internal_malloc(sizeof(double) * 3 * (nv + s->onv));
 		if (!y0 || !y1)
 		{
-			free(box); free(y0); free(y1);
+			qaws_internal_free(box); qaws_internal_free(y0); qaws_internal_free(y1);
 			return 0;
 		}
 		memcpy(y0, x0, sizeof(double) * 3 * nv); memcpy(y0 + 3 * nv, s->ox, sizeof(double) * 3 * s->onv);
@@ -534,7 +535,7 @@ static int rm_pairs_ok(qaws_repulsive_mesh_solver const* s, double const* x0, do
 			}
 	}
 	st = qaws_internal_rbh_box_pairs(box, n, 3, rm_bp_accept, rm_bp_visit, &b);
-	free(box); free(y0); free(y1);
+	qaws_internal_free(box); qaws_internal_free(y0); qaws_internal_free(y1);
 	return st == QAWS_STATUS_OK;
 }
 
@@ -553,9 +554,9 @@ static qaws_status rm_hier(rs_core const* core, double const* x, qaws_internal_r
 	double s = 2 - 2 / m->p;
 	qaws_status st;
 	memset(h, 0, sizeof(*h));
-	h->lij = (unsigned int*)malloc(sizeof(unsigned int) * 6 * m->nf);
-	h->lw = (double*)malloc(sizeof(double) * 3 * m->nf);
-	h->mass = (double*)calloc(m->nv + 1, sizeof(double));
+	h->lij = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * 6 * m->nf);
+	h->lw = (double*)qaws_internal_malloc(sizeof(double) * 3 * m->nf);
+	h->mass = (double*)qaws_internal_zalloc(m->nv + 1, sizeof(double));
 	if (!h->lij || !h->lw || !h->mass)
 	{
 		qaws_internal_rs_hier_free(h);
@@ -643,7 +644,7 @@ static void rm_translate(rs_core const* core, double const* x, double const* dE,
 {
 	qaws_repulsive_mesh_solver const* s = (qaws_repulsive_mesh_solver const*)core;
 	unsigned int nv = core->nv, i, f, q, c, n = 0;
-	double* w = (double*)calloc(nv + 4 * (size_t)s->ngrp, sizeof(double));
+	double* w = (double*)qaws_internal_zalloc(nv + 4 * (size_t)s->ngrp, sizeof(double));
 	double* t;
 	double keep[3] = { 0, 0, 0 };
 	if (!w)
@@ -674,7 +675,7 @@ static void rm_translate(rs_core const* core, double const* x, double const* dE,
 	for (c = 0; c < s->ngrp; c++) n += s->gcnt[c];
 	for (i = 0; i < nv; i++)
 		for (q = 0; q < 3 && s->grp[i] != ~0u; q++) g[3 * i + q] += t[4 * s->grp[i] + q] - (s->keep ? keep[q] / n : 0);
-	free(w);
+	qaws_internal_free(w);
 }
 
 static qaws_internal_rs_ops const rm_ops = { rm_energy, rm_metric_op, rm_constraints, rm_path_ok, rm_hier, NULL, rm_hvp, rm_constraints_hvp, NULL };
@@ -724,17 +725,17 @@ qaws_status qaws_repulsive_mesh_solver_solution_jvp(qaws_repulsive_mesh_solver c
 	qaws_status st;
 	if (!s || !d || !out_dx)
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	rows = (double*)calloc(s->core.k + 1, sizeof(double));
-	dx = (double*)malloc(sizeof(double) * (s->core.N + 1));
+	rows = (double*)qaws_internal_zalloc(s->core.k + 1, sizeof(double));
+	dx = (double*)qaws_internal_malloc(sizeof(double) * (s->core.N + 1));
 	if (!rows || !dx)
 	{
-		free(rows); free(dx);
+		qaws_internal_free(rows); qaws_internal_free(dx);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 	rm_targets(s, (qaws_repulsive_targets*)d, rows, 0);
 	st = qaws_internal_rs_sensitivity(&s->core, rows, NULL, dx, out_gauge);
 	for (i = 0; st == QAWS_STATUS_OK && i < s->core.N; i++) out_dx[i] = (qaws_scalar)dx[i];
-	free(rows); free(dx);
+	qaws_internal_free(rows); qaws_internal_free(dx);
 	return st;
 }
 
@@ -746,18 +747,18 @@ qaws_status qaws_repulsive_mesh_solver_solution_vjp(qaws_repulsive_mesh_solver c
 	qaws_status st;
 	if (!s || !xbar || !out_bar)
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	rows = (double*)calloc(s->core.k + 1, sizeof(double));
-	xb = (double*)malloc(sizeof(double) * (s->core.N + 1));
+	rows = (double*)qaws_internal_zalloc(s->core.k + 1, sizeof(double));
+	xb = (double*)qaws_internal_malloc(sizeof(double) * (s->core.N + 1));
 	if (!rows || !xb)
 	{
-		free(rows); free(xb);
+		qaws_internal_free(rows); qaws_internal_free(xb);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 	for (i = 0; i < s->core.N; i++) xb[i] = (double)xbar[i];
 	st = qaws_internal_rs_sensitivity(&s->core, NULL, xb, rows, out_gauge);
 	if (st == QAWS_STATUS_OK)
 		rm_targets(s, out_bar, rows, 1);
-	free(rows); free(xb);
+	qaws_internal_free(rows); qaws_internal_free(xb);
 	return st;
 }
 
@@ -770,23 +771,23 @@ void qaws_repulsive_mesh_solver_destroy(qaws_repulsive_mesh_solver* s)
 	unsigned int i;
 	if (!s)
 		return;
-	free(s->pin); free(s->pin_target); free(s->fixed); free(s->edges); free(s->core.x); free(s->grp); free(s->gcnt);
+	qaws_internal_free(s->pin); qaws_internal_free(s->pin_target); qaws_internal_free(s->fixed); qaws_internal_free(s->edges); qaws_internal_free(s->core.x); qaws_internal_free(s->grp); qaws_internal_free(s->gcnt);
 	for (i = 0; i < s->nobs; i++) qaws_internal_obstacle_destroy(s->obs[i]);
-	free(s->ox); free(s->otri); free(s->oedge);
-	free(s->obs);
-	free(s);
+	qaws_internal_free(s->ox); qaws_internal_free(s->otri); qaws_internal_free(s->oedge);
+	qaws_internal_free(s->obs);
+	qaws_internal_free(s);
 }
 
 /* the mesh's edges, each once (sorted ends); and whether every edge lies on
    exactly two faces, oppositely oriented (closed) */
 static qaws_status rm_edges(qaws_repulsive_mesh const* m, unsigned int** out, unsigned int* out_n, int* closed)
 {
-	unsigned int* e = (unsigned int*)malloc(sizeof(unsigned int) * 6 * (m->nf + 1));
-	int* cnt = (int*)calloc(3 * m->nf + 1, sizeof(int));
+	unsigned int* e = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * 6 * (m->nf + 1));
+	int* cnt = (int*)qaws_internal_zalloc(3 * m->nf + 1, sizeof(int));
 	unsigned int n = 0, f, c, k;
 	if (!e || !cnt)
 	{
-		free(e); free(cnt);
+		qaws_internal_free(e); qaws_internal_free(cnt);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 	*closed = 1;
@@ -802,7 +803,7 @@ static qaws_status rm_edges(qaws_repulsive_mesh const* m, unsigned int** out, un
 	for (k = 0; k < n; k++)
 		if (cnt[k] != 17)
 			*closed = 0;
-	free(cnt);
+	qaws_internal_free(cnt);
 	*out = e;
 	*out_n = n;
 	return QAWS_STATUS_OK;
@@ -827,7 +828,7 @@ qaws_status qaws_repulsive_mesh_solver_create(qaws_repulsive_mesh const* m, qaws
 		(d.translations == 1 && d.pinned_count))
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	for (i = 0; i < d.pinned_count; i++) if (d.pinned[i] >= m->nv) return QAWS_STATUS_INVALID_ARGUMENT;
-	s = (qaws_repulsive_mesh_solver*)calloc(1, sizeof(*s));
+	s = (qaws_repulsive_mesh_solver*)qaws_internal_zalloc(1, sizeof(*s));
 	if (!s)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	k = &s->core;
@@ -846,7 +847,7 @@ qaws_status qaws_repulsive_mesh_solver_create(qaws_repulsive_mesh const* m, qaws
 			qaws_repulsive_mesh_solver_destroy(s);
 			return QAWS_STATUS_INVALID_ARGUMENT;
 		}
-		s->obs = (qaws_internal_obstacle**)calloc(d.obstacle_count, sizeof(qaws_internal_obstacle*));
+		s->obs = (qaws_internal_obstacle**)qaws_internal_zalloc(d.obstacle_count, sizeof(qaws_internal_obstacle*));
 		if (!s->obs)
 		{
 			qaws_repulsive_mesh_solver_destroy(s);
@@ -866,9 +867,9 @@ qaws_status qaws_repulsive_mesh_solver_create(qaws_repulsive_mesh const* m, qaws
 			/* their geometry for the collision check, numbered after the mesh's vertices */
 			unsigned int base = 0, fb = 0, o;
 			for (o = 0; o < d.obstacle_count; o++) { s->onv += d.obstacles[o].vertex_count; s->onf += d.obstacles[o].triangles ? d.obstacles[o].triangle_count : 0; }
-			s->ox = (double*)malloc(sizeof(double) * 3 * (s->onv + 1));
-			s->otri = (unsigned int*)malloc(sizeof(unsigned int) * 3 * (s->onf + 1));
-			s->oedge = (unsigned int*)malloc(sizeof(unsigned int) * 2 * (3 * s->onf + 1));
+			s->ox = (double*)qaws_internal_malloc(sizeof(double) * 3 * (s->onv + 1));
+			s->otri = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * 3 * (s->onf + 1));
+			s->oedge = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * 2 * (3 * s->onf + 1));
 			if (!s->ox || !s->otri || !s->oedge)
 			{
 				qaws_repulsive_mesh_solver_destroy(s);
@@ -894,7 +895,7 @@ qaws_status qaws_repulsive_mesh_solver_create(qaws_repulsive_mesh const* m, qaws
 					for (j = 0; j < 2 * ne; j++) s->oedge[2 * s->one + j] = m->nv + base + e[j];
 					s->one += ne;
 					fb += ob->triangle_count;
-					free(e);
+					qaws_internal_free(e);
 				}
 				base += ob->vertex_count;
 			}
@@ -902,10 +903,10 @@ qaws_status qaws_repulsive_mesh_solver_create(qaws_repulsive_mesh const* m, qaws
 	}
 	s->bary = d.hold_barycenter > 0 || (d.hold_barycenter == 0 && d.pinned_count == 0);
 	k->checked = d.collision_checked != 0;
-	k->x = (double*)malloc(sizeof(double) * k->N);
-	s->pin = (unsigned int*)malloc(sizeof(unsigned int) * (s->npin + 1));
-	s->pin_target = (double*)malloc(sizeof(double) * (3 * s->npin + 1));
-	s->fixed = (unsigned char*)calloc(m->nv + 1, 1);
+	k->x = (double*)qaws_internal_malloc(sizeof(double) * k->N);
+	s->pin = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (s->npin + 1));
+	s->pin_target = (double*)qaws_internal_malloc(sizeof(double) * (3 * s->npin + 1));
+	s->fixed = (unsigned char*)qaws_internal_zalloc(m->nv + 1, 1);
 	if (!k->x || !s->pin || !s->pin_target || !s->fixed || (st = rm_edges(m, &s->edges, &s->ne, &closed)) != QAWS_STATUS_OK)
 	{
 		qaws_repulsive_mesh_solver_destroy(s);
@@ -933,13 +934,13 @@ qaws_status qaws_repulsive_mesh_solver_create(qaws_repulsive_mesh const* m, qaws
 	{
 		/* the groups: one, or the connected components (union-find on the
 		   edges, each rooted at its least vertex) without a pin */
-		unsigned int* root = (unsigned int*)malloc(sizeof(unsigned int) * (m->nv + 1));
-		unsigned char* pinned = (unsigned char*)calloc(m->nv + 1, 1);
-		s->grp = (unsigned int*)malloc(sizeof(unsigned int) * (m->nv + 1));
-		s->gcnt = (unsigned int*)calloc(m->nv + 1, sizeof(unsigned int));
+		unsigned int* root = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (m->nv + 1));
+		unsigned char* pinned = (unsigned char*)qaws_internal_zalloc(m->nv + 1, 1);
+		s->grp = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (m->nv + 1));
+		s->gcnt = (unsigned int*)qaws_internal_zalloc(m->nv + 1, sizeof(unsigned int));
 		if (!root || !pinned || !s->grp || !s->gcnt)
 		{
-			free(root); free(pinned);
+			qaws_internal_free(root); qaws_internal_free(pinned);
 			qaws_repulsive_mesh_solver_destroy(s);
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 		}
@@ -956,7 +957,7 @@ qaws_status qaws_repulsive_mesh_solver_create(qaws_repulsive_mesh const* m, qaws
 		for (i = 0, s->ngrp = 0; i < m->nv; i++)
 			s->grp[i] = pinned[root[i]] ? ~0u : root[i] == i ? s->ngrp++ : s->grp[root[i]];
 		for (i = 0; i < m->nv; i++) if (s->grp[i] != ~0u) s->gcnt[s->grp[i]]++;
-		free(root); free(pinned);
+		qaws_internal_free(root); qaws_internal_free(pinned);
 		s->keep = d.translations == 2 && s->bary;
 		s->bary = 0;   /* (the groups' rows replace the barycenter's) */
 		k->ops = &rm_ops_translate;
@@ -1057,7 +1058,7 @@ qaws_status qaws_repulsive_mesh_solve(qaws_repulsive_mesh const* mesh, qaws_repu
 static qaws_status rm_fractional(qaws_repulsive_mesh const* m, rm_face const* f, double const* x, double sg, double* L)
 {
 	unsigned int i, j, s, c, nv = m->nv;
-	double* mass = (double*)calloc(nv + 1, sizeof(double));
+	double* mass = (double*)qaws_internal_zalloc(nv + 1, sizeof(double));
 	if (!mass)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	for (s = 0; s < m->nf; s++)
@@ -1072,14 +1073,14 @@ static qaws_status rm_fractional(qaws_repulsive_mesh const* m, rm_face const* f,
 			r2 = rm_dot(d, d);
 			if (!(r2 > 0))
 			{
-				free(mass);
+				qaws_internal_free(mass);
 				return QAWS_STATUS_NUMERICAL_FAILURE;
 			}
 			w = 2 * mass[i] * mass[j] * pow(r2, -(sg + 1));
 			L[i * nv + i] += w; L[j * nv + j] += w;
 			L[i * nv + j] -= w; L[j * nv + i] -= w;
 		}
-	free(mass);
+	qaws_internal_free(mass);
 	return QAWS_STATUS_OK;
 }
 
@@ -1155,8 +1156,8 @@ static int rm_pinv_make(rm_pinv* p, double const* K, unsigned int nv)
 {
 	unsigned int i, j, n = nv + 1;
 	p->n = n;
-	p->M = (double*)calloc((size_t)n * n, sizeof(double));
-	p->piv = (unsigned int*)malloc(sizeof(unsigned int) * n);
+	p->M = (double*)qaws_internal_zalloc((size_t)n * n, sizeof(double));
+	p->piv = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * n);
 	if (!p->M || !p->piv)
 		return 0;
 	for (i = 0; i < nv; i++)
@@ -1206,16 +1207,16 @@ qaws_status qaws_internal_repulsive_mesh_gmres(qaws_repulsive_mesh const* m, dou
 	rm_pinv P;
 	qaws_status st = QAWS_STATUS_OK;
 	memset(&P, 0, sizeof(P));
-	A = (double*)malloc(sizeof(double) * nv * nv);
-	Lf = (double*)malloc(sizeof(double) * nv * nv);
-	K = (double*)malloc(sizeof(double) * nv * nv);
-	V = (double*)malloc(sizeof(double) * nv * (R + 1));
-	Z = (double*)malloc(sizeof(double) * nv * (R + 1));
-	H = (double*)calloc((R + 1) * R, sizeof(double));
-	cs = (double*)malloc(sizeof(double) * R); sn = (double*)malloc(sizeof(double) * R);
-	gq = (double*)malloc(sizeof(double) * (R + 1));
-	w = (double*)malloc(sizeof(double) * (nv + 1)); t = (double*)malloc(sizeof(double) * (nv + 2)); t2 = (double*)malloc(sizeof(double) * (nv + 2));
-	f = (rm_face*)malloc(sizeof(rm_face) * (m->nf + 1));
+	A = (double*)qaws_internal_malloc(sizeof(double) * nv * nv);
+	Lf = (double*)qaws_internal_malloc(sizeof(double) * nv * nv);
+	K = (double*)qaws_internal_malloc(sizeof(double) * nv * nv);
+	V = (double*)qaws_internal_malloc(sizeof(double) * nv * (R + 1));
+	Z = (double*)qaws_internal_malloc(sizeof(double) * nv * (R + 1));
+	H = (double*)qaws_internal_zalloc((R + 1) * R, sizeof(double));
+	cs = (double*)qaws_internal_malloc(sizeof(double) * R); sn = (double*)qaws_internal_malloc(sizeof(double) * R);
+	gq = (double*)qaws_internal_malloc(sizeof(double) * (R + 1));
+	w = (double*)qaws_internal_malloc(sizeof(double) * (nv + 1)); t = (double*)qaws_internal_malloc(sizeof(double) * (nv + 2)); t2 = (double*)qaws_internal_malloc(sizeof(double) * (nv + 2));
+	f = (rm_face*)qaws_internal_malloc(sizeof(rm_face) * (m->nf + 1));
 	if (!A || !Lf || !K || !V || !Z || !H || !cs || !sn || !gq || !w || !t || !t2 || !f)
 	{
 		st = QAWS_STATUS_ALLOCATION_FAILURE;
@@ -1323,8 +1324,8 @@ qaws_status qaws_internal_repulsive_mesh_gmres(qaws_repulsive_mesh const* m, dou
 	}
 done:
 	if (out_iterations) *out_iterations = it;
-	free(A); free(Lf); free(K); free(V); free(Z); free(H); free(cs); free(sn); free(gq); free(w); free(t); free(t2); free(f);
-	free(P.M); free(P.piv);
+	qaws_internal_free(A); qaws_internal_free(Lf); qaws_internal_free(K); qaws_internal_free(V); qaws_internal_free(Z); qaws_internal_free(H); qaws_internal_free(cs); qaws_internal_free(sn); qaws_internal_free(gq); qaws_internal_free(w); qaws_internal_free(t); qaws_internal_free(t2); qaws_internal_free(f);
+	qaws_internal_free(P.M); qaws_internal_free(P.piv);
 	return st;
 }
 
@@ -1337,6 +1338,6 @@ int qaws_internal_repulsive_mesh_path_clear(qaws_repulsive_mesh const* mesh, dou
 	if (rm_edges(mesh, &s.edges, &s.ne, &closed) != QAWS_STATUS_OK)
 		return 0;
 	ok = rm_pairs_ok(&s, x0, x1, 1);
-	free(s.edges);
+	qaws_internal_free(s.edges);
 	return ok;
 }

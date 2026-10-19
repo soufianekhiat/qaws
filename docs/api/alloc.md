@@ -6,7 +6,55 @@ Custom allocator support for curve and surface creation.
 
 ## Overview
 
-The `_ex` variants of creation functions behave identically to their non-`_ex` counterparts but route all internal allocations through the provided `qaws_allocator`. Pass NULL for `allocator` to use the default `malloc`/`free`.
+Every allocation of the library goes through one place (`src/qaws/internal/qaws_internal_memory.c`, the only caller of `malloc`, `realloc` and `free`). Memory comes from, in order:
+
+1. the allocator passed to an `_ex` function;
+2. the calling thread's allocator, `qaws_set_thread_allocator`;
+3. the process default, `qaws_set_default_allocator`;
+4. `malloc`.
+
+This covers objects, results, and all internal scratch: operations, sampling, traversal, inspection, clipping, meshing, batches and repulsive solvers.
+
+- **Ownership.** Each block carries a 16-byte header naming the allocator that gave it. Freeing and growing always go back to that allocator, whatever the settings at the time and whichever thread releases it.
+- **Allocator requirements.** An allocator must return 16-byte aligned memory and outlive its blocks.
+- **Setting the default.** Set the default before calls run. Set a thread's allocator on that thread.
+
+```c
+void qaws_set_default_allocator(qaws_allocator const* allocator);   /* NULL: malloc */
+void qaws_set_thread_allocator(qaws_allocator const* allocator);    /* this thread; NULL: the default */
+```
+
+## Caller memory: qaws_arena
+
+```c
+typedef struct qaws_arena {
+    qaws_allocator allocator;   /* pass &arena.allocator */
+    unsigned char* base;
+    size_t size, used, peak, last;
+} qaws_arena;
+
+void qaws_arena_init(qaws_arena* arena, void* memory, size_t size);
+void qaws_arena_reset(qaws_arena* arena);
+```
+
+An allocator over memory the host provides: a mapped file, pinned or GPU-visible memory, or a frame arena.
+
+- **Allocation.** Blocks are cut in order and 16-byte aligned.
+- **Freeing.** A free releases only the latest block, so a growing array reuses its space. Everything else is released at `qaws_arena_reset`. `peak` tells how much a workload needed.
+- **When full.** Allocation fails, and calls return `QAWS_STATUS_ALLOCATION_FAILURE`. Nothing falls back to the heap.
+- **Threads.** One thread at a time. For workers, use one arena per thread with `qaws_set_thread_allocator(&arena.allocator)`.
+
+Test 154 checks this:
+
+- a counting default allocator sees and gets back every block of a mixed workload;
+- the thread allocator takes precedence over the default;
+- blocks return to their own allocator;
+- the workload runs inside a 2 MB caller buffer (peak 386 KB);
+- a 2 KB buffer fails cleanly.
+
+## _ex creation functions
+
+The `_ex` variants of creation functions behave identically to their non-`_ex` counterparts but take their memory from the provided `qaws_allocator`. Pass NULL for `allocator` to use the order above.
 
 Curves and surfaces created with a custom allocator MUST be destroyed with `qaws_curve_destroy` or `qaws_surface_destroy` (which read the stored allocator). The allocator must remain valid until the object is destroyed.
 

@@ -355,6 +355,7 @@ checks stay manual.
 | The allocator through every constructor | every curve and surface family; loft and Gordon evaluation scratch from it beyond 32 sections | 31e5f0b, 41df199 (146) |
 | Surface intersection at its default tolerance | fixed (Gauss-Newton seeds); fillets work | f830321 (48) |
 | Derived curves in their source's allocator | reverse, extract, split, join, conversions, wrappers | d41be61 (146) |
+| All allocations through one place | `qaws_set_default_allocator`, `qaws_set_thread_allocator`, `qaws_arena` over caller memory; blocks remember their allocator | (154) |
 | Shader interface from buffers | `qaws_curve_record`, `qaws_surface_record`: any length, HLSL and GLSL, on a GPU | e6e58be, d94e5f5 (144) |
 | Rotation-minimizing frames | `qaws_curve_compute_rotation_minimizing_frames_3d`, `core/qaws_frame_core.h` (HLSL and GLSL) | 1e4133e (147) |
 | Arc length and its inverse | adaptive Gauss-Kronrod per span; `qaws_curve_compute_parameter_at_arc_length` by safeguarded Newton | 9b5837a (148) |
@@ -370,8 +371,6 @@ Remaining, in order:
 - Views of the remaining families (arc, Yuksel, trajectory, subdivision);
   owned objects are not rebuilt on views. Composites already borrow through
   borrowed children (142); clothoids hold no arrays to borrow.
-- The allocator for operation scratch, sampling, traversal, inspection,
-  batches and repulsive (constructors and derived curves are done).
 - Halide's runtime span (the buffer interface is done for HLSL and GLSL).
 - Repulsive: the allocator, line-search and GMRES settings, a validity
   report for solution derivatives, and the mesh VJP test.

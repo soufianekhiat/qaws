@@ -1,4 +1,5 @@
 #include "qaws_internal_ldlt.h"
+#include "qaws_internal_memory.h"
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -96,7 +97,7 @@ static void ld_dissect(ld_order* o, unsigned int* set, unsigned int n)
 
 void qaws_internal_ldlt_free(qaws_internal_ldlt* f)
 {
-	free(f->perm); free(f->sf); free(f->rp); free(f->ri); free(f->lp); free(f->lx); free(f->d); free(f->w);
+	qaws_internal_free(f->perm); qaws_internal_free(f->sf); qaws_internal_free(f->rp); qaws_internal_free(f->ri); qaws_internal_free(f->lp); qaws_internal_free(f->lx); qaws_internal_free(f->d); qaws_internal_free(f->w);
 	memset(f, 0, sizeof *f);
 }
 
@@ -201,19 +202,19 @@ qaws_status qaws_internal_ldlt_factor(qaws_internal_ldlt* f, unsigned int n, uns
 	memset(f, 0, sizeof *f);
 	memset(&wk, 0, sizeof wk);
 	f->n = n;
-	f->perm = (unsigned int*)malloc(sizeof(unsigned int) * (n + 1));
-	f->d = (double*)malloc(sizeof(double) * (n + 1));
-	f->w = (double*)malloc(sizeof(double) * (2 * (size_t)n + 1));
-	f->sf = (unsigned int*)malloc(sizeof(unsigned int) * (n + 2));
-	pinv = (unsigned int*)malloc(sizeof(unsigned int) * (n + 1));
-	rp = (unsigned int*)calloc((size_t)n + 2, sizeof(unsigned int));
-	cp = (unsigned int*)calloc((size_t)n + 2, sizeof(unsigned int));
-	parent = (unsigned int*)malloc(sizeof(unsigned int) * (n + 1));
-	flag = (unsigned int*)malloc(sizeof(unsigned int) * (n + 1));
-	lnz = (unsigned int*)malloc(sizeof(unsigned int) * (n + 1));
-	kids = (unsigned int*)calloc((size_t)n + 1, sizeof(unsigned int));
-	wk.super = (unsigned int*)malloc(sizeof(unsigned int) * (n + 1));
-	wk.map = (unsigned int*)malloc(sizeof(unsigned int) * (n + 1));
+	f->perm = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (n + 1));
+	f->d = (double*)qaws_internal_malloc(sizeof(double) * (n + 1));
+	f->w = (double*)qaws_internal_malloc(sizeof(double) * (2 * (size_t)n + 1));
+	f->sf = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (n + 2));
+	pinv = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (n + 1));
+	rp = (unsigned int*)qaws_internal_zalloc((size_t)n + 2, sizeof(unsigned int));
+	cp = (unsigned int*)qaws_internal_zalloc((size_t)n + 2, sizeof(unsigned int));
+	parent = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (n + 1));
+	flag = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (n + 1));
+	lnz = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (n + 1));
+	kids = (unsigned int*)qaws_internal_zalloc((size_t)n + 1, sizeof(unsigned int));
+	wk.super = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (n + 1));
+	wk.map = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (n + 1));
 	if (!f->perm || !f->d || !f->w || !f->sf || !pinv || !rp || !cp || !parent || !flag || !lnz || !kids || !wk.super || !wk.map)
 		goto done;
 	for (k = 0; k < n; k++)
@@ -225,12 +226,12 @@ qaws_status qaws_internal_ldlt_factor(qaws_internal_ldlt* f, unsigned int n, uns
 		o.col = col;
 		o.xyz = xyz;
 		o.gen = 0;
-		o.stamp = (unsigned int*)calloc((size_t)n + 1, sizeof(unsigned int));
-		o.tmp = (unsigned int*)malloc(sizeof(unsigned int) * (n + 1));
-		o.key = (ld_key*)malloc(sizeof(ld_key) * (n + 1));
+		o.stamp = (unsigned int*)qaws_internal_zalloc((size_t)n + 1, sizeof(unsigned int));
+		o.tmp = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (n + 1));
+		o.key = (ld_key*)qaws_internal_malloc(sizeof(ld_key) * (n + 1));
 		if (o.stamp && o.tmp && o.key)
 			ld_dissect(&o, f->perm, n);
-		free(o.stamp); free(o.tmp); free(o.key);
+		qaws_internal_free(o.stamp); qaws_internal_free(o.tmp); qaws_internal_free(o.key);
 		if (o.gen == 0)
 			goto done;
 	}
@@ -251,9 +252,9 @@ qaws_status qaws_internal_ldlt_factor(qaws_internal_ldlt* f, unsigned int n, uns
 		cp[k + 2] += cp[k + 1];
 	}
 	nnzc = cp[n + 1];
-	rj = (unsigned int*)malloc(sizeof(unsigned int) * (nnzc + 1));
-	ci = (unsigned int*)malloc(sizeof(unsigned int) * (nnzc + 1));
-	cx = (double*)malloc(sizeof(double) * (nnzc + 1));
+	rj = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (nnzc + 1));
+	ci = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (nnzc + 1));
+	cx = (double*)qaws_internal_malloc(sizeof(double) * (nnzc + 1));
 	if (!rj || !ci || !cx)
 		goto done;
 	for (r = 0; r < n; r++)
@@ -293,11 +294,11 @@ qaws_status qaws_internal_ldlt_factor(qaws_internal_ldlt* f, unsigned int n, uns
 		wk.super[k] = f->ns - 1;
 	}
 	f->sf[f->ns] = n;
-	f->rp = (unsigned int*)malloc(sizeof(unsigned int) * (f->ns + 1));
-	f->lp = (size_t*)malloc(sizeof(size_t) * (f->ns + 1));
-	wk.head = (unsigned int*)malloc(sizeof(unsigned int) * (f->ns + 1));
-	wk.next = (unsigned int*)malloc(sizeof(unsigned int) * (f->ns + 1));
-	wk.pos = (unsigned int*)malloc(sizeof(unsigned int) * (f->ns + 1));
+	f->rp = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (f->ns + 1));
+	f->lp = (size_t*)qaws_internal_malloc(sizeof(size_t) * (f->ns + 1));
+	wk.head = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (f->ns + 1));
+	wk.next = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (f->ns + 1));
+	wk.pos = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (f->ns + 1));
 	if (!f->rp || !f->lp || !wk.head || !wk.next || !wk.pos)
 		goto done;
 	/* each supernode's rows: its first column and that column's rows below */
@@ -315,10 +316,10 @@ qaws_status qaws_internal_ldlt_factor(qaws_internal_ldlt* f, unsigned int n, uns
 		maxw = w > maxw ? w : maxw;
 	}
 	total = f->lp[f->ns];
-	f->ri = (unsigned int*)malloc(sizeof(unsigned int) * ((size_t)f->rp[f->ns] + 1));
-	f->lx = (double*)malloc(sizeof(double) * (total + 1));
-	wk.acc = (double*)malloc(sizeof(double) * (maxr + 1));
-	wk.t = (double*)malloc(sizeof(double) * (maxw + 1));
+	f->ri = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)f->rp[f->ns] + 1));
+	f->lx = (double*)qaws_internal_malloc(sizeof(double) * (total + 1));
+	wk.acc = (double*)qaws_internal_malloc(sizeof(double) * (maxr + 1));
+	wk.t = (double*)qaws_internal_malloc(sizeof(double) * (maxw + 1));
 	if (!f->ri || !f->lx || !wk.acc || !wk.t)
 		goto done;
 	/* (gathered row by row along each row's reach, so each list comes sorted) */
@@ -349,8 +350,8 @@ qaws_status qaws_internal_ldlt_factor(qaws_internal_ldlt* f, unsigned int n, uns
 		shift = shift > 0 ? 10 * shift : 1e-12 * (dmax > 0 ? dmax : 1);
 	}
 done:
-	free(pinv); free(rp); free(rj); free(cp); free(ci); free(cx); free(parent); free(flag); free(lnz); free(kids);
-	free(wk.super); free(wk.map); free(wk.head); free(wk.next); free(wk.pos); free(wk.acc); free(wk.t);
+	qaws_internal_free(pinv); qaws_internal_free(rp); qaws_internal_free(rj); qaws_internal_free(cp); qaws_internal_free(ci); qaws_internal_free(cx); qaws_internal_free(parent); qaws_internal_free(flag); qaws_internal_free(lnz); qaws_internal_free(kids);
+	qaws_internal_free(wk.super); qaws_internal_free(wk.map); qaws_internal_free(wk.head); qaws_internal_free(wk.next); qaws_internal_free(wk.pos); qaws_internal_free(wk.acc); qaws_internal_free(wk.t);
 	if (st != QAWS_STATUS_OK)
 		qaws_internal_ldlt_free(f);
 	return st;

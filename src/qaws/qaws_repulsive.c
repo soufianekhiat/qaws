@@ -13,6 +13,7 @@
  */
 
 #include "qaws_repulsive.h"
+#include "internal/qaws_internal_memory.h"
 #include "internal/qaws_internal_repulsive.h"
 #include "internal/qaws_internal_repulsive_jet.h"
 #include <stdlib.h>
@@ -194,7 +195,7 @@ static qaws_status rp_run(unsigned int dim, unsigned int nv, unsigned int const*
 	qaws_status st;
 	if (!positions || (want == RP_HVP && !direction) || (want != RP_EVAL && !out_vec))
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	x = (double*)calloc(3 * (size_t)m + 1, sizeof(double));
+	x = (double*)qaws_internal_zalloc(3 * (size_t)m + 1, sizeof(double));
 	if (!x)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	if (direction) d = x + m;
@@ -208,7 +209,7 @@ static qaws_status rp_run(unsigned int dim, unsigned int nv, unsigned int const*
 	st = rp_run_d(dim, idx, ne, k, pair, user, skip_shared, x, d, want, seed, out_v, out_t, out_t2, acc);
 	for (i = 0; st == QAWS_STATUS_OK && acc && i < m; i++)
 		out_vec[i] = (qaws_scalar)((double)out_vec[i] + acc[i]);
-	free(x);
+	qaws_internal_free(x);
 	return st;
 }
 
@@ -244,13 +245,13 @@ qaws_status qaws_repulsive_curves_create(qaws_repulsive_curves_desc const* desc,
 	for (i = 0; i < desc->edge_count; i++)
 		if (desc->edges[2 * i] >= desc->vertex_count || desc->edges[2 * i + 1] >= desc->vertex_count || desc->edges[2 * i] == desc->edges[2 * i + 1])
 			return QAWS_STATUS_INVALID_ARGUMENT;
-	c = (qaws_repulsive_curves*)calloc(1, sizeof(*c));
+	c = (qaws_repulsive_curves*)qaws_internal_zalloc(1, sizeof(*c));
 	if (!c)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
-	c->edges = (unsigned int*)malloc(sizeof(unsigned int) * 2 * desc->edge_count + 1);
+	c->edges = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * 2 * desc->edge_count + 1);
 	if (!c->edges)
 	{
-		free(c);
+		qaws_internal_free(c);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 	if (desc->edge_count) memcpy(c->edges, desc->edges, sizeof(unsigned int) * 2 * desc->edge_count);
@@ -264,8 +265,8 @@ void qaws_repulsive_curves_destroy(qaws_repulsive_curves* curves)
 {
 	if (!curves)
 		return;
-	free(curves->edges);
-	free(curves);
+	qaws_internal_free(curves->edges);
+	qaws_internal_free(curves);
 }
 
 qaws_status qaws_repulsive_curves_eval(qaws_repulsive_curves const* curves, qaws_scalar const* positions,
@@ -328,13 +329,13 @@ qaws_status qaws_repulsive_mesh_create(qaws_repulsive_mesh_desc const* desc, qaw
 		if (t[0] >= desc->vertex_count || t[1] >= desc->vertex_count || t[2] >= desc->vertex_count || t[0] == t[1] || t[1] == t[2] || t[0] == t[2])
 			return QAWS_STATUS_INVALID_ARGUMENT;
 	}
-	m = (qaws_repulsive_mesh*)calloc(1, sizeof(*m));
+	m = (qaws_repulsive_mesh*)qaws_internal_zalloc(1, sizeof(*m));
 	if (!m)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
-	m->tris = (unsigned int*)malloc(sizeof(unsigned int) * 3 * desc->triangle_count + 1);
+	m->tris = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * 3 * desc->triangle_count + 1);
 	if (!m->tris)
 	{
-		free(m);
+		qaws_internal_free(m);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 	if (desc->triangle_count) memcpy(m->tris, desc->triangles, sizeof(unsigned int) * 3 * desc->triangle_count);
@@ -347,8 +348,8 @@ void qaws_repulsive_mesh_destroy(qaws_repulsive_mesh* mesh)
 {
 	if (!mesh)
 		return;
-	free(mesh->tris);
-	free(mesh);
+	qaws_internal_free(mesh->tris);
+	qaws_internal_free(mesh);
 }
 
 qaws_status qaws_repulsive_mesh_eval(qaws_repulsive_mesh const* mesh, qaws_scalar const* positions,

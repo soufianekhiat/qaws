@@ -6,6 +6,7 @@
  */
 
 #include "qaws_mesh_core.h"
+#include "../internal/qaws_internal_memory.h"
 #include "../qaws_mesh_repair.h"
 #include "../internal/qaws_internal_broadphase.h"
 #include "../internal/qaws_internal_ldlt.h"
@@ -102,7 +103,7 @@ static unsigned int rp_add_v(rp_mesh* m, double const* p)
 	if (m->nv == m->capv)
 	{
 		unsigned int cap = m->capv ? 2 * m->capv : 64;
-		double* x = (double*)realloc(m->x, sizeof(double) * 3 * cap);
+		double* x = (double*)qaws_internal_realloc(m->x, sizeof(double) * 3 * cap);
 		if (!x)
 			return HM_NONE;
 		m->x = x;
@@ -117,17 +118,17 @@ static int rp_add_t(rp_mesh* m, unsigned int a, unsigned int b, unsigned int c, 
 	if (m->nt == m->capt)
 	{
 		unsigned int cap = m->capt ? 2 * m->capt : 64;
-		unsigned int* t = (unsigned int*)realloc(m->t, sizeof(unsigned int) * 3 * cap);
+		unsigned int* t = (unsigned int*)qaws_internal_realloc(m->t, sizeof(unsigned int) * 3 * cap);
 		int* s;
 		unsigned char* f;
 		if (!t)
 			return 0;
 		m->t = t;
-		s = (int*)realloc(m->src, sizeof(int) * cap);
+		s = (int*)qaws_internal_realloc(m->src, sizeof(int) * cap);
 		if (!s)
 			return 0;
 		m->src = s;
-		f = (unsigned char*)realloc(m->fl, cap);
+		f = (unsigned char*)qaws_internal_realloc(m->fl, cap);
 		if (!f)
 			return 0;
 		m->fl = f;
@@ -192,7 +193,7 @@ static int rp_he_cmp(void const* p, void const* q)
 static rp_he* rp_edges(rp_mesh const* m, unsigned int t0, unsigned int t1, unsigned int* out_n)
 {
 	unsigned int n = 3 * (t1 - t0), f, k;
-	rp_he* E = (rp_he*)malloc(sizeof(rp_he) * (n ? n : 1));
+	rp_he* E = (rp_he*)qaws_internal_malloc(sizeof(rp_he) * (n ? n : 1));
 	*out_n = n;
 	if (!E)
 		return NULL;
@@ -272,7 +273,7 @@ static void rp_union(unsigned int* uf, unsigned int a, unsigned int b)
 static unsigned int rp_merge(rp_work* w, unsigned int* uf)
 {
 	rp_mesh* m = &w->m;
-	double* s = (double*)calloc(4 * (size_t)(m->nv ? m->nv : 1), sizeof(double));
+	double* s = (double*)qaws_internal_zalloc(4 * (size_t)(m->nv ? m->nv : 1), sizeof(double));
 	unsigned int v, n = 0;
 	size_t i;
 	if (!s)
@@ -299,7 +300,7 @@ static unsigned int rp_merge(rp_work* w, unsigned int* uf)
 		}
 	for (i = 0; i < 3 * (size_t)m->nt; i++)
 		m->t[i] = rp_find(uf, m->t[i]);
-	free(s);
+	qaws_internal_free(s);
 	return n;
 }
 
@@ -342,12 +343,12 @@ static void rp_clean(rp_work* w)
 		m->fl[n++] = m->fl[f];
 	}
 	m->nt = n;
-	K = (rp_tri_key*)malloc(sizeof(rp_tri_key) * (n ? n : 1));
-	del = (unsigned char*)calloc(n ? n : 1, 1);
+	K = (rp_tri_key*)qaws_internal_malloc(sizeof(rp_tri_key) * (n ? n : 1));
+	del = (unsigned char*)qaws_internal_zalloc(n ? n : 1, 1);
 	if (!K || !del)
 	{
-		free(K);
-		free(del);
+		qaws_internal_free(K);
+		qaws_internal_free(del);
 		w->st = QAWS_STATUS_ALLOCATION_FAILURE;
 		return;
 	}
@@ -383,8 +384,8 @@ static void rp_clean(rp_work* w)
 			}
 	}
 	rp_compact(m, del, n);
-	free(K);
-	free(del);
+	qaws_internal_free(K);
+	qaws_internal_free(del);
 }
 
 /* ---- welding ------------------------------------------------------------ */
@@ -411,9 +412,9 @@ static qaws_status rp_weld_visit(void* user, unsigned int i, unsigned int j)
 static unsigned int* rp_weld(rp_work* w, unsigned char const* used, double tol)
 {
 	rp_mesh* m = &w->m;
-	unsigned int* uf = (unsigned int*)malloc(sizeof(unsigned int) * (m->nv ? m->nv : 1));
-	unsigned int* id = (unsigned int*)malloc(sizeof(unsigned int) * (m->nv ? m->nv : 1));
-	qaws_bp_box* box = (qaws_bp_box*)malloc(sizeof(qaws_bp_box) * (m->nv ? m->nv : 1));
+	unsigned int* uf = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (m->nv ? m->nv : 1));
+	unsigned int* id = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (m->nv ? m->nv : 1));
+	qaws_bp_box* box = (qaws_bp_box*)qaws_internal_malloc(sizeof(qaws_bp_box) * (m->nv ? m->nv : 1));
 	unsigned int v, n = 0, k;
 	rp_weld_ctx c;
 	if (!uf || !id || !box)
@@ -437,13 +438,13 @@ static unsigned int* rp_weld(rp_work* w, unsigned char const* used, double tol)
 	if (n > 1 && qaws_internal_broadphase(box, n, 3, NULL, rp_weld_visit, &c, NULL) != QAWS_STATUS_OK)
 		goto fail;
 	w->r->welded_vertices += rp_merge(w, uf);
-	free(id);
-	free(box);
+	qaws_internal_free(id);
+	qaws_internal_free(box);
 	return uf;
 fail:
-	free(uf);
-	free(id);
-	free(box);
+	qaws_internal_free(uf);
+	qaws_internal_free(id);
+	qaws_internal_free(box);
 	w->st = QAWS_STATUS_ALLOCATION_FAILURE;
 	return NULL;
 }
@@ -479,13 +480,13 @@ static void rp_ear_clip(rp_work* w, unsigned int const* P, unsigned int n, int s
 {
 	rp_mesh* m = &w->m;
 	double N[3] = { 0, 0, 0 };
-	double* uv = (double*)malloc(sizeof(double) * 2 * n);
-	unsigned int* id = (unsigned int*)malloc(sizeof(unsigned int) * n);
+	double* uv = (double*)qaws_internal_malloc(sizeof(double) * 2 * n);
+	unsigned int* id = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * n);
 	unsigned int i, cnt = n, ax = 0, k;
 	if (!uv || !id)
 	{
-		free(uv);
-		free(id);
+		qaws_internal_free(uv);
+		qaws_internal_free(id);
 		w->st = QAWS_STATUS_ALLOCATION_FAILURE;
 		return;
 	}
@@ -521,8 +522,8 @@ static void rp_ear_clip(rp_work* w, unsigned int const* P, unsigned int n, int s
 		cnt = 0;
 	if (cnt != 3)
 		w->st = QAWS_STATUS_ALLOCATION_FAILURE;
-	free(uv);
-	free(id);
+	qaws_internal_free(uv);
+	qaws_internal_free(id);
 }
 
 /* ---- degenerate faces --------------------------------------------------- */
@@ -536,13 +537,13 @@ static void rp_degenerate(rp_work* w, double h)
 	{
 		unsigned int ne, nt0 = m->nt, f, changed = 0, v;
 		rp_he* E = rp_edges(m, 0, nt0, &ne);
-		unsigned int* uf = (unsigned int*)malloc(sizeof(unsigned int) * (m->nv ? m->nv : 1));
-		unsigned char* mark = (unsigned char*)calloc(nt0 ? nt0 : 1, 1);   /* 1 touched this pass, 2 removed */
+		unsigned int* uf = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (m->nv ? m->nv : 1));
+		unsigned char* mark = (unsigned char*)qaws_internal_zalloc(nt0 ? nt0 : 1, 1);   /* 1 touched this pass, 2 removed */
 		if (!E || !uf || !mark)
 		{
-			free(E);
-			free(uf);
-			free(mark);
+			qaws_internal_free(E);
+			qaws_internal_free(uf);
+			qaws_internal_free(mark);
 			w->st = QAWS_STATUS_ALLOCATION_FAILURE;
 			return;
 		}
@@ -618,9 +619,9 @@ static void rp_degenerate(rp_work* w, double h)
 			if (w->st == QAWS_STATUS_OK)
 				rp_clean(w);
 		}
-		free(E);
-		free(uf);
-		free(mark);
+		qaws_internal_free(E);
+		qaws_internal_free(uf);
+		qaws_internal_free(mark);
 		if (!changed)
 			break;
 	}
@@ -726,8 +727,8 @@ static void rp_stitch(rp_work* w, double tol)
 		rp_stitch_ctx c;
 		if (!E)
 			goto oom;
-		be = (unsigned int*)malloc(sizeof(unsigned int) * (ne ? ne : 1));
-		isb = (unsigned char*)calloc(m->nv ? m->nv : 1, 1);
+		be = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (ne ? ne : 1));
+		isb = (unsigned char*)qaws_internal_zalloc(m->nv ? m->nv : 1, 1);
 		if (!be || !isb)
 			goto oom;
 		for (r = 0; r < ne; r = k)
@@ -741,22 +742,22 @@ static void rp_stitch(rp_work* w, double tol)
 		}
 		if (!nbe)
 		{
-			free(E);
-			free(be);
-			free(isb);
+			qaws_internal_free(E);
+			qaws_internal_free(be);
+			qaws_internal_free(isb);
 			break;
 		}
 		for (v = 0; v < m->nv; v++)
 			nbv += isb[v];
-		bv = (unsigned int*)malloc(sizeof(unsigned int) * nbv);
-		uf = (unsigned int*)malloc(sizeof(unsigned int) * m->nv);
-		welded = (unsigned char*)calloc(m->nv, 1);
-		best = (unsigned int*)malloc(sizeof(unsigned int) * nbv);
-		bs = (double*)malloc(sizeof(double) * nbv);
-		bd = (double*)malloc(sizeof(double) * nbv);
-		box = (qaws_bp_box*)malloc(sizeof(qaws_bp_box) * (nbv + nbe));
-		sn = (rp_snap*)malloc(sizeof(rp_snap) * nbv);
-		used = (unsigned char*)calloc(nt0, 1);
+		bv = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * nbv);
+		uf = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * m->nv);
+		welded = (unsigned char*)qaws_internal_zalloc(m->nv, 1);
+		best = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * nbv);
+		bs = (double*)qaws_internal_malloc(sizeof(double) * nbv);
+		bd = (double*)qaws_internal_malloc(sizeof(double) * nbv);
+		box = (qaws_bp_box*)qaws_internal_malloc(sizeof(qaws_bp_box) * (nbv + nbe));
+		sn = (rp_snap*)qaws_internal_malloc(sizeof(rp_snap) * nbv);
+		used = (unsigned char*)qaws_internal_zalloc(nt0, 1);
 		if (!bv || !uf || !welded || !best || !bs || !bd || !box || !sn || !used)
 			goto oom;
 		for (v = 0, i = 0; v < m->nv; v++)
@@ -828,12 +829,12 @@ static void rp_stitch(rp_work* w, double tol)
 		w->r->stitched_vertices += snapped + merged;
 		if (w->st == QAWS_STATUS_OK)
 			rp_clean(w);
-		free(E); free(be); free(isb); free(bv); free(uf); free(welded); free(best); free(bs); free(bd); free(box); free(sn); free(used);
+		qaws_internal_free(E); qaws_internal_free(be); qaws_internal_free(isb); qaws_internal_free(bv); qaws_internal_free(uf); qaws_internal_free(welded); qaws_internal_free(best); qaws_internal_free(bs); qaws_internal_free(bd); qaws_internal_free(box); qaws_internal_free(sn); qaws_internal_free(used);
 		if (!snapped && !merged)
 			break;
 		continue;
 	oom:
-		free(E); free(be); free(isb); free(bv); free(uf); free(welded); free(best); free(bs); free(bd); free(box); free(sn); free(used);
+		qaws_internal_free(E); qaws_internal_free(be); qaws_internal_free(isb); qaws_internal_free(bv); qaws_internal_free(uf); qaws_internal_free(welded); qaws_internal_free(best); qaws_internal_free(bs); qaws_internal_free(bd); qaws_internal_free(box); qaws_internal_free(sn); qaws_internal_free(used);
 		w->st = QAWS_STATUS_ALLOCATION_FAILURE;
 		return;
 	}
@@ -845,10 +846,10 @@ static void rp_stitch(rp_work* w, double tol)
 static void rp_components(rp_work* w, double min_area, unsigned int min_faces)
 {
 	rp_mesh* m = &w->m;
-	unsigned int* uf = (unsigned int*)malloc(sizeof(unsigned int) * (m->nv ? m->nv : 1));
-	unsigned int* cnt = (unsigned int*)calloc(m->nv ? m->nv : 1, sizeof(unsigned int));
-	double* area = (double*)calloc(m->nv ? m->nv : 1, sizeof(double));
-	unsigned char* del = (unsigned char*)calloc(m->nt ? m->nt : 1, 1);
+	unsigned int* uf = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (m->nv ? m->nv : 1));
+	unsigned int* cnt = (unsigned int*)qaws_internal_zalloc(m->nv ? m->nv : 1, sizeof(unsigned int));
+	double* area = (double*)qaws_internal_zalloc(m->nv ? m->nv : 1, sizeof(double));
+	unsigned char* del = (unsigned char*)qaws_internal_zalloc(m->nt ? m->nt : 1, 1);
 	unsigned int v, f;
 	if (!uf || !cnt || !area || !del)
 	{
@@ -883,10 +884,10 @@ static void rp_components(rp_work* w, double min_area, unsigned int min_faces)
 	}
 	rp_compact(m, del, m->nt);
 done:
-	free(uf);
-	free(cnt);
-	free(area);
-	free(del);
+	qaws_internal_free(uf);
+	qaws_internal_free(cnt);
+	qaws_internal_free(area);
+	qaws_internal_free(del);
 }
 
 /* ---- orientation -------------------------------------------------------- */
@@ -898,15 +899,15 @@ static unsigned int rp_consistent(rp_work* w, unsigned int* shell, unsigned char
 	rp_mesh* m = &w->m;
 	unsigned int ne, r, k, f, ns = 0;
 	rp_he* E = rp_edges(m, 0, m->nt, &ne);
-	unsigned int* pos = (unsigned int*)malloc(sizeof(unsigned int) * (ne ? ne : 1));
-	unsigned int* mate = (unsigned int*)malloc(sizeof(unsigned int) * (ne ? ne : 1));
-	unsigned int* queue = (unsigned int*)malloc(sizeof(unsigned int) * (m->nt ? m->nt : 1));
-	unsigned char* o = (unsigned char*)calloc(m->nt ? m->nt : 1, 1);
-	unsigned char* bad = (unsigned char*)calloc(m->nt ? m->nt : 1, 1);
+	unsigned int* pos = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (ne ? ne : 1));
+	unsigned int* mate = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (ne ? ne : 1));
+	unsigned int* queue = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (m->nt ? m->nt : 1));
+	unsigned char* o = (unsigned char*)qaws_internal_zalloc(m->nt ? m->nt : 1, 1);
+	unsigned char* bad = (unsigned char*)qaws_internal_zalloc(m->nt ? m->nt : 1, 1);
 	*out_bad = NULL;
 	if (!E || !pos || !mate || !queue || !o || !bad)
 	{
-		free(bad);
+		qaws_internal_free(bad);
 		w->st = QAWS_STATUS_ALLOCATION_FAILURE;
 		goto done;
 	}
@@ -958,11 +959,11 @@ static unsigned int rp_consistent(rp_work* w, unsigned int* shell, unsigned char
 			rp_flip(m, f);
 	*out_bad = bad;
 done:
-	free(E);
-	free(pos);
-	free(mate);
-	free(queue);
-	free(o);
+	qaws_internal_free(E);
+	qaws_internal_free(pos);
+	qaws_internal_free(mate);
+	qaws_internal_free(queue);
+	qaws_internal_free(o);
 	return ns;
 }
 
@@ -980,7 +981,7 @@ static void rp_outward(rp_work* w, int remove_nested)
 {
 	rp_mesh* m = &w->m;
 	unsigned int nt = m->nt, ns, s, f, r, k, ne = 0, i;
-	unsigned int *shell = (unsigned int*)malloc(sizeof(unsigned int) * (nt ? nt : 1)), *off = NULL, *list = NULL, *depth = NULL, *stamp = NULL;
+	unsigned int *shell = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (nt ? nt : 1)), *off = NULL, *list = NULL, *depth = NULL, *stamp = NULL;
 	unsigned char *bad = NULL, *open = NULL, *del = NULL;
 	double *vol = NULL, *box = NULL;
 	rp_he* E = NULL;
@@ -990,14 +991,14 @@ static void rp_outward(rp_work* w, int remove_nested)
 	if (w->st != QAWS_STATUS_OK)
 		goto done;
 	E = rp_edges(m, 0, nt, &ne);
-	off = (unsigned int*)calloc(ns + 1, sizeof(unsigned int));
-	list = (unsigned int*)malloc(sizeof(unsigned int) * (nt ? nt : 1));
-	depth = (unsigned int*)calloc(ns ? ns : 1, sizeof(unsigned int));
-	stamp = (unsigned int*)calloc(m->nv ? m->nv : 1, sizeof(unsigned int));
-	open = (unsigned char*)calloc(ns ? ns : 1, 1);
-	del = (unsigned char*)calloc(nt ? nt : 1, 1);
-	vol = (double*)calloc(ns ? ns : 1, sizeof(double));
-	box = (double*)malloc(sizeof(double) * 6 * (ns ? ns : 1));
+	off = (unsigned int*)qaws_internal_zalloc(ns + 1, sizeof(unsigned int));
+	list = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (nt ? nt : 1));
+	depth = (unsigned int*)qaws_internal_zalloc(ns ? ns : 1, sizeof(unsigned int));
+	stamp = (unsigned int*)qaws_internal_zalloc(m->nv ? m->nv : 1, sizeof(unsigned int));
+	open = (unsigned char*)qaws_internal_zalloc(ns ? ns : 1, 1);
+	del = (unsigned char*)qaws_internal_zalloc(nt ? nt : 1, 1);
+	vol = (double*)qaws_internal_zalloc(ns ? ns : 1, sizeof(double));
+	box = (double*)qaws_internal_malloc(sizeof(double) * 6 * (ns ? ns : 1));
 	if (!E || !off || !list || !depth || !stamp || !open || !del || !vol || !box)
 		goto oom;
 	for (s = 0; s < ns; s++)
@@ -1109,7 +1110,7 @@ static void rp_outward(rp_work* w, int remove_nested)
 oom:
 	w->st = QAWS_STATUS_ALLOCATION_FAILURE;
 done:
-	free(shell); free(off); free(list); free(depth); free(stamp); free(bad); free(open); free(del); free(vol); free(box); free(E);
+	qaws_internal_free(shell); qaws_internal_free(off); qaws_internal_free(list); qaws_internal_free(depth); qaws_internal_free(stamp); qaws_internal_free(bad); qaws_internal_free(open); qaws_internal_free(del); qaws_internal_free(vol); qaws_internal_free(box); qaws_internal_free(E);
 }
 
 /* ---- holes -------------------------------------------------------------- */
@@ -1129,7 +1130,7 @@ static int rp_sigma_room(rp_fill_ctx* c, unsigned int nv)
 	if (nv > c->scap)
 	{
 		unsigned int cap = 2 * nv;
-		double* s = (double*)realloc(c->sigma, sizeof(double) * cap);
+		double* s = (double*)qaws_internal_realloc(c->sigma, sizeof(double) * cap);
 		if (!s)
 			return 0;
 		c->sigma = s;
@@ -1152,12 +1153,12 @@ static void rp_fill_dp(rp_work* w, rp_fill_ctx const* c, unsigned int const* L, 
 {
 	rp_mesh* m = &w->m;
 	size_t nn = (size_t)n * n;
-	double* A = (double*)malloc(sizeof(double) * nn);          /* the triangulation of [i, k]: its smallest cosine */
-	double* S = (double*)malloc(sizeof(double) * nn);          /* its area */
-	double* N = (double*)malloc(sizeof(double) * 3 * nn);      /* its triangle on edge (i, k): the unit normal */
-	double* Ne = (double*)malloc(sizeof(double) * 3 * n);      /* the faces round the loop */
-	unsigned int* K = (unsigned int*)malloc(sizeof(unsigned int) * nn);
-	unsigned int* stack = (unsigned int*)malloc(sizeof(unsigned int) * 2 * n);
+	double* A = (double*)qaws_internal_malloc(sizeof(double) * nn);          /* the triangulation of [i, k]: its smallest cosine */
+	double* S = (double*)qaws_internal_malloc(sizeof(double) * nn);          /* its area */
+	double* N = (double*)qaws_internal_malloc(sizeof(double) * 3 * nn);      /* its triangle on edge (i, k): the unit normal */
+	double* Ne = (double*)qaws_internal_malloc(sizeof(double) * 3 * n);      /* the faces round the loop */
+	unsigned int* K = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * nn);
+	unsigned int* stack = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * 2 * n);
 	unsigned int i, len, top = 0;
 	if (!A || !S || !N || !Ne || !K || !stack)
 	{
@@ -1221,12 +1222,12 @@ static void rp_fill_dp(rp_work* w, rp_fill_ctx const* c, unsigned int const* L, 
 		stack[top++] = k;
 	}
 done:
-	free(A);
-	free(S);
-	free(N);
-	free(Ne);
-	free(K);
-	free(stack);
+	qaws_internal_free(A);
+	qaws_internal_free(S);
+	qaws_internal_free(N);
+	qaws_internal_free(Ne);
+	qaws_internal_free(K);
+	qaws_internal_free(stack);
 }
 
 /* one boundary loop (pv: its vertices, pr: its boundary records' indices into be) filled, or counted as left */
@@ -1285,11 +1286,11 @@ static void rp_relax(rp_work* w, rp_fill_ctx const* c, unsigned int t0)
 	{
 		unsigned int nf, r, flips = 0;
 		rp_he* F = rp_edges(m, t0, m->nt, &nf);
-		unsigned char* touched = (unsigned char*)calloc(m->nt - t0 + 1, 1);
+		unsigned char* touched = (unsigned char*)qaws_internal_zalloc(m->nt - t0 + 1, 1);
 		if (!F || !touched)
 		{
-			free(F);
-			free(touched);
+			qaws_internal_free(F);
+			qaws_internal_free(touched);
 			w->st = QAWS_STATUS_ALLOCATION_FAILURE;
 			return;
 		}
@@ -1333,8 +1334,8 @@ static void rp_relax(rp_work* w, rp_fill_ctx const* c, unsigned int t0)
 			touched[f - t0] = touched[g - t0] = 1;
 			flips++;
 		}
-		free(F);
-		free(touched);
+		qaws_internal_free(F);
+		qaws_internal_free(touched);
 		if (!flips)
 			break;
 	}
@@ -1416,8 +1417,8 @@ static void rp_fair(rp_work* w, unsigned int v0)
 	if (!nfree)
 		return;
 	E = rp_edges(m, 0, m->nt, &ne);
-	deg = (unsigned int*)calloc(nv, sizeof(unsigned int));
-	off = (unsigned int*)calloc(nv + 1, sizeof(unsigned int));
+	deg = (unsigned int*)qaws_internal_zalloc(nv, sizeof(unsigned int));
+	off = (unsigned int*)qaws_internal_zalloc(nv + 1, sizeof(unsigned int));
 	if (!E || !deg || !off)
 		goto oom;
 	for (r = 0; r < ne; r = rp_group_end(E, ne, r))
@@ -1431,10 +1432,10 @@ static void rp_fair(rp_work* w, unsigned int v0)
 		maxd = deg[v] > maxd ? deg[v] : maxd;
 		deg[v] = 0;
 	}
-	adj = (unsigned int*)malloc(sizeof(unsigned int) * (off[nv] ? off[nv] : 1));
-	fc = (unsigned int*)malloc(sizeof(unsigned int) * (maxd + 1));
-	fw = (double*)malloc(sizeof(double) * (maxd + 1));
-	b = (double*)calloc(3 * (size_t)nfree, sizeof(double));
+	adj = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (off[nv] ? off[nv] : 1));
+	fc = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (maxd + 1));
+	fw = (double*)qaws_internal_malloc(sizeof(double) * (maxd + 1));
+	b = (double*)qaws_internal_zalloc(3 * (size_t)nfree, sizeof(double));
 	if (!adj || !fc || !fw || !b)
 		goto oom;
 	for (r = 0; r < ne; r = rp_group_end(E, ne, r))
@@ -1476,7 +1477,7 @@ static void rp_fair(rp_work* w, unsigned int v0)
 		if (nt + nfc * nfc > ct)
 		{
 			unsigned int cap = 2 * (nt + nfc * nfc);
-			rp_trip* g = (rp_trip*)realloc(T, sizeof(rp_trip) * cap);
+			rp_trip* g = (rp_trip*)qaws_internal_realloc(T, sizeof(rp_trip) * cap);
 			if (!g)
 				goto oom;
 			T = g;
@@ -1495,11 +1496,11 @@ static void rp_fair(rp_work* w, unsigned int v0)
 		}
 	}
 	qsort(T, nt, sizeof(rp_trip), rp_trip_cmp);
-	rp = (unsigned int*)calloc(nfree + 1, sizeof(unsigned int));
-	col = (unsigned int*)malloc(sizeof(unsigned int) * (nt ? nt : 1));
-	val = (double*)malloc(sizeof(double) * (nt ? nt : 1));
-	xyz = (double*)malloc(sizeof(double) * 3 * (size_t)nfree);
-	sol = (double*)malloc(sizeof(double) * (size_t)nfree);
+	rp = (unsigned int*)qaws_internal_zalloc(nfree + 1, sizeof(unsigned int));
+	col = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (nt ? nt : 1));
+	val = (double*)qaws_internal_malloc(sizeof(double) * (nt ? nt : 1));
+	xyz = (double*)qaws_internal_malloc(sizeof(double) * 3 * (size_t)nfree);
+	sol = (double*)qaws_internal_malloc(sizeof(double) * (size_t)nfree);
 	if (!rp || !col || !val || !xyz || !sol)
 		goto oom;
 	for (i = 0, j = 0; i < nt; i++)
@@ -1533,7 +1534,7 @@ oom:
 	w->st = QAWS_STATUS_ALLOCATION_FAILURE;
 done:
 	qaws_internal_ldlt_free(&L);
-	free(E); free(deg); free(off); free(adj); free(rp); free(col); free(fc); free(val); free(b); free(xyz); free(sol); free(fw); free(T);
+	qaws_internal_free(E); qaws_internal_free(deg); qaws_internal_free(off); qaws_internal_free(adj); qaws_internal_free(rp); qaws_internal_free(col); qaws_internal_free(fc); qaws_internal_free(val); qaws_internal_free(b); qaws_internal_free(xyz); qaws_internal_free(sol); qaws_internal_free(fw); qaws_internal_free(T);
 }
 
 /* boundary loops traced over the half-edges alone on their edges (a loop meeting itself at a vertex cut there) and filled */
@@ -1546,9 +1547,9 @@ static void rp_fill(rp_work* w, double perimeter, unsigned int flags, unsigned i
 	unsigned int *be = NULL, *start = NULL, *cur = NULL, *ord = NULL, *inpath = NULL, *pv = NULL, *pr = NULL, *cnt = NULL;
 	unsigned char* used = NULL;
 	memset(&c, 0, sizeof c);
-	c.sigma = (double*)calloc(nv0 ? nv0 : 1, sizeof(double));
+	c.sigma = (double*)qaws_internal_zalloc(nv0 ? nv0 : 1, sizeof(double));
 	c.scap = nv0 ? nv0 : 1;
-	cnt = (unsigned int*)calloc(nv0 ? nv0 : 1, sizeof(unsigned int));
+	cnt = (unsigned int*)qaws_internal_zalloc(nv0 ? nv0 : 1, sizeof(unsigned int));
 	if (!E || !c.sigma || !cnt)
 		goto oom;
 	c.E = E;
@@ -1568,15 +1569,15 @@ static void rp_fill(rp_work* w, double perimeter, unsigned int flags, unsigned i
 	}
 	for (v = 0; v < nv0; v++)
 		c.sigma[v] = cnt[v] ? c.sigma[v] / cnt[v] : 0;
-	be = (unsigned int*)malloc(sizeof(unsigned int) * (nb ? nb : 1));
-	start = (unsigned int*)calloc(nv0 + 1, sizeof(unsigned int));
-	cur = (unsigned int*)malloc(sizeof(unsigned int) * (nv0 + 1));
-	ord = (unsigned int*)malloc(sizeof(unsigned int) * (nb ? nb : 1));
-	inpath = (unsigned int*)calloc(nv0 ? nv0 : 1, sizeof(unsigned int));
-	pv = (unsigned int*)malloc(sizeof(unsigned int) * (nb + 1));
-	pr = (unsigned int*)malloc(sizeof(unsigned int) * (nb + 1));
-	c.O = (unsigned int*)malloc(sizeof(unsigned int) * (nb + 1));
-	used = (unsigned char*)calloc(nb ? nb : 1, 1);
+	be = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (nb ? nb : 1));
+	start = (unsigned int*)qaws_internal_zalloc(nv0 + 1, sizeof(unsigned int));
+	cur = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (nv0 + 1));
+	ord = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (nb ? nb : 1));
+	inpath = (unsigned int*)qaws_internal_zalloc(nv0 ? nv0 : 1, sizeof(unsigned int));
+	pv = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (nb + 1));
+	pr = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (nb + 1));
+	c.O = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (nb + 1));
+	used = (unsigned char*)qaws_internal_zalloc(nb ? nb : 1, 1);
 	if (!be || !start || !cur || !ord || !inpath || !pv || !pr || !c.O || !used)
 		goto oom;
 	for (r = 0, nb = 0; r < ne; r = k)
@@ -1661,8 +1662,8 @@ static void rp_fill(rp_work* w, double perimeter, unsigned int flags, unsigned i
 oom:
 	w->st = QAWS_STATUS_ALLOCATION_FAILURE;
 done:
-	free(E); free(be); free(start); free(cur); free(ord); free(inpath); free(pv); free(pr); free(used); free(cnt);
-	free(c.sigma); free(c.O);
+	qaws_internal_free(E); qaws_internal_free(be); qaws_internal_free(start); qaws_internal_free(cur); qaws_internal_free(ord); qaws_internal_free(inpath); qaws_internal_free(pv); qaws_internal_free(pr); qaws_internal_free(used); qaws_internal_free(cnt);
+	qaws_internal_free(c.sigma); qaws_internal_free(c.O);
 }
 
 /* ---- the call ----------------------------------------------------------- */
@@ -1691,15 +1692,15 @@ static void rp_measure(rp_work* w)
 	w->r->closed = m->nt > 0 && !w->r->open_edges;
 	for (i = 0; i < m->nt; i++)
 		w->r->flipped_faces += m->src[i] >= 0 && m->fl[i];
-	free(E);
+	qaws_internal_free(E);
 }
 
 /* the used vertices renumbered in order, the store built with the source_face attribute */
 static qaws_status rp_output(rp_work* w, qaws_mesh_3d** out)
 {
 	rp_mesh* m = &w->m;
-	unsigned int* map = (unsigned int*)malloc(sizeof(unsigned int) * (m->nv ? m->nv : 1));
-	double* x = (double*)malloc(sizeof(double) * 3 * (m->nv ? m->nv : 1));
+	unsigned int* map = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (m->nv ? m->nv : 1));
+	double* x = (double*)qaws_internal_malloc(sizeof(double) * 3 * (m->nv ? m->nv : 1));
 	unsigned int v, n = 0, a;
 	size_t i;
 	qaws_status st = QAWS_STATUS_ALLOCATION_FAILURE;
@@ -1731,8 +1732,8 @@ static qaws_status rp_output(rp_work* w, qaws_mesh_3d** out)
 	for (v = 0; v < m->nt; v++)
 		*hm_attr_at(&(*out)->hm, a, v) = m->src[v];
 done:
-	free(map);
-	free(x);
+	qaws_internal_free(map);
+	qaws_internal_free(x);
 	return st;
 }
 
@@ -1792,10 +1793,10 @@ qaws_status qaws_mesh_repair(qaws_scalar const* positions, unsigned int vertex_c
 	memset(&w, 0, sizeof w);
 	w.r = report;
 	m->nv = m->capv = vertex_count;
-	m->x = (double*)malloc(sizeof(double) * 3 * (vertex_count ? vertex_count : 1));
-	used = (unsigned char*)calloc(vertex_count ? vertex_count : 1, 1);
-	stamp = (unsigned int*)calloc(vertex_count ? vertex_count : 1, sizeof(unsigned int));
-	poly = (unsigned int*)malloc(sizeof(unsigned int) * smax);
+	m->x = (double*)qaws_internal_malloc(sizeof(double) * 3 * (vertex_count ? vertex_count : 1));
+	used = (unsigned char*)qaws_internal_zalloc(vertex_count ? vertex_count : 1, 1);
+	stamp = (unsigned int*)qaws_internal_zalloc(vertex_count ? vertex_count : 1, sizeof(unsigned int));
+	poly = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * smax);
 	if (!m->x || !used || !stamp || !poly)
 		goto oom;
 	for (i = 0; i < 3 * (size_t)vertex_count; i++)
@@ -1867,7 +1868,7 @@ qaws_status qaws_mesh_repair(qaws_scalar const* positions, unsigned int vertex_c
 		rp_components(&w, (double)d.min_component_area, d.min_component_faces);
 	if (w.st == QAWS_STATUS_OK && perim >= 0)
 	{
-		shell = (unsigned int*)malloc(sizeof(unsigned int) * (m->nt ? m->nt : 1));
+		shell = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (m->nt ? m->nt : 1));
 		if (!shell)
 			goto oom;
 		rp_consistent(&w, shell, &bad);
@@ -1884,7 +1885,7 @@ qaws_status qaws_mesh_repair(qaws_scalar const* positions, unsigned int vertex_c
 oom:
 	w.st = QAWS_STATUS_ALLOCATION_FAILURE;
 done:
-	free(m->x); free(m->t); free(m->src); free(m->fl);
-	free(uf); free(poly); free(stamp); free(used); free(shell); free(bad);
+	qaws_internal_free(m->x); qaws_internal_free(m->t); qaws_internal_free(m->src); qaws_internal_free(m->fl);
+	qaws_internal_free(uf); qaws_internal_free(poly); qaws_internal_free(stamp); qaws_internal_free(used); qaws_internal_free(shell); qaws_internal_free(bad);
 	return w.st;
 }

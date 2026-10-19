@@ -16,6 +16,7 @@
  */
 
 #include "qaws_mesh_internal.h"
+#include "../internal/qaws_internal_memory.h"
 #include "../qaws_tetrahedralize.h"
 #include "../internal/qaws_internal_wide.h"
 #include <stdlib.h>
@@ -139,15 +140,15 @@ static int tt_emap_reset(tt_emap* e, unsigned int n)
 		cap <<= 1;
 	if (cap > e->cap)
 	{
-		unsigned int *a = (unsigned int*)realloc(e->ka, sizeof(unsigned int) * cap), *b, *v;
+		unsigned int *a = (unsigned int*)qaws_internal_realloc(e->ka, sizeof(unsigned int) * cap), *b, *v;
 		if (!a)
 			return 0;
 		e->ka = a;
-		b = (unsigned int*)realloc(e->kb, sizeof(unsigned int) * cap);
+		b = (unsigned int*)qaws_internal_realloc(e->kb, sizeof(unsigned int) * cap);
 		if (!b)
 			return 0;
 		e->kb = b;
-		v = (unsigned int*)realloc(e->val, sizeof(unsigned int) * cap);
+		v = (unsigned int*)qaws_internal_realloc(e->val, sizeof(unsigned int) * cap);
 		if (!v)
 			return 0;
 		e->val = v;
@@ -182,9 +183,9 @@ static unsigned int tt_emap_get(tt_emap const* e, unsigned int a, unsigned int b
 
 static void tt_emap_free(tt_emap* e)
 {
-	free(e->ka);
-	free(e->kb);
-	free(e->val);
+	qaws_internal_free(e->ka);
+	qaws_internal_free(e->kb);
+	qaws_internal_free(e->val);
 	memset(e, 0, sizeof *e);
 }
 
@@ -218,7 +219,7 @@ static int tt_grow(void** p, unsigned int* cap, unsigned int need, size_t size)
 	c = *cap ? *cap : 64;
 	while (c < need)
 		c *= 2;
-	g = realloc(*p, size * c);
+	g = qaws_internal_realloc(*p, size * c);
 	if (!g)
 		return 0;
 	*p = g;
@@ -236,9 +237,9 @@ static int tt_push(unsigned int** a, unsigned int* n, unsigned int* cap, unsigne
 
 static void tt_free(tt_mesh* m)
 {
-	free(m->q); free(m->x); free(m->vst); free(m->v2t);
-	free(m->tv); free(m->tn); free(m->tf); free(m->stamp); free(m->freel);
-	free(m->cav); free(m->bc); free(m->bf); free(m->made);
+	qaws_internal_free(m->q); qaws_internal_free(m->x); qaws_internal_free(m->vst); qaws_internal_free(m->v2t);
+	qaws_internal_free(m->tv); qaws_internal_free(m->tn); qaws_internal_free(m->tf); qaws_internal_free(m->stamp); qaws_internal_free(m->freel);
+	qaws_internal_free(m->cav); qaws_internal_free(m->bc); qaws_internal_free(m->bf); qaws_internal_free(m->made);
 	tt_emap_free(&m->link);
 	memset(m, 0, sizeof *m);
 }
@@ -701,12 +702,12 @@ static double tt_quality(double const* a, double const* b, double const* c, doub
    quality round it, never turning a cell over: Freitag and Ollivier-Gooch's smoothing, a few sweeps. */
 static int tt_smooth(double* x, unsigned int nv, unsigned int const* cells, unsigned int nc, unsigned char const* fixed, unsigned int sweeps)
 {
-	unsigned int *v0 = (unsigned int*)calloc((size_t)nv + 1, sizeof(unsigned int)), *vt = (unsigned int*)malloc(sizeof(unsigned int) * (4 * (size_t)nc + 1));
+	unsigned int *v0 = (unsigned int*)qaws_internal_zalloc((size_t)nv + 1, sizeof(unsigned int)), *vt = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (4 * (size_t)nc + 1));
 	unsigned int s, v, i, k;
 	if (!v0 || !vt)
 	{
-		free(v0);
-		free(vt);
+		qaws_internal_free(v0);
+		qaws_internal_free(vt);
 		return 0;
 	}
 	for (i = 0; i < 4 * nc; i++)
@@ -714,17 +715,17 @@ static int tt_smooth(double* x, unsigned int nv, unsigned int const* cells, unsi
 	for (v = 0; v < nv; v++)
 		v0[v + 1] += v0[v];
 	{
-		unsigned int* fill = (unsigned int*)malloc(sizeof(unsigned int) * ((size_t)nv + 1));
+		unsigned int* fill = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)nv + 1));
 		if (!fill)
 		{
-			free(v0);
-			free(vt);
+			qaws_internal_free(v0);
+			qaws_internal_free(vt);
 			return 0;
 		}
 		memcpy(fill, v0, sizeof(unsigned int) * nv);
 		for (i = 0; i < 4 * nc; i++)
 			vt[fill[cells[i]]++] = i / 4;
-		free(fill);
+		qaws_internal_free(fill);
 	}
 	for (s = 0; s < sweeps; s++)
 		for (v = 0; v < nv; v++)
@@ -773,8 +774,8 @@ static int tt_smooth(double* x, unsigned int nv, unsigned int const* cells, unsi
 			}
 			memcpy(x + 3 * (size_t)v, bi < 3 ? cand[bi] : keep, sizeof keep);
 		}
-	free(v0);
-	free(vt);
+	qaws_internal_free(v0);
+	qaws_internal_free(vt);
 	return 1;
 }
 
@@ -1122,7 +1123,7 @@ static int tt_lawson(tt_ctx* t, unsigned int* flips)
 		changed = 0;
 		if (!tt_border_map(t) || !tt_grow((void**)&mark, &capmark, t->nbt + 1, 1))
 		{
-			free(mark);
+			qaws_internal_free(mark);
 			return 0;
 		}
 		memset(mark, 0, t->nbt);
@@ -1144,7 +1145,7 @@ static int tt_lawson(tt_ctx* t, unsigned int* flips)
 				t->bdead[i] = t->bdead[j] = 1;
 				if (!tt_add_tri(t, z, x, w) || !tt_add_tri(t, w, y, z))
 				{
-					free(mark);
+					qaws_internal_free(mark);
 					return 0;
 				}
 				(*flips)++;
@@ -1153,7 +1154,7 @@ static int tt_lawson(tt_ctx* t, unsigned int* flips)
 			}
 		}
 	}
-	free(mark);
+	qaws_internal_free(mark);
 	return 1;
 }
 
@@ -1338,7 +1339,7 @@ static int tt_recover(tt_ctx* t, unsigned int* passes, unsigned int* splits, uns
 			break;
 	}
 out:
-	free(mark);
+	qaws_internal_free(mark);
 	return result;
 }
 
@@ -1419,7 +1420,7 @@ qaws_status qaws_volume_mesh_tetrahedralize(qaws_mesh_3d const* boundary, qaws_t
 		m->last = s;
 	}
 	/* the border's vertices, then its triangles (polygons fanned) */
-	map = (unsigned int*)malloc(sizeof(unsigned int) * ((size_t)h->nv + 1));
+	map = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)h->nv + 1));
 	if (!map)
 		goto done;
 	for (i = 0; i < h->nv; i++)
@@ -1493,7 +1494,7 @@ qaws_status qaws_volume_mesh_tetrahedralize(qaws_mesh_3d const* boundary, qaws_t
 		for (c = 0; c < m->nt; c++)
 			if (!(m->tf[c] & TT_DEAD) && (m->tf[c] & TT_IN) && !tt_push(&queue, &nq, &capq, c))
 			{
-				free(queue);
+				qaws_internal_free(queue);
 				goto done;
 			}
 		for (i = 0; i < nq; i++)
@@ -1504,7 +1505,7 @@ qaws_status qaws_volume_mesh_tetrahedralize(qaws_mesh_3d const* boundary, qaws_t
 				unsigned int u = m->tn[4 * (size_t)cc + k];
 				if (m->tv[4 * (size_t)cc + k] < 4)
 				{
-					free(queue);
+					qaws_internal_free(queue);
 					st = QAWS_STATUS_INVALID_TOPOLOGY;   /* (the inside reaches the super cell: not closed) */
 					goto done;
 				}
@@ -1513,12 +1514,12 @@ qaws_status qaws_volume_mesh_tetrahedralize(qaws_mesh_3d const* boundary, qaws_t
 				m->tf[u] |= TT_IN;
 				if (!tt_push(&queue, &nq, &capq, u))
 				{
-					free(queue);
+					qaws_internal_free(queue);
 					goto done;
 				}
 			}
 		}
-		free(queue);
+		qaws_internal_free(queue);
 		/* consistent: no wall with the inside on both sides */
 		for (c = 0; c < m->nt; c++)
 		{
@@ -1533,12 +1534,12 @@ qaws_status qaws_volume_mesh_tetrahedralize(qaws_mesh_3d const* boundary, qaws_t
 		}
 	}
 	/* the inside filled: a body-centred cubic lattice of spacing 1.1 L, its points farther than L / 2 from the border */
-	boxes = (qaws_bp_box*)malloc(sizeof(qaws_bp_box) * ((size_t)t.nbt + 1));
+	boxes = (qaws_bp_box*)qaws_internal_malloc(sizeof(qaws_bp_box) * ((size_t)t.nbt + 1));
 	if (!boxes)
 		goto done;
 	{
 		unsigned int nlive = 0;
-		unsigned int* live = (unsigned int*)malloc(sizeof(unsigned int) * 3 * ((size_t)t.nbt + 1));
+		unsigned int* live = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * 3 * ((size_t)t.nbt + 1));
 		if (!live)
 			goto done;
 		for (i = 0; i < t.nbt; i++)
@@ -1556,7 +1557,7 @@ qaws_status qaws_volume_mesh_tetrahedralize(qaws_mesh_3d const* boundary, qaws_t
 				}
 				nlive++;
 			}
-		free(t.bt);
+		qaws_internal_free(t.bt);
 		t.bt = live;
 		t.nbt = nlive;
 		t.capbt = nlive + 1;
@@ -1599,7 +1600,7 @@ qaws_status qaws_volume_mesh_tetrahedralize(qaws_mesh_3d const* boundary, qaws_t
 			for (c = 0; c < m->nt; c++)
 				if (!(m->tf[c] & TT_DEAD) && (m->tf[c] & TT_IN) && !tt_push(&queue, &nq, &capq, c))
 				{
-					free(queue);
+					qaws_internal_free(queue);
 					goto done;
 				}
 			while (nq && added < cap)
@@ -1653,7 +1654,7 @@ qaws_status qaws_volume_mesh_tetrahedralize(qaws_mesh_3d const* boundary, qaws_t
 				{
 					if (why == 0)
 					{
-						free(queue);
+						qaws_internal_free(queue);
 						goto done;
 					}
 					continue;
@@ -1663,17 +1664,17 @@ qaws_status qaws_volume_mesh_tetrahedralize(qaws_mesh_3d const* boundary, qaws_t
 				for (i = 0; i < m->nmade; i++)
 					if (!tt_push(&queue, &nq, &capq, m->made[i]))
 					{
-						free(queue);
+						qaws_internal_free(queue);
 						goto done;
 					}
 			}
-			free(queue);
+			qaws_internal_free(queue);
 		}
 	}
 	{
 		/* improved: flips, then the inside vertices smoothed (the border's fixed), three rounds */
-		unsigned char* fixed = (unsigned char*)calloc((size_t)m->nv + 1, 1);
-		unsigned int* arr = (unsigned int*)malloc(sizeof(unsigned int) * (4 * (size_t)m->nt + 1));
+		unsigned char* fixed = (unsigned char*)qaws_internal_zalloc((size_t)m->nv + 1, 1);
+		unsigned int* arr = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (4 * (size_t)m->nt + 1));
 		unsigned int round, n;
 		int ok = fixed && arr;
 		for (i = 0; ok && i < 3 * t.nbt; i++)
@@ -1686,18 +1687,18 @@ qaws_status qaws_volume_mesh_tetrahedralize(qaws_mesh_3d const* boundary, qaws_t
 					memcpy(arr + 4 * (size_t)n++, m->tv + 4 * (size_t)c, sizeof(unsigned int) * 4);
 			ok = ok && tt_smooth(m->x, m->nv, arr, n, fixed, 2);
 		}
-		free(fixed);
-		free(arr);
+		qaws_internal_free(fixed);
+		qaws_internal_free(arr);
 		if (!ok)
 			goto done;
 	}
 	/* the cells inside, their vertices compacted */
 	for (c = 0; c < m->nt; c++)
 		nin += !(m->tf[c] & TT_DEAD) && (m->tf[c] & TT_IN);
-	vmap = (unsigned int*)malloc(sizeof(unsigned int) * ((size_t)m->nv + 1));
-	cells = (unsigned int*)malloc(sizeof(unsigned int) * (4 * (size_t)nin + 1));
-	ctype = (unsigned char*)calloc((size_t)nin + 1, 1);
-	xo = (double*)malloc(sizeof(double) * (3 * (size_t)m->nv + 1));
+	vmap = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)m->nv + 1));
+	cells = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (4 * (size_t)nin + 1));
+	ctype = (unsigned char*)qaws_internal_zalloc((size_t)nin + 1, 1);
+	xo = (double*)qaws_internal_malloc(sizeof(double) * (3 * (size_t)m->nv + 1));
 	if (!vmap || !cells || !ctype || !xo)
 		goto done;
 	for (i = 0; i < m->nv; i++)
@@ -1727,8 +1728,8 @@ qaws_status qaws_volume_mesh_tetrahedralize(qaws_mesh_3d const* boundary, qaws_t
 		qaws_mesh_3d_destroy(b);
 	}
 done:
-	free(map); free(cells); free(vmap); free(ctype); free(xo); free(boxes);
-	free(t.bt); free(t.bdead);
+	qaws_internal_free(map); qaws_internal_free(cells); qaws_internal_free(vmap); qaws_internal_free(ctype); qaws_internal_free(xo); qaws_internal_free(boxes);
+	qaws_internal_free(t.bt); qaws_internal_free(t.bdead);
 	tt_emap_free(&t.bmap);
 	qaws_internal_grid_destroy(grid);
 	tt_free(m);

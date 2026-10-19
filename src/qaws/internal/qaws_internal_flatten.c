@@ -1,4 +1,5 @@
 #include "qaws_internal_flatten.h"
+#include "qaws_internal_memory.h"
 #include "qaws_internal_types.h"
 #include "qaws_internal_surface.h"
 #include "../qaws_eval.h"
@@ -79,7 +80,7 @@ static qaws_status fl_push_seg(fl_curve* f, qaws_scalar t0, qaws_scalar const* p
 	if (*f->count == *f->cap)
 	{
 		unsigned int cap = *f->cap ? *f->cap * 2 : 1024;
-		qaws_flat_seg* g = (qaws_flat_seg*)realloc(*f->segs, cap * sizeof(qaws_flat_seg));
+		qaws_flat_seg* g = (qaws_flat_seg*)qaws_internal_realloc(*f->segs, cap * sizeof(qaws_flat_seg));
 		if (!g)
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 		*f->segs = g;
@@ -226,7 +227,7 @@ static qaws_status fl_surf_patch(fl_surf* f, qaws_scalar u0, qaws_scalar u1, qaw
 		if (*f->count == *f->cap)
 		{
 			unsigned int cap = *f->cap ? *f->cap * 2 : 1024;
-			qaws_flat_patch* g = (qaws_flat_patch*)realloc(*f->patches, cap * sizeof(qaws_flat_patch));
+			qaws_flat_patch* g = (qaws_flat_patch*)qaws_internal_realloc(*f->patches, cap * sizeof(qaws_flat_patch));
 			if (!g)
 				return QAWS_STATUS_ALLOCATION_FAILURE;
 			*f->patches = g;

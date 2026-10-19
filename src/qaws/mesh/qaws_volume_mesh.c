@@ -4,6 +4,7 @@
  */
 
 #include "qaws_mesh_internal.h"
+#include "../internal/qaws_internal_memory.h"
 #include "../qaws_volume_mesh.h"
 #include <stdlib.h>
 #include <string.h>
@@ -114,8 +115,8 @@ void qaws_volume_mesh_destroy(qaws_volume_mesh* m)
 {
 	if (!m)
 		return;
-	free(m->x); free(m->type); free(m->c0); free(m->cv); free(m->f0); free(m->fo);
-	free(m);
+	qaws_internal_free(m->x); qaws_internal_free(m->type); qaws_internal_free(m->c0); qaws_internal_free(m->cv); qaws_internal_free(m->f0); qaws_internal_free(m->fo);
+	qaws_internal_free(m);
 }
 
 qaws_status vm_create(double const* x, unsigned int nv, unsigned int const* cv, unsigned char const* type, unsigned int nc, qaws_volume_mesh** out)
@@ -135,18 +136,18 @@ qaws_status vm_create(double const* x, unsigned int nv, unsigned int const* cv, 
 		ncorner += vm_corners[type[c]];
 		nfacet += vm_facets[type[c]];
 	}
-	m = (qaws_volume_mesh*)calloc(1, sizeof *m);
+	m = (qaws_volume_mesh*)qaws_internal_zalloc(1, sizeof *m);
 	if (!m)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	m->nv = nv;
 	m->nc = nc;
-	m->x = (double*)malloc(sizeof(double) * (3 * (size_t)nv + 1));
-	m->type = (unsigned char*)malloc((size_t)nc + 1);
-	m->c0 = (unsigned int*)malloc(sizeof(unsigned int) * ((size_t)nc + 1));
-	m->f0 = (unsigned int*)malloc(sizeof(unsigned int) * ((size_t)nc + 1));
-	m->cv = (unsigned int*)malloc(sizeof(unsigned int) * ((size_t)ncorner + 1));
-	m->fo = (unsigned int*)malloc(sizeof(unsigned int) * ((size_t)nfacet + 1));
-	keys = (vm_key*)malloc(sizeof(vm_key) * ((size_t)nfacet + 1));
+	m->x = (double*)qaws_internal_malloc(sizeof(double) * (3 * (size_t)nv + 1));
+	m->type = (unsigned char*)qaws_internal_malloc((size_t)nc + 1);
+	m->c0 = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)nc + 1));
+	m->f0 = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)nc + 1));
+	m->cv = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)ncorner + 1));
+	m->fo = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)nfacet + 1));
+	keys = (vm_key*)qaws_internal_malloc(sizeof(vm_key) * ((size_t)nfacet + 1));
 	if (!m->x || !m->type || !m->c0 || !m->f0 || !m->cv || !m->fo || !keys)
 		goto done;
 	memcpy(m->x, x, sizeof(double) * 3 * nv);
@@ -196,7 +197,7 @@ qaws_status vm_create(double const* x, unsigned int nv, unsigned int const* cv, 
 		i = j;
 	}
 done:
-	free(keys);
+	qaws_internal_free(keys);
 	if (st != QAWS_STATUS_OK)
 	{
 		qaws_volume_mesh_destroy(m);
@@ -217,12 +218,12 @@ qaws_status qaws_volume_mesh_create(qaws_volume_mesh_desc const* desc, qaws_volu
 	*out_mesh = NULL;
 	if (!desc || (desc->vertex_count && !desc->positions) || (desc->cell_count && !desc->cell_vertices))
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	x = (double*)malloc(sizeof(double) * (3 * (size_t)desc->vertex_count + 1));
-	type = (unsigned char*)malloc((size_t)desc->cell_count + 1);
+	x = (double*)qaws_internal_malloc(sizeof(double) * (3 * (size_t)desc->vertex_count + 1));
+	type = (unsigned char*)qaws_internal_malloc((size_t)desc->cell_count + 1);
 	if (!x || !type)
 	{
-		free(x);
-		free(type);
+		qaws_internal_free(x);
+		qaws_internal_free(type);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 	for (i = 0; i < 3 * desc->vertex_count; i++)
@@ -230,8 +231,8 @@ qaws_status qaws_volume_mesh_create(qaws_volume_mesh_desc const* desc, qaws_volu
 	for (i = 0; i < desc->cell_count; i++)
 		type[i] = (unsigned char)(desc->cell_types ? ((unsigned int)desc->cell_types[i] <= QAWS_CELL_PYRAMID ? desc->cell_types[i] : 255) : QAWS_CELL_TETRAHEDRON);
 	st = vm_create(x, desc->vertex_count, desc->cell_vertices, type, desc->cell_count, out_mesh);
-	free(x);
-	free(type);
+	qaws_internal_free(x);
+	qaws_internal_free(type);
 	return st;
 }
 
@@ -312,12 +313,12 @@ qaws_status qaws_volume_mesh_get_boundary(qaws_volume_mesh const* m, qaws_mesh_3
 	*out_surface = NULL;
 	if (!m)
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	map = (unsigned int*)malloc(sizeof(unsigned int) * ((size_t)m->nv + 1));
-	src = (unsigned int*)malloc(sizeof(unsigned int) * ((size_t)m->nv + 1));
-	fv = (unsigned int*)malloc(sizeof(unsigned int) * (4 * (size_t)m->f0[m->nc] + 1));
-	fs = (unsigned int*)malloc(sizeof(unsigned int) * ((size_t)m->f0[m->nc] + 1));
-	fcell = (unsigned int*)malloc(sizeof(unsigned int) * ((size_t)m->f0[m->nc] + 1));
-	xb = (double*)malloc(sizeof(double) * (3 * (size_t)m->nv + 1));
+	map = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)m->nv + 1));
+	src = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)m->nv + 1));
+	fv = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (4 * (size_t)m->f0[m->nc] + 1));
+	fs = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)m->f0[m->nc] + 1));
+	fcell = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)m->f0[m->nc] + 1));
+	xb = (double*)qaws_internal_malloc(sizeof(double) * (3 * (size_t)m->nv + 1));
 	if (!map || !src || !fv || !fs || !fcell || !xb)
 		goto done;
 	for (k = 0; k < m->nv; k++)
@@ -344,7 +345,7 @@ qaws_status qaws_volume_mesh_get_boundary(qaws_volume_mesh const* m, qaws_mesh_3
 	st = hm_mesh_3d_create(xb, nvb, fv, fs, nb, &s);
 	if (st != QAWS_STATUS_OK)
 		goto done;
-	vals = (qaws_scalar*)malloc(sizeof(qaws_scalar) * ((size_t)s->hm.nv + nb + 1));
+	vals = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * ((size_t)s->hm.nv + nb + 1));
 	if (!vals)
 	{
 		st = QAWS_STATUS_ALLOCATION_FAILURE;
@@ -371,7 +372,7 @@ qaws_status qaws_volume_mesh_get_boundary(qaws_volume_mesh const* m, qaws_mesh_3
 		}
 	}
 done:
-	free(map); free(src); free(fv); free(fs); free(fcell); free(xb); free(vals);
+	qaws_internal_free(map); qaws_internal_free(src); qaws_internal_free(fv); qaws_internal_free(fs); qaws_internal_free(fcell); qaws_internal_free(xb); qaws_internal_free(vals);
 	if (st != QAWS_STATUS_OK)
 	{
 		qaws_mesh_3d_destroy(s);

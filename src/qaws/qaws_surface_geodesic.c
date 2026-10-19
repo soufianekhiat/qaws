@@ -11,6 +11,7 @@
  * midpoints are within the tolerance of the solution.
  */
 #include "qaws_surface_region.h"
+#include "internal/qaws_internal_memory.h"
 #include "qaws_surface.h"
 #include "qaws_curve.h"
 #include "qaws_hermite.h"
@@ -286,7 +287,7 @@ static qaws_status sg_angle(sg_ctx const* c, double u, double v, double const* d
 static qaws_status sg_hermite(double const* pts, double const* der, unsigned int n, qaws_curve** out)
 {
 	qaws_hermite_desc d;
-	qaws_scalar* buf = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 4 * n);
+	qaws_scalar* buf = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * 4 * n);
 	unsigned int i;
 	qaws_status st;
 	if (!buf)
@@ -301,7 +302,7 @@ static qaws_status sg_hermite(double const* pts, double const* der, unsigned int
 	d.points = buf; d.point_count = n;
 	d.derivatives = buf + 2 * n; d.derivative_count = n;
 	st = qaws_curve_create_hermite(&d, out);
-	free(buf);
+	qaws_internal_free(buf);
 	return st;
 }
 
@@ -322,7 +323,7 @@ static qaws_status sg_path(sg_ctx const* c, double const* y0, double L, qaws_cur
 	*out = NULL;
 	while (n <= 1u << 18)
 	{
-		double* pts = (double*)malloc(sizeof(double) * 4 * (n + 1));
+		double* pts = (double*)qaws_internal_malloc(sizeof(double) * 4 * (n + 1));
 		double *der = pts + 2 * (n + 1), y[4], h = L / n, worst = 0;
 		unsigned int k;
 		qaws_status st = QAWS_STATUS_OK;
@@ -352,7 +353,7 @@ static qaws_status sg_path(sg_ctx const* c, double const* y0, double L, qaws_cur
 				if (d > worst) worst = d;
 			}
 		}
-		free(pts);
+		qaws_internal_free(pts);
 		if (st != QAWS_STATUS_OK)
 		{
 			qaws_curve_destroy(cv);
@@ -372,7 +373,7 @@ static qaws_status sg_path(sg_ctx const* c, double const* y0, double L, qaws_cur
 
 static qaws_surface_curve* sg_new(qaws_surface const* s, qaws_surface_curve_kind kind)
 {
-	qaws_surface_curve* c = (qaws_surface_curve*)calloc(1, sizeof(qaws_surface_curve));
+	qaws_surface_curve* c = (qaws_surface_curve*)qaws_internal_zalloc(1, sizeof(qaws_surface_curve));
 	if (c)
 	{
 		c->s = s;
@@ -523,7 +524,7 @@ qaws_status qaws_surface_curve_create_uv(qaws_surface const* surface, qaws_curve
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	if ((st = sg_init(&c->ctx, surface, 0)) != QAWS_STATUS_OK)
 	{
-		free(c);
+		qaws_internal_free(c);
 		return st;
 	}
 	rg = qaws_curve_get_parameter_range(uv_curve);
@@ -756,7 +757,7 @@ qaws_status qaws_surface_curve_create_geodesic_arc(qaws_surface const* surface, 
 	while (n <= 1u << 16)
 	{
 		/* points at n + 1 angles, two more each side for the derivatives */
-		double* pts = (double*)malloc(sizeof(double) * 2 * (n + 5) + sizeof(double) * 4 * (n + 1));
+		double* pts = (double*)qaws_internal_malloc(sizeof(double) * 2 * (n + 5) + sizeof(double) * 4 * (n + 1));
 		double *P = pts + 4, *hp, *hd, dt = sweep / n, worst = 0;
 		unsigned int k;
 		qaws_curve* cv = NULL;
@@ -807,14 +808,14 @@ qaws_status qaws_surface_curve_create_geodesic_arc(qaws_surface const* surface, 
 			qaws_surface_curve* c;
 			if (sg_self_crossing(P, whole && !pole ? n : n + 1, whole && !pole))
 			{
-				free(pts);
+				qaws_internal_free(pts);
 				qaws_curve_destroy(cv);
 				return QAWS_STATUS_INVALID_ARGUMENT;      /* past the injectivity radius */
 			}
 			c = sg_new(surface, QAWS_SURFACE_CURVE_GEODESIC_ARC);
 			if (!c)
 			{
-				free(pts);
+				qaws_internal_free(pts);
 				qaws_curve_destroy(cv);
 				return QAWS_STATUS_ALLOCATION_FAILURE;
 			}
@@ -825,11 +826,11 @@ qaws_status qaws_surface_curve_create_geodesic_arc(qaws_surface const* surface, 
 			c->length = -1;
 			c->a[0] = P[0]; c->a[1] = P[1];
 			c->b[0] = P[2 * n]; c->b[1] = P[2 * n + 1];
-			free(pts);
+			qaws_internal_free(pts);
 			*out_curve = c;
 			return QAWS_STATUS_OK;
 		}
-		free(pts);
+		qaws_internal_free(pts);
 		qaws_curve_destroy(cv);
 		if (st != QAWS_STATUS_OK)
 			return st;
@@ -844,7 +845,7 @@ void qaws_surface_curve_destroy(qaws_surface_curve* curve)
 	if (!curve)
 		return;
 	qaws_curve_destroy(curve->uv);
-	free(curve);
+	qaws_internal_free(curve);
 }
 
 qaws_surface_curve_kind qaws_surface_curve_get_kind(qaws_surface_curve const* curve)
@@ -1027,7 +1028,7 @@ qaws_status qaws_internal_sg_offset(qaws_internal_sg_ctx const* c, qaws_curve co
 	}
 	while (st == QAWS_STATUS_OK)
 	{
-		double* pts = (double*)malloc(sizeof(double) * 4 * (n + 1));
+		double* pts = (double*)qaws_internal_malloc(sizeof(double) * 4 * (n + 1));
 		double *der, worst = 0;
 		unsigned int k;
 		if (!pts)
@@ -1078,7 +1079,7 @@ qaws_status qaws_internal_sg_offset(qaws_internal_sg_ctx const* c, qaws_curve co
 				if (dd > worst) worst = dd;
 			}
 		}
-		free(pts);
+		qaws_internal_free(pts);
 		/* (past a cusp of the offset, where the base curves more than 1/r, the
 		   fit stops refining: that run lies inside the swept strip) */
 		if (st != QAWS_STATUS_OK || worst <= c->tol || n >= 1u << 12)

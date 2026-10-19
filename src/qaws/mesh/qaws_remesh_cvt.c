@@ -36,6 +36,7 @@
  */
 
 #include "qaws_remesh_cvt.h"
+#include "../internal/qaws_internal_memory.h"
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -320,9 +321,9 @@ static int rv_build(rv_cvt* w, double* nstar)
 	qaws_mesh_reference const* r = w->r;
 	unsigned int t, nsv = 0, nst = 0, nadj = 0, pass, i, j, q;
 	double total = 0;
-	w->k = (unsigned int*)malloc(sizeof(unsigned int) * (r->nt + 1));
-	w->v0 = (unsigned int*)malloc(sizeof(unsigned int) * (r->nt + 1));
-	w->t0 = (unsigned int*)malloc(sizeof(unsigned int) * (r->nt + 1));
+	w->k = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (r->nt + 1));
+	w->v0 = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (r->nt + 1));
+	w->t0 = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (r->nt + 1));
 	if (!w->k || !w->v0 || !w->t0)
 		return 0;
 	for (t = 0; t < r->nt; t++)
@@ -362,11 +363,11 @@ static int rv_build(rv_cvt* w, double* nstar)
 		nst += w->k[t] * w->k[t];
 	}
 	w->nst = nst;
-	w->sv = (double*)malloc(sizeof(double) * 4 * ((size_t)nsv + 1));
-	w->tri = (unsigned int*)malloc(sizeof(unsigned int) * 3 * ((size_t)nst + 1));
-	w->a0 = (unsigned int*)malloc(sizeof(unsigned int) * ((size_t)nst + 1));
-	w->stamp = (unsigned int*)calloc((size_t)nst + 1, sizeof(unsigned int));
-	w->queue = (unsigned int*)malloc(sizeof(unsigned int) * ((size_t)nst + 1));
+	w->sv = (double*)qaws_internal_malloc(sizeof(double) * 4 * ((size_t)nsv + 1));
+	w->tri = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * 3 * ((size_t)nst + 1));
+	w->a0 = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)nst + 1));
+	w->stamp = (unsigned int*)qaws_internal_zalloc((size_t)nst + 1, sizeof(unsigned int));
+	w->queue = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)nst + 1));
 	if (!w->sv || !w->tri || !w->a0 || !w->stamp || !w->queue)
 		return 0;
 	for (t = 0; t < r->nt; t++)
@@ -416,7 +417,7 @@ static int rv_build(rv_cvt* w, double* nstar)
 		if (pass == 0)
 		{
 			w->a0[nst] = nadj;
-			w->adj = (unsigned int*)malloc(sizeof(unsigned int) * ((size_t)nadj + 1));
+			w->adj = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)nadj + 1));
 			if (!w->adj)
 				return 0;
 		}
@@ -493,12 +494,12 @@ static int rv_count(rv_cvt* w, double nstar, int lines)
 		if (fabs(m->nv - nstar) <= 0.01 * nstar)
 			break;
 		want = (unsigned int)fabs(m->nv - nstar);
-		key = (rv_cand*)malloc(sizeof(rv_cand) * (m->nc + 1));
-		e = (unsigned int*)malloc(sizeof(unsigned int) * 2 * (m->nc + 1));
-		touched = (unsigned char*)calloc((size_t)m->nv + 1, 1);
+		key = (rv_cand*)qaws_internal_malloc(sizeof(rv_cand) * (m->nc + 1));
+		e = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * 2 * (m->nc + 1));
+		touched = (unsigned char*)qaws_internal_zalloc((size_t)m->nv + 1, 1);
 		if (!key || !e || !touched)
 		{
-			free(key); free(e); free(touched);
+			qaws_internal_free(key); qaws_internal_free(e); qaws_internal_free(touched);
 			return 0;
 		}
 		for (c = 0; c < m->nc; c++)
@@ -534,7 +535,7 @@ static int rv_count(rv_cvt* w, double nstar, int lines)
 				v = hm_split_edge(m, cc, 0.5, p, 1);
 				if (v == HM_NONE)
 				{
-					free(key); free(e); free(touched);
+					qaws_internal_free(key); qaws_internal_free(e); qaws_internal_free(touched);
 					return 0;
 				}
 				m->foot[v] = l;
@@ -561,7 +562,7 @@ static int rv_count(rv_cvt* w, double nstar, int lines)
 				nr += hm_ring(m, x, ring + nr, 128);
 				if (!hm_collapse(m, cc, x, 1, rv_x(m, y)))
 				{
-					free(key); free(e); free(touched);
+					qaws_internal_free(key); qaws_internal_free(e); qaws_internal_free(touched);
 					return 0;
 				}
 				touched[x] = touched[y] = 1;
@@ -571,7 +572,7 @@ static int rv_count(rv_cvt* w, double nstar, int lines)
 			w->rep->collapses++;
 			done++;
 		}
-		free(key); free(e); free(touched);
+		qaws_internal_free(key); qaws_internal_free(e); qaws_internal_free(touched);
 		hm_compact(m);
 		if (!done)
 			break;
@@ -586,7 +587,7 @@ static int rv_count(rv_cvt* w, double nstar, int lines)
 static int rv_subdivide(rv_cvt* w)
 {
 	qaws_hm* m = w->m;
-	unsigned int c, ne = 0, i, nv0 = m->nv, *e = (unsigned int*)malloc(sizeof(unsigned int) * 2 * (m->nc + 1)), *src;
+	unsigned int c, ne = 0, i, nv0 = m->nv, *e = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * 2 * (m->nc + 1)), *src;
 	if (!e)
 		return 0;
 	for (c = 0; c < m->nc; c++)
@@ -596,10 +597,10 @@ static int rv_subdivide(rv_cvt* w)
 			e[2 * ne + 1] = hm_to(m, c);
 			ne++;
 		}
-	src = (unsigned int*)malloc(sizeof(unsigned int) * 2 * ((size_t)ne + 1));
+	src = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * 2 * ((size_t)ne + 1));
 	if (!src)
 	{
-		free(e);
+		qaws_internal_free(e);
 		return 0;
 	}
 	for (i = 0; i < ne; i++)
@@ -626,7 +627,7 @@ static int rv_subdivide(rv_cvt* w)
 		v = hm_split_edge(m, cc, 0.5, p, 1);
 		if (v == HM_NONE)
 		{
-			free(e); free(src);
+			qaws_internal_free(e); qaws_internal_free(src);
 			return 0;
 		}
 		m->foot[v] = l;
@@ -657,12 +658,12 @@ static int rv_subdivide(rv_cvt* w)
 		if (cc != HM_NONE && !(m->cflag[cc] & HM_FEATURE) && m->co[cc] != HM_NONE && m->cv[hm_prev(m, cc)] >= nv0
 			&& m->cv[hm_prev(m, m->co[cc])] >= nv0 && hm_can_flip(m, cc) && !hm_flip(m, cc))
 		{
-			free(e); free(src);
+			qaws_internal_free(e); qaws_internal_free(src);
 			return 0;
 		}
 	}
-	free(e);
-	free(src);
+	qaws_internal_free(e);
+	qaws_internal_free(src);
 	hm_compact(m);
 	return 1;
 }
@@ -809,7 +810,7 @@ static int rv_lines(rv_cvt* w)
 {
 	qaws_hm* m = w->m;
 	unsigned int v, pass, nv = m->nv, cap = 0, *ch = NULL;
-	unsigned char* seen = (unsigned char*)calloc((size_t)nv + 1, 1);
+	unsigned char* seen = (unsigned char*)qaws_internal_zalloc((size_t)nv + 1, 1);
 	double* s = NULL;
 	int ok = seen != NULL;
 	for (pass = 0; ok && pass < 2; pass++)
@@ -835,8 +836,8 @@ static int rv_lines(rv_cvt* w)
 						unsigned int* c2;
 						double* s2;
 						cap = 2 * cap + 64;
-						c2 = (unsigned int*)realloc(ch, sizeof(unsigned int) * cap);
-						s2 = (double*)realloc(s, sizeof(double) * 4 * (size_t)cap);
+						c2 = (unsigned int*)qaws_internal_realloc(ch, sizeof(unsigned int) * cap);
+						s2 = (double*)qaws_internal_realloc(s, sizeof(double) * 4 * (size_t)cap);
 						if (c2)
 							ch = c2;
 						if (s2)
@@ -869,8 +870,8 @@ static int rv_lines(rv_cvt* w)
 						unsigned int* c2;
 						double* s2;
 						cap = (unsigned int)need;
-						c2 = (unsigned int*)realloc(ch, sizeof(unsigned int) * cap);
-						s2 = (double*)realloc(s, sizeof(double) * 4 * (size_t)cap);
+						c2 = (unsigned int*)qaws_internal_realloc(ch, sizeof(unsigned int) * cap);
+						s2 = (double*)qaws_internal_realloc(s, sizeof(double) * 4 * (size_t)cap);
 						if (c2)
 							ch = c2;
 						if (s2)
@@ -885,9 +886,9 @@ static int rv_lines(rv_cvt* w)
 				ok = rv_chain(w, ch, n - 1, cap, s, ch[n - 1] == v) != 0;
 			}
 		}
-	free(seen);
-	free(ch);
-	free(s);
+	qaws_internal_free(seen);
+	qaws_internal_free(ch);
+	qaws_internal_free(s);
 	hm_compact(m);
 	return ok;
 }
@@ -912,7 +913,7 @@ static int rv_delaunay(rv_cvt* w)
 	unsigned int c, head = 0, tail = 0, flips = 0, cap = 10 * m->nv, need = m->nc + 4 * cap + 8;
 	if (need > w->ceq)
 	{
-		unsigned int* g = (unsigned int*)realloc(w->eq, sizeof(unsigned int) * 2 * (size_t)need);
+		unsigned int* g = (unsigned int*)qaws_internal_realloc(w->eq, sizeof(unsigned int) * 2 * (size_t)need);
 		if (!g)
 			return 0;
 		w->eq = g;
@@ -1328,10 +1329,10 @@ static int rv_seeds(rv_cvt* w)
 	qaws_hm* m = w->m;
 	unsigned int i, ne = 0, pass;
 	w->n = m->nv;
-	w->locked = (unsigned char*)calloc((size_t)w->n + 1, 1);
-	w->e0 = (unsigned int*)malloc(sizeof(unsigned int) * ((size_t)w->n + 1));
-	w->box = (qaws_bp_box*)malloc(sizeof(qaws_bp_box) * ((size_t)w->n + 1));
-	w->cand = (rv_cand*)malloc(sizeof(rv_cand) * ((size_t)w->n + 1));
+	w->locked = (unsigned char*)qaws_internal_zalloc((size_t)w->n + 1, 1);
+	w->e0 = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)w->n + 1));
+	w->box = (qaws_bp_box*)qaws_internal_malloc(sizeof(qaws_bp_box) * ((size_t)w->n + 1));
+	w->cand = (rv_cand*)qaws_internal_malloc(sizeof(rv_cand) * ((size_t)w->n + 1));
 	if (!w->locked || !w->e0 || !w->box || !w->cand)
 		return 0;
 	for (pass = 0; pass < 2; pass++)
@@ -1385,8 +1386,8 @@ static int rv_seeds(rv_cvt* w)
 		w->e0[w->n] = ne;
 		if (pass == 0)
 		{
-			w->ereg = (unsigned int*)malloc(sizeof(unsigned int) * ((size_t)ne + 1));
-			w->estart = (unsigned int*)malloc(sizeof(unsigned int) * ((size_t)ne + 1));
+			w->ereg = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)ne + 1));
+			w->estart = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)ne + 1));
 			if (!w->ereg || !w->estart)
 				return 0;
 		}
@@ -1403,10 +1404,10 @@ static int rv_solve(rv_cvt* w, unsigned int steps)
 	qaws_hm* m = w->m;
 	unsigned int n3 = 3 * w->n, i, k, it, hn = 0, hhead = 0;
 	size_t sz = sizeof(double) * ((size_t)n3 + 3);
-	double *mass = (double*)malloc(sz), *cen = (double*)malloc(sz), *mt = (double*)malloc(sz), *ct = (double*)malloc(sz);
-	double *g = (double*)malloc(sz), *gt = (double*)malloc(sz), *d = (double*)malloc(sz), *zt = (double*)malloc(sz);
-	double *S = (double*)malloc(sz * RV_HISTORY), *Y = (double*)malloc(sz * RV_HISTORY), rh[RV_HISTORY], al[RV_HISTORY];
-	qaws_mesh_location* ft = (qaws_mesh_location*)malloc(sizeof(qaws_mesh_location) * ((size_t)w->n + 1));
+	double *mass = (double*)qaws_internal_malloc(sz), *cen = (double*)qaws_internal_malloc(sz), *mt = (double*)qaws_internal_malloc(sz), *ct = (double*)qaws_internal_malloc(sz);
+	double *g = (double*)qaws_internal_malloc(sz), *gt = (double*)qaws_internal_malloc(sz), *d = (double*)qaws_internal_malloc(sz), *zt = (double*)qaws_internal_malloc(sz);
+	double *S = (double*)qaws_internal_malloc(sz * RV_HISTORY), *Y = (double*)qaws_internal_malloc(sz * RV_HISTORY), rh[RV_HISTORY], al[RV_HISTORY];
+	qaws_mesh_location* ft = (qaws_mesh_location*)qaws_internal_malloc(sizeof(qaws_mesh_location) * ((size_t)w->n + 1));
 	double E = 0, Et = 0, gnorm, gam = 1, stop = 1e-9 * w->r->extent * w->r->extent * w->r->extent;
 	int ok = mass && cen && mt && ct && g && gt && d && zt && S && Y && ft;
 	for (it = 0; ok && it < 5; it++)
@@ -1573,13 +1574,13 @@ static int rv_solve(rv_cvt* w, unsigned int steps)
 		rv_trace->coverage = w->mass > 0 ? w->covered / w->mass : 0;
 		rv_trace->evaluations = w->evaluations;
 	}
-	free(mass); free(cen); free(mt); free(ct); free(g); free(gt); free(d); free(zt); free(S); free(Y); free(ft);
+	qaws_internal_free(mass); qaws_internal_free(cen); qaws_internal_free(mt); qaws_internal_free(ct); qaws_internal_free(g); qaws_internal_free(gt); qaws_internal_free(d); qaws_internal_free(zt); qaws_internal_free(S); qaws_internal_free(Y); qaws_internal_free(ft);
 	return ok;
 }
 
 static void rv_seeds_free(rv_cvt* w)
 {
-	free(w->locked); free(w->e0); free(w->ereg); free(w->estart); free(w->box); free(w->cand);
+	qaws_internal_free(w->locked); qaws_internal_free(w->e0); qaws_internal_free(w->ereg); qaws_internal_free(w->estart); qaws_internal_free(w->box); qaws_internal_free(w->cand);
 	w->locked = NULL; w->e0 = w->ereg = w->estart = NULL; w->box = NULL; w->cand = NULL;
 }
 
@@ -1606,7 +1607,7 @@ static int rv_level(rv_cvt* w, double nstar, int coarse, unsigned int steps)
 /* the integration mesh freed */
 static void rv_unbuild(rv_cvt* w)
 {
-	free(w->k); free(w->v0); free(w->t0); free(w->sv); free(w->tri); free(w->a0); free(w->adj); free(w->stamp); free(w->queue);
+	qaws_internal_free(w->k); qaws_internal_free(w->v0); qaws_internal_free(w->t0); qaws_internal_free(w->sv); qaws_internal_free(w->tri); qaws_internal_free(w->a0); qaws_internal_free(w->adj); qaws_internal_free(w->stamp); qaws_internal_free(w->queue);
 	w->k = w->v0 = w->t0 = w->tri = w->a0 = w->adj = w->stamp = w->queue = NULL;
 	w->sv = NULL;
 	w->gen = 0;
@@ -1659,6 +1660,6 @@ int rv_optimize(qaws_hm* m, qaws_mesh_reference const* r, qaws_size_field const*
 	w.scale = 1;
 	ok = ok && rv_build(&w, &nstar) && rv_level(&w, nstar, 0, steps);
 	rv_unbuild(&w);
-	free(w.eq);
+	qaws_internal_free(w.eq);
 	return ok;
 }

@@ -4,6 +4,7 @@
  */
 
 #include "qaws_alloc.h"
+#include "internal/qaws_internal_memory.h"
 #include "qaws_path.h"
 #include "qaws_curve.h"
 #include "qaws_eval.h"
@@ -85,7 +86,7 @@ qaws_status qaws_curve_create_polyline_2d(qaws_scalar const* points, unsigned in
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	*out_curve = NULL;
 	n = count + (closed ? 1u : 0u);
-	cp = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (2 * n + n + 2));
+	cp = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * (2 * n + n + 2));
 	if (!cp)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	kn = cp + 2 * n;
@@ -107,7 +108,7 @@ qaws_status qaws_curve_create_polyline_2d(qaws_scalar const* points, unsigned in
 	d.knots = kn;
 	d.knot_count = n + 2;
 	s = qaws_curve_create_bspline(&d, out_curve);
-	free(cp);
+	qaws_internal_free(cp);
 	return s;
 }
 
@@ -196,7 +197,7 @@ static qaws_status pt_arc_to_nurbs(qaws_curve const* curve, qaws_curve** out)
 		double sweep = fabs((double)(impl->segments[i].angle_end - impl->segments[i].angle_start));
 		n += (unsigned int)ceil(sweep / (PT_PI / 2) - 1e-9) > 0 ? (unsigned int)ceil(sweep / (PT_PI / 2) - 1e-9) : 1;
 	}
-	cp = (qaws_scalar*)malloc(sizeof(qaws_scalar) * ((2 * n + 1) * 3 + 2 * n + 4));
+	cp = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * ((2 * n + 1) * 3 + 2 * n + 4));
 	if (!cp)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	w = cp + 2 * (2 * n + 1);
@@ -259,7 +260,7 @@ static qaws_status pt_arc_to_nurbs(qaws_curve const* curve, qaws_curve** out)
 	d.weights = w;
 	d.weight_count = np;
 	s = qaws_curve_create_nurbs_ex(&d, curve->allocator, out);
-	free(cp);
+	qaws_internal_free(cp);
 	return s;
 }
 
@@ -279,7 +280,7 @@ qaws_status qaws_curve_transform_2d(qaws_curve const* curve, qaws_scalar const m
 	case QAWS_CURVE_KIND_BEZIER:
 	{
 		qaws_bezier_impl const* impl = (qaws_bezier_impl const*)curve->impl;
-		qaws_scalar* cp = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 2 * impl->control_point_count);
+		qaws_scalar* cp = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * 2 * impl->control_point_count);
 		qaws_bezier_desc d;
 		if (!cp) return QAWS_STATUS_ALLOCATION_FAILURE;
 		pt_map(m, impl->control_points, cp, impl->control_point_count);
@@ -287,13 +288,13 @@ qaws_status qaws_curve_transform_2d(qaws_curve const* curve, qaws_scalar const m
 		d.dimension = QAWS_DIMENSION_2D; d.degree = curve->degree;
 		d.control_points = cp; d.control_point_count = impl->control_point_count;
 		s = qaws_curve_create_bezier_ex(&d, curve->allocator, out_curve);
-		free(cp);
+		qaws_internal_free(cp);
 		return s;
 	}
 	case QAWS_CURVE_KIND_RATIONAL_BEZIER:
 	{
 		qaws_rational_bezier_impl const* impl = (qaws_rational_bezier_impl const*)curve->impl;
-		qaws_scalar* cp = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 2 * impl->control_point_count);
+		qaws_scalar* cp = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * 2 * impl->control_point_count);
 		qaws_rational_bezier_desc d;
 		if (!cp) return QAWS_STATUS_ALLOCATION_FAILURE;
 		pt_map(m, impl->control_points, cp, impl->control_point_count);
@@ -302,13 +303,13 @@ qaws_status qaws_curve_transform_2d(qaws_curve const* curve, qaws_scalar const m
 		d.control_points = cp; d.control_point_count = impl->control_point_count;
 		d.weights = impl->weights; d.weight_count = impl->control_point_count;
 		s = qaws_curve_create_rational_bezier_ex(&d, curve->allocator, out_curve);
-		free(cp);
+		qaws_internal_free(cp);
 		return s;
 	}
 	case QAWS_CURVE_KIND_BSPLINE:
 	{
 		qaws_bspline_impl const* impl = (qaws_bspline_impl const*)curve->impl;
-		qaws_scalar* cp = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 2 * impl->control_point_count);
+		qaws_scalar* cp = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * 2 * impl->control_point_count);
 		qaws_bspline_desc d;
 		if (!cp) return QAWS_STATUS_ALLOCATION_FAILURE;
 		pt_map(m, impl->control_points, cp, impl->control_point_count);
@@ -317,13 +318,13 @@ qaws_status qaws_curve_transform_2d(qaws_curve const* curve, qaws_scalar const m
 		d.control_points = cp; d.control_point_count = impl->control_point_count;
 		d.knots = impl->knots; d.knot_count = impl->knot_count;
 		s = qaws_curve_create_bspline_ex(&d, curve->allocator, out_curve);
-		free(cp);
+		qaws_internal_free(cp);
 		return s;
 	}
 	case QAWS_CURVE_KIND_NURBS:
 	{
 		qaws_nurbs_impl const* impl = (qaws_nurbs_impl const*)curve->impl;
-		qaws_scalar* cp = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 2 * impl->control_point_count);
+		qaws_scalar* cp = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * 2 * impl->control_point_count);
 		qaws_nurbs_desc d;
 		if (!cp) return QAWS_STATUS_ALLOCATION_FAILURE;
 		pt_map(m, impl->control_points, cp, impl->control_point_count);
@@ -333,7 +334,7 @@ qaws_status qaws_curve_transform_2d(qaws_curve const* curve, qaws_scalar const m
 		d.knots = impl->knots; d.knot_count = impl->knot_count;
 		d.weights = impl->weights; d.weight_count = impl->weight_count;
 		s = qaws_curve_create_nurbs_ex(&d, curve->allocator, out_curve);
-		free(cp);
+		qaws_internal_free(cp);
 		return s;
 	}
 	case QAWS_CURVE_KIND_POLYNOMIAL:
@@ -341,7 +342,7 @@ qaws_status qaws_curve_transform_2d(qaws_curve const* curve, qaws_scalar const m
 		/* linear part on every coefficient, the translation on c0 only */
 		qaws_polynomial_impl const* impl = (qaws_polynomial_impl const*)curve->impl;
 		unsigned int n = impl->coefficient_count, i;
-		qaws_scalar* co = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 2 * n);
+		qaws_scalar* co = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * 2 * n);
 		qaws_polynomial_desc d;
 		if (!co) return QAWS_STATUS_ALLOCATION_FAILURE;
 		for (i = 0; i < n; i++)
@@ -355,7 +356,7 @@ qaws_status qaws_curve_transform_2d(qaws_curve const* curve, qaws_scalar const m
 		d.coefficients = co; d.coefficient_count = n;
 		d.t_min = curve->parameter_range.min_value; d.t_max = curve->parameter_range.max_value;
 		s = qaws_curve_create_polynomial_ex(&d, curve->allocator, out_curve);
-		free(co);
+		qaws_internal_free(co);
 		return s;
 	}
 	case QAWS_CURVE_KIND_ARC:
@@ -373,7 +374,7 @@ qaws_status qaws_curve_transform_2d(qaws_curve const* curve, qaws_scalar const m
 			qaws_curve_destroy(nurbs);
 			return s;
 		}
-		seg = (qaws_arc_segment*)malloc(sizeof(qaws_arc_segment) * impl->segment_count);
+		seg = (qaws_arc_segment*)qaws_internal_malloc(sizeof(qaws_arc_segment) * impl->segment_count);
 		if (!seg) return QAWS_STATUS_ALLOCATION_FAILURE;
 		for (i = 0; i < impl->segment_count; i++)
 		{
@@ -398,7 +399,7 @@ qaws_status qaws_curve_transform_2d(qaws_curve const* curve, qaws_scalar const m
 		memset(&d, 0, sizeof(d));
 		d.dimension = QAWS_DIMENSION_2D; d.segments = seg; d.segment_count = impl->segment_count;
 		s = qaws_curve_create_arc_ex(&d, curve->allocator, out_curve);
-		free(seg);
+		qaws_internal_free(seg);
 		return s;
 	}
 	case QAWS_CURVE_KIND_CLOTHOID:
@@ -428,7 +429,7 @@ qaws_status qaws_curve_transform_2d(qaws_curve const* curve, qaws_scalar const m
 	case QAWS_CURVE_KIND_COMPOSITE:
 	{
 		qaws_composite_impl const* impl = (qaws_composite_impl const*)curve->impl;
-		qaws_curve** seg = (qaws_curve**)malloc(sizeof(qaws_curve*) * impl->segment_count);
+		qaws_curve** seg = (qaws_curve**)qaws_internal_malloc(sizeof(qaws_curve*) * impl->segment_count);
 		qaws_composite_desc d;
 		unsigned int i, made = 0;
 		if (!seg) return QAWS_STATUS_ALLOCATION_FAILURE;
@@ -444,7 +445,7 @@ qaws_status qaws_curve_transform_2d(qaws_curve const* curve, qaws_scalar const m
 		}
 		if (s != QAWS_STATUS_OK)
 			for (i = 0; i < made; i++) qaws_curve_destroy(seg[i]);
-		free(seg);
+		qaws_internal_free(seg);
 		return s;
 	}
 	default:
@@ -769,7 +770,7 @@ static int pt_push(pt_segs* q, pt_seg const* g)
 	if (q->n == q->cap)
 	{
 		unsigned int cap = q->cap ? 2 * q->cap : 256;
-		pt_seg* s = (pt_seg*)realloc(q->s, sizeof(pt_seg) * cap);
+		pt_seg* s = (pt_seg*)qaws_internal_realloc(q->s, sizeof(pt_seg) * cap);
 		if (!s) return 0;
 		q->s = s;
 		q->cap = cap;
@@ -838,7 +839,7 @@ static qaws_status pt_flatten(qaws_path_2d const* paths, unsigned int path_count
 			qaws_flat_seg* fs = NULL;
 			unsigned int n = 0, cap = 0;
 			qaws_status s = qaws_internal_flatten_curve(paths[i].curves[j], 2, (qaws_scalar)flat, i, &fs, &n, &cap);
-			if (s != QAWS_STATUS_OK) { free(fs); return s; }
+			if (s != QAWS_STATUS_OK) { qaws_internal_free(fs); return s; }
 			for (k = 0; k < n; k++)
 			{
 				pt_seg g;
@@ -848,9 +849,9 @@ static qaws_status pt_flatten(qaws_path_2d const* paths, unsigned int path_count
 				g.p0[0] = fs[k].p0[0]; g.p0[1] = fs[k].p0[1];
 				g.p1[0] = fs[k].p1[0]; g.p1[1] = fs[k].p1[1];
 				g.r = fs[k].r;
-				if (!pt_push(out, &g)) { free(fs); return QAWS_STATUS_ALLOCATION_FAILURE; }
+				if (!pt_push(out, &g)) { qaws_internal_free(fs); return QAWS_STATUS_ALLOCATION_FAILURE; }
 			}
-			free(fs);
+			qaws_internal_free(fs);
 		}
 	return QAWS_STATUS_OK;
 }
@@ -930,13 +931,13 @@ qaws_status qaws_region_locate_point_2d(qaws_path_2d const* paths, unsigned int 
 	tol = tolerance > 0 ? (double)tolerance : ext * PT_ON_REL;
 	pt[0] = point.x; pt[1] = point.y;
 	s = pt_flatten(paths, path_count, ext / 1024, &q);
-	if (s != QAWS_STATUS_OK) { free(q.s); return s; }
+	if (s != QAWS_STATUS_OK) { qaws_internal_free(q.s); return s; }
 	/* on a boundary? */
 	for (i = 0; i < q.n; i++)
 		if (pt_seg_dist(pt, q.s[i].p0, q.s[i].p1) <= q.s[i].r + tol && pt_true_dist(&q.s[i], pt) <= tol)
 		{
 			*out_location = QAWS_POINT_ON;
-			free(q.s);
+			qaws_internal_free(q.s);
 			return QAWS_STATUS_OK;
 		}
 	/* winding, path by path: a path's segments are contiguous */
@@ -957,7 +958,7 @@ qaws_status qaws_region_locate_point_2d(qaws_path_2d const* paths, unsigned int 
 		winding += (int)floor(angle / (2 * PT_PI) + 0.5);
 		start += n;
 	}
-	free(q.s);
+	qaws_internal_free(q.s);
 	*out_location = qaws_fill_rule_inside(fill_rule, winding) ? QAWS_POINT_INSIDE : QAWS_POINT_OUTSIDE;
 	return QAWS_STATUS_OK;
 }
@@ -992,7 +993,7 @@ qaws_status qaws_path_compute_winding_2d(qaws_path_2d const* path, qaws_vec2 poi
 				angle += atan2(ax * by - ay * bx, ax * bx + ay * by);
 			}
 		}
-		free(q.s);
+		qaws_internal_free(q.s);
 		w = (int)floor(angle / (2 * PT_PI) + 0.5);
 	}
 	*out_winding = w;
@@ -1054,7 +1055,7 @@ qaws_status qaws_polyline_trim_collinear_2d(qaws_scalar const* points, unsigned 
 	qaws_status s;
 	if ((!points && count) || !out || !out_count)
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	w = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 2 * (count ? count : 1));
+	w = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * 2 * (count ? count : 1));
 	if (!w)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	s = qaws_polyline_strip_duplicates_2d(points, count, closed, w, &n);
@@ -1101,7 +1102,7 @@ qaws_status qaws_polyline_trim_collinear_2d(qaws_scalar const* points, unsigned 
 	if (n < (closed ? 3u : 2u))
 		n = 0;
 	memcpy(out, w, sizeof(qaws_scalar) * 2 * n);
-	free(w);
+	qaws_internal_free(w);
 	*out_count = n;
 	return s;
 }
@@ -1130,12 +1131,12 @@ qaws_status qaws_polyline_simplify_2d(qaws_scalar const* points, unsigned int co
 		*out_count = count;
 		return QAWS_STATUS_OK;
 	}
-	prev = (unsigned int*)malloc(sizeof(unsigned int) * 2 * n);
-	dist = (double*)malloc(sizeof(double) * n);
-	gone = (unsigned char*)calloc(n, 1);
+	prev = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * 2 * n);
+	dist = (double*)qaws_internal_malloc(sizeof(double) * n);
+	gone = (unsigned char*)qaws_internal_zalloc(n, 1);
 	if (!prev || !dist || !gone)
 	{
-		free(prev); free(dist); free(gone);
+		qaws_internal_free(prev); qaws_internal_free(dist); qaws_internal_free(gone);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 	next = prev + n;
@@ -1189,7 +1190,7 @@ qaws_status qaws_polyline_simplify_2d(qaws_scalar const* points, unsigned int co
 			}
 		*out_count = m;
 	}
-	free(prev); free(dist); free(gone);
+	qaws_internal_free(prev); qaws_internal_free(dist); qaws_internal_free(gone);
 	return QAWS_STATUS_OK;
 }
 
@@ -1225,7 +1226,7 @@ qaws_status qaws_polyline_rdp_2d(qaws_scalar const* points, unsigned int count, 
 		*out_count = count;
 		return QAWS_STATUS_OK;
 	}
-	keep = (unsigned char*)calloc(count, 1);
+	keep = (unsigned char*)qaws_internal_zalloc(count, 1);
 	if (!keep)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	keep[0] = keep[count - 1] = 1;
@@ -1238,7 +1239,7 @@ qaws_status qaws_polyline_rdp_2d(qaws_scalar const* points, unsigned int count, 
 			out[2 * m + 1] = y;
 			m++;
 		}
-	free(keep);
+	qaws_internal_free(keep);
 	*out_count = m;
 	return QAWS_STATUS_OK;
 }

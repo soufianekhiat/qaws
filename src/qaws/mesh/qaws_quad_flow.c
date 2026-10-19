@@ -15,6 +15,7 @@
  */
 
 #include "qaws_quad_flow.h"
+#include "../internal/qaws_internal_memory.h"
 #include "../internal/qaws_internal_flow.h"
 #include <stdlib.h>
 #include <string.h>
@@ -142,7 +143,7 @@ typedef struct qf_net
 static void qf_net_free(qf_net* n)
 {
 	qaws_flow_destroy(n->flow);
-	free(n->rec);
+	qaws_internal_free(n->rec);
 	memset(n, 0, sizeof *n);
 }
 
@@ -174,7 +175,7 @@ static qaws_status qf_network(qaws_hm const* dm, mf_level const* L, int const* T
 		open |= dm->cf[c] != HM_NONE && dm->co[c] == HM_NONE;
 	}
 	st = qaws_flow_create(2 * nf + 1, 8 * ne + 10 * nf + 1, &net->flow);
-	net->rec = (unsigned int*)malloc(sizeof(unsigned int) * (8 * (size_t)ne + 10 * (size_t)nf + 1));
+	net->rec = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (8 * (size_t)ne + 10 * (size_t)nf + 1));
 	if (st != QAWS_STATUS_OK || !net->rec)
 	{
 		qf_net_free(net);
@@ -444,7 +445,7 @@ static unsigned int qf_cluster(qaws_hm const* dm, mf_level const* L, int const* 
 static unsigned int qf_cones(qaws_hm const* dm, mf_level const* L, int* T, unsigned char const* K, unsigned char* fr)
 {
 	unsigned int f, i, j, q, way, m, bm, placed = 0, list[64], bl[64];
-	unsigned char rot[64], brot[64], *mark = (unsigned char*)calloc((size_t)dm->nv + 1, 1);
+	unsigned char rot[64], brot[64], *mark = (unsigned char*)qaws_internal_zalloc((size_t)dm->nv + 1, 1);
 	for (f = 0; f < dm->nf; f++)
 	{
 		int S[2], t = qf_closure(dm, f, T, K, fr, S), bb = 0, bd[2] = { 0, 0 }, e[6];
@@ -536,7 +537,7 @@ static unsigned int qf_cones(qaws_hm const* dm, mf_level const* L, int* T, unsig
 			placed++;
 		}
 	}
-	free(mark);
+	qaws_internal_free(mark);
 	return placed;
 }
 
@@ -547,7 +548,7 @@ static unsigned int qf_unflip(qaws_hm const* dm, mf_level const* L, int* T, unsi
 {
 	static int const step[8][2] = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 }, { 1, 1 }, { -1, -1 }, { 1, -1 }, { -1, 1 } };
 	unsigned int f, k, pass, n = 0, moved = 1, list[64], m;
-	unsigned char rot[64], *mark = (unsigned char*)calloc((size_t)dm->nv + 1, 1);   /* (none: no moves of whole lattice points) */
+	unsigned char rot[64], *mark = (unsigned char*)qaws_internal_zalloc((size_t)dm->nv + 1, 1);   /* (none: no moves of whole lattice points) */
 	for (pass = 0; pass < 16 && moved; pass++)
 	{
 		moved = 0;
@@ -672,7 +673,7 @@ static unsigned int qf_unflip(qaws_hm const* dm, mf_level const* L, int* T, unsi
 				}
 			}
 	}
-	free(mark);
+	qaws_internal_free(mark);
 	for (f = 0; f < dm->nf; f++)
 		n += qf_area(dm, f, T, K) < 0;
 	return n;
@@ -682,10 +683,10 @@ unsigned int qf_consistent(qaws_hm const* dm, mf_level const* L, int* T, unsigne
 	qf_report* out_report)
 {
 	unsigned int nf = dm->nf, f, i, left = HM_NONE, odd = 0, head, tail;
-	unsigned char *fr = (unsigned char*)malloc((size_t)dm->nc + 1), *sing = (unsigned char*)malloc((size_t)nf + 1);
-	unsigned char *g = (unsigned char*)malloc((size_t)nf + 1), *seen = (unsigned char*)calloc((size_t)nf + 1, 1);
-	unsigned int *queue = (unsigned int*)malloc(sizeof(unsigned int) * (nf + 2)), *targets = NULL;
-	int* S = (int*)malloc(sizeof(int) * (2 * (size_t)nf + 2));
+	unsigned char *fr = (unsigned char*)qaws_internal_malloc((size_t)dm->nc + 1), *sing = (unsigned char*)qaws_internal_malloc((size_t)nf + 1);
+	unsigned char *g = (unsigned char*)qaws_internal_malloc((size_t)nf + 1), *seen = (unsigned char*)qaws_internal_zalloc((size_t)nf + 1, 1);
+	unsigned int *queue = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (nf + 2)), *targets = NULL;
+	int* S = (int*)qaws_internal_malloc(sizeof(int) * (2 * (size_t)nf + 2));
 	qf_report rep;
 	qf_net net;
 	memset(&rep, 0, sizeof rep);
@@ -750,7 +751,7 @@ unsigned int qf_consistent(qaws_hm const* dm, mf_level const* L, int* T, unsigne
 	/* 2. odd cones paired by paths of unit changes (the faces between keep their sums), or sent to the border.
 	   shortcut: in index order, each to the nearest odd one left; a min-cost matching when pairs should be cheapest
 	   together */
-	targets = (unsigned int*)malloc(sizeof(unsigned int) * (nf + 2));
+	targets = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (nf + 2));
 	if (!targets)
 		goto done;
 	for (f = 0, odd = 0; f < nf; f++)
@@ -803,7 +804,7 @@ unsigned int qf_consistent(qaws_hm const* dm, mf_level const* L, int* T, unsigne
 		*out_odd = odd;
 done:
 	qf_net_free(&net);
-	free(fr); free(sing); free(g); free(seen); free(queue); free(targets); free(S);
+	qaws_internal_free(fr); qaws_internal_free(sing); qaws_internal_free(g); qaws_internal_free(seen); qaws_internal_free(queue); qaws_internal_free(targets); qaws_internal_free(S);
 	if (out_report)
 		*out_report = rep;
 	return left;

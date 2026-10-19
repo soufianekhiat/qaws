@@ -1,4 +1,5 @@
 #include "qaws_exact_surface.h"
+#include "../internal/qaws_internal_memory.h"
 #include "qaws_exact_solve.h"
 #include "../internal/qaws_internal_types.h"
 #include "../internal/qaws_internal_curve.h"
@@ -728,7 +729,7 @@ static qaws_status er_chunk(void* ctx, unsigned int chunk, unsigned int begin, u
 	qaws_status st = QAWS_STATUS_OK;
 	memset(&stats, 0, sizeof(stats));
 	memset(&x, 0, sizeof(x));
-	x.stamp = (unsigned int*)malloc((J->npatch ? J->npatch : 1) * sizeof(unsigned int));
+	x.stamp = (unsigned int*)qaws_internal_malloc((J->npatch ? J->npatch : 1) * sizeof(unsigned int));
 	if (!x.stamp)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	for (i = 0; i < J->npatch; i++)
@@ -777,7 +778,7 @@ static qaws_status er_chunk(void* ctx, unsigned int chunk, unsigned int begin, u
 			o->certified = 1;   /* proven to miss */
 	}
 	J->chunk_stats[chunk] = stats;
-	free(x.stamp);
+	qaws_internal_free(x.stamp);
 	return st;
 }
 
@@ -808,8 +809,8 @@ qaws_status qaws_exact_surface_batch_raycast(qaws_exact_ssi_batch_desc const* de
 			return QAWS_STATUS_INVALID_ARGUMENT;
 		npatch += desc->surfaces[i]->nu * desc->surfaces[i]->nv;
 	}
-	patches = (er_patch*)malloc(npatch * sizeof(er_patch));
-	boxes = (qaws_bp_box*)malloc(npatch * sizeof(qaws_bp_box));
+	patches = (er_patch*)qaws_internal_malloc(npatch * sizeof(er_patch));
+	boxes = (qaws_bp_box*)qaws_internal_malloc(npatch * sizeof(qaws_bp_box));
 	if (!patches || !boxes)
 	{
 		st = QAWS_STATUS_ALLOCATION_FAILURE;
@@ -855,7 +856,7 @@ qaws_status qaws_exact_surface_batch_raycast(qaws_exact_ssi_batch_desc const* de
 		J.p0 = p0;
 		J.p1 = p1;
 		J.out_hits = out_hits;
-		J.chunk_stats = (qaws_exact_batch_stats*)calloc(nchunk ? nchunk : 1, sizeof(qaws_exact_batch_stats));
+		J.chunk_stats = (qaws_exact_batch_stats*)qaws_internal_zalloc(nchunk ? nchunk : 1, sizeof(qaws_exact_batch_stats));
 		if (!J.chunk_stats)
 			st = QAWS_STATUS_ALLOCATION_FAILURE;
 		else
@@ -866,13 +867,13 @@ qaws_status qaws_exact_surface_batch_raycast(qaws_exact_ssi_batch_desc const* de
 			stats.hit_count += J.chunk_stats[ch].hit_count;
 			stats.uncertified_count += J.chunk_stats[ch].uncertified_count;
 		}
-		free(J.chunk_stats);
+		qaws_internal_free(J.chunk_stats);
 	}
 done:
 	if (out_stats)
 		*out_stats = stats;
 	qaws_internal_grid_destroy(grid);
-	free(patches);
-	free(boxes);
+	qaws_internal_free(patches);
+	qaws_internal_free(boxes);
 	return st;
 }

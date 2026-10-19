@@ -1,4 +1,5 @@
 #include "qaws_import.h"
+#include "internal/qaws_internal_memory.h"
 #include "qaws_catmull_rom.h"
 #include "qaws_trajectory.h"
 #include <stdlib.h>
@@ -55,7 +56,7 @@ qaws_status qaws_polyline_import_trajectory(
 		times = times_stack;
 	else
 	{
-		times = (qaws_scalar*)malloc(point_count * sizeof(qaws_scalar));
+		times = (qaws_scalar*)qaws_internal_malloc(point_count * sizeof(qaws_scalar));
 		if (!times)
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
@@ -74,7 +75,7 @@ qaws_status qaws_polyline_import_trajectory(
 	s = qaws_curve_create_trajectory(&desc, out_curve);
 
 	if (times != times_stack)
-		free(times);
+		qaws_internal_free(times);
 
 	return s;
 }

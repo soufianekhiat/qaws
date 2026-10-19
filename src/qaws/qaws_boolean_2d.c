@@ -4,6 +4,7 @@
  */
 
 #include "qaws_boolean_2d.h"
+#include "internal/qaws_internal_memory.h"
 #include "qaws_clip.h"
 #include "qaws_curve.h"
 #include "qaws_inspect.h"
@@ -27,7 +28,7 @@ static qaws_status bo_path_curve(qaws_path_2d const* p, qaws_curve** out)
 	qaws_status s = QAWS_STATUS_OK;
 	if (p->curve_count == 1)
 		return bo_copy(p->curves[0], out);
-	seg = (qaws_curve**)malloc(sizeof(qaws_curve*) * p->curve_count);
+	seg = (qaws_curve**)qaws_internal_malloc(sizeof(qaws_curve*) * p->curve_count);
 	if (!seg)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	for (i = 0; i < p->curve_count && s == QAWS_STATUS_OK; i++)
@@ -44,7 +45,7 @@ static qaws_status bo_path_curve(qaws_path_2d const* p, qaws_curve** out)
 	if (s != QAWS_STATUS_OK)
 		for (i = 0; i < made; i++)
 			qaws_curve_destroy(seg[i]);
-	free(seg);
+	qaws_internal_free(seg);
 	return s;
 }
 

@@ -12,6 +12,7 @@
  */
 
 #include "qaws_mesh_internal.h"
+#include "../internal/qaws_internal_memory.h"
 #include "../qaws_remesh.h"
 #include "qaws_remesh_cvt.h"
 #include <stdlib.h>
@@ -186,7 +187,7 @@ static int rm_snapshot(rmsh* w)
 	unsigned int c;
 	if (m->nc > w->cep)
 	{
-		unsigned int* g = (unsigned int*)realloc(w->ep, sizeof(unsigned int) * 2 * m->nc);
+		unsigned int* g = (unsigned int*)qaws_internal_realloc(w->ep, sizeof(unsigned int) * 2 * m->nc);
 		if (!g)
 		{
 			w->failed = 1;
@@ -220,7 +221,7 @@ static int rm_push(rmsh* w, unsigned int a, unsigned int b)
 {
 	if (w->nep == w->cep)
 	{
-		unsigned int* g = (unsigned int*)realloc(w->ep, sizeof(unsigned int) * 2 * (2 * (size_t)w->cep + 64));
+		unsigned int* g = (unsigned int*)qaws_internal_realloc(w->ep, sizeof(unsigned int) * 2 * (2 * (size_t)w->cep + 64));
 		if (!g)
 		{
 			w->failed = 1;
@@ -242,7 +243,7 @@ static void rm_touch(rmsh* w, unsigned int v)
 		return;
 	if (w->nchg == w->cchg)
 	{
-		unsigned int* g = (unsigned int*)realloc(w->chg, sizeof(unsigned int) * (2 * (size_t)w->cchg + 64));
+		unsigned int* g = (unsigned int*)qaws_internal_realloc(w->chg, sizeof(unsigned int) * (2 * (size_t)w->cchg + 64));
 		if (!g)
 		{
 			w->failed = 1;
@@ -1211,7 +1212,7 @@ static unsigned int rm_gather(rmsh* w, int large, rm_bad** list, unsigned int* c
 			continue;
 		if (n == *cap)
 		{
-			rm_bad* g = (rm_bad*)realloc(*list, sizeof(rm_bad) * (2 * (size_t)*cap + 64));
+			rm_bad* g = (rm_bad*)qaws_internal_realloc(*list, sizeof(rm_bad) * (2 * (size_t)*cap + 64));
 			if (!g)
 			{
 				w->failed = 1;
@@ -1627,12 +1628,12 @@ static int rm_small(rmsh* w, rm_bad const* t)
 static void rm_smooth_changed(rmsh* w)
 {
 	qaws_hm* m = w->m;
-	unsigned char* mk = (unsigned char*)calloc((size_t)m->nv + 1, 1);
-	unsigned int *list = (unsigned int*)malloc(sizeof(unsigned int) * ((size_t)m->nv + 1)), n = 0, i, k, depth, start = 0;
+	unsigned char* mk = (unsigned char*)qaws_internal_zalloc((size_t)m->nv + 1, 1);
+	unsigned int *list = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)m->nv + 1)), n = 0, i, k, depth, start = 0;
 	if (!mk || !list)
 	{
-		free(mk);
-		free(list);
+		qaws_internal_free(mk);
+		qaws_internal_free(list);
 		w->failed = 1;
 		return;
 	}
@@ -1663,8 +1664,8 @@ static void rm_smooth_changed(rmsh* w)
 	w->nchg = 0;
 	for (i = 0; i < n; i++)
 		rm_smooth_vertex(w, list[i]);
-	free(mk);
-	free(list);
+	qaws_internal_free(mk);
+	qaws_internal_free(list);
 }
 
 /* rounds of: the worst large angles split away, valence flips and relaxation, the worst small angles collapsed, flipped or
@@ -1716,7 +1717,7 @@ static void rm_angles(rmsh* w)
 	}
 	w->bounded = 0;
 	w->nchg = 0;
-	free(list);
+	qaws_internal_free(list);
 }
 
 /* after the loop: the distance guard made good on every face (and strict from here on), the Delaunay flips, the
@@ -1742,22 +1743,22 @@ static void rm_post(rmsh* w, qaws_remesh_desc const* desc)
 static qaws_status rm_begin(rmsh* w, qaws_mesh_3d const* in, qaws_mesh_3d** out)
 {
 	unsigned int nv = qaws_mesh_3d_get_vertex_count(in), nt = qaws_mesh_3d_get_triangle_count(in), nfe = qaws_mesh_3d_get_feature_edge_count(in), i, k;
-	unsigned int *tri = (unsigned int*)malloc(sizeof(unsigned int) * (3 * (size_t)nt + 1)), *fe = (unsigned int*)malloc(sizeof(unsigned int) * (2 * (size_t)nfe + 1));
+	unsigned int *tri = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (3 * (size_t)nt + 1)), *fe = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (2 * (size_t)nfe + 1));
 	qaws_hm* m;
 	qaws_status st;
 	if (!tri || !fe)
 	{
-		free(tri);
-		free(fe);
+		qaws_internal_free(tri);
+		qaws_internal_free(fe);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 	qaws_mesh_3d_get_triangles(in, tri);
 	qaws_mesh_3d_get_feature_edges(in, fe);
 	st = hm_mesh_3d_create(in->hm.x, nv, tri, NULL, nt, out);
-	free(tri);
+	qaws_internal_free(tri);
 	if (st != QAWS_STATUS_OK)
 	{
-		free(fe);
+		qaws_internal_free(fe);
 		return st;
 	}
 	m = &(*out)->hm;
@@ -1771,7 +1772,7 @@ static qaws_status rm_begin(rmsh* w, qaws_mesh_3d const* in, qaws_mesh_3d** out)
 		if (m->co[c] != HM_NONE)
 			m->cflag[m->co[c]] |= HM_FEATURE;
 	}
-	free(fe);
+	qaws_internal_free(fe);
 	for (i = 0; i < m->nc; i++)
 		if (m->cf[i] != HM_NONE && m->co[i] == HM_NONE)
 			m->cflag[i] |= HM_FEATURE;   /* (the border) */
@@ -1952,7 +1953,7 @@ static qaws_status rm_end(rmsh* w, int report)
 	double dmax = 0, dsum = 0;
 	int need = report;
 	hm_compact(m);
-	fl = (qaws_mesh_location*)malloc(sizeof(qaws_mesh_location) * (m->nf + 1));
+	fl = (qaws_mesh_location*)qaws_internal_malloc(sizeof(qaws_mesh_location) * (m->nf + 1));
 	if (!fl)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	/* each face's centre on the reference, from its first vertex's side: the deviation reported, and where face and corner
@@ -1980,7 +1981,7 @@ static qaws_status rm_end(rmsh* w, int report)
 	w->rep.mean_deviation = (qaws_scalar)(m->nf ? dsum / m->nf : 0);
 	{
 		qaws_status st = mx_transfer(m, w->r, fl);
-		free(fl);
+		qaws_internal_free(fl);
 		return st;
 	}
 }
@@ -2088,8 +2089,8 @@ qaws_status qaws_mesh_remesh(qaws_mesh_3d const* mesh, qaws_remesh_desc const* d
 	if (st == QAWS_STATUS_OK)
 		st = rm_end(&w, out_report != NULL);
 	mr_scratch_free(&w.s);
-	free(w.ep);
-	free(w.chg);
+	qaws_internal_free(w.ep);
+	qaws_internal_free(w.chg);
 	qaws_size_field_destroy(w.tsize);
 	qaws_mesh_reference_destroy(own);
 	if (st != QAWS_STATUS_OK)

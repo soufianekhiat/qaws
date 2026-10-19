@@ -3,6 +3,7 @@
 
 #include "qaws_types.h"
 #include "qaws_status.h"
+#include <stddef.h>
 #include "qaws_bezier.h"
 #include "qaws_hermite.h"
 #include "qaws_catmull_rom.h"
@@ -46,6 +47,35 @@
  * qaws_curve_destroy (which reads the stored allocator). The
  * allocator must remain valid until the curve is destroyed.
  */
+
+/*
+ * Where the library's memory comes from. Without an explicit allocator (a NULL argument to the _ex functions, and all
+ * internal scratch and results), memory comes from the calling thread's allocator if set, else the process default if
+ * set, else malloc. Each block remembers the allocator that gave it and returns there, whatever the settings when it
+ * is released or on which thread. An allocator must outlive its blocks and return 16-byte aligned memory (the library
+ * keeps a 16-byte header per block). Set the default before calls run; set a thread's allocator on that thread.
+ */
+void qaws_set_default_allocator(qaws_allocator const* allocator);   /* NULL: malloc */
+void qaws_set_thread_allocator(qaws_allocator const* allocator);    /* this thread; NULL: the default */
+
+/*
+ * An allocator over caller memory: a mapped file, pinned or GPU-visible memory, a host arena. Blocks are cut in order
+ * from the given range, 16-byte aligned; freeing releases only the latest block, the rest at qaws_arena_reset; when it
+ * is full, allocation fails and calls return QAWS_STATUS_ALLOCATION_FAILURE. Use it from one thread at a time (one
+ * arena per worker with qaws_set_thread_allocator). Pass &arena.allocator wherever an allocator is taken.
+ */
+typedef struct qaws_arena
+{
+	qaws_allocator allocator;
+	unsigned char* base;
+	size_t size;
+	size_t used;                        /* bytes in use */
+	size_t peak;                        /* most bytes in use since init */
+	size_t last;                        /* the latest block */
+} qaws_arena;
+
+void qaws_arena_init(qaws_arena* arena, void* memory, size_t size);
+void qaws_arena_reset(qaws_arena* arena);
 
 /* --- Curve creation _ex variants --- */
 

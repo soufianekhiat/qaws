@@ -155,6 +155,7 @@ add_executable(
 151_surface_tessellation.c
 152_sweep_derivatives.c
 153_parameterization.c
+154_memory.c
 )
 
 # The amalgamated library exports exactly the same symbols, so the tests can

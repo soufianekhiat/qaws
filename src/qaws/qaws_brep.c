@@ -1,4 +1,5 @@
 #include "qaws_brep.h"
+#include "internal/qaws_internal_memory.h"
 #include "qaws_surface.h"
 #include "qaws_inspect.h"
 #include <stdlib.h>
@@ -66,7 +67,7 @@ static int brep_grow_vertices(qaws_brep_shell* shell)
 	new_cap = shell->vertex_capacity == 0
 		? BREP_INITIAL_CAPACITY
 		: shell->vertex_capacity * 2;
-	new_buf = (brep_vertex*)realloc(
+	new_buf = (brep_vertex*)qaws_internal_realloc(
 		shell->vertices, new_cap * sizeof(brep_vertex));
 	if (!new_buf)
 		return 0;
@@ -87,7 +88,7 @@ static int brep_grow_edges(qaws_brep_shell* shell)
 	new_cap = shell->edge_capacity == 0
 		? BREP_INITIAL_CAPACITY
 		: shell->edge_capacity * 2;
-	new_buf = (brep_edge*)realloc(
+	new_buf = (brep_edge*)qaws_internal_realloc(
 		shell->edges, new_cap * sizeof(brep_edge));
 	if (!new_buf)
 		return 0;
@@ -108,7 +109,7 @@ static int brep_grow_faces(qaws_brep_shell* shell)
 	new_cap = shell->face_capacity == 0
 		? BREP_INITIAL_CAPACITY
 		: shell->face_capacity * 2;
-	new_buf = (brep_face*)realloc(
+	new_buf = (brep_face*)qaws_internal_realloc(
 		shell->faces, new_cap * sizeof(brep_face));
 	if (!new_buf)
 		return 0;
@@ -129,7 +130,7 @@ qaws_status qaws_brep_create(qaws_brep_shell** out_shell)
 	if (!out_shell)
 		return QAWS_STATUS_INVALID_ARGUMENT;
 
-	shell = (qaws_brep_shell*)calloc(1, sizeof(qaws_brep_shell));
+	shell = (qaws_brep_shell*)qaws_internal_zalloc(1, sizeof(qaws_brep_shell));
 	if (!shell)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 
@@ -145,14 +146,14 @@ void qaws_brep_destroy(qaws_brep_shell* shell)
 		return;
 
 	for (i = 0; i < shell->face_count; i++) {
-		free(shell->faces[i].edge_ids);
-		free(shell->faces[i].edge_orientations);
+		qaws_internal_free(shell->faces[i].edge_ids);
+		qaws_internal_free(shell->faces[i].edge_orientations);
 	}
 
-	free(shell->vertices);
-	free(shell->edges);
-	free(shell->faces);
-	free(shell);
+	qaws_internal_free(shell->vertices);
+	qaws_internal_free(shell->edges);
+	qaws_internal_free(shell->faces);
+	qaws_internal_free(shell);
 }
 
 /* ===================================================================
@@ -258,13 +259,13 @@ qaws_status qaws_brep_add_face(
 	f->edge_orientations = NULL;
 
 	if (edge_count > 0) {
-		f->edge_ids = (qaws_brep_edge_id*)malloc(
+		f->edge_ids = (qaws_brep_edge_id*)qaws_internal_malloc(
 			edge_count * sizeof(qaws_brep_edge_id));
-		f->edge_orientations = (int*)malloc(
+		f->edge_orientations = (int*)qaws_internal_malloc(
 			edge_count * sizeof(int));
 		if (!f->edge_ids || !f->edge_orientations) {
-			free(f->edge_ids);
-			free(f->edge_orientations);
+			qaws_internal_free(f->edge_ids);
+			qaws_internal_free(f->edge_orientations);
 			f->edge_ids = NULL;
 			f->edge_orientations = NULL;
 			return QAWS_STATUS_ALLOCATION_FAILURE;

@@ -5,6 +5,7 @@
  */
 
 #include "qaws_mesh_internal.h"
+#include "../internal/qaws_internal_memory.h"
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -87,7 +88,7 @@ double sf_eval(qaws_size_field const* f, qaws_mesh_location const* l, double con
 
 static qaws_size_field* sf_new(int kind)
 {
-	qaws_size_field* f = (qaws_size_field*)calloc(1, sizeof *f);
+	qaws_size_field* f = (qaws_size_field*)qaws_internal_zalloc(1, sizeof *f);
 	if (f)
 		f->kind = kind;
 	return f;
@@ -147,7 +148,7 @@ static qaws_status sf_vertices(qaws_mesh_reference const* r, double* vs, qaws_si
 	*out = sf_new(SF_VERTICES);
 	if (!*out)
 	{
-		free(vs);
+		qaws_internal_free(vs);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 	(*out)->ref = r;
@@ -168,7 +169,7 @@ qaws_status qaws_size_field_create_vertices(qaws_mesh_reference const* r, qaws_s
 	for (i = 0; i < nv; i++)
 		if (!(sizes[i] > 0))
 			return QAWS_STATUS_INVALID_ARGUMENT;
-	vs = (double*)malloc(sizeof(double) * (nv + 1));
+	vs = (double*)qaws_internal_malloc(sizeof(double) * (nv + 1));
 	if (!vs)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	for (i = 0; i < nv; i++)
@@ -187,12 +188,12 @@ static unsigned int sf_hm_ring(void* m, unsigned int u, unsigned int* out, unsig
 static int sf_gradation(unsigned int n, double const* x, double* h, double beta, unsigned int (*nbr)(void* user, unsigned int u, unsigned int* out,
 	unsigned int cap), void* user)
 {
-	unsigned int *heap = (unsigned int*)malloc(sizeof(unsigned int) * (n + 1)), *pos = (unsigned int*)malloc(sizeof(unsigned int) * (n + 1));
+	unsigned int *heap = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (n + 1)), *pos = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (n + 1));
 	unsigned int count = n, i, ring[256];
 	if (!heap || !pos)
 	{
-		free(heap);
-		free(pos);
+		qaws_internal_free(heap);
+		qaws_internal_free(pos);
 		return 0;
 	}
 	for (i = 0; i < n; i++)
@@ -251,8 +252,8 @@ static int sf_gradation(unsigned int n, double const* x, double* h, double beta,
 	}
 #undef SF_LESS
 #undef SF_SWAP
-	free(heap);
-	free(pos);
+	qaws_internal_free(heap);
+	qaws_internal_free(pos);
 	return 1;
 }
 
@@ -274,12 +275,12 @@ qaws_status qaws_size_field_create_curvature(qaws_mesh_reference const* r, qaws_
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	e = (double)desc->chord_tolerance;
 	th = (double)desc->angle_tolerance;
-	kmax = (double*)calloc((size_t)m->nv + 1, sizeof(double));
-	vs = (double*)malloc(sizeof(double) * ((size_t)m->nv + 1));
+	kmax = (double*)qaws_internal_zalloc((size_t)m->nv + 1, sizeof(double));
+	vs = (double*)qaws_internal_malloc(sizeof(double) * ((size_t)m->nv + 1));
 	if (!kmax || !vs)
 	{
-		free(kmax);
-		free(vs);
+		qaws_internal_free(kmax);
+		qaws_internal_free(vs);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 	/* the largest curvature near each vertex: at its corners and at its triangles' centres */
@@ -314,10 +315,10 @@ qaws_status qaws_size_field_create_curvature(qaws_mesh_reference const* r, qaws_
 		}
 		vs[i] = L < lo ? lo : L > hi ? hi : L;
 	}
-	free(kmax);
+	qaws_internal_free(kmax);
 	if (desc->gradation > 0 && !sf_gradation(m->nv, m->x, vs, (double)desc->gradation, sf_hm_ring, (void*)m))
 	{
-		free(vs);
+		qaws_internal_free(vs);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 	return sf_vertices(r, vs, out);
@@ -673,12 +674,12 @@ static size_t fs_levels(fs_work* w, double const* target)
 
 static void fs_free_samples(fs_work* w)
 {
-	free(w->x);
-	free(w->nrm);
-	free(w->h);
-	free(w->tri);
-	free(w->tree.perm);
-	free(w->tree.box);
+	qaws_internal_free(w->x);
+	qaws_internal_free(w->nrm);
+	qaws_internal_free(w->h);
+	qaws_internal_free(w->tri);
+	qaws_internal_free(w->tree.perm);
+	qaws_internal_free(w->tree.box);
 	w->x = w->nrm = w->h = NULL;
 	w->tri = w->tree.perm = NULL;
 	w->tree.box = NULL;
@@ -692,12 +693,12 @@ static int fs_pass(fs_work* w, size_t ns, double cells, double lo, double hi, do
 	unsigned int t, i, j;
 	double R = 0.5 * cells * hi, smax = 0;
 	w->ns = (unsigned int)ns;
-	w->x = (double*)malloc(sizeof(double) * 3 * (ns + 1));
-	w->nrm = (double*)malloc(sizeof(double) * 3 * (ns + 1));
-	w->h = (double*)malloc(sizeof(double) * (ns + 1));
-	w->tri = (unsigned int*)malloc(sizeof(unsigned int) * (ns + 1));
-	w->tree.perm = (unsigned int*)malloc(sizeof(unsigned int) * (ns + 1));
-	w->tree.box = (double*)malloc(sizeof(double) * 12 * (ns + 1));
+	w->x = (double*)qaws_internal_malloc(sizeof(double) * 3 * (ns + 1));
+	w->nrm = (double*)qaws_internal_malloc(sizeof(double) * 3 * (ns + 1));
+	w->h = (double*)qaws_internal_malloc(sizeof(double) * (ns + 1));
+	w->tri = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (ns + 1));
+	w->tree.perm = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (ns + 1));
+	w->tree.box = (double*)qaws_internal_malloc(sizeof(double) * 12 * (ns + 1));
 	if (!w->x || !w->nrm || !w->h || !w->tri || !w->tree.perm || !w->tree.box)
 		return 0;
 	for (t = 0; t < r->nt; t++)
@@ -778,13 +779,13 @@ qaws_status qaws_size_field_create_feature_size(qaws_mesh_reference const* r, qa
 	beta = desc->gradation > 0 ? (double)desc->gradation : hi / (1e-6 * r->extent + 1e-300);
 	memset(&w, 0, sizeof w);
 	w.r = r;
-	w.lv = (unsigned int*)malloc(sizeof(unsigned int) * (nt + 1));
-	w.first = (unsigned int*)malloc(sizeof(unsigned int) * (nt + 1));
-	w.emax = (double*)malloc(sizeof(double) * (nt + 1));
-	w.spacing = (double*)malloc(sizeof(double) * (nt + 1));
-	target = (double*)malloc(sizeof(double) * (nt + 1));
-	prev = (unsigned int*)malloc(sizeof(unsigned int) * (nt + 1));
-	thin = (unsigned char*)calloc(nt + 1, 1);
+	w.lv = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (nt + 1));
+	w.first = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (nt + 1));
+	w.emax = (double*)qaws_internal_malloc(sizeof(double) * (nt + 1));
+	w.spacing = (double*)qaws_internal_malloc(sizeof(double) * (nt + 1));
+	target = (double*)qaws_internal_malloc(sizeof(double) * (nt + 1));
+	prev = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (nt + 1));
+	thin = (unsigned char*)qaws_internal_zalloc(nt + 1, 1);
 	if (!w.lv || !w.first || !w.emax || !w.spacing || !target || !prev || !thin)
 		goto done;
 	for (t = 0; t < nt; t++)
@@ -834,13 +835,13 @@ qaws_status qaws_size_field_create_feature_size(qaws_mesh_reference const* r, qa
 	}
 done:
 	fs_free_samples(&w);
-	free(w.lv);
-	free(w.first);
-	free(w.emax);
-	free(w.spacing);
-	free(target);
-	free(prev);
-	free(thin);
+	qaws_internal_free(w.lv);
+	qaws_internal_free(w.first);
+	qaws_internal_free(w.emax);
+	qaws_internal_free(w.spacing);
+	qaws_internal_free(target);
+	qaws_internal_free(prev);
+	qaws_internal_free(thin);
 	return ok ? QAWS_STATUS_OK : QAWS_STATUS_ALLOCATION_FAILURE;
 }
 
@@ -848,10 +849,10 @@ void qaws_size_field_destroy(qaws_size_field* f)
 {
 	if (!f)
 		return;
-	free(f->vs);
-	free(f->lv);
-	free(f->first);
-	free(f);
+	qaws_internal_free(f->vs);
+	qaws_internal_free(f->lv);
+	qaws_internal_free(f->first);
+	qaws_internal_free(f);
 }
 
 qaws_mesh_reference const* qaws_size_field_get_reference(qaws_size_field const* f)

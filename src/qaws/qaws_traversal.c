@@ -1,4 +1,5 @@
 #include "qaws_traversal.h"
+#include "internal/qaws_internal_memory.h"
 #include "qaws_diff_sampling.h"
 #include "qaws_eval.h"
 #include "internal/qaws_internal_types.h"
@@ -517,14 +518,14 @@ static qaws_status build_custom_speed_table(
 		return QAWS_STATUS_OK;
 	}
 
-	traversal->custom_time_table = (qaws_scalar *)malloc(n * sizeof(qaws_scalar));
+	traversal->custom_time_table = (qaws_scalar *)qaws_internal_malloc(n * sizeof(qaws_scalar));
 	if (!traversal->custom_time_table)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 
-	traversal->custom_dist_table = (qaws_scalar *)malloc(n * sizeof(qaws_scalar));
+	traversal->custom_dist_table = (qaws_scalar *)qaws_internal_malloc(n * sizeof(qaws_scalar));
 	if (!traversal->custom_dist_table)
 	{
-		free(traversal->custom_time_table);
+		qaws_internal_free(traversal->custom_time_table);
 		traversal->custom_time_table = NULL;
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
@@ -585,7 +586,7 @@ qaws_status qaws_traversal_create(
 
 	*out_traversal = NULL;
 
-	traversal = (qaws_traversal *)malloc(sizeof(qaws_traversal));
+	traversal = (qaws_traversal *)qaws_internal_malloc(sizeof(qaws_traversal));
 	if (!traversal)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 
@@ -605,20 +606,20 @@ qaws_status qaws_traversal_create(
 	table_size = QAWS_ARC_LENGTH_TABLE_SIZE;
 	traversal->table_size = table_size;
 
-	traversal->table_params = (qaws_scalar *)malloc(
+	traversal->table_params = (qaws_scalar *)qaws_internal_malloc(
 		table_size * sizeof(qaws_scalar));
 	if (!traversal->table_params)
 	{
-		free(traversal);
+		qaws_internal_free(traversal);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 
-	traversal->table_distances = (qaws_scalar *)malloc(
+	traversal->table_distances = (qaws_scalar *)qaws_internal_malloc(
 		table_size * sizeof(qaws_scalar));
 	if (!traversal->table_distances)
 	{
-		free(traversal->table_params);
-		free(traversal);
+		qaws_internal_free(traversal->table_params);
+		qaws_internal_free(traversal);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 
@@ -626,9 +627,9 @@ qaws_status qaws_traversal_create(
 		curve, table_size, traversal->table_params, traversal->table_distances);
 	if (status != QAWS_STATUS_OK)
 	{
-		free(traversal->table_distances);
-		free(traversal->table_params);
-		free(traversal);
+		qaws_internal_free(traversal->table_distances);
+		qaws_internal_free(traversal->table_params);
+		qaws_internal_free(traversal);
 		return status;
 	}
 
@@ -639,9 +640,9 @@ qaws_status qaws_traversal_create(
 	status = build_custom_speed_table(traversal);
 	if (status != QAWS_STATUS_OK)
 	{
-		free(traversal->table_distances);
-		free(traversal->table_params);
-		free(traversal);
+		qaws_internal_free(traversal->table_distances);
+		qaws_internal_free(traversal->table_params);
+		qaws_internal_free(traversal);
 		return status;
 	}
 
@@ -680,7 +681,7 @@ qaws_status qaws_traversal_create_multi(
 		}
 	}
 
-	traversal = (qaws_traversal *)malloc(sizeof(qaws_traversal));
+	traversal = (qaws_traversal *)qaws_internal_malloc(sizeof(qaws_traversal));
 	if (!traversal)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 
@@ -693,18 +694,18 @@ qaws_status qaws_traversal_create_multi(
 	traversal->custom_table_size = 0;
 
 	/* Build chain arrays */
-	chain = (qaws_curve const **)malloc(curve_count * sizeof(qaws_curve const *));
+	chain = (qaws_curve const **)qaws_internal_malloc(curve_count * sizeof(qaws_curve const *));
 	if (!chain)
 	{
-		free(traversal);
+		qaws_internal_free(traversal);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 
-	param_offsets = (qaws_scalar *)malloc((curve_count + 1) * sizeof(qaws_scalar));
+	param_offsets = (qaws_scalar *)qaws_internal_malloc((curve_count + 1) * sizeof(qaws_scalar));
 	if (!param_offsets)
 	{
-		free(chain);
-		free(traversal);
+		qaws_internal_free(chain);
+		qaws_internal_free(traversal);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 
@@ -727,24 +728,24 @@ qaws_status qaws_traversal_create_multi(
 	table_size = QAWS_ARC_LENGTH_TABLE_SIZE;
 	traversal->table_size = table_size;
 
-	traversal->table_params = (qaws_scalar *)malloc(
+	traversal->table_params = (qaws_scalar *)qaws_internal_malloc(
 		table_size * sizeof(qaws_scalar));
 	if (!traversal->table_params)
 	{
-		free(param_offsets);
-		free(chain);
-		free(traversal);
+		qaws_internal_free(param_offsets);
+		qaws_internal_free(chain);
+		qaws_internal_free(traversal);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 
-	traversal->table_distances = (qaws_scalar *)malloc(
+	traversal->table_distances = (qaws_scalar *)qaws_internal_malloc(
 		table_size * sizeof(qaws_scalar));
 	if (!traversal->table_distances)
 	{
-		free(traversal->table_params);
-		free(param_offsets);
-		free(chain);
-		free(traversal);
+		qaws_internal_free(traversal->table_params);
+		qaws_internal_free(param_offsets);
+		qaws_internal_free(chain);
+		qaws_internal_free(traversal);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 
@@ -823,11 +824,11 @@ qaws_status qaws_traversal_create_multi(
 	status = build_custom_speed_table(traversal);
 	if (status != QAWS_STATUS_OK)
 	{
-		free(traversal->table_distances);
-		free(traversal->table_params);
-		free(param_offsets);
-		free(chain);
-		free(traversal);
+		qaws_internal_free(traversal->table_distances);
+		qaws_internal_free(traversal->table_params);
+		qaws_internal_free(param_offsets);
+		qaws_internal_free(chain);
+		qaws_internal_free(traversal);
 		return status;
 	}
 
@@ -840,22 +841,22 @@ void qaws_traversal_destroy(qaws_traversal *traversal)
 	if (!traversal)
 		return;
 
-	free(traversal->table_params);
-	free(traversal->table_distances);
+	qaws_internal_free(traversal->table_params);
+	qaws_internal_free(traversal->table_distances);
 
 	/* Free multi-curve chain arrays */
 	if (traversal->chain_curves)
-		free(traversal->chain_curves);
+		qaws_internal_free(traversal->chain_curves);
 	if (traversal->chain_param_offsets)
-		free(traversal->chain_param_offsets);
+		qaws_internal_free(traversal->chain_param_offsets);
 
 	/* Free custom speed tables */
 	if (traversal->custom_time_table)
-		free(traversal->custom_time_table);
+		qaws_internal_free(traversal->custom_time_table);
 	if (traversal->custom_dist_table)
-		free(traversal->custom_dist_table);
+		qaws_internal_free(traversal->custom_dist_table);
 
-	free(traversal);
+	qaws_internal_free(traversal);
 }
 
 /* ---------------------------------------------------------------------------

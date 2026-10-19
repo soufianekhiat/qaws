@@ -5,13 +5,14 @@
  */
 
 #include "qaws_mesh_core.h"
+#include "../internal/qaws_internal_memory.h"
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
 
 static int hm_re(void** p, size_t bytes)
 {
-	void* q = realloc(*p, bytes ? bytes : 1);
+	void* q = qaws_internal_realloc(*p, bytes ? bytes : 1);
 	if (!q)
 		return 0;
 	*p = q;
@@ -66,16 +67,16 @@ void hm_free(qaws_hm* m)
 	if (!m)
 		return;
 	p = &m->pb;
-	free(m->x); free(m->vc); free(m->vsrc); free(m->vflag);
-	free(m->cv); free(m->co); free(m->cf); free(m->cflag);
-	free(m->fc); free(m->fn); free(m->fflag);
+	qaws_internal_free(m->x); qaws_internal_free(m->vc); qaws_internal_free(m->vsrc); qaws_internal_free(m->vflag);
+	qaws_internal_free(m->cv); qaws_internal_free(m->co); qaws_internal_free(m->cf); qaws_internal_free(m->cflag);
+	qaws_internal_free(m->fc); qaws_internal_free(m->fn); qaws_internal_free(m->fflag);
 	for (i = 0; i < m->na; i++)
-		free(m->attr[i].v);
-	free(m->attr);
-	free(m->foot);
-	free(m->hole[0]); free(m->hole[1]);
-	free(p->old); free(p->off); free(p->fs); free(p->fa); free(p->fv); free(p->s0); free(p->sn); free(p->hint);
-	free(p->sp); free(p->sw);
+		qaws_internal_free(m->attr[i].v);
+	qaws_internal_free(m->attr);
+	qaws_internal_free(m->foot);
+	qaws_internal_free(m->hole[0]); qaws_internal_free(m->hole[1]);
+	qaws_internal_free(p->old); qaws_internal_free(p->off); qaws_internal_free(p->fs); qaws_internal_free(p->fa); qaws_internal_free(p->fv); qaws_internal_free(p->s0); qaws_internal_free(p->sn); qaws_internal_free(p->hint);
+	qaws_internal_free(p->sp); qaws_internal_free(p->sw);
 	memset(m, 0, sizeof *m);
 }
 
@@ -346,7 +347,7 @@ qaws_status hm_build(qaws_hm* m, unsigned int dim, double const* x, unsigned int
 	}
 	if (total > 0x3FFFFFFFu)
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	stamp = (unsigned int*)calloc(nv ? nv : 1, sizeof(unsigned int));
+	stamp = (unsigned int*)qaws_internal_zalloc(nv ? nv : 1, sizeof(unsigned int));
 	if (!stamp)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	for (f = 0, off = 0; f < nf; f++)
@@ -357,17 +358,17 @@ qaws_status hm_build(qaws_hm* m, unsigned int dim, double const* x, unsigned int
 			v = fv[off + i];
 			if (v >= nv || stamp[v] == f + 1)
 			{
-				free(stamp);
+				qaws_internal_free(stamp);
 				return QAWS_STATUS_INVALID_ARGUMENT;
 			}
 			stamp[v] = f + 1;
 		}
 		off += s;
 	}
-	free(stamp);
+	qaws_internal_free(stamp);
 	for (mask = 1; mask < 2 * total; mask <<= 1) {}
-	slot = (unsigned int*)malloc(sizeof(unsigned int) * mask);
-	rep = (unsigned int*)malloc(sizeof(unsigned int) * smax);
+	slot = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * mask);
+	rep = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * smax);
 	if (!slot || !rep || !hm_reserve(m, nv, (unsigned int)total, nf))
 		goto oom;
 	memset(slot, 0xFF, sizeof(unsigned int) * mask);
@@ -434,9 +435,9 @@ qaws_status hm_build(qaws_hm* m, unsigned int dim, double const* x, unsigned int
 	}
 	/* each vertex's fans: a vertex on several gets a copy per fan past the first */
 	n = m->nv;
-	vn = (unsigned int*)calloc((size_t)n + 1, sizeof(unsigned int));
-	vl = (unsigned int*)malloc(sizeof(unsigned int) * (m->nc + 1));
-	seen = (unsigned char*)calloc((size_t)m->nc + 1, 1);
+	vn = (unsigned int*)qaws_internal_zalloc((size_t)n + 1, sizeof(unsigned int));
+	vl = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (m->nc + 1));
+	seen = (unsigned char*)qaws_internal_zalloc((size_t)m->nc + 1, 1);
 	if (!vn || !vl || !seen)
 		goto oom;
 	for (c = 0; c < m->nc; c++)
@@ -489,7 +490,7 @@ qaws_status hm_build(qaws_hm* m, unsigned int dim, double const* x, unsigned int
 oom:
 	st = QAWS_STATUS_ALLOCATION_FAILURE;
 done:
-	free(slot); free(rep); free(vn); free(vl); free(seen);
+	qaws_internal_free(slot); qaws_internal_free(rep); qaws_internal_free(vn); qaws_internal_free(vl); qaws_internal_free(seen);
 	if (st != QAWS_STATUS_OK)
 		hm_free(m);
 	return st;
@@ -549,7 +550,7 @@ qaws_status hm_check(qaws_hm const* m)
 {
 	unsigned int c, v, f, nfree = 0, *deg;
 	qaws_status st = QAWS_STATUS_INTERNAL_ERROR;
-	deg = (unsigned int*)calloc((size_t)m->nv + 1, sizeof(unsigned int));
+	deg = (unsigned int*)qaws_internal_zalloc((size_t)m->nv + 1, sizeof(unsigned int));
 	if (!deg)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	for (f = 0; f < m->nf; f++)
@@ -620,7 +621,7 @@ qaws_status hm_check(qaws_hm const* m)
 	}
 	st = QAWS_STATUS_OK;
 done:
-	free(deg);
+	qaws_internal_free(deg);
 	return st;
 }
 
@@ -783,14 +784,14 @@ static int hm_replace(qaws_hm* m, unsigned int from, unsigned int to)
 	}
 	if (!hm_reserve(m, 0, p->ncv, ext))
 		return 0;
-	buf = (unsigned int*)malloc(sizeof(unsigned int) * (5 * (size_t)nt + p->ncv + 1));
+	buf = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (5 * (size_t)nt + p->ncv + 1));
 	if (ca)
-		cvals = (double*)malloc(sizeof(double) * ca * (nt ? nt : 1));
+		cvals = (double*)qaws_internal_malloc(sizeof(double) * ca * (nt ? nt : 1));
 	if (fa)
-		fvals = (double*)malloc(sizeof(double) * fa * (p->nold ? p->nold : 1));
+		fvals = (double*)qaws_internal_malloc(sizeof(double) * fa * (p->nold ? p->nold : 1));
 	if (!buf || (ca && !cvals) || (fa && !fvals))
 	{
-		free(buf); free(cvals); free(fvals);
+		qaws_internal_free(buf); qaws_internal_free(cvals); qaws_internal_free(fvals);
 		return 0;
 	}
 	oc = buf; ou = oc + nt; ow = ou + nt; otw = ow + nt; oflag = otw + nt; nc = oflag + nt;
@@ -938,7 +939,7 @@ static int hm_replace(qaws_hm* m, unsigned int from, unsigned int to)
 			continue;
 		hm_fix_vertex(m, v, hm_any_corner(m, v, nc, p->ncv, otw, nt));
 	}
-	free(buf); free(cvals); free(fvals);
+	qaws_internal_free(buf); qaws_internal_free(cvals); qaws_internal_free(fvals);
 	return 1;
 }
 
@@ -1031,14 +1032,14 @@ unsigned int hm_split_face(qaws_hm* m, unsigned int f, double const* x)
 	int centroid = x == NULL;
 	if (!hm_reserve(m, 1, 0, 0))
 		return HM_NONE;
-	w = s == 3 ? w3 : (double*)malloc(sizeof(double) * s);
-	vx = s == 3 ? vx3 : (unsigned int*)malloc(sizeof(unsigned int) * s);
+	w = s == 3 ? w3 : (double*)qaws_internal_malloc(sizeof(double) * s);
+	vx = s == 3 ? vx3 : (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * s);
 	if (!w || !vx)
 	{
 		if (w != w3)
-			free(w);
+			qaws_internal_free(w);
 		if (vx != vx3)
-			free(vx);
+			qaws_internal_free(vx);
 		return HM_NONE;
 	}
 	for (i = 0; i < s; i++)
@@ -1091,9 +1092,9 @@ unsigned int hm_split_face(qaws_hm* m, unsigned int f, double const* x)
 				hm_blend(hm_attr_at(m, k, v), m->attr[k].v, m->attr[k].n, vx, w, s, m->attr[k].n, m->attr[k].rule);
 	}
 	if (w != w3)
-		free(w);
+		qaws_internal_free(w);
 	if (vx != vx3)
-		free(vx);
+		qaws_internal_free(vx);
 	if (m->pb.failed)
 		return HM_NONE;
 	if (!hm_replace(m, HM_NONE, HM_NONE))
@@ -1284,7 +1285,7 @@ static void hm_move_face(qaws_hm* m, unsigned int j, unsigned int i)
 /* the corner pool without its free slots (runs keep their order) */
 static void hm_pool(qaws_hm* m)
 {
-	unsigned int* map = (unsigned int*)malloc(sizeof(unsigned int) * (m->nc + 1));
+	unsigned int* map = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (m->nc + 1));
 	unsigned int c, n = 0, k, v;
 	if (!map)
 		return;   /* (the garbage stays) */
@@ -1313,7 +1314,7 @@ static void hm_pool(qaws_hm* m)
 			m->vc[v] = map[m->vc[v]];
 	m->nc = n;
 	m->cfree = 0;
-	free(map);
+	qaws_internal_free(map);
 }
 
 void hm_compact(qaws_hm* m)
@@ -1350,7 +1351,7 @@ void hm_compact(qaws_hm* m)
 
 unsigned int hm_attr_add(qaws_hm* m, char const* name, unsigned int element, unsigned int rule, unsigned int n)
 {
-	hm_attr* g = (hm_attr*)realloc(m->attr, sizeof(hm_attr) * (m->na + 1));
+	hm_attr* g = (hm_attr*)qaws_internal_realloc(m->attr, sizeof(hm_attr) * (m->na + 1));
 	hm_attr* a;
 	size_t slots;
 	if (!g)
@@ -1359,7 +1360,7 @@ unsigned int hm_attr_add(qaws_hm* m, char const* name, unsigned int element, uns
 	a = &g[m->na];
 	memset(a, 0, sizeof *a);
 	slots = element == QAWS_MESH_VERTEX ? m->capv : element == QAWS_MESH_CORNER ? m->capc : m->capf;
-	a->v = (double*)calloc(slots ? slots * n : 1, sizeof(double));
+	a->v = (double*)qaws_internal_zalloc(slots ? slots * n : 1, sizeof(double));
 	if (!a->v)
 		return HM_NONE;
 	if (name)
@@ -1375,7 +1376,7 @@ unsigned int hm_attr_add(qaws_hm* m, char const* name, unsigned int element, uns
 
 void hm_attr_remove(qaws_hm* m, unsigned int a)
 {
-	free(m->attr[a].v);
+	qaws_internal_free(m->attr[a].v);
 	memmove(m->attr + a, m->attr + a + 1, sizeof(hm_attr) * (m->na - a - 1));
 	m->na--;
 }
@@ -1385,7 +1386,7 @@ int hm_foot_enable(qaws_hm* m)
 	unsigned int v;
 	if (m->foot)
 		return 1;
-	m->foot = (qaws_mesh_location*)malloc(sizeof(qaws_mesh_location) * (m->capv ? m->capv : 1));
+	m->foot = (qaws_mesh_location*)qaws_internal_malloc(sizeof(qaws_mesh_location) * (m->capv ? m->capv : 1));
 	if (!m->foot)
 		return 0;
 	for (v = 0; v < m->nv; v++)

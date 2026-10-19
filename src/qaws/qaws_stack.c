@@ -4,6 +4,7 @@
  */
 
 #include "qaws_stack.h"
+#include "internal/qaws_internal_memory.h"
 #include "qaws_curve.h"
 #include "qaws_eval.h"
 #include "qaws_inspect.h"
@@ -205,7 +206,7 @@ static qaws_status sk_blend_struct(sk_struct const* tpl, qaws_curve const* const
 	double const* w, unsigned int n, qaws_curve** out)
 {
 	unsigned int dim = 2, i, k;
-	qaws_scalar* cp = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (tpl->n * dim + tpl->n));
+	qaws_scalar* cp = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * (tpl->n * dim + tpl->n));
 	qaws_scalar* wt;
 	qaws_status s;
 	if (!cp)
@@ -236,7 +237,7 @@ static qaws_status sk_blend_struct(sk_struct const* tpl, qaws_curve const* const
 		}
 		if (!(hw > 0))
 		{
-			free(cp);
+			qaws_internal_free(cp);
 			return QAWS_STATUS_UNSUPPORTED_OPERATION;
 		}
 		cp[2 * k] = (qaws_scalar)(hx / hw);
@@ -282,7 +283,7 @@ static qaws_status sk_blend_struct(sk_struct const* tpl, qaws_curve const* const
 	}
 	}
 	(void)k;
-	free(cp);
+	qaws_internal_free(cp);
 	return s;
 }
 
@@ -291,12 +292,12 @@ static void sk_resample(qaws_curve const* c, unsigned int m, double* out)
 {
 	enum { DENSE = 4096 };
 	static double const dummy = 0;
-	double* acc = (double*)malloc(sizeof(double) * (DENSE + 1));
-	double* xy = (double*)malloc(sizeof(double) * 2 * (DENSE + 1));
+	double* acc = (double*)qaws_internal_malloc(sizeof(double) * (DENSE + 1));
+	double* xy = (double*)qaws_internal_malloc(sizeof(double) * 2 * (DENSE + 1));
 	qaws_range r = qaws_curve_get_parameter_range(c);
 	unsigned int i, j = 0;
 	(void)dummy;
-	if (!acc || !xy) { free(acc); free(xy); memset(out, 0, sizeof(double) * 2 * m); return; }
+	if (!acc || !xy) { qaws_internal_free(acc); qaws_internal_free(xy); memset(out, 0, sizeof(double) * 2 * m); return; }
 	for (i = 0; i <= DENSE; i++)
 	{
 		qaws_eval_result_2d e;
@@ -313,8 +314,8 @@ static void sk_resample(qaws_curve const* c, unsigned int m, double* out)
 		out[2 * i] = xy[2 * j] + f * (xy[2 * j + 2] - xy[2 * j]);
 		out[2 * i + 1] = xy[2 * j + 1] + f * (xy[2 * j + 3] - xy[2 * j + 1]);
 	}
-	free(acc);
-	free(xy);
+	qaws_internal_free(acc);
+	qaws_internal_free(xy);
 }
 
 /* contours of different structures: resampled, aligned to the first's start
@@ -323,7 +324,7 @@ static qaws_status sk_blend_resampled(qaws_curve const* const* cs, double const*
 	qaws_curve** out)
 {
 	unsigned int m = SK_RESAMPLE, i, k, ref = SK_NONE;
-	double* all = (double*)malloc(sizeof(double) * 2 * m * (n + 1));
+	double* all = (double*)qaws_internal_malloc(sizeof(double) * 2 * m * (n + 1));
 	double* blend = all + 2 * m * n;
 	qaws_scalar* sp;
 	qaws_catmull_rom_desc d;
@@ -377,11 +378,11 @@ static qaws_status sk_blend_resampled(qaws_curve const* const* cs, double const*
 			}
 			if (bs)
 			{
-				double* tmp = (double*)malloc(sizeof(double) * 2 * m);
-				if (!tmp) { free(all); return QAWS_STATUS_ALLOCATION_FAILURE; }
+				double* tmp = (double*)qaws_internal_malloc(sizeof(double) * 2 * m);
+				if (!tmp) { qaws_internal_free(all); return QAWS_STATUS_ALLOCATION_FAILURE; }
 				for (q = 0; q < m; q++) { tmp[2 * q] = p[2 * ((q + bs) % m)]; tmp[2 * q + 1] = p[2 * ((q + bs) % m) + 1]; }
 				memcpy(p, tmp, sizeof(double) * 2 * m);
-				free(tmp);
+				qaws_internal_free(tmp);
 			}
 		}
 	}
@@ -392,15 +393,15 @@ static qaws_status sk_blend_resampled(qaws_curve const* const* cs, double const*
 			v += w[i] * all[2 * m * i + k];
 		blend[k] = v;
 	}
-	sp = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 2 * m);
-	if (!sp) { free(all); return QAWS_STATUS_ALLOCATION_FAILURE; }
+	sp = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * 2 * m);
+	if (!sp) { qaws_internal_free(all); return QAWS_STATUS_ALLOCATION_FAILURE; }
 	for (k = 0; k < 2 * m; k++) sp[k] = (qaws_scalar)blend[k];
 	memset(&d, 0, sizeof(d));
 	d.dimension = QAWS_DIMENSION_2D; d.control_points = sp; d.control_point_count = m;
 	d.parameterization = QAWS_PARAMETERIZATION_CENTRIPETAL; d.closed = 1;
 	s = qaws_curve_create_catmull_rom(&d, out);
-	free(sp);
-	free(all);
+	qaws_internal_free(sp);
+	qaws_internal_free(all);
 	return s;
 }
 
@@ -426,13 +427,13 @@ static qaws_status sk_match(qaws_stack_2d const* st, unsigned int const* idx, do
 			if (L->paths[j].curve_count != 1)
 				return QAWS_STATUS_OK;
 	}
-	pairs = (unsigned int*)malloc(sizeof(unsigned int) * (n * m + 1));
-	blended = (qaws_curve**)calloc(m + 1, sizeof(qaws_curve*));
-	views = (qaws_curve const**)calloc(m + 1, sizeof(qaws_curve*));
-	paths = (qaws_path_2d*)calloc(m + 1, sizeof(qaws_path_2d));
+	pairs = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (n * m + 1));
+	blended = (qaws_curve**)qaws_internal_zalloc(m + 1, sizeof(qaws_curve*));
+	views = (qaws_curve const**)qaws_internal_zalloc(m + 1, sizeof(qaws_curve*));
+	paths = (qaws_path_2d*)qaws_internal_zalloc(m + 1, sizeof(qaws_path_2d));
 	if (!pairs || !blended || !views || !paths)
 	{
-		free(pairs); free(blended); free((void*)views); free(paths);
+		qaws_internal_free(pairs); qaws_internal_free(blended); qaws_internal_free((void*)views); qaws_internal_free(paths);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 	for (i = 0; i < n; i++)
@@ -445,7 +446,7 @@ static qaws_status sk_match(qaws_stack_2d const* st, unsigned int const* idx, do
 	/* pair every level's contours with the first's: greedy nearest centres */
 	for (i = 0; i < n; i++)
 	{
-		unsigned char* used = (unsigned char*)calloc(m + 1, 1);
+		unsigned char* used = (unsigned char*)qaws_internal_zalloc(m + 1, 1);
 		for (j = 0; j < m; j++)
 		{
 			double cj[2], sj, best = 1e300;
@@ -462,7 +463,7 @@ static qaws_status sk_match(qaws_stack_2d const* st, unsigned int const* idx, do
 			pairs[i * m + j] = bk;
 			if (used) used[bk] = 1;
 		}
-		free(used);
+		qaws_internal_free(used);
 	}
 	for (j = 0; j < m && s == QAWS_STATUS_OK; j++)
 	{
@@ -516,7 +517,7 @@ static qaws_status sk_match(qaws_stack_2d const* st, unsigned int const* idx, do
 		*applied = s == QAWS_STATUS_OK;
 	}
 	for (j = 0; j < m; j++) qaws_curve_destroy(blended[j]);
-	free(pairs); free(blended); free((void*)views); free(paths);
+	qaws_internal_free(pairs); qaws_internal_free(blended); qaws_internal_free((void*)views); qaws_internal_free(paths);
 	return s;
 }
 
@@ -541,15 +542,15 @@ static qaws_status sk_level_signs(qaws_stack_level const* L, qaws_fill_rule fr, 
 	for (i = 0; i < L->path_count && s == QAWS_STATUS_OK; i++)
 		for (c = 0; c < L->paths[i].curve_count && s == QAWS_STATUS_OK; c++)
 			s = qaws_internal_flatten_curve(L->paths[i].curves[c], 2, (qaws_scalar)flat, i, &segs, &ns, &cap);
-	if (s != QAWS_STATUS_OK) { free(segs); return s; }
+	if (s != QAWS_STATUS_OK) { qaws_internal_free(segs); return s; }
 	for (j = 0; j <= g->ny; j++)
 	{
 		double y = g->y0 + g->h * j;
 		/* crossings of the row (half-open in y), as (x, +1 / -1) */
-		double* xs = (double*)malloc(sizeof(double) * 2 * (ns + 1));
+		double* xs = (double*)qaws_internal_malloc(sizeof(double) * 2 * (ns + 1));
 		unsigned int nc = 0, a, b;
 		int wsum = 0;
-		if (!xs) { free(segs); return QAWS_STATUS_ALLOCATION_FAILURE; }
+		if (!xs) { qaws_internal_free(segs); return QAWS_STATUS_ALLOCATION_FAILURE; }
 		for (i = 0; i < ns; i++)
 		{
 			double y0 = segs[i].p0[1], y1 = segs[i].p1[1];
@@ -582,9 +583,9 @@ static qaws_status sk_level_signs(qaws_stack_level const* L, qaws_fill_rule fr, 
 				inside[j * (g->nx + 1) + i] = (unsigned char)qaws_fill_rule_inside(fr, total - wsum);
 			}
 		}
-		free(xs);
+		qaws_internal_free(xs);
 	}
-	free(segs);
+	qaws_internal_free(segs);
 	return QAWS_STATUS_OK;
 }
 
@@ -622,10 +623,10 @@ static qaws_status sk_distance(qaws_stack_2d const* st, unsigned int const* idx,
 	g.y0 = 0.5 * (lo[1] + hi[1]) - 0.55 * ext - 0.5 * g.h;
 	g.nx = g.ny = G + 1;
 	nn = (g.nx + 1) * (g.ny + 1);
-	g.f = (double*)calloc(nn, sizeof(double));
-	pts = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 2 * nn);
-	cp = (qaws_closest_point*)malloc(sizeof(qaws_closest_point) * nn);
-	ins = (unsigned char*)malloc(nn);
+	g.f = (double*)qaws_internal_zalloc(nn, sizeof(double));
+	pts = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * 2 * nn);
+	cp = (qaws_closest_point*)qaws_internal_malloc(sizeof(qaws_closest_point) * nn);
+	ins = (unsigned char*)qaws_internal_malloc(nn);
 	if (!g.f || !pts || !cp || !ins)
 	{
 		s = QAWS_STATUS_ALLOCATION_FAILURE;
@@ -646,7 +647,7 @@ static qaws_status sk_distance(qaws_stack_2d const* st, unsigned int const* idx,
 		qaws_curve_batch_desc bd;
 		qaws_curve_set* set = NULL;
 		for (q = 0; q < L->path_count; q++) nc += L->paths[q].curve_count;
-		curves = (qaws_curve const**)malloc(sizeof(qaws_curve*) * (nc + 1));
+		curves = (qaws_curve const**)qaws_internal_malloc(sizeof(qaws_curve*) * (nc + 1));
 		if (!curves) { s = QAWS_STATUS_ALLOCATION_FAILURE; break; }
 		nc = 0;
 		for (q = 0; q < L->path_count; q++)
@@ -656,7 +657,7 @@ static qaws_status sk_distance(qaws_stack_2d const* st, unsigned int const* idx,
 		{
 			/* an empty level: far outside everywhere */
 			for (q = 0; q < nn; q++) g.f[q] += w[k] * 4 * ext;
-			free((void*)curves);
+			qaws_internal_free((void*)curves);
 			continue;
 		}
 		memset(&bd, 0, sizeof(bd));
@@ -672,7 +673,7 @@ static qaws_status sk_distance(qaws_stack_2d const* st, unsigned int const* idx,
 				g.f[q] += w[k] * (ins[q] ? -d : d);
 			}
 		qaws_curve_set_destroy(set);
-		free((void*)curves);
+		qaws_internal_free((void*)curves);
 	}
 	if (s != QAWS_STATUS_OK)
 		goto done;
@@ -681,14 +682,14 @@ static qaws_status sk_distance(qaws_stack_2d const* st, unsigned int const* idx,
 		unsigned int W = g.nx, Hc = g.ny;
 		/* edge points: horizontal edges (i, j)-(i + 1, j) id j W + i, vertical edges after */
 		unsigned int nh = W * (Hc + 1), ne = nh + (W + 1) * Hc, e;
-		double* ep = (double*)malloc(sizeof(double) * 2 * ne);
-		unsigned int* nxt = (unsigned int*)malloc(sizeof(unsigned int) * ne);
-		unsigned char* seen = (unsigned char*)calloc(ne, 1);
+		double* ep = (double*)qaws_internal_malloc(sizeof(double) * 2 * ne);
+		unsigned int* nxt = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ne);
+		unsigned char* seen = (unsigned char*)qaws_internal_zalloc(ne, 1);
 		qaws_curve** loops = NULL;
 		unsigned int nloops = 0, caploops = 0;
 		if (!ep || !nxt || !seen)
 		{
-			free(ep); free(nxt); free(seen);
+			qaws_internal_free(ep); qaws_internal_free(nxt); qaws_internal_free(seen);
 			s = QAWS_STATUS_ALLOCATION_FAILURE;
 			goto done;
 		}
@@ -769,7 +770,7 @@ static qaws_status sk_distance(qaws_stack_2d const* st, unsigned int const* idx,
 				if (m == capm)
 				{
 					unsigned int nc2 = capm ? 2 * capm : 64;
-					qaws_scalar* gp = (qaws_scalar*)realloc(lp, sizeof(qaws_scalar) * 2 * nc2);
+					qaws_scalar* gp = (qaws_scalar*)qaws_internal_realloc(lp, sizeof(qaws_scalar) * 2 * nc2);
 					if (!gp) { s = QAWS_STATUS_ALLOCATION_FAILURE; break; }
 					lp = gp; capm = nc2;
 				}
@@ -784,19 +785,19 @@ static qaws_status sk_distance(qaws_stack_2d const* st, unsigned int const* idx,
 				if (nloops == caploops)
 				{
 					unsigned int nc2 = caploops ? 2 * caploops : 16;
-					qaws_curve** gl = (qaws_curve**)realloc(loops, sizeof(qaws_curve*) * nc2);
-					if (!gl) { free(lp); s = QAWS_STATUS_ALLOCATION_FAILURE; break; }
+					qaws_curve** gl = (qaws_curve**)qaws_internal_realloc(loops, sizeof(qaws_curve*) * nc2);
+					if (!gl) { qaws_internal_free(lp); s = QAWS_STATUS_ALLOCATION_FAILURE; break; }
 					loops = gl; caploops = nc2;
 				}
 				s = qaws_curve_create_polyline_2d(lp, m, 1, &c);
 				if (s == QAWS_STATUS_OK) loops[nloops++] = c;
 			}
-			free(lp);
+			qaws_internal_free(lp);
 		}
 		if (s == QAWS_STATUS_OK)
 		{
-			qaws_path_2d* paths = (qaws_path_2d*)calloc(nloops + 1, sizeof(qaws_path_2d));
-			qaws_curve const** views = (qaws_curve const**)calloc(nloops + 1, sizeof(qaws_curve*));
+			qaws_path_2d* paths = (qaws_path_2d*)qaws_internal_zalloc(nloops + 1, sizeof(qaws_path_2d));
+			qaws_curve const** views = (qaws_curve const**)qaws_internal_zalloc(nloops + 1, sizeof(qaws_curve*));
 			if (!paths || !views)
 				s = QAWS_STATUS_ALLOCATION_FAILURE;
 			else
@@ -810,15 +811,15 @@ static qaws_status sk_distance(qaws_stack_2d const* st, unsigned int const* idx,
 				}
 				s = sk_union(paths, nloops, QAWS_FILL_NON_ZERO, out);
 			}
-			free(paths);
-			free((void*)views);
+			qaws_internal_free(paths);
+			qaws_internal_free((void*)views);
 		}
 		for (i = 0; i < nloops; i++) qaws_curve_destroy(loops[i]);
-		free(loops);
-		free(ep); free(nxt); free(seen);
+		qaws_internal_free(loops);
+		qaws_internal_free(ep); qaws_internal_free(nxt); qaws_internal_free(seen);
 	}
 done:
-	free(g.f); free(pts); free(cp); free(ins);
+	qaws_internal_free(g.f); qaws_internal_free(pts); qaws_internal_free(cp); qaws_internal_free(ins);
 	return s;
 }
 
@@ -879,8 +880,8 @@ static qaws_status sk_level_job(void* ctx, unsigned int chunk, unsigned int begi
 		if (s == QAWS_STATUS_OK)
 		{
 			unsigned int na = qaws_clip_result_get_path_count(ra), nb = qaws_clip_result_get_path_count(rb), k;
-			qaws_path_2d* pa = (qaws_path_2d*)malloc(sizeof(qaws_path_2d) * (na + 1));
-			qaws_path_2d* pb = (qaws_path_2d*)malloc(sizeof(qaws_path_2d) * (nb + 1));
+			qaws_path_2d* pa = (qaws_path_2d*)qaws_internal_malloc(sizeof(qaws_path_2d) * (na + 1));
+			qaws_path_2d* pb = (qaws_path_2d*)qaws_internal_malloc(sizeof(qaws_path_2d) * (nb + 1));
 			if (!pa || !pb)
 				s = QAWS_STATUS_ALLOCATION_FAILURE;
 			else
@@ -889,8 +890,8 @@ static qaws_status sk_level_job(void* ctx, unsigned int chunk, unsigned int begi
 				for (k = 0; k < nb; k++) qaws_clip_result_get_path(rb, k, &pb[k]);
 				s = qaws_clip_boolean(j->ct, QAWS_FILL_NON_ZERO, pa, na, pb, nb, &j->levels[i]);
 			}
-			free(pa);
-			free(pb);
+			qaws_internal_free(pa);
+			qaws_internal_free(pb);
 		}
 		qaws_clip_result_destroy(ra);
 		qaws_clip_result_destroy(rb);
@@ -910,11 +911,11 @@ qaws_status qaws_stack_boolean_2d(qaws_clip_type ct, qaws_stack_2d const* a, qaw
 	if (!a || !b || !out)
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	*out = NULL;
-	r = (qaws_stack_result*)calloc(1, sizeof(qaws_stack_result));
+	r = (qaws_stack_result*)qaws_internal_zalloc(1, sizeof(qaws_stack_result));
 	if (!r)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
-	r->z = (double*)malloc(sizeof(double) * (a->level_count + b->level_count + 1));
-	r->levels = (qaws_clip_result**)calloc(a->level_count + b->level_count + 1, sizeof(qaws_clip_result*));
+	r->z = (double*)qaws_internal_malloc(sizeof(double) * (a->level_count + b->level_count + 1));
+	r->levels = (qaws_clip_result**)qaws_internal_zalloc(a->level_count + b->level_count + 1, sizeof(qaws_clip_result*));
 	if (!r->z || !r->levels)
 	{
 		qaws_stack_result_destroy(r);
@@ -955,9 +956,9 @@ void qaws_stack_result_destroy(qaws_stack_result* r)
 	if (!r) return;
 	for (i = 0; r->levels && i < r->count; i++)
 		qaws_clip_result_destroy(r->levels[i]);
-	free(r->levels);
-	free(r->z);
-	free(r);
+	qaws_internal_free(r->levels);
+	qaws_internal_free(r->z);
+	qaws_internal_free(r);
 }
 
 unsigned int qaws_stack_result_get_level_count(qaws_stack_result const* r) { return r ? r->count : 0; }

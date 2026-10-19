@@ -15,6 +15,7 @@
  */
 
 #include "qaws_region_sample.h"
+#include "internal/qaws_internal_memory.h"
 #include "qaws_curve.h"
 #include "qaws_eval.h"
 #include "qaws_inspect.h"
@@ -146,7 +147,7 @@ static qaws_status rs_add_piece(rs_piece** pcs, unsigned int* n, unsigned int* c
 	if (*n == *cap)
 	{
 		unsigned int nc = *cap ? 2 * *cap : 64;
-		rs_piece* g = (rs_piece*)realloc(*pcs, sizeof(rs_piece) * nc);
+		rs_piece* g = (rs_piece*)qaws_internal_realloc(*pcs, sizeof(rs_piece) * nc);
 		if (!g)
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 		*pcs = g;
@@ -228,15 +229,15 @@ void qaws_region_sampler_destroy(qaws_region_sampler* s)
 	if (!s)
 		return;
 	qaws_clip_result_destroy(s->region);
-	free(s->pieces);
-	free(s->xs);
-	free(s->acum);
-	free(s->first);
-	free(s->active);
-	free(s->pfirst);
-	free(s->pmass);
-	free(s->pcoef);
-	free(s);
+	qaws_internal_free(s->pieces);
+	qaws_internal_free(s->xs);
+	qaws_internal_free(s->acum);
+	qaws_internal_free(s->first);
+	qaws_internal_free(s->active);
+	qaws_internal_free(s->pfirst);
+	qaws_internal_free(s->pmass);
+	qaws_internal_free(s->pcoef);
+	qaws_internal_free(s);
 }
 
 qaws_status qaws_region_sampler_create(qaws_region_sampler_desc const* desc, qaws_region_sampler** out)
@@ -248,7 +249,7 @@ qaws_status qaws_region_sampler_create(qaws_region_sampler_desc const* desc, qaw
 	if (!desc || !out || (desc->path_count && !desc->paths))
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	*out = NULL;
-	s = (qaws_region_sampler*)calloc(1, sizeof(*s));
+	s = (qaws_region_sampler*)qaws_internal_zalloc(1, sizeof(*s));
 	if (!s)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	/* 1. the region, its boundary simple */
@@ -269,7 +270,7 @@ qaws_status qaws_region_sampler_create(qaws_region_sampler_desc const* desc, qaw
 	{
 		double lo = 1e300, hi = -1e300, eps;
 		unsigned int nraw = 2 * s->npieces, m = 0;
-		raw = (double*)malloc(sizeof(double) * nraw);
+		raw = (double*)qaws_internal_malloc(sizeof(double) * nraw);
 		if (!raw)
 			st = QAWS_STATUS_ALLOCATION_FAILURE;
 		for (i = 0; st == QAWS_STATUS_OK && i < s->npieces; i++)
@@ -315,8 +316,8 @@ qaws_status qaws_region_sampler_create(qaws_region_sampler_desc const* desc, qaw
 	if (st == QAWS_STATUS_OK)
 	{
 		unsigned int nslab = s->nxs - 1, total = 0;
-		s->first = (unsigned int*)calloc(nslab + 2, sizeof(unsigned int));
-		s->acum = (double*)malloc(sizeof(double) * s->nxs);
+		s->first = (unsigned int*)qaws_internal_zalloc(nslab + 2, sizeof(unsigned int));
+		s->acum = (double*)qaws_internal_malloc(sizeof(double) * s->nxs);
 		if (!s->first || !s->acum)
 			st = QAWS_STATUS_ALLOCATION_FAILURE;
 		for (i = 0; st == QAWS_STATUS_OK && i < s->npieces; i++)
@@ -330,15 +331,15 @@ qaws_status qaws_region_sampler_create(qaws_region_sampler_desc const* desc, qaw
 		}
 		if (st == QAWS_STATUS_OK)
 		{
-			unsigned int* fill = (unsigned int*)calloc(nslab + 1, sizeof(unsigned int));
+			unsigned int* fill = (unsigned int*)qaws_internal_zalloc(nslab + 1, sizeof(unsigned int));
 			for (k = 0; k < nslab; k++) s->first[k + 1] += s->first[k];
-			s->active = (unsigned int*)malloc(sizeof(unsigned int) * (total + 1));
+			s->active = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (total + 1));
 			if (!fill || !s->active)
 				st = QAWS_STATUS_ALLOCATION_FAILURE;
 			for (i = 0; st == QAWS_STATUS_OK && i < s->npieces; i++)
 				for (k = s->pieces[i].s0; k < s->pieces[i].s1; k++)
 					s->active[s->first[k] + fill[k]++] = i;
-			free(fill);
+			qaws_internal_free(fill);
 		}
 		/* A at every abscissa */
 		if (st == QAWS_STATUS_OK)
@@ -366,7 +367,7 @@ qaws_status qaws_region_sampler_create(qaws_region_sampler_desc const* desc, qaw
 			}
 		}
 	}
-	free(raw);
+	qaws_internal_free(raw);
 	if (st != QAWS_STATUS_OK)
 	{
 		qaws_region_sampler_destroy(s);
@@ -449,7 +450,7 @@ static rs_cross* rs_crossings(qaws_region_sampler const* s, unsigned int k, doub
 	rs_cross* cr = stack;
 	if (nc > 64)
 	{
-		cr = (rs_cross*)malloc(sizeof(rs_cross) * nc);
+		cr = (rs_cross*)qaws_internal_malloc(sizeof(rs_cross) * nc);
 		if (!cr) { *out_n = 0; return stack; }
 	}
 	for (j = 0; j < nc; j++)
@@ -601,7 +602,7 @@ static double rs_g(qaws_region_sampler const* s, unsigned int k, double x, doubl
 		w += cr[j].sigma;
 		if (w > 0) sum += s->rho ? rs_rho_line(s, x, cr[j].y, cr[j + 1].y, rmax) : cr[j + 1].y - cr[j].y;
 	}
-	if (cr != stack) free(cr);
+	if (cr != stack) qaws_internal_free(cr);
 	return sum;
 }
 
@@ -690,7 +691,7 @@ static qaws_status rs_build_density(qaws_region_sampler* s)
 	double width = s->xs[s->nxs - 1] - s->xs[0], rmax = 0;
 	rs_build_ctx* c;
 	qaws_status st;
-	s->pfirst = (unsigned int*)malloc(sizeof(unsigned int) * (nslab + 1));
+	s->pfirst = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (nslab + 1));
 	if (!s->pfirst)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	for (k = 0; k < nslab; k++)
@@ -700,12 +701,12 @@ static qaws_status rs_build_density(qaws_region_sampler* s)
 		total += np < 2 ? 2 : np;
 	}
 	s->pfirst[nslab] = total;
-	s->pmass = (double*)malloc(sizeof(double) * (total + 1));
-	s->pcoef = (double*)malloc(sizeof(double) * 8 * total);
-	c = (rs_build_ctx*)calloc(1, sizeof(rs_build_ctx));
+	s->pmass = (double*)qaws_internal_malloc(sizeof(double) * (total + 1));
+	s->pcoef = (double*)qaws_internal_malloc(sizeof(double) * 8 * total);
+	c = (rs_build_ctx*)qaws_internal_zalloc(1, sizeof(rs_build_ctx));
 	if (!s->pmass || !s->pcoef || !c)
 	{
-		free(c);
+		qaws_internal_free(c);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 	/* the panels in parallel, then their masses summed in order */
@@ -713,7 +714,7 @@ static qaws_status rs_build_density(qaws_region_sampler* s)
 	st = qaws_internal_parallel(s->executor, total, 2, rs_build_job, c);
 	for (k = 0; k < 256; k++)
 		if (c->rmax[k] > rmax) rmax = c->rmax[k];
-	free(c);
+	qaws_internal_free(c);
 	if (st != QAWS_STATUS_OK)
 		return st;
 	s->pmass[0] = 0;
@@ -801,10 +802,10 @@ static qaws_status rs_map_mass(qaws_region_sampler const* s, double u, double v,
 		cr = rs_crossings(s, k, x, stack, &n);
 		if (n > 64)
 		{
-			mm = (double*)malloc(sizeof(double) * n);
+			mm = (double*)qaws_internal_malloc(sizeof(double) * n);
 			if (!mm)
 			{
-				if (cr != stack) free(cr);
+				if (cr != stack) qaws_internal_free(cr);
 				return QAWS_STATUS_ALLOCATION_FAILURE;
 			}
 		}
@@ -832,8 +833,8 @@ static qaws_status rs_map_mass(qaws_region_sampler const* s, double u, double v,
 			out->y = (qaws_scalar)rs_rho_solve(s, x, cr[j].y, cr[j + 1].y, yt);
 			break;
 		}
-		if (mm != mstack) free(mm);
-		if (cr != stack) free(cr);
+		if (mm != mstack) qaws_internal_free(mm);
+		if (cr != stack) qaws_internal_free(cr);
 	}
 	return QAWS_STATUS_OK;
 }
@@ -850,7 +851,7 @@ static qaws_status rs_map_area(qaws_region_sampler const* s, qaws_scalar u, qaws
 	nc = s->first[k + 1] - s->first[k];
 	if (nc > 64)
 	{
-		cr = (rs_cross*)malloc(sizeof(rs_cross) * nc);
+		cr = (rs_cross*)qaws_internal_malloc(sizeof(rs_cross) * nc);
 		if (!cr)
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
@@ -887,7 +888,7 @@ static qaws_status rs_map_area(qaws_region_sampler const* s, qaws_scalar u, qaws
 		yt -= len;
 	}
 	if (cr != stackc)
-		free(cr);
+		qaws_internal_free(cr);
 	return QAWS_STATUS_OK;
 }
 
@@ -1261,7 +1262,7 @@ static qaws_status rs_eliminate(qaws_region_sampler const* s, qaws_vec2 const* c
 	{
 		rs_batch c;
 		double big = 0;
-		e.rad = (double*)malloc(sizeof(double) * (ncand + 1));
+		e.rad = (double*)qaws_internal_malloc(sizeof(double) * (ncand + 1));
 		if (!e.rad)
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 		memset(&c, 0, sizeof(c));
@@ -1272,7 +1273,7 @@ static qaws_status rs_eliminate(qaws_region_sampler const* s, qaws_vec2 const* c
 		st = rs_batch_run(&c, ncand);
 		if (st != QAWS_STATUS_OK)
 		{
-			free(e.rad);
+			qaws_internal_free(e.rad);
 			return st;
 		}
 		for (i = 0; i < ncand; i++)
@@ -1289,16 +1290,16 @@ static qaws_status rs_eliminate(qaws_region_sampler const* s, qaws_vec2 const* c
 	}
 	e.gx = (unsigned int)((hi[0] - e.lo[0]) / e.cs) + 1;
 	e.gy = (unsigned int)((hi[1] - e.lo[1]) / e.cs) + 1;
-	e.cell_first = (unsigned int*)calloc((size_t)e.gx * e.gy + 2, sizeof(unsigned int));
-	e.cell_items = (unsigned int*)malloc(sizeof(unsigned int) * (ncand + 1));
-	e.w = (double*)calloc(ncand + 1, sizeof(double));
-	e.heap = (unsigned int*)malloc(sizeof(unsigned int) * (ncand + 1));
-	e.pos = (unsigned int*)malloc(sizeof(unsigned int) * (ncand + 1));
+	e.cell_first = (unsigned int*)qaws_internal_zalloc((size_t)e.gx * e.gy + 2, sizeof(unsigned int));
+	e.cell_items = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (ncand + 1));
+	e.w = (double*)qaws_internal_zalloc(ncand + 1, sizeof(double));
+	e.heap = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (ncand + 1));
+	e.pos = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (ncand + 1));
 	if (!e.cell_first || !e.cell_items || !e.w || !e.heap || !e.pos)
 		st = QAWS_STATUS_ALLOCATION_FAILURE;
 	if (st == QAWS_STATUS_OK)
 	{
-		unsigned int* fill = (unsigned int*)calloc((size_t)e.gx * e.gy + 1, sizeof(unsigned int));
+		unsigned int* fill = (unsigned int*)qaws_internal_zalloc((size_t)e.gx * e.gy + 1, sizeof(unsigned int));
 		if (!fill)
 			st = QAWS_STATUS_ALLOCATION_FAILURE;
 		else
@@ -1310,7 +1311,7 @@ static qaws_status rs_eliminate(qaws_region_sampler const* s, qaws_vec2 const* c
 				unsigned int c = rs_elim_cell(&e, &cand[i]);
 				e.cell_items[e.cell_first[c] + fill[c]++] = i;
 			}
-			free(fill);
+			qaws_internal_free(fill);
 		}
 	}
 	if (st == QAWS_STATUS_OK)
@@ -1333,7 +1334,7 @@ static qaws_status rs_eliminate(qaws_region_sampler const* s, qaws_vec2 const* c
 			if (e.pos[i] != ~0u)
 				out[k++] = cand[i];
 	}
-	free(e.cell_first); free(e.cell_items); free(e.w); free(e.heap); free(e.pos); free(e.rad);
+	qaws_internal_free(e.cell_first); qaws_internal_free(e.cell_items); qaws_internal_free(e.w); qaws_internal_free(e.heap); qaws_internal_free(e.pos); qaws_internal_free(e.rad);
 	return st;
 }
 
@@ -1341,7 +1342,7 @@ static qaws_status rs_eliminate(qaws_region_sampler const* s, qaws_vec2 const* c
 static qaws_status rs_blue_noise(qaws_region_sampler const* s, unsigned int count, unsigned long long seed, qaws_vec2* out)
 {
 	unsigned int ncand = 5 * count;
-	qaws_vec2* cand = (qaws_vec2*)malloc(sizeof(qaws_vec2) * (ncand + 1));
+	qaws_vec2* cand = (qaws_vec2*)qaws_internal_malloc(sizeof(qaws_vec2) * (ncand + 1));
 	rs_pattern q;
 	qaws_status st = QAWS_STATUS_OK;
 	if (!cand)
@@ -1350,7 +1351,7 @@ static qaws_status rs_blue_noise(qaws_region_sampler const* s, unsigned int coun
 	st = rs_map_batch(s, &q, NULL, ncand, cand);
 	if (st == QAWS_STATUS_OK)
 		st = rs_eliminate(s, cand, ncand, count, out);
-	free(cand);
+	qaws_internal_free(cand);
 	return st;
 }
 
@@ -1402,7 +1403,7 @@ static qaws_status rs_box_count(qaws_region_sampler const* s, unsigned int kind,
 	qaws_status st;
 	if (total > *cap)
 	{
-		unsigned char* k = (unsigned char*)realloc(*keep, total);
+		unsigned char* k = (unsigned char*)qaws_internal_realloc(*keep, total);
 		if (!k)
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 		*keep = k;
@@ -1476,7 +1477,7 @@ static qaws_status rs_box(qaws_region_sampler const* s, unsigned int count, unsi
 		{
 			/* the surplus at random: a hashed permutation's first count of
 			   the kept, in order */
-			unsigned int* in = (unsigned int*)malloc(sizeof(unsigned int) * (got + 1));
+			unsigned int* in = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (got + 1));
 			if (!in)
 				st = QAWS_STATUS_ALLOCATION_FAILURE;
 			else
@@ -1491,10 +1492,10 @@ static qaws_status rs_box(qaws_region_sampler const* s, unsigned int count, unsi
 					out[i].x = (qaws_scalar)(box[0] + box[1] * u);
 					out[i].y = (qaws_scalar)(box[2] + box[3] * v);
 				}
-				free(in);
+				qaws_internal_free(in);
 			}
 		}
-		free(keep);
+		qaws_internal_free(keep);
 		return st;
 	}
 	rs_pattern_init(&q, kind, count, seed);
@@ -1511,7 +1512,7 @@ static qaws_status rs_box(qaws_region_sampler const* s, unsigned int count, unsi
 		}
 		if (n > cap)
 		{
-			unsigned char* k = (unsigned char*)realloc(keep, n);
+			unsigned char* k = (unsigned char*)qaws_internal_realloc(keep, n);
 			if (!k)
 			{
 				st = QAWS_STATUS_ALLOCATION_FAILURE;
@@ -1538,7 +1539,7 @@ static qaws_status rs_box(qaws_region_sampler const* s, unsigned int count, unsi
 			}
 		i += n;
 	}
-	free(keep);
+	qaws_internal_free(keep);
 	return st;
 }
 

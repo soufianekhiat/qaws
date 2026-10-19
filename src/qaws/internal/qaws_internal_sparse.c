@@ -1,4 +1,5 @@
 #include "qaws_internal_sparse.h"
+#include "qaws_internal_memory.h"
 #include "../qaws_platform.h"
 #include <stdlib.h>
 #include <string.h>
@@ -20,9 +21,9 @@ qaws_status qaws_internal_csr_alloc(
 	mat->cols = cols;
 	mat->nnz = nnz;
 
-	mat->row_ptr = (unsigned int*)calloc(rows + 1, sizeof(unsigned int));
-	mat->col_idx = (unsigned int*)malloc(nnz * sizeof(unsigned int));
-	mat->values = (qaws_scalar*)calloc(nnz, sizeof(qaws_scalar));
+	mat->row_ptr = (unsigned int*)qaws_internal_zalloc(rows + 1, sizeof(unsigned int));
+	mat->col_idx = (unsigned int*)qaws_internal_malloc(nnz * sizeof(unsigned int));
+	mat->values = (qaws_scalar*)qaws_internal_zalloc(nnz, sizeof(qaws_scalar));
 
 	if (!mat->row_ptr || !mat->col_idx || !mat->values)
 	{
@@ -36,9 +37,9 @@ qaws_status qaws_internal_csr_alloc(
 void qaws_internal_csr_free(qaws_internal_csr* mat)
 {
 	if (!mat) return;
-	free(mat->row_ptr);
-	free(mat->col_idx);
-	free(mat->values);
+	qaws_internal_free(mat->row_ptr);
+	qaws_internal_free(mat->col_idx);
+	qaws_internal_free(mat->values);
 	memset(mat, 0, sizeof(*mat));
 }
 
@@ -98,15 +99,15 @@ qaws_status qaws_internal_cg_solve(
 
 	tol_sq = tolerance * tolerance;
 
-	r = (qaws_scalar*)malloc(n * sizeof(qaws_scalar));
-	p = (qaws_scalar*)malloc(n * sizeof(qaws_scalar));
-	Ap = (qaws_scalar*)malloc(n * sizeof(qaws_scalar));
-	M_inv = (qaws_scalar*)malloc(n * sizeof(qaws_scalar));
-	z = (qaws_scalar*)malloc(n * sizeof(qaws_scalar));
+	r = (qaws_scalar*)qaws_internal_malloc(n * sizeof(qaws_scalar));
+	p = (qaws_scalar*)qaws_internal_malloc(n * sizeof(qaws_scalar));
+	Ap = (qaws_scalar*)qaws_internal_malloc(n * sizeof(qaws_scalar));
+	M_inv = (qaws_scalar*)qaws_internal_malloc(n * sizeof(qaws_scalar));
+	z = (qaws_scalar*)qaws_internal_malloc(n * sizeof(qaws_scalar));
 
 	if (!r || !p || !Ap || !M_inv || !z)
 	{
-		free(r); free(p); free(Ap); free(M_inv); free(z);
+		qaws_internal_free(r); qaws_internal_free(p); qaws_internal_free(Ap); qaws_internal_free(M_inv); qaws_internal_free(z);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 
@@ -189,7 +190,7 @@ qaws_status qaws_internal_cg_solve(
 			p[i] = z[i] + beta * p[i];
 	}
 
-	free(r); free(p); free(Ap); free(M_inv); free(z);
+	qaws_internal_free(r); qaws_internal_free(p); qaws_internal_free(Ap); qaws_internal_free(M_inv); qaws_internal_free(z);
 	return QAWS_STATUS_OK;
 }
 
@@ -221,11 +222,11 @@ qaws_status qaws_internal_build_laplacian(
 		return status;
 
 	/* Count entries per row: 1 (diagonal) + degree */
-	degree = (unsigned int*)calloc(n, sizeof(unsigned int));
-	row_fill = (unsigned int*)calloc(n, sizeof(unsigned int));
+	degree = (unsigned int*)qaws_internal_zalloc(n, sizeof(unsigned int));
+	row_fill = (unsigned int*)qaws_internal_zalloc(n, sizeof(unsigned int));
 	if (!degree || !row_fill)
 	{
-		free(degree); free(row_fill);
+		qaws_internal_free(degree); qaws_internal_free(row_fill);
 		qaws_internal_csr_free(out_L);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
@@ -273,8 +274,8 @@ qaws_status qaws_internal_build_laplacian(
 		out_L->values[out_L->row_ptr[vb]] -= w;
 	}
 
-	free(degree);
-	free(row_fill);
+	qaws_internal_free(degree);
+	qaws_internal_free(row_fill);
 
 	/* Compute lumped mass diagonal (1/3 of area of adjacent triangles) */
 	memset(out_mass_diag, 0, n * sizeof(qaws_scalar));

@@ -18,6 +18,7 @@
  */
 
 #include "qaws_alloc.h"
+#include "internal/qaws_internal_memory.h"
 #include "qaws_operations.h"
 #include "qaws_curve.h"
 #include "qaws_eval.h"
@@ -120,7 +121,7 @@ static qaws_status ex_bezier(qaws_curve const* c, qaws_scalar t0, qaws_scalar t1
 {
 	qaws_bezier_impl const* impl = (qaws_bezier_impl const*)c->impl;
 	unsigned int dim = (unsigned int)c->dimension, n = impl->control_point_count;
-	qaws_scalar* cp = (qaws_scalar*)malloc(sizeof(qaws_scalar) * n * dim);
+	qaws_scalar* cp = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * n * dim);
 	qaws_bezier_desc d;
 	qaws_status s;
 	if (!cp) return QAWS_STATUS_ALLOCATION_FAILURE;
@@ -132,7 +133,7 @@ static qaws_status ex_bezier(qaws_curve const* c, qaws_scalar t0, qaws_scalar t1
 	d.control_points = cp;
 	d.control_point_count = n;
 	s = qaws_curve_create_bezier_ex(&d, c->allocator, out);
-	free(cp);
+	qaws_internal_free(cp);
 	return s;
 }
 
@@ -140,7 +141,7 @@ static qaws_status ex_rational_bezier(qaws_curve const* c, qaws_scalar t0, qaws_
 {
 	qaws_rational_bezier_impl const* impl = (qaws_rational_bezier_impl const*)c->impl;
 	unsigned int dim = (unsigned int)c->dimension, n = impl->control_point_count, h = dim + 1, i, k;
-	qaws_scalar* hp = (qaws_scalar*)malloc(sizeof(qaws_scalar) * n * (h + dim + 1));
+	qaws_scalar* hp = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * n * (h + dim + 1));
 	qaws_scalar *cp, *w;
 	qaws_rational_bezier_desc d;
 	qaws_status s;
@@ -168,7 +169,7 @@ static qaws_status ex_rational_bezier(qaws_curve const* c, qaws_scalar t0, qaws_
 	d.weights = w;
 	d.weight_count = n;
 	s = qaws_curve_create_rational_bezier_ex(&d, c->allocator, out);
-	free(hp);
+	qaws_internal_free(hp);
 	return s;
 }
 
@@ -254,11 +255,11 @@ static qaws_status ex_spline_restrict(ex_spline* sp, qaws_scalar t0, qaws_scalar
 	res->stride = st;
 	res->cp_count = nc;
 	res->knot_count = nc + p + 1;
-	res->cp = (qaws_scalar*)malloc(sizeof(qaws_scalar) * nc * st);
-	res->knots = (qaws_scalar*)malloc(sizeof(qaws_scalar) * res->knot_count);
+	res->cp = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * nc * st);
+	res->knots = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * res->knot_count);
 	if (!res->cp || !res->knots)
 	{
-		free(res->cp); free(res->knots);
+		qaws_internal_free(res->cp); qaws_internal_free(res->knots);
 		res->cp = res->knots = NULL;
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
@@ -304,12 +305,12 @@ static qaws_status ex_spline_kind(qaws_curve const* c, qaws_scalar t0, qaws_scal
 	sp.stride = dim + (rational ? 1u : 0u);
 	sp.knot_count = kc;
 	sp.cp_count = n;
-	sp.knots = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (kc + 2 * p + 2));
-	sp.cp = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (n + 2 * p + 2) * sp.stride);
+	sp.knots = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * (kc + 2 * p + 2));
+	sp.cp = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * (n + 2 * p + 2) * sp.stride);
 	memset(&res, 0, sizeof(res));
 	if (!sp.knots || !sp.cp)
 	{
-		free(sp.knots); free(sp.cp);
+		qaws_internal_free(sp.knots); qaws_internal_free(sp.cp);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 	memcpy(sp.knots, knots, sizeof(qaws_scalar) * kc);
@@ -323,16 +324,16 @@ static qaws_status ex_spline_kind(qaws_curve const* c, qaws_scalar t0, qaws_scal
 	}
 
 	s = ex_spline_restrict(&sp, t0, t1, &res);
-	free(sp.knots); free(sp.cp);
+	qaws_internal_free(sp.knots); qaws_internal_free(sp.cp);
 	if (s != QAWS_STATUS_OK)
 		return s;
 
 	if (rational)
 	{
-		qaws_scalar* cp = (qaws_scalar*)malloc(sizeof(qaws_scalar) * res.cp_count * (dim + 1));
+		qaws_scalar* cp = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * res.cp_count * (dim + 1));
 		qaws_scalar* w;
 		qaws_nurbs_desc d;
-		if (!cp) { free(res.cp); free(res.knots); return QAWS_STATUS_ALLOCATION_FAILURE; }
+		if (!cp) { qaws_internal_free(res.cp); qaws_internal_free(res.knots); return QAWS_STATUS_ALLOCATION_FAILURE; }
 		w = cp + res.cp_count * dim;
 		for (i = 0; i < res.cp_count; i++)
 		{
@@ -350,7 +351,7 @@ static qaws_status ex_spline_kind(qaws_curve const* c, qaws_scalar t0, qaws_scal
 		d.weights = w;
 		d.weight_count = res.cp_count;
 		s = qaws_curve_create_nurbs_ex(&d, c->allocator, out);
-		free(cp);
+		qaws_internal_free(cp);
 	}
 	else
 	{
@@ -364,7 +365,7 @@ static qaws_status ex_spline_kind(qaws_curve const* c, qaws_scalar t0, qaws_scal
 		d.knot_count = res.knot_count;
 		s = qaws_curve_create_bspline_ex(&d, c->allocator, out);
 	}
-	free(res.cp); free(res.knots);
+	qaws_internal_free(res.cp); qaws_internal_free(res.knots);
 	return s;
 }
 
@@ -387,10 +388,10 @@ static int ex_cubics_reserve(ex_cubics* q, unsigned int n)
 	unsigned int cap = q->capacity ? q->capacity : 8;
 	if (n <= q->capacity) return 1;
 	while (cap < n) cap *= 2;
-	cp = (qaws_scalar*)realloc(q->cp, sizeof(qaws_scalar) * 3 * (3 * cap + 1));
+	cp = (qaws_scalar*)qaws_internal_realloc(q->cp, sizeof(qaws_scalar) * 3 * (3 * cap + 1));
 	if (!cp) return 0;
 	q->cp = cp;
-	br = (qaws_scalar*)realloc(q->breaks, sizeof(qaws_scalar) * (cap + 1));
+	br = (qaws_scalar*)qaws_internal_realloc(q->breaks, sizeof(qaws_scalar) * (cap + 1));
 	if (!br) return 0;
 	q->breaks = br;
 	q->capacity = cap;
@@ -464,7 +465,7 @@ static void ex_cubic_piece(qaws_curve const* c, ex_cubics* q, unsigned int span,
 static qaws_status ex_cubics_curve(qaws_curve const* c, ex_cubics* q, qaws_curve** out)
 {
 	unsigned int dim = (unsigned int)c->dimension, n = 3 * q->count + 1, i, k;
-	qaws_scalar* cp = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (n * dim + n + 4));
+	qaws_scalar* cp = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * (n * dim + n + 4));
 	qaws_scalar* knots;
 	qaws_status s;
 	if (!cp) return QAWS_STATUS_ALLOCATION_FAILURE;
@@ -500,7 +501,7 @@ static qaws_status ex_cubics_curve(qaws_curve const* c, ex_cubics* q, qaws_curve
 		d.knot_count = kc;
 		s = qaws_curve_create_bspline_ex(&d, c->allocator, out);
 	}
-	free(cp);
+	qaws_internal_free(cp);
 	return s;
 }
 
@@ -550,7 +551,7 @@ static qaws_status ex_cubic_kind(qaws_curve const* c, qaws_scalar t0, qaws_scala
 	st = q.status;
 	if (st == QAWS_STATUS_OK)
 		st = q.count ? ex_cubics_curve(c, &q, out) : QAWS_STATUS_INVALID_ARGUMENT;
-	free(q.cp); free(q.breaks);
+	qaws_internal_free(q.cp); qaws_internal_free(q.breaks);
 	return st;
 }
 
@@ -584,7 +585,7 @@ static qaws_status ex_arc(qaws_curve const* c, qaws_scalar t0, qaws_scalar t1, q
 	qaws_status st;
 
 	if (s1 > s0 && u1 <= QAWS_ZERO) { s1--; u1 = QAWS_ONE; }
-	seg = (qaws_arc_segment*)malloc(sizeof(qaws_arc_segment) * (s1 - s0 + 1));
+	seg = (qaws_arc_segment*)qaws_internal_malloc(sizeof(qaws_arc_segment) * (s1 - s0 + 1));
 	if (!seg) return QAWS_STATUS_ALLOCATION_FAILURE;
 	for (s = s0; s <= s1; s++)
 	{
@@ -601,7 +602,7 @@ static qaws_status ex_arc(qaws_curve const* c, qaws_scalar t0, qaws_scalar t1, q
 	d.segments = seg;
 	d.segment_count = n;
 	st = n ? qaws_curve_create_arc_ex(&d, c->allocator, out) : QAWS_STATUS_INVALID_ARGUMENT;
-	free(seg);
+	qaws_internal_free(seg);
 	return st;
 }
 
@@ -638,7 +639,7 @@ static qaws_status ex_composite(qaws_curve const* c, qaws_scalar t0, qaws_scalar
 	qaws_status st = QAWS_STATUS_OK;
 
 	if (s1 > s0 && u1 <= QAWS_ZERO) { s1--; u1 = QAWS_ONE; }
-	parts = (qaws_curve**)malloc(sizeof(qaws_curve*) * (s1 - s0 + 1));
+	parts = (qaws_curve**)qaws_internal_malloc(sizeof(qaws_curve*) * (s1 - s0 + 1));
 	if (!parts) return QAWS_STATUS_ALLOCATION_FAILURE;
 	for (s = s0; s <= s1 && st == QAWS_STATUS_OK; s++)
 	{
@@ -654,13 +655,13 @@ static qaws_status ex_composite(qaws_curve const* c, qaws_scalar t0, qaws_scalar
 	if (st != QAWS_STATUS_OK)
 	{
 		for (i = 0; i < n; i++) qaws_curve_destroy(parts[i]);
-		free(parts);
+		qaws_internal_free(parts);
 		return st;
 	}
 	if (n == 1)
 	{
 		*out = parts[0];
-		free(parts);
+		qaws_internal_free(parts);
 		return QAWS_STATUS_OK;
 	}
 	memset(&d, 0, sizeof(d));
@@ -670,7 +671,7 @@ static qaws_status ex_composite(qaws_curve const* c, qaws_scalar t0, qaws_scalar
 	st = qaws_curve_create_composite_ex(&d, c->allocator, out);
 	if (st != QAWS_STATUS_OK)
 		for (i = 0; i < n; i++) qaws_curve_destroy(parts[i]);
-	free(parts);
+	qaws_internal_free(parts);
 	return st;
 }
 

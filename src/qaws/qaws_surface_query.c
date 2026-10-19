@@ -11,6 +11,7 @@
  */
 
 #include "qaws_surface_region.h"
+#include "internal/qaws_internal_memory.h"
 #include "qaws_surface.h"
 #include "qaws_curve.h"
 #include "qaws_eval.h"
@@ -397,10 +398,10 @@ qaws_status qaws_surface_region_distance(qaws_surface_region const* region, qaws
 				if (n == cap)
 				{
 					unsigned int nc = cap ? 2 * cap : 64;
-					qaws_curve const** g1 = (qaws_curve const**)realloc((void*)cv, sizeof(*cv) * nc);
+					qaws_curve const** g1 = (qaws_curve const**)qaws_internal_realloc((void*)cv, sizeof(*cv) * nc);
 					double* g2;
 					if (g1) cv = g1;
-					g2 = g1 ? (double*)realloc(lb, sizeof(double) * nc) : NULL;
+					g2 = g1 ? (double*)qaws_internal_realloc(lb, sizeof(double) * nc) : NULL;
 					if (!g1 || !g2)
 					{
 						st = QAWS_STATUS_ALLOCATION_FAILURE;
@@ -439,8 +440,8 @@ qaws_status qaws_surface_region_distance(qaws_surface_region const* region, qaws
 			}
 			cv[bi] = NULL;
 		}
-		free((void*)cv);
-		free(lb);
+		qaws_internal_free((void*)cv);
+		qaws_internal_free(lb);
 		if (st != QAWS_STATUS_OK)
 			return st;
 	}
@@ -497,9 +498,9 @@ qaws_status qaws_surface_curve_create_shortest_path(qaws_surface const* surface,
 	}
 	/* (no obstacles: the whole surface, no loops) */
 	nout = !np || (c.pu > 0 && c.pv > 0) ? 0 : c.pu > 0 || c.pv > 0 ? 2 : 4;
-	own = (qaws_curve**)calloc(total + nout + 1, sizeof(qaws_curve*));
-	views = (qaws_curve const**)calloc(total + nout + 1, sizeof(qaws_curve*));
-	loops = (qaws_path_2d*)calloc(np + 3, sizeof(qaws_path_2d));
+	own = (qaws_curve**)qaws_internal_zalloc(total + nout + 1, sizeof(qaws_curve*));
+	views = (qaws_curve const**)qaws_internal_zalloc(total + nout + 1, sizeof(qaws_curve*));
+	loops = (qaws_path_2d*)qaws_internal_zalloc(np + 3, sizeof(qaws_path_2d));
 	if (!own || !views || !loops)
 	{
 		st = QAWS_STATUS_ALLOCATION_FAILURE;
@@ -570,7 +571,7 @@ qaws_status qaws_surface_curve_create_shortest_path(qaws_surface const* surface,
 	{
 		/* the runs end to end, as one curve in (u, v) */
 		unsigned int nr = qaws_shell_curve_get_run_count(sc);
-		qaws_curve** seg = (qaws_curve**)calloc(nr + 1, sizeof(qaws_curve*));
+		qaws_curve** seg = (qaws_curve**)qaws_internal_zalloc(nr + 1, sizeof(qaws_curve*));
 		qaws_curve* comp = NULL;
 		if (!seg)
 			st = QAWS_STATUS_ALLOCATION_FAILURE;
@@ -596,12 +597,12 @@ qaws_status qaws_surface_curve_create_shortest_path(qaws_surface const* surface,
 		if (st == QAWS_STATUS_OK)
 			st = qaws_surface_curve_create_uv(surface, comp, out_curve);
 		qaws_curve_destroy(comp);
-		free(seg);
+		qaws_internal_free(seg);
 	}
 done:
 	qaws_shell_curve_destroy(sc);
 	qaws_shell_atlas_destroy(atlas);
 	for (i = 0; i < nown; i++) qaws_curve_destroy(own[i]);
-	free(own); free((void*)views); free(loops);
+	qaws_internal_free(own); qaws_internal_free((void*)views); qaws_internal_free(loops);
 	return st;
 }

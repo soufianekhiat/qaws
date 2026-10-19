@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include "internal/qaws_internal_memory.h"
 #include "qaws_surface_intersect.h"
 #include "qaws_surface.h"
 #include <stdlib.h>
@@ -503,7 +504,7 @@ qaws_status qaws_surface_intersect(
 
 		seed_capacity = grid_n * grid_n;
 		if (seed_capacity > 1000) seed_capacity = 1000;
-		seeds = (qaws_ssi_point*)malloc(seed_capacity * sizeof(qaws_ssi_point));
+		seeds = (qaws_ssi_point*)qaws_internal_malloc(seed_capacity * sizeof(qaws_ssi_point));
 		if (!seeds) return QAWS_STATUS_ALLOCATION_FAILURE;
 
 		for (gi = 0; gi < grid_n && seed_count < seed_capacity; ++gi)
@@ -562,16 +563,16 @@ qaws_status qaws_surface_intersect(
 
 	if (seed_count == 0)
 	{
-		free(seeds);
+		qaws_internal_free(seeds);
 		*out_curve_count = 0;
 		return QAWS_STATUS_OK;
 	}
 
 	/* Phase 2: March from each unused seed to form curves */
-	seed_used = (int*)calloc(seed_count, sizeof(int));
+	seed_used = (int*)qaws_internal_zalloc(seed_count, sizeof(int));
 	if (!seed_used)
 	{
-		free(seeds);
+		qaws_internal_free(seeds);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 
@@ -596,12 +597,12 @@ qaws_status qaws_surface_intersect(
 		if (fwd_cap > max_march) fwd_cap = max_march;
 		if (bwd_cap > max_march) bwd_cap = max_march;
 
-		fwd_buf = (qaws_ssi_point*)malloc(fwd_cap * sizeof(qaws_ssi_point));
-		bwd_buf = (qaws_ssi_point*)malloc(bwd_cap * sizeof(qaws_ssi_point));
+		fwd_buf = (qaws_ssi_point*)qaws_internal_malloc(fwd_cap * sizeof(qaws_ssi_point));
+		bwd_buf = (qaws_ssi_point*)qaws_internal_malloc(bwd_cap * sizeof(qaws_ssi_point));
 		if (!fwd_buf || !bwd_buf)
 		{
-			free(fwd_buf);
-			free(bwd_buf);
+			qaws_internal_free(fwd_buf);
+			qaws_internal_free(bwd_buf);
 			break;
 		}
 
@@ -628,8 +629,8 @@ qaws_status qaws_surface_intersect(
 			/* Truncate */
 			if (total_points + 1 > point_capacity)
 			{
-				free(fwd_buf);
-				free(bwd_buf);
+				qaws_internal_free(fwd_buf);
+				qaws_internal_free(bwd_buf);
 				break;
 			}
 			total_curve_pts = point_capacity - total_points;
@@ -695,12 +696,12 @@ qaws_status qaws_surface_intersect(
 			total_points += total_curve_pts;
 		}
 
-		free(fwd_buf);
-		free(bwd_buf);
+		qaws_internal_free(fwd_buf);
+		qaws_internal_free(bwd_buf);
 	}
 
-	free(seed_used);
-	free(seeds);
+	qaws_internal_free(seed_used);
+	qaws_internal_free(seeds);
 
 	*out_curve_count = curve_count;
 	return QAWS_STATUS_OK;

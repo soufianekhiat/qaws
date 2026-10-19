@@ -144,7 +144,3 @@ own tool, `examples/repulsive_gpu_parity.c`.
 - **Views of the remaining families** (arc, Yuksel, trajectory,
   subdivision). Composites take borrowed children; clothoids hold no arrays. Hermite, Catmull-Rom and polynomial curves have
   views; owned objects are not rebuilt on views (their parity is tested).
-- **The allocator through the other entry points.** Every curve and surface
-  constructor takes one, and curves derived from a source curve use its
-  allocator (test 146). Operation scratch, sampling, traversal, batches and
-  repulsive still use malloc.

@@ -1,4 +1,5 @@
 #include "qaws_cross_field.h"
+#include "../internal/qaws_internal_memory.h"
 #include "../internal/qaws_internal_ldlt.h"
 #include <stdlib.h>
 #include <string.h>
@@ -78,11 +79,11 @@ void cf_free(cf_system* s)
 {
 	if (!s)
 		return;
-	free(s->th); free(s->as); free(s->ar); free(s->rr); free(s->we); free(s->e0); free(s->enb); free(s->ew); free(s->ez);
-	free(s->mass); free(s->u); free(s->id); free(s->b); free(s->x); free(s->cp); free(s->ch); free(s->pw); free(s->pg);
+	qaws_internal_free(s->th); qaws_internal_free(s->as); qaws_internal_free(s->ar); qaws_internal_free(s->rr); qaws_internal_free(s->we); qaws_internal_free(s->e0); qaws_internal_free(s->enb); qaws_internal_free(s->ew); qaws_internal_free(s->ez);
+	qaws_internal_free(s->mass); qaws_internal_free(s->u); qaws_internal_free(s->id); qaws_internal_free(s->b); qaws_internal_free(s->x); qaws_internal_free(s->cp); qaws_internal_free(s->ch); qaws_internal_free(s->pw); qaws_internal_free(s->pg);
 	qaws_internal_ldlt_free(&s->f);
 	qaws_internal_ldlt_free(&s->g);
-	free(s);
+	qaws_internal_free(s);
 }
 
 /* A_FF + sigma M_FF in real 2 x 2 blocks ([a -b; b a] for a + ib), each unknown's two rows at its vertex for the ordering;
@@ -91,8 +92,8 @@ static qaws_status cf_factor(cf_system* s, double sigma, qaws_internal_ldlt* f)
 {
 	qaws_hm const* m = s->m;
 	unsigned int nrow = 2 * s->nfree, v, k, at;
-	unsigned int *rp = (unsigned int*)malloc(sizeof(unsigned int) * (nrow + 1)), *cj = NULL;
-	double *cx = NULL, *xyz = (double*)malloc(sizeof(double) * 3 * (nrow + 1));
+	unsigned int *rp = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (nrow + 1)), *cj = NULL;
+	double *cx = NULL, *xyz = (double*)qaws_internal_malloc(sizeof(double) * 3 * (nrow + 1));
 	qaws_status st = QAWS_STATUS_ALLOCATION_FAILURE;
 	memset(f, 0, sizeof *f);
 	if (!rp || !xyz)
@@ -111,8 +112,8 @@ static qaws_status cf_factor(cf_system* s, double sigma, qaws_internal_ldlt* f)
 		memcpy(xyz + 6 * (size_t)a + 3, m->x + 3 * (size_t)v, sizeof(double) * 3);
 	}
 	rp[nrow] = at;
-	cj = (unsigned int*)malloc(sizeof(unsigned int) * (at + 1));
-	cx = (double*)malloc(sizeof(double) * (at + 1));
+	cj = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (at + 1));
+	cx = (double*)qaws_internal_malloc(sizeof(double) * (at + 1));
 	if (!cj || !cx)
 		goto done;
 	for (v = 0; v < m->nv; v++)
@@ -148,7 +149,7 @@ static qaws_status cf_factor(cf_system* s, double sigma, qaws_internal_ldlt* f)
 			s->nnz_a += cj[at] <= k;
 	st = nrow ? qaws_internal_ldlt_factor(f, nrow, rp, cj, cx, xyz, 0) : QAWS_STATUS_OK;
 done:
-	free(rp); free(cj); free(cx); free(xyz);
+	qaws_internal_free(rp); qaws_internal_free(cj); qaws_internal_free(cx); qaws_internal_free(xyz);
 	return st;
 }
 
@@ -156,7 +157,7 @@ static double cf_angle(cf_system const* s, unsigned int v, double const* g);
 
 qaws_status cf_create(qaws_hm const* m, double const* nrm, mf_level const* L0, unsigned int n, cf_system** out)
 {
-	cf_system* s = (cf_system*)calloc(1, sizeof(cf_system));
+	cf_system* s = (cf_system*)qaws_internal_zalloc(1, sizeof(cf_system));
 	unsigned int v, f, c, k, nc = m->nc, nv = m->nv, ne = 0, at;
 	double mean = 0;
 	qaws_status st = QAWS_STATUS_ALLOCATION_FAILURE;
@@ -166,15 +167,15 @@ qaws_status cf_create(qaws_hm const* m, double const* nrm, mf_level const* L0, u
 	s->m = m;
 	s->nrm = nrm;
 	s->n = n;
-	s->th = (double*)calloc((size_t)nc + 1, sizeof(double));
-	s->as = (double*)calloc((size_t)nc + 1, sizeof(double));
-	s->ar = (double*)calloc((size_t)nc + 1, sizeof(double));
-	s->we = (double*)calloc((size_t)nc + 1, sizeof(double));
-	s->rr = (double*)calloc(2 * (size_t)nc + 2, sizeof(double));
-	s->e0 = (unsigned int*)malloc(sizeof(unsigned int) * (nv + 1));
-	s->mass = (double*)calloc((size_t)nv + 1, sizeof(double));
-	s->u = (double*)malloc(sizeof(double) * 2 * (nv + 1));
-	s->id = (unsigned int*)malloc(sizeof(unsigned int) * (nv + 1));
+	s->th = (double*)qaws_internal_zalloc((size_t)nc + 1, sizeof(double));
+	s->as = (double*)qaws_internal_zalloc((size_t)nc + 1, sizeof(double));
+	s->ar = (double*)qaws_internal_zalloc((size_t)nc + 1, sizeof(double));
+	s->we = (double*)qaws_internal_zalloc((size_t)nc + 1, sizeof(double));
+	s->rr = (double*)qaws_internal_zalloc(2 * (size_t)nc + 2, sizeof(double));
+	s->e0 = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (nv + 1));
+	s->mass = (double*)qaws_internal_zalloc((size_t)nv + 1, sizeof(double));
+	s->u = (double*)qaws_internal_malloc(sizeof(double) * 2 * (nv + 1));
+	s->id = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (nv + 1));
 	if (!s->th || !s->as || !s->ar || !s->we || !s->rr || !s->e0 || !s->mass || !s->u || !s->id)
 		goto done;
 	/* each vertex's corner angles, rescaled to sum to 2 pi (pi on the border) from its first edge on */
@@ -268,9 +269,9 @@ qaws_status cf_create(qaws_hm const* m, double const* nrm, mf_level const* L0, u
 	/* each vertex's edges: out along its corners (the transport back the conjugate), and on the border in along the last */
 	for (v = 0, at = 0; v < nv; v++)
 		at += m->vc[v] == HM_NONE ? 0 : hm_valence(m, v);
-	s->enb = (unsigned int*)malloc(sizeof(unsigned int) * (at + 1));
-	s->ew = (double*)malloc(sizeof(double) * (at + 1));
-	s->ez = (double*)malloc(sizeof(double) * 2 * (at + 1));
+	s->enb = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (at + 1));
+	s->ew = (double*)qaws_internal_malloc(sizeof(double) * (at + 1));
+	s->ez = (double*)qaws_internal_malloc(sizeof(double) * 2 * (at + 1));
 	if (!s->enb || !s->ew || !s->ez)
 		goto done;
 	for (v = 0, at = 0; v < nv; v++)
@@ -301,7 +302,7 @@ qaws_status cf_create(qaws_hm const* m, double const* nrm, mf_level const* L0, u
 	s->e0[nv] = at;
 	/* the connected components (id the stack, set below): each solved by its lines when it has some, else for its
 	   eigenvector */
-	s->cp = (unsigned int*)malloc(sizeof(unsigned int) * (nv + 1));
+	s->cp = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (nv + 1));
 	if (!s->cp)
 		goto done;
 	for (v = 0; v < nv; v++)
@@ -322,7 +323,7 @@ qaws_status cf_create(qaws_hm const* m, double const* nrm, mf_level const* L0, u
 				}
 		s->ncp++;
 	}
-	s->ch = (unsigned char*)calloc((size_t)s->ncp + 1, 1);
+	s->ch = (unsigned char*)qaws_internal_zalloc((size_t)s->ncp + 1, 1);
 	if (!s->ch)
 		goto done;
 	/* held: off the corners, along the vertex's two feature (or border) edges, the mean of their directions' n-th powers
@@ -378,8 +379,8 @@ qaws_status cf_create(qaws_hm const* m, double const* nrm, mf_level const* L0, u
 	}
 	for (v = 0; v < nv; v++)
 		s->loose |= s->id[v] != HM_NONE && !s->ch[s->cp[v]];
-	s->b = (double*)malloc(sizeof(double) * (2 * (size_t)s->nfree + 1));
-	s->x = (double*)malloc(sizeof(double) * (2 * (size_t)s->nfree + 1));
+	s->b = (double*)qaws_internal_malloc(sizeof(double) * (2 * (size_t)s->nfree + 1));
+	s->x = (double*)qaws_internal_malloc(sizeof(double) * (2 * (size_t)s->nfree + 1));
 	if (s->b && s->x)
 		st = cf_factor(s, 1e-8, &s->f);
 done:
@@ -526,15 +527,15 @@ static qaws_status cf_connection(cf_system* s, int const* cone, double const* at
 	memset(delta, 0, sizeof(double) * m->nc);
 	if (!nf)
 		return QAWS_STATUS_OK;
-	uf = (unsigned int*)malloc(sizeof(unsigned int) * (nf + 1));
-	rp = (unsigned int*)malloc(sizeof(unsigned int) * (nf + 1));
-	cj = (unsigned int*)malloc(sizeof(unsigned int) * ((size_t)m->nc + nf + 1));
-	cx = (double*)malloc(sizeof(double) * ((size_t)m->nc + nf + 1));
-	b = (double*)malloc(sizeof(double) * (2 * (size_t)nf + 1));
-	xyz = (double*)calloc(3 * (size_t)nf + 3, sizeof(double));
-	sum = (double*)calloc((size_t)nf + 1, sizeof(double));
-	cnt = (double*)calloc((size_t)nf + 1, sizeof(double));
-	grounded = (unsigned char*)calloc((size_t)nf + 1, 1);
+	uf = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (nf + 1));
+	rp = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (nf + 1));
+	cj = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)m->nc + nf + 1));
+	cx = (double*)qaws_internal_malloc(sizeof(double) * ((size_t)m->nc + nf + 1));
+	b = (double*)qaws_internal_malloc(sizeof(double) * (2 * (size_t)nf + 1));
+	xyz = (double*)qaws_internal_zalloc(3 * (size_t)nf + 3, sizeof(double));
+	sum = (double*)qaws_internal_zalloc((size_t)nf + 1, sizeof(double));
+	cnt = (double*)qaws_internal_zalloc((size_t)nf + 1, sizeof(double));
+	grounded = (unsigned char*)qaws_internal_zalloc((size_t)nf + 1, 1);
 	if (!uf || !rp || !cj || !cx || !b || !xyz || !sum || !cnt || !grounded)
 		goto done;
 	for (f = 0; f < nf; f++)
@@ -626,7 +627,7 @@ static qaws_status cf_connection(cf_system* s, int const* cone, double const* at
 		}
 done:
 	qaws_internal_ldlt_free(&L);
-	free(uf); free(rp); free(cj); free(cx); free(b); free(xyz); free(sum); free(cnt); free(grounded);
+	qaws_internal_free(uf); qaws_internal_free(rp); qaws_internal_free(cj); qaws_internal_free(cx); qaws_internal_free(b); qaws_internal_free(xyz); qaws_internal_free(sum); qaws_internal_free(cnt); qaws_internal_free(grounded);
 	return st;
 }
 
@@ -641,8 +642,8 @@ qaws_status cf_steer(cf_system* s, double const* att, int const* cone)
 	if (cone)
 	{
 		/* Poincare-Hopf on each closed component with nothing held: sum k = n (V - E + F) */
-		long *chi = (long*)calloc((size_t)s->ncp + 1, sizeof(long)), *ks = (long*)calloc((size_t)s->ncp + 1, sizeof(long));
-		unsigned char* open = (unsigned char*)calloc((size_t)s->ncp + 1, 1);
+		long *chi = (long*)qaws_internal_zalloc((size_t)s->ncp + 1, sizeof(long)), *ks = (long*)qaws_internal_zalloc((size_t)s->ncp + 1, sizeof(long));
+		unsigned char* open = (unsigned char*)qaws_internal_zalloc((size_t)s->ncp + 1, 1);
 		st = chi && ks && open ? QAWS_STATUS_OK : QAWS_STATUS_ALLOCATION_FAILURE;
 		for (v = 0; st == QAWS_STATUS_OK && v < nv; v++)
 		{
@@ -662,11 +663,11 @@ qaws_status cf_steer(cf_system* s, double const* att, int const* cone)
 		for (v = 0; st == QAWS_STATUS_OK && v < s->ncp; v++)
 			if (!open[v] && ks[v] != (long)s->n * chi[v])
 				st = QAWS_STATUS_INVALID_ARGUMENT;
-		free(chi); free(ks); free(open);
+		qaws_internal_free(chi); qaws_internal_free(ks); qaws_internal_free(open);
 		if (st != QAWS_STATUS_OK)
 			return st;
 	}
-	delta = (double*)malloc(sizeof(double) * ((size_t)m->nc + 1));
+	delta = (double*)qaws_internal_malloc(sizeof(double) * ((size_t)m->nc + 1));
 	if (!delta)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	st = cf_connection(s, cone, att, delta);
@@ -693,7 +694,7 @@ qaws_status cf_steer(cf_system* s, double const* att, int const* cone)
 			k++;
 		}
 	}
-	free(delta);
+	qaws_internal_free(delta);
 	if (st != QAWS_STATUS_OK)
 		return st;
 	qaws_internal_ldlt_free(&s->f);
@@ -707,11 +708,11 @@ qaws_status cf_smoothest(cf_system* s, double* out_q)
 {
 	qaws_hm const* m = s->m;
 	unsigned int v, c, it;
-	double *q = (double*)calloc(2 * (size_t)m->nv + 2, sizeof(double)), *nn = (double*)malloc(sizeof(double) * ((size_t)s->ncp + 1));
+	double *q = (double*)qaws_internal_zalloc(2 * (size_t)m->nv + 2, sizeof(double)), *nn = (double*)qaws_internal_malloc(sizeof(double) * ((size_t)s->ncp + 1));
 	if (!q || !nn)
 	{
-		free(q);
-		free(nn);
+		qaws_internal_free(q);
+		qaws_internal_free(nn);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 	/* a component held by lines: one solve, A_FF u_F = -A_FC u_C (q 0 there); one without: inverse power iteration toward
@@ -748,8 +749,8 @@ qaws_status cf_smoothest(cf_system* s, double* out_q)
 		if (it && moved < 1e-12)
 			break;
 	}
-	free(q);
-	free(nn);
+	qaws_internal_free(q);
+	qaws_internal_free(nn);
 	cf_directions(s, out_q);
 	return QAWS_STATUS_OK;
 }
@@ -783,14 +784,14 @@ static double cf_angle(cf_system const* s, unsigned int v, double const* g)
 qaws_status cf_aligned(cf_system* s, double const* guide, double* out_q)
 {
 	qaws_hm const* m = s->m;
-	double *q = (double*)malloc(sizeof(double) * 2 * (m->nv + 1)), *gc = (double*)calloc((size_t)s->ncp + 1, sizeof(double)), nn = 0;
+	double *q = (double*)qaws_internal_malloc(sizeof(double) * 2 * (m->nv + 1)), *gc = (double*)qaws_internal_zalloc((size_t)s->ncp + 1, sizeof(double)), nn = 0;
 	unsigned int v;
 	int bare = 0;
 	qaws_status st;
 	if (!q || !gc)
 	{
-		free(q);
-		free(gc);
+		qaws_internal_free(q);
+		qaws_internal_free(gc);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 	/* q = |g|^2 exp(i n phi), normalized to 1 / sqrt(area) in M (the pull then weighs as the held lines at any scale) */
@@ -821,18 +822,18 @@ qaws_status cf_aligned(cf_system* s, double const* guide, double* out_q)
 			}
 		if (st != QAWS_STATUS_OK || !(nn > 0) || !(s->area > 0))
 		{
-			free(q);
-			free(gc);
+			qaws_internal_free(q);
+			qaws_internal_free(gc);
 			return st;
 		}
 	}
-	free(gc);
+	qaws_internal_free(gc);
 	nn = 1 / sqrt(nn * s->area);
 	for (v = 0; v < 2 * m->nv; v++)
 		q[v] *= nn;
 	if (s->nfree)
 		cf_solve(s, &s->f, q, 0);
-	free(q);
+	qaws_internal_free(q);
 	cf_directions(s, out_q);
 	return QAWS_STATUS_OK;
 }
@@ -843,8 +844,8 @@ qaws_status cf_guide(cf_system* s, double const* g)
 	unsigned int v, k, any = 0;
 	if (!s->pw)
 	{
-		s->pw = (double*)calloc((size_t)m->nv + 1, sizeof(double));
-		s->pg = (double*)calloc(2 * (size_t)m->nv + 2, sizeof(double));
+		s->pw = (double*)qaws_internal_zalloc((size_t)m->nv + 1, sizeof(double));
+		s->pg = (double*)qaws_internal_zalloc(2 * (size_t)m->nv + 2, sizeof(double));
 		if (!s->pw || !s->pg)
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
@@ -889,7 +890,7 @@ qaws_status cf_relax(cf_system* s, double eps, unsigned int steps, double* out_q
 	qaws_status st = QAWS_STATUS_OK;
 	if (s->nfree && s->held && eps > 0 && steps)
 	{
-		q = (double*)calloc(2 * (size_t)m->nv + 2, sizeof(double));
+		q = (double*)qaws_internal_zalloc(2 * (size_t)m->nv + 2, sizeof(double));
 		if (!q)
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 		if (s->geps != eps)
@@ -914,7 +915,7 @@ qaws_status cf_relax(cf_system* s, double eps, unsigned int steps, double* out_q
 				break;
 			cf_solve(s, &s->g, q, 1);
 		}
-		free(q);
+		qaws_internal_free(q);
 	}
 	if (st == QAWS_STATUS_OK)
 		cf_directions(s, out_q);
@@ -990,7 +991,7 @@ qaws_status cf_direction_field(qaws_mesh_3d const* mesh, mf_hier const* h, unsig
 		cf_free(sys);
 		return st;
 	}
-	q = (double*)malloc(sizeof(double) * 3 * (m->nv + 1));
+	q = (double*)qaws_internal_malloc(sizeof(double) * 3 * (m->nv + 1));
 	if (!q)
 	{
 		st = QAWS_STATUS_ALLOCATION_FAILURE;
@@ -1009,7 +1010,7 @@ qaws_status cf_direction_field(qaws_mesh_3d const* mesh, mf_hier const* h, unsig
 	if (aligned)
 	{
 		/* the guide: the direction of largest curvature on the PN reference, as strong as the surface bends one way more */
-		g = (double*)calloc(3 * (size_t)m->nv + 3, sizeof(double));
+		g = (double*)qaws_internal_zalloc(3 * (size_t)m->nv + 3, sizeof(double));
 		if (!g)
 		{
 			st = QAWS_STATUS_ALLOCATION_FAILURE;
@@ -1041,8 +1042,8 @@ qaws_status cf_direction_field(qaws_mesh_3d const* mesh, mf_hier const* h, unsig
 	if (out_face_index)
 		cf_index(sys, out_face_index);
 done:
-	free(q);
-	free(g);
+	qaws_internal_free(q);
+	qaws_internal_free(g);
 	qaws_mesh_reference_destroy(r);
 	cf_free(sys);
 	return st;

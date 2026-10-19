@@ -29,6 +29,7 @@
  */
 
 #include "qaws_quad_improve.h"
+#include "../internal/qaws_internal_memory.h"
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -844,7 +845,7 @@ static int qi_push(qi_work* w, qi_op const* o, unsigned int a, unsigned int b)
 	if (w->ncand == w->ccand)
 	{
 		unsigned int c = w->ccand ? 2 * w->ccand : 256;
-		qi_cand* p = (qi_cand*)realloc(w->cand, sizeof(qi_cand) * c);
+		qi_cand* p = (qi_cand*)qaws_internal_realloc(w->cand, sizeof(qi_cand) * c);
 		if (!p)
 			return 0;
 		w->cand = p;
@@ -1142,12 +1143,12 @@ static int qi_relax(qi_work* w)
 {
 	qaws_hm* m = w->m;
 	unsigned int sweep, v, f, nb = 0, i, k;
-	unsigned char* busy = (unsigned char*)malloc((size_t)m->nv + 1);
-	qi_bad* bad = (qi_bad*)malloc(sizeof(qi_bad) * (m->nf + 1));
+	unsigned char* busy = (unsigned char*)qaws_internal_malloc((size_t)m->nv + 1);
+	qi_bad* bad = (qi_bad*)qaws_internal_malloc(sizeof(qi_bad) * (m->nf + 1));
 	if (!busy || !bad)
 	{
-		free(busy);
-		free(bad);
+		qaws_internal_free(busy);
+		qaws_internal_free(bad);
 		return 0;
 	}
 	memset(busy, 1, m->nv);
@@ -1214,8 +1215,8 @@ static int qi_relax(qi_work* w)
 			if (!qi_line(w, v))
 				qi_search(w, v);
 		}
-	free(busy);
-	free(bad);
+	qaws_internal_free(busy);
+	qaws_internal_free(bad);
 	return 1;
 }
 
@@ -1229,10 +1230,10 @@ unsigned int qi_improve(qaws_hm* m, qaws_mesh_reference const* r, mr_scratch* s,
 	w.s = s;
 	w.kind = kind;
 	w.rho = rho;
-	w.ideal = (unsigned char*)malloc((size_t)m->nv + 1);
-	w.stamp = (unsigned int*)calloc((size_t)m->nv + 1, sizeof(unsigned int));
-	w.fstamp = (unsigned int*)calloc((size_t)m->nf + 1, sizeof(unsigned int));
-	w.fnrm = (double*)malloc(sizeof(double) * (3 * (size_t)m->nf + 3));
+	w.ideal = (unsigned char*)qaws_internal_malloc((size_t)m->nv + 1);
+	w.stamp = (unsigned int*)qaws_internal_zalloc((size_t)m->nv + 1, sizeof(unsigned int));
+	w.fstamp = (unsigned int*)qaws_internal_zalloc((size_t)m->nf + 1, sizeof(unsigned int));
+	w.fnrm = (double*)qaws_internal_malloc(sizeof(double) * (3 * (size_t)m->nf + 3));
 	if (!w.ideal || !w.stamp || !w.fstamp || !w.fnrm)
 		goto done;
 	qi_ideal(&w);
@@ -1264,10 +1265,10 @@ unsigned int qi_improve(qaws_hm* m, qaws_mesh_reference const* r, mr_scratch* s,
 	hm_attr_remove(m, a);
 	ok = 1;
 done:
-	free(w.ideal);
-	free(w.stamp);
-	free(w.fstamp);
-	free(w.fnrm);
-	free(w.cand);
+	qaws_internal_free(w.ideal);
+	qaws_internal_free(w.stamp);
+	qaws_internal_free(w.fstamp);
+	qaws_internal_free(w.fnrm);
+	qaws_internal_free(w.cand);
 	return ok ? w.ops : HM_NONE;
 }

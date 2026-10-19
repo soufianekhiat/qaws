@@ -27,6 +27,7 @@
  */
 
 #include "qaws_repulsive.h"
+#include "internal/qaws_internal_memory.h"
 #include "internal/qaws_internal_repulsive.h"
 #include "internal/qaws_internal_repulsive_solve.h"
 #include "internal/qaws_internal_parallel.h"
@@ -59,7 +60,7 @@ void qaws_internal_rs_hier_free(qaws_internal_rs_hier* h)
 {
 	qaws_internal_rbh_destroy(h->A);
 	qaws_internal_rbh_destroy(h->F);
-	free(h->lij); free(h->lw); free(h->mass);
+	qaws_internal_free(h->lij); qaws_internal_free(h->lw); qaws_internal_free(h->mass);
 	memset(h, 0, sizeof(*h));
 }
 
@@ -68,10 +69,10 @@ void qaws_internal_rs_hsys_free(qaws_internal_rs_hsys* H)
 	if (!H)
 		return;
 	qaws_internal_rs_hier_free(&H->h);
-	free(H->Y); free(H->C); free(H->phi); free(H->S); free(H->piv);
-	free(H->t0); free(H->t1);
-	free(H->perm); free(H->inv); free(H->first); free(H->start); free(H->L);
-	free(H);
+	qaws_internal_free(H->Y); qaws_internal_free(H->C); qaws_internal_free(H->phi); qaws_internal_free(H->S); qaws_internal_free(H->piv);
+	qaws_internal_free(H->t0); qaws_internal_free(H->t1);
+	qaws_internal_free(H->perm); qaws_internal_free(H->inv); qaws_internal_free(H->first); qaws_internal_free(H->start); qaws_internal_free(H->L);
+	qaws_internal_free(H);
 }
 
 static void rh_mask(rs_core const* s, double* v)
@@ -102,26 +103,26 @@ static void rh_work_destroy(rh_work* W)
 {
 	if (!W)
 		return;
-	free(W->V); free(W->Z); free(W->H); free(W->cs); free(W->sn); free(W->gq);
-	free(W->t0); free(W->t3); free(W->b); free(W->r); free(W->tmp);
+	qaws_internal_free(W->V); qaws_internal_free(W->Z); qaws_internal_free(W->H); qaws_internal_free(W->cs); qaws_internal_free(W->sn); qaws_internal_free(W->gq);
+	qaws_internal_free(W->t0); qaws_internal_free(W->t3); qaws_internal_free(W->b); qaws_internal_free(W->r); qaws_internal_free(W->tmp);
 	qaws_internal_rbh_scratch_destroy(W->sa);
 	qaws_internal_rbh_scratch_destroy(W->sf);
-	free(W);
+	qaws_internal_free(W);
 }
 
 static rh_work* rh_work_create(qaws_internal_rs_hsys const* H)
 {
 	size_t nv = H->s->nv;
-	rh_work* W = (rh_work*)calloc(1, sizeof(rh_work));
+	rh_work* W = (rh_work*)qaws_internal_zalloc(1, sizeof(rh_work));
 	if (!W)
 		return NULL;
-	W->V = (double*)malloc(sizeof(double) * nv * (RH_RESTART + 1));
-	W->Z = (double*)malloc(sizeof(double) * nv * (RH_RESTART + 1));
-	W->H = (double*)calloc((RH_RESTART + 1) * RH_RESTART, sizeof(double));
-	W->cs = (double*)malloc(sizeof(double) * RH_RESTART); W->sn = (double*)malloc(sizeof(double) * RH_RESTART);
-	W->gq = (double*)malloc(sizeof(double) * (RH_RESTART + 1));
-	W->t0 = (double*)malloc(sizeof(double) * nv); W->t3 = (double*)malloc(sizeof(double) * nv);
-	W->b = (double*)malloc(sizeof(double) * nv); W->r = (double*)malloc(sizeof(double) * nv); W->tmp = (double*)malloc(sizeof(double) * nv);
+	W->V = (double*)qaws_internal_malloc(sizeof(double) * nv * (RH_RESTART + 1));
+	W->Z = (double*)qaws_internal_malloc(sizeof(double) * nv * (RH_RESTART + 1));
+	W->H = (double*)qaws_internal_zalloc((RH_RESTART + 1) * RH_RESTART, sizeof(double));
+	W->cs = (double*)qaws_internal_malloc(sizeof(double) * RH_RESTART); W->sn = (double*)qaws_internal_malloc(sizeof(double) * RH_RESTART);
+	W->gq = (double*)qaws_internal_malloc(sizeof(double) * (RH_RESTART + 1));
+	W->t0 = (double*)qaws_internal_malloc(sizeof(double) * nv); W->t3 = (double*)qaws_internal_malloc(sizeof(double) * nv);
+	W->b = (double*)qaws_internal_malloc(sizeof(double) * nv); W->r = (double*)qaws_internal_malloc(sizeof(double) * nv); W->tmp = (double*)qaws_internal_malloc(sizeof(double) * nv);
 	W->sa = qaws_internal_rbh_scratch_create(H->h.A);
 	W->sf = qaws_internal_rbh_scratch_create(H->h.F);
 	if (!W->V || !W->Z || !W->H || !W->cs || !W->sn || !W->gq || !W->t0 || !W->t3 || !W->b || !W->r || !W->tmp || !W->sa || !W->sf)
@@ -158,14 +159,14 @@ static int rh_chol_make(qaws_internal_rs_hsys* H)
 {
 	rs_core const* s = H->s;
 	unsigned int nv = s->nv, i, l, head = 0, tail = 0, n = 0;
-	unsigned int *deg = (unsigned int*)calloc(nv + 1, sizeof(unsigned int)), *adj0 = (unsigned int*)calloc(nv + 2, sizeof(unsigned int)), *adj = NULL;
-	unsigned char* seen = (unsigned char*)calloc(nv + 1, 1);
+	unsigned int *deg = (unsigned int*)qaws_internal_zalloc(nv + 1, sizeof(unsigned int)), *adj0 = (unsigned int*)qaws_internal_zalloc(nv + 2, sizeof(unsigned int)), *adj = NULL;
+	unsigned char* seen = (unsigned char*)qaws_internal_zalloc(nv + 1, 1);
 	size_t total = 0;
 	int ok = 0;
-	H->perm = (unsigned int*)malloc(sizeof(unsigned int) * (nv + 1));
-	H->inv = (unsigned int*)malloc(sizeof(unsigned int) * (nv + 1));
-	H->first = (unsigned int*)malloc(sizeof(unsigned int) * (nv + 1));
-	H->start = (size_t*)malloc(sizeof(size_t) * (nv + 1));
+	H->perm = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (nv + 1));
+	H->inv = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (nv + 1));
+	H->first = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (nv + 1));
+	H->start = (size_t*)qaws_internal_malloc(sizeof(size_t) * (nv + 1));
 	if (!deg || !adj0 || !seen || !H->perm || !H->inv || !H->first || !H->start)
 		goto done;
 	/* the adjacency (free vertices only) */
@@ -175,7 +176,7 @@ static int rh_chol_make(qaws_internal_rs_hsys* H)
 		if (a != b && !(s->fixed && (s->fixed[a] || s->fixed[b]))) { deg[a]++; deg[b]++; }
 	}
 	for (i = 0; i < nv; i++) adj0[i + 1] = adj0[i] + deg[i];
-	adj = (unsigned int*)malloc(sizeof(unsigned int) * (adj0[nv] + 1));
+	adj = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (adj0[nv] + 1));
 	if (!adj)
 		goto done;
 	memset(deg, 0, sizeof(unsigned int) * nv);
@@ -213,7 +214,7 @@ static int rh_chol_make(qaws_internal_rs_hsys* H)
 		for (a = adj0[i]; a < adj0[i + 1]; a++) if (H->perm[adj[a]] < H->first[r]) H->first[r] = H->perm[adj[a]];
 	}
 	for (i = 0; i < nv; i++) { H->start[i] = total; total += i - H->first[i] + 1; }
-	H->L = (double*)calloc(total + 1, sizeof(double));
+	H->L = (double*)qaws_internal_zalloc(total + 1, sizeof(double));
 	if (!H->L)
 		goto done;
 	/* assembled, then factored in place: L L^T */
@@ -257,7 +258,7 @@ static int rh_chol_make(qaws_internal_rs_hsys* H)
 	}
 	ok = 1;
 done:
-	free(deg); free(adj0); free(adj); free(seen);
+	qaws_internal_free(deg); qaws_internal_free(adj0); qaws_internal_free(adj); qaws_internal_free(seen);
 	return ok;
 }
 
@@ -407,9 +408,9 @@ static int rh_solve_all(qaws_internal_rs_hsys const* H, double const* const* src
 {
 	rs_core const* s = H->s;
 	unsigned int dim = s->dim, nv = s->nv, njob = 0, nuniq = 0, j, q, i, t;
-	unsigned int* which = (unsigned int*)malloc(sizeof(unsigned int) * (count * dim + 1));   /* job -> distinct system */
-	double *rhs = (double*)malloc(sizeof(double) * ((size_t)count * dim * nv + 1)), *sol = (double*)malloc(sizeof(double) * ((size_t)count * dim * nv + 1));
-	int* ok = (int*)malloc(sizeof(int) * (count * dim + 1));
+	unsigned int* which = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (count * dim + 1));   /* job -> distinct system */
+	double *rhs = (double*)qaws_internal_malloc(sizeof(double) * ((size_t)count * dim * nv + 1)), *sol = (double*)qaws_internal_malloc(sizeof(double) * ((size_t)count * dim * nv + 1));
+	int* ok = (int*)qaws_internal_malloc(sizeof(int) * (count * dim + 1));
 	int good = which && rhs && sol && ok;
 	rh_batch b;
 	for (j = 0; good && j < count; j++)
@@ -443,7 +444,7 @@ static int rh_solve_all(qaws_internal_rs_hsys const* H, double const* const* src
 	for (j = 0, njob = 0; good && j < count; j++)
 		for (q = 0; q < dim; q++, njob++)
 			for (i = 0; i < nv; i++) dst[j][dim * i + q] = which[njob] == 0xffffffffu ? 0 : sol[(size_t)which[njob] * nv + i];
-	free(which); free(rhs); free(sol); free(ok);
+	qaws_internal_free(which); qaws_internal_free(rhs); qaws_internal_free(sol); qaws_internal_free(ok);
 	return good;
 }
 
@@ -456,16 +457,16 @@ qaws_status qaws_internal_rs_hdirection(rs_core const* s, double const* x, doubl
 	*out = NULL;
 	if (s->translates)
 		return QAWS_STATUS_NUMERICAL_FAILURE;   /* (as the dense system: singular) */
-	H = (qaws_internal_rs_hsys*)calloc(1, sizeof(*H));
+	H = (qaws_internal_rs_hsys*)qaws_internal_zalloc(1, sizeof(*H));
 	if (!H)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	H->s = s; H->k = k;
-	H->Y = (double*)malloc(sizeof(double) * ((size_t)k * N + 1));
-	H->C = (double*)malloc(sizeof(double) * ((size_t)k * N + 1));
-	H->phi = (double*)malloc(sizeof(double) * (k + 1));
-	H->S = (double*)malloc(sizeof(double) * (k * k + 1));
-	H->piv = (unsigned int*)malloc(sizeof(unsigned int) * (k + 1));
-	H->t0 = (double*)malloc(sizeof(double) * nv); H->t1 = (double*)malloc(sizeof(double) * nv);
+	H->Y = (double*)qaws_internal_malloc(sizeof(double) * ((size_t)k * N + 1));
+	H->C = (double*)qaws_internal_malloc(sizeof(double) * ((size_t)k * N + 1));
+	H->phi = (double*)qaws_internal_malloc(sizeof(double) * (k + 1));
+	H->S = (double*)qaws_internal_malloc(sizeof(double) * (k * k + 1));
+	H->piv = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (k + 1));
+	H->t0 = (double*)qaws_internal_malloc(sizeof(double) * nv); H->t1 = (double*)qaws_internal_malloc(sizeof(double) * nv);
 	if (!H->Y || !H->C || !H->phi || !H->S || !H->piv || !H->t0 || !H->t1)
 	{
 		qaws_internal_rs_hsys_free(H);
