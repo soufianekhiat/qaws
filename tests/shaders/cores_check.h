@@ -16,6 +16,11 @@
 #include "../../src/qaws/core/qaws_rational_bezier_core.h"
 #include "../../src/qaws/core/qaws_surface_core.h"
 
+#define QAWS_BUFFER_KNOT(i) input_data[i]
+#define QAWS_BUFFER_POINT(i) input_data[i]
+#define QAWS_BUFFER_WEIGHT(i) input_data[i]
+#include "../../src/qaws/core/qaws_curve_record_core.h"
+
 qaws_scalar qaws_check_cores(qaws_scalar t)
 {
     qaws_scalar cp2[QAWS_CORE_MAX_POINTS * 2];
@@ -31,6 +36,7 @@ qaws_scalar qaws_check_cores(qaws_scalar t)
     qaws_eval_2d e2;
     qaws_eval_3d e3;
     qaws_surface_eval_3d es;
+    qaws_curve_record rec;
     qaws_scalar s = QAWS_ZERO;
     int i;
     int span;
@@ -93,5 +99,9 @@ qaws_scalar qaws_check_cores(qaws_scalar t)
     s += es.position.x + es.du.y + es.dv.z + es.normal.x + es.duu.y + es.duv.z + es.dvv.x;
     es = qaws_surface_bspline_eval_3d(grid, kn, kn, 3, 3, 6, 6, 3, 3, t, t, 127);
     s += es.position.x + es.du.y + es.dv.z + es.normal.x + es.duu.y + es.duv.z + es.dvv.x;
+    rec.degree = 3; rec.count = 40; rec.dimension = 3; rec.rational = 1;
+    rec.knot_offset = 0; rec.point_offset = 64; rec.weight_offset = 256; rec.reserved = 0;
+    e3 = qaws_record_eval_3d(rec, t, 7);
+    s += e3.position.x + e3.d1.y + e3.d2.z;
     return s;
 }

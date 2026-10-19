@@ -151,3 +151,24 @@ void CSCurve(uint3 id : SV_DispatchThreadID)
     }
     put3(9 * i, e.position); put3(9 * i + 3, e.d1); put3(9 * i + 6, e.d2);
 }
+
+/* curves read from the data buffer through a record (core/qaws_curve_record_core.h): the record from the parameters (dimension in
+   v_degree, rational in v_count, knots at off_knots, weights at off_extra, points at 0) */
+#define QAWS_BUFFER_KNOT(i) data[i]
+#define QAWS_BUFFER_POINT(i) data[i]
+#define QAWS_BUFFER_WEIGHT(i) data[i]
+#include "../src/qaws/core/qaws_curve_record_core.h"
+
+[numthreads(64, 1, 1)]
+void CSRecord(uint3 id : SV_DispatchThreadID)
+{
+    uint i = id.x;
+    qaws_curve_record r;
+    qaws_eval_3d e;
+    if (i >= count)
+        return;
+    r.degree = (int)degree; r.count = (int)n; r.dimension = (int)v_degree; r.rational = (int)v_count;
+    r.knot_offset = (int)off_knots; r.point_offset = 0; r.weight_offset = (int)off_extra; r.reserved = 0;
+    e = qaws_record_eval_3d(r, params[i], 7);
+    put3(9 * i, e.position); put3(9 * i + 3, e.d1); put3(9 * i + 6, e.d2);
+}

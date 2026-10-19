@@ -446,6 +446,77 @@ static void test_spline_cores(void)
 	printf("  %s\n", msg);
 }
 
+/* curves read from buffers (core/qaws_curve_record_core.h): two records sharing the arrays, both far past the 34-knot windows */
+#define EC_REC_KNOTS (64 + 4 + 40 + 6)
+#define EC_REC_POINTS (64 * 3 + 40 * 2)
+static qaws_scalar ec_rec_knots[EC_REC_KNOTS], ec_rec_points[EC_REC_POINTS], ec_rec_weights[40];
+#define QAWS_BUFFER_KNOT(i) ec_rec_knots[i]
+#define QAWS_BUFFER_POINT(i) ec_rec_points[i]
+#define QAWS_BUFFER_WEIGHT(i) ec_rec_weights[i]
+#include "core/qaws_curve_record_core.h"
+
+static void test_curve_records(void)
+{
+	qaws_curve_record rb, rn;
+	qaws_bspline_desc bd;
+	qaws_nurbs_desc nd;
+	qaws_curve *bs = NULL, *nu = NULL;
+	double eb = 0, en = 0;
+	unsigned int i;
+	char msg[256];
+	/* a cubic 3D B-spline of 64 points with a double knot, then a quintic 2D NURBS of 40 */
+	memset(&rb, 0, sizeof rb);
+	rb.degree = 3; rb.count = 64; rb.dimension = 3; rb.knot_offset = 0; rb.point_offset = 0;
+	memset(&rn, 0, sizeof rn);
+	rn.degree = 5; rn.count = 40; rn.dimension = 2; rn.rational = 1; rn.knot_offset = 68; rn.point_offset = 64 * 3; rn.weight_offset = 0;
+	for (i = 0; i < 68; i++)
+		ec_rec_knots[i] = (qaws_scalar)(i <= 3 ? 0 : i >= 64 ? 61 : i == 30 ? 27 : (double)(i - 3) + 0.3 * sin(1.1 * i) * (i != 31));
+	ec_rec_knots[31] = ec_rec_knots[30];
+	for (i = 0; i < 46; i++)
+		ec_rec_knots[68 + i] = (qaws_scalar)(i <= 5 ? 0 : i >= 40 ? 35 : i - 5);
+	for (i = 0; i < 64 * 3; i++)
+		ec_rec_points[i] = (qaws_scalar)(cos(0.37 * i) + 0.01 * i);
+	for (i = 0; i < 40 * 2; i++)
+		ec_rec_points[64 * 3 + i] = (qaws_scalar)(sin(0.53 * i) * (1 + 0.02 * i));
+	for (i = 0; i < 40; i++)
+		ec_rec_weights[i] = (qaws_scalar)(0.6 + 0.5 * ((i * 7) % 5) / 4.0);
+	memset(&bd, 0, sizeof bd);
+	bd.dimension = QAWS_DIMENSION_3D; bd.degree = 3; bd.control_points = ec_rec_points; bd.control_point_count = 64;
+	bd.knots = ec_rec_knots; bd.knot_count = 68;
+	memset(&nd, 0, sizeof nd);
+	nd.dimension = QAWS_DIMENSION_2D; nd.degree = 5; nd.control_points = ec_rec_points + 64 * 3; nd.control_point_count = 40;
+	nd.knots = ec_rec_knots + 68; nd.knot_count = 46; nd.weights = ec_rec_weights; nd.weight_count = 40;
+	if (qaws_curve_create_bspline(&bd, &bs) != QAWS_STATUS_OK || qaws_curve_create_nurbs(&nd, &nu) != QAWS_STATUS_OK)
+	{
+		TEST_ASSERT(0, "record curves created");
+		qaws_curve_destroy(bs);
+		qaws_curve_destroy(nu);
+		return;
+	}
+	for (i = 0; i <= 300; i++)
+	{
+		qaws_eval_result_3d r3;
+		qaws_eval_result_2d r2;
+		qaws_eval_3d c;
+		qaws_vec2 p2, d12, d22;
+		qaws_scalar tb = (qaws_scalar)(61.0 * i / 300), tn = (qaws_scalar)(35.0 * i / 300);
+		c = qaws_record_eval_3d(rb, tb, 7);
+		qaws_curve_evaluate_3d(bs, tb, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2, &r3);
+		eb = fmax(eb, ec_err3(c.position, r3.position) + ec_err3(c.d1, r3.d1) + ec_err3(c.d2, r3.d2));
+		c = qaws_record_eval_3d(rn, tn, 7);
+		qaws_curve_evaluate_2d(nu, tn, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2, &r2);
+		p2.x = c.position.x; p2.y = c.position.y;
+		d12.x = c.d1.x; d12.y = c.d1.y;
+		d22.x = c.d2.x; d22.y = c.d2.y;
+		en = fmax(en, ec_err2(p2, r2.position) + ec_err2(d12, r2.d1) + ec_err2(d22, r2.d2) + fabs((double)c.position.z));
+	}
+	sprintf(msg, "curves read from buffers against the runtime: B-spline (64 points) %.2g, NURBS (40 points, degree 5) %.2g", eb, en);
+	TEST_ASSERT(eb <= EC_TOL * 10 && en <= EC_TOL * 10, msg);
+	printf("  %s\n", msg);
+	qaws_curve_destroy(bs);
+	qaws_curve_destroy(nu);
+}
+
 int test_144_eval_consistency_main(void)
 {
 	g_pass = 0;
@@ -456,6 +527,7 @@ int test_144_eval_consistency_main(void)
 	test_inline_copy();
 	test_arc_length_wrappers();
 	test_spline_cores();
+	test_curve_records();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
 }

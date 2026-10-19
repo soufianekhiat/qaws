@@ -32,6 +32,13 @@
 #include "core/qaws_rational_bezier_core.h"
 #include "core/qaws_surface_core.h"
 
+/* the record core reads the same floats the GPU gets */
+static float const* ep_record_data;
+#define QAWS_BUFFER_KNOT(i) ep_record_data[i]
+#define QAWS_BUFFER_POINT(i) ep_record_data[i]
+#define QAWS_BUFFER_WEIGHT(i) ep_record_data[i]
+#include "core/qaws_curve_record_core.h"
+
 #define EP_SAMPLES 256
 #define EP_DATA 2048
 
@@ -44,7 +51,7 @@ typedef struct ep_ctx
 {
 	ID3D11Device* dev;
 	ID3D11DeviceContext* ctx;
-	ID3D11ComputeShader* cs[3];             /* curves, Bezier surface, B-spline surface */
+	ID3D11ComputeShader* cs[4];             /* curves, Bezier surface, B-spline surface, records */
 } ep_ctx;
 
 static HRESULT __stdcall ep_open(ID3DInclude* self, D3D_INCLUDE_TYPE type, LPCSTR name, LPCVOID parent, LPCVOID* data, UINT* bytes)
@@ -119,7 +126,7 @@ static void ep_run(ep_ctx* g, ep_params const* p, float const* data, float const
 	csd.pSysMem = p; csd.SysMemPitch = 0; csd.SysMemSlicePitch = 0;
 	ID3D11Device_CreateBuffer(g->dev, &cbd, &csd, &cb);
 	srvs[0] = sd; srvs[1] = sp;
-	ID3D11DeviceContext_CSSetShader(g->ctx, g->cs[p->family == 7 ? 1 : p->family == 8 ? 2 : 0], NULL, 0);
+	ID3D11DeviceContext_CSSetShader(g->ctx, g->cs[p->family >= 9 ? 3 : p->family == 7 ? 1 : p->family == 8 ? 2 : 0], NULL, 0);
 	ID3D11DeviceContext_CSSetShaderResources(g->ctx, 0, 2, srvs);
 	ID3D11DeviceContext_CSSetUnorderedAccessViews(g->ctx, 0, 1, &uo, NULL);
 	ID3D11DeviceContext_CSSetConstantBuffers(g->ctx, 0, 1, &cb);
@@ -161,7 +168,15 @@ static void ep_cpu_curve(ep_params const* p, float const* data, double t, double
 	int j, d = (int)p->degree;
 	for (j = 0; j < QAWS_CORE_MAX_POINTS * 4; j++) cp[j] = j < (int)(p->n * 4) ? data[j] : 0;
 	for (j = 0; j < QAWS_CORE_MAX_POINTS * 3; j++) cp3[j] = cp[j];
-	if (p->family == 0)
+	if (p->family >= 9)
+	{
+		qaws_curve_record r;
+		r.degree = d; r.count = (int)p->n; r.dimension = (int)p->v_degree; r.rational = (int)p->v_count;
+		r.knot_offset = (int)p->off_knots; r.point_offset = 0; r.weight_offset = (int)p->off_extra; r.reserved = 0;
+		ep_record_data = data;
+		e = qaws_record_eval_3d(r, t, 7);
+	}
+	else if (p->family == 0)
 		e = qaws_decasteljau_eval_3d(cp3, d, t, 7);
 	else if (p->family == 1)
 		e = qaws_rational_bezier_eval_3d(cp, d, t, 7);
@@ -218,13 +233,14 @@ static void ep_cpu_surface(ep_params const* p, float const* data, double u, doub
 
 int main(void)
 {
-	static char const* const names[9] = { "Bezier (degree 5)", "rational Bezier (degree 4)", "B-spline (cubic, 9 points, a double knot)",
-		"NURBS (cubic, 9 points)", "cubic", "polynomial (degree 4)", "arc", "Bezier surface (3 x 3)", "B-spline surface (3 x 2, 6 x 5 points)" };
+	static char const* const names[11] = { "Bezier (degree 5)", "rational Bezier (degree 4)", "B-spline (cubic, 9 points, a double knot)",
+		"NURBS (cubic, 9 points)", "cubic", "polynomial (degree 4)", "arc", "Bezier surface (3 x 3)", "B-spline surface (3 x 2, 6 x 5 points)",
+		"record: B-spline (cubic, 64 points, from buffers)", "record: NURBS (degree 5, 40 points, from buffers)" };
 	static float data[EP_DATA], params[2 * EP_SAMPLES], gpu[21 * EP_SAMPLES];
 	static double cpu[21 * EP_SAMPLES];
 	ep_ctx g;
 	D3D_FEATURE_LEVEL fl;
-	static char const* const entries[3] = { "CSCurve", "CSBezierSurface", "CSBsplineSurface" };
+	static char const* const entries[4] = { "CSCurve", "CSBezierSurface", "CSBsplineSurface", "CSRecord" };
 	unsigned int f, i, bad = 0;
 	memset(&g, 0, sizeof(g));
 	if (FAILED(D3D11CreateDevice(NULL, D3D_DRIVER_TYPE_HARDWARE, NULL, 0, NULL, 0, D3D11_SDK_VERSION, &g.dev, &fl, &g.ctx)))
@@ -232,7 +248,7 @@ int main(void)
 		printf("no Direct3D 11 device\n");
 		return 1;
 	}
-	for (i = 0; i < 3; i++)
+	for (i = 0; i < 4; i++)
 	{
 		ID3DBlob *blob = NULL, *err = NULL;
 		if (FAILED(D3DCompileFromFile(L"examples/eval_parity.hlsl", NULL, &ep_include, entries[i], "cs_5_0", D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, &blob, &err)))
@@ -243,10 +259,10 @@ int main(void)
 		ID3D11Device_CreateComputeShader(g.dev, ID3D10Blob_GetBufferPointer(blob), ID3D10Blob_GetBufferSize(blob), NULL, &g.cs[i]);
 		ID3D10Blob_Release(blob);
 	}
-	for (f = 0; f < 9; f++)
+	for (f = 0; f < 11; f++)
 	{
 		ep_params p;
-		unsigned int stride = f >= 7 ? 21 : 9;
+		unsigned int stride = f == 7 || f == 8 ? 21 : 9;
 		double worst;
 		memset(&p, 0, sizeof(p));
 		memset(data, 0, sizeof(data));
@@ -278,12 +294,21 @@ int main(void)
 			memcpy(data + 600, vk, sizeof(vk));
 			break;
 		}
+		case 9:
+			p.degree = 3; p.n = 64; p.v_degree = 3; p.v_count = 0; p.off_knots = 512;
+			for (i = 0; i < 68; i++) data[512 + i] = (float)(i <= 3 ? 0 : i >= 64 ? 61 : (double)(i - 3) + 0.3 * sin(1.1 * i));
+			break;
+		case 10:
+			p.degree = 5; p.n = 40; p.v_degree = 2; p.v_count = 1; p.off_knots = 512; p.off_extra = 600;
+			for (i = 0; i < 46; i++) data[512 + i] = (float)(i <= 5 ? 0 : i >= 40 ? 35 : i - 5);
+			for (i = 0; i < 40; i++) data[600 + i] = (float)(0.6 + 0.5 * ((i * 7) % 5) / 4.0);
+			break;
 		default: break;
 		}
 		for (i = 0; i < EP_SAMPLES; i++)
 		{
-			double t = (f == 2 || f == 3 ? 4.0 : 1.0) * i / (EP_SAMPLES - 1);
-			if (f >= 7)
+			double t = (f == 2 || f == 3 ? 4.0 : f == 9 ? 61.0 : f == 10 ? 35.0 : 1.0) * i / (EP_SAMPLES - 1);
+			if (f == 7 || f == 8)
 			{
 				params[2 * i] = (float)((i % 16) / 15.0);
 				params[2 * i + 1] = (float)((i / 16) / 15.0);
@@ -295,7 +320,7 @@ int main(void)
 				ep_cpu_curve(&p, data, params[i], cpu + stride * i);
 			}
 		}
-		ep_run(&g, &p, data, params, f >= 7 ? 2 * EP_SAMPLES : EP_SAMPLES, stride, gpu);
+		ep_run(&g, &p, data, params, f == 7 || f == 8 ? 2 * EP_SAMPLES : EP_SAMPLES, stride, gpu);
 		worst = ep_err(gpu, cpu, stride * EP_SAMPLES);
 		{
 			/* a family evaluated on nothing compares zeros: refused */
