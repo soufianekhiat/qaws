@@ -12,6 +12,9 @@
  *   host3_closest.svg  the point of a spiked circle closest to its center: the
  *                      nearest of 32 samples against the certified search
  *                      (qaws_curve_find_closest_point_certified_2d)
+ *   host4_tessellation.svg  an S whose middle lies on its chord: the adaptive
+ *                      sampler's midpoint test against qaws_curve_tessellate_2d
+ *                      at chord and angle tolerances
  */
 
 #include "qaws.h"
@@ -279,10 +282,91 @@ static void figure_closest(void)
 	printf("wrote showcase/host3_closest.svg\n");
 }
 
+#define HS_TESS 512
+
+/* the curve, its polyline and vertices */
+static void hs_polyline(svg* s, viewport const* v, qaws_curve const* c, qaws_vec2 const* pts, unsigned int n, char const* color, char const* label)
+{
+	qaws_range r = qaws_curve_get_parameter_range(c);
+	double line[600 * 2], poly[HS_TESS * 2];
+	char note[160];
+	unsigned int i;
+	for (i = 0; i < 600; i++)
+	{
+		qaws_eval_result_2d e;
+		qaws_curve_evaluate_2d(c, r.min_value + (r.max_value - r.min_value) * (qaws_scalar)i / 599, QAWS_EVAL_FLAG_POSITION, &e);
+		line[2 * i] = vx(v, e.position.x);
+		line[2 * i + 1] = vy(v, e.position.y);
+	}
+	svg_polyline(s, line, 600, "#8c959f", 6, 0.35, 0);
+	for (i = 0; i < n; i++)
+	{
+		poly[2 * i] = vx(v, pts[i].x);
+		poly[2 * i + 1] = vy(v, pts[i].y);
+	}
+	svg_polyline(s, poly, (int)n, color, 2, 1, 0);
+	for (i = 0; i < n; i++)
+		svg_circle(s, poly[2 * i], poly[2 * i + 1], 3.5, color, "#1b1f24");
+	snprintf(note, sizeof note, "%s: %u vertices", label, n);
+	svg_text(s, v->x0 + 16, v->y0 + v->h - 16, 13, "#57606a", "start", note);
+}
+
+static void figure_tessellation(void)
+{
+	/* an S whose middle (4.5, 0) lies on its chord */
+	qaws_vec2 p[4] = { { 0, 0 }, { 3, 4 }, { 6, -4 }, { 9, 0 } };
+	static qaws_scalar t[HS_TESS];
+	static qaws_vec2 pts[HS_TESS], old_pts[HS_TESS];
+	qaws_bezier_desc d;
+	qaws_sampling_desc sd;
+	qaws_curve_tessellation_desc td;
+	qaws_curve* c = NULL;
+	unsigned int n = 0, old_n = 0;
+	viewport vl = { 24, 80, 576, 520, -0.8, 9.8, -2.4, 2.8 }, vr = { 624, 80, 576, 520, -0.8, 9.8, -2.4, 2.8 };
+	svg s;
+	memset(&d, 0, sizeof d);
+	d.dimension = QAWS_DIMENSION_2D;
+	d.degree = 3;
+	d.control_points = p;
+	d.control_point_count = 4;
+	if (qaws_curve_create_bezier(&d, &c) != QAWS_STATUS_OK)
+	{
+		printf("host4: curve not created\n");
+		return;
+	}
+	/* the adaptive sampler: a midpoint test from one segment */
+	memset(&sd, 0, sizeof sd);
+	sd.sample_count = 2;
+	sd.error_tolerance = (qaws_scalar)0.02;
+	sd.use_adaptive_sampling = 1;
+	qaws_curve_sample_2d(c, &sd, old_pts, HS_TESS, &old_n);
+	memset(&td, 0, sizeof td);
+	td.chord_tolerance = (qaws_scalar)0.02;
+	td.angle_tolerance = (qaws_scalar)0.35;
+	qaws_curve_tessellate_2d(c, &td, NULL, NULL, 0, &n);
+	if (n > HS_TESS || qaws_curve_tessellate_2d(c, &td, t, pts, HS_TESS, &n) != QAWS_STATUS_OK)
+	{
+		printf("host4: tessellation failed\n");
+		qaws_curve_destroy(c);
+		return;
+	}
+	if (!svg_open(&s, "showcase/host4_tessellation.svg", 1224, 640, "Adaptive curve tessellation",
+		"the same chord tolerance 0.02 on a cubic Bezier S (grey): a midpoint test accepts a segment whose middle lies on its chord"))
+		return;
+	svg_panel(&s, &vl, "adaptive sampling (midpoint test, from one segment)");
+	svg_panel(&s, &vr, "qaws_curve_tessellate_2d (chord 0.02, angle 0.35 rad)");
+	hs_polyline(&s, &vl, c, old_pts, old_n, "#f4a261", "qaws_curve_sample_2d, use_adaptive_sampling");
+	hs_polyline(&s, &vr, c, pts, n, "#2a9d8f", "tests at 1/4, 1/2, 3/4; counts first, caller buffers");
+	svg_close(&s);
+	qaws_curve_destroy(c);
+	printf("wrote showcase/host4_tessellation.svg\n");
+}
+
 int main(void)
 {
 	figure_frames();
 	figure_arc_length();
 	figure_closest();
+	figure_tessellation();
 	return 0;
 }
