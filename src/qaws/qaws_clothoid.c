@@ -464,9 +464,10 @@ static qaws_curve_vtable const clothoid_vtable = {
  * Creation
  * ------------------------------------------------------------------------- */
 
-qaws_status qaws_curve_create_clothoid(
+qaws_status qaws_curve_create_clothoid_ex(
 	qaws_clothoid_desc const *desc,
-	qaws_curve **out_curve)
+	qaws_allocator const* allocator,
+	qaws_curve** out_curve)
 {
 	qaws_range parameter_range;
 	qaws_curve *curve;
@@ -488,13 +489,12 @@ qaws_status qaws_curve_create_clothoid(
 	parameter_range.max_value = desc->length;
 
 	/* Allocate curve: single span, degree 3 convention, 2D only */
-	curve = qaws_internal_curve_alloc(
-		QAWS_CURVE_KIND_CLOTHOID,
+	curve = qaws_internal_curve_alloc_ex(QAWS_CURVE_KIND_CLOTHOID,
 		QAWS_DIMENSION_2D,
 		3,
 		1,
 		parameter_range,
-		&clothoid_vtable);
+		&clothoid_vtable, allocator);
 
 	if (!curve)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
@@ -504,7 +504,7 @@ qaws_status qaws_curve_create_clothoid(
 	curve->span_boundaries[1] = desc->length;
 
 	/* Allocate impl */
-	impl = (qaws_clothoid_impl *)calloc(1, sizeof(qaws_clothoid_impl));
+	impl = (qaws_clothoid_impl *)qaws_internal_calloc(allocator, 1, sizeof(qaws_clothoid_impl));
 	if (!impl)
 	{
 		qaws_curve_destroy(curve);
@@ -525,4 +525,11 @@ qaws_status qaws_curve_create_clothoid(
 	*out_curve = curve;
 
 	return QAWS_STATUS_OK;
+}
+
+qaws_status qaws_curve_create_clothoid(
+	qaws_clothoid_desc const *desc,
+	qaws_curve** out_curve)
+{
+	return qaws_curve_create_clothoid_ex(desc, NULL, out_curve);
 }

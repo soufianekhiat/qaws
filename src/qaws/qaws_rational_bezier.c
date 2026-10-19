@@ -413,8 +413,9 @@ static qaws_curve_vtable const rbez_vtable = {
  * Creation
  * ------------------------------------------------------------------------- */
 
-qaws_status qaws_curve_create_rational_bezier(
+qaws_status qaws_curve_create_rational_bezier_ex(
 	qaws_rational_bezier_desc const* desc,
+	qaws_allocator const* allocator,
 	qaws_curve** out_curve)
 {
 	unsigned int dim_count;
@@ -456,15 +457,14 @@ qaws_status qaws_curve_create_rational_bezier(
 
 	/* Allocate curve */
 	range.min_value = 0; range.max_value = 1;
-	curve = qaws_internal_curve_alloc(
-		QAWS_CURVE_KIND_RATIONAL_BEZIER,
-		desc->dimension, desc->degree, 1, range, &rbez_vtable);
+	curve = qaws_internal_curve_alloc_ex(QAWS_CURVE_KIND_RATIONAL_BEZIER,
+		desc->dimension, desc->degree, 1, range, &rbez_vtable, allocator);
 	if (!curve) return QAWS_STATUS_ALLOCATION_FAILURE;
 	curve->span_boundaries[0] = 0;
 	curve->span_boundaries[1] = 1;
 
 	/* Allocate impl */
-	impl = (qaws_rational_bezier_impl*)calloc(1, sizeof(qaws_rational_bezier_impl));
+	impl = (qaws_rational_bezier_impl*)qaws_internal_calloc(allocator, 1, sizeof(qaws_rational_bezier_impl));
 	if (!impl) {
 		qaws_curve_destroy(curve);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
@@ -472,9 +472,9 @@ qaws_status qaws_curve_create_rational_bezier(
 
 	/* Copy control points */
 	cp_size = (size_t)dim_count * n_pts * sizeof(qaws_scalar);
-	impl->control_points = (qaws_scalar*)malloc(cp_size);
+	impl->control_points = (qaws_scalar*)qaws_internal_alloc(allocator, (unsigned long)(cp_size));
 	if (!impl->control_points) {
-		free(impl);
+		qaws_internal_dealloc(allocator, impl);
 		qaws_curve_destroy(curve);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
@@ -483,10 +483,10 @@ qaws_status qaws_curve_create_rational_bezier(
 
 	/* Copy weights */
 	w_size = (size_t)n_pts * sizeof(qaws_scalar);
-	impl->weights = (qaws_scalar*)malloc(w_size);
+	impl->weights = (qaws_scalar*)qaws_internal_alloc(allocator, (unsigned long)(w_size));
 	if (!impl->weights) {
-		free(impl->control_points);
-		free(impl);
+		qaws_internal_dealloc(allocator, impl->control_points);
+		qaws_internal_dealloc(allocator, impl);
 		qaws_curve_destroy(curve);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
@@ -496,11 +496,11 @@ qaws_status qaws_curve_create_rational_bezier(
 	   for each point i, store (w_i * x, w_i * y, [w_i * z], w_i) */
 	hdim = dim_count + 1;
 	wp_size = (size_t)hdim * n_pts * sizeof(qaws_scalar);
-	impl->weighted_points = (qaws_scalar*)malloc(wp_size);
+	impl->weighted_points = (qaws_scalar*)qaws_internal_alloc(allocator, (unsigned long)(wp_size));
 	if (!impl->weighted_points) {
-		free(impl->weights);
-		free(impl->control_points);
-		free(impl);
+		qaws_internal_dealloc(allocator, impl->weights);
+		qaws_internal_dealloc(allocator, impl->control_points);
+		qaws_internal_dealloc(allocator, impl);
 		qaws_curve_destroy(curve);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
@@ -520,4 +520,11 @@ qaws_status qaws_curve_create_rational_bezier(
 	curve->impl = impl;
 	*out_curve = curve;
 	return QAWS_STATUS_OK;
+}
+
+qaws_status qaws_curve_create_rational_bezier(
+	qaws_rational_bezier_desc const* desc,
+	qaws_curve** out_curve)
+{
+	return qaws_curve_create_rational_bezier_ex(desc, NULL, out_curve);
 }

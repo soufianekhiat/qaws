@@ -132,6 +132,31 @@ Allocator-aware variant of `qaws_curve_create_trajectory`.
 
 ---
 
+## The other curve families
+
+```c
+qaws_status qaws_curve_create_rational_bezier_ex(qaws_rational_bezier_desc const* desc, qaws_allocator const* allocator, qaws_curve** out_curve);
+qaws_status qaws_curve_create_yuksel_ex(qaws_yuksel_desc const* desc, qaws_allocator const* allocator, qaws_curve** out_curve);
+qaws_status qaws_curve_create_arc_ex(qaws_arc_desc const* desc, qaws_allocator const* allocator, qaws_curve** out_curve);
+qaws_status qaws_curve_create_polynomial_ex(qaws_polynomial_desc const* desc, qaws_allocator const* allocator, qaws_curve** out_curve);
+qaws_status qaws_curve_create_clothoid_ex(qaws_clothoid_desc const* desc, qaws_allocator const* allocator, qaws_curve** out_curve);
+qaws_status qaws_curve_create_composite_ex(qaws_composite_desc const* desc, qaws_allocator const* allocator, qaws_curve** out_curve);
+qaws_status qaws_curve_create_subdivision_ex(qaws_subdivision_desc const* desc, qaws_allocator const* allocator, qaws_curve** out_curve);
+```
+
+Each is the allocator-aware variant of the constructor without `_ex`,
+which calls it with NULL. Every allocation the constructor makes goes
+through the allocator: the curve, its stored data, and its scratch (the
+subdivision's refinement levels). A composite owns its segments only on
+success; the segments keep the allocators they were made with.
+
+**Checked by test 146.** Every curve and surface constructor here runs with
+an allocator that fails at its k-th allocation, for every k. Each failure
+returns `QAWS_STATUS_ALLOCATION_FAILURE` with no object and nothing left
+allocated. A success, once destroyed, leaves nothing either.
+
+---
+
 ## qaws_surface_create_bezier_ex
 
 ```c

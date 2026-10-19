@@ -32,18 +32,18 @@ columns differ by family.
 | Family | Evaluation kernel | Borrowed / prepared | Derivatives w.r.t. data | Allocator | Degree limit |
 |---|---|---|---|---|---|
 | Bezier | core de Casteljau (to D2) + runtime D3 | view with n = degree + 1 (142) | yes | yes | 16 (140) |
-| Rational Bezier | runtime | NURBS view with n = degree + 1 (142) | yes | malloc | 47 (140) |
+| Rational Bezier | runtime | NURBS view with n = degree + 1 (142) | yes | yes (146) | 47 (140) |
 | Hermite | runtime | `QAWS_VIEW_HERMITE` (142) | yes | yes | 3 |
 | Catmull-Rom | runtime | `QAWS_VIEW_CATMULL_ROM` (142) | yes | yes | 3 |
 | B-spline | internal basis | `qaws_curve_view`, prepared, borrowed (142) | yes | yes | 31 (140) |
 | NURBS | internal basis | weights or homogeneous points (142) | yes | yes | 31 (140) |
 | Trajectory | runtime | absent | absent | yes | |
-| Yuksel | runtime | absent | yes | malloc | |
-| Arc | core arc | absent | absent | malloc | |
-| Polynomial | core Horner | `QAWS_VIEW_POLYNOMIAL` (142) | yes | malloc | |
-| Clothoid | runtime | absent | yes | malloc | |
-| Composite | its children | absent | yes | malloc | |
-| Subdivision | runtime | absent | absent | malloc | |
+| Yuksel | runtime | absent | yes | yes (146) | |
+| Arc | core arc | absent | absent | yes (146) | |
+| Polynomial | core Horner | `QAWS_VIEW_POLYNOMIAL` (142) | yes | yes (146) | |
+| Clothoid | runtime | absent | yes | yes (146) | |
+| Composite | its children | absent | yes | yes (146) | |
+| Subdivision | runtime | absent | absent | yes (146) | |
 | Arc-length / length-matched wrappers | chain rule over the source (144) | absent | absent | malloc | |
 
 Borrowed curves: `qaws_view.h`. Evaluation does not allocate.

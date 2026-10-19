@@ -332,8 +332,9 @@ static qaws_curve_vtable const composite_vtable = {
 /*  Create                                                             */
 /* ------------------------------------------------------------------ */
 
-qaws_status qaws_curve_create_composite(
+qaws_status qaws_curve_create_composite_ex(
 	qaws_composite_desc const* desc,
+	qaws_allocator const* allocator,
 	qaws_curve** out_curve)
 {
 	unsigned int i;
@@ -368,9 +369,8 @@ qaws_status qaws_curve_create_composite(
 	range.min_value = (qaws_scalar)0;
 	range.max_value = (qaws_scalar)desc->segment_count;
 
-	curve = qaws_internal_curve_alloc(
-		QAWS_CURVE_KIND_COMPOSITE, desc->dimension,
-		max_degree, desc->segment_count, range, &composite_vtable);
+	curve = qaws_internal_curve_alloc_ex(QAWS_CURVE_KIND_COMPOSITE, desc->dimension,
+		max_degree, desc->segment_count, range, &composite_vtable, allocator);
 	if (!curve) return QAWS_STATUS_ALLOCATION_FAILURE;
 
 	/* Span boundaries: segment i occupies [i, i+1] */
@@ -378,17 +378,16 @@ qaws_status qaws_curve_create_composite(
 		curve->span_boundaries[i] = (qaws_scalar)i;
 
 	/* Allocate impl */
-	impl = (qaws_composite_impl*)malloc(sizeof(qaws_composite_impl));
+	impl = (qaws_composite_impl*)qaws_internal_alloc(allocator, (unsigned long)(sizeof(qaws_composite_impl)));
 	if (!impl) {
 		qaws_curve_destroy(curve);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 
 	impl->segment_count = desc->segment_count;
-	impl->segments = (qaws_curve**)malloc(
-		sizeof(qaws_curve*) * (size_t)desc->segment_count);
+	impl->segments = (qaws_curve**)qaws_internal_alloc(allocator, (unsigned long)(sizeof(qaws_curve*) * (size_t)desc->segment_count));
 	if (!impl->segments) {
-		free(impl);
+		qaws_internal_dealloc(allocator, impl);
 		qaws_curve_destroy(curve);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
@@ -400,4 +399,11 @@ qaws_status qaws_curve_create_composite(
 	curve->impl = impl;
 	*out_curve = curve;
 	return QAWS_STATUS_OK;
+}
+
+qaws_status qaws_curve_create_composite(
+	qaws_composite_desc const* desc,
+	qaws_curve** out_curve)
+{
+	return qaws_curve_create_composite_ex(desc, NULL, out_curve);
 }

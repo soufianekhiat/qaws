@@ -2,6 +2,7 @@
 #define QAWS_INTERNAL_CURVE_H
 
 #include "qaws_internal_types.h"
+#include <stddef.h>
 
 qaws_curve* qaws_internal_curve_alloc(
 	qaws_curve_kind kind,
@@ -25,5 +26,9 @@ void qaws_internal_curve_free(qaws_curve* curve);
 /* Allocator-aware helpers for impl allocations. */
 void* qaws_internal_alloc(qaws_allocator const* allocator, unsigned long size);
 void  qaws_internal_dealloc(qaws_allocator const* allocator, void* ptr);
+/* count * size zeroed bytes (NULL on overflow or failure) */
+void* qaws_internal_calloc(qaws_allocator const* allocator, size_t count, size_t size);
+/* count * size zeroed bytes (NULL on overflow or failure) */
+void* qaws_internal_calloc(qaws_allocator const* allocator, size_t count, size_t size);
 
 #endif /* QAWS_INTERNAL_CURVE_H */

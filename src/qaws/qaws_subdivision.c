@@ -23,6 +23,7 @@
  * Closed curve: produces 2*n points.
  */
 static qaws_scalar* chaikin_step(
+	qaws_allocator const* allocator,
 	qaws_scalar const* pts,
 	unsigned int count,
 	unsigned int dim_count,
@@ -34,7 +35,7 @@ static qaws_scalar* chaikin_step(
 
 	if (closed) {
 		unsigned int new_count = 2 * count;
-		result = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (size_t)(new_count * dim_count));
+		result = (qaws_scalar*)qaws_internal_alloc(allocator, (unsigned long)(sizeof(qaws_scalar) * (size_t)(new_count * dim_count)));
 		if (!result) return NULL;
 
 		for (i = 0; i < count; i++) {
@@ -52,7 +53,7 @@ static qaws_scalar* chaikin_step(
 		*out_count = new_count;
 	} else {
 		unsigned int new_count = 2 * (count - 1) + 1;
-		result = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (size_t)(new_count * dim_count));
+		result = (qaws_scalar*)qaws_internal_alloc(allocator, (unsigned long)(sizeof(qaws_scalar) * (size_t)(new_count * dim_count)));
 		if (!result) return NULL;
 
 		/* Keep first endpoint */
@@ -92,6 +93,7 @@ static qaws_scalar* chaikin_step(
  * For degree 4 (quartic B-spline limit): k = 3.
  */
 static qaws_scalar* lane_riesenfeld_step(
+	qaws_allocator const* allocator,
 	qaws_scalar const* pts,
 	unsigned int count,
 	unsigned int dim_count,
@@ -107,7 +109,7 @@ static qaws_scalar* lane_riesenfeld_step(
 
 	if (closed) {
 		doubled_count = 2 * count;
-		doubled = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (size_t)(doubled_count * dim_count));
+		doubled = (qaws_scalar*)qaws_internal_alloc(allocator, (unsigned long)(sizeof(qaws_scalar) * (size_t)(doubled_count * dim_count)));
 		if (!doubled) return NULL;
 
 		for (i = 0; i < count; i++) {
@@ -123,7 +125,7 @@ static qaws_scalar* lane_riesenfeld_step(
 		}
 	} else {
 		doubled_count = 2 * count - 1;
-		doubled = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (size_t)(doubled_count * dim_count));
+		doubled = (qaws_scalar*)qaws_internal_alloc(allocator, (unsigned long)(sizeof(qaws_scalar) * (size_t)(doubled_count * dim_count)));
 		if (!doubled) return NULL;
 
 		for (i = 0; i < count - 1; i++) {
@@ -145,9 +147,9 @@ static qaws_scalar* lane_riesenfeld_step(
 	for (r = 0; r < averaging_rounds; r++) {
 		if (closed) {
 			/* Average all points with their next neighbor (wrapping) */
-			qaws_scalar* temp = (qaws_scalar*)malloc(
-				sizeof(qaws_scalar) * (size_t)(doubled_count * dim_count));
-			if (!temp) { free(doubled); return NULL; }
+			qaws_scalar* temp = (qaws_scalar*)qaws_internal_alloc(allocator, (unsigned long)
+				(sizeof(qaws_scalar) * (size_t)(doubled_count * dim_count)));
+			if (!temp) { qaws_internal_dealloc(allocator, doubled); return NULL; }
 
 			for (i = 0; i < doubled_count; i++) {
 				unsigned int next = (i + 1) % doubled_count;
@@ -158,13 +160,13 @@ static qaws_scalar* lane_riesenfeld_step(
 				}
 			}
 
-			free(doubled);
+			qaws_internal_dealloc(allocator, doubled);
 			doubled = temp;
 		} else {
 			/* Average interior points; keep endpoints fixed */
-			qaws_scalar* temp = (qaws_scalar*)malloc(
-				sizeof(qaws_scalar) * (size_t)(doubled_count * dim_count));
-			if (!temp) { free(doubled); return NULL; }
+			qaws_scalar* temp = (qaws_scalar*)qaws_internal_alloc(allocator, (unsigned long)
+				(sizeof(qaws_scalar) * (size_t)(doubled_count * dim_count)));
+			if (!temp) { qaws_internal_dealloc(allocator, doubled); return NULL; }
 
 			/* Keep first endpoint */
 			for (d = 0; d < dim_count; d++)
@@ -184,7 +186,7 @@ static qaws_scalar* lane_riesenfeld_step(
 				temp[(doubled_count - 1) * dim_count + d] =
 					doubled[(doubled_count - 1) * dim_count + d];
 
-			free(doubled);
+			qaws_internal_dealloc(allocator, doubled);
 			doubled = temp;
 		}
 	}
@@ -198,6 +200,7 @@ static qaws_scalar* lane_riesenfeld_step(
  * Returns the refined point array (caller frees) and refined count.
  */
 static qaws_scalar* apply_subdivision(
+	qaws_allocator const* allocator,
 	qaws_scalar const* input_pts,
 	unsigned int input_count,
 	unsigned int dim_count,
@@ -212,7 +215,7 @@ static qaws_scalar* apply_subdivision(
 
 	/* Copy input so we can iterate */
 	current_count = input_count;
-	current = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (size_t)(current_count * dim_count));
+	current = (qaws_scalar*)qaws_internal_alloc(allocator, (unsigned long)(sizeof(qaws_scalar) * (size_t)(current_count * dim_count)));
 	if (!current) return NULL;
 	memcpy(current, input_pts, sizeof(qaws_scalar) * (size_t)(current_count * dim_count));
 
@@ -222,20 +225,20 @@ static qaws_scalar* apply_subdivision(
 
 		switch (scheme) {
 		case QAWS_SUBDIVISION_CHAIKIN:
-			next = chaikin_step(current, current_count, dim_count,
+			next = chaikin_step(allocator, current, current_count, dim_count,
 			                    closed, &next_count);
 			break;
 		case QAWS_SUBDIVISION_LANE_RIESENFELD_3:
-			next = lane_riesenfeld_step(current, current_count, dim_count,
+			next = lane_riesenfeld_step(allocator, current, current_count, dim_count,
 			                            closed, 2, &next_count);
 			break;
 		case QAWS_SUBDIVISION_LANE_RIESENFELD_4:
-			next = lane_riesenfeld_step(current, current_count, dim_count,
+			next = lane_riesenfeld_step(allocator, current, current_count, dim_count,
 			                            closed, 3, &next_count);
 			break;
 		}
 
-		free(current);
+		qaws_internal_dealloc(allocator, current);
 		if (!next) return NULL;
 
 		current = next;
@@ -496,8 +499,9 @@ static unsigned int scheme_degree(qaws_subdivision_scheme scheme)
 /*  Creation                                                                  */
 /* -------------------------------------------------------------------------- */
 
-qaws_status qaws_curve_create_subdivision(
+qaws_status qaws_curve_create_subdivision_ex(
 	qaws_subdivision_desc const* desc,
+	qaws_allocator const* allocator,
 	qaws_curve** out_curve)
 {
 	qaws_subdivision_impl* impl = NULL;
@@ -539,7 +543,7 @@ qaws_status qaws_curve_create_subdivision(
 
 	/* --- Apply subdivision --------------------------------------------- */
 
-	refined = apply_subdivision(
+	refined = apply_subdivision(allocator,
 		(qaws_scalar const*)desc->control_points,
 		desc->control_point_count,
 		dim_count,
@@ -554,7 +558,7 @@ qaws_status qaws_curve_create_subdivision(
 	/* Need at least 4 points for Catmull-Rom stencil (open) or 3 (closed) */
 	if ((!desc->closed && refined_count < 4) ||
 	    (desc->closed && refined_count < 3)) {
-		free(refined);
+		qaws_internal_dealloc(allocator, refined);
 		return QAWS_STATUS_INVALID_CONTROL_POINT_COUNT;
 	}
 
@@ -568,9 +572,9 @@ qaws_status qaws_curve_create_subdivision(
 
 	/* --- Allocate implementation --------------------------------------- */
 
-	impl = (qaws_subdivision_impl*)calloc(1, sizeof(qaws_subdivision_impl));
+	impl = (qaws_subdivision_impl*)qaws_internal_calloc(allocator, 1, sizeof(qaws_subdivision_impl));
 	if (!impl) {
-		free(refined);
+		qaws_internal_dealloc(allocator, refined);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 
@@ -581,11 +585,10 @@ qaws_status qaws_curve_create_subdivision(
 
 	/* --- Compute Catmull-Rom coefficients for each span ---------------- */
 
-	impl->segment_coeffs = (qaws_scalar*)calloc(
-		(size_t)(span_count * dim_count * 4), sizeof(qaws_scalar));
+	impl->segment_coeffs = (qaws_scalar*)qaws_internal_calloc(allocator, (size_t)(span_count * dim_count * 4), sizeof(qaws_scalar));
 	if (!impl->segment_coeffs) {
-		free(impl->refined_points);
-		free(impl);
+		qaws_internal_dealloc(allocator, impl->refined_points);
+		qaws_internal_dealloc(allocator, impl);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 
@@ -622,14 +625,14 @@ qaws_status qaws_curve_create_subdivision(
 		qaws_scalar* phantom_end = NULL;
 		unsigned int d;
 
-		phantom_start = (qaws_scalar*)malloc(sizeof(qaws_scalar) * dim_count);
-		phantom_end = (qaws_scalar*)malloc(sizeof(qaws_scalar) * dim_count);
+		phantom_start = (qaws_scalar*)qaws_internal_alloc(allocator, (unsigned long)(sizeof(qaws_scalar) * dim_count));
+		phantom_end = (qaws_scalar*)qaws_internal_alloc(allocator, (unsigned long)(sizeof(qaws_scalar) * dim_count));
 		if (!phantom_start || !phantom_end) {
-			free(phantom_start);
-			free(phantom_end);
-			free(impl->segment_coeffs);
-			free(impl->refined_points);
-			free(impl);
+			qaws_internal_dealloc(allocator, phantom_start);
+			qaws_internal_dealloc(allocator, phantom_end);
+			qaws_internal_dealloc(allocator, impl->segment_coeffs);
+			qaws_internal_dealloc(allocator, impl->refined_points);
+			qaws_internal_dealloc(allocator, impl);
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 		}
 
@@ -668,8 +671,8 @@ qaws_status qaws_curve_create_subdivision(
 				&impl->segment_coeffs[s * dim_count * 4]);
 		}
 
-		free(phantom_start);
-		free(phantom_end);
+		qaws_internal_dealloc(allocator, phantom_start);
+		qaws_internal_dealloc(allocator, phantom_end);
 	}
 
 	/* --- Allocate curve ------------------------------------------------ */
@@ -677,17 +680,16 @@ qaws_status qaws_curve_create_subdivision(
 	range.min_value = (qaws_scalar)0.0;
 	range.max_value = (qaws_scalar)span_count;
 
-	curve = qaws_internal_curve_alloc(
-		QAWS_CURVE_KIND_SUBDIVISION,
+	curve = qaws_internal_curve_alloc_ex(QAWS_CURVE_KIND_SUBDIVISION,
 		desc->dimension,
 		scheme_degree(desc->scheme),
 		span_count,
 		range,
-		&subdivision_vtable);
+		&subdivision_vtable, allocator);
 	if (!curve) {
-		free(impl->segment_coeffs);
-		free(impl->refined_points);
-		free(impl);
+		qaws_internal_dealloc(allocator, impl->segment_coeffs);
+		qaws_internal_dealloc(allocator, impl->refined_points);
+		qaws_internal_dealloc(allocator, impl);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 
@@ -700,4 +702,11 @@ qaws_status qaws_curve_create_subdivision(
 	*out_curve = curve;
 
 	return QAWS_STATUS_OK;
+}
+
+qaws_status qaws_curve_create_subdivision(
+	qaws_subdivision_desc const* desc,
+	qaws_curve** out_curve)
+{
+	return qaws_curve_create_subdivision_ex(desc, NULL, out_curve);
 }

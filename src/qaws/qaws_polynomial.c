@@ -260,8 +260,9 @@ static qaws_curve_vtable const polynomial_vtable = {
 /*  Creation function                                                          */
 /* -------------------------------------------------------------------------- */
 
-qaws_status qaws_curve_create_polynomial(
+qaws_status qaws_curve_create_polynomial_ex(
 	qaws_polynomial_desc const* desc,
+	qaws_allocator const* allocator,
 	qaws_curve** out_curve)
 {
 	unsigned int dim_count;
@@ -285,23 +286,29 @@ qaws_status qaws_curve_create_polynomial(
 
 	dim_count = (unsigned int)desc->dimension;
 
-	curve = qaws_internal_curve_alloc(
-		QAWS_CURVE_KIND_POLYNOMIAL, desc->dimension, desc->degree,
-		1, range, &polynomial_vtable);
+	curve = qaws_internal_curve_alloc_ex(QAWS_CURVE_KIND_POLYNOMIAL, desc->dimension, desc->degree,
+		1, range, &polynomial_vtable, allocator);
 	if (!curve) return QAWS_STATUS_ALLOCATION_FAILURE;
 	curve->span_boundaries[0] = range.min_value;
 	curve->span_boundaries[1] = range.max_value;
 
-	impl = (qaws_polynomial_impl*)malloc(sizeof(qaws_polynomial_impl));
+	impl = (qaws_polynomial_impl*)qaws_internal_alloc(allocator, (unsigned long)(sizeof(qaws_polynomial_impl)));
 	if (!impl) { qaws_internal_curve_free(curve); return QAWS_STATUS_ALLOCATION_FAILURE; }
 
 	coeff_size = (size_t)dim_count * desc->coefficient_count * sizeof(qaws_scalar);
-	impl->coefficients = (qaws_scalar*)malloc(coeff_size);
-	if (!impl->coefficients) { free(impl); qaws_internal_curve_free(curve); return QAWS_STATUS_ALLOCATION_FAILURE; }
+	impl->coefficients = (qaws_scalar*)qaws_internal_alloc(allocator, (unsigned long)(coeff_size));
+	if (!impl->coefficients) { qaws_internal_dealloc(allocator, impl); qaws_internal_curve_free(curve); return QAWS_STATUS_ALLOCATION_FAILURE; }
 	memcpy(impl->coefficients, desc->coefficients, coeff_size);
 	impl->coefficient_count = desc->coefficient_count;
 
 	curve->impl = impl;
 	*out_curve = curve;
 	return QAWS_STATUS_OK;
+}
+
+qaws_status qaws_curve_create_polynomial(
+	qaws_polynomial_desc const* desc,
+	qaws_curve** out_curve)
+{
+	return qaws_curve_create_polynomial_ex(desc, NULL, out_curve);
 }

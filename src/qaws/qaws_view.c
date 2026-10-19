@@ -814,7 +814,6 @@ static qaws_status pr_copy(qaws_curve_prepared const* p, qaws_allocator const* a
 	}
 	else if (p->view.family == QAWS_VIEW_POLYNOMIAL)
 	{
-		/* shortcut: qaws_curve_create_polynomial takes no allocator (it calls malloc), until the allocator reaches every constructor */
 		qaws_polynomial_desc d;
 		memset(&d, 0, sizeof d);
 		d.dimension = p->view.dimension;
@@ -823,7 +822,7 @@ static qaws_status pr_copy(qaws_curve_prepared const* p, qaws_allocator const* a
 		d.coefficient_count = p->n;
 		d.t_min = p->t0;
 		d.t_max = p->t1;
-		st = qaws_curve_create_polynomial(&d, out_curve);
+		st = qaws_curve_create_polynomial_ex(&d, allocator, out_curve);
 	}
 	else if (p->rational)
 	{

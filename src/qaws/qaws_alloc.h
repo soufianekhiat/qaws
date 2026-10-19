@@ -9,6 +9,13 @@
 #include "qaws_bspline.h"
 #include "qaws_nurbs.h"
 #include "qaws_trajectory.h"
+#include "qaws_rational_bezier.h"
+#include "qaws_yuksel.h"
+#include "qaws_arc.h"
+#include "qaws_polynomial.h"
+#include "qaws_clothoid.h"
+#include "qaws_composite.h"
+#include "qaws_subdivision.h"
 #include "qaws_surface_bezier.h"
 #include "qaws_surface_bspline.h"
 #include "qaws_surface_nurbs.h"
@@ -54,6 +61,41 @@ qaws_status qaws_curve_create_nurbs_ex(
 
 qaws_status qaws_curve_create_trajectory_ex(
 	qaws_trajectory_desc const* desc,
+	qaws_allocator const* allocator,
+	qaws_curve** out_curve);
+
+qaws_status qaws_curve_create_rational_bezier_ex(
+	qaws_rational_bezier_desc const* desc,
+	qaws_allocator const* allocator,
+	qaws_curve** out_curve);
+
+qaws_status qaws_curve_create_yuksel_ex(
+	qaws_yuksel_desc const* desc,
+	qaws_allocator const* allocator,
+	qaws_curve** out_curve);
+
+qaws_status qaws_curve_create_arc_ex(
+	qaws_arc_desc const* desc,
+	qaws_allocator const* allocator,
+	qaws_curve** out_curve);
+
+qaws_status qaws_curve_create_polynomial_ex(
+	qaws_polynomial_desc const* desc,
+	qaws_allocator const* allocator,
+	qaws_curve** out_curve);
+
+qaws_status qaws_curve_create_clothoid_ex(
+	qaws_clothoid_desc const* desc,
+	qaws_allocator const* allocator,
+	qaws_curve** out_curve);
+
+qaws_status qaws_curve_create_composite_ex(
+	qaws_composite_desc const* desc,
+	qaws_allocator const* allocator,
+	qaws_curve** out_curve);
+
+qaws_status qaws_curve_create_subdivision_ex(
+	qaws_subdivision_desc const* desc,
 	qaws_allocator const* allocator,
 	qaws_curve** out_curve);
 

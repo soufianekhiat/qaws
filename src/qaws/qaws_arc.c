@@ -324,9 +324,10 @@ static qaws_curve_vtable const arc_vtable = {
  * Creation
  * ------------------------------------------------------------------------- */
 
-qaws_status qaws_curve_create_arc(
+qaws_status qaws_curve_create_arc_ex(
 	qaws_arc_desc const *desc,
-	qaws_curve **out_curve)
+	qaws_allocator const* allocator,
+	qaws_curve** out_curve)
 {
 	unsigned int i;
 	qaws_scalar total_length;
@@ -379,13 +380,12 @@ qaws_status qaws_curve_create_arc(
 	parameter_range.max_value = total_length;
 
 	/* Allocate curve: degree=2 by convention for circular arcs */
-	curve = qaws_internal_curve_alloc(
-		QAWS_CURVE_KIND_ARC,
+	curve = qaws_internal_curve_alloc_ex(QAWS_CURVE_KIND_ARC,
 		desc->dimension,
 		2,
 		desc->segment_count,
 		parameter_range,
-		&arc_vtable);
+		&arc_vtable, allocator);
 
 	if (!curve)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
@@ -400,7 +400,7 @@ qaws_status qaws_curve_create_arc(
 	}
 
 	/* Allocate impl */
-	impl = (qaws_arc_impl *)calloc(1, sizeof(qaws_arc_impl));
+	impl = (qaws_arc_impl *)qaws_internal_calloc(allocator, 1, sizeof(qaws_arc_impl));
 	if (!impl)
 	{
 		qaws_curve_destroy(curve);
@@ -411,10 +411,10 @@ qaws_status qaws_curve_create_arc(
 
 	/* Copy segments */
 	seg_size = (size_t)desc->segment_count * sizeof(qaws_arc_segment);
-	impl->segments = (qaws_arc_segment *)malloc(seg_size);
+	impl->segments = (qaws_arc_segment *)qaws_internal_alloc(allocator, (unsigned long)(seg_size));
 	if (!impl->segments)
 	{
-		free(impl);
+		qaws_internal_dealloc(allocator, impl);
 		qaws_curve_destroy(curve);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
@@ -424,4 +424,11 @@ qaws_status qaws_curve_create_arc(
 	*out_curve = curve;
 
 	return QAWS_STATUS_OK;
+}
+
+qaws_status qaws_curve_create_arc(
+	qaws_arc_desc const *desc,
+	qaws_curve** out_curve)
+{
+	return qaws_curve_create_arc_ex(desc, NULL, out_curve);
 }

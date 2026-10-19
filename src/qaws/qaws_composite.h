@@ -12,9 +12,10 @@
  * parameter space: segment i maps to [i, i+1].  The total parameter
  * range is [0, segment_count].
  *
- * Ownership: the create function takes ownership of every curve pointer
- * in the segments array.  The caller must NOT destroy them afterwards;
- * they will be destroyed when the composite curve is destroyed.
+ * Ownership: on success the create function takes ownership of every curve
+ * pointer in the segments array.  The caller must NOT destroy them
+ * afterwards; they will be destroyed when the composite curve is destroyed.
+ * On failure the caller keeps them.
  */
 
 typedef struct qaws_composite_desc

@@ -1439,8 +1439,9 @@ static qaws_curve_vtable const yuksel_bezier_vtable = {
 /*  Creation function                                                  */
 /* ------------------------------------------------------------------ */
 
-qaws_status qaws_curve_create_yuksel(
+qaws_status qaws_curve_create_yuksel_ex(
 	qaws_yuksel_desc const* desc,
+	qaws_allocator const* allocator,
 	qaws_curve** out_curve)
 {
 	qaws_status status;
@@ -1480,29 +1481,28 @@ qaws_status qaws_curve_create_yuksel(
 	range.min_value = (qaws_scalar)0;
 	range.max_value = (qaws_scalar)span_count;
 
-	curve = qaws_internal_curve_alloc(
-		QAWS_CURVE_KIND_YUKSEL,
+	curve = qaws_internal_curve_alloc_ex(QAWS_CURVE_KIND_YUKSEL,
 		desc->dimension,
 		2, /* degree (quadratic sub-curves) */
 		span_count,
 		range,
-		desc->mode == QAWS_YUKSEL_MODE_BEZIER ? &yuksel_bezier_vtable : &yuksel_vtable);
+		desc->mode == QAWS_YUKSEL_MODE_BEZIER ? &yuksel_bezier_vtable : &yuksel_vtable, allocator);
 	if (!curve)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 
 	for (i = 0; i <= span_count; i++)
 		curve->span_boundaries[i] = (qaws_scalar)i;
 
-	impl = (qaws_yuksel_impl*)malloc(sizeof(qaws_yuksel_impl));
+	impl = (qaws_yuksel_impl*)qaws_internal_alloc(allocator, (unsigned long)(sizeof(qaws_yuksel_impl)));
 	if (!impl) {
 		qaws_internal_curve_free(curve);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 
 	pts_size = (size_t)n * (size_t)dim_count * sizeof(qaws_scalar);
-	impl->control_points = (qaws_scalar*)malloc(pts_size);
+	impl->control_points = (qaws_scalar*)qaws_internal_alloc(allocator, (unsigned long)(pts_size));
 	if (!impl->control_points) {
-		free(impl);
+		qaws_internal_dealloc(allocator, impl);
 		qaws_internal_curve_free(curve);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
@@ -1512,10 +1512,10 @@ qaws_status qaws_curve_create_yuksel(
 	impl->closed = desc->closed;
 	impl->mode = (int)desc->mode;
 
-	impl->subcurves = (qaws_yuksel_subcurve*)calloc(n, sizeof(qaws_yuksel_subcurve));
+	impl->subcurves = (qaws_yuksel_subcurve*)qaws_internal_calloc(allocator, n, sizeof(qaws_yuksel_subcurve));
 	if (!impl->subcurves) {
-		free(impl->control_points);
-		free(impl);
+		qaws_internal_dealloc(allocator, impl->control_points);
+		qaws_internal_dealloc(allocator, impl);
 		qaws_internal_curve_free(curve);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
@@ -1545,4 +1545,11 @@ qaws_status qaws_curve_create_yuksel(
 	*out_curve = curve;
 
 	return QAWS_STATUS_OK;
+}
+
+qaws_status qaws_curve_create_yuksel(
+	qaws_yuksel_desc const* desc,
+	qaws_curve** out_curve)
+{
+	return qaws_curve_create_yuksel_ex(desc, NULL, out_curve);
 }

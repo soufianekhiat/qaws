@@ -19,6 +19,17 @@ void qaws_internal_dealloc(qaws_allocator const* allocator, void* ptr)
 	free(ptr);
 }
 
+void* qaws_internal_calloc(qaws_allocator const* allocator, size_t count, size_t size)
+{
+	void* p;
+	if (size && count > (size_t)-1 / size)
+		return NULL;
+	p = qaws_internal_alloc(allocator, (unsigned long)(count * size));
+	if (p)
+		memset(p, 0, count * size);
+	return p;
+}
+
 qaws_curve* qaws_internal_curve_alloc_ex(
 	qaws_curve_kind kind,
 	qaws_dimension dimension,
