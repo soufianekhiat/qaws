@@ -3,13 +3,21 @@
 
 #include "qaws_internal_types.h"
 
-/* Compute arc length of a curve segment between two global parameter values
-   using Gaussian quadrature. */
+/* Arc length between two global parameter values: adaptive Gauss-Kronrod (7-15)
+   per span, relative error QAWS_EPSILON. */
 qaws_status qaws_internal_arc_length(
 	qaws_curve const* curve,
 	qaws_scalar t_min,
 	qaws_scalar t_max,
 	qaws_scalar* out_length);
+
+/* The parameter t at arc length `length` from t_start (s(t) = length to QAWS_EPSILON of the length to the end):
+   safeguarded Newton; OUT_OF_RANGE past the end or for a negative length. */
+qaws_status qaws_internal_parameter_at_arc_length(
+	qaws_curve const* curve,
+	qaws_scalar t_start,
+	qaws_scalar length,
+	qaws_scalar* out_parameter);
 
 /* Build a cumulative arc-length table for a curve.
    table_params and table_distances must each hold table_size entries.

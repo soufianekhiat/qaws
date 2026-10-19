@@ -92,7 +92,25 @@ qaws_status qaws_curve_compute_arc_length(
     qaws_scalar* out_length);
 ```
 
-Computes the arc length (distance) along the curve between two parameter values. Uses Gauss-Legendre quadrature internally.
+Computes the arc length (distance) along the curve between two parameter values. It uses adaptive Gauss-Kronrod (7-15) on each span. An interval is halved until its Gauss and Kronrod estimates agree to `QAWS_EPSILON` of the length (1e-12 in double, 1e-6 in float). Does not allocate.
+
+### qaws_curve_compute_parameter_at_arc_length
+
+```c
+qaws_status qaws_curve_compute_parameter_at_arc_length(
+    qaws_curve const* curve,
+    qaws_scalar parameter_min,
+    qaws_scalar length,
+    qaws_scalar* out_parameter);
+```
+
+Returns the parameter `t` where the arc length from `parameter_min` reaches `length`, to `QAWS_EPSILON` of the length to the end of the range.
+
+- **Method.** Newton on the length, with the speed as its derivative, inside a bracket that every step narrows. A step that leaves the bracket, or does not halve the previous step, is replaced by a bisection.
+- **Zero speed.** Cusps and stationary spans are handled. Inside a stationary span, any parameter of that span may be returned.
+- **Ends.** A `length` of 0 returns `parameter_min`. The whole length returns the range's end.
+- **Errors.** `QAWS_STATUS_OUT_OF_RANGE` for a negative length, a length past the end, or a `parameter_min` outside the range.
+- **Sorted lengths.** Each call integrates from `parameter_min`. For increasing lengths, start each call from the previous parameter and pass the difference of lengths.
 
 ### qaws_curve_compute_bounds_2d / 3d
 

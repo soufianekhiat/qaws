@@ -159,6 +159,7 @@ extern int test_144_eval_consistency_main(void);
 extern int test_145_repulsive_control_main(void);
 extern int test_146_allocator_main(void);
 extern int test_147_frames_main(void);
+extern int test_148_arc_length_main(void);
 
 /* Test registry */
 typedef struct {
@@ -315,6 +316,7 @@ static test_suite const g_test_suites[] = {
 {"145_repulsive_control", test_145_repulsive_control_main},
 {"146_allocator", test_146_allocator_main},
 {"147_frames", test_147_frames_main},
+{"148_arc_length", test_148_arc_length_main},
 };
 
 int main(void) {

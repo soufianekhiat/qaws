@@ -356,6 +356,8 @@ checks stay manual.
 | Surface intersection at its default tolerance | fixed (Gauss-Newton seeds); fillets work | f830321 (48) |
 | Derived curves in their source's allocator | reverse, extract, split, join, conversions, wrappers | d41be61 (146) |
 | Shader interface from buffers | `qaws_curve_record`, `qaws_surface_record`: any length, HLSL and GLSL, on a GPU | e6e58be, d94e5f5 (144) |
+| Rotation-minimizing frames | `qaws_curve_compute_rotation_minimizing_frames_3d`, `core/qaws_frame_core.h` (HLSL and GLSL) | 1e4133e (147) |
+| Arc length and its inverse | adaptive Gauss-Kronrod per span; `qaws_curve_compute_parameter_at_arc_length` by safeguarded Newton | 148 |
 
 Remaining, in order:
 
@@ -364,6 +366,8 @@ Remaining, in order:
 - The allocator for operation scratch, sampling, traversal, inspection,
   batches and repulsive (constructors and derived curves are done).
 - Halide's runtime span (the buffer interface is done for HLSL and GLSL).
-- The kernels of section 6.
+- The kernels of section 6 (frames and arc length are done): certified
+  closest point, adaptive tessellation, sweeps and lofts with analytic
+  derivatives, parameterization options.
 - Repulsive: the allocator, line-search and GMRES settings, a validity
   report for solution derivatives, and the mesh VJP test.

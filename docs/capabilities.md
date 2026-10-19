@@ -52,6 +52,15 @@ may run on host workers (142: four threads, bit-identical). A borrowed
 `qaws_curve` works with every operation that evaluates curves. Extract,
 split and reverse go through an owned copy (142).
 
+Arc length (`qaws_curve_compute_arc_length`): adaptive Gauss-Kronrod 7-15
+on each span, to QAWS_EPSILON of the length. Its inverse
+(`qaws_curve_compute_parameter_at_arc_length`) uses safeguarded Newton.
+Both match Mathematica to double precision (148). Sampling, traversal and
+the arc-length wrappers build their 256-entry tables from the same measure
+and interpolate linearly between entries. The differentiable CDF sampler
+(58, 60) keeps its fixed composite rule, because it differentiates through
+that rule.
+
 ## Surfaces on the CPU
 
 | Family | Evaluation | Borrowed / prepared | Jets (closest point, curvature) | Derivatives w.r.t. data | Allocator |
@@ -109,9 +118,6 @@ own tool, `examples/repulsive_gpu_parity.c`.
   still needs the span when the pipeline is built.
 - **CPU and GPU comparison in a build step.** Both GPU tools run by hand on
   Windows only. GLSL is compiled, never run. Halide is never built.
-- **Arc length and its inverse.** Two implementations disagree: a 5-point
-  Gauss rule with a 256-entry table, and the CDF sampler. Planned: one
-  error-controlled measure with a safeguarded Newton inverse.
 - **Certified closest point.** Today curves use 32 samples and
   Gauss-Newton; surfaces use an 8x8 grid and Newton. Both can miss the
   global minimum. Planned: subdivision with bounds.

@@ -24,6 +24,13 @@ qaws_status qaws_curve_compute_arc_length(
 	qaws_scalar parameter_min,
 	qaws_scalar parameter_max,
 	qaws_scalar* out_length);
+/* The parameter at arc length `length` after parameter_min (safeguarded Newton on the measure above); OUT_OF_RANGE for
+   a negative length or one past the end of the range. */
+qaws_status qaws_curve_compute_parameter_at_arc_length(
+	qaws_curve const* curve,
+	qaws_scalar parameter_min,
+	qaws_scalar length,
+	qaws_scalar* out_parameter);
 
 qaws_status qaws_curve_compute_bounds_2d(
 	qaws_curve const* curve,

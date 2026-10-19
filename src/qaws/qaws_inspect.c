@@ -102,6 +102,16 @@ qaws_status qaws_curve_compute_arc_length(
 		curve, parameter_min, parameter_max, out_length);
 }
 
+qaws_status qaws_curve_compute_parameter_at_arc_length(
+	qaws_curve const *curve,
+	qaws_scalar parameter_min,
+	qaws_scalar length,
+	qaws_scalar *out_parameter)
+{
+	return qaws_internal_parameter_at_arc_length(
+		curve, parameter_min, length, out_parameter);
+}
+
 qaws_status qaws_curve_compute_bounds_2d(
 	qaws_curve const *curve,
 	qaws_vec2 *out_min,

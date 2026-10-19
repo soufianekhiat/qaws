@@ -149,6 +149,7 @@ add_executable(
 145_repulsive_control.c
 146_allocator.c
 147_frames.c
+148_arc_length.c
 )
 
 # The amalgamated library exports exactly the same symbols, so the tests can
