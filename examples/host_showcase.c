@@ -7,6 +7,8 @@
  *                      straight piece, flipping at the inflection) and by
  *                      rotation-minimizing frames (qaws_curve_compute_
  *                      rotation_minimizing_frames_3d: continuous, twist-free)
+ *   host2_arc_length.svg  points at uniform parameters against points at equal
+ *                      arc length (qaws_curve_compute_parameter_at_arc_length)
  */
 
 #include "qaws.h"
@@ -109,8 +111,89 @@ static void figure_frames(void)
 	printf("wrote showcase/host1_frames.svg\n");
 }
 
+#define HS_DOTS 25
+
+/* the curve and HS_DOTS points on it: at uniform parameters, or at equal lengths (qaws_curve_compute_parameter_at_arc_length) */
+static void hs_dots(svg* s, viewport const* v, qaws_curve const* c, int by_length, char const* color)
+{
+	qaws_range r = qaws_curve_get_parameter_range(c);
+	qaws_scalar total = 0, t, t_prev = r.min_value;
+	double line[HS_SAMPLES * 2], xy[HS_DOTS * 2], dmin = 1e300, dmax = 0;
+	char note[160];
+	int i;
+	for (i = 0; i < HS_SAMPLES; i++)
+	{
+		qaws_eval_result_2d e;
+		qaws_curve_evaluate_2d(c, r.min_value + (r.max_value - r.min_value) * (qaws_scalar)i / (HS_SAMPLES - 1), QAWS_EVAL_FLAG_POSITION, &e);
+		line[2 * i] = vx(v, e.position.x);
+		line[2 * i + 1] = vy(v, e.position.y);
+	}
+	svg_polyline(s, line, HS_SAMPLES, "#1b1f24", 1.6, 1, 0);
+	qaws_curve_compute_arc_length(c, r.min_value, r.max_value, &total);
+	for (i = 0; i < HS_DOTS; i++)
+	{
+		qaws_eval_result_2d e;
+		t = r.min_value + (r.max_value - r.min_value) * (qaws_scalar)i / (HS_DOTS - 1);
+		if (by_length)
+			qaws_curve_compute_parameter_at_arc_length(c, r.min_value, total * (qaws_scalar)i / (HS_DOTS - 1), &t);
+		qaws_curve_evaluate_2d(c, t, QAWS_EVAL_FLAG_POSITION, &e);
+		xy[2 * i] = e.position.x;
+		xy[2 * i + 1] = e.position.y;
+		if (i > 0)
+		{
+			qaws_scalar arc = 0;
+			double d;
+			qaws_curve_compute_arc_length(c, t_prev, t, &arc);
+			d = arc;
+			dmin = d < dmin ? d : dmin;
+			dmax = d > dmax ? d : dmax;
+		}
+		t_prev = t;
+	}
+	for (i = 0; i < HS_DOTS; i++)
+		svg_circle(s, vx(v, xy[2 * i]), vy(v, xy[2 * i + 1]), 5, color, "#1b1f24");
+	snprintf(note, sizeof note, "arc lengths between neighbours: %.6f to %.6f", dmin, dmax);
+	svg_text(s, v->x0 + 16, v->y0 + v->h - 16, 13, "#57606a", "start", note);
+}
+
+static void figure_arc_length(void)
+{
+	/* a cubic B-spline whose knots crowd the parameter into the first turn */
+	qaws_vec2 p[8] = { { 0, 0 }, { 1, 3 }, { 3, 3.5f }, { 4, 0.5f }, { 6, -0.5f }, { 7.5f, 2.5f }, { 9, 3 }, { 10, 0 } };
+	qaws_scalar knots[12] = { 0, 0, 0, 0, 0.05f, 0.1f, 0.6f, 0.95f, 1, 1, 1, 1 };
+	qaws_bspline_desc d;
+	qaws_curve* c = NULL;
+	viewport vl = { 24, 80, 576, 560, -0.8, 10.8, -1.9, 4.6 }, vr = { 624, 80, 576, 560, -0.8, 10.8, -1.9, 4.6 };
+	svg s;
+	memset(&d, 0, sizeof d);
+	d.dimension = QAWS_DIMENSION_2D;
+	d.degree = 3;
+	d.control_points = p;
+	d.control_point_count = 8;
+	d.knots = knots;
+	d.knot_count = 12;
+	if (qaws_curve_create_bspline(&d, &c) != QAWS_STATUS_OK)
+	{
+		printf("host2: curve not created\n");
+		return;
+	}
+	if (!svg_open(&s, "showcase/host2_arc_length.svg", 1224, 670, "Points at equal arc length",
+		"25 points on a B-spline with uneven parameter speed: at uniform parameters (left) they bunch and spread; "
+		"at equal lengths (right) they are evenly spaced"))
+		return;
+	svg_panel(&s, &vl, "uniform parameters");
+	svg_panel(&s, &vr, "equal arc length (safeguarded Newton)");
+	hs_dots(&s, &vl, c, 0, "#f4a261");
+	hs_dots(&s, &vr, c, 1, "#2a9d8f");
+	svg_text(&s, 640, 662, 13, "#57606a", "start", "qaws_curve_compute_parameter_at_arc_length over adaptive Gauss-Kronrod per span");
+	svg_close(&s);
+	qaws_curve_destroy(c);
+	printf("wrote showcase/host2_arc_length.svg\n");
+}
+
 int main(void)
 {
 	figure_frames();
+	figure_arc_length();
 	return 0;
 }
