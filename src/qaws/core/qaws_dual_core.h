@@ -21,22 +21,22 @@
  * input adjoint contributions (to be added by the caller).
  * =================================================================== */
 
-QAWS_TYPE_DEF struct {
+QAWS_STRUCT(qaws_dual1) {
     qaws_scalar v, t, tt;
-} qaws_dual1;
+} QAWS_STRUCT_END(qaws_dual1);
 
-QAWS_TYPE_DEF struct {
+QAWS_STRUCT(qaws_dual3) {
     qaws_vec3 v, t, tt;
-} qaws_dual3;
+} QAWS_STRUCT_END(qaws_dual3);
 
-QAWS_TYPE_DEF struct {
+QAWS_STRUCT(qaws_vec3_pair) {
     qaws_vec3 a, b;
-} qaws_vec3_pair;
+} QAWS_STRUCT_END(qaws_vec3_pair);
 
-QAWS_TYPE_DEF struct {
+QAWS_STRUCT(qaws_vec3_scalar) {
     qaws_vec3 x;
     qaws_scalar s;
-} qaws_vec3_scalar;
+} QAWS_STRUCT_END(qaws_vec3_scalar);
 
 /* -------------------------------------------------------------------
  * Plain vec3 helpers

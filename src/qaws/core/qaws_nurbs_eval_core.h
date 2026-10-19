@@ -40,9 +40,9 @@ QAWS_INLINE qaws_eval_2d qaws_nurbs_eval_2d(
     result.d1.x = QAWS_ZERO; result.d1.y = QAWS_ZERO;
     result.d2.x = QAWS_ZERO; result.d2.y = QAWS_ZERO;
 
-    if (eval_flags & 0x2) max_deriv = 1;
-    if (eval_flags & 0x4) max_deriv = 2;
-    if (eval_flags & 0x8) max_deriv = 3;
+    if ((eval_flags & 0x2) != 0) max_deriv = 1;
+    if ((eval_flags & 0x4) != 0) max_deriv = 2;
+    if ((eval_flags & 0x8) != 0) max_deriv = 3;
 
     qaws_bspline_basis_derivs(local_knots, degree, span, t, max_deriv, ders);
 
@@ -117,9 +117,9 @@ QAWS_INLINE qaws_eval_3d qaws_nurbs_eval_3d(
     result.d1.x = QAWS_ZERO; result.d1.y = QAWS_ZERO; result.d1.z = QAWS_ZERO;
     result.d2.x = QAWS_ZERO; result.d2.y = QAWS_ZERO; result.d2.z = QAWS_ZERO;
 
-    if (eval_flags & 0x2) max_deriv = 1;
-    if (eval_flags & 0x4) max_deriv = 2;
-    if (eval_flags & 0x8) max_deriv = 3;
+    if ((eval_flags & 0x2) != 0) max_deriv = 1;
+    if ((eval_flags & 0x4) != 0) max_deriv = 2;
+    if ((eval_flags & 0x8) != 0) max_deriv = 3;
 
     qaws_bspline_basis_derivs(local_knots, degree, span, t, max_deriv, ders);
 

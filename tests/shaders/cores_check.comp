@@ -1,0 +1,16 @@
+#version 450
+#extension GL_GOOGLE_include_directive : enable
+
+#include "../../src/qaws/qaws_glsl.h"
+
+layout(std430, binding = 0) readonly buffer InputBuffer { float input_data[]; };
+layout(std430, binding = 1) buffer OutBuffer { float results[]; };
+
+#include "cores_check.h"
+
+layout(local_size_x = 64) in;
+void main()
+{
+    uint idx = gl_GlobalInvocationID.x;
+    results[idx] = qaws_check_cores(float(idx) / 64.0);
+}

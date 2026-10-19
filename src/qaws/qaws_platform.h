@@ -48,6 +48,7 @@
 # define QAWS_EPSILON 1e-6f
 
 #elif QAWS_BACKEND == QAWS_BACKEND_GLSL
+# define qaws_scalar float
 # define QAWS_SCALAR_IS_FLOAT 1
 # define QAWS_LITERAL(x) (x)
 # define QAWS_EPSILON 1e-6
@@ -123,6 +124,16 @@
 # define QAWS_TYPE_DEF   typedef
 # define QAWS_OUT
 # define QAWS_INOUT
+#endif
+
+/* A struct type every backend names the same way: QAWS_STRUCT(name) { members } QAWS_STRUCT_END(name);
+   (a typedef of an anonymous struct in C, HLSL and Halide; a named struct in GLSL, which has no typedef) */
+#if QAWS_BACKEND == QAWS_BACKEND_GLSL
+# define QAWS_STRUCT(name)     struct name
+# define QAWS_STRUCT_END(name)
+#else
+# define QAWS_STRUCT(name)     typedef struct
+# define QAWS_STRUCT_END(name) name
 #endif
 
 /* ===================================================================

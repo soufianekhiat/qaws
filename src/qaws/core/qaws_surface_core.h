@@ -25,12 +25,12 @@
 #ifndef QAWS_SURFACE_EVAL_3D_DEFINED
 #define QAWS_SURFACE_EVAL_3D_DEFINED
 
-QAWS_TYPE_DEF struct {
+QAWS_STRUCT(qaws_surface_eval_3d) {
     qaws_vec3 position;
     qaws_vec3 du, dv;
     qaws_vec3 duu, dvv, duv;
     qaws_vec3 normal;
-} qaws_surface_eval_3d;
+} QAWS_STRUCT_END(qaws_surface_eval_3d);
 
 #endif /* QAWS_SURFACE_EVAL_3D_DEFINED */
 
@@ -97,7 +97,7 @@ QAWS_INLINE qaws_surface_eval_3d qaws_surface_bezier_eval_3d(
     }
 
     /* Position: evaluate column at u */
-    if (eval_flags & QAWS_SURFACE_CORE_POSITION) {
+    if ((eval_flags & QAWS_SURFACE_CORE_POSITION) != 0) {
         for (k = 0; k < u_count; k++) {
             work[k * 3 + 0] = col[k * 3 + 0];
             work[k * 3 + 1] = col[k * 3 + 1];
@@ -117,8 +117,8 @@ QAWS_INLINE qaws_surface_eval_3d qaws_surface_bezier_eval_3d(
     }
 
     /* du: derivative control points in u, then evaluate at u */
-    if (eval_flags & (QAWS_SURFACE_CORE_DU | QAWS_SURFACE_CORE_DUU | QAWS_SURFACE_CORE_DUV | QAWS_SURFACE_CORE_NORMAL)) {
-        qaws_scalar deg_u = (qaws_scalar)u_degree;
+    if ((eval_flags & (QAWS_SURFACE_CORE_DU | QAWS_SURFACE_CORE_DUU | QAWS_SURFACE_CORE_DUV | QAWS_SURFACE_CORE_NORMAL)) != 0) {
+        qaws_scalar deg_u = QAWS_ITOF(u_degree);
 
         /* D(col)/du: first-difference the column */
         for (k = 0; k < u_degree; k++) {
@@ -146,8 +146,8 @@ QAWS_INLINE qaws_surface_eval_3d qaws_surface_bezier_eval_3d(
         result.du.z = work[2];
 
         /* duu: second derivative in u */
-        if ((eval_flags & QAWS_SURFACE_CORE_DUU) && u_degree >= 2) {
-            qaws_scalar deg_u1 = (qaws_scalar)(u_degree - 1);
+        if (((eval_flags & QAWS_SURFACE_CORE_DUU) != 0) && u_degree >= 2) {
+            qaws_scalar deg_u1 = QAWS_ITOF(u_degree - 1);
             for (k = 0; k < u_degree - 1; k++) {
                 ddcol[k * 3 + 0] = deg_u1 * (dcol[(k + 1) * 3 + 0] - dcol[k * 3 + 0]);
                 ddcol[k * 3 + 1] = deg_u1 * (dcol[(k + 1) * 3 + 1] - dcol[k * 3 + 1]);
@@ -173,8 +173,8 @@ QAWS_INLINE qaws_surface_eval_3d qaws_surface_bezier_eval_3d(
     }
 
     /* dv: differentiate each row in v, evaluate at v, then evaluate column at u */
-    if (eval_flags & (QAWS_SURFACE_CORE_DV | QAWS_SURFACE_CORE_DVV | QAWS_SURFACE_CORE_DUV | QAWS_SURFACE_CORE_NORMAL)) {
-        qaws_scalar deg_v = (qaws_scalar)v_degree;
+    if ((eval_flags & (QAWS_SURFACE_CORE_DV | QAWS_SURFACE_CORE_DVV | QAWS_SURFACE_CORE_DUV | QAWS_SURFACE_CORE_NORMAL)) != 0) {
+        qaws_scalar deg_v = QAWS_ITOF(v_degree);
 
         for (i = 0; i < u_count; i++) {
             /* Derivative CPs for this row in v */
@@ -222,8 +222,8 @@ QAWS_INLINE qaws_surface_eval_3d qaws_surface_bezier_eval_3d(
         result.dv.z = work[2];
 
         /* dvv: second derivative in v */
-        if ((eval_flags & QAWS_SURFACE_CORE_DVV) && v_degree >= 2) {
-            qaws_scalar deg_v1 = (qaws_scalar)(v_degree - 1);
+        if (((eval_flags & QAWS_SURFACE_CORE_DVV) != 0) && v_degree >= 2) {
+            qaws_scalar deg_v1 = QAWS_ITOF(v_degree - 1);
 
             for (i = 0; i < u_count; i++) {
                 qaws_scalar dv_row[QAWS_CORE_MAX_POINTS * 3];
@@ -280,9 +280,9 @@ QAWS_INLINE qaws_surface_eval_3d qaws_surface_bezier_eval_3d(
         }
 
         /* duv: differentiate the dv_col in u, then evaluate at u */
-        if (eval_flags & QAWS_SURFACE_CORE_DUV) {
+        if ((eval_flags & QAWS_SURFACE_CORE_DUV) != 0) {
             qaws_scalar duv_col[QAWS_CORE_MAX_POINTS * 3];
-            qaws_scalar deg_u = (qaws_scalar)u_degree;
+            qaws_scalar deg_u = QAWS_ITOF(u_degree);
 
             for (k = 0; k < u_degree; k++) {
                 duv_col[k * 3 + 0] = deg_u * (dv_col[(k + 1) * 3 + 0] - dv_col[k * 3 + 0]);
@@ -310,7 +310,7 @@ QAWS_INLINE qaws_surface_eval_3d qaws_surface_bezier_eval_3d(
     }
 
     /* Normal: cross product of du x dv, normalized */
-    if (eval_flags & QAWS_SURFACE_CORE_NORMAL) {
+    if ((eval_flags & QAWS_SURFACE_CORE_NORMAL) != 0) {
         nx = result.du.y * result.dv.z - result.du.z * result.dv.y;
         ny = result.du.z * result.dv.x - result.du.x * result.dv.z;
         nz = result.du.x * result.dv.y - result.du.y * result.dv.x;
@@ -380,15 +380,15 @@ QAWS_INLINE qaws_surface_eval_3d qaws_surface_bspline_eval_3d(
     result.normal.x = QAWS_ZERO; result.normal.y = QAWS_ZERO; result.normal.z = QAWS_ZERO;
 
     /* Determine derivative orders needed */
-    if (eval_flags & QAWS_SURFACE_CORE_DU) max_u_deriv = 1;
-    if (eval_flags & QAWS_SURFACE_CORE_DUU) max_u_deriv = 2;
-    if (eval_flags & QAWS_SURFACE_CORE_DV) max_v_deriv = 1;
-    if (eval_flags & QAWS_SURFACE_CORE_DVV) max_v_deriv = 2;
-    if (eval_flags & QAWS_SURFACE_CORE_DUV) {
+    if ((eval_flags & QAWS_SURFACE_CORE_DU) != 0) max_u_deriv = 1;
+    if ((eval_flags & QAWS_SURFACE_CORE_DUU) != 0) max_u_deriv = 2;
+    if ((eval_flags & QAWS_SURFACE_CORE_DV) != 0) max_v_deriv = 1;
+    if ((eval_flags & QAWS_SURFACE_CORE_DVV) != 0) max_v_deriv = 2;
+    if ((eval_flags & QAWS_SURFACE_CORE_DUV) != 0) {
         if (max_u_deriv < 1) max_u_deriv = 1;
         if (max_v_deriv < 1) max_v_deriv = 1;
     }
-    if (eval_flags & QAWS_SURFACE_CORE_NORMAL) {
+    if ((eval_flags & QAWS_SURFACE_CORE_NORMAL) != 0) {
         if (max_u_deriv < 1) max_u_deriv = 1;
         if (max_v_deriv < 1) max_v_deriv = 1;
     }
@@ -427,49 +427,49 @@ QAWS_INLINE qaws_surface_eval_3d qaws_surface_bspline_eval_3d(
     }
 
     /* Position */
-    if (eval_flags & QAWS_SURFACE_CORE_POSITION) {
+    if ((eval_flags & QAWS_SURFACE_CORE_POSITION) != 0) {
         result.position.x = S[0][0][0];
         result.position.y = S[0][0][1];
         result.position.z = S[0][0][2];
     }
 
     /* du */
-    if (eval_flags & (QAWS_SURFACE_CORE_DU | QAWS_SURFACE_CORE_NORMAL)) {
+    if ((eval_flags & (QAWS_SURFACE_CORE_DU | QAWS_SURFACE_CORE_NORMAL)) != 0) {
         result.du.x = S[1][0][0];
         result.du.y = S[1][0][1];
         result.du.z = S[1][0][2];
     }
 
     /* dv */
-    if (eval_flags & (QAWS_SURFACE_CORE_DV | QAWS_SURFACE_CORE_NORMAL)) {
+    if ((eval_flags & (QAWS_SURFACE_CORE_DV | QAWS_SURFACE_CORE_NORMAL)) != 0) {
         result.dv.x = S[0][1][0];
         result.dv.y = S[0][1][1];
         result.dv.z = S[0][1][2];
     }
 
     /* duu */
-    if ((eval_flags & QAWS_SURFACE_CORE_DUU) && max_u_deriv >= 2) {
+    if (((eval_flags & QAWS_SURFACE_CORE_DUU) != 0) && max_u_deriv >= 2) {
         result.duu.x = S[2][0][0];
         result.duu.y = S[2][0][1];
         result.duu.z = S[2][0][2];
     }
 
     /* dvv */
-    if ((eval_flags & QAWS_SURFACE_CORE_DVV) && max_v_deriv >= 2) {
+    if (((eval_flags & QAWS_SURFACE_CORE_DVV) != 0) && max_v_deriv >= 2) {
         result.dvv.x = S[0][2][0];
         result.dvv.y = S[0][2][1];
         result.dvv.z = S[0][2][2];
     }
 
     /* duv */
-    if ((eval_flags & QAWS_SURFACE_CORE_DUV) && max_u_deriv >= 1 && max_v_deriv >= 1) {
+    if (((eval_flags & QAWS_SURFACE_CORE_DUV) != 0) && max_u_deriv >= 1 && max_v_deriv >= 1) {
         result.duv.x = S[1][1][0];
         result.duv.y = S[1][1][1];
         result.duv.z = S[1][1][2];
     }
 
     /* Normal: cross product of du x dv, normalized */
-    if (eval_flags & QAWS_SURFACE_CORE_NORMAL) {
+    if ((eval_flags & QAWS_SURFACE_CORE_NORMAL) != 0) {
         nx = result.du.y * result.dv.z - result.du.z * result.dv.y;
         ny = result.du.z * result.dv.x - result.du.x * result.dv.z;
         nz = result.du.x * result.dv.y - result.du.y * result.dv.x;

@@ -135,7 +135,7 @@ QAWS_INLINE void qaws_bezier_deriv_points_2d(
     int degree,
     QAWS_OUT qaws_scalar out_dp[QAWS_CORE_MAX_POINTS * 2])
 {
-    qaws_scalar deg = (qaws_scalar)degree;
+    qaws_scalar deg = QAWS_ITOF(degree);
     int i;
     for (i = 0; i < degree; i++) {
         out_dp[i * 2]     = deg * (cp[(i + 1) * 2]     - cp[i * 2]);
@@ -152,7 +152,7 @@ QAWS_INLINE void qaws_bezier_deriv_points_3d(
     int degree,
     QAWS_OUT qaws_scalar out_dp[QAWS_CORE_MAX_POINTS * 3])
 {
-    qaws_scalar deg = (qaws_scalar)degree;
+    qaws_scalar deg = QAWS_ITOF(degree);
     int i;
     for (i = 0; i < degree; i++) {
         out_dp[i * 3]     = deg * (cp[(i + 1) * 3]     - cp[i * 3]);
@@ -185,14 +185,14 @@ QAWS_INLINE qaws_eval_2d qaws_decasteljau_eval_2d(
     result.d1.x = QAWS_ZERO; result.d1.y = QAWS_ZERO;
     result.d2.x = QAWS_ZERO; result.d2.y = QAWS_ZERO;
 
-    if ((eval_flags & 0x2) && degree >= 1) {
+    if (((eval_flags & 0x2) != 0) && degree >= 1) {
         qaws_bezier_deriv_points_2d(cp, degree, d1cp);
         d1val = qaws_decasteljau_2d(d1cp, degree - 1, t);
         result.d1 = d1val;
     }
 
-    if ((eval_flags & 0x4) && degree >= 2) {
-        if (!(eval_flags & 0x2)) {
+    if (((eval_flags & 0x4) != 0) && degree >= 2) {
+        if ((eval_flags & 0x2) == 0) {
             qaws_bezier_deriv_points_2d(cp, degree, d1cp);
         }
         qaws_bezier_deriv_points_2d(d1cp, degree - 1, d2cp);
@@ -224,14 +224,14 @@ QAWS_INLINE qaws_eval_3d qaws_decasteljau_eval_3d(
     result.d1.x = QAWS_ZERO; result.d1.y = QAWS_ZERO; result.d1.z = QAWS_ZERO;
     result.d2.x = QAWS_ZERO; result.d2.y = QAWS_ZERO; result.d2.z = QAWS_ZERO;
 
-    if ((eval_flags & 0x2) && degree >= 1) {
+    if (((eval_flags & 0x2) != 0) && degree >= 1) {
         qaws_bezier_deriv_points_3d(cp, degree, d1cp);
         d1val = qaws_decasteljau_3d(d1cp, degree - 1, t);
         result.d1 = d1val;
     }
 
-    if ((eval_flags & 0x4) && degree >= 2) {
-        if (!(eval_flags & 0x2)) {
+    if (((eval_flags & 0x4) != 0) && degree >= 2) {
+        if ((eval_flags & 0x2) == 0) {
             qaws_bezier_deriv_points_3d(cp, degree, d1cp);
         }
         qaws_bezier_deriv_points_3d(d1cp, degree - 1, d2cp);

@@ -48,19 +48,19 @@ QAWS_INLINE qaws_eval_2d qaws_rational_bezier_eval_2d(
     h_d2.x = QAWS_ZERO; h_d2.y = QAWS_ZERO; h_d2.z = QAWS_ZERO;
 
     /* D1 (also for D2: the quotient rule reads it) */
-    if ((eval_flags & 0x6) && degree >= 1) {
+    if (((eval_flags & 0x6) != 0) && degree >= 1) {
         qaws_bezier_deriv_points_3d(weighted_cp, degree, d1p);
         h_d1 = qaws_decasteljau_3d(d1p, degree - 1, t);
         C1x = (h_d1.x - Cx * h_d1.z) * inv_w0;
         C1y = (h_d1.y - Cy * h_d1.z) * inv_w0;
-        if (eval_flags & 0x2) {
+        if ((eval_flags & 0x2) != 0) {
             result.d1.x = C1x;
             result.d1.y = C1y;
         }
     }
 
     /* D2 (the homogeneous second derivative vanishes below degree 2, the quotient's does not) */
-    if ((eval_flags & 0x4) && degree >= 1) {
+    if (((eval_flags & 0x4) != 0) && degree >= 1) {
         if (degree >= 2) {
             qaws_bezier_deriv_points_3d(d1p, degree - 1, d2p);
             h_d2 = qaws_decasteljau_3d(d2p, degree - 2, t);
@@ -134,8 +134,8 @@ QAWS_INLINE qaws_eval_3d qaws_rational_bezier_eval_3d(
     for (c = 0; c < 4; c++) { hd1[c] = QAWS_ZERO; hd2[c] = QAWS_ZERO; }
 
     /* D1 (also for D2: the quotient rule reads it) */
-    if ((eval_flags & 0x6) && degree >= 1) {
-        deg = (qaws_scalar)degree;
+    if (((eval_flags & 0x6) != 0) && degree >= 1) {
+        deg = QAWS_ITOF(degree);
         for (i = 0; i < degree; i++)
             for (c = 0; c < 4; c++)
                 d1p[i * 4 + c] = deg * (weighted_cp[(i + 1) * 4 + c] - weighted_cp[i * 4 + c]);
@@ -153,7 +153,7 @@ QAWS_INLINE qaws_eval_3d qaws_rational_bezier_eval_3d(
         C1x = (hd1[0] - Cx * hd1[3]) * inv_w0;
         C1y = (hd1[1] - Cy * hd1[3]) * inv_w0;
         C1z = (hd1[2] - Cz * hd1[3]) * inv_w0;
-        if (eval_flags & 0x2) {
+        if ((eval_flags & 0x2) != 0) {
             result.d1.x = C1x;
             result.d1.y = C1y;
             result.d1.z = C1z;
@@ -161,9 +161,9 @@ QAWS_INLINE qaws_eval_3d qaws_rational_bezier_eval_3d(
     }
 
     /* D2 (the homogeneous second derivative vanishes below degree 2, the quotient's does not) */
-    if ((eval_flags & 0x4) && degree >= 1) {
+    if (((eval_flags & 0x4) != 0) && degree >= 1) {
         if (degree >= 2) {
-            deg = (qaws_scalar)(degree - 1);
+            deg = QAWS_ITOF(degree - 1);
             for (i = 0; i < degree - 1; i++)
                 for (c = 0; c < 4; c++)
                     d2p[i * 4 + c] = deg * (d1p[(i + 1) * 4 + c] - d1p[i * 4 + c]);

@@ -238,12 +238,12 @@ QAWS_INLINE void qaws_bspline_basis_derivs(
         }
     }
 
-    factor = (qaws_scalar)p;
+    factor = QAWS_ITOF(p);
     for (d_idx = 1; d_idx <= max_k; d_idx++) {
         for (j = 0; j <= p; j++) {
             out_ders[d_idx * order + j] *= factor;
         }
-        factor *= (qaws_scalar)(p - d_idx);
+        factor *= QAWS_ITOF(p - d_idx);
     }
 }
 
