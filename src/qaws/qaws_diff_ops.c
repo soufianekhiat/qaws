@@ -376,7 +376,7 @@ static qaws_status surface_refine(qaws_surface const* surface, qaws_vec3 q, qaws
 
 static qaws_status surface_solve(qaws_surface const* surface, qaws_vec3 q, surface_solution* s)
 {
-	static qaws_scalar d[OPS_GAP_GRID][OPS_GAP_GRID];
+	qaws_scalar d[OPS_GAP_GRID][OPS_GAP_GRID];   /* (on the stack: callers on several threads each have their own) */
 	qaws_range ur = surface->u_range, vr = surface->v_range;
 	qaws_scalar du = (ur.max_value - ur.min_value) / (OPS_GAP_GRID - 1);
 	qaws_scalar dv = (vr.max_value - vr.min_value) / (OPS_GAP_GRID - 1);

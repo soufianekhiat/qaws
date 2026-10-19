@@ -142,6 +142,7 @@ add_executable(
 138_feature_size.c
 139_mesh_repair.c
 140_eval_limits.c
+141_eval_threads.c
 )
 
 # The amalgamated library exports exactly the same symbols, so the tests can
