@@ -21,6 +21,8 @@
  *   host6_surface_tessellation.svg  a B-spline flat on half its net: the
  *                      quadtree with an absolute flatness threshold against
  *                      qaws_surface_tessellate_adaptive (chord and angle)
+ *   host7_pipe.svg     a pipe around a twisted path: rotation-minimizing frames,
+ *                      lit by the normal of its analytic derivatives
  */
 
 #include "qaws.h"
@@ -566,8 +568,99 @@ static void figure_tessellation_surface(void)
 	printf("wrote showcase/host6_surface_tessellation.svg\n");
 }
 
+#define HS_PU 260
+#define HS_PV 24
+
+/* a pipe as quads back to front, lit by its analytic normal, striped along v (a twisting frame would wind the stripes) */
+static void hs_pipe(svg* s, projection const* pr, qaws_surface const* pipe)
+{
+	static int order[HS_PU * HS_PV];
+	static double depth[HS_PU * HS_PV];
+	int n = HS_PU * HS_PV, k, m, gap;
+	for (k = 0; k < n; k++)
+	{
+		qaws_surface_eval_result r;
+		qaws_surface_evaluate(pipe, (qaws_scalar)((k / HS_PV + 0.5) / HS_PU), (qaws_scalar)((k % HS_PV + 0.5) / HS_PV), QAWS_SURFACE_EVAL_POSITION, &r);
+		depth[k] = r.position.x + r.position.y - 0.4 * r.position.z;
+		order[k] = k;
+	}
+	for (gap = n / 2; gap > 0; gap /= 2)
+		for (k = gap; k < n; k++)
+		{
+			int o = order[k];
+			for (m = k; m >= gap && depth[order[m - gap]] > depth[o]; m -= gap)
+				order[m] = order[m - gap];
+			order[m] = o;
+		}
+	for (k = 0; k < n; k++)
+	{
+		int i = order[k] / HS_PV, j = order[k] % HS_PV, c;
+		double x[4], y[4], lit;
+		qaws_surface_eval_result r[4], mid;
+		int du[4] = { 0, 1, 1, 0 }, dv[4] = { 0, 0, 1, 1 };
+		for (c = 0; c < 4; c++)
+		{
+			qaws_surface_evaluate(pipe, (qaws_scalar)((double)(i + du[c]) / HS_PU), (qaws_scalar)((double)(j + dv[c]) / HS_PV), QAWS_SURFACE_EVAL_POSITION, &r[c]);
+			project(pr, r[c].position.x, r[c].position.y, r[c].position.z, &x[c], &y[c]);
+		}
+		qaws_surface_evaluate(pipe, (qaws_scalar)((i + 0.5) / HS_PU), (qaws_scalar)((j + 0.5) / HS_PV), QAWS_SURFACE_EVAL_NORMAL, &mid);
+		lit = fabs(-0.5 * mid.normal.x + 0.3 * mid.normal.y + 0.81 * mid.normal.z);
+		lit = 0.25 + 0.75 * lit;
+		fprintf(s->f, "<polygon points=\"%.1f,%.1f %.1f,%.1f %.1f,%.1f %.1f,%.1f\" fill=\"rgb(%d,%d,%d)\" stroke=\"none\"/>\n",
+			x[0], y[0], x[1], y[1], x[2], y[2], x[3], y[3],
+			(int)(lit * (j / 3 % 2 ? 42 : 244)), (int)(lit * (j / 3 % 2 ? 157 : 162)), (int)(lit * (j / 3 % 2 ? 143 : 97)));
+	}
+}
+
+static void figure_pipe(void)
+{
+	/* a twisted path: a helix with wobbles */
+	qaws_vec3 p[12];
+	qaws_bspline_desc d;
+	qaws_surface_pipe_desc pd;
+	qaws_curve* c = NULL;
+	qaws_surface* pipe = NULL;
+	projection pr = { 612, 420, 52, 1.0 };
+	viewport v = { 24, 80, 1176, 620, 0, 1, 0, 1 };
+	svg s;
+	unsigned int i;
+	for (i = 0; i < 12; i++)
+	{
+		double a = 0.75 * i;
+		p[i].x = (qaws_scalar)(2.2 * cos(a) + 0.5 * sin(2.1 * a));
+		p[i].y = (qaws_scalar)(2.2 * sin(a));
+		p[i].z = (qaws_scalar)(0.55 * i + 0.6 * cos(1.7 * a) - 3);
+	}
+	memset(&d, 0, sizeof d);
+	d.dimension = QAWS_DIMENSION_3D;
+	d.degree = 3;
+	d.control_points = p;
+	d.control_point_count = 12;
+	if (qaws_curve_create_bspline(&d, &c) != QAWS_STATUS_OK)
+		return;
+	memset(&pd, 0, sizeof pd);
+	pd.path = c;
+	pd.radius_x = (qaws_scalar)0.45;
+	if (qaws_surface_create_pipe(&pd, &pipe) != QAWS_STATUS_OK)
+	{
+		qaws_curve_destroy(c);
+		return;
+	}
+	if (svg_open(&s, "showcase/host7_pipe.svg", 1224, 730, "Pipe with analytic derivatives",
+		"a pipe around a twisted cubic path: rotation-minimizing frames by double reflection, lit by the normal of the analytic du and dv"))
+	{
+		svg_panel(&s, &v, "qaws_surface_create_pipe: stripes along v stay straight (no twist); smooth shading from the analytic normal");
+		hs_pipe(&s, &pr, pipe);
+		svg_close(&s);
+		printf("wrote showcase/host7_pipe.svg\n");
+	}
+	qaws_surface_destroy(pipe);
+	qaws_curve_destroy(c);
+}
+
 int main(void)
 {
+	figure_pipe();
 	figure_tessellation_surface();
 	figure_surface_closest();
 	figure_frames();
