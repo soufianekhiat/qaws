@@ -88,8 +88,9 @@ typedef struct qaws_array_view_mut
 	size_t stride;
 } qaws_array_view_mut;
 
-/* QAWS_STATUS_INVALID_ARGUMENT unless: a known type; 1 to 4 components; when count > 0, non-NULL pointers aligned to the scalar's
-   size and a stride that is a multiple of it, at least an element (packed) or a value (planar). */
+/* QAWS_STATUS_INVALID_ARGUMENT unless: a known type; 1 to 4 components; when count > 0, non-NULL pointers and a stride of at least
+   an element (packed) or a value (planar). Values are read bytewise: no alignment is required (doubles 4-aligned on 32-bit x86,
+   packed host structs with any stride). */
 qaws_status qaws_array_view_validate(qaws_array_view const* view);
 
 /* QAWS_STATUS_OUT_OF_RANGE unless every byte the view reads lies in [base, base + bytes) (a host buffer's extent) */

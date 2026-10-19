@@ -34,7 +34,7 @@ enum { MEM_SYSTEM = 1, MEM_LEGACY = 2, MEM_SIZED = 3 };
 typedef struct mem_tail
 {
 	size_t size;                        /* user bytes */
-	unsigned int kind;
+	unsigned int kind;                  /* low byte: the kind; above: the shift of a legacy block to alignment */
 	unsigned int magic;
 } mem_tail;
 
@@ -220,16 +220,21 @@ static void mem_read_tail(void const* ptr, mem_tail* t)
 	memcpy(t, (unsigned char const*)ptr - sizeof(mem_tail), sizeof *t);
 }
 
-/* the raw block of a user pointer; 0 when it is not one of ours */
+/* the raw block of a user pointer (t->kind left as the kind alone); 0 when it is not one of ours */
 static int mem_block(void const* ptr, mem_tail* t, unsigned char** raw, qaws_allocator* a)
 {
+	unsigned char* base;
+	unsigned int shift;
 	mem_read_tail(ptr, t);
 	assert(t->magic == MEM_MAGIC && "qaws: a pointer the library did not allocate");
+	shift = t->kind >> 8;
+	t->kind &= 0xFFu;
 	if (t->magic != MEM_MAGIC || t->kind < MEM_SYSTEM || t->kind > MEM_SIZED)
 		return 0;
-	*raw = (unsigned char*)ptr - (t->kind == MEM_SYSTEM ? MEM_HEAD_SYSTEM : MEM_HEAD_CUSTOM);
+	base = (unsigned char*)ptr - (t->kind == MEM_SYSTEM ? MEM_HEAD_SYSTEM : MEM_HEAD_CUSTOM);
 	if (t->kind != MEM_SYSTEM)
-		memcpy(a, *raw, sizeof *a);
+		memcpy(a, base, sizeof *a);
+	*raw = base - shift;
 	return 1;
 }
 
@@ -246,7 +251,8 @@ static void mem_release(unsigned char* raw, unsigned int kind, qaws_allocator co
 		a->dealloc(raw, a->user_data);
 }
 
-static void* mem_finish(unsigned char* raw, unsigned int kind, qaws_allocator const* a, size_t size)
+/* base: the aligned start of the header; shift: how far past the allocator's block it is (legacy blocks) */
+static void* mem_finish(unsigned char* raw, unsigned int kind, qaws_allocator const* a, size_t size, unsigned int shift)
 {
 	size_t head = kind == MEM_SYSTEM ? MEM_HEAD_SYSTEM : MEM_HEAD_CUSTOM;
 	mem_tail t;
@@ -257,7 +263,7 @@ static void* mem_finish(unsigned char* raw, unsigned int kind, qaws_allocator co
 		memcpy(raw, &c, sizeof c);
 	}
 	t.size = size;
-	t.kind = kind;
+	t.kind = kind | (shift << 8);
 	t.magic = MEM_MAGIC;
 	memcpy(raw + head - sizeof t, &t, sizeof t);
 	return raw + head;
@@ -281,21 +287,28 @@ void* qaws_internal_alloc_from(qaws_allocator const* allocator, size_t size)
 		raw = (unsigned char*)allocator->alloc_sized(total, MEM_ALIGN, allocator->user_data);
 	else
 	{
-		/* the legacy interface counts in unsigned long: larger requests fail, never truncated */
+		/* the legacy interface counts in unsigned long (larger requests fail, never truncated) and cannot be told the
+		   alignment: the block is asked MEM_ALIGN - 1 bytes larger and the header placed at the first aligned address */
+		unsigned int shift;
+		total += MEM_ALIGN - 1;
 		if (total > (size_t)ULONG_MAX)
 			return NULL;
 		raw = (unsigned char*)allocator->alloc((unsigned long)total, allocator->user_data);
+		if (!raw)
+			return NULL;
+		shift = (unsigned int)((MEM_ALIGN - (uintptr_t)raw % MEM_ALIGN) % MEM_ALIGN);
+		return mem_finish(raw + shift, MEM_LEGACY, allocator, size, shift);
 	}
 	if (!raw)
 		return NULL;
 	if ((uintptr_t)raw % MEM_ALIGN)
 	{
-		/* a misaligned block is given back: the call fails rather than misalign the library's data */
-		assert(!"qaws: the allocator returned a block not aligned to QAWS_MEMORY_ALIGNMENT");
+		/* the sized interface was told the alignment: a misaligned block is given back and the call fails */
+		assert(!"qaws: the allocator returned a block not aligned as asked");
 		mem_release(raw, kind, allocator, total);
 		return NULL;
 	}
-	return mem_finish(raw, kind, allocator, size);
+	return mem_finish(raw, kind, allocator, size, 0);
 }
 
 void* qaws_internal_malloc(size_t size)
@@ -346,10 +359,10 @@ void* qaws_internal_realloc(void* ptr, size_t size)
 	if (t.kind == MEM_SYSTEM)
 	{
 		unsigned char* q = (unsigned char*)sys_realloc(raw, t.size + head, size + head);
-		return q ? mem_finish(q, MEM_SYSTEM, NULL, size) : NULL;
+		return q ? mem_finish(q, MEM_SYSTEM, NULL, size, 0) : NULL;
 	}
 	if (t.kind == MEM_SIZED && a.resize && a.resize(raw, t.size + head, size + head, MEM_ALIGN, a.user_data))
-		return mem_finish(raw, MEM_SIZED, &a, size);
+		return mem_finish(raw, MEM_SIZED, &a, size, 0);
 	/* a new block from the same allocator; the old one kept on failure */
 	p = qaws_internal_alloc_from(&a, size);
 	if (!p)

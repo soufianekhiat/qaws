@@ -69,6 +69,10 @@ static qaws_curve* mm_square(double x, double y, double s)
 	return c;
 }
 
+/* the parts mm_workload runs: sampling, offsets, clipping, tessellation */
+enum { MM_SAMPLE = 1, MM_OFFSET = 2, MM_CLIP = 4, MM_TESS = 8, MM_ALL = 15 };
+static unsigned int g_parts = MM_ALL;
+
 /* a mixed workload; its failures counted */
 static unsigned int mm_workload(void)
 {
@@ -91,23 +95,28 @@ static unsigned int mm_workload(void)
 
 	memset(&d, 0, sizeof d);
 	d.dimension = QAWS_DIMENSION_2D; d.degree = 3; d.control_points = wave; d.control_point_count = 6;
-	failures += qaws_curve_create_bspline(&d, &w) != QAWS_STATUS_OK;
+	if (g_parts & (MM_SAMPLE | MM_OFFSET))
+		failures += qaws_curve_create_bspline(&d, &w) != QAWS_STATUS_OK;
 	if (w)
 	{
 		memset(&sd, 0, sizeof sd);
 		sd.sample_count = 4;
 		sd.error_tolerance = (qaws_scalar)1e-4;
 		sd.use_adaptive_sampling = 1;
-		failures += qaws_curve_sample_2d(w, &sd, samples, 4096, &n) != QAWS_STATUS_OK;
+		if (g_parts & MM_SAMPLE)
+			failures += qaws_curve_sample_2d(w, &sd, samples, 4096, &n) != QAWS_STATUS_OK;
 		n = 0;
-		failures += qaws_curve_offset_2d(w, (qaws_scalar)0.3, 1, offs, 16, &n) != QAWS_STATUS_OK;
+		if (g_parts & MM_OFFSET)
+			failures += qaws_curve_offset_2d(w, (qaws_scalar)0.3, 1, offs, 16, &n) != QAWS_STATUS_OK;
 		for (i = 0; i < n; i++)
 			qaws_curve_destroy(offs[i]);
 		qaws_curve_destroy(w);
 	}
-	a = mm_square(0, 0, 2);
-	b = mm_square(1, 1, 2);
-	if (a && b)
+	a = g_parts & MM_CLIP ? mm_square(0, 0, 2) : NULL;
+	b = g_parts & MM_CLIP ? mm_square(1, 1, 2) : NULL;
+	if (!(g_parts & MM_CLIP))
+		;
+	else if (a && b)
 	{
 		ca[0] = a; cb[0] = b;
 		pa.curves = ca; pa.curve_count = 1; pa.closed = 1;
@@ -128,7 +137,8 @@ static unsigned int mm_workload(void)
 		}
 	memset(&bd, 0, sizeof bd);
 	bd.u_degree = 3; bd.v_degree = 3; bd.control_points = net; bd.u_point_count = 4; bd.v_point_count = 4;
-	failures += qaws_surface_create_bezier(&bd, &s) != QAWS_STATUS_OK;
+	if (g_parts & MM_TESS)
+		failures += qaws_surface_create_bezier(&bd, &s) != QAWS_STATUS_OK;
 	if (s)
 	{
 		memset(&td, 0, sizeof td);
@@ -302,10 +312,26 @@ static void* mm_shifted_alloc(unsigned long size, void* user)
 	return p ? p + 8 + (16 - ((uintptr_t)p & 15)) % 16 : NULL;
 }
 
+/* records the pointer it is given back (the test keeps the few bytes) */
+static void* g_shift_last;
 static void mm_shifted_free(void* p, void* user)
 {
-	/* blocks are only ever given back here unused: the test keeps them (a few bytes) */
-	(void)p;
+	g_shift_last = p;
+	((mm_count*)user)->frees++;
+}
+
+/* the sized interface, 8 bytes off the alignment it is asked */
+static void* mm_shifted_sized(size_t size, size_t alignment, void* user)
+{
+	unsigned char* p = (unsigned char*)malloc(size + 64);
+	((mm_count*)user)->allocs++;
+	return p ? p + 8 + (alignment - ((uintptr_t)p % alignment)) % alignment : NULL;
+}
+
+static void mm_shifted_sized_free(void* p, size_t size, size_t alignment, void* user)
+{
+	(void)size; (void)alignment;
+	g_shift_last = p;
 	((mm_count*)user)->frees++;
 }
 
@@ -340,16 +366,34 @@ static void test_sizes_and_alignment(void)
 	unsigned int i;
 	char msg[200];
 
-#ifdef NDEBUG
+	/* the legacy interface cannot be told the alignment: blocks 8 bytes off are aligned inside, freed at the address given */
 	memset(&shifted, 0, sizeof shifted);
 	shifted.alloc = mm_shifted_alloc;
 	shifted.dealloc = mm_shifted_free;
 	shifted.user_data = &g_shift;
-	TEST_ASSERT(qaws_internal_alloc_from(&shifted, 64) == NULL && g_shift.allocs == 1 && g_shift.frees == 1,
-		"a misaligned block is given back and the allocation fails");
+	{
+		unsigned char* q = (unsigned char*)qaws_internal_alloc_from(&shifted, 64);
+		TEST_ASSERT(q && (uintptr_t)q % QAWS_MEMORY_ALIGNMENT == 0, "a legacy allocator off alignment: the block aligned inside");
+		memset(q, 0x5A, 64);
+		qaws_internal_free(q);
+		TEST_ASSERT(g_shift.frees == 1 && g_shift_last && (unsigned char*)g_shift_last < q && q - (unsigned char*)g_shift_last < 256,
+			"and given back at the address the allocator returned");
+	}
+#ifdef NDEBUG
+	/* the sized interface is told the alignment: a block off it is given back and the allocation fails */
+	{
+		qaws_allocator ss;
+		mm_count sc = { 0, 0, 0 };
+		memset(&ss, 0, sizeof ss);
+		ss.alloc = qaws_allocator_extended;
+		ss.alloc_sized = mm_shifted_sized;
+		ss.dealloc_sized = mm_shifted_sized_free;
+		ss.user_data = &sc;
+		TEST_ASSERT(qaws_internal_alloc_from(&ss, 64) == NULL && sc.allocs == 1 && sc.frees == 1,
+			"a sized allocator off the alignment asked: refused, the block given back");
+	}
 #else
-	(void)shifted;
-	printf("  (misaligned allocators assert in debug builds; checked in release)\n");
+	printf("  (a sized allocator off its alignment asserts in debug builds; checked in release)\n");
 #endif
 
 	TEST_ASSERT(qaws_internal_malloc(SIZE_MAX) == NULL && qaws_internal_malloc(SIZE_MAX - 8) == NULL, "sizes near SIZE_MAX refused");
@@ -455,6 +499,38 @@ static void test_arena(void)
 	failures = mm_workload();
 	qaws_set_thread_allocator(&prev);
 	TEST_ASSERT(failures > 0 && arena.peak <= sizeof tiny_buffer && arena.live == 0, "a 2 KB arena: allocation failures reported cleanly, nothing held");
+
+	/* every part in arenas from 256 bytes up (allocations fail at many different points): nothing may stay held */
+	{
+		static char const* names[4] = { "sampling", "offsets", "clipping", "tessellation" };
+		static double sweep[1 << 16];
+		unsigned int part, leaks = 0, runs = 0;
+		size_t sz;
+		for (part = 0; part < 4; part++)
+		{
+			unsigned int part_leaks = 0;
+			g_parts = 1u << part;
+			for (sz = 256; sz <= sizeof sweep; sz = sz * 9 / 8 + 16)
+			{
+				qaws_arena_init(&arena, sweep, sz);
+				qaws_exchange_thread_allocator(&arena.allocator, &prev);
+				mm_workload();
+				qaws_set_thread_allocator(&prev);
+				runs++;
+				if (arena.live || arena.invalid_frees)
+				{
+					if (!part_leaks)
+						printf("    %s: %lu blocks held after failing in a %lu-byte arena\n", names[part], (unsigned long)arena.live, (unsigned long)sz);
+					part_leaks++;
+				}
+			}
+			leaks += part_leaks;
+		}
+		g_parts = MM_ALL;
+		snprintf(msg, sizeof msg, "failure paths: %u runs in arenas from 256 bytes, %u left blocks held", runs, leaks);
+		printf("  %s\n", msg);
+		TEST_ASSERT(leaks == 0, msg);
+	}
 
 	/* overflow-safe arithmetic in the arena itself */
 	qaws_arena_init(&arena, tiny_buffer, sizeof tiny_buffer);

@@ -192,9 +192,21 @@ static double cl_tmax(qaws_curve const* c) { return c->parameter_range.max_value
 /*  1. Sources                                                              */
 /* ======================================================================== */
 
-static qaws_status cl_temp(cl_ctx* x, qaws_curve* c)
+static qaws_status cl_temp_room(cl_ctx* x)
 {
 	CL_GROW(x->temp, x->ntemp, x->captemp, qaws_curve*);
+	return QAWS_STATUS_OK;
+}
+
+/* c held by the context; destroyed when there is no room to hold it (it would leak) */
+static qaws_status cl_temp(cl_ctx* x, qaws_curve* c)
+{
+	qaws_status s = cl_temp_room(x);
+	if (s != QAWS_STATUS_OK)
+	{
+		qaws_curve_destroy(c);
+		return s;
+	}
 	x->temp[x->ntemp++] = c;
 	return QAWS_STATUS_OK;
 }
@@ -1667,9 +1679,21 @@ static qaws_status cl_windings(cl_ctx* x, unsigned int nfaces, int* ws, int* wc,
 /*  8. Output                                                               */
 /* ======================================================================== */
 
-static qaws_status cl_res_curve(qaws_clip_result* r, qaws_curve* c)
+static qaws_status cl_res_room(qaws_clip_result* r)
 {
 	CL_GROW(r->curves, r->curve_count, r->curve_cap, qaws_curve*);
+	return QAWS_STATUS_OK;
+}
+
+/* c held by the result; destroyed when there is no room to hold it (it would leak) */
+static qaws_status cl_res_curve(qaws_clip_result* r, qaws_curve* c)
+{
+	qaws_status s = cl_res_room(r);
+	if (s != QAWS_STATUS_OK)
+	{
+		qaws_curve_destroy(c);
+		return s;
+	}
 	r->curves[r->curve_count++] = c;
 	return QAWS_STATUS_OK;
 }
@@ -2478,11 +2502,18 @@ qaws_status qaws_internal_clip_result_append(qaws_clip_result* dst, qaws_clip_re
 {
 	unsigned int coff = dst->curve_count, voff = dst->vertex_count, poff = dst->path_count, i;
 	qaws_curve const** views;
-	for (i = 0; i < src->curve_count; i++)
+	/* room for every curve first: a failure leaves each curve owned by src alone */
+	if (dst->curve_cap - dst->curve_count < src->curve_count)
 	{
-		if (cl_res_curve(dst, src->curves[i]) != QAWS_STATUS_OK)
+		unsigned int nc = dst->curve_count + src->curve_count;
+		qaws_curve** np = (qaws_curve**)qaws_internal_realloc(dst->curves, sizeof(qaws_curve*) * nc);
+		if (!np)
 			return QAWS_STATUS_ALLOCATION_FAILURE;
+		dst->curves = np;
+		dst->curve_cap = nc;
 	}
+	for (i = 0; i < src->curve_count; i++)
+		dst->curves[dst->curve_count++] = src->curves[i];
 	src->curve_count = 0;   /* moved */
 	for (i = 0; i < src->vertex_count; i++)
 		if (cl_res_vertex(dst, &src->vertices[i]) != QAWS_STATUS_OK)

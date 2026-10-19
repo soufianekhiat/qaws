@@ -44,13 +44,24 @@ static size_t vw_step(void const* data, size_t stride, qaws_element_type t, unsi
 	return stride ? stride : data ? vw_size(t) * components : vw_size(t);
 }
 
-/* element i's component c */
+/* element i's component c, read bytewise: host data needs no alignment (4-byte doubles on 32-bit x86, packed structs) */
 static double vw_get(qaws_array_view const* v, unsigned int i, unsigned int c)
 {
 	size_t s = vw_step(v->data, v->stride, v->type, v->components);
 	unsigned char const* p = v->data ? (unsigned char const*)v->data + (size_t)i * s + c * vw_size(v->type)
 		: (unsigned char const*)v->planes[c] + (size_t)i * s;
-	return v->type == QAWS_ELEMENT_F32 ? (double)*(float const*)p : *(double const*)p;
+	if (v->type == QAWS_ELEMENT_F32)
+	{
+		float f;
+		memcpy(&f, p, sizeof f);
+		return (double)f;
+	}
+	else
+	{
+		double d;
+		memcpy(&d, p, sizeof d);
+		return d;
+	}
 }
 
 static void vw_put(qaws_array_view_mut const* v, unsigned int i, unsigned int c, double x)
@@ -58,9 +69,12 @@ static void vw_put(qaws_array_view_mut const* v, unsigned int i, unsigned int c,
 	size_t s = vw_step(v->data, v->stride, v->type, v->components);
 	unsigned char* p = v->data ? (unsigned char*)v->data + (size_t)i * s + c * vw_size(v->type) : (unsigned char*)v->planes[c] + (size_t)i * s;
 	if (v->type == QAWS_ELEMENT_F32)
-		*(float*)p = (float)x;
+	{
+		float f = (float)x;
+		memcpy(p, &f, sizeof f);
+	}
 	else
-		*(double*)p = x;
+		memcpy(p, &x, sizeof x);
 }
 
 static qaws_array_view vw_const(qaws_array_view_mut const* m)
@@ -86,13 +100,12 @@ qaws_status qaws_array_view_validate(qaws_array_view const* view)
 	if (view->count == 0)
 		return QAWS_STATUS_OK;
 	es = vw_size(view->type);
-	if (view->stride % es)
-		return QAWS_STATUS_INVALID_ARGUMENT;
 	if (view->data)
-		return (uintptr_t)view->data % es || (view->stride && view->stride < es * view->components) ? QAWS_STATUS_INVALID_ARGUMENT
-			: QAWS_STATUS_OK;
+		return view->stride && view->stride < es * view->components ? QAWS_STATUS_INVALID_ARGUMENT : QAWS_STATUS_OK;
+	if (view->stride && view->stride < es)
+		return QAWS_STATUS_INVALID_ARGUMENT;
 	for (c = 0; c < view->components; c++)
-		if (!view->planes[c] || (uintptr_t)view->planes[c] % es)
+		if (!view->planes[c])
 			return QAWS_STATUS_INVALID_ARGUMENT;
 	return QAWS_STATUS_OK;
 }
