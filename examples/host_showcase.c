@@ -15,6 +15,9 @@
  *   host4_tessellation.svg  an S whose middle lies on its chord: the adaptive
  *                      sampler's midpoint test against qaws_curve_tessellate_2d
  *                      at chord and angle tolerances
+ *   host5_surface_closest.svg  the point of a dented spherical cap closest to
+ *                      its center: the nearest of an 8 x 8 grid against
+ *                      qaws_surface_find_closest_point_certified
  */
 
 #include "qaws.h"
@@ -362,8 +365,96 @@ static void figure_tessellation(void)
 	printf("wrote showcase/host4_tessellation.svg\n");
 }
 
+#define HS_CAP 40
+
+static double hs_radius(void const* user, qaws_scalar u, qaws_scalar v)
+{
+	qaws_surface_eval_result r;
+	qaws_surface_evaluate((qaws_surface const*)user, u, v, QAWS_SURFACE_EVAL_POSITION, &r);
+	return sqrt((double)r.position.x * r.position.x + (double)r.position.y * r.position.y + (double)r.position.z * r.position.z);
+}
+
+static void hs_mark(svg* s, projection const* pr, qaws_vec3 p, char const* color, char const* label)
+{
+	double x0, y0, x1, y1;
+	project(pr, 0, 0, 0, &x0, &y0);
+	project(pr, p.x, p.y, p.z, &x1, &y1);
+	svg_line(s, x0, y0, x1, y1, color, 2.5, 1);
+	svg_circle(s, x1, y1, 5, color, "#1b1f24");
+	svg_circle(s, x0, y0, 5, "#d1242f", "#1b1f24");
+	svg_text(s, x1 + 8, y1 - 8, 13, "#1b1f24", "start", label);
+}
+
+static void figure_surface_closest(void)
+{
+	/* a spherical cap of radius 5 around the origin, one net point pulled to radius 0.5: a dent between the 8 x 8 samples */
+	static qaws_vec3 p[HS_CAP * HS_CAP];
+	qaws_surface_bspline_desc d;
+	qaws_surface* c = NULL;
+	qaws_vec3 q = { 0, 0, 0 }, cl, near_pt = { 0, 0, 0 };
+	qaws_scalar u, v, dist, gap;
+	projection left = { 312, 400, 37, 1.0 }, right = { 912, 400, 37, 1.0 };
+	viewport vl = { 24, 80, 576, 620, 0, 1, 0, 1 }, vr = { 624, 80, 576, 620, 0, 1, 0, 1 };
+	double best = 1e300, lx, ly;
+	char note[200];
+	svg s;
+	unsigned int i, j;
+	for (i = 0; i < HS_CAP; i++)
+		for (j = 0; j < HS_CAP; j++)
+		{
+			double th = 0.3 + 2.5 * i / (HS_CAP - 1), ph = 3.0 * j / (HS_CAP - 1), r = i == 14 && j == 14 ? 0.5 : 5.0;
+			p[i * HS_CAP + j].x = (qaws_scalar)(r * sin(th) * cos(ph));
+			p[i * HS_CAP + j].y = (qaws_scalar)(r * sin(th) * sin(ph));
+			p[i * HS_CAP + j].z = (qaws_scalar)(r * cos(th));
+		}
+	memset(&d, 0, sizeof d);
+	d.u_degree = 3;
+	d.v_degree = 3;
+	d.control_points = p;
+	d.u_point_count = HS_CAP;
+	d.v_point_count = HS_CAP;
+	if (qaws_surface_create_bspline(&d, &c) != QAWS_STATUS_OK)
+	{
+		printf("host5: surface not created\n");
+		return;
+	}
+	if (!svg_open(&s, "showcase/host5_surface_closest.svg", 1224, 760, "Certified closest point on a surface",
+		"a bicubic B-spline cap of radius 5 around the red point, coloured by distance to it, with a dent between the samples of an 8 x 8 grid"))
+		return;
+	svg_panel(&s, &vl, "nearest of the 8 x 8 grid (Newton stays on the sphere)");
+	svg_panel(&s, &vr, "certified: branch and bound over the Bezier patches");
+	draw_quads(&s, &left, c, 110, 110, hs_radius, c, 2.9, 5.0);
+	draw_quads(&s, &right, c, 110, 110, hs_radius, c, 2.9, 5.0);
+	for (i = 0; i < 8; i++)
+		for (j = 0; j < 8; j++)
+		{
+			qaws_surface_eval_result r;
+			double dd;
+			qaws_surface_evaluate(c, (qaws_scalar)(i / 7.0), (qaws_scalar)(j / 7.0), QAWS_SURFACE_EVAL_POSITION, &r);
+			dd = sqrt((double)r.position.x * r.position.x + (double)r.position.y * r.position.y + (double)r.position.z * r.position.z);
+			project(&left, r.position.x, r.position.y, r.position.z, &lx, &ly);
+			svg_circle(&s, lx, ly, 3, "#f4a261", "#1b1f24");
+			if (dd < best)
+			{
+				best = dd;
+				near_pt = r.position;
+			}
+		}
+	snprintf(note, sizeof note, "%.6f", best);
+	hs_mark(&s, &left, near_pt, "#f4a261", note);
+	qaws_surface_find_closest_point_certified(c, q, &u, &v, &cl, &dist, &gap);
+	snprintf(note, sizeof note, "%.9f (gap %.0e)", (double)dist, (double)gap);
+	hs_mark(&s, &right, cl, "#2a9d8f", note);
+	svg_colorbar(&s, 640, 716, 300, 12, "2.9", "5.0");
+	svg_text(&s, 960, 727, 13, "#57606a", "start", "distance to the red point");
+	svg_close(&s);
+	qaws_surface_destroy(c);
+	printf("wrote showcase/host5_surface_closest.svg\n");
+}
+
 int main(void)
 {
+	figure_surface_closest();
 	figure_frames();
 	figure_arc_length();
 	figure_closest();
