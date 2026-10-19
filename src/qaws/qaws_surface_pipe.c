@@ -3,6 +3,7 @@
 #include "qaws_inspect.h"
 #include "internal/qaws_internal_surface.h"
 #include "internal/qaws_internal_curve.h"
+#include "core/qaws_frame_core.h"
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -16,7 +17,10 @@ typedef struct qaws_surface_pipe_impl
 	qaws_range path_range;
 	qaws_scalar radius_x;
 	qaws_scalar radius_y;
-	/* Precomputed parallel transport (Bishop) frames at uniform u samples */
+	/* rotation-minimizing frames at uniform u samples, by double reflection (Wang et al. 2008): the path's point and unit
+	   tangent there, the frame's normal and binormal */
+	qaws_vec3 frame_P[PIPE_FRAME_SAMPLES + 1];
+	qaws_vec3 frame_T[PIPE_FRAME_SAMPLES + 1];
 	qaws_vec3 frame_N[PIPE_FRAME_SAMPLES + 1];
 	qaws_vec3 frame_B[PIPE_FRAME_SAMPLES + 1];
 } qaws_surface_pipe_impl;
@@ -53,19 +57,6 @@ static qaws_vec3 v3_cross_l(qaws_vec3 a, qaws_vec3 b)
 	return r;
 }
 
-/* Rotate vector v around unit axis by angle (cos_a, sin_a) via Rodrigues */
-static qaws_vec3 v3_rotate_l(qaws_vec3 v, qaws_vec3 axis,
-	qaws_scalar cos_a, qaws_scalar sin_a)
-{
-	qaws_scalar d = v3_dot_l(axis, v);
-	qaws_vec3 cr = v3_cross_l(axis, v);
-	qaws_vec3 r;
-	r.x = v.x * cos_a + cr.x * sin_a + axis.x * d * (QAWS_ONE - cos_a);
-	r.y = v.y * cos_a + cr.y * sin_a + axis.y * d * (QAWS_ONE - cos_a);
-	r.z = v.z * cos_a + cr.z * sin_a + axis.z * d * (QAWS_ONE - cos_a);
-	return r;
-}
-
 /* Build an initial perpendicular frame for a given tangent */
 static void build_frame(qaws_vec3 T, qaws_vec3* N, qaws_vec3* B)
 {
@@ -84,99 +75,90 @@ static void build_frame(qaws_vec3 T, qaws_vec3* N, qaws_vec3* B)
 	v3_norm(N);
 }
 
-/* ------------------------------------------------------------------ */
-/*  Precompute parallel transport frames along the path                */
-/* ------------------------------------------------------------------ */
+/* the path at u: D1 and D2 in its parameter, its point and unit tangent (fallback where D1 vanishes) */
+static void pipe_path(qaws_surface_pipe_impl const* impl, qaws_scalar u, qaws_vec3 fallback, qaws_eval_result_3d* c, qaws_vec3* T)
+{
+	qaws_scalar s_path = impl->path_range.max_value - impl->path_range.min_value;
+	memset(c, 0, sizeof *c);
+	qaws_curve_evaluate_3d(impl->path, impl->path_range.min_value + u * s_path,
+		QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2, c);
+	*T = c->d1;
+	if (v3_len(*T) > QAWS_LITERAL(1e-15))
+		v3_norm(T);
+	else
+		*T = fallback;
+}
 
-static void precompute_bishop_frames(qaws_surface_pipe_impl* impl)
+/* N from the double reflection of the frame (P0, T0, N0) to (P1, T1), made unit and perpendicular to T1; B = T1 x N */
+static void pipe_reflect(qaws_vec3 p0, qaws_vec3 t0, qaws_vec3 n0, qaws_vec3 p1, qaws_vec3 t1, qaws_vec3* N, qaws_vec3* B)
+{
+	qaws_vec3 r = qaws_double_reflection(p0, t0, n0, p1, t1);
+	qaws_scalar d = v3_dot_l(r, t1);
+	r.x -= d * t1.x;
+	r.y -= d * t1.y;
+	r.z -= d * t1.z;
+	v3_norm(&r);
+	*N = r;
+	*B = v3_cross_l(t1, r);
+}
+
+static void precompute_frames(qaws_surface_pipe_impl* impl)
 {
 	unsigned int i;
-	qaws_scalar s_path = impl->path_range.max_value - impl->path_range.min_value;
-	qaws_vec3 prev_T = {0,0,0}, prev_N = {0,0,0}, prev_B = {0,0,0};
-	int initialized = 0;
-
+	qaws_vec3 z = { 0, 0, 1 };
 	for (i = 0; i <= PIPE_FRAME_SAMPLES; i++)
 	{
-		qaws_scalar u = (qaws_scalar)i / (qaws_scalar)PIPE_FRAME_SAMPLES;
-		qaws_scalar t_path = impl->path_range.min_value + u * s_path;
+		qaws_eval_result_3d c;
 		qaws_vec3 T;
-
-		if (qaws_curve_compute_tangent_3d(impl->path, t_path, &T) != QAWS_STATUS_OK)
-		{
-			/* Fallback: use arbitrary frame */
-			T.x = QAWS_ZERO; T.y = QAWS_ZERO; T.z = QAWS_ONE;
-		}
-		v3_norm(&T);
-
-		if (!initialized)
-		{
-			build_frame(T, &impl->frame_N[i], &impl->frame_B[i]);
-			prev_T = T;
-			prev_N = impl->frame_N[i];
-			prev_B = impl->frame_B[i];
-			initialized = 1;
-		}
+		pipe_path(impl, (qaws_scalar)i / (qaws_scalar)PIPE_FRAME_SAMPLES, i ? impl->frame_T[i - 1] : z, &c, &T);
+		impl->frame_P[i] = c.position;
+		impl->frame_T[i] = T;
+		if (i == 0)
+			build_frame(T, &impl->frame_N[0], &impl->frame_B[0]);
 		else
-		{
-			/* Parallel transport: rotate previous N,B to align with new T */
-			qaws_scalar d = v3_dot_l(prev_T, T);
-			if (d > QAWS_ONE) d = QAWS_ONE;
-			if (d < -QAWS_ONE) d = -QAWS_ONE;
-
-			if (d > QAWS_LITERAL(0.9999999))
-			{
-				/* Nearly parallel: keep previous frame */
-				impl->frame_N[i] = prev_N;
-				impl->frame_B[i] = prev_B;
-			}
-			else
-			{
-				qaws_vec3 rot_axis = v3_cross_l(prev_T, T);
-				qaws_scalar sin_a, cos_a;
-				v3_norm(&rot_axis);
-				cos_a = d;
-				sin_a = QAWS_SQRT(QAWS_ONE - d * d);
-				impl->frame_N[i] = v3_rotate_l(prev_N, rot_axis, cos_a, sin_a);
-				impl->frame_B[i] = v3_rotate_l(prev_B, rot_axis, cos_a, sin_a);
-				v3_norm(&impl->frame_N[i]);
-				v3_norm(&impl->frame_B[i]);
-			}
-			prev_T = T;
-			prev_N = impl->frame_N[i];
-			prev_B = impl->frame_B[i];
-		}
+			pipe_reflect(impl->frame_P[i - 1], impl->frame_T[i - 1], impl->frame_N[i - 1], c.position, T, &impl->frame_N[i], &impl->frame_B[i]);
 	}
 }
 
-/* Interpolate the precomputed Bishop frame at a given u in [0,1] */
-static void lookup_bishop_frame(
-	qaws_surface_pipe_impl const* impl,
-	qaws_scalar u,
-	qaws_vec3* out_N,
-	qaws_vec3* out_B)
+/* the frame at u: one double reflection from the sample at or below u, so it meets the samples and is smooth between */
+static void pipe_frame(qaws_surface_pipe_impl const* impl, qaws_scalar u, qaws_eval_result_3d* c, qaws_vec3* T, qaws_vec3* N, qaws_vec3* B)
 {
-	qaws_scalar u_idx = u * (qaws_scalar)PIPE_FRAME_SAMPLES;
-	unsigned int lo, hi;
-	qaws_scalar frac;
+	qaws_scalar ui = u * (qaws_scalar)PIPE_FRAME_SAMPLES;
+	unsigned int i = ui <= QAWS_ZERO ? 0 : ui >= (qaws_scalar)PIPE_FRAME_SAMPLES ? PIPE_FRAME_SAMPLES - 1 : (unsigned int)ui;
+	pipe_path(impl, u, impl->frame_T[i], c, T);
+	pipe_reflect(impl->frame_P[i], impl->frame_T[i], impl->frame_N[i], c->position, *T, N, B);
+}
 
-	if (u_idx < QAWS_ZERO) u_idx = QAWS_ZERO;
-	if (u_idx > (qaws_scalar)PIPE_FRAME_SAMPLES) u_idx = (qaws_scalar)PIPE_FRAME_SAMPLES;
-
-	lo = (unsigned int)u_idx;
-	if (lo >= PIPE_FRAME_SAMPLES) lo = PIPE_FRAME_SAMPLES;
-	hi = lo + 1;
-	if (hi > PIPE_FRAME_SAMPLES) hi = PIPE_FRAME_SAMPLES;
-	frac = u_idx - (qaws_scalar)lo;
-
-	out_N->x = (QAWS_ONE - frac) * impl->frame_N[lo].x + frac * impl->frame_N[hi].x;
-	out_N->y = (QAWS_ONE - frac) * impl->frame_N[lo].y + frac * impl->frame_N[hi].y;
-	out_N->z = (QAWS_ONE - frac) * impl->frame_N[lo].z + frac * impl->frame_N[hi].z;
-	out_B->x = (QAWS_ONE - frac) * impl->frame_B[lo].x + frac * impl->frame_B[hi].x;
-	out_B->y = (QAWS_ONE - frac) * impl->frame_B[lo].y + frac * impl->frame_B[hi].y;
-	out_B->z = (QAWS_ONE - frac) * impl->frame_B[lo].z + frac * impl->frame_B[hi].z;
-
-	v3_norm(out_N);
-	v3_norm(out_B);
+/* dS/du at (u, cos and sin of the angle), and the frame's rates in u: a rotation-minimizing frame turns with the tangent
+   only, N' = -(T' . N) T, B' = -(T' . B) T, with T' = (C'' - (C'' . T) T) / |C'| */
+static void pipe_du(qaws_surface_pipe_impl const* impl, qaws_scalar u, qaws_scalar ca, qaws_scalar sa, qaws_vec3* out_du,
+	qaws_vec3* out_dn, qaws_vec3* out_db)
+{
+	qaws_scalar s_path = impl->path_range.max_value - impl->path_range.min_value;
+	qaws_eval_result_3d c;
+	qaws_vec3 T, N, B, dt = { 0, 0, 0 }, dn, db;
+	qaws_scalar sp, kn, kb;
+	pipe_frame(impl, u, &c, &T, &N, &B);
+	sp = v3_len(c.d1);
+	if (sp > QAWS_LITERAL(1e-15))
+	{
+		qaws_scalar a = v3_dot_l(c.d2, T);
+		dt.x = (c.d2.x - a * T.x) / sp;
+		dt.y = (c.d2.y - a * T.y) / sp;
+		dt.z = (c.d2.z - a * T.z) / sp;
+	}
+	kn = v3_dot_l(dt, N);
+	kb = v3_dot_l(dt, B);
+	dn.x = -kn * T.x * s_path; dn.y = -kn * T.y * s_path; dn.z = -kn * T.z * s_path;
+	db.x = -kb * T.x * s_path; db.y = -kb * T.y * s_path; db.z = -kb * T.z * s_path;
+	out_du->x = s_path * c.d1.x + impl->radius_x * ca * dn.x + impl->radius_y * sa * db.x;
+	out_du->y = s_path * c.d1.y + impl->radius_x * ca * dn.y + impl->radius_y * sa * db.y;
+	out_du->z = s_path * c.d1.z + impl->radius_x * ca * dn.z + impl->radius_y * sa * db.z;
+	if (out_dn)
+	{
+		*out_dn = dn;
+		*out_db = db;
+	}
 }
 
 /* ------------------------------------------------------------------ */
@@ -185,11 +167,10 @@ static void lookup_bishop_frame(
 
 /* Pipe surface: S(u,v) = P(u) + rx * cos(theta) * N(u) + ry * sin(theta) * B(u)
    where theta = 2 * pi * v.
-   N(u), B(u) are from the precomputed Bishop (parallel transport) frame.
+   N(u), B(u) are a rotation-minimizing frame (pipe_frame).
    u follows the path, v parameterizes the circular/elliptical cross-section.
 
-   dS/dv is computed analytically.
-   dS/du uses central finite differences. */
+   dS/dv, dS/du and the mixed derivative are analytic (pipe_du); duu is the central difference of the analytic dS/du. */
 static qaws_status pipe_surface_eval(
 	qaws_surface const* surface,
 	qaws_scalar u,
@@ -199,8 +180,6 @@ static qaws_status pipe_surface_eval(
 {
 	qaws_surface_pipe_impl const* impl =
 		(qaws_surface_pipe_impl const*)surface->impl;
-	qaws_scalar s_path = impl->path_range.max_value - impl->path_range.min_value;
-	qaws_scalar t_path = impl->path_range.min_value + u * s_path;
 	qaws_scalar rx = impl->radius_x;
 	qaws_scalar ry = impl->radius_y;
 	qaws_scalar pi = QAWS_LITERAL(3.14159265358979323846);
@@ -210,18 +189,9 @@ static qaws_status pipe_surface_eval(
 	qaws_scalar sin_theta = QAWS_SIN(theta);
 
 	qaws_eval_result_3d path_r;
-	qaws_vec3 N, B, pos;
+	qaws_vec3 T, N, B, pos;
 
-	/* Evaluate path position */
-	memset(&path_r, 0, sizeof(path_r));
-	{
-		qaws_status s = qaws_curve_evaluate_3d(impl->path, t_path,
-			QAWS_EVAL_FLAG_POSITION, &path_r);
-		if (s != QAWS_STATUS_OK) return s;
-	}
-
-	/* Get Bishop frame at this u */
-	lookup_bishop_frame(impl, u, &N, &B);
+	pipe_frame(impl, u, &path_r, &T, &N, &B);
 
 	/* Position: P(u) + rx * cos(theta) * N(u) + ry * sin(theta) * B(u) */
 	pos.x = path_r.position.x + rx * cos_theta * N.x + ry * sin_theta * B.x;
@@ -257,82 +227,37 @@ static qaws_status pipe_surface_eval(
 		out_result->valid_flags |= QAWS_SURFACE_EVAL_DVV;
 	}
 
-	/* dS/du via central finite differences */
-	if (eval_flags & (QAWS_SURFACE_EVAL_DU | QAWS_SURFACE_EVAL_DUU
-		| QAWS_SURFACE_EVAL_DUV | QAWS_SURFACE_EVAL_NORMAL))
+	if (eval_flags & (QAWS_SURFACE_EVAL_DU | QAWS_SURFACE_EVAL_DUU | QAWS_SURFACE_EVAL_DUV))
 	{
-		qaws_scalar h = QAWS_LITERAL(1e-5);
-		qaws_scalar u_lo = u - h, u_hi = u + h;
-		qaws_vec3 p_lo, p_hi;
-
-		if (u_lo < 0) u_lo = 0;
-		if (u_hi > 1) u_hi = 1;
-		h = (u_hi - u_lo) * QAWS_LITERAL(0.5);
-
-		/* Evaluate position at u-h and u+h using Bishop frame */
-		{
-			qaws_scalar t_lo = impl->path_range.min_value + u_lo * s_path;
-			qaws_scalar t_hi = impl->path_range.min_value + u_hi * s_path;
-			qaws_eval_result_3d pr;
-			qaws_vec3 N_lo, B_lo, N_hi, B_hi;
-
-			memset(&pr, 0, sizeof(pr));
-			qaws_curve_evaluate_3d(impl->path, t_lo, QAWS_EVAL_FLAG_POSITION, &pr);
-			lookup_bishop_frame(impl, u_lo, &N_lo, &B_lo);
-			p_lo.x = pr.position.x + rx * cos_theta * N_lo.x + ry * sin_theta * B_lo.x;
-			p_lo.y = pr.position.y + rx * cos_theta * N_lo.y + ry * sin_theta * B_lo.y;
-			p_lo.z = pr.position.z + rx * cos_theta * N_lo.z + ry * sin_theta * B_lo.z;
-
-			memset(&pr, 0, sizeof(pr));
-			qaws_curve_evaluate_3d(impl->path, t_hi, QAWS_EVAL_FLAG_POSITION, &pr);
-			lookup_bishop_frame(impl, u_hi, &N_hi, &B_hi);
-			p_hi.x = pr.position.x + rx * cos_theta * N_hi.x + ry * sin_theta * B_hi.x;
-			p_hi.y = pr.position.y + rx * cos_theta * N_hi.y + ry * sin_theta * B_hi.y;
-			p_hi.z = pr.position.z + rx * cos_theta * N_hi.z + ry * sin_theta * B_hi.z;
-		}
+		qaws_vec3 du, dn, db;
+		pipe_du(impl, u, cos_theta, sin_theta, &du, &dn, &db);
 
 		if (eval_flags & QAWS_SURFACE_EVAL_DU)
 		{
-			qaws_scalar inv2h = QAWS_ONE / (QAWS_LITERAL(2.0) * h);
-			out_result->du.x = (p_hi.x - p_lo.x) * inv2h;
-			out_result->du.y = (p_hi.y - p_lo.y) * inv2h;
-			out_result->du.z = (p_hi.z - p_lo.z) * inv2h;
+			out_result->du = du;
 			out_result->valid_flags |= QAWS_SURFACE_EVAL_DU;
 		}
 
-		/* duu via central 2nd-order finite difference: (p_hi - 2*p + p_lo) / h^2 */
+		/* duu: the central difference of the analytic dS/du (one-sided at the ends) */
 		if (eval_flags & QAWS_SURFACE_EVAL_DUU)
 		{
-			qaws_scalar inv_h2 = QAWS_ONE / (h * h);
-			out_result->duu.x = (p_hi.x - 2 * pos.x + p_lo.x) * inv_h2;
-			out_result->duu.y = (p_hi.y - 2 * pos.y + p_lo.y) * inv_h2;
-			out_result->duu.z = (p_hi.z - 2 * pos.z + p_lo.z) * inv_h2;
+			qaws_scalar h = QAWS_LITERAL(1e-4);
+			qaws_scalar u_lo = u - h < 0 ? 0 : u - h, u_hi = u + h > 1 ? 1 : u + h;
+			qaws_vec3 d_lo, d_hi;
+			pipe_du(impl, u_lo, cos_theta, sin_theta, &d_lo, NULL, NULL);
+			pipe_du(impl, u_hi, cos_theta, sin_theta, &d_hi, NULL, NULL);
+			out_result->duu.x = (d_hi.x - d_lo.x) / (u_hi - u_lo);
+			out_result->duu.y = (d_hi.y - d_lo.y) / (u_hi - u_lo);
+			out_result->duu.z = (d_hi.z - d_lo.z) / (u_hi - u_lo);
 			out_result->valid_flags |= QAWS_SURFACE_EVAL_DUU;
 		}
 
-		/* duv via finite difference of dv w.r.t. u */
+		/* duv = 2*pi * (-rx * sin(theta) * N'(u) + ry * cos(theta) * B'(u)) */
 		if (eval_flags & QAWS_SURFACE_EVAL_DUV)
 		{
-			qaws_vec3 N_lo, B_lo, N_hi, B_hi;
-			qaws_scalar dnx = -rx * sin_theta;
-			qaws_scalar dny = ry * cos_theta;
-			qaws_vec3 dv_lo, dv_hi;
-			qaws_scalar inv2h = QAWS_ONE / (QAWS_LITERAL(2.0) * h);
-
-			lookup_bishop_frame(impl, u_lo, &N_lo, &B_lo);
-			lookup_bishop_frame(impl, u_hi, &N_hi, &B_hi);
-
-			dv_lo.x = two_pi * (dnx * N_lo.x + dny * B_lo.x);
-			dv_lo.y = two_pi * (dnx * N_lo.y + dny * B_lo.y);
-			dv_lo.z = two_pi * (dnx * N_lo.z + dny * B_lo.z);
-
-			dv_hi.x = two_pi * (dnx * N_hi.x + dny * B_hi.x);
-			dv_hi.y = two_pi * (dnx * N_hi.y + dny * B_hi.y);
-			dv_hi.z = two_pi * (dnx * N_hi.z + dny * B_hi.z);
-
-			out_result->duv.x = (dv_hi.x - dv_lo.x) * inv2h;
-			out_result->duv.y = (dv_hi.y - dv_lo.y) * inv2h;
-			out_result->duv.z = (dv_hi.z - dv_lo.z) * inv2h;
+			out_result->duv.x = two_pi * (-rx * sin_theta * dn.x + ry * cos_theta * db.x);
+			out_result->duv.y = two_pi * (-rx * sin_theta * dn.y + ry * cos_theta * db.y);
+			out_result->duv.z = two_pi * (-rx * sin_theta * dn.z + ry * cos_theta * db.z);
 			out_result->valid_flags |= QAWS_SURFACE_EVAL_DUV;
 		}
 	}
@@ -403,8 +328,8 @@ qaws_status qaws_surface_create_pipe_ex(
 	impl->radius_x = desc->radius_x;
 	impl->radius_y = ry;
 
-	/* Precompute Bishop frames along the path */
-	precompute_bishop_frames(impl);
+	/* rotation-minimizing frames along the path */
+	precompute_frames(impl);
 
 	surface->impl = impl;
 	*out_surface = surface;

@@ -163,6 +163,7 @@ extern int test_148_arc_length_main(void);
 extern int test_149_closest_point_main(void);
 extern int test_150_curve_tessellation_main(void);
 extern int test_151_surface_tessellation_main(void);
+extern int test_152_sweep_derivatives_main(void);
 
 /* Test registry */
 typedef struct {
@@ -323,6 +324,7 @@ static test_suite const g_test_suites[] = {
 {"149_closest_point", test_149_closest_point_main},
 {"150_curve_tessellation", test_150_curve_tessellation_main},
 {"151_surface_tessellation", test_151_surface_tessellation_main},
+{"152_sweep_derivatives", test_152_sweep_derivatives_main},
 };
 
 int main(void) {

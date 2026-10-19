@@ -78,7 +78,7 @@ Bezier patches of Bezier, B-spline, NURBS and borrowed surfaces.
 | B-spline | runtime | `qaws_surface_view` (143) | yes | yes | yes |
 | NURBS | runtime | weights or homogeneous points (143) | yes | yes | yes |
 | Ruled, Coons, extrusion, revolution, bilinear, biquadratic, loft, Gordon, offset | runtime over their curves | absent | yes | yes | yes (146) |
-| Swept, pipe | finite differences | absent | absent | absent | yes (146) |
+| Swept, pipe | analytic du, dv and the mixed derivative (Frenet-Serret; the rotation-minimizing frame law on a double-reflection frame), duu from the analytic du (152) | absent | absent | absent | yes (146) |
 | Fillet, subdivision, trimmed, T-spline | runtime | absent | absent | absent | yes (146) |
 | Borrowed (`QAWS_SURFACE_KIND_VIEW`) | prepared view | - | to third order (143) | absent | yes |
 
@@ -135,9 +135,12 @@ own tool, `examples/repulsive_gpu_parity.c`.
   (151) meets chord and angle tolerances without cracks into caller
   buffers, but has no 2:1 grading (fans of thin triangles beside much
   finer quads), and repeats shared vertices instead of welding them.
-- **Sweeps and lofts with analytic derivatives.** Swept and pipe surfaces use
-  finite differences. Loft and Gordon evaluation scratch is on the stack up
-  to 32 sections, beyond that from the surface's allocator.
+- **Third-order sweep derivatives.** Swept and pipe surfaces take duu from
+  a difference of their analytic du (the torsion's rate would need the
+  path's fourth derivative). Lofts and Gordon surfaces are analytic through
+  their sections' jets; sections without jets fall back to differences.
+  Their evaluation scratch is on the stack up to 32 sections, beyond that
+  from the surface's allocator.
 - **Views of the remaining families** (arc, clothoid, Yuksel, trajectory,
   subdivision, composite). Hermite, Catmull-Rom and polynomial curves have
   views; owned objects are not rebuilt on views (their parity is tested).

@@ -17,12 +17,57 @@ typedef struct qaws_surface_swept_impl
 	qaws_range prof_range;
 } qaws_surface_swept_impl;
 
+/* dS/du at u for the profile point (px, py) (scaled), and the frame's rates N', B' in u: the Frenet-Serret formulas in the
+   path parameter t, N' = |C'| (-k T + t B), B' = -|C'| t N (k, t: curvature and torsion, from D1 to D3); where D1 x D2
+   vanishes the frame is the constant one qaws_curve_compute_frenet_frame_3d picks, so it does not turn */
+static qaws_status swept_du(qaws_surface_swept_impl const* impl, qaws_scalar u, qaws_scalar px, qaws_scalar py, qaws_vec3* out_du,
+	qaws_vec3* out_dn, qaws_vec3* out_db)
+{
+	qaws_scalar s_path = impl->path_range.max_value - impl->path_range.min_value;
+	qaws_scalar t_path = impl->path_range.min_value + u * s_path;
+	qaws_eval_result_3d c;
+	qaws_vec3 T, N, B, dn = { 0, 0, 0 }, db = { 0, 0, 0 };
+	double x[3], xl2, sp, kappa_s, tau;
+	qaws_status st;
+	memset(&c, 0, sizeof c);
+	if ((st = qaws_curve_evaluate_3d(impl->path, t_path, QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2 | QAWS_EVAL_FLAG_D3, &c)) != QAWS_STATUS_OK)
+		return st;
+	if ((st = qaws_curve_compute_frenet_frame_3d(impl->path, t_path, &T, &N, &B)) != QAWS_STATUS_OK)
+		return st;
+	x[0] = (double)c.d1.y * c.d2.z - (double)c.d1.z * c.d2.y;
+	x[1] = (double)c.d1.z * c.d2.x - (double)c.d1.x * c.d2.z;
+	x[2] = (double)c.d1.x * c.d2.y - (double)c.d1.y * c.d2.x;
+	xl2 = x[0] * x[0] + x[1] * x[1] + x[2] * x[2];
+	sp = sqrt((double)c.d1.x * c.d1.x + (double)c.d1.y * c.d1.y + (double)c.d1.z * c.d1.z);
+	/* the threshold of qaws_curve_compute_frenet_frame_3d */
+	if (sqrt(xl2) >= 1.0e-12 && sp > 0)
+	{
+		kappa_s = sqrt(xl2) / (sp * sp);      /* |C'| k */
+		tau = (x[0] * c.d3.x + x[1] * c.d3.y + x[2] * c.d3.z) / xl2;
+		dn.x = (qaws_scalar)(-kappa_s * T.x + sp * tau * B.x);
+		dn.y = (qaws_scalar)(-kappa_s * T.y + sp * tau * B.y);
+		dn.z = (qaws_scalar)(-kappa_s * T.z + sp * tau * B.z);
+		db.x = (qaws_scalar)(-sp * tau * N.x);
+		db.y = (qaws_scalar)(-sp * tau * N.y);
+		db.z = (qaws_scalar)(-sp * tau * N.z);
+	}
+	out_du->x = s_path * (c.d1.x + px * dn.x + py * db.x);
+	out_du->y = s_path * (c.d1.y + px * dn.y + py * db.y);
+	out_du->z = s_path * (c.d1.z + px * dn.z + py * db.z);
+	if (out_dn)
+	{
+		out_dn->x = s_path * dn.x; out_dn->y = s_path * dn.y; out_dn->z = s_path * dn.z;
+		out_db->x = s_path * db.x; out_db->y = s_path * db.y; out_db->z = s_path * db.z;
+	}
+	return QAWS_STATUS_OK;
+}
+
 /* Swept surface: S(u,v) = P(u) + scale * [profile_x(v) * N(u) + profile_y(v) * B(u)]
    u follows the path, v follows the profile cross-section.
    N, B are Frenet normal and binormal of the path curve.
 
-   dS/dv is computed analytically.
-   dS/du uses central finite differences (frame derivatives are complex). */
+   dS/dv, dS/du and the mixed derivative are analytic (swept_du); duu is the central difference of the analytic dS/du
+   (the torsion's rate would need the path's fourth derivative). */
 static qaws_status swept_surface_eval(
 	qaws_surface const* surface,
 	qaws_scalar u,
@@ -62,7 +107,7 @@ static qaws_status swept_surface_eval(
 	{
 		unsigned int pf = QAWS_EVAL_FLAG_POSITION;
 		qaws_status s;
-		if (eval_flags & (QAWS_SURFACE_EVAL_DV | QAWS_SURFACE_EVAL_DVV))
+		if (eval_flags & (QAWS_SURFACE_EVAL_DV | QAWS_SURFACE_EVAL_DVV | QAWS_SURFACE_EVAL_DUV))
 			pf |= QAWS_EVAL_FLAG_D1;
 		if (eval_flags & QAWS_SURFACE_EVAL_DVV)
 			pf |= QAWS_EVAL_FLAG_D2;
@@ -109,84 +154,43 @@ static qaws_status swept_surface_eval(
 		out_result->valid_flags |= QAWS_SURFACE_EVAL_DVV;
 	}
 
-	/* dS/du via central finite differences */
 	if (eval_flags & (QAWS_SURFACE_EVAL_DU | QAWS_SURFACE_EVAL_DUU
 		| QAWS_SURFACE_EVAL_DUV | QAWS_SURFACE_EVAL_NORMAL))
 	{
-		qaws_scalar h = QAWS_LITERAL(1e-5);
-		qaws_scalar u_lo = u - h, u_hi = u + h;
-		qaws_vec3 p_lo, p_hi;
+		qaws_vec3 du, dn, db;
+		qaws_status s = swept_du(impl, u, px, py, &du, &dn, &db);
+		if (s != QAWS_STATUS_OK) return s;
 
-		if (u_lo < 0) u_lo = 0;
-		if (u_hi > 1) u_hi = 1;
-		h = (u_hi - u_lo) * QAWS_LITERAL(0.5);
-
-		/* Evaluate position at u-h and u+h */
+		if (eval_flags & (QAWS_SURFACE_EVAL_DU | QAWS_SURFACE_EVAL_NORMAL))
 		{
-			qaws_scalar t_lo = impl->path_range.min_value + u_lo * s_path;
-			qaws_scalar t_hi = impl->path_range.min_value + u_hi * s_path;
-			qaws_eval_result_3d pr;
-			qaws_vec3 T_lo, N_lo, B_lo, T_hi, N_hi, B_hi;
-
-			memset(&pr, 0, sizeof(pr));
-			qaws_curve_evaluate_3d(impl->path, t_lo, QAWS_EVAL_FLAG_POSITION, &pr);
-			qaws_curve_compute_frenet_frame_3d(impl->path, t_lo, &T_lo, &N_lo, &B_lo);
-			p_lo.x = pr.position.x + px * N_lo.x + py * B_lo.x;
-			p_lo.y = pr.position.y + px * N_lo.y + py * B_lo.y;
-			p_lo.z = pr.position.z + px * N_lo.z + py * B_lo.z;
-
-			memset(&pr, 0, sizeof(pr));
-			qaws_curve_evaluate_3d(impl->path, t_hi, QAWS_EVAL_FLAG_POSITION, &pr);
-			qaws_curve_compute_frenet_frame_3d(impl->path, t_hi, &T_hi, &N_hi, &B_hi);
-			p_hi.x = pr.position.x + px * N_hi.x + py * B_hi.x;
-			p_hi.y = pr.position.y + px * N_hi.y + py * B_hi.y;
-			p_hi.z = pr.position.z + px * N_hi.z + py * B_hi.z;
-		}
-
-		if (eval_flags & QAWS_SURFACE_EVAL_DU)
-		{
-			qaws_scalar inv2h = QAWS_ONE / (QAWS_LITERAL(2.0) * h);
-			out_result->du.x = (p_hi.x - p_lo.x) * inv2h;
-			out_result->du.y = (p_hi.y - p_lo.y) * inv2h;
-			out_result->du.z = (p_hi.z - p_lo.z) * inv2h;
+			out_result->du = du;
 			out_result->valid_flags |= QAWS_SURFACE_EVAL_DU;
 		}
 
-		/* duu via central 2nd-order finite difference: (p_hi - 2*p + p_lo) / h^2 */
+		/* duu: the central difference of the analytic dS/du (one-sided at the ends) */
 		if (eval_flags & QAWS_SURFACE_EVAL_DUU)
 		{
-			qaws_scalar inv_h2 = QAWS_ONE / (h * h);
-			out_result->duu.x = (p_hi.x - 2 * pos.x + p_lo.x) * inv_h2;
-			out_result->duu.y = (p_hi.y - 2 * pos.y + p_lo.y) * inv_h2;
-			out_result->duu.z = (p_hi.z - 2 * pos.z + p_lo.z) * inv_h2;
+			qaws_scalar h = QAWS_LITERAL(1e-4);
+			qaws_scalar u_lo = u - h < 0 ? 0 : u - h, u_hi = u + h > 1 ? 1 : u + h;
+			qaws_vec3 d_lo = { 0, 0, 0 }, d_hi = { 0, 0, 0 };
+			s = swept_du(impl, u_lo, px, py, &d_lo, NULL, NULL);
+			if (s == QAWS_STATUS_OK)
+				s = swept_du(impl, u_hi, px, py, &d_hi, NULL, NULL);
+			if (s != QAWS_STATUS_OK) return s;
+			out_result->duu.x = (d_hi.x - d_lo.x) / (u_hi - u_lo);
+			out_result->duu.y = (d_hi.y - d_lo.y) / (u_hi - u_lo);
+			out_result->duu.z = (d_hi.z - d_lo.z) / (u_hi - u_lo);
 			out_result->valid_flags |= QAWS_SURFACE_EVAL_DUU;
 		}
 
-		/* duv via finite difference of dv w.r.t. u */
+		/* duv = s_prof * scale * [profile_x'(v) * N'(u) + profile_y'(v) * B'(u)] */
 		if (eval_flags & QAWS_SURFACE_EVAL_DUV)
 		{
-			qaws_scalar t_lo = impl->path_range.min_value + u_lo * s_path;
-			qaws_scalar t_hi = impl->path_range.min_value + u_hi * s_path;
-			qaws_vec3 T_tmp, N_lo, B_lo, N_hi, B_hi;
 			qaws_scalar dpx = prof_r.d1.x * scale * s_prof;
 			qaws_scalar dpy = prof_r.d1.y * scale * s_prof;
-			qaws_vec3 dv_lo, dv_hi;
-			qaws_scalar inv2h = QAWS_ONE / (QAWS_LITERAL(2.0) * h);
-
-			qaws_curve_compute_frenet_frame_3d(impl->path, t_lo, &T_tmp, &N_lo, &B_lo);
-			qaws_curve_compute_frenet_frame_3d(impl->path, t_hi, &T_tmp, &N_hi, &B_hi);
-
-			dv_lo.x = dpx * N_lo.x + dpy * B_lo.x;
-			dv_lo.y = dpx * N_lo.y + dpy * B_lo.y;
-			dv_lo.z = dpx * N_lo.z + dpy * B_lo.z;
-
-			dv_hi.x = dpx * N_hi.x + dpy * B_hi.x;
-			dv_hi.y = dpx * N_hi.y + dpy * B_hi.y;
-			dv_hi.z = dpx * N_hi.z + dpy * B_hi.z;
-
-			out_result->duv.x = (dv_hi.x - dv_lo.x) * inv2h;
-			out_result->duv.y = (dv_hi.y - dv_lo.y) * inv2h;
-			out_result->duv.z = (dv_hi.z - dv_lo.z) * inv2h;
+			out_result->duv.x = dpx * dn.x + dpy * db.x;
+			out_result->duv.y = dpx * dn.y + dpy * db.y;
+			out_result->duv.z = dpx * dn.z + dpy * db.z;
 			out_result->valid_flags |= QAWS_SURFACE_EVAL_DUV;
 		}
 	}

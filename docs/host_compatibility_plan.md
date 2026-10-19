@@ -361,7 +361,8 @@ checks stay manual.
 | Certified closest point on curves | `qaws_curve_find_closest_point_certified_2d/3d`: branch and bound over Bezier spans (Bezier, rational Bezier, B-spline, NURBS, borrowed splines), a returned gap; behind `qaws_curve_find_closest_parameter_*` | a9a557f (149) |
 | Certified closest point on surfaces | `qaws_surface_find_closest_point_certified`: branch and bound over Bezier patches (Bezier, B-spline, NURBS, borrowed; degree at most 15) with box and patch-frame prism bounds; behind `qaws_surface_find_closest_point` | 5e276d0 (149) |
 | Adaptive curve tessellation | `qaws_curve_tessellate_2d/3d`: chord and angle tolerances, span boundaries kept, deterministic, counts first into caller buffers | dea270b (150) |
-| Adaptive surface tessellation | `qaws_surface_tessellate_adaptive`: chord and angle tolerances on an implicit quadtree, no cracks, counts first into caller buffers, no allocation | 151 |
+| Adaptive surface tessellation | `qaws_surface_tessellate_adaptive`: chord and angle tolerances on an implicit quadtree, no cracks, counts first into caller buffers, no allocation | 1c99965 (151) |
+| Sweep derivatives | swept: du and the mixed derivative from the Frenet-Serret formulas; pipe: a double-reflection frame, du from the rotation-minimizing law (was a linearly interpolated table, duu wrong); duu from the analytic du | 152 |
 
 Remaining, in order:
 
@@ -371,8 +372,7 @@ Remaining, in order:
   batches and repulsive (constructors and derived curves are done).
 - Halide's runtime span (the buffer interface is done for HLSL and GLSL).
 - The kernels of section 6 (frames, arc length, certified closest points
-  on spline curves and surfaces, curve and surface tessellation are
-  done): sweeps and lofts with analytic derivatives, parameterization
-  options.
+  on spline curves and surfaces, curve and surface tessellation, sweep
+  derivatives are done): parameterization options.
 - Repulsive: the allocator, line-search and GMRES settings, a validity
   report for solution derivatives, and the mesh VJP test.

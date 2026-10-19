@@ -153,6 +153,7 @@ add_executable(
 149_closest_point.c
 150_curve_tessellation.c
 151_surface_tessellation.c
+152_sweep_derivatives.c
 )
 
 # The amalgamated library exports exactly the same symbols, so the tests can
