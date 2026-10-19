@@ -146,6 +146,7 @@ add_executable(
 142_curve_view.c
 143_surface_view.c
 144_eval_consistency.c
+145_repulsive_control.c
 )
 
 # The amalgamated library exports exactly the same symbols, so the tests can

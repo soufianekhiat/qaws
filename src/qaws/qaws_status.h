@@ -29,7 +29,9 @@ typedef enum qaws_status
 	   solution derivatives) */
 	QAWS_STATUS_NOT_CONVERGED,
 	/* a mesh edit refused by its validity checks (the mesh is unchanged) */
-	QAWS_STATUS_INVALID_TOPOLOGY
+	QAWS_STATUS_INVALID_TOPOLOGY,
+	/* stopped by the host's cancel callback (outputs as the operation documents) */
+	QAWS_STATUS_CANCELLED
 } qaws_status;
 
 char const* qaws_status_to_string(qaws_status status);

@@ -156,6 +156,7 @@ extern int test_141_eval_threads_main(void);
 extern int test_142_curve_view_main(void);
 extern int test_143_surface_view_main(void);
 extern int test_144_eval_consistency_main(void);
+extern int test_145_repulsive_control_main(void);
 
 /* Test registry */
 typedef struct {
@@ -309,6 +310,7 @@ static test_suite const g_test_suites[] = {
 {"142_curve_view", test_142_curve_view_main},
 {"143_surface_view", test_143_surface_view_main},
 {"144_eval_consistency", test_144_eval_consistency_main},
+{"145_repulsive_control", test_145_repulsive_control_main},
 };
 
 int main(void) {

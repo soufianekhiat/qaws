@@ -607,6 +607,7 @@ qaws_status qaws_repulsive_controls_solver_create(qaws_repulsive_controls const*
 	k->k = (s->bary ? dim : 0) + dim * s->npin + s->kin;
 	k->checked = in->checked;
 	k->lmean = in->lmean; k->clearance = in->clearance; k->tol = in->tol; k->ctol = in->ctol; k->h = in->h;
+	k->progress = in->progress;
 	k->rep.reason = QAWS_REPULSIVE_RUNNING;
 	k->rep.stationarity = 1;
 	if ((st = rcs_energy(k, k->x, &E, NULL)) != QAWS_STATUS_OK)
@@ -631,25 +632,21 @@ qaws_status qaws_repulsive_controls_solver_step(qaws_repulsive_controls_solver* 
 	return s ? qaws_internal_rs_step(&s->core, controls, out_report) : QAWS_STATUS_INVALID_ARGUMENT;
 }
 
+qaws_status qaws_repulsive_controls_solver_objective(qaws_repulsive_controls_solver const* s, qaws_scalar const* controls, qaws_scalar* out_energy,
+	qaws_scalar* out_gradient)
+{
+	return s ? qaws_internal_rs_objective(&s->core, controls, out_energy, out_gradient) : QAWS_STATUS_INVALID_ARGUMENT;
+}
+
 qaws_status qaws_repulsive_controls_solve(qaws_repulsive_controls const* ctl, qaws_repulsive_curves_solve_desc const* desc, qaws_scalar* controls,
 	qaws_repulsive_report* out_report)
 {
 	qaws_repulsive_controls_solver* s = NULL;
-	qaws_repulsive_report rep;
-	unsigned int it, max = desc && desc->max_iterations ? desc->max_iterations : 100;
+	unsigned int max = desc && desc->max_iterations ? desc->max_iterations : 100;
 	qaws_status st = qaws_repulsive_controls_solver_create(ctl, desc, controls, &s);
 	if (st != QAWS_STATUS_OK)
 		return st;
-	memset(&rep, 0, sizeof(rep));
-	for (it = 0; it < max && st == QAWS_STATUS_OK; it++)
-	{
-		st = qaws_repulsive_controls_solver_step(s, controls, &rep);
-		if (rep.reason != QAWS_REPULSIVE_RUNNING)
-			break;
-	}
-	if (st == QAWS_STATUS_OK && rep.reason == QAWS_REPULSIVE_RUNNING)
-		rep.reason = QAWS_REPULSIVE_ITERATION_LIMIT;
-	if (out_report) *out_report = rep;
+	st = qaws_internal_rs_solve(&s->core, max, controls, out_report);
 	qaws_repulsive_controls_solver_destroy(s);
 	return st;
 }

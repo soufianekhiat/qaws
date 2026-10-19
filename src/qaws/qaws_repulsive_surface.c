@@ -448,6 +448,7 @@ qaws_status qaws_repulsive_surface_curves_solver_create(qaws_repulsive_curves co
 	k->k = 2 * s->npin + s->kin;
 	k->checked = in->checked;
 	k->lmean = in->lmean; k->clearance = in->clearance; k->tol = in->tol; k->ctol = in->ctol; k->h = in->h;
+	k->progress = in->progress;
 	k->rep.reason = QAWS_REPULSIVE_RUNNING;
 	k->rep.stationarity = 1;
 	if ((st = qaws_internal_repulsive_curves_energy(c, s->x, &E, NULL)) != QAWS_STATUS_OK)
@@ -473,25 +474,21 @@ qaws_status qaws_repulsive_surface_curves_solver_step(qaws_repulsive_surface_cur
 	return s ? qaws_internal_rs_step(&s->core, uv, out_report) : QAWS_STATUS_INVALID_ARGUMENT;
 }
 
+qaws_status qaws_repulsive_surface_curves_solver_objective(qaws_repulsive_surface_curves_solver const* s, qaws_scalar const* uv, qaws_scalar* out_energy,
+	qaws_scalar* out_gradient)
+{
+	return s ? qaws_internal_rs_objective(&s->core, uv, out_energy, out_gradient) : QAWS_STATUS_INVALID_ARGUMENT;
+}
+
 qaws_status qaws_repulsive_surface_curves_solve(qaws_repulsive_curves const* c, qaws_repulsive_surface_desc const* sd,
 	qaws_repulsive_curves_solve_desc const* desc, qaws_scalar* uv, qaws_repulsive_report* out_report)
 {
 	qaws_repulsive_surface_curves_solver* s = NULL;
-	qaws_repulsive_report rep;
-	unsigned int it, max = desc && desc->max_iterations ? desc->max_iterations : 100;
+	unsigned int max = desc && desc->max_iterations ? desc->max_iterations : 100;
 	qaws_status st = qaws_repulsive_surface_curves_solver_create(c, sd, desc, uv, &s);
 	if (st != QAWS_STATUS_OK)
 		return st;
-	memset(&rep, 0, sizeof(rep));
-	for (it = 0; it < max && st == QAWS_STATUS_OK; it++)
-	{
-		st = qaws_repulsive_surface_curves_solver_step(s, uv, &rep);
-		if (rep.reason != QAWS_REPULSIVE_RUNNING)
-			break;
-	}
-	if (st == QAWS_STATUS_OK && rep.reason == QAWS_REPULSIVE_RUNNING)
-		rep.reason = QAWS_REPULSIVE_ITERATION_LIMIT;
-	if (out_report) *out_report = rep;
+	st = qaws_internal_rs_solve(&s->core, max, uv, out_report);
 	qaws_repulsive_surface_curves_solver_destroy(s);
 	return st;
 }

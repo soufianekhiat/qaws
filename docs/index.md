@@ -66,6 +66,7 @@ Per-header documentation with all function signatures and parameters:
 - [qaws_alloc.h](api/alloc.md) -- Custom allocator support
 - [qaws_inline.h](api/inline.md) -- Stack-allocated inline curve initialization
 - [qaws_prepare.h](api/prepare.md) -- Precomputation / preparation utilities
+- [qaws_view.h](api/view.md) -- Borrowed curves and surfaces: host arrays (f32/f64, strided, planar), prepared evaluation, ranges, the lifetime contract
 
 ### Differentiation
 

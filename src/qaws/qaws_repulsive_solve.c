@@ -272,8 +272,12 @@ static qaws_status rs_direction(rs_core const* s, double const* x, rs_dense* D, 
 	memset(dE, 0, sizeof(double) * s->N);
 	if ((st = s->ops->energy(s, x, E, dE)) != QAWS_STATUS_OK)
 		return st;
+	if (QAWS_INTERNAL_RS_CANCELLED(s))
+		return QAWS_STATUS_CANCELLED;
 	if ((st = s->ops->metric(s, x, D->A)) != QAWS_STATUS_OK)
 		return st;
+	if (QAWS_INTERNAL_RS_CANCELLED(s))
+		return QAWS_STATUS_CANCELLED;
 	s->ops->constraints(s, x, D->phi, D->C);
 	if (s->full)
 	{
@@ -412,13 +416,19 @@ qaws_status qaws_internal_rs_step(rs_core* s, qaws_scalar* positions, qaws_repul
 {
 	unsigned int n, i, v, trial, same = 1;
 	double *buf, *phi, *dE, *g, *y, E, Ey = 0, gdot = 0, gmax = 0, h;
-	qaws_status st;
+	qaws_status st, ret = QAWS_STATUS_OK;
 	int last = 0;   /* the last rejection: 1 energy, 2 collision, 3 projection */
 	int dense;
 	rs_dense D;
 	qaws_internal_rs_hsys* H = NULL;
 	if (!s || !positions)
 		return QAWS_STATUS_INVALID_ARGUMENT;
+	if (QAWS_INTERNAL_RS_CANCELLED(s))
+	{
+		s->rep.reason = QAWS_REPULSIVE_CANCELLED;
+		if (out_report) *out_report = s->rep;
+		return QAWS_STATUS_CANCELLED;
+	}
 	n = s->N + s->k;
 	dense = !(s->theta > 0);
 	/* the caller's positions, unless they are this solver's own rounded */
@@ -439,9 +449,15 @@ qaws_status qaws_internal_rs_step(rs_core* s, qaws_scalar* positions, qaws_repul
 	{
 		memset(dE, 0, sizeof(double) * s->N);
 		st = s->ops->energy(s, s->x, &E, dE);
+		if (st == QAWS_STATUS_OK && QAWS_INTERNAL_RS_CANCELLED(s))
+			st = QAWS_STATUS_CANCELLED;
 		if (st == QAWS_STATUS_OK)
 			st = qaws_internal_rs_hdirection(s, s->x, dE, g, &H);
 	}
+	if (st == QAWS_STATUS_OK && QAWS_INTERNAL_RS_CANCELLED(s))
+		st = QAWS_STATUS_CANCELLED;
+	if (st == QAWS_STATUS_CANCELLED)
+		goto cancelled;
 	if (st != QAWS_STATUS_OK)
 	{
 		s->rep.reason = QAWS_REPULSIVE_NUMERICAL_FAILURE;
@@ -475,6 +491,8 @@ qaws_status qaws_internal_rs_step(rs_core* s, qaws_scalar* positions, qaws_repul
 	for (trial = 0; trial < RS_TRIALS; trial++, h *= 0.5)
 	{
 		double tau = h / gmax;
+		if (QAWS_INTERNAL_RS_CANCELLED(s))
+			goto cancelled;
 		for (i = 0; i < s->N; i++) y[i] = s->x[i] - tau * g[i];
 		if (dense ? !rs_project(s, &D, y) : !qaws_internal_rs_hproject(H, y))
 		{
@@ -482,6 +500,8 @@ qaws_status qaws_internal_rs_step(rs_core* s, qaws_scalar* positions, qaws_repul
 			last = 3;
 			continue;
 		}
+		if (QAWS_INTERNAL_RS_CANCELLED(s))
+			goto cancelled;
 		if (s->ops->energy(s, y, &Ey, NULL) != QAWS_STATUS_OK || !(Ey <= E - RS_ARMIJO * tau * gdot))
 		{
 			s->rep.rejected_energy++;
@@ -519,11 +539,57 @@ qaws_status qaws_internal_rs_step(rs_core* s, qaws_scalar* positions, qaws_repul
 	s->ops->constraints(s, s->x, phi, NULL);
 	s->rep.constraint_residual = (qaws_scalar)(rs_phi_max(s, phi) / s->lmean);
 	for (i = 0; i < s->N; i++) positions[i] = (qaws_scalar)s->x[i];
+	goto done;
+cancelled:
+	/* (nothing written: s->x and positions are the last accepted step's) */
+	s->rep.reason = QAWS_REPULSIVE_CANCELLED;
+	ret = QAWS_STATUS_CANCELLED;
 done:
 	qaws_internal_rs_hsys_free(H);
 	free(buf); rs_dense_free(&D);
 	if (out_report) *out_report = s->rep;
-	return QAWS_STATUS_OK;
+	return ret;
+}
+
+qaws_status qaws_internal_rs_solve(rs_core* s, unsigned int max_steps, qaws_scalar* positions, qaws_repulsive_report* out_report)
+{
+	qaws_repulsive_report rep;
+	qaws_status st = QAWS_STATUS_OK;
+	unsigned int it;
+	memset(&rep, 0, sizeof(rep));
+	for (it = 0; it < max_steps && st == QAWS_STATUS_OK; it++)
+	{
+		unsigned int before = s->rep.iterations;
+		st = qaws_internal_rs_step(s, positions, &rep);
+		if (st == QAWS_STATUS_OK && rep.iterations > before && s->progress.on_step)
+			s->progress.on_step(&rep, positions, s->progress.user_data);
+		if (rep.reason != QAWS_REPULSIVE_RUNNING)
+			break;
+	}
+	if (st == QAWS_STATUS_OK && rep.reason == QAWS_REPULSIVE_RUNNING)
+		rep.reason = QAWS_REPULSIVE_ITERATION_LIMIT;
+	if (out_report) *out_report = rep;
+	return st;
+}
+
+qaws_status qaws_internal_rs_objective(rs_core const* s, qaws_scalar const* positions, qaws_scalar* out_energy, qaws_scalar* out_gradient)
+{
+	double *x, *grad, E = 0;
+	qaws_status st;
+	unsigned int i;
+	if (!s || !positions || !out_energy)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	x = (double*)malloc(sizeof(double) * ((size_t)s->N * 2 + 1));
+	if (!x)
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	grad = x + s->N;
+	for (i = 0; i < s->N; i++) x[i] = (double)positions[i];
+	memset(grad, 0, sizeof(double) * s->N);
+	st = s->ops->energy(s, x, &E, out_gradient ? grad : NULL);
+	*out_energy = (qaws_scalar)E;
+	for (i = 0; out_gradient && st == QAWS_STATUS_OK && i < s->N; i++) out_gradient[i] = (qaws_scalar)grad[i];
+	free(x);
+	return st;
 }
 
 /* ------------------------------------------------------------------------ */
@@ -1224,6 +1290,7 @@ qaws_status qaws_repulsive_curves_solver_create(qaws_repulsive_curves const* c, 
 		k->ops = &rs_curve_ops_plain;
 	k->theta = (double)d.theta;
 	k->executor = c->executor;
+	k->progress = d.progress;
 	k->fixed = s->fixed;
 	k->translates = s->npin == 0 && !s->bary;
 	k->k = (s->bary ? dim - (s->hold ? 1 : 0) : 0) + (k->theta > 0 ? 0 : dim * s->npin) + (dim - 1) * s->nt + (s->total_len ? 1 : 0) + s->nlen + s->nhold;
@@ -1274,25 +1341,21 @@ qaws_status qaws_repulsive_curves_solver_step(qaws_repulsive_curves_solver* s, q
 	return s ? qaws_internal_rs_step(&s->core, positions, out_report) : QAWS_STATUS_INVALID_ARGUMENT;
 }
 
+qaws_status qaws_repulsive_curves_solver_objective(qaws_repulsive_curves_solver const* s, qaws_scalar const* positions, qaws_scalar* out_energy,
+	qaws_scalar* out_gradient)
+{
+	return s ? qaws_internal_rs_objective(&s->core, positions, out_energy, out_gradient) : QAWS_STATUS_INVALID_ARGUMENT;
+}
+
 qaws_status qaws_repulsive_curves_solve(qaws_repulsive_curves const* curves, qaws_repulsive_curves_solve_desc const* desc,
 	qaws_scalar* positions, qaws_repulsive_report* out_report)
 {
 	qaws_repulsive_curves_solver* s = NULL;
-	qaws_repulsive_report rep;
-	unsigned int it, max = desc && desc->max_iterations ? desc->max_iterations : 100;
+	unsigned int max = desc && desc->max_iterations ? desc->max_iterations : 100;
 	qaws_status st = qaws_repulsive_curves_solver_create(curves, desc, positions, &s);
 	if (st != QAWS_STATUS_OK)
 		return st;
-	memset(&rep, 0, sizeof(rep));
-	for (it = 0; it < max && st == QAWS_STATUS_OK; it++)
-	{
-		st = qaws_repulsive_curves_solver_step(s, positions, &rep);
-		if (rep.reason != QAWS_REPULSIVE_RUNNING)
-			break;
-	}
-	if (st == QAWS_STATUS_OK && rep.reason == QAWS_REPULSIVE_RUNNING)
-		rep.reason = QAWS_REPULSIVE_ITERATION_LIMIT;
-	if (out_report) *out_report = rep;
+	st = qaws_internal_rs_solve(&s->core, max, positions, out_report);
 	qaws_repulsive_curves_solver_destroy(s);
 	return st;
 }

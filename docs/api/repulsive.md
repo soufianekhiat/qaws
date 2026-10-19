@@ -176,10 +176,43 @@ The method is the paper's (Sec. 4.2 and 5.2 to 5.4), direct and dense.
 | COLLISION_LIMITED | every trial step collided, or the accepted ones vanish (under 1e-8 l) with collisions rejected |
 | STALLED | no trial step lowered the energy, or the accepted ones vanish (under 1e-12 l) |
 | NUMERICAL_FAILURE | a singular system or an unusable energy |
+| CANCELLED | the host's cancel callback stopped it (status QAWS_STATUS_CANCELLED) |
 
 The report also counts the trial steps rejected by the energy, by the
 collision check and by the projection. It gives the constraint residual and
 the size of the last step.
+
+### Host control (test 145)
+
+```c
+sd.progress.cancel = my_cancel;      /* int (*)(void* user): non-zero stops */
+sd.progress.on_step = my_on_step;    /* void (*)(report, positions, user), after each accepted step of _solve */
+sd.progress.user_data = &my_state;
+qaws_repulsive_curves_solver_objective(s, positions, &E, gradient);   /* what the solver lowers, and its gradient */
+```
+
+The same `progress` member is in the mesh desc. It applies to the curves
+on a surface and the control-point solvers through their curves desc.
+
+- **Cancellation.** The callback is called on the caller's thread, never
+  from the executor's. It is polled at the start of a step, between the
+  step's stages, and before each line-search trial's projection and
+  energy. The stages are the energy and gradient, the metric's assembly,
+  and its factorization (or the hierarchical direction's solves). A step
+  therefore stops within one stage; a dense factorization is the longest.
+  On cancellation the step returns QAWS_STATUS_CANCELLED with the reason
+  CANCELLED. The positions are untouched: a step writes them only when it
+  accepts. `_solve` stops with the positions of the last accepted step. A
+  time budget is a cancel callback that reads a clock. The solver keeps
+  stepping when called again.
+- **Progress.** `_solve` calls `on_step` after each accepted step. It
+  passes the report (energy, stationarity, residual, step size) and the
+  caller's positions array, read-only during the call.
+- **Objective.** `qaws_repulsive_*_solver_objective` evaluates the
+  function the solver lowers: the energy plus every term the desc adds
+  (length, room; area, volume, obstacles for meshes), as `report.energy`
+  shows it. It also returns its gradient with respect to the solver's
+  variables (positions, uv, control points).
 
 ### The two modes
 

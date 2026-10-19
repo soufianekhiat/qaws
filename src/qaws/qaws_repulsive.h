@@ -122,8 +122,33 @@ typedef enum qaws_repulsive_termination
 	QAWS_REPULSIVE_INFEASIBLE,             /* the constraints could not be met again */
 	QAWS_REPULSIVE_COLLISION_LIMITED,      /* every shorter step collided (collision-checked) */
 	QAWS_REPULSIVE_STALLED,                /* no step lowered the energy */
-	QAWS_REPULSIVE_NUMERICAL_FAILURE       /* a singular system or an unusable energy */
+	QAWS_REPULSIVE_NUMERICAL_FAILURE,      /* a singular system or an unusable energy */
+	QAWS_REPULSIVE_CANCELLED               /* the host's cancel callback stopped it (QAWS_STATUS_CANCELLED) */
 } qaws_repulsive_termination;
+
+typedef struct qaws_repulsive_report qaws_repulsive_report;
+
+/*
+ * Host control of a run; every member optional (zero: none). The solver
+ * calls them on the thread that calls it, never from the executor's.
+ *
+ *   cancel   polled at the start of a step, between its stages (the energy
+ *            and its gradient, the metric's assembly, its factorization or
+ *            the hierarchical direction's solves) and before each line-search
+ *            trial's projection and energy: a step stops within one stage.
+ *            Non-zero stops it: QAWS_STATUS_CANCELLED, the report's reason
+ *            QAWS_REPULSIVE_CANCELLED, the positions as the last accepted
+ *            step left them (a step writes them only when it accepts). A
+ *            time budget is a cancel reading a clock.
+ *   on_step  called by *_solve after each accepted step with its report and
+ *            the positions (the caller's array, read-only during the call).
+ */
+typedef struct qaws_repulsive_progress
+{
+	int (*cancel)(void* user_data);
+	void (*on_step)(qaws_repulsive_report const* report, qaws_scalar const* positions, void* user_data);
+	void* user_data;
+} qaws_repulsive_progress;
 
 typedef struct qaws_repulsive_curves_solve_desc
 {
@@ -157,9 +182,10 @@ typedef struct qaws_repulsive_curves_solve_desc
 	qaws_scalar const* room;               /* room_count points, 2 coordinates each; NULL: no room */
 	unsigned int room_count;
 	qaws_scalar room_weight;               /* 0 = 1 */
+	qaws_repulsive_progress progress;      /* cancellation and per-step reports (above) */
 } qaws_repulsive_curves_solve_desc;
 
-typedef struct qaws_repulsive_report
+struct qaws_repulsive_report
 {
 	qaws_repulsive_termination reason;
 	unsigned int iterations;               /* accepted steps */
@@ -171,7 +197,7 @@ typedef struct qaws_repulsive_report
 	unsigned int rejected_energy;          /* trial steps rejected: no Armijo decrease or no energy */
 	unsigned int rejected_collision;       /* trial steps rejected by the collision check */
 	unsigned int rejected_projection;      /* trial steps whose projection failed */
-} qaws_repulsive_report;
+};
 
 typedef struct qaws_repulsive_curves_solver qaws_repulsive_curves_solver;
 
@@ -185,9 +211,15 @@ void qaws_repulsive_curves_solver_destroy(qaws_repulsive_curves_solver* solver);
    (may be NULL) says what happened (RUNNING, or why it stopped). */
 qaws_status qaws_repulsive_curves_solver_step(qaws_repulsive_curves_solver* solver, qaws_scalar* positions, qaws_repulsive_report* out_report);
 
-/* Steps until a termination reason (create, step, destroy). */
+/* Steps until a termination reason or max_iterations (create, step, destroy); desc->progress reports each accepted step and may
+   cancel. */
 qaws_status qaws_repulsive_curves_solve(qaws_repulsive_curves const* curves, qaws_repulsive_curves_solve_desc const* desc,
 	qaws_scalar* positions, qaws_repulsive_report* out_report);
+
+/* The objective the solver lowers at positions: the energy and every term the desc adds (length, room), as report.energy;
+   out_gradient (may be NULL) its gradient with respect to the positions, overwritten. */
+qaws_status qaws_repulsive_curves_solver_objective(qaws_repulsive_curves_solver const* solver, qaws_scalar const* positions,
+	qaws_scalar* out_energy, qaws_scalar* out_gradient);
 
 /* The descent direction g at positions (the projected fractional Sobolev
    gradient: A g + C^T l = dE, C g = 0), not the coordinate gradient. */
@@ -362,6 +394,7 @@ typedef struct qaws_repulsive_mesh_solve_desc
 	                                          (0: none; the trial size doubles after each accepted step). A step lands
 	                                          where it lands: a long one can pass a thin barrier, as a sparse point
 	                                          cloud's, that shorter ones would feel */
+	qaws_repulsive_progress progress;      /* cancellation and per-step reports, as for curves */
 } qaws_repulsive_mesh_solve_desc;
 
 typedef struct qaws_repulsive_mesh_solver qaws_repulsive_mesh_solver;
@@ -379,6 +412,10 @@ qaws_status qaws_repulsive_mesh_solver_direction(qaws_repulsive_mesh_solver cons
 qaws_status qaws_repulsive_mesh_solver_set_targets(qaws_repulsive_mesh_solver* solver, qaws_scalar const* area, qaws_scalar const* volume);
 qaws_status qaws_repulsive_mesh_solve(qaws_repulsive_mesh const* mesh, qaws_repulsive_mesh_solve_desc const* desc,
 	qaws_scalar* positions, qaws_repulsive_report* out_report);
+
+/* The objective the solver lowers (energy, area, volume and obstacle terms), as for curves */
+qaws_status qaws_repulsive_mesh_solver_objective(qaws_repulsive_mesh_solver const* solver, qaws_scalar const* positions,
+	qaws_scalar* out_energy, qaws_scalar* out_gradient);
 
 /* ---- derivatives of a converged solution (R5) ---------------------------- */
 
@@ -493,6 +530,10 @@ qaws_status qaws_repulsive_surface_curves_solver_direction(qaws_repulsive_surfac
 qaws_status qaws_repulsive_surface_curves_solve(qaws_repulsive_curves const* curves, qaws_repulsive_surface_desc const* surface,
 	qaws_repulsive_curves_solve_desc const* desc, qaws_scalar* uv, qaws_repulsive_report* out_report);
 
+/* The objective at uv; the gradient with respect to uv */
+qaws_status qaws_repulsive_surface_curves_solver_objective(qaws_repulsive_surface_curves_solver const* solver, qaws_scalar const* uv,
+	qaws_scalar* out_energy, qaws_scalar* out_gradient);
+
 /* ---- native control points (R5) ---------------------------------------- */
 
 /*
@@ -558,5 +599,9 @@ qaws_status qaws_repulsive_controls_solver_direction(qaws_repulsive_controls_sol
 	qaws_scalar* out_direction);
 qaws_status qaws_repulsive_controls_solve(qaws_repulsive_controls const* controls, qaws_repulsive_curves_solve_desc const* desc,
 	qaws_scalar* control_points, qaws_repulsive_report* out_report);
+
+/* The objective at control_points; the gradient with respect to them */
+qaws_status qaws_repulsive_controls_solver_objective(qaws_repulsive_controls_solver const* solver, qaws_scalar const* control_points,
+	qaws_scalar* out_energy, qaws_scalar* out_gradient);
 
 #endif /* QAWS_REPULSIVE_H */

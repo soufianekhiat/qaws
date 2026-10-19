@@ -47,6 +47,8 @@ const char *qaws_status_to_string(qaws_status status)
 		return "QAWS_STATUS_NOT_CONVERGED";
 	case QAWS_STATUS_INVALID_TOPOLOGY:
 		return "QAWS_STATUS_INVALID_TOPOLOGY";
+	case QAWS_STATUS_CANCELLED:
+		return "QAWS_STATUS_CANCELLED";
 	default:
 		return "QAWS_STATUS_UNKNOWN";
 	}

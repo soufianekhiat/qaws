@@ -58,7 +58,18 @@ struct qaws_internal_rs_core
 	unsigned char const* fixed;          /* pinned vertices */
 	double* x;                           /* the current positions, in double */
 	qaws_repulsive_report rep;
+	qaws_repulsive_progress progress;    /* the desc's: cancellation, per-step reports */
 };
+
+/* the host's cancel callback says stop */
+#define QAWS_INTERNAL_RS_CANCELLED(core) ((core)->progress.cancel && (core)->progress.cancel((core)->progress.user_data))
+
+/* steps until a termination reason or max steps, reporting each accepted one (the *_solve loop) */
+qaws_status qaws_internal_rs_solve(qaws_internal_rs_core* core, unsigned int max_steps, qaws_scalar* positions, qaws_repulsive_report* out_report);
+
+/* the objective at positions and its gradient (may be NULL) */
+qaws_status qaws_internal_rs_objective(qaws_internal_rs_core const* core, qaws_scalar const* positions, qaws_scalar* out_energy,
+	qaws_scalar* out_gradient);
 
 /* the most constraint rows (pins aside) the hierarchical mode solves for */
 #define QAWS_INTERNAL_RS_HROWS 32
