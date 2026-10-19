@@ -41,8 +41,8 @@ columns differ by family.
 | Yuksel | runtime | absent | yes | yes (146) | |
 | Arc | core arc | absent | absent | yes (146) | |
 | Polynomial | core Horner | `QAWS_VIEW_POLYNOMIAL` (142) | yes | yes (146) | |
-| Clothoid | runtime | absent | yes | yes (146) | |
-| Composite | its children | absent | yes | yes (146) | |
+| Clothoid | runtime | nothing to borrow: six scalars | yes | yes (146) | |
+| Composite | its children | through borrowed children (142) | yes | yes (146) | |
 | Subdivision | runtime | absent | absent | yes (146) | |
 | Arc-length / length-matched wrappers | chain rule over the source (144) | absent | absent | malloc | |
 
@@ -141,8 +141,8 @@ own tool, `examples/repulsive_gpu_parity.c`.
   their sections' jets; sections without jets fall back to differences.
   Their evaluation scratch is on the stack up to 32 sections, beyond that
   from the surface's allocator.
-- **Views of the remaining families** (arc, clothoid, Yuksel, trajectory,
-  subdivision, composite). Hermite, Catmull-Rom and polynomial curves have
+- **Views of the remaining families** (arc, Yuksel, trajectory,
+  subdivision). Composites take borrowed children; clothoids hold no arrays. Hermite, Catmull-Rom and polynomial curves have
   views; owned objects are not rebuilt on views (their parity is tested).
 - **The allocator through the other entry points.** Every curve and surface
   constructor takes one, and curves derived from a source curve use its

@@ -367,8 +367,9 @@ checks stay manual.
 
 Remaining, in order:
 
-- Views of the remaining families (arc, clothoid, Yuksel, trajectory,
-  subdivision, composite); owned objects are not rebuilt on views.
+- Views of the remaining families (arc, Yuksel, trajectory, subdivision);
+  owned objects are not rebuilt on views. Composites already borrow through
+  borrowed children (142); clothoids hold no arrays to borrow.
 - The allocator for operation scratch, sampling, traversal, inspection,
   batches and repulsive (constructors and derived curves are done).
 - Halide's runtime span (the buffer interface is done for HLSL and GLSL).

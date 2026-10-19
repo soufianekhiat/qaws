@@ -845,11 +845,60 @@ static void test_families(void)
 	}
 }
 
+/* a composite of borrowed curves: composites borrow by their children, which may be views (it owns the views, not the
+   host arrays); the same as the composite of owned copies */
+static void test_composite_of_views(void)
+{
+	double p0[3 * 8], p1[3 * 8];
+	qaws_curve_view v;
+	qaws_curve *b[2] = { NULL, NULL }, *o[2] = { NULL, NULL }, *cb = NULL, *co = NULL;
+	qaws_composite_desc d;
+	double worst = 0;
+	unsigned int i;
+	cv_points(p0, 8, 0.1);
+	cv_points(p1, 8, 0.7);
+	memset(&v, 0, sizeof v);
+	v.dimension = QAWS_DIMENSION_3D;
+	v.degree = 3;
+	v.points = cv_packed(p0, QAWS_ELEMENT_F64, 3, 8, 3 * sizeof(double));
+	qaws_curve_create_borrowed(&v, NULL, &b[0]);
+	qaws_curve_create_from_view(&v, NULL, &o[0]);
+	v.points = cv_packed(p1, QAWS_ELEMENT_F64, 3, 8, 3 * sizeof(double));
+	qaws_curve_create_borrowed(&v, NULL, &b[1]);
+	qaws_curve_create_from_view(&v, NULL, &o[1]);
+	memset(&d, 0, sizeof d);
+	d.dimension = QAWS_DIMENSION_3D;
+	d.segments = b;
+	d.segment_count = 2;
+	TEST_ASSERT(qaws_curve_create_composite(&d, &cb) == QAWS_STATUS_OK, "composite of two borrowed curves");
+	d.segments = o;
+	TEST_ASSERT(qaws_curve_create_composite(&d, &co) == QAWS_STATUS_OK, "composite of their owned copies");
+	for (i = 0; i <= 64; i++)
+	{
+		qaws_eval_result_3d eb, eo;
+		qaws_scalar t = (qaws_scalar)(2.0 * i / 64);
+		qaws_curve_evaluate_3d(cb, t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2, &eb);
+		qaws_curve_evaluate_3d(co, t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2, &eo);
+		worst = fmax(worst, cv_diff3(&eb, &eo));
+	}
+	TEST_ASSERT(worst == 0, "composite of views = composite of owned copies, to the bit");
+	/* the host arrays move under the composite */
+	p1[3 * 7] += 1;
+	{
+		qaws_eval_result_3d e;
+		qaws_curve_evaluate_3d(cb, 2, QAWS_EVAL_FLAG_POSITION, &e);
+		TEST_ASSERT(fabs(e.position.x - p1[3 * 7]) <= 1e-12, "the composite reads the moved host point");
+	}
+	qaws_curve_destroy(cb);
+	qaws_curve_destroy(co);
+}
+
 int test_142_curve_view_main(void)
 {
 	g_pass = 0;
 	g_fail = 0;
 	printf("Test 142: borrowed curves\n");
+	test_composite_of_views();
 	test_parity_bspline();
 	test_parity_nurbs();
 	test_layouts();
