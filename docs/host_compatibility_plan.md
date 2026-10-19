@@ -354,15 +354,16 @@ checks stay manual.
 | Hermite, Catmull-Rom and polynomial views | done (`qaws_curve_view.family`) | 2593741 (142) |
 | The allocator through every constructor | every curve and surface family; loft and Gordon evaluation scratch from it beyond 32 sections | 31e5f0b, 41df199 (146) |
 | Surface intersection at its default tolerance | fixed (Gauss-Newton seeds); fillets work | f830321 (48) |
+| Derived curves in their source's allocator | reverse, extract, split, join, conversions, wrappers | d41be61 (146) |
+| Shader interface from buffers | `qaws_curve_record`, `qaws_surface_record`: any length, HLSL and GLSL, on a GPU | e6e58be, d94e5f5 (144) |
 
 Remaining, in order:
 
 - Views of the remaining families (arc, clothoid, Yuksel, trajectory,
   subdivision, composite); owned objects are not rebuilt on views.
-- The allocator through operations, sampling, traversal, inspection,
-  batches and repulsive (the constructors are done).
-- The shader ABI for B-splines, NURBS and surfaces read from buffers, and
-  Halide's runtime span.
+- The allocator for operation scratch, sampling, traversal, inspection,
+  batches and repulsive (constructors and derived curves are done).
+- Halide's runtime span (the buffer interface is done for HLSL and GLSL).
 - The kernels of section 6.
 - Repulsive: the allocator, line-search and GMRES settings, a validity
   report for solution derivatives, and the mesh VJP test.
