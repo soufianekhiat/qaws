@@ -171,8 +171,8 @@ static qaws_status cl_push(cl_list* L, cl_cand const* c)
 {
 	if (L->n == L->cap)
 	{
-		unsigned int cap = L->cap ? L->cap * 2 : 32;
-		cl_cand* g = (cl_cand*)qaws_internal_realloc(L->c, cap * sizeof(cl_cand));
+		unsigned int cap = qaws_internal_grow(L->cap, (size_t)L->n + 1, 32);
+		cl_cand* g = cap ? (cl_cand*)qaws_internal_realloc(L->c, qaws_internal_mul2(cap, sizeof(cl_cand))) : NULL;
 		if (!g)
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 		L->c = g;
@@ -299,8 +299,8 @@ static void cl_ring_visit(void* user, unsigned int item)
 	x->stamp[item] = x->query;
 	if (x->ngot == x->capgot)
 	{
-		unsigned int cap = x->capgot ? x->capgot * 2 : 64;
-		cl_span* g = (cl_span*)qaws_internal_realloc(x->got, cap * sizeof(cl_span));
+		unsigned int cap = qaws_internal_grow(x->capgot, (size_t)x->ngot + 1, 64);
+		cl_span* g = cap ? (cl_span*)qaws_internal_realloc(x->got, qaws_internal_mul2(cap, sizeof(cl_span))) : NULL;
 		if (!g)
 		{
 			x->failed = 1;
@@ -399,7 +399,7 @@ static qaws_status ecl_chunk(void* ctx, unsigned int chunk, unsigned int begin, 
 	R.dim = dim;
 	R.all = (cl_span*)J->all;
 	R.box = J->box;
-	R.stamp = (unsigned int*)qaws_internal_malloc((J->nspan ? J->nspan : 1) * sizeof(unsigned int));
+	R.stamp = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2((J->nspan ? J->nspan : 1), sizeof(unsigned int)));
 	w = (cl_work*)qaws_internal_malloc(sizeof(cl_work));
 	if (!R.stamp || !w)
 	{
@@ -575,11 +575,11 @@ qaws_status qaws_exact_curve_batch_closest(qaws_exact_batch_desc const* desc, do
 	scale = ldexp(1.0, space);
 	R.desc = desc;
 	R.dim = dim;
-	R.all = (cl_span*)qaws_internal_malloc(nspan * sizeof(cl_span));
-	R.box = (double (*)[2][3])qaws_internal_malloc(nspan * sizeof(double) * 6);
-	R.stamp = (unsigned int*)qaws_internal_malloc(nspan * sizeof(unsigned int));
-	boxes = (qaws_bp_box*)qaws_internal_malloc(nspan * sizeof(qaws_bp_box));
-	closed = (int*)qaws_internal_malloc(desc->curve_count * sizeof(int));
+	R.all = (cl_span*)qaws_internal_malloc(qaws_internal_mul2(nspan, sizeof(cl_span)));
+	R.box = (double (*)[2][3])qaws_internal_malloc(qaws_internal_mul3(nspan, sizeof(double), 6));
+	R.stamp = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(nspan, sizeof(unsigned int)));
+	boxes = (qaws_bp_box*)qaws_internal_malloc(qaws_internal_mul2(nspan, sizeof(qaws_bp_box)));
+	closed = (int*)qaws_internal_malloc(qaws_internal_mul2(desc->curve_count, sizeof(int)));
 	w = (cl_work*)qaws_internal_malloc(sizeof(cl_work));
 	if (!R.all || !R.box || !R.stamp || !boxes || !closed || !w)
 	{
@@ -895,8 +895,8 @@ static qaws_status sc_push(sc_list* L, sc_cand2 const* c)
 {
 	if (L->n == L->cap)
 	{
-		unsigned int cap = L->cap ? L->cap * 2 : 32;
-		sc_cand2* g = (sc_cand2*)qaws_internal_realloc(L->c, cap * sizeof(sc_cand2));
+		unsigned int cap = qaws_internal_grow(L->cap, (size_t)L->n + 1, 32);
+		sc_cand2* g = cap ? (sc_cand2*)qaws_internal_realloc(L->c, qaws_internal_mul2(cap, sizeof(sc_cand2))) : NULL;
 		if (!g)
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 		L->c = g;
@@ -1258,7 +1258,7 @@ static qaws_status esc_chunk(void* ctx, unsigned int chunk, unsigned int begin, 
 	R.dim = 3;
 	R.all = (cl_span*)J->all;
 	R.box = J->box;
-	R.stamp = (unsigned int*)qaws_internal_malloc((J->npatch ? J->npatch : 1) * sizeof(unsigned int));
+	R.stamp = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2((J->npatch ? J->npatch : 1), sizeof(unsigned int)));
 	w = (sc_work*)qaws_internal_zalloc(1, sizeof(sc_work));
 	if (!R.stamp || !w)
 	{
@@ -1405,10 +1405,10 @@ qaws_status qaws_exact_surface_batch_closest(qaws_exact_ssi_batch_desc const* de
 	space = desc->surfaces[0]->space_exp2;
 	scale = ldexp(1.0, space);
 	R.dim = 3;
-	R.all = (cl_span*)qaws_internal_malloc(npatch * sizeof(cl_span));
-	R.box = (double (*)[2][3])qaws_internal_malloc(npatch * sizeof(double) * 6);
-	R.stamp = (unsigned int*)qaws_internal_malloc(npatch * sizeof(unsigned int));
-	boxes = (qaws_bp_box*)qaws_internal_malloc(npatch * sizeof(qaws_bp_box));
+	R.all = (cl_span*)qaws_internal_malloc(qaws_internal_mul2(npatch, sizeof(cl_span)));
+	R.box = (double (*)[2][3])qaws_internal_malloc(qaws_internal_mul3(npatch, sizeof(double), 6));
+	R.stamp = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(npatch, sizeof(unsigned int)));
+	boxes = (qaws_bp_box*)qaws_internal_malloc(qaws_internal_mul2(npatch, sizeof(qaws_bp_box)));
 	if (!R.all || !R.box || !R.stamp || !boxes)
 	{
 		st = QAWS_STATUS_ALLOCATION_FAILURE;

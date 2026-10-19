@@ -1227,7 +1227,7 @@ static qaws_status read_jet_3d(void const* jets, unsigned int i, curve_jet_buf* 
 
 static void* scratch_alloc(qaws_diff_context const* ctx, size_t size)
 {
-	return qaws_internal_alloc(ctx ? ctx->allocator : NULL, (unsigned long)size);
+	return qaws_internal_alloc(ctx ? ctx->allocator : NULL, size);
 }
 
 static void scratch_free(qaws_diff_context const* ctx, void* p)
@@ -1358,7 +1358,7 @@ static qaws_status accumulate_tiled(
 	for (f = 0; f < nf; f++)
 	{
 		qaws_field_view const* v = &views->fields[f];
-		size_t size = sizeof(qaws_scalar) * (size_t)v->count * v->components;
+		size_t size = qaws_internal_mul3(sizeof(qaws_scalar), (size_t)v->count, v->components);
 		if (!v->data || !v->count)
 			continue;
 		local[f] = (qaws_scalar*)scratch_alloc(ctx, size);
@@ -1448,7 +1448,7 @@ static qaws_status accumulate_gather(
 	for (f = 0; f < nf; f++)
 	{
 		qaws_field_view const* v = &views->fields[f];
-		size_t size = sizeof(unsigned int) * ((size_t)v->count + 1);
+		size_t size = qaws_internal_mul2(sizeof(unsigned int), ((size_t)v->count + 1));
 		if (!v->data || !v->count)
 			continue;
 		offsets[f] = (unsigned int*)scratch_alloc(ctx, size);
@@ -2058,7 +2058,7 @@ qaws_status qaws_curve_build_support_index(
 		/* Fill in sample order; use a moving cursor stored past the end of
 		   each bucket start by recomputing offsets afterwards. */
 		unsigned int* cursor = (unsigned int*)qaws_internal_alloc(NULL,
-			(unsigned long)(sizeof(unsigned int) * ((size_t)element_count + 1)));
+			qaws_internal_mul2(sizeof(unsigned int), ((size_t)element_count + 1)));
 		if (!cursor)
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 		memcpy(cursor, out_offsets, sizeof(unsigned int) * ((size_t)element_count + 1));
@@ -2207,7 +2207,7 @@ qaws_status qaws_internal_field_override(
 		return QAWS_STATUS_OK;
 	if (v->count != count || v->components != components)
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	buf = (qaws_scalar*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_scalar) * (size_t)count * components + 1));
+	buf = (qaws_scalar*)qaws_internal_alloc(NULL, sizeof(qaws_scalar) * (size_t)count * components + 1);
 	if (!buf)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	stride = qaws_internal_view_stride(v);

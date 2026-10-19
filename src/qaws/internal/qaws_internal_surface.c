@@ -15,7 +15,7 @@ qaws_surface* qaws_internal_surface_alloc_ex(
 	/* a custom allocator is kept by value right after the surface (see qaws_internal_curve_alloc_ex) */
 	int custom = allocator && allocator->alloc;
 	size_t at = (sizeof(qaws_surface) + sizeof(void*) - 1) / sizeof(void*) * sizeof(void*);
-	qaws_surface* s = (qaws_surface*)qaws_internal_alloc(allocator, (unsigned long)(at + (custom ? sizeof(qaws_allocator) : 0)));
+	qaws_surface* s = (qaws_surface*)qaws_internal_alloc(allocator, at + (custom ? sizeof(qaws_allocator) : 0));
 	if (!s) return NULL;
 	s->kind = kind;
 	s->u_degree = u_degree;

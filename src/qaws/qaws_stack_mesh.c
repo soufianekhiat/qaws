@@ -35,8 +35,8 @@ static unsigned int sm_vert(sm_mesh* m, double x, double y, double z)
 {
 	if (m->nv == m->capv)
 	{
-		unsigned int nc = m->capv ? 2 * m->capv : 1024;
-		double* g = (double*)qaws_internal_realloc(m->v, sizeof(double) * 3 * nc);
+		unsigned int nc = qaws_internal_grow(m->capv, (size_t)m->nv + 1, 1024);
+		double* g = nc ? (double*)qaws_internal_realloc(m->v, qaws_internal_mul3(sizeof(double), 3, nc)) : NULL;
 		if (!g) { m->failed = 1; return SM_NONE; }
 		m->v = g;
 		m->capv = nc;
@@ -50,8 +50,8 @@ static void sm_tri(sm_mesh* m, unsigned int a, unsigned int b, unsigned int c)
 	if (a == b || b == c || a == c) return;
 	if (m->nt == m->capt)
 	{
-		unsigned int nc = m->capt ? 2 * m->capt : 2048;
-		unsigned int* g = (unsigned int*)qaws_internal_realloc(m->t, sizeof(unsigned int) * 3 * nc);
+		unsigned int nc = qaws_internal_grow(m->capt, (size_t)m->nt + 1, 2048);
+		unsigned int* g = nc ? (unsigned int*)qaws_internal_realloc(m->t, qaws_internal_mul3(sizeof(unsigned int), 3, nc)) : NULL;
 		if (!g) { m->failed = 1; return; }
 		m->t = g;
 		m->capt = nc;
@@ -126,10 +126,10 @@ static int sm_densify(qaws_path_2d const* p, sm_dense* d)
 {
 	unsigned int k, total = 1, n = 0;
 	for (k = 0; k < p->curve_count; k++) total += SM_DENSE * p->curves[k]->span_count;
-	d->curve = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * total);
-	d->t = (double*)qaws_internal_malloc(sizeof(double) * total);
-	d->s = (double*)qaws_internal_malloc(sizeof(double) * total);
-	d->p = (double*)qaws_internal_malloc(sizeof(double) * 2 * total);
+	d->curve = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), total));
+	d->t = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), total));
+	d->s = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), total));
+	d->p = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), 2, total));
 	if (!d->curve || !d->t || !d->s || !d->p) return 0;
 	for (k = 0; k < p->curve_count; k++)
 	{
@@ -216,7 +216,7 @@ static int sm_emit(sm_mesh* m, sm_contour* c, double z)
 	unsigned int i, k = 0, total = 0;
 	memset(&d, 0, sizeof(d));
 	if (!sm_densify(&c->path, &d)) { sm_dense_free(&d); return 0; }
-	corner = (double*)qaws_internal_malloc(sizeof(double) * d.n);
+	corner = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), d.n));
 	if (!corner) { sm_dense_free(&d); return 0; }
 	/* d's last point closes onto its first */
 	for (i = 0; d.n >= 3 && i + 1 < d.n; i++)
@@ -241,7 +241,7 @@ static int sm_emit(sm_mesh* m, sm_contour* c, double z)
 	else
 	{
 		unsigned int g;
-		c->corner = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * k);
+		c->corner = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), k));
 		if (!c->corner) { qaws_internal_free(corner); sm_dense_free(&d); return 0; }
 		c->nk = k;
 		for (g = 0; g < k; g++)
@@ -305,7 +305,7 @@ static void sm_stitch(sm_mesh* m, unsigned int const* P, unsigned int n, unsigne
 
 static unsigned int* sm_loop(sm_contour const* c)
 {
-	unsigned int* l = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (c->n + 1)), i;
+	unsigned int* l = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (c->n + 1))), i;
 	if (l) for (i = 0; i < c->n; i++) l[i] = c->first + i;
 	return l;
 }
@@ -338,8 +338,8 @@ static void sm_band(sm_mesh* m, sm_contour const* p, sm_contour const* q)
 {
 	if (p->nk && p->nk == q->nk)
 	{
-		unsigned int *a = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (p->n + 2));
-		unsigned int *b = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (q->n + 2));
+		unsigned int *a = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (p->n + 2)));
+		unsigned int *b = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (q->n + 2)));
 		unsigned int r = 0, g, t;
 		double bd = 1e300;
 		if (!a || !b) { qaws_internal_free(a); qaws_internal_free(b); m->failed = 1; return; }
@@ -407,9 +407,9 @@ static int sm_overlap(sm_mesh const* m, sm_contour const* a, sm_contour const* b
    partner (the caller falls back). */
 static int sm_branch(sm_mesh* m, sm_contour const* x, sm_contour const* const* ys, unsigned int k, int x_below)
 {
-	unsigned int* own = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (x->n + 1));
-	unsigned int* start = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (x->n + 1));
-	unsigned int* who = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (x->n + 1));
+	unsigned int* own = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (x->n + 1)));
+	unsigned int* start = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (x->n + 1)));
+	unsigned int* who = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (x->n + 1)));
 	unsigned int i, j, runs = 0, ok = 1;
 	if (!own || !start || !who) { qaws_internal_free(own); qaws_internal_free(start); qaws_internal_free(who); m->failed = 1; return 0; }
 	for (i = 0; i < x->n; i++)
@@ -448,7 +448,7 @@ static int sm_branch(sm_mesh* m, sm_contour const* x, sm_contour const* const* y
 		for (j = i + 1; j < runs; j++) if (who[i] == who[j]) ok = 0;
 	if (ok)
 	{
-		unsigned int* loop = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (x->n + 2));
+		unsigned int* loop = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (x->n + 2)));
 		if (!loop) { m->failed = 1; ok = 0; }
 		for (i = 0; ok && i < runs; i++)
 		{
@@ -509,9 +509,9 @@ static int sm_link(sm_mesh* m, sm_section* a, sm_section* b)
 	unsigned char* ov;
 	unsigned int *qa, *qb, *seen_a, *seen_b;
 	if (!na || !nb) return 1;
-	ov = (unsigned char*)qaws_internal_zalloc((size_t)na * nb, 1);
-	qa = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (na + 1));
-	qb = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (nb + 1));
+	ov = (unsigned char*)qaws_internal_zalloc(qaws_internal_mul2((size_t)na, nb), 1);
+	qa = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (na + 1)));
+	qb = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (nb + 1)));
 	seen_a = (unsigned int*)qaws_internal_zalloc(na + 1, sizeof(unsigned int));
 	seen_b = (unsigned int*)qaws_internal_zalloc(nb + 1, sizeof(unsigned int));
 	if (!ov || !qa || !qb || !seen_a || !seen_b) { qaws_internal_free(ov); qaws_internal_free(qa); qaws_internal_free(qb); qaws_internal_free(seen_a); qaws_internal_free(seen_b); return 0; }
@@ -689,8 +689,8 @@ static void sm_cap_tri(sm_mesh* m, sm_contour const* const* cs, unsigned int n, 
 static int sm_cap(sm_mesh* m, sm_contour const* const* cs, unsigned int n, int up)
 {
 	qaws_curve** rings = (qaws_curve**)qaws_internal_zalloc(n + 1, sizeof(qaws_curve*));
-	qaws_curve const** views = (qaws_curve const**)qaws_internal_malloc(sizeof(qaws_curve*) * (n + 1));
-	qaws_path_2d* paths = (qaws_path_2d*)qaws_internal_malloc(sizeof(qaws_path_2d) * (n + 1));
+	qaws_curve const** views = (qaws_curve const**)qaws_internal_malloc(qaws_internal_mul2(sizeof(qaws_curve*), (n + 1)));
+	qaws_path_2d* paths = (qaws_path_2d*)qaws_internal_malloc(qaws_internal_mul2(sizeof(qaws_path_2d), (n + 1)));
 	qaws_triangulate_desc d;
 	qaws_mesh_2d* mesh = NULL;
 	unsigned int i, k, total = 0;
@@ -698,7 +698,7 @@ static int sm_cap(sm_mesh* m, sm_contour const* const* cs, unsigned int n, int u
 	if (!rings || !views || !paths) ok = 0;
 	for (i = 0; ok && i < n; i++)
 	{
-		qaws_scalar* xy = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * 2 * cs[i]->n);
+		qaws_scalar* xy = (qaws_scalar*)qaws_internal_malloc(qaws_internal_mul3(sizeof(qaws_scalar), 2, (cs[i]->n)));
 		if (!xy) { ok = 0; break; }
 		for (k = 0; k < cs[i]->n; k++)
 		{
@@ -725,7 +725,7 @@ static int sm_cap(sm_mesh* m, sm_contour const* const* cs, unsigned int n, int u
 	if (ok && mesh)
 	{
 		unsigned int nv = qaws_mesh_2d_get_vertex_count(mesh), nt = qaws_mesh_2d_get_triangle_count(mesh);
-		unsigned int* map = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (nv + 1));
+		unsigned int* map = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (nv + 1)));
 		double z = m->v[3 * cs[0]->first + 2];
 		if (!map) ok = 0;
 		/* each vertex back to its sample (the same point up to the lattice) */
@@ -783,7 +783,7 @@ qaws_status qaws_stack_mesh_3d(qaws_stack_mesh_desc const* desc, qaws_mesh_3d** 
 	if (!m) return QAWS_STATUS_ALLOCATION_FAILURE;
 	/* the heights: every level, and the sections between */
 	per = desc->sections + 1;
-	s = (sm_section*)qaws_internal_zalloc((st->level_count - 1) * per + 1, sizeof(sm_section));
+	s = (sm_section*)qaws_internal_zalloc(qaws_internal_add2(qaws_internal_mul2(st->level_count - 1, per), 1), sizeof(sm_section));
 	if (!s) { qaws_internal_free(m); return QAWS_STATUS_ALLOCATION_FAILURE; }
 	for (i = 0; i < st->level_count; i++)
 	{
@@ -855,7 +855,7 @@ qaws_status qaws_stack_mesh_3d(qaws_stack_mesh_desc const* desc, qaws_mesh_3d** 
 			sm_section const* sec = &s[e ? ns - 1 : 0];
 			sm_contour const** cs;
 			if (!sec->nc || (e == 1 && ns == 1)) continue;
-			cs = (sm_contour const**)qaws_internal_malloc(sizeof(sm_contour*) * sec->nc);
+			cs = (sm_contour const**)qaws_internal_malloc(qaws_internal_mul2(sizeof(sm_contour*), sec->nc));
 			if (!cs) { status = QAWS_STATUS_ALLOCATION_FAILURE; break; }
 			for (j = 0; j < sec->nc; j++) cs[j] = &sec->c[j];
 			if (!sm_cap(m, cs, sec->nc, e == 1)) status = QAWS_STATUS_ALLOCATION_FAILURE;

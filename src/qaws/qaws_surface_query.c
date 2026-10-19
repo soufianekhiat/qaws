@@ -397,11 +397,11 @@ qaws_status qaws_surface_region_distance(qaws_surface_region const* region, qaws
 					continue;
 				if (n == cap)
 				{
-					unsigned int nc = cap ? 2 * cap : 64;
-					qaws_curve const** g1 = (qaws_curve const**)qaws_internal_realloc((void*)cv, sizeof(*cv) * nc);
+					unsigned int nc = qaws_internal_grow(cap, (size_t)n + 1, 64);
+					qaws_curve const** g1 = nc ? (qaws_curve const**)qaws_internal_realloc((void*)cv, qaws_internal_mul2(sizeof(*cv), nc)) : NULL;
 					double* g2;
 					if (g1) cv = g1;
-					g2 = g1 ? (double*)qaws_internal_realloc(lb, sizeof(double) * nc) : NULL;
+					g2 = g1 ? (double*)qaws_internal_realloc(lb, qaws_internal_mul2(sizeof(double), nc)) : NULL;
 					if (!g1 || !g2)
 					{
 						st = QAWS_STATUS_ALLOCATION_FAILURE;

@@ -277,6 +277,8 @@ qaws_status qaws_curve_create_polynomial_ex(
 	if (qaws_internal_validate_dimension(desc->dimension) != QAWS_STATUS_OK)
 		return QAWS_STATUS_INVALID_DIMENSION;
 	if (desc->degree < 1) return QAWS_STATUS_INVALID_DEGREE;
+	/* (degree + 1) * dim_count indexes the coefficients in unsigned int */
+	if (desc->degree >= 0xFFFFFFFFu / 3) return QAWS_STATUS_INVALID_DEGREE;
 	if (desc->coefficient_count != desc->degree + 1) return QAWS_STATUS_INVALID_CONTROL_POINT_COUNT;
 	if (!desc->coefficients) return QAWS_STATUS_INVALID_ARGUMENT;
 	/* 0 and 0: the documented default [0, 1], as qaws_curve_init_polynomial_inline */
@@ -292,11 +294,11 @@ qaws_status qaws_curve_create_polynomial_ex(
 	curve->span_boundaries[0] = range.min_value;
 	curve->span_boundaries[1] = range.max_value;
 
-	impl = (qaws_polynomial_impl*)qaws_internal_alloc(allocator, (unsigned long)(sizeof(qaws_polynomial_impl)));
+	impl = (qaws_polynomial_impl*)qaws_internal_alloc(allocator, sizeof(qaws_polynomial_impl));
 	if (!impl) { qaws_internal_curve_free(curve); return QAWS_STATUS_ALLOCATION_FAILURE; }
 
-	coeff_size = (size_t)dim_count * desc->coefficient_count * sizeof(qaws_scalar);
-	impl->coefficients = (qaws_scalar*)qaws_internal_alloc(allocator, (unsigned long)(coeff_size));
+	coeff_size = qaws_internal_mul3((size_t)dim_count, desc->coefficient_count, sizeof(qaws_scalar));
+	impl->coefficients = (qaws_scalar*)qaws_internal_alloc(allocator, coeff_size);
 	if (!impl->coefficients) { qaws_internal_dealloc(allocator, impl); qaws_internal_curve_free(curve); return QAWS_STATUS_ALLOCATION_FAILURE; }
 	memcpy(impl->coefficients, desc->coefficients, coeff_size);
 	impl->coefficient_count = desc->coefficient_count;

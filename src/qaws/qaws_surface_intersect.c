@@ -504,7 +504,7 @@ qaws_status qaws_surface_intersect(
 
 		seed_capacity = grid_n * grid_n;
 		if (seed_capacity > 1000) seed_capacity = 1000;
-		seeds = (qaws_ssi_point*)qaws_internal_malloc(seed_capacity * sizeof(qaws_ssi_point));
+		seeds = (qaws_ssi_point*)qaws_internal_malloc(qaws_internal_mul2(seed_capacity, sizeof(qaws_ssi_point)));
 		if (!seeds) return QAWS_STATUS_ALLOCATION_FAILURE;
 
 		for (gi = 0; gi < grid_n && seed_count < seed_capacity; ++gi)
@@ -597,8 +597,8 @@ qaws_status qaws_surface_intersect(
 		if (fwd_cap > max_march) fwd_cap = max_march;
 		if (bwd_cap > max_march) bwd_cap = max_march;
 
-		fwd_buf = (qaws_ssi_point*)qaws_internal_malloc(fwd_cap * sizeof(qaws_ssi_point));
-		bwd_buf = (qaws_ssi_point*)qaws_internal_malloc(bwd_cap * sizeof(qaws_ssi_point));
+		fwd_buf = (qaws_ssi_point*)qaws_internal_malloc(qaws_internal_mul2(fwd_cap, sizeof(qaws_ssi_point)));
+		bwd_buf = (qaws_ssi_point*)qaws_internal_malloc(qaws_internal_mul2(bwd_cap, sizeof(qaws_ssi_point)));
 		if (!fwd_buf || !bwd_buf)
 		{
 			qaws_internal_free(fwd_buf);

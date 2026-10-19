@@ -187,7 +187,7 @@ static qaws_status mg_finish(mg_src const* src, double const* x, qaws_shell_poin
 	{
 		/* each triangle's face as an attribute; the edges between faces as features */
 		qaws_attribute_desc ad;
-		qaws_scalar* fv = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * (nt + 1));
+		qaws_scalar* fv = (qaws_scalar*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(qaws_scalar), (nt + 1)));
 		qaws_hm* m = &dense->hm;
 		unsigned int c;
 		if (!fv)
@@ -362,10 +362,10 @@ qaws_status qaws_mesh_generate_shell(qaws_shell_atlas const* shell, qaws_generat
 		goto done;
 	nv = qaws_shell_mesh_get_vertex_count(sm);
 	nt = qaws_shell_mesh_get_triangle_count(sm);
-	x = (double*)qaws_internal_malloc(sizeof(double) * 3 * (nv + 1));
-	dvp = (qaws_shell_point*)qaws_internal_malloc(sizeof(qaws_shell_point) * (nv + 1));
-	tri = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * 3 * (nt + 1));
-	tface = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (nt + 1));
+	x = (double*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(double), 3, (nv + 1)));
+	dvp = (qaws_shell_point*)qaws_internal_malloc(qaws_internal_mul2(sizeof(qaws_shell_point), (nv + 1)));
+	tri = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(unsigned int), 3, (nt + 1)));
+	tface = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (nt + 1)));
 	if (!x || !dvp || !tri || !tface)
 	{
 		st = QAWS_STATUS_ALLOCATION_FAILURE;
@@ -446,12 +446,12 @@ static qaws_status mg_grid(qaws_surface const* s, double Ld, double** ox, qaws_s
 	nu = (unsigned int)fmin(1024, fmax(4, ceil(lu / Ld)));
 	nw = (unsigned int)fmin(1024, fmax(4, ceil(lv / Ld)));
 	n = (nu + 1) * (nw + 1);
-	x = (double*)qaws_internal_malloc(sizeof(double) * 3 * n);
-	dvp = (qaws_shell_point*)qaws_internal_malloc(sizeof(qaws_shell_point) * n);
-	map = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * n);
-	tri = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * 6 * nu * nw);
+	x = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), 3, n));
+	dvp = (qaws_shell_point*)qaws_internal_malloc(qaws_internal_mul2(sizeof(qaws_shell_point), n));
+	map = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), n));
+	tri = (unsigned int*)qaws_internal_malloc(qaws_internal_mul4(sizeof(unsigned int), 6, nu, nw));
 	for (mask = 1; mask < 2 * n; mask <<= 1) {}
-	slot = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * mask);
+	slot = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), mask));
 	if (!x || !dvp || !map || !tri || !slot)
 	{
 		st = QAWS_STATUS_ALLOCATION_FAILURE;
@@ -593,7 +593,7 @@ qaws_status qaws_mesh_generate_surface(qaws_surface const* surface, qaws_generat
 	st = mg_grid(surface, mg_dense_length(desc, L), &x, &dvp, &nv, &tri, &nt, &area);
 	if (st != QAWS_STATUS_OK)
 		return st;
-	tface = (unsigned int*)qaws_internal_zalloc((size_t)nt + 1, sizeof(unsigned int));
+	tface = (unsigned int*)qaws_internal_scratch_zalloc((size_t)nt + 1, sizeof(unsigned int));
 	if (!tface)
 		st = QAWS_STATUS_ALLOCATION_FAILURE;
 	src.shell = NULL;

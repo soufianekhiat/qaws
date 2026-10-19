@@ -146,8 +146,8 @@ static qaws_status rs_add_piece(rs_piece** pcs, unsigned int* n, unsigned int* c
 		return QAWS_STATUS_OK;      /* vertical: no area to its side */
 	if (*n == *cap)
 	{
-		unsigned int nc = *cap ? 2 * *cap : 64;
-		rs_piece* g = (rs_piece*)qaws_internal_realloc(*pcs, sizeof(rs_piece) * nc);
+		unsigned int nc = qaws_internal_grow(*cap, (size_t)*n + 1, 64);
+		rs_piece* g = nc ? (rs_piece*)qaws_internal_realloc(*pcs, qaws_internal_mul2(sizeof(rs_piece), nc)) : NULL;
 		if (!g)
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 		*pcs = g;
@@ -270,7 +270,7 @@ qaws_status qaws_region_sampler_create(qaws_region_sampler_desc const* desc, qaw
 	{
 		double lo = 1e300, hi = -1e300, eps;
 		unsigned int nraw = 2 * s->npieces, m = 0;
-		raw = (double*)qaws_internal_malloc(sizeof(double) * nraw);
+		raw = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), nraw));
 		if (!raw)
 			st = QAWS_STATUS_ALLOCATION_FAILURE;
 		for (i = 0; st == QAWS_STATUS_OK && i < s->npieces; i++)
@@ -317,7 +317,7 @@ qaws_status qaws_region_sampler_create(qaws_region_sampler_desc const* desc, qaw
 	{
 		unsigned int nslab = s->nxs - 1, total = 0;
 		s->first = (unsigned int*)qaws_internal_zalloc(nslab + 2, sizeof(unsigned int));
-		s->acum = (double*)qaws_internal_malloc(sizeof(double) * s->nxs);
+		s->acum = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), s->nxs));
 		if (!s->first || !s->acum)
 			st = QAWS_STATUS_ALLOCATION_FAILURE;
 		for (i = 0; st == QAWS_STATUS_OK && i < s->npieces; i++)
@@ -333,7 +333,7 @@ qaws_status qaws_region_sampler_create(qaws_region_sampler_desc const* desc, qaw
 		{
 			unsigned int* fill = (unsigned int*)qaws_internal_zalloc(nslab + 1, sizeof(unsigned int));
 			for (k = 0; k < nslab; k++) s->first[k + 1] += s->first[k];
-			s->active = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (total + 1));
+			s->active = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (total + 1)));
 			if (!fill || !s->active)
 				st = QAWS_STATUS_ALLOCATION_FAILURE;
 			for (i = 0; st == QAWS_STATUS_OK && i < s->npieces; i++)
@@ -450,7 +450,7 @@ static rs_cross* rs_crossings(qaws_region_sampler const* s, unsigned int k, doub
 	rs_cross* cr = stack;
 	if (nc > 64)
 	{
-		cr = (rs_cross*)qaws_internal_malloc(sizeof(rs_cross) * nc);
+		cr = (rs_cross*)qaws_internal_malloc(qaws_internal_mul2(sizeof(rs_cross), nc));
 		if (!cr) { *out_n = 0; return stack; }
 	}
 	for (j = 0; j < nc; j++)
@@ -691,7 +691,7 @@ static qaws_status rs_build_density(qaws_region_sampler* s)
 	double width = s->xs[s->nxs - 1] - s->xs[0], rmax = 0;
 	rs_build_ctx* c;
 	qaws_status st;
-	s->pfirst = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (nslab + 1));
+	s->pfirst = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (nslab + 1)));
 	if (!s->pfirst)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	for (k = 0; k < nslab; k++)
@@ -701,8 +701,8 @@ static qaws_status rs_build_density(qaws_region_sampler* s)
 		total += np < 2 ? 2 : np;
 	}
 	s->pfirst[nslab] = total;
-	s->pmass = (double*)qaws_internal_malloc(sizeof(double) * (total + 1));
-	s->pcoef = (double*)qaws_internal_malloc(sizeof(double) * 8 * total);
+	s->pmass = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), (total + 1)));
+	s->pcoef = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), 8, total));
 	c = (rs_build_ctx*)qaws_internal_zalloc(1, sizeof(rs_build_ctx));
 	if (!s->pmass || !s->pcoef || !c)
 	{
@@ -802,7 +802,7 @@ static qaws_status rs_map_mass(qaws_region_sampler const* s, double u, double v,
 		cr = rs_crossings(s, k, x, stack, &n);
 		if (n > 64)
 		{
-			mm = (double*)qaws_internal_malloc(sizeof(double) * n);
+			mm = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), n));
 			if (!mm)
 			{
 				if (cr != stack) qaws_internal_free(cr);
@@ -851,7 +851,7 @@ static qaws_status rs_map_area(qaws_region_sampler const* s, qaws_scalar u, qaws
 	nc = s->first[k + 1] - s->first[k];
 	if (nc > 64)
 	{
-		cr = (rs_cross*)qaws_internal_malloc(sizeof(rs_cross) * nc);
+		cr = (rs_cross*)qaws_internal_malloc(qaws_internal_mul2(sizeof(rs_cross), nc));
 		if (!cr)
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
@@ -1262,7 +1262,7 @@ static qaws_status rs_eliminate(qaws_region_sampler const* s, qaws_vec2 const* c
 	{
 		rs_batch c;
 		double big = 0;
-		e.rad = (double*)qaws_internal_malloc(sizeof(double) * (ncand + 1));
+		e.rad = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), (ncand + 1)));
 		if (!e.rad)
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 		memset(&c, 0, sizeof(c));
@@ -1290,16 +1290,16 @@ static qaws_status rs_eliminate(qaws_region_sampler const* s, qaws_vec2 const* c
 	}
 	e.gx = (unsigned int)((hi[0] - e.lo[0]) / e.cs) + 1;
 	e.gy = (unsigned int)((hi[1] - e.lo[1]) / e.cs) + 1;
-	e.cell_first = (unsigned int*)qaws_internal_zalloc((size_t)e.gx * e.gy + 2, sizeof(unsigned int));
-	e.cell_items = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (ncand + 1));
+	e.cell_first = (unsigned int*)qaws_internal_zalloc(qaws_internal_add2(qaws_internal_mul2(e.gx, e.gy), 2), sizeof(unsigned int));
+	e.cell_items = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (ncand + 1)));
 	e.w = (double*)qaws_internal_zalloc(ncand + 1, sizeof(double));
-	e.heap = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (ncand + 1));
-	e.pos = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (ncand + 1));
+	e.heap = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (ncand + 1)));
+	e.pos = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (ncand + 1)));
 	if (!e.cell_first || !e.cell_items || !e.w || !e.heap || !e.pos)
 		st = QAWS_STATUS_ALLOCATION_FAILURE;
 	if (st == QAWS_STATUS_OK)
 	{
-		unsigned int* fill = (unsigned int*)qaws_internal_zalloc((size_t)e.gx * e.gy + 1, sizeof(unsigned int));
+		unsigned int* fill = (unsigned int*)qaws_internal_zalloc(qaws_internal_add2(qaws_internal_mul2(e.gx, e.gy), 1), sizeof(unsigned int));
 		if (!fill)
 			st = QAWS_STATUS_ALLOCATION_FAILURE;
 		else
@@ -1342,9 +1342,14 @@ static qaws_status rs_eliminate(qaws_region_sampler const* s, qaws_vec2 const* c
 static qaws_status rs_blue_noise(qaws_region_sampler const* s, unsigned int count, unsigned long long seed, qaws_vec2* out)
 {
 	unsigned int ncand = 5 * count;
-	qaws_vec2* cand = (qaws_vec2*)qaws_internal_malloc(sizeof(qaws_vec2) * (ncand + 1));
+	qaws_vec2* cand = (qaws_vec2*)qaws_internal_malloc(qaws_internal_mul2(sizeof(qaws_vec2), (ncand + 1)));
 	rs_pattern q;
 	qaws_status st = QAWS_STATUS_OK;
+	if (count > 0xFFFFFFFFu / 5 - 1)   /* 5 count + 1 candidates count in unsigned int */
+	{
+		qaws_internal_free(cand);
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	}
 	if (!cand)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	rs_pattern_init(&q, QAWS_REGION_SAMPLE_RANDOM, ncand, seed);
@@ -1477,7 +1482,7 @@ static qaws_status rs_box(qaws_region_sampler const* s, unsigned int count, unsi
 		{
 			/* the surplus at random: a hashed permutation's first count of
 			   the kept, in order */
-			unsigned int* in = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (got + 1));
+			unsigned int* in = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (got + 1)));
 			if (!in)
 				st = QAWS_STATUS_ALLOCATION_FAILURE;
 			else

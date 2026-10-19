@@ -102,8 +102,8 @@ static unsigned int rp_add_v(rp_mesh* m, double const* p)
 {
 	if (m->nv == m->capv)
 	{
-		unsigned int cap = m->capv ? 2 * m->capv : 64;
-		double* x = (double*)qaws_internal_realloc(m->x, sizeof(double) * 3 * cap);
+		unsigned int cap = qaws_internal_grow(m->capv, (size_t)m->nv + 1, 64);
+		double* x = cap ? (double*)qaws_internal_realloc(m->x, qaws_internal_mul3(sizeof(double), 3, cap)) : NULL;
 		if (!x)
 			return HM_NONE;
 		m->x = x;
@@ -117,14 +117,14 @@ static int rp_add_t(rp_mesh* m, unsigned int a, unsigned int b, unsigned int c, 
 {
 	if (m->nt == m->capt)
 	{
-		unsigned int cap = m->capt ? 2 * m->capt : 64;
-		unsigned int* t = (unsigned int*)qaws_internal_realloc(m->t, sizeof(unsigned int) * 3 * cap);
+		unsigned int cap = qaws_internal_grow(m->capt, (size_t)m->nt + 1, 64);
+		unsigned int* t = cap ? (unsigned int*)qaws_internal_realloc(m->t, qaws_internal_mul3(sizeof(unsigned int), 3, cap)) : NULL;
 		int* s;
 		unsigned char* f;
 		if (!t)
 			return 0;
 		m->t = t;
-		s = (int*)qaws_internal_realloc(m->src, sizeof(int) * cap);
+		s = (int*)qaws_internal_realloc(m->src, qaws_internal_mul2(sizeof(int), cap));
 		if (!s)
 			return 0;
 		m->src = s;
@@ -193,7 +193,7 @@ static int rp_he_cmp(void const* p, void const* q)
 static rp_he* rp_edges(rp_mesh const* m, unsigned int t0, unsigned int t1, unsigned int* out_n)
 {
 	unsigned int n = 3 * (t1 - t0), f, k;
-	rp_he* E = (rp_he*)qaws_internal_malloc(sizeof(rp_he) * (n ? n : 1));
+	rp_he* E = (rp_he*)qaws_internal_malloc(qaws_internal_mul2(sizeof(rp_he), (n ? n : 1)));
 	*out_n = n;
 	if (!E)
 		return NULL;
@@ -273,7 +273,7 @@ static void rp_union(unsigned int* uf, unsigned int a, unsigned int b)
 static unsigned int rp_merge(rp_work* w, unsigned int* uf)
 {
 	rp_mesh* m = &w->m;
-	double* s = (double*)qaws_internal_zalloc(4 * (size_t)(m->nv ? m->nv : 1), sizeof(double));
+	double* s = (double*)qaws_internal_zalloc(qaws_internal_mul2(4, ((size_t)(m->nv ? m->nv : 1))), sizeof(double));
 	unsigned int v, n = 0;
 	size_t i;
 	if (!s)
@@ -343,8 +343,8 @@ static void rp_clean(rp_work* w)
 		m->fl[n++] = m->fl[f];
 	}
 	m->nt = n;
-	K = (rp_tri_key*)qaws_internal_malloc(sizeof(rp_tri_key) * (n ? n : 1));
-	del = (unsigned char*)qaws_internal_zalloc(n ? n : 1, 1);
+	K = (rp_tri_key*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(rp_tri_key), (n ? n : 1)));
+	del = (unsigned char*)qaws_internal_scratch_zalloc(n ? n : 1, 1);
 	if (!K || !del)
 	{
 		qaws_internal_free(K);
@@ -412,9 +412,9 @@ static qaws_status rp_weld_visit(void* user, unsigned int i, unsigned int j)
 static unsigned int* rp_weld(rp_work* w, unsigned char const* used, double tol)
 {
 	rp_mesh* m = &w->m;
-	unsigned int* uf = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (m->nv ? m->nv : 1));
-	unsigned int* id = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (m->nv ? m->nv : 1));
-	qaws_bp_box* box = (qaws_bp_box*)qaws_internal_malloc(sizeof(qaws_bp_box) * (m->nv ? m->nv : 1));
+	unsigned int* uf = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (m->nv ? m->nv : 1)));
+	unsigned int* id = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (m->nv ? m->nv : 1)));
+	qaws_bp_box* box = (qaws_bp_box*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(qaws_bp_box), (m->nv ? m->nv : 1)));
 	unsigned int v, n = 0, k;
 	rp_weld_ctx c;
 	if (!uf || !id || !box)
@@ -480,8 +480,8 @@ static void rp_ear_clip(rp_work* w, unsigned int const* P, unsigned int n, int s
 {
 	rp_mesh* m = &w->m;
 	double N[3] = { 0, 0, 0 };
-	double* uv = (double*)qaws_internal_malloc(sizeof(double) * 2 * n);
-	unsigned int* id = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * n);
+	double* uv = (double*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(double), 2, n));
+	unsigned int* id = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), n));
 	unsigned int i, cnt = n, ax = 0, k;
 	if (!uv || !id)
 	{
@@ -537,7 +537,7 @@ static void rp_degenerate(rp_work* w, double h)
 	{
 		unsigned int ne, nt0 = m->nt, f, changed = 0, v;
 		rp_he* E = rp_edges(m, 0, nt0, &ne);
-		unsigned int* uf = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (m->nv ? m->nv : 1));
+		unsigned int* uf = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (m->nv ? m->nv : 1)));
 		unsigned char* mark = (unsigned char*)qaws_internal_zalloc(nt0 ? nt0 : 1, 1);   /* 1 touched this pass, 2 removed */
 		if (!E || !uf || !mark)
 		{
@@ -727,8 +727,8 @@ static void rp_stitch(rp_work* w, double tol)
 		rp_stitch_ctx c;
 		if (!E)
 			goto oom;
-		be = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (ne ? ne : 1));
-		isb = (unsigned char*)qaws_internal_zalloc(m->nv ? m->nv : 1, 1);
+		be = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (ne ? ne : 1)));
+		isb = (unsigned char*)qaws_internal_scratch_zalloc(m->nv ? m->nv : 1, 1);
 		if (!be || !isb)
 			goto oom;
 		for (r = 0; r < ne; r = k)
@@ -749,15 +749,15 @@ static void rp_stitch(rp_work* w, double tol)
 		}
 		for (v = 0; v < m->nv; v++)
 			nbv += isb[v];
-		bv = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * nbv);
-		uf = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * m->nv);
+		bv = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), nbv));
+		uf = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), m->nv));
 		welded = (unsigned char*)qaws_internal_zalloc(m->nv, 1);
-		best = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * nbv);
-		bs = (double*)qaws_internal_malloc(sizeof(double) * nbv);
-		bd = (double*)qaws_internal_malloc(sizeof(double) * nbv);
-		box = (qaws_bp_box*)qaws_internal_malloc(sizeof(qaws_bp_box) * (nbv + nbe));
-		sn = (rp_snap*)qaws_internal_malloc(sizeof(rp_snap) * nbv);
-		used = (unsigned char*)qaws_internal_zalloc(nt0, 1);
+		best = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), nbv));
+		bs = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), nbv));
+		bd = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), nbv));
+		box = (qaws_bp_box*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(qaws_bp_box), (nbv + nbe)));
+		sn = (rp_snap*)qaws_internal_malloc(qaws_internal_mul2(sizeof(rp_snap), nbv));
+		used = (unsigned char*)qaws_internal_scratch_zalloc(nt0, 1);
 		if (!bv || !uf || !welded || !best || !bs || !bd || !box || !sn || !used)
 			goto oom;
 		for (v = 0, i = 0; v < m->nv; v++)
@@ -846,10 +846,10 @@ static void rp_stitch(rp_work* w, double tol)
 static void rp_components(rp_work* w, double min_area, unsigned int min_faces)
 {
 	rp_mesh* m = &w->m;
-	unsigned int* uf = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (m->nv ? m->nv : 1));
-	unsigned int* cnt = (unsigned int*)qaws_internal_zalloc(m->nv ? m->nv : 1, sizeof(unsigned int));
-	double* area = (double*)qaws_internal_zalloc(m->nv ? m->nv : 1, sizeof(double));
-	unsigned char* del = (unsigned char*)qaws_internal_zalloc(m->nt ? m->nt : 1, 1);
+	unsigned int* uf = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (m->nv ? m->nv : 1)));
+	unsigned int* cnt = (unsigned int*)qaws_internal_scratch_zalloc(m->nv ? m->nv : 1, sizeof(unsigned int));
+	double* area = (double*)qaws_internal_scratch_zalloc(m->nv ? m->nv : 1, sizeof(double));
+	unsigned char* del = (unsigned char*)qaws_internal_scratch_zalloc(m->nt ? m->nt : 1, 1);
 	unsigned int v, f;
 	if (!uf || !cnt || !area || !del)
 	{
@@ -899,10 +899,10 @@ static unsigned int rp_consistent(rp_work* w, unsigned int* shell, unsigned char
 	rp_mesh* m = &w->m;
 	unsigned int ne, r, k, f, ns = 0;
 	rp_he* E = rp_edges(m, 0, m->nt, &ne);
-	unsigned int* pos = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (ne ? ne : 1));
-	unsigned int* mate = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (ne ? ne : 1));
-	unsigned int* queue = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (m->nt ? m->nt : 1));
-	unsigned char* o = (unsigned char*)qaws_internal_zalloc(m->nt ? m->nt : 1, 1);
+	unsigned int* pos = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (ne ? ne : 1)));
+	unsigned int* mate = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (ne ? ne : 1)));
+	unsigned int* queue = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (m->nt ? m->nt : 1)));
+	unsigned char* o = (unsigned char*)qaws_internal_scratch_zalloc(m->nt ? m->nt : 1, 1);
 	unsigned char* bad = (unsigned char*)qaws_internal_zalloc(m->nt ? m->nt : 1, 1);
 	*out_bad = NULL;
 	if (!E || !pos || !mate || !queue || !o || !bad)
@@ -981,7 +981,7 @@ static void rp_outward(rp_work* w, int remove_nested)
 {
 	rp_mesh* m = &w->m;
 	unsigned int nt = m->nt, ns, s, f, r, k, ne = 0, i;
-	unsigned int *shell = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (nt ? nt : 1)), *off = NULL, *list = NULL, *depth = NULL, *stamp = NULL;
+	unsigned int *shell = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (nt ? nt : 1))), *off = NULL, *list = NULL, *depth = NULL, *stamp = NULL;
 	unsigned char *bad = NULL, *open = NULL, *del = NULL;
 	double *vol = NULL, *box = NULL;
 	rp_he* E = NULL;
@@ -992,13 +992,13 @@ static void rp_outward(rp_work* w, int remove_nested)
 		goto done;
 	E = rp_edges(m, 0, nt, &ne);
 	off = (unsigned int*)qaws_internal_zalloc(ns + 1, sizeof(unsigned int));
-	list = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (nt ? nt : 1));
+	list = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (nt ? nt : 1)));
 	depth = (unsigned int*)qaws_internal_zalloc(ns ? ns : 1, sizeof(unsigned int));
 	stamp = (unsigned int*)qaws_internal_zalloc(m->nv ? m->nv : 1, sizeof(unsigned int));
-	open = (unsigned char*)qaws_internal_zalloc(ns ? ns : 1, 1);
-	del = (unsigned char*)qaws_internal_zalloc(nt ? nt : 1, 1);
-	vol = (double*)qaws_internal_zalloc(ns ? ns : 1, sizeof(double));
-	box = (double*)qaws_internal_malloc(sizeof(double) * 6 * (ns ? ns : 1));
+	open = (unsigned char*)qaws_internal_scratch_zalloc(ns ? ns : 1, 1);
+	del = (unsigned char*)qaws_internal_scratch_zalloc(nt ? nt : 1, 1);
+	vol = (double*)qaws_internal_scratch_zalloc(ns ? ns : 1, sizeof(double));
+	box = (double*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(double), 6, (ns ? ns : 1)));
 	if (!E || !off || !list || !depth || !stamp || !open || !del || !vol || !box)
 		goto oom;
 	for (s = 0; s < ns; s++)
@@ -1129,8 +1129,8 @@ static int rp_sigma_room(rp_fill_ctx* c, unsigned int nv)
 {
 	if (nv > c->scap)
 	{
-		unsigned int cap = 2 * nv;
-		double* s = (double*)qaws_internal_realloc(c->sigma, sizeof(double) * cap);
+		unsigned int cap = qaws_internal_grow(c->scap, nv, 16);
+		double* s = cap ? (double*)qaws_internal_realloc(c->sigma, qaws_internal_mul2(sizeof(double), cap)) : NULL;
 		if (!s)
 			return 0;
 		c->sigma = s;
@@ -1153,12 +1153,12 @@ static void rp_fill_dp(rp_work* w, rp_fill_ctx const* c, unsigned int const* L, 
 {
 	rp_mesh* m = &w->m;
 	size_t nn = (size_t)n * n;
-	double* A = (double*)qaws_internal_malloc(sizeof(double) * nn);          /* the triangulation of [i, k]: its smallest cosine */
-	double* S = (double*)qaws_internal_malloc(sizeof(double) * nn);          /* its area */
-	double* N = (double*)qaws_internal_malloc(sizeof(double) * 3 * nn);      /* its triangle on edge (i, k): the unit normal */
-	double* Ne = (double*)qaws_internal_malloc(sizeof(double) * 3 * n);      /* the faces round the loop */
-	unsigned int* K = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * nn);
-	unsigned int* stack = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * 2 * n);
+	double* A = (double*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(double), nn));          /* the triangulation of [i, k]: its smallest cosine */
+	double* S = (double*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(double), nn));          /* its area */
+	double* N = (double*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(double), 3, nn));      /* its triangle on edge (i, k): the unit normal */
+	double* Ne = (double*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(double), 3, n));      /* the faces round the loop */
+	unsigned int* K = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), nn));
+	unsigned int* stack = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(unsigned int), 2, n));
 	unsigned int i, len, top = 0;
 	if (!A || !S || !N || !Ne || !K || !stack)
 	{
@@ -1286,7 +1286,7 @@ static void rp_relax(rp_work* w, rp_fill_ctx const* c, unsigned int t0)
 	{
 		unsigned int nf, r, flips = 0;
 		rp_he* F = rp_edges(m, t0, m->nt, &nf);
-		unsigned char* touched = (unsigned char*)qaws_internal_zalloc(m->nt - t0 + 1, 1);
+		unsigned char* touched = (unsigned char*)qaws_internal_scratch_zalloc(m->nt - t0 + 1, 1);
 		if (!F || !touched)
 		{
 			qaws_internal_free(F);
@@ -1417,8 +1417,8 @@ static void rp_fair(rp_work* w, unsigned int v0)
 	if (!nfree)
 		return;
 	E = rp_edges(m, 0, m->nt, &ne);
-	deg = (unsigned int*)qaws_internal_zalloc(nv, sizeof(unsigned int));
-	off = (unsigned int*)qaws_internal_zalloc(nv + 1, sizeof(unsigned int));
+	deg = (unsigned int*)qaws_internal_scratch_zalloc(nv, sizeof(unsigned int));
+	off = (unsigned int*)qaws_internal_scratch_zalloc(nv + 1, sizeof(unsigned int));
 	if (!E || !deg || !off)
 		goto oom;
 	for (r = 0; r < ne; r = rp_group_end(E, ne, r))
@@ -1432,10 +1432,10 @@ static void rp_fair(rp_work* w, unsigned int v0)
 		maxd = deg[v] > maxd ? deg[v] : maxd;
 		deg[v] = 0;
 	}
-	adj = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (off[nv] ? off[nv] : 1));
-	fc = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (maxd + 1));
-	fw = (double*)qaws_internal_malloc(sizeof(double) * (maxd + 1));
-	b = (double*)qaws_internal_zalloc(3 * (size_t)nfree, sizeof(double));
+	adj = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (off[nv] ? off[nv] : 1)));
+	fc = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (maxd + 1)));
+	fw = (double*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(double), (maxd + 1)));
+	b = (double*)qaws_internal_scratch_zalloc(qaws_internal_mul2(3, (size_t)nfree), sizeof(double));
 	if (!adj || !fc || !fw || !b)
 		goto oom;
 	for (r = 0; r < ne; r = rp_group_end(E, ne, r))
@@ -1474,10 +1474,10 @@ static void rp_fair(rp_work* w, unsigned int v0)
 			else
 				for (k = 0; k < 3; k++)
 					rh[k] += RP_X(m, adj[i])[k] / (fmax(rp_dist(RP_X(m, v), RP_X(m, adj[i])), 1e-300) * inv);
-		if (nt + nfc * nfc > ct)
+		if (nt + (size_t)nfc * nfc > ct)
 		{
-			unsigned int cap = 2 * (nt + nfc * nfc);
-			rp_trip* g = (rp_trip*)qaws_internal_realloc(T, sizeof(rp_trip) * cap);
+			unsigned int cap = qaws_internal_grow(ct, nt + (size_t)nfc * nfc, 16);
+			rp_trip* g = cap ? (rp_trip*)qaws_internal_realloc(T, qaws_internal_mul2(sizeof(rp_trip), cap)) : NULL;
 			if (!g)
 				goto oom;
 			T = g;
@@ -1496,11 +1496,11 @@ static void rp_fair(rp_work* w, unsigned int v0)
 		}
 	}
 	qsort(T, nt, sizeof(rp_trip), rp_trip_cmp);
-	rp = (unsigned int*)qaws_internal_zalloc(nfree + 1, sizeof(unsigned int));
-	col = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (nt ? nt : 1));
-	val = (double*)qaws_internal_malloc(sizeof(double) * (nt ? nt : 1));
-	xyz = (double*)qaws_internal_malloc(sizeof(double) * 3 * (size_t)nfree);
-	sol = (double*)qaws_internal_malloc(sizeof(double) * (size_t)nfree);
+	rp = (unsigned int*)qaws_internal_scratch_zalloc(nfree + 1, sizeof(unsigned int));
+	col = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (nt ? nt : 1)));
+	val = (double*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(double), (nt ? nt : 1)));
+	xyz = (double*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(double), 3, (size_t)nfree));
+	sol = (double*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(double), (size_t)nfree));
 	if (!rp || !col || !val || !xyz || !sol)
 		goto oom;
 	for (i = 0, j = 0; i < nt; i++)
@@ -1549,7 +1549,7 @@ static void rp_fill(rp_work* w, double perimeter, unsigned int flags, unsigned i
 	memset(&c, 0, sizeof c);
 	c.sigma = (double*)qaws_internal_zalloc(nv0 ? nv0 : 1, sizeof(double));
 	c.scap = nv0 ? nv0 : 1;
-	cnt = (unsigned int*)qaws_internal_zalloc(nv0 ? nv0 : 1, sizeof(unsigned int));
+	cnt = (unsigned int*)qaws_internal_scratch_zalloc(nv0 ? nv0 : 1, sizeof(unsigned int));
 	if (!E || !c.sigma || !cnt)
 		goto oom;
 	c.E = E;
@@ -1569,14 +1569,14 @@ static void rp_fill(rp_work* w, double perimeter, unsigned int flags, unsigned i
 	}
 	for (v = 0; v < nv0; v++)
 		c.sigma[v] = cnt[v] ? c.sigma[v] / cnt[v] : 0;
-	be = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (nb ? nb : 1));
-	start = (unsigned int*)qaws_internal_zalloc(nv0 + 1, sizeof(unsigned int));
-	cur = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (nv0 + 1));
-	ord = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (nb ? nb : 1));
-	inpath = (unsigned int*)qaws_internal_zalloc(nv0 ? nv0 : 1, sizeof(unsigned int));
-	pv = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (nb + 1));
-	pr = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (nb + 1));
-	c.O = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (nb + 1));
+	be = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (nb ? nb : 1)));
+	start = (unsigned int*)qaws_internal_scratch_zalloc(nv0 + 1, sizeof(unsigned int));
+	cur = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (nv0 + 1)));
+	ord = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (nb ? nb : 1)));
+	inpath = (unsigned int*)qaws_internal_scratch_zalloc(nv0 ? nv0 : 1, sizeof(unsigned int));
+	pv = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (nb + 1)));
+	pr = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (nb + 1)));
+	c.O = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (nb + 1)));
 	used = (unsigned char*)qaws_internal_zalloc(nb ? nb : 1, 1);
 	if (!be || !start || !cur || !ord || !inpath || !pv || !pr || !c.O || !used)
 		goto oom;
@@ -1699,8 +1699,8 @@ static void rp_measure(rp_work* w)
 static qaws_status rp_output(rp_work* w, qaws_mesh_3d** out)
 {
 	rp_mesh* m = &w->m;
-	unsigned int* map = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (m->nv ? m->nv : 1));
-	double* x = (double*)qaws_internal_malloc(sizeof(double) * 3 * (m->nv ? m->nv : 1));
+	unsigned int* map = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (m->nv ? m->nv : 1)));
+	double* x = (double*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(double), 3, (m->nv ? m->nv : 1)));
 	unsigned int v, n = 0, a;
 	size_t i;
 	qaws_status st = QAWS_STATUS_ALLOCATION_FAILURE;
@@ -1793,10 +1793,10 @@ qaws_status qaws_mesh_repair(qaws_scalar const* positions, unsigned int vertex_c
 	memset(&w, 0, sizeof w);
 	w.r = report;
 	m->nv = m->capv = vertex_count;
-	m->x = (double*)qaws_internal_malloc(sizeof(double) * 3 * (vertex_count ? vertex_count : 1));
-	used = (unsigned char*)qaws_internal_zalloc(vertex_count ? vertex_count : 1, 1);
-	stamp = (unsigned int*)qaws_internal_zalloc(vertex_count ? vertex_count : 1, sizeof(unsigned int));
-	poly = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * smax);
+	m->x = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), 3, (vertex_count ? vertex_count : 1)));
+	used = (unsigned char*)qaws_internal_scratch_zalloc(vertex_count ? vertex_count : 1, 1);
+	stamp = (unsigned int*)qaws_internal_scratch_zalloc(vertex_count ? vertex_count : 1, sizeof(unsigned int));
+	poly = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), smax));
 	if (!m->x || !used || !stamp || !poly)
 		goto oom;
 	for (i = 0; i < 3 * (size_t)vertex_count; i++)
@@ -1868,7 +1868,7 @@ qaws_status qaws_mesh_repair(qaws_scalar const* positions, unsigned int vertex_c
 		rp_components(&w, (double)d.min_component_area, d.min_component_faces);
 	if (w.st == QAWS_STATUS_OK && perim >= 0)
 	{
-		shell = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (m->nt ? m->nt : 1));
+		shell = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (m->nt ? m->nt : 1)));
 		if (!shell)
 			goto oom;
 		rp_consistent(&w, shell, &bad);

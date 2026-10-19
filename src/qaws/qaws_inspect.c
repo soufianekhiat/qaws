@@ -2050,8 +2050,8 @@ qaws_status qaws_curve_find_self_intersections_2d(
 	range_min = curve->parameter_range.min_value;
 	range_max = curve->parameter_range.max_value;
 
-	params = (qaws_scalar *)qaws_internal_malloc(n * sizeof(qaws_scalar));
-	pts = (qaws_vec2 *)qaws_internal_malloc(n * sizeof(qaws_vec2));
+	params = (qaws_scalar *)qaws_internal_scratch_malloc(qaws_internal_mul2(n, sizeof(qaws_scalar)));
+	pts = (qaws_vec2 *)qaws_internal_scratch_malloc(qaws_internal_mul2(n, sizeof(qaws_vec2)));
 	if (!params || !pts) { qaws_internal_free(params); qaws_internal_free(pts); return QAWS_STATUS_ALLOCATION_FAILURE; }
 
 	/* Dense sampling */
@@ -2156,8 +2156,8 @@ qaws_status qaws_curve_find_self_intersections_3d(
 	range_min = curve->parameter_range.min_value;
 	range_max = curve->parameter_range.max_value;
 
-	params = (qaws_scalar *)qaws_internal_malloc(n * sizeof(qaws_scalar));
-	pts = (qaws_vec3 *)qaws_internal_malloc(n * sizeof(qaws_vec3));
+	params = (qaws_scalar *)qaws_internal_scratch_malloc(qaws_internal_mul2(n, sizeof(qaws_scalar)));
+	pts = (qaws_vec3 *)qaws_internal_scratch_malloc(qaws_internal_mul2(n, sizeof(qaws_vec3)));
 	if (!params || !pts) { qaws_internal_free(params); qaws_internal_free(pts); return QAWS_STATUS_ALLOCATION_FAILURE; }
 
 	for (i = 0; i < n; ++i)
@@ -2259,10 +2259,10 @@ qaws_status qaws_curve_find_intersections_2d(
 	b_min = curve_b->parameter_range.min_value;
 	b_max = curve_b->parameter_range.max_value;
 
-	params_a = (qaws_scalar *)qaws_internal_malloc(na * sizeof(qaws_scalar));
-	pts_a = (qaws_vec2 *)qaws_internal_malloc(na * sizeof(qaws_vec2));
-	params_b = (qaws_scalar *)qaws_internal_malloc(nb * sizeof(qaws_scalar));
-	pts_b = (qaws_vec2 *)qaws_internal_malloc(nb * sizeof(qaws_vec2));
+	params_a = (qaws_scalar *)qaws_internal_scratch_malloc(qaws_internal_mul2(na, sizeof(qaws_scalar)));
+	pts_a = (qaws_vec2 *)qaws_internal_scratch_malloc(qaws_internal_mul2(na, sizeof(qaws_vec2)));
+	params_b = (qaws_scalar *)qaws_internal_scratch_malloc(qaws_internal_mul2(nb, sizeof(qaws_scalar)));
+	pts_b = (qaws_vec2 *)qaws_internal_scratch_malloc(qaws_internal_mul2(nb, sizeof(qaws_vec2)));
 	if (!params_a || !pts_a || !params_b || !pts_b)
 	{
 		qaws_internal_free(params_a); qaws_internal_free(pts_a); qaws_internal_free(params_b); qaws_internal_free(pts_b);
@@ -2365,10 +2365,10 @@ qaws_status qaws_curve_find_intersections_3d(
 	b_min = curve_b->parameter_range.min_value;
 	b_max = curve_b->parameter_range.max_value;
 
-	params_a = (qaws_scalar *)qaws_internal_malloc(na * sizeof(qaws_scalar));
-	pts_a = (qaws_vec3 *)qaws_internal_malloc(na * sizeof(qaws_vec3));
-	params_b = (qaws_scalar *)qaws_internal_malloc(nb * sizeof(qaws_scalar));
-	pts_b = (qaws_vec3 *)qaws_internal_malloc(nb * sizeof(qaws_vec3));
+	params_a = (qaws_scalar *)qaws_internal_scratch_malloc(qaws_internal_mul2(na, sizeof(qaws_scalar)));
+	pts_a = (qaws_vec3 *)qaws_internal_scratch_malloc(qaws_internal_mul2(na, sizeof(qaws_vec3)));
+	params_b = (qaws_scalar *)qaws_internal_scratch_malloc(qaws_internal_mul2(nb, sizeof(qaws_scalar)));
+	pts_b = (qaws_vec3 *)qaws_internal_scratch_malloc(qaws_internal_mul2(nb, sizeof(qaws_vec3)));
 	if (!params_a || !pts_a || !params_b || !pts_b)
 	{
 		qaws_internal_free(params_a); qaws_internal_free(pts_a); qaws_internal_free(params_b); qaws_internal_free(pts_b);
@@ -3874,10 +3874,10 @@ qaws_status qaws_surface_tessellate(
 	/* Allocate work structures */
 	stack_capacity = 4096;
 	leaf_capacity = 4096;
-	stack = (qaws_tess_quad *)qaws_internal_malloc(
-		stack_capacity * sizeof(qaws_tess_quad));
-	leaves = (qaws_tess_leaf *)qaws_internal_malloc(
-		leaf_capacity * sizeof(qaws_tess_leaf));
+	stack = (qaws_tess_quad *)qaws_internal_scratch_malloc(
+		qaws_internal_mul2(stack_capacity, sizeof(qaws_tess_quad)));
+	leaves = (qaws_tess_leaf *)qaws_internal_scratch_malloc(
+		qaws_internal_mul2(leaf_capacity, sizeof(qaws_tess_leaf)));
 	if (!stack || !leaves)
 	{
 		qaws_internal_free(stack);
@@ -4012,7 +4012,7 @@ qaws_status qaws_surface_tessellate(
 		{
 			unsigned int new_cap = stack_capacity * 2;
 			qaws_tess_quad* new_stack = (qaws_tess_quad*)qaws_internal_realloc(
-				stack, new_cap * sizeof(qaws_tess_quad));
+				stack, qaws_internal_mul2(new_cap, sizeof(qaws_tess_quad)));
 			if (!new_stack)
 			{
 				qaws_internal_free(stack); qaws_internal_free(leaves);
@@ -4059,7 +4059,7 @@ qaws_status qaws_surface_tessellate(
 			{
 				unsigned int new_cap = leaf_capacity * 2;
 				qaws_tess_leaf* new_leaves = (qaws_tess_leaf*)qaws_internal_realloc(
-					leaves, new_cap * sizeof(qaws_tess_leaf));
+					leaves, qaws_internal_mul2(new_cap, sizeof(qaws_tess_leaf)));
 				if (!new_leaves)
 				{
 					qaws_internal_free(stack); qaws_internal_free(leaves);
@@ -4214,8 +4214,8 @@ qaws_status qaws_surface_project_curve(
 	n_samples = sample_count > 0 ? sample_count : 128;
 	range = qaws_curve_get_parameter_range(curve);
 
-	params = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * (size_t)n_samples);
-	uv_coords = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * (size_t)n_samples * 2);
+	params = (qaws_scalar*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(qaws_scalar), (size_t)n_samples));
+	uv_coords = (qaws_scalar*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(qaws_scalar), (size_t)n_samples, 2));
 	if (!params || !uv_coords)
 	{
 		qaws_internal_free(params); qaws_internal_free(uv_coords);
@@ -4417,7 +4417,7 @@ static qaws_status create_path_bspline(
 	}
 
 	/* Generate uniform parameters [0, 1] */
-	params = (qaws_scalar*)qaws_internal_malloc(point_count * sizeof(qaws_scalar));
+	params = (qaws_scalar*)qaws_internal_scratch_malloc(qaws_internal_mul2(point_count, sizeof(qaws_scalar)));
 	if (!params) return QAWS_STATUS_ALLOCATION_FAILURE;
 	for (i = 0; i < point_count; i++)
 		params[i] = (qaws_scalar)i / (qaws_scalar)(point_count - 1);
@@ -4545,7 +4545,7 @@ qaws_status qaws_surface_compute_geodesic(
 	if (dist_target < QAWS_LITERAL(1e-10))
 		return QAWS_STATUS_DEGENERATE_CURVE;
 
-	path_coords = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * (size_t)(n_steps + 2) * 3);
+	path_coords = (qaws_scalar*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(qaws_scalar), ((size_t)(n_steps + 2)), 3));
 	if (!path_coords)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 
@@ -4776,7 +4776,7 @@ static qaws_status geodesic_tessellate_and_build(
 
 	/* Determine grid resolution */
 	if (tessellation_desc && tessellation_desc->max_depth > 0)
-		grid_n = 1u << tessellation_desc->max_depth; /* 2^depth */
+		grid_n = tessellation_desc->max_depth >= 8 ? 256u : 1u << tessellation_desc->max_depth; /* 2^depth (capped below; no shift past the width) */
 	else
 		grid_n = 32; /* default 32x32 grid */
 
@@ -4787,10 +4787,10 @@ static qaws_status geodesic_tessellate_and_build(
 	tri_count = grid_n * grid_n * 2;
 	idx_count = tri_count * 3;
 
-	verts = (qaws_tessellation_vertex*)qaws_internal_malloc(vert_count * sizeof(qaws_tessellation_vertex));
-	indices = (unsigned int*)qaws_internal_malloc(idx_count * sizeof(unsigned int));
-	positions = (qaws_scalar*)qaws_internal_malloc(vert_count * 3 * sizeof(qaws_scalar));
-	uvs = (qaws_scalar*)qaws_internal_malloc(vert_count * 2 * sizeof(qaws_scalar));
+	verts = (qaws_tessellation_vertex*)qaws_internal_malloc(qaws_internal_mul2(vert_count, sizeof(qaws_tessellation_vertex)));
+	indices = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(idx_count, sizeof(unsigned int)));
+	positions = (qaws_scalar*)qaws_internal_malloc(qaws_internal_mul3(vert_count, 3, sizeof(qaws_scalar)));
+	uvs = (qaws_scalar*)qaws_internal_malloc(qaws_internal_mul3(vert_count, 2, sizeof(qaws_scalar)));
 
 	if (!verts || !indices || !positions || !uvs)
 	{
@@ -4925,7 +4925,7 @@ qaws_status qaws_surface_compute_geodesic_flip(
 	}
 
 	/* Dijkstra shortest path */
-	path = (unsigned int*)qaws_internal_malloc(vert_count * sizeof(unsigned int));
+	path = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(vert_count, sizeof(unsigned int)));
 	if (!path)
 	{
 		qaws_internal_mesh_destroy(&mesh);
@@ -4957,8 +4957,8 @@ qaws_status qaws_surface_compute_geodesic_flip(
 		qaws_scalar* uv_pts = NULL; /* 2 * out_count */
 
 		out_count = path_count;
-		pts = (qaws_scalar*)qaws_internal_malloc(out_count * 3 * sizeof(qaws_scalar));
-		uv_pts = (qaws_scalar*)qaws_internal_malloc(out_count * 2 * sizeof(qaws_scalar));
+		pts = (qaws_scalar*)qaws_internal_scratch_malloc(qaws_internal_mul3(out_count, 3, sizeof(qaws_scalar)));
+		uv_pts = (qaws_scalar*)qaws_internal_scratch_malloc(qaws_internal_mul3(out_count, 2, sizeof(qaws_scalar)));
 		if (!pts || !uv_pts)
 		{
 			qaws_internal_free(pts); qaws_internal_free(uv_pts);
@@ -5353,7 +5353,7 @@ static qaws_status heat_solve_distances(
 	memset(&L_reg, 0, sizeof(L_reg));
 
 	/* Build Laplacian and mass matrix */
-	mass_diag = (qaws_scalar*)qaws_internal_malloc(vert_count * sizeof(qaws_scalar));
+	mass_diag = (qaws_scalar*)qaws_internal_scratch_malloc(qaws_internal_mul2(vert_count, sizeof(qaws_scalar)));
 	if (!mass_diag) return QAWS_STATUS_ALLOCATION_FAILURE;
 
 	status = qaws_internal_build_laplacian(mesh, &L, mass_diag);
@@ -5407,7 +5407,7 @@ static qaws_status heat_solve_distances(
 	}
 
 	heat = (qaws_scalar*)qaws_internal_zalloc(vert_count, sizeof(qaws_scalar));
-	rhs = (qaws_scalar*)qaws_internal_zalloc(vert_count, sizeof(qaws_scalar));
+	rhs = (qaws_scalar*)qaws_internal_scratch_zalloc(vert_count, sizeof(qaws_scalar));
 	if (!heat || !rhs) { status = QAWS_STATUS_ALLOCATION_FAILURE; goto cleanup; }
 
 	rhs[src_v] = QAWS_ONE;
@@ -5417,7 +5417,7 @@ static qaws_status heat_solve_distances(
 
 	/* Step II: Per-triangle gradient X = -grad(u) / |grad(u)| */
 	/* Step III: Integrated divergence div(X) at each vertex */
-	div_X = (qaws_scalar*)qaws_internal_zalloc(vert_count, sizeof(qaws_scalar));
+	div_X = (qaws_scalar*)qaws_internal_scratch_zalloc(vert_count, sizeof(qaws_scalar));
 	if (!div_X) { status = QAWS_STATUS_ALLOCATION_FAILURE; goto cleanup; }
 
 	for (ti = 0; ti < mesh->tri_count; ti++)
@@ -5702,7 +5702,7 @@ qaws_status qaws_surface_compute_geodesic_heat(
 		unsigned int entry_edge; /* edge we entered from (UINT_MAX = none) */
 		unsigned int trace_iter;
 
-		trace_coords = (qaws_scalar*)qaws_internal_malloc(max_trace * 3 * sizeof(qaws_scalar));
+		trace_coords = (qaws_scalar*)qaws_internal_scratch_malloc(qaws_internal_mul3(max_trace, 3, sizeof(qaws_scalar)));
 		if (!trace_coords) { status = QAWS_STATUS_ALLOCATION_FAILURE; goto cleanup; }
 
 		/* Find triangle containing (end_u, end_v) via UV barycentric test */
@@ -5986,7 +5986,7 @@ qaws_status qaws_surface_compute_geodesic_heat(
 		}
 
 		/* Reverse trace (end→start → start→end), fix exact endpoints */
-		path_coords = (qaws_scalar*)qaws_internal_malloc(trace_count * 3 * sizeof(qaws_scalar));
+		path_coords = (qaws_scalar*)qaws_internal_scratch_malloc(qaws_internal_mul3(trace_count, 3, sizeof(qaws_scalar)));
 		if (!path_coords) { qaws_internal_free(trace_coords); status = QAWS_STATUS_ALLOCATION_FAILURE; goto cleanup; }
 		{
 			unsigned int pi;

@@ -276,8 +276,8 @@ qaws_status qaws_exact_bernstein_isolate(qaws_exact_int const* b, unsigned int n
 		TRY(push_root(out, capacity, &count, 0, 0, 1));
 	if (qaws_exact_int_is_zero(&b[n]))
 		TRY(push_root(out, capacity, &count, 1, 0, 1));
-	stack = (qaws_exact_int*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_exact_int) * (n + 1) * max_items));
-	items = (root_item*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(root_item) * max_items));
+	stack = (qaws_exact_int*)qaws_internal_alloc(NULL, qaws_internal_mul3(sizeof(qaws_exact_int), (n + 1), max_items));
+	items = (root_item*)qaws_internal_alloc(NULL, qaws_internal_mul2(sizeof(root_item), max_items));
 	if (!stack || !items)
 		st = QAWS_STATUS_ALLOCATION_FAILURE;
 	if (st == QAWS_STATUS_OK)

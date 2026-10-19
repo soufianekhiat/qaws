@@ -54,7 +54,7 @@ static qaws_status reverse_bezier(
 	qaws_status status;
 	unsigned int i;
 
-	rev_cp = (qaws_scalar *)qaws_internal_malloc(sizeof(qaws_scalar) * (size_t)(n * dim));
+	rev_cp = (qaws_scalar *)qaws_internal_malloc(qaws_internal_mul3(sizeof(qaws_scalar), n, dim));
 	if (!rev_cp)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 
@@ -91,11 +91,11 @@ static qaws_status reverse_hermite(
 	qaws_status status;
 	unsigned int i, c;
 
-	rev_pts = (qaws_scalar *)qaws_internal_malloc(sizeof(qaws_scalar) * (size_t)(n * dim));
+	rev_pts = (qaws_scalar *)qaws_internal_malloc(qaws_internal_mul3(sizeof(qaws_scalar), n, dim));
 	if (!rev_pts)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 
-	rev_der = (qaws_scalar *)qaws_internal_malloc(sizeof(qaws_scalar) * (size_t)(n * dim));
+	rev_der = (qaws_scalar *)qaws_internal_malloc(qaws_internal_mul3(sizeof(qaws_scalar), n, dim));
 	if (!rev_der) {
 		qaws_internal_free(rev_pts);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
@@ -140,7 +140,7 @@ static qaws_status reverse_catmull_rom(
 	qaws_status status;
 	unsigned int i;
 
-	rev_cp = (qaws_scalar *)qaws_internal_malloc(sizeof(qaws_scalar) * (size_t)(n * dim));
+	rev_cp = (qaws_scalar *)qaws_internal_malloc(qaws_internal_mul3(sizeof(qaws_scalar), n, dim));
 	if (!rev_cp)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 
@@ -183,11 +183,11 @@ static qaws_status reverse_bspline(
 	qaws_scalar knot_min;
 	qaws_scalar knot_max;
 
-	rev_cp = (qaws_scalar *)qaws_internal_malloc(sizeof(qaws_scalar) * (size_t)(n * dim));
+	rev_cp = (qaws_scalar *)qaws_internal_malloc(qaws_internal_mul3(sizeof(qaws_scalar), n, dim));
 	if (!rev_cp)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 
-	rev_knots = (qaws_scalar *)qaws_internal_malloc(sizeof(qaws_scalar) * (size_t)kn);
+	rev_knots = (qaws_scalar *)qaws_internal_malloc(qaws_internal_mul2(sizeof(qaws_scalar), (size_t)kn));
 	if (!rev_knots) {
 		qaws_internal_free(rev_cp);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
@@ -241,17 +241,17 @@ static qaws_status reverse_nurbs(
 	qaws_scalar knot_min;
 	qaws_scalar knot_max;
 
-	rev_cp = (qaws_scalar *)qaws_internal_malloc(sizeof(qaws_scalar) * (size_t)(n * dim));
+	rev_cp = (qaws_scalar *)qaws_internal_malloc(qaws_internal_mul3(sizeof(qaws_scalar), n, dim));
 	if (!rev_cp)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 
-	rev_knots = (qaws_scalar *)qaws_internal_malloc(sizeof(qaws_scalar) * (size_t)kn);
+	rev_knots = (qaws_scalar *)qaws_internal_malloc(qaws_internal_mul2(sizeof(qaws_scalar), (size_t)kn));
 	if (!rev_knots) {
 		qaws_internal_free(rev_cp);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 
-	rev_weights = (qaws_scalar *)qaws_internal_malloc(sizeof(qaws_scalar) * (size_t)wn);
+	rev_weights = (qaws_scalar *)qaws_internal_malloc(qaws_internal_mul2(sizeof(qaws_scalar), (size_t)wn));
 	if (!rev_weights) {
 		qaws_internal_free(rev_knots);
 		qaws_internal_free(rev_cp);
@@ -312,11 +312,11 @@ static qaws_status reverse_trajectory(
 	qaws_scalar time_min;
 	qaws_scalar time_max;
 
-	rev_pos = (qaws_scalar *)qaws_internal_malloc(sizeof(qaws_scalar) * (size_t)(n * dim));
+	rev_pos = (qaws_scalar *)qaws_internal_malloc(qaws_internal_mul3(sizeof(qaws_scalar), n, dim));
 	if (!rev_pos)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 
-	rev_times = (qaws_scalar *)qaws_internal_malloc(sizeof(qaws_scalar) * (size_t)n);
+	rev_times = (qaws_scalar *)qaws_internal_malloc(qaws_internal_mul2(sizeof(qaws_scalar), (size_t)n));
 	if (!rev_times) {
 		qaws_internal_free(rev_pos);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
@@ -337,7 +337,7 @@ static qaws_status reverse_trajectory(
 	/* Reverse and negate velocities */
 	if (vel_n > 0 && impl->key_velocities) {
 		rev_vel = (qaws_scalar *)qaws_internal_malloc(
-			sizeof(qaws_scalar) * (size_t)(vel_n * dim));
+			qaws_internal_mul3(sizeof(qaws_scalar), vel_n, dim));
 		if (!rev_vel) {
 			qaws_internal_free(rev_times);
 			qaws_internal_free(rev_pos);
@@ -352,7 +352,7 @@ static qaws_status reverse_trajectory(
 	/* Reverse and negate accelerations */
 	if (acc_n > 0 && impl->key_accelerations) {
 		rev_acc = (qaws_scalar *)qaws_internal_malloc(
-			sizeof(qaws_scalar) * (size_t)(acc_n * dim));
+			qaws_internal_mul3(sizeof(qaws_scalar), acc_n, dim));
 		if (!rev_acc) {
 			qaws_internal_free(rev_vel);
 			qaws_internal_free(rev_times);
@@ -410,7 +410,7 @@ static qaws_status reverse_yuksel(
 			curve->parameter_range.min_value,
 			out_reversed);
 
-	rev_cp = (qaws_scalar *)qaws_internal_malloc(sizeof(qaws_scalar) * (size_t)(n * dim));
+	rev_cp = (qaws_scalar *)qaws_internal_malloc(qaws_internal_mul3(sizeof(qaws_scalar), n, dim));
 	if (!rev_cp)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 
@@ -447,7 +447,7 @@ static qaws_status reverse_rational_bezier(
 	qaws_status status;
 	unsigned int i;
 
-	buf = (qaws_scalar *)qaws_internal_malloc(sizeof(qaws_scalar) * (size_t)(n * (dim + 1)));
+	buf = (qaws_scalar *)qaws_internal_malloc(qaws_internal_mul3(sizeof(qaws_scalar), n, (dim + 1)));
 	if (!buf)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 
@@ -486,7 +486,7 @@ static qaws_status reverse_polynomial(
 	qaws_status status;
 	unsigned int i, j, k;
 
-	co = (qaws_scalar *)qaws_internal_malloc(sizeof(qaws_scalar) * (size_t)((n + 1) * dim));
+	co = (qaws_scalar *)qaws_internal_malloc(qaws_internal_mul3(sizeof(qaws_scalar), (n + 1), dim));
 	if (!co)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	memcpy(co, impl->coefficients, sizeof(qaws_scalar) * (size_t)((n + 1) * dim));
@@ -523,7 +523,7 @@ static qaws_status reverse_arc(
 	qaws_status status;
 	unsigned int i;
 
-	seg = (qaws_arc_segment *)qaws_internal_malloc(sizeof(qaws_arc_segment) * (size_t)n);
+	seg = (qaws_arc_segment *)qaws_internal_malloc(qaws_internal_mul2(sizeof(qaws_arc_segment), (size_t)n));
 	if (!seg)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 
@@ -580,7 +580,7 @@ static qaws_status reverse_composite(
 	qaws_status status = QAWS_STATUS_OK;
 	unsigned int i, made = 0;
 
-	seg = (qaws_curve **)qaws_internal_malloc(sizeof(qaws_curve *) * (size_t)n);
+	seg = (qaws_curve **)qaws_internal_malloc(qaws_internal_mul2(sizeof(qaws_curve *), (size_t)n));
 	if (!seg)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 

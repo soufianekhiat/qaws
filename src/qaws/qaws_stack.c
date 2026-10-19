@@ -206,7 +206,7 @@ static qaws_status sk_blend_struct(sk_struct const* tpl, qaws_curve const* const
 	double const* w, unsigned int n, qaws_curve** out)
 {
 	unsigned int dim = 2, i, k;
-	qaws_scalar* cp = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * (tpl->n * dim + tpl->n));
+	qaws_scalar* cp = (qaws_scalar*)qaws_internal_malloc(qaws_internal_mul2(sizeof(qaws_scalar), (tpl->n * dim + tpl->n)));
 	qaws_scalar* wt;
 	qaws_status s;
 	if (!cp)
@@ -292,8 +292,8 @@ static void sk_resample(qaws_curve const* c, unsigned int m, double* out)
 {
 	enum { DENSE = 4096 };
 	static double const dummy = 0;
-	double* acc = (double*)qaws_internal_malloc(sizeof(double) * (DENSE + 1));
-	double* xy = (double*)qaws_internal_malloc(sizeof(double) * 2 * (DENSE + 1));
+	double* acc = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), (DENSE + 1)));
+	double* xy = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), 2, (DENSE + 1)));
 	qaws_range r = qaws_curve_get_parameter_range(c);
 	unsigned int i, j = 0;
 	(void)dummy;
@@ -324,7 +324,7 @@ static qaws_status sk_blend_resampled(qaws_curve const* const* cs, double const*
 	qaws_curve** out)
 {
 	unsigned int m = SK_RESAMPLE, i, k, ref = SK_NONE;
-	double* all = (double*)qaws_internal_malloc(sizeof(double) * 2 * m * (n + 1));
+	double* all = (double*)qaws_internal_malloc(qaws_internal_mul4(sizeof(double), 2, m, (n + 1)));
 	double* blend = all + 2 * m * n;
 	qaws_scalar* sp;
 	qaws_catmull_rom_desc d;
@@ -378,7 +378,7 @@ static qaws_status sk_blend_resampled(qaws_curve const* const* cs, double const*
 			}
 			if (bs)
 			{
-				double* tmp = (double*)qaws_internal_malloc(sizeof(double) * 2 * m);
+				double* tmp = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), 2, m));
 				if (!tmp) { qaws_internal_free(all); return QAWS_STATUS_ALLOCATION_FAILURE; }
 				for (q = 0; q < m; q++) { tmp[2 * q] = p[2 * ((q + bs) % m)]; tmp[2 * q + 1] = p[2 * ((q + bs) % m) + 1]; }
 				memcpy(p, tmp, sizeof(double) * 2 * m);
@@ -393,7 +393,7 @@ static qaws_status sk_blend_resampled(qaws_curve const* const* cs, double const*
 			v += w[i] * all[2 * m * i + k];
 		blend[k] = v;
 	}
-	sp = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * 2 * m);
+	sp = (qaws_scalar*)qaws_internal_malloc(qaws_internal_mul3(sizeof(qaws_scalar), 2, m));
 	if (!sp) { qaws_internal_free(all); return QAWS_STATUS_ALLOCATION_FAILURE; }
 	for (k = 0; k < 2 * m; k++) sp[k] = (qaws_scalar)blend[k];
 	memset(&d, 0, sizeof(d));
@@ -427,7 +427,7 @@ static qaws_status sk_match(qaws_stack_2d const* st, unsigned int const* idx, do
 			if (L->paths[j].curve_count != 1)
 				return QAWS_STATUS_OK;
 	}
-	pairs = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (n * m + 1));
+	pairs = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (n * m + 1)));
 	blended = (qaws_curve**)qaws_internal_zalloc(m + 1, sizeof(qaws_curve*));
 	views = (qaws_curve const**)qaws_internal_zalloc(m + 1, sizeof(qaws_curve*));
 	paths = (qaws_path_2d*)qaws_internal_zalloc(m + 1, sizeof(qaws_path_2d));
@@ -547,7 +547,7 @@ static qaws_status sk_level_signs(qaws_stack_level const* L, qaws_fill_rule fr, 
 	{
 		double y = g->y0 + g->h * j;
 		/* crossings of the row (half-open in y), as (x, +1 / -1) */
-		double* xs = (double*)qaws_internal_malloc(sizeof(double) * 2 * (ns + 1));
+		double* xs = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), 2, (ns + 1)));
 		unsigned int nc = 0, a, b;
 		int wsum = 0;
 		if (!xs) { qaws_internal_free(segs); return QAWS_STATUS_ALLOCATION_FAILURE; }
@@ -598,6 +598,8 @@ static qaws_status sk_distance(qaws_stack_2d const* st, unsigned int const* idx,
 	qaws_closest_point* cp = NULL;
 	unsigned char* ins = NULL;
 	qaws_status s = QAWS_STATUS_OK;
+	if (G > 16384)   /* (G + 2)^2 nodes and 2 (G + 1)(G + 2) edges, times 2 coordinates, count in unsigned int */
+		return QAWS_STATUS_INVALID_ARGUMENT;
 	memset(&g, 0, sizeof(g));
 	for (i = 0; i < n; i++)
 	{
@@ -624,8 +626,8 @@ static qaws_status sk_distance(qaws_stack_2d const* st, unsigned int const* idx,
 	g.nx = g.ny = G + 1;
 	nn = (g.nx + 1) * (g.ny + 1);
 	g.f = (double*)qaws_internal_zalloc(nn, sizeof(double));
-	pts = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * 2 * nn);
-	cp = (qaws_closest_point*)qaws_internal_malloc(sizeof(qaws_closest_point) * nn);
+	pts = (qaws_scalar*)qaws_internal_malloc(qaws_internal_mul3(sizeof(qaws_scalar), 2, nn));
+	cp = (qaws_closest_point*)qaws_internal_malloc(qaws_internal_mul2(sizeof(qaws_closest_point), nn));
 	ins = (unsigned char*)qaws_internal_malloc(nn);
 	if (!g.f || !pts || !cp || !ins)
 	{
@@ -647,7 +649,7 @@ static qaws_status sk_distance(qaws_stack_2d const* st, unsigned int const* idx,
 		qaws_curve_batch_desc bd;
 		qaws_curve_set* set = NULL;
 		for (q = 0; q < L->path_count; q++) nc += L->paths[q].curve_count;
-		curves = (qaws_curve const**)qaws_internal_malloc(sizeof(qaws_curve*) * (nc + 1));
+		curves = (qaws_curve const**)qaws_internal_malloc(qaws_internal_mul2(sizeof(qaws_curve*), (nc + 1)));
 		if (!curves) { s = QAWS_STATUS_ALLOCATION_FAILURE; break; }
 		nc = 0;
 		for (q = 0; q < L->path_count; q++)
@@ -682,8 +684,8 @@ static qaws_status sk_distance(qaws_stack_2d const* st, unsigned int const* idx,
 		unsigned int W = g.nx, Hc = g.ny;
 		/* edge points: horizontal edges (i, j)-(i + 1, j) id j W + i, vertical edges after */
 		unsigned int nh = W * (Hc + 1), ne = nh + (W + 1) * Hc, e;
-		double* ep = (double*)qaws_internal_malloc(sizeof(double) * 2 * ne);
-		unsigned int* nxt = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ne);
+		double* ep = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), 2, ne));
+		unsigned int* nxt = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), ne));
 		unsigned char* seen = (unsigned char*)qaws_internal_zalloc(ne, 1);
 		qaws_curve** loops = NULL;
 		unsigned int nloops = 0, caploops = 0;
@@ -769,8 +771,8 @@ static qaws_status sk_distance(qaws_stack_2d const* st, unsigned int const* idx,
 				seen[q] = 1;
 				if (m == capm)
 				{
-					unsigned int nc2 = capm ? 2 * capm : 64;
-					qaws_scalar* gp = (qaws_scalar*)qaws_internal_realloc(lp, sizeof(qaws_scalar) * 2 * nc2);
+					unsigned int nc2 = qaws_internal_grow(capm, (size_t)m + 1, 64);
+					qaws_scalar* gp = nc2 ? (qaws_scalar*)qaws_internal_realloc(lp, qaws_internal_mul3(sizeof(qaws_scalar), 2, nc2)) : NULL;
 					if (!gp) { s = QAWS_STATUS_ALLOCATION_FAILURE; break; }
 					lp = gp; capm = nc2;
 				}
@@ -784,8 +786,8 @@ static qaws_status sk_distance(qaws_stack_2d const* st, unsigned int const* idx,
 				qaws_curve* c = NULL;
 				if (nloops == caploops)
 				{
-					unsigned int nc2 = caploops ? 2 * caploops : 16;
-					qaws_curve** gl = (qaws_curve**)qaws_internal_realloc(loops, sizeof(qaws_curve*) * nc2);
+					unsigned int nc2 = qaws_internal_grow(caploops, (size_t)nloops + 1, 16);
+					qaws_curve** gl = nc2 ? (qaws_curve**)qaws_internal_realloc(loops, qaws_internal_mul2(sizeof(qaws_curve*), nc2)) : NULL;
 					if (!gl) { qaws_internal_free(lp); s = QAWS_STATUS_ALLOCATION_FAILURE; break; }
 					loops = gl; caploops = nc2;
 				}
@@ -880,8 +882,8 @@ static qaws_status sk_level_job(void* ctx, unsigned int chunk, unsigned int begi
 		if (s == QAWS_STATUS_OK)
 		{
 			unsigned int na = qaws_clip_result_get_path_count(ra), nb = qaws_clip_result_get_path_count(rb), k;
-			qaws_path_2d* pa = (qaws_path_2d*)qaws_internal_malloc(sizeof(qaws_path_2d) * (na + 1));
-			qaws_path_2d* pb = (qaws_path_2d*)qaws_internal_malloc(sizeof(qaws_path_2d) * (nb + 1));
+			qaws_path_2d* pa = (qaws_path_2d*)qaws_internal_malloc(qaws_internal_mul2(sizeof(qaws_path_2d), (na + 1)));
+			qaws_path_2d* pb = (qaws_path_2d*)qaws_internal_malloc(qaws_internal_mul2(sizeof(qaws_path_2d), (nb + 1)));
 			if (!pa || !pb)
 				s = QAWS_STATUS_ALLOCATION_FAILURE;
 			else
@@ -914,7 +916,7 @@ qaws_status qaws_stack_boolean_2d(qaws_clip_type ct, qaws_stack_2d const* a, qaw
 	r = (qaws_stack_result*)qaws_internal_zalloc(1, sizeof(qaws_stack_result));
 	if (!r)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
-	r->z = (double*)qaws_internal_malloc(sizeof(double) * (a->level_count + b->level_count + 1));
+	r->z = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), (a->level_count + b->level_count + 1)));
 	r->levels = (qaws_clip_result**)qaws_internal_zalloc(a->level_count + b->level_count + 1, sizeof(qaws_clip_result*));
 	if (!r->z || !r->levels)
 	{

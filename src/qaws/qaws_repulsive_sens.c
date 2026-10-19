@@ -145,8 +145,8 @@ static qaws_status rsn_solve(rsn_sys* S, double const* b, double* u)
 {
 	enum { R = RSN_RESTART };
 	unsigned int n = S->n, i, j, kk, outer;
-	double *V = (double*)qaws_internal_malloc(sizeof(double) * n * (R + 1)), *Z = (double*)qaws_internal_malloc(sizeof(double) * n * (R + 1)), *H = (double*)qaws_internal_zalloc((R + 1) * R, sizeof(double));
-	double *w = (double*)qaws_internal_malloc(sizeof(double) * n), cs[R], sn[R], gq[R + 1], y[R], bn = sqrt(rsn_dot(b, b, n)), prev = HUGE_VAL;
+	double *V = (double*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(double), n, (R + 1))), *Z = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), n, (R + 1))), *H = (double*)qaws_internal_zalloc(qaws_internal_mul2((R + 1), R), sizeof(double));
+	double *w = (double*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(double), n)), cs[R], sn[R], gq[R + 1], y[R], bn = sqrt(rsn_dot(b, b, n)), prev = HUGE_VAL;
 	qaws_status st = QAWS_STATUS_NUMERICAL_FAILURE;
 	memset(u, 0, sizeof(double) * n);
 	if (!V || !Z || !H || !w)
@@ -245,15 +245,15 @@ qaws_status qaws_internal_rs_sensitivity(rs_core const* s, double const* drows, 
 	N = s->N; k = s->k; dim = s->dim; nv = s->nv;
 	memset(&S, 0, sizeof(S));
 	S.s = s; S.N = N; S.k = k;
-	A = (double*)qaws_internal_malloc(sizeof(double) * ((size_t)nv * nv + 1));
-	dE = (double*)qaws_internal_zalloc(N + 1, sizeof(double));
-	phi = (double*)qaws_internal_malloc(sizeof(double) * (k + 1));
-	S.C = (double*)qaws_internal_malloc(sizeof(double) * ((size_t)k * N + 1));
+	A = (double*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(double), ((size_t)nv * nv + 1)));
+	dE = (double*)qaws_internal_scratch_zalloc(N + 1, sizeof(double));
+	phi = (double*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(double), (k + 1)));
+	S.C = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), ((size_t)k * N + 1)));
 	S.G = (double*)qaws_internal_zalloc(6 * (size_t)N + 1, sizeof(double));
 	S.lambda = (double*)qaws_internal_zalloc(k + 1, sizeof(double));
-	S.t1 = (double*)qaws_internal_malloc(sizeof(double) * (N + 1));
-	CC = (double*)qaws_internal_malloc(sizeof(double) * (k * k + 1));
-	cpiv = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (k + 1));
+	S.t1 = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), (N + 1)));
+	CC = (double*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(double), (k * k + 1)));
+	cpiv = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (k + 1)));
 	if (!A || !dE || !phi || !S.C || !S.G || !S.lambda || !S.t1 || !CC || !cpiv)
 	{
 		st = QAWS_STATUS_ALLOCATION_FAILURE;
@@ -288,7 +288,7 @@ qaws_status qaws_internal_rs_sensitivity(rs_core const* s, double const* drows, 
 		for (q = 0; q < dim; q++) b[q] += s->x[dim * i + q] / nv;
 	{
 		unsigned int m = dim == 3 ? 6 : 3, a, c2, j;
-		double *Mo = (double*)qaws_internal_zalloc((size_t)m * N + 1, sizeof(double)), Gm[36], V[36], ev[6];
+		double *Mo = (double*)qaws_internal_scratch_zalloc(qaws_internal_add2(qaws_internal_mul2(m, N), 1), sizeof(double)), Gm[36], V[36], ev[6];
 		if (!Mo)
 		{
 			st = QAWS_STATUS_ALLOCATION_FAILURE;
@@ -345,10 +345,10 @@ qaws_status qaws_internal_rs_sensitivity(rs_core const* s, double const* drows, 
 	}
 	(void)cn;
 	S.n = N + k + S.ng;
-	S.M = (double*)qaws_internal_malloc(sizeof(double) * ((size_t)S.n * S.n + 1));
-	S.piv = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (S.n + 1));
-	rhs = (double*)qaws_internal_zalloc(S.n + 1, sizeof(double));
-	u = (double*)qaws_internal_malloc(sizeof(double) * (S.n + 1));
+	S.M = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), ((size_t)S.n * S.n + 1)));
+	S.piv = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (S.n + 1)));
+	rhs = (double*)qaws_internal_scratch_zalloc(S.n + 1, sizeof(double));
+	u = (double*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(double), (S.n + 1)));
 	if (!S.M || !S.piv || !rhs || !u)
 	{
 		st = QAWS_STATUS_ALLOCATION_FAILURE;

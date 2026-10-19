@@ -887,7 +887,8 @@ static void test_composite_of_views(void)
 	{
 		qaws_eval_result_3d e;
 		qaws_curve_evaluate_3d(cb, 2, QAWS_EVAL_FLAG_POSITION, &e);
-		TEST_ASSERT(fabs(e.position.x - p1[3 * 7]) <= 1e-12, "the composite reads the moved host point");
+		/* (the end point is the host value converted to the scalar: one rounding) */
+		TEST_ASSERT(fabs(e.position.x - p1[3 * 7]) <= 1e-12 + fabs(p1[3 * 7]) * TEST_EPS, "the composite reads the moved host point");
 	}
 	qaws_curve_destroy(cb);
 	qaws_curve_destroy(co);

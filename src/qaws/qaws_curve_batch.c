@@ -197,8 +197,11 @@ static qaws_status cb_push(cb_ctx* x, unsigned int a, unsigned int b, unsigned i
 	cb_hit* h;
 	if (x->nhit == x->caphit)
 	{
-		unsigned int cap = x->caphit ? x->caphit * 2 : 256;
-		cb_hit* g = (cb_hit*)qaws_internal_realloc(x->hits, cap * sizeof(cb_hit));
+		unsigned int cap = qaws_internal_grow(x->caphit, (size_t)x->nhit + 1, 256);
+		cb_hit* g;
+		if (!cap)
+			return QAWS_STATUS_ALLOCATION_FAILURE;
+		g = (cb_hit*)qaws_internal_realloc(x->hits, qaws_internal_mul2(cap, sizeof(cb_hit)));
 		if (!g)
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 		x->hits = g;
@@ -562,7 +565,7 @@ static qaws_status cb_merge(cb_ctx* x)
 	unsigned int i, n = 0, start = 0;
 	cb_hit* src;
 	qsort(x->hits, x->nhit, sizeof(cb_hit), cb_cmp_hit);
-	src = (cb_hit*)qaws_internal_malloc((x->nhit ? x->nhit : 1) * sizeof(cb_hit));
+	src = (cb_hit*)qaws_internal_malloc(qaws_internal_mul2((x->nhit ? x->nhit : 1), sizeof(cb_hit)));
 	if (!src)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	memcpy(src, x->hits, x->nhit * sizeof(cb_hit));
@@ -697,7 +700,7 @@ static qaws_status cb_solve(cb_ctx* x)
 	x->stats.segment_count = x->nseg;
 	if (x->nseg == 0)
 		return QAWS_STATUS_OK;
-	boxes = (qaws_bp_box*)qaws_internal_malloc(x->nseg * sizeof(qaws_bp_box));
+	boxes = (qaws_bp_box*)qaws_internal_malloc(qaws_internal_mul2(x->nseg, sizeof(qaws_bp_box)));
 	if (!boxes)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	for (i = 0; i < x->nseg; i++)
@@ -710,7 +713,7 @@ static qaws_status cb_solve(cb_ctx* x)
 	n = s == QAWS_STATUS_OK ? qaws_internal_grid_pair_chunks(grid) : 0;
 	if (s == QAWS_STATUS_OK && n)
 	{
-		ch = (cb_ctx*)qaws_internal_malloc(n * sizeof(cb_ctx));
+		ch = (cb_ctx*)qaws_internal_malloc(qaws_internal_mul2(n, sizeof(cb_ctx)));
 		if (!ch)
 			s = QAWS_STATUS_ALLOCATION_FAILURE;
 		for (k = 0; s == QAWS_STATUS_OK && k < n; k++)
@@ -726,7 +729,7 @@ static qaws_status cb_solve(cb_ctx* x)
 		{
 			if (s == QAWS_STATUS_OK && ch[k].nhit)
 			{
-				cb_hit* g = (cb_hit*)qaws_internal_realloc(x->hits, (x->nhit + ch[k].nhit) * sizeof(cb_hit));
+				cb_hit* g = (cb_hit*)qaws_internal_realloc(x->hits, qaws_internal_mul2((x->nhit + ch[k].nhit), sizeof(cb_hit)));
 				if (!g)
 					s = QAWS_STATUS_ALLOCATION_FAILURE;
 				else
@@ -867,8 +870,8 @@ qaws_status qaws_curve_set_create(qaws_curve_batch_desc const* desc, qaws_curve_
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	set->desc = *desc;
 	set->dim = dim;
-	set->desc.curves = (qaws_curve const* const*)qaws_internal_malloc((n ? n : 1) * sizeof(qaws_curve*));
-	set->desc.families = desc->families ? (unsigned int const*)qaws_internal_malloc((n ? n : 1) * sizeof(unsigned int)) : NULL;
+	set->desc.curves = (qaws_curve const* const*)qaws_internal_malloc(qaws_internal_mul2((n ? n : 1), sizeof(qaws_curve*)));
+	set->desc.families = desc->families ? (unsigned int const*)qaws_internal_malloc(qaws_internal_mul2((n ? n : 1), sizeof(unsigned int))) : NULL;
 	if (!set->desc.curves || (desc->families && !set->desc.families))
 	{
 		qaws_curve_set_destroy(set);
@@ -948,10 +951,10 @@ static qaws_status cs_find(qaws_curve_set const* a, qaws_curve_set const* b, uns
 	{
 		/* both sets side by side: b's curves numbered after a's, in another family */
 		nb = b->desc.curve_count;
-		curves = (qaws_curve const**)qaws_internal_malloc((na + nb ? na + nb : 1) * sizeof(qaws_curve*));
-		fam = (unsigned int*)qaws_internal_malloc((na + nb ? na + nb : 1) * sizeof(unsigned int));
-		segs = (qaws_flat_seg*)qaws_internal_malloc((a->nseg + b->nseg ? a->nseg + b->nseg : 1) * sizeof(qaws_flat_seg));
-		counts = (unsigned int*)qaws_internal_malloc((na + nb ? na + nb : 1) * sizeof(unsigned int));
+		curves = (qaws_curve const**)qaws_internal_malloc(qaws_internal_mul2((na + nb ? na + nb : 1), sizeof(qaws_curve*)));
+		fam = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2((na + nb ? na + nb : 1), sizeof(unsigned int)));
+		segs = (qaws_flat_seg*)qaws_internal_malloc(qaws_internal_mul2((a->nseg + b->nseg ? a->nseg + b->nseg : 1), sizeof(qaws_flat_seg)));
+		counts = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2((na + nb ? na + nb : 1), sizeof(unsigned int)));
 		if (!curves || !fam || !segs || !counts)
 		{
 			s = QAWS_STATUS_ALLOCATION_FAILURE;
@@ -1043,8 +1046,11 @@ static qaws_status lc_push(lc_ctx* x, unsigned int level, qaws_scalar t, qaws_sc
 	qaws_level_crossing* o;
 	if (x->n == x->cap)
 	{
-		unsigned int cap = x->cap ? x->cap * 2 : 256;
-		qaws_level_crossing* g = (qaws_level_crossing*)qaws_internal_realloc(x->out, cap * sizeof(qaws_level_crossing));
+		unsigned int cap = qaws_internal_grow(x->cap, (size_t)x->n + 1, 256);
+		qaws_level_crossing* g;
+		if (!cap)
+			return QAWS_STATUS_ALLOCATION_FAILURE;
+		g = (qaws_level_crossing*)qaws_internal_realloc(x->out, qaws_internal_mul2(cap, sizeof(qaws_level_crossing)));
 		if (!g)
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 		x->out = g;
@@ -1262,7 +1268,7 @@ qaws_status qaws_curve_batch_find_level_crossings(
 		/* segments in chunks, each with its own copy of the context and list */
 		J.segs = segs;
 		J.nchunk = qaws_internal_chunk_count(nseg, LC_GRAIN);
-		J.ctx = (lc_ctx*)qaws_internal_malloc(J.nchunk * sizeof(lc_ctx));
+		J.ctx = (lc_ctx*)qaws_internal_malloc(qaws_internal_mul2(J.nchunk, sizeof(lc_ctx)));
 		if (!J.ctx)
 			s = QAWS_STATUS_ALLOCATION_FAILURE;
 		for (k = 0; s == QAWS_STATUS_OK && k < J.nchunk; k++)
@@ -1280,8 +1286,8 @@ qaws_status qaws_curve_batch_find_level_crossings(
 					x.curve = J.ctx[k].out[m].curve;
 					if (x.n == x.cap)
 					{
-						unsigned int cap = x.cap ? x.cap * 2 : 256;
-						qaws_level_crossing* grown = (qaws_level_crossing*)qaws_internal_realloc(x.out, cap * sizeof(qaws_level_crossing));
+						unsigned int cap = qaws_internal_grow(x.cap, (size_t)x.n + 1, 256);
+						qaws_level_crossing* grown = cap ? (qaws_level_crossing*)qaws_internal_realloc(x.out, qaws_internal_mul2(cap, sizeof(qaws_level_crossing))) : NULL;
 						if (!grown)
 						{
 							s = QAWS_STATUS_ALLOCATION_FAILURE;
@@ -1372,8 +1378,8 @@ static void cp_visit(void* user, unsigned int item)
 		x->best_ub = ub;
 	if (x->ncand == x->capcand)
 	{
-		unsigned int cap = x->capcand ? x->capcand * 2 : 64;
-		cp_cand* g = (cp_cand*)qaws_internal_realloc(x->cand, cap * sizeof(cp_cand));
+		unsigned int cap = qaws_internal_grow(x->capcand, (size_t)x->ncand + 1, 64);
+		cp_cand* g = cap ? (cp_cand*)qaws_internal_realloc(x->cand, qaws_internal_mul2(cap, sizeof(cp_cand))) : NULL;
 		if (!g)
 		{
 			x->failed = 1;
@@ -1488,7 +1494,7 @@ static qaws_status cp_chunk(void* ctx, unsigned int chunk, unsigned int begin, u
 	cp_ctx x;
 	qaws_status s = QAWS_STATUS_OK;
 	memset(&x, 0, sizeof(x));
-	x.stamp = (unsigned int*)qaws_internal_malloc(J->nseg * sizeof(unsigned int));
+	x.stamp = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(J->nseg, sizeof(unsigned int)));
 	if (!x.stamp)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	for (i = 0; i < J->nseg; i++)
@@ -1576,7 +1582,7 @@ static qaws_status cp_run(qaws_curve const* const* curves, unsigned int dim, qaw
 	}
 	if (!nseg || !point_count)
 		return QAWS_STATUS_OK;
-	boxes = (qaws_bp_box*)qaws_internal_malloc(nseg * sizeof(qaws_bp_box));
+	boxes = (qaws_bp_box*)qaws_internal_malloc(qaws_internal_mul2(nseg, sizeof(qaws_bp_box)));
 	nchunk = qaws_internal_chunk_count(point_count, CP_GRAIN);
 	J.stats = (qaws_curve_batch_stats*)qaws_internal_zalloc(nchunk, sizeof(qaws_curve_batch_stats));
 	if (!boxes || !J.stats)

@@ -67,6 +67,35 @@ status = qaws_curve_offset_2d(curve, d, 1, out, cap, &count);   /* every return 
 qaws_set_thread_allocator(&previous);
 ```
 
+- **Setting the default against the first allocation.** Sealing and setting go through one compare-and-swap state, and the descriptor is copied before the state that publishes it is stored (sequentially consistent atomics, `Interlocked*` on MSVC). An allocation therefore sees either no default or the whole copy, never a partly written one. Test 154 starts 24 fresh processes in which seven workers allocate while thread 0 sets the default: at once, while a worker enters its first allocation, or after it. Each run ends with the default installed or refused as sealed, the allocator's callbacks always see their own `user_data`, and every block returns to the allocator that gave it.
+
+## Scratch apart from results
+
+```c
+void qaws_exchange_thread_scratch_allocator(qaws_allocator const* allocator, qaws_allocator* out_previous);   /* NULL: none */
+```
+
+With a scratch allocator installed on a thread, the temporaries of adaptive sampling, tessellation, meshing, clipping and the repulsive solvers come from it: blocks allocated and freed within one call. Results and objects still follow the order above (`_ex` argument, thread allocator, default). A frame arena can therefore serve as scratch and be reset after every call while the results stay on the heap.
+
+```c
+qaws_allocator previous;
+qaws_exchange_thread_scratch_allocator(&frame_arena.allocator, &previous);
+status = qaws_mesh_generate_surface(surface, &desc, &mesh, NULL);   /* the mesh: heap; its temporaries: the arena */
+qaws_exchange_thread_scratch_allocator(&previous, NULL);
+qaws_arena_reset(&frame_arena);                                    /* OK: the arena holds nothing after the call */
+```
+
+- **Which allocations count as scratch.** A local pointer allocated and freed in the same function and never stored elsewhere (386 sites in those modules). Everything else, including every block a result keeps, uses the persistent order, so a result never holds scratch memory.
+- **Coverage.** Other operations take their temporaries from the persistent order as before. Without a scratch allocator, nothing changes.
+- **Tests.** Test 154 runs sampling, offsets, clipping, tessellation, meshing and a repulsive solve with an arena as scratch and a counting heap as the allocator. After each call the arena holds no block and resets, and the kept results (curves, a clip result, a mesh, a solver) are read after the resets and then returned to the heap. With `QAWS_TEST_SCRATCH=1`, the test runner installs a scratch arena for every suite and fails a suite that leaves a block in it.
+
+## Sizes and overflow
+
+- **Allocation sizes** are computed with checked arithmetic (`qaws_internal_mul2/3/4`, `qaws_internal_add2`). A product or sum that does not fit `size_t` becomes `SIZE_MAX`, which every allocation refuses before calling an allocator. The call returns `QAWS_STATUS_ALLOCATION_FAILURE`: the request cannot be represented, so it is reported the same way as memory the allocator does not have. A size never wraps into a short block that the library would then overrun.
+- **Element counts** that the library indexes with `unsigned int` (control points `u × v` of a surface, indices, list capacities) are refused at the public entry with the function's count status (`QAWS_STATUS_INVALID_CONTROL_POINT_COUNT` and similar) when their product does not fit. Growing lists double up to `UINT_MAX` and fail beyond it.
+- **Order.** Invalid dimensions and counts are refused before any allocation. Allocation failures happen before any result is published: a failed call leaves its output pointers `NULL` and frees what it allocated (test 154, every part in arenas from 256 bytes up, 0 blocks held and 0 results published on failure).
+- **The legacy interface** counts in `unsigned long`. A request above `ULONG_MAX` (4 GB on Windows) fails without calling `alloc`.
+
 ## Caller memory: qaws_arena
 
 ```c
@@ -93,7 +122,8 @@ An extended allocator over memory the host provides: a mapped file, pinned memor
 - **Allocation.** Blocks are cut in order and aligned. The latest block grows and shrinks in place, which is how growing arrays stay compact. A freed latest block is released at once; other freed blocks are released at reset.
 - **Hard bound.** When full, allocation fails and the call returns `QAWS_STATUS_ALLOCATION_FAILURE`. Nothing falls back to the heap. All offsets are computed without overflow, including requests near `SIZE_MAX`.
 - **Reset.** `qaws_arena_reset` refuses (`QAWS_STATUS_INVALID_ARGUMENT`) while blocks are held (`live > 0`). Destroy every arena-backed object and finish every call first. Freeing a block the arena does not hold (another arena, an earlier generation, or a double free) is counted in `invalid_frees`, and debug builds assert.
-- **Threads.** One thread at a time. For workers, use one arena per thread with `qaws_exchange_thread_allocator`.
+- **Resize.** `qaws_internal_realloc` grows or shrinks the latest block in place. Any other block is copied into a new block, which the arena records as the latest, and the old one is marked freed. If a reallocation fails, the old block stays held and unchanged (test 154).
+- **Threads.** One thread at a time: allocation, free, reset, and the destruction of arena-backed objects. Destroying an arena-backed object on another thread while the owner resets is a race, and that use is unsupported. Reset refuses while any block is held, so a reset that does not race cannot invalidate a live object or result. For workers, use one arena per thread with `qaws_exchange_thread_allocator` (test 154 runs four workers this way, with arenas that are large enough and arenas that fail).
 
 Arena-backed objects never move to the heap. To keep an object beyond a reset, create it with another allocator (the `_ex` argument) while scratch uses the arena (the thread setting).
 

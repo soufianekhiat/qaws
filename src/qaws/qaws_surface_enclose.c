@@ -198,7 +198,7 @@ static qaws_status ge_patch_make(ge_patch* pt, ge_iv const* cp, unsigned int m, 
 					return QAWS_STATUS_ALLOCATION_FAILURE;
 				continue;
 			}
-			q = (ge_iv*)qaws_internal_malloc(sizeof(ge_iv) * 3 * rm * rn);
+			q = (ge_iv*)qaws_internal_malloc(qaws_internal_mul4(sizeof(ge_iv), 3, rm, rn));
 			if (!q)
 				return QAWS_STATUS_ALLOCATION_FAILURE;
 			pt->net[k] = q;
@@ -232,7 +232,7 @@ static qaws_status ge_patch_make(ge_patch* pt, ge_iv const* cp, unsigned int m, 
 
 static qaws_status ge_surf_add(ge_surf* s, ge_iv const* cp, unsigned int m, unsigned int n, double u0, double u1, double v0, double v1)
 {
-	ge_patch* g = (ge_patch*)qaws_internal_realloc(s->p, sizeof(ge_patch) * (s->np + 1));
+	ge_patch* g = (ge_patch*)qaws_internal_realloc(s->p, qaws_internal_mul2(sizeof(ge_patch), (s->np + 1)));
 	qaws_status st;
 	if (!g)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
@@ -248,8 +248,8 @@ static qaws_status ge_surf_add(ge_surf* s, ge_iv const* cp, unsigned int m, unsi
 static qaws_status ge_insert(ge_iv** pts, unsigned int rows, unsigned int* cnt, double** kn, unsigned int* nk, unsigned int d, double t)
 {
 	unsigned int c = *cnt, r, i, k, sp = 0;
-	ge_iv* q = (ge_iv*)qaws_internal_malloc(sizeof(ge_iv) * 3 * rows * (c + 1));
-	double* kk = (double*)qaws_internal_malloc(sizeof(double) * (*nk + 1));
+	ge_iv* q = (ge_iv*)qaws_internal_malloc(qaws_internal_mul4(sizeof(ge_iv), 3, rows, (c + 1)));
+	double* kk = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), (*nk + 1)));
 	if (!q || !kk)
 	{
 		qaws_internal_free(q); qaws_internal_free(kk);
@@ -297,7 +297,7 @@ static qaws_status ge_insert(ge_iv** pts, unsigned int rows, unsigned int* cnt, 
 /* points (rows x cols, u major) transposed */
 static ge_iv* ge_transpose(ge_iv const* p, unsigned int rows, unsigned int cols)
 {
-	ge_iv* q = (ge_iv*)qaws_internal_malloc(sizeof(ge_iv) * 3 * rows * cols);
+	ge_iv* q = (ge_iv*)qaws_internal_malloc(qaws_internal_mul4(sizeof(ge_iv), 3, rows, cols));
 	unsigned int i, j;
 	if (q)
 		for (i = 0; i < rows; i++)
@@ -311,8 +311,8 @@ static ge_iv* ge_transpose(ge_iv const* p, unsigned int rows, unsigned int cols)
 static qaws_status ge_from_bspline(ge_surf* s, qaws_surface_bspline_impl const* b, unsigned int m, unsigned int n)
 {
 	unsigned int cu = b->u_count, cv = b->v_count, nku = b->u_knot_count, nkv = b->v_knot_count, i, j, k, mult;
-	ge_iv* pts = (ge_iv*)qaws_internal_malloc(sizeof(ge_iv) * 3 * cu * cv);
-	double *ku = (double*)qaws_internal_malloc(sizeof(double) * nku), *kv = (double*)qaws_internal_malloc(sizeof(double) * nkv);
+	ge_iv* pts = (ge_iv*)qaws_internal_malloc(qaws_internal_mul4(sizeof(ge_iv), 3, cu, cv));
+	double *ku = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), nku)), *kv = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), nkv));
 	qaws_status st = QAWS_STATUS_OK;
 	if (!pts || !ku || !kv)
 	{
@@ -372,7 +372,7 @@ static qaws_status ge_from_bspline(ge_surf* s, qaws_surface_bspline_impl const* 
 			unsigned int a, c2, iu = i - m, iv0 = j - n;
 			if (!(kv[j] < kv[j + 1]) || kv[j] < s->v0 || kv[j + 1] > s->v1)
 				continue;
-			cp = (ge_iv*)qaws_internal_malloc(sizeof(ge_iv) * 3 * (m + 1) * (n + 1));
+			cp = (ge_iv*)qaws_internal_malloc(qaws_internal_mul4(sizeof(ge_iv), 3, (m + 1), (n + 1)));
 			if (!cp)
 			{
 				st = QAWS_STATUS_ALLOCATION_FAILURE;
@@ -408,7 +408,7 @@ static qaws_status ge_surf_init(ge_surf* s, qaws_surface const* surf)
 			if (b->u_count > 8 || b->v_count > 8)
 				return QAWS_STATUS_UNSUPPORTED_OPERATION;   /* (binomials to degree 7) */
 		}
-		cp = (ge_iv*)qaws_internal_malloc(sizeof(ge_iv) * 3 * (m + 1) * (n + 1) + sizeof(ge_iv) * 12);
+		cp = (ge_iv*)qaws_internal_malloc(qaws_internal_add2(qaws_internal_mul4(sizeof(ge_iv), 3, (size_t)m + 1, (size_t)n + 1), sizeof(ge_iv) * 12));
 		if (!cp)
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 		if (kind == QAWS_SURFACE_KIND_BEZIER)
@@ -750,8 +750,8 @@ static int ge_push(qaws_geodesic_enclosure* e, double t0, double t1, ge_iv const
 {
 	if (e->n == e->cap)
 	{
-		unsigned int nc = e->cap ? 2 * e->cap : 256;
-		double* g = (double*)qaws_internal_realloc(e->steps, sizeof(double) * GE_STRIDE * nc);
+		unsigned int nc = qaws_internal_grow(e->cap, (size_t)e->n + 1, 256);
+		double* g = nc ? (double*)qaws_internal_realloc(e->steps, qaws_internal_mul3(sizeof(double), GE_STRIDE, nc)) : NULL;
 		if (!g)
 			return 0;
 		e->steps = g;
@@ -1139,10 +1139,10 @@ static qaws_status ge_cross_core(qaws_geodesic_enclosure const* a, qaws_geodesic
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	*out_count = 0;
 	nc = (b->n + CH - 1) / CH;
-	cb = (ge_iv*)qaws_internal_malloc(sizeof(ge_iv) * 2 * (nc + 1));
-	jlo = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (a->n + 1));
-	jhi = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (a->n + 1));
-	mh = (ge_iv*)qaws_internal_malloc(sizeof(ge_iv) * 2 * (a->n + 1));
+	cb = (ge_iv*)qaws_internal_malloc(qaws_internal_mul3(sizeof(ge_iv), 2, (nc + 1)));
+	jlo = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (a->n + 1)));
+	jhi = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (a->n + 1)));
+	mh = (ge_iv*)qaws_internal_malloc(qaws_internal_mul3(sizeof(ge_iv), 2, (a->n + 1)));
 	if (!cb || !jlo || !jhi || !mh)
 	{
 		qaws_internal_free(cb); qaws_internal_free(jlo); qaws_internal_free(jhi); qaws_internal_free(mh);
@@ -1424,8 +1424,8 @@ qaws_status qaws_surface_geodesic_polygon_area(qaws_surface const* surface, qaws
 	/* the chain of boxes round the curve: each segment's step boxes, then the
 	   box from its last one to the next segment's start (the gap between the
 	   true end and that start, closed by a straight (u, v) segment) */
-	box = (double*)qaws_internal_malloc(sizeof(double) * 4 * nb);
-	q = (double*)qaws_internal_malloc(sizeof(double) * 2 * nb);
+	box = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), 4, nb));
+	q = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), 2, nb));
 	if (!box || !q)
 	{
 		st = QAWS_STATUS_ALLOCATION_FAILURE;
@@ -1467,8 +1467,8 @@ qaws_status qaws_surface_geodesic_polygon_area(qaws_surface const* surface, qaws
 	hu = hv = (bu1 - bu0 > bv1 - bv0 ? bu1 - bu0 : bv1 - bv0) / N;
 	nu = (unsigned int)ceil((bu1 - bu0) / hu) + 2; nv = (unsigned int)ceil((bv1 - bv0) / hv) + 2;
 	bu0 -= hu; bv0 -= hv;
-	cell = (unsigned char*)qaws_internal_zalloc((size_t)nu * nv, 1);
-	stack = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * nu * nv);
+	cell = (unsigned char*)qaws_internal_zalloc(qaws_internal_mul2((size_t)nu, nv), 1);
+	stack = (unsigned int*)qaws_internal_malloc(qaws_internal_mul3(sizeof(unsigned int), nu, nv));
 	if (!cell || !stack)
 	{
 		st = QAWS_STATUS_ALLOCATION_FAILURE;

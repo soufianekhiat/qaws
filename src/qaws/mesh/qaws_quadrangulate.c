@@ -62,9 +62,9 @@ static unsigned int qd_singular(qaws_hm const* dm, mf_level const* L)
    vertices the faces index. */
 static qaws_status qd_doublets(unsigned int* fv, unsigned int* fs, unsigned int* nf, unsigned int* nc, unsigned int nv, unsigned char const* kind)
 {
-	unsigned int *first = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (nv + 2)), *inc = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (*nc + 1));
-	unsigned int* at = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (*nf + 1));
-	unsigned char* mark = (unsigned char*)qaws_internal_malloc(*nf + 1);   /* (1: changed this pass, 2: joined away) */
+	unsigned int *first = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (nv + 2))), *inc = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (*nc + 1)));
+	unsigned int* at = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (*nf + 1)));
+	unsigned char* mark = (unsigned char*)qaws_internal_scratch_malloc((size_t)*nf + 1);   /* (1: changed this pass, 2: joined away) */
 	unsigned int f, k, v, changed;
 	if (!first || !inc || !at || !mark)
 	{
@@ -170,15 +170,15 @@ static qaws_status qd_extract(qaws_hm const* dm, mf_hier const* h, int const* T,
 	unsigned char *ckind = NULL, *paired = NULL;
 	qaws_status st = QAWS_STATUS_ALLOCATION_FAILURE;
 	memset(out, 0, sizeof *out);
-	uf = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (n + 1));
-	cl = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (n + 1));
-	member = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (n + 1));
-	cx = (double*)qaws_internal_zalloc(3 * (size_t)n + 3, sizeof(double));
-	cw = (double*)qaws_internal_zalloc((size_t)n + 1, sizeof(double));
-	gx = (double*)qaws_internal_zalloc(4 * (size_t)n + 4, sizeof(double));   /* (per cluster its guide members' lattice points summed, their count) */
-	ckind = (unsigned char*)qaws_internal_zalloc((size_t)n + 1, 1);
-	tri = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (4 * (size_t)dm->nf + 4));
-	paired = (unsigned char*)qaws_internal_zalloc((size_t)dm->nf + 1, 1);
+	uf = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (n + 1)));
+	cl = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (n + 1)));
+	member = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (n + 1)));
+	cx = (double*)qaws_internal_scratch_zalloc(3 * (size_t)n + 3, sizeof(double));
+	cw = (double*)qaws_internal_scratch_zalloc((size_t)n + 1, sizeof(double));
+	gx = (double*)qaws_internal_scratch_zalloc(4 * (size_t)n + 4, sizeof(double));   /* (per cluster its guide members' lattice points summed, their count) */
+	ckind = (unsigned char*)qaws_internal_scratch_zalloc((size_t)n + 1, 1);
+	tri = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (4 * (size_t)dm->nf + 4)));
+	paired = (unsigned char*)qaws_internal_scratch_zalloc((size_t)dm->nf + 1, 1);
 	if (!uf || !cl || !member || !cx || !cw || !gx || !ckind || !tri || !paired)
 		goto done;
 	/* the clusters */
@@ -258,10 +258,12 @@ static qaws_status qd_extract(qaws_hm const* dm, mf_hier const* h, int const* T,
 		nt++;
 	}
 	/* each diagonal once in a hash (a second half cell on the same side of it overlaps the first: dropped) */
-	for (mask = 1; mask < 2 * nt + 2; mask <<= 1) {}
-	hash = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * mask);
-	out->fv = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (4 * (size_t)nt + 1));
-	out->fs = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)nt + 1));
+	mask = qaws_internal_grow(1, qaws_internal_mul2(2, (size_t)nt + 1), 1);
+	if (!mask || (mask & (mask - 1)))
+		goto done;   /* (a power of two: the probe masks with it) */
+	hash = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), mask));
+	out->fv = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (4 * (size_t)nt + 1)));
+	out->fs = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), ((size_t)nt + 1)));
 	if (!hash || !out->fv || !out->fs)
 		goto done;
 	for (i = 0; i < mask; i++)
@@ -325,7 +327,7 @@ static qaws_status qd_extract(qaws_hm const* dm, mf_hier const* h, int const* T,
 	if (qd_doublets(out->fv, out->fs, &out->nf, &out->nc, ncl, ckind) != QAWS_STATUS_OK)
 		goto done;
 	/* the vertices the faces use, placed on the reference */
-	used = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (ncl + 1));
+	used = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (ncl + 1)));
 	if (!used)
 		goto done;
 	for (i = 0; i < ncl; i++)
@@ -333,8 +335,8 @@ static qaws_status qd_extract(qaws_hm const* dm, mf_hier const* h, int const* T,
 	for (i = 0; i < out->nc; i++)
 		if (used[out->fv[i]] == HM_NONE)
 			used[out->fv[i]] = out->nv++;
-	out->x = (double*)qaws_internal_malloc(sizeof(double) * 3 * (out->nv + 1));
-	out->foot = (qaws_mesh_location*)qaws_internal_malloc(sizeof(qaws_mesh_location) * (out->nv + 1));
+	out->x = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), 3, (out->nv + 1)));
+	out->foot = (qaws_mesh_location*)qaws_internal_malloc(qaws_internal_mul2(sizeof(qaws_mesh_location), (out->nv + 1)));
 	out->kind = (unsigned char*)qaws_internal_malloc(out->nv + 1);
 	if (!out->x || !out->foot || !out->kind)
 		goto done;
@@ -381,9 +383,11 @@ static qaws_status qd_fill(qd_out* o, qaws_mesh_reference const* r, mr_scratch* 
 	qaws_status st = QAWS_STATUS_OK;
 	for (k = 0; k < 3 * r->nt && !open; k++)
 		open = r->ta[k] == HM_NONE;
-	for (mask = 1; mask < 2 * o->nc + 2; mask <<= 1) {}
-	h = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * 2 * mask);
-	start = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (o->nv + 1));
+	mask = qaws_internal_grow(1, qaws_internal_mul2(2, (size_t)o->nc + 1), 1);
+	if (!mask || (mask & (mask - 1)))
+		return QAWS_STATUS_ALLOCATION_FAILURE;   /* (a power of two: the probe masks with it) */
+	h = (unsigned int*)qaws_internal_malloc(qaws_internal_mul3(sizeof(unsigned int), 2, mask));
+	start = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (o->nv + 1)));
 	if (!h || !start)
 	{
 		qaws_internal_free(h);
@@ -415,17 +419,17 @@ static qaws_status qd_fill(qd_out* o, qaws_mesh_reference const* r, mr_scratch* 
 				continue;
 			start[b] = start[b] == HM_NONE ? a : HM_NONE - 1;   /* (HM_NONE - 1: ambiguous) */
 		}
-	nf = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (o->nc + 8 * (size_t)o->nv + 1));
-	nfs = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (o->nf + o->nv + 1));
+	nf = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (o->nc + 8 * (size_t)o->nv + 1)));
+	nfs = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (o->nf + o->nv + 1)));
 	{
 		/* (room for a centre per loop, the loops of three or more sharing no vertex) */
 		size_t nmax = (size_t)o->nv + o->nv / 3 + 1;
-		double* x = (double*)qaws_internal_realloc(o->x, sizeof(double) * 3 * nmax);
+		double* x = (double*)qaws_internal_realloc(o->x, qaws_internal_mul3(sizeof(double), 3, nmax));
 		qaws_mesh_location* foot;
 		unsigned char* kind;
 		if (x)
 			o->x = x;
-		foot = x ? (qaws_mesh_location*)qaws_internal_realloc(o->foot, sizeof(qaws_mesh_location) * nmax) : NULL;
+		foot = x ? (qaws_mesh_location*)qaws_internal_realloc(o->foot, qaws_internal_mul2(sizeof(qaws_mesh_location), nmax)) : NULL;
 		if (foot)
 			o->foot = foot;
 		kind = foot ? (unsigned char*)qaws_internal_realloc(o->kind, nmax) : NULL;
@@ -541,14 +545,16 @@ static qaws_status qd_split(qd_out* o, qaws_mesh_reference const* r, mr_scratch*
 	unsigned int f, k, q, nv2, *mid, *keys, c0, nf2 = 0, mask;
 	qd_out n;
 	memset(&n, 0, sizeof n);
-	for (mask = 1; mask < 2 * o->nc + 2; mask <<= 1) {}
-	mid = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (o->nc + 1));
-	keys = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * 3 * mask);   /* (a hash: low end, high end, midpoint) */
-	n.x = (double*)qaws_internal_malloc(sizeof(double) * 3 * (o->nv + o->nc + o->nf + 1));
-	n.foot = (qaws_mesh_location*)qaws_internal_malloc(sizeof(qaws_mesh_location) * (o->nv + o->nc + o->nf + 1));
+	mask = qaws_internal_grow(1, qaws_internal_mul2(2, (size_t)o->nc + 1), 1);
+	if (!mask || (mask & (mask - 1)))
+		return QAWS_STATUS_ALLOCATION_FAILURE;   /* (a power of two: the probe masks with it) */
+	mid = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (o->nc + 1)));
+	keys = (unsigned int*)qaws_internal_malloc(qaws_internal_mul3(sizeof(unsigned int), 3, mask));   /* (a hash: low end, high end, midpoint) */
+	n.x = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), 3, (o->nv + o->nc + o->nf + 1)));
+	n.foot = (qaws_mesh_location*)qaws_internal_malloc(qaws_internal_mul2(sizeof(qaws_mesh_location), (o->nv + o->nc + o->nf + 1)));
 	n.kind = (unsigned char*)qaws_internal_zalloc((size_t)o->nv + o->nc + o->nf + 1, 1);
-	n.fv = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * 4 * (o->nc + 1));
-	n.fs = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (o->nc + 1));
+	n.fv = (unsigned int*)qaws_internal_malloc(qaws_internal_mul3(sizeof(unsigned int), 4, (o->nc + 1)));
+	n.fs = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (o->nc + 1)));
 	if (!mid || !keys || !n.x || !n.foot || !n.kind || !n.fv || !n.fs)
 	{
 		qaws_internal_free(mid);
@@ -651,9 +657,9 @@ static qaws_status qd_split(qd_out* o, qaws_mesh_reference const* r, mr_scratch*
 static qaws_status qd_pair_triangles(qd_out* o)
 {
 	unsigned int f, g, k, j, c0, nf = 0, nc = 0;
-	unsigned int *at = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)o->nf + 1)), *mate = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)o->nf + 1));
-	unsigned int *nfv = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)o->nc + 1)), *nfs = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)o->nf + 1));
-	unsigned char* side = (unsigned char*)qaws_internal_malloc((size_t)o->nf + 1);
+	unsigned int *at = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), ((size_t)o->nf + 1))), *mate = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), ((size_t)o->nf + 1)));
+	unsigned int *nfv = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), ((size_t)o->nc + 1))), *nfs = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), ((size_t)o->nf + 1)));
+	unsigned char* side = (unsigned char*)qaws_internal_scratch_malloc((size_t)o->nf + 1);
 	if (!at || !mate || !nfv || !nfs || !side)
 	{
 		qaws_internal_free(at); qaws_internal_free(mate); qaws_internal_free(nfv); qaws_internal_free(nfs); qaws_internal_free(side);
@@ -721,8 +727,8 @@ static qaws_status qd_lattice(qaws_hm const* dm, mf_hier* h, double rho, int* T,
 {
 	mf_level* L = &h->lv[0];
 	unsigned int f, k, odd, ncone = 0;
-	double *Tc = (double*)qaws_internal_malloc(sizeof(double) * (4 * (size_t)dm->nc + 4)), *cone = (double*)qaws_internal_malloc(sizeof(double) * (3 * (size_t)dm->nf + 3));
-	unsigned char* fr = (unsigned char*)qaws_internal_malloc((size_t)dm->nc + 1);
+	double *Tc = (double*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(double), (4 * (size_t)dm->nc + 4))), *cone = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), (3 * (size_t)dm->nf + 3)));
+	unsigned char* fr = (unsigned char*)qaws_internal_scratch_malloc((size_t)dm->nc + 1);
 	qaws_status st = QAWS_STATUS_ALLOCATION_FAILURE;
 	if (!Tc || !cone || !fr)
 		goto done;
@@ -849,7 +855,7 @@ static qaws_status qd_guide(qaws_quadrangulate_desc const* desc, qaws_mesh_3d co
 	if (desc->size)
 	{
 		double lo = HUGE_VAL;
-		sz = (double*)qaws_internal_malloc(sizeof(double) * (n + 1));
+		sz = (double*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(double), (n + 1)));
 		if (!sz)
 			return st;
 		for (v = 0; v < n; v++)
@@ -875,7 +881,7 @@ static qaws_status qd_guide(qaws_quadrangulate_desc const* desc, qaws_mesh_3d co
 		/* cones: on the dense vertex the remesh kept at each (pinned there); attractors: the weights at the dense vertices */
 		double lo[3] = { HUGE_VAL, HUGE_VAL, HUGE_VAL }, hi[3] = { -HUGE_VAL, -HUGE_VAL, -HUGE_VAL }, rad = (double)desc->attractor_radius;
 		int* cone = desc->cone_count ? (int*)qaws_internal_zalloc((size_t)n + 1, sizeof(int)) : NULL;
-		double* vw = desc->attractor_count ? (double*)qaws_internal_malloc(sizeof(double) * 2 * (n + 1)) : NULL;
+		double* vw = desc->attractor_count ? (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), 2, (n + 1))) : NULL;
 		if ((desc->cone_count && !cone) || (desc->attractor_count && !vw))
 		{
 			qaws_internal_free(cone);
@@ -926,8 +932,8 @@ static qaws_status qd_guide(qaws_quadrangulate_desc const* desc, qaws_mesh_3d co
 	if (!desc->guide_directions && !desc->guide_edge_count)
 		return QAWS_STATUS_OK;
 	dir = (double*)qaws_internal_zalloc(3 * (size_t)n + 3, sizeof(double));
-	w = (double*)qaws_internal_zalloc((size_t)n + 1, sizeof(double));
-	band = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (n + 1));
+	w = (double*)qaws_internal_scratch_zalloc((size_t)n + 1, sizeof(double));
+	band = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (n + 1)));
 	if (!dir || !w || !band)
 		goto done;
 	for (v = 0; desc->guide_directions && v < n; v++)
@@ -1126,7 +1132,7 @@ static qaws_status qd_run(qaws_mesh_3d const* mesh, qaws_quadrangulate_desc cons
 	if (desc->cone_count)
 	{
 		/* the cones' vertices kept by the dense remesh too */
-		pins = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)desc->pinned_count + desc->cone_count + 1));
+		pins = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), ((size_t)desc->pinned_count + desc->cone_count + 1)));
 		if (!pins)
 		{
 			st = QAWS_STATUS_ALLOCATION_FAILURE;
@@ -1145,7 +1151,7 @@ static qaws_status qd_run(qaws_mesh_3d const* mesh, qaws_quadrangulate_desc cons
 	if (st != QAWS_STATUS_OK)
 		goto done;
 	/* 2. the fields, with the reference's normals */
-	nrm = (double*)qaws_internal_malloc(sizeof(double) * 3 * (dense->hm.nv + 1));
+	nrm = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), 3, (dense->hm.nv + 1)));
 	if (!nrm || !mr_scratch_init(&s, r->nt))
 	{
 		st = QAWS_STATUS_ALLOCATION_FAILURE;
@@ -1170,7 +1176,7 @@ static qaws_status qd_run(qaws_mesh_3d const* mesh, qaws_quadrangulate_desc cons
 		   a coarse start left them. Held by lines, either is first relaxed at the lattice's scale (Ginzburg-Landau), which
 		   parts the zeros the relaxed energy lets coincide: a disc held by its border gets four cones well inside it (an
 		   O-grid), neither one at its centre nor four on its rim. Any failure there keeps the field there is */
-		double* init = (double*)qaws_internal_zalloc(3 * (size_t)dense->hm.nv + 3, sizeof(double));
+		double* init = (double*)qaws_internal_scratch_zalloc(3 * (size_t)dense->hm.nv + 3, sizeof(double));
 		double *keep = NULL, *cand = NULL;
 		unsigned int pulled = 0, s0, l, t, placed = 0;
 		qaws_status fst = QAWS_STATUS_OK;
@@ -1200,8 +1206,8 @@ static qaws_status qd_run(qaws_mesh_3d const* mesh, qaws_quadrangulate_desc cons
 		mf_orientations(&h, desc->sweeps ? desc->sweeps : 8, init, 0);
 		for (total = 0, l = 0; l < h.nl; l++)
 			total += 3 * (size_t)h.lv[l].n;
-		keep = (double*)qaws_internal_malloc(sizeof(double) * (total + 1));
-		cand = (double*)qaws_internal_malloc(sizeof(double) * (3 * (size_t)dense->hm.nv + 3));
+		keep = (double*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(double), (total + 1)));
+		cand = (double*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(double), (3 * (size_t)dense->hm.nv + 3)));
 		if (!keep || !cand)
 		{
 			qaws_internal_free(init);
@@ -1265,8 +1271,8 @@ static qaws_status qd_run(qaws_mesh_3d const* mesh, qaws_quadrangulate_desc cons
 	/* 3. the steps between lattice points made to close round every face, the mesh read off them; all quads at the
 	   target when that leaves no other face, else (a triangle or a polygon left) the same at twice the target, every face
 	   split; holes left are not looked for, the split would not close them either */
-	T = (int*)qaws_internal_malloc(sizeof(int) * (2 * (size_t)dense->hm.nc + 2));
-	K = (unsigned char*)qaws_internal_malloc((size_t)dense->hm.nc + 1);
+	T = (int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(int), (2 * (size_t)dense->hm.nc + 2)));
+	K = (unsigned char*)qaws_internal_scratch_malloc((size_t)dense->hm.nc + 1);
 	if (!T || !K)
 	{
 		st = QAWS_STATUS_ALLOCATION_FAILURE;
@@ -1326,7 +1332,7 @@ static qaws_status qd_run(qaws_mesh_3d const* mesh, qaws_quadrangulate_desc cons
 	}
 	{
 		/* copies split off at creation take their sources' footpoints and kinds */
-		unsigned char* kind = (unsigned char*)qaws_internal_malloc(out->hm.nv + 1);
+		unsigned char* kind = (unsigned char*)qaws_internal_scratch_malloc(out->hm.nv + 1);
 		if (!kind)
 		{
 			st = QAWS_STATUS_ALLOCATION_FAILURE;
@@ -1414,7 +1420,7 @@ static qaws_status qd_run(qaws_mesh_3d const* mesh, qaws_quadrangulate_desc cons
 		qaws_internal_free(kind);
 	}
 	/* 4. attributes and the report */
-	fl = (qaws_mesh_location*)qaws_internal_malloc(sizeof(qaws_mesh_location) * (out->hm.nf + 1));
+	fl = (qaws_mesh_location*)qaws_internal_malloc(qaws_internal_mul2(sizeof(qaws_mesh_location), (out->hm.nf + 1)));
 	if (!fl)
 	{
 		st = QAWS_STATUS_ALLOCATION_FAILURE;

@@ -102,8 +102,8 @@ static int os_push_elem(os_elems* q, os_elem const* e)
 {
 	if (q->n == q->cap)
 	{
-		unsigned int nc = q->cap ? 2 * q->cap : 32;
-		os_elem* g = (os_elem*)qaws_internal_realloc(q->e, sizeof(os_elem) * nc);
+		unsigned int nc = qaws_internal_grow(q->cap, (size_t)q->n + 1, 32);
+		os_elem* g = nc ? (os_elem*)qaws_internal_realloc(q->e, qaws_internal_mul2(sizeof(os_elem), nc)) : NULL;
 		if (!g) return 0;
 		q->e = g;
 		q->cap = nc;
@@ -192,8 +192,8 @@ static qaws_status os_keep(os_ctx* x, qaws_curve* c)
 {
 	if (x->ncurves == x->capcurves)
 	{
-		unsigned int nc = x->capcurves ? 2 * x->capcurves : 256;
-		qaws_curve** g = (qaws_curve**)qaws_internal_realloc(x->curves, sizeof(qaws_curve*) * nc);
+		unsigned int nc = qaws_internal_grow(x->capcurves, (size_t)x->ncurves + 1, 256);
+		qaws_curve** g = nc ? (qaws_curve**)qaws_internal_realloc(x->curves, qaws_internal_mul2(sizeof(qaws_curve*), nc)) : NULL;
 		if (!g) { qaws_curve_destroy(c); return QAWS_STATUS_ALLOCATION_FAILURE; }
 		x->curves = g;
 		x->capcurves = nc;
@@ -245,10 +245,10 @@ static qaws_status os_arc(os_ctx* x, double const* center, double r, double a0, 
 
 static qaws_status os_loop_end(os_ctx* x, unsigned int first)
 {
-	if (x->nloops + 2 > x->caploops)
+	if ((size_t)x->nloops + 2 > x->caploops)
 	{
-		unsigned int nc = x->caploops ? 2 * x->caploops : 64;
-		unsigned int* g = (unsigned int*)qaws_internal_realloc(x->loop_first, sizeof(unsigned int) * nc);
+		unsigned int nc = qaws_internal_grow(x->caploops, (size_t)x->nloops + 2, 64);
+		unsigned int* g = nc ? (unsigned int*)qaws_internal_realloc(x->loop_first, qaws_internal_mul2(sizeof(unsigned int), nc)) : NULL;
 		if (!g) return QAWS_STATUS_ALLOCATION_FAILURE;
 		x->loop_first = g;
 		x->caploops = nc;
@@ -392,10 +392,11 @@ static int os_piece_straight(qaws_scalar const* p)
 static qaws_status os_keep_bspline(os_ctx* x, qaws_scalar const* cp, unsigned int count)
 {
 	unsigned int np = 3 * count + 1, kc = 0, i;
-	qaws_scalar* kn = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * (np + 4));
+	qaws_scalar* kn = (qaws_scalar*)qaws_internal_malloc(qaws_internal_mul2(sizeof(qaws_scalar), (np + 4)));
 	qaws_bspline_desc d;
 	qaws_curve* c = NULL;
 	qaws_status st;
+	if (count > (0xFFFFFFFFu - 5) / 3) { qaws_internal_free(kn); return QAWS_STATUS_ALLOCATION_FAILURE; }   /* np + 4 counts in unsigned int */
 	if (!kn) return QAWS_STATUS_ALLOCATION_FAILURE;
 	for (i = 0; i < 4; i++) kn[kc++] = 0;
 	for (i = 1; i < count; i++) { kn[kc++] = (qaws_scalar)i; kn[kc++] = (qaws_scalar)i; kn[kc++] = (qaws_scalar)i; }
@@ -599,12 +600,12 @@ static int os_cut_push(os_cuts* c, double t, os_geo const* g)
 {
 	if (c->n == c->cap)
 	{
-		unsigned int nc = c->cap ? 2 * c->cap : 32;
-		double* a = (double*)qaws_internal_realloc(c->t, sizeof(double) * nc);
+		unsigned int nc = qaws_internal_grow(c->cap, (size_t)c->n + 1, 32);
+		double* a = nc ? (double*)qaws_internal_realloc(c->t, qaws_internal_mul2(sizeof(double), nc)) : NULL;
 		os_geo* b;
 		if (!a) return 0;
 		c->t = a;
-		b = (os_geo*)qaws_internal_realloc(c->g, sizeof(os_geo) * nc);
+		b = (os_geo*)qaws_internal_realloc(c->g, qaws_internal_mul2(sizeof(os_geo), nc));
 		if (!b) return 0;
 		c->g = b;
 		c->cap = nc;
@@ -766,12 +767,12 @@ static void os_fit_push(os_fit* f, double const* b)
 {
 	unsigned int k;
 	if (f->status != QAWS_STATUS_OK) return;
-	if (3 * (f->count + 1) + 1 > f->cap)
+	if (qaws_internal_add2(qaws_internal_mul2(3, (size_t)f->count + 1), 1) > f->cap)
 	{
-		unsigned int nc = f->cap ? 2 * f->cap : 64;
+		unsigned int nc = qaws_internal_grow(f->cap, qaws_internal_add2(qaws_internal_mul2(3, (size_t)f->count + 1), 1), 64);
 		qaws_scalar* g;
-		while (nc < 3 * (f->count + 1) + 1) nc *= 2;
-		g = (qaws_scalar*)qaws_internal_realloc(f->cp, sizeof(qaws_scalar) * 2 * nc);
+		if (!nc) { f->status = QAWS_STATUS_ALLOCATION_FAILURE; return; }
+		g = (qaws_scalar*)qaws_internal_realloc(f->cp, qaws_internal_mul3(sizeof(qaws_scalar), 2, nc));
 		if (!g) { f->status = QAWS_STATUS_ALLOCATION_FAILURE; return; }
 		f->cp = g;
 		f->cap = nc;
@@ -1525,8 +1526,8 @@ static qaws_status os_path(os_ctx* x, qaws_path_2d const* p, double delta, qaws_
 		else
 		{
 			unsigned int first = x->ncurves, n = q.n;
-			double* se = (double*)qaws_internal_malloc(sizeof(double) * 4 * (2 * n + 1));
-			os_elem* both = (os_elem*)qaws_internal_malloc(sizeof(os_elem) * (2 * n + 1));
+			double* se = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), 4, (2 * n + 1)));
+			os_elem* both = (os_elem*)qaws_internal_malloc(qaws_internal_mul2(sizeof(os_elem), (2 * n + 1)));
 			if (!se || !both) s = QAWS_STATUS_ALLOCATION_FAILURE;
 			for (i = 0; s == QAWS_STATUS_OK && i < n; i++)
 			{
@@ -1612,8 +1613,8 @@ static qaws_status os_poly_push(os_poly* q, double px, double py)
 {
 	if (q->n == q->cap)
 	{
-		unsigned int nc = q->cap ? 2 * q->cap : 256;
-		double* g = (double*)qaws_internal_realloc(q->xy, sizeof(double) * 2 * nc);
+		unsigned int nc = qaws_internal_grow(q->cap, (size_t)q->n + 1, 256);
+		double* g = nc ? (double*)qaws_internal_realloc(q->xy, qaws_internal_mul3(sizeof(double), 2, nc)) : NULL;
 		if (!g)
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 		q->xy = g;
@@ -1645,7 +1646,7 @@ static qaws_status os_poly_span(os_poly* q, qaws_curve const* c, double t0, doub
 static qaws_status os_poly_path64(os_poly const* q, double const* org, double scale, int64_t** pts, qaws_path64* out)
 {
 	unsigned int i;
-	*pts = (int64_t*)qaws_internal_malloc(sizeof(int64_t) * 2 * (q->n + 1));
+	*pts = (int64_t*)qaws_internal_malloc(qaws_internal_mul3(sizeof(int64_t), 2, (q->n + 1)));
 	if (!*pts)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	for (i = 0; i < q->n; i++)
@@ -1707,8 +1708,8 @@ static qaws_status os_erode_path(os_ctx* x, qaws_path_2d const* p, double delta,
 	nsides = tol < w ? (unsigned int)ceil(OS_PI / acos(1 - tol / w)) : 8;
 	if (nsides < 8) nsides = 8;
 	if (nsides > 1024) nsides = 1024;
-	pieces = (qaws_path64*)qaws_internal_malloc(sizeof(qaws_path64) * 2 * n);
-	all = (int64_t*)qaws_internal_malloc(sizeof(int64_t) * 2 * n * (4 + nsides));
+	pieces = (qaws_path64*)qaws_internal_malloc(qaws_internal_mul3(sizeof(qaws_path64), 2, n));
+	all = (int64_t*)qaws_internal_malloc(qaws_internal_mul4(sizeof(int64_t), 2, n, (4 + nsides)));
 	if (!pieces || !all)
 		s = QAWS_STATUS_ALLOCATION_FAILURE;
 	for (i = 0; s == QAWS_STATUS_OK && i < n; i++)
@@ -1800,7 +1801,7 @@ static qaws_status os_erode_path(os_ctx* x, qaws_path_2d const* p, double delta,
 		qaws_clip64_result_get_path(res, i, &rp, &m);
 		if (m < 3)
 			continue;
-		fp = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * 2 * m);
+		fp = (qaws_scalar*)qaws_internal_malloc(qaws_internal_mul3(sizeof(qaws_scalar), 2, m));
 		if (!fp) { s = QAWS_STATUS_ALLOCATION_FAILURE; break; }
 		{
 			/* the points within a tenth of the tolerance of the chord between
@@ -1904,8 +1905,8 @@ static qaws_status os_erode_path(os_ctx* x, qaws_path_2d const* p, double delta,
 	if (s == QAWS_STATUS_OK)
 	{
 		qaws_clip_desc cd;
-		loops = (qaws_path_2d*)qaws_internal_malloc(sizeof(qaws_path_2d) * (b.nloops + 1));
-		views = (qaws_curve const**)qaws_internal_malloc(sizeof(qaws_curve*) * (b.ncurves + 1));
+		loops = (qaws_path_2d*)qaws_internal_malloc(qaws_internal_mul2(sizeof(qaws_path_2d), (b.nloops + 1)));
+		views = (qaws_curve const**)qaws_internal_malloc(qaws_internal_mul2(sizeof(qaws_curve*), (b.ncurves + 1)));
 		if (!loops || !views)
 			s = QAWS_STATUS_ALLOCATION_FAILURE;
 		else
@@ -1930,7 +1931,7 @@ static qaws_status os_erode_path(os_ctx* x, qaws_path_2d const* p, double delta,
 	if (s == QAWS_STATUS_OK)
 	{
 		nb = qaws_clip_result_get_path_count(band);
-		bp = (qaws_path_2d*)qaws_internal_malloc(sizeof(qaws_path_2d) * (nb + 1));
+		bp = (qaws_path_2d*)qaws_internal_malloc(qaws_internal_mul2(sizeof(qaws_path_2d), (nb + 1)));
 		if (!bp)
 			s = QAWS_STATUS_ALLOCATION_FAILURE;
 		for (i = 0; s == QAWS_STATUS_OK && i < nb; i++)
@@ -1973,7 +1974,7 @@ static qaws_status os_check(qaws_offset_desc const* desc, qaws_clip_result const
 	for (g = 0; g < desc->group_count; g++)
 		for (k = 0; k < desc->groups[g].path_count; k++)
 			n += desc->groups[g].paths[k].curve_count;
-	in = (qaws_curve const**)qaws_internal_malloc(sizeof(qaws_curve*) * (n + 1));
+	in = (qaws_curve const**)qaws_internal_malloc(qaws_internal_mul2(sizeof(qaws_curve*), (n + 1)));
 	if (!in)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	n = 0;
@@ -1997,8 +1998,8 @@ static qaws_status os_check(qaws_offset_desc const* desc, qaws_clip_result const
 				double t = c->parameter_range.min_value + (c->parameter_range.max_value - c->parameter_range.min_value) * q / m;
 				if (np == capp)
 				{
-					unsigned int nc = capp ? 2 * capp : 1024;
-					qaws_scalar* gp = (qaws_scalar*)qaws_internal_realloc(pts, sizeof(qaws_scalar) * 2 * nc);
+					unsigned int nc = qaws_internal_grow(capp, (size_t)np + 1, 1024);
+					qaws_scalar* gp = nc ? (qaws_scalar*)qaws_internal_realloc(pts, qaws_internal_mul3(sizeof(qaws_scalar), 2, nc)) : NULL;
 					if (!gp) { s = QAWS_STATUS_ALLOCATION_FAILURE; break; }
 					pts = gp;
 					capp = nc;
@@ -2012,7 +2013,7 @@ static qaws_status os_check(qaws_offset_desc const* desc, qaws_clip_result const
 	}
 	if (s == QAWS_STATUS_OK && np && n)
 	{
-		cl = (qaws_closest_point*)qaws_internal_malloc(sizeof(qaws_closest_point) * np);
+		cl = (qaws_closest_point*)qaws_internal_malloc(qaws_internal_mul2(sizeof(qaws_closest_point), np));
 		if (!cl)
 			s = QAWS_STATUS_ALLOCATION_FAILURE;
 		else
@@ -2062,7 +2063,7 @@ static qaws_status os_execute(qaws_offset_desc const* desc, qaws_clip_result** o
 		for (g = 0; g < desc->group_count; g++)
 			for (k = 0; k < desc->groups[g].path_count; k++)
 				n += desc->groups[g].paths[k].curve_count;
-		all = (qaws_curve const**)qaws_internal_malloc(sizeof(qaws_curve*) * (n + 1));
+		all = (qaws_curve const**)qaws_internal_malloc(qaws_internal_mul2(sizeof(qaws_curve*), (n + 1)));
 		if (!all) return QAWS_STATUS_ALLOCATION_FAILURE;
 		n = 0;
 		for (g = 0; g < desc->group_count; g++)
@@ -2145,8 +2146,8 @@ static qaws_status os_execute(qaws_offset_desc const* desc, qaws_clip_result** o
 	if (s == QAWS_STATUS_OK)
 	{
 		qaws_clip_desc cd;
-		loops = (qaws_path_2d*)qaws_internal_malloc(sizeof(qaws_path_2d) * (x.nloops + 1));
-		views = (qaws_curve const**)qaws_internal_malloc(sizeof(qaws_curve*) * (x.ncurves + 1));
+		loops = (qaws_path_2d*)qaws_internal_malloc(qaws_internal_mul2(sizeof(qaws_path_2d), (x.nloops + 1)));
+		views = (qaws_curve const**)qaws_internal_malloc(qaws_internal_mul2(sizeof(qaws_curve*), (x.ncurves + 1)));
 		if (!loops || !views)
 			s = QAWS_STATUS_ALLOCATION_FAILURE;
 		else
@@ -2187,7 +2188,7 @@ static double os_check_tolerance(qaws_offset_desc const* desc)
 	for (g = 0; g < desc->group_count; g++)
 		for (k = 0; k < desc->groups[g].path_count; k++)
 			n += desc->groups[g].paths[k].curve_count;
-	all = (qaws_curve const**)qaws_internal_malloc(sizeof(qaws_curve*) * (n + 1));
+	all = (qaws_curve const**)qaws_internal_malloc(qaws_internal_mul2(sizeof(qaws_curve*), (n + 1)));
 	if (all)
 	{
 		n = 0;

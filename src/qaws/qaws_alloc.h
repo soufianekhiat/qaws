@@ -71,6 +71,15 @@ void qaws_get_thread_allocator(qaws_allocator* out_allocator);              /* z
 void qaws_exchange_thread_allocator(qaws_allocator const* allocator, qaws_allocator* out_previous);
 
 /*
+ * Scratch apart from results: with a scratch allocator installed on a thread, the temporaries of adaptive sampling,
+ * tessellation, meshing, clipping and the repulsive solvers (blocks allocated and released within one call) come from
+ * it; results and objects still come from the _ex argument, the thread allocator or the default as above, so a frame
+ * arena can serve as scratch and be reset after each call while results stay. Other operations take their scratch as
+ * before. Installs it (NULL: none) and returns the one it replaces (zeroed: none); restore it on every return path.
+ */
+void qaws_exchange_thread_scratch_allocator(qaws_allocator const* allocator, qaws_allocator* out_previous);
+
+/*
  * An allocator over caller memory (sized interface): a mapped file, pinned memory, a host frame arena. The memory must
  * be CPU-accessible and coherent for the CPU; placing the library's data there does not move any computation to a GPU.
  *

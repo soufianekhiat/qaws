@@ -378,14 +378,14 @@ qaws_status qaws_curve_create_composite_ex(
 		curve->span_boundaries[i] = (qaws_scalar)i;
 
 	/* Allocate impl */
-	impl = (qaws_composite_impl*)qaws_internal_alloc(allocator, (unsigned long)(sizeof(qaws_composite_impl)));
+	impl = (qaws_composite_impl*)qaws_internal_alloc(allocator, sizeof(qaws_composite_impl));
 	if (!impl) {
 		qaws_curve_destroy(curve);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 
 	impl->segment_count = desc->segment_count;
-	impl->segments = (qaws_curve**)qaws_internal_alloc(allocator, (unsigned long)(sizeof(qaws_curve*) * (size_t)desc->segment_count));
+	impl->segments = (qaws_curve**)qaws_internal_alloc(allocator, qaws_internal_mul2(sizeof(qaws_curve*), (size_t)desc->segment_count));
 	if (!impl->segments) {
 		qaws_internal_dealloc(allocator, impl);
 		qaws_curve_destroy(curve);

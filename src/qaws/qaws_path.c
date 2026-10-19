@@ -85,8 +85,10 @@ qaws_status qaws_curve_create_polyline_2d(qaws_scalar const* points, unsigned in
 	if (!points || !out_curve || count < 2)
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	*out_curve = NULL;
+	if (count > 0xFFFFFFFFu / 4 - 1)   /* 3 n + 2 scalars count in unsigned int */
+		return QAWS_STATUS_INVALID_CONTROL_POINT_COUNT;
 	n = count + (closed ? 1u : 0u);
-	cp = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * (2 * n + n + 2));
+	cp = (qaws_scalar*)qaws_internal_malloc(qaws_internal_mul2(sizeof(qaws_scalar), (2 * n + n + 2)));
 	if (!cp)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	kn = cp + 2 * n;
@@ -195,9 +197,12 @@ static qaws_status pt_arc_to_nurbs(qaws_curve const* curve, qaws_curve** out)
 	for (i = 0; i < impl->segment_count; i++)
 	{
 		double sweep = fabs((double)(impl->segments[i].angle_end - impl->segments[i].angle_start));
-		n += (unsigned int)ceil(sweep / (PT_PI / 2) - 1e-9) > 0 ? (unsigned int)ceil(sweep / (PT_PI / 2) - 1e-9) : 1;
+		double q = ceil(sweep / (PT_PI / 2) - 1e-9);
+		if (!(q < (double)(0xFFFFFFFFu / 8 - n)))   /* (2 n + 1) * 3 + 2 n + 4 counts in unsigned int */
+			return QAWS_STATUS_INVALID_ARGUMENT;
+		n += q > 0 ? (unsigned int)q : 1;
 	}
-	cp = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * ((2 * n + 1) * 3 + 2 * n + 4));
+	cp = (qaws_scalar*)qaws_internal_malloc(qaws_internal_mul2(sizeof(qaws_scalar), ((2 * n + 1) * 3 + 2 * n + 4)));
 	if (!cp)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	w = cp + 2 * (2 * n + 1);
@@ -280,7 +285,7 @@ qaws_status qaws_curve_transform_2d(qaws_curve const* curve, qaws_scalar const m
 	case QAWS_CURVE_KIND_BEZIER:
 	{
 		qaws_bezier_impl const* impl = (qaws_bezier_impl const*)curve->impl;
-		qaws_scalar* cp = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * 2 * impl->control_point_count);
+		qaws_scalar* cp = (qaws_scalar*)qaws_internal_malloc(qaws_internal_mul3(sizeof(qaws_scalar), 2, impl->control_point_count));
 		qaws_bezier_desc d;
 		if (!cp) return QAWS_STATUS_ALLOCATION_FAILURE;
 		pt_map(m, impl->control_points, cp, impl->control_point_count);
@@ -294,7 +299,7 @@ qaws_status qaws_curve_transform_2d(qaws_curve const* curve, qaws_scalar const m
 	case QAWS_CURVE_KIND_RATIONAL_BEZIER:
 	{
 		qaws_rational_bezier_impl const* impl = (qaws_rational_bezier_impl const*)curve->impl;
-		qaws_scalar* cp = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * 2 * impl->control_point_count);
+		qaws_scalar* cp = (qaws_scalar*)qaws_internal_malloc(qaws_internal_mul3(sizeof(qaws_scalar), 2, impl->control_point_count));
 		qaws_rational_bezier_desc d;
 		if (!cp) return QAWS_STATUS_ALLOCATION_FAILURE;
 		pt_map(m, impl->control_points, cp, impl->control_point_count);
@@ -309,7 +314,7 @@ qaws_status qaws_curve_transform_2d(qaws_curve const* curve, qaws_scalar const m
 	case QAWS_CURVE_KIND_BSPLINE:
 	{
 		qaws_bspline_impl const* impl = (qaws_bspline_impl const*)curve->impl;
-		qaws_scalar* cp = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * 2 * impl->control_point_count);
+		qaws_scalar* cp = (qaws_scalar*)qaws_internal_malloc(qaws_internal_mul3(sizeof(qaws_scalar), 2, impl->control_point_count));
 		qaws_bspline_desc d;
 		if (!cp) return QAWS_STATUS_ALLOCATION_FAILURE;
 		pt_map(m, impl->control_points, cp, impl->control_point_count);
@@ -324,7 +329,7 @@ qaws_status qaws_curve_transform_2d(qaws_curve const* curve, qaws_scalar const m
 	case QAWS_CURVE_KIND_NURBS:
 	{
 		qaws_nurbs_impl const* impl = (qaws_nurbs_impl const*)curve->impl;
-		qaws_scalar* cp = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * 2 * impl->control_point_count);
+		qaws_scalar* cp = (qaws_scalar*)qaws_internal_malloc(qaws_internal_mul3(sizeof(qaws_scalar), 2, impl->control_point_count));
 		qaws_nurbs_desc d;
 		if (!cp) return QAWS_STATUS_ALLOCATION_FAILURE;
 		pt_map(m, impl->control_points, cp, impl->control_point_count);
@@ -342,7 +347,7 @@ qaws_status qaws_curve_transform_2d(qaws_curve const* curve, qaws_scalar const m
 		/* linear part on every coefficient, the translation on c0 only */
 		qaws_polynomial_impl const* impl = (qaws_polynomial_impl const*)curve->impl;
 		unsigned int n = impl->coefficient_count, i;
-		qaws_scalar* co = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * 2 * n);
+		qaws_scalar* co = (qaws_scalar*)qaws_internal_malloc(qaws_internal_mul3(sizeof(qaws_scalar), 2, n));
 		qaws_polynomial_desc d;
 		if (!co) return QAWS_STATUS_ALLOCATION_FAILURE;
 		for (i = 0; i < n; i++)
@@ -374,7 +379,7 @@ qaws_status qaws_curve_transform_2d(qaws_curve const* curve, qaws_scalar const m
 			qaws_curve_destroy(nurbs);
 			return s;
 		}
-		seg = (qaws_arc_segment*)qaws_internal_malloc(sizeof(qaws_arc_segment) * impl->segment_count);
+		seg = (qaws_arc_segment*)qaws_internal_malloc(qaws_internal_mul2(sizeof(qaws_arc_segment), impl->segment_count));
 		if (!seg) return QAWS_STATUS_ALLOCATION_FAILURE;
 		for (i = 0; i < impl->segment_count; i++)
 		{
@@ -429,7 +434,7 @@ qaws_status qaws_curve_transform_2d(qaws_curve const* curve, qaws_scalar const m
 	case QAWS_CURVE_KIND_COMPOSITE:
 	{
 		qaws_composite_impl const* impl = (qaws_composite_impl const*)curve->impl;
-		qaws_curve** seg = (qaws_curve**)qaws_internal_malloc(sizeof(qaws_curve*) * impl->segment_count);
+		qaws_curve** seg = (qaws_curve**)qaws_internal_malloc(qaws_internal_mul2(sizeof(qaws_curve*), impl->segment_count));
 		qaws_composite_desc d;
 		unsigned int i, made = 0;
 		if (!seg) return QAWS_STATUS_ALLOCATION_FAILURE;
@@ -769,8 +774,8 @@ static int pt_push(pt_segs* q, pt_seg const* g)
 {
 	if (q->n == q->cap)
 	{
-		unsigned int cap = q->cap ? 2 * q->cap : 256;
-		pt_seg* s = (pt_seg*)qaws_internal_realloc(q->s, sizeof(pt_seg) * cap);
+		unsigned int cap = qaws_internal_grow(q->cap, (size_t)q->n + 1, 256);
+		pt_seg* s = cap ? (pt_seg*)qaws_internal_realloc(q->s, qaws_internal_mul2(sizeof(pt_seg), cap)) : NULL;
 		if (!s) return 0;
 		q->s = s;
 		q->cap = cap;
@@ -1055,7 +1060,7 @@ qaws_status qaws_polyline_trim_collinear_2d(qaws_scalar const* points, unsigned 
 	qaws_status s;
 	if ((!points && count) || !out || !out_count)
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	w = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * 2 * (count ? count : 1));
+	w = (qaws_scalar*)qaws_internal_malloc(qaws_internal_mul3(sizeof(qaws_scalar), 2, (count ? count : 1)));
 	if (!w)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	s = qaws_polyline_strip_duplicates_2d(points, count, closed, w, &n);
@@ -1131,8 +1136,8 @@ qaws_status qaws_polyline_simplify_2d(qaws_scalar const* points, unsigned int co
 		*out_count = count;
 		return QAWS_STATUS_OK;
 	}
-	prev = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * 2 * n);
-	dist = (double*)qaws_internal_malloc(sizeof(double) * n);
+	prev = (unsigned int*)qaws_internal_malloc(qaws_internal_mul3(sizeof(unsigned int), 2, n));
+	dist = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), n));
 	gone = (unsigned char*)qaws_internal_zalloc(n, 1);
 	if (!prev || !dist || !gone)
 	{

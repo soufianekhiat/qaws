@@ -141,13 +141,13 @@ qaws_status vm_create(double const* x, unsigned int nv, unsigned int const* cv, 
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	m->nv = nv;
 	m->nc = nc;
-	m->x = (double*)qaws_internal_malloc(sizeof(double) * (3 * (size_t)nv + 1));
+	m->x = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), (3 * (size_t)nv + 1)));
 	m->type = (unsigned char*)qaws_internal_malloc((size_t)nc + 1);
-	m->c0 = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)nc + 1));
-	m->f0 = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)nc + 1));
-	m->cv = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)ncorner + 1));
-	m->fo = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)nfacet + 1));
-	keys = (vm_key*)qaws_internal_malloc(sizeof(vm_key) * ((size_t)nfacet + 1));
+	m->c0 = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), ((size_t)nc + 1)));
+	m->f0 = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), ((size_t)nc + 1)));
+	m->cv = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), ((size_t)ncorner + 1)));
+	m->fo = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), ((size_t)nfacet + 1)));
+	keys = (vm_key*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(vm_key), ((size_t)nfacet + 1)));
 	if (!m->x || !m->type || !m->c0 || !m->f0 || !m->cv || !m->fo || !keys)
 		goto done;
 	memcpy(m->x, x, sizeof(double) * 3 * nv);
@@ -218,8 +218,8 @@ qaws_status qaws_volume_mesh_create(qaws_volume_mesh_desc const* desc, qaws_volu
 	*out_mesh = NULL;
 	if (!desc || (desc->vertex_count && !desc->positions) || (desc->cell_count && !desc->cell_vertices))
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	x = (double*)qaws_internal_malloc(sizeof(double) * (3 * (size_t)desc->vertex_count + 1));
-	type = (unsigned char*)qaws_internal_malloc((size_t)desc->cell_count + 1);
+	x = (double*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(double), (3 * (size_t)desc->vertex_count + 1)));
+	type = (unsigned char*)qaws_internal_scratch_malloc((size_t)desc->cell_count + 1);
 	if (!x || !type)
 	{
 		qaws_internal_free(x);
@@ -313,12 +313,12 @@ qaws_status qaws_volume_mesh_get_boundary(qaws_volume_mesh const* m, qaws_mesh_3
 	*out_surface = NULL;
 	if (!m)
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	map = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)m->nv + 1));
-	src = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)m->nv + 1));
-	fv = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (4 * (size_t)m->f0[m->nc] + 1));
-	fs = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)m->f0[m->nc] + 1));
-	fcell = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)m->f0[m->nc] + 1));
-	xb = (double*)qaws_internal_malloc(sizeof(double) * (3 * (size_t)m->nv + 1));
+	map = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), ((size_t)m->nv + 1)));
+	src = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), ((size_t)m->nv + 1)));
+	fv = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (4 * (size_t)m->f0[m->nc] + 1)));
+	fs = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), ((size_t)m->f0[m->nc] + 1)));
+	fcell = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), ((size_t)m->f0[m->nc] + 1)));
+	xb = (double*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(double), (3 * (size_t)m->nv + 1)));
 	if (!map || !src || !fv || !fs || !fcell || !xb)
 		goto done;
 	for (k = 0; k < m->nv; k++)
@@ -345,7 +345,7 @@ qaws_status qaws_volume_mesh_get_boundary(qaws_volume_mesh const* m, qaws_mesh_3
 	st = hm_mesh_3d_create(xb, nvb, fv, fs, nb, &s);
 	if (st != QAWS_STATUS_OK)
 		goto done;
-	vals = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * ((size_t)s->hm.nv + nb + 1));
+	vals = (qaws_scalar*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(qaws_scalar), ((size_t)s->hm.nv + nb + 1)));
 	if (!vals)
 	{
 		st = QAWS_STATUS_ALLOCATION_FAILURE;

@@ -54,7 +54,7 @@ qaws_status qaws_internal_parallel(qaws_batch_executor const* executor, unsigned
 	w.ctx = ctx;
 	if (w.chunks == 0)
 		return QAWS_STATUS_OK;
-	w.status = (qaws_status*)qaws_internal_malloc(w.chunks * sizeof(qaws_status));
+	w.status = (qaws_status*)qaws_internal_malloc(qaws_internal_mul2(w.chunks, sizeof(qaws_status)));
 	if (!w.status)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	for (k = 0; k < w.chunks; k++)

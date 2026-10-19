@@ -35,7 +35,7 @@ static qaws_scalar* chaikin_step(
 
 	if (closed) {
 		unsigned int new_count = 2 * count;
-		result = (qaws_scalar*)qaws_internal_alloc(allocator, (unsigned long)(sizeof(qaws_scalar) * (size_t)(new_count * dim_count)));
+		result = (qaws_scalar*)qaws_internal_alloc(allocator, qaws_internal_mul3(sizeof(qaws_scalar), new_count, dim_count));
 		if (!result) return NULL;
 
 		for (i = 0; i < count; i++) {
@@ -53,7 +53,7 @@ static qaws_scalar* chaikin_step(
 		*out_count = new_count;
 	} else {
 		unsigned int new_count = 2 * (count - 1) + 1;
-		result = (qaws_scalar*)qaws_internal_alloc(allocator, (unsigned long)(sizeof(qaws_scalar) * (size_t)(new_count * dim_count)));
+		result = (qaws_scalar*)qaws_internal_alloc(allocator, qaws_internal_mul3(sizeof(qaws_scalar), new_count, dim_count));
 		if (!result) return NULL;
 
 		/* Keep first endpoint */
@@ -109,7 +109,7 @@ static qaws_scalar* lane_riesenfeld_step(
 
 	if (closed) {
 		doubled_count = 2 * count;
-		doubled = (qaws_scalar*)qaws_internal_alloc(allocator, (unsigned long)(sizeof(qaws_scalar) * (size_t)(doubled_count * dim_count)));
+		doubled = (qaws_scalar*)qaws_internal_alloc(allocator, qaws_internal_mul3(sizeof(qaws_scalar), doubled_count, dim_count));
 		if (!doubled) return NULL;
 
 		for (i = 0; i < count; i++) {
@@ -125,7 +125,7 @@ static qaws_scalar* lane_riesenfeld_step(
 		}
 	} else {
 		doubled_count = 2 * count - 1;
-		doubled = (qaws_scalar*)qaws_internal_alloc(allocator, (unsigned long)(sizeof(qaws_scalar) * (size_t)(doubled_count * dim_count)));
+		doubled = (qaws_scalar*)qaws_internal_alloc(allocator, qaws_internal_mul3(sizeof(qaws_scalar), doubled_count, dim_count));
 		if (!doubled) return NULL;
 
 		for (i = 0; i < count - 1; i++) {
@@ -147,8 +147,7 @@ static qaws_scalar* lane_riesenfeld_step(
 	for (r = 0; r < averaging_rounds; r++) {
 		if (closed) {
 			/* Average all points with their next neighbor (wrapping) */
-			qaws_scalar* temp = (qaws_scalar*)qaws_internal_alloc(allocator, (unsigned long)
-				(sizeof(qaws_scalar) * (size_t)(doubled_count * dim_count)));
+			qaws_scalar* temp = (qaws_scalar*)qaws_internal_alloc(allocator, qaws_internal_mul3(sizeof(qaws_scalar), doubled_count, dim_count));
 			if (!temp) { qaws_internal_dealloc(allocator, doubled); return NULL; }
 
 			for (i = 0; i < doubled_count; i++) {
@@ -164,8 +163,7 @@ static qaws_scalar* lane_riesenfeld_step(
 			doubled = temp;
 		} else {
 			/* Average interior points; keep endpoints fixed */
-			qaws_scalar* temp = (qaws_scalar*)qaws_internal_alloc(allocator, (unsigned long)
-				(sizeof(qaws_scalar) * (size_t)(doubled_count * dim_count)));
+			qaws_scalar* temp = (qaws_scalar*)qaws_internal_alloc(allocator, qaws_internal_mul3(sizeof(qaws_scalar), doubled_count, dim_count));
 			if (!temp) { qaws_internal_dealloc(allocator, doubled); return NULL; }
 
 			/* Keep first endpoint */
@@ -215,13 +213,19 @@ static qaws_scalar* apply_subdivision(
 
 	/* Copy input so we can iterate */
 	current_count = input_count;
-	current = (qaws_scalar*)qaws_internal_alloc(allocator, (unsigned long)(sizeof(qaws_scalar) * (size_t)(current_count * dim_count)));
+	current = (qaws_scalar*)qaws_internal_alloc(allocator, qaws_internal_mul3(sizeof(qaws_scalar), current_count, dim_count));
 	if (!current) return NULL;
 	memcpy(current, input_pts, sizeof(qaws_scalar) * (size_t)(current_count * dim_count));
 
 	for (lev = 0; lev < levels; lev++) {
 		qaws_scalar* next = NULL;
 		unsigned int next_count = 0;
+
+		/* a step at most doubles the count; the doubled count * dim_count * 4 (span coefficients) must fit unsigned int */
+		if (current_count > 0xFFFFFFFFu / (8 * dim_count)) {
+			qaws_internal_dealloc(allocator, current);
+			return NULL;
+		}
 
 		switch (scheme) {
 		case QAWS_SUBDIVISION_CHAIKIN:
@@ -537,6 +541,8 @@ qaws_status qaws_curve_create_subdivision_ex(
 		return QAWS_STATUS_INVALID_ARGUMENT;
 
 	dim_count = (desc->dimension == QAWS_DIMENSION_2D) ? 2u : 3u;
+	if (desc->control_point_count > 0xFFFFFFFFu / (8 * dim_count))   /* see apply_subdivision */
+		return QAWS_STATUS_INVALID_CONTROL_POINT_COUNT;
 	levels = desc->refinement_levels;
 	if (levels == 0)
 		levels = 6;  /* default */
@@ -585,7 +591,7 @@ qaws_status qaws_curve_create_subdivision_ex(
 
 	/* --- Compute Catmull-Rom coefficients for each span ---------------- */
 
-	impl->segment_coeffs = (qaws_scalar*)qaws_internal_calloc(allocator, (size_t)(span_count * dim_count * 4), sizeof(qaws_scalar));
+	impl->segment_coeffs = (qaws_scalar*)qaws_internal_calloc(allocator, qaws_internal_mul3(span_count, dim_count, 4), sizeof(qaws_scalar));
 	if (!impl->segment_coeffs) {
 		qaws_internal_dealloc(allocator, impl->refined_points);
 		qaws_internal_dealloc(allocator, impl);
@@ -625,8 +631,8 @@ qaws_status qaws_curve_create_subdivision_ex(
 		qaws_scalar* phantom_end = NULL;
 		unsigned int d;
 
-		phantom_start = (qaws_scalar*)qaws_internal_alloc(allocator, (unsigned long)(sizeof(qaws_scalar) * dim_count));
-		phantom_end = (qaws_scalar*)qaws_internal_alloc(allocator, (unsigned long)(sizeof(qaws_scalar) * dim_count));
+		phantom_start = (qaws_scalar*)qaws_internal_alloc(allocator, qaws_internal_mul2(sizeof(qaws_scalar), dim_count));
+		phantom_end = (qaws_scalar*)qaws_internal_alloc(allocator, qaws_internal_mul2(sizeof(qaws_scalar), dim_count));
 		if (!phantom_start || !phantom_end) {
 			qaws_internal_dealloc(allocator, phantom_start);
 			qaws_internal_dealloc(allocator, phantom_end);

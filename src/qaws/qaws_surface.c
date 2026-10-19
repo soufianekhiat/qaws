@@ -93,6 +93,7 @@ qaws_status qaws_surface_sample(
 	if (!surface || !out_positions || !out_position_count)
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	if (u_count < 2 || v_count < 2) return QAWS_STATUS_INVALID_ARGUMENT;
+	if (u_count > 0xFFFFFFFFu / v_count) return QAWS_STATUS_INVALID_ARGUMENT;   /* the grid counts in unsigned int */
 
 	total = u_count * v_count;
 	if (total > position_capacity) return QAWS_STATUS_BUFFER_TOO_SMALL;

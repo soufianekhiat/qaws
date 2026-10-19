@@ -180,9 +180,9 @@ static qaws_status mk_float(qaws_scalar const* pattern, unsigned int np, qaws_sc
 	if (!pattern || !path || !out || np < 1 || nq < 1)
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	*out = NULL;
-	pat = (double*)qaws_internal_malloc(sizeof(double) * 2 * np);
-	pth = (double*)qaws_internal_malloc(sizeof(double) * 2 * nq);
-	quads = (double*)qaws_internal_malloc(sizeof(double) * 8 * (nq * np + 1));
+	pat = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), 2, np));
+	pth = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), 2, nq));
+	quads = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), 8, (nq * np + 1)));
 	if (!pat || !pth || !quads)
 	{
 		qaws_internal_free(pat); qaws_internal_free(pth); qaws_internal_free(quads);
@@ -226,8 +226,8 @@ static qaws_status mk_64(int64_t const* pattern, unsigned int np, int64_t const*
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	*out = NULL;
 	nquad = nq >= 2 ? (closed ? nq : nq - 1) * np : 0;
-	q64 = (int64_t*)qaws_internal_malloc(sizeof(int64_t) * 8 * (nquad + 1));
-	paths = (qaws_path64*)qaws_internal_malloc(sizeof(qaws_path64) * (nquad + 1));
+	q64 = (int64_t*)qaws_internal_malloc(qaws_internal_mul3(sizeof(int64_t), 8, (nquad + 1)));
+	paths = (qaws_path64*)qaws_internal_malloc(qaws_internal_mul2(sizeof(qaws_path64), (nquad + 1)));
 	if (!q64 || !paths)
 	{
 		qaws_internal_free(q64); qaws_internal_free(paths);

@@ -11,7 +11,7 @@
 typedef qaws_exact_poly poly;
 static void* sv_alloc(size_t bytes)
 {
-	return qaws_internal_alloc(NULL, (unsigned long)bytes);
+	return qaws_internal_alloc(NULL, bytes);
 }
 
 static void sv_free(void* p)

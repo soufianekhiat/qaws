@@ -241,14 +241,20 @@ int main(void)
 	g_patch = mb_patch();
 	for (k = 0; k < 64; k++)
 		g_squares[k] = mb_square((k % 8) * 0.7, (k / 8) * 0.7, 1.0);
-	printf("%-34s %12s %12s %10s %14s %14s %8s\n", "operation", "heap ms", "arena ms", "blocks", "heap live peak", "arena peak", "ratio");
+	/* columns: time on the heap and in an arena; the heap's blocks and live peak; the arena's peak and its ratio to that;
+	   then the split run: time, the blocks that went to the scratch arena and those left on the heap, the scratch peak and
+	   the heap's live peak */
+	printf("%-34s %9s %9s %8s %12s %12s %6s %9s %8s %8s %12s %12s\n", "operation", "heap ms", "arena ms", "blocks", "heap peak", "arena peak",
+		"ratio", "split ms", "scratch", "heap", "scratch peak", "heap peak");
 	for (i = 0; i < sizeof ops / sizeof ops[0]; i++)
 	{
 		mb_count c;
 		qaws_allocator counting, prev;
 		qaws_arena arena;
-		double th, ta;
+		double th, ta, ts;
 		int ok1, ok2, ok3;
+		long split_blocks;
+		size_t full_peak, split_heap_peak;
 		/* heap: the C allocator, then a counting sized allocator for the live peak */
 		th = mb_seconds(ops[i].run, ops[i].reps, &ok1);
 		memset(&c, 0, sizeof c);
@@ -276,8 +282,41 @@ int main(void)
 			ta = (double)(clock() - t0) / CLOCKS_PER_SEC / ops[i].reps;
 		}
 		qaws_set_thread_allocator(&prev);
-		printf("%-34s %12.3f %12.3f %10ld %14lu %14lu %8.2f%s\n", ops[i].name, th * 1e3, ta * 1e3, c.blocks, (unsigned long)c.peak,
-			(unsigned long)arena.peak, c.peak ? (double)arena.peak / (double)c.peak : 0.0, ok1 && ok2 && ok3 ? "" : "  (a run failed)");
+		full_peak = arena.peak;
+		/* split: the counting heap for results and objects, the arena for the temporaries (qaws_exchange_thread_scratch_allocator);
+		   the arena must hold nothing when a call returns */
+		{
+			mb_count h;
+			qaws_allocator heap, prev_scratch;
+			clock_t t0;
+			int rr;
+			size_t held = 0;
+			memset(&h, 0, sizeof h);
+			memset(&heap, 0, sizeof heap);
+			heap.alloc = qaws_allocator_extended;
+			heap.alloc_sized = mb_alloc;
+			heap.dealloc_sized = mb_free;
+			heap.user_data = &h;
+			qaws_arena_init(&arena, memory, arena_bytes);
+			qaws_exchange_thread_allocator(&heap, &prev);
+			qaws_exchange_thread_scratch_allocator(&arena.allocator, &prev_scratch);
+			t0 = clock();
+			for (rr = 0; rr < ops[i].reps; rr++)
+			{
+				ok3 &= ops[i].run();
+				held += arena.live;
+				ok3 &= qaws_arena_reset(&arena) == QAWS_STATUS_OK;
+			}
+			ts = (double)(clock() - t0) / CLOCKS_PER_SEC / ops[i].reps;
+			qaws_exchange_thread_scratch_allocator(&prev_scratch, NULL);
+			qaws_set_thread_allocator(&prev);
+			ok3 &= held == 0;
+			split_blocks = h.blocks / ops[i].reps;
+			split_heap_peak = h.peak;
+		}
+		printf("%-34s %9.3f %9.3f %8ld %12lu %12lu %6.2f %9.3f %8ld %8ld %12lu %12lu%s\n", ops[i].name, th * 1e3, ta * 1e3, c.blocks,
+			(unsigned long)c.peak, (unsigned long)full_peak, c.peak ? (double)full_peak / (double)c.peak : 0.0, ts * 1e3,
+			c.blocks - split_blocks, split_blocks, (unsigned long)arena.peak, (unsigned long)split_heap_peak, ok1 && ok2 && ok3 ? "" : "  (a run failed)");
 	}
 	for (k = 0; k < 64; k++)
 		qaws_curve_destroy(g_squares[k]);

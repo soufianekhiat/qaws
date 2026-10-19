@@ -168,7 +168,7 @@ qaws_status qaws_curve_fit_bspline(
 
 	/* --- Step 1: Parameter assignment ---------------------------------- */
 
-	params = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * (size_t)m);
+	params = (qaws_scalar*)qaws_internal_malloc(qaws_internal_mul2(sizeof(qaws_scalar), (size_t)m));
 	if (!params) { status = QAWS_STATUS_ALLOCATION_FAILURE; goto cleanup; }
 
 	if (desc->parameters) {
@@ -180,7 +180,7 @@ qaws_status qaws_curve_fit_bspline(
 	/* --- Step 2: Knot placement (averaging) ---------------------------- */
 
 	knot_count = n + p + 1;
-	knots = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * (size_t)knot_count);
+	knots = (qaws_scalar*)qaws_internal_malloc(qaws_internal_mul2(sizeof(qaws_scalar), (size_t)knot_count));
 	if (!knots) { status = QAWS_STATUS_ALLOCATION_FAILURE; goto cleanup; }
 
 	/* First p+1 knots = 0 */
@@ -214,16 +214,16 @@ qaws_status qaws_curve_fit_bspline(
 
 	/* --- Step 3: Build normal equations N^T N Q = N^T R ---------------- */
 
-	basis = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * (size_t)(p + 1));
+	basis = (qaws_scalar*)qaws_internal_malloc(qaws_internal_mul2(sizeof(qaws_scalar), ((size_t)(p + 1))));
 	if (!basis) { status = QAWS_STATUS_ALLOCATION_FAILURE; goto cleanup; }
 
 	if (sys_size > 0) {
 		NtN = (qaws_scalar*)qaws_internal_zalloc(
-			(size_t)sys_size * (size_t)sys_size, sizeof(qaws_scalar));
+			qaws_internal_mul2((size_t)sys_size, (size_t)sys_size), sizeof(qaws_scalar));
 		if (!NtN) { status = QAWS_STATUS_ALLOCATION_FAILURE; goto cleanup; }
 
 		rhs = (qaws_scalar*)qaws_internal_zalloc(
-			(size_t)dim_count * (size_t)sys_size, sizeof(qaws_scalar));
+			qaws_internal_mul2((size_t)dim_count, (size_t)sys_size), sizeof(qaws_scalar));
 		if (!rhs) { status = QAWS_STATUS_ALLOCATION_FAILURE; goto cleanup; }
 
 		/* For each interior data point k = 1..m-2, compute basis and
@@ -284,7 +284,7 @@ qaws_status qaws_curve_fit_bspline(
 
 	/* --- Step 5: Assemble control points ------------------------------- */
 
-	ctrl = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * (size_t)(n * dim_count));
+	ctrl = (qaws_scalar*)qaws_internal_malloc(qaws_internal_mul3(sizeof(qaws_scalar), n, dim_count));
 	if (!ctrl) { status = QAWS_STATUS_ALLOCATION_FAILURE; goto cleanup; }
 
 	/* Q_0 = D_0 (first data point) */

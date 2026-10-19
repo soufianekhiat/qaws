@@ -365,6 +365,9 @@ checks stay manual.
 | Adaptive surface tessellation | `qaws_surface_tessellate_adaptive`: chord and angle tolerances on an implicit quadtree, no cracks, counts first into caller buffers, no allocation | 1c99965 (151) |
 | Sweep derivatives | swept: du and the mixed derivative from the Frenet-Serret formulas; pipe: a double-reflection frame, du from the rotation-minimizing law (was a linearly interpolated table, duu wrong); duu from the analytic du | 3f7566e (152) |
 | Parameterizations of fitting | `qaws_bspline_fit_desc.parameterization`: uniform, chordal (default), centripetal; interpolation with as many control points as points; the differentiable fit through all three; interpolating fits average p parameters per knot | a7c658a, 38bcc6f (153, 55) |
+| Checked allocation sizes | every allocation size computed with `qaws_internal_mul2/3/4` and `qaws_internal_add2` (SIZE_MAX refused); list growth through `qaws_internal_grow`; unsigned counts bounded at the public entries; `qaws_internal_alloc` takes `size_t` | this branch (154) |
+| Scratch apart from results | `qaws_exchange_thread_scratch_allocator`: the temporaries of sampling, tessellation, meshing, clipping and repulsive solvers; results keep the persistent order | this branch (154, runner `QAWS_TEST_SCRATCH=1`) |
+| Single-precision tests | 140, 142, 145, 147 to 153 pass with `QAWS_SCALAR_IS_FLOAT`; bounds per precision from rounding (TEST_EPS) or measured truncation, double bounds unchanged | this branch |
 
 Remaining, in order:
 

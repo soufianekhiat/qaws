@@ -410,8 +410,8 @@ qaws_status qaws_curve_create_arc_ex(
 	impl->segment_count = desc->segment_count;
 
 	/* Copy segments */
-	seg_size = (size_t)desc->segment_count * sizeof(qaws_arc_segment);
-	impl->segments = (qaws_arc_segment *)qaws_internal_alloc(allocator, (unsigned long)(seg_size));
+	seg_size = qaws_internal_mul2((size_t)desc->segment_count, sizeof(qaws_arc_segment));
+	impl->segments = (qaws_arc_segment *)qaws_internal_alloc(allocator, seg_size);
 	if (!impl->segments)
 	{
 		qaws_internal_dealloc(allocator, impl);

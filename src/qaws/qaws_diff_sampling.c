@@ -105,8 +105,8 @@ static qaws_status hvp_polarize(void const* user, hvp_quadratic_fn q, qaws_diff_
 		return QAWS_STATUS_UNSUPPORTED_OPERATION;
 	for (f = 0; f < out_hv->field_count; f++)
 		total += out_hv->fields[f].count * out_hv->fields[f].components;
-	fields = (qaws_field_view*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_field_view) * (out_hv->field_count + 1)));
-	data = (qaws_scalar*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_scalar) * 2 * (total + 1)));
+	fields = (qaws_field_view*)qaws_internal_alloc(NULL, qaws_internal_mul2(sizeof(qaws_field_view), (out_hv->field_count + 1)));
+	data = (qaws_scalar*)qaws_internal_alloc(NULL, qaws_internal_mul3(sizeof(qaws_scalar), 2, (total + 1)));
 	if (!fields || !data)
 	{
 		qaws_internal_dealloc(NULL, fields);
@@ -420,8 +420,8 @@ static qaws_status cdf_job_knots(cdf_job* job, qaws_diff_views const* views)
 	}
 	if (!ok || knot_count < 2)
 		return QAWS_STATUS_OK;
-	knots = (qaws_scalar*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_scalar) * knot_count));
-	job->left = (unsigned int*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(unsigned int) * job->spans));
+	knots = (qaws_scalar*)qaws_internal_alloc(NULL, qaws_internal_mul2(sizeof(qaws_scalar), knot_count));
+	job->left = (unsigned int*)qaws_internal_alloc(NULL, qaws_internal_mul2(sizeof(unsigned int), job->spans));
 	if (!knots || !job->left)
 	{
 		qaws_internal_dealloc(NULL, knots);
@@ -482,7 +482,7 @@ static qaws_status cdf_job_init(cdf_job* job, qaws_diff_context const* ctx, qaws
 		else if (job->left)
 			job->knot_out = (qaws_field_view*)qaws_diff_views_find(other, QAWS_FIELD_KNOTS);
 	}
-	job->cum = (double*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(double) * 3 * (job->spans + 1)));
+	job->cum = (double*)qaws_internal_alloc(NULL, qaws_internal_mul3(sizeof(double), 3, (job->spans + 1)));
 	if (!job->cum)
 	{
 		cdf_job_free(job);
@@ -747,7 +747,7 @@ static qaws_status cdf_pullback_measure(cdf_job const* job, cdf_sample const* sm
 	double const* c1, double const* c2, double F1, double F2, qaws_diff_views* sink)
 {
 	unsigned int S = job->spans, k, i, q;
-	double* beyond = (double*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(double) * 2 * (S + 1)));
+	double* beyond = (double*)qaws_internal_alloc(NULL, qaws_internal_mul3(sizeof(double), 2, (S + 1)));
 	qaws_status st = QAWS_STATUS_OK;
 	if (!beyond)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
@@ -867,7 +867,7 @@ qaws_status qaws_curve_cdf_sample_adjoint(
 	st = cdf_job_init(&job, ctx, curve, measure, quadrature, NULL, param_adjoint, 1);
 	if (st != QAWS_STATUS_OK)
 		return st;
-	smp = (cdf_sample*)qaws_internal_alloc(NULL, (unsigned long)((sizeof(cdf_sample) + sizeof(double)) * (count + 1)));
+	smp = (cdf_sample*)qaws_internal_alloc(NULL, qaws_internal_mul2(sizeof(cdf_sample) + sizeof(double), (count + 1)));
 	if (!smp)
 	{
 		cdf_job_free(&job);
@@ -963,7 +963,7 @@ qaws_status qaws_curve_cdf_sample_hvp(
 		a.count = count;
 		a.quadrature = quadrature;
 		a.adjoint = adjoint;
-		a.scratch = (qaws_cdf_sample*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_cdf_sample) * (count + 1)));
+		a.scratch = (qaws_cdf_sample*)qaws_internal_alloc(NULL, qaws_internal_mul2(sizeof(qaws_cdf_sample), (count + 1)));
 		if (!a.scratch)
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 		st = hvp_polarize(&a, cdf_second, direction, out_hv);
@@ -973,7 +973,7 @@ qaws_status qaws_curve_cdf_sample_hvp(
 	st = cdf_job_init(&job, ctx, curve, measure, quadrature, direction, out_hv, 0);
 	if (st != QAWS_STATUS_OK)
 		return st;
-	smp = (cdf_sample*)qaws_internal_alloc(NULL, (unsigned long)((sizeof(cdf_sample) + 2 * sizeof(double)) * (count + 1)));
+	smp = (cdf_sample*)qaws_internal_alloc(NULL, qaws_internal_mul2(sizeof(cdf_sample) + 2 * sizeof(double), (count + 1)));
 	if (!smp)
 	{
 		cdf_job_free(&job);
@@ -1249,7 +1249,7 @@ static int scdf_rational_setup(scdf_job* job)
 	}
 	if (!ncp || nw != ncp)
 		return 0;
-	job->rp = (qaws_scalar*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_scalar) * 8 * ncp));
+	job->rp = (qaws_scalar*)qaws_internal_alloc(NULL, qaws_internal_mul3(sizeof(qaws_scalar), 8, ncp));
 	if (!job->rp)
 		return 0;
 	job->rw = job->rp + 3 * ncp;
@@ -1334,7 +1334,7 @@ static qaws_status scdf_job_init(scdf_job* job, qaws_diff_context const* ctx, qa
 	job->v1 = surface->v_range.max_value;
 	job->hu = (job->u1 - job->u0) / job->cells;
 	job->hv = (job->v1 - job->v0) / job->cells;
-	job->cumA = (qaws_dual1*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_dual1) * (job->cells + 1)));
+	job->cumA = (qaws_dual1*)qaws_internal_alloc(NULL, qaws_internal_mul2(sizeof(qaws_dual1), (job->cells + 1)));
 	if (!job->cumA)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	job->cumA[0] = dual_c(0);
@@ -1920,7 +1920,7 @@ static qaws_status scdf_backward(scdf_pass const* ps, qaws_scalar const* xi, uns
 	double total = job->cumA[job->cells].v;
 	unsigned int i, c, q;
 	qaws_status st = QAWS_STATUS_OK;
-	cellw = (qaws_dual1*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_dual1) * (job->cells + 1)));
+	cellw = (qaws_dual1*)qaws_internal_alloc(NULL, qaws_internal_mul2(sizeof(qaws_dual1), (job->cells + 1)));
 	if (!cellw)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	for (c = 0; c <= job->cells; c++)
@@ -2101,8 +2101,8 @@ qaws_status qaws_surface_cdf_sample_adjoint(
 		unsigned int e, i;
 		if (kv->field != QAWS_FIELD_U_KNOTS && kv->field != QAWS_FIELD_V_KNOTS)
 			continue;
-		t1 = (qaws_surface_cdf_sample*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_surface_cdf_sample) * (count + 1)));
-		unit = (qaws_scalar*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_scalar) * (kv->count + 1)));
+		t1 = (qaws_surface_cdf_sample*)qaws_internal_alloc(NULL, qaws_internal_mul2(sizeof(qaws_surface_cdf_sample), (count + 1)));
+		unit = (qaws_scalar*)qaws_internal_alloc(NULL, qaws_internal_mul2(sizeof(qaws_scalar), (kv->count + 1)));
 		if (!t1 || !unit)
 		{
 			qaws_internal_dealloc(NULL, t1);
@@ -2222,7 +2222,7 @@ qaws_status qaws_surface_cdf_sample_hvp(
 	a.cells = cells;
 	a.quadrature = quadrature;
 	a.adjoint = adjoint;
-	a.scratch = (qaws_surface_cdf_sample*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_surface_cdf_sample) * (count + 1)));
+	a.scratch = (qaws_surface_cdf_sample*)qaws_internal_alloc(NULL, qaws_internal_mul2(sizeof(qaws_surface_cdf_sample), (count + 1)));
 	if (!a.scratch)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	st = hvp_polarize(&a, scdf_second, direction, out_hv);

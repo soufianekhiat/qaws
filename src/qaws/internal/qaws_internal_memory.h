@@ -22,6 +22,20 @@ void* qaws_internal_zalloc(size_t count, size_t size);
 void* qaws_internal_realloc(void* ptr, size_t size);                           /* by the block's own allocator */
 void qaws_internal_free(void* ptr);
 
+/* a temporary of one call (freed before it returns, never part of a result): from the thread's scratch allocator when
+   one is set, else as qaws_internal_malloc */
+void* qaws_internal_scratch_malloc(size_t size);
+void* qaws_internal_scratch_zalloc(size_t count, size_t size);
+
+/* checked size products: SIZE_MAX when the product does not fit, which every allocation refuses (a size that wraps
+   would allocate a short block the caller then overruns) */
+size_t qaws_internal_mul2(size_t a, size_t b);
+size_t qaws_internal_mul3(size_t a, size_t b, size_t c);
+size_t qaws_internal_mul4(size_t a, size_t b, size_t c, size_t d);
+size_t qaws_internal_add2(size_t a, size_t b);   /* SIZE_MAX when the sum does not fit */
+/* the next capacity of a growing list: first when cap is 0, else cap doubled until it reaches need (UINT_MAX when doubling would pass it); 0 when need cannot be held (need > UINT_MAX) */
+unsigned int qaws_internal_grow(unsigned int cap, size_t need, unsigned int first);
+
 /* the user size of a block (0 for NULL) */
 size_t qaws_internal_block_size(void const* ptr);
 

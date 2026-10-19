@@ -225,6 +225,8 @@ qaws_status qaws_curve_view_validate(qaws_curve_view const* view)
 	d = view->degree;
 	if (d < 1 || d > QAWS_VIEW_MAX_DEGREE)
 		return QAWS_STATUS_INVALID_DEGREE;
+	if (n > 0xFFFFFFFFu / (dim + 1))   /* n * (dim + 1) scalars and n + d + 1 knots count in unsigned int */
+		return QAWS_STATUS_INVALID_CONTROL_POINT_COUNT;
 	switch (view->family)
 	{
 	case QAWS_VIEW_SPLINE:
@@ -289,7 +291,7 @@ struct qaws_curve_prepared
 /* 16-byte aligned blocks from an allocator: one extra block, the object at the first aligned address, the raw pointer before it */
 static void* vw_alloc16(qaws_allocator const* allocator, size_t bytes)
 {
-	void* raw = qaws_internal_alloc(allocator, (unsigned long)(bytes + 16 + sizeof(void*)));
+	void* raw = qaws_internal_alloc(allocator, bytes + 16 + sizeof(void*));
 	uintptr_t at;
 	if (!raw)
 		return NULL;
@@ -810,7 +812,7 @@ int qaws_internal_view_span_window(qaws_curve const* curve, unsigned int s, unsi
 static qaws_status pr_copy(qaws_curve_prepared const* p, qaws_allocator const* allocator, qaws_curve** out_curve)
 {
 	unsigned int dim = (unsigned int)p->view.dimension, i, c;
-	qaws_scalar* pts = (qaws_scalar*)qaws_internal_alloc(allocator, (unsigned long)(sizeof(qaws_scalar) * (size_t)p->n * (2 * dim + 1)));
+	qaws_scalar* pts = (qaws_scalar*)qaws_internal_alloc(allocator, qaws_internal_mul3(sizeof(qaws_scalar), (size_t)p->n, (2 * dim + 1)));
 	qaws_scalar *wts, *tans;
 	qaws_status st;
 	if (!pts)
@@ -1308,7 +1310,7 @@ qaws_status qaws_surface_create_from_view(qaws_surface_view const* view, qaws_al
 	if ((st = qaws_surface_prepare(view, allocator, &p)) != QAWS_STATUS_OK)
 		return st;
 	n = view->u_count * view->v_count;
-	pts = (qaws_vec3*)qaws_internal_alloc(allocator, (unsigned long)((sizeof(qaws_vec3) + sizeof(qaws_scalar)) * (size_t)n));
+	pts = (qaws_vec3*)qaws_internal_alloc(allocator, qaws_internal_mul2(sizeof(qaws_vec3) + sizeof(qaws_scalar), (size_t)n));
 	if (!pts)
 	{
 		qaws_surface_prepared_destroy(p);

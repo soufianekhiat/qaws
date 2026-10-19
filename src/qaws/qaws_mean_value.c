@@ -62,15 +62,16 @@ struct qaws_mean_value
 	qaws_batch_executor const* executor;
 };
 
-static int mv_grow(void** p, unsigned int* cap, unsigned int need, size_t size)
+static int mv_grow(void** p, unsigned int* cap, size_t need, size_t size)
 {
 	unsigned int n;
 	void* q;
 	if (need <= *cap)
 		return 1;
-	n = *cap ? *cap : 16;
-	while (n < need) n *= 2;
-	q = qaws_internal_realloc(*p, size * n);
+	n = qaws_internal_grow(*cap, need, 16);
+	if (!n)
+		return 0;
+	q = qaws_internal_realloc(*p, qaws_internal_mul2(size, n));
 	if (!q)
 		return 0;
 	*p = q;
@@ -137,7 +138,7 @@ static unsigned int mv_handle(qaws_mean_value* m, double x, double y, unsigned i
 {
 	if (merge_with != 0xFFFFFFFFu && hypot(m->hp[2 * merge_with] - x, m->hp[2 * merge_with + 1] - y) <= MV_MERGE * (m->ext > 0 ? m->ext : 1) + 1e-300)
 		return merge_with;
-	if (!mv_grow((void**)&m->hp, &m->caph, m->nh + 1, 2 * sizeof(double)))
+	if (!mv_grow((void**)&m->hp, &m->caph, (size_t)m->nh + 1, 2 * sizeof(double)))
 		return 0xFFFFFFFFu;
 	m->hp[2 * m->nh] = x;
 	m->hp[2 * m->nh + 1] = y;
@@ -147,7 +148,7 @@ static unsigned int mv_handle(qaws_mean_value* m, double x, double y, unsigned i
 static mv_piece* mv_piece_new(qaws_mean_value* m)
 {
 	mv_piece* p;
-	if (!mv_grow((void**)&m->pc, &m->cappc, m->npc + 1, sizeof(mv_piece)))
+	if (!mv_grow((void**)&m->pc, &m->cappc, (size_t)m->npc + 1, sizeof(mv_piece)))
 		return NULL;
 	p = &m->pc[m->npc++];
 	memset(p, 0, sizeof(*p));
@@ -170,7 +171,7 @@ static qaws_status mv_add_spline(qaws_mean_value* m, double const* cp, double co
 	unsigned int i, s;
 	if (p > MV_MAXD || p == 0 || n < p + 1)
 		return QAWS_STATUS_UNSUPPORTED_OPERATION;
-	hid = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * n);
+	hid = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), n));
 	if (!hid)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	for (i = 0; i < n; i++)
@@ -356,8 +357,8 @@ static qaws_status mv_add_curve(qaws_mean_value* m, qaws_curve const* c, unsigne
 			nk = 2 * (deg + 1);
 		if (n == 0 || n > 100000 || nk > 200000)
 			return QAWS_STATUS_INVALID_ARGUMENT;
-		buf = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * (2 * n + nk + n));
-		cp = (double*)qaws_internal_malloc(sizeof(double) * (2 * n + nk + n));
+		buf = (qaws_scalar*)qaws_internal_malloc(qaws_internal_mul2(sizeof(qaws_scalar), (2 * n + nk + n)));
+		cp = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), (2 * n + nk + n)));
 		if (!buf || !cp)
 		{
 			qaws_internal_free(buf); qaws_internal_free(cp);
@@ -729,7 +730,7 @@ qaws_status qaws_mean_value_create(qaws_mean_value_desc const* desc, qaws_mean_v
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	*out_coords = NULL;
 	m = (qaws_mean_value*)qaws_internal_zalloc(1, sizeof(*m));
-	loop_piece = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (desc->path_count + 1));
+	loop_piece = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (desc->path_count + 1)));
 	if (!m || !loop_piece)
 	{
 		qaws_internal_free(m); qaws_internal_free(loop_piece);
@@ -854,7 +855,7 @@ qaws_status qaws_mean_value_coordinates(qaws_mean_value const* coords, qaws_vec2
 	qaws_status st;
 	if (!coords || !out_weights)
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	w = (double*)qaws_internal_malloc(sizeof(double) * (coords->nh + 1));
+	w = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), (coords->nh + 1)));
 	if (!w)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	x[0] = (double)point.x; x[1] = (double)point.y;
@@ -877,7 +878,7 @@ typedef struct mv_deform_ctx
 static void mv_deform_task(void* ctx_, unsigned int begin, unsigned int end)
 {
 	mv_deform_ctx* ctx = (mv_deform_ctx*)ctx_;
-	double* w = (double*)qaws_internal_malloc(sizeof(double) * (ctx->m->nh + 1));
+	double* w = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), (ctx->m->nh + 1)));
 	unsigned int i, k;
 	if (!w)
 	{

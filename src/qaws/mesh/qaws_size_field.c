@@ -169,7 +169,7 @@ qaws_status qaws_size_field_create_vertices(qaws_mesh_reference const* r, qaws_s
 	for (i = 0; i < nv; i++)
 		if (!(sizes[i] > 0))
 			return QAWS_STATUS_INVALID_ARGUMENT;
-	vs = (double*)qaws_internal_malloc(sizeof(double) * (nv + 1));
+	vs = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), (nv + 1)));
 	if (!vs)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	for (i = 0; i < nv; i++)
@@ -188,7 +188,7 @@ static unsigned int sf_hm_ring(void* m, unsigned int u, unsigned int* out, unsig
 static int sf_gradation(unsigned int n, double const* x, double* h, double beta, unsigned int (*nbr)(void* user, unsigned int u, unsigned int* out,
 	unsigned int cap), void* user)
 {
-	unsigned int *heap = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (n + 1)), *pos = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (n + 1));
+	unsigned int *heap = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (n + 1))), *pos = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (n + 1)));
 	unsigned int count = n, i, ring[256];
 	if (!heap || !pos)
 	{
@@ -275,8 +275,8 @@ qaws_status qaws_size_field_create_curvature(qaws_mesh_reference const* r, qaws_
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	e = (double)desc->chord_tolerance;
 	th = (double)desc->angle_tolerance;
-	kmax = (double*)qaws_internal_zalloc((size_t)m->nv + 1, sizeof(double));
-	vs = (double*)qaws_internal_malloc(sizeof(double) * ((size_t)m->nv + 1));
+	kmax = (double*)qaws_internal_scratch_zalloc((size_t)m->nv + 1, sizeof(double));
+	vs = (double*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(double), ((size_t)m->nv + 1)));
 	if (!kmax || !vs)
 	{
 		qaws_internal_free(kmax);
@@ -693,12 +693,12 @@ static int fs_pass(fs_work* w, size_t ns, double cells, double lo, double hi, do
 	unsigned int t, i, j;
 	double R = 0.5 * cells * hi, smax = 0;
 	w->ns = (unsigned int)ns;
-	w->x = (double*)qaws_internal_malloc(sizeof(double) * 3 * (ns + 1));
-	w->nrm = (double*)qaws_internal_malloc(sizeof(double) * 3 * (ns + 1));
-	w->h = (double*)qaws_internal_malloc(sizeof(double) * (ns + 1));
-	w->tri = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (ns + 1));
-	w->tree.perm = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (ns + 1));
-	w->tree.box = (double*)qaws_internal_malloc(sizeof(double) * 12 * (ns + 1));
+	w->x = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), 3, (ns + 1)));
+	w->nrm = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), 3, (ns + 1)));
+	w->h = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), (ns + 1)));
+	w->tri = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (ns + 1)));
+	w->tree.perm = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (ns + 1)));
+	w->tree.box = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), 12, (ns + 1)));
 	if (!w->x || !w->nrm || !w->h || !w->tri || !w->tree.perm || !w->tree.box)
 		return 0;
 	for (t = 0; t < r->nt; t++)
@@ -779,13 +779,13 @@ qaws_status qaws_size_field_create_feature_size(qaws_mesh_reference const* r, qa
 	beta = desc->gradation > 0 ? (double)desc->gradation : hi / (1e-6 * r->extent + 1e-300);
 	memset(&w, 0, sizeof w);
 	w.r = r;
-	w.lv = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (nt + 1));
-	w.first = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (nt + 1));
-	w.emax = (double*)qaws_internal_malloc(sizeof(double) * (nt + 1));
-	w.spacing = (double*)qaws_internal_malloc(sizeof(double) * (nt + 1));
-	target = (double*)qaws_internal_malloc(sizeof(double) * (nt + 1));
-	prev = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (nt + 1));
-	thin = (unsigned char*)qaws_internal_zalloc(nt + 1, 1);
+	w.lv = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (nt + 1)));
+	w.first = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (nt + 1)));
+	w.emax = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), (nt + 1)));
+	w.spacing = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), (nt + 1)));
+	target = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), (nt + 1)));
+	prev = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (nt + 1)));
+	thin = (unsigned char*)qaws_internal_scratch_zalloc(nt + 1, 1);
 	if (!w.lv || !w.first || !w.emax || !w.spacing || !target || !prev || !thin)
 		goto done;
 	for (t = 0; t < nt; t++)

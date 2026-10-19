@@ -32,7 +32,7 @@ typedef struct ssi_pt
 
 static void* ss_alloc(size_t b)
 {
-	return qaws_internal_alloc(NULL, (unsigned long)b);
+	return qaws_internal_alloc(NULL, b);
 }
 
 static void ss_free(void* p)
@@ -371,11 +371,14 @@ static unsigned int face_hash(unsigned int const* key)
 static ssi_face* face_slot(ssi_out* o, unsigned int const* key)
 {
 	unsigned int i, mask;
-	if (2 * (o->face_count + 1) > o->face_cap)
+	if (qaws_internal_mul2(2, (size_t)o->face_count + 1) > o->face_cap)
 	{
-		/* grow and rehash */
-		unsigned int ncap = o->face_cap ? 2 * o->face_cap : 256, j;
-		ssi_face* nf = (ssi_face*)ss_alloc(sizeof(ssi_face) * ncap);
+		/* grow and rehash (a power of two: the probe masks with ncap - 1) */
+		unsigned int ncap = qaws_internal_grow(o->face_cap, qaws_internal_mul2(2, (size_t)o->face_count + 1), 256), j;
+		ssi_face* nf;
+		if (!ncap || (ncap & (ncap - 1)))
+			return NULL;
+		nf = (ssi_face*)ss_alloc(qaws_internal_mul2(sizeof(ssi_face), ncap));
 		if (!nf)
 			return NULL;
 		for (j = 0; j < ncap; j++)

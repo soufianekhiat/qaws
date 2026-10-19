@@ -190,11 +190,11 @@ qaws_status qaws_internal_fit_bspline_range_ex(
 	*out_curve = NULL;
 
 	/* Allocate working buffers */
-	knots = (qaws_scalar*)qaws_internal_alloc(allocator, (unsigned long)(sizeof(qaws_scalar) * (size_t)knot_count));
-	ata_band = (qaws_scalar*)qaws_internal_calloc(allocator, (size_t)(n * stride), sizeof(qaws_scalar));
-	atb = (qaws_scalar*)qaws_internal_calloc(allocator, (size_t)(n * dim), sizeof(qaws_scalar));
-	basis_row = (qaws_scalar*)qaws_internal_alloc(allocator, (unsigned long)(sizeof(qaws_scalar) * (size_t)n));
-	cps = (qaws_scalar*)qaws_internal_alloc(allocator, (unsigned long)(sizeof(qaws_scalar) * (size_t)(n * dim)));
+	knots = (qaws_scalar*)qaws_internal_alloc(allocator, qaws_internal_mul2(sizeof(qaws_scalar), (size_t)knot_count));
+	ata_band = (qaws_scalar*)qaws_internal_calloc(allocator, qaws_internal_mul2(n, stride), sizeof(qaws_scalar));
+	atb = (qaws_scalar*)qaws_internal_calloc(allocator, qaws_internal_mul2(n, dim), sizeof(qaws_scalar));
+	basis_row = (qaws_scalar*)qaws_internal_alloc(allocator, qaws_internal_mul2(sizeof(qaws_scalar), (size_t)n));
+	cps = (qaws_scalar*)qaws_internal_alloc(allocator, qaws_internal_mul3(sizeof(qaws_scalar), n, dim));
 
 	if (!knots || !ata_band || !atb || !basis_row || !cps)
 	{
@@ -240,8 +240,8 @@ qaws_status qaws_internal_fit_bspline_range_ex(
 	for (d = 0; d < dim; d++)
 	{
 		/* Copy the band matrix (it gets overwritten by Cholesky) */
-		qaws_scalar* ata_copy = (qaws_scalar*)qaws_internal_alloc(allocator, (unsigned long)(sizeof(qaws_scalar) * (size_t)(n * stride)));
-		qaws_scalar* rhs = (qaws_scalar*)qaws_internal_alloc(allocator, (unsigned long)(sizeof(qaws_scalar) * (size_t)n));
+		qaws_scalar* ata_copy = (qaws_scalar*)qaws_internal_alloc(allocator, qaws_internal_mul3(sizeof(qaws_scalar), n, stride));
+		qaws_scalar* rhs = (qaws_scalar*)qaws_internal_alloc(allocator, qaws_internal_mul2(sizeof(qaws_scalar), (size_t)n));
 		if (!ata_copy || !rhs)
 		{
 			qaws_internal_dealloc(allocator, ata_copy); qaws_internal_dealloc(allocator, rhs);

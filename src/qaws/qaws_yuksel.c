@@ -1472,6 +1472,8 @@ qaws_status qaws_curve_create_yuksel_ex(
 		return QAWS_STATUS_INVALID_ARGUMENT;
 
 	dim_count = (desc->dimension == QAWS_DIMENSION_2D) ? 2u : 3u;
+	if (n > 0xFFFFFFFFu / dim_count)   /* i * dim indexes in unsigned int */
+		return QAWS_STATUS_INVALID_CONTROL_POINT_COUNT;
 
 	if (desc->closed)
 		span_count = n;
@@ -1493,14 +1495,14 @@ qaws_status qaws_curve_create_yuksel_ex(
 	for (i = 0; i <= span_count; i++)
 		curve->span_boundaries[i] = (qaws_scalar)i;
 
-	impl = (qaws_yuksel_impl*)qaws_internal_alloc(allocator, (unsigned long)(sizeof(qaws_yuksel_impl)));
+	impl = (qaws_yuksel_impl*)qaws_internal_alloc(allocator, sizeof(qaws_yuksel_impl));
 	if (!impl) {
 		qaws_internal_curve_free(curve);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 
-	pts_size = (size_t)n * (size_t)dim_count * sizeof(qaws_scalar);
-	impl->control_points = (qaws_scalar*)qaws_internal_alloc(allocator, (unsigned long)(pts_size));
+	pts_size = qaws_internal_mul3((size_t)n, (size_t)dim_count, sizeof(qaws_scalar));
+	impl->control_points = (qaws_scalar*)qaws_internal_alloc(allocator, pts_size);
 	if (!impl->control_points) {
 		qaws_internal_dealloc(allocator, impl);
 		qaws_internal_curve_free(curve);

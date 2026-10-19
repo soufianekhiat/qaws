@@ -294,9 +294,13 @@ qaws_status qaws_surface_create_tspline_ex(
 	if (!desc->control_points) return QAWS_STATUS_INVALID_ARGUMENT;
 	if (desc->u_degree < 1) return QAWS_STATUS_INVALID_DEGREE;
 	if (desc->v_degree < 1) return QAWS_STATUS_INVALID_DEGREE;
+	if (desc->u_degree > 15 || desc->v_degree > 15) return QAWS_STATUS_INVALID_DEGREE;   /* eval_basis holds 16 values */
 
 	u_knot_len = 2 * desc->u_degree + 2;
 	v_knot_len = 2 * desc->v_degree + 2;
+	/* i * knot_len indexes the knot arrays in unsigned int */
+	if (desc->control_point_count > 0xFFFFFFFFu / (u_knot_len > v_knot_len ? u_knot_len : v_knot_len))
+		return QAWS_STATUS_INVALID_CONTROL_POINT_COUNT;
 
 	/* Validate that all control points have non-NULL knot vectors */
 	for (i = 0; i < desc->control_point_count; i++)
@@ -311,7 +315,7 @@ qaws_status qaws_surface_create_tspline_ex(
 		&tspline_surface_vtable, allocator);
 	if (!surface) return QAWS_STATUS_ALLOCATION_FAILURE;
 
-	impl = (qaws_surface_tspline_impl*)qaws_internal_alloc(allocator, (unsigned long)(sizeof(qaws_surface_tspline_impl)));
+	impl = (qaws_surface_tspline_impl*)qaws_internal_alloc(allocator, sizeof(qaws_surface_tspline_impl));
 	if (!impl)
 	{
 		qaws_internal_surface_free(surface);
@@ -328,15 +332,15 @@ qaws_status qaws_surface_create_tspline_ex(
 	impl->u_knots_all = NULL;
 	impl->v_knots_all = NULL;
 
-	pos_size = sizeof(qaws_vec3) * impl->cp_count;
-	wt_size = sizeof(qaws_scalar) * impl->cp_count;
-	uk_size = sizeof(qaws_scalar) * impl->cp_count * u_knot_len;
-	vk_size = sizeof(qaws_scalar) * impl->cp_count * v_knot_len;
+	pos_size = qaws_internal_mul2(sizeof(qaws_vec3), impl->cp_count);
+	wt_size = qaws_internal_mul2(sizeof(qaws_scalar), impl->cp_count);
+	uk_size = qaws_internal_mul3(sizeof(qaws_scalar), impl->cp_count, u_knot_len);
+	vk_size = qaws_internal_mul3(sizeof(qaws_scalar), impl->cp_count, v_knot_len);
 
-	impl->positions = (qaws_vec3*)qaws_internal_alloc(allocator, (unsigned long)(pos_size));
-	impl->weights = (qaws_scalar*)qaws_internal_alloc(allocator, (unsigned long)(wt_size));
-	impl->u_knots_all = (qaws_scalar*)qaws_internal_alloc(allocator, (unsigned long)(uk_size));
-	impl->v_knots_all = (qaws_scalar*)qaws_internal_alloc(allocator, (unsigned long)(vk_size));
+	impl->positions = (qaws_vec3*)qaws_internal_alloc(allocator, pos_size);
+	impl->weights = (qaws_scalar*)qaws_internal_alloc(allocator, wt_size);
+	impl->u_knots_all = (qaws_scalar*)qaws_internal_alloc(allocator, uk_size);
+	impl->v_knots_all = (qaws_scalar*)qaws_internal_alloc(allocator, vk_size);
 
 	if (!impl->positions || !impl->weights || !impl->u_knots_all || !impl->v_knots_all)
 	{

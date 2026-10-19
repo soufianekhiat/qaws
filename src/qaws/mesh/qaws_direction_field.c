@@ -203,10 +203,10 @@ static int mf_level_alloc(mf_level* L, unsigned int n)
 {
 	memset(L, 0, sizeof *L);
 	L->n = n;
-	L->x = (double*)qaws_internal_malloc(sizeof(double) * 3 * (n + 1));
-	L->nrm = (double*)qaws_internal_malloc(sizeof(double) * 3 * (n + 1));
-	L->area = (double*)qaws_internal_malloc(sizeof(double) * (n + 1));
-	L->parent = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (n + 1));
+	L->x = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), 3, (n + 1)));
+	L->nrm = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), 3, (n + 1)));
+	L->area = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), (n + 1)));
+	L->parent = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (n + 1)));
 	L->q = (double*)qaws_internal_zalloc(3 * (size_t)n + 3, sizeof(double));
 	L->o = (double*)qaws_internal_zalloc(3 * (size_t)n + 3, sizeof(double));
 	L->cq = (double*)qaws_internal_zalloc(3 * (size_t)n + 3, sizeof(double));
@@ -231,9 +231,9 @@ static int mf_pair_cmp(void const* a, void const* b)
 static int mf_coarsen(mf_level* f, mf_level* c)
 {
 	unsigned int ne = f->adj0[f->n], i, k, np = 0, nc = 0, *stamp = NULL, total;
-	mf_pair* pairs = (mf_pair*)qaws_internal_malloc(sizeof(mf_pair) * (ne / 2 + 1));
-	unsigned int* first = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (f->n + 1));
-	unsigned int* second = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (f->n + 1));
+	mf_pair* pairs = (mf_pair*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(mf_pair), (ne / 2 + 1)));
+	unsigned int* first = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (f->n + 1)));
+	unsigned int* second = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (f->n + 1)));
 	int ok = 0;
 	if (!pairs || !first || !second)
 		goto done;
@@ -270,9 +270,9 @@ static int mf_coarsen(mf_level* f, mf_level* c)
 		}
 	if (!mf_level_alloc(c, nc))
 		goto done;
-	c->child0 = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (nc + 1));
-	c->child = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (2 * (size_t)nc + 1));
-	stamp = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (nc + 1));
+	c->child0 = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (nc + 1)));
+	c->child = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (2 * (size_t)nc + 1)));
+	stamp = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (nc + 1)));
 	if (!c->child0 || !c->child || !stamp)
 		goto done;
 	for (i = 0, total = 0; i < nc; i++)
@@ -311,7 +311,7 @@ static int mf_coarsen(mf_level* f, mf_level* c)
 		stamp[i] = HM_NONE;
 	{
 		unsigned int cap = ne + 1, cnt = 0;
-		c->adj = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * cap);
+		c->adj = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), cap));
 		if (!c->adj)
 			goto done;
 		for (i = 0; i < nc; i++)
@@ -396,7 +396,7 @@ qaws_status mf_build(mf_hier* h, qaws_hm const* m, double const* normals)
 		cnt += hm_valence(m, v);
 	}
 	L->adj0[m->nv] = cnt;
-	L->adj = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (cnt + 1));
+	L->adj = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (cnt + 1)));
 	if (!L->adj)
 		goto oom;
 	for (v = 0; v < m->nv; v++)
@@ -457,12 +457,13 @@ qaws_status mf_build(mf_hier* h, qaws_hm const* m, double const* normals)
 		mf_level *fine, *coarse;
 		if (h->nl == cap)
 		{
-			mf_level* g = (mf_level*)qaws_internal_realloc(h->lv, sizeof(mf_level) * 2 * cap);
+			unsigned int nc = qaws_internal_grow(cap, (size_t)h->nl + 1, 8);
+			mf_level* g = nc ? (mf_level*)qaws_internal_realloc(h->lv, qaws_internal_mul2(sizeof(mf_level), nc)) : NULL;
 			if (!g)
 				goto oom;
-			memset(g + cap, 0, sizeof(mf_level) * cap);
+			memset(g + cap, 0, sizeof(mf_level) * (nc - cap));
 			h->lv = g;
-			cap *= 2;
+			cap = nc;
 		}
 		fine = &h->lv[h->nl - 1];
 		coarse = &h->lv[h->nl];
@@ -692,7 +693,7 @@ static int mf_carry(mf_hier* h, double const* v0, int weights)
 		mf_level *L = &h->lv[l], *F = l ? &h->lv[l - 1] : NULL;
 		double **slot = weights ? &L->wt : &L->sc, *fv = F ? (weights ? F->wt : F->sc) : NULL;
 		qaws_internal_free(*slot);
-		*slot = (double*)qaws_internal_malloc(sizeof(double) * (L->n + 1));
+		*slot = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), (L->n + 1)));
 		if (!*slot)
 			return 0;
 		for (i = 0; i < L->n; i++)
@@ -854,7 +855,7 @@ qaws_status qaws_mesh_3d_direction_field(qaws_mesh_3d const* mesh, qaws_directio
 		/* per vertex its cones' indices summed; the attractors' weights */
 		double lo[3] = { HUGE_VAL, HUGE_VAL, HUGE_VAL }, hi[3] = { -HUGE_VAL, -HUGE_VAL, -HUGE_VAL }, r = (double)desc->attractor_radius;
 		cone = desc->cone_count ? (int*)qaws_internal_zalloc((size_t)m->nv + 1, sizeof(int)) : NULL;
-		vw = desc->attractor_count ? (double*)qaws_internal_malloc(sizeof(double) * 2 * (m->nv + 1)) : NULL;
+		vw = desc->attractor_count ? (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), 2, (m->nv + 1))) : NULL;
 		if ((desc->cone_count && !cone) || (desc->attractor_count && !vw))
 		{
 			st = QAWS_STATUS_ALLOCATION_FAILURE;
@@ -883,7 +884,7 @@ qaws_status qaws_mesh_3d_direction_field(qaws_mesh_3d const* mesh, qaws_directio
 	if (desc && desc->guide_directions)
 	{
 		/* the guidance on every level (SMOOTHEST takes level 0's: held values and penalties) */
-		double *g = (double*)qaws_internal_malloc(sizeof(double) * 3 * (m->nv + 1)), *w = (double*)qaws_internal_malloc(sizeof(double) * (m->nv + 1));
+		double *g = (double*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(double), 3, (m->nv + 1))), *w = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), (m->nv + 1)));
 		if (!g || !w)
 		{
 			qaws_internal_free(g);

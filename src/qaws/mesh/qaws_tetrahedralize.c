@@ -135,20 +135,20 @@ typedef struct tt_emap
 
 static int tt_emap_reset(tt_emap* e, unsigned int n)
 {
-	unsigned int cap = 16;
-	while (cap < 2 * n + 2)
-		cap <<= 1;
+	unsigned int cap = qaws_internal_grow(16, qaws_internal_mul2(2, (size_t)n + 1), 16);
+	if (!cap || (cap & (cap - 1)))
+		return 0;   /* (a power of two: the probe masks with cap - 1) */
 	if (cap > e->cap)
 	{
-		unsigned int *a = (unsigned int*)qaws_internal_realloc(e->ka, sizeof(unsigned int) * cap), *b, *v;
+		unsigned int *a = (unsigned int*)qaws_internal_realloc(e->ka, qaws_internal_mul2(sizeof(unsigned int), cap)), *b, *v;
 		if (!a)
 			return 0;
 		e->ka = a;
-		b = (unsigned int*)qaws_internal_realloc(e->kb, sizeof(unsigned int) * cap);
+		b = (unsigned int*)qaws_internal_realloc(e->kb, qaws_internal_mul2(sizeof(unsigned int), cap));
 		if (!b)
 			return 0;
 		e->kb = b;
-		v = (unsigned int*)qaws_internal_realloc(e->val, sizeof(unsigned int) * cap);
+		v = (unsigned int*)qaws_internal_realloc(e->val, qaws_internal_mul2(sizeof(unsigned int), cap));
 		if (!v)
 			return 0;
 		e->val = v;
@@ -210,16 +210,16 @@ typedef struct tt_mesh
 
 #define TT_Q(m, v) ((m)->q + 3 * (size_t)(v))
 
-static int tt_grow(void** p, unsigned int* cap, unsigned int need, size_t size)
+static int tt_grow(void** p, unsigned int* cap, size_t need, size_t size)
 {
 	void* g;
 	unsigned int c;
 	if (need <= *cap)
 		return 1;
-	c = *cap ? *cap : 64;
-	while (c < need)
-		c *= 2;
-	g = qaws_internal_realloc(*p, size * c);
+	c = qaws_internal_grow(*cap, need, 64);
+	if (!c)
+		return 0;
+	g = qaws_internal_realloc(*p, qaws_internal_mul2(size, c));
 	if (!g)
 		return 0;
 	*p = g;
@@ -229,7 +229,7 @@ static int tt_grow(void** p, unsigned int* cap, unsigned int need, size_t size)
 
 static int tt_push(unsigned int** a, unsigned int* n, unsigned int* cap, unsigned int v)
 {
-	if (!tt_grow((void**)a, cap, *n + 1, sizeof(unsigned int)))
+	if (!tt_grow((void**)a, cap, (size_t)*n + 1, sizeof(unsigned int)))
 		return 0;
 	(*a)[(*n)++] = v;
 	return 1;
@@ -249,16 +249,16 @@ static unsigned int tt_add_vertex(tt_mesh* m, int64_t const* q, double const* x)
 	unsigned int c = m->capv;
 	if (m->nv + 1 > m->capv)
 	{
-		if (!tt_grow((void**)&m->q, &c, m->nv + 1, sizeof(int64_t) * 3))
+		if (!tt_grow((void**)&m->q, &c, (size_t)m->nv + 1, sizeof(int64_t) * 3))
 			return HM_NONE;
 		c = m->capv;
-		if (!tt_grow((void**)&m->x, &c, m->nv + 1, sizeof(double) * 3))
+		if (!tt_grow((void**)&m->x, &c, (size_t)m->nv + 1, sizeof(double) * 3))
 			return HM_NONE;
 		c = m->capv;
-		if (!tt_grow((void**)&m->vst, &c, m->nv + 1, sizeof(unsigned int)))
+		if (!tt_grow((void**)&m->vst, &c, (size_t)m->nv + 1, sizeof(unsigned int)))
 			return HM_NONE;
 		c = m->capv;
-		if (!tt_grow((void**)&m->v2t, &c, m->nv + 1, sizeof(unsigned int)))
+		if (!tt_grow((void**)&m->v2t, &c, (size_t)m->nv + 1, sizeof(unsigned int)))
 			return HM_NONE;
 		m->capv = c;
 	}
@@ -279,19 +279,19 @@ static unsigned int tt_new_cell(tt_mesh* m)
 		unsigned int c = m->capt;
 		if (m->nt + 1 > m->capt)
 		{
-			if (!tt_grow((void**)&m->tv, &c, m->nt + 1, sizeof(unsigned int) * 4))
+			if (!tt_grow((void**)&m->tv, &c, (size_t)m->nt + 1, sizeof(unsigned int) * 4))
 				return HM_NONE;
 			c = m->capt;
-			if (!tt_grow((void**)&m->tn, &c, m->nt + 1, sizeof(unsigned int) * 4))
+			if (!tt_grow((void**)&m->tn, &c, (size_t)m->nt + 1, sizeof(unsigned int) * 4))
 				return HM_NONE;
 			c = m->capt;
-			if (!tt_grow((void**)&m->tf, &c, m->nt + 1, 1))
+			if (!tt_grow((void**)&m->tf, &c, (size_t)m->nt + 1, 1))
 				return HM_NONE;
 			c = m->capt;
-			if (!tt_grow((void**)&m->stamp, &c, m->nt + 1, sizeof(unsigned int)))
+			if (!tt_grow((void**)&m->stamp, &c, (size_t)m->nt + 1, sizeof(unsigned int)))
 				return HM_NONE;
 			c = m->capt;
-			if (!tt_grow((void**)&m->freel, &c, m->nt + 1, sizeof(unsigned int)))
+			if (!tt_grow((void**)&m->freel, &c, (size_t)m->nt + 1, sizeof(unsigned int)))
 				return HM_NONE;
 			m->capt = c;
 		}
@@ -702,7 +702,7 @@ static double tt_quality(double const* a, double const* b, double const* c, doub
    quality round it, never turning a cell over: Freitag and Ollivier-Gooch's smoothing, a few sweeps. */
 static int tt_smooth(double* x, unsigned int nv, unsigned int const* cells, unsigned int nc, unsigned char const* fixed, unsigned int sweeps)
 {
-	unsigned int *v0 = (unsigned int*)qaws_internal_zalloc((size_t)nv + 1, sizeof(unsigned int)), *vt = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (4 * (size_t)nc + 1));
+	unsigned int *v0 = (unsigned int*)qaws_internal_scratch_zalloc((size_t)nv + 1, sizeof(unsigned int)), *vt = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (4 * (size_t)nc + 1)));
 	unsigned int s, v, i, k;
 	if (!v0 || !vt)
 	{
@@ -715,7 +715,7 @@ static int tt_smooth(double* x, unsigned int nv, unsigned int const* cells, unsi
 	for (v = 0; v < nv; v++)
 		v0[v + 1] += v0[v];
 	{
-		unsigned int* fill = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)nv + 1));
+		unsigned int* fill = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), ((size_t)nv + 1)));
 		if (!fill)
 		{
 			qaws_internal_free(v0);
@@ -1016,11 +1016,11 @@ static void tt_lattice(tt_ctx const* t, double const* x, int64_t* q)
 static int tt_add_tri(tt_ctx* t, unsigned int a, unsigned int b, unsigned int c)
 {
 	unsigned int cap = t->capbt;
-	if (!tt_grow((void**)&t->bt, &cap, t->nbt + 1, sizeof(unsigned int) * 3))
+	if (!tt_grow((void**)&t->bt, &cap, (size_t)t->nbt + 1, sizeof(unsigned int) * 3))
 		return 0;
 	t->capbt = cap;
 	cap = t->capbd;
-	if (!tt_grow((void**)&t->bdead, &cap, t->nbt + 1, 1))
+	if (!tt_grow((void**)&t->bdead, &cap, (size_t)t->nbt + 1, 1))
 		return 0;
 	t->capbd = cap;
 	t->bt[3 * (size_t)t->nbt] = a;
@@ -1121,7 +1121,7 @@ static int tt_lawson(tt_ctx* t, unsigned int* flips)
 	{
 		unsigned int i, n0 = t->nbt;
 		changed = 0;
-		if (!tt_border_map(t) || !tt_grow((void**)&mark, &capmark, t->nbt + 1, 1))
+		if (!tt_border_map(t) || !tt_grow((void**)&mark, &capmark, (size_t)t->nbt + 1, 1))
 		{
 			qaws_internal_free(mark);
 			return 0;
@@ -1168,7 +1168,7 @@ static int tt_recover(tt_ctx* t, unsigned int* passes, unsigned int* splits, uns
 	for (pass = 0; pass < 200; pass++)
 	{
 		unsigned int i, n0, missing = 0;
-		if (!tt_lawson(t, flips) || !tt_border_map(t) || !tt_grow((void**)&mark, &capmark, t->nbt + 1, 1))
+		if (!tt_lawson(t, flips) || !tt_border_map(t) || !tt_grow((void**)&mark, &capmark, (size_t)t->nbt + 1, 1))
 		{
 			result = 0;
 			break;
@@ -1420,7 +1420,7 @@ qaws_status qaws_volume_mesh_tetrahedralize(qaws_mesh_3d const* boundary, qaws_t
 		m->last = s;
 	}
 	/* the border's vertices, then its triangles (polygons fanned) */
-	map = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)h->nv + 1));
+	map = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), ((size_t)h->nv + 1)));
 	if (!map)
 		goto done;
 	for (i = 0; i < h->nv; i++)
@@ -1534,12 +1534,12 @@ qaws_status qaws_volume_mesh_tetrahedralize(qaws_mesh_3d const* boundary, qaws_t
 		}
 	}
 	/* the inside filled: a body-centred cubic lattice of spacing 1.1 L, its points farther than L / 2 from the border */
-	boxes = (qaws_bp_box*)qaws_internal_malloc(sizeof(qaws_bp_box) * ((size_t)t.nbt + 1));
+	boxes = (qaws_bp_box*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(qaws_bp_box), ((size_t)t.nbt + 1)));
 	if (!boxes)
 		goto done;
 	{
 		unsigned int nlive = 0;
-		unsigned int* live = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * 3 * ((size_t)t.nbt + 1));
+		unsigned int* live = (unsigned int*)qaws_internal_malloc(qaws_internal_mul3(sizeof(unsigned int), 3, ((size_t)t.nbt + 1)));
 		if (!live)
 			goto done;
 		for (i = 0; i < t.nbt; i++)
@@ -1673,8 +1673,8 @@ qaws_status qaws_volume_mesh_tetrahedralize(qaws_mesh_3d const* boundary, qaws_t
 	}
 	{
 		/* improved: flips, then the inside vertices smoothed (the border's fixed), three rounds */
-		unsigned char* fixed = (unsigned char*)qaws_internal_zalloc((size_t)m->nv + 1, 1);
-		unsigned int* arr = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (4 * (size_t)m->nt + 1));
+		unsigned char* fixed = (unsigned char*)qaws_internal_scratch_zalloc((size_t)m->nv + 1, 1);
+		unsigned int* arr = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (4 * (size_t)m->nt + 1)));
 		unsigned int round, n;
 		int ok = fixed && arr;
 		for (i = 0; ok && i < 3 * t.nbt; i++)
@@ -1695,10 +1695,10 @@ qaws_status qaws_volume_mesh_tetrahedralize(qaws_mesh_3d const* boundary, qaws_t
 	/* the cells inside, their vertices compacted */
 	for (c = 0; c < m->nt; c++)
 		nin += !(m->tf[c] & TT_DEAD) && (m->tf[c] & TT_IN);
-	vmap = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)m->nv + 1));
-	cells = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (4 * (size_t)nin + 1));
-	ctype = (unsigned char*)qaws_internal_zalloc((size_t)nin + 1, 1);
-	xo = (double*)qaws_internal_malloc(sizeof(double) * (3 * (size_t)m->nv + 1));
+	vmap = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), ((size_t)m->nv + 1)));
+	cells = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (4 * (size_t)nin + 1)));
+	ctype = (unsigned char*)qaws_internal_scratch_zalloc((size_t)nin + 1, 1);
+	xo = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), (3 * (size_t)m->nv + 1)));
 	if (!vmap || !cells || !ctype || !xo)
 		goto done;
 	for (i = 0; i < m->nv; i++)

@@ -15,7 +15,7 @@ typedef qaws_exact_poly poly;
 
 static void* sh_alloc(size_t bytes)
 {
-	return qaws_internal_alloc(NULL, (unsigned long)bytes);
+	return qaws_internal_alloc(NULL, bytes);
 }
 
 static void sh_free(void* p)
@@ -729,7 +729,7 @@ static qaws_status er_chunk(void* ctx, unsigned int chunk, unsigned int begin, u
 	qaws_status st = QAWS_STATUS_OK;
 	memset(&stats, 0, sizeof(stats));
 	memset(&x, 0, sizeof(x));
-	x.stamp = (unsigned int*)qaws_internal_malloc((J->npatch ? J->npatch : 1) * sizeof(unsigned int));
+	x.stamp = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2((J->npatch ? J->npatch : 1), sizeof(unsigned int)));
 	if (!x.stamp)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	for (i = 0; i < J->npatch; i++)
@@ -809,8 +809,8 @@ qaws_status qaws_exact_surface_batch_raycast(qaws_exact_ssi_batch_desc const* de
 			return QAWS_STATUS_INVALID_ARGUMENT;
 		npatch += desc->surfaces[i]->nu * desc->surfaces[i]->nv;
 	}
-	patches = (er_patch*)qaws_internal_malloc(npatch * sizeof(er_patch));
-	boxes = (qaws_bp_box*)qaws_internal_malloc(npatch * sizeof(qaws_bp_box));
+	patches = (er_patch*)qaws_internal_malloc(qaws_internal_mul2(npatch, sizeof(er_patch)));
+	boxes = (qaws_bp_box*)qaws_internal_malloc(qaws_internal_mul2(npatch, sizeof(qaws_bp_box)));
 	if (!patches || !boxes)
 	{
 		st = QAWS_STATUS_ALLOCATION_FAILURE;

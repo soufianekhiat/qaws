@@ -182,7 +182,9 @@ static void test_objective(void)
 	qaws_repulsive_curves* c;
 	qaws_repulsive_curves_solve_desc d;
 	qaws_repulsive_curves_solver* s = NULL;
-	double worst = 0, fd = 0, len = 0, h = 1e-6;
+	/* the difference step: 1e-6 in double. float: fourth-order differences with h = 2^-8 (exact in float); measured, their
+	   error falls as h^4 down to 3e-4 there and rises below it with rounding, within the same 1e-4 (1 + E) bound */
+	double worst = 0, fd = 0, len = 0, h = sizeof(qaws_scalar) == sizeof(double) ? 1e-6 : 1.0 / 256;
 	char msg[256];
 	rc_loop(x, edges);
 	c = rc_curves(edges);
@@ -219,10 +221,29 @@ static void test_objective(void)
 			qaws_repulsive_curves_solver_objective(s, xp, &Ep, NULL);
 			xp[i] = (qaws_scalar)(x[i] - h);
 			qaws_repulsive_curves_solver_objective(s, xp, &Em, NULL);
-			fd = fabs(((double)Ep - Em) / (2 * h) - g[i]) > fd ? fabs(((double)Ep - Em) / (2 * h) - g[i]) : fd;
+			if (sizeof(qaws_scalar) == sizeof(double))
+			{
+				/* (divided by the step the scalar coordinates actually took) */
+				double step = (double)(qaws_scalar)(x[i] + h) - (double)(qaws_scalar)(x[i] - h);
+				fd = fabs(((double)Ep - Em) / step - g[i]) > fd ? fabs(((double)Ep - Em) / step - g[i]) : fd;
+			}
+			else
+			{
+				/* float: fourth-order differences (the energy's third derivative is large, so second order needs a step
+				   too small for float's rounding) */
+				qaws_scalar Ep2 = 0, Em2 = 0;
+				double e;
+				xp[i] = (qaws_scalar)(x[i] + 2 * h);
+				qaws_repulsive_curves_solver_objective(s, xp, &Ep2, NULL);
+				xp[i] = (qaws_scalar)(x[i] - 2 * h);
+				qaws_repulsive_curves_solver_objective(s, xp, &Em2, NULL);
+				e = fabs((8 * ((double)Ep - Em) - ((double)Ep2 - Em2)) / (12 * h) - g[i]);
+				fd = e > fd ? e : fd;
+			}
 		}
 		sprintf(msg, "objective with a length term: %.12g against E + w L = %.12g; gradient against differences %.2g", (double)El, Eref + 0.7 * len, fd);
-		TEST_ASSERT(fabs((double)El - (Eref + 0.7 * len)) <= 1e-9 * fabs((double)El) && fd <= 1e-4 * (1 + fabs((double)El)), msg);
+		/* (the energy is a sum over the RC_N^2 pairs and RC_N edge lengths: recursive summation errs by up to n eps relative) */
+		TEST_ASSERT(fabs((double)El - (Eref + 0.7 * len)) <= fmax(1e-9, RC_N * TEST_EPS) * fabs((double)El) && fd <= 1e-4 * (1 + fabs((double)El)), msg);
 		printf("  %s\n", msg);
 	}
 	else

@@ -39,7 +39,7 @@ qaws_status qaws_mesh_3d_create(qaws_mesh_3d_desc const* desc, qaws_mesh_3d** ou
 	*out_mesh = NULL;
 	if (!desc || (desc->vertex_count && !desc->positions) || (desc->face_count && !desc->face_vertices))
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	x = (double*)qaws_internal_malloc(sizeof(double) * 3 * (desc->vertex_count ? desc->vertex_count : 1));
+	x = (double*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(double), 3, (desc->vertex_count ? desc->vertex_count : 1)));
 	if (!x)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	for (i = 0; i < 3 * desc->vertex_count; i++)
@@ -259,7 +259,7 @@ qaws_status qaws_mesh_3d_get_vertex_normals(qaws_mesh_3d const* mesh, qaws_scala
 	if (!mesh || (!out_normals && mesh->hm.nv))
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	m = &mesh->hm;
-	acc = (double*)qaws_internal_zalloc(3 * (size_t)m->nv + 1, sizeof(double));
+	acc = (double*)qaws_internal_scratch_zalloc(3 * (size_t)m->nv + 1, sizeof(double));
 	if (!acc)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	for (f = 0; f < m->nf; f++)
@@ -307,10 +307,10 @@ qaws_status qaws_mesh_3d_get_topology(qaws_mesh_3d const* mesh, qaws_mesh_topolo
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	m = &mesh->hm;
 	memset(out_topology, 0, sizeof *out_topology);
-	uf = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (2 * (size_t)m->nv + 1));
-	seen = (unsigned char*)qaws_internal_zalloc((size_t)m->nc + 1, 1);
-	comp_chi = (int*)qaws_internal_zalloc((size_t)m->nv + 1, sizeof(int));
-	comp_b = (unsigned int*)qaws_internal_zalloc((size_t)m->nv + 1, sizeof(unsigned int));
+	uf = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (2 * (size_t)m->nv + 1)));
+	seen = (unsigned char*)qaws_internal_scratch_zalloc((size_t)m->nc + 1, 1);
+	comp_chi = (int*)qaws_internal_scratch_zalloc((size_t)m->nv + 1, sizeof(int));
+	comp_b = (unsigned int*)qaws_internal_scratch_zalloc((size_t)m->nv + 1, sizeof(unsigned int));
 	if (!uf || !seen || !comp_chi || !comp_b)
 	{
 		qaws_internal_free(uf); qaws_internal_free(seen); qaws_internal_free(comp_chi); qaws_internal_free(comp_b);
@@ -397,9 +397,9 @@ qaws_status qaws_mesh_3d_create_dual(qaws_mesh_3d const* mesh, qaws_mesh_3d** ou
 	if (!mesh)
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	m = &mesh->hm;
-	x = (double*)qaws_internal_zalloc(3 * (size_t)m->nf + 1, sizeof(double));
-	fv = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (m->nc + 1));
-	fs = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (m->nv + 1));
+	x = (double*)qaws_internal_scratch_zalloc(3 * (size_t)m->nf + 1, sizeof(double));
+	fv = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (m->nc + 1)));
+	fs = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (m->nv + 1)));
 	if (!x || !fv || !fs)
 	{
 		qaws_internal_free(x); qaws_internal_free(fv); qaws_internal_free(fs);

@@ -151,7 +151,7 @@ void qaws_exact_curve_destroy(qaws_exact_curve* curve)
 /* Allocates an exact curve of `count` spans of degree p (dimension dim). */
 static qaws_exact_curve* exact_curve_alloc(qaws_exact_desc const* d, unsigned int dim, unsigned int count, unsigned int p)
 {
-	qaws_exact_curve* ec = (qaws_exact_curve*)qaws_internal_alloc(NULL, (unsigned long)sizeof(qaws_exact_curve));
+	qaws_exact_curve* ec = (qaws_exact_curve*)qaws_internal_alloc(NULL, sizeof(qaws_exact_curve));
 	unsigned int s;
 	if (!ec)
 		return NULL;
@@ -159,7 +159,7 @@ static qaws_exact_curve* exact_curve_alloc(qaws_exact_desc const* d, unsigned in
 	ec->dimension = (int)dim;
 	ec->space_exp2 = d->space_exp2;
 	ec->desc = *d;
-	ec->spans = (qaws_exact_span*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_exact_span) * count));
+	ec->spans = (qaws_exact_span*)qaws_internal_alloc(NULL, qaws_internal_mul2(sizeof(qaws_exact_span), count));
 	if (!ec->spans)
 	{
 		qaws_internal_dealloc(NULL, ec);
@@ -170,7 +170,7 @@ static qaws_exact_curve* exact_curve_alloc(qaws_exact_desc const* d, unsigned in
 	for (s = 0; s < count; s++)
 	{
 		ec->spans[s].degree = p;
-		ec->spans[s].h = (qaws_exact_int*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_exact_int) * (p + 1) * (dim + 1)));
+		ec->spans[s].h = (qaws_exact_int*)qaws_internal_alloc(NULL, qaws_internal_mul3(sizeof(qaws_exact_int), (p + 1), (dim + 1)));
 		if (!ec->spans[s].h)
 		{
 			exact_curve_free(ec);
@@ -288,8 +288,8 @@ static qaws_status prepare_cubic_family(qaws_exact_desc const* d, qaws_curve con
 			n = fields[f].count;
 	if (n < 2 || (dim != 2 && dim != 3))
 		return QAWS_STATUS_EXACT_RANGE_EXCEEDED;
-	pts = (qaws_scalar*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_scalar) * 2 * n * dim));
-	P = (int64_t*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(int64_t) * 2 * n * dim));
+	pts = (qaws_scalar*)qaws_internal_alloc(NULL, qaws_internal_mul4(sizeof(qaws_scalar), 2, n, dim));
+	P = (int64_t*)qaws_internal_alloc(NULL, qaws_internal_mul4(sizeof(int64_t), 2, n, dim));
 	if (pts && P)
 		st = prepare_cubic_points(d, curve, kind, n, pts, pts + n * dim, P, P + n * dim, out, max_pos);
 	else
@@ -514,7 +514,7 @@ static qaws_status prepare_composite(qaws_exact_desc const* d, qaws_curve const*
 	qaws_status st = QAWS_STATUS_OK;
 	if (!impl || impl->segment_count == 0)
 		return QAWS_STATUS_EXACT_UNSUPPORTED;
-	seg = (qaws_exact_curve**)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_exact_curve*) * impl->segment_count));
+	seg = (qaws_exact_curve**)qaws_internal_alloc(NULL, qaws_internal_mul2(sizeof(qaws_exact_curve*), impl->segment_count));
 	if (!seg)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	memset(seg, 0, sizeof(qaws_exact_curve*) * impl->segment_count);
@@ -544,11 +544,11 @@ static qaws_status prepare_composite(qaws_exact_desc const* d, qaws_curve const*
 	}
 	if (st == QAWS_STATUS_OK)
 	{
-		ec = (qaws_exact_curve*)qaws_internal_alloc(NULL, (unsigned long)sizeof(qaws_exact_curve));
+		ec = (qaws_exact_curve*)qaws_internal_alloc(NULL, sizeof(qaws_exact_curve));
 		if (ec)
 		{
 			memset(ec, 0, sizeof(*ec));
-			ec->spans = (qaws_exact_span*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_exact_span) * total));
+			ec->spans = (qaws_exact_span*)qaws_internal_alloc(NULL, qaws_internal_mul2(sizeof(qaws_exact_span), total));
 		}
 		if (!ec || !ec->spans)
 			st = QAWS_STATUS_ALLOCATION_FAILURE;
@@ -650,7 +650,7 @@ static qaws_status prepare_net(qaws_exact_desc const* dp, qaws_curve const* curv
 	frexp(wmax, &wexp);
 	wexp = (int)d.weight_bits - wexp;
 
-	ec = (qaws_exact_curve*)qaws_internal_alloc(NULL, (unsigned long)sizeof(qaws_exact_curve));
+	ec = (qaws_exact_curve*)qaws_internal_alloc(NULL, sizeof(qaws_exact_curve));
 	if (!ec)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	memset(ec, 0, sizeof(*ec));
@@ -692,7 +692,7 @@ static qaws_status prepare_net(qaws_exact_desc const* dp, qaws_curve const* curv
 	}
 
 	/* homogeneous integer control points */
-	local = (qaws_exact_hfrac*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_exact_hfrac) * n));
+	local = (qaws_exact_hfrac*)qaws_internal_alloc(NULL, qaws_internal_mul2(sizeof(qaws_exact_hfrac), n));
 	if (!local)
 	{
 		exact_curve_free(ec);
@@ -733,7 +733,7 @@ static qaws_status prepare_net(qaws_exact_desc const* dp, qaws_curve const* curv
 		}
 		else
 			count = 1;
-		ec->spans = (qaws_exact_span*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_exact_span) * (count ? count : 1)));
+		ec->spans = (qaws_exact_span*)qaws_internal_alloc(NULL, qaws_internal_mul2(sizeof(qaws_exact_span), (count ? count : 1)));
 		if (!ec->spans || count == 0)
 			st = ec->spans ? QAWS_STATUS_EXACT_UNSUPPORTED : QAWS_STATUS_ALLOCATION_FAILURE;
 		else
@@ -746,7 +746,7 @@ static qaws_status prepare_net(qaws_exact_desc const* dp, qaws_curve const* curv
 				continue;
 			sp = &ec->spans[ec->span_count++];
 			sp->degree = p;
-			sp->h = (qaws_exact_int*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_exact_int) * (p + 1) * D));
+			sp->h = (qaws_exact_int*)qaws_internal_alloc(NULL, qaws_internal_mul3(sizeof(qaws_exact_int), (p + 1), D));
 			if (!sp->h)
 			{
 				st = QAWS_STATUS_ALLOCATION_FAILURE;
@@ -878,8 +878,8 @@ qaws_status qaws_exact_curve_prepare(qaws_exact_desc const* desc, qaws_curve con
 		return QAWS_STATUS_EXACT_RANGE_EXCEEDED;
 	{
 		size_t nkk = spline ? nk : 1;
-		qaws_scalar* buf = (qaws_scalar*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_scalar) * (n * (dim + 1) + nkk)));
-		int64_t* K = (int64_t*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(int64_t) * nkk));
+		qaws_scalar* buf = (qaws_scalar*)qaws_internal_alloc(NULL, qaws_internal_mul2(sizeof(qaws_scalar), (n * (dim + 1) + nkk)));
+		int64_t* K = (int64_t*)qaws_internal_alloc(NULL, qaws_internal_mul2(sizeof(int64_t), nkk));
 		if (buf && K)
 			st = prepare_net(&d, curve, n, nk, p, rational, spline, buf, buf + n * dim, buf + n * (dim + 1), K, out_curve, out_report);
 		else

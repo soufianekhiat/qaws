@@ -4,7 +4,14 @@
  *   - a descriptor that was a stack local: the object outlives it and is
  *     destroyed through the copy, after the stack is reused;
  *   - the default: settable until first used, then refused; a mixed workload
- *     sees all its blocks come back;
+ *     sees all its blocks come back; set against the first allocation of
+ *     seven workers in 24 fresh processes (installed or sealed first, never
+ *     a partly written descriptor);
+ *   - a scratch arena apart from results: sampling, offsets, clipping,
+ *     tessellation, meshing and a repulsive solve leave nothing in it, their
+ *     results live on the heap past its resets;
+ *   - checked size products and sums, list capacities, an oversized net
+ *     refused before its points are read;
  *   - thread allocators: before the default, exchanged and restored when
  *     nested, blocks made on one thread freed on another under other settings;
  *   - misaligned allocators refused (release builds: debug builds assert);
@@ -70,8 +77,9 @@ static qaws_curve* mm_square(double x, double y, double s)
 }
 
 /* the parts mm_workload runs: sampling, offsets, clipping, tessellation */
-enum { MM_SAMPLE = 1, MM_OFFSET = 2, MM_CLIP = 4, MM_TESS = 8, MM_ALL = 15 };
+enum { MM_SAMPLE = 1, MM_OFFSET = 2, MM_CLIP = 4, MM_TESS = 8, MM_MESH = 16, MM_REPULSIVE = 32, MM_ALL = 15 };
 static unsigned int g_parts = MM_ALL;
+static unsigned int g_published;   /* results a failed call left in its outputs */
 
 /* a mixed workload; its failures counted */
 static unsigned int mm_workload(void)
@@ -137,15 +145,58 @@ static unsigned int mm_workload(void)
 		}
 	memset(&bd, 0, sizeof bd);
 	bd.u_degree = 3; bd.v_degree = 3; bd.control_points = net; bd.u_point_count = 4; bd.v_point_count = 4;
-	if (g_parts & MM_TESS)
+	if (g_parts & (MM_TESS | MM_MESH))
 		failures += qaws_surface_create_bezier(&bd, &s) != QAWS_STATUS_OK;
-	if (s)
+	if (s && (g_parts & MM_TESS))
 	{
 		memset(&td, 0, sizeof td);
 		td.max_depth = 4;
 		td.curvature_threshold = (qaws_scalar)0.01;
 		failures += qaws_surface_tessellate(s, &td, tv, 4096, &nv, ti, 24000, &ni) != QAWS_STATUS_OK;
-		qaws_surface_destroy(s);
+	}
+	if (s && (g_parts & MM_MESH))
+	{
+		qaws_generate_desc gd;
+		qaws_mesh_3d* m = NULL;
+		qaws_status st;
+		memset(&gd, 0, sizeof gd);
+		gd.method = QAWS_GENERATE_REMESH;
+		gd.target_length = (qaws_scalar)0.5;
+		st = qaws_mesh_generate_surface(s, &gd, &m, NULL);
+		failures += st != QAWS_STATUS_OK;
+		g_published += st != QAWS_STATUS_OK && m != NULL;   /* a failed call publishes no mesh */
+		qaws_mesh_3d_destroy(m);
+	}
+	qaws_surface_destroy(s);
+	if (g_parts & MM_REPULSIVE)
+	{
+		qaws_repulsive_curves_desc rd;
+		qaws_repulsive_curves_solve_desc sd;
+		qaws_repulsive_curves* rc = NULL;
+		qaws_scalar pos[48];
+		unsigned int edges[32];
+		qaws_status st;
+		for (i = 0; i < 16; i++)
+		{
+			double t = 6.283185307179586 * i / 16;
+			pos[3 * i] = (qaws_scalar)cos(t);
+			pos[3 * i + 1] = (qaws_scalar)(sin(t) * (1 + 0.2 * cos(3 * t)));
+			pos[3 * i + 2] = (qaws_scalar)(0.2 * sin(2 * t));
+			edges[2 * i] = i;
+			edges[2 * i + 1] = (i + 1) % 16;
+		}
+		memset(&rd, 0, sizeof rd);
+		rd.dimension = 3; rd.vertex_count = 16; rd.edges = edges; rd.edge_count = 16;
+		st = qaws_repulsive_curves_create(&rd, &rc);
+		failures += st != QAWS_STATUS_OK;
+		g_published += st != QAWS_STATUS_OK && rc != NULL;
+		if (rc)
+		{
+			memset(&sd, 0, sizeof sd);
+			sd.max_iterations = 2;
+			failures += qaws_repulsive_curves_solve(rc, &sd, pos, NULL) != QAWS_STATUS_OK;
+			qaws_repulsive_curves_destroy(rc);
+		}
 	}
 	return failures;
 }
@@ -219,6 +270,271 @@ static void test_default(void)
 	}
 }
 
+/* the first allocation against qaws_set_default_allocator: in a fresh process (a child of this runner), seven workers
+   allocate and free from the moment thread 0 installs the default. The default is installed (OK) or sealed by a worker
+   first (UNSUPPORTED_OPERATION); either way every block returns to the allocator that gave it, and the default's
+   callbacks never see a partly written descriptor (their user_data checked on every call). */
+#define MM_RACE_MAGIC 0x5EA1u
+typedef struct mm_race
+{
+	unsigned int magic;
+	long volatile allocs, frees, bad;
+} mm_race;
+static mm_race g_race = { MM_RACE_MAGIC, 0, 0, 0 };
+static long volatile g_race_go;
+/* the child's index mod 3: thread 0 installs at once (0), once a worker is about to allocate (1), once one has allocated (2) */
+static unsigned int g_race_mode;
+static long volatile g_race_entered, g_race_done;
+
+static long mm_inc(long volatile* p)
+{
+#ifdef _WIN32
+	return InterlockedIncrement(p);
+#else
+	return __atomic_add_fetch(p, 1, __ATOMIC_SEQ_CST);
+#endif
+}
+
+static void* mm_race_alloc(unsigned long size, void* user)
+{
+	mm_race* r = (mm_race*)user;
+	if (r != &g_race || r->magic != MM_RACE_MAGIC)
+		mm_inc(&g_race.bad);
+	mm_inc(&g_race.allocs);
+	return malloc(size);
+}
+
+static void mm_race_free(void* p, void* user)
+{
+	mm_race* r = (mm_race*)user;
+	if (r != &g_race || r->magic != MM_RACE_MAGIC)
+		mm_inc(&g_race.bad);
+	mm_inc(&g_race.frees);
+	free(p);
+}
+
+static qaws_status g_race_status = QAWS_STATUS_INTERNAL_ERROR;
+static long volatile g_race_failed;
+
+static void mm_race_worker(void* p)
+{
+	unsigned int i;
+	if (p)
+	{
+		/* thread 0: release the workers, then install the default */
+		qaws_allocator a;
+		memset(&a, 0, sizeof a);
+		a.alloc = mm_race_alloc;
+		a.dealloc = mm_race_free;
+		a.user_data = &g_race;
+		mm_inc(&g_race_go);
+		while ((g_race_mode == 1 && !g_race_entered) || (g_race_mode == 2 && !g_race_done)) {}
+		g_race_status = qaws_set_default_allocator(&a);
+		memset(&a, 0xCD, sizeof a);   /* the library holds its own copy */
+		return;
+	}
+	while (!g_race_go) {}
+	for (i = 0; i < 2000; i++)
+	{
+		void* b;
+		if (i == 0)
+			mm_inc(&g_race_entered);
+		b = qaws_internal_malloc(16 + i % 200);
+		if (i == 0)
+			mm_inc(&g_race_done);
+		if (!b)
+			mm_inc(&g_race_failed);
+		else
+			memset(b, 0x5A, 16);
+		qaws_internal_free(b);
+	}
+}
+
+static int test_default_race_child(void)
+{
+	void* args[8] = { &g_race, NULL, NULL, NULL, NULL, NULL, NULL, NULL };
+	int sealed_first;
+	g_race_mode = ((unsigned int)atoi(getenv("QAWS_TEST_RACE")) - 1) % 3;
+	test_run_threads(8, mm_race_worker, args);
+	sealed_first = g_race_status == QAWS_STATUS_UNSUPPORTED_OPERATION;
+	if (g_race_failed || g_race.bad || g_race.allocs != g_race.frees || (g_race_status != QAWS_STATUS_OK && !sealed_first)
+		|| (sealed_first && g_race.allocs != 0))
+	{
+		printf("  race: status %s, %ld blocks, %ld returned, %ld bad descriptors, %ld failures\n", qaws_status_to_string(g_race_status),
+			g_race.allocs, g_race.frees, g_race.bad, g_race_failed);
+		return 1;
+	}
+	return sealed_first ? 100 : 0;
+}
+
+static void test_default_race(void)
+{
+#ifdef _WIN32
+	char path[MAX_PATH];
+	unsigned int k, installed = 0, sealed = 0, bad = 0;
+	char msg[200];
+	if (!GetModuleFileNameA(NULL, path, sizeof path))
+	{
+		TEST_ASSERT(0, "default race: the runner's path");
+		return;
+	}
+	_putenv("QAWS_TEST=154");
+	for (k = 0; k < 24; k++)
+	{
+		char var[40];
+		intptr_t code;
+		snprintf(var, sizeof var, "QAWS_TEST_RACE=%u", k + 1);
+		_putenv(var);
+		code = _spawnl(_P_WAIT, path, path, NULL);
+		if (code == 0)
+			installed++;
+		else if (code == 100)
+			sealed++;
+		else
+			bad++;
+	}
+	_putenv("QAWS_TEST_RACE=");
+	snprintf(msg, sizeof msg, "default against first allocation, 24 fresh processes: installed in %u, sealed by a worker first in %u, wrong in %u",
+		installed, sealed, bad);
+	printf("  %s\n", msg);
+	TEST_ASSERT(bad == 0 && installed + sealed == 24, msg);
+#else
+	/* shortcut: the child-process race runs on Windows only; on other targets add a fork/exec path when they are tested */
+#endif
+}
+
+/* ---- scratch apart from results ------------------------------------------ */
+
+/* each operation with a frame arena as the thread's scratch and a counting heap as its allocator: when the call returns
+   the arena holds nothing (the temporaries came from it and went back), so it resets while the results live on the heap;
+   the results then go back to the heap. */
+static void test_scratch_split(void)
+{
+	static unsigned char memory[1 << 22];
+	static qaws_vec2 samples[4096];
+	static qaws_tessellation_vertex tv[8192];
+	static unsigned int ti[49152];
+	qaws_vec2 wave[6] = { { 0, 0 }, { 1, 2 }, { 2, -2 }, { 3, 2 }, { 4, -2 }, { 5, 0 } };
+	qaws_vec3 net[16];
+	mm_count heap = { 0, 0, 0 };
+	qaws_allocator ha = mm_legacy(&heap), prev, prev_scratch;
+	qaws_arena arena;
+	qaws_bspline_desc d;
+	qaws_curve *w = NULL, *a, *b, *offs[16];
+	qaws_curve const* ca[1];
+	qaws_curve const* cb[1];
+	qaws_path_2d pa, pb;
+	qaws_clip_result* r = NULL;
+	qaws_surface* s = NULL;
+	qaws_mesh_3d* m = NULL;
+	qaws_repulsive_curves* rc = NULL;
+	unsigned int n = 0, noff = 0, nv = 0, ni = 0, i, j, ok = 1, held = 0, edges[48];
+	size_t scratch_peak[6];
+	qaws_scalar pos[72];
+	char msg[300];
+	qaws_arena_init(&arena, memory, sizeof memory);
+	qaws_exchange_thread_allocator(&ha, &prev);
+	qaws_exchange_thread_scratch_allocator(&arena.allocator, &prev_scratch);
+	memset(&d, 0, sizeof d);
+	d.dimension = QAWS_DIMENSION_2D; d.degree = 3; d.control_points = wave; d.control_point_count = 6;
+	ok &= qaws_curve_create_bspline(&d, &w) == QAWS_STATUS_OK;
+	/* adaptive sampling */
+	{
+		qaws_sampling_desc sd;
+		memset(&sd, 0, sizeof sd);
+		sd.sample_count = 4; sd.error_tolerance = (qaws_scalar)1e-5; sd.use_adaptive_sampling = 1;
+		ok &= qaws_curve_sample_2d(w, &sd, samples, 4096, &n) == QAWS_STATUS_OK;
+		held += arena.live != 0; scratch_peak[0] = arena.peak; ok &= qaws_arena_reset(&arena) == QAWS_STATUS_OK; qaws_arena_init(&arena, memory, sizeof memory);
+	}
+	/* offsets: curves kept past the reset */
+	ok &= qaws_curve_offset_2d(w, (qaws_scalar)0.3, 1, offs, 16, &noff) == QAWS_STATUS_OK;
+	held += arena.live != 0; scratch_peak[1] = arena.peak; ok &= qaws_arena_reset(&arena) == QAWS_STATUS_OK; qaws_arena_init(&arena, memory, sizeof memory);
+	/* clipping: the result kept */
+	a = mm_square(0, 0, 2);
+	b = mm_square(1, 1, 2);
+	ca[0] = a; cb[0] = b;
+	pa.curves = ca; pa.curve_count = 1; pa.closed = 1;
+	pb.curves = cb; pb.curve_count = 1; pb.closed = 1;
+	ok &= qaws_clip_boolean(QAWS_CLIP_UNION, QAWS_FILL_NON_ZERO, &pa, 1, &pb, 1, &r) == QAWS_STATUS_OK;
+	held += arena.live != 0; scratch_peak[2] = arena.peak; ok &= qaws_arena_reset(&arena) == QAWS_STATUS_OK; qaws_arena_init(&arena, memory, sizeof memory);
+	/* tessellation */
+	for (i = 0; i < 4; i++)
+		for (j = 0; j < 4; j++)
+		{
+			net[i * 4 + j].x = (qaws_scalar)i;
+			net[i * 4 + j].y = (qaws_scalar)j;
+			net[i * 4 + j].z = (qaws_scalar)sin(1.3 * i + 0.7 * j);
+		}
+	{
+		qaws_surface_bezier_desc bd;
+		qaws_tessellation_desc td;
+		memset(&bd, 0, sizeof bd);
+		bd.u_degree = 3; bd.v_degree = 3; bd.control_points = net; bd.u_point_count = 4; bd.v_point_count = 4;
+		ok &= qaws_surface_create_bezier(&bd, &s) == QAWS_STATUS_OK;
+		memset(&td, 0, sizeof td);
+		td.max_depth = 5; td.curvature_threshold = (qaws_scalar)0.003;
+		ok &= qaws_surface_tessellate(s, &td, tv, 8192, &nv, ti, 49152, &ni) == QAWS_STATUS_OK;
+		held += arena.live != 0; scratch_peak[3] = arena.peak; ok &= qaws_arena_reset(&arena) == QAWS_STATUS_OK; qaws_arena_init(&arena, memory, sizeof memory);
+	}
+	/* meshing: the mesh kept */
+	{
+		qaws_generate_desc gd;
+		memset(&gd, 0, sizeof gd);
+		gd.method = QAWS_GENERATE_REMESH;
+		gd.target_length = (qaws_scalar)0.3;
+		ok &= qaws_mesh_generate_surface(s, &gd, &m, NULL) == QAWS_STATUS_OK;
+		held += arena.live != 0; scratch_peak[4] = arena.peak; ok &= qaws_arena_reset(&arena) == QAWS_STATUS_OK; qaws_arena_init(&arena, memory, sizeof memory);
+	}
+	/* a repulsive solve: the solver object kept */
+	{
+		qaws_repulsive_curves_desc rd;
+		qaws_repulsive_curves_solve_desc sd;
+		for (i = 0; i < 24; i++)
+		{
+			double t = 6.283185307179586 * i / 24;
+			pos[3 * i] = (qaws_scalar)(cos(t) * (1 + 0.3 * cos(5 * t)));
+			pos[3 * i + 1] = (qaws_scalar)(sin(t) * (1 + 0.3 * cos(5 * t)));
+			pos[3 * i + 2] = (qaws_scalar)(0.2 * sin(3 * t));
+			edges[2 * i] = i;
+			edges[2 * i + 1] = (i + 1) % 24;
+		}
+		memset(&rd, 0, sizeof rd);
+		rd.dimension = 3; rd.vertex_count = 24; rd.edges = edges; rd.edge_count = 24;
+		ok &= qaws_repulsive_curves_create(&rd, &rc) == QAWS_STATUS_OK;
+		memset(&sd, 0, sizeof sd);
+		sd.max_iterations = 3;
+		sd.hold_total_length = 1;
+		ok &= qaws_repulsive_curves_solve(rc, &sd, pos, NULL) == QAWS_STATUS_OK;
+		held += arena.live != 0; scratch_peak[5] = arena.peak; ok &= qaws_arena_reset(&arena) == QAWS_STATUS_OK; qaws_arena_init(&arena, memory, sizeof memory);
+	}
+	qaws_exchange_thread_scratch_allocator(&prev_scratch, NULL);
+	snprintf(msg, sizeof msg, "scratch arena apart from results: sampling, offsets, clipping, tessellation, meshing, repulsive; held after a call %u; "
+		"scratch peaks %lu, %lu, %lu, %lu, %lu, %lu bytes", held, (unsigned long)scratch_peak[0],
+		(unsigned long)scratch_peak[1], (unsigned long)scratch_peak[2], (unsigned long)scratch_peak[3], (unsigned long)scratch_peak[4],
+		(unsigned long)scratch_peak[5]);
+	printf("  %s\n", msg);
+	TEST_ASSERT(ok && held == 0 && arena.invalid_frees == 0 && arena.failures == 0 && scratch_peak[5] > 0 && noff > 0 && r && m && rc, msg);
+	/* the results are whole on the heap: used after the resets, then returned */
+	ok = qaws_clip_result_get_path_count(r) > 0 && qaws_mesh_3d_get_face_count(m) > 0;
+	{
+		static qaws_scalar xyz[3 * 65536];
+		qaws_path_2d path;
+		ok &= qaws_mesh_3d_get_vertex_count(m) <= 65536 && qaws_mesh_3d_get_positions(m, xyz) == QAWS_STATUS_OK
+			&& qaws_clip_result_get_path(r, 0, &path) == QAWS_STATUS_OK && path.curve_count > 0;
+	}
+	for (i = 0; i < noff; i++)
+		qaws_curve_destroy(offs[i]);
+	qaws_clip_result_destroy(r);
+	qaws_mesh_3d_destroy(m);
+	qaws_repulsive_curves_destroy(rc);
+	qaws_surface_destroy(s);
+	qaws_curve_destroy(a);
+	qaws_curve_destroy(b);
+	qaws_curve_destroy(w);
+	qaws_set_thread_allocator(&prev);
+	TEST_ASSERT(ok && heap.allocs > 0 && heap.frees == heap.allocs && arena.live == 0, "the results used after the resets and returned to the heap");
+}
+
 static void test_thread_nesting(void)
 {
 	mm_count outer = { 0, 0, 0 }, inner = { 0, 0, 0 };
@@ -254,11 +570,13 @@ typedef struct mm_job
 static void mm_make(void* p)
 {
 	mm_job* j = (mm_job*)p;
+	qaws_allocator local = j->a;   /* a stack descriptor, gone before the blocks are freed on another thread */
 	unsigned int i;
-	qaws_set_thread_allocator(&j->a);
+	qaws_set_thread_allocator(&local);
 	for (i = 0; i < 8; i++)
 		j->curves[i] = mm_square(i, 0, 1);
 	qaws_set_thread_allocator(NULL);
+	memset(&local, 0xCD, sizeof local);
 }
 
 
@@ -398,6 +716,40 @@ static void test_sizes_and_alignment(void)
 
 	TEST_ASSERT(qaws_internal_malloc(SIZE_MAX) == NULL && qaws_internal_malloc(SIZE_MAX - 8) == NULL, "sizes near SIZE_MAX refused");
 	TEST_ASSERT(qaws_internal_zalloc(SIZE_MAX / 2, 3) == NULL && qaws_internal_zalloc(SIZE_MAX, SIZE_MAX) == NULL, "count times size overflow refused");
+	/* the checked size arithmetic: exact below the limit, SIZE_MAX (refused by every allocation) past it */
+	TEST_ASSERT(qaws_internal_mul2(SIZE_MAX / 2, 2) == SIZE_MAX - 1 && qaws_internal_mul2(SIZE_MAX / 2 + 1, 2) == SIZE_MAX
+		&& qaws_internal_mul2(0, SIZE_MAX) == 0 && qaws_internal_mul3(SIZE_MAX / 4 + 1, 2, 2) == SIZE_MAX
+		&& qaws_internal_mul4(65536, 65536, 65536, 65536) == SIZE_MAX
+		&& qaws_internal_mul3(0xFFFFFFFFu, 3, 8) == (sizeof(size_t) > 4 ? (size_t)0xFFFFFFFFu * 24 : SIZE_MAX)
+		&& qaws_internal_add2(SIZE_MAX - 1, 1) == SIZE_MAX && qaws_internal_add2(SIZE_MAX, 1) == SIZE_MAX
+		&& qaws_internal_malloc(qaws_internal_mul3(SIZE_MAX / 3, 2, 2)) == NULL, "checked size products and sums");
+	TEST_ASSERT(qaws_internal_grow(0, 1, 16) == 16 && qaws_internal_grow(16, 17, 16) == 32 && qaws_internal_grow(16, 100, 16) == 128
+		&& qaws_internal_grow(0x80000000u, 0x80000001u, 16) == 0xFFFFFFFFu && (sizeof(size_t) == 4 || qaws_internal_grow(0xFFFFFFFFu, (size_t)0xFFFFFFFFu + 1, 16) == 0),   /* (32-bit: no list reaches UINT_MAX elements) */
+		"list capacities: doubled to the need, held at UINT_MAX, 0 past it");
+	/* oversized topology refused before the control points are read (they are 16 here) */
+	{
+		qaws_vec3 net16[16];
+		qaws_surface_bspline_desc sd;
+		qaws_surface* s = NULL;
+		qaws_status st;
+		memset(net16, 0, sizeof net16);
+		memset(&sd, 0, sizeof sd);
+		sd.u_degree = 3; sd.v_degree = 3; sd.control_points = net16; sd.u_point_count = 0x10000; sd.v_point_count = 0x10000;
+		st = qaws_surface_create_bspline(&sd, &s);
+		snprintf(msg, sizeof msg, "a 65536 x 65536 net (2^32 points, past unsigned int): %s", qaws_status_to_string(st));
+		TEST_ASSERT(st == QAWS_STATUS_INVALID_CONTROL_POINT_COUNT && !s, msg);
+		if (sizeof(size_t) == 4)
+		{
+			/* 32-bit: 2^29 points of three scalars overflow size_t; refused before they are read */
+			qaws_bspline_desc bd;
+			qaws_curve* c = NULL;
+			memset(&bd, 0, sizeof bd);
+			bd.dimension = QAWS_DIMENSION_3D; bd.degree = 3; bd.control_points = net16; bd.control_point_count = 0x20000000;
+			st = qaws_curve_create_bspline(&bd, &c);
+			snprintf(msg, sizeof msg, "32-bit: 2^29 control points of three scalars: %s", qaws_status_to_string(st));
+			TEST_ASSERT(st != QAWS_STATUS_OK && !c, msg);
+		}
+	}
 	p = (unsigned char*)qaws_internal_malloc(100);
 	for (i = 0; i < 100; i++)
 		p[i] = (unsigned char)i;
@@ -502,11 +854,12 @@ static void test_arena(void)
 
 	/* every part in arenas from 256 bytes up (allocations fail at many different points): nothing may stay held */
 	{
-		static char const* names[4] = { "sampling", "offsets", "clipping", "tessellation" };
+		static char const* names[6] = { "sampling", "offsets", "clipping", "tessellation", "meshing", "repulsive" };
 		static double sweep[1 << 16];
 		unsigned int part, leaks = 0, runs = 0;
 		size_t sz;
-		for (part = 0; part < 4; part++)
+		g_published = 0;
+		for (part = 0; part < 6; part++)
 		{
 			unsigned int part_leaks = 0;
 			g_parts = 1u << part;
@@ -527,9 +880,10 @@ static void test_arena(void)
 			leaks += part_leaks;
 		}
 		g_parts = MM_ALL;
-		snprintf(msg, sizeof msg, "failure paths: %u runs in arenas from 256 bytes, %u left blocks held", runs, leaks);
+		snprintf(msg, sizeof msg, "failure paths: %u runs in arenas from 256 bytes, %u left blocks held, %u published a result on failure", runs,
+			leaks, g_published);
 		printf("  %s\n", msg);
-		TEST_ASSERT(leaks == 0, msg);
+		TEST_ASSERT(leaks == 0 && g_published == 0, msg);
 	}
 
 	/* overflow-safe arithmetic in the arena itself */
@@ -593,11 +947,18 @@ int test_154_memory_main(void)
 {
 	g_pass = 0;
 	g_fail = 0;
+	{
+		char const* race = getenv("QAWS_TEST_RACE");
+		if (race && *race)
+			exit(test_default_race_child());   /* the child's verdict as its exit code (the runner would fold it) */
+	}
 	printf("Test 154: allocators and caller memory\n");
 	test_default();
+	test_default_race();
 	test_descriptor_lifetime();
 	test_thread_nesting();
 	test_cross_thread();
+	test_scratch_split();
 	test_sizes_and_alignment();
 	test_arena();
 	test_concurrent();

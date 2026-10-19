@@ -136,7 +136,7 @@ static qaws_status bp_build(qaws_bp_box const* boxes, unsigned int count, unsign
 
 	/* count, prefix, fill */
 	start = (unsigned int*)qaws_internal_zalloc((size_t)ncell + 1, sizeof(unsigned int));
-	fill = (unsigned int*)qaws_internal_malloc(((size_t)ncell + 1) * sizeof(unsigned int));
+	fill = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(((size_t)ncell + 1), sizeof(unsigned int)));
 	if (!start || !fill)
 	{
 		goto done;
@@ -158,7 +158,7 @@ static qaws_status bp_build(qaws_bp_box const* boxes, unsigned int count, unsign
 	}
 	start[ncell] = total;
 	memcpy(fill, start, ((size_t)ncell + 1) * sizeof(unsigned int));
-	items = (unsigned int*)qaws_internal_malloc((size_t)(total ? total : 1) * sizeof(unsigned int));
+	items = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(((size_t)(total ? total : 1)), sizeof(unsigned int)));
 	if (!items)
 	{
 		goto done;
@@ -287,7 +287,7 @@ static unsigned int bp_axis(qaws_bp_box const* boxes, unsigned int count, unsign
 /* bounded boxes sorted by their low end on the axis (unbounded ones counted apart) */
 static bp_key* bp_sorted(qaws_bp_box const* boxes, unsigned int count, unsigned int dim, unsigned int axis, unsigned int* out_n)
 {
-	bp_key* keys = (bp_key*)qaws_internal_malloc(sizeof(bp_key) * (count ? count : 1));
+	bp_key* keys = (bp_key*)qaws_internal_malloc(qaws_internal_mul2(sizeof(bp_key), (count ? count : 1)));
 	unsigned int i, n = 0;
 	if (!keys)
 		return NULL;

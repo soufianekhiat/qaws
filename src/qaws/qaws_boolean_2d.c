@@ -28,7 +28,7 @@ static qaws_status bo_path_curve(qaws_path_2d const* p, qaws_curve** out)
 	qaws_status s = QAWS_STATUS_OK;
 	if (p->curve_count == 1)
 		return bo_copy(p->curves[0], out);
-	seg = (qaws_curve**)qaws_internal_malloc(sizeof(qaws_curve*) * p->curve_count);
+	seg = (qaws_curve**)qaws_internal_malloc(qaws_internal_mul2(sizeof(qaws_curve*), p->curve_count));
 	if (!seg)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	for (i = 0; i < p->curve_count && s == QAWS_STATUS_OK; i++)

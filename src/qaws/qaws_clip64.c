@@ -115,7 +115,8 @@ typedef struct c64_ctx
 } c64_ctx;
 
 #define C64_GROW(ptr, n, cap, type) \
-	do { if ((n) == (cap)) { unsigned int nc_ = (cap) ? 2 * (cap) : 64; type* np_ = (type*)qaws_internal_realloc((ptr), sizeof(type) * nc_); \
+	do { if ((n) >= 0x7FFFFFFFu) { return QAWS_STATUS_ALLOCATION_FAILURE; } /* 2 n half-edges count in unsigned int */ \
+		if ((n) == (cap)) { unsigned int nc_ = (cap) ? 2 * (cap) : 64; type* np_ = (type*)qaws_internal_realloc((ptr), qaws_internal_mul2(sizeof(type), nc_)); \
 		if (!np_) { return QAWS_STATUS_ALLOCATION_FAILURE; } (ptr) = np_; (cap) = nc_; } } while (0)
 
 /* ======================================================================== */
@@ -192,20 +193,22 @@ static void c64_sort_keys(c64_skey* k, c64_skey* tmp, unsigned int n, c64_skey_f
 			k[b] = key;
 		}
 	}
-	for (w = 16; w < n; w *= 2)
+	/* (bounds by differences and w capped at n: nothing wraps when n nears UINT_MAX) */
+	for (w = 16; w < n; w = w <= (n - 1) / 2 ? 2 * w : n)
 	{
-		for (i = 0; i < n; i += 2 * w)
+		for (i = 0; i < n;)
 		{
-			unsigned int a = i, am = i + w < n ? i + w : n, b = am, bm = i + 2 * w < n ? i + 2 * w : n, j = i;
+			unsigned int a = i, am = w < n - i ? i + w : n, b = am, bm = w < n - am ? am + w : n, j = i;
 			if (am >= bm || cmp(ctx, &k[am - 1], &k[am]) <= 0)
-			{
 				memcpy(&tmp[i], &k[i], sizeof(c64_skey) * (bm - i));
-				continue;
+			else
+			{
+				while (a < am && b < bm)
+					tmp[j++] = cmp(ctx, &k[a], &k[b]) <= 0 ? k[a++] : k[b++];
+				while (a < am) tmp[j++] = k[a++];
+				while (b < bm) tmp[j++] = k[b++];
 			}
-			while (a < am && b < bm)
-				tmp[j++] = cmp(ctx, &k[a], &k[b]) <= 0 ? k[a++] : k[b++];
-			while (a < am) tmp[j++] = k[a++];
-			while (b < bm) tmp[j++] = k[b++];
+			i = bm;
 		}
 		memcpy(k, tmp, sizeof(c64_skey) * n);
 	}
@@ -231,7 +234,7 @@ static int c64_skey_t(void const* ctx, c64_skey const* p, c64_skey const* q)
 /* the points sorted (y, then x), as indices */
 static qaws_status c64_sort_points(c64_ctx* x, unsigned int* idx)
 {
-	c64_skey* k = (c64_skey*)qaws_internal_malloc(sizeof(c64_skey) * 2 * (x->npt + 1));
+	c64_skey* k = (c64_skey*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(c64_skey), 2, (x->npt + 1)));
 	unsigned int i;
 	if (!k)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
@@ -251,8 +254,8 @@ static qaws_status c64_sort_points(c64_ctx* x, unsigned int* idx)
 /* the cuts by segment (counting sort), then along each segment by t */
 static qaws_status c64_sort_cuts(c64_ctx* x, unsigned int* idx)
 {
-	unsigned int* start = (unsigned int*)qaws_internal_zalloc(x->nseg + 2, sizeof(unsigned int));
-	c64_skey* k = (c64_skey*)qaws_internal_malloc(sizeof(c64_skey) * 2 * (x->ncut + 1));
+	unsigned int* start = (unsigned int*)qaws_internal_scratch_zalloc(x->nseg + 2, sizeof(unsigned int));
+	c64_skey* k = (c64_skey*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(c64_skey), 2, (x->ncut + 1)));
 	unsigned int i, s;
 	if (!start || !k)
 	{
@@ -507,7 +510,7 @@ static qaws_status c64_visit(void* user, unsigned int i, unsigned int j)
 	if (P->n + 2 > P->cap)
 	{
 		unsigned int nc = P->cap ? 2 * P->cap : 4096;
-		unsigned int* g = (unsigned int*)qaws_internal_realloc(P->p, sizeof(unsigned int) * nc);
+		unsigned int* g = (unsigned int*)qaws_internal_realloc(P->p, qaws_internal_mul2(sizeof(unsigned int), nc));
 		if (!g) return QAWS_STATUS_ALLOCATION_FAILURE;
 		P->p = g;
 		P->cap = nc;
@@ -522,14 +525,14 @@ static qaws_status c64_reserve(c64_ctx* x, unsigned int n, unsigned int m)
 {
 	if (x->ncut + n > x->capcut)
 	{
-		c64_cut* g = (c64_cut*)qaws_internal_realloc(x->cut, sizeof(c64_cut) * (x->ncut + n));
+		c64_cut* g = (c64_cut*)qaws_internal_realloc(x->cut, qaws_internal_mul2(sizeof(c64_cut), (x->ncut + n)));
 		if (!g) return QAWS_STATUS_ALLOCATION_FAILURE;
 		x->cut = g;
 		x->capcut = x->ncut + n;
 	}
 	if (x->npt + m > x->cappt)
 	{
-		c64_pt* g = (c64_pt*)qaws_internal_realloc(x->pt, sizeof(c64_pt) * (x->npt + m));
+		c64_pt* g = (c64_pt*)qaws_internal_realloc(x->pt, qaws_internal_mul2(sizeof(c64_pt), (x->npt + m)));
 		if (!g) return QAWS_STATUS_ALLOCATION_FAILURE;
 		x->pt = g;
 		x->cappt = x->npt + m;
@@ -539,7 +542,7 @@ static qaws_status c64_reserve(c64_ctx* x, unsigned int n, unsigned int m)
 
 static qaws_status c64_hits(c64_ctx* x)
 {
-	qaws_bp_box* boxes = (qaws_bp_box*)qaws_internal_malloc(sizeof(qaws_bp_box) * (x->nseg + 1));
+	qaws_bp_box* boxes = (qaws_bp_box*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(qaws_bp_box), (x->nseg + 1)));
 	unsigned int i;
 	c64_pairs P;
 	qaws_status s;
@@ -579,12 +582,12 @@ static qaws_status c64_hits(c64_ctx* x)
 
 static qaws_status c64_vertices(c64_ctx* x)
 {
-	unsigned int* idx = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * 2 * (x->npt + 1));
+	unsigned int* idx = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(unsigned int), 2, (x->npt + 1)));
 	unsigned int i;
 	if (!idx)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
-	x->vid = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (x->npt + 1));
-	x->vrep = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (x->npt + 1));
+	x->vid = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (x->npt + 1)));
+	x->vrep = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (x->npt + 1)));
 	if (!x->vid || !x->vrep)
 	{
 		qaws_internal_free(idx);
@@ -603,7 +606,7 @@ static qaws_status c64_vertices(c64_ctx* x)
 		x->vid[idx[i]] = x->nv - 1;
 	}
 	qaws_internal_free(idx);
-	x->vf = (double*)qaws_internal_malloc(sizeof(double) * 2 * (x->nv + 1));
+	x->vf = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), 2, (x->nv + 1)));
 	if (!x->vf)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	for (i = 0; i < x->nv; i++)
@@ -631,7 +634,7 @@ static int c64_cmp_key(void const* a, void const* b)
 
 static qaws_status c64_edges(c64_ctx* x)
 {
-	unsigned int* idx = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * 2 * (x->ncut + 1));
+	unsigned int* idx = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(unsigned int), 2, (x->ncut + 1)));
 	unsigned int i, j, n;
 	c64_key* k;
 	if (!idx)
@@ -673,7 +676,7 @@ static qaws_status c64_edges(c64_ctx* x)
 	}
 	qaws_internal_free(idx);
 	/* straight edges between the same vertices are the same edge */
-	k = (c64_key*)qaws_internal_malloc(sizeof(c64_key) * (x->ne + 1));
+	k = (c64_key*)qaws_internal_malloc(qaws_internal_mul2(sizeof(c64_key), (x->ne + 1)));
 	if (!k)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	for (i = 0; i < x->ne; i++)
@@ -736,8 +739,8 @@ static int c64_before(c64_ctx const* x, unsigned int a, unsigned int b)
 static qaws_status c64_graph(c64_ctx* x)
 {
 	unsigned int nh = 2 * x->ne, i;
-	x->h = (c64_half*)qaws_internal_malloc(sizeof(c64_half) * (nh + 1));
-	x->vout = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (nh + 1));
+	x->h = (c64_half*)qaws_internal_malloc(qaws_internal_mul2(sizeof(c64_half), (nh + 1)));
+	x->vout = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (nh + 1)));
 	x->vfirst = (unsigned int*)qaws_internal_zalloc(x->nv + 1, sizeof(unsigned int));
 	x->vcount = (unsigned int*)qaws_internal_zalloc(x->nv + 1, sizeof(unsigned int));
 	if (!x->h || !x->vout || !x->vfirst || !x->vcount)
@@ -873,8 +876,8 @@ static qaws_status c64_faces(c64_ctx* x, unsigned int* out_faces)
 {
 	unsigned int nh = 2 * x->ne, i, ncyc = 0, capc = 0, nfaces = 1;
 	c64_cycle* cyc = NULL;
-	unsigned int* hcyc = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (nh + 1));
-	unsigned int* vcomp = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (x->nv + 1));
+	unsigned int* hcyc = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (nh + 1)));
+	unsigned int* vcomp = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (x->nv + 1)));
 	unsigned int* cface;
 	if (!hcyc || !vcomp)
 	{
@@ -932,14 +935,14 @@ static qaws_status c64_faces(c64_ctx* x, unsigned int* out_faces)
 		}
 		if (ncyc == capc)
 		{
-			unsigned int nc = capc ? 2 * capc : 64;
-			c64_cycle* g = (c64_cycle*)qaws_internal_realloc(cyc, sizeof(c64_cycle) * nc);
+			unsigned int nc = qaws_internal_grow(capc, (size_t)ncyc + 1, 64);
+			c64_cycle* g = nc ? (c64_cycle*)qaws_internal_realloc(cyc, qaws_internal_mul2(sizeof(c64_cycle), nc)) : NULL;
 			if (!g) { qaws_internal_free(cyc); qaws_internal_free(hcyc); qaws_internal_free(vcomp); return QAWS_STATUS_ALLOCATION_FAILURE; }
 			cyc = g; capc = nc;
 		}
 		cyc[ncyc++] = c;
 	}
-	cface = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (ncyc + 1));
+	cface = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (ncyc + 1)));
 	if (!cface)
 	{
 		qaws_internal_free(cyc); qaws_internal_free(hcyc); qaws_internal_free(vcomp);
@@ -959,8 +962,8 @@ static qaws_status c64_faces(c64_ctx* x, unsigned int* out_faces)
 		for (i = 0; i < ncyc; i++) nccw += cyc[i].ccw;
 		if (nccw)
 		{
-			boxes = (qaws_bp_box*)qaws_internal_malloc(sizeof(qaws_bp_box) * nccw);
-			of = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * nccw);
+			boxes = (qaws_bp_box*)qaws_internal_malloc(qaws_internal_mul2(sizeof(qaws_bp_box), nccw));
+			of = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), nccw));
 			if (!boxes || !of)
 			{
 				qaws_internal_free(boxes); qaws_internal_free(of); qaws_internal_free(cyc); qaws_internal_free(hcyc); qaws_internal_free(vcomp); qaws_internal_free(cface);
@@ -1029,9 +1032,9 @@ static int c64_inside(qaws_clip_type ct, qaws_fill_rule fr, int ws, int wc)
 static qaws_status c64_windings(c64_ctx* x, unsigned int nfaces, int* ws, int* wc, int* known)
 {
 	unsigned int nh = 2 * x->ne, i, *queue, *first, *list, *fill, qh = 0, qt = 0;
-	queue = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (nfaces + 1));
+	queue = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (nfaces + 1)));
 	first = (unsigned int*)qaws_internal_zalloc(nfaces + 2, sizeof(unsigned int));
-	list = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (nh + 1));
+	list = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (nh + 1)));
 	fill = (unsigned int*)qaws_internal_zalloc(nfaces + 1, sizeof(unsigned int));
 	if (!queue || !first || !list || !fill)
 	{
@@ -1095,9 +1098,9 @@ static qaws_status c64_out_point(qaws_clip64_result* r, int64_t px, int64_t py, 
 {
 	if (r->npts == r->cappts)
 	{
-		unsigned int nc = r->cappts ? 2 * r->cappts : 256;
-		int64_t* p = (int64_t*)qaws_internal_realloc(r->pts, sizeof(int64_t) * 2 * nc);
-		double* e = p ? (double*)qaws_internal_realloc(r->exact, sizeof(double) * 2 * nc) : NULL;
+		unsigned int nc = qaws_internal_grow(r->cappts, (size_t)r->npts + 1, 256);
+		int64_t* p = nc ? (int64_t*)qaws_internal_realloc(r->pts, qaws_internal_mul3(sizeof(int64_t), 2, nc)) : NULL;
+		double* e = p ? (double*)qaws_internal_realloc(r->exact, qaws_internal_mul3(sizeof(double), 2, nc)) : NULL;
 		if (p) r->pts = p;
 		if (e) r->exact = e;
 		if (!p || !e)
@@ -1128,8 +1131,8 @@ static int c64_emit(c64_ctx* x, unsigned int const* verts, unsigned int n, int c
 			continue;
 		if (r->nex == r->capex)
 		{
-			unsigned int nc = r->capex ? 2 * r->capex : 256;
-			double* g = (double*)qaws_internal_realloc(r->ex, sizeof(double) * 2 * nc);
+			unsigned int nc = qaws_internal_grow(r->capex, (size_t)r->nex + 1, 256);
+			double* g = nc ? (double*)qaws_internal_realloc(r->ex, qaws_internal_mul3(sizeof(double), 2, nc)) : NULL;
 			if (!g)
 				return -1;
 			r->ex = g;
@@ -1233,11 +1236,11 @@ static qaws_status c64_output(c64_ctx* x, unsigned int nfaces, int const* inside
 	unsigned char* seen;
 	unsigned int first_path = x->r->path_count;
 	qaws_status s = QAWS_STATUS_OK;
-	fcomp = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (nfaces + 1));
-	comp_outer = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (nfaces + 1));
-	comp_hole = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (nfaces + 1));
-	seen = (unsigned char*)qaws_internal_zalloc(nh + 1, 1);
-	vpos = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (x->nv + 1));
+	fcomp = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (nfaces + 1)));
+	comp_outer = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (nfaces + 1)));
+	comp_hole = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (nfaces + 1)));
+	seen = (unsigned char*)qaws_internal_scratch_zalloc(nh + 1, 1);
+	vpos = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (x->nv + 1)));
 	if (!fcomp || !comp_outer || !comp_hole || !seen || !vpos)
 	{
 		s = QAWS_STATUS_ALLOCATION_FAILURE;
@@ -1262,11 +1265,11 @@ static qaws_status c64_output(c64_ctx* x, unsigned int nfaces, int const* inside
 		{
 			unsigned int tw, v, p, g = C64_NONE;
 			seen[h] = 1;
-			if (n + 1 > cap)
+			if ((size_t)n + 1 > cap)
 			{
-				unsigned int nc = cap ? 2 * cap : 64;
-				unsigned int* a1 = (unsigned int*)qaws_internal_realloc(seq, sizeof(unsigned int) * nc);
-				unsigned int* a2 = a1 ? (unsigned int*)qaws_internal_realloc(st, sizeof(unsigned int) * nc) : NULL;
+				unsigned int nc = qaws_internal_grow(cap, (size_t)n + 1, 64);
+				unsigned int* a1 = nc ? (unsigned int*)qaws_internal_realloc(seq, qaws_internal_mul2(sizeof(unsigned int), nc)) : NULL;
+				unsigned int* a2 = a1 ? (unsigned int*)qaws_internal_realloc(st, qaws_internal_mul2(sizeof(unsigned int), nc)) : NULL;
 				if (a1) seq = a1;
 				if (a2) st = a2;
 				if (!a2) { s = QAWS_STATUS_ALLOCATION_FAILURE; goto done; }
@@ -1312,7 +1315,7 @@ static qaws_status c64_output(c64_ctx* x, unsigned int nfaces, int const* inside
 					c64_dir(x, st[low], &ox, &oy);
 					ccw = c64_cross_sign(ix, iy, ox, oy) > 0;
 				}
-				verts = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (len + 1));
+				verts = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (len + 1)));
 				if (!verts) { s = QAWS_STATUS_ALLOCATION_FAILURE; goto done; }
 				for (a = 0; a < len; a++)
 				{
@@ -1322,10 +1325,10 @@ static qaws_status c64_output(c64_ctx* x, unsigned int nfaces, int const* inside
 				memset(&op, 0, sizeof(op));
 				if (c64_emit(x, verts, len, 1, &op) > 0)
 				{
-					unsigned int* g1 = (unsigned int*)qaws_internal_realloc(loop_path, sizeof(unsigned int) * (nloop + 1));
-					unsigned int* g2 = g1 ? (unsigned int*)qaws_internal_realloc(loop_left, sizeof(unsigned int) * (nloop + 1)) : NULL;
-					unsigned int* g3 = g2 ? (unsigned int*)qaws_internal_realloc(loop_right, sizeof(unsigned int) * (nloop + 1)) : NULL;
-					int* g4 = g3 ? (int*)qaws_internal_realloc(loop_ccw, sizeof(int) * (nloop + 1)) : NULL;
+					unsigned int* g1 = (unsigned int*)qaws_internal_realloc(loop_path, qaws_internal_mul2(sizeof(unsigned int), (nloop + 1)));
+					unsigned int* g2 = g1 ? (unsigned int*)qaws_internal_realloc(loop_left, qaws_internal_mul2(sizeof(unsigned int), (nloop + 1))) : NULL;
+					unsigned int* g3 = g2 ? (unsigned int*)qaws_internal_realloc(loop_right, qaws_internal_mul2(sizeof(unsigned int), (nloop + 1))) : NULL;
+					int* g4 = g3 ? (int*)qaws_internal_realloc(loop_ccw, qaws_internal_mul2(sizeof(int), (nloop + 1))) : NULL;
 					if (g1) loop_path = g1;
 					if (g2) loop_left = g2;
 					if (g3) loop_right = g3;
@@ -1458,10 +1461,10 @@ static qaws_status c64_open(c64_ctx* x)
 		}
 		if (keep)
 		{
-			if (n + 2 > cap)
+			if ((size_t)n + 2 > cap)
 			{
-				unsigned int nc = cap ? 2 * cap : 64;
-				unsigned int* g = (unsigned int*)qaws_internal_realloc(verts, sizeof(unsigned int) * nc);
+				unsigned int nc = qaws_internal_grow(cap, (size_t)n + 2, 64);
+				unsigned int* g = nc ? (unsigned int*)qaws_internal_realloc(verts, qaws_internal_mul2(sizeof(unsigned int), nc)) : NULL;
 				if (!g) { qaws_internal_free(verts); return QAWS_STATUS_ALLOCATION_FAILURE; }
 				verts = g; cap = nc;
 			}
@@ -1523,7 +1526,7 @@ qaws_status qaws_clip64_execute(qaws_clip64_desc const* desc, qaws_clip64_result
 		if (s == QAWS_STATUS_OK) s = c64_vertices(&x);
 		if (s == QAWS_STATUS_OK)
 		{
-			x.vround = (int64_t*)qaws_internal_malloc(sizeof(int64_t) * 2 * (x.nv + 1));
+			x.vround = (int64_t*)qaws_internal_malloc(qaws_internal_mul3(sizeof(int64_t), 2, (x.nv + 1)));
 			if (!x.vround)
 				s = QAWS_STATUS_ALLOCATION_FAILURE;
 			for (i = 0; s == QAWS_STATUS_OK && i < x.nv; i++)
@@ -1538,10 +1541,10 @@ qaws_status qaws_clip64_execute(qaws_clip64_desc const* desc, qaws_clip64_result
 		if (s == QAWS_STATUS_OK) s = c64_faces(&x, &nfaces);
 		if (s == QAWS_STATUS_OK)
 		{
-			ws = (int*)qaws_internal_malloc(sizeof(int) * (nfaces + 1));
-			wc = (int*)qaws_internal_malloc(sizeof(int) * (nfaces + 1));
-			known = (int*)qaws_internal_malloc(sizeof(int) * (nfaces + 1));
-			inside = (int*)qaws_internal_malloc(sizeof(int) * (nfaces + 1));
+			ws = (int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(int), (nfaces + 1)));
+			wc = (int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(int), (nfaces + 1)));
+			known = (int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(int), (nfaces + 1)));
+			inside = (int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(int), (nfaces + 1)));
 			if (!ws || !wc || !known || !inside)
 				s = QAWS_STATUS_ALLOCATION_FAILURE;
 		}
@@ -1636,8 +1639,8 @@ qaws_status qaws_internal_clip64_result_append(qaws_clip64_result* dst, qaws_cli
 	{
 		if (dst->nex == dst->capex)
 		{
-			unsigned int nc = dst->capex ? 2 * dst->capex : 256;
-			double* g = (double*)qaws_internal_realloc(dst->ex, sizeof(double) * 2 * nc);
+			unsigned int nc = qaws_internal_grow(dst->capex, (size_t)dst->nex + 1, 256);
+			double* g = nc ? (double*)qaws_internal_realloc(dst->ex, qaws_internal_mul3(sizeof(double), 2, nc)) : NULL;
 			if (!g) return QAWS_STATUS_ALLOCATION_FAILURE;
 			dst->ex = g;
 			dst->capex = nc;

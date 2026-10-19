@@ -202,19 +202,19 @@ qaws_status qaws_internal_ldlt_factor(qaws_internal_ldlt* f, unsigned int n, uns
 	memset(f, 0, sizeof *f);
 	memset(&wk, 0, sizeof wk);
 	f->n = n;
-	f->perm = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (n + 1));
-	f->d = (double*)qaws_internal_malloc(sizeof(double) * (n + 1));
-	f->w = (double*)qaws_internal_malloc(sizeof(double) * (2 * (size_t)n + 1));
-	f->sf = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (n + 2));
-	pinv = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (n + 1));
+	f->perm = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (n + 1)));
+	f->d = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), (n + 1)));
+	f->w = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), (2 * (size_t)n + 1)));
+	f->sf = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (n + 2)));
+	pinv = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (n + 1)));
 	rp = (unsigned int*)qaws_internal_zalloc((size_t)n + 2, sizeof(unsigned int));
 	cp = (unsigned int*)qaws_internal_zalloc((size_t)n + 2, sizeof(unsigned int));
-	parent = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (n + 1));
-	flag = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (n + 1));
-	lnz = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (n + 1));
+	parent = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (n + 1)));
+	flag = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (n + 1)));
+	lnz = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (n + 1)));
 	kids = (unsigned int*)qaws_internal_zalloc((size_t)n + 1, sizeof(unsigned int));
-	wk.super = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (n + 1));
-	wk.map = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (n + 1));
+	wk.super = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (n + 1)));
+	wk.map = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (n + 1)));
 	if (!f->perm || !f->d || !f->w || !f->sf || !pinv || !rp || !cp || !parent || !flag || !lnz || !kids || !wk.super || !wk.map)
 		goto done;
 	for (k = 0; k < n; k++)
@@ -227,8 +227,8 @@ qaws_status qaws_internal_ldlt_factor(qaws_internal_ldlt* f, unsigned int n, uns
 		o.xyz = xyz;
 		o.gen = 0;
 		o.stamp = (unsigned int*)qaws_internal_zalloc((size_t)n + 1, sizeof(unsigned int));
-		o.tmp = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (n + 1));
-		o.key = (ld_key*)qaws_internal_malloc(sizeof(ld_key) * (n + 1));
+		o.tmp = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (n + 1)));
+		o.key = (ld_key*)qaws_internal_malloc(qaws_internal_mul2(sizeof(ld_key), (n + 1)));
 		if (o.stamp && o.tmp && o.key)
 			ld_dissect(&o, f->perm, n);
 		qaws_internal_free(o.stamp); qaws_internal_free(o.tmp); qaws_internal_free(o.key);
@@ -252,9 +252,9 @@ qaws_status qaws_internal_ldlt_factor(qaws_internal_ldlt* f, unsigned int n, uns
 		cp[k + 2] += cp[k + 1];
 	}
 	nnzc = cp[n + 1];
-	rj = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (nnzc + 1));
-	ci = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (nnzc + 1));
-	cx = (double*)qaws_internal_malloc(sizeof(double) * (nnzc + 1));
+	rj = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (nnzc + 1)));
+	ci = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (nnzc + 1)));
+	cx = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), (nnzc + 1)));
 	if (!rj || !ci || !cx)
 		goto done;
 	for (r = 0; r < n; r++)
@@ -294,11 +294,11 @@ qaws_status qaws_internal_ldlt_factor(qaws_internal_ldlt* f, unsigned int n, uns
 		wk.super[k] = f->ns - 1;
 	}
 	f->sf[f->ns] = n;
-	f->rp = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (f->ns + 1));
-	f->lp = (size_t*)qaws_internal_malloc(sizeof(size_t) * (f->ns + 1));
-	wk.head = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (f->ns + 1));
-	wk.next = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (f->ns + 1));
-	wk.pos = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (f->ns + 1));
+	f->rp = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (f->ns + 1)));
+	f->lp = (size_t*)qaws_internal_malloc(qaws_internal_mul2(sizeof(size_t), (f->ns + 1)));
+	wk.head = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (f->ns + 1)));
+	wk.next = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (f->ns + 1)));
+	wk.pos = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (f->ns + 1)));
 	if (!f->rp || !f->lp || !wk.head || !wk.next || !wk.pos)
 		goto done;
 	/* each supernode's rows: its first column and that column's rows below */
@@ -316,10 +316,10 @@ qaws_status qaws_internal_ldlt_factor(qaws_internal_ldlt* f, unsigned int n, uns
 		maxw = w > maxw ? w : maxw;
 	}
 	total = f->lp[f->ns];
-	f->ri = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)f->rp[f->ns] + 1));
-	f->lx = (double*)qaws_internal_malloc(sizeof(double) * (total + 1));
-	wk.acc = (double*)qaws_internal_malloc(sizeof(double) * (maxr + 1));
-	wk.t = (double*)qaws_internal_malloc(sizeof(double) * (maxw + 1));
+	f->ri = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), ((size_t)f->rp[f->ns] + 1)));
+	f->lx = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), (total + 1)));
+	wk.acc = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), (maxr + 1)));
+	wk.t = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), (maxw + 1)));
 	if (!f->ri || !f->lx || !wk.acc || !wk.t)
 		goto done;
 	/* (gathered row by row along each row's reach, so each list comes sorted) */

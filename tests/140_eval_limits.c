@@ -44,21 +44,27 @@ static qaws_scalar* tl_points(unsigned int n)
 /* the largest relative error of D1, D2, D3 at t against central differences of the derivative below */
 static double tl_derivatives(qaws_curve const* c, double t, double h)
 {
-	qaws_eval_result_3d a, m, p;
+	qaws_eval_result_3d a, m, p, m2, p2;
 	unsigned int const all = QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2 | QAWS_EVAL_FLAG_D3;
 	double worst = 0;
 	unsigned int k, d;
+	/* the parameters as the scalar holds them, so the differences divide by the step actually taken */
+	t = (qaws_scalar)t;
+	h = (qaws_scalar)(t + h) - t;
 	if (qaws_curve_evaluate_3d(c, (qaws_scalar)t, all, &a) != QAWS_STATUS_OK || qaws_curve_evaluate_3d(c, (qaws_scalar)(t - h), all, &m) != QAWS_STATUS_OK
-		|| qaws_curve_evaluate_3d(c, (qaws_scalar)(t + h), all, &p) != QAWS_STATUS_OK || !(a.valid_flags & QAWS_EVAL_FLAG_D3))
+		|| qaws_curve_evaluate_3d(c, (qaws_scalar)(t + h), all, &p) != QAWS_STATUS_OK || qaws_curve_evaluate_3d(c, (qaws_scalar)(t - 2 * h), all, &m2) != QAWS_STATUS_OK
+		|| qaws_curve_evaluate_3d(c, (qaws_scalar)(t + 2 * h), all, &p2) != QAWS_STATUS_OK || !(a.valid_flags & QAWS_EVAL_FLAG_D3))
 		return HUGE_VAL;
 	for (d = 1; d <= 3; d++)
 	{
 		qaws_vec3 const *an = d == 1 ? &a.d1 : d == 2 ? &a.d2 : &a.d3, *lo = d == 1 ? &m.position : d == 2 ? &m.d1 : &m.d2,
-			*hi = d == 1 ? &p.position : d == 2 ? &p.d1 : &p.d2;
+			*hi = d == 1 ? &p.position : d == 2 ? &p.d1 : &p.d2, *lo2 = d == 1 ? &m2.position : d == 2 ? &m2.d1 : &m2.d2,
+			*hi2 = d == 1 ? &p2.position : d == 2 ? &p2.d1 : &p2.d2;
 		double num[3], ana[3], scale = 0, err = 0;
-		num[0] = ((double)hi->x - lo->x) / (2 * h);
-		num[1] = ((double)hi->y - lo->y) / (2 * h);
-		num[2] = ((double)hi->z - lo->z) / (2 * h);
+		/* fourth-order central differences: truncation h^4 f^(5) / 30, so a degree-n curve takes h near 1 / (2n) in float */
+		num[0] = (8 * ((double)hi->x - lo->x) - ((double)hi2->x - lo2->x)) / (12 * h);
+		num[1] = (8 * ((double)hi->y - lo->y) - ((double)hi2->y - lo2->y)) / (12 * h);
+		num[2] = (8 * ((double)hi->z - lo->z) - ((double)hi2->z - lo2->z)) / (12 * h);
 		ana[0] = an->x;
 		ana[1] = an->y;
 		ana[2] = an->z;
@@ -170,7 +176,10 @@ static void test_largest(void)
 	qaws_scalar w[60];
 	qaws_curve *b16 = NULL, *s20 = NULL, *s31 = NULL, *r47 = NULL;
 	qaws_status st[4];
-	double e[4], tol = sizeof(qaws_scalar) == sizeof(double) ? 1e-4 : 5e-2, h = sizeof(qaws_scalar) == sizeof(double) ? 1e-5 : 2e-3;
+	/* relative to the derivative's size. double: steps far below truncation, rounding eps / h ~ 1e-11 per difference.
+	   float: a step of 1 / (2 degree) puts truncation (1/2)^4 / 30 ~ 2e-3 and rounding (eps times the degree, over n h) ~ 1e-5 */
+	double e[4], tol = sizeof(qaws_scalar) == sizeof(double) ? 1e-4 : 1e-2;
+	int const f32 = sizeof(qaws_scalar) != sizeof(double);
 	unsigned int i;
 	char msg[400];
 	for (i = 0; i < 60; i++)
@@ -207,11 +216,11 @@ static void test_largest(void)
 		d.weight_count = 48;
 		st[3] = qaws_curve_create_rational_bezier(&d, &r47);
 	}
-	e[0] = b16 ? tl_derivatives(b16, 0.37, h) : HUGE_VAL;
-	e[1] = s20 ? tl_derivatives(s20, 0.41, h) : HUGE_VAL;
-	e[2] = s31 ? tl_derivatives(s31, 0.53, h) : HUGE_VAL;
+	e[0] = b16 ? tl_derivatives(b16, 0.37, f32 ? 0.5 / 16 : 1e-5) : HUGE_VAL;
+	e[1] = s20 ? tl_derivatives(s20, 0.41, f32 ? 0.5 / 20 : 1e-5) : HUGE_VAL;
+	e[2] = s31 ? tl_derivatives(s31, 0.53, f32 ? 0.5 / 31 : 1e-5) : HUGE_VAL;
 	/* (degree 47: the third derivative is 47 * 46 * 45 times the points; a wider step keeps the differences above rounding) */
-	e[3] = r47 ? tl_derivatives(r47, 0.29, 10 * h) : HUGE_VAL;
+	e[3] = r47 ? tl_derivatives(r47, 0.29, f32 ? 0.5 / 47 : 1e-4) : HUGE_VAL;
 	sprintf(msg, "largest degrees evaluated with D3: Bezier 16 %s (derivatives off by %.1e), B-spline 20 %s (%.1e), B-spline 31 %s (%.1e), "
 		"rational Bezier 47 %s (%.1e), tolerance %.0e", qaws_status_to_string(st[0]), e[0], qaws_status_to_string(st[1]), e[1],
 		qaws_status_to_string(st[2]), e[2], qaws_status_to_string(st[3]), e[3], tol);

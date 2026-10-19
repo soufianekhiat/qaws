@@ -30,7 +30,7 @@ typedef struct cs_ctx
 
 static void* cs_alloc(size_t b)
 {
-	return qaws_internal_alloc(NULL, (unsigned long)b);
+	return qaws_internal_alloc(NULL, b);
 }
 
 static void cs_free(void* p)

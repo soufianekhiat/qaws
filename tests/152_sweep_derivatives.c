@@ -33,6 +33,13 @@ static qaws_curve* sd_path(int twisted)
 	return c;
 }
 
+#define SD_F32 (sizeof(qaws_scalar) != sizeof(double))
+/* float bounds, relative to 1 + |value|, at the step below: the measured errors (du 1e-5, duv 6e-5, duu 2e-3) with a
+   margin of five to ten for other grids of (u, v) */
+#define SD_DU 1e-4
+#define SD_DUV 5e-4
+#define SD_DUU 1e-2
+
 static qaws_vec3 sd_pos(qaws_surface const* s, double u, double v, unsigned int flag)
 {
 	qaws_surface_eval_result r;
@@ -55,7 +62,10 @@ static void sd_check(qaws_surface const* s, char const* name, double* e_du, doub
 		for (j = 0; j < 7; j++)
 		{
 			/* mid-span in the path (six spans): its third derivative jumps at the knots, and so does the Frenet frame's rate */
-			double u = (i + 0.5) / 12, v = 0.141 * j + 0.03, h = 1e-3, q[3], m[3];
+			/* the step: 1e-3 in double. float: Richardson's truncation (h^4) against the rounding of the positions (eps |P| / h
+			   for du, eps |P| / h^2 for duu); measured over h = 0.04 .. 0.005, du and duv are smallest at h = 0.01 (1e-5, 6e-5),
+			   duu at 2e-3 there (rounding, rising as 1 / h^2). The step stays inside the span (mid-span is 1 / 12 from the knots) */
+			double u = (i + 0.5) / 12, v = 0.141 * j + 0.03, h = SD_F32 ? 0.01 : 1e-3, q[3], m[3];
 			qaws_surface_eval_result r;
 			qaws_vec3 a, b, c, dd, a2, b2, va, vb, va2, vb2;
 			unsigned int k;
@@ -102,9 +112,9 @@ static void test_swept(void)
 	d.path = path; d.profile = prof;
 	TEST_ASSERT(qaws_surface_create_swept(&d, &s) == QAWS_STATUS_OK, "swept surface created");
 	sd_check(s, "swept (Frenet)", &e_du, &e_duv, &e_duu);
-	TEST_ASSERT(e_du <= 1e-8, "swept: du analytic");
-	TEST_ASSERT(e_duv <= 1e-7, "swept: mixed derivative analytic");
-	TEST_ASSERT(e_duu <= 1e-5, "swept: duu from the analytic du");
+	TEST_ASSERT(e_du <= (SD_F32 ? SD_DU : 1e-8), "swept: du analytic");
+	TEST_ASSERT(e_duv <= (SD_F32 ? SD_DUV : 1e-7), "swept: mixed derivative analytic");
+	TEST_ASSERT(e_duu <= (SD_F32 ? SD_DUU : 1e-5), "swept: duu from the analytic du");
 	qaws_surface_destroy(s);
 	qaws_curve_destroy(prof);
 	qaws_curve_destroy(path);
@@ -122,9 +132,9 @@ static void test_pipe(void)
 	d.path = path; d.radius_x = (qaws_scalar)0.35;
 	TEST_ASSERT(qaws_surface_create_pipe(&d, &s) == QAWS_STATUS_OK, "pipe created");
 	sd_check(s, "pipe (rotation-minimizing)", &e_du, &e_duv, &e_duu);
-	TEST_ASSERT(e_du <= 1e-7, "pipe: du analytic");
-	TEST_ASSERT(e_duv <= 1e-6, "pipe: mixed derivative analytic");
-	TEST_ASSERT(e_duu <= 1e-5, "pipe: duu from the analytic du");
+	TEST_ASSERT(e_du <= (SD_F32 ? SD_DU : 1e-7), "pipe: du analytic");
+	TEST_ASSERT(e_duv <= (SD_F32 ? SD_DUV : 1e-6), "pipe: mixed derivative analytic");
+	TEST_ASSERT(e_duu <= (SD_F32 ? SD_DUU : 1e-5), "pipe: duu from the analytic du");
 	for (i = 0; i < 400; i++)
 	{
 		double u = (i + 0.5) / 400, v = 0.37 * i - floor(0.37 * i);
@@ -136,7 +146,8 @@ static void test_pipe(void)
 			+ ((double)p.z - c.position.z) * (p.z - c.position.z)) - 0.35));
 	}
 	snprintf(msg, sizeof msg, "pipe: the section at its radius (%.1e)", radius);
-	TEST_ASSERT(radius <= 1e-12, msg);
+	/* (pure rounding: the frame is orthonormal; a few eps of the path's size, 4) */
+	TEST_ASSERT(radius <= fmax(1e-12, 8 * TEST_EPS * 4), msg);
 	/* across the samples of the frame table */
 	for (i = 1; i < 256; i += 17)
 	{
@@ -152,10 +163,14 @@ static void test_pipe(void)
 	/* the normal */
 	{
 		qaws_surface_eval_result r;
-		qaws_surface_evaluate(s, (qaws_scalar)0.41, (qaws_scalar)0.77, QAWS_SURFACE_EVAL_NORMAL, &r);
-		TEST_ASSERT(fabs(sqrt((double)r.normal.x * r.normal.x + (double)r.normal.y * r.normal.y + (double)r.normal.z * r.normal.z) - 1) <= 1e-12
-			&& fabs((double)r.normal.x * r.du.x + (double)r.normal.y * r.du.y + (double)r.normal.z * r.du.z) <= 1e-12
-			&& fabs((double)r.normal.x * r.dv.x + (double)r.normal.y * r.dv.y + (double)r.normal.z * r.dv.z) <= 1e-12, "pipe: unit normal across du and dv");
+		double tu, tv;
+		qaws_surface_evaluate(s, (qaws_scalar)0.41, (qaws_scalar)0.77, QAWS_SURFACE_EVAL_NORMAL | QAWS_SURFACE_EVAL_DU | QAWS_SURFACE_EVAL_DV, &r);
+		/* rounding: a few eps, relative to |du| and |dv| for the products with them */
+		tu = fmax(1e-12, 8 * TEST_EPS * sqrt((double)r.du.x * r.du.x + (double)r.du.y * r.du.y + (double)r.du.z * r.du.z));
+		tv = fmax(1e-12, 8 * TEST_EPS * sqrt((double)r.dv.x * r.dv.x + (double)r.dv.y * r.dv.y + (double)r.dv.z * r.dv.z));
+		TEST_ASSERT(fabs(sqrt((double)r.normal.x * r.normal.x + (double)r.normal.y * r.normal.y + (double)r.normal.z * r.normal.z) - 1) <= fmax(1e-12, 8 * TEST_EPS)
+			&& fabs((double)r.normal.x * r.du.x + (double)r.normal.y * r.du.y + (double)r.normal.z * r.du.z) <= tu
+			&& fabs((double)r.normal.x * r.dv.x + (double)r.normal.y * r.dv.y + (double)r.normal.z * r.dv.z) <= tv, "pipe: unit normal across du and dv");
 	}
 	qaws_surface_destroy(s);
 	qaws_curve_destroy(path);

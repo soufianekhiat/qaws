@@ -213,6 +213,37 @@ qaws_allocator const* qaws_internal_current_allocator(void)
 	return g_thread_set ? &g_thread : mem_default();
 }
 
+static QAWS_THREAD_LOCAL qaws_allocator g_scratch;
+static QAWS_THREAD_LOCAL int g_scratch_set;
+
+void qaws_exchange_thread_scratch_allocator(qaws_allocator const* allocator, qaws_allocator* out_previous)
+{
+	qaws_allocator previous = g_scratch;
+	g_scratch_set = mem_custom(allocator);
+	if (g_scratch_set)
+		mem_copy(&g_scratch, allocator);
+	else
+		memset(&g_scratch, 0, sizeof g_scratch);
+	if (out_previous)
+		*out_previous = previous;
+}
+
+void* qaws_internal_scratch_malloc(size_t size)
+{
+	return qaws_internal_alloc_from(g_scratch_set ? &g_scratch : NULL, size);
+}
+
+void* qaws_internal_scratch_zalloc(size_t count, size_t size)
+{
+	void* p;
+	if (size && count > SIZE_MAX / size)
+		return NULL;
+	p = qaws_internal_scratch_malloc(count * size);
+	if (p)
+		memset(p, 0, count * size);
+	return p;
+}
+
 /* ---- blocks ------------------------------------------------------------- */
 
 static void mem_read_tail(void const* ptr, mem_tail* t)
@@ -314,6 +345,36 @@ void* qaws_internal_alloc_from(qaws_allocator const* allocator, size_t size)
 void* qaws_internal_malloc(size_t size)
 {
 	return qaws_internal_alloc_from(NULL, size);
+}
+
+size_t qaws_internal_mul2(size_t a, size_t b)
+{
+	return b && a > SIZE_MAX / b ? SIZE_MAX : a * b;
+}
+
+size_t qaws_internal_mul3(size_t a, size_t b, size_t c)
+{
+	return qaws_internal_mul2(qaws_internal_mul2(a, b), c);
+}
+
+size_t qaws_internal_mul4(size_t a, size_t b, size_t c, size_t d)
+{
+	return qaws_internal_mul2(qaws_internal_mul3(a, b, c), d);
+}
+
+size_t qaws_internal_add2(size_t a, size_t b)
+{
+	return a > SIZE_MAX - b ? SIZE_MAX : a + b;
+}
+
+unsigned int qaws_internal_grow(unsigned int cap, size_t need, unsigned int first)
+{
+	unsigned long long c = cap ? cap : (first ? first : 1);
+	if ((unsigned long long)need > UINT_MAX)
+		return 0;
+	while (c < (unsigned long long)need)
+		c *= 2;
+	return c > UINT_MAX ? UINT_MAX : (unsigned int)c;
 }
 
 void* qaws_internal_zalloc(size_t count, size_t size)

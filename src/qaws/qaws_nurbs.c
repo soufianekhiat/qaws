@@ -26,7 +26,7 @@ static int nurbs_compute_span_boundaries(
 {
 	unsigned int max_spans = knot_count;
 	qaws_scalar *tmp = (qaws_scalar *)qaws_internal_alloc(allocator,
-		(unsigned long)((size_t)max_spans * sizeof(qaws_scalar)));
+		qaws_internal_mul2((size_t)max_spans, sizeof(qaws_scalar)));
 	unsigned int count = 0;
 	qaws_scalar prev;
 	unsigned int i;
@@ -530,6 +530,8 @@ qaws_status qaws_curve_create_nurbs_ex(
 	control_point_count = desc->control_point_count;
 	if (control_point_count < degree + 1)
 		return QAWS_STATUS_INVALID_CONTROL_POINT_COUNT;
+	if (control_point_count > 0xFFFFFFFFu / 4)   /* count * (dim_count + 1) homogeneous scalars, count + knots, count in unsigned int */
+		return QAWS_STATUS_INVALID_CONTROL_POINT_COUNT;
 
 	if (!desc->control_points)
 		return QAWS_STATUS_INVALID_ARGUMENT;
@@ -602,9 +604,9 @@ qaws_status qaws_curve_create_nurbs_ex(
 	memset(impl, 0, sizeof(qaws_nurbs_impl));
 
 	/* Copy control points */
-	cp_size = (size_t)control_point_count * (size_t)dim_count * sizeof(qaws_scalar);
+	cp_size = qaws_internal_mul3((size_t)control_point_count, (size_t)dim_count, sizeof(qaws_scalar));
 	impl->control_points = (qaws_scalar *)qaws_internal_alloc(allocator,
-		(unsigned long)cp_size);
+		cp_size);
 	if (!impl->control_points)
 	{
 		qaws_internal_dealloc(allocator, impl);
@@ -615,9 +617,9 @@ qaws_status qaws_curve_create_nurbs_ex(
 	impl->control_point_count = control_point_count;
 
 	/* Copy knots */
-	knot_size = (size_t)knot_count * sizeof(qaws_scalar);
+	knot_size = qaws_internal_mul2((size_t)knot_count, sizeof(qaws_scalar));
 	impl->knots = (qaws_scalar *)qaws_internal_alloc(allocator,
-		(unsigned long)knot_size);
+		knot_size);
 	if (!impl->knots)
 	{
 		qaws_internal_dealloc(allocator, impl->control_points);
@@ -629,9 +631,9 @@ qaws_status qaws_curve_create_nurbs_ex(
 	impl->knot_count = knot_count;
 
 	/* Copy weights */
-	weight_size = (size_t)control_point_count * sizeof(qaws_scalar);
+	weight_size = qaws_internal_mul2((size_t)control_point_count, sizeof(qaws_scalar));
 	impl->weights = (qaws_scalar *)qaws_internal_alloc(allocator,
-		(unsigned long)weight_size);
+		weight_size);
 	if (!impl->weights)
 	{
 		qaws_internal_dealloc(allocator, impl->knots);

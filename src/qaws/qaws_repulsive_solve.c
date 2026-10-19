@@ -149,20 +149,20 @@ static int rs_dense_create(rs_core const* s, rs_dense* D)
 {
 	size_t N = s->N, k = s->k, n = N + k, nv = s->nv, m = s->full ? n : nv;
 	memset(D, 0, sizeof(*D));
-	D->A = (double*)qaws_internal_malloc(sizeof(double) * (rs_asize(s) + 1));
-	D->C = (double*)qaws_internal_malloc(sizeof(double) * (k * N + 1));
-	D->phi = (double*)qaws_internal_malloc(sizeof(double) * (k + 1));
-	D->rhs = (double*)qaws_internal_malloc(sizeof(double) * (n + 1));
-	D->M = (double*)qaws_internal_malloc(sizeof(double) * (m * m + 1));
-	D->piv = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (m + 1));
+	D->A = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), (rs_asize(s) + 1)));
+	D->C = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), (k * N + 1)));
+	D->phi = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), (k + 1)));
+	D->rhs = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), (n + 1)));
+	D->M = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), (m * m + 1)));
+	D->piv = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (m + 1)));
 	if (!s->full)
 	{
-		D->Ai = (double*)qaws_internal_malloc(sizeof(double) * (nv * nv + 1));
-		D->Y = (double*)qaws_internal_malloc(sizeof(double) * (k * N + 1));
-		D->S = (double*)qaws_internal_malloc(sizeof(double) * (k * k + 1));
-		D->fi = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (nv + 1));
-		D->spiv = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (k + 1));
-		D->nz = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (N + 1));
+		D->Ai = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), (nv * nv + 1)));
+		D->Y = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), (k * N + 1)));
+		D->S = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), (k * k + 1)));
+		D->fi = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (nv + 1)));
+		D->spiv = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (k + 1)));
+		D->nz = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (N + 1)));
 		D->live = (unsigned char*)qaws_internal_malloc(k + 1);
 	}
 	if (D->A && D->C && D->phi && D->rhs && D->M && D->piv &&
@@ -338,7 +338,7 @@ qaws_status qaws_internal_rs_direction(rs_core const* s, qaws_scalar const* posi
 		return st;
 	}
 	n = s->N + s->k;
-	buf = (double*)qaws_internal_malloc(sizeof(double) * ((size_t)s->N * 2 + n + 1));
+	buf = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), ((size_t)s->N * 2 + n + 1)));
 	if (!buf || !rs_dense_create(s, &D))
 	{
 		qaws_internal_free(buf);
@@ -437,7 +437,7 @@ qaws_status qaws_internal_rs_step(rs_core* s, qaws_scalar* positions, qaws_repul
 	if (!same)
 		for (i = 0; i < s->N; i++) s->x[i] = (double)positions[i];
 	memset(&D, 0, sizeof(D));
-	buf = (double*)qaws_internal_malloc(sizeof(double) * ((size_t)s->N * 2 + s->k + n + 1));
+	buf = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), ((size_t)s->N * 2 + s->k + n + 1)));
 	if (!buf || (dense && !rs_dense_create(s, &D)))
 	{
 		qaws_internal_free(buf);
@@ -580,7 +580,7 @@ qaws_status qaws_internal_rs_objective(rs_core const* s, qaws_scalar const* posi
 	unsigned int i;
 	if (!s || !positions || !out_energy)
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	x = (double*)qaws_internal_malloc(sizeof(double) * ((size_t)s->N * 2 + 1));
+	x = (double*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(double), ((size_t)s->N * 2 + 1)));
 	if (!x)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	grad = x + s->N;
@@ -837,8 +837,8 @@ static qaws_status rs_c_hier(rs_core const* core, double const* x, qaws_internal
 	double s = (c->beta - 1) / c->alpha;
 	qaws_status st;
 	memset(h, 0, sizeof(*h));
-	h->lij = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * 2 * c->ne);
-	h->lw = (double*)qaws_internal_malloc(sizeof(double) * c->ne);
+	h->lij = (unsigned int*)qaws_internal_malloc(qaws_internal_mul3(sizeof(unsigned int), 2, c->ne));
+	h->lw = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), c->ne));
 	h->mass = (double*)qaws_internal_zalloc(c->nv + 1, sizeof(double));
 	if (!h->lij || !h->lw || !h->mass)
 	{
@@ -1007,7 +1007,7 @@ static int rs_curves_pairs_ok(qaws_repulsive_curves const* c, double clearance, 
 {
 	unsigned int dim = c->dim, i, a, q;
 	double pad = touch > 0 ? touch : 0.5 * clearance * (1 + 1e-9);
-	qaws_bp_box* box = (qaws_bp_box*)qaws_internal_malloc(sizeof(qaws_bp_box) * (c->ne + 1));
+	qaws_bp_box* box = (qaws_bp_box*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(qaws_bp_box), (c->ne + 1)));
 	rs_bp b;
 	qaws_status st;
 	if (!box)
@@ -1125,8 +1125,8 @@ qaws_status qaws_repulsive_curves_solver_solution_jvp(qaws_repulsive_curves_solv
 	qaws_status st;
 	if (!s || !d || !out_dx)
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	rows = (double*)qaws_internal_zalloc(s->core.k + 1, sizeof(double));
-	dx = (double*)qaws_internal_malloc(sizeof(double) * (s->core.N + 1));
+	rows = (double*)qaws_internal_scratch_zalloc(s->core.k + 1, sizeof(double));
+	dx = (double*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(double), (s->core.N + 1)));
 	if (!rows || !dx)
 	{
 		qaws_internal_free(rows); qaws_internal_free(dx);
@@ -1147,8 +1147,8 @@ qaws_status qaws_repulsive_curves_solver_solution_vjp(qaws_repulsive_curves_solv
 	qaws_status st;
 	if (!s || !xbar || !out_bar)
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	rows = (double*)qaws_internal_zalloc(s->core.k + 1, sizeof(double));
-	xb = (double*)qaws_internal_malloc(sizeof(double) * (s->core.N + 1));
+	rows = (double*)qaws_internal_scratch_zalloc(s->core.k + 1, sizeof(double));
+	xb = (double*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(double), (s->core.N + 1)));
 	if (!rows || !xb)
 	{
 		qaws_internal_free(rows); qaws_internal_free(xb);
@@ -1200,15 +1200,15 @@ qaws_status qaws_repulsive_curves_solver_create(qaws_repulsive_curves const* c, 
 	s->total_len = d.hold_total_length != 0; s->edge_len = d.hold_edge_lengths != 0;
 	s->bary = d.hold_barycenter > 0 || (d.hold_barycenter == 0 && d.pinned_count == 0);
 	k->checked = d.collision_checked != 0;
-	k->x = (double*)qaws_internal_malloc(sizeof(double) * k->N);
-	s->pin = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (s->npin + 1));
-	s->pin_target = (double*)qaws_internal_malloc(sizeof(double) * (dim * s->npin + 1));
-	s->tedge = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (d.tangent_edge_count + 1));
-	s->tbasis = (double*)qaws_internal_malloc(sizeof(double) * (dim * (dim - 1) * d.tangent_edge_count + 1));
+	k->x = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), k->N));
+	s->pin = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (s->npin + 1)));
+	s->pin_target = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), (dim * s->npin + 1)));
+	s->tedge = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (d.tangent_edge_count + 1)));
+	s->tbasis = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), (dim * (dim - 1) * d.tangent_edge_count + 1)));
 	s->fixed = (unsigned char*)qaws_internal_zalloc(c->nv + 1, 1);
-	s->len0 = (double*)qaws_internal_malloc(sizeof(double) * (c->ne + 1));
-	s->hold0 = (double*)qaws_internal_malloc(sizeof(double) * (c->nv + 1));
-	s->room = (double*)qaws_internal_malloc(sizeof(double) * (2 * d.room_count + 1));
+	s->len0 = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), (c->ne + 1)));
+	s->hold0 = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), (c->nv + 1)));
+	s->room = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), (2 * d.room_count + 1)));
 	if (!k->x || !s->pin || !s->pin_target || !s->tedge || !s->tbasis || !s->len0 || !s->fixed || !s->hold0 || !s->room)
 	{
 		qaws_repulsive_curves_solver_destroy(s);

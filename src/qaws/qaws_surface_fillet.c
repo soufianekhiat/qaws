@@ -354,7 +354,7 @@ static qaws_status build_fillet_grid(
 	unsigned int si, ai;
 	qaws_vec3* grid;
 
-	grid = (qaws_vec3*)qaws_internal_alloc(allocator, (unsigned long)(sample_count * v_count * sizeof(qaws_vec3)));
+	grid = (qaws_vec3*)qaws_internal_alloc(allocator, qaws_internal_mul3(sample_count, v_count, sizeof(qaws_vec3)));
 	if (!grid) return QAWS_STATUS_ALLOCATION_FAILURE;
 
 	for (si = 0; si < sample_count; si++)
@@ -522,7 +522,7 @@ static qaws_status create_fillet_internal(
 	if (arc_segments < 1) arc_segments = 1;
 
 	/* Allocate SSI point buffer */
-	point_buffer = (qaws_ssi_point*)qaws_internal_alloc(allocator, (unsigned long)(FILLET_SSI_POINT_CAP * sizeof(qaws_ssi_point)));
+	point_buffer = (qaws_ssi_point*)qaws_internal_alloc(allocator, qaws_internal_mul2(FILLET_SSI_POINT_CAP, sizeof(qaws_ssi_point)));
 	if (!point_buffer) return QAWS_STATUS_ALLOCATION_FAILURE;
 
 	/* Find intersection curves */
@@ -544,7 +544,7 @@ static qaws_status create_fillet_internal(
 
 	/* Use the first (longest) intersection curve.
 	   Resample to uniform spacing. */
-	resampled = (qaws_ssi_point*)qaws_internal_alloc(allocator, (unsigned long)(sample_count * sizeof(qaws_ssi_point)));
+	resampled = (qaws_ssi_point*)qaws_internal_alloc(allocator, qaws_internal_mul2(sample_count, sizeof(qaws_ssi_point)));
 	if (!resampled)
 	{
 		qaws_internal_dealloc(allocator, point_buffer);
@@ -580,7 +580,7 @@ static qaws_status create_fillet_internal(
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 
-	impl = (qaws_surface_fillet_impl*)qaws_internal_alloc(allocator, (unsigned long)(sizeof(qaws_surface_fillet_impl)));
+	impl = (qaws_surface_fillet_impl*)qaws_internal_alloc(allocator, sizeof(qaws_surface_fillet_impl));
 	if (!impl)
 	{
 		qaws_internal_dealloc(allocator, grid);
@@ -642,8 +642,8 @@ qaws_status qaws_surface_create_fillet_with_trims_ex(
 	if (sample_count < 2) sample_count = 2;
 
 	/* Allocate trim UV buffers */
-	trim_a_uv = (qaws_scalar*)qaws_internal_alloc(allocator, (unsigned long)(sample_count * 2 * sizeof(qaws_scalar)));
-	trim_b_uv = (qaws_scalar*)qaws_internal_alloc(allocator, (unsigned long)(sample_count * 2 * sizeof(qaws_scalar)));
+	trim_a_uv = (qaws_scalar*)qaws_internal_alloc(allocator, qaws_internal_mul3(sample_count, 2, sizeof(qaws_scalar)));
+	trim_b_uv = (qaws_scalar*)qaws_internal_alloc(allocator, qaws_internal_mul3(sample_count, 2, sizeof(qaws_scalar)));
 	if (!trim_a_uv || !trim_b_uv)
 	{
 		qaws_internal_dealloc(allocator, trim_a_uv);
@@ -662,10 +662,10 @@ qaws_status qaws_surface_create_fillet_with_trims_ex(
 
 	/* Fit B-spline curves through the 2D trim points.
 	   Parameters are uniform in [0,1], coordinates are (u,v) pairs. */
-	trim_a_params = (qaws_scalar*)qaws_internal_alloc(allocator, (unsigned long)(sample_count * sizeof(qaws_scalar)));
-	trim_b_params = (qaws_scalar*)qaws_internal_alloc(allocator, (unsigned long)(sample_count * sizeof(qaws_scalar)));
-	trim_a_coords = (qaws_scalar*)qaws_internal_alloc(allocator, (unsigned long)(sample_count * 2 * sizeof(qaws_scalar)));
-	trim_b_coords = (qaws_scalar*)qaws_internal_alloc(allocator, (unsigned long)(sample_count * 2 * sizeof(qaws_scalar)));
+	trim_a_params = (qaws_scalar*)qaws_internal_alloc(allocator, qaws_internal_mul2(sample_count, sizeof(qaws_scalar)));
+	trim_b_params = (qaws_scalar*)qaws_internal_alloc(allocator, qaws_internal_mul2(sample_count, sizeof(qaws_scalar)));
+	trim_a_coords = (qaws_scalar*)qaws_internal_alloc(allocator, qaws_internal_mul3(sample_count, 2, sizeof(qaws_scalar)));
+	trim_b_coords = (qaws_scalar*)qaws_internal_alloc(allocator, qaws_internal_mul3(sample_count, 2, sizeof(qaws_scalar)));
 	if (!trim_a_params || !trim_b_params || !trim_a_coords || !trim_b_coords)
 	{
 		qaws_internal_dealloc(allocator, trim_a_uv); qaws_internal_dealloc(allocator, trim_b_uv);

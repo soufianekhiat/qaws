@@ -210,15 +210,16 @@ typedef struct sk_run
 	qaws_status st;
 } sk_run;
 
-static int sk_grow(void** p, unsigned int* cap, unsigned int need, size_t size)
+static int sk_grow(void** p, unsigned int* cap, size_t need, size_t size)
 {
 	unsigned int n;
 	void* q;
 	if (need <= *cap)
 		return 1;
-	n = *cap ? *cap : 16;
-	while (n < need) n *= 2;
-	q = qaws_internal_realloc(*p, size * n);
+	n = qaws_internal_grow(*cap, need, 16);
+	if (!n)
+		return 0;
+	q = qaws_internal_realloc(*p, qaws_internal_mul2(size, n));
 	if (!q)
 		return 0;
 	*p = q;
@@ -625,7 +626,7 @@ static unsigned int sk_node(sk_run* r, double const* p, double t)
 		if (fabs((double)n->time - t) <= r->eps_t && hypot((double)n->position.x - p[0], (double)n->position.y - p[1]) <= r->eps)
 			return i;
 	}
-	if (!sk_grow((void**)&s->nodes, &s->capnodes, s->nnodes + 1, sizeof(qaws_skeleton_node)))
+	if (!sk_grow((void**)&s->nodes, &s->capnodes, (size_t)s->nnodes + 1, sizeof(qaws_skeleton_node)))
 	{
 		r->st = QAWS_STATUS_ALLOCATION_FAILURE;
 		return 0;
@@ -642,8 +643,8 @@ static void sk_arc(sk_run* r, unsigned int a, unsigned int b, unsigned int fa, u
 	qaws_skeleton* s = r->s;
 	if (!r->record || a == b)
 		return;
-	if (!sk_grow((void**)&s->arcs, &s->caparcs, s->narcs + 1, sizeof(qaws_skeleton_arc)) ||
-		!sk_grow((void**)&s->geo, &s->capgeo, s->narcs + 1, sizeof(sk_geo)))
+	if (!sk_grow((void**)&s->arcs, &s->caparcs, (size_t)s->narcs + 1, sizeof(qaws_skeleton_arc)) ||
+		!sk_grow((void**)&s->geo, &s->capgeo, (size_t)s->narcs + 1, sizeof(sk_geo)))
 	{
 		r->st = QAWS_STATUS_ALLOCATION_FAILURE;
 		return;
@@ -671,7 +672,7 @@ static void sk_push(sk_run* r, unsigned int kind, double t, double const* p, uns
 		return;
 	if (r->collect)
 	{
-		if (!sk_grow((void**)&r->coll, &r->capcoll, r->ncoll + 1, sizeof(sk_event)))
+		if (!sk_grow((void**)&r->coll, &r->capcoll, (size_t)r->ncoll + 1, sizeof(sk_event)))
 		{
 			r->st = QAWS_STATUS_ALLOCATION_FAILURE;
 			return;
@@ -680,7 +681,7 @@ static void sk_push(sk_run* r, unsigned int kind, double t, double const* p, uns
 		r->coll[r->ncoll++] = e;
 		return;
 	}
-	if (!sk_grow((void**)&r->heap, &r->caph, r->nh + 1, sizeof(sk_event)))
+	if (!sk_grow((void**)&r->heap, &r->caph, (size_t)r->nh + 1, sizeof(sk_event)))
 	{
 		r->st = QAWS_STATUS_ALLOCATION_FAILURE;
 		return;
@@ -751,7 +752,7 @@ static double sk_tend(sk_run const* r, sk_corner const* c)
 
 static void sk_pair_add(sk_run* r, sk_ilist* l, unsigned int i, unsigned int reg)
 {
-	if (!sk_grow((void**)&l->v, &l->cap, l->n + 2, sizeof(unsigned int)))
+	if (!sk_grow((void**)&l->v, &l->cap, (size_t)l->n + 2, sizeof(unsigned int)))
 	{
 		r->st = QAWS_STATUS_ALLOCATION_FAILURE;
 		return;
@@ -785,7 +786,7 @@ static void sk_grid_box(sk_run* r, sk_ilist* cells, sk_ilist* always, double con
 static void sk_gq_push(sk_run* r, double t, unsigned int i)
 {
 	unsigned int k;
-	if (!sk_grow((void**)&r->gq, &r->capgq, r->ngq + 1, sizeof(sk_gexp)))
+	if (!sk_grow((void**)&r->gq, &r->capgq, (size_t)r->ngq + 1, sizeof(sk_gexp)))
 	{
 		r->st = QAWS_STATUS_ALLOCATION_FAILURE;
 		return;
@@ -1042,7 +1043,7 @@ static void sk_grid_query(sk_run* r, int edges, double const* p, double t, unsig
 					  (b->kind == SK_CIRCLE && fabs(sk_resid(b, p, t)) > r->rad + 10 * r->eps_r))
 					continue;
 			}
-			if (!sk_grow((void**)&r->found, &r->capfound, r->nfound + 1, sizeof(unsigned int)))
+			if (!sk_grow((void**)&r->found, &r->capfound, (size_t)r->nfound + 1, sizeof(unsigned int)))
 			{
 				r->st = QAWS_STATUS_ALLOCATION_FAILURE;
 				return;
@@ -1073,8 +1074,8 @@ static unsigned int sk_corner_new(sk_run* r, double const* p, double t, unsigned
 	sk_sup const *a, *b;
 	unsigned int i;
 	*spike = 0;
-	if (!sk_grow((void**)&r->c, &r->capc, r->nc + 1, sizeof(sk_corner)) ||
-		!sk_grow((void**)&r->tag, &r->captag, r->nc + 1, sizeof(unsigned int)))
+	if (!sk_grow((void**)&r->c, &r->capc, (size_t)r->nc + 1, sizeof(sk_corner)) ||
+		!sk_grow((void**)&r->tag, &r->captag, (size_t)r->nc + 1, sizeof(unsigned int)))
 	{
 		r->st = QAWS_STATUS_ALLOCATION_FAILURE;
 		return SK_NONE;
@@ -1246,7 +1247,7 @@ static unsigned int sk_corner_new(sk_run* r, double const* p, double t, unsigned
 	}
 	if (prev != SK_NONE) r->c[prev].next = i;
 	if (next != SK_NONE) r->c[next].prev = i;
-	if (!sk_grow((void**)&r->refs, &r->caprefs, r->nsup + 1, sizeof(unsigned int)))
+	if (!sk_grow((void**)&r->refs, &r->caprefs, (size_t)r->nsup + 1, sizeof(unsigned int)))
 	{
 		r->st = QAWS_STATUS_ALLOCATION_FAILURE;
 		return i;
@@ -1638,8 +1639,8 @@ static double sk_loop_area(sk_run const* r, unsigned int i, double t);
 static unsigned int sk_support_circle(sk_run* r, double const* p, double t, unsigned int node)
 {
 	sk_sup* g;
-	if (!sk_grow((void**)&r->sup, &r->capsup, r->nsup + 1, sizeof(sk_sup)) ||
-		!sk_grow((void**)&r->refs, &r->caprefs, r->nsup + 1, sizeof(unsigned int)))
+	if (!sk_grow((void**)&r->sup, &r->capsup, (size_t)r->nsup + 1, sizeof(sk_sup)) ||
+		!sk_grow((void**)&r->refs, &r->caprefs, (size_t)r->nsup + 1, sizeof(unsigned int)))
 	{
 		r->st = QAWS_STATUS_ALLOCATION_FAILURE;
 		return SK_NONE;
@@ -2047,8 +2048,8 @@ static void sk_event_at(sk_run* r, double const* p_in, double t)
 		return;
 	}
 	p[1] = p_in[1];
-	cons = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (n0 + 1));
-	split = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (n0 + 1));
+	cons = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (n0 + 1)));
+	split = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (n0 + 1)));
 	if (!cons || !split)
 	{
 		r->st = QAWS_STATUS_ALLOCATION_FAILURE;
@@ -2225,9 +2226,9 @@ collect:
 		}
 	}
 	node = sk_node(r, p, t);
-	ch = (sk_chain*)qaws_internal_malloc(sizeof(sk_chain) * (ncons + nsplit + 1));
-	fresh = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (ncons + nsplit + 1));
-	spikes = (int*)qaws_internal_malloc(sizeof(int) * (ncons + nsplit + 1));
+	ch = (sk_chain*)qaws_internal_malloc(qaws_internal_mul2(sizeof(sk_chain), (ncons + nsplit + 1)));
+	fresh = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (ncons + nsplit + 1)));
+	spikes = (int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(int), (ncons + nsplit + 1)));
 	if (!ch || !fresh || !spikes)
 	{
 		r->st = QAWS_STATUS_ALLOCATION_FAILURE;
@@ -2566,7 +2567,7 @@ static qaws_status sk_simulate(qaws_skeleton* s, int record, double stop, sk_run
 	r->rad = sqrt(r->eps_r * (s->ext > 0 ? s->ext : 1));
 	r->eps_t = s->tol;
 	r->st = QAWS_STATUS_OK;
-	r->sup = (sk_sup*)qaws_internal_malloc(sizeof(sk_sup) * (s->ninput + 1));
+	r->sup = (sk_sup*)qaws_internal_malloc(qaws_internal_mul2(sizeof(sk_sup), (s->ninput + 1)));
 	r->refs = (unsigned int*)qaws_internal_zalloc(s->ninput + 1, sizeof(unsigned int));
 	if (!r->sup || !r->refs)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
@@ -2601,8 +2602,8 @@ static qaws_status sk_simulate(qaws_skeleton* s, int record, double stop, sk_run
 		r->gh = (w > 0 ? w : 1) / r->gn;
 		r->glo[0] = lo[0]; r->glo[1] = lo[1];
 		r->grc = r->gre = 4 * r->eps;
-		r->gc = (sk_ilist*)qaws_internal_zalloc((size_t)r->gn * r->gn, sizeof(sk_ilist));
-		r->ge = (sk_ilist*)qaws_internal_zalloc((size_t)r->gn * r->gn, sizeof(sk_ilist));
+		r->gc = (sk_ilist*)qaws_internal_zalloc(qaws_internal_mul2((size_t)r->gn, r->gn), sizeof(sk_ilist));
+		r->ge = (sk_ilist*)qaws_internal_zalloc(qaws_internal_mul2((size_t)r->gn, r->gn), sizeof(sk_ilist));
 		if (!r->gc || !r->ge)
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 		r->gon = 1;
@@ -2773,7 +2774,7 @@ static unsigned int sk_span(qaws_curve const* c, double t)
 	deg = c->degree;
 	if (qaws_bspline_get_knots(c, buf, 256, &n) == QAWS_STATUS_BUFFER_TOO_SMALL)
 	{
-		k = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * n);
+		k = (qaws_scalar*)qaws_internal_malloc(qaws_internal_mul2(sizeof(qaws_scalar), n));
 		if (!k) return 0;
 		qaws_bspline_get_knots(c, k, n, &n);
 	}
@@ -2835,12 +2836,12 @@ static qaws_status sk_faces(qaws_skeleton* s)
 	int open = 0;
 	cnt = (unsigned int*)qaws_internal_zalloc(s->nsup + 1, sizeof(unsigned int));
 	first = (unsigned int*)qaws_internal_zalloc(s->nsup + 1, sizeof(unsigned int));
-	list = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (2 * s->narcs + 1));
+	list = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (2 * s->narcs + 1)));
 	used = (unsigned int*)qaws_internal_zalloc(s->narcs + 1, sizeof(unsigned int));
 	back = (unsigned int*)qaws_internal_zalloc(s->narcs + 1, sizeof(unsigned int));
-	walks = (unsigned int*)qaws_internal_zalloc(2 * s->narcs + 2, sizeof(unsigned int));
-	s->face_first = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (s->nsup + 1));
-	s->face_nodes = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (4 * s->narcs + 2 * s->nsup + 1));
+	walks = (unsigned int*)qaws_internal_zalloc(2 * (size_t)s->narcs + 2, sizeof(unsigned int));
+	s->face_first = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (s->nsup + 1)));
+	s->face_nodes = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (4 * s->narcs + 2 * s->nsup + 1)));
 	if (!cnt || !first || !list || !used || !back || !walks || !s->face_first || !s->face_nodes)
 	{
 		qaws_internal_free(cnt); qaws_internal_free(first); qaws_internal_free(list); qaws_internal_free(used); qaws_internal_free(back); qaws_internal_free(walks);
@@ -3138,7 +3139,7 @@ static qaws_status sk_fit(qaws_curve const* c, double ta, double tb, double tol,
 				continue;
 			}
 		}
-		if (!sk_grow((void**)&out->g, &out->cap, out->n + 1, sizeof(sk_prim)))
+		if (!sk_grow((void**)&out->g, &out->cap, (size_t)out->n + 1, sizeof(sk_prim)))
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 		out->g[out->n++] = g[i];
 	}
@@ -3163,8 +3164,8 @@ static qaws_status sk_fit_curve(qaws_curve const* c, double tol, sk_prims* out)
 
 static qaws_status sk_add_support(qaws_skeleton* s, unsigned int* cap, sk_sup const* e, double const* start)
 {
-	if (!sk_grow((void**)&s->sup, cap, s->nsup + 1, sizeof(sk_sup)) ||
-		!sk_grow((void**)&s->nodes, &s->capnodes, s->nnodes + 1, sizeof(qaws_skeleton_node)))
+	if (!sk_grow((void**)&s->sup, cap, (size_t)s->nsup + 1, sizeof(sk_sup)) ||
+		!sk_grow((void**)&s->nodes, &s->capnodes, (size_t)s->nnodes + 1, sizeof(qaws_skeleton_node)))
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	s->sup[s->nsup] = *e;
 	s->sup[s->nsup].start[0] = start[0];
@@ -3240,7 +3241,7 @@ qaws_status qaws_skeleton_create(qaws_skeleton_desc const* desc, qaws_skeleton**
 		}
 		fit_tol = desc->curve_tolerance > 0 ? (double)desc->curve_tolerance : 1e-4 * (ext0 > 0 ? ext0 : 1);
 	}
-	s->loop_first = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (np + 1));
+	s->loop_first = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (np + 1)));
 	if (!s->loop_first)
 		st = QAWS_STATUS_ALLOCATION_FAILURE;
 	/* the supports, loop by loop; a node at every input corner */
@@ -3264,7 +3265,7 @@ qaws_status qaws_skeleton_create(qaws_skeleton_desc const* desc, qaws_skeleton**
 				unsigned int n = 0, j;
 				if (qaws_curve_get_control_points(c, buf, 64, &n) == QAWS_STATUS_BUFFER_TOO_SMALL)
 				{
-					cp = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * 2 * n);
+					cp = (qaws_scalar*)qaws_internal_malloc(qaws_internal_mul3(sizeof(qaws_scalar), 2, n));
 					if (!cp) { st = QAWS_STATUS_ALLOCATION_FAILURE; break; }
 					qaws_curve_get_control_points(c, cp, n, &n);
 				}
@@ -3470,7 +3471,7 @@ qaws_status qaws_skeleton_create(qaws_skeleton_desc const* desc, qaws_skeleton**
 #endif
 		unsigned int attempt, nodes0 = s->nnodes, attempts = desc->tolerance > 0 ? 1 : (unsigned int)(sizeof(scales) / sizeof(scales[0]));
 		double tol0 = s->tol;
-		sk_sup* inputs = (sk_sup*)qaws_internal_malloc(sizeof(sk_sup) * (s->ninput + 1));
+		sk_sup* inputs = (sk_sup*)qaws_internal_malloc(qaws_internal_mul2(sizeof(sk_sup), (s->ninput + 1)));
 		if (!inputs)
 			attempts = 0, st = QAWS_STATUS_ALLOCATION_FAILURE;
 		else
@@ -3480,7 +3481,7 @@ qaws_status qaws_skeleton_create(qaws_skeleton_desc const* desc, qaws_skeleton**
 			if (attempt)
 			{
 				/* back to the input */
-				sk_sup* fresh = (sk_sup*)qaws_internal_malloc(sizeof(sk_sup) * (s->ninput + 1));
+				sk_sup* fresh = (sk_sup*)qaws_internal_malloc(qaws_internal_mul2(sizeof(sk_sup), (s->ninput + 1)));
 				if (!fresh)
 				{
 					st = QAWS_STATUS_ALLOCATION_FAILURE;
@@ -3766,7 +3767,7 @@ qaws_status qaws_skeleton_offset(qaws_skeleton const* s, qaws_scalar time, qaws_
 	{
 		unsigned int* seen = (unsigned int*)qaws_internal_zalloc(r.nc + 1, sizeof(unsigned int));
 		curves = (qaws_curve**)qaws_internal_zalloc(r.nc + 1, sizeof(qaws_curve*));
-		lp = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (r.nc + 2));
+		lp = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (r.nc + 2)));
 		if (!seen || !curves || !lp)
 			st = QAWS_STATUS_ALLOCATION_FAILURE;
 		for (i = 0; i < r.nc && st == QAWS_STATUS_OK; i++)
@@ -3832,8 +3833,8 @@ qaws_status qaws_skeleton_offset(qaws_skeleton const* s, qaws_scalar time, qaws_
 	sk_run_free(&r);
 	if (st == QAWS_STATUS_OK)
 	{
-		cv = (qaws_curve const**)qaws_internal_malloc(sizeof(qaws_curve*) * (ncur + 1));
-		paths = (qaws_path_2d*)qaws_internal_malloc(sizeof(qaws_path_2d) * (nloops + 1));
+		cv = (qaws_curve const**)qaws_internal_malloc(qaws_internal_mul2(sizeof(qaws_curve*), (ncur + 1)));
+		paths = (qaws_path_2d*)qaws_internal_malloc(qaws_internal_mul2(sizeof(qaws_path_2d), (nloops + 1)));
 		if (!cv || !paths)
 			st = QAWS_STATUS_ALLOCATION_FAILURE;
 		for (i = 0; i < ncur && st == QAWS_STATUS_OK; i++) cv[i] = curves[i];

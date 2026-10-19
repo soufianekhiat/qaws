@@ -32,6 +32,17 @@ static double cp_dense_2d(qaws_curve const* c, qaws_vec2 q, unsigned int n)
 	return best;
 }
 
+/* the certified gap's contract: within 1e-9 of the extent in double, QAWS_EPSILON (1e-6) of it in float; the tests allow
+   ten times the double one */
+#define CP_GAP (sizeof(qaws_scalar) == sizeof(double) ? 1e-8 : 1e-6)
+
+/* the rounding of a distance between evaluated points of a curve of the given extent: the evaluation and the sum of
+   squares err by a few eps of the coordinates (the double bounds are kept as they were, below this) */
+static double cp_round(double extent, double dbl)
+{
+	return fmax(dbl, 8 * TEST_EPS * extent);
+}
+
 static void cp_spiked_points(double* p)
 {
 	unsigned int i;
@@ -47,6 +58,8 @@ static void cp_spiked_points(double* p)
 static void test_spike(void)
 {
 	static double p[CP_N * 2];
+	static qaws_scalar ps[CP_N * 2];   /* the control points as the scalar (the view below reads the doubles) */
+	unsigned int k;
 	qaws_vec2 q = { 0, 0 };
 	qaws_bspline_desc d;
 	qaws_curve_view v;
@@ -55,8 +68,10 @@ static void test_spike(void)
 	double dense;
 	char msg[240];
 	cp_spiked_points(p);
+	for (k = 0; k < CP_N * 2; k++)
+		ps[k] = (qaws_scalar)p[k];
 	memset(&d, 0, sizeof d);
-	d.dimension = QAWS_DIMENSION_2D; d.degree = 3; d.control_points = p; d.control_point_count = CP_N;
+	d.dimension = QAWS_DIMENSION_2D; d.degree = 3; d.control_points = ps; d.control_point_count = CP_N;
 	TEST_ASSERT(qaws_curve_create_bspline(&d, &c) == QAWS_STATUS_OK, "spiked circle created");
 	/* sampling and Newton alone, from the 32 samples: they stop on the circle */
 	{
@@ -77,8 +92,8 @@ static void test_spike(void)
 	dense = cp_dense_2d(c, q, 400000);
 	snprintf(msg, sizeof msg, "the spike found: distance %.12f at t = %.6f, gap %.1e; dense sampling %.12f", (double)dist, (double)t, (double)gap, dense);
 	printf("  %s\n", msg);
-	TEST_ASSERT(dist < 4 && dist <= dense + 1e-12 && t > 64 && t < 68, msg);
-	TEST_ASSERT(gap >= 0 && gap <= 1e-8 * 10, "gap within the tolerance");
+	TEST_ASSERT(dist < 4 && dist <= dense + cp_round(5, 1e-12) && t > 64 && t < 68, msg);
+	TEST_ASSERT(gap >= 0 && gap <= CP_GAP * 10, "gap within the tolerance");
 	TEST_ASSERT(qaws_curve_find_closest_parameter_2d(c, q, &ts) == QAWS_STATUS_OK && ts == t, "find_closest_parameter gives the same");
 
 	/* the same curve borrowed */
@@ -113,11 +128,11 @@ static void test_circle(void)
 	qaws_curve_find_closest_point_certified_2d(c, q, &t, &dist, &gap);
 	snprintf(msg, sizeof msg, "rational circle: distance sqrt(10) - 2 (error %.1e, gap %.1e)", fabs(dist - (sqrt(10.0) - 2)), (double)gap);
 	printf("  %s\n", msg);
-	TEST_ASSERT(fabs(dist - (sqrt(10.0) - 2)) <= 1e-13 && gap <= 1e-8, msg);
+	TEST_ASSERT(fabs(dist - (sqrt(10.0) - 2)) <= cp_round(2, 1e-13) && gap <= CP_GAP, msg);
 	TEST_ASSERT(qaws_curve_find_closest_point_certified_2d(c, center, &t, &dist, &gap) == QAWS_STATUS_OK, "the center: it terminates");
 	snprintf(msg, sizeof msg, "the center: distance 2 (error %.1e), gap %.2e within the work bound", fabs(dist - 2), (double)gap);
 	printf("  %s\n", msg);
-	TEST_ASSERT(fabs(dist - 2) <= 1e-13 && gap >= 0 && gap <= 2, msg);
+	TEST_ASSERT(fabs(dist - 2) <= cp_round(2, 1e-13) && gap >= 0 && gap <= 2, msg);
 	qaws_curve_destroy(c);
 }
 
@@ -152,7 +167,7 @@ static void test_bezier_3d(void)
 	}
 	snprintf(msg, sizeof msg, "3D quintic, 24 points: never above dense sampling (worst %.1e), gaps up to %.1e", worst, gap_max);
 	printf("  %s\n", msg);
-	TEST_ASSERT(worst <= 1e-12 && gap_max <= 1e-7, msg);
+	TEST_ASSERT(worst <= cp_round(7, 1e-12) && gap_max <= CP_GAP * 10, msg);
 	qaws_curve_destroy(c);
 }
 
@@ -219,8 +234,8 @@ static void test_surfaces(void)
 	snprintf(msg, sizeof msg, "cap: the 8 x 8 grid sees %.3f; certified %.12f at (%.4f, %.4f), gap %.1e; 601 x 601 samples %.12f",
 		grid, (double)dist, (double)u, (double)w, (double)gap, dense);
 	printf("  %s\n", msg);
-	TEST_ASSERT(grid > 4.9 && dist < 4 && dist <= dense + 1e-12 && gap <= 1e-7, msg);
-	TEST_ASSERT(fabs(sqrt((double)cl.x * cl.x + (double)cl.y * cl.y + (double)cl.z * cl.z) - dist) <= 1e-12, "the closest point at that distance");
+	TEST_ASSERT(grid > 4.9 && dist < 4 && dist <= dense + cp_round(5, 1e-12) && gap <= CP_GAP * 10, msg);
+	TEST_ASSERT(fabs(sqrt((double)cl.x * cl.x + (double)cl.y * cl.y + (double)cl.z * cl.z) - dist) <= cp_round(5, 1e-12), "the closest point at that distance");
 	/* the same cap borrowed */
 	memset(&v, 0, sizeof v);
 	v.u_degree = 3; v.v_degree = 3; v.u_count = CP_S; v.v_count = CP_S;
@@ -268,7 +283,7 @@ static void test_surfaces(void)
 		}
 		snprintf(msg, sizeof msg, "bicubic patch, 12 points: never above dense sampling (worst %.1e), gaps up to %.1e", worst, gmax);
 		printf("  %s\n", msg);
-		TEST_ASSERT(worst <= 1e-12 && gmax <= 1e-7, msg);
+		TEST_ASSERT(worst <= cp_round(3, 1e-12) && gmax <= CP_GAP * 10, msg);
 		qaws_surface_destroy(s);
 	}
 	/* a flat square: exact distances, inside and past its edge */
@@ -281,7 +296,7 @@ static void test_surfaces(void)
 		qaws_surface_find_closest_point_certified(s, x1, &u, &w, &cl, &dist, &gap);
 		TEST_ASSERT(fabs(dist - 2) <= 1e-14 && fabs(u - (qaws_scalar)0.3) <= 1e-7 && fabs(w - (qaws_scalar)0.6) <= 1e-7, "square: above it");
 		qaws_surface_find_closest_point_certified(s, x2, &u, &w, &cl, &dist, &gap);
-		TEST_ASSERT(fabs(dist - sqrt(1.25)) <= 1e-14 && u == 1 && fabs(w - (qaws_scalar)0.5) <= 1e-7, "square: past its edge");
+		TEST_ASSERT(fabs(dist - sqrt(1.25)) <= cp_round(1, 1e-14) && u == 1 && fabs(w - (qaws_scalar)0.5) <= 1e-7, "square: past its edge");
 		qaws_surface_destroy(s);
 	}
 }

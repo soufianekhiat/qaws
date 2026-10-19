@@ -22,38 +22,44 @@ static int hm_re(void** p, size_t bytes)
 int hm_reserve(qaws_hm* m, unsigned int dv, unsigned int dc, unsigned int df)
 {
 	unsigned int i, c;
-	if (m->nv + dv > m->capv)
+	if (qaws_internal_add2(m->nv, dv) > m->capv)
 	{
-		for (c = m->capv ? m->capv : 16; c < m->nv + dv; c *= 2) {}
-		if (!hm_re((void**)&m->x, sizeof(double) * m->dim * c) || !hm_re((void**)&m->vc, sizeof(unsigned int) * c)
-			|| !hm_re((void**)&m->vsrc, sizeof(unsigned int) * c) || !hm_re((void**)&m->vflag, c)
-			|| !hm_re((void**)&m->hole[0], sizeof(unsigned int) * c)
-			|| (m->foot && !hm_re((void**)&m->foot, sizeof(qaws_mesh_location) * c)))
+		c = qaws_internal_grow(m->capv, qaws_internal_add2(m->nv, dv), 16);
+		if (!c)
+			return 0;
+		if (!hm_re((void**)&m->x, qaws_internal_mul3(sizeof(double), m->dim, c)) || !hm_re((void**)&m->vc, qaws_internal_mul2(sizeof(unsigned int), c))
+			|| !hm_re((void**)&m->vsrc, qaws_internal_mul2(sizeof(unsigned int), c)) || !hm_re((void**)&m->vflag, c)
+			|| !hm_re((void**)&m->hole[0], qaws_internal_mul2(sizeof(unsigned int), c))
+			|| (m->foot && !hm_re((void**)&m->foot, qaws_internal_mul2(sizeof(qaws_mesh_location), c))))
 			return 0;
 		for (i = 0; i < m->na; i++)
-			if (m->attr[i].element == QAWS_MESH_VERTEX && !hm_re((void**)&m->attr[i].v, sizeof(double) * m->attr[i].n * c))
+			if (m->attr[i].element == QAWS_MESH_VERTEX && !hm_re((void**)&m->attr[i].v, qaws_internal_mul3(sizeof(double), m->attr[i].n, c)))
 				return 0;
 		m->capv = c;
 	}
-	if (m->nc + dc > m->capc)
+	if (qaws_internal_add2(m->nc, dc) > m->capc)
 	{
-		for (c = m->capc ? m->capc : 64; c < m->nc + dc; c *= 2) {}
-		if (!hm_re((void**)&m->cv, sizeof(unsigned int) * c) || !hm_re((void**)&m->co, sizeof(unsigned int) * c)
-			|| !hm_re((void**)&m->cf, sizeof(unsigned int) * c) || !hm_re((void**)&m->cflag, c))
+		c = qaws_internal_grow(m->capc, qaws_internal_add2(m->nc, dc), 64);
+		if (!c)
+			return 0;
+		if (!hm_re((void**)&m->cv, qaws_internal_mul2(sizeof(unsigned int), c)) || !hm_re((void**)&m->co, qaws_internal_mul2(sizeof(unsigned int), c))
+			|| !hm_re((void**)&m->cf, qaws_internal_mul2(sizeof(unsigned int), c)) || !hm_re((void**)&m->cflag, c))
 			return 0;
 		for (i = 0; i < m->na; i++)
-			if (m->attr[i].element == QAWS_MESH_CORNER && !hm_re((void**)&m->attr[i].v, sizeof(double) * m->attr[i].n * c))
+			if (m->attr[i].element == QAWS_MESH_CORNER && !hm_re((void**)&m->attr[i].v, qaws_internal_mul3(sizeof(double), m->attr[i].n, c)))
 				return 0;
 		m->capc = c;
 	}
-	if (m->nf + df > m->capf)
+	if (qaws_internal_add2(m->nf, df) > m->capf)
 	{
-		for (c = m->capf ? m->capf : 16; c < m->nf + df; c *= 2) {}
-		if (!hm_re((void**)&m->fc, sizeof(unsigned int) * c) || !hm_re((void**)&m->fn, sizeof(unsigned int) * c)
-			|| !hm_re((void**)&m->fflag, c) || !hm_re((void**)&m->hole[1], sizeof(unsigned int) * c))
+		c = qaws_internal_grow(m->capf, qaws_internal_add2(m->nf, df), 16);
+		if (!c)
+			return 0;
+		if (!hm_re((void**)&m->fc, qaws_internal_mul2(sizeof(unsigned int), c)) || !hm_re((void**)&m->fn, qaws_internal_mul2(sizeof(unsigned int), c))
+			|| !hm_re((void**)&m->fflag, c) || !hm_re((void**)&m->hole[1], qaws_internal_mul2(sizeof(unsigned int), c)))
 			return 0;
 		for (i = 0; i < m->na; i++)
-			if (m->attr[i].element == QAWS_MESH_FACE && !hm_re((void**)&m->attr[i].v, sizeof(double) * m->attr[i].n * c))
+			if (m->attr[i].element == QAWS_MESH_FACE && !hm_re((void**)&m->attr[i].v, qaws_internal_mul3(sizeof(double), m->attr[i].n, c)))
 				return 0;
 		m->capf = c;
 	}
@@ -347,7 +353,7 @@ qaws_status hm_build(qaws_hm* m, unsigned int dim, double const* x, unsigned int
 	}
 	if (total > 0x3FFFFFFFu)
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	stamp = (unsigned int*)qaws_internal_zalloc(nv ? nv : 1, sizeof(unsigned int));
+	stamp = (unsigned int*)qaws_internal_scratch_zalloc(nv ? nv : 1, sizeof(unsigned int));
 	if (!stamp)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	for (f = 0, off = 0; f < nf; f++)
@@ -367,8 +373,8 @@ qaws_status hm_build(qaws_hm* m, unsigned int dim, double const* x, unsigned int
 	}
 	qaws_internal_free(stamp);
 	for (mask = 1; mask < 2 * total; mask <<= 1) {}
-	slot = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * mask);
-	rep = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * smax);
+	slot = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), mask));
+	rep = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), smax));
 	if (!slot || !rep || !hm_reserve(m, nv, (unsigned int)total, nf))
 		goto oom;
 	memset(slot, 0xFF, sizeof(unsigned int) * mask);
@@ -435,9 +441,9 @@ qaws_status hm_build(qaws_hm* m, unsigned int dim, double const* x, unsigned int
 	}
 	/* each vertex's fans: a vertex on several gets a copy per fan past the first */
 	n = m->nv;
-	vn = (unsigned int*)qaws_internal_zalloc((size_t)n + 1, sizeof(unsigned int));
-	vl = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (m->nc + 1));
-	seen = (unsigned char*)qaws_internal_zalloc((size_t)m->nc + 1, 1);
+	vn = (unsigned int*)qaws_internal_scratch_zalloc((size_t)n + 1, sizeof(unsigned int));
+	vl = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (m->nc + 1)));
+	seen = (unsigned char*)qaws_internal_scratch_zalloc((size_t)m->nc + 1, 1);
 	if (!vn || !vl || !seen)
 		goto oom;
 	for (c = 0; c < m->nc; c++)
@@ -629,13 +635,13 @@ done:
 /*  Patches: the operations                                                 */
 /* ======================================================================== */
 
-static int hm_grow(void** p, unsigned int* cap, unsigned int need, size_t size)
+static int hm_grow(void** p, unsigned int* cap, size_t need, size_t size)
 {
 	unsigned int c;
 	if (need <= *cap)
 		return 1;
-	for (c = *cap ? *cap : 16; c < need; c *= 2) {}
-	if (!hm_re(p, (size_t)c * size))
+	c = qaws_internal_grow(*cap, need, 16);
+	if (!c || !hm_re(p, qaws_internal_mul2(c, size)))
 		return 0;
 	*cap = c;
 	return 1;
@@ -653,8 +659,8 @@ static unsigned int pb_old(qaws_hm* m, unsigned int f)
 {
 	hm_patch* p = &m->pb;
 	unsigned int c = p->cold;
-	if (p->failed || !hm_grow((void**)&p->old, &c, p->nold + 1, sizeof(unsigned int))
-		|| !hm_grow((void**)&p->off, &p->cold, p->nold + 1, sizeof(unsigned int)))
+	if (p->failed || !hm_grow((void**)&p->old, &c, (size_t)p->nold + 1, sizeof(unsigned int))
+		|| !hm_grow((void**)&p->off, &p->cold, (size_t)p->nold + 1, sizeof(unsigned int)))
 	{
 		p->failed = 1;
 		return 0;
@@ -670,8 +676,8 @@ static void pb_face(qaws_hm* m, unsigned int k)
 {
 	hm_patch* p = &m->pb;
 	unsigned int c = p->cnew;
-	if (p->failed || !hm_grow((void**)&p->fs, &c, p->nnew + 1, sizeof(unsigned int))
-		|| !hm_grow((void**)&p->fa, &p->cnew, p->nnew + 1, sizeof(unsigned int)))
+	if (p->failed || !hm_grow((void**)&p->fs, &c, (size_t)p->nnew + 1, sizeof(unsigned int))
+		|| !hm_grow((void**)&p->fa, &p->cnew, (size_t)p->nnew + 1, sizeof(unsigned int)))
 	{
 		p->failed = 1;
 		return;
@@ -686,9 +692,9 @@ static void pb_corner(qaws_hm* m, unsigned int v, unsigned char hint)
 {
 	hm_patch* p = &m->pb;
 	unsigned int c1 = p->ccv, c2 = p->ccv, c3 = p->ccv;
-	if (p->failed || !p->nnew || !hm_grow((void**)&p->fv, &c1, p->ncv + 1, sizeof(unsigned int))
-		|| !hm_grow((void**)&p->s0, &c2, p->ncv + 1, sizeof(unsigned int)) || !hm_grow((void**)&p->sn, &c3, p->ncv + 1, sizeof(unsigned int))
-		|| !hm_grow((void**)&p->hint, &p->ccv, p->ncv + 1, 1))
+	if (p->failed || !p->nnew || !hm_grow((void**)&p->fv, &c1, (size_t)p->ncv + 1, sizeof(unsigned int))
+		|| !hm_grow((void**)&p->s0, &c2, (size_t)p->ncv + 1, sizeof(unsigned int)) || !hm_grow((void**)&p->sn, &c3, (size_t)p->ncv + 1, sizeof(unsigned int))
+		|| !hm_grow((void**)&p->hint, &p->ccv, (size_t)p->ncv + 1, 1))
 	{
 		p->failed = 1;
 		return;
@@ -706,8 +712,8 @@ static void pb_src(qaws_hm* m, unsigned int pos, double w)
 {
 	hm_patch* p = &m->pb;
 	unsigned int c = p->csrc;
-	if (p->failed || pos == HM_NONE || !hm_grow((void**)&p->sp, &c, p->nsrc + 1, sizeof(unsigned int))
-		|| !hm_grow((void**)&p->sw, &p->csrc, p->nsrc + 1, sizeof(double)))
+	if (p->failed || pos == HM_NONE || !hm_grow((void**)&p->sp, &c, (size_t)p->nsrc + 1, sizeof(unsigned int))
+		|| !hm_grow((void**)&p->sw, &p->csrc, (size_t)p->nsrc + 1, sizeof(double)))
 	{
 		p->failed = 1;
 		return;
@@ -784,11 +790,11 @@ static int hm_replace(qaws_hm* m, unsigned int from, unsigned int to)
 	}
 	if (!hm_reserve(m, 0, p->ncv, ext))
 		return 0;
-	buf = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (5 * (size_t)nt + p->ncv + 1));
+	buf = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (5 * (size_t)nt + p->ncv + 1)));
 	if (ca)
-		cvals = (double*)qaws_internal_malloc(sizeof(double) * ca * (nt ? nt : 1));
+		cvals = (double*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(double), ca, (nt ? nt : 1)));
 	if (fa)
-		fvals = (double*)qaws_internal_malloc(sizeof(double) * fa * (p->nold ? p->nold : 1));
+		fvals = (double*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(double), fa, (p->nold ? p->nold : 1)));
 	if (!buf || (ca && !cvals) || (fa && !fvals))
 	{
 		qaws_internal_free(buf); qaws_internal_free(cvals); qaws_internal_free(fvals);
@@ -1032,8 +1038,8 @@ unsigned int hm_split_face(qaws_hm* m, unsigned int f, double const* x)
 	int centroid = x == NULL;
 	if (!hm_reserve(m, 1, 0, 0))
 		return HM_NONE;
-	w = s == 3 ? w3 : (double*)qaws_internal_malloc(sizeof(double) * s);
-	vx = s == 3 ? vx3 : (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * s);
+	w = s == 3 ? w3 : (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), s));
+	vx = s == 3 ? vx3 : (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), s));
 	if (!w || !vx)
 	{
 		if (w != w3)
@@ -1285,7 +1291,7 @@ static void hm_move_face(qaws_hm* m, unsigned int j, unsigned int i)
 /* the corner pool without its free slots (runs keep their order) */
 static void hm_pool(qaws_hm* m)
 {
-	unsigned int* map = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (m->nc + 1));
+	unsigned int* map = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (m->nc + 1)));
 	unsigned int c, n = 0, k, v;
 	if (!map)
 		return;   /* (the garbage stays) */
@@ -1351,7 +1357,7 @@ void hm_compact(qaws_hm* m)
 
 unsigned int hm_attr_add(qaws_hm* m, char const* name, unsigned int element, unsigned int rule, unsigned int n)
 {
-	hm_attr* g = (hm_attr*)qaws_internal_realloc(m->attr, sizeof(hm_attr) * (m->na + 1));
+	hm_attr* g = (hm_attr*)qaws_internal_realloc(m->attr, qaws_internal_mul2(sizeof(hm_attr), (m->na + 1)));
 	hm_attr* a;
 	size_t slots;
 	if (!g)
@@ -1360,7 +1366,7 @@ unsigned int hm_attr_add(qaws_hm* m, char const* name, unsigned int element, uns
 	a = &g[m->na];
 	memset(a, 0, sizeof *a);
 	slots = element == QAWS_MESH_VERTEX ? m->capv : element == QAWS_MESH_CORNER ? m->capc : m->capf;
-	a->v = (double*)qaws_internal_zalloc(slots ? slots * n : 1, sizeof(double));
+	a->v = (double*)qaws_internal_zalloc(slots ? qaws_internal_mul2(slots, n) : 1, sizeof(double));
 	if (!a->v)
 		return HM_NONE;
 	if (name)
@@ -1386,7 +1392,7 @@ int hm_foot_enable(qaws_hm* m)
 	unsigned int v;
 	if (m->foot)
 		return 1;
-	m->foot = (qaws_mesh_location*)qaws_internal_malloc(sizeof(qaws_mesh_location) * (m->capv ? m->capv : 1));
+	m->foot = (qaws_mesh_location*)qaws_internal_malloc(qaws_internal_mul2(sizeof(qaws_mesh_location), (m->capv ? m->capv : 1)));
 	if (!m->foot)
 		return 0;
 	for (v = 0; v < m->nv; v++)

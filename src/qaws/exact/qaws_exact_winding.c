@@ -143,7 +143,7 @@ static qaws_status crossings(wind_poly const* p0, int* out)
 		}
 	}
 	cap = 16;
-	stack = (wind_item*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(wind_item) * cap));
+	stack = (wind_item*)qaws_internal_alloc(NULL, qaws_internal_mul2(sizeof(wind_item), cap));
 	if (!stack)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	stack[top].p = *p0;
@@ -171,7 +171,8 @@ static qaws_status crossings(wind_poly const* p0, int* out)
 		if (top + 2 > cap)
 		{
 			/* grow the stack (depth-first: at most one pending sibling per level) */
-			wind_item* bigger = (wind_item*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(wind_item) * cap * 2));
+			unsigned int nc = qaws_internal_grow(cap, (size_t)top + 2, 16);
+			wind_item* bigger = nc ? (wind_item*)qaws_internal_alloc(NULL, qaws_internal_mul2(sizeof(wind_item), nc)) : NULL;
 			if (!bigger)
 			{
 				st = QAWS_STATUS_ALLOCATION_FAILURE;
@@ -180,7 +181,7 @@ static qaws_status crossings(wind_poly const* p0, int* out)
 			memcpy(bigger, stack, sizeof(wind_item) * (top + 1));
 			qaws_internal_dealloc(NULL, stack);
 			stack = bigger;
-			cap *= 2;
+			cap = nc;
 			p = &stack[top].p;
 		}
 		{

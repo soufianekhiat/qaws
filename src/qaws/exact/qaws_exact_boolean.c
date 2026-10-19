@@ -188,7 +188,7 @@ qaws_status qaws_exact_boolean_2d(qaws_exact_curve const* a, qaws_exact_curve co
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	pairs = NULL;
 	x = NULL;
-	sd = (bo_side*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(bo_side) * 2));
+	sd = (bo_side*)qaws_internal_alloc(NULL, qaws_internal_mul2(sizeof(bo_side), 2));
 	if (!sd)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	/* both boundaries simple */
@@ -205,7 +205,7 @@ qaws_status qaws_exact_boolean_2d(qaws_exact_curve const* a, qaws_exact_curve co
 		if (st != QAWS_STATUS_OK)
 			break;
 		qaws_internal_dealloc(NULL, pairs);
-		pairs = (qaws_exact_pair*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_exact_pair) * cap));
+		pairs = (qaws_exact_pair*)qaws_internal_alloc(NULL, qaws_internal_mul2(sizeof(qaws_exact_pair), cap));
 		if (!pairs)
 		{
 			st = QAWS_STATUS_ALLOCATION_FAILURE;
@@ -223,8 +223,8 @@ qaws_status qaws_exact_boolean_2d(qaws_exact_curve const* a, qaws_exact_curve co
 			st = QAWS_STATUS_CERTIFICATION_FAILED;
 	if (st == QAWS_STATUS_OK)
 	{
-		x = (bo_cross*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(bo_cross) * (np + 1)));
-		ints = (int*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(int) * 10 * (np + 1)));
+		x = (bo_cross*)qaws_internal_alloc(NULL, qaws_internal_mul2(sizeof(bo_cross), (np + 1)));
+		ints = (int*)qaws_internal_alloc(NULL, qaws_internal_mul3(sizeof(int), 10, (np + 1)));
 		if (!x || !ints)
 			st = QAWS_STATUS_ALLOCATION_FAILURE;
 		for (s = 0; s < 2 && st == QAWS_STATUS_OK; s++)

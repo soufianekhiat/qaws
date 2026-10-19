@@ -187,7 +187,7 @@ static int rm_snapshot(rmsh* w)
 	unsigned int c;
 	if (m->nc > w->cep)
 	{
-		unsigned int* g = (unsigned int*)qaws_internal_realloc(w->ep, sizeof(unsigned int) * 2 * m->nc);
+		unsigned int* g = (unsigned int*)qaws_internal_realloc(w->ep, qaws_internal_mul3(sizeof(unsigned int), 2, m->nc));
 		if (!g)
 		{
 			w->failed = 1;
@@ -221,7 +221,7 @@ static int rm_push(rmsh* w, unsigned int a, unsigned int b)
 {
 	if (w->nep == w->cep)
 	{
-		unsigned int* g = (unsigned int*)qaws_internal_realloc(w->ep, sizeof(unsigned int) * 2 * (2 * (size_t)w->cep + 64));
+		unsigned int* g = (unsigned int*)qaws_internal_realloc(w->ep, qaws_internal_mul3(sizeof(unsigned int), 2, (2 * (size_t)w->cep + 64)));
 		if (!g)
 		{
 			w->failed = 1;
@@ -243,7 +243,7 @@ static void rm_touch(rmsh* w, unsigned int v)
 		return;
 	if (w->nchg == w->cchg)
 	{
-		unsigned int* g = (unsigned int*)qaws_internal_realloc(w->chg, sizeof(unsigned int) * (2 * (size_t)w->cchg + 64));
+		unsigned int* g = (unsigned int*)qaws_internal_realloc(w->chg, qaws_internal_mul2(sizeof(unsigned int), (2 * (size_t)w->cchg + 64)));
 		if (!g)
 		{
 			w->failed = 1;
@@ -986,7 +986,7 @@ static void rm_caps(rmsh* w)
 static void rm_delaunay(rmsh* w)
 {
 	qaws_hm* m = w->m;
-	unsigned int n, flips = 0, cap = 100 * m->nv;
+	unsigned int n, flips = 0, cap = m->nv > 0xFFFFFFFFu / 100 ? 0xFFFFFFFFu : 100 * m->nv;   /* a flip budget: saturate, never wrap */
 	if (!rm_snapshot(w))
 		return;
 	for (n = w->nep; n > 0 && flips < cap && !w->failed;)
@@ -1212,7 +1212,7 @@ static unsigned int rm_gather(rmsh* w, int large, rm_bad** list, unsigned int* c
 			continue;
 		if (n == *cap)
 		{
-			rm_bad* g = (rm_bad*)qaws_internal_realloc(*list, sizeof(rm_bad) * (2 * (size_t)*cap + 64));
+			rm_bad* g = (rm_bad*)qaws_internal_realloc(*list, qaws_internal_mul2(sizeof(rm_bad), (2 * (size_t)*cap + 64)));
 			if (!g)
 			{
 				w->failed = 1;
@@ -1628,8 +1628,8 @@ static int rm_small(rmsh* w, rm_bad const* t)
 static void rm_smooth_changed(rmsh* w)
 {
 	qaws_hm* m = w->m;
-	unsigned char* mk = (unsigned char*)qaws_internal_zalloc((size_t)m->nv + 1, 1);
-	unsigned int *list = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)m->nv + 1)), n = 0, i, k, depth, start = 0;
+	unsigned char* mk = (unsigned char*)qaws_internal_scratch_zalloc((size_t)m->nv + 1, 1);
+	unsigned int *list = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), ((size_t)m->nv + 1))), n = 0, i, k, depth, start = 0;
 	if (!mk || !list)
 	{
 		qaws_internal_free(mk);
@@ -1743,7 +1743,7 @@ static void rm_post(rmsh* w, qaws_remesh_desc const* desc)
 static qaws_status rm_begin(rmsh* w, qaws_mesh_3d const* in, qaws_mesh_3d** out)
 {
 	unsigned int nv = qaws_mesh_3d_get_vertex_count(in), nt = qaws_mesh_3d_get_triangle_count(in), nfe = qaws_mesh_3d_get_feature_edge_count(in), i, k;
-	unsigned int *tri = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (3 * (size_t)nt + 1)), *fe = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (2 * (size_t)nfe + 1));
+	unsigned int *tri = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (3 * (size_t)nt + 1))), *fe = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (2 * (size_t)nfe + 1)));
 	qaws_hm* m;
 	qaws_status st;
 	if (!tri || !fe)
@@ -1953,7 +1953,7 @@ static qaws_status rm_end(rmsh* w, int report)
 	double dmax = 0, dsum = 0;
 	int need = report;
 	hm_compact(m);
-	fl = (qaws_mesh_location*)qaws_internal_malloc(sizeof(qaws_mesh_location) * (m->nf + 1));
+	fl = (qaws_mesh_location*)qaws_internal_malloc(qaws_internal_mul2(sizeof(qaws_mesh_location), (m->nf + 1)));
 	if (!fl)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	/* each face's centre on the reference, from its first vertex's side: the deviation reported, and where face and corner

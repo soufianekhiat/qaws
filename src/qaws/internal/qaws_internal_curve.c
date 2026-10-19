@@ -3,9 +3,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-void* qaws_internal_alloc(qaws_allocator const* allocator, unsigned long size)
+void* qaws_internal_alloc(qaws_allocator const* allocator, size_t size)
 {
-	return qaws_internal_alloc_from(allocator, (size_t)size);
+	return qaws_internal_alloc_from(allocator, size);
 }
 
 /* the block knows its allocator (qaws_internal_memory.h) */
@@ -17,7 +17,7 @@ void qaws_internal_dealloc(qaws_allocator const* allocator, void* ptr)
 
 void* qaws_internal_scratch(qaws_allocator const* allocator, void* stack, size_t stack_bytes, size_t bytes)
 {
-	return bytes <= stack_bytes ? stack : qaws_internal_alloc(allocator, (unsigned long)bytes);
+	return bytes <= stack_bytes ? stack : qaws_internal_alloc(allocator, bytes);
 }
 
 void qaws_internal_scratch_release(qaws_allocator const* allocator, void* stack, void* scratch)
@@ -31,7 +31,7 @@ void* qaws_internal_calloc(qaws_allocator const* allocator, size_t count, size_t
 	void* p;
 	if (size && count > (size_t)-1 / size)
 		return NULL;
-	p = qaws_internal_alloc(allocator, (unsigned long)(count * size));
+	p = qaws_internal_alloc(allocator, qaws_internal_mul2(count, size));
 	if (p)
 		memset(p, 0, count * size);
 	return p;
@@ -49,11 +49,11 @@ qaws_curve* qaws_internal_curve_alloc_ex(
 	/* a custom allocator is kept by value right after the curve: the caller's descriptor may be a short-lived local */
 	int custom = allocator && allocator->alloc;
 	size_t at = (sizeof(qaws_curve) + sizeof(void*) - 1) / sizeof(void*) * sizeof(void*);
-	qaws_curve* curve = (qaws_curve*)qaws_internal_alloc(allocator, (unsigned long)(at + (custom ? sizeof(qaws_allocator) : 0)));
+	qaws_curve* curve = (qaws_curve*)qaws_internal_alloc(allocator, at + (custom ? sizeof(qaws_allocator) : 0));
 	if (!curve) return NULL;
 
 	curve->span_boundaries = (qaws_scalar*)qaws_internal_alloc(
-		allocator, (unsigned long)(span_count + 1) * sizeof(qaws_scalar));
+		allocator, qaws_internal_mul2(((size_t)(span_count + 1)), sizeof(qaws_scalar)));
 	if (!curve->span_boundaries) {
 		qaws_internal_dealloc(allocator, curve);
 		return NULL;

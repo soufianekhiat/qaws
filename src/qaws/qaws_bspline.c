@@ -30,7 +30,7 @@ static qaws_status generate_uniform_knots(
 	qaws_scalar max_val = (qaws_scalar)(control_point_count - degree);
 
 	knots = (qaws_scalar *)qaws_internal_alloc(allocator,
-		(unsigned long)(sizeof(qaws_scalar) * (size_t)knot_count));
+		qaws_internal_mul2(sizeof(qaws_scalar), (size_t)knot_count));
 	if (!knots)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 
@@ -515,6 +515,8 @@ qaws_status qaws_curve_create_bspline_ex(
 		return QAWS_STATUS_INVALID_CONTROL_POINT_COUNT;
 
 	dim_count = (desc->dimension == QAWS_DIMENSION_2D) ? 2u : 3u;
+	if (N > 0xFFFFFFFFu / 4)   /* N * (dim_count + 1) homogeneous scalars, N + knots, count in unsigned int */
+		return QAWS_STATUS_INVALID_CONTROL_POINT_COUNT;
 
 	/* --- Build or validate knot vector --------------------------------- */
 
@@ -535,7 +537,7 @@ qaws_status qaws_curve_create_bspline_ex(
 
 		/* Copy the knot vector */
 		knots = (qaws_scalar *)qaws_internal_alloc(allocator,
-			(unsigned long)(sizeof(qaws_scalar) * (size_t)knot_count));
+			qaws_internal_mul2(sizeof(qaws_scalar), (size_t)knot_count));
 		if (!knots)
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 		memcpy(knots, desc->knots,
@@ -561,7 +563,7 @@ qaws_status qaws_curve_create_bspline_ex(
 		unsigned int count;
 
 		temp_bounds = (qaws_scalar *)qaws_internal_alloc(allocator,
-			(unsigned long)(sizeof(qaws_scalar) * (size_t)(max_spans + 1)));
+			qaws_internal_mul2(sizeof(qaws_scalar), ((size_t)(max_spans + 1))));
 		if (!temp_bounds) {
 			if (owns_knots) qaws_internal_dealloc(allocator, knots);
 			return QAWS_STATUS_ALLOCATION_FAILURE;
@@ -627,7 +629,7 @@ qaws_status qaws_curve_create_bspline_ex(
 
 	/* Copy control points */
 	impl->control_points = (qaws_scalar *)qaws_internal_alloc(allocator,
-		(unsigned long)(sizeof(qaws_scalar) * (size_t)(N * dim_count)));
+		qaws_internal_mul3(sizeof(qaws_scalar), N, dim_count));
 	if (!impl->control_points) {
 		qaws_internal_dealloc(allocator, impl->knots);
 		qaws_internal_dealloc(allocator, impl);

@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "qaws_alloc.h"
 
 /* Forward declarations of test main functions */
 extern int test_00_status_main(void);
@@ -337,6 +338,19 @@ int main(void) {
 	   CTest runs each suite) */
 	char const* only = getenv("QAWS_TEST");
 	setvbuf(stdout, NULL, _IONBF, 0);
+	/* QAWS_TEST_SCRATCH=1: the main thread's scratch from an arena that must hold nothing between suites (a temporary
+	   kept by a result that outlives its suite shows as a block held) */
+	static qaws_arena scratch;
+	unsigned char* scratch_memory = NULL;
+	if (getenv("QAWS_TEST_SCRATCH") && atoi(getenv("QAWS_TEST_SCRATCH")))
+	{
+		scratch_memory = (unsigned char*)malloc((size_t)1 << 30);
+		if (scratch_memory)
+		{
+			qaws_arena_init(&scratch, scratch_memory, (size_t)1 << 30);
+			qaws_exchange_thread_scratch_allocator(&scratch.allocator, NULL);
+		}
+	}
 	printf("========================================\n");
 	printf("Qaws Unit Test Runner\n");
 	printf("========================================\n\n");
@@ -354,6 +368,14 @@ int main(void) {
 		printf("========================================\n");
 
 		int result = g_test_suites[i].test_fn();
+		if (scratch_memory)
+		{
+			printf("  scratch arena: peak %lu bytes, %lu refused, %lu invalid frees, %lu held\n", (unsigned long)scratch.peak,
+				(unsigned long)scratch.failures, (unsigned long)scratch.invalid_frees, (unsigned long)scratch.live);
+			if (scratch.live || scratch.invalid_frees || qaws_arena_reset(&scratch) != QAWS_STATUS_OK)
+				result += 1;
+			qaws_arena_init(&scratch, scratch_memory, (size_t)1 << 30);
+		}
 
 		if (result == 0) {
 			total_passed++;

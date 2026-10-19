@@ -346,6 +346,8 @@ qaws_status qaws_curve_create_hermite_ex(
 		return QAWS_STATUS_INVALID_ARGUMENT;
 
 	dim_count = (desc->dimension == QAWS_DIMENSION_2D) ? 2u : 3u;
+	if (desc->point_count > 0xFFFFFFFFu / (dim_count * 4))   /* span * dim_count * 4 indexes the coefficients in unsigned int */
+		return QAWS_STATUS_INVALID_CONTROL_POINT_COUNT;
 	span_count = desc->point_count - 1;
 
 	range.min_value = QAWS_ZERO;
@@ -366,15 +368,15 @@ qaws_status qaws_curve_create_hermite_ex(
 		curve->span_boundaries[i] = (qaws_scalar)i;
 	}
 
-	impl = (qaws_hermite_impl *)qaws_internal_alloc(allocator, (unsigned long)sizeof(qaws_hermite_impl));
+	impl = (qaws_hermite_impl *)qaws_internal_alloc(allocator, sizeof(qaws_hermite_impl));
 	if (!impl) {
 		qaws_internal_curve_free(curve);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 
-	pts_size = (size_t)desc->point_count * (size_t)dim_count * sizeof(qaws_scalar);
+	pts_size = qaws_internal_mul3((size_t)desc->point_count, (size_t)dim_count, sizeof(qaws_scalar));
 
-	impl->points = (qaws_scalar *)qaws_internal_alloc(allocator, (unsigned long)pts_size);
+	impl->points = (qaws_scalar *)qaws_internal_alloc(allocator, pts_size);
 	if (!impl->points) {
 		qaws_internal_dealloc(allocator, impl);
 		qaws_internal_curve_free(curve);
@@ -382,7 +384,7 @@ qaws_status qaws_curve_create_hermite_ex(
 	}
 	memcpy(impl->points, desc->points, pts_size);
 
-	impl->tangents = (qaws_scalar *)qaws_internal_alloc(allocator, (unsigned long)pts_size);
+	impl->tangents = (qaws_scalar *)qaws_internal_alloc(allocator, pts_size);
 	if (!impl->tangents) {
 		qaws_internal_dealloc(allocator, impl->points);
 		qaws_internal_dealloc(allocator, impl);
@@ -397,7 +399,7 @@ qaws_status qaws_curve_create_hermite_ex(
 	{
 		unsigned int s;
 		impl->span_coeffs = (qaws_scalar *)qaws_internal_alloc(allocator,
-			(unsigned long)(sizeof(qaws_scalar) * (size_t)span_count * (size_t)dim_count * 4));
+			qaws_internal_mul4(sizeof(qaws_scalar), (size_t)span_count, (size_t)dim_count, 4));
 		if (!impl->span_coeffs) {
 			qaws_internal_dealloc(allocator, impl->tangents);
 			qaws_internal_dealloc(allocator, impl->points);
@@ -409,7 +411,7 @@ qaws_status qaws_curve_create_hermite_ex(
 		if (dim_count == 2) {
 			qaws_vec2 *tmp_a, *tmp_b, *tmp_c, *tmp_d;
 			size_t vec_size = (size_t)span_count * sizeof(qaws_vec2);
-			tmp_a = (qaws_vec2 *)qaws_internal_alloc(allocator, (unsigned long)(vec_size * 4));
+			tmp_a = (qaws_vec2 *)qaws_internal_alloc(allocator, qaws_internal_mul2(vec_size, 4));
 			if (!tmp_a) {
 				qaws_internal_dealloc(allocator, impl->span_coeffs);
 				qaws_internal_dealloc(allocator, impl->tangents);
@@ -442,7 +444,7 @@ qaws_status qaws_curve_create_hermite_ex(
 		} else {
 			qaws_vec3 *tmp_a, *tmp_b, *tmp_c, *tmp_d;
 			size_t vec_size = (size_t)span_count * sizeof(qaws_vec3);
-			tmp_a = (qaws_vec3 *)qaws_internal_alloc(allocator, (unsigned long)(vec_size * 4));
+			tmp_a = (qaws_vec3 *)qaws_internal_alloc(allocator, qaws_internal_mul2(vec_size, 4));
 			if (!tmp_a) {
 				qaws_internal_dealloc(allocator, impl->span_coeffs);
 				qaws_internal_dealloc(allocator, impl->tangents);

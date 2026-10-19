@@ -174,8 +174,10 @@ static qaws_status qf_network(qaws_hm const* dm, mf_level const* L, int const* T
 		ne += dm->cf[c] != HM_NONE && (dm->co[c] == HM_NONE || c < dm->co[c]);
 		open |= dm->cf[c] != HM_NONE && dm->co[c] == HM_NONE;
 	}
+	if (ne > 0xFFFFFFFFu / 16 || nf > 0xFFFFFFFFu / 32)   /* 8 ne + 10 nf + 1 arcs count in unsigned int */
+		return QAWS_STATUS_ALLOCATION_FAILURE;
 	st = qaws_flow_create(2 * nf + 1, 8 * ne + 10 * nf + 1, &net->flow);
-	net->rec = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (8 * (size_t)ne + 10 * (size_t)nf + 1));
+	net->rec = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (8 * (size_t)ne + 10 * (size_t)nf + 1)));
 	if (st != QAWS_STATUS_OK || !net->rec)
 	{
 		qf_net_free(net);
@@ -683,10 +685,10 @@ unsigned int qf_consistent(qaws_hm const* dm, mf_level const* L, int* T, unsigne
 	qf_report* out_report)
 {
 	unsigned int nf = dm->nf, f, i, left = HM_NONE, odd = 0, head, tail;
-	unsigned char *fr = (unsigned char*)qaws_internal_malloc((size_t)dm->nc + 1), *sing = (unsigned char*)qaws_internal_malloc((size_t)nf + 1);
-	unsigned char *g = (unsigned char*)qaws_internal_malloc((size_t)nf + 1), *seen = (unsigned char*)qaws_internal_zalloc((size_t)nf + 1, 1);
-	unsigned int *queue = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (nf + 2)), *targets = NULL;
-	int* S = (int*)qaws_internal_malloc(sizeof(int) * (2 * (size_t)nf + 2));
+	unsigned char *fr = (unsigned char*)qaws_internal_scratch_malloc((size_t)dm->nc + 1), *sing = (unsigned char*)qaws_internal_malloc((size_t)nf + 1);
+	unsigned char *g = (unsigned char*)qaws_internal_scratch_malloc((size_t)nf + 1), *seen = (unsigned char*)qaws_internal_zalloc((size_t)nf + 1, 1);
+	unsigned int *queue = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (nf + 2))), *targets = NULL;
+	int* S = (int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(int), (2 * (size_t)nf + 2)));
 	qf_report rep;
 	qf_net net;
 	memset(&rep, 0, sizeof rep);
@@ -751,7 +753,7 @@ unsigned int qf_consistent(qaws_hm const* dm, mf_level const* L, int* T, unsigne
 	/* 2. odd cones paired by paths of unit changes (the faces between keep their sums), or sent to the border.
 	   shortcut: in index order, each to the nearest odd one left; a min-cost matching when pairs should be cheapest
 	   together */
-	targets = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (nf + 2));
+	targets = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (nf + 2)));
 	if (!targets)
 		goto done;
 	for (f = 0, odd = 0; f < nf; f++)

@@ -471,8 +471,8 @@ qaws_status qaws_curve_create_rational_bezier_ex(
 	}
 
 	/* Copy control points */
-	cp_size = (size_t)dim_count * n_pts * sizeof(qaws_scalar);
-	impl->control_points = (qaws_scalar*)qaws_internal_alloc(allocator, (unsigned long)(cp_size));
+	cp_size = qaws_internal_mul3((size_t)dim_count, n_pts, sizeof(qaws_scalar));
+	impl->control_points = (qaws_scalar*)qaws_internal_alloc(allocator, cp_size);
 	if (!impl->control_points) {
 		qaws_internal_dealloc(allocator, impl);
 		qaws_curve_destroy(curve);
@@ -482,8 +482,8 @@ qaws_status qaws_curve_create_rational_bezier_ex(
 	impl->control_point_count = n_pts;
 
 	/* Copy weights */
-	w_size = (size_t)n_pts * sizeof(qaws_scalar);
-	impl->weights = (qaws_scalar*)qaws_internal_alloc(allocator, (unsigned long)(w_size));
+	w_size = qaws_internal_mul2((size_t)n_pts, sizeof(qaws_scalar));
+	impl->weights = (qaws_scalar*)qaws_internal_alloc(allocator, w_size);
 	if (!impl->weights) {
 		qaws_internal_dealloc(allocator, impl->control_points);
 		qaws_internal_dealloc(allocator, impl);
@@ -495,8 +495,8 @@ qaws_status qaws_curve_create_rational_bezier_ex(
 	/* Pre-compute weighted (homogeneous) control points:
 	   for each point i, store (w_i * x, w_i * y, [w_i * z], w_i) */
 	hdim = dim_count + 1;
-	wp_size = (size_t)hdim * n_pts * sizeof(qaws_scalar);
-	impl->weighted_points = (qaws_scalar*)qaws_internal_alloc(allocator, (unsigned long)(wp_size));
+	wp_size = qaws_internal_mul3((size_t)hdim, n_pts, sizeof(qaws_scalar));
+	impl->weighted_points = (qaws_scalar*)qaws_internal_alloc(allocator, wp_size);
 	if (!impl->weighted_points) {
 		qaws_internal_dealloc(allocator, impl->weights);
 		qaws_internal_dealloc(allocator, impl->control_points);

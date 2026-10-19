@@ -180,8 +180,8 @@ static int qg_register(qg_ctx* c, unsigned int t, int i, int j, unsigned int p)
 	if (2 * (c->nreg + 1) > c->mask + 1)
 	{
 		unsigned int n = 2 * (c->mask + 1), k;
-		unsigned int* h = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * n);
-		qg_reg* g = (qg_reg*)qaws_internal_realloc(c->reg, sizeof(qg_reg) * (n / 2 + 1));
+		unsigned int* h = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), n));
+		qg_reg* g = (qg_reg*)qaws_internal_realloc(c->reg, qaws_internal_mul2(sizeof(qg_reg), (n / 2 + 1)));
 		if (g)
 			c->reg = g;
 		if (!h || !g)
@@ -239,9 +239,9 @@ static qaws_status qg_points(qg_ctx* c)
 				if (c->np == c->capp)
 				{
 					unsigned int n = 2 * c->capp + 64;
-					unsigned int* uf = (unsigned int*)qaws_internal_realloc(c->uf, sizeof(unsigned int) * n);
-					unsigned int* home = uf ? (unsigned int*)qaws_internal_realloc(c->home, sizeof(unsigned int) * n) : NULL;
-					double* bary = home ? (double*)qaws_internal_realloc(c->bary, sizeof(double) * 3 * n) : NULL;
+					unsigned int* uf = (unsigned int*)qaws_internal_realloc(c->uf, qaws_internal_mul2(sizeof(unsigned int), n));
+					unsigned int* home = uf ? (unsigned int*)qaws_internal_realloc(c->home, qaws_internal_mul2(sizeof(unsigned int), n)) : NULL;
+					double* bary = home ? (double*)qaws_internal_realloc(c->bary, qaws_internal_mul3(sizeof(double), 3, n)) : NULL;
 					if (uf)
 						c->uf = uf;
 					if (home)
@@ -452,11 +452,11 @@ static qaws_status qg_read(qg_ctx* c, qaws_hm const* dm, mf_level const* L, qd_o
 			if (qg_owns(&c->tri[c->reg[r].t], P, (int)a))
 				c->reg[r].he[a] = nhe++;
 		}
-	he = (qg_he*)qaws_internal_malloc(sizeof(qg_he) * (nhe + 1));
-	seen = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (nhe + 1));
-	out = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (c->np + 1));
-	o->fv = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (nhe + 1));
-	o->fs = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (nhe / 4 + 1));
+	he = (qg_he*)qaws_internal_malloc(qaws_internal_mul2(sizeof(qg_he), (nhe + 1)));
+	seen = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (nhe + 1)));
+	out = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (c->np + 1)));
+	o->fv = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (nhe + 1)));
+	o->fs = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (nhe / 4 + 1)));
 	if (!he || !seen || !out || !o->fv || !o->fs)
 		goto done;
 	st = QAWS_STATUS_INVALID_TOPOLOGY;
@@ -510,8 +510,8 @@ static qaws_status qg_read(qg_ctx* c, qaws_hm const* dm, mf_level const* L, qd_o
 	if (!o->nf)
 		goto done;
 	st = QAWS_STATUS_ALLOCATION_FAILURE;
-	o->x = (double*)qaws_internal_malloc(sizeof(double) * 3 * (o->nv + 1));
-	o->foot = (qaws_mesh_location*)qaws_internal_malloc(sizeof(qaws_mesh_location) * (o->nv + 1));
+	o->x = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), 3, (o->nv + 1)));
+	o->foot = (qaws_mesh_location*)qaws_internal_malloc(qaws_internal_mul2(sizeof(qaws_mesh_location), (o->nv + 1)));
 	o->kind = (unsigned char*)qaws_internal_malloc(o->nv + 1);
 	if (!o->x || !o->foot || !o->kind)
 		goto done;
@@ -631,7 +631,7 @@ static qaws_status qg_solve(qaws_hm const* dm, mf_level const* L, double rho, qg
 	qaws_internal_ldlt f;
 	qaws_status st = QAWS_STATUS_ALLOCATION_FAILURE;
 	memset(&f, 0, sizeof f);
-	nb0 = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (n + 1));
+	nb0 = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (n + 1)));
 	if (!nb0)
 		goto done;
 	for (v = 0; v < n; v++)
@@ -640,12 +640,12 @@ static qaws_status qg_solve(qaws_hm const* dm, mf_level const* L, double rho, qg
 		tot += 1 + (dm->vc[v] == HM_NONE ? 0 : hm_ring(dm, v, ring, 64));
 	}
 	nb0[n] = tot;
-	nb = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (tot + 1));
-	rp = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (2 * (size_t)n + 1));
-	col = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (4 * (size_t)tot + 1));
-	val = (double*)qaws_internal_zalloc(4 * (size_t)tot + 1, sizeof(double));
-	rhs = (double*)qaws_internal_zalloc(2 * (size_t)n + 1, sizeof(double));
-	xyz = (double*)qaws_internal_malloc(sizeof(double) * (6 * (size_t)n + 1));
+	nb = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (tot + 1)));
+	rp = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (2 * (size_t)n + 1)));
+	col = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (4 * (size_t)tot + 1)));
+	val = (double*)qaws_internal_scratch_zalloc(4 * (size_t)tot + 1, sizeof(double));
+	rhs = (double*)qaws_internal_scratch_zalloc(2 * (size_t)n + 1, sizeof(double));
+	xyz = (double*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(double), (6 * (size_t)n + 1)));
 	if (!nb || !rp || !col || !val || !rhs || !xyz)
 		goto done;
 	/* each vertex's neighbours and itself, sorted; its two rows the same columns (a 2 x 2 block per neighbour) */
@@ -851,8 +851,8 @@ static int qg_centre(double const (*nl)[3], unsigned int n, unsigned int fix, do
    rounds. Returns the folds left (HM_NONE on allocation failure). */
 static unsigned int qg_untangle(qg_tri* tri, unsigned int nt, unsigned int nv, unsigned char const* fix, double* d)
 {
-	unsigned int *at = (unsigned int*)qaws_internal_zalloc((size_t)nv + 2, sizeof(unsigned int)), *ct = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (3 * (size_t)nt + 1));
-	unsigned char* mark = (unsigned char*)qaws_internal_malloc((size_t)nv + 1);
+	unsigned int *at = (unsigned int*)qaws_internal_scratch_zalloc((size_t)nv + 2, sizeof(unsigned int)), *ct = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (3 * (size_t)nt + 1)));
+	unsigned char* mark = (unsigned char*)qaws_internal_scratch_malloc((size_t)nv + 1);
 	unsigned int t, k, v, round, folds = HM_NONE;
 	if (!at || !ct || !mark)
 		goto done;
@@ -1332,13 +1332,13 @@ static qaws_status qg_cones_onto(qaws_hm const* dm, mf_level const* L, double rh
 	qaws_status st = QAWS_STATUS_ALLOCATION_FAILURE;
 	memset(&c, 0, sizeof c);
 	memset(&info, 0, sizeof info);
-	c.tri = (qg_tri*)qaws_internal_malloc(sizeof(qg_tri) * (3 * (size_t)dm->nf + 1));
-	ct = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)dm->nc + 1));
-	fix = (unsigned char*)qaws_internal_malloc((size_t)dm->nv + 1);
-	cone = (unsigned char*)qaws_internal_malloc((size_t)dm->nv + 1);
-	used = (unsigned char*)qaws_internal_zalloc((size_t)dm->nv + 1, 1);
-	d = (double*)qaws_internal_malloc(sizeof(double) * (2 * (size_t)dm->nv + 2));
-	s = (int*)qaws_internal_zalloc(2 * (size_t)dm->nv + 2, sizeof(int));
+	c.tri = (qg_tri*)qaws_internal_malloc(qaws_internal_mul2(sizeof(qg_tri), (3 * (size_t)dm->nf + 1)));
+	ct = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), ((size_t)dm->nc + 1)));
+	fix = (unsigned char*)qaws_internal_scratch_malloc((size_t)dm->nv + 1);
+	cone = (unsigned char*)qaws_internal_scratch_malloc((size_t)dm->nv + 1);
+	used = (unsigned char*)qaws_internal_scratch_zalloc((size_t)dm->nv + 1, 1);
+	d = (double*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(double), (2 * (size_t)dm->nv + 2)));
+	s = (int*)qaws_internal_scratch_zalloc(2 * (size_t)dm->nv + 2, sizeof(int));
 	info.fbad = (unsigned char*)qaws_internal_malloc((size_t)dm->nf + 1);
 	info.sR = (signed char*)qaws_internal_malloc((size_t)dm->nv + 1);
 	info.sbad = (unsigned char*)qaws_internal_malloc((size_t)dm->nv + 1);
@@ -1419,14 +1419,14 @@ static qaws_status qg_map_of(qaws_hm const* dm, mf_level const* L, double rho, i
 	qaws_status st = QAWS_STATUS_ALLOCATION_FAILURE;
 	memset(&c, 0, sizeof c);
 	memset(o, 0, sizeof *o);
-	c.tri = (qg_tri*)qaws_internal_malloc(sizeof(qg_tri) * (3 * (size_t)dm->nf + 1));
-	ct = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)dm->nc + 1));
-	fix = (unsigned char*)qaws_internal_malloc((size_t)dm->nv + 1);
-	cone = (unsigned char*)qaws_internal_malloc((size_t)dm->nv + 1);
-	d = (double*)qaws_internal_malloc(sizeof(double) * (2 * (size_t)dm->nv + 2));
+	c.tri = (qg_tri*)qaws_internal_malloc(qaws_internal_mul2(sizeof(qg_tri), (3 * (size_t)dm->nf + 1)));
+	ct = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), ((size_t)dm->nc + 1)));
+	fix = (unsigned char*)qaws_internal_scratch_malloc((size_t)dm->nv + 1);
+	cone = (unsigned char*)qaws_internal_scratch_malloc((size_t)dm->nv + 1);
+	d = (double*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(double), (2 * (size_t)dm->nv + 2)));
 	c.mask = 255;
-	c.hash = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * 256);
-	c.reg = (qg_reg*)qaws_internal_malloc(sizeof(qg_reg) * 129);
+	c.hash = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), 256));
+	c.reg = (qg_reg*)qaws_internal_malloc(qaws_internal_mul2(sizeof(qg_reg), 129));
 	if (!c.tri || !ct || !fix || !cone || !d || !c.hash || !c.reg)
 		goto done;
 	for (k = 0; k < 256; k++)
@@ -1456,7 +1456,7 @@ static qaws_status qg_map_of(qaws_hm const* dm, mf_level const* L, double rho, i
 	/* every free vertex inside wound once round: one wound twice (its triangles all positive, beside a cone whose map
 	   winds a full turn short) leaves no map */
 	{
-		double* ang = (double*)qaws_internal_zalloc((size_t)dm->nv + 1, sizeof(double));
+		double* ang = (double*)qaws_internal_scratch_zalloc((size_t)dm->nv + 1, sizeof(double));
 		unsigned int w = HM_NONE;
 		if (!ang)
 		{
@@ -1554,8 +1554,8 @@ static qaws_status qg_map_of(qaws_hm const* dm, mf_level const* L, double rho, i
 		st = qg_read(&c, dm, L, o);
 	if (st == QAWS_STATUS_OK && map)
 	{
-		map->x = (double*)qaws_internal_malloc(sizeof(double) * 9 * ((size_t)c.nt + 1));
-		map->uv = (double*)qaws_internal_malloc(sizeof(double) * 6 * ((size_t)c.nt + 1));
+		map->x = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), 9, ((size_t)c.nt + 1)));
+		map->uv = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), 6, ((size_t)c.nt + 1)));
 		if (!map->x || !map->uv)
 		{
 			qg_map_free(map);
@@ -1729,28 +1729,28 @@ static qaws_status qg_quantize(qaws_hm const* dm, mf_level const* L, double rho,
 	memset(&c2, 0, sizeof c2);
 	memset(&fac, 0, sizeof fac);
 	memset(&info, 0, sizeof info);
-	c.tri = (qg_tri*)qaws_internal_malloc(sizeof(qg_tri) * (3 * (size_t)nf + 1));
-	c2.tri = (qg_tri*)qaws_internal_malloc(sizeof(qg_tri) * (3 * (size_t)nf + 1));
-	ct = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)dm->nc + 1));
-	ct2 = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)dm->nc + 1));
+	c.tri = (qg_tri*)qaws_internal_malloc(qaws_internal_mul2(sizeof(qg_tri), (3 * (size_t)nf + 1)));
+	c2.tri = (qg_tri*)qaws_internal_malloc(qaws_internal_mul2(sizeof(qg_tri), (3 * (size_t)nf + 1)));
+	ct = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), ((size_t)dm->nc + 1)));
+	ct2 = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), ((size_t)dm->nc + 1)));
 	fix = (unsigned char*)qaws_internal_malloc((size_t)nv + 1);
-	cone = (unsigned char*)qaws_internal_malloc((size_t)nv + 1);
-	fix2 = (unsigned char*)qaws_internal_malloc((size_t)nv + 1);
-	cone2 = (unsigned char*)qaws_internal_malloc((size_t)nv + 1);
-	d = (double*)qaws_internal_malloc(sizeof(double) * (2 * (size_t)nv + 2));
-	d2 = (double*)qaws_internal_malloc(sizeof(double) * (2 * (size_t)nv + 2));
+	cone = (unsigned char*)qaws_internal_scratch_malloc((size_t)nv + 1);
+	fix2 = (unsigned char*)qaws_internal_scratch_malloc((size_t)nv + 1);
+	cone2 = (unsigned char*)qaws_internal_scratch_malloc((size_t)nv + 1);
+	d = (double*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(double), (2 * (size_t)nv + 2)));
+	d2 = (double*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(double), (2 * (size_t)nv + 2)));
 	info.fbad = (unsigned char*)qaws_internal_malloc((size_t)nf + 1);
 	info.sR = (signed char*)qaws_internal_malloc((size_t)nv + 1);
 	info.sbad = (unsigned char*)qaws_internal_malloc((size_t)nv + 1);
-	Tw = (int*)qaws_internal_malloc(sizeof(int) * (2 * (size_t)dm->nc + 2));
-	nodeof = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)nf + 1));
-	par = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)nf + 1));
-	own = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)nf + 1));
-	queue = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)nf + 1));
-	faces = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)nf + 1));
-	vis = (unsigned char*)qaws_internal_zalloc((size_t)nf + 1, 1);
-	dep = (unsigned int*)qaws_internal_zalloc((size_t)nf + 1, sizeof(unsigned int));
-	star = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)nv + 1));
+	Tw = (int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(int), (2 * (size_t)dm->nc + 2)));
+	nodeof = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), ((size_t)nf + 1)));
+	par = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), ((size_t)nf + 1)));
+	own = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), ((size_t)nf + 1)));
+	queue = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), ((size_t)nf + 1)));
+	faces = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), ((size_t)nf + 1)));
+	vis = (unsigned char*)qaws_internal_scratch_zalloc((size_t)nf + 1, 1);
+	dep = (unsigned int*)qaws_internal_scratch_zalloc((size_t)nf + 1, sizeof(unsigned int));
+	star = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), ((size_t)nv + 1)));
 	if (!c.tri || !c2.tri || !ct || !ct2 || !fix || !cone || !fix2 || !cone2 || !d || !d2 || !info.fbad || !info.sR || !info.sbad || !Tw || !nodeof || !par
 		|| !own || !queue || !faces || !vis || !star || !dep)
 		goto done;
@@ -1784,7 +1784,7 @@ static qaws_status qg_quantize(qaws_hm const* dm, mf_level const* L, double rho,
 		goto done;
 	st = QAWS_STATUS_ALLOCATION_FAILURE;
 	node = (qg_node*)qaws_internal_zalloc(nn, sizeof(qg_node));
-	order = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * nn);
+	order = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), nn));
 	if (!node || !order)
 		goto done;
 	for (i = 0; i < nn; i++)
@@ -1879,8 +1879,8 @@ static qaws_status qg_quantize(qaws_hm const* dm, mf_level const* L, double rho,
 		qg_uv(&c.tri[i], d);
 	/* the unknowns and the translations each changes */
 	st = QAWS_STATUS_ALLOCATION_FAILURE;
-	var = (qg_var*)qaws_internal_malloc(sizeof(qg_var) * (4 * (size_t)nn + 1));
-	at = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)c.nt + 1));
+	var = (qg_var*)qaws_internal_malloc(qaws_internal_mul2(sizeof(qg_var), (4 * (size_t)nn + 1)));
+	at = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), ((size_t)c.nt + 1)));
 	if (!var || !at)
 		goto done;
 	for (i = 0; i < c.nt; i++)
@@ -1949,9 +1949,9 @@ static qaws_status qg_quantize(qaws_hm const* dm, mf_level const* L, double rho,
 					continue;
 				if (nl == capl)
 				{
-					unsigned int nc2 = 2 * capl + 256;
-					int (*ndt)[6] = (int (*)[6])qaws_internal_realloc(dt, sizeof(int) * 6 * nc2);
-					unsigned int* nlt = ndt ? (unsigned int*)qaws_internal_realloc(lt, sizeof(unsigned int) * nc2) : NULL;
+					unsigned int nc2 = qaws_internal_grow(capl, (size_t)nl + 1, 256);
+					int (*ndt)[6] = nc2 ? (int (*)[6])qaws_internal_realloc(dt, qaws_internal_mul3(sizeof(int), 6, nc2)) : NULL;
+					unsigned int* nlt = ndt ? (unsigned int*)qaws_internal_realloc(lt, qaws_internal_mul2(sizeof(unsigned int), nc2)) : NULL;
 					if (ndt)
 						dt = ndt;
 					if (!nlt)
@@ -1971,15 +1971,15 @@ static qaws_status qg_quantize(qaws_hm const* dm, mf_level const* L, double rho,
 		goto done;
 	/* E(z): per unknown its places' response (one solve on the factor), Q's column; g */
 	st = QAWS_STATUS_ALLOCATION_FAILURE;
-	D = (double*)qaws_internal_malloc(sizeof(double) * (2 * (size_t)nv + 2));
-	rhs = (double*)qaws_internal_malloc(sizeof(double) * (2 * (size_t)nv + 2));
-	Q = (double*)qaws_internal_zalloc((size_t)nz * nz, sizeof(double));
-	A = (double*)qaws_internal_malloc(sizeof(double) * (size_t)nz * nz);
-	g = (double*)qaws_internal_zalloc(nz, sizeof(double));
-	z = (double*)qaws_internal_zalloc(nz, sizeof(double));
-	b = (double*)qaws_internal_malloc(sizeof(double) * nz);
-	fixed = (unsigned char*)qaws_internal_zalloc(nz, 1);
-	fr = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * nz);
+	D = (double*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(double), (2 * (size_t)nv + 2)));
+	rhs = (double*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(double), (2 * (size_t)nv + 2)));
+	Q = (double*)qaws_internal_scratch_zalloc(qaws_internal_mul2((size_t)nz, nz), sizeof(double));
+	A = (double*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(double), (size_t)nz, nz));
+	g = (double*)qaws_internal_scratch_zalloc(nz, sizeof(double));
+	z = (double*)qaws_internal_scratch_zalloc(nz, sizeof(double));
+	b = (double*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(double), nz));
+	fixed = (unsigned char*)qaws_internal_scratch_zalloc(nz, 1);
+	fr = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), nz));
 	if (!D || !rhs || !Q || !A || !g || !z || !b || !fixed || !fr)
 		goto done;
 	for (i = 0; i < nz; i++)
@@ -2156,8 +2156,8 @@ done:
 
 qaws_status qg_quads(qaws_hm const* dm, mf_level const* L, double rho, int const* T0, unsigned char const* K0, qd_out* o, qg_map* map)
 {
-	int *T = (int*)qaws_internal_malloc(sizeof(int) * (2 * (size_t)dm->nc + 2)), *Tq = (int*)qaws_internal_malloc(sizeof(int) * (2 * (size_t)dm->nc + 2));
-	unsigned char* K = (unsigned char*)qaws_internal_malloc((size_t)dm->nc + 1);
+	int *T = (int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(int), (2 * (size_t)dm->nc + 2))), *Tq = (int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(int), (2 * (size_t)dm->nc + 2)));
+	unsigned char* K = (unsigned char*)qaws_internal_scratch_malloc((size_t)dm->nc + 1);
 	qaws_status st = QAWS_STATUS_ALLOCATION_FAILURE;
 	memset(o, 0, sizeof *o);
 	if (!T || !Tq || !K)

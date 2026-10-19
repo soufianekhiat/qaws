@@ -759,7 +759,7 @@ qaws_status qaws_surface_create_gordon_ex(
 		&gordon_surface_vtable, allocator);
 	if (!surface) return QAWS_STATUS_ALLOCATION_FAILURE;
 
-	impl = (qaws_surface_gordon_impl*)qaws_internal_alloc(allocator, (unsigned long)(sizeof(qaws_surface_gordon_impl)));
+	impl = (qaws_surface_gordon_impl*)qaws_internal_alloc(allocator, sizeof(qaws_surface_gordon_impl));
 	if (!impl)
 	{
 		qaws_internal_surface_free(surface);
@@ -771,33 +771,33 @@ qaws_status qaws_surface_create_gordon_ex(
 	impl->v_curve_count = N;
 
 	/* Copy u_curves array */
-	impl->u_curves = (qaws_curve const**)qaws_internal_alloc(allocator, (unsigned long)(M * sizeof(qaws_curve const*)));
+	impl->u_curves = (qaws_curve const**)qaws_internal_alloc(allocator, qaws_internal_mul2(M, sizeof(qaws_curve const*)));
 	if (!impl->u_curves) goto fail;
 	memcpy(impl->u_curves, desc->u_curves, M * sizeof(qaws_curve const*));
 
 	/* Copy v_params */
-	impl->v_params = (qaws_scalar*)qaws_internal_alloc(allocator, (unsigned long)(M * sizeof(qaws_scalar)));
+	impl->v_params = (qaws_scalar*)qaws_internal_alloc(allocator, qaws_internal_mul2(M, sizeof(qaws_scalar)));
 	if (!impl->v_params) goto fail;
 	memcpy(impl->v_params, desc->v_params, M * sizeof(qaws_scalar));
 
 	/* Cache u-curve parameter ranges */
-	impl->u_curve_ranges = (qaws_range*)qaws_internal_alloc(allocator, (unsigned long)(M * sizeof(qaws_range)));
+	impl->u_curve_ranges = (qaws_range*)qaws_internal_alloc(allocator, qaws_internal_mul2(M, sizeof(qaws_range)));
 	if (!impl->u_curve_ranges) goto fail;
 	for (i = 0; i < M; i++)
 		impl->u_curve_ranges[i] = qaws_curve_get_parameter_range(desc->u_curves[i]);
 
 	/* Copy v_curves array */
-	impl->v_curves = (qaws_curve const**)qaws_internal_alloc(allocator, (unsigned long)(N * sizeof(qaws_curve const*)));
+	impl->v_curves = (qaws_curve const**)qaws_internal_alloc(allocator, qaws_internal_mul2(N, sizeof(qaws_curve const*)));
 	if (!impl->v_curves) goto fail;
 	memcpy(impl->v_curves, desc->v_curves, N * sizeof(qaws_curve const*));
 
 	/* Copy u_params */
-	impl->u_params = (qaws_scalar*)qaws_internal_alloc(allocator, (unsigned long)(N * sizeof(qaws_scalar)));
+	impl->u_params = (qaws_scalar*)qaws_internal_alloc(allocator, qaws_internal_mul2(N, sizeof(qaws_scalar)));
 	if (!impl->u_params) goto fail;
 	memcpy(impl->u_params, desc->u_params, N * sizeof(qaws_scalar));
 
 	/* Cache v-curve parameter ranges */
-	impl->v_curve_ranges = (qaws_range*)qaws_internal_alloc(allocator, (unsigned long)(N * sizeof(qaws_range)));
+	impl->v_curve_ranges = (qaws_range*)qaws_internal_alloc(allocator, qaws_internal_mul2(N, sizeof(qaws_range)));
 	if (!impl->v_curve_ranges) goto fail;
 	for (i = 0; i < N; i++)
 		impl->v_curve_ranges[i] = qaws_curve_get_parameter_range(desc->v_curves[i]);
@@ -806,7 +806,7 @@ qaws_status qaws_surface_create_gordon_ex(
 	   Q[i][j] = u_curve[i] evaluated at the u-parameter corresponding to u_params[j].
 	   u_curve[i] runs along u, so evaluate at:
 	     t = range.min + u_params[j] * (range.max - range.min) */
-	impl->Q = (qaws_vec3*)qaws_internal_alloc(allocator, (unsigned long)(M * N * sizeof(qaws_vec3)));
+	impl->Q = (qaws_vec3*)qaws_internal_alloc(allocator, qaws_internal_mul3(M, N, sizeof(qaws_vec3)));
 	if (!impl->Q) goto fail;
 
 	for (i = 0; i < M; i++)

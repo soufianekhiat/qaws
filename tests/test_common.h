@@ -10,6 +10,7 @@
 
 #include "qaws.h"
 #include <stdio.h>
+#include <float.h>
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -49,6 +50,10 @@ static int g_fail = 0;
 #define TOLERANCE 1e-8
 #define TOLERANCE_LOOSE 1e-4
 #endif
+
+/* the scalar's machine epsilon: bounds that come from rounding (host data converted to the scalar, sums of n terms) scale
+   with it, bounds that come from truncation (difference steps, sampling) do not */
+#define TEST_EPS (sizeof(qaws_scalar) == sizeof(double) ? DBL_EPSILON : (double)FLT_EPSILON)
 
 static int approx_eq_loose(qaws_scalar a, qaws_scalar b)
 {

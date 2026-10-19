@@ -46,8 +46,8 @@ static void o64_push(o64_ctx* c, int64_t x, int64_t y)
 	o64_path* p = &c->out;
 	if (p->n == p->cap)
 	{
-		unsigned int nc = p->cap ? 2 * p->cap : 64;
-		int64_t* g = (int64_t*)qaws_internal_realloc(p->p, sizeof(int64_t) * 2 * nc);
+		unsigned int nc = qaws_internal_grow(p->cap, (size_t)p->n + 1, 64);
+		int64_t* g = nc ? (int64_t*)qaws_internal_realloc(p->p, qaws_internal_mul3(sizeof(int64_t), 2, nc)) : NULL;
 		if (!g) { c->failed = 1; return; }
 		p->p = g;
 		p->cap = nc;
@@ -67,8 +67,8 @@ static void o64_emit(o64_ctx* c)
 {
 	if (c->nsol == c->capsol)
 	{
-		unsigned int nc = c->capsol ? 2 * c->capsol : 16;
-		o64_path* g = (o64_path*)qaws_internal_realloc(c->sol, sizeof(o64_path) * nc);
+		unsigned int nc = qaws_internal_grow(c->capsol, (size_t)c->nsol + 1, 16);
+		o64_path* g = nc ? (o64_path*)qaws_internal_realloc(c->sol, qaws_internal_mul2(sizeof(o64_path), nc)) : NULL;
 		if (!g) { c->failed = 1; return; }
 		c->sol = g;
 		c->capsol = nc;
@@ -120,7 +120,7 @@ static void o64_build_normals(o64_ctx* c, int64_t const* p, unsigned int n)
 	unsigned int i;
 	if (n > c->capnorms)
 	{
-		o64_pt* g = (o64_pt*)qaws_internal_realloc(c->norms, sizeof(o64_pt) * n);
+		o64_pt* g = (o64_pt*)qaws_internal_realloc(c->norms, qaws_internal_mul2(sizeof(o64_pt), n));
 		if (!g) { c->failed = 1; return; }
 		c->norms = g;
 		c->capnorms = n;
@@ -263,14 +263,14 @@ static void o64_offset_polygon(o64_ctx* c, int64_t const* p, unsigned int n)
 
 static void o64_offset_open_joined(o64_ctx* c, int64_t const* p, unsigned int n)
 {
-	int64_t* r = (int64_t*)qaws_internal_malloc(sizeof(int64_t) * 2 * n);
+	int64_t* r = (int64_t*)qaws_internal_malloc(qaws_internal_mul3(sizeof(int64_t), 2, n));
 	unsigned int i;
 	o64_offset_polygon(c, p, n);
 	if (!r) { c->failed = 1; return; }
 	for (i = 0; i < n; i++) { r[2 * i] = p[2 * (n - 1 - i)]; r[2 * i + 1] = p[2 * (n - 1 - i) + 1]; }
 	/* the normals reversed, rotated by one, negated */
 	{
-		o64_pt* tmp = (o64_pt*)qaws_internal_malloc(sizeof(o64_pt) * n);
+		o64_pt* tmp = (o64_pt*)qaws_internal_malloc(qaws_internal_mul2(sizeof(o64_pt), n));
 		if (!tmp) { qaws_internal_free(r); c->failed = 1; return; }
 		for (i = 0; i < n; i++) tmp[i] = c->norms[n - 1 - i];
 		for (i = 0; i < n; i++) { c->norms[i].x = -tmp[(i + 1) % n].x; c->norms[i].y = -tmp[(i + 1) % n].y; }
@@ -352,7 +352,7 @@ qaws_status qaws_offset64_execute(qaws_offset64_desc const* d, qaws_clip64_resul
 		/* strip, and find the lowest closed path (its orientation decides) */
 		for (i = 0; i < gr->path_count; i++, total++)
 		{
-			stripped[total] = (int64_t*)qaws_internal_malloc(sizeof(int64_t) * 2 * (gr->paths[i].point_count + 1));
+			stripped[total] = (int64_t*)qaws_internal_malloc(qaws_internal_mul3(sizeof(int64_t), 2, (gr->paths[i].point_count + 1)));
 			if (!stripped[total]) { c.failed = 1; break; }
 			slen[total] = o64_strip(gr->paths[i].points, gr->paths[i].point_count, joined, stripped[total]);
 		}
@@ -469,7 +469,7 @@ qaws_status qaws_offset64_execute(qaws_offset64_desc const* d, qaws_clip64_resul
 	{
 		/* the clean-up: one exact union, positive (negative when reversed),
 		   keeping the input's orientation */
-		qaws_path64* paths = (qaws_path64*)qaws_internal_malloc(sizeof(qaws_path64) * (c.nsol + 1));
+		qaws_path64* paths = (qaws_path64*)qaws_internal_malloc(qaws_internal_mul2(sizeof(qaws_path64), (c.nsol + 1)));
 		qaws_clip64_desc cd;
 		if (!paths) st = QAWS_STATUS_ALLOCATION_FAILURE;
 		else

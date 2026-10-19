@@ -27,7 +27,7 @@ static int adaptive_buf_2d_push(struct adaptive_buf_2d *buf, qaws_vec2 pt)
 	{
 		unsigned int new_cap = buf->capacity * 2;
 		qaws_vec2 *new_ptr = (qaws_vec2 *)qaws_internal_realloc(
-			buf->points, new_cap * sizeof(qaws_vec2));
+			buf->points, qaws_internal_mul2(new_cap, sizeof(qaws_vec2)));
 		if (!new_ptr)
 			return 0;
 		buf->points = new_ptr;
@@ -106,7 +106,7 @@ static int adaptive_buf_3d_push(struct adaptive_buf_3d *buf, qaws_vec3 pt)
 	{
 		unsigned int new_cap = buf->capacity * 2;
 		qaws_vec3 *new_ptr = (qaws_vec3 *)qaws_internal_realloc(
-			buf->points, new_cap * sizeof(qaws_vec3));
+			buf->points, qaws_internal_mul2(new_cap, sizeof(qaws_vec3)));
 		if (!new_ptr)
 			return 0;
 		buf->points = new_ptr;
@@ -204,7 +204,7 @@ static qaws_status adaptive_sample_2d(
 
 	buf.capacity = initial_count * 4;
 	buf.count = 0;
-	buf.points = (qaws_vec2 *)qaws_internal_malloc(buf.capacity * sizeof(qaws_vec2));
+	buf.points = (qaws_vec2 *)qaws_internal_malloc(qaws_internal_mul2(buf.capacity, sizeof(qaws_vec2)));
 	if (!buf.points)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 
@@ -297,7 +297,7 @@ static qaws_status adaptive_sample_3d(
 
 	buf.capacity = initial_count * 4;
 	buf.count = 0;
-	buf.points = (qaws_vec3 *)qaws_internal_malloc(buf.capacity * sizeof(qaws_vec3));
+	buf.points = (qaws_vec3 *)qaws_internal_malloc(qaws_internal_mul2(buf.capacity, sizeof(qaws_vec3)));
 	if (!buf.points)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 
@@ -376,7 +376,7 @@ static int adaptive_eval_buf_2d_push(struct adaptive_eval_buf_2d *buf,
 	{
 		unsigned int new_cap = buf->capacity * 2;
 		qaws_eval_result_2d *new_ptr = (qaws_eval_result_2d *)qaws_internal_realloc(
-			buf->samples, new_cap * sizeof(qaws_eval_result_2d));
+			buf->samples, qaws_internal_mul2(new_cap, sizeof(qaws_eval_result_2d)));
 		if (!new_ptr)
 			return 0;
 		buf->samples = new_ptr;
@@ -469,7 +469,7 @@ static int adaptive_eval_buf_3d_push(struct adaptive_eval_buf_3d *buf,
 	{
 		unsigned int new_cap = buf->capacity * 2;
 		qaws_eval_result_3d *new_ptr = (qaws_eval_result_3d *)qaws_internal_realloc(
-			buf->samples, new_cap * sizeof(qaws_eval_result_3d));
+			buf->samples, qaws_internal_mul2(new_cap, sizeof(qaws_eval_result_3d)));
 		if (!new_ptr)
 			return 0;
 		buf->samples = new_ptr;
@@ -585,7 +585,7 @@ static qaws_status adaptive_sample_eval_2d(
 	buf.capacity = initial_count * 4;
 	buf.count = 0;
 	buf.samples = (qaws_eval_result_2d *)qaws_internal_malloc(
-		buf.capacity * sizeof(qaws_eval_result_2d));
+		qaws_internal_mul2(buf.capacity, sizeof(qaws_eval_result_2d)));
 	if (!buf.samples)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 
@@ -683,7 +683,7 @@ static qaws_status adaptive_sample_eval_3d(
 	buf.capacity = initial_count * 4;
 	buf.count = 0;
 	buf.samples = (qaws_eval_result_3d *)qaws_internal_malloc(
-		buf.capacity * sizeof(qaws_eval_result_3d));
+		qaws_internal_mul2(buf.capacity, sizeof(qaws_eval_result_3d)));
 	if (!buf.samples)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 
@@ -807,11 +807,11 @@ qaws_status qaws_curve_sample_2d(
 		qaws_scalar target_dist;
 		qaws_scalar param;
 
-		table_params = (qaws_scalar *)qaws_internal_malloc(table_size * sizeof(qaws_scalar));
+		table_params = (qaws_scalar *)qaws_internal_scratch_malloc(qaws_internal_mul2(table_size, sizeof(qaws_scalar)));
 		if (!table_params)
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 
-		table_distances = (qaws_scalar *)qaws_internal_malloc(table_size * sizeof(qaws_scalar));
+		table_distances = (qaws_scalar *)qaws_internal_scratch_malloc(qaws_internal_mul2(table_size, sizeof(qaws_scalar)));
 		if (!table_distances)
 		{
 			qaws_internal_free(table_params);
@@ -923,11 +923,11 @@ qaws_status qaws_curve_sample_3d(
 		qaws_scalar target_dist;
 		qaws_scalar param;
 
-		table_params = (qaws_scalar *)qaws_internal_malloc(table_size * sizeof(qaws_scalar));
+		table_params = (qaws_scalar *)qaws_internal_scratch_malloc(qaws_internal_mul2(table_size, sizeof(qaws_scalar)));
 		if (!table_params)
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 
-		table_distances = (qaws_scalar *)qaws_internal_malloc(table_size * sizeof(qaws_scalar));
+		table_distances = (qaws_scalar *)qaws_internal_scratch_malloc(qaws_internal_mul2(table_size, sizeof(qaws_scalar)));
 		if (!table_distances)
 		{
 			qaws_internal_free(table_params);
@@ -1042,11 +1042,11 @@ qaws_status qaws_curve_sample_eval_2d(
 		qaws_scalar target_dist;
 		qaws_scalar param;
 
-		table_params = (qaws_scalar *)qaws_internal_malloc(table_size * sizeof(qaws_scalar));
+		table_params = (qaws_scalar *)qaws_internal_scratch_malloc(qaws_internal_mul2(table_size, sizeof(qaws_scalar)));
 		if (!table_params)
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 
-		table_distances = (qaws_scalar *)qaws_internal_malloc(table_size * sizeof(qaws_scalar));
+		table_distances = (qaws_scalar *)qaws_internal_scratch_malloc(qaws_internal_mul2(table_size, sizeof(qaws_scalar)));
 		if (!table_distances)
 		{
 			qaws_internal_free(table_params);
@@ -1157,11 +1157,11 @@ qaws_status qaws_curve_sample_eval_3d(
 		qaws_scalar target_dist;
 		qaws_scalar param;
 
-		table_params = (qaws_scalar *)qaws_internal_malloc(table_size * sizeof(qaws_scalar));
+		table_params = (qaws_scalar *)qaws_internal_scratch_malloc(qaws_internal_mul2(table_size, sizeof(qaws_scalar)));
 		if (!table_params)
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 
-		table_distances = (qaws_scalar *)qaws_internal_malloc(table_size * sizeof(qaws_scalar));
+		table_distances = (qaws_scalar *)qaws_internal_scratch_malloc(qaws_internal_mul2(table_size, sizeof(qaws_scalar)));
 		if (!table_distances)
 		{
 			qaws_internal_free(table_params);
@@ -1269,18 +1269,18 @@ qaws_status qaws_curve_sample_curvature_weighted_2d(
 	range_max = curve->parameter_range.max_value;
 	epsilon = (qaws_scalar)1e-6;
 
-	t_table = (qaws_scalar *)qaws_internal_malloc(n * sizeof(qaws_scalar));
+	t_table = (qaws_scalar *)qaws_internal_scratch_malloc(qaws_internal_mul2(n, sizeof(qaws_scalar)));
 	if (!t_table)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 
-	curv_table = (qaws_scalar *)qaws_internal_malloc(n * sizeof(qaws_scalar));
+	curv_table = (qaws_scalar *)qaws_internal_scratch_malloc(qaws_internal_mul2(n, sizeof(qaws_scalar)));
 	if (!curv_table)
 	{
 		qaws_internal_free(t_table);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 
-	cum_weight = (qaws_scalar *)qaws_internal_malloc(n * sizeof(qaws_scalar));
+	cum_weight = (qaws_scalar *)qaws_internal_scratch_malloc(qaws_internal_mul2(n, sizeof(qaws_scalar)));
 	if (!cum_weight)
 	{
 		qaws_internal_free(t_table);
@@ -1417,18 +1417,18 @@ qaws_status qaws_curve_sample_curvature_weighted_3d(
 	range_max = curve->parameter_range.max_value;
 	epsilon = (qaws_scalar)1e-6;
 
-	t_table = (qaws_scalar *)qaws_internal_malloc(n * sizeof(qaws_scalar));
+	t_table = (qaws_scalar *)qaws_internal_scratch_malloc(qaws_internal_mul2(n, sizeof(qaws_scalar)));
 	if (!t_table)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 
-	curv_table = (qaws_scalar *)qaws_internal_malloc(n * sizeof(qaws_scalar));
+	curv_table = (qaws_scalar *)qaws_internal_scratch_malloc(qaws_internal_mul2(n, sizeof(qaws_scalar)));
 	if (!curv_table)
 	{
 		qaws_internal_free(t_table);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 
-	cum_weight = (qaws_scalar *)qaws_internal_malloc(n * sizeof(qaws_scalar));
+	cum_weight = (qaws_scalar *)qaws_internal_scratch_malloc(qaws_internal_mul2(n, sizeof(qaws_scalar)));
 	if (!cum_weight)
 	{
 		qaws_internal_free(t_table);
@@ -1606,7 +1606,7 @@ qaws_status qaws_curve_sample_feature_preserving_2d(
 		+ FEATURE_MAX_INFLECTIONS
 		+ FEATURE_MAX_EXTREMA_PER_AXIS * 2;
 
-	params = (qaws_scalar *)qaws_internal_malloc(max_params * sizeof(qaws_scalar));
+	params = (qaws_scalar *)qaws_internal_scratch_malloc(qaws_internal_mul2(max_params, sizeof(qaws_scalar)));
 	if (!params)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 
@@ -1718,7 +1718,7 @@ qaws_status qaws_curve_sample_feature_preserving_3d(
 		+ FEATURE_MAX_INFLECTIONS
 		+ FEATURE_MAX_EXTREMA_PER_AXIS * 3;
 
-	params = (qaws_scalar *)qaws_internal_malloc(max_params * sizeof(qaws_scalar));
+	params = (qaws_scalar *)qaws_internal_scratch_malloc(qaws_internal_mul2(max_params, sizeof(qaws_scalar)));
 	if (!params)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 
@@ -1828,11 +1828,11 @@ qaws_status qaws_curve_sample_streaming_2d(
 		qaws_scalar target_dist;
 		qaws_scalar param;
 
-		table_params = (qaws_scalar *)qaws_internal_malloc(table_size * sizeof(qaws_scalar));
+		table_params = (qaws_scalar *)qaws_internal_scratch_malloc(qaws_internal_mul2(table_size, sizeof(qaws_scalar)));
 		if (!table_params)
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 
-		table_distances = (qaws_scalar *)qaws_internal_malloc(table_size * sizeof(qaws_scalar));
+		table_distances = (qaws_scalar *)qaws_internal_scratch_malloc(qaws_internal_mul2(table_size, sizeof(qaws_scalar)));
 		if (!table_distances)
 		{
 			qaws_internal_free(table_params);
@@ -1937,11 +1937,11 @@ qaws_status qaws_curve_sample_streaming_3d(
 		qaws_scalar target_dist;
 		qaws_scalar param;
 
-		table_params = (qaws_scalar *)qaws_internal_malloc(table_size * sizeof(qaws_scalar));
+		table_params = (qaws_scalar *)qaws_internal_scratch_malloc(qaws_internal_mul2(table_size, sizeof(qaws_scalar)));
 		if (!table_params)
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 
-		table_distances = (qaws_scalar *)qaws_internal_malloc(table_size * sizeof(qaws_scalar));
+		table_distances = (qaws_scalar *)qaws_internal_scratch_malloc(qaws_internal_mul2(table_size, sizeof(qaws_scalar)));
 		if (!table_distances)
 		{
 			qaws_internal_free(table_params);

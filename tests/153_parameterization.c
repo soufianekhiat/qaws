@@ -15,6 +15,8 @@
 #include <string.h>
 
 #define PZ_M 9
+/* float: eps |P| / h ~ 6e-5 per difference, times the collocation condition */
+#define PZ_F32_TANGENT 2e-3
 
 static double const pz_x[PZ_M] = { 0, 0.2, 0.3, 1.5, 3.0, 3.1, 3.3, 5.0, 5.4 };
 
@@ -89,7 +91,9 @@ static void test_parameterizations(void)
 		double own = c ? pz_miss(c, p, t[k]) : 1, other = c ? pz_miss(c, p, t[(k + 1) % 3]) : 0;
 		snprintf(msg, sizeof msg, "%s: through the points at its parameters (%.1e), not at %s ones (%.2f)", names[k], own, names[(k + 1) % 3], other);
 		printf("  %s\n", msg);
-		TEST_ASSERT(c && own <= 1e-10 && other > 1e-3, msg);
+		/* (an interpolating fit solves the collocation system: its rounding is the system's condition, a few tens here, times
+		   eps times the data's size, 5) */
+		TEST_ASSERT(c && own <= fmax(1e-10, 64 * TEST_EPS * 5) && other > 1e-3, msg);
 		qaws_curve_destroy(c);
 	}
 }
@@ -137,7 +141,7 @@ static void test_interpolation_map(void)
 {
 	qaws_vec2 p[PZ_M];
 	double dir[PZ_M * 2], worst = 0;
-	qaws_scalar tq[PZ_M * 2], tk[PZ_M + 4], qp[PZ_M * 2], qm[PZ_M * 2];
+	qaws_scalar tq[PZ_M * 2], tk[PZ_M + 4], qp[PZ_M * 2], qm[PZ_M * 2], qp2[PZ_M * 2], qm2[PZ_M * 2];
 	qaws_field_view in_f, out_f[2];
 	qaws_diff_views in_v, out_v;
 	qaws_diff_views const* ins[1];
@@ -166,16 +170,31 @@ static void test_interpolation_map(void)
 		ins[0] = &in_v;
 		outs[0] = &out_v;
 		TEST_ASSERT(qaws_diff_map_tangent(map, NULL, ins, 1, outs, 1) == QAWS_STATUS_OK, "its tangent");
-		pz_fit_at(p, dir, 1e-6, param, qp);
-		pz_fit_at(p, dir, -1e-6, param, qm);
-		for (i = 0; i < PZ_M * 2; i++)
-			worst = fmax(worst, fabs(tq[i] - ((double)qp[i] - qm[i]) / 2e-6) / (1 + fabs((double)tq[i])));
+		/* double: central differences with h = 1e-6. float: rounding eps |P| / h rules, so fourth-order differences
+		   (truncation h^4) with h = 0.01, a tenth of the shortest chord so the centripetal square roots stay smooth */
+		if (sizeof(qaws_scalar) == sizeof(double))
+		{
+			pz_fit_at(p, dir, 1e-6, param, qp);
+			pz_fit_at(p, dir, -1e-6, param, qm);
+			for (i = 0; i < PZ_M * 2; i++)
+				worst = fmax(worst, fabs(tq[i] - ((double)qp[i] - qm[i]) / 2e-6) / (1 + fabs((double)tq[i])));
+		}
+		else
+		{
+			double const h = 0.01;
+			pz_fit_at(p, dir, h, param, qp);
+			pz_fit_at(p, dir, -h, param, qm);
+			pz_fit_at(p, dir, 2 * h, param, qp2);
+			pz_fit_at(p, dir, -2 * h, param, qm2);
+			for (i = 0; i < PZ_M * 2; i++)
+				worst = fmax(worst, fabs(tq[i] - (8 * ((double)qp[i] - qm[i]) - ((double)qp2[i] - qm2[i])) / (12 * h)) / (1 + fabs((double)tq[i])));
+		}
 		qaws_diff_map_destroy(map);
 		qaws_curve_destroy(c);
 	}
 	snprintf(msg, sizeof msg, "interpolating fits, chordal and centripetal: the map's tangent = differences of the fit (%.1e)", worst);
 	printf("  %s\n", msg);
-	TEST_ASSERT(worst <= 1e-6, msg);
+	TEST_ASSERT(worst <= (sizeof(qaws_scalar) == sizeof(double) ? 1e-6 : PZ_F32_TANGENT), msg);
 }
 
 int test_153_parameterization_main(void)

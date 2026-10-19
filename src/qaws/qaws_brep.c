@@ -68,7 +68,7 @@ static int brep_grow_vertices(qaws_brep_shell* shell)
 		? BREP_INITIAL_CAPACITY
 		: shell->vertex_capacity * 2;
 	new_buf = (brep_vertex*)qaws_internal_realloc(
-		shell->vertices, new_cap * sizeof(brep_vertex));
+		shell->vertices, qaws_internal_mul2(new_cap, sizeof(brep_vertex)));
 	if (!new_buf)
 		return 0;
 
@@ -89,7 +89,7 @@ static int brep_grow_edges(qaws_brep_shell* shell)
 		? BREP_INITIAL_CAPACITY
 		: shell->edge_capacity * 2;
 	new_buf = (brep_edge*)qaws_internal_realloc(
-		shell->edges, new_cap * sizeof(brep_edge));
+		shell->edges, qaws_internal_mul2(new_cap, sizeof(brep_edge)));
 	if (!new_buf)
 		return 0;
 
@@ -110,7 +110,7 @@ static int brep_grow_faces(qaws_brep_shell* shell)
 		? BREP_INITIAL_CAPACITY
 		: shell->face_capacity * 2;
 	new_buf = (brep_face*)qaws_internal_realloc(
-		shell->faces, new_cap * sizeof(brep_face));
+		shell->faces, qaws_internal_mul2(new_cap, sizeof(brep_face)));
 	if (!new_buf)
 		return 0;
 
@@ -260,9 +260,9 @@ qaws_status qaws_brep_add_face(
 
 	if (edge_count > 0) {
 		f->edge_ids = (qaws_brep_edge_id*)qaws_internal_malloc(
-			edge_count * sizeof(qaws_brep_edge_id));
+			qaws_internal_mul2(edge_count, sizeof(qaws_brep_edge_id)));
 		f->edge_orientations = (int*)qaws_internal_malloc(
-			edge_count * sizeof(int));
+			qaws_internal_mul2(edge_count, sizeof(int)));
 		if (!f->edge_ids || !f->edge_orientations) {
 			qaws_internal_free(f->edge_ids);
 			qaws_internal_free(f->edge_orientations);

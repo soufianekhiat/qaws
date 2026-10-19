@@ -56,7 +56,7 @@ qaws_status qaws_polyline_import_trajectory(
 		times = times_stack;
 	else
 	{
-		times = (qaws_scalar*)qaws_internal_malloc(point_count * sizeof(qaws_scalar));
+		times = (qaws_scalar*)qaws_internal_malloc(qaws_internal_mul2(point_count, sizeof(qaws_scalar)));
 		if (!times)
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 	}

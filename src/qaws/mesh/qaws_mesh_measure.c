@@ -580,8 +580,8 @@ static unsigned int ms_point_add(ms_side* q, double const* y, int project, unsig
 	double best = HUGE_VAL;
 	if (q->np == q->cap)
 	{
-		unsigned int cap = q->cap ? 2 * q->cap : 1024;
-		ms_point* g = (ms_point*)qaws_internal_realloc(q->pt, sizeof(ms_point) * cap);
+		unsigned int cap = qaws_internal_grow(q->cap, (size_t)q->np + 1, 1024);
+		ms_point* g = cap ? (ms_point*)qaws_internal_realloc(q->pt, qaws_internal_mul2(sizeof(ms_point), cap)) : NULL;
 		if (!g)
 		{
 			q->failed = 1;
@@ -1085,8 +1085,8 @@ static int ms_push(ms_side* q, ms_tri const* T)
 	unsigned int i;
 	if (q->nh == q->caph)
 	{
-		unsigned int cap = q->caph ? 2 * q->caph : 1024;
-		ms_tri* g = (ms_tri*)qaws_internal_realloc(q->heap, sizeof(ms_tri) * cap);
+		unsigned int cap = qaws_internal_grow(q->caph, (size_t)q->nh + 1, 1024);
+		ms_tri* g = cap ? (ms_tri*)qaws_internal_realloc(q->heap, qaws_internal_mul2(sizeof(ms_tri), cap)) : NULL;
 		if (!g)
 		{
 			q->failed = 1;

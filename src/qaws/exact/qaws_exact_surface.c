@@ -63,8 +63,8 @@ static qaws_status extract_patch(qaws_exact_hfrac const* net, unsigned int ncv, 
 	qaws_exact_hfrac* out = NULL;
 	unsigned int a, b, i, j;
 	qaws_status st = QAWS_STATUS_OK;
-	rowsrc = (qaws_exact_hfrac*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_exact_hfrac) * (p + 1) * (q + 1)));
-	out = (qaws_exact_hfrac*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_exact_hfrac) * (p + 1) * (q + 1)));
+	rowsrc = (qaws_exact_hfrac*)qaws_internal_alloc(NULL, qaws_internal_mul3(sizeof(qaws_exact_hfrac), (p + 1), (q + 1)));
+	out = (qaws_exact_hfrac*)qaws_internal_alloc(NULL, qaws_internal_mul3(sizeof(qaws_exact_hfrac), (p + 1), (q + 1)));
 	if (!rowsrc || !out)
 		st = QAWS_STATUS_ALLOCATION_FAILURE;
 	/* u pass on the q + 1 columns the v span touches */
@@ -161,7 +161,7 @@ qaws_status qaws_exact_surface_prepare(qaws_exact_desc const* desc, qaws_surface
 			return QAWS_STATUS_EXACT_UNSUPPORTED;
 		for (i = 0; i < nkv; i++) kvd[i] = (double)kn[i];
 	}
-	es = (qaws_exact_surface*)qaws_internal_alloc(NULL, (unsigned long)sizeof(qaws_exact_surface));
+	es = (qaws_exact_surface*)qaws_internal_alloc(NULL, sizeof(qaws_exact_surface));
 	if (!es)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	memset(es, 0, sizeof(*es));
@@ -173,9 +173,9 @@ qaws_status qaws_exact_surface_prepare(qaws_exact_desc const* desc, qaws_surface
 		st = lattice_knots(kvd, nkv, q, ncv, d.param_bits, Kv, &es->v_shift, &spv, &max_k);
 
 	/* homogeneous integer net */
-	cps = (qaws_scalar*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_scalar) * ncp * 3));
-	ws = (qaws_scalar*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_scalar) * ncp));
-	net = (qaws_exact_hfrac*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_exact_hfrac) * ncp));
+	cps = (qaws_scalar*)qaws_internal_alloc(NULL, qaws_internal_mul3(sizeof(qaws_scalar), ncp, 3));
+	ws = (qaws_scalar*)qaws_internal_alloc(NULL, qaws_internal_mul2(sizeof(qaws_scalar), ncp));
+	net = (qaws_exact_hfrac*)qaws_internal_alloc(NULL, qaws_internal_mul2(sizeof(qaws_exact_hfrac), ncp));
 	if (st == QAWS_STATUS_OK && (!cps || !ws || !net))
 		st = QAWS_STATUS_ALLOCATION_FAILURE;
 	if (st == QAWS_STATUS_OK && qaws_surface_read_field(surface, QAWS_FIELD_CONTROL_POINTS, cps, ncp * 3, &got) != QAWS_STATUS_OK)
@@ -222,9 +222,9 @@ qaws_status qaws_exact_surface_prepare(qaws_exact_desc const* desc, qaws_surface
 	/* patches */
 	if (st == QAWS_STATUS_OK)
 	{
-		es->ub = (int64_t*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(int64_t) * (spu + 1)));
-		es->vb = (int64_t*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(int64_t) * (spv + 1)));
-		es->patch = (qaws_exact_int**)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_exact_int*) * spu * spv));
+		es->ub = (int64_t*)qaws_internal_alloc(NULL, qaws_internal_mul2(sizeof(int64_t), (spu + 1)));
+		es->vb = (int64_t*)qaws_internal_alloc(NULL, qaws_internal_mul2(sizeof(int64_t), (spv + 1)));
+		es->patch = (qaws_exact_int**)qaws_internal_alloc(NULL, qaws_internal_mul3(sizeof(qaws_exact_int*), spu, spv));
 		if (!es->ub || !es->vb || !es->patch)
 			st = QAWS_STATUS_ALLOCATION_FAILURE;
 		else
@@ -251,7 +251,7 @@ qaws_status qaws_exact_surface_prepare(qaws_exact_desc const* desc, qaws_surface
 					continue;
 				es->vb[iv] = Kv[sv];
 				es->vb[iv + 1] = Kv[sv + 1];
-				h = (qaws_exact_int*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_exact_int) * (p + 1) * (q + 1) * 4));
+				h = (qaws_exact_int*)qaws_internal_alloc(NULL, qaws_internal_mul4(sizeof(qaws_exact_int), (p + 1), (q + 1), 4));
 				es->patch[iu * spv + iv] = h;
 				if (!h)
 				{

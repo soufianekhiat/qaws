@@ -15,6 +15,10 @@
 #include <math.h>
 #include <string.h>
 
+/* rounding bounds (the quadrature converges far below them; double keeps its own, smaller bounds): a length is a sum of
+   panel contributions returned as a scalar, within AL_ROUND eps of itself relative; a parameter is a scalar near 3 */
+#define AL_ROUND (32 * TEST_EPS)
+
 static qaws_scalar al_length(qaws_curve const* c, double a, double b)
 {
 	qaws_scalar l = 0;
@@ -37,7 +41,7 @@ static void test_reference(void)
 	TEST_ASSERT(qaws_curve_create_bspline(&d, &c) == QAWS_STATUS_OK, "reference B-spline created");
 	snprintf(msg, sizeof msg, "length = Mathematica's (relative error %.1e)", fabs(al_length(c, 0, 3) - total) / total);
 	printf("  %s\n", msg);
-	TEST_ASSERT(fabs(al_length(c, 0, 3) - total) <= 1e-13 * total, msg);
+	TEST_ASSERT(fabs(al_length(c, 0, 3) - total) <= fmax(1e-13, AL_ROUND) * total, msg);
 	/* the targets {distance, fraction}: 0.35 of the length, 1.7, the length less 0.5 */
 	sigma[0] = 0.35 * total;
 	sigma[1] = 1.7;
@@ -48,13 +52,13 @@ static void test_reference(void)
 		qaws_status st = qaws_curve_compute_parameter_at_arc_length(c, 0, (qaws_scalar)sigma[i], &t);
 		snprintf(msg, sizeof msg, "parameter at length %.4f = Mathematica's (error %.1e)", sigma[i], fabs(t - ref_t_arc[i]));
 		printf("  %s\n", msg);
-		TEST_ASSERT(st == QAWS_STATUS_OK && fabs(t - ref_t_arc[i]) <= 1e-11, msg);
+		TEST_ASSERT(st == QAWS_STATUS_OK && fabs(t - ref_t_arc[i]) <= fmax(1e-11, AL_ROUND * 3), msg);
 	}
 	/* from inside the range: the length from there is reached */
 	{
 		qaws_scalar t = -1;
 		qaws_status st = qaws_curve_compute_parameter_at_arc_length(c, (qaws_scalar)1.3, (qaws_scalar)2.0, &t);
-		TEST_ASSERT(st == QAWS_STATUS_OK && fabs(al_length(c, 1.3, t) - 2.0) <= 1e-11, "from t = 1.3, 2.0 further");
+		TEST_ASSERT(st == QAWS_STATUS_OK && fabs(al_length(c, 1.3, t) - 2.0) <= fmax(1e-11, AL_ROUND * total), "from t = 1.3, 2.0 further");
 	}
 	qaws_curve_destroy(c);
 }
@@ -72,14 +76,14 @@ static void test_circle(void)
 	TEST_ASSERT(qaws_curve_create_nurbs(&d, &c) == QAWS_STATUS_OK, "quarter circle created");
 	snprintf(msg, sizeof msg, "quarter circle of radius 2: pi (error %.1e)", fabs(al_length(c, 0, 1) - M_PI));
 	printf("  %s\n", msg);
-	TEST_ASSERT(fabs(al_length(c, 0, 1) - M_PI) <= 1e-13, msg);
+	TEST_ASSERT(fabs(al_length(c, 0, 1) - M_PI) <= fmax(1e-13, AL_ROUND * M_PI), msg);
 	/* a third of the arc: the point at 30 degrees */
 	{
 		qaws_eval_result_2d e;
 		qaws_curve_compute_parameter_at_arc_length(c, 0, (qaws_scalar)(M_PI / 3), &t);
 		qaws_curve_evaluate_2d(c, t, QAWS_EVAL_FLAG_POSITION, &e);
 		snprintf(msg, sizeof msg, "a third of the arc: the point at 30 degrees (error %.1e)", fabs(e.position.x - sqrt(3.0)) + fabs(e.position.y - 1));
-		TEST_ASSERT(fabs(e.position.x - sqrt(3.0)) + fabs(e.position.y - 1) <= 1e-11, msg);
+		TEST_ASSERT(fabs(e.position.x - sqrt(3.0)) + fabs(e.position.y - 1) <= fmax(1e-11, AL_ROUND * 2), msg);
 	}
 	qaws_curve_destroy(c);
 }
@@ -111,7 +115,7 @@ static void test_zero_speed(void)
 	}
 	snprintf(msg, sizeof msg, "cusp at the start: the lengths reached (worst %.1e of %.3f)", worst, total);
 	printf("  %s\n", msg);
-	TEST_ASSERT(worst <= 1e-11 * total, msg);
+	TEST_ASSERT(worst <= fmax(1e-11, AL_ROUND) * total, msg);
 
 	memset(&qd, 0, sizeof qd);
 	qd.dimension = QAWS_DIMENSION_2D; qd.degree = 1; qd.control_points = q; qd.control_point_count = 4; qd.knots = knots; qd.knot_count = 6;

@@ -161,7 +161,7 @@ qaws_status qaws_exact_poly_det(qaws_exact_poly const* M, unsigned int n, unsign
 		qaws_exact_poly_const(out, 1);
 		return QAWS_STATUS_OK;
 	}
-	sub = (qaws_exact_poly*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_exact_poly) * 2));
+	sub = (qaws_exact_poly*)qaws_internal_alloc(NULL, qaws_internal_mul2(sizeof(qaws_exact_poly), 2));
 	if (!sub)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	t = sub + 1;
@@ -358,7 +358,7 @@ qaws_status qaws_exact_poly_gcd(qaws_exact_poly const* a, qaws_exact_poly const*
 	unsigned int dbest = 0, i, used = 0;
 	int have = 0;
 	qaws_status st = QAWS_STATUS_OK;
-	A = (qaws_exact_poly*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_exact_poly) * 4));
+	A = (qaws_exact_poly*)qaws_internal_alloc(NULL, qaws_internal_mul2(sizeof(qaws_exact_poly), 4));
 	if (!A)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	B = A + 1;
@@ -513,7 +513,7 @@ static qaws_status div_exact_in(qaws_exact_poly const* a, qaws_exact_poly const*
 
 qaws_status qaws_exact_poly_div_exact(qaws_exact_poly const* a, qaws_exact_poly const* g, qaws_exact_poly* q)
 {
-	qaws_exact_poly* w = (qaws_exact_poly*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_exact_poly) * 2));
+	qaws_exact_poly* w = (qaws_exact_poly*)qaws_internal_alloc(NULL, qaws_internal_mul2(sizeof(qaws_exact_poly), 2));
 	qaws_status st;
 	if (!w)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
@@ -537,7 +537,7 @@ static qaws_status gcd0(qaws_exact_poly const* a, qaws_exact_poly const* b, qaws
 
 qaws_status qaws_exact_poly_squarefree(qaws_exact_poly const* a, qaws_exact_poly* factors, unsigned int* mult, unsigned int capacity, unsigned int* count)
 {
-	qaws_exact_poly* w = (qaws_exact_poly*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_exact_poly) * 7));
+	qaws_exact_poly* w = (qaws_exact_poly*)qaws_internal_alloc(NULL, qaws_internal_mul2(sizeof(qaws_exact_poly), 7));
 	qaws_exact_poly *A, *dA, *g, *b, *c, *d, *e;
 	unsigned int i = 1;
 	qaws_status st;

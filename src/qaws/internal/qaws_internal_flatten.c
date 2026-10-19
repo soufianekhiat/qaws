@@ -79,8 +79,8 @@ static qaws_status fl_push_seg(fl_curve* f, qaws_scalar t0, qaws_scalar const* p
 	int k;
 	if (*f->count == *f->cap)
 	{
-		unsigned int cap = *f->cap ? *f->cap * 2 : 1024;
-		qaws_flat_seg* g = (qaws_flat_seg*)qaws_internal_realloc(*f->segs, cap * sizeof(qaws_flat_seg));
+		unsigned int cap = qaws_internal_grow(*f->cap, (size_t)*f->count + 1, 1024);
+		qaws_flat_seg* g = cap ? (qaws_flat_seg*)qaws_internal_realloc(*f->segs, qaws_internal_mul2(cap, sizeof(qaws_flat_seg))) : NULL;
 		if (!g)
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 		*f->segs = g;
@@ -226,8 +226,8 @@ static qaws_status fl_surf_patch(fl_surf* f, qaws_scalar u0, qaws_scalar u1, qaw
 		qaws_flat_patch* p;
 		if (*f->count == *f->cap)
 		{
-			unsigned int cap = *f->cap ? *f->cap * 2 : 1024;
-			qaws_flat_patch* g = (qaws_flat_patch*)qaws_internal_realloc(*f->patches, cap * sizeof(qaws_flat_patch));
+			unsigned int cap = qaws_internal_grow(*f->cap, (size_t)*f->count + 1, 1024);
+			qaws_flat_patch* g = cap ? (qaws_flat_patch*)qaws_internal_realloc(*f->patches, qaws_internal_mul2(cap, sizeof(qaws_flat_patch))) : NULL;
 			if (!g)
 				return QAWS_STATUS_ALLOCATION_FAILURE;
 			*f->patches = g;

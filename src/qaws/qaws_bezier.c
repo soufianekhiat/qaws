@@ -239,8 +239,8 @@ qaws_status qaws_curve_create_bezier_ex(
 	impl = (qaws_bezier_impl*)qaws_internal_alloc(allocator, sizeof(qaws_bezier_impl));
 	if (!impl) { qaws_curve_destroy(curve); return QAWS_STATUS_ALLOCATION_FAILURE; }
 
-	cp_size = (size_t)dim_count * desc->control_point_count * sizeof(qaws_scalar);
-	impl->control_points = (qaws_scalar*)qaws_internal_alloc(allocator, (unsigned long)cp_size);
+	cp_size = qaws_internal_mul3((size_t)dim_count, desc->control_point_count, sizeof(qaws_scalar));
+	impl->control_points = (qaws_scalar*)qaws_internal_alloc(allocator, cp_size);
 	if (!impl->control_points) { qaws_internal_dealloc(allocator, impl); qaws_curve_destroy(curve); return QAWS_STATUS_ALLOCATION_FAILURE; }
 	memcpy(impl->control_points, desc->control_points, cp_size);
 	impl->control_point_count = desc->control_point_count;

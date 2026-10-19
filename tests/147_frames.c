@@ -91,7 +91,9 @@ static void test_planar_and_straight(void)
 			worst_line = fabs((double)fr[9 * i + k] - fr[k]) > worst_line ? fabs((double)fr[9 * i + k] - fr[k]) : worst_line;
 	sprintf(msg, "planar curve: the normal stays the plane normal within %.2g; straight segment: one frame within %.2g; orthonormal within %.2g",
 		worst, worst_line, ortho);
-	TEST_ASSERT(worst <= 1e-9 && worst_line <= 1e-12 && ortho <= 1e-12, msg);
+	/* all three are pure rounding (exact arithmetic keeps them exact): the normal drifts by up to an eps per step over the
+	   200 steps, a frame and its orthonormality err by a few eps */
+	TEST_ASSERT(worst <= fmax(1e-9, 200 * TEST_EPS) && worst_line <= fmax(1e-12, 8 * TEST_EPS) && ortho <= fmax(1e-12, 8 * TEST_EPS), msg);
 	printf("  %s\n", msg);
 	qaws_curve_destroy(c);
 	qaws_curve_destroy(line);
@@ -101,7 +103,11 @@ static void test_convergence(void)
 {
 	qaws_vec3 p[6] = { { 0, 0, 0 }, { 1, 2, 0.5f }, { 3, -1, 2 }, { 4, 2, -1 }, { 2, 3, 3 }, { 5, 1, 1 } };
 	qaws_curve* c = fr_bezier(p, 6);
-	unsigned int const nref = 64 * 128 + 1;   /* 64 times the finest test's steps */
+	/* double: 32, 64, 128 steps against 64 times the finest. float: each step's reflections round by an eps, so the frames
+	   carry a floor that grows with the step count; 8, 16, 32 steps against 16 times the finest keep the fourth-order
+	   truncation above it */
+	int const f32 = sizeof(qaws_scalar) != sizeof(double);
+	unsigned int const finest = f32 ? 32 : 128, nref = (f32 ? 16 : 64) * finest + 1;
 	qaws_scalar* tr = (qaws_scalar*)malloc(sizeof(qaws_scalar) * nref);
 	qaws_scalar* ref = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 9 * nref);
 	double e1, e2, e3;
@@ -117,7 +123,7 @@ static void test_convergence(void)
 	/* 32, 64 and 128 steps against the reference at the same parameters (the same first normal: both from the same tangent) */
 	{
 		/* errors at N = 33, 65, 129 samples, each against the reference at its own parameters */
-		unsigned int Ns[3] = { 33, 65, 129 }, k, i;
+		unsigned int Ns[3] = { finest / 4 + 1, finest / 2 + 1, finest + 1 }, k, i;
 		double e[3];
 		for (k = 0; k < 3; k++)
 		{
@@ -132,8 +138,10 @@ static void test_convergence(void)
 			{
 				qaws_scalar const* a = fr + 9 * i + 3;
 				qaws_scalar const* b = ref + 9 * (stride * i) + 3;
-				double dot = (double)a[0] * b[0] + (double)a[1] * b[1] + (double)a[2] * b[2];
-				double ang = acos(dot > 1 ? 1 : dot < -1 ? -1 : dot);
+				/* the angle from the chord between the unit normals: acos of their dot product would err by sqrt(eps) near 0 */
+				double dx = (double)a[0] - b[0], dy = (double)a[1] - b[1], dz = (double)a[2] - b[2];
+				double ch = sqrt(dx * dx + dy * dy + dz * dz) / 2;
+				double ang = 2 * asin(ch > 1 ? 1 : ch);
 				e[k] = ang > e[k] ? ang : e[k];
 			}
 			free(t);
@@ -141,8 +149,10 @@ static void test_convergence(void)
 		}
 		e1 = e[0]; e2 = e[1]; e3 = e[2];
 	}
-	sprintf(msg, "space curve: normal errors %.3g, %.3g, %.3g for 32, 64, 128 steps (ratios %.2f, %.2f; fourth order: 16)", e1, e2, e3, e1 / e2, e2 / e3);
-	TEST_ASSERT(e1 < 1e-3 && e1 / e2 > 12 && e2 / e3 > 12, msg);
+	sprintf(msg, "space curve: normal errors %.3g, %.3g, %.3g for %u, %u, %u steps (ratios %.2f, %.2f; fourth order: 16)", e1, e2, e3,
+		finest / 4, finest / 2, finest, e1 / e2, e2 / e3);
+	/* (float, 8 steps: truncation 0.012) */
+	TEST_ASSERT(e1 < (f32 ? 2e-2 : 1e-3) && e1 / e2 > 12 && e2 / e3 > 12, msg);
 	printf("  %s\n", msg);
 	free(tr);
 	free(ref);

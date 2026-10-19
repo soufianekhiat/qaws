@@ -423,9 +423,9 @@ static void ff_apply(ff_sys const* S, qaws_volume_mesh const* m, double const* v
 /* the smoothest coefficients: preconditioned conjugate gradients on the normal equations; 0 on allocation failure */
 static int ff_solve(ff_sys const* S, qaws_volume_mesh const* m, double* z)
 {
-	double *r = (double*)qaws_internal_malloc(sizeof(double) * ((size_t)S->nz + 1)), *p = (double*)qaws_internal_malloc(sizeof(double) * ((size_t)S->nz + 1));
-	double *Hp = (double*)qaws_internal_malloc(sizeof(double) * ((size_t)S->nz + 1)), *dg = (double*)qaws_internal_zalloc((size_t)S->nz + 1, sizeof(double));
-	double *zz = (double*)qaws_internal_malloc(sizeof(double) * ((size_t)S->nz + 1)), rz, r0;
+	double *r = (double*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(double), ((size_t)S->nz + 1))), *p = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), ((size_t)S->nz + 1)));
+	double *Hp = (double*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(double), ((size_t)S->nz + 1))), *dg = (double*)qaws_internal_zalloc((size_t)S->nz + 1, sizeof(double));
+	double *zz = (double*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(double), ((size_t)S->nz + 1))), rz, r0;
 	unsigned int c, f, i, it;
 	if (!r || !p || !Hp || !dg || !zz)
 	{
@@ -496,7 +496,7 @@ qaws_status qaws_volume_mesh_frame_field(struct qaws_volume_mesh const* mesh, qa
 	qaws_status st;
 	if (!mesh || (mesh->nc && !out_frames))
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	R = (double*)qaws_internal_malloc(sizeof(double) * (9 * (size_t)mesh->nc + 1));
+	R = (double*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(double), (9 * (size_t)mesh->nc + 1)));
 	if (!R)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	st = ff_frames(mesh, desc && desc->sweeps ? desc->sweeps : 60, R, out_singular);
@@ -508,7 +508,7 @@ qaws_status qaws_volume_mesh_frame_field(struct qaws_volume_mesh const* mesh, qa
 
 int ff_comb(qaws_volume_mesh const* m, double* R)
 {
-	unsigned int *queue = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)m->nc + 1)), nq = 0, head, c, f;
+	unsigned int *queue = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), ((size_t)m->nc + 1))), nq = 0, head, c, f;
 	unsigned char* set = (unsigned char*)qaws_internal_zalloc((size_t)m->nc + 1, 1);
 	int ok = queue && set;
 	for (c = 0; ok && c < m->nc; c++)
@@ -567,7 +567,7 @@ qaws_status ff_frames(qaws_volume_mesh const* m, unsigned int sweeps, double* R,
 	for (c = 0; c < m->nc; c++)
 		if (m->type[c] != QAWS_CELL_TETRAHEDRON)
 			return QAWS_STATUS_UNSUPPORTED_OPERATION;
-	nrm = (double*)qaws_internal_zalloc(6 * (size_t)m->nc + 1, sizeof(double));
+	nrm = (double*)qaws_internal_scratch_zalloc(6 * (size_t)m->nc + 1, sizeof(double));
 	ncon = (unsigned char*)qaws_internal_zalloc((size_t)m->nc + 1, 1);
 	if (!nrm || !ncon)
 		goto done;
@@ -613,13 +613,13 @@ qaws_status ff_frames(qaws_volume_mesh const* m, unsigned int sweeps, double* R,
 	{
 		double Y[9][15], *z = NULL;
 		ff_sys S;
-		unsigned int *queue = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)m->nc + 1)), nq = 0, head;
+		unsigned int *queue = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), ((size_t)m->nc + 1))), nq = 0, head;
 		unsigned char* set = (unsigned char*)qaws_internal_zalloc((size_t)m->nc + 1, 1);
 		int ok;
 		memset(&S, 0, sizeof S);
 		ff_basis(Y);
 		S.kind = ncon;
-		S.off = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)m->nc + 1));
+		S.off = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), ((size_t)m->nc + 1)));
 		S.A = (double*)qaws_internal_zalloc(9 * (size_t)m->nc + 1, sizeof(double));
 		S.B = (double*)qaws_internal_zalloc(9 * (size_t)m->nc + 1, sizeof(double));
 		S.C = (double*)qaws_internal_zalloc(9 * (size_t)m->nc + 1, sizeof(double));

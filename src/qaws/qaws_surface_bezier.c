@@ -304,11 +304,11 @@ qaws_status qaws_surface_create_bezier_ex(
 		allocator);
 	if (!surface) return QAWS_STATUS_ALLOCATION_FAILURE;
 
-	impl = (qaws_surface_bezier_impl*)qaws_internal_alloc(allocator, (unsigned long)sizeof(qaws_surface_bezier_impl));
+	impl = (qaws_surface_bezier_impl*)qaws_internal_alloc(allocator, sizeof(qaws_surface_bezier_impl));
 	if (!impl) { qaws_internal_surface_free(surface); return QAWS_STATUS_ALLOCATION_FAILURE; }
 
-	cp_size = (size_t)desc->u_point_count * desc->v_point_count * 3 * sizeof(qaws_scalar);
-	impl->control_points = (qaws_scalar*)qaws_internal_alloc(allocator, (unsigned long)cp_size);
+	cp_size = qaws_internal_mul4((size_t)desc->u_point_count, desc->v_point_count, 3, sizeof(qaws_scalar));
+	impl->control_points = (qaws_scalar*)qaws_internal_alloc(allocator, cp_size);
 	if (!impl->control_points)
 	{
 		qaws_internal_dealloc(allocator, impl);

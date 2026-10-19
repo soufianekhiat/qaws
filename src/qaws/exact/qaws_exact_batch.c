@@ -32,16 +32,16 @@ typedef struct eb_ctx
 	qaws_exact_pair* tmp;
 } eb_ctx;
 
-static int eb_grow(void** p, unsigned int* cap, unsigned int need, size_t elem)
+static int eb_grow(void** p, unsigned int* cap, size_t need, size_t elem)
 {
 	unsigned int c;
 	void* q;
 	if (need <= *cap)
 		return 1;
-	c = *cap ? *cap : 64;
-	while (c < need)
-		c *= 2;
-	q = qaws_internal_realloc(*p, (size_t)c * elem);
+	c = qaws_internal_grow(*cap, need, 64);
+	if (!c)
+		return 0;
+	q = qaws_internal_realloc(*p, qaws_internal_mul2((size_t)c, elem));
 	if (!q)
 		return 0;
 	*p = q;
@@ -51,7 +51,7 @@ static int eb_grow(void** p, unsigned int* cap, unsigned int need, size_t elem)
 
 static qaws_status eb_fail(eb_ctx* x, unsigned int a, unsigned int b)
 {
-	if (!eb_grow((void**)&x->failed, &x->capfail, x->nfail + 1, sizeof(uint64_t)))
+	if (!eb_grow((void**)&x->failed, &x->capfail, (size_t)x->nfail + 1, sizeof(uint64_t)))
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	x->failed[x->nfail++] = (uint64_t)a * x->desc->curve_count + b;
 	return QAWS_STATUS_OK;
@@ -60,7 +60,7 @@ static qaws_status eb_fail(eb_ctx* x, unsigned int a, unsigned int b)
 static qaws_status eb_add(eb_ctx* x, unsigned int a, unsigned int b, qaws_exact_pair const* p, unsigned int n)
 {
 	unsigned int k;
-	if (!eb_grow((void**)&x->hits, &x->caphit, x->nhit + n, sizeof(qaws_exact_batch_hit)))
+	if (!eb_grow((void**)&x->hits, &x->caphit, (size_t)x->nhit + n, sizeof(qaws_exact_batch_hit)))
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	for (k = 0; k < n; k++)
 	{
@@ -100,7 +100,7 @@ static int eb_append(void** dst, unsigned int* nd, unsigned int* cap, void const
 {
 	if (!n)
 		return 1;
-	if (!eb_grow(dst, cap, *nd + n, elem))
+	if (!eb_grow(dst, cap, (size_t)*nd + n, elem))
 		return 0;
 	memcpy((char*)*dst + (size_t)*nd * elem, src, (size_t)n * elem);
 	*nd += n;
@@ -130,7 +130,7 @@ static qaws_status eb_pairs(eb_ctx* x, qaws_bp_box const* boxes, unsigned int n,
 		{
 			ch[k].desc = x->desc;
 			ch[k].spans = x->spans;
-			ch[k].tmp = (qaws_exact_pair*)qaws_internal_malloc(QAWS_EXACT_SOLVE_MAX_ROOTS * sizeof(qaws_exact_pair));
+			ch[k].tmp = (qaws_exact_pair*)qaws_internal_malloc(qaws_internal_mul2(QAWS_EXACT_SOLVE_MAX_ROOTS, sizeof(qaws_exact_pair)));
 			if (!ch[k].tmp)
 				s = QAWS_STATUS_ALLOCATION_FAILURE;
 		}
@@ -180,7 +180,7 @@ static qaws_status eb_self(eb_ctx* x, unsigned int i)
 	qaws_status st;
 	for (;;)
 	{
-		qaws_exact_pair* g = (qaws_exact_pair*)qaws_internal_realloc(buf, cap * sizeof(qaws_exact_pair));
+		qaws_exact_pair* g = (qaws_exact_pair*)qaws_internal_realloc(buf, qaws_internal_mul2(cap, sizeof(qaws_exact_pair)));
 		if (!g)
 		{
 			qaws_internal_free(buf);
@@ -228,8 +228,8 @@ qaws_status qaws_exact_curve_batch_hits(qaws_exact_batch_desc const* desc, qaws_
 	memset(&x, 0, sizeof(x));
 	memset(&stats, 0, sizeof(stats));
 	x.desc = desc;
-	x.spans = (eb_span*)qaws_internal_malloc((nspan ? nspan : 1) * sizeof(eb_span));
-	boxes = (qaws_bp_box*)qaws_internal_malloc((nspan ? nspan : 1) * sizeof(qaws_bp_box));
+	x.spans = (eb_span*)qaws_internal_malloc(qaws_internal_mul2((nspan ? nspan : 1), sizeof(eb_span)));
+	boxes = (qaws_bp_box*)qaws_internal_malloc(qaws_internal_mul2((nspan ? nspan : 1), sizeof(qaws_bp_box)));
 	if (!x.spans || !boxes)
 	{
 		st = QAWS_STATUS_ALLOCATION_FAILURE;
@@ -283,7 +283,7 @@ qaws_status qaws_exact_curve_batch_hits(qaws_exact_batch_desc const* desc, qaws_
 			i = e;
 			continue;
 		}
-		tmp = (qaws_exact_pair*)qaws_internal_malloc((e - i) * sizeof(qaws_exact_pair));
+		tmp = (qaws_exact_pair*)qaws_internal_malloc(qaws_internal_mul2((e - i), sizeof(qaws_exact_pair)));
 		if (!tmp)
 		{
 			st = QAWS_STATUS_ALLOCATION_FAILURE;
@@ -356,12 +356,12 @@ static qaws_status es_visit(void* user, unsigned int i, unsigned int j)
 		return st;
 	if (st != QAWS_STATUS_OK)
 	{
-		if (!eb_grow((void**)&x->failed, &x->capfail, x->nfail + 1, sizeof(uint64_t)))
+		if (!eb_grow((void**)&x->failed, &x->capfail, (size_t)x->nfail + 1, sizeof(uint64_t)))
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 		x->failed[x->nfail++] = (uint64_t)S->owner * x->desc->surface_count + P->owner;
 		return QAWS_STATUS_OK;
 	}
-	if (!eb_grow((void**)&x->hits, &x->caphit, x->nhit + n, sizeof(qaws_exact_curve_surface_batch_hit)))
+	if (!eb_grow((void**)&x->hits, &x->caphit, (size_t)x->nhit + n, sizeof(qaws_exact_curve_surface_batch_hit)))
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	for (k = 0; k < n; k++)
 	{
@@ -473,7 +473,7 @@ qaws_status qaws_exact_curve_surface_batch_hits(qaws_exact_surface_batch_desc co
 		return QAWS_STATUS_OK;
 	}
 	x = (es_ctx*)qaws_internal_zalloc(1, sizeof(es_ctx));
-	boxes = (qaws_bp_box*)qaws_internal_malloc(npiece * sizeof(qaws_bp_box));
+	boxes = (qaws_bp_box*)qaws_internal_malloc(qaws_internal_mul2(npiece, sizeof(qaws_bp_box)));
 	if (!x || !boxes)
 	{
 		qaws_internal_free(x);
@@ -482,7 +482,7 @@ qaws_status qaws_exact_curve_surface_batch_hits(qaws_exact_surface_batch_desc co
 	}
 	x->desc = desc;
 	x->nspan = nspan;
-	x->pieces = (es_piece*)qaws_internal_malloc(npiece * sizeof(es_piece));
+	x->pieces = (es_piece*)qaws_internal_malloc(qaws_internal_mul2(npiece, sizeof(es_piece)));
 	if (!x->pieces)
 	{
 		st = QAWS_STATUS_ALLOCATION_FAILURE;
@@ -584,7 +584,7 @@ static qaws_status ess_visit(void* user, unsigned int i, unsigned int j)
 	es_piece const* P = &x->pieces[i];
 	es_piece const* Q = &x->pieces[j];
 	ess_pair* p;
-	if (!eb_grow((void**)&x->pairs, &x->cappair, x->npair + 1, sizeof(ess_pair)))
+	if (!eb_grow((void**)&x->pairs, &x->cappair, (size_t)x->npair + 1, sizeof(ess_pair)))
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	/* pieces are numbered surface by surface: i < j gives P's surface first */
 	p = &x->pairs[x->npair++];
@@ -639,15 +639,15 @@ static qaws_status ess_chunk(void* ctx, unsigned int chunk, unsigned int begin, 
 		ess_group* G = &J->groups[g];
 		ess_pair const* P = &J->pairs[G->first];
 		unsigned int pcap = 256, bcap = 16;
-		unsigned int* list = (unsigned int*)qaws_internal_malloc(G->count * 4 * sizeof(unsigned int));
+		unsigned int* list = (unsigned int*)qaws_internal_malloc(qaws_internal_mul3(G->count, 4, sizeof(unsigned int)));
 		if (!list)
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 		for (k = 0; k < G->count; k++)
 			memcpy(&list[4 * k], P[k].q, 4 * sizeof(unsigned int));
 		for (;;)
 		{
-			G->points = (qaws_exact_ssi_point*)qaws_internal_malloc(pcap * sizeof(qaws_exact_ssi_point));
-			G->branches = (qaws_exact_ssi_branch*)qaws_internal_malloc(bcap * sizeof(qaws_exact_ssi_branch));
+			G->points = (qaws_exact_ssi_point*)qaws_internal_malloc(qaws_internal_mul2(pcap, sizeof(qaws_exact_ssi_point)));
+			G->branches = (qaws_exact_ssi_branch*)qaws_internal_malloc(qaws_internal_mul2(bcap, sizeof(qaws_exact_ssi_branch)));
 			if (!G->points || !G->branches)
 			{
 				G->st = QAWS_STATUS_ALLOCATION_FAILURE;
@@ -703,8 +703,8 @@ qaws_status qaws_exact_surface_batch_hits(qaws_exact_ssi_batch_desc const* desc,
 	stats.patch_count = npiece;
 	memset(&x, 0, sizeof(x));
 	x.desc = desc;
-	x.pieces = (es_piece*)qaws_internal_malloc((npiece ? npiece : 1) * sizeof(es_piece));
-	boxes = (qaws_bp_box*)qaws_internal_malloc((npiece ? npiece : 1) * sizeof(qaws_bp_box));
+	x.pieces = (es_piece*)qaws_internal_malloc(qaws_internal_mul2((npiece ? npiece : 1), sizeof(es_piece)));
+	boxes = (qaws_bp_box*)qaws_internal_malloc(qaws_internal_mul2((npiece ? npiece : 1), sizeof(qaws_bp_box)));
 	if (!x.pieces || !boxes)
 	{
 		st = QAWS_STATUS_ALLOCATION_FAILURE;

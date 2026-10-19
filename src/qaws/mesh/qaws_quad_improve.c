@@ -844,8 +844,8 @@ static int qi_push(qi_work* w, qi_op const* o, unsigned int a, unsigned int b)
 {
 	if (w->ncand == w->ccand)
 	{
-		unsigned int c = w->ccand ? 2 * w->ccand : 256;
-		qi_cand* p = (qi_cand*)qaws_internal_realloc(w->cand, sizeof(qi_cand) * c);
+		unsigned int c = qaws_internal_grow(w->ccand, (size_t)w->ncand + 1, 256);
+		qi_cand* p = c ? (qi_cand*)qaws_internal_realloc(w->cand, qaws_internal_mul2(sizeof(qi_cand), c)) : NULL;
 		if (!p)
 			return 0;
 		w->cand = p;
@@ -1143,8 +1143,8 @@ static int qi_relax(qi_work* w)
 {
 	qaws_hm* m = w->m;
 	unsigned int sweep, v, f, nb = 0, i, k;
-	unsigned char* busy = (unsigned char*)qaws_internal_malloc((size_t)m->nv + 1);
-	qi_bad* bad = (qi_bad*)qaws_internal_malloc(sizeof(qi_bad) * (m->nf + 1));
+	unsigned char* busy = (unsigned char*)qaws_internal_scratch_malloc((size_t)m->nv + 1);
+	qi_bad* bad = (qi_bad*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(qi_bad), (m->nf + 1)));
 	if (!busy || !bad)
 	{
 		qaws_internal_free(busy);
@@ -1233,7 +1233,7 @@ unsigned int qi_improve(qaws_hm* m, qaws_mesh_reference const* r, mr_scratch* s,
 	w.ideal = (unsigned char*)qaws_internal_malloc((size_t)m->nv + 1);
 	w.stamp = (unsigned int*)qaws_internal_zalloc((size_t)m->nv + 1, sizeof(unsigned int));
 	w.fstamp = (unsigned int*)qaws_internal_zalloc((size_t)m->nf + 1, sizeof(unsigned int));
-	w.fnrm = (double*)qaws_internal_malloc(sizeof(double) * (3 * (size_t)m->nf + 3));
+	w.fnrm = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), (3 * (size_t)m->nf + 3)));
 	if (!w.ideal || !w.stamp || !w.fstamp || !w.fnrm)
 		goto done;
 	qi_ideal(&w);

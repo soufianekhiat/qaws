@@ -278,7 +278,7 @@ static qaws_status curve_job_knots(curve_job* job, qaws_diff_views const* views)
 	}
 	if (!ok)
 		return QAWS_STATUS_OK;
-	job->knots = (qaws_scalar*)qaws_internal_alloc(NULL, (unsigned long)(sizeof(qaws_scalar) * (job->knot_count + 1)));
+	job->knots = (qaws_scalar*)qaws_internal_alloc(NULL, qaws_internal_mul2(sizeof(qaws_scalar), (job->knot_count + 1)));
 	if (!job->knots)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	if (qaws_curve_read_field(job->curve, QAWS_FIELD_KNOTS, job->knots, job->knot_count, &got) != QAWS_STATUS_OK)

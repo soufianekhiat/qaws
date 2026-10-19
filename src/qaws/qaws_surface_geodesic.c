@@ -287,7 +287,7 @@ static qaws_status sg_angle(sg_ctx const* c, double u, double v, double const* d
 static qaws_status sg_hermite(double const* pts, double const* der, unsigned int n, qaws_curve** out)
 {
 	qaws_hermite_desc d;
-	qaws_scalar* buf = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * 4 * n);
+	qaws_scalar* buf = (qaws_scalar*)qaws_internal_malloc(qaws_internal_mul3(sizeof(qaws_scalar), 4, n));
 	unsigned int i;
 	qaws_status st;
 	if (!buf)
@@ -323,7 +323,7 @@ static qaws_status sg_path(sg_ctx const* c, double const* y0, double L, qaws_cur
 	*out = NULL;
 	while (n <= 1u << 18)
 	{
-		double* pts = (double*)qaws_internal_malloc(sizeof(double) * 4 * (n + 1));
+		double* pts = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), 4, (n + 1)));
 		double *der = pts + 2 * (n + 1), y[4], h = L / n, worst = 0;
 		unsigned int k;
 		qaws_status st = QAWS_STATUS_OK;
@@ -1010,6 +1010,8 @@ qaws_status qaws_internal_sg_offset(qaws_internal_sg_ctx const* c, qaws_curve co
 	if (out_ray1) *out_ray1 = NULL;
 	if (!(r > 0) || !(t1 > t0))
 		return QAWS_STATUS_INVALID_ARGUMENT;
+	if (qaws_curve_get_span_count(base) > 0xFFFFFFFFu / 16)   /* n and its 4 (n + 1) sample values count in unsigned int */
+		return QAWS_STATUS_ALLOCATION_FAILURE;
 	if (n < 16) n = 16;
 	/* the conormal geodesics at the ends: the offset starts and ends exactly
 	   where they do */
@@ -1028,7 +1030,7 @@ qaws_status qaws_internal_sg_offset(qaws_internal_sg_ctx const* c, qaws_curve co
 	}
 	while (st == QAWS_STATUS_OK)
 	{
-		double* pts = (double*)qaws_internal_malloc(sizeof(double) * 4 * (n + 1));
+		double* pts = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), 4, (n + 1)));
 		double *der, worst = 0;
 		unsigned int k;
 		if (!pts)

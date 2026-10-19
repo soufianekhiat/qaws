@@ -1304,7 +1304,7 @@ qaws_status qaws_surface_build_support_index(
 			if (!out_samples || sample_capacity < total)
 				return QAWS_STATUS_BUFFER_TOO_SMALL;
 			cursor = (unsigned int*)qaws_internal_alloc(surface->allocator,
-				(unsigned long)(sizeof(unsigned int) * ((size_t)element_count + 1)));
+				qaws_internal_mul2(sizeof(unsigned int), ((size_t)element_count + 1)));
 			if (!cursor)
 				return QAWS_STATUS_ALLOCATION_FAILURE;
 			memcpy(cursor, out_offsets, sizeof(unsigned int) * ((size_t)element_count + 1));

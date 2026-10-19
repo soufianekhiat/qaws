@@ -22,7 +22,7 @@ qaws_status qaws_internal_csr_alloc(
 	mat->nnz = nnz;
 
 	mat->row_ptr = (unsigned int*)qaws_internal_zalloc(rows + 1, sizeof(unsigned int));
-	mat->col_idx = (unsigned int*)qaws_internal_malloc(nnz * sizeof(unsigned int));
+	mat->col_idx = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(nnz, sizeof(unsigned int)));
 	mat->values = (qaws_scalar*)qaws_internal_zalloc(nnz, sizeof(qaws_scalar));
 
 	if (!mat->row_ptr || !mat->col_idx || !mat->values)
@@ -99,11 +99,11 @@ qaws_status qaws_internal_cg_solve(
 
 	tol_sq = tolerance * tolerance;
 
-	r = (qaws_scalar*)qaws_internal_malloc(n * sizeof(qaws_scalar));
-	p = (qaws_scalar*)qaws_internal_malloc(n * sizeof(qaws_scalar));
-	Ap = (qaws_scalar*)qaws_internal_malloc(n * sizeof(qaws_scalar));
-	M_inv = (qaws_scalar*)qaws_internal_malloc(n * sizeof(qaws_scalar));
-	z = (qaws_scalar*)qaws_internal_malloc(n * sizeof(qaws_scalar));
+	r = (qaws_scalar*)qaws_internal_malloc(qaws_internal_mul2(n, sizeof(qaws_scalar)));
+	p = (qaws_scalar*)qaws_internal_malloc(qaws_internal_mul2(n, sizeof(qaws_scalar)));
+	Ap = (qaws_scalar*)qaws_internal_malloc(qaws_internal_mul2(n, sizeof(qaws_scalar)));
+	M_inv = (qaws_scalar*)qaws_internal_malloc(qaws_internal_mul2(n, sizeof(qaws_scalar)));
+	z = (qaws_scalar*)qaws_internal_malloc(qaws_internal_mul2(n, sizeof(qaws_scalar)));
 
 	if (!r || !p || !Ap || !M_inv || !z)
 	{
@@ -215,6 +215,8 @@ qaws_status qaws_internal_build_laplacian(
 		return QAWS_STATUS_INVALID_ARGUMENT;
 
 	/* Count non-zeros: each edge contributes 2 off-diagonal entries, plus n diagonal */
+	if (mesh->edge_count > (0xFFFFFFFFu - n) / 2)   /* nnz counts in unsigned int */
+		return QAWS_STATUS_ALLOCATION_FAILURE;
 	nnz = n + 2 * mesh->edge_count;
 
 	status = qaws_internal_csr_alloc(out_L, n, n, nnz);

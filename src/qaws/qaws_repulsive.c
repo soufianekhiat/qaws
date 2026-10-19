@@ -195,7 +195,7 @@ static qaws_status rp_run(unsigned int dim, unsigned int nv, unsigned int const*
 	qaws_status st;
 	if (!positions || (want == RP_HVP && !direction) || (want != RP_EVAL && !out_vec))
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	x = (double*)qaws_internal_zalloc(3 * (size_t)m + 1, sizeof(double));
+	x = (double*)qaws_internal_scratch_zalloc(3 * (size_t)m + 1, sizeof(double));
 	if (!x)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	if (direction) d = x + m;
@@ -235,6 +235,9 @@ qaws_status qaws_repulsive_curves_create(qaws_repulsive_curves_desc const* desc,
 	unsigned int i;
 	if (!desc || !out_curves || (desc->dimension != 2 && desc->dimension != 3) || (desc->edge_count && !desc->edges))
 		return QAWS_STATUS_INVALID_ARGUMENT;
+	/* 2 edge_count indices and vertex_count * dimension coordinates count in unsigned int */
+	if (desc->edge_count > 0xFFFFFFFFu / 2 || desc->vertex_count > 0xFFFFFFFFu / 3)
+		return QAWS_STATUS_INVALID_ARGUMENT;
 	*out_curves = NULL;
 	alpha = desc->alpha == 0 && desc->beta == 0 ? 3 : (double)desc->alpha;
 	beta = desc->alpha == 0 && desc->beta == 0 ? 6 : (double)desc->beta;
@@ -248,7 +251,7 @@ qaws_status qaws_repulsive_curves_create(qaws_repulsive_curves_desc const* desc,
 	c = (qaws_repulsive_curves*)qaws_internal_zalloc(1, sizeof(*c));
 	if (!c)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
-	c->edges = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * 2 * desc->edge_count + 1);
+	c->edges = (unsigned int*)qaws_internal_malloc(qaws_internal_add2(qaws_internal_mul3(sizeof(unsigned int), 2, desc->edge_count), 1));
 	if (!c->edges)
 	{
 		qaws_internal_free(c);
@@ -319,6 +322,9 @@ qaws_status qaws_repulsive_mesh_create(qaws_repulsive_mesh_desc const* desc, qaw
 	unsigned int i;
 	if (!desc || !out_mesh || (desc->triangle_count && !desc->triangles))
 		return QAWS_STATUS_INVALID_ARGUMENT;
+	/* 3 triangle_count indices and 3 vertex_count coordinates count in unsigned int */
+	if (desc->triangle_count > 0xFFFFFFFFu / 3 || desc->vertex_count > 0xFFFFFFFFu / 3)
+		return QAWS_STATUS_INVALID_ARGUMENT;
 	*out_mesh = NULL;
 	p = desc->p == 0 ? 6 : (double)desc->p;
 	if (!(p > 4))
@@ -332,7 +338,7 @@ qaws_status qaws_repulsive_mesh_create(qaws_repulsive_mesh_desc const* desc, qaw
 	m = (qaws_repulsive_mesh*)qaws_internal_zalloc(1, sizeof(*m));
 	if (!m)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
-	m->tris = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * 3 * desc->triangle_count + 1);
+	m->tris = (unsigned int*)qaws_internal_malloc(qaws_internal_add2(qaws_internal_mul3(sizeof(unsigned int), 3, desc->triangle_count), 1));
 	if (!m->tris)
 	{
 		qaws_internal_free(m);

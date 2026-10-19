@@ -209,20 +209,20 @@ qaws_status qaws_mesh_reference_create(qaws_mesh_3d const* mesh, qaws_mesh_refer
 	for (f = 0; f < m->nf; f++)
 		nt += m->fn[f] - 2;
 	r->nt = nt;
-	r->tv = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * 3 * (nt + 1));
-	r->tc = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * 3 * (nt + 1));
-	r->tf = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (nt + 1));
-	r->ta = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * 3 * (nt + 1));
+	r->tv = (unsigned int*)qaws_internal_malloc(qaws_internal_mul3(sizeof(unsigned int), 3, (nt + 1)));
+	r->tc = (unsigned int*)qaws_internal_malloc(qaws_internal_mul3(sizeof(unsigned int), 3, (nt + 1)));
+	r->tf = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (nt + 1)));
+	r->ta = (unsigned int*)qaws_internal_malloc(qaws_internal_mul3(sizeof(unsigned int), 3, (nt + 1)));
 	r->tcrease = (unsigned char*)qaws_internal_zalloc(3 * (size_t)nt + 1, 1);
-	r->treg = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (nt + 1));
-	r->patch = (mi_tri*)qaws_internal_malloc(sizeof(mi_tri) * (nt + 1));
-	r->box = (qaws_bp_box*)qaws_internal_malloc(sizeof(qaws_bp_box) * (nt + 1));
-	r->vloc = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (m->nv + 1));
-	ce2t = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (m->nc + 1));
-	cn = (double*)qaws_internal_malloc(sizeof(double) * 3 * (m->nc + 1));
-	fnrm = (double*)qaws_internal_malloc(sizeof(double) * 3 * (m->nf + 1));
-	tan = (double*)qaws_internal_zalloc(3 * (size_t)m->nv + 1, sizeof(double));
-	has = (unsigned char*)qaws_internal_zalloc((size_t)m->nv + 1, 1);
+	r->treg = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (nt + 1)));
+	r->patch = (mi_tri*)qaws_internal_malloc(qaws_internal_mul2(sizeof(mi_tri), (nt + 1)));
+	r->box = (qaws_bp_box*)qaws_internal_malloc(qaws_internal_mul2(sizeof(qaws_bp_box), (nt + 1)));
+	r->vloc = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (m->nv + 1)));
+	ce2t = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (m->nc + 1)));
+	cn = (double*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(double), 3, (m->nc + 1)));
+	fnrm = (double*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(double), 3, (m->nf + 1)));
+	tan = (double*)qaws_internal_scratch_zalloc(3 * (size_t)m->nv + 1, sizeof(double));
+	has = (unsigned char*)qaws_internal_scratch_zalloc((size_t)m->nv + 1, 1);
 	if (!r->tv || !r->tc || !r->tf || !r->ta || !r->tcrease || !r->treg || !r->patch || !r->box || !r->vloc || !ce2t || !cn || !fnrm || !tan || !has)
 	{
 		st = QAWS_STATUS_ALLOCATION_FAILURE;
@@ -658,7 +658,7 @@ int mr_scratch_init(mr_scratch* s, unsigned int nt)
 {
 	s->tried = (unsigned int*)qaws_internal_zalloc((size_t)nt + 1, sizeof(unsigned int));
 	s->queued = (unsigned int*)qaws_internal_zalloc((size_t)nt + 1, sizeof(unsigned int));
-	s->queue = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)nt + 1));
+	s->queue = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), ((size_t)nt + 1)));
 	s->gen = 0;
 	if (!s->tried || !s->queued || !s->queue)
 	{

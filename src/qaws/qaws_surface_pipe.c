@@ -316,7 +316,7 @@ qaws_status qaws_surface_create_pipe_ex(
 		&pipe_surface_vtable, allocator);
 	if (!surface) return QAWS_STATUS_ALLOCATION_FAILURE;
 
-	impl = (qaws_surface_pipe_impl*)qaws_internal_alloc(allocator, (unsigned long)(sizeof(qaws_surface_pipe_impl)));
+	impl = (qaws_surface_pipe_impl*)qaws_internal_alloc(allocator, sizeof(qaws_surface_pipe_impl));
 	if (!impl)
 	{
 		qaws_internal_surface_free(surface);

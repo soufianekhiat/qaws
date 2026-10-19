@@ -99,9 +99,9 @@ struct qaws_mesh_2d
    its features (a vertex where the region pinches is split there, appended) */
 static int tm_core_sync(qaws_mesh_2d* m)
 {
-	double* x = (double*)qaws_internal_malloc(sizeof(double) * (3 * (size_t)m->onv + 1));
-	unsigned int* fv = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (3 * (size_t)m->ont + 4 * (size_t)m->onq + 1));
-	unsigned int* fs = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)m->ont + m->onq + 1));
+	double* x = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), (3 * (size_t)m->onv + 1)));
+	unsigned int* fv = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (3 * (size_t)m->ont + 4 * (size_t)m->onq + 1)));
+	unsigned int* fs = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), ((size_t)m->ont + m->onq + 1)));
 	qaws_mesh_3d* core = NULL;
 	unsigned int i;
 	int ok = 0;
@@ -166,13 +166,13 @@ static int tm_from_core(qaws_mesh_2d* m)
 			nb += h->co[c] == HM_NONE;
 			nk += h->co[c] != HM_NONE && c < h->co[c] && (h->cflag[c] & HM_FEATURE);
 		}
-	ov = (double*)qaws_internal_malloc(sizeof(double) * (2 * (size_t)h->nv + 1));
+	ov = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), (2 * (size_t)h->nv + 1)));
 	ovt = (double*)qaws_internal_zalloc((size_t)h->nv + 1, sizeof(double));
-	ovc = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)h->nv + 1));
-	otri = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (3 * (size_t)nt + 1));
-	oquad = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (4 * (size_t)nq + 1));
-	obe = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (2 * ((size_t)nb + nk) + 1));
-	obc = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)nb + nk + 1));
+	ovc = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), ((size_t)h->nv + 1)));
+	otri = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (3 * (size_t)nt + 1)));
+	oquad = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (4 * (size_t)nq + 1)));
+	obe = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (2 * ((size_t)nb + nk) + 1)));
+	obc = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), ((size_t)nb + nk + 1)));
 	obt = (double*)qaws_internal_zalloc(2 * ((size_t)nb + nk) + 1, sizeof(double));
 	obk = (unsigned char*)qaws_internal_malloc((size_t)nb + nk + 1);
 	if (!ov || !ovt || !ovc || !otri || !oquad || !obe || !obc || !obt || !obk)
@@ -282,8 +282,8 @@ static unsigned int tm_vert_add(qaws_mesh_2d* m, double x, double y, unsigned in
 	tm_vert* v;
 	if (m->nv == m->capv)
 	{
-		unsigned int nc = m->capv ? 2 * m->capv : 1024;
-		tm_vert* g = (tm_vert*)qaws_internal_realloc(m->v, sizeof(tm_vert) * nc);
+		unsigned int nc = qaws_internal_grow(m->capv, (size_t)m->nv + 1, 1024);
+		tm_vert* g = nc ? (tm_vert*)qaws_internal_realloc(m->v, qaws_internal_mul2(sizeof(tm_vert), nc)) : NULL;
 		if (!g) { m->failed = 1; return TM_NONE; }
 		m->v = g;
 		m->capv = nc;
@@ -306,8 +306,8 @@ static unsigned int tm_tri_new(qaws_mesh_2d* m)
 	{
 		if (m->nt == m->capt)
 		{
-			unsigned int nc = m->capt ? 2 * m->capt : 2048;
-			tm_tri* g = (tm_tri*)qaws_internal_realloc(m->t, sizeof(tm_tri) * nc);
+			unsigned int nc = qaws_internal_grow(m->capt, (size_t)m->nt + 1, 2048);
+			tm_tri* g = nc ? (tm_tri*)qaws_internal_realloc(m->t, qaws_internal_mul2(sizeof(tm_tri), nc)) : NULL;
 			if (!g) { m->failed = 1; return TM_NONE; }
 			m->t = g;
 			m->capt = nc;
@@ -325,8 +325,8 @@ static void tm_tri_kill(qaws_mesh_2d* m, unsigned int i)
 	m->t[i].alive = 0;
 	if (m->ndead == m->capdead)
 	{
-		unsigned int nc = m->capdead ? 2 * m->capdead : 256;
-		unsigned int* g = (unsigned int*)qaws_internal_realloc(m->dead, sizeof(unsigned int) * nc);
+		unsigned int nc = qaws_internal_grow(m->capdead, (size_t)m->ndead + 1, 256);
+		unsigned int* g = nc ? (unsigned int*)qaws_internal_realloc(m->dead, qaws_internal_mul2(sizeof(unsigned int), nc)) : NULL;
 		if (!g) { m->failed = 1; return; }
 		m->dead = g;
 		m->capdead = nc;
@@ -338,8 +338,8 @@ static unsigned int tm_seg_add(qaws_mesh_2d* m, unsigned int a, unsigned int b, 
 {
 	if (m->ns == m->caps)
 	{
-		unsigned int nc = m->caps ? 2 * m->caps : 256;
-		tm_seg* g = (tm_seg*)qaws_internal_realloc(m->sg, sizeof(tm_seg) * nc);
+		unsigned int nc = qaws_internal_grow(m->caps, (size_t)m->ns + 1, 256);
+		tm_seg* g = nc ? (tm_seg*)qaws_internal_realloc(m->sg, qaws_internal_mul2(sizeof(tm_seg), nc)) : NULL;
 		if (!g) { m->failed = 1; return TM_NONE; }
 		m->sg = g;
 		m->caps = nc;
@@ -353,8 +353,8 @@ static int tm_push(unsigned int** buf, unsigned int* n, unsigned int* cap, unsig
 {
 	if (*n == *cap)
 	{
-		unsigned int nc = *cap ? 2 * *cap : 64;
-		unsigned int* g = (unsigned int*)qaws_internal_realloc(*buf, sizeof(unsigned int) * nc);
+		unsigned int nc = qaws_internal_grow(*cap, (size_t)*n + 1, 64);
+		unsigned int* g = nc ? (unsigned int*)qaws_internal_realloc(*buf, qaws_internal_mul2(sizeof(unsigned int), nc)) : NULL;
 		if (!g) return 0;
 		*buf = g;
 		*cap = nc;
@@ -477,12 +477,12 @@ static int tm_insert(qaws_mesh_2d* m, unsigned int p, unsigned int t0)
 	}
 	nnew = nb / 2;
 	{
-		unsigned int* nt = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (nnew + 1));
-		unsigned int* ea = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (nnew + 1));
-		unsigned int* eb = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (nnew + 1));
-		unsigned int* on = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (nnew + 1));
-		unsigned int* os = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (nnew + 1));
-		unsigned int* ob = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (nnew + 1));
+		unsigned int* nt = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (nnew + 1)));
+		unsigned int* ea = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (nnew + 1)));
+		unsigned int* eb = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (nnew + 1)));
+		unsigned int* on = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (nnew + 1)));
+		unsigned int* os = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (nnew + 1)));
+		unsigned int* ob = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (nnew + 1)));
 		if (!nt || !ea || !eb || !on || !os || !ob) { qaws_internal_free(nt); qaws_internal_free(ea); qaws_internal_free(eb); qaws_internal_free(on); qaws_internal_free(os); qaws_internal_free(ob); qaws_internal_free(bnd); m->failed = 1; return 0; }
 		for (i = 0; i < nnew; i++)
 		{
@@ -926,8 +926,8 @@ static int tm_sample_push(tm_samples* s, double t)
 {
 	if (s->n == s->cap)
 	{
-		unsigned int nc = s->cap ? 2 * s->cap : 64;
-		double* g = (double*)qaws_internal_realloc(s->t, sizeof(double) * nc);
+		unsigned int nc = qaws_internal_grow(s->cap, (size_t)s->n + 1, 64);
+		double* g = nc ? (double*)qaws_internal_realloc(s->t, qaws_internal_mul2(sizeof(double), nc)) : NULL;
 		if (!g) return 0;
 		s->t = g;
 		s->cap = nc;
@@ -994,7 +994,7 @@ static int tm_curve_samples(qaws_mesh_2d const* m, qaws_triangulate_desc const* 
 {
 	double t0 = c->parameter_range.min_value, t1 = c->parameter_range.max_value, *br, pa[2], ta;
 	unsigned int nb = 0, i, sp;
-	br = (double*)qaws_internal_malloc(sizeof(double) * (c->span_count + nf + 2));
+	br = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), (c->span_count + nf + 2)));
 	if (!br) return 0;
 	for (sp = 1; sp < c->span_count; sp++)
 		if (c->span_boundaries[sp] > t0 && c->span_boundaries[sp] < t1) br[nb++] = c->span_boundaries[sp];
@@ -1304,7 +1304,7 @@ static int tm_feature(qaws_mesh_2d const* m, unsigned int i, unsigned int k, uns
 
 static int tm_compact(qaws_mesh_2d* m)
 {
-	unsigned int* map = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (m->nv + 1));
+	unsigned int* map = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (m->nv + 1)));
 	unsigned int i, k, kind, nt = 0, nb = 0;
 	qaws_internal_free(m->ov); qaws_internal_free(m->otri); qaws_internal_free(m->ovc); qaws_internal_free(m->ovt); qaws_internal_free(m->obe); qaws_internal_free(m->obc); qaws_internal_free(m->obt); qaws_internal_free(m->obk); qaws_internal_free(m->oquad);
 	m->ov = NULL; m->otri = NULL; m->ovc = NULL; m->ovt = NULL; m->obe = NULL; m->obc = NULL; m->obt = NULL; m->obk = NULL; m->oquad = NULL;
@@ -1318,13 +1318,13 @@ static int tm_compact(qaws_mesh_2d* m)
 			for (k = 0; k < 3; k++)
 				if (tm_feature(m, i, k, 0) || tm_feature(m, i, k, 1)) nb++;
 		}
-	m->otri = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * 3 * (nt + 1));
-	m->ov = (double*)qaws_internal_malloc(sizeof(double) * 2 * (m->nv + 1));
-	m->ovc = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (m->nv + 1));
-	m->ovt = (double*)qaws_internal_malloc(sizeof(double) * (m->nv + 1));
-	m->obe = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * 2 * (nb + 1));
-	m->obc = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (nb + 1));
-	m->obt = (double*)qaws_internal_malloc(sizeof(double) * 2 * (nb + 1));
+	m->otri = (unsigned int*)qaws_internal_malloc(qaws_internal_mul3(sizeof(unsigned int), 3, (nt + 1)));
+	m->ov = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), 2, (m->nv + 1)));
+	m->ovc = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (m->nv + 1)));
+	m->ovt = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), (m->nv + 1)));
+	m->obe = (unsigned int*)qaws_internal_malloc(qaws_internal_mul3(sizeof(unsigned int), 2, (nb + 1)));
+	m->obc = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (nb + 1)));
+	m->obt = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), 2, (nb + 1)));
 	m->obk = (unsigned char*)qaws_internal_malloc(nb + 1);
 	if (!m->otri || !m->ov || !m->ovc || !m->ovt || !m->obe || !m->obc || !m->obt || !m->obk) { qaws_internal_free(map); return 0; }
 	for (i = 0; i < m->nt; i++)
@@ -1399,7 +1399,7 @@ qaws_status qaws_mesh_2d_create(qaws_mesh_2d_desc const* desc, qaws_mesh_2d** ou
 	if (!desc || (desc->vertex_count && !desc->positions) || (desc->face_count && !desc->face_vertices))
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	m = (qaws_mesh_2d*)qaws_internal_zalloc(1, sizeof *m);
-	x = (double*)qaws_internal_malloc(sizeof(double) * (3 * (size_t)desc->vertex_count + 1));
+	x = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), (3 * (size_t)desc->vertex_count + 1)));
 	if (!m || !x)
 	{
 		qaws_internal_free(m);
@@ -1536,7 +1536,7 @@ qaws_status qaws_triangulate_region_2d(qaws_triangulate_desc const* d, qaws_mesh
 	if (d->constraint_count)
 	{
 		qaws_clip_desc kd;
-		qaws_path_2d* rp = (qaws_path_2d*)qaws_internal_malloc(sizeof(qaws_path_2d) * (np + 1));
+		qaws_path_2d* rp = (qaws_path_2d*)qaws_internal_malloc(qaws_internal_mul2(sizeof(qaws_path_2d), (np + 1)));
 		if (!rp) { qaws_mesh_2d_destroy(m); return QAWS_STATUS_ALLOCATION_FAILURE; }
 		for (i = 0; i < np; i++) qaws_clip_result_get_path(m->region, i, &rp[i]);
 		memset(&kd, 0, sizeof(kd));
@@ -1559,7 +1559,7 @@ qaws_status qaws_triangulate_region_2d(qaws_triangulate_desc const* d, qaws_mesh
 	}
 	m->nbcurves = m->ncurves;
 	m->ncurves += ncc;
-	m->curves = (qaws_curve const**)qaws_internal_malloc(sizeof(qaws_curve*) * (m->ncurves + 1));
+	m->curves = (qaws_curve const**)qaws_internal_malloc(qaws_internal_mul2(sizeof(qaws_curve*), (m->ncurves + 1)));
 	if (!m->curves) { qaws_mesh_2d_destroy(m); return QAWS_STATUS_ALLOCATION_FAILURE; }
 	{
 		unsigned int ci = 0;
@@ -1603,10 +1603,10 @@ qaws_status qaws_triangulate_region_2d(qaws_triangulate_desc const* d, qaws_mesh
 	/* where constraint pieces end on the boundary: forced boundary samples */
 	if (ncons && m->nbcurves)
 	{
-		qaws_scalar* pts = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * 4 * ncons);
-		qaws_closest_point* cl = (qaws_closest_point*)qaws_internal_malloc(sizeof(qaws_closest_point) * 2 * ncons);
+		qaws_scalar* pts = (qaws_scalar*)qaws_internal_malloc(qaws_internal_mul3(sizeof(qaws_scalar), 4, ncons));
+		qaws_closest_point* cl = (qaws_closest_point*)qaws_internal_malloc(qaws_internal_mul3(sizeof(qaws_closest_point), 2, ncons));
 		qaws_closest_desc qd;
-		forced = (tm_force*)qaws_internal_malloc(sizeof(tm_force) * 2 * ncons);
+		forced = (tm_force*)qaws_internal_malloc(qaws_internal_mul3(sizeof(tm_force), 2, ncons));
 		if (!pts || !cl || !forced) { qaws_internal_free(pts); qaws_internal_free(cl); qaws_internal_free(forced); qaws_mesh_2d_destroy(m); return QAWS_STATUS_ALLOCATION_FAILURE; }
 		for (i = 0; i < ncons; i++)
 		{
@@ -1785,17 +1785,17 @@ static unsigned int rm_vert(rm_ctx* x, double px, double py, unsigned int curve,
 {
 	if (x->nv == x->capv)
 	{
-		unsigned int nc = x->capv ? 2 * x->capv : 256;
-		double* p = (double*)qaws_internal_realloc(x->p, sizeof(double) * 2 * nc);
+		unsigned int nc = qaws_internal_grow(x->capv, (size_t)x->nv + 1, 256);
+		double* p = nc ? (double*)qaws_internal_realloc(x->p, qaws_internal_mul3(sizeof(double), 2, nc)) : NULL;
 		unsigned int* vc;
 		double* vt;
 		unsigned char* co;
 		if (!p) { x->failed = 1; return TM_NONE; }
 		x->p = p;
-		vc = (unsigned int*)qaws_internal_realloc(x->vc, sizeof(unsigned int) * nc);
+		vc = (unsigned int*)qaws_internal_realloc(x->vc, qaws_internal_mul2(sizeof(unsigned int), nc));
 		if (!vc) { x->failed = 1; return TM_NONE; }
 		x->vc = vc;
-		vt = (double*)qaws_internal_realloc(x->vt, sizeof(double) * nc);
+		vt = (double*)qaws_internal_realloc(x->vt, qaws_internal_mul2(sizeof(double), nc));
 		if (!vt) { x->failed = 1; return TM_NONE; }
 		x->vt = vt;
 		co = (unsigned char*)qaws_internal_realloc(x->corner, nc);
@@ -1812,8 +1812,8 @@ static unsigned int rm_tri(rm_ctx* x, unsigned int a, unsigned int b, unsigned i
 {
 	if (x->nt == x->capt)
 	{
-		unsigned int nc = x->capt ? 2 * x->capt : 512;
-		unsigned int* g = (unsigned int*)qaws_internal_realloc(x->tri, sizeof(unsigned int) * 3 * nc);
+		unsigned int nc = qaws_internal_grow(x->capt, (size_t)x->nt + 1, 512);
+		unsigned int* g = nc ? (unsigned int*)qaws_internal_realloc(x->tri, qaws_internal_mul3(sizeof(unsigned int), 3, nc)) : NULL;
 		unsigned char* u;
 		if (!g) { x->failed = 1; return TM_NONE; }
 		x->tri = g;
@@ -1832,16 +1832,16 @@ static unsigned int rm_bedge(rm_ctx* x, unsigned int a, unsigned int b, unsigned
 {
 	if (x->nb == x->capb)
 	{
-		unsigned int nc = x->capb ? 2 * x->capb : 256;
-		unsigned int* be = (unsigned int*)qaws_internal_realloc(x->be, sizeof(unsigned int) * 2 * nc);
+		unsigned int nc = qaws_internal_grow(x->capb, (size_t)x->nb + 1, 256);
+		unsigned int* be = nc ? (unsigned int*)qaws_internal_realloc(x->be, qaws_internal_mul3(sizeof(unsigned int), 2, nc)) : NULL;
 		unsigned int* bc;
 		double* bt;
 		if (!be) { x->failed = 1; return TM_NONE; }
 		x->be = be;
-		bc = (unsigned int*)qaws_internal_realloc(x->bc, sizeof(unsigned int) * nc);
+		bc = (unsigned int*)qaws_internal_realloc(x->bc, qaws_internal_mul2(sizeof(unsigned int), nc));
 		if (!bc) { x->failed = 1; return TM_NONE; }
 		x->bc = bc;
-		bt = (double*)qaws_internal_realloc(x->bt, sizeof(double) * 2 * nc);
+		bt = (double*)qaws_internal_realloc(x->bt, qaws_internal_mul3(sizeof(double), 2, nc));
 		if (!bt) { x->failed = 1; return TM_NONE; }
 		x->bt = bt;
 		{
@@ -1893,10 +1893,10 @@ static int rm_maps(rm_ctx* x)
 {
 	unsigned int i, k, n = 0;
 	qaws_internal_free(x->ekey); qaws_internal_free(x->eref); qaws_internal_free(x->bkey); qaws_internal_free(x->bref);
-	x->ekey = (uint64_t*)qaws_internal_malloc(sizeof(uint64_t) * (3 * x->nt + 1));
-	x->eref = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (3 * x->nt + 1));
-	x->bkey = (uint64_t*)qaws_internal_malloc(sizeof(uint64_t) * (x->nb + 1));
-	x->bref = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (x->nb + 1));
+	x->ekey = (uint64_t*)qaws_internal_malloc(qaws_internal_mul2(sizeof(uint64_t), (3 * x->nt + 1)));
+	x->eref = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (3 * x->nt + 1)));
+	x->bkey = (uint64_t*)qaws_internal_malloc(qaws_internal_mul2(sizeof(uint64_t), (x->nb + 1)));
+	x->bref = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (x->nb + 1)));
 	if (!x->ekey || !x->eref || !x->bkey || !x->bref) { x->failed = 1; return 0; }
 	for (i = 0; i < x->nt; i++)
 	{
@@ -2015,8 +2015,8 @@ static int rm_stars(rm_ctx* x, unsigned int** first, unsigned int** star)
 {
 	unsigned int i, k;
 	unsigned int* f = (unsigned int*)qaws_internal_zalloc(x->nv + 2, sizeof(unsigned int));
-	unsigned int* s = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (3 * x->nt + 1));
-	unsigned int* fill = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (x->nv + 1));
+	unsigned int* s = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (3 * x->nt + 1)));
+	unsigned int* fill = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (x->nv + 1)));
 	if (!f || !s || !fill) { qaws_internal_free(f); qaws_internal_free(s); qaws_internal_free(fill); x->failed = 1; return 0; }
 	for (i = 0; i < x->nt; i++)
 		if (x->tri[3 * i] != TM_NONE)
@@ -2044,8 +2044,8 @@ static int tg_collapse(rm_ctx* x)
 	unsigned int* bout = NULL;    /* and the one starting there */
 	unsigned char* lock = NULL;
 	if (!rm_maps(x) || !rm_stars(x, &first, &star)) return -1;
-	bin = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (x->nv + 1));
-	bout = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (x->nv + 1));
+	bin = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (x->nv + 1)));
+	bout = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (x->nv + 1)));
 	lock = (unsigned char*)qaws_internal_zalloc(x->nv + 1, 1);
 	if (!bin || !bout || !lock) { qaws_internal_free(first); qaws_internal_free(star); qaws_internal_free(bin); qaws_internal_free(bout); qaws_internal_free(lock); return -1; }
 	for (i = 0; i < x->nv; i++) bin[i] = bout[i] = TM_NONE;
@@ -2217,8 +2217,8 @@ static int tg_flip(rm_ctx* x)
 static int tg_smooth(rm_ctx* x)
 {
 	unsigned int *first = NULL, *star = NULL, v, moved = 0;
-	unsigned int* bin = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (x->nv + 1));
-	unsigned int* bout = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (x->nv + 1));
+	unsigned int* bin = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (x->nv + 1)));
+	unsigned int* bout = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (x->nv + 1)));
 	if (!bin || !bout || !rm_stars(x, &first, &star)) { qaws_internal_free(bin); qaws_internal_free(bout); qaws_internal_free(first); qaws_internal_free(star); return -1; }
 	for (v = 0; v < x->nv; v++) bin[v] = bout[v] = TM_NONE;
 	for (v = 0; v < x->nb; v++) { bout[x->be[2 * v]] = v; bin[x->be[2 * v + 1]] = v; }
@@ -2275,7 +2275,7 @@ static int tg_smooth(rm_ctx* x)
 static int rm_store(rm_ctx* x, unsigned int const* quads, unsigned int nq)
 {
 	qaws_mesh_2d* m = x->m;
-	unsigned int* map = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (x->nv + 1));
+	unsigned int* map = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (x->nv + 1)));
 	unsigned int i, k, kind, nt = 0, nv = 0;
 	if (!map) return 0;
 	for (i = 0; i < x->nv; i++) map[i] = TM_NONE;
@@ -2288,14 +2288,14 @@ static int rm_store(rm_ctx* x, unsigned int const* quads, unsigned int nq)
 	for (i = 0; i < nq; i++)
 		for (k = 0; k < 4; k++) if (map[quads[4 * i + k]] == TM_NONE) map[quads[4 * i + k]] = nv++;
 	qaws_internal_free(m->ov); qaws_internal_free(m->otri); qaws_internal_free(m->ovc); qaws_internal_free(m->ovt); qaws_internal_free(m->obe); qaws_internal_free(m->obc); qaws_internal_free(m->obt); qaws_internal_free(m->obk); qaws_internal_free(m->oquad);
-	m->ov = (double*)qaws_internal_malloc(sizeof(double) * 2 * (nv + 1));
-	m->ovc = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (nv + 1));
-	m->ovt = (double*)qaws_internal_malloc(sizeof(double) * (nv + 1));
-	m->otri = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * 3 * (nt + 1));
-	m->oquad = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * 4 * (nq + 1));
-	m->obe = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * 2 * (x->nb + 1));
-	m->obc = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (x->nb + 1));
-	m->obt = (double*)qaws_internal_malloc(sizeof(double) * 2 * (x->nb + 1));
+	m->ov = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), 2, (nv + 1)));
+	m->ovc = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (nv + 1)));
+	m->ovt = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), (nv + 1)));
+	m->otri = (unsigned int*)qaws_internal_malloc(qaws_internal_mul3(sizeof(unsigned int), 3, (nt + 1)));
+	m->oquad = (unsigned int*)qaws_internal_malloc(qaws_internal_mul3(sizeof(unsigned int), 4, (nq + 1)));
+	m->obe = (unsigned int*)qaws_internal_malloc(qaws_internal_mul3(sizeof(unsigned int), 2, (x->nb + 1)));
+	m->obc = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (x->nb + 1)));
+	m->obt = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), 2, (x->nb + 1)));
 	m->obk = (unsigned char*)qaws_internal_malloc(x->nb + 1);
 	m->onv = m->ont = m->onbe = m->once = m->onq = 0;
 	if (!m->ov || !m->ovc || !m->ovt || !m->otri || !m->oquad || !m->obe || !m->obc || !m->obt || !m->obk) { qaws_internal_free(map); return 0; }
@@ -2347,8 +2347,8 @@ static int rm_load(rm_ctx* x, qaws_mesh_2d* m)
 		if (rm_tri(x, m->otri[3 * i], m->otri[3 * i + 1], m->otri[3 * i + 2]) == TM_NONE) return 0;
 	for (i = 0; i < m->onbe + m->once; i++)
 		if (rm_bedge(x, m->obe[2 * i], m->obe[2 * i + 1], m->obc[i], m->obt[2 * i], m->obt[2 * i + 1], m->obk[i]) == TM_NONE) return 0;
-	bin = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (x->nv + 1));
-	bout = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (x->nv + 1));
+	bin = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (x->nv + 1)));
+	bout = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (x->nv + 1)));
 	deg = (unsigned int*)qaws_internal_zalloc(x->nv + 1, sizeof(unsigned int));
 	if (!bin || !bout || !deg) { qaws_internal_free(bin); qaws_internal_free(bout); qaws_internal_free(deg); return 0; }
 	for (i = 0; i < x->nv; i++) bin[i] = bout[i] = TM_NONE;
@@ -2475,8 +2475,8 @@ static int qd_add(qd_faces* q, unsigned int a, unsigned int b, unsigned int c, u
 {
 	if (q->n == q->cap)
 	{
-		unsigned int nc = q->cap ? 2 * q->cap : 256;
-		unsigned int* g = (unsigned int*)qaws_internal_realloc(q->f, sizeof(unsigned int) * 4 * nc);
+		unsigned int nc = qaws_internal_grow(q->cap, (size_t)q->n + 1, 256);
+		unsigned int* g = nc ? (unsigned int*)qaws_internal_realloc(q->f, qaws_internal_mul3(sizeof(unsigned int), 4, nc)) : NULL;
 		if (!g) return 0;
 		q->f = g;
 		q->cap = nc;
@@ -2496,9 +2496,9 @@ static int qd_split_all(rm_ctx* x, qd_faces* faces)
 	unsigned int i, k, n = 0, nf = faces->n;
 	qd_faces out;
 	memset(&out, 0, sizeof(out));
-	key = (uint64_t*)qaws_internal_malloc(sizeof(uint64_t) * (4 * nf + 1));
-	ref = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (4 * nf + 1));
-	mid = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (4 * nf + 1));
+	key = (uint64_t*)qaws_internal_malloc(qaws_internal_mul2(sizeof(uint64_t), (4 * nf + 1)));
+	ref = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (4 * nf + 1)));
+	mid = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (4 * nf + 1)));
 	if (!key || !ref || !mid) { qaws_internal_free(key); qaws_internal_free(ref); qaws_internal_free(mid); return 0; }
 	for (i = 0; i < nf; i++)
 	{
@@ -2541,7 +2541,7 @@ static int qd_split_all(rm_ctx* x, qd_faces* faces)
 	}
 	/* the midpoint of each face edge, back by the face's order */
 	{
-		unsigned int* fm = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (4 * nf + 1));
+		unsigned int* fm = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (4 * nf + 1)));
 		if (!fm) { qaws_internal_free(key); qaws_internal_free(ref); qaws_internal_free(mid); return 0; }
 		for (i = 0; i < n; i++) fm[ref[i]] = mid[i];
 		for (i = 0; i < nf && !x->failed; i++)
@@ -2571,10 +2571,10 @@ static int qd_smooth(rm_ctx* x, qd_faces const* faces)
 {
 	unsigned int *first, *star, *fill, *bin, *bout, i, k, v;
 	first = (unsigned int*)qaws_internal_zalloc(x->nv + 2, sizeof(unsigned int));
-	star = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (4 * faces->n + 1));
-	fill = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (x->nv + 1));
-	bin = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (x->nv + 1));
-	bout = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (x->nv + 1));
+	star = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (4 * faces->n + 1)));
+	fill = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (x->nv + 1)));
+	bin = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (x->nv + 1)));
+	bout = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (x->nv + 1)));
 	if (!first || !star || !fill || !bin || !bout) { qaws_internal_free(first); qaws_internal_free(star); qaws_internal_free(fill); qaws_internal_free(bin); qaws_internal_free(bout); return 0; }
 	for (i = 0; i < faces->n; i++)
 		for (k = 0; k < qd_size(faces->f + 4 * i); k++) first[faces->f[4 * i + k] + 1]++;
@@ -2695,9 +2695,9 @@ qaws_status qaws_mesh_2d_quadrangulate(qaws_mesh_2d* mesh, int all_quads, unsign
 	x.m = mesh;
 	if (!rm_load(&x, mesh) || !rm_maps(&x)) { rm_free(&x); return QAWS_STATUS_ALLOCATION_FAILURE; }
 	/* candidate pairs: two triangles over a free edge, convex together */
-	key = (uint64_t*)qaws_internal_malloc(sizeof(uint64_t) * (x.ne + 1));
-	ref = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (x.ne + 1));
-	cq = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * 6 * (x.ne + 1));
+	key = (uint64_t*)qaws_internal_malloc(qaws_internal_mul2(sizeof(uint64_t), (x.ne + 1)));
+	ref = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (x.ne + 1)));
+	cq = (unsigned int*)qaws_internal_malloc(qaws_internal_mul3(sizeof(unsigned int), 6, (x.ne + 1)));
 	matched = (unsigned char*)qaws_internal_zalloc(x.nt + 1, 1);
 	if (!key || !ref || !cq || !matched) ok = 0;
 	for (i = 0; ok && i < x.ne; i++)
@@ -2728,16 +2728,16 @@ qaws_status qaws_mesh_2d_quadrangulate(qaws_mesh_2d* mesh, int all_quads, unsign
 		qd_match q;
 		unsigned int t, pass;
 		memset(&q, 0, sizeof(q));
-		q.mate = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (x.nt + 1));
-		q.via = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (x.nt + 1));
+		q.mate = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (x.nt + 1)));
+		q.via = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (x.nt + 1)));
 		q.first = (unsigned int*)qaws_internal_zalloc(x.nt + 2, sizeof(unsigned int));
-		q.list = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (2 * nc + 1));
+		q.list = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (2 * nc + 1)));
 		q.seen = (unsigned int*)qaws_internal_zalloc(x.nt + 1, sizeof(unsigned int));
 		q.cq = cq;
 		if (!q.mate || !q.via || !q.first || !q.list || !q.seen) ok = 0;
 		if (ok)
 		{
-			unsigned int* fill = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (x.nt + 1));
+			unsigned int* fill = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (x.nt + 1)));
 			if (!fill) ok = 0;
 			else
 			{
@@ -2796,7 +2796,7 @@ qaws_status qaws_mesh_2d_quadrangulate(qaws_mesh_2d* mesh, int all_quads, unsign
 	if (ok)
 	{
 		/* triangles back into x.tri, quads out */
-		unsigned int* quads = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * 4 * (faces.n + 1));
+		unsigned int* quads = (unsigned int*)qaws_internal_malloc(qaws_internal_mul3(sizeof(unsigned int), 4, (faces.n + 1)));
 		unsigned int nq = 0;
 		if (!quads) ok = 0;
 		x.nt = 0;

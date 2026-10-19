@@ -107,8 +107,8 @@ static int bh_build(bh_tree* t, unsigned int begin, unsigned int end)
 	bh_node* n;
 	if (t->nn == t->cap)
 	{
-		unsigned int nc = t->cap ? 2 * t->cap : 64;
-		bh_node* g = (bh_node*)qaws_internal_realloc(t->node, sizeof(bh_node) * nc);
+		unsigned int nc = qaws_internal_grow(t->cap, (size_t)t->nn + 1, 64);
+		bh_node* g = nc ? (bh_node*)qaws_internal_realloc(t->node, qaws_internal_mul2(sizeof(bh_node), nc)) : NULL;
 		if (!g)
 			return -1;
 		t->node = g;
@@ -660,7 +660,7 @@ static qaws_status bh_traverse(bh_ctx* c)
 	p.base = c;
 	p.chunk = (bh_ctx*)qaws_internal_zalloc(chunks + 1, sizeof(bh_ctx));
 	p.share = (double*)qaws_internal_zalloc((size_t)c->nitems + 1, sizeof(double));
-	p.blocks = c->grad ? (double*)qaws_internal_zalloc((size_t)slots * c->nitems + 1, sizeof(double)) : NULL;
+	p.blocks = c->grad ? (double*)qaws_internal_zalloc(qaws_internal_add2(qaws_internal_mul2(slots, c->nitems), 1), sizeof(double)) : NULL;
 	if (!p.chunk || !p.share || (c->grad && !p.blocks))
 	{
 		qaws_internal_free(p.chunk); qaws_internal_free(p.share); qaws_internal_free(p.blocks);
@@ -685,12 +685,12 @@ static qaws_status bh_run(bh_ctx* c, double const* x, double* grad, double* E, q
 	unsigned int i;
 	double *lo = NULL, *hi = NULL, *ctr = NULL, *w = NULL, *qp = NULL;
 	qaws_status st = QAWS_STATUS_OK;
-	lo = (double*)qaws_internal_malloc(sizeof(double) * (c->dim * (size_t)c->nitems + 1));
-	hi = (double*)qaws_internal_malloc(sizeof(double) * (c->dim * (size_t)c->nitems + 1));
-	ctr = (double*)qaws_internal_malloc(sizeof(double) * (c->dim * (size_t)c->nitems + 1));
-	w = (double*)qaws_internal_malloc(sizeof(double) * (c->nitems + 1));
-	qp = (double*)qaws_internal_malloc(sizeof(double) * (6 * (size_t)c->nitems + 1));
-	c->t.perm = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (c->nitems + 1));
+	lo = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), (c->dim * (size_t)c->nitems + 1)));
+	hi = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), (c->dim * (size_t)c->nitems + 1)));
+	ctr = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), (c->dim * (size_t)c->nitems + 1)));
+	w = (double*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(double), (c->nitems + 1)));
+	qp = (double*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(double), (6 * (size_t)c->nitems + 1)));
+	c->t.perm = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (c->nitems + 1)));
 	c->x = x;
 	c->grad = grad;
 	if (!lo || !hi || !ctr || !w || !qp || !c->t.perm)
@@ -728,7 +728,7 @@ static qaws_status bh_public(bh_ctx* c, unsigned int nv, qaws_scalar const* posi
 	qaws_repulsive_bh_stats* out_stats)
 {
 	unsigned int i;
-	double E = 0, *x = (double*)qaws_internal_malloc(sizeof(double) * (c->dim * (size_t)nv + 1)), *g = gradient ? (double*)qaws_internal_zalloc(c->dim * (size_t)nv + 1, sizeof(double)) : NULL;
+	double E = 0, *x = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), qaws_internal_add2(qaws_internal_mul2(c->dim, nv), 1))), *g = gradient ? (double*)qaws_internal_zalloc(qaws_internal_add2(qaws_internal_mul2(c->dim, nv), 1), sizeof(double)) : NULL;
 	qaws_status st;
 	if (!x || (gradient && !g))
 	{
@@ -796,9 +796,9 @@ qaws_status qaws_internal_obstacle_create(qaws_repulsive_obstacle const* d, qaws
 	if (!ob)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	ob->n = n;
-	ob->lo = (double*)qaws_internal_malloc(sizeof(double) * 3 * n); ob->hi = (double*)qaws_internal_malloc(sizeof(double) * 3 * n); ob->c = (double*)qaws_internal_malloc(sizeof(double) * 3 * n);
-	ob->w = (double*)qaws_internal_malloc(sizeof(double) * n); ob->qp = (double*)qaws_internal_zalloc(6 * (size_t)n, sizeof(double));
-	ob->t.perm = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * n);
+	ob->lo = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), 3, n)); ob->hi = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), 3, n)); ob->c = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), 3, n));
+	ob->w = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), n)); ob->qp = (double*)qaws_internal_zalloc(qaws_internal_mul2(6, (size_t)n), sizeof(double));
+	ob->t.perm = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), n));
 	if (!ob->lo || !ob->hi || !ob->c || !ob->w || !ob->qp || !ob->t.perm)
 	{
 		qaws_internal_obstacle_destroy(ob);
@@ -906,7 +906,7 @@ qaws_status qaws_internal_obstacle_energy(qaws_internal_obstacle const* ob, qaws
 {
 	bh_ctx c;
 	unsigned int f, k, q;
-	double* box = (double*)qaws_internal_malloc(sizeof(double) * 6 * (mesh->nf + 1));
+	double* box = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), 6, (mesh->nf + 1)));
 	qaws_status st;
 	if (!box)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
@@ -1014,8 +1014,8 @@ static int rbh_push(rbh_link** v, size_t* n, size_t* cap, unsigned int I, unsign
 {
 	if (*n == *cap)
 	{
-		size_t nc = *cap ? 2 * *cap : 1024;
-		rbh_link* g = (rbh_link*)qaws_internal_realloc(*v, sizeof(rbh_link) * nc);
+		size_t nc = *cap ? qaws_internal_mul2(2, *cap) : 1024;   /* (SIZE_MAX, refused, when it does not fit) */
+		rbh_link* g = (rbh_link*)qaws_internal_realloc(*v, qaws_internal_mul2(sizeof(rbh_link), nc));
 		if (!g)
 			return 0;
 		*v = g;
@@ -1086,12 +1086,12 @@ static void rbh_scratch_free(qaws_internal_rbh_scratch* sc)
 static int rbh_scratch_make(qaws_internal_rbh_op const* op, qaws_internal_rbh_scratch* sc)
 {
 	size_t ni = (size_t)op->nitems + 1, nn = (size_t)op->t.nn + 1;
-	sc->gi = (double*)qaws_internal_malloc(sizeof(double) * (op->gdim * ni + 1));
-	sc->ui = (double*)qaws_internal_malloc(sizeof(double) * ni);
-	sc->accB = (double*)qaws_internal_malloc(sizeof(double) * (op->gdim * ni + 1));
-	sc->acc0 = (double*)qaws_internal_malloc(sizeof(double) * ni);
-	sc->G = (double*)qaws_internal_malloc(sizeof(double) * (op->gdim * nn + 1));
-	sc->U = (double*)qaws_internal_malloc(sizeof(double) * nn);
+	sc->gi = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), (op->gdim * ni + 1)));
+	sc->ui = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), ni));
+	sc->accB = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), (op->gdim * ni + 1)));
+	sc->acc0 = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), ni));
+	sc->G = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), (op->gdim * nn + 1)));
+	sc->U = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), nn));
 	if (sc->gi && sc->ui && sc->accB && sc->acc0 && sc->G && sc->U)
 		return 1;
 	rbh_scratch_free(sc);
@@ -1155,7 +1155,7 @@ static qaws_status rbh_finish(qaws_internal_rbh_op* op, double const* lo, double
 	unsigned int i, chunks = qaws_internal_chunk_count(op->nitems, GRAIN);
 	qaws_status st;
 	size_t ni = (size_t)op->nitems + 1;
-	op->t.perm = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ni);
+	op->t.perm = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), ni));
 	if (!op->t.perm)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	for (i = 0; i < op->nitems; i++) op->t.perm[i] = i;
@@ -1180,8 +1180,8 @@ static qaws_status rbh_finish(qaws_internal_rbh_op* op, double const* lo, double
 	for (i = 0; st == QAWS_STATUS_OK && i < chunks; i++) { op->nnear += p.chunk[i].nnear; op->nfar += p.chunk[i].nfar; }
 	if (st == QAWS_STATUS_OK)
 	{
-		op->near = (rbh_link*)qaws_internal_malloc(sizeof(rbh_link) * (op->nnear + 1));
-		op->far = (rbh_link*)qaws_internal_malloc(sizeof(rbh_link) * (op->nfar + 1));
+		op->near = (rbh_link*)qaws_internal_malloc(qaws_internal_mul2(sizeof(rbh_link), (op->nnear + 1)));
+		op->far = (rbh_link*)qaws_internal_malloc(qaws_internal_mul2(sizeof(rbh_link), (op->nfar + 1)));
 		op->capnear = op->nnear; op->capfar = op->nfar;
 		if (!op->near || !op->far)
 			st = QAWS_STATUS_ALLOCATION_FAILURE;
@@ -1283,15 +1283,15 @@ static qaws_internal_rbh_op* rbh_alloc(unsigned int nitems, unsigned int k, unsi
 {
 	qaws_internal_rbh_op* op = (qaws_internal_rbh_op*)qaws_internal_zalloc(1, sizeof(*op));
 	size_t ni = (size_t)nitems + 1;
-	*lo = (double*)qaws_internal_malloc(sizeof(double) * dim * ni);
-	*hi = (double*)qaws_internal_malloc(sizeof(double) * dim * ni);
-	*ctr = (double*)qaws_internal_malloc(sizeof(double) * dim * ni);
-	*qp = (double*)qaws_internal_zalloc(6 * ni, sizeof(double));
+	*lo = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), dim, ni));
+	*hi = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), dim, ni));
+	*ctr = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), dim, ni));
+	*qp = (double*)qaws_internal_zalloc(qaws_internal_mul2(6, ni), sizeof(double));
 	if (op)
 	{
 		op->nitems = nitems; op->k = k; op->gdim = gdim; op->dim = dim; op->nv = nv; op->idx = idx;
-		op->c = (double*)qaws_internal_zalloc((size_t)k * gdim * ni + 1, sizeof(double));
-		op->w = (double*)qaws_internal_malloc(sizeof(double) * ni);
+		op->c = (double*)qaws_internal_zalloc(qaws_internal_add2(qaws_internal_mul3(k, gdim, ni), 1), sizeof(double));
+		op->w = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), ni));
 	}
 	if (!op || !op->c || !op->w || !*lo || !*hi || !*ctr || !*qp)
 	{
@@ -1488,8 +1488,8 @@ qaws_status qaws_internal_rbh_mesh_metric(qaws_repulsive_mesh const* m, double c
 	*out = NULL;
 	if (!op)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
-	fa = (double*)qaws_internal_malloc(sizeof(double) * (m->nf + 1));
-	fN = (double*)qaws_internal_malloc(sizeof(double) * (3 * (size_t)m->nf + 1));
+	fa = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), (m->nf + 1)));
+	fN = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), (3 * (size_t)m->nf + 1)));
 	if (!fa || !fN)
 		st = QAWS_STATUS_ALLOCATION_FAILURE;
 	for (i = 0; i < m->nf && st == QAWS_STATUS_OK; i++)
@@ -1662,11 +1662,11 @@ qaws_status qaws_internal_rbh_box_pairs(qaws_bp_box const* box, unsigned int n, 
 	qaws_status (*visit)(void*, unsigned int, unsigned int), void* user)
 {
 	rbh_pairs P;
-	double *lo = (double*)qaws_internal_malloc(sizeof(double) * dim * ((size_t)n + 1)), *hi = (double*)qaws_internal_malloc(sizeof(double) * dim * ((size_t)n + 1));
-	double* ctr = (double*)qaws_internal_malloc(sizeof(double) * dim * ((size_t)n + 1));
+	double *lo = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), dim, ((size_t)n + 1))), *hi = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), dim, ((size_t)n + 1)));
+	double* ctr = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), dim, ((size_t)n + 1)));
 	unsigned int i, q;
 	memset(&P, 0, sizeof(P));
-	P.t.perm = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)n + 1));
+	P.t.perm = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), ((size_t)n + 1)));
 	P.st = QAWS_STATUS_OK;
 	if (!lo || !hi || !ctr || !P.t.perm)
 		P.st = QAWS_STATUS_ALLOCATION_FAILURE;

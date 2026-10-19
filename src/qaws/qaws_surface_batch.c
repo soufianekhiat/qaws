@@ -128,8 +128,8 @@ static qaws_status sb_push(sb_ctx* x, unsigned int curve, unsigned int surface, 
 	sb_hit* h;
 	if (x->nhit == x->caphit)
 	{
-		unsigned int cap = x->caphit ? x->caphit * 2 : 256;
-		sb_hit* g = (sb_hit*)qaws_internal_realloc(x->hits, cap * sizeof(sb_hit));
+		unsigned int cap = qaws_internal_grow(x->caphit, (size_t)x->nhit + 1, 256);
+		sb_hit* g = cap ? (sb_hit*)qaws_internal_realloc(x->hits, qaws_internal_mul2(cap, sizeof(sb_hit))) : NULL;
 		if (!g)
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 		x->hits = g;
@@ -229,7 +229,7 @@ static qaws_status sb_pairs(sb_ctx* x, qaws_bp_box const* boxes, unsigned int n)
 		nch = qaws_internal_grid_pair_chunks(grid);
 	if (s == QAWS_STATUS_OK && nch)
 	{
-		ch = (sb_ctx*)qaws_internal_malloc(nch * sizeof(sb_ctx));
+		ch = (sb_ctx*)qaws_internal_malloc(qaws_internal_mul2(nch, sizeof(sb_ctx)));
 		if (!ch)
 			s = QAWS_STATUS_ALLOCATION_FAILURE;
 		for (k = 0; s == QAWS_STATUS_OK && k < nch; k++)
@@ -245,7 +245,7 @@ static qaws_status sb_pairs(sb_ctx* x, qaws_bp_box const* boxes, unsigned int n)
 		{
 			if (s == QAWS_STATUS_OK && ch[k].nhit)
 			{
-				sb_hit* g = (sb_hit*)qaws_internal_realloc(x->hits, (x->nhit + ch[k].nhit) * sizeof(sb_hit));
+				sb_hit* g = (sb_hit*)qaws_internal_realloc(x->hits, qaws_internal_mul2((x->nhit + ch[k].nhit), sizeof(sb_hit)));
 				if (!g)
 					s = QAWS_STATUS_ALLOCATION_FAILURE;
 				else
@@ -313,7 +313,7 @@ static qaws_status sb_solve(sb_ctx* x, qaws_curve_surface_batch_hit* out_hits, u
 	x->stats.patch_count = x->npatch;
 	if (x->nseg && x->npatch)
 	{
-		boxes = (qaws_bp_box*)qaws_internal_malloc((x->nseg + x->npatch) * sizeof(qaws_bp_box));
+		boxes = (qaws_bp_box*)qaws_internal_malloc(qaws_internal_mul2((x->nseg + x->npatch), sizeof(qaws_bp_box)));
 		if (!boxes)
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 		for (i = 0; i < x->nseg + x->npatch; i++)
@@ -406,8 +406,8 @@ qaws_status qaws_surface_set_create(qaws_surface_batch_desc const* desc, qaws_su
 	if (!set)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	set->desc = *desc;
-	set->desc.surfaces = (qaws_surface const* const*)qaws_internal_malloc((n ? n : 1) * sizeof(qaws_surface*));
-	set->desc.families = desc->families ? (unsigned int const*)qaws_internal_malloc((n ? n : 1) * sizeof(unsigned int)) : NULL;
+	set->desc.surfaces = (qaws_surface const* const*)qaws_internal_malloc(qaws_internal_mul2((n ? n : 1), sizeof(qaws_surface*)));
+	set->desc.families = desc->families ? (unsigned int const*)qaws_internal_malloc(qaws_internal_mul2((n ? n : 1), sizeof(unsigned int))) : NULL;
 	if (!set->desc.surfaces || (desc->families && !set->desc.families))
 	{
 		qaws_surface_set_destroy(set);
@@ -728,8 +728,8 @@ static qaws_status ss_pair(ss_ctx* x, qaws_flat_patch const* A, qaws_flat_patch 
 				continue;
 			if (x->nseg == x->capseg)
 			{
-				unsigned int cap = x->capseg ? x->capseg * 2 : 256;
-				ss_seg* g = (ss_seg*)qaws_internal_realloc(x->segs, cap * sizeof(ss_seg));
+				unsigned int cap = qaws_internal_grow(x->capseg, (size_t)x->nseg + 1, 256);
+				ss_seg* g = cap ? (ss_seg*)qaws_internal_realloc(x->segs, qaws_internal_mul2(cap, sizeof(ss_seg))) : NULL;
 				if (!g)
 					return QAWS_STATUS_ALLOCATION_FAILURE;
 				x->segs = g;
@@ -765,7 +765,7 @@ static qaws_status ss_pairs(ss_ctx* x, qaws_bp_box const* boxes, unsigned int n)
 		nch = qaws_internal_grid_pair_chunks(grid);
 	if (s == QAWS_STATUS_OK && nch)
 	{
-		ch = (ss_ctx*)qaws_internal_malloc(nch * sizeof(ss_ctx));
+		ch = (ss_ctx*)qaws_internal_malloc(qaws_internal_mul2(nch, sizeof(ss_ctx)));
 		if (!ch)
 			s = QAWS_STATUS_ALLOCATION_FAILURE;
 		for (k = 0; s == QAWS_STATUS_OK && k < nch; k++)
@@ -781,7 +781,7 @@ static qaws_status ss_pairs(ss_ctx* x, qaws_bp_box const* boxes, unsigned int n)
 		{
 			if (s == QAWS_STATUS_OK && ch[k].nseg)
 			{
-				ss_seg* g = (ss_seg*)qaws_internal_realloc(x->segs, (x->nseg + ch[k].nseg) * sizeof(ss_seg));
+				ss_seg* g = (ss_seg*)qaws_internal_realloc(x->segs, qaws_internal_mul2((x->nseg + ch[k].nseg), sizeof(ss_seg)));
 				if (!g)
 					s = QAWS_STATUS_ALLOCATION_FAILURE;
 				else
@@ -940,8 +940,8 @@ static qaws_status ss_nodes(ss_ctx const* x, ss_seg const* segs, unsigned int m,
 				if (nbr == capbr)
 				{
 					ss_bridge* g;
-					capbr = capbr ? capbr * 2 : 64;
-					g = (ss_bridge*)qaws_internal_realloc(br, capbr * sizeof(ss_bridge));
+					unsigned int nc = qaws_internal_grow(capbr, (size_t)nbr + 1, 64);
+					g = nc ? (ss_bridge*)qaws_internal_realloc(br, qaws_internal_mul2(nc, sizeof(ss_bridge))) : NULL;
 					if (!g)
 					{
 						qaws_internal_free(br);
@@ -949,6 +949,7 @@ static qaws_status ss_nodes(ss_ctx const* x, ss_seg const* segs, unsigned int m,
 						goto done;
 					}
 					br = g;
+					capbr = nc;
 				}
 				br[nbr].a = ri;
 				br[nbr].b = rj;
@@ -1006,8 +1007,8 @@ static qaws_status ss_append(ss_seg** L, unsigned int* m, unsigned int* cap, uns
 {
 	if (*m == *cap)
 	{
-		unsigned int c = *cap ? *cap * 2 : 64;
-		ss_seg* g = (ss_seg*)qaws_internal_realloc(*L, c * sizeof(ss_seg));
+		unsigned int c = qaws_internal_grow(*cap, (size_t)*m + 1, 64);
+		ss_seg* g = c ? (ss_seg*)qaws_internal_realloc(*L, qaws_internal_mul2(c, sizeof(ss_seg))) : NULL;
 		if (!g)
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 		*L = g;
@@ -1080,13 +1081,13 @@ static qaws_status ss_close_gaps(ss_ctx* x, ss_seg** L, unsigned int* m, unsigne
 	qaws_surface const* sa = x->desc->surfaces[(*L)[0].a];
 	qaws_surface const* sb = x->desc->surfaces[(*L)[0].b];
 	unsigned int a = (*L)[0].a, b = (*L)[0].b;
-	ss_end* ends = (ss_end*)qaws_internal_malloc(ne * sizeof(ss_end));
-	unsigned int* parent = (unsigned int*)qaws_internal_malloc(ne * sizeof(unsigned int));
+	ss_end* ends = (ss_end*)qaws_internal_malloc(qaws_internal_mul2(ne, sizeof(ss_end)));
+	unsigned int* parent = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(ne, sizeof(unsigned int)));
 	unsigned int* deg = (unsigned int*)qaws_internal_zalloc(ne, sizeof(unsigned int));
 	unsigned char* dangling = (unsigned char*)qaws_internal_zalloc(ne, 1);
 	qaws_status st = QAWS_STATUS_OK;
 #define SG_PT(e) (&(*L)[(e) / 2].p[(e) % 2])
-	if (!ends || !parent || !deg || !dangling)
+	if (!ends || !parent || !deg || !dangling || n0 > 0x7FFFFFFEu)   /* 2 n0 end points count in unsigned int */
 	{
 		st = QAWS_STATUS_ALLOCATION_FAILURE;
 		goto done;
@@ -1160,16 +1161,16 @@ done:
 static qaws_status ss_chain(ss_ctx* x, ss_seg const* segs, unsigned int m, ss_out* o)
 {
 	unsigned int ne = 2 * m, i;
-	ss_end* ends = (ss_end*)qaws_internal_malloc(ne * sizeof(ss_end));
-	unsigned int* parent = (unsigned int*)qaws_internal_malloc(ne * sizeof(unsigned int));
+	ss_end* ends = (ss_end*)qaws_internal_malloc(qaws_internal_mul2(ne, sizeof(ss_end)));
+	unsigned int* parent = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(ne, sizeof(unsigned int)));
 	unsigned int* deg = (unsigned int*)qaws_internal_zalloc(ne, sizeof(unsigned int));
 	unsigned int* adj_start = (unsigned int*)qaws_internal_zalloc(ne + 1, sizeof(unsigned int));
-	unsigned int* adj = (unsigned int*)qaws_internal_malloc(ne * sizeof(unsigned int));
+	unsigned int* adj = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(ne, sizeof(unsigned int)));
 	unsigned char* used = (unsigned char*)qaws_internal_zalloc(m ? m : 1, 1);
-	qaws_ssi_point const** line = (qaws_ssi_point const**)qaws_internal_malloc((m + 2) * sizeof(qaws_ssi_point*));
+	qaws_ssi_point const** line = (qaws_ssi_point const**)qaws_internal_malloc(qaws_internal_mul2((m + 2), sizeof(qaws_ssi_point*)));
 	qaws_status st = QAWS_STATUS_OK;
 #define SS_PT(e) (&segs[(e) / 2].p[(e) % 2])
-	if (!ends || !parent || !deg || !adj_start || !adj || !used || !line)
+	if (!ends || !parent || !deg || !adj_start || !adj || !used || !line || m > 0x7FFFFFFEu)   /* 2 m + 1 end points count in unsigned int */
 	{
 		st = QAWS_STATUS_ALLOCATION_FAILURE;
 		goto done;
@@ -1262,7 +1263,7 @@ static qaws_status ss_solve(ss_ctx* x, ss_out* o)
 	x->stats.patch_count = x->npatch;
 	if (x->npatch > 1)
 	{
-		boxes = (qaws_bp_box*)qaws_internal_malloc(x->npatch * sizeof(qaws_bp_box));
+		boxes = (qaws_bp_box*)qaws_internal_malloc(qaws_internal_mul2(x->npatch, sizeof(qaws_bp_box)));
 		if (!boxes)
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 		for (i = 0; i < x->npatch; i++)
@@ -1282,7 +1283,7 @@ static qaws_status ss_solve(ss_ctx* x, ss_out* o)
 		{
 			/* the group's segments, gaps closed by marching, then chained */
 			unsigned int m = i - g, cap = m;
-			ss_seg* L = (ss_seg*)qaws_internal_malloc(m * sizeof(ss_seg));
+			ss_seg* L = (ss_seg*)qaws_internal_malloc(qaws_internal_mul2(m, sizeof(ss_seg)));
 			if (!L)
 				return QAWS_STATUS_ALLOCATION_FAILURE;
 			memcpy(L, x->segs + g, m * sizeof(ss_seg));
@@ -1395,9 +1396,9 @@ qaws_status qaws_surface_set_find_intersections(
 	else
 	{
 		/* both sets side by side: other's surfaces numbered after set's, in another family */
-		surfs = (qaws_surface const**)qaws_internal_malloc((na + nb ? na + nb : 1) * sizeof(qaws_surface*));
-		fam = (unsigned int*)qaws_internal_malloc((na + nb ? na + nb : 1) * sizeof(unsigned int));
-		patches = (qaws_flat_patch*)qaws_internal_malloc((set->npatch + other->npatch ? set->npatch + other->npatch : 1) * sizeof(qaws_flat_patch));
+		surfs = (qaws_surface const**)qaws_internal_malloc(qaws_internal_mul2((na + nb ? na + nb : 1), sizeof(qaws_surface*)));
+		fam = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2((na + nb ? na + nb : 1), sizeof(unsigned int)));
+		patches = (qaws_flat_patch*)qaws_internal_malloc(qaws_internal_mul2((set->npatch + other->npatch ? set->npatch + other->npatch : 1), sizeof(qaws_flat_patch)));
 		if (!surfs || !fam || !patches)
 		{
 			s = QAWS_STATUS_ALLOCATION_FAILURE;
@@ -1630,8 +1631,8 @@ static void sc_visit(void* user, unsigned int item)
 	}
 	if (x->ncand == x->capcand)
 	{
-		unsigned int cap = x->capcand ? x->capcand * 2 : 64;
-		sc_cand* g = (sc_cand*)qaws_internal_realloc(x->cand, cap * sizeof(sc_cand));
+		unsigned int cap = qaws_internal_grow(x->capcand, (size_t)x->ncand + 1, 64);
+		sc_cand* g = cap ? (sc_cand*)qaws_internal_realloc(x->cand, qaws_internal_mul2(cap, sizeof(sc_cand))) : NULL;
 		if (!g)
 		{
 			x->failed = 1;
@@ -1674,7 +1675,7 @@ static qaws_status sc_chunk(void* ctx, unsigned int chunk, unsigned int begin, u
 	unsigned int i, k;
 	qaws_status s = QAWS_STATUS_OK;
 	memset(&x, 0, sizeof(x));
-	x.stamp = (unsigned int*)qaws_internal_malloc(J->npatch * sizeof(unsigned int));
+	x.stamp = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(J->npatch, sizeof(unsigned int)));
 	if (!x.stamp)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	for (i = 0; i < J->npatch; i++)
@@ -1780,7 +1781,7 @@ static qaws_status sc_run(qaws_surface const* const* surfaces, qaws_flat_patch c
 	}
 	if (!npatch || !point_count)
 		return QAWS_STATUS_OK;
-	boxes = (qaws_bp_box*)qaws_internal_malloc(npatch * sizeof(qaws_bp_box));
+	boxes = (qaws_bp_box*)qaws_internal_malloc(qaws_internal_mul2(npatch, sizeof(qaws_bp_box)));
 	nchunk = qaws_internal_chunk_count(point_count, SC_GRAIN);
 	J.stats = (qaws_surface_batch_stats*)qaws_internal_zalloc(nchunk, sizeof(qaws_surface_batch_stats));
 	if (!boxes || !J.stats)
@@ -2016,7 +2017,7 @@ static qaws_status sr_chunk(void* ctx, unsigned int chunk, unsigned int begin, u
 	sr_ctx x;
 	unsigned int i, k;
 	memset(&x, 0, sizeof(x));
-	x.stamp = (unsigned int*)qaws_internal_malloc(J->npatch * sizeof(unsigned int));
+	x.stamp = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(J->npatch, sizeof(unsigned int)));
 	if (!x.stamp)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	for (i = 0; i < J->npatch; i++)
@@ -2076,7 +2077,7 @@ static qaws_status sr_run(qaws_surface const* const* surfaces, qaws_flat_patch c
 	}
 	if (!npatch || !ray_count)
 		return QAWS_STATUS_OK;
-	boxes = (qaws_bp_box*)qaws_internal_malloc(npatch * sizeof(qaws_bp_box));
+	boxes = (qaws_bp_box*)qaws_internal_malloc(qaws_internal_mul2(npatch, sizeof(qaws_bp_box)));
 	nchunk = qaws_internal_chunk_count(ray_count, SR_GRAIN);
 	J.stats = (qaws_surface_batch_stats*)qaws_internal_zalloc(nchunk, sizeof(qaws_surface_batch_stats));
 	if (!boxes || !J.stats)
