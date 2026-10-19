@@ -190,8 +190,16 @@ qaws_status qaws_curve_fit_bspline(
 	for (i = 0; i <= p; i++)
 		knots[knot_count - 1 - i] = (qaws_scalar)1.0;
 
-	/* Internal knots via averaging */
-	{
+	/* Internal knots via averaging: interpolation (n = m) takes the mean of p parameters (Piegl & Tiller 9.8), so every
+	   span holds a parameter; fewer control points, the spread of 9.68 */
+	if (n == m) {
+		for (j = 1; j <= n - p - 1; j++) {
+			qaws_scalar sum = (qaws_scalar)0.0;
+			for (i = j; i < j + p; i++)
+				sum += params[i];
+			knots[p + j] = sum / (qaws_scalar)p;
+		}
+	} else {
 		qaws_scalar d_float = (qaws_scalar)(m - 1) / (qaws_scalar)(n - p);
 		for (j = 1; j <= n - p - 1; j++) {
 			qaws_scalar jd = (qaws_scalar)j * d_float;

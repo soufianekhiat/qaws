@@ -23,6 +23,8 @@
  *                      qaws_surface_tessellate_adaptive (chord and angle)
  *   host7_pipe.svg     a pipe around a twisted path: rotation-minimizing frames,
  *                      lit by the normal of its analytic derivatives
+ *   host8_parameterization.svg  interpolating fits through uneven points by
+ *                      uniform, chordal and centripetal parameters
  */
 
 #include "qaws.h"
@@ -658,8 +660,56 @@ static void figure_pipe(void)
 	qaws_curve_destroy(c);
 }
 
+static void figure_parameterization(void)
+{
+	/* uneven points: a tight cluster, then long jumps and a sharp turn */
+	qaws_vec2 p[8] = { { 0, 0 }, { 0.3f, 0.25f }, { 0.5f, 0.3f }, { 4, 3.2f }, { 6.2f, 3.4f }, { 6.5f, 1.2f }, { 9.5f, 0.6f }, { 9.8f, 3.6f } };
+	static char const* names[3] = { "uniform", "chordal (default)", "centripetal" };
+	static char const* colors[3] = { "#d1242f", "#0969da", "#2a9d8f" };
+	qaws_parameterization par[3] = { QAWS_PARAMETERIZATION_UNIFORM, QAWS_PARAMETERIZATION_CHORDAL, QAWS_PARAMETERIZATION_CENTRIPETAL };
+	viewport v = { 24, 80, 1176, 600, -1.5, 11.5, -2.2, 5.6 };
+	double line[400 * 2];
+	svg s;
+	unsigned int k, i;
+	if (!svg_open(&s, "showcase/host8_parameterization.svg", 1224, 720, "Parameterizations of fitting",
+		"cubic B-splines through the same eight unevenly spaced points (as many control points as points), by qaws_bspline_fit_desc.parameterization"))
+		return;
+	svg_panel(&s, &v, NULL);
+	for (k = 0; k < 3; k++)
+	{
+		qaws_bspline_fit_desc d;
+		qaws_curve* c = NULL;
+		memset(&d, 0, sizeof d);
+		d.dimension = QAWS_DIMENSION_2D;
+		d.data_points = p;
+		d.data_point_count = 8;
+		d.degree = 3;
+		d.control_point_count = 8;
+		d.parameterization = par[k];
+		if (qaws_curve_fit_bspline(&d, &c) != QAWS_STATUS_OK)
+			continue;
+		for (i = 0; i < 400; i++)
+		{
+			qaws_eval_result_2d e;
+			qaws_curve_evaluate_2d(c, (qaws_scalar)(i / 399.0), QAWS_EVAL_FLAG_POSITION, &e);
+			line[2 * i] = vx(&v, e.position.x);
+			line[2 * i + 1] = vy(&v, e.position.y);
+		}
+		svg_polyline(&s, line, 400, colors[k], 2.4, 0.9, 0);
+		svg_line(&s, 60, 112 + 22 * k, 92, 112 + 22 * k, colors[k], 3, 1);
+		svg_text(&s, 100, 117 + 22 * k, 14, "#1b1f24", "start", names[k]);
+		qaws_curve_destroy(c);
+	}
+	for (i = 0; i < 8; i++)
+		svg_circle(&s, vx(&v, p[i].x), vy(&v, p[i].y), 5, "#ffffff", "#1b1f24");
+	svg_text(&s, 40, 705, 13, "#57606a", "start", "uniform steps kink inside the cluster, chord lengths swing wide after it; their square roots (centripetal) follow the points");
+	svg_close(&s);
+	printf("wrote showcase/host8_parameterization.svg\n");
+}
+
 int main(void)
 {
+	figure_parameterization();
 	figure_pipe();
 	figure_tessellation_surface();
 	figure_surface_closest();

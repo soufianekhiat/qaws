@@ -796,7 +796,16 @@ static void fit_directional(fit_state* s, double const* dD, double const* dt_in)
 	for (j = 0; j < s->kc; j++)
 		s->dknots[j] = 0;
 	for (j = 1; j + p < n; j++)
+	{
+		if (n == m)
+		{
+			/* interpolation: the mean of p parameters (as qaws_curve_fit_bspline) */
+			for (i = j; i < j + p; i++)
+				s->dknots[p + j] += dt[i] / (double)p;
+			continue;
+		}
 		s->dknots[p + j] = (1.0 - s->knot_alpha[j]) * dt[s->knot_src[j] - 1] + s->knot_alpha[j] * dt[s->knot_src[j]];
+	}
 	for (j = 0; j < s->kc; j++)
 	{
 		s->kd[j].v = (double)s->knots[j];

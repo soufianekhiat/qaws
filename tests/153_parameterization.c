@@ -116,6 +116,68 @@ static void test_default_and_refusal(void)
 	TEST_ASSERT(qaws_curve_fit_bspline(&d, &c) == QAWS_STATUS_INVALID_ARGUMENT, "an unknown parameterization refused");
 }
 
+/* control points of the interpolating fit of the points moved by h along dir */
+static void pz_fit_at(qaws_vec2 const* p, double const* dir, double h, qaws_parameterization param, qaws_scalar* cps)
+{
+	qaws_vec2 q[PZ_M];
+	qaws_curve* c;
+	unsigned int i, got;
+	for (i = 0; i < PZ_M; i++)
+	{
+		q[i].x = (qaws_scalar)(p[i].x + h * dir[2 * i]);
+		q[i].y = (qaws_scalar)(p[i].y + h * dir[2 * i + 1]);
+	}
+	c = pz_fit(q, param);
+	qaws_curve_read_field(c, QAWS_FIELD_CONTROL_POINTS, cps, PZ_M * 2, &got);
+	qaws_curve_destroy(c);
+}
+
+/* the interpolating fit's map (its knots average p parameters) against differences of the fit */
+static void test_interpolation_map(void)
+{
+	qaws_vec2 p[PZ_M];
+	double dir[PZ_M * 2], worst = 0;
+	qaws_scalar tq[PZ_M * 2], tk[PZ_M + 4], qp[PZ_M * 2], qm[PZ_M * 2];
+	qaws_field_view in_f, out_f[2];
+	qaws_diff_views in_v, out_v;
+	qaws_diff_views const* ins[1];
+	qaws_diff_views* outs[1];
+	qaws_bspline_fit_desc d;
+	qaws_curve* c = NULL;
+	qaws_diff_map* map = NULL;
+	qaws_scalar vdir[PZ_M * 2];
+	unsigned int i, k;
+	char msg[200];
+	pz_points(p);
+	for (i = 0; i < PZ_M * 2; i++)
+		vdir[i] = (qaws_scalar)(dir[i] = sin(1.7 * i + 0.3));
+	for (k = 0; k < 2; k++)
+	{
+		qaws_parameterization param = k ? QAWS_PARAMETERIZATION_CENTRIPETAL : QAWS_PARAMETERIZATION_CHORDAL;
+		memset(&d, 0, sizeof d);
+		d.dimension = QAWS_DIMENSION_2D; d.data_points = p; d.data_point_count = PZ_M; d.degree = 3; d.control_point_count = PZ_M;
+		d.parameterization = param;
+		TEST_ASSERT(qaws_curve_fit_bspline_diff(&d, &c, &map) == QAWS_STATUS_OK, "interpolating fit with its map");
+		in_f = qaws_field_view_make(QAWS_FIELD_POINTS, vdir, PZ_M, 2);
+		in_v.fields = &in_f; in_v.field_count = 1; in_v.children = NULL; in_v.child_count = 0;
+		out_f[0] = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, tq, PZ_M, 2);
+		out_f[1] = qaws_field_view_make(QAWS_FIELD_KNOTS, tk, PZ_M + 4, 1);
+		out_v.fields = out_f; out_v.field_count = 2; out_v.children = NULL; out_v.child_count = 0;
+		ins[0] = &in_v;
+		outs[0] = &out_v;
+		TEST_ASSERT(qaws_diff_map_tangent(map, NULL, ins, 1, outs, 1) == QAWS_STATUS_OK, "its tangent");
+		pz_fit_at(p, dir, 1e-6, param, qp);
+		pz_fit_at(p, dir, -1e-6, param, qm);
+		for (i = 0; i < PZ_M * 2; i++)
+			worst = fmax(worst, fabs(tq[i] - ((double)qp[i] - qm[i]) / 2e-6) / (1 + fabs((double)tq[i])));
+		qaws_diff_map_destroy(map);
+		qaws_curve_destroy(c);
+	}
+	snprintf(msg, sizeof msg, "interpolating fits, chordal and centripetal: the map's tangent = differences of the fit (%.1e)", worst);
+	printf("  %s\n", msg);
+	TEST_ASSERT(worst <= 1e-6, msg);
+}
+
 int test_153_parameterization_main(void)
 {
 	g_pass = 0;
@@ -123,6 +185,7 @@ int test_153_parameterization_main(void)
 	printf("Test 153: parameterizations of B-spline fitting\n");
 	test_parameterizations();
 	test_default_and_refusal();
+	test_interpolation_map();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
 }
