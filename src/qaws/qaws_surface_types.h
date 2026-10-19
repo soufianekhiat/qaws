@@ -29,7 +29,8 @@ typedef enum qaws_surface_kind
 	QAWS_SURFACE_KIND_TRIMMED,
 	QAWS_SURFACE_KIND_TSPLINE,
 	QAWS_SURFACE_KIND_SUBDIV,
-	QAWS_SURFACE_KIND_FILLET
+	QAWS_SURFACE_KIND_FILLET,
+	QAWS_SURFACE_KIND_VIEW               /* borrowed: evaluated from host arrays it does not own (qaws_view.h) */
 } qaws_surface_kind;
 
 typedef enum qaws_surface_eval_flags

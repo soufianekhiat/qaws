@@ -154,6 +154,7 @@ extern int test_139_mesh_repair_main(void);
 extern int test_140_eval_limits_main(void);
 extern int test_141_eval_threads_main(void);
 extern int test_142_curve_view_main(void);
+extern int test_143_surface_view_main(void);
 
 /* Test registry */
 typedef struct {
@@ -305,6 +306,7 @@ static test_suite const g_test_suites[] = {
 {"140_eval_limits", test_140_eval_limits_main},
 {"141_eval_threads", test_141_eval_threads_main},
 {"142_curve_view", test_142_curve_view_main},
+{"143_surface_view", test_143_surface_view_main},
 };
 
 int main(void) {

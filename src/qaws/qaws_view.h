@@ -3,10 +3,12 @@
 
 #include "qaws_types.h"
 #include "qaws_status.h"
+#include "qaws_surface_types.h"
 #include <stddef.h>
 
 /*
- * Borrowed geometry: curves evaluated from host memory without copying it.
+ * Borrowed geometry: curves and surfaces evaluated from host memory without
+ * copying it.
  *
  *   qaws_array_view      a typed strided array the host owns: f32 or f64,
  *                        packed (any stride, interleaved records included)
@@ -28,6 +30,12 @@
  *                        points) refuse it: the host holds those arrays.
  *   owned copy           qaws_curve_create_from_view: an owned B-spline or
  *                        NURBS curve from a view.
+ *   surfaces             the same over a grid: qaws_surface_view,
+ *                        qaws_surface_prepared, qaws_surface_create_borrowed
+ *                        (kind QAWS_SURFACE_KIND_VIEW: evaluation, sampling,
+ *                        area, jets to third order so closest points and
+ *                        curvatures; no derivatives with respect to the
+ *                        host's arrays), qaws_surface_create_from_view.
  *
  * Precision: views hold f32 or f64 data whatever the library's qaws_scalar;
  * values are converted one at a time as they are read (no converted copy).
@@ -154,5 +162,51 @@ qaws_status qaws_curve_create_borrowed(qaws_curve_view const* view, qaws_allocat
 /* An owned copy: a B-spline curve (polynomial views) or a NURBS curve (weights or homogeneous points, divided by w), with the
    view's knots (or the clamped uniform ones), converted to qaws_scalar; the view is borrowed for the call only. */
 qaws_status qaws_curve_create_from_view(qaws_curve_view const* view, qaws_allocator const* allocator, qaws_curve** out_curve);
+
+/* ---- surfaces: the same model over a grid of points -------------------------------------------------------------------------- */
+
+/* A tensor-product B-spline or NURBS surface: point (i, j), i < u_count, j < v_count, is element i * v_count + j of points (row
+   major, as qaws_surface_create_bspline). */
+typedef struct qaws_surface_view
+{
+	unsigned int u_degree, v_degree;    /* 1 to QAWS_VIEW_MAX_DEGREE */
+	unsigned int u_count, v_count;      /* at least degree + 1 each */
+	qaws_array_view points;             /* u_count * v_count points: 3 components, or 4 homogeneous (w x, w y, w z, w) */
+	qaws_array_view weights;            /* count 0: none; else u_count * v_count weights > 0 (with Cartesian points) */
+	qaws_array_view u_knots, v_knots;   /* count 0: clamped uniform over [0, 1], as qaws_surface_create_bspline; else count + degree + 1 */
+} qaws_surface_view;
+
+qaws_status qaws_surface_view_validate(qaws_surface_view const* view);
+
+typedef struct qaws_surface_prepared qaws_surface_prepared;
+
+qaws_status qaws_surface_prepare(qaws_surface_view const* view, qaws_allocator const* allocator, qaws_surface_prepared** out_prepared);
+size_t qaws_surface_prepared_size(qaws_surface_view const* view);
+qaws_status qaws_surface_prepare_into(qaws_surface_view const* view, void* memory, size_t bytes, qaws_surface_prepared** out_prepared);
+void qaws_surface_prepared_destroy(qaws_surface_prepared* prepared);
+unsigned int qaws_surface_prepared_dependencies(qaws_surface_prepared const* prepared);
+qaws_range qaws_surface_prepared_get_u_range(qaws_surface_prepared const* prepared);
+qaws_range qaws_surface_prepared_get_v_range(qaws_surface_prepared const* prepared);
+
+/* (u, v) clamped to the domain; flags and results as qaws_surface_evaluate (a normal also gives du and dv); thread-safe, no
+   allocation */
+qaws_status qaws_surface_prepared_evaluate(qaws_surface_prepared const* prepared, qaws_scalar u, qaws_scalar v, unsigned int eval_flags,
+	qaws_surface_eval_result* out_result);
+
+/* Outputs of a surface range evaluation: as qaws_curve_outputs, 3 components each */
+typedef struct qaws_surface_outputs
+{
+	qaws_array_view_mut position, du, dv, normal, duu, duv, dvv;
+} qaws_surface_outputs;
+
+/* Parameters begin to end - 1 of a view of two components (u, v); otherwise as qaws_curve_prepared_evaluate_range */
+qaws_status qaws_surface_prepared_evaluate_range(qaws_surface_prepared const* prepared, qaws_array_view const* parameters,
+	unsigned int begin, unsigned int end, qaws_surface_outputs const* outputs);
+
+/* A qaws_surface over the view (kind QAWS_SURFACE_KIND_VIEW), the contract of a prepared object for its life */
+qaws_status qaws_surface_create_borrowed(qaws_surface_view const* view, qaws_allocator const* allocator, qaws_surface** out_surface);
+
+/* An owned copy: a B-spline or NURBS surface */
+qaws_status qaws_surface_create_from_view(qaws_surface_view const* view, qaws_allocator const* allocator, qaws_surface** out_surface);
 
 #endif /* QAWS_VIEW_H */
