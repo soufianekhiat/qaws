@@ -737,7 +737,8 @@ static void fit_basis_dual(fit_dual const* knots, unsigned int p, unsigned int s
 typedef struct fit_state
 {
 	unsigned int m, n, p, dim, sys, kc;
-	int chord;
+	int chord;                 /* parameters from the points: steps by the chord lengths to the power alpha */
+	double alpha;              /* 1 chordal, 0.5 centripetal */
 	double* data;              /* m * dim */
 	qaws_scalar* params;       /* m, as the fit computes them */
 	qaws_scalar* knots;        /* kc */
@@ -769,7 +770,7 @@ static void fit_directional(fit_state* s, double const* dD, double const* dt_in)
 		s->cum[0] = 0;
 		for (k = 1; k < m; k++)
 		{
-			double len2 = 0, dlen2 = 0, len;
+			double len2 = 0, dlen2 = 0, len, w;
 			for (d = 0; d < dim; d++)
 			{
 				double a = s->data[k * dim + d] - s->data[(k - 1) * dim + d];
@@ -778,8 +779,10 @@ static void fit_directional(fit_state* s, double const* dD, double const* dt_in)
 				dlen2 += a * da;
 			}
 			len = sqrt(len2);
-			total += len;
-			dtotal += len > 0 ? dlen2 / len : 0.0;
+			w = s->alpha == 1.0 ? len : sqrt(len);
+			total += w;
+			/* d(len^alpha) = alpha len^alpha (a . da) / len^2 */
+			dtotal += len > 0 ? s->alpha * w * dlen2 / len2 : 0.0;
 			s->cum[k] = dtotal;
 		}
 		if (total > 0)
@@ -891,7 +894,7 @@ static qaws_status fit_emit(qaws_diff_map* m, fit_state const* s, unsigned int i
 static qaws_status fit_prepare(fit_state* s, struct qaws_bspline_fit_desc const* desc, qaws_curve const* curve,
 	qaws_scalar* cps, double* A)
 {
-	unsigned int i, j, k, d, got;
+	unsigned int i, j, k, got;
 	qaws_scalar const* dp = (qaws_scalar const*)desc->data_points;
 	qaws_status st;
 
@@ -900,25 +903,7 @@ static qaws_status fit_prepare(fit_state* s, struct qaws_bspline_fit_desc const*
 	if (desc->parameters)
 		memcpy(s->params, desc->parameters, sizeof(qaws_scalar) * s->m);
 	else
-	{
-		qaws_scalar total = 0;
-		s->params[0] = 0;
-		for (k = 1; k < s->m; k++)
-		{
-			qaws_scalar l2 = 0;
-			for (d = 0; d < s->dim; d++)
-			{
-				qaws_scalar a = dp[k * s->dim + d] - dp[(k - 1) * s->dim + d];
-				l2 += a * a;
-			}
-			total += QAWS_SQRT(l2);
-			s->params[k] = total;
-		}
-		if (total > 0)
-			for (k = 1; k < s->m; k++)
-				s->params[k] /= total;
-		s->params[s->m - 1] = QAWS_ONE;
-	}
+		qaws_internal_fit_parameters(dp, s->m, s->dim, desc->parameterization, s->params);
 	st = qaws_curve_read_field(curve, QAWS_FIELD_KNOTS, s->knots, s->kc, &got);
 	if (st == QAWS_STATUS_OK)
 		st = qaws_curve_read_field(curve, QAWS_FIELD_CONTROL_POINTS, cps, s->n * s->dim, &got);
@@ -1010,7 +995,8 @@ qaws_status qaws_curve_fit_bspline_diff(struct qaws_bspline_fit_desc const* desc
 	s.dim = desc->dimension == QAWS_DIMENSION_2D ? 2u : 3u;
 	s.sys = s.n - 2;
 	s.kc = s.n + s.p + 1;
-	s.chord = desc->parameters == NULL;
+	s.chord = desc->parameters == NULL && desc->parameterization != QAWS_PARAMETERIZATION_UNIFORM;
+	s.alpha = desc->parameterization == QAWS_PARAMETERIZATION_CENTRIPETAL ? 0.5 : 1.0;
 	if (s.p + 1 > QAWS_DIFF_MAX_SUPPORT)
 	{
 		st = QAWS_STATUS_UNSUPPORTED_OPERATION;

@@ -382,6 +382,9 @@ static void test_clone(void)
 #define FIT_N 7
 #define FIT_KC (FIT_N + 3 + 1)
 
+/* the parameterization of the fits below without given parameters */
+static qaws_parameterization g_fit_param;
+
 /* Fitted control points and knots after moving data and parameters by h. */
 static void fit_at(qaws_dimension dim, qaws_scalar const* data, qaws_scalar const* params, qaws_scalar const* ddata,
 	qaws_scalar const* dparams, double h, qaws_scalar* cps, qaws_scalar* knots)
@@ -401,6 +404,7 @@ static void fit_at(qaws_dimension dim, qaws_scalar const* data, qaws_scalar cons
 	desc.degree = 3;
 	desc.control_point_count = FIT_N;
 	desc.parameters = params ? t : NULL;
+	desc.parameterization = g_fit_param;
 	qaws_curve_fit_bspline(&desc, &c);
 	qaws_curve_read_field(c, QAWS_FIELD_CONTROL_POINTS, cps, FIT_N * dc, &got);
 	qaws_curve_read_field(c, QAWS_FIELD_KNOTS, knots, FIT_KC, &got);
@@ -452,6 +456,7 @@ static void check_fit(char const* name, qaws_dimension dim, int with_params)
 	desc.degree = 3;
 	desc.control_point_count = FIT_N;
 	desc.parameters = with_params ? params : NULL;
+	desc.parameterization = g_fit_param;
 	TEST_ASSERT_STATUS(qaws_curve_fit_bspline_diff(&desc, &c, &map));
 	TEST_ASSERT(qaws_diff_map_input_count(map) == (with_params ? 2u : 1u), "fit map input count");
 
@@ -512,6 +517,12 @@ static void test_fit_map(void)
 	check_fit("fit 3d chord-length", QAWS_DIMENSION_3D, 0);
 	check_fit("fit 2d given parameters", QAWS_DIMENSION_2D, 1);
 	check_fit("fit 3d given parameters", QAWS_DIMENSION_3D, 1);
+	g_fit_param = QAWS_PARAMETERIZATION_CENTRIPETAL;
+	check_fit("fit 2d centripetal", QAWS_DIMENSION_2D, 0);
+	check_fit("fit 3d centripetal", QAWS_DIMENSION_3D, 0);
+	g_fit_param = QAWS_PARAMETERIZATION_UNIFORM;
+	check_fit("fit 3d uniform", QAWS_DIMENSION_3D, 0);
+	g_fit_param = QAWS_PARAMETERIZATION_DEFAULT;
 }
 
 

@@ -14,6 +14,7 @@ typedef struct qaws_bspline_fit_desc {
     unsigned int degree;
     unsigned int control_point_count;
     qaws_scalar const* parameters;
+    qaws_parameterization parameterization;
 } qaws_bspline_fit_desc;
 ```
 
@@ -24,7 +25,10 @@ typedef struct qaws_bspline_fit_desc {
 | `data_point_count` | Number of data points (m). Must be >= `degree + 1`. |
 | `degree` | Desired B-spline degree (typically 3) |
 | `control_point_count` | Desired number of control points (n). Must satisfy `degree < n <= m`. |
-| `parameters` | Optional: m parameter values in [0, 1]. Pass NULL for chord-length parameterization. |
+| `parameters` | Optional: m parameter values in [0, 1]. Pass NULL to derive them from the points by `parameterization`. |
+| `parameterization` | Without `parameters`: `QAWS_PARAMETERIZATION_DEFAULT` and `_CHORDAL` step by the chord lengths, `_UNIFORM` by equal steps, `_CENTRIPETAL` by the square roots of the chord lengths (steadier through sharp turns and uneven spacing). Others are refused. `qaws_curve_fit_bspline_diff` differentiates through all three (test 55). |
+
+With `control_point_count` equal to `data_point_count` the fit interpolates the points at those parameters (test 153).
 
 ---
 

@@ -336,3 +336,26 @@ qaws_status qaws_internal_fit_bspline(qaws_dimension dimension, unsigned int deg
 {
 	return qaws_internal_fit_bspline_ex(NULL, dimension, degree, sample_params, sample_coords, sample_count, control_point_count, out_curve);
 }
+
+void qaws_internal_fit_parameters(qaws_scalar const* data, unsigned int m, unsigned int dim, qaws_parameterization param, qaws_scalar* out)
+{
+	qaws_scalar total = QAWS_ZERO;
+	unsigned int k, d;
+	out[0] = QAWS_ZERO;
+	for (k = 1; k < m; k++)
+	{
+		qaws_scalar l2 = QAWS_ZERO;
+		for (d = 0; d < dim; d++)
+		{
+			qaws_scalar a = data[k * dim + d] - data[(k - 1) * dim + d];
+			l2 += a * a;
+		}
+		total += param == QAWS_PARAMETERIZATION_UNIFORM ? QAWS_ONE
+			: param == QAWS_PARAMETERIZATION_CENTRIPETAL ? QAWS_SQRT(QAWS_SQRT(l2)) : QAWS_SQRT(l2);
+		out[k] = total;
+	}
+	if (total > QAWS_ZERO)
+		for (k = 1; k < m; k++)
+			out[k] /= total;
+	out[m - 1] = QAWS_ONE;
+}

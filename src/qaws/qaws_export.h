@@ -12,7 +12,9 @@ typedef struct qaws_bspline_fit_desc
 	unsigned int data_point_count;     /* m >= degree + 1 */
 	unsigned int degree;               /* desired B-spline degree (typically 3) */
 	unsigned int control_point_count;  /* n: desired number of CPs (degree < n <= m) */
-	qaws_scalar const* parameters;     /* optional: m parameter values in [0,1], NULL = chord-length */
+	qaws_scalar const* parameters;     /* optional: m parameter values in [0,1], NULL = from the points as below */
+	qaws_parameterization parameterization;  /* without parameters: DEFAULT and CHORDAL chord lengths, UNIFORM equal steps,
+	                                            CENTRIPETAL square roots of the chord lengths */
 } qaws_bspline_fit_desc;
 
 qaws_status qaws_curve_fit_bspline(

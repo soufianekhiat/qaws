@@ -11,6 +11,7 @@
 #include "qaws_surface_types.h"
 #include "internal/qaws_internal_types.h"
 #include "internal/qaws_internal_basis.h"
+#include "internal/qaws_internal_fit.h"
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -21,14 +22,6 @@
 /*  Helpers                                                                    */
 /* -------------------------------------------------------------------------- */
 
-static qaws_scalar scalar_sqrt(qaws_scalar x)
-{
-#if QAWS_SCALAR_IS_FLOAT
-	return sqrtf(x);
-#else
-	return sqrt(x);
-#endif
-}
 
 static qaws_scalar scalar_floor(qaws_scalar x)
 {
@@ -149,7 +142,7 @@ qaws_status qaws_curve_fit_bspline(
 	    desc->dimension != QAWS_DIMENSION_3D)
 		return QAWS_STATUS_INVALID_DIMENSION;
 
-	if (!desc->data_points)
+	if (!desc->data_points || (unsigned int)desc->parameterization > QAWS_PARAMETERIZATION_CENTRIPETAL)
 		return QAWS_STATUS_INVALID_ARGUMENT;
 
 	m = desc->data_point_count;
@@ -180,24 +173,7 @@ qaws_status qaws_curve_fit_bspline(
 	if (desc->parameters) {
 		memcpy(params, desc->parameters, sizeof(qaws_scalar) * (size_t)m);
 	} else {
-		/* Chord-length parameterization */
-		qaws_scalar total_length = (qaws_scalar)0.0;
-		params[0] = (qaws_scalar)0.0;
-		for (i = 1; i < m; i++) {
-			qaws_scalar dist_sq = (qaws_scalar)0.0;
-			for (d = 0; d < dim_count; d++) {
-				qaws_scalar diff = data[i * dim_count + d]
-				                 - data[(i - 1) * dim_count + d];
-				dist_sq += diff * diff;
-			}
-			total_length += scalar_sqrt(dist_sq);
-			params[i] = total_length;
-		}
-		if (total_length > (qaws_scalar)0.0) {
-			for (i = 1; i < m; i++)
-				params[i] /= total_length;
-		}
-		params[m - 1] = (qaws_scalar)1.0; /* ensure exact endpoint */
+		qaws_internal_fit_parameters(data, m, dim_count, desc->parameterization, params);
 	}
 
 	/* --- Step 2: Knot placement (averaging) ---------------------------- */

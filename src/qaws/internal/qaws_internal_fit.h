@@ -64,4 +64,8 @@ qaws_status qaws_internal_fit_bspline_range_ex(
 	qaws_scalar t_max,
 	qaws_curve** out_curve);
 
+/* m parameters in [0, 1] from m points of dim coordinates: steps by the chord lengths (DEFAULT, CHORDAL), equal (UNIFORM)
+   or by their square roots (CENTRIPETAL); all 0 but the last when the points coincide */
+void qaws_internal_fit_parameters(qaws_scalar const* data, unsigned int m, unsigned int dim, qaws_parameterization param, qaws_scalar* out);
+
 #endif /* QAWS_INTERNAL_FIT_H */
