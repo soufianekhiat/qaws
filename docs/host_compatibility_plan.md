@@ -334,3 +334,32 @@ claimed from a header alone.
    (f32 data, f32 compute) also required for speed on the CPU?
 3. **Shader toolchains in CI.** dxc and glslang (and Halide) as optional
    build steps on machines that have them, or kept to manual checks?
+
+## 11. Status (2026-10-19)
+
+Decisions taken: work on `meshing` in the 2.0.0 order; mixed precision yes
+(f32 or f64 host data into either computing precision); no shader CI, the
+checks stay manual.
+
+| Item | State | Commits, tests |
+|---|---|---|
+| Defects of section 0 | fixed: degree limits, the static grid, the rational core, the inline copy, reparam D1 (and D3's coefficient, the length-matched curve's chain rule), surface flags, the GLSL example | d1ec231 (140), fee7393 (141), 4d72562 (144) |
+| Array views, curve views, lifetime contract | done (`qaws_view.h`, `docs/api/view.md`) | 91ee140 (142) |
+| Prepared curves, ranges, borrowed `qaws_curve`, owned copies | done | 91ee140 (142) |
+| Surface views, prepared surfaces, borrowed `qaws_surface` with jets | done | 6978734 (143) |
+| Capability matrix | `docs/capabilities.md` | d6b4640, cef91cc |
+| GLSL compiles; shader checks | the cores and examples compile (`tests/shaders/check_shaders.ps1`) | 40d6c76 |
+| CPU/GPU validation | C cores = runtime (144); GPU = C cores, nine families, by hand (`examples/eval_gpu_parity.c`) | cef91cc |
+| Repulsive: cancellation, progress, objective | done for the four solvers | bd8a376 (145) |
+
+Remaining, in order:
+
+- The other families as views (Hermite, Catmull-Rom, polynomial, arc and
+  others), and owned objects rebuilt on views.
+- The allocator through every entry point (section 4) and test 6 for them.
+  The views and prepared objects already take one.
+- The shader ABI for B-splines, NURBS and surfaces read from buffers, and
+  Halide's runtime span.
+- The kernels of section 6.
+- Repulsive: the allocator, line-search and GMRES settings, a validity
+  report for solution derivatives, and the mesh VJP test.
