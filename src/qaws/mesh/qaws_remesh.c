@@ -690,6 +690,30 @@ static int rm_can_remove(rmsh* w, unsigned int x, unsigned int y, double const* 
 	return rm_star_within(w, x, y, dst, ldst);
 }
 
+/* would x's and y's rings stay within 4/3 of their targets from dst, give or take slack? (rm_can_remove's first test, run on
+   the plain midpoint before projecting it: most short edges fail it, and the projection is most of a collapse's cost) */
+static int rm_reach(rmsh* w, unsigned int x, unsigned int y, double const* dst, double slack)
+{
+	qaws_hm const* m = w->m;
+	unsigned int ring[256], n, i, j;
+	for (j = 0; j < 2; j++)
+	{
+		n = hm_ring(m, j ? y : x, ring, 256);
+		if (n > 256)
+			return 0;
+		for (i = 0; i < n; i++)
+		{
+			double hi;
+			if (ring[i] == y || ring[i] == x)
+				continue;
+			hi = (4.0 / 3) * rm_target(w, y, ring[i]) + slack;
+			if (rm_d2(dst, rm_x(m, ring[i])) > hi * hi)
+				return 0;
+		}
+	}
+	return 1;
+}
+
 /* x merged into y: onto the placed point when the guards allow it there, else at y */
 static int rm_try_collapse(rmsh* w, unsigned int c, unsigned int x, unsigned int y)
 {
@@ -700,7 +724,11 @@ static int rm_try_collapse(rmsh* w, unsigned int c, unsigned int x, unsigned int
 	int placed;
 	if ((m->vflag[x] & HM_CORNER) || (hm_feature_degree(m, x) && !(m->cflag[c] & HM_FEATURE)) || !hm_can_collapse(m, c, x))
 		return 0;
-	placed = rm_place(w, c, p, &l);
+	for (k = 0; k < 3; k++)
+		p[k] = 0.5 * (rm_x(m, x)[k] + rm_x(m, y)[k]);
+	l = m->foot[y];
+	/* (the projection moves the midpoint by about the edge's sagitta: a tenth of the edge covers it) */
+	placed = rm_reach(w, x, y, p, 0.1 * sqrt(rm_d2(rm_x(m, x), rm_x(m, y)))) && rm_place(w, c, p, &l);
 	if (placed && !rm_can_remove(w, x, y, p, &l))
 		placed = 0;
 	if (!placed)
@@ -1915,19 +1943,25 @@ qaws_status mx_transfer(qaws_hm* m, qaws_mesh_reference const* r, qaws_mesh_loca
 	return QAWS_STATUS_OK;
 }
 
-/* the reference mesh's attributes onto the result; the faces' deviations */
-static qaws_status rm_end(rmsh* w)
+/* the reference mesh's attributes onto the result; the faces' deviations when report */
+static qaws_status rm_end(rmsh* w, int report)
 {
 	qaws_hm* m = w->m;
 	qaws_mesh_location* fl;
 	unsigned int f, k, c;
 	double dmax = 0, dsum = 0;
+	int need = report;
 	hm_compact(m);
 	fl = (qaws_mesh_location*)malloc(sizeof(qaws_mesh_location) * (m->nf + 1));
 	if (!fl)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
-	/* each face's centre on the reference, from its first vertex's side */
-	for (f = 0; f < m->nf; f++)
+	/* each face's centre on the reference, from its first vertex's side: the deviation reported, and where face and corner
+	   attributes are read; neither wanted (INSTANT's dense mesh), none projected */
+	for (k = 0; k < w->r->mesh->hm.na && !need; k++)
+		need = w->r->mesh->hm.attr[k].element != QAWS_MESH_VERTEX;
+	for (f = 0; !need && f < m->nf; f++)
+		fl[f].patch = HM_NONE;
+	for (f = 0; need && f < m->nf; f++)
 	{
 		double cen[3] = { 0, 0, 0 }, d;
 		for (c = m->fc[f]; c < m->fc[f] + m->fn[f]; c++)
@@ -2052,7 +2086,7 @@ qaws_status qaws_mesh_remesh(qaws_mesh_3d const* mesh, qaws_remesh_desc const* d
 	if (w.failed && st == QAWS_STATUS_OK)
 		st = QAWS_STATUS_ALLOCATION_FAILURE;
 	if (st == QAWS_STATUS_OK)
-		st = rm_end(&w);
+		st = rm_end(&w, out_report != NULL);
 	mr_scratch_free(&w.s);
 	free(w.ep);
 	free(w.chg);
@@ -2063,9 +2097,11 @@ qaws_status qaws_mesh_remesh(qaws_mesh_3d const* mesh, qaws_remesh_desc const* d
 		qaws_mesh_3d_destroy(out);
 		return st;
 	}
-	qaws_mesh_3d_measure_quality(out, &w.rep.quality);
 	if (out_report)
+	{
+		qaws_mesh_3d_measure_quality(out, &w.rep.quality);
 		*out_report = w.rep;
+	}
 	*out_mesh = out;
 	return QAWS_STATUS_OK;
 }
