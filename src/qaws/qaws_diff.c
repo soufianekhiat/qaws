@@ -1819,6 +1819,7 @@ static qaws_status curve_batch_tangent(
 			qaws_scalar t_dot = t_tangent ? t_tangent[i] : QAWS_ZERO;
 			qaws_scalar const eps = QAWS_LITERAL(16.0) * QAWS_EPSILON;
 			int boundary = (span > 0 && local_t <= eps) || (span + 1 < curve->span_count && local_t >= QAWS_ONE - eps);
+			memset(&tt3, 0, sizeof tt3);   /* written only with out_tangent2; zeroed for the compiler's flow analysis */
 			st = d->tangent_span(ctx, curve, span, local_t, t_dot, channels, views, &p3, &t3, out_tangent2 ? &tt3 : NULL);
 			if (st != QAWS_STATUS_OK)
 				return st;
