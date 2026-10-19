@@ -161,6 +161,7 @@ extern int test_146_allocator_main(void);
 extern int test_147_frames_main(void);
 extern int test_148_arc_length_main(void);
 extern int test_149_closest_point_main(void);
+extern int test_150_curve_tessellation_main(void);
 
 /* Test registry */
 typedef struct {
@@ -319,6 +320,7 @@ static test_suite const g_test_suites[] = {
 {"147_frames", test_147_frames_main},
 {"148_arc_length", test_148_arc_length_main},
 {"149_closest_point", test_149_closest_point_main},
+{"150_curve_tessellation", test_150_curve_tessellation_main},
 };
 
 int main(void) {

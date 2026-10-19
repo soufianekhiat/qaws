@@ -99,4 +99,35 @@ qaws_status qaws_curve_sample_streaming_3d(
 	qaws_sample_callback_3d callback,
 	void* user_data);
 
+/* Adaptive tessellation into caller buffers: each span is halved until every
+   segment is within the chord tolerance of the curve (measured at 1/4, 1/2
+   and 3/4 of it) and the tangent turns by at most the angle tolerance along
+   it (summed over those points). Span boundaries are always vertices. The
+   subdivision is deterministic: call with out_parameters NULL for the count,
+   then with buffers of that size. */
+typedef struct qaws_curve_tessellation_desc
+{
+	qaws_scalar chord_tolerance;        /* distance; 0: unused */
+	qaws_scalar angle_tolerance;        /* radians; 0: unused (one of the two is needed) */
+	unsigned int max_depth;             /* halvings per span at most; 0: 16, at most 30 */
+} qaws_curve_tessellation_desc;
+
+/* out_points may be NULL. BUFFER_TOO_SMALL when capacity < the count (in
+   *out_count); the buffers then hold the first capacity vertices. */
+qaws_status qaws_curve_tessellate_2d(
+	qaws_curve const* curve,
+	qaws_curve_tessellation_desc const* desc,
+	qaws_scalar* out_parameters,
+	qaws_vec2* out_points,
+	unsigned int capacity,
+	unsigned int* out_count);
+
+qaws_status qaws_curve_tessellate_3d(
+	qaws_curve const* curve,
+	qaws_curve_tessellation_desc const* desc,
+	qaws_scalar* out_parameters,
+	qaws_vec3* out_points,
+	unsigned int capacity,
+	unsigned int* out_count);
+
 #endif /* QAWS_SAMPLING_H */

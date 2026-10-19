@@ -151,6 +151,7 @@ add_executable(
 147_frames.c
 148_arc_length.c
 149_closest_point.c
+150_curve_tessellation.c
 )
 
 # The amalgamated library exports exactly the same symbols, so the tests can

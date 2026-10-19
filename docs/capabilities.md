@@ -129,8 +129,9 @@ own tool, `examples/repulsive_gpu_parity.c`.
   Surfaces use an 8x8 grid and Newton, which can miss the global minimum.
   Curves other than Bezier, rational Bezier, B-spline, NURBS and borrowed
   splines keep sampling with Newton.
-- **Adaptive tessellation** with chord and angle tolerances into caller
-  buffers. Today the quadtree uses an absolute threshold.
+- **Adaptive surface tessellation** with chord and angle tolerances into
+  caller buffers. Today the quadtree uses an absolute threshold. Curves
+  have this: `qaws_curve_tessellate_2d` and `_3d` (150).
 - **Sweeps and lofts with analytic derivatives.** Swept and pipe surfaces use
   finite differences. Loft and Gordon evaluation scratch is on the stack up
   to 32 sections, beyond that from the surface's allocator.

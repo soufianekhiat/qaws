@@ -209,3 +209,35 @@ qaws_status qaws_curve_sample_streaming_3d(
 ```
 
 Same as `streaming_2d` but for 3D curves.
+
+---
+
+## Adaptive tessellation
+
+### qaws_curve_tessellate_2d / 3d
+
+```c
+typedef struct qaws_curve_tessellation_desc
+{
+    qaws_scalar chord_tolerance;        /* distance; 0: unused */
+    qaws_scalar angle_tolerance;        /* radians; 0: unused (one of the two is needed) */
+    unsigned int max_depth;             /* halvings per span at most; 0: 16, at most 30 */
+} qaws_curve_tessellation_desc;
+
+qaws_status qaws_curve_tessellate_2d(
+    qaws_curve const* curve,
+    qaws_curve_tessellation_desc const* desc,
+    qaws_scalar* out_parameters,
+    qaws_vec2* out_points,
+    unsigned int capacity,
+    unsigned int* out_count);
+
+qaws_status qaws_curve_tessellate_3d(/* the same, qaws_vec3* out_points */);
+```
+
+A polyline that follows the curve within the given tolerances.
+
+- **Subdivision.** Each span is halved until every segment passes both tests. The chord test measures the distance from the curve to the segment at 1/4, 1/2 and 3/4 of it. The angle test sums the tangent's turning through those points. The three test points catch S shapes, whose middle lies on the chord. Span boundaries are always vertices, and a kink there does not count as turning.
+- **Determinism.** The vertices come out in parameter order and are the same on every call. Call once with `out_parameters` NULL for the count (`out_points` may be NULL), then again with buffers of that size.
+- **Errors.** `QAWS_STATUS_BUFFER_TOO_SMALL` when `capacity` is below the count; `*out_count` then holds the count, and the buffers hold the first `capacity` vertices. Nothing is allocated.
+- **Limits.** The tests sample three points, so they are estimates, not bounds (test 150: the true chord error stays under the tolerance on a circle and an S). `max_depth` limits the halvings near cusps, where the tangent reverses.
