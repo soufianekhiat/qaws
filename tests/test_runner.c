@@ -301,7 +301,8 @@ static test_suite const g_test_suites[] = {
 
 int main(void) {
 	/* unbuffered, so a crash shows where it happened; QAWS_TEST=substring
-	   runs only the matching suites */
+	   runs only the matching suites, QAWS_TEST==name the one so named (as
+	   CTest runs each suite) */
 	char const* only = getenv("QAWS_TEST");
 	setvbuf(stdout, NULL, _IONBF, 0);
 	printf("========================================\n");
@@ -313,7 +314,7 @@ int main(void) {
 	size_t const num_suites = sizeof(g_test_suites) / sizeof(g_test_suites[0]);
 
 	for (size_t i = 0; i < num_suites; i++) {
-		if (only && !strstr(g_test_suites[i].name, only))
+		if (only && (only[0] == '=' ? strcmp(g_test_suites[i].name, only + 1) != 0 : !strstr(g_test_suites[i].name, only)))
 			continue;
 		printf("\n");
 		printf("========================================\n");
@@ -341,6 +342,10 @@ int main(void) {
 	printf("Total test suites:  %zu\n", num_suites);
 	printf("========================================\n");
 
+	if (only && total_passed + total_failed == 0) {
+		printf("\nNo suite matches QAWS_TEST=%s\n", only);
+		return 1;
+	}
 	if (total_failed > 0) {
 		printf("\nSome tests FAILED!\n");
 		return 1;

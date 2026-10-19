@@ -175,5 +175,12 @@ set_target_properties(qaws_tests PROPERTIES
   VS_DEBUGGER_WORKING_DIRECTORY "${QAWS_WORKING_DIR}"
 )
 
-add_test(NAME qaws_tests COMMAND qaws_tests)
-set_tests_properties(qaws_tests PROPERTIES WORKING_DIRECTORY "${QAWS_WORKING_DIR}")
+# one CTest test per suite, named as its file: `ctest -R "^13"` picks some, `ctest -j 4` runs a few at once (a laptop CPU gains little past its performance cores)
+# (QAWS_TEST_HEAVY=1 in the environment adds the heavy checks); qaws_tests run by hand still runs them all in turn
+get_target_property(_qaws_test_sources qaws_tests SOURCES)
+foreach(_qaws_test_source IN LISTS _qaws_test_sources)
+  if(_qaws_test_source MATCHES "^([0-9]+_[A-Za-z0-9_]+)\\.c$")
+    add_test(NAME ${CMAKE_MATCH_1} COMMAND qaws_tests)
+    set_tests_properties(${CMAKE_MATCH_1} PROPERTIES WORKING_DIRECTORY "${QAWS_WORKING_DIR}" ENVIRONMENT "QAWS_TEST==${CMAKE_MATCH_1}")
+  endif()
+endforeach()
