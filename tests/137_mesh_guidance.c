@@ -20,6 +20,9 @@
  *   - attractors: a free cone of the smoothest field drawn to a point and
  *     pushed off one (SMOOTHEST, LOCAL); quads' irregular vertex drawn;
  *   - refusals: bad indices, directions on a foreign reference.
+ * By default the unguided quads the stroke and the edge loop are compared
+ * against are their measured numbers (the stroke 17.04 degrees off, the
+ * loop's segments up to 0.0597 from the edges); heavy runs them alongside.
  */
 
 #include "test_common.h"
@@ -209,12 +212,12 @@ static void test_density(void)
 	qaws_mesh_report rep;
 	qaws_status st = QAWS_STATUS_INTERNAL_ERROR;
 	gd_arrays a;
-	double sum[2] = { 0, 0 }, sj = -1;
+	double sum[2] = { 0, 0 }, sj = -1, fine = 0.08;
 	unsigned int cnt[2] = { 0, 0 }, nonq = 1;
 	char msg[400];
 	memset(&a, 0, sizeof a);
 	for (i = 0; i < nv0; i++)
-		sizes[i] = (qaws_scalar)(x0[3 * i + 2] > 0 ? 0.08 : 0.16);
+		sizes[i] = (qaws_scalar)(x0[3 * i + 2] > 0 ? fine : 2 * fine);
 	qaws_mesh_reference_create(s, NULL, &r);
 	qaws_size_field_create_vertices(r, sizes, &sf);
 	memset(&d, 0, sizeof d);
@@ -236,10 +239,10 @@ static void test_density(void)
 		}
 		sj = gd_quads(&a, &nonq);
 	}
-	sprintf(msg, "density paint 0.08 above, 0.16 below: %s, mean edge above %.4f (%u), below %.4f (%u), %u faces not quads, SJ min %.3f, %u singular",
-		qaws_status_to_string(st), cnt[0] ? sum[0] / cnt[0] : 0, cnt[0], cnt[1] ? sum[1] / cnt[1] : 0, cnt[1], nonq, sj, rep.quality.irregular);
+	sprintf(msg, "density paint %.2f above, %.2f below: %s, mean edge above %.4f (%u), below %.4f (%u), %u faces not quads, SJ min %.3f, %u singular",
+		fine, 2 * fine, qaws_status_to_string(st), cnt[0] ? sum[0] / cnt[0] : 0, cnt[0], cnt[1] ? sum[1] / cnt[1] : 0, cnt[1], nonq, sj, rep.quality.irregular);
 	printf("  %s\n", msg);
-	TEST_ASSERT(st == QAWS_STATUS_OK && cnt[0] && cnt[1] && fabs(sum[0] / cnt[0] - 0.08) < 0.2 * 0.08 && fabs(sum[1] / cnt[1] - 0.16) < 0.2 * 0.16
+	TEST_ASSERT(st == QAWS_STATUS_OK && cnt[0] && cnt[1] && fabs(sum[0] / cnt[0] - fine) < 0.2 * fine && fabs(sum[1] / cnt[1] - 2 * fine) < 0.2 * 2 * fine
 		&& nonq == 0 && sj > 0, msg);
 	gd_free(&a);
 	qaws_mesh_3d_destroy(q);
@@ -258,7 +261,7 @@ static void test_directions(void)
 	qaws_scalar *g = (qaws_scalar*)calloc(3 * nv0, sizeof(qaws_scalar)), *w = (qaws_scalar*)calloc(nv0, sizeof(qaws_scalar));
 	qaws_scalar* q = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * nv0);
 	double mean[4], worst[4], before = 0;
-	double devs[2] = { 90, 0 };
+	double devs[2] = { 90, 17.04 };   /* (without the stroke: measured, run again when heavy) */
 	unsigned int ns = 0;
 	char msg[500];
 	for (i = 0; i < nv0; i++)
@@ -310,7 +313,7 @@ static void test_directions(void)
 	TEST_ASSERT(mean[0] < 3 && worst[0] < 8 && mean[1] < 0.5 && worst[1] < 1 && mean[2] < 3 && worst[2] < 8 && mean[3] < 0.5 && worst[3] < 1
 		&& before > 5, msg);
 	/* quads: the edges on the stroke along it */
-	for (j = 0; j < 2; j++)
+	for (j = 0; j < (test_heavy() ? 2u : 1u); j++)
 	{
 		qaws_quadrangulate_desc d;
 		qaws_mesh_report rep;
@@ -401,14 +404,14 @@ static void test_edge_loops(void)
 	unsigned int nv0, i, j, nlon = 48, ring = 8;   /* (the parallel at 60 degrees from the north pole) */
 	qaws_mesh_3d* s = gd_sphere(24, nlon, &x0, &nv0);
 	unsigned int* ge = (unsigned int*)malloc(sizeof(unsigned int) * 2 * nlon);
-	double worst[2] = { 0, 0 }, mean[2] = { 0, 0 }, L = 0.12;
+	double worst[2] = { 0, 0.0597 }, mean[2] = { 0, 0.0217 }, L = 0.12;   /* (without the guide: measured, run again when heavy) */
 	char msg[400];
 	for (i = 0; i < nlon; i++)
 	{
 		ge[2 * i] = 1 + (ring - 1) * nlon + i;
 		ge[2 * i + 1] = 1 + (ring - 1) * nlon + (i + 1) % nlon;
 	}
-	for (j = 0; j < 2; j++)
+	for (j = 0; j < (test_heavy() ? 2u : 1u); j++)
 	{
 		qaws_quadrangulate_desc d;
 		qaws_mesh_report rep;
@@ -438,6 +441,8 @@ static void test_edge_loops(void)
 		{
 			double const *pa = x0 + 3 * ge[2 * i], *pb = x0 + 3 * ge[2 * i + 1];
 			unsigned int k, t;
+			if (i == 0 && j == 1)
+				worst[1] = mean[1] = 0;
 			for (t = 1; t < 4; t++)
 			{
 				double p[3], l, dd;
