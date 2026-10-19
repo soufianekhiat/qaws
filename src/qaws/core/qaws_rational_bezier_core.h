@@ -44,24 +44,27 @@ QAWS_INLINE qaws_eval_2d qaws_rational_bezier_eval_2d(
     C1x = QAWS_ZERO; C1y = QAWS_ZERO;
     C2x = QAWS_ZERO; C2y = QAWS_ZERO;
 
-    /* D1 */
-    if ((eval_flags & 0x2) && degree >= 1) {
+    h_d1.x = QAWS_ZERO; h_d1.y = QAWS_ZERO; h_d1.z = QAWS_ZERO;
+    h_d2.x = QAWS_ZERO; h_d2.y = QAWS_ZERO; h_d2.z = QAWS_ZERO;
+
+    /* D1 (also for D2: the quotient rule reads it) */
+    if ((eval_flags & 0x6) && degree >= 1) {
         qaws_bezier_deriv_points_3d(weighted_cp, degree, d1p);
         h_d1 = qaws_decasteljau_3d(d1p, degree - 1, t);
         C1x = (h_d1.x - Cx * h_d1.z) * inv_w0;
         C1y = (h_d1.y - Cy * h_d1.z) * inv_w0;
-        result.d1.x = C1x;
-        result.d1.y = C1y;
+        if (eval_flags & 0x2) {
+            result.d1.x = C1x;
+            result.d1.y = C1y;
+        }
     }
 
-    /* D2 */
-    if ((eval_flags & 0x4) && degree >= 2) {
-        if (!(eval_flags & 0x2)) {
-            qaws_bezier_deriv_points_3d(weighted_cp, degree, d1p);
-            h_d1 = qaws_decasteljau_3d(d1p, degree - 1, t);
+    /* D2 (the homogeneous second derivative vanishes below degree 2, the quotient's does not) */
+    if ((eval_flags & 0x4) && degree >= 1) {
+        if (degree >= 2) {
+            qaws_bezier_deriv_points_3d(d1p, degree - 1, d2p);
+            h_d2 = qaws_decasteljau_3d(d2p, degree - 2, t);
         }
-        qaws_bezier_deriv_points_3d(d1p, degree - 1, d2p);
-        h_d2 = qaws_decasteljau_3d(d2p, degree - 2, t);
         C2x = (h_d2.x - QAWS_LITERAL(2.0) * C1x * h_d1.z - Cx * h_d2.z) * inv_w0;
         C2y = (h_d2.y - QAWS_LITERAL(2.0) * C1y * h_d1.z - Cy * h_d2.z) * inv_w0;
         result.d2.x = C2x;
@@ -128,8 +131,10 @@ QAWS_INLINE qaws_eval_3d qaws_rational_bezier_eval_3d(
     C1x = QAWS_ZERO; C1y = QAWS_ZERO; C1z = QAWS_ZERO;
     C2x = QAWS_ZERO; C2y = QAWS_ZERO; C2z = QAWS_ZERO;
 
-    /* D1 */
-    if ((eval_flags & 0x2) && degree >= 1) {
+    for (c = 0; c < 4; c++) { hd1[c] = QAWS_ZERO; hd2[c] = QAWS_ZERO; }
+
+    /* D1 (also for D2: the quotient rule reads it) */
+    if ((eval_flags & 0x6) && degree >= 1) {
         deg = (qaws_scalar)degree;
         for (i = 0; i < degree; i++)
             for (c = 0; c < 4; c++)
@@ -148,41 +153,30 @@ QAWS_INLINE qaws_eval_3d qaws_rational_bezier_eval_3d(
         C1x = (hd1[0] - Cx * hd1[3]) * inv_w0;
         C1y = (hd1[1] - Cy * hd1[3]) * inv_w0;
         C1z = (hd1[2] - Cz * hd1[3]) * inv_w0;
-        result.d1.x = C1x;
-        result.d1.y = C1y;
-        result.d1.z = C1z;
+        if (eval_flags & 0x2) {
+            result.d1.x = C1x;
+            result.d1.y = C1y;
+            result.d1.z = C1z;
+        }
     }
 
-    /* D2 */
-    if ((eval_flags & 0x4) && degree >= 2) {
-        if (!(eval_flags & 0x2)) {
-            deg = (qaws_scalar)degree;
-            for (i = 0; i < degree; i++)
+    /* D2 (the homogeneous second derivative vanishes below degree 2, the quotient's does not) */
+    if ((eval_flags & 0x4) && degree >= 1) {
+        if (degree >= 2) {
+            deg = (qaws_scalar)(degree - 1);
+            for (i = 0; i < degree - 1; i++)
                 for (c = 0; c < 4; c++)
-                    d1p[i * 4 + c] = deg * (weighted_cp[(i + 1) * 4 + c] - weighted_cp[i * 4 + c]);
-            for (i = 0; i <= degree - 1; i++)
+                    d2p[i * 4 + c] = deg * (d1p[(i + 1) * 4 + c] - d1p[i * 4 + c]);
+
+            for (i = 0; i <= degree - 2; i++)
                 for (c = 0; c < 4; c++)
-                    work[i * 4 + c] = d1p[i * 4 + c];
-            for (r = 1; r <= degree - 1; r++)
-                for (i = 0; i <= degree - 1 - r; i++)
+                    work[i * 4 + c] = d2p[i * 4 + c];
+            for (r = 1; r <= degree - 2; r++)
+                for (i = 0; i <= degree - 2 - r; i++)
                     for (c = 0; c < 4; c++)
                         work[i * 4 + c] = u * work[i * 4 + c] + t * work[(i + 1) * 4 + c];
-            for (c = 0; c < 4; c++) hd1[c] = work[c];
+            for (c = 0; c < 4; c++) hd2[c] = work[c];
         }
-
-        deg = (qaws_scalar)(degree - 1);
-        for (i = 0; i < degree - 1; i++)
-            for (c = 0; c < 4; c++)
-                d2p[i * 4 + c] = deg * (d1p[(i + 1) * 4 + c] - d1p[i * 4 + c]);
-
-        for (i = 0; i <= degree - 2; i++)
-            for (c = 0; c < 4; c++)
-                work[i * 4 + c] = d2p[i * 4 + c];
-        for (r = 1; r <= degree - 2; r++)
-            for (i = 0; i <= degree - 2 - r; i++)
-                for (c = 0; c < 4; c++)
-                    work[i * 4 + c] = u * work[i * 4 + c] + t * work[(i + 1) * 4 + c];
-        for (c = 0; c < 4; c++) hd2[c] = work[c];
 
         C2x = (hd2[0] - QAWS_LITERAL(2.0) * C1x * hd1[3] - Cx * hd2[3]) * inv_w0;
         C2y = (hd2[1] - QAWS_LITERAL(2.0) * C1y * hd1[3] - Cy * hd2[3]) * inv_w0;

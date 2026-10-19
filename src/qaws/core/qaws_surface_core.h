@@ -9,13 +9,14 @@
  * Surface eval flag bits
  * =================================================================== */
 
+/* the values of QAWS_SURFACE_EVAL_* (qaws_surface_types.h): one flag word for the runtime and the cores */
 #define QAWS_SURFACE_CORE_POSITION  0x1
 #define QAWS_SURFACE_CORE_DU        0x2
 #define QAWS_SURFACE_CORE_DV        0x4
-#define QAWS_SURFACE_CORE_DUU       0x8
-#define QAWS_SURFACE_CORE_DVV       0x10
+#define QAWS_SURFACE_CORE_NORMAL    0x8
+#define QAWS_SURFACE_CORE_DUU       0x10
 #define QAWS_SURFACE_CORE_DUV       0x20
-#define QAWS_SURFACE_CORE_NORMAL    0x40
+#define QAWS_SURFACE_CORE_DVV       0x40
 
 /* ===================================================================
  * Surface evaluation result type

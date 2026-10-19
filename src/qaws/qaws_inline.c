@@ -23,10 +23,33 @@ static size_t align_up(size_t offset, size_t alignment)
 	return (offset + alignment - 1) & ~(alignment - 1);
 }
 
+typedef struct inline_poly_impl
+{
+	qaws_scalar const* coefficients;
+	unsigned int coefficient_count;
+	unsigned int dim_count;
+} inline_poly_impl;
+
+/* The pointers the init functions placed, made again from this storage (the same offsets: n = dimension * (degree + 1) scalars),
+   so a copied inline curve reads its own data. */
 qaws_curve* qaws_curve_inline_get_curve(qaws_curve_inline* ic)
 {
+	qaws_curve* curve;
+	size_t sb_off, cp_off, impl_off;
 	if (!ic) return NULL;
-	return (qaws_curve*)(void*)ic->storage;
+	curve = (qaws_curve*)(void*)ic->storage;
+	if (curve->kind != QAWS_CURVE_KIND_BEZIER && curve->kind != QAWS_CURVE_KIND_POLYNOMIAL)
+		return curve;
+	sb_off = align_up(sizeof(qaws_curve), sizeof(qaws_scalar));
+	cp_off = align_up(sb_off + 2 * sizeof(qaws_scalar), sizeof(qaws_scalar));
+	impl_off = align_up(cp_off + (size_t)curve->dimension * (curve->degree + 1) * sizeof(qaws_scalar), sizeof(void*));
+	curve->span_boundaries = (qaws_scalar*)(void*)&ic->storage[sb_off];
+	curve->impl = &ic->storage[impl_off];
+	if (curve->kind == QAWS_CURVE_KIND_BEZIER)
+		((qaws_bezier_impl*)curve->impl)->control_points = (qaws_scalar*)(void*)&ic->storage[cp_off];
+	else
+		((inline_poly_impl*)curve->impl)->coefficients = (qaws_scalar const*)(void const*)&ic->storage[cp_off];
+	return curve;
 }
 
 /* ------------------------------------------------------------------ */
@@ -220,13 +243,6 @@ qaws_status qaws_curve_init_bezier_inline(
 /* ------------------------------------------------------------------ */
 /*  Inline Polynomial                                                  */
 /* ------------------------------------------------------------------ */
-
-typedef struct inline_poly_impl
-{
-	qaws_scalar const* coefficients;
-	unsigned int coefficient_count;
-	unsigned int dim_count;
-} inline_poly_impl;
 
 static qaws_status inline_poly_eval_2d(
 	qaws_curve const* curve, unsigned int span_index, qaws_scalar local_t,

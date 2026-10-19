@@ -145,6 +145,7 @@ add_executable(
 141_eval_threads.c
 142_curve_view.c
 143_surface_view.c
+144_eval_consistency.c
 )
 
 # The amalgamated library exports exactly the same symbols, so the tests can

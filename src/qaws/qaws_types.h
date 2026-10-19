@@ -212,14 +212,18 @@ typedef struct qaws_allocator
  */
 #define QAWS_INLINE_STORAGE_BYTES 512
 
-typedef struct qaws_curve_inline
+typedef union qaws_curve_inline
 {
 	/* Opaque storage — do not access directly.
 	   Layout is set by the init functions. */
 	char storage[QAWS_INLINE_STORAGE_BYTES];
+	double align_double;                /* the curve and its pointers live in storage: aligned for both */
+	void* align_pointer;
 } qaws_curve_inline;
 
-/* Get the usable qaws_curve pointer from an initialized inline curve. */
+/* Get the usable qaws_curve pointer from an initialized inline curve. The curve points into its own storage, so a copy (memcpy or
+   assignment) is used through the curve this returns for the copy (it re-points the copy at itself: call it once after copying,
+   before other threads use the copy); a pointer taken from the original keeps reading the original. */
 qaws_curve* qaws_curve_inline_get_curve(qaws_curve_inline* ic);
 
 #endif /* QAWS_TYPES_H */
