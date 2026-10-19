@@ -1997,7 +1997,7 @@ static int sr_visit(void* user, unsigned int const* items, unsigned int count, d
 
 #define SR_GRAIN 64
 
-typedef struct sr_job
+typedef struct sb_job
 {
 	qaws_surface const* const* surfaces;
 	qaws_flat_patch const* patches;
@@ -2008,11 +2008,11 @@ typedef struct sr_job
 	qaws_scalar max_t, pos_tol;
 	qaws_surface_ray_hit* out;
 	qaws_surface_batch_stats* stats;   /* one per chunk */
-} sr_job;
+} sb_job;
 
 static qaws_status sr_chunk(void* ctx, unsigned int chunk, unsigned int begin, unsigned int end)
 {
-	sr_job const* J = (sr_job const*)ctx;
+	sb_job const* J = (sb_job const*)ctx;
 	sr_ctx x;
 	unsigned int i, k;
 	memset(&x, 0, sizeof(x));
@@ -2063,7 +2063,7 @@ static qaws_status sr_run(qaws_surface const* const* surfaces, qaws_flat_patch c
 	qaws_scalar const* directions, unsigned int ray_count, qaws_scalar max_t, qaws_scalar ext, qaws_batch_executor const* executor, qaws_surface_ray_hit* out,
 	qaws_surface_batch_stats* stats)
 {
-	sr_job J;
+	sb_job J;
 	qaws_bp_box* boxes;
 	unsigned int i, k, nchunk;
 	qaws_status s;

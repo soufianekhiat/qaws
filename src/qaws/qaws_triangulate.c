@@ -1758,7 +1758,7 @@ static uint64_t rm_key(unsigned int a, unsigned int b)
 	return a < b ? ((uint64_t)a << 32) | b : ((uint64_t)b << 32) | a;
 }
 
-static double rm_target(rm_ctx const* x, double const* p)
+static double tg_target(rm_ctx const* x, double const* p)
 {
 	if (x->size_fn)
 	{
@@ -1773,7 +1773,7 @@ static double rm_target(rm_ctx const* x, double const* p)
 }
 
 /* twice the signed area of a, b, c (a's position replaced by pa if given) */
-static double rm_cross(rm_ctx const* x, unsigned int a, unsigned int b, unsigned int c, double const* pa)
+static double tg_cross(rm_ctx const* x, unsigned int a, unsigned int b, unsigned int c, double const* pa)
 {
 	double const* A = pa ? pa : x->p + 2 * a;
 	double const* B = x->p + 2 * b;
@@ -1955,7 +1955,7 @@ static unsigned int rm_edge_tris(rm_ctx const* x, unsigned int a, unsigned int b
 	return n;
 }
 
-static int rm_split(rm_ctx* x)
+static int tg_split(rm_ctx* x)
 {
 	unsigned int i, ne, splits = 0;
 	if (!rm_maps(x)) return -1;
@@ -1975,7 +1975,7 @@ static int rm_split(rm_ctx* x)
 		if (j < n) continue;
 		mid[0] = 0.5 * (x->p[2 * a] + x->p[2 * b]); mid[1] = 0.5 * (x->p[2 * a + 1] + x->p[2 * b + 1]);
 		len = hypot(x->p[2 * b] - x->p[2 * a], x->p[2 * b + 1] - x->p[2 * a + 1]);
-		if (!(len > 4.0 / 3.0 * rm_target(x, mid))) continue;
+		if (!(len > 4.0 / 3.0 * tg_target(x, mid))) continue;
 		bi = rm_boundary(x, a, b);
 		if (bi != TM_NONE)
 		{
@@ -1986,7 +1986,7 @@ static int rm_split(rm_ctx* x)
 		for (j = 0; j < n; j++)
 		{
 			unsigned int t = r[j] / 3, k = r[j] % 3, c = x->tri[3 * t + k], ea = x->tri[3 * t + (k + 1) % 3], eb = x->tri[3 * t + (k + 2) % 3];
-			if (!(rm_cross(x, TM_NONE, c, ea, mid) > 0) || !(rm_cross(x, TM_NONE, eb, c, mid) > 0)) break;
+			if (!(tg_cross(x, TM_NONE, c, ea, mid) > 0) || !(tg_cross(x, TM_NONE, eb, c, mid) > 0)) break;
 		}
 		if (j < n) continue;
 		mv = rm_vert(x, mid[0], mid[1], bi != TM_NONE ? x->bc[bi] : TM_NONE, tm);
@@ -2037,7 +2037,7 @@ static int rm_has(rm_ctx const* x, unsigned int t, unsigned int v)
 	return x->tri[3 * t] != TM_NONE && (x->tri[3 * t] == v || x->tri[3 * t + 1] == v || x->tri[3 * t + 2] == v);
 }
 
-static int rm_collapse(rm_ctx* x)
+static int tg_collapse(rm_ctx* x)
 {
 	unsigned int *first = NULL, *star = NULL, i, ne, done = 0;
 	unsigned int* bin = NULL;     /* per vertex: the boundary edge ending there */
@@ -2062,7 +2062,7 @@ static int rm_collapse(rm_ctx* x)
 		if (rm_key(a, b) != x->ekey[i] || lock[a] || lock[b]) continue;
 		mid[0] = 0.5 * (x->p[2 * a] + x->p[2 * b]); mid[1] = 0.5 * (x->p[2 * a + 1] + x->p[2 * b + 1]);
 		len = hypot(x->p[2 * b] - x->p[2 * a], x->p[2 * b + 1] - x->p[2 * a + 1]);
-		if (!(len < 0.8 * rm_target(x, mid))) continue;
+		if (!(len < 0.8 * tg_target(x, mid))) continue;
 		bi = rm_boundary(x, a, b);
 		/* which end goes: never a corner; a boundary vertex only along its
 		   boundary edge (into its neighbour on the same curve) */
@@ -2101,13 +2101,13 @@ static int rm_collapse(rm_ctx* x)
 			if (x->tri[3 * t] == TM_NONE || rm_has(x, t, w)) continue;
 			o[0] = x->tri[3 * t]; o[1] = x->tri[3 * t + 1]; o[2] = x->tri[3 * t + 2];
 			for (kk = 0; kk < 3; kk++) if (o[kk] == u) o[kk] = w;
-			if (!(rm_cross(x, o[0], o[1], o[2], NULL) > 0)) ok = 0;
+			if (!(tg_cross(x, o[0], o[1], o[2], NULL) > 0)) ok = 0;
 			for (kk = 0; kk < 3 && ok; kk++)
 				if (o[kk] != w)
 				{
 					double mm[2];
 					mm[0] = 0.5 * (x->p[2 * o[kk]] + x->p[2 * w]); mm[1] = 0.5 * (x->p[2 * o[kk] + 1] + x->p[2 * w + 1]);
-					if (hypot(x->p[2 * o[kk]] - x->p[2 * w], x->p[2 * o[kk] + 1] - x->p[2 * w + 1]) > 4.0 / 3.0 * rm_target(x, mm)) ok = 0;
+					if (hypot(x->p[2 * o[kk]] - x->p[2 * w], x->p[2 * o[kk] + 1] - x->p[2 * w + 1]) > 4.0 / 3.0 * tg_target(x, mm)) ok = 0;
 				}
 		}
 		if (!ok) continue;
@@ -2182,7 +2182,7 @@ static double rm_incircle(rm_ctx const* x, unsigned int a, unsigned int b, unsig
 	return (adx * adx + ady * ady) * (bdx * cdy - cdx * bdy) + (bdx * bdx + bdy * bdy) * (cdx * ady - adx * cdy) + (cdx * cdx + cdy * cdy) * (adx * bdy - bdx * ady);
 }
 
-static int rm_flip(rm_ctx* x)
+static int tg_flip(rm_ctx* x)
 {
 	unsigned int i, ne, flips = 0;
 	if (!rm_maps(x)) return -1;
@@ -2205,7 +2205,7 @@ static int rm_flip(rm_ctx* x)
 		e = hypot(x->p[2 * a] - x->p[2 * b], x->p[2 * a + 1] - x->p[2 * b + 1]);
 		s = e * e;
 		if (rm_incircle(x, c, a, b, d) <= 1e-9 * s * s) continue;
-		if (!(rm_cross(x, c, a, d, NULL) > 0) || !(rm_cross(x, d, b, c, NULL) > 0)) continue;
+		if (!(tg_cross(x, c, a, d, NULL) > 0) || !(tg_cross(x, d, b, c, NULL) > 0)) continue;
 		x->tri[3 * t] = c; x->tri[3 * t + 1] = a; x->tri[3 * t + 2] = d;
 		x->tri[3 * u] = d; x->tri[3 * u + 1] = b; x->tri[3 * u + 2] = c;
 		x->used[t] = x->used[u] = 1;
@@ -2214,7 +2214,7 @@ static int rm_flip(rm_ctx* x)
 	return (int)flips;
 }
 
-static int rm_smooth(rm_ctx* x)
+static int tg_smooth(rm_ctx* x)
 {
 	unsigned int *first = NULL, *star = NULL, v, moved = 0;
 	unsigned int* bin = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (x->nv + 1));
@@ -2254,7 +2254,7 @@ static int rm_smooth(rm_ctx* x)
 			unsigned int t = star[j], k;
 			for (k = 0; k < 3; k++)
 				if (x->tri[3 * t + k] == v)
-					ok = rm_cross(x, TM_NONE, x->tri[3 * t + (k + 1) % 3], x->tri[3 * t + (k + 2) % 3], np) > 0;
+					ok = tg_cross(x, TM_NONE, x->tri[3 * t + (k + 1) % 3], x->tri[3 * t + (k + 2) % 3], np) > 0;
 		}
 		if (!ok) continue;
 		x->p[2 * v] = np[0]; x->p[2 * v + 1] = np[1];
@@ -2421,13 +2421,13 @@ qaws_status qaws_mesh_2d_remesh(qaws_mesh_2d* mesh, qaws_scalar target_length, q
 	{
 		unsigned int r;
 		int s;
-		for (r = 0; r < 12; r++) { s = rm_split(&x); if (s < 0) { ok = 0; break; } if (!s) break; }
-		for (r = 0; r < 4 && ok; r++) { s = rm_collapse(&x); if (s < 0) { ok = 0; break; } if (!s) break; }
-		for (r = 0; r < 8 && ok; r++) { s = rm_flip(&x); if (s < 0) { ok = 0; break; } if (!s) break; }
+		for (r = 0; r < 12; r++) { s = tg_split(&x); if (s < 0) { ok = 0; break; } if (!s) break; }
+		for (r = 0; r < 4 && ok; r++) { s = tg_collapse(&x); if (s < 0) { ok = 0; break; } if (!s) break; }
+		for (r = 0; r < 8 && ok; r++) { s = tg_flip(&x); if (s < 0) { ok = 0; break; } if (!s) break; }
 		for (r = 0; r < 3 && ok; r++)
 		{
-			if (rm_smooth(&x) < 0) { ok = 0; break; }
-			if (rm_flip(&x) < 0) ok = 0;
+			if (tg_smooth(&x) < 0) { ok = 0; break; }
+			if (tg_flip(&x) < 0) ok = 0;
 		}
 	}
 	if (ok) ok = rm_store(&x, NULL, 0);

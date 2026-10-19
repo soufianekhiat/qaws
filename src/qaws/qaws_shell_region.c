@@ -4651,7 +4651,7 @@ static int sm_add_tri(qaws_shell_mesh* m, unsigned int a, unsigned int b, unsign
 	return 1;
 }
 
-static double sm_d3(qaws_vec3 a, qaws_vec3 b)
+static double shr_d3(qaws_vec3 a, qaws_vec3 b)
 {
 	double dx = (double)a.x - b.x, dy = (double)a.y - b.y, dz = (double)a.z - b.z;
 	return sqrt(dx * dx + dy * dy + dz * dz);
@@ -4711,7 +4711,7 @@ qaws_status qaws_shell_region_triangulate(qaws_shell_region const* region, qaws_
 			uv[0] = q.x; uv[1] = q.y;
 			memset(&r, 0, sizeof(r));
 			sh_point(&region->a->c[f], uv, QAWS_SURFACE_EVAL_POSITION, &r);
-			for (j = 0; j < m->nv && sm_d3(m->vx[j], r.position) > weld; j++) {}
+			for (j = 0; j < m->nv && shr_d3(m->vx[j], r.position) > weld; j++) {}
 			if (j == m->nv)
 			{
 				if (!sm_grow((void**)&m->vp, &m->capv, m->nv + 1, sizeof(qaws_shell_point)) ||

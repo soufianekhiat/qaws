@@ -36,14 +36,14 @@ typedef struct rp_work
 
 /* ---- vectors ------------------------------------------------------------ */
 
-static void rp_sub(double const* a, double const* b, double* o)
+static void mrp_sub(double const* a, double const* b, double* o)
 {
 	o[0] = a[0] - b[0];
 	o[1] = a[1] - b[1];
 	o[2] = a[2] - b[2];
 }
 
-static double rp_dot(double const* a, double const* b)
+static double mrp_dot(double const* a, double const* b)
 {
 	return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 }
@@ -58,23 +58,23 @@ static void rp_cross(double const* a, double const* b, double* o)
 static double rp_dist(double const* a, double const* b)
 {
 	double d[3];
-	rp_sub(a, b, d);
-	return sqrt(rp_dot(d, d));
+	mrp_sub(a, b, d);
+	return sqrt(mrp_dot(d, d));
 }
 
 /* the normal of (a, b, c), as long as twice the area */
 static void rp_normal(double const* a, double const* b, double const* c, double* n)
 {
 	double u[3], v[3];
-	rp_sub(b, a, u);
-	rp_sub(c, a, v);
+	mrp_sub(b, a, u);
+	mrp_sub(c, a, v);
 	rp_cross(u, v, n);
 }
 
 /* n made unit (zero when it has no length); its length */
 static double rp_unit(double* n)
 {
-	double l = sqrt(rp_dot(n, n));
+	double l = sqrt(mrp_dot(n, n));
 	n[0] = l > 0 ? n[0] / l : 0;
 	n[1] = l > 0 ? n[1] / l : 0;
 	n[2] = l > 0 ? n[2] / l : 0;
@@ -86,7 +86,7 @@ static double rp_angle(double const* u, double const* v)
 {
 	double c[3];
 	rp_cross(u, v, c);
-	return atan2(sqrt(rp_dot(c, c)), rp_dot(u, v));
+	return atan2(sqrt(mrp_dot(c, c)), mrp_dot(u, v));
 }
 
 static int rp_finite(double v)
@@ -402,8 +402,8 @@ static qaws_status rp_weld_visit(void* user, unsigned int i, unsigned int j)
 {
 	rp_weld_ctx* c = (rp_weld_ctx*)user;
 	double d[3];
-	rp_sub(c->x + 3 * (size_t)c->id[i], c->x + 3 * (size_t)c->id[j], d);
-	if (rp_dot(d, d) <= c->tol2)
+	mrp_sub(c->x + 3 * (size_t)c->id[i], c->x + 3 * (size_t)c->id[j], d);
+	if (mrp_dot(d, d) <= c->tol2)
 		rp_union(c->uf, c->id[i], c->id[j]);
 	return QAWS_STATUS_OK;
 }
@@ -571,7 +571,7 @@ static void rp_degenerate(rp_work* w, double h)
 				}
 			}
 			rp_normal(RP_X(m, m->t[3 * (size_t)f]), RP_X(m, m->t[3 * (size_t)f + 1]), RP_X(m, m->t[3 * (size_t)f + 2]), n);
-			if (lmax > 0 && sqrt(rp_dot(n, n)) >= h * lmax)
+			if (lmax > 0 && sqrt(mrp_dot(n, n)) >= h * lmax)
 				continue;
 			if (lmin < h)
 			{
@@ -673,10 +673,10 @@ static qaws_status rp_stitch_visit(void* user, unsigned int i, unsigned int j)
 		if (v == a || v == b || v == q || rp_has_edge(c->E, c->ne, v, a) || rp_has_edge(c->E, c->ne, v, b)
 			|| rp_dist(P, A) <= c->tol || rp_dist(P, B) <= c->tol)
 			return QAWS_STATUS_OK;   /* (near an end: merged with it instead) */
-		rp_sub(B, A, ab);
-		rp_sub(P, A, ap);
-		L2 = rp_dot(ab, ab);
-		s = L2 > 0 ? rp_dot(ap, ab) / L2 : 0;
+		mrp_sub(B, A, ab);
+		mrp_sub(P, A, ap);
+		L2 = mrp_dot(ab, ab);
+		s = L2 > 0 ? mrp_dot(ap, ab) / L2 : 0;
 		if (s <= 0 || s >= 1)
 			return QAWS_STATUS_OK;
 		F[0] = A[0] + s * ab[0];
@@ -868,7 +868,7 @@ static void rp_components(rp_work* w, double min_area, unsigned int min_faces)
 		unsigned int r = rp_find(uf, m->t[3 * (size_t)f]);
 		double n[3];
 		rp_normal(RP_X(m, m->t[3 * (size_t)f]), RP_X(m, m->t[3 * (size_t)f + 1]), RP_X(m, m->t[3 * (size_t)f + 2]), n);
-		area[r] += 0.5 * sqrt(rp_dot(n, n));
+		area[r] += 0.5 * sqrt(mrp_dot(n, n));
 		cnt[r]++;
 	}
 	for (v = 0; v < m->nv; v++)
@@ -970,9 +970,9 @@ done:
 /* the solid angle of triangle (a, b, c) seen from the origin (Van Oosterom and Strackee) */
 static double rp_solid_angle(double const* a, double const* b, double const* c)
 {
-	double la = sqrt(rp_dot(a, a)), lb = sqrt(rp_dot(b, b)), lc = sqrt(rp_dot(c, c)), bc[3];
+	double la = sqrt(mrp_dot(a, a)), lb = sqrt(mrp_dot(b, b)), lc = sqrt(mrp_dot(c, c)), bc[3];
 	rp_cross(b, c, bc);
-	return 2 * atan2(rp_dot(a, bc), la * lb * lc + rp_dot(a, b) * lc + rp_dot(b, c) * la + rp_dot(c, a) * lb);
+	return 2 * atan2(mrp_dot(a, bc), la * lb * lc + mrp_dot(a, b) * lc + mrp_dot(b, c) * la + mrp_dot(c, a) * lb);
 }
 
 /* each part turned so its signed volume is positive, or negative at an odd depth inside other closed parts (removed instead
@@ -1045,11 +1045,11 @@ static void rp_outward(rp_work* w, int remove_nested)
 		double c[3], a[3], b[3], d[3], n[3];
 		for (i = 0; i < 3; i++)
 			c[i] = 0.5 * (bx[i] + bx[3 + i]);
-		rp_sub(RP_X(m, m->t[3 * (size_t)f]), c, a);
-		rp_sub(RP_X(m, m->t[3 * (size_t)f + 1]), c, b);
-		rp_sub(RP_X(m, m->t[3 * (size_t)f + 2]), c, d);
+		mrp_sub(RP_X(m, m->t[3 * (size_t)f]), c, a);
+		mrp_sub(RP_X(m, m->t[3 * (size_t)f + 1]), c, b);
+		mrp_sub(RP_X(m, m->t[3 * (size_t)f + 2]), c, d);
 		rp_cross(b, d, n);
-		vol[shell[f]] += rp_dot(a, n) / 6;
+		vol[shell[f]] += mrp_dot(a, n) / 6;
 	}
 	memset(depth, 0, sizeof(unsigned int) * (ns ? ns : 1));
 	/* depth: the closed parts T round a part S, judged at up to 16 of S's vertices by T's winding number
@@ -1080,9 +1080,9 @@ static void rp_outward(rp_work* w, int remove_nested)
 				for (i = off[s]; i < off[s + 1]; i++)
 				{
 					double a[3], b[3], d[3];
-					rp_sub(RP_X(m, m->t[3 * (size_t)list[i]]), p, a);
-					rp_sub(RP_X(m, m->t[3 * (size_t)list[i] + 1]), p, b);
-					rp_sub(RP_X(m, m->t[3 * (size_t)list[i] + 2]), p, d);
+					mrp_sub(RP_X(m, m->t[3 * (size_t)list[i]]), p, a);
+					mrp_sub(RP_X(m, m->t[3 * (size_t)list[i] + 1]), p, b);
+					mrp_sub(RP_X(m, m->t[3 * (size_t)list[i] + 2]), p, d);
 					wn += rp_solid_angle(a, b, d);
 				}
 				tested++;
@@ -1142,8 +1142,8 @@ static int rp_sigma_room(rp_fill_ctx* c, unsigned int nv)
 /* the cosine of the angle between unit normals; -1 (the worst) when one is degenerate */
 static double rp_cos(double const* a, double const* b)
 {
-	double d = rp_dot(a, b);
-	return rp_dot(a, a) > 0 && rp_dot(b, b) > 0 ? d : -1;
+	double d = mrp_dot(a, b);
+	return mrp_dot(a, a) > 0 && mrp_dot(b, b) > 0 ? d : -1;
 }
 
 /* loop L (its edges L[i] -> L[i + 1] those of faces whose third vertices are O[i]) filled by Liepa's programme: the
@@ -1308,11 +1308,11 @@ static void rp_relax(rp_work* w, rp_fill_ctx const* c, unsigned int t0)
 			q = m->t[3 * (size_t)g + (F[r + 1].k + 2) % 3];
 			if (p == q || rp_has_edge(F, nf, p, q) || rp_has_edge(c->E, c->ne, p, q))
 				continue;
-			rp_sub(RP_X(m, a), RP_X(m, p), u);
-			rp_sub(RP_X(m, b), RP_X(m, p), v);
+			mrp_sub(RP_X(m, a), RP_X(m, p), u);
+			mrp_sub(RP_X(m, b), RP_X(m, p), v);
 			ap = rp_angle(u, v);
-			rp_sub(RP_X(m, a), RP_X(m, q), u);
-			rp_sub(RP_X(m, b), RP_X(m, q), v);
+			mrp_sub(RP_X(m, a), RP_X(m, q), u);
+			mrp_sub(RP_X(m, b), RP_X(m, q), v);
 			aq = rp_angle(u, v);
 			if (ap + aq <= RP_PI + 1e-9)
 				continue;
@@ -1323,7 +1323,7 @@ static void rp_relax(rp_work* w, rp_fill_ctx const* c, unsigned int t0)
 			n0[2] += nf2[2];
 			rp_normal(RP_X(m, p), RP_X(m, a), RP_X(m, q), n1);
 			rp_normal(RP_X(m, q), RP_X(m, b), RP_X(m, p), n2);
-			if (rp_dot(n1, n0) <= 0 || rp_dot(n2, n0) <= 0)
+			if (mrp_dot(n1, n0) <= 0 || mrp_dot(n2, n0) <= 0)
 				continue;
 			m->t[3 * (size_t)f] = p;
 			m->t[3 * (size_t)f + 1] = a;

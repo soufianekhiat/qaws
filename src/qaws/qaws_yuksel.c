@@ -9,11 +9,11 @@
 #include <string.h>
 #include <math.h>
 
-#ifndef QAWS_PI
-#define QAWS_PI ((qaws_scalar)3.14159265358979323846)
+#ifndef YK_PI
+#define YK_PI ((qaws_scalar)3.14159265358979323846)
 #endif
 
-#define QAWS_PI_2 ((qaws_scalar)(QAWS_PI * (qaws_scalar)0.5))
+#define QAWS_PI_2 ((qaws_scalar)(YK_PI * (qaws_scalar)0.5))
 
 /* ------------------------------------------------------------------ */
 /*  Vector helpers (2D/3D, dimension-generic via raw scalars)          */
@@ -568,7 +568,7 @@ static void compute_elliptical_subcurve(
 		sc->radius = a2;
 		sc->radius_b = b2;
 
-		sc->angle_start = QAWS_PI;
+		sc->angle_start = YK_PI;
 		sc->angle_end = (qaws_scalar)0;
 
 		/* Detect which way pi is relative to the chord in 2D */
@@ -640,7 +640,7 @@ static void compute_elliptical_subcurve(
 	sc->angle_end = (qaws_scalar)atan2((double)0, (double)a);       /* 0 angle, i.e. pk */
 
 	/* Determine sign of arc angles: pj corresponds to angle PI, pk to angle 0 */
-	sc->angle_start = QAWS_PI;
+	sc->angle_start = YK_PI;
 	sc->angle_end = (qaws_scalar)0;
 
 	/* Detect which way pi is relative to the chord */
@@ -892,8 +892,8 @@ static void yuksel_blend_eval(
 	   dw2/dt =  pi * cos(pi*t/2) * sin(pi*t/2) =  pi/2 * sin(pi*t)
 	   D1 = dw1*p1 + w1*dp1 + dw2*p2 + w2*dp2 */
 	if (out_d1 && need_d1) {
-		qaws_scalar dw1 = -QAWS_PI * c_val * s_val;
-		qaws_scalar dw2 =  QAWS_PI * c_val * s_val;
+		qaws_scalar dw1 = -YK_PI * c_val * s_val;
+		qaws_scalar dw2 =  YK_PI * c_val * s_val;
 		for (d = 0; d < dim; d++)
 			out_d1[d] = dw1 * p1[d] + c2 * dp1[d]
 				+ dw2 * p2[d] + s2 * dp2[d];
@@ -901,13 +901,13 @@ static void yuksel_blend_eval(
 
 	/* Second derivative */
 	if (out_d2 && need_d2) {
-		qaws_scalar dw1 = -QAWS_PI * c_val * s_val;
-		qaws_scalar dw2 =  QAWS_PI * c_val * s_val;
+		qaws_scalar dw1 = -YK_PI * c_val * s_val;
+		qaws_scalar dw2 =  YK_PI * c_val * s_val;
 		/* d2w1/dt2 = -pi^2/2 * cos(pi*t) */
-		qaws_scalar d2w1 = -QAWS_PI * QAWS_PI / (qaws_scalar)2
-			* (qaws_scalar)cos((double)(QAWS_PI * t));
-		qaws_scalar d2w2 =  QAWS_PI * QAWS_PI / (qaws_scalar)2
-			* (qaws_scalar)cos((double)(QAWS_PI * t));
+		qaws_scalar d2w1 = -YK_PI * YK_PI / (qaws_scalar)2
+			* (qaws_scalar)cos((double)(YK_PI * t));
+		qaws_scalar d2w2 =  YK_PI * YK_PI / (qaws_scalar)2
+			* (qaws_scalar)cos((double)(YK_PI * t));
 		for (d = 0; d < dim; d++)
 			out_d2[d] = d2w1 * p1[d] + (qaws_scalar)2 * dw1 * dp1[d] + c2 * d2p1[d]
 				+ d2w2 * p2[d] + (qaws_scalar)2 * dw2 * dp2[d] + s2 * d2p2[d];
@@ -915,9 +915,9 @@ static void yuksel_blend_eval(
 
 	/* Third derivative: d3w1 = pi^3/2 sin(pi t), d3w2 = -d3w1 */
 	if (out_d3) {
-		qaws_scalar dw1 = -QAWS_PI * c_val * s_val;
-		qaws_scalar d2w1 = -QAWS_PI * QAWS_PI / (qaws_scalar)2 * (qaws_scalar)cos((double)(QAWS_PI * t));
-		qaws_scalar d3w1 = QAWS_PI * QAWS_PI * QAWS_PI / (qaws_scalar)2 * (qaws_scalar)sin((double)(QAWS_PI * t));
+		qaws_scalar dw1 = -YK_PI * c_val * s_val;
+		qaws_scalar d2w1 = -YK_PI * YK_PI / (qaws_scalar)2 * (qaws_scalar)cos((double)(YK_PI * t));
+		qaws_scalar d3w1 = YK_PI * YK_PI * YK_PI / (qaws_scalar)2 * (qaws_scalar)sin((double)(YK_PI * t));
 		for (d = 0; d < dim; d++)
 			out_d3[d] = d3w1 * (p1[d] - p2[d]) + (qaws_scalar)3 * d2w1 * (dp1[d] - dp2[d])
 				+ (qaws_scalar)3 * dw1 * (d2p1[d] - d2p2[d]) + c2 * d3p1[d] + s2 * d3p2[d];
@@ -1246,8 +1246,8 @@ static void yk_span_jet(qaws_yuksel_impl const* impl, unsigned int dim, unsigned
 			{
 				/* w1 = (1 + cos pi u) / 2, w2 = 1 - w1 */
 				unsigned int m = k - j;
-				qaws_scalar w1 = m == 0 ? (qaws_scalar)(0.5 * (1 + cos(QAWS_PI * u)))
-					: (qaws_scalar)(0.5 * pow((double)QAWS_PI, (double)m) * cos(QAWS_PI * u + m * QAWS_PI_2));
+				qaws_scalar w1 = m == 0 ? (qaws_scalar)(0.5 * (1 + cos(YK_PI * u)))
+					: (qaws_scalar)(0.5 * pow((double)YK_PI, (double)m) * cos(YK_PI * u + m * QAWS_PI_2));
 				qaws_scalar w2 = m == 0 ? (qaws_scalar)1 - w1 : -w1;
 				acc = qaws_dual1_add(acc, yk_mul_s(qaws_dual1_add(yk_mul_s(g1[j][c], w1), yk_mul_s(g2[j][c], w2)), binom[k][j]));
 			}
