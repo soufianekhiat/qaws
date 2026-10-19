@@ -278,18 +278,19 @@ qaws_status qaws_curve_create_polynomial(
 	if (desc->degree < 1) return QAWS_STATUS_INVALID_DEGREE;
 	if (desc->coefficient_count != desc->degree + 1) return QAWS_STATUS_INVALID_CONTROL_POINT_COUNT;
 	if (!desc->coefficients) return QAWS_STATUS_INVALID_ARGUMENT;
-	if (desc->t_max <= desc->t_min) return QAWS_STATUS_INVALID_PARAMETER_RANGE;
+	/* 0 and 0: the documented default [0, 1], as qaws_curve_init_polynomial_inline */
+	range.min_value = desc->t_min;
+	range.max_value = desc->t_min == 0 && desc->t_max == 0 ? (qaws_scalar)1 : desc->t_max;
+	if (range.max_value <= range.min_value) return QAWS_STATUS_INVALID_PARAMETER_RANGE;
 
 	dim_count = (unsigned int)desc->dimension;
-	range.min_value = desc->t_min;
-	range.max_value = desc->t_max;
 
 	curve = qaws_internal_curve_alloc(
 		QAWS_CURVE_KIND_POLYNOMIAL, desc->dimension, desc->degree,
 		1, range, &polynomial_vtable);
 	if (!curve) return QAWS_STATUS_ALLOCATION_FAILURE;
-	curve->span_boundaries[0] = desc->t_min;
-	curve->span_boundaries[1] = desc->t_max;
+	curve->span_boundaries[0] = range.min_value;
+	curve->span_boundaries[1] = range.max_value;
 
 	impl = (qaws_polynomial_impl*)malloc(sizeof(qaws_polynomial_impl));
 	if (!impl) { qaws_internal_curve_free(curve); return QAWS_STATUS_ALLOCATION_FAILURE; }

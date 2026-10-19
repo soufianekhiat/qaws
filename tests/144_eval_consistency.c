@@ -22,6 +22,10 @@
 #include "qaws_core_types.h"
 #include "core/qaws_rational_bezier_core.h"
 #include "core/qaws_surface_core.h"
+#include "core/qaws_bspline_basis_core.h"
+#include "core/qaws_bspline_eval_core.h"
+#include "core/qaws_nurbs_eval_core.h"
+#include "core/qaws_cubic_poly_core.h"
 #include <math.h>
 #include <string.h>
 #include <stddef.h>
@@ -288,6 +292,160 @@ static void test_arc_length_wrappers(void)
 	qaws_curve_destroy(b);
 }
 
+/* the B-spline, NURBS, cubic and B-spline surface cores (shader code, compiled as C) against the runtime objects: the CPU end of
+   the shader validation (examples/eval_gpu_parity.c runs the same cores on a GPU against these) */
+static void test_spline_cores(void)
+{
+	static double const kn[11] = { 0, 0, 0, 0, 0.7, 1.5, 1.5, 3, 3, 3, 3 };   /* n = 7, cubic, a double knot */
+	qaws_scalar cp[7 * 3], ws[7], k[11], full[QAWS_CORE_MAX_POINTS * 2];
+	qaws_bspline_desc bd;
+	qaws_nurbs_desc nd;
+	qaws_polynomial_desc pd;
+	qaws_curve *bs = NULL, *nu = NULL, *po = NULL;
+	qaws_scalar coef[4 * 3];
+	double eb = 0, en = 0, ec = 0, es = 0;
+	unsigned int i, j, s;
+	char msg[300];
+	memset(full, 0, sizeof full);
+	for (i = 0; i < 7; i++)
+	{
+		cp[i * 3] = (qaws_scalar)cos(0.9 * i);
+		cp[i * 3 + 1] = (qaws_scalar)sin(1.3 * i);
+		cp[i * 3 + 2] = (qaws_scalar)(0.2 * i);
+		ws[i] = (qaws_scalar)(0.5 + 0.3 * (i % 3));
+	}
+	for (i = 0; i < 11; i++)
+		full[i] = k[i] = (qaws_scalar)kn[i];
+	memset(&bd, 0, sizeof bd);
+	bd.dimension = QAWS_DIMENSION_3D;
+	bd.degree = 3;
+	bd.control_points = cp;
+	bd.control_point_count = 7;
+	bd.knots = k;
+	bd.knot_count = 11;
+	memset(&nd, 0, sizeof nd);
+	nd.dimension = QAWS_DIMENSION_3D;
+	nd.degree = 3;
+	nd.control_points = cp;
+	nd.control_point_count = 7;
+	nd.knots = k;
+	nd.knot_count = 11;
+	nd.weights = ws;
+	nd.weight_count = 7;
+	for (i = 0; i < 12; i++)
+		coef[i] = (qaws_scalar)(0.3 * sin(1.7 * i + 0.2));
+	memset(&pd, 0, sizeof pd);
+	pd.dimension = QAWS_DIMENSION_3D;
+	pd.degree = 3;
+	pd.coefficients = coef;
+	pd.coefficient_count = 4;
+	{
+		qaws_status s1 = qaws_curve_create_bspline(&bd, &bs), s2 = qaws_curve_create_nurbs(&nd, &nu), s3 = qaws_curve_create_polynomial(&pd, &po);
+		sprintf(msg, "spline curves created: B-spline %s, NURBS %s, polynomial %s", qaws_status_to_string(s1), qaws_status_to_string(s2),
+			qaws_status_to_string(s3));
+	}
+	if (!bs || !nu || !po)
+	{
+		TEST_ASSERT(0, msg);
+		qaws_curve_destroy(bs);
+		qaws_curve_destroy(nu);
+		qaws_curve_destroy(po);
+		return;
+	}
+	for (s = 0; s <= 30; s++)
+	{
+		qaws_scalar t = (qaws_scalar)(3.0 * s / 30);
+		qaws_scalar lcp[QAWS_CORE_MAX_POINTS * 3], lk[QAWS_CORE_MAX_POINTS * 2], lw[QAWS_CORE_MAX_POINTS];
+		qaws_eval_result_3d r;
+		qaws_eval_3d c;
+		qaws_vec3 a, b, cc, d;
+		int span = qaws_find_span(full, 3, 7, t);
+		for (j = 0; j < 8; j++)
+			lk[j] = k[span - 3 + (int)j];
+		for (j = 0; j <= 3; j++)
+		{
+			lcp[j * 3] = cp[(span - 3 + (int)j) * 3];
+			lcp[j * 3 + 1] = cp[(span - 3 + (int)j) * 3 + 1];
+			lcp[j * 3 + 2] = cp[(span - 3 + (int)j) * 3 + 2];
+			lw[j] = ws[span - 3 + (int)j];
+		}
+		c = qaws_bspline_eval_3d(lcp, lk, 3, 3, t, 7);
+		qaws_curve_evaluate_3d(bs, t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2, &r);
+		eb = fmax(eb, ec_err3(c.position, r.position) + ec_err3(c.d1, r.d1) + ec_err3(c.d2, r.d2));
+		c = qaws_nurbs_eval_3d(lcp, lk, lw, 3, 3, t, 7);
+		qaws_curve_evaluate_3d(nu, t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2, &r);
+		en = fmax(en, ec_err3(c.position, r.position) + ec_err3(c.d1, r.d1) + ec_err3(c.d2, r.d2));
+		/* the cubic core's a t^3 + b t^2 + c t + d against the monomial curve sum coef[i] t^i on [0, 1] */
+		if (s <= 10)
+		{
+			qaws_scalar u = (qaws_scalar)(s / 10.0);
+			a.x = coef[9]; a.y = coef[10]; a.z = coef[11];
+			b.x = coef[6]; b.y = coef[7]; b.z = coef[8];
+			cc.x = coef[3]; cc.y = coef[4]; cc.z = coef[5];
+			d.x = coef[0]; d.y = coef[1]; d.z = coef[2];
+			c = qaws_cubic_eval_3d(a, b, cc, d, u, 7);
+			qaws_curve_evaluate_3d(po, u, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2, &r);
+			ec = fmax(ec, ec_err3(c.position, r.position) + ec_err3(c.d1, r.d1) + ec_err3(c.d2, r.d2));
+		}
+	}
+	qaws_curve_destroy(bs);
+	qaws_curve_destroy(nu);
+	qaws_curve_destroy(po);
+	/* the B-spline surface core: 6 x 5 points, degrees 3 and 2 */
+	{
+		static double const uk[10] = { 0, 0, 0, 0, 0.4, 0.4, 1, 1, 1, 1 }, vk[8] = { 0, 0, 0, 0.3, 0.75, 1, 1, 1 };
+		qaws_vec3 grid[30];
+		qaws_scalar flat[QAWS_CORE_MAX_POINTS * QAWS_CORE_MAX_POINTS * 3], fu[QAWS_CORE_MAX_POINTS * 2], fv[QAWS_CORE_MAX_POINTS * 2];
+		qaws_scalar uks[10], vks[8];
+		qaws_surface_bspline_desc sd;
+		qaws_surface* sf = NULL;
+		memset(fu, 0, sizeof fu);
+		memset(fv, 0, sizeof fv);
+		for (i = 0; i < 30; i++)
+		{
+			grid[i].x = (qaws_scalar)((i / 5) / 5.0);
+			grid[i].y = (qaws_scalar)((i % 5) / 4.0);
+			grid[i].z = (qaws_scalar)(0.3 * sin(1.3 * (i / 5)) * cos(0.9 * (i % 5)));
+			flat[i * 3] = grid[i].x;
+			flat[i * 3 + 1] = grid[i].y;
+			flat[i * 3 + 2] = grid[i].z;
+		}
+		for (i = 0; i < 10; i++)
+			fu[i] = uks[i] = (qaws_scalar)uk[i];
+		for (i = 0; i < 8; i++)
+			fv[i] = vks[i] = (qaws_scalar)vk[i];
+		memset(&sd, 0, sizeof sd);
+		sd.u_degree = 3;
+		sd.v_degree = 2;
+		sd.control_points = grid;
+		sd.u_point_count = 6;
+		sd.v_point_count = 5;
+		sd.u_knots = uks;
+		sd.u_knot_count = 10;
+		sd.v_knots = vks;
+		sd.v_knot_count = 8;
+		if (qaws_surface_create_bspline(&sd, &sf) == QAWS_STATUS_OK)
+		{
+			for (s = 0; s < 49; s++)
+			{
+				qaws_scalar u = (qaws_scalar)((s % 7) / 6.0), v = (qaws_scalar)((s / 7) / 6.0);
+				qaws_surface_eval_result r;
+				qaws_surface_eval_3d c;
+				qaws_surface_evaluate(sf, u, v, 127, &r);
+				c = qaws_surface_bspline_eval_3d(flat, fu, fv, 3, 2, 6, 5, qaws_find_span(fu, 3, 6, u), qaws_find_span(fv, 2, 5, v), u, v, 127);
+				es = fmax(es, ec_err3(c.position, r.position) + ec_err3(c.du, r.du) + ec_err3(c.dv, r.dv) + ec_err3(c.normal, r.normal)
+					+ ec_err3(c.duu, r.duu) + ec_err3(c.duv, r.duv) + ec_err3(c.dvv, r.dvv));
+			}
+			qaws_surface_destroy(sf);
+		}
+		else
+			es = 1e30;
+	}
+	sprintf(msg, "cores as C against the runtime: B-spline %.2g, NURBS %.2g, cubic %.2g, B-spline surface %.2g", eb, en, ec, es);
+	TEST_ASSERT(eb <= EC_TOL * 10 && en <= EC_TOL * 10 && ec <= EC_TOL * 10 && es <= EC_TOL * 10, msg);
+	printf("  %s\n", msg);
+}
+
 int test_144_eval_consistency_main(void)
 {
 	g_pass = 0;
@@ -297,6 +455,7 @@ int test_144_eval_consistency_main(void)
 	test_surface_core_flags();
 	test_inline_copy();
 	test_arc_length_wrappers();
+	test_spline_cores();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
 }

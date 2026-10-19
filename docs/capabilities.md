@@ -7,6 +7,8 @@ backend.
 Status words:
 
 - **tested**: a test compares results. The test is named.
+- **run on a GPU**: a shader ran on a GPU, and its results were compared with
+  the CPU by a tool run by hand. The largest difference is given (below).
 - **compiled**: the compiler accepts the source. No results are compared.
   Checked by `tests/shaders/check_shaders.ps1` (dxc `-T cs_6_0` and
   glslangValidator `-V`, Vulkan SDK 1.4.363, 2026-10-19). This is a manual
@@ -70,15 +72,15 @@ evaluation.
 
 | Core | Runtime caller | C | HLSL | GLSL | Halide |
 |---|---|---|---|---|---|
-| de Casteljau (Bezier) | Bezier curves | tested (01) | compiled | compiled | written (`examples/eval_bezier_halide.cpp`) |
-| Rational Bezier | none | tested against the runtime (144) | compiled | compiled | written |
-| Cubic (Hermite, Catmull-Rom, trajectory) | none | compiled | compiled | compiled | written |
-| Horner (polynomial) | polynomial curves | tested (10) | compiled | compiled | written |
-| Arc | arc curves | tested (09) | compiled | compiled | written |
-| B-spline span and evaluation | none | compiled | compiled | compiled | written; needs the span at pipeline-build time |
-| NURBS evaluation | none | compiled | compiled | compiled | written; same span limit |
-| Bezier surface | none | tested against the runtime (144) | compiled | compiled | written |
-| B-spline surface | none | compiled | compiled | compiled | written; the normal block uses C `if` on expressions |
+| de Casteljau (Bezier) | Bezier curves | tested (01) | run on a GPU, 1.7e-6 (eval_gpu_parity) | compiled | written (`examples/eval_bezier_halide.cpp`) |
+| Rational Bezier | none | tested against the runtime (144) | run on a GPU, 1.9e-6 (eval_gpu_parity) | compiled | written |
+| Cubic (Hermite, Catmull-Rom, trajectory) | none | tested against the runtime (144) | run on a GPU, 1.3e-7 (eval_gpu_parity) | compiled | written |
+| Horner (polynomial) | polynomial curves | tested (10) | run on a GPU, 2.1e-7 (eval_gpu_parity) | compiled | written |
+| Arc | arc curves | tested (09) | run on a GPU, 2e-5 (eval_gpu_parity) | compiled | written |
+| B-spline span and evaluation | none | tested against the runtime (144) | run on a GPU, 7.4e-7 (eval_gpu_parity) | compiled | written; needs the span at pipeline-build time |
+| NURBS evaluation | none | tested against the runtime (144) | run on a GPU, 2.1e-6 (eval_gpu_parity) | compiled | written; same span limit |
+| Bezier surface | none | tested against the runtime (144) | run on a GPU, 2.2e-6 (eval_gpu_parity) | compiled | written |
+| B-spline surface | none | tested against the runtime (144) | run on a GPU, 1.9e-6 (eval_gpu_parity) | compiled | written; the normal block uses C `if` on expressions |
 | B-spline derivatives w.r.t. data | none | tested (57) | compiled (`diff_bspline_adjoint.hlsl`) | not checked | written |
 | B-spline sampling (CDF) | none | tested (60) | compiled (`diff_cdf_sampling.hlsl`) | not checked | written; C `if` on expressions |
 | Surface functionals | none | tested (61) | compiled (`diff_surface_functionals.hlsl`) | not checked | written |
@@ -86,8 +88,15 @@ evaluation.
 | Repulsive pair kernels | none | tested (119) | run on a GPU once by hand, parity 1.1e-4 (`examples/repulsive_gpu_parity.c`) | not checked | written; C `if` on expressions |
 | Dual numbers | differentiation | tested (49) | compiled (through the sampling and functional cores) | not checked | written |
 
-"Compiled" says the shader source is accepted. Only the repulsive kernels
-have been run on a GPU and compared with the CPU.
+"Compiled" says the shader source is accepted. "Run on a GPU" gives the
+largest difference, relative to 1 + |value|, between the core on a GPU
+(float, Direct3D 11, fxc cs_5_0) and the same core compiled as C (double)
+on the same inputs, over 256 parameters per family: position, D1 and D2,
+and for surfaces du, dv, the normal and the second partials.
+`examples/eval_gpu_parity.c` with `examples/eval_parity.hlsl` measures it
+by hand on Windows (2026-10-19). With test 144 (C core = runtime) this
+closes the chain GPU = C core = runtime. The repulsive kernels have their
+own tool, `examples/repulsive_gpu_parity.c`.
 
 ## Missing
 
@@ -96,8 +105,8 @@ have been run on a GPU and compared with the CPU.
   structured buffer, a bounded span search on the knot buffer, and the
   de Boor window gathered from buffers. Halide would take the span as a
   runtime `Expr`.
-- **CPU and GPU result comparison.** Every eval core except the repulsive
-  kernels is checked by compiling only.
+- **CPU and GPU comparison in a build step.** Both GPU tools run by hand on
+  Windows only. GLSL is compiled, never run. Halide is never built.
 - **Parallel-transport frames.** The kernel is private to pipe surfaces.
   Planned: a public kernel (double reflection) and a prepared frame table.
 - **Arc length and its inverse.** Two implementations disagree: a 5-point
