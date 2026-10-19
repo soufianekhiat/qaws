@@ -1,0 +1,323 @@
+/*
+ * Certified closest points on curves with Bezier spans (internal/qaws_internal_closest.h): branch and bound over each span's
+ * Bezier form, from its B-spline window by blossoming. A piece is dropped when a lower bound of its distance is no less
+ * than the best distance found: the distance to the box of its control points, or to its fat line (the chord's segment
+ * widened by the points' largest offset from it, second order in the piece's size, so only a few pieces survive near the
+ * minimum). Pieces are halved by de Casteljau until their box is under the tolerance; a Newton polish ends it.
+ */
+
+#include "internal/qaws_internal_closest.h"
+#include "internal/qaws_internal_basis.h"
+#include "qaws_eval.h"
+#include "qaws_platform.h"
+#include <math.h>
+#include <string.h>
+
+#define CL_MAX (QAWS_INTERNAL_BASIS_MAX_DEGREE + 1)
+#define CL_DEPTH 56
+#define CL_WORK 4096
+
+/* span s as its B-spline window and knots (see qaws_internal_view_span_window); 0 for families without Bezier spans */
+static int cl_window(qaws_curve const* c, unsigned int s, unsigned int* p, double* win, double* uk)
+{
+	unsigned int dim = (unsigned int)c->dimension, h = dim + 1, d = c->degree, j, i;
+	qaws_scalar const* pts = NULL;
+	qaws_scalar const* w = NULL;
+	if (c->kind == QAWS_CURVE_KIND_VIEW)
+		return qaws_internal_view_span_window(c, s, p, win, uk);
+	if (c->kind == QAWS_CURVE_KIND_BEZIER || c->kind == QAWS_CURVE_KIND_RATIONAL_BEZIER)
+	{
+		if (c->kind == QAWS_CURVE_KIND_BEZIER)
+			pts = ((qaws_bezier_impl const*)c->impl)->control_points;
+		for (j = 0; j <= d; j++)
+			for (i = 0; i < h; i++)
+				win[j * h + i] = pts ? (i < dim ? (double)pts[j * dim + i] : 1.0)
+					: (double)((qaws_rational_bezier_impl const*)c->impl)->weighted_points[j * h + i];
+		for (j = 0; j < 2 * d; j++)
+			uk[j] = j < d ? 0.0 : 1.0;
+	}
+	else if (c->kind == QAWS_CURVE_KIND_BSPLINE || c->kind == QAWS_CURVE_KIND_NURBS)
+	{
+		qaws_scalar const* knots;
+		unsigned int kc, n, k;
+		if (c->kind == QAWS_CURVE_KIND_BSPLINE)
+		{
+			qaws_bspline_impl const* b = (qaws_bspline_impl const*)c->impl;
+			pts = b->control_points; knots = b->knots; kc = b->knot_count; n = b->control_point_count;
+		}
+		else
+		{
+			qaws_nurbs_impl const* b = (qaws_nurbs_impl const*)c->impl;
+			pts = b->control_points; knots = b->knots; kc = b->knot_count; n = b->control_point_count; w = b->weights;
+		}
+		k = qaws_internal_find_knot_span(knots, kc, d, n, (c->span_boundaries[s] + c->span_boundaries[s + 1]) / 2);
+		for (j = 0; j <= d; j++)
+		{
+			double wj = w ? (double)w[k - d + j] : 1.0;
+			for (i = 0; i < dim; i++)
+				win[j * h + i] = wj * (double)pts[(k - d + j) * dim + i];
+			win[j * h + dim] = wj;
+		}
+		for (j = 0; j < 2 * d; j++)
+			uk[j] = (double)knots[k - d + 1 + j];
+	}
+	else
+		return 0;
+	*p = d;
+	return 1;
+}
+
+/* Bezier point i of the span is the blossom at (u_k ^ (p - i), u_k+1 ^ i): de Boor with those arguments (uk[p - 1] = u_k) */
+static void cl_bezier(double const* win, double const* uk, unsigned int p, unsigned int h, double* bez)
+{
+	double tmp[CL_MAX * 4];
+	unsigned int i, r, j, c;
+	for (i = 0; i <= p; i++)
+	{
+		memcpy(tmp, win, sizeof(double) * (p + 1) * h);
+		for (r = 1; r <= p; r++)
+		{
+			double x = r <= p - i ? uk[p - 1] : uk[p];
+			for (j = p; j >= r; j--)
+			{
+				double a = uk[j - 1], al = (x - a) / (uk[j + p - r] - a);
+				for (c = 0; c < h; c++)
+					tmp[j * h + c] = (1 - al) * tmp[(j - 1) * h + c] + al * tmp[j * h + c];
+			}
+		}
+		memcpy(bez + i * h, tmp + p * h, sizeof(double) * h);
+	}
+}
+
+/* de Casteljau at u in place: keeps the right part (or the left) */
+static void cl_split(double* b, unsigned int p, unsigned int h, double u, int right)
+{
+	unsigned int r, j, c;
+	for (r = 1; r <= p; r++)
+	{
+		if (right)
+			for (j = 0; j + r <= p; j++)
+				for (c = 0; c < h; c++)
+					b[j * h + c] += u * (b[(j + 1) * h + c] - b[j * h + c]);
+		else
+			for (j = p; j >= r; j--)
+				for (c = 0; c < h; c++)
+					b[j * h + c] = b[(j - 1) * h + c] + u * (b[j * h + c] - b[(j - 1) * h + c]);
+	}
+}
+
+static double cl_dist(double const* a, double const* b, unsigned int dim)
+{
+	double s = 0;
+	unsigned int c;
+	for (c = 0; c < dim; c++)
+		s += (a[c] - b[c]) * (a[c] - b[c]);
+	return sqrt(s);
+}
+
+/* the piece's points projected (q[i]); its lower bound of the distance to x, its box diagonal */
+static double cl_lower(double const* qp, unsigned int p, unsigned int dim, double const* x, double* diag)
+{
+	double lo[3], hi[3], box = 0, dg = 0, u[3], len = 0, smin = 0, smax = 0, off = 0, sx = 0, px = 0, fat;
+	unsigned int i, c;
+	for (c = 0; c < dim; c++)
+	{
+		lo[c] = hi[c] = qp[c];
+		for (i = 1; i <= p; i++)
+		{
+			lo[c] = qp[i * 3 + c] < lo[c] ? qp[i * 3 + c] : lo[c];
+			hi[c] = qp[i * 3 + c] > hi[c] ? qp[i * 3 + c] : hi[c];
+		}
+		box += x[c] < lo[c] ? (lo[c] - x[c]) * (lo[c] - x[c]) : x[c] > hi[c] ? (x[c] - hi[c]) * (x[c] - hi[c]) : 0;
+		dg += (hi[c] - lo[c]) * (hi[c] - lo[c]);
+		u[c] = qp[p * 3 + c] - qp[c];
+		len += u[c] * u[c];
+	}
+	*diag = sqrt(dg);
+	box = sqrt(box);
+	len = sqrt(len);
+	if (!(len > 1e-300))
+		return box;
+	for (c = 0; c < dim; c++)
+		u[c] /= len;
+	/* every point within off of the chord line, between smin and smax along it */
+	for (i = 0; i <= p; i++)
+	{
+		double s = 0, r = 0;
+		for (c = 0; c < dim; c++)
+			s += (qp[i * 3 + c] - qp[c]) * u[c];
+		for (c = 0; c < dim; c++)
+		{
+			double e = qp[i * 3 + c] - qp[c] - s * u[c];
+			r += e * e;
+		}
+		smin = s < smin ? s : smin;
+		smax = s > smax ? s : smax;
+		off = sqrt(r) > off ? sqrt(r) : off;
+	}
+	for (c = 0; c < dim; c++)
+		sx += (x[c] - qp[c]) * u[c];
+	for (c = 0; c < dim; c++)
+	{
+		double e = x[c] - qp[c] - sx * u[c];
+		px += e * e;
+	}
+	sx = sx < smin ? smin - sx : sx > smax ? sx - smax : 0;
+	fat = sqrt(sx * sx + px) - off;
+	return fat > box ? fat : box;
+}
+
+static double cl_point_distance(qaws_curve const* c, qaws_scalar t, double const* x)
+{
+	double pos[3];
+	if (c->dimension == QAWS_DIMENSION_2D)
+	{
+		qaws_eval_result_2d e;
+		qaws_curve_evaluate_2d(c, t, QAWS_EVAL_FLAG_POSITION, &e);
+		pos[0] = e.position.x; pos[1] = e.position.y;
+	}
+	else
+	{
+		qaws_eval_result_3d e;
+		qaws_curve_evaluate_3d(c, t, QAWS_EVAL_FLAG_POSITION, &e);
+		pos[0] = e.position.x; pos[1] = e.position.y; pos[2] = e.position.z;
+	}
+	return cl_dist(pos, x, (unsigned int)c->dimension);
+}
+
+/* Newton on (C - x) . C' = 0 from t, kept in the range; the closer of the start and the end */
+static qaws_scalar cl_polish(qaws_curve const* c, qaws_scalar t, double const* x, double* d)
+{
+	qaws_scalar t0 = t, lo = c->parameter_range.min_value, hi = c->parameter_range.max_value;
+	unsigned int it, k, dim = (unsigned int)c->dimension;
+	double dn;
+	for (it = 0; it < 24; it++)
+	{
+		double v[3][3], f = 0, g = 0, step;
+		if (dim == 2)
+		{
+			qaws_eval_result_2d e;
+			qaws_curve_evaluate_2d(c, t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2, &e);
+			v[0][0] = e.position.x; v[0][1] = e.position.y; v[1][0] = e.d1.x; v[1][1] = e.d1.y; v[2][0] = e.d2.x; v[2][1] = e.d2.y;
+		}
+		else
+		{
+			qaws_eval_result_3d e;
+			qaws_curve_evaluate_3d(c, t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2, &e);
+			v[0][0] = e.position.x; v[0][1] = e.position.y; v[0][2] = e.position.z;
+			v[1][0] = e.d1.x; v[1][1] = e.d1.y; v[1][2] = e.d1.z; v[2][0] = e.d2.x; v[2][1] = e.d2.y; v[2][2] = e.d2.z;
+		}
+		for (k = 0; k < dim; k++)
+		{
+			f += (v[0][k] - x[k]) * v[1][k];
+			g += v[1][k] * v[1][k] + (v[0][k] - x[k]) * v[2][k];
+		}
+		if (!(g > 0))
+			break;
+		step = f / g;
+		t = (qaws_scalar)((double)t - step);
+		t = t < lo ? lo : t > hi ? hi : t;
+		if (fabs(step) <= 1e-15 * ((double)hi - (double)lo))
+			break;
+	}
+	dn = cl_point_distance(c, t, x);
+	if (dn < *d)
+	{
+		*d = dn;
+		return t;
+	}
+	return t0;
+}
+
+qaws_status qaws_internal_closest_certify(qaws_curve const* curve, double const* x, qaws_scalar* io_t, double* out_distance,
+	double* out_gap)
+{
+	double win[CL_MAX * 4], uk[2 * CL_MAX], bez[CL_MAX * 4], sub[CL_MAX * 4], qp[CL_MAX * 3];
+	double lo[3] = { 1e300, 1e300, 1e300 }, hi[3] = { -1e300, -1e300, -1e300 }, ext = 0, tol, best, open = 1e300;
+	struct { double u0, u1, lb; unsigned int depth; } stack[CL_DEPTH + 4];
+	unsigned int dim = (unsigned int)curve->dimension, h = dim + 1, s, p, i, c, top, work = 0;
+	qaws_scalar best_t = *io_t;
+
+	/* the extent, for the tolerance, and the families and weights this handles */
+	for (s = 0; s < curve->span_count; s++)
+	{
+		if (!cl_window(curve, s, &p, win, uk))
+			return QAWS_STATUS_UNSUPPORTED_OPERATION;
+		for (i = 0; i <= p; i++)
+		{
+			if (!(win[i * h + dim] > 0))
+				return QAWS_STATUS_UNSUPPORTED_OPERATION;
+			for (c = 0; c < dim; c++)
+			{
+				double v = win[i * h + c] / win[i * h + dim];
+				lo[c] = v < lo[c] ? v : lo[c];
+				hi[c] = v > hi[c] ? v : hi[c];
+			}
+		}
+	}
+	for (c = 0; c < dim; c++)
+		ext += (hi[c] - lo[c]) * (hi[c] - lo[c]);
+	tol = sqrt(ext) * ((double)QAWS_EPSILON > 1e-9 ? (double)QAWS_EPSILON : 1e-9) + 1e-300;
+	best = cl_point_distance(curve, best_t, x);
+
+	for (s = 0; s < curve->span_count; s++)
+	{
+		double ta = curve->span_boundaries[s], tb = curve->span_boundaries[s + 1];
+		double root_diag;
+		cl_window(curve, s, &p, win, uk);
+		/* the span lies in its window's hull too: most spans end here, before the blossom */
+		for (i = 0; i <= p; i++)
+			for (c = 0; c < dim; c++)
+				qp[i * 3 + c] = win[i * h + c] / win[i * h + dim];
+		if (cl_lower(qp, p, dim, x, &root_diag) >= best)
+			continue;
+		cl_bezier(win, uk, p, h, bez);
+		stack[0].u0 = 0; stack[0].u1 = 1; stack[0].lb = 0; stack[0].depth = 0;
+		top = 1;
+		while (top > 0)
+		{
+			double u0 = stack[top - 1].u0, u1 = stack[top - 1].u1, lb = stack[top - 1].lb, diag, d0, d1, m;
+			unsigned int depth = stack[--top].depth;
+			if (lb >= best)
+				continue;
+			memcpy(sub, bez, sizeof(double) * (p + 1) * h);
+			if (u0 > 0)
+				cl_split(sub, p, h, u0, 1);
+			if (u1 < 1)
+				cl_split(sub, p, h, (u1 - u0) / (1 - u0), 0);
+			for (i = 0; i <= p; i++)
+				for (c = 0; c < dim; c++)
+					qp[i * 3 + c] = sub[i * h + c] / sub[i * h + dim];
+			lb = cl_lower(qp, p, dim, x, &diag);
+			/* the ends are on the curve */
+			d0 = cl_dist(qp, x, dim);
+			d1 = cl_dist(qp + p * 3, x, dim);
+			if (d0 < best)
+			{
+				best = d0;
+				best_t = (qaws_scalar)(ta + u0 * (tb - ta));
+			}
+			if (d1 < best)
+			{
+				best = d1;
+				best_t = (qaws_scalar)(ta + u1 * (tb - ta));
+			}
+			if (lb >= best)
+				continue;
+			if (diag <= tol || depth >= CL_DEPTH || ++work > CL_WORK)
+			{
+				open = lb < open ? lb : open;
+				continue;
+			}
+			/* the half nearer x on top */
+			m = 0.5 * (u0 + u1);
+			stack[top].u0 = d0 < d1 ? m : u0; stack[top].u1 = d0 < d1 ? u1 : m; stack[top].lb = lb; stack[top].depth = depth + 1; top++;
+			stack[top].u0 = d0 < d1 ? u0 : m; stack[top].u1 = d0 < d1 ? m : u1; stack[top].lb = lb; stack[top].depth = depth + 1; top++;
+		}
+	}
+	best_t = cl_polish(curve, best_t, x, &best);
+	*io_t = best_t;
+	*out_distance = best;
+	*out_gap = open < best ? best - open : 0;
+	return QAWS_STATUS_OK;
+}

@@ -5,6 +5,7 @@
 #include "qaws_platform.h"
 #include "internal/qaws_internal_types.h"
 #include "internal/qaws_internal_arc_length.h"
+#include "internal/qaws_internal_closest.h"
 #include "internal/qaws_internal_solver.h"
 #include "internal/qaws_internal_fit.h"
 #include "internal/qaws_internal_mesh.h"
@@ -268,7 +269,7 @@ static void closest_eval_2d(
 	out_d1[1] = result.d1.y;
 }
 
-qaws_status qaws_curve_find_closest_parameter_2d(
+static qaws_status closest_sampled_2d(
 	qaws_curve const *curve,
 	qaws_vec2 point,
 	qaws_scalar *out_parameter)
@@ -333,6 +334,52 @@ qaws_status qaws_curve_find_closest_parameter_2d(
 	return QAWS_STATUS_OK;
 }
 
+/* the sampled answer, then certified where the family has Bezier spans */
+static qaws_status closest_2d(
+	qaws_curve const *curve,
+	qaws_vec2 point,
+	qaws_scalar *out_parameter,
+	double *out_distance,
+	double *out_gap)
+{
+	double x[3] = { point.x, point.y, 0 };
+	qaws_status status = closest_sampled_2d(curve, point, out_parameter);
+	if (status != QAWS_STATUS_OK)
+		return status;
+	return qaws_internal_closest_certify(curve, x, out_parameter, out_distance, out_gap);
+}
+
+qaws_status qaws_curve_find_closest_parameter_2d(
+	qaws_curve const *curve,
+	qaws_vec2 point,
+	qaws_scalar *out_parameter)
+{
+	double distance, gap;
+	qaws_status status = closest_2d(curve, point, out_parameter, &distance, &gap);
+	return status == QAWS_STATUS_UNSUPPORTED_OPERATION ? QAWS_STATUS_OK : status;
+}
+
+qaws_status qaws_curve_find_closest_point_certified_2d(
+	qaws_curve const *curve,
+	qaws_vec2 point,
+	qaws_scalar *out_parameter,
+	qaws_scalar *out_distance,
+	qaws_scalar *out_gap)
+{
+	double distance, gap;
+	qaws_scalar t;
+	qaws_status status;
+	if (!out_parameter || !out_distance || !out_gap)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	status = closest_2d(curve, point, &t, &distance, &gap);
+	if (status != QAWS_STATUS_OK)
+		return status;
+	*out_parameter = t;
+	*out_distance = (qaws_scalar)distance;
+	*out_gap = (qaws_scalar)gap;
+	return QAWS_STATUS_OK;
+}
+
 struct closest_ctx_3d
 {
 	qaws_curve const *curve;
@@ -361,7 +408,7 @@ static void closest_eval_3d(
 	out_d1[2] = result.d1.z;
 }
 
-qaws_status qaws_curve_find_closest_parameter_3d(
+static qaws_status closest_sampled_3d(
 	qaws_curve const *curve,
 	qaws_vec3 point,
 	qaws_scalar *out_parameter)
@@ -426,6 +473,52 @@ qaws_status qaws_curve_find_closest_parameter_3d(
 		range_min, range_max, best_t, 32);
 
 	*out_parameter = best_t;
+	return QAWS_STATUS_OK;
+}
+
+/* the sampled answer, then certified where the family has Bezier spans */
+static qaws_status closest_3d(
+	qaws_curve const *curve,
+	qaws_vec3 point,
+	qaws_scalar *out_parameter,
+	double *out_distance,
+	double *out_gap)
+{
+	double x[3] = { point.x, point.y, point.z };
+	qaws_status status = closest_sampled_3d(curve, point, out_parameter);
+	if (status != QAWS_STATUS_OK)
+		return status;
+	return qaws_internal_closest_certify(curve, x, out_parameter, out_distance, out_gap);
+}
+
+qaws_status qaws_curve_find_closest_parameter_3d(
+	qaws_curve const *curve,
+	qaws_vec3 point,
+	qaws_scalar *out_parameter)
+{
+	double distance, gap;
+	qaws_status status = closest_3d(curve, point, out_parameter, &distance, &gap);
+	return status == QAWS_STATUS_UNSUPPORTED_OPERATION ? QAWS_STATUS_OK : status;
+}
+
+qaws_status qaws_curve_find_closest_point_certified_3d(
+	qaws_curve const *curve,
+	qaws_vec3 point,
+	qaws_scalar *out_parameter,
+	qaws_scalar *out_distance,
+	qaws_scalar *out_gap)
+{
+	double distance, gap;
+	qaws_scalar t;
+	qaws_status status;
+	if (!out_parameter || !out_distance || !out_gap)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	status = closest_3d(curve, point, &t, &distance, &gap);
+	if (status != QAWS_STATUS_OK)
+		return status;
+	*out_parameter = t;
+	*out_distance = (qaws_scalar)distance;
+	*out_gap = (qaws_scalar)gap;
 	return QAWS_STATUS_OK;
 }
 

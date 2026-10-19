@@ -61,6 +61,13 @@ and interpolate linearly between entries. The differentiable CDF sampler
 (58, 60) keeps its fixed composite rule, because it differentiates through
 that rule.
 
+Closest points (`qaws_curve_find_closest_point_certified_2d` and `_3d`,
+also behind `qaws_curve_find_closest_parameter_*`) are certified for
+Bezier, rational Bezier, B-spline, NURBS and borrowed splines. They run
+branch and bound over the spans' Bezier forms. The global minimum lies
+within a returned gap below the distance (149: a spike between the
+samples, which sampling misses).
+
 ## Surfaces on the CPU
 
 | Family | Evaluation | Borrowed / prepared | Jets (closest point, curvature) | Derivatives w.r.t. data | Allocator |
@@ -118,9 +125,10 @@ own tool, `examples/repulsive_gpu_parity.c`.
   still needs the span when the pipeline is built.
 - **CPU and GPU comparison in a build step.** Both GPU tools run by hand on
   Windows only. GLSL is compiled, never run. Halide is never built.
-- **Certified closest point.** Today curves use 32 samples and
-  Gauss-Newton; surfaces use an 8x8 grid and Newton. Both can miss the
-  global minimum. Planned: subdivision with bounds.
+- **Certified closest point on surfaces and the other curve families.**
+  Surfaces use an 8x8 grid and Newton, which can miss the global minimum.
+  Curves other than Bezier, rational Bezier, B-spline, NURBS and borrowed
+  splines keep sampling with Newton.
 - **Adaptive tessellation** with chord and angle tolerances into caller
   buffers. Today the quadtree uses an absolute threshold.
 - **Sweeps and lofts with analytic derivatives.** Swept and pipe surfaces use

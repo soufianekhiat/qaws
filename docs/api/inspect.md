@@ -142,7 +142,35 @@ qaws_status qaws_curve_find_closest_parameter_3d(
     qaws_scalar* out_parameter);
 ```
 
-Finds the curve parameter closest to a given point. Uses coarse sampling (32 points) followed by Newton iteration refinement.
+Finds the curve parameter closest to a given point. It starts from coarse sampling (32 points) with Newton refinement. For curves with Bezier spans (Bezier, rational Bezier, B-spline, NURBS and borrowed splines), the result is then certified as below. Other families keep the sampled answer, which can be a local minimum.
+
+### qaws_curve_find_closest_point_certified_2d / 3d
+
+```c
+qaws_status qaws_curve_find_closest_point_certified_2d(
+    qaws_curve const* curve,
+    qaws_vec2 point,
+    qaws_scalar* out_parameter,
+    qaws_scalar* out_distance,
+    qaws_scalar* out_gap);
+
+qaws_status qaws_curve_find_closest_point_certified_3d(
+    qaws_curve const* curve,
+    qaws_vec3 point,
+    qaws_scalar* out_parameter,
+    qaws_scalar* out_distance,
+    qaws_scalar* out_gap);
+```
+
+The closest point with a certificate: the global minimum distance lies in `[*out_distance - *out_gap, *out_distance]`.
+
+- **Method.** Branch and bound over each span's Bezier form, obtained by blossoming the span's B-spline window.
+  - **Pruning.** A piece is dropped when a lower bound of its distance is no less than the best distance found. Two lower bounds are used: the distance to the box of its control points, and the distance to its fat line (the chord's segment widened by the points' largest offset from it). The fat-line bound is second order in the piece's size, so only a few pieces survive near the minimum.
+  - **Subdivision.** Pieces are halved by de Casteljau until their box is under 1e-9 of the curve's extent (`QAWS_EPSILON` in float).
+  - **Polish.** A Newton step on `(C - p) . C'` finishes the result.
+- **Cost.** Most spans are dropped on their B-spline window's hull, before any blossom. Each query is allocation-free.
+- **Work bound.** After 4096 halvings the remaining pieces end the search, and their lower bounds widen the gap. A point at a circle's center, where every point of the curve is closest, ends this way: the distance is right, and the gap says the parameter is not unique.
+- **Errors.** `QAWS_STATUS_UNSUPPORTED_OPERATION` for other families (Hermite, Catmull-Rom, polynomial, arc, clothoid, Yuksel, trajectory, composite, subdivision, wrappers) and for non-positive weights.
 
 ### qaws_curve_get_span_continuity
 

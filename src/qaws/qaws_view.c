@@ -26,6 +26,7 @@
 #include "core/qaws_cubic_poly_core.h"
 #include "core/qaws_horner_core.h"
 #include "internal/qaws_internal_diff.h"
+#include "internal/qaws_internal_closest.h"
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -763,6 +764,30 @@ qaws_status qaws_curve_create_borrowed(qaws_curve_view const* view, qaws_allocat
 	curve->impl = p;
 	*out_curve = curve;
 	return QAWS_STATUS_OK;
+}
+
+int qaws_internal_view_span_window(qaws_curve const* curve, unsigned int s, unsigned int* degree, double* window, double* knots)
+{
+	qaws_curve_prepared const* p = (qaws_curve_prepared const*)curve->impl;
+	unsigned int d, dim, k, j, c;
+	if (curve->kind != QAWS_CURVE_KIND_VIEW || p->view.family != QAWS_VIEW_SPLINE)
+		return 0;
+	d = p->view.degree;
+	dim = (unsigned int)p->view.dimension;
+	k = qaws_internal_find_knot_span(p->knots, p->kc, d, p->n, (p->bounds[s] + p->bounds[s + 1]) / 2);
+	for (j = 0; j <= d; j++)
+	{
+		unsigned int i = k - d + j;
+		double w = p->rational == 1 ? vw_get(&p->view.weights, i, 0) : p->rational == 2 ? vw_get(&p->view.points, i, dim) : 1.0;
+		/* homogeneous points are already w P */
+		for (c = 0; c < dim; c++)
+			window[j * (dim + 1) + c] = (p->rational == 1 ? w : 1.0) * vw_get(&p->view.points, i, c);
+		window[j * (dim + 1) + dim] = w;
+	}
+	for (j = 0; j < 2 * d; j++)
+		knots[j] = p->knots[k - d + 1 + j];
+	*degree = d;
+	return 1;
 }
 
 /* ---- owned copies ------------------------------------------------------- */

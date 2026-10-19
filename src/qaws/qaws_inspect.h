@@ -52,6 +52,25 @@ qaws_status qaws_curve_find_closest_parameter_3d(
 	qaws_vec3 point,
 	qaws_scalar* out_parameter);
 
+/* The closest point with a certificate, for curves with Bezier spans (Bezier, rational Bezier, B-spline, NURBS and borrowed
+   splines; the two functions above use it too): branch and bound over the spans' Bezier forms with convex-hull and fat-line
+   bounds. The global minimum distance lies in [*out_distance - *out_gap, *out_distance]; the gap is within 1e-9 of the
+   curve's extent (QAWS_EPSILON in float) unless the work bound (4096 halvings) is reached, as for a point at a circle's
+   center. QAWS_STATUS_UNSUPPORTED_OPERATION for the other families and for non-positive weights. */
+qaws_status qaws_curve_find_closest_point_certified_2d(
+	qaws_curve const* curve,
+	qaws_vec2 point,
+	qaws_scalar* out_parameter,
+	qaws_scalar* out_distance,
+	qaws_scalar* out_gap);
+
+qaws_status qaws_curve_find_closest_point_certified_3d(
+	qaws_curve const* curve,
+	qaws_vec3 point,
+	qaws_scalar* out_parameter,
+	qaws_scalar* out_distance,
+	qaws_scalar* out_gap);
+
 qaws_status qaws_curve_get_span_continuity(
 	qaws_curve const* curve,
 	unsigned int boundary_index,
