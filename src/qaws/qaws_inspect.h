@@ -393,6 +393,29 @@ qaws_status qaws_surface_tessellate(
 	unsigned int index_capacity,
 	unsigned int* out_index_count);
 
+/* Adaptive tessellation by tolerances into caller buffers, without cracks and without allocation: a quadtree over (u, v)
+   whose quads split until the surface at their 3 x 3 test points is within the chord tolerance of the bilinear patch of
+   their corners and the normal turns by at most the angle tolerance across them. Deterministic: call with NULL buffers
+   for the counts, then with buffers of those sizes (BUFFER_TOO_SMALL with the counts otherwise). Triangles are
+   counter-clockwise in (u, v). Vertices are written per quad: a point shared by quads repeats, with the same bits. */
+typedef struct qaws_surface_tessellation_desc
+{
+	qaws_scalar chord_tolerance;        /* distance; 0: unused */
+	qaws_scalar angle_tolerance;        /* radians; 0: unused (one of the two is needed) */
+	unsigned int min_depth;             /* quarterings everywhere first; 0: 2 */
+	unsigned int max_depth;             /* quarterings at most; 0: 10, at most 20 */
+} qaws_surface_tessellation_desc;
+
+qaws_status qaws_surface_tessellate_adaptive(
+	qaws_surface const* surface,
+	qaws_surface_tessellation_desc const* desc,
+	qaws_tessellation_vertex* out_vertices,
+	unsigned int vertex_capacity,
+	unsigned int* out_vertex_count,
+	unsigned int* out_indices,
+	unsigned int index_capacity,
+	unsigned int* out_index_count);
+
 /* Curve projection onto surface */
 
 /* Project a 3D curve onto a surface, producing a 2D curve in (u,v) parameter space.

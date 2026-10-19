@@ -544,3 +544,42 @@ The closest point with a certificate: the global minimum distance lies in `[*out
 - **Work bound.** After 8192 splits the remaining pieces widen the gap.
 - **Errors.** `QAWS_STATUS_UNSUPPORTED_OPERATION` for other surfaces, for degrees above 15, and for non-positive weights.
 - **Evidence (test 149).** A spike between the grid's samples on a spherical cap is found (2.99231, against 5.000 on the grid), with a gap of 4e-16. A bicubic patch is never farther than a 301 × 301 sampling at 12 points, including minima on its edges.
+
+---
+
+## Adaptive surface tessellation
+
+### qaws_surface_tessellate_adaptive
+
+```c
+typedef struct qaws_surface_tessellation_desc
+{
+    qaws_scalar chord_tolerance;        /* distance; 0: unused */
+    qaws_scalar angle_tolerance;        /* radians; 0: unused (one of the two is needed) */
+    unsigned int min_depth;             /* quarterings everywhere first; 0: 2 */
+    unsigned int max_depth;             /* quarterings at most; 0: 10, at most 20 */
+} qaws_surface_tessellation_desc;
+
+qaws_status qaws_surface_tessellate_adaptive(
+    qaws_surface const* surface,
+    qaws_surface_tessellation_desc const* desc,
+    qaws_tessellation_vertex* out_vertices,
+    unsigned int vertex_capacity,
+    unsigned int* out_vertex_count,
+    unsigned int* out_indices,
+    unsigned int index_capacity,
+    unsigned int* out_index_count);
+```
+
+A triangle mesh of the surface within the given tolerances, written into caller buffers without cracks and without allocation.
+
+- **Subdivision.** A quadtree over (u, v) whose quads split until both tests pass. The chord test requires the surface at seven test points (side midpoints, center, and the centroids in (u, v) of the quad's two triangles) to lie within the chord tolerance of those triangles. The angle test requires the normals at the 3 × 3 points to stay within half the angle tolerance of the center's.
+- **No stored tree.** Each split decision depends only on the quad, so the tree is never stored and every call rebuilds the same one.
+- **No cracks.** A quad's sides carry the vertices of finer neighbours, found by descending the neighbour along the shared side. A quad without such vertices is two triangles; one with them is a fan around its center. Triangles are counter-clockwise in (u, v).
+- **Counts first.** Call with NULL buffers for the counts, then with buffers of those sizes. `QAWS_STATUS_BUFFER_TOO_SMALL` returns the counts when a capacity is short.
+- **Vertices.** Vertices are written per quad, with position, normal and (u, v). A point shared by quads repeats with the same bits, because quad corners sit on dyadic parameters; weld by (u, v) when one index per point is needed.
+- **Limits.**
+  - The tests sample points, so they are estimates (test 151: a spherical cap at chord 2e-3 is within 1.8e-3 of its mesh).
+  - There is no 2:1 grading, so a coarse quad next to much finer ones fans out into thin triangles.
+
+`qaws_surface_tessellate` keeps its absolute flatness threshold and fixed buffers.

@@ -131,9 +131,10 @@ own tool, `examples/repulsive_gpu_parity.c`.
   Bezier, rational Bezier, B-spline, NURBS and borrowed splines keep
   sampling with Newton. Surfaces other than Bezier, B-spline, NURBS and
   borrowed ones (degree at most 15) keep an 8 × 8 grid with Newton.
-- **Adaptive surface tessellation** with chord and angle tolerances into
-  caller buffers. Today the quadtree uses an absolute threshold. Curves
-  have this: `qaws_curve_tessellate_2d` and `_3d` (150).
+- **Graded surface tessellation.** `qaws_surface_tessellate_adaptive`
+  (151) meets chord and angle tolerances without cracks into caller
+  buffers, but has no 2:1 grading (fans of thin triangles beside much
+  finer quads), and repeats shared vertices instead of welding them.
 - **Sweeps and lofts with analytic derivatives.** Swept and pipe surfaces use
   finite differences. Loft and Gordon evaluation scratch is on the stack up
   to 32 sections, beyond that from the surface's allocator.

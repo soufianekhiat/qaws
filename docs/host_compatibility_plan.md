@@ -359,8 +359,9 @@ checks stay manual.
 | Rotation-minimizing frames | `qaws_curve_compute_rotation_minimizing_frames_3d`, `core/qaws_frame_core.h` (HLSL and GLSL) | 1e4133e (147) |
 | Arc length and its inverse | adaptive Gauss-Kronrod per span; `qaws_curve_compute_parameter_at_arc_length` by safeguarded Newton | 9b5837a (148) |
 | Certified closest point on curves | `qaws_curve_find_closest_point_certified_2d/3d`: branch and bound over Bezier spans (Bezier, rational Bezier, B-spline, NURBS, borrowed splines), a returned gap; behind `qaws_curve_find_closest_parameter_*` | a9a557f (149) |
-| Certified closest point on surfaces | `qaws_surface_find_closest_point_certified`: branch and bound over Bezier patches (Bezier, B-spline, NURBS, borrowed; degree at most 15) with box and patch-frame prism bounds; behind `qaws_surface_find_closest_point` | 149 |
+| Certified closest point on surfaces | `qaws_surface_find_closest_point_certified`: branch and bound over Bezier patches (Bezier, B-spline, NURBS, borrowed; degree at most 15) with box and patch-frame prism bounds; behind `qaws_surface_find_closest_point` | 5e276d0 (149) |
 | Adaptive curve tessellation | `qaws_curve_tessellate_2d/3d`: chord and angle tolerances, span boundaries kept, deterministic, counts first into caller buffers | dea270b (150) |
+| Adaptive surface tessellation | `qaws_surface_tessellate_adaptive`: chord and angle tolerances on an implicit quadtree, no cracks, counts first into caller buffers, no allocation | 151 |
 
 Remaining, in order:
 
@@ -370,8 +371,8 @@ Remaining, in order:
   batches and repulsive (constructors and derived curves are done).
 - Halide's runtime span (the buffer interface is done for HLSL and GLSL).
 - The kernels of section 6 (frames, arc length, certified closest points
-  on spline curves and surfaces, curve tessellation are done): adaptive
-  surface tessellation, sweeps and lofts with analytic derivatives,
-  parameterization options.
+  on spline curves and surfaces, curve and surface tessellation are
+  done): sweeps and lofts with analytic derivatives, parameterization
+  options.
 - Repulsive: the allocator, line-search and GMRES settings, a validity
   report for solution derivatives, and the mesh VJP test.

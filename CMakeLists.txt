@@ -59,6 +59,7 @@ set(QAWS_SOURCES
   src/qaws/qaws_frames.c
   src/qaws/qaws_closest.c
   src/qaws/qaws_curve_tessellate.c
+  src/qaws/qaws_surface_tessellate.c
   src/qaws/qaws_curve_batch.c
   src/qaws/qaws_view.c
   src/qaws/qaws_surface_batch.c
