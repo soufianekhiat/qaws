@@ -114,6 +114,7 @@ src/qaws/mesh/qaws_cross_field.c
 src/qaws/mesh/qaws_quad_flow.c
 src/qaws/mesh/qaws_quad_improve.c
 src/qaws/mesh/qaws_quad_global.c
+src/qaws/mesh/qaws_mesh_repair.c
   src/qaws/qaws_convert.c
   src/qaws/qaws_export.c
   src/qaws/qaws_import.c

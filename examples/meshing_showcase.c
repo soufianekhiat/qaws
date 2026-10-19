@@ -25,6 +25,8 @@
  *                      smoothest cross fields, quads by min-cost flow, quad finishing
  *   mesh16_guidance.png  quads guided: density paint, a stroke of directions, an
  *                      edge loop, pinned vertices; placed cones, an attractor
+ *   mesh18_repair.png  repair for farq: a broken torus soup (holes, a gap, faces
+ *                      turned, duplicates) made closed and outward, the fills tinted
  *
  * Each figure lives in meshing_showcase/NN_*.c, compiled as one translation
  * unit with the rasterizer in example_raster.h.
@@ -172,14 +174,15 @@ static void ms_panel(er_canvas* c, int x, int y, int w, int h, qaws_mesh_3d cons
 #include "meshing_showcase/15_quad_global.c"
 #include "meshing_showcase/16_guidance.c"
 #include "meshing_showcase/17_feature_size.c"
+#include "meshing_showcase/18_repair.c"
 
-/* the figures to draw: all, or those whose keys the first argument lists ("58"; figures 10 to 17 are a to h) */
+/* the figures to draw: all, or those whose keys the first argument lists ("58"; figures 10 to 18 are a to i) */
 int main(int argc, char** argv)
 {
 	static void (*const demo[])(void) = { demo_core, demo_reference, demo_remesh, demo_quads, demo_generate, demo_tets, demo_hexes, demo_frame_hexes,
 		demo_measures, demo_remesh_angles, demo_remesh_cvt, demo_cross_field, demo_quad_flow, demo_quad_improve,
-		demo_quad_global, demo_guidance, demo_feature_size };
-	static char const key[] = "123456789abcdefgh";
+		demo_quad_global, demo_guidance, demo_feature_size, demo_repair };
+	static char const key[] = "123456789abcdefghi";
 	unsigned int i;
 	setvbuf(stdout, NULL, _IONBF, 0);
 	MAKE_DIR("showcase");

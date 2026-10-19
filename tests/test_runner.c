@@ -150,6 +150,7 @@ extern int test_135_quad_improve_main(void);
 extern int test_136_quad_global_main(void);
 extern int test_137_mesh_guidance_main(void);
 extern int test_138_feature_size_main(void);
+extern int test_139_mesh_repair_main(void);
 
 /* Test registry */
 typedef struct {
@@ -297,6 +298,7 @@ static test_suite const g_test_suites[] = {
 {"136_quad_global", test_136_quad_global_main},
 {"137_mesh_guidance", test_137_mesh_guidance_main},
 {"138_feature_size", test_138_feature_size_main},
+{"139_mesh_repair", test_139_mesh_repair_main},
 };
 
 int main(void) {

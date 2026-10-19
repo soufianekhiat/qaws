@@ -14,6 +14,7 @@ enters and leaves as arrays; qaws reads and writes no files.
 | `qaws_remesh.h` | surface remeshing (LOCAL) |
 | `qaws_quadrangulate.h` | quad meshes (INSTANT) |
 | `qaws_mesh_generate.h` | meshes of surfaces and shells (REMESH) |
+| `qaws_mesh_repair.h` | repair for farq: soups and broken meshes made closed and outward |
 | `qaws_volume_mesh.h` | `qaws_volume_mesh`: tetrahedra, hexahedra, prisms, pyramids |
 | `qaws_tetrahedralize.h` | tetrahedra filling a closed surface (DELAUNAY) |
 | `qaws_hexahedralize.h` | hexahedra filling a closed surface (GRID) |
@@ -684,6 +685,67 @@ element's face. Border and crease vertices are held on their domain's side,
 corners on its corners. `PARAMETRIC`, `RESTRICTED_DELAUNAY` and
 `STRUCTURED` are reserved.
 
+## Repair for farq
+
+```c
+qaws_status qaws_mesh_repair(qaws_scalar const* positions, unsigned int vertex_count, unsigned int const* face_vertices,
+	unsigned int const* face_sizes, unsigned int face_count, qaws_mesh_repair_desc const* desc, qaws_mesh_3d** out_mesh,
+	qaws_mesh_repair_report* report);
+```
+
+`qaws_mesh_repair.h` turns messy input (triangle and polygon soups, scans,
+meshes exported from games and modelling tools) into a closed,
+consistently oriented triangle surface: the input farq's exact Booleans
+take. The split (decision 9 of [meshing_plan.md](../meshing_plan.md)):
+farq is exact and tolerance-free and accepts anything with a defined
+inside (every directed edge cancels: self-intersecting, non-manifold and
+nested input included); qaws owns every tolerance and quality judgement.
+So the repair closes and orients, and leaves to farq what needs no
+tolerance.
+
+The policies, in order. Tolerances are world lengths; 0 is the default,
+relative to D, the bounding diagonal of the vertices the faces use; a
+negative value turns the policy off.
+
+| Policy | Field (default) | What |
+|---|---|---|
+| validation | | an index out of range, a face under 3 vertices, a position not finite: `INVALID_ARGUMENT`, `report.invalid_face` / `invalid_vertex` naming the first; a face with a vertex twice dropped; polygons ear-clipped in their plane (the output is triangles) |
+| welding | `weld_tolerance` (1e-6 D; off: identical points only) | points that close merged transitively (union-find over a grid's pairs), each group at its mean; faces collapsed by it dropped |
+| degenerate faces | `degenerate_tolerance` (the weld tolerance) | faces lower than it (twice the area over the longest edge): a needle's short edge collapsed; a cap (a corner on its long edge) removed and the faces across the long edge split at that corner, so no hole opens |
+| duplicates | | faces on the same three vertices kept once, the majority's way; a pair turned opposite ways (a membrane that cancels) removed both |
+| gaps | `gap_tolerance` (1e-3 D) | boundary vertices that close to another boundary vertex merged at their mean, or to a boundary edge: its face split at the vertex (the T-junction resolved); never two vertices already joined by an edge; repeated until the borders meet |
+| junk | `min_component_area`, `min_component_faces` (0: none) | parts (faces sharing a vertex) below either removed |
+| orientation | | each part made consistent by turning faces across its manifold edges; a part that cannot be (a Moebius strip) counted in `non_orientable` and left, its border open |
+| holes | `hole_perimeter` (all) | boundary loops up to that perimeter filled: the triangulation largest in its smallest dihedral angle, then least in area, by dynamic programming (Liepa 2003) up to 500 vertices, a fan from the centroid beyond; refined toward the surrounding edge lengths (centroid splits, Delaunay flips) and faired (the scale-dependent bi-Laplacian, the border and its ring held, one LDL^T), unless `flags` has `QAWS_MESH_REPAIR_FLAT_FILLS` (refined, not faired) or `QAWS_MESH_REPAIR_COARSE_FILLS` (the minimal triangulation only) |
+| outward | `nested_shells` (`KEEP`) | each part turned to a positive signed volume, except a part inside another closed part (the generalized winding number at its vertices): at an odd depth a cavity, turned inward, or removed with `QAWS_NESTED_SHELLS_REMOVE` |
+
+Left for farq, and reported: non-manifold edges, self-intersections (not
+looked for: farq's self-union resolves them exactly), the borders of holes
+not filled. `report.closed` says every directed edge cancels; the report
+also counts what each policy did (welded, needles, caps, duplicates,
+stitched, holes filled and left, fill faces, faces turned back, nested
+shells, boundary, non-manifold and open edges).
+
+The output carries a face attribute `source_face`: the given face each
+triangle comes from, -1 for fills (exact up to 2^24 in the f32 build). Its
+creation splits non-manifold edges and vertices into copies at the same
+positions (as every `qaws_mesh_3d`), so the indices from
+`qaws_mesh_3d_get_faces` stop cancelling there. farq should read the
+positions: its exact point keys merge the copies and the directed edges
+cancel again; or map the indices through `qaws_mesh_3d_get_vertex_source`
+first.
+
+Test 139: a cube soup (36 points) to the closed cube of 8; a sphere soup
+off by 1e-7 back to its 642 vertices; three holes in a sphere filled to
+1.4% of the area removed (flat fills 8.6% under), fill edges within 12% of
+the surrounding ones, the smallest fill angle 25.9 degrees; a box in two
+halves at different spacings 3e-4 apart stitched closed without fills; half
+of a sphere's faces turned and turned back; a cavity turned inward, an
+island in it outward; a cap, needles and a zero-area face removed without
+holes; a Moebius strip reported; two cubes on one edge closed with the edge
+left non-manifold. Figure 18 (key i): a broken torus soup (holes, a gap,
+three faces in ten turned, duplicates) repaired in 0.02 s.
+
 ## Volume meshes: qaws_volume_mesh
 
 ```c
@@ -781,12 +843,13 @@ hd.cell_size = 0.22;
 qaws_volume_mesh_hexahedralize(surface, &hd, &hexes, NULL);
 ```
 
-The showcase `qaws_meshing_showcase` draws figures 1 to 14: the corner
+The showcase `qaws_meshing_showcase` draws figures 1 to 18: the corner
 store, references, remeshing, quads, generation, tetrahedra, hexahedra,
 hexahedra along frame fields, measures, angle-bounded LOCAL, CVT,
-smoothest cross fields, quads by min-cost flow and quad finishing
+smoothest cross fields, quads by min-cost flow, quad finishing, GLOBAL
+quads, guidance, local feature size and repair
 (`examples/meshing_showcase/`); an argument listing figure keys draws
-those alone (1 to 9, then a to e for figures 10 to 14: `5c` draws 5 and
+those alone (1 to 9, then a to i for figures 10 to 18: `5c` draws 5 and
 12).
 
 ## Known limits
@@ -824,3 +887,14 @@ those alone (1 to 9, then a to e for figures 10 to 14: `5c` draws 5 and
   edges.
 - Frame fields: the singular edges are those of the smoothest field, not
   constrained to be meshable (Liu, Bommes 2023).
+- Repair: welding is transitive (a chain of points each within the
+  tolerance merges wider); a gap is closed by moving the vertices onto the
+  other border, not by bridging strips between borders farther apart than
+  the tolerance (those become holes, filled); loops past 500 vertices are
+  filled by a fan from their centroid (folded where the loop is far from
+  star-shaped round it); fills follow the loop and the ring round it, not
+  features (a hole across a crease is filled smooth); nesting is judged at
+  up to 16 vertices of a part (nested when all are inside), so a part
+  crossing another stays outward unless those samples all fall inside
+  (farq's self-union sorts crossing parts); a part with no consistent
+  orientation is left as it is.

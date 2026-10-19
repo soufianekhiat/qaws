@@ -140,6 +140,7 @@ add_executable(
 136_quad_global.c
 137_mesh_guidance.c
 138_feature_size.c
+139_mesh_repair.c
 )
 
 # The amalgamated library exports exactly the same symbols, so the tests can
