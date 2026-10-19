@@ -1,3 +1,4 @@
+#include <stdio.h>
 #include "qaws_surface_intersect.h"
 #include "qaws_surface.h"
 #include <stdlib.h>
@@ -68,9 +69,47 @@ static int solve_2x2(
 	return 1;
 }
 
+/* Gauss-Newton step on F = S1(u1, v1) - S2(u2, v2) = 0 (3 equations, 4 unknowns): the minimum-norm step
+   d = -J^T (J J^T)^-1 F, J = [S1u S1v -S2u -S2v], converging quadratically onto the intersection curve. 0 when J J^T is
+   singular (the surfaces tangent there). */
+static int ssi_gauss_newton_step(qaws_surface_eval_result const* r1, qaws_surface_eval_result const* r2, qaws_scalar d[4])
+{
+	qaws_vec3 const* t[4];
+	qaws_scalar M[3][3], F[3], y[3], det, scale;
+	unsigned int i, j, k;
+	t[0] = &r1->du; t[1] = &r1->dv; t[2] = &r2->du; t[3] = &r2->dv;
+	F[0] = r1->position.x - r2->position.x;
+	F[1] = r1->position.y - r2->position.y;
+	F[2] = r1->position.z - r2->position.z;
+	for (i = 0; i < 3; i++)
+		for (j = 0; j < 3; j++)
+		{
+			M[i][j] = QAWS_ZERO;
+			for (k = 0; k < 4; k++)
+				M[i][j] += (&t[k]->x)[i] * (&t[k]->x)[j];
+		}
+	det = M[0][0] * (M[1][1] * M[2][2] - M[1][2] * M[2][1]) - M[0][1] * (M[1][0] * M[2][2] - M[1][2] * M[2][0])
+		+ M[0][2] * (M[1][0] * M[2][1] - M[1][1] * M[2][0]);
+	scale = M[0][0] + M[1][1] + M[2][2];
+	if (!(QAWS_FABS(det) > QAWS_LITERAL(1e-12) * scale * scale * scale))
+		return 0;
+	/* y = M^-1 F by Cramer's rule */
+	y[0] = (F[0] * (M[1][1] * M[2][2] - M[1][2] * M[2][1]) - M[0][1] * (F[1] * M[2][2] - M[1][2] * F[2])
+		+ M[0][2] * (F[1] * M[2][1] - M[1][1] * F[2])) / det;
+	y[1] = (M[0][0] * (F[1] * M[2][2] - M[1][2] * F[2]) - F[0] * (M[1][0] * M[2][2] - M[1][2] * M[2][0])
+		+ M[0][2] * (M[1][0] * F[2] - F[1] * M[2][0])) / det;
+	y[2] = (M[0][0] * (M[1][1] * F[2] - F[1] * M[2][1]) - M[0][1] * (M[1][0] * F[2] - F[1] * M[2][0])
+		+ F[0] * (M[1][0] * M[2][1] - M[1][1] * M[2][0])) / det;
+	d[0] = -(t[0]->x * y[0] + t[0]->y * y[1] + t[0]->z * y[2]);
+	d[1] = -(t[1]->x * y[0] + t[1]->y * y[1] + t[1]->z * y[2]);
+	d[2] = t[2]->x * y[0] + t[2]->y * y[1] + t[2]->z * y[2];
+	d[3] = t[3]->x * y[0] + t[3]->y * y[1] + t[3]->z * y[2];
+	return 1;
+}
+
 /* Newton refinement: given (u1,v1) on surface_a and (u2,v2) on surface_b,
-   refine so that S1(u1,v1) = S2(u2,v2).
-   Uses midpoint projection approach: each surface projects independently. */
+   refine so that S1(u1,v1) = S2(u2,v2): Gauss-Newton steps (above); where the surfaces are tangent, each surface projects
+   independently toward the midpoint of the two points. */
 static int newton_refine(
 	qaws_surface const* sa,
 	qaws_surface const* sb,
@@ -107,6 +146,18 @@ static int newton_refine(
 				out_pos->y = (r1.position.y + r2.position.y) * QAWS_LITERAL(0.5);
 				out_pos->z = (r1.position.z + r2.position.z) * QAWS_LITERAL(0.5);
 				return 1;
+			}
+		}
+
+		{
+			qaws_scalar d[4];
+			if (ssi_gauss_newton_step(&r1, &r2, d))
+			{
+				*u1 = clamp01(*u1 + d[0]);
+				*v1 = clamp01(*v1 + d[1]);
+				*u2 = clamp01(*u2 + d[2]);
+				*v2 = clamp01(*v2 + d[3]);
+				continue;
 			}
 		}
 
