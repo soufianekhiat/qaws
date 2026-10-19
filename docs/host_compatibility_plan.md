@@ -363,7 +363,7 @@ checks stay manual.
 | Adaptive curve tessellation | `qaws_curve_tessellate_2d/3d`: chord and angle tolerances, span boundaries kept, deterministic, counts first into caller buffers | dea270b (150) |
 | Adaptive surface tessellation | `qaws_surface_tessellate_adaptive`: chord and angle tolerances on an implicit quadtree, no cracks, counts first into caller buffers, no allocation | 1c99965 (151) |
 | Sweep derivatives | swept: du and the mixed derivative from the Frenet-Serret formulas; pipe: a double-reflection frame, du from the rotation-minimizing law (was a linearly interpolated table, duu wrong); duu from the analytic du | 3f7566e (152) |
-| Parameterizations of fitting | `qaws_bspline_fit_desc.parameterization`: uniform, chordal (default), centripetal; interpolation with as many control points as points; the differentiable fit through all three | 153, 55 |
+| Parameterizations of fitting | `qaws_bspline_fit_desc.parameterization`: uniform, chordal (default), centripetal; interpolation with as many control points as points; the differentiable fit through all three; interpolating fits average p parameters per knot | a7c658a, 38bcc6f (153, 55) |
 
 Remaining, in order:
 
