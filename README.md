@@ -212,7 +212,7 @@ Full docs are in [`docs/`](docs/index.md):
 - [Traversal](docs/traversal.md) -- motion profiles, easing, wrap modes
 - [Inspection](docs/inspection.md) -- geometry queries, intersection, analysis
 - [Building](docs/building.md) -- CMake and Sharpmake configuration
-- [Feature Matrix](docs/feature_per_backends.md) -- function-by-function backend support
+- [Capabilities](docs/capabilities.md) -- what runs on which backend, and which test or check backs it
 
 ## License
 

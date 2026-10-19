@@ -196,7 +196,7 @@ Complete working examples are in the `examples/` directory:
 
 ## See also
 
-- [Feature availability per backend](feature_per_backends.md) — complete
+- [Capabilities](capabilities.md): what runs on which backend and what checks it
   function-by-function matrix
 - [Evaluation](evaluation.md) — core eval headers and prepare+eval
   architecture in detail

@@ -19,7 +19,7 @@
 
 ## Feature matrix
 
-- [Feature per Backend](feature_per_backends.md) -- Supported operations for each curve type
+- [Capabilities](capabilities.md) -- What runs on which backend, and which test or check backs it
 
 ## API reference
 
