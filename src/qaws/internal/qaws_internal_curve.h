@@ -28,7 +28,11 @@ void* qaws_internal_alloc(qaws_allocator const* allocator, unsigned long size);
 void  qaws_internal_dealloc(qaws_allocator const* allocator, void* ptr);
 /* count * size zeroed bytes (NULL on overflow or failure) */
 void* qaws_internal_calloc(qaws_allocator const* allocator, size_t count, size_t size);
-/* count * size zeroed bytes (NULL on overflow or failure) */
-void* qaws_internal_calloc(qaws_allocator const* allocator, size_t count, size_t size);
+
+/* Evaluation scratch: `stack` (stack_bytes, the caller's array) when bytes fit, else bytes from the allocator (an object's own, so
+   evaluation never calls malloc); released by qaws_internal_scratch_release with the same stack pointer (NULL is ignored). */
+#define QAWS_INTERNAL_SCRATCH 32
+void* qaws_internal_scratch(qaws_allocator const* allocator, void* stack, size_t stack_bytes, size_t bytes);
+void qaws_internal_scratch_release(qaws_allocator const* allocator, void* stack, void* scratch);
 
 #endif /* QAWS_INTERNAL_CURVE_H */

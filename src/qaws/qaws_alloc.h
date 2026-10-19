@@ -19,6 +19,21 @@
 #include "qaws_surface_bezier.h"
 #include "qaws_surface_bspline.h"
 #include "qaws_surface_nurbs.h"
+#include "qaws_surface_bilinear.h"
+#include "qaws_surface_biquadratic.h"
+#include "qaws_surface_coons.h"
+#include "qaws_surface_extrusion.h"
+#include "qaws_surface_offset.h"
+#include "qaws_surface_pipe.h"
+#include "qaws_surface_revolution.h"
+#include "qaws_surface_ruled.h"
+#include "qaws_surface_swept.h"
+#include "qaws_surface_loft.h"
+#include "qaws_surface_gordon.h"
+#include "qaws_surface_trim.h"
+#include "qaws_surface_tspline.h"
+#include "qaws_surface_subdiv.h"
+#include "qaws_surface_fillet.h"
 
 /*
  * Allocator-aware creation functions (_ex variants).
@@ -115,5 +130,88 @@ qaws_status qaws_surface_create_nurbs_ex(
 	qaws_surface_nurbs_desc const* desc,
 	qaws_allocator const* allocator,
 	qaws_surface** out_surface);
+
+qaws_status qaws_surface_create_bilinear_ex(
+	qaws_surface_bilinear_desc const* desc,
+	qaws_allocator const* allocator,
+	qaws_surface** out_surface);
+
+qaws_status qaws_surface_create_biquadratic_ex(
+	qaws_surface_biquadratic_desc const* desc,
+	qaws_allocator const* allocator,
+	qaws_surface** out_surface);
+
+qaws_status qaws_surface_create_coons_ex(
+	qaws_surface_coons_desc const* desc,
+	qaws_allocator const* allocator,
+	qaws_surface** out_surface);
+
+qaws_status qaws_surface_create_extrusion_ex(
+	qaws_surface_extrusion_desc const* desc,
+	qaws_allocator const* allocator,
+	qaws_surface** out_surface);
+
+qaws_status qaws_surface_create_offset_ex(
+	qaws_surface_offset_desc const* desc,
+	qaws_allocator const* allocator,
+	qaws_surface** out_surface);
+
+qaws_status qaws_surface_create_pipe_ex(
+	qaws_surface_pipe_desc const* desc,
+	qaws_allocator const* allocator,
+	qaws_surface** out_surface);
+
+qaws_status qaws_surface_create_revolution_ex(
+	qaws_surface_revolution_desc const* desc,
+	qaws_allocator const* allocator,
+	qaws_surface** out_surface);
+
+qaws_status qaws_surface_create_ruled_ex(
+	qaws_surface_ruled_desc const* desc,
+	qaws_allocator const* allocator,
+	qaws_surface** out_surface);
+
+qaws_status qaws_surface_create_swept_ex(
+	qaws_surface_swept_desc const* desc,
+	qaws_allocator const* allocator,
+	qaws_surface** out_surface);
+
+qaws_status qaws_surface_create_loft_ex(
+	qaws_surface_loft_desc const* desc,
+	qaws_allocator const* allocator,
+	qaws_surface** out_surface);
+
+qaws_status qaws_surface_create_gordon_ex(
+	qaws_surface_gordon_desc const* desc,
+	qaws_allocator const* allocator,
+	qaws_surface** out_surface);
+
+qaws_status qaws_surface_create_trimmed_ex(
+	qaws_surface_trim_desc const* desc,
+	qaws_allocator const* allocator,
+	qaws_surface** out_surface);
+
+qaws_status qaws_surface_create_tspline_ex(
+	qaws_surface_tspline_desc const* desc,
+	qaws_allocator const* allocator,
+	qaws_surface** out_surface);
+
+qaws_status qaws_surface_create_subdiv_ex(
+	qaws_surface_subdiv_desc const* desc,
+	qaws_allocator const* allocator,
+	qaws_surface** out_surface);
+
+qaws_status qaws_surface_create_fillet_ex(
+	qaws_surface_fillet_desc const* desc,
+	qaws_allocator const* allocator,
+	qaws_surface** out_surface);
+
+/* the fillet with its trim curves on both surfaces; all three from the allocator */
+qaws_status qaws_surface_create_fillet_with_trims_ex(
+	qaws_surface_fillet_desc const* desc,
+	qaws_allocator const* allocator,
+	qaws_surface** out_fillet,
+	qaws_curve** out_trim_a,
+	qaws_curve** out_trim_b);
 
 #endif /* QAWS_ALLOC_H */

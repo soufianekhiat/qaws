@@ -365,8 +365,9 @@ static qaws_surface_vtable const pipe_surface_vtable = {
 	NULL /* diff */
 };
 
-qaws_status qaws_surface_create_pipe(
+qaws_status qaws_surface_create_pipe_ex(
 	qaws_surface_pipe_desc const* desc,
+	qaws_allocator const* allocator,
 	qaws_surface** out_surface)
 {
 	qaws_surface* surface;
@@ -385,13 +386,12 @@ qaws_status qaws_surface_create_pipe(
 	u_range.min_value = 0; u_range.max_value = 1;
 	v_range.min_value = 0; v_range.max_value = 1;
 
-	surface = qaws_internal_surface_alloc(
-		QAWS_SURFACE_KIND_PIPE,
+	surface = qaws_internal_surface_alloc_ex(QAWS_SURFACE_KIND_PIPE,
 		0, 0, u_range, v_range,
-		&pipe_surface_vtable);
+		&pipe_surface_vtable, allocator);
 	if (!surface) return QAWS_STATUS_ALLOCATION_FAILURE;
 
-	impl = (qaws_surface_pipe_impl*)malloc(sizeof(qaws_surface_pipe_impl));
+	impl = (qaws_surface_pipe_impl*)qaws_internal_alloc(allocator, (unsigned long)(sizeof(qaws_surface_pipe_impl)));
 	if (!impl)
 	{
 		qaws_internal_surface_free(surface);
@@ -409,4 +409,11 @@ qaws_status qaws_surface_create_pipe(
 	surface->impl = impl;
 	*out_surface = surface;
 	return QAWS_STATUS_OK;
+}
+
+qaws_status qaws_surface_create_pipe(
+	qaws_surface_pipe_desc const* desc,
+	qaws_surface** out_surface)
+{
+	return qaws_surface_create_pipe_ex(desc, NULL, out_surface);
 }

@@ -23,64 +23,26 @@ typedef struct qaws_surface_trim_impl
 	unsigned int loop_count;
 } qaws_surface_trim_impl;
 
-/* Compute winding number of point (px, py) w.r.t. a polygon defined by
-   poly_x[], poly_y[] with n vertices. The polygon is implicitly closed
-   (edge from vertex n-1 back to vertex 0). */
-static int compute_winding_number(
-	qaws_scalar const* poly_x,
-	qaws_scalar const* poly_y,
-	unsigned int n,
-	qaws_scalar px,
-	qaws_scalar py)
+/* The winding contribution of the polygon edge (x1, y1) -> (x2, y2) around (px, py): +1 an upward crossing with the point left of
+   the edge, -1 a downward one with it right, else 0 */
+static int winding_edge(qaws_scalar x1, qaws_scalar y1, qaws_scalar x2, qaws_scalar y2, qaws_scalar px, qaws_scalar py)
 {
-	int winding = 0;
-	unsigned int i;
-	for (i = 0; i < n; ++i)
-	{
-		unsigned int j = (i + 1) % n;
-		qaws_scalar y1 = poly_y[i];
-		qaws_scalar y2 = poly_y[j];
-		if (y1 <= py)
-		{
-			if (y2 > py)
-			{
-				/* upward crossing: check if point is left of edge */
-				qaws_scalar cross = (poly_x[j] - poly_x[i]) * (py - y1)
-					- (px - poly_x[i]) * (y2 - y1);
-				if (cross > QAWS_ZERO) ++winding;
-			}
-		}
-		else
-		{
-			if (y2 <= py)
-			{
-				/* downward crossing: check if point is right of edge */
-				qaws_scalar cross = (poly_x[j] - poly_x[i]) * (py - y1)
-					- (px - poly_x[i]) * (y2 - y1);
-				if (cross < QAWS_ZERO) --winding;
-			}
-		}
-	}
-	return winding;
+	qaws_scalar cross = (x2 - x1) * (py - y1) - (px - x1) * (y2 - y1);
+	if (y1 <= py)
+		return y2 > py && cross > QAWS_ZERO ? 1 : 0;
+	return y2 <= py && cross < QAWS_ZERO ? -1 : 0;
 }
 
-/* Sample a trim loop into a polygon and test containment */
+/* Sample a trim loop into a polygon and test containment: the winding number summed edge by edge as the samples come (closed by the
+   edge from the last sample back to the first), so a query allocates nothing */
 static int loop_contains_point(
 	qaws_trim_loop_internal const* loop,
 	qaws_scalar u, qaws_scalar v)
 {
 	unsigned int samples_per_curve = 100;
-	unsigned int total_samples = loop->curve_count * samples_per_curve;
-	qaws_scalar* poly_x;
-	qaws_scalar* poly_y;
-	unsigned int sample_idx = 0;
-	unsigned int ci;
-	int winding;
-
-	poly_x = (qaws_scalar*)malloc(total_samples * sizeof(qaws_scalar));
-	if (!poly_x) return 0;
-	poly_y = (qaws_scalar*)malloc(total_samples * sizeof(qaws_scalar));
-	if (!poly_y) { free(poly_x); return 0; }
+	unsigned int ci, count = 0;
+	qaws_scalar x0 = QAWS_ZERO, y0 = QAWS_ZERO, xp = QAWS_ZERO, yp = QAWS_ZERO;
+	int winding = 0;
 
 	for (ci = 0; ci < loop->curve_count; ++ci)
 	{
@@ -94,26 +56,27 @@ static int loop_contains_point(
 			qaws_scalar t_frac = (qaws_scalar)si / (qaws_scalar)samples_per_curve;
 			qaws_scalar t = range.min_value + t_frac * span;
 			qaws_eval_result_2d r2d;
+			qaws_scalar x = QAWS_ZERO, y = QAWS_ZERO;
 
 			memset(&r2d, 0, sizeof(r2d));
 			if (qaws_curve_evaluate_2d(crv, t, QAWS_EVAL_FLAG_POSITION, &r2d) == QAWS_STATUS_OK)
 			{
-				poly_x[sample_idx] = r2d.position.x;
-				poly_y[sample_idx] = r2d.position.y;
+				x = r2d.position.x;
+				y = r2d.position.y;
+			}
+			if (count++ == 0)
+			{
+				x0 = x;
+				y0 = y;
 			}
 			else
-			{
-				poly_x[sample_idx] = QAWS_ZERO;
-				poly_y[sample_idx] = QAWS_ZERO;
-			}
-			++sample_idx;
+				winding += winding_edge(xp, yp, x, y, u, v);
+			xp = x;
+			yp = y;
 		}
 	}
-
-	winding = compute_winding_number(poly_x, poly_y, sample_idx, u, v);
-
-	free(poly_x);
-	free(poly_y);
+	if (count)
+		winding += winding_edge(xp, yp, x0, y0, u, v);
 
 	return (winding != 0) ? 1 : 0;
 }
@@ -142,9 +105,9 @@ static void trimmed_surface_destroy(void* impl_ptr, qaws_allocator const* alloca
 			for (i = 0; i < impl->loop_count; ++i)
 			{
 				if (impl->loops[i].curves)
-					free(impl->loops[i].curves);
+					qaws_internal_dealloc(allocator, impl->loops[i].curves);
 			}
-			free(impl->loops);
+			qaws_internal_dealloc(allocator, impl->loops);
 		}
 	}
 	qaws_internal_dealloc(allocator, impl);
@@ -163,8 +126,9 @@ static qaws_surface_vtable const trimmed_surface_vtable = {
 	NULL /* diff */
 };
 
-qaws_status qaws_surface_create_trimmed(
+qaws_status qaws_surface_create_trimmed_ex(
 	qaws_surface_trim_desc const* desc,
+	qaws_allocator const* allocator,
 	qaws_surface** out_surface)
 {
 	qaws_surface* surface;
@@ -195,13 +159,12 @@ qaws_status qaws_surface_create_trimmed(
 	u_range.min_value = 0; u_range.max_value = 1;
 	v_range.min_value = 0; v_range.max_value = 1;
 
-	surface = qaws_internal_surface_alloc(
-		QAWS_SURFACE_KIND_TRIMMED,
+	surface = qaws_internal_surface_alloc_ex(QAWS_SURFACE_KIND_TRIMMED,
 		0, 0, u_range, v_range,
-		&trimmed_surface_vtable);
+		&trimmed_surface_vtable, allocator);
 	if (!surface) return QAWS_STATUS_ALLOCATION_FAILURE;
 
-	impl = (qaws_surface_trim_impl*)malloc(sizeof(qaws_surface_trim_impl));
+	impl = (qaws_surface_trim_impl*)qaws_internal_alloc(allocator, (unsigned long)(sizeof(qaws_surface_trim_impl)));
 	if (!impl)
 	{
 		qaws_internal_surface_free(surface);
@@ -214,11 +177,10 @@ qaws_status qaws_surface_create_trimmed(
 
 	if (desc->loop_count > 0)
 	{
-		impl->loops = (qaws_trim_loop_internal*)malloc(
-			desc->loop_count * sizeof(qaws_trim_loop_internal));
+		impl->loops = (qaws_trim_loop_internal*)qaws_internal_alloc(allocator, (unsigned long)(desc->loop_count * sizeof(qaws_trim_loop_internal)));
 		if (!impl->loops)
 		{
-			free(impl);
+			qaws_internal_dealloc(allocator, impl);
 			qaws_internal_surface_free(surface);
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 		}
@@ -230,16 +192,15 @@ qaws_status qaws_surface_create_trimmed(
 
 			impl->loops[i].curve_count = src->curve_count;
 			impl->loops[i].is_outer = src->is_outer;
-			impl->loops[i].curves = (qaws_curve const**)malloc(
-				src->curve_count * sizeof(qaws_curve const*));
+			impl->loops[i].curves = (qaws_curve const**)qaws_internal_alloc(allocator, (unsigned long)(src->curve_count * sizeof(qaws_curve const*)));
 			if (!impl->loops[i].curves)
 			{
 				/* Clean up previously allocated loops */
 				unsigned int j;
 				for (j = 0; j < i; ++j)
-					free(impl->loops[j].curves);
-				free(impl->loops);
-				free(impl);
+					qaws_internal_dealloc(allocator, impl->loops[j].curves);
+				qaws_internal_dealloc(allocator, impl->loops);
+				qaws_internal_dealloc(allocator, impl);
 				qaws_internal_surface_free(surface);
 				return QAWS_STATUS_ALLOCATION_FAILURE;
 			}
@@ -251,6 +212,13 @@ qaws_status qaws_surface_create_trimmed(
 	surface->impl = impl;
 	*out_surface = surface;
 	return QAWS_STATUS_OK;
+}
+
+qaws_status qaws_surface_create_trimmed(
+	qaws_surface_trim_desc const* desc,
+	qaws_surface** out_surface)
+{
+	return qaws_surface_create_trimmed_ex(desc, NULL, out_surface);
 }
 
 qaws_status qaws_surface_trim_contains(

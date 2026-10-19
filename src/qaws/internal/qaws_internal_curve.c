@@ -19,6 +19,17 @@ void qaws_internal_dealloc(qaws_allocator const* allocator, void* ptr)
 	free(ptr);
 }
 
+void* qaws_internal_scratch(qaws_allocator const* allocator, void* stack, size_t stack_bytes, size_t bytes)
+{
+	return bytes <= stack_bytes ? stack : qaws_internal_alloc(allocator, (unsigned long)bytes);
+}
+
+void qaws_internal_scratch_release(qaws_allocator const* allocator, void* stack, void* scratch)
+{
+	if (scratch && scratch != stack)
+		qaws_internal_dealloc(allocator, scratch);
+}
+
 void* qaws_internal_calloc(qaws_allocator const* allocator, size_t count, size_t size)
 {
 	void* p;

@@ -30,6 +30,8 @@ static qaws_status loft_surface_eval_sampled(
 	unsigned int eval_flags,
 	qaws_surface_eval_result* out_result)
 {
+	qaws_vec3 stack_sec_du[QAWS_INTERNAL_SCRATCH];
+	qaws_vec3 stack_sec_pos[QAWS_INTERNAL_SCRATCH];
 	qaws_surface_loft_impl const* impl =
 		(qaws_surface_loft_impl const*)surface->impl;
 	unsigned int n = impl->section_count;
@@ -58,15 +60,15 @@ static qaws_status loft_surface_eval_sampled(
 	}
 
 	/* Allocate temporary arrays for section evaluations */
-	sec_pos = (qaws_vec3*)malloc(n * sizeof(qaws_vec3));
+	sec_pos = (qaws_vec3*)qaws_internal_scratch(surface->allocator, stack_sec_pos, sizeof(stack_sec_pos), n * sizeof(qaws_vec3));
 	if (!sec_pos) return QAWS_STATUS_ALLOCATION_FAILURE;
 
 	if (need_du)
 	{
-		sec_du = (qaws_vec3*)malloc(n * sizeof(qaws_vec3));
+		sec_du = (qaws_vec3*)qaws_internal_scratch(surface->allocator, stack_sec_du, sizeof(stack_sec_du), n * sizeof(qaws_vec3));
 		if (!sec_du)
 		{
-			free(sec_pos);
+			qaws_internal_scratch_release(surface->allocator, stack_sec_pos, sec_pos);
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 		}
 	}
@@ -87,8 +89,8 @@ static qaws_status loft_surface_eval_sampled(
 		status = qaws_curve_evaluate_3d(impl->sections[i], t_curve, cf, &cr);
 		if (status != QAWS_STATUS_OK)
 		{
-			free(sec_pos);
-			if (sec_du) free(sec_du);
+			qaws_internal_scratch_release(surface->allocator, stack_sec_pos, sec_pos);
+			qaws_internal_scratch_release(surface->allocator, stack_sec_du, sec_du);
 			return status;
 		}
 
@@ -212,8 +214,8 @@ static qaws_status loft_surface_eval_sampled(
 		}
 	}
 
-	free(sec_pos);
-	if (sec_du) free(sec_du);
+	qaws_internal_scratch_release(surface->allocator, stack_sec_pos, sec_pos);
+	qaws_internal_scratch_release(surface->allocator, stack_sec_du, sec_du);
 	return QAWS_STATUS_OK;
 }
 
@@ -417,9 +419,9 @@ static void loft_surface_destroy(void* impl, qaws_allocator const* allocator)
 	qaws_surface_loft_impl* li = (qaws_surface_loft_impl*)impl;
 	if (li)
 	{
-		if (li->sections) free(li->sections);
-		if (li->v_params) free(li->v_params);
-		if (li->section_ranges) free(li->section_ranges);
+		if (li->sections) qaws_internal_dealloc(allocator, li->sections);
+		if (li->v_params) qaws_internal_dealloc(allocator, li->v_params);
+		if (li->section_ranges) qaws_internal_dealloc(allocator, li->section_ranges);
 	}
 	qaws_internal_dealloc(allocator, impl);
 }
@@ -437,8 +439,9 @@ static qaws_surface_vtable const loft_surface_vtable = {
 	&loft_surface_diff_vtable
 };
 
-qaws_status qaws_surface_create_loft(
+qaws_status qaws_surface_create_loft_ex(
 	qaws_surface_loft_desc const* desc,
+	qaws_allocator const* allocator,
 	qaws_surface** out_surface)
 {
 	qaws_surface* surface;
@@ -461,13 +464,12 @@ qaws_status qaws_surface_create_loft(
 	u_range.min_value = 0; u_range.max_value = 1;
 	v_range.min_value = 0; v_range.max_value = 1;
 
-	surface = qaws_internal_surface_alloc(
-		QAWS_SURFACE_KIND_LOFT,
+	surface = qaws_internal_surface_alloc_ex(QAWS_SURFACE_KIND_LOFT,
 		0, 0, u_range, v_range,
-		&loft_surface_vtable);
+		&loft_surface_vtable, allocator);
 	if (!surface) return QAWS_STATUS_ALLOCATION_FAILURE;
 
-	impl = (qaws_surface_loft_impl*)malloc(sizeof(qaws_surface_loft_impl));
+	impl = (qaws_surface_loft_impl*)qaws_internal_alloc(allocator, (unsigned long)(sizeof(qaws_surface_loft_impl)));
 	if (!impl)
 	{
 		qaws_internal_surface_free(surface);
@@ -478,11 +480,10 @@ qaws_status qaws_surface_create_loft(
 	impl->section_count = desc->section_count;
 
 	/* Copy sections array */
-	impl->sections = (qaws_curve const**)malloc(
-		desc->section_count * sizeof(qaws_curve const*));
+	impl->sections = (qaws_curve const**)qaws_internal_alloc(allocator, (unsigned long)(desc->section_count * sizeof(qaws_curve const*)));
 	if (!impl->sections)
 	{
-		free(impl);
+		qaws_internal_dealloc(allocator, impl);
 		qaws_internal_surface_free(surface);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
@@ -490,12 +491,11 @@ qaws_status qaws_surface_create_loft(
 		desc->section_count * sizeof(qaws_curve const*));
 
 	/* Copy or generate v_parameters */
-	impl->v_params = (qaws_scalar*)malloc(
-		desc->section_count * sizeof(qaws_scalar));
+	impl->v_params = (qaws_scalar*)qaws_internal_alloc(allocator, (unsigned long)(desc->section_count * sizeof(qaws_scalar)));
 	if (!impl->v_params)
 	{
-		free(impl->sections);
-		free(impl);
+		qaws_internal_dealloc(allocator, impl->sections);
+		qaws_internal_dealloc(allocator, impl);
 		qaws_internal_surface_free(surface);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
@@ -516,13 +516,12 @@ qaws_status qaws_surface_create_loft(
 	}
 
 	/* Cache section parameter ranges */
-	impl->section_ranges = (qaws_range*)malloc(
-		desc->section_count * sizeof(qaws_range));
+	impl->section_ranges = (qaws_range*)qaws_internal_alloc(allocator, (unsigned long)(desc->section_count * sizeof(qaws_range)));
 	if (!impl->section_ranges)
 	{
-		free(impl->v_params);
-		free(impl->sections);
-		free(impl);
+		qaws_internal_dealloc(allocator, impl->v_params);
+		qaws_internal_dealloc(allocator, impl->sections);
+		qaws_internal_dealloc(allocator, impl);
 		qaws_internal_surface_free(surface);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
@@ -534,4 +533,11 @@ qaws_status qaws_surface_create_loft(
 	surface->impl = impl;
 	*out_surface = surface;
 	return QAWS_STATUS_OK;
+}
+
+qaws_status qaws_surface_create_loft(
+	qaws_surface_loft_desc const* desc,
+	qaws_surface** out_surface)
+{
+	return qaws_surface_create_loft_ex(desc, NULL, out_surface);
 }

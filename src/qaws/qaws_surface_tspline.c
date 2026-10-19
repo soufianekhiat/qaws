@@ -278,8 +278,9 @@ static qaws_surface_vtable const tspline_surface_vtable = {
 	NULL /* diff */
 };
 
-qaws_status qaws_surface_create_tspline(
+qaws_status qaws_surface_create_tspline_ex(
 	qaws_surface_tspline_desc const* desc,
+	qaws_allocator const* allocator,
 	qaws_surface** out_surface)
 {
 	qaws_surface* surface;
@@ -304,14 +305,13 @@ qaws_status qaws_surface_create_tspline(
 			return QAWS_STATUS_INVALID_ARGUMENT;
 	}
 
-	surface = qaws_internal_surface_alloc(
-		QAWS_SURFACE_KIND_TSPLINE,
+	surface = qaws_internal_surface_alloc_ex(QAWS_SURFACE_KIND_TSPLINE,
 		desc->u_degree, desc->v_degree,
 		desc->u_range, desc->v_range,
-		&tspline_surface_vtable);
+		&tspline_surface_vtable, allocator);
 	if (!surface) return QAWS_STATUS_ALLOCATION_FAILURE;
 
-	impl = (qaws_surface_tspline_impl*)malloc(sizeof(qaws_surface_tspline_impl));
+	impl = (qaws_surface_tspline_impl*)qaws_internal_alloc(allocator, (unsigned long)(sizeof(qaws_surface_tspline_impl)));
 	if (!impl)
 	{
 		qaws_internal_surface_free(surface);
@@ -333,18 +333,18 @@ qaws_status qaws_surface_create_tspline(
 	uk_size = sizeof(qaws_scalar) * impl->cp_count * u_knot_len;
 	vk_size = sizeof(qaws_scalar) * impl->cp_count * v_knot_len;
 
-	impl->positions = (qaws_vec3*)malloc(pos_size);
-	impl->weights = (qaws_scalar*)malloc(wt_size);
-	impl->u_knots_all = (qaws_scalar*)malloc(uk_size);
-	impl->v_knots_all = (qaws_scalar*)malloc(vk_size);
+	impl->positions = (qaws_vec3*)qaws_internal_alloc(allocator, (unsigned long)(pos_size));
+	impl->weights = (qaws_scalar*)qaws_internal_alloc(allocator, (unsigned long)(wt_size));
+	impl->u_knots_all = (qaws_scalar*)qaws_internal_alloc(allocator, (unsigned long)(uk_size));
+	impl->v_knots_all = (qaws_scalar*)qaws_internal_alloc(allocator, (unsigned long)(vk_size));
 
 	if (!impl->positions || !impl->weights || !impl->u_knots_all || !impl->v_knots_all)
 	{
-		free(impl->positions);
-		free(impl->weights);
-		free(impl->u_knots_all);
-		free(impl->v_knots_all);
-		free(impl);
+		qaws_internal_dealloc(allocator, impl->positions);
+		qaws_internal_dealloc(allocator, impl->weights);
+		qaws_internal_dealloc(allocator, impl->u_knots_all);
+		qaws_internal_dealloc(allocator, impl->v_knots_all);
+		qaws_internal_dealloc(allocator, impl);
 		qaws_internal_surface_free(surface);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
@@ -365,4 +365,11 @@ qaws_status qaws_surface_create_tspline(
 	surface->impl = impl;
 	*out_surface = surface;
 	return QAWS_STATUS_OK;
+}
+
+qaws_status qaws_surface_create_tspline(
+	qaws_surface_tspline_desc const* desc,
+	qaws_surface** out_surface)
+{
+	return qaws_surface_create_tspline_ex(desc, NULL, out_surface);
 }

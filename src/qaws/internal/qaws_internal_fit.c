@@ -4,6 +4,9 @@
 #include <string.h>
 #include <math.h>
 #include "../qaws_platform.h"
+#include "../qaws_alloc.h"
+#include "qaws_internal_basis.h"
+#include "qaws_internal_curve.h"
 
 /* ========================================================================== */
 /*  Internal: band-diagonal solver for B-spline fitting                       */
@@ -17,67 +20,36 @@ static qaws_scalar basis_function(
 	qaws_scalar const* knots,
 	unsigned int knot_count)
 {
-	qaws_scalar* left = NULL;
-	qaws_scalar* right = NULL;
-	qaws_scalar result;
-	unsigned int j;
+	qaws_scalar N[QAWS_INTERNAL_BASIS_MAX_DEGREE + 1];   /* (the fit refuses degrees above the basis limit) */
+	unsigned int j, k;
 
 	(void)knot_count;
 
 	if (p == 0)
 		return (t >= knots[i] && t < knots[i + 1]) ? QAWS_ONE : QAWS_ZERO;
 
-	left = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (size_t)(p + 1));
-	right = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (size_t)(p + 1));
-	if (!left || !right)
+	/* Triangular table algorithm: degree 0, then up to degree p */
+	for (j = 0; j <= p; j++)
 	{
-		free(left);
-		free(right);
-		return QAWS_ZERO;
+		unsigned int idx = i + j;
+		N[j] = (t >= knots[idx] && t < knots[idx + 1]) ? QAWS_ONE : QAWS_ZERO;
 	}
-
-	/* Triangular table algorithm */
+	for (k = 1; k <= p; k++)
 	{
-		qaws_scalar* N = (qaws_scalar*)calloc((size_t)(p + 1), sizeof(qaws_scalar));
-		unsigned int k;
-		if (!N)
-		{
-			free(left);
-			free(right);
-			return QAWS_ZERO;
-		}
-
-		/* Degree 0 */
-		for (j = 0; j <= p; j++)
+		for (j = 0; j <= p - k; j++)
 		{
 			unsigned int idx = i + j;
-			N[j] = (t >= knots[idx] && t < knots[idx + 1]) ? QAWS_ONE : QAWS_ZERO;
+			qaws_scalar denom_l = knots[idx + k] - knots[idx];
+			qaws_scalar denom_r = knots[idx + k + 1] - knots[idx + 1];
+			qaws_scalar val = QAWS_ZERO;
+			if (QAWS_FABS(denom_l) > QAWS_LITERAL(1e-30))
+				val += (t - knots[idx]) / denom_l * N[j];
+			if (QAWS_FABS(denom_r) > QAWS_LITERAL(1e-30))
+				val += (knots[idx + k + 1] - t) / denom_r * N[j + 1];
+			N[j] = val;
 		}
-
-		/* Build up to degree p */
-		for (k = 1; k <= p; k++)
-		{
-			for (j = 0; j <= p - k; j++)
-			{
-				unsigned int idx = i + j;
-				qaws_scalar denom_l = knots[idx + k] - knots[idx];
-				qaws_scalar denom_r = knots[idx + k + 1] - knots[idx + 1];
-				qaws_scalar val = QAWS_ZERO;
-				if (QAWS_FABS(denom_l) > QAWS_LITERAL(1e-30))
-					val += (t - knots[idx]) / denom_l * N[j];
-				if (QAWS_FABS(denom_r) > QAWS_LITERAL(1e-30))
-					val += (knots[idx + k + 1] - t) / denom_r * N[j + 1];
-				N[j] = val;
-			}
-		}
-
-		result = N[0];
-		free(N);
 	}
-
-	free(left);
-	free(right);
-	return result;
+	return N[0];
 }
 
 /* Build clamped uniform knot vector for degree p, n control points.
@@ -179,7 +151,8 @@ static int solve_banded_spd(
 /*  Public: fit B-spline through sample points                                */
 /* ========================================================================== */
 
-qaws_status qaws_internal_fit_bspline_range(
+qaws_status qaws_internal_fit_bspline_range_ex(
+	qaws_allocator const* allocator,
 	qaws_dimension dimension,
 	unsigned int degree,
 	qaws_scalar const* sample_params,
@@ -209,21 +182,23 @@ qaws_status qaws_internal_fit_bspline_range(
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	if (sample_count < 2 || control_point_count < degree + 1)
 		return QAWS_STATUS_INVALID_ARGUMENT;
+	if (degree < 1 || degree > QAWS_INTERNAL_BASIS_MAX_DEGREE)
+		return QAWS_STATUS_INVALID_DEGREE;
 	if (dimension != QAWS_DIMENSION_2D && dimension != QAWS_DIMENSION_3D)
 		return QAWS_STATUS_INVALID_DIMENSION;
 
 	*out_curve = NULL;
 
 	/* Allocate working buffers */
-	knots = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (size_t)knot_count);
-	ata_band = (qaws_scalar*)calloc((size_t)(n * stride), sizeof(qaws_scalar));
-	atb = (qaws_scalar*)calloc((size_t)(n * dim), sizeof(qaws_scalar));
-	basis_row = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (size_t)n);
-	cps = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (size_t)(n * dim));
+	knots = (qaws_scalar*)qaws_internal_alloc(allocator, (unsigned long)(sizeof(qaws_scalar) * (size_t)knot_count));
+	ata_band = (qaws_scalar*)qaws_internal_calloc(allocator, (size_t)(n * stride), sizeof(qaws_scalar));
+	atb = (qaws_scalar*)qaws_internal_calloc(allocator, (size_t)(n * dim), sizeof(qaws_scalar));
+	basis_row = (qaws_scalar*)qaws_internal_alloc(allocator, (unsigned long)(sizeof(qaws_scalar) * (size_t)n));
+	cps = (qaws_scalar*)qaws_internal_alloc(allocator, (unsigned long)(sizeof(qaws_scalar) * (size_t)(n * dim)));
 
 	if (!knots || !ata_band || !atb || !basis_row || !cps)
 	{
-		free(knots); free(ata_band); free(atb); free(basis_row); free(cps);
+		qaws_internal_dealloc(allocator, knots); qaws_internal_dealloc(allocator, ata_band); qaws_internal_dealloc(allocator, atb); qaws_internal_dealloc(allocator, basis_row); qaws_internal_dealloc(allocator, cps);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 
@@ -265,12 +240,12 @@ qaws_status qaws_internal_fit_bspline_range(
 	for (d = 0; d < dim; d++)
 	{
 		/* Copy the band matrix (it gets overwritten by Cholesky) */
-		qaws_scalar* ata_copy = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (size_t)(n * stride));
-		qaws_scalar* rhs = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (size_t)n);
+		qaws_scalar* ata_copy = (qaws_scalar*)qaws_internal_alloc(allocator, (unsigned long)(sizeof(qaws_scalar) * (size_t)(n * stride)));
+		qaws_scalar* rhs = (qaws_scalar*)qaws_internal_alloc(allocator, (unsigned long)(sizeof(qaws_scalar) * (size_t)n));
 		if (!ata_copy || !rhs)
 		{
-			free(ata_copy); free(rhs);
-			free(knots); free(ata_band); free(atb); free(basis_row); free(cps);
+			qaws_internal_dealloc(allocator, ata_copy); qaws_internal_dealloc(allocator, rhs);
+			qaws_internal_dealloc(allocator, knots); qaws_internal_dealloc(allocator, ata_band); qaws_internal_dealloc(allocator, atb); qaws_internal_dealloc(allocator, basis_row); qaws_internal_dealloc(allocator, cps);
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 		}
 
@@ -289,8 +264,8 @@ qaws_status qaws_internal_fit_bspline_range(
 				rhs[ci] = atb[ci * dim + d];
 			if (!solve_banded_spd(ata_copy, rhs, n, bw))
 			{
-				free(ata_copy); free(rhs);
-				free(knots); free(ata_band); free(atb); free(basis_row); free(cps);
+				qaws_internal_dealloc(allocator, ata_copy); qaws_internal_dealloc(allocator, rhs);
+				qaws_internal_dealloc(allocator, knots); qaws_internal_dealloc(allocator, ata_band); qaws_internal_dealloc(allocator, atb); qaws_internal_dealloc(allocator, basis_row); qaws_internal_dealloc(allocator, cps);
 				return QAWS_STATUS_DEGENERATE_CURVE;
 			}
 		}
@@ -298,8 +273,8 @@ qaws_status qaws_internal_fit_bspline_range(
 		for (ci = 0; ci < n; ci++)
 			cps[ci * dim + d] = rhs[ci];
 
-		free(ata_copy);
-		free(rhs);
+		qaws_internal_dealloc(allocator, ata_copy);
+		qaws_internal_dealloc(allocator, rhs);
 	}
 
 	/* Create B-spline curve from the computed control points */
@@ -313,18 +288,19 @@ qaws_status qaws_internal_fit_bspline_range(
 	desc.is_uniform = 0;
 	desc.is_closed = 0;
 
-	status = qaws_curve_create_bspline(&desc, out_curve);
+	status = qaws_curve_create_bspline_ex(&desc, allocator, out_curve);
 
-	free(knots);
-	free(ata_band);
-	free(atb);
-	free(basis_row);
-	free(cps);
+	qaws_internal_dealloc(allocator, knots);
+	qaws_internal_dealloc(allocator, ata_band);
+	qaws_internal_dealloc(allocator, atb);
+	qaws_internal_dealloc(allocator, basis_row);
+	qaws_internal_dealloc(allocator, cps);
 
 	return status;
 }
 
-qaws_status qaws_internal_fit_bspline(
+qaws_status qaws_internal_fit_bspline_ex(
+	qaws_allocator const* allocator,
 	qaws_dimension dimension,
 	unsigned int degree,
 	qaws_scalar const* sample_params,
@@ -340,9 +316,23 @@ qaws_status qaws_internal_fit_bspline(
 	t_min = sample_params[0];
 	t_max = sample_params[sample_count - 1];
 
-	return qaws_internal_fit_bspline_range(
+	return qaws_internal_fit_bspline_range_ex(allocator, 
 		dimension, degree,
 		sample_params, sample_coords,
 		sample_count, control_point_count,
 		t_min, t_max, out_curve);
+}
+
+qaws_status qaws_internal_fit_bspline_range(qaws_dimension dimension, unsigned int degree, qaws_scalar const* sample_params,
+	qaws_scalar const* sample_coords, unsigned int sample_count, unsigned int control_point_count, qaws_scalar t_min, qaws_scalar t_max,
+	qaws_curve** out_curve)
+{
+	return qaws_internal_fit_bspline_range_ex(NULL, dimension, degree, sample_params, sample_coords, sample_count, control_point_count, t_min, t_max,
+		out_curve);
+}
+
+qaws_status qaws_internal_fit_bspline(qaws_dimension dimension, unsigned int degree, qaws_scalar const* sample_params,
+	qaws_scalar const* sample_coords, unsigned int sample_count, unsigned int control_point_count, qaws_curve** out_curve)
+{
+	return qaws_internal_fit_bspline_ex(NULL, dimension, degree, sample_params, sample_coords, sample_count, control_point_count, out_curve);
 }

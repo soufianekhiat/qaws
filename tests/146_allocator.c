@@ -256,12 +256,289 @@ static void test_constructors(void)
 		printf("  %s\n", report);
 }
 
+/* inputs the surfaces borrow, made once without the allocator */
+typedef struct al_inputs
+{
+	qaws_curve *c0, *c1, *d0, *d1, *mid, *path, *profile2, *uv[4];
+	qaws_surface *plane_a, *plane_b;
+} al_inputs;
+
+static qaws_curve* al_line(qaws_dimension dim, double ax, double ay, double az, double bx, double by, double bz, double bump)
+{
+	qaws_vec3 p[4];
+	qaws_bezier_desc d;
+	qaws_curve* c = NULL;
+	unsigned int i;
+	for (i = 0; i < 4; i++)
+	{
+		double t = i / 3.0;
+		p[i].x = (qaws_scalar)(ax + (bx - ax) * t);
+		p[i].y = (qaws_scalar)(ay + (by - ay) * t);
+		p[i].z = (qaws_scalar)(az + (bz - az) * t + (i == 1 || i == 2 ? bump : 0));
+	}
+	if (dim == QAWS_DIMENSION_2D)
+		for (i = 0; i < 4; i++)
+		{
+			((qaws_vec2*)p)[i].x = p[i].x;
+			((qaws_vec2*)p)[i].y = p[i].y;
+		}
+	memset(&d, 0, sizeof d);
+	d.dimension = dim; d.degree = 3; d.control_points = p; d.control_point_count = 4;
+	qaws_curve_create_bezier(&d, &c);
+	return c;
+}
+
+static int al_inputs_make(al_inputs* in)
+{
+	qaws_surface_bilinear_desc a, b;
+	memset(in, 0, sizeof *in);
+	in->c0 = al_line(QAWS_DIMENSION_3D, 0, 0, 0, 1, 0, 0, 0.2);
+	in->c1 = al_line(QAWS_DIMENSION_3D, 0, 1, 0, 1, 1, 0, -0.1);
+	in->d0 = al_line(QAWS_DIMENSION_3D, 0, 0, 0, 0, 1, 0, 0.15);
+	in->d1 = al_line(QAWS_DIMENSION_3D, 1, 0, 0, 1, 1, 0, -0.05);
+	in->mid = al_line(QAWS_DIMENSION_3D, 0, 0.5, 0.3, 1, 0.5, 0.3, 0.1);
+	in->path = al_line(QAWS_DIMENSION_3D, 0, 0, 0, 0, 0, 3, 0.5);
+	in->profile2 = al_line(QAWS_DIMENSION_2D, 0.5, 0, 0, 1, 1, 0, 0);
+	/* a closed square in the unit uv square */
+	in->uv[0] = al_line(QAWS_DIMENSION_2D, 0.2, 0.2, 0, 0.8, 0.2, 0, 0);
+	in->uv[1] = al_line(QAWS_DIMENSION_2D, 0.8, 0.2, 0, 0.8, 0.8, 0, 0);
+	in->uv[2] = al_line(QAWS_DIMENSION_2D, 0.8, 0.8, 0, 0.2, 0.8, 0, 0);
+	in->uv[3] = al_line(QAWS_DIMENSION_2D, 0.2, 0.8, 0, 0.2, 0.2, 0, 0);
+	/* two planes crossing through each other's interiors (z = 0 and x = 0), so the fillet has an intersection to follow */
+	memset(&a, 0, sizeof a);
+	a.p00.x = -1; a.p00.y = -1; a.p10.x = 1; a.p10.y = -1; a.p01.x = -1; a.p01.y = 1; a.p11.x = 1; a.p11.y = 1;
+	memset(&b, 0, sizeof b);
+	b.p00.y = -1; b.p00.z = -1; b.p10.y = 1; b.p10.z = -1; b.p01.y = -1; b.p01.z = 1; b.p11.y = 1; b.p11.z = 1;
+	/* (tilted, off the sampling grid: x = 0.137 + 0.21 z) */
+	b.p00.x = b.p10.x = (qaws_scalar)(0.137 - 0.21);
+	b.p01.x = b.p11.x = (qaws_scalar)(0.137 + 0.21);
+	qaws_surface_create_bilinear(&a, &in->plane_a);
+	qaws_surface_create_bilinear(&b, &in->plane_b);
+	return in->c0 && in->c1 && in->d0 && in->d1 && in->mid && in->path && in->profile2 && in->uv[0] && in->uv[1] && in->uv[2] && in->uv[3]
+		&& in->plane_a && in->plane_b;
+}
+
+static void al_inputs_free(al_inputs* in)
+{
+	unsigned int i;
+	qaws_curve_destroy(in->c0); qaws_curve_destroy(in->c1); qaws_curve_destroy(in->d0); qaws_curve_destroy(in->d1);
+	qaws_curve_destroy(in->mid); qaws_curve_destroy(in->path); qaws_curve_destroy(in->profile2);
+	for (i = 0; i < 4; i++) qaws_curve_destroy(in->uv[i]);
+	qaws_surface_destroy(in->plane_a);
+	qaws_surface_destroy(in->plane_b);
+}
+
+#define AL_SURFACE_CASES 16
+
+/* the other surface constructors; case 15 (the fillet with trims) also makes two curves */
+static qaws_status al_surface2(unsigned int c, al_inputs const* in, qaws_allocator const* al, qaws_surface** out, qaws_curve** ta, qaws_curve** tb)
+{
+	*out = NULL;
+	switch (c)
+	{
+	case 0:
+	{
+		qaws_surface_bilinear_desc d;
+		memset(&d, 0, sizeof d);
+		d.p10.x = 1; d.p01.y = 1; d.p11.x = 1; d.p11.y = 1; d.p11.z = 0.5f;
+		return qaws_surface_create_bilinear_ex(&d, al, out);
+	}
+	case 1:
+	{
+		qaws_surface_biquadratic_desc d;
+		unsigned int i;
+		for (i = 0; i < 9; i++)
+		{
+			d.control_points[i].x = (qaws_scalar)(i / 3);
+			d.control_points[i].y = (qaws_scalar)(i % 3);
+			d.control_points[i].z = (qaws_scalar)(i == 4 ? 1 : 0);
+		}
+		return qaws_surface_create_biquadratic_ex(&d, al, out);
+	}
+	case 2:
+	{
+		qaws_surface_coons_desc d;
+		d.c0 = in->c0; d.c1 = in->c1; d.d0 = in->d0; d.d1 = in->d1;
+		return qaws_surface_create_coons_ex(&d, al, out);
+	}
+	case 3:
+	{
+		qaws_surface_extrusion_desc d;
+		memset(&d, 0, sizeof d);
+		d.profile = in->c0; d.direction.z = 1; d.length = 2;
+		return qaws_surface_create_extrusion_ex(&d, al, out);
+	}
+	case 4:
+	{
+		qaws_surface_offset_desc d;
+		d.base = in->plane_a; d.distance = (qaws_scalar)0.1;
+		return qaws_surface_create_offset_ex(&d, al, out);
+	}
+	case 5:
+	{
+		qaws_surface_pipe_desc d;
+		memset(&d, 0, sizeof d);
+		d.path = in->path; d.radius_x = (qaws_scalar)0.2;
+		return qaws_surface_create_pipe_ex(&d, al, out);
+	}
+	case 6:
+	{
+		qaws_surface_revolution_desc d;
+		memset(&d, 0, sizeof d);
+		d.profile = in->profile2; d.axis_direction.y = 1;
+		return qaws_surface_create_revolution_ex(&d, al, out);
+	}
+	case 7:
+	{
+		qaws_surface_ruled_desc d;
+		d.curve_a = in->c0; d.curve_b = in->c1;
+		return qaws_surface_create_ruled_ex(&d, al, out);
+	}
+	case 8:
+	{
+		qaws_surface_swept_desc d;
+		memset(&d, 0, sizeof d);
+		d.path = in->path; d.profile = in->profile2;
+		return qaws_surface_create_swept_ex(&d, al, out);
+	}
+	case 9:
+	{
+		qaws_curve const* sections[3];
+		qaws_surface_loft_desc d;
+		sections[0] = in->c0; sections[1] = in->mid; sections[2] = in->c1;
+		memset(&d, 0, sizeof d);
+		d.sections = sections; d.section_count = 3;
+		return qaws_surface_create_loft_ex(&d, al, out);
+	}
+	case 10:
+	{
+		static qaws_scalar const p01[2] = { 0, 1 };
+		qaws_curve const* uc[2];
+		qaws_curve const* vc[2];
+		qaws_surface_gordon_desc d;
+		uc[0] = in->c0; uc[1] = in->c1; vc[0] = in->d0; vc[1] = in->d1;
+		d.u_curves = uc; d.u_curve_count = 2; d.v_params = p01; d.v_curves = vc; d.v_curve_count = 2; d.u_params = p01;
+		return qaws_surface_create_gordon_ex(&d, al, out);
+	}
+	case 11:
+	{
+		qaws_curve const* loop_curves[4];
+		qaws_trim_loop loop;
+		qaws_surface_trim_desc d;
+		unsigned int i;
+		for (i = 0; i < 4; i++) loop_curves[i] = in->uv[i];
+		loop.curves = loop_curves; loop.curve_count = 4; loop.is_outer = 1;
+		d.base = in->plane_a; d.loops = &loop; d.loop_count = 1;
+		return qaws_surface_create_trimmed_ex(&d, al, out);
+	}
+	case 12:
+	{
+		static qaws_scalar const k[4] = { 0, 0, 1, 1 };
+		qaws_tspline_control_point cps[4];
+		qaws_surface_tspline_desc d;
+		unsigned int i;
+		for (i = 0; i < 4; i++)
+		{
+			cps[i].position.x = (qaws_scalar)(i & 1); cps[i].position.y = (qaws_scalar)(i >> 1); cps[i].position.z = (qaws_scalar)(i == 3);
+			cps[i].weight = 1; cps[i].u_knots = k; cps[i].v_knots = k;
+		}
+		memset(&d, 0, sizeof d);
+		d.control_points = cps; d.control_point_count = 4; d.u_degree = 1; d.v_degree = 1;
+		d.u_range.max_value = 1; d.v_range.max_value = 1;
+		return qaws_surface_create_tspline_ex(&d, al, out);
+	}
+	case 13:
+	{
+		/* a cube of 6 quads */
+		static qaws_vec3 const v[8] = { { 0, 0, 0 }, { 1, 0, 0 }, { 1, 1, 0 }, { 0, 1, 0 }, { 0, 0, 1 }, { 1, 0, 1 }, { 1, 1, 1 }, { 0, 1, 1 } };
+		static unsigned int const f[24] = { 0, 3, 2, 1, 4, 5, 6, 7, 0, 1, 5, 4, 1, 2, 6, 5, 2, 3, 7, 6, 3, 0, 4, 7 };
+		static unsigned int const fs[6] = { 4, 4, 4, 4, 4, 4 };
+		qaws_surface_subdiv_desc d;
+		memset(&d, 0, sizeof d);
+		d.vertices = v; d.vertex_count = 8; d.face_indices = f; d.face_sizes = fs; d.face_count = 6;
+		d.scheme = QAWS_SUBDIV_CATMULL_CLARK; d.subdivision_level = 1;
+		return qaws_surface_create_subdiv_ex(&d, al, out);
+	}
+	default:
+	{
+		qaws_surface_fillet_desc d;
+		memset(&d, 0, sizeof d);
+		d.surface_a = in->plane_a; d.surface_b = in->plane_b; d.radius = (qaws_scalar)0.3; d.sample_count = 32; d.arc_segments = 8;
+		if (c == 14)
+			return qaws_surface_create_fillet_ex(&d, al, out);
+		return qaws_surface_create_fillet_with_trims_ex(&d, al, out, ta, tb);
+	}
+	}
+}
+
+static void test_surface_constructors(void)
+{
+	static char const* const names[AL_SURFACE_CASES] = { "bilinear", "biquadratic", "Coons", "extrusion", "offset", "pipe", "revolution", "ruled",
+		"swept", "loft", "Gordon", "trimmed", "T-spline", "subdivision", "fillet", "fillet with trims" };
+	char report[1024] = "";
+	al_inputs in;
+	unsigned int c, bad = 0;
+	if (!al_inputs_make(&in))
+	{
+		TEST_ASSERT(0, "surface inputs made");
+		al_inputs_free(&in);
+		return;
+	}
+	for (c = 0; c < AL_SURFACE_CASES; c++)
+	{
+		al_state s;
+		qaws_allocator al;
+		int k, ok = 0, wrong = 0, leaks = 0;
+		qaws_status last_wrong = QAWS_STATUS_OK;
+		al.alloc = al_alloc;
+		al.dealloc = al_dealloc;
+		al.user_data = &s;
+		for (k = 0; k < 4096 && !ok; k++)
+		{
+			qaws_surface* surface = NULL;
+			qaws_curve *ta = NULL, *tb = NULL;
+			qaws_status st;
+			s.calls = 0;
+			s.fail_at = k;
+			s.live = 0;
+			st = al_surface2(c, &in, &al, &surface, &ta, &tb);
+			if (st == QAWS_STATUS_OK)
+			{
+				qaws_surface_eval_result r;
+				ok = k + 1;
+				/* an evaluation, so scratch past the stack buffers would be counted too */
+				qaws_surface_evaluate(surface, (qaws_scalar)0.4, (qaws_scalar)0.6, QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL, &r);
+				qaws_surface_destroy(surface);
+				qaws_curve_destroy(ta);
+				qaws_curve_destroy(tb);
+			}
+			else
+			{
+				wrong += st != QAWS_STATUS_ALLOCATION_FAILURE || surface || ta || tb;
+				if (st != QAWS_STATUS_ALLOCATION_FAILURE)
+					last_wrong = st;
+			}
+			leaks += s.live != 0;
+		}
+		if (!ok || wrong || leaks)
+		{
+			bad++;
+			sprintf(report + strlen(report), " %s (succeeded %d, wrong %d (%s), leaks %d);", names[c], ok, wrong, qaws_status_to_string(last_wrong), leaks);
+		}
+	}
+	TEST_ASSERT(bad == 0, bad ? report : "every surface constructor: each allocation failure reported and cleaned up, nothing left after destroy");
+	if (bad)
+		printf("  %s\n", report);
+	al_inputs_free(&in);
+}
+
 int test_146_allocator_main(void)
 {
 	g_pass = 0;
 	g_fail = 0;
 	printf("Test 146: the allocator through every constructor\n");
 	test_constructors();
+	test_surface_constructors();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
 }

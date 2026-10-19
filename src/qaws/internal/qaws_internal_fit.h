@@ -41,4 +41,27 @@ qaws_status qaws_internal_fit_bspline_range(
 	qaws_scalar t_max,
 	qaws_curve** out_curve);
 
+/* The same, every allocation (scratch and the curve) through the allocator (NULL: malloc) */
+qaws_status qaws_internal_fit_bspline_ex(
+	qaws_allocator const* allocator,
+	qaws_dimension dimension,
+	unsigned int degree,
+	qaws_scalar const* sample_params,
+	qaws_scalar const* sample_coords,
+	unsigned int sample_count,
+	unsigned int control_point_count,
+	qaws_curve** out_curve);
+
+qaws_status qaws_internal_fit_bspline_range_ex(
+	qaws_allocator const* allocator,
+	qaws_dimension dimension,
+	unsigned int degree,
+	qaws_scalar const* sample_params,
+	qaws_scalar const* sample_coords,
+	unsigned int sample_count,
+	unsigned int control_point_count,
+	qaws_scalar t_min,
+	qaws_scalar t_max,
+	qaws_curve** out_curve);
+
 #endif /* QAWS_INTERNAL_FIT_H */

@@ -59,9 +59,9 @@ split and reverse go through an owned copy (142).
 | Bezier | runtime | absent | yes | yes | yes |
 | B-spline | runtime | `qaws_surface_view` (143) | yes | yes | yes |
 | NURBS | runtime | weights or homogeneous points (143) | yes | yes | yes |
-| Ruled, Coons, extrusion, revolution, bilinear, biquadratic, loft, Gordon, offset | runtime over their curves | absent | yes | yes | malloc |
-| Swept, pipe | finite differences | absent | absent | absent | malloc |
-| Fillet, subdivision | runtime | absent | absent | absent | malloc |
+| Ruled, Coons, extrusion, revolution, bilinear, biquadratic, loft, Gordon, offset | runtime over their curves | absent | yes | yes | yes (146) |
+| Swept, pipe | finite differences | absent | absent | absent | yes (146) |
+| Fillet, subdivision, trimmed, T-spline | runtime | absent | absent | absent | yes (146) |
 | Borrowed (`QAWS_SURFACE_KIND_VIEW`) | prepared view | - | to third order (143) | absent | yes |
 
 ## Cores on each backend
@@ -117,11 +117,12 @@ own tool, `examples/repulsive_gpu_parity.c`.
   global minimum. Planned: subdivision with bounds.
 - **Adaptive tessellation** with chord and angle tolerances into caller
   buffers. Today the quadtree uses an absolute threshold.
-- **Sweeps and lofts with analytic derivatives** and without allocation
-  per evaluation. Swept and pipe surfaces use finite differences. The loft
-  and Gordon fallbacks allocate.
+- **Sweeps and lofts with analytic derivatives.** Swept and pipe surfaces use
+  finite differences. Loft and Gordon evaluation scratch is on the stack up
+  to 32 sections, beyond that from the surface's allocator.
 - **Views of the remaining families** (arc, clothoid, Yuksel, trajectory,
   subdivision, composite). Hermite, Catmull-Rom and polynomial curves have
   views; owned objects are not rebuilt on views (their parity is tested).
-- **The allocator through every entry point** marked malloc above, and
-  through operations, sampling, traversal, batches and repulsive.
+- **The allocator through the other entry points.** Every curve and surface
+  constructor takes one (test 146). Operations, sampling, traversal, batches
+  and repulsive do not yet.

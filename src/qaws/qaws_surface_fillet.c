@@ -1,3 +1,4 @@
+#include <stdio.h>
 #include "qaws_surface_fillet.h"
 #include "qaws_surface.h"
 #include "qaws_surface_intersect.h"
@@ -273,7 +274,7 @@ static void fillet_surface_destroy(void* impl, qaws_allocator const* allocator)
 	qaws_surface_fillet_impl* fi = (qaws_surface_fillet_impl*)impl;
 	if (fi)
 	{
-		if (fi->grid) free(fi->grid);
+		if (fi->grid) qaws_internal_dealloc(allocator, fi->grid);
 	}
 	qaws_internal_dealloc(allocator, impl);
 }
@@ -338,6 +339,7 @@ static void resample_ssi_curve(
 /* ------------------------------------------------------------------ */
 
 static qaws_status build_fillet_grid(
+	qaws_allocator const* allocator,
 	qaws_surface const* surface_a,
 	qaws_surface const* surface_b,
 	qaws_scalar radius,
@@ -352,7 +354,7 @@ static qaws_status build_fillet_grid(
 	unsigned int si, ai;
 	qaws_vec3* grid;
 
-	grid = (qaws_vec3*)malloc(sample_count * v_count * sizeof(qaws_vec3));
+	grid = (qaws_vec3*)qaws_internal_alloc(allocator, (unsigned long)(sample_count * v_count * sizeof(qaws_vec3)));
 	if (!grid) return QAWS_STATUS_ALLOCATION_FAILURE;
 
 	for (si = 0; si < sample_count; si++)
@@ -489,6 +491,7 @@ static qaws_status build_fillet_grid(
 /* ------------------------------------------------------------------ */
 
 static qaws_status create_fillet_internal(
+	qaws_allocator const* allocator,
 	qaws_surface_fillet_desc const* desc,
 	qaws_surface** out_surface,
 	qaws_scalar* out_trim_a_uv,
@@ -519,8 +522,7 @@ static qaws_status create_fillet_internal(
 	if (arc_segments < 1) arc_segments = 1;
 
 	/* Allocate SSI point buffer */
-	point_buffer = (qaws_ssi_point*)malloc(
-		FILLET_SSI_POINT_CAP * sizeof(qaws_ssi_point));
+	point_buffer = (qaws_ssi_point*)qaws_internal_alloc(allocator, (unsigned long)(FILLET_SSI_POINT_CAP * sizeof(qaws_ssi_point)));
 	if (!point_buffer) return QAWS_STATUS_ALLOCATION_FAILURE;
 
 	/* Find intersection curves */
@@ -536,16 +538,16 @@ static qaws_status create_fillet_internal(
 
 	if (status != QAWS_STATUS_OK || curve_count == 0)
 	{
-		free(point_buffer);
+		qaws_internal_dealloc(allocator, point_buffer);
 		return (status != QAWS_STATUS_OK) ? status : QAWS_STATUS_NUMERICAL_FAILURE;
 	}
 
 	/* Use the first (longest) intersection curve.
 	   Resample to uniform spacing. */
-	resampled = (qaws_ssi_point*)malloc(sample_count * sizeof(qaws_ssi_point));
+	resampled = (qaws_ssi_point*)qaws_internal_alloc(allocator, (unsigned long)(sample_count * sizeof(qaws_ssi_point)));
 	if (!resampled)
 	{
-		free(point_buffer);
+		qaws_internal_dealloc(allocator, point_buffer);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 
@@ -554,13 +556,13 @@ static qaws_status create_fillet_internal(
 		sample_count, resampled);
 
 	/* Build fillet grid */
-	status = build_fillet_grid(
+	status = build_fillet_grid(allocator,
 		desc->surface_a, desc->surface_b, desc->radius,
 		resampled, sample_count, arc_segments,
 		&grid, out_trim_a_uv, out_trim_b_uv);
 
-	free(resampled);
-	free(point_buffer);
+	qaws_internal_dealloc(allocator, resampled);
+	qaws_internal_dealloc(allocator, point_buffer);
 
 	if (status != QAWS_STATUS_OK) return status;
 
@@ -568,20 +570,20 @@ static qaws_status create_fillet_internal(
 	u_range.min_value = 0; u_range.max_value = 1;
 	v_range.min_value = 0; v_range.max_value = 1;
 
-	surface = qaws_internal_surface_alloc(
-		QAWS_SURFACE_KIND_TRIMMED, /* reuse TRIMMED kind since no FILLET kind yet */
+	surface = qaws_internal_surface_alloc_ex(
+		QAWS_SURFACE_KIND_FILLET,
 		1, 1, u_range, v_range,
-		&fillet_surface_vtable);
+		&fillet_surface_vtable, allocator);
 	if (!surface)
 	{
-		free(grid);
+		qaws_internal_dealloc(allocator, grid);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 
-	impl = (qaws_surface_fillet_impl*)malloc(sizeof(qaws_surface_fillet_impl));
+	impl = (qaws_surface_fillet_impl*)qaws_internal_alloc(allocator, (unsigned long)(sizeof(qaws_surface_fillet_impl)));
 	if (!impl)
 	{
-		free(grid);
+		qaws_internal_dealloc(allocator, grid);
 		qaws_internal_surface_free(surface);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
@@ -599,15 +601,24 @@ static qaws_status create_fillet_internal(
 /* Public API                                                         */
 /* ------------------------------------------------------------------ */
 
+qaws_status qaws_surface_create_fillet_ex(
+	qaws_surface_fillet_desc const* desc,
+	qaws_allocator const* allocator,
+	qaws_surface** out_surface)
+{
+	return create_fillet_internal(allocator, desc, out_surface, NULL, NULL);
+}
+
 qaws_status qaws_surface_create_fillet(
 	qaws_surface_fillet_desc const* desc,
 	qaws_surface** out_surface)
 {
-	return create_fillet_internal(desc, out_surface, NULL, NULL);
+	return qaws_surface_create_fillet_ex(desc, NULL, out_surface);
 }
 
-qaws_status qaws_surface_create_fillet_with_trims(
+qaws_status qaws_surface_create_fillet_with_trims_ex(
 	qaws_surface_fillet_desc const* desc,
+	qaws_allocator const* allocator,
 	qaws_surface** out_fillet,
 	qaws_curve** out_trim_a,
 	qaws_curve** out_trim_b)
@@ -631,35 +642,35 @@ qaws_status qaws_surface_create_fillet_with_trims(
 	if (sample_count < 2) sample_count = 2;
 
 	/* Allocate trim UV buffers */
-	trim_a_uv = (qaws_scalar*)malloc(sample_count * 2 * sizeof(qaws_scalar));
-	trim_b_uv = (qaws_scalar*)malloc(sample_count * 2 * sizeof(qaws_scalar));
+	trim_a_uv = (qaws_scalar*)qaws_internal_alloc(allocator, (unsigned long)(sample_count * 2 * sizeof(qaws_scalar)));
+	trim_b_uv = (qaws_scalar*)qaws_internal_alloc(allocator, (unsigned long)(sample_count * 2 * sizeof(qaws_scalar)));
 	if (!trim_a_uv || !trim_b_uv)
 	{
-		free(trim_a_uv);
-		free(trim_b_uv);
+		qaws_internal_dealloc(allocator, trim_a_uv);
+		qaws_internal_dealloc(allocator, trim_b_uv);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 
 	/* Build the fillet surface and collect trim UV data */
-	status = create_fillet_internal(desc, out_fillet, trim_a_uv, trim_b_uv);
+	status = create_fillet_internal(allocator, desc, out_fillet, trim_a_uv, trim_b_uv);
 	if (status != QAWS_STATUS_OK)
 	{
-		free(trim_a_uv);
-		free(trim_b_uv);
+		qaws_internal_dealloc(allocator, trim_a_uv);
+		qaws_internal_dealloc(allocator, trim_b_uv);
 		return status;
 	}
 
 	/* Fit B-spline curves through the 2D trim points.
 	   Parameters are uniform in [0,1], coordinates are (u,v) pairs. */
-	trim_a_params = (qaws_scalar*)malloc(sample_count * sizeof(qaws_scalar));
-	trim_b_params = (qaws_scalar*)malloc(sample_count * sizeof(qaws_scalar));
-	trim_a_coords = (qaws_scalar*)malloc(sample_count * 2 * sizeof(qaws_scalar));
-	trim_b_coords = (qaws_scalar*)malloc(sample_count * 2 * sizeof(qaws_scalar));
+	trim_a_params = (qaws_scalar*)qaws_internal_alloc(allocator, (unsigned long)(sample_count * sizeof(qaws_scalar)));
+	trim_b_params = (qaws_scalar*)qaws_internal_alloc(allocator, (unsigned long)(sample_count * sizeof(qaws_scalar)));
+	trim_a_coords = (qaws_scalar*)qaws_internal_alloc(allocator, (unsigned long)(sample_count * 2 * sizeof(qaws_scalar)));
+	trim_b_coords = (qaws_scalar*)qaws_internal_alloc(allocator, (unsigned long)(sample_count * 2 * sizeof(qaws_scalar)));
 	if (!trim_a_params || !trim_b_params || !trim_a_coords || !trim_b_coords)
 	{
-		free(trim_a_uv); free(trim_b_uv);
-		free(trim_a_params); free(trim_b_params);
-		free(trim_a_coords); free(trim_b_coords);
+		qaws_internal_dealloc(allocator, trim_a_uv); qaws_internal_dealloc(allocator, trim_b_uv);
+		qaws_internal_dealloc(allocator, trim_a_params); qaws_internal_dealloc(allocator, trim_b_params);
+		qaws_internal_dealloc(allocator, trim_a_coords); qaws_internal_dealloc(allocator, trim_b_coords);
 		qaws_surface_destroy(*out_fillet);
 		*out_fillet = NULL;
 		return QAWS_STATUS_ALLOCATION_FAILURE;
@@ -682,7 +693,7 @@ qaws_status qaws_surface_create_fillet_with_trims(
 	if (cp_count < 4) cp_count = 4;
 	if (cp_count > sample_count) cp_count = sample_count;
 
-	status = qaws_internal_fit_bspline(
+	status = qaws_internal_fit_bspline_ex(allocator, 
 		QAWS_DIMENSION_2D, 3,
 		trim_a_params, trim_a_coords,
 		sample_count, cp_count,
@@ -690,15 +701,15 @@ qaws_status qaws_surface_create_fillet_with_trims(
 
 	if (status != QAWS_STATUS_OK)
 	{
-		free(trim_a_uv); free(trim_b_uv);
-		free(trim_a_params); free(trim_b_params);
-		free(trim_a_coords); free(trim_b_coords);
+		qaws_internal_dealloc(allocator, trim_a_uv); qaws_internal_dealloc(allocator, trim_b_uv);
+		qaws_internal_dealloc(allocator, trim_a_params); qaws_internal_dealloc(allocator, trim_b_params);
+		qaws_internal_dealloc(allocator, trim_a_coords); qaws_internal_dealloc(allocator, trim_b_coords);
 		qaws_surface_destroy(*out_fillet);
 		*out_fillet = NULL;
 		return status;
 	}
 
-	status = qaws_internal_fit_bspline(
+	status = qaws_internal_fit_bspline_ex(allocator, 
 		QAWS_DIMENSION_2D, 3,
 		trim_b_params, trim_b_coords,
 		sample_count, cp_count,
@@ -706,9 +717,9 @@ qaws_status qaws_surface_create_fillet_with_trims(
 
 	if (status != QAWS_STATUS_OK)
 	{
-		free(trim_a_uv); free(trim_b_uv);
-		free(trim_a_params); free(trim_b_params);
-		free(trim_a_coords); free(trim_b_coords);
+		qaws_internal_dealloc(allocator, trim_a_uv); qaws_internal_dealloc(allocator, trim_b_uv);
+		qaws_internal_dealloc(allocator, trim_a_params); qaws_internal_dealloc(allocator, trim_b_params);
+		qaws_internal_dealloc(allocator, trim_a_coords); qaws_internal_dealloc(allocator, trim_b_coords);
 		qaws_curve_destroy(*out_trim_a);
 		*out_trim_a = NULL;
 		qaws_surface_destroy(*out_fillet);
@@ -716,11 +727,20 @@ qaws_status qaws_surface_create_fillet_with_trims(
 		return status;
 	}
 
-	free(trim_a_uv);
-	free(trim_b_uv);
-	free(trim_a_params);
-	free(trim_b_params);
-	free(trim_a_coords);
-	free(trim_b_coords);
+	qaws_internal_dealloc(allocator, trim_a_uv);
+	qaws_internal_dealloc(allocator, trim_b_uv);
+	qaws_internal_dealloc(allocator, trim_a_params);
+	qaws_internal_dealloc(allocator, trim_b_params);
+	qaws_internal_dealloc(allocator, trim_a_coords);
+	qaws_internal_dealloc(allocator, trim_b_coords);
 	return QAWS_STATUS_OK;
+}
+
+qaws_status qaws_surface_create_fillet_with_trims(
+	qaws_surface_fillet_desc const* desc,
+	qaws_surface** out_fillet,
+	qaws_curve** out_trim_a,
+	qaws_curve** out_trim_b)
+{
+	return qaws_surface_create_fillet_with_trims_ex(desc, NULL, out_fillet, out_trim_a, out_trim_b);
 }

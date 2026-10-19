@@ -68,17 +68,18 @@ typedef struct qaws_surface_subdiv_impl
  * Mesh helpers
  * ----------------------------------------------------------------------- */
 
-static void subdiv_mesh_free(subdiv_mesh* m)
+static void subdiv_mesh_free(qaws_allocator const* allocator, subdiv_mesh* m)
 {
 	if (m)
 	{
-		if (m->verts) free(m->verts);
-		if (m->faces) free(m->faces);
-		if (m->face_sizes) free(m->face_sizes);
+		if (m->verts) qaws_internal_dealloc(allocator, m->verts);
+		if (m->faces) qaws_internal_dealloc(allocator, m->faces);
+		if (m->face_sizes) qaws_internal_dealloc(allocator, m->face_sizes);
 	}
 }
 
 static int subdiv_mesh_init_from_desc(
+	qaws_allocator const* allocator,
 	subdiv_mesh* m,
 	qaws_surface_subdiv_desc const* desc)
 {
@@ -95,17 +96,17 @@ static int subdiv_mesh_init_from_desc(
 	m->total_indices = total;
 
 	/* Allocate and copy vertices */
-	m->verts = (qaws_vec3*)malloc(m->vert_count * sizeof(qaws_vec3));
+	m->verts = (qaws_vec3*)qaws_internal_alloc(allocator, (unsigned long)(m->vert_count * sizeof(qaws_vec3)));
 	if (!m->verts) return 0;
 	memcpy(m->verts, desc->vertices, m->vert_count * sizeof(qaws_vec3));
 
 	/* Allocate and copy faces */
-	m->faces = (unsigned int*)malloc(total * sizeof(unsigned int));
+	m->faces = (unsigned int*)qaws_internal_alloc(allocator, (unsigned long)(total * sizeof(unsigned int)));
 	if (!m->faces) return 0;
 	memcpy(m->faces, desc->face_indices, total * sizeof(unsigned int));
 
 	/* Allocate and copy face sizes */
-	m->face_sizes = (unsigned int*)malloc(m->face_count * sizeof(unsigned int));
+	m->face_sizes = (unsigned int*)qaws_internal_alloc(allocator, (unsigned long)(m->face_count * sizeof(unsigned int)));
 	if (!m->face_sizes) return 0;
 	memcpy(m->face_sizes, desc->face_sizes, m->face_count * sizeof(unsigned int));
 
@@ -116,25 +117,25 @@ static int subdiv_mesh_init_from_desc(
  * Adjacency computation
  * ----------------------------------------------------------------------- */
 
-static void subdiv_adjacency_free(subdiv_adjacency* adj, unsigned int vert_count)
+static void subdiv_adjacency_free(qaws_allocator const* allocator, subdiv_adjacency* adj, unsigned int vert_count)
 {
 	unsigned int i;
 	if (!adj) return;
-	if (adj->edges) free(adj->edges);
-	if (adj->vert_valence) free(adj->vert_valence);
+	if (adj->edges) qaws_internal_dealloc(allocator, adj->edges);
+	if (adj->vert_valence) qaws_internal_dealloc(allocator, adj->vert_valence);
 	if (adj->vert_edges)
 	{
 		for (i = 0; i < vert_count; i++)
-			if (adj->vert_edges[i]) free(adj->vert_edges[i]);
-		free(adj->vert_edges);
+			if (adj->vert_edges[i]) qaws_internal_dealloc(allocator, adj->vert_edges[i]);
+		qaws_internal_dealloc(allocator, adj->vert_edges);
 	}
 	if (adj->vert_faces)
 	{
 		for (i = 0; i < vert_count; i++)
-			if (adj->vert_faces[i]) free(adj->vert_faces[i]);
-		free(adj->vert_faces);
+			if (adj->vert_faces[i]) qaws_internal_dealloc(allocator, adj->vert_faces[i]);
+		qaws_internal_dealloc(allocator, adj->vert_faces);
 	}
-	if (adj->vert_face_count) free(adj->vert_face_count);
+	if (adj->vert_face_count) qaws_internal_dealloc(allocator, adj->vert_face_count);
 }
 
 /* Find an existing edge between v0 and v1 in the edge array, or return
@@ -157,7 +158,7 @@ static unsigned int find_edge(
 	return SUBDIV_INVALID_INDEX;
 }
 
-static int subdiv_adjacency_build(subdiv_adjacency* adj, subdiv_mesh const* m)
+static int subdiv_adjacency_build(qaws_allocator const* allocator, subdiv_adjacency* adj, subdiv_mesh const* m)
 {
 	unsigned int max_edges;
 	unsigned int fi, ei, vi;
@@ -168,7 +169,7 @@ static int subdiv_adjacency_build(subdiv_adjacency* adj, subdiv_mesh const* m)
 
 	/* Worst case: total_indices edges (before dedup, actual is about half) */
 	max_edges = m->total_indices;
-	adj->edges = (subdiv_edge*)malloc(max_edges * sizeof(subdiv_edge));
+	adj->edges = (subdiv_edge*)qaws_internal_alloc(allocator, (unsigned long)(max_edges * sizeof(subdiv_edge)));
 	if (!adj->edges) return 0;
 	adj->edge_count = 0;
 
@@ -203,7 +204,7 @@ static int subdiv_adjacency_build(subdiv_adjacency* adj, subdiv_mesh const* m)
 	}
 
 	/* Compute vertex valence and adjacency lists */
-	adj->vert_valence = (unsigned int*)calloc(m->vert_count, sizeof(unsigned int));
+	adj->vert_valence = (unsigned int*)qaws_internal_calloc(allocator, m->vert_count, sizeof(unsigned int));
 	if (!adj->vert_valence) return 0;
 
 	/* Count valences */
@@ -214,20 +215,19 @@ static int subdiv_adjacency_build(subdiv_adjacency* adj, subdiv_mesh const* m)
 	}
 
 	/* Allocate per-vertex edge lists */
-	adj->vert_edges = (unsigned int**)calloc(m->vert_count, sizeof(unsigned int*));
+	adj->vert_edges = (unsigned int**)qaws_internal_calloc(allocator, m->vert_count, sizeof(unsigned int*));
 	if (!adj->vert_edges) return 0;
 	for (vi = 0; vi < m->vert_count; vi++)
 	{
 		if (adj->vert_valence[vi] > 0)
 		{
-			adj->vert_edges[vi] = (unsigned int*)malloc(
-				adj->vert_valence[vi] * sizeof(unsigned int));
+			adj->vert_edges[vi] = (unsigned int*)qaws_internal_alloc(allocator, (unsigned long)(adj->vert_valence[vi] * sizeof(unsigned int)));
 			if (!adj->vert_edges[vi]) return 0;
 		}
 	}
 
 	/* Fill edge lists */
-	temp_valence = (unsigned int*)calloc(m->vert_count, sizeof(unsigned int));
+	temp_valence = (unsigned int*)qaws_internal_calloc(allocator, m->vert_count, sizeof(unsigned int));
 	if (!temp_valence) return 0;
 
 	for (ei = 0; ei < adj->edge_count; ei++)
@@ -237,10 +237,10 @@ static int subdiv_adjacency_build(subdiv_adjacency* adj, subdiv_mesh const* m)
 		adj->vert_edges[va][temp_valence[va]++] = ei;
 		adj->vert_edges[vb][temp_valence[vb]++] = ei;
 	}
-	free(temp_valence);
+	qaws_internal_dealloc(allocator, temp_valence);
 
 	/* Build per-vertex face lists */
-	adj->vert_face_count = (unsigned int*)calloc(m->vert_count, sizeof(unsigned int));
+	adj->vert_face_count = (unsigned int*)qaws_internal_calloc(allocator, m->vert_count, sizeof(unsigned int));
 	if (!adj->vert_face_count) return 0;
 
 	/* Count faces per vertex */
@@ -256,21 +256,20 @@ static int subdiv_adjacency_build(subdiv_adjacency* adj, subdiv_mesh const* m)
 		offset += n;
 	}
 
-	adj->vert_faces = (unsigned int**)calloc(m->vert_count, sizeof(unsigned int*));
+	adj->vert_faces = (unsigned int**)qaws_internal_calloc(allocator, m->vert_count, sizeof(unsigned int*));
 	if (!adj->vert_faces) return 0;
 	for (vi = 0; vi < m->vert_count; vi++)
 	{
 		if (adj->vert_face_count[vi] > 0)
 		{
-			adj->vert_faces[vi] = (unsigned int*)malloc(
-				adj->vert_face_count[vi] * sizeof(unsigned int));
+			adj->vert_faces[vi] = (unsigned int*)qaws_internal_alloc(allocator, (unsigned long)(adj->vert_face_count[vi] * sizeof(unsigned int)));
 			if (!adj->vert_faces[vi]) return 0;
 		}
 	}
 
 	/* Fill face lists (reuse vert_face_count as write index, then restore) */
 	{
-		unsigned int* write_idx = (unsigned int*)calloc(m->vert_count, sizeof(unsigned int));
+		unsigned int* write_idx = (unsigned int*)qaws_internal_calloc(allocator, m->vert_count, sizeof(unsigned int));
 		if (!write_idx) return 0;
 
 		offset = 0;
@@ -285,7 +284,7 @@ static int subdiv_adjacency_build(subdiv_adjacency* adj, subdiv_mesh const* m)
 			}
 			offset += n;
 		}
-		free(write_idx);
+		qaws_internal_dealloc(allocator, write_idx);
 	}
 
 	return 1;
@@ -342,7 +341,7 @@ static qaws_vec3 compute_face_centroid(
  * Catmull-Clark subdivision step
  * ----------------------------------------------------------------------- */
 
-static int catmull_clark_subdivide(subdiv_mesh* in_mesh, subdiv_mesh* out_mesh)
+static int catmull_clark_subdivide(qaws_allocator const* allocator, subdiv_mesh* in_mesh, subdiv_mesh* out_mesh)
 {
 	subdiv_adjacency adj;
 	unsigned int nv, ne, nf;
@@ -361,10 +360,10 @@ static int catmull_clark_subdivide(subdiv_mesh* in_mesh, subdiv_mesh* out_mesh)
 	int ok;
 
 	memset(&adj, 0, sizeof(adj));
-	ok = subdiv_adjacency_build(&adj, in_mesh);
+	ok = subdiv_adjacency_build(allocator, &adj, in_mesh);
 	if (!ok)
 	{
-		subdiv_adjacency_free(&adj, in_mesh->vert_count);
+		subdiv_adjacency_free(allocator, &adj, in_mesh->vert_count);
 		return 0;
 	}
 
@@ -387,20 +386,20 @@ static int catmull_clark_subdivide(subdiv_mesh* in_mesh, subdiv_mesh* out_mesh)
 	new_total_indices = new_face_count * 4;
 
 	/* Allocate output mesh */
-	new_verts = (qaws_vec3*)malloc(new_vert_count * sizeof(qaws_vec3));
-	new_faces = (unsigned int*)malloc(new_total_indices * sizeof(unsigned int));
-	new_face_sizes = (unsigned int*)malloc(new_face_count * sizeof(unsigned int));
-	face_points = (qaws_vec3*)malloc(nf * sizeof(qaws_vec3));
-	edge_points = (qaws_vec3*)malloc(ne * sizeof(qaws_vec3));
+	new_verts = (qaws_vec3*)qaws_internal_alloc(allocator, (unsigned long)(new_vert_count * sizeof(qaws_vec3)));
+	new_faces = (unsigned int*)qaws_internal_alloc(allocator, (unsigned long)(new_total_indices * sizeof(unsigned int)));
+	new_face_sizes = (unsigned int*)qaws_internal_alloc(allocator, (unsigned long)(new_face_count * sizeof(unsigned int)));
+	face_points = (qaws_vec3*)qaws_internal_alloc(allocator, (unsigned long)(nf * sizeof(qaws_vec3)));
+	edge_points = (qaws_vec3*)qaws_internal_alloc(allocator, (unsigned long)(ne * sizeof(qaws_vec3)));
 
 	if (!new_verts || !new_faces || !new_face_sizes || !face_points || !edge_points)
 	{
-		if (new_verts) free(new_verts);
-		if (new_faces) free(new_faces);
-		if (new_face_sizes) free(new_face_sizes);
-		if (face_points) free(face_points);
-		if (edge_points) free(edge_points);
-		subdiv_adjacency_free(&adj, in_mesh->vert_count);
+		if (new_verts) qaws_internal_dealloc(allocator, new_verts);
+		if (new_faces) qaws_internal_dealloc(allocator, new_faces);
+		if (new_face_sizes) qaws_internal_dealloc(allocator, new_face_sizes);
+		if (face_points) qaws_internal_dealloc(allocator, face_points);
+		if (edge_points) qaws_internal_dealloc(allocator, edge_points);
+		subdiv_adjacency_free(allocator, &adj, in_mesh->vert_count);
 		return 0;
 	}
 
@@ -598,9 +597,9 @@ static int catmull_clark_subdivide(subdiv_mesh* in_mesh, subdiv_mesh* out_mesh)
 	out_mesh->face_count = new_face_count;
 	out_mesh->total_indices = new_total_indices;
 
-	free(face_points);
-	free(edge_points);
-	subdiv_adjacency_free(&adj, in_mesh->vert_count);
+	qaws_internal_dealloc(allocator, face_points);
+	qaws_internal_dealloc(allocator, edge_points);
+	subdiv_adjacency_free(allocator, &adj, in_mesh->vert_count);
 	return 1;
 }
 
@@ -608,7 +607,7 @@ static int catmull_clark_subdivide(subdiv_mesh* in_mesh, subdiv_mesh* out_mesh)
  * Loop subdivision step
  * ----------------------------------------------------------------------- */
 
-static int loop_subdivide(subdiv_mesh* in_mesh, subdiv_mesh* out_mesh)
+static int loop_subdivide(qaws_allocator const* allocator, subdiv_mesh* in_mesh, subdiv_mesh* out_mesh)
 {
 	subdiv_adjacency adj;
 	unsigned int nv, ne, nf;
@@ -624,10 +623,10 @@ static int loop_subdivide(subdiv_mesh* in_mesh, subdiv_mesh* out_mesh)
 	int ok;
 
 	memset(&adj, 0, sizeof(adj));
-	ok = subdiv_adjacency_build(&adj, in_mesh);
+	ok = subdiv_adjacency_build(allocator, &adj, in_mesh);
 	if (!ok)
 	{
-		subdiv_adjacency_free(&adj, in_mesh->vert_count);
+		subdiv_adjacency_free(allocator, &adj, in_mesh->vert_count);
 		return 0;
 	}
 
@@ -644,16 +643,16 @@ static int loop_subdivide(subdiv_mesh* in_mesh, subdiv_mesh* out_mesh)
 	new_face_count = nf * 4;
 	new_total_indices = new_face_count * 3;
 
-	new_verts = (qaws_vec3*)malloc(new_vert_count * sizeof(qaws_vec3));
-	new_faces = (unsigned int*)malloc(new_total_indices * sizeof(unsigned int));
-	new_face_sizes = (unsigned int*)malloc(new_face_count * sizeof(unsigned int));
+	new_verts = (qaws_vec3*)qaws_internal_alloc(allocator, (unsigned long)(new_vert_count * sizeof(qaws_vec3)));
+	new_faces = (unsigned int*)qaws_internal_alloc(allocator, (unsigned long)(new_total_indices * sizeof(unsigned int)));
+	new_face_sizes = (unsigned int*)qaws_internal_alloc(allocator, (unsigned long)(new_face_count * sizeof(unsigned int)));
 
 	if (!new_verts || !new_faces || !new_face_sizes)
 	{
-		if (new_verts) free(new_verts);
-		if (new_faces) free(new_faces);
-		if (new_face_sizes) free(new_face_sizes);
-		subdiv_adjacency_free(&adj, in_mesh->vert_count);
+		if (new_verts) qaws_internal_dealloc(allocator, new_verts);
+		if (new_faces) qaws_internal_dealloc(allocator, new_faces);
+		if (new_face_sizes) qaws_internal_dealloc(allocator, new_face_sizes);
+		subdiv_adjacency_free(allocator, &adj, in_mesh->vert_count);
 		return 0;
 	}
 
@@ -886,7 +885,7 @@ static int loop_subdivide(subdiv_mesh* in_mesh, subdiv_mesh* out_mesh)
 	out_mesh->face_count = new_face_count;
 	out_mesh->total_indices = new_total_indices;
 
-	subdiv_adjacency_free(&adj, in_mesh->vert_count);
+	subdiv_adjacency_free(allocator, &adj, in_mesh->vert_count);
 	return 1;
 }
 
@@ -918,6 +917,7 @@ static void mesh_bounds(
    Uses planar parameterization: project onto the plane of largest extent.
    Returns allocated arrays of u,v coordinates (caller frees). */
 static int parameterize_mesh(
+	qaws_allocator const* allocator,
 	subdiv_mesh const* m,
 	qaws_scalar** out_u,
 	qaws_scalar** out_v)
@@ -975,12 +975,12 @@ static int parameterize_mesh(
 	if (range0 < QAWS_LITERAL(1e-12)) range0 = QAWS_ONE;
 	if (range1 < QAWS_LITERAL(1e-12)) range1 = QAWS_ONE;
 
-	u_coords = (qaws_scalar*)malloc(m->vert_count * sizeof(qaws_scalar));
-	v_coords = (qaws_scalar*)malloc(m->vert_count * sizeof(qaws_scalar));
+	u_coords = (qaws_scalar*)qaws_internal_alloc(allocator, (unsigned long)(m->vert_count * sizeof(qaws_scalar)));
+	v_coords = (qaws_scalar*)qaws_internal_alloc(allocator, (unsigned long)(m->vert_count * sizeof(qaws_scalar)));
 	if (!u_coords || !v_coords)
 	{
-		if (u_coords) free(u_coords);
-		if (v_coords) free(v_coords);
+		if (u_coords) qaws_internal_dealloc(allocator, u_coords);
+		if (v_coords) qaws_internal_dealloc(allocator, v_coords);
 		return 0;
 	}
 
@@ -1043,6 +1043,7 @@ static int barycentric_2d(
    For each grid point, find the face containing it in parameter space and
    interpolate the 3D position. */
 static int sample_mesh_to_grid(
+	qaws_allocator const* allocator,
 	subdiv_mesh const* m,
 	unsigned int grid_n,
 	qaws_vec3** out_grid)
@@ -1054,15 +1055,15 @@ static int sample_mesh_to_grid(
 	unsigned int gi, gj;
 	unsigned int fi;
 
-	if (!parameterize_mesh(m, &u_param, &v_param))
+	if (!parameterize_mesh(allocator, m, &u_param, &v_param))
 		return 0;
 
 	grid_size = (grid_n + 1) * (grid_n + 1);
-	grid = (qaws_vec3*)malloc(grid_size * sizeof(qaws_vec3));
+	grid = (qaws_vec3*)qaws_internal_alloc(allocator, (unsigned long)(grid_size * sizeof(qaws_vec3)));
 	if (!grid)
 	{
-		free(u_param);
-		free(v_param);
+		qaws_internal_dealloc(allocator, u_param);
+		qaws_internal_dealloc(allocator, v_param);
 		return 0;
 	}
 
@@ -1191,8 +1192,8 @@ static int sample_mesh_to_grid(
 		}
 	}
 
-	free(u_param);
-	free(v_param);
+	qaws_internal_dealloc(allocator, u_param);
+	qaws_internal_dealloc(allocator, v_param);
 	*out_grid = grid;
 	return 1;
 }
@@ -1334,10 +1335,10 @@ static void subdiv_surface_destroy(void* impl, qaws_allocator const* allocator)
 	qaws_surface_subdiv_impl* si = (qaws_surface_subdiv_impl*)impl;
 	if (si)
 	{
-		if (si->grid) free(si->grid);
-		if (si->mesh_verts) free(si->mesh_verts);
-		if (si->mesh_normals) free(si->mesh_normals);
-		if (si->mesh_tris) free(si->mesh_tris);
+		if (si->grid) qaws_internal_dealloc(allocator, si->grid);
+		if (si->mesh_verts) qaws_internal_dealloc(allocator, si->mesh_verts);
+		if (si->mesh_normals) qaws_internal_dealloc(allocator, si->mesh_normals);
+		if (si->mesh_tris) qaws_internal_dealloc(allocator, si->mesh_tris);
 	}
 	qaws_internal_dealloc(allocator, impl);
 }
@@ -1360,6 +1361,7 @@ static qaws_surface_vtable const subdiv_surface_vtable = {
  * ----------------------------------------------------------------------- */
 
 static int build_triangle_mesh(
+	qaws_allocator const* allocator,
 	subdiv_mesh const* m,
 	qaws_vec3** out_verts,
 	qaws_vec3** out_normals,
@@ -1381,14 +1383,14 @@ static int build_triangle_mesh(
 			tri_count += m->face_sizes[fi] - 2;
 	}
 
-	verts = (qaws_vec3*)malloc(m->vert_count * sizeof(qaws_vec3));
-	normals = (qaws_vec3*)calloc(m->vert_count, sizeof(qaws_vec3));
-	tris = (unsigned int*)malloc(tri_count * 3 * sizeof(unsigned int));
-	face_normals = (qaws_vec3*)malloc(tri_count * sizeof(qaws_vec3));
+	verts = (qaws_vec3*)qaws_internal_alloc(allocator, (unsigned long)(m->vert_count * sizeof(qaws_vec3)));
+	normals = (qaws_vec3*)qaws_internal_calloc(allocator, m->vert_count, sizeof(qaws_vec3));
+	tris = (unsigned int*)qaws_internal_alloc(allocator, (unsigned long)(tri_count * 3 * sizeof(unsigned int)));
+	face_normals = (qaws_vec3*)qaws_internal_alloc(allocator, (unsigned long)(tri_count * sizeof(qaws_vec3)));
 
 	if (!verts || !normals || !tris || !face_normals)
 	{
-		free(verts); free(normals); free(tris); free(face_normals);
+		qaws_internal_dealloc(allocator, verts); qaws_internal_dealloc(allocator, normals); qaws_internal_dealloc(allocator, tris); qaws_internal_dealloc(allocator, face_normals);
 		return 0;
 	}
 
@@ -1459,7 +1461,7 @@ static int build_triangle_mesh(
 		}
 	}
 
-	free(face_normals);
+	qaws_internal_dealloc(allocator, face_normals);
 
 	*out_verts = verts;
 	*out_normals = normals;
@@ -1473,8 +1475,9 @@ static int build_triangle_mesh(
  * Public creation function
  * ----------------------------------------------------------------------- */
 
-qaws_status qaws_surface_create_subdiv(
+qaws_status qaws_surface_create_subdiv_ex(
 	qaws_surface_subdiv_desc const* desc,
+	qaws_allocator const* allocator,
 	qaws_surface** out_surface)
 {
 	qaws_surface* surface;
@@ -1528,9 +1531,9 @@ qaws_status qaws_surface_create_subdiv(
 
 	/* Initialize mesh from descriptor */
 	memset(&mesh, 0, sizeof(mesh));
-	if (!subdiv_mesh_init_from_desc(&mesh, desc))
+	if (!subdiv_mesh_init_from_desc(allocator, &mesh, desc))
 	{
-		subdiv_mesh_free(&mesh);
+		subdiv_mesh_free(allocator, &mesh);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 
@@ -1543,15 +1546,15 @@ qaws_status qaws_surface_create_subdiv(
 		memset(&new_mesh, 0, sizeof(new_mesh));
 
 		if (desc->scheme == QAWS_SUBDIV_LOOP)
-			ok = loop_subdivide(&mesh, &new_mesh);
+			ok = loop_subdivide(allocator, &mesh, &new_mesh);
 		else
-			ok = catmull_clark_subdivide(&mesh, &new_mesh);
+			ok = catmull_clark_subdivide(allocator, &mesh, &new_mesh);
 
-		subdiv_mesh_free(&mesh);
+		subdiv_mesh_free(allocator, &mesh);
 
 		if (!ok)
 		{
-			subdiv_mesh_free(&new_mesh);
+			subdiv_mesh_free(allocator, &new_mesh);
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 		}
 
@@ -1565,9 +1568,9 @@ qaws_status qaws_surface_create_subdiv(
 		unsigned int* mt = NULL;
 		unsigned int mvc = 0, mtc = 0;
 
-		if (!build_triangle_mesh(&mesh, &mv, &mn, &mt, &mvc, &mtc))
+		if (!build_triangle_mesh(allocator, &mesh, &mv, &mn, &mt, &mvc, &mtc))
 		{
-			subdiv_mesh_free(&mesh);
+			subdiv_mesh_free(allocator, &mesh);
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 		}
 
@@ -1578,32 +1581,31 @@ qaws_status qaws_surface_create_subdiv(
 
 		/* Sample subdivided mesh onto regular grid (best-effort for eval) */
 		grid = NULL;
-		if (!sample_mesh_to_grid(&mesh, grid_n, &grid))
+		if (!sample_mesh_to_grid(allocator, &mesh, grid_n, &grid))
 		{
-			subdiv_mesh_free(&mesh);
-			free(mv); free(mn); free(mt);
+			subdiv_mesh_free(allocator, &mesh);
+			qaws_internal_dealloc(allocator, mv); qaws_internal_dealloc(allocator, mn); qaws_internal_dealloc(allocator, mt);
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 		}
-		subdiv_mesh_free(&mesh);
+		subdiv_mesh_free(allocator, &mesh);
 
 		/* Allocate surface */
 		u_range.min_value = 0; u_range.max_value = 1;
 		v_range.min_value = 0; v_range.max_value = 1;
 
-		surface = qaws_internal_surface_alloc(
-			QAWS_SURFACE_KIND_SUBDIV,
+		surface = qaws_internal_surface_alloc_ex(QAWS_SURFACE_KIND_SUBDIV,
 			1, 1, u_range, v_range,
-			&subdiv_surface_vtable);
+			&subdiv_surface_vtable, allocator);
 		if (!surface)
 		{
-			free(grid); free(mv); free(mn); free(mt);
+			qaws_internal_dealloc(allocator, grid); qaws_internal_dealloc(allocator, mv); qaws_internal_dealloc(allocator, mn); qaws_internal_dealloc(allocator, mt);
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 		}
 
-		impl = (qaws_surface_subdiv_impl*)malloc(sizeof(qaws_surface_subdiv_impl));
+		impl = (qaws_surface_subdiv_impl*)qaws_internal_alloc(allocator, (unsigned long)(sizeof(qaws_surface_subdiv_impl)));
 		if (!impl)
 		{
-			free(grid); free(mv); free(mn); free(mt);
+			qaws_internal_dealloc(allocator, grid); qaws_internal_dealloc(allocator, mv); qaws_internal_dealloc(allocator, mn); qaws_internal_dealloc(allocator, mt);
 			qaws_internal_surface_free(surface);
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 		}
@@ -1620,6 +1622,13 @@ qaws_status qaws_surface_create_subdiv(
 		*out_surface = surface;
 		return QAWS_STATUS_OK;
 	}
+}
+
+qaws_status qaws_surface_create_subdiv(
+	qaws_surface_subdiv_desc const* desc,
+	qaws_surface** out_surface)
+{
+	return qaws_surface_create_subdiv_ex(desc, NULL, out_surface);
 }
 
 /* -----------------------------------------------------------------------

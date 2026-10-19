@@ -496,8 +496,9 @@ static qaws_surface_vtable const offset_surface_vtable = {
 	&offset_surface_diff_vtable
 };
 
-qaws_status qaws_surface_create_offset(
+qaws_status qaws_surface_create_offset_ex(
 	qaws_surface_offset_desc const* desc,
+	qaws_allocator const* allocator,
 	qaws_surface** out_surface)
 {
 	qaws_surface* surface;
@@ -512,13 +513,12 @@ qaws_status qaws_surface_create_offset(
 	u_range.min_value = 0; u_range.max_value = 1;
 	v_range.min_value = 0; v_range.max_value = 1;
 
-	surface = qaws_internal_surface_alloc(
-		QAWS_SURFACE_KIND_OFFSET,
+	surface = qaws_internal_surface_alloc_ex(QAWS_SURFACE_KIND_OFFSET,
 		0, 0, u_range, v_range,
-		&offset_surface_vtable);
+		&offset_surface_vtable, allocator);
 	if (!surface) return QAWS_STATUS_ALLOCATION_FAILURE;
 
-	impl = (qaws_surface_offset_impl*)malloc(sizeof(qaws_surface_offset_impl));
+	impl = (qaws_surface_offset_impl*)qaws_internal_alloc(allocator, (unsigned long)(sizeof(qaws_surface_offset_impl)));
 	if (!impl)
 	{
 		qaws_internal_surface_free(surface);
@@ -531,4 +531,11 @@ qaws_status qaws_surface_create_offset(
 	surface->impl = impl;
 	*out_surface = surface;
 	return QAWS_STATUS_OK;
+}
+
+qaws_status qaws_surface_create_offset(
+	qaws_surface_offset_desc const* desc,
+	qaws_surface** out_surface)
+{
+	return qaws_surface_create_offset_ex(desc, NULL, out_surface);
 }

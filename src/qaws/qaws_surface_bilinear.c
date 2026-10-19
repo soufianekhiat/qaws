@@ -203,8 +203,9 @@ static qaws_surface_vtable const bilinear_surface_vtable = {
 	&bilinear_surface_diff_vtable
 };
 
-qaws_status qaws_surface_create_bilinear(
+qaws_status qaws_surface_create_bilinear_ex(
 	qaws_surface_bilinear_desc const* desc,
+	qaws_allocator const* allocator,
 	qaws_surface** out_surface)
 {
 	qaws_surface* surface;
@@ -216,13 +217,12 @@ qaws_status qaws_surface_create_bilinear(
 	u_range.min_value = 0; u_range.max_value = 1;
 	v_range.min_value = 0; v_range.max_value = 1;
 
-	surface = qaws_internal_surface_alloc(
-		QAWS_SURFACE_KIND_BILINEAR,
+	surface = qaws_internal_surface_alloc_ex(QAWS_SURFACE_KIND_BILINEAR,
 		1, 1, u_range, v_range,
-		&bilinear_surface_vtable);
+		&bilinear_surface_vtable, allocator);
 	if (!surface) return QAWS_STATUS_ALLOCATION_FAILURE;
 
-	impl = (qaws_surface_bilinear_impl*)malloc(sizeof(qaws_surface_bilinear_impl));
+	impl = (qaws_surface_bilinear_impl*)qaws_internal_alloc(allocator, (unsigned long)(sizeof(qaws_surface_bilinear_impl)));
 	if (!impl)
 	{
 		qaws_internal_surface_free(surface);
@@ -237,4 +237,11 @@ qaws_status qaws_surface_create_bilinear(
 	surface->impl = impl;
 	*out_surface = surface;
 	return QAWS_STATUS_OK;
+}
+
+qaws_status qaws_surface_create_bilinear(
+	qaws_surface_bilinear_desc const* desc,
+	qaws_surface** out_surface)
+{
+	return qaws_surface_create_bilinear_ex(desc, NULL, out_surface);
 }
