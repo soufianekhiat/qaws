@@ -119,6 +119,39 @@ by hand on Windows (2026-10-19). With test 144 (C core = runtime) this
 closes the chain GPU = C core = runtime. The repulsive kernels have their
 own tool, `examples/repulsive_gpu_parity.c`.
 
+## Memory behaviour of the main operations
+
+Every allocation follows `docs/api/alloc.md`: from the `_ex` argument, else the thread's allocator, else the default. The columns mean:
+
+- **Allocates:** memory taken during the call. "Object" means it allocates only the object it returns.
+- **Borrows input:** the call reads host arrays in place.
+- **Caller output:** results are written into caller buffers (with counts first where noted).
+- **Prepared:** a reusable object for repeated calls.
+- **Parallel:** calls on shared immutable inputs may run concurrently, and the library has no internal thread pool. "Executor" means the caller can hand the library a `qaws_batch_executor` to fan the work out.
+- **Cancel:** the call takes a cancellation hook.
+- **Results outlive scratch:** returned objects own their memory; no result points into a call's scratch.
+
+| Operation | Allocates | Borrows input | Caller output | Prepared | Parallel | Cancel | Results outlive scratch |
+|---|---|---|---|---|---|---|---|
+| Curve and surface evaluation (owned, borrowed, prepared ranges) | no (loft and Gordon beyond 32 sections: from the surface's allocator) | views: B-spline, NURBS, Bezier, Hermite, Catmull-Rom, polynomial curves; B-spline, NURBS surfaces (142, 143) | yes | `qaws_curve_prepare`, `_into` caller memory | yes (142: four threads, bit-identical) | n/a (bounded) | n/a |
+| Curve and surface construction | object | through views | object | - | yes | n/a | yes |
+| Arc length, inverse, frames, certified closest points | no | any curve, including borrowed | yes | - | yes | n/a | n/a |
+| Curve and surface tessellation (`_tessellate_2d/3d`, `_adaptive`) | no | yes | yes, counts first | - | yes | n/a | n/a |
+| Sampling (`qaws_curve_sample_*`) | arc-length tables, adaptive growth buffers | yes | yes (`qaws_curve_get_sample_count`) | - | yes | no | n/a |
+| B-spline fitting | normal equations (O(n^2)), parameters, knots | data points read in place | object | - | yes | no | yes |
+| Offsets (`qaws_curve_offset_2d`, `qaws_offset`) | yes | yes | objects | - | executor (`qaws_offset`) | no | yes |
+| Clipping (`qaws_clip_*`) | yes | yes | result object | - | executor | no | yes |
+| Traversal | tables at creation | yes | object | the traversal | yes | no | yes |
+| Meshing (generate, remesh, quadrangulate, repair) | yes | yes | mesh objects | - | yes | no | yes |
+| Curve and surface batches | yes | yes | caller capacity + counts | prepared sets | executor | no | yes |
+| Repulsive curves and surfaces | solver state, per-step scratch | positions in caller buffers | in place | the energy object and solver | executor | progress callback cancels (145) | yes |
+
+**Scratch sizes.** No operation publishes a bound or a scratch-size query yet. `examples/memory_bench.c` measures, per operation:
+
+- the blocks;
+- the most live bytes on the heap;
+- the peak inside an arena, which is what to size an arena by.
+
 ## Missing
 
 - **Halide spans at run time.** Curves and surfaces read from buffers have a

@@ -441,6 +441,13 @@ if(QAWS_BUILD_EXAMPLES)
     RUNTIME_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/working_dir"
     RUNTIME_OUTPUT_DIRECTORY_RELEASE "${PROJECT_SOURCE_DIR}/working_dir"
     RUNTIME_OUTPUT_DIRECTORY_DEBUG "${PROJECT_SOURCE_DIR}/working_dir")
+  add_executable(qaws_memory_bench examples/memory_bench.c)
+  target_link_libraries(qaws_memory_bench PRIVATE Qaws::qaws)
+  target_include_directories(qaws_memory_bench PRIVATE "${PROJECT_SOURCE_DIR}/src/qaws")
+  set_target_properties(qaws_memory_bench PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/working_dir"
+    RUNTIME_OUTPUT_DIRECTORY_RELEASE "${PROJECT_SOURCE_DIR}/working_dir"
+    RUNTIME_OUTPUT_DIRECTORY_DEBUG "${PROJECT_SOURCE_DIR}/working_dir")
   add_executable(qaws_better2d_showcase examples/better2d_showcase.c)
   target_link_libraries(qaws_better2d_showcase PRIVATE Qaws::qaws)
   target_include_directories(qaws_better2d_showcase PRIVATE "${PROJECT_SOURCE_DIR}/src/qaws")

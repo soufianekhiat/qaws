@@ -1,5 +1,6 @@
 #ifndef QAWS_TYPES_H
 #define QAWS_TYPES_H
+#include <stddef.h>
 
 /*
  * Thread safety guarantees:
@@ -186,19 +187,36 @@ typedef struct qaws_curve qaws_curve;
 typedef struct qaws_traversal qaws_traversal;
 
 /*
- * Custom allocator. Pass to _ex creation functions to override
- * malloc/free. If alloc returns NULL, creation fails with
- * QAWS_STATUS_ALLOCATION_FAILURE.
+ * Custom allocator. Pass to _ex creation functions or install it (qaws_alloc.h). If allocation returns NULL, the call
+ * fails with QAWS_STATUS_ALLOCATION_FAILURE.
  *
- * alloc(size, user_data) — allocate size bytes (like malloc)
- * dealloc(ptr, user_data) — free pointer (like free)
+ * The library copies this descriptor (callbacks and user_data) into every block it allocates and into the objects that
+ * allocate later, so the descriptor itself may be a short-lived local; the state user_data points to must outlive every
+ * block the allocator gave.
+ *
+ * Two interfaces. A legacy descriptor sets the first three members only; the others are never read. An extended one sets
+ * alloc to qaws_allocator_extended (the marker) and the sized members:
+ *   legacy: alloc(size, user_data), dealloc(ptr, user_data); sizes in unsigned long (32 bits on Windows: larger
+ *           requests fail);
+ *   sized:  alloc_sized(size, alignment, user_data), dealloc_sized(ptr, size, alignment, user_data) with the size and
+ *           alignment of the allocation; resize (optional) grows or shrinks a block in place and returns non-zero, or
+ *           returns 0 to let the library allocate, copy and free.
+ * Blocks must be aligned to QAWS_MEMORY_ALIGNMENT (16); misaligned blocks are given back and the call fails.
  */
 typedef struct qaws_allocator
 {
 	void* (*alloc)(unsigned long size, void* user_data);
 	void  (*dealloc)(void* ptr, void* user_data);
 	void* user_data;
+	void* (*alloc_sized)(size_t size, size_t alignment, void* user_data);
+	void  (*dealloc_sized)(void* ptr, size_t size, size_t alignment, void* user_data);
+	int   (*resize)(void* ptr, size_t old_size, size_t new_size, size_t alignment, void* user_data);
 } qaws_allocator;
+
+#define QAWS_MEMORY_ALIGNMENT 16
+
+/* the marker of an extended descriptor (alloc = qaws_allocator_extended); never allocates when called */
+void* qaws_allocator_extended(unsigned long size, void* user_data);
 
 /*
  * Stack-allocated curve for single-span curves (up to degree 7, 3D).

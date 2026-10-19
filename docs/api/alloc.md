@@ -1,62 +1,107 @@
 # API Reference: qaws_alloc.h
 
-Custom allocator support for curve and surface creation.
+Where the library's memory comes from, and how hosts give it their own.
 
 ---
 
 ## Overview
 
-Every allocation of the library goes through one place (`src/qaws/internal/qaws_internal_memory.c`, the only caller of `malloc`, `realloc` and `free`). Memory comes from, in order:
+Every allocation of the library goes through one place: `src/qaws/internal/qaws_internal_memory.c` is the only caller of the C allocator. Memory comes from, in order:
 
 1. the allocator passed to an `_ex` function;
 2. the calling thread's allocator, `qaws_set_thread_allocator`;
 3. the process default, `qaws_set_default_allocator`;
-4. `malloc`.
+4. the C allocator, aligned to `QAWS_MEMORY_ALIGNMENT` (`_aligned_malloc` on MSVC).
 
-This covers objects, results, and all internal scratch: operations, sampling, traversal, inspection, clipping, meshing, batches and repulsive solvers.
+This covers objects, results and all internal scratch: operations, sampling, traversal, inspection, clipping, meshing, batches and repulsive solvers.
 
-- **Ownership.** Each block carries a 16-byte header naming the allocator that gave it. Freeing and growing always go back to that allocator, whatever the settings at the time and whichever thread releases it.
-- **Allocator requirements.** An allocator must return 16-byte aligned memory and outlive its blocks.
-- **Setting the default.** Set the default before calls run. Set a thread's allocator on that thread.
+## The descriptor
 
 ```c
-void qaws_set_default_allocator(qaws_allocator const* allocator);   /* NULL: malloc */
-void qaws_set_thread_allocator(qaws_allocator const* allocator);    /* this thread; NULL: the default */
+typedef struct qaws_allocator {
+    void* (*alloc)(unsigned long size, void* user_data);              /* legacy, or qaws_allocator_extended */
+    void  (*dealloc)(void* ptr, void* user_data);                      /* legacy */
+    void* user_data;
+    void* (*alloc_sized)(size_t size, size_t alignment, void* user_data);
+    void  (*dealloc_sized)(void* ptr, size_t size, size_t alignment, void* user_data);
+    int   (*resize)(void* ptr, size_t old_size, size_t new_size, size_t alignment, void* user_data);
+} qaws_allocator;
+
+#define QAWS_MEMORY_ALIGNMENT 16
+void* qaws_allocator_extended(unsigned long size, void* user_data);   /* the marker */
+```
+
+The library recognizes two kinds of descriptor:
+
+- **Legacy.** Existing code sets `alloc`, `dealloc` and `user_data`. The other members are never read, so descriptors filled field by field on the stack keep working, and so do binaries built against the old three-member layout. Sizes are `unsigned long`, which is 32 bits on Windows. A larger request fails without calling `alloc`; it is never truncated.
+- **Extended.** Set `alloc = qaws_allocator_extended` (a marker that never allocates) and the sized members. Sizes are `size_t`, with the alignment passed. `dealloc_sized` receives the size and alignment it was allocated with. `resize`, if set, grows or shrinks a block in place and returns non-zero, or returns 0 to let the library allocate, copy and free.
+
+Both kinds have the same alignment rule:
+
+- Blocks must be aligned to `QAWS_MEMORY_ALIGNMENT` (16). That is enough for every type the library keeps on the heap; its aligned SIMD loads only read stack arrays.
+- A misaligned block is given back to the allocator and the call fails with `QAWS_STATUS_ALLOCATION_FAILURE`. Debug builds also assert.
+
+## Lifetimes
+
+- **The descriptor** can be short-lived. Settings and `_ex` arguments are copied: callbacks and `user_data`. Each block keeps the copy it was made with, and so does every curve, surface or prepared object that allocates again later (derived curves, evaluation scratch). A descriptor can therefore be a local that goes out of scope before the objects it made (test 154).
+- **The state `user_data` points to** must outlive every block of that allocator. Copying the callbacks does not extend it.
+- **Blocks** are freed and grown by the allocator that gave them, whatever the settings at that time and whichever thread releases them (test 154: four workers' blocks freed on another thread under another allocator).
+- **Results** live as long as their objects and do not depend on any call's scratch. Scratch is meant to be freed before a call returns. Test 154 checks this for a mixed workload, both completed and failing for lack of memory inside a 2 KB arena (no block left held). It is not checked for every failure path of every operation.
+
+## Settings
+
+```c
+qaws_status qaws_set_default_allocator(qaws_allocator const* allocator);   /* NULL: the C allocator */
+void qaws_set_thread_allocator(qaws_allocator const* allocator);            /* this thread; NULL: the default */
+void qaws_get_thread_allocator(qaws_allocator* out_allocator);              /* zeroed: none */
+void qaws_exchange_thread_allocator(qaws_allocator const* allocator, qaws_allocator* out_previous);
+```
+
+- **The default is write-once in effect.** It can be set or cleared until the library first allocates from it. After that, `qaws_set_default_allocator` returns `QAWS_STATUS_UNSUPPORTED_OPERATION` and changes nothing. Setting and sealing are synchronized with atomics. Once sealed, reading the default is a plain load, so allocations take no lock.
+- **A thread's allocator** applies to that thread only, and the library never changes it. To nest, install with `qaws_exchange_thread_allocator(&mine, &previous)` and restore with `qaws_set_thread_allocator(&previous)` on every return path: success, failure and cancellation.
+
+```c
+qaws_allocator previous;
+qaws_exchange_thread_allocator(&frame_arena.allocator, &previous);
+status = qaws_curve_offset_2d(curve, d, 1, out, cap, &count);   /* every return path below restores */
+qaws_set_thread_allocator(&previous);
 ```
 
 ## Caller memory: qaws_arena
 
 ```c
 typedef struct qaws_arena {
-    qaws_allocator allocator;   /* pass &arena.allocator */
+    qaws_allocator allocator;      /* pass &arena.allocator */
     unsigned char* base;
-    size_t size, used, peak, last;
+    size_t size;
+    size_t used;                   /* up to the end of the latest block */
+    size_t peak;                   /* most used since init */
+    size_t last;                   /* the latest block's offset */
+    size_t live;                   /* blocks held */
+    size_t failures;               /* requests refused for room */
+    size_t invalid_frees;          /* frees of blocks it does not hold */
+    unsigned int generation;       /* resets so far */
 } qaws_arena;
 
 void qaws_arena_init(qaws_arena* arena, void* memory, size_t size);
-void qaws_arena_reset(qaws_arena* arena);
+qaws_status qaws_arena_reset(qaws_arena* arena);
 ```
 
-An allocator over memory the host provides: a mapped file, pinned or GPU-visible memory, or a frame arena.
+An extended allocator over memory the host provides: a mapped file, pinned memory, or a frame arena.
 
-- **Allocation.** Blocks are cut in order and 16-byte aligned.
-- **Freeing.** A free releases only the latest block, so a growing array reuses its space. Everything else is released at `qaws_arena_reset`. `peak` tells how much a workload needed.
-- **When full.** Allocation fails, and calls return `QAWS_STATUS_ALLOCATION_FAILURE`. Nothing falls back to the heap.
-- **Threads.** One thread at a time. For workers, use one arena per thread with `qaws_set_thread_allocator(&arena.allocator)`.
+- **CPU access.** The memory must be CPU-accessible and coherent for the CPU. Putting the library's data in GPU-visible memory does not run any of its algorithms on a GPU.
+- **Allocation.** Blocks are cut in order and aligned. The latest block grows and shrinks in place, which is how growing arrays stay compact. A freed latest block is released at once; other freed blocks are released at reset.
+- **Hard bound.** When full, allocation fails and the call returns `QAWS_STATUS_ALLOCATION_FAILURE`. Nothing falls back to the heap. All offsets are computed without overflow, including requests near `SIZE_MAX`.
+- **Reset.** `qaws_arena_reset` refuses (`QAWS_STATUS_INVALID_ARGUMENT`) while blocks are held (`live > 0`). Destroy every arena-backed object and finish every call first. Freeing a block the arena does not hold (another arena, an earlier generation, or a double free) is counted in `invalid_frees`, and debug builds assert.
+- **Threads.** One thread at a time. For workers, use one arena per thread with `qaws_exchange_thread_allocator`.
 
-Test 154 checks this:
-
-- a counting default allocator sees and gets back every block of a mixed workload;
-- the thread allocator takes precedence over the default;
-- blocks return to their own allocator;
-- the workload runs inside a 2 MB caller buffer (peak 386 KB);
-- a 2 KB buffer fails cleanly.
+Arena-backed objects never move to the heap. To keep an object beyond a reset, create it with another allocator (the `_ex` argument) while scratch uses the arena (the thread setting).
 
 ## _ex creation functions
 
 The `_ex` variants of creation functions behave identically to their non-`_ex` counterparts but take their memory from the provided `qaws_allocator`. Pass NULL for `allocator` to use the order above.
 
-Curves and surfaces created with a custom allocator MUST be destroyed with `qaws_curve_destroy` or `qaws_surface_destroy` (which read the stored allocator). The allocator must remain valid until the object is destroyed.
+Curves and surfaces created with a custom allocator are destroyed with `qaws_curve_destroy` or `qaws_surface_destroy` as usual; they keep a copy of the descriptor, so only the state behind `user_data` must remain valid until then.
 
 ---
 

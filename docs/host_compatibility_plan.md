@@ -355,7 +355,7 @@ checks stay manual.
 | The allocator through every constructor | every curve and surface family; loft and Gordon evaluation scratch from it beyond 32 sections | 31e5f0b, 41df199 (146) |
 | Surface intersection at its default tolerance | fixed (Gauss-Newton seeds); fillets work | f830321 (48) |
 | Derived curves in their source's allocator | reverse, extract, split, join, conversions, wrappers | d41be61 (146) |
-| All allocations through one place | `qaws_set_default_allocator`, `qaws_set_thread_allocator`, `qaws_arena` over caller memory; blocks remember their allocator | (154) |
+| All allocations through one place | `qaws_set_default_allocator` (write-once, sealed on first use), `qaws_set_thread_allocator`, `qaws_exchange_thread_allocator`, `qaws_arena` over caller memory; blocks keep a copy of their allocator; sized interface (`qaws_allocator_extended`) | 9d36f97 and the next commits (154) |
 | Shader interface from buffers | `qaws_curve_record`, `qaws_surface_record`: any length, HLSL and GLSL, on a GPU | e6e58be, d94e5f5 (144) |
 | Rotation-minimizing frames | `qaws_curve_compute_rotation_minimizing_frames_3d`, `core/qaws_frame_core.h` (HLSL and GLSL) | 1e4133e (147) |
 | Arc length and its inverse | adaptive Gauss-Kronrod per span; `qaws_curve_compute_parameter_at_arc_length` by safeguarded Newton | 9b5837a (148) |

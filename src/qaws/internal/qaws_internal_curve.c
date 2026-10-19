@@ -46,7 +46,10 @@ qaws_curve* qaws_internal_curve_alloc_ex(
 	qaws_curve_vtable const* vtable,
 	qaws_allocator const* allocator)
 {
-	qaws_curve* curve = (qaws_curve*)qaws_internal_alloc(allocator, sizeof(qaws_curve));
+	/* a custom allocator is kept by value right after the curve: the caller's descriptor may be a short-lived local */
+	int custom = allocator && allocator->alloc;
+	size_t at = (sizeof(qaws_curve) + sizeof(void*) - 1) / sizeof(void*) * sizeof(void*);
+	qaws_curve* curve = (qaws_curve*)qaws_internal_alloc(allocator, (unsigned long)(at + (custom ? sizeof(qaws_allocator) : 0)));
 	if (!curve) return NULL;
 
 	curve->span_boundaries = (qaws_scalar*)qaws_internal_alloc(
@@ -65,7 +68,22 @@ qaws_curve* qaws_internal_curve_alloc_ex(
 	curve->parameter_range = parameter_range;
 	curve->vtable = vtable;
 	curve->impl = NULL;
-	curve->allocator = allocator;
+	curve->allocator = NULL;
+	if (custom)
+	{
+		qaws_allocator* copy = (qaws_allocator*)((unsigned char*)curve + at);
+		memset(copy, 0, sizeof *copy);
+		copy->alloc = allocator->alloc;
+		copy->dealloc = allocator->dealloc;
+		copy->user_data = allocator->user_data;
+		if (allocator->alloc == qaws_allocator_extended)
+		{
+			copy->alloc_sized = allocator->alloc_sized;
+			copy->dealloc_sized = allocator->dealloc_sized;
+			copy->resize = allocator->resize;
+		}
+		curve->allocator = copy;
+	}
 
 	return curve;
 }

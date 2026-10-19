@@ -12,7 +12,10 @@ qaws_surface* qaws_internal_surface_alloc_ex(
 	qaws_surface_vtable const* vtable,
 	qaws_allocator const* allocator)
 {
-	qaws_surface* s = (qaws_surface*)qaws_internal_alloc(allocator, sizeof(qaws_surface));
+	/* a custom allocator is kept by value right after the surface (see qaws_internal_curve_alloc_ex) */
+	int custom = allocator && allocator->alloc;
+	size_t at = (sizeof(qaws_surface) + sizeof(void*) - 1) / sizeof(void*) * sizeof(void*);
+	qaws_surface* s = (qaws_surface*)qaws_internal_alloc(allocator, (unsigned long)(at + (custom ? sizeof(qaws_allocator) : 0)));
 	if (!s) return NULL;
 	s->kind = kind;
 	s->u_degree = u_degree;
@@ -21,7 +24,22 @@ qaws_surface* qaws_internal_surface_alloc_ex(
 	s->v_range = v_range;
 	s->vtable = vtable;
 	s->impl = NULL;
-	s->allocator = allocator;
+	s->allocator = NULL;
+	if (custom)
+	{
+		qaws_allocator* copy = (qaws_allocator*)((unsigned char*)s + at);
+		memset(copy, 0, sizeof *copy);
+		copy->alloc = allocator->alloc;
+		copy->dealloc = allocator->dealloc;
+		copy->user_data = allocator->user_data;
+		if (allocator->alloc == qaws_allocator_extended)
+		{
+			copy->alloc_sized = allocator->alloc_sized;
+			copy->dealloc_sized = allocator->dealloc_sized;
+			copy->resize = allocator->resize;
+		}
+		s->allocator = copy;
+	}
 	return s;
 }
 
