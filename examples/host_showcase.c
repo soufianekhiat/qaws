@@ -9,6 +9,9 @@
  *                      rotation_minimizing_frames_3d: continuous, twist-free)
  *   host2_arc_length.svg  points at uniform parameters against points at equal
  *                      arc length (qaws_curve_compute_parameter_at_arc_length)
+ *   host3_closest.svg  the point of a spiked circle closest to its center: the
+ *                      nearest of 32 samples against the certified search
+ *                      (qaws_curve_find_closest_point_certified_2d)
  */
 
 #include "qaws.h"
@@ -191,9 +194,95 @@ static void figure_arc_length(void)
 	printf("wrote showcase/host2_arc_length.svg\n");
 }
 
+#define HS_RING 200
+
+static void hs_ring_curve(svg* s, viewport const* v, qaws_curve const* c)
+{
+	qaws_range r = qaws_curve_get_parameter_range(c);
+	double line[1200 * 2];
+	int i;
+	for (i = 0; i < 1200; i++)
+	{
+		qaws_eval_result_2d e;
+		qaws_curve_evaluate_2d(c, r.min_value + (r.max_value - r.min_value) * (qaws_scalar)i / 1199, QAWS_EVAL_FLAG_POSITION, &e);
+		line[2 * i] = vx(v, e.position.x);
+		line[2 * i + 1] = vy(v, e.position.y);
+	}
+	svg_polyline(s, line, 1200, "#1b1f24", 1.6, 1, 0);
+	svg_circle(s, vx(v, 0), vy(v, 0), 5, "#d1242f", "#1b1f24");
+}
+
+static void figure_closest(void)
+{
+	/* a circle of radius 5 as a cubic B-spline, one point pulled to radius 0.5: a spike between the 32 samples */
+	static qaws_vec2 p[HS_RING];
+	qaws_bspline_desc d;
+	qaws_curve* c = NULL;
+	qaws_range r;
+	qaws_vec2 q = { 0, 0 };
+	qaws_scalar t = 0, dist = 0, gap = 0, ts = 0;
+	double best = 1e300;
+	viewport vl = { 24, 80, 576, 576, -6, 6, -6, 6 }, vr = { 624, 80, 576, 576, -6, 6, -6, 6 };
+	qaws_eval_result_2d e;
+	char note[200];
+	svg s;
+	int i;
+	for (i = 0; i < HS_RING; i++)
+	{
+		double rad = i == 67 ? 0.5 : 5.0, a = 6.283185307179586 * i / (HS_RING - 1);
+		p[i].x = (qaws_scalar)(rad * cos(a));
+		p[i].y = (qaws_scalar)(rad * sin(a));
+	}
+	memset(&d, 0, sizeof d);
+	d.dimension = QAWS_DIMENSION_2D;
+	d.degree = 3;
+	d.control_points = p;
+	d.control_point_count = HS_RING;
+	if (qaws_curve_create_bspline(&d, &c) != QAWS_STATUS_OK)
+	{
+		printf("host3: curve not created\n");
+		return;
+	}
+	if (!svg_open(&s, "showcase/host3_closest.svg", 1224, 700, "Certified closest point",
+		"the point of the curve closest to the circle's center (red): a spike lies between the 32 samples a sampled search starts from")) 
+		return;
+	svg_panel(&s, &vl, "nearest of 32 samples (Newton stays on the circle: equal distances)");
+	svg_panel(&s, &vr, "certified: branch and bound over the Bezier spans");
+	hs_ring_curve(&s, &vl, c);
+	hs_ring_curve(&s, &vr, c);
+	r = qaws_curve_get_parameter_range(c);
+	for (i = 0; i < 32; i++)
+	{
+		double dd;
+		qaws_curve_evaluate_2d(c, r.min_value + (r.max_value - r.min_value) * (qaws_scalar)i / 31, QAWS_EVAL_FLAG_POSITION, &e);
+		dd = hypot(e.position.x, e.position.y);
+		svg_circle(&s, vx(&vl, e.position.x), vy(&vl, e.position.y), 3.5, "#f4a261", "#1b1f24");
+		if (dd < best)
+		{
+			best = dd;
+			ts = r.min_value + (r.max_value - r.min_value) * (qaws_scalar)i / 31;
+		}
+	}
+	qaws_curve_evaluate_2d(c, ts, QAWS_EVAL_FLAG_POSITION, &e);
+	svg_line(&s, vx(&vl, 0), vy(&vl, 0), vx(&vl, e.position.x), vy(&vl, e.position.y), "#f4a261", 2.5, 1);
+	snprintf(note, sizeof note, "distance %.6f", best);
+	svg_text(&s, vl.x0 + 16, vl.y0 + vl.h - 16, 13, "#57606a", "start", note);
+	qaws_curve_find_closest_point_certified_2d(c, q, &t, &dist, &gap);
+	qaws_curve_evaluate_2d(c, t, QAWS_EVAL_FLAG_POSITION, &e);
+	svg_line(&s, vx(&vr, 0), vy(&vr, 0), vx(&vr, e.position.x), vy(&vr, e.position.y), "#2a9d8f", 2.5, 1);
+	svg_circle(&s, vx(&vr, e.position.x), vy(&vr, e.position.y), 5, "#2a9d8f", "#1b1f24");
+	snprintf(note, sizeof note, "distance %.12f, gap %.1e (the minimum is in [d - gap, d])", (double)dist, (double)gap);
+	svg_text(&s, vr.x0 + 16, vr.y0 + vr.h - 16, 13, "#57606a", "start", note);
+	svg_text(&s, 640, 692, 13, "#57606a", "start", "qaws_curve_find_closest_point_certified_2d: convex-hull and fat-line bounds, de Casteljau halving");
+	svg_close(&s);
+	qaws_curve_destroy(c);
+	printf("wrote showcase/host3_closest.svg\n");
+}
+
 int main(void)
 {
 	figure_frames();
 	figure_arc_length();
+	figure_closest();
 	return 0;
 }
