@@ -351,13 +351,16 @@ checks stay manual.
 | GLSL compiles; shader checks | the cores and examples compile (`tests/shaders/check_shaders.ps1`) | 40d6c76 |
 | CPU/GPU validation | C cores = runtime (144); GPU = C cores, nine families, by hand (`examples/eval_gpu_parity.c`) | cef91cc |
 | Repulsive: cancellation, progress, objective | done for the four solvers | bd8a376 (145) |
+| Hermite, Catmull-Rom and polynomial views | done (`qaws_curve_view.family`) | 2593741 (142) |
+| The allocator through every constructor | every curve and surface family; loft and Gordon evaluation scratch from it beyond 32 sections | 31e5f0b, 41df199 (146) |
+| Surface intersection at its default tolerance | fixed (Gauss-Newton seeds); fillets work | f830321 (48) |
 
 Remaining, in order:
 
-- The other families as views (Hermite, Catmull-Rom, polynomial, arc and
-  others), and owned objects rebuilt on views.
-- The allocator through every entry point (section 4) and test 6 for them.
-  The views and prepared objects already take one.
+- Views of the remaining families (arc, clothoid, Yuksel, trajectory,
+  subdivision, composite); owned objects are not rebuilt on views.
+- The allocator through operations, sampling, traversal, inspection,
+  batches and repulsive (the constructors are done).
 - The shader ABI for B-splines, NURBS and surfaces read from buffers, and
   Halide's runtime span.
 - The kernels of section 6.
