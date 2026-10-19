@@ -18,6 +18,9 @@
  *   host5_surface_closest.svg  the point of a dented spherical cap closest to
  *                      its center: the nearest of an 8 x 8 grid against
  *                      qaws_surface_find_closest_point_certified
+ *   host6_surface_tessellation.svg  a B-spline flat on half its net: the
+ *                      quadtree with an absolute flatness threshold against
+ *                      qaws_surface_tessellate_adaptive (chord and angle)
  */
 
 #include "qaws.h"
@@ -452,8 +455,120 @@ static void figure_surface_closest(void)
 	printf("wrote showcase/host5_surface_closest.svg\n");
 }
 
+#define HS_TV 120000
+#define HS_TI 360000
+
+/* triangles shaded by their normal against a light, back to front */
+static void hs_mesh(svg* s, projection const* pr, qaws_tessellation_vertex const* v, unsigned int const* idx, unsigned int ni)
+{
+	static unsigned int order[HS_TI / 3];
+	static double depth[HS_TI / 3];
+	unsigned int n = ni / 3, t, k;
+	for (t = 0; t < n; t++)
+	{
+		order[t] = t;
+		depth[t] = 0;
+		for (k = 0; k < 3; k++)
+			depth[t] += v[idx[3 * t + k]].position.x + v[idx[3 * t + k]].position.y;
+	}
+	/* shell sort by depth, far first */
+	for (k = n / 2; k > 0; k /= 2)
+		for (t = k; t < n; t++)
+		{
+			unsigned int o = order[t], m = t;
+			while (m >= k && depth[order[m - k]] > depth[o])
+			{
+				order[m] = order[m - k];
+				m -= k;
+			}
+			order[m] = o;
+		}
+	for (t = 0; t < n; t++)
+	{
+		qaws_vec3 const* p[3];
+		double x[3], y[3], e1[3], e2[3], nx, ny, nz, l, lit;
+		int g;
+		for (k = 0; k < 3; k++)
+		{
+			p[k] = &v[idx[3 * order[t] + k]].position;
+			project(pr, p[k]->x, p[k]->y, p[k]->z, &x[k], &y[k]);
+		}
+		e1[0] = p[1]->x - p[0]->x; e1[1] = p[1]->y - p[0]->y; e1[2] = p[1]->z - p[0]->z;
+		e2[0] = p[2]->x - p[0]->x; e2[1] = p[2]->y - p[0]->y; e2[2] = p[2]->z - p[0]->z;
+		nx = e1[1] * e2[2] - e1[2] * e2[1];
+		ny = e1[2] * e2[0] - e1[0] * e2[2];
+		nz = e1[0] * e2[1] - e1[1] * e2[0];
+		l = sqrt(nx * nx + ny * ny + nz * nz);
+		lit = l > 0 ? fabs(-0.6 * nx + 0.35 * ny + 0.72 * nz) / l : 1;
+		g = (int)(40 + 215 * lit * lit);
+		fprintf(s->f, "<polygon points=\"%.1f,%.1f %.1f,%.1f %.1f,%.1f\" fill=\"rgb(%d,%d,%d)\" stroke=\"#1b1f24\" stroke-width=\"0.25\" "
+			"stroke-opacity=\"0.7\"/>\n", x[0], y[0], x[1], y[1], x[2], y[2], g / 3, g * 2 / 3, g);
+	}
+}
+
+static void figure_tessellation_surface(void)
+{
+	/* flat for the first half of the net, waves on the other */
+	static qaws_vec3 p[24 * 24];
+	static qaws_tessellation_vertex v[HS_TV];
+	static unsigned int idx[HS_TI];
+	qaws_surface_bspline_desc d;
+	qaws_tessellation_desc od;
+	qaws_surface_tessellation_desc td;
+	qaws_surface* c = NULL;
+	unsigned int i, j, nv = 0, ni = 0;
+	projection left = { 312, 230, 12.5, 1.0 }, right = { 912, 230, 12.5, 1.0 };
+	viewport vl = { 24, 80, 576, 520, 0, 1, 0, 1 }, vr = { 624, 80, 576, 520, 0, 1, 0, 1 };
+	char note[200];
+	svg s;
+	for (i = 0; i < 24; i++)
+		for (j = 0; j < 24; j++)
+		{
+			p[i * 24 + j].x = (qaws_scalar)i;
+			p[i * 24 + j].y = (qaws_scalar)j;
+			p[i * 24 + j].z = (qaws_scalar)(i < 12 ? 0 : 1.5 * sin(1.3 * j) * cos(0.9 * i));
+		}
+	memset(&d, 0, sizeof d);
+	d.u_degree = 3;
+	d.v_degree = 3;
+	d.control_points = p;
+	d.u_point_count = 24;
+	d.v_point_count = 24;
+	if (qaws_surface_create_bspline(&d, &c) != QAWS_STATUS_OK)
+	{
+		printf("host6: surface not created\n");
+		return;
+	}
+	if (!svg_open(&s, "showcase/host6_surface_tessellation.svg", 1224, 640, "Adaptive surface tessellation",
+		"a bicubic B-spline flat on half its net: a quadtree with an absolute flatness threshold against chord and angle tolerances"))
+		return;
+	svg_panel(&s, &vl, "qaws_surface_tessellate (flatness 0.02, depth 6)");
+	svg_panel(&s, &vr, "qaws_surface_tessellate_adaptive (chord 0.02, angle 0.5)");
+	memset(&od, 0, sizeof od);
+	od.max_depth = 6;
+	od.curvature_threshold = (qaws_scalar)0.02;
+	qaws_surface_tessellate(c, &od, v, HS_TV, &nv, idx, HS_TI, &ni);
+	hs_mesh(&s, &left, v, idx, ni);
+	snprintf(note, sizeof note, "%u triangles", ni / 3);
+	svg_text(&s, vl.x0 + 16, vl.y0 + vl.h - 16, 13, "#57606a", "start", note);
+	memset(&td, 0, sizeof td);
+	td.chord_tolerance = (qaws_scalar)0.02;
+	td.angle_tolerance = (qaws_scalar)0.5;
+	qaws_surface_tessellate_adaptive(c, &td, NULL, 0, &nv, NULL, 0, &ni);
+	if (nv <= HS_TV && ni <= HS_TI && qaws_surface_tessellate_adaptive(c, &td, v, HS_TV, &nv, idx, HS_TI, &ni) == QAWS_STATUS_OK)
+	{
+		hs_mesh(&s, &right, v, idx, ni);
+		snprintf(note, sizeof note, "%u triangles, no cracks, counts first into caller buffers", ni / 3);
+		svg_text(&s, vr.x0 + 16, vr.y0 + vr.h - 16, 13, "#57606a", "start", note);
+	}
+	svg_close(&s);
+	qaws_surface_destroy(c);
+	printf("wrote showcase/host6_surface_tessellation.svg\n");
+}
+
 int main(void)
 {
+	figure_tessellation_surface();
 	figure_surface_closest();
 	figure_frames();
 	figure_arc_length();
