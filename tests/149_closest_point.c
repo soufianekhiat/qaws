@@ -171,6 +171,121 @@ static void test_other_families(void)
 	qaws_curve_destroy(c);
 }
 
+#define CP_S 40
+
+/* a spherical cap of radius 5 around the origin, point (14, 14) pulled to radius 0.5: its support, [11, 15] / 37 in u and
+   v, lies between the 8 x 8 grid's samples 2 and 3 */
+static void cp_cap_points(qaws_vec3* p)
+{
+	unsigned int i, j;
+	for (i = 0; i < CP_S; i++)
+		for (j = 0; j < CP_S; j++)
+		{
+			double th = 0.3 + 2.5 * i / (CP_S - 1), ph = 3.0 * j / (CP_S - 1), r = i == 14 && j == 14 ? 0.5 : 5.0;
+			p[i * CP_S + j].x = (qaws_scalar)(r * sin(th) * cos(ph));
+			p[i * CP_S + j].y = (qaws_scalar)(r * sin(th) * sin(ph));
+			p[i * CP_S + j].z = (qaws_scalar)(r * cos(th));
+		}
+}
+
+static void test_surfaces(void)
+{
+	static qaws_vec3 p[CP_S * CP_S];
+	qaws_vec3 q = { 0, 0, 0 }, cl, cl2;
+	qaws_surface_bspline_desc d;
+	qaws_surface_view v;
+	qaws_surface *s = NULL, *b = NULL;
+	qaws_scalar u = -1, w = -1, dist = -1, gap = -1, u2, w2, dist2, gap2;
+	double grid = 1e300, dense = 1e300;
+	unsigned int i, j;
+	char msg[260];
+	cp_cap_points(p);
+	memset(&d, 0, sizeof d);
+	d.u_degree = 3; d.v_degree = 3; d.control_points = p; d.u_point_count = CP_S; d.v_point_count = CP_S;
+	TEST_ASSERT(qaws_surface_create_bspline(&d, &s) == QAWS_STATUS_OK, "spiked cap created");
+	for (i = 0; i <= 600; i++)
+		for (j = 0; j <= 600; j++)
+		{
+			qaws_surface_eval_result e;
+			double r;
+			qaws_surface_evaluate(s, (qaws_scalar)i / 600, (qaws_scalar)j / 600, QAWS_SURFACE_EVAL_POSITION, &e);
+			r = sqrt((double)e.position.x * e.position.x + (double)e.position.y * e.position.y + (double)e.position.z * e.position.z);
+			dense = fmin(dense, r);
+			if (i % 600 == 0 || (i * 7) % 600 == 0)
+				if (j % 600 == 0 || (j * 7) % 600 == 0)
+					grid = fmin(grid, r);
+		}
+	TEST_ASSERT(qaws_surface_find_closest_point_certified(s, q, &u, &w, &cl, &dist, &gap) == QAWS_STATUS_OK, "certified on the cap");
+	snprintf(msg, sizeof msg, "cap: the 8 x 8 grid sees %.3f; certified %.12f at (%.4f, %.4f), gap %.1e; 601 x 601 samples %.12f",
+		grid, (double)dist, (double)u, (double)w, (double)gap, dense);
+	printf("  %s\n", msg);
+	TEST_ASSERT(grid > 4.9 && dist < 4 && dist <= dense + 1e-12 && gap <= 1e-7, msg);
+	TEST_ASSERT(fabs(sqrt((double)cl.x * cl.x + (double)cl.y * cl.y + (double)cl.z * cl.z) - dist) <= 1e-12, "the closest point at that distance");
+	/* the same cap borrowed */
+	memset(&v, 0, sizeof v);
+	v.u_degree = 3; v.v_degree = 3; v.u_count = CP_S; v.v_count = CP_S;
+	v.points.data = p; v.points.type = sizeof(qaws_scalar) == 8 ? QAWS_ELEMENT_F64 : QAWS_ELEMENT_F32; v.points.components = 3;
+	v.points.count = CP_S * CP_S; v.points.stride = sizeof(qaws_vec3);
+	TEST_ASSERT(qaws_surface_create_borrowed(&v, NULL, &b) == QAWS_STATUS_OK, "borrowed cap created");
+	qaws_surface_find_closest_point_certified(b, q, &u2, &w2, &cl2, &dist2, &gap2);
+	snprintf(msg, sizeof msg, "borrowed cap: the same point (%.1e in u, %.1e in v)", fabs((double)u2 - u), fabs((double)w2 - w));
+	TEST_ASSERT(fabs((double)u2 - u) <= 1e-10 && fabs((double)w2 - w) <= 1e-10 && fabs((double)dist2 - dist) <= 1e-12, msg);
+	qaws_surface_destroy(b);
+	qaws_surface_destroy(s);
+
+	/* a bicubic Bezier patch at points around it: never above dense sampling */
+	{
+		qaws_vec3 n[16];
+		qaws_surface_bezier_desc bd;
+		double worst = 0, gmax = 0;
+		unsigned int k;
+		for (i = 0; i < 4; i++)
+			for (j = 0; j < 4; j++)
+			{
+				n[i * 4 + j].x = (qaws_scalar)i;
+				n[i * 4 + j].y = (qaws_scalar)j;
+				n[i * 4 + j].z = (qaws_scalar)(1.5 * sin(1.7 * i + 0.9 * j) - 0.5 * cos(2.1 * i * j));
+			}
+		memset(&bd, 0, sizeof bd);
+		bd.u_degree = 3; bd.v_degree = 3; bd.control_points = n; bd.u_point_count = 4; bd.v_point_count = 4;
+		TEST_ASSERT(qaws_surface_create_bezier(&bd, &s) == QAWS_STATUS_OK, "bicubic patch created");
+		for (k = 0; k < 12; k++)
+		{
+			qaws_vec3 x;
+			dense = 1e300;
+			x.x = (qaws_scalar)(1.5 + 2 * cos(1.3 * k)); x.y = (qaws_scalar)(1.5 + 2 * sin(2.1 * k)); x.z = (qaws_scalar)(1.5 * cos(0.7 * k + 1));
+			qaws_surface_find_closest_point_certified(s, x, &u, &w, &cl, &dist, &gap);
+			for (i = 0; i <= 300; i++)
+				for (j = 0; j <= 300; j++)
+				{
+					qaws_surface_eval_result e;
+					qaws_surface_evaluate(s, (qaws_scalar)i / 300, (qaws_scalar)j / 300, QAWS_SURFACE_EVAL_POSITION, &e);
+					dense = fmin(dense, sqrt(((double)e.position.x - x.x) * ((double)e.position.x - x.x) + ((double)e.position.y - x.y)
+						* ((double)e.position.y - x.y) + ((double)e.position.z - x.z) * ((double)e.position.z - x.z)));
+				}
+			worst = fmax(worst, dist - dense);
+			gmax = fmax(gmax, gap);
+		}
+		snprintf(msg, sizeof msg, "bicubic patch, 12 points: never above dense sampling (worst %.1e), gaps up to %.1e", worst, gmax);
+		printf("  %s\n", msg);
+		TEST_ASSERT(worst <= 1e-12 && gmax <= 1e-7, msg);
+		qaws_surface_destroy(s);
+	}
+	/* a flat square: exact distances, inside and past its edge */
+	{
+		qaws_vec3 n[4] = { { 0, 0, 0 }, { 0, 1, 0 }, { 1, 0, 0 }, { 1, 1, 0 } }, x1 = { 0.3f, 0.6f, 2 }, x2 = { 1.5f, 0.5f, 1 };
+		qaws_surface_bezier_desc bd;
+		memset(&bd, 0, sizeof bd);
+		bd.u_degree = 1; bd.v_degree = 1; bd.control_points = n; bd.u_point_count = 2; bd.v_point_count = 2;
+		qaws_surface_create_bezier(&bd, &s);
+		qaws_surface_find_closest_point_certified(s, x1, &u, &w, &cl, &dist, &gap);
+		TEST_ASSERT(fabs(dist - 2) <= 1e-14 && fabs(u - (qaws_scalar)0.3) <= 1e-7 && fabs(w - (qaws_scalar)0.6) <= 1e-7, "square: above it");
+		qaws_surface_find_closest_point_certified(s, x2, &u, &w, &cl, &dist, &gap);
+		TEST_ASSERT(fabs(dist - sqrt(1.25)) <= 1e-14 && u == 1 && fabs(w - (qaws_scalar)0.5) <= 1e-7, "square: past its edge");
+		qaws_surface_destroy(s);
+	}
+}
+
 int test_149_closest_point_main(void)
 {
 	g_pass = 0;
@@ -180,6 +295,7 @@ int test_149_closest_point_main(void)
 	test_circle();
 	test_bezier_3d();
 	test_other_families();
+	test_surfaces();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
 }

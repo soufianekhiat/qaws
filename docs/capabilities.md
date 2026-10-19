@@ -66,7 +66,9 @@ also behind `qaws_curve_find_closest_parameter_*`) are certified for
 Bezier, rational Bezier, B-spline, NURBS and borrowed splines. They run
 branch and bound over the spans' Bezier forms. The global minimum lies
 within a returned gap below the distance (149: a spike between the
-samples, which sampling misses).
+samples, which sampling misses). `qaws_surface_find_closest_point_certified`
+(also behind `qaws_surface_find_closest_point`) does the same over the
+Bezier patches of Bezier, B-spline, NURBS and borrowed surfaces.
 
 ## Surfaces on the CPU
 
@@ -125,10 +127,10 @@ own tool, `examples/repulsive_gpu_parity.c`.
   still needs the span when the pipeline is built.
 - **CPU and GPU comparison in a build step.** Both GPU tools run by hand on
   Windows only. GLSL is compiled, never run. Halide is never built.
-- **Certified closest point on surfaces and the other curve families.**
-  Surfaces use an 8x8 grid and Newton, which can miss the global minimum.
-  Curves other than Bezier, rational Bezier, B-spline, NURBS and borrowed
-  splines keep sampling with Newton.
+- **Certified closest point on the other families.** Curves other than
+  Bezier, rational Bezier, B-spline, NURBS and borrowed splines keep
+  sampling with Newton. Surfaces other than Bezier, B-spline, NURBS and
+  borrowed ones (degree at most 15) keep an 8 × 8 grid with Newton.
 - **Adaptive surface tessellation** with chord and angle tolerances into
   caller buffers. Today the quadtree uses an absolute threshold. Curves
   have this: `qaws_curve_tessellate_2d` and `_3d` (150).

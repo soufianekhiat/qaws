@@ -3089,7 +3089,7 @@ qaws_status qaws_curve_compute_hausdorff_distance_3d(
 /*  Closest point on surface                                           */
 /* ------------------------------------------------------------------ */
 
-qaws_status qaws_surface_find_closest_point(
+static qaws_status surface_closest_sampled(
 	qaws_surface const *surface,
 	qaws_vec3 point,
 	qaws_scalar *out_u,
@@ -3231,6 +3231,63 @@ qaws_status qaws_surface_find_closest_point(
 	*out_u = u;
 	*out_v = v;
 	*out_closest_point = result.position;
+	return QAWS_STATUS_OK;
+}
+
+/* the sampled answer, then certified where the surface has Bezier patches */
+static qaws_status surface_closest(
+	qaws_surface const *surface,
+	qaws_vec3 point,
+	qaws_scalar *out_u,
+	qaws_scalar *out_v,
+	qaws_vec3 *out_closest_point,
+	double *out_distance,
+	double *out_gap)
+{
+	double x[3] = { point.x, point.y, point.z };
+	qaws_surface_eval_result result;
+	qaws_status status = surface_closest_sampled(surface, point, out_u, out_v, out_closest_point);
+	if (status != QAWS_STATUS_OK)
+		return status;
+	status = qaws_internal_surface_closest_certify(surface, x, out_u, out_v, out_distance, out_gap);
+	if (status != QAWS_STATUS_OK)
+		return status;
+	status = qaws_surface_evaluate(surface, *out_u, *out_v, QAWS_SURFACE_EVAL_POSITION, &result);
+	if (status == QAWS_STATUS_OK)
+		*out_closest_point = result.position;
+	return status;
+}
+
+qaws_status qaws_surface_find_closest_point(
+	qaws_surface const *surface,
+	qaws_vec3 point,
+	qaws_scalar *out_u,
+	qaws_scalar *out_v,
+	qaws_vec3 *out_closest_point)
+{
+	double distance, gap;
+	qaws_status status = surface_closest(surface, point, out_u, out_v, out_closest_point, &distance, &gap);
+	return status == QAWS_STATUS_UNSUPPORTED_OPERATION ? QAWS_STATUS_OK : status;
+}
+
+qaws_status qaws_surface_find_closest_point_certified(
+	qaws_surface const *surface,
+	qaws_vec3 point,
+	qaws_scalar *out_u,
+	qaws_scalar *out_v,
+	qaws_vec3 *out_closest_point,
+	qaws_scalar *out_distance,
+	qaws_scalar *out_gap)
+{
+	double distance, gap;
+	qaws_status status;
+	if (!out_distance || !out_gap)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	status = surface_closest(surface, point, out_u, out_v, out_closest_point, &distance, &gap);
+	if (status != QAWS_STATUS_OK)
+		return status;
+	*out_distance = (qaws_scalar)distance;
+	*out_gap = (qaws_scalar)gap;
 	return QAWS_STATUS_OK;
 }
 

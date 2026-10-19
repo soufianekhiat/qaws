@@ -1256,6 +1256,32 @@ qaws_status qaws_surface_create_borrowed(qaws_surface_view const* view, qaws_all
 	return QAWS_STATUS_OK;
 }
 
+int qaws_internal_surface_view_net(qaws_surface const* surface, unsigned int* degrees, unsigned int* counts, qaws_scalar const** u_knots,
+	qaws_scalar const** v_knots)
+{
+	qaws_surface_prepared const* p = (qaws_surface_prepared const*)surface->impl;
+	if (surface->kind != QAWS_SURFACE_KIND_VIEW)
+		return 0;
+	degrees[0] = p->view.u_degree;
+	degrees[1] = p->view.v_degree;
+	counts[0] = p->view.u_count;
+	counts[1] = p->view.v_count;
+	*u_knots = p->u_knots;
+	*v_knots = p->v_knots;
+	return 1;
+}
+
+void qaws_internal_surface_view_point(qaws_surface const* surface, unsigned int i, unsigned int j, double* h)
+{
+	qaws_surface_prepared const* p = (qaws_surface_prepared const*)surface->impl;
+	unsigned int e = i * p->view.v_count + j, c;
+	double w = p->rational == 1 ? vw_get(&p->view.weights, e, 0) : p->rational == 2 ? vw_get(&p->view.points, e, 3) : 1.0;
+	/* homogeneous points are already w P */
+	for (c = 0; c < 3; c++)
+		h[c] = (p->rational == 1 ? w : 1.0) * vw_get(&p->view.points, e, c);
+	h[3] = w;
+}
+
 qaws_status qaws_surface_create_from_view(qaws_surface_view const* view, qaws_allocator const* allocator, qaws_surface** out_surface)
 {
 	qaws_surface_prepared* p;

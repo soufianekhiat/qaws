@@ -503,3 +503,44 @@ qaws_status qaws_nurbs_get_weights(
 Extracts NURBS weights.
 
 Returns `QAWS_STATUS_UNSUPPORTED_OPERATION` if not a NURBS curve.
+
+---
+
+## Closest point on a surface
+
+### qaws_surface_find_closest_point
+
+```c
+qaws_status qaws_surface_find_closest_point(
+    qaws_surface const* surface,
+    qaws_vec3 point,
+    qaws_scalar* out_u,
+    qaws_scalar* out_v,
+    qaws_vec3* out_closest_point);
+```
+
+An 8 × 8 grid and Newton on the gradient of the squared distance. Bezier, B-spline, NURBS and borrowed surfaces of degree at most 15 are then certified as below. Other surfaces keep the sampled answer, which can be a local minimum.
+
+### qaws_surface_find_closest_point_certified
+
+```c
+qaws_status qaws_surface_find_closest_point_certified(
+    qaws_surface const* surface,
+    qaws_vec3 point,
+    qaws_scalar* out_u,
+    qaws_scalar* out_v,
+    qaws_vec3* out_closest_point,
+    qaws_scalar* out_distance,
+    qaws_scalar* out_gap);
+```
+
+The closest point with a certificate: the global minimum distance lies in `[*out_distance - *out_gap, *out_distance]`.
+
+- **Method.** Branch and bound over the Bezier patches, each blossomed from its B-spline window (rows, then columns).
+  - **Pruning.** A piece is dropped when a lower bound of its distance is no less than the best distance found. Two lower bounds are used: the distance to the axis-aligned box of its net, and the distance to its prism in the patch's own frame. The prism is the parallelogram spanned by the corner edges in the tangent plane, times the net's spread along the normal. It is second order in the piece's size, also where the minimum lies on an edge.
+  - **Subdivision.** Pieces are quartered by de Casteljau until their box is under 1e-9 of the extent (`QAWS_EPSILON` in float).
+  - **Polish.** A Newton step on the gradient finishes the result where its Hessian is positive definite.
+- **Cost.** Most patches are dropped on their window's hull before any blossom. Each query is allocation-free.
+- **Work bound.** After 8192 splits the remaining pieces widen the gap.
+- **Errors.** `QAWS_STATUS_UNSUPPORTED_OPERATION` for other surfaces, for degrees above 15, and for non-positive weights.
+- **Evidence (test 149).** A spike between the grid's samples on a spherical cap is found (2.99231, against 5.000 on the grid), with a gap of 4e-16. A bicubic patch is never farther than a 301 × 301 sampling at 12 points, including minima on its edges.

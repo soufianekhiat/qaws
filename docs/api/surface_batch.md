@@ -186,8 +186,9 @@ This returns, for every query point, the nearest point over all surfaces.
    parameter the 2D step would take out stops on its bound the same way.
 
 Test 81 runs 400 points against three paraboloids and two planes. No
-answer is farther than a 160 × 160 sampling of the surfaces, while the
-pairwise `qaws_surface_find_closest_point` lands farther on 32 of them.
+answer is farther than a 160 × 160 sampling of the surfaces. The pairwise
+`qaws_surface_find_closest_point` (certified since test 149) is farther on
+none; its 8 × 8 grid and Newton alone were farther on 32.
 
 ## Ray casting
 

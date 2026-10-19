@@ -301,13 +301,27 @@ qaws_status qaws_curve_compute_hausdorff_distance_3d(
 /* Closest point on surface */
 
 /* Find the (u,v) parameters of the point on a surface closest to a given 3D point.
-   Uses Newton iteration on the distance function gradient. */
+   An 8x8 grid and Newton on the distance function gradient, then certified as
+   below where the surface has Bezier patches. */
 qaws_status qaws_surface_find_closest_point(
 	qaws_surface const* surface,
 	qaws_vec3 point,
 	qaws_scalar* out_u,
 	qaws_scalar* out_v,
 	qaws_vec3* out_closest_point);
+
+/* The closest point with a certificate, for Bezier, B-spline, NURBS and borrowed surfaces of degree at most 15: branch and
+   bound over the Bezier patches with bounds by their nets' boxes, axis-aligned and in each patch's own frame. The global
+   minimum distance lies in [*out_distance - *out_gap, *out_distance]; the gap is within 1e-9 of the extent (QAWS_EPSILON in
+   float) unless the work bound (8192 splits) is reached. QAWS_STATUS_UNSUPPORTED_OPERATION for other surfaces. */
+qaws_status qaws_surface_find_closest_point_certified(
+	qaws_surface const* surface,
+	qaws_vec3 point,
+	qaws_scalar* out_u,
+	qaws_scalar* out_v,
+	qaws_vec3* out_closest_point,
+	qaws_scalar* out_distance,
+	qaws_scalar* out_gap);
 
 /* Curve-plane intersection */
 
