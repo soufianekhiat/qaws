@@ -62,7 +62,8 @@ typedef enum qaws_curve_kind
 	QAWS_CURVE_KIND_POLYNOMIAL,
 	QAWS_CURVE_KIND_CLOTHOID,
 	QAWS_CURVE_KIND_SUBDIVISION,
-	QAWS_CURVE_KIND_REPARAMETERIZED
+	QAWS_CURVE_KIND_REPARAMETERIZED,
+	QAWS_CURVE_KIND_VIEW                /* borrowed: evaluated from host arrays it does not own (qaws_view.h) */
 } qaws_curve_kind;
 
 typedef enum qaws_parameterization

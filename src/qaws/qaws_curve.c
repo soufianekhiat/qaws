@@ -653,6 +653,7 @@ qaws_status qaws_curve_reverse(
 		return reverse_clothoid(curve, out_reversed);
 	case QAWS_CURVE_KIND_SUBDIVISION:
 	case QAWS_CURVE_KIND_REPARAMETERIZED:
+	case QAWS_CURVE_KIND_VIEW:
 		return reverse_by_extract(curve, out_reversed);
 	default:
 		return QAWS_STATUS_UNSUPPORTED_OPERATION;

@@ -153,6 +153,7 @@ qaws_status qaws_curve_split(
 	case QAWS_CURVE_KIND_CLOTHOID:
 	case QAWS_CURVE_KIND_SUBDIVISION:
 	case QAWS_CURVE_KIND_REPARAMETERIZED:
+	case QAWS_CURVE_KIND_VIEW:
 		return split_by_extract(curve, parameter, out_left, out_right);
 
 	default:
@@ -209,6 +210,7 @@ qaws_status qaws_curve_join(
 	case QAWS_CURVE_KIND_CLOTHOID:
 	case QAWS_CURVE_KIND_SUBDIVISION:
 	case QAWS_CURVE_KIND_REPARAMETERIZED:
+	case QAWS_CURVE_KIND_VIEW:
 		return QAWS_STATUS_UNSUPPORTED_OPERATION;
 
 	default:

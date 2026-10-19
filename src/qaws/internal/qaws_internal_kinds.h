@@ -54,4 +54,7 @@ qaws_status qaws_internal_curve_fit_cubic(qaws_curve const* curve, qaws_scalar t
 /* 1 when the curve's two ends coincide, relative to the size of the curve. */
 int qaws_internal_curve_ends_meet(qaws_curve const* curve);
 
+/* A borrowed curve (QAWS_CURVE_KIND_VIEW) copied into an owned B-spline or NURBS curve, with its allocator. */
+qaws_status qaws_internal_curve_view_copy(qaws_curve const* curve, qaws_curve** out_curve);
+
 #endif /* QAWS_INTERNAL_KINDS_H */

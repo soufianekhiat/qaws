@@ -747,6 +747,15 @@ qaws_status qaws_curve_extract(
 			return QAWS_STATUS_UNSUPPORTED_OPERATION;
 		return qaws_curve_extract(src0, s0, s1, out_curve);
 	}
+	case QAWS_CURVE_KIND_VIEW:
+	{
+		qaws_curve* owned = NULL;
+		if ((st = qaws_internal_curve_view_copy(curve, &owned)) != QAWS_STATUS_OK)
+			return st;
+		st = qaws_curve_extract(owned, t0, t1, out_curve);
+		qaws_curve_destroy(owned);
+		return st;
+	}
 	default:
 		return QAWS_STATUS_UNSUPPORTED_OPERATION;
 	}

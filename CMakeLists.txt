@@ -57,6 +57,7 @@ set(QAWS_SOURCES
   src/qaws/qaws_traversal.c
   src/qaws/qaws_inspect.c
   src/qaws/qaws_curve_batch.c
+  src/qaws/qaws_curve_view.c
   src/qaws/qaws_surface_batch.c
   src/qaws/qaws_bezier.c
   src/qaws/qaws_hermite.c
@@ -539,6 +540,7 @@ if(QAWS_INSTALL)
       src/qaws/qaws_traversal.h
       src/qaws/qaws_inspect.h
       src/qaws/qaws_curve_batch.h
+      src/qaws/qaws_view.h
       src/qaws/qaws_batch_executor.h
       src/qaws/qaws_surface_batch.h
       src/qaws/qaws_operations.h
