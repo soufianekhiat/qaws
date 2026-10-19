@@ -657,6 +657,194 @@ static void test_operations(void)
 	qaws_curve_destroy(owned);
 }
 
+/* worst difference over 61 parameters, the prepared view and the borrowed curve against an owned curve (3D) */
+static double cv_family_diff(qaws_curve_view const* v, qaws_curve const* owned)
+{
+	qaws_curve_prepared* p = NULL;
+	qaws_curve* b = NULL;
+	qaws_range r = qaws_curve_get_parameter_range(owned);
+	double worst = 0, e;
+	unsigned int i;
+	if (qaws_curve_prepare(v, NULL, &p) != QAWS_STATUS_OK || qaws_curve_create_borrowed(v, NULL, &b) != QAWS_STATUS_OK)
+	{
+		qaws_curve_prepared_destroy(p);
+		return 1e30;
+	}
+	for (i = 0; i <= 60; i++)
+	{
+		qaws_scalar t = r.min_value + (r.max_value - r.min_value) * (qaws_scalar)i / 60;
+		qaws_eval_result_3d a, c, o;
+		qaws_curve_prepared_evaluate_3d(p, t, CV_ALL, &a);
+		qaws_curve_evaluate_3d(b, t, CV_ALL, &c);
+		qaws_curve_evaluate_3d(owned, t, CV_ALL, &o);
+		e = cv_diff3(&a, &o) > cv_diff3(&c, &o) ? cv_diff3(&a, &o) : cv_diff3(&c, &o);
+		worst = e > worst ? e : worst;
+		if (o.valid_flags & ~a.valid_flags)
+			worst = 1e30;
+	}
+	qaws_curve_prepared_destroy(p);
+	qaws_curve_destroy(b);
+	return worst;
+}
+
+static void test_families(void)
+{
+	double p[8 * 3], tg[8 * 3], cf[5 * 3], rng[2] = { -1, 2 };
+	qaws_scalar ps[8 * 3], ts[8 * 3], cs[5 * 3];
+	qaws_curve_view v;
+	qaws_curve* owned = NULL;
+	double eh, eh2, ecr[4], ep;
+	unsigned int i, k;
+	char msg[300];
+	cv_points(p, 8, 0.4);
+	for (i = 0; i < 8 * 3; i++)
+	{
+		tg[i] = 0.7 * cos(0.37 * i + 1.0);
+		ps[i] = (qaws_scalar)p[i];
+		ts[i] = (qaws_scalar)tg[i];
+	}
+	for (i = 0; i < 5 * 3; i++)
+		cs[i] = (qaws_scalar)(cf[i] = 0.4 * sin(1.3 * i + 0.1));
+	/* Hermite */
+	{
+		qaws_hermite_desc d;
+		memset(&d, 0, sizeof d);
+		d.dimension = QAWS_DIMENSION_3D;
+		d.degree = 3;
+		d.points = ps;
+		d.derivatives = ts;
+		d.point_count = 8;
+		d.derivative_count = 8;
+		qaws_curve_create_hermite(&d, &owned);
+		memset(&v, 0, sizeof v);
+		v.family = QAWS_VIEW_HERMITE;
+		v.dimension = QAWS_DIMENSION_3D;
+		v.degree = 3;
+		v.points = cv_packed(p, QAWS_ELEMENT_F64, 3, 8, 0);
+		v.tangents = cv_packed(tg, QAWS_ELEMENT_F64, 3, 8, 0);
+		eh = owned ? cv_family_diff(&v, owned) : 1e30;
+		qaws_curve_destroy(owned);
+		owned = NULL;
+		/* the tangents rewritten in place: a prepared object follows them */
+		for (i = 0; i < 8 * 3; i++)
+			ts[i] = (qaws_scalar)(tg[i] = -0.5 * tg[i] + 0.1);
+		qaws_curve_create_hermite(&d, &owned);
+		eh2 = owned ? cv_family_diff(&v, owned) : 1e30;
+		qaws_curve_destroy(owned);
+		owned = NULL;
+	}
+	/* Catmull-Rom: open uniform, chordal, centripetal; closed centripetal */
+	for (k = 0; k < 4; k++)
+	{
+		qaws_catmull_rom_desc d;
+		memset(&d, 0, sizeof d);
+		d.dimension = QAWS_DIMENSION_3D;
+		d.control_points = ps;
+		d.control_point_count = 8;
+		d.parameterization = k == 0 ? QAWS_PARAMETERIZATION_UNIFORM : k == 1 ? QAWS_PARAMETERIZATION_CHORDAL : QAWS_PARAMETERIZATION_CENTRIPETAL;
+		d.closed = k == 3;
+		for (i = 0; i < 8 * 3; i++)
+			ps[i] = (qaws_scalar)p[i];
+		qaws_curve_create_catmull_rom(&d, &owned);
+		memset(&v, 0, sizeof v);
+		v.family = QAWS_VIEW_CATMULL_ROM;
+		v.dimension = QAWS_DIMENSION_3D;
+		v.degree = 3;
+		v.points = cv_packed(p, QAWS_ELEMENT_F64, 3, 8, 0);
+		v.parameterization = d.parameterization;
+		v.closed = d.closed;
+		ecr[k] = owned ? cv_family_diff(&v, owned) : 1e30;
+		qaws_curve_destroy(owned);
+		owned = NULL;
+	}
+	/* polynomial of degree 4 over [-1, 2] */
+	{
+		qaws_polynomial_desc d;
+		memset(&d, 0, sizeof d);
+		d.dimension = QAWS_DIMENSION_3D;
+		d.degree = 4;
+		d.coefficients = cs;
+		d.coefficient_count = 5;
+		d.t_min = -1;
+		d.t_max = 2;
+		qaws_curve_create_polynomial(&d, &owned);
+		memset(&v, 0, sizeof v);
+		v.family = QAWS_VIEW_POLYNOMIAL;
+		v.dimension = QAWS_DIMENSION_3D;
+		v.degree = 4;
+		v.points = cv_packed(cf, QAWS_ELEMENT_F64, 3, 5, 0);
+		v.knots = cv_packed(rng, QAWS_ELEMENT_F64, 1, 2, 0);
+		ep = owned ? cv_family_diff(&v, owned) : 1e30;
+		qaws_curve_destroy(owned);
+		owned = NULL;
+	}
+	sprintf(msg, "families as views against the owned curves: Hermite %.2g (tangents rewritten %.2g), Catmull-Rom uniform %.2g, chordal %.2g, "
+		"centripetal %.2g, closed %.2g, polynomial %.2g", eh, eh2, ecr[0], ecr[1], ecr[2], ecr[3], ep);
+	TEST_ASSERT(eh <= CV_TOL && eh2 <= CV_TOL && ecr[0] <= CV_TOL && ecr[1] <= CV_TOL && ecr[2] <= CV_TOL && ecr[3] <= CV_TOL && ep <= CV_TOL, msg);
+	printf("  %s\n", msg);
+	/* refusals */
+	memset(&v, 0, sizeof v);
+	v.family = QAWS_VIEW_HERMITE;
+	v.dimension = QAWS_DIMENSION_3D;
+	v.degree = 3;
+	v.points = cv_packed(p, QAWS_ELEMENT_F64, 3, 8, 0);
+	v.tangents = cv_packed(tg, QAWS_ELEMENT_F64, 3, 7, 0);
+	TEST_ASSERT(qaws_curve_view_validate(&v) == QAWS_STATUS_INVALID_CONTROL_POINT_COUNT, "Hermite: tangents not one per point refused");
+	v.tangents.count = 8;
+	v.degree = 2;
+	TEST_ASSERT(qaws_curve_view_validate(&v) == QAWS_STATUS_INVALID_DEGREE, "Hermite: degree 2 refused");
+	v.family = QAWS_VIEW_CATMULL_ROM;
+	v.degree = 3;
+	v.points.count = 3;
+	TEST_ASSERT(qaws_curve_view_validate(&v) == QAWS_STATUS_INVALID_CONTROL_POINT_COUNT, "Catmull-Rom: 3 points open refused");
+	v.closed = 1;
+	TEST_ASSERT(qaws_curve_view_validate(&v) == QAWS_STATUS_OK, "Catmull-Rom: 3 points closed accepted");
+	v.family = QAWS_VIEW_POLYNOMIAL;
+	v.closed = 0;
+	v.degree = 2;
+	rng[0] = 3;
+	v.knots = cv_packed(rng, QAWS_ELEMENT_F64, 1, 2, 0);
+	TEST_ASSERT(qaws_curve_view_validate(&v) == QAWS_STATUS_INVALID_PARAMETER_RANGE, "polynomial: an empty range refused");
+	/* operations through owned copies: extract of a borrowed Catmull-Rom curve as of the owned */
+	{
+		qaws_catmull_rom_desc d;
+		qaws_curve *b = NULL, *eo = NULL, *eb = NULL;
+		double e = 0;
+		memset(&d, 0, sizeof d);
+		d.dimension = QAWS_DIMENSION_3D;
+		d.control_points = ps;
+		d.control_point_count = 8;
+		d.parameterization = QAWS_PARAMETERIZATION_CENTRIPETAL;
+		qaws_curve_create_catmull_rom(&d, &owned);
+		memset(&v, 0, sizeof v);
+		v.family = QAWS_VIEW_CATMULL_ROM;
+		v.dimension = QAWS_DIMENSION_3D;
+		v.degree = 3;
+		v.points = cv_packed(p, QAWS_ELEMENT_F64, 3, 8, 0);
+		v.parameterization = QAWS_PARAMETERIZATION_CENTRIPETAL;
+		if (owned && qaws_curve_create_borrowed(&v, NULL, &b) == QAWS_STATUS_OK && qaws_curve_extract(owned, (qaws_scalar)0.6, (qaws_scalar)3.7, &eo) == QAWS_STATUS_OK
+			&& qaws_curve_extract(b, (qaws_scalar)0.6, (qaws_scalar)3.7, &eb) == QAWS_STATUS_OK)
+		{
+			for (i = 0; i <= 20; i++)
+			{
+				qaws_scalar t = (qaws_scalar)(0.6 + 3.1 * i / 20);
+				qaws_eval_result_3d a, c;
+				qaws_curve_evaluate_3d(eo, t, QAWS_EVAL_FLAG_POSITION, &a);
+				qaws_curve_evaluate_3d(eb, t, QAWS_EVAL_FLAG_POSITION, &c);
+				e = cv_diff3(&a, &c) > e ? cv_diff3(&a, &c) : e;
+			}
+			sprintf(msg, "extract of a borrowed Catmull-Rom curve as of the owned: %.2g", e);
+			TEST_ASSERT(e <= CV_TOL, msg);
+		}
+		else
+			TEST_ASSERT(0, "Catmull-Rom extracts");
+		qaws_curve_destroy(eo);
+		qaws_curve_destroy(eb);
+		qaws_curve_destroy(b);
+		qaws_curve_destroy(owned);
+	}
+}
+
 int test_142_curve_view_main(void)
 {
 	g_pass = 0;
@@ -670,6 +858,7 @@ int test_142_curve_view_main(void)
 	test_allocation();
 	test_validation();
 	test_operations();
+	test_families();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
 }

@@ -19,6 +19,12 @@
 #include "qaws_surface_nurbs.h"
 #include "internal/qaws_internal_surface.h"
 #include "qaws_alloc.h"
+#include "qaws_hermite.h"
+#include "qaws_catmull_rom.h"
+#include "qaws_polynomial.h"
+#include "qaws_prepare.h"
+#include "core/qaws_cubic_poly_core.h"
+#include "core/qaws_horner_core.h"
 #include "internal/qaws_internal_diff.h"
 #include <stdint.h>
 #include <stdlib.h>
@@ -194,18 +200,60 @@ static void vw_knots(qaws_array_view const* knots, unsigned int n, unsigned int 
 
 qaws_status qaws_curve_view_validate(qaws_curve_view const* view)
 {
+	unsigned int dim, n, d;
 	qaws_status st;
 	if (!view)
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	if (view->dimension != QAWS_DIMENSION_2D && view->dimension != QAWS_DIMENSION_3D)
 		return QAWS_STATUS_INVALID_DIMENSION;
-	if (view->degree < 1 || view->degree > QAWS_VIEW_MAX_DEGREE)
+	dim = (unsigned int)view->dimension;
+	n = view->points.count;
+	d = view->degree;
+	if (d < 1 || d > QAWS_VIEW_MAX_DEGREE)
 		return QAWS_STATUS_INVALID_DEGREE;
-	if (view->points.count < view->degree + 1)
-		return QAWS_STATUS_INVALID_CONTROL_POINT_COUNT;
-	if ((st = vw_check_points(&view->points, &view->weights, (unsigned int)view->dimension, view->points.count)) != QAWS_STATUS_OK)
-		return st;
-	return vw_check_knots(&view->knots, view->points.count, view->degree);
+	switch (view->family)
+	{
+	case QAWS_VIEW_SPLINE:
+		if (n < d + 1)
+			return QAWS_STATUS_INVALID_CONTROL_POINT_COUNT;
+		if ((st = vw_check_points(&view->points, &view->weights, dim, n)) != QAWS_STATUS_OK)
+			return st;
+		return vw_check_knots(&view->knots, n, d);
+	case QAWS_VIEW_HERMITE:
+	case QAWS_VIEW_CATMULL_ROM:
+		if (d != 3)
+			return QAWS_STATUS_INVALID_DEGREE;
+		if (n < (view->family == QAWS_VIEW_HERMITE ? 2u : view->closed ? 3u : 4u))
+			return QAWS_STATUS_INVALID_CONTROL_POINT_COUNT;
+		if (view->weights.count || view->knots.count || view->points.components != dim)
+			return QAWS_STATUS_INVALID_ARGUMENT;
+		if ((st = vw_check_points(&view->points, &view->weights, dim, n)) != QAWS_STATUS_OK)
+			return st;
+		if (view->family == QAWS_VIEW_CATMULL_ROM)
+			return (unsigned int)view->parameterization <= QAWS_PARAMETERIZATION_CENTRIPETAL ? QAWS_STATUS_OK : QAWS_STATUS_INVALID_ARGUMENT;
+		if (view->tangents.count != n)
+			return QAWS_STATUS_INVALID_CONTROL_POINT_COUNT;
+		if (view->tangents.components != dim)
+			return QAWS_STATUS_INVALID_ARGUMENT;
+		return vw_check_points(&view->tangents, &view->weights, dim, n);
+	case QAWS_VIEW_POLYNOMIAL:
+		if (n != d + 1)
+			return QAWS_STATUS_INVALID_CONTROL_POINT_COUNT;
+		if (view->weights.count || view->points.components != dim)
+			return QAWS_STATUS_INVALID_ARGUMENT;
+		if ((st = vw_check_points(&view->points, &view->weights, dim, n)) != QAWS_STATUS_OK)
+			return st;
+		if (!view->knots.count)
+			return QAWS_STATUS_OK;
+		if (view->knots.count != 2 || view->knots.components != 1)
+			return QAWS_STATUS_INVALID_KNOT_COUNT;
+		if ((st = qaws_array_view_validate(&view->knots)) != QAWS_STATUS_OK)
+			return st;
+		return isfinite(vw_get(&view->knots, 0, 0)) && vw_get(&view->knots, 0, 0) < vw_get(&view->knots, 1, 0)
+			&& isfinite(vw_get(&view->knots, 1, 0)) ? QAWS_STATUS_OK : QAWS_STATUS_INVALID_PARAMETER_RANGE;
+	default:
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	}
 }
 
 /* ---- prepared curves ---------------------------------------------------- */
@@ -215,10 +263,11 @@ struct qaws_curve_prepared
 	qaws_curve_view view;               /* pointers into host memory */
 	qaws_allocator const* allocator;
 	int owned;                          /* the block is ours to free */
-	int rational;                       /* 0: polynomial, 1: weights, 2: homogeneous points */
+	int rational;                       /* splines: 0 polynomial, 1 weights, 2 homogeneous points */
 	unsigned int n, kc, span_count;
-	qaws_scalar* knots;                 /* kc values, the computing precision */
-	qaws_scalar* bounds;                /* span_count + 1 distinct knot values over the domain */
+	qaws_scalar t0, t1;                 /* the domain */
+	qaws_scalar* knots;                 /* splines: kc values, the computing precision */
+	qaws_scalar* bounds;                /* span_count + 1 span bounds over the domain */
 };
 
 #define PR_ALIGN(x) (((x) + 15) & ~(size_t)15)
@@ -240,34 +289,62 @@ static void vw_free16(qaws_allocator const* allocator, void* p)
 	qaws_internal_dealloc(allocator, ((void**)p)[-1]);
 }
 
-static size_t pr_bytes(unsigned int n, unsigned int d)
+/* the prepared block's knots (kc, splines only) and span bounds (nb) for a valid view */
+static void pr_counts(qaws_curve_view const* v, unsigned int* kc, unsigned int* nb)
 {
-	return PR_ALIGN(sizeof(struct qaws_curve_prepared)) + PR_ALIGN(sizeof(qaws_scalar) * ((size_t)n + d + 1))
-		+ PR_ALIGN(sizeof(qaws_scalar) * ((size_t)n - d + 1));
+	unsigned int n = v->points.count, d = v->degree;
+	*kc = v->family == QAWS_VIEW_SPLINE ? n + d + 1 : 0;
+	*nb = v->family == QAWS_VIEW_SPLINE ? n - d + 1 : v->family == QAWS_VIEW_HERMITE ? n : v->family == QAWS_VIEW_CATMULL_ROM
+		? (v->closed ? n + 1 : n - 2) : 2;
+}
+
+static size_t pr_bytes(qaws_curve_view const* v)
+{
+	unsigned int kc, nb;
+	pr_counts(v, &kc, &nb);
+	return PR_ALIGN(sizeof(struct qaws_curve_prepared)) + PR_ALIGN(sizeof(qaws_scalar) * kc) + PR_ALIGN(sizeof(qaws_scalar) * nb);
 }
 
 size_t qaws_curve_prepared_size(qaws_curve_view const* view)
 {
-	return qaws_curve_view_validate(view) == QAWS_STATUS_OK ? pr_bytes(view->points.count, view->degree) : 0;
+	return qaws_curve_view_validate(view) == QAWS_STATUS_OK ? pr_bytes(view) : 0;
 }
 
 /* the object laid out in memory (pr_bytes of it), from a valid view */
 static qaws_curve_prepared* pr_fill(qaws_curve_view const* view, void* memory)
 {
 	qaws_curve_prepared* p = (qaws_curve_prepared*)memory;
-	unsigned int n = view->points.count, d = view->degree, k;
+	unsigned int n = view->points.count, d = view->degree, k, nb;
 	memset(p, 0, sizeof *p);
 	p->view = *view;
 	p->n = n;
-	p->kc = n + d + 1;
-	p->rational = view->weights.count ? 1 : view->points.components == (unsigned int)view->dimension + 1 ? 2 : 0;
+	pr_counts(view, &p->kc, &nb);
 	p->knots = (qaws_scalar*)((unsigned char*)memory + PR_ALIGN(sizeof *p));
 	p->bounds = (qaws_scalar*)((unsigned char*)p->knots + PR_ALIGN(sizeof(qaws_scalar) * p->kc));
-	vw_knots(&view->knots, n, d, 0, p->knots);
-	p->bounds[0] = p->knots[d];
-	for (k = d; k < n; k++)
-		if (p->knots[k + 1] > p->knots[k])
-			p->bounds[++p->span_count] = p->knots[k + 1];
+	if (view->family == QAWS_VIEW_SPLINE)
+	{
+		p->rational = view->weights.count ? 1 : view->points.components == (unsigned int)view->dimension + 1 ? 2 : 0;
+		vw_knots(&view->knots, n, d, 0, p->knots);
+		p->bounds[0] = p->knots[d];
+		for (k = d; k < n; k++)
+			if (p->knots[k + 1] > p->knots[k])
+				p->bounds[++p->span_count] = p->knots[k + 1];
+	}
+	else if (view->family == QAWS_VIEW_POLYNOMIAL)
+	{
+		p->span_count = 1;
+		p->bounds[0] = view->knots.count ? (qaws_scalar)vw_get(&view->knots, 0, 0) : QAWS_ZERO;
+		p->bounds[1] = view->knots.count ? (qaws_scalar)vw_get(&view->knots, 1, 0) : QAWS_ONE;
+	}
+	else
+	{
+		/* Hermite and Catmull-Rom: unit spans 0, 1, ..., as the owned curves */
+		p->span_count = nb - 1;
+		for (k = 0; k < nb; k++)
+			p->bounds[k] = (qaws_scalar)k;
+	}
+	p->t0 = p->bounds[0];
+	p->t1 = p->bounds[p->span_count];
 	return p;
 }
 
@@ -281,7 +358,7 @@ qaws_status qaws_curve_prepare_into(qaws_curve_view const* view, void* memory, s
 		return st;
 	if (!memory || (uintptr_t)memory % 16)
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	if (bytes < pr_bytes(view->points.count, view->degree))
+	if (bytes < pr_bytes(view))
 		return QAWS_STATUS_BUFFER_TOO_SMALL;
 	*out_prepared = pr_fill(view, memory);
 	return QAWS_STATUS_OK;
@@ -290,15 +367,13 @@ qaws_status qaws_curve_prepare_into(qaws_curve_view const* view, void* memory, s
 qaws_status qaws_curve_prepare(qaws_curve_view const* view, qaws_allocator const* allocator, qaws_curve_prepared** out_prepared)
 {
 	qaws_status st;
-	size_t bytes;
 	void* memory;
 	if (!out_prepared)
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	*out_prepared = NULL;
 	if ((st = qaws_curve_view_validate(view)) != QAWS_STATUS_OK)
 		return st;
-	bytes = pr_bytes(view->points.count, view->degree);
-	if (!(memory = vw_alloc16(allocator, bytes)))
+	if (!(memory = vw_alloc16(allocator, pr_bytes(view))))
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	*out_prepared = pr_fill(view, memory);
 	(*out_prepared)->allocator = allocator;
@@ -320,23 +395,118 @@ unsigned int qaws_curve_prepared_dependencies(qaws_curve_prepared const* prepare
 qaws_range qaws_curve_prepared_get_range(qaws_curve_prepared const* prepared)
 {
 	qaws_range r;
-	r.min_value = prepared ? prepared->knots[prepared->view.degree] : QAWS_ZERO;
-	r.max_value = prepared ? prepared->knots[prepared->n] : QAWS_ZERO;
+	r.min_value = prepared ? prepared->t0 : QAWS_ZERO;
+	r.max_value = prepared ? prepared->t1 : QAWS_ZERO;
 	return r;
 }
 
 #define PR_ORDERS 4
 
-/* position and derivatives 1 to kmax at t (clamped to the domain), rows of out; the polynomial part as the owned B-spline
-   (same span search, same basis, same sums), the rational part by the quotient rule */
+static qaws_vec3 pr_vec3(qaws_array_view const* v, unsigned int i, unsigned int dim)
+{
+	qaws_vec3 r;
+	r.x = (qaws_scalar)vw_get(v, i, 0);
+	r.y = (qaws_scalar)vw_get(v, i, 1);
+	r.z = dim > 2 ? (qaws_scalar)vw_get(v, i, 2) : QAWS_ZERO;
+	return r;
+}
+
+static void pr_put(qaws_scalar out[3], qaws_vec3 v)
+{
+	out[0] = v.x;
+	out[1] = v.y;
+	out[2] = v.z;
+}
+
+/* Hermite and Catmull-Rom span `span` at local u in [0, 1]: its coefficients from the borrowed points (and tangents) by the owned
+   curves' own routines (qaws_hermite_prepare_3d, qaws_catmull_rom_prepare_3d on the span's points: the same operations, a zero
+   third coordinate in 2D), then the cubic core; D3 = 6 a */
+static void pr_eval_cubic(qaws_curve_prepared const* p, unsigned int span, qaws_scalar u, qaws_scalar out[PR_ORDERS][3])
+{
+	unsigned int dim = (unsigned int)p->view.dimension, n = p->n, idx[4], k, cnt = 4, sc;
+	qaws_vec3 P[4], T[2], a, b, c, d;
+	qaws_eval_3d e;
+	if (p->view.family == QAWS_VIEW_HERMITE)
+	{
+		idx[0] = span;
+		idx[1] = span + 1;
+		cnt = 2;
+	}
+	else if (p->view.closed)
+	{
+		idx[0] = span ? span - 1 : n - 1;
+		idx[1] = span;
+		idx[2] = (span + 1) % n;
+		idx[3] = (span + 2) % n;
+	}
+	else
+		for (k = 0; k < 4; k++)
+			idx[k] = span + k;
+	for (k = 0; k < cnt; k++)
+		P[k] = pr_vec3(&p->view.points, idx[k], dim);
+	if (p->view.family == QAWS_VIEW_HERMITE)
+	{
+		T[0] = pr_vec3(&p->view.tangents, idx[0], dim);
+		T[1] = pr_vec3(&p->view.tangents, idx[1], dim);
+		qaws_hermite_prepare_3d(P, T, 2, &a, &b, &c, &d);
+	}
+	else
+		qaws_catmull_rom_prepare_3d(P, 4, p->view.parameterization, 0, &a, &b, &c, &d, &sc);
+	e = qaws_cubic_eval_3d(a, b, c, d, u, 7);
+	pr_put(out[0], e.position);
+	pr_put(out[1], e.d1);
+	pr_put(out[2], e.d2);
+	out[3][0] = QAWS_LITERAL(6.0) * a.x;
+	out[3][1] = QAWS_LITERAL(6.0) * a.y;
+	out[3][2] = QAWS_LITERAL(6.0) * a.z;
+}
+
+/* sum c_i t^i: the Horner core as the owned polynomial, D3 by its own Horner pass */
+static void pr_eval_poly(qaws_curve_prepared const* p, qaws_scalar t, qaws_scalar out[PR_ORDERS][3])
+{
+	qaws_scalar cf[(QAWS_VIEW_MAX_DEGREE + 1) * 3];
+	unsigned int dim = (unsigned int)p->view.dimension, d = p->view.degree, i, c;
+	int k;
+	qaws_eval_3d e;
+	memset(cf, 0, sizeof cf);
+	for (i = 0; i <= d; i++)
+		for (c = 0; c < dim; c++)
+			cf[i * 3 + c] = (qaws_scalar)vw_get(&p->view.points, i, c);
+	e = qaws_horner_eval_3d(cf, (int)d, t, 7);
+	pr_put(out[0], e.position);
+	pr_put(out[1], e.d1);
+	pr_put(out[2], e.d2);
+	for (c = 0; c < 3; c++)
+	{
+		qaws_scalar s = QAWS_ZERO;
+		for (k = (int)d; k >= 3; k--)
+			s = s * t + QAWS_ITOF(k * (k - 1) * (k - 2)) * cf[(unsigned int)k * 3 + c];
+		out[3][c] = s;
+	}
+}
+
+/* position and derivatives 1 to kmax at t (clamped to the domain), rows of out. Splines: the polynomial part as the owned B-spline
+   (same span search, same basis, same sums), the rational part by the quotient rule. The other families as theirs. */
 static void pr_eval(qaws_curve_prepared const* p, qaws_scalar t, unsigned int kmax, qaws_scalar out[PR_ORDERS][3])
 {
 	unsigned int d = p->view.degree, dim = (unsigned int)p->view.dimension, span, j, r, c, kb = kmax < d ? kmax : d;
 	qaws_scalar ders[PR_ORDERS * (QAWS_VIEW_MAX_DEGREE + 1)], A[PR_ORDERS][3], W[PR_ORDERS];
-	if (t < p->knots[d])
-		t = p->knots[d];
-	if (t > p->knots[p->n])
-		t = p->knots[p->n];
+	if (t < p->t0)
+		t = p->t0;
+	if (t > p->t1)
+		t = p->t1;
+	if (p->view.family == QAWS_VIEW_HERMITE || p->view.family == QAWS_VIEW_CATMULL_ROM)
+	{
+		/* the owned curves' span lookup on unit spans */
+		span = t >= p->t1 ? p->span_count - 1 : (unsigned int)floor((double)t);
+		pr_eval_cubic(p, span, (t - p->bounds[span]) / (p->bounds[span + 1] - p->bounds[span]), out);
+		return;
+	}
+	if (p->view.family == QAWS_VIEW_POLYNOMIAL)
+	{
+		pr_eval_poly(p, t, out);
+		return;
+	}
 	span = qaws_internal_find_knot_span(p->knots, p->kc, d, p->n, t);
 	qaws_internal_bspline_basis_derivs(p->knots, p->kc, d, span, t, kb, ders);
 	memset(A, 0, sizeof A);
@@ -377,23 +547,26 @@ static void pr_eval(qaws_curve_prepared const* p, qaws_scalar t, unsigned int km
 	}
 }
 
+/* span `span` at local u: the cubic families directly (as the owned ones, no round trip through the global parameter), the others at
+   the global parameter as the owned B-spline and polynomial map it */
+static void pr_eval_span(qaws_curve_prepared const* p, unsigned int span, qaws_scalar u, unsigned int kmax, qaws_scalar out[PR_ORDERS][3])
+{
+	if (p->view.family == QAWS_VIEW_HERMITE || p->view.family == QAWS_VIEW_CATMULL_ROM)
+		pr_eval_cubic(p, span, u, out);
+	else
+		pr_eval(p, p->bounds[span] + u * (p->bounds[span + 1] - p->bounds[span]), kmax, out);
+}
+
 static unsigned int pr_order(unsigned int flags)
 {
 	return flags & QAWS_EVAL_FLAG_D3 ? 3 : flags & QAWS_EVAL_FLAG_D2 ? 2 : flags & QAWS_EVAL_FLAG_D1 ? 1 : 0;
 }
 
-qaws_status qaws_curve_prepared_evaluate_3d(qaws_curve_prepared const* prepared, qaws_scalar parameter, unsigned int eval_flags,
-	qaws_eval_result_3d* out_result)
+static void pr_store_3d(qaws_scalar const v[PR_ORDERS][3], unsigned int eval_flags, qaws_eval_result_3d* out_result)
 {
-	qaws_scalar v[PR_ORDERS][3];
 	qaws_vec3* dst[PR_ORDERS];
 	unsigned int r;
-	if (!prepared || !out_result)
-		return QAWS_STATUS_INVALID_ARGUMENT;
-	if (prepared->view.dimension != QAWS_DIMENSION_3D)
-		return QAWS_STATUS_INVALID_DIMENSION;
 	memset(out_result, 0, sizeof *out_result);
-	pr_eval(prepared, parameter, pr_order(eval_flags), v);
 	dst[0] = &out_result->position;
 	dst[1] = &out_result->d1;
 	dst[2] = &out_result->d2;
@@ -406,21 +579,13 @@ qaws_status qaws_curve_prepared_evaluate_3d(qaws_curve_prepared const* prepared,
 			dst[r]->z = v[r][2];
 			out_result->valid_flags |= 1u << r;
 		}
-	return QAWS_STATUS_OK;
 }
 
-qaws_status qaws_curve_prepared_evaluate_2d(qaws_curve_prepared const* prepared, qaws_scalar parameter, unsigned int eval_flags,
-	qaws_eval_result_2d* out_result)
+static void pr_store_2d(qaws_scalar const v[PR_ORDERS][3], unsigned int eval_flags, qaws_eval_result_2d* out_result)
 {
-	qaws_scalar v[PR_ORDERS][3];
 	qaws_vec2* dst[PR_ORDERS];
 	unsigned int r;
-	if (!prepared || !out_result)
-		return QAWS_STATUS_INVALID_ARGUMENT;
-	if (prepared->view.dimension != QAWS_DIMENSION_2D)
-		return QAWS_STATUS_INVALID_DIMENSION;
 	memset(out_result, 0, sizeof *out_result);
-	pr_eval(prepared, parameter, pr_order(eval_flags), v);
 	dst[0] = &out_result->position;
 	dst[1] = &out_result->d1;
 	dst[2] = &out_result->d2;
@@ -432,6 +597,31 @@ qaws_status qaws_curve_prepared_evaluate_2d(qaws_curve_prepared const* prepared,
 			dst[r]->y = v[r][1];
 			out_result->valid_flags |= 1u << r;
 		}
+}
+
+qaws_status qaws_curve_prepared_evaluate_3d(qaws_curve_prepared const* prepared, qaws_scalar parameter, unsigned int eval_flags,
+	qaws_eval_result_3d* out_result)
+{
+	qaws_scalar v[PR_ORDERS][3];
+	if (!prepared || !out_result)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	if (prepared->view.dimension != QAWS_DIMENSION_3D)
+		return QAWS_STATUS_INVALID_DIMENSION;
+	pr_eval(prepared, parameter, pr_order(eval_flags), v);
+	pr_store_3d(v, eval_flags, out_result);
+	return QAWS_STATUS_OK;
+}
+
+qaws_status qaws_curve_prepared_evaluate_2d(qaws_curve_prepared const* prepared, qaws_scalar parameter, unsigned int eval_flags,
+	qaws_eval_result_2d* out_result)
+{
+	qaws_scalar v[PR_ORDERS][3];
+	if (!prepared || !out_result)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	if (prepared->view.dimension != QAWS_DIMENSION_2D)
+		return QAWS_STATUS_INVALID_DIMENSION;
+	pr_eval(prepared, parameter, pr_order(eval_flags), v);
+	pr_store_2d(v, eval_flags, out_result);
 	return QAWS_STATUS_OK;
 }
 
@@ -488,19 +678,20 @@ qaws_status qaws_curve_prepared_evaluate_range(qaws_curve_prepared const* prepar
 
 /* ---- borrowed qaws_curve ------------------------------------------------ */
 
-static qaws_scalar bw_global(qaws_curve const* curve, unsigned int span, qaws_scalar local_t)
-{
-	return curve->span_boundaries[span] + local_t * (curve->span_boundaries[span + 1] - curve->span_boundaries[span]);
-}
-
 static qaws_status bw_eval_span_2d(qaws_curve const* curve, unsigned int span, qaws_scalar local_t, unsigned int flags, qaws_eval_result_2d* out)
 {
-	return qaws_curve_prepared_evaluate_2d((qaws_curve_prepared const*)curve->impl, bw_global(curve, span, local_t), flags, out);
+	qaws_scalar v[PR_ORDERS][3];
+	pr_eval_span((qaws_curve_prepared const*)curve->impl, span, local_t, pr_order(flags), v);
+	pr_store_2d(v, flags, out);
+	return QAWS_STATUS_OK;
 }
 
 static qaws_status bw_eval_span_3d(qaws_curve const* curve, unsigned int span, qaws_scalar local_t, unsigned int flags, qaws_eval_result_3d* out)
 {
-	return qaws_curve_prepared_evaluate_3d((qaws_curve_prepared const*)curve->impl, bw_global(curve, span, local_t), flags, out);
+	qaws_scalar v[PR_ORDERS][3];
+	pr_eval_span((qaws_curve_prepared const*)curve->impl, span, local_t, pr_order(flags), v);
+	pr_store_3d(v, flags, out);
+	return QAWS_STATUS_OK;
 }
 
 static void bw_destroy(void* impl, qaws_allocator const* allocator)
@@ -511,13 +702,14 @@ static void bw_destroy(void* impl, qaws_allocator const* allocator)
 
 static int bw_is_closed(qaws_curve const* curve)
 {
-	return qaws_internal_curve_ends_meet(curve);
+	qaws_curve_prepared const* p = (qaws_curve_prepared const*)curve->impl;
+	return (p->view.family == QAWS_VIEW_CATMULL_ROM && p->view.closed) || qaws_internal_curve_ends_meet(curve);
 }
 
 static int bw_is_periodic(qaws_curve const* curve)
 {
-	(void)curve;
-	return 0;
+	qaws_curve_prepared const* p = (qaws_curve_prepared const*)curve->impl;
+	return p->view.family == QAWS_VIEW_CATMULL_ROM && p->view.closed;
 }
 
 static int bw_is_rational(qaws_curve const* curve)
@@ -525,12 +717,16 @@ static int bw_is_rational(qaws_curve const* curve)
 	return ((qaws_curve_prepared const*)curve->impl)->rational != 0;
 }
 
-/* the degree less the largest multiplicity of a knot inside the domain */
+/* splines: the degree less the largest multiplicity of a knot inside the domain; the others as the owned families */
 static qaws_continuity bw_get_continuity(qaws_curve const* curve)
 {
 	qaws_curve_prepared const* p = (qaws_curve_prepared const*)curve->impl;
 	unsigned int d = p->view.degree, k, run = 1, worst = 0;
 	int smooth;
+	if (p->view.family == QAWS_VIEW_POLYNOMIAL)
+		return QAWS_CONTINUITY_C3;
+	if (p->view.family != QAWS_VIEW_SPLINE)
+		return QAWS_CONTINUITY_C1;
 	for (k = d + 1; k < p->n; k++)
 		if (p->knots[k] > p->knots[d] && p->knots[k] < p->knots[p->n])
 		{
@@ -571,24 +767,65 @@ qaws_status qaws_curve_create_borrowed(qaws_curve_view const* view, qaws_allocat
 
 /* ---- owned copies ------------------------------------------------------- */
 
-/* an owned B-spline (polynomial) or NURBS curve with the prepared knots and the view's points (homogeneous ones divided by w) */
+/* the owned curve of the view's family: splines a B-spline (polynomial) or NURBS curve with the prepared knots (homogeneous points
+   divided by w); Hermite with its tangents; Catmull-Rom; polynomial over the prepared range */
 static qaws_status pr_copy(qaws_curve_prepared const* p, qaws_allocator const* allocator, qaws_curve** out_curve)
 {
 	unsigned int dim = (unsigned int)p->view.dimension, i, c;
-	qaws_scalar* pts = (qaws_scalar*)qaws_internal_alloc(allocator, (unsigned long)(sizeof(qaws_scalar) * (size_t)p->n * (dim + 1)));
-	qaws_scalar* wts;
+	qaws_scalar* pts = (qaws_scalar*)qaws_internal_alloc(allocator, (unsigned long)(sizeof(qaws_scalar) * (size_t)p->n * (2 * dim + 1)));
+	qaws_scalar *wts, *tans;
 	qaws_status st;
 	if (!pts)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	wts = pts + (size_t)p->n * dim;
+	tans = wts + p->n;
 	for (i = 0; i < p->n; i++)
 	{
 		wts[i] = p->rational == 1 ? (qaws_scalar)vw_get(&p->view.weights, i, 0)
 			: p->rational == 2 ? (qaws_scalar)vw_get(&p->view.points, i, dim) : QAWS_ONE;
 		for (c = 0; c < dim; c++)
+		{
 			pts[i * dim + c] = (qaws_scalar)vw_get(&p->view.points, i, c) / (p->rational == 2 ? wts[i] : QAWS_ONE);
+			tans[i * dim + c] = p->view.family == QAWS_VIEW_HERMITE ? (qaws_scalar)vw_get(&p->view.tangents, i, c) : QAWS_ZERO;
+		}
 	}
-	if (p->rational)
+	if (p->view.family == QAWS_VIEW_HERMITE)
+	{
+		qaws_hermite_desc d;
+		memset(&d, 0, sizeof d);
+		d.dimension = p->view.dimension;
+		d.degree = 3;
+		d.points = pts;
+		d.derivatives = tans;
+		d.point_count = p->n;
+		d.derivative_count = p->n;
+		st = qaws_curve_create_hermite_ex(&d, allocator, out_curve);
+	}
+	else if (p->view.family == QAWS_VIEW_CATMULL_ROM)
+	{
+		qaws_catmull_rom_desc d;
+		memset(&d, 0, sizeof d);
+		d.dimension = p->view.dimension;
+		d.control_points = pts;
+		d.control_point_count = p->n;
+		d.parameterization = p->view.parameterization;
+		d.closed = p->view.closed;
+		st = qaws_curve_create_catmull_rom_ex(&d, allocator, out_curve);
+	}
+	else if (p->view.family == QAWS_VIEW_POLYNOMIAL)
+	{
+		/* shortcut: qaws_curve_create_polynomial takes no allocator (it calls malloc), until the allocator reaches every constructor */
+		qaws_polynomial_desc d;
+		memset(&d, 0, sizeof d);
+		d.dimension = p->view.dimension;
+		d.degree = p->view.degree;
+		d.coefficients = pts;
+		d.coefficient_count = p->n;
+		d.t_min = p->t0;
+		d.t_max = p->t1;
+		st = qaws_curve_create_polynomial(&d, out_curve);
+	}
+	else if (p->rational)
 	{
 		qaws_nurbs_desc d;
 		memset(&d, 0, sizeof d);

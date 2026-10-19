@@ -75,6 +75,18 @@ qaws_curve_create_from_view(&v, allocator, &c);              /* an owned B-splin
   inspection, transforms, and derivatives with respect to control points
   refuse it: the host holds those arrays.
 
+### Other families
+
+`view.family` selects what the arrays describe (zero: `QAWS_VIEW_SPLINE`, above). Each evaluates as the owned family it names, bit for bit (test 142):
+
+| Family | Arrays | Domain |
+|---|---|---|
+| `QAWS_VIEW_HERMITE` | `points` and `tangents` (n each), degree 3 | [0, n - 1], span i on [i, i + 1] |
+| `QAWS_VIEW_CATMULL_ROM` | `points`, `parameterization`, `closed`, degree 3 | [0, n - 3] (closed: [0, n]) |
+| `QAWS_VIEW_POLYNOMIAL` | `points`: the coefficients c_0 .. c_degree of sum c_i t^i | `knots`: none ([0, 1]) or 2 values |
+
+Their span coefficients are computed at each evaluation from the borrowed values, by the owned curves' routines. Nothing depending on the points or tangents is cached, so these may be rewritten in place like spline points. Owned copies (`qaws_curve_create_from_view`, and extract, split and reverse of a borrowed curve) make the owned curve of the same family.
+
 ## Surfaces
 
 ```c

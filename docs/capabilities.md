@@ -33,14 +33,14 @@ columns differ by family.
 |---|---|---|---|---|---|
 | Bezier | core de Casteljau (to D2) + runtime D3 | view with n = degree + 1 (142) | yes | yes | 16 (140) |
 | Rational Bezier | runtime | NURBS view with n = degree + 1 (142) | yes | malloc | 47 (140) |
-| Hermite | runtime | absent | yes | yes | 3 |
-| Catmull-Rom | runtime | absent | yes | yes | 3 |
+| Hermite | runtime | `QAWS_VIEW_HERMITE` (142) | yes | yes | 3 |
+| Catmull-Rom | runtime | `QAWS_VIEW_CATMULL_ROM` (142) | yes | yes | 3 |
 | B-spline | internal basis | `qaws_curve_view`, prepared, borrowed (142) | yes | yes | 31 (140) |
 | NURBS | internal basis | weights or homogeneous points (142) | yes | yes | 31 (140) |
 | Trajectory | runtime | absent | absent | yes | |
 | Yuksel | runtime | absent | yes | malloc | |
 | Arc | core arc | absent | absent | malloc | |
-| Polynomial | core Horner | absent | yes | malloc | |
+| Polynomial | core Horner | `QAWS_VIEW_POLYNOMIAL` (142) | yes | malloc | |
 | Clothoid | runtime | absent | yes | malloc | |
 | Composite | its children | absent | yes | malloc | |
 | Subdivision | runtime | absent | absent | malloc | |
@@ -120,7 +120,8 @@ own tool, `examples/repulsive_gpu_parity.c`.
 - **Sweeps and lofts with analytic derivatives** and without allocation
   per evaluation. Swept and pipe surfaces use finite differences. The loft
   and Gordon fallbacks allocate.
-- **Views of the other families** (Hermite, Catmull-Rom, polynomial, arc
-  and others), and owned objects rebuilt on views.
+- **Views of the remaining families** (arc, clothoid, Yuksel, trajectory,
+  subdivision, composite). Hermite, Catmull-Rom and polynomial curves have
+  views; owned objects are not rebuilt on views (their parity is tested).
 - **The allocator through every entry point** marked malloc above, and
   through operations, sampling, traversal, batches and repulsive.

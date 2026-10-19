@@ -97,15 +97,30 @@ qaws_status qaws_array_view_check_extent(qaws_array_view const* view, void const
 
 #define QAWS_VIEW_MAX_DEGREE 31
 
+/* What a curve view describes; each evaluates as the owned family it names */
+typedef enum qaws_curve_view_family
+{
+	QAWS_VIEW_SPLINE = 0,               /* B-spline, NURBS or Bezier: points, weights, knots (the default) */
+	QAWS_VIEW_HERMITE,                  /* cubic Hermite (qaws_curve_create_hermite): points and tangents, n - 1 spans, span i on [i, i + 1] */
+	QAWS_VIEW_CATMULL_ROM,              /* Catmull-Rom (qaws_curve_create_catmull_rom): points, parameterization, closed; n - 3 spans
+	                                       (closed: n), span i on [i, i + 1] */
+	QAWS_VIEW_POLYNOMIAL                /* polynomial (qaws_curve_create_polynomial): the points are the coefficients c_0 .. c_degree of
+	                                       sum c_i t^i (count degree + 1); knots: none ([0, 1]) or 2 values, the range */
+} qaws_curve_view_family;
+
 typedef struct qaws_curve_view
 {
 	qaws_dimension dimension;           /* 2 or 3 */
-	unsigned int degree;                /* 1 to QAWS_VIEW_MAX_DEGREE */
-	qaws_array_view points;             /* n points: dimension components, or dimension + 1 homogeneous (w x, w y, [w z,] w) */
-	qaws_array_view weights;            /* count 0: none; else n weights > 0 (with Cartesian points) */
-	qaws_array_view knots;              /* count 0: clamped uniform 0, 1, ..., n - degree, as qaws_curve_create_bspline (n = degree + 1:
-	                                       a Bezier curve on [0, 1]); else n + degree + 1 non-decreasing values, the domain
+	unsigned int degree;                /* 1 to QAWS_VIEW_MAX_DEGREE; Hermite and Catmull-Rom: 3 */
+	qaws_array_view points;             /* n points: dimension components, or (splines) dimension + 1 homogeneous (w x, w y, [w z,] w) */
+	qaws_array_view weights;            /* splines: count 0: none; else n weights > 0 (with Cartesian points) */
+	qaws_array_view knots;              /* splines: count 0: clamped uniform 0, 1, ..., n - degree, as qaws_curve_create_bspline (n =
+	                                       degree + 1: a Bezier curve on [0, 1]); else n + degree + 1 non-decreasing values, the domain
 	                                       [knots[degree], knots[n]] */
+	qaws_curve_view_family family;      /* zero: QAWS_VIEW_SPLINE */
+	qaws_array_view tangents;           /* Hermite: n tangents, dimension components */
+	qaws_parameterization parameterization;   /* Catmull-Rom (DEFAULT: centripetal) */
+	int closed;                         /* Catmull-Rom */
 } qaws_curve_view;
 
 /* The view's arrays and their values: counts, layouts, knots non-decreasing over a non-empty domain, weights (or homogeneous
@@ -159,8 +174,9 @@ qaws_status qaws_curve_prepared_evaluate_range(qaws_curve_prepared const* prepar
    contract as a prepared object for as long as the curve lives. Kind QAWS_CURVE_KIND_VIEW. */
 qaws_status qaws_curve_create_borrowed(qaws_curve_view const* view, qaws_allocator const* allocator, qaws_curve** out_curve);
 
-/* An owned copy: a B-spline curve (polynomial views) or a NURBS curve (weights or homogeneous points, divided by w), with the
-   view's knots (or the clamped uniform ones), converted to qaws_scalar; the view is borrowed for the call only. */
+/* An owned copy: splines a B-spline curve (polynomial views) or a NURBS curve (weights or homogeneous points, divided by w), with the
+   view's knots (or the clamped uniform ones); the other families their own owned curve; values converted to qaws_scalar; the view
+   is borrowed for the call only. */
 qaws_status qaws_curve_create_from_view(qaws_curve_view const* view, qaws_allocator const* allocator, qaws_curve** out_curve);
 
 /* ---- surfaces: the same model over a grid of points -------------------------------------------------------------------------- */
