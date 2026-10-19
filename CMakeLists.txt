@@ -427,6 +427,16 @@ if(QAWS_BUILD_EXAMPLES)
     RUNTIME_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/working_dir"
     RUNTIME_OUTPUT_DIRECTORY_RELEASE "${PROJECT_SOURCE_DIR}/working_dir"
     RUNTIME_OUTPUT_DIRECTORY_DEBUG "${PROJECT_SOURCE_DIR}/working_dir")
+  add_executable(qaws_host_showcase examples/host_showcase.c)
+  target_link_libraries(qaws_host_showcase PRIVATE Qaws::qaws)
+  target_include_directories(qaws_host_showcase PRIVATE "${PROJECT_SOURCE_DIR}/src/qaws")
+  if(MSVC)
+    target_compile_definitions(qaws_host_showcase PRIVATE _CRT_SECURE_NO_WARNINGS)
+  endif()
+  set_target_properties(qaws_host_showcase PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/working_dir"
+    RUNTIME_OUTPUT_DIRECTORY_RELEASE "${PROJECT_SOURCE_DIR}/working_dir"
+    RUNTIME_OUTPUT_DIRECTORY_DEBUG "${PROJECT_SOURCE_DIR}/working_dir")
   add_executable(qaws_better2d_showcase examples/better2d_showcase.c)
   target_link_libraries(qaws_better2d_showcase PRIVATE Qaws::qaws)
   target_include_directories(qaws_better2d_showcase PRIVATE "${PROJECT_SOURCE_DIR}/src/qaws")
