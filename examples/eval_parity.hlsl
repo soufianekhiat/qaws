@@ -31,6 +31,10 @@ cbuffer Params : register(b0)
     uint v_count;
     uint off_knots;   /* (u) knots */
     uint off_extra;   /* weights, or the v knots */
+    uint rational;    /* surface records */
+    uint off_weights;
+    uint pad0;
+    uint pad1;
 };
 
 void put3(uint base, qaws_vec3 v)
@@ -171,4 +175,21 @@ void CSRecord(uint3 id : SV_DispatchThreadID)
     r.knot_offset = (int)off_knots; r.point_offset = 0; r.weight_offset = (int)off_extra; r.reserved = 0;
     e = qaws_record_eval_3d(r, params[i], 7);
     put3(9 * i, e.position); put3(9 * i + 3, e.d1); put3(9 * i + 6, e.d2);
+}
+
+/* surfaces read from the data buffer through a record: degrees in degree / v_degree, counts in n / v_count, u knots at off_knots,
+   v knots at off_extra, weights at off_weights, points at 0 */
+#include "../src/qaws/core/qaws_surface_record_core.h"
+
+[numthreads(64, 1, 1)]
+void CSSurfaceRecord(uint3 id : SV_DispatchThreadID)
+{
+    uint i = id.x;
+    qaws_surface_record r;
+    if (i >= count)
+        return;
+    r.u_degree = (int)degree; r.v_degree = (int)v_degree; r.u_count = (int)n; r.v_count = (int)v_count; r.rational = (int)rational;
+    r.u_knot_offset = (int)off_knots; r.v_knot_offset = (int)off_extra; r.point_offset = 0; r.weight_offset = (int)off_weights;
+    r.reserved0 = 0; r.reserved1 = 0; r.reserved2 = 0;
+    put_surface(i, qaws_surface_record_eval(r, params[2 * i], params[2 * i + 1], 127));
 }

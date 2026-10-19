@@ -82,6 +82,7 @@ evaluation.
 | Bezier surface | none | tested against the runtime (144) | run on a GPU, 2.2e-6 (eval_gpu_parity) | compiled | written |
 | B-spline surface | none | tested against the runtime (144) | run on a GPU, 1.9e-6 (eval_gpu_parity) | compiled | written; the normal block uses C `if` on expressions |
 | Curve records: B-spline and NURBS read from buffers, any length (`qaws_curve_record_core.h`) | none | tested against the runtime (144) | run on a GPU, 4.9e-7 (eval_gpu_parity) | compiled | absent |
+| Surface records: B-spline and NURBS surfaces read from buffers, any number of points (`qaws_surface_record_core.h`) | none | tested against the runtime (144) | run on a GPU, 7.6e-6 (eval_gpu_parity) | compiled | absent |
 | B-spline derivatives w.r.t. data | none | tested (57) | compiled (`diff_bspline_adjoint.hlsl`) | not checked | written |
 | B-spline sampling (CDF) | none | tested (60) | compiled (`diff_cdf_sampling.hlsl`) | not checked | written; C `if` on expressions |
 | Surface functionals | none | tested (61) | compiled (`diff_surface_functionals.hlsl`) | not checked | written |
@@ -101,11 +102,10 @@ own tool, `examples/repulsive_gpu_parity.c`.
 
 ## Missing
 
-- **Shader interface for surfaces.** Curves have one: `qaws_curve_record`
-  over shared knot, point and weight buffers, with a bounded span search on
-  the knot buffer and only the de Boor window loaded (any number of points,
-  degree at most 16). Surfaces still copy a 34-knot window. Halide would
-  take the span as a runtime `Expr`.
+- **Halide spans at run time.** Curves and surfaces read from buffers have a
+  shader interface (`qaws_curve_record`, `qaws_surface_record`): a bounded
+  span search on the knot buffers, and only the de Boor window loaded. Halide
+  still needs the span when the pipeline is built.
 - **CPU and GPU comparison in a build step.** Both GPU tools run by hand on
   Windows only. GLSL is compiled, never run. Halide is never built.
 - **Parallel-transport frames.** The kernel is private to pipe surfaces.

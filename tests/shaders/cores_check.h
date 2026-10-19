@@ -20,6 +20,7 @@
 #define QAWS_BUFFER_POINT(i) input_data[i]
 #define QAWS_BUFFER_WEIGHT(i) input_data[i]
 #include "../../src/qaws/core/qaws_curve_record_core.h"
+#include "../../src/qaws/core/qaws_surface_record_core.h"
 
 qaws_scalar qaws_check_cores(qaws_scalar t)
 {
@@ -37,6 +38,7 @@ qaws_scalar qaws_check_cores(qaws_scalar t)
     qaws_eval_3d e3;
     qaws_surface_eval_3d es;
     qaws_curve_record rec;
+    qaws_surface_record srec;
     qaws_scalar s = QAWS_ZERO;
     int i;
     int span;
@@ -103,5 +105,10 @@ qaws_scalar qaws_check_cores(qaws_scalar t)
     rec.knot_offset = 0; rec.point_offset = 64; rec.weight_offset = 256; rec.reserved = 0;
     e3 = qaws_record_eval_3d(rec, t, 7);
     s += e3.position.x + e3.d1.y + e3.d2.z;
+    srec.u_degree = 3; srec.v_degree = 2; srec.u_count = 8; srec.v_count = 6; srec.rational = 1;
+    srec.u_knot_offset = 0; srec.v_knot_offset = 16; srec.point_offset = 64; srec.weight_offset = 256;
+    srec.reserved0 = 0; srec.reserved1 = 0; srec.reserved2 = 0;
+    es = qaws_surface_record_eval(srec, t, t, 127);
+    s += es.position.x + es.du.y + es.dv.z + es.normal.x + es.duu.y + es.duv.z + es.dvv.x;
     return s;
 }

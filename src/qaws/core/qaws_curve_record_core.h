@@ -39,17 +39,18 @@ QAWS_STRUCT(qaws_curve_record) {
 
 #define QAWS_RECORD_SEARCH_STEPS 32
 
-/* the knot span of t in [knot[degree], knot[count]]: knot[span] <= t < knot[span + 1], the last non-empty span at the end */
-QAWS_INLINE int qaws_record_find_span(qaws_curve_record r, qaws_scalar t)
+/* the knot span of t in [knot[degree], knot[count]] of the knots at knot_offset in the knot buffer: knot[span] <= t < knot[span + 1],
+   the last non-empty span at the end */
+QAWS_INLINE int qaws_buffer_find_span(int knot_offset, int degree, int count, qaws_scalar t)
 {
-    int lo = r.degree;
-    int hi = r.count;
+    int lo = degree;
+    int hi = count;
     int it;
-    if (t >= QAWS_BUFFER_KNOT(r.knot_offset + r.count)) {
+    if (t >= QAWS_BUFFER_KNOT(knot_offset + count)) {
         /* a knot repeated at the end leaves empty spans before it (at most degree of them) */
-        lo = r.count - 1;
+        lo = count - 1;
         for (it = 0; it < QAWS_CORE_MAX_POINTS; it++)
-            if (lo > r.degree && QAWS_BUFFER_KNOT(r.knot_offset + lo) >= QAWS_BUFFER_KNOT(r.knot_offset + r.count))
+            if (lo > degree && QAWS_BUFFER_KNOT(knot_offset + lo) >= QAWS_BUFFER_KNOT(knot_offset + count))
                 lo = lo - 1;
         return lo;
     }
@@ -57,13 +58,18 @@ QAWS_INLINE int qaws_record_find_span(qaws_curve_record r, qaws_scalar t)
     for (it = 0; it < QAWS_RECORD_SEARCH_STEPS; it++) {
         if (hi - lo > 1) {
             int mid = (lo + hi) / 2;
-            if (t < QAWS_BUFFER_KNOT(r.knot_offset + mid))
+            if (t < QAWS_BUFFER_KNOT(knot_offset + mid))
                 hi = mid;
             else
                 lo = mid;
         }
     }
     return lo;
+}
+
+QAWS_INLINE int qaws_record_find_span(qaws_curve_record r, qaws_scalar t)
+{
+    return qaws_buffer_find_span(r.knot_offset, r.degree, r.count, t);
 }
 
 /* Position, D1 and D2 (eval_flags 0x2, 0x4) at t, clamped to the domain; 2D records leave z at zero. Rational records by the

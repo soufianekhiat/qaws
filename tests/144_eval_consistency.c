@@ -447,13 +447,14 @@ static void test_spline_cores(void)
 }
 
 /* curves read from buffers (core/qaws_curve_record_core.h): two records sharing the arrays, both far past the 34-knot windows */
-#define EC_REC_KNOTS (64 + 4 + 40 + 6)
-#define EC_REC_POINTS (64 * 3 + 40 * 2)
-static qaws_scalar ec_rec_knots[EC_REC_KNOTS], ec_rec_points[EC_REC_POINTS], ec_rec_weights[40];
+#define EC_REC_KNOTS 200
+#define EC_REC_POINTS 1600
+static qaws_scalar ec_rec_knots[EC_REC_KNOTS], ec_rec_points[EC_REC_POINTS], ec_rec_weights[200];
 #define QAWS_BUFFER_KNOT(i) ec_rec_knots[i]
 #define QAWS_BUFFER_POINT(i) ec_rec_points[i]
 #define QAWS_BUFFER_WEIGHT(i) ec_rec_weights[i]
 #include "core/qaws_curve_record_core.h"
+#include "core/qaws_surface_record_core.h"
 
 static void test_curve_records(void)
 {
@@ -517,6 +518,75 @@ static void test_curve_records(void)
 	qaws_curve_destroy(nu);
 }
 
+/* surfaces read from the same buffers: a 20 x 15 B-spline surface (degrees 3, 2) and a 12 x 10 NURBS surface (degrees 2, 3) */
+static void test_surface_records(void)
+{
+	qaws_surface_record rb, rn;
+	qaws_surface_bspline_desc bd;
+	qaws_surface_nurbs_desc nd;
+	qaws_surface *bs = NULL, *nu = NULL;
+	qaws_vec3 gb[300], gn[120];
+	double eb = 0, en = 0;
+	unsigned int i, j;
+	char msg[256];
+	/* knots after the curves' 114, points after their 272 floats, weights after their 40 */
+	memset(&rb, 0, sizeof rb);
+	rb.u_degree = 3; rb.v_degree = 2; rb.u_count = 20; rb.v_count = 15; rb.u_knot_offset = 114; rb.v_knot_offset = 138; rb.point_offset = 272;
+	memset(&rn, 0, sizeof rn);
+	rn.u_degree = 2; rn.v_degree = 3; rn.u_count = 12; rn.v_count = 10; rn.rational = 1; rn.u_knot_offset = 156; rn.v_knot_offset = 171;
+	rn.point_offset = 272 + 900; rn.weight_offset = 40;
+	for (i = 0; i < 24; i++) ec_rec_knots[114 + i] = (qaws_scalar)(i <= 3 ? 0 : i >= 20 ? 17 : (double)(i - 3) + 0.25 * sin(0.9 * i));
+	for (i = 0; i < 18; i++) ec_rec_knots[138 + i] = (qaws_scalar)(i <= 2 ? 0 : i >= 15 ? 13 : i - 2);
+	for (i = 0; i < 15; i++) ec_rec_knots[156 + i] = (qaws_scalar)(i <= 2 ? 0 : i >= 12 ? 10 : i - 2);
+	for (i = 0; i < 14; i++) ec_rec_knots[171 + i] = (qaws_scalar)(i <= 3 ? 0 : i >= 10 ? 7 : (double)(i - 3) + 0.2 * cos(1.3 * i));
+	for (i = 0; i < 300; i++)
+	{
+		gb[i].x = (qaws_scalar)(i / 15); gb[i].y = (qaws_scalar)(i % 15); gb[i].z = (qaws_scalar)(0.4 * sin(0.7 * i));
+		ec_rec_points[272 + i * 3] = gb[i].x; ec_rec_points[272 + i * 3 + 1] = gb[i].y; ec_rec_points[272 + i * 3 + 2] = gb[i].z;
+	}
+	for (i = 0; i < 120; i++)
+	{
+		gn[i].x = (qaws_scalar)(i / 10); gn[i].y = (qaws_scalar)(i % 10); gn[i].z = (qaws_scalar)(0.3 * cos(0.9 * i));
+		ec_rec_points[1172 + i * 3] = gn[i].x; ec_rec_points[1172 + i * 3 + 1] = gn[i].y; ec_rec_points[1172 + i * 3 + 2] = gn[i].z;
+		ec_rec_weights[40 + i] = (qaws_scalar)(0.5 + 0.4 * ((i * 5) % 7) / 6.0);
+	}
+	memset(&bd, 0, sizeof bd);
+	bd.u_degree = 3; bd.v_degree = 2; bd.control_points = gb; bd.u_point_count = 20; bd.v_point_count = 15;
+	bd.u_knots = ec_rec_knots + 114; bd.u_knot_count = 24; bd.v_knots = ec_rec_knots + 138; bd.v_knot_count = 18;
+	memset(&nd, 0, sizeof nd);
+	nd.u_degree = 2; nd.v_degree = 3; nd.control_points = gn; nd.u_point_count = 12; nd.v_point_count = 10; nd.weights = ec_rec_weights + 40;
+	nd.u_knots = ec_rec_knots + 156; nd.u_knot_count = 15; nd.v_knots = ec_rec_knots + 171; nd.v_knot_count = 14;
+	if (qaws_surface_create_bspline(&bd, &bs) != QAWS_STATUS_OK || qaws_surface_create_nurbs(&nd, &nu) != QAWS_STATUS_OK)
+	{
+		TEST_ASSERT(0, "record surfaces created");
+		qaws_surface_destroy(bs);
+		qaws_surface_destroy(nu);
+		return;
+	}
+	for (i = 0; i <= 20; i++)
+		for (j = 0; j <= 20; j++)
+		{
+			qaws_surface_eval_result o;
+			qaws_surface_eval_3d c;
+			qaws_scalar u = (qaws_scalar)(17.0 * i / 20), v = (qaws_scalar)(13.0 * j / 20);
+			c = qaws_surface_record_eval(rb, u, v, 127);
+			qaws_surface_evaluate(bs, u, v, 127, &o);
+			eb = fmax(eb, ec_err3(c.position, o.position) + ec_err3(c.du, o.du) + ec_err3(c.dv, o.dv) + ec_err3(c.normal, o.normal)
+				+ ec_err3(c.duu, o.duu) + ec_err3(c.duv, o.duv) + ec_err3(c.dvv, o.dvv));
+			u = (qaws_scalar)(10.0 * i / 20);
+			v = (qaws_scalar)(7.0 * j / 20);
+			c = qaws_surface_record_eval(rn, u, v, 127);
+			qaws_surface_evaluate(nu, u, v, 127, &o);
+			en = fmax(en, ec_err3(c.position, o.position) + ec_err3(c.du, o.du) + ec_err3(c.dv, o.dv) + ec_err3(c.normal, o.normal)
+				+ ec_err3(c.duu, o.duu) + ec_err3(c.duv, o.duv) + ec_err3(c.dvv, o.dvv));
+		}
+	sprintf(msg, "surfaces read from buffers against the runtime: B-spline (20 x 15) %.2g, NURBS (12 x 10) %.2g", eb, en);
+	TEST_ASSERT(eb <= EC_TOL * 10 && en <= EC_TOL * 10, msg);
+	printf("  %s\n", msg);
+	qaws_surface_destroy(bs);
+	qaws_surface_destroy(nu);
+}
+
 int test_144_eval_consistency_main(void)
 {
 	g_pass = 0;
@@ -528,6 +598,7 @@ int test_144_eval_consistency_main(void)
 	test_arc_length_wrappers();
 	test_spline_cores();
 	test_curve_records();
+	test_surface_records();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
 }
