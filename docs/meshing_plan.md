@@ -30,6 +30,16 @@ and an order of work; the questions it raised are kept in section 13.
    adjacency, the dual graph, is stored (`qaws_mesh_3d_get_face_adjacency`,
    `qaws_mesh_3d_create_dual`). Volumes follow the same pattern (cell
    corners, cell facets' adjacency).
+9. **Boundary with farq (2026-10-19).** farq (exact mesh Booleans) does
+   everything exact and tolerance-free; qaws owns every tolerance and every
+   quality judgement. qaws: welding near-duplicates, removing degenerate
+   faces, hole filling, gap bridging, orientation repair by heuristics,
+   scans, remeshing, quads, quality tetrahedra and hexahedra. farq:
+   Booleans, self-union, intersection resolution, the exact defect network,
+   exact orientation and winding-number solids of soups, exact Booleans on
+   volume cells. So qaws's repair only has to make a surface closed: it does
+   not resolve self-intersections (farq's self-union does, exactly). Neither
+   library links the other; the caller composes them through arrays.
 
 ## As built (2026-10-18)
 
@@ -76,7 +86,7 @@ Quality and reach:
 2. Boundary layers: prisms grown from the surface (the volume mesh stores prisms; nothing makes them).
 3. Metric-driven adaptation: remeshing to an anisotropic metric per vertex (as Mmg), for a solution field rather than curvature.
 4. Sizing by local feature size: landed. `qaws_size_field_create_feature_size`: the width across thin parts and gaps over `cells_across`, from medial balls by shrinking (Ma et al. 2012) on two passes of per-triangle samples (a k-d tree pruned by box and normal cone), contacts carried onto the patches, faces across creases excluded by their normals, graded and combinable by min. Test 138: a fin 0.02 thick at 3 cells across 0.00667 on its top, no edge alone across its narrow sides (uniform 0.05: one), LOCAL at 30..110 degrees, the far end back at 0.05, growth 1.11 of the gradation, field in 0.5 s; two plates 0.03 apart sized 0.0100 across the gap; a sphere 0.6667 (2r / 3). Figure 17 (key h). Limits: a thin part's narrow side (a strip between creases) is refined only by the gradation from the faces beside it; sizes are held on a grid per triangle, so a large triangle next to a thin part is sampled finely throughout; the field is sampled on the reference (generation and other references need their own).
-5. Input repair: self-intersections, holes, degenerate faces (non-manifold input is only split today).
+5. Input repair: holes, degenerate faces, near-duplicates, orientation (non-manifold input is only split today); self-intersections are farq's (decision 9).
 6. Scale: benchmarks past 10^6 elements, parallel field solves and local operations.
 7. Faster tests: a fast default per suite and a heavy tier apart (test 131 alone takes about 100 s).
 
@@ -833,7 +843,8 @@ Quality: scaled Jacobian and the Verdict metrics in the reports.
 6. **Attribute types.** `qaws_scalar` only (proposed), or integers and
    categorical types natively?
 7. **Non-manifold and dirty input.** Weld and split non-manifold vertices
-   (proposed); hole filling and self-intersection resolution: in or out?
+   (proposed); hole filling in, self-intersection resolution out (farq,
+   decision 9).
 8. **Exactness for volumes.** Exact predicates and indirect predicates
    (proposed), and the envelope mode with exact constructions (the
    rationals of the exact kernel)?
