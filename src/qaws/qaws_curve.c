@@ -1,3 +1,4 @@
+#include "qaws_alloc.h"
 #include "qaws_curve.h"
 #include "qaws_bezier.h"
 #include "qaws_hermite.h"
@@ -66,7 +67,7 @@ static qaws_status reverse_bezier(
 	desc.control_points = rev_cp;
 	desc.control_point_count = n;
 
-	status = qaws_curve_create_bezier(&desc, out_reversed);
+	status = qaws_curve_create_bezier_ex(&desc, curve->allocator, out_reversed);
 	free(rev_cp);
 	return status;
 }
@@ -115,7 +116,7 @@ static qaws_status reverse_hermite(
 	desc.point_count = n;
 	desc.derivative_count = n;
 
-	status = qaws_curve_create_hermite(&desc, out_reversed);
+	status = qaws_curve_create_hermite_ex(&desc, curve->allocator, out_reversed);
 	free(rev_pts);
 	free(rev_der);
 	return status;
@@ -155,7 +156,7 @@ static qaws_status reverse_catmull_rom(
 	desc.parameterization = impl->parameterization;
 	desc.closed = impl->closed;
 
-	status = qaws_curve_create_catmull_rom(&desc, out_reversed);
+	status = qaws_curve_create_catmull_rom_ex(&desc, curve->allocator, out_reversed);
 	free(rev_cp);
 	return status;
 }
@@ -210,7 +211,7 @@ static qaws_status reverse_bspline(
 	desc.is_uniform = 0;
 	desc.is_closed = 0;
 
-	status = qaws_curve_create_bspline(&desc, out_reversed);
+	status = qaws_curve_create_bspline_ex(&desc, curve->allocator, out_reversed);
 	free(rev_cp);
 	free(rev_knots);
 	return status;
@@ -279,7 +280,7 @@ static qaws_status reverse_nurbs(
 	desc.weight_count = wn;
 	desc.is_closed = 0;
 
-	status = qaws_curve_create_nurbs(&desc, out_reversed);
+	status = qaws_curve_create_nurbs_ex(&desc, curve->allocator, out_reversed);
 	free(rev_cp);
 	free(rev_knots);
 	free(rev_weights);
@@ -375,7 +376,7 @@ static qaws_status reverse_trajectory(
 	desc.key_acceleration_count = acc_n;
 	desc.closed = impl->closed;
 
-	status = qaws_curve_create_trajectory(&desc, out_reversed);
+	status = qaws_curve_create_trajectory_ex(&desc, curve->allocator, out_reversed);
 	free(rev_acc);
 	free(rev_vel);
 	free(rev_times);
@@ -423,7 +424,7 @@ static qaws_status reverse_yuksel(
 	desc.mode = (qaws_yuksel_mode)impl->mode;
 	desc.closed = impl->closed;
 
-	status = qaws_curve_create_yuksel(&desc, out_reversed);
+	status = qaws_curve_create_yuksel_ex(&desc, curve->allocator, out_reversed);
 	free(rev_cp);
 	return status;
 }
@@ -464,7 +465,7 @@ static qaws_status reverse_rational_bezier(
 	desc.weights = &buf[n * dim];
 	desc.weight_count = n;
 
-	status = qaws_curve_create_rational_bezier(&desc, out_reversed);
+	status = qaws_curve_create_rational_bezier_ex(&desc, curve->allocator, out_reversed);
 	free(buf);
 	return status;
 }
@@ -505,7 +506,7 @@ static qaws_status reverse_polynomial(
 	desc.t_min = curve->parameter_range.min_value;
 	desc.t_max = curve->parameter_range.max_value;
 
-	status = qaws_curve_create_polynomial(&desc, out_reversed);
+	status = qaws_curve_create_polynomial_ex(&desc, curve->allocator, out_reversed);
 	free(co);
 	return status;
 }
@@ -536,7 +537,7 @@ static qaws_status reverse_arc(
 	desc.segments = seg;
 	desc.segment_count = n;
 
-	status = qaws_curve_create_arc(&desc, out_reversed);
+	status = qaws_curve_create_arc_ex(&desc, curve->allocator, out_reversed);
 	free(seg);
 	return status;
 }
@@ -564,7 +565,7 @@ static qaws_status reverse_clothoid(
 	desc.end_curvature = -impl->kappa_0;
 	desc.length = L;
 
-	return qaws_curve_create_clothoid(&desc, out_reversed);
+	return qaws_curve_create_clothoid_ex(&desc, curve->allocator, out_reversed);
 }
 
 static qaws_status reverse_composite(
@@ -593,7 +594,7 @@ static qaws_status reverse_composite(
 		desc.dimension = curve->dimension;
 		desc.segments = seg;
 		desc.segment_count = n;
-		status = qaws_curve_create_composite(&desc, out_reversed);
+		status = qaws_curve_create_composite_ex(&desc, curve->allocator, out_reversed);
 	}
 	if (status != QAWS_STATUS_OK)
 		for (i = 0; i < made; i++)

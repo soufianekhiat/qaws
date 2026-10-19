@@ -124,5 +124,6 @@ own tool, `examples/repulsive_gpu_parity.c`.
   subdivision, composite). Hermite, Catmull-Rom and polynomial curves have
   views; owned objects are not rebuilt on views (their parity is tested).
 - **The allocator through the other entry points.** Every curve and surface
-  constructor takes one (test 146). Operations, sampling, traversal, batches
-  and repulsive do not yet.
+  constructor takes one, and curves derived from a source curve use its
+  allocator (test 146). Operation scratch, sampling, traversal, batches and
+  repulsive still use malloc.

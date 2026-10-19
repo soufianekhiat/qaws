@@ -17,6 +17,7 @@
  * t0 > t1 returns the piece reversed.
  */
 
+#include "qaws_alloc.h"
 #include "qaws_operations.h"
 #include "qaws_curve.h"
 #include "qaws_eval.h"
@@ -130,7 +131,7 @@ static qaws_status ex_bezier(qaws_curve const* c, qaws_scalar t0, qaws_scalar t1
 	d.degree = c->degree;
 	d.control_points = cp;
 	d.control_point_count = n;
-	s = qaws_curve_create_bezier(&d, out);
+	s = qaws_curve_create_bezier_ex(&d, c->allocator, out);
 	free(cp);
 	return s;
 }
@@ -166,7 +167,7 @@ static qaws_status ex_rational_bezier(qaws_curve const* c, qaws_scalar t0, qaws_
 	d.control_point_count = n;
 	d.weights = w;
 	d.weight_count = n;
-	s = qaws_curve_create_rational_bezier(&d, out);
+	s = qaws_curve_create_rational_bezier_ex(&d, c->allocator, out);
 	free(hp);
 	return s;
 }
@@ -348,7 +349,7 @@ static qaws_status ex_spline_kind(qaws_curve const* c, qaws_scalar t0, qaws_scal
 		d.knot_count = res.knot_count;
 		d.weights = w;
 		d.weight_count = res.cp_count;
-		s = qaws_curve_create_nurbs(&d, out);
+		s = qaws_curve_create_nurbs_ex(&d, c->allocator, out);
 		free(cp);
 	}
 	else
@@ -361,7 +362,7 @@ static qaws_status ex_spline_kind(qaws_curve const* c, qaws_scalar t0, qaws_scal
 		d.control_point_count = res.cp_count;
 		d.knots = res.knots;
 		d.knot_count = res.knot_count;
-		s = qaws_curve_create_bspline(&d, out);
+		s = qaws_curve_create_bspline_ex(&d, c->allocator, out);
 	}
 	free(res.cp); free(res.knots);
 	return s;
@@ -479,7 +480,7 @@ static qaws_status ex_cubics_curve(qaws_curve const* c, ex_cubics* q, qaws_curve
 		d.degree = 3;
 		d.control_points = cp;
 		d.control_point_count = 4;
-		s = qaws_curve_create_bezier(&d, out);
+		s = qaws_curve_create_bezier_ex(&d, c->allocator, out);
 	}
 	else
 	{
@@ -497,7 +498,7 @@ static qaws_status ex_cubics_curve(qaws_curve const* c, ex_cubics* q, qaws_curve
 		d.control_point_count = n;
 		d.knots = knots;
 		d.knot_count = kc;
-		s = qaws_curve_create_bspline(&d, out);
+		s = qaws_curve_create_bspline_ex(&d, c->allocator, out);
 	}
 	free(cp);
 	return s;
@@ -568,7 +569,7 @@ static qaws_status ex_polynomial(qaws_curve const* c, qaws_scalar t0, qaws_scala
 	d.coefficient_count = impl->coefficient_count;
 	d.t_min = t0;
 	d.t_max = t1;
-	return qaws_curve_create_polynomial(&d, out);
+	return qaws_curve_create_polynomial_ex(&d, c->allocator, out);
 }
 
 static qaws_status ex_arc(qaws_curve const* c, qaws_scalar t0, qaws_scalar t1, qaws_curve** out)
@@ -599,7 +600,7 @@ static qaws_status ex_arc(qaws_curve const* c, qaws_scalar t0, qaws_scalar t1, q
 	d.dimension = c->dimension;
 	d.segments = seg;
 	d.segment_count = n;
-	st = n ? qaws_curve_create_arc(&d, out) : QAWS_STATUS_INVALID_ARGUMENT;
+	st = n ? qaws_curve_create_arc_ex(&d, c->allocator, out) : QAWS_STATUS_INVALID_ARGUMENT;
 	free(seg);
 	return st;
 }
@@ -618,7 +619,7 @@ static qaws_status ex_clothoid(qaws_curve const* c, qaws_scalar t0, qaws_scalar 
 	d.start_curvature = impl->kappa_0 + impl->rate * t0;
 	d.end_curvature = impl->kappa_0 + impl->rate * t1;
 	d.length = t1 - t0;
-	return qaws_curve_create_clothoid(&d, out);
+	return qaws_curve_create_clothoid_ex(&d, c->allocator, out);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -666,7 +667,7 @@ static qaws_status ex_composite(qaws_curve const* c, qaws_scalar t0, qaws_scalar
 	d.dimension = c->dimension;
 	d.segments = parts;
 	d.segment_count = n;
-	st = qaws_curve_create_composite(&d, out);
+	st = qaws_curve_create_composite_ex(&d, c->allocator, out);
 	if (st != QAWS_STATUS_OK)
 		for (i = 0; i < n; i++) qaws_curve_destroy(parts[i]);
 	free(parts);

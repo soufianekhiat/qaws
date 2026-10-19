@@ -1,3 +1,4 @@
+#include "qaws_alloc.h"
 #include "qaws_inspect.h"
 #include "qaws_eval.h"
 #include "qaws_surface.h"
@@ -4085,7 +4086,7 @@ qaws_status qaws_surface_project_curve(
 	if (n_cp < 6) n_cp = 6;
 	if (n_cp > n_samples) n_cp = n_samples;
 
-	status = qaws_internal_fit_bspline(
+	status = qaws_internal_fit_bspline_ex(curve->allocator, 
 		QAWS_DIMENSION_2D, 3,
 		params, uv_coords,
 		n_samples, n_cp,

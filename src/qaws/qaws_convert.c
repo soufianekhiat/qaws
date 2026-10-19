@@ -1,3 +1,4 @@
+#include "qaws_alloc.h"
 #include "qaws_convert.h"
 #include "qaws_bezier.h"
 #include "qaws_hermite.h"
@@ -67,7 +68,7 @@ qaws_status qaws_curve_convert_hermite_to_bezier(
 	desc.control_points = cp;
 	desc.control_point_count = 4;
 
-	status = qaws_curve_create_bezier(&desc, out_bezier);
+	status = qaws_curve_create_bezier_ex(&desc, curve->allocator, out_bezier);
 	free(cp);
 	return status;
 }
@@ -142,7 +143,7 @@ qaws_status qaws_curve_convert_catmull_rom_to_bezier(
 	desc.control_points = cp;
 	desc.control_point_count = 4;
 
-	status = qaws_curve_create_bezier(&desc, out_bezier);
+	status = qaws_curve_create_bezier_ex(&desc, curve->allocator, out_bezier);
 	free(cp);
 	return status;
 }
@@ -195,7 +196,7 @@ qaws_status qaws_curve_convert_bezier_to_bspline(
 	desc.is_uniform = 0;
 	desc.is_closed = 0;
 
-	status = qaws_curve_create_bspline(&desc, out_bspline);
+	status = qaws_curve_create_bspline_ex(&desc, curve->allocator, out_bspline);
 	free(knots);
 	return status;
 }
@@ -245,7 +246,7 @@ qaws_status qaws_curve_convert_bspline_to_nurbs(
 	desc.weight_count = cp_count;
 	desc.is_closed = 0;
 
-	status = qaws_curve_create_nurbs(&desc, out_nurbs);
+	status = qaws_curve_create_nurbs_ex(&desc, curve->allocator, out_nurbs);
 	free(weights);
 	return status;
 }
@@ -311,7 +312,7 @@ qaws_status qaws_curve_elevate_degree(
 	desc.control_points = new_cp;
 	desc.control_point_count = new_count;
 
-	status = qaws_curve_create_bezier(&desc, out_elevated);
+	status = qaws_curve_create_bezier_ex(&desc, curve->allocator, out_elevated);
 	free(new_cp);
 	return status;
 }
@@ -463,7 +464,7 @@ qaws_status qaws_curve_reduce_degree(
 		desc.degree = m;
 		desc.control_points = new_cp;
 		desc.control_point_count = new_count;
-		status = qaws_curve_create_bezier(&desc, out_reduced);
+		status = qaws_curve_create_bezier_ex(&desc, curve->allocator, out_reduced);
 		free(new_cp);
 		return status;
 	}
@@ -592,7 +593,7 @@ qaws_status qaws_curve_reduce_degree(
 	desc.control_points = new_cp;
 	desc.control_point_count = new_count;
 
-	status = qaws_curve_create_bezier(&desc, out_reduced);
+	status = qaws_curve_create_bezier_ex(&desc, curve->allocator, out_reduced);
 	free(new_cp);
 	return status;
 }

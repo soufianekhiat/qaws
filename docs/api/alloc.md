@@ -254,3 +254,21 @@ allocator that is safe across threads. Trimmed surfaces test containment
 without allocating.
 
 Test 146 covers all of these with an allocator failing at each allocation.
+
+---
+
+## Derived curves
+
+An operation that makes curves from a source curve gives its results the
+source curve's allocator: reverse, extract, split, join, conversion, degree
+elevation and reduction, merging a chain (the first curve's allocator),
+transforms, and the arc-length and length-matched wrappers. With a host
+allocator on the source, everything derived from it lives in that
+allocator, and is destroyed with `qaws_curve_destroy` as usual.
+
+Two kinds of curve keep the default allocator for now: curves built from
+raw arrays (polyline and offset outputs, clipping, skeletons, stacks blending
+several curves), and the scratch an operation frees before it returns.
+Test 146 checks reverse, extract, split, degree elevation, B-spline to
+NURBS, and both wrappers. It injects a failure at each allocation and
+checks that the results are counted in the source's allocator.

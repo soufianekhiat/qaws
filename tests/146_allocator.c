@@ -532,6 +532,83 @@ static void test_surface_constructors(void)
 	al_inputs_free(&in);
 }
 
+/* derived curves: an operation's results come from its source curve's allocator */
+static qaws_status al_derive(unsigned int c, qaws_curve const* src, qaws_curve const* src2, qaws_curve const* bez, qaws_curve** a,
+	qaws_curve** b)
+{
+	switch (c)
+	{
+	case 0: return qaws_curve_reverse(src, a);
+	case 1: return qaws_curve_extract(src, (qaws_scalar)0.4, (qaws_scalar)2.1, a);
+	case 2: return qaws_curve_split(src, (qaws_scalar)1.3, a, b);
+	case 3: return qaws_curve_elevate_degree(bez, a);
+	case 4: return qaws_curve_convert_bspline_to_nurbs(src, a);
+	case 5: return qaws_curve_reparameterize_arc_length(src, 64, a);
+	default: return qaws_curve_match_arc_length(src2, src, 64, a);
+	}
+}
+
+static void test_derived(void)
+{
+	static char const* const names[7] = { "reverse", "extract", "split", "degree elevation", "B-spline to NURBS", "arc-length curve",
+		"length-matched curve" };
+	char report[1024] = "";
+	al_state s;
+	qaws_allocator al;
+	qaws_curve *src = NULL, *src2 = NULL, *bez = NULL;
+	unsigned int c, bad = 0;
+	int base;
+	al.alloc = al_alloc;
+	al.dealloc = al_dealloc;
+	al.user_data = &s;
+	s.calls = 0;
+	s.fail_at = -1;
+	s.live = 0;
+	if (al_curve(3, &al, &src) != QAWS_STATUS_OK || al_curve(0, NULL, &src2) != QAWS_STATUS_OK || al_curve(0, &al, &bez) != QAWS_STATUS_OK)
+	{
+		TEST_ASSERT(0, "derived: sources made");
+		qaws_curve_destroy(src);
+		qaws_curve_destroy(src2);
+		qaws_curve_destroy(bez);
+		return;
+	}
+	base = s.live;
+	for (c = 0; c < 7; c++)
+	{
+		int k, ok = 0, wrong = 0, leaks = 0, counted = 1;
+		for (k = 0; k < 256 && !ok; k++)
+		{
+			qaws_curve *a = NULL, *b = NULL;
+			qaws_status st;
+			s.calls = 0;
+			s.fail_at = k;
+			st = al_derive(c, src, src2, bez, &a, &b);
+			if (st == QAWS_STATUS_OK)
+			{
+				ok = k + 1;
+				counted = s.live > base;      /* the results live in the source's allocator */
+				qaws_curve_destroy(a);
+				qaws_curve_destroy(b);
+			}
+			else
+				wrong += st != QAWS_STATUS_ALLOCATION_FAILURE || a || b;
+			leaks += s.live != base;
+		}
+		if (!ok || wrong || leaks || !counted)
+		{
+			bad++;
+			sprintf(report + strlen(report), " %s (succeeded %d, wrong %d, leaks %d, results in the allocator %d);", names[c], ok, wrong, leaks, counted);
+		}
+	}
+	s.fail_at = -1;
+	qaws_curve_destroy(src);
+	qaws_curve_destroy(src2);
+	qaws_curve_destroy(bez);
+	TEST_ASSERT(bad == 0 && s.live == 0, bad ? report : "derived curves in the source's allocator; failures reported, nothing left");
+	if (bad)
+		printf("  %s\n", report);
+}
+
 int test_146_allocator_main(void)
 {
 	g_pass = 0;
@@ -539,6 +616,7 @@ int test_146_allocator_main(void)
 	printf("Test 146: the allocator through every constructor\n");
 	test_constructors();
 	test_surface_constructors();
+	test_derived();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
 }
