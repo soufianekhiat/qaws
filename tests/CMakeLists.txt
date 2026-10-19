@@ -148,6 +148,7 @@ add_executable(
 144_eval_consistency.c
 145_repulsive_control.c
 146_allocator.c
+147_frames.c
 )
 
 # The amalgamated library exports exactly the same symbols, so the tests can

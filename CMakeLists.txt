@@ -56,6 +56,7 @@ set(QAWS_SOURCES
   src/qaws/qaws_sampling.c
   src/qaws/qaws_traversal.c
   src/qaws/qaws_inspect.c
+  src/qaws/qaws_frames.c
   src/qaws/qaws_curve_batch.c
   src/qaws/qaws_view.c
   src/qaws/qaws_surface_batch.c

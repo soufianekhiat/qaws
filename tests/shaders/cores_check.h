@@ -15,6 +15,7 @@
 #include "../../src/qaws/core/qaws_nurbs_eval_core.h"
 #include "../../src/qaws/core/qaws_rational_bezier_core.h"
 #include "../../src/qaws/core/qaws_surface_core.h"
+#include "../../src/qaws/core/qaws_frame_core.h"
 
 #define QAWS_BUFFER_KNOT(i) input_data[i]
 #define QAWS_BUFFER_POINT(i) input_data[i]
@@ -110,5 +111,7 @@ qaws_scalar qaws_check_cores(qaws_scalar t)
     srec.reserved0 = 0; srec.reserved1 = 0; srec.reserved2 = 0;
     es = qaws_surface_record_eval(srec, t, t, 127);
     s += es.position.x + es.du.y + es.dv.z + es.normal.x + es.duu.y + es.duv.z + es.dvv.x;
+    a3 = qaws_double_reflection(a3, b3, a3, b3, a3);
+    s += a3.x + a3.y + a3.z;
     return s;
 }

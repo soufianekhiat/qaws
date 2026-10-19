@@ -83,6 +83,7 @@ evaluation.
 | B-spline surface | none | tested against the runtime (144) | run on a GPU, 1.9e-6 (eval_gpu_parity) | compiled | written; the normal block uses C `if` on expressions |
 | Curve records: B-spline and NURBS read from buffers, any length (`qaws_curve_record_core.h`) | none | tested against the runtime (144) | run on a GPU, 4.9e-7 (eval_gpu_parity) | compiled | absent |
 | Surface records: B-spline and NURBS surfaces read from buffers, any number of points (`qaws_surface_record_core.h`) | none | tested against the runtime (144) | run on a GPU, 7.6e-6 (eval_gpu_parity) | compiled | absent |
+| Rotation-minimizing frame step (double reflection, `qaws_frame_core.h`) | `qaws_curve_compute_rotation_minimizing_frames_3d` | tested (147: fourth order) | compiled | compiled | written; C `if` on expressions |
 | B-spline derivatives w.r.t. data | none | tested (57) | compiled (`diff_bspline_adjoint.hlsl`) | not checked | written |
 | B-spline sampling (CDF) | none | tested (60) | compiled (`diff_cdf_sampling.hlsl`) | not checked | written; C `if` on expressions |
 | Surface functionals | none | tested (61) | compiled (`diff_surface_functionals.hlsl`) | not checked | written |
@@ -108,8 +109,6 @@ own tool, `examples/repulsive_gpu_parity.c`.
   still needs the span when the pipeline is built.
 - **CPU and GPU comparison in a build step.** Both GPU tools run by hand on
   Windows only. GLSL is compiled, never run. Halide is never built.
-- **Parallel-transport frames.** The kernel is private to pipe surfaces.
-  Planned: a public kernel (double reflection) and a prepared frame table.
 - **Arc length and its inverse.** Two implementations disagree: a 5-point
   Gauss rule with a 256-entry table, and the CDF sampler. Planned: one
   error-controlled measure with a safeguarded Newton inverse.

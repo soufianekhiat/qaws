@@ -229,6 +229,38 @@ qaws_status qaws_curve_compute_frenet_frame_3d(
 
 Computes the Frenet frame (tangent, normal, binormal) at the given parameter for a 3D curve. Returns unit vectors forming an orthonormal basis.
 
+### qaws_curve_compute_rotation_minimizing_frames_3d
+
+```c
+qaws_status qaws_curve_compute_rotation_minimizing_frames_3d(
+    qaws_curve const* curve,
+    qaws_scalar const* parameters,
+    unsigned int count,
+    qaws_vec3 const* initial_normal,
+    qaws_scalar* out_frames);
+```
+
+Rotation-minimizing (parallel-transport, Bishop) frames at `count`
+non-decreasing parameters. `out_frames` gets 9 scalars per parameter: the
+unit tangent, the normal, then the binormal (tangent × normal). The frames
+suit sweeps, tubes and camera rails:
+
+- They are defined where the Frenet frame is not: on straight pieces and
+  at inflections.
+- They do not twist about the curve.
+
+Each normal follows from the previous one by double reflection (Wang,
+Jüttler, Zheng and Liu 2008; the step is `qaws_double_reflection` in
+`core/qaws_frame_core.h`, which also compiles for HLSL and GLSL). The error
+is fourth order in the parameter step: halving the step divides it by about
+16 (test 147).
+
+The first normal is `initial_normal` made perpendicular to the tangent. With
+NULL, or a normal along the tangent, the frame picks a perpendicular from
+the tangent alone. A closed curve's frame need not close: the gap is its
+holonomy. The function allocates nothing. It returns
+`QAWS_STATUS_DEGENERATE_CURVE` where the curve's speed vanishes.
+
 ---
 
 ## Inflection point detection

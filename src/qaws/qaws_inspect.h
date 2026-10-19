@@ -94,6 +94,19 @@ qaws_status qaws_curve_compute_frenet_frame_3d(
 	qaws_vec3* out_normal,
 	qaws_vec3* out_binormal);
 
+/* Rotation-minimizing (parallel-transport, Bishop) frames at count non-decreasing parameters: out_frames[9 i ..] = the unit tangent,
+   the normal and the binormal (tangent x normal), row i for parameters[i]. Defined where the Frenet frame is not (straight pieces,
+   inflections) and free of its twist: each normal follows from the previous by double reflection (core/qaws_frame_core.h; Wang et
+   al. 2008), fourth-order accurate in the parameter step (test 147: halving the step divides the error by 16). The first normal is
+   initial_normal made perpendicular to the tangent (NULL, or parallel to it: a perpendicular chosen from the tangent alone). A
+   closed curve's frame need not close (its holonomy). QAWS_STATUS_DEGENERATE_CURVE where the speed vanishes. No allocation. */
+qaws_status qaws_curve_compute_rotation_minimizing_frames_3d(
+	qaws_curve const* curve,
+	qaws_scalar const* parameters,
+	unsigned int count,
+	qaws_vec3 const* initial_normal,
+	qaws_scalar* out_frames);
+
 /* Inflection point detection */
 qaws_status qaws_curve_find_inflection_points(
 	qaws_curve const* curve,
