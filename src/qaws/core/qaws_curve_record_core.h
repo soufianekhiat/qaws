@@ -41,6 +41,31 @@ QAWS_STRUCT(qaws_curve_record) {
 
 /* the knot span of t in [knot[degree], knot[count]] of the knots at knot_offset in the knot buffer: knot[span] <= t < knot[span + 1],
    the last non-empty span at the end */
+#if QAWS_BACKEND == QAWS_BACKEND_HALIDE
+/* Halide: the same search unrolled into selects, an Expr evaluated per element (offsets and count may be Exprs too); as many
+   halvings as a constant count needs, else QAWS_RECORD_SEARCH_STEPS */
+QAWS_INLINE qaws_index qaws_buffer_find_span(Halide::Expr knot_offset, int degree, Halide::Expr count, qaws_scalar t)
+{
+    Halide::Expr lo = degree, hi = count, end = QAWS_BUFFER_KNOT(knot_offset + count), last = count - 1;
+    auto n = Halide::Internal::as_const_int(count);   /* (a pointer or an optional, by Halide version) */
+    int steps = QAWS_RECORD_SEARCH_STEPS, it;
+    if (n) {
+        steps = 1;
+        while (steps < QAWS_RECORD_SEARCH_STEPS && ((int64_t)1 << steps) < *n - degree + 1)
+            steps++;
+    }
+    /* invariant knot[lo] <= t < knot[hi] */
+    for (it = 0; it < steps; it++) {
+        Halide::Expr mid = (lo + hi) / 2, go = hi - lo > 1, below = t < QAWS_BUFFER_KNOT(knot_offset + mid);
+        hi = Halide::select(go && below, mid, hi);
+        lo = Halide::select(go && !below, mid, lo);
+    }
+    /* a knot repeated at the end leaves empty spans before it (at most degree of them) */
+    for (it = 0; it < degree; it++)
+        last = Halide::select(last > degree && QAWS_BUFFER_KNOT(knot_offset + last) >= end, last - 1, last);
+    return Halide::select(t >= end, last, lo);
+}
+#else
 QAWS_INLINE int qaws_buffer_find_span(int knot_offset, int degree, int count, qaws_scalar t)
 {
     int lo = degree;
@@ -66,8 +91,9 @@ QAWS_INLINE int qaws_buffer_find_span(int knot_offset, int degree, int count, qa
     }
     return lo;
 }
+#endif
 
-QAWS_INLINE int qaws_record_find_span(qaws_curve_record r, qaws_scalar t)
+QAWS_INLINE qaws_index qaws_record_find_span(qaws_curve_record r, qaws_scalar t)
 {
     return qaws_buffer_find_span(r.knot_offset, r.degree, r.count, t);
 }
@@ -82,15 +108,20 @@ QAWS_INLINE qaws_eval_3d qaws_record_eval_3d(qaws_curve_record r, qaws_scalar t,
     qaws_scalar W[3];
     qaws_scalar t0, t1, inv;
     int d = r.degree;
-    int span, j, k, c, max_deriv = 0;
+    qaws_index span;
+    int j, k, c, max_deriv = 0;
     qaws_eval_3d result;
 
     t0 = QAWS_BUFFER_KNOT(r.knot_offset + d);
     t1 = QAWS_BUFFER_KNOT(r.knot_offset + r.count);
     t = qaws_clamp(t, t0, t1);
     span = qaws_record_find_span(r, t);
-    for (j = 0; j < QAWS_CORE_MAX_POINTS * 2; j++)
-        lk[j] = j < 2 * (d + 1) ? QAWS_BUFFER_KNOT(r.knot_offset + span - d + j) : QAWS_ZERO;
+    for (j = 0; j < QAWS_CORE_MAX_POINTS * 2; j++) {
+        if (j < 2 * (d + 1))
+            lk[j] = QAWS_BUFFER_KNOT(r.knot_offset + span - d + j);
+        else
+            lk[j] = QAWS_ZERO;
+    }
     if ((eval_flags & 0x4) != 0) max_deriv = 2;
     else if ((eval_flags & 0x2) != 0) max_deriv = 1;
     if (max_deriv > d) max_deriv = d;
@@ -99,11 +130,15 @@ QAWS_INLINE qaws_eval_3d qaws_record_eval_3d(qaws_curve_record r, qaws_scalar t,
     for (k = 0; k < 9; k++) A[k] = QAWS_ZERO;
     for (k = 0; k < 3; k++) W[k] = QAWS_ZERO;
     for (j = 0; j <= d; j++) {
-        int idx = span - d + j;
+        qaws_index idx = span - d + j;
         qaws_scalar x[3];
         qaws_scalar w = QAWS_ONE;
-        for (c = 0; c < 3; c++)
-            x[c] = c < r.dimension ? QAWS_BUFFER_POINT(r.point_offset + idx * r.dimension + c) : QAWS_ZERO;
+        for (c = 0; c < 3; c++) {
+            if (c < r.dimension)
+                x[c] = QAWS_BUFFER_POINT(r.point_offset + idx * r.dimension + c);
+            else
+                x[c] = QAWS_ZERO;
+        }
         if (r.rational != 0)
             w = QAWS_BUFFER_WEIGHT(r.weight_offset + idx);
         for (k = 0; k <= max_deriv; k++) {

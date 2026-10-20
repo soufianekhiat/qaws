@@ -315,15 +315,10 @@ QAWS_INLINE qaws_surface_eval_3d qaws_surface_bezier_eval_3d(
         ny = result.du.z * result.dv.x - result.du.x * result.dv.z;
         nz = result.du.x * result.dv.y - result.du.y * result.dv.x;
         len = QAWS_SQRT(nx * nx + ny * ny + nz * nz);
-        if (len > QAWS_LITERAL(1e-12)) {
-            result.normal.x = nx / len;
-            result.normal.y = ny / len;
-            result.normal.z = nz / len;
-        } else {
-            result.normal.x = QAWS_ZERO;
-            result.normal.y = QAWS_ZERO;
-            result.normal.z = QAWS_ONE;
-        }
+        /* (a select, not a branch: Halide decides it per element) */
+        result.normal.x = QAWS_SELECT(len > QAWS_LITERAL(1e-12), nx / len, QAWS_ZERO);
+        result.normal.y = QAWS_SELECT(len > QAWS_LITERAL(1e-12), ny / len, QAWS_ZERO);
+        result.normal.z = QAWS_SELECT(len > QAWS_LITERAL(1e-12), nz / len, QAWS_ONE);
     }
 
     return result;
@@ -474,15 +469,10 @@ QAWS_INLINE qaws_surface_eval_3d qaws_surface_bspline_eval_3d(
         ny = result.du.z * result.dv.x - result.du.x * result.dv.z;
         nz = result.du.x * result.dv.y - result.du.y * result.dv.x;
         len = QAWS_SQRT(nx * nx + ny * ny + nz * nz);
-        if (len > QAWS_LITERAL(1e-12)) {
-            result.normal.x = nx / len;
-            result.normal.y = ny / len;
-            result.normal.z = nz / len;
-        } else {
-            result.normal.x = QAWS_ZERO;
-            result.normal.y = QAWS_ZERO;
-            result.normal.z = QAWS_ONE;
-        }
+        /* (a select, not a branch: Halide decides it per element) */
+        result.normal.x = QAWS_SELECT(len > QAWS_LITERAL(1e-12), nx / len, QAWS_ZERO);
+        result.normal.y = QAWS_SELECT(len > QAWS_LITERAL(1e-12), ny / len, QAWS_ZERO);
+        result.normal.z = QAWS_SELECT(len > QAWS_LITERAL(1e-12), nz / len, QAWS_ONE);
     }
 
     return result;

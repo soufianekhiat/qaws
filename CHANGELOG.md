@@ -40,6 +40,11 @@ All notable changes to Qaws are documented here.
 - `.github/workflows/permutations.yml` builds every combination of OS, scalar
   type, SIMD, and translation-unit layout, and compiles the amalgamation
   standalone on all three platforms.
+- Halide evaluates the curve and surface records (`qaws_curve_record_core.h`,
+  `qaws_surface_record_core.h`) with the knot span found at run time, an
+  `Expr` per element; `qaws_index` (an `int`, an `Expr` in Halide) for the
+  indices the data decide. `examples/eval_record_halide.cpp` checks them
+  against the C cores by hand (1.5e-15 relative).
 
 ### Changed
 

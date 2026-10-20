@@ -66,6 +66,7 @@
           : Halide::Expr(Halide::Internal::make_const(
                 Halide::Float(QAWS_HALIDE_FLOAT_BITS), v)) {}
       qaws_halide_scalar(const Halide::Expr& e) : Halide::Expr(e) {}
+      qaws_halide_scalar(const Halide::FuncRef& f) : Halide::Expr(f) {}   /* a buffer's element */
   };
   typedef qaws_halide_scalar qaws_scalar;
 #endif
@@ -83,6 +84,14 @@
 #else
 # define QAWS_ITOF(n) ((qaws_scalar)(n))
 # define QAWS_FTOI(x) ((int)(x))
+#endif
+
+/* an index the data decide (a knot span, the window it starts): an int, and in Halide an Expr evaluated per element at
+   run time */
+#if QAWS_BACKEND == QAWS_BACKEND_HALIDE
+# define qaws_index Halide::Expr
+#else
+# define qaws_index int
 #endif
 
 /* ===================================================================

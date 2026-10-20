@@ -45,7 +45,8 @@ QAWS_INLINE qaws_surface_eval_3d qaws_surface_record_eval(qaws_surface_record r,
     qaws_scalar inv, len;
     int ud = r.u_degree;
     int vd = r.v_degree;
-    int us, vs, i, j, ku, kv, c, k, mu = 0, mv = 0, bu, bv;
+    qaws_index us, vs;
+    int i, j, ku, kv, c, k, mu = 0, mv = 0, bu, bv;
     qaws_vec3 n;
     qaws_surface_eval_3d result;
 
@@ -54,8 +55,14 @@ QAWS_INLINE qaws_surface_eval_3d qaws_surface_record_eval(qaws_surface_record r,
     us = qaws_buffer_find_span(r.u_knot_offset, ud, r.u_count, u);
     vs = qaws_buffer_find_span(r.v_knot_offset, vd, r.v_count, v);
     for (j = 0; j < QAWS_CORE_MAX_POINTS * 2; j++) {
-        lku[j] = j < 2 * (ud + 1) ? QAWS_BUFFER_KNOT(r.u_knot_offset + us - ud + j) : QAWS_ZERO;
-        lkv[j] = j < 2 * (vd + 1) ? QAWS_BUFFER_KNOT(r.v_knot_offset + vs - vd + j) : QAWS_ZERO;
+        if (j < 2 * (ud + 1))
+            lku[j] = QAWS_BUFFER_KNOT(r.u_knot_offset + us - ud + j);
+        else
+            lku[j] = QAWS_ZERO;
+        if (j < 2 * (vd + 1))
+            lkv[j] = QAWS_BUFFER_KNOT(r.v_knot_offset + vs - vd + j);
+        else
+            lkv[j] = QAWS_ZERO;
     }
     if ((eval_flags & (QAWS_SURFACE_CORE_DU | QAWS_SURFACE_CORE_DUV | QAWS_SURFACE_CORE_NORMAL)) != 0) mu = 1;
     if ((eval_flags & QAWS_SURFACE_CORE_DUU) != 0) mu = 2;
@@ -70,7 +77,7 @@ QAWS_INLINE qaws_surface_eval_3d qaws_surface_record_eval(qaws_surface_record r,
     for (k = 0; k < 9; k++) W[k] = QAWS_ZERO;
     for (i = 0; i <= ud; i++) {
         for (j = 0; j <= vd; j++) {
-            int idx = (us - ud + i) * r.v_count + (vs - vd + j);
+            qaws_index idx = (us - ud + i) * r.v_count + (vs - vd + j);
             qaws_scalar x[3];
             qaws_scalar w = QAWS_ONE;
             for (c = 0; c < 3; c++)
@@ -114,11 +121,10 @@ QAWS_INLINE qaws_surface_eval_3d qaws_surface_record_eval(qaws_surface_record r,
     n.y = result.du.z * result.dv.x - result.du.x * result.dv.z;
     n.z = result.du.x * result.dv.y - result.du.y * result.dv.x;
     len = QAWS_SQRT(n.x * n.x + n.y * n.y + n.z * n.z);
-    if (len > QAWS_LITERAL(1e-12)) {
-        result.normal.x = n.x / len; result.normal.y = n.y / len; result.normal.z = n.z / len;
-    } else {
-        result.normal.x = QAWS_ZERO; result.normal.y = QAWS_ZERO; result.normal.z = QAWS_ONE;
-    }
+    /* (a select, not a branch: Halide decides it per element) */
+    result.normal.x = QAWS_SELECT(len > QAWS_LITERAL(1e-12), n.x / len, QAWS_ZERO);
+    result.normal.y = QAWS_SELECT(len > QAWS_LITERAL(1e-12), n.y / len, QAWS_ZERO);
+    result.normal.z = QAWS_SELECT(len > QAWS_LITERAL(1e-12), n.z / len, QAWS_ONE);
     return result;
 }
 

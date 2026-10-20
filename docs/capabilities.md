@@ -98,9 +98,9 @@ evaluation.
 | B-spline span and evaluation | none | tested against the runtime (144) | run on a GPU, 7.4e-7 (eval_gpu_parity) | compiled | written; needs the span at pipeline-build time |
 | NURBS evaluation | none | tested against the runtime (144) | run on a GPU, 2.1e-6 (eval_gpu_parity) | compiled | written; same span limit |
 | Bezier surface | none | tested against the runtime (144) | run on a GPU, 2.2e-6 (eval_gpu_parity) | compiled | written |
-| B-spline surface | none | tested against the runtime (144) | run on a GPU, 1.9e-6 (eval_gpu_parity) | compiled | written; the normal block uses C `if` on expressions |
-| Curve records: B-spline and NURBS read from buffers, any length (`qaws_curve_record_core.h`) | none | tested against the runtime (144) | run on a GPU, 4.9e-7 (eval_gpu_parity) | compiled | absent |
-| Surface records: B-spline and NURBS surfaces read from buffers, any number of points (`qaws_surface_record_core.h`) | none | tested against the runtime (144) | run on a GPU, 7.6e-6 (eval_gpu_parity) | compiled | absent |
+| B-spline surface | none | tested against the runtime (144) | run on a GPU, 1.9e-6 (eval_gpu_parity) | compiled | compiled (the normal by selects) |
+| Curve records: B-spline and NURBS read from buffers, any length (`qaws_curve_record_core.h`) | none | tested against the runtime (144) | run on a GPU, 4.9e-7 (eval_gpu_parity) | compiled | run by Halide's JIT against the C core, 1.1e-15 (`examples/eval_record_halide.cpp`, by hand): the span an `Expr` per element |
+| Surface records: B-spline and NURBS surfaces read from buffers, any number of points (`qaws_surface_record_core.h`) | none | tested against the runtime (144) | run on a GPU, 7.6e-6 (eval_gpu_parity) | compiled | run by Halide's JIT against the C core, 1.5e-15, normals included (`examples/eval_record_halide.cpp`, by hand) |
 | Rotation-minimizing frame step (double reflection, `qaws_frame_core.h`) | `qaws_curve_compute_rotation_minimizing_frames_3d` | tested (147: fourth order) | compiled | compiled | written; C `if` on expressions |
 | B-spline derivatives w.r.t. data | none | tested (57) | compiled (`diff_bspline_adjoint.hlsl`) | not checked | written |
 | B-spline sampling (CDF) | none | tested (60) | compiled (`diff_cdf_sampling.hlsl`) | not checked | written; C `if` on expressions |
@@ -154,12 +154,9 @@ Every allocation follows `docs/api/alloc.md`: from the `_ex` argument, else the 
 
 ## Missing
 
-- **Halide spans at run time.** Curves and surfaces read from buffers have a
-  shader interface (`qaws_curve_record`, `qaws_surface_record`): a bounded
-  span search on the knot buffers, and only the de Boor window loaded. Halide
-  still needs the span when the pipeline is built.
 - **CPU and GPU comparison in a build step.** Both GPU tools run by hand on
-  Windows only. GLSL is compiled, never run. Halide is never built.
+  Windows only. GLSL is compiled, never run. Halide runs the records by hand
+  (`examples/eval_record_halide.cpp`); its other cores are never built.
 - **Certified closest point on the other families.** Curves other than
   Bezier, rational Bezier, B-spline, NURBS and borrowed splines keep
   sampling with Newton. Surfaces other than Bezier, B-spline, NURBS and

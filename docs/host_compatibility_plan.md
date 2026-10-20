@@ -370,7 +370,6 @@ checks stay manual.
 | Single-precision tests | 140, 142, 145, 147 to 153 pass with `QAWS_SCALAR_IS_FLOAT`; bounds per precision from rounding (TEST_EPS) or measured truncation, double bounds unchanged | this branch |
 | Arc, trajectory, Yuksel and subdivision views | done (`QAWS_VIEW_ARC`, `_TRAJECTORY`, `_YUKSEL`, `_SUBDIVISION`; span data rebuilt per evaluation, subdivision from the window of control points a span depends on, no refined polygon kept); bit for bit the owned curves, 2D and 3D, open and closed. Composites borrow through borrowed children; clothoids hold no arrays; owned objects are not rebuilt on views | this branch (142) |
 | Repulsive: settings, allocator, derivative report, mesh VJP | line search (`armijo`, `backtrack`, `max_trials`) and GMRES limits (`gmres_max_iterations`, `_restart`, `_tolerance`, hierarchical and derivatives) in both solve descs, zero = bit for bit as before, out of range refused; `_ex` creators for curves, meshes, control points and the four solvers, every call on such an object under its allocator, none from the thread allocator, nothing left in a scratch arena; `qaws_repulsive_derivative_report` and the `_checked` JVP/VJP (residual, iterations, converged, a lower bound of the preconditioned KKT operator's condition, gauge); the mesh VJP's adjoint identity and the JVP against re-solves (`docs/api/repulsive.md`) | this branch (145, 118) |
+| Halide spans at run time | the curve and surface records under Halide: the knot span an `Expr` per element (the bounded search unrolled into selects), the window gathered by it, the normal by selects (also in `qaws_surface_core.h`); `qaws_index` names an index the data decide; checked by hand against the C cores, 1.5e-15 (`examples/eval_record_halide.cpp`) | this branch |
 
-Remaining, in order:
-
-- Halide's runtime span (the buffer interface is done for HLSL and GLSL).
+Nothing remains of this plan.
