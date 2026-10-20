@@ -1,4 +1,17 @@
-#ifndef QAWS_MESH_REPAIR_H
+#include "qaws_platform.h"   /* (QAWS_SCALAR_IS_FLOAT: the precision this pass declares) */
+#if QAWS_SCALAR_IS_FLOAT
+#ifndef QAWS_MESH_REPAIR_H_F32
+#define QAWS_MESH_REPAIR_H_F32
+#define QAWS_MESH_REPAIR_H_BODY
+#endif
+#else
+#ifndef QAWS_MESH_REPAIR_H_F64
+#define QAWS_MESH_REPAIR_H_F64
+#define QAWS_MESH_REPAIR_H_BODY
+#endif
+#endif
+#ifdef QAWS_MESH_REPAIR_H_BODY
+#undef QAWS_MESH_REPAIR_H_BODY
 #define QAWS_MESH_REPAIR_H
 
 #include "qaws_mesh.h"
@@ -79,11 +92,14 @@
  * qaws_mesh_3d_get_vertex_source): the directed edges cancel again.
  */
 
+#ifndef QAWS_ENUM_QAWS_NESTED_SHELLS
+#define QAWS_ENUM_QAWS_NESTED_SHELLS
 typedef enum qaws_nested_shells
 {
 	QAWS_NESTED_SHELLS_KEEP = 0,        /* a part at an odd depth inside others turned inward: a cavity */
 	QAWS_NESTED_SHELLS_REMOVE           /* parts inside another closed part removed */
 } qaws_nested_shells;
+#endif
 
 #define QAWS_MESH_REPAIR_FLAT_FILLS 1u      /* fills refined, not faired */
 #define QAWS_MESH_REPAIR_COARSE_FILLS 2u    /* fills left as the minimal triangulation */

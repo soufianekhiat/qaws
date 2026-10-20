@@ -1,4 +1,17 @@
-#ifndef QAWS_HEXAHEDRALIZE_H
+#include "qaws_platform.h"   /* (QAWS_SCALAR_IS_FLOAT: the precision this pass declares) */
+#if QAWS_SCALAR_IS_FLOAT
+#ifndef QAWS_HEXAHEDRALIZE_H_F32
+#define QAWS_HEXAHEDRALIZE_H_F32
+#define QAWS_HEXAHEDRALIZE_H_BODY
+#endif
+#else
+#ifndef QAWS_HEXAHEDRALIZE_H_F64
+#define QAWS_HEXAHEDRALIZE_H_F64
+#define QAWS_HEXAHEDRALIZE_H_BODY
+#endif
+#endif
+#ifdef QAWS_HEXAHEDRALIZE_H_BODY
+#undef QAWS_HEXAHEDRALIZE_H_BODY
 #define QAWS_HEXAHEDRALIZE_H
 
 #include "qaws_volume_mesh.h"
@@ -42,12 +55,15 @@
  * quality, the result's border.
  */
 
+#ifndef QAWS_ENUM_QAWS_HEXAHEDRALIZE_METHOD
+#define QAWS_ENUM_QAWS_HEXAHEDRALIZE_METHOD
 typedef enum qaws_hexahedralize_method
 {
 	QAWS_HEXES_GRID = 0,
 	QAWS_HEXES_POLYCUBE,
 	QAWS_HEXES_FRAME_FIELD
 } qaws_hexahedralize_method;
+#endif
 
 typedef struct qaws_hexahedralize_desc
 {

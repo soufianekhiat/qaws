@@ -9,7 +9,6 @@
  */
 
 #include "qaws_internal_memory.h"
-#include "../qaws_alloc.h"
 #include <assert.h>
 #include <limits.h>
 #include <stdint.h>
@@ -24,6 +23,10 @@
 #include <sched.h>
 #define QAWS_THREAD_LOCAL _Thread_local
 #endif
+
+/* (precision-free, and the process's allocator state must exist once: defined by the f64 pass only, where the library
+   and a twice-compiled amalgamation both compile it once) */
+#if !QAWS_SCALAR_IS_FLOAT
 
 #define MEM_ALIGN ((size_t)QAWS_MEMORY_ALIGNMENT)
 #define MEM_ROUND(n) ((((n) + MEM_ALIGN - 1) / MEM_ALIGN) * MEM_ALIGN)
@@ -572,3 +575,39 @@ qaws_status qaws_arena_reset(qaws_arena* arena)
 	arena->generation++;
 	return QAWS_STATUS_OK;
 }
+
+/* allocator-aware helpers: an explicit allocator, else the current one */
+void* qaws_internal_alloc(size_t size, qaws_allocator const* allocator)
+{
+	return qaws_internal_alloc_from(size, allocator);
+}
+
+/* the block knows its allocator (qaws_internal_memory.h) */
+void qaws_internal_dealloc(void* ptr, qaws_allocator const* allocator)
+{
+	(void)allocator;
+	qaws_internal_free(ptr);
+}
+
+void* qaws_internal_scratch(void* stack, size_t stack_bytes, size_t bytes, qaws_allocator const* allocator)
+{
+	return bytes <= stack_bytes ? stack : qaws_internal_alloc(bytes, allocator);
+}
+
+void qaws_internal_scratch_release(void* stack, void* scratch, qaws_allocator const* allocator)
+{
+	if (scratch && scratch != stack)
+		qaws_internal_dealloc(scratch, allocator);
+}
+
+void* qaws_internal_calloc(size_t count, size_t size, qaws_allocator const* allocator)
+{
+	void* p;
+	if (size && count > (size_t)-1 / size)
+		return NULL;
+	p = qaws_internal_alloc(qaws_internal_mul2(count, size), allocator);
+	if (p)
+		memset(p, 0, count * size);
+	return p;
+}
+#endif /* !QAWS_SCALAR_IS_FLOAT */

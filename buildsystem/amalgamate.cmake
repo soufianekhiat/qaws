@@ -31,8 +31,9 @@ get_filename_component(QAWS_OUTPUT_DIR "${QAWS_OUTPUT_DIR}" ABSOLUTE)
 # include time and must not be pulled into the C amalgamation.
 set(_AM_EXCLUDED qaws_hlsl.h qaws_glsl.h qaws_halide.h)
 
-# An include line: optional blanks, #include "target", optional blanks, end of line.
-set(_AM_INCLUDE_RE "\n[ \t]*#[ \t]*include[ \t]*\"([^\"\n]+)\"[ \t]*\n")
+# An include line: optional blanks, #include "target", the rest of the line
+# (blanks or a comment).
+set(_AM_INCLUDE_RE "\n[ \t]*#[ \t]*include[ \t]*\"([^\"\n]+)\"[^\n]*\n")
 
 set_property(GLOBAL PROPERTY AM_SEEN "")
 set_property(GLOBAL PROPERTY AM_MISSING "")
@@ -138,8 +139,10 @@ function(_am_banner kind out_var)
  *
  * SIMD batch evaluation: ${simd}
  *
- * Define QAWS_SCALAR_IS_FLOAT=1 for float, 0 for double, before
- * including this file. It must match between qaws.h and qaws.c.
+ * Both precisions: compile qaws.c twice, with QAWS_SCALAR_IS_FLOAT=0 and
+ * with QAWS_SCALAR_IS_FLOAT=1 (every scalar-bearing name gets its _f64 or
+ * _f32 form). Including qaws.h declares the precision QAWS_SCALAR_IS_FLOAT
+ * selects (default 1); include it again under the other value for both.
  */
 " PARENT_SCOPE)
 endfunction()

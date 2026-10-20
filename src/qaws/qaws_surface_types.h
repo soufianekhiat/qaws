@@ -1,4 +1,17 @@
-#ifndef QAWS_SURFACE_TYPES_H
+#include "qaws_platform.h"   /* (QAWS_SCALAR_IS_FLOAT: the precision this pass declares) */
+#if QAWS_SCALAR_IS_FLOAT
+#ifndef QAWS_SURFACE_TYPES_H_F32
+#define QAWS_SURFACE_TYPES_H_F32
+#define QAWS_SURFACE_TYPES_H_BODY
+#endif
+#else
+#ifndef QAWS_SURFACE_TYPES_H_F64
+#define QAWS_SURFACE_TYPES_H_F64
+#define QAWS_SURFACE_TYPES_H_BODY
+#endif
+#endif
+#ifdef QAWS_SURFACE_TYPES_H_BODY
+#undef QAWS_SURFACE_TYPES_H_BODY
 #define QAWS_SURFACE_TYPES_H
 
 #include "qaws_types.h"
@@ -9,6 +22,8 @@
  * Multiple threads may concurrently evaluate or sample the same surface.
  */
 
+#ifndef QAWS_ENUM_QAWS_SURFACE_KIND
+#define QAWS_ENUM_QAWS_SURFACE_KIND
 typedef enum qaws_surface_kind
 {
 	QAWS_SURFACE_KIND_INVALID = 0,
@@ -32,7 +47,10 @@ typedef enum qaws_surface_kind
 	QAWS_SURFACE_KIND_FILLET,
 	QAWS_SURFACE_KIND_VIEW               /* borrowed: evaluated from host arrays it does not own (qaws_view.h) */
 } qaws_surface_kind;
+#endif
 
+#ifndef QAWS_ENUM_QAWS_SURFACE_EVAL_FLAGS
+#define QAWS_ENUM_QAWS_SURFACE_EVAL_FLAGS
 typedef enum qaws_surface_eval_flags
 {
 	QAWS_SURFACE_EVAL_NONE     = 0,
@@ -44,6 +62,7 @@ typedef enum qaws_surface_eval_flags
 	QAWS_SURFACE_EVAL_DUV      = 1 << 5,  /* mixed partial d^2/dudv */
 	QAWS_SURFACE_EVAL_DVV      = 1 << 6   /* second partial d^2/dv^2 */
 } qaws_surface_eval_flags;
+#endif
 
 typedef struct qaws_surface_eval_result
 {

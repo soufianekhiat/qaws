@@ -1,11 +1,24 @@
-#ifndef QAWS_H
+#include "qaws_platform.h"   /* (QAWS_SCALAR_IS_FLOAT: the precision this pass declares) */
+#if QAWS_SCALAR_IS_FLOAT
+#ifndef QAWS_H_F32
+#define QAWS_H_F32
+#define QAWS_H_BODY
+#endif
+#else
+#ifndef QAWS_H_F64
+#define QAWS_H_F64
+#define QAWS_H_BODY
+#endif
+#endif
+#ifdef QAWS_H_BODY
+#undef QAWS_H_BODY
 #define QAWS_H
 
-#define QAWS_VERSION_MAJOR 2
+#define QAWS_VERSION_MAJOR 3
 #define QAWS_VERSION_MINOR 0
 #define QAWS_VERSION_PATCH 0
 #define QAWS_VERSION ((QAWS_VERSION_MAJOR * 10000) + (QAWS_VERSION_MINOR * 100) + QAWS_VERSION_PATCH)
-#define QAWS_VERSION_STRING "2.0.0"
+#define QAWS_VERSION_STRING "3.0.0"
 
 #include "qaws_types.h"
 #include "qaws_status.h"

@@ -1,4 +1,17 @@
-#ifndef QAWS_BREP_H
+#include "qaws_platform.h"   /* (QAWS_SCALAR_IS_FLOAT: the precision this pass declares) */
+#if QAWS_SCALAR_IS_FLOAT
+#ifndef QAWS_BREP_H_F32
+#define QAWS_BREP_H_F32
+#define QAWS_BREP_H_BODY
+#endif
+#else
+#ifndef QAWS_BREP_H_F64
+#define QAWS_BREP_H_F64
+#define QAWS_BREP_H_BODY
+#endif
+#endif
+#ifdef QAWS_BREP_H_BODY
+#undef QAWS_BREP_H_BODY
 #define QAWS_BREP_H
 
 #include "qaws_types.h"
@@ -118,6 +131,8 @@ qaws_status qaws_brep_get_vertex_faces(
 	qaws_brep_vertex_id id);
 
 /* Validation */
+#ifndef QAWS_ENUM_QAWS_BREP_VALIDATION_FLAGS
+#define QAWS_ENUM_QAWS_BREP_VALIDATION_FLAGS
 typedef enum qaws_brep_validation_flags
 {
 	QAWS_BREP_VALID            = 0,
@@ -126,6 +141,7 @@ typedef enum qaws_brep_validation_flags
 	QAWS_BREP_NOT_ORIENTABLE   = 1 << 2,  /* inconsistent face orientations */
 	QAWS_BREP_HAS_DEGENERATE   = 1 << 3   /* zero-area face or zero-length edge */
 } qaws_brep_validation_flags;
+#endif
 
 qaws_status qaws_brep_validate(
 	unsigned int* out_flags,

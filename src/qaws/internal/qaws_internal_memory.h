@@ -1,7 +1,7 @@
 #ifndef QAWS_INTERNAL_MEMORY_H
 #define QAWS_INTERNAL_MEMORY_H
 
-#include "../qaws_types.h"
+#include "../qaws_allocator.h"   /* (precision-free: declared and defined once) */
 #include <stddef.h>
 
 /*
@@ -38,5 +38,17 @@ unsigned int qaws_internal_grow(unsigned int cap, size_t need, unsigned int firs
 
 /* the user size of a block (0 for NULL) */
 size_t qaws_internal_block_size(void const* ptr);
+
+/* Allocator-aware helpers for impl allocations. */
+void* qaws_internal_alloc(size_t size, qaws_allocator const* allocator);
+void  qaws_internal_dealloc(void* ptr, qaws_allocator const* allocator);
+/* count * size zeroed bytes (NULL on overflow or failure) */
+void* qaws_internal_calloc(size_t count, size_t size, qaws_allocator const* allocator);
+
+/* Evaluation scratch: `stack` (stack_bytes, the caller's array) when bytes fit, else bytes from the allocator (an object's own, so
+   evaluation never calls malloc); released by qaws_internal_scratch_release with the same stack pointer (NULL is ignored). */
+#define QAWS_INTERNAL_SCRATCH 32
+void* qaws_internal_scratch(void* stack, size_t stack_bytes, size_t bytes, qaws_allocator const* allocator);
+void qaws_internal_scratch_release(void* stack, void* scratch, qaws_allocator const* allocator);
 
 #endif /* QAWS_INTERNAL_MEMORY_H */

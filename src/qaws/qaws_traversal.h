@@ -1,4 +1,17 @@
-#ifndef QAWS_TRAVERSAL_H
+#include "qaws_platform.h"   /* (QAWS_SCALAR_IS_FLOAT: the precision this pass declares) */
+#if QAWS_SCALAR_IS_FLOAT
+#ifndef QAWS_TRAVERSAL_H_F32
+#define QAWS_TRAVERSAL_H_F32
+#define QAWS_TRAVERSAL_H_BODY
+#endif
+#else
+#ifndef QAWS_TRAVERSAL_H_F64
+#define QAWS_TRAVERSAL_H_F64
+#define QAWS_TRAVERSAL_H_BODY
+#endif
+#endif
+#ifdef QAWS_TRAVERSAL_H_BODY
+#undef QAWS_TRAVERSAL_H_BODY
 #define QAWS_TRAVERSAL_H
 
 #include "qaws_types.h"

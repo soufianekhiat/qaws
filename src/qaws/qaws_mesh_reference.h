@@ -1,4 +1,17 @@
-#ifndef QAWS_MESH_REFERENCE_H
+#include "qaws_platform.h"   /* (QAWS_SCALAR_IS_FLOAT: the precision this pass declares) */
+#if QAWS_SCALAR_IS_FLOAT
+#ifndef QAWS_MESH_REFERENCE_H_F32
+#define QAWS_MESH_REFERENCE_H_F32
+#define QAWS_MESH_REFERENCE_H_BODY
+#endif
+#else
+#ifndef QAWS_MESH_REFERENCE_H_F64
+#define QAWS_MESH_REFERENCE_H_F64
+#define QAWS_MESH_REFERENCE_H_BODY
+#endif
+#endif
+#ifdef QAWS_MESH_REFERENCE_H_BODY
+#undef QAWS_MESH_REFERENCE_H_BODY
 #define QAWS_MESH_REFERENCE_H
 
 #include "qaws_mesh.h"
@@ -51,6 +64,8 @@
  * Thread-safe for concurrent reads.
  */
 
+#ifndef QAWS_ENUM_QAWS_INTERPOLANT
+#define QAWS_ENUM_QAWS_INTERPOLANT
 typedef enum qaws_interpolant
 {
 	QAWS_INTERPOLANT_PN = 0,
@@ -61,6 +76,7 @@ typedef enum qaws_interpolant
 	QAWS_INTERPOLANT_SUBDIVISION,
 	QAWS_INTERPOLANT_MLS
 } qaws_interpolant;
+#endif
 
 typedef struct qaws_mesh_reference_desc
 {

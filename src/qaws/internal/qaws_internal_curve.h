@@ -23,18 +23,7 @@ qaws_curve* qaws_internal_curve_alloc_ex(
 
 void qaws_internal_curve_free(qaws_curve* curve);
 
-/* Allocator-aware helpers for impl allocations. */
-void* qaws_internal_alloc(size_t size, qaws_allocator const* allocator);
-/* qaws_internal_mul2..4 for allocation sizes */
+/* the allocator-aware helpers (qaws_internal_alloc, _dealloc, _calloc, _scratch): qaws_internal_memory.h, precision-free */
 #include "qaws_internal_memory.h"
-void  qaws_internal_dealloc(void* ptr, qaws_allocator const* allocator);
-/* count * size zeroed bytes (NULL on overflow or failure) */
-void* qaws_internal_calloc(size_t count, size_t size, qaws_allocator const* allocator);
-
-/* Evaluation scratch: `stack` (stack_bytes, the caller's array) when bytes fit, else bytes from the allocator (an object's own, so
-   evaluation never calls malloc); released by qaws_internal_scratch_release with the same stack pointer (NULL is ignored). */
-#define QAWS_INTERNAL_SCRATCH 32
-void* qaws_internal_scratch(void* stack, size_t stack_bytes, size_t bytes, qaws_allocator const* allocator);
-void qaws_internal_scratch_release(void* stack, void* scratch, qaws_allocator const* allocator);
 
 #endif /* QAWS_INTERNAL_CURVE_H */

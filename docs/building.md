@@ -17,7 +17,7 @@ cmake --build .
 
 | Option | Default | Description |
 |---|---|---|
-| `QAWS_SCALAR_IS_FLOAT` | `ON` | Use `float` (f32). Set to `OFF` for `double` (f64). |
+| `QAWS_SCALAR_IS_FLOAT` | `ON` | Which precision callers' unsuffixed names mean: `ON` f32, `OFF` f64. The library holds both (`name_f32`, `name_f64`). |
 | `QAWS_ENABLE_WARNINGS` | `ON` | Enable compiler warnings |
 | `QAWS_WARNINGS_AS_ERRORS` | `ON` (f64) / `OFF` (f32) | Treat warnings as errors |
 | `QAWS_DISABLE_STRICT_ALIASING` | `ON` | Pass `-fno-strict-aliasing` on GCC/Clang |
@@ -27,7 +27,7 @@ cmake --build .
 | `QAWS_INSTALL` | `ON` | Enable install rules |
 | `QAWS_INSTALL_PKGCONFIG` | `ON` | Install the `qaws.pc` pkg-config file |
 | `BUILD_TESTING` | `ON` | Build test suite |
-| `QAWS_UNITY_BUILD` | `OFF` | Compile the library as a single translation unit |
+| `QAWS_UNITY_BUILD` | `OFF` | Compile the library as one translation unit per precision |
 | `QAWS_AMALGAMATION` | `OFF` | Generate and build the `qaws.h` + `qaws.c` amalgamation (with `cmake -P`) |
 | `QAWS_TEST_AMALGAMATION` | `OFF` | Run the test suite against the amalgamated library. Implies `QAWS_AMALGAMATION` |
 | `QAWS_AMALGAMATION_DIR` | `<build>/amalgam` | Where the generated `qaws.h`/`qaws.c` are written |
@@ -35,15 +35,30 @@ cmake --build .
 See [integration.md](integration.md) for the single-file and no-build-system
 paths, including the `amalgamate` target and the Xcode/iOS notes.
 
-### f32 vs f64 build
+### Both precisions
+
+The library holds every scalar-bearing function and type twice, as
+`name_f32` and `name_f64`: each source is compiled through two wrappers the
+build generates (`<build>/qaws_precision/<name>_f32.c` and `_f64.c`; Sharpmake:
+`tmp/qaws_precision/`), never directly. The precision-free sources (the status
+strings and the memory module: the default, thread and scratch allocators and
+the arena) are compiled once, so the allocator state is one for both.
+
+`QAWS_SCALAR_IS_FLOAT` only selects what a caller's unsuffixed names,
+`qaws_scalar` and the scalar macros mean:
 
 ```bash
-# Float (default)
+# unsuffixed names are the f32 forms (default)
 cmake .. -DQAWS_SCALAR_IS_FLOAT=ON
 
-# Double
+# unsuffixed names are the f64 forms
 cmake .. -DQAWS_SCALAR_IS_FLOAT=OFF
 ```
+
+A translation unit wanting both side by side includes `qaws_both.h`.
+After adding or renaming a declaration, regenerate `src/qaws/qaws_names.h`
+(CONTRIBUTING.md, "Both precisions"); CTest `qaws_api_names` fails while it
+is stale.
 
 ### SIMD build
 

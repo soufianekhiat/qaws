@@ -1,4 +1,17 @@
-#ifndef QAWS_VIEW_H
+#include "qaws_platform.h"   /* (QAWS_SCALAR_IS_FLOAT: the precision this pass declares) */
+#if QAWS_SCALAR_IS_FLOAT
+#ifndef QAWS_VIEW_H_F32
+#define QAWS_VIEW_H_F32
+#define QAWS_VIEW_H_BODY
+#endif
+#else
+#ifndef QAWS_VIEW_H_F64
+#define QAWS_VIEW_H_F64
+#define QAWS_VIEW_H_BODY
+#endif
+#endif
+#ifdef QAWS_VIEW_H_BODY
+#undef QAWS_VIEW_H_BODY
 #define QAWS_VIEW_H
 
 #include "qaws_types.h"
@@ -59,11 +72,14 @@
  *     allocation at all). Evaluation never allocates.
  */
 
+#ifndef QAWS_ENUM_QAWS_ELEMENT_TYPE
+#define QAWS_ENUM_QAWS_ELEMENT_TYPE
 typedef enum qaws_element_type
 {
 	QAWS_ELEMENT_F32 = 1,
 	QAWS_ELEMENT_F64 = 2
 } qaws_element_type;
+#endif
 
 /* Packed (data non-NULL): element i's component c at data + i * stride + c * size. Planar (data NULL): at planes[c] + i * stride.
    size: 4 (f32) or 8 (f64); stride 0 means tight (packed: components * size; planar: size). */
@@ -99,6 +115,8 @@ qaws_status qaws_array_view_check_extent(qaws_array_view const* view, void const
 #define QAWS_VIEW_MAX_DEGREE 31
 
 /* What a curve view describes; each evaluates as the owned family it names */
+#ifndef QAWS_ENUM_QAWS_CURVE_VIEW_FAMILY
+#define QAWS_ENUM_QAWS_CURVE_VIEW_FAMILY
 typedef enum qaws_curve_view_family
 {
 	QAWS_VIEW_SPLINE = 0,               /* B-spline, NURBS or Bezier: points, weights, knots (the default) */
@@ -117,6 +135,7 @@ typedef enum qaws_curve_view_family
 	QAWS_VIEW_SUBDIVISION               /* subdivision (qaws_curve_create_subdivision), degree 2, 3, 4 (the scheme's): points, mode
 	                                       (qaws_subdivision_scheme), levels, closed; unit spans over the refined polygon */
 } qaws_curve_view_family;
+#endif
 
 typedef struct qaws_curve_view
 {

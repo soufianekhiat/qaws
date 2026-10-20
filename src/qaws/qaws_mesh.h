@@ -1,4 +1,17 @@
-#ifndef QAWS_MESH_H
+#include "qaws_platform.h"   /* (QAWS_SCALAR_IS_FLOAT: the precision this pass declares) */
+#if QAWS_SCALAR_IS_FLOAT
+#ifndef QAWS_MESH_H_F32
+#define QAWS_MESH_H_F32
+#define QAWS_MESH_H_BODY
+#endif
+#else
+#ifndef QAWS_MESH_H_F64
+#define QAWS_MESH_H_F64
+#define QAWS_MESH_H_BODY
+#endif
+#endif
+#ifdef QAWS_MESH_H_BODY
+#undef QAWS_MESH_H_BODY
 #define QAWS_MESH_H
 
 #include "qaws_types.h"
@@ -46,19 +59,25 @@
 
 #define QAWS_MESH_NONE 0xFFFFFFFFu
 
+#ifndef QAWS_ENUM_QAWS_MESH_ELEMENT
+#define QAWS_ENUM_QAWS_MESH_ELEMENT
 typedef enum qaws_mesh_element
 {
 	QAWS_MESH_VERTEX = 0,
 	QAWS_MESH_CORNER,
 	QAWS_MESH_FACE
 } qaws_mesh_element;
+#endif
 
+#ifndef QAWS_ENUM_QAWS_ATTRIBUTE_RULE
+#define QAWS_ENUM_QAWS_ATTRIBUTE_RULE
 typedef enum qaws_attribute_rule
 {
 	QAWS_ATTRIBUTE_LINEAR = 0,          /* interpolated linearly (along an edge, or barycentric at a footpoint) */
 	QAWS_ATTRIBUTE_NORMALIZED,          /* linearly, then scaled to unit length (normals, tangents) */
 	QAWS_ATTRIBUTE_NEAREST              /* the nearest value: material ids, labels */
 } qaws_attribute_rule;
+#endif
 
 typedef struct qaws_attribute_desc
 {

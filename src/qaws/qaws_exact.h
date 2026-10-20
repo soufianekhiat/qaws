@@ -1,4 +1,17 @@
-#ifndef QAWS_EXACT_H
+#include "qaws_platform.h"   /* (QAWS_SCALAR_IS_FLOAT: the precision this pass declares) */
+#if QAWS_SCALAR_IS_FLOAT
+#ifndef QAWS_EXACT_H_F32
+#define QAWS_EXACT_H_F32
+#define QAWS_EXACT_H_BODY
+#endif
+#else
+#ifndef QAWS_EXACT_H_F64
+#define QAWS_EXACT_H_F64
+#define QAWS_EXACT_H_BODY
+#endif
+#endif
+#ifdef QAWS_EXACT_H_BODY
+#undef QAWS_EXACT_H_BODY
 #define QAWS_EXACT_H
 
 /*
@@ -21,19 +34,25 @@
 #include "qaws_surface_types.h"
 #include "qaws_batch_executor.h"
 
+#ifndef QAWS_ENUM_QAWS_EXACT_SIGN
+#define QAWS_ENUM_QAWS_EXACT_SIGN
 typedef enum qaws_exact_sign
 {
 	QAWS_EXACT_NEGATIVE = -1,
 	QAWS_EXACT_ZERO = 0,
 	QAWS_EXACT_POSITIVE = 1
 } qaws_exact_sign;
+#endif
 
 /* How a predicate decided (optional output). */
+#ifndef QAWS_ENUM_QAWS_EXACT_PATH
+#define QAWS_ENUM_QAWS_EXACT_PATH
 typedef enum qaws_exact_path
 {
 	QAWS_EXACT_PATH_FILTER = 0,   /* the f64 evaluation and its error bound */
 	QAWS_EXACT_PATH_EXACT         /* exact integer evaluation */
 } qaws_exact_path;
+#endif
 
 /* Sign of (a - c) x (b - c): positive when a, b, c turn counterclockwise. */
 qaws_status qaws_exact_orient2d(qaws_exact_sign* out_sign, qaws_exact_path* out_path, double const a[2], double const b[2],
@@ -67,6 +86,8 @@ qaws_status qaws_exact_compare_ratio(qaws_exact_sign* out_sign, qaws_exact_path*
 
 typedef struct qaws_exact_curve qaws_exact_curve;
 
+#ifndef QAWS_ENUM_QAWS_NUMERIC_QUALITY
+#define QAWS_ENUM_QAWS_NUMERIC_QUALITY
 typedef enum qaws_numeric_quality
 {
 	QAWS_NUMERIC_APPROXIMATE = 0,
@@ -74,13 +95,17 @@ typedef enum qaws_numeric_quality
 	QAWS_NUMERIC_EXACT_RATIONAL,
 	QAWS_NUMERIC_UNSUPPORTED
 } qaws_numeric_quality;
+#endif
 
+#ifndef QAWS_ENUM_QAWS_EXACT_FLAG
+#define QAWS_ENUM_QAWS_EXACT_FLAG
 typedef enum qaws_exact_flag
 {
 	QAWS_EXACT_FLAG_NONE = 0,
 	QAWS_EXACT_FLAG_INPUT_QUANTIZED = 1 << 0,   /* inputs were rounded onto the lattices */
 	QAWS_EXACT_FLAG_PREP_QUANTIZED = 1 << 1     /* an approximate preparation was frozen */
 } qaws_exact_flag;
+#endif
 
 typedef struct qaws_exact_desc
 {
@@ -150,12 +175,15 @@ qaws_status qaws_exact_winding_2d(int* out_winding, qaws_exact_curve const* cons
  * Bernstein coefficients (subdivision and Descartes' rule of signs).
  * =================================================================== */
 
+#ifndef QAWS_ENUM_QAWS_EXACT_HIT_KIND
+#define QAWS_ENUM_QAWS_EXACT_HIT_KIND
 typedef enum qaws_exact_hit_kind
 {
 	QAWS_EXACT_HIT_CROSSING = 0,   /* (t_lo, t_hi) holds exactly one transversal intersection */
 	QAWS_EXACT_HIT_POINT,          /* an intersection at t_lo == t_hi exactly (enclosed when not a double) */
 	QAWS_EXACT_HIT_OVERLAP         /* the curve lies in the line / plane on [t_lo, t_hi] */
 } qaws_exact_hit_kind;
+#endif
 
 typedef struct qaws_exact_hit
 {

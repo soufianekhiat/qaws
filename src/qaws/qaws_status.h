@@ -1,6 +1,10 @@
 #ifndef QAWS_STATUS_H
 #define QAWS_STATUS_H
 
+/* (precision-free itself; included first by most headers, it also brings
+   the current precision's names before anything is declared) */
+#include "qaws_platform.h"
+
 typedef enum qaws_status
 {
 	QAWS_STATUS_OK = 0,

@@ -1,4 +1,17 @@
-#ifndef QAWS_SURFACE_SUBDIV_H
+#include "qaws_platform.h"   /* (QAWS_SCALAR_IS_FLOAT: the precision this pass declares) */
+#if QAWS_SCALAR_IS_FLOAT
+#ifndef QAWS_SURFACE_SUBDIV_H_F32
+#define QAWS_SURFACE_SUBDIV_H_F32
+#define QAWS_SURFACE_SUBDIV_H_BODY
+#endif
+#else
+#ifndef QAWS_SURFACE_SUBDIV_H_F64
+#define QAWS_SURFACE_SUBDIV_H_F64
+#define QAWS_SURFACE_SUBDIV_H_BODY
+#endif
+#endif
+#ifdef QAWS_SURFACE_SUBDIV_H_BODY
+#undef QAWS_SURFACE_SUBDIV_H_BODY
 #define QAWS_SURFACE_SUBDIV_H
 
 #include "qaws_surface_types.h"
@@ -22,11 +35,14 @@
 
    The control mesh data is copied (not borrowed). */
 
+#ifndef QAWS_ENUM_QAWS_SUBDIV_SCHEME
+#define QAWS_ENUM_QAWS_SUBDIV_SCHEME
 typedef enum qaws_subdiv_scheme
 {
 	QAWS_SUBDIV_CATMULL_CLARK = 0,
 	QAWS_SUBDIV_LOOP
 } qaws_subdiv_scheme;
+#endif
 
 typedef struct qaws_surface_subdiv_desc
 {

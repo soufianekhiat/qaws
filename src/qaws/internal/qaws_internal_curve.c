@@ -3,40 +3,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-void* qaws_internal_alloc(size_t size, qaws_allocator const* allocator)
-{
-	return qaws_internal_alloc_from(size, allocator);
-}
-
-/* the block knows its allocator (qaws_internal_memory.h) */
-void qaws_internal_dealloc(void* ptr, qaws_allocator const* allocator)
-{
-	(void)allocator;
-	qaws_internal_free(ptr);
-}
-
-void* qaws_internal_scratch(void* stack, size_t stack_bytes, size_t bytes, qaws_allocator const* allocator)
-{
-	return bytes <= stack_bytes ? stack : qaws_internal_alloc(bytes, allocator);
-}
-
-void qaws_internal_scratch_release(void* stack, void* scratch, qaws_allocator const* allocator)
-{
-	if (scratch && scratch != stack)
-		qaws_internal_dealloc(scratch, allocator);
-}
-
-void* qaws_internal_calloc(size_t count, size_t size, qaws_allocator const* allocator)
-{
-	void* p;
-	if (size && count > (size_t)-1 / size)
-		return NULL;
-	p = qaws_internal_alloc(qaws_internal_mul2(count, size), allocator);
-	if (p)
-		memset(p, 0, count * size);
-	return p;
-}
-
 qaws_curve* qaws_internal_curve_alloc_ex(
 	qaws_curve_kind kind,
 	qaws_dimension dimension,

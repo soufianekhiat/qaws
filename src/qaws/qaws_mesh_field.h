@@ -1,4 +1,17 @@
-#ifndef QAWS_MESH_FIELD_H
+#include "qaws_platform.h"   /* (QAWS_SCALAR_IS_FLOAT: the precision this pass declares) */
+#if QAWS_SCALAR_IS_FLOAT
+#ifndef QAWS_MESH_FIELD_H_F32
+#define QAWS_MESH_FIELD_H_F32
+#define QAWS_MESH_FIELD_H_BODY
+#endif
+#else
+#ifndef QAWS_MESH_FIELD_H_F64
+#define QAWS_MESH_FIELD_H_F64
+#define QAWS_MESH_FIELD_H_BODY
+#endif
+#endif
+#ifdef QAWS_MESH_FIELD_H_BODY
+#undef QAWS_MESH_FIELD_H_BODY
 #define QAWS_MESH_FIELD_H
 
 #include "qaws_mesh_reference.h"
@@ -146,11 +159,14 @@ qaws_status qaws_size_field_evaluate(qaws_scalar* out_sizes, qaws_size_field con
  * smoothing's edge weights times exp(-strength Gaussian): singularities
  * cost less where they are low.
  */
+#ifndef QAWS_ENUM_QAWS_DIRECTION_FIELD_METHOD
+#define QAWS_ENUM_QAWS_DIRECTION_FIELD_METHOD
 typedef enum qaws_direction_field_method
 {
 	QAWS_DIRECTION_FIELD_LOCAL = 0,
 	QAWS_DIRECTION_FIELD_SMOOTHEST
 } qaws_direction_field_method;
+#endif
 
 typedef struct qaws_direction_field_desc
 {

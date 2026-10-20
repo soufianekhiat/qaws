@@ -1,4 +1,17 @@
-#ifndef QAWS_REMESH_H
+#include "qaws_platform.h"   /* (QAWS_SCALAR_IS_FLOAT: the precision this pass declares) */
+#if QAWS_SCALAR_IS_FLOAT
+#ifndef QAWS_REMESH_H_F32
+#define QAWS_REMESH_H_F32
+#define QAWS_REMESH_H_BODY
+#endif
+#else
+#ifndef QAWS_REMESH_H_F64
+#define QAWS_REMESH_H_F64
+#define QAWS_REMESH_H_BODY
+#endif
+#endif
+#ifdef QAWS_REMESH_H_BODY
+#undef QAWS_REMESH_H_BODY
 #define QAWS_REMESH_H
 
 #include "qaws_mesh_reference.h"
@@ -91,12 +104,15 @@
  * centre. The input is not changed.
  */
 
+#ifndef QAWS_ENUM_QAWS_REMESH_METHOD
+#define QAWS_ENUM_QAWS_REMESH_METHOD
 typedef enum qaws_remesh_method
 {
 	QAWS_REMESH_LOCAL = 0,
 	QAWS_REMESH_CVT,
 	QAWS_REMESH_FIELD_ALIGNED
 } qaws_remesh_method;
+#endif
 
 typedef struct qaws_remesh_desc
 {

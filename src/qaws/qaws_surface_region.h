@@ -1,4 +1,17 @@
-#ifndef QAWS_SURFACE_REGION_H
+#include "qaws_platform.h"   /* (QAWS_SCALAR_IS_FLOAT: the precision this pass declares) */
+#if QAWS_SCALAR_IS_FLOAT
+#ifndef QAWS_SURFACE_REGION_H_F32
+#define QAWS_SURFACE_REGION_H_F32
+#define QAWS_SURFACE_REGION_H_BODY
+#endif
+#else
+#ifndef QAWS_SURFACE_REGION_H_F64
+#define QAWS_SURFACE_REGION_H_F64
+#define QAWS_SURFACE_REGION_H_BODY
+#endif
+#endif
+#ifdef QAWS_SURFACE_REGION_H_BODY
+#undef QAWS_SURFACE_REGION_H_BODY
 #define QAWS_SURFACE_REGION_H
 
 #include "qaws_types.h"
@@ -41,6 +54,8 @@
 
 typedef struct qaws_surface_curve qaws_surface_curve;
 
+#ifndef QAWS_ENUM_QAWS_SURFACE_CURVE_KIND
+#define QAWS_ENUM_QAWS_SURFACE_CURVE_KIND
 typedef enum qaws_surface_curve_kind
 {
 	QAWS_SURFACE_CURVE_UV = 0,          /* a curve drawn in (u, v) */
@@ -48,6 +63,7 @@ typedef enum qaws_surface_curve_kind
 	QAWS_SURFACE_CURVE_GEODESIC_ARC,    /* an arc of a geodesic circle */
 	QAWS_SURFACE_CURVE_GEODESIC_OFFSET  /* a curve's geodesic offset */
 } qaws_surface_curve_kind;
+#endif
 
 /* The metric and Christoffel symbols at (u, v): g = { E, F, G },
    christoffel = { G1_11, G1_12, G1_22, G2_11, G2_12, G2_22 } (either may be

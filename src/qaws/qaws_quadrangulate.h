@@ -1,4 +1,17 @@
-#ifndef QAWS_QUADRANGULATE_H
+#include "qaws_platform.h"   /* (QAWS_SCALAR_IS_FLOAT: the precision this pass declares) */
+#if QAWS_SCALAR_IS_FLOAT
+#ifndef QAWS_QUADRANGULATE_H_F32
+#define QAWS_QUADRANGULATE_H_F32
+#define QAWS_QUADRANGULATE_H_BODY
+#endif
+#else
+#ifndef QAWS_QUADRANGULATE_H_F64
+#define QAWS_QUADRANGULATE_H_F64
+#define QAWS_QUADRANGULATE_H_BODY
+#endif
+#endif
+#ifdef QAWS_QUADRANGULATE_H_BODY
+#undef QAWS_QUADRANGULATE_H_BODY
 #define QAWS_QUADRANGULATE_H
 
 #include "qaws_mesh_reference.h"
@@ -106,6 +119,8 @@
  *               drawn to or pushed from points.
  */
 
+#ifndef QAWS_ENUM_QAWS_QUAD_METHOD
+#define QAWS_ENUM_QAWS_QUAD_METHOD
 typedef enum qaws_quad_method
 {
 	QAWS_QUADS_INSTANT = 0,
@@ -114,6 +129,7 @@ typedef enum qaws_quad_method
 	QAWS_QUADS_GLOBAL,
 	QAWS_QUADS_LAYOUT
 } qaws_quad_method;
+#endif
 
 typedef struct qaws_quadrangulate_desc
 {

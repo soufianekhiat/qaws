@@ -167,6 +167,7 @@ extern int test_151_surface_tessellation_main(void);
 extern int test_152_sweep_derivatives_main(void);
 extern int test_153_parameterization_main(void);
 extern int test_154_memory_main(void);
+extern int test_155_precision_both_main(void);
 
 /* Test registry */
 typedef struct {
@@ -330,6 +331,7 @@ static test_suite const g_test_suites[] = {
 {"152_sweep_derivatives", test_152_sweep_derivatives_main},
 {"153_parameterization", test_153_parameterization_main},
 {"154_memory", test_154_memory_main},
+{"155_precision_both", test_155_precision_both_main},
 };
 
 int main(void) {

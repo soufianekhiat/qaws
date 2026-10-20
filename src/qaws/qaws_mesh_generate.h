@@ -1,4 +1,17 @@
-#ifndef QAWS_MESH_GENERATE_H
+#include "qaws_platform.h"   /* (QAWS_SCALAR_IS_FLOAT: the precision this pass declares) */
+#if QAWS_SCALAR_IS_FLOAT
+#ifndef QAWS_MESH_GENERATE_H_F32
+#define QAWS_MESH_GENERATE_H_F32
+#define QAWS_MESH_GENERATE_H_BODY
+#endif
+#else
+#ifndef QAWS_MESH_GENERATE_H_F64
+#define QAWS_MESH_GENERATE_H_F64
+#define QAWS_MESH_GENERATE_H_BODY
+#endif
+#endif
+#ifdef QAWS_MESH_GENERATE_H_BODY
+#undef QAWS_MESH_GENERATE_H_BODY
 #define QAWS_MESH_GENERATE_H
 
 #include "qaws_mesh_reference.h"
@@ -28,6 +41,8 @@
  * far the snapping moved the vertices (the dense reference's error).
  */
 
+#ifndef QAWS_ENUM_QAWS_GENERATE_METHOD
+#define QAWS_ENUM_QAWS_GENERATE_METHOD
 typedef enum qaws_generate_method
 {
 	QAWS_GENERATE_REMESH = 0,
@@ -35,13 +50,17 @@ typedef enum qaws_generate_method
 	QAWS_GENERATE_RESTRICTED_DELAUNAY,
 	QAWS_GENERATE_STRUCTURED
 } qaws_generate_method;
+#endif
 
+#ifndef QAWS_ENUM_QAWS_ELEMENTS
+#define QAWS_ENUM_QAWS_ELEMENTS
 typedef enum qaws_elements
 {
 	QAWS_ELEMENTS_TRIANGLES = 0,
 	QAWS_ELEMENTS_QUADS,                /* all quads */
 	QAWS_ELEMENTS_QUAD_DOMINANT
 } qaws_elements;
+#endif
 
 typedef struct qaws_generate_desc
 {

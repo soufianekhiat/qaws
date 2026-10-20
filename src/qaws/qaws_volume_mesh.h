@@ -1,4 +1,17 @@
-#ifndef QAWS_VOLUME_MESH_H
+#include "qaws_platform.h"   /* (QAWS_SCALAR_IS_FLOAT: the precision this pass declares) */
+#if QAWS_SCALAR_IS_FLOAT
+#ifndef QAWS_VOLUME_MESH_H_F32
+#define QAWS_VOLUME_MESH_H_F32
+#define QAWS_VOLUME_MESH_H_BODY
+#endif
+#else
+#ifndef QAWS_VOLUME_MESH_H_F64
+#define QAWS_VOLUME_MESH_H_F64
+#define QAWS_VOLUME_MESH_H_BODY
+#endif
+#endif
+#ifdef QAWS_VOLUME_MESH_H_BODY
+#undef QAWS_VOLUME_MESH_H_BODY
 #define QAWS_VOLUME_MESH_H
 
 #include "qaws_mesh.h"
@@ -28,6 +41,8 @@
  * than two cells, or by two cells on the same side, is INVALID_TOPOLOGY.
  */
 
+#ifndef QAWS_ENUM_QAWS_CELL_TYPE
+#define QAWS_ENUM_QAWS_CELL_TYPE
 typedef enum qaws_cell_type
 {
 	QAWS_CELL_TETRAHEDRON = 0,
@@ -35,6 +50,7 @@ typedef enum qaws_cell_type
 	QAWS_CELL_PRISM,
 	QAWS_CELL_PYRAMID
 } qaws_cell_type;
+#endif
 
 typedef struct qaws_volume_mesh qaws_volume_mesh;
 

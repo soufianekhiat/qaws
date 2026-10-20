@@ -4,6 +4,29 @@ All notable changes to Qaws are documented here.
 
 ## [Unreleased]
 
+### Changed (3.0.0, breaking)
+
+- **The parameter convention of Alwan, Suwar and Abaad** (CONTRIBUTING.md):
+  outputs first, then reports, in-out buffers, the object handle, input
+  buffers (strides beside them), sizes, descriptors, scalars, and the
+  context, allocator or executor last. Constructors put the new object
+  first: `qaws_curve_create_bezier(&curve, &desc)`. Every public, internal,
+  mesh-module and shader-core declaration follows it; `tools/qaws_api_tool.c`
+  checks it (CTest `qaws_api_convention`). Callers reorder their arguments;
+  a type-checking compiler finds most call sites, but two arguments of the
+  same type swap silently, so review each call.
+- **Both precisions in one binary.** Every scalar-bearing function and type
+  exists as `name_f32` and `name_f64`. `QAWS_SCALAR_IS_FLOAT` no longer
+  selects the library; it selects which precision a caller's unsuffixed
+  names, `qaws_scalar` and the scalar macros mean (default 1, as before).
+  `qaws_both.h` declares both in one translation unit; `qaws_f32` and
+  `qaws_f64` are the scalar types. The allocator (`qaws_allocator.h`: the
+  descriptor, the default, thread and scratch allocators, the arena) is
+  precision-free and exists once: an allocator installed once serves both
+  precisions. The amalgamation is compiled twice (through two generated
+  wrappers), and `QAWS_UNITY_BUILD` builds one translation unit per
+  precision.
+
 ### Added
 
 - Single-file amalgamation: `buildsystem/amalgamate.py` collapses the tree into

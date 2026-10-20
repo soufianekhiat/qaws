@@ -1,4 +1,17 @@
-#ifndef QAWS_TETRAHEDRALIZE_H
+#include "qaws_platform.h"   /* (QAWS_SCALAR_IS_FLOAT: the precision this pass declares) */
+#if QAWS_SCALAR_IS_FLOAT
+#ifndef QAWS_TETRAHEDRALIZE_H_F32
+#define QAWS_TETRAHEDRALIZE_H_F32
+#define QAWS_TETRAHEDRALIZE_H_BODY
+#endif
+#else
+#ifndef QAWS_TETRAHEDRALIZE_H_F64
+#define QAWS_TETRAHEDRALIZE_H_F64
+#define QAWS_TETRAHEDRALIZE_H_BODY
+#endif
+#endif
+#ifdef QAWS_TETRAHEDRALIZE_H_BODY
+#undef QAWS_TETRAHEDRALIZE_H_BODY
 #define QAWS_TETRAHEDRALIZE_H
 
 #include "qaws_volume_mesh.h"
@@ -34,12 +47,15 @@
  * passes; quality, the result's border.
  */
 
+#ifndef QAWS_ENUM_QAWS_TETRAHEDRALIZE_METHOD
+#define QAWS_ENUM_QAWS_TETRAHEDRALIZE_METHOD
 typedef enum qaws_tetrahedralize_method
 {
 	QAWS_TETS_DELAUNAY = 0,
 	QAWS_TETS_ENVELOPE,
 	QAWS_TETS_STUFFING
 } qaws_tetrahedralize_method;
+#endif
 
 typedef struct qaws_tetrahedralize_desc
 {

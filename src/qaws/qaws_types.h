@@ -1,4 +1,17 @@
-#ifndef QAWS_TYPES_H
+#include "qaws_platform.h"   /* (QAWS_SCALAR_IS_FLOAT: the precision this pass declares) */
+#if QAWS_SCALAR_IS_FLOAT
+#ifndef QAWS_TYPES_H_F32
+#define QAWS_TYPES_H_F32
+#define QAWS_TYPES_H_BODY
+#endif
+#else
+#ifndef QAWS_TYPES_H_F64
+#define QAWS_TYPES_H_F64
+#define QAWS_TYPES_H_BODY
+#endif
+#endif
+#ifdef QAWS_TYPES_H_BODY
+#undef QAWS_TYPES_H_BODY
 #define QAWS_TYPES_H
 #include <stddef.h>
 
@@ -18,15 +31,7 @@
  *   another thread is using it.
  */
 
-#ifndef QAWS_SCALAR_IS_FLOAT
-#define QAWS_SCALAR_IS_FLOAT 1
-#endif
-
-#if QAWS_SCALAR_IS_FLOAT
-typedef float qaws_scalar;
-#else
-typedef double qaws_scalar;
-#endif
+#include "qaws_platform.h"   /* (qaws_scalar: the current precision's) */
 
 typedef struct qaws_vec2
 {
@@ -41,12 +46,17 @@ typedef struct qaws_vec3
 	qaws_scalar z;
 } qaws_vec3;
 
+#ifndef QAWS_ENUM_QAWS_DIMENSION
+#define QAWS_ENUM_QAWS_DIMENSION
 typedef enum qaws_dimension
 {
 	QAWS_DIMENSION_2D = 2,
 	QAWS_DIMENSION_3D = 3
 } qaws_dimension;
+#endif
 
+#ifndef QAWS_ENUM_QAWS_CURVE_KIND
+#define QAWS_ENUM_QAWS_CURVE_KIND
 typedef enum qaws_curve_kind
 {
 	QAWS_CURVE_KIND_INVALID = 0,
@@ -66,7 +76,10 @@ typedef enum qaws_curve_kind
 	QAWS_CURVE_KIND_REPARAMETERIZED,
 	QAWS_CURVE_KIND_VIEW                /* borrowed: evaluated from host arrays it does not own (qaws_view.h) */
 } qaws_curve_kind;
+#endif
 
+#ifndef QAWS_ENUM_QAWS_PARAMETERIZATION
+#define QAWS_ENUM_QAWS_PARAMETERIZATION
 typedef enum qaws_parameterization
 {
 	QAWS_PARAMETERIZATION_DEFAULT = 0,
@@ -74,7 +87,10 @@ typedef enum qaws_parameterization
 	QAWS_PARAMETERIZATION_CHORDAL,
 	QAWS_PARAMETERIZATION_CENTRIPETAL
 } qaws_parameterization;
+#endif
 
+#ifndef QAWS_ENUM_QAWS_CONTINUITY
+#define QAWS_ENUM_QAWS_CONTINUITY
 typedef enum qaws_continuity
 {
 	QAWS_CONTINUITY_NONE = 0,
@@ -83,14 +99,20 @@ typedef enum qaws_continuity
 	QAWS_CONTINUITY_C2,
 	QAWS_CONTINUITY_C3
 } qaws_continuity;
+#endif
 
+#ifndef QAWS_ENUM_QAWS_TRAVERSAL_MODE
+#define QAWS_ENUM_QAWS_TRAVERSAL_MODE
 typedef enum qaws_traversal_mode
 {
 	QAWS_TRAVERSAL_MODE_PARAMETER = 0,
 	QAWS_TRAVERSAL_MODE_ARC_LENGTH,
 	QAWS_TRAVERSAL_MODE_TIME
 } qaws_traversal_mode;
+#endif
 
+#ifndef QAWS_ENUM_QAWS_MOTION_PROFILE
+#define QAWS_ENUM_QAWS_MOTION_PROFILE
 typedef enum qaws_motion_profile
 {
 	QAWS_MOTION_PROFILE_NONE = 0,
@@ -100,10 +122,13 @@ typedef enum qaws_motion_profile
 	QAWS_MOTION_PROFILE_S_CURVE,
 	QAWS_MOTION_PROFILE_CUSTOM
 } qaws_motion_profile;
+#endif
 
 /* Custom speed function: returns speed given distance along the curve. */
 typedef qaws_scalar (*qaws_speed_fn)(qaws_scalar distance, void* user_data);
 
+#ifndef QAWS_ENUM_QAWS_EASING
+#define QAWS_ENUM_QAWS_EASING
 typedef enum qaws_easing
 {
 	QAWS_EASING_LINEAR = 0,
@@ -117,14 +142,20 @@ typedef enum qaws_easing
 	QAWS_EASING_SINE_OUT,
 	QAWS_EASING_SINE_IN_OUT
 } qaws_easing;
+#endif
 
+#ifndef QAWS_ENUM_QAWS_WRAP_MODE
+#define QAWS_ENUM_QAWS_WRAP_MODE
 typedef enum qaws_wrap_mode
 {
 	QAWS_WRAP_CLAMP = 0,
 	QAWS_WRAP_LOOP,
 	QAWS_WRAP_PING_PONG
 } qaws_wrap_mode;
+#endif
 
+#ifndef QAWS_ENUM_QAWS_EVAL_FLAGS
+#define QAWS_ENUM_QAWS_EVAL_FLAGS
 typedef enum qaws_eval_flags
 {
 	QAWS_EVAL_FLAG_NONE     = 0,
@@ -133,6 +164,7 @@ typedef enum qaws_eval_flags
 	QAWS_EVAL_FLAG_D2       = 1 << 2,
 	QAWS_EVAL_FLAG_D3       = 1 << 3
 } qaws_eval_flags;
+#endif
 
 typedef struct qaws_range
 {
@@ -186,37 +218,8 @@ typedef struct qaws_traversal_desc
 typedef struct qaws_curve qaws_curve;
 typedef struct qaws_traversal qaws_traversal;
 
-/*
- * Custom allocator. Pass to _ex creation functions or install it (qaws_alloc.h). If allocation returns NULL, the call
- * fails with QAWS_STATUS_ALLOCATION_FAILURE.
- *
- * The library copies this descriptor (callbacks and user_data) into every block it allocates and into the objects that
- * allocate later, so the descriptor itself may be a short-lived local; the state user_data points to must outlive every
- * block the allocator gave.
- *
- * Two interfaces. A legacy descriptor sets the first three members only; the others are never read. An extended one sets
- * alloc to qaws_allocator_extended (the marker) and the sized members:
- *   legacy: alloc(size, user_data), dealloc(ptr, user_data); sizes in unsigned long (32 bits on Windows: larger
- *           requests fail);
- *   sized:  alloc_sized(size, alignment, user_data), dealloc_sized(ptr, size, alignment, user_data) with the size and
- *           alignment of the allocation; resize (optional) grows or shrinks a block in place and returns non-zero, or
- *           returns 0 to let the library allocate, copy and free.
- * Blocks must be aligned to QAWS_MEMORY_ALIGNMENT (16); misaligned blocks are given back and the call fails.
- */
-typedef struct qaws_allocator
-{
-	void* (*alloc)(unsigned long size, void* user_data);
-	void  (*dealloc)(void* ptr, void* user_data);
-	void* user_data;
-	void* (*alloc_sized)(size_t size, size_t alignment, void* user_data);
-	void  (*dealloc_sized)(void* ptr, size_t size, size_t alignment, void* user_data);
-	int   (*resize)(void* ptr, size_t old_size, size_t new_size, size_t alignment, void* user_data);
-} qaws_allocator;
-
-#define QAWS_MEMORY_ALIGNMENT 16
-
-/* the marker of an extended descriptor (alloc = qaws_allocator_extended); never allocates when called */
-void* qaws_allocator_extended(unsigned long size, void* user_data);
+/* the allocator (precision-free, once: qaws_allocator.h) */
+#include "qaws_allocator.h"
 
 /*
  * Stack-allocated curve for single-span curves (up to degree 7, 3D).

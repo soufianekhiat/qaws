@@ -12,10 +12,13 @@
  *       Exit 1 on a violation not in the allow-list, or an allow-list
  *       entry that no longer applies (the list only shrinks).
  *
- *   qaws_api_tool names [-check file] -once header... -- header...
+ *   qaws_api_tool names [-check file] -once header... -- header... [-any header...]
  *       writes qaws_names.h: every precision-bearing name (functions,
  *       types, struct tags declared by the headers after "--", less those
  *       of the once-only headers and the enums) mapped to QAWS_SFX(name).
+ *       Names are those starting with qaws_; the headers after "-any" (the
+ *       mesh module's internals) also give their other external functions
+ *       and variables.
  *
  * The headers are tokenized (comments, strings and preprocessor lines
  * dropped) and read statement by statement at file scope.
@@ -531,6 +534,7 @@ typedef struct names
 	char** s;
 	size_t n;
 	int collect_once;     /* collecting the once-only headers' names (excluded) */
+	int any;              /* also the functions not named qaws_* (an internal prefix, as hm_build) */
 	char** once;
 	size_t nonce;
 } names;
@@ -542,15 +546,23 @@ static int has(char** list, size_t n, char const* s)
 	return 0;
 }
 
-static void add(char*** list, size_t* n, char const* s)
+/* a function name of an internal prefix: lower case, with an underscore (no C keyword or base type has one) */
+static int internal_name(char const* s)
+{
+	return islower((unsigned char)s[0]) && strchr(s, '_') != NULL && strcmp(s, "size_t") != 0;
+}
+
+static void add_name(char*** list, size_t* n, char const* s, int any)
 {
 	size_t l = strlen(s);
-	if (strncmp(s, "qaws_", 5) || has(*list, *n, s)) return;
+	if ((any ? !internal_name(s) : strncmp(s, "qaws_", 5) != 0) || has(*list, *n, s)) return;
 	*list = (char**)realloc(*list, sizeof(char*) * (*n + 1));
 	(*list)[*n] = (char*)malloc(l + 1);
 	memcpy((*list)[*n], s, l + 1);
 	(*n)++;
 }
+
+static void add(char*** list, size_t* n, char const* s) { add_name(list, n, s, 0); }
 
 static void names_stmt(void* user, toks const* v, size_t a, size_t b, int body)
 {
@@ -558,12 +570,13 @@ static void names_stmt(void* user, toks const* v, size_t a, size_t b, int body)
 	char*** list = N->collect_once ? &N->once : &N->s;
 	size_t* n = N->collect_once ? &N->nonce : &N->n;
 	size_t i;
-	int is_enum = 0, is_typedef = 0;
+	int is_enum = 0, is_typedef = 0, is_extern = 0;
 	(void)body;
 	for (i = a; i < b; i++)
 	{
 		if (!strcmp(v->t[i].s, "enum")) is_enum = 1;
 		if (!strcmp(v->t[i].s, "typedef")) is_typedef = 1;
+		if (!strcmp(v->t[i].s, "extern")) is_extern = 1;
 	}
 	if (is_enum)
 	{
@@ -578,7 +591,28 @@ static void names_stmt(void* user, toks const* v, size_t a, size_t b, int body)
 	for (i = a; i < b; i++)
 	{
 		char const* s = v->t[i].s;
-		if (strncmp(s, "qaws_", 5)) continue;
+		if (strncmp(s, "qaws_", 5))
+		{
+			/* -any: an extern variable (name, then ';', ',' or its bound) */
+			if (N->any && is_extern && i > a && (i + 1 == b || !strcmp(v->t[i + 1].s, ",") || !strcmp(v->t[i + 1].s, "[")))
+			{
+				add_name(list, n, s, 1);
+				continue;
+			}
+			/* -any: a function declared at depth 0 (name, then its parameter list), no other kind of name */
+			if (N->any && i > a && i + 1 < b && !strcmp(v->t[i + 1].s, "(") && strcmp(v->t[i - 1].s, "(") && !is_typedef)
+			{
+				size_t j;
+				int depth = 0;
+				for (j = a; j < i; j++)
+				{
+					if (!strcmp(v->t[j].s, "(") || !strcmp(v->t[j].s, "{")) depth++;
+					else if (!strcmp(v->t[j].s, ")") || !strcmp(v->t[j].s, "}")) depth--;
+				}
+				if (depth == 0) add_name(list, n, s, 1);
+			}
+			continue;
+		}
 		if (i > a && !strcmp(v->t[i - 1].s, "struct")) { add(list, n, s); continue; }
 		if (i + 1 < b && !strcmp(v->t[i + 1].s, "(") && (i == a || strcmp(v->t[i - 1].s, "(")))
 		{
@@ -653,7 +687,7 @@ static char* read_text(char const* path)
 	return s;
 }
 
-/* names [-check file] -once header... -- header...: the map on stdout, or
+/* names [-check file] -once header... -- header... [-any header...]: the map on stdout, or
    exit 1 when the file differs from it (CR ignored) */
 static int run_names(int argc, char** argv)
 {
@@ -668,6 +702,7 @@ static int run_names(int argc, char** argv)
 		if (!strcmp(argv[i], "-check") && i + 1 < argc) { check = argv[++i]; continue; }
 		if (!strcmp(argv[i], "-once")) { N.collect_once = 1; continue; }
 		if (!strcmp(argv[i], "--")) { N.collect_once = 0; continue; }
+		if (!strcmp(argv[i], "-any")) { N.collect_once = 0; N.any = 1; continue; }
 		if (!tokenize(argv[i], &v)) return 2;
 		statements(&v, names_stmt, &N);
 		free(v.t);
@@ -695,6 +730,6 @@ int main(int argc, char** argv)
 	if (argc >= 2 && !strcmp(argv[1], "names"))
 		return run_names(argc - 2, argv + 2);
 	fprintf(stderr, "usage: qaws_api_tool survey [-v] [-order] [-allow file] [-types header... --] header...\n"
-		"       qaws_api_tool names [-check file] -once header... -- header...\n");
+		"       qaws_api_tool names [-check file] -once header... -- header... [-any header...]\n");
 	return 2;
 }

@@ -156,6 +156,7 @@ add_executable(
 152_sweep_derivatives.c
 153_parameterization.c
 154_memory.c
+155_precision_both.c
 )
 
 # The amalgamated library exports exactly the same symbols, so the tests can
@@ -200,3 +201,35 @@ foreach(_qaws_test_source IN LISTS _qaws_test_sources)
     set_tests_properties(${CMAKE_MATCH_1} PROPERTIES WORKING_DIRECTORY "${QAWS_WORKING_DIR}" ENVIRONMENT "QAWS_TEST==${CMAKE_MATCH_1}")
   endif()
 endforeach()
+
+# The API checks (docs/parameter_convention_plan.md): every declaration in
+# the parameter convention, less the shrinking allow-list; qaws_names.h the
+# map of the headers' precision-bearing names. The once-only headers
+# (precision-free: the status, the executor, the allocator and the memory
+# module) are declared once and their names left unsuffixed. The mesh
+# module's internal functions have their own prefixes (hm_, cf_, ...): -any.
+add_executable(qaws_api_tool "${PROJECT_SOURCE_DIR}/tools/qaws_api_tool.c")
+if(MSVC)
+  target_compile_definitions(qaws_api_tool PRIVATE _CRT_SECURE_NO_WARNINGS)
+endif()
+set(_QAWS_SRC "${PROJECT_SOURCE_DIR}/src/qaws")
+file(GLOB _QAWS_PUBLIC_HEADERS "${_QAWS_SRC}/*.h")
+list(REMOVE_ITEM _QAWS_PUBLIC_HEADERS "${_QAWS_SRC}/qaws_names.h")
+file(GLOB _QAWS_INTERNAL_HEADERS "${_QAWS_SRC}/internal/*.h")
+file(GLOB _QAWS_MESH_HEADERS "${_QAWS_SRC}/mesh/*.h")
+file(GLOB _QAWS_CORE_HEADERS "${_QAWS_SRC}/core/*.h")
+file(GLOB _QAWS_OTHER_HEADERS "${_QAWS_SRC}/exact/*.h" "${_QAWS_SRC}/simd/*.h")
+set(_QAWS_ONCE_HEADERS "${_QAWS_SRC}/qaws_status.h" "${_QAWS_SRC}/qaws_batch_executor.h" "${_QAWS_SRC}/qaws_allocator.h"
+  "${_QAWS_SRC}/internal/qaws_internal_memory.h")
+set(_QAWS_NAMED_HEADERS ${_QAWS_PUBLIC_HEADERS})
+list(REMOVE_ITEM _QAWS_NAMED_HEADERS ${_QAWS_ONCE_HEADERS})
+set(_QAWS_NAMED_INTERNAL_HEADERS ${_QAWS_INTERNAL_HEADERS})
+list(REMOVE_ITEM _QAWS_NAMED_INTERNAL_HEADERS ${_QAWS_ONCE_HEADERS})
+add_test(NAME qaws_api_convention
+  COMMAND qaws_api_tool survey -allow "${PROJECT_SOURCE_DIR}/tools/qaws_api_allow.txt"
+    ${_QAWS_PUBLIC_HEADERS} ${_QAWS_INTERNAL_HEADERS} ${_QAWS_MESH_HEADERS} ${_QAWS_CORE_HEADERS})
+add_test(NAME qaws_api_names
+  COMMAND qaws_api_tool names -check "${_QAWS_SRC}/qaws_names.h"
+    -once ${_QAWS_ONCE_HEADERS}
+    -- ${_QAWS_NAMED_HEADERS} ${_QAWS_NAMED_INTERNAL_HEADERS} ${_QAWS_OTHER_HEADERS} ${_QAWS_CORE_HEADERS}
+    -any ${_QAWS_MESH_HEADERS})
