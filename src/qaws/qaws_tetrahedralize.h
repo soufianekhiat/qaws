@@ -49,7 +49,7 @@ typedef struct qaws_tetrahedralize_desc
 	int border_only;                    /* 1: no vertex added inside (the border's vertices' cells, flipped) */
 } qaws_tetrahedralize_desc;
 
-qaws_status qaws_volume_mesh_tetrahedralize(qaws_mesh_3d const* boundary, qaws_tetrahedralize_desc const* desc, qaws_volume_mesh** out_mesh,
-	qaws_mesh_report* out_report);
+qaws_status qaws_volume_mesh_tetrahedralize(qaws_volume_mesh** out_mesh, qaws_mesh_report* out_report, qaws_mesh_3d const* boundary,
+	qaws_tetrahedralize_desc const* desc);
 
 #endif /* QAWS_TETRAHEDRALIZE_H */

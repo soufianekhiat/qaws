@@ -151,14 +151,14 @@ static qaws_status tc_tessellate(qaws_curve const* c, qaws_dimension dim, qaws_c
 	return params && n > capacity ? QAWS_STATUS_BUFFER_TOO_SMALL : QAWS_STATUS_OK;
 }
 
-qaws_status qaws_curve_tessellate_2d(qaws_curve const* curve, qaws_curve_tessellation_desc const* desc, qaws_scalar* out_parameters,
-	qaws_vec2* out_points, unsigned int capacity, unsigned int* out_count)
+qaws_status qaws_curve_tessellate_2d(qaws_scalar* out_parameters, qaws_vec2* out_points, unsigned int* out_count,
+	qaws_curve const* curve, unsigned int capacity, qaws_curve_tessellation_desc const* desc)
 {
 	return tc_tessellate(curve, QAWS_DIMENSION_2D, desc, out_parameters, out_points, capacity, out_count);
 }
 
-qaws_status qaws_curve_tessellate_3d(qaws_curve const* curve, qaws_curve_tessellation_desc const* desc, qaws_scalar* out_parameters,
-	qaws_vec3* out_points, unsigned int capacity, unsigned int* out_count)
+qaws_status qaws_curve_tessellate_3d(qaws_scalar* out_parameters, qaws_vec3* out_points, unsigned int* out_count,
+	qaws_curve const* curve, unsigned int capacity, qaws_curve_tessellation_desc const* desc)
 {
 	return tc_tessellate(curve, QAWS_DIMENSION_3D, desc, out_parameters, out_points, capacity, out_count);
 }

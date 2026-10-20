@@ -85,8 +85,8 @@ static void test_flow_module(void)
 			if (ok && (best < 0 || c < best))
 				best = c;
 		}
-		qaws_flow_create(n, m, &f);
-		qaws_flow_create(n, m, &f2);
+		qaws_flow_create(&f, m, n);
+		qaws_flow_create(&f2, m, n);
 		for (a = 0; a < m; a++)
 		{
 			qaws_flow_arc(f, from[a], to[a], cap[a], cost[a]);
@@ -97,8 +97,8 @@ static void test_flow_module(void)
 			qaws_flow_supply(f, i, b[i]);
 			qaws_flow_supply(f2, i, b[i]);
 		}
-		qaws_flow_solve(f, &left, &got);
-		qaws_flow_solve(f2, NULL, NULL);
+		qaws_flow_solve(&left, &got, f);
+		qaws_flow_solve(NULL, NULL, f2);
 		{
 			int net[6] = { 0, 0, 0, 0, 0, 0 };
 			for (a = 0; a < m; a++)
@@ -126,11 +126,11 @@ static void test_flow_module(void)
 		/* more supply than room: reported, not failed */
 		qaws_flow* f = NULL;
 		int left = 0;
-		qaws_flow_create(2, 1, &f);
+		qaws_flow_create(&f, 1, 2);
 		qaws_flow_arc(f, 0, 1, 1, 3);
 		qaws_flow_supply(f, 0, 2);
 		qaws_flow_supply(f, 1, -2);
-		qaws_flow_solve(f, &left, NULL);
+		qaws_flow_solve(&left, NULL, f);
 		sprintf(msg, "flow: 2 units over an arc of 1, %d unrouted", left);
 		TEST_ASSERT(left == 1 && qaws_flow_get(f, 0) == 1, msg);
 		qaws_flow_destroy(f);
@@ -140,14 +140,14 @@ static void test_flow_module(void)
 		qaws_flow* f = NULL;
 		unsigned int targets[2] = { 2, 4 }, r1, r2, r3;
 		long long c1, c2;
-		qaws_flow_create(5, 4, &f);
+		qaws_flow_create(&f, 4, 5);
 		qaws_flow_arc(f, 0, 1, 1, 4);
 		qaws_flow_arc(f, 1, 2, 1, 1);
 		qaws_flow_arc(f, 0, 3, 1, 2);
 		qaws_flow_arc(f, 3, 4, 1, 1);
-		qaws_flow_augment(f, 0, targets, 2, &r1, &c1);
-		qaws_flow_augment(f, 0, targets, 2, &r2, &c2);
-		qaws_flow_augment(f, 0, targets, 2, &r3, NULL);
+		qaws_flow_augment(&r1, &c1, f, targets, 2, 0);
+		qaws_flow_augment(&r2, &c2, f, targets, 2, 0);
+		qaws_flow_augment(&r3, NULL, f, targets, 2, 0);
 		sprintf(msg, "flow: augmenting reaches %u at %lld, then %u at %lld, then none (%u)", r1, c1, r2, c2, r3);
 		TEST_ASSERT(r1 == 4 && c1 == 3 && r2 == 2 && c2 == 5 && r3 == QAWS_FLOW_NONE, msg);
 		qaws_flow_destroy(f);
@@ -372,7 +372,7 @@ static qaws_mesh_3d* tq_make(double const* x, unsigned int nv, unsigned int cons
 	d.face_vertices = f;
 	d.face_sizes = fs;
 	d.face_count = nf;
-	qaws_mesh_3d_create(&d, &m);
+	qaws_mesh_3d_create(&m, &d);
 	free(p);
 	return m;
 }
@@ -395,9 +395,9 @@ static qaws_mesh_3d* tq_blob(double k)
 	nv0 = qaws_mesh_3d_get_vertex_count(m);
 	e = (unsigned int*)malloc(sizeof(unsigned int) * 2 * ne);
 	src = (unsigned int*)malloc(sizeof(unsigned int) * 2 * ne);
-	qaws_mesh_3d_get_edges(m, e);
+	qaws_mesh_3d_get_edges(e, m);
 	for (i = 0; i < ne; i++)
-		if (qaws_mesh_3d_split_edge(m, e[2 * i], e[2 * i + 1], NULL, NULL, &w) == QAWS_STATUS_OK)
+		if (qaws_mesh_3d_split_edge(&w, m, NULL, NULL, e[2 * i], e[2 * i + 1]) == QAWS_STATUS_OK)
 		{
 			src[2 * (w - nv0)] = e[2 * i];
 			src[2 * (w - nv0) + 1] = e[2 * i + 1];
@@ -405,7 +405,7 @@ static qaws_mesh_3d* tq_blob(double k)
 	free(e);
 	ne = qaws_mesh_3d_get_edge_count(m);
 	e = (unsigned int*)malloc(sizeof(unsigned int) * 2 * ne);
-	qaws_mesh_3d_get_edges(m, e);
+	qaws_mesh_3d_get_edges(e, m);
 	for (i = 0; i < ne; i++)
 	{
 		unsigned int a = e[2 * i], b = e[2 * i + 1], nw, old;
@@ -420,7 +420,7 @@ static qaws_mesh_3d* tq_blob(double k)
 	free(src);
 	n = qaws_mesh_3d_get_vertex_count(m);
 	p = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * n);
-	qaws_mesh_3d_get_positions(m, p);
+	qaws_mesh_3d_get_positions(p, m);
 	for (i = 0; i < n; i++)
 	{
 		double q0 = p[3 * i], q1 = p[3 * i + 1], q2 = p[3 * i + 2], l = sqrt(q0 * q0 + q1 * q1 + q2 * q2), s;
@@ -498,11 +498,11 @@ static qaws_mesh_3d* tq_quads(qaws_mesh_3d const* m, double L, int pure, qaws_me
 	memset(&d, 0, sizeof d);
 	d.target_length = (qaws_scalar)L;
 	d.pure = pure;
-	if (qaws_mesh_quadrangulate(m, &d, &out, NULL) != QAWS_STATUS_OK)
+	if (qaws_mesh_quadrangulate(&out, NULL, m, &d) != QAWS_STATUS_OK)
 		return NULL;
 	if (seconds)
 		*seconds = (double)(clock() - t0) / CLOCKS_PER_SEC;
-	qaws_mesh_3d_measure_quality(out, q);
+	qaws_mesh_3d_measure_quality(q, out);
 	return out;
 }
 
@@ -517,10 +517,10 @@ static int tq_identical(qaws_mesh_3d const* q2, qaws_mesh_3d const* q3)
 		unsigned int nv = qaws_mesh_3d_get_vertex_count(q2), nc = qaws_mesh_3d_get_corner_count(q2);
 		qaws_scalar *p2 = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * nv), *p3 = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * nv);
 		unsigned int *f2 = (unsigned int*)malloc(sizeof(unsigned int) * (nc + nf)), *f3 = (unsigned int*)malloc(sizeof(unsigned int) * (nc + nf));
-		qaws_mesh_3d_get_positions(q2, p2);
-		qaws_mesh_3d_get_positions(q3, p3);
-		qaws_mesh_3d_get_faces(q2, f2, f2 + nc);
-		qaws_mesh_3d_get_faces(q3, f3, f3 + nc);
+		qaws_mesh_3d_get_positions(p2, q2);
+		qaws_mesh_3d_get_positions(p3, q3);
+		qaws_mesh_3d_get_faces(f2, f2 + nc, q2);
+		qaws_mesh_3d_get_faces(f3, f3 + nc, q3);
 		same = !memcmp(p2, p3, sizeof(qaws_scalar) * 3 * nv) && !memcmp(f2, f3, sizeof(unsigned int) * (nc + nf));
 		free(p2); free(p3); free(f2); free(f3);
 	}
@@ -545,14 +545,14 @@ static void test_blob(void)
 	for (k = 0; k < nk; k++)
 	{
 		qaws_mesh_3d* bk = tq_blob(1 + 1e-12 * k);
-		qaws_mesh_3d_measure_quality(bk, &in);
+		qaws_mesh_3d_measure_quality(&in, bk);
 		area = (double)in.area;
 		q1 = tq_quads(bk, 0.16, 0, &a, &t1);
 		q3 = heavy ? tq_quads(bk, 0.11, 1, &c, &t2) : NULL;
 		nf = q3 ? qaws_mesh_3d_get_face_count(q3) : 0;
 		memset(&top, 0, sizeof top);
 		if (q3)
-			qaws_mesh_3d_get_topology(q3, &top);
+			qaws_mesh_3d_get_topology(&top, q3);
 		printf("  blob x(1 + %u e-12): quad-dominant at 0.16 %u quads, %u others, %u irregular, %.2f s; pure at 0.11 %u quads of %u "
 			"(area / 0.11^2 = %.0f), closed %d, %u irregular, mean edge %.3f, %.2f s\n", k, q1 ? a.quads : 0, q1 ? a.triangles + a.polygons : 0,
 			q1 ? a.irregular : 0, t1, q3 ? c.quads : 0, nf, area / (0.11 * 0.11), top.closed, q3 ? c.irregular : 0, q3 ? (double)c.mean_edge : 0, t2);
@@ -597,7 +597,7 @@ static void test_blob(void)
 	q3 = tq_quads(blob, 0.10, 0, &c, NULL);
 	memset(&top, 0, sizeof top);
 	if (q3)
-		qaws_mesh_3d_get_topology(q3, &top);
+		qaws_mesh_3d_get_topology(&top, q3);
 	sprintf(msg, "blob quad-dominant at 0.10: %u components (1), closed %d, valid %d", top.components, top.closed,
 		q3 && qaws_mesh_3d_validate(q3) == QAWS_STATUS_OK);
 	printf("  %s\n", msg);
@@ -637,15 +637,15 @@ static void test_can(void)
 			qaws_mesh_3d_destroy(can);
 			continue;
 		}
-		qaws_mesh_3d_get_topology(q, &top);
+		qaws_mesh_3d_get_topology(&top, q);
 		nf = qaws_mesh_3d_get_face_count(q);
 		nfe = qaws_mesh_3d_get_feature_edge_count(q);
 		{
 			unsigned int nvq = qaws_mesh_3d_get_vertex_count(q), *ff = (unsigned int*)malloc(sizeof(unsigned int) * qaws_mesh_3d_get_corner_count(q));
 			unsigned int *fs = (unsigned int*)malloc(sizeof(unsigned int) * nf), *fe = (unsigned int*)malloc(sizeof(unsigned int) * 2 * (nfe + 1));
 			qaws_scalar* p = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * nvq);
-			qaws_mesh_3d_get_positions(q, p);
-			qaws_mesh_3d_get_faces(q, ff, fs);
+			qaws_mesh_3d_get_positions(p, q);
+			qaws_mesh_3d_get_faces(ff, fs, q);
 			for (f = 0, c0 = 0; f < nf; c0 += fs[f], f++)
 			{
 				double cen[3] = { 0, 0, 0 }, nn[3] = { 0, 0, 0 }, out[3];
@@ -660,7 +660,7 @@ static void test_can(void)
 				else { out[0] = cen[0]; out[1] = cen[1]; out[2] = 0; }
 				bad += nn[0] * out[0] + nn[1] * out[1] + nn[2] * out[2] <= 0;
 			}
-			qaws_mesh_3d_get_feature_edges(q, fe);
+			qaws_mesh_3d_get_feature_edges(fe, q);
 			for (i = 0; i < 2 * nfe; i++)
 				onrim &= fabs(fabs(p[3 * fe[i] + 2]) - 0.8) < 1e-6;
 			free(ff); free(fs); free(fe); free(p);
@@ -685,7 +685,7 @@ static void test_can(void)
 		qaws_mesh_3d *can = tq_can(1), *q = tq_quads(can, 0.15, 0, &a, NULL);
 		memset(&top, 0, sizeof top);
 		if (q)
-			qaws_mesh_3d_get_topology(q, &top);
+			qaws_mesh_3d_get_topology(&top, q);
 		sprintf(msg, "can quad-dominant at 0.15: %u components (1), closed %d", top.components, top.closed);
 		printf("  %s\n", msg);
 		TEST_ASSERT(q && top.components == 1 && top.closed && qaws_mesh_3d_validate(q) == QAWS_STATUS_OK, msg);
@@ -707,7 +707,7 @@ static void test_torus(void)
 	q = tq_quads(t, L, 1, &a, NULL);
 	nf = q ? qaws_mesh_3d_get_face_count(q) : 0;
 	if (q)
-		qaws_mesh_3d_get_topology(q, &top);
+		qaws_mesh_3d_get_topology(&top, q);
 	sprintf(msg, "torus pure at %.2f: %u quads of %u (area / L^2 = %.0f, +-15%%), closed %d, valid %d, irregular %u (0)", L, q ? a.quads : 0, nf,
 		area / (L * L), top.closed, q && qaws_mesh_3d_validate(q) == QAWS_STATUS_OK, q ? a.irregular : 0);
 	printf("  %s\n", msg);
@@ -788,9 +788,9 @@ static void test_disk(void)
 		q1 = tq_quads(d, L, 0, &a, NULL);
 		q2 = tq_quads(d, L, 1, &b, NULL);
 		if (q1)
-			qaws_mesh_3d_get_topology(q1, &t1);
+			qaws_mesh_3d_get_topology(&t1, q1);
 		if (q2)
-			qaws_mesh_3d_get_topology(q2, &t2);
+			qaws_mesh_3d_get_topology(&t2, q2);
 		n1 = q1 ? qaws_mesh_3d_get_face_count(q1) : 0;
 		n2 = q2 ? qaws_mesh_3d_get_face_count(q2) : 0;
 		printf("  disk at %.2f: quad-dominant %u faces, %u not quads, components %u; pure %u quads of %u, mean edge %.3f, open %d, "
@@ -811,7 +811,7 @@ static void test_disk(void)
 	memset(&t3, 0, sizeof t3);
 	q3 = tq_quads(d, 0.42, 0, &c, NULL);
 	if (q3)
-		qaws_mesh_3d_get_topology(q3, &t3);
+		qaws_mesh_3d_get_topology(&t3, q3);
 	sprintf(msg, "disk at 0.10 to 0.20: %u of %u not one valid component quad-dominant, or pure not all quads, valid, open and one "
 		"component (or not the quad-dominant mesh where that is all quads); pure's fallback taken at %u (one at least); at 0.42 "
 		"quad-dominant open %d, valid %d, components %u", bad, ran, fell, !t3.closed, q3 && qaws_mesh_3d_validate(q3) == QAWS_STATUS_OK, t3.components);
@@ -865,9 +865,9 @@ static void test_patch(void)
 	memset(&gd, 0, sizeof gd);
 	gd.target_length = (qaws_scalar)0.15;
 	gd.elements = QAWS_ELEMENTS_QUADS;
-	qaws_mesh_generate_surface(s, &gd, &m, NULL);
+	qaws_mesh_generate_surface(&m, NULL, s, &gd);
 	if (m)
-		qaws_mesh_3d_measure_quality(m, &a);
+		qaws_mesh_3d_measure_quality(&a, m);
 	sprintf(msg, "wavy patch in quads at 0.15: %u quads of %u, irregular %u (2; was 4)", m ? a.quads : 0, m ? qaws_mesh_3d_get_face_count(m) : 0,
 		m ? a.irregular : 0);
 	printf("  %s\n", msg);
@@ -894,7 +894,7 @@ static void test_timing(void)
 	memset(&h, 0, sizeof h);
 	memset(&rep, 0, sizeof rep);
 	rd.target_length = (qaws_scalar)(rf / 3);
-	qaws_mesh_remesh(blob, &rd, &dense, NULL);
+	qaws_mesh_remesh(&dense, NULL, blob, &rd);
 	if (!dense || mf_build(&h, &dense->hm, NULL) != QAWS_STATUS_OK)
 	{
 		TEST_ASSERT(0, "timing: dense blob");

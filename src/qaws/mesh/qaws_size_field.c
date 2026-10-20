@@ -94,7 +94,7 @@ static qaws_size_field* sf_new(int kind)
 	return f;
 }
 
-qaws_status qaws_size_field_create_uniform(qaws_scalar length, qaws_size_field** out)
+qaws_status qaws_size_field_create_uniform(qaws_size_field** out, qaws_scalar length)
 {
 	if (!out)
 		return QAWS_STATUS_INVALID_ARGUMENT;
@@ -108,7 +108,7 @@ qaws_status qaws_size_field_create_uniform(qaws_scalar length, qaws_size_field**
 	return QAWS_STATUS_OK;
 }
 
-qaws_status qaws_size_field_create_callback(qaws_scalar (*size)(void* user, qaws_scalar const* point), void* user, qaws_size_field** out)
+qaws_status qaws_size_field_create_callback(qaws_size_field** out, qaws_scalar (*size)(void* user, qaws_scalar const* point), void* user)
 {
 	if (!out)
 		return QAWS_STATUS_INVALID_ARGUMENT;
@@ -123,7 +123,7 @@ qaws_status qaws_size_field_create_callback(qaws_scalar (*size)(void* user, qaws
 	return QAWS_STATUS_OK;
 }
 
-qaws_status qaws_size_field_create_min(qaws_size_field const* a, qaws_size_field const* b, qaws_size_field** out)
+qaws_status qaws_size_field_create_min(qaws_size_field** out, qaws_size_field const* a, qaws_size_field const* b)
 {
 	qaws_mesh_reference const *ra, *rb;
 	if (!out)
@@ -156,7 +156,7 @@ static qaws_status sf_vertices(qaws_mesh_reference const* r, double* vs, qaws_si
 	return QAWS_STATUS_OK;
 }
 
-qaws_status qaws_size_field_create_vertices(qaws_mesh_reference const* r, qaws_scalar const* sizes, qaws_size_field** out)
+qaws_status qaws_size_field_create_vertices(qaws_size_field** out, qaws_mesh_reference const* r, qaws_scalar const* sizes)
 {
 	unsigned int nv, i;
 	double* vs;
@@ -257,7 +257,7 @@ static int sf_gradation(unsigned int n, double const* x, double* h, double beta,
 	return 1;
 }
 
-qaws_status qaws_size_field_create_curvature(qaws_mesh_reference const* r, qaws_curvature_size_desc const* desc, qaws_size_field** out)
+qaws_status qaws_size_field_create_curvature(qaws_size_field** out, qaws_mesh_reference const* r, qaws_curvature_size_desc const* desc)
 {
 	qaws_hm const* m;
 	double *kmax, *vs, lo, hi, e, th;
@@ -749,7 +749,7 @@ static int fs_pass(fs_work* w, size_t ns, double cells, double lo, double hi, do
 	return sf_gradation(w->ns, w->x, w->h, beta, fs_nbr, w);
 }
 
-qaws_status qaws_size_field_create_feature_size(qaws_mesh_reference const* r, qaws_feature_size_desc const* desc, qaws_size_field** out)
+qaws_status qaws_size_field_create_feature_size(qaws_size_field** out, qaws_mesh_reference const* r, qaws_feature_size_desc const* desc)
 {
 	qaws_feature_size_desc dd;
 	fs_work w;
@@ -870,8 +870,8 @@ qaws_mesh_reference const* qaws_size_field_get_reference(qaws_size_field const* 
 	return r ? r : qaws_size_field_get_reference(f->b);
 }
 
-qaws_status qaws_size_field_evaluate(qaws_size_field const* f, qaws_mesh_location const* loc, qaws_scalar const* points, unsigned int count,
-	qaws_scalar* out)
+qaws_status qaws_size_field_evaluate(qaws_scalar* out, qaws_size_field const* f, qaws_mesh_location const* loc, qaws_scalar const* points,
+	unsigned int count)
 {
 	qaws_mesh_reference const* r;
 	unsigned int i;

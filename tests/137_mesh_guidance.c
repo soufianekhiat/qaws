@@ -81,7 +81,7 @@ static qaws_mesh_3d* gd_sphere(unsigned int nlat, unsigned int nlon, double** ou
 	d.vertex_count = nv;
 	d.face_vertices = f;
 	d.face_count = nf;
-	qaws_mesh_3d_create(&d, &m);
+	qaws_mesh_3d_create(&m, &d);
 	free(p);
 	free(f);
 	*out_x = x;
@@ -162,12 +162,12 @@ static void gd_get(qaws_mesh_3d const* m, gd_arrays* a)
 	a->fs = (unsigned int*)malloc(sizeof(unsigned int) * (a->nf + 1));
 	a->e = (unsigned int*)malloc(sizeof(unsigned int) * (2 * a->ne + 2));
 	p = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * (a->nv + 1));
-	qaws_mesh_3d_get_positions(m, p);
+	qaws_mesh_3d_get_positions(p, m);
 	for (i = 0; i < 3 * a->nv; i++)
 		a->x[i] = (double)p[i];
 	free(p);
-	qaws_mesh_3d_get_faces(m, a->fv, a->fs);
-	qaws_mesh_3d_get_edges(m, a->e);
+	qaws_mesh_3d_get_faces(a->fv, a->fs, m);
+	qaws_mesh_3d_get_edges(a->e, m);
 }
 
 static void gd_free(gd_arrays* a)
@@ -196,7 +196,7 @@ static double gd_quads(gd_arrays const* a, unsigned int* nonquads)
 static qaws_mesh_3d* gd_quadrangulate(qaws_mesh_3d const* m, qaws_quadrangulate_desc* d, qaws_mesh_report* rep, qaws_status* st)
 {
 	qaws_mesh_3d* out = NULL;
-	*st = qaws_mesh_quadrangulate(m, d, &out, rep);
+	*st = qaws_mesh_quadrangulate(&out, rep, m, d);
 	return out;
 }
 
@@ -218,8 +218,8 @@ static void test_density(void)
 	memset(&a, 0, sizeof a);
 	for (i = 0; i < nv0; i++)
 		sizes[i] = (qaws_scalar)(x0[3 * i + 2] > 0 ? fine : 2 * fine);
-	qaws_mesh_reference_create(s, NULL, &r);
-	qaws_size_field_create_vertices(r, sizes, &sf);
+	qaws_mesh_reference_create(&r, s, NULL);
+	qaws_size_field_create_vertices(&sf, r, sizes);
 	memset(&d, 0, sizeof d);
 	d.reference = r;
 	d.size = sf;
@@ -286,7 +286,7 @@ static void test_directions(void)
 			dd.guide_directions = g;
 			dd.guide_weights = w;
 		}
-		qaws_mesh_3d_direction_field(s, &dd, q, NULL);
+		qaws_mesh_3d_direction_field(q, NULL, s, &dd);
 		mean[j & 3] = 0;
 		worst[j & 3] = 0;
 		for (i = 0; i < nv0; i++)
@@ -491,7 +491,7 @@ static void test_pinned(void)
 			d.pure = 1;
 			d.pinned = pins;
 			d.pinned_count = 4;
-			sts[j] = qaws_mesh_quadrangulate(s, &d, &m, NULL);
+			sts[j] = qaws_mesh_quadrangulate(&m, NULL, s, &d);
 		}
 		else
 		{
@@ -501,7 +501,7 @@ static void test_pinned(void)
 			d.target_length = (qaws_scalar)0.09;
 			d.pinned = pins;
 			d.pinned_count = 4;
-			sts[j] = qaws_mesh_remesh(s, &d, &m, NULL);
+			sts[j] = qaws_mesh_remesh(&m, NULL, s, &d);
 		}
 		if (!m)
 		{
@@ -578,7 +578,7 @@ static qaws_mesh_3d* gd_square(unsigned int n, double** out_x, unsigned int* out
 	d.vertex_count = nv;
 	d.face_vertices = f;
 	d.face_count = nf;
-	qaws_mesh_3d_create(&d, &m);
+	qaws_mesh_3d_create(&m, &d);
 	free(p);
 	free(f);
 	*out_x = x;
@@ -714,17 +714,17 @@ static void test_cones(void)
 	dd.cone_vertices = cv;
 	dd.cone_indices = ci;
 	dd.cone_count = 8;
-	st = qaws_mesh_3d_direction_field(s, &dd, NULL, idx);
+	st = qaws_mesh_3d_direction_field(NULL, idx, s, &dd);
 	for (i = 0, at = 0; i < 8; i++)
 	{
 		n = gd_singular(&a, idx, cv[i], 1, &at2);
 		at += at2 == 1;
 	}
 	dd.cone_count = 7;
-	s2 = qaws_mesh_3d_direction_field(s, &dd, NULL, idx);
+	s2 = qaws_mesh_3d_direction_field(NULL, idx, s, &dd);
 	dd.cone_count = 8;
 	dd.method = QAWS_DIRECTION_FIELD_LOCAL;
-	s3 = qaws_mesh_3d_direction_field(s, &dd, NULL, idx);
+	s3 = qaws_mesh_3d_direction_field(NULL, idx, s, &dd);
 	sprintf(msg, "sphere, 8 cones placed (SMOOTHEST): %s, %u singular faces, %u of 8 cones +1 on a face round their vertex; 7 cones %s; LOCAL %s",
 		qaws_status_to_string(st), n, at, qaws_status_to_string(s2), qaws_status_to_string(s3));
 	printf("  %s\n", msg);
@@ -795,7 +795,7 @@ static void test_cones(void)
 		dd.cone_vertices = pv;
 		dd.cone_indices = pi;
 		dd.cone_count = 2;
-		st = qaws_mesh_3d_direction_field(sq, &dd, NULL, idx);
+		st = qaws_mesh_3d_direction_field(NULL, idx, sq, &dd);
 		n = gd_singular(&a, idx, pv[0], 1, &ia);
 		gd_singular(&a, idx, pv[1], -1, &ib);
 		sprintf(msg, "square, a +1 and -1 pair placed (SMOOTHEST): %s, %u singular faces, +1 at its vertex %u, -1 at its %u", qaws_status_to_string(st), n,
@@ -870,7 +870,7 @@ static void test_attractors(void)
 		dd.attractor_strengths = &str;
 		dd.attractor_count = str != 0;
 		dd.attractor_radius = (qaws_scalar)0.3;
-		qaws_mesh_3d_direction_field(s, &dd, NULL, idx);
+		qaws_mesh_3d_direction_field(NULL, idx, s, &dd);
 		dist[j] = gd_cone_distance(&a, idx, at, j % 3 == 0 ? c0 : NULL);
 		ns[j] = gd_singular(&a, idx, 0, 0, &tmp);
 	}
@@ -933,20 +933,20 @@ static void test_refusals(void)
 	memset(&d, 0, sizeof d);
 	d.pinned = bad + 1;
 	d.pinned_count = 1;
-	s1 = qaws_mesh_quadrangulate(s, &d, &out, NULL);
+	s1 = qaws_mesh_quadrangulate(&out, NULL, s, &d);
 	memset(&d, 0, sizeof d);
 	d.guide_edges = bad;
 	d.guide_edge_count = 1;
-	s2 = qaws_mesh_quadrangulate(s, &d, &out, NULL);
-	qaws_mesh_reference_create(t, NULL, &rt);
+	s2 = qaws_mesh_quadrangulate(&out, NULL, s, &d);
+	qaws_mesh_reference_create(&rt, t, NULL);
 	memset(&d, 0, sizeof d);
 	d.reference = rt;
 	d.guide_directions = g;
-	s3 = qaws_mesh_quadrangulate(s, &d, &out, NULL);
+	s3 = qaws_mesh_quadrangulate(&out, NULL, s, &d);
 	memset(&rd, 0, sizeof rd);
 	rd.pinned = bad + 1;
 	rd.pinned_count = 1;
-	s4 = qaws_mesh_remesh(s, &rd, &out, NULL);
+	s4 = qaws_mesh_remesh(&out, NULL, s, &rd);
 	sprintf(msg, "refusals: a pin past the vertices %s, a guide edge past them %s, directions on a foreign reference %s, remeshing's pin %s",
 		qaws_status_to_string(s1), qaws_status_to_string(s2), qaws_status_to_string(s3), qaws_status_to_string(s4));
 	TEST_ASSERT(s1 == QAWS_STATUS_INVALID_ARGUMENT && s2 == QAWS_STATUS_INVALID_ARGUMENT && s3 == QAWS_STATUS_INVALID_ARGUMENT

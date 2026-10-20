@@ -307,7 +307,7 @@ qaws_status qaws_curve_transform_2d(qaws_curve** out_curve, qaws_curve const* cu
 		d.dimension = QAWS_DIMENSION_2D; d.degree = curve->degree;
 		d.control_points = cp; d.control_point_count = impl->control_point_count;
 		d.weights = impl->weights; d.weight_count = impl->control_point_count;
-		s = qaws_curve_create_rational_bezier_ex(&d, curve->allocator, out_curve);
+		s = qaws_curve_create_rational_bezier_ex(out_curve, &d, curve->allocator);
 		qaws_internal_free(cp);
 		return s;
 	}
@@ -360,7 +360,7 @@ qaws_status qaws_curve_transform_2d(qaws_curve** out_curve, qaws_curve const* cu
 		d.dimension = QAWS_DIMENSION_2D; d.degree = curve->degree;
 		d.coefficients = co; d.coefficient_count = n;
 		d.t_min = curve->parameter_range.min_value; d.t_max = curve->parameter_range.max_value;
-		s = qaws_curve_create_polynomial_ex(&d, curve->allocator, out_curve);
+		s = qaws_curve_create_polynomial_ex(out_curve, &d, curve->allocator);
 		qaws_internal_free(co);
 		return s;
 	}
@@ -403,7 +403,7 @@ qaws_status qaws_curve_transform_2d(qaws_curve** out_curve, qaws_curve const* cu
 		}
 		memset(&d, 0, sizeof(d));
 		d.dimension = QAWS_DIMENSION_2D; d.segments = seg; d.segment_count = impl->segment_count;
-		s = qaws_curve_create_arc_ex(&d, curve->allocator, out_curve);
+		s = qaws_curve_create_arc_ex(out_curve, &d, curve->allocator);
 		qaws_internal_free(seg);
 		return s;
 	}
@@ -429,7 +429,7 @@ qaws_status qaws_curve_transform_2d(qaws_curve** out_curve, qaws_curve const* cu
 		d.start_curvature = (qaws_scalar)((flip ? -impl->kappa_0 : impl->kappa_0) / scale);
 		d.end_curvature = (qaws_scalar)((flip ? -impl->kappa_1 : impl->kappa_1) / scale);
 		d.length = (qaws_scalar)(impl->length * scale);
-		return qaws_curve_create_clothoid_ex(&d, curve->allocator, out_curve);
+		return qaws_curve_create_clothoid_ex(out_curve, &d, curve->allocator);
 	}
 	case QAWS_CURVE_KIND_COMPOSITE:
 	{
@@ -446,7 +446,7 @@ qaws_status qaws_curve_transform_2d(qaws_curve** out_curve, qaws_curve const* cu
 		{
 			memset(&d, 0, sizeof(d));
 			d.dimension = QAWS_DIMENSION_2D; d.segments = seg; d.segment_count = impl->segment_count;
-			s = qaws_curve_create_composite_ex(&d, curve->allocator, out_curve);
+			s = qaws_curve_create_composite_ex(out_curve, &d, curve->allocator);
 		}
 		if (s != QAWS_STATUS_OK)
 			for (i = 0; i < made; i++) qaws_curve_destroy(seg[i]);

@@ -1387,7 +1387,7 @@ void qaws_mesh_2d_destroy(qaws_mesh_2d* m)
 	qaws_internal_free(m);
 }
 
-qaws_status qaws_mesh_2d_create(qaws_mesh_2d_desc const* desc, qaws_mesh_2d** out_mesh)
+qaws_status qaws_mesh_2d_create(qaws_mesh_2d** out_mesh, qaws_mesh_2d_desc const* desc)
 {
 	qaws_mesh_2d* m;
 	double* x;
@@ -1448,12 +1448,12 @@ static qaws_scalar const* tm_lift(qaws_scalar const* p, qaws_scalar* out)
 	return out;
 }
 
-qaws_status qaws_mesh_2d_split_edge(qaws_mesh_2d* mesh, unsigned int a, unsigned int b, qaws_scalar const* position, unsigned int* out_vertex)
+qaws_status qaws_mesh_2d_split_edge(unsigned int* out_vertex, qaws_mesh_2d* mesh, qaws_scalar const* position, unsigned int a, unsigned int b)
 {
 	qaws_scalar p[3];
 	if (!mesh || !mesh->core)
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	return tm_edited(mesh, qaws_mesh_3d_split_edge(mesh->core, a, b, tm_lift(position, p), NULL, out_vertex));
+	return tm_edited(mesh, qaws_mesh_3d_split_edge(out_vertex, mesh->core, tm_lift(position, p), NULL, a, b));
 }
 
 qaws_status qaws_mesh_2d_collapse_edge(qaws_mesh_2d* mesh, unsigned int a, unsigned int b, qaws_scalar const* position)
@@ -1471,19 +1471,19 @@ qaws_status qaws_mesh_2d_flip_edge(qaws_mesh_2d* mesh, unsigned int a, unsigned 
 	return tm_edited(mesh, qaws_mesh_3d_flip_edge(mesh->core, a, b));
 }
 
-qaws_status qaws_mesh_2d_split_face(qaws_mesh_2d* mesh, unsigned int face, qaws_scalar const* position, unsigned int* out_vertex)
+qaws_status qaws_mesh_2d_split_face(unsigned int* out_vertex, qaws_mesh_2d* mesh, qaws_scalar const* position, unsigned int face)
 {
 	qaws_scalar p[3];
 	if (!mesh || !mesh->core)
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	return tm_edited(mesh, qaws_mesh_3d_split_face(mesh->core, face, tm_lift(position, p), NULL, out_vertex));
+	return tm_edited(mesh, qaws_mesh_3d_split_face(out_vertex, mesh->core, tm_lift(position, p), NULL, face));
 }
 
-qaws_status qaws_mesh_2d_add_attribute(qaws_mesh_2d* mesh, qaws_attribute_desc const* desc, qaws_scalar const* values, unsigned int* out_attribute)
+qaws_status qaws_mesh_2d_add_attribute(unsigned int* out_attribute, qaws_mesh_2d* mesh, qaws_scalar const* values, qaws_attribute_desc const* desc)
 {
 	if (out_attribute)
 		*out_attribute = QAWS_MESH_NONE;
-	return mesh ? qaws_mesh_3d_add_attribute(mesh->core, desc, values, out_attribute) : QAWS_STATUS_INVALID_ARGUMENT;
+	return mesh ? qaws_mesh_3d_add_attribute(out_attribute, mesh->core, values, desc) : QAWS_STATUS_INVALID_ARGUMENT;
 }
 
 qaws_status qaws_mesh_2d_set_attribute(qaws_mesh_2d* mesh, unsigned int attribute, qaws_scalar const* values)

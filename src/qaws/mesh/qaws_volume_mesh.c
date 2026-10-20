@@ -207,7 +207,7 @@ done:
 	return QAWS_STATUS_OK;
 }
 
-qaws_status qaws_volume_mesh_create(qaws_volume_mesh_desc const* desc, qaws_volume_mesh** out_mesh)
+qaws_status qaws_volume_mesh_create(qaws_volume_mesh** out_mesh, qaws_volume_mesh_desc const* desc)
 {
 	double* x;
 	unsigned char* type;
@@ -236,7 +236,7 @@ qaws_status qaws_volume_mesh_create(qaws_volume_mesh_desc const* desc, qaws_volu
 	return st;
 }
 
-qaws_status qaws_volume_mesh_clone(qaws_volume_mesh const* m, qaws_volume_mesh** out_mesh)
+qaws_status qaws_volume_mesh_clone(qaws_volume_mesh** out_mesh, qaws_volume_mesh const* m)
 {
 	if (!out_mesh)
 		return QAWS_STATUS_INVALID_ARGUMENT;
@@ -270,7 +270,7 @@ unsigned int qaws_volume_mesh_get_facet_count(qaws_volume_mesh const* m)
 	return m ? m->f0[m->nc] : 0;
 }
 
-qaws_status qaws_volume_mesh_get_positions(qaws_volume_mesh const* m, qaws_scalar* out)
+qaws_status qaws_volume_mesh_get_positions(qaws_scalar* out, qaws_volume_mesh const* m)
 {
 	unsigned int i;
 	if (!m || (m->nv && !out))
@@ -280,7 +280,7 @@ qaws_status qaws_volume_mesh_get_positions(qaws_volume_mesh const* m, qaws_scala
 	return QAWS_STATUS_OK;
 }
 
-qaws_status qaws_volume_mesh_get_cells(qaws_volume_mesh const* m, unsigned int* out_cell_vertices, qaws_cell_type* out_cell_types)
+qaws_status qaws_volume_mesh_get_cells(unsigned int* out_cell_vertices, qaws_cell_type* out_cell_types, qaws_volume_mesh const* m)
 {
 	unsigned int c;
 	if (!m || (m->nc && !out_cell_vertices))
@@ -291,7 +291,7 @@ qaws_status qaws_volume_mesh_get_cells(qaws_volume_mesh const* m, unsigned int* 
 	return QAWS_STATUS_OK;
 }
 
-qaws_status qaws_volume_mesh_get_cell_adjacency(qaws_volume_mesh const* m, unsigned int* out_cells)
+qaws_status qaws_volume_mesh_get_cell_adjacency(unsigned int* out_cells, qaws_volume_mesh const* m)
 {
 	unsigned int f;
 	if (!m || (m->nc && !out_cells))
@@ -301,7 +301,7 @@ qaws_status qaws_volume_mesh_get_cell_adjacency(qaws_volume_mesh const* m, unsig
 	return QAWS_STATUS_OK;
 }
 
-qaws_status qaws_volume_mesh_get_boundary(qaws_volume_mesh const* m, qaws_mesh_3d** out_surface)
+qaws_status qaws_volume_mesh_get_boundary(qaws_mesh_3d** out_surface, qaws_volume_mesh const* m)
 {
 	unsigned int *map = NULL, *fv = NULL, *fs = NULL, *src = NULL, *fcell = NULL, nb = 0, nfv = 0, nvb = 0, f, k;
 	double* xb = NULL;
@@ -361,14 +361,14 @@ qaws_status qaws_volume_mesh_get_boundary(qaws_volume_mesh const* m, qaws_mesh_3
 		/* (copies split off at creation: their source's) */
 		for (k = 0; k < s->hm.nv; k++)
 			vals[k] = (qaws_scalar)src[s->hm.vsrc[k] < nvb ? s->hm.vsrc[k] : 0];
-		st = qaws_mesh_3d_add_attribute(s, &ad, vals, NULL);
+		st = qaws_mesh_3d_add_attribute(NULL, s, vals, &ad);
 		if (st == QAWS_STATUS_OK)
 		{
 			ad.name = "cell";
 			ad.element = QAWS_MESH_FACE;
 			for (k = 0; k < nb; k++)
 				vals[k] = (qaws_scalar)fcell[k];
-			st = qaws_mesh_3d_add_attribute(s, &ad, vals, NULL);
+			st = qaws_mesh_3d_add_attribute(NULL, s, vals, &ad);
 		}
 	}
 done:
@@ -464,7 +464,7 @@ double vm_hex_quality(double const* x, unsigned int const* v)
 	return q;
 }
 
-qaws_status qaws_volume_mesh_measure_quality(qaws_volume_mesh const* m, qaws_volume_quality* out)
+qaws_status qaws_volume_mesh_measure_quality(qaws_volume_quality* out, qaws_volume_mesh const* m)
 {
 	double mind = 180, maxd = 0, maxre = 0, minsj = 1, mine = HUGE_VAL, maxe = 0, sume = 0, vol = 0;
 	unsigned int c, k, ne = 0;

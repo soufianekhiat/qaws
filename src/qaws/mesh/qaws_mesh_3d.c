@@ -29,7 +29,7 @@ qaws_status hm_mesh_3d_create(double const* x, unsigned int nv, unsigned int con
 	return QAWS_STATUS_OK;
 }
 
-qaws_status qaws_mesh_3d_create(qaws_mesh_3d_desc const* desc, qaws_mesh_3d** out_mesh)
+qaws_status qaws_mesh_3d_create(qaws_mesh_3d** out_mesh, qaws_mesh_3d_desc const* desc)
 {
 	double* x;
 	unsigned int i;
@@ -49,7 +49,7 @@ qaws_status qaws_mesh_3d_create(qaws_mesh_3d_desc const* desc, qaws_mesh_3d** ou
 	return st;
 }
 
-qaws_status qaws_mesh_3d_clone(qaws_mesh_3d const* mesh, qaws_mesh_3d** out_mesh)
+qaws_status qaws_mesh_3d_clone(qaws_mesh_3d** out_mesh, qaws_mesh_3d const* mesh)
 {
 	qaws_mesh_3d* m;
 	qaws_status st;
@@ -101,7 +101,7 @@ qaws_vec3 qaws_mesh_3d_get_vertex(qaws_mesh_3d const* mesh, unsigned int vertex)
 	return r;
 }
 
-qaws_status qaws_mesh_3d_get_positions(qaws_mesh_3d const* mesh, qaws_scalar* out_positions)
+qaws_status qaws_mesh_3d_get_positions(qaws_scalar* out_positions, qaws_mesh_3d const* mesh)
 {
 	unsigned int i;
 	if (!mesh || (!out_positions && mesh->hm.nv))
@@ -121,7 +121,7 @@ qaws_status qaws_mesh_3d_set_positions(qaws_mesh_3d* mesh, qaws_scalar const* po
 	return QAWS_STATUS_OK;
 }
 
-qaws_status qaws_mesh_3d_get_faces(qaws_mesh_3d const* mesh, unsigned int* out_face_vertices, unsigned int* out_face_sizes)
+qaws_status qaws_mesh_3d_get_faces(unsigned int* out_face_vertices, unsigned int* out_face_sizes, qaws_mesh_3d const* mesh)
 {
 	qaws_hm const* m;
 	unsigned int f, c, k = 0;
@@ -140,7 +140,7 @@ qaws_status qaws_mesh_3d_get_faces(qaws_mesh_3d const* mesh, unsigned int* out_f
 	return QAWS_STATUS_OK;
 }
 
-qaws_status qaws_mesh_3d_get_edges(qaws_mesh_3d const* mesh, unsigned int* out_edge_vertices)
+qaws_status qaws_mesh_3d_get_edges(unsigned int* out_edge_vertices, qaws_mesh_3d const* mesh)
 {
 	qaws_hm const* m;
 	unsigned int c, k = 0;
@@ -186,7 +186,7 @@ void qaws_mesh_3d_get_triangle(unsigned int out_vertices[3], qaws_mesh_3d const*
 	out_vertices[2] = m->cv[c + t + 2];
 }
 
-qaws_status qaws_mesh_3d_get_triangles(qaws_mesh_3d const* mesh, unsigned int* out_triangles)
+qaws_status qaws_mesh_3d_get_triangles(unsigned int* out_triangles, qaws_mesh_3d const* mesh)
 {
 	qaws_hm const* m;
 	unsigned int f, t, k = 0;
@@ -208,8 +208,8 @@ unsigned int qaws_mesh_3d_get_vertex_source(qaws_mesh_3d const* mesh, unsigned i
 	return mesh && vertex < mesh->hm.nv ? mesh->hm.vsrc[vertex] : QAWS_MESH_NONE;
 }
 
-qaws_status qaws_mesh_3d_get_vertex_ring(qaws_mesh_3d const* mesh, unsigned int vertex, unsigned int* out_vertices,
-	unsigned int capacity, unsigned int* out_count)
+qaws_status qaws_mesh_3d_get_vertex_ring(unsigned int* out_vertices, unsigned int* out_count, qaws_mesh_3d const* mesh,
+	unsigned int capacity, unsigned int vertex)
 {
 	unsigned int n;
 	if (!mesh || vertex >= mesh->hm.nv || (!out_vertices && capacity) || !out_count)
@@ -251,7 +251,7 @@ static double m3_corner_angle(qaws_hm const* m, unsigned int c)
 	return acos(d > 1 ? 1 : d < -1 ? -1 : d);
 }
 
-qaws_status qaws_mesh_3d_get_vertex_normals(qaws_mesh_3d const* mesh, qaws_scalar* out_normals)
+qaws_status qaws_mesh_3d_get_vertex_normals(qaws_scalar* out_normals, qaws_mesh_3d const* mesh)
 {
 	qaws_hm const* m;
 	double* acc;
@@ -295,7 +295,7 @@ static unsigned int m3_find(unsigned int* uf, unsigned int i)
 	return i;
 }
 
-qaws_status qaws_mesh_3d_get_topology(qaws_mesh_3d const* mesh, qaws_mesh_topology* out_topology)
+qaws_status qaws_mesh_3d_get_topology(qaws_mesh_topology* out_topology, qaws_mesh_3d const* mesh)
 {
 	qaws_hm const* m;
 	unsigned int *uf, v, c, f, roots = 0, loops = 0;
@@ -372,7 +372,7 @@ qaws_status qaws_mesh_3d_validate(qaws_mesh_3d const* mesh)
 	return mesh ? hm_check(&mesh->hm) : QAWS_STATUS_INVALID_ARGUMENT;
 }
 
-qaws_status qaws_mesh_3d_get_face_adjacency(qaws_mesh_3d const* mesh, unsigned int* out_faces)
+qaws_status qaws_mesh_3d_get_face_adjacency(unsigned int* out_faces, qaws_mesh_3d const* mesh)
 {
 	qaws_hm const* m;
 	unsigned int f, c, k = 0;
@@ -385,7 +385,7 @@ qaws_status qaws_mesh_3d_get_face_adjacency(qaws_mesh_3d const* mesh, unsigned i
 	return QAWS_STATUS_OK;
 }
 
-qaws_status qaws_mesh_3d_create_dual(qaws_mesh_3d const* mesh, qaws_mesh_3d** out_dual)
+qaws_status qaws_mesh_3d_create_dual(qaws_mesh_3d** out_dual, qaws_mesh_3d const* mesh)
 {
 	qaws_hm const* m;
 	double* x;
@@ -464,8 +464,8 @@ static double m3_param(qaws_hm const* m, unsigned int a, unsigned int b, double 
 	return t < 0 ? 0 : t > 1 ? 1 : t;
 }
 
-qaws_status qaws_mesh_3d_split_edge(qaws_mesh_3d* mesh, unsigned int a, unsigned int b, qaws_scalar const* position,
-	qaws_mesh_location const* footpoint, unsigned int* out_vertex)
+qaws_status qaws_mesh_3d_split_edge(unsigned int* out_vertex, qaws_mesh_3d* mesh, qaws_scalar const* position, qaws_mesh_location const* footpoint,
+	unsigned int a, unsigned int b)
 {
 	qaws_hm* m;
 	unsigned int c, v, k;
@@ -562,8 +562,8 @@ qaws_status qaws_mesh_3d_flip_edge(qaws_mesh_3d* mesh, unsigned int a, unsigned 
 	return QAWS_STATUS_OK;
 }
 
-qaws_status qaws_mesh_3d_split_face(qaws_mesh_3d* mesh, unsigned int face, qaws_scalar const* position,
-	qaws_mesh_location const* footpoint, unsigned int* out_vertex)
+qaws_status qaws_mesh_3d_split_face(unsigned int* out_vertex, qaws_mesh_3d* mesh, qaws_scalar const* position,
+	qaws_mesh_location const* footpoint, unsigned int face)
 {
 	qaws_hm* m;
 	unsigned int k, v;
@@ -706,7 +706,7 @@ unsigned int qaws_mesh_3d_get_feature_edge_count(qaws_mesh_3d const* mesh)
 	return n;
 }
 
-qaws_status qaws_mesh_3d_get_feature_edges(qaws_mesh_3d const* mesh, unsigned int* out_edge_vertices)
+qaws_status qaws_mesh_3d_get_feature_edges(unsigned int* out_edge_vertices, qaws_mesh_3d const* mesh)
 {
 	qaws_hm const* m;
 	unsigned int c, k = 0;
@@ -760,8 +760,8 @@ static void m3_attr_io(qaws_hm* m, unsigned int a, qaws_scalar* out, qaws_scalar
 		}
 }
 
-qaws_status qaws_mesh_3d_add_attribute(qaws_mesh_3d* mesh, qaws_attribute_desc const* desc, qaws_scalar const* values,
-	unsigned int* out_attribute)
+qaws_status qaws_mesh_3d_add_attribute(unsigned int* out_attribute, qaws_mesh_3d* mesh, qaws_scalar const* values,
+	qaws_attribute_desc const* desc)
 {
 	unsigned int a;
 	if (out_attribute)
@@ -783,7 +783,7 @@ unsigned int qaws_mesh_3d_get_attribute_count(qaws_mesh_3d const* mesh)
 	return mesh ? mesh->hm.na : 0;
 }
 
-qaws_status qaws_mesh_3d_find_attribute(qaws_mesh_3d const* mesh, char const* name, unsigned int* out_attribute)
+qaws_status qaws_mesh_3d_find_attribute(unsigned int* out_attribute, qaws_mesh_3d const* mesh, char const* name)
 {
 	unsigned int a;
 	if (!mesh || !name || !out_attribute)
@@ -798,7 +798,7 @@ qaws_status qaws_mesh_3d_find_attribute(qaws_mesh_3d const* mesh, char const* na
 	return QAWS_STATUS_OUT_OF_RANGE;
 }
 
-qaws_status qaws_mesh_3d_get_attribute_desc(qaws_mesh_3d const* mesh, unsigned int attribute, qaws_attribute_desc* out_desc)
+qaws_status qaws_mesh_3d_get_attribute_desc(qaws_attribute_desc* out_desc, qaws_mesh_3d const* mesh, unsigned int attribute)
 {
 	hm_attr const* at;
 	if (!mesh || attribute >= mesh->hm.na || !out_desc)
@@ -811,7 +811,7 @@ qaws_status qaws_mesh_3d_get_attribute_desc(qaws_mesh_3d const* mesh, unsigned i
 	return QAWS_STATUS_OK;
 }
 
-qaws_status qaws_mesh_3d_get_attribute(qaws_mesh_3d const* mesh, unsigned int attribute, qaws_scalar* out_values)
+qaws_status qaws_mesh_3d_get_attribute(qaws_scalar* out_values, qaws_mesh_3d const* mesh, unsigned int attribute)
 {
 	if (!mesh || attribute >= mesh->hm.na || !out_values)
 		return QAWS_STATUS_INVALID_ARGUMENT;
@@ -844,7 +844,7 @@ int qaws_mesh_3d_has_footpoints(qaws_mesh_3d const* mesh)
 	return mesh && mesh->hm.foot != NULL;
 }
 
-qaws_status qaws_mesh_3d_get_footpoints(qaws_mesh_3d const* mesh, qaws_mesh_location* out_locations)
+qaws_status qaws_mesh_3d_get_footpoints(qaws_mesh_location* out_locations, qaws_mesh_3d const* mesh)
 {
 	if (!mesh || !mesh->hm.foot || (!out_locations && mesh->hm.nv))
 		return QAWS_STATUS_INVALID_ARGUMENT;
@@ -874,7 +874,7 @@ qaws_status qaws_mesh_3d_set_footpoints(qaws_mesh_3d* mesh, qaws_mesh_location c
 /*  Quality                                                                 */
 /* ======================================================================== */
 
-qaws_status qaws_mesh_3d_measure_quality(qaws_mesh_3d const* mesh, qaws_mesh_quality* out_quality)
+qaws_status qaws_mesh_3d_measure_quality(qaws_mesh_quality* out_quality, qaws_mesh_3d const* mesh)
 {
 	qaws_hm const* m;
 	unsigned int f, c, v, ne = 0, nt = 0, regular;

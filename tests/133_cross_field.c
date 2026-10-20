@@ -55,7 +55,7 @@ static qaws_mesh_3d* cft_make(double const* x, unsigned int nv, unsigned int con
 	d.face_vertices = f;
 	d.face_sizes = fs;
 	d.face_count = nf;
-	qaws_mesh_3d_create(&d, &m);
+	qaws_mesh_3d_create(&m, &d);
 	free(p);
 	return m;
 }
@@ -65,7 +65,7 @@ static double* cft_positions(qaws_mesh_3d const* m)
 	unsigned int n = qaws_mesh_3d_get_vertex_count(m), i;
 	qaws_scalar* p = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * (n + 1));
 	double* x = (double*)malloc(sizeof(double) * 3 * (n + 1));
-	qaws_mesh_3d_get_positions(m, p);
+	qaws_mesh_3d_get_positions(p, m);
 	for (i = 0; i < 3 * n; i++)
 		x[i] = (double)p[i];
 	free(p);
@@ -136,14 +136,14 @@ static void test_ldlt(void)
 	nnz = cft_grid(k, 1e-3, rp, col, val, xyz);
 	for (i = 0; i < n; i++)
 		b[i] = cft_rand();
-	st = qaws_internal_ldlt_factor(&f, n, rp, col, val, xyz, 0);
+	st = qaws_internal_ldlt_factor(&f, rp, col, val, xyz, n, 0);
 	if (st != QAWS_STATUS_OK)
 	{
 		TEST_ASSERT(0, "ldlt: the grid factored");
 		goto done;
 	}
 	fill100 = f.nnz + n;
-	qaws_internal_ldlt_solve(&f, b, x);
+	qaws_internal_ldlt_solve(x, &f, b);
 	cft_matvec(n, rp, col, val, x, y);
 	for (i = 0; i < n; i++)
 		y[i] -= b[i];
@@ -169,10 +169,10 @@ static void test_ldlt(void)
 #endif
 	/* fill: nested dissection against the natural order on 60 x 60 */
 	cft_grid(60, 1e-3, rp, col, val, xyz);
-	if (qaws_internal_ldlt_factor(&f, 3600, rp, col, val, xyz, 0) == QAWS_STATUS_OK)
+	if (qaws_internal_ldlt_factor(&f, rp, col, val, xyz, 3600, 0) == QAWS_STATUS_OK)
 		fill60nd = f.nnz + 3600;
 	qaws_internal_ldlt_free(&f);
-	if (qaws_internal_ldlt_factor(&f, 3600, rp, col, val, NULL, 0) == QAWS_STATUS_OK)
+	if (qaws_internal_ldlt_factor(&f, rp, col, val, NULL, 3600, 0) == QAWS_STATUS_OK)
 		fill60nat = f.nnz + 3600;
 	qaws_internal_ldlt_free(&f);
 	bound = 12.0 * n * log2(sqrt((double)n));
@@ -221,10 +221,10 @@ static void test_ldlt(void)
 		}
 		crp[N] = at;
 		/* (100 rows: dissected) */
-		st = qaws_internal_ldlt_factor(&f, N, crp, ccol, cval, cxyz, 0);
+		st = qaws_internal_ldlt_factor(&f, crp, ccol, cval, cxyz, N, 0);
 		if (st == QAWS_STATUS_OK)
 		{
-			qaws_internal_ldlt_solve(&f, b, x);
+			qaws_internal_ldlt_solve(x, &f, b);
 			qaws_internal_ldlt_free(&f);
 		}
 		/* dense Gaussian elimination with partial pivoting */
@@ -276,10 +276,10 @@ static void test_ldlt(void)
 		cft_grid(40, 0, rp, col, val, xyz);
 		for (i = 0; i < 1600; i++)
 			b[i] = i < 800 ? 1 : -1;
-		st = qaws_internal_ldlt_factor(&f, 1600, rp, col, val, xyz, 1e-8);
+		st = qaws_internal_ldlt_factor(&f, rp, col, val, xyz, 1600, 1e-8);
 		if (st == QAWS_STATUS_OK)
 		{
-			qaws_internal_ldlt_solve(&f, b, x);
+			qaws_internal_ldlt_solve(x, &f, b);
 			for (i = 0; i < 1600; i++)
 				finite &= x[i] == x[i] && fabs(x[i]) < 1e30;
 			qaws_internal_ldlt_free(&f);
@@ -430,9 +430,9 @@ static qaws_mesh_3d* cft_blob(void)
 	nv0 = qaws_mesh_3d_get_vertex_count(m);
 	e = (unsigned int*)malloc(sizeof(unsigned int) * 2 * ne);
 	src = (unsigned int*)malloc(sizeof(unsigned int) * 2 * ne);
-	qaws_mesh_3d_get_edges(m, e);
+	qaws_mesh_3d_get_edges(e, m);
 	for (i = 0; i < ne; i++)
-		if (qaws_mesh_3d_split_edge(m, e[2 * i], e[2 * i + 1], NULL, NULL, &vv) == QAWS_STATUS_OK)
+		if (qaws_mesh_3d_split_edge(&vv, m, NULL, NULL, e[2 * i], e[2 * i + 1]) == QAWS_STATUS_OK)
 		{
 			src[2 * (vv - nv0)] = e[2 * i];
 			src[2 * (vv - nv0) + 1] = e[2 * i + 1];
@@ -440,7 +440,7 @@ static qaws_mesh_3d* cft_blob(void)
 	free(e);
 	ne = qaws_mesh_3d_get_edge_count(m);
 	e = (unsigned int*)malloc(sizeof(unsigned int) * 2 * ne);
-	qaws_mesh_3d_get_edges(m, e);
+	qaws_mesh_3d_get_edges(e, m);
 	for (i = 0; i < ne; i++)
 	{
 		unsigned int a = e[2 * i], b = e[2 * i + 1], nw, old;
@@ -477,7 +477,7 @@ static qaws_mesh_3d* cft_remesh(qaws_mesh_3d const* m, double L)
 	qaws_mesh_3d* out = NULL;
 	memset(&d, 0, sizeof d);
 	d.target_length = (qaws_scalar)L;
-	qaws_mesh_remesh(m, &d, &out, NULL);
+	qaws_mesh_remesh(&out, NULL, m, &d);
 	return out;
 }
 
@@ -513,7 +513,7 @@ static qaws_status cft_field(qaws_mesh_3d const* m, unsigned int n, int aligned,
 	d.method = QAWS_DIRECTION_FIELD_SMOOTHEST;
 	d.symmetry = n;
 	d.curvature_aligned = aligned;
-	st = qaws_mesh_3d_direction_field(m, &d, dir, idx);
+	st = qaws_mesh_3d_direction_field(dir, idx, m, &d);
 	*plus = *other = 0;
 	for (f = 0; st == QAWS_STATUS_OK && f < nf; f++)
 	{
@@ -642,7 +642,7 @@ static void test_components(void)
 	cf_system* sys = NULL;
 	char msg[400];
 	memcpy(x, xs, sizeof(double) * 3 * ns);
-	qaws_mesh_3d_get_triangles(s, t);
+	qaws_mesh_3d_get_triangles(t, s);
 	for (j = 0; j < k; j++)
 		for (i = 0; i < k; i++)
 		{
@@ -714,8 +714,8 @@ static void test_can(void)
 	tri = (unsigned int*)malloc(sizeof(unsigned int) * 3 * nf);
 	e = (unsigned int*)malloc(sizeof(unsigned int) * 2 * ne);
 	x = cft_positions(d);
-	qaws_mesh_3d_get_triangles(d, tri);
-	qaws_mesh_3d_get_edges(d, e);
+	qaws_mesh_3d_get_triangles(tri, d);
+	qaws_mesh_3d_get_edges(e, d);
 	for (f = 0; f < ne; f++)
 	{
 		double const *a = x + 3 * e[2 * f], *b = x + 3 * e[2 * f + 1];
@@ -780,8 +780,8 @@ static void test_cube(void)
 	tri = (unsigned int*)malloc(sizeof(unsigned int) * 3 * nf);
 	fe = (unsigned int*)malloc(sizeof(unsigned int) * 2 * (nfe + 1));
 	x = cft_positions(d);
-	qaws_mesh_3d_get_triangles(d, tri);
-	qaws_mesh_3d_get_feature_edges(d, fe);
+	qaws_mesh_3d_get_triangles(tri, d);
+	qaws_mesh_3d_get_feature_edges(fe, d);
 	st = cft_field(d, 4, 0, dir, idx, &plus, &other);
 	for (f = 0; st == QAWS_STATUS_OK && f < nf; f++)
 	{
@@ -866,12 +866,12 @@ static void test_refusals(void)
 	char msg[300];
 	memset(&d, 0, sizeof d);
 	d.symmetry = 6;
-	s1 = qaws_mesh_3d_direction_field(t, &d, NULL, NULL);
+	s1 = qaws_mesh_3d_direction_field(NULL, NULL, t, &d);
 	d.method = (qaws_direction_field_method)7;
-	s2 = qaws_mesh_3d_direction_field(t, &d, NULL, NULL);
+	s2 = qaws_mesh_3d_direction_field(NULL, NULL, t, &d);
 	d.method = QAWS_DIRECTION_FIELD_SMOOTHEST;
 	d.symmetry = 3;
-	s3 = qaws_mesh_3d_direction_field(t, &d, NULL, NULL);
+	s3 = qaws_mesh_3d_direction_field(NULL, NULL, t, &d);
 	sprintf(msg, "refusals: LOCAL 6-symmetric %s, method 7 %s, SMOOTHEST 3-symmetric %s", qaws_status_to_string(s1), qaws_status_to_string(s2),
 		qaws_status_to_string(s3));
 	TEST_ASSERT(s1 == QAWS_STATUS_UNSUPPORTED_OPERATION && s2 == QAWS_STATUS_INVALID_ARGUMENT && s3 == QAWS_STATUS_UNSUPPORTED_OPERATION, msg);
@@ -887,7 +887,7 @@ static unsigned int cft_quads(qaws_mesh_3d const* m, double L, qaws_status* st, 
 	memset(&rep, 0, sizeof rep);
 	d.target_length = (qaws_scalar)L;
 	d.pure = 1;
-	*st = qaws_mesh_quadrangulate(m, &d, &out, &rep);
+	*st = qaws_mesh_quadrangulate(&out, &rep, m, &d);
 	qaws_mesh_3d_destroy(out);
 	*mean = (double)rep.quality.mean_edge;
 	*quads = rep.quality.quads;

@@ -188,7 +188,7 @@ the size of the last step.
 sd.progress.cancel = my_cancel;      /* int (*)(void* user): non-zero stops */
 sd.progress.on_step = my_on_step;    /* void (*)(report, positions, user), after each accepted step of _solve */
 sd.progress.user_data = &my_state;
-qaws_repulsive_curves_solver_objective(s, positions, &E, gradient);   /* what the solver lowers, and its gradient */
+qaws_repulsive_curves_solver_objective(&E, gradient, s, positions);   /* what the solver lowers, and its gradient */
 ```
 
 The same `progress` member is in the mesh desc. It applies to the curves
@@ -249,8 +249,8 @@ solver's creation return INVALID_ARGUMENT.
 ### Allocators (test 145)
 
 ```c
-qaws_repulsive_curves_create_ex(&cd, &allocator, &curves);
-qaws_repulsive_curves_solver_create_ex(curves, &sd, positions, &allocator, &solver);
+qaws_repulsive_curves_create_ex(&curves, &cd, &allocator);
+qaws_repulsive_curves_solver_create_ex(&solver, curves, positions, &sd, &allocator);
 ```
 
 Every creator has an `_ex` variant (curves, meshes, control points, and the

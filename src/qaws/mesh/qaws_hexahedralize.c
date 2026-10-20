@@ -516,7 +516,7 @@ static qaws_status hx_frame_field(qaws_mesh_3d const* boundary, double h, qaws_v
 	memset(&cen, 0, sizeof cen);
 	memset(&td, 0, sizeof td);
 	td.target_length = (qaws_scalar)(0.5 * h);
-	st = qaws_volume_mesh_tetrahedralize(boundary, &td, &t, NULL);
+	st = qaws_volume_mesh_tetrahedralize(&t, NULL, boundary, &td);
 	if (st != QAWS_STATUS_OK)
 		return st;
 	st = QAWS_STATUS_ALLOCATION_FAILURE;
@@ -824,8 +824,8 @@ static qaws_status hx_frame_field(qaws_mesh_3d const* boundary, double h, qaws_v
 	if (st == QAWS_STATUS_OK)
 	{
 		qaws_mesh_3d* bd = NULL;
-		if (qaws_volume_mesh_get_boundary(*out_mesh, &bd) == QAWS_STATUS_OK)
-			qaws_mesh_3d_measure_quality(bd, &rep->quality);
+		if (qaws_volume_mesh_get_boundary(&bd, *out_mesh) == QAWS_STATUS_OK)
+			qaws_mesh_3d_measure_quality(&rep->quality, bd);
 		qaws_mesh_3d_destroy(bd);
 	}
 done:
@@ -838,8 +838,8 @@ done:
 
 /* ---- the operator ----------------------------------------------------------- */
 
-qaws_status qaws_volume_mesh_hexahedralize(qaws_mesh_3d const* boundary, qaws_hexahedralize_desc const* desc, qaws_volume_mesh** out_mesh,
-	qaws_mesh_report* out_report)
+qaws_status qaws_volume_mesh_hexahedralize(qaws_volume_mesh** out_mesh, qaws_mesh_report* out_report, qaws_mesh_3d const* boundary,
+	qaws_hexahedralize_desc const* desc)
 {
 	static unsigned char const F[6][4] = { { 0, 3, 2, 1 }, { 4, 5, 6, 7 }, { 0, 1, 5, 4 }, { 1, 2, 6, 5 }, { 2, 3, 7, 6 }, { 3, 0, 4, 7 } };
 	static int const FN[6][3] = { { 0, 0, -1 }, { 0, 0, 1 }, { 0, -1, 0 }, { 1, 0, 0 }, { 0, 1, 0 }, { -1, 0, 0 } };
@@ -878,7 +878,7 @@ qaws_status qaws_volume_mesh_hexahedralize(qaws_mesh_3d const* boundary, qaws_he
 	x = (double*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(double), (3 * (size_t)hm->nv + 1)));
 	if (!tri || !x)
 		goto done;
-	qaws_mesh_3d_get_triangles(boundary, tri);
+	qaws_mesh_3d_get_triangles(tri, boundary);
 	memcpy(x, hm->x, sizeof(double) * 3 * hm->nv);
 	for (k = 0; k < 3; k++)
 	{
@@ -934,7 +934,7 @@ qaws_status qaws_volume_mesh_hexahedralize(qaws_mesh_3d const* boundary, qaws_he
 	if (!g.in || !g.keep || !hx_inside(&g, x, tri, nt))
 		goto done;
 	/* the reference: projections, the margin from the surface */
-	st = qaws_mesh_reference_create(boundary, NULL, &ref);
+	st = qaws_mesh_reference_create(&ref, boundary, NULL);
 	if (st != QAWS_STATUS_OK)
 		goto done;
 	st = QAWS_STATUS_ALLOCATION_FAILURE;
@@ -1183,8 +1183,8 @@ qaws_status qaws_volume_mesh_hexahedralize(qaws_mesh_3d const* boundary, qaws_he
 	if (st == QAWS_STATUS_OK)
 	{
 		qaws_mesh_3d* b = NULL;
-		if (qaws_volume_mesh_get_boundary(*out_mesh, &b) == QAWS_STATUS_OK)
-			qaws_mesh_3d_measure_quality(b, &rep.quality);
+		if (qaws_volume_mesh_get_boundary(&b, *out_mesh) == QAWS_STATUS_OK)
+			qaws_mesh_3d_measure_quality(&rep.quality, b);
 		qaws_mesh_3d_destroy(b);
 	}
 done:

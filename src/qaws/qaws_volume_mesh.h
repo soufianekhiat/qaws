@@ -47,23 +47,23 @@ typedef struct qaws_volume_mesh_desc
 	unsigned int cell_count;
 } qaws_volume_mesh_desc;
 
-qaws_status qaws_volume_mesh_create(qaws_volume_mesh_desc const* desc, qaws_volume_mesh** out_mesh);
-qaws_status qaws_volume_mesh_clone(qaws_volume_mesh const* mesh, qaws_volume_mesh** out_mesh);
+qaws_status qaws_volume_mesh_create(qaws_volume_mesh** out_mesh, qaws_volume_mesh_desc const* desc);
+qaws_status qaws_volume_mesh_clone(qaws_volume_mesh** out_mesh, qaws_volume_mesh const* mesh);
 void qaws_volume_mesh_destroy(qaws_volume_mesh* mesh);
 
 unsigned int qaws_volume_mesh_get_vertex_count(qaws_volume_mesh const* mesh);
 unsigned int qaws_volume_mesh_get_cell_count(qaws_volume_mesh const* mesh);
 unsigned int qaws_volume_mesh_get_corner_count(qaws_volume_mesh const* mesh);   /* the cells' vertex lists' total length */
 unsigned int qaws_volume_mesh_get_facet_count(qaws_volume_mesh const* mesh);    /* 4 per tetrahedron, 6 per hexahedron, 5 per prism or pyramid */
-qaws_status qaws_volume_mesh_get_positions(qaws_volume_mesh const* mesh, qaws_scalar* out_positions);
+qaws_status qaws_volume_mesh_get_positions(qaws_scalar* out_positions, qaws_volume_mesh const* mesh);
 /* each cell's vertices in turn; out_cell_types may be NULL */
-qaws_status qaws_volume_mesh_get_cells(qaws_volume_mesh const* mesh, unsigned int* out_cell_vertices, qaws_cell_type* out_cell_types);
+qaws_status qaws_volume_mesh_get_cells(unsigned int* out_cell_vertices, qaws_cell_type* out_cell_types, qaws_volume_mesh const* mesh);
 /* per facet (cells in turn, each in its type's facet order): the cell across, QAWS_MESH_NONE on the border */
-qaws_status qaws_volume_mesh_get_cell_adjacency(qaws_volume_mesh const* mesh, unsigned int* out_cells);
+qaws_status qaws_volume_mesh_get_cell_adjacency(unsigned int* out_cells, qaws_volume_mesh const* mesh);
 
 /* The border: its facets as a surface mesh turned outward, with a vertex
    attribute "vertex" (the volume's vertex) and a face attribute "cell". */
-qaws_status qaws_volume_mesh_get_boundary(qaws_volume_mesh const* mesh, qaws_mesh_3d** out_surface);
+qaws_status qaws_volume_mesh_get_boundary(qaws_mesh_3d** out_surface, qaws_volume_mesh const* mesh);
 
 /* The structure's invariants: every cell positively oriented, facets
    matched pairwise with the same vertices turned the other way. OK, or
@@ -80,6 +80,6 @@ typedef struct qaws_volume_quality
 	qaws_scalar volume;
 } qaws_volume_quality;
 
-qaws_status qaws_volume_mesh_measure_quality(qaws_volume_mesh const* mesh, qaws_volume_quality* out_quality);
+qaws_status qaws_volume_mesh_measure_quality(qaws_volume_quality* out_quality, qaws_volume_mesh const* mesh);
 
 #endif /* QAWS_VOLUME_MESH_H */

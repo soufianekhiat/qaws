@@ -63,7 +63,7 @@ static qaws_mesh_3d* tg_make(double const* x, unsigned int nv, unsigned int cons
 	d.vertex_count = nv;
 	d.face_vertices = f;
 	d.face_count = nf;
-	qaws_mesh_3d_create(&d, &m);
+	qaws_mesh_3d_create(&m, &d);
 	free(p);
 	return m;
 }
@@ -85,9 +85,9 @@ static qaws_mesh_3d* tg_blob(void)
 	nv0 = qaws_mesh_3d_get_vertex_count(m);
 	e = (unsigned int*)malloc(sizeof(unsigned int) * 2 * ne);
 	src = (unsigned int*)malloc(sizeof(unsigned int) * 2 * ne);
-	qaws_mesh_3d_get_edges(m, e);
+	qaws_mesh_3d_get_edges(e, m);
 	for (i = 0; i < ne; i++)
-		if (qaws_mesh_3d_split_edge(m, e[2 * i], e[2 * i + 1], NULL, NULL, &w) == QAWS_STATUS_OK)
+		if (qaws_mesh_3d_split_edge(&w, m, NULL, NULL, e[2 * i], e[2 * i + 1]) == QAWS_STATUS_OK)
 		{
 			src[2 * (w - nv0)] = e[2 * i];
 			src[2 * (w - nv0) + 1] = e[2 * i + 1];
@@ -95,7 +95,7 @@ static qaws_mesh_3d* tg_blob(void)
 	free(e);
 	ne = qaws_mesh_3d_get_edge_count(m);
 	e = (unsigned int*)malloc(sizeof(unsigned int) * 2 * ne);
-	qaws_mesh_3d_get_edges(m, e);
+	qaws_mesh_3d_get_edges(e, m);
 	for (i = 0; i < ne; i++)
 	{
 		unsigned int a = e[2 * i], b = e[2 * i + 1], nw, old;
@@ -110,7 +110,7 @@ static qaws_mesh_3d* tg_blob(void)
 	free(src);
 	n = qaws_mesh_3d_get_vertex_count(m);
 	p = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * n);
-	qaws_mesh_3d_get_positions(m, p);
+	qaws_mesh_3d_get_positions(p, m);
 	for (i = 0; i < n; i++)
 	{
 		double q[3], l, s;
@@ -293,8 +293,8 @@ static double tg_foot(qaws_mesh_3d const* q, qaws_mesh_reference const* r)
 	qaws_mesh_location* l = (qaws_mesh_location*)malloc(sizeof(qaws_mesh_location) * (nv + 1));
 	qaws_scalar *x = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (3 * nv + 3)), *y = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (3 * nv + 3));
 	double worst = 0;
-	qaws_mesh_3d_get_positions(q, x);
-	if (qaws_mesh_3d_get_footpoints(q, l) != QAWS_STATUS_OK || qaws_mesh_reference_evaluate(r, l, nv, y, NULL, NULL) != QAWS_STATUS_OK)
+	qaws_mesh_3d_get_positions(x, q);
+	if (qaws_mesh_3d_get_footpoints(l, q) != QAWS_STATUS_OK || qaws_mesh_reference_evaluate(y, NULL, NULL, r, l, nv) != QAWS_STATUS_OK)
 		worst = HUGE_VAL;
 	for (i = 0; i < nv && worst < HUGE_VAL; i++)
 		for (k = 0; k < 3; k++)
@@ -314,21 +314,21 @@ static qaws_mesh_3d* tg_quads(qaws_mesh_3d const* m, double L, qaws_quad_method 
 	clock_t t0;
 	memset(s, 0, sizeof *s);
 	memset(&d, 0, sizeof d);
-	if (qaws_mesh_reference_create(m, NULL, &r) != QAWS_STATUS_OK)
+	if (qaws_mesh_reference_create(&r, m, NULL) != QAWS_STATUS_OK)
 		return NULL;
 	d.method = method;
 	d.reference = r;
 	d.target_length = (qaws_scalar)L;
 	d.pure = 1;
 	t0 = clock();
-	if (qaws_mesh_quadrangulate(m, &d, &out, &rep) == QAWS_STATUS_OK)
+	if (qaws_mesh_quadrangulate(&out, &rep, m, &d) == QAWS_STATUS_OK)
 	{
 		unsigned int nv = qaws_mesh_3d_get_vertex_count(out), ne = qaws_mesh_3d_get_edge_count(out), nc = qaws_mesh_3d_get_corner_count(out);
 		unsigned int nf = qaws_mesh_3d_get_face_count(out), i, f, c0, *e, *deg, *fv, *fs, *across;
 		unsigned char* bd;
 		s->ms = 1000.0 * (double)(clock() - t0) / CLOCKS_PER_SEC;
-		qaws_mesh_3d_measure_shape(out, &s->s, NULL);
-		qaws_mesh_3d_measure_quality(out, &q);
+		qaws_mesh_3d_measure_shape(&s->s, NULL, out);
+		qaws_mesh_3d_measure_quality(&q, out);
 		s->quads = q.quads;
 		s->faces = qaws_mesh_3d_get_face_count(out);
 		s->made = rep.iterations;
@@ -338,7 +338,7 @@ static qaws_mesh_3d* tg_quads(qaws_mesh_3d const* m, double L, qaws_quad_method 
 		e = (unsigned int*)malloc(sizeof(unsigned int) * (2 * ne + 2));
 		deg = (unsigned int*)calloc(nv + 1, sizeof(unsigned int));
 		bd = (unsigned char*)calloc(nv + 1, 1);
-		qaws_mesh_3d_get_edges(out, e);
+		qaws_mesh_3d_get_edges(e, out);
 		for (i = 0; i < ne; i++)
 		{
 			deg[e[2 * i]]++;
@@ -347,8 +347,8 @@ static qaws_mesh_3d* tg_quads(qaws_mesh_3d const* m, double L, qaws_quad_method 
 		fv = (unsigned int*)malloc(sizeof(unsigned int) * (nc + 1));
 		fs = (unsigned int*)malloc(sizeof(unsigned int) * (nf + 1));
 		across = (unsigned int*)malloc(sizeof(unsigned int) * (nc + 1));
-		qaws_mesh_3d_get_faces(out, fv, fs);
-		qaws_mesh_3d_get_face_adjacency(out, across);
+		qaws_mesh_3d_get_faces(fv, fs, out);
+		qaws_mesh_3d_get_face_adjacency(across, out);
 		for (f = 0, c0 = 0; f < nf; c0 += fs[f], f++)
 			for (i = 0; i < fs[f]; i++)
 				if (across[c0 + i] == QAWS_MESH_NONE)

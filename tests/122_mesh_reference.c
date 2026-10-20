@@ -67,7 +67,7 @@ static qaws_mesh_3d* ts_make(ts_mesh const* t)
 	d.vertex_count = t->nv;
 	d.face_vertices = t->f;
 	d.face_count = t->nf;
-	qaws_mesh_3d_create(&d, &m);
+	qaws_mesh_3d_create(&m, &d);
 	free(p);
 	return m;
 }
@@ -148,7 +148,7 @@ static qaws_mesh_reference* ts_ref(qaws_mesh_3d const* m, qaws_interpolant kind,
 	memset(&d, 0, sizeof d);
 	d.interpolant = kind;
 	d.normals = normals;
-	qaws_mesh_reference_create(m, &d, &r);
+	qaws_mesh_reference_create(&r, m, &d);
 	return r;
 }
 
@@ -236,8 +236,8 @@ static void test_sphere(void)
 	{
 		qaws_mesh_location l;
 		qaws_scalar x[3];
-		okv &= qaws_mesh_reference_get_vertex_location(pn, i, &l) == QAWS_STATUS_OK;
-		qaws_mesh_reference_evaluate(pn, &l, 1, x, NULL, NULL);
+		okv &= qaws_mesh_reference_get_vertex_location(&l, pn, i) == QAWS_STATUS_OK;
+		qaws_mesh_reference_evaluate(x, NULL, NULL, pn, &l, 1);
 		vmax = fmax(vmax, fabs(x[0] - t.x[3 * i]) + fabs(x[1] - t.x[3 * i + 1]) + fabs(x[2] - t.x[3 * i + 2]));
 	}
 	/* the patches meet along their edges: each triangle edge's points from both sides */
@@ -265,8 +265,8 @@ static void test_sphere(void)
 	{
 		qaws_mesh_location l = ts_loc(&s, nt);
 		qaws_scalar x[3], y[3], k[8];
-		qaws_mesh_reference_evaluate(pn, &l, 1, x, NULL, k);
-		qaws_mesh_reference_evaluate(lin, &l, 1, y, NULL, NULL);
+		qaws_mesh_reference_evaluate(x, NULL, k, pn, &l, 1);
+		qaws_mesh_reference_evaluate(y, NULL, NULL, lin, &l, 1);
 		epn = fmax(epn, fabs(sqrt(x[0] * x[0] + x[1] * x[1] + x[2] * x[2]) - 1));
 		elin = fmax(elin, fabs(sqrt(y[0] * y[0] + y[1] * y[1] + y[2] * y[2]) - 1));
 		kmax = fmax(kmax, fmax(fabs(k[0] - 1), fabs(k[1] - 1)));
@@ -310,7 +310,7 @@ static void test_cylinder_and_cube(void)
 	{
 		qaws_mesh_location l = ts_loc(&s, nt);
 		qaws_scalar k[8];
-		qaws_mesh_reference_evaluate(r, &l, 1, NULL, NULL, k);
+		qaws_mesh_reference_evaluate(NULL, NULL, k, r, &l, 1);
 		k1e = fmax(k1e, fabs(k[0] - 1 / 1.5));
 		k2e = fmax(k2e, fabs(k[1]));
 		dax = fmax(dax, fabs(k[4]));   /* (d1's z: round the cylinder, not along it) */
@@ -325,9 +325,9 @@ static void test_cylinder_and_cube(void)
 		qaws_mesh_3d_desc d;
 		memset(&d, 0, sizeof d);
 		d.positions = x; d.vertex_count = 8; d.face_vertices = f; d.face_sizes = fs; d.face_count = 6;
-		qaws_mesh_3d_create(&d, &cube);
+		qaws_mesh_3d_create(&cube, &d);
 		for (i = 0; cube && i < 6; i++)
-			qaws_mesh_3d_split_face(cube, i, NULL, NULL, NULL);
+			qaws_mesh_3d_split_face(NULL, cube, NULL, NULL, i);
 		if (cube)
 			qaws_mesh_3d_detect_features(cube, (qaws_scalar)(M_PI / 6), 0, 0);
 		rc = cube ? ts_ref(cube, QAWS_INTERPOLANT_PN, NULL) : NULL;
@@ -340,7 +340,7 @@ static void test_cylinder_and_cube(void)
 			qaws_mesh_location l = ts_loc(&s, nt);
 			qaws_scalar x[3];
 			double mx;
-			qaws_mesh_reference_evaluate(rc, &l, 1, x, NULL, NULL);
+			qaws_mesh_reference_evaluate(x, NULL, NULL, rc, &l, 1);
 			mx = fmax(fabs(x[0]), fmax(fabs(x[1]), fabs(x[2])));
 			off = fmax(off, mx - 1);
 			onface = fmax(onface, 1 - mx);
@@ -392,7 +392,7 @@ static void test_projection(void)
 			unsigned int tt;
 			q[0] = 2.6 * ts_u(&s) - 1.3; q[1] = 2.6 * ts_u(&s) - 1.3; q[2] = 2.6 * ts_u(&s) - 1.3;
 			p[0] = (qaws_scalar)q[0]; p[1] = (qaws_scalar)q[1]; p[2] = (qaws_scalar)q[2];
-			qaws_mesh_reference_project(r, p, 1, NULL, &l, &d);
+			qaws_mesh_reference_project(&l, &d, r, p, NULL, 1);
 			for (tt = 0; tt < nt; tt++)
 				best = fmin(best, mr_closest_on_patch(r, tt, q, &a, &b));
 			emax[kind] = fmax(emax[kind], fabs(d - sqrt(best)));
@@ -412,13 +412,13 @@ static void test_projection(void)
 		qaws_mesh_location l0, l1, hint;
 		memset(&d, 0, sizeof d);
 		d.positions = x; d.vertex_count = 8; d.face_vertices = f; d.face_count = 4;
-		qaws_mesh_3d_create(&d, &two);
+		qaws_mesh_3d_create(&two, &d);
 		r = two ? ts_ref(two, QAWS_INTERPOLANT_PN, NULL) : NULL;
 		hint.patch = 0; hint.a = (qaws_scalar)0.2; hint.b = (qaws_scalar)0.2;
 		if (r)
 		{
-			qaws_mesh_reference_project(r, p, 1, NULL, &l0, &d0);
-			qaws_mesh_reference_project(r, p, 1, &hint, &l1, &d1);
+			qaws_mesh_reference_project(&l0, &d0, r, p, NULL, 1);
+			qaws_mesh_reference_project(&l1, &d1, r, p, &hint, 1);
 		}
 		sprintf(msg, "two sheets 0.1 apart, a point 0.06 above the first: unhinted to triangle %u at %.4g, hinted on the first to triangle %u at %.4g",
 			l0.patch, (double)d0, l1.patch, (double)d1);
@@ -464,9 +464,9 @@ static void test_walk(void)
 			double ang = 2 * M_PI * i / 20, len = 0.05 + 0.02 * i;
 			qaws_scalar w[3];
 			w[0] = (qaws_scalar)(len * cos(ang)); w[1] = (qaws_scalar)(len * sin(ang)); w[2] = 0;
-			qaws_mesh_reference_project(r, p, 1, NULL, &from, NULL);
-			qaws_mesh_reference_walk(r, from, w, &to);
-			qaws_mesh_reference_evaluate(r, &to, 1, x, NULL, NULL);
+			qaws_mesh_reference_project(&from, NULL, r, p, NULL, 1);
+			qaws_mesh_reference_walk(&to, r, w, from);
+			qaws_mesh_reference_evaluate(x, NULL, NULL, r, &to, 1);
 			e1 = fmax(e1, fabs(x[0] - (p[0] + w[0])) + fabs(x[1] - (p[1] + w[1])));
 		}
 	}
@@ -495,9 +495,9 @@ static void test_walk(void)
 			{
 				/* the walked length is |w|: unrolled, its horizontal and vertical parts */
 				double h = L * cos(th), v = L * sin(th) * 0.4, len = sqrt(h * h + v * v);
-				qaws_mesh_reference_project(rp, start, 1, NULL, &from, NULL);
-				qaws_mesh_reference_walk(rp, from, w, &to);
-				qaws_mesh_reference_evaluate(rp, &to, 1, x, NULL, NULL);
+				qaws_mesh_reference_project(&from, NULL, rp, start, NULL, 1);
+				qaws_mesh_reference_walk(&to, rp, w, from);
+				qaws_mesh_reference_evaluate(x, NULL, NULL, rp, &to, 1);
 				(void)len;
 				pp = p0 + h;
 				zz = z0 + v;
@@ -538,20 +538,20 @@ static void test_attributes_and_refusals(void)
 		vals[i] = (qaws_scalar)(t.x[3 * i] - 2 * t.x[3 * i + 1]);
 	memset(&d, 0, sizeof d);
 	d.name = "f"; d.element = QAWS_MESH_VERTEX; d.components = 1;
-	qaws_mesh_3d_add_attribute(m, &d, vals, &va);
+	qaws_mesh_3d_add_attribute(&va, m, vals, &d);
 	for (i = 0; i < t.nf; i++)
 		vals[i] = (qaws_scalar)i;
 	d.name = "id"; d.element = QAWS_MESH_FACE; d.rule = QAWS_ATTRIBUTE_NEAREST;
-	qaws_mesh_3d_add_attribute(m, &d, vals, &fa);
+	qaws_mesh_3d_add_attribute(&fa, m, vals, &d);
 	r = ts_ref(m, QAWS_INTERPOLANT_LINEAR, NULL);
 	nt = r ? qaws_mesh_reference_get_triangle_count(r) : 0;
 	for (i = 0; r && i < 500; i++)
 	{
 		qaws_mesh_location l = ts_loc(&s, nt);
 		qaws_scalar x[3], v, id;
-		qaws_mesh_reference_evaluate(r, &l, 1, x, NULL, NULL);
-		qaws_mesh_reference_evaluate_attribute(r, va, &l, 1, &v);
-		qaws_mesh_reference_evaluate_attribute(r, fa, &l, 1, &id);
+		qaws_mesh_reference_evaluate(x, NULL, NULL, r, &l, 1);
+		qaws_mesh_reference_evaluate_attribute(&v, r, &l, 1, va);
+		qaws_mesh_reference_evaluate_attribute(&id, r, &l, 1, fa);
 		ev = fmax(ev, fabs(v - (x[0] - 2 * x[1])));
 		ef = fmax(ef, fabs(id - (double)l.patch));
 	}
@@ -564,9 +564,9 @@ static void test_attributes_and_refusals(void)
 		qaws_status s1, s2;
 		memset(&dd, 0, sizeof dd);
 		dd.interpolant = QAWS_INTERPOLANT_NAGATA;
-		s1 = qaws_mesh_reference_create(m, &dd, &bad);
+		s1 = qaws_mesh_reference_create(&bad, m, &dd);
 		l.patch = 100000; l.a = 0; l.b = 0;
-		s2 = r ? qaws_mesh_reference_evaluate(r, &l, 1, NULL, NULL, NULL) : QAWS_STATUS_OK;
+		s2 = r ? qaws_mesh_reference_evaluate(NULL, NULL, NULL, r, &l, 1) : QAWS_STATUS_OK;
 		sprintf(msg, "refusals: a reserved interpolant %s, a location off the triangles %s", qaws_status_to_string(s1), qaws_status_to_string(s2));
 		TEST_ASSERT(s1 == QAWS_STATUS_UNSUPPORTED_OPERATION && !bad && s2 == QAWS_STATUS_INVALID_ARGUMENT, msg);
 	}

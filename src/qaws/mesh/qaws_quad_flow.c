@@ -176,7 +176,7 @@ static qaws_status qf_network(qaws_hm const* dm, mf_level const* L, int const* T
 	}
 	if (ne > 0xFFFFFFFFu / 16 || nf > 0xFFFFFFFFu / 32)   /* 8 ne + 10 nf + 1 arcs count in unsigned int */
 		return QAWS_STATUS_ALLOCATION_FAILURE;
-	st = qaws_flow_create(2 * nf + 1, 8 * ne + 10 * nf + 1, &net->flow);
+	st = qaws_flow_create(&net->flow, 8 * ne + 10 * nf + 1, 2 * nf + 1);
 	net->rec = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (8 * (size_t)ne + 10 * (size_t)nf + 1)));
 	if (st != QAWS_STATUS_OK || !net->rec)
 	{
@@ -744,7 +744,7 @@ unsigned int qf_consistent(qaws_hm const* dm, mf_level const* L, int* T, unsigne
 			rep.supply += (unsigned int)(abs(E[0]) + abs(E[1]));
 		}
 		qaws_flow_supply(net.flow, 2 * nf, sum);
-		qaws_flow_solve(net.flow, &un, &rep.cost);
+		qaws_flow_solve(&un, &rep.cost, net.flow);
 		rep.unrouted = (unsigned int)un;
 	}
 	rep.cut = net.cut;
@@ -775,7 +775,7 @@ unsigned int qf_consistent(qaws_hm const* dm, mf_level const* L, int* T, unsigne
 				if (seen[k] && k != f)
 					targets[nt++] = 2 * k;
 			targets[nt++] = 2 * nf;
-			qaws_flow_augment(net.flow, 2 * f, targets, nt, &reached, NULL);
+			qaws_flow_augment(&reached, NULL, net.flow, targets, nt, 2 * f);
 			if (reached == QAWS_FLOW_NONE)
 				continue;
 			rep.paths++;

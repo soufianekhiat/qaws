@@ -488,8 +488,8 @@ static int ff_solve(ff_sys const* S, qaws_volume_mesh const* m, double* z)
 	return 1;
 }
 
-qaws_status qaws_volume_mesh_frame_field(struct qaws_volume_mesh const* mesh, qaws_frame_field_desc const* desc, qaws_scalar* out_frames,
-	unsigned char* out_singular)
+qaws_status qaws_volume_mesh_frame_field(qaws_scalar* out_frames, unsigned char* out_singular, struct qaws_volume_mesh const* mesh,
+	qaws_frame_field_desc const* desc)
 {
 	double* R;
 	unsigned int c;

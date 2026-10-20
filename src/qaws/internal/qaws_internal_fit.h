@@ -43,29 +43,29 @@ qaws_status qaws_internal_fit_bspline_range(
 
 /* The same, every allocation (scratch and the curve) through the allocator (NULL: malloc) */
 qaws_status qaws_internal_fit_bspline_ex(
-	qaws_allocator const* allocator,
-	qaws_dimension dimension,
-	unsigned int degree,
+	qaws_curve** out_curve,
 	qaws_scalar const* sample_params,
 	qaws_scalar const* sample_coords,
+	qaws_dimension dimension,
 	unsigned int sample_count,
 	unsigned int control_point_count,
-	qaws_curve** out_curve);
+	unsigned int degree,
+	qaws_allocator const* allocator);
 
 qaws_status qaws_internal_fit_bspline_range_ex(
-	qaws_allocator const* allocator,
-	qaws_dimension dimension,
-	unsigned int degree,
+	qaws_curve** out_curve,
 	qaws_scalar const* sample_params,
 	qaws_scalar const* sample_coords,
+	qaws_dimension dimension,
 	unsigned int sample_count,
 	unsigned int control_point_count,
+	unsigned int degree,
 	qaws_scalar t_min,
 	qaws_scalar t_max,
-	qaws_curve** out_curve);
+	qaws_allocator const* allocator);
 
 /* m parameters in [0, 1] from m points of dim coordinates: steps by the chord lengths (DEFAULT, CHORDAL), equal (UNIFORM)
    or by their square roots (CENTRIPETAL); all 0 but the last when the points coincide */
-void qaws_internal_fit_parameters(qaws_scalar const* data, unsigned int m, unsigned int dim, qaws_parameterization param, qaws_scalar* out);
+void qaws_internal_fit_parameters(qaws_scalar* out, qaws_scalar const* data, unsigned int dim, unsigned int m, qaws_parameterization param);
 
 #endif /* QAWS_INTERNAL_FIT_H */

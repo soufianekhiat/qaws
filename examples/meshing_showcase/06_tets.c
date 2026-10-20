@@ -27,11 +27,11 @@ static void ms_cutaway(er_canvas* c, qaws_volume_mesh const* v, int (*keep)(doub
 	unsigned int* cv = (unsigned int*)malloc(sizeof(unsigned int) * 4 * nc);
 	unsigned int* adj = (unsigned int*)malloc(sizeof(unsigned int) * 4 * nc);
 	unsigned char* kept = (unsigned char*)malloc(nc);
-	qaws_volume_mesh_get_positions(v, ps);
+	qaws_volume_mesh_get_positions(ps, v);
 	for (i = 0; i < 3 * nv; i++)
 		x[i] = (double)ps[i];
-	qaws_volume_mesh_get_cells(v, cv, NULL);
-	qaws_volume_mesh_get_cell_adjacency(v, adj);
+	qaws_volume_mesh_get_cells(cv, NULL, v);
+	qaws_volume_mesh_get_cell_adjacency(adj, v);
 	for (i = 0; i < nc; i++)
 	{
 		double cen[3] = { 0, 0, 0 };
@@ -83,13 +83,13 @@ static qaws_volume_mesh* ms_tets(qaws_mesh_3d const* b, char* sub, char const* w
 	qaws_volume_quality q;
 	qaws_status st;
 	memset(&d, 0, sizeof d);
-	st = qaws_volume_mesh_tetrahedralize(b, &d, &v, NULL);
+	st = qaws_volume_mesh_tetrahedralize(&v, NULL, b, &d);
 	if (st != QAWS_STATUS_OK)
 	{
 		printf("  tetrahedralize failed: %s\n", qaws_status_to_string(st));
 		return NULL;
 	}
-	qaws_volume_mesh_measure_quality(v, &q);
+	qaws_volume_mesh_measure_quality(&q, v);
 	sprintf(sub, "%u tetrahedra, dihedral %.0f..%.0f", q.tetrahedra, (double)q.min_dihedral, (double)q.max_dihedral);
 	printf("  %s: %u tetrahedra, %u vertices, dihedral %.1f..%.1f, radius-edge %.2f, volume %.6f, %s\n", what, q.tetrahedra,
 		qaws_volume_mesh_get_vertex_count(v), (double)q.min_dihedral, (double)q.max_dihedral, (double)q.max_radius_edge, (double)q.volume,
@@ -103,7 +103,7 @@ static void ms_vpanel(er_canvas* c, int x, int y, int w, int h, qaws_volume_mesh
 	unsigned int n = qaws_volume_mesh_get_vertex_count(v), i;
 	qaws_scalar* ps = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * n);
 	double* p = (double*)malloc(sizeof(double) * 3 * n);
-	qaws_volume_mesh_get_positions(v, ps);
+	qaws_volume_mesh_get_positions(ps, v);
 	for (i = 0; i < 3 * n; i++)
 		p[i] = (double)ps[i];
 	er_panel(c, x, y + 72, w, h - 72, p, n, yaw, pitch, 0.06);
@@ -141,7 +141,7 @@ static void demo_tets(void)
 		ms_vpanel(c, 733, 0, 733, 700, v2, 0.62, 0.55, "a box, a corner out", sub);
 		ms_cutaway(c, v2, ms_keep_box, tan, wire);
 	}
-	qaws_mesh_reference_create(blob, NULL, &rb);
+	qaws_mesh_reference_create(&rb, blob, NULL);
 	rblob = rb ? ms_remesh(blob, rb, 0.12, NULL, NULL) : NULL;
 	v3 = rblob ? ms_tets(rblob, sub, "blob") : NULL;
 	if (v3)

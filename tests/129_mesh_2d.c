@@ -67,9 +67,9 @@ static void test_annulus(void)
 		unsigned int nv = qaws_mesh_3d_get_vertex_count(v), nf = qaws_mesh_3d_get_face_count(v), same = 1, flat = 1;
 		unsigned int* fv = (unsigned int*)malloc(sizeof(unsigned int) * 3 * (nf + 1));
 		qaws_scalar* x = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * (nv + 1));
-		qaws_mesh_3d_get_topology(v, &top);
-		qaws_mesh_3d_get_faces(v, fv, NULL);
-		qaws_mesh_3d_get_positions(v, x);
+		qaws_mesh_3d_get_topology(&top, v);
+		qaws_mesh_3d_get_faces(fv, NULL, v);
+		qaws_mesh_3d_get_positions(x, v);
 		for (i = 0; i < qaws_mesh_2d_get_triangle_count(m) && i < nf; i++)
 		{
 			unsigned int t[3];
@@ -91,7 +91,7 @@ static void test_annulus(void)
 		{
 			qaws_mesh_quality q;
 			v = qaws_mesh_2d_get_mesh(m);
-			qaws_mesh_3d_measure_quality(v, &q);
+			qaws_mesh_3d_measure_quality(&q, v);
 			sprintf(msg, "annulus quadrangulated: the view %u quads (the mesh %u), %u triangles", q.quads, qaws_mesh_2d_get_quad_count(m), q.triangles);
 			TEST_ASSERT(q.quads == qaws_mesh_2d_get_quad_count(m) && q.quads > 0 && q.triangles == 0 && qaws_mesh_3d_validate(v) == QAWS_STATUS_OK, msg);
 		}
@@ -118,7 +118,7 @@ static void test_edits(void)
 	d.vertex_count = 4;
 	d.face_vertices = f;
 	d.face_count = 2;
-	s1 = qaws_mesh_2d_create(&d, &m);
+	s1 = qaws_mesh_2d_create(&m, &d);
 	if (s1 != QAWS_STATUS_OK || !m)
 	{
 		TEST_ASSERT(0, "square from arrays: created");
@@ -126,9 +126,9 @@ static void test_edits(void)
 	}
 	nb = qaws_mesh_2d_get_boundary_edge_count(m);
 	/* the diagonal split at its midpoint, a face split at its centroid, a flip, a collapse */
-	s2 = qaws_mesh_2d_split_edge(m, 0, 2, NULL, &nv);
+	s2 = qaws_mesh_2d_split_edge(&nv, m, NULL, 0, 2);
 	nt1 = qaws_mesh_2d_get_triangle_count(m);
-	s3 = qaws_mesh_2d_split_face(m, 0, NULL, NULL);
+	s3 = qaws_mesh_2d_split_face(NULL, m, NULL, 0);
 	nt2 = qaws_mesh_2d_get_triangle_count(m);
 	s4 = qaws_mesh_2d_flip_edge(m, 0, 1);                    /* a border edge: refused */
 	s5 = qaws_mesh_3d_can_collapse_edge(qaws_mesh_2d_get_mesh(m), 4, 0) ? qaws_mesh_2d_collapse_edge(m, 5, 4, NULL) : QAWS_STATUS_OK;
@@ -144,7 +144,7 @@ static void test_edits(void)
 		ad.name = "id";
 		ad.element = QAWS_MESH_VERTEX;
 		ad.components = 1;
-		s6 = qaws_mesh_2d_add_attribute(m, &ad, vals, &a);
+		s6 = qaws_mesh_2d_add_attribute(&a, m, vals, &ad);
 		free(vals);
 	}
 	sprintf(msg, "square edited: created %s, %u boundary edges; split edge %s (vertex %u, %u triangles), split face %s (%u), a border flip %s, a collapse %s (%u), area %.12f, boundary edges %u, validate %s, attribute %s, remesh %s",

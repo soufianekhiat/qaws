@@ -44,16 +44,16 @@ static int tensor_product_eval(
 	qaws_vec3* row_blended;
 	qaws_vec3* row_du;
 
-	row_blended = (qaws_vec3*)qaws_internal_scratch(allocator, stack_row_blended, sizeof(stack_row_blended), M * sizeof(qaws_vec3));
+	row_blended = (qaws_vec3*)qaws_internal_scratch(stack_row_blended, sizeof(stack_row_blended), M * sizeof(qaws_vec3), allocator);
 	if (!row_blended) return 0;
 
 	row_du = NULL;
 	if (out_du)
 	{
-		row_du = (qaws_vec3*)qaws_internal_scratch(allocator, stack_row_du, sizeof(stack_row_du), M * sizeof(qaws_vec3));
+		row_du = (qaws_vec3*)qaws_internal_scratch(stack_row_du, sizeof(stack_row_du), M * sizeof(qaws_vec3), allocator);
 		if (!row_du)
 		{
-			qaws_internal_scratch_release(allocator, stack_row_blended, row_blended);
+			qaws_internal_scratch_release(stack_row_blended, row_blended, allocator);
 			return 0;
 		}
 	}
@@ -77,8 +77,8 @@ static int tensor_product_eval(
 			M, v);
 	}
 
-	qaws_internal_scratch_release(allocator, stack_row_blended, row_blended);
-	qaws_internal_scratch_release(allocator, stack_row_du, row_du);
+	qaws_internal_scratch_release(stack_row_blended, row_blended, allocator);
+	qaws_internal_scratch_release(stack_row_du, row_du, allocator);
 	return 1;
 }
 
@@ -134,16 +134,16 @@ static qaws_status gordon_surface_eval_sampled(
 	memset(&T_dv, 0, sizeof(T_dv));
 
 	/* === L_u(u,v): evaluate each u-curve at u, blend in v === */
-	u_pts = (qaws_vec3*)qaws_internal_scratch(surface->allocator, stack_u_pts, sizeof(stack_u_pts), M * sizeof(qaws_vec3));
+	u_pts = (qaws_vec3*)qaws_internal_scratch(stack_u_pts, sizeof(stack_u_pts), M * sizeof(qaws_vec3), surface->allocator);
 	if (!u_pts) return QAWS_STATUS_ALLOCATION_FAILURE;
 
 	u_du = NULL;
 	if (need_du)
 	{
-		u_du = (qaws_vec3*)qaws_internal_scratch(surface->allocator, stack_u_du, sizeof(stack_u_du), M * sizeof(qaws_vec3));
+		u_du = (qaws_vec3*)qaws_internal_scratch(stack_u_du, sizeof(stack_u_du), M * sizeof(qaws_vec3), surface->allocator);
 		if (!u_du)
 		{
-			qaws_internal_scratch_release(surface->allocator, stack_u_pts, u_pts);
+			qaws_internal_scratch_release(stack_u_pts, u_pts, surface->allocator);
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 		}
 	}
@@ -163,8 +163,8 @@ static qaws_status gordon_surface_eval_sampled(
 		status = qaws_curve_evaluate_3d(&cr, impl->u_curves[i], t_curve, cf);
 		if (status != QAWS_STATUS_OK)
 		{
-			qaws_internal_scratch_release(surface->allocator, stack_u_pts, u_pts);
-			qaws_internal_scratch_release(surface->allocator, stack_u_du, u_du);
+			qaws_internal_scratch_release(stack_u_pts, u_pts, surface->allocator);
+			qaws_internal_scratch_release(stack_u_du, u_du, surface->allocator);
 			return status;
 		}
 
@@ -186,20 +186,20 @@ static qaws_status gordon_surface_eval_sampled(
 			M, v);
 	}
 
-	qaws_internal_scratch_release(surface->allocator, stack_u_pts, u_pts);
-	qaws_internal_scratch_release(surface->allocator, stack_u_du, u_du);
+	qaws_internal_scratch_release(stack_u_pts, u_pts, surface->allocator);
+	qaws_internal_scratch_release(stack_u_du, u_du, surface->allocator);
 
 	/* === L_v(u,v): evaluate each v-curve at v, blend in u === */
-	v_pts = (qaws_vec3*)qaws_internal_scratch(surface->allocator, stack_v_pts, sizeof(stack_v_pts), N * sizeof(qaws_vec3));
+	v_pts = (qaws_vec3*)qaws_internal_scratch(stack_v_pts, sizeof(stack_v_pts), N * sizeof(qaws_vec3), surface->allocator);
 	if (!v_pts) return QAWS_STATUS_ALLOCATION_FAILURE;
 
 	v_dv = NULL;
 	if (need_dv)
 	{
-		v_dv = (qaws_vec3*)qaws_internal_scratch(surface->allocator, stack_v_dv, sizeof(stack_v_dv), N * sizeof(qaws_vec3));
+		v_dv = (qaws_vec3*)qaws_internal_scratch(stack_v_dv, sizeof(stack_v_dv), N * sizeof(qaws_vec3), surface->allocator);
 		if (!v_dv)
 		{
-			qaws_internal_scratch_release(surface->allocator, stack_v_pts, v_pts);
+			qaws_internal_scratch_release(stack_v_pts, v_pts, surface->allocator);
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 		}
 	}
@@ -219,8 +219,8 @@ static qaws_status gordon_surface_eval_sampled(
 		status = qaws_curve_evaluate_3d(&cr, impl->v_curves[i], t_curve, cf);
 		if (status != QAWS_STATUS_OK)
 		{
-			qaws_internal_scratch_release(surface->allocator, stack_v_pts, v_pts);
-			qaws_internal_scratch_release(surface->allocator, stack_v_dv, v_dv);
+			qaws_internal_scratch_release(stack_v_pts, v_pts, surface->allocator);
+			qaws_internal_scratch_release(stack_v_dv, v_dv, surface->allocator);
 			return status;
 		}
 
@@ -242,8 +242,8 @@ static qaws_status gordon_surface_eval_sampled(
 			N, u);
 	}
 
-	qaws_internal_scratch_release(surface->allocator, stack_v_pts, v_pts);
-	qaws_internal_scratch_release(surface->allocator, stack_v_dv, v_dv);
+	qaws_internal_scratch_release(stack_v_pts, v_pts, surface->allocator);
+	qaws_internal_scratch_release(stack_v_dv, v_dv, surface->allocator);
 
 	/* === T(u,v): tensor product of intersection grid === */
 	if (!tensor_product_eval(surface->allocator, impl, u, v, &T_pos,
@@ -719,9 +719,9 @@ static qaws_surface_vtable const gordon_surface_vtable = {
 };
 
 qaws_status qaws_surface_create_gordon_ex(
+	qaws_surface** out_surface,
 	qaws_surface_gordon_desc const* desc,
-	qaws_allocator const* allocator,
-	qaws_surface** out_surface)
+	qaws_allocator const* allocator)
 {
 	qaws_surface* surface;
 	qaws_surface_gordon_impl* impl;
@@ -847,5 +847,5 @@ qaws_status qaws_surface_create_gordon(
 	qaws_surface** out_surface,
 	qaws_surface_gordon_desc const* desc)
 {
-	return qaws_surface_create_gordon_ex(desc, NULL, out_surface);
+	return qaws_surface_create_gordon_ex(out_surface, desc, NULL);
 }

@@ -756,17 +756,17 @@ static void eval_subcurve(
 /* ------------------------------------------------------------------ */
 
 void qaws_internal_yuksel_blend(
-	qaws_yuksel_subcurve const* sc1,
-	qaws_yuksel_subcurve const* sc2,
-	int is_first_span,
-	int is_last_span,
-	qaws_scalar t,
-	unsigned int dim,
-	unsigned int eval_flags,
 	qaws_scalar* out_pos,
 	qaws_scalar* out_d1,
 	qaws_scalar* out_d2,
-	qaws_scalar* out_d3)
+	qaws_scalar* out_d3,
+	qaws_yuksel_subcurve const* sc1,
+	qaws_yuksel_subcurve const* sc2,
+	unsigned int dim,
+	int is_first_span,
+	int is_last_span,
+	qaws_scalar t,
+	unsigned int eval_flags)
 {
 	qaws_scalar t_sc1, t_sc2;
 	qaws_scalar c_val, s_val, c2, s2;
@@ -921,8 +921,8 @@ static void yuksel_blend_eval(
 	unsigned int n = impl->control_point_count;
 	unsigned int i1 = impl->closed ? span_index % n : span_index;
 	unsigned int i2 = impl->closed ? (span_index + 1) % n : span_index + 1;
-	qaws_internal_yuksel_blend(&impl->subcurves[i1], &impl->subcurves[i2], !impl->closed && span_index == 0,
-		!impl->closed && span_index == n - 2, t, dim, eval_flags, out_pos, out_d1, out_d2, out_d3);
+	qaws_internal_yuksel_blend(out_pos, out_d1, out_d2,
+		out_d3, &impl->subcurves[i1], &impl->subcurves[i2], dim, !impl->closed && span_index == 0, !impl->closed && span_index == n - 2, t, eval_flags);
 }
 
 /* The sub-curve at point i of the mode (unknown modes: Bezier) */
@@ -1461,9 +1461,9 @@ static qaws_curve_vtable const yuksel_bezier_vtable = {
 /* ------------------------------------------------------------------ */
 
 qaws_status qaws_curve_create_yuksel_ex(
+	qaws_curve** out_curve,
 	qaws_yuksel_desc const* desc,
-	qaws_allocator const* allocator,
-	qaws_curve** out_curve)
+	qaws_allocator const* allocator)
 {
 	qaws_status status;
 	qaws_curve* curve;
@@ -1535,7 +1535,7 @@ qaws_status qaws_curve_create_yuksel_ex(
 	impl->closed = desc->closed;
 	impl->mode = (int)desc->mode;
 
-	impl->subcurves = (qaws_yuksel_subcurve*)qaws_internal_calloc(allocator, n, sizeof(qaws_yuksel_subcurve));
+	impl->subcurves = (qaws_yuksel_subcurve*)qaws_internal_calloc(n, sizeof(qaws_yuksel_subcurve), allocator);
 	if (!impl->subcurves) {
 		qaws_internal_dealloc(impl->control_points, allocator);
 		qaws_internal_dealloc(impl, allocator);
@@ -1557,5 +1557,5 @@ qaws_status qaws_curve_create_yuksel(
 	qaws_curve** out_curve,
 	qaws_yuksel_desc const* desc)
 {
-	return qaws_curve_create_yuksel_ex(desc, NULL, out_curve);
+	return qaws_curve_create_yuksel_ex(out_curve, desc, NULL);
 }

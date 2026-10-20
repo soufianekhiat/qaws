@@ -339,9 +339,9 @@ static qaws_surface_vtable const ruled_surface_vtable = {
 };
 
 qaws_status qaws_surface_create_ruled_ex(
+	qaws_surface** out_surface,
 	qaws_surface_ruled_desc const* desc,
-	qaws_allocator const* allocator,
-	qaws_surface** out_surface)
+	qaws_allocator const* allocator)
 {
 	qaws_surface* surface;
 	qaws_surface_ruled_impl* impl;
@@ -383,5 +383,5 @@ qaws_status qaws_surface_create_ruled(
 	qaws_surface** out_surface,
 	qaws_surface_ruled_desc const* desc)
 {
-	return qaws_surface_create_ruled_ex(desc, NULL, out_surface);
+	return qaws_surface_create_ruled_ex(out_surface, desc, NULL);
 }

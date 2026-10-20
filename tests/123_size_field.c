@@ -91,7 +91,7 @@ static qaws_mesh_3d* sf_icosphere(unsigned int level, double radius, qaws_scalar
 	d.vertex_count = nv;
 	d.face_vertices = f;
 	d.face_count = nf;
-	qaws_mesh_3d_create(&d, &m);
+	qaws_mesh_3d_create(&m, &d);
 	free(x);
 	free(f);
 	free(p);
@@ -110,12 +110,12 @@ static void test_simple(void)
 	qaws_scalar pts[6] = { 0, 0, 0, 2, 0, 0 }, out[2] = { 0, 0 };
 	qaws_status s1;
 	char msg[300];
-	qaws_size_field_create_uniform((qaws_scalar)0.15, &u);
-	qaws_size_field_create_callback(sf_by_x, NULL, &cb);
-	qaws_size_field_create_min(u, cb, &mn);
-	s1 = qaws_size_field_create_uniform(0, &bad);
+	qaws_size_field_create_uniform(&u, (qaws_scalar)0.15);
+	qaws_size_field_create_callback(&cb, sf_by_x, NULL);
+	qaws_size_field_create_min(&mn, u, cb);
+	s1 = qaws_size_field_create_uniform(&bad, 0);
 	if (mn)
-		qaws_size_field_evaluate(mn, NULL, pts, 2, out);
+		qaws_size_field_evaluate(out, mn, NULL, pts, 2);
 	sprintf(msg, "uniform 0.15 and 0.1 + 0.05 x: their min %.3g at x = 0, %.3g at x = 2; a zero length %s", (double)out[0], (double)out[1],
 		qaws_status_to_string(s1));
 	TEST_ASSERT(u && cb && mn && fabs(out[0] - 0.1) < 1e-6 && fabs(out[1] - 0.15) < 1e-6 && s1 == QAWS_STATUS_INVALID_ARGUMENT && !bad, msg);
@@ -143,7 +143,7 @@ static void test_curvature(void)
 	char msg[400];
 	memset(&rd, 0, sizeof rd);
 	rd.normals = nrm;
-	qaws_mesh_reference_create(m, &rd, &r);
+	qaws_mesh_reference_create(&r, m, &rd);
 	if (!r)
 	{
 		TEST_ASSERT(0, "curvature: the reference");
@@ -152,14 +152,14 @@ static void test_curvature(void)
 	memset(&cd, 0, sizeof cd);
 	cd.chord_tolerance = (qaws_scalar)e;
 	cd.max_length = 10;
-	qaws_size_field_create_curvature(r, &cd, &fc);
+	qaws_size_field_create_curvature(&fc, r, &cd);
 	cd.chord_tolerance = 0;
 	cd.angle_tolerance = (qaws_scalar)t;
-	qaws_size_field_create_curvature(r, &cd, &fa);
+	qaws_size_field_create_curvature(&fa, r, &cd);
 	cd.chord_tolerance = (qaws_scalar)(e / 4);
-	qaws_size_field_create_curvature(r, &cd, &fb);
+	qaws_size_field_create_curvature(&fb, r, &cd);
 	cd.min_length = (qaws_scalar)0.5;
-	qaws_size_field_create_curvature(r, &cd, &fl);
+	qaws_size_field_create_curvature(&fl, r, &cd);
 	nt = qaws_mesh_reference_get_triangle_count(r);
 	for (i = 0; fc && fa && fb && fl && i < 400; i++)
 	{
@@ -168,11 +168,11 @@ static void test_curvature(void)
 		double a = (sf_rand(&s) & 0xFFFF) / 65536.0, b = (sf_rand(&s) & 0xFFFF) / 65536.0;
 		if (a + b > 1) { a = 1 - a; b = 1 - b; }
 		l.patch = sf_rand(&s) % nt; l.a = (qaws_scalar)a; l.b = (qaws_scalar)b;
-		qaws_mesh_reference_evaluate(r, &l, 1, x, NULL, NULL);
-		qaws_size_field_evaluate(fc, &l, x, 1, v);
-		qaws_size_field_evaluate(fa, &l, x, 1, v + 1);
-		qaws_size_field_evaluate(fb, &l, x, 1, v + 2);
-		qaws_size_field_evaluate(fl, &l, x, 1, v + 3);
+		qaws_mesh_reference_evaluate(x, NULL, NULL, r, &l, 1);
+		qaws_size_field_evaluate(v, fc, &l, x, 1);
+		qaws_size_field_evaluate(v + 1, fa, &l, x, 1);
+		qaws_size_field_evaluate(v + 2, fb, &l, x, 1);
+		qaws_size_field_evaluate(v + 3, fl, &l, x, 1);
 		ec = fmax(ec, fabs(v[0] - wc) / wc);
 		ea = fmax(ea, fabs(v[1] - wa) / wa);
 		eb = fmax(eb, fabs(v[2] - fmin(wa, 2 * sqrt(e / 4 * (2 * R - e / 4)))) / wa);
@@ -204,7 +204,7 @@ static void test_gradation(void)
 	nv = qaws_mesh_3d_get_vertex_count(m);
 	x = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * nv);
 	h = (qaws_scalar*)malloc(sizeof(qaws_scalar) * nv);
-	qaws_mesh_3d_get_positions(m, x);
+	qaws_mesh_3d_get_positions(x, m);
 	for (i = 0; i < nv; i++)
 	{
 		/* a sharp bump round (0, 0, 1) */
@@ -214,17 +214,17 @@ static void test_gradation(void)
 		x[3 * i + 2] = (qaws_scalar)(x[3 * i + 2] * s);
 	}
 	qaws_mesh_3d_set_positions(m, x);
-	qaws_mesh_reference_create(m, NULL, &r);
+	qaws_mesh_reference_create(&r, m, NULL);
 	memset(&cd, 0, sizeof cd);
 	cd.angle_tolerance = (qaws_scalar)0.15;
 	cd.min_length = (qaws_scalar)0.005;
 	cd.max_length = (qaws_scalar)1;
 	cd.gradation = (qaws_scalar)beta;
 	if (r)
-		qaws_size_field_create_curvature(r, &cd, &f);
+		qaws_size_field_create_curvature(&f, r, &cd);
 	cd.gradation = 0;
 	if (r)
-		qaws_size_field_create_curvature(r, &cd, &g);
+		qaws_size_field_create_curvature(&g, r, &cd);
 	if (!f || !g)
 	{
 		TEST_ASSERT(0, "gradation: the fields");
@@ -233,8 +233,8 @@ static void test_gradation(void)
 	for (i = 0; i < nv; i++)
 	{
 		qaws_mesh_location l;
-		qaws_mesh_reference_get_vertex_location(r, i, &l);
-		qaws_size_field_evaluate(f, &l, x + 3 * i, 1, h + i);
+		qaws_mesh_reference_get_vertex_location(&l, r, i);
+		qaws_size_field_evaluate(h + i, f, &l, x + 3 * i, 1);
 		if (h[i] < hmin)
 			hmin = h[i];
 		if (x[3 * i + 2] > 1.3)
@@ -244,7 +244,7 @@ static void test_gradation(void)
 	}
 	ne = qaws_mesh_3d_get_edge_count(m);
 	e = (unsigned int*)malloc(sizeof(unsigned int) * 2 * ne);
-	qaws_mesh_3d_get_edges(m, e);
+	qaws_mesh_3d_get_edges(e, m);
 	for (i = 0; i < ne; i++)
 	{
 		unsigned int a = e[2 * i], b = e[2 * i + 1];
@@ -274,15 +274,15 @@ static void test_refusals(void)
 	qaws_status s1, s2, s3;
 	qaws_scalar p[3] = { 0, 0, 1 }, v;
 	char msg[300];
-	qaws_mesh_reference_create(a, NULL, &ra);
-	qaws_mesh_reference_create(b, NULL, &rb);
+	qaws_mesh_reference_create(&ra, a, NULL);
+	qaws_mesh_reference_create(&rb, b, NULL);
 	memset(&cd, 0, sizeof cd);
-	s1 = qaws_size_field_create_curvature(ra, &cd, &none);
+	s1 = qaws_size_field_create_curvature(&none, ra, &cd);
 	cd.chord_tolerance = (qaws_scalar)0.01;
-	qaws_size_field_create_curvature(ra, &cd, &fa);
-	qaws_size_field_create_curvature(rb, &cd, &fb);
-	s2 = qaws_size_field_create_min(fa, fb, &mn);
-	s3 = fa ? qaws_size_field_evaluate(fa, NULL, p, 1, &v) : QAWS_STATUS_OK;
+	qaws_size_field_create_curvature(&fa, ra, &cd);
+	qaws_size_field_create_curvature(&fb, rb, &cd);
+	s2 = qaws_size_field_create_min(&mn, fa, fb);
+	s3 = fa ? qaws_size_field_evaluate(&v, fa, NULL, p, 1) : QAWS_STATUS_OK;
 	sprintf(msg, "refusals: no tolerance %s, min of fields on two references %s, a reference's field without locations %s",
 		qaws_status_to_string(s1), qaws_status_to_string(s2), qaws_status_to_string(s3));
 	TEST_ASSERT(s1 == QAWS_STATUS_INVALID_ARGUMENT && !none && s2 == QAWS_STATUS_INVALID_ARGUMENT && !mn && s3 == QAWS_STATUS_INVALID_ARGUMENT, msg);

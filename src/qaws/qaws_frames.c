@@ -31,8 +31,8 @@ static int fr_perpendicular(qaws_vec3* r, qaws_vec3 t)
 	return QAWS_SQRT(qaws_frame_dot(*r, *r)) > QAWS_LITERAL(1e-9) * l0 && fr_unit(r);
 }
 
-qaws_status qaws_curve_compute_rotation_minimizing_frames_3d(qaws_curve const* curve, qaws_scalar const* parameters, unsigned int count,
-	qaws_vec3 const* initial_normal, qaws_scalar* out_frames)
+qaws_status qaws_curve_compute_rotation_minimizing_frames_3d(qaws_scalar* out_frames, qaws_curve const* curve, qaws_scalar const* parameters,
+	qaws_vec3 const* initial_normal, unsigned int count)
 {
 	qaws_vec3 x0 = { 0, 0, 0 }, t0 = { 0, 0, 0 }, r0 = { 0, 0, 0 };
 	unsigned int i;

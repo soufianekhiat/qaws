@@ -269,12 +269,12 @@ static qaws_scalar* apply_subdivision(
  *   d =               P1
  */
 void qaws_internal_subdivision_cr_coeffs(
+	qaws_scalar* coeffs_out,
 	qaws_scalar const* P0,
 	qaws_scalar const* P1,
 	qaws_scalar const* P2,
 	qaws_scalar const* P3,
-	unsigned int dim_count,
-	qaws_scalar* coeffs_out)  /* dim_count * 4 scalars */
+	unsigned int dim_count)  /* dim_count * 4 scalars */
 {
 	unsigned int d;
 
@@ -299,10 +299,10 @@ void qaws_internal_subdivision_cr_coeffs(
 
 /* coeffs: the span's dim_count * 4 coefficients */
 qaws_status qaws_internal_subdivision_eval_2d(
+	qaws_eval_result_2d* out_result,
 	qaws_scalar const* coeffs,
 	qaws_scalar local_t,
-	unsigned int eval_flags,
-	qaws_eval_result_2d* out_result)
+	unsigned int eval_flags)
 {
 	qaws_scalar t = local_t;
 	qaws_scalar t2 = t * t;
@@ -352,10 +352,10 @@ qaws_status qaws_internal_subdivision_eval_2d(
 /* -------------------------------------------------------------------------- */
 
 qaws_status qaws_internal_subdivision_eval_3d(
+	qaws_eval_result_3d* out_result,
 	qaws_scalar const* coeffs,
 	qaws_scalar local_t,
-	unsigned int eval_flags,
-	qaws_eval_result_3d* out_result)
+	unsigned int eval_flags)
 {
 	qaws_scalar t = local_t;
 	qaws_scalar t2 = t * t;
@@ -416,7 +416,7 @@ static qaws_status subdivision_eval_span_2d(
 	qaws_eval_result_2d* out_result)
 {
 	qaws_subdivision_impl const* impl = (qaws_subdivision_impl const*)curve->impl;
-	return qaws_internal_subdivision_eval_2d(&impl->segment_coeffs[span_index * 2 * 4], local_t, eval_flags, out_result);
+	return qaws_internal_subdivision_eval_2d(out_result, &impl->segment_coeffs[span_index * 2 * 4], local_t, eval_flags);
 }
 
 static qaws_status subdivision_eval_span_3d(
@@ -427,7 +427,7 @@ static qaws_status subdivision_eval_span_3d(
 	qaws_eval_result_3d* out_result)
 {
 	qaws_subdivision_impl const* impl = (qaws_subdivision_impl const*)curve->impl;
-	return qaws_internal_subdivision_eval_3d(&impl->segment_coeffs[span_index * 3 * 4], local_t, eval_flags, out_result);
+	return qaws_internal_subdivision_eval_3d(out_result, &impl->segment_coeffs[span_index * 3 * 4], local_t, eval_flags);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -515,9 +515,9 @@ static unsigned int scheme_degree(qaws_subdivision_scheme scheme)
 /* -------------------------------------------------------------------------- */
 
 qaws_status qaws_curve_create_subdivision_ex(
+	qaws_curve** out_curve,
 	qaws_subdivision_desc const* desc,
-	qaws_allocator const* allocator,
-	qaws_curve** out_curve)
+	qaws_allocator const* allocator)
 {
 	qaws_subdivision_impl* impl = NULL;
 	qaws_curve* curve = NULL;
@@ -589,7 +589,7 @@ qaws_status qaws_curve_create_subdivision_ex(
 
 	/* --- Allocate implementation --------------------------------------- */
 
-	impl = (qaws_subdivision_impl*)qaws_internal_calloc(allocator, 1, sizeof(qaws_subdivision_impl));
+	impl = (qaws_subdivision_impl*)qaws_internal_calloc(1, sizeof(qaws_subdivision_impl), allocator);
 	if (!impl) {
 		qaws_internal_dealloc(refined, allocator);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
@@ -602,7 +602,7 @@ qaws_status qaws_curve_create_subdivision_ex(
 
 	/* --- Compute Catmull-Rom coefficients for each span ---------------- */
 
-	impl->segment_coeffs = (qaws_scalar*)qaws_internal_calloc(allocator, qaws_internal_mul3(span_count, dim_count, 4), sizeof(qaws_scalar));
+	impl->segment_coeffs = (qaws_scalar*)qaws_internal_calloc(qaws_internal_mul3(span_count, dim_count, 4), sizeof(qaws_scalar), allocator);
 	if (!impl->segment_coeffs) {
 		qaws_internal_dealloc(impl->refined_points, allocator);
 		qaws_internal_dealloc(impl, allocator);
@@ -622,12 +622,12 @@ qaws_status qaws_curve_create_subdivision_ex(
 			unsigned int i3 = (s + 2) % N;
 
 			qaws_internal_subdivision_cr_coeffs(
+				&impl->segment_coeffs[s * dim_count * 4],
 				&refined[i0 * dim_count],
 				&refined[i1 * dim_count],
 				&refined[i2 * dim_count],
 				&refined[i3 * dim_count],
-				dim_count,
-				&impl->segment_coeffs[s * dim_count * 4]);
+				dim_count);
 		}
 	} else {
 		/*
@@ -683,9 +683,9 @@ qaws_status qaws_curve_create_subdivision_ex(
 				P3 = &refined[(s + 2) * dim_count];
 
 			qaws_internal_subdivision_cr_coeffs(
-				P0, P1, P2, P3,
-				dim_count,
-				&impl->segment_coeffs[s * dim_count * 4]);
+				&impl->segment_coeffs[s * dim_count * 4], P0, P1, P2,
+				P3,
+				dim_count);
 		}
 
 		qaws_internal_dealloc(phantom_start, allocator);
@@ -725,5 +725,5 @@ qaws_status qaws_curve_create_subdivision(
 	qaws_curve** out_curve,
 	qaws_subdivision_desc const* desc)
 {
-	return qaws_curve_create_subdivision_ex(desc, NULL, out_curve);
+	return qaws_curve_create_subdivision_ex(out_curve, desc, NULL);
 }

@@ -107,7 +107,7 @@ static void demo_repair(void)
 	memset(&d, 0, sizeof d);
 	d.gap_tolerance = (qaws_scalar)0.01;
 	t0 = clock();
-	status = qaws_mesh_repair(sp, 3 * ns, st, NULL, ns, &d, &m, &r);
+	status = qaws_mesh_repair(&m, &r, sp, st, NULL, 3 * ns, ns, &d);
 	secs = (double)(clock() - t0) / CLOCKS_PER_SEC;
 	for (i = 0, k = 0; i < nk; i++)
 		k += flip[i];
@@ -155,10 +155,10 @@ static void demo_repair(void)
 			free(tt); free(src); free(ns3); free(p); free(n);
 			break;
 		}
-		qaws_mesh_3d_get_triangles(m, tt);
-		qaws_mesh_3d_find_attribute(m, "source_face", &a);
-		qaws_mesh_3d_get_attribute(m, a, src);
-		qaws_mesh_3d_get_vertex_normals(m, ns3);
+		qaws_mesh_3d_get_triangles(tt, m);
+		qaws_mesh_3d_find_attribute(&a, m, "source_face");
+		qaws_mesh_3d_get_attribute(src, m, a);
+		qaws_mesh_3d_get_vertex_normals(ns3, m);
 		for (i = 0; i < 3 * nv; i++)
 			n[i] = (double)ns3[i];
 		if (k == 0)

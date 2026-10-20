@@ -162,7 +162,7 @@ static unsigned int mm_workload(void)
 		memset(&gd, 0, sizeof gd);
 		gd.method = QAWS_GENERATE_REMESH;
 		gd.target_length = (qaws_scalar)0.5;
-		st = qaws_mesh_generate_surface(s, &gd, &m, NULL);
+		st = qaws_mesh_generate_surface(&m, NULL, s, &gd);
 		failures += st != QAWS_STATUS_OK;
 		g_published += st != QAWS_STATUS_OK && m != NULL;   /* a failed call publishes no mesh */
 		qaws_mesh_3d_destroy(m);
@@ -465,8 +465,8 @@ static void test_scratch_split(void)
 	qaws_scalar pos[72];
 	char msg[300];
 	qaws_arena_init(&arena, memory, sizeof memory);
-	qaws_exchange_thread_allocator(&ha, &prev);
-	qaws_exchange_thread_scratch_allocator(&arena.allocator, &prev_scratch);
+	qaws_exchange_thread_allocator(&prev, &ha);
+	qaws_exchange_thread_scratch_allocator(&prev_scratch, &arena.allocator);
 	memset(&d, 0, sizeof d);
 	d.dimension = QAWS_DIMENSION_2D; d.degree = 3; d.control_points = wave; d.control_point_count = 6;
 	ok &= qaws_curve_create_bspline(&w, &d) == QAWS_STATUS_OK;
@@ -514,7 +514,7 @@ static void test_scratch_split(void)
 		memset(&gd, 0, sizeof gd);
 		gd.method = QAWS_GENERATE_REMESH;
 		gd.target_length = (qaws_scalar)0.3;
-		ok &= qaws_mesh_generate_surface(s, &gd, &m, NULL) == QAWS_STATUS_OK;
+		ok &= qaws_mesh_generate_surface(&m, NULL, s, &gd) == QAWS_STATUS_OK;
 		held += arena.live != 0; scratch_peak[4] = arena.peak; ok &= qaws_arena_reset(&arena) == QAWS_STATUS_OK; mm_poison(&arena, memory, sizeof memory);
 	}
 	/* a curvature size field on that mesh: kept past the reset, read below against one made without scratch */
@@ -524,8 +524,8 @@ static void test_scratch_split(void)
 		memset(&cd, 0, sizeof cd);
 		cd.chord_tolerance = (qaws_scalar)0.01;
 		cd.gradation = (qaws_scalar)0.5;
-		ok &= qaws_mesh_reference_create(m, NULL, &ref) == QAWS_STATUS_OK;
-		ok &= ref && qaws_size_field_create_curvature(ref, &cd, &field) == QAWS_STATUS_OK;
+		ok &= qaws_mesh_reference_create(&ref, m, NULL) == QAWS_STATUS_OK;
+		ok &= ref && qaws_size_field_create_curvature(&field, ref, &cd) == QAWS_STATUS_OK;
 		held += arena.live != 0; ok &= qaws_arena_reset(&arena) == QAWS_STATUS_OK; mm_poison(&arena, memory, sizeof memory);
 	}
 	/* a repulsive solve: the solver object kept */
@@ -550,7 +550,7 @@ static void test_scratch_split(void)
 		ok &= qaws_repulsive_curves_solve(NULL, pos, rc, &sd) == QAWS_STATUS_OK;
 		held += arena.live != 0; scratch_peak[5] = arena.peak; ok &= qaws_arena_reset(&arena) == QAWS_STATUS_OK; mm_poison(&arena, memory, sizeof memory);
 	}
-	qaws_exchange_thread_scratch_allocator(&prev_scratch, NULL);
+	qaws_exchange_thread_scratch_allocator(NULL, &prev_scratch);
 	snprintf(msg, sizeof msg, "scratch arena apart from results: sampling, offsets, clipping, tessellation, meshing, repulsive; held after a call %u; "
 		"scratch peaks %lu, %lu, %lu, %lu, %lu, %lu bytes", held, (unsigned long)scratch_peak[0],
 		(unsigned long)scratch_peak[1], (unsigned long)scratch_peak[2], (unsigned long)scratch_peak[3], (unsigned long)scratch_peak[4],
@@ -562,7 +562,7 @@ static void test_scratch_split(void)
 	{
 		static qaws_scalar xyz[3 * 65536];
 		qaws_path_2d path;
-		ok &= qaws_mesh_3d_get_vertex_count(m) <= 65536 && qaws_mesh_3d_get_positions(m, xyz) == QAWS_STATUS_OK
+		ok &= qaws_mesh_3d_get_vertex_count(m) <= 65536 && qaws_mesh_3d_get_positions(xyz, m) == QAWS_STATUS_OK
 			&& qaws_clip_result_get_path(&path, r, 0) == QAWS_STATUS_OK && path.curve_count > 0;
 		/* the size field against one made without scratch, at the corners of the first triangles */
 		if (ok && ref && field)
@@ -575,15 +575,15 @@ static void test_scratch_split(void)
 			memset(&cd, 0, sizeof cd);
 			cd.chord_tolerance = (qaws_scalar)0.01;
 			cd.gradation = (qaws_scalar)0.5;
-			ok &= qaws_size_field_create_curvature(ref, &cd, &plain) == QAWS_STATUS_OK;
+			ok &= qaws_size_field_create_curvature(&plain, ref, &cd) == QAWS_STATUS_OK;
 			for (t = 0; t < cnt; t++)
 			{
-				qaws_mesh_reference_get_triangle(ref, t, tv3);
+				qaws_mesh_reference_get_triangle(tv3, ref, t);
 				loc[t].patch = t; loc[t].a = 1; loc[t].b = 0;
 				at[3 * t] = xyz[3 * tv3[0]]; at[3 * t + 1] = xyz[3 * tv3[0] + 1]; at[3 * t + 2] = xyz[3 * tv3[0] + 2];
 			}
-			ok &= plain && cnt > 0 && qaws_size_field_evaluate(field, loc, at, cnt, s1) == QAWS_STATUS_OK
-				&& qaws_size_field_evaluate(plain, loc, at, cnt, s2) == QAWS_STATUS_OK && memcmp(s1, s2, cnt * sizeof s1[0]) == 0;
+			ok &= plain && cnt > 0 && qaws_size_field_evaluate(s1, field, loc, at, cnt) == QAWS_STATUS_OK
+				&& qaws_size_field_evaluate(s2, plain, loc, at, cnt) == QAWS_STATUS_OK && memcmp(s1, s2, cnt * sizeof s1[0]) == 0;
 			qaws_size_field_destroy(plain);
 		}
 	}
@@ -608,9 +608,9 @@ static void test_thread_nesting(void)
 	qaws_allocator ao = mm_legacy(&outer), ai = mm_legacy(&inner), prev1, prev2, now;
 	long base_default = g_default_count.allocs;
 	qaws_curve* c;
-	qaws_exchange_thread_allocator(&ao, &prev1);
+	qaws_exchange_thread_allocator(&prev1, &ao);
 	TEST_ASSERT(prev1.alloc == NULL, "no thread allocator to begin with");
-	qaws_exchange_thread_allocator(&ai, &prev2);
+	qaws_exchange_thread_allocator(&prev2, &ai);
 	TEST_ASSERT(prev2.alloc == mm_alloc && prev2.user_data == &outer, "the nested exchange returns the outer one");
 	c = mm_square(0, 0, 1);
 	qaws_curve_destroy(c);
@@ -757,7 +757,7 @@ static void test_sizes_and_alignment(void)
 	shifted.dealloc = mm_shifted_free;
 	shifted.user_data = &g_shift;
 	{
-		unsigned char* q = (unsigned char*)qaws_internal_alloc_from(&shifted, 64);
+		unsigned char* q = (unsigned char*)qaws_internal_alloc_from(64, &shifted);
 		TEST_ASSERT(q && (uintptr_t)q % QAWS_MEMORY_ALIGNMENT == 0, "a legacy allocator off alignment: the block aligned inside");
 		memset(q, 0x5A, 64);
 		qaws_internal_free(q);
@@ -774,7 +774,7 @@ static void test_sizes_and_alignment(void)
 		ss.alloc_sized = mm_shifted_sized;
 		ss.dealloc_sized = mm_shifted_sized_free;
 		ss.user_data = &sc;
-		TEST_ASSERT(qaws_internal_alloc_from(&ss, 64) == NULL && sc.allocs == 1 && sc.frees == 1,
+		TEST_ASSERT(qaws_internal_alloc_from(64, &ss) == NULL && sc.allocs == 1 && sc.frees == 1,
 			"a sized allocator off the alignment asked: refused, the block given back");
 	}
 #else
@@ -835,10 +835,10 @@ static void test_sizes_and_alignment(void)
 	sized.user_data = &rec;
 	if (sizeof(size_t) > 4)
 	{
-		TEST_ASSERT(qaws_internal_alloc_from(&sized, five_gb) == NULL && rec.calls == 1 && rec.requested > five_gb
+		TEST_ASSERT(qaws_internal_alloc_from(five_gb, &sized) == NULL && rec.calls == 1 && rec.requested > five_gb
 			&& rec.requested - five_gb <= 256, "5 GB through the sized interface, not truncated");
 		legacy = mm_legacy(&lc);
-		qaws_internal_alloc_from(&legacy, five_gb);
+		qaws_internal_alloc_from(five_gb, &legacy);
 		snprintf(msg, sizeof msg, "5 GB through the legacy interface (unsigned long of %u bytes): %s", (unsigned)sizeof(unsigned long),
 			sizeof(unsigned long) < 8 ? "refused without calling it" : "passed whole");
 		printf("  %s\n", msg);
@@ -858,7 +858,7 @@ static void test_arena(void)
 	qaws_allocator prev;
 
 	qaws_arena_init(&arena, big, sizeof big);
-	qaws_exchange_thread_allocator(&arena.allocator, &prev);
+	qaws_exchange_thread_allocator(&prev, &arena.allocator);
 	failures = mm_workload();
 	qaws_set_thread_allocator(&prev);
 	snprintf(msg, sizeof msg, "arena over a 2 MB caller buffer: the workload ran (%u failures), peak %lu bytes, %lu blocks held after",
@@ -870,7 +870,7 @@ static void test_arena(void)
 	/* in-place growth of the latest block */
 	{
 		unsigned char *a, *b;
-		a = (unsigned char*)qaws_internal_alloc_from(&arena.allocator, 64);
+		a = (unsigned char*)qaws_internal_alloc_from(64, &arena.allocator);
 		b = (unsigned char*)qaws_internal_realloc(a, 4096);
 		TEST_ASSERT(a && b == a, "the latest block grows in place");
 		qaws_internal_free(b);
@@ -882,8 +882,8 @@ static void test_arena(void)
 		unsigned char *a, *b;
 		unsigned int i;
 		qaws_arena_init(&s2, tiny_buffer, sizeof tiny_buffer);
-		a = (unsigned char*)qaws_internal_alloc_from(&s2.allocator, 256);
-		b = (unsigned char*)qaws_internal_alloc_from(&s2.allocator, 256);
+		a = (unsigned char*)qaws_internal_alloc_from(256, &s2.allocator);
+		b = (unsigned char*)qaws_internal_alloc_from(256, &s2.allocator);
 		for (i = 0; i < 256; i++)
 			a[i] = (unsigned char)(i * 7);
 		TEST_ASSERT(a && b && qaws_internal_realloc(a, 4000) == NULL, "a reallocation the arena cannot hold fails");
@@ -914,7 +914,7 @@ static void test_arena(void)
 
 	/* too tiny_buffer: failures reported, nothing taken from the heap */
 	qaws_arena_init(&arena, tiny_buffer, sizeof tiny_buffer);
-	qaws_exchange_thread_allocator(&arena.allocator, &prev);
+	qaws_exchange_thread_allocator(&prev, &arena.allocator);
 	failures = mm_workload();
 	qaws_set_thread_allocator(&prev);
 	TEST_ASSERT(failures > 0 && arena.peak <= sizeof tiny_buffer && arena.live == 0, "a 2 KB arena: allocation failures reported cleanly, nothing held");
@@ -933,7 +933,7 @@ static void test_arena(void)
 			for (sz = 256; sz <= sizeof sweep; sz = sz * 9 / 8 + 16)
 			{
 				qaws_arena_init(&arena, sweep, sz);
-				qaws_exchange_thread_allocator(&arena.allocator, &prev);
+				qaws_exchange_thread_allocator(&prev, &arena.allocator);
 				mm_workload();
 				qaws_set_thread_allocator(&prev);
 				runs++;
@@ -972,7 +972,7 @@ static void mm_work(void* p)
 	mm_worker* w = (mm_worker*)p;
 	qaws_allocator prev;
 	unsigned int k;
-	qaws_exchange_thread_allocator(&w->arena.allocator, &prev);
+	qaws_exchange_thread_allocator(&prev, &w->arena.allocator);
 	/* a frame arena: reset between workloads, refused if anything were still held */
 	for (k = 0; k < 3; k++)
 	{

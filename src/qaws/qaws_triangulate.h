@@ -140,16 +140,16 @@ typedef struct qaws_mesh_2d_desc
 	unsigned int face_count;
 } qaws_mesh_2d_desc;
 
-qaws_status qaws_mesh_2d_create(qaws_mesh_2d_desc const* desc, qaws_mesh_2d** out_mesh);
+qaws_status qaws_mesh_2d_create(qaws_mesh_2d** out_mesh, qaws_mesh_2d_desc const* desc);
 qaws_mesh_3d const* qaws_mesh_2d_get_mesh(qaws_mesh_2d const* mesh);
 
 /* positions: 2 (NULL: the edge's midpoint, the far vertex, the face's centroid) */
-qaws_status qaws_mesh_2d_split_edge(qaws_mesh_2d* mesh, unsigned int a, unsigned int b, qaws_scalar const* position, unsigned int* out_vertex);
+qaws_status qaws_mesh_2d_split_edge(unsigned int* out_vertex, qaws_mesh_2d* mesh, qaws_scalar const* position, unsigned int a, unsigned int b);
 qaws_status qaws_mesh_2d_collapse_edge(qaws_mesh_2d* mesh, unsigned int a, unsigned int b, qaws_scalar const* position);
 qaws_status qaws_mesh_2d_flip_edge(qaws_mesh_2d* mesh, unsigned int a, unsigned int b);
-qaws_status qaws_mesh_2d_split_face(qaws_mesh_2d* mesh, unsigned int face, qaws_scalar const* position, unsigned int* out_vertex);
+qaws_status qaws_mesh_2d_split_face(unsigned int* out_vertex, qaws_mesh_2d* mesh, qaws_scalar const* position, unsigned int face);
 
-qaws_status qaws_mesh_2d_add_attribute(qaws_mesh_2d* mesh, qaws_attribute_desc const* desc, qaws_scalar const* values, unsigned int* out_attribute);
+qaws_status qaws_mesh_2d_add_attribute(unsigned int* out_attribute, qaws_mesh_2d* mesh, qaws_scalar const* values, qaws_attribute_desc const* desc);
 qaws_status qaws_mesh_2d_set_attribute(qaws_mesh_2d* mesh, unsigned int attribute, qaws_scalar const* values);
 qaws_status qaws_mesh_2d_remove_attribute(qaws_mesh_2d* mesh, unsigned int attribute);
 

@@ -63,7 +63,7 @@ static qaws_mesh_3d* rq_make(double const* x, unsigned int nv, unsigned int cons
 	d.face_vertices = f;
 	d.face_sizes = fs;
 	d.face_count = nf;
-	qaws_mesh_3d_create(&d, &m);
+	qaws_mesh_3d_create(&m, &d);
 	free(p);
 	return m;
 }
@@ -122,7 +122,7 @@ static qaws_mesh_3d* rq_bumped(void)
 	qaws_mesh_3d* m = rq_icosphere(NULL);
 	unsigned int nv = qaws_mesh_3d_get_vertex_count(m), i;
 	qaws_scalar* p = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * nv);
-	qaws_mesh_3d_get_positions(m, p);
+	qaws_mesh_3d_get_positions(p, m);
 	for (i = 0; i < nv; i++)
 	{
 		double d = p[3 * i] * p[3 * i] + p[3 * i + 1] * p[3 * i + 1] + (p[3 * i + 2] - 1) * (p[3 * i + 2] - 1), s = 1 + 0.6 * exp(-6 * d);
@@ -153,9 +153,9 @@ static qaws_mesh_3d* rq_blob(void)
 	nv0 = qaws_mesh_3d_get_vertex_count(m);
 	e = (unsigned int*)malloc(sizeof(unsigned int) * 2 * ne);
 	src = (unsigned int*)malloc(sizeof(unsigned int) * 2 * ne);
-	qaws_mesh_3d_get_edges(m, e);
+	qaws_mesh_3d_get_edges(e, m);
 	for (i = 0; i < ne; i++)
-		if (qaws_mesh_3d_split_edge(m, e[2 * i], e[2 * i + 1], NULL, NULL, &vn) == QAWS_STATUS_OK)
+		if (qaws_mesh_3d_split_edge(&vn, m, NULL, NULL, e[2 * i], e[2 * i + 1]) == QAWS_STATUS_OK)
 		{
 			src[2 * (vn - nv0)] = e[2 * i];
 			src[2 * (vn - nv0) + 1] = e[2 * i + 1];
@@ -163,7 +163,7 @@ static qaws_mesh_3d* rq_blob(void)
 	free(e);
 	ne = qaws_mesh_3d_get_edge_count(m);
 	e = (unsigned int*)malloc(sizeof(unsigned int) * 2 * ne);
-	qaws_mesh_3d_get_edges(m, e);
+	qaws_mesh_3d_get_edges(e, m);
 	for (i = 0; i < ne; i++)
 	{
 		unsigned int a = e[2 * i], b = e[2 * i + 1], nw, old;
@@ -178,7 +178,7 @@ static qaws_mesh_3d* rq_blob(void)
 	free(src);
 	n = qaws_mesh_3d_get_vertex_count(m);
 	p = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * n);
-	qaws_mesh_3d_get_positions(m, p);
+	qaws_mesh_3d_get_positions(p, m);
 	for (i = 0; i < n; i++)
 	{
 		double q[3], l, s;
@@ -269,7 +269,7 @@ static qaws_mesh_3d* rq_remesh(qaws_mesh_3d const* m, qaws_mesh_reference const*
 	d.min_angle = (qaws_scalar)(lo * M_PI / 180);
 	d.max_angle = (qaws_scalar)(hi * M_PI / 180);
 	d.tolerance = (qaws_scalar)tol;
-	if (qaws_mesh_remesh(m, &d, &out, rep) != QAWS_STATUS_OK)
+	if (qaws_mesh_remesh(&out, rep, m, &d) != QAWS_STATUS_OK)
 		out = NULL;
 	if (seconds)
 		*seconds = (double)(clock() - t0) / CLOCKS_PER_SEC;
@@ -336,10 +336,10 @@ static void rq_measure(qaws_mesh_3d const* m, double lo, double hi, rq_meas* q)
 	onf = (unsigned int*)calloc(nv + 1, sizeof(unsigned int));
 	ang = (double*)malloc(sizeof(double) * 3 * nf);
 	sec = (double*)malloc(sizeof(double) * 3 * nf);
-	qaws_mesh_3d_get_positions(m, p);
-	qaws_mesh_3d_get_triangles(m, t);
-	qaws_mesh_3d_get_feature_edges(m, fe);
-	qaws_mesh_3d_get_edges(m, e);
+	qaws_mesh_3d_get_positions(p, m);
+	qaws_mesh_3d_get_triangles(t, m);
+	qaws_mesh_3d_get_feature_edges(fe, m);
+	qaws_mesh_3d_get_edges(e, m);
 	for (i = 0; i < nfe; i++)
 	{
 		keys[i] = rq_key(fe[2 * i], fe[2 * i + 1]);
@@ -469,8 +469,8 @@ static double rq_deviation(qaws_mesh_3d const* m, qaws_mesh_reference const* r)
 	qaws_scalar* d = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 10 * nf);
 	qaws_mesh_location* l = (qaws_mesh_location*)malloc(sizeof(qaws_mesh_location) * 10 * nf);
 	double dmax = 0;
-	qaws_mesh_3d_get_positions(m, p);
-	qaws_mesh_3d_get_triangles(m, t);
+	qaws_mesh_3d_get_positions(p, m);
+	qaws_mesh_3d_get_triangles(t, m);
 	for (i = 0; i < nf; i++)
 	{
 		for (k = 0; k < 3; k++)
@@ -486,7 +486,7 @@ static double rq_deviation(qaws_mesh_3d const* m, qaws_mesh_reference const* r)
 					s[3 * n + k] = (qaws_scalar)((1 - w[h]) * a[k] + w[h] * b[k]);
 		}
 	}
-	qaws_mesh_reference_project(r, s, n, NULL, l, d);
+	qaws_mesh_reference_project(l, d, r, s, NULL, n);
 	for (i = 0; i < n; i++)
 		dmax = fmax(dmax, d[i]);
 	free(t); free(p); free(s); free(d); free(l);
@@ -512,12 +512,12 @@ static int rq_invariants(qaws_mesh_3d const* in, qaws_mesh_3d const* out, qaws_m
 	fi = (unsigned int*)malloc(sizeof(unsigned int) * 2 * (nfi + 1));
 	keys = (unsigned long long*)malloc(sizeof(unsigned long long) * (nfi + 6 * nt + 1));
 	onf = (unsigned char*)calloc(nvi + 1, 1);
-	qaws_mesh_3d_get_positions(out, x);
-	qaws_mesh_3d_get_positions(in, xi);
-	qaws_mesh_3d_get_footpoints(out, l);
-	qaws_mesh_reference_evaluate(r, l, nv, y, NULL, NULL);
-	qaws_mesh_3d_get_feature_edges(out, fe);
-	qaws_mesh_3d_get_feature_edges(in, fi);
+	qaws_mesh_3d_get_positions(x, out);
+	qaws_mesh_3d_get_positions(xi, in);
+	qaws_mesh_3d_get_footpoints(l, out);
+	qaws_mesh_reference_evaluate(y, NULL, NULL, r, l, nv);
+	qaws_mesh_3d_get_feature_edges(fe, out);
+	qaws_mesh_3d_get_feature_edges(fi, in);
 	for (i = 0; i < nfi; i++)
 	{
 		keys[i] = rq_key(fi[2 * i], fi[2 * i + 1]);
@@ -526,7 +526,7 @@ static int rq_invariants(qaws_mesh_3d const* in, qaws_mesh_3d const* out, qaws_m
 	/* the reference's border is a crease too: its edges in one triangle only */
 	for (i = 0; i < nt; i++)
 	{
-		qaws_mesh_reference_get_triangle(r, i, tv + 3 * i);
+		qaws_mesh_reference_get_triangle(tv + 3 * i, r, i);
 		for (k = 0; k < 3; k++)
 			keys[nfi + 3 * nt + 3 * i + k] = rq_key(tv[3 * i + k], tv[3 * i + (k + 1) % 3]);
 	}
@@ -567,7 +567,7 @@ static int rq_invariants(qaws_mesh_3d const* in, qaws_mesh_3d const* out, qaws_m
 		qaws_mesh_location const* f = &l[fe[i]];
 		unsigned int tv[3], on = 0;
 		double b[3];
-		qaws_mesh_reference_get_triangle(r, f->patch, tv);
+		qaws_mesh_reference_get_triangle(tv, r, f->patch);
 		b[0] = 1 - f->a - f->b;
 		b[1] = f->a;
 		b[2] = f->b;
@@ -581,8 +581,8 @@ static int rq_invariants(qaws_mesh_3d const* in, qaws_mesh_3d const* out, qaws_m
 		}
 		crease &= on;
 	}
-	qaws_mesh_3d_get_topology(in, &t0);
-	qaws_mesh_3d_get_topology(out, &t1);
+	qaws_mesh_3d_get_topology(&t0, in);
+	qaws_mesh_3d_get_topology(&t1, out);
 	ok = qaws_mesh_3d_validate(out) == QAWS_STATUS_OK && t0.closed == t1.closed && t0.genus == t1.genus && foot <= 1e-9 && corners && crease;
 	sprintf(why, "valid %d, closed %d genus %u (input %d, %u), footpoints %.1e, corners kept %d, crease vertices on creases %d",
 		qaws_mesh_3d_validate(out) == QAWS_STATUS_OK, t1.closed, t1.genus, t0.closed, t0.genus, foot, corners, crease);
@@ -597,8 +597,8 @@ static double rq_bump_ratio(qaws_mesh_3d const* out)
 	qaws_scalar* p = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * nv);
 	unsigned int* e = (unsigned int*)malloc(sizeof(unsigned int) * 2 * ne);
 	double lb = 0, lf = 0;
-	qaws_mesh_3d_get_positions(out, p);
-	qaws_mesh_3d_get_edges(out, e);
+	qaws_mesh_3d_get_positions(p, out);
+	qaws_mesh_3d_get_edges(e, out);
 	for (i = 0; i < ne; i++)
 	{
 		qaws_scalar const *a = p + 3 * e[2 * i], *b = p + 3 * e[2 * i + 1];
@@ -637,24 +637,24 @@ static void rq_shapes_make(rq_shapes* s)
 	s->ico = rq_icosphere(nrm);
 	memset(&rd, 0, sizeof rd);
 	rd.normals = nrm;
-	qaws_mesh_reference_create(s->ico, &rd, &s->rico);
+	qaws_mesh_reference_create(&s->rico, s->ico, &rd);
 	s->blob = rq_blob();
-	qaws_mesh_reference_create(s->blob, NULL, &s->rblob);
+	qaws_mesh_reference_create(&s->rblob, s->blob, NULL);
 	s->bump = rq_bumped();
-	qaws_mesh_reference_create(s->bump, NULL, &s->rbump);
+	qaws_mesh_reference_create(&s->rbump, s->bump, NULL);
 	memset(&cd, 0, sizeof cd);
 	cd.angle_tolerance = (qaws_scalar)0.2;
 	cd.min_length = (qaws_scalar)0.02;
 	cd.max_length = (qaws_scalar)0.4;
 	cd.gradation = (qaws_scalar)0.4;
 	if (s->rbump)
-		qaws_size_field_create_curvature(s->rbump, &cd, &s->sf);
+		qaws_size_field_create_curvature(&s->sf, s->rbump, &cd);
 	s->can = rq_can();
-	qaws_mesh_reference_create(s->can, NULL, &s->rcan);
+	qaws_mesh_reference_create(&s->rcan, s->can, NULL);
 	s->cube = rq_cube();
-	qaws_mesh_reference_create(s->cube, NULL, &s->rcube);
+	qaws_mesh_reference_create(&s->rcube, s->cube, NULL);
 	s->square = rq_square();
-	qaws_mesh_reference_create(s->square, NULL, &s->rsquare);
+	qaws_mesh_reference_create(&s->rsquare, s->square, NULL);
 }
 
 static void rq_shapes_free(rq_shapes* s)
@@ -932,7 +932,7 @@ static qaws_mesh_3d* rq_generated(unsigned int which, double L)
 	memset(&g, 0, sizeof g);
 	g.elements = QAWS_ELEMENTS_TRIANGLES;
 	g.target_length = (qaws_scalar)L;
-	if (qaws_mesh_generate_surface(srf, &g, &out, NULL) != QAWS_STATUS_OK)
+	if (qaws_mesh_generate_surface(&out, NULL, srf, &g) != QAWS_STATUS_OK)
 		out = NULL;
 	qaws_surface_destroy(srf);
 	return out;
@@ -945,8 +945,8 @@ static void rq_area_border(qaws_mesh_3d const* m, double* area, double* border)
 	qaws_scalar* p = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * nv);
 	unsigned int* t = (unsigned int*)malloc(sizeof(unsigned int) * 3 * nf);
 	unsigned long long* keys = (unsigned long long*)malloc(sizeof(unsigned long long) * 3 * nf);
-	qaws_mesh_3d_get_positions(m, p);
-	qaws_mesh_3d_get_triangles(m, t);
+	qaws_mesh_3d_get_positions(p, m);
+	qaws_mesh_3d_get_triangles(t, m);
 	*area = *border = 0;
 	for (i = 0; i < nf; i++)
 	{
@@ -989,7 +989,7 @@ static void test_open_generated(void)
 		qaws_mesh_3d* g = rq_generated(w, 0.1);
 		qaws_mesh_reference* r = NULL;
 		double a0, b0;
-		if (!g || qaws_mesh_reference_create(g, NULL, &r) != QAWS_STATUS_OK)
+		if (!g || qaws_mesh_reference_create(&r, g, NULL) != QAWS_STATUS_OK)
 		{
 			TEST_ASSERT(0, "open generated: the patch meshed");
 			qaws_mesh_3d_destroy(g);
@@ -1036,7 +1036,7 @@ static void test_refusals(rq_shapes const* s)
 		d.min_angle = (qaws_scalar)bad[i][0];
 		d.max_angle = (qaws_scalar)bad[i][1];
 		d.tolerance = (qaws_scalar)bad[i][2];
-		st[i] = qaws_mesh_remesh(s->ico, &d, &out, NULL);
+		st[i] = qaws_mesh_remesh(&out, NULL, s->ico, &d);
 		ok &= st[i] == QAWS_STATUS_INVALID_ARGUMENT && !out;
 	}
 	sprintf(msg, "refusals: min 0.7 over max 0.6 %s, min -0.1 %s, min pi/3 %s, max 1.0 %s, tolerance -1 %s", qaws_status_to_string(st[0]),

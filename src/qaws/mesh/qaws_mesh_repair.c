@@ -1517,7 +1517,7 @@ static void rp_fair(rp_work* w, unsigned int v0)
 	for (i = 0; i < nfree; i++)
 		rp[i + 1] += rp[i];
 	memcpy(xyz, RP_X(m, v0), sizeof(double) * 3 * (size_t)nfree);
-	st = qaws_internal_ldlt_factor(&L, nfree, rp, col, val, xyz, 0);
+	st = qaws_internal_ldlt_factor(&L, rp, col, val, xyz, nfree, 0);
 	if (st == QAWS_STATUS_ALLOCATION_FAILURE)
 		goto oom;
 	if (st == QAWS_STATUS_OK)
@@ -1525,7 +1525,7 @@ static void rp_fair(rp_work* w, unsigned int v0)
 		{
 			for (i = 0; i < nfree; i++)
 				sol[i] = b[3 * (size_t)i + k];
-			qaws_internal_ldlt_solve(&L, sol, sol);
+			qaws_internal_ldlt_solve(sol, &L, sol);
 			for (i = 0; i < nfree; i++)
 				RP_X(m, v0 + i)[k] = sol[i];
 		}
@@ -1737,9 +1737,9 @@ done:
 	return st;
 }
 
-qaws_status qaws_mesh_repair(qaws_scalar const* positions, unsigned int vertex_count, unsigned int const* face_vertices,
-	unsigned int const* face_sizes, unsigned int face_count, qaws_mesh_repair_desc const* desc, qaws_mesh_3d** out_mesh,
-	qaws_mesh_repair_report* report)
+qaws_status qaws_mesh_repair(qaws_mesh_3d** out_mesh, qaws_mesh_repair_report* report, qaws_scalar const* positions,
+	unsigned int const* face_vertices, unsigned int const* face_sizes, unsigned int vertex_count, unsigned int face_count,
+	qaws_mesh_repair_desc const* desc)
 {
 	qaws_mesh_repair_desc d;
 	qaws_mesh_repair_report local;

@@ -204,7 +204,7 @@ static int subdiv_adjacency_build(qaws_allocator const* allocator, subdiv_adjace
 	}
 
 	/* Compute vertex valence and adjacency lists */
-	adj->vert_valence = (unsigned int*)qaws_internal_calloc(allocator, m->vert_count, sizeof(unsigned int));
+	adj->vert_valence = (unsigned int*)qaws_internal_calloc(m->vert_count, sizeof(unsigned int), allocator);
 	if (!adj->vert_valence) return 0;
 
 	/* Count valences */
@@ -215,7 +215,7 @@ static int subdiv_adjacency_build(qaws_allocator const* allocator, subdiv_adjace
 	}
 
 	/* Allocate per-vertex edge lists */
-	adj->vert_edges = (unsigned int**)qaws_internal_calloc(allocator, m->vert_count, sizeof(unsigned int*));
+	adj->vert_edges = (unsigned int**)qaws_internal_calloc(m->vert_count, sizeof(unsigned int*), allocator);
 	if (!adj->vert_edges) return 0;
 	for (vi = 0; vi < m->vert_count; vi++)
 	{
@@ -227,7 +227,7 @@ static int subdiv_adjacency_build(qaws_allocator const* allocator, subdiv_adjace
 	}
 
 	/* Fill edge lists */
-	temp_valence = (unsigned int*)qaws_internal_calloc(allocator, m->vert_count, sizeof(unsigned int));
+	temp_valence = (unsigned int*)qaws_internal_calloc(m->vert_count, sizeof(unsigned int), allocator);
 	if (!temp_valence) return 0;
 
 	for (ei = 0; ei < adj->edge_count; ei++)
@@ -240,7 +240,7 @@ static int subdiv_adjacency_build(qaws_allocator const* allocator, subdiv_adjace
 	qaws_internal_dealloc(temp_valence, allocator);
 
 	/* Build per-vertex face lists */
-	adj->vert_face_count = (unsigned int*)qaws_internal_calloc(allocator, m->vert_count, sizeof(unsigned int));
+	adj->vert_face_count = (unsigned int*)qaws_internal_calloc(m->vert_count, sizeof(unsigned int), allocator);
 	if (!adj->vert_face_count) return 0;
 
 	/* Count faces per vertex */
@@ -256,7 +256,7 @@ static int subdiv_adjacency_build(qaws_allocator const* allocator, subdiv_adjace
 		offset += n;
 	}
 
-	adj->vert_faces = (unsigned int**)qaws_internal_calloc(allocator, m->vert_count, sizeof(unsigned int*));
+	adj->vert_faces = (unsigned int**)qaws_internal_calloc(m->vert_count, sizeof(unsigned int*), allocator);
 	if (!adj->vert_faces) return 0;
 	for (vi = 0; vi < m->vert_count; vi++)
 	{
@@ -269,7 +269,7 @@ static int subdiv_adjacency_build(qaws_allocator const* allocator, subdiv_adjace
 
 	/* Fill face lists (reuse vert_face_count as write index, then restore) */
 	{
-		unsigned int* write_idx = (unsigned int*)qaws_internal_calloc(allocator, m->vert_count, sizeof(unsigned int));
+		unsigned int* write_idx = (unsigned int*)qaws_internal_calloc(m->vert_count, sizeof(unsigned int), allocator);
 		if (!write_idx) return 0;
 
 		offset = 0;
@@ -1392,7 +1392,7 @@ static int build_triangle_mesh(
 	}
 
 	verts = (qaws_vec3*)qaws_internal_alloc(qaws_internal_mul2(m->vert_count, sizeof(qaws_vec3)), allocator);
-	normals = (qaws_vec3*)qaws_internal_calloc(allocator, m->vert_count, sizeof(qaws_vec3));
+	normals = (qaws_vec3*)qaws_internal_calloc(m->vert_count, sizeof(qaws_vec3), allocator);
 	tris = (unsigned int*)qaws_internal_alloc(qaws_internal_mul3(tri_count, 3, sizeof(unsigned int)), allocator);
 	face_normals = (qaws_vec3*)qaws_internal_alloc(qaws_internal_mul2(tri_count, sizeof(qaws_vec3)), allocator);
 
@@ -1484,9 +1484,9 @@ static int build_triangle_mesh(
  * ----------------------------------------------------------------------- */
 
 qaws_status qaws_surface_create_subdiv_ex(
+	qaws_surface** out_surface,
 	qaws_surface_subdiv_desc const* desc,
-	qaws_allocator const* allocator,
-	qaws_surface** out_surface)
+	qaws_allocator const* allocator)
 {
 	qaws_surface* surface;
 	qaws_surface_subdiv_impl* impl;
@@ -1640,7 +1640,7 @@ qaws_status qaws_surface_create_subdiv(
 	qaws_surface** out_surface,
 	qaws_surface_subdiv_desc const* desc)
 {
-	return qaws_surface_create_subdiv_ex(desc, NULL, out_surface);
+	return qaws_surface_create_subdiv_ex(out_surface, desc, NULL);
 }
 
 /* -----------------------------------------------------------------------

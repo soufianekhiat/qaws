@@ -60,15 +60,15 @@ static qaws_status loft_surface_eval_sampled(
 	}
 
 	/* Allocate temporary arrays for section evaluations */
-	sec_pos = (qaws_vec3*)qaws_internal_scratch(surface->allocator, stack_sec_pos, sizeof(stack_sec_pos), n * sizeof(qaws_vec3));
+	sec_pos = (qaws_vec3*)qaws_internal_scratch(stack_sec_pos, sizeof(stack_sec_pos), n * sizeof(qaws_vec3), surface->allocator);
 	if (!sec_pos) return QAWS_STATUS_ALLOCATION_FAILURE;
 
 	if (need_du)
 	{
-		sec_du = (qaws_vec3*)qaws_internal_scratch(surface->allocator, stack_sec_du, sizeof(stack_sec_du), n * sizeof(qaws_vec3));
+		sec_du = (qaws_vec3*)qaws_internal_scratch(stack_sec_du, sizeof(stack_sec_du), n * sizeof(qaws_vec3), surface->allocator);
 		if (!sec_du)
 		{
-			qaws_internal_scratch_release(surface->allocator, stack_sec_pos, sec_pos);
+			qaws_internal_scratch_release(stack_sec_pos, sec_pos, surface->allocator);
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 		}
 	}
@@ -89,8 +89,8 @@ static qaws_status loft_surface_eval_sampled(
 		status = qaws_curve_evaluate_3d(&cr, impl->sections[i], t_curve, cf);
 		if (status != QAWS_STATUS_OK)
 		{
-			qaws_internal_scratch_release(surface->allocator, stack_sec_pos, sec_pos);
-			qaws_internal_scratch_release(surface->allocator, stack_sec_du, sec_du);
+			qaws_internal_scratch_release(stack_sec_pos, sec_pos, surface->allocator);
+			qaws_internal_scratch_release(stack_sec_du, sec_du, surface->allocator);
 			return status;
 		}
 
@@ -214,8 +214,8 @@ static qaws_status loft_surface_eval_sampled(
 		}
 	}
 
-	qaws_internal_scratch_release(surface->allocator, stack_sec_pos, sec_pos);
-	qaws_internal_scratch_release(surface->allocator, stack_sec_du, sec_du);
+	qaws_internal_scratch_release(stack_sec_pos, sec_pos, surface->allocator);
+	qaws_internal_scratch_release(stack_sec_du, sec_du, surface->allocator);
 	return QAWS_STATUS_OK;
 }
 
@@ -440,9 +440,9 @@ static qaws_surface_vtable const loft_surface_vtable = {
 };
 
 qaws_status qaws_surface_create_loft_ex(
+	qaws_surface** out_surface,
 	qaws_surface_loft_desc const* desc,
-	qaws_allocator const* allocator,
-	qaws_surface** out_surface)
+	qaws_allocator const* allocator)
 {
 	qaws_surface* surface;
 	qaws_surface_loft_impl* impl;
@@ -539,5 +539,5 @@ qaws_status qaws_surface_create_loft(
 	qaws_surface** out_surface,
 	qaws_surface_loft_desc const* desc)
 {
-	return qaws_surface_create_loft_ex(desc, NULL, out_surface);
+	return qaws_surface_create_loft_ex(out_surface, desc, NULL);
 }

@@ -79,7 +79,7 @@ static double ms_stroke_angle(qaws_mesh_3d const* m)
 {
 	unsigned int ne = qaws_mesh_3d_get_edge_count(m), *e = (unsigned int*)malloc(sizeof(unsigned int) * (2 * ne + 2)), i, k, n = 0;
 	double* x = ms_positions(m), sum = 0;
-	qaws_mesh_3d_get_edges(m, e);
+	qaws_mesh_3d_get_edges(e, m);
 	for (i = 0; i < ne; i++)
 	{
 		double const *p = x + 3 * e[2 * i], *u = x + 3 * e[2 * i + 1];
@@ -175,8 +175,8 @@ static double ms_mark_irregular(er_canvas* c, qaws_mesh_3d const* m, double lift
 	unsigned int *e = (unsigned int*)malloc(sizeof(unsigned int) * (2 * ne + 2)), *deg = (unsigned int*)calloc(nv + 1, sizeof(unsigned int));
 	unsigned int* ed = (unsigned int*)calloc(nv + 1, sizeof(unsigned int));
 	double* x = ms_positions(m), near = HUGE_VAL;
-	qaws_mesh_3d_get_faces(m, fv, fs);
-	qaws_mesh_3d_get_edges(m, e);
+	qaws_mesh_3d_get_faces(fv, fs, m);
+	qaws_mesh_3d_get_edges(e, m);
 	for (f = 0, c0 = 0; f < nf; c0 += fs[f], f++)
 		for (i = 0; i < fs[f]; i++)
 			deg[fv[c0 + i]]++;
@@ -264,7 +264,7 @@ static void demo_cones(er_canvas* c, int y)
 			d.attractor_count = 1;
 			d.attractor_radius = (qaws_scalar)0.1;
 		}
-		st = qaws_mesh_quadrangulate(i == 2 ? sq : s, &d, &q[i], &rep[i]);
+		st = qaws_mesh_quadrangulate(&q[i], &rep[i], i == 2 ? sq : s, &d);
 		printf("  cones panel %u: %s, %u quads, %u others, %u singular, %.1f s\n", i, qaws_status_to_string(st), rep[i].quality.quads,
 			rep[i].quality.triangles + rep[i].quality.polygons, rep[i].quality.irregular, (double)(clock() - t0) / CLOCKS_PER_SEC);
 	}
@@ -345,8 +345,8 @@ static void demo_guidance(void)
 		ge[2 * i] = 1 + (ring - 1) * nlon + i;
 		ge[2 * i + 1] = 1 + (ring - 1) * nlon + (i + 1) % nlon;
 	}
-	qaws_mesh_reference_create(s, NULL, &r);
-	qaws_size_field_create_vertices(r, sizes, &sf);
+	qaws_mesh_reference_create(&r, s, NULL);
+	qaws_size_field_create_vertices(&sf, r, sizes);
 	for (i = 0; i < 5; i++)
 	{
 		clock_t t0 = clock();
@@ -374,7 +374,7 @@ static void demo_guidance(void)
 			d.pinned = pins;
 			d.pinned_count = 6;
 		}
-		st = qaws_mesh_quadrangulate(s, &d, &q[i], &rep[i]);
+		st = qaws_mesh_quadrangulate(&q[i], &rep[i], s, &d);
 		printf("  panel %u: %s, %u quads, %u others, %u singular, %.1f s\n", i, qaws_status_to_string(st), rep[i].quality.quads,
 			rep[i].quality.triangles + rep[i].quality.polygons, rep[i].quality.irregular, (double)(clock() - t0) / CLOCKS_PER_SEC);
 	}
@@ -386,8 +386,8 @@ static void demo_guidance(void)
 		unsigned int *fs = (unsigned int*)malloc(sizeof(unsigned int) * (nf + 1)), *e = (unsigned int*)malloc(sizeof(unsigned int) * (2 * ne + 2));
 		double* p = ms_positions(q[0]), sum[2] = { 0, 0 };
 		unsigned int cnt[2] = { 0, 0 };
-		qaws_mesh_3d_get_faces(q[0], fv, fs);
-		qaws_mesh_3d_get_edges(q[0], e);
+		qaws_mesh_3d_get_faces(fv, fs, q[0]);
+		qaws_mesh_3d_get_edges(e, q[0]);
 		for (i = 0; i < ne; i++)
 		{
 			double const *a = p + 3 * e[2 * i], *b = p + 3 * e[2 * i + 1];

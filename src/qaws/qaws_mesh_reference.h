@@ -71,33 +71,33 @@ typedef struct qaws_mesh_reference_desc
 typedef struct qaws_mesh_reference qaws_mesh_reference;
 
 /* desc NULL: PN with computed normals */
-qaws_status qaws_mesh_reference_create(qaws_mesh_3d const* mesh, qaws_mesh_reference_desc const* desc, qaws_mesh_reference** out_reference);
+qaws_status qaws_mesh_reference_create(qaws_mesh_reference** out_reference, qaws_mesh_3d const* mesh, qaws_mesh_reference_desc const* desc);
 void qaws_mesh_reference_destroy(qaws_mesh_reference* reference);
 
 unsigned int qaws_mesh_reference_get_triangle_count(qaws_mesh_reference const* reference);
-qaws_status qaws_mesh_reference_get_triangle(qaws_mesh_reference const* reference, unsigned int triangle, unsigned int out_vertices[3]);
+qaws_status qaws_mesh_reference_get_triangle(unsigned int out_vertices[3], qaws_mesh_reference const* reference, unsigned int triangle);
 /* the mesh the reference copied */
 qaws_mesh_3d const* qaws_mesh_reference_get_mesh(qaws_mesh_reference const* reference);
 /* a location of an input vertex */
-qaws_status qaws_mesh_reference_get_vertex_location(qaws_mesh_reference const* reference, unsigned int vertex,
-	qaws_mesh_location* out_location);
+qaws_status qaws_mesh_reference_get_vertex_location(qaws_mesh_location* out_location, qaws_mesh_reference const* reference,
+	unsigned int vertex);
 
 /* per location: a position (3), a unit normal (3), curvatures (8: k1 >= k2,
    then the unit directions d1, d2); each output may be NULL */
-qaws_status qaws_mesh_reference_evaluate(qaws_mesh_reference const* reference, qaws_mesh_location const* locations, unsigned int count,
-	qaws_scalar* out_positions, qaws_scalar* out_normals, qaws_scalar* out_curvatures);
+qaws_status qaws_mesh_reference_evaluate(qaws_scalar* out_positions, qaws_scalar* out_normals, qaws_scalar* out_curvatures,
+	qaws_mesh_reference const* reference, qaws_mesh_location const* locations, unsigned int count);
 
 /* hints and out_distances may be NULL */
-qaws_status qaws_mesh_reference_project(qaws_mesh_reference const* reference, qaws_scalar const* points, unsigned int count,
-	qaws_mesh_location const* hints, qaws_mesh_location* out_locations, qaws_scalar* out_distances);
+qaws_status qaws_mesh_reference_project(qaws_mesh_location* out_locations, qaws_scalar* out_distances, qaws_mesh_reference const* reference,
+	qaws_scalar const* points, qaws_mesh_location const* hints, unsigned int count);
 
 /* tangent: a 3D vector, its part in the plane of the triangle walked; its
    length is the distance walked (on the triangles); stops at the border */
-qaws_status qaws_mesh_reference_walk(qaws_mesh_reference const* reference, qaws_mesh_location from, qaws_scalar const* tangent,
-	qaws_mesh_location* out_to);
+qaws_status qaws_mesh_reference_walk(qaws_mesh_location* out_to, qaws_mesh_reference const* reference, qaws_scalar const* tangent,
+	qaws_mesh_location from);
 
 /* the input mesh's attribute at the locations (components per location) */
-qaws_status qaws_mesh_reference_evaluate_attribute(qaws_mesh_reference const* reference, unsigned int attribute,
-	qaws_mesh_location const* locations, unsigned int count, qaws_scalar* out_values);
+qaws_status qaws_mesh_reference_evaluate_attribute(qaws_scalar* out_values, qaws_mesh_reference const* reference,
+	qaws_mesh_location const* locations, unsigned int count, unsigned int attribute);
 
 #endif /* QAWS_MESH_REFERENCE_H */

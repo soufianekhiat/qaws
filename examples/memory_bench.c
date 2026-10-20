@@ -141,7 +141,7 @@ static int op_meshing(void)
 	memset(&gd, 0, sizeof gd);
 	gd.method = QAWS_GENERATE_REMESH;
 	gd.target_length = (qaws_scalar)0.25;
-	ok = qaws_mesh_generate_surface(g_patch, &gd, &m, NULL) == QAWS_STATUS_OK;
+	ok = qaws_mesh_generate_surface(&m, NULL, g_patch, &gd) == QAWS_STATUS_OK;
 	qaws_mesh_3d_destroy(m);
 	return ok;
 }
@@ -263,13 +263,13 @@ int main(void)
 		counting.alloc_sized = mb_alloc;
 		counting.dealloc_sized = mb_free;
 		counting.user_data = &c;
-		qaws_exchange_thread_allocator(&counting, &prev);
+		qaws_exchange_thread_allocator(&prev, &counting);
 		ok2 = ops[i].run();
 		qaws_set_thread_allocator(&prev);
 		/* arena */
 		/* arena: the same repetitions, reset between runs (a frame arena) */
 		qaws_arena_init(&arena, memory, arena_bytes);
-		qaws_exchange_thread_allocator(&arena.allocator, &prev);
+		qaws_exchange_thread_allocator(&prev, &arena.allocator);
 		{
 			clock_t t0 = clock();
 			int rr;
@@ -298,8 +298,8 @@ int main(void)
 			heap.dealloc_sized = mb_free;
 			heap.user_data = &h;
 			qaws_arena_init(&arena, memory, arena_bytes);
-			qaws_exchange_thread_allocator(&heap, &prev);
-			qaws_exchange_thread_scratch_allocator(&arena.allocator, &prev_scratch);
+			qaws_exchange_thread_allocator(&prev, &heap);
+			qaws_exchange_thread_scratch_allocator(&prev_scratch, &arena.allocator);
 			t0 = clock();
 			for (rr = 0; rr < ops[i].reps; rr++)
 			{
@@ -308,7 +308,7 @@ int main(void)
 				ok3 &= qaws_arena_reset(&arena) == QAWS_STATUS_OK;
 			}
 			ts = (double)(clock() - t0) / CLOCKS_PER_SEC / ops[i].reps;
-			qaws_exchange_thread_scratch_allocator(&prev_scratch, NULL);
+			qaws_exchange_thread_scratch_allocator(NULL, &prev_scratch);
 			qaws_set_thread_allocator(&prev);
 			ok3 &= held == 0;
 			split_blocks = h.blocks / ops[i].reps;

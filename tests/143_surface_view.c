@@ -175,7 +175,7 @@ static double sv_compare(qaws_surface_prepared const* p, qaws_surface const* bor
 			qaws_surface_eval_result a, b;
 			if (qaws_surface_evaluate(&b, owned, u, v, SV_ALL) != QAWS_STATUS_OK)
 				return 1e30;
-			if (qaws_surface_prepared_evaluate(p, u, v, SV_ALL, &a) != QAWS_STATUS_OK || (b.valid_flags & ~a.valid_flags))
+			if (qaws_surface_prepared_evaluate(&a, p, u, v, SV_ALL) != QAWS_STATUS_OK || (b.valid_flags & ~a.valid_flags))
 				return 1e30;
 			e = sv_diff(&a, &b);
 			worst = e > worst ? e : worst;
@@ -213,7 +213,7 @@ static void test_parity(void)
 		qaws_surface_prepared* pr = NULL;
 		qaws_surface* borrowed = NULL;
 		e[c] = 1e30;
-		if (owned && qaws_surface_prepare(&v, NULL, &pr) == QAWS_STATUS_OK && qaws_surface_create_borrowed(&v, NULL, &borrowed) == QAWS_STATUS_OK)
+		if (owned && qaws_surface_prepare(&pr, &v, NULL) == QAWS_STATUS_OK && qaws_surface_create_borrowed(&borrowed, &v, NULL) == QAWS_STATUS_OK)
 		{
 			e[c] = sv_compare(pr, borrowed, owned);
 			if (c == 0)
@@ -264,9 +264,9 @@ static void test_layouts_and_mutation(void)
 		pz[i] = pf[i * 3 + 2];
 	}
 	v = sv_view(pf, 3, NULL, 1);
-	TEST_ASSERT(qaws_surface_prepare(&v, NULL, &b) == QAWS_STATUS_OK, "prepare: packed f64");
+	TEST_ASSERT(qaws_surface_prepare(&b, &v, NULL) == QAWS_STATUS_OK, "prepare: packed f64");
 	v.points = sv_packed(rec[0].position, QAWS_ELEMENT_F32, 3, SV_N, sizeof(sv_record));
-	TEST_ASSERT(qaws_surface_prepare(&v, NULL, &a) == QAWS_STATUS_OK, "prepare: interleaved f32 records");
+	TEST_ASSERT(qaws_surface_prepare(&a, &v, NULL) == QAWS_STATUS_OK, "prepare: interleaved f32 records");
 	memset(&v.points, 0, sizeof v.points);
 	v.points.planes[0] = px;
 	v.points.planes[1] = py;
@@ -274,16 +274,16 @@ static void test_layouts_and_mutation(void)
 	v.points.type = QAWS_ELEMENT_F64;
 	v.points.components = 3;
 	v.points.count = SV_N;
-	TEST_ASSERT(qaws_surface_prepare(&v, NULL, &c) == QAWS_STATUS_OK, "prepare: planar f64");
+	TEST_ASSERT(qaws_surface_prepare(&c, &v, NULL) == QAWS_STATUS_OK, "prepare: planar f64");
 	if (!a || !b || !c)
 		return;
 	for (i = 0; i <= 20; i++)
 		for (j = 0; j <= 20; j++)
 		{
 			qaws_surface_eval_result ra, rb, rc;
-			qaws_surface_prepared_evaluate(a, (qaws_scalar)(i / 20.0), (qaws_scalar)(j / 20.0), SV_ALL, &ra);
-			qaws_surface_prepared_evaluate(b, (qaws_scalar)(i / 20.0), (qaws_scalar)(j / 20.0), SV_ALL, &rb);
-			qaws_surface_prepared_evaluate(c, (qaws_scalar)(i / 20.0), (qaws_scalar)(j / 20.0), SV_ALL, &rc);
+			qaws_surface_prepared_evaluate(&ra, a, (qaws_scalar)(i / 20.0), (qaws_scalar)(j / 20.0), SV_ALL);
+			qaws_surface_prepared_evaluate(&rb, b, (qaws_scalar)(i / 20.0), (qaws_scalar)(j / 20.0), SV_ALL);
+			qaws_surface_prepared_evaluate(&rc, c, (qaws_scalar)(i / 20.0), (qaws_scalar)(j / 20.0), SV_ALL);
 			diff += memcmp(&ra, &rb, sizeof ra) != 0 || memcmp(&rb, &rc, sizeof rb) != 0;
 		}
 	TEST_ASSERT(diff == 0, "surface: f32 records, packed f64 and planar f64 holding the same values evaluate bit for bit alike");
@@ -345,7 +345,7 @@ static void test_ranges(void)
 		uv[i * 2 + 1] = fmod(0.414214 * i, 1.0);
 	}
 	v = sv_view(p, 3, w, 1);
-	if (qaws_surface_prepare(&v, NULL, &pr) != QAWS_STATUS_OK)
+	if (qaws_surface_prepare(&pr, &v, NULL) != QAWS_STATUS_OK)
 	{
 		TEST_ASSERT(0, "surface ranges: prepared");
 		return;
@@ -362,7 +362,7 @@ static void test_ranges(void)
 	for (i = 0; i < SV_RANGE; i += 5)
 	{
 		qaws_surface_eval_result r;
-		qaws_surface_prepared_evaluate(pr, (qaws_scalar)uv[i * 2], (qaws_scalar)uv[i * 2 + 1], QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL, &r);
+		qaws_surface_prepared_evaluate(&r, pr, (qaws_scalar)uv[i * 2], (qaws_scalar)uv[i * 2 + 1], QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL);
 		bad += (double)r.position.x != pos_s[i * 3] || (double)r.position.z != pos_s[i * 3 + 2] || (double)r.normal.y != nrm_s[i * 3 + 1];
 	}
 	TEST_ASSERT(bad == 0, "surface range evaluation: the single evaluations' values");
@@ -435,8 +435,8 @@ static void test_allocation_and_validation(void)
 			s.calls = 0;
 			s.fail_at = (int)f;
 			s.live = 0;
-			st = which == 0 ? qaws_surface_prepare(&v, &al, &pr) : which == 1 ? qaws_surface_create_borrowed(&v, &al, &sf)
-				: qaws_surface_create_from_view(&v, &al, &sf);
+			st = which == 0 ? qaws_surface_prepare(&pr, &v, &al) : which == 1 ? qaws_surface_create_borrowed(&sf, &v, &al)
+				: qaws_surface_create_from_view(&sf, &v, &al);
 			if (st == QAWS_STATUS_OK)
 			{
 				ok[which] = f + 1;
@@ -454,14 +454,14 @@ static void test_allocation_and_validation(void)
 	mem = (unsigned char*)malloc(bytes + 32);
 	{
 		unsigned char* at = (unsigned char*)(((size_t)mem + 15) & ~(size_t)15);
-		TEST_ASSERT(qaws_surface_prepare_into(&v, at, bytes - 1, &pi) == QAWS_STATUS_BUFFER_TOO_SMALL && !pi, "surface prepare_into: one byte short refused");
-		TEST_ASSERT(qaws_surface_prepare_into(&v, at, bytes, &pi) == QAWS_STATUS_OK && qaws_surface_prepare(&v, NULL, &pa) == QAWS_STATUS_OK,
+		TEST_ASSERT(qaws_surface_prepare_into(&pi, at, &v, bytes - 1) == QAWS_STATUS_BUFFER_TOO_SMALL && !pi, "surface prepare_into: one byte short refused");
+		TEST_ASSERT(qaws_surface_prepare_into(&pi, at, &v, bytes) == QAWS_STATUS_OK && qaws_surface_prepare(&pa, &v, NULL) == QAWS_STATUS_OK,
 			"surface prepare_into and prepare");
 		if (pi && pa)
 		{
 			qaws_surface_eval_result a, b;
-			qaws_surface_prepared_evaluate(pi, (qaws_scalar)0.37, (qaws_scalar)0.81, SV_ALL, &a);
-			qaws_surface_prepared_evaluate(pa, (qaws_scalar)0.37, (qaws_scalar)0.81, SV_ALL, &b);
+			qaws_surface_prepared_evaluate(&a, pi, (qaws_scalar)0.37, (qaws_scalar)0.81, SV_ALL);
+			qaws_surface_prepared_evaluate(&b, pa, (qaws_scalar)0.37, (qaws_scalar)0.81, SV_ALL);
 			TEST_ASSERT(memcmp(&a, &b, sizeof a) == 0, "surface prepare_into evaluates as prepare");
 		}
 		qaws_surface_prepared_destroy(pi);
@@ -496,7 +496,7 @@ static void test_operations(void)
 	sv_points(p, 0.8);
 	v = sv_view(p, 3, NULL, 1);
 	owned = sv_owned(p, NULL, 1);
-	if (!owned || qaws_surface_create_borrowed(&v, NULL, &borrowed) != QAWS_STATUS_OK)
+	if (!owned || qaws_surface_create_borrowed(&borrowed, &v, NULL) != QAWS_STATUS_OK)
 	{
 		TEST_ASSERT(0, "surface operations: created");
 		return;
@@ -529,7 +529,7 @@ static void test_jets(void)
 	{
 		qaws_surface_view v = sv_view(p, 3, c ? w : NULL, 1);
 		qaws_surface *owned = sv_owned(p, c ? w : NULL, 1), *borrowed = NULL;
-		if (!owned || qaws_surface_create_borrowed(&v, NULL, &borrowed) != QAWS_STATUS_OK)
+		if (!owned || qaws_surface_create_borrowed(&borrowed, &v, NULL) != QAWS_STATUS_OK)
 		{
 			TEST_ASSERT(0, "jets: surfaces created");
 			qaws_surface_destroy(owned);

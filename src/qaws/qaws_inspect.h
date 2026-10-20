@@ -27,10 +27,10 @@ qaws_status qaws_curve_compute_arc_length(
 /* The parameter at arc length `length` after parameter_min (safeguarded Newton on the measure above); OUT_OF_RANGE for
    a negative length or one past the end of the range. */
 qaws_status qaws_curve_compute_parameter_at_arc_length(
+	qaws_scalar* out_parameter,
 	qaws_curve const* curve,
 	qaws_scalar parameter_min,
-	qaws_scalar length,
-	qaws_scalar* out_parameter);
+	qaws_scalar length);
 
 qaws_status qaws_curve_compute_bounds_2d(
 	qaws_vec2* out_min,
@@ -58,18 +58,18 @@ qaws_status qaws_curve_find_closest_parameter_3d(
    curve's extent (QAWS_EPSILON in float) unless the work bound (4096 halvings) is reached, as for a point at a circle's
    center. QAWS_STATUS_UNSUPPORTED_OPERATION for the other families and for non-positive weights. */
 qaws_status qaws_curve_find_closest_point_certified_2d(
-	qaws_curve const* curve,
-	qaws_vec2 point,
 	qaws_scalar* out_parameter,
 	qaws_scalar* out_distance,
-	qaws_scalar* out_gap);
+	qaws_scalar* out_gap,
+	qaws_curve const* curve,
+	qaws_vec2 point);
 
 qaws_status qaws_curve_find_closest_point_certified_3d(
-	qaws_curve const* curve,
-	qaws_vec3 point,
 	qaws_scalar* out_parameter,
 	qaws_scalar* out_distance,
-	qaws_scalar* out_gap);
+	qaws_scalar* out_gap,
+	qaws_curve const* curve,
+	qaws_vec3 point);
 
 qaws_status qaws_curve_get_span_continuity(
 	qaws_continuity* out_continuity,
@@ -127,11 +127,11 @@ qaws_status qaws_curve_compute_frenet_frame_3d(
    initial_normal made perpendicular to the tangent (NULL, or parallel to it: a perpendicular chosen from the tangent alone). A
    closed curve's frame need not close (its holonomy). QAWS_STATUS_DEGENERATE_CURVE where the speed vanishes. No allocation. */
 qaws_status qaws_curve_compute_rotation_minimizing_frames_3d(
+	qaws_scalar* out_frames,
 	qaws_curve const* curve,
 	qaws_scalar const* parameters,
-	unsigned int count,
 	qaws_vec3 const* initial_normal,
-	qaws_scalar* out_frames);
+	unsigned int count);
 
 /* Inflection point detection */
 qaws_status qaws_curve_find_inflection_points(
@@ -315,13 +315,13 @@ qaws_status qaws_surface_find_closest_point(
    minimum distance lies in [*out_distance - *out_gap, *out_distance]; the gap is within 1e-9 of the extent (QAWS_EPSILON in
    float) unless the work bound (8192 splits) is reached. QAWS_STATUS_UNSUPPORTED_OPERATION for other surfaces. */
 qaws_status qaws_surface_find_closest_point_certified(
-	qaws_surface const* surface,
-	qaws_vec3 point,
 	qaws_scalar* out_u,
 	qaws_scalar* out_v,
 	qaws_vec3* out_closest_point,
 	qaws_scalar* out_distance,
-	qaws_scalar* out_gap);
+	qaws_scalar* out_gap,
+	qaws_surface const* surface,
+	qaws_vec3 point);
 
 /* Curve-plane intersection */
 
@@ -407,14 +407,14 @@ typedef struct qaws_surface_tessellation_desc
 } qaws_surface_tessellation_desc;
 
 qaws_status qaws_surface_tessellate_adaptive(
-	qaws_surface const* surface,
-	qaws_surface_tessellation_desc const* desc,
 	qaws_tessellation_vertex* out_vertices,
-	unsigned int vertex_capacity,
 	unsigned int* out_vertex_count,
 	unsigned int* out_indices,
+	unsigned int* out_index_count,
+	qaws_surface const* surface,
+	unsigned int vertex_capacity,
 	unsigned int index_capacity,
-	unsigned int* out_index_count);
+	qaws_surface_tessellation_desc const* desc);
 
 /* Curve projection onto surface */
 

@@ -76,10 +76,10 @@ static void ms_sj_draw(er_canvas* c, qaws_mesh_3d const* m, ms_qi_stats* st)
 	memset(st, 0, sizeof *st);
 	st->smin = 1;
 	st->emin = HUGE_VAL;
-	qaws_mesh_3d_get_faces(m, fv, fs);
-	qaws_mesh_3d_get_edges(m, e);
-	qaws_mesh_3d_get_face_adjacency(m, across);
-	qaws_mesh_3d_get_vertex_normals(m, ns);
+	qaws_mesh_3d_get_faces(fv, fs, m);
+	qaws_mesh_3d_get_edges(e, m);
+	qaws_mesh_3d_get_face_adjacency(across, m);
+	qaws_mesh_3d_get_vertex_normals(ns, m);
 	for (k = 0; k < 3 * nv; k++)
 		n[k] = (double)ns[k];
 	for (f = 0, c0 = 0; f < nf; c0 += fs[f], f++)
@@ -203,11 +203,11 @@ static void demo_quad_improve(void)
 		qaws_hm* m = &g->hm;
 		unsigned char kind[82];
 		unsigned int v, ops = 0, nf0 = m->nf;
-		qaws_mesh_reference_create(g, NULL, &r);
+		qaws_mesh_reference_create(&r, g, NULL);
 		hm_foot_enable(m);
 		for (v = 0; v < m->nv; v++)
 		{
-			qaws_mesh_reference_get_vertex_location(r, v, &m->foot[v]);
+			qaws_mesh_reference_get_vertex_location(&m->foot[v], r, v);
 			kind[v] = (unsigned char)(hm_is_border_vertex(m, v) ? hm_valence(m, v) == 2 ? 2 : 1 : 0);
 			if (kind[v] == 2)
 				m->vflag[v] |= HM_CORNER;

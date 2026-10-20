@@ -66,7 +66,7 @@ typedef struct qaws_repulsive_curves_desc
 typedef struct qaws_repulsive_curves qaws_repulsive_curves;
 
 qaws_status qaws_repulsive_curves_create(qaws_repulsive_curves** out_curves, qaws_repulsive_curves_desc const* desc);
-qaws_status qaws_repulsive_curves_create_ex(qaws_repulsive_curves_desc const* desc, qaws_allocator const* allocator, qaws_repulsive_curves** out_curves);
+qaws_status qaws_repulsive_curves_create_ex(qaws_repulsive_curves** out_curves, qaws_repulsive_curves_desc const* desc, qaws_allocator const* allocator);
 void qaws_repulsive_curves_destroy(qaws_repulsive_curves* curves);
 
 /* The energy at positions; with a direction (else NULL, and the derivative
@@ -235,8 +235,8 @@ typedef struct qaws_repulsive_curves_solver qaws_repulsive_curves_solver;
    positions; checks the input (collision-checked: no touching edges). */
 qaws_status qaws_repulsive_curves_solver_create(qaws_repulsive_curves_solver** out_solver, qaws_repulsive_curves const* curves,
 	qaws_scalar const* positions, qaws_repulsive_curves_solve_desc const* desc);
-qaws_status qaws_repulsive_curves_solver_create_ex(qaws_repulsive_curves const* curves, qaws_repulsive_curves_solve_desc const* desc,
-	qaws_scalar const* positions, qaws_allocator const* allocator, qaws_repulsive_curves_solver** out_solver);
+qaws_status qaws_repulsive_curves_solver_create_ex(qaws_repulsive_curves_solver** out_solver, qaws_repulsive_curves const* curves,
+	qaws_scalar const* positions, qaws_repulsive_curves_solve_desc const* desc, qaws_allocator const* allocator);
 void qaws_repulsive_curves_solver_destroy(qaws_repulsive_curves_solver* solver);
 
 /* One step: positions updated in place when a step is accepted; the report
@@ -250,8 +250,8 @@ qaws_status qaws_repulsive_curves_solve(qaws_repulsive_report* out_report, qaws_
 
 /* The objective the solver lowers at positions: the energy and every term the desc adds (length, room), as report.energy;
    out_gradient (may be NULL) its gradient with respect to the positions, overwritten. */
-qaws_status qaws_repulsive_curves_solver_objective(qaws_repulsive_curves_solver const* solver, qaws_scalar const* positions,
-	qaws_scalar* out_energy, qaws_scalar* out_gradient);
+qaws_status qaws_repulsive_curves_solver_objective(qaws_scalar* out_energy, qaws_scalar* out_gradient,
+	qaws_repulsive_curves_solver const* solver, qaws_scalar const* positions);
 
 /* The descent direction g at positions (the projected fractional Sobolev
    gradient: A g + C^T l = dE, C g = 0), not the coordinate gradient. */
@@ -306,7 +306,7 @@ typedef struct qaws_repulsive_mesh_desc
 typedef struct qaws_repulsive_mesh qaws_repulsive_mesh;
 
 qaws_status qaws_repulsive_mesh_create(qaws_repulsive_mesh** out_mesh, qaws_repulsive_mesh_desc const* desc);
-qaws_status qaws_repulsive_mesh_create_ex(qaws_repulsive_mesh_desc const* desc, qaws_allocator const* allocator, qaws_repulsive_mesh** out_mesh);
+qaws_status qaws_repulsive_mesh_create_ex(qaws_repulsive_mesh** out_mesh, qaws_repulsive_mesh_desc const* desc, qaws_allocator const* allocator);
 void qaws_repulsive_mesh_destroy(qaws_repulsive_mesh* mesh);
 
 qaws_status qaws_repulsive_mesh_eval(qaws_scalar* out_value, qaws_scalar* out_tangent,
@@ -440,8 +440,8 @@ typedef struct qaws_repulsive_mesh_solver qaws_repulsive_mesh_solver;
 
 qaws_status qaws_repulsive_mesh_solver_create(qaws_repulsive_mesh_solver** out_solver, qaws_repulsive_mesh const* mesh,
 	qaws_scalar const* positions, qaws_repulsive_mesh_solve_desc const* desc);
-qaws_status qaws_repulsive_mesh_solver_create_ex(qaws_repulsive_mesh const* mesh, qaws_repulsive_mesh_solve_desc const* desc,
-	qaws_scalar const* positions, qaws_allocator const* allocator, qaws_repulsive_mesh_solver** out_solver);
+qaws_status qaws_repulsive_mesh_solver_create_ex(qaws_repulsive_mesh_solver** out_solver, qaws_repulsive_mesh const* mesh,
+	qaws_scalar const* positions, qaws_repulsive_mesh_solve_desc const* desc, qaws_allocator const* allocator);
 void qaws_repulsive_mesh_solver_destroy(qaws_repulsive_mesh_solver* solver);
 qaws_status qaws_repulsive_mesh_solver_step(qaws_repulsive_report* out_report, qaws_scalar* positions, qaws_repulsive_mesh_solver* solver);
 qaws_status qaws_repulsive_mesh_solver_direction(qaws_scalar* out_direction, qaws_repulsive_mesh_solver const* solver,
@@ -455,8 +455,8 @@ qaws_status qaws_repulsive_mesh_solve(qaws_repulsive_report* out_report, qaws_sc
 	qaws_repulsive_mesh const* mesh, qaws_repulsive_mesh_solve_desc const* desc);
 
 /* The objective the solver lowers (energy, area, volume and obstacle terms), as for curves */
-qaws_status qaws_repulsive_mesh_solver_objective(qaws_repulsive_mesh_solver const* solver, qaws_scalar const* positions,
-	qaws_scalar* out_energy, qaws_scalar* out_gradient);
+qaws_status qaws_repulsive_mesh_solver_objective(qaws_scalar* out_energy, qaws_scalar* out_gradient,
+	qaws_repulsive_mesh_solver const* solver, qaws_scalar const* positions);
 
 /* ---- derivatives of a converged solution (R5) ---------------------------- */
 
@@ -538,14 +538,14 @@ typedef struct qaws_repulsive_derivative_report
 } qaws_repulsive_derivative_report;
 
 /* the four above with a report (may be NULL; the unchecked ones pass NULL) */
-qaws_status qaws_repulsive_curves_solver_solution_jvp_checked(qaws_repulsive_curves_solver const* solver, qaws_repulsive_targets const* dtargets,
-	qaws_scalar* out_dx, unsigned int* out_gauge, qaws_repulsive_derivative_report* out_report);
-qaws_status qaws_repulsive_curves_solver_solution_vjp_checked(qaws_repulsive_curves_solver const* solver, qaws_scalar const* xbar,
-	qaws_repulsive_targets* out_targets_bar, unsigned int* out_gauge, qaws_repulsive_derivative_report* out_report);
-qaws_status qaws_repulsive_mesh_solver_solution_jvp_checked(qaws_repulsive_mesh_solver const* solver, qaws_repulsive_targets const* dtargets,
-	qaws_scalar* out_dx, unsigned int* out_gauge, qaws_repulsive_derivative_report* out_report);
-qaws_status qaws_repulsive_mesh_solver_solution_vjp_checked(qaws_repulsive_mesh_solver const* solver, qaws_scalar const* xbar,
-	qaws_repulsive_targets* out_targets_bar, unsigned int* out_gauge, qaws_repulsive_derivative_report* out_report);
+qaws_status qaws_repulsive_curves_solver_solution_jvp_checked(qaws_scalar* out_dx, unsigned int* out_gauge,
+	qaws_repulsive_derivative_report* out_report, qaws_repulsive_curves_solver const* solver, qaws_repulsive_targets const* dtargets);
+qaws_status qaws_repulsive_curves_solver_solution_vjp_checked(qaws_repulsive_targets* out_targets_bar, unsigned int* out_gauge,
+	qaws_repulsive_derivative_report* out_report, qaws_repulsive_curves_solver const* solver, qaws_scalar const* xbar);
+qaws_status qaws_repulsive_mesh_solver_solution_jvp_checked(qaws_scalar* out_dx, unsigned int* out_gauge,
+	qaws_repulsive_derivative_report* out_report, qaws_repulsive_mesh_solver const* solver, qaws_repulsive_targets const* dtargets);
+qaws_status qaws_repulsive_mesh_solver_solution_vjp_checked(qaws_repulsive_targets* out_targets_bar, unsigned int* out_gauge,
+	qaws_repulsive_derivative_report* out_report, qaws_repulsive_mesh_solver const* solver, qaws_scalar const* xbar);
 
 /* ---- curves on a surface (R5) ------------------------------------------- */
 
@@ -606,8 +606,8 @@ typedef struct qaws_repulsive_surface_curves_solver qaws_repulsive_surface_curve
 /* desc as for curves; hold_barycenter and theta must be 0 */
 qaws_status qaws_repulsive_surface_curves_solver_create(qaws_repulsive_surface_curves_solver** out_solver, qaws_repulsive_curves const* curves,
 	qaws_scalar const* uv, qaws_repulsive_surface_desc const* surface, qaws_repulsive_curves_solve_desc const* desc);
-qaws_status qaws_repulsive_surface_curves_solver_create_ex(qaws_repulsive_curves const* curves, qaws_repulsive_surface_desc const* surface,
-	qaws_repulsive_curves_solve_desc const* desc, qaws_scalar const* uv, qaws_allocator const* allocator, qaws_repulsive_surface_curves_solver** out_solver);
+qaws_status qaws_repulsive_surface_curves_solver_create_ex(qaws_repulsive_surface_curves_solver** out_solver, qaws_repulsive_curves const* curves,
+	qaws_scalar const* uv, qaws_repulsive_surface_desc const* surface, qaws_repulsive_curves_solve_desc const* desc, qaws_allocator const* allocator);
 void qaws_repulsive_surface_curves_solver_destroy(qaws_repulsive_surface_curves_solver* solver);
 qaws_status qaws_repulsive_surface_curves_solver_step(qaws_repulsive_report* out_report, qaws_scalar* uv,
 	qaws_repulsive_surface_curves_solver* solver);
@@ -617,8 +617,8 @@ qaws_status qaws_repulsive_surface_curves_solve(qaws_repulsive_report* out_repor
 	qaws_repulsive_curves const* curves, qaws_repulsive_surface_desc const* surface, qaws_repulsive_curves_solve_desc const* desc);
 
 /* The objective at uv; the gradient with respect to uv */
-qaws_status qaws_repulsive_surface_curves_solver_objective(qaws_repulsive_surface_curves_solver const* solver, qaws_scalar const* uv,
-	qaws_scalar* out_energy, qaws_scalar* out_gradient);
+qaws_status qaws_repulsive_surface_curves_solver_objective(qaws_scalar* out_energy, qaws_scalar* out_gradient,
+	qaws_repulsive_surface_curves_solver const* solver, qaws_scalar const* uv);
 
 /* ---- native control points (R5) ---------------------------------------- */
 
@@ -653,7 +653,7 @@ typedef struct qaws_repulsive_controls_desc
 typedef struct qaws_repulsive_controls qaws_repulsive_controls;
 
 qaws_status qaws_repulsive_controls_create(qaws_repulsive_controls** out_controls, qaws_repulsive_controls_desc const* desc);
-qaws_status qaws_repulsive_controls_create_ex(qaws_repulsive_controls_desc const* desc, qaws_allocator const* allocator, qaws_repulsive_controls** out_controls);
+qaws_status qaws_repulsive_controls_create_ex(qaws_repulsive_controls** out_controls, qaws_repulsive_controls_desc const* desc, qaws_allocator const* allocator);
 void qaws_repulsive_controls_destroy(qaws_repulsive_controls* controls);
 /* the control points (all curves', in order, dimension each), the samples, the edges */
 void qaws_repulsive_controls_get_counts(unsigned int* out_control_count, unsigned int* out_vertex_count, unsigned int* out_edge_count,
@@ -680,8 +680,8 @@ typedef struct qaws_repulsive_controls_solver qaws_repulsive_controls_solver;
 
 qaws_status qaws_repulsive_controls_solver_create(qaws_repulsive_controls_solver** out_solver, qaws_repulsive_controls const* controls,
 	qaws_scalar const* control_points, qaws_repulsive_curves_solve_desc const* desc);
-qaws_status qaws_repulsive_controls_solver_create_ex(qaws_repulsive_controls const* controls, qaws_repulsive_curves_solve_desc const* desc,
-	qaws_scalar const* control_points, qaws_allocator const* allocator, qaws_repulsive_controls_solver** out_solver);
+qaws_status qaws_repulsive_controls_solver_create_ex(qaws_repulsive_controls_solver** out_solver, qaws_repulsive_controls const* controls,
+	qaws_scalar const* control_points, qaws_repulsive_curves_solve_desc const* desc, qaws_allocator const* allocator);
 void qaws_repulsive_controls_solver_destroy(qaws_repulsive_controls_solver* solver);
 qaws_status qaws_repulsive_controls_solver_step(qaws_repulsive_report* out_report, qaws_scalar* control_points, qaws_repulsive_controls_solver* solver);
 qaws_status qaws_repulsive_controls_solver_direction(qaws_scalar* out_direction, qaws_repulsive_controls_solver const* solver,
@@ -690,7 +690,7 @@ qaws_status qaws_repulsive_controls_solve(qaws_repulsive_report* out_report, qaw
 	qaws_repulsive_controls const* controls, qaws_repulsive_curves_solve_desc const* desc);
 
 /* The objective at control_points; the gradient with respect to them */
-qaws_status qaws_repulsive_controls_solver_objective(qaws_repulsive_controls_solver const* solver, qaws_scalar const* control_points,
-	qaws_scalar* out_energy, qaws_scalar* out_gradient);
+qaws_status qaws_repulsive_controls_solver_objective(qaws_scalar* out_energy, qaws_scalar* out_gradient,
+	qaws_repulsive_controls_solver const* solver, qaws_scalar const* control_points);
 
 #endif /* QAWS_REPULSIVE_H */

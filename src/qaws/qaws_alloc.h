@@ -68,7 +68,7 @@
 qaws_status qaws_set_default_allocator(qaws_allocator const* allocator);   /* NULL: the C allocator */
 void qaws_set_thread_allocator(qaws_allocator const* allocator);            /* this thread; NULL: the default */
 void qaws_get_thread_allocator(qaws_allocator* out_allocator);              /* zeroed: none */
-void qaws_exchange_thread_allocator(qaws_allocator const* allocator, qaws_allocator* out_previous);
+void qaws_exchange_thread_allocator(qaws_allocator* out_previous, qaws_allocator const* allocator);
 
 /*
  * Scratch apart from results: with a scratch allocator installed on a thread, the temporaries of adaptive sampling,
@@ -77,7 +77,7 @@ void qaws_exchange_thread_allocator(qaws_allocator const* allocator, qaws_alloca
  * arena can serve as scratch and be reset after each call while results stay. Other operations take their scratch as
  * before. Installs it (NULL: none) and returns the one it replaces (zeroed: none); restore it on every return path.
  */
-void qaws_exchange_thread_scratch_allocator(qaws_allocator const* allocator, qaws_allocator* out_previous);
+void qaws_exchange_thread_scratch_allocator(qaws_allocator* out_previous, qaws_allocator const* allocator);
 
 /*
  * An allocator over caller memory (sized interface): a mapped file, pinned memory, a host frame arena. The memory must
@@ -144,39 +144,39 @@ qaws_status qaws_curve_create_trajectory_ex(
 	qaws_allocator const* allocator);
 
 qaws_status qaws_curve_create_rational_bezier_ex(
+	qaws_curve** out_curve,
 	qaws_rational_bezier_desc const* desc,
-	qaws_allocator const* allocator,
-	qaws_curve** out_curve);
+	qaws_allocator const* allocator);
 
 qaws_status qaws_curve_create_yuksel_ex(
+	qaws_curve** out_curve,
 	qaws_yuksel_desc const* desc,
-	qaws_allocator const* allocator,
-	qaws_curve** out_curve);
+	qaws_allocator const* allocator);
 
 qaws_status qaws_curve_create_arc_ex(
+	qaws_curve** out_curve,
 	qaws_arc_desc const* desc,
-	qaws_allocator const* allocator,
-	qaws_curve** out_curve);
+	qaws_allocator const* allocator);
 
 qaws_status qaws_curve_create_polynomial_ex(
+	qaws_curve** out_curve,
 	qaws_polynomial_desc const* desc,
-	qaws_allocator const* allocator,
-	qaws_curve** out_curve);
+	qaws_allocator const* allocator);
 
 qaws_status qaws_curve_create_clothoid_ex(
+	qaws_curve** out_curve,
 	qaws_clothoid_desc const* desc,
-	qaws_allocator const* allocator,
-	qaws_curve** out_curve);
+	qaws_allocator const* allocator);
 
 qaws_status qaws_curve_create_composite_ex(
+	qaws_curve** out_curve,
 	qaws_composite_desc const* desc,
-	qaws_allocator const* allocator,
-	qaws_curve** out_curve);
+	qaws_allocator const* allocator);
 
 qaws_status qaws_curve_create_subdivision_ex(
+	qaws_curve** out_curve,
 	qaws_subdivision_desc const* desc,
-	qaws_allocator const* allocator,
-	qaws_curve** out_curve);
+	qaws_allocator const* allocator);
 
 /* --- Surface creation _ex variants --- */
 
@@ -196,86 +196,86 @@ qaws_status qaws_surface_create_nurbs_ex(
 	qaws_allocator const* allocator);
 
 qaws_status qaws_surface_create_bilinear_ex(
+	qaws_surface** out_surface,
 	qaws_surface_bilinear_desc const* desc,
-	qaws_allocator const* allocator,
-	qaws_surface** out_surface);
+	qaws_allocator const* allocator);
 
 qaws_status qaws_surface_create_biquadratic_ex(
+	qaws_surface** out_surface,
 	qaws_surface_biquadratic_desc const* desc,
-	qaws_allocator const* allocator,
-	qaws_surface** out_surface);
+	qaws_allocator const* allocator);
 
 qaws_status qaws_surface_create_coons_ex(
+	qaws_surface** out_surface,
 	qaws_surface_coons_desc const* desc,
-	qaws_allocator const* allocator,
-	qaws_surface** out_surface);
+	qaws_allocator const* allocator);
 
 qaws_status qaws_surface_create_extrusion_ex(
+	qaws_surface** out_surface,
 	qaws_surface_extrusion_desc const* desc,
-	qaws_allocator const* allocator,
-	qaws_surface** out_surface);
+	qaws_allocator const* allocator);
 
 qaws_status qaws_surface_create_offset_ex(
+	qaws_surface** out_surface,
 	qaws_surface_offset_desc const* desc,
-	qaws_allocator const* allocator,
-	qaws_surface** out_surface);
+	qaws_allocator const* allocator);
 
 qaws_status qaws_surface_create_pipe_ex(
+	qaws_surface** out_surface,
 	qaws_surface_pipe_desc const* desc,
-	qaws_allocator const* allocator,
-	qaws_surface** out_surface);
+	qaws_allocator const* allocator);
 
 qaws_status qaws_surface_create_revolution_ex(
+	qaws_surface** out_surface,
 	qaws_surface_revolution_desc const* desc,
-	qaws_allocator const* allocator,
-	qaws_surface** out_surface);
+	qaws_allocator const* allocator);
 
 qaws_status qaws_surface_create_ruled_ex(
+	qaws_surface** out_surface,
 	qaws_surface_ruled_desc const* desc,
-	qaws_allocator const* allocator,
-	qaws_surface** out_surface);
+	qaws_allocator const* allocator);
 
 qaws_status qaws_surface_create_swept_ex(
+	qaws_surface** out_surface,
 	qaws_surface_swept_desc const* desc,
-	qaws_allocator const* allocator,
-	qaws_surface** out_surface);
+	qaws_allocator const* allocator);
 
 qaws_status qaws_surface_create_loft_ex(
+	qaws_surface** out_surface,
 	qaws_surface_loft_desc const* desc,
-	qaws_allocator const* allocator,
-	qaws_surface** out_surface);
+	qaws_allocator const* allocator);
 
 qaws_status qaws_surface_create_gordon_ex(
+	qaws_surface** out_surface,
 	qaws_surface_gordon_desc const* desc,
-	qaws_allocator const* allocator,
-	qaws_surface** out_surface);
+	qaws_allocator const* allocator);
 
 qaws_status qaws_surface_create_trimmed_ex(
+	qaws_surface** out_surface,
 	qaws_surface_trim_desc const* desc,
-	qaws_allocator const* allocator,
-	qaws_surface** out_surface);
+	qaws_allocator const* allocator);
 
 qaws_status qaws_surface_create_tspline_ex(
+	qaws_surface** out_surface,
 	qaws_surface_tspline_desc const* desc,
-	qaws_allocator const* allocator,
-	qaws_surface** out_surface);
+	qaws_allocator const* allocator);
 
 qaws_status qaws_surface_create_subdiv_ex(
+	qaws_surface** out_surface,
 	qaws_surface_subdiv_desc const* desc,
-	qaws_allocator const* allocator,
-	qaws_surface** out_surface);
+	qaws_allocator const* allocator);
 
 qaws_status qaws_surface_create_fillet_ex(
+	qaws_surface** out_surface,
 	qaws_surface_fillet_desc const* desc,
-	qaws_allocator const* allocator,
-	qaws_surface** out_surface);
+	qaws_allocator const* allocator);
 
 /* the fillet with its trim curves on both surfaces; all three from the allocator */
 qaws_status qaws_surface_create_fillet_with_trims_ex(
-	qaws_surface_fillet_desc const* desc,
-	qaws_allocator const* allocator,
 	qaws_surface** out_fillet,
 	qaws_curve** out_trim_a,
-	qaws_curve** out_trim_b);
+	qaws_curve** out_trim_b,
+	qaws_surface_fillet_desc const* desc,
+	qaws_allocator const* allocator);
 
 #endif /* QAWS_ALLOC_H */

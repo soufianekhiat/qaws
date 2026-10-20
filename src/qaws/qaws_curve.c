@@ -425,7 +425,7 @@ static qaws_status reverse_yuksel(
 	desc.mode = (qaws_yuksel_mode)impl->mode;
 	desc.closed = impl->closed;
 
-	status = qaws_curve_create_yuksel_ex(&desc, curve->allocator, out_reversed);
+	status = qaws_curve_create_yuksel_ex(out_reversed, &desc, curve->allocator);
 	qaws_internal_free(rev_cp);
 	return status;
 }
@@ -466,7 +466,7 @@ static qaws_status reverse_rational_bezier(
 	desc.weights = &buf[n * dim];
 	desc.weight_count = n;
 
-	status = qaws_curve_create_rational_bezier_ex(&desc, curve->allocator, out_reversed);
+	status = qaws_curve_create_rational_bezier_ex(out_reversed, &desc, curve->allocator);
 	qaws_internal_free(buf);
 	return status;
 }
@@ -507,7 +507,7 @@ static qaws_status reverse_polynomial(
 	desc.t_min = curve->parameter_range.min_value;
 	desc.t_max = curve->parameter_range.max_value;
 
-	status = qaws_curve_create_polynomial_ex(&desc, curve->allocator, out_reversed);
+	status = qaws_curve_create_polynomial_ex(out_reversed, &desc, curve->allocator);
 	qaws_internal_free(co);
 	return status;
 }
@@ -538,7 +538,7 @@ static qaws_status reverse_arc(
 	desc.segments = seg;
 	desc.segment_count = n;
 
-	status = qaws_curve_create_arc_ex(&desc, curve->allocator, out_reversed);
+	status = qaws_curve_create_arc_ex(out_reversed, &desc, curve->allocator);
 	qaws_internal_free(seg);
 	return status;
 }
@@ -566,7 +566,7 @@ static qaws_status reverse_clothoid(
 	desc.end_curvature = -impl->kappa_0;
 	desc.length = L;
 
-	return qaws_curve_create_clothoid_ex(&desc, curve->allocator, out_reversed);
+	return qaws_curve_create_clothoid_ex(out_reversed, &desc, curve->allocator);
 }
 
 static qaws_status reverse_composite(
@@ -595,7 +595,7 @@ static qaws_status reverse_composite(
 		desc.dimension = curve->dimension;
 		desc.segments = seg;
 		desc.segment_count = n;
-		status = qaws_curve_create_composite_ex(&desc, curve->allocator, out_reversed);
+		status = qaws_curve_create_composite_ex(out_reversed, &desc, curve->allocator);
 	}
 	if (status != QAWS_STATUS_OK)
 		for (i = 0; i < made; i++)

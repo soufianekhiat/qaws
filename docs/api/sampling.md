@@ -225,12 +225,12 @@ typedef struct qaws_curve_tessellation_desc
 } qaws_curve_tessellation_desc;
 
 qaws_status qaws_curve_tessellate_2d(
-    qaws_curve const* curve,
-    qaws_curve_tessellation_desc const* desc,
     qaws_scalar* out_parameters,
     qaws_vec2* out_points,
+    unsigned int* out_count,
+    qaws_curve const* curve,
     unsigned int capacity,
-    unsigned int* out_count);
+    qaws_curve_tessellation_desc const* desc);
 
 qaws_status qaws_curve_tessellate_3d(/* the same, qaws_vec3* out_points */);
 ```

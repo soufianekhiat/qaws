@@ -108,13 +108,13 @@ static qaws_volume_mesh* ms_hexes_by(qaws_mesh_3d const* b, qaws_hexahedralize_m
 	memset(&d, 0, sizeof d);
 	d.method = method;
 	d.cell_size = (qaws_scalar)h;
-	st = qaws_volume_mesh_hexahedralize(b, &d, &v, NULL);
+	st = qaws_volume_mesh_hexahedralize(&v, NULL, b, &d);
 	if (st != QAWS_STATUS_OK)
 	{
 		printf("  %s: hexahedralize failed: %s\n", what, qaws_status_to_string(st));
 		return NULL;
 	}
-	qaws_volume_mesh_measure_quality(v, &q);
+	qaws_volume_mesh_measure_quality(&q, v);
 	sprintf(sub, "%u hexahedra, scaled Jacobian from %.2f", q.hexahedra, (double)q.min_scaled_jacobian);
 	printf("  %s: %u hexahedra, scaled Jacobian %.3f, volume %.5f, edges %.3f..%.3f, %s\n", what, q.hexahedra, (double)q.min_scaled_jacobian,
 		(double)q.volume, (double)q.min_edge, (double)q.max_edge, qaws_status_to_string(qaws_volume_mesh_validate(v)));

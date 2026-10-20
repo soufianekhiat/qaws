@@ -822,8 +822,8 @@ void mf_guide(mf_hier* h, double const* dir, double const* w)
 /*  The public cross field                                                  */
 /* ======================================================================== */
 
-qaws_status qaws_mesh_3d_direction_field(qaws_mesh_3d const* mesh, qaws_direction_field_desc const* desc, qaws_scalar* out_directions,
-	int* out_face_index)
+qaws_status qaws_mesh_3d_direction_field(qaws_scalar* out_directions, int* out_face_index, qaws_mesh_3d const* mesh,
+	qaws_direction_field_desc const* desc)
 {
 	mf_hier h;
 	qaws_hm const* m;

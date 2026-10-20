@@ -168,7 +168,7 @@ static qaws_status ex_rational_bezier(qaws_curve const* c, qaws_scalar t0, qaws_
 	d.control_point_count = n;
 	d.weights = w;
 	d.weight_count = n;
-	s = qaws_curve_create_rational_bezier_ex(&d, c->allocator, out);
+	s = qaws_curve_create_rational_bezier_ex(out, &d, c->allocator);
 	qaws_internal_free(hp);
 	return s;
 }
@@ -572,7 +572,7 @@ static qaws_status ex_polynomial(qaws_curve const* c, qaws_scalar t0, qaws_scala
 	d.coefficient_count = impl->coefficient_count;
 	d.t_min = t0;
 	d.t_max = t1;
-	return qaws_curve_create_polynomial_ex(&d, c->allocator, out);
+	return qaws_curve_create_polynomial_ex(out, &d, c->allocator);
 }
 
 static qaws_status ex_arc(qaws_curve const* c, qaws_scalar t0, qaws_scalar t1, qaws_curve** out)
@@ -603,7 +603,7 @@ static qaws_status ex_arc(qaws_curve const* c, qaws_scalar t0, qaws_scalar t1, q
 	d.dimension = c->dimension;
 	d.segments = seg;
 	d.segment_count = n;
-	st = n ? qaws_curve_create_arc_ex(&d, c->allocator, out) : QAWS_STATUS_INVALID_ARGUMENT;
+	st = n ? qaws_curve_create_arc_ex(out, &d, c->allocator) : QAWS_STATUS_INVALID_ARGUMENT;
 	qaws_internal_free(seg);
 	return st;
 }
@@ -622,7 +622,7 @@ static qaws_status ex_clothoid(qaws_curve const* c, qaws_scalar t0, qaws_scalar 
 	d.start_curvature = impl->kappa_0 + impl->rate * t0;
 	d.end_curvature = impl->kappa_0 + impl->rate * t1;
 	d.length = t1 - t0;
-	return qaws_curve_create_clothoid_ex(&d, c->allocator, out);
+	return qaws_curve_create_clothoid_ex(out, &d, c->allocator);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -670,7 +670,7 @@ static qaws_status ex_composite(qaws_curve const* c, qaws_scalar t0, qaws_scalar
 	d.dimension = c->dimension;
 	d.segments = parts;
 	d.segment_count = n;
-	st = qaws_curve_create_composite_ex(&d, c->allocator, out);
+	st = qaws_curve_create_composite_ex(out, &d, c->allocator);
 	if (st != QAWS_STATUS_OK)
 		for (i = 0; i < n; i++) qaws_curve_destroy(parts[i]);
 	qaws_internal_free(parts);
@@ -754,7 +754,7 @@ qaws_status qaws_curve_extract(
 	case QAWS_CURVE_KIND_VIEW:
 	{
 		qaws_curve* owned = NULL;
-		if ((st = qaws_internal_curve_view_copy(curve, &owned)) != QAWS_STATUS_OK)
+		if ((st = qaws_internal_curve_view_copy(&owned, curve)) != QAWS_STATUS_OK)
 			return st;
 		st = qaws_curve_extract(out_curve, owned, t0, t1);
 		qaws_curve_destroy(owned);

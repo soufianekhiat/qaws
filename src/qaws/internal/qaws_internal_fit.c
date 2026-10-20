@@ -152,16 +152,16 @@ static int solve_banded_spd(
 /* ========================================================================== */
 
 qaws_status qaws_internal_fit_bspline_range_ex(
-	qaws_allocator const* allocator,
-	qaws_dimension dimension,
-	unsigned int degree,
+	qaws_curve** out_curve,
 	qaws_scalar const* sample_params,
 	qaws_scalar const* sample_coords,
+	qaws_dimension dimension,
 	unsigned int sample_count,
 	unsigned int control_point_count,
+	unsigned int degree,
 	qaws_scalar t_min,
 	qaws_scalar t_max,
-	qaws_curve** out_curve)
+	qaws_allocator const* allocator)
 {
 	unsigned int n = control_point_count;
 	unsigned int p = degree;
@@ -191,8 +191,8 @@ qaws_status qaws_internal_fit_bspline_range_ex(
 
 	/* Allocate working buffers */
 	knots = (qaws_scalar*)qaws_internal_alloc(qaws_internal_mul2(sizeof(qaws_scalar), (size_t)knot_count), allocator);
-	ata_band = (qaws_scalar*)qaws_internal_calloc(allocator, qaws_internal_mul2(n, stride), sizeof(qaws_scalar));
-	atb = (qaws_scalar*)qaws_internal_calloc(allocator, qaws_internal_mul2(n, dim), sizeof(qaws_scalar));
+	ata_band = (qaws_scalar*)qaws_internal_calloc(qaws_internal_mul2(n, stride), sizeof(qaws_scalar), allocator);
+	atb = (qaws_scalar*)qaws_internal_calloc(qaws_internal_mul2(n, dim), sizeof(qaws_scalar), allocator);
 	basis_row = (qaws_scalar*)qaws_internal_alloc(qaws_internal_mul2(sizeof(qaws_scalar), (size_t)n), allocator);
 	cps = (qaws_scalar*)qaws_internal_alloc(qaws_internal_mul3(sizeof(qaws_scalar), n, dim), allocator);
 
@@ -300,14 +300,14 @@ qaws_status qaws_internal_fit_bspline_range_ex(
 }
 
 qaws_status qaws_internal_fit_bspline_ex(
-	qaws_allocator const* allocator,
-	qaws_dimension dimension,
-	unsigned int degree,
+	qaws_curve** out_curve,
 	qaws_scalar const* sample_params,
 	qaws_scalar const* sample_coords,
+	qaws_dimension dimension,
 	unsigned int sample_count,
 	unsigned int control_point_count,
-	qaws_curve** out_curve)
+	unsigned int degree,
+	qaws_allocator const* allocator)
 {
 	qaws_scalar t_min, t_max;
 	if (!sample_params || sample_count < 2)
@@ -316,28 +316,28 @@ qaws_status qaws_internal_fit_bspline_ex(
 	t_min = sample_params[0];
 	t_max = sample_params[sample_count - 1];
 
-	return qaws_internal_fit_bspline_range_ex(allocator, 
-		dimension, degree,
+	return qaws_internal_fit_bspline_range_ex(out_curve, 
 		sample_params, sample_coords,
-		sample_count, control_point_count,
-		t_min, t_max, out_curve);
+		dimension, sample_count,
+		control_point_count, degree,
+		t_min, t_max, allocator);
 }
 
 qaws_status qaws_internal_fit_bspline_range(qaws_curve** out_curve, qaws_scalar const* sample_params, qaws_scalar const* sample_coords,
 	qaws_dimension dimension, unsigned int sample_count, unsigned int control_point_count, unsigned int degree, qaws_scalar t_min,
 	qaws_scalar t_max)
 {
-	return qaws_internal_fit_bspline_range_ex(NULL, dimension, degree, sample_params, sample_coords, sample_count, control_point_count, t_min, t_max,
-		out_curve);
+	return qaws_internal_fit_bspline_range_ex(out_curve, sample_params, sample_coords, dimension, sample_count, control_point_count, degree, t_min, t_max,
+		NULL);
 }
 
 qaws_status qaws_internal_fit_bspline(qaws_curve** out_curve, qaws_scalar const* sample_params, qaws_scalar const* sample_coords,
 	qaws_dimension dimension, unsigned int sample_count, unsigned int control_point_count, unsigned int degree)
 {
-	return qaws_internal_fit_bspline_ex(NULL, dimension, degree, sample_params, sample_coords, sample_count, control_point_count, out_curve);
+	return qaws_internal_fit_bspline_ex(out_curve, sample_params, sample_coords, dimension, sample_count, control_point_count, degree, NULL);
 }
 
-void qaws_internal_fit_parameters(qaws_scalar const* data, unsigned int m, unsigned int dim, qaws_parameterization param, qaws_scalar* out)
+void qaws_internal_fit_parameters(qaws_scalar* out, qaws_scalar const* data, unsigned int dim, unsigned int m, qaws_parameterization param)
 {
 	qaws_scalar total = QAWS_ZERO;
 	unsigned int k, d;

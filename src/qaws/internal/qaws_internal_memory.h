@@ -16,7 +16,7 @@
 /* the allocator a block without an explicit one comes from now (NULL: malloc) */
 qaws_allocator const* qaws_internal_current_allocator(void);   /* a copy the library holds */
 
-void* qaws_internal_alloc_from(qaws_allocator const* allocator, size_t size);   /* NULL: the current allocator */
+void* qaws_internal_alloc_from(size_t size, qaws_allocator const* allocator);   /* NULL: the current allocator */
 void* qaws_internal_malloc(size_t size);
 void* qaws_internal_zalloc(size_t count, size_t size);
 void* qaws_internal_realloc(void* ptr, size_t size);                           /* by the block's own allocator */

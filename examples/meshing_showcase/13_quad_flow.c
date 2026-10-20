@@ -34,7 +34,7 @@ static int mq_run(qaws_mesh_3d const* m, double rho, mq_dense* d)
 	memset(&rd, 0, sizeof rd);
 	rd.target_length = (qaws_scalar)(rho / 3);
 	rd.iterations = 6;
-	if (qaws_mesh_remesh(m, &rd, &d->dense, NULL) != QAWS_STATUS_OK || mf_build(&d->h, &d->dense->hm, NULL) != QAWS_STATUS_OK)
+	if (qaws_mesh_remesh(&d->dense, NULL, m, &rd) != QAWS_STATUS_OK || mf_build(&d->h, &d->dense->hm, NULL) != QAWS_STATUS_OK)
 		return 0;
 	mf_orientations(&d->h, 8, NULL, 0);
 	mf_positions(&d->h, rho, 8);

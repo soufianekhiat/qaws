@@ -216,10 +216,10 @@ qaws_scalar qaws_internal_parameter_to_distance(
 /* rtsafe-style: a Newton step on s(t) - length with s' = |C'|, a bisection when the step leaves the bracket or does
    not halve the previous one; s(t) carried incrementally from the last iterate. */
 qaws_status qaws_internal_parameter_at_arc_length(
+	qaws_scalar* out_parameter,
 	qaws_curve const* curve,
 	qaws_scalar t_start,
-	qaws_scalar length,
-	qaws_scalar* out_parameter)
+	qaws_scalar length)
 {
 	qaws_scalar t_end, total, piece;
 	double lo, hi, t, s, step_old, step;

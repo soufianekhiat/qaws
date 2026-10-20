@@ -84,7 +84,7 @@ static double ms_angle(qaws_hm const* m, unsigned int c)
 	return atan2(sqrt(ms_dot(x, x)), ms_dot(u, w)) * MS_DEG;
 }
 
-qaws_status qaws_mesh_3d_measure_shape(qaws_mesh_3d const* mesh, qaws_shape_quality* out, unsigned int* out_ideal)
+qaws_status qaws_mesh_3d_measure_shape(qaws_shape_quality* out, unsigned int* out_ideal, qaws_mesh_3d const* mesh)
 {
 	qaws_hm const* m;
 	unsigned int f, c, v, ntri = 0, nquad = 0, ne = 0, nsmooth = 0, n567 = 0, nvert = 0, tri_major;
@@ -1287,8 +1287,8 @@ static qaws_scalar ms_store(double x, int up)
 	return f;
 }
 
-qaws_status qaws_mesh_3d_measure_deviation(qaws_mesh_3d const* mesh, qaws_mesh_reference const* reference, qaws_deviation_desc const* desc,
-	qaws_mesh_deviation* out)
+qaws_status qaws_mesh_3d_measure_deviation(qaws_mesh_deviation* out, qaws_mesh_reference const* reference, qaws_mesh_3d const* mesh,
+	qaws_deviation_desc const* desc)
 {
 	qaws_mesh_reference_desc ld;
 	qaws_mesh_reference* lin = NULL;
@@ -1312,7 +1312,7 @@ qaws_status qaws_mesh_3d_measure_deviation(qaws_mesh_3d const* mesh, qaws_mesh_r
 	/* the mesh as its flat triangles: what is measured one way, and measured against the other */
 	memset(&ld, 0, sizeof ld);
 	ld.interpolant = QAWS_INTERPOLANT_LINEAR;
-	st = qaws_mesh_reference_create(mesh, &ld, &lin);
+	st = qaws_mesh_reference_create(&lin, mesh, &ld);
 	if (st == QAWS_STATUS_OK)
 		st = ms_run(lin, reference, prec * diag, budget, &rms, to, wt, &c1);
 	if (st == QAWS_STATUS_OK)

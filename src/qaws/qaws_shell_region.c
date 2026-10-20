@@ -2566,7 +2566,7 @@ static qaws_status sh_face_region(qaws_shell_atlas const* a, unsigned int f, qaw
 	return st;
 }
 
-qaws_status qaws_shell_region_create_whole(qaws_shell_atlas const* a, qaws_shell_region** out_region)
+qaws_status qaws_shell_region_create_whole(qaws_shell_region** out_region, qaws_shell_atlas const* a)
 {
 	qaws_shell_region* r;
 	unsigned int f;

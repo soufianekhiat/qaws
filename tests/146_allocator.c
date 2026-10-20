@@ -98,14 +98,14 @@ static qaws_status al_curve(unsigned int c, qaws_allocator const* al, qaws_curve
 		qaws_rational_bezier_desc d;
 		memset(&d, 0, sizeof d);
 		d.dimension = QAWS_DIMENSION_3D; d.degree = 3; d.control_points = al_pts; d.control_point_count = 4; d.weights = w; d.weight_count = 4;
-		return qaws_curve_create_rational_bezier_ex(&d, al, out);
+		return qaws_curve_create_rational_bezier_ex(out, &d, al);
 	}
 	case 7:
 	{
 		qaws_yuksel_desc d;
 		memset(&d, 0, sizeof d);
 		d.dimension = QAWS_DIMENSION_3D; d.control_points = al_pts; d.control_point_count = 6; d.mode = QAWS_YUKSEL_MODE_HYBRID;
-		return qaws_curve_create_yuksel_ex(&d, al, out);
+		return qaws_curve_create_yuksel_ex(out, &d, al);
 	}
 	case 8:
 	{
@@ -116,21 +116,21 @@ static qaws_status al_curve(unsigned int c, qaws_allocator const* al, qaws_curve
 		seg[1].center[0] = 0.2f; seg[1].radius = 0.8f; seg[1].angle_start = 1.5f; seg[1].angle_end = 3;
 		memset(&d, 0, sizeof d);
 		d.dimension = QAWS_DIMENSION_2D; d.segments = seg; d.segment_count = 2;
-		return qaws_curve_create_arc_ex(&d, al, out);
+		return qaws_curve_create_arc_ex(out, &d, al);
 	}
 	case 9:
 	{
 		qaws_polynomial_desc d;
 		memset(&d, 0, sizeof d);
 		d.dimension = QAWS_DIMENSION_3D; d.degree = 3; d.coefficients = al_pts; d.coefficient_count = 4;
-		return qaws_curve_create_polynomial_ex(&d, al, out);
+		return qaws_curve_create_polynomial_ex(out, &d, al);
 	}
 	case 10:
 	{
 		qaws_clothoid_desc d;
 		memset(&d, 0, sizeof d);
 		d.start_curvature = 0.1f; d.end_curvature = 1.2f; d.length = 3;
-		return qaws_curve_create_clothoid_ex(&d, al, out);
+		return qaws_curve_create_clothoid_ex(out, &d, al);
 	}
 	case 11:
 	{
@@ -147,7 +147,7 @@ static qaws_status al_curve(unsigned int c, qaws_allocator const* al, qaws_curve
 		}
 		memset(&d, 0, sizeof d);
 		d.dimension = QAWS_DIMENSION_3D; d.segments = seg; d.segment_count = 2;
-		if ((st = qaws_curve_create_composite_ex(&d, al, out)) != QAWS_STATUS_OK)
+		if ((st = qaws_curve_create_composite_ex(out, &d, al)) != QAWS_STATUS_OK)
 		{
 			qaws_curve_destroy(seg[0]);
 			qaws_curve_destroy(seg[1]);
@@ -160,7 +160,7 @@ static qaws_status al_curve(unsigned int c, qaws_allocator const* al, qaws_curve
 		memset(&d, 0, sizeof d);
 		d.dimension = QAWS_DIMENSION_3D; d.scheme = QAWS_SUBDIVISION_LANE_RIESENFELD_3; d.control_points = al_pts; d.control_point_count = 6;
 		d.refinement_levels = 3;
-		return qaws_curve_create_subdivision_ex(&d, al, out);
+		return qaws_curve_create_subdivision_ex(out, &d, al);
 	}
 	default:
 		return QAWS_STATUS_INVALID_ARGUMENT;
@@ -341,7 +341,7 @@ static qaws_status al_surface2(unsigned int c, al_inputs const* in, qaws_allocat
 		qaws_surface_bilinear_desc d;
 		memset(&d, 0, sizeof d);
 		d.p10.x = 1; d.p01.y = 1; d.p11.x = 1; d.p11.y = 1; d.p11.z = 0.5f;
-		return qaws_surface_create_bilinear_ex(&d, al, out);
+		return qaws_surface_create_bilinear_ex(out, &d, al);
 	}
 	case 1:
 	{
@@ -353,53 +353,53 @@ static qaws_status al_surface2(unsigned int c, al_inputs const* in, qaws_allocat
 			d.control_points[i].y = (qaws_scalar)(i % 3);
 			d.control_points[i].z = (qaws_scalar)(i == 4 ? 1 : 0);
 		}
-		return qaws_surface_create_biquadratic_ex(&d, al, out);
+		return qaws_surface_create_biquadratic_ex(out, &d, al);
 	}
 	case 2:
 	{
 		qaws_surface_coons_desc d;
 		d.c0 = in->c0; d.c1 = in->c1; d.d0 = in->d0; d.d1 = in->d1;
-		return qaws_surface_create_coons_ex(&d, al, out);
+		return qaws_surface_create_coons_ex(out, &d, al);
 	}
 	case 3:
 	{
 		qaws_surface_extrusion_desc d;
 		memset(&d, 0, sizeof d);
 		d.profile = in->c0; d.direction.z = 1; d.length = 2;
-		return qaws_surface_create_extrusion_ex(&d, al, out);
+		return qaws_surface_create_extrusion_ex(out, &d, al);
 	}
 	case 4:
 	{
 		qaws_surface_offset_desc d;
 		d.base = in->plane_a; d.distance = (qaws_scalar)0.1;
-		return qaws_surface_create_offset_ex(&d, al, out);
+		return qaws_surface_create_offset_ex(out, &d, al);
 	}
 	case 5:
 	{
 		qaws_surface_pipe_desc d;
 		memset(&d, 0, sizeof d);
 		d.path = in->path; d.radius_x = (qaws_scalar)0.2;
-		return qaws_surface_create_pipe_ex(&d, al, out);
+		return qaws_surface_create_pipe_ex(out, &d, al);
 	}
 	case 6:
 	{
 		qaws_surface_revolution_desc d;
 		memset(&d, 0, sizeof d);
 		d.profile = in->profile2; d.axis_direction.y = 1;
-		return qaws_surface_create_revolution_ex(&d, al, out);
+		return qaws_surface_create_revolution_ex(out, &d, al);
 	}
 	case 7:
 	{
 		qaws_surface_ruled_desc d;
 		d.curve_a = in->c0; d.curve_b = in->c1;
-		return qaws_surface_create_ruled_ex(&d, al, out);
+		return qaws_surface_create_ruled_ex(out, &d, al);
 	}
 	case 8:
 	{
 		qaws_surface_swept_desc d;
 		memset(&d, 0, sizeof d);
 		d.path = in->path; d.profile = in->profile2;
-		return qaws_surface_create_swept_ex(&d, al, out);
+		return qaws_surface_create_swept_ex(out, &d, al);
 	}
 	case 9:
 	{
@@ -408,7 +408,7 @@ static qaws_status al_surface2(unsigned int c, al_inputs const* in, qaws_allocat
 		sections[0] = in->c0; sections[1] = in->mid; sections[2] = in->c1;
 		memset(&d, 0, sizeof d);
 		d.sections = sections; d.section_count = 3;
-		return qaws_surface_create_loft_ex(&d, al, out);
+		return qaws_surface_create_loft_ex(out, &d, al);
 	}
 	case 10:
 	{
@@ -418,7 +418,7 @@ static qaws_status al_surface2(unsigned int c, al_inputs const* in, qaws_allocat
 		qaws_surface_gordon_desc d;
 		uc[0] = in->c0; uc[1] = in->c1; vc[0] = in->d0; vc[1] = in->d1;
 		d.u_curves = uc; d.u_curve_count = 2; d.v_params = p01; d.v_curves = vc; d.v_curve_count = 2; d.u_params = p01;
-		return qaws_surface_create_gordon_ex(&d, al, out);
+		return qaws_surface_create_gordon_ex(out, &d, al);
 	}
 	case 11:
 	{
@@ -429,7 +429,7 @@ static qaws_status al_surface2(unsigned int c, al_inputs const* in, qaws_allocat
 		for (i = 0; i < 4; i++) loop_curves[i] = in->uv[i];
 		loop.curves = loop_curves; loop.curve_count = 4; loop.is_outer = 1;
 		d.base = in->plane_a; d.loops = &loop; d.loop_count = 1;
-		return qaws_surface_create_trimmed_ex(&d, al, out);
+		return qaws_surface_create_trimmed_ex(out, &d, al);
 	}
 	case 12:
 	{
@@ -445,7 +445,7 @@ static qaws_status al_surface2(unsigned int c, al_inputs const* in, qaws_allocat
 		memset(&d, 0, sizeof d);
 		d.control_points = cps; d.control_point_count = 4; d.u_degree = 1; d.v_degree = 1;
 		d.u_range.max_value = 1; d.v_range.max_value = 1;
-		return qaws_surface_create_tspline_ex(&d, al, out);
+		return qaws_surface_create_tspline_ex(out, &d, al);
 	}
 	case 13:
 	{
@@ -457,7 +457,7 @@ static qaws_status al_surface2(unsigned int c, al_inputs const* in, qaws_allocat
 		memset(&d, 0, sizeof d);
 		d.vertices = v; d.vertex_count = 8; d.face_indices = f; d.face_sizes = fs; d.face_count = 6;
 		d.scheme = QAWS_SUBDIV_CATMULL_CLARK; d.subdivision_level = 1;
-		return qaws_surface_create_subdiv_ex(&d, al, out);
+		return qaws_surface_create_subdiv_ex(out, &d, al);
 	}
 	default:
 	{
@@ -465,8 +465,8 @@ static qaws_status al_surface2(unsigned int c, al_inputs const* in, qaws_allocat
 		memset(&d, 0, sizeof d);
 		d.surface_a = in->plane_a; d.surface_b = in->plane_b; d.radius = (qaws_scalar)0.3; d.sample_count = 32; d.arc_segments = 8;
 		if (c == 14)
-			return qaws_surface_create_fillet_ex(&d, al, out);
-		return qaws_surface_create_fillet_with_trims_ex(&d, al, out, ta, tb);
+			return qaws_surface_create_fillet_ex(out, &d, al);
+		return qaws_surface_create_fillet_with_trims_ex(out, ta, tb, &d, al);
 	}
 	}
 }

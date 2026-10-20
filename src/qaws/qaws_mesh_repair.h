@@ -122,8 +122,8 @@ typedef struct qaws_mesh_repair_report
 } qaws_mesh_repair_report;
 
 /* face_sizes NULL: triangles; desc NULL: the defaults; report may be NULL */
-qaws_status qaws_mesh_repair(qaws_scalar const* positions, unsigned int vertex_count, unsigned int const* face_vertices,
-	unsigned int const* face_sizes, unsigned int face_count, qaws_mesh_repair_desc const* desc, qaws_mesh_3d** out_mesh,
-	qaws_mesh_repair_report* report);
+qaws_status qaws_mesh_repair(qaws_mesh_3d** out_mesh, qaws_mesh_repair_report* report, qaws_scalar const* positions,
+	unsigned int const* face_vertices, unsigned int const* face_sizes, unsigned int vertex_count, unsigned int face_count,
+	qaws_mesh_repair_desc const* desc);
 
 #endif /* QAWS_MESH_REPAIR_H */

@@ -261,9 +261,9 @@ static qaws_curve_vtable const polynomial_vtable = {
 /* -------------------------------------------------------------------------- */
 
 qaws_status qaws_curve_create_polynomial_ex(
+	qaws_curve** out_curve,
 	qaws_polynomial_desc const* desc,
-	qaws_allocator const* allocator,
-	qaws_curve** out_curve)
+	qaws_allocator const* allocator)
 {
 	unsigned int dim_count;
 	size_t coeff_size;
@@ -312,5 +312,5 @@ qaws_status qaws_curve_create_polynomial(
 	qaws_curve** out_curve,
 	qaws_polynomial_desc const* desc)
 {
-	return qaws_curve_create_polynomial_ex(desc, NULL, out_curve);
+	return qaws_curve_create_polynomial_ex(out_curve, desc, NULL);
 }

@@ -42,8 +42,8 @@ static void par_task(void* ctx, unsigned int begin, unsigned int end)
 	}
 }
 
-qaws_status qaws_internal_parallel(unsigned int count, unsigned int grain, qaws_status (*job)(void* ctx, unsigned int chunk, unsigned int begin, unsigned int end),
-	void* ctx, qaws_batch_executor const* executor)
+qaws_status qaws_internal_parallel(unsigned int count, unsigned int grain, qaws_status (*job)(void* user, unsigned int chunk, unsigned int begin, unsigned int end),
+	void* user, qaws_batch_executor const* executor)
 {
 	par_wrap w;
 	unsigned int k;
@@ -51,7 +51,7 @@ qaws_status qaws_internal_parallel(unsigned int count, unsigned int grain, qaws_
 	w.count = count;
 	w.chunks = qaws_internal_chunk_count(count, grain);
 	w.job = job;
-	w.ctx = ctx;
+	w.ctx = user;
 	if (w.chunks == 0)
 		return QAWS_STATUS_OK;
 	w.status = (qaws_status*)qaws_internal_malloc(qaws_internal_mul2(w.chunks, sizeof(qaws_status)));

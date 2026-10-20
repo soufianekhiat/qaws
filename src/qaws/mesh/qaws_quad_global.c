@@ -746,9 +746,9 @@ static qaws_status qg_solve(qaws_hm const* dm, mf_level const* L, double rho, qg
 		}
 		rhs[v] = held ? 0 : rhs[v] + mean * d[v];
 	}
-	st = qaws_internal_ldlt_factor(&f, 2 * n, rp, col, val, xyz, 0);
+	st = qaws_internal_ldlt_factor(&f, rp, col, val, xyz, 2 * n, 0);
 	if (st == QAWS_STATUS_OK)
-		qaws_internal_ldlt_solve(&f, rhs, d);
+		qaws_internal_ldlt_solve(d, &f, rhs);
 	if (st == QAWS_STATUS_OK && keep)
 	{
 		*keep = f;
@@ -2018,7 +2018,7 @@ static qaws_status qg_quantize(qaws_hm const* dm, mf_level const* L, double rho,
 		for (k = 0; k < 2 * nv; k++)
 			if ((fix[k / 2] >> (k & 1)) & 1)
 				rhs[k] = 0;
-		qaws_internal_ldlt_solve(&fac, rhs, D);
+		qaws_internal_ldlt_solve(D, &fac, rhs);
 		for (i = 0; i < nz; i++)
 			for (l = var[i].first; l < var[i].first + var[i].count; l++)
 			{

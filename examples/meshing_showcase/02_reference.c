@@ -30,7 +30,7 @@ static void ms_draw_reference(er_canvas* c, qaws_mesh_reference const* r, unsign
 				loc[q].a = (qaws_scalar)((double)i / n);
 				loc[q].b = (qaws_scalar)((double)j / n);
 			}
-		qaws_mesh_reference_evaluate(r, loc, m, x, nr, curv ? kv : NULL);
+		qaws_mesh_reference_evaluate(x, nr, curv ? kv : NULL, r, loc, m);
 		for (q = 0; q < m; q++)
 		{
 			for (k = 0; k < 3; k++)
@@ -73,7 +73,7 @@ static void ms_draw_reference(er_canvas* c, qaws_mesh_reference const* r, unsign
 						e2[s].a = (qaws_scalar)bb[1];
 						e2[s].b = (qaws_scalar)bb[2];
 					}
-					qaws_mesh_reference_evaluate(r, e2, 2, y, NULL, NULL);
+					qaws_mesh_reference_evaluate(y, NULL, NULL, r, e2, 2);
 					for (s = 0; s < 3; s++)
 					{
 						y0[s] = (double)y[s];
@@ -162,15 +162,15 @@ static void demo_reference(void)
 		return;
 	memset(&d, 0, sizeof d);
 	d.interpolant = QAWS_INTERPOLANT_PN;
-	qaws_mesh_reference_create(blob, &d, &rb);
+	qaws_mesh_reference_create(&rb, blob, &d);
 	d.interpolant = QAWS_INTERPOLANT_LINEAR;
-	qaws_mesh_reference_create(blob, &d, &rl);
+	qaws_mesh_reference_create(&rl, blob, &d);
 	d.interpolant = QAWS_INTERPOLANT_PN;
-	qaws_mesh_reference_create(fine, &d, &rf);
-	qaws_mesh_reference_create(can, &d, &rc);
-	qaws_mesh_3d_clone(can, &can2);
+	qaws_mesh_reference_create(&rf, fine, &d);
+	qaws_mesh_reference_create(&rc, can, &d);
+	qaws_mesh_3d_clone(&can2, can);
 	qaws_mesh_3d_detect_features(can2, (qaws_scalar)(50 * MS_PI / 180), 0, 0);
-	qaws_mesh_reference_create(can2, &d, &rc2);
+	qaws_mesh_reference_create(&rc2, can2, &d);
 	if (!rb || !rl || !rc || !rc2 || !rf)
 		return;
 	sprintf(sub, "%u triangles, flat", qaws_mesh_3d_get_face_count(blob));
@@ -195,7 +195,7 @@ static void demo_reference(void)
 				l.patch = t;
 				l.a = (qaws_scalar)(0.15 + 0.12 * (i % 3));
 				l.b = (qaws_scalar)(0.15 + 0.12 * (i / 3));
-				qaws_mesh_reference_evaluate(rf, &l, 1, NULL, NULL, k);
+				qaws_mesh_reference_evaluate(NULL, NULL, k, rf, &l, 1);
 				klo = fmin(klo, 0.5 * (k[0] + k[1]));
 				khi = fmax(khi, 0.5 * (k[0] + k[1]));
 			}

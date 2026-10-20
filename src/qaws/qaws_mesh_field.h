@@ -70,16 +70,16 @@ typedef struct qaws_feature_size_desc
 	qaws_scalar gradation;              /* the largest growth of the size per unit of distance; 0: unlimited (the samples' own sizes) */
 } qaws_feature_size_desc;
 
-qaws_status qaws_size_field_create_uniform(qaws_scalar length, qaws_size_field** out_field);
-qaws_status qaws_size_field_create_curvature(qaws_mesh_reference const* reference, qaws_curvature_size_desc const* desc,
-	qaws_size_field** out_field);
+qaws_status qaws_size_field_create_uniform(qaws_size_field** out_field, qaws_scalar length);
+qaws_status qaws_size_field_create_curvature(qaws_size_field** out_field, qaws_mesh_reference const* reference,
+	qaws_curvature_size_desc const* desc);
 /* desc NULL: the defaults */
-qaws_status qaws_size_field_create_feature_size(qaws_mesh_reference const* reference, qaws_feature_size_desc const* desc,
-	qaws_size_field** out_field);
+qaws_status qaws_size_field_create_feature_size(qaws_size_field** out_field, qaws_mesh_reference const* reference,
+	qaws_feature_size_desc const* desc);
 /* sizes: one per vertex of the reference's mesh (all positive) */
-qaws_status qaws_size_field_create_vertices(qaws_mesh_reference const* reference, qaws_scalar const* sizes, qaws_size_field** out_field);
-qaws_status qaws_size_field_create_callback(qaws_scalar (*size)(void* user, qaws_scalar const* point), void* user, qaws_size_field** out_field);
-qaws_status qaws_size_field_create_min(qaws_size_field const* a, qaws_size_field const* b, qaws_size_field** out_field);
+qaws_status qaws_size_field_create_vertices(qaws_size_field** out_field, qaws_mesh_reference const* reference, qaws_scalar const* sizes);
+qaws_status qaws_size_field_create_callback(qaws_size_field** out_field, qaws_scalar (*size)(void* user, qaws_scalar const* point), void* user);
+qaws_status qaws_size_field_create_min(qaws_size_field** out_field, qaws_size_field const* a, qaws_size_field const* b);
 void qaws_size_field_destroy(qaws_size_field* field);
 
 /* the reference a field is sampled on (through min fields: the first found), or NULL */
@@ -87,8 +87,8 @@ qaws_mesh_reference const* qaws_size_field_get_reference(qaws_size_field const* 
 
 /* sizes at points; locations on the field's reference (may be NULL for a
    field on none: then they are unused) */
-qaws_status qaws_size_field_evaluate(qaws_size_field const* field, qaws_mesh_location const* locations, qaws_scalar const* points,
-	unsigned int count, qaws_scalar* out_sizes);
+qaws_status qaws_size_field_evaluate(qaws_scalar* out_sizes, qaws_size_field const* field, qaws_mesh_location const* locations,
+	qaws_scalar const* points, unsigned int count);
 
 /*
  * Direction fields: an n-direction field on a mesh's vertices (a direction
@@ -173,8 +173,8 @@ typedef struct qaws_direction_field_desc
 
 /* per vertex a unit tangent (3); per face the index round it; either output
    may be NULL; desc NULL: the defaults */
-qaws_status qaws_mesh_3d_direction_field(qaws_mesh_3d const* mesh, qaws_direction_field_desc const* desc, qaws_scalar* out_directions,
-	int* out_face_index);
+qaws_status qaws_mesh_3d_direction_field(qaws_scalar* out_directions, int* out_face_index, qaws_mesh_3d const* mesh,
+	qaws_direction_field_desc const* desc);
 
 /*
  * Frame fields in volumes: per tetrahedron an octahedral frame (three
@@ -200,7 +200,7 @@ struct qaws_volume_mesh;
 /* per cell three unit axes (9); per cell its singular edges (may be NULL):
    bit e for edge e of 0-1, 0-2, 0-3, 1-2, 1-3, 2-3; tetrahedral meshes only
    (UNSUPPORTED_OPERATION otherwise); desc NULL: the defaults */
-qaws_status qaws_volume_mesh_frame_field(struct qaws_volume_mesh const* mesh, qaws_frame_field_desc const* desc, qaws_scalar* out_frames,
-	unsigned char* out_singular);
+qaws_status qaws_volume_mesh_frame_field(qaws_scalar* out_frames, unsigned char* out_singular, struct qaws_volume_mesh const* mesh,
+	qaws_frame_field_desc const* desc);
 
 #endif /* QAWS_MESH_FIELD_H */

@@ -19,7 +19,7 @@ static qaws_mesh_3d* ms_remesh(qaws_mesh_3d const* m, qaws_mesh_reference const*
 	d.target_length = (qaws_scalar)L;
 	d.size = sf;
 	d.iterations = 12;
-	if (qaws_mesh_remesh(m, &d, &out, rep) != QAWS_STATUS_OK)
+	if (qaws_mesh_remesh(&out, rep, m, &d) != QAWS_STATUS_OK)
 		printf("  remesh failed\n");
 	return out;
 }
@@ -61,7 +61,7 @@ static void demo_remesh(void)
 	unsigned int i;
 	if (!c || !blob || !can)
 		return;
-	qaws_mesh_reference_create(blob, NULL, &rb);
+	qaws_mesh_reference_create(&rb, blob, NULL);
 	ms_panel(c, 0, 0, 550, 640, blob, 0.6, 0.5, "the coarse blob", "80 triangles");
 	ms_draw(c, blob, tint, NULL, 0, wire, 1.6);
 	uni = ms_remesh(blob, rb, 0.11, NULL, &rep);
@@ -79,9 +79,9 @@ static void demo_remesh(void)
 	cd.min_length = (qaws_scalar)0.02;
 	cd.max_length = (qaws_scalar)0.3;
 	cd.gradation = (qaws_scalar)0.35;
-	qaws_mesh_reference_create(bumpy, NULL, &ry);
+	qaws_mesh_reference_create(&ry, bumpy, NULL);
 	if (ry)
-		qaws_size_field_create_curvature(ry, &cd, &sf);
+		qaws_size_field_create_curvature(&sf, ry, &cd);
 	ada = sf ? ms_remesh(bumpy, ry, 0, sf, &rep) : NULL;
 	if (ada)
 	{
@@ -93,7 +93,7 @@ static void demo_remesh(void)
 	}
 	/* the can, its creases kept */
 	qaws_mesh_3d_detect_features(can, (qaws_scalar)(50 * MS_PI / 180), 0, 0);
-	qaws_mesh_reference_create(can, NULL, &rc);
+	qaws_mesh_reference_create(&rc, can, NULL);
 	rcan = rc ? ms_remesh(can, rc, 0.12, NULL, &rep) : NULL;
 	if (rcan)
 	{
@@ -102,7 +102,7 @@ static void demo_remesh(void)
 		sprintf(sub, "%u triangles, %u crease edges", qaws_mesh_3d_get_face_count(rcan), nfe);
 		ms_panel(c, 1650, 0, 550, 640, rcan, 0.35, 0.5, "the can remeshed", sub);
 		ms_draw(c, rcan, warm, NULL, 1, wire, 0.9);
-		qaws_mesh_3d_get_feature_edges(rcan, fe);
+		qaws_mesh_3d_get_feature_edges(fe, rcan);
 		for (i = 0; i < nfe; i++)
 			er_line(c, p + 3 * fe[2 * i], p + 3 * fe[2 * i + 1], red, 2.4);
 		printf("  can: %u triangles, %u creases, angles %.1f..%.1f, deviation %.2e\n", qaws_mesh_3d_get_face_count(rcan), nfe,
@@ -131,10 +131,10 @@ static void demo_remesh(void)
 		ad.element = QAWS_MESH_CORNER;
 		ad.components = 3;
 		ad.rule = QAWS_ATTRIBUTE_LINEAR;
-		qaws_mesh_3d_add_attribute(cube, &ad, cols, &a);
+		qaws_mesh_3d_add_attribute(&a, cube, cols, &ad);
 		qaws_mesh_3d_detect_features(cube, (qaws_scalar)(30 * MS_PI / 180), 0, 0);
 		rcube = ms_remesh(cube, NULL, 0.22, NULL, &rep);
-		if (rcube && qaws_mesh_3d_find_attribute(rcube, "colour", &a) == QAWS_STATUS_OK)
+		if (rcube && qaws_mesh_3d_find_attribute(&a, rcube, "colour") == QAWS_STATUS_OK)
 		{
 			/* corners coloured: drawn per face from its corners */
 			unsigned int nf = qaws_mesh_3d_get_face_count(rcube), *fv, *fz, k, q;
@@ -144,8 +144,8 @@ static void demo_remesh(void)
 			fv = (unsigned int*)malloc(sizeof(unsigned int) * nc);
 			fz = (unsigned int*)malloc(sizeof(unsigned int) * nf);
 			cc = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * nc);
-			qaws_mesh_3d_get_faces(rcube, fv, fz);
-			qaws_mesh_3d_get_attribute(rcube, a, cc);
+			qaws_mesh_3d_get_faces(fv, fz, rcube);
+			qaws_mesh_3d_get_attribute(cc, rcube, a);
 			sprintf(sub, "%u triangles: colour seams kept", nf);
 			ms_panel(c, 2200, 0, 550, 640, rcube, 0.62, 0.55, "a corner attribute", sub);
 			for (k = 0, q = 0; k < nf; k++, q += fz[k - 1])

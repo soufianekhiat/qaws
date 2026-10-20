@@ -177,8 +177,8 @@ on, and Atelier maps that to its register versions.
 
 ```c
 qaws_status qaws_curve_prepare_size(size_t* out_bytes, size_t* out_alignment, qaws_curve_view const* view);
-qaws_status qaws_curve_prepare(qaws_curve_prepared** out, qaws_curve_view const* view, qaws_allocator const* allocator);
-qaws_status qaws_curve_prepare_into(qaws_curve_prepared** out, void* memory, size_t bytes, qaws_curve_view const* view);   /* no allocation */
+qaws_status qaws_curve_prepare(qaws_allocator const* allocator, qaws_curve_prepared** out, qaws_curve_view const* view);
+qaws_status qaws_curve_prepare_into(qaws_curve_view const* view, void* memory, qaws_curve_prepared** out, size_t bytes);   /* no allocation */
 void qaws_curve_prepared_destroy(qaws_curve_prepared* p);
 ```
 

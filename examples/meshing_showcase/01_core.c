@@ -45,9 +45,9 @@ static void ms_subdivide(qaws_mesh_3d* m, unsigned int* edits)
 	unsigned int ne = qaws_mesh_3d_get_edge_count(m), nv0 = qaws_mesh_3d_get_vertex_count(m), i, v;
 	unsigned int* e = (unsigned int*)malloc(sizeof(unsigned int) * 2 * ne);
 	unsigned int* src = (unsigned int*)malloc(sizeof(unsigned int) * 2 * ne);
-	qaws_mesh_3d_get_edges(m, e);
+	qaws_mesh_3d_get_edges(e, m);
 	for (i = 0; i < ne; i++)
-		if (qaws_mesh_3d_split_edge(m, e[2 * i], e[2 * i + 1], NULL, NULL, &v) == QAWS_STATUS_OK)
+		if (qaws_mesh_3d_split_edge(&v, m, NULL, NULL, e[2 * i], e[2 * i + 1]) == QAWS_STATUS_OK)
 		{
 			src[2 * (v - nv0)] = e[2 * i];
 			src[2 * (v - nv0) + 1] = e[2 * i + 1];
@@ -56,7 +56,7 @@ static void ms_subdivide(qaws_mesh_3d* m, unsigned int* edits)
 	free(e);
 	ne = qaws_mesh_3d_get_edge_count(m);
 	e = (unsigned int*)malloc(sizeof(unsigned int) * 2 * ne);
-	qaws_mesh_3d_get_edges(m, e);
+	qaws_mesh_3d_get_edges(e, m);
 	for (i = 0; i < ne; i++)
 	{
 		unsigned int p = e[2 * i], q = e[2 * i + 1], nw, old;
@@ -84,15 +84,15 @@ static void demo_core(void)
 	if (!c || !torus)
 		return;
 	/* the torus and its dual */
-	qaws_mesh_3d_get_topology(torus, &t);
+	qaws_mesh_3d_get_topology(&t, torus);
 	sprintf(sub, "%u triangles, chi %d, genus %u", qaws_mesh_3d_get_face_count(torus), t.euler_characteristic, t.genus);
 	ms_panel(c, 0, 0, 550, 640, torus, 0.5, 0.75, "a triangle torus", sub);
 	ms_draw(c, torus, tint, NULL, 1, wire, 1.1);
-	qaws_mesh_3d_create_dual(torus, &dual);
+	qaws_mesh_3d_create_dual(&dual, torus);
 	if (dual)
 	{
 		qaws_mesh_quality q;
-		qaws_mesh_3d_measure_quality(dual, &q);
+		qaws_mesh_3d_measure_quality(&q, dual);
 		sprintf(sub, "%u faces, %u hexagons: the stored adjacency", qaws_mesh_3d_get_face_count(dual), q.polygons);
 		ms_panel(c, 550, 0, 550, 640, dual, 0.5, 0.75, "its dual", sub);
 		ms_draw(c, dual, warm, NULL, 1, wire, 1.4);
@@ -106,7 +106,7 @@ static void demo_core(void)
 		double* p;
 		cube = ms_make(x, 8, f, fs, 6);
 		for (i = 0; i < 6; i++)
-			qaws_mesh_3d_split_face(cube, i, NULL, NULL, NULL);
+			qaws_mesh_3d_split_face(NULL, cube, NULL, NULL, i);
 		qaws_mesh_3d_detect_features(cube, (qaws_scalar)(30 * MS_PI / 180), 0, 0);
 		edits = 0;
 		ms_subdivide(cube, &edits);
@@ -121,7 +121,7 @@ static void demo_core(void)
 		ms_panel(c, 1100, 0, 550, 640, cube, 0.62, 0.55, "1-to-4 by splits and flips", sub);
 		ms_draw(c, cube, tint, NULL, 0, wire, 1.0);
 		fe = (unsigned int*)malloc(sizeof(unsigned int) * 2 * (nfe ? nfe : 1));
-		qaws_mesh_3d_get_feature_edges(cube, fe);
+		qaws_mesh_3d_get_feature_edges(fe, cube);
 		p = ms_positions(cube);
 		for (i = 0; i < nfe; i++)
 			er_line(c, p + 3 * fe[2 * i], p + 3 * fe[2 * i + 1], red, 3.2);
@@ -150,7 +150,7 @@ static void demo_core(void)
 		d.element = QAWS_MESH_VERTEX;
 		d.components = 1;
 		d.rule = QAWS_ATTRIBUTE_LINEAR;
-		qaws_mesh_3d_add_attribute(ico, &d, vals, &a);
+		qaws_mesh_3d_add_attribute(&a, ico, vals, &d);
 		edits = 0;
 		for (i = 0; i < 4; i++)
 			ms_subdivide(ico, &edits);
@@ -158,7 +158,7 @@ static void demo_core(void)
 		p = ms_positions(ico);
 		got = (qaws_scalar*)malloc(sizeof(qaws_scalar) * nv);
 		col = (double*)malloc(sizeof(double) * 3 * nv);
-		qaws_mesh_3d_get_attribute(ico, a, got);
+		qaws_mesh_3d_get_attribute(got, ico, a);
 		for (i = 0; i < nv; i++)
 		{
 			double want = p[3 * i] - 0.3 * p[3 * i + 1] + 0.2 * p[3 * i + 2];

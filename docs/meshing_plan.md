@@ -493,7 +493,7 @@ typedef struct qaws_mesh_reference_desc
 	qaws_scalar mls_radius;              /* 0: from the density */
 } qaws_mesh_reference_desc;
 
-qaws_status qaws_mesh_reference_create(qaws_mesh const* mesh, qaws_mesh_reference_desc const* desc, qaws_mesh_reference** out);
+qaws_status qaws_mesh_reference_create(qaws_mesh_reference** out, qaws_mesh const* mesh, qaws_mesh_reference_desc const* desc);
 qaws_status qaws_mesh_reference_create_surface(qaws_surface const* surface, qaws_mesh_reference** out);
 qaws_status qaws_mesh_reference_create_shell(qaws_shell_atlas const* shell, qaws_mesh_reference** out);
 qaws_status qaws_mesh_reference_create_implicit(qaws_implicit_desc const* desc, qaws_mesh_reference** out);   /* value and gradient callbacks, bounds */
@@ -501,12 +501,12 @@ void qaws_mesh_reference_destroy(qaws_mesh_reference* reference);
 
 typedef struct qaws_mesh_location { unsigned int patch; qaws_scalar a, b; } qaws_mesh_location;   /* triangle and barycentrics, or face and (u, v) */
 
-qaws_status qaws_mesh_reference_evaluate(qaws_mesh_reference const* reference, qaws_mesh_location const* locations, unsigned int count,
-	qaws_scalar* out_positions, qaws_scalar* out_normals, qaws_scalar* out_curvatures /* k1 k2 d1 d2, may be NULL */);
-qaws_status qaws_mesh_reference_project(qaws_mesh_reference const* reference, qaws_scalar const* points, unsigned int count,
-	qaws_mesh_location const* hints /* may be NULL */, qaws_mesh_location* out_locations, qaws_scalar* out_distances);
-qaws_status qaws_mesh_reference_walk(qaws_mesh_reference const* reference, qaws_mesh_location from, qaws_scalar const* tangent,
-	qaws_mesh_location* out_to);
+qaws_status qaws_mesh_reference_evaluate(qaws_scalar* out_positions, qaws_scalar* out_normals, qaws_scalar* out_curvatures /* k1 k2 d1 d2, may be NULL */,
+	qaws_mesh_reference const* reference, qaws_mesh_location const* locations, unsigned int count);
+qaws_status qaws_mesh_reference_project(qaws_mesh_location* out_locations, qaws_scalar* out_distances, qaws_mesh_reference const* reference,
+	qaws_scalar const* points, qaws_mesh_location const* hints /* may be NULL */, unsigned int count);
+qaws_status qaws_mesh_reference_walk(qaws_mesh_location* out_to, qaws_mesh_reference const* reference, qaws_scalar const* tangent,
+	qaws_mesh_location from);
 ```
 
 Every mesh produced by an operator keeps its vertices' locations
@@ -517,11 +517,11 @@ Every mesh produced by an operator keeps its vertices' locations
 ```c
 /* sizes: the target edge length at a point */
 typedef struct qaws_size_field qaws_size_field;
-qaws_status qaws_size_field_create_uniform(qaws_scalar length, qaws_size_field** out);
-qaws_status qaws_size_field_create_curvature(qaws_mesh_reference const* reference, qaws_curvature_size_desc const* desc,
-	qaws_size_field** out);   /* chord tolerance, normal-turn tolerance, min and max length */
+qaws_status qaws_size_field_create_uniform(qaws_size_field** out, qaws_scalar length);
+qaws_status qaws_size_field_create_curvature(qaws_size_field** out, qaws_mesh_reference const* reference,
+	qaws_curvature_size_desc const* desc);   /* chord tolerance, normal-turn tolerance, min and max length */
 qaws_status qaws_size_field_create_attribute(qaws_mesh const* mesh, unsigned int attribute, qaws_scalar scale, qaws_size_field** out);
-qaws_status qaws_size_field_create_callback(qaws_scalar (*size)(void* user, qaws_scalar const* point), void* user, qaws_size_field** out);
+qaws_status qaws_size_field_create_callback(qaws_size_field** out, qaws_scalar (*size)(void* user, qaws_scalar const* point), void* user);
 qaws_status qaws_size_field_combine(qaws_size_field const* a, qaws_size_field const* b, qaws_size_combine how, qaws_size_field** out);
 qaws_status qaws_size_field_limit_gradation(qaws_size_field* field, qaws_mesh_reference const* reference, qaws_scalar beta);
 
@@ -573,7 +573,7 @@ typedef struct qaws_generate_desc
 } qaws_generate_desc;
 
 /* remeshing, simplification, refinement */
-qaws_status qaws_mesh_remesh(qaws_mesh const* mesh, qaws_remesh_desc const* desc, qaws_mesh** out, qaws_mesh_report* report);
+qaws_status qaws_mesh_remesh(qaws_mesh** out, qaws_mesh_report* report, qaws_mesh const* mesh, qaws_remesh_desc const* desc);
 qaws_status qaws_mesh_simplify(qaws_mesh const* mesh, qaws_simplify_desc const* desc, qaws_mesh** out, qaws_mesh_report* report);
 qaws_status qaws_mesh_subdivide(qaws_mesh const* mesh, qaws_subdivide_desc const* desc, qaws_mesh** out);   /* Loop, Catmull-Clark, sqrt(3), midpoint; new points on the reference */
 
@@ -594,7 +594,7 @@ typedef struct qaws_remesh_desc
 
 /* element structure */
 qaws_status qaws_mesh_triangulate(qaws_mesh const* mesh, qaws_mesh** out);   /* polygons to triangles (constrained, on the reference) */
-qaws_status qaws_mesh_quadrangulate(qaws_mesh const* mesh, qaws_quadrangulate_desc const* desc, qaws_mesh** out, qaws_mesh_report* report);
+qaws_status qaws_mesh_quadrangulate(qaws_mesh** out, qaws_mesh_report* report, qaws_mesh const* mesh, qaws_quadrangulate_desc const* desc);
 	/* method: QAWS_QUADS_PAIRING (Blossom matching), QAWS_QUADS_SPLIT (all quads, halving),
 	   QAWS_QUADS_INSTANT (Instant Meshes + QuadriFlow consistency), QAWS_QUADS_GLOBAL (integer-grid map),
 	   QAWS_QUADS_LAYOUT (feature-line patches, QuadWild-like) */
@@ -613,8 +613,8 @@ qaws_status qaws_mesh_measure_distance(qaws_mesh const* mesh, qaws_mesh_referenc
 ```c
 /* qaws_volume_mesh.h: tetrahedra, hexahedra, prisms, pyramids (and polyhedra for hex-dominant results) */
 typedef struct qaws_volume_mesh qaws_volume_mesh;
-qaws_status qaws_volume_mesh_create(qaws_volume_mesh_desc const* desc, qaws_volume_mesh** out);
-qaws_status qaws_volume_mesh_get_boundary(qaws_volume_mesh const* mesh, qaws_mesh** out);
+qaws_status qaws_volume_mesh_create(qaws_volume_mesh** out, qaws_volume_mesh_desc const* desc);
+qaws_status qaws_volume_mesh_get_boundary(qaws_mesh** out, qaws_volume_mesh const* mesh);
 
 qaws_status qaws_volume_mesh_tetrahedralize(qaws_tetrahedralize_desc const* desc, qaws_volume_mesh** out, qaws_mesh_report* report);
 	/* boundary: a closed qaws_mesh, a shell or an implicit; mode: QAWS_TETS_CONFORMING (the boundary kept exactly: CDT),

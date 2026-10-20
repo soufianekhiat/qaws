@@ -333,9 +333,9 @@ static qaws_curve_vtable const composite_vtable = {
 /* ------------------------------------------------------------------ */
 
 qaws_status qaws_curve_create_composite_ex(
+	qaws_curve** out_curve,
 	qaws_composite_desc const* desc,
-	qaws_allocator const* allocator,
-	qaws_curve** out_curve)
+	qaws_allocator const* allocator)
 {
 	unsigned int i;
 	unsigned int max_degree;
@@ -405,5 +405,5 @@ qaws_status qaws_curve_create_composite(
 	qaws_curve** out_curve,
 	qaws_composite_desc const* desc)
 {
-	return qaws_curve_create_composite_ex(desc, NULL, out_curve);
+	return qaws_curve_create_composite_ex(out_curve, desc, NULL);
 }

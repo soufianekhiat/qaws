@@ -532,7 +532,7 @@ static qaws_curve_prepared* pr_fill(qaws_curve_view const* view, void* memory)
 	return p;
 }
 
-qaws_status qaws_curve_prepare_into(qaws_curve_view const* view, void* memory, size_t bytes, qaws_curve_prepared** out_prepared)
+qaws_status qaws_curve_prepare_into(qaws_curve_prepared** out_prepared, void* memory, qaws_curve_view const* view, size_t bytes)
 {
 	qaws_status st;
 	if (!out_prepared)
@@ -548,7 +548,7 @@ qaws_status qaws_curve_prepare_into(qaws_curve_view const* view, void* memory, s
 	return QAWS_STATUS_OK;
 }
 
-qaws_status qaws_curve_prepare(qaws_curve_view const* view, qaws_allocator const* allocator, qaws_curve_prepared** out_prepared)
+qaws_status qaws_curve_prepare(qaws_curve_prepared** out_prepared, qaws_curve_view const* view, qaws_allocator const* allocator)
 {
 	qaws_status st;
 	void* memory;
@@ -832,7 +832,7 @@ static void pr_subdivision_coeffs(qaws_curve_prepared const* p, unsigned int s, 
 	}
 	P0 = !closed && s == 0 ? ph[0] : win[m - 1];
 	P3 = !closed && (int64_t)s + 2 >= cnt[levels] ? ph[1] : win[m + 2];
-	qaws_internal_subdivision_cr_coeffs(P0, win[m], win[m + 1], P3, dim, cf);
+	qaws_internal_subdivision_cr_coeffs(cf, P0, win[m], win[m + 1], P3, dim);
 }
 
 static void pr_from_2d(qaws_eval_result_2d const* e, qaws_scalar out[PR_ORDERS][3])
@@ -878,24 +878,24 @@ static void pr_eval_family(qaws_curve_prepared const* p, unsigned int span, qaws
 	{
 		qaws_arc_segment seg = pr_arc(p, span);
 		if (is3)
-			qaws_internal_arc_eval_3d(&seg, u, PR_ALL, &e3);
+			qaws_internal_arc_eval_3d(&e3, &seg, u, PR_ALL);
 		else
-			qaws_internal_arc_eval_2d(&seg, u, PR_ALL, &e2);
+			qaws_internal_arc_eval_2d(&e2, &seg, u, PR_ALL);
 		break;
 	}
 	case QAWS_VIEW_TRAJECTORY:
 		pr_trajectory_coeffs(p, span, cf);
 		if (is3)
-			qaws_internal_trajectory_eval_3d(cf, p->bounds[span + 1] - p->bounds[span], u, PR_ALL, &e3);
+			qaws_internal_trajectory_eval_3d(&e3, cf, p->bounds[span + 1] - p->bounds[span], u, PR_ALL);
 		else
-			qaws_internal_trajectory_eval_2d(cf, p->bounds[span + 1] - p->bounds[span], u, PR_ALL, &e2);
+			qaws_internal_trajectory_eval_2d(&e2, cf, p->bounds[span + 1] - p->bounds[span], u, PR_ALL);
 		break;
 	case QAWS_VIEW_SUBDIVISION:
 		pr_subdivision_coeffs(p, span, cf);
 		if (is3)
-			qaws_internal_subdivision_eval_3d(cf, u, PR_ALL, &e3);
+			qaws_internal_subdivision_eval_3d(&e3, cf, u, PR_ALL);
 		else
-			qaws_internal_subdivision_eval_2d(cf, u, PR_ALL, &e2);
+			qaws_internal_subdivision_eval_2d(&e2, cf, u, PR_ALL);
 		break;
 	default:
 	{
@@ -905,8 +905,8 @@ static void pr_eval_family(qaws_curve_prepared const* p, unsigned int span, qaws
 		memset(out, 0, sizeof(qaws_scalar) * PR_ORDERS * 3);
 		pr_yuksel_subcurve(p, closed ? span % n : span, &sc[0]);
 		pr_yuksel_subcurve(p, closed ? (span + 1) % n : span + 1, &sc[1]);
-		qaws_internal_yuksel_blend(&sc[0], &sc[1], !closed && span == 0, !closed && span == n - 2, u, dim, PR_ALL, out[0], out[1],
-			out[2], out[3]);
+		qaws_internal_yuksel_blend(out[0], out[1], out[2], out[3], &sc[0], &sc[1], dim, !closed && span == 0, !closed && span == n - 2,
+			u, PR_ALL);
 		return;
 	}
 	}
@@ -1070,8 +1070,8 @@ static void pr_store_2d(qaws_scalar const v[PR_ORDERS][3], unsigned int eval_fla
 		}
 }
 
-qaws_status qaws_curve_prepared_evaluate_3d(qaws_curve_prepared const* prepared, qaws_scalar parameter, unsigned int eval_flags,
-	qaws_eval_result_3d* out_result)
+qaws_status qaws_curve_prepared_evaluate_3d(qaws_eval_result_3d* out_result, qaws_curve_prepared const* prepared, qaws_scalar parameter,
+	unsigned int eval_flags)
 {
 	qaws_scalar v[PR_ORDERS][3];
 	if (!prepared || !out_result)
@@ -1083,8 +1083,8 @@ qaws_status qaws_curve_prepared_evaluate_3d(qaws_curve_prepared const* prepared,
 	return QAWS_STATUS_OK;
 }
 
-qaws_status qaws_curve_prepared_evaluate_2d(qaws_curve_prepared const* prepared, qaws_scalar parameter, unsigned int eval_flags,
-	qaws_eval_result_2d* out_result)
+qaws_status qaws_curve_prepared_evaluate_2d(qaws_eval_result_2d* out_result, qaws_curve_prepared const* prepared, qaws_scalar parameter,
+	unsigned int eval_flags)
 {
 	qaws_scalar v[PR_ORDERS][3];
 	if (!prepared || !out_result)
@@ -1185,7 +1185,7 @@ static int bw_is_closed(qaws_curve const* curve)
 	case QAWS_VIEW_ARC:
 	{
 		qaws_arc_segment first = pr_arc(p, 0), last = pr_arc(p, p->n - 1);
-		return qaws_internal_arc_closed(p->view.dimension, &first, &last);
+		return qaws_internal_arc_closed(&first, &last, p->view.dimension);
 	}
 	default:
 		return (p->view.family == QAWS_VIEW_CATMULL_ROM && p->view.closed) || qaws_internal_curve_ends_meet(curve);
@@ -1236,7 +1236,7 @@ static qaws_curve_vtable const bw_vtable = {
 	bw_eval_span_2d, bw_eval_span_3d, bw_destroy, bw_is_closed, bw_is_periodic, bw_is_rational, bw_get_continuity, NULL
 };
 
-qaws_status qaws_curve_create_borrowed(qaws_curve_view const* view, qaws_allocator const* allocator, qaws_curve** out_curve)
+qaws_status qaws_curve_create_borrowed(qaws_curve** out_curve, qaws_curve_view const* view, qaws_allocator const* allocator)
 {
 	qaws_curve_prepared* p;
 	qaws_curve* curve;
@@ -1245,7 +1245,7 @@ qaws_status qaws_curve_create_borrowed(qaws_curve_view const* view, qaws_allocat
 	if (!out_curve)
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	*out_curve = NULL;
-	if ((st = qaws_curve_prepare(view, allocator, &p)) != QAWS_STATUS_OK)
+	if ((st = qaws_curve_prepare(&p, view, allocator)) != QAWS_STATUS_OK)
 		return st;
 	range = qaws_curve_prepared_get_range(p);
 	curve = qaws_internal_curve_alloc_ex(QAWS_CURVE_KIND_VIEW, view->dimension, view->degree, p->span_count, range, &bw_vtable, allocator);
@@ -1260,7 +1260,7 @@ qaws_status qaws_curve_create_borrowed(qaws_curve_view const* view, qaws_allocat
 	return QAWS_STATUS_OK;
 }
 
-int qaws_internal_view_span_window(qaws_curve const* curve, unsigned int s, unsigned int* degree, double* window, double* knots)
+int qaws_internal_view_span_window(unsigned int* degree, double* window, double* knots, qaws_curve const* curve, unsigned int s)
 {
 	qaws_curve_prepared const* p = (qaws_curve_prepared const*)curve->impl;
 	unsigned int d, dim, k, j, c;
@@ -1307,7 +1307,7 @@ static qaws_status pr_copy(qaws_curve_prepared const* p, qaws_allocator const* a
 		d.dimension = p->view.dimension;
 		d.segments = segs;
 		d.segment_count = p->n;
-		st = qaws_curve_create_arc_ex(&d, allocator, out_curve);
+		st = qaws_curve_create_arc_ex(out_curve, &d, allocator);
 		qaws_internal_dealloc(segs, allocator);
 		return st;
 	}
@@ -1351,7 +1351,7 @@ static qaws_status pr_copy(qaws_curve_prepared const* p, qaws_allocator const* a
 		d.control_point_count = p->n;
 		d.mode = (qaws_yuksel_mode)p->view.mode;
 		d.closed = p->view.closed;
-		st = qaws_curve_create_yuksel_ex(&d, allocator, out_curve);
+		st = qaws_curve_create_yuksel_ex(out_curve, &d, allocator);
 	}
 	else if (p->view.family == QAWS_VIEW_SUBDIVISION)
 	{
@@ -1363,7 +1363,7 @@ static qaws_status pr_copy(qaws_curve_prepared const* p, qaws_allocator const* a
 		d.control_point_count = p->n;
 		d.closed = p->view.closed;
 		d.refinement_levels = p->view.levels;
-		st = qaws_curve_create_subdivision_ex(&d, allocator, out_curve);
+		st = qaws_curve_create_subdivision_ex(out_curve, &d, allocator);
 	}
 	else if (p->view.family == QAWS_VIEW_HERMITE)
 	{
@@ -1398,7 +1398,7 @@ static qaws_status pr_copy(qaws_curve_prepared const* p, qaws_allocator const* a
 		d.coefficient_count = p->n;
 		d.t_min = p->t0;
 		d.t_max = p->t1;
-		st = qaws_curve_create_polynomial_ex(&d, allocator, out_curve);
+		st = qaws_curve_create_polynomial_ex(out_curve, &d, allocator);
 	}
 	else if (p->rational)
 	{
@@ -1430,21 +1430,21 @@ static qaws_status pr_copy(qaws_curve_prepared const* p, qaws_allocator const* a
 	return st;
 }
 
-qaws_status qaws_curve_create_from_view(qaws_curve_view const* view, qaws_allocator const* allocator, qaws_curve** out_curve)
+qaws_status qaws_curve_create_from_view(qaws_curve** out_curve, qaws_curve_view const* view, qaws_allocator const* allocator)
 {
 	qaws_curve_prepared* p;
 	qaws_status st;
 	if (!out_curve)
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	*out_curve = NULL;
-	if ((st = qaws_curve_prepare(view, allocator, &p)) != QAWS_STATUS_OK)
+	if ((st = qaws_curve_prepare(&p, view, allocator)) != QAWS_STATUS_OK)
 		return st;
 	st = pr_copy(p, allocator, out_curve);
 	qaws_curve_prepared_destroy(p);
 	return st;
 }
 
-qaws_status qaws_internal_curve_view_copy(qaws_curve const* curve, qaws_curve** out_curve)
+qaws_status qaws_internal_curve_view_copy(qaws_curve** out_curve, qaws_curve const* curve)
 {
 	return pr_copy((qaws_curve_prepared const*)curve->impl, curve->allocator, out_curve);
 }
@@ -1501,7 +1501,7 @@ static qaws_surface_prepared* sp_fill(qaws_surface_view const* view, void* memor
 	return p;
 }
 
-qaws_status qaws_surface_prepare_into(qaws_surface_view const* view, void* memory, size_t bytes, qaws_surface_prepared** out_prepared)
+qaws_status qaws_surface_prepare_into(qaws_surface_prepared** out_prepared, void* memory, qaws_surface_view const* view, size_t bytes)
 {
 	qaws_status st;
 	if (!out_prepared)
@@ -1517,7 +1517,7 @@ qaws_status qaws_surface_prepare_into(qaws_surface_view const* view, void* memor
 	return QAWS_STATUS_OK;
 }
 
-qaws_status qaws_surface_prepare(qaws_surface_view const* view, qaws_allocator const* allocator, qaws_surface_prepared** out_prepared)
+qaws_status qaws_surface_prepare(qaws_surface_prepared** out_prepared, qaws_surface_view const* view, qaws_allocator const* allocator)
 {
 	qaws_status st;
 	void* memory;
@@ -1650,8 +1650,8 @@ static unsigned char const sp_jet[QAWS_SURFACE_JET_COUNT][2] = {
 	{ 0, 0 }, { 1, 0 }, { 0, 1 }, { 2, 0 }, { 1, 1 }, { 0, 2 }, { 3, 0 }, { 2, 1 }, { 1, 2 }, { 0, 3 }
 };
 
-qaws_status qaws_surface_prepared_evaluate(qaws_surface_prepared const* prepared, qaws_scalar u, qaws_scalar v, unsigned int eval_flags,
-	qaws_surface_eval_result* out_result)
+qaws_status qaws_surface_prepared_evaluate(qaws_surface_eval_result* out_result, qaws_surface_prepared const* prepared, qaws_scalar u, qaws_scalar v,
+	unsigned int eval_flags)
 {
 	qaws_scalar S[SP_ORDERS][SP_ORDERS][3];
 	qaws_vec3* dst[7];
@@ -1726,7 +1726,7 @@ qaws_status qaws_surface_prepared_evaluate_range(qaws_surface_prepared const* pr
 	{
 		qaws_surface_eval_result r;
 		qaws_vec3 const* src[7];
-		qaws_surface_prepared_evaluate(prepared, (qaws_scalar)vw_get(parameters, i, 0), (qaws_scalar)vw_get(parameters, i, 1), flags, &r);
+		qaws_surface_prepared_evaluate(&r, prepared, (qaws_scalar)vw_get(parameters, i, 0), (qaws_scalar)vw_get(parameters, i, 1), flags);
 		src[0] = &r.position;
 		src[1] = &r.du;
 		src[2] = &r.dv;
@@ -1747,7 +1747,7 @@ qaws_status qaws_surface_prepared_evaluate_range(qaws_surface_prepared const* pr
 
 static qaws_status bs_eval(qaws_surface const* surface, qaws_scalar u, qaws_scalar v, unsigned int flags, qaws_surface_eval_result* out)
 {
-	return qaws_surface_prepared_evaluate((qaws_surface_prepared const*)surface->impl, u, v, flags, out);
+	return qaws_surface_prepared_evaluate(out, (qaws_surface_prepared const*)surface->impl, u, v, flags);
 }
 
 static void bs_destroy(void* impl, qaws_allocator const* allocator)
@@ -1785,7 +1785,7 @@ static qaws_surface_diff_vtable const bs_diff = { 0, QAWS_DIFF_PIECEWISE_SMOOTH,
 
 static qaws_surface_vtable const bs_vtable = { bs_eval, bs_destroy, bs_is_rational, &bs_diff };
 
-qaws_status qaws_surface_create_borrowed(qaws_surface_view const* view, qaws_allocator const* allocator, qaws_surface** out_surface)
+qaws_status qaws_surface_create_borrowed(qaws_surface** out_surface, qaws_surface_view const* view, qaws_allocator const* allocator)
 {
 	qaws_surface_prepared* p;
 	qaws_surface* s;
@@ -1793,7 +1793,7 @@ qaws_status qaws_surface_create_borrowed(qaws_surface_view const* view, qaws_all
 	if (!out_surface)
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	*out_surface = NULL;
-	if ((st = qaws_surface_prepare(view, allocator, &p)) != QAWS_STATUS_OK)
+	if ((st = qaws_surface_prepare(&p, view, allocator)) != QAWS_STATUS_OK)
 		return st;
 	s = qaws_internal_surface_alloc_ex(QAWS_SURFACE_KIND_VIEW, view->u_degree, view->v_degree, qaws_surface_prepared_get_u_range(p),
 		qaws_surface_prepared_get_v_range(p), &bs_vtable, allocator);
@@ -1807,8 +1807,8 @@ qaws_status qaws_surface_create_borrowed(qaws_surface_view const* view, qaws_all
 	return QAWS_STATUS_OK;
 }
 
-int qaws_internal_surface_view_net(qaws_surface const* surface, unsigned int* degrees, unsigned int* counts, qaws_scalar const** u_knots,
-	qaws_scalar const** v_knots)
+int qaws_internal_surface_view_net(qaws_scalar const** u_knots, qaws_scalar const** v_knots, unsigned int* degrees, unsigned int* counts,
+	qaws_surface const* surface)
 {
 	qaws_surface_prepared const* p = (qaws_surface_prepared const*)surface->impl;
 	if (surface->kind != QAWS_SURFACE_KIND_VIEW)
@@ -1822,7 +1822,7 @@ int qaws_internal_surface_view_net(qaws_surface const* surface, unsigned int* de
 	return 1;
 }
 
-void qaws_internal_surface_view_point(qaws_surface const* surface, unsigned int i, unsigned int j, double* h)
+void qaws_internal_surface_view_point(double* h, qaws_surface const* surface, unsigned int i, unsigned int j)
 {
 	qaws_surface_prepared const* p = (qaws_surface_prepared const*)surface->impl;
 	unsigned int e = i * p->view.v_count + j, c;
@@ -1833,7 +1833,7 @@ void qaws_internal_surface_view_point(qaws_surface const* surface, unsigned int 
 	h[3] = w;
 }
 
-qaws_status qaws_surface_create_from_view(qaws_surface_view const* view, qaws_allocator const* allocator, qaws_surface** out_surface)
+qaws_status qaws_surface_create_from_view(qaws_surface** out_surface, qaws_surface_view const* view, qaws_allocator const* allocator)
 {
 	qaws_surface_prepared* p;
 	qaws_vec3* pts;
@@ -1843,7 +1843,7 @@ qaws_status qaws_surface_create_from_view(qaws_surface_view const* view, qaws_al
 	if (!out_surface)
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	*out_surface = NULL;
-	if ((st = qaws_surface_prepare(view, allocator, &p)) != QAWS_STATUS_OK)
+	if ((st = qaws_surface_prepare(&p, view, allocator)) != QAWS_STATUS_OK)
 		return st;
 	n = view->u_count * view->v_count;
 	pts = (qaws_vec3*)qaws_internal_alloc(qaws_internal_mul2(sizeof(qaws_vec3) + sizeof(qaws_scalar), (size_t)n), allocator);

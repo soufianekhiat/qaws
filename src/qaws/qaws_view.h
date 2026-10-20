@@ -148,14 +148,14 @@ typedef struct qaws_curve_prepared qaws_curve_prepared;
 #define QAWS_DEPENDS_KNOTS   4u         /* the knots' values */
 #define QAWS_DEPENDS_LAYOUT  8u         /* pointers, strides, counts, types, the degree */
 
-qaws_status qaws_curve_prepare(qaws_curve_view const* view, qaws_allocator const* allocator, qaws_curve_prepared** out_prepared);
+qaws_status qaws_curve_prepare(qaws_curve_prepared** out_prepared, qaws_curve_view const* view, qaws_allocator const* allocator);
 
 /* bytes (and the alignment, 16) qaws_curve_prepare_into needs for this view; 0 when the view is invalid */
 size_t qaws_curve_prepared_size(qaws_curve_view const* view);
 
 /* into caller memory (no allocation): memory 16-byte aligned, at least qaws_curve_prepared_size bytes; the object lives there
    until the caller reuses it (qaws_curve_prepared_destroy is a no-op for it, and may be called) */
-qaws_status qaws_curve_prepare_into(qaws_curve_view const* view, void* memory, size_t bytes, qaws_curve_prepared** out_prepared);
+qaws_status qaws_curve_prepare_into(qaws_curve_prepared** out_prepared, void* memory, qaws_curve_view const* view, size_t bytes);
 
 void qaws_curve_prepared_destroy(qaws_curve_prepared* prepared);
 
@@ -165,10 +165,10 @@ unsigned int qaws_curve_prepared_dependencies(qaws_curve_prepared const* prepare
 qaws_range qaws_curve_prepared_get_range(qaws_curve_prepared const* prepared);
 
 /* One parameter (clamped to the domain); derivatives with respect to it, as qaws_curve_evaluate_*; thread-safe, no allocation */
-qaws_status qaws_curve_prepared_evaluate_2d(qaws_curve_prepared const* prepared, qaws_scalar parameter, unsigned int eval_flags,
-	qaws_eval_result_2d* out_result);
-qaws_status qaws_curve_prepared_evaluate_3d(qaws_curve_prepared const* prepared, qaws_scalar parameter, unsigned int eval_flags,
-	qaws_eval_result_3d* out_result);
+qaws_status qaws_curve_prepared_evaluate_2d(qaws_eval_result_2d* out_result, qaws_curve_prepared const* prepared, qaws_scalar parameter,
+	unsigned int eval_flags);
+qaws_status qaws_curve_prepared_evaluate_3d(qaws_eval_result_3d* out_result, qaws_curve_prepared const* prepared, qaws_scalar parameter,
+	unsigned int eval_flags);
 
 /* Outputs of a range evaluation: each written when it has a pointer (data or planes[0]), dimension components, at least `end`
    elements, f32 or f64. */
@@ -185,12 +185,12 @@ qaws_status qaws_curve_prepared_evaluate_range(qaws_curve_prepared const* prepar
 
 /* A qaws_curve over the view without copying its points, weights or knots (a prepared object inside, from the allocator); the same
    contract as a prepared object for as long as the curve lives. Kind QAWS_CURVE_KIND_VIEW. */
-qaws_status qaws_curve_create_borrowed(qaws_curve_view const* view, qaws_allocator const* allocator, qaws_curve** out_curve);
+qaws_status qaws_curve_create_borrowed(qaws_curve** out_curve, qaws_curve_view const* view, qaws_allocator const* allocator);
 
 /* An owned copy: splines a B-spline curve (polynomial views) or a NURBS curve (weights or homogeneous points, divided by w), with the
    view's knots (or the clamped uniform ones); the other families their own owned curve; values converted to qaws_scalar; the view
    is borrowed for the call only. */
-qaws_status qaws_curve_create_from_view(qaws_curve_view const* view, qaws_allocator const* allocator, qaws_curve** out_curve);
+qaws_status qaws_curve_create_from_view(qaws_curve** out_curve, qaws_curve_view const* view, qaws_allocator const* allocator);
 
 /* ---- surfaces: the same model over a grid of points -------------------------------------------------------------------------- */
 
@@ -209,9 +209,9 @@ qaws_status qaws_surface_view_validate(qaws_surface_view const* view);
 
 typedef struct qaws_surface_prepared qaws_surface_prepared;
 
-qaws_status qaws_surface_prepare(qaws_surface_view const* view, qaws_allocator const* allocator, qaws_surface_prepared** out_prepared);
+qaws_status qaws_surface_prepare(qaws_surface_prepared** out_prepared, qaws_surface_view const* view, qaws_allocator const* allocator);
 size_t qaws_surface_prepared_size(qaws_surface_view const* view);
-qaws_status qaws_surface_prepare_into(qaws_surface_view const* view, void* memory, size_t bytes, qaws_surface_prepared** out_prepared);
+qaws_status qaws_surface_prepare_into(qaws_surface_prepared** out_prepared, void* memory, qaws_surface_view const* view, size_t bytes);
 void qaws_surface_prepared_destroy(qaws_surface_prepared* prepared);
 unsigned int qaws_surface_prepared_dependencies(qaws_surface_prepared const* prepared);
 qaws_range qaws_surface_prepared_get_u_range(qaws_surface_prepared const* prepared);
@@ -219,8 +219,8 @@ qaws_range qaws_surface_prepared_get_v_range(qaws_surface_prepared const* prepar
 
 /* (u, v) clamped to the domain; flags and results as qaws_surface_evaluate (a normal also gives du and dv); thread-safe, no
    allocation */
-qaws_status qaws_surface_prepared_evaluate(qaws_surface_prepared const* prepared, qaws_scalar u, qaws_scalar v, unsigned int eval_flags,
-	qaws_surface_eval_result* out_result);
+qaws_status qaws_surface_prepared_evaluate(qaws_surface_eval_result* out_result, qaws_surface_prepared const* prepared, qaws_scalar u, qaws_scalar v,
+	unsigned int eval_flags);
 
 /* Outputs of a surface range evaluation: as qaws_curve_outputs, 3 components each */
 typedef struct qaws_surface_outputs
@@ -233,9 +233,9 @@ qaws_status qaws_surface_prepared_evaluate_range(qaws_surface_prepared const* pr
 	unsigned int begin, unsigned int end, qaws_surface_outputs const* outputs);
 
 /* A qaws_surface over the view (kind QAWS_SURFACE_KIND_VIEW), the contract of a prepared object for its life */
-qaws_status qaws_surface_create_borrowed(qaws_surface_view const* view, qaws_allocator const* allocator, qaws_surface** out_surface);
+qaws_status qaws_surface_create_borrowed(qaws_surface** out_surface, qaws_surface_view const* view, qaws_allocator const* allocator);
 
 /* An owned copy: a B-spline or NURBS surface */
-qaws_status qaws_surface_create_from_view(qaws_surface_view const* view, qaws_allocator const* allocator, qaws_surface** out_surface);
+qaws_status qaws_surface_create_from_view(qaws_surface** out_surface, qaws_surface_view const* view, qaws_allocator const* allocator);
 
 #endif /* QAWS_VIEW_H */

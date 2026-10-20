@@ -105,13 +105,13 @@ qaws_status qaws_curve_compute_arc_length(
 }
 
 qaws_status qaws_curve_compute_parameter_at_arc_length(
+	qaws_scalar *out_parameter,
 	qaws_curve const *curve,
 	qaws_scalar parameter_min,
-	qaws_scalar length,
-	qaws_scalar *out_parameter)
+	qaws_scalar length)
 {
 	return qaws_internal_parameter_at_arc_length(
-		curve, parameter_min, length, out_parameter);
+		out_parameter, curve, parameter_min, length);
 }
 
 qaws_status qaws_curve_compute_bounds_2d(
@@ -347,7 +347,7 @@ static qaws_status closest_2d(
 	qaws_status status = closest_sampled_2d(curve, point, out_parameter);
 	if (status != QAWS_STATUS_OK)
 		return status;
-	return qaws_internal_closest_certify(curve, x, out_parameter, out_distance, out_gap);
+	return qaws_internal_closest_certify(out_distance, out_gap, out_parameter, curve, x);
 }
 
 qaws_status qaws_curve_find_closest_parameter_2d(
@@ -361,11 +361,11 @@ qaws_status qaws_curve_find_closest_parameter_2d(
 }
 
 qaws_status qaws_curve_find_closest_point_certified_2d(
-	qaws_curve const *curve,
-	qaws_vec2 point,
 	qaws_scalar *out_parameter,
 	qaws_scalar *out_distance,
-	qaws_scalar *out_gap)
+	qaws_scalar *out_gap,
+	qaws_curve const *curve,
+	qaws_vec2 point)
 {
 	double distance, gap;
 	qaws_scalar t;
@@ -489,7 +489,7 @@ static qaws_status closest_3d(
 	qaws_status status = closest_sampled_3d(curve, point, out_parameter);
 	if (status != QAWS_STATUS_OK)
 		return status;
-	return qaws_internal_closest_certify(curve, x, out_parameter, out_distance, out_gap);
+	return qaws_internal_closest_certify(out_distance, out_gap, out_parameter, curve, x);
 }
 
 qaws_status qaws_curve_find_closest_parameter_3d(
@@ -503,11 +503,11 @@ qaws_status qaws_curve_find_closest_parameter_3d(
 }
 
 qaws_status qaws_curve_find_closest_point_certified_3d(
-	qaws_curve const *curve,
-	qaws_vec3 point,
 	qaws_scalar *out_parameter,
 	qaws_scalar *out_distance,
-	qaws_scalar *out_gap)
+	qaws_scalar *out_gap,
+	qaws_curve const *curve,
+	qaws_vec3 point)
 {
 	double distance, gap;
 	qaws_scalar t;
@@ -3250,7 +3250,7 @@ static qaws_status surface_closest(
 	qaws_status status = surface_closest_sampled(surface, point, out_u, out_v, out_closest_point);
 	if (status != QAWS_STATUS_OK)
 		return status;
-	status = qaws_internal_surface_closest_certify(surface, x, out_u, out_v, out_distance, out_gap);
+	status = qaws_internal_surface_closest_certify(out_distance, out_gap, out_u, out_v, surface, x);
 	if (status != QAWS_STATUS_OK)
 		return status;
 	status = qaws_surface_evaluate(&result, surface, *out_u, *out_v, QAWS_SURFACE_EVAL_POSITION);
@@ -3272,13 +3272,13 @@ qaws_status qaws_surface_find_closest_point(
 }
 
 qaws_status qaws_surface_find_closest_point_certified(
-	qaws_surface const *surface,
-	qaws_vec3 point,
 	qaws_scalar *out_u,
 	qaws_scalar *out_v,
 	qaws_vec3 *out_closest_point,
 	qaws_scalar *out_distance,
-	qaws_scalar *out_gap)
+	qaws_scalar *out_gap,
+	qaws_surface const *surface,
+	qaws_vec3 point)
 {
 	double distance, gap;
 	qaws_status status;
@@ -4247,11 +4247,11 @@ qaws_status qaws_surface_project_curve(
 	if (n_cp < 6) n_cp = 6;
 	if (n_cp > n_samples) n_cp = n_samples;
 
-	status = qaws_internal_fit_bspline_ex(curve->allocator, 
-		QAWS_DIMENSION_2D, 3,
+	status = qaws_internal_fit_bspline_ex(out_uv_curve, 
 		params, uv_coords,
-		n_samples, n_cp,
-		out_uv_curve);
+		QAWS_DIMENSION_2D, n_samples,
+		n_cp, 3,
+		curve->allocator);
 
 	qaws_internal_free(params);
 	qaws_internal_free(uv_coords);

@@ -75,11 +75,11 @@ int qaws_internal_rs_settings(qaws_internal_rs_core* core, qaws_scalar armijo, q
 #define QAWS_INTERNAL_RS_CANCELLED(core) ((core)->progress.cancel && (core)->progress.cancel((core)->progress.user_data))
 
 /* steps until a termination reason or max steps, reporting each accepted one (the *_solve loop) */
-qaws_status qaws_internal_rs_solve(qaws_internal_rs_core* core, unsigned int max_steps, qaws_scalar* positions, qaws_repulsive_report* out_report);
+qaws_status qaws_internal_rs_solve(qaws_repulsive_report* out_report, qaws_scalar* positions, qaws_internal_rs_core* core, unsigned int max_steps);
 
 /* the objective at positions and its gradient (may be NULL) */
-qaws_status qaws_internal_rs_objective(qaws_internal_rs_core const* core, qaws_scalar const* positions, qaws_scalar* out_energy,
-	qaws_scalar* out_gradient);
+qaws_status qaws_internal_rs_objective(qaws_scalar* out_energy, qaws_scalar* out_gradient, qaws_internal_rs_core const* core,
+	qaws_scalar const* positions);
 
 /* the most constraint rows (pins aside) the hierarchical mode solves for */
 #define QAWS_INTERNAL_RS_HROWS 32

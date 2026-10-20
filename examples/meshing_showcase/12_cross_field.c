@@ -22,8 +22,8 @@ static void ms_cross_field(er_canvas* c, qaws_mesh_3d const* m, qaws_scalar cons
 	double* p = ms_positions(m);
 	qaws_scalar* nrm = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * nv);
 	unsigned int* fv = (unsigned int*)malloc(sizeof(unsigned int) * 3 * nf);
-	qaws_mesh_3d_get_vertex_normals(m, nrm);
-	qaws_mesh_3d_get_triangles(m, fv);
+	qaws_mesh_3d_get_vertex_normals(nrm, m);
+	qaws_mesh_3d_get_triangles(fv, m);
 	for (i = 0; i < nv; i++)
 	{
 		double const* x = p + 3 * i;
@@ -67,7 +67,7 @@ static void ms_field_panel(er_canvas* c, int x, int y, qaws_mesh_3d const* m, qa
 	d.method = method;
 	d.curvature_aligned = aligned;
 	t0 = clock();
-	st = qaws_mesh_3d_direction_field(m, &d, dir, idx);
+	st = qaws_mesh_3d_direction_field(dir, idx, m, &d);
 	ms = 1000.0 * (double)(clock() - t0) / CLOCKS_PER_SEC;
 	ms_panel(c, x, y, 550, 600, m, yaw, pitch, title, NULL);
 	ms_draw(c, m, tint, NULL, 1, NULL, 0);
@@ -89,7 +89,7 @@ static unsigned int ms_irregular(er_canvas* c, qaws_mesh_3d const* q, unsigned i
 	unsigned int *fv = (unsigned int*)malloc(sizeof(unsigned int) * nc), *fs = (unsigned int*)malloc(sizeof(unsigned int) * nf);
 	unsigned int* val = (unsigned int*)calloc(nv, sizeof(unsigned int));
 	double* p = ms_positions(q);
-	qaws_mesh_3d_get_faces(q, fv, fs);
+	qaws_mesh_3d_get_faces(fv, fs, q);
 	for (i = 0; i < nc; i++)
 		val[fv[i]]++;
 	*top = *bottom = 0;
@@ -120,9 +120,9 @@ static void demo_cross_field(void)
 	qaws_mesh_3d_detect_features(can, (qaws_scalar)(50 * MS_PI / 180), 0, 0);
 	memset(&rd, 0, sizeof rd);
 	rd.target_length = (qaws_scalar)0.09;
-	qaws_mesh_remesh(blob, &rd, &db, NULL);
+	qaws_mesh_remesh(&db, NULL, blob, &rd);
 	rd.target_length = (qaws_scalar)0.07;
-	qaws_mesh_remesh(can, &rd, &dc, NULL);
+	qaws_mesh_remesh(&dc, NULL, can, &rd);
 	/* columns 1 and 2: LOCAL above, SMOOTHEST below */
 	if (db)
 	{
@@ -158,7 +158,7 @@ static void demo_cross_field(void)
 	qd.pure = 1;
 	{
 		clock_t t0 = clock();
-		qaws_mesh_quadrangulate(can, &qd, &q, &rep);
+		qaws_mesh_quadrangulate(&q, &rep, can, &qd);
 		if (q)
 		{
 			unsigned int nfe = qaws_mesh_3d_get_feature_edge_count(q), *fe = (unsigned int*)malloc(sizeof(unsigned int) * 2 * (nfe + 1)), i, n, top, bottom;
@@ -166,7 +166,7 @@ static void demo_cross_field(void)
 			static double const red[3] = { 214, 39, 40 };
 			char sub2[200];
 			double sec = (double)(clock() - t0) / CLOCKS_PER_SEC;
-			qaws_mesh_3d_get_feature_edges(q, fe);
+			qaws_mesh_3d_get_feature_edges(fe, q);
 			n = ms_irregular(NULL, q, &top, &bottom);
 			/* the count before this item was measured on the LOCAL field alone: no setting brings that field back */
 			sprintf(sub, "%u irregular (22 measured before); top cap %u", rep.quality.irregular, top);

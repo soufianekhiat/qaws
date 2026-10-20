@@ -44,7 +44,7 @@ void qaws_flow_destroy(qaws_flow* f)
 	qaws_internal_free(f);
 }
 
-qaws_status qaws_flow_create(unsigned int nodes, unsigned int arc_capacity, qaws_flow** out)
+qaws_status qaws_flow_create(qaws_flow** out, unsigned int arc_capacity, unsigned int nodes)
 {
 	qaws_flow* f;
 	size_t n = (size_t)nodes + 1, a = (size_t)arc_capacity + 1;
@@ -271,7 +271,7 @@ static long long fl_send(qaws_flow* f, unsigned int t, int amount)
 	return c * amount;
 }
 
-qaws_status qaws_flow_solve(qaws_flow* f, int* out_unrouted, long long* out_cost)
+qaws_status qaws_flow_solve(int* out_unrouted, long long* out_cost, qaws_flow* f)
 {
 	unsigned int s, t, a;
 	int progress = 1, left = 0;
@@ -306,8 +306,8 @@ qaws_status qaws_flow_solve(qaws_flow* f, int* out_unrouted, long long* out_cost
 	return QAWS_STATUS_OK;
 }
 
-qaws_status qaws_flow_augment(qaws_flow* f, unsigned int from, unsigned int const* targets, unsigned int target_count,
-	unsigned int* out_reached, long long* out_cost)
+qaws_status qaws_flow_augment(unsigned int* out_reached, long long* out_cost, qaws_flow* f, unsigned int const* targets,
+	unsigned int target_count, unsigned int from)
 {
 	unsigned int i, t, any = 0;
 	long long pimin = 0;

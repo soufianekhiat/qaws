@@ -49,7 +49,7 @@ static void test_reference(void)
 	for (i = 0; i < 3; i++)
 	{
 		qaws_scalar t = -1;
-		qaws_status st = qaws_curve_compute_parameter_at_arc_length(c, 0, (qaws_scalar)sigma[i], &t);
+		qaws_status st = qaws_curve_compute_parameter_at_arc_length(&t, c, 0, (qaws_scalar)sigma[i]);
 		snprintf(msg, sizeof msg, "parameter at length %.4f = Mathematica's (error %.1e)", sigma[i], fabs(t - ref_t_arc[i]));
 		printf("  %s\n", msg);
 		TEST_ASSERT(st == QAWS_STATUS_OK && fabs(t - ref_t_arc[i]) <= fmax(1e-11, AL_ROUND * 3), msg);
@@ -57,7 +57,7 @@ static void test_reference(void)
 	/* from inside the range: the length from there is reached */
 	{
 		qaws_scalar t = -1;
-		qaws_status st = qaws_curve_compute_parameter_at_arc_length(c, (qaws_scalar)1.3, (qaws_scalar)2.0, &t);
+		qaws_status st = qaws_curve_compute_parameter_at_arc_length(&t, c, (qaws_scalar)1.3, (qaws_scalar)2.0);
 		TEST_ASSERT(st == QAWS_STATUS_OK && fabs(al_length(c, 1.3, t) - 2.0) <= fmax(1e-11, AL_ROUND * total), "from t = 1.3, 2.0 further");
 	}
 	qaws_curve_destroy(c);
@@ -80,7 +80,7 @@ static void test_circle(void)
 	/* a third of the arc: the point at 30 degrees */
 	{
 		qaws_eval_result_2d e;
-		qaws_curve_compute_parameter_at_arc_length(c, 0, (qaws_scalar)(M_PI / 3), &t);
+		qaws_curve_compute_parameter_at_arc_length(&t, c, 0, (qaws_scalar)(M_PI / 3));
 		qaws_curve_evaluate_2d(&e, c, t, QAWS_EVAL_FLAG_POSITION);
 		snprintf(msg, sizeof msg, "a third of the arc: the point at 30 degrees (error %.1e)", fabs(e.position.x - sqrt(3.0)) + fabs(e.position.y - 1));
 		TEST_ASSERT(fabs(e.position.x - sqrt(3.0)) + fabs(e.position.y - 1) <= fmax(1e-11, AL_ROUND * 2), msg);
@@ -108,7 +108,7 @@ static void test_zero_speed(void)
 	for (i = 0; i <= 20; i++)
 	{
 		double s = total * (i == 0 ? 1e-9 : i / 20.0);
-		qaws_status st = qaws_curve_compute_parameter_at_arc_length(cusp, 0, (qaws_scalar)s, &t);
+		qaws_status st = qaws_curve_compute_parameter_at_arc_length(&t, cusp, 0, (qaws_scalar)s);
 		double e = st == QAWS_STATUS_OK ? fabs(al_length(cusp, 0, t) - s) : 1;
 		if (e > worst)
 			worst = e;
@@ -121,9 +121,9 @@ static void test_zero_speed(void)
 	qd.dimension = QAWS_DIMENSION_2D; qd.degree = 1; qd.control_points = q; qd.control_point_count = 4; qd.knots = knots; qd.knot_count = 6;
 	qaws_curve_create_bspline(&poly, &qd);
 	TEST_ASSERT(fabs(al_length(poly, 0, 3) - 2) <= 1e-14, "polyline with a stationary span: length 2");
-	qaws_curve_compute_parameter_at_arc_length(poly, 0, 1, &t);
+	qaws_curve_compute_parameter_at_arc_length(&t, poly, 0, 1);
 	TEST_ASSERT(t >= 1 - 1e-9 && t <= 2 + 1e-9, "length 1: in the stationary span");
-	qaws_curve_compute_parameter_at_arc_length(poly, 0, (qaws_scalar)1.5, &t);
+	qaws_curve_compute_parameter_at_arc_length(&t, poly, 0, (qaws_scalar)1.5);
 	snprintf(msg, sizeof msg, "length 1.5: t = 2.5 past the stationary span (%.12f)", (double)t);
 	TEST_ASSERT(fabs(t - 2.5) <= 1e-11, msg);
 	qaws_curve_destroy(cusp);
@@ -140,13 +140,13 @@ static void test_ends_and_refusals(void)
 	d.dimension = QAWS_DIMENSION_2D; d.degree = 2; d.control_points = p; d.control_point_count = 3;
 	qaws_curve_create_bezier(&c, &d);
 	total = al_length(c, 0, 1);
-	TEST_ASSERT(qaws_curve_compute_parameter_at_arc_length(c, (qaws_scalar)0.25, 0, &t) == QAWS_STATUS_OK && t == (qaws_scalar)0.25, "length 0: the start");
-	TEST_ASSERT(qaws_curve_compute_parameter_at_arc_length(c, 0, total, &t) == QAWS_STATUS_OK && t == 1, "the whole length: the end");
-	TEST_ASSERT(qaws_curve_compute_parameter_at_arc_length(c, 0, total * (qaws_scalar)1.001, &t) == QAWS_STATUS_OUT_OF_RANGE, "past the end refused");
-	TEST_ASSERT(qaws_curve_compute_parameter_at_arc_length(c, 0, -1, &t) == QAWS_STATUS_OUT_OF_RANGE, "a negative length refused");
-	TEST_ASSERT(qaws_curve_compute_parameter_at_arc_length(c, 2, 0, &t) == QAWS_STATUS_OUT_OF_RANGE, "a start outside the range refused");
-	TEST_ASSERT(qaws_curve_compute_parameter_at_arc_length(NULL, 0, 0, &t) == QAWS_STATUS_INVALID_ARGUMENT, "no curve refused");
-	TEST_ASSERT(qaws_curve_compute_parameter_at_arc_length(c, 0, 0, NULL) == QAWS_STATUS_INVALID_ARGUMENT, "no output refused");
+	TEST_ASSERT(qaws_curve_compute_parameter_at_arc_length(&t, c, (qaws_scalar)0.25, 0) == QAWS_STATUS_OK && t == (qaws_scalar)0.25, "length 0: the start");
+	TEST_ASSERT(qaws_curve_compute_parameter_at_arc_length(&t, c, 0, total) == QAWS_STATUS_OK && t == 1, "the whole length: the end");
+	TEST_ASSERT(qaws_curve_compute_parameter_at_arc_length(&t, c, 0, total * (qaws_scalar)1.001) == QAWS_STATUS_OUT_OF_RANGE, "past the end refused");
+	TEST_ASSERT(qaws_curve_compute_parameter_at_arc_length(&t, c, 0, -1) == QAWS_STATUS_OUT_OF_RANGE, "a negative length refused");
+	TEST_ASSERT(qaws_curve_compute_parameter_at_arc_length(&t, c, 2, 0) == QAWS_STATUS_OUT_OF_RANGE, "a start outside the range refused");
+	TEST_ASSERT(qaws_curve_compute_parameter_at_arc_length(&t, NULL, 0, 0) == QAWS_STATUS_INVALID_ARGUMENT, "no curve refused");
+	TEST_ASSERT(qaws_curve_compute_parameter_at_arc_length(NULL, c, 0, 0) == QAWS_STATUS_INVALID_ARGUMENT, "no output refused");
 	qaws_curve_destroy(c);
 }
 

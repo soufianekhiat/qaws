@@ -1753,8 +1753,8 @@ static qaws_status rm_begin(rmsh* w, qaws_mesh_3d const* in, qaws_mesh_3d** out)
 		qaws_internal_free(fe);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
-	qaws_mesh_3d_get_triangles(in, tri);
-	qaws_mesh_3d_get_feature_edges(in, fe);
+	qaws_mesh_3d_get_triangles(tri, in);
+	qaws_mesh_3d_get_feature_edges(fe, in);
 	st = hm_mesh_3d_create(in->hm.x, nv, tri, NULL, nt, out);
 	qaws_internal_free(tri);
 	if (st != QAWS_STATUS_OK)
@@ -1910,7 +1910,7 @@ qaws_status mx_transfer(qaws_hm* m, qaws_mesh_reference const* r, qaws_mesh_loca
 			for (v = 0; v < m->nv; v++)
 			{
 				unsigned int q;
-				qaws_mesh_reference_evaluate_attribute(r, k, &m->foot[v], 1, vals);
+				qaws_mesh_reference_evaluate_attribute(vals, r, &m->foot[v], 1, k);
 				for (q = 0; q < at->n; q++)
 					hm_attr_at(m, a, v)[q] = (double)vals[q];
 			}
@@ -1922,7 +1922,7 @@ qaws_status mx_transfer(qaws_hm* m, qaws_mesh_reference const* r, qaws_mesh_loca
 					continue;
 				if (at->element == QAWS_MESH_FACE)
 				{
-					qaws_mesh_reference_evaluate_attribute(r, k, &fl[f], 1, vals);
+					qaws_mesh_reference_evaluate_attribute(vals, r, &fl[f], 1, k);
 					for (q = 0; q < at->n; q++)
 						hm_attr_at(m, a, f)[q] = (double)vals[q];
 					continue;
@@ -1936,7 +1936,7 @@ qaws_status mx_transfer(qaws_hm* m, qaws_mesh_reference const* r, qaws_mesh_loca
 					l.patch = fl[f].patch;
 					l.a = (qaws_scalar)ba;
 					l.b = (qaws_scalar)bb;
-					qaws_mesh_reference_evaluate_attribute(r, k, &l, 1, vals);
+					qaws_mesh_reference_evaluate_attribute(vals, r, &l, 1, k);
 					for (q = 0; q < at->n; q++)
 						hm_attr_at(m, a, c)[q] = (double)vals[q];
 				}
@@ -1987,7 +1987,7 @@ static qaws_status rm_end(rmsh* w, int report)
 	}
 }
 
-qaws_status qaws_mesh_remesh(qaws_mesh_3d const* mesh, qaws_remesh_desc const* desc, qaws_mesh_3d** out_mesh, qaws_mesh_report* out_report)
+qaws_status qaws_mesh_remesh(qaws_mesh_3d** out_mesh, qaws_mesh_report* out_report, qaws_mesh_3d const* mesh, qaws_remesh_desc const* desc)
 {
 	rmsh w;
 	qaws_mesh_reference* own = NULL;
@@ -2013,7 +2013,7 @@ qaws_status qaws_mesh_remesh(qaws_mesh_3d const* mesh, qaws_remesh_desc const* d
 	w.tol = desc->tolerance > 0 ? (double)desc->tolerance : 0;
 	if (!w.r)
 	{
-		st = qaws_mesh_reference_create(mesh, NULL, &own);
+		st = qaws_mesh_reference_create(&own, mesh, NULL);
 		if (st != QAWS_STATUS_OK)
 			return st;
 		w.r = own;
@@ -2026,14 +2026,14 @@ qaws_status qaws_mesh_remesh(qaws_mesh_3d const* mesh, qaws_remesh_desc const* d
 	if (!w.r->nt)
 	{
 		qaws_mesh_reference_destroy(own);
-		return qaws_mesh_3d_clone(mesh, out_mesh);
+		return qaws_mesh_3d_clone(out_mesh, mesh);
 	}
 	w.size = desc->size;
 	w.L = desc->target_length > 0 ? (double)desc->target_length : 0;
 	if (w.L == 0)
 	{
 		qaws_mesh_quality q;
-		qaws_mesh_3d_measure_quality(mesh, &q);
+		qaws_mesh_3d_measure_quality(&q, mesh);
 		w.L = q.mean_edge > 0 ? (double)q.mean_edge : 1;
 	}
 	/* a tolerance shrinks the sizes where the surface bends, as Mmgs's hausd does: an edge's chord gap at most 3/4 of it */
@@ -2043,7 +2043,7 @@ qaws_status qaws_mesh_remesh(qaws_mesh_3d const* mesh, qaws_remesh_desc const* d
 		memset(&cd, 0, sizeof cd);
 		cd.chord_tolerance = (qaws_scalar)(0.75 * w.tol);
 		cd.max_length = (qaws_scalar)w.r->extent;
-		st = qaws_size_field_create_curvature(w.r, &cd, &w.tsize);
+		st = qaws_size_field_create_curvature(&w.tsize, w.r, &cd);
 		if (st != QAWS_STATUS_OK)
 		{
 			qaws_mesh_reference_destroy(own);
@@ -2101,7 +2101,7 @@ qaws_status qaws_mesh_remesh(qaws_mesh_3d const* mesh, qaws_remesh_desc const* d
 	}
 	if (out_report)
 	{
-		qaws_mesh_3d_measure_quality(out, &w.rep.quality);
+		qaws_mesh_3d_measure_quality(&w.rep.quality, out);
 		*out_report = w.rep;
 	}
 	*out_mesh = out;

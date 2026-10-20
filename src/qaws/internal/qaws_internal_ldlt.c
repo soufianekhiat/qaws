@@ -190,8 +190,8 @@ static int ld_numeric(qaws_internal_ldlt* f, unsigned int const* cp, unsigned in
 	return 1;
 }
 
-qaws_status qaws_internal_ldlt_factor(qaws_internal_ldlt* f, unsigned int n, unsigned int const* row_ptr, unsigned int const* col,
-	double const* val, double const* xyz, double shift)
+qaws_status qaws_internal_ldlt_factor(qaws_internal_ldlt* f, unsigned int const* row_ptr, unsigned int const* col, double const* val,
+	double const* xyz, unsigned int n, double shift)
 {
 	unsigned int *pinv = NULL, *rp = NULL, *rj = NULL, *cp = NULL, *ci = NULL, *parent = NULL, *flag = NULL, *lnz = NULL, *kids = NULL;
 	double *cx = NULL, dmax = 0;
@@ -357,7 +357,7 @@ done:
 	return st;
 }
 
-void qaws_internal_ldlt_solve(qaws_internal_ldlt const* f, double const* b, double* x)
+void qaws_internal_ldlt_solve(double* x, qaws_internal_ldlt const* f, double const* b)
 {
 	unsigned int n = f->n, j, s, c, i;
 	double *y = f->w, *t = f->w + n;

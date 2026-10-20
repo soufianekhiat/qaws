@@ -22,7 +22,7 @@ static qaws_mesh_3d* ms_quads_by(qaws_mesh_3d const* m, double L, qaws_quad_meth
 	d.method = method;
 	d.target_length = (qaws_scalar)L;
 	d.pure = 1;
-	if (qaws_mesh_quadrangulate(m, &d, &out, rep) != QAWS_STATUS_OK)
+	if (qaws_mesh_quadrangulate(&out, rep, m, &d) != QAWS_STATUS_OK)
 		printf("  quadrangulate failed\n");
 	return out;
 }

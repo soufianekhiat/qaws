@@ -39,10 +39,10 @@ static qaws_scalar arc_segment_length(qaws_arc_segment const *seg)
  * ------------------------------------------------------------------------- */
 
 qaws_status qaws_internal_arc_eval_2d(
+	qaws_eval_result_2d *out_result,
 	qaws_arc_segment const *seg,
 	qaws_scalar local_t,
-	unsigned int eval_flags,
-	qaws_eval_result_2d *out_result)
+	unsigned int eval_flags)
 {
 	qaws_scalar sweep = seg->angle_end - seg->angle_start;
 	/* local_t is normalized on the span; the curve parameter is arc length */
@@ -120,10 +120,10 @@ qaws_status qaws_internal_arc_eval_2d(
  * ------------------------------------------------------------------------- */
 
 qaws_status qaws_internal_arc_eval_3d(
+	qaws_eval_result_3d *out_result,
 	qaws_arc_segment const *seg,
 	qaws_scalar local_t,
-	unsigned int eval_flags,
-	qaws_eval_result_3d *out_result)
+	unsigned int eval_flags)
 {
 	qaws_scalar sweep = seg->angle_end - seg->angle_start;
 	/* local_t is normalized on the span; the curve parameter is arc length */
@@ -207,7 +207,7 @@ static qaws_status arc_eval_span_2d(
 	qaws_eval_result_2d *out_result)
 {
 	qaws_arc_impl *impl = (qaws_arc_impl *)curve->impl;
-	return qaws_internal_arc_eval_2d(&impl->segments[span_index], local_t, eval_flags, out_result);
+	return qaws_internal_arc_eval_2d(out_result, &impl->segments[span_index], local_t, eval_flags);
 }
 
 static qaws_status arc_eval_span_3d(
@@ -218,7 +218,7 @@ static qaws_status arc_eval_span_3d(
 	qaws_eval_result_3d *out_result)
 {
 	qaws_arc_impl *impl = (qaws_arc_impl *)curve->impl;
-	return qaws_internal_arc_eval_3d(&impl->segments[span_index], local_t, eval_flags, out_result);
+	return qaws_internal_arc_eval_3d(out_result, &impl->segments[span_index], local_t, eval_flags);
 }
 
 /* ---------------------------------------------------------------------------
@@ -239,7 +239,7 @@ static void arc_destroy_impl(void *impl, qaws_allocator const *allocator)
  * Vtable: property queries
  * ------------------------------------------------------------------------- */
 
-int qaws_internal_arc_closed(qaws_dimension dimension, qaws_arc_segment const *first, qaws_arc_segment const *last)
+int qaws_internal_arc_closed(qaws_arc_segment const *first, qaws_arc_segment const *last, qaws_dimension dimension)
 {
 	qaws_scalar end_theta;
 	qaws_scalar start_x, start_y, start_z;
@@ -299,7 +299,7 @@ static int arc_is_closed(qaws_curve const *curve)
 	qaws_arc_impl *impl = (qaws_arc_impl *)curve->impl;
 	if (impl->segment_count < 1)
 		return 0;
-	return qaws_internal_arc_closed(curve->dimension, &impl->segments[0], &impl->segments[impl->segment_count - 1]);
+	return qaws_internal_arc_closed(&impl->segments[0], &impl->segments[impl->segment_count - 1], curve->dimension);
 }
 
 static int arc_is_periodic(qaws_curve const *curve)
@@ -340,9 +340,9 @@ static qaws_curve_vtable const arc_vtable = {
  * ------------------------------------------------------------------------- */
 
 qaws_status qaws_curve_create_arc_ex(
+	qaws_curve** out_curve,
 	qaws_arc_desc const *desc,
-	qaws_allocator const* allocator,
-	qaws_curve** out_curve)
+	qaws_allocator const* allocator)
 {
 	unsigned int i;
 	qaws_scalar total_length;
@@ -415,7 +415,7 @@ qaws_status qaws_curve_create_arc_ex(
 	}
 
 	/* Allocate impl */
-	impl = (qaws_arc_impl *)qaws_internal_calloc(allocator, 1, sizeof(qaws_arc_impl));
+	impl = (qaws_arc_impl *)qaws_internal_calloc(1, sizeof(qaws_arc_impl), allocator);
 	if (!impl)
 	{
 		qaws_curve_destroy(curve);
@@ -445,5 +445,5 @@ qaws_status qaws_curve_create_arc(
 	qaws_curve** out_curve,
 	qaws_arc_desc const *desc)
 {
-	return qaws_curve_create_arc_ex(desc, NULL, out_curve);
+	return qaws_curve_create_arc_ex(out_curve, desc, NULL);
 }

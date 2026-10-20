@@ -130,16 +130,16 @@ static void tg_read(qaws_mesh_3d const* m, tg_mesh* t)
 	t->fv = (unsigned int*)malloc(sizeof(unsigned int) * (qaws_mesh_3d_get_corner_count(m) + 1));
 	t->fs = (unsigned int*)malloc(sizeof(unsigned int) * (t->nf + 1));
 	t->foot = (qaws_mesh_location*)malloc(sizeof(qaws_mesh_location) * (t->nv + 1));
-	qaws_mesh_3d_get_positions(m, p);
+	qaws_mesh_3d_get_positions(p, m);
 	for (i = 0; i < 3 * t->nv; i++)
 		t->x[i] = (double)p[i];
 	free(p);
-	qaws_mesh_3d_get_faces(m, t->fv, t->fs);
-	if (qaws_mesh_3d_get_footpoints(m, t->foot) != QAWS_STATUS_OK)
+	qaws_mesh_3d_get_faces(t->fv, t->fs, m);
+	if (qaws_mesh_3d_get_footpoints(t->foot, m) != QAWS_STATUS_OK)
 		for (i = 0; i < t->nv; i++)
 			t->foot[i].patch = QAWS_MESH_NONE;
-	qaws_mesh_3d_get_topology(m, &t->top);
-	qaws_mesh_3d_measure_quality(m, &t->q);
+	qaws_mesh_3d_get_topology(&t->top, m);
+	qaws_mesh_3d_measure_quality(&t->q, m);
 }
 
 static void tg_free(tg_mesh* t)
@@ -183,7 +183,7 @@ static void test_patch(void)
 	char msg[300];
 	memset(&d, 0, sizeof d);
 	d.target_length = (qaws_scalar)0.15;
-	s1 = qaws_mesh_generate_surface(s, &d, &tri, &rep);
+	s1 = qaws_mesh_generate_surface(&tri, &rep, s, &d);
 	if (s1 != QAWS_STATUS_OK || !tri)
 		TEST_ASSERT(0, "patch: triangles generated");
 	else
@@ -194,7 +194,7 @@ static void test_patch(void)
 		tg_read(tri, &t);
 		err = tg_foot_error(&t, s, NULL);
 		/* the border's vertices on the domain's sides */
-		qaws_mesh_3d_get_face_adjacency(tri, across);
+		qaws_mesh_3d_get_face_adjacency(across, tri);
 		for (f = 0, c0 = 0; f < t.nf; c0 += t.fs[f], f++)
 			for (k = 0; k < t.fs[f]; k++)
 				if (across[c0 + k] == QAWS_MESH_NONE)
@@ -213,7 +213,7 @@ static void test_patch(void)
 		tg_free(&t);
 	}
 	d.elements = QAWS_ELEMENTS_QUADS;
-	s2 = qaws_mesh_generate_surface(s, &d, &quad, NULL);
+	s2 = qaws_mesh_generate_surface(&quad, NULL, s, &d);
 	if (s2 != QAWS_STATUS_OK || !quad)
 		TEST_ASSERT(0, "patch: quads generated");
 	else
@@ -230,7 +230,7 @@ static void test_patch(void)
 	d.min_length = (qaws_scalar)0.03;
 	d.max_length = (qaws_scalar)0.3;
 	d.gradation = (qaws_scalar)0.4;
-	s3 = qaws_mesh_generate_surface(s, &d, &ada, &rep);
+	s3 = qaws_mesh_generate_surface(&ada, &rep, s, &d);
 	if (s3 != QAWS_STATUS_OK || !ada)
 		TEST_ASSERT(0, "patch: adaptive generated");
 	else
@@ -261,7 +261,7 @@ static void test_torus(void)
 	memset(&d, 0, sizeof d);
 	d.elements = QAWS_ELEMENTS_QUADS;
 	d.target_length = (qaws_scalar)L;
-	st = qaws_mesh_generate_surface(s, &d, &m, NULL);
+	st = qaws_mesh_generate_surface(&m, NULL, s, &d);
 	if (st != QAWS_STATUS_OK || !m)
 		TEST_ASSERT(0, "torus: generated");
 	else
@@ -305,7 +305,7 @@ static void test_box(void)
 	d.elements = QAWS_ELEMENTS_QUADS;
 	d.target_length = (qaws_scalar)L;
 	if (st == QAWS_STATUS_OK)
-		st = qaws_mesh_generate_shell(atlas, &d, &m, &rep);
+		st = qaws_mesh_generate_shell(&m, &rep, atlas, &d);
 	if (st != QAWS_STATUS_OK || !m)
 		TEST_ASSERT(0, "box: generated");
 	else
@@ -317,10 +317,10 @@ static void test_box(void)
 		tg_read(m, &t);
 		err = tg_foot_error(&t, NULL, atlas);
 		/* every face on the box face its attribute names */
-		if (qaws_mesh_3d_find_attribute(m, "face", &fa) == QAWS_STATUS_OK)
+		if (qaws_mesh_3d_find_attribute(&fa, m, "face") == QAWS_STATUS_OK)
 		{
 			fid = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (t.nf + 1));
-			qaws_mesh_3d_get_attribute(m, fa, fid);
+			qaws_mesh_3d_get_attribute(fid, m, fa);
 			for (f = 0, c0 = 0; f < t.nf; c0 += t.fs[f], f++)
 			{
 				unsigned int F = (unsigned int)fid[f];
@@ -372,11 +372,11 @@ static void test_refusals(void)
 	char msg[200];
 	memset(&d, 0, sizeof d);
 	d.method = QAWS_GENERATE_PARAMETRIC;
-	s1 = qaws_mesh_generate_surface(s, &d, &out, NULL);
-	s2 = qaws_mesh_generate_surface(s, NULL, &out, NULL);
+	s1 = qaws_mesh_generate_surface(&out, NULL, s, &d);
+	s2 = qaws_mesh_generate_surface(&out, NULL, s, NULL);
 	d.method = QAWS_GENERATE_REMESH;
 	d.target_length = (qaws_scalar)-1;
-	s3 = qaws_mesh_generate_surface(s, &d, &out, NULL);
+	s3 = qaws_mesh_generate_surface(&out, NULL, s, &d);
 	sprintf(msg, "refusals: PARAMETRIC %s, no description %s, a negative length %s", qaws_status_to_string(s1), qaws_status_to_string(s2),
 		qaws_status_to_string(s3));
 	TEST_ASSERT(s1 == QAWS_STATUS_UNSUPPORTED_OPERATION && s2 == QAWS_STATUS_INVALID_ARGUMENT && s3 == QAWS_STATUS_INVALID_ARGUMENT && !out, msg);

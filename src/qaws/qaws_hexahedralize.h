@@ -55,7 +55,7 @@ typedef struct qaws_hexahedralize_desc
 	qaws_scalar cell_size;              /* the grid's step; 0: the border's mean edge */
 } qaws_hexahedralize_desc;
 
-qaws_status qaws_volume_mesh_hexahedralize(qaws_mesh_3d const* boundary, qaws_hexahedralize_desc const* desc, qaws_volume_mesh** out_mesh,
-	qaws_mesh_report* out_report);
+qaws_status qaws_volume_mesh_hexahedralize(qaws_volume_mesh** out_mesh, qaws_mesh_report* out_report, qaws_mesh_3d const* boundary,
+	qaws_hexahedralize_desc const* desc);
 
 #endif /* QAWS_HEXAHEDRALIZE_H */

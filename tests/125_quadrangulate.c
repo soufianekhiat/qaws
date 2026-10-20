@@ -34,7 +34,7 @@ static qaws_mesh_3d* qt_make(double const* x, unsigned int nv, unsigned int cons
 	d.face_vertices = f;
 	d.face_sizes = fs;
 	d.face_count = nf;
-	qaws_mesh_3d_create(&d, &m);
+	qaws_mesh_3d_create(&m, &d);
 	free(p);
 	return m;
 }
@@ -125,9 +125,9 @@ static void test_fields(void)
 	double unit = 0, tang = 0;
 	char msg[300];
 	qaws_scalar* p = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * nv);
-	qaws_mesh_3d_direction_field(s, NULL, dir, is);
-	qaws_mesh_3d_direction_field(t, NULL, NULL, it);
-	qaws_mesh_3d_get_vertex_normals(s, p);   /* (tangent to the normals the field uses) */
+	qaws_mesh_3d_direction_field(dir, is, s, NULL);
+	qaws_mesh_3d_direction_field(NULL, it, t, NULL);
+	qaws_mesh_3d_get_vertex_normals(p, s);   /* (tangent to the normals the field uses) */
 	for (i = 0; i < nfs; i++)
 		ss += is[i];
 	for (i = 0; i < nft; i++)
@@ -153,7 +153,7 @@ static qaws_mesh_3d* qt_quads(qaws_mesh_3d const* m, double L, int pure, qaws_me
 	memset(&d, 0, sizeof d);
 	d.target_length = (qaws_scalar)L;
 	d.pure = pure;
-	*st = qaws_mesh_quadrangulate(m, &d, &out, rep);
+	*st = qaws_mesh_quadrangulate(&out, rep, m, &d);
 	return out;
 }
 
@@ -170,20 +170,20 @@ static void test_torus(void)
 	double const L = test_heavy() ? 0.3 : 0.45;   /* (by default 0.45: the quadrangulations 2.25 times cheaper; the edge bound follows) */
 	q = qt_quads(t, L, 0, &rep, &st);
 	p = qt_quads(t, L, 1, &rep2, &st2);
-	qaws_mesh_reference_create(t, NULL, &r);
+	qaws_mesh_reference_create(&r, t, NULL);
 	if (!q || !p || !r)
 	{
 		TEST_ASSERT(0, "torus: quadrangulated");
 		goto done;
 	}
-	qaws_mesh_3d_get_topology(q, &top);
+	qaws_mesh_3d_get_topology(&top, q);
 	nv = qaws_mesh_3d_get_vertex_count(q);
 	{
 		qaws_mesh_location* l = (qaws_mesh_location*)malloc(sizeof(qaws_mesh_location) * nv);
 		qaws_scalar *x = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * nv), *y = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * nv);
-		qaws_mesh_3d_get_positions(q, x);
-		qaws_mesh_3d_get_footpoints(q, l);
-		qaws_mesh_reference_evaluate(r, l, nv, y, NULL, NULL);
+		qaws_mesh_3d_get_positions(x, q);
+		qaws_mesh_3d_get_footpoints(l, q);
+		qaws_mesh_reference_evaluate(y, NULL, NULL, r, l, nv);
 		for (i = 0; i < nv; i++)
 		{
 			double rho = sqrt(x[3 * i] * x[3 * i] + x[3 * i + 1] * x[3 * i + 1]), dz = x[3 * i + 2];
@@ -240,15 +240,15 @@ static void test_can_and_cube(void)
 		TEST_ASSERT(0, "can: quadrangulated");
 		goto done;
 	}
-	qaws_mesh_3d_get_topology(q, &top);
+	qaws_mesh_3d_get_topology(&top, q);
 	nf = qaws_mesh_3d_get_face_count(q);
 	nfe = qaws_mesh_3d_get_feature_edge_count(q);
 	{
 		unsigned int nvq = qaws_mesh_3d_get_vertex_count(q), *ff = (unsigned int*)malloc(sizeof(unsigned int) * qaws_mesh_3d_get_corner_count(q));
 		unsigned int *fs = (unsigned int*)malloc(sizeof(unsigned int) * nf), *fe = (unsigned int*)malloc(sizeof(unsigned int) * 2 * (nfe + 1));
 		qaws_scalar* p = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * nvq);
-		qaws_mesh_3d_get_positions(q, p);
-		qaws_mesh_3d_get_faces(q, ff, fs);
+		qaws_mesh_3d_get_positions(p, q);
+		qaws_mesh_3d_get_faces(ff, fs, q);
 		for (f = 0, c0 = 0; f < nf; c0 += fs[f], f++)
 		{
 			double cen[3] = { 0, 0, 0 }, nn[3] = { 0, 0, 0 }, out[3];
@@ -263,7 +263,7 @@ static void test_can_and_cube(void)
 			else { out[0] = cen[0]; out[1] = cen[1]; out[2] = 0; }
 			bad += nn[0] * out[0] + nn[1] * out[1] + nn[2] * out[2] <= 0;
 		}
-		qaws_mesh_3d_get_feature_edges(q, fe);
+		qaws_mesh_3d_get_feature_edges(fe, q);
 		for (i = 0; i < 2 * nfe; i++)
 		{
 			onrim &= fabs(fabs(p[3 * fe[i] + 2]) - 0.8) < 1e-6;
@@ -287,17 +287,17 @@ static void test_can_and_cube(void)
 			vals[i] = (qaws_scalar)(cx[3 * i] - 2 * cx[3 * i + 1] + 0.5 * cx[3 * i + 2]);
 		memset(&ad, 0, sizeof ad);
 		ad.name = "f"; ad.element = QAWS_MESH_VERTEX; ad.components = 1;
-		qaws_mesh_3d_add_attribute(cube, &ad, vals, &a);
+		qaws_mesh_3d_add_attribute(&a, cube, vals, &ad);
 		qaws_mesh_3d_detect_features(cube, (qaws_scalar)(M_PI / 6), 0, 0);
 		qc = qt_quads(cube, Lc, 1, &rep, &st2);
-		if (qc && qaws_mesh_3d_find_attribute(qc, "f", &a) == QAWS_STATUS_OK)
+		if (qc && qaws_mesh_3d_find_attribute(&a, qc, "f") == QAWS_STATUS_OK)
 		{
 			qaws_scalar *p, *v;
 			nvq = qaws_mesh_3d_get_vertex_count(qc);
 			p = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * nvq);
 			v = (qaws_scalar*)malloc(sizeof(qaws_scalar) * nvq);
-			qaws_mesh_3d_get_positions(qc, p);
-			qaws_mesh_3d_get_attribute(qc, a, v);
+			qaws_mesh_3d_get_positions(p, qc);
+			qaws_mesh_3d_get_attribute(v, qc, a);
 			for (i = 0; i < nvq; i++)
 				ev = fmax(ev, fabs(v[i] - (p[3 * i] - 2 * p[3 * i + 1] + 0.5 * p[3 * i + 2])));
 			free(p);
@@ -323,10 +323,10 @@ static void test_refusals(void)
 	char msg[200];
 	memset(&d, 0, sizeof d);
 	d.method = QAWS_QUADS_LAYOUT;
-	s1 = qaws_mesh_quadrangulate(t, &d, &out, NULL);
+	s1 = qaws_mesh_quadrangulate(&out, NULL, t, &d);
 	memset(&dd, 0, sizeof dd);
 	dd.symmetry = 6;
-	s2 = qaws_mesh_3d_direction_field(t, &dd, NULL, NULL);
+	s2 = qaws_mesh_3d_direction_field(NULL, NULL, t, &dd);
 	sprintf(msg, "refusals: LAYOUT %s, a 6-symmetric field %s", qaws_status_to_string(s1), qaws_status_to_string(s2));
 	TEST_ASSERT(s1 == QAWS_STATUS_UNSUPPORTED_OPERATION && !out && s2 == QAWS_STATUS_UNSUPPORTED_OPERATION, msg);
 	qaws_mesh_3d_destroy(t);

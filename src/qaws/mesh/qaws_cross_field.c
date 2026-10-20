@@ -147,7 +147,7 @@ static qaws_status cf_factor(cf_system* s, double sigma, qaws_internal_ldlt* f)
 	for (k = 0; f == &s->f && k < nrow; k++)
 		for (at = rp[k]; at < rp[k + 1]; at++)
 			s->nnz_a += cj[at] <= k;
-	st = nrow ? qaws_internal_ldlt_factor(f, nrow, rp, cj, cx, xyz, 0) : QAWS_STATUS_OK;
+	st = nrow ? qaws_internal_ldlt_factor(f, rp, cj, cx, xyz, nrow, 0) : QAWS_STATUS_OK;
 done:
 	qaws_internal_free(rp); qaws_internal_free(cj); qaws_internal_free(cx); qaws_internal_free(xyz);
 	return st;
@@ -433,7 +433,7 @@ static void cf_solve(cf_system* s, qaws_internal_ldlt const* f, double const* q,
 		s->b[2 * (size_t)a] = br;
 		s->b[2 * (size_t)a + 1] = bi;
 	}
-	qaws_internal_ldlt_solve(f, s->b, s->x);
+	qaws_internal_ldlt_solve(s->x, f, s->b);
 	for (v = 0; v < m->nv; v++)
 		if (s->id[v] != HM_NONE && (!held_only || s->ch[s->cp[v]]))
 		{
@@ -613,10 +613,10 @@ static qaws_status cf_connection(cf_system* s, int const* cone, double const* at
 		}
 	}
 	rp[nf] = at;
-	st = qaws_internal_ldlt_factor(&L, nf, rp, cj, cx, xyz, 0);
+	st = qaws_internal_ldlt_factor(&L, rp, cj, cx, xyz, nf, 0);
 	if (st != QAWS_STATUS_OK)
 		goto done;
-	qaws_internal_ldlt_solve(&L, b, b + nf);
+	qaws_internal_ldlt_solve(b + nf, &L, b);
 	for (f = 0; f < nf; f++)
 		for (c = m->fc[f]; c < m->fc[f] + m->fn[f]; c++)
 		{
@@ -1016,7 +1016,7 @@ qaws_status cf_direction_field(qaws_mesh_3d const* mesh, mf_hier const* h, unsig
 			st = QAWS_STATUS_ALLOCATION_FAILURE;
 			goto done;
 		}
-		st = qaws_mesh_reference_create(mesh, NULL, &r);
+		st = qaws_mesh_reference_create(&r, mesh, NULL);
 		if (st != QAWS_STATUS_OK)
 			goto done;
 		for (v = 0; v < m->nv; v++)

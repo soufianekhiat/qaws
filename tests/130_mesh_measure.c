@@ -39,7 +39,7 @@ static qaws_mesh_3d* mm_make(double const* x, unsigned int nv, unsigned int cons
 	d.face_vertices = f;
 	d.face_sizes = fs;
 	d.face_count = nf;
-	qaws_mesh_3d_create(&d, &m);
+	qaws_mesh_3d_create(&m, &d);
 	free(p);
 	return m;
 }
@@ -132,7 +132,7 @@ static qaws_mesh_3d* mm_bumped(void)
 	qaws_mesh_3d* m = mm_icosphere();
 	unsigned int nv = qaws_mesh_3d_get_vertex_count(m), i;
 	qaws_scalar* p = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * nv);
-	qaws_mesh_3d_get_positions(m, p);
+	qaws_mesh_3d_get_positions(p, m);
 	for (i = 0; i < nv; i++)
 	{
 		double d = p[3 * i] * p[3 * i] + p[3 * i + 1] * p[3 * i + 1] + (p[3 * i + 2] - 1) * (p[3 * i + 2] - 1), s = 1 + 0.6 * exp(-6 * d);
@@ -183,19 +183,19 @@ static void test_shapes(void)
 	qaws_mesh_3d *a = mm_make(eq, 3, t, NULL, 1), *b = mm_make(half, 3, t, NULL, 1), *c = mm_make(sq, 4, q, &four, 1), *d = mm_make(rh, 4, q, &four, 1);
 	qaws_shape_quality s;
 	char msg[300];
-	qaws_mesh_3d_measure_shape(a, &s, NULL);
+	qaws_mesh_3d_measure_shape(&s, NULL, a);
 	sprintf(msg, "equilateral: Q %.15g / %.15g, under 30 %g, mean smallest angle %.15g", (double)s.min_quality, (double)s.mean_quality,
 		(double)s.below_30, (double)s.mean_min_angle);
 	TEST_ASSERT(fabs(s.min_quality - 1) < 1e-12 && fabs(s.mean_quality - 1) < 1e-12 && s.below_30 == 0 && fabs(s.mean_min_angle - 60) < 1e-12, msg);
-	qaws_mesh_3d_measure_shape(b, &s, NULL);
+	qaws_mesh_3d_measure_shape(&s, NULL, b);
 	sprintf(msg, "30-60-90: Q %.15g (want %.15g), angles %.12g..%.12g, a share over 90 %g", (double)s.min_quality, (3 - s3) / 2,
 		(double)s.min_angle, (double)s.max_angle, (double)s.above_90);
 	TEST_ASSERT(fabs(s.min_quality - (3 - s3) / 2) < 1e-12 && fabs(s.min_angle - 30) < 1e-12 && fabs(s.max_angle - 90) < 1e-12, msg);
-	qaws_mesh_3d_measure_shape(c, &s, NULL);
+	qaws_mesh_3d_measure_shape(&s, NULL, c);
 	sprintf(msg, "unit square: Jacobian %.15g / %.15g, AD %g, ED %g", (double)s.min_jacobian, (double)s.mean_jacobian, (double)s.angle_deviation,
 		(double)s.edge_deviation);
 	TEST_ASSERT(fabs(s.min_jacobian - 1) < 1e-12 && fabs(s.mean_jacobian - 1) < 1e-12 && fabs(s.angle_deviation) < 1e-12 && fabs(s.edge_deviation) < 1e-12, msg);
-	qaws_mesh_3d_measure_shape(d, &s, NULL);
+	qaws_mesh_3d_measure_shape(&s, NULL, d);
 	sprintf(msg, "60-degree rhombus: Jacobian %.15g (want %.15g), AD %.15g", (double)s.min_jacobian, s3 / 2, (double)s.angle_deviation);
 	TEST_ASSERT(fabs(s.min_jacobian - s3 / 2) < 1e-12 && fabs(s.angle_deviation - 30) < 1e-12, msg);
 	qaws_mesh_3d_destroy(a);
@@ -261,8 +261,8 @@ static void test_valences(void)
 		qaws_mesh_3d* m = mm_cube(3, &corner, &edge);
 		ideal = (unsigned int*)malloc(sizeof(unsigned int) * qaws_mesh_3d_get_vertex_count(m));
 		qaws_mesh_3d_detect_features(m, (qaws_scalar)(30 * M_PI / 180), (qaws_scalar)(60 * M_PI / 180), 0);
-		qaws_mesh_3d_measure_shape(m, &s, ideal);
-		qaws_mesh_3d_measure_quality(m, &mq);
+		qaws_mesh_3d_measure_shape(&s, ideal, m);
+		qaws_mesh_3d_measure_quality(&mq, m);
 		sprintf(msg, "creased quad cube (%u vertices, %u quads): irregular %u (qaws_mesh_quality: %u), ideal %u at a corner, %u on an edge, excess %u, share %g",
 			qaws_mesh_3d_get_vertex_count(m), qaws_mesh_3d_get_face_count(m), s.irregular, mq.irregular, ideal[corner], ideal[edge], s.valence_excess,
 			(double)s.regular_share);
@@ -273,7 +273,7 @@ static void test_valences(void)
 	/* the icosphere: its 12 valence-5 vertices */
 	{
 		qaws_mesh_3d* m = mm_icosphere();
-		qaws_mesh_3d_measure_shape(m, &s, NULL);
+		qaws_mesh_3d_measure_shape(&s, NULL, m);
 		sprintf(msg, "icosphere (%u vertices): irregular %u, V567 %g", qaws_mesh_3d_get_vertex_count(m), s.irregular, (double)s.regular_share);
 		TEST_ASSERT(qaws_mesh_3d_get_vertex_count(m) == 42 && s.irregular == 12 && s.regular_share == 1, msg);
 		qaws_mesh_3d_destroy(m);
@@ -282,7 +282,7 @@ static void test_valences(void)
 	{
 		qaws_mesh_3d* m = mm_grid(10, 1, NULL);
 		ideal = (unsigned int*)malloc(sizeof(unsigned int) * qaws_mesh_3d_get_vertex_count(m));
-		qaws_mesh_3d_measure_shape(m, &s, ideal);
+		qaws_mesh_3d_measure_shape(&s, ideal, m);
 		sprintf(msg, "open 10 x 10 quad grid: irregular %u, ideal %u at a corner, %u on the border, %u inside", s.irregular, ideal[0], ideal[5], ideal[5 * 11 + 5]);
 		TEST_ASSERT(s.irregular == 0 && ideal[0] == 2 && ideal[5] == 3 && ideal[5 * 11 + 5] == 4, msg);
 		free(ideal);
@@ -325,8 +325,8 @@ static void test_exact(void)
 	char msg[300];
 	memset(&rd, 0, sizeof rd);
 	rd.interpolant = QAWS_INTERPOLANT_LINEAR;
-	qaws_mesh_reference_create(flat, &rd, &r);
-	st = qaws_mesh_3d_measure_deviation(up, r, NULL, &d);
+	qaws_mesh_reference_create(&r, flat, &rd);
+	st = qaws_mesh_3d_measure_deviation(&d, r, up, NULL);
 	mm_print("flat grid lifted by 0.01", &d);
 	tol = 1e-4 * d.diagonal;
 	sprintf(msg, "a flat grid lifted by 0.01 against its LINEAR reference: to [%.12g, %.12g], from [%.12g, %.12g], converged %d", (double)d.to_reference[0],
@@ -351,8 +351,8 @@ static void test_brute(void)
 	qaws_scalar *pts, *dist;
 	qaws_mesh_location* loc;
 	char msg[400];
-	qaws_mesh_reference_create(g, NULL, &r);
-	st = qaws_mesh_3d_measure_deviation(m, r, NULL, &d);
+	qaws_mesh_reference_create(&r, g, NULL);
+	st = qaws_mesh_3d_measure_deviation(&d, r, m, NULL);
 	mm_print("flat square against a raised PN grid", &d);
 	tol = 1e-4 * d.diagonal;
 	/* the square sampled 200 x 200 per face, projected unhinted */
@@ -368,7 +368,7 @@ static void test_brute(void)
 			for (i = 0; i + j <= n; i++, q++)
 				for (k = 0; k < 3; k++)
 					pts[3 * q + k] = (qaws_scalar)(A[k] + (B[k] - A[k]) * i / n + (C[k] - A[k]) * j / n);
-		qaws_mesh_reference_project(r, pts, np, NULL, loc, dist);
+		qaws_mesh_reference_project(loc, dist, r, pts, NULL, np);
 		for (q = 0; q < np; q++)
 			to = dist[q] > to ? dist[q] : to;
 	}
@@ -386,7 +386,7 @@ static void test_brute(void)
 				loc[q].a = (qaws_scalar)((double)i / n);
 				loc[q].b = (qaws_scalar)((double)j / n);
 			}
-		qaws_mesh_reference_evaluate(r, loc, np, pts, NULL, NULL);
+		qaws_mesh_reference_evaluate(pts, NULL, NULL, r, loc, np);
 		for (q = 0; q < np; q++)
 		{
 			double p[3], e;
@@ -420,8 +420,8 @@ static void test_two_sided(void)
 	qaws_mesh_deviation d;
 	qaws_status st;
 	char msg[300];
-	qaws_mesh_reference_create(g, NULL, &r);
-	st = qaws_mesh_3d_measure_deviation(m, r, NULL, &d);
+	qaws_mesh_reference_create(&r, g, NULL);
+	st = qaws_mesh_3d_measure_deviation(&d, r, m, NULL);
 	mm_print("flat square under a bump of 0.2", &d);
 	sprintf(msg, "a bump of 0.2 over a flat square: from the reference [%.9g, %.9g] (to it only %.9g), Hausdorff [%.9g, %.9g]", (double)d.from_reference[0],
 		(double)d.from_reference[1], (double)d.to_reference[1], (double)d.hausdorff[0], (double)d.hausdorff[1]);
@@ -452,7 +452,7 @@ static double mm_dense(qaws_mesh_reference const* r, double const* p, unsigned i
 				loc[q].a = (qaws_scalar)((double)i / n);
 				loc[q].b = (qaws_scalar)((double)j / n);
 			}
-		qaws_mesh_reference_evaluate(r, loc, np, pts, NULL, NULL);
+		qaws_mesh_reference_evaluate(pts, NULL, NULL, r, loc, np);
 		for (q = 0; q < np; q++)
 		{
 			double e = 0;
@@ -485,9 +485,9 @@ static void test_saddle(void)
 	char msg[500];
 	memset(&rd, 0, sizeof rd);
 	rd.interpolant = QAWS_INTERPOLANT_LINEAR;
-	qaws_mesh_reference_create(g, NULL, &r);
-	qaws_mesh_reference_create(g, &rd, &lin);
-	st = qaws_mesh_3d_measure_deviation(g, r, NULL, &d);
+	qaws_mesh_reference_create(&r, g, NULL);
+	qaws_mesh_reference_create(&lin, g, &rd);
+	st = qaws_mesh_3d_measure_deviation(&d, r, g, NULL);
 	mm_print("a PN saddle against its own triangles", &d);
 	tol = 1e-4 * d.diagonal;
 	for (k = 0; k < 3; k++)
@@ -496,7 +496,7 @@ static void test_saddle(void)
 		at[k] = d.from_reference_at[k];
 	}
 	at_to = mm_dense(r, wt, 100);
-	qaws_mesh_reference_project(lin, at, 1, NULL, &l, &dist);
+	qaws_mesh_reference_project(&l, &dist, lin, at, NULL, 1);
 	at_from = (double)dist;
 	nt = qaws_mesh_reference_get_triangle_count(r);
 	loc = (qaws_mesh_location*)malloc(sizeof(qaws_mesh_location) * np);
@@ -511,8 +511,8 @@ static void test_saddle(void)
 				loc[q].a = (qaws_scalar)((double)i / n);
 				loc[q].b = (qaws_scalar)((double)j / n);
 			}
-		qaws_mesh_reference_evaluate(r, loc, np, pts, NULL, NULL);
-		qaws_mesh_reference_project(lin, pts, np, NULL, loc, dd);
+		qaws_mesh_reference_evaluate(pts, NULL, NULL, r, loc, np);
+		qaws_mesh_reference_project(loc, dd, lin, pts, NULL, np);
 		for (q = 0; q < np; q++)
 			sup = dd[q] > sup ? dd[q] : sup;
 	}
@@ -541,8 +541,8 @@ static void test_pentagon(void)
 	qaws_status st;
 	double tol;
 	char msg[300];
-	qaws_mesh_reference_create(g, NULL, &r);
-	st = qaws_mesh_3d_measure_deviation(m, r, NULL, &d);
+	qaws_mesh_reference_create(&r, g, NULL);
+	st = qaws_mesh_3d_measure_deviation(&d, r, m, NULL);
 	mm_print("a pentagon with a straight corner against a PN saddle", &d);
 	tol = 1e-4 * d.diagonal;
 	sprintf(msg, "a pentagon with a straight corner: from the reference [%.9g, %.9g], to it [%.9g, %.9g], tol %.3g, converged %d", (double)d.from_reference[0],
@@ -560,7 +560,7 @@ static qaws_mesh_3d* mm_remesh(qaws_mesh_3d const* m, qaws_mesh_reference const*
 	memset(&d, 0, sizeof d);
 	d.reference = r;
 	d.target_length = (qaws_scalar)L;
-	qaws_mesh_remesh(m, &d, &out, rep);
+	qaws_mesh_remesh(&out, rep, m, &d);
 	return out;
 }
 
@@ -573,10 +573,10 @@ static void test_consistency_and_timing(void)
 	qaws_shape_quality s;
 	qaws_status st = QAWS_STATUS_INTERNAL_ERROR;
 	char msg[400];
-	qaws_mesh_reference_create(m, NULL, &r);
+	qaws_mesh_reference_create(&r, m, NULL);
 	out = r ? mm_remesh(m, r, 0.12, &rep) : NULL;
 	if (out)
-		st = qaws_mesh_3d_measure_deviation(out, r, NULL, &d);
+		st = qaws_mesh_3d_measure_deviation(&d, r, out, NULL);
 	if (out)
 		mm_print("the bumped sphere remeshed at 0.12", &d);
 	sprintf(msg, "remeshed at 0.12: the certified bound %.9g over the report's face-centre deviation %.9g, converged %d",
@@ -589,9 +589,9 @@ static void test_consistency_and_timing(void)
 		clock_t c0 = clock(), c1, c2;
 		unsigned int i, rounds = 20;
 		for (i = 0; i < rounds; i++)
-			qaws_mesh_3d_measure_shape(big, &s, NULL);
+			qaws_mesh_3d_measure_shape(&s, NULL, big);
 		c1 = clock();
-		st = qaws_mesh_3d_measure_deviation(big, r, NULL, &d);
+		st = qaws_mesh_3d_measure_deviation(&d, r, big, NULL);
 		c2 = clock();
 		printf("  %u faces: shape %.2f ms (V567 %.3f, Q %.3f / %.3f, angles %.1f..%.1f), deviation %.3f s (to [%.3g, %.3g], from [%.3g, %.3g], rms %.3g, converged %d)\n",
 			qaws_mesh_3d_get_face_count(big), 1000.0 * (double)(c1 - c0) / CLOCKS_PER_SEC / rounds, (double)s.regular_share, (double)s.min_quality,
@@ -620,16 +620,16 @@ static void test_refusals(void)
 	qaws_shape_quality s;
 	qaws_status s1, s2, s3, s4, s5, s6;
 	char msg[300];
-	qaws_mesh_reference_create(m, NULL, &r);
-	qaws_mesh_reference_create(empty, NULL, &re);
+	qaws_mesh_reference_create(&r, m, NULL);
+	qaws_mesh_reference_create(&re, empty, NULL);
 	memset(&dd, 0, sizeof dd);
 	dd.precision = (qaws_scalar)-1;
-	s1 = qaws_mesh_3d_measure_deviation(NULL, r, NULL, &d);
-	s2 = qaws_mesh_3d_measure_deviation(m, r, NULL, NULL);
-	s3 = re ? qaws_mesh_3d_measure_deviation(m, re, NULL, &d) : QAWS_STATUS_INVALID_ARGUMENT;
-	s4 = qaws_mesh_3d_measure_deviation(m, r, &dd, &d);
-	s5 = qaws_mesh_3d_measure_shape(NULL, &s, NULL);
-	s6 = qaws_mesh_3d_measure_shape(m, NULL, NULL);
+	s1 = qaws_mesh_3d_measure_deviation(&d, r, NULL, NULL);
+	s2 = qaws_mesh_3d_measure_deviation(NULL, r, m, NULL);
+	s3 = re ? qaws_mesh_3d_measure_deviation(&d, re, m, NULL) : QAWS_STATUS_INVALID_ARGUMENT;
+	s4 = qaws_mesh_3d_measure_deviation(&d, r, m, &dd);
+	s5 = qaws_mesh_3d_measure_shape(&s, NULL, NULL);
+	s6 = qaws_mesh_3d_measure_shape(NULL, NULL, m);
 	sprintf(msg, "refusals: NULL mesh %d, NULL out %d, a reference without triangles %d, a negative precision %d, shape NULL mesh %d, NULL out %d",
 		(int)s1, (int)s2, (int)s3, (int)s4, (int)s5, (int)s6);
 	TEST_ASSERT(s1 == QAWS_STATUS_INVALID_ARGUMENT && s2 == QAWS_STATUS_INVALID_ARGUMENT && s3 == QAWS_STATUS_INVALID_ARGUMENT

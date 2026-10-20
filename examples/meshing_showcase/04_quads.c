@@ -16,7 +16,7 @@ static qaws_mesh_3d* ms_quads(qaws_mesh_3d const* m, double L, int pure, qaws_me
 	d.method = QAWS_QUADS_INSTANT;
 	d.target_length = (qaws_scalar)L;
 	d.pure = pure;
-	st = qaws_mesh_quadrangulate(m, &d, &out, rep);
+	st = qaws_mesh_quadrangulate(&out, rep, m, &d);
 	if (st != QAWS_STATUS_OK)
 		printf("  quadrangulate failed: %s\n", qaws_status_to_string(st));
 	return out;
@@ -48,13 +48,13 @@ static void demo_quads(void)
 		unsigned int nv, nf, plus = 0, minus = 0, *fv;
 		memset(&rd, 0, sizeof rd);
 		rd.target_length = (qaws_scalar)0.09;
-		qaws_mesh_remesh(blob, &rd, &dense, NULL);
+		qaws_mesh_remesh(&dense, NULL, blob, &rd);
 		nv = qaws_mesh_3d_get_vertex_count(dense);
 		nf = qaws_mesh_3d_get_face_count(dense);
 		dir = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * nv);
 		idx = (int*)malloc(sizeof(int) * nf);
 		fv = (unsigned int*)malloc(sizeof(unsigned int) * 3 * nf);
-		qaws_mesh_3d_direction_field(dense, NULL, dir, idx);
+		qaws_mesh_3d_direction_field(dir, idx, dense, NULL);
 		for (i = 0; i < nf; i++)
 		{
 			plus += idx[i] == 1;
@@ -66,7 +66,7 @@ static void demo_quads(void)
 		p = ms_positions(dense);
 		{
 			qaws_scalar* nrm = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * nv);
-			qaws_mesh_3d_get_vertex_normals(dense, nrm);
+			qaws_mesh_3d_get_vertex_normals(nrm, dense);
 			for (i = 0; i < nv; i++)
 			{
 				double const* x = p + 3 * i;
@@ -83,7 +83,7 @@ static void demo_quads(void)
 			}
 			free(nrm);
 		}
-		qaws_mesh_3d_get_triangles(dense, fv);
+		qaws_mesh_3d_get_triangles(fv, dense);
 		for (i = 0; i < nf; i++)
 			if (idx[i])
 			{
@@ -121,7 +121,7 @@ static void demo_quads(void)
 		ms_quad_sub(sub, q3, &rep);
 		ms_panel(c, 1650, 0, 550, 640, q3, 0.35, 0.5, "along the creases", sub);
 		ms_draw(c, q3, warm, NULL, 1, wire, 1.0);
-		qaws_mesh_3d_get_feature_edges(q3, fe);
+		qaws_mesh_3d_get_feature_edges(fe, q3);
 		for (i = 0; i < nfe; i++)
 			er_line(c, p + 3 * fe[2 * i], p + 3 * fe[2 * i + 1], red, 2.4);
 		printf("  can quads: %u quads, %u others, singular %u, creases %u\n", rep.quality.quads, rep.quality.triangles + rep.quality.polygons,

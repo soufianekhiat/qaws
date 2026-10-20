@@ -35,7 +35,7 @@ static qaws_mesh_3d* tm_make(qaws_scalar const* x, unsigned int nv, unsigned int
 	d.face_vertices = f;
 	d.face_sizes = fs;
 	d.face_count = nf;
-	if (qaws_mesh_3d_create(&d, &m) != QAWS_STATUS_OK)
+	if (qaws_mesh_3d_create(&m, &d) != QAWS_STATUS_OK)
 		return NULL;
 	return m;
 }
@@ -108,10 +108,10 @@ static void test_build(void)
 	TEST_ASSERT(ok, "build: the four meshes");
 	if (!ok)
 		goto done;
-	qaws_mesh_3d_get_topology(ico, &t[0]);
-	qaws_mesh_3d_get_topology(cube, &t[1]);
-	qaws_mesh_3d_get_topology(torus, &t[2]);
-	qaws_mesh_3d_get_topology(disk, &t[3]);
+	qaws_mesh_3d_get_topology(&t[0], ico);
+	qaws_mesh_3d_get_topology(&t[1], cube);
+	qaws_mesh_3d_get_topology(&t[2], torus);
+	qaws_mesh_3d_get_topology(&t[3], disk);
 	sprintf(msg, "icosahedron: %u vertices, %u edges, %u faces, chi %d, genus %u, closed %d, valid %d",
 		qaws_mesh_3d_get_vertex_count(ico), qaws_mesh_3d_get_edge_count(ico), qaws_mesh_3d_get_face_count(ico),
 		t[0].euler_characteristic, t[0].genus, t[0].closed, qaws_mesh_3d_validate(ico) == QAWS_STATUS_OK);
@@ -132,7 +132,7 @@ static void test_build(void)
 	{
 		/* a fan-triangulated face read back: the cube's first face */
 		unsigned int tri[3], fv[24], fs[6];
-		qaws_mesh_3d_get_faces(cube, fv, fs);
+		qaws_mesh_3d_get_faces(fv, fs, cube);
 		qaws_mesh_3d_get_triangle(tri, cube, 1);
 		sprintf(msg, "cube: face 0 (%u %u %u %u), its second fan triangle (%u %u %u)", fv[0], fv[1], fv[2], fv[3], tri[0], tri[1], tri[2]);
 		TEST_ASSERT(fs[0] == 4 && tri[0] == fv[0] && tri[1] == fv[2] && tri[2] == fv[3], msg);
@@ -166,8 +166,8 @@ static void test_non_manifold(void)
 	TEST_ASSERT(ok, "non-manifold input accepted");
 	if (!ok)
 		goto done;
-	qaws_mesh_3d_get_topology(a, &ta);
-	qaws_mesh_3d_get_topology(b, &tb);
+	qaws_mesh_3d_get_topology(&ta, a);
+	qaws_mesh_3d_get_topology(&tb, b);
 	sprintf(msg, "bowtie: %u vertices (copy of %u), %u components, valid %d; fin: %u vertices (copies of %u, %u), valid %d; turned neighbour: %u vertices, valid %d",
 		qaws_mesh_3d_get_vertex_count(a), qaws_mesh_3d_get_vertex_source(a, 5), ta.components, qaws_mesh_3d_validate(a) == QAWS_STATUS_OK,
 		qaws_mesh_3d_get_vertex_count(b), qaws_mesh_3d_get_vertex_source(b, 5), qaws_mesh_3d_get_vertex_source(b, 6),
@@ -193,8 +193,8 @@ static void test_dual(void)
 		TEST_ASSERT(0, "dual: the cube");
 		return;
 	}
-	qaws_mesh_3d_get_face_adjacency(cube, adj);
-	qaws_mesh_3d_get_faces(cube, fv, fs);
+	qaws_mesh_3d_get_face_adjacency(adj, cube);
+	qaws_mesh_3d_get_faces(fv, fs, cube);
 	/* each face's neighbour across each edge shares that edge, reversed */
 	for (i = 0; i < 24; i++)
 	{
@@ -209,10 +209,10 @@ static void test_dual(void)
 		ok &= hit;
 	}
 	TEST_ASSERT(ok, "dual: the cube's face adjacency, each neighbour on the reversed edge");
-	TEST_ASSERT(qaws_mesh_3d_create_dual(cube, &dual) == QAWS_STATUS_OK && dual, "dual: created");
+	TEST_ASSERT(qaws_mesh_3d_create_dual(&dual, cube) == QAWS_STATUS_OK && dual, "dual: created");
 	if (dual)
 	{
-		qaws_mesh_3d_get_topology(dual, &t);
+		qaws_mesh_3d_get_topology(&t, dual);
 		sprintf(msg, "the cube's dual: %u vertices, %u faces (%u triangles), %u edges, chi %d, valid %d", qaws_mesh_3d_get_vertex_count(dual),
 			qaws_mesh_3d_get_face_count(dual), qaws_mesh_3d_get_triangle_count(dual), qaws_mesh_3d_get_edge_count(dual), t.euler_characteristic,
 			qaws_mesh_3d_validate(dual) == QAWS_STATUS_OK);
@@ -240,9 +240,9 @@ static void tm_attr_error(qaws_mesh_3d* m, unsigned int va, unsigned int ca, dou
 		*cc = (qaws_scalar*)malloc(sizeof(qaws_scalar) * nc);
 	unsigned int *fv = (unsigned int*)malloc(sizeof(unsigned int) * nc), *fs = (unsigned int*)malloc(sizeof(unsigned int) * nf);
 	*out_v = *out_c = 0;
-	qaws_mesh_3d_get_positions(m, x);
-	qaws_mesh_3d_get_attribute(m, va, vv);
-	qaws_mesh_3d_get_faces(m, fv, fs);
+	qaws_mesh_3d_get_positions(x, m);
+	qaws_mesh_3d_get_attribute(vv, m, va);
+	qaws_mesh_3d_get_faces(fv, fs, m);
 	for (i = 0; i < nv; i++)
 	{
 		double p[3] = { x[3 * i], x[3 * i + 1], x[3 * i + 2] };
@@ -250,7 +250,7 @@ static void tm_attr_error(qaws_mesh_3d* m, unsigned int va, unsigned int ca, dou
 	}
 	if (ca != QAWS_MESH_NONE)
 	{
-		qaws_mesh_3d_get_attribute(m, ca, cc);
+		qaws_mesh_3d_get_attribute(cc, m, ca);
 		for (i = 0; i < nc; i++)
 		{
 			double p[3] = { x[3 * fv[i]], x[3 * fv[i] + 1], x[3 * fv[i] + 2] };
@@ -268,8 +268,8 @@ static void tm_add_attrs(qaws_mesh_3d* m, unsigned int* va, unsigned int* ca, un
 		*cc = (qaws_scalar*)malloc(sizeof(qaws_scalar) * nc), *ff = (qaws_scalar*)malloc(sizeof(qaws_scalar) * nf);
 	unsigned int *fv = (unsigned int*)malloc(sizeof(unsigned int) * nc), *fs = (unsigned int*)malloc(sizeof(unsigned int) * nf);
 	qaws_attribute_desc d;
-	qaws_mesh_3d_get_positions(m, x);
-	qaws_mesh_3d_get_faces(m, fv, fs);
+	qaws_mesh_3d_get_positions(x, m);
+	qaws_mesh_3d_get_faces(fv, fs, m);
 	for (i = 0; i < nv; i++)
 	{
 		double p[3] = { x[3 * i], x[3 * i + 1], x[3 * i + 2] };
@@ -284,11 +284,11 @@ static void tm_add_attrs(qaws_mesh_3d* m, unsigned int* va, unsigned int* ca, un
 		ff[i] = (qaws_scalar)(i % 3);
 	memset(&d, 0, sizeof d);
 	d.name = "f"; d.element = QAWS_MESH_VERTEX; d.components = 1; d.rule = QAWS_ATTRIBUTE_LINEAR;
-	qaws_mesh_3d_add_attribute(m, &d, vv, va);
+	qaws_mesh_3d_add_attribute(va, m, vv, &d);
 	d.name = "g"; d.element = QAWS_MESH_CORNER;
-	qaws_mesh_3d_add_attribute(m, &d, cc, ca);
+	qaws_mesh_3d_add_attribute(ca, m, cc, &d);
 	d.name = "material"; d.element = QAWS_MESH_FACE; d.rule = QAWS_ATTRIBUTE_NEAREST;
-	qaws_mesh_3d_add_attribute(m, &d, ff, fa);
+	qaws_mesh_3d_add_attribute(fa, m, ff, &d);
 	free(x); free(vv); free(cc); free(ff); free(fv); free(fs);
 }
 
@@ -297,7 +297,7 @@ static void tm_edit(qaws_mesh_3d* m, unsigned int n, int collapses, unsigned int
 {
 	unsigned int it, s = seed, ops[4] = { 0, 0, 0, 0 };
 	qaws_mesh_topology t0, t1;
-	qaws_mesh_3d_get_topology(m, &t0);
+	qaws_mesh_3d_get_topology(&t0, m);
 	*out_valid = 1;
 	for (it = 0; it < n && *out_valid; it++)
 	{
@@ -306,7 +306,7 @@ static void tm_edit(qaws_mesh_3d* m, unsigned int n, int collapses, unsigned int
 		qaws_status st = QAWS_STATUS_OK;
 		qaws_vec3 pa, pb;
 		qaws_scalar mid[3];
-		qaws_mesh_3d_get_edges(m, e);
+		qaws_mesh_3d_get_edges(e, m);
 		a = e[2 * k];
 		b = e[2 * k + 1];
 		free(e);
@@ -316,11 +316,11 @@ static void tm_edit(qaws_mesh_3d* m, unsigned int n, int collapses, unsigned int
 		if (qaws_mesh_3d_get_vertex_count(m) > 400)
 			op = collapses ? 3 : 1;   /* (keep it small) */
 		if (op == 0)
-			st = qaws_mesh_3d_split_edge(m, a, b, mid, NULL, &v);
+			st = qaws_mesh_3d_split_edge(&v, m, mid, NULL, a, b);
 		else if (op == 1)
 			st = qaws_mesh_3d_can_flip_edge(m, a, b) ? qaws_mesh_3d_flip_edge(m, a, b) : QAWS_STATUS_INVALID_TOPOLOGY;
 		else if (op == 2)
-			st = qaws_mesh_3d_split_face(m, tm_rand(&s) % qaws_mesh_3d_get_face_count(m), NULL, NULL, &v);
+			st = qaws_mesh_3d_split_face(&v, m, NULL, NULL, tm_rand(&s) % qaws_mesh_3d_get_face_count(m));
 		else
 			st = qaws_mesh_3d_can_collapse_edge(m, a, b) ? qaws_mesh_3d_collapse_edge(m, a, b, mid, NULL) : QAWS_STATUS_INVALID_TOPOLOGY;
 		if (st == QAWS_STATUS_OK)
@@ -330,7 +330,7 @@ static void tm_edit(qaws_mesh_3d* m, unsigned int n, int collapses, unsigned int
 		if (qaws_mesh_3d_validate(m) != QAWS_STATUS_OK)
 			*out_valid = 0;
 	}
-	qaws_mesh_3d_get_topology(m, &t1);
+	qaws_mesh_3d_get_topology(&t1, m);
 	*out_chi = t1.euler_characteristic == t0.euler_characteristic && t1.closed == t0.closed;
 	memcpy(out_ops, ops, sizeof ops);
 }
@@ -353,7 +353,7 @@ static void test_edits(void)
 	tm_attr_error(m, va, ca, &ev, &ec);
 	nf = qaws_mesh_3d_get_face_count(m);
 	ff = (qaws_scalar*)malloc(sizeof(qaws_scalar) * nf);
-	qaws_mesh_3d_get_attribute(m, fa, ff);
+	qaws_mesh_3d_get_attribute(ff, m, fa);
 	for (i = 0; i < nf; i++)
 		materials &= ff[i] == 0 || ff[i] == 1 || ff[i] == 2;
 	free(ff);
@@ -402,12 +402,12 @@ static void test_refusals_and_features(void)
 		&& s3 == QAWS_STATUS_INVALID_TOPOLOGY, msg);
 	/* the cube's creases: triangulated by face splits, then detected */
 	for (f = 0; f < 6; f++)
-		qaws_mesh_3d_split_face(cube, f, NULL, NULL, NULL);
+		qaws_mesh_3d_split_face(NULL, cube, NULL, NULL, f);
 	qaws_mesh_3d_detect_features(cube, (qaws_scalar)(30 * M_PI / 180), 0, 0);
 	nfe = qaws_mesh_3d_get_feature_edge_count(cube);
 	for (v = 0; v < qaws_mesh_3d_get_vertex_count(cube); v++)
 		corners += qaws_mesh_3d_is_feature_corner(cube, v);
-	qaws_mesh_3d_get_feature_edges(cube, e);
+	qaws_mesh_3d_get_feature_edges(e, cube);
 	s1 = qaws_mesh_3d_collapse_edge(cube, e[0], e[1], NULL, NULL);   /* (a corner into a corner) */
 	s2 = qaws_mesh_3d_flip_edge(cube, e[0], e[1]);
 	s3 = qaws_mesh_3d_collapse_edge(cube, 8, 0, NULL, NULL);          /* (face 0's centre into its corner 0: allowed) */
@@ -415,8 +415,8 @@ static void test_refusals_and_features(void)
 		nfe, corners, qaws_status_to_string(s1), qaws_status_to_string(s2), qaws_status_to_string(s3));
 	TEST_ASSERT(nfe == 12 && corners == 8 && s1 == QAWS_STATUS_INVALID_TOPOLOGY && s2 == QAWS_STATUS_INVALID_TOPOLOGY
 		&& s3 == QAWS_STATUS_OK && qaws_mesh_3d_validate(cube) == QAWS_STATUS_OK, msg);
-	qaws_mesh_3d_get_feature_edges(cube, e);
-	s4 = qaws_mesh_3d_split_edge(cube, e[0], e[1], NULL, NULL, &v);
+	qaws_mesh_3d_get_feature_edges(e, cube);
+	s4 = qaws_mesh_3d_split_edge(&v, cube, NULL, NULL, e[0], e[1]);
 	sprintf(msg, "a crease split: %s, %u creases now, the new vertex a corner %d (no), valid %d", qaws_status_to_string(s4),
 		qaws_mesh_3d_get_feature_edge_count(cube), qaws_mesh_3d_is_feature_corner(cube, v), qaws_mesh_3d_validate(cube) == QAWS_STATUS_OK);
 	TEST_ASSERT(s4 == QAWS_STATUS_OK && qaws_mesh_3d_get_feature_edge_count(cube) == 13 && !qaws_mesh_3d_is_feature_corner(cube, v)
@@ -439,12 +439,12 @@ static void test_footpoints_and_quality(void)
 		TEST_ASSERT(0, "footpoints: the icosahedron");
 		return;
 	}
-	qaws_mesh_3d_measure_quality(m, &q);
+	qaws_mesh_3d_measure_quality(&q, m);
 	sprintf(msg, "icosahedron quality: angles %.6g to %.6g, aspect %.6g to %.6g, valence 5 at %u vertices, %u irregular", (double)q.min_angle,
 		(double)q.max_angle, (double)q.mean_aspect, (double)q.max_aspect, q.valence[2], q.irregular);
 	TEST_ASSERT(fabs(q.min_angle - 60) < 1e-3 && fabs(q.max_angle - 60) < 1e-3 && fabs(q.max_aspect - 1) < 1e-4 && q.valence[2] == 12
 		&& q.irregular == 12 && q.triangles == 20, msg);
-	TEST_ASSERT(!qaws_mesh_3d_has_footpoints(m) && qaws_mesh_3d_get_footpoints(m, got) == QAWS_STATUS_INVALID_ARGUMENT, "footpoints: none at first");
+	TEST_ASSERT(!qaws_mesh_3d_has_footpoints(m) && qaws_mesh_3d_get_footpoints(got, m) == QAWS_STATUS_INVALID_ARGUMENT, "footpoints: none at first");
 	for (i = 0; i < 12; i++)
 	{
 		loc[i].patch = i;
@@ -453,8 +453,8 @@ static void test_footpoints_and_quality(void)
 	}
 	qaws_mesh_3d_set_footpoints(m, loc);
 	one.patch = 99; one.a = (qaws_scalar)0.5; one.b = (qaws_scalar)0.5;
-	qaws_mesh_3d_split_edge(m, 0, 11, NULL, &one, &v);
-	qaws_mesh_3d_get_footpoints(m, got);
+	qaws_mesh_3d_split_edge(&v, m, NULL, &one, 0, 11);
+	qaws_mesh_3d_get_footpoints(got, m);
 	for (i = 0; i < 12; i++)
 		ok &= got[i].patch == loc[i].patch && got[i].a == loc[i].a && got[i].b == loc[i].b;
 	sprintf(msg, "footpoints kept through a split (%u), the new vertex %u given its own (patch %u)", ok, v, got[v].patch);

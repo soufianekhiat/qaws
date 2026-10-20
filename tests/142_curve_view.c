@@ -132,7 +132,7 @@ static double cv_compare3(qaws_curve_prepared const* p, qaws_curve const* owned)
 	{
 		qaws_scalar t = r.min_value + (r.max_value - r.min_value) * (qaws_scalar)i / 40;
 		qaws_eval_result_3d a, b;
-		if (qaws_curve_prepared_evaluate_3d(p, t, CV_ALL, &a) != QAWS_STATUS_OK || qaws_curve_evaluate_3d(&b, owned, t, CV_ALL) != QAWS_STATUS_OK
+		if (qaws_curve_prepared_evaluate_3d(&a, p, t, CV_ALL) != QAWS_STATUS_OK || qaws_curve_evaluate_3d(&b, owned, t, CV_ALL) != QAWS_STATUS_OK
 			|| (b.valid_flags & ~a.valid_flags))
 			return 1e30;
 		e = cv_diff3(&a, &b);
@@ -162,17 +162,17 @@ static void test_parity_bspline(void)
 	TEST_ASSERT(owned && owned_u, "owned B-splines created");
 	if (!owned || !owned_u)
 		return;
-	TEST_ASSERT(qaws_curve_prepare(&v, NULL, &pr) == QAWS_STATUS_OK, "prepare: packed f64, non-uniform knots");
+	TEST_ASSERT(qaws_curve_prepare(&pr, &v, NULL) == QAWS_STATUS_OK, "prepare: packed f64, non-uniform knots");
 	e = cv_compare3(pr, owned);
 	TEST_ASSERT(qaws_curve_prepared_dependencies(pr) == (QAWS_DEPENDS_KNOTS | QAWS_DEPENDS_LAYOUT), "dependencies: knots and layout");
 	qaws_curve_prepared_destroy(pr);
 	v.knots.count = 0;
-	TEST_ASSERT(qaws_curve_prepare(&v, NULL, &pr) == QAWS_STATUS_OK, "prepare: default knots");
+	TEST_ASSERT(qaws_curve_prepare(&pr, &v, NULL) == QAWS_STATUS_OK, "prepare: default knots");
 	eu = cv_compare3(pr, owned_u);
 	TEST_ASSERT(qaws_curve_prepared_dependencies(pr) == QAWS_DEPENDS_LAYOUT, "dependencies without knots: layout");
 	qaws_curve_prepared_destroy(pr);
 	v.knots.count = CV_N + CV_DEG + 1;
-	TEST_ASSERT(qaws_curve_create_borrowed(&v, NULL, &borrowed) == QAWS_STATUS_OK, "borrowed curve created");
+	TEST_ASSERT(qaws_curve_create_borrowed(&borrowed, &v, NULL) == QAWS_STATUS_OK, "borrowed curve created");
 	if (borrowed)
 	{
 		ro = qaws_curve_get_parameter_range(owned);
@@ -242,18 +242,18 @@ static void test_parity_nurbs(void)
 	v.points = cv_packed(xy, QAWS_ELEMENT_F64, 2, 7, 0);
 	v.weights = cv_packed(w, QAWS_ELEMENT_F64, 1, 7, 0);
 	v.knots = cv_packed(kn, QAWS_ELEMENT_F64, 1, 10, 0);
-	TEST_ASSERT(qaws_curve_prepare(&v, NULL, &pw) == QAWS_STATUS_OK, "prepare: weights");
+	TEST_ASSERT(qaws_curve_prepare(&pw, &v, NULL) == QAWS_STATUS_OK, "prepare: weights");
 	v.points = cv_packed(hom, QAWS_ELEMENT_F64, 3, 7, 0);
 	memset(&v.weights, 0, sizeof v.weights);
-	TEST_ASSERT(qaws_curve_prepare(&v, NULL, &ph) == QAWS_STATUS_OK, "prepare: homogeneous points");
+	TEST_ASSERT(qaws_curve_prepare(&ph, &v, NULL) == QAWS_STATUS_OK, "prepare: homogeneous points");
 	if (!owned || !pw || !ph)
 		return;
 	for (i = 0; i <= 60; i++)
 	{
 		qaws_scalar t = (qaws_scalar)(3.0 * i / 60);
 		qaws_eval_result_2d a, b, c;
-		qaws_curve_prepared_evaluate_2d(pw, t, CV_ALL, &a);
-		qaws_curve_prepared_evaluate_2d(ph, t, CV_ALL, &b);
+		qaws_curve_prepared_evaluate_2d(&a, pw, t, CV_ALL);
+		qaws_curve_prepared_evaluate_2d(&b, ph, t, CV_ALL);
 		qaws_curve_evaluate_2d(&c, owned, t, CV_ALL);
 		e = cv_diff2(&a, &c);
 		ew = e > ew ? e : ew;
@@ -304,11 +304,11 @@ static void test_layouts(void)
 	/* f32 records, f32 knots */
 	v.points = cv_packed(rec[0].position, QAWS_ELEMENT_F32, 3, CV_N, sizeof(cv_record));
 	v.knots = cv_packed(kf, QAWS_ELEMENT_F32, 1, CV_N + CV_DEG + 1, 0);
-	TEST_ASSERT(qaws_curve_prepare(&v, NULL, &a) == QAWS_STATUS_OK, "prepare: interleaved f32 records, f32 knots");
+	TEST_ASSERT(qaws_curve_prepare(&a, &v, NULL) == QAWS_STATUS_OK, "prepare: interleaved f32 records, f32 knots");
 	/* the same values as packed f64 */
 	v.points = cv_packed(pf, QAWS_ELEMENT_F64, 3, CV_N, 0);
 	v.knots = cv_packed(cv_knots, QAWS_ELEMENT_F64, 1, CV_N + CV_DEG + 1, 0);
-	TEST_ASSERT(qaws_curve_prepare(&v, NULL, &b) == QAWS_STATUS_OK, "prepare: packed f64");
+	TEST_ASSERT(qaws_curve_prepare(&b, &v, NULL) == QAWS_STATUS_OK, "prepare: packed f64");
 	/* planar f64 */
 	memset(&v.points, 0, sizeof v.points);
 	v.points.planes[0] = px;
@@ -317,16 +317,16 @@ static void test_layouts(void)
 	v.points.type = QAWS_ELEMENT_F64;
 	v.points.components = 3;
 	v.points.count = CV_N;
-	TEST_ASSERT(qaws_curve_prepare(&v, NULL, &c) == QAWS_STATUS_OK, "prepare: planar f64");
+	TEST_ASSERT(qaws_curve_prepare(&c, &v, NULL) == QAWS_STATUS_OK, "prepare: planar f64");
 	if (!a || !b || !c)
 		return;
 	for (i = 0; i <= 50; i++)
 	{
 		qaws_scalar t = (qaws_scalar)(4.0 * i / 50);
 		qaws_eval_result_3d ra, rb, rc;
-		qaws_curve_prepared_evaluate_3d(a, t, CV_ALL, &ra);
-		qaws_curve_prepared_evaluate_3d(b, t, CV_ALL, &rb);
-		qaws_curve_prepared_evaluate_3d(c, t, CV_ALL, &rc);
+		qaws_curve_prepared_evaluate_3d(&ra, a, t, CV_ALL);
+		qaws_curve_prepared_evaluate_3d(&rb, b, t, CV_ALL);
+		qaws_curve_prepared_evaluate_3d(&rc, c, t, CV_ALL);
 		diff += memcmp(&ra, &rb, sizeof ra) != 0 || memcmp(&rb, &rc, sizeof rb) != 0;
 	}
 	TEST_ASSERT(diff == 0, "f32 records, packed f64 and planar f64 holding the same values evaluate bit for bit alike");
@@ -349,7 +349,7 @@ static void test_mutation(void)
 	v.degree = CV_DEG;
 	v.points = cv_packed(p, QAWS_ELEMENT_F64, 3, CV_N, 0);
 	v.knots = cv_packed(cv_knots, QAWS_ELEMENT_F64, 1, CV_N + CV_DEG + 1, 0);
-	if (qaws_curve_prepare(&v, NULL, &pr) != QAWS_STATUS_OK)
+	if (qaws_curve_prepare(&pr, &v, NULL) != QAWS_STATUS_OK)
 	{
 		TEST_ASSERT(0, "mutation: prepared");
 		return;
@@ -408,7 +408,7 @@ static void test_ranges(void)
 	v.degree = CV_DEG;
 	v.points = cv_packed(p, QAWS_ELEMENT_F64, 3, CV_N, 0);
 	v.knots = cv_packed(cv_knots, QAWS_ELEMENT_F64, 1, CV_N + CV_DEG + 1, 0);
-	if (qaws_curve_prepare(&v, NULL, &pr) != QAWS_STATUS_OK)
+	if (qaws_curve_prepare(&pr, &v, NULL) != QAWS_STATUS_OK)
 	{
 		TEST_ASSERT(0, "ranges: prepared");
 		return;
@@ -426,7 +426,7 @@ static void test_ranges(void)
 	for (i = 0; i < CV_RANGE; i += 7)
 	{
 		qaws_eval_result_3d r;
-		qaws_curve_prepared_evaluate_3d(pr, (qaws_scalar)params[i], QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &r);
+		qaws_curve_prepared_evaluate_3d(&r, pr, (qaws_scalar)params[i], QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1);
 		bad += (double)r.position.x != serial[i * 3] || (double)r.position.y != serial[i * 3 + 1] || (double)r.position.z != serial[i * 3 + 2]
 			|| (double)r.d1.x != d1s[i * 3] || (double)r.d1.z != d1s[i * 3 + 2];
 	}
@@ -524,8 +524,8 @@ static void test_allocation(void)
 			s.calls = 0;
 			s.fail_at = (int)f;
 			s.live = 0;
-			st = which == 0 ? qaws_curve_prepare(&v, &al, &pr) : which == 1 ? qaws_curve_create_borrowed(&v, &al, &c)
-				: qaws_curve_create_from_view(&v, &al, &c);
+			st = which == 0 ? qaws_curve_prepare(&pr, &v, &al) : which == 1 ? qaws_curve_create_borrowed(&c, &v, &al)
+				: qaws_curve_create_from_view(&c, &v, &al);
 			if (st == QAWS_STATUS_OK)
 			{
 				ok[which] = f + 1;
@@ -544,15 +544,15 @@ static void test_allocation(void)
 	mem = (unsigned char*)malloc(bytes + 32);
 	{
 		unsigned char* at = (unsigned char*)(((size_t)mem + 15) & ~(size_t)15);
-		TEST_ASSERT(bytes > 0 && qaws_curve_prepare_into(&v, at, bytes - 1, &pi) == QAWS_STATUS_BUFFER_TOO_SMALL && !pi, "prepare_into: one byte short refused");
-		TEST_ASSERT(qaws_curve_prepare_into(&v, at + 8, bytes, &pi) == QAWS_STATUS_INVALID_ARGUMENT, "prepare_into: misaligned memory refused");
-		TEST_ASSERT(qaws_curve_prepare_into(&v, at, bytes, &pi) == QAWS_STATUS_OK, "prepare_into: in caller memory");
-		TEST_ASSERT(qaws_curve_prepare(&v, NULL, &pa) == QAWS_STATUS_OK, "prepare: allocated");
+		TEST_ASSERT(bytes > 0 && qaws_curve_prepare_into(&pi, at, &v, bytes - 1) == QAWS_STATUS_BUFFER_TOO_SMALL && !pi, "prepare_into: one byte short refused");
+		TEST_ASSERT(qaws_curve_prepare_into(&pi, at + 8, &v, bytes) == QAWS_STATUS_INVALID_ARGUMENT, "prepare_into: misaligned memory refused");
+		TEST_ASSERT(qaws_curve_prepare_into(&pi, at, &v, bytes) == QAWS_STATUS_OK, "prepare_into: in caller memory");
+		TEST_ASSERT(qaws_curve_prepare(&pa, &v, NULL) == QAWS_STATUS_OK, "prepare: allocated");
 		if (pi && pa)
 		{
 			qaws_eval_result_3d a, b;
-			qaws_curve_prepared_evaluate_3d(pi, (qaws_scalar)1.7, CV_ALL, &a);
-			qaws_curve_prepared_evaluate_3d(pa, (qaws_scalar)1.7, CV_ALL, &b);
+			qaws_curve_prepared_evaluate_3d(&a, pi, (qaws_scalar)1.7, CV_ALL);
+			qaws_curve_prepared_evaluate_3d(&b, pa, (qaws_scalar)1.7, CV_ALL);
 			TEST_ASSERT(memcmp(&a, &b, sizeof a) == 0, "prepare_into evaluates as prepare");
 		}
 		qaws_curve_prepared_destroy(pi);
@@ -579,7 +579,7 @@ static void test_validation(void)
 	TEST_ASSERT(qaws_curve_view_validate(&v) == QAWS_STATUS_OK, "valid view");
 	kn[5] = 0.1;
 	TEST_ASSERT(qaws_curve_view_validate(&v) == QAWS_STATUS_INVALID_KNOT_VECTOR, "decreasing knots refused");
-	TEST_ASSERT(qaws_curve_prepare(&v, NULL, &pr) == QAWS_STATUS_INVALID_KNOT_VECTOR && !pr, "prepare refuses, output cleared");
+	TEST_ASSERT(qaws_curve_prepare(&pr, &v, NULL) == QAWS_STATUS_INVALID_KNOT_VECTOR && !pr, "prepare refuses, output cleared");
 	kn[5] = cv_knots[5];
 	v.knots.count = 12;
 	TEST_ASSERT(qaws_curve_view_validate(&v) == QAWS_STATUS_INVALID_KNOT_COUNT, "knot count refused");
@@ -622,7 +622,7 @@ static void test_operations(void)
 	v.points = cv_packed(p, QAWS_ELEMENT_F64, 3, CV_N, 0);
 	v.knots = cv_packed(cv_knots, QAWS_ELEMENT_F64, 1, CV_N + CV_DEG + 1, 0);
 	owned = cv_owned_bspline(p, CV_N, cv_knots);
-	if (!owned || qaws_curve_create_borrowed(&v, NULL, &borrowed) != QAWS_STATUS_OK)
+	if (!owned || qaws_curve_create_borrowed(&borrowed, &v, NULL) != QAWS_STATUS_OK)
 	{
 		TEST_ASSERT(0, "operations: curves created");
 		return;
@@ -671,7 +671,7 @@ static double cv_family_diff(qaws_curve_view const* v, qaws_curve const* owned)
 	qaws_range r = qaws_curve_get_parameter_range(owned);
 	double worst = 0, e;
 	unsigned int i;
-	if (qaws_curve_prepare(v, NULL, &p) != QAWS_STATUS_OK || qaws_curve_create_borrowed(v, NULL, &b) != QAWS_STATUS_OK)
+	if (qaws_curve_prepare(&p, v, NULL) != QAWS_STATUS_OK || qaws_curve_create_borrowed(&b, v, NULL) != QAWS_STATUS_OK)
 	{
 		qaws_curve_prepared_destroy(p);
 		return 1e30;
@@ -680,7 +680,7 @@ static double cv_family_diff(qaws_curve_view const* v, qaws_curve const* owned)
 	{
 		qaws_scalar t = r.min_value + (r.max_value - r.min_value) * (qaws_scalar)i / 60;
 		qaws_eval_result_3d a, c, o;
-		qaws_curve_prepared_evaluate_3d(p, t, CV_ALL, &a);
+		qaws_curve_prepared_evaluate_3d(&a, p, t, CV_ALL);
 		qaws_curve_evaluate_3d(&c, b, t, CV_ALL);
 		qaws_curve_evaluate_3d(&o, owned, t, CV_ALL);
 		e = cv_diff3(&a, &o) > cv_diff3(&c, &o) ? cv_diff3(&a, &o) : cv_diff3(&c, &o);
@@ -828,7 +828,7 @@ static void test_families(void)
 		v.degree = 3;
 		v.points = cv_packed(p, QAWS_ELEMENT_F64, 3, 8, 0);
 		v.parameterization = QAWS_PARAMETERIZATION_CENTRIPETAL;
-		if (owned && qaws_curve_create_borrowed(&v, NULL, &b) == QAWS_STATUS_OK && qaws_curve_extract(&eo, owned, (qaws_scalar)0.6, (qaws_scalar)3.7) == QAWS_STATUS_OK
+		if (owned && qaws_curve_create_borrowed(&b, &v, NULL) == QAWS_STATUS_OK && qaws_curve_extract(&eo, owned, (qaws_scalar)0.6, (qaws_scalar)3.7) == QAWS_STATUS_OK
 			&& qaws_curve_extract(&eb, b, (qaws_scalar)0.6, (qaws_scalar)3.7) == QAWS_STATUS_OK)
 		{
 			for (i = 0; i <= 20; i++)
@@ -869,10 +869,10 @@ static unsigned int cv_eval_any(int how, qaws_curve_prepared const* p, qaws_curv
 	memset(&r2, 0, sizeof r2);
 	memset(&r3, 0, sizeof r3);
 	if (is3)
-		st = how == 0 ? qaws_curve_prepared_evaluate_3d(p, t, CV_ALL, &r3) : how == 1 ? qaws_curve_evaluate_3d(&r3, c, t, CV_ALL)
+		st = how == 0 ? qaws_curve_prepared_evaluate_3d(&r3, p, t, CV_ALL) : how == 1 ? qaws_curve_evaluate_3d(&r3, c, t, CV_ALL)
 			: qaws_curve_evaluate_span_3d(&r3, c, span, t, CV_ALL);
 	else
-		st = how == 0 ? qaws_curve_prepared_evaluate_2d(p, t, CV_ALL, &r2) : how == 1 ? qaws_curve_evaluate_2d(&r2, c, t, CV_ALL)
+		st = how == 0 ? qaws_curve_prepared_evaluate_2d(&r2, p, t, CV_ALL) : how == 1 ? qaws_curve_evaluate_2d(&r2, c, t, CV_ALL)
 			: qaws_curve_evaluate_span_2d(&r2, c, span, t, CV_ALL);
 	for (r = 0; r < 4; r++)
 	{
@@ -941,8 +941,8 @@ static double cv_view_gap(qaws_curve_view const* v, qaws_curve const* owned, int
 	qaws_curve *b = NULL, *c = NULL;
 	int is3 = v->dimension == QAWS_DIMENSION_3D;
 	double gap = 1e30, gc;
-	if (mem && owned && bytes && qaws_curve_prepare_into(v, (void*)(((size_t)mem + 15) & ~(size_t)15), bytes, &p) == QAWS_STATUS_OK
-		&& qaws_curve_create_borrowed(v, NULL, &b) == QAWS_STATUS_OK && qaws_curve_create_from_view(v, NULL, &c) == QAWS_STATUS_OK
+	if (mem && owned && bytes && qaws_curve_prepare_into(&p, (void*)(((size_t)mem + 15) & ~(size_t)15), v, bytes) == QAWS_STATUS_OK
+		&& qaws_curve_create_borrowed(&b, v, NULL) == QAWS_STATUS_OK && qaws_curve_create_from_view(&c, v, NULL) == QAWS_STATUS_OK
 		&& qaws_curve_get_kind(c) == qaws_curve_get_kind(owned))
 	{
 		gap = cv_gap(p, b, owned, is3, rel);
@@ -1175,7 +1175,7 @@ static void test_more_families(void)
 		cv_fam_case(k, pick[k], 3, pts, arcs, au, av, times, vel, &v, &owned);
 		qaws_curve_destroy(owned);
 		moved[k] = 1e30;
-		if (qaws_curve_prepare(&v, NULL, &p) == QAWS_STATUS_OK && qaws_curve_create_borrowed(&v, NULL, &b) == QAWS_STATUS_OK)
+		if (qaws_curve_prepare(&p, &v, NULL) == QAWS_STATUS_OK && qaws_curve_create_borrowed(&b, &v, NULL) == QAWS_STATUS_OK)
 		{
 			double keep_arcs[CV_FAM_N * 3], keep_times[CV_FAM_N];
 			deps[k] = qaws_curve_prepared_dependencies(p);
@@ -1324,11 +1324,11 @@ static void test_composite_of_views(void)
 	v.dimension = QAWS_DIMENSION_3D;
 	v.degree = 3;
 	v.points = cv_packed(p0, QAWS_ELEMENT_F64, 3, 8, 3 * sizeof(double));
-	qaws_curve_create_borrowed(&v, NULL, &b[0]);
-	qaws_curve_create_from_view(&v, NULL, &o[0]);
+	qaws_curve_create_borrowed(&b[0], &v, NULL);
+	qaws_curve_create_from_view(&o[0], &v, NULL);
 	v.points = cv_packed(p1, QAWS_ELEMENT_F64, 3, 8, 3 * sizeof(double));
-	qaws_curve_create_borrowed(&v, NULL, &b[1]);
-	qaws_curve_create_from_view(&v, NULL, &o[1]);
+	qaws_curve_create_borrowed(&b[1], &v, NULL);
+	qaws_curve_create_from_view(&o[1], &v, NULL);
 	memset(&d, 0, sizeof d);
 	d.dimension = QAWS_DIMENSION_3D;
 	d.segments = b;

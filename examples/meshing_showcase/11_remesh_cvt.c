@@ -27,7 +27,7 @@ static void ms_regularity(qaws_mesh_3d const* m, double* v6, double* cv)
 	unsigned int nv = qaws_mesh_3d_get_vertex_count(m), ne = qaws_mesh_3d_get_edge_count(m), i, in = 0, r6 = 0;
 	unsigned int* e = (unsigned int*)malloc(sizeof(unsigned int) * 2 * (ne + 1));
 	double* x = ms_positions(m), s = 0, s2 = 0;
-	qaws_mesh_3d_get_edges(m, e);
+	qaws_mesh_3d_get_edges(e, m);
 	for (i = 0; i < ne; i++)
 	{
 		double const *a = x + 3 * e[2 * i], *b = x + 3 * e[2 * i + 1];
@@ -40,7 +40,7 @@ static void ms_regularity(qaws_mesh_3d const* m, double* v6, double* cv)
 		unsigned int ring[64], n = 0;
 		if (qaws_mesh_3d_is_boundary_vertex(m, i))
 			continue;
-		qaws_mesh_3d_get_vertex_ring(m, i, ring, 64, &n);
+		qaws_mesh_3d_get_vertex_ring(ring, &n, m, 64, i);
 		in++;
 		r6 += n == 6;
 	}
@@ -60,7 +60,7 @@ static qaws_mesh_3d* ms_remesh_by(qaws_mesh_3d const* m, qaws_mesh_reference con
 	d.method = method;
 	d.reference = r;
 	d.target_length = (qaws_scalar)L;
-	if (qaws_mesh_remesh(m, &d, &out, rep) != QAWS_STATUS_OK)
+	if (qaws_mesh_remesh(&out, rep, m, &d) != QAWS_STATUS_OK)
 		printf("  remesh failed\n");
 	*seconds = (double)(clock() - t0) / CLOCKS_PER_SEC;
 	return out;
@@ -82,7 +82,7 @@ static void ms_valence_panel(er_canvas* c, int x0, qaws_mesh_3d const* m, qaws_m
 	for (i = 0; i < nv; i++)
 	{
 		unsigned int ring[64], n = 0;
-		qaws_mesh_3d_get_vertex_ring(m, i, ring, 64, &n);
+		qaws_mesh_3d_get_vertex_ring(ring, &n, m, 64, i);
 		ms_valence_rgb(n, rgb);
 		er_point(c, p + 3 * i, rgb, n == 6 ? 2.2 : 3.6);
 	}
@@ -122,7 +122,7 @@ static void demo_remesh_cvt(void)
 	unsigned int i;
 	if (!c || !blob || !can)
 		return;
-	qaws_mesh_reference_create(blob, NULL, &rb);
+	qaws_mesh_reference_create(&rb, blob, NULL);
 	loc = ms_remesh_by(blob, rb, QAWS_REMESH_LOCAL, 0.11, &rep, &sec);
 	if (loc)
 		ms_valence_panel(c, 0, loc, &rep, sec, "the blob by LOCAL");
@@ -132,7 +132,7 @@ static void demo_remesh_cvt(void)
 	/* the dual of the can's Delaunay mesh: per edge, its faces' circumcentres joined (to the edge's middle on a crease), on the
 	   reference */
 	qaws_mesh_3d_detect_features(can, (qaws_scalar)(50 * MS_PI / 180), 0, 0);
-	qaws_mesh_reference_create(can, NULL, &rc);
+	qaws_mesh_reference_create(&rc, can, NULL);
 	rcan = rc ? ms_remesh_by(can, rc, QAWS_REMESH_CVT, 0.12, &rep, &sec) : NULL;
 	if (rcan)
 	{
@@ -143,12 +143,12 @@ static void demo_remesh_cvt(void)
 		qaws_mesh_location *foot = (qaws_mesh_location*)malloc(sizeof(qaws_mesh_location) * nv), *hint = (qaws_mesh_location*)malloc(sizeof(qaws_mesh_location) * (nt + ne)),
 			*cl = (qaws_mesh_location*)malloc(sizeof(qaws_mesh_location) * (nt + ne));
 		unsigned char* feat = (unsigned char*)calloc(ne + 1, 1);
-		qaws_mesh_3d_get_triangles(rcan, t);
-		qaws_mesh_3d_get_edges(rcan, e);
-		qaws_mesh_3d_get_footpoints(rcan, foot);
+		qaws_mesh_3d_get_triangles(t, rcan);
+		qaws_mesh_3d_get_edges(e, rcan);
+		qaws_mesh_3d_get_footpoints(foot, rcan);
 		{
 			unsigned int nfe = qaws_mesh_3d_get_feature_edge_count(rcan), *fe = (unsigned int*)malloc(sizeof(unsigned int) * 2 * (nfe + 1));
-			qaws_mesh_3d_get_feature_edges(rcan, fe);
+			qaws_mesh_3d_get_feature_edges(fe, rcan);
 			for (q = 0; q < nfe; q++)
 				for (i = 0; i < ne; i++)
 					if ((e[2 * i] == fe[2 * q] && e[2 * i + 1] == fe[2 * q + 1]) || (e[2 * i] == fe[2 * q + 1] && e[2 * i + 1] == fe[2 * q]))
@@ -182,8 +182,8 @@ static void demo_remesh_cvt(void)
 		}
 		for (i = 0; i < 3 * (nt + ne); i++)
 			cs[i] = (qaws_scalar)cc[i];
-		qaws_mesh_reference_project(rc, cs, nt + ne, hint, cl, NULL);
-		qaws_mesh_reference_evaluate(rc, cl, nt + ne, cp, NULL, NULL);
+		qaws_mesh_reference_project(cl, NULL, rc, cs, hint, nt + ne);
+		qaws_mesh_reference_evaluate(cp, NULL, NULL, rc, cl, nt + ne);
 		for (i = 0; i < 3 * (nt + ne); i++)
 			cc[i] = (double)cp[i];
 		/* each edge's dual: its two faces' centres, or a face's centre to the edge's middle on a crease */
@@ -225,7 +225,7 @@ static void demo_remesh_cvt(void)
 			double* p = ms_positions(rcube), v6, cv;
 			unsigned int seeds = 0;
 			ms_regularity(rcube, &v6, &cv);
-			qaws_mesh_3d_get_feature_edges(rcube, fe);
+			qaws_mesh_3d_get_feature_edges(fe, rcube);
 			for (i = 0; i < nfe; i++)
 				on[fe[2 * i]] = on[fe[2 * i + 1]] = 1;
 			for (i = 0; i < nv; i++)
@@ -242,7 +242,7 @@ static void demo_remesh_cvt(void)
 				{
 					unsigned int ring[64], n = 0;
 					double rgb[3];
-					qaws_mesh_3d_get_vertex_ring(rcube, i, ring, 64, &n);
+					qaws_mesh_3d_get_vertex_ring(ring, &n, rcube, 64, i);
 					ms_valence_rgb(n, rgb);
 					er_point(c, p + 3 * i, rgb, n == 6 ? 2.2 : 3.6);
 				}

@@ -915,7 +915,7 @@ static qaws_status fit_prepare(fit_state* s, struct qaws_bspline_fit_desc const*
 	if (desc->parameters)
 		memcpy(s->params, desc->parameters, sizeof(qaws_scalar) * s->m);
 	else
-		qaws_internal_fit_parameters(dp, s->m, s->dim, desc->parameterization, s->params);
+		qaws_internal_fit_parameters(s->params, dp, s->dim, s->m, desc->parameterization);
 	st = qaws_curve_read_field(s->knots, &got, curve, s->kc, QAWS_FIELD_KNOTS);
 	if (st == QAWS_STATUS_OK)
 		st = qaws_curve_read_field(cps, &got, curve, s->n * s->dim, QAWS_FIELD_CONTROL_POINTS);

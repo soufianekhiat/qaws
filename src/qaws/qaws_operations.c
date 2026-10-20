@@ -3317,11 +3317,11 @@ qaws_status qaws_curve_offset_3d(
 	if (n_cp < 8) n_cp = 8;
 	if (n_cp > n_samples) n_cp = n_samples;
 
-	status = qaws_internal_fit_bspline_ex(curve->allocator, 
-		QAWS_DIMENSION_3D, 3,
+	status = qaws_internal_fit_bspline_ex(out_curve, 
 		params, coords,
-		n_samples, n_cp,
-		out_curve);
+		QAWS_DIMENSION_3D, n_samples,
+		n_cp, 3,
+		curve->allocator);
 
 	qaws_internal_free(params);
 	qaws_internal_free(coords);
@@ -3414,8 +3414,8 @@ qaws_status qaws_curve_merge_chain(
 	if (n_cp < degree + 1) n_cp = degree + 1;
 	if (n_cp > total_samples) n_cp = total_samples;
 
-	status = qaws_internal_fit_bspline_ex(curves[0]->allocator, dim, degree, params, coords,
-		total_samples, n_cp, &merged);
+	status = qaws_internal_fit_bspline_ex(&merged, params, coords, dim, total_samples,
+		n_cp, degree, curves[0]->allocator);
 
 	if (status != QAWS_STATUS_OK) { qaws_internal_free(params); qaws_internal_free(coords); return status; }
 
@@ -3453,8 +3453,8 @@ qaws_status qaws_curve_merge_chain(
 		merged = NULL;
 		n_cp = total_samples / 2;
 		if (n_cp < degree + 1) n_cp = degree + 1;
-		status = qaws_internal_fit_bspline_ex(curves[0]->allocator, dim, degree, params, coords,
-			total_samples, n_cp, &merged);
+		status = qaws_internal_fit_bspline_ex(&merged, params, coords, dim, total_samples,
+			n_cp, degree, curves[0]->allocator);
 		if (status != QAWS_STATUS_OK)
 		{
 			qaws_internal_free(params); qaws_internal_free(coords);
@@ -3538,7 +3538,7 @@ qaws_status qaws_curve_fillet_2d(
 			coords[i * 2] = er.position.x;
 			coords[i * 2 + 1] = er.position.y;
 		}
-		status = qaws_internal_fit_bspline_ex(curve->allocator, QAWS_DIMENSION_2D, 3, params, coords, n_samp, 16, out_curve);
+		status = qaws_internal_fit_bspline_ex(out_curve, params, coords, QAWS_DIMENSION_2D, n_samp, 16, 3, curve->allocator);
 		qaws_internal_free(params); qaws_internal_free(coords);
 		return status;
 	}
@@ -3675,7 +3675,7 @@ qaws_status qaws_curve_fillet_2d(
 
 		{
 			qaws_curve* seg_copy = NULL;
-			status = qaws_internal_fit_bspline_ex(curve->allocator, QAWS_DIMENSION_2D, 3, samp_params, samp_coords, n_samp, 10, &seg_copy);
+			status = qaws_internal_fit_bspline_ex(&seg_copy, samp_params, samp_coords, QAWS_DIMENSION_2D, n_samp, 10, 3, curve->allocator);
 			qaws_internal_free(samp_params); qaws_internal_free(samp_coords);
 			if (status != QAWS_STATUS_OK) goto cleanup_fillet;
 			if (new_count >= total_segs) { qaws_curve_destroy(seg_copy); goto cleanup_fillet; }
@@ -3732,7 +3732,7 @@ qaws_status qaws_curve_fillet_2d(
 			arc_desc.segments = &arc_seg;
 			arc_desc.segment_count = 1;
 
-			status = qaws_curve_create_arc_ex(&arc_desc, curve->allocator, &arc_curve);
+			status = qaws_curve_create_arc_ex(&arc_curve, &arc_desc, curve->allocator);
 			if (status == QAWS_STATUS_OK && arc_curve && new_count < total_segs)
 				new_segments[new_count++] = arc_curve;
 		}
@@ -3750,7 +3750,7 @@ qaws_status qaws_curve_fillet_2d(
 	cdesc.dimension = QAWS_DIMENSION_2D;
 	cdesc.segments = new_segments;
 	cdesc.segment_count = new_count;
-	status = qaws_curve_create_composite_ex(&cdesc, curve->allocator, out_curve);
+	status = qaws_curve_create_composite_ex(out_curve, &cdesc, curve->allocator);
 
 	if (status != QAWS_STATUS_OK)
 		goto cleanup_fillet;
@@ -3827,7 +3827,7 @@ qaws_status qaws_curve_chamfer_2d(
 			coords[i * 2] = er.position.x;
 			coords[i * 2 + 1] = er.position.y;
 		}
-		status = qaws_internal_fit_bspline_ex(curve->allocator, QAWS_DIMENSION_2D, 3, params, coords, n_samp, 16, out_curve);
+		status = qaws_internal_fit_bspline_ex(out_curve, params, coords, QAWS_DIMENSION_2D, n_samp, 16, 3, curve->allocator);
 		qaws_internal_free(params); qaws_internal_free(coords);
 		return status;
 	}
@@ -3953,7 +3953,7 @@ qaws_status qaws_curve_chamfer_2d(
 
 		{
 			qaws_curve* seg_copy = NULL;
-			status = qaws_internal_fit_bspline_ex(curve->allocator, QAWS_DIMENSION_2D, 3, samp_params, samp_coords, n_samp, 10, &seg_copy);
+			status = qaws_internal_fit_bspline_ex(&seg_copy, samp_params, samp_coords, QAWS_DIMENSION_2D, n_samp, 10, 3, curve->allocator);
 			qaws_internal_free(samp_params); qaws_internal_free(samp_coords);
 			if (status != QAWS_STATUS_OK) goto cleanup_chamfer;
 			if (new_count >= total_segs) { qaws_curve_destroy(seg_copy); goto cleanup_chamfer; }
@@ -3999,7 +3999,7 @@ qaws_status qaws_curve_chamfer_2d(
 	cdesc.dimension = QAWS_DIMENSION_2D;
 	cdesc.segments = new_segments;
 	cdesc.segment_count = new_count;
-	status = qaws_curve_create_composite_ex(&cdesc, curve->allocator, out_curve);
+	status = qaws_curve_create_composite_ex(out_curve, &cdesc, curve->allocator);
 
 	if (status != QAWS_STATUS_OK)
 		goto cleanup_chamfer;

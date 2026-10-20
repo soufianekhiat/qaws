@@ -90,8 +90,8 @@ typedef struct qaws_mesh_3d_desc
 
 /* INVALID_ARGUMENT for a face under 3 vertices, an index out of range or a
    vertex twice in one face. */
-qaws_status qaws_mesh_3d_create(qaws_mesh_3d_desc const* desc, qaws_mesh_3d** out_mesh);
-qaws_status qaws_mesh_3d_clone(qaws_mesh_3d const* mesh, qaws_mesh_3d** out_mesh);
+qaws_status qaws_mesh_3d_create(qaws_mesh_3d** out_mesh, qaws_mesh_3d_desc const* desc);
+qaws_status qaws_mesh_3d_clone(qaws_mesh_3d** out_mesh, qaws_mesh_3d const* mesh);
 void qaws_mesh_3d_destroy(qaws_mesh_3d* mesh);
 
 /* ---- reading ---------------------------------------------------------- */
@@ -101,29 +101,29 @@ unsigned int qaws_mesh_3d_get_edge_count(qaws_mesh_3d const* mesh);
 unsigned int qaws_mesh_3d_get_face_count(qaws_mesh_3d const* mesh);
 unsigned int qaws_mesh_3d_get_corner_count(qaws_mesh_3d const* mesh);   /* the sum of the face sizes */
 qaws_vec3 qaws_mesh_3d_get_vertex(qaws_mesh_3d const* mesh, unsigned int vertex);
-qaws_status qaws_mesh_3d_get_positions(qaws_mesh_3d const* mesh, qaws_scalar* out_positions);
+qaws_status qaws_mesh_3d_get_positions(qaws_scalar* out_positions, qaws_mesh_3d const* mesh);
 qaws_status qaws_mesh_3d_set_positions(qaws_mesh_3d* mesh, qaws_scalar const* positions);
 /* out_face_sizes may be NULL for a triangle mesh; corners are listed in this order */
-qaws_status qaws_mesh_3d_get_faces(qaws_mesh_3d const* mesh, unsigned int* out_face_vertices, unsigned int* out_face_sizes);
-qaws_status qaws_mesh_3d_get_edges(qaws_mesh_3d const* mesh, unsigned int* out_edge_vertices);   /* 2 per edge */
+qaws_status qaws_mesh_3d_get_faces(unsigned int* out_face_vertices, unsigned int* out_face_sizes, qaws_mesh_3d const* mesh);
+qaws_status qaws_mesh_3d_get_edges(unsigned int* out_edge_vertices, qaws_mesh_3d const* mesh);   /* 2 per edge */
 
 /* The faces fan-triangulated from their first vertex, in face order (for a
    triangle mesh, the faces themselves). */
 unsigned int qaws_mesh_3d_get_triangle_count(qaws_mesh_3d const* mesh);
 void qaws_mesh_3d_get_triangle(unsigned int out_vertices[3], qaws_mesh_3d const* mesh, unsigned int triangle);
-qaws_status qaws_mesh_3d_get_triangles(qaws_mesh_3d const* mesh, unsigned int* out_triangles);   /* 3 per triangle */
+qaws_status qaws_mesh_3d_get_triangles(unsigned int* out_triangles, qaws_mesh_3d const* mesh);   /* 3 per triangle */
 
 /* The given vertex a copy was split from at creation (the vertex itself
    otherwise; QAWS_MESH_NONE for a vertex an operation added). */
 unsigned int qaws_mesh_3d_get_vertex_source(qaws_mesh_3d const* mesh, unsigned int vertex);
 /* The neighbours of a vertex, counter-clockwise; BUFFER_TOO_SMALL with the
    count when capacity is short. */
-qaws_status qaws_mesh_3d_get_vertex_ring(qaws_mesh_3d const* mesh, unsigned int vertex, unsigned int* out_vertices,
-	unsigned int capacity, unsigned int* out_count);
+qaws_status qaws_mesh_3d_get_vertex_ring(unsigned int* out_vertices, unsigned int* out_count, qaws_mesh_3d const* mesh,
+	unsigned int capacity, unsigned int vertex);
 int qaws_mesh_3d_is_boundary_vertex(qaws_mesh_3d const* mesh, unsigned int vertex);
 /* Unit vertex normals: the face normals around each vertex weighted by
    their angle there (Thurmer and Wuthrich). */
-qaws_status qaws_mesh_3d_get_vertex_normals(qaws_mesh_3d const* mesh, qaws_scalar* out_normals);
+qaws_status qaws_mesh_3d_get_vertex_normals(qaws_scalar* out_normals, qaws_mesh_3d const* mesh);
 
 typedef struct qaws_mesh_topology
 {
@@ -134,16 +134,16 @@ typedef struct qaws_mesh_topology
 	int closed;                         /* no boundary */
 } qaws_mesh_topology;
 
-qaws_status qaws_mesh_3d_get_topology(qaws_mesh_3d const* mesh, qaws_mesh_topology* out_topology);
+qaws_status qaws_mesh_3d_get_topology(qaws_mesh_topology* out_topology, qaws_mesh_3d const* mesh);
 
 /* Per corner (qaws_mesh_3d_get_faces order), the face across the corner's
    edge, from its vertex to the next corner's (QAWS_MESH_NONE on the
    border): the dual graph, as stored. */
-qaws_status qaws_mesh_3d_get_face_adjacency(qaws_mesh_3d const* mesh, unsigned int* out_faces);
+qaws_status qaws_mesh_3d_get_face_adjacency(unsigned int* out_faces, qaws_mesh_3d const* mesh);
 /* The dual mesh: vertex i at face i's centroid, a face round each interior
    vertex through its faces counter-clockwise (a triangle mesh's dual is
    mostly hexagons). Border vertices have none. */
-qaws_status qaws_mesh_3d_create_dual(qaws_mesh_3d const* mesh, qaws_mesh_3d** out_dual);
+qaws_status qaws_mesh_3d_create_dual(qaws_mesh_3d** out_dual, qaws_mesh_3d const* mesh);
 /* The half-edge structure's own invariants: OK, or INTERNAL_ERROR. */
 qaws_status qaws_mesh_3d_validate(qaws_mesh_3d const* mesh);
 
@@ -160,8 +160,8 @@ qaws_status qaws_mesh_3d_validate(qaws_mesh_3d const* mesh);
 /* A vertex inserted on edge (a, b) at position (NULL: the midpoint): the
    triangles on either side are split in two, larger faces take the vertex.
    The new vertex is the last. A feature edge's halves are features. */
-qaws_status qaws_mesh_3d_split_edge(qaws_mesh_3d* mesh, unsigned int a, unsigned int b, qaws_scalar const* position,
-	qaws_mesh_location const* footpoint, unsigned int* out_vertex);
+qaws_status qaws_mesh_3d_split_edge(unsigned int* out_vertex, qaws_mesh_3d* mesh, qaws_scalar const* position, qaws_mesh_location const* footpoint,
+	unsigned int a, unsigned int b);
 
 /* a merged into b, which moves to position (NULL: stays): a is removed (the
    last vertex moves to index a) with the triangles on the edge (the last
@@ -180,8 +180,8 @@ qaws_status qaws_mesh_3d_flip_edge(qaws_mesh_3d* mesh, unsigned int a, unsigned 
 /* A vertex inserted in a face at position (NULL: its centroid) and joined to
    each corner: a fan of triangles. The new vertex is the last; the face
    keeps its index for the first triangle, the others are appended. */
-qaws_status qaws_mesh_3d_split_face(qaws_mesh_3d* mesh, unsigned int face, qaws_scalar const* position,
-	qaws_mesh_location const* footpoint, unsigned int* out_vertex);
+qaws_status qaws_mesh_3d_split_face(unsigned int* out_vertex, qaws_mesh_3d* mesh, qaws_scalar const* position,
+	qaws_mesh_location const* footpoint, unsigned int face);
 
 int qaws_mesh_3d_can_collapse_edge(qaws_mesh_3d const* mesh, unsigned int a, unsigned int b);
 int qaws_mesh_3d_can_flip_edge(qaws_mesh_3d const* mesh, unsigned int a, unsigned int b);
@@ -201,20 +201,20 @@ qaws_status qaws_mesh_3d_set_feature_edges(qaws_mesh_3d* mesh, unsigned int cons
 qaws_status qaws_mesh_3d_detect_features(qaws_mesh_3d* mesh, qaws_scalar dihedral_angle, qaws_scalar corner_angle,
 	unsigned int flags);
 unsigned int qaws_mesh_3d_get_feature_edge_count(qaws_mesh_3d const* mesh);
-qaws_status qaws_mesh_3d_get_feature_edges(qaws_mesh_3d const* mesh, unsigned int* out_edge_vertices);
+qaws_status qaws_mesh_3d_get_feature_edges(unsigned int* out_edge_vertices, qaws_mesh_3d const* mesh);
 int qaws_mesh_3d_is_feature_corner(qaws_mesh_3d const* mesh, unsigned int vertex);
 
 /* ---- attributes -------------------------------------------------------- */
 
 /* values: components per vertex, per corner (in qaws_mesh_3d_get_faces
    order) or per face; NULL: zeros. */
-qaws_status qaws_mesh_3d_add_attribute(qaws_mesh_3d* mesh, qaws_attribute_desc const* desc, qaws_scalar const* values,
-	unsigned int* out_attribute);
+qaws_status qaws_mesh_3d_add_attribute(unsigned int* out_attribute, qaws_mesh_3d* mesh, qaws_scalar const* values,
+	qaws_attribute_desc const* desc);
 unsigned int qaws_mesh_3d_get_attribute_count(qaws_mesh_3d const* mesh);
-qaws_status qaws_mesh_3d_find_attribute(qaws_mesh_3d const* mesh, char const* name, unsigned int* out_attribute);
+qaws_status qaws_mesh_3d_find_attribute(unsigned int* out_attribute, qaws_mesh_3d const* mesh, char const* name);
 /* the desc's name points into the mesh, valid while the attribute lives */
-qaws_status qaws_mesh_3d_get_attribute_desc(qaws_mesh_3d const* mesh, unsigned int attribute, qaws_attribute_desc* out_desc);
-qaws_status qaws_mesh_3d_get_attribute(qaws_mesh_3d const* mesh, unsigned int attribute, qaws_scalar* out_values);
+qaws_status qaws_mesh_3d_get_attribute_desc(qaws_attribute_desc* out_desc, qaws_mesh_3d const* mesh, unsigned int attribute);
+qaws_status qaws_mesh_3d_get_attribute(qaws_scalar* out_values, qaws_mesh_3d const* mesh, unsigned int attribute);
 qaws_status qaws_mesh_3d_set_attribute(qaws_mesh_3d* mesh, unsigned int attribute, qaws_scalar const* values);
 qaws_status qaws_mesh_3d_remove_attribute(qaws_mesh_3d* mesh, unsigned int attribute);   /* later ones shift down */
 
@@ -222,7 +222,7 @@ qaws_status qaws_mesh_3d_remove_attribute(qaws_mesh_3d* mesh, unsigned int attri
 
 int qaws_mesh_3d_has_footpoints(qaws_mesh_3d const* mesh);
 /* INVALID_ARGUMENT when the mesh has none */
-qaws_status qaws_mesh_3d_get_footpoints(qaws_mesh_3d const* mesh, qaws_mesh_location* out_locations);
+qaws_status qaws_mesh_3d_get_footpoints(qaws_mesh_location* out_locations, qaws_mesh_3d const* mesh);
 qaws_status qaws_mesh_3d_set_footpoints(qaws_mesh_3d* mesh, qaws_mesh_location const* locations);   /* NULL: none */
 
 /* ---- measures ---------------------------------------------------------- */
@@ -238,7 +238,7 @@ typedef struct qaws_mesh_quality
 	unsigned int irregular;                     /* interior vertices not of valence 6 (4 when quads are the most) */
 } qaws_mesh_quality;
 
-qaws_status qaws_mesh_3d_measure_quality(qaws_mesh_3d const* mesh, qaws_mesh_quality* out_quality);
+qaws_status qaws_mesh_3d_measure_quality(qaws_mesh_quality* out_quality, qaws_mesh_3d const* mesh);
 
 /* What a meshing operator did and reached. A target not reached is not an
    error: the mesh is valid, the report says how far it got. */

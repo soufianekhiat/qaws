@@ -202,7 +202,7 @@ static qaws_status mg_finish(mg_src const* src, double const* x, qaws_shell_poin
 		ad.element = QAWS_MESH_FACE;
 		ad.components = 1;
 		ad.rule = QAWS_ATTRIBUTE_NEAREST;
-		st = qaws_mesh_3d_add_attribute(dense, &ad, fv, &fa);
+		st = qaws_mesh_3d_add_attribute(&fa, dense, fv, &ad);
 		qaws_internal_free(fv);
 		if (st != QAWS_STATUS_OK)
 			goto done;
@@ -224,7 +224,7 @@ static qaws_status mg_finish(mg_src const* src, double const* x, qaws_shell_poin
 				m->vflag[i] |= HM_CORNER;
 		}
 	}
-	st = qaws_mesh_reference_create(dense, NULL, &ref);
+	st = qaws_mesh_reference_create(&ref, dense, NULL);
 	if (st != QAWS_STATUS_OK)
 		goto done;
 	if (desc->target_length == 0 && (desc->chord_tolerance > 0 || desc->angle_tolerance > 0))
@@ -236,7 +236,7 @@ static qaws_status mg_finish(mg_src const* src, double const* x, qaws_shell_poin
 		cd.min_length = desc->min_length;
 		cd.max_length = desc->max_length > 0 ? desc->max_length : (qaws_scalar)L;
 		cd.gradation = desc->gradation;
-		st = qaws_size_field_create_curvature(ref, &cd, &sf);
+		st = qaws_size_field_create_curvature(&sf, ref, &cd);
 		if (st != QAWS_STATUS_OK)
 			goto done;
 	}
@@ -247,7 +247,7 @@ static qaws_status mg_finish(mg_src const* src, double const* x, qaws_shell_poin
 		rd.reference = ref;
 		rd.target_length = (qaws_scalar)L;
 		rd.size = sf;
-		st = qaws_mesh_remesh(dense, &rd, &out, rep);
+		st = qaws_mesh_remesh(&out, rep, dense, &rd);
 	}
 	else
 	{
@@ -256,7 +256,7 @@ static qaws_status mg_finish(mg_src const* src, double const* x, qaws_shell_poin
 		qd.reference = ref;
 		qd.target_length = (qaws_scalar)L;
 		qd.pure = desc->elements == QAWS_ELEMENTS_QUADS;
-		st = qaws_mesh_quadrangulate(dense, &qd, &out, rep);
+		st = qaws_mesh_quadrangulate(&out, rep, dense, &qd);
 	}
 	if (st != QAWS_STATUS_OK)
 		goto done;
@@ -293,7 +293,7 @@ static qaws_status mg_finish(mg_src const* src, double const* x, qaws_shell_poin
 		}
 		rep->max_deviation = (qaws_scalar)dmax;
 		rep->mean_deviation = (qaws_scalar)(m->nv ? dsum / m->nv : 0);
-		qaws_mesh_3d_measure_quality(out, &rep->quality);
+		qaws_mesh_3d_measure_quality(&rep->quality, out);
 	}
 done:
 	qaws_size_field_destroy(sf);
@@ -323,8 +323,8 @@ static double mg_dense_length(qaws_generate_desc const* desc, double L)
 	return Ld;
 }
 
-qaws_status qaws_mesh_generate_shell(qaws_shell_atlas const* shell, qaws_generate_desc const* desc, qaws_mesh_3d** out_mesh,
-	qaws_mesh_report* out_report)
+qaws_status qaws_mesh_generate_shell(qaws_mesh_3d** out_mesh, qaws_mesh_report* out_report, qaws_shell_atlas const* shell,
+	qaws_generate_desc const* desc)
 {
 	qaws_shell_region* whole = NULL;
 	qaws_shell_mesh* sm = NULL;
@@ -344,7 +344,7 @@ qaws_status qaws_mesh_generate_shell(qaws_shell_atlas const* shell, qaws_generat
 	if (desc->method != QAWS_GENERATE_REMESH)
 		return QAWS_STATUS_UNSUPPORTED_OPERATION;
 	memset(&rep, 0, sizeof rep);
-	st = qaws_shell_region_create_whole(shell, &whole);
+	st = qaws_shell_region_create_whole(&whole, shell);
 	if (st != QAWS_STATUS_OK)
 		return st;
 	qaws_shell_region_get_area(&area, whole);
@@ -556,8 +556,8 @@ done:
 	return QAWS_STATUS_OK;
 }
 
-qaws_status qaws_mesh_generate_surface(qaws_surface const* surface, qaws_generate_desc const* desc, qaws_mesh_3d** out_mesh,
-	qaws_mesh_report* out_report)
+qaws_status qaws_mesh_generate_surface(qaws_mesh_3d** out_mesh, qaws_mesh_report* out_report, qaws_surface const* surface,
+	qaws_generate_desc const* desc)
 {
 	qaws_mesh_report rep;
 	qaws_shell_point* dvp = NULL;

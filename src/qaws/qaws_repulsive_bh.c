@@ -781,7 +781,7 @@ void qaws_internal_obstacle_destroy(qaws_internal_obstacle* ob)
 	qaws_internal_free(ob);
 }
 
-qaws_status qaws_internal_obstacle_create(qaws_repulsive_obstacle const* d, qaws_internal_obstacle** out)
+qaws_status qaws_internal_obstacle_create(qaws_internal_obstacle** out, qaws_repulsive_obstacle const* d)
 {
 	qaws_internal_obstacle* ob;
 	unsigned int i, q, k, n;
@@ -901,8 +901,8 @@ static void bh_obstacle_visit(bh_ctx* c, unsigned int I, unsigned int id)
 	}
 }
 
-qaws_status qaws_internal_obstacle_energy(qaws_internal_obstacle const* ob, qaws_repulsive_mesh const* mesh, double const* x, double theta,
-	double* E, double* grad)
+qaws_status qaws_internal_obstacle_energy(double* E, double* grad, qaws_internal_obstacle const* ob, qaws_repulsive_mesh const* mesh,
+	double const* x, double theta)
 {
 	bh_ctx c;
 	unsigned int f, k, q;

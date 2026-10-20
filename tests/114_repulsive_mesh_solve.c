@@ -499,9 +499,9 @@ static void test_obstacles(void)
 	}
 	memset(&od, 0, sizeof(od));
 	od.positions = xo; od.vertex_count = nv; od.triangles = tris; od.triangle_count = nf; od.weight = (qaws_scalar)2;
-	st = st == QAWS_STATUS_OK ? qaws_internal_obstacle_create(&od, &ob) : st;
-	st = st == QAWS_STATUS_OK ? qaws_internal_obstacle_energy(ob, mS, xd, 0, &Eob, gob) : st;
-	st = st == QAWS_STATUS_OK ? qaws_internal_obstacle_energy(ob, mS, xd, 0.25, &Ebh, NULL) : st;
+	st = st == QAWS_STATUS_OK ? qaws_internal_obstacle_create(&ob, &od) : st;
+	st = st == QAWS_STATUS_OK ? qaws_internal_obstacle_energy(&Eob, gob, ob, mS, xd, 0) : st;
+	st = st == QAWS_STATUS_OK ? qaws_internal_obstacle_energy(&Ebh, NULL, ob, mS, xd, 0.25) : st;
 	for (i = 0; i < 3 * nv; i++)
 	{
 		gerr = fmax(gerr, fabs(gob[i] - 2 * (gM[i] - gS[i])));
@@ -509,8 +509,8 @@ static void test_obstacles(void)
 	}
 	/* the point cloud (weight 3): each face against each point, the face's normal only */
 	od.triangles = NULL; od.triangle_count = 0; od.weight = (qaws_scalar)3;
-	st = st == QAWS_STATUS_OK ? qaws_internal_obstacle_create(&od, &pc) : st;
-	st = st == QAWS_STATUS_OK ? qaws_internal_obstacle_energy(pc, mS, xd, 0, &Epc, NULL) : st;
+	st = st == QAWS_STATUS_OK ? qaws_internal_obstacle_create(&pc, &od) : st;
+	st = st == QAWS_STATUS_OK ? qaws_internal_obstacle_energy(&Epc, NULL, pc, mS, xd, 0) : st;
 	for (k = 0; k < nf; k++)
 	{
 		unsigned int const* t = tris + 3 * k;

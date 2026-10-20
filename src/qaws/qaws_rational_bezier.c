@@ -414,9 +414,9 @@ static qaws_curve_vtable const rbez_vtable = {
  * ------------------------------------------------------------------------- */
 
 qaws_status qaws_curve_create_rational_bezier_ex(
+	qaws_curve** out_curve,
 	qaws_rational_bezier_desc const* desc,
-	qaws_allocator const* allocator,
-	qaws_curve** out_curve)
+	qaws_allocator const* allocator)
 {
 	unsigned int dim_count;
 	unsigned int n_pts;
@@ -464,7 +464,7 @@ qaws_status qaws_curve_create_rational_bezier_ex(
 	curve->span_boundaries[1] = 1;
 
 	/* Allocate impl */
-	impl = (qaws_rational_bezier_impl*)qaws_internal_calloc(allocator, 1, sizeof(qaws_rational_bezier_impl));
+	impl = (qaws_rational_bezier_impl*)qaws_internal_calloc(1, sizeof(qaws_rational_bezier_impl), allocator);
 	if (!impl) {
 		qaws_curve_destroy(curve);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
@@ -526,5 +526,5 @@ qaws_status qaws_curve_create_rational_bezier(
 	qaws_curve** out_curve,
 	qaws_rational_bezier_desc const* desc)
 {
-	return qaws_curve_create_rational_bezier_ex(desc, NULL, out_curve);
+	return qaws_curve_create_rational_bezier_ex(out_curve, desc, NULL);
 }

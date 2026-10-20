@@ -59,7 +59,7 @@ typedef struct qaws_shape_quality
 } qaws_shape_quality;
 
 /* out_ideal (may be NULL): per vertex its rounded ideal valence (0 for an isolated vertex); irregular counts the vertices off it */
-qaws_status qaws_mesh_3d_measure_shape(qaws_mesh_3d const* mesh, qaws_shape_quality* out_quality, unsigned int* out_ideal);
+qaws_status qaws_mesh_3d_measure_shape(qaws_shape_quality* out_quality, unsigned int* out_ideal, qaws_mesh_3d const* mesh);
 
 typedef struct qaws_deviation_desc
 {
@@ -83,7 +83,7 @@ typedef struct qaws_mesh_deviation
 /* desc NULL: the defaults. INVALID_ARGUMENT for a NULL mesh, reference or
    out, a mesh without faces, a reference without triangles, a negative
    precision. */
-qaws_status qaws_mesh_3d_measure_deviation(qaws_mesh_3d const* mesh, qaws_mesh_reference const* reference, qaws_deviation_desc const* desc,
-	qaws_mesh_deviation* out_deviation);
+qaws_status qaws_mesh_3d_measure_deviation(qaws_mesh_deviation* out_deviation, qaws_mesh_reference const* reference, qaws_mesh_3d const* mesh,
+	qaws_deviation_desc const* desc);
 
 #endif /* QAWS_MESH_MEASURE_H */

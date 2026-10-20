@@ -200,7 +200,7 @@ void qaws_get_thread_allocator(qaws_allocator* out_allocator)
 		*out_allocator = g_thread;
 }
 
-void qaws_exchange_thread_allocator(qaws_allocator const* allocator, qaws_allocator* out_previous)
+void qaws_exchange_thread_allocator(qaws_allocator* out_previous, qaws_allocator const* allocator)
 {
 	qaws_allocator previous = g_thread;
 	qaws_set_thread_allocator(allocator);
@@ -216,7 +216,7 @@ qaws_allocator const* qaws_internal_current_allocator(void)
 static QAWS_THREAD_LOCAL qaws_allocator g_scratch;
 static QAWS_THREAD_LOCAL int g_scratch_set;
 
-void qaws_exchange_thread_scratch_allocator(qaws_allocator const* allocator, qaws_allocator* out_previous)
+void qaws_exchange_thread_scratch_allocator(qaws_allocator* out_previous, qaws_allocator const* allocator)
 {
 	qaws_allocator previous = g_scratch;
 	g_scratch_set = mem_custom(allocator);
@@ -230,7 +230,7 @@ void qaws_exchange_thread_scratch_allocator(qaws_allocator const* allocator, qaw
 
 void* qaws_internal_scratch_malloc(size_t size)
 {
-	return qaws_internal_alloc_from(g_scratch_set ? &g_scratch : NULL, size);
+	return qaws_internal_alloc_from(size, g_scratch_set ? &g_scratch : NULL);
 }
 
 void* qaws_internal_scratch_zalloc(size_t count, size_t size)
@@ -300,7 +300,7 @@ static void* mem_finish(unsigned char* raw, unsigned int kind, qaws_allocator co
 	return raw + head;
 }
 
-void* qaws_internal_alloc_from(qaws_allocator const* allocator, size_t size)
+void* qaws_internal_alloc_from(size_t size, qaws_allocator const* allocator)
 {
 	unsigned char* raw;
 	unsigned int kind;
@@ -344,7 +344,7 @@ void* qaws_internal_alloc_from(qaws_allocator const* allocator, size_t size)
 
 void* qaws_internal_malloc(size_t size)
 {
-	return qaws_internal_alloc_from(NULL, size);
+	return qaws_internal_alloc_from(size, NULL);
 }
 
 size_t qaws_internal_mul2(size_t a, size_t b)
@@ -382,7 +382,7 @@ void* qaws_internal_zalloc(size_t count, size_t size)
 	void* p;
 	if (size && count > SIZE_MAX / size)
 		return NULL;
-	p = qaws_internal_alloc_from(NULL, count * size);
+	p = qaws_internal_alloc_from(count * size, NULL);
 	if (p)
 		memset(p, 0, count * size);
 	return p;
@@ -425,7 +425,7 @@ void* qaws_internal_realloc(void* ptr, size_t size)
 	if (t.kind == MEM_SIZED && a.resize && a.resize(raw, t.size + head, size + head, MEM_ALIGN, a.user_data))
 		return mem_finish(raw, MEM_SIZED, &a, size, 0);
 	/* a new block from the same allocator; the old one kept on failure */
-	p = qaws_internal_alloc_from(&a, size);
+	p = qaws_internal_alloc_from(size, &a);
 	if (!p)
 		return NULL;
 	memcpy(p, ptr, t.size < size ? t.size : size);

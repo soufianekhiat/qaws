@@ -68,7 +68,7 @@ static qaws_mesh_3d* tq_make(double const* x, unsigned int nv, unsigned int cons
 	d.face_vertices = f;
 	d.face_sizes = fs;
 	d.face_count = nf;
-	qaws_mesh_3d_create(&d, &m);
+	qaws_mesh_3d_create(&m, &d);
 	free(p);
 	return m;
 }
@@ -85,10 +85,10 @@ static void tq_measure(qaws_mesh_3d const* m, tq_shape* s)
 	qaws_scalar* p = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (3 * nv + 3));
 	qaws_mesh_quality q;
 	double lsum = 0;
-	qaws_mesh_3d_get_positions(m, p);
-	qaws_mesh_3d_get_faces(m, fv, fs);
-	qaws_mesh_3d_get_edges(m, e);
-	qaws_mesh_3d_measure_quality(m, &q);
+	qaws_mesh_3d_get_positions(p, m);
+	qaws_mesh_3d_get_faces(fv, fs, m);
+	qaws_mesh_3d_get_edges(e, m);
+	qaws_mesh_3d_measure_quality(&q, m);
 	memset(s, 0, sizeof *s);
 	s->irregular = q.irregular;
 	s->quads = q.quads;
@@ -181,9 +181,9 @@ static qaws_mesh_3d* tq_blob(void)
 	nv0 = qaws_mesh_3d_get_vertex_count(m);
 	e = (unsigned int*)malloc(sizeof(unsigned int) * 2 * ne);
 	src = (unsigned int*)malloc(sizeof(unsigned int) * 2 * ne);
-	qaws_mesh_3d_get_edges(m, e);
+	qaws_mesh_3d_get_edges(e, m);
 	for (i = 0; i < ne; i++)
-		if (qaws_mesh_3d_split_edge(m, e[2 * i], e[2 * i + 1], NULL, NULL, &w) == QAWS_STATUS_OK)
+		if (qaws_mesh_3d_split_edge(&w, m, NULL, NULL, e[2 * i], e[2 * i + 1]) == QAWS_STATUS_OK)
 		{
 			src[2 * (w - nv0)] = e[2 * i];
 			src[2 * (w - nv0) + 1] = e[2 * i + 1];
@@ -191,7 +191,7 @@ static qaws_mesh_3d* tq_blob(void)
 	free(e);
 	ne = qaws_mesh_3d_get_edge_count(m);
 	e = (unsigned int*)malloc(sizeof(unsigned int) * 2 * ne);
-	qaws_mesh_3d_get_edges(m, e);
+	qaws_mesh_3d_get_edges(e, m);
 	for (i = 0; i < ne; i++)
 	{
 		unsigned int a = e[2 * i], b = e[2 * i + 1], nw, old;
@@ -206,7 +206,7 @@ static qaws_mesh_3d* tq_blob(void)
 	free(src);
 	n = qaws_mesh_3d_get_vertex_count(m);
 	p = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * n);
-	qaws_mesh_3d_get_positions(m, p);
+	qaws_mesh_3d_get_positions(p, m);
 	for (i = 0; i < n; i++)
 	{
 		double q[3], l, s;
@@ -285,7 +285,7 @@ static qaws_mesh_3d* tq_quads(qaws_mesh_3d const* m, double L, qaws_mesh_referen
 	d.reference = r;
 	d.target_length = (qaws_scalar)L;
 	d.pure = 1;
-	qaws_mesh_quadrangulate(m, &d, &out, NULL);
+	qaws_mesh_quadrangulate(&out, NULL, m, &d);
 	if (out)
 		tq_measure(out, s);
 	s->ms = 1000.0 * (double)(clock() - t0) / CLOCKS_PER_SEC;
@@ -318,7 +318,7 @@ static qaws_mesh_3d* tq_wavy(tq_shape* s)
 	memset(&g, 0, sizeof g);
 	g.elements = QAWS_ELEMENTS_QUADS;
 	g.target_length = (qaws_scalar)0.1;
-	qaws_mesh_generate_surface(srf, &g, &out, NULL);
+	qaws_mesh_generate_surface(&out, NULL, srf, &g);
 	if (out)
 		tq_measure(out, s);
 	qaws_surface_destroy(srf);
@@ -526,7 +526,7 @@ static unsigned char* tq_prepare(qaws_mesh_3d* g, qaws_mesh_reference const* r)
 	hm_foot_enable(m);
 	for (v = 0; v < m->nv; v++)
 	{
-		qaws_mesh_reference_get_vertex_location(r, v, &m->foot[v]);
+		qaws_mesh_reference_get_vertex_location(&m->foot[v], r, v);
 		if (hm_is_border_vertex(m, v))
 			kind[v] = hm_valence(m, v) == 2 ? 2 : 1;
 		if (kind[v] == 2)
@@ -544,7 +544,7 @@ static void test_pairs(void)
 	tq_shape before, after;
 	unsigned int ops;
 	char msg[300];
-	qaws_mesh_reference_create(g, NULL, &r);
+	qaws_mesh_reference_create(&r, g, NULL);
 	kind = tq_prepare(g, r);
 	hm_rotate(&g->hm, hm_find(&g->hm, 39, 40), 1);   /* (4,4)-(5,4): two 3-5 pairs */
 	tq_measure(g, &before);
@@ -560,7 +560,7 @@ static void test_pairs(void)
 	qaws_mesh_3d_destroy(g);
 	/* a jittered grid relaxed back */
 	g = tq_grid(8, 0, 0);
-	qaws_mesh_reference_create(g, NULL, &r);
+	qaws_mesh_reference_create(&r, g, NULL);
 	qaws_mesh_3d_destroy(g);
 	g = tq_grid(8, 0, 0.5);
 	kind = tq_prepare(g, r);
@@ -591,8 +591,8 @@ static double tq_foot(qaws_mesh_3d const* q, qaws_mesh_reference const* r)
 	qaws_mesh_location* l = (qaws_mesh_location*)malloc(sizeof(qaws_mesh_location) * (nv + 1));
 	qaws_scalar *x = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (3 * nv + 3)), *y = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (3 * nv + 3));
 	double worst = 0;
-	qaws_mesh_3d_get_positions(q, x);
-	if (qaws_mesh_3d_get_footpoints(q, l) != QAWS_STATUS_OK || qaws_mesh_reference_evaluate(r, l, nv, y, NULL, NULL) != QAWS_STATUS_OK)
+	qaws_mesh_3d_get_positions(x, q);
+	if (qaws_mesh_3d_get_footpoints(l, q) != QAWS_STATUS_OK || qaws_mesh_reference_evaluate(y, NULL, NULL, r, l, nv) != QAWS_STATUS_OK)
 		worst = HUGE_VAL;
 	for (i = 0; i < nv && worst < HUGE_VAL; i++)
 		for (k = 0; k < 3; k++)
@@ -607,8 +607,8 @@ static unsigned int tq_creases(qaws_mesh_3d const* q, int* on_rims)
 	unsigned int n = qaws_mesh_3d_get_feature_edge_count(q), nv = qaws_mesh_3d_get_vertex_count(q), i;
 	unsigned int* e = (unsigned int*)malloc(sizeof(unsigned int) * (2 * n + 2));
 	qaws_scalar* p = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (3 * nv + 3));
-	qaws_mesh_3d_get_positions(q, p);
-	qaws_mesh_3d_get_feature_edges(q, e);
+	qaws_mesh_3d_get_positions(p, q);
+	qaws_mesh_3d_get_feature_edges(e, q);
 	*on_rims = 1;
 	for (i = 0; i < 2 * n; i++)
 		*on_rims &= fabs(fabs((double)p[3 * e[i] + 2]) - 0.8) < 1e-6;
@@ -629,7 +629,7 @@ static void test_quads(void)
 	unsigned int ne;
 	int rims;
 	char msg[600];
-	qaws_mesh_reference_create(blob, NULL, &rb);
+	qaws_mesh_reference_create(&rb, blob, NULL);
 	q[1] = rb ? tq_quads(blob, 0.11, rb, &b) : NULL;
 	if (!heavy)
 	{
@@ -639,7 +639,7 @@ static void test_quads(void)
 			goto done;
 		}
 		tq_print("blob", &b);
-		qaws_mesh_3d_get_topology(q[1], &tb);
+		qaws_mesh_3d_get_topology(&tb, q[1]);
 		fb = tq_foot(q[1], rb);
 		/* the blob's bounds as below */
 		sprintf(msg, "blob, all quads at 0.11: %u irregular (8 before), SJ min %.3f (0.761) mean %.3f (0.991), AD %.2f (3.68, %.0f%% lower)",
@@ -653,10 +653,10 @@ static void test_quads(void)
 		printf("  quadrangulation with the finishing: blob %.0f ms\n", b.ms);
 		goto done;
 	}
-	qaws_mesh_reference_create(can, NULL, &rc);
+	qaws_mesh_reference_create(&rc, can, NULL);
 	q[0] = rc ? tq_quads(can, 0.14, rc, &a) : NULL;
 	q[2] = tq_wavy(&c);
-	qaws_mesh_reference_create(torus, NULL, &rt);
+	qaws_mesh_reference_create(&rt, torus, NULL);
 	q[3] = rt ? tq_quads(torus, 0.3, rt, &t) : NULL;
 	if (!q[0] || !q[1] || !q[2] || !q[3])
 	{
@@ -667,8 +667,8 @@ static void test_quads(void)
 	tq_print("blob", &b);
 	tq_print("wavy patch", &c);
 	tq_print("torus", &t);
-	qaws_mesh_3d_get_topology(q[0], &tc);
-	qaws_mesh_3d_get_topology(q[1], &tb);
+	qaws_mesh_3d_get_topology(&tc, q[0]);
+	qaws_mesh_3d_get_topology(&tb, q[1]);
 	fc = tq_foot(q[0], rc);
 	fb = tq_foot(q[1], rb);
 	ne = tq_creases(q[0], &rims);

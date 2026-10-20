@@ -1343,8 +1343,8 @@ out:
 	return result;
 }
 
-qaws_status qaws_volume_mesh_tetrahedralize(qaws_mesh_3d const* boundary, qaws_tetrahedralize_desc const* desc, qaws_volume_mesh** out_mesh,
-	qaws_mesh_report* out_report)
+qaws_status qaws_volume_mesh_tetrahedralize(qaws_volume_mesh** out_mesh, qaws_mesh_report* out_report, qaws_mesh_3d const* boundary,
+	qaws_tetrahedralize_desc const* desc)
 {
 	tt_ctx t;
 	tt_mesh* m = &t.m;
@@ -1723,8 +1723,8 @@ qaws_status qaws_volume_mesh_tetrahedralize(qaws_mesh_3d const* boundary, qaws_t
 	if (st == QAWS_STATUS_OK)
 	{
 		qaws_mesh_3d* b = NULL;
-		if (qaws_volume_mesh_get_boundary(*out_mesh, &b) == QAWS_STATUS_OK)
-			qaws_mesh_3d_measure_quality(b, &rep.quality);
+		if (qaws_volume_mesh_get_boundary(&b, *out_mesh) == QAWS_STATUS_OK)
+			qaws_mesh_3d_measure_quality(&rep.quality, b);
 		qaws_mesh_3d_destroy(b);
 	}
 done:

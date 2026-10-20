@@ -35,7 +35,7 @@ static qaws_mesh_3d* tv_cube_surface(void)
 	d.face_vertices = f;
 	d.face_sizes = fs;
 	d.face_count = 6;
-	qaws_mesh_3d_create(&d, &m);
+	qaws_mesh_3d_create(&m, &d);
 	return m;
 }
 
@@ -47,8 +47,8 @@ static double tv_enclosed(qaws_mesh_3d const* m)
 	unsigned int* fv = (unsigned int*)malloc(sizeof(unsigned int) * qaws_mesh_3d_get_corner_count(m));
 	unsigned int* fs = (unsigned int*)malloc(sizeof(unsigned int) * nf);
 	double vol = 0;
-	qaws_mesh_3d_get_positions(m, x);
-	qaws_mesh_3d_get_faces(m, fv, fs);
+	qaws_mesh_3d_get_positions(x, m);
+	qaws_mesh_3d_get_faces(fv, fs, m);
 	for (f = 0, q = 0; f < nf; q += fs[f], f++)
 		for (k = 1; k + 1 < fs[f]; k++)
 		{
@@ -80,12 +80,12 @@ static void test_container(void)
 	d.cell_vertices = hex;
 	d.cell_types = &ht;
 	d.cell_count = 1;
-	s1 = qaws_volume_mesh_create(&d, &m);
+	s1 = qaws_volume_mesh_create(&m, &d);
 	if (s1 == QAWS_STATUS_OK)
 	{
-		qaws_volume_mesh_measure_quality(m, &q);
-		s2 = qaws_volume_mesh_get_boundary(m, &b);
-		qaws_mesh_3d_get_topology(b, &top);
+		qaws_volume_mesh_measure_quality(&q, m);
+		s2 = qaws_volume_mesh_get_boundary(&b, m);
+		qaws_mesh_3d_get_topology(&top, b);
 		sprintf(msg, "a hexahedron: validate %s, scaled Jacobian %.3f, volume %.6f, border %u faces (%u quads), closed %d", qaws_status_to_string(qaws_volume_mesh_validate(m)),
 			(double)q.min_scaled_jacobian, (double)q.volume, qaws_mesh_3d_get_face_count(b), qaws_mesh_3d_get_face_count(b), top.closed);
 		TEST_ASSERT(s2 == QAWS_STATUS_OK && qaws_volume_mesh_validate(m) == QAWS_STATUS_OK && q.hexahedra == 1 && fabs((double)q.min_scaled_jacobian - 1) < 1e-12
@@ -111,10 +111,10 @@ static void test_container(void)
 	d.cell_vertices = tets;
 	d.cell_types = NULL;
 	d.cell_count = 6;
-	s1 = qaws_volume_mesh_create(&d, &m);
+	s1 = qaws_volume_mesh_create(&m, &d);
 	if (s1 == QAWS_STATUS_OK)
 	{
-		qaws_volume_mesh_get_cell_adjacency(m, adj);
+		qaws_volume_mesh_get_cell_adjacency(adj, m);
 		for (i = 0; i < 24; i++)
 		{
 			unsigned int o = adj[i], k, back = 0;
@@ -127,9 +127,9 @@ static void test_container(void)
 				back |= adj[4 * o + k] == i / 4;
 			sym &= back;
 		}
-		qaws_volume_mesh_measure_quality(m, &q);
-		qaws_volume_mesh_get_boundary(m, &b);
-		qaws_mesh_3d_get_topology(b, &top);
+		qaws_volume_mesh_measure_quality(&q, m);
+		qaws_volume_mesh_get_boundary(&b, m);
+		qaws_mesh_3d_get_topology(&top, b);
 		sprintf(msg, "six tetrahedra: validate %s, %u border facets, adjacency symmetric %u, volume %.6f, border %u faces closed %d",
 			qaws_status_to_string(qaws_volume_mesh_validate(m)), nborder, sym, (double)q.volume, qaws_mesh_3d_get_face_count(b), top.closed);
 		TEST_ASSERT(qaws_volume_mesh_validate(m) == QAWS_STATUS_OK && qaws_volume_mesh_get_facet_count(m) == 24 && nborder == 12 && sym
@@ -146,13 +146,13 @@ static void test_container(void)
 		qaws_status s3, s4;
 		d.cell_vertices = bad;
 		d.cell_count = 1;
-		s3 = qaws_volume_mesh_create(&d, &m);
+		s3 = qaws_volume_mesh_create(&m, &d);
 		s4 = m ? qaws_volume_mesh_validate(m) : QAWS_STATUS_OK;
 		qaws_volume_mesh_destroy(m);
 		m = NULL;
 		d.cell_vertices = three;
 		d.cell_count = 3;
-		s1 = qaws_volume_mesh_create(&d, &m);
+		s1 = qaws_volume_mesh_create(&m, &d);
 		sprintf(msg, "refusals: an inverted cell validates %s, a facet of three cells %s", qaws_status_to_string(s4), qaws_status_to_string(s1));
 		TEST_ASSERT(s3 == QAWS_STATUS_OK && s4 == QAWS_STATUS_INVALID_TOPOLOGY && s1 == QAWS_STATUS_INVALID_TOPOLOGY && !m, msg);
 	}
@@ -172,9 +172,9 @@ static void tv_check(char const* name, qaws_mesh_3d const* surface, qaws_volume_
 		TEST_ASSERT(0, msg);
 		return;
 	}
-	qaws_volume_mesh_measure_quality(v, &q);
-	qaws_volume_mesh_get_boundary(v, &b);
-	qaws_mesh_3d_get_topology(b, &top);
+	qaws_volume_mesh_measure_quality(&q, v);
+	qaws_volume_mesh_get_boundary(&b, v);
+	qaws_mesh_3d_get_topology(&top, b);
 	sprintf(msg, "%s: %u tetrahedra, validate %s, volume %.12f for %.12f, border %u vertices (surface %u) closed %d genus %u, dihedral %.1f..%.1f",
 		name, q.tetrahedra, qaws_status_to_string(qaws_volume_mesh_validate(v)), (double)q.volume, encl, qaws_mesh_3d_get_vertex_count(b),
 		qaws_mesh_3d_get_vertex_count(surface), top.closed, top.genus, (double)q.min_dihedral, (double)q.max_dihedral);
@@ -193,14 +193,14 @@ static void test_cube(void)
 	qaws_status st;
 	memset(&d, 0, sizeof d);
 	d.border_only = 1;
-	st = qaws_volume_mesh_tetrahedralize(s, &d, &v, &rep);
+	st = qaws_volume_mesh_tetrahedralize(&v, &rep, s, &d);
 	tv_check("a cube from its corners", s, v, st, 0, 30);
 	TEST_ASSERT(!v || (qaws_volume_mesh_get_vertex_count(v) == 8 && rep.splits == 0), "a cube from its corners: no vertex added");
 	qaws_volume_mesh_destroy(v);
 	v = NULL;
 	d.border_only = 0;
 	d.target_length = (qaws_scalar)0.25;
-	st = qaws_volume_mesh_tetrahedralize(s, &d, &v, &rep);
+	st = qaws_volume_mesh_tetrahedralize(&v, &rep, s, &d);
 	tv_check("a cube filled", s, v, st, 0, 5);
 	TEST_ASSERT(!v || (qaws_volume_mesh_get_vertex_count(v) > 30 && rep.moves > 20), "a cube filled: points inside");
 	qaws_volume_mesh_destroy(v);
@@ -250,15 +250,15 @@ static void test_torus(void)
 	qaws_status st;
 	memset(&g, 0, sizeof g);
 	g.target_length = (qaws_scalar)0.25;
-	st = qaws_mesh_generate_surface(t, &g, &s, NULL);
+	st = qaws_mesh_generate_surface(&s, NULL, t, &g);
 	memset(&d, 0, sizeof d);
 	if (st == QAWS_STATUS_OK)
-		st = qaws_volume_mesh_tetrahedralize(s, &d, &v, NULL);
+		st = qaws_volume_mesh_tetrahedralize(&v, NULL, s, &d);
 	tv_check("a torus filled", s, v, st, 1, 8);
 	if (v)
 	{
 		qaws_volume_quality q;
-		qaws_volume_mesh_measure_quality(v, &q);
+		qaws_volume_mesh_measure_quality(&q, v);
 		TEST_ASSERT((double)q.max_radius_edge < 2.5 && (double)q.max_dihedral < 170, "a torus filled: circumradius over shortest edge below 2.5, dihedral below 170");
 	}
 	qaws_volume_mesh_destroy(v);
@@ -299,10 +299,10 @@ static void test_box(void)
 	memset(&g, 0, sizeof g);
 	g.target_length = (qaws_scalar)0.15;
 	if (st == QAWS_STATUS_OK)
-		st = qaws_mesh_generate_shell(atlas, &g, &s, NULL);
+		st = qaws_mesh_generate_shell(&s, NULL, atlas, &g);
 	memset(&d, 0, sizeof d);
 	if (st == QAWS_STATUS_OK)
-		st = qaws_volume_mesh_tetrahedralize(s, &d, &v, NULL);
+		st = qaws_volume_mesh_tetrahedralize(&v, NULL, s, &d);
 	tv_check("a box filled", s, v, st, 0, 5);
 	TEST_ASSERT(!v || fabs(tv_enclosed(s) - 2.8) < 1e-12, "a box filled: its surface encloses 2 x 1.4 x 1");
 	qaws_volume_mesh_destroy(v);
@@ -330,13 +330,13 @@ static void test_refusals(void)
 	{
 		unsigned int fs = 4;
 		md.face_sizes = &fs;
-		qaws_mesh_3d_create(&md, &open);
+		qaws_mesh_3d_create(&open, &md);
 	}
 	memset(&d, 0, sizeof d);
-	s1 = qaws_volume_mesh_tetrahedralize(open, &d, &v, NULL);
+	s1 = qaws_volume_mesh_tetrahedralize(&v, NULL, open, &d);
 	d.method = QAWS_TETS_ENVELOPE;
-	s2 = qaws_volume_mesh_tetrahedralize(cube, &d, &v, NULL);
-	s3 = qaws_volume_mesh_tetrahedralize(cube, NULL, &v, NULL);
+	s2 = qaws_volume_mesh_tetrahedralize(&v, NULL, cube, &d);
+	s3 = qaws_volume_mesh_tetrahedralize(&v, NULL, cube, NULL);
 	sprintf(msg, "refusals: an open surface %s, ENVELOPE %s, no description %s", qaws_status_to_string(s1), qaws_status_to_string(s2), qaws_status_to_string(s3));
 	TEST_ASSERT(s1 == QAWS_STATUS_INVALID_TOPOLOGY && s2 == QAWS_STATUS_UNSUPPORTED_OPERATION && s3 == QAWS_STATUS_INVALID_ARGUMENT && !v, msg);
 	qaws_mesh_3d_destroy(open);

@@ -53,7 +53,7 @@ static void hs_ribbon(svg* s, projection const* pr, qaws_curve const* c, int fre
 	for (i = 0; i < HS_SAMPLES; i++)
 		t[i] = r.min_value + (r.max_value - r.min_value) * (qaws_scalar)i / (HS_SAMPLES - 1);
 	if (!frenet)
-		qaws_curve_compute_rotation_minimizing_frames_3d(c, t, HS_SAMPLES, NULL, fr);
+		qaws_curve_compute_rotation_minimizing_frames_3d(fr, c, t, NULL, HS_SAMPLES);
 	for (i = 0; i < HS_SAMPLES; i++)
 	{
 		qaws_eval_result_3d e;
@@ -151,7 +151,7 @@ static void hs_dots(svg* s, viewport const* v, qaws_curve const* c, int by_lengt
 		qaws_eval_result_2d e;
 		t = r.min_value + (r.max_value - r.min_value) * (qaws_scalar)i / (HS_DOTS - 1);
 		if (by_length)
-			qaws_curve_compute_parameter_at_arc_length(c, r.min_value, total * (qaws_scalar)i / (HS_DOTS - 1), &t);
+			qaws_curve_compute_parameter_at_arc_length(&t, c, r.min_value, total * (qaws_scalar)i / (HS_DOTS - 1));
 		qaws_curve_evaluate_2d(&e, c, t, QAWS_EVAL_FLAG_POSITION);
 		xy[2 * i] = e.position.x;
 		xy[2 * i + 1] = e.position.y;
@@ -280,7 +280,7 @@ static void figure_closest(void)
 	svg_line(&s, vx(&vl, 0), vy(&vl, 0), vx(&vl, e.position.x), vy(&vl, e.position.y), "#f4a261", 2.5, 1);
 	snprintf(note, sizeof note, "distance %.6f", best);
 	svg_text(&s, vl.x0 + 16, vl.y0 + vl.h - 16, 13, "#57606a", "start", note);
-	qaws_curve_find_closest_point_certified_2d(c, q, &t, &dist, &gap);
+	qaws_curve_find_closest_point_certified_2d(&t, &dist, &gap, c, q);
 	qaws_curve_evaluate_2d(&e, c, t, QAWS_EVAL_FLAG_POSITION);
 	svg_line(&s, vx(&vr, 0), vy(&vr, 0), vx(&vr, e.position.x), vy(&vr, e.position.y), "#2a9d8f", 2.5, 1);
 	svg_circle(&s, vx(&vr, e.position.x), vy(&vr, e.position.y), 5, "#2a9d8f", "#1b1f24");
@@ -353,8 +353,8 @@ static void figure_tessellation(void)
 	memset(&td, 0, sizeof td);
 	td.chord_tolerance = (qaws_scalar)0.02;
 	td.angle_tolerance = (qaws_scalar)0.35;
-	qaws_curve_tessellate_2d(c, &td, NULL, NULL, 0, &n);
-	if (n > HS_TESS || qaws_curve_tessellate_2d(c, &td, t, pts, HS_TESS, &n) != QAWS_STATUS_OK)
+	qaws_curve_tessellate_2d(NULL, NULL, &n, c, 0, &td);
+	if (n > HS_TESS || qaws_curve_tessellate_2d(t, pts, &n, c, HS_TESS, &td) != QAWS_STATUS_OK)
 	{
 		printf("host4: tessellation failed\n");
 		qaws_curve_destroy(c);
@@ -449,7 +449,7 @@ static void figure_surface_closest(void)
 		}
 	snprintf(note, sizeof note, "%.6f", best);
 	hs_mark(&s, &left, near_pt, "#f4a261", note);
-	qaws_surface_find_closest_point_certified(c, q, &u, &v, &cl, &dist, &gap);
+	qaws_surface_find_closest_point_certified(&u, &v, &cl, &dist, &gap, c, q);
 	snprintf(note, sizeof note, "%.9f (gap %.0e)", (double)dist, (double)gap);
 	hs_mark(&s, &right, cl, "#2a9d8f", note);
 	svg_colorbar(&s, 640, 716, 300, 12, "2.9", "5.0");
@@ -558,8 +558,8 @@ static void figure_tessellation_surface(void)
 	memset(&td, 0, sizeof td);
 	td.chord_tolerance = (qaws_scalar)0.02;
 	td.angle_tolerance = (qaws_scalar)0.5;
-	qaws_surface_tessellate_adaptive(c, &td, NULL, 0, &nv, NULL, 0, &ni);
-	if (nv <= HS_TV && ni <= HS_TI && qaws_surface_tessellate_adaptive(c, &td, v, HS_TV, &nv, idx, HS_TI, &ni) == QAWS_STATUS_OK)
+	qaws_surface_tessellate_adaptive(NULL, &nv, NULL, &ni, c, 0, 0, &td);
+	if (nv <= HS_TV && ni <= HS_TI && qaws_surface_tessellate_adaptive(v, &nv, idx, &ni, c, HS_TV, HS_TI, &td) == QAWS_STATUS_OK)
 	{
 		hs_mesh(&s, &right, v, idx, ni);
 		snprintf(note, sizeof note, "%u triangles, no cracks, counts first into caller buffers", ni / 3);

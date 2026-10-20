@@ -180,7 +180,7 @@ static qaws_status rm_energy(rs_core const* core, double const* x, double* E, do
 	qaws_repulsive_mesh const* m = s->m;
 	qaws_status st = qaws_internal_repulsive_mesh_bh(E, grad, m, x, core->theta);   /* (theta 0 opens every node: the direct terms, in closed form) */
 	unsigned int o;
-	for (o = 0; st == QAWS_STATUS_OK && o < s->nobs; o++) st = qaws_internal_obstacle_energy(s->obs[o], m, x, core->theta, E, grad);
+	for (o = 0; st == QAWS_STATUS_OK && o < s->nobs; o++) st = qaws_internal_obstacle_energy(E, grad, s->obs[o], m, x, core->theta);
 	if (st == QAWS_STATUS_OK && (s->area_w > 0 || s->vol_w > 0))
 	{
 		/* the area weighted (the paper's minimize area); the volume's deviation
@@ -720,11 +720,11 @@ static void rm_targets(qaws_repulsive_mesh_solver const* s, qaws_repulsive_targe
 qaws_status qaws_repulsive_mesh_solver_solution_jvp(qaws_scalar* out_dx, unsigned int* out_gauge, qaws_repulsive_mesh_solver const* s,
 	qaws_repulsive_targets const* d)
 {
-	return qaws_repulsive_mesh_solver_solution_jvp_checked(s, d, out_dx, out_gauge, NULL);
+	return qaws_repulsive_mesh_solver_solution_jvp_checked(out_dx, out_gauge, NULL, s, d);
 }
 
-qaws_status qaws_repulsive_mesh_solver_solution_jvp_checked(qaws_repulsive_mesh_solver const* s, qaws_repulsive_targets const* d, qaws_scalar* out_dx,
-	unsigned int* out_gauge, qaws_repulsive_derivative_report* out_report)
+qaws_status qaws_repulsive_mesh_solver_solution_jvp_checked(qaws_scalar* out_dx, unsigned int* out_gauge, qaws_repulsive_derivative_report* out_report,
+	qaws_repulsive_mesh_solver const* s, qaws_repulsive_targets const* d)
 {
 	double *rows, *dx;
 	unsigned int i;
@@ -753,11 +753,11 @@ qaws_status qaws_repulsive_mesh_solver_solution_jvp_checked(qaws_repulsive_mesh_
 qaws_status qaws_repulsive_mesh_solver_solution_vjp(qaws_repulsive_targets* out_bar, unsigned int* out_gauge, qaws_repulsive_mesh_solver const* s,
 	qaws_scalar const* xbar)
 {
-	return qaws_repulsive_mesh_solver_solution_vjp_checked(s, xbar, out_bar, out_gauge, NULL);
+	return qaws_repulsive_mesh_solver_solution_vjp_checked(out_bar, out_gauge, NULL, s, xbar);
 }
 
-qaws_status qaws_repulsive_mesh_solver_solution_vjp_checked(qaws_repulsive_mesh_solver const* s, qaws_scalar const* xbar, qaws_repulsive_targets* out_bar,
-	unsigned int* out_gauge, qaws_repulsive_derivative_report* out_report)
+qaws_status qaws_repulsive_mesh_solver_solution_vjp_checked(qaws_repulsive_targets* out_bar, unsigned int* out_gauge, qaws_repulsive_derivative_report* out_report,
+	qaws_repulsive_mesh_solver const* s, qaws_scalar const* xbar)
 {
 	double *rows, *xb;
 	unsigned int i;
@@ -877,7 +877,7 @@ qaws_status qaws_repulsive_mesh_solver_create(qaws_repulsive_mesh_solver** out_s
 		}
 		for (i = 0; i < d.obstacle_count; i++)
 		{
-			if ((st = qaws_internal_obstacle_create(d.obstacles + i, s->obs + i)) != QAWS_STATUS_OK)
+			if ((st = qaws_internal_obstacle_create(s->obs + i, d.obstacles + i)) != QAWS_STATUS_OK)
 			{
 				qaws_repulsive_mesh_solver_destroy(s);
 				return st;
@@ -1047,10 +1047,10 @@ qaws_status qaws_repulsive_mesh_solver_step(qaws_repulsive_report* out_report, q
 	return s ? qaws_internal_rs_step(out_report, positions, &s->core) : QAWS_STATUS_INVALID_ARGUMENT;
 }
 
-qaws_status qaws_repulsive_mesh_solver_objective(qaws_repulsive_mesh_solver const* s, qaws_scalar const* positions, qaws_scalar* out_energy,
-	qaws_scalar* out_gradient)
+qaws_status qaws_repulsive_mesh_solver_objective(qaws_scalar* out_energy, qaws_scalar* out_gradient, qaws_repulsive_mesh_solver const* s,
+	qaws_scalar const* positions)
 {
-	return s ? qaws_internal_rs_objective(&s->core, positions, out_energy, out_gradient) : QAWS_STATUS_INVALID_ARGUMENT;
+	return s ? qaws_internal_rs_objective(out_energy, out_gradient, &s->core, positions) : QAWS_STATUS_INVALID_ARGUMENT;
 }
 
 qaws_status qaws_repulsive_mesh_solve(qaws_repulsive_report* out_report, qaws_scalar* positions,
@@ -1058,16 +1058,16 @@ qaws_status qaws_repulsive_mesh_solve(qaws_repulsive_report* out_report, qaws_sc
 {
 	qaws_repulsive_mesh_solver* s = NULL;
 	unsigned int max = desc && desc->max_iterations ? desc->max_iterations : 100;
-	qaws_status st = qaws_repulsive_mesh_solver_create_ex(mesh, desc, positions, mesh ? &mesh->alloc : NULL, &s);
+	qaws_status st = qaws_repulsive_mesh_solver_create_ex(&s, mesh, positions, desc, mesh ? &mesh->alloc : NULL);
 	if (st != QAWS_STATUS_OK)
 		return st;
-	st = qaws_internal_rs_solve(&s->core, max, positions, out_report);
+	st = qaws_internal_rs_solve(out_report, positions, &s->core, max);
 	qaws_repulsive_mesh_solver_destroy(s);
 	return st;
 }
 
-qaws_status qaws_repulsive_mesh_solver_create_ex(qaws_repulsive_mesh const* mesh, qaws_repulsive_mesh_solve_desc const* desc,
-	qaws_scalar const* positions, qaws_allocator const* allocator, qaws_repulsive_mesh_solver** out_solver)
+qaws_status qaws_repulsive_mesh_solver_create_ex(qaws_repulsive_mesh_solver** out_solver, qaws_repulsive_mesh const* mesh,
+	qaws_scalar const* positions, qaws_repulsive_mesh_solve_desc const* desc, qaws_allocator const* allocator)
 {
 	qaws_internal_rs_scope sc;
 	qaws_status st;

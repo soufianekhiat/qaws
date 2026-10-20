@@ -602,9 +602,9 @@ static qaws_status create_fillet_internal(
 /* ------------------------------------------------------------------ */
 
 qaws_status qaws_surface_create_fillet_ex(
+	qaws_surface** out_surface,
 	qaws_surface_fillet_desc const* desc,
-	qaws_allocator const* allocator,
-	qaws_surface** out_surface)
+	qaws_allocator const* allocator)
 {
 	return create_fillet_internal(allocator, desc, out_surface, NULL, NULL);
 }
@@ -613,15 +613,15 @@ qaws_status qaws_surface_create_fillet(
 	qaws_surface** out_surface,
 	qaws_surface_fillet_desc const* desc)
 {
-	return qaws_surface_create_fillet_ex(desc, NULL, out_surface);
+	return qaws_surface_create_fillet_ex(out_surface, desc, NULL);
 }
 
 qaws_status qaws_surface_create_fillet_with_trims_ex(
-	qaws_surface_fillet_desc const* desc,
-	qaws_allocator const* allocator,
 	qaws_surface** out_fillet,
 	qaws_curve** out_trim_a,
-	qaws_curve** out_trim_b)
+	qaws_curve** out_trim_b,
+	qaws_surface_fillet_desc const* desc,
+	qaws_allocator const* allocator)
 {
 	qaws_scalar* trim_a_uv = NULL;
 	qaws_scalar* trim_b_uv = NULL;
@@ -693,11 +693,11 @@ qaws_status qaws_surface_create_fillet_with_trims_ex(
 	if (cp_count < 4) cp_count = 4;
 	if (cp_count > sample_count) cp_count = sample_count;
 
-	status = qaws_internal_fit_bspline_ex(allocator, 
-		QAWS_DIMENSION_2D, 3,
+	status = qaws_internal_fit_bspline_ex(out_trim_a, 
 		trim_a_params, trim_a_coords,
-		sample_count, cp_count,
-		out_trim_a);
+		QAWS_DIMENSION_2D, sample_count,
+		cp_count, 3,
+		allocator);
 
 	if (status != QAWS_STATUS_OK)
 	{
@@ -709,11 +709,11 @@ qaws_status qaws_surface_create_fillet_with_trims_ex(
 		return status;
 	}
 
-	status = qaws_internal_fit_bspline_ex(allocator, 
-		QAWS_DIMENSION_2D, 3,
+	status = qaws_internal_fit_bspline_ex(out_trim_b, 
 		trim_b_params, trim_b_coords,
-		sample_count, cp_count,
-		out_trim_b);
+		QAWS_DIMENSION_2D, sample_count,
+		cp_count, 3,
+		allocator);
 
 	if (status != QAWS_STATUS_OK)
 	{
@@ -742,5 +742,5 @@ qaws_status qaws_surface_create_fillet_with_trims(
 	qaws_curve** out_trim_b,
 	qaws_surface_fillet_desc const* desc)
 {
-	return qaws_surface_create_fillet_with_trims_ex(desc, NULL, out_fillet, out_trim_a, out_trim_b);
+	return qaws_surface_create_fillet_with_trims_ex(out_fillet, out_trim_a, out_trim_b, desc, NULL);
 }

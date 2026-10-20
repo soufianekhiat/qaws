@@ -63,8 +63,8 @@ static void test_chord(void)
 	char msg[200];
 	memset(&d, 0, sizeof d);
 	d.chord_tolerance = (qaws_scalar)1e-3;
-	TEST_ASSERT(qaws_curve_tessellate_2d(c, &d, NULL, NULL, 0, &n) == QAWS_STATUS_OK && n > 8, "circle: the count first");
-	TEST_ASSERT(qaws_curve_tessellate_2d(c, &d, t, p, TS_CAP, &n2) == QAWS_STATUS_OK && n2 == n, "circle: the same count filled");
+	TEST_ASSERT(qaws_curve_tessellate_2d(NULL, NULL, &n, c, 0, &d) == QAWS_STATUS_OK && n > 8, "circle: the count first");
+	TEST_ASSERT(qaws_curve_tessellate_2d(t, p, &n2, c, TS_CAP, &d) == QAWS_STATUS_OK && n2 == n, "circle: the same count filled");
 	err = ts_seg_error_2d(c, t, p, n);
 	snprintf(msg, sizeof msg, "circle of radius 2 at chord 1e-3: %u vertices, true chord error %.3e", n, err);
 	printf("  %s\n", msg);
@@ -76,9 +76,9 @@ static void test_chord(void)
 		if (!(t[i] > t[i - 1]))
 			break;
 	TEST_ASSERT(i == n, "parameters increasing");
-	qaws_curve_tessellate_2d(c, &d, t2, p2, TS_CAP, &n2);
+	qaws_curve_tessellate_2d(t2, p2, &n2, c, TS_CAP, &d);
 	TEST_ASSERT(n2 == n && memcmp(t, t2, sizeof(qaws_scalar) * n) == 0 && memcmp(p, p2, sizeof(qaws_vec2) * n) == 0, "the same vertices every call");
-	TEST_ASSERT(qaws_curve_tessellate_2d(c, &d, t2, NULL, 10, &n3) == QAWS_STATUS_BUFFER_TOO_SMALL && n3 == n
+	TEST_ASSERT(qaws_curve_tessellate_2d(t2, NULL, &n3, c, 10, &d) == QAWS_STATUS_BUFFER_TOO_SMALL && n3 == n
 		&& memcmp(t, t2, sizeof(qaws_scalar) * 10) == 0, "short buffer: the count and the first vertices");
 	qaws_curve_destroy(c);
 }
@@ -100,7 +100,7 @@ static void test_s_and_angle(void)
 	qaws_curve_create_bezier(&b, &bd);
 	memset(&d, 0, sizeof d);
 	d.chord_tolerance = (qaws_scalar)1e-2;
-	qaws_curve_tessellate_2d(b, &d, t, p, TS_CAP, &n);
+	qaws_curve_tessellate_2d(t, p, &n, b, TS_CAP, &d);
 	err = ts_seg_error_2d(b, t, p, n);
 	snprintf(msg, sizeof msg, "S curve at chord 1e-2: %u vertices, true chord error %.3e", n, err);
 	printf("  %s\n", msg);
@@ -108,7 +108,7 @@ static void test_s_and_angle(void)
 
 	memset(&d, 0, sizeof d);
 	d.angle_tolerance = (qaws_scalar)0.1;
-	qaws_curve_tessellate_2d(c, &d, t, p, TS_CAP, &n);
+	qaws_curve_tessellate_2d(t, p, &n, c, TS_CAP, &d);
 	for (i = 0; i + 1 < n; i++)
 	{
 		qaws_eval_result_2d e0, e1;
@@ -139,7 +139,7 @@ static void test_kink_and_line(void)
 	memset(&td, 0, sizeof td);
 	td.chord_tolerance = (qaws_scalar)1e-3;
 	td.angle_tolerance = (qaws_scalar)0.2;
-	qaws_curve_tessellate_3d(c, &td, t, NULL, TS_CAP, &n);
+	qaws_curve_tessellate_3d(t, NULL, &n, c, TS_CAP, &td);
 	for (i = 0; i < n; i++)
 	{
 		has_kink |= t[i] == 1;
@@ -156,12 +156,12 @@ static void test_refusals(void)
 	qaws_curve_tessellation_desc d;
 	unsigned int n;
 	memset(&d, 0, sizeof d);
-	TEST_ASSERT(qaws_curve_tessellate_2d(c, &d, NULL, NULL, 0, &n) == QAWS_STATUS_INVALID_ARGUMENT, "no tolerance refused");
+	TEST_ASSERT(qaws_curve_tessellate_2d(NULL, NULL, &n, c, 0, &d) == QAWS_STATUS_INVALID_ARGUMENT, "no tolerance refused");
 	d.chord_tolerance = -1;
-	TEST_ASSERT(qaws_curve_tessellate_2d(c, &d, NULL, NULL, 0, &n) == QAWS_STATUS_INVALID_ARGUMENT, "a negative tolerance refused");
+	TEST_ASSERT(qaws_curve_tessellate_2d(NULL, NULL, &n, c, 0, &d) == QAWS_STATUS_INVALID_ARGUMENT, "a negative tolerance refused");
 	d.chord_tolerance = (qaws_scalar)0.1;
-	TEST_ASSERT(qaws_curve_tessellate_3d(c, &d, NULL, NULL, 0, &n) == QAWS_STATUS_INVALID_DIMENSION, "a 2D curve as 3D refused");
-	TEST_ASSERT(qaws_curve_tessellate_2d(c, &d, NULL, NULL, 0, NULL) == QAWS_STATUS_INVALID_ARGUMENT, "no count refused");
+	TEST_ASSERT(qaws_curve_tessellate_3d(NULL, NULL, &n, c, 0, &d) == QAWS_STATUS_INVALID_DIMENSION, "a 2D curve as 3D refused");
+	TEST_ASSERT(qaws_curve_tessellate_2d(NULL, NULL, NULL, c, 0, &d) == QAWS_STATUS_INVALID_ARGUMENT, "no count refused");
 	qaws_curve_destroy(c);
 }
 

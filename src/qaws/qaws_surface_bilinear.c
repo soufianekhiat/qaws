@@ -204,9 +204,9 @@ static qaws_surface_vtable const bilinear_surface_vtable = {
 };
 
 qaws_status qaws_surface_create_bilinear_ex(
+	qaws_surface** out_surface,
 	qaws_surface_bilinear_desc const* desc,
-	qaws_allocator const* allocator,
-	qaws_surface** out_surface)
+	qaws_allocator const* allocator)
 {
 	qaws_surface* surface;
 	qaws_surface_bilinear_impl* impl;
@@ -243,5 +243,5 @@ qaws_status qaws_surface_create_bilinear(
 	qaws_surface** out_surface,
 	qaws_surface_bilinear_desc const* desc)
 {
-	return qaws_surface_create_bilinear_ex(desc, NULL, out_surface);
+	return qaws_surface_create_bilinear_ex(out_surface, desc, NULL);
 }

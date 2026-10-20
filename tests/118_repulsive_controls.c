@@ -565,7 +565,7 @@ static void test_derivative_report(void)
 	memcpy(x, x0, sizeof(x));
 	qaws_repulsive_curves_solver_create(&s0, c, x, &d);
 	memset(&repn, 0x7f, sizeof(repn));
-	stn = qaws_repulsive_curves_solver_solution_jvp_checked(s0, &t, dx, NULL, &repn);
+	stn = qaws_repulsive_curves_solver_solution_jvp_checked(dx, NULL, &repn, s0, &t);
 	qaws_repulsive_curves_solver_destroy(s0);
 	for (k = 0; k < 3; k++)
 	{
@@ -574,7 +574,7 @@ static void test_derivative_report(void)
 		if (k == 2) dk.gmres_max_iterations = 2;
 		memcpy(x, x0, sizeof(x));
 		s[k] = rc_converge(c, &dk, x, &r[k]);
-		st[k] = s[k] ? qaws_repulsive_curves_solver_solution_jvp_checked(s[k], &t, dx, k ? NULL : &gauge, &rep[k]) : QAWS_STATUS_INVALID_ARGUMENT;
+		st[k] = s[k] ? qaws_repulsive_curves_solver_solution_jvp_checked(dx, k ? NULL : &gauge, &rep[k], s[k], &t) : QAWS_STATUS_INVALID_ARGUMENT;
 		if (k == 0) memcpy(dx2, dx, sizeof(dx));
 	}
 	stu = s[0] ? qaws_repulsive_curves_solver_solution_jvp(dx, NULL, s[0], &t) : QAWS_STATUS_INVALID_ARGUMENT;
@@ -582,7 +582,7 @@ static void test_derivative_report(void)
 	for (i = 0; i < 3 * N; i++) xbar[i] = (qaws_scalar)sin(0.9 * i + 0.4);
 	memset(&tb, 0, sizeof(tb));
 	tb.pinned = pb;
-	stv = s[0] ? qaws_repulsive_curves_solver_solution_vjp_checked(s[0], xbar, &tb, NULL, &repv) : QAWS_STATUS_INVALID_ARGUMENT;
+	stv = s[0] ? qaws_repulsive_curves_solver_solution_vjp_checked(&tb, NULL, &repv, s[0], xbar) : QAWS_STATUS_INVALID_ARGUMENT;
 	sprintf(msg, "refused before convergence: status %d, report zeroed %d", (int)stn, repn.converged == 0 && repn.iterations == 0 && repn.residual == 0);
 	TEST_ASSERT(stn == QAWS_STATUS_NOT_CONVERGED && repn.converged == 0 && repn.iterations == 0 && repn.residual == 0, msg);
 	sprintf(msg, "converged strand, default limits: JVP status %d, residual %.3g, %u iterations, converged %d, condition estimate %.4g, gauge %u (out %u); "

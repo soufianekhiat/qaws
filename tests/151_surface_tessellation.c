@@ -227,11 +227,11 @@ static void test_chord_and_cracks(void)
 	char msg[240];
 	memset(&d, 0, sizeof d);
 	d.chord_tolerance = (qaws_scalar)2e-3;
-	TEST_ASSERT(qaws_surface_tessellate_adaptive(s, &d, NULL, 0, &nv, NULL, 0, &ni) == QAWS_STATUS_OK && nv > 0 && ni > 0, "cap: counts first");
+	TEST_ASSERT(qaws_surface_tessellate_adaptive(NULL, &nv, NULL, &ni, s, 0, 0, &d) == QAWS_STATUS_OK && nv > 0 && ni > 0, "cap: counts first");
 	TEST_ASSERT(nv <= TT_VCAP && ni <= TT_ICAP, "cap: within the test's buffers");
-	TEST_ASSERT(qaws_surface_tessellate_adaptive(s, &d, tt_v, TT_VCAP, &nv2, tt_i, TT_ICAP, &ni2) == QAWS_STATUS_OK && nv2 == nv && ni2 == ni,
+	TEST_ASSERT(qaws_surface_tessellate_adaptive(tt_v, &nv2, tt_i, &ni2, s, TT_VCAP, TT_ICAP, &d) == QAWS_STATUS_OK && nv2 == nv && ni2 == ni,
 		"cap: the same counts filled");
-	qaws_surface_tessellate_adaptive(s, &d, tt_v2, TT_VCAP, &nv3, tt_i2, TT_ICAP, &ni3);
+	qaws_surface_tessellate_adaptive(tt_v2, &nv3, tt_i2, &ni3, s, TT_VCAP, TT_ICAP, &d);
 	TEST_ASSERT(nv3 == nv && ni3 == ni && memcmp(tt_v, tt_v2, sizeof(qaws_tessellation_vertex) * nv) == 0
 		&& memcmp(tt_i, tt_i2, sizeof(unsigned int) * ni) == 0, "cap: the same mesh every call");
 	err = tt_chord(s, ni);
@@ -240,7 +240,7 @@ static void test_chord_and_cracks(void)
 	printf("  %s\n", msg);
 	TEST_ASSERT(err <= 1.5 * 2e-3, msg);
 	TEST_ASSERT(cracks == 0, "no cracks: every inner edge shared by two triangles in opposite directions");
-	TEST_ASSERT(qaws_surface_tessellate_adaptive(s, &d, tt_v2, 10, &nv3, tt_i2, 30, &ni3) == QAWS_STATUS_BUFFER_TOO_SMALL && nv3 == nv && ni3 == ni,
+	TEST_ASSERT(qaws_surface_tessellate_adaptive(tt_v2, &nv3, tt_i2, &ni3, s, 10, 30, &d) == QAWS_STATUS_BUFFER_TOO_SMALL && nv3 == nv && ni3 == ni,
 		"short buffers: the counts");
 	qaws_surface_destroy(s);
 }
@@ -254,7 +254,7 @@ static void test_angle(void)
 	char msg[200];
 	memset(&d, 0, sizeof d);
 	d.angle_tolerance = (qaws_scalar)0.15;
-	qaws_surface_tessellate_adaptive(s, &d, tt_v, TT_VCAP, &nv, tt_i, TT_ICAP, &ni);
+	qaws_surface_tessellate_adaptive(tt_v, &nv, tt_i, &ni, s, TT_VCAP, TT_ICAP, &d);
 	for (t = 0; t < ni; t += 3)
 	{
 		unsigned int k;
@@ -279,7 +279,7 @@ static void test_adaptivity(void)
 	char msg[200];
 	memset(&d, 0, sizeof d);
 	d.chord_tolerance = (qaws_scalar)1e-2;
-	qaws_surface_tessellate_adaptive(s, &d, tt_v, TT_VCAP, &nv, tt_i, TT_ICAP, &ni);
+	qaws_surface_tessellate_adaptive(tt_v, &nv, tt_i, &ni, s, TT_VCAP, TT_ICAP, &d);
 	for (t = 0; t < ni; t += 3)
 	{
 		double u = (tt_v[tt_i[t]].u + tt_v[tt_i[t + 1]].u + tt_v[tt_i[t + 2]].u) / 3;
@@ -301,12 +301,12 @@ static void test_refusals(void)
 	qaws_surface_tessellation_desc d;
 	unsigned int nv, ni;
 	memset(&d, 0, sizeof d);
-	TEST_ASSERT(qaws_surface_tessellate_adaptive(s, &d, NULL, 0, &nv, NULL, 0, &ni) == QAWS_STATUS_INVALID_ARGUMENT, "no tolerance refused");
+	TEST_ASSERT(qaws_surface_tessellate_adaptive(NULL, &nv, NULL, &ni, s, 0, 0, &d) == QAWS_STATUS_INVALID_ARGUMENT, "no tolerance refused");
 	d.angle_tolerance = -1;
-	TEST_ASSERT(qaws_surface_tessellate_adaptive(s, &d, NULL, 0, &nv, NULL, 0, &ni) == QAWS_STATUS_INVALID_ARGUMENT, "a negative tolerance refused");
+	TEST_ASSERT(qaws_surface_tessellate_adaptive(NULL, &nv, NULL, &ni, s, 0, 0, &d) == QAWS_STATUS_INVALID_ARGUMENT, "a negative tolerance refused");
 	d.angle_tolerance = (qaws_scalar)0.5;
-	TEST_ASSERT(qaws_surface_tessellate_adaptive(s, &d, NULL, 0, NULL, NULL, 0, &ni) == QAWS_STATUS_INVALID_ARGUMENT, "no count refused");
-	TEST_ASSERT(qaws_surface_tessellate_adaptive(NULL, &d, NULL, 0, &nv, NULL, 0, &ni) == QAWS_STATUS_INVALID_ARGUMENT, "no surface refused");
+	TEST_ASSERT(qaws_surface_tessellate_adaptive(NULL, NULL, NULL, &ni, s, 0, 0, &d) == QAWS_STATUS_INVALID_ARGUMENT, "no count refused");
+	TEST_ASSERT(qaws_surface_tessellate_adaptive(NULL, &nv, NULL, &ni, NULL, 0, 0, &d) == QAWS_STATUS_INVALID_ARGUMENT, "no surface refused");
 	qaws_surface_destroy(s);
 }
 

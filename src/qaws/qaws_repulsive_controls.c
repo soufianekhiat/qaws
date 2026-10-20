@@ -404,7 +404,7 @@ static qaws_status rc_to_curve_run(qaws_repulsive_controls const* ctl, qaws_scal
 }
 
 /* the public calls: under the controls' allocator (_ex) */
-qaws_status qaws_repulsive_controls_create_ex(qaws_repulsive_controls_desc const* desc, qaws_allocator const* allocator, qaws_repulsive_controls** out)
+qaws_status qaws_repulsive_controls_create_ex(qaws_repulsive_controls** out, qaws_repulsive_controls_desc const* desc, qaws_allocator const* allocator)
 {
 	qaws_internal_rs_scope sc;
 	qaws_status st;
@@ -704,10 +704,10 @@ qaws_status qaws_repulsive_controls_solver_step(qaws_repulsive_report* out_repor
 	return s ? qaws_internal_rs_step(out_report, controls, &s->core) : QAWS_STATUS_INVALID_ARGUMENT;
 }
 
-qaws_status qaws_repulsive_controls_solver_objective(qaws_repulsive_controls_solver const* s, qaws_scalar const* controls, qaws_scalar* out_energy,
-	qaws_scalar* out_gradient)
+qaws_status qaws_repulsive_controls_solver_objective(qaws_scalar* out_energy, qaws_scalar* out_gradient, qaws_repulsive_controls_solver const* s,
+	qaws_scalar const* controls)
 {
-	return s ? qaws_internal_rs_objective(&s->core, controls, out_energy, out_gradient) : QAWS_STATUS_INVALID_ARGUMENT;
+	return s ? qaws_internal_rs_objective(out_energy, out_gradient, &s->core, controls) : QAWS_STATUS_INVALID_ARGUMENT;
 }
 
 qaws_status qaws_repulsive_controls_solve(qaws_repulsive_report* out_report, qaws_scalar* controls, qaws_repulsive_controls const* ctl,
@@ -715,16 +715,16 @@ qaws_status qaws_repulsive_controls_solve(qaws_repulsive_report* out_report, qaw
 {
 	qaws_repulsive_controls_solver* s = NULL;
 	unsigned int max = desc && desc->max_iterations ? desc->max_iterations : 100;
-	qaws_status st = qaws_repulsive_controls_solver_create_ex(ctl, desc, controls, ctl ? &ctl->alloc : NULL, &s);
+	qaws_status st = qaws_repulsive_controls_solver_create_ex(&s, ctl, controls, desc, ctl ? &ctl->alloc : NULL);
 	if (st != QAWS_STATUS_OK)
 		return st;
-	st = qaws_internal_rs_solve(&s->core, max, controls, out_report);
+	st = qaws_internal_rs_solve(out_report, controls, &s->core, max);
 	qaws_repulsive_controls_solver_destroy(s);
 	return st;
 }
 
-qaws_status qaws_repulsive_controls_solver_create_ex(qaws_repulsive_controls const* ctl, qaws_repulsive_curves_solve_desc const* desc,
-	qaws_scalar const* controls, qaws_allocator const* allocator, qaws_repulsive_controls_solver** out_solver)
+qaws_status qaws_repulsive_controls_solver_create_ex(qaws_repulsive_controls_solver** out_solver, qaws_repulsive_controls const* ctl,
+	qaws_scalar const* controls, qaws_repulsive_curves_solve_desc const* desc, qaws_allocator const* allocator)
 {
 	qaws_internal_rs_scope sc;
 	qaws_status st;

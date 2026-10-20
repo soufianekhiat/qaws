@@ -174,7 +174,7 @@ qaws_status qaws_curve_fit_bspline(
 	if (desc->parameters) {
 		memcpy(params, desc->parameters, sizeof(qaws_scalar) * (size_t)m);
 	} else {
-		qaws_internal_fit_parameters(data, m, dim_count, desc->parameterization, params);
+		qaws_internal_fit_parameters(params, data, dim_count, m, desc->parameterization);
 	}
 
 	/* --- Step 2: Knot placement (averaging) ---------------------------- */

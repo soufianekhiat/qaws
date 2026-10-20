@@ -511,10 +511,10 @@ qaws_status qaws_repulsive_surface_curves_solver_step(qaws_repulsive_report* out
 	return s ? qaws_internal_rs_step(out_report, uv, &s->core) : QAWS_STATUS_INVALID_ARGUMENT;
 }
 
-qaws_status qaws_repulsive_surface_curves_solver_objective(qaws_repulsive_surface_curves_solver const* s, qaws_scalar const* uv, qaws_scalar* out_energy,
-	qaws_scalar* out_gradient)
+qaws_status qaws_repulsive_surface_curves_solver_objective(qaws_scalar* out_energy, qaws_scalar* out_gradient, qaws_repulsive_surface_curves_solver const* s,
+	qaws_scalar const* uv)
 {
-	return s ? qaws_internal_rs_objective(&s->core, uv, out_energy, out_gradient) : QAWS_STATUS_INVALID_ARGUMENT;
+	return s ? qaws_internal_rs_objective(out_energy, out_gradient, &s->core, uv) : QAWS_STATUS_INVALID_ARGUMENT;
 }
 
 qaws_status qaws_repulsive_surface_curves_solve(qaws_repulsive_report* out_report, qaws_scalar* uv,
@@ -522,16 +522,16 @@ qaws_status qaws_repulsive_surface_curves_solve(qaws_repulsive_report* out_repor
 {
 	qaws_repulsive_surface_curves_solver* s = NULL;
 	unsigned int max = desc && desc->max_iterations ? desc->max_iterations : 100;
-	qaws_status st = qaws_repulsive_surface_curves_solver_create_ex(c, sd, desc, uv, c ? &c->alloc : NULL, &s);
+	qaws_status st = qaws_repulsive_surface_curves_solver_create_ex(&s, c, uv, sd, desc, c ? &c->alloc : NULL);
 	if (st != QAWS_STATUS_OK)
 		return st;
-	st = qaws_internal_rs_solve(&s->core, max, uv, out_report);
+	st = qaws_internal_rs_solve(out_report, uv, &s->core, max);
 	qaws_repulsive_surface_curves_solver_destroy(s);
 	return st;
 }
 
-qaws_status qaws_repulsive_surface_curves_solver_create_ex(qaws_repulsive_curves const* c, qaws_repulsive_surface_desc const* sd,
-	qaws_repulsive_curves_solve_desc const* desc, qaws_scalar const* uv, qaws_allocator const* allocator, qaws_repulsive_surface_curves_solver** out_solver)
+qaws_status qaws_repulsive_surface_curves_solver_create_ex(qaws_repulsive_surface_curves_solver** out_solver, qaws_repulsive_curves const* c,
+	qaws_scalar const* uv, qaws_repulsive_surface_desc const* sd, qaws_repulsive_curves_solve_desc const* desc, qaws_allocator const* allocator)
 {
 	qaws_internal_rs_scope sc;
 	qaws_status st;

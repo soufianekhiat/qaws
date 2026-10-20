@@ -133,7 +133,7 @@ qaws_status qaws_shell_curve_get_length(qaws_scalar* out_length, qaws_shell_curv
 qaws_status qaws_shell_region_create(qaws_shell_region** out_region, qaws_shell_atlas const* atlas, qaws_shell_curve const* const* loops,
 	unsigned int loop_count);
 /* The whole shell: every face whole (its trimmed domain). */
-qaws_status qaws_shell_region_create_whole(qaws_shell_atlas const* atlas, qaws_shell_region** out_region);
+qaws_status qaws_shell_region_create_whole(qaws_shell_region** out_region, qaws_shell_atlas const* atlas);
 
 /* The geodesic disk of radius r about the centre: the points within r
    along the shell. With no shell vertex inside, the region of

@@ -1106,7 +1106,7 @@ static qaws_status qd_run(qaws_mesh_3d const* mesh, qaws_quadrangulate_desc cons
 	r = desc->reference;
 	if (!r)
 	{
-		st = qaws_mesh_reference_create(mesh, NULL, &own);
+		st = qaws_mesh_reference_create(&own, mesh, NULL);
 		if (st != QAWS_STATUS_OK)
 			return st;
 		r = own;
@@ -1120,7 +1120,7 @@ static qaws_status qd_run(qaws_mesh_3d const* mesh, qaws_quadrangulate_desc cons
 	if (rho == 0)
 	{
 		qaws_mesh_quality q;
-		qaws_mesh_3d_measure_quality(mesh, &q);
+		qaws_mesh_3d_measure_quality(&q, mesh);
 		rho = q.mean_edge > 0 ? 2 * (double)q.mean_edge : 1;
 	}
 	rf = rho;
@@ -1147,7 +1147,7 @@ static qaws_status qd_run(qaws_mesh_3d const* mesh, qaws_quadrangulate_desc cons
 	st = desc->size ? sf_create_scaled(desc->size, 1.0 / 3, &dsize) : QAWS_STATUS_OK;
 	rd.size = dsize;
 	if (st == QAWS_STATUS_OK)
-		st = qaws_mesh_remesh(mesh, &rd, &dense, NULL);
+		st = qaws_mesh_remesh(&dense, NULL, mesh, &rd);
 	if (st != QAWS_STATUS_OK)
 		goto done;
 	/* 2. the fields, with the reference's normals */
@@ -1439,7 +1439,7 @@ static qaws_status qd_run(qaws_mesh_3d const* mesh, qaws_quadrangulate_desc cons
 	}
 	st = mx_transfer(&out->hm, r, fl);
 	if (st == QAWS_STATUS_OK)
-		qaws_mesh_3d_measure_quality(out, &rep.quality);
+		qaws_mesh_3d_measure_quality(&rep.quality, out);
 done:
 	qaws_internal_free(fl);
 	qaws_internal_free(nrm);
@@ -1466,7 +1466,7 @@ done:
 	return QAWS_STATUS_OK;
 }
 
-qaws_status qaws_mesh_quadrangulate(qaws_mesh_3d const* mesh, qaws_quadrangulate_desc const* desc, qaws_mesh_3d** out_mesh, qaws_mesh_report* out_report)
+qaws_status qaws_mesh_quadrangulate(qaws_mesh_3d** out_mesh, qaws_mesh_report* out_report, qaws_mesh_3d const* mesh, qaws_quadrangulate_desc const* desc)
 {
 	return qd_run(mesh, desc, out_mesh, out_report, NULL);
 }

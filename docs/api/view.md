@@ -43,14 +43,14 @@ v.knots.data = knots; v.knots.type = QAWS_ELEMENT_F64; v.knots.components = 1; v
 /* weights: n positive values with Cartesian points, or points of dimension + 1 homogeneous components */
 
 qaws_curve_prepared* p = NULL;
-qaws_curve_prepare(&v, allocator, &p);                       /* or qaws_curve_prepare_into(&v, memory, bytes, &p) */
-qaws_curve_prepared_evaluate_3d(p, t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &r);
+qaws_curve_prepare(&p, &v, allocator);                       /* or qaws_curve_prepare_into(&v, memory, bytes, &p) */
+qaws_curve_prepared_evaluate_3d(&r, p, t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1);
 qaws_curve_prepared_evaluate_range(p, &params, begin, end, &outputs);   /* f32/f64 outputs, caller buffers */
 qaws_curve_prepared_destroy(p);
 
 qaws_curve* c = NULL;
-qaws_curve_create_borrowed(&v, allocator, &c);               /* a qaws_curve, kind QAWS_CURVE_KIND_VIEW */
-qaws_curve_create_from_view(&v, allocator, &c);              /* an owned B-spline or NURBS copy */
+qaws_curve_create_borrowed(&c, &v, allocator);               /* a qaws_curve, kind QAWS_CURVE_KIND_VIEW */
+qaws_curve_create_from_view(&c, &v, allocator);              /* an owned B-spline or NURBS copy */
 ```
 
 - **Knots.** With a count of 0, the knots are clamped uniform 0, 1, ...,
@@ -99,11 +99,11 @@ s.u_degree = 3; s.v_degree = 2; s.u_count = 6; s.v_count = 5;
 s.points = ...;                 /* u_count * v_count points, row major: (i, j) at i * v_count + j */
 /* weights, u_knots, v_knots as for curves; default knots clamped uniform over [0, 1], as the owned surfaces */
 
-qaws_surface_prepare(&s, allocator, &sp);
-qaws_surface_prepared_evaluate(sp, u, v, QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL, &r);
+qaws_surface_prepare(&sp, &s, allocator);
+qaws_surface_prepared_evaluate(&r, sp, u, v, QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL);
 qaws_surface_prepared_evaluate_range(sp, &uv, begin, end, &surface_outputs);   /* position, du, dv, normal, duu, duv, dvv */
-qaws_surface_create_borrowed(&s, allocator, &surface);       /* kind QAWS_SURFACE_KIND_VIEW */
-qaws_surface_create_from_view(&s, allocator, &surface);
+qaws_surface_create_borrowed(&surface, &s, allocator);       /* kind QAWS_SURFACE_KIND_VIEW */
+qaws_surface_create_from_view(&surface, &s, allocator);
 ```
 
 Evaluation matches the owned B-spline and NURBS surfaces bit for bit (test

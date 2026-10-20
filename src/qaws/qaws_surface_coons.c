@@ -594,9 +594,9 @@ static qaws_surface_vtable const coons_surface_vtable = {
 };
 
 qaws_status qaws_surface_create_coons_ex(
+	qaws_surface** out_surface,
 	qaws_surface_coons_desc const* desc,
-	qaws_allocator const* allocator,
-	qaws_surface** out_surface)
+	qaws_allocator const* allocator)
 {
 	qaws_surface* surface;
 	qaws_surface_coons_impl* impl;
@@ -669,5 +669,5 @@ qaws_status qaws_surface_create_coons(
 	qaws_surface** out_surface,
 	qaws_surface_coons_desc const* desc)
 {
-	return qaws_surface_create_coons_ex(desc, NULL, out_surface);
+	return qaws_surface_create_coons_ex(out_surface, desc, NULL);
 }

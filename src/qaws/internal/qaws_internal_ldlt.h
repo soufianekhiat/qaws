@@ -31,10 +31,10 @@ typedef struct qaws_internal_ldlt
    of one 2 x 2 block given the same point stay together), NULL for the natural order; shift added to the diagonal; on a
    pivot that is not positive the factor is redone with 10 times the shift (a 1e-12 relative one from 0), INVALID_ARGUMENT
    after 3 retries */
-qaws_status qaws_internal_ldlt_factor(qaws_internal_ldlt* f, unsigned int n, unsigned int const* row_ptr, unsigned int const* col,
-	double const* val, double const* xyz, double shift);
+qaws_status qaws_internal_ldlt_factor(qaws_internal_ldlt* f, unsigned int const* row_ptr, unsigned int const* col, double const* val,
+	double const* xyz, unsigned int n, double shift);
 /* A x = b; b and x may alias. The solve works in f's workspace: solves on one factor are not for concurrent threads */
-void qaws_internal_ldlt_solve(qaws_internal_ldlt const* f, double const* b, double* x);
+void qaws_internal_ldlt_solve(double* x, qaws_internal_ldlt const* f, double const* b);
 void qaws_internal_ldlt_free(qaws_internal_ldlt* f);
 
 #endif /* QAWS_INTERNAL_LDLT_H */

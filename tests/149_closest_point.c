@@ -88,7 +88,7 @@ static void test_spike(void)
 		printf("  %s\n", msg);
 		TEST_ASSERT(best > 4.9, msg);
 	}
-	TEST_ASSERT(qaws_curve_find_closest_point_certified_2d(c, q, &t, &dist, &gap) == QAWS_STATUS_OK, "certified search runs");
+	TEST_ASSERT(qaws_curve_find_closest_point_certified_2d(&t, &dist, &gap, c, q) == QAWS_STATUS_OK, "certified search runs");
 	dense = cp_dense_2d(c, q, 400000);
 	snprintf(msg, sizeof msg, "the spike found: distance %.12f at t = %.6f, gap %.1e; dense sampling %.12f", (double)dist, (double)t, (double)gap, dense);
 	printf("  %s\n", msg);
@@ -101,8 +101,8 @@ static void test_spike(void)
 	v.dimension = QAWS_DIMENSION_2D;
 	v.degree = 3;
 	v.points.data = p; v.points.type = QAWS_ELEMENT_F64; v.points.components = 2; v.points.count = CP_N; v.points.stride = 2 * sizeof(double);
-	TEST_ASSERT(qaws_curve_create_borrowed(&v, NULL, &b) == QAWS_STATUS_OK, "borrowed view created");
-	TEST_ASSERT(qaws_curve_find_closest_point_certified_2d(b, q, &t2, &dist2, &gap2) == QAWS_STATUS_OK, "certified on the view");
+	TEST_ASSERT(qaws_curve_create_borrowed(&b, &v, NULL) == QAWS_STATUS_OK, "borrowed view created");
+	TEST_ASSERT(qaws_curve_find_closest_point_certified_2d(&t2, &dist2, &gap2, b, q) == QAWS_STATUS_OK, "certified on the view");
 	snprintf(msg, sizeof msg, "the view: the same point (%.1e in t, %.1e in distance)", fabs((double)t2 - t), fabs((double)dist2 - dist));
 	TEST_ASSERT(fabs((double)t2 - t) <= 1e-10 && fabs((double)dist2 - dist) <= 1e-12, msg);
 	qaws_curve_destroy(b);
@@ -125,11 +125,11 @@ static void test_circle(void)
 	d.dimension = QAWS_DIMENSION_2D; d.degree = 2; d.control_points = p; d.control_point_count = 9;
 	d.knots = knots; d.knot_count = 12; d.weights = w; d.weight_count = 9;
 	TEST_ASSERT(qaws_curve_create_nurbs(&c, &d) == QAWS_STATUS_OK, "rational circle created");
-	qaws_curve_find_closest_point_certified_2d(c, q, &t, &dist, &gap);
+	qaws_curve_find_closest_point_certified_2d(&t, &dist, &gap, c, q);
 	snprintf(msg, sizeof msg, "rational circle: distance sqrt(10) - 2 (error %.1e, gap %.1e)", fabs(dist - (sqrt(10.0) - 2)), (double)gap);
 	printf("  %s\n", msg);
 	TEST_ASSERT(fabs(dist - (sqrt(10.0) - 2)) <= cp_round(2, 1e-13) && gap <= CP_GAP, msg);
-	TEST_ASSERT(qaws_curve_find_closest_point_certified_2d(c, center, &t, &dist, &gap) == QAWS_STATUS_OK, "the center: it terminates");
+	TEST_ASSERT(qaws_curve_find_closest_point_certified_2d(&t, &dist, &gap, c, center) == QAWS_STATUS_OK, "the center: it terminates");
 	snprintf(msg, sizeof msg, "the center: distance 2 (error %.1e), gap %.2e within the work bound", fabs(dist - 2), (double)gap);
 	printf("  %s\n", msg);
 	TEST_ASSERT(fabs(dist - 2) <= cp_round(2, 1e-13) && gap >= 0 && gap <= 2, msg);
@@ -153,7 +153,7 @@ static void test_bezier_3d(void)
 		qaws_scalar t, dist, gap;
 		double dense = 1e300;
 		q.x = (qaws_scalar)(3.5 + 4 * cos(1.7 * k)); q.y = (qaws_scalar)(2.5 * sin(2.3 * k)); q.z = (qaws_scalar)(2 * cos(0.9 * k + 1));
-		qaws_curve_find_closest_point_certified_3d(c, q, &t, &dist, &gap);
+		qaws_curve_find_closest_point_certified_3d(&t, &dist, &gap, c, q);
 		for (i = 0; i <= 100000; i++)
 		{
 			qaws_eval_result_3d e;
@@ -180,9 +180,9 @@ static void test_other_families(void)
 	memset(&d, 0, sizeof d);
 	d.dimension = QAWS_DIMENSION_2D; d.degree = 3; d.points = pts; d.derivatives = der; d.point_count = 2; d.derivative_count = 2;
 	TEST_ASSERT(qaws_curve_create_hermite(&c, &d) == QAWS_STATUS_OK, "Hermite curve created");
-	TEST_ASSERT(qaws_curve_find_closest_point_certified_2d(c, q, &t, &dist, &gap) == QAWS_STATUS_UNSUPPORTED_OPERATION, "Hermite: not certified");
+	TEST_ASSERT(qaws_curve_find_closest_point_certified_2d(&t, &dist, &gap, c, q) == QAWS_STATUS_UNSUPPORTED_OPERATION, "Hermite: not certified");
 	TEST_ASSERT(qaws_curve_find_closest_parameter_2d(&t, c, q) == QAWS_STATUS_OK && fabs(t - 0.5) <= 1e-6, "Hermite: still answered (t = 0.5)");
-	TEST_ASSERT(qaws_curve_find_closest_point_certified_2d(c, q, &t, NULL, &gap) == QAWS_STATUS_INVALID_ARGUMENT, "no output refused");
+	TEST_ASSERT(qaws_curve_find_closest_point_certified_2d(&t, NULL, &gap, c, q) == QAWS_STATUS_INVALID_ARGUMENT, "no output refused");
 	qaws_curve_destroy(c);
 }
 
@@ -230,7 +230,7 @@ static void test_surfaces(void)
 				if (j % 600 == 0 || (j * 7) % 600 == 0)
 					grid = fmin(grid, r);
 		}
-	TEST_ASSERT(qaws_surface_find_closest_point_certified(s, q, &u, &w, &cl, &dist, &gap) == QAWS_STATUS_OK, "certified on the cap");
+	TEST_ASSERT(qaws_surface_find_closest_point_certified(&u, &w, &cl, &dist, &gap, s, q) == QAWS_STATUS_OK, "certified on the cap");
 	snprintf(msg, sizeof msg, "cap: the 8 x 8 grid sees %.3f; certified %.12f at (%.4f, %.4f), gap %.1e; 601 x 601 samples %.12f",
 		grid, (double)dist, (double)u, (double)w, (double)gap, dense);
 	printf("  %s\n", msg);
@@ -241,8 +241,8 @@ static void test_surfaces(void)
 	v.u_degree = 3; v.v_degree = 3; v.u_count = CP_S; v.v_count = CP_S;
 	v.points.data = p; v.points.type = sizeof(qaws_scalar) == 8 ? QAWS_ELEMENT_F64 : QAWS_ELEMENT_F32; v.points.components = 3;
 	v.points.count = CP_S * CP_S; v.points.stride = sizeof(qaws_vec3);
-	TEST_ASSERT(qaws_surface_create_borrowed(&v, NULL, &b) == QAWS_STATUS_OK, "borrowed cap created");
-	qaws_surface_find_closest_point_certified(b, q, &u2, &w2, &cl2, &dist2, &gap2);
+	TEST_ASSERT(qaws_surface_create_borrowed(&b, &v, NULL) == QAWS_STATUS_OK, "borrowed cap created");
+	qaws_surface_find_closest_point_certified(&u2, &w2, &cl2, &dist2, &gap2, b, q);
 	snprintf(msg, sizeof msg, "borrowed cap: the same point (%.1e in u, %.1e in v)", fabs((double)u2 - u), fabs((double)w2 - w));
 	TEST_ASSERT(fabs((double)u2 - u) <= 1e-10 && fabs((double)w2 - w) <= 1e-10 && fabs((double)dist2 - dist) <= 1e-12, msg);
 	qaws_surface_destroy(b);
@@ -269,7 +269,7 @@ static void test_surfaces(void)
 			qaws_vec3 x;
 			dense = 1e300;
 			x.x = (qaws_scalar)(1.5 + 2 * cos(1.3 * k)); x.y = (qaws_scalar)(1.5 + 2 * sin(2.1 * k)); x.z = (qaws_scalar)(1.5 * cos(0.7 * k + 1));
-			qaws_surface_find_closest_point_certified(s, x, &u, &w, &cl, &dist, &gap);
+			qaws_surface_find_closest_point_certified(&u, &w, &cl, &dist, &gap, s, x);
 			for (i = 0; i <= 300; i++)
 				for (j = 0; j <= 300; j++)
 				{
@@ -293,9 +293,9 @@ static void test_surfaces(void)
 		memset(&bd, 0, sizeof bd);
 		bd.u_degree = 1; bd.v_degree = 1; bd.control_points = n; bd.u_point_count = 2; bd.v_point_count = 2;
 		qaws_surface_create_bezier(&s, &bd);
-		qaws_surface_find_closest_point_certified(s, x1, &u, &w, &cl, &dist, &gap);
+		qaws_surface_find_closest_point_certified(&u, &w, &cl, &dist, &gap, s, x1);
 		TEST_ASSERT(fabs(dist - 2) <= 1e-14 && fabs(u - (qaws_scalar)0.3) <= 1e-7 && fabs(w - (qaws_scalar)0.6) <= 1e-7, "square: above it");
-		qaws_surface_find_closest_point_certified(s, x2, &u, &w, &cl, &dist, &gap);
+		qaws_surface_find_closest_point_certified(&u, &w, &cl, &dist, &gap, s, x2);
 		TEST_ASSERT(fabs(dist - sqrt(1.25)) <= cp_round(1, 1e-14) && u == 1 && fabs(w - (qaws_scalar)0.5) <= 1e-7, "square: past its edge");
 		qaws_surface_destroy(s);
 	}

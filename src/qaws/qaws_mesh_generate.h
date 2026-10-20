@@ -54,9 +54,9 @@ typedef struct qaws_generate_desc
 	qaws_scalar gradation;
 } qaws_generate_desc;
 
-qaws_status qaws_mesh_generate_surface(qaws_surface const* surface, qaws_generate_desc const* desc, qaws_mesh_3d** out_mesh,
-	qaws_mesh_report* out_report);
-qaws_status qaws_mesh_generate_shell(qaws_shell_atlas const* shell, qaws_generate_desc const* desc, qaws_mesh_3d** out_mesh,
-	qaws_mesh_report* out_report);
+qaws_status qaws_mesh_generate_surface(qaws_mesh_3d** out_mesh, qaws_mesh_report* out_report, qaws_surface const* surface,
+	qaws_generate_desc const* desc);
+qaws_status qaws_mesh_generate_shell(qaws_mesh_3d** out_mesh, qaws_mesh_report* out_report, qaws_shell_atlas const* shell,
+	qaws_generate_desc const* desc);
 
 #endif /* QAWS_MESH_GENERATE_H */

@@ -37,7 +37,7 @@ static qaws_status mr_repair(double const* x, unsigned int nv, unsigned int cons
 	qaws_status st;
 	for (i = 0; i < 3 * nv; i++)
 		p[i] = (qaws_scalar)x[i];
-	st = qaws_mesh_repair(p, nv, f, fs, nf, d, out, rep);
+	st = qaws_mesh_repair(out, rep, p, f, fs, nv, nf, d);
 	free(p);
 	return st;
 }
@@ -54,7 +54,7 @@ static unsigned int mr_uncancelled(qaws_mesh_3d const* m)
 	unsigned int nt = qaws_mesh_3d_get_triangle_count(m), i, k, n = 0;
 	unsigned int* t = (unsigned int*)malloc(sizeof(unsigned int) * 3 * (nt + 1));
 	unsigned long long* e = (unsigned long long*)malloc(sizeof(unsigned long long) * 3 * (nt + 1));
-	qaws_mesh_3d_get_triangles(m, t);
+	qaws_mesh_3d_get_triangles(t, m);
 	for (i = 0; i < nt; i++)
 		for (k = 0; k < 3; k++)
 		{
@@ -79,7 +79,7 @@ static double mr_volume(qaws_mesh_3d const* m)
 	unsigned int nt = qaws_mesh_3d_get_triangle_count(m), i;
 	unsigned int* t = (unsigned int*)malloc(sizeof(unsigned int) * 3 * (nt + 1));
 	double v = 0;
-	qaws_mesh_3d_get_triangles(m, t);
+	qaws_mesh_3d_get_triangles(t, m);
 	for (i = 0; i < nt; i++)
 	{
 		qaws_vec3 a = qaws_mesh_3d_get_vertex(m, t[3 * i]), b = qaws_mesh_3d_get_vertex(m, t[3 * i + 1]), c = qaws_mesh_3d_get_vertex(m, t[3 * i + 2]);
@@ -112,9 +112,9 @@ static void mr_measure(qaws_mesh_3d const* m, mr_stats* s)
 	memset(s, 0, sizeof *s);
 	s->fill_min_angle = 180;
 	s->min_height = HUGE_VAL;
-	qaws_mesh_3d_get_triangles(m, t);
-	qaws_mesh_3d_find_attribute(m, "source_face", &a);
-	qaws_mesh_3d_get_attribute(m, a, src);
+	qaws_mesh_3d_get_triangles(t, m);
+	qaws_mesh_3d_find_attribute(&a, m, "source_face");
+	qaws_mesh_3d_get_attribute(src, m, a);
 	for (i = 0; i < nt; i++)
 	{
 		double p[3][3], l[3], lmax = 0, cr[3], area;
@@ -702,7 +702,7 @@ static void test_refusals(void)
 		px[i] = (qaws_scalar)x[i];
 	memcpy(nanx, x, sizeof x);
 	nanx[4] = sqrt(-1.0 + 0 * nanx[0]);
-	a = qaws_mesh_repair(px, 3, ok, NULL, 1, NULL, NULL, &r);
+	a = qaws_mesh_repair(NULL, &r, px, ok, NULL, 3, 1, NULL);
 	b = mr_repair(x, 3, bad, NULL, 1, NULL, &m, &r);
 	TEST_ASSERT(a == QAWS_STATUS_INVALID_ARGUMENT && b == QAWS_STATUS_INVALID_ARGUMENT && !m && r.invalid_face == 0, "refused: no output, an index out of range");
 	c = mr_repair(nanx, 3, ok, NULL, 1, NULL, &m, &r);

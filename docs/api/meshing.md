@@ -33,16 +33,16 @@ typedef struct qaws_mesh_3d_desc {
 	unsigned int const* face_vertices; unsigned int const* face_sizes; unsigned int face_count;   /* sizes NULL: triangles */
 } qaws_mesh_3d_desc;
 
-qaws_status qaws_mesh_3d_create(qaws_mesh_3d_desc const* desc, qaws_mesh_3d** out_mesh);
-qaws_status qaws_mesh_3d_get_faces(qaws_mesh_3d const* mesh, unsigned int* out_face_vertices, unsigned int* out_face_sizes);
-qaws_status qaws_mesh_3d_get_face_adjacency(qaws_mesh_3d const* mesh, unsigned int* out_faces);
-qaws_status qaws_mesh_3d_split_edge(qaws_mesh_3d* mesh, unsigned int a, unsigned int b, qaws_scalar const* position,
-	qaws_mesh_location const* footpoint, unsigned int* out_vertex);
+qaws_status qaws_mesh_3d_create(qaws_mesh_3d** out_mesh, qaws_mesh_3d_desc const* desc);
+qaws_status qaws_mesh_3d_get_faces(unsigned int* out_face_vertices, unsigned int* out_face_sizes, qaws_mesh_3d const* mesh);
+qaws_status qaws_mesh_3d_get_face_adjacency(unsigned int* out_faces, qaws_mesh_3d const* mesh);
+qaws_status qaws_mesh_3d_split_edge(unsigned int* out_vertex, qaws_mesh_3d* mesh, qaws_scalar const* position, qaws_mesh_location const* footpoint,
+	unsigned int a, unsigned int b);
 qaws_status qaws_mesh_3d_collapse_edge(qaws_mesh_3d* mesh, unsigned int a, unsigned int b, qaws_scalar const* position,
 	qaws_mesh_location const* footpoint);
 qaws_status qaws_mesh_3d_flip_edge(qaws_mesh_3d* mesh, unsigned int a, unsigned int b);
-qaws_status qaws_mesh_3d_split_face(qaws_mesh_3d* mesh, unsigned int face, qaws_scalar const* position,
-	qaws_mesh_location const* footpoint, unsigned int* out_vertex);
+qaws_status qaws_mesh_3d_split_face(unsigned int* out_vertex, qaws_mesh_3d* mesh, qaws_scalar const* position,
+	qaws_mesh_location const* footpoint, unsigned int face);
 ```
 
 The storage is geogram's facet corners: a face is a run of corners, each
@@ -74,13 +74,13 @@ outside; indices stay dense through edits.
 ## References: the surface between the vertices
 
 ```c
-qaws_status qaws_mesh_reference_create(qaws_mesh_3d const* mesh, qaws_mesh_reference_desc const* desc, qaws_mesh_reference** out);
-qaws_status qaws_mesh_reference_evaluate(qaws_mesh_reference const* r, qaws_mesh_location const* locations, unsigned int count,
-	qaws_scalar* out_positions, qaws_scalar* out_normals, qaws_scalar* out_curvatures);
-qaws_status qaws_mesh_reference_project(qaws_mesh_reference const* r, qaws_scalar const* points, unsigned int count,
-	qaws_mesh_location const* hints, qaws_mesh_location* out_locations, qaws_scalar* out_distances);
-qaws_status qaws_mesh_reference_walk(qaws_mesh_reference const* r, qaws_mesh_location from, qaws_scalar const* tangent,
-	qaws_mesh_location* out_to);
+qaws_status qaws_mesh_reference_create(qaws_mesh_reference** out, qaws_mesh_3d const* mesh, qaws_mesh_reference_desc const* desc);
+qaws_status qaws_mesh_reference_evaluate(qaws_scalar* out_positions, qaws_scalar* out_normals, qaws_scalar* out_curvatures,
+	qaws_mesh_reference const* r, qaws_mesh_location const* locations, unsigned int count);
+qaws_status qaws_mesh_reference_project(qaws_mesh_location* out_locations, qaws_scalar* out_distances, qaws_mesh_reference const* r,
+	qaws_scalar const* points, qaws_mesh_location const* hints, unsigned int count);
+qaws_status qaws_mesh_reference_walk(qaws_mesh_location* out_to, qaws_mesh_reference const* r, qaws_scalar const* tangent,
+	qaws_mesh_location from);
 ```
 
 A triangle mesh with vertex normals implies a smooth surface. The reference
@@ -102,13 +102,13 @@ derivatives and curvatures are checked against Mathematica
 ## Fields
 
 ```c
-qaws_status qaws_size_field_create_uniform(qaws_scalar length, qaws_size_field** out);
-qaws_status qaws_size_field_create_curvature(qaws_mesh_reference const* r, qaws_curvature_size_desc const* desc, qaws_size_field** out);
-qaws_status qaws_size_field_create_feature_size(qaws_mesh_reference const* r, qaws_feature_size_desc const* desc, qaws_size_field** out);
-qaws_status qaws_mesh_3d_direction_field(qaws_mesh_3d const* mesh, qaws_direction_field_desc const* desc, qaws_scalar* out_directions,
-	int* out_face_index);
-qaws_status qaws_volume_mesh_frame_field(qaws_volume_mesh const* mesh, qaws_frame_field_desc const* desc, qaws_scalar* out_frames,
-	unsigned char* out_singular);
+qaws_status qaws_size_field_create_uniform(qaws_size_field** out, qaws_scalar length);
+qaws_status qaws_size_field_create_curvature(qaws_size_field** out, qaws_mesh_reference const* r, qaws_curvature_size_desc const* desc);
+qaws_status qaws_size_field_create_feature_size(qaws_size_field** out, qaws_mesh_reference const* r, qaws_feature_size_desc const* desc);
+qaws_status qaws_mesh_3d_direction_field(qaws_scalar* out_directions, int* out_face_index, qaws_mesh_3d const* mesh,
+	qaws_direction_field_desc const* desc);
+qaws_status qaws_volume_mesh_frame_field(qaws_scalar* out_frames, unsigned char* out_singular, qaws_volume_mesh const* mesh,
+	qaws_frame_field_desc const* desc);
 ```
 
 - **Size fields** give the target edge length at each point: uniform; by
@@ -186,9 +186,9 @@ int curvature_aligned;                /* SMOOTHEST: drawn to the principal curva
 ## Remeshing and quads
 
 ```c
-qaws_status qaws_mesh_remesh(qaws_mesh_3d const* mesh, qaws_remesh_desc const* desc, qaws_mesh_3d** out, qaws_mesh_report* report);
-qaws_status qaws_mesh_quadrangulate(qaws_mesh_3d const* mesh, qaws_quadrangulate_desc const* desc, qaws_mesh_3d** out,
-	qaws_mesh_report* report);
+qaws_status qaws_mesh_remesh(qaws_mesh_3d** out, qaws_mesh_report* report, qaws_mesh_3d const* mesh, qaws_remesh_desc const* desc);
+qaws_status qaws_mesh_quadrangulate(qaws_mesh_3d** out, qaws_mesh_report* report, qaws_mesh_3d const* mesh,
+	qaws_quadrangulate_desc const* desc);
 ```
 
 - **LOCAL** remeshing (Botsch and Kobbelt 2004, as pmp, geometry-central
@@ -465,7 +465,7 @@ d.attractors = points;               /* 3 each: free singularities drawn there *
 d.attractor_strengths = strengths;   /* SMOOTHEST in cones, < 0 pushes */
 d.attractor_count = n_points;
 d.attractor_radius = 0.12f;          /* near the spacing */
-qaws_mesh_quadrangulate(mesh, &d, &quads, &report);
+qaws_mesh_quadrangulate(&quads, &report, mesh, &d);
 ```
 
 | Input | Field | What honours it |
@@ -593,9 +593,9 @@ at 1.25 512 quads, SJ min 0.860 (INSTANT 0.178), AD 2.41 (2.78); can at
 ## Measures
 
 ```c
-qaws_status qaws_mesh_3d_measure_shape(qaws_mesh_3d const* mesh, qaws_shape_quality* out, unsigned int* out_ideal);
-qaws_status qaws_mesh_3d_measure_deviation(qaws_mesh_3d const* mesh, qaws_mesh_reference const* reference,
-	qaws_deviation_desc const* desc, qaws_mesh_deviation* out);
+qaws_status qaws_mesh_3d_measure_shape(qaws_shape_quality* out, unsigned int* out_ideal, qaws_mesh_3d const* mesh);
+qaws_status qaws_mesh_3d_measure_deviation(qaws_mesh_deviation* out, qaws_mesh_reference const* reference,
+	qaws_mesh_3d const* mesh, qaws_deviation_desc const* desc);
 ```
 
 `qaws_mesh_measure.h` reports a mesh the way remeshing papers do (Hu et
@@ -667,10 +667,10 @@ figures 3 and 4's meshes: the baseline the remeshing items quote.
 ## Meshes of exact geometry
 
 ```c
-qaws_status qaws_mesh_generate_surface(qaws_surface const* surface, qaws_generate_desc const* desc, qaws_mesh_3d** out,
-	qaws_mesh_report* report);
-qaws_status qaws_mesh_generate_shell(qaws_shell_atlas const* shell, qaws_generate_desc const* desc, qaws_mesh_3d** out,
-	qaws_mesh_report* report);
+qaws_status qaws_mesh_generate_surface(qaws_mesh_3d** out, qaws_mesh_report* report, qaws_surface const* surface,
+	qaws_generate_desc const* desc);
+qaws_status qaws_mesh_generate_shell(qaws_mesh_3d** out, qaws_mesh_report* report, qaws_shell_atlas const* shell,
+	qaws_generate_desc const* desc);
 ```
 
 `REMESH` meshes a surface (a welded parameter grid, so seams and poles
@@ -688,9 +688,9 @@ corners on its corners. `PARAMETRIC`, `RESTRICTED_DELAUNAY` and
 ## Repair for farq
 
 ```c
-qaws_status qaws_mesh_repair(qaws_scalar const* positions, unsigned int vertex_count, unsigned int const* face_vertices,
-	unsigned int const* face_sizes, unsigned int face_count, qaws_mesh_repair_desc const* desc, qaws_mesh_3d** out_mesh,
-	qaws_mesh_repair_report* report);
+qaws_status qaws_mesh_repair(qaws_mesh_3d** out_mesh, qaws_mesh_repair_report* report, qaws_scalar const* positions,
+	unsigned int const* face_vertices, unsigned int const* face_sizes, unsigned int vertex_count, unsigned int face_count,
+	qaws_mesh_repair_desc const* desc);
 ```
 
 `qaws_mesh_repair.h` turns messy input (triangle and polygon soups, scans,
@@ -754,11 +754,11 @@ typedef struct qaws_volume_mesh_desc {
 	unsigned int const* cell_vertices; qaws_cell_type const* cell_types; unsigned int cell_count;   /* types NULL: tetrahedra */
 } qaws_volume_mesh_desc;
 
-qaws_status qaws_volume_mesh_create(qaws_volume_mesh_desc const* desc, qaws_volume_mesh** out_mesh);
-qaws_status qaws_volume_mesh_get_cells(qaws_volume_mesh const* mesh, unsigned int* out_cell_vertices, qaws_cell_type* out_types);
-qaws_status qaws_volume_mesh_get_cell_adjacency(qaws_volume_mesh const* mesh, unsigned int* out_cells);
-qaws_status qaws_volume_mesh_get_boundary(qaws_volume_mesh const* mesh, qaws_mesh_3d** out_surface);
-qaws_status qaws_volume_mesh_measure_quality(qaws_volume_mesh const* mesh, qaws_volume_quality* out_quality);
+qaws_status qaws_volume_mesh_create(qaws_volume_mesh** out_mesh, qaws_volume_mesh_desc const* desc);
+qaws_status qaws_volume_mesh_get_cells(unsigned int* out_cell_vertices, qaws_cell_type* out_types, qaws_volume_mesh const* mesh);
+qaws_status qaws_volume_mesh_get_cell_adjacency(unsigned int* out_cells, qaws_volume_mesh const* mesh);
+qaws_status qaws_volume_mesh_get_boundary(qaws_mesh_3d** out_surface, qaws_volume_mesh const* mesh);
+qaws_status qaws_volume_mesh_measure_quality(qaws_volume_quality* out_quality, qaws_volume_mesh const* mesh);
 ```
 
 Cells follow geogram's pattern: runs of corners, and per cell facet the
@@ -780,8 +780,8 @@ tetrahedra, the scaled Jacobian for hexahedra, edges and volume.
 ## Tetrahedra
 
 ```c
-qaws_status qaws_volume_mesh_tetrahedralize(qaws_mesh_3d const* boundary, qaws_tetrahedralize_desc const* desc,
-	qaws_volume_mesh** out_mesh, qaws_mesh_report* out_report);
+qaws_status qaws_volume_mesh_tetrahedralize(qaws_volume_mesh** out_mesh, qaws_mesh_report* out_report,
+	qaws_mesh_3d const* boundary, qaws_tetrahedralize_desc const* desc);
 ```
 
 `DELAUNAY`: the Delaunay tetrahedralization of the border's vertices,
@@ -802,8 +802,8 @@ the border's vertices alone. `ENVELOPE` (triangle soups, fTetWild) and
 ## Hexahedra
 
 ```c
-qaws_status qaws_volume_mesh_hexahedralize(qaws_mesh_3d const* boundary, qaws_hexahedralize_desc const* desc,
-	qaws_volume_mesh** out_mesh, qaws_mesh_report* out_report);
+qaws_status qaws_volume_mesh_hexahedralize(qaws_volume_mesh** out_mesh, qaws_mesh_report* out_report,
+	qaws_mesh_3d const* boundary, qaws_hexahedralize_desc const* desc);
 ```
 
 `GRID` (Maréchal 2009; Gao, Shen, Panozzo 2019): a grid over the box in
@@ -836,11 +836,11 @@ qaws_volume_mesh *tets = NULL, *hexes = NULL;
 qaws_volume_quality q;
 
 g.target_length = 0.2;                                   /* triangles on the torus, exact to rounding */
-qaws_mesh_generate_surface(torus, &g, &surface, NULL);
-qaws_volume_mesh_tetrahedralize(surface, &td, &tets, NULL);
-qaws_volume_mesh_measure_quality(tets, &q);              /* q.min_dihedral, q.max_radius_edge, q.volume */
+qaws_mesh_generate_surface(&surface, NULL, torus, &g);
+qaws_volume_mesh_tetrahedralize(&tets, NULL, surface, &td);
+qaws_volume_mesh_measure_quality(&q, tets);              /* q.min_dihedral, q.max_radius_edge, q.volume */
 hd.cell_size = 0.22;
-qaws_volume_mesh_hexahedralize(surface, &hd, &hexes, NULL);
+qaws_volume_mesh_hexahedralize(&hexes, NULL, surface, &hd);
 ```
 
 The showcase `qaws_meshing_showcase` draws figures 1 to 18: the corner

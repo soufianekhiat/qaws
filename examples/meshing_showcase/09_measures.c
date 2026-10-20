@@ -20,7 +20,7 @@ static double* ms_face_quality(qaws_mesh_3d const* m)
 	unsigned int nf = qaws_mesh_3d_get_face_count(m), nc = qaws_mesh_3d_get_corner_count(m), f, q, i, k;
 	unsigned int *fv = (unsigned int*)malloc(sizeof(unsigned int) * (nc + 1)), *fs = (unsigned int*)malloc(sizeof(unsigned int) * (nf + 1));
 	double *x = ms_positions(m), *out = (double*)malloc(sizeof(double) * (nf + 1));
-	qaws_mesh_3d_get_faces(m, fv, fs);
+	qaws_mesh_3d_get_faces(fv, fs, m);
 	for (f = 0, q = 0; f < nf; q += fs[f++])
 	{
 		double const* p[4];
@@ -95,7 +95,7 @@ static void ms_draw_faces(er_canvas* c, qaws_mesh_3d const* m, double const* rgb
 	unsigned int nf = qaws_mesh_3d_get_face_count(m), nc = qaws_mesh_3d_get_corner_count(m), f, q, i;
 	unsigned int *fv = (unsigned int*)malloc(sizeof(unsigned int) * (nc + 1)), *fs = (unsigned int*)malloc(sizeof(unsigned int) * (nf + 1));
 	double* x = ms_positions(m);
-	qaws_mesh_3d_get_faces(m, fv, fs);
+	qaws_mesh_3d_get_faces(fv, fs, m);
 	for (f = 0, q = 0; f < nf; q += fs[f++])
 		for (i = 1; i + 1 < fs[f]; i++)
 			er_triangle(c, x + 3 * fv[q], x + 3 * fv[q + i], x + 3 * fv[q + i + 1], NULL, NULL, NULL, rgb + 3 * f, rgb + 3 * f, rgb + 3 * f);
@@ -111,7 +111,7 @@ static void ms_dot_irregular(er_canvas* c, qaws_mesh_3d const* m, unsigned int c
 	for (v = 0; v < nv; v++)
 	{
 		n = 0;
-		qaws_mesh_3d_get_vertex_ring(m, v, ring, 64, &n);
+		qaws_mesh_3d_get_vertex_ring(ring, &n, m, 64, v);
 		if (ideal[v] && n != ideal[v])
 			er_point(c, x + 3 * v, n < ideal[v] ? blue : red, 4.5);
 	}
@@ -135,8 +135,8 @@ static void ms_measure(ms_measured* r)
 	memset(&r->d, 0, sizeof r->d);
 	if (!r->mesh || !r->ref)
 		return;
-	qaws_mesh_3d_measure_shape(r->mesh, &r->s, NULL);
-	qaws_mesh_3d_measure_deviation(r->mesh, r->ref, NULL, &r->d);
+	qaws_mesh_3d_measure_shape(&r->s, NULL, r->mesh);
+	qaws_mesh_3d_measure_deviation(&r->d, r->ref, r->mesh, NULL);
 	r->seconds = (double)(clock() - c0) / CLOCKS_PER_SEC;
 }
 
@@ -162,18 +162,18 @@ static void demo_measures(void)
 		qaws_mesh_3d_detect_features(cube, (qaws_scalar)(30 * MS_PI / 180), 0, 0);
 	}
 	qaws_mesh_3d_detect_features(can, (qaws_scalar)(50 * MS_PI / 180), 0, 0);
-	qaws_mesh_reference_create(blob, NULL, &rb);
-	qaws_mesh_reference_create(bumpy, NULL, &ry);
-	qaws_mesh_reference_create(can, NULL, &rc);
-	qaws_mesh_reference_create(cube, NULL, &rq);
-	qaws_mesh_reference_create(torus, NULL, &rt);
+	qaws_mesh_reference_create(&rb, blob, NULL);
+	qaws_mesh_reference_create(&ry, bumpy, NULL);
+	qaws_mesh_reference_create(&rc, can, NULL);
+	qaws_mesh_reference_create(&rq, cube, NULL);
+	qaws_mesh_reference_create(&rt, torus, NULL);
 	memset(&cd, 0, sizeof cd);
 	cd.angle_tolerance = (qaws_scalar)(12 * MS_PI / 180);
 	cd.min_length = (qaws_scalar)0.02;
 	cd.max_length = (qaws_scalar)0.3;
 	cd.gradation = (qaws_scalar)0.35;
 	if (ry)
-		qaws_size_field_create_curvature(ry, &cd, &sf);
+		qaws_size_field_create_curvature(&sf, ry, &cd);
 	/* figures 3 and 4's meshes, each with the surface it was made on */
 	memset(row, 0, sizeof row);
 	row[0].name = "uniform blob";
@@ -226,7 +226,7 @@ static void demo_measures(void)
 		qaws_shape_quality s;
 		for (i = 0; i < nf; i++)
 			ms_quality_colour((q[i] - 0.6) / 0.4, col + 3 * i);
-		qaws_mesh_3d_measure_shape(m, &s, ideal);
+		qaws_mesh_3d_measure_shape(&s, ideal, m);
 		sprintf(sub, "Q min %.2f mean %.3f, %u irregular", (double)s.min_quality, (double)s.mean_quality, s.irregular);
 		ms_panel(c, 0, 0, 550, 640, m, 0.6, 0.5, "triangles by Q", sub);
 		ms_draw_faces(c, m, col);
@@ -246,7 +246,7 @@ static void demo_measures(void)
 		qaws_shape_quality s;
 		for (i = 0; i < nf; i++)
 			ms_quality_colour(q[i] < 0.5 ? -1 : (q[i] - 0.5) / 0.5, col + 3 * i);
-		qaws_mesh_3d_get_faces(m, fv, fs);
+		qaws_mesh_3d_get_faces(fv, fs, m);
 		for (i = 0; i < nf; o += fs[i++])
 			if (q[i] < q[w])
 			{
@@ -262,12 +262,12 @@ static void demo_measures(void)
 			for (k = 0; k < 3; k++)
 				dir[k] -= p[3 * i + k] / nv;
 		l = sqrt(dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]);
-		qaws_mesh_3d_measure_shape(m, &s, ideal);
+		qaws_mesh_3d_measure_shape(&s, ideal, m);
 		sprintf(sub, "SJ min %.2f mean %.3f, %u irregular", (double)s.min_jacobian, (double)s.mean_jacobian, s.irregular);
 		ms_panel(c, 550, 0, 550, 640, m, atan2(-dir[0], -dir[1]), asin(fmax(-0.7, fmin(0.7, l > 0 ? dir[2] / l : 0.5))), "quads by SJ, the worst ringed", sub);
 		ms_draw_faces(c, m, col);
 		ms_draw(c, m, NULL, NULL, 0, wire, 0.8);
-		qaws_mesh_3d_get_feature_edges(m, fe);
+		qaws_mesh_3d_get_feature_edges(fe, m);
 		for (i = 0; i < nfe; i++)
 			er_line(c, p + 3 * fe[2 * i], p + 3 * fe[2 * i + 1], dark, 2.0);
 		ms_dot_irregular(c, m, ideal);
@@ -301,11 +301,11 @@ static void demo_measures(void)
 		double *x = ms_positions(m), *col = (double*)malloc(sizeof(double) * 3 * nf), wt[3], wf[3];
 		qaws_scalar *cen = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * nf), *dist = (qaws_scalar*)malloc(sizeof(qaws_scalar) * nf);
 		qaws_mesh_location* loc = (qaws_mesh_location*)malloc(sizeof(qaws_mesh_location) * nf);
-		qaws_mesh_3d_get_triangles(m, t);
+		qaws_mesh_3d_get_triangles(t, m);
 		for (i = 0; i < nf; i++)
 			for (k = 0; k < 3; k++)
 				cen[3 * i + k] = (qaws_scalar)((x[3 * t[3 * i] + k] + x[3 * t[3 * i + 1] + k] + x[3 * t[3 * i + 2] + k]) / 3);
-		qaws_mesh_reference_project(rb, cen, nf, NULL, loc, dist);
+		qaws_mesh_reference_project(loc, dist, rb, cen, NULL, nf);
 		for (i = 0; i < nf; i++)
 			ms_colormap(0.5 + 0.5 * dist[i] / d->to_reference[1], col + 3 * i);
 		for (k = 0; k < 3; k++)

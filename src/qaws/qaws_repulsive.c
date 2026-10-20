@@ -252,7 +252,7 @@ void qaws_internal_rs_enter(qaws_internal_rs_scope* sc, qaws_allocator const* a)
 {
 	sc->active = a && a->alloc;
 	if (sc->active)
-		qaws_exchange_thread_allocator(a, &sc->previous);
+		qaws_exchange_thread_allocator(&sc->previous, a);
 }
 
 void qaws_internal_rs_leave(qaws_internal_rs_scope const* sc)
@@ -265,7 +265,7 @@ void qaws_internal_rs_leave(qaws_internal_rs_scope const* sc)
 /*  Curves                                                                  */
 /* ------------------------------------------------------------------------ */
 
-qaws_status qaws_repulsive_curves_create_ex(qaws_repulsive_curves_desc const* desc, qaws_allocator const* allocator, qaws_repulsive_curves** out_curves)
+qaws_status qaws_repulsive_curves_create_ex(qaws_repulsive_curves** out_curves, qaws_repulsive_curves_desc const* desc, qaws_allocator const* allocator)
 {
 	qaws_internal_rs_scope sc;
 	qaws_status st;
@@ -364,7 +364,7 @@ qaws_status qaws_repulsive_curves_hvp(qaws_scalar* out_hv, qaws_repulsive_curves
 /*  Meshes                                                                  */
 /* ------------------------------------------------------------------------ */
 
-qaws_status qaws_repulsive_mesh_create_ex(qaws_repulsive_mesh_desc const* desc, qaws_allocator const* allocator, qaws_repulsive_mesh** out_mesh)
+qaws_status qaws_repulsive_mesh_create_ex(qaws_repulsive_mesh** out_mesh, qaws_repulsive_mesh_desc const* desc, qaws_allocator const* allocator)
 {
 	qaws_internal_rs_scope sc;
 	qaws_status st;

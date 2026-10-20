@@ -177,7 +177,7 @@ void qaws_mesh_reference_destroy(qaws_mesh_reference* r)
 	qaws_internal_free(r);
 }
 
-qaws_status qaws_mesh_reference_create(qaws_mesh_3d const* mesh, qaws_mesh_reference_desc const* desc, qaws_mesh_reference** out)
+qaws_status qaws_mesh_reference_create(qaws_mesh_reference** out, qaws_mesh_3d const* mesh, qaws_mesh_reference_desc const* desc)
 {
 	qaws_mesh_reference* r;
 	qaws_hm* m;
@@ -199,7 +199,7 @@ qaws_status qaws_mesh_reference_create(qaws_mesh_3d const* mesh, qaws_mesh_refer
 	if (!r)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	r->kind = kind;
-	st = qaws_mesh_3d_clone(mesh, &r->mesh);
+	st = qaws_mesh_3d_clone(&r->mesh, mesh);
 	if (st != QAWS_STATUS_OK)
 	{
 		qaws_internal_free(r);
@@ -364,7 +364,7 @@ unsigned int qaws_mesh_reference_get_triangle_count(qaws_mesh_reference const* r
 	return r ? r->nt : 0;
 }
 
-qaws_status qaws_mesh_reference_get_triangle(qaws_mesh_reference const* r, unsigned int t, unsigned int out[3])
+qaws_status qaws_mesh_reference_get_triangle(unsigned int out[3], qaws_mesh_reference const* r, unsigned int t)
 {
 	if (!r || t >= r->nt || !out)
 		return QAWS_STATUS_INVALID_ARGUMENT;
@@ -379,7 +379,7 @@ qaws_mesh_3d const* qaws_mesh_reference_get_mesh(qaws_mesh_reference const* r)
 	return r ? r->mesh : NULL;
 }
 
-qaws_status qaws_mesh_reference_get_vertex_location(qaws_mesh_reference const* r, unsigned int v, qaws_mesh_location* out)
+qaws_status qaws_mesh_reference_get_vertex_location(qaws_mesh_location* out, qaws_mesh_reference const* r, unsigned int v)
 {
 	unsigned int l;
 	if (!r || !out || v >= r->mesh->hm.nv || r->vloc[v] == HM_NONE)
@@ -395,8 +395,8 @@ qaws_status qaws_mesh_reference_get_vertex_location(qaws_mesh_reference const* r
 /*  Evaluation                                                              */
 /* ======================================================================== */
 
-qaws_status qaws_mesh_reference_evaluate(qaws_mesh_reference const* r, qaws_mesh_location const* loc, unsigned int count,
-	qaws_scalar* out_x, qaws_scalar* out_n, qaws_scalar* out_k)
+qaws_status qaws_mesh_reference_evaluate(qaws_scalar* out_x, qaws_scalar* out_n, qaws_scalar* out_k,
+	qaws_mesh_reference const* r, qaws_mesh_location const* loc, unsigned int count)
 {
 	unsigned int i, k;
 	if (!r || (count && !loc))
@@ -755,8 +755,8 @@ void mr_eval(qaws_mesh_reference const* r, qaws_mesh_location const* l, double* 
 	mi_eval(&r->patch[l->patch], (double)l->a, (double)l->b, x, NULL, NULL, NULL, NULL, NULL, n, NULL, NULL);
 }
 
-qaws_status qaws_mesh_reference_project(qaws_mesh_reference const* r, qaws_scalar const* points, unsigned int count,
-	qaws_mesh_location const* hints, qaws_mesh_location* out_loc, qaws_scalar* out_dist)
+qaws_status qaws_mesh_reference_project(qaws_mesh_location* out_loc, qaws_scalar* out_dist, qaws_mesh_reference const* r,
+	qaws_scalar const* points, qaws_mesh_location const* hints, unsigned int count)
 {
 	mr_scratch s;
 	unsigned int i;
@@ -902,8 +902,8 @@ int mr_walk(qaws_mesh_reference const* r, qaws_mesh_location from, double const*
 	return stopped;
 }
 
-qaws_status qaws_mesh_reference_walk(qaws_mesh_reference const* r, qaws_mesh_location from, qaws_scalar const* tangent,
-	qaws_mesh_location* out_to)
+qaws_status qaws_mesh_reference_walk(qaws_mesh_location* out_to, qaws_mesh_reference const* r, qaws_scalar const* tangent,
+	qaws_mesh_location from)
 {
 	double w[3];
 	if (!r || !tangent || !out_to || from.patch >= r->nt)
@@ -919,8 +919,8 @@ qaws_status qaws_mesh_reference_walk(qaws_mesh_reference const* r, qaws_mesh_loc
 /*  Attributes                                                              */
 /* ======================================================================== */
 
-qaws_status qaws_mesh_reference_evaluate_attribute(qaws_mesh_reference const* r, unsigned int attribute, qaws_mesh_location const* loc,
-	unsigned int count, qaws_scalar* out)
+qaws_status qaws_mesh_reference_evaluate_attribute(qaws_scalar* out, qaws_mesh_reference const* r, qaws_mesh_location const* loc,
+	unsigned int count, unsigned int attribute)
 {
 	qaws_hm const* m;
 	hm_attr const* at;

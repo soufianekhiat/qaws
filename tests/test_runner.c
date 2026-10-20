@@ -355,7 +355,7 @@ int main(void) {
 		if (scratch_memory)
 		{
 			qaws_arena_init(&scratch, scratch_memory, (size_t)1 << 30);
-			qaws_exchange_thread_scratch_allocator(&scratch.allocator, NULL);
+			qaws_exchange_thread_scratch_allocator(NULL, &scratch.allocator);
 		}
 	}
 	printf("========================================\n");

@@ -36,7 +36,7 @@ static qaws_mesh_3d* rt_make(double const* x, unsigned int nv, unsigned int cons
 	d.face_vertices = f;
 	d.face_sizes = fs;
 	d.face_count = nf;
-	qaws_mesh_3d_create(&d, &m);
+	qaws_mesh_3d_create(&m, &d);
 	free(p);
 	return m;
 }
@@ -98,7 +98,7 @@ static qaws_mesh_3d* rt_remesh(qaws_mesh_3d const* m, qaws_mesh_reference const*
 	d.reference = r;
 	d.target_length = (qaws_scalar)L;
 	d.size = sf;
-	*st = qaws_mesh_remesh(m, &d, &out, rep);
+	*st = qaws_mesh_remesh(&out, rep, m, &d);
 	return out;
 }
 
@@ -116,7 +116,7 @@ static void test_sphere(void)
 	char msg[500];
 	memset(&rd, 0, sizeof rd);
 	rd.normals = nrm;
-	qaws_mesh_reference_create(m, &rd, &r);
+	qaws_mesh_reference_create(&r, m, &rd);
 	if (r)
 		out = rt_remesh(m, r, 0.12, NULL, &rep, &st);
 	if (!out)
@@ -128,21 +128,21 @@ static void test_sphere(void)
 	{
 		qaws_mesh_location* l = (qaws_mesh_location*)malloc(sizeof(qaws_mesh_location) * nv);
 		qaws_scalar *x = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * nv), *y = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * nv);
-		qaws_mesh_3d_get_positions(out, x);
-		qaws_mesh_3d_get_footpoints(out, l);
-		qaws_mesh_reference_evaluate(r, l, nv, y, NULL, NULL);
+		qaws_mesh_3d_get_positions(x, out);
+		qaws_mesh_3d_get_footpoints(l, out);
+		qaws_mesh_reference_evaluate(y, NULL, NULL, r, l, nv);
 		for (i = 0; i < nv; i++)
 		{
 			unsigned int ring[64], n = 0;
 			foot = fmax(foot, fabs(x[3 * i] - y[3 * i]) + fabs(x[3 * i + 1] - y[3 * i + 1]) + fabs(x[3 * i + 2] - y[3 * i + 2]));
 			off = fmax(off, fabs(sqrt(x[3 * i] * x[3 * i] + x[3 * i + 1] * x[3 * i + 1] + x[3 * i + 2] * x[3 * i + 2]) - 1));
-			qaws_mesh_3d_get_vertex_ring(out, i, ring, 64, &n);
+			qaws_mesh_3d_get_vertex_ring(ring, &n, out, 64, i);
 			interior++;
 			v6 += n == 6;
 		}
 		free(l); free(x); free(y);
 	}
-	qaws_mesh_3d_get_topology(out, &t);
+	qaws_mesh_3d_get_topology(&t, out);
 	sprintf(msg, "sphere remeshed to 0.12: %u vertices, valid %d, closed %d, genus %u; footpoints %.2g, off the sphere %.2g; edges %.3g..%.3g mean %.3g, angles %.3g..%.3g, valence 6 at %.0f%%, deviation %.2g",
 		nv, qaws_mesh_3d_validate(out) == QAWS_STATUS_OK, t.closed, t.genus, foot, off, (double)rep.quality.min_edge, (double)rep.quality.max_edge,
 		(double)rep.quality.mean_edge, (double)rep.quality.min_angle, (double)rep.quality.max_angle, 100.0 * v6 / interior, (double)rep.max_deviation);
@@ -171,11 +171,11 @@ static void test_cube(void)
 		vals[i] = (qaws_scalar)(x[3 * i] + 2 * x[3 * i + 1] + 3 * x[3 * i + 2]);
 	memset(&ad, 0, sizeof ad);
 	ad.name = "f"; ad.element = QAWS_MESH_VERTEX; ad.components = 1;
-	qaws_mesh_3d_add_attribute(m, &ad, vals, &va);
+	qaws_mesh_3d_add_attribute(&va, m, vals, &ad);
 	for (i = 0; i < 24; i++)
 		vals[i] = (qaws_scalar)(i / 4);   /* (each face's corners: its index) */
 	ad.name = "side"; ad.element = QAWS_MESH_CORNER; ad.rule = QAWS_ATTRIBUTE_NEAREST;
-	qaws_mesh_3d_add_attribute(m, &ad, vals, &ca);
+	qaws_mesh_3d_add_attribute(&ca, m, vals, &ad);
 	qaws_mesh_3d_detect_features(m, (qaws_scalar)(M_PI / 6), 0, 0);
 	out = rt_remesh(m, NULL, 0.25, NULL, &rep, &st);
 	if (!out)
@@ -191,10 +191,10 @@ static void test_cube(void)
 		unsigned int *fvx = (unsigned int*)malloc(sizeof(unsigned int) * nc), *fsz = (unsigned int*)malloc(sizeof(unsigned int) * nf);
 		qaws_scalar* side = (qaws_scalar*)malloc(sizeof(qaws_scalar) * nc);
 		fe = (unsigned int*)malloc(sizeof(unsigned int) * 2 * nfe);
-		qaws_mesh_3d_get_positions(out, p);
-		qaws_mesh_3d_find_attribute(out, "f", &a2);
-		qaws_mesh_3d_find_attribute(out, "side", &c2);
-		qaws_mesh_3d_get_attribute(out, a2, fv);
+		qaws_mesh_3d_get_positions(p, out);
+		qaws_mesh_3d_find_attribute(&a2, out, "f");
+		qaws_mesh_3d_find_attribute(&c2, out, "side");
+		qaws_mesh_3d_get_attribute(fv, out, a2);
 		for (i = 0; i < nv; i++)
 		{
 			double mx = fmax(fabs(p[3 * i]), fmax(fabs(p[3 * i + 1]), fabs(p[3 * i + 2])));
@@ -205,7 +205,7 @@ static void test_cube(void)
 					found[k] = 1;
 			corners += qaws_mesh_3d_is_feature_corner(out, i);
 		}
-		qaws_mesh_3d_get_feature_edges(out, fe);
+		qaws_mesh_3d_get_feature_edges(fe, out);
 		for (i = 0; i < nfe; i++)
 		{
 			qaws_scalar const *a = p + 3 * fe[2 * i], *b = p + 3 * fe[2 * i + 1];
@@ -216,8 +216,8 @@ static void test_cube(void)
 			fon += on < 2;
 		}
 		/* each face's corners: the side its centre is on */
-		qaws_mesh_3d_get_faces(out, fvx, fsz);
-		qaws_mesh_3d_get_attribute(out, c2, side);
+		qaws_mesh_3d_get_faces(fvx, fsz, out);
+		qaws_mesh_3d_get_attribute(side, out, c2);
 		for (i = 0, q = 0; i < nf; q += fsz[i], i++)
 		{
 			double cen[3] = { 0, 0, 0 };
@@ -276,11 +276,11 @@ static void test_open_square(void)
 		TEST_ASSERT(0, "open square: remeshed");
 		goto done;
 	}
-	qaws_mesh_3d_get_topology(out, &t);
+	qaws_mesh_3d_get_topology(&t, out);
 	{
 		unsigned int nv = qaws_mesh_3d_get_vertex_count(out);
 		qaws_scalar* p = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * nv);
-		qaws_mesh_3d_get_positions(out, p);
+		qaws_mesh_3d_get_positions(p, out);
 		for (i = 0; i < nv; i++)
 		{
 			double u = p[3 * i], v = p[3 * i + 1];
@@ -316,7 +316,7 @@ static void test_adaptive_and_refusals(void)
 	char msg[400];
 	nv = qaws_mesh_3d_get_vertex_count(m);
 	p = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * nv);
-	qaws_mesh_3d_get_positions(m, p);
+	qaws_mesh_3d_get_positions(p, m);
 	for (i = 0; i < nv; i++)
 	{
 		double d = p[3 * i] * p[3 * i] + p[3 * i + 1] * p[3 * i + 1] + (p[3 * i + 2] - 1) * (p[3 * i + 2] - 1), s = 1 + 0.6 * exp(-6 * d);
@@ -326,14 +326,14 @@ static void test_adaptive_and_refusals(void)
 	}
 	qaws_mesh_3d_set_positions(m, p);
 	free(p);
-	qaws_mesh_reference_create(m, NULL, &r);
+	qaws_mesh_reference_create(&r, m, NULL);
 	memset(&cd, 0, sizeof cd);
 	cd.angle_tolerance = (qaws_scalar)0.2;
 	cd.min_length = (qaws_scalar)0.02;
 	cd.max_length = (qaws_scalar)0.4;
 	cd.gradation = (qaws_scalar)0.4;
 	if (r)
-		qaws_size_field_create_curvature(r, &cd, &sf);
+		qaws_size_field_create_curvature(&sf, r, &cd);
 	out = sf ? rt_remesh(m, r, 0, sf, &rep, &st) : NULL;
 	if (out)
 	{
@@ -341,8 +341,8 @@ static void test_adaptive_and_refusals(void)
 		ne = qaws_mesh_3d_get_edge_count(out);
 		p = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * nv);
 		e = (unsigned int*)malloc(sizeof(unsigned int) * 2 * ne);
-		qaws_mesh_3d_get_positions(out, p);
-		qaws_mesh_3d_get_edges(out, e);
+		qaws_mesh_3d_get_positions(p, out);
+		qaws_mesh_3d_get_edges(e, out);
 		for (i = 0; i < ne; i++)
 		{
 			qaws_scalar const *a = p + 3 * e[2 * i], *b = p + 3 * e[2 * i + 1];
@@ -370,14 +370,14 @@ static void test_adaptive_and_refusals(void)
 		qaws_mesh_3d* bad = NULL;
 		memset(&d, 0, sizeof d);
 		d.method = QAWS_REMESH_FIELD_ALIGNED;
-		s1 = qaws_mesh_remesh(m, &d, &bad, NULL);
-		qaws_mesh_reference_create(other, NULL, &ro);
+		s1 = qaws_mesh_remesh(&bad, NULL, m, &d);
+		qaws_mesh_reference_create(&ro, other, NULL);
 		if (ro)
-			qaws_size_field_create_curvature(ro, &cd, &so);
+			qaws_size_field_create_curvature(&so, ro, &cd);
 		memset(&d, 0, sizeof d);
 		d.reference = r;
 		d.size = so;
-		s2 = so ? qaws_mesh_remesh(m, &d, &bad, NULL) : QAWS_STATUS_OK;
+		s2 = so ? qaws_mesh_remesh(&bad, NULL, m, &d) : QAWS_STATUS_OK;
 		sprintf(msg, "remesh refusals: CVT %s, a size field on another reference %s", qaws_status_to_string(s1), qaws_status_to_string(s2));
 		TEST_ASSERT(s1 == QAWS_STATUS_UNSUPPORTED_OPERATION && s2 == QAWS_STATUS_INVALID_ARGUMENT && !bad, msg);
 	}

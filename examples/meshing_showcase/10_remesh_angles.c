@@ -22,7 +22,7 @@ static qaws_mesh_3d* ms_remesh_bounded(qaws_mesh_3d const* m, qaws_mesh_referenc
 	d.min_angle = (qaws_scalar)(lo * MS_PI / 180);
 	d.max_angle = (qaws_scalar)(hi * MS_PI / 180);
 	d.tolerance = (qaws_scalar)tol;
-	if (qaws_mesh_remesh(m, &d, &out, rep) != QAWS_STATUS_OK)
+	if (qaws_mesh_remesh(&out, rep, m, &d) != QAWS_STATUS_OK)
 		printf("  remesh failed\n");
 	return out;
 }
@@ -33,7 +33,7 @@ static double* ms_corner_angles(qaws_mesh_3d const* m, unsigned int* n)
 	unsigned int nt = qaws_mesh_3d_get_triangle_count(m), i, k;
 	unsigned int* t = (unsigned int*)malloc(sizeof(unsigned int) * 3 * (nt ? nt : 1));
 	double *x = ms_positions(m), *a = (double*)malloc(sizeof(double) * 3 * (nt ? nt : 1));
-	qaws_mesh_3d_get_triangles(m, t);
+	qaws_mesh_3d_get_triangles(t, m);
 	for (i = 0; i < 3 * nt; i++)
 	{
 		double const *P = x + 3 * t[i], *A = x + 3 * t[3 * (i / 3) + (i + 1) % 3], *B = x + 3 * t[3 * (i / 3) + (i + 2) % 3];
@@ -59,7 +59,7 @@ static double ms_v567(qaws_mesh_3d const* m)
 	unsigned int nv = qaws_mesh_3d_get_vertex_count(m), nfe = qaws_mesh_3d_get_feature_edge_count(m), i, n = 0, k = 0;
 	unsigned int* fe = (unsigned int*)malloc(sizeof(unsigned int) * 2 * (nfe + 1));
 	unsigned char* on = (unsigned char*)calloc(nv + 1, 1);
-	qaws_mesh_3d_get_feature_edges(m, fe);
+	qaws_mesh_3d_get_feature_edges(fe, m);
 	for (i = 0; i < 2 * nfe; i++)
 		on[fe[i]] = 1;
 	for (i = 0; i < nv; i++)
@@ -67,7 +67,7 @@ static double ms_v567(qaws_mesh_3d const* m)
 		unsigned int ring[64], c = 0;
 		if (on[i] || qaws_mesh_3d_is_boundary_vertex(m, i))
 			continue;
-		qaws_mesh_3d_get_vertex_ring(m, i, ring, 64, &c);
+		qaws_mesh_3d_get_vertex_ring(ring, &c, m, 64, i);
 		n++;
 		k += c >= 5 && c <= 7;
 	}
@@ -85,7 +85,7 @@ static double ms_sampled_deviation(qaws_mesh_3d const* m, qaws_mesh_reference co
 	qaws_scalar *s = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 30 * (nf ? nf : 1)), *d = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 10 * (nf ? nf : 1));
 	qaws_mesh_location* l = (qaws_mesh_location*)malloc(sizeof(qaws_mesh_location) * 10 * (nf ? nf : 1));
 	double dmax = 0;
-	qaws_mesh_3d_get_triangles(m, t);
+	qaws_mesh_3d_get_triangles(t, m);
 	for (i = 0; i < nf; i++)
 	{
 		for (k = 0; k < 3; k++)
@@ -96,7 +96,7 @@ static double ms_sampled_deviation(qaws_mesh_3d const* m, qaws_mesh_reference co
 				for (k = 0; k < 3; k++)
 					s[3 * n + k] = (qaws_scalar)((1 - 0.25 * h) * x[3 * t[3 * i + j] + k] + 0.25 * h * x[3 * t[3 * i + (j + 1) % 3] + k]);
 	}
-	qaws_mesh_reference_project(r, s, n, NULL, l, d);
+	qaws_mesh_reference_project(l, d, r, s, NULL, n);
 	for (i = 0; i < n; i++)
 		dmax = fmax(dmax, (double)d[i]);
 	free(t); free(x); free(s); free(d); free(l);
@@ -111,8 +111,8 @@ static void ms_draw_by_angle(er_canvas* c, qaws_mesh_3d const* m)
 	unsigned int* t = (unsigned int*)malloc(sizeof(unsigned int) * 3 * (nt ? nt : 1));
 	double *x = ms_positions(m), *n = (double*)malloc(sizeof(double) * 3 * (nv ? nv : 1)), *a = ms_corner_angles(m, &na);
 	qaws_scalar* ns = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * (nv ? nv : 1));
-	qaws_mesh_3d_get_triangles(m, t);
-	qaws_mesh_3d_get_vertex_normals(m, ns);
+	qaws_mesh_3d_get_triangles(t, m);
+	qaws_mesh_3d_get_vertex_normals(ns, m);
 	for (i = 0; i < 3 * nv; i++)
 		n[i] = (double)ns[i];
 	for (i = 0; i < nt; i++)
@@ -222,14 +222,14 @@ static void demo_remesh_angles(void)
 	in[2] = ms_can(8, 1, 1.6);
 	qaws_mesh_3d_detect_features(in[2], (qaws_scalar)(50 * MS_PI / 180), 0, 0);
 	for (i = 0; i < 3; i++)
-		qaws_mesh_reference_create(in[i], NULL, &r[i]);
+		qaws_mesh_reference_create(&r[i], in[i], NULL);
 	memset(&cd, 0, sizeof cd);
 	cd.angle_tolerance = (qaws_scalar)(12 * MS_PI / 180);
 	cd.min_length = (qaws_scalar)0.02;
 	cd.max_length = (qaws_scalar)0.3;
 	cd.gradation = (qaws_scalar)0.35;
 	if (r[1])
-		qaws_size_field_create_curvature(r[1], &cd, &sf);
+		qaws_size_field_create_curvature(&sf, r[1], &cd);
 	for (i = 0; i < 3; i++)
 	{
 		if (!r[i] || (i == 1 && !sf))

@@ -1,0 +1,8 @@
+# Declarations not yet in the parameter convention (docs/parameter_convention_plan.md):
+# "function rule". The survey fails on a violation missing here and on an entry
+# that no longer applies, so this list only shrinks; it ends empty.
+# Two allocators in one signature (the survey takes every allocator for the context): the output (the previous
+# setting, the copy kept) first, the given allocator last, as the convention asks of the context.
+qaws_exchange_thread_allocator R1
+qaws_exchange_thread_scratch_allocator R1
+qaws_internal_rs_keep R1

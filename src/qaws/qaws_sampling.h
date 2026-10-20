@@ -115,19 +115,19 @@ typedef struct qaws_curve_tessellation_desc
 /* out_points may be NULL. BUFFER_TOO_SMALL when capacity < the count (in
    *out_count); the buffers then hold the first capacity vertices. */
 qaws_status qaws_curve_tessellate_2d(
-	qaws_curve const* curve,
-	qaws_curve_tessellation_desc const* desc,
 	qaws_scalar* out_parameters,
 	qaws_vec2* out_points,
+	unsigned int* out_count,
+	qaws_curve const* curve,
 	unsigned int capacity,
-	unsigned int* out_count);
+	qaws_curve_tessellation_desc const* desc);
 
 qaws_status qaws_curve_tessellate_3d(
-	qaws_curve const* curve,
-	qaws_curve_tessellation_desc const* desc,
 	qaws_scalar* out_parameters,
 	qaws_vec3* out_points,
+	unsigned int* out_count,
+	qaws_curve const* curve,
 	unsigned int capacity,
-	unsigned int* out_count);
+	qaws_curve_tessellation_desc const* desc);
 
 #endif /* QAWS_SAMPLING_H */

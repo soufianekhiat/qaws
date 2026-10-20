@@ -45,7 +45,7 @@ static double* ms_length_colours(qaws_mesh_3d const* m, double lo, double hi)
 	unsigned int nv = qaws_mesh_3d_get_vertex_count(m), ne = qaws_mesh_3d_get_edge_count(m), i;
 	unsigned int *e = (unsigned int*)malloc(sizeof(unsigned int) * 2 * (ne + 1)), *cnt = (unsigned int*)calloc(nv + 1, sizeof(unsigned int));
 	double *x = ms_positions(m), *sum = (double*)calloc(nv + 1, sizeof(double)), *rgb = (double*)malloc(sizeof(double) * 3 * (nv + 1));
-	qaws_mesh_3d_get_edges(m, e);
+	qaws_mesh_3d_get_edges(e, m);
 	for (i = 0; i < ne; i++)
 	{
 		double const *a = x + 3 * e[2 * i], *b = x + 3 * e[2 * i + 1];
@@ -67,7 +67,7 @@ static double ms_fin_span(qaws_mesh_3d const* m)
 	unsigned int nt = qaws_mesh_3d_get_triangle_count(m), i, k;
 	unsigned int* t = (unsigned int*)malloc(sizeof(unsigned int) * 3 * (nt + 1));
 	double *x = ms_positions(m), worst = 0;
-	qaws_mesh_3d_get_triangles(m, t);
+	qaws_mesh_3d_get_triangles(t, m);
 	for (i = 0; i < nt; i++)
 	{
 		double c[3] = { 0, 0, 0 }, zl = HUGE_VAL, zh = -HUGE_VAL;
@@ -114,7 +114,7 @@ static void demo_feature_size(void)
 		if (!shape[s])
 			continue;
 		qaws_mesh_3d_detect_features(shape[s], (qaws_scalar)(MS_PI / 6), 0, 0);
-		qaws_mesh_reference_create(shape[s], NULL, &r);
+		qaws_mesh_reference_create(&r, shape[s], NULL);
 		memset(&fd, 0, sizeof fd);
 		fd.cells_across = 3;
 		fd.min_length = (qaws_scalar)0.002;
@@ -122,7 +122,7 @@ static void demo_feature_size(void)
 		fd.gradation = (qaws_scalar)0.3;
 		t0 = clock();
 		if (r)
-			qaws_size_field_create_feature_size(r, &fd, &sf);
+			qaws_size_field_create_feature_size(&sf, r, &fd);
 		build = (double)(clock() - t0) / CLOCKS_PER_SEC;
 		for (k = 0; k < 2; k++)
 		{

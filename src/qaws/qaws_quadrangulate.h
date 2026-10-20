@@ -138,7 +138,7 @@ typedef struct qaws_quadrangulate_desc
 	qaws_scalar attractor_radius;           /* 0: a tenth of the input's bounding diagonal */
 } qaws_quadrangulate_desc;
 
-qaws_status qaws_mesh_quadrangulate(qaws_mesh_3d const* mesh, qaws_quadrangulate_desc const* desc, qaws_mesh_3d** out_mesh,
-	qaws_mesh_report* out_report);
+qaws_status qaws_mesh_quadrangulate(qaws_mesh_3d** out_mesh, qaws_mesh_report* out_report, qaws_mesh_3d const* mesh,
+	qaws_quadrangulate_desc const* desc);
 
 #endif /* QAWS_QUADRANGULATE_H */

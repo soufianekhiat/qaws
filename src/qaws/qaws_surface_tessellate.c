@@ -277,9 +277,9 @@ static void ts_walk(ts_ctx* c, unsigned int d, unsigned int i, unsigned int j)
 	ts_walk(c, d + 1, 2 * i + 1, 2 * j + 1);
 }
 
-qaws_status qaws_surface_tessellate_adaptive(qaws_surface const* surface, qaws_surface_tessellation_desc const* desc,
-	qaws_tessellation_vertex* out_vertices, unsigned int vertex_capacity, unsigned int* out_vertex_count,
-	unsigned int* out_indices, unsigned int index_capacity, unsigned int* out_index_count)
+qaws_status qaws_surface_tessellate_adaptive(qaws_tessellation_vertex* out_vertices, unsigned int* out_vertex_count,
+	unsigned int* out_indices, unsigned int* out_index_count, qaws_surface const* surface,
+	unsigned int vertex_capacity, unsigned int index_capacity, qaws_surface_tessellation_desc const* desc)
 {
 	ts_ctx c;
 	qaws_range ur, vr;

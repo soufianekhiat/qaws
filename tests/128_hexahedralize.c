@@ -56,7 +56,7 @@ static qaws_mesh_3d* th_box(qaws_shell_atlas** out_atlas, qaws_surface** f)
 		return NULL;
 	memset(&g, 0, sizeof g);
 	g.target_length = (qaws_scalar)(test_heavy() ? 0.1 : 0.2);
-	qaws_mesh_generate_shell(*out_atlas, &g, &s, NULL);
+	qaws_mesh_generate_shell(&s, NULL, *out_atlas, &g);
 	return s;
 }
 
@@ -105,7 +105,7 @@ static void test_box(void)
 	unsigned int i;
 	memset(&d, 0, sizeof d);
 	d.cell_size = (qaws_scalar)0.15;
-	st = s ? qaws_volume_mesh_hexahedralize(s, &d, &v, NULL) : QAWS_STATUS_INVALID_ARGUMENT;
+	st = s ? qaws_volume_mesh_hexahedralize(&v, NULL, s, &d) : QAWS_STATUS_INVALID_ARGUMENT;
 	if (st != QAWS_STATUS_OK || !v)
 		TEST_ASSERT(0, "box: hexahedralized");
 	else
@@ -115,12 +115,12 @@ static void test_box(void)
 		qaws_mesh_topology top;
 		unsigned int nb, off = 0, corners = 0, a;
 		qaws_scalar* x;
-		qaws_volume_mesh_measure_quality(v, &q);
-		qaws_volume_mesh_get_boundary(v, &b);
-		qaws_mesh_3d_get_topology(b, &top);
+		qaws_volume_mesh_measure_quality(&q, v);
+		qaws_volume_mesh_get_boundary(&b, v);
+		qaws_mesh_3d_get_topology(&top, b);
 		nb = qaws_mesh_3d_get_vertex_count(b);
 		x = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * nb);
-		qaws_mesh_3d_get_positions(b, x);
+		qaws_mesh_3d_get_positions(x, b);
 		for (i = 0; i < nb; i++)
 		{
 			unsigned int on = 0, k;
@@ -149,13 +149,13 @@ static void test_box(void)
 		qaws_tetrahedralize_desc td;
 		qaws_volume_mesh* t = NULL;
 		memset(&td, 0, sizeof td);
-		if (s && qaws_volume_mesh_tetrahedralize(s, &td, &t, NULL) == QAWS_STATUS_OK)
+		if (s && qaws_volume_mesh_tetrahedralize(&t, NULL, s, &td) == QAWS_STATUS_OK)
 		{
 			unsigned int nc = qaws_volume_mesh_get_cell_count(t), ns = 0;
 			qaws_scalar* fr = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 9 * nc);
 			unsigned char* sing = (unsigned char*)malloc(nc);
 			double off = 0;
-			st = qaws_volume_mesh_frame_field(t, NULL, fr, sing);
+			st = qaws_volume_mesh_frame_field(fr, sing, t, NULL);
 			for (i = 0; i < nc; i++)
 			{
 				unsigned int k;
@@ -190,11 +190,11 @@ static void test_torus(void)
 	char msg[400];
 	memset(&g, 0, sizeof g);
 	g.target_length = (qaws_scalar)(test_heavy() ? 0.2 : 0.3);
-	st = qaws_mesh_generate_surface(t, &g, &s, NULL);
+	st = qaws_mesh_generate_surface(&s, NULL, t, &g);
 	memset(&d, 0, sizeof d);
 	d.cell_size = (qaws_scalar)(test_heavy() ? 0.22 : 0.25);
 	if (st == QAWS_STATUS_OK)
-		st = qaws_volume_mesh_hexahedralize(s, &d, &v, NULL);
+		st = qaws_volume_mesh_hexahedralize(&v, NULL, s, &d);
 	if (st != QAWS_STATUS_OK || !v)
 		TEST_ASSERT(0, "torus: hexahedralized");
 	else
@@ -203,9 +203,9 @@ static void test_torus(void)
 		qaws_mesh_3d* b = NULL;
 		qaws_mesh_topology top;
 		double exact = 2 * M_PI * M_PI * 2 * 0.7 * 0.7;
-		qaws_volume_mesh_measure_quality(v, &q);
-		qaws_volume_mesh_get_boundary(v, &b);
-		qaws_mesh_3d_get_topology(b, &top);
+		qaws_volume_mesh_measure_quality(&q, v);
+		qaws_volume_mesh_get_boundary(&b, v);
+		qaws_mesh_3d_get_topology(&top, b);
 		sprintf(msg, "torus: %u hexahedra, validate %s, volume %.4f for %.4f, scaled Jacobian from %.3f, border closed %d genus %u", q.hexahedra,
 			qaws_status_to_string(qaws_volume_mesh_validate(v)), (double)q.volume, exact, (double)q.min_scaled_jacobian, top.closed, top.genus);
 		TEST_ASSERT(qaws_volume_mesh_validate(v) == QAWS_STATUS_OK && fabs((double)q.volume - exact) < 0.05 * exact && (double)q.min_scaled_jacobian > 0.2
@@ -217,7 +217,7 @@ static void test_torus(void)
 		qaws_tetrahedralize_desc td;
 		qaws_volume_mesh* tt = NULL;
 		memset(&td, 0, sizeof td);
-		if (s && qaws_volume_mesh_tetrahedralize(s, &td, &tt, NULL) == QAWS_STATUS_OK)
+		if (s && qaws_volume_mesh_tetrahedralize(&tt, NULL, s, &td) == QAWS_STATUS_OK)
 		{
 			unsigned int nc = qaws_volume_mesh_get_cell_count(tt), nv = qaws_volume_mesh_get_vertex_count(tt), i, k, j;
 			qaws_scalar *fr = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 9 * nc), *x = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * nv);
@@ -225,10 +225,10 @@ static void test_torus(void)
 			double orth = 0, along = 0;
 			unsigned int nborder = 0;
 			static unsigned char const F[4][3] = { { 1, 2, 3 }, { 0, 3, 2 }, { 0, 1, 3 }, { 0, 2, 1 } };
-			st = qaws_volume_mesh_frame_field(tt, NULL, fr, NULL);
-			qaws_volume_mesh_get_positions(tt, x);
-			qaws_volume_mesh_get_cells(tt, cv, NULL);
-			qaws_volume_mesh_get_cell_adjacency(tt, adj);
+			st = qaws_volume_mesh_frame_field(fr, NULL, tt, NULL);
+			qaws_volume_mesh_get_positions(x, tt);
+			qaws_volume_mesh_get_cells(cv, NULL, tt);
+			qaws_volume_mesh_get_cell_adjacency(adj, tt);
 			for (i = 0; i < nc; i++)
 			{
 				qaws_scalar const* f = fr + 9 * i;
@@ -319,7 +319,7 @@ static qaws_mesh_3d* th_lattice(unsigned int const* n, void (*f)(double const* p
 	d.face_vertices = fv;
 	d.face_sizes = fs;
 	d.face_count = nf;
-	qaws_mesh_3d_create(&d, &m);
+	qaws_mesh_3d_create(&m, &d);
 	free(map); free(fv); free(fs); free(x);
 	return m;
 }
@@ -358,19 +358,19 @@ static void test_frame_field(void)
 	memset(&d, 0, sizeof d);
 	d.method = QAWS_HEXES_FRAME_FIELD;
 	d.cell_size = (qaws_scalar)c;
-	s1 = qaws_volume_mesh_hexahedralize(box, &d, &v1, NULL);
-	s2 = qaws_volume_mesh_hexahedralize(bent, &d, &v2, NULL);
+	s1 = qaws_volume_mesh_hexahedralize(&v1, NULL, box, &d);
+	s2 = qaws_volume_mesh_hexahedralize(&v2, NULL, bent, &d);
 	memset(&g, 0, sizeof g);
 	g.target_length = (qaws_scalar)ct;
-	qaws_mesh_generate_surface(t, &g, &ts, NULL);
+	qaws_mesh_generate_surface(&ts, NULL, t, &g);
 	d.cell_size = (qaws_scalar)ct;
-	s3 = qaws_volume_mesh_hexahedralize(ts, &d, &v3, NULL);
+	s3 = qaws_volume_mesh_hexahedralize(&v3, NULL, ts, &d);
 	memset(&q1, 0, sizeof q1);
 	memset(&q2, 0, sizeof q2);
 	if (v1)
-		qaws_volume_mesh_measure_quality(v1, &q1);
+		qaws_volume_mesh_measure_quality(&q1, v1);
 	if (v2)
-		qaws_volume_mesh_measure_quality(v2, &q2);
+		qaws_volume_mesh_measure_quality(&q2, v2);
 	sprintf(msg, "turned box along its field: %s, %u hexahedra, validate %s, scaled Jacobian from %.4f, volume %.12f, edges %.3f..%.3f",
 		qaws_status_to_string(s1), q1.hexahedra, v1 ? qaws_status_to_string(qaws_volume_mesh_validate(v1)) : "-", (double)q1.min_scaled_jacobian,
 		(double)q1.volume, (double)q1.min_edge, (double)q1.max_edge);
@@ -412,19 +412,19 @@ static void test_refusals(void)
 	md.face_vertices = f;
 	md.face_sizes = &fs;
 	md.face_count = 1;
-	qaws_mesh_3d_create(&md, &open);
+	qaws_mesh_3d_create(&open, &md);
 	memset(&d, 0, sizeof d);
-	s1 = qaws_volume_mesh_hexahedralize(open, &d, &v, NULL);
+	s1 = qaws_volume_mesh_hexahedralize(&v, NULL, open, &d);
 	d.method = QAWS_HEXES_POLYCUBE;
-	s2 = qaws_volume_mesh_hexahedralize(open, &d, &v, NULL);
+	s2 = qaws_volume_mesh_hexahedralize(&v, NULL, open, &d);
 	memset(&vd, 0, sizeof vd);
 	vd.positions = cube;
 	vd.vertex_count = 8;
 	vd.cell_vertices = hex;
 	vd.cell_types = &ht;
 	vd.cell_count = 1;
-	qaws_volume_mesh_create(&vd, &h);
-	s3 = qaws_volume_mesh_frame_field(h, NULL, fr, NULL);
+	qaws_volume_mesh_create(&h, &vd);
+	s3 = qaws_volume_mesh_frame_field(fr, NULL, h, NULL);
 	sprintf(msg, "refusals: an open surface %s, POLYCUBE %s, a field on hexahedra %s", qaws_status_to_string(s1), qaws_status_to_string(s2),
 		qaws_status_to_string(s3));
 	TEST_ASSERT(s1 == QAWS_STATUS_INVALID_TOPOLOGY && s2 == QAWS_STATUS_UNSUPPORTED_OPERATION && s3 == QAWS_STATUS_UNSUPPORTED_OPERATION && !v, msg);

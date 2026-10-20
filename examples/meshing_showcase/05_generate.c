@@ -107,7 +107,7 @@ static qaws_mesh_3d* ms_generate(qaws_surface const* s, qaws_shell_atlas const* 
 		d.max_length = (qaws_scalar)0.3;
 		d.gradation = (qaws_scalar)0.4;
 	}
-	st = s ? qaws_mesh_generate_surface(s, &d, &out, rep) : qaws_mesh_generate_shell(a, &d, &out, rep);
+	st = s ? qaws_mesh_generate_surface(&out, rep, s, &d) : qaws_mesh_generate_shell(&out, rep, a, &d);
 	if (st != QAWS_STATUS_OK)
 		printf("  generate failed: %s\n", qaws_status_to_string(st));
 	return out;
@@ -178,9 +178,9 @@ static void demo_generate(void)
 		unsigned int* fv = (unsigned int*)malloc(sizeof(unsigned int) * qaws_mesh_3d_get_corner_count(g5));
 		double* p = ms_positions(g5);
 		t = (unsigned int*)malloc(sizeof(unsigned int) * 3 * nt);
-		qaws_mesh_3d_find_attribute(g5, "face", &a);
-		qaws_mesh_3d_get_attribute(g5, a, fid);
-		qaws_mesh_3d_get_faces(g5, fv, fs);
+		qaws_mesh_3d_find_attribute(&a, g5, "face");
+		qaws_mesh_3d_get_attribute(fid, g5, a);
+		qaws_mesh_3d_get_faces(fv, fs, g5);
 		sprintf(sub, "a shell of 6 faces: %u quads", rep.quality.quads);
 		ms_panel(c, 2200, 0, 550, 640, g5, 0.62, 0.55, "a box", sub);
 		for (f = 0; f < nf; f++)

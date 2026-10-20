@@ -36,7 +36,7 @@ static qaws_mesh_3d* fz_make(double const* x, unsigned int nv, unsigned int cons
 	d.face_vertices = f;
 	d.face_sizes = fs;
 	d.face_count = nf;
-	qaws_mesh_3d_create(&d, &m);
+	qaws_mesh_3d_create(&m, &d);
 	free(p);
 	return m;
 }
@@ -164,7 +164,7 @@ static qaws_size_field* fz_field(qaws_mesh_reference const* r, double cells, dou
 	d.min_length = (qaws_scalar)lo;
 	d.max_length = (qaws_scalar)hi;
 	d.gradation = (qaws_scalar)grad;
-	qaws_size_field_create_feature_size(r, &d, &sf);
+	qaws_size_field_create_feature_size(&sf, r, &d);
 	if (seconds)
 		*seconds = (double)(clock() - t0) / CLOCKS_PER_SEC;
 	return sf;
@@ -176,8 +176,8 @@ static double fz_at(qaws_mesh_reference const* r, qaws_size_field const* sf, dou
 	qaws_scalar p[3], s = 0;
 	qaws_mesh_location l;
 	p[0] = (qaws_scalar)x; p[1] = (qaws_scalar)y; p[2] = (qaws_scalar)z;
-	qaws_mesh_reference_project(r, p, 1, NULL, &l, NULL);
-	qaws_size_field_evaluate(sf, &l, p, 1, &s);
+	qaws_mesh_reference_project(&l, NULL, r, p, NULL, 1);
+	qaws_size_field_evaluate(&s, sf, &l, p, 1);
 	return (double)s;
 }
 
@@ -195,7 +195,7 @@ static qaws_mesh_3d* fz_remesh(qaws_mesh_3d const* m, qaws_mesh_reference const*
 	d.size = sf;
 	d.min_angle = (qaws_scalar)(min_angle * M_PI / 180);
 	d.max_angle = (qaws_scalar)(min_angle > 0 ? 110 * M_PI / 180 : 0);
-	if (qaws_mesh_remesh(m, &d, &out, rep) != QAWS_STATUS_OK)
+	if (qaws_mesh_remesh(&out, rep, m, &d) != QAWS_STATUS_OK)
 		out = NULL;
 	*seconds = (double)(clock() - t0) / CLOCKS_PER_SEC;
 	return out;
@@ -215,8 +215,8 @@ static void fz_measure(qaws_mesh_3d const* m, int (*keep)(double const* c), fz_s
 	qaws_scalar* p = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * (nv + 1));
 	double sum = 0;
 	memset(s, 0, sizeof *s);
-	qaws_mesh_3d_get_triangles(m, t);
-	qaws_mesh_3d_get_positions(m, p);
+	qaws_mesh_3d_get_triangles(t, m);
+	qaws_mesh_3d_get_positions(p, m);
 	for (i = 0; i < nt; i++)
 	{
 		double c[3] = { 0, 0, 0 }, zl = HUGE_VAL, zh = -HUGE_VAL;
@@ -266,10 +266,10 @@ static double fz_growth(qaws_mesh_3d const* m, qaws_size_field const* sf, double
 	qaws_scalar *p = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * (nv + 1)), *h = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (nv + 1));
 	qaws_mesh_location* l = (qaws_mesh_location*)malloc(sizeof(qaws_mesh_location) * (nv + 1));
 	double worst = 0;
-	qaws_mesh_3d_get_edges(m, e);
-	qaws_mesh_3d_get_positions(m, p);
-	qaws_mesh_3d_get_footpoints(m, l);
-	qaws_size_field_evaluate(sf, l, p, nv, h);
+	qaws_mesh_3d_get_edges(e, m);
+	qaws_mesh_3d_get_positions(p, m);
+	qaws_mesh_3d_get_footpoints(l, m);
+	qaws_size_field_evaluate(h, sf, l, p, nv);
 	for (i = 0; i < ne; i++)
 	{
 		qaws_scalar const *a = p + 3 * e[2 * i], *b = p + 3 * e[2 * i + 1];
@@ -292,7 +292,7 @@ static void test_fin(void)
 	double build = 0, sec = 0, usec = 0, at_top, at_far, growth;
 	char msg[700];
 	qaws_mesh_3d_detect_features(m, (qaws_scalar)(M_PI / 6), 0, 0);
-	qaws_mesh_reference_create(m, NULL, &r);
+	qaws_mesh_reference_create(&r, m, NULL);
 	sf = r ? fz_field(r, 3, 0.002, 0.05, 0.3, &build) : NULL;
 	if (!sf)
 	{
@@ -311,7 +311,7 @@ static void test_fin(void)
 		TEST_ASSERT(0, "fin: remeshed");
 		goto done;
 	}
-	qaws_mesh_3d_get_topology(out, &t);
+	qaws_mesh_3d_get_topology(&t, out);
 	fz_measure(out, fz_fin_side, &side);
 	fz_measure(uni, fz_fin_side, &uside);
 	fz_measure(out, fz_fin_top, &top);
@@ -359,7 +359,7 @@ static void test_gap(void)
 	double sec = 0, at_gap, at_outer;
 	char msg[400];
 	qaws_mesh_3d_detect_features(m, (qaws_scalar)(M_PI / 6), 0, 0);
-	qaws_mesh_reference_create(m, NULL, &r);
+	qaws_mesh_reference_create(&r, m, NULL);
 	sf = r ? fz_field(r, 3, 0.002, 0.05, 0.3, NULL) : NULL;
 	if (!sf)
 	{
@@ -404,16 +404,16 @@ static void test_sphere(void)
 	char msg[300];
 	memset(&rd, 0, sizeof rd);
 	rd.normals = normals;
-	qaws_mesh_reference_create(m, &rd, &r);
+	qaws_mesh_reference_create(&r, m, &rd);
 	sf = r ? fz_field(r, 3, 0.01, 10, 0, NULL) : NULL;
 	capped = r ? fz_field(r, 3, 0.01, 0.3, 0.5, NULL) : NULL;
 	memset(&cd, 0, sizeof cd);
 	cd.angle_tolerance = (qaws_scalar)0.2;
 	cd.max_length = 10;
 	if (r)
-		qaws_size_field_create_curvature(r, &cd, &curv);
+		qaws_size_field_create_curvature(&curv, r, &cd);
 	if (sf && curv)
-		qaws_size_field_create_min(sf, curv, &both);
+		qaws_size_field_create_min(&both, sf, curv);
 	if (!sf || !capped || !both)
 	{
 		TEST_ASSERT(0, "sphere: fields created");
@@ -425,13 +425,13 @@ static void test_sphere(void)
 	hm = (qaws_scalar*)malloc(sizeof(qaws_scalar) * nv);
 	hk = (qaws_scalar*)malloc(sizeof(qaws_scalar) * nv);
 	l = (qaws_mesh_location*)malloc(sizeof(qaws_mesh_location) * nv);
-	qaws_mesh_3d_get_positions(m, pos);
+	qaws_mesh_3d_get_positions(pos, m);
 	for (i = 0; i < nv; i++)
-		qaws_mesh_reference_get_vertex_location(r, i, &l[i]);
-	qaws_size_field_evaluate(sf, l, pos, nv, h);
-	qaws_size_field_evaluate(capped, l, pos, nv, hc);
-	qaws_size_field_evaluate(both, l, pos, nv, hm);
-	qaws_size_field_evaluate(curv, l, pos, nv, hk);
+		qaws_mesh_reference_get_vertex_location(&l[i], r, i);
+	qaws_size_field_evaluate(h, sf, l, pos, nv);
+	qaws_size_field_evaluate(hc, capped, l, pos, nv);
+	qaws_size_field_evaluate(hm, both, l, pos, nv);
+	qaws_size_field_evaluate(hk, curv, l, pos, nv);
 	for (i = 0; i < nv; i++)
 	{
 		lo = fmin(lo, (double)h[i]);
@@ -463,16 +463,16 @@ static void test_refusals(void)
 	qaws_feature_size_desc d;
 	qaws_size_field* sf = NULL;
 	qaws_status a, b, c, e;
-	qaws_mesh_reference_create(m, NULL, &r);
+	qaws_mesh_reference_create(&r, m, NULL);
 	memset(&d, 0, sizeof d);
 	d.cells_across = -1;
-	a = qaws_size_field_create_feature_size(r, &d, &sf);
+	a = qaws_size_field_create_feature_size(&sf, r, &d);
 	d.cells_across = 3;
 	d.min_length = (qaws_scalar)0.5;
 	d.max_length = (qaws_scalar)0.1;
-	b = qaws_size_field_create_feature_size(r, &d, &sf);
-	c = qaws_size_field_create_feature_size(NULL, NULL, &sf);
-	e = qaws_size_field_create_feature_size(r, NULL, &sf);
+	b = qaws_size_field_create_feature_size(&sf, r, &d);
+	c = qaws_size_field_create_feature_size(&sf, NULL, NULL);
+	e = qaws_size_field_create_feature_size(&sf, r, NULL);
 	TEST_ASSERT(a == QAWS_STATUS_INVALID_ARGUMENT && b == QAWS_STATUS_INVALID_ARGUMENT && c == QAWS_STATUS_INVALID_ARGUMENT && e == QAWS_STATUS_OK
 		&& sf, "refusals; the defaults");
 	qaws_size_field_destroy(sf);

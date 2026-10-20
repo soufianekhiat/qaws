@@ -113,6 +113,6 @@ typedef struct qaws_remesh_desc
 } qaws_remesh_desc;
 
 /* out_report may be NULL */
-qaws_status qaws_mesh_remesh(qaws_mesh_3d const* mesh, qaws_remesh_desc const* desc, qaws_mesh_3d** out_mesh, qaws_mesh_report* out_report);
+qaws_status qaws_mesh_remesh(qaws_mesh_3d** out_mesh, qaws_mesh_report* out_report, qaws_mesh_3d const* mesh, qaws_remesh_desc const* desc);
 
 #endif /* QAWS_REMESH_H */

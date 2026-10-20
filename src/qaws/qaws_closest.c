@@ -27,7 +27,7 @@ static int cl_window(qaws_curve const* c, unsigned int s, unsigned int* p, doubl
 	qaws_scalar const* pts = NULL;
 	qaws_scalar const* w = NULL;
 	if (c->kind == QAWS_CURVE_KIND_VIEW)
-		return qaws_internal_view_span_window(c, s, p, win, uk);
+		return qaws_internal_view_span_window(p, win, uk, c, s);
 	if (c->kind == QAWS_CURVE_KIND_BEZIER || c->kind == QAWS_CURVE_KIND_RATIONAL_BEZIER)
 	{
 		if (c->kind == QAWS_CURVE_KIND_BEZIER)
@@ -232,8 +232,8 @@ static qaws_scalar cl_polish(qaws_curve const* c, qaws_scalar t, double const* x
 	return t0;
 }
 
-qaws_status qaws_internal_closest_certify(qaws_curve const* curve, double const* x, qaws_scalar* io_t, double* out_distance,
-	double* out_gap)
+qaws_status qaws_internal_closest_certify(double* out_distance, double* out_gap, qaws_scalar* io_t, qaws_curve const* curve,
+	double const* x)
 {
 	double win[CL_MAX * 4], uk[2 * CL_MAX], bez[CL_MAX * 4], sub[CL_MAX * 4], qp[CL_MAX * 3];
 	double lo[3] = { 1e300, 1e300, 1e300 }, hi[3] = { -1e300, -1e300, -1e300 }, ext = 0, tol, best, open = 1e300;
@@ -347,7 +347,7 @@ static int sf_net_init(qaws_surface const* s, sf_net* m)
 	unsigned int d, i;
 	memset(m, 0, sizeof *m);
 	m->s = s;
-	if (qaws_internal_surface_view_net(s, m->p, m->n, &m->k[0], &m->k[1]))
+	if (qaws_internal_surface_view_net(&m->k[0], &m->k[1], m->p, m->n, s))
 		return m->p[0] < SF_MAX && m->p[1] < SF_MAX;
 	if (s->kind == QAWS_SURFACE_KIND_BEZIER)
 	{
@@ -389,7 +389,7 @@ static void sf_point(sf_net const* m, unsigned int i, unsigned int j, double* h)
 	double w;
 	if (!m->cp)
 	{
-		qaws_internal_surface_view_point(m->s, i, j, h);
+		qaws_internal_surface_view_point(h, m->s, i, j);
 		return;
 	}
 	w = m->w ? (double)m->w[e] : 1.0;
@@ -598,8 +598,8 @@ static void sf_polish(qaws_surface const* s, double const* x, qaws_scalar* io_u,
 	}
 }
 
-qaws_status qaws_internal_surface_closest_certify(qaws_surface const* surface, double const* x, qaws_scalar* io_u, qaws_scalar* io_v,
-	double* out_distance, double* out_gap)
+qaws_status qaws_internal_surface_closest_certify(double* out_distance, double* out_gap, qaws_scalar* io_u, qaws_scalar* io_v,
+	qaws_surface const* surface, double const* x)
 {
 	double bez[SF_MAX * SF_MAX * 4], sub[SF_MAX * SF_MAX * 4], qp[SF_MAX * SF_MAX * 3], h[4];
 	double lo[3] = { 1e300, 1e300, 1e300 }, hi[3] = { -1e300, -1e300, -1e300 }, ext = 0, tol, best, open = 1e300;

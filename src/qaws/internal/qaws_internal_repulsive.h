@@ -79,10 +79,10 @@ qaws_status qaws_internal_repulsive_mesh_bh(double* E, double* grad, qaws_repuls
    tangent-point energy with the mesh at x, grad (may be NULL) += the
    gradient in the mesh's vertices; theta 0: every pair. */
 typedef struct qaws_internal_obstacle qaws_internal_obstacle;
-qaws_status qaws_internal_obstacle_create(qaws_repulsive_obstacle const* desc, qaws_internal_obstacle** out);
+qaws_status qaws_internal_obstacle_create(qaws_internal_obstacle** out, qaws_repulsive_obstacle const* desc);
 void qaws_internal_obstacle_destroy(qaws_internal_obstacle* ob);
-qaws_status qaws_internal_obstacle_energy(qaws_internal_obstacle const* ob, qaws_repulsive_mesh const* mesh, double const* x, double theta,
-	double* E, double* grad);
+qaws_status qaws_internal_obstacle_energy(double* E, double* grad, qaws_internal_obstacle const* ob, qaws_repulsive_mesh const* mesh,
+	double const* x, double theta);
 
 /* Hierarchical operators on vertex functions (qaws_repulsive_bh.c): the
    metric A = B + B0 at x, and the fractional operator sum over ordered

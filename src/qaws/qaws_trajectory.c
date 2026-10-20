@@ -71,11 +71,11 @@ static void trajectory_compute_velocities(
 
 /* span_coeffs: the span's dim_count * 4 coefficients; dt: its duration */
 qaws_status qaws_internal_trajectory_eval_2d(
+	qaws_eval_result_2d *out_result,
 	qaws_scalar const *span_coeffs,
 	qaws_scalar dt,
 	qaws_scalar local_t,
-	unsigned int eval_flags,
-	qaws_eval_result_2d *out_result)
+	unsigned int eval_flags)
 {
 	qaws_scalar const *cx;
 	qaws_scalar const *cy;
@@ -148,11 +148,11 @@ qaws_status qaws_internal_trajectory_eval_2d(
  * ------------------------------------------------------------------------- */
 
 qaws_status qaws_internal_trajectory_eval_3d(
+	qaws_eval_result_3d *out_result,
 	qaws_scalar const *span_coeffs,
 	qaws_scalar dt,
 	qaws_scalar local_t,
-	unsigned int eval_flags,
-	qaws_eval_result_3d *out_result)
+	unsigned int eval_flags)
 {
 	qaws_scalar const *cx;
 	qaws_scalar const *cy;
@@ -236,8 +236,8 @@ static qaws_status trajectory_eval_span_2d(
 {
 	qaws_trajectory_impl *impl = (qaws_trajectory_impl *)curve->impl;
 	unsigned int s = span_index;
-	return qaws_internal_trajectory_eval_2d(&impl->span_coeffs[s * 2 * 4], impl->key_times[s + 1] - impl->key_times[s], local_t,
-		eval_flags, out_result);
+	return qaws_internal_trajectory_eval_2d(out_result, &impl->span_coeffs[s * 2 * 4], impl->key_times[s + 1] - impl->key_times[s],
+		local_t, eval_flags);
 }
 
 static qaws_status trajectory_eval_span_3d(
@@ -249,8 +249,8 @@ static qaws_status trajectory_eval_span_3d(
 {
 	qaws_trajectory_impl *impl = (qaws_trajectory_impl *)curve->impl;
 	unsigned int s = span_index;
-	return qaws_internal_trajectory_eval_3d(&impl->span_coeffs[s * 3 * 4], impl->key_times[s + 1] - impl->key_times[s], local_t,
-		eval_flags, out_result);
+	return qaws_internal_trajectory_eval_3d(out_result, &impl->span_coeffs[s * 3 * 4], impl->key_times[s + 1] - impl->key_times[s],
+		local_t, eval_flags);
 }
 
 /* ---------------------------------------------------------------------------

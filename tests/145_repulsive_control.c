@@ -201,7 +201,7 @@ static void test_objective(void)
 	memset(&d, 0, sizeof d);
 	memset(gref, 0, sizeof gref);
 	qaws_repulsive_curves_gradient(gref, &Eref, c, x, 1);
-	if (qaws_repulsive_curves_solver_create(&s, c, x, &d) == QAWS_STATUS_OK && qaws_repulsive_curves_solver_objective(s, x, &E, g) == QAWS_STATUS_OK)
+	if (qaws_repulsive_curves_solver_create(&s, c, x, &d) == QAWS_STATUS_OK && qaws_repulsive_curves_solver_objective(&E, g, s, x) == QAWS_STATUS_OK)
 	{
 		for (i = 0; i < 3 * RC_N; i++)
 			worst = fabs((double)g[i] - gref[i]) > worst ? fabs((double)g[i] - gref[i]) : worst;
@@ -219,16 +219,16 @@ static void test_objective(void)
 		double dx = x[3 * ((i + 1) % RC_N)] - x[3 * i], dy = x[3 * ((i + 1) % RC_N) + 1] - x[3 * i + 1], dz = x[3 * ((i + 1) % RC_N) + 2] - x[3 * i + 2];
 		len += sqrt(dx * dx + dy * dy + dz * dz);
 	}
-	if (qaws_repulsive_curves_solver_create(&s, c, x, &d) == QAWS_STATUS_OK && qaws_repulsive_curves_solver_objective(s, x, &El, g) == QAWS_STATUS_OK)
+	if (qaws_repulsive_curves_solver_create(&s, c, x, &d) == QAWS_STATUS_OK && qaws_repulsive_curves_solver_objective(&El, g, s, x) == QAWS_STATUS_OK)
 	{
 		for (i = 0; i < 3 * RC_N; i += 5)
 		{
 			qaws_scalar xp[3 * RC_N], Ep = 0, Em = 0;
 			memcpy(xp, x, sizeof x);
 			xp[i] = (qaws_scalar)(x[i] + h);
-			qaws_repulsive_curves_solver_objective(s, xp, &Ep, NULL);
+			qaws_repulsive_curves_solver_objective(&Ep, NULL, s, xp);
 			xp[i] = (qaws_scalar)(x[i] - h);
-			qaws_repulsive_curves_solver_objective(s, xp, &Em, NULL);
+			qaws_repulsive_curves_solver_objective(&Em, NULL, s, xp);
 			if (sizeof(qaws_scalar) == sizeof(double))
 			{
 				/* (divided by the step the scalar coordinates actually took) */
@@ -242,9 +242,9 @@ static void test_objective(void)
 				qaws_scalar Ep2 = 0, Em2 = 0;
 				double e;
 				xp[i] = (qaws_scalar)(x[i] + 2 * h);
-				qaws_repulsive_curves_solver_objective(s, xp, &Ep2, NULL);
+				qaws_repulsive_curves_solver_objective(&Ep2, NULL, s, xp);
 				xp[i] = (qaws_scalar)(x[i] - 2 * h);
-				qaws_repulsive_curves_solver_objective(s, xp, &Em2, NULL);
+				qaws_repulsive_curves_solver_objective(&Em2, NULL, s, xp);
 				e = fabs((8 * ((double)Ep - Em) - ((double)Ep2 - Em2)) / (12 * h) - g[i]);
 				fd = e > fd ? e : fd;
 			}
@@ -315,7 +315,7 @@ static void rc_octahedron(qaws_scalar* x, qaws_repulsive_mesh_desc* md, qaws_all
 	md->triangles = tris;
 	md->triangle_count = 8;
 	*m = NULL;
-	qaws_repulsive_mesh_create_ex(md, allocator, m);
+	qaws_repulsive_mesh_create_ex(m, md, allocator);
 }
 
 /* the line search and GMRES settings: explicit defaults reproduce zeros bit for bit; fewer trials, a faster backtrack;
@@ -472,7 +472,7 @@ static void test_allocator(void)
 	oa.alloc = rc_count_alloc; oa.dealloc = rc_count_free; oa.user_data = &oc;
 	ta.alloc = rc_count_alloc; ta.dealloc = rc_count_free; ta.user_data = &tc;
 	qaws_arena_init(&arena, g_rc_arena, sizeof g_rc_arena);
-	qaws_exchange_thread_allocator(&ta, &prev);
+	qaws_exchange_thread_allocator(&prev, &ta);
 	for (pass = 0; pass < 2; pass++)
 	{
 		qaws_repulsive_curves_desc cd;
@@ -488,11 +488,11 @@ static void test_allocator(void)
 		qaws_repulsive_derivative_report rep;
 #define RC_CALL(expr) do { st = (expr); if (st != QAWS_STATUS_OK && bad == QAWS_STATUS_OK) bad = st; calls++; held += pass && arena.live != 0; } while (0)
 		if (pass)
-			qaws_exchange_thread_scratch_allocator(&arena.allocator, &prev_scratch);
+			qaws_exchange_thread_scratch_allocator(&prev_scratch, &arena.allocator);
 		rc_loop(x, edges);
 		memset(&cd, 0, sizeof cd);
 		cd.dimension = 3; cd.vertex_count = RC_N; cd.edges = edges; cd.edge_count = RC_N;
-		RC_CALL(qaws_repulsive_curves_create_ex(&cd, &oa, &c));
+		RC_CALL(qaws_repulsive_curves_create_ex(&c, &cd, &oa));
 		if (!c)
 			break;
 		memset(g, 0, sizeof g);
@@ -503,13 +503,13 @@ static void test_allocator(void)
 		RC_CALL(qaws_repulsive_curves_bh(g, &E, NULL, c, x, (qaws_scalar)0.5, 1));
 		memset(&d, 0, sizeof d);
 		d.collision_checked = 1;
-		RC_CALL(qaws_repulsive_curves_solver_create_ex(c, &d, x, &oa, &s));
+		RC_CALL(qaws_repulsive_curves_solver_create_ex(&s, c, x, &d, &oa));
 		for (it = 0; s && it < 3; it++) RC_CALL(qaws_repulsive_curves_solver_step(&r, x, s));
 		RC_CALL(qaws_repulsive_curves_solver_direction(dir, s, x));
-		RC_CALL(qaws_repulsive_curves_solver_objective(s, x, &E, g));
+		RC_CALL(qaws_repulsive_curves_solver_objective(&E, g, s, x));
 		d.collision_checked = 0;
 		d.theta = (qaws_scalar)0.5;
-		RC_CALL(qaws_repulsive_curves_solver_create_ex(c, &d, x, &oa, &sh));
+		RC_CALL(qaws_repulsive_curves_solver_create_ex(&sh, c, x, &d, &oa));
 		for (it = 0; sh && it < 2; it++) RC_CALL(qaws_repulsive_curves_solver_step(&r, x, sh));
 		d.theta = 0;
 		d.max_iterations = 3;
@@ -518,12 +518,12 @@ static void test_allocator(void)
 		rc_octahedron(mx, &md, &oa, &m);
 		memset(&dm, 0, sizeof dm);
 		dm.hold_area = 1; dm.hold_volume = 1;
-		RC_CALL(m ? qaws_repulsive_mesh_solver_create_ex(m, &dm, mx, &oa, &ms) : QAWS_STATUS_INVALID_ARGUMENT);
+		RC_CALL(m ? qaws_repulsive_mesh_solver_create_ex(&ms, m, mx, &dm, &oa) : QAWS_STATUS_INVALID_ARGUMENT);
 		memset(&r, 0, sizeof r);
 		for (it = 0; ms && it < 500 && r.reason == QAWS_REPULSIVE_RUNNING; it++) RC_CALL(qaws_repulsive_mesh_solver_step(&r, mx, ms));
 		memset(&t, 0, sizeof t);
 		t.area = 1;
-		RC_CALL(qaws_repulsive_mesh_solver_solution_jvp_checked(ms, &t, dx, NULL, &rep));
+		RC_CALL(qaws_repulsive_mesh_solver_solution_jvp_checked(dx, NULL, &rep, ms, &t));
 		for (i = 0; i < 18; i++) xbar[i] = (qaws_scalar)cos(0.4 * i);
 		memset(&tb, 0, sizeof tb);
 		RC_CALL(qaws_repulsive_mesh_solver_solution_vjp(&tb, NULL, ms, xbar));
@@ -535,7 +535,7 @@ static void test_allocator(void)
 		qaws_repulsive_curves_destroy(c);
 		held += pass && arena.live != 0;
 		if (pass)
-			qaws_exchange_thread_scratch_allocator(&prev_scratch, NULL);
+			qaws_exchange_thread_scratch_allocator(NULL, &prev_scratch);
 #undef RC_CALL
 	}
 	qaws_set_thread_allocator(&prev);

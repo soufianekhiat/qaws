@@ -64,7 +64,7 @@ static void test_planar_and_straight(void)
 	nv.x = (qaws_scalar)n[0]; nv.y = (qaws_scalar)n[1]; nv.z = (qaws_scalar)n[2];
 	c = fr_bezier(p, 5);
 	fr_params(t, 200);
-	TEST_ASSERT(c && qaws_curve_compute_rotation_minimizing_frames_3d(c, t, 200, &nv, fr) == QAWS_STATUS_OK, "planar curve: frames");
+	TEST_ASSERT(c && qaws_curve_compute_rotation_minimizing_frames_3d(fr, c, t, &nv, 200) == QAWS_STATUS_OK, "planar curve: frames");
 	for (i = 0; i < 200; i++)
 	{
 		/* the normal stays on the plane normal */
@@ -85,7 +85,7 @@ static void test_planar_and_straight(void)
 	q[0].x = 0; q[0].y = 0; q[0].z = 0;
 	q[1].x = 1; q[1].y = 2; q[1].z = 3;
 	line = fr_bezier(q, 2);
-	TEST_ASSERT(line && qaws_curve_compute_rotation_minimizing_frames_3d(line, t, 200, NULL, fr) == QAWS_STATUS_OK, "straight segment: frames");
+	TEST_ASSERT(line && qaws_curve_compute_rotation_minimizing_frames_3d(fr, line, t, NULL, 200) == QAWS_STATUS_OK, "straight segment: frames");
 	for (i = 1; i < 200; i++)
 		for (k = 0; k < 9; k++)
 			worst_line = fabs((double)fr[9 * i + k] - fr[k]) > worst_line ? fabs((double)fr[9 * i + k] - fr[k]) : worst_line;
@@ -119,7 +119,7 @@ static void test_convergence(void)
 		return;
 	}
 	fr_params(tr, nref);
-	TEST_ASSERT(qaws_curve_compute_rotation_minimizing_frames_3d(c, tr, nref, NULL, ref) == QAWS_STATUS_OK, "reference frames");
+	TEST_ASSERT(qaws_curve_compute_rotation_minimizing_frames_3d(ref, c, tr, NULL, nref) == QAWS_STATUS_OK, "reference frames");
 	/* 32, 64 and 128 steps against the reference at the same parameters (the same first normal: both from the same tangent) */
 	{
 		/* errors at N = 33, 65, 129 samples, each against the reference at its own parameters */
@@ -132,7 +132,7 @@ static void test_convergence(void)
 			qaws_scalar* fr = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 9 * N);
 			e[k] = 0;
 			fr_params(t, N);
-			if (qaws_curve_compute_rotation_minimizing_frames_3d(c, t, N, NULL, fr) != QAWS_STATUS_OK)
+			if (qaws_curve_compute_rotation_minimizing_frames_3d(fr, c, t, NULL, N) != QAWS_STATUS_OK)
 				e[k] = 1e30;
 			for (i = 0; i < N && e[k] < 1e30; i++)
 			{
@@ -169,10 +169,10 @@ static void test_refusals(void)
 	memset(&d, 0, sizeof d);
 	d.dimension = QAWS_DIMENSION_2D; d.degree = 2; d.control_points = p2; d.control_point_count = 3;
 	qaws_curve_create_bezier(&c2, &d);
-	TEST_ASSERT(qaws_curve_compute_rotation_minimizing_frames_3d(c, t, 3, NULL, fr) == QAWS_STATUS_INVALID_ARGUMENT, "decreasing parameters refused");
+	TEST_ASSERT(qaws_curve_compute_rotation_minimizing_frames_3d(fr, c, t, NULL, 3) == QAWS_STATUS_INVALID_ARGUMENT, "decreasing parameters refused");
 	t[2] = 1;
-	TEST_ASSERT(qaws_curve_compute_rotation_minimizing_frames_3d(c2, t, 3, NULL, fr) == QAWS_STATUS_INVALID_DIMENSION, "a 2D curve refused");
-	TEST_ASSERT(qaws_curve_compute_rotation_minimizing_frames_3d(c, t, 0, NULL, fr) == QAWS_STATUS_INVALID_ARGUMENT, "no parameters refused");
+	TEST_ASSERT(qaws_curve_compute_rotation_minimizing_frames_3d(fr, c2, t, NULL, 3) == QAWS_STATUS_INVALID_DIMENSION, "a 2D curve refused");
+	TEST_ASSERT(qaws_curve_compute_rotation_minimizing_frames_3d(fr, c, t, NULL, 0) == QAWS_STATUS_INVALID_ARGUMENT, "no parameters refused");
 	qaws_curve_destroy(c);
 	qaws_curve_destroy(c2);
 }

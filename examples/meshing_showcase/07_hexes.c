@@ -22,11 +22,11 @@ static void ms_hex_cutaway(er_canvas* c, qaws_volume_mesh const* v, int (*keep)(
 	unsigned int* cv = (unsigned int*)malloc(sizeof(unsigned int) * 8 * nc);
 	unsigned int* adj = (unsigned int*)malloc(sizeof(unsigned int) * 6 * nc);
 	unsigned char* kept = (unsigned char*)malloc(nc);
-	qaws_volume_mesh_get_positions(v, ps);
+	qaws_volume_mesh_get_positions(ps, v);
 	for (i = 0; i < 3 * nv; i++)
 		x[i] = (double)ps[i];
-	qaws_volume_mesh_get_cells(v, cv, NULL);
-	qaws_volume_mesh_get_cell_adjacency(v, adj);
+	qaws_volume_mesh_get_cells(cv, NULL, v);
+	qaws_volume_mesh_get_cell_adjacency(adj, v);
 	for (i = 0; i < nc; i++)
 	{
 		double cen[3] = { 0, 0, 0 };
@@ -80,13 +80,13 @@ static qaws_volume_mesh* ms_hexes(qaws_mesh_3d const* b, double h, char* sub, ch
 	qaws_status st;
 	memset(&d, 0, sizeof d);
 	d.cell_size = (qaws_scalar)h;
-	st = qaws_volume_mesh_hexahedralize(b, &d, &v, NULL);
+	st = qaws_volume_mesh_hexahedralize(&v, NULL, b, &d);
 	if (st != QAWS_STATUS_OK)
 	{
 		printf("  hexahedralize failed: %s\n", qaws_status_to_string(st));
 		return NULL;
 	}
-	qaws_volume_mesh_measure_quality(v, &q);
+	qaws_volume_mesh_measure_quality(&q, v);
 	sprintf(sub, "%u hexahedra, scaled Jacobian from %.2f", q.hexahedra, (double)q.min_scaled_jacobian);
 	printf("  %s: %u hexahedra, %u vertices, scaled Jacobian %.3f, volume %.6f, %s\n", what, q.hexahedra, qaws_volume_mesh_get_vertex_count(v),
 		(double)q.min_scaled_jacobian, (double)q.volume, qaws_status_to_string(qaws_volume_mesh_validate(v)));
@@ -126,7 +126,7 @@ static void demo_hexes(void)
 	{
 		qaws_tetrahedralize_desc td;
 		memset(&td, 0, sizeof td);
-		qaws_volume_mesh_tetrahedralize(ts, &td, &tt, NULL);
+		qaws_volume_mesh_tetrahedralize(&tt, NULL, ts, &td);
 	}
 	if (tt)
 	{
@@ -137,18 +137,18 @@ static void demo_hexes(void)
 		unsigned int* cv = (unsigned int*)malloc(sizeof(unsigned int) * 4 * nc);
 		unsigned char* sing = (unsigned char*)malloc(nc);
 		qaws_mesh_3d* tb = NULL;
-		qaws_volume_mesh_get_positions(tt, ps);
+		qaws_volume_mesh_get_positions(ps, tt);
 		for (i = 0; i < 3 * nv; i++)
 			x[i] = (double)ps[i];
-		qaws_volume_mesh_get_cells(tt, cv, NULL);
-		qaws_volume_mesh_frame_field(tt, NULL, fr, sing);
+		qaws_volume_mesh_get_cells(cv, NULL, tt);
+		qaws_volume_mesh_frame_field(fr, sing, tt, NULL);
 		for (i = 0; i < nc; i++)
 			for (k = 0; k < 6; k++)
 				ns += (sing[i] >> k) & 1;
 		sprintf(sub, "%u tetrahedra, %u singular edge sides", nc, ns);
 		ms_vpanel(c, 1466, 0, 733, 700, tt, 0.5, 0.75, "its frame field", sub);
 		/* the surface as lines only (nothing hides the inside), the singular edges, the frames in the middle plane */
-		qaws_volume_mesh_get_boundary(tt, &tb);
+		qaws_volume_mesh_get_boundary(&tb, tt);
 		if (tb)
 			ms_draw(c, tb, NULL, NULL, 0, grey, 0.6);
 		for (i = 0; i < nc; i++)

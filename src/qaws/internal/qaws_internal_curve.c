@@ -5,7 +5,7 @@
 
 void* qaws_internal_alloc(size_t size, qaws_allocator const* allocator)
 {
-	return qaws_internal_alloc_from(allocator, size);
+	return qaws_internal_alloc_from(size, allocator);
 }
 
 /* the block knows its allocator (qaws_internal_memory.h) */
@@ -15,18 +15,18 @@ void qaws_internal_dealloc(void* ptr, qaws_allocator const* allocator)
 	qaws_internal_free(ptr);
 }
 
-void* qaws_internal_scratch(qaws_allocator const* allocator, void* stack, size_t stack_bytes, size_t bytes)
+void* qaws_internal_scratch(void* stack, size_t stack_bytes, size_t bytes, qaws_allocator const* allocator)
 {
 	return bytes <= stack_bytes ? stack : qaws_internal_alloc(bytes, allocator);
 }
 
-void qaws_internal_scratch_release(qaws_allocator const* allocator, void* stack, void* scratch)
+void qaws_internal_scratch_release(void* stack, void* scratch, qaws_allocator const* allocator)
 {
 	if (scratch && scratch != stack)
 		qaws_internal_dealloc(scratch, allocator);
 }
 
-void* qaws_internal_calloc(qaws_allocator const* allocator, size_t count, size_t size)
+void* qaws_internal_calloc(size_t count, size_t size, qaws_allocator const* allocator)
 {
 	void* p;
 	if (size && count > (size_t)-1 / size)

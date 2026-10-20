@@ -93,7 +93,7 @@ static qaws_mesh_3d* ms_make(double const* x, unsigned int nv, unsigned int cons
 	d.face_vertices = f;
 	d.face_sizes = fs;
 	d.face_count = nf;
-	qaws_mesh_3d_create(&d, &m);
+	qaws_mesh_3d_create(&m, &d);
 	free(p);
 	return m;
 }
@@ -104,7 +104,7 @@ static double* ms_positions(qaws_mesh_3d const* m)
 	unsigned int n = qaws_mesh_3d_get_vertex_count(m), i;
 	qaws_scalar* p = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * (n ? n : 1));
 	double* x = (double*)malloc(sizeof(double) * 3 * (n ? n : 1));
-	qaws_mesh_3d_get_positions(m, p);
+	qaws_mesh_3d_get_positions(p, m);
 	for (i = 0; i < 3 * n; i++)
 		x[i] = (double)p[i];
 	free(p);
@@ -120,12 +120,12 @@ static void ms_draw(er_canvas* c, qaws_mesh_3d const* m, double const* rgb, doub
 	double* n = NULL;
 	unsigned int* t = (unsigned int*)malloc(sizeof(unsigned int) * 3 * (nt ? nt : 1));
 	unsigned int* e = (unsigned int*)malloc(sizeof(unsigned int) * 2 * (ne ? ne : 1));
-	qaws_mesh_3d_get_triangles(m, t);
+	qaws_mesh_3d_get_triangles(t, m);
 	if (smooth)
 	{
 		qaws_scalar* ns = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * (nv ? nv : 1));
 		n = (double*)malloc(sizeof(double) * 3 * (nv ? nv : 1));
-		qaws_mesh_3d_get_vertex_normals(m, ns);
+		qaws_mesh_3d_get_vertex_normals(ns, m);
 		for (i = 0; i < 3 * nv; i++)
 			n[i] = (double)ns[i];
 		free(ns);
@@ -138,7 +138,7 @@ static void ms_draw(er_canvas* c, qaws_mesh_3d const* m, double const* rgb, doub
 	}
 	if (wire)
 	{
-		qaws_mesh_3d_get_edges(m, e);
+		qaws_mesh_3d_get_edges(e, m);
 		for (i = 0; i < ne; i++)
 			er_line(c, x + 3 * e[2 * i], x + 3 * e[2 * i + 1], wire, wire_width);
 	}
