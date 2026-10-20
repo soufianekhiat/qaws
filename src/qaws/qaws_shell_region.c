@@ -19,6 +19,7 @@
 #include "internal/qaws_internal_surface_region.h"
 #include <stdlib.h>
 #include <string.h>
+#include <float.h>
 #include <math.h>
 
 #define SH_PI 3.14159265358979323846
@@ -75,6 +76,7 @@ typedef struct sh_trim
 	unsigned int* loop;         /* per piece: its loop */
 	unsigned int* lfirst;       /* nl + 1: each loop's first piece */
 	double* poly;               /* per piece, SH_TRIM_N + 1 (u, v) points: inside tests, nearest points */
+	double* box;                /* per piece, SH_TRIM_B boxes u0, v0, u1, v1 of its polygon's runs of segments (NULL: none, every segment searched) */
 	double diag;                /* the extent of the pieces in (u, v) */
 	double sag;                 /* how far a piece strays from its polygon */
 	qaws_curve** own;           /* curves made here (a domain turned into a trim) */
@@ -85,6 +87,8 @@ typedef struct sh_trim
 } sh_trim;
 
 #define SH_TRIM_N 128
+#define SH_TRIM_C 16                         /* segments under one box */
+#define SH_TRIM_B (SH_TRIM_N / SH_TRIM_C)    /* boxes per piece */
 
 struct qaws_shell_atlas
 {
@@ -452,6 +456,16 @@ static int sh_trim_winding(sh_trim const* t, double const* uv)
 				for (i = 0; i < SH_TRIM_N; i++)
 				{
 					double xa = q[2 * i + ax], xb = q[2 * i + 2 + ax], ya = q[2 * i + 1 - ax], yb = q[2 * i + 3 - ax];
+					/* (no edge of a run whose box does not straddle a0 crosses) */
+					if (t->box && i % SH_TRIM_C == 0)
+					{
+						double const* b = t->box + 4 * (SH_TRIM_B * p + i / SH_TRIM_C);
+						if (!(b[ax] <= a0 && a0 < b[2 + ax]))
+						{
+							i += SH_TRIM_C - 1;
+							continue;
+						}
+					}
 					if ((xa <= a0 && a0 < xb) || (xb <= a0 && a0 < xa))
 						if (ya + (a0 - xa) / (xb - xa) * (yb - ya) > b0)
 							crossings++;
@@ -467,6 +481,16 @@ static int sh_trim_winding(sh_trim const* t, double const* uv)
 		{
 			double x0 = q[2 * i], y0 = q[2 * i + 1], x1 = q[2 * i + 2], y1 = q[2 * i + 3];
 			double left = (x1 - x0) * (uv[1] - y0) - (uv[0] - x0) * (y1 - y0);
+			/* (no edge of a run whose box does not straddle uv[1] counts) */
+			if (t->box && i % SH_TRIM_C == 0)
+			{
+				double const* b = t->box + 4 * (SH_TRIM_B * p + i / SH_TRIM_C);
+				if (!(b[1] <= uv[1] && uv[1] < b[3]))
+				{
+					i += SH_TRIM_C - 1;
+					continue;
+				}
+			}
 			if (y0 <= uv[1]) { if (y1 > uv[1] && left > 0) wn++; }
 			else if (y1 <= uv[1] && left < 0) wn--;
 		}
@@ -478,11 +502,56 @@ static int sh_trim_winding(sh_trim const* t, double const* uv)
    of uv (by the polygons, then Newton on the piece); the (u, v) distance,
    and (may be NULL) the shift of the copy: the piece's point plus it is
    near uv */
+/* the squared distance from (x, y) to segment i of polygon q, and where on it (l in [0, 1]) */
+static double sh_seg_d2(double const* q, unsigned int i, double x, double y, double* l_out)
+{
+	double ex = q[2 * i + 2] - q[2 * i], ey = q[2 * i + 3] - q[2 * i + 1], ee = ex * ex + ey * ey, l = 0, dx, dy;
+	if (ee > 0) l = ((x - q[2 * i]) * ex + (y - q[2 * i + 1]) * ey) / ee;
+	if (l < 0) l = 0;
+	if (l > 1) l = 1;
+	dx = q[2 * i] + l * ex - x; dy = q[2 * i + 1] + l * ey - y;
+	*l_out = l;
+	return dx * dx + dy * dy;
+}
+
+/* the squared distance from (x, y) to a box u0, v0, u1, v1 */
+static double sh_box_d2(double const* b, double x, double y)
+{
+	double bx = x < b[0] ? b[0] - x : x > b[2] ? x - b[2] : 0, by = y < b[1] ? b[1] - y : y > b[3] ? y - b[3] : 0;
+	return bx * bx + by * by;
+}
+
 static double sh_trim_nearest(sh_trim const* t, double const* uv, unsigned int only, unsigned int* piece, double* s_out, double* shift)
 {
 	unsigned int p, i, bp = 0, it, k, nc;
 	double best = 1e300, s = 0, s0, c[2], d[2], sh[SH_COPIES][2], w[2], bs[2] = { 0, 0 };
 	nc = sh_trim_copies(t, uv, sh);
+	if (t->box)
+	{
+		/* a first bound from the run whose box is nearest, a hair above its distance: the scan below still takes the
+		   first segment at the least distance, and skips the runs that cannot reach the bound */
+		double bd = 1e300, l, seed = 1e300;
+		unsigned int bk = 0, br = 0, r;
+		for (k = 0; k < nc; k++)
+			for (r = 0; r < t->np * SH_TRIM_B; r++)
+			{
+				double e;
+				if (only != SH_NONE && r / SH_TRIM_B != only)
+					continue;
+				e = sh_box_d2(t->box + 4 * r, uv[0] - sh[k][0], uv[1] - sh[k][1]);
+				if (e < bd) { bd = e; bk = k; br = r; }
+			}
+		if (bd < 1e300)
+		{
+			double const* q = t->poly + 2 * (SH_TRIM_N + 1) * (br / SH_TRIM_B);
+			for (i = SH_TRIM_C * (br % SH_TRIM_B); i < SH_TRIM_C * (br % SH_TRIM_B + 1); i++)
+			{
+				double e = sh_seg_d2(q, i, uv[0] - sh[bk][0], uv[1] - sh[bk][1], &l);
+				if (e < seed) seed = e;
+			}
+			best = seed * (1 + 1e-9) + DBL_MIN;
+		}
+	}
 	for (k = 0; k < nc; k++)
 	{
 		double x = uv[0] - sh[k][0], y = uv[1] - sh[k][1];
@@ -493,12 +562,16 @@ static double sh_trim_nearest(sh_trim const* t, double const* uv, unsigned int o
 				continue;
 			for (i = 0; i < SH_TRIM_N; i++)
 			{
-				double ex = q[2 * i + 2] - q[2 * i], ey = q[2 * i + 3] - q[2 * i + 1], ee = ex * ex + ey * ey, l = 0, dx, dy;
-				if (ee > 0) l = ((x - q[2 * i]) * ex + (y - q[2 * i + 1]) * ey) / ee;
-				if (l < 0) l = 0;
-				if (l > 1) l = 1;
-				dx = q[2 * i] + l * ex - x; dy = q[2 * i + 1] + l * ey - y;
-				if (dx * dx + dy * dy < best) { best = dx * dx + dy * dy; bp = p; s = (i + l) / SH_TRIM_N; bs[0] = sh[k][0]; bs[1] = sh[k][1]; }
+				double l, e;
+				/* a run whose box is no nearer than the best so far cannot win (the margin keeps rounding of the
+				   segments' distances from choosing differently) */
+				if (t->box && i % SH_TRIM_C == 0 && sh_box_d2(t->box + 4 * (SH_TRIM_B * p + i / SH_TRIM_C), x, y) * (1 - 1e-12) > best)
+				{
+					i += SH_TRIM_C - 1;
+					continue;
+				}
+				e = sh_seg_d2(q, i, x, y, &l);
+				if (e < best) { best = e; bp = p; s = (i + l) / SH_TRIM_N; bs[0] = sh[k][0]; bs[1] = sh[k][1]; }
 			}
 		}
 	}
@@ -560,6 +633,7 @@ static void sh_trim_free(sh_trim* t)
 	for (i = 0; i < t->nown; i++) qaws_curve_destroy(t->own[i]);
 	qaws_internal_free(t->own);
 	qaws_internal_free((void*)t->cv); qaws_internal_free(t->t0); qaws_internal_free(t->t1); qaws_internal_free(t->loop); qaws_internal_free(t->lfirst); qaws_internal_free(t->poly);
+	qaws_internal_free(t->box);
 	memset(t, 0, sizeof(*t));
 }
 
@@ -579,6 +653,22 @@ static void sh_trim_polys(sh_trim* t)
 			if (q[0] > hi[0]) hi[0] = q[0];
 			if (q[1] > hi[1]) hi[1] = q[1];
 		}
+	/* each run of SH_TRIM_C segments' box */
+	qaws_internal_free(t->box);
+	t->box = t->np ? (double*)qaws_internal_malloc(qaws_internal_mul4(sizeof(double), 4, SH_TRIM_B, t->np)) : NULL;
+	for (k = 0; t->box && k < t->np * SH_TRIM_B; k++)
+	{
+		double const* q = t->poly + 2 * ((SH_TRIM_N + 1) * (k / SH_TRIM_B) + SH_TRIM_C * (k % SH_TRIM_B));
+		double* b = t->box + 4 * k;
+		b[0] = b[2] = q[0]; b[1] = b[3] = q[1];
+		for (i = 1; i <= SH_TRIM_C; i++)
+		{
+			if (q[2 * i] < b[0]) b[0] = q[2 * i];
+			if (q[2 * i + 1] < b[1]) b[1] = q[2 * i + 1];
+			if (q[2 * i] > b[2]) b[2] = q[2 * i];
+			if (q[2 * i + 1] > b[3]) b[3] = q[2 * i + 1];
+		}
+	}
 	t->lo[0] = lo[0]; t->lo[1] = lo[1]; t->hi[0] = hi[0]; t->hi[1] = hi[1];
 	t->diag = hypot(hi[0] - lo[0], hi[1] - lo[1]);
 	t->sag = 0;
