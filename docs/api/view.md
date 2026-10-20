@@ -84,8 +84,12 @@ qaws_curve_create_from_view(&v, allocator, &c);              /* an owned B-splin
 | `QAWS_VIEW_HERMITE` | `points` and `tangents` (n each), degree 3 | [0, n - 1], span i on [i, i + 1] |
 | `QAWS_VIEW_CATMULL_ROM` | `points`, `parameterization`, `closed`, degree 3 | [0, n - 3] (closed: [0, n]) |
 | `QAWS_VIEW_POLYNOMIAL` | `points`: the coefficients c_0 .. c_degree of sum c_i t^i | `knots`: none ([0, 1]) or 2 values |
+| `QAWS_VIEW_ARC` | `points`: n centers; `knots`: n elements of 3 components (radius, angle_start, angle_end); 3D: `axes_u`, `axes_v` (n x 3); degree 2 | arc length, [0, total length] |
+| `QAWS_VIEW_TRAJECTORY` | `points`: n key positions; `knots`: n key times (strictly increasing, spans of at least 1e-10); `tangents`: none (velocities from the neighbours, as the owned curve) or n key velocities; `closed`; degree 3 | the key times |
+| `QAWS_VIEW_YUKSEL` | `points`, `mode` (`qaws_yuksel_mode`), `closed`; degree 2 | [0, n - 1] (closed: [0, n]) |
+| `QAWS_VIEW_SUBDIVISION` | `points`, `mode` (`qaws_subdivision_scheme`), `levels` (0: 6), `closed`; degree 2, 3, 4 (Chaikin, Lane-Riesenfeld 3, 4) | one unit span per refined edge |
 
-Their span coefficients are computed at each evaluation from the borrowed values, by the owned curves' routines. Nothing depending on the points or tangents is cached, so these may be rewritten in place like spline points. Owned copies (`qaws_curve_create_from_view`, and extract, split and reverse of a borrowed curve) make the owned curve of the same family.
+Their span coefficients are computed at each evaluation from the borrowed values, by the owned curves' routines. Nothing depending on the points, tangents or axes is cached, so these may be rewritten in place like spline points. Arc radii and angles and trajectory times are knots: the span bounds come from them (`QAWS_DEPENDS_KNOTS`). A subdivision view keeps no refined polygon: each evaluation refines only the window of control points its span depends on (a few points per level), with the owned steps' arithmetic. Owned copies (`qaws_curve_create_from_view`, and extract, split and reverse of a borrowed curve) make the owned curve of the same family.
 
 ## Surfaces
 

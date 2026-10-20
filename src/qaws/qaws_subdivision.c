@@ -268,7 +268,7 @@ static qaws_scalar* apply_subdivision(
  *   c = -0.5*P0          + 0.5*P2
  *   d =               P1
  */
-static void compute_uniform_cr_coeffs(
+void qaws_internal_subdivision_cr_coeffs(
 	qaws_scalar const* P0,
 	qaws_scalar const* P1,
 	qaws_scalar const* P2,
@@ -297,16 +297,13 @@ static void compute_uniform_cr_coeffs(
 /*  Vtable: eval_span (2D)                                                    */
 /* -------------------------------------------------------------------------- */
 
-static qaws_status subdivision_eval_span_2d(
-	qaws_curve const* curve,
-	unsigned int span_index,
+/* coeffs: the span's dim_count * 4 coefficients */
+qaws_status qaws_internal_subdivision_eval_2d(
+	qaws_scalar const* coeffs,
 	qaws_scalar local_t,
 	unsigned int eval_flags,
 	qaws_eval_result_2d* out_result)
 {
-	qaws_subdivision_impl const* impl =
-		(qaws_subdivision_impl const*)curve->impl;
-	unsigned int const dim_count = 2;
 	qaws_scalar t = local_t;
 	qaws_scalar t2 = t * t;
 	qaws_scalar t3 = t2 * t;
@@ -315,12 +312,10 @@ static qaws_status subdivision_eval_span_2d(
 	qaws_scalar ax, bx, cx_coeff, dx_val;
 	qaws_scalar ay, by, cy_coeff, dy_val;
 
-	(void)curve;
-
 	memset(out_result, 0, sizeof(*out_result));
 
-	cx = &impl->segment_coeffs[span_index * dim_count * 4 + 0 * 4];
-	cy = &impl->segment_coeffs[span_index * dim_count * 4 + 1 * 4];
+	cx = &coeffs[0 * 4];
+	cy = &coeffs[1 * 4];
 
 	ax = cx[0]; bx = cx[1]; cx_coeff = cx[2]; dx_val = cx[3];
 	ay = cy[0]; by = cy[1]; cy_coeff = cy[2]; dy_val = cy[3];
@@ -356,16 +351,12 @@ static qaws_status subdivision_eval_span_2d(
 /*  Vtable: eval_span (3D)                                                    */
 /* -------------------------------------------------------------------------- */
 
-static qaws_status subdivision_eval_span_3d(
-	qaws_curve const* curve,
-	unsigned int span_index,
+qaws_status qaws_internal_subdivision_eval_3d(
+	qaws_scalar const* coeffs,
 	qaws_scalar local_t,
 	unsigned int eval_flags,
 	qaws_eval_result_3d* out_result)
 {
-	qaws_subdivision_impl const* impl =
-		(qaws_subdivision_impl const*)curve->impl;
-	unsigned int const dim_count = 3;
 	qaws_scalar t = local_t;
 	qaws_scalar t2 = t * t;
 	qaws_scalar t3 = t2 * t;
@@ -376,13 +367,11 @@ static qaws_status subdivision_eval_span_3d(
 	qaws_scalar ay, by, cy_coeff, dy_val;
 	qaws_scalar az, bz, cz_coeff, dz_val;
 
-	(void)curve;
-
 	memset(out_result, 0, sizeof(*out_result));
 
-	cx = &impl->segment_coeffs[span_index * dim_count * 4 + 0 * 4];
-	cy = &impl->segment_coeffs[span_index * dim_count * 4 + 1 * 4];
-	cz = &impl->segment_coeffs[span_index * dim_count * 4 + 2 * 4];
+	cx = &coeffs[0 * 4];
+	cy = &coeffs[1 * 4];
+	cz = &coeffs[2 * 4];
 
 	ax = cx[0]; bx = cx[1]; cx_coeff = cx[2]; dx_val = cx[3];
 	ay = cy[0]; by = cy[1]; cy_coeff = cy[2]; dy_val = cy[3];
@@ -417,6 +406,28 @@ static qaws_status subdivision_eval_span_3d(
 	}
 
 	return QAWS_STATUS_OK;
+}
+
+static qaws_status subdivision_eval_span_2d(
+	qaws_curve const* curve,
+	unsigned int span_index,
+	qaws_scalar local_t,
+	unsigned int eval_flags,
+	qaws_eval_result_2d* out_result)
+{
+	qaws_subdivision_impl const* impl = (qaws_subdivision_impl const*)curve->impl;
+	return qaws_internal_subdivision_eval_2d(&impl->segment_coeffs[span_index * 2 * 4], local_t, eval_flags, out_result);
+}
+
+static qaws_status subdivision_eval_span_3d(
+	qaws_curve const* curve,
+	unsigned int span_index,
+	qaws_scalar local_t,
+	unsigned int eval_flags,
+	qaws_eval_result_3d* out_result)
+{
+	qaws_subdivision_impl const* impl = (qaws_subdivision_impl const*)curve->impl;
+	return qaws_internal_subdivision_eval_3d(&impl->segment_coeffs[span_index * 3 * 4], local_t, eval_flags, out_result);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -610,7 +621,7 @@ qaws_status qaws_curve_create_subdivision_ex(
 			unsigned int i2 = (s + 1) % N;
 			unsigned int i3 = (s + 2) % N;
 
-			compute_uniform_cr_coeffs(
+			qaws_internal_subdivision_cr_coeffs(
 				&refined[i0 * dim_count],
 				&refined[i1 * dim_count],
 				&refined[i2 * dim_count],
@@ -671,7 +682,7 @@ qaws_status qaws_curve_create_subdivision_ex(
 			else
 				P3 = &refined[(s + 2) * dim_count];
 
-			compute_uniform_cr_coeffs(
+			qaws_internal_subdivision_cr_coeffs(
 				P0, P1, P2, P3,
 				dim_count,
 				&impl->segment_coeffs[s * dim_count * 4]);

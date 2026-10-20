@@ -37,13 +37,13 @@ columns differ by family.
 | Catmull-Rom | runtime | `QAWS_VIEW_CATMULL_ROM` (142) | yes | yes | 3 |
 | B-spline | internal basis | `qaws_curve_view`, prepared, borrowed (142) | yes | yes | 31 (140) |
 | NURBS | internal basis | weights or homogeneous points (142) | yes | yes | 31 (140) |
-| Trajectory | runtime | absent | absent | yes | |
-| Yuksel | runtime | absent | yes | yes (146) | |
-| Arc | core arc | absent | absent | yes (146) | |
+| Trajectory | runtime | `QAWS_VIEW_TRAJECTORY` (142) | absent | yes | |
+| Yuksel | runtime | `QAWS_VIEW_YUKSEL` (142) | yes | yes (146) | |
+| Arc | core arc | `QAWS_VIEW_ARC` (142) | absent | yes (146) | |
 | Polynomial | core Horner | `QAWS_VIEW_POLYNOMIAL` (142) | yes | yes (146) | |
 | Clothoid | runtime | nothing to borrow: six scalars | yes | yes (146) | |
 | Composite | its children | through borrowed children (142) | yes | yes (146) | |
-| Subdivision | runtime | absent | absent | yes (146) | |
+| Subdivision | runtime | `QAWS_VIEW_SUBDIVISION` (142) | absent | yes (146) | |
 | Arc-length / length-matched wrappers | chain rule over the source (144) | absent | absent | malloc | |
 
 Borrowed curves: `qaws_view.h`. Evaluation does not allocate.
@@ -174,6 +174,3 @@ Every allocation follows `docs/api/alloc.md`: from the `_ex` argument, else the 
   their sections' jets; sections without jets fall back to differences.
   Their evaluation scratch is on the stack up to 32 sections, beyond that
   from the surface's allocator.
-- **Views of the remaining families** (arc, Yuksel, trajectory,
-  subdivision). Composites take borrowed children; clothoids hold no arrays. Hermite, Catmull-Rom and polynomial curves have
-  views; owned objects are not rebuilt on views (their parity is tested).

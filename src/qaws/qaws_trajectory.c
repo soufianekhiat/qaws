@@ -3,6 +3,7 @@
 #include "qaws_prepare.h"
 #include "internal/qaws_internal_types.h"
 #include "internal/qaws_internal_curve.h"
+#include "internal/qaws_internal_kinds.h"
 #include "internal/qaws_internal_basis.h"
 #include "internal/qaws_internal_validation.h"
 #include "core/qaws_cubic_poly_core.h"
@@ -68,17 +69,14 @@ static void trajectory_compute_velocities(
  * Vtable: eval_span_2d
  * ------------------------------------------------------------------------- */
 
-static qaws_status trajectory_eval_span_2d(
-	qaws_curve const *curve,
-	unsigned int span_index,
+/* span_coeffs: the span's dim_count * 4 coefficients; dt: its duration */
+qaws_status qaws_internal_trajectory_eval_2d(
+	qaws_scalar const *span_coeffs,
+	qaws_scalar dt,
 	qaws_scalar local_t,
 	unsigned int eval_flags,
 	qaws_eval_result_2d *out_result)
 {
-	qaws_trajectory_impl *impl = (qaws_trajectory_impl *)curve->impl;
-	unsigned int const dim_count = 2;
-	unsigned int s = span_index;
-	qaws_scalar dt;
 	qaws_scalar const *cx;
 	qaws_scalar const *cy;
 	qaws_scalar ax, bx, cx_coeff, dx_val;
@@ -90,12 +88,11 @@ static qaws_status trajectory_eval_span_2d(
 
 	memset(out_result, 0, sizeof(*out_result));
 
-	dt = impl->key_times[s + 1] - impl->key_times[s];
 	if (dt < QAWS_LITERAL(1e-10))
 		return QAWS_STATUS_DEGENERATE_CURVE;
 
-	cx = &impl->span_coeffs[s * dim_count * 4 + 0 * 4];
-	cy = &impl->span_coeffs[s * dim_count * 4 + 1 * 4];
+	cx = &span_coeffs[0 * 4];
+	cy = &span_coeffs[1 * 4];
 
 	ax = cx[0]; bx = cx[1]; cx_coeff = cx[2]; dx_val = cx[3];
 	ay = cy[0]; by = cy[1]; cy_coeff = cy[2]; dy_val = cy[3];
@@ -150,17 +147,13 @@ static qaws_status trajectory_eval_span_2d(
  * Vtable: eval_span_3d
  * ------------------------------------------------------------------------- */
 
-static qaws_status trajectory_eval_span_3d(
-	qaws_curve const *curve,
-	unsigned int span_index,
+qaws_status qaws_internal_trajectory_eval_3d(
+	qaws_scalar const *span_coeffs,
+	qaws_scalar dt,
 	qaws_scalar local_t,
 	unsigned int eval_flags,
 	qaws_eval_result_3d *out_result)
 {
-	qaws_trajectory_impl *impl = (qaws_trajectory_impl *)curve->impl;
-	unsigned int const dim_count = 3;
-	unsigned int s = span_index;
-	qaws_scalar dt;
 	qaws_scalar const *cx;
 	qaws_scalar const *cy;
 	qaws_scalar const *cz;
@@ -174,13 +167,12 @@ static qaws_status trajectory_eval_span_3d(
 
 	memset(out_result, 0, sizeof(*out_result));
 
-	dt = impl->key_times[s + 1] - impl->key_times[s];
 	if (dt < QAWS_LITERAL(1e-10))
 		return QAWS_STATUS_DEGENERATE_CURVE;
 
-	cx = &impl->span_coeffs[s * dim_count * 4 + 0 * 4];
-	cy = &impl->span_coeffs[s * dim_count * 4 + 1 * 4];
-	cz = &impl->span_coeffs[s * dim_count * 4 + 2 * 4];
+	cx = &span_coeffs[0 * 4];
+	cy = &span_coeffs[1 * 4];
+	cz = &span_coeffs[2 * 4];
 
 	ax = cx[0]; bx = cx[1]; cx_coeff = cx[2]; dx_val = cx[3];
 	ay = cy[0]; by = cy[1]; cy_coeff = cy[2]; dy_val = cy[3];
@@ -233,6 +225,32 @@ static qaws_status trajectory_eval_span_3d(
 	}
 
 	return QAWS_STATUS_OK;
+}
+
+static qaws_status trajectory_eval_span_2d(
+	qaws_curve const *curve,
+	unsigned int span_index,
+	qaws_scalar local_t,
+	unsigned int eval_flags,
+	qaws_eval_result_2d *out_result)
+{
+	qaws_trajectory_impl *impl = (qaws_trajectory_impl *)curve->impl;
+	unsigned int s = span_index;
+	return qaws_internal_trajectory_eval_2d(&impl->span_coeffs[s * 2 * 4], impl->key_times[s + 1] - impl->key_times[s], local_t,
+		eval_flags, out_result);
+}
+
+static qaws_status trajectory_eval_span_3d(
+	qaws_curve const *curve,
+	unsigned int span_index,
+	qaws_scalar local_t,
+	unsigned int eval_flags,
+	qaws_eval_result_3d *out_result)
+{
+	qaws_trajectory_impl *impl = (qaws_trajectory_impl *)curve->impl;
+	unsigned int s = span_index;
+	return qaws_internal_trajectory_eval_3d(&impl->span_coeffs[s * 3 * 4], impl->key_times[s + 1] - impl->key_times[s], local_t,
+		eval_flags, out_result);
 }
 
 /* ---------------------------------------------------------------------------

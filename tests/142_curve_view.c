@@ -16,7 +16,12 @@
  *     borrowed curve, owned copy), every allocation released; prepare_into
  *     in caller memory (size, alignment, too small);
  *   - validation and extents; operations on a borrowed curve (arc length,
- *     extract, split, reverse) as on the owned curve.
+ *     extract, split, reverse) as on the owned curve;
+ *   - the other families: Hermite, Catmull-Rom, polynomial; arc, trajectory,
+ *     Yuksel (four modes) and subdivision (three schemes, levels 1, 3, 6)
+ *     views, 2D and 3D, open and closed, bit for bit the owned curves from
+ *     f64 data (prepared into caller memory, borrowed, copied), values
+ *     rewritten in place, f32 data, refusals.
  */
 
 #include "test_common.h"
@@ -34,6 +39,7 @@
 #else
 #define CV_TOL 1e-11
 #endif
+#define CV_F32_TOL 1e-5
 
 static double const cv_knots[CV_N + CV_DEG + 1] = { 0, 0, 0, 0, 0.5, 1.25, 1.25, 2, 3.5, 4, 4, 4, 4 };
 
@@ -845,6 +851,463 @@ static void test_families(void)
 	}
 }
 
+/* ---- arc, trajectory, Yuksel and subdivision views -------------------------------------------------------------------------- */
+
+#define CV_FAM_N 7
+
+/* a result's four orders as 12 values (2D: z 0); its flags, 0 when the call fails. how: 0 the prepared object at t, 1 the curve at
+   t, 2 the curve's span `span` at local t */
+static unsigned int cv_eval_any(int how, qaws_curve_prepared const* p, qaws_curve const* c, int is3, qaws_scalar t, unsigned int span,
+	double o[12])
+{
+	qaws_eval_result_2d r2;
+	qaws_eval_result_3d r3;
+	qaws_vec3 const* v3[4] = { &r3.position, &r3.d1, &r3.d2, &r3.d3 };
+	qaws_vec2 const* v2[4] = { &r2.position, &r2.d1, &r2.d2, &r2.d3 };
+	qaws_status st;
+	unsigned int r;
+	memset(&r2, 0, sizeof r2);
+	memset(&r3, 0, sizeof r3);
+	if (is3)
+		st = how == 0 ? qaws_curve_prepared_evaluate_3d(p, t, CV_ALL, &r3) : how == 1 ? qaws_curve_evaluate_3d(c, t, CV_ALL, &r3)
+			: qaws_curve_evaluate_span_3d(c, span, t, CV_ALL, &r3);
+	else
+		st = how == 0 ? qaws_curve_prepared_evaluate_2d(p, t, CV_ALL, &r2) : how == 1 ? qaws_curve_evaluate_2d(c, t, CV_ALL, &r2)
+			: qaws_curve_evaluate_span_2d(c, span, t, CV_ALL, &r2);
+	for (r = 0; r < 4; r++)
+	{
+		o[r * 3 + 0] = is3 ? (double)v3[r]->x : (double)v2[r]->x;
+		o[r * 3 + 1] = is3 ? (double)v3[r]->y : (double)v2[r]->y;
+		o[r * 3 + 2] = is3 ? (double)v3[r]->z : 0.0;
+	}
+	return st != QAWS_STATUS_OK ? 0 : is3 ? r3.valid_flags : r2.valid_flags;
+}
+
+/* largest difference (absolute; rel: relative to 1 + |owned value|), position to D3, of a prepared view (when given) and a borrowed
+   or copied curve against an owned curve: 97 parameters over the domain (its ends included) and 9 local parameters in each span (its
+   ends included); 1e30 when flags, span counts, degrees or properties (closed, periodic, rational, continuity) differ, or (absolute)
+   the domains */
+static double cv_gap(qaws_curve_prepared const* p, qaws_curve const* b, qaws_curve const* owned, int is3, int rel)
+{
+	qaws_range r = qaws_curve_get_parameter_range(owned), rb = qaws_curve_get_parameter_range(b);
+	unsigned int ns = qaws_curve_get_span_count(owned), i, s, k, how;
+	double worst = 0, a[12], o[12];
+	if (ns != qaws_curve_get_span_count(b) || qaws_curve_get_degree(b) != qaws_curve_get_degree(owned)
+		|| !qaws_curve_is_closed(b) != !qaws_curve_is_closed(owned) || !qaws_curve_is_periodic(b) != !qaws_curve_is_periodic(owned)
+		|| !qaws_curve_is_rational(b) != !qaws_curve_is_rational(owned) || qaws_curve_get_continuity(b) != qaws_curve_get_continuity(owned)
+		|| (!rel && (rb.min_value != r.min_value || rb.max_value != r.max_value)))
+		return 1e30;
+	if (p && !rel && (qaws_curve_prepared_get_range(p).min_value != r.min_value || qaws_curve_prepared_get_range(p).max_value != r.max_value))
+		return 1e30;
+	for (i = 0; i <= 96 + ns * 9; i++)
+		for (how = p ? 0 : 1; how < 2; how++)
+		{
+			/* the domain, then each span's local parameters (how 0: the prepared object at the matching global parameter is not
+			   compared there, the span walk is the curve's) */
+			unsigned int fo, fa;
+			s = i <= 96 ? 0 : (i - 97) / 9;
+			if (i <= 96)
+			{
+				qaws_scalar t = i == 96 ? r.max_value : r.min_value + (r.max_value - r.min_value) * (qaws_scalar)i / 96;
+				fo = cv_eval_any(1, NULL, owned, is3, t, 0, o);
+				fa = cv_eval_any(how, p, b, is3, t, 0, a);
+			}
+			else if (how == 1)
+			{
+				qaws_scalar u = (qaws_scalar)((i - 97) % 9) / 8;
+				fo = cv_eval_any(2, NULL, owned, is3, u, s, o);
+				fa = cv_eval_any(2, NULL, b, is3, u, s, a);
+			}
+			else
+				continue;
+			if (!fo || fa != fo)
+				return 1e30;
+			for (k = 0; k < 12; k++)
+			{
+				double e = fabs(a[k] - o[k]) / (rel ? 1 + fabs(o[k]) : 1);
+				worst = e > worst ? e : worst;
+			}
+		}
+	return worst;
+}
+
+/* a view against its owned curve: prepared into caller memory of qaws_curve_prepared_size bytes, borrowed, and copied
+   (qaws_curve_create_from_view, the owned curve's kind) */
+static double cv_view_gap(qaws_curve_view const* v, qaws_curve const* owned, int rel)
+{
+	size_t bytes = qaws_curve_prepared_size(v);
+	unsigned char* mem = (unsigned char*)malloc(bytes + 16);
+	qaws_curve_prepared* p = NULL;
+	qaws_curve *b = NULL, *c = NULL;
+	int is3 = v->dimension == QAWS_DIMENSION_3D;
+	double gap = 1e30, gc;
+	if (mem && owned && bytes && qaws_curve_prepare_into(v, (void*)(((size_t)mem + 15) & ~(size_t)15), bytes, &p) == QAWS_STATUS_OK
+		&& qaws_curve_create_borrowed(v, NULL, &b) == QAWS_STATUS_OK && qaws_curve_create_from_view(v, NULL, &c) == QAWS_STATUS_OK
+		&& qaws_curve_get_kind(c) == qaws_curve_get_kind(owned))
+	{
+		gap = cv_gap(p, b, owned, is3, rel);
+		gc = cv_gap(NULL, c, owned, is3, rel);
+		gap = gc > gap ? gc : gap;
+	}
+	qaws_curve_prepared_destroy(p);
+	qaws_curve_destroy(b);
+	qaws_curve_destroy(c);
+	free(mem);
+	return gap;
+}
+
+/* the first dim of each 3 values, n elements, in the library's precision */
+static void cv_take(double const* src, unsigned int n, unsigned int dim, qaws_scalar* out)
+{
+	unsigned int i, c;
+	for (i = 0; i < n; i++)
+		for (c = 0; c < dim; c++)
+			out[i * dim + c] = (qaws_scalar)src[i * 3 + c];
+}
+
+/* a view of n host records of 3 doubles (2D: the first two, the stride a record) */
+static qaws_curve_view cv_fam_view(qaws_curve_view_family family, unsigned int dim, unsigned int degree, double const* pts, unsigned int n)
+{
+	qaws_curve_view v;
+	memset(&v, 0, sizeof v);
+	v.family = family;
+	v.dimension = dim == 3 ? QAWS_DIMENSION_3D : QAWS_DIMENSION_2D;
+	v.degree = degree;
+	v.points = cv_packed(pts, QAWS_ELEMENT_F64, dim, n, 3 * sizeof(double));
+	return v;
+}
+
+static qaws_curve* cv_owned_arc(double const* centers, double const* arcs, double const* au, double const* av, unsigned int n, unsigned int dim)
+{
+	qaws_arc_segment s[CV_FAM_N];
+	qaws_arc_desc d;
+	qaws_curve* c = NULL;
+	unsigned int i, k;
+	for (i = 0; i < n; i++)
+	{
+		memset(&s[i], 0, sizeof s[i]);
+		for (k = 0; k < dim; k++)
+			s[i].center[k] = (qaws_scalar)centers[i * 3 + k];
+		s[i].radius = (qaws_scalar)arcs[i * 3 + 0];
+		s[i].angle_start = (qaws_scalar)arcs[i * 3 + 1];
+		s[i].angle_end = (qaws_scalar)arcs[i * 3 + 2];
+		for (k = 0; dim == 3 && k < 3; k++)
+		{
+			s[i].axis_u[k] = (qaws_scalar)au[i * 3 + k];
+			s[i].axis_v[k] = (qaws_scalar)av[i * 3 + k];
+		}
+	}
+	memset(&d, 0, sizeof d);
+	d.dimension = dim == 3 ? QAWS_DIMENSION_3D : QAWS_DIMENSION_2D;
+	d.segments = s;
+	d.segment_count = n;
+	qaws_curve_create_arc(&d, &c);
+	return c;
+}
+
+static qaws_curve* cv_owned_trajectory(double const* pts, double const* times, double const* vel, unsigned int dim, int closed)
+{
+	qaws_scalar p[CV_FAM_N * 3], t[CV_FAM_N], v[CV_FAM_N * 3];
+	qaws_trajectory_desc d;
+	qaws_curve* c = NULL;
+	unsigned int i;
+	cv_take(pts, CV_FAM_N, dim, p);
+	if (vel)
+		cv_take(vel, CV_FAM_N, dim, v);
+	for (i = 0; i < CV_FAM_N; i++)
+		t[i] = (qaws_scalar)times[i];
+	memset(&d, 0, sizeof d);
+	d.dimension = dim == 3 ? QAWS_DIMENSION_3D : QAWS_DIMENSION_2D;
+	d.degree = 3;
+	d.key_positions = p;
+	d.key_count = CV_FAM_N;
+	d.key_times = t;
+	d.key_time_count = CV_FAM_N;
+	d.key_velocities = vel ? v : NULL;
+	d.key_velocity_count = vel ? CV_FAM_N : 0;
+	d.closed = closed;
+	qaws_curve_create_trajectory(&d, &c);
+	return c;
+}
+
+static qaws_curve* cv_owned_yuksel(double const* pts, unsigned int dim, unsigned int mode, int closed)
+{
+	qaws_scalar p[CV_FAM_N * 3];
+	qaws_yuksel_desc d;
+	qaws_curve* c = NULL;
+	cv_take(pts, CV_FAM_N, dim, p);
+	memset(&d, 0, sizeof d);
+	d.dimension = dim == 3 ? QAWS_DIMENSION_3D : QAWS_DIMENSION_2D;
+	d.control_points = p;
+	d.control_point_count = CV_FAM_N;
+	d.mode = (qaws_yuksel_mode)mode;
+	d.closed = closed;
+	qaws_curve_create_yuksel(&d, &c);
+	return c;
+}
+
+static qaws_curve* cv_owned_subdivision(double const* pts, unsigned int dim, unsigned int scheme, unsigned int levels, int closed)
+{
+	qaws_scalar p[CV_FAM_N * 3];
+	qaws_subdivision_desc d;
+	qaws_curve* c = NULL;
+	cv_take(pts, CV_FAM_N, dim, p);
+	memset(&d, 0, sizeof d);
+	d.dimension = dim == 3 ? QAWS_DIMENSION_3D : QAWS_DIMENSION_2D;
+	d.scheme = (qaws_subdivision_scheme)scheme;
+	d.control_points = p;
+	d.control_point_count = CV_FAM_N;
+	d.closed = closed;
+	d.refinement_levels = levels;
+	qaws_curve_create_subdivision(&d, &c);
+	return c;
+}
+
+/* the views of family k (0 arc, 1 trajectory, 2 Yuksel, 3 subdivision), configuration j, over the given host arrays, and the owned
+   curve of the same values; 0 past the last configuration. Arcs: 7 segments, one full circle (closed); trajectories: velocities from
+   the neighbours or given, open and closed; Yuksel: four modes, open and closed; subdivision: three schemes, levels 1, 3, 6 (and 0:
+   6), open and closed. */
+static int cv_fam_case(unsigned int k, unsigned int j, unsigned int dim, double const* pts, double const* arcs, double const* au,
+	double const* av, double const* times, double const* vel, qaws_curve_view* v, qaws_curve** owned)
+{
+	static double const circle[3] = { 1.0, 0.0, 6.283185307179586 };
+	static unsigned int const levels[4] = { 1, 3, 6, 0 };
+	*owned = NULL;
+	if (k == 0 && j < 2)
+	{
+		unsigned int n = j ? 1 : CV_FAM_N;
+		*v = cv_fam_view(QAWS_VIEW_ARC, dim, 2, pts, n);
+		v->knots = cv_packed(j ? circle : arcs, QAWS_ELEMENT_F64, 3, n, 0);
+		if (dim == 3)
+		{
+			v->axes_u = cv_packed(au, QAWS_ELEMENT_F64, 3, n, 0);
+			v->axes_v = cv_packed(av, QAWS_ELEMENT_F64, 3, n, 0);
+		}
+		*owned = cv_owned_arc(pts, j ? circle : arcs, au, av, n, dim);
+		return 1;
+	}
+	if (k == 1 && j < 4)
+	{
+		*v = cv_fam_view(QAWS_VIEW_TRAJECTORY, dim, 3, pts, CV_FAM_N);
+		v->knots = cv_packed(times, QAWS_ELEMENT_F64, 1, CV_FAM_N, 0);
+		if (j & 1)
+			v->tangents = cv_packed(vel, QAWS_ELEMENT_F64, dim, CV_FAM_N, 3 * sizeof(double));
+		v->closed = j >= 2;
+		*owned = cv_owned_trajectory(pts, times, j & 1 ? vel : NULL, dim, v->closed);
+		return 1;
+	}
+	if (k == 2 && j < 8)
+	{
+		*v = cv_fam_view(QAWS_VIEW_YUKSEL, dim, 2, pts, CV_FAM_N);
+		v->mode = j / 2;
+		v->closed = j & 1;
+		*owned = cv_owned_yuksel(pts, dim, v->mode, v->closed);
+		return 1;
+	}
+	if (k == 3 && j < 24)
+	{
+		*v = cv_fam_view(QAWS_VIEW_SUBDIVISION, dim, 2 + j / 8, pts, CV_FAM_N);
+		v->mode = j / 8;
+		v->levels = levels[(j / 2) % 4];
+		v->closed = j & 1;
+		*owned = cv_owned_subdivision(pts, dim, v->mode, v->levels, v->closed);
+		return 1;
+	}
+	return 0;
+}
+
+static void cv_fam_data(double* pts, double* arcs, double* au, double* av, double* times, double* vel, double phase)
+{
+	unsigned int i, c;
+	cv_points(pts, CV_FAM_N, phase);
+	for (i = 0; i < CV_FAM_N; i++)
+	{
+		double a = 0.7 * i + phase, b = 0.3 + 0.2 * i;
+		arcs[i * 3 + 0] = 0.5 + 0.2 * i;
+		arcs[i * 3 + 1] = 0.3 * i;
+		arcs[i * 3 + 2] = 0.3 * i + (i % 2 ? -1.1 : 1.4);
+		au[i * 3 + 0] = cos(a);
+		au[i * 3 + 1] = sin(a);
+		au[i * 3 + 2] = 0;
+		av[i * 3 + 0] = -sin(a) * cos(b);
+		av[i * 3 + 1] = cos(a) * cos(b);
+		av[i * 3 + 2] = sin(b);
+		times[i] = 0.45 * i + 0.1 * sin(1.7 * i);   /* strictly increasing: slope at least 0.28 */
+		for (c = 0; c < 3; c++)
+			vel[i * 3 + c] = 0.6 * cos(0.5 * i + c + phase);
+	}
+}
+
+static void test_more_families(void)
+{
+	static char const* const names[4] = { "arc", "trajectory", "Yuksel", "subdivision" };
+	double pts[CV_FAM_N * 3], arcs[CV_FAM_N * 3], au[CV_FAM_N * 3], av[CV_FAM_N * 3], times[CV_FAM_N], vel[CV_FAM_N * 3];
+	double worst[4] = { 0, 0, 0, 0 }, moved[4] = { 0, 0, 0, 0 }, f32[4] = { 0, 0, 0, 0 };
+	unsigned int deps[4] = { 0, 0, 0, 0 }, cases[4] = { 0, 0, 0, 0 }, k, j, dim, i;
+	qaws_curve_view v;
+	qaws_curve* owned;
+	char msg[400];
+	cv_fam_data(pts, arcs, au, av, times, vel, 0.3);
+	/* f64 host data: to the bit, 2D and 3D, every configuration */
+	for (dim = 2; dim <= 3; dim++)
+		for (k = 0; k < 4; k++)
+			for (j = 0; cv_fam_case(k, j, dim, pts, arcs, au, av, times, vel, &v, &owned); j++)
+			{
+				double g = cv_view_gap(&v, owned, 0);
+				worst[k] = g > worst[k] ? g : worst[k];
+				cases[k]++;
+				qaws_curve_destroy(owned);
+			}
+	sprintf(msg, "views against the owned curves, f64 host data, 2D and 3D (largest difference to D3, must be 0): arc %.2g (%u), "
+		"trajectory %.2g (%u), Yuksel %.2g (%u), subdivision %.2g (%u)", worst[0], cases[0], worst[1], cases[1], worst[2], cases[2],
+		worst[3], cases[3]);
+	TEST_ASSERT(worst[0] == 0 && worst[1] == 0 && worst[2] == 0 && worst[3] == 0, msg);
+	printf("  %s\n", msg);
+	/* the host's values rewritten in place (arc centers and axes, trajectory positions and velocities, control points) without
+	   preparing again: the prepared object and the borrowed curve follow; the dependencies name the layout and the knots only (arc
+	   radii and angles, trajectory times) */
+	for (k = 0; k < 4; k++)
+	{
+		unsigned int pick[4] = { 0, 1, 7, 11 };   /* 7 segments; given velocities; hybrid closed; LR3 levels 3 closed */
+		qaws_curve_prepared* p = NULL;
+		qaws_curve* b = NULL;
+		cv_fam_data(pts, arcs, au, av, times, vel, 0.3);
+		cv_fam_case(k, pick[k], 3, pts, arcs, au, av, times, vel, &v, &owned);
+		qaws_curve_destroy(owned);
+		moved[k] = 1e30;
+		if (qaws_curve_prepare(&v, NULL, &p) == QAWS_STATUS_OK && qaws_curve_create_borrowed(&v, NULL, &b) == QAWS_STATUS_OK)
+		{
+			double keep_arcs[CV_FAM_N * 3], keep_times[CV_FAM_N];
+			deps[k] = qaws_curve_prepared_dependencies(p);
+			memcpy(keep_arcs, arcs, sizeof arcs);
+			memcpy(keep_times, times, sizeof times);
+			cv_fam_data(pts, arcs, au, av, times, vel, 1.1);
+			memcpy(arcs, keep_arcs, sizeof arcs);
+			memcpy(times, keep_times, sizeof times);
+			cv_fam_case(k, pick[k], 3, pts, arcs, au, av, times, vel, &v, &owned);
+			moved[k] = owned ? cv_gap(p, b, owned, 1, 0) : 1e30;
+			qaws_curve_destroy(owned);
+		}
+		qaws_curve_prepared_destroy(p);
+		qaws_curve_destroy(b);
+	}
+	sprintf(msg, "values rewritten in place, no new prepare: arc %.2g, trajectory %.2g, Yuksel %.2g, subdivision %.2g; dependencies %u %u %u %u",
+		moved[0], moved[1], moved[2], moved[3], deps[0], deps[1], deps[2], deps[3]);
+	TEST_ASSERT(moved[0] == 0 && moved[1] == 0 && moved[2] == 0 && moved[3] == 0 && deps[0] == (QAWS_DEPENDS_LAYOUT | QAWS_DEPENDS_KNOTS)
+		&& deps[1] == (QAWS_DEPENDS_LAYOUT | QAWS_DEPENDS_KNOTS) && deps[2] == QAWS_DEPENDS_LAYOUT && deps[3] == QAWS_DEPENDS_LAYOUT, msg);
+	printf("  %s\n", msg);
+	/* f32 host data (the same values rounded to 24 bits, so relative input errors of 6e-8) against the owned curves of the f64
+	   values: within CV_F32_TOL relative to 1 + |value|, the error carried by spans of moderate condition up to D3 */
+	cv_fam_data(pts, arcs, au, av, times, vel, 0.3);
+	for (k = 0; k < 4; k++)
+	{
+		float fp[CV_FAM_N * 3], fa[CV_FAM_N * 3], fu[CV_FAM_N * 3], fv[CV_FAM_N * 3], ft[CV_FAM_N], fw[CV_FAM_N * 3];
+		unsigned int pick[4] = { 0, 1, 6, 13 };   /* 7 segments; given velocities; hybrid open; LR3 levels 6 closed */
+		for (i = 0; i < CV_FAM_N * 3; i++)
+		{
+			fp[i] = (float)pts[i];
+			fa[i] = (float)arcs[i];
+			fu[i] = (float)au[i];
+			fv[i] = (float)av[i];
+			fw[i] = (float)vel[i];
+		}
+		for (i = 0; i < CV_FAM_N; i++)
+			ft[i] = (float)times[i];
+		cv_fam_case(k, pick[k], 3, pts, arcs, au, av, times, vel, &v, &owned);
+		v.points = cv_packed(fp, QAWS_ELEMENT_F32, 3, v.points.count, 0);
+		if (k == 0)
+		{
+			v.knots = cv_packed(fa, QAWS_ELEMENT_F32, 3, CV_FAM_N, 0);
+			v.axes_u = cv_packed(fu, QAWS_ELEMENT_F32, 3, CV_FAM_N, 0);
+			v.axes_v = cv_packed(fv, QAWS_ELEMENT_F32, 3, CV_FAM_N, 0);
+		}
+		if (k == 1)
+		{
+			v.knots = cv_packed(ft, QAWS_ELEMENT_F32, 1, CV_FAM_N, 0);
+			v.tangents = cv_packed(fw, QAWS_ELEMENT_F32, 3, CV_FAM_N, 0);
+		}
+		f32[k] = cv_view_gap(&v, owned, 1);
+		qaws_curve_destroy(owned);
+	}
+	sprintf(msg, "f32 host data against the owned curves of the f64 values (relative): arc %.2g, trajectory %.2g, Yuksel %.2g, subdivision %.2g",
+		f32[0], f32[1], f32[2], f32[3]);
+	TEST_ASSERT(f32[0] <= CV_F32_TOL && f32[1] <= CV_F32_TOL && f32[2] <= CV_F32_TOL && f32[3] <= CV_F32_TOL, msg);
+	printf("  %s\n", msg);
+	/* refusals */
+	cv_fam_case(0, 0, 3, pts, arcs, au, av, times, vel, &v, &owned);
+	qaws_curve_destroy(owned);
+	TEST_ASSERT(qaws_curve_view_validate(&v) == QAWS_STATUS_OK, "arc view valid");
+	arcs[3] = 0;
+	TEST_ASSERT(qaws_curve_view_validate(&v) == QAWS_STATUS_INVALID_ARGUMENT, "arc: zero radius refused");
+	arcs[3] = 0.7;
+	arcs[5] = arcs[4];
+	TEST_ASSERT(qaws_curve_view_validate(&v) == QAWS_STATUS_DEGENERATE_CURVE, "arc: zero sweep refused");
+	cv_fam_data(pts, arcs, au, av, times, vel, 0.3);
+	v.knots.count = CV_FAM_N - 1;
+	TEST_ASSERT(qaws_curve_view_validate(&v) == QAWS_STATUS_INVALID_KNOT_COUNT, "arc: one (radius, angles) short refused");
+	v.knots.count = CV_FAM_N;
+	v.axes_v.count = CV_FAM_N - 1;
+	TEST_ASSERT(qaws_curve_view_validate(&v) == QAWS_STATUS_INVALID_CONTROL_POINT_COUNT, "arc 3D: one axis short refused");
+	v.axes_v.count = CV_FAM_N;
+	v.tangents = cv_packed(vel, QAWS_ELEMENT_F64, 3, CV_FAM_N, 0);
+	TEST_ASSERT(qaws_curve_view_validate(&v) == QAWS_STATUS_INVALID_ARGUMENT, "arc: tangents refused");
+	v.tangents.count = 0;
+	v.degree = 3;
+	TEST_ASSERT(qaws_curve_view_validate(&v) == QAWS_STATUS_INVALID_DEGREE, "arc: degree 3 refused");
+	cv_fam_case(0, 0, 2, pts, arcs, au, av, times, vel, &v, &owned);
+	qaws_curve_destroy(owned);
+	v.axes_u = cv_packed(au, QAWS_ELEMENT_F64, 3, CV_FAM_N, 0);
+	TEST_ASSERT(qaws_curve_view_validate(&v) == QAWS_STATUS_INVALID_ARGUMENT, "arc 2D: axes refused");
+	cv_fam_case(1, 1, 3, pts, arcs, au, av, times, vel, &v, &owned);
+	qaws_curve_destroy(owned);
+	times[3] = times[2];
+	TEST_ASSERT(qaws_curve_view_validate(&v) == QAWS_STATUS_INVALID_PARAMETER_RANGE, "trajectory: equal times refused");
+	times[3] = times[2] + 1e-12;
+	TEST_ASSERT(qaws_curve_view_validate(&v) == QAWS_STATUS_INVALID_PARAMETER_RANGE, "trajectory: a span under 1e-10 refused");
+	cv_fam_data(pts, arcs, au, av, times, vel, 0.3);
+	v.knots.count = CV_FAM_N - 1;
+	TEST_ASSERT(qaws_curve_view_validate(&v) == QAWS_STATUS_INVALID_ARGUMENT, "trajectory: one time short refused");
+	v.knots.count = CV_FAM_N;
+	v.tangents.count = CV_FAM_N - 1;
+	TEST_ASSERT(qaws_curve_view_validate(&v) == QAWS_STATUS_INVALID_CONTROL_POINT_COUNT, "trajectory: one velocity short refused");
+	v.tangents.count = CV_FAM_N;
+	v.weights = cv_packed(times, QAWS_ELEMENT_F64, 1, CV_FAM_N, 0);
+	TEST_ASSERT(qaws_curve_view_validate(&v) == QAWS_STATUS_INVALID_ARGUMENT, "trajectory: weights refused");
+	v.weights.count = 0;
+	v.points.count = v.knots.count = v.tangents.count = 1;
+	TEST_ASSERT(qaws_curve_view_validate(&v) == QAWS_STATUS_INVALID_ARGUMENT, "trajectory: one key refused");
+	cv_fam_case(2, 0, 3, pts, arcs, au, av, times, vel, &v, &owned);
+	qaws_curve_destroy(owned);
+	v.mode = 4;
+	TEST_ASSERT(qaws_curve_view_validate(&v) == QAWS_STATUS_INVALID_ARGUMENT, "Yuksel: unknown mode refused");
+	v.mode = 0;
+	v.points.count = 2;
+	TEST_ASSERT(qaws_curve_view_validate(&v) == QAWS_STATUS_INVALID_CONTROL_POINT_COUNT, "Yuksel: 2 points refused");
+	v.points.count = CV_FAM_N;
+	v.knots = cv_packed(times, QAWS_ELEMENT_F64, 1, CV_FAM_N, 0);
+	TEST_ASSERT(qaws_curve_view_validate(&v) == QAWS_STATUS_INVALID_ARGUMENT, "Yuksel: knots refused");
+	v.knots.count = 0;
+	v.axes_u = cv_packed(au, QAWS_ELEMENT_F64, 3, CV_FAM_N, 0);
+	TEST_ASSERT(qaws_curve_view_validate(&v) == QAWS_STATUS_INVALID_ARGUMENT, "Yuksel: axes refused");
+	v.axes_u.count = 0;
+	v.degree = 3;
+	TEST_ASSERT(qaws_curve_view_validate(&v) == QAWS_STATUS_INVALID_DEGREE, "Yuksel: degree 3 refused");
+	cv_fam_case(3, 8, 3, pts, arcs, au, av, times, vel, &v, &owned);
+	qaws_curve_destroy(owned);
+	TEST_ASSERT(qaws_curve_view_validate(&v) == QAWS_STATUS_OK && v.degree == 3, "subdivision LR3 view valid");
+	v.degree = 2;
+	TEST_ASSERT(qaws_curve_view_validate(&v) == QAWS_STATUS_INVALID_DEGREE, "subdivision: a degree other than the scheme's refused");
+	v.degree = 3;
+	v.mode = 3;
+	TEST_ASSERT(qaws_curve_view_validate(&v) == QAWS_STATUS_INVALID_ARGUMENT, "subdivision: unknown scheme refused");
+	v.mode = 1;
+	v.levels = 40;
+	TEST_ASSERT(qaws_curve_view_validate(&v) == QAWS_STATUS_INVALID_CONTROL_POINT_COUNT, "subdivision: 40 levels (past the count bound) refused");
+	v.levels = 3;
+	v.tangents = cv_packed(vel, QAWS_ELEMENT_F64, 3, CV_FAM_N, 0);
+	TEST_ASSERT(qaws_curve_view_validate(&v) == QAWS_STATUS_INVALID_ARGUMENT, "subdivision: tangents refused");
+}
+
 /* a composite of borrowed curves: composites borrow by their children, which may be views (it owns the views, not the
    host arrays); the same as the composite of owned copies */
 static void test_composite_of_views(void)
@@ -909,6 +1372,7 @@ int test_142_curve_view_main(void)
 	test_validation();
 	test_operations();
 	test_families();
+	test_more_families();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
 }

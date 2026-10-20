@@ -105,23 +105,35 @@ typedef enum qaws_curve_view_family
 	QAWS_VIEW_HERMITE,                  /* cubic Hermite (qaws_curve_create_hermite): points and tangents, n - 1 spans, span i on [i, i + 1] */
 	QAWS_VIEW_CATMULL_ROM,              /* Catmull-Rom (qaws_curve_create_catmull_rom): points, parameterization, closed; n - 3 spans
 	                                       (closed: n), span i on [i, i + 1] */
-	QAWS_VIEW_POLYNOMIAL                /* polynomial (qaws_curve_create_polynomial): the points are the coefficients c_0 .. c_degree of
+	QAWS_VIEW_POLYNOMIAL,               /* polynomial (qaws_curve_create_polynomial): the points are the coefficients c_0 .. c_degree of
 	                                       sum c_i t^i (count degree + 1); knots: none ([0, 1]) or 2 values, the range */
+	QAWS_VIEW_ARC,                      /* arcs (qaws_curve_create_arc), degree 2: the points are the n centers; knots: n elements of 3
+	                                       components (radius, angle_start, angle_end); 3D: axes_u, axes_v; arc-length parameter */
+	QAWS_VIEW_TRAJECTORY,               /* trajectory (qaws_curve_create_trajectory), degree 3: points the n key positions; knots the n key
+	                                       times (1 component, strictly increasing, spans of at least 1e-10: the domain); tangents: none
+	                                       (velocities from the neighbours, as the owned curve) or n key velocities; closed */
+	QAWS_VIEW_YUKSEL,                   /* Yuksel (qaws_curve_create_yuksel), degree 2: points, mode (qaws_yuksel_mode), closed; n - 1
+	                                       spans (closed: n), span i on [i, i + 1] */
+	QAWS_VIEW_SUBDIVISION               /* subdivision (qaws_curve_create_subdivision), degree 2, 3, 4 (the scheme's): points, mode
+	                                       (qaws_subdivision_scheme), levels, closed; unit spans over the refined polygon */
 } qaws_curve_view_family;
 
 typedef struct qaws_curve_view
 {
 	qaws_dimension dimension;           /* 2 or 3 */
-	unsigned int degree;                /* 1 to QAWS_VIEW_MAX_DEGREE; Hermite and Catmull-Rom: 3 */
+	unsigned int degree;                /* 1 to QAWS_VIEW_MAX_DEGREE; the other families: theirs (above) */
 	qaws_array_view points;             /* n points: dimension components, or (splines) dimension + 1 homogeneous (w x, w y, [w z,] w) */
 	qaws_array_view weights;            /* splines: count 0: none; else n weights > 0 (with Cartesian points) */
 	qaws_array_view knots;              /* splines: count 0: clamped uniform 0, 1, ..., n - degree, as qaws_curve_create_bspline (n =
 	                                       degree + 1: a Bezier curve on [0, 1]); else n + degree + 1 non-decreasing values, the domain
 	                                       [knots[degree], knots[n]] */
 	qaws_curve_view_family family;      /* zero: QAWS_VIEW_SPLINE */
-	qaws_array_view tangents;           /* Hermite: n tangents, dimension components */
+	qaws_array_view tangents;           /* Hermite: n tangents, dimension components; trajectory: none or n velocities */
 	qaws_parameterization parameterization;   /* Catmull-Rom (DEFAULT: centripetal) */
-	int closed;                         /* Catmull-Rom */
+	int closed;                         /* Catmull-Rom, trajectory, Yuksel, subdivision */
+	qaws_array_view axes_u, axes_v;     /* arc, 3D: n plane axes (3 components) */
+	unsigned int mode;                  /* Yuksel: qaws_yuksel_mode; subdivision: qaws_subdivision_scheme */
+	unsigned int levels;                /* subdivision: refinement levels (0: 6, as qaws_curve_create_subdivision) */
 } qaws_curve_view;
 
 /* The view's arrays and their values: counts, layouts, knots non-decreasing over a non-empty domain, weights (or homogeneous

@@ -368,12 +368,10 @@ checks stay manual.
 | Checked allocation sizes | every allocation size computed with `qaws_internal_mul2/3/4` and `qaws_internal_add2` (SIZE_MAX refused); list growth through `qaws_internal_grow`; unsigned counts bounded at the public entries; `qaws_internal_alloc` takes `size_t` | this branch (154) |
 | Scratch apart from results | `qaws_exchange_thread_scratch_allocator`: the temporaries of sampling, tessellation, meshing, clipping and repulsive solvers; results keep the persistent order | this branch (154, runner `QAWS_TEST_SCRATCH=1`) |
 | Single-precision tests | 140, 142, 145, 147 to 153 pass with `QAWS_SCALAR_IS_FLOAT`; bounds per precision from rounding (TEST_EPS) or measured truncation, double bounds unchanged | this branch |
+| Arc, trajectory, Yuksel and subdivision views | done (`QAWS_VIEW_ARC`, `_TRAJECTORY`, `_YUKSEL`, `_SUBDIVISION`; span data rebuilt per evaluation, subdivision from the window of control points a span depends on, no refined polygon kept); bit for bit the owned curves, 2D and 3D, open and closed. Composites borrow through borrowed children; clothoids hold no arrays; owned objects are not rebuilt on views | this branch (142) |
 
 Remaining, in order:
 
-- Views of the remaining families (arc, Yuksel, trajectory, subdivision);
-  owned objects are not rebuilt on views. Composites already borrow through
-  borrowed children (142); clothoids hold no arrays to borrow.
 - Halide's runtime span (the buffer interface is done for HLSL and GLSL).
 - Repulsive: the allocator, line-search and GMRES settings, a validity
   report for solution derivatives, and the mesh VJP test.

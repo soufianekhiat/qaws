@@ -2,6 +2,7 @@
 #include "qaws_curve.h"
 #include "internal/qaws_internal_types.h"
 #include "internal/qaws_internal_curve.h"
+#include "internal/qaws_internal_kinds.h"
 #include "internal/qaws_internal_validation.h"
 #include "internal/qaws_internal_diff.h"
 #include "core/qaws_dual_core.h"
@@ -754,9 +755,11 @@ static void eval_subcurve(
 /*  P(t) = cos^2(pi*t/2) * curve1 + sin^2(pi*t/2) * curve2           */
 /* ------------------------------------------------------------------ */
 
-static void yuksel_blend_eval(
-	qaws_yuksel_impl const* impl,
-	unsigned int span_index,
+void qaws_internal_yuksel_blend(
+	qaws_yuksel_subcurve const* sc1,
+	qaws_yuksel_subcurve const* sc2,
+	int is_first_span,
+	int is_last_span,
 	qaws_scalar t,
 	unsigned int dim,
 	unsigned int eval_flags,
@@ -765,10 +768,6 @@ static void yuksel_blend_eval(
 	qaws_scalar* out_d2,
 	qaws_scalar* out_d3)
 {
-	unsigned int n = impl->control_point_count;
-	unsigned int i1, i2;
-	qaws_yuksel_subcurve const* sc1;
-	qaws_yuksel_subcurve const* sc2;
 	qaws_scalar t_sc1, t_sc2;
 	qaws_scalar c_val, s_val, c2, s2;
 	qaws_scalar p1[3], p2[3];
@@ -778,18 +777,6 @@ static void yuksel_blend_eval(
 	qaws_scalar dt_sc1, dt_sc2;
 	unsigned int d;
 	int need_d1, need_d2;
-	int is_first_span, is_last_span;
-
-	if (impl->closed) {
-		i1 = span_index % n;
-		i2 = (span_index + 1) % n;
-	} else {
-		i1 = span_index;
-		i2 = span_index + 1;
-	}
-
-	sc1 = &impl->subcurves[i1];
-	sc2 = &impl->subcurves[i2];
 
 	/* Map global span t to sub-curve local parameters */
 	/* sc1: right half, from t1 to 1.0 -> local = t1 + (1-t1)*t */
@@ -798,10 +785,6 @@ static void yuksel_blend_eval(
 	dt_sc2 = sc2->t1;
 	t_sc1 = sc1->t1 + dt_sc1 * t;
 	t_sc2 = dt_sc2 * t;
-
-	/* Check for boundary spans on open curves */
-	is_first_span = (!impl->closed && span_index == 0);
-	is_last_span = (!impl->closed && span_index == n - 2);
 
 	need_d1 = (eval_flags & (QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2 | QAWS_EVAL_FLAG_D3)) != 0;
 	need_d2 = (eval_flags & (QAWS_EVAL_FLAG_D2 | QAWS_EVAL_FLAG_D3)) != 0;
@@ -857,7 +840,7 @@ static void yuksel_blend_eval(
 	}
 
 	/* For first/last open-curve spans, use single sub-curve unblended */
-	if (is_first_span && !impl->closed) {
+	if (is_first_span) {
 		/* Use sc2 only (the curve at P[1] from its left half) */
 		if (out_pos) { for (d = 0; d < dim; d++) out_pos[d] = p2[d]; }
 		if (out_d1 && need_d1) { for (d = 0; d < dim; d++) out_d1[d] = dp2[d]; }
@@ -866,7 +849,7 @@ static void yuksel_blend_eval(
 		return;
 	}
 
-	if (is_last_span && !impl->closed) {
+	if (is_last_span) {
 		/* Use sc1 only (the curve at P[n-2] from its right half) */
 		if (out_pos) { for (d = 0; d < dim; d++) out_pos[d] = p1[d]; }
 		if (out_d1 && need_d1) { for (d = 0; d < dim; d++) out_d1[d] = dp1[d]; }
@@ -921,6 +904,44 @@ static void yuksel_blend_eval(
 		for (d = 0; d < dim; d++)
 			out_d3[d] = d3w1 * (p1[d] - p2[d]) + (qaws_scalar)3 * d2w1 * (dp1[d] - dp2[d])
 				+ (qaws_scalar)3 * dw1 * (d2p1[d] - d2p2[d]) + c2 * d3p1[d] + s2 * d3p2[d];
+	}
+}
+
+static void yuksel_blend_eval(
+	qaws_yuksel_impl const* impl,
+	unsigned int span_index,
+	qaws_scalar t,
+	unsigned int dim,
+	unsigned int eval_flags,
+	qaws_scalar* out_pos,
+	qaws_scalar* out_d1,
+	qaws_scalar* out_d2,
+	qaws_scalar* out_d3)
+{
+	unsigned int n = impl->control_point_count;
+	unsigned int i1 = impl->closed ? span_index % n : span_index;
+	unsigned int i2 = impl->closed ? (span_index + 1) % n : span_index + 1;
+	qaws_internal_yuksel_blend(&impl->subcurves[i1], &impl->subcurves[i2], !impl->closed && span_index == 0,
+		!impl->closed && span_index == n - 2, t, dim, eval_flags, out_pos, out_d1, out_d2, out_d3);
+}
+
+/* The sub-curve at point i of the mode (unknown modes: Bezier) */
+void qaws_internal_yuksel_subcurve(qaws_scalar const* pts, unsigned int n, unsigned int i, int closed, unsigned int dim, int mode,
+	qaws_yuksel_subcurve* sc)
+{
+	switch (mode) {
+	case QAWS_YUKSEL_MODE_CIRCULAR:
+		compute_circular_subcurve(pts, n, i, closed, dim, sc);
+		break;
+	case QAWS_YUKSEL_MODE_ELLIPTICAL:
+		compute_elliptical_subcurve(pts, n, i, closed, dim, sc);
+		break;
+	case QAWS_YUKSEL_MODE_HYBRID:
+		compute_hybrid_subcurve(pts, n, i, closed, dim, sc);
+		break;
+	default:
+		compute_bezier_subcurve(pts, n, i, closed, dim, sc);
+		break;
 	}
 }
 
@@ -1523,25 +1544,8 @@ qaws_status qaws_curve_create_yuksel_ex(
 	}
 
 	/* Compute sub-curves for each control point */
-	for (i = 0; i < n; i++) {
-		switch (desc->mode) {
-		case QAWS_YUKSEL_MODE_BEZIER:
-			compute_bezier_subcurve(impl->control_points, n, i, desc->closed, dim_count, &impl->subcurves[i]);
-			break;
-		case QAWS_YUKSEL_MODE_CIRCULAR:
-			compute_circular_subcurve(impl->control_points, n, i, desc->closed, dim_count, &impl->subcurves[i]);
-			break;
-		case QAWS_YUKSEL_MODE_ELLIPTICAL:
-			compute_elliptical_subcurve(impl->control_points, n, i, desc->closed, dim_count, &impl->subcurves[i]);
-			break;
-		case QAWS_YUKSEL_MODE_HYBRID:
-			compute_hybrid_subcurve(impl->control_points, n, i, desc->closed, dim_count, &impl->subcurves[i]);
-			break;
-		default:
-			compute_bezier_subcurve(impl->control_points, n, i, desc->closed, dim_count, &impl->subcurves[i]);
-			break;
-		}
-	}
+	for (i = 0; i < n; i++)
+		qaws_internal_yuksel_subcurve(impl->control_points, n, i, desc->closed, dim_count, (int)desc->mode, &impl->subcurves[i]);
 
 	curve->impl = impl;
 	*out_curve = curve;

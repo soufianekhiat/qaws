@@ -38,15 +38,12 @@ static qaws_scalar arc_segment_length(qaws_arc_segment const *seg)
  *   D3    = (sin(theta), -cos(theta)) * sign(sweep) / radius^2
  * ------------------------------------------------------------------------- */
 
-static qaws_status arc_eval_span_2d(
-	qaws_curve const *curve,
-	unsigned int span_index,
+qaws_status qaws_internal_arc_eval_2d(
+	qaws_arc_segment const *seg,
 	qaws_scalar local_t,
 	unsigned int eval_flags,
 	qaws_eval_result_2d *out_result)
 {
-	qaws_arc_impl *impl = (qaws_arc_impl *)curve->impl;
-	qaws_arc_segment const *seg = &impl->segments[span_index];
 	qaws_scalar sweep = seg->angle_end - seg->angle_start;
 	/* local_t is normalized on the span; the curve parameter is arc length */
 	qaws_scalar inv_len = QAWS_ONE / (seg->radius * QAWS_FABS(sweep));
@@ -122,15 +119,12 @@ static qaws_status arc_eval_span_2d(
  *   D3    = (sin(theta) * axis_u - cos(theta) * axis_v) * sign(sweep) / r^2
  * ------------------------------------------------------------------------- */
 
-static qaws_status arc_eval_span_3d(
-	qaws_curve const *curve,
-	unsigned int span_index,
+qaws_status qaws_internal_arc_eval_3d(
+	qaws_arc_segment const *seg,
 	qaws_scalar local_t,
 	unsigned int eval_flags,
 	qaws_eval_result_3d *out_result)
 {
-	qaws_arc_impl *impl = (qaws_arc_impl *)curve->impl;
-	qaws_arc_segment const *seg = &impl->segments[span_index];
 	qaws_scalar sweep = seg->angle_end - seg->angle_start;
 	/* local_t is normalized on the span; the curve parameter is arc length */
 	qaws_scalar inv_len = QAWS_ONE / (seg->radius * QAWS_FABS(sweep));
@@ -205,6 +199,28 @@ static qaws_status arc_eval_span_3d(
 	return QAWS_STATUS_OK;
 }
 
+static qaws_status arc_eval_span_2d(
+	qaws_curve const *curve,
+	unsigned int span_index,
+	qaws_scalar local_t,
+	unsigned int eval_flags,
+	qaws_eval_result_2d *out_result)
+{
+	qaws_arc_impl *impl = (qaws_arc_impl *)curve->impl;
+	return qaws_internal_arc_eval_2d(&impl->segments[span_index], local_t, eval_flags, out_result);
+}
+
+static qaws_status arc_eval_span_3d(
+	qaws_curve const *curve,
+	unsigned int span_index,
+	qaws_scalar local_t,
+	unsigned int eval_flags,
+	qaws_eval_result_3d *out_result)
+{
+	qaws_arc_impl *impl = (qaws_arc_impl *)curve->impl;
+	return qaws_internal_arc_eval_3d(&impl->segments[span_index], local_t, eval_flags, out_result);
+}
+
 /* ---------------------------------------------------------------------------
  * Vtable: destroy
  * ------------------------------------------------------------------------- */
@@ -223,24 +239,15 @@ static void arc_destroy_impl(void *impl, qaws_allocator const *allocator)
  * Vtable: property queries
  * ------------------------------------------------------------------------- */
 
-static int arc_is_closed(qaws_curve const *curve)
+int qaws_internal_arc_closed(qaws_dimension dimension, qaws_arc_segment const *first, qaws_arc_segment const *last)
 {
-	qaws_arc_impl *impl = (qaws_arc_impl *)curve->impl;
-	qaws_arc_segment const *first;
-	qaws_arc_segment const *last;
 	qaws_scalar end_theta;
 	qaws_scalar start_x, start_y, start_z;
 	qaws_scalar end_x, end_y, end_z;
 	qaws_scalar dx, dy, dz;
 
-	if (impl->segment_count < 1)
-		return 0;
-
-	first = &impl->segments[0];
-	last = &impl->segments[impl->segment_count - 1];
-
 	/* Compute start point of first segment */
-	if (curve->dimension == QAWS_DIMENSION_2D)
+	if (dimension == QAWS_DIMENSION_2D)
 	{
 		start_x = first->center[0]
 			+ first->radius * QAWS_COS(first->angle_start);
@@ -285,6 +292,14 @@ static int arc_is_closed(qaws_curve const *curve)
 		dz = end_z - start_z;
 		return (dx * dx + dy * dy + dz * dz) < QAWS_LITERAL(1e-10);
 	}
+}
+
+static int arc_is_closed(qaws_curve const *curve)
+{
+	qaws_arc_impl *impl = (qaws_arc_impl *)curve->impl;
+	if (impl->segment_count < 1)
+		return 0;
+	return qaws_internal_arc_closed(curve->dimension, &impl->segments[0], &impl->segments[impl->segment_count - 1]);
 }
 
 static int arc_is_periodic(qaws_curve const *curve)

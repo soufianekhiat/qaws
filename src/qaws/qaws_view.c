@@ -22,11 +22,14 @@
 #include "qaws_hermite.h"
 #include "qaws_catmull_rom.h"
 #include "qaws_polynomial.h"
+#include "qaws_trajectory.h"
+#include "qaws_yuksel.h"
 #include "qaws_prepare.h"
 #include "core/qaws_cubic_poly_core.h"
 #include "core/qaws_horner_core.h"
 #include "internal/qaws_internal_diff.h"
 #include "internal/qaws_internal_closest.h"
+#include <assert.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -212,6 +215,94 @@ static void vw_knots(qaws_array_view const* knots, unsigned int n, unsigned int 
 			out[k] = (qaws_scalar)(k <= d ? 0 : k >= n ? n - d : k - d);
 }
 
+/* subdivision: the levels (0: 6) and the refined polygon's count after them, 0 when a step would pass the owned curve's bound (a
+   step at most doubles the count; the doubled count * dim * 4 must fit unsigned int) */
+static unsigned int vw_sub_levels(qaws_curve_view const* v)
+{
+	return v->levels ? v->levels : 6;
+}
+
+static unsigned int vw_sub_count(qaws_curve_view const* v)
+{
+	unsigned int l, c = v->points.count, levels = vw_sub_levels(v), dim = (unsigned int)v->dimension;
+	for (l = 0; l < levels; l++)
+	{
+		if (c > 0xFFFFFFFFu / (8 * dim))
+			return 0;
+		c = v->closed ? 2 * c : 2 * c - 1;
+	}
+	return c;
+}
+
+static unsigned int vw_sub_degree(unsigned int scheme)
+{
+	return scheme == QAWS_SUBDIVISION_CHAIKIN ? 2 : scheme == QAWS_SUBDIVISION_LANE_RIESENFELD_3 ? 3 : 4;
+}
+
+/* arcs: n centers, n (radius, angle_start, angle_end), 3D the n plane axes; the owned create's checks in the computing precision
+   (radius > 0, |sweep| and length at least 1e-15) */
+static qaws_status vw_check_arcs(qaws_curve_view const* v, unsigned int dim, unsigned int n)
+{
+	qaws_array_view const* axes[2];
+	unsigned int i, a;
+	qaws_status st;
+	if (v->knots.count != n || v->knots.components != 3)
+		return QAWS_STATUS_INVALID_KNOT_COUNT;
+	if ((st = vw_check_points(&v->knots, &v->weights, 3, n)) != QAWS_STATUS_OK)
+		return st;
+	axes[0] = &v->axes_u;
+	axes[1] = &v->axes_v;
+	for (a = 0; a < 2; a++)
+		if (dim == 3)
+		{
+			if (axes[a]->count != n)
+				return QAWS_STATUS_INVALID_CONTROL_POINT_COUNT;
+			if (axes[a]->components != 3)
+				return QAWS_STATUS_INVALID_ARGUMENT;
+			if ((st = vw_check_points(axes[a], &v->weights, 3, n)) != QAWS_STATUS_OK)
+				return st;
+		}
+		else if (axes[a]->count)
+			return QAWS_STATUS_INVALID_ARGUMENT;
+	for (i = 0; i < n; i++)
+	{
+		qaws_scalar r = (qaws_scalar)vw_get(&v->knots, i, 0);
+		qaws_scalar sweep = (qaws_scalar)vw_get(&v->knots, i, 2) - (qaws_scalar)vw_get(&v->knots, i, 1);
+		if (r <= QAWS_ZERO)
+			return QAWS_STATUS_INVALID_ARGUMENT;
+		if (QAWS_FABS(sweep) < QAWS_LITERAL(1e-15) || r * QAWS_FABS(sweep) < QAWS_LITERAL(1e-15))
+			return QAWS_STATUS_DEGENERATE_CURVE;
+	}
+	return QAWS_STATUS_OK;
+}
+
+/* trajectories: n key times strictly increasing in the computing precision (as the owned create), every span at least 1e-10 long
+   (the owned curve refuses to evaluate shorter ones); key velocities none or n */
+static qaws_status vw_check_trajectory(qaws_curve_view const* v, unsigned int dim, unsigned int n)
+{
+	unsigned int i;
+	qaws_status st;
+	if (n > 0xFFFFFFFFu / (dim * 4) || v->knots.count != n || v->knots.components != 1)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	if ((st = qaws_array_view_validate(&v->knots)) != QAWS_STATUS_OK)
+		return st;
+	for (i = 0; i < n; i++)
+	{
+		qaws_scalar t = (qaws_scalar)vw_get(&v->knots, i, 0);
+		if (!isfinite((double)t))
+			return QAWS_STATUS_INVALID_ARGUMENT;
+		if (i && (t <= (qaws_scalar)vw_get(&v->knots, i - 1, 0) || t - (qaws_scalar)vw_get(&v->knots, i - 1, 0) < QAWS_LITERAL(1e-10)))
+			return QAWS_STATUS_INVALID_PARAMETER_RANGE;
+	}
+	if (!v->tangents.count)
+		return QAWS_STATUS_OK;
+	if (v->tangents.count != n)
+		return QAWS_STATUS_INVALID_CONTROL_POINT_COUNT;
+	if (v->tangents.components != dim)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	return vw_check_points(&v->tangents, &v->weights, dim, n);
+}
+
 qaws_status qaws_curve_view_validate(qaws_curve_view const* view)
 {
 	unsigned int dim, n, d;
@@ -227,8 +318,41 @@ qaws_status qaws_curve_view_validate(qaws_curve_view const* view)
 		return QAWS_STATUS_INVALID_DEGREE;
 	if (n > 0xFFFFFFFFu / (dim + 1))   /* n * (dim + 1) scalars and n + d + 1 knots count in unsigned int */
 		return QAWS_STATUS_INVALID_CONTROL_POINT_COUNT;
+	if (view->family != QAWS_VIEW_ARC && (view->axes_u.count || view->axes_v.count))
+		return QAWS_STATUS_INVALID_ARGUMENT;
 	switch (view->family)
 	{
+	case QAWS_VIEW_ARC:
+		if (d != 2)
+			return QAWS_STATUS_INVALID_DEGREE;
+		if (n < 1)
+			return QAWS_STATUS_INVALID_CONTROL_POINT_COUNT;
+		if (view->weights.count || view->tangents.count || view->points.components != dim)
+			return QAWS_STATUS_INVALID_ARGUMENT;
+		if ((st = vw_check_points(&view->points, &view->weights, dim, n)) != QAWS_STATUS_OK)
+			return st;
+		return vw_check_arcs(view, dim, n);
+	case QAWS_VIEW_TRAJECTORY:
+		if (d != 3)
+			return QAWS_STATUS_INVALID_DEGREE;
+		if (n < 2 || view->weights.count || view->points.components != dim)
+			return QAWS_STATUS_INVALID_ARGUMENT;
+		if ((st = vw_check_points(&view->points, &view->weights, dim, n)) != QAWS_STATUS_OK)
+			return st;
+		return vw_check_trajectory(view, dim, n);
+	case QAWS_VIEW_YUKSEL:
+	case QAWS_VIEW_SUBDIVISION:
+		if (n < 3)
+			return QAWS_STATUS_INVALID_CONTROL_POINT_COUNT;
+		if (view->mode > (view->family == QAWS_VIEW_YUKSEL ? (unsigned int)QAWS_YUKSEL_MODE_HYBRID : (unsigned int)QAWS_SUBDIVISION_LANE_RIESENFELD_4))
+			return QAWS_STATUS_INVALID_ARGUMENT;
+		if (d != (view->family == QAWS_VIEW_YUKSEL ? 2u : vw_sub_degree(view->mode)))
+			return QAWS_STATUS_INVALID_DEGREE;
+		if (view->weights.count || view->knots.count || view->tangents.count || view->points.components != dim)
+			return QAWS_STATUS_INVALID_ARGUMENT;
+		if (view->family == QAWS_VIEW_SUBDIVISION && !vw_sub_count(view))
+			return QAWS_STATUS_INVALID_CONTROL_POINT_COUNT;
+		return vw_check_points(&view->points, &view->weights, dim, n);
 	case QAWS_VIEW_SPLINE:
 		if (n < d + 1)
 			return QAWS_STATUS_INVALID_CONTROL_POINT_COUNT;
@@ -310,8 +434,32 @@ static void pr_counts(qaws_curve_view const* v, unsigned int* kc, unsigned int* 
 {
 	unsigned int n = v->points.count, d = v->degree;
 	*kc = v->family == QAWS_VIEW_SPLINE ? n + d + 1 : 0;
-	*nb = v->family == QAWS_VIEW_SPLINE ? n - d + 1 : v->family == QAWS_VIEW_HERMITE ? n : v->family == QAWS_VIEW_CATMULL_ROM
-		? (v->closed ? n + 1 : n - 2) : 2;
+	switch (v->family)
+	{
+	case QAWS_VIEW_SPLINE:
+		*nb = n - d + 1;
+		break;
+	case QAWS_VIEW_HERMITE:
+	case QAWS_VIEW_TRAJECTORY:
+		*nb = n;
+		break;
+	case QAWS_VIEW_CATMULL_ROM:
+		*nb = v->closed ? n + 1 : n - 2;
+		break;
+	case QAWS_VIEW_ARC:
+		*nb = n + 1;
+		break;
+	case QAWS_VIEW_YUKSEL:
+		*nb = v->closed ? n + 1 : n;
+		break;
+	case QAWS_VIEW_SUBDIVISION:
+		/* the owned curve's spans: one per refined point (open: per refined edge) */
+		*nb = v->closed ? vw_sub_count(v) + 1 : vw_sub_count(v);
+		break;
+	default:
+		*nb = 2;
+		break;
+	}
 }
 
 static size_t pr_bytes(qaws_curve_view const* v)
@@ -346,6 +494,26 @@ static qaws_curve_prepared* pr_fill(qaws_curve_view const* view, void* memory)
 			if (p->knots[k + 1] > p->knots[k])
 				p->bounds[++p->span_count] = p->knots[k + 1];
 	}
+	else if (view->family == QAWS_VIEW_ARC)
+	{
+		/* cumulative arc lengths, summed as the owned create sums them */
+		qaws_scalar cumulative = QAWS_ZERO;
+		p->span_count = n;
+		p->bounds[0] = QAWS_ZERO;
+		for (k = 0; k < n; k++)
+		{
+			qaws_scalar sweep = (qaws_scalar)vw_get(&view->knots, k, 2) - (qaws_scalar)vw_get(&view->knots, k, 1);
+			cumulative += (qaws_scalar)vw_get(&view->knots, k, 0) * QAWS_FABS(sweep);
+			p->bounds[k + 1] = cumulative;
+		}
+	}
+	else if (view->family == QAWS_VIEW_TRAJECTORY)
+	{
+		/* the key times */
+		p->span_count = n - 1;
+		for (k = 0; k < n; k++)
+			p->bounds[k] = (qaws_scalar)vw_get(&view->knots, k, 0);
+	}
 	else if (view->family == QAWS_VIEW_POLYNOMIAL)
 	{
 		p->span_count = 1;
@@ -354,7 +522,7 @@ static qaws_curve_prepared* pr_fill(qaws_curve_view const* view, void* memory)
 	}
 	else
 	{
-		/* Hermite and Catmull-Rom: unit spans 0, 1, ..., as the owned curves */
+		/* Hermite, Catmull-Rom, Yuksel and subdivision: unit spans 0, 1, ..., as the owned curves */
 		p->span_count = nb - 1;
 		for (k = 0; k < nb; k++)
 			p->bounds[k] = (qaws_scalar)k;
@@ -501,6 +669,284 @@ static void pr_eval_poly(qaws_curve_prepared const* p, qaws_scalar t, qaws_scala
 	}
 }
 
+/* arc i as the owned curve keeps it */
+static qaws_arc_segment pr_arc(qaws_curve_prepared const* p, unsigned int i)
+{
+	qaws_arc_segment s;
+	unsigned int dim = (unsigned int)p->view.dimension, c;
+	memset(&s, 0, sizeof s);
+	for (c = 0; c < dim; c++)
+		s.center[c] = (qaws_scalar)vw_get(&p->view.points, i, c);
+	s.radius = (qaws_scalar)vw_get(&p->view.knots, i, 0);
+	s.angle_start = (qaws_scalar)vw_get(&p->view.knots, i, 1);
+	s.angle_end = (qaws_scalar)vw_get(&p->view.knots, i, 2);
+	for (c = 0; dim == 3 && c < 3; c++)
+	{
+		s.axis_u[c] = (qaws_scalar)vw_get(&p->view.axes_u, i, c);
+		s.axis_v[c] = (qaws_scalar)vw_get(&p->view.axes_v, i, c);
+	}
+	return s;
+}
+
+/* trajectory span s's coefficients: the key velocities given, or from the neighbours (one-sided at the ends, central inside, the
+   time step clamped to 1e-15) as traj_compute_velocities; then the owned Hermite coefficients, operation for operation */
+static void pr_trajectory_coeffs(qaws_curve_prepared const* p, unsigned int s, qaws_scalar* cf)
+{
+	unsigned int dim = (unsigned int)p->view.dimension, n = p->n, k, d;
+	qaws_scalar const* T = p->bounds;
+	qaws_scalar v[2][3], dt = T[s + 1] - T[s];
+	for (k = 0; k < 2; k++)
+	{
+		unsigned int key = s + k, lo = key ? key - 1 : 0, hi = key + 1 < n ? key + 1 : n - 1;
+		qaws_scalar h = T[hi] - T[lo], inv_dt;
+		if (h < QAWS_LITERAL(1e-15)) h = QAWS_LITERAL(1e-15);
+		inv_dt = QAWS_ONE / h;
+		for (d = 0; d < dim; d++)
+			v[k][d] = p->view.tangents.count ? (qaws_scalar)vw_get(&p->view.tangents, key, d)
+				: ((qaws_scalar)vw_get(&p->view.points, hi, d) - (qaws_scalar)vw_get(&p->view.points, lo, d)) * inv_dt;
+	}
+	for (d = 0; d < dim; d++)
+	{
+		qaws_scalar p0 = (qaws_scalar)vw_get(&p->view.points, s, d);
+		qaws_scalar p1 = (qaws_scalar)vw_get(&p->view.points, s + 1, d);
+		qaws_scalar m0 = v[0][d] * dt;
+		qaws_scalar m1 = v[1][d] * dt;
+		cf[d * 4 + 0] = QAWS_LITERAL(2.0) * p0 + m0 - QAWS_LITERAL(2.0) * p1 + m1;
+		cf[d * 4 + 1] = -QAWS_LITERAL(3.0) * p0 - QAWS_LITERAL(2.0) * m0 + QAWS_LITERAL(3.0) * p1 - m1;
+		cf[d * 4 + 2] = m0;
+		cf[d * 4 + 3] = p0;
+	}
+}
+
+/* Yuksel sub-curve at point i from its neighbours only: the owned routine on a window of them (open ends: two points, so the routine
+   picks the same neighbours and degenerate cases) */
+static void pr_yuksel_subcurve(qaws_curve_prepared const* p, unsigned int i, qaws_yuksel_subcurve* sc)
+{
+	unsigned int dim = (unsigned int)p->view.dimension, n = p->n, idx[3], m = 0, at, k, c;
+	qaws_scalar w[3 * 3];
+	if (p->view.closed)
+		idx[m++] = (i + n - 1) % n;
+	else if (i > 0)
+		idx[m++] = i - 1;
+	at = m;
+	idx[m++] = i;
+	if (p->view.closed)
+		idx[m++] = (i + 1) % n;
+	else if (i < n - 1)
+		idx[m++] = i + 1;
+	for (k = 0; k < m; k++)
+		for (c = 0; c < dim; c++)
+			w[k * dim + c] = (qaws_scalar)vw_get(&p->view.points, idx[k], c);
+	memset(sc, 0, sizeof *sc);
+	qaws_internal_yuksel_subcurve(w, m, at, 0, dim, (int)p->view.mode, sc);
+}
+
+#define PR_SUB_LEVELS 32                /* above the levels the owned bound allows (counts at least double per level) */
+#define PR_SUB_WIDTH 16                 /* refined points a span needs per level: 4 at the last, at most 8 before (LR4) + 3 doubled */
+
+static int64_t pr_floor2(int64_t x)
+{
+	return x >= 0 ? x / 2 : -((-x + 1) / 2);
+}
+
+/* subdivision span s's uniform Catmull-Rom coefficients without the refined polygon: the windows of points span s's stencil depends
+   on, level by level back to the control points (global indices: open curves clamped to each level's count, closed ones unwrapped
+   and read modulo n), then refined forward over those windows by the owned steps' own expressions (chaikin_step,
+   lane_riesenfeld_step), endpoints kept on open curves; the stencil and phantom end points as the owned create */
+static void pr_subdivision_coeffs(qaws_curve_prepared const* p, unsigned int s, qaws_scalar* cf)
+{
+	unsigned int dim = (unsigned int)p->view.dimension, n = p->n, levels = vw_sub_levels(&p->view), scheme = p->view.mode, l, d, r;
+	unsigned int rounds = scheme == QAWS_SUBDIVISION_CHAIKIN ? 0 : scheme == QAWS_SUBDIVISION_LANE_RIESENFELD_3 ? 2 : 3;
+	int closed = p->view.closed != 0;
+	int64_t cnt[PR_SUB_LEVELS + 1], lo[PR_SUB_LEVELS + 1], hi[PR_SUB_LEVELS + 1], m;
+	qaws_scalar win[PR_SUB_WIDTH][3], nxt[PR_SUB_WIDTH][3], ph[2][3];
+	qaws_scalar const *P0, *P3;
+	assert(levels <= PR_SUB_LEVELS);
+	cnt[0] = n;
+	for (l = 0; l < levels; l++)
+		cnt[l + 1] = closed ? 2 * cnt[l] : 2 * cnt[l] - 1;
+	/* backward: out[m] reads in[floor(m / 2)] and in[floor(m / 2) + 1] (open Chaikin: of m - 1); Lane-Riesenfeld averages doubled
+	   points m .. m + rounds */
+	lo[levels] = (int64_t)s - 1;
+	hi[levels] = (int64_t)s + 2;
+	for (l = levels + 1; l-- > 0;)
+	{
+		if (l < levels)
+		{
+			lo[l] = pr_floor2(lo[l + 1] - 1);
+			hi[l] = pr_floor2(hi[l + 1] + rounds) + 1;
+		}
+		if (!closed)
+		{
+			lo[l] = lo[l] < 0 ? 0 : lo[l];
+			hi[l] = hi[l] > cnt[l] - 1 ? cnt[l] - 1 : hi[l];
+		}
+		assert(hi[l] - lo[l] + 1 + rounds <= PR_SUB_WIDTH);
+	}
+	for (m = lo[0]; m <= hi[0]; m++)
+		for (d = 0; d < dim; d++)
+			win[m - lo[0]][d] = (qaws_scalar)vw_get(&p->view.points, (unsigned int)(closed ? (m % n + n) % n : m), d);
+	/* forward: win holds level l over [lo[l], hi[l]] */
+	for (l = 0; l < levels; l++)
+	{
+		int64_t a = lo[l + 1], b = hi[l + 1], c = cnt[l], N = cnt[l + 1], e, top;
+#define PR_IN(i) win[(i) - lo[l]]
+		if (scheme == QAWS_SUBDIVISION_CHAIKIN)
+			for (m = a; m <= b; m++)
+			{
+				int64_t i = closed ? pr_floor2(m) : (m - 1) / 2, first = closed ? m - 2 * i == 0 : m - 1 - 2 * i == 0;
+				for (d = 0; d < dim; d++)
+					nxt[m - a][d] = !closed && m == 0 ? PR_IN(0)[d] : !closed && m == N - 1 ? PR_IN(c - 1)[d]
+						: first ? (qaws_scalar)0.75 * PR_IN(i)[d] + (qaws_scalar)0.25 * PR_IN(i + 1)[d]
+						: (qaws_scalar)0.25 * PR_IN(i)[d] + (qaws_scalar)0.75 * PR_IN(i + 1)[d];
+			}
+		else
+		{
+			/* the doubled points a .. b + rounds (open: up to the last), then the averaging rounds in place (ascending: each reads
+			   its successor's previous value) */
+			e = closed || b + rounds < N - 1 ? b + rounds : N - 1;
+			for (m = a; m <= e; m++)
+			{
+				int64_t i = pr_floor2(m);
+				for (d = 0; d < dim; d++)
+					nxt[m - a][d] = m % 2 == 0 ? PR_IN(i)[d] : (qaws_scalar)0.5 * (PR_IN(i)[d] + PR_IN(i + 1)[d]);
+			}
+			for (top = e, r = 0; r < rounds; r++)
+			{
+				top = !closed && top == N - 1 ? top : top - 1;
+				for (m = a; m <= top; m++)
+					if (closed || (m != 0 && m != N - 1))
+						for (d = 0; d < dim; d++)
+							nxt[m - a][d] = (qaws_scalar)0.5 * (nxt[m - a][d] + nxt[m + 1 - a][d]);
+			}
+		}
+#undef PR_IN
+		memcpy(win, nxt, sizeof win);
+	}
+	/* the stencil of span s over the last level (open: phantom points 2 P[0] - P[1], 2 P[N - 1] - P[N - 2]) */
+	m = (int64_t)s - lo[levels];        /* refined point s in win; open end spans: s = 0, or s = N - 2 (s + 1 the last) */
+	for (d = 0; d < dim; d++)
+	{
+		ph[0][d] = (qaws_scalar)2.0 * win[m][d] - win[m + 1][d];
+		ph[1][d] = (qaws_scalar)2.0 * win[m + 1][d] - win[m][d];
+	}
+	P0 = !closed && s == 0 ? ph[0] : win[m - 1];
+	P3 = !closed && (int64_t)s + 2 >= cnt[levels] ? ph[1] : win[m + 2];
+	qaws_internal_subdivision_cr_coeffs(P0, win[m], win[m + 1], P3, dim, cf);
+}
+
+static void pr_from_2d(qaws_eval_result_2d const* e, qaws_scalar out[PR_ORDERS][3])
+{
+	qaws_vec2 const* v[PR_ORDERS];
+	unsigned int r;
+	v[0] = &e->position;
+	v[1] = &e->d1;
+	v[2] = &e->d2;
+	v[3] = &e->d3;
+	for (r = 0; r < PR_ORDERS; r++)
+	{
+		out[r][0] = v[r]->x;
+		out[r][1] = v[r]->y;
+		out[r][2] = QAWS_ZERO;
+	}
+}
+
+static void pr_from_3d(qaws_eval_result_3d const* e, qaws_scalar out[PR_ORDERS][3])
+{
+	pr_put(out[0], e->position);
+	pr_put(out[1], e->d1);
+	pr_put(out[2], e->d2);
+	pr_put(out[3], e->d3);
+}
+
+#define PR_ALL (QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2 | QAWS_EVAL_FLAG_D3)
+
+/* arc, trajectory, Yuksel and subdivision span `span` at local u: the owned family's span evaluator on that span's data, rebuilt
+   from the borrowed values (every order asked: the owned evaluators give each order the same value whatever else is asked) */
+static void pr_eval_family(qaws_curve_prepared const* p, unsigned int span, qaws_scalar u, qaws_scalar out[PR_ORDERS][3])
+{
+	unsigned int dim = (unsigned int)p->view.dimension, n = p->n;
+	int is3 = dim == 3;
+	qaws_scalar cf[3 * 4];
+	qaws_eval_result_2d e2;
+	qaws_eval_result_3d e3;
+	memset(&e2, 0, sizeof e2);
+	memset(&e3, 0, sizeof e3);
+	switch (p->view.family)
+	{
+	case QAWS_VIEW_ARC:
+	{
+		qaws_arc_segment seg = pr_arc(p, span);
+		if (is3)
+			qaws_internal_arc_eval_3d(&seg, u, PR_ALL, &e3);
+		else
+			qaws_internal_arc_eval_2d(&seg, u, PR_ALL, &e2);
+		break;
+	}
+	case QAWS_VIEW_TRAJECTORY:
+		pr_trajectory_coeffs(p, span, cf);
+		if (is3)
+			qaws_internal_trajectory_eval_3d(cf, p->bounds[span + 1] - p->bounds[span], u, PR_ALL, &e3);
+		else
+			qaws_internal_trajectory_eval_2d(cf, p->bounds[span + 1] - p->bounds[span], u, PR_ALL, &e2);
+		break;
+	case QAWS_VIEW_SUBDIVISION:
+		pr_subdivision_coeffs(p, span, cf);
+		if (is3)
+			qaws_internal_subdivision_eval_3d(cf, u, PR_ALL, &e3);
+		else
+			qaws_internal_subdivision_eval_2d(cf, u, PR_ALL, &e2);
+		break;
+	default:
+	{
+		/* Yuksel: the span's two sub-curves (closed: wrapping), blended */
+		qaws_yuksel_subcurve sc[2];
+		int closed = p->view.closed != 0;
+		memset(out, 0, sizeof(qaws_scalar) * PR_ORDERS * 3);
+		pr_yuksel_subcurve(p, closed ? span % n : span, &sc[0]);
+		pr_yuksel_subcurve(p, closed ? (span + 1) % n : span + 1, &sc[1]);
+		qaws_internal_yuksel_blend(&sc[0], &sc[1], !closed && span == 0, !closed && span == n - 2, u, dim, PR_ALL, out[0], out[1],
+			out[2], out[3]);
+		return;
+	}
+	}
+	if (is3)
+		pr_from_3d(&e3, out);
+	else
+		pr_from_2d(&e2, out);
+}
+
+/* the span holding t and t's local parameter in it, as qaws_internal_find_span on the owned curve's span boundaries */
+static unsigned int pr_find_span(qaws_curve_prepared const* p, qaws_scalar t, qaws_scalar* u)
+{
+	qaws_scalar const* b = p->bounds;
+	unsigned int span, lo = 0, hi = p->span_count - 1;
+	qaws_scalar len;
+	if (t <= b[0])
+		span = 0;
+	else if (t >= b[p->span_count])
+		span = p->span_count - 1;
+	else
+	{
+		while (lo < hi)
+		{
+			unsigned int mid = lo + (hi - lo) / 2;
+			if (t < b[mid + 1])
+				hi = mid;
+			else
+				lo = mid + 1;
+		}
+		span = lo;
+	}
+	len = b[span + 1] - b[span];
+	*u = len < (qaws_scalar)1e-10 ? (qaws_scalar)0 : (t - b[span]) / len;
+	if (*u < (qaws_scalar)0)
+		*u = (qaws_scalar)0;
+	else if (*u > (qaws_scalar)1)
+		*u = (qaws_scalar)1;
+	return span;
+}
+
 /* position and derivatives 1 to kmax at t (clamped to the domain), rows of out. Splines: the polynomial part as the owned B-spline
    (same span search, same basis, same sums), the rational part by the quotient rule. The other families as theirs. */
 static void pr_eval(qaws_curve_prepared const* p, qaws_scalar t, unsigned int kmax, qaws_scalar out[PR_ORDERS][3])
@@ -521,6 +967,13 @@ static void pr_eval(qaws_curve_prepared const* p, qaws_scalar t, unsigned int km
 	if (p->view.family == QAWS_VIEW_POLYNOMIAL)
 	{
 		pr_eval_poly(p, t, out);
+		return;
+	}
+	if (p->view.family >= QAWS_VIEW_ARC)
+	{
+		qaws_scalar u;
+		span = pr_find_span(p, t, &u);
+		pr_eval_family(p, span, u, out);
 		return;
 	}
 	span = qaws_internal_find_knot_span(p->knots, p->kc, d, p->n, t);
@@ -569,6 +1022,8 @@ static void pr_eval_span(qaws_curve_prepared const* p, unsigned int span, qaws_s
 {
 	if (p->view.family == QAWS_VIEW_HERMITE || p->view.family == QAWS_VIEW_CATMULL_ROM)
 		pr_eval_cubic(p, span, u, out);
+	else if (p->view.family >= QAWS_VIEW_ARC)
+		pr_eval_family(p, span, u, out);
 	else
 		pr_eval(p, p->bounds[span] + u * (p->bounds[span + 1] - p->bounds[span]), kmax, out);
 }
@@ -716,21 +1171,38 @@ static void bw_destroy(void* impl, qaws_allocator const* allocator)
 	qaws_curve_prepared_destroy((qaws_curve_prepared*)impl);
 }
 
+/* closed and periodic as the owned families: trajectory, Yuksel and subdivision by the flag, arcs when their ends meet (the owned
+   test), Catmull-Rom closed or (splines, Hermite, polynomial) ends meeting */
 static int bw_is_closed(qaws_curve const* curve)
 {
 	qaws_curve_prepared const* p = (qaws_curve_prepared const*)curve->impl;
-	return (p->view.family == QAWS_VIEW_CATMULL_ROM && p->view.closed) || qaws_internal_curve_ends_meet(curve);
+	switch (p->view.family)
+	{
+	case QAWS_VIEW_TRAJECTORY:
+	case QAWS_VIEW_YUKSEL:
+	case QAWS_VIEW_SUBDIVISION:
+		return p->view.closed != 0;
+	case QAWS_VIEW_ARC:
+	{
+		qaws_arc_segment first = pr_arc(p, 0), last = pr_arc(p, p->n - 1);
+		return qaws_internal_arc_closed(p->view.dimension, &first, &last);
+	}
+	default:
+		return (p->view.family == QAWS_VIEW_CATMULL_ROM && p->view.closed) || qaws_internal_curve_ends_meet(curve);
+	}
 }
 
 static int bw_is_periodic(qaws_curve const* curve)
 {
 	qaws_curve_prepared const* p = (qaws_curve_prepared const*)curve->impl;
-	return p->view.family == QAWS_VIEW_CATMULL_ROM && p->view.closed;
+	return p->view.closed && (p->view.family == QAWS_VIEW_CATMULL_ROM || p->view.family == QAWS_VIEW_TRAJECTORY
+		|| p->view.family == QAWS_VIEW_YUKSEL || p->view.family == QAWS_VIEW_SUBDIVISION);
 }
 
 static int bw_is_rational(qaws_curve const* curve)
 {
-	return ((qaws_curve_prepared const*)curve->impl)->rational != 0;
+	qaws_curve_prepared const* p = (qaws_curve_prepared const*)curve->impl;
+	return p->rational != 0 || p->view.family == QAWS_VIEW_ARC;
 }
 
 /* splines: the degree less the largest multiplicity of a knot inside the domain; the others as the owned families */
@@ -739,6 +1211,13 @@ static qaws_continuity bw_get_continuity(qaws_curve const* curve)
 	qaws_curve_prepared const* p = (qaws_curve_prepared const*)curve->impl;
 	unsigned int d = p->view.degree, k, run = 1, worst = 0;
 	int smooth;
+	if (p->view.family == QAWS_VIEW_ARC)
+		return QAWS_CONTINUITY_C0;
+	if (p->view.family == QAWS_VIEW_YUKSEL)
+		return QAWS_CONTINUITY_C2;
+	if (p->view.family == QAWS_VIEW_SUBDIVISION)
+		return p->view.mode == QAWS_SUBDIVISION_CHAIKIN ? QAWS_CONTINUITY_C1 : p->view.mode == QAWS_SUBDIVISION_LANE_RIESENFELD_3
+			? QAWS_CONTINUITY_C2 : QAWS_CONTINUITY_C3;
 	if (p->view.family == QAWS_VIEW_POLYNOMIAL)
 		return QAWS_CONTINUITY_C3;
 	if (p->view.family != QAWS_VIEW_SPLINE)
@@ -808,28 +1287,85 @@ int qaws_internal_view_span_window(qaws_curve const* curve, unsigned int s, unsi
 /* ---- owned copies ------------------------------------------------------- */
 
 /* the owned curve of the view's family: splines a B-spline (polynomial) or NURBS curve with the prepared knots (homogeneous points
-   divided by w); Hermite with its tangents; Catmull-Rom; polynomial over the prepared range */
+   divided by w); Hermite with its tangents; Catmull-Rom; polynomial over the prepared range; arcs; trajectories (with their key
+   velocities when given); Yuksel; subdivision with the view's levels */
 static qaws_status pr_copy(qaws_curve_prepared const* p, qaws_allocator const* allocator, qaws_curve** out_curve)
 {
 	unsigned int dim = (unsigned int)p->view.dimension, i, c;
-	qaws_scalar* pts = (qaws_scalar*)qaws_internal_alloc(allocator, qaws_internal_mul3(sizeof(qaws_scalar), (size_t)p->n, (2 * dim + 1)));
+	qaws_scalar* pts;
 	qaws_scalar *wts, *tans;
 	qaws_status st;
+	if (p->view.family == QAWS_VIEW_ARC)
+	{
+		qaws_arc_desc d;
+		qaws_arc_segment* segs = (qaws_arc_segment*)qaws_internal_alloc(allocator, qaws_internal_mul2(sizeof(qaws_arc_segment), (size_t)p->n));
+		if (!segs)
+			return QAWS_STATUS_ALLOCATION_FAILURE;
+		for (i = 0; i < p->n; i++)
+			segs[i] = pr_arc(p, i);
+		memset(&d, 0, sizeof d);
+		d.dimension = p->view.dimension;
+		d.segments = segs;
+		d.segment_count = p->n;
+		st = qaws_curve_create_arc_ex(&d, allocator, out_curve);
+		qaws_internal_dealloc(allocator, segs);
+		return st;
+	}
+	pts = (qaws_scalar*)qaws_internal_alloc(allocator, qaws_internal_mul3(sizeof(qaws_scalar), (size_t)p->n, (2 * dim + 1)));
 	if (!pts)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
+	/* weights (trajectories: the key times) and tangents (Hermite, trajectory key velocities) */
 	wts = pts + (size_t)p->n * dim;
 	tans = wts + p->n;
 	for (i = 0; i < p->n; i++)
 	{
 		wts[i] = p->rational == 1 ? (qaws_scalar)vw_get(&p->view.weights, i, 0)
-			: p->rational == 2 ? (qaws_scalar)vw_get(&p->view.points, i, dim) : QAWS_ONE;
+			: p->rational == 2 ? (qaws_scalar)vw_get(&p->view.points, i, dim) : p->view.family == QAWS_VIEW_TRAJECTORY ? p->bounds[i] : QAWS_ONE;
 		for (c = 0; c < dim; c++)
 		{
 			pts[i * dim + c] = (qaws_scalar)vw_get(&p->view.points, i, c) / (p->rational == 2 ? wts[i] : QAWS_ONE);
-			tans[i * dim + c] = p->view.family == QAWS_VIEW_HERMITE ? (qaws_scalar)vw_get(&p->view.tangents, i, c) : QAWS_ZERO;
+			tans[i * dim + c] = p->view.tangents.count ? (qaws_scalar)vw_get(&p->view.tangents, i, c) : QAWS_ZERO;
 		}
 	}
-	if (p->view.family == QAWS_VIEW_HERMITE)
+	if (p->view.family == QAWS_VIEW_TRAJECTORY)
+	{
+		qaws_trajectory_desc d;
+		memset(&d, 0, sizeof d);
+		d.dimension = p->view.dimension;
+		d.degree = 3;
+		d.key_positions = pts;
+		d.key_count = p->n;
+		d.key_times = wts;
+		d.key_time_count = p->n;
+		d.key_velocities = p->view.tangents.count ? tans : NULL;
+		d.key_velocity_count = p->view.tangents.count;
+		d.closed = p->view.closed;
+		st = qaws_curve_create_trajectory_ex(&d, allocator, out_curve);
+	}
+	else if (p->view.family == QAWS_VIEW_YUKSEL)
+	{
+		qaws_yuksel_desc d;
+		memset(&d, 0, sizeof d);
+		d.dimension = p->view.dimension;
+		d.control_points = pts;
+		d.control_point_count = p->n;
+		d.mode = (qaws_yuksel_mode)p->view.mode;
+		d.closed = p->view.closed;
+		st = qaws_curve_create_yuksel_ex(&d, allocator, out_curve);
+	}
+	else if (p->view.family == QAWS_VIEW_SUBDIVISION)
+	{
+		qaws_subdivision_desc d;
+		memset(&d, 0, sizeof d);
+		d.dimension = p->view.dimension;
+		d.scheme = (qaws_subdivision_scheme)p->view.mode;
+		d.control_points = pts;
+		d.control_point_count = p->n;
+		d.closed = p->view.closed;
+		d.refinement_levels = p->view.levels;
+		st = qaws_curve_create_subdivision_ex(&d, allocator, out_curve);
+	}
+	else if (p->view.family == QAWS_VIEW_HERMITE)
 	{
 		qaws_hermite_desc d;
 		memset(&d, 0, sizeof d);
