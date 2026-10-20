@@ -166,6 +166,9 @@ static void test_offsets(void)
 	for (z = 0; z < 3; z++)
 	{
 		qaws_shell_point c;
+		/* (by default one disk across an edge and the one round the corner) */
+		if (z == 1 && !test_heavy())
+			continue;
 		qaws_shell_region *g = NULL, *gr = NULL, *sh = NULL, *big = NULL, *small = NULL;
 		qaws_scalar A1 = 0, A2 = 0, B1 = 0, B2 = 0;
 		double r = cases[z][2];

@@ -345,7 +345,7 @@ static void test_wavy(void)
 	qaws_surface_medial_axis* m = NULL;
 	qaws_surface_medial_desc md;
 	double dlt = SMT_F32 ? 2e-3 : 1e-6;
-	unsigned int i, n = 0, checked = 0, good = 0;
+	unsigned int i, n = 0, checked = 0, good = 0, want = test_heavy() ? 5 : 2;   /* axis points checked (each costs two offsets) */
 	qaws_status st;
 	char msg[300];
 	for (i = 0; i < 16; i++) { cp[i].x = (qaws_scalar)((i / 4) / 3.0 * 2); cp[i].y = (qaws_scalar)((i % 4) / 3.0 * 2); cp[i].z = (qaws_scalar)z[i]; }
@@ -364,7 +364,7 @@ static void test_wavy(void)
 		n = qaws_surface_medial_axis_get_segment_count(m);
 		/* a few axis points, each against the region shrunk to either side of
 		   its radius */
-		for (i = 0; i < n && checked < 5; i += 7)
+		for (i = 0; i < n && checked < want; i += 7)
 		{
 			qaws_vec2 p[2];
 			qaws_scalar rr[2];
@@ -388,7 +388,7 @@ static void test_wavy(void)
 	}
 	sprintf(msg, "wavy patch: a geodesic quadrilateral's axis (%u segments): %u of %u points inside the region shrunk by r - %.0e and outside it shrunk by r + %.0e",
 		n, good, checked, dlt, dlt);
-	TEST_ASSERT(st == QAWS_STATUS_OK && checked == 5 && good == checked, msg);
+	TEST_ASSERT(st == QAWS_STATUS_OK && checked == want && good == checked, msg);
 	/* the largest inscribed circle: the region shrunk by just less keeps a
 	   part, shrunk by just more vanishes */
 	{

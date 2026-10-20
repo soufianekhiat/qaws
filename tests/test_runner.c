@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include "qaws_alloc.h"
 
 /* Forward declarations of test main functions */
@@ -376,7 +377,11 @@ int main(void) {
 		printf("Running test suite: %s\n", g_test_suites[i].name);
 		printf("========================================\n");
 
+		struct timespec t0, t1;
+		timespec_get(&t0, TIME_UTC);
 		int result = g_test_suites[i].test_fn();
+		timespec_get(&t1, TIME_UTC);
+		double const seconds = (double)(t1.tv_sec - t0.tv_sec) + 1e-9 * (double)(t1.tv_nsec - t0.tv_nsec);
 		if (scratch_memory)
 		{
 			printf("  scratch arena: peak %lu bytes, %lu refused, %lu invalid frees, %lu held\n", (unsigned long)scratch.peak,
@@ -388,11 +393,11 @@ int main(void) {
 
 		if (result == 0) {
 			total_passed++;
-			printf("[PASS] Test suite '%s' passed\n", g_test_suites[i].name);
+			printf("[PASS] Test suite '%s' passed (%.2f s)\n", g_test_suites[i].name, seconds);
 		} else {
 			total_failed++;
-			printf("[FAIL] Test suite '%s' failed with code %d\n",
-				g_test_suites[i].name, result);
+			printf("[FAIL] Test suite '%s' failed with code %d (%.2f s)\n",
+				g_test_suites[i].name, result, seconds);
 		}
 	}
 

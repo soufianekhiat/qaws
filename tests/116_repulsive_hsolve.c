@@ -319,8 +319,9 @@ static void test_directions(void)
    per step against the dense mode */
 static void test_solves(void)
 {
+	/* the solves at a third of the size by default (the timings they report are the heavy tier's point) */
 	{
-		enum { N = 600 };
+		unsigned int const N = test_heavy() ? 600 : 200;
 		double* xd = (double*)malloc(sizeof(double) * 3 * N);
 		qaws_scalar *x = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * N), *x2 = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * N);
 		unsigned int* e = (unsigned int*)malloc(sizeof(unsigned int) * 2 * N);
@@ -342,8 +343,8 @@ static void test_solves(void)
 			qaws_repulsive_curves_solve(&r[t], t ? x : x2, c, &sd);
 			tm[t] = (double)(clock() - c0) / CLOCKS_PER_SEC / (r[t].iterations ? r[t].iterations : 1);
 		}
-		sprintf(msg, "trefoil (600 edges), total length held: hierarchical (theta 0.25) E %.4g -> %.4g in %u steps, length off %.2g, reason %d; "
-			"%.3f s per step against %.3f s dense",
+		sprintf(msg, "trefoil (%u edges), total length held: hierarchical (theta 0.25) E %.4g -> %.4g in %u steps, length off %.2g, reason %d; "
+			"%.3f s per step against %.3f s dense", N,
 			(double)r[1].initial_energy, (double)r[1].energy, r[1].iterations, (double)r[1].constraint_residual, (int)r[1].reason, tm[1], tm[0]);
 		TEST_ASSERT(r[1].energy < 0.9 * r[1].initial_energy && r[1].iterations >= 10 && (double)r[1].constraint_residual <= (sizeof(qaws_scalar) == 4 ? 1e-4 : 1e-7), msg);
 		qaws_repulsive_curves_destroy(c);
@@ -361,7 +362,7 @@ static void test_solves(void)
 		clock_t c0;
 		double tm;
 		char msg[300];
-		rh_sphere(4, xd, tris, &nv, &nf);
+		rh_sphere(test_heavy() ? 4 : 3, xd, tris, &nv, &nf);
 		for (i = 0; i < 3 * nv; i++) x[i] = (qaws_scalar)xd[i];
 		memset(&d, 0, sizeof(d));
 		d.vertex_count = nv; d.triangles = tris; d.triangle_count = nf;

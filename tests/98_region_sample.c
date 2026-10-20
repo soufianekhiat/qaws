@@ -105,11 +105,18 @@ static int rst_inside(rst_region const* r, double x, double y, double margin)
 	}
 }
 
+/* the points the inside oracles check: every one under QAWS_TEST_HEAVY (or QAWS_RST_FULL), every 16th by default (the
+   statistics still use them all) */
+static unsigned int rst_stride(void)
+{
+	return test_heavy() || getenv("QAWS_RST_FULL") ? 1 : 16;
+}
+
 static void rst_check(qaws_region_sampler const* s, rst_region const* rg)
 {
 	double area = (double)qaws_region_sampler_get_area(s), worst = 0, scale = sqrt(rg->moments[0]);
 	double atol = RST_F32 ? 2e-4 : 1e-10;
-	unsigned int i, outside = 0, n = 1u << 16, nr = 20000;
+	unsigned int i, outside = 0, n = 1u << 16, nr = 20000, stride = rst_stride();
 	qaws_vec2* pts = (qaws_vec2*)malloc(sizeof(qaws_vec2) * n);
 	double m[6] = { 0, 0, 0, 0, 0, 0 }, ks = 0;
 	char msg[300];
@@ -153,7 +160,7 @@ static void rst_check(qaws_region_sampler const* s, rst_region const* rg)
 			for (i = 0; i < n; i++)
 			{
 				double x = pts[i].x, y = pts[i].y;
-				if (!rst_inside(rg, x, y, RST_F32 ? 1e-4 : 1e-9)) outside++;
+				if (i % stride == 0 && !rst_inside(rg, x, y, RST_F32 ? 1e-4 : 1e-9)) outside++;
 				m[0] += 1; m[1] += x; m[2] += y; m[3] += x * x; m[4] += y * y; m[5] += x * y;
 			}
 			worst = 0;
@@ -179,7 +186,7 @@ static void rst_check(qaws_region_sampler const* s, rst_region const* rg)
 		for (i = 0; i < nb; i++)
 		{
 			double x = pts[i].x, y = pts[i].y;
-			if (!rst_inside(rg, x, y, RST_F32 ? 1e-4 : 1e-9)) outside++;
+			if (i % stride == 0 && !rst_inside(rg, x, y, RST_F32 ? 1e-4 : 1e-9)) outside++;
 			m[1] += x; m[2] += y;
 			for (j = i + 1; j < nb; j++)
 			{
@@ -516,9 +523,10 @@ static void test_sweep(void)
 		QAWS_REGION_SAMPLE_R2 | QAWS_REGION_SAMPLE_BOX, QAWS_REGION_SAMPLE_BLUE_NOISE };
 	rst_shape sh[9];
 	unsigned int ns = rst_shapes(sh), si, k, i;
-	/* the full sweep under QAWS_RST_FULL; the suite runs a fifth of it */
+	/* the full sweep under QAWS_RST_FULL; the suite runs a fifth of it, by default with a tenth of the Monte Carlo
+	   points and the inside oracle on every 16th sample (QAWS_TEST_HEAVY: all of them) */
 	int full = getenv("QAWS_RST_FULL") != NULL;
-	unsigned int m = full ? 16384 : 8192, nmc = full ? 200000 : 40000, nblue = full ? 4096 : 2048;
+	unsigned int m = full ? 16384 : 8192, nmc = full ? 200000 : test_heavy() ? 40000 : 4000, nblue = full ? 4096 : 2048, stride = rst_stride();
 	qaws_vec2* pts = (qaws_vec2*)malloc(sizeof(qaws_vec2) * m);
 	char msg[400];
 	printf("    shape                 area (sampler)    area (clip region)  closed form       Monte Carlo (+- 4 sigma)    total variation of the cell areas from the samples:\n");
@@ -618,8 +626,11 @@ static void test_sweep(void)
 			{
 				int cx = (int)((pts[i].x - lo.x) / (hi.x - lo.x) * G), cy = (int)((pts[i].y - lo.y) / (hi.y - lo.y) * G);
 				qaws_point_location loc = QAWS_POINT_OUTSIDE;
-				qaws_region_locate_point_2d(&loc, s->paths, s->npaths, s->rule, pts[i], 0);
-				if (loc == QAWS_POINT_OUTSIDE) outside[k]++;
+				if (i % stride == 0)
+				{
+					qaws_region_locate_point_2d(&loc, s->paths, s->npaths, s->rule, pts[i], 0);
+					if (loc == QAWS_POINT_OUTSIDE) outside[k]++;
+				}
 				if (cx < 0) cx = 0;
 				if (cy < 0) cy = 0;
 				if (cx >= G) cx = G - 1;
@@ -672,8 +683,11 @@ static void test_sweep(void)
 				{
 					int cx = (int)((pts[i].x - lo.x) / (hi.x - lo.x) * G), cy = (int)((pts[i].y - lo.y) / (hi.y - lo.y) * G);
 					qaws_point_location loc = QAWS_POINT_OUTSIDE;
-					qaws_region_locate_point_2d(&loc, s->paths, s->npaths, s->rule, pts[i], 0);
-					if (loc == QAWS_POINT_OUTSIDE) dout++;
+					if (i % stride == 0)
+					{
+						qaws_region_locate_point_2d(&loc, s->paths, s->npaths, s->rule, pts[i], 0);
+						if (loc == QAWS_POINT_OUTSIDE) dout++;
+					}
 					if (cx < 0) cx = 0;
 					if (cy < 0) cy = 0;
 					if (cx >= G) cx = G - 1;
@@ -722,7 +736,7 @@ static void test_density(void)
 	static double const segs[4][8] = {
 		{ 0, 0, 1, -0.9, 2.4, -0.5, 2.2, 0.6 }, { 2.2, 0.6, 2, 1.6, 1.4, 1.1, 1, 1 },
 		{ 1, 1, 0.6, 0.9, 0.2, 1.8, -0.5, 1.2 }, { -0.5, 1.2, -1.2, 0.6, -0.6, 0.2, 0, 0 } };
-	unsigned int r, k, i, n = 16384;
+	unsigned int r, k, i, n = 16384, stride = rst_stride();
 	qaws_vec2* pts = (qaws_vec2*)malloc(sizeof(qaws_vec2) * n);
 	char msg[400];
 	for (r = 0; r < 3; r++)
@@ -801,7 +815,7 @@ static void test_density(void)
 			qaws_region_sampler_generate(pts, s, nn, kinds[k], 5);
 			for (i = 0; i < nn; i++)
 			{
-				if (!rst_inside(&rg, pts[i].x, pts[i].y, RST_F32 ? 1e-4 : 1e-9)) outside++;
+				if (i % stride == 0 && !rst_inside(&rg, pts[i].x, pts[i].y, RST_F32 ? 1e-4 : 1e-9)) outside++;
 				sx += pts[i].x; sy += pts[i].y;
 			}
 			e = hypot(sx / nn - cx, sy / nn - cy) / size;

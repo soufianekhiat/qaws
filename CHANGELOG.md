@@ -49,6 +49,12 @@ All notable changes to Qaws are documented here.
   collisions that prevented single-translation-unit builds.
 - CMake compiler settings moved into a shared `qaws_configure_target` function
   so the per-file and amalgamated libraries cannot drift apart.
+- Shell regions: the trims' nearest-point and inside tests skip the runs of
+  their polygons whose boxes cannot matter (results unchanged, bit for bit):
+  trimmed shells about 2.5 times faster (test 108: 133 s to 45 s).
+- Tests: a fast default tier and `QAWS_TEST_HEAVY=1` for the slow checks
+  (docs/building.md); the runner reports each suite's time. The default run
+  takes 360 s serially instead of 783 s.
 
 ## [1.0.0] - 2026-03-12
 

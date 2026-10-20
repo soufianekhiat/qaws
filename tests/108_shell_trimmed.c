@@ -496,7 +496,8 @@ static void test_capped_tube(void)
 	TEST_ASSERT(s1 == QAWS_STATUS_OK && s2 == QAWS_STATUS_OK && qaws_shell_atlas_get_edge_count(aa) == 1 && qaws_shell_atlas_get_edge_count(ab) == 3, msg);
 	/* disks over the rim (one centred on the seam right below a T point):
 	   the same either way, and by symmetry the same wherever round */
-	for (z = 0; z < 3 && s1 == QAWS_STATUS_OK && s2 == QAWS_STATUS_OK; z++)
+	/* (by default the two disks against the first: the third, one cap against two again, under QAWS_TEST_HEAVY) */
+	for (z = 0; z < (test_heavy() ? 3u : 2u) && s1 == QAWS_STATUS_OK && s2 == QAWS_STATUS_OK; z++)
 	{
 		qaws_shell_region *g = NULL, *h = NULL;
 		qaws_scalar Ag = 0, Ah = 0, Pg = 0, Ph = 0;
@@ -518,7 +519,7 @@ static void test_capped_tube(void)
 		qaws_shell_region_destroy(h);
 	}
 	sprintf(msg, "capped tube: disks over the rim (one on the seam below a T point) alike with one cap or two, round the tube alike, within %.2g", worst);
-	TEST_ASSERT(ok == 3, msg);
+	TEST_ASSERT(ok == (test_heavy() ? 3u : 2u), msg);
 	qaws_shell_atlas_destroy(aa);
 	qaws_shell_atlas_destroy(ab);
 	qaws_surface_destroy(tube); qaws_surface_destroy(cap);

@@ -85,6 +85,15 @@ ctest --output-on-failure
 
 Tests produce SVG files in `working_dir/tests_output/` for visual verification of curve shapes.
 
+CTest runs each suite as its own test, named as its file: `ctest -R "^10[6-9]"` picks a few, `ctest -j 4` runs several at once.
+`QAWS_TEST==108_shell_trimmed` (or a substring) does the same for `qaws_tests` run by hand, and every suite reports its
+time (`[PASS] Test suite '...' passed (2.31 s)`).
+
+The default tier is the iteration loop: the whole run takes about 6 minutes serially (Release, f64), with the slowest suite
+about 70 s. `QAWS_TEST_HEAVY=1` adds the slow checks: the oracles on every sample, the full solve and offset sizes, the
+timings on large meshes and the robustness sweeps (about 13 minutes). Run it before a release or after touching what a
+heavy check covers.
+
 ### Installing
 
 ```bash
