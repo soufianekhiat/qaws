@@ -550,8 +550,8 @@ static qaws_status qd_split(qd_out* o, qaws_mesh_reference const* r, mr_scratch*
 		return QAWS_STATUS_ALLOCATION_FAILURE;   /* (a power of two: the probe masks with it) */
 	mid = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (o->nc + 1)));
 	keys = (unsigned int*)qaws_internal_malloc(qaws_internal_mul3(sizeof(unsigned int), 3, mask));   /* (a hash: low end, high end, midpoint) */
-	n.x = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), 3, (o->nv + o->nc + o->nf + 1)));
-	n.foot = (qaws_mesh_location*)qaws_internal_malloc(qaws_internal_mul2(sizeof(qaws_mesh_location), (o->nv + o->nc + o->nf + 1)));
+	n.x = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), 3, (size_t)o->nv + o->nc + o->nf + 1));
+	n.foot = (qaws_mesh_location*)qaws_internal_malloc(qaws_internal_mul2(sizeof(qaws_mesh_location), (size_t)o->nv + o->nc + o->nf + 1));
 	n.kind = (unsigned char*)qaws_internal_zalloc((size_t)o->nv + o->nc + o->nf + 1, 1);
 	n.fv = (unsigned int*)qaws_internal_malloc(qaws_internal_mul3(sizeof(unsigned int), 4, (o->nc + 1)));
 	n.fs = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (o->nc + 1)));

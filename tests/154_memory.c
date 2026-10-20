@@ -77,7 +77,7 @@ static qaws_curve* mm_square(double x, double y, double s)
 }
 
 /* the parts mm_workload runs: sampling, offsets, clipping, tessellation */
-enum { MM_SAMPLE = 1, MM_OFFSET = 2, MM_CLIP = 4, MM_TESS = 8, MM_MESH = 16, MM_REPULSIVE = 32, MM_ALL = 15 };
+enum { MM_SAMPLE = 1, MM_OFFSET = 2, MM_CLIP = 4, MM_TESS = 8, MM_MESH = 16, MM_REPULSIVE = 32, MM_CLIP64 = 64, MM_ALL = 15 };
 static unsigned int g_parts = MM_ALL;
 static unsigned int g_published;   /* results a failed call left in its outputs */
 
@@ -168,6 +168,23 @@ static unsigned int mm_workload(void)
 		qaws_mesh_3d_destroy(m);
 	}
 	qaws_surface_destroy(s);
+	if (g_parts & MM_CLIP64)
+	{
+		/* integer clipping: two overlapping squares and an open path through them */
+		static int64_t const sa[8] = { 0, 0, 2000, 0, 2000, 2000, 0, 2000 }, sb[8] = { 1000, 1000, 3000, 1000, 3000, 3000, 1000, 3000 };
+		static int64_t const op[4] = { -500, 1500, 3500, 1700 };
+		qaws_path64 pa64 = { sa, 4 }, pb64 = { sb, 4 }, po64 = { op, 2 };
+		qaws_clip64_desc cd;
+		qaws_clip64_result* r64 = NULL;
+		qaws_status st;
+		memset(&cd, 0, sizeof cd);
+		cd.subjects = &pa64; cd.subject_count = 1; cd.open_subjects = &po64; cd.open_subject_count = 1;
+		cd.clips = &pb64; cd.clip_count = 1; cd.clip_type = QAWS_CLIP_UNION; cd.fill_rule = QAWS_FILL_NON_ZERO;
+		st = qaws_clip64_execute(&cd, &r64);
+		failures += st != QAWS_STATUS_OK;
+		g_published += st != QAWS_STATUS_OK && r64 != NULL;
+		qaws_clip64_result_destroy(r64);
+	}
 	if (g_parts & MM_REPULSIVE)
 	{
 		qaws_repulsive_curves_desc rd;
@@ -371,12 +388,17 @@ static void test_default_race(void)
 {
 #ifdef _WIN32
 	char path[MAX_PATH];
+	char saved[300];
 	unsigned int k, installed = 0, sealed = 0, bad = 0;
 	char msg[200];
 	if (!GetModuleFileNameA(NULL, path, sizeof path))
 	{
 		TEST_ASSERT(0, "default race: the runner's path");
 		return;
+	}
+	{
+		char const* was = getenv("QAWS_TEST");
+		snprintf(saved, sizeof saved, "QAWS_TEST=%s", was ? was : "");
 	}
 	_putenv("QAWS_TEST=154");
 	for (k = 0; k < 24; k++)
@@ -394,6 +416,7 @@ static void test_default_race(void)
 			bad++;
 	}
 	_putenv("QAWS_TEST_RACE=");
+	_putenv(saved);   /* the runner's own setting back */
 	snprintf(msg, sizeof msg, "default against first allocation, 24 fresh processes: installed in %u, sealed by a worker first in %u, wrong in %u",
 		installed, sealed, bad);
 	printf("  %s\n", msg);
@@ -404,6 +427,13 @@ static void test_default_race(void)
 }
 
 /* ---- scratch apart from results ------------------------------------------ */
+
+/* after a reset: what the arena held is overwritten (a result still pointing into it reads 0xCD), then a fresh arena */
+static void mm_poison(qaws_arena* arena, unsigned char* memory, size_t size)
+{
+	memset(memory, 0xCD, arena->peak < size ? arena->peak + 64 : size);
+	qaws_arena_init(arena, memory, size);
+}
 
 /* each operation with a frame arena as the thread's scratch and a counting heap as its allocator: when the call returns
    the arena holds nothing (the temporaries came from it and went back), so it resets while the results live on the heap;
@@ -428,6 +458,8 @@ static void test_scratch_split(void)
 	qaws_surface* s = NULL;
 	qaws_mesh_3d* m = NULL;
 	qaws_repulsive_curves* rc = NULL;
+	qaws_mesh_reference* ref = NULL;
+	qaws_size_field* field = NULL;
 	unsigned int n = 0, noff = 0, nv = 0, ni = 0, i, j, ok = 1, held = 0, edges[48];
 	size_t scratch_peak[6];
 	qaws_scalar pos[72];
@@ -444,11 +476,11 @@ static void test_scratch_split(void)
 		memset(&sd, 0, sizeof sd);
 		sd.sample_count = 4; sd.error_tolerance = (qaws_scalar)1e-5; sd.use_adaptive_sampling = 1;
 		ok &= qaws_curve_sample_2d(w, &sd, samples, 4096, &n) == QAWS_STATUS_OK;
-		held += arena.live != 0; scratch_peak[0] = arena.peak; ok &= qaws_arena_reset(&arena) == QAWS_STATUS_OK; qaws_arena_init(&arena, memory, sizeof memory);
+		held += arena.live != 0; scratch_peak[0] = arena.peak; ok &= qaws_arena_reset(&arena) == QAWS_STATUS_OK; mm_poison(&arena, memory, sizeof memory);
 	}
 	/* offsets: curves kept past the reset */
 	ok &= qaws_curve_offset_2d(w, (qaws_scalar)0.3, 1, offs, 16, &noff) == QAWS_STATUS_OK;
-	held += arena.live != 0; scratch_peak[1] = arena.peak; ok &= qaws_arena_reset(&arena) == QAWS_STATUS_OK; qaws_arena_init(&arena, memory, sizeof memory);
+	held += arena.live != 0; scratch_peak[1] = arena.peak; ok &= qaws_arena_reset(&arena) == QAWS_STATUS_OK; mm_poison(&arena, memory, sizeof memory);
 	/* clipping: the result kept */
 	a = mm_square(0, 0, 2);
 	b = mm_square(1, 1, 2);
@@ -456,7 +488,7 @@ static void test_scratch_split(void)
 	pa.curves = ca; pa.curve_count = 1; pa.closed = 1;
 	pb.curves = cb; pb.curve_count = 1; pb.closed = 1;
 	ok &= qaws_clip_boolean(QAWS_CLIP_UNION, QAWS_FILL_NON_ZERO, &pa, 1, &pb, 1, &r) == QAWS_STATUS_OK;
-	held += arena.live != 0; scratch_peak[2] = arena.peak; ok &= qaws_arena_reset(&arena) == QAWS_STATUS_OK; qaws_arena_init(&arena, memory, sizeof memory);
+	held += arena.live != 0; scratch_peak[2] = arena.peak; ok &= qaws_arena_reset(&arena) == QAWS_STATUS_OK; mm_poison(&arena, memory, sizeof memory);
 	/* tessellation */
 	for (i = 0; i < 4; i++)
 		for (j = 0; j < 4; j++)
@@ -474,7 +506,7 @@ static void test_scratch_split(void)
 		memset(&td, 0, sizeof td);
 		td.max_depth = 5; td.curvature_threshold = (qaws_scalar)0.003;
 		ok &= qaws_surface_tessellate(s, &td, tv, 8192, &nv, ti, 49152, &ni) == QAWS_STATUS_OK;
-		held += arena.live != 0; scratch_peak[3] = arena.peak; ok &= qaws_arena_reset(&arena) == QAWS_STATUS_OK; qaws_arena_init(&arena, memory, sizeof memory);
+		held += arena.live != 0; scratch_peak[3] = arena.peak; ok &= qaws_arena_reset(&arena) == QAWS_STATUS_OK; mm_poison(&arena, memory, sizeof memory);
 	}
 	/* meshing: the mesh kept */
 	{
@@ -483,7 +515,18 @@ static void test_scratch_split(void)
 		gd.method = QAWS_GENERATE_REMESH;
 		gd.target_length = (qaws_scalar)0.3;
 		ok &= qaws_mesh_generate_surface(s, &gd, &m, NULL) == QAWS_STATUS_OK;
-		held += arena.live != 0; scratch_peak[4] = arena.peak; ok &= qaws_arena_reset(&arena) == QAWS_STATUS_OK; qaws_arena_init(&arena, memory, sizeof memory);
+		held += arena.live != 0; scratch_peak[4] = arena.peak; ok &= qaws_arena_reset(&arena) == QAWS_STATUS_OK; mm_poison(&arena, memory, sizeof memory);
+	}
+	/* a curvature size field on that mesh: kept past the reset, read below against one made without scratch */
+	if (m)
+	{
+		qaws_curvature_size_desc cd;
+		memset(&cd, 0, sizeof cd);
+		cd.chord_tolerance = (qaws_scalar)0.01;
+		cd.gradation = (qaws_scalar)0.5;
+		ok &= qaws_mesh_reference_create(m, NULL, &ref) == QAWS_STATUS_OK;
+		ok &= ref && qaws_size_field_create_curvature(ref, &cd, &field) == QAWS_STATUS_OK;
+		held += arena.live != 0; ok &= qaws_arena_reset(&arena) == QAWS_STATUS_OK; mm_poison(&arena, memory, sizeof memory);
 	}
 	/* a repulsive solve: the solver object kept */
 	{
@@ -505,7 +548,7 @@ static void test_scratch_split(void)
 		sd.max_iterations = 3;
 		sd.hold_total_length = 1;
 		ok &= qaws_repulsive_curves_solve(rc, &sd, pos, NULL) == QAWS_STATUS_OK;
-		held += arena.live != 0; scratch_peak[5] = arena.peak; ok &= qaws_arena_reset(&arena) == QAWS_STATUS_OK; qaws_arena_init(&arena, memory, sizeof memory);
+		held += arena.live != 0; scratch_peak[5] = arena.peak; ok &= qaws_arena_reset(&arena) == QAWS_STATUS_OK; mm_poison(&arena, memory, sizeof memory);
 	}
 	qaws_exchange_thread_scratch_allocator(&prev_scratch, NULL);
 	snprintf(msg, sizeof msg, "scratch arena apart from results: sampling, offsets, clipping, tessellation, meshing, repulsive; held after a call %u; "
@@ -521,10 +564,34 @@ static void test_scratch_split(void)
 		qaws_path_2d path;
 		ok &= qaws_mesh_3d_get_vertex_count(m) <= 65536 && qaws_mesh_3d_get_positions(m, xyz) == QAWS_STATUS_OK
 			&& qaws_clip_result_get_path(r, 0, &path) == QAWS_STATUS_OK && path.curve_count > 0;
+		/* the size field against one made without scratch, at the corners of the first triangles */
+		if (ok && ref && field)
+		{
+			qaws_curvature_size_desc cd;
+			qaws_size_field* plain = NULL;
+			qaws_mesh_location loc[16];
+			qaws_scalar at[48], s1[16], s2[16];
+			unsigned int t, tv3[3], cnt = qaws_mesh_reference_get_triangle_count(ref) < 16 ? qaws_mesh_reference_get_triangle_count(ref) : 16;
+			memset(&cd, 0, sizeof cd);
+			cd.chord_tolerance = (qaws_scalar)0.01;
+			cd.gradation = (qaws_scalar)0.5;
+			ok &= qaws_size_field_create_curvature(ref, &cd, &plain) == QAWS_STATUS_OK;
+			for (t = 0; t < cnt; t++)
+			{
+				qaws_mesh_reference_get_triangle(ref, t, tv3);
+				loc[t].patch = t; loc[t].a = 1; loc[t].b = 0;
+				at[3 * t] = xyz[3 * tv3[0]]; at[3 * t + 1] = xyz[3 * tv3[0] + 1]; at[3 * t + 2] = xyz[3 * tv3[0] + 2];
+			}
+			ok &= plain && cnt > 0 && qaws_size_field_evaluate(field, loc, at, cnt, s1) == QAWS_STATUS_OK
+				&& qaws_size_field_evaluate(plain, loc, at, cnt, s2) == QAWS_STATUS_OK && memcmp(s1, s2, cnt * sizeof s1[0]) == 0;
+			qaws_size_field_destroy(plain);
+		}
 	}
 	for (i = 0; i < noff; i++)
 		qaws_curve_destroy(offs[i]);
 	qaws_clip_result_destroy(r);
+	qaws_size_field_destroy(field);
+	qaws_mesh_reference_destroy(ref);
 	qaws_mesh_3d_destroy(m);
 	qaws_repulsive_curves_destroy(rc);
 	qaws_surface_destroy(s);
@@ -854,12 +921,12 @@ static void test_arena(void)
 
 	/* every part in arenas from 256 bytes up (allocations fail at many different points): nothing may stay held */
 	{
-		static char const* names[6] = { "sampling", "offsets", "clipping", "tessellation", "meshing", "repulsive" };
+		static char const* names[7] = { "sampling", "offsets", "clipping", "tessellation", "meshing", "repulsive", "integer clipping" };
 		static double sweep[1 << 16];
 		unsigned int part, leaks = 0, runs = 0;
 		size_t sz;
 		g_published = 0;
-		for (part = 0; part < 6; part++)
+		for (part = 0; part < 7; part++)
 		{
 			unsigned int part_leaks = 0;
 			g_parts = 1u << part;

@@ -193,7 +193,7 @@ static void c64_sort_keys(c64_skey* k, c64_skey* tmp, unsigned int n, c64_skey_f
 			k[b] = key;
 		}
 	}
-	/* (bounds by differences and w capped at n: nothing wraps when n nears UINT_MAX) */
+	/* (the merge passes bound runs by differences and cap w at n, so their indices do not wrap) */
 	for (w = 16; w < n; w = w <= (n - 1) / 2 ? 2 * w : n)
 	{
 		for (i = 0; i < n;)
@@ -632,6 +632,13 @@ static int c64_cmp_key(void const* a, void const* b)
 	return p->e < q->e ? -1 : (p->e > q->e ? 1 : 0);
 }
 
+/* room for one more edge (C64_GROW as a call, for callers that free their own blocks on failure) */
+static qaws_status c64_edge_room(c64_edge** e, unsigned int n, unsigned int* cap)
+{
+	C64_GROW(*e, n, *cap, c64_edge);
+	return QAWS_STATUS_OK;
+}
+
 static qaws_status c64_edges(c64_ctx* x)
 {
 	unsigned int* idx = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(unsigned int), 2, (x->ncut + 1)));
@@ -662,12 +669,20 @@ static qaws_status c64_edges(c64_ctx* x)
 				e.alive = 1;
 				if (S->operand == 2)
 				{
-					C64_GROW(x->oe, x->noe, x->capoe, c64_edge);
+					if (c64_edge_room(&x->oe, x->noe, &x->capoe) != QAWS_STATUS_OK)
+					{
+						qaws_internal_free(idx);
+						return QAWS_STATUS_ALLOCATION_FAILURE;
+					}
 					x->oe[x->noe++] = e;
 				}
 				else
 				{
-					C64_GROW(x->e, x->ne, x->cape, c64_edge);
+					if (c64_edge_room(&x->e, x->ne, &x->cape) != QAWS_STATUS_OK)
+					{
+						qaws_internal_free(idx);
+						return QAWS_STATUS_ALLOCATION_FAILURE;
+					}
 					x->e[x->ne++] = e;
 				}
 			}

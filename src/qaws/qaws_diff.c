@@ -1484,7 +1484,7 @@ static qaws_status accumulate_gather(
 			offsets[f][e + 1] += offsets[f][e];
 		total = offsets[f][views->fields[f].count];
 		memcpy(cursor[f], offsets[f], sizeof(unsigned int) * ((size_t)views->fields[f].count + 1));
-		contrib[f] = (qaws_scalar*)scratch_alloc(ctx, sizeof(qaws_scalar) * ((size_t)total * views->fields[f].components + 1));
+		contrib[f] = (qaws_scalar*)scratch_alloc(ctx, qaws_internal_mul2(sizeof(qaws_scalar), qaws_internal_add2(qaws_internal_mul2(total, views->fields[f].components), 1)));
 		if (!contrib[f])
 		{
 			st = QAWS_STATUS_ALLOCATION_FAILURE;
@@ -1553,7 +1553,7 @@ qaws_status qaws_internal_diff_accumulate(
 
 	(void)components;
 
-	entries = (qaws_diff_entry*)scratch_alloc(ctx, sizeof(qaws_diff_entry) * (size_t)(entry_capacity ? entry_capacity : 1u));
+	entries = (qaws_diff_entry*)scratch_alloc(ctx, qaws_internal_mul2(sizeof(qaws_diff_entry), entry_capacity ? entry_capacity : 1u));
 	if (!entries)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 

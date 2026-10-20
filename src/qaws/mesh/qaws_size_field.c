@@ -276,7 +276,7 @@ qaws_status qaws_size_field_create_curvature(qaws_mesh_reference const* r, qaws_
 	e = (double)desc->chord_tolerance;
 	th = (double)desc->angle_tolerance;
 	kmax = (double*)qaws_internal_scratch_zalloc((size_t)m->nv + 1, sizeof(double));
-	vs = (double*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(double), ((size_t)m->nv + 1)));
+	vs = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), ((size_t)m->nv + 1)));
 	if (!kmax || !vs)
 	{
 		qaws_internal_free(kmax);

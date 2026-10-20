@@ -729,7 +729,7 @@ static qaws_status cb_solve(cb_ctx* x)
 		{
 			if (s == QAWS_STATUS_OK && ch[k].nhit)
 			{
-				cb_hit* g = (cb_hit*)qaws_internal_realloc(x->hits, qaws_internal_mul2((x->nhit + ch[k].nhit), sizeof(cb_hit)));
+				cb_hit* g = (cb_hit*)qaws_internal_realloc(x->hits, qaws_internal_mul2(qaws_internal_add2(x->nhit, ch[k].nhit), sizeof(cb_hit)));
 				if (!g)
 					s = QAWS_STATUS_ALLOCATION_FAILURE;
 				else

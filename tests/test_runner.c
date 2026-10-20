@@ -336,7 +336,14 @@ int main(void) {
 	/* unbuffered, so a crash shows where it happened; QAWS_TEST=substring
 	   runs only the matching suites, QAWS_TEST==name the one so named (as
 	   CTest runs each suite) */
+	/* a copy: a suite may change the variable (154 starts child runners), which frees the string getenv returned */
+	static char only_copy[256];
 	char const* only = getenv("QAWS_TEST");
+	if (only)
+	{
+		strncpy(only_copy, only, sizeof only_copy - 1);
+		only = only_copy;
+	}
 	setvbuf(stdout, NULL, _IONBF, 0);
 	/* QAWS_TEST_SCRATCH=1: the main thread's scratch from an arena that must hold nothing between suites (a temporary
 	   kept by a result that outlives its suite shows as a block held) */

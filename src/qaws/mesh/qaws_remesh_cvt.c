@@ -875,6 +875,11 @@ static int rv_lines(rv_cvt* w)
 					{
 						unsigned int* c2;
 						double* s2;
+						if (!(need < 4294967295.0))   /* (also NaN) */
+						{
+							ok = 0;
+							break;
+						}
 						cap = (unsigned int)need;
 						c2 = (unsigned int*)qaws_internal_realloc(ch, qaws_internal_mul2(sizeof(unsigned int), cap));
 						s2 = (double*)qaws_internal_realloc(s, qaws_internal_mul3(sizeof(double), 4, (size_t)cap));

@@ -1212,14 +1212,15 @@ static unsigned int rm_gather(rmsh* w, int large, rm_bad** list, unsigned int* c
 			continue;
 		if (n == *cap)
 		{
-			rm_bad* g = (rm_bad*)qaws_internal_realloc(*list, qaws_internal_mul2(sizeof(rm_bad), (2 * (size_t)*cap + 64)));
+			unsigned int nc = qaws_internal_grow(*cap, (size_t)n + 1, 64);
+			rm_bad* g = nc ? (rm_bad*)qaws_internal_realloc(*list, qaws_internal_mul2(sizeof(rm_bad), nc)) : NULL;
 			if (!g)
 			{
 				w->failed = 1;
 				break;
 			}
 			*list = g;
-			*cap = 2 * *cap + 64;
+			*cap = nc;
 		}
 		(*list)[n].e = e;
 		for (k = 0; k < 3; k++)

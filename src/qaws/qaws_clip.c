@@ -888,7 +888,7 @@ static void cl_sort_cuts(cl_cut* c, unsigned int n)
 		qsort(c, n, sizeof(cl_cut), cl_cmp_cut);
 		return;
 	}
-	/* (bounds by differences and w capped at n: nothing wraps when n nears UINT_MAX) */
+	/* (the merge passes bound runs by differences and cap w at n, so their indices do not wrap) */
 	for (w = 16; w < n; w = w <= (n - 1) / 2 ? 2 * w : n)
 	{
 		for (a = 0; a < n;)

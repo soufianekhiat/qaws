@@ -245,7 +245,7 @@ static qaws_status sb_pairs(sb_ctx* x, qaws_bp_box const* boxes, unsigned int n)
 		{
 			if (s == QAWS_STATUS_OK && ch[k].nhit)
 			{
-				sb_hit* g = (sb_hit*)qaws_internal_realloc(x->hits, qaws_internal_mul2((x->nhit + ch[k].nhit), sizeof(sb_hit)));
+				sb_hit* g = (sb_hit*)qaws_internal_realloc(x->hits, qaws_internal_mul2(qaws_internal_add2(x->nhit, ch[k].nhit), sizeof(sb_hit)));
 				if (!g)
 					s = QAWS_STATUS_ALLOCATION_FAILURE;
 				else
