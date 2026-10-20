@@ -12,11 +12,19 @@
  *   - the solver's objective: with nothing added, the energy and gradient of
  *     qaws_repulsive_curves_gradient; with a length term, that plus the
  *     weighted length, its gradient against central differences;
- *   - a mesh solve cancelled after two steps.
+ *   - a mesh solve cancelled after two steps;
+ *   - the line search and GMRES settings: their defaults given explicitly
+ *     reproduce zeros bit for bit (dense and hierarchical); from a far first
+ *     trial a faster backtrack refuses fewer trials, max_trials 2 stops the
+ *     step after two; out-of-range values refused at creation;
+ *   - _ex allocators: every block of the objects and of the calls on them
+ *     from the given allocator, none from the thread allocator, all returned
+ *     after destroy; with a scratch arena no call leaves a block in it.
  */
 
 #include "test_common.h"
 #include "qaws_repulsive.h"
+#include "qaws_alloc.h"
 #include <math.h>
 #include <string.h>
 #include <stdlib.h>
@@ -295,6 +303,251 @@ static void test_mesh_cancel(void)
 	qaws_repulsive_mesh_destroy(m);
 }
 
+static void rc_octahedron(qaws_scalar* x, qaws_repulsive_mesh_desc* md, qaws_allocator const* allocator, qaws_repulsive_mesh** m)
+{
+	static qaws_scalar const oct[6 * 3] = { 1, 0, 0, -1, 0, 0, 0, 1, 0, 0, -1, 0, 0, 0, 1, 0, 0, -1 };
+	static unsigned int const tris[8 * 3] = { 0, 2, 4, 2, 1, 4, 1, 3, 4, 3, 0, 4, 2, 0, 5, 1, 2, 5, 3, 1, 5, 0, 3, 5 };
+	unsigned int i;
+	for (i = 0; i < 18; i++)
+		x[i] = oct[i] * (qaws_scalar)(i % 3 == 2 ? 0.6 : 1.0);
+	memset(md, 0, sizeof *md);
+	md->vertex_count = 6;
+	md->triangles = tris;
+	md->triangle_count = 8;
+	*m = NULL;
+	qaws_repulsive_mesh_create_ex(md, allocator, m);
+}
+
+/* the line search and GMRES settings: explicit defaults reproduce zeros bit for bit; fewer trials, a faster backtrack;
+   values out of range refused */
+static void test_settings(void)
+{
+	qaws_scalar xa[3 * RC_N], xb[3 * RC_N], m0[18], m1[18];
+	unsigned int edges[2 * RC_N], mode, k, refused = 0, rej[3] = { 0, 0, 0 };
+	qaws_repulsive_curves* c;
+	qaws_repulsive_mesh_desc md;
+	qaws_repulsive_mesh* m = NULL;
+	qaws_repulsive_report ra, rb, rm[3];
+	qaws_status sa, sb, sm[3] = { QAWS_STATUS_INVALID_ARGUMENT, QAWS_STATUS_INVALID_ARGUMENT, QAWS_STATUS_INVALID_ARGUMENT };
+	char msg[300];
+	rc_loop(xa, edges);
+	c = rc_curves(edges);
+	if (!c)
+		return;
+	for (mode = 0; mode < 2; mode++)
+	{
+		qaws_repulsive_curves_solve_desc d;
+		memset(&d, 0, sizeof d);
+		d.max_iterations = 8;
+		d.theta = mode ? (qaws_scalar)0.5 : 0;
+		rc_loop(xa, edges);
+		rc_loop(xb, edges);
+		sa = qaws_repulsive_curves_solve(c, &d, xa, &ra);
+		d.armijo = (qaws_scalar)0.1; d.backtrack = (qaws_scalar)0.5; d.max_trials = 40;
+		d.gmres_max_iterations = 1000; d.gmres_restart = 40; d.gmres_tolerance = (qaws_scalar)1e-8;
+		sb = qaws_repulsive_curves_solve(c, &d, xb, &rb);
+		sprintf(msg, "%s curves, the settings' defaults given explicitly: %u and %u steps, positions bit for bit %d, reports equal %d",
+			mode ? "hierarchical" : "dense", ra.iterations, rb.iterations, memcmp(xa, xb, sizeof xa) == 0, memcmp(&ra, &rb, sizeof ra) == 0);
+		TEST_ASSERT(sa == QAWS_STATUS_OK && sb == QAWS_STATUS_OK && ra.iterations > 0 && memcmp(xa, xb, sizeof xa) == 0 && memcmp(&ra, &rb, sizeof ra) == 0, msg);
+	}
+	/* the hierarchical direction's scalar solves within the limits: one iteration cannot solve them (NUMERICAL_FAILURE);
+	   a looser tolerance gives another step */
+	{
+		qaws_repulsive_curves_solve_desc d;
+		qaws_repulsive_curves_solver* s = NULL;
+		qaws_repulsive_report r1, r2;
+		qaws_status s1 = QAWS_STATUS_INVALID_ARGUMENT, s2 = QAWS_STATUS_INVALID_ARGUMENT;
+		memset(&d, 0, sizeof d);
+		d.theta = (qaws_scalar)0.5;
+		d.gmres_max_iterations = 1;
+		rc_loop(xa, edges);
+		memset(&r1, 0, sizeof r1); memset(&r2, 0, sizeof r2);
+		if (qaws_repulsive_curves_solver_create(c, &d, xa, &s) == QAWS_STATUS_OK)
+			s1 = qaws_repulsive_curves_solver_step(s, xa, &r1);
+		qaws_repulsive_curves_solver_destroy(s);
+		s = NULL;
+		d.max_iterations = 8;
+		d.gmres_max_iterations = 0;
+		d.gmres_tolerance = (qaws_scalar)1e-3;
+		rc_loop(xa, edges);
+		s2 = qaws_repulsive_curves_solve(c, &d, xa, &r2);
+		sprintf(msg, "hierarchical, gmres_max_iterations 1: step status %d, reason %d (NUMERICAL_FAILURE); gmres_tolerance 1e-3: %u steps, "
+			"energy %.10g (default %.10g), positions differ %d", (int)s1, (int)r1.reason, r2.iterations, (double)r2.energy, (double)ra.energy,
+			memcmp(xa, xb, sizeof xa) != 0);
+		TEST_ASSERT(s1 == QAWS_STATUS_OK && r1.reason == QAWS_REPULSIVE_NUMERICAL_FAILURE && r1.iterations == 0 && s2 == QAWS_STATUS_OK &&
+			r2.iterations > 0 && r2.energy < r2.initial_energy && memcmp(xa, xb, sizeof xa) != 0, msg);
+		printf("  %s\n", msg);
+	}
+	/* one mesh step from a first trial 40 mean edge lengths long: refused trials until one is accepted */
+	rc_octahedron(m0, &md, NULL, &m);
+	for (k = 0; k < 3 && m; k++)
+	{
+		qaws_repulsive_mesh_solve_desc d;
+		qaws_repulsive_mesh_solver* s = NULL;
+		memset(&d, 0, sizeof d);
+		d.hold_area = 1;
+		d.initial_step = 40;
+		if (k == 1) d.backtrack = (qaws_scalar)0.1;
+		if (k == 2) d.max_trials = 2;
+		memcpy(m1, m0, sizeof m0);
+		memset(&rm[k], 0, sizeof rm[k]);
+		sm[k] = qaws_repulsive_mesh_solver_create(m, &d, m1, &s);
+		if (sm[k] == QAWS_STATUS_OK)
+			sm[k] = qaws_repulsive_mesh_solver_step(s, m1, &rm[k]);
+		rej[k] = rm[k].rejected_energy + rm[k].rejected_collision + rm[k].rejected_projection;
+		if (k == 2) refused = memcmp(m1, m0, sizeof m0) == 0;
+		qaws_repulsive_mesh_solver_destroy(s);
+	}
+	sprintf(msg, "a mesh step from a 40-edge first trial: backtrack 0.5 %u refused trials then accepted (%u), 0.1 %u then accepted (%u); "
+		"max_trials 2: %u refused, reason %d, positions untouched %d", rej[0], rm[0].iterations, rej[1], rm[1].iterations, rej[2], (int)rm[2].reason, (int)refused);
+	TEST_ASSERT(m && sm[0] == QAWS_STATUS_OK && sm[1] == QAWS_STATUS_OK && sm[2] == QAWS_STATUS_OK && rm[0].iterations == 1 && rm[1].iterations == 1 &&
+		rej[0] > 2 && rej[1] < rej[0] && rm[2].iterations == 0 && rej[2] == 2 && refused &&
+		(rm[2].reason == QAWS_REPULSIVE_STALLED || rm[2].reason == QAWS_REPULSIVE_INFEASIBLE || rm[2].reason == QAWS_REPULSIVE_COLLISION_LIMITED), msg);
+	printf("  %s\n", msg);
+	/* refusals at creation */
+	refused = 0;
+	for (k = 0; k < 6; k++)
+	{
+		qaws_repulsive_curves_solve_desc d;
+		qaws_repulsive_mesh_solve_desc dm;
+		qaws_repulsive_curves_solver* s = NULL;
+		qaws_repulsive_mesh_solver* sv = NULL;
+		qaws_scalar const bad[6] = { (qaws_scalar)0.5, (qaws_scalar)-0.1, 1, (qaws_scalar)-0.5, -1, (qaws_scalar)0.7 };
+		memset(&d, 0, sizeof d);
+		memset(&dm, 0, sizeof dm);
+		if (k == 0 || k == 1 || k == 5) d.armijo = dm.armijo = bad[k];
+		if (k == 2 || k == 3) d.backtrack = dm.backtrack = bad[k];
+		if (k == 4) d.gmres_tolerance = dm.gmres_tolerance = bad[k];
+		rc_loop(xa, edges);
+		refused += qaws_repulsive_curves_solver_create(c, &d, xa, &s) == QAWS_STATUS_INVALID_ARGUMENT && !s;
+		refused += m && qaws_repulsive_mesh_solver_create(m, &dm, m0, &sv) == QAWS_STATUS_INVALID_ARGUMENT && !sv;
+		qaws_repulsive_curves_solver_destroy(s);
+		qaws_repulsive_mesh_solver_destroy(sv);
+	}
+	sprintf(msg, "armijo 0.5, -0.1, 0.7, backtrack 1, -0.5, gmres_tolerance -1 refused by the curve and mesh solvers: %u of 12", refused);
+	TEST_ASSERT(refused == 12, msg);
+	qaws_repulsive_mesh_destroy(m);
+	qaws_repulsive_curves_destroy(c);
+}
+
+/* a counting allocator (legacy interface) */
+typedef struct rc_count
+{
+	unsigned long allocs;
+	long live;
+} rc_count;
+
+static void* rc_count_alloc(unsigned long size, void* user)
+{
+	rc_count* c = (rc_count*)user;
+	c->allocs++;
+	c->live++;
+	return malloc(size);
+}
+
+static void rc_count_free(void* p, void* user)
+{
+	rc_count* c = (rc_count*)user;
+	if (p)
+		c->live--;
+	free(p);
+}
+
+static unsigned char g_rc_arena[1 << 22];
+
+/* the objects' allocator: every block of objects made with _ex and of calls on them comes from it, none from the thread
+   allocator (a second counter, installed as such); everything returned after destroy. Then with a scratch arena: no
+   call leaves a block in it. */
+static void test_allocator(void)
+{
+	qaws_scalar x[3 * RC_N], g[3 * RC_N], dir[3 * RC_N], mx[18], dx[18], xbar[18], E = 0;
+	unsigned int edges[2 * RC_N], i, it, pass, held = 0, calls = 0;
+	rc_count oc, tc;
+	qaws_allocator oa, ta, prev, prev_scratch;
+	qaws_arena arena;
+	qaws_status bad = QAWS_STATUS_OK, st;
+	char msg[300];
+	memset(&oc, 0, sizeof oc); memset(&tc, 0, sizeof tc);
+	memset(&oa, 0, sizeof oa); memset(&ta, 0, sizeof ta);
+	oa.alloc = rc_count_alloc; oa.dealloc = rc_count_free; oa.user_data = &oc;
+	ta.alloc = rc_count_alloc; ta.dealloc = rc_count_free; ta.user_data = &tc;
+	qaws_arena_init(&arena, g_rc_arena, sizeof g_rc_arena);
+	qaws_exchange_thread_allocator(&ta, &prev);
+	for (pass = 0; pass < 2; pass++)
+	{
+		qaws_repulsive_curves_desc cd;
+		qaws_repulsive_curves* c = NULL;
+		qaws_repulsive_curves_solve_desc d;
+		qaws_repulsive_curves_solver *s = NULL, *sh = NULL;
+		qaws_repulsive_mesh_desc md;
+		qaws_repulsive_mesh* m = NULL;
+		qaws_repulsive_mesh_solve_desc dm;
+		qaws_repulsive_mesh_solver* ms = NULL;
+		qaws_repulsive_report r;
+		qaws_repulsive_targets t, tb;
+		qaws_repulsive_derivative_report rep;
+#define RC_CALL(expr) do { st = (expr); if (st != QAWS_STATUS_OK && bad == QAWS_STATUS_OK) bad = st; calls++; held += pass && arena.live != 0; } while (0)
+		if (pass)
+			qaws_exchange_thread_scratch_allocator(&arena.allocator, &prev_scratch);
+		rc_loop(x, edges);
+		memset(&cd, 0, sizeof cd);
+		cd.dimension = 3; cd.vertex_count = RC_N; cd.edges = edges; cd.edge_count = RC_N;
+		RC_CALL(qaws_repulsive_curves_create_ex(&cd, &oa, &c));
+		if (!c)
+			break;
+		memset(g, 0, sizeof g);
+		for (i = 0; i < 3 * RC_N; i++) dir[i] = (qaws_scalar)sin(0.3 * i);
+		RC_CALL(qaws_repulsive_curves_gradient(c, x, 1, g, &E));
+		RC_CALL(qaws_repulsive_curves_eval(c, x, dir, &E, NULL, NULL));
+		RC_CALL(qaws_repulsive_curves_hvp(c, x, dir, g));
+		RC_CALL(qaws_repulsive_curves_bh(c, x, (qaws_scalar)0.5, 1, g, &E, NULL));
+		memset(&d, 0, sizeof d);
+		d.collision_checked = 1;
+		RC_CALL(qaws_repulsive_curves_solver_create_ex(c, &d, x, &oa, &s));
+		for (it = 0; s && it < 3; it++) RC_CALL(qaws_repulsive_curves_solver_step(s, x, &r));
+		RC_CALL(qaws_repulsive_curves_solver_direction(s, x, dir));
+		RC_CALL(qaws_repulsive_curves_solver_objective(s, x, &E, g));
+		d.collision_checked = 0;
+		d.theta = (qaws_scalar)0.5;
+		RC_CALL(qaws_repulsive_curves_solver_create_ex(c, &d, x, &oa, &sh));
+		for (it = 0; sh && it < 2; it++) RC_CALL(qaws_repulsive_curves_solver_step(sh, x, &r));
+		d.theta = 0;
+		d.max_iterations = 3;
+		RC_CALL(qaws_repulsive_curves_solve(c, &d, x, &r));   /* (a solver in the curves' allocator) */
+		/* a mesh converged, its derivatives */
+		rc_octahedron(mx, &md, &oa, &m);
+		memset(&dm, 0, sizeof dm);
+		dm.hold_area = 1; dm.hold_volume = 1;
+		RC_CALL(m ? qaws_repulsive_mesh_solver_create_ex(m, &dm, mx, &oa, &ms) : QAWS_STATUS_INVALID_ARGUMENT);
+		memset(&r, 0, sizeof r);
+		for (it = 0; ms && it < 500 && r.reason == QAWS_REPULSIVE_RUNNING; it++) RC_CALL(qaws_repulsive_mesh_solver_step(ms, mx, &r));
+		memset(&t, 0, sizeof t);
+		t.area = 1;
+		RC_CALL(qaws_repulsive_mesh_solver_solution_jvp_checked(ms, &t, dx, NULL, &rep));
+		for (i = 0; i < 18; i++) xbar[i] = (qaws_scalar)cos(0.4 * i);
+		memset(&tb, 0, sizeof tb);
+		RC_CALL(qaws_repulsive_mesh_solver_solution_vjp(ms, xbar, &tb, NULL));
+		RC_CALL(qaws_repulsive_mesh_eval(m, mx, NULL, &E, NULL, NULL));
+		qaws_repulsive_mesh_solver_destroy(ms);
+		qaws_repulsive_mesh_destroy(m);
+		qaws_repulsive_curves_solver_destroy(s);
+		qaws_repulsive_curves_solver_destroy(sh);
+		qaws_repulsive_curves_destroy(c);
+		held += pass && arena.live != 0;
+		if (pass)
+			qaws_exchange_thread_scratch_allocator(&prev_scratch, NULL);
+#undef RC_CALL
+	}
+	qaws_set_thread_allocator(&prev);
+	sprintf(msg, "objects made with _ex: %lu blocks from their allocator, %ld left after destroy; %lu from the thread allocator; %u calls, first failure %s",
+		oc.allocs, oc.live, tc.allocs, calls, qaws_status_to_string(bad));
+	TEST_ASSERT(bad == QAWS_STATUS_OK && oc.allocs > 0 && oc.live == 0 && tc.allocs == 0, msg);
+	printf("  %s\n", msg);
+	sprintf(msg, "with a scratch arena: %u calls left blocks in it, peak %lu bytes used", held, (unsigned long)arena.peak);
+	TEST_ASSERT(held == 0 && arena.peak > 0, msg);
+	printf("  %s\n", msg);
+}
+
 int test_145_repulsive_control_main(void)
 {
 	g_pass = 0;
@@ -304,6 +557,8 @@ int test_145_repulsive_control_main(void)
 	test_solve_progress();
 	test_objective();
 	test_mesh_cancel();
+	test_settings();
+	test_allocator();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
 }

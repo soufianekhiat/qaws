@@ -35,7 +35,8 @@
 #include <string.h>
 #include <math.h>
 
-#define RH_RESTART 40
+#define RH_RESTART 40        /* the defaults of the desc's gmres_* settings */
+#define RH_MAXIT 1000
 #define RH_TOL 1e-8          /* each scalar solve, relative */
 #define RH_ACCEPT 1e-6       /* accepted once restarts stop gaining: the floor rounding sets in the approximate products */
 
@@ -94,7 +95,8 @@ static double rh_dot(double const* a, double const* b, unsigned int n)
 /* one scalar solve's workspace: GMRES's vectors, the products' scratch */
 typedef struct rh_work
 {
-	double *V, *Z, *H, *cs, *sn, *gq;
+	double *V, *Z, *H, *cs, *sn, *gq, *y;
+	unsigned int R;                 /* the restart */
 	double *t0, *t3, *b, *r, *tmp;  /* nv each */
 	qaws_internal_rbh_scratch *sa, *sf;
 } rh_work;
@@ -103,7 +105,7 @@ static void rh_work_destroy(rh_work* W)
 {
 	if (!W)
 		return;
-	qaws_internal_free(W->V); qaws_internal_free(W->Z); qaws_internal_free(W->H); qaws_internal_free(W->cs); qaws_internal_free(W->sn); qaws_internal_free(W->gq);
+	qaws_internal_free(W->V); qaws_internal_free(W->Z); qaws_internal_free(W->H); qaws_internal_free(W->cs); qaws_internal_free(W->sn); qaws_internal_free(W->gq); qaws_internal_free(W->y);
 	qaws_internal_free(W->t0); qaws_internal_free(W->t3); qaws_internal_free(W->b); qaws_internal_free(W->r); qaws_internal_free(W->tmp);
 	qaws_internal_rbh_scratch_destroy(W->sa);
 	qaws_internal_rbh_scratch_destroy(W->sf);
@@ -112,20 +114,22 @@ static void rh_work_destroy(rh_work* W)
 
 static rh_work* rh_work_create(qaws_internal_rs_hsys const* H)
 {
-	size_t nv = H->s->nv;
+	size_t nv = H->s->nv, R = H->s->gmres_restart ? H->s->gmres_restart : RH_RESTART;
 	rh_work* W = (rh_work*)qaws_internal_zalloc(1, sizeof(rh_work));
 	if (!W)
 		return NULL;
-	W->V = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), nv, (RH_RESTART + 1)));
-	W->Z = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), nv, (RH_RESTART + 1)));
-	W->H = (double*)qaws_internal_zalloc(qaws_internal_mul2((RH_RESTART + 1), RH_RESTART), sizeof(double));
-	W->cs = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), RH_RESTART)); W->sn = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), RH_RESTART));
-	W->gq = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), (RH_RESTART + 1)));
+	W->R = (unsigned int)R;
+	W->y = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), R));
+	W->V = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), nv, (R + 1)));
+	W->Z = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), nv, (R + 1)));
+	W->H = (double*)qaws_internal_zalloc(qaws_internal_mul2((R + 1), R), sizeof(double));
+	W->cs = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), R)); W->sn = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), R));
+	W->gq = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), (R + 1)));
 	W->t0 = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), nv)); W->t3 = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), nv));
 	W->b = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), nv)); W->r = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), nv)); W->tmp = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), nv));
 	W->sa = qaws_internal_rbh_scratch_create(H->h.A);
 	W->sf = qaws_internal_rbh_scratch_create(H->h.F);
-	if (!W->V || !W->Z || !W->H || !W->cs || !W->sn || !W->gq || !W->t0 || !W->t3 || !W->b || !W->r || !W->tmp || !W->sa || !W->sf)
+	if (!W->y || !W->V || !W->Z || !W->H || !W->cs || !W->sn || !W->gq || !W->t0 || !W->t3 || !W->b || !W->r || !W->tmp || !W->sa || !W->sf)
 	{
 		rh_work_destroy(W);
 		return NULL;
@@ -305,9 +309,10 @@ static void rh_precond(qaws_internal_rs_hsys const* H, rh_work* W, double const*
    does not converge */
 static int rh_solve(qaws_internal_rs_hsys const* H, rh_work* W, double const* b0, double* u)
 {
-	enum { R = RH_RESTART };
-	unsigned int nv = H->s->nv, i, j, k, outer;
-	double *V = W->V, *Z = W->Z, *Hm = W->H, *b = W->b, *r = W->r, bn, prev = HUGE_VAL;
+	size_t R = W->R;
+	unsigned int nv = H->s->nv, i, j, k, outer, it = 0;
+	unsigned int maxit = H->s->gmres_max ? H->s->gmres_max : RH_MAXIT, maxouter = (unsigned int)(maxit / R + (maxit % R != 0));
+	double *V = W->V, *Z = W->Z, *Hm = W->H, *b = W->b, *r = W->r, *y = W->y, bn, prev = HUGE_VAL, tol = H->s->gmres_tol > 0 ? H->s->gmres_tol : RH_TOL;
 	int ok = 0;
 	memset(u, 0, sizeof(double) * nv);
 	memcpy(b, b0, sizeof(double) * nv);
@@ -315,13 +320,13 @@ static int rh_solve(qaws_internal_rs_hsys const* H, rh_work* W, double const* b0
 	bn = sqrt(rh_dot(b, b, nv));
 	if (!(bn > 0))
 		return 1;
-	for (outer = 0; outer < 25; outer++)
+	for (outer = 0; outer < maxouter; outer++)   /* (the defaults: 25 restarts of 40) */
 	{
 		double beta;
 		rh_apply(H, W, u, r);
 		for (i = 0; i < nv; i++) r[i] = b[i] - r[i];
 		beta = sqrt(rh_dot(r, r, nv));
-		if (beta <= RH_TOL * bn || (beta <= RH_ACCEPT * bn && beta > 0.5 * prev))
+		if (beta <= tol * bn || (beta <= RH_ACCEPT * bn && beta > 0.5 * prev))
 		{
 			ok = 1;
 			break;
@@ -358,9 +363,9 @@ static int rh_solve(qaws_internal_rs_hsys const* H, rh_work* W, double const* b0
 				Hm[j * R + j] = rr; Hm[(j + 1) * R + j] = 0;
 				W->gq[j + 1] = -W->sn[j] * W->gq[j]; W->gq[j] *= W->cs[j];
 			}
-			if (fabs(W->gq[j + 1]) <= RH_TOL * bn || j + 1 == R || !(hn > 0))
+			it++;
+			if (fabs(W->gq[j + 1]) <= tol * bn || j + 1 == R || !(hn > 0) || it == maxit)
 			{
-				double y[R];
 				unsigned int n = j + 1;
 				for (k = n; k-- > 0;)
 				{

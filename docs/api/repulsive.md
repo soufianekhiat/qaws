@@ -214,6 +214,64 @@ on a surface and the control-point solvers through their curves desc.
   shows it. It also returns its gradient with respect to the solver's
   variables (positions, uv, control points).
 
+### Line search and GMRES settings (test 145)
+
+```c
+sd.armijo = 0.2;                     /* sufficient decrease, in (0, 0.5); 0: 0.1 */
+sd.backtrack = 0.25;                 /* step factor per refused trial, in (0, 1); 0: 0.5 */
+sd.max_trials = 10;                  /* trials per step; 0: 40 */
+sd.gmres_max_iterations = 500;       /* 0: 1000 (hierarchical), 2400 (derivatives) */
+sd.gmres_restart = 30;               /* 0: 40 (hierarchical), 80 (derivatives) */
+sd.gmres_tolerance = 1e-6;           /* relative residual; 0: 1e-8 (hierarchical), 1e-11 (derivatives) */
+```
+
+The same members are in the mesh desc, with the same defaults; the curves
+on a surface and the control-point solvers take them from their curves
+desc. Zero keeps the previous behaviour bit for bit. A trial is accepted
+when E(y) <= E - armijo tau <dE, g>; each refused trial shrinks the step by
+`backtrack`; after `max_trials` refused trials the step stops (STALLED,
+COLLISION_LIMITED or INFEASIBLE, by the last refusal). The GMRES limits
+apply to the hierarchical mode's scalar solves and to the solution
+derivatives' KKT solve, each with its own defaults; a value set applies to
+both. A solve whose restarts stop gaining is still accepted under 1e-6
+(hierarchical) or 1e-7 (derivatives). Out-of-range values (armijo outside
+[0, 0.5), backtrack outside [0, 1), a negative or NaN tolerance) make the
+solver's creation return INVALID_ARGUMENT.
+
+| Check (test 145) | Result |
+|---|---|
+| The defaults given explicitly against zeros: 8 steps, dense and hierarchical | positions and reports bit for bit |
+| Hierarchical, `gmres_max_iterations` 1 | the step's reason NUMERICAL_FAILURE, nothing moved |
+| Hierarchical, `gmres_tolerance` 1e-3 | the energy still falls (2.96796 against 2.96800 by default after 8 steps), other positions |
+| A mesh step from a first trial 40 mean edge lengths long | backtrack 0.5: 7 refused trials, then accepted; 0.1: 2; `max_trials` 2: STALLED after 2, positions untouched |
+| armijo 0.5, -0.1, 0.7; backtrack 1, -0.5; `gmres_tolerance` -1 | INVALID_ARGUMENT from the curve and the mesh solver |
+
+### Allocators (test 145)
+
+```c
+qaws_repulsive_curves_create_ex(&cd, &allocator, &curves);
+qaws_repulsive_curves_solver_create_ex(curves, &sd, positions, &allocator, &solver);
+```
+
+Every creator has an `_ex` variant (curves, meshes, control points, and the
+four solvers). The object keeps a copy of the allocator. Its blocks come
+from it, and so do the blocks of every call on it: eval, gradient, hvp, bh,
+the curves-on-surface evaluations, a solver's steps, direction, objective
+and derivatives, and `*_solve`. Each call installs the allocator as the
+thread allocator on entry and restores the previous one on every return.
+Per-call temporaries still come from the thread's scratch allocator when
+one is installed (`qaws_exchange_thread_scratch_allocator`). A NULL
+allocator, and the non-`_ex` creators, keep the usual order. A solver made
+without `_ex` follows the usual order whatever its curves' or mesh's
+allocator; `*_solve` uses the allocator of the object it is given. With an
+executor, the temporaries of jobs on other threads follow those threads'
+order.
+
+| Check (test 145) | Result |
+|---|---|
+| Curves and a mesh made with `_ex` and a counting allocator; the curves' eval, gradient, hvp, bh; a dense collision-checked and a hierarchical solver (`_ex`) stepping, their direction and objective; `_solve`; a mesh solver converged, its JVP (checked) and VJP; all destroyed. A second counting allocator installed as the thread allocator | 1756 blocks from the objects' allocator, none left after destroy, none from the thread allocator |
+| The same with a scratch arena installed | no call leaves a block in the arena (`live` 0 after each), peak 23 KB |
+
 ### The two modes
 
 - **Energy-based.** Every accepted step lowers the energy and holds the
@@ -665,9 +723,27 @@ Hess c_r. The descent's preconditioner is not differentiated.
 - **Status.**
   - NOT_CONVERGED unless the solver's last reason is CONVERGED.
   - NUMERICAL_FAILURE for dependent rows, or a system GMRES cannot reduce
-    to 1e-7 (not a strict minimum on the constraint set).
+    to 1e-7 (not a strict minimum on the constraint set), or not within
+    the desc's `gmres_*` limits.
   - UNSUPPORTED_OPERATION in the hierarchical mode, and for the surface
     and control-point solvers.
+- **Validity report.** The `_checked` variants of the four functions take
+  a `qaws_repulsive_derivative_report` (the unchecked ones pass NULL). It
+  is filled when the KKT solve ran (OK, or NUMERICAL_FAILURE because GMRES
+  did not converge), zeroed when the call was refused before it:
+  - `residual`: |b - K u| / |b| of the returned solution, recomputed with
+    the exact operator;
+  - `iterations`: GMRES iterations over all restarts;
+  - `converged`: 1 when the solve was accepted (under `gmres_tolerance`,
+    or under 1e-7 once restarts stopped gaining), else 0 and the call
+    returns NUMERICAL_FAILURE with the outputs untouched;
+  - `condition_estimate`: the ratio of the extreme singular values of
+    GMRES's Hessenberg matrices (the largest over the restart cycles).
+    These lie within the singular values of the preconditioned operator
+    K P^-1, so it is a lower bound of that operator's condition number,
+    not of K's. It is >= 1, HUGE_VAL for a singular cycle, 1 when no
+    iteration ran;
+  - `gauge`: as `*out_gauge`.
 - **Not provided.** The derivative of a fixed sequence of steps, and
   derivatives in the exponents.
 - **A practical note.** The descent converges well when the problem is
@@ -685,6 +761,10 @@ Hess c_r. The descent's preconditioner is not differentiated.
 | A loop, barycenter and edge lengths held, scaled: three rotations gauged, the JVP orthogonal to them, against the re-solved difference less its rotation | 1.7e-18; 2.3e-8 | 1.6e-10; 2.4e-5 |
 | A lumpy octahedron, area and volume changed: against the re-solved difference less its rotation (the differences' floor: 5e-4) | 2.8e-4 | 6.9e-3 |
 | Refusals: before convergence; in the hierarchical mode | NOT_CONVERGED; UNSUPPORTED | same |
+| The report on the converged strand (default limits): residual, iterations, converged, condition estimate, gauge; the unchecked JVP | 4.9e-12, 16, 1, 191, 1; bit for bit | not measured |
+| `gmres_tolerance` 1e-4; `gmres_max_iterations` 2 | 1.1e-5 in 8 iterations, converged; NUMERICAL_FAILURE, converged 0, residual 0.995 | not measured |
+| A mesh's VJP, a pin, barycenter, area and volume held (one gauge: the rotation about the pin-barycenter line): the adjoint identity over three random pairs over every target | 6.4e-13 relative | not measured |
+| The same mesh, the area target alone moved by +-4e-3 and +-2e-3 from the solution (re-solved to convergence, Richardson extrapolated): the JVP against it, less the free rotation | 6.1e-4 (bound 2e-3: the re-solves stop at stationarity 1e-6) | not measured |
 
 Figure 36 (`examples/better2d_showcase/36_repulsive_surface.c`) shows five
 crowded loops on a torus spreading over it with every edge's length held,

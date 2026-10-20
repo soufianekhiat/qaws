@@ -59,7 +59,17 @@ struct qaws_internal_rs_core
 	double* x;                           /* the current positions, in double */
 	qaws_repulsive_report rep;
 	qaws_repulsive_progress progress;    /* the desc's: cancellation, per-step reports */
+	double armijo, backtrack;            /* the line search: sufficient decrease, step factor per refused trial */
+	unsigned int trials;                 /* trials per step */
+	unsigned int gmres_max, gmres_restart;   /* the GMRES limits (0: each solve's own default) */
+	double gmres_tol;
+	qaws_allocator alloc;                /* _ex: the solver's allocator (zeroed: none) */
 };
+
+/* the desc's line-search and GMRES settings into the core (zero: the
+   defaults); 0 when one is out of range */
+int qaws_internal_rs_settings(qaws_internal_rs_core* core, qaws_scalar armijo, qaws_scalar backtrack, unsigned int max_trials,
+	unsigned int gmres_max_iterations, unsigned int gmres_restart, qaws_scalar gmres_tolerance);
 
 /* the host's cancel callback says stop */
 #define QAWS_INTERNAL_RS_CANCELLED(core) ((core)->progress.cancel && (core)->progress.cancel((core)->progress.user_data))
@@ -87,8 +97,10 @@ void qaws_internal_rs_hsys_free(qaws_internal_rs_hsys* H);
 /* the converged solution's derivative (qaws_repulsive_sens.c), dense mode:
    with drows (k: the change of each constraint row's target, C dx = drows)
    dx (N); or with xbar (N) the rows' adjoints (k) in out. *out_gauge: the
-   free rotations removed (dx orthogonal to them). */
-qaws_status qaws_internal_rs_sensitivity(qaws_internal_rs_core const* core, double const* drows, double const* xbar, double* out, unsigned int* out_gauge);
+   free rotations removed (dx orthogonal to them). out_report (may be
+   NULL): the KKT solve's validity (qaws_repulsive.h). */
+qaws_status qaws_internal_rs_sensitivity(qaws_internal_rs_core const* core, double const* drows, double const* xbar, double* out, unsigned int* out_gauge,
+	qaws_repulsive_derivative_report* out_report);
 
 /* LU with partial pivoting of the n x n row-major m in place (0: singular),
    and its solve */

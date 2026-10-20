@@ -82,7 +82,7 @@ solvers with step and one-shot entry points, iteration and tolerance
 limits, a termination reason and a report; caller-owned position buffers;
 backend-neutral pair kernels (`core/qaws_repulsive_core.h`, HLSL parity
 1.1e-4); solution JVP/VJP by the KKT system for curves (tested) and meshes
-(JVP tested, **VJP untested**). Missing: cancellation (a dense step can take
+(JVP tested, **VJP untested**; since tested, see section 11). Missing: cancellation (a dense step can take
 a second), progress from `*_solve`, an iteration or time budget per step,
 the allocator, a public evaluation of the full objective and of the metric,
 constraint and projection operators, a public descent core, line-search and
@@ -369,9 +369,8 @@ checks stay manual.
 | Scratch apart from results | `qaws_exchange_thread_scratch_allocator`: the temporaries of sampling, tessellation, meshing, clipping and repulsive solvers; results keep the persistent order | this branch (154, runner `QAWS_TEST_SCRATCH=1`) |
 | Single-precision tests | 140, 142, 145, 147 to 153 pass with `QAWS_SCALAR_IS_FLOAT`; bounds per precision from rounding (TEST_EPS) or measured truncation, double bounds unchanged | this branch |
 | Arc, trajectory, Yuksel and subdivision views | done (`QAWS_VIEW_ARC`, `_TRAJECTORY`, `_YUKSEL`, `_SUBDIVISION`; span data rebuilt per evaluation, subdivision from the window of control points a span depends on, no refined polygon kept); bit for bit the owned curves, 2D and 3D, open and closed. Composites borrow through borrowed children; clothoids hold no arrays; owned objects are not rebuilt on views | this branch (142) |
+| Repulsive: settings, allocator, derivative report, mesh VJP | line search (`armijo`, `backtrack`, `max_trials`) and GMRES limits (`gmres_max_iterations`, `_restart`, `_tolerance`, hierarchical and derivatives) in both solve descs, zero = bit for bit as before, out of range refused; `_ex` creators for curves, meshes, control points and the four solvers, every call on such an object under its allocator, none from the thread allocator, nothing left in a scratch arena; `qaws_repulsive_derivative_report` and the `_checked` JVP/VJP (residual, iterations, converged, a lower bound of the preconditioned KKT operator's condition, gauge); the mesh VJP's adjoint identity and the JVP against re-solves (`docs/api/repulsive.md`) | this branch (145, 118) |
 
 Remaining, in order:
 
 - Halide's runtime span (the buffer interface is done for HLSL and GLSL).
-- Repulsive: the allocator, line-search and GMRES settings, a validity
-  report for solution derivatives, and the mesh VJP test.

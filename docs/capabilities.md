@@ -144,7 +144,7 @@ Every allocation follows `docs/api/alloc.md`: from the `_ex` argument, else the 
 | Traversal | tables at creation | yes | object | the traversal | yes | no | yes |
 | Meshing (generate, remesh, quadrangulate, repair) | yes | yes | mesh objects | - | yes | no | yes |
 | Curve and surface batches | yes | yes | caller capacity + counts | prepared sets | executor | no | yes |
-| Repulsive curves and surfaces | solver state, per-step scratch | positions in caller buffers | in place | the energy object and solver | executor | progress callback cancels (145) | yes |
+| Repulsive curves and surfaces | solver state from the `_ex` allocator (or the usual order), per-step scratch from the scratch allocator when installed (145) | positions in caller buffers | in place | the energy object and solver | executor | progress callback cancels (145) | yes |
 
 **Scratch sizes.** No operation publishes a bound or a scratch-size query yet. `examples/memory_bench.c` measures, per operation:
 

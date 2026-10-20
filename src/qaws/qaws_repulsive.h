@@ -37,6 +37,17 @@
  * face (no tangent or normal); NUMERICAL_FAILURE when two interacting
  * points coincide (a self-intersection: the energy is infinite, never
  * softened into a finite value).
+ *
+ * Allocators: each creator has an _ex variant taking an allocator (NULL:
+ * the usual order of qaws_alloc.h). The object keeps a copy of it, and the
+ * object's blocks, and the blocks of every call on it (eval, gradient, hvp,
+ * bh, a solver's steps, direction, objective and derivatives, *_solve),
+ * come from it: the call installs it as the thread allocator on entry and
+ * restores the previous one on return. Per-call temporaries still come
+ * from the thread's scratch allocator when one is installed. A solver made
+ * without _ex follows the usual order, whatever its curves' or mesh's;
+ * *_solve uses the allocator of the object it is given. With an executor,
+ * the temporaries of jobs run on other threads follow those threads' order.
  */
 
 /* ---- curves ------------------------------------------------------------ */
@@ -55,6 +66,7 @@ typedef struct qaws_repulsive_curves_desc
 typedef struct qaws_repulsive_curves qaws_repulsive_curves;
 
 qaws_status qaws_repulsive_curves_create(qaws_repulsive_curves_desc const* desc, qaws_repulsive_curves** out_curves);
+qaws_status qaws_repulsive_curves_create_ex(qaws_repulsive_curves_desc const* desc, qaws_allocator const* allocator, qaws_repulsive_curves** out_curves);
 void qaws_repulsive_curves_destroy(qaws_repulsive_curves* curves);
 
 /* The energy at positions; with a direction (else NULL, and the derivative
@@ -183,6 +195,24 @@ typedef struct qaws_repulsive_curves_solve_desc
 	unsigned int room_count;
 	qaws_scalar room_weight;               /* 0 = 1 */
 	qaws_repulsive_progress progress;      /* cancellation and per-step reports (above) */
+	/* The line search and the GMRES solves (zero: the defaults given; the
+	   meshes' are the same). A trial step is accepted when
+	   E(y) <= E - armijo tau <dE, g>; each refused trial shrinks the step by
+	   backtrack; after max_trials refused trials the step stops (STALLED,
+	   COLLISION_LIMITED or INFEASIBLE, by the last refusal). The GMRES limits
+	   apply to the hierarchical mode's scalar solves (defaults 1000
+	   iterations, restart 40, relative residual 1e-8; a solve whose restarts
+	   stop gaining is accepted under 1e-6) and to the solution derivatives'
+	   KKT solve (defaults 2400, 80, 1e-11; accepted under 1e-7 the same
+	   way); a value set applies to both. Out of range (armijo outside
+	   (0, 0.5), backtrack outside (0, 1), a negative tolerance): the
+	   solver's creation returns INVALID_ARGUMENT. */
+	qaws_scalar armijo;                    /* sufficient decrease; 0 = 0.1 */
+	qaws_scalar backtrack;                 /* step factor per refused trial; 0 = 0.5 */
+	unsigned int max_trials;               /* trials per step; 0 = 40 */
+	unsigned int gmres_max_iterations;     /* 0 = 1000 (hierarchical), 2400 (derivatives) */
+	unsigned int gmres_restart;            /* 0 = 40 (hierarchical), 80 (derivatives) */
+	qaws_scalar gmres_tolerance;           /* relative residual; 0 = 1e-8 (hierarchical), 1e-11 (derivatives) */
 } qaws_repulsive_curves_solve_desc;
 
 struct qaws_repulsive_report
@@ -205,6 +235,8 @@ typedef struct qaws_repulsive_curves_solver qaws_repulsive_curves_solver;
    positions; checks the input (collision-checked: no touching edges). */
 qaws_status qaws_repulsive_curves_solver_create(qaws_repulsive_curves const* curves, qaws_repulsive_curves_solve_desc const* desc,
 	qaws_scalar const* positions, qaws_repulsive_curves_solver** out_solver);
+qaws_status qaws_repulsive_curves_solver_create_ex(qaws_repulsive_curves const* curves, qaws_repulsive_curves_solve_desc const* desc,
+	qaws_scalar const* positions, qaws_allocator const* allocator, qaws_repulsive_curves_solver** out_solver);
 void qaws_repulsive_curves_solver_destroy(qaws_repulsive_curves_solver* solver);
 
 /* One step: positions updated in place when a step is accepted; the report
@@ -274,6 +306,7 @@ typedef struct qaws_repulsive_mesh_desc
 typedef struct qaws_repulsive_mesh qaws_repulsive_mesh;
 
 qaws_status qaws_repulsive_mesh_create(qaws_repulsive_mesh_desc const* desc, qaws_repulsive_mesh** out_mesh);
+qaws_status qaws_repulsive_mesh_create_ex(qaws_repulsive_mesh_desc const* desc, qaws_allocator const* allocator, qaws_repulsive_mesh** out_mesh);
 void qaws_repulsive_mesh_destroy(qaws_repulsive_mesh* mesh);
 
 qaws_status qaws_repulsive_mesh_eval(qaws_repulsive_mesh const* mesh, qaws_scalar const* positions,
@@ -395,12 +428,20 @@ typedef struct qaws_repulsive_mesh_solve_desc
 	                                          where it lands: a long one can pass a thin barrier, as a sparse point
 	                                          cloud's, that shorter ones would feel */
 	qaws_repulsive_progress progress;      /* cancellation and per-step reports, as for curves */
+	qaws_scalar armijo;                    /* the line search and GMRES settings, as for curves (same defaults) */
+	qaws_scalar backtrack;
+	unsigned int max_trials;
+	unsigned int gmres_max_iterations;
+	unsigned int gmres_restart;
+	qaws_scalar gmres_tolerance;
 } qaws_repulsive_mesh_solve_desc;
 
 typedef struct qaws_repulsive_mesh_solver qaws_repulsive_mesh_solver;
 
 qaws_status qaws_repulsive_mesh_solver_create(qaws_repulsive_mesh const* mesh, qaws_repulsive_mesh_solve_desc const* desc,
 	qaws_scalar const* positions, qaws_repulsive_mesh_solver** out_solver);
+qaws_status qaws_repulsive_mesh_solver_create_ex(qaws_repulsive_mesh const* mesh, qaws_repulsive_mesh_solve_desc const* desc,
+	qaws_scalar const* positions, qaws_allocator const* allocator, qaws_repulsive_mesh_solver** out_solver);
 void qaws_repulsive_mesh_solver_destroy(qaws_repulsive_mesh_solver* solver);
 qaws_status qaws_repulsive_mesh_solver_step(qaws_repulsive_mesh_solver* solver, qaws_scalar* positions, qaws_repulsive_report* out_report);
 qaws_status qaws_repulsive_mesh_solver_direction(qaws_repulsive_mesh_solver const* solver, qaws_scalar const* positions,
@@ -439,7 +480,8 @@ qaws_status qaws_repulsive_mesh_solver_objective(qaws_repulsive_mesh_solver cons
  *     gauged out (dx orthogonal to them), and *out_gauge says how many (0
  *     to 3);
  *   - NUMERICAL_FAILURE for dependent constraint rows, or a KKT system
- *     GMRES cannot solve (not a strict minimum on the constraint set);
+ *     GMRES cannot solve (not a strict minimum on the constraint set, or
+ *     the desc's gmres_* limits too tight; the _checked variants report it);
  *   - UNSUPPORTED_OPERATION in the hierarchical mode;
  *   - not provided: the derivative of a fixed sequence of steps, and
  *     derivatives in the energy's exponents.
@@ -462,6 +504,48 @@ qaws_status qaws_repulsive_mesh_solver_solution_jvp(qaws_repulsive_mesh_solver c
 	qaws_scalar* out_dx, unsigned int* out_gauge);
 qaws_status qaws_repulsive_mesh_solver_solution_vjp(qaws_repulsive_mesh_solver const* solver, qaws_scalar const* xbar,
 	qaws_repulsive_targets* out_targets_bar, unsigned int* out_gauge);
+
+/*
+ * How far a derivative can be trusted: what the KKT solve achieved. The
+ * report is filled when the solve ran (the call returned OK, or
+ * NUMERICAL_FAILURE because GMRES did not converge within the desc's
+ * gmres_* limits); zeroed when the call was refused before it (NOT_CONVERGED,
+ * UNSUPPORTED_OPERATION, dependent rows, ...).
+ *   residual            |b - K u| / |b| of the returned solution, recomputed
+ *                       with the exact operator (0 for a zero right-hand side)
+ *   iterations          GMRES iterations over all restarts
+ *   converged           1 when the solve was accepted: residual under
+ *                       gmres_tolerance, or under the acceptance floor (1e-7)
+ *                       once restarts stopped gaining; 0 otherwise (and the
+ *                       call returns NUMERICAL_FAILURE, outputs untouched)
+ *   condition_estimate  the ratio of the largest to the smallest singular
+ *                       value of GMRES's Hessenberg matrices (the largest
+ *                       over the restart cycles). Their singular values lie
+ *                       within those of the preconditioned operator K P^-1
+ *                       (P the descent's dense system), so this is a lower
+ *                       bound of that operator's condition number, not of
+ *                       K's; >= 1, HUGE_VAL for a singular cycle, 1 when no
+ *                       iteration ran
+ *   gauge               as *out_gauge
+ */
+typedef struct qaws_repulsive_derivative_report
+{
+	qaws_scalar residual;
+	unsigned int iterations;
+	int converged;
+	qaws_scalar condition_estimate;
+	unsigned int gauge;
+} qaws_repulsive_derivative_report;
+
+/* the four above with a report (may be NULL; the unchecked ones pass NULL) */
+qaws_status qaws_repulsive_curves_solver_solution_jvp_checked(qaws_repulsive_curves_solver const* solver, qaws_repulsive_targets const* dtargets,
+	qaws_scalar* out_dx, unsigned int* out_gauge, qaws_repulsive_derivative_report* out_report);
+qaws_status qaws_repulsive_curves_solver_solution_vjp_checked(qaws_repulsive_curves_solver const* solver, qaws_scalar const* xbar,
+	qaws_repulsive_targets* out_targets_bar, unsigned int* out_gauge, qaws_repulsive_derivative_report* out_report);
+qaws_status qaws_repulsive_mesh_solver_solution_jvp_checked(qaws_repulsive_mesh_solver const* solver, qaws_repulsive_targets const* dtargets,
+	qaws_scalar* out_dx, unsigned int* out_gauge, qaws_repulsive_derivative_report* out_report);
+qaws_status qaws_repulsive_mesh_solver_solution_vjp_checked(qaws_repulsive_mesh_solver const* solver, qaws_scalar const* xbar,
+	qaws_repulsive_targets* out_targets_bar, unsigned int* out_gauge, qaws_repulsive_derivative_report* out_report);
 
 /* ---- curves on a surface (R5) ------------------------------------------- */
 
@@ -522,6 +606,8 @@ typedef struct qaws_repulsive_surface_curves_solver qaws_repulsive_surface_curve
 /* desc as for curves; hold_barycenter and theta must be 0 */
 qaws_status qaws_repulsive_surface_curves_solver_create(qaws_repulsive_curves const* curves, qaws_repulsive_surface_desc const* surface,
 	qaws_repulsive_curves_solve_desc const* desc, qaws_scalar const* uv, qaws_repulsive_surface_curves_solver** out_solver);
+qaws_status qaws_repulsive_surface_curves_solver_create_ex(qaws_repulsive_curves const* curves, qaws_repulsive_surface_desc const* surface,
+	qaws_repulsive_curves_solve_desc const* desc, qaws_scalar const* uv, qaws_allocator const* allocator, qaws_repulsive_surface_curves_solver** out_solver);
 void qaws_repulsive_surface_curves_solver_destroy(qaws_repulsive_surface_curves_solver* solver);
 qaws_status qaws_repulsive_surface_curves_solver_step(qaws_repulsive_surface_curves_solver* solver, qaws_scalar* uv,
 	qaws_repulsive_report* out_report);
@@ -567,6 +653,7 @@ typedef struct qaws_repulsive_controls_desc
 typedef struct qaws_repulsive_controls qaws_repulsive_controls;
 
 qaws_status qaws_repulsive_controls_create(qaws_repulsive_controls_desc const* desc, qaws_repulsive_controls** out_controls);
+qaws_status qaws_repulsive_controls_create_ex(qaws_repulsive_controls_desc const* desc, qaws_allocator const* allocator, qaws_repulsive_controls** out_controls);
 void qaws_repulsive_controls_destroy(qaws_repulsive_controls* controls);
 /* the control points (all curves', in order, dimension each), the samples, the edges */
 void qaws_repulsive_controls_get_counts(qaws_repulsive_controls const* controls, unsigned int* out_control_count, unsigned int* out_vertex_count,
@@ -593,6 +680,8 @@ typedef struct qaws_repulsive_controls_solver qaws_repulsive_controls_solver;
 
 qaws_status qaws_repulsive_controls_solver_create(qaws_repulsive_controls const* controls, qaws_repulsive_curves_solve_desc const* desc,
 	qaws_scalar const* control_points, qaws_repulsive_controls_solver** out_solver);
+qaws_status qaws_repulsive_controls_solver_create_ex(qaws_repulsive_controls const* controls, qaws_repulsive_curves_solve_desc const* desc,
+	qaws_scalar const* control_points, qaws_allocator const* allocator, qaws_repulsive_controls_solver** out_solver);
 void qaws_repulsive_controls_solver_destroy(qaws_repulsive_controls_solver* solver);
 qaws_status qaws_repulsive_controls_solver_step(qaws_repulsive_controls_solver* solver, qaws_scalar* control_points, qaws_repulsive_report* out_report);
 qaws_status qaws_repulsive_controls_solver_direction(qaws_repulsive_controls_solver const* solver, qaws_scalar const* control_points,

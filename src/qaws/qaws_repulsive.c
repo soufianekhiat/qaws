@@ -16,6 +16,7 @@
 #include "internal/qaws_internal_memory.h"
 #include "internal/qaws_internal_repulsive.h"
 #include "internal/qaws_internal_repulsive_jet.h"
+#include "qaws_alloc.h"
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -185,7 +186,7 @@ static qaws_status rp_run_d(unsigned int dim, unsigned int const* idx, unsigned 
 }
 
 /* rp_run_d from qaws_scalar inputs: out_vec += the result, only on success */
-static qaws_status rp_run(unsigned int dim, unsigned int nv, unsigned int const* idx, unsigned int ne, unsigned int k,
+static qaws_status rp_run(qaws_allocator const* alloc, unsigned int dim, unsigned int nv, unsigned int const* idx, unsigned int ne, unsigned int k,
 	int (*pair)(void const*, rp_jet (*)[3], unsigned int, rp_jet*), void const* user, int skip_shared,
 	qaws_scalar const* positions, qaws_scalar const* direction, rp_want want, double seed,
 	double* out_v, double* out_t, double* out_t2, qaws_scalar* out_vec)
@@ -193,11 +194,16 @@ static qaws_status rp_run(unsigned int dim, unsigned int nv, unsigned int const*
 	unsigned int i, m = nv * dim;
 	double *x, *d = NULL, *acc = NULL;
 	qaws_status st;
+	qaws_internal_rs_scope sc;
 	if (!positions || (want == RP_HVP && !direction) || (want != RP_EVAL && !out_vec))
 		return QAWS_STATUS_INVALID_ARGUMENT;
+	qaws_internal_rs_enter(&sc, alloc);
 	x = (double*)qaws_internal_scratch_zalloc(3 * (size_t)m + 1, sizeof(double));
 	if (!x)
+	{
+		qaws_internal_rs_leave(&sc);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
+	}
 	if (direction) d = x + m;
 	if (want != RP_EVAL) acc = x + 2 * m;
 	for (i = 0; i < m; i++)
@@ -210,6 +216,7 @@ static qaws_status rp_run(unsigned int dim, unsigned int nv, unsigned int const*
 	for (i = 0; st == QAWS_STATUS_OK && acc && i < m; i++)
 		out_vec[i] = (qaws_scalar)((double)out_vec[i] + acc[i]);
 	qaws_internal_free(x);
+	qaws_internal_rs_leave(&sc);
 	return st;
 }
 
@@ -225,8 +232,50 @@ static int rp_mesh_term(void const* user, rp_jet (*x)[3], unsigned int n, rp_jet
 }
 
 /* ------------------------------------------------------------------------ */
+/*  Objects' allocators                                                     */
+/* ------------------------------------------------------------------------ */
+
+void qaws_internal_rs_keep(qaws_allocator* to, qaws_allocator const* a)
+{
+	memset(to, 0, sizeof(*to));
+	if (!a || !a->alloc)
+		return;
+	to->alloc = a->alloc; to->dealloc = a->dealloc; to->user_data = a->user_data;
+	if (a->alloc == qaws_allocator_extended)
+	{
+		/* (a legacy descriptor's other members are never read) */
+		to->alloc_sized = a->alloc_sized; to->dealloc_sized = a->dealloc_sized; to->resize = a->resize;
+	}
+}
+
+void qaws_internal_rs_enter(qaws_internal_rs_scope* sc, qaws_allocator const* a)
+{
+	sc->active = a && a->alloc;
+	if (sc->active)
+		qaws_exchange_thread_allocator(a, &sc->previous);
+}
+
+void qaws_internal_rs_leave(qaws_internal_rs_scope const* sc)
+{
+	if (sc->active)
+		qaws_set_thread_allocator(&sc->previous);
+}
+
+/* ------------------------------------------------------------------------ */
 /*  Curves                                                                  */
 /* ------------------------------------------------------------------------ */
+
+qaws_status qaws_repulsive_curves_create_ex(qaws_repulsive_curves_desc const* desc, qaws_allocator const* allocator, qaws_repulsive_curves** out_curves)
+{
+	qaws_internal_rs_scope sc;
+	qaws_status st;
+	qaws_internal_rs_enter(&sc, allocator);
+	st = qaws_repulsive_curves_create(desc, out_curves);
+	if (st == QAWS_STATUS_OK)
+		qaws_internal_rs_keep(&(*out_curves)->alloc, allocator);
+	qaws_internal_rs_leave(&sc);
+	return st;
+}
 
 qaws_status qaws_repulsive_curves_create(qaws_repulsive_curves_desc const* desc, qaws_repulsive_curves** out_curves)
 {
@@ -279,7 +328,7 @@ qaws_status qaws_repulsive_curves_eval(qaws_repulsive_curves const* curves, qaws
 	qaws_status st;
 	if (!curves)
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	st = rp_run(curves->dim, curves->nv, curves->edges, curves->ne, 2, rp_curve_term, curves, 1, positions, direction,
+	st = rp_run(&curves->alloc, curves->dim, curves->nv, curves->edges, curves->ne, 2, rp_curve_term, curves, 1, positions, direction,
 		RP_EVAL, 0, &v, &t, &t2, NULL);
 	if (st != QAWS_STATUS_OK)
 		return st;
@@ -296,7 +345,7 @@ qaws_status qaws_repulsive_curves_gradient(qaws_repulsive_curves const* curves, 
 	qaws_status st;
 	if (!curves)
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	st = rp_run(curves->dim, curves->nv, curves->edges, curves->ne, 2, rp_curve_term, curves, 1, positions, NULL,
+	st = rp_run(&curves->alloc, curves->dim, curves->nv, curves->edges, curves->ne, 2, rp_curve_term, curves, 1, positions, NULL,
 		RP_GRAD, (double)seed, &v, NULL, NULL, gradient);
 	if (st == QAWS_STATUS_OK && out_value) *out_value = (qaws_scalar)v;
 	return st;
@@ -307,13 +356,25 @@ qaws_status qaws_repulsive_curves_hvp(qaws_repulsive_curves const* curves, qaws_
 {
 	if (!curves)
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	return rp_run(curves->dim, curves->nv, curves->edges, curves->ne, 2, rp_curve_term, curves, 1, positions, direction,
+	return rp_run(&curves->alloc, curves->dim, curves->nv, curves->edges, curves->ne, 2, rp_curve_term, curves, 1, positions, direction,
 		RP_HVP, 0, NULL, NULL, NULL, out_hv);
 }
 
 /* ------------------------------------------------------------------------ */
 /*  Meshes                                                                  */
 /* ------------------------------------------------------------------------ */
+
+qaws_status qaws_repulsive_mesh_create_ex(qaws_repulsive_mesh_desc const* desc, qaws_allocator const* allocator, qaws_repulsive_mesh** out_mesh)
+{
+	qaws_internal_rs_scope sc;
+	qaws_status st;
+	qaws_internal_rs_enter(&sc, allocator);
+	st = qaws_repulsive_mesh_create(desc, out_mesh);
+	if (st == QAWS_STATUS_OK)
+		qaws_internal_rs_keep(&(*out_mesh)->alloc, allocator);
+	qaws_internal_rs_leave(&sc);
+	return st;
+}
 
 qaws_status qaws_repulsive_mesh_create(qaws_repulsive_mesh_desc const* desc, qaws_repulsive_mesh** out_mesh)
 {
@@ -365,7 +426,7 @@ qaws_status qaws_repulsive_mesh_eval(qaws_repulsive_mesh const* mesh, qaws_scala
 	qaws_status st;
 	if (!mesh)
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	st = rp_run(3, mesh->nv, mesh->tris, mesh->nf, 3, rp_mesh_term, mesh, 0, positions, direction, RP_EVAL, 0, &v, &t, &t2, NULL);
+	st = rp_run(&mesh->alloc, 3, mesh->nv, mesh->tris, mesh->nf, 3, rp_mesh_term, mesh, 0, positions, direction, RP_EVAL, 0, &v, &t, &t2, NULL);
 	if (st != QAWS_STATUS_OK)
 		return st;
 	if (out_value) *out_value = (qaws_scalar)v;
@@ -381,7 +442,7 @@ qaws_status qaws_repulsive_mesh_gradient(qaws_repulsive_mesh const* mesh, qaws_s
 	qaws_status st;
 	if (!mesh)
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	st = rp_run(3, mesh->nv, mesh->tris, mesh->nf, 3, rp_mesh_term, mesh, 0, positions, NULL, RP_GRAD, (double)seed, &v, NULL, NULL, gradient);
+	st = rp_run(&mesh->alloc, 3, mesh->nv, mesh->tris, mesh->nf, 3, rp_mesh_term, mesh, 0, positions, NULL, RP_GRAD, (double)seed, &v, NULL, NULL, gradient);
 	if (st == QAWS_STATUS_OK && out_value) *out_value = (qaws_scalar)v;
 	return st;
 }
@@ -391,7 +452,7 @@ qaws_status qaws_repulsive_mesh_hvp(qaws_repulsive_mesh const* mesh, qaws_scalar
 {
 	if (!mesh)
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	return rp_run(3, mesh->nv, mesh->tris, mesh->nf, 3, rp_mesh_term, mesh, 0, positions, direction, RP_HVP, 0, NULL, NULL, NULL, out_hv);
+	return rp_run(&mesh->alloc, 3, mesh->nv, mesh->tris, mesh->nf, 3, rp_mesh_term, mesh, 0, positions, direction, RP_HVP, 0, NULL, NULL, NULL, out_hv);
 }
 
 /* ------------------------------------------------------------------------ */

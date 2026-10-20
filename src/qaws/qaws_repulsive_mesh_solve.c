@@ -720,45 +720,67 @@ static void rm_targets(qaws_repulsive_mesh_solver const* s, qaws_repulsive_targe
 qaws_status qaws_repulsive_mesh_solver_solution_jvp(qaws_repulsive_mesh_solver const* s, qaws_repulsive_targets const* d, qaws_scalar* out_dx,
 	unsigned int* out_gauge)
 {
+	return qaws_repulsive_mesh_solver_solution_jvp_checked(s, d, out_dx, out_gauge, NULL);
+}
+
+qaws_status qaws_repulsive_mesh_solver_solution_jvp_checked(qaws_repulsive_mesh_solver const* s, qaws_repulsive_targets const* d, qaws_scalar* out_dx,
+	unsigned int* out_gauge, qaws_repulsive_derivative_report* out_report)
+{
 	double *rows, *dx;
 	unsigned int i;
 	qaws_status st;
+	qaws_internal_rs_scope sc;
+	if (out_report) memset(out_report, 0, sizeof(*out_report));
 	if (!s || !d || !out_dx)
 		return QAWS_STATUS_INVALID_ARGUMENT;
+	qaws_internal_rs_enter(&sc, &s->core.alloc);
 	rows = (double*)qaws_internal_scratch_zalloc(s->core.k + 1, sizeof(double));
 	dx = (double*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(double), (s->core.N + 1)));
 	if (!rows || !dx)
 	{
 		qaws_internal_free(rows); qaws_internal_free(dx);
+		qaws_internal_rs_leave(&sc);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 	rm_targets(s, (qaws_repulsive_targets*)d, rows, 0);
-	st = qaws_internal_rs_sensitivity(&s->core, rows, NULL, dx, out_gauge);
+	st = qaws_internal_rs_sensitivity(&s->core, rows, NULL, dx, out_gauge, out_report);
 	for (i = 0; st == QAWS_STATUS_OK && i < s->core.N; i++) out_dx[i] = (qaws_scalar)dx[i];
 	qaws_internal_free(rows); qaws_internal_free(dx);
+	qaws_internal_rs_leave(&sc);
 	return st;
 }
 
 qaws_status qaws_repulsive_mesh_solver_solution_vjp(qaws_repulsive_mesh_solver const* s, qaws_scalar const* xbar, qaws_repulsive_targets* out_bar,
 	unsigned int* out_gauge)
 {
+	return qaws_repulsive_mesh_solver_solution_vjp_checked(s, xbar, out_bar, out_gauge, NULL);
+}
+
+qaws_status qaws_repulsive_mesh_solver_solution_vjp_checked(qaws_repulsive_mesh_solver const* s, qaws_scalar const* xbar, qaws_repulsive_targets* out_bar,
+	unsigned int* out_gauge, qaws_repulsive_derivative_report* out_report)
+{
 	double *rows, *xb;
 	unsigned int i;
 	qaws_status st;
+	qaws_internal_rs_scope sc;
+	if (out_report) memset(out_report, 0, sizeof(*out_report));
 	if (!s || !xbar || !out_bar)
 		return QAWS_STATUS_INVALID_ARGUMENT;
+	qaws_internal_rs_enter(&sc, &s->core.alloc);
 	rows = (double*)qaws_internal_scratch_zalloc(s->core.k + 1, sizeof(double));
 	xb = (double*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(double), (s->core.N + 1)));
 	if (!rows || !xb)
 	{
 		qaws_internal_free(rows); qaws_internal_free(xb);
+		qaws_internal_rs_leave(&sc);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 	for (i = 0; i < s->core.N; i++) xb[i] = (double)xbar[i];
-	st = qaws_internal_rs_sensitivity(&s->core, NULL, xb, rows, out_gauge);
+	st = qaws_internal_rs_sensitivity(&s->core, NULL, xb, rows, out_gauge, out_report);
 	if (st == QAWS_STATUS_OK)
 		rm_targets(s, out_bar, rows, 1);
 	qaws_internal_free(rows); qaws_internal_free(xb);
+	qaws_internal_rs_leave(&sc);
 	return st;
 }
 
@@ -977,7 +999,8 @@ qaws_status qaws_repulsive_mesh_solver_create(qaws_repulsive_mesh const* m, qaws
 	k->fixed = s->fixed;
 	k->translates = s->npin == 0 && !s->bary && !s->grp;
 	k->k = rm_brows(s) + (k->theta > 0 ? 0 : 3 * s->npin) + (s->area ? 1 : 0) + (s->volume ? 1 : 0);
-	if (!(d.theta >= 0) || (k->theta > 0 && k->k > QAWS_INTERNAL_RS_HROWS) || (s->vol_w > 0 && !(s->vol_t != 0)))
+	if (!(d.theta >= 0) || (k->theta > 0 && k->k > QAWS_INTERNAL_RS_HROWS) || (s->vol_w > 0 && !(s->vol_t != 0)) ||
+		!qaws_internal_rs_settings(k, d.armijo, d.backtrack, d.max_trials, d.gmres_max_iterations, d.gmres_restart, d.gmres_tolerance))
 	{
 		qaws_repulsive_mesh_solver_destroy(s);
 		return QAWS_STATUS_INVALID_ARGUMENT;
@@ -1035,11 +1058,24 @@ qaws_status qaws_repulsive_mesh_solve(qaws_repulsive_mesh const* mesh, qaws_repu
 {
 	qaws_repulsive_mesh_solver* s = NULL;
 	unsigned int max = desc && desc->max_iterations ? desc->max_iterations : 100;
-	qaws_status st = qaws_repulsive_mesh_solver_create(mesh, desc, positions, &s);
+	qaws_status st = qaws_repulsive_mesh_solver_create_ex(mesh, desc, positions, mesh ? &mesh->alloc : NULL, &s);
 	if (st != QAWS_STATUS_OK)
 		return st;
 	st = qaws_internal_rs_solve(&s->core, max, positions, out_report);
 	qaws_repulsive_mesh_solver_destroy(s);
+	return st;
+}
+
+qaws_status qaws_repulsive_mesh_solver_create_ex(qaws_repulsive_mesh const* mesh, qaws_repulsive_mesh_solve_desc const* desc,
+	qaws_scalar const* positions, qaws_allocator const* allocator, qaws_repulsive_mesh_solver** out_solver)
+{
+	qaws_internal_rs_scope sc;
+	qaws_status st;
+	qaws_internal_rs_enter(&sc, allocator);
+	st = qaws_repulsive_mesh_solver_create(mesh, desc, positions, out_solver);
+	if (st == QAWS_STATUS_OK)
+		qaws_internal_rs_keep(&(*out_solver)->core.alloc, allocator);
+	qaws_internal_rs_leave(&sc);
 	return st;
 }
 

@@ -948,20 +948,30 @@ qaws_status qaws_repulsive_curves_bh(qaws_repulsive_curves const* curves, qaws_s
 	qaws_scalar* gradient, qaws_scalar* out_value, qaws_repulsive_bh_stats* out_stats)
 {
 	bh_ctx c;
+	qaws_internal_rs_scope sc;
+	qaws_status st;
 	if (!curves || !positions || !(theta >= 0))
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	bh_curves_ctx(&c, curves, (double)theta);
-	return bh_public(&c, curves->nv, positions, seed, gradient, out_value, out_stats);
+	qaws_internal_rs_enter(&sc, &curves->alloc);
+	st = bh_public(&c, curves->nv, positions, seed, gradient, out_value, out_stats);
+	qaws_internal_rs_leave(&sc);
+	return st;
 }
 
 qaws_status qaws_repulsive_mesh_bh(qaws_repulsive_mesh const* mesh, qaws_scalar const* positions, qaws_scalar theta, qaws_scalar seed,
 	qaws_scalar* gradient, qaws_scalar* out_value, qaws_repulsive_bh_stats* out_stats)
 {
 	bh_ctx c;
+	qaws_internal_rs_scope sc;
+	qaws_status st;
 	if (!mesh || !positions || !(theta >= 0))
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	bh_mesh_ctx(&c, mesh, (double)theta);
-	return bh_public(&c, mesh->nv, positions, seed, gradient, out_value, out_stats);
+	qaws_internal_rs_enter(&sc, &mesh->alloc);
+	st = bh_public(&c, mesh->nv, positions, seed, gradient, out_value, out_stats);
+	qaws_internal_rs_leave(&sc);
+	return st;
 }
 
 /* ------------------------------------------------------------------------ */

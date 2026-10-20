@@ -35,7 +35,8 @@
 #include <string.h>
 #include <math.h>
 
-#define RSN_RESTART 80
+#define RSN_RESTART 80       /* the defaults of the desc's gmres_* settings */
+#define RSN_MAXIT 2400
 #define RSN_TOL 1e-11
 #define RSN_ACCEPT 1e-7   /* the residual accepted once restarts stop gaining (the floor of rounding) */
 
@@ -140,42 +141,70 @@ static qaws_status rsn_precond(rsn_sys* S, double const* A)
 	return qaws_internal_rs_lu(S->M, n, S->piv) ? QAWS_STATUS_OK : QAWS_STATUS_NUMERICAL_FAILURE;
 }
 
-/* the system's solve by flexible GMRES, right-preconditioned */
-static qaws_status rsn_solve(rsn_sys* S, double const* b, double* u)
+/* the ratio of the largest to the smallest singular value of the m x m
+   upper triangle R (row stride ld): the square roots of R^T R's extreme
+   eigenvalues (HUGE_VAL when singular; 1 when out of memory: no estimate) */
+static double rsn_cond(double const* R, size_t ld, unsigned int m)
 {
-	enum { R = RSN_RESTART };
-	unsigned int n = S->n, i, j, kk, outer;
+	double *A = (double*)qaws_internal_scratch_zalloc(qaws_internal_mul3(2, m, m), sizeof(double)), *V, lo = HUGE_VAL, hi = 0;
+	unsigned int i, j, k;
+	if (!A)
+		return 1;
+	V = A + (size_t)m * m;
+	for (i = 0; i < m; i++)
+		for (j = 0; j < m; j++)
+		{
+			double sum = 0;
+			for (k = 0; k <= (i < j ? i : j); k++) sum += R[k * ld + i] * R[k * ld + j];
+			A[(size_t)i * m + j] = sum;
+			V[(size_t)i * m + j] = i == j;
+		}
+	rsn_jacobi(A, V, m);
+	for (i = 0; i < m; i++) { lo = fmin(lo, A[(size_t)i * m + i]); hi = fmax(hi, A[(size_t)i * m + i]); }
+	qaws_internal_free(A);
+	return lo > 0 ? fmax(sqrt(hi / lo), 1) : HUGE_VAL;
+}
+
+/* the system's solve by flexible GMRES, right-preconditioned, within the
+   desc's gmres_* limits; rep (may be NULL): what it achieved */
+static qaws_status rsn_solve(rsn_sys* S, double const* b, double* u, qaws_repulsive_derivative_report* rep)
+{
+	rs_core const* s = S->s;
+	size_t R = s->gmres_restart ? s->gmres_restart : RSN_RESTART;
+	unsigned int n = S->n, i, j, kk, outer, it = 0;
+	unsigned int maxit = s->gmres_max ? s->gmres_max : RSN_MAXIT, maxouter = (unsigned int)(maxit / R + (maxit % R != 0));
 	double *V = (double*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(double), n, (R + 1))), *Z = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), n, (R + 1))), *H = (double*)qaws_internal_zalloc(qaws_internal_mul2((R + 1), R), sizeof(double));
-	double *w = (double*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(double), n)), cs[R], sn[R], gq[R + 1], y[R], bn = sqrt(rsn_dot(b, b, n)), prev = HUGE_VAL;
+	double *w = (double*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(double), n)), *g = (double*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(double), qaws_internal_add2(qaws_internal_mul2(4, R), 1)));
+	double *cs = NULL, *sn = NULL, *gq = NULL, *y = NULL, bn = sqrt(rsn_dot(b, b, n)), prev = HUGE_VAL, beta = 0, cond = 1, tol = s->gmres_tol > 0 ? s->gmres_tol : RSN_TOL;
 	qaws_status st = QAWS_STATUS_NUMERICAL_FAILURE;
 	memset(u, 0, sizeof(double) * n);
-	if (!V || !Z || !H || !w)
+	if (!V || !Z || !H || !w || !g)
 	{
 		st = QAWS_STATUS_ALLOCATION_FAILURE;
 		goto done;
 	}
+	cs = g; sn = g + R; gq = g + 2 * R; y = g + 3 * R + 1;
 	if (!(bn > 0))
 	{
 		st = QAWS_STATUS_OK;
 		goto done;
 	}
-	for (outer = 0; outer <= 30; outer++)
+	for (outer = 0;; outer++)   /* (the defaults: 30 restarts of 80, then a last residual) */
 	{
-		double beta;
 		qaws_status a;
 		if ((a = rsn_apply(S, u, w)) != QAWS_STATUS_OK) { st = a; goto done; }
 		for (i = 0; i < n; i++) w[i] = b[i] - w[i];
 		beta = sqrt(rsn_dot(w, w, n));
-		if (beta <= RSN_TOL * bn || (beta <= RSN_ACCEPT * bn && beta > 0.1 * prev))
+		if (beta <= tol * bn || (beta <= RSN_ACCEPT * bn && beta > 0.1 * prev))
 		{
 			st = QAWS_STATUS_OK;
 			break;
 		}
-		if (outer == 30)
+		if (outer == maxouter)
 			break;
 		prev = beta;
 		for (i = 0; i < n; i++) V[i] = w[i] / beta;
-		memset(gq, 0, sizeof(gq));
+		memset(gq, 0, sizeof(double) * (R + 1));
 		gq[0] = beta;
 		for (j = 0; j < R; j++)
 		{
@@ -206,7 +235,8 @@ static qaws_status rsn_solve(rsn_sys* S, double const* b, double* u)
 				H[j * R + j] = rr; H[(j + 1) * R + j] = 0;
 				gq[j + 1] = -sn[j] * gq[j]; gq[j] *= cs[j];
 			}
-			if (fabs(gq[j + 1]) <= RSN_TOL * bn || j + 1 == R || !(hn > 0))
+			it++;
+			if (fabs(gq[j + 1]) <= tol * bn || j + 1 == R || !(hn > 0) || it == maxit)
 			{
 				unsigned int m = j + 1;
 				for (kk = m; kk-- > 0;)
@@ -217,16 +247,26 @@ static qaws_status rsn_solve(rsn_sys* S, double const* b, double* u)
 				}
 				for (kk = 0; kk < m; kk++)
 					for (i = 0; i < n; i++) u[i] += y[kk] * Z[(size_t)kk * n + i];
+				if (rep)
+					cond = fmax(cond, rsn_cond(H, R, m));   /* (H is R of its QR now: the same singular values) */
 				break;
 			}
 		}
 	}
 done:
-	qaws_internal_free(V); qaws_internal_free(Z); qaws_internal_free(H); qaws_internal_free(w);
+	if (rep && st != QAWS_STATUS_ALLOCATION_FAILURE)
+	{
+		rep->residual = (qaws_scalar)(bn > 0 ? beta / bn : 0);
+		rep->iterations = it;
+		rep->converged = st == QAWS_STATUS_OK;
+		rep->condition_estimate = (qaws_scalar)cond;
+	}
+	qaws_internal_free(V); qaws_internal_free(Z); qaws_internal_free(H); qaws_internal_free(w); qaws_internal_free(g);
 	return st;
 }
 
-qaws_status qaws_internal_rs_sensitivity(rs_core const* s, double const* drows, double const* xbar, double* out, unsigned int* out_gauge)
+qaws_status qaws_internal_rs_sensitivity(rs_core const* s, double const* drows, double const* xbar, double* out, unsigned int* out_gauge,
+	qaws_repulsive_derivative_report* out_report)
 {
 	rsn_sys S;
 	unsigned int N, k, i, r, q, dim, nv;
@@ -360,7 +400,10 @@ qaws_status qaws_internal_rs_sensitivity(rs_core const* s, double const* drows, 
 		for (r = 0; r < k; r++) rhs[N + r] = drows[r];
 	else
 		for (i = 0; i < N; i++) rhs[i] = xbar[i];
-	if ((st = rsn_solve(&S, rhs, u)) != QAWS_STATUS_OK)
+	if (out_report) memset(out_report, 0, sizeof(*out_report));
+	st = rsn_solve(&S, rhs, u, out_report);
+	if (out_report && (st == QAWS_STATUS_OK || st == QAWS_STATUS_NUMERICAL_FAILURE)) out_report->gauge = S.ng;
+	if (st != QAWS_STATUS_OK)
 		goto done;
 	if (drows)
 		for (i = 0; i < N; i++) out[i] = u[i];

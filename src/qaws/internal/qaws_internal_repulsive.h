@@ -13,6 +13,7 @@ struct qaws_repulsive_curves
 	unsigned int* edges;
 	double alpha, beta;
 	qaws_batch_executor const* executor;
+	qaws_allocator alloc;                /* _ex: a copy of the creator's (zeroed: none) */
 };
 
 struct qaws_repulsive_mesh
@@ -21,7 +22,21 @@ struct qaws_repulsive_mesh
 	unsigned int* tris;
 	double p;
 	qaws_batch_executor const* executor;
+	qaws_allocator alloc;
 };
+
+/* A call on an object made with _ex runs under the object's allocator: enter
+   installs it as the thread allocator (a zeroed one: nothing changes), leave
+   restores the previous one; every return path between them must leave. */
+typedef struct qaws_internal_rs_scope
+{
+	qaws_allocator previous;
+	int active;
+} qaws_internal_rs_scope;
+void qaws_internal_rs_enter(qaws_internal_rs_scope* scope, qaws_allocator const* allocator);
+void qaws_internal_rs_leave(qaws_internal_rs_scope const* scope);
+/* *to = a copy of allocator's members in use (NULL: zeroed) */
+void qaws_internal_rs_keep(qaws_allocator* to, qaws_allocator const* allocator);
 
 /* the mesh's energy at x (3 per vertex); grad (may be NULL) += its gradient */
 qaws_status qaws_internal_repulsive_mesh_energy(qaws_repulsive_mesh const* mesh, double const* x, double* out_energy, double* grad);

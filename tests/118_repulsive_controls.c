@@ -19,6 +19,13 @@
  *     held, against the re-solved difference less its rotation
  *   - refusals: before convergence NOT_CONVERGED; the hierarchical mode
  *     UNSUPPORTED_OPERATION
+ *   - the validity report: on the converged strand the KKT residual under
+ *     1e-7, converged, a finite condition estimate >= 1, the unchecked JVP
+ *     bit for bit; a looser gmres_tolerance takes fewer iterations; two
+ *     iterations at most: NUMERICAL_FAILURE, converged 0
+ *   - a mesh solution's VJP (a pin, the barycenter, area and volume held):
+ *     the adjoint identity over random pairs, and the JVP for the area
+ *     target against re-solved central differences
  */
 
 #include "test_common.h"
@@ -521,6 +528,263 @@ static void test_mesh_solution(void)
 	qaws_repulsive_mesh_destroy(m);
 }
 
+/* the validity report of a derivative: the strand of test_curve_solution
+   converged three times alike, its solvers differing only in their GMRES
+   limits (the dense descent does not use them) */
+static void test_derivative_report(void)
+{
+	enum { N = 14 };
+	qaws_scalar x0[3 * N], x[3 * N], dx[3 * N], dx2[3 * N], xbar[3 * N], dpin[6], pb[6];
+	unsigned int e[2 * N], pins[2] = { 0, N - 1 }, i, k, gauge = 9, same = 1;
+	qaws_repulsive_curves_desc cd;
+	qaws_repulsive_curves* c = NULL;
+	qaws_repulsive_curves_solve_desc d;
+	qaws_repulsive_curves_solver* s[3] = { NULL, NULL, NULL };
+	qaws_repulsive_curves_solver* s0 = NULL;
+	qaws_repulsive_report r[3];
+	qaws_repulsive_targets t, tb;
+	qaws_repulsive_derivative_report rep[3], repv, repn;
+	qaws_status st[3], stu, stv, stn;
+	char msg[400];
+	for (i = 0; i < N; i++)
+	{
+		double u = (double)i / (N - 1);
+		x0[3 * i] = (qaws_scalar)(1.6 * u); x0[3 * i + 1] = (qaws_scalar)(0.35 * sin(3 * RC_PI * u)); x0[3 * i + 2] = (qaws_scalar)(0.2 * sin(2 * RC_PI * u));
+		e[2 * i] = i; e[2 * i + 1] = i + 1;
+	}
+	memset(&cd, 0, sizeof(cd));
+	cd.dimension = 3; cd.vertex_count = N; cd.edges = e; cd.edge_count = N - 1;
+	qaws_repulsive_curves_create(&cd, &c);
+	memset(&d, 0, sizeof(d));
+	d.pinned = pins; d.pinned_count = 2; d.hold_edge_lengths = 1;
+	/* refused before convergence: the report zeroed */
+	memset(&t, 0, sizeof(t));
+	memset(dpin, 0, sizeof(dpin));
+	dpin[4] = 1;
+	t.pinned = dpin;
+	memcpy(x, x0, sizeof(x));
+	qaws_repulsive_curves_solver_create(c, &d, x, &s0);
+	memset(&repn, 0x7f, sizeof(repn));
+	stn = qaws_repulsive_curves_solver_solution_jvp_checked(s0, &t, dx, NULL, &repn);
+	qaws_repulsive_curves_solver_destroy(s0);
+	for (k = 0; k < 3; k++)
+	{
+		qaws_repulsive_curves_solve_desc dk = d;
+		if (k == 1) dk.gmres_tolerance = (qaws_scalar)1e-4;
+		if (k == 2) dk.gmres_max_iterations = 2;
+		memcpy(x, x0, sizeof(x));
+		s[k] = rc_converge(c, &dk, x, &r[k]);
+		st[k] = s[k] ? qaws_repulsive_curves_solver_solution_jvp_checked(s[k], &t, dx, k ? NULL : &gauge, &rep[k]) : QAWS_STATUS_INVALID_ARGUMENT;
+		if (k == 0) memcpy(dx2, dx, sizeof(dx));
+	}
+	stu = s[0] ? qaws_repulsive_curves_solver_solution_jvp(s[0], &t, dx, NULL) : QAWS_STATUS_INVALID_ARGUMENT;
+	for (i = 0; i < 3 * N; i++) same &= dx[i] == dx2[i];
+	for (i = 0; i < 3 * N; i++) xbar[i] = (qaws_scalar)sin(0.9 * i + 0.4);
+	memset(&tb, 0, sizeof(tb));
+	tb.pinned = pb;
+	stv = s[0] ? qaws_repulsive_curves_solver_solution_vjp_checked(s[0], xbar, &tb, NULL, &repv) : QAWS_STATUS_INVALID_ARGUMENT;
+	sprintf(msg, "refused before convergence: status %d, report zeroed %d", (int)stn, repn.converged == 0 && repn.iterations == 0 && repn.residual == 0);
+	TEST_ASSERT(stn == QAWS_STATUS_NOT_CONVERGED && repn.converged == 0 && repn.iterations == 0 && repn.residual == 0, msg);
+	sprintf(msg, "converged strand, default limits: JVP status %d, residual %.3g, %u iterations, converged %d, condition estimate %.4g, gauge %u (out %u); "
+		"the unchecked JVP bit for bit %d; the VJP status %d, residual %.3g, converged %d",
+		(int)st[0], (double)rep[0].residual, rep[0].iterations, rep[0].converged, (double)rep[0].condition_estimate, rep[0].gauge, gauge, (int)same,
+		(int)stv, (double)repv.residual, repv.converged);
+	TEST_ASSERT(st[0] == QAWS_STATUS_OK && stu == QAWS_STATUS_OK && rep[0].converged == 1 && (double)rep[0].residual <= 1e-7 && rep[0].iterations > 0 &&
+		(double)rep[0].condition_estimate >= 1 && (double)rep[0].condition_estimate < 1e30 && rep[0].gauge == 1 && gauge == 1 && same &&
+		stv == QAWS_STATUS_OK && repv.converged == 1 && (double)repv.residual <= 1e-7, msg);
+	printf("  %s\n", msg);
+	sprintf(msg, "gmres_tolerance 1e-4: status %d, residual %.3g, %u iterations (default %u), converged %d",
+		(int)st[1], (double)rep[1].residual, rep[1].iterations, rep[0].iterations, rep[1].converged);
+	TEST_ASSERT(st[1] == QAWS_STATUS_OK && rep[1].converged == 1 && (double)rep[1].residual <= 1e-4 && rep[1].iterations < rep[0].iterations, msg);
+	printf("  %s\n", msg);
+	sprintf(msg, "gmres_max_iterations 2: status %d (NUMERICAL_FAILURE), residual %.3g, %u iterations, converged %d, condition estimate %.4g",
+		(int)st[2], (double)rep[2].residual, rep[2].iterations, rep[2].converged, (double)rep[2].condition_estimate);
+	TEST_ASSERT(st[2] == QAWS_STATUS_NUMERICAL_FAILURE && rep[2].converged == 0 && rep[2].iterations == 2 && (double)rep[2].residual > 1e-7 &&
+		(double)rep[2].residual < 1e30 && (double)rep[2].condition_estimate >= 1, msg);
+	printf("  %s\n", msg);
+	for (k = 0; k < 3; k++) qaws_repulsive_curves_solver_destroy(s[k]);
+	qaws_repulsive_curves_destroy(c);
+}
+
+/* the least-norm move d with C d = e_area: C the Jacobian of the mesh's barycenter (3 rows), the pinned vertex (3),
+   the area and the volume, at x; d = C^T (C C^T)^-1 e_area by Gaussian elimination */
+static void rc_area_move(qaws_scalar const* x, unsigned int const* tris, unsigned int nv, unsigned int nf, unsigned int pin, qaws_scalar* out)
+{
+	double C[8][3 * 64], G[8][9], y[8];
+	unsigned int f, q, i, j, k, a;
+	memset(C, 0, sizeof(C));
+	for (i = 0; i < nv; i++)
+		for (q = 0; q < 3; q++) C[q][3 * i + q] = 1.0 / nv;
+	for (q = 0; q < 3; q++) C[3 + q][3 * pin + q] = 1;
+	for (f = 0; f < nf; f++)
+		for (a = 0; a < 3; a++)
+		{
+			/* dA/dx_a = n x (x_c - x_b) / 2, n the unit normal; dV/dx_a = x_b x x_c / 6 */
+			unsigned int va = tris[3 * f + a], vb = tris[3 * f + (a + 1) % 3], vc = tris[3 * f + (a + 2) % 3];
+			double p0[3], p1[3], p2[3], u[3], v[3], n[3], e[3], len;
+			for (q = 0; q < 3; q++) { p0[q] = x[3 * tris[3 * f] + q]; p1[q] = x[3 * tris[3 * f + 1] + q]; p2[q] = x[3 * tris[3 * f + 2] + q]; }
+			for (q = 0; q < 3; q++) { u[q] = p1[q] - p0[q]; v[q] = p2[q] - p0[q]; e[q] = (double)x[3 * vc + q] - x[3 * vb + q]; }
+			n[0] = u[1] * v[2] - u[2] * v[1]; n[1] = u[2] * v[0] - u[0] * v[2]; n[2] = u[0] * v[1] - u[1] * v[0];
+			len = sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+			for (q = 0; q < 3; q++) n[q] /= len;
+			C[6][3 * va] += 0.5 * (n[1] * e[2] - n[2] * e[1]); C[6][3 * va + 1] += 0.5 * (n[2] * e[0] - n[0] * e[2]); C[6][3 * va + 2] += 0.5 * (n[0] * e[1] - n[1] * e[0]);
+			{
+				double xb[3], xc[3];
+				for (q = 0; q < 3; q++) { xb[q] = x[3 * vb + q]; xc[q] = x[3 * vc + q]; }
+				C[7][3 * va] += (xb[1] * xc[2] - xb[2] * xc[1]) / 6; C[7][3 * va + 1] += (xb[2] * xc[0] - xb[0] * xc[2]) / 6; C[7][3 * va + 2] += (xb[0] * xc[1] - xb[1] * xc[0]) / 6;
+			}
+		}
+	for (i = 0; i < 8; i++)
+	{
+		for (j = 0; j < 8; j++)
+		{
+			G[i][j] = 0;
+			for (k = 0; k < 3 * nv; k++) G[i][j] += C[i][k] * C[j][k];
+		}
+		G[i][8] = i == 6;
+	}
+	for (k = 0; k < 8; k++)
+	{
+		unsigned int p = k;
+		for (i = k + 1; i < 8; i++) if (fabs(G[i][k]) > fabs(G[p][k])) p = i;
+		for (j = 0; j < 9; j++) { double t = G[k][j]; G[k][j] = G[p][j]; G[p][j] = t; }
+		for (i = k + 1; i < 8; i++)
+		{
+			double m = G[i][k] / G[k][k];
+			for (j = k; j < 9; j++) G[i][j] -= m * G[k][j];
+		}
+	}
+	for (k = 8; k-- > 0;)
+	{
+		y[k] = G[k][8];
+		for (j = k + 1; j < 8; j++) y[k] -= G[k][j] * y[j];
+		y[k] /= G[k][k];
+	}
+	for (k = 0; k < 3 * nv; k++)
+	{
+		double s = 0;
+		for (i = 0; i < 8; i++) s += C[i][k] * y[i];
+		out[k] = (qaws_scalar)s;
+	}
+}
+
+/* a mesh solution's VJP: pins, barycenter, area and volume held */
+static void test_mesh_vjp(void)
+{
+	enum { NV = 6, NF = 8 };
+	qaws_scalar x[3 * NV], xp[3 * NV], xm[3 * NV], dx[3 * NV], xbar[3 * NV], dpin[3], pb[3];
+	unsigned int tris[3 * NF], pins[1] = { 4 }, i, q, k, it, gauge = 0, resolved = 0;
+	static double const ov[6][3] = { { 1, 0, 0 }, { -1, 0, 0 }, { 0, 1, 0 }, { 0, -1, 0 }, { 0, 0, 1 }, { 0, 0, -1 } };
+	static unsigned int const of[24] = { 0, 2, 4, 2, 1, 4, 1, 3, 4, 3, 0, 4, 2, 0, 5, 1, 2, 5, 3, 1, 5, 0, 3, 5 };
+	qaws_repulsive_mesh_desc md;
+	qaws_repulsive_mesh* m = NULL;
+	qaws_repulsive_mesh_solve_desc d;
+	qaws_repulsive_mesh_solver *s = NULL, *sp = NULL, *sm = NULL;
+	qaws_repulsive_report r, rp, rm;
+	qaws_repulsive_targets t, tb;
+	qaws_status st = QAWS_STATUS_OK, sj, sv;
+	double h = RC_F32 ? 2e-2 : 4e-3, worst = 0, fd[3 * NV], fdk[2][3 * NV], an[3 * NV], err, A, V, orth;
+	char msg[400];
+	for (i = 0; i < NV; i++)
+		for (q = 0; q < 3; q++) x[3 * i + q] = (qaws_scalar)(ov[i][q] * (1 + 0.15 * sin(2.0 * i + q)));
+	memcpy(tris, of, sizeof(of));
+	memset(&md, 0, sizeof(md));
+	md.vertex_count = NV; md.triangles = tris; md.triangle_count = NF;
+	qaws_repulsive_mesh_create(&md, &m);
+	memset(&d, 0, sizeof(d));
+	d.pinned = pins; d.pinned_count = 1; d.hold_barycenter = 1; d.hold_area = 1; d.hold_volume = 1;
+	d.tolerance = (qaws_scalar)(RC_F32 ? 1e-4 : 1e-6);
+	memset(&r, 0, sizeof(r));
+	if (qaws_repulsive_mesh_solver_create(m, &d, x, &s) == QAWS_STATUS_OK)
+		for (it = 0; it < 3000 && r.reason == QAWS_REPULSIVE_RUNNING; it++) qaws_repulsive_mesh_solver_step(s, x, &r);
+	/* the adjoint identity <VJP(xbar), dt> = <xbar, JVP(dt)> for random xbar and dt over every target */
+	for (k = 0; k < 3; k++)
+	{
+		double lhs = 0, rhs = 0;
+		memset(&t, 0, sizeof(t));
+		for (q = 0; q < 3; q++)
+		{
+			dpin[q] = (qaws_scalar)sin(1.7 * k + 0.9 * q + 0.3);
+			t.barycenter[q] = (qaws_scalar)cos(2.3 * k + 1.1 * q);
+		}
+		t.pinned = dpin;
+		t.area = (qaws_scalar)sin(3.1 * k + 0.7); t.volume = (qaws_scalar)cos(1.9 * k + 0.2);
+		for (i = 0; i < 3 * NV; i++) xbar[i] = (qaws_scalar)sin(0.77 * i + 1.3 * k + 0.1);
+		sj = s ? qaws_repulsive_mesh_solver_solution_jvp(s, &t, dx, &gauge) : QAWS_STATUS_INVALID_ARGUMENT;
+		memset(&tb, 0, sizeof(tb));
+		tb.pinned = pb;
+		sv = s ? qaws_repulsive_mesh_solver_solution_vjp(s, xbar, &tb, NULL) : QAWS_STATUS_INVALID_ARGUMENT;
+		if (sj != QAWS_STATUS_OK) st = sj;
+		if (sv != QAWS_STATUS_OK) st = sv;
+		for (i = 0; i < 3 * NV; i++) lhs += (double)xbar[i] * dx[i];
+		for (q = 0; q < 3; q++) rhs += (double)pb[q] * dpin[q] + (double)tb.barycenter[q] * t.barycenter[q];
+		rhs += (double)tb.area * t.area + (double)tb.volume * t.volume;
+		worst = fmax(worst, fabs(lhs - rhs) / fmax(fabs(lhs), 1e-300));
+	}
+	sprintf(msg, "mesh VJP (a pin, barycenter, area and volume held): converged %d, gauge %u (the rotation about the pin-barycenter line), "
+		"the adjoint identity over 3 random pairs, worst relative gap %.3g", (int)r.reason, gauge, worst);
+	/* (both sides come from one KKT matrix solved to 1e-11: the gap is GMRES's residual times the system's condition) */
+	TEST_ASSERT(st == QAWS_STATUS_OK && r.reason == QAWS_REPULSIVE_CONVERGED && gauge == 1 && worst <= (RC_F32 ? 1e-3 : 1e-8), msg);
+	printf("  %s\n", msg);
+	/* the JVP for the area target against central differences of re-solved meshes. Each re-solve starts at x +- h
+	   delta, delta the least-norm move changing the area target alone to first order (C delta = e_area, C the rows'
+	   Jacobian: barycenter, pin, area, volume); its other targets then differ from the solution's by O(h^2), alike
+	   for + and -, so they cancel in the central difference. (Not set_targets at x itself: there the direction is
+	   about 0, so the line search stalls; nor from the far input: the two re-solves then drift apart along the free
+	   rotation by more than the difference resolves.) The solution bends sharply with the area here: measured, the
+	   central difference's error falls as h^2, from 0.14 at h = 2e-2 to 3e-3 at 2e-3. So the differences at h and
+	   h / 2 are combined by Richardson extrapolation, (4 D(h / 2) - D(h)) / 3, leaving O(h^4) and the re-solves' own
+	   error (they stop at stationarity 1e-6) over h. Measured 6e-4; the bound 2e-3 as in test_mesh_solution. */
+	rc_measures(x, tris, NF, &A, &V);
+	rc_area_move(x, tris, NV, NF, pins[0], dx);
+	for (k = 0; k < 2; k++)
+	{
+		double hk = k ? h / 2 : h;
+		for (i = 0; i < 3 * NV; i++) { xp[i] = (qaws_scalar)((double)x[i] + hk * dx[i]); xm[i] = (qaws_scalar)((double)x[i] - hk * dx[i]); }
+		memset(&rp, 0, sizeof(rp)); memset(&rm, 0, sizeof(rm));
+		if (qaws_repulsive_mesh_solver_create(m, &d, xp, &sp) == QAWS_STATUS_OK && qaws_repulsive_mesh_solver_create(m, &d, xm, &sm) == QAWS_STATUS_OK)
+		{
+			for (it = 0; it < 3000 && rp.reason == QAWS_REPULSIVE_RUNNING; it++) qaws_repulsive_mesh_solver_step(sp, xp, &rp);
+			for (it = 0; it < 3000 && rm.reason == QAWS_REPULSIVE_RUNNING; it++) qaws_repulsive_mesh_solver_step(sm, xm, &rm);
+		}
+		resolved += rp.reason == QAWS_REPULSIVE_CONVERGED && rm.reason == QAWS_REPULSIVE_CONVERGED;
+		for (i = 0; i < 3 * NV; i++) fdk[k][i] = ((double)xp[i] - xm[i]) / (2 * hk);
+		qaws_repulsive_mesh_solver_destroy(sp); qaws_repulsive_mesh_solver_destroy(sm);
+		sp = sm = NULL;
+	}
+	memset(&t, 0, sizeof(t));
+	t.area = 1;
+	sj = s ? qaws_repulsive_mesh_solver_solution_jvp(s, &t, dx, NULL) : QAWS_STATUS_INVALID_ARGUMENT;
+	for (i = 0; i < 3 * NV; i++) { fd[i] = (4 * fdk[1][i] - fdk[0][i]) / 3; an[i] = (double)dx[i]; }
+	{
+		/* (less the rotation about the pin-barycenter line, free between the re-solves; the JVP is orthogonal to it) */
+		double b[3] = { 0, 0, 0 }, a[3], R[3 * NV], rr = 0, fr = 0, ar = 0;
+		for (i = 0; i < NV; i++)
+			for (q = 0; q < 3; q++) b[q] += (double)x[3 * i + q] / NV;
+		for (q = 0; q < 3; q++) a[q] = b[q] - x[3 * pins[0] + q];
+		for (i = 0; i < NV; i++)
+		{
+			double p[3];
+			for (q = 0; q < 3; q++) p[q] = (double)x[3 * i + q] - x[3 * pins[0] + q];
+			R[3 * i] = a[1] * p[2] - a[2] * p[1]; R[3 * i + 1] = a[2] * p[0] - a[0] * p[2]; R[3 * i + 2] = a[0] * p[1] - a[1] * p[0];
+		}
+		for (i = 0; i < 3 * NV; i++) { rr += R[i] * R[i]; fr += fd[i] * R[i]; ar += an[i] * R[i]; }
+		for (i = 0; i < 3 * NV; i++) fd[i] -= fr / rr * R[i];
+		orth = fabs(ar) / sqrt(rr);
+	}
+	err = rc_maxrel(an, fd, 3 * NV);
+	sprintf(msg, "mesh JVP, the area target (A %.4g) moved by +-%.0e and +-%.0e: %u of 2 re-solved pairs converged, the JVP's part along "
+		"the free rotation %.2g, against the extrapolated central difference less it %.3g", A, h, h / 2, resolved, orth, err);
+	/* float: the re-solves stop at float's tolerances, and their difference over h carries that stop error; measured 0.17, so
+	   in float this is a check of sign and size only (0.3); the gauge removal leaves rounding along the rotation, a few hundred float
+	   eps (measured 1.3e-7) against 1e-8 in double; the derivative's precision being checked by the adjoint identity
+	   above and by the double build */
+	TEST_ASSERT(sj == QAWS_STATUS_OK && resolved == 2 && orth <= (RC_F32 ? 1e-5 : 1e-8) && err <= (RC_F32 ? 3e-1 : 2e-3), msg);
+	printf("  %s\n", msg);
+	qaws_repulsive_mesh_solver_destroy(s); qaws_repulsive_mesh_solver_destroy(sp); qaws_repulsive_mesh_solver_destroy(sm);
+	qaws_repulsive_mesh_destroy(m);
+}
+
 int test_118_repulsive_controls_main(void)
 {
 	g_pass = 0;
@@ -530,6 +794,8 @@ int test_118_repulsive_controls_main(void)
 	test_curve_solution();
 	test_loop_solution();
 	test_mesh_solution();
+	test_derivative_report();
+	test_mesh_vjp();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
 }
