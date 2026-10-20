@@ -210,7 +210,7 @@ static void test_fill_and_nesting(void)
 		qaws_clip64_execute(&r, &d);
 		if (r)
 		{
-			int64_t const* p;
+			int64_t const* p = NULL;
 			unsigned int m = 0;
 			ni = qaws_clip64_result_get_open_path_count(r);
 			if (ni) qaws_clip64_result_get_open_path(&p, &m, r, 0);

@@ -845,7 +845,7 @@ static void test_patch(void)
 	qaws_surface* s = NULL;
 	qaws_generate_desc gd;
 	qaws_mesh_3d* m = NULL;
-	qaws_mesh_quality a;
+	qaws_mesh_quality a = { 0 };
 	unsigned int i, j;
 	char msg[300];
 	for (i = 0; i < 7; i++)

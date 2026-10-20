@@ -202,7 +202,7 @@ static unsigned int mr_icosphere(unsigned int level, double* x, unsigned int* t,
 	unsigned int nv = 12, nt = 20, l, i, k, cap = 1u << 20;
 	unsigned long long* key = (unsigned long long*)malloc(sizeof(unsigned long long) * cap);
 	unsigned int* val = (unsigned int*)malloc(sizeof(unsigned int) * cap);
-	unsigned int* nt3 = (unsigned int*)malloc(sizeof(unsigned int) * 3 * 20 * (1u << (2 * level)));
+	unsigned int* nt3 = (unsigned int*)malloc(sizeof(unsigned int) * 3 * 20 * ((size_t)1 << (2 * level)));
 	for (i = 0; i < 36; i++)
 		x[i] = v0[i] / sqrt(1 + g * g);
 	for (i = 0; i < 60; i++)

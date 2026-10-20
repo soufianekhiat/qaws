@@ -45,7 +45,7 @@ static void rm_sphere(unsigned int level, double* x, unsigned int* tris, unsigne
 	static double const ov[6][3] = { { 1, 0, 0 }, { -1, 0, 0 }, { 0, 1, 0 }, { 0, -1, 0 }, { 0, 0, 1 }, { 0, 0, -1 } };
 	static unsigned int const of[8][3] = { { 0, 2, 4 }, { 2, 1, 4 }, { 1, 3, 4 }, { 3, 0, 4 }, { 2, 0, 5 }, { 1, 2, 5 }, { 3, 1, 5 }, { 0, 3, 5 } };
 	unsigned int l, i, n = 6, f = 8, q;
-	unsigned int* t2 = (unsigned int*)malloc(sizeof(unsigned int) * 3 * 4 * 8 * (1u << (2 * level)));
+	unsigned int* t2 = (unsigned int*)malloc(sizeof(unsigned int) * 3 * 4 * 8 * ((size_t)1 << (2 * level)));
 	memcpy(x, ov, sizeof(ov));
 	memcpy(tris, of, sizeof(of));
 	for (l = 0; l < level; l++)
@@ -410,7 +410,7 @@ static void test_targets(void)
 	qaws_repulsive_mesh* m;
 	qaws_repulsive_mesh_solve_desc sd;
 	qaws_repulsive_mesh_solver* s = NULL;
-	qaws_repulsive_report r, rp, rw;
+	qaws_repulsive_report r, rp = { 0 }, rw = { 0 };
 	qaws_status st, sa, sv, sn;
 	char msg[400];
 	rm_sphere(2, xd, tris, &nv, &nf);
@@ -520,9 +520,9 @@ static void test_obstacles(void)
 		a = sqrt(m[0] * m[0] + m[1] * m[1] + m[2] * m[2]);
 		for (j = 0; j < nv; j++)
 		{
-			double dd[3], s = 0, r2 = 0;
-			for (q = 0; q < 3; q++) { dd[q] = X[q] - (double)xo[3 * j + q]; s += m[q] / a * dd[q]; r2 += dd[q] * dd[q]; }
-			Ebrute += 3 * 0.5 * a * pow(fabs(s), 6) / pow(r2, 6);
+			double dd[3], sp = 0, r2 = 0;
+			for (q = 0; q < 3; q++) { dd[q] = X[q] - (double)xo[3 * j + q]; sp += m[q] / a * dd[q]; r2 += dd[q] * dd[q]; }
+			Ebrute += 3 * 0.5 * a * pow(fabs(sp), 6) / pow(r2, 6);
 		}
 	}
 	/* the solver: the sphere drifting free (translations 1) moves away from the obstacle on its +x side */

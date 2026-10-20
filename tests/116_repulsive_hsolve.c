@@ -29,7 +29,7 @@ static void rh_sphere(unsigned int level, double* x, unsigned int* tris, unsigne
 	static double const ov[6][3] = { { 1, 0, 0 }, { -1, 0, 0 }, { 0, 1, 0 }, { 0, -1, 0 }, { 0, 0, 1 }, { 0, 0, -1 } };
 	static unsigned int const of[8][3] = { { 0, 2, 4 }, { 2, 1, 4 }, { 1, 3, 4 }, { 3, 0, 4 }, { 2, 0, 5 }, { 1, 2, 5 }, { 3, 1, 5 }, { 0, 3, 5 } };
 	unsigned int l, i, n = 6, f = 8, q;
-	unsigned int* t2 = (unsigned int*)malloc(sizeof(unsigned int) * 3 * 4 * 8 * (1u << (2 * level)));
+	unsigned int* t2 = (unsigned int*)malloc(sizeof(unsigned int) * 3 * 4 * 8 * ((size_t)1 << (2 * level)));
 	memcpy(x, ov, sizeof(ov));
 	memcpy(tris, of, sizeof(of));
 	for (l = 0; l < level; l++)

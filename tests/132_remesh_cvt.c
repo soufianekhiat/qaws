@@ -204,7 +204,7 @@ static void test_sphere(void)
 	qaws_mesh_3d *m = ct_icosphere(nrm, 0), *out = NULL, *loc = NULL;
 	qaws_mesh_reference_desc rd;
 	qaws_mesh_reference* r = NULL;
-	qaws_mesh_report rep, lrep;
+	qaws_mesh_report rep = { 0 }, lrep = { 0 };
 	qaws_mesh_topology t;
 	qaws_status st = QAWS_STATUS_INTERNAL_ERROR, ls = QAWS_STATUS_INTERNAL_ERROR;
 	ct_shape s, ls_;
@@ -353,7 +353,7 @@ static void test_adaptive(void)
 	qaws_mesh_reference* r = NULL;
 	qaws_curvature_size_desc cd;
 	qaws_size_field* sf = NULL;
-	qaws_mesh_report rep, lrep;
+	qaws_mesh_report rep = { 0 }, lrep = { 0 };
 	qaws_status st = QAWS_STATUS_INTERNAL_ERROR, ls = QAWS_STATUS_INTERNAL_ERROR;
 	unsigned int nv, i;
 	double dev = 0, ldev = 0, bump = 0, far_ = 1, lbump = 0, lfar = 1, sec = 0;

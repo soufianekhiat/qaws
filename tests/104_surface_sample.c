@@ -219,7 +219,7 @@ static void test_meshing(void)
 	char msg[300];
 	/* the sphere: a geodesic circle across the seam */
 	{
-		double R = 1.3, L = 0.05, am, em;
+		double R = 1.3, L = 0.05, am = 0, em = 0;
 		qaws_curve* prof = NULL;
 		qaws_surface* s = sst_revolve(0, R, -SST_PI / 2, SST_PI / 2, &prof);
 		qaws_surface_curve* c = NULL;

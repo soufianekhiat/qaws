@@ -365,6 +365,8 @@ QAWS_INLINE qaws_surface_eval_3d qaws_surface_bspline_eval_3d(
     qaws_scalar Nu, Nv, w, nx, ny, nz, len;
     int ci, cj, cp_idx;
 
+    QAWS_UNUSED(u_count);   /* (the span is given) */
+
     /* Zero the result */
     result.position.x = QAWS_ZERO; result.position.y = QAWS_ZERO; result.position.z = QAWS_ZERO;
     result.du.x = QAWS_ZERO; result.du.y = QAWS_ZERO; result.du.z = QAWS_ZERO;

@@ -543,7 +543,7 @@ static void test_derivative_report(void)
 	qaws_repulsive_curves_solver* s0 = NULL;
 	qaws_repulsive_report r[3];
 	qaws_repulsive_targets t, tb;
-	qaws_repulsive_derivative_report rep[3], repv, repn;
+	qaws_repulsive_derivative_report rep[3], repv = { 0 }, repn;
 	qaws_status st[3], stu, stv, stn;
 	char msg[400];
 	for (i = 0; i < N; i++)

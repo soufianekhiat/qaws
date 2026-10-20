@@ -248,7 +248,7 @@ static void test_degenerate(void)
 		qaws_curve* c = trt_poly(q, 9);
 		qaws_curve const* cc = c;
 		qaws_mesh_2d* m = trt_run(&cc, 1, QAWS_FILL_NON_ZERO, 0, 0, 0, NULL);
-		trt_stats s;
+		trt_stats s = { 0 };
 		if (m) trt_measure(m, &s);
 		sprintf(msg, "collinear and repeated points: area %.12g of 9, %u clockwise", m ? s.area : 0, m ? s.cw : 0);
 		TEST_ASSERT(m && fabs(s.area - 9) < 1e-9 && s.cw == 0, msg);
@@ -264,7 +264,7 @@ static void test_degenerate(void)
 		for (r = 0; r < 2; r++)
 		{
 			qaws_mesh_2d* m = trt_run(&cc, 1, r ? QAWS_FILL_NON_ZERO : QAWS_FILL_EVEN_ODD, 0, 0, 0, NULL);
-			trt_stats s;
+			trt_stats s = { 0 };
 			if (m) trt_measure(m, &s);
 			sprintf(msg, "bow-tie (%s): area %.12g of 2, %u triangles", r ? "non-zero" : "even-odd", m ? s.area : 0, m ? s.nt : 0);
 			TEST_ASSERT(m && fabs(s.area - 2) < 1e-9 && s.cw == 0, msg);
@@ -278,7 +278,7 @@ static void test_degenerate(void)
 		qaws_curve *c1 = trt_poly(a, 4), *c2 = trt_poly(b2, 4);
 		qaws_curve const* cs[2];
 		qaws_mesh_2d* m;
-		trt_stats s;
+		trt_stats s = { 0 };
 		cs[0] = c1; cs[1] = c2;
 		m = trt_run(cs, 2, QAWS_FILL_NON_ZERO, 0, 0, 0, NULL);
 		if (m) trt_measure(m, &s);
@@ -307,7 +307,7 @@ static void test_refine(void)
 	cs[0] = o; cs[1] = hr;
 	{
 		qaws_mesh_2d* m = trt_run(cs, 2, QAWS_FILL_NON_ZERO, 2e-3, 30, 0, NULL);
-		trt_stats s;
+		trt_stats s = { 0 };
 		if (m) trt_measure(m, &s);
 		sprintf(msg, "refined to 30 degrees: smallest angle %.3f, %u vertices, %u triangles, boundary on the curves (%.2e), %u not Delaunay",
 			m ? s.min_angle : 0, m ? s.nv : 0, m ? s.nt : 0, m ? s.on_curve : 0, m ? s.not_delaunay : 0);
@@ -316,7 +316,7 @@ static void test_refine(void)
 	}
 	{
 		qaws_mesh_2d* m = trt_run(cs, 2, QAWS_FILL_NON_ZERO, 2e-3, 20, 0.002, NULL);
-		trt_stats s;
+		trt_stats s = { 0 };
 		if (m) trt_measure(m, &s);
 		sprintf(msg, "maximum area 0.002: largest %.5f, smallest angle %.2f, %u triangles", m ? s.max_area : 0, m ? s.min_angle : 0, m ? s.nt : 0);
 		TEST_ASSERT(m && s.nt > 0 && s.max_area <= 0.002 * (1 + 1e-9) && s.min_angle >= 20 - 1e-6 && s.cw == 0, msg);
@@ -324,7 +324,7 @@ static void test_refine(void)
 	}
 	{
 		qaws_mesh_2d* m = trt_run(cs, 2, QAWS_FILL_NON_ZERO, 2e-3, 0, 0, trt_size);
-		trt_stats s;
+		trt_stats s = { 0 };
 		unsigned int i, over = 0;
 		if (m)
 		{

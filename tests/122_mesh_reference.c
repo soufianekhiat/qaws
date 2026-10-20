@@ -409,7 +409,7 @@ static void test_projection(void)
 		qaws_mesh_3d* two = NULL;
 		qaws_mesh_reference* r = NULL;
 		qaws_scalar p[3] = { 0.5f, 0.4f, 0.06f }, d0 = 0, d1 = 0;
-		qaws_mesh_location l0, l1, hint;
+		qaws_mesh_location l0 = { 0 }, l1 = { 0 }, hint;
 		memset(&d, 0, sizeof d);
 		d.positions = x; d.vertex_count = 8; d.face_vertices = f; d.face_count = 4;
 		qaws_mesh_3d_create(&two, &d);

@@ -32,6 +32,10 @@ namespace Qaws
 
             // Link against Qaws library
             conf.AddPrivateDependency<QawsLibProject>(target);
-        }
+
+            // The suites branch on the precision (sizeof(qaws_scalar), *_F32): constant conditions by design
+            conf.AdditionalCompilerOptions.Add("/wd4127");
+            // winbase.h under the conforming preprocessor (the SDK's, not ours)
+            conf.AdditionalCompilerOptions.Add("/wd5105");        }
     }
 }

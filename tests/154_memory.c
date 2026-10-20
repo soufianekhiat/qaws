@@ -188,7 +188,7 @@ static unsigned int mm_workload(void)
 	if (g_parts & MM_REPULSIVE)
 	{
 		qaws_repulsive_curves_desc rd;
-		qaws_repulsive_curves_solve_desc sd;
+		qaws_repulsive_curves_solve_desc rsd;
 		qaws_repulsive_curves* rc = NULL;
 		qaws_scalar pos[48];
 		unsigned int edges[32];
@@ -209,9 +209,9 @@ static unsigned int mm_workload(void)
 		g_published += st != QAWS_STATUS_OK && rc != NULL;
 		if (rc)
 		{
-			memset(&sd, 0, sizeof sd);
-			sd.max_iterations = 2;
-			failures += qaws_repulsive_curves_solve(NULL, pos, rc, &sd) != QAWS_STATUS_OK;
+			memset(&rsd, 0, sizeof rsd);
+			rsd.max_iterations = 2;
+			failures += qaws_repulsive_curves_solve(NULL, pos, rc, &rsd) != QAWS_STATUS_OK;
 			qaws_repulsive_curves_destroy(rc);
 		}
 	}

@@ -157,7 +157,7 @@ static void test_against_float(void)
 	   its curve's start is that start on the parameter lattice): each circle
 	   and its union with a shifted copy certified, the float areas */
 	{
-		static double const cs[5][3] = { { 0.02, 0.5, 0.5 }, { 0.0, 0.5, 0.4 }, { 0.98, 0.45, 0.6 }, { 0.05, 0.3, 0.3 }, { 0.99, 0.6, 0.25 } };
+		static double const cs5[5][3] = { { 0.02, 0.5, 0.5 }, { 0.0, 0.5, 0.4 }, { 0.98, 0.45, 0.6 }, { 0.05, 0.3, 0.3 }, { 0.99, 0.6, 0.25 } };
 		double off = 0;
 		qaws_status sbad = QAWS_STATUS_OK;
 		unsigned int z;
@@ -168,8 +168,8 @@ static void test_against_float(void)
 			qaws_surface_path X, Y;
 			double af, ae, uf, ue;
 			qaws_status sf, se, tf, te;
-			qaws_surface_curve_create_geodesic_arc(&cx, s, sxt_uv(cs[z][0], cs[z][1]), (qaws_scalar)cs[z][2], 0, (qaws_scalar)(2 * SXT_PI), 0);
-			qaws_surface_curve_create_geodesic_arc(&cy, s, sxt_uv(cs[z][0] + 0.06, cs[z][1] + 0.03), (qaws_scalar)cs[z][2], 0, (qaws_scalar)(2 * SXT_PI), 0);
+			qaws_surface_curve_create_geodesic_arc(&cx, s, sxt_uv(cs5[z][0], cs5[z][1]), (qaws_scalar)cs5[z][2], 0, (qaws_scalar)(2 * SXT_PI), 0);
+			qaws_surface_curve_create_geodesic_arc(&cy, s, sxt_uv(cs5[z][0] + 0.06, cs5[z][1] + 0.03), (qaws_scalar)cs5[z][2], 0, (qaws_scalar)(2 * SXT_PI), 0);
 			px[0] = cx; py[0] = cy;
 			X.curves = px; X.curve_count = 1; X.closed = 1;
 			Y.curves = py; Y.curve_count = 1; Y.closed = 1;

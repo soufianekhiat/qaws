@@ -86,8 +86,8 @@ static void test_square(void)
 	sprintf(msg, "square grown by 1: miter 144 (%.10g), square 132 + 8 sqrt 2 (%.10g), bevel 142 (%.10g), round 140 + pi (%.10g)", am, as, ab, ar);
 	TEST_ASSERT(fabs(am - 144) < OST_TOL * 100 && fabs(as - (132 + 8 * sqrt(2.0))) < OST_TOL * 100 && fabs(ab - 142) < OST_TOL * 100 &&
 		fabs(ar - (140 + OST_PI)) < OST_TOL * 100, msg);
-	sprintf(msg, "square shrunk by 1: 64 (%.10g); by 6: nothing (%u paths)", ai, ne);
-	TEST_ASSERT(fabs(ai - 64) < OST_TOL * 100 && ne == 0, msg);
+	sprintf(msg, "square shrunk by 1: 64 (%.10g); by 6: nothing (%u paths, area %.3g)", ai, ne, az);
+	TEST_ASSERT(fabs(ai - 64) < OST_TOL * 100 && ne == 0 && az == 0, msg);
 	qaws_curve_destroy(c);
 }
 

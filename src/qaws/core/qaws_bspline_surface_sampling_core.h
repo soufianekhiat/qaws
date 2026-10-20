@@ -372,6 +372,7 @@ QAWS_INLINE qaws_vec3 qaws_patch_area_adjoint_cp(QAWS_PATCH_PARAMS, qaws_scalar 
     int li = i - (us - u_degree), lj = j - (vs - v_degree);
     qaws_vec3 su, sv, n, gu, gv, g;
     qaws_scalar len, a, b;
+    QAWS_UNUSED(cp_dot);
     g = qaws_v3_zero();
     if (li < 0 || li > u_degree || lj < 0 || lj > v_degree)
         return g;

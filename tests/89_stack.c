@@ -229,9 +229,9 @@ static void test_boolean(void)
 		for (i = 0; i < n; i++)
 			if (fabs((double)qaws_stack_result_get_z(r, i) - 1) < 1e-12)
 			{
-				double r1 = 0.75, r2 = 1, dd = 0.5;
-				double lens = r1 * r1 * acos((dd * dd + r1 * r1 - r2 * r2) / (2 * dd * r1)) + r2 * r2 * acos((dd * dd + r2 * r2 - r1 * r1) / (2 * dd * r2))
-					- 0.5 * sqrt((-dd + r1 + r2) * (dd + r1 - r2) * (dd - r1 + r2) * (dd + r1 + r2));
+				double r1 = 0.75, r2b = 1, dd = 0.5;
+				double lens = r1 * r1 * acos((dd * dd + r1 * r1 - r2b * r2b) / (2 * dd * r1)) + r2b * r2b * acos((dd * dd + r2b * r2b - r1 * r1) / (2 * dd * r2b))
+					- 0.5 * sqrt((-dd + r1 + r2b) * (dd + r1 - r2b) * (dd - r1 + r2b) * (dd + r1 + r2b));
 				double a = stt_area(qaws_stack_result_get_level(r, i));
 				sprintf(msg, "at z 1 the intersection is the lens of the cone's r 0.75 disc and the sphere's r 1 disc (%.10g vs %.10g)", a, lens);
 				TEST_ASSERT(fabs(a - lens) < STT_TOL(lens), msg);

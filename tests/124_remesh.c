@@ -108,7 +108,7 @@ static void test_sphere(void)
 	qaws_mesh_3d *m = rt_icosphere(nrm), *out = NULL;
 	qaws_mesh_reference_desc rd;
 	qaws_mesh_reference* r = NULL;
-	qaws_mesh_report rep;
+	qaws_mesh_report rep = { 0 };
 	qaws_mesh_topology t;
 	qaws_status st = QAWS_STATUS_INTERNAL_ERROR;
 	unsigned int nv = 0, i, v6 = 0, interior = 0;

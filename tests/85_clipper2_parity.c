@@ -16,9 +16,6 @@
 #include <string.h>
 #include <stdlib.h>
 
-#ifndef QAWS_TEST_DATA_DIR
-#define QAWS_TEST_DATA_DIR "../tests/data"
-#endif
 
 typedef struct c2_paths
 {

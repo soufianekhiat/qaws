@@ -568,8 +568,8 @@ static void test_consistency_and_timing(void)
 {
 	qaws_mesh_3d *m = mm_bumped(), *out = NULL, *big = NULL;
 	qaws_mesh_reference* r = NULL;
-	qaws_mesh_report rep;
-	qaws_mesh_deviation d;
+	qaws_mesh_report rep = { 0 };
+	qaws_mesh_deviation d = { 0 };
 	qaws_shape_quality s;
 	qaws_status st = QAWS_STATUS_INTERNAL_ERROR;
 	char msg[400];

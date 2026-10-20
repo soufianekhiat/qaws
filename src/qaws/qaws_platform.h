@@ -188,6 +188,13 @@
 # define QAWS_SELECT(cond, t, f) ((cond) ? (t) : (f))
 #endif
 
+/* a parameter one function of a shared signature does not use (GLSL has no void cast and no such warning) */
+#if QAWS_BACKEND == QAWS_BACKEND_GLSL
+# define QAWS_UNUSED(x)
+#else
+# define QAWS_UNUSED(x) (void)(x)
+#endif
+
 /* ===================================================================
  * Utility functions
  * =================================================================== */

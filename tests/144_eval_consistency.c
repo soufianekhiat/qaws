@@ -181,7 +181,7 @@ static void test_inline_copy(void)
 	qaws_scalar coef[3 * 3] = { 1, 2, 3, 0.5, -1, 2, 0.25, 0.1, -0.3 };
 	qaws_bezier_desc bd;
 	qaws_polynomial_desc pd;
-	qaws_curve_inline a, b, p, q;
+	qaws_curve_inline a, b, p = { 0 }, q;
 	ec_holder h[2];
 	unsigned int bad = 0, k;
 	memset(&bd, 0, sizeof bd);

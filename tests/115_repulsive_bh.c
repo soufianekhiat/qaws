@@ -120,7 +120,7 @@ static void rb_sphere(unsigned int level, qaws_scalar* xs, unsigned int* tris, u
 	static unsigned int const of[8][3] = { { 0, 2, 4 }, { 2, 1, 4 }, { 1, 3, 4 }, { 3, 0, 4 }, { 2, 0, 5 }, { 1, 2, 5 }, { 3, 1, 5 }, { 0, 3, 5 } };
 	unsigned int l, i, n = 6, f = 8, q;
 	double* x = (double*)malloc(sizeof(double) * 3 * (2 + 4 * (1u << (2 * level))) * 2);
-	unsigned int* t2 = (unsigned int*)malloc(sizeof(unsigned int) * 3 * 8 * (1u << (2 * level)));
+	unsigned int* t2 = (unsigned int*)malloc(sizeof(unsigned int) * 3 * 8 * ((size_t)1 << (2 * level)));
 	memcpy(x, ov, sizeof(ov));
 	memcpy(tris, of, sizeof(of));
 	for (l = 0; l < level; l++)

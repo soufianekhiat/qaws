@@ -15,6 +15,11 @@
 #include <string.h>
 #include <math.h>
 
+/* the test data (the build defines it; run from working_dir otherwise) */
+#ifndef QAWS_TEST_DATA_DIR
+#define QAWS_TEST_DATA_DIR "../tests/data"
+#endif
+
 #ifdef _WIN32
 #include <direct.h>
 #define MKDIR(path) _mkdir(path)

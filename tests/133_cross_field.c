@@ -527,7 +527,7 @@ static void test_indices(void)
 {
 	qaws_mesh_3d *s = cft_sphere(8), *t = cft_torus(30, 12, 2, 0.75), *disc = cft_disc(0.08);
 	unsigned int nfs = qaws_mesh_3d_get_face_count(s), nft = qaws_mesh_3d_get_face_count(t), nfd = disc ? qaws_mesh_3d_get_face_count(disc) : 0;
-	unsigned int p4, o4, p6, o6, p2, o2, pt, ot, pd, od, f;
+	unsigned int p4, o4, p6, o6, p2, o2, pt, ot, pd = 0, od = 0, f;
 	int* idx = (int*)malloc(sizeof(int) * (nfs + nft + nfd + 1)), tsum = 0, tbig = 0;
 	qaws_status s4, s6, s2, st, sd = QAWS_STATUS_INTERNAL_ERROR;
 	char msg[400];

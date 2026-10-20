@@ -67,6 +67,12 @@ All notable changes to Qaws are documented here.
   density, stroke and attractor), which the f64 build fails too with its
   input rounded to float: the quad meshers are sensitive to input noise of
   1e-7 (open).
+- Sharpmake: the test project builds again at /W4 /WX (Release f32 and f64):
+  tests 93 and 94 read their data through an undefined `QAWS_TEST_DATA_DIR`
+  (now defaulted in test_common.h), variables possibly used uninitialized,
+  shadowed locals, 32-bit shifts widened; `QAWS_UNUSED` for the core
+  headers; constant conditions (the precision branches) and the SDK's
+  winbase.h warning disabled for the tests only.
 
 ## [1.0.0] - 2026-03-12
 

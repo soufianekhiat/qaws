@@ -565,18 +565,18 @@ static int rq_invariants(qaws_mesh_3d const* in, qaws_mesh_3d const* out, qaws_m
 	for (i = 0; i < 2 * nfe; i++)
 	{
 		qaws_mesh_location const* f = &l[fe[i]];
-		unsigned int tv[3], on = 0;
+		unsigned int tri[3], on = 0;
 		double b[3];
-		qaws_mesh_reference_get_triangle(tv, r, f->patch);
+		qaws_mesh_reference_get_triangle(tri, r, f->patch);
 		b[0] = 1 - f->a - f->b;
 		b[1] = f->a;
 		b[2] = f->b;
 		for (k = 0; k < 3; k++)
 		{
-			unsigned long long key = rq_key(tv[k], tv[(k + 1) % 3]);
+			unsigned long long key = rq_key(tri[k], tri[(k + 1) % 3]);
 			if (b[(k + 2) % 3] <= TEST_BOUND(1e-9, 32) && nk && bsearch(&key, keys, nk, sizeof *keys, rq_key_cmp))
 				on = 1;
-			if (b[k] >= 1 - TEST_BOUND(1e-9, 32) && onf[tv[k]])
+			if (b[k] >= 1 - TEST_BOUND(1e-9, 32) && onf[tri[k]])
 				on = 1;
 		}
 		crease &= on;
@@ -744,7 +744,7 @@ static void test_angles(rq_shapes const* s)
 	{
 		qaws_mesh_report rep;
 		rq_meas q;
-		double sec;
+		double sec = 0;
 		qaws_mesh_3d* out = c[i].m && c[i].r ? rq_remesh(c[i].m, c[i].r, c[i].L, c[i].sf, 35, 86, 0, &rep, &sec) : NULL;
 		if (!out)
 		{
