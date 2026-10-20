@@ -87,6 +87,7 @@
 #include "qaws_volume_mesh.h"
 #include "qaws_tetrahedralize.h"
 #include "qaws_hexahedralize.h"
+#include "qaws_boundary_layers.h"
 #include "qaws_triangulate.h"
 #include "qaws_region_sample.h"
 #include "qaws_mean_value.h"

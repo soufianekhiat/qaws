@@ -112,6 +112,7 @@ src/qaws/mesh/qaws_mesh_generate.c
 src/qaws/mesh/qaws_volume_mesh.c
 src/qaws/mesh/qaws_tetrahedralize.c
 src/qaws/mesh/qaws_hexahedralize.c
+src/qaws/mesh/qaws_boundary_layers.c
 src/qaws/mesh/qaws_frame_field.c
 src/qaws/mesh/qaws_mesh_measure.c
 src/qaws/mesh/qaws_remesh_cvt.c

@@ -157,6 +157,7 @@ add_executable(
 153_parameterization.c
 154_memory.c
 155_precision_both.c
+156_boundary_layers.c
 )
 
 # The amalgamated library exports exactly the same symbols, so the tests can

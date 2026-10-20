@@ -40,6 +40,11 @@ All notable changes to Qaws are documented here.
 - `.github/workflows/permutations.yml` builds every combination of OS, scalar
   type, SIMD, and translation-unit layout, and compiles the amalgamation
   standalone on all three platforms.
+- Boundary layers: `qaws_volume_mesh_grow_layers` (`qaws_boundary_layers.h`)
+  grows layers of prisms and hexahedra from a surface's triangles and quads,
+  inward or outward, at a first height and a growth ratio, thinned where
+  they would meet the surface or each other; every corner's Jacobian
+  positive (test 156).
 - Halide evaluates the curve and surface records (`qaws_curve_record_core.h`,
   `qaws_surface_record_core.h`) with the knot span found at run time, an
   `Expr` per element; `qaws_index` (an `int`, an `Expr` in Halide) for the

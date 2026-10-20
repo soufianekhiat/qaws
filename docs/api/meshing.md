@@ -18,6 +18,7 @@ enters and leaves as arrays; qaws reads and writes no files.
 | `qaws_volume_mesh.h` | `qaws_volume_mesh`: tetrahedra, hexahedra, prisms, pyramids |
 | `qaws_tetrahedralize.h` | tetrahedra filling a closed surface (DELAUNAY) |
 | `qaws_hexahedralize.h` | hexahedra filling a closed surface (GRID) |
+| `qaws_boundary_layers.h` | boundary layers: prisms and hexahedra grown from a surface |
 
 Every operator has a `method` field. The methods listed as reserved return
 `QAWS_STATUS_UNSUPPORTED_OPERATION` until they land. Operators never change
@@ -825,6 +826,32 @@ bent or twisted bar as a bent or twisted grid. Fields with singular edges
 (a sphere, a round torus) or that turn round a hole give
 `QAWS_STATUS_UNSUPPORTED_OPERATION`. `POLYCUBE` is reserved.
 
+## Boundary layers
+
+```c
+qaws_status qaws_volume_mesh_grow_layers(qaws_volume_mesh** out_mesh, qaws_mesh_report* out_report,
+	qaws_mesh_3d const* surface, qaws_boundary_layers_desc const* desc);
+```
+
+Thin cells grown from a surface in `layer_count` layers, the first
+`first_height` thick and each the one before times `growth` (0: 1.2), as
+flow solvers want along walls. Triangles become stacks of prisms, quads
+stacks of hexahedra; a closed surface turned outward grows inward unless
+`outward` is set, an open surface grows too. Vertex v of layer k is
+`k * vertex_count + v`, so the last layer is an offset copy of the surface
+(the border of what a tetrahedralization of the rest would fill).
+
+Each vertex moves along one direction: its faces' normals weighted by
+their angles, turned until every face round it sees it, its height
+stretched so the layers stay as thick across the faces (a box's corner
+moves along its diagonal by sqrt 3 times the height: the layers of a box
+are boxes). A stack is thinned where it would reach the surface (at most
+0.4 of the distance along its direction) or its neighbours' (directions
+converging in a concave region), neighbours kept within 1.25 of each
+other, and halved where a cell would turn over: every corner's Jacobian
+is positive. `report.moves` counts the stacks thinned, `iterations` the
+halving rounds. Test 156.
+
 ## Example: a NURBS torus, its surface, tetrahedra and hexahedra
 
 ```c
@@ -864,7 +891,10 @@ those alone (1 to 9, then a to i for figures 10 to 18: `5c` draws 5 and
   not a global solve; the field's singularities are those of a smooth field
   (or one drawn to curvature), not placed for the fewest irregular
   vertices; the pipeline is sensitive to tiny changes of the input (a
-  scale of 1e-12 can change the quads, not their quality). GLOBAL keeps
+  scale of 1e-12 can change the quads; rounding the input to float, 1e-7,
+  moved a painted density's fine spacing by 22% and a torus from 275 to
+  230 quads, so five quality checks of 125 to 137 fail in single
+  precision). GLOBAL keeps
   the flow's integers whenever they give a map, even a poorer one than its
   own quantization would (the box at 0.75 times its target: 2 irregular
   vertices, SJ min 0.03, where the quantized integers give 0 and 0.49;
@@ -877,6 +907,11 @@ those alone (1 to 9, then a to i for figures 10 to 18: `5c` draws 5 and
   gives up past 48 cones. Paths to the border exist for singular faces,
   not for corners. INSTANT's mesh is still returned when neither set of
   integers leaves a fold-free map that winds once round every free vertex.
+- Boundary layers: the distance ahead is found against every face (no
+  hierarchy: slow past 10^5 faces); thinning is per stack, so a thin wall
+  meshed coarsely across its edges (a vertex at a rim moving diagonally
+  above a side's next vertex) is thinned by the rim's spacing, not the
+  wall's thickness; no layers on a vertex no direction serves (a spike).
 - Generation: vertices on a trimmed face's trim curve are snapped onto the
   surface, not the curve.
 - Tetrahedra: improvement by flips and smoothing only (no edge removal or
