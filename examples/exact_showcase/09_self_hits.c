@@ -39,10 +39,10 @@ static void demo_self_hits(void)
 	d.control_point_count = 6;
 	d.knots = kn_star;
 	d.knot_count = 9;
-	qaws_curve_create_bspline(&d, &cs);
-	qaws_exact_curve_prepare(&desc, cs, &es, NULL);
-	ss = qaws_exact_curve_self_hits(es, hs, 32, &ns);
-	qaws_curve_find_self_intersections_2d(cs, f2, 64, &nf2);
+	qaws_curve_create_bspline(&cs, &d);
+	qaws_exact_curve_prepare(&es, NULL, cs, &desc);
+	ss = qaws_exact_curve_self_hits(hs, &ns, es, 32);
+	qaws_curve_find_self_intersections_2d(f2, &nf2, cs, 64);
 	/* a trefoil knot: a closed (periodic) cubic B-spline in space */
 	for (i = 0; i < 12; i++)
 	{
@@ -65,10 +65,10 @@ static void demo_self_hits(void)
 	d.control_point_count = 15;
 	d.knots = kn_knot;
 	d.knot_count = 19;
-	qaws_curve_create_bspline(&d, &ck);
-	qaws_exact_curve_prepare(&desc, ck, &ek, NULL);
-	sk = qaws_exact_curve_self_hits(ek, hk, 32, &nk);
-	qaws_curve_find_self_intersections_3d(ck, f3, 64, &nf3);
+	qaws_curve_create_bspline(&ck, &d);
+	qaws_exact_curve_prepare(&ek, NULL, ck, &desc);
+	sk = qaws_exact_curve_self_hits(hk, &nk, ek, 32);
+	qaws_curve_find_self_intersections_3d(f3, &nf3, ck, 64);
 
 	svg_open(&sv, "showcase/exact9_self_hits.svg", 880, 540, "Certified self-intersections",
 		"Left: a B-spline star, crossings isolated exactly. Right: a trefoil knot, whose shadow crosses itself while the curve never does.");
@@ -78,7 +78,7 @@ static void demo_self_hits(void)
 		for (i = 0; i <= 700; i++)
 		{
 			double out[2];
-			qaws_exact_curve_evaluate(es, t0 + (t1 - t0) * i / 700.0, 0, out, NULL);
+			qaws_exact_curve_evaluate(out, NULL, es, t0 + (t1 - t0) * i / 700.0, 0);
 			xy[2 * i] = vx(&va, out[0]);
 			xy[2 * i + 1] = vy(&va, out[1]);
 		}
@@ -86,7 +86,7 @@ static void demo_self_hits(void)
 		for (i = 0; i < ns; i++)
 		{
 			double p[2];
-			qaws_exact_curve_evaluate(es, 0.5 * (hs[i].a_lo + hs[i].a_hi), 0, p, NULL);
+			qaws_exact_curve_evaluate(p, NULL, es, 0.5 * (hs[i].a_lo + hs[i].a_hi), 0);
 			svg_circle(&sv, vx(&va, p[0]), vy(&va, p[1]), 6, "none", "#1a7f37");
 		}
 		sprintf(buf, "exact: %u crossings (status %d); qaws f64 finder: %u; Mathematica: 5", ns, (int)ss, nf2);
@@ -99,8 +99,8 @@ static void demo_self_hits(void)
 		{
 			double p[3], q[3];
 			char col[32];
-			qaws_exact_curve_evaluate(ek, t0 + (t1 - t0) * i / 600.0, 0, p, NULL);
-			qaws_exact_curve_evaluate(ek, t0 + (t1 - t0) * (i + 1) / 600.0, 0, q, NULL);
+			qaws_exact_curve_evaluate(p, NULL, ek, t0 + (t1 - t0) * i / 600.0, 0);
+			qaws_exact_curve_evaluate(q, NULL, ek, t0 + (t1 - t0) * (i + 1) / 600.0, 0);
 			heat(0.5 + 0.3 * p[2], col);
 			svg_line(&sv, vx(&vb, p[0]), vy(&vb, p[1]), vx(&vb, q[0]), vy(&vb, q[1]), col, 3.0, 1);
 		}

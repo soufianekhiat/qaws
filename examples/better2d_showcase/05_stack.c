@@ -16,7 +16,7 @@ static void sk_draw_region(svg* s, sk_view const* sv, qaws_clip_result const* r,
 	for (i = 0; r && i < qaws_clip_result_get_path_count(r); i++)
 	{
 		qaws_path_2d p;
-		qaws_clip_result_get_path(r, i, &p);
+		qaws_clip_result_get_path(&p, r, i);
 		for (k = 0; k < p.curve_count; k++)
 		{
 			double xy[2 * 97];
@@ -24,7 +24,7 @@ static void sk_draw_region(svg* s, sk_view const* sv, qaws_clip_result const* r,
 			for (j = 0; j <= 96; j++)
 			{
 				qaws_eval_result_2d e;
-				qaws_curve_evaluate_2d(p.curves[k], (qaws_scalar)(rg.min_value + (rg.max_value - rg.min_value) * j / 96), QAWS_EVAL_FLAG_POSITION, &e);
+				qaws_curve_evaluate_2d(&e, p.curves[k], (qaws_scalar)(rg.min_value + (rg.max_value - rg.min_value) * j / 96), QAWS_EVAL_FLAG_POSITION);
 				xy[2 * j] = vx(&sv->v, e.position.x) + sv->sx * z;
 				xy[2 * j + 1] = vy(&sv->v, e.position.y * 0.45) - sv->sy * z;
 			}
@@ -41,14 +41,14 @@ static void sk_draw_stack(svg* s, sk_view const* sv, qaws_stack_2d const* st, un
 	{
 		double z = z0 + (z1 - z0) * i / sections;
 		qaws_clip_result* r = NULL;
-		if (qaws_stack_section_2d(st, (qaws_scalar)z, &r) == QAWS_STATUS_OK)
+		if (qaws_stack_section_2d(&r, st, (qaws_scalar)z) == QAWS_STATUS_OK)
 			sk_draw_region(s, sv, r, z, scol, 1.0, 0.75);
 		qaws_clip_result_destroy(r);
 	}
 	for (i = 0; i < st->level_count; i++)
 	{
 		qaws_clip_result* r = NULL;
-		if (qaws_stack_section_2d(st, st->levels[i].z, &r) == QAWS_STATUS_OK)
+		if (qaws_stack_section_2d(&r, st, st->levels[i].z) == QAWS_STATUS_OK)
 			sk_draw_region(s, sv, r, st->levels[i].z, "#24292f", 1.6, 0.95);
 		qaws_clip_result_destroy(r);
 	}
@@ -78,10 +78,10 @@ static qaws_curve* sk_circ(double x, double y, double r)
 	if (r < 1e-9)
 	{
 		qaws_scalar p[4] = { (qaws_scalar)x, (qaws_scalar)y, (qaws_scalar)x, (qaws_scalar)y };
-		qaws_curve_create_polyline_2d(p, 2, 1, &c);
+		qaws_curve_create_polyline_2d(&c, p, 2, 1);
 	}
 	else
-		qaws_curve_create_ellipse_2d((qaws_scalar)x, (qaws_scalar)y, (qaws_scalar)r, (qaws_scalar)r, 0, &c);
+		qaws_curve_create_ellipse_2d(&c, (qaws_scalar)x, (qaws_scalar)y, (qaws_scalar)r, (qaws_scalar)r, 0);
 	return c;
 }
 
@@ -158,7 +158,7 @@ static void demo_stack(void)
 			qaws_path_2d p[3];
 			qaws_stack_level lv[2];
 			qaws_stack_2d st;
-			qaws_curve_create_ellipse_2d((qaws_scalar)0.2, 0, (qaws_scalar)2.2, (qaws_scalar)1.0, 0, &e);
+			qaws_curve_create_ellipse_2d(&e, (qaws_scalar)0.2, 0, (qaws_scalar)2.2, (qaws_scalar)1.0, 0);
 			v[0] = e; v[1] = c1; v[2] = c2;
 			for (i = 0; i < 3; i++) { p[i].curves = &v[i]; p[i].curve_count = 1; p[i].closed = 1; }
 			lv[0].z = 0; lv[0].paths = &p[0]; lv[0].path_count = 1;
@@ -176,7 +176,7 @@ static void demo_stack(void)
 			qaws_clip_type ct = k == 4 ? QAWS_CLIP_INTERSECTION : QAWS_CLIP_UNION;
 			sprintf(label, "cone %s sphere, solved at every level of either", k == 4 ? "x" : "+");
 			svg_panel(&s, &sv.v, label);
-			if (qaws_stack_boolean_2d(ct, &st_cone, &st_sph_c, NULL, &r) == QAWS_STATUS_OK)
+			if (qaws_stack_boolean_2d(&r, &st_cone, &st_sph_c, ct, NULL) == QAWS_STATUS_OK)
 			{
 				for (i = 0; i < qaws_stack_result_get_level_count(r); i++)
 					sk_draw_region(&s, &sv, qaws_stack_result_get_level(r, i), qaws_stack_result_get_z(r, i),

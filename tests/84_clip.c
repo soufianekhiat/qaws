@@ -32,7 +32,7 @@ static qaws_curve* clt_poly(double const* xy, unsigned int n)
 	qaws_curve* c = NULL;
 	unsigned int i;
 	for (i = 0; i < 2 * n; i++) p[i] = (qaws_scalar)xy[i];
-	qaws_curve_create_polyline_2d(p, n, 1, &c);
+	qaws_curve_create_polyline_2d(&c, p, n, 1);
 	return c;
 }
 
@@ -50,8 +50,8 @@ static double clt_area(qaws_clip_result const* r)
 	{
 		qaws_path_2d p;
 		qaws_scalar a = 0;
-		qaws_clip_result_get_path(r, i, &p);
-		qaws_path_compute_area_2d(&p, &a);
+		qaws_clip_result_get_path(&p, r, i);
+		qaws_path_compute_area_2d(&a, &p);
 		sum += a;
 	}
 	return sum;
@@ -61,7 +61,7 @@ static unsigned int clt_vertices(qaws_clip_result const* r, unsigned int i)
 {
 	qaws_clip_vertex const* v = NULL;
 	unsigned int n = 0;
-	qaws_clip_result_get_vertices(r, 0, i, &v, &n);
+	qaws_clip_result_get_vertices(&v, &n, r, 0, i);
 	return n;
 }
 
@@ -79,7 +79,7 @@ static qaws_clip_result* clt_run(qaws_clip_type ct, qaws_fill_rule fr, qaws_curv
 	d.subjects = sp; d.subject_count = ns;
 	d.clips = cp; d.clip_count = nc;
 	d.clip_type = ct; d.fill_rule = fr; d.flags = flags;
-	s = qaws_clip_execute(&d, &r);
+	s = qaws_clip_execute(&r, &d);
 	if (s != QAWS_STATUS_OK)
 		printf("    clip status %d\n", (int)s);
 	return r;
@@ -106,7 +106,7 @@ static void test_squares(void)
 		if (r && ct == QAWS_CLIP_UNION)
 		{
 			qaws_path_2d p;
-			qaws_clip_result_get_path(r, 0, &p);
+			qaws_clip_result_get_path(&p, r, 0);
 			sprintf(msg, "union: one closed polyline of 8 corners (curves %u, kind %d, vertices %u)", p.curve_count,
 				p.curve_count ? (int)qaws_curve_get_kind(p.curves[0]) : -1, clt_vertices(r, 0));
 			TEST_ASSERT(p.curve_count == 1 && qaws_curve_get_kind(p.curves[0]) == QAWS_CURVE_KIND_BSPLINE && clt_vertices(r, 0) == 8, msg);
@@ -245,8 +245,8 @@ static void test_circles(void)
 	qaws_curve const* sb;
 	char msg[256];
 	double r = 1, dd = 1.2, lens, half;
-	qaws_curve_create_ellipse_2d(0, 0, 1, 1, 0, &a);
-	qaws_curve_create_ellipse_2d((qaws_scalar)dd, 0, 1, 1, 0, &b);
+	qaws_curve_create_ellipse_2d(&a, 0, 0, 1, 1, 0);
+	qaws_curve_create_ellipse_2d(&b, (qaws_scalar)dd, 0, 1, 1, 0);
 	sa = a; sb = b;
 	/* lens of two unit circles at distance d */
 	lens = 2 * r * r * acos(dd / (2 * r)) - 0.5 * dd * sqrt(4 * r * r - dd * dd);
@@ -259,7 +259,7 @@ static void test_circles(void)
 		if (ri && qaws_clip_result_get_path_count(ri) == 1)
 		{
 			unsigned int k;
-			qaws_clip_result_get_path(ri, 0, &p);
+			qaws_clip_result_get_path(&p, ri, 0);
 			nurbs = p.curve_count == 2 || p.curve_count == 3;   /* 3 when an arc crosses a circle's seam */
 			for (k = 0; k < p.curve_count; k++)
 				nurbs = nurbs && qaws_curve_get_kind(p.curves[k]) == QAWS_CURVE_KIND_NURBS;
@@ -303,7 +303,7 @@ static void test_open_and_z(void)
 	qaws_clip_result* r = NULL;
 	unsigned int zc = 0;
 	char msg[256];
-	qaws_curve_create_polyline_2d(lp, 2, 0, &line);
+	qaws_curve_create_polyline_2d(&line, lp, 2, 0);
 	cl = line;
 	clip.curves = &cs; clip.curve_count = 1; clip.closed = 1;
 	open.curves = &cl; open.curve_count = 1; open.closed = 0;
@@ -311,7 +311,7 @@ static void test_open_and_z(void)
 	d.open_subjects = &open; d.open_subject_count = 1;
 	d.clips = &clip; d.clip_count = 1;
 	d.clip_type = QAWS_CLIP_INTERSECTION; d.fill_rule = QAWS_FILL_NON_ZERO;
-	qaws_clip_execute(&d, &r);
+	qaws_clip_execute(&r, &d);
 	{
 		unsigned int ni = r ? qaws_clip_result_get_open_path_count(r) : 0, no;
 		double len = 0;
@@ -320,12 +320,12 @@ static void test_open_and_z(void)
 		{
 			qaws_path_2d p;
 			qaws_scalar l = 0;
-			qaws_clip_result_get_open_path(r, 0, &p);
-			qaws_path_compute_length_2d(&p, &l);
+			qaws_clip_result_get_open_path(&p, r, 0);
+			qaws_path_compute_length_2d(&l, &p);
 			len = l;
 		}
 		d.clip_type = QAWS_CLIP_DIFFERENCE;
-		qaws_clip_execute(&d, &r2);
+		qaws_clip_execute(&r2, &d);
 		no = r2 ? qaws_clip_result_get_open_path_count(r2) : 0;
 		sprintf(msg, "a line through a square: intersection keeps the inside piece (%u, length %.12g), difference the two outside (%u)", ni, len, no);
 		TEST_ASSERT(ni == 1 && fabs(len - 2) < CLT_TOL && no == 2, msg);
@@ -340,11 +340,11 @@ static void test_open_and_z(void)
 	d.clip_type = QAWS_CLIP_UNION; d.fill_rule = QAWS_FILL_NON_ZERO;
 	d.z_fn = clt_z; d.z_user = &zc;
 	r = NULL;
-	qaws_clip_execute(&d, &r);
+	qaws_clip_execute(&r, &d);
 	{
 		qaws_clip_vertex const* v = NULL;
 		unsigned int n = 0, k, zok = 0;
-		if (r) qaws_clip_result_get_vertices(r, 0, 0, &v, &n);
+		if (r) qaws_clip_result_get_vertices(&v, &n, r, 0, 0);
 		for (k = 0; k < n; k++)
 			if (v[k].operand_b != QAWS_CLIP_NONE_INDEX && fabs(v[k].z - (v[k].position.x + v[k].position.y)) < 1e-12)
 				zok++;
@@ -367,7 +367,7 @@ static qaws_curve* clt_seg(double x0, double y0, double x1, double y1)
 	p[0] = (qaws_scalar)x0; p[1] = (qaws_scalar)y0; p[2] = (qaws_scalar)x1; p[3] = (qaws_scalar)y1;
 	memset(&d, 0, sizeof(d));
 	d.dimension = QAWS_DIMENSION_2D; d.degree = 1; d.control_points = p; d.control_point_count = 2;
-	qaws_curve_create_bezier(&d, &c);
+	qaws_curve_create_bezier(&c, &d);
 	return c;
 }
 
@@ -381,7 +381,7 @@ static qaws_curve* clt_half(double cx, double a0)
 	g.angle_start = (qaws_scalar)a0; g.angle_end = (qaws_scalar)(a0 + CLT_PI);
 	memset(&ad, 0, sizeof(ad));
 	ad.dimension = QAWS_DIMENSION_2D; ad.segments = &g; ad.segment_count = 1;
-	qaws_curve_create_arc(&ad, &c);
+	qaws_curve_create_arc(&c, &ad);
 	return c;
 }
 
@@ -404,13 +404,13 @@ static void test_tangent_fan(void)
 	p.curves = (qaws_curve const**)c; p.curve_count = 12; p.closed = 1;
 	memset(&cd, 0, sizeof(cd));
 	cd.subjects = &p; cd.subject_count = 1; cd.clip_type = QAWS_CLIP_UNION; cd.fill_rule = QAWS_FILL_POSITIVE;
-	qaws_clip_execute(&cd, &r);
+	qaws_clip_execute(&r, &cd);
 	for (i = 0; r && i < qaws_clip_result_get_path_count(r); i++)
 	{
 		qaws_path_2d q;
 		qaws_scalar a = 0;
-		qaws_clip_result_get_path(r, i, &q);
-		qaws_path_compute_area_2d(&q, &a);
+		qaws_clip_result_get_path(&q, r, i);
+		qaws_path_compute_area_2d(&a, &q);
 		area += a;
 	}
 	n = r ? qaws_clip_result_get_path_count(r) : 0;
@@ -452,7 +452,7 @@ static void test_collinear_strokes(void)
 		{
 			qaws_scalar cp[16];
 			unsigned int ncp = 0;
-			qaws_curve_get_control_points(c[k], cp, 8, &ncp);
+			qaws_curve_get_control_points(cp, &ncp, c[k], 8);
 			for (j = 0; j < 8; j++)
 				ip[8 * k + j] = (int64_t)floor((double)cp[j] * scale + 0.5);
 		}
@@ -466,16 +466,16 @@ static void test_collinear_strokes(void)
 		qaws_clip64_result* r64 = NULL;
 		double a = 0, a64 = 0;
 		unsigned int z;
-		qaws_clip_boolean(QAWS_CLIP_UNION, fr, p, N, NULL, 0, &r);
+		qaws_clip_boolean(&r, p, NULL, N, 0, QAWS_CLIP_UNION, fr);
 		if (r) a = clt_area(r);
 		memset(&d64, 0, sizeof(d64));
 		d64.subjects = p64; d64.subject_count = N; d64.clip_type = QAWS_CLIP_UNION; d64.fill_rule = fr;
-		qaws_clip64_execute(&d64, &r64);
+		qaws_clip64_execute(&r64, &d64);
 		for (z = 0; r64 && z < qaws_clip64_result_get_path_count(r64); z++)
 		{
 			int64_t const* pp;
 			unsigned int m;
-			qaws_clip64_result_get_path(r64, z, &pp, &m);
+			qaws_clip64_result_get_path(&pp, &m, r64, z);
 			a64 += 0.5 * qaws_path64_area2(pp, m) / (scale * scale);
 		}
 		sprintf(msg, "strokes of a 96-gon on collinear sides, %s: area %.9f (clip64 %.9f)", f ? "even-odd" : "non-zero", a, a64);
@@ -511,22 +511,22 @@ static void test_fine_polygon(void)
 			xy[2 * i] = (qaws_scalar)(0.95 * cos(2 * CLT_PI * i / n));
 			xy[2 * i + 1] = (qaws_scalar)(0.95 * sin(2 * CLT_PI * i / n));
 		}
-		qaws_curve_create_polyline_2d(xy, n, 1, &pl);
+		qaws_curve_create_polyline_2d(&pl, xy, n, 1);
 		memset(&g, 0, sizeof(g));
 		g.center[0] = (qaws_scalar)0.3; g.center[1] = (qaws_scalar)0.1; g.radius = (qaws_scalar)0.4;
 		g.angle_start = (qaws_scalar)(2 * CLT_PI); g.angle_end = 0;
 		memset(&d, 0, sizeof(d));
 		d.dimension = QAWS_DIMENSION_2D; d.segments = &g; d.segment_count = 1;
-		qaws_curve_create_arc(&d, &hole);
+		qaws_curve_create_arc(&hole, &d);
 		cv[0] = pl; cv[1] = hole;
 		p[0].curves = &cv[0]; p[0].curve_count = 1; p[0].closed = 1;
 		p[1].curves = &cv[1]; p[1].curve_count = 1; p[1].closed = 1;
-		qaws_clip_boolean(QAWS_CLIP_UNION, QAWS_FILL_POSITIVE, p, 2, NULL, 0, &r);
+		qaws_clip_boolean(&r, p, NULL, 2, 0, QAWS_CLIP_UNION, QAWS_FILL_POSITIVE);
 		got = r ? clt_area(r) : 0;
 		for (i = 0; r && i < qaws_clip_result_get_path_count(r); i++)
 		{
 			qaws_path_2d q;
-			qaws_clip_result_get_path(r, i, &q);
+			qaws_clip_result_get_path(&q, r, i);
 			empty += q.curve_count == 0;
 		}
 		sprintf(msg, "a %u-gon of a circle with a round hole: %u loops (%u empty), area %.9f (expected %.9f)",

@@ -20,7 +20,7 @@ typedef struct qaws_trajectory_desc
 } qaws_trajectory_desc;
 
 qaws_status qaws_curve_create_trajectory(
-	qaws_trajectory_desc const* desc,
-	qaws_curve** out_curve);
+	qaws_curve** out_curve,
+	qaws_trajectory_desc const* desc);
 
 #endif /* QAWS_TRAJECTORY_H */

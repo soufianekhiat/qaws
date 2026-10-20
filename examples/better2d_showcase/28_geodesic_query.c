@@ -9,7 +9,7 @@
 static void s28_join(ssd_scene* sc, qaws_surface* f, qaws_vec2 a, qaws_vec2 b, int const* rgb, double width)
 {
 	qaws_surface_curve* g = NULL;
-	if (fabs(a.x - b.x) + fabs(a.y - b.y) > 1e-9 && qaws_surface_curve_create_geodesic(f, a, b, 0, &g) == QAWS_STATUS_OK)
+	if (fabs(a.x - b.x) + fabs(a.y - b.y) > 1e-9 && qaws_surface_curve_create_geodesic(&g, f, a, b, 0) == QAWS_STATUS_OK)
 		ssd_curve_line(sc, f, qaws_surface_curve_get_uv(g), rgb, width);
 	qaws_surface_curve_destroy(g);
 }
@@ -46,7 +46,7 @@ static void demo_geodesic_query(void)
 		static double const pts[4][2] = { { 0.3, 0.75 }, { 0.55, 0.85 }, { 0.75, 0.3 }, { 0.45, 0.15 } };
 		qaws_surface_curve* g = NULL;
 		double worst = 0;
-		qaws_surface_curve_create_geodesic(f[0], sgf_uv(0.1, 0.25), sgf_uv(0.9, 0.7), 0, &g);
+		qaws_surface_curve_create_geodesic(&g, f[0], sgf_uv(0.1, 0.25), sgf_uv(0.9, 0.7), 0);
 		s28_scene(&sc, &view, &v3, 0, pw, ph);
 		ssd_surfaces(&sc, f, 1, NULL, 0);
 		if (g) ssd_curve_line(&sc, f[0], qaws_surface_curve_get_uv(g), blue, 1.8);
@@ -54,7 +54,7 @@ static void demo_geodesic_query(void)
 		{
 			qaws_vec2 q, p = sgf_uv(pts[i][0], pts[i][1]);
 			qaws_scalar d = 0;
-			if (qaws_surface_curve_closest_point(g, p, 0, NULL, &q, &d) != QAWS_STATUS_OK)
+			if (qaws_surface_curve_closest_point(NULL, &q, &d, g, p, 0) != QAWS_STATUS_OK)
 				continue;
 			s28_join(&sc, f[0], p, q, red, 1.3);
 			ssd_dot(&sc, f[0], pts[i][0], pts[i][1], black, 3.2);
@@ -73,12 +73,12 @@ static void demo_geodesic_query(void)
 		unsigned int nx = 0;
 		qaws_vec2 pa, pb;
 		qaws_scalar d = 0;
-		qaws_surface_curve_create_geodesic(f[0], sgf_uv(0.15, 0.3), sgf_uv(0.8, 0.65), 0, &a);
-		qaws_surface_curve_create_geodesic(f[0], sgf_uv(0.2, 0.7), sgf_uv(0.8, 0.3), 0, &b);
-		qaws_surface_curve_create_geodesic(f[0], sgf_uv(0.05, 0.92), sgf_uv(0.45, 0.95), 0, &c);
-		qaws_surface_curve_create_geodesic(f[0], sgf_uv(0.62, 0.9), sgf_uv(0.95, 0.5), 0, &e);
-		if (a && b) qaws_surface_curve_intersect(a, b, x, 2, &nx);
-		if (c && e) qaws_surface_curve_closest_points(c, e, 0, NULL, NULL, &pa, &pb, &d);
+		qaws_surface_curve_create_geodesic(&a, f[0], sgf_uv(0.15, 0.3), sgf_uv(0.8, 0.65), 0);
+		qaws_surface_curve_create_geodesic(&b, f[0], sgf_uv(0.2, 0.7), sgf_uv(0.8, 0.3), 0);
+		qaws_surface_curve_create_geodesic(&c, f[0], sgf_uv(0.05, 0.92), sgf_uv(0.45, 0.95), 0);
+		qaws_surface_curve_create_geodesic(&e, f[0], sgf_uv(0.62, 0.9), sgf_uv(0.95, 0.5), 0);
+		if (a && b) qaws_surface_curve_intersect(x, &nx, a, b, 2);
+		if (c && e) qaws_surface_curve_closest_points(NULL, NULL, &pa, &pb, &d, c, e, 0);
 		s28_scene(&sc, &view, &v3, 1, pw, ph);
 		ssd_surfaces(&sc, f, 1, NULL, 0);
 		if (a) ssd_curve_line(&sc, f[0], qaws_surface_curve_get_uv(a), blue, 1.8);
@@ -100,10 +100,10 @@ static void demo_geodesic_query(void)
 		qaws_surface_curve const* pc[1];
 		qaws_surface_path pp;
 		qaws_surface_region* rg = NULL;
-		qaws_surface_curve_create_geodesic_arc(f[0], sgf_uv(0.45, 0.45), (qaws_scalar)0.55, 0, (qaws_scalar)(2 * pi), 0, &cc);
+		qaws_surface_curve_create_geodesic_arc(&cc, f[0], sgf_uv(0.45, 0.45), (qaws_scalar)0.55, 0, (qaws_scalar)(2 * pi), 0);
 		pc[0] = cc;
 		pp.curves = pc; pp.curve_count = 1; pp.closed = 1;
-		qaws_surface_clip(f[0], QAWS_CLIP_NONE, QAWS_FILL_NON_ZERO, &pp, 1, NULL, 0, &rg);
+		qaws_surface_clip(&rg, f[0], &pp, NULL, 1, 0, QAWS_CLIP_NONE, QAWS_FILL_NON_ZERO);
 		s28_scene(&sc, &view, &v3, 2, pw, ph);
 		ssd_surfaces(&sc, f, 1, NULL, 0);
 		if (cc) ssd_curve_line(&sc, f[0], qaws_surface_curve_get_uv(cc), blue, 1.8);
@@ -113,7 +113,7 @@ static void demo_geodesic_query(void)
 			qaws_vec2 q, p = sgf_uv(pts[i][0], pts[i][1]);
 			qaws_scalar d = 0;
 			char one[40];
-			if (qaws_surface_region_distance(rg, p, 0, &d, &q) != QAWS_STATUS_OK)
+			if (qaws_surface_region_distance(&d, &q, rg, p, 0) != QAWS_STATUS_OK)
 				continue;
 			s28_join(&sc, f[0], p, q, d < 0 ? green : red, 1.3);
 			ssd_dot(&sc, f[0], pts[i][0], pts[i][1], d < 0 ? green : red, 3.2);
@@ -139,12 +139,12 @@ static void demo_geodesic_query(void)
 		qaws_surface_region* rg = NULL;
 		double total = 0;
 		unsigned int ok = 0;
-		qaws_surface_curve_create_geodesic_arc(f[0], sgf_uv(0.45, 0.35), (qaws_scalar)0.25, 0, (qaws_scalar)(2 * pi), 0, &c1);
-		qaws_surface_curve_create_geodesic_arc(f[0], sgf_uv(0.55, 0.7), (qaws_scalar)0.2, 0, (qaws_scalar)(2 * pi), 0, &c2);
+		qaws_surface_curve_create_geodesic_arc(&c1, f[0], sgf_uv(0.45, 0.35), (qaws_scalar)0.25, 0, (qaws_scalar)(2 * pi), 0);
+		qaws_surface_curve_create_geodesic_arc(&c2, f[0], sgf_uv(0.55, 0.7), (qaws_scalar)0.2, 0, (qaws_scalar)(2 * pi), 0);
 		p1[0] = c1; p2[0] = c2;
 		pp[0].curves = p1; pp[0].curve_count = 1; pp[0].closed = 1;
 		pp[1].curves = p2; pp[1].curve_count = 1; pp[1].closed = 1;
-		qaws_surface_clip(f[0], QAWS_CLIP_UNION, QAWS_FILL_NON_ZERO, &pp[0], 1, &pp[1], 1, &rg);
+		qaws_surface_clip(&rg, f[0], &pp[0], &pp[1], 1, 1, QAWS_CLIP_UNION, QAWS_FILL_NON_ZERO);
 		s28_scene(&sc, &view, &v3, 3, pw, ph);
 		ssd_surfaces(&sc, f, 1, NULL, 0);
 		if (c1) ssd_curve_line(&sc, f[0], qaws_surface_curve_get_uv(c1), black, 1.4);
@@ -153,10 +153,10 @@ static void demo_geodesic_query(void)
 		{
 			qaws_surface_curve* path = NULL;
 			qaws_scalar L = 0;
-			if (qaws_surface_curve_create_shortest_path(f[0], rg, sgf_uv(0.12, 0.5), sgf_uv(to[i][0], to[i][1]), 0, &path) == QAWS_STATUS_OK)
+			if (qaws_surface_curve_create_shortest_path(&path, f[0], rg, sgf_uv(0.12, 0.5), sgf_uv(to[i][0], to[i][1]), 0) == QAWS_STATUS_OK)
 			{
 				ssd_curve_line(&sc, f[0], qaws_surface_curve_get_uv(path), red, 1.5);
-				qaws_surface_curve_get_length(path, &L);
+				qaws_surface_curve_get_length(&L, path);
 				total += (double)L;
 				ok++;
 			}

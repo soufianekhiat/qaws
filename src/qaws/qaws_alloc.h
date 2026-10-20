@@ -114,34 +114,34 @@ qaws_status qaws_arena_reset(qaws_arena* arena);
 /* --- Curve creation _ex variants --- */
 
 qaws_status qaws_curve_create_bezier_ex(
+	qaws_curve** out_curve,
 	qaws_bezier_desc const* desc,
-	qaws_allocator const* allocator,
-	qaws_curve** out_curve);
+	qaws_allocator const* allocator);
 
 qaws_status qaws_curve_create_hermite_ex(
+	qaws_curve** out_curve,
 	qaws_hermite_desc const* desc,
-	qaws_allocator const* allocator,
-	qaws_curve** out_curve);
+	qaws_allocator const* allocator);
 
 qaws_status qaws_curve_create_catmull_rom_ex(
+	qaws_curve** out_curve,
 	qaws_catmull_rom_desc const* desc,
-	qaws_allocator const* allocator,
-	qaws_curve** out_curve);
+	qaws_allocator const* allocator);
 
 qaws_status qaws_curve_create_bspline_ex(
+	qaws_curve** out_curve,
 	qaws_bspline_desc const* desc,
-	qaws_allocator const* allocator,
-	qaws_curve** out_curve);
+	qaws_allocator const* allocator);
 
 qaws_status qaws_curve_create_nurbs_ex(
+	qaws_curve** out_curve,
 	qaws_nurbs_desc const* desc,
-	qaws_allocator const* allocator,
-	qaws_curve** out_curve);
+	qaws_allocator const* allocator);
 
 qaws_status qaws_curve_create_trajectory_ex(
+	qaws_curve** out_curve,
 	qaws_trajectory_desc const* desc,
-	qaws_allocator const* allocator,
-	qaws_curve** out_curve);
+	qaws_allocator const* allocator);
 
 qaws_status qaws_curve_create_rational_bezier_ex(
 	qaws_rational_bezier_desc const* desc,
@@ -181,19 +181,19 @@ qaws_status qaws_curve_create_subdivision_ex(
 /* --- Surface creation _ex variants --- */
 
 qaws_status qaws_surface_create_bezier_ex(
+	qaws_surface** out_surface,
 	qaws_surface_bezier_desc const* desc,
-	qaws_allocator const* allocator,
-	qaws_surface** out_surface);
+	qaws_allocator const* allocator);
 
 qaws_status qaws_surface_create_bspline_ex(
+	qaws_surface** out_surface,
 	qaws_surface_bspline_desc const* desc,
-	qaws_allocator const* allocator,
-	qaws_surface** out_surface);
+	qaws_allocator const* allocator);
 
 qaws_status qaws_surface_create_nurbs_ex(
+	qaws_surface** out_surface,
 	qaws_surface_nurbs_desc const* desc,
-	qaws_allocator const* allocator,
-	qaws_surface** out_surface);
+	qaws_allocator const* allocator);
 
 qaws_status qaws_surface_create_bilinear_ex(
 	qaws_surface_bilinear_desc const* desc,

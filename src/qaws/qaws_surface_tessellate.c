@@ -50,7 +50,7 @@ static void ts_eval(ts_ctx* c, double u, double v, qaws_surface_eval_result* r)
 {
 	qaws_status st;
 	memset(r, 0, sizeof *r);
-	st = qaws_surface_evaluate(c->s, (qaws_scalar)u, (qaws_scalar)v, QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL, r);
+	st = qaws_surface_evaluate(r, c->s, (qaws_scalar)u, (qaws_scalar)v, QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL);
 	if (st != QAWS_STATUS_OK && c->status == QAWS_STATUS_OK)
 		c->status = st;
 }

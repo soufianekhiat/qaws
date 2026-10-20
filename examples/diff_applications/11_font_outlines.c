@@ -53,7 +53,7 @@ static qaws_curve* fo_curve(fo_loop const* L)
 	d.control_point_count = (unsigned int)(L->n + 3);
 	d.knots = L->knots;
 	d.knot_count = (unsigned int)(L->n + 7);
-	qaws_curve_create_bspline(&d, &c);
+	qaws_curve_create_bspline(&c, &d);
 	return c;
 }
 
@@ -183,7 +183,7 @@ static void fo_project(qaws_curve const* c, fo_loop* L)
 		{
 			qaws_eval_result_2d e;
 			double dx, dy, g, H, t = L->t[i];
-			qaws_curve_evaluate_2d(c, (qaws_scalar)t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2, &e);
+			qaws_curve_evaluate_2d(&e, c, (qaws_scalar)t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2);
 			dx = e.position.x - L->q[2 * i];
 			dy = e.position.y - L->q[2 * i + 1];
 			g = dx * e.d1.x + dy * e.d1.y;
@@ -205,7 +205,7 @@ static double fo_energy(qaws_curve const* c, fo_loop const* L, qaws_scalar* grad
 	int i;
 	for (i = 0; i < L->nq; i++)
 		ts[i] = (qaws_scalar)L->t[i];
-	qaws_curve_eval_batch_tangent_2d(NULL, c, ts, NULL, (unsigned int)L->nq, QAWS_EVAL_FLAG_POSITION, NULL, prim, tan);
+	qaws_curve_eval_batch_tangent_2d(prim, tan, c, ts, NULL, NULL, (unsigned int)L->nq, QAWS_EVAL_FLAG_POSITION, NULL);
 	for (i = 0; i < L->nq; i++)
 	{
 		double dx = prim[i].d[0].x - L->q[2 * i], dy = prim[i].d[0].y - L->q[2 * i + 1], d2 = dx * dx + dy * dy;
@@ -223,7 +223,7 @@ static double fo_energy(qaws_curve const* c, fo_loop const* L, qaws_scalar* grad
 		qaws_field_view fv;
 		qaws_diff_views views = one_field(&fv, QAWS_FIELD_CONTROL_POINTS, ext, (unsigned int)(L->n + 3), 2);
 		memset(ext, 0, sizeof(qaws_scalar) * 2 * (size_t)(L->n + 3));
-		qaws_curve_eval_batch_adjoint_2d(NULL, c, ts, (unsigned int)L->nq, QAWS_EVAL_FLAG_POSITION, bar, &views, NULL);
+		qaws_curve_eval_batch_adjoint_2d(&views, NULL, c, ts, bar, (unsigned int)L->nq, QAWS_EVAL_FLAG_POSITION, NULL);
 		memset(grad, 0, sizeof(qaws_scalar) * 2 * (size_t)L->n);
 		for (i = 0; i < L->n + 3; i++)
 		{
@@ -268,7 +268,7 @@ static void fo_curve_path(svg* s, imgmap const* m, qaws_curve const* c, int star
 	{
 		qaws_eval_result_2d e;
 		double x, y;
-		qaws_curve_evaluate_2d(c, (qaws_scalar)(r.min_value + (r.max_value - r.min_value) * k / n), QAWS_EVAL_FLAG_POSITION, &e);
+		qaws_curve_evaluate_2d(&e, c, (qaws_scalar)(r.min_value + (r.max_value - r.min_value) * k / n), QAWS_EVAL_FLAG_POSITION);
 		map_pt(m, e.position.x, e.position.y, &x, &y);
 		fprintf(s->f, "%s%.2f %.2f", (k == 0 && start) ? "M" : (k == 0 ? "M" : "L"), x, y);
 	}

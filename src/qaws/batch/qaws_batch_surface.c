@@ -138,10 +138,10 @@ void qaws_batch_surface_bspline_eval(
         v_span = qaws_internal_find_knot_span(v_knots, v_knot_count,
                                                v_degree, v_cp_count, v);
 
-        qaws_internal_bspline_basis(u_knots, u_knot_count, u_degree,
-                                     u_span, u, u_basis);
-        qaws_internal_bspline_basis(v_knots, v_knot_count, v_degree,
-                                     v_span, v, v_basis);
+        qaws_internal_bspline_basis(u_basis, u_knots, u_knot_count,
+                                     u_degree, u_span, u);
+        qaws_internal_bspline_basis(v_basis, v_knots, v_knot_count,
+                                     v_degree, v_span, v);
 
         /* Tensor-product summation:
          * S(u,v) = sum_i sum_j N_i(u) * N_j(v) * P_{i,j} */
@@ -213,10 +213,10 @@ void qaws_batch_surface_nurbs_eval(
         v_span = qaws_internal_find_knot_span(v_knots, v_knot_count,
                                                v_degree, v_cp_count, v);
 
-        qaws_internal_bspline_basis(u_knots, u_knot_count, u_degree,
-                                     u_span, u, u_basis);
-        qaws_internal_bspline_basis(v_knots, v_knot_count, v_degree,
-                                     v_span, v, v_basis);
+        qaws_internal_bspline_basis(u_basis, u_knots, u_knot_count,
+                                     u_degree, u_span, u);
+        qaws_internal_bspline_basis(v_basis, v_knots, v_knot_count,
+                                     v_degree, v_span, v);
 
         ax = QAWS_ZERO;
         ay = QAWS_ZERO;

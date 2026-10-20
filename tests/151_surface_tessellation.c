@@ -49,7 +49,7 @@ static qaws_surface* tt_surface(int half_flat)
 		}
 	memset(&d, 0, sizeof d);
 	d.u_degree = 3; d.v_degree = 3; d.control_points = p; d.u_point_count = TT_N; d.v_point_count = TT_N;
-	qaws_surface_create_bspline(&d, &s);
+	qaws_surface_create_bspline(&s, &d);
 	return s;
 }
 
@@ -146,7 +146,7 @@ static double tt_chord(qaws_surface const* s, unsigned int ni)
 			unsigned int cell, m;
 			u = w0 * a->u + w1 * b->u + w2 * c->u;
 			v = w0 * a->v + w1 * b->v + w2 * c->v;
-			qaws_surface_evaluate(s, (qaws_scalar)u, (qaws_scalar)v, QAWS_SURFACE_EVAL_POSITION, &r);
+			qaws_surface_evaluate(&r, s, (qaws_scalar)u, (qaws_scalar)v, QAWS_SURFACE_EVAL_POSITION);
 			p[0] = r.position.x; p[1] = r.position.y; p[2] = r.position.z;
 			cell = (unsigned int)(u * TT_G >= TT_G ? TT_G - 1 : u * TT_G) * TT_G + (unsigned int)(v * TT_G >= TT_G ? TT_G - 1 : v * TT_G);
 			for (m = start[cell]; m < start[cell + 1]; m++)

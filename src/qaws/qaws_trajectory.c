@@ -262,12 +262,12 @@ static void trajectory_destroy_impl(void *impl, qaws_allocator const *allocator)
 	qaws_trajectory_impl *ti = (qaws_trajectory_impl *)impl;
 	if (ti)
 	{
-		qaws_internal_dealloc(allocator, ti->span_coeffs);
-		qaws_internal_dealloc(allocator, ti->key_positions);
-		qaws_internal_dealloc(allocator, ti->key_times);
-		qaws_internal_dealloc(allocator, ti->key_velocities);
-		qaws_internal_dealloc(allocator, ti->key_accelerations);
-		qaws_internal_dealloc(allocator, ti);
+		qaws_internal_dealloc(ti->span_coeffs, allocator);
+		qaws_internal_dealloc(ti->key_positions, allocator);
+		qaws_internal_dealloc(ti->key_times, allocator);
+		qaws_internal_dealloc(ti->key_velocities, allocator);
+		qaws_internal_dealloc(ti->key_accelerations, allocator);
+		qaws_internal_dealloc(ti, allocator);
 	}
 }
 
@@ -319,9 +319,9 @@ static qaws_curve_vtable const trajectory_vtable = {
  * ------------------------------------------------------------------------- */
 
 qaws_status qaws_curve_create_trajectory_ex(
+	qaws_curve **out_curve,
 	qaws_trajectory_desc const *desc,
-	qaws_allocator const *allocator,
-	qaws_curve **out_curve)
+	qaws_allocator const *allocator)
 {
 	unsigned int dim_count;
 	unsigned int key_count;
@@ -399,7 +399,7 @@ qaws_status qaws_curve_create_trajectory_ex(
 		curve->span_boundaries[i] = desc->key_times[i];
 
 	/* Allocate impl */
-	impl = (qaws_trajectory_impl *)qaws_internal_alloc(allocator, sizeof(qaws_trajectory_impl));
+	impl = (qaws_trajectory_impl *)qaws_internal_alloc(sizeof(qaws_trajectory_impl), allocator);
 	if (!impl)
 	{
 		qaws_curve_destroy(curve);
@@ -412,10 +412,10 @@ qaws_status qaws_curve_create_trajectory_ex(
 
 	/* Copy key_positions */
 	pos_size = qaws_internal_mul3((size_t)key_count, (size_t)dim_count, sizeof(qaws_scalar));
-	impl->key_positions = (qaws_scalar *)qaws_internal_alloc(allocator, pos_size);
+	impl->key_positions = (qaws_scalar *)qaws_internal_alloc(pos_size, allocator);
 	if (!impl->key_positions)
 	{
-		qaws_internal_dealloc(allocator, impl);
+		qaws_internal_dealloc(impl, allocator);
 		qaws_curve_destroy(curve);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
@@ -423,11 +423,11 @@ qaws_status qaws_curve_create_trajectory_ex(
 
 	/* Copy key_times */
 	time_size = qaws_internal_mul2((size_t)key_count, sizeof(qaws_scalar));
-	impl->key_times = (qaws_scalar *)qaws_internal_alloc(allocator, time_size);
+	impl->key_times = (qaws_scalar *)qaws_internal_alloc(time_size, allocator);
 	if (!impl->key_times)
 	{
-		qaws_internal_dealloc(allocator, impl->key_positions);
-		qaws_internal_dealloc(allocator, impl);
+		qaws_internal_dealloc(impl->key_positions, allocator);
+		qaws_internal_dealloc(impl, allocator);
 		qaws_curve_destroy(curve);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
@@ -440,12 +440,12 @@ qaws_status qaws_curve_create_trajectory_ex(
 	if (user_velocities)
 	{
 		/* Copy user-provided velocities */
-		impl->key_velocities = (qaws_scalar *)qaws_internal_alloc(allocator, vel_size);
+		impl->key_velocities = (qaws_scalar *)qaws_internal_alloc(vel_size, allocator);
 		if (!impl->key_velocities)
 		{
-			qaws_internal_dealloc(allocator, impl->key_times);
-			qaws_internal_dealloc(allocator, impl->key_positions);
-			qaws_internal_dealloc(allocator, impl);
+			qaws_internal_dealloc(impl->key_times, allocator);
+			qaws_internal_dealloc(impl->key_positions, allocator);
+			qaws_internal_dealloc(impl, allocator);
 			qaws_curve_destroy(curve);
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 		}
@@ -455,12 +455,12 @@ qaws_status qaws_curve_create_trajectory_ex(
 	else
 	{
 		/* Compute velocities using finite differences */
-		impl->key_velocities = (qaws_scalar *)qaws_internal_alloc(allocator, vel_size);
+		impl->key_velocities = (qaws_scalar *)qaws_internal_alloc(vel_size, allocator);
 		if (!impl->key_velocities)
 		{
-			qaws_internal_dealloc(allocator, impl->key_times);
-			qaws_internal_dealloc(allocator, impl->key_positions);
-			qaws_internal_dealloc(allocator, impl);
+			qaws_internal_dealloc(impl->key_times, allocator);
+			qaws_internal_dealloc(impl->key_positions, allocator);
+			qaws_internal_dealloc(impl, allocator);
 			qaws_curve_destroy(curve);
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 		}
@@ -476,13 +476,13 @@ qaws_status qaws_curve_create_trajectory_ex(
 	if (desc->key_accelerations && desc->key_acceleration_count > 0)
 	{
 		acc_size = qaws_internal_mul3((size_t)desc->key_acceleration_count, (size_t)dim_count, sizeof(qaws_scalar));
-		impl->key_accelerations = (qaws_scalar *)qaws_internal_alloc(allocator, acc_size);
+		impl->key_accelerations = (qaws_scalar *)qaws_internal_alloc(acc_size, allocator);
 		if (!impl->key_accelerations)
 		{
-			qaws_internal_dealloc(allocator, impl->key_velocities);
-			qaws_internal_dealloc(allocator, impl->key_times);
-			qaws_internal_dealloc(allocator, impl->key_positions);
-			qaws_internal_dealloc(allocator, impl);
+			qaws_internal_dealloc(impl->key_velocities, allocator);
+			qaws_internal_dealloc(impl->key_times, allocator);
+			qaws_internal_dealloc(impl->key_positions, allocator);
+			qaws_internal_dealloc(impl, allocator);
 			qaws_curve_destroy(curve);
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 		}
@@ -493,14 +493,14 @@ qaws_status qaws_curve_create_trajectory_ex(
 	/* Precompute per-span polynomial coefficients */
 	{
 		unsigned int s;
-		impl->span_coeffs = (qaws_scalar *)qaws_internal_alloc(allocator,
-			qaws_internal_mul4(sizeof(qaws_scalar), (size_t)span_count, (size_t)dim_count, 4));
+		impl->span_coeffs = (qaws_scalar *)qaws_internal_alloc(qaws_internal_mul4(sizeof(qaws_scalar), (size_t)span_count, (size_t)dim_count, 4),
+			allocator);
 		if (!impl->span_coeffs) {
-			qaws_internal_dealloc(allocator, impl->key_accelerations);
-			qaws_internal_dealloc(allocator, impl->key_velocities);
-			qaws_internal_dealloc(allocator, impl->key_times);
-			qaws_internal_dealloc(allocator, impl->key_positions);
-			qaws_internal_dealloc(allocator, impl);
+			qaws_internal_dealloc(impl->key_accelerations, allocator);
+			qaws_internal_dealloc(impl->key_velocities, allocator);
+			qaws_internal_dealloc(impl->key_times, allocator);
+			qaws_internal_dealloc(impl->key_positions, allocator);
+			qaws_internal_dealloc(impl, allocator);
 			qaws_curve_destroy(curve);
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 		}
@@ -531,14 +531,14 @@ qaws_status qaws_curve_create_trajectory_ex(
 			qaws_vec2 *tmp_a, *tmp_b, *tmp_c, *tmp_d;
 			unsigned int prep_span_count = 0;
 			size_t vec_size = (size_t)span_count * sizeof(qaws_vec2);
-			tmp_a = (qaws_vec2 *)qaws_internal_alloc(allocator, qaws_internal_mul2(vec_size, 4));
+			tmp_a = (qaws_vec2 *)qaws_internal_alloc(qaws_internal_mul2(vec_size, 4), allocator);
 			if (!tmp_a) {
-				qaws_internal_dealloc(allocator, impl->span_coeffs);
-				qaws_internal_dealloc(allocator, impl->key_accelerations);
-				qaws_internal_dealloc(allocator, impl->key_velocities);
-				qaws_internal_dealloc(allocator, impl->key_times);
-				qaws_internal_dealloc(allocator, impl->key_positions);
-				qaws_internal_dealloc(allocator, impl);
+				qaws_internal_dealloc(impl->span_coeffs, allocator);
+				qaws_internal_dealloc(impl->key_accelerations, allocator);
+				qaws_internal_dealloc(impl->key_velocities, allocator);
+				qaws_internal_dealloc(impl->key_times, allocator);
+				qaws_internal_dealloc(impl->key_positions, allocator);
+				qaws_internal_dealloc(impl, allocator);
 				qaws_curve_destroy(curve);
 				return QAWS_STATUS_ALLOCATION_FAILURE;
 			}
@@ -547,10 +547,10 @@ qaws_status qaws_curve_create_trajectory_ex(
 			tmp_d = tmp_c + span_count;
 
 			qaws_trajectory_prepare_2d(
-				(const qaws_vec2 *)impl->key_positions,
-				impl->key_times, key_count, desc->degree,
-				impl->closed,
-				tmp_a, tmp_b, tmp_c, tmp_d, &prep_span_count);
+				tmp_a,
+				tmp_b, tmp_c, tmp_d,
+				&prep_span_count,
+				(const qaws_vec2 *)impl->key_positions, impl->key_times, key_count, desc->degree, impl->closed);
 
 			for (s = 0; s < span_count; s++) {
 				impl->span_coeffs[s * 8 + 0] = tmp_a[s].x;
@@ -562,19 +562,19 @@ qaws_status qaws_curve_create_trajectory_ex(
 				impl->span_coeffs[s * 8 + 6] = tmp_c[s].y;
 				impl->span_coeffs[s * 8 + 7] = tmp_d[s].y;
 			}
-			qaws_internal_dealloc(allocator, tmp_a);
+			qaws_internal_dealloc(tmp_a, allocator);
 		} else {
 			qaws_vec3 *tmp_a, *tmp_b, *tmp_c, *tmp_d;
 			unsigned int prep_span_count = 0;
 			size_t vec_size = (size_t)span_count * sizeof(qaws_vec3);
-			tmp_a = (qaws_vec3 *)qaws_internal_alloc(allocator, qaws_internal_mul2(vec_size, 4));
+			tmp_a = (qaws_vec3 *)qaws_internal_alloc(qaws_internal_mul2(vec_size, 4), allocator);
 			if (!tmp_a) {
-				qaws_internal_dealloc(allocator, impl->span_coeffs);
-				qaws_internal_dealloc(allocator, impl->key_accelerations);
-				qaws_internal_dealloc(allocator, impl->key_velocities);
-				qaws_internal_dealloc(allocator, impl->key_times);
-				qaws_internal_dealloc(allocator, impl->key_positions);
-				qaws_internal_dealloc(allocator, impl);
+				qaws_internal_dealloc(impl->span_coeffs, allocator);
+				qaws_internal_dealloc(impl->key_accelerations, allocator);
+				qaws_internal_dealloc(impl->key_velocities, allocator);
+				qaws_internal_dealloc(impl->key_times, allocator);
+				qaws_internal_dealloc(impl->key_positions, allocator);
+				qaws_internal_dealloc(impl, allocator);
 				qaws_curve_destroy(curve);
 				return QAWS_STATUS_ALLOCATION_FAILURE;
 			}
@@ -583,10 +583,10 @@ qaws_status qaws_curve_create_trajectory_ex(
 			tmp_d = tmp_c + span_count;
 
 			qaws_trajectory_prepare_3d(
-				(const qaws_vec3 *)impl->key_positions,
-				impl->key_times, key_count, desc->degree,
-				impl->closed,
-				tmp_a, tmp_b, tmp_c, tmp_d, &prep_span_count);
+				tmp_a,
+				tmp_b, tmp_c, tmp_d,
+				&prep_span_count,
+				(const qaws_vec3 *)impl->key_positions, impl->key_times, key_count, desc->degree, impl->closed);
 
 			for (s = 0; s < span_count; s++) {
 				impl->span_coeffs[s * 12 + 0]  = tmp_a[s].x;
@@ -602,7 +602,7 @@ qaws_status qaws_curve_create_trajectory_ex(
 				impl->span_coeffs[s * 12 + 10] = tmp_c[s].z;
 				impl->span_coeffs[s * 12 + 11] = tmp_d[s].z;
 			}
-			qaws_internal_dealloc(allocator, tmp_a);
+			qaws_internal_dealloc(tmp_a, allocator);
 		}
 	}
 
@@ -613,8 +613,8 @@ qaws_status qaws_curve_create_trajectory_ex(
 }
 
 qaws_status qaws_curve_create_trajectory(
-	qaws_trajectory_desc const *desc,
-	qaws_curve **out_curve)
+	qaws_curve **out_curve,
+	qaws_trajectory_desc const *desc)
 {
-	return qaws_curve_create_trajectory_ex(desc, NULL, out_curve);
+	return qaws_curve_create_trajectory_ex(out_curve, desc, NULL);
 }

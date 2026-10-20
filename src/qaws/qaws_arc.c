@@ -230,8 +230,8 @@ static void arc_destroy_impl(void *impl, qaws_allocator const *allocator)
 	qaws_arc_impl *ai = (qaws_arc_impl *)impl;
 	if (ai)
 	{
-		qaws_internal_dealloc(allocator, ai->segments);
-		qaws_internal_dealloc(allocator, ai);
+		qaws_internal_dealloc(ai->segments, allocator);
+		qaws_internal_dealloc(ai, allocator);
 	}
 }
 
@@ -426,10 +426,10 @@ qaws_status qaws_curve_create_arc_ex(
 
 	/* Copy segments */
 	seg_size = qaws_internal_mul2((size_t)desc->segment_count, sizeof(qaws_arc_segment));
-	impl->segments = (qaws_arc_segment *)qaws_internal_alloc(allocator, seg_size);
+	impl->segments = (qaws_arc_segment *)qaws_internal_alloc(seg_size, allocator);
 	if (!impl->segments)
 	{
-		qaws_internal_dealloc(allocator, impl);
+		qaws_internal_dealloc(impl, allocator);
 		qaws_curve_destroy(curve);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
@@ -442,8 +442,8 @@ qaws_status qaws_curve_create_arc_ex(
 }
 
 qaws_status qaws_curve_create_arc(
-	qaws_arc_desc const *desc,
-	qaws_curve** out_curve)
+	qaws_curve** out_curve,
+	qaws_arc_desc const *desc)
 {
 	return qaws_curve_create_arc_ex(desc, NULL, out_curve);
 }

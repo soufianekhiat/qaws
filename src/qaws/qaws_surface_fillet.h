@@ -32,17 +32,17 @@ typedef struct qaws_surface_fillet_desc
    The fillet is a swept circular arc along the intersection spine.
    Returns a new surface representing the fillet blend. */
 qaws_status qaws_surface_create_fillet(
-	qaws_surface_fillet_desc const* desc,
-	qaws_surface** out_surface);
+	qaws_surface** out_surface,
+	qaws_surface_fillet_desc const* desc);
 
 /* Convenience: compute fillet and also return the trim curves on each surface.
    out_trim_a: 2D curve in surface_a parameter space where fillet meets surface_a.
    out_trim_b: 2D curve in surface_b parameter space where fillet meets surface_b.
    These curves can be used to trim the original surfaces. */
 qaws_status qaws_surface_create_fillet_with_trims(
-	qaws_surface_fillet_desc const* desc,
 	qaws_surface** out_fillet,
 	qaws_curve** out_trim_a,
-	qaws_curve** out_trim_b);
+	qaws_curve** out_trim_b,
+	qaws_surface_fillet_desc const* desc);
 
 #endif /* QAWS_SURFACE_FILLET_H */

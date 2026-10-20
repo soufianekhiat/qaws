@@ -50,9 +50,9 @@ static void demo_raytrace(void)
 	memset(&d, 0, sizeof(d));
 	d.surfaces = (qaws_surface const* const*)&terrain;
 	d.surface_count = 1;
-	qaws_surface_set_create(&d, &set);
+	qaws_surface_set_create(&set, &d);
 	t0 = hf_now();
-	qaws_surface_set_raycast(set, org, dir, RT_W * RT_H, 0, hit, &st1);
+	qaws_surface_set_raycast(hit, &st1, set, org, dir, RT_W * RT_H, 0);
 	t_primary = hf_now() - t0;
 	/* shadow rays from every hit, slightly lifted, toward the light */
 	for (i = 0; i < RT_W * RT_H; i++)
@@ -70,7 +70,7 @@ static void demo_raytrace(void)
 			sdir[3 * i + k] = (qaws_scalar)light[k];
 	}
 	t0 = hf_now();
-	qaws_surface_set_raycast(set, sorg, sdir, RT_W * RT_H, 0, shadow, &st2);
+	qaws_surface_set_raycast(shadow, &st2, set, sorg, sdir, RT_W * RT_H, 0);
 	t_shadow = hf_now() - t0;
 	for (i = 0; i < RT_W * RT_H; i++)
 		nshadow += hit[i].surface != QAWS_CURVE_BATCH_NONE && shadow[i].surface != QAWS_CURVE_BATCH_NONE;
@@ -98,7 +98,7 @@ static void demo_raytrace(void)
 					qaws_surface_eval_result r;
 					double n[3], lam, hc;
 					int rr = 0, gg = 0, bb = 0;
-					qaws_surface_evaluate(terrain, hit[p].u, hit[p].v, QAWS_SURFACE_EVAL_NORMAL, &r);
+					qaws_surface_evaluate(&r, terrain, hit[p].u, hit[p].v, QAWS_SURFACE_EVAL_NORMAL);
 					n[0] = r.normal.x; n[1] = r.normal.y; n[2] = r.normal.z;
 					if (n[2] < 0) { n[0] = -n[0]; n[1] = -n[1]; n[2] = -n[2]; }
 					lam = n[0] * light[0] + n[1] * light[1] + n[2] * light[2];

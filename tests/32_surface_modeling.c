@@ -15,7 +15,7 @@ static qaws_curve* make_line_3d(qaws_vec3 a, qaws_vec3 b)
 	d.degree = 1;
 	d.control_points = pts;
 	d.control_point_count = 2;
-	qaws_curve_create_bezier(&d, &c);
+	qaws_curve_create_bezier(&c, &d);
 	return c;
 }
 
@@ -35,7 +35,7 @@ static qaws_curve* make_quad_3d(qaws_vec3 a, qaws_vec3 b, qaws_vec3 c_pt)
 	d.degree = 2;
 	d.control_points = pts;
 	d.control_point_count = 3;
-	qaws_curve_create_bezier(&d, &crv);
+	qaws_curve_create_bezier(&crv, &d);
 	return crv;
 }
 
@@ -54,7 +54,7 @@ static qaws_curve* make_circle_profile_2d(qaws_scalar radius)
 	d.degree = 2;
 	d.control_points = pts;
 	d.control_point_count = 3;
-	qaws_curve_create_bezier(&d, &crv);
+	qaws_curve_create_bezier(&crv, &d);
 	return crv;
 }
 
@@ -86,7 +86,7 @@ static void test_coons_patch(void)
 		qaws_surface_coons_desc desc;
 		desc.c0 = c0; desc.c1 = c1;
 		desc.d0 = d0; desc.d1 = d1;
-		s = qaws_surface_create_coons(&desc, &surf);
+		s = qaws_surface_create_coons(&surf, &desc);
 	}
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(surf != NULL, "coons surface created");
@@ -95,8 +95,8 @@ static void test_coons_patch(void)
 
 	/* Corner (0,0) should be (0,0,0) */
 	memset(&r, 0, sizeof(r));
-	s = qaws_surface_evaluate(surf, 0, 0,
-		QAWS_SURFACE_EVAL_POSITION, &r);
+	s = qaws_surface_evaluate(&r, surf, 0,
+		0, QAWS_SURFACE_EVAL_POSITION);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(fabs(r.position.x) < TOLERANCE_LOOSE, "coons (0,0) x");
 	TEST_ASSERT(fabs(r.position.y) < TOLERANCE_LOOSE, "coons (0,0) y");
@@ -104,8 +104,8 @@ static void test_coons_patch(void)
 
 	/* Corner (1,1) should be (4,3,0) */
 	memset(&r, 0, sizeof(r));
-	s = qaws_surface_evaluate(surf, 1, 1,
-		QAWS_SURFACE_EVAL_POSITION, &r);
+	s = qaws_surface_evaluate(&r, surf, 1,
+		1, QAWS_SURFACE_EVAL_POSITION);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(approx_eq_loose(r.position.x, (qaws_scalar)4.0), "coons (1,1) x");
 	TEST_ASSERT(approx_eq_loose(r.position.y, (qaws_scalar)3.0), "coons (1,1) y");
@@ -113,8 +113,8 @@ static void test_coons_patch(void)
 
 	/* Center (0.5,0.5) of flat quad should be (2, 1.5, 0) */
 	memset(&r, 0, sizeof(r));
-	s = qaws_surface_evaluate(surf, (qaws_scalar)0.5, (qaws_scalar)0.5,
-		QAWS_SURFACE_EVAL_POSITION, &r);
+	s = qaws_surface_evaluate(&r, surf, (qaws_scalar)0.5,
+		(qaws_scalar)0.5, QAWS_SURFACE_EVAL_POSITION);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(approx_eq_loose(r.position.x, (qaws_scalar)2.0), "coons center x");
 	TEST_ASSERT(approx_eq_loose(r.position.y, (qaws_scalar)1.5), "coons center y");
@@ -122,13 +122,13 @@ static void test_coons_patch(void)
 
 	/* Normal should point in z direction for flat patch */
 	memset(&r, 0, sizeof(r));
-	s = qaws_surface_evaluate(surf, (qaws_scalar)0.5, (qaws_scalar)0.5,
-		QAWS_SURFACE_EVAL_NORMAL | QAWS_SURFACE_EVAL_DU | QAWS_SURFACE_EVAL_DV, &r);
+	s = qaws_surface_evaluate(&r, surf, (qaws_scalar)0.5,
+		(qaws_scalar)0.5, QAWS_SURFACE_EVAL_NORMAL | QAWS_SURFACE_EVAL_DU | QAWS_SURFACE_EVAL_DV);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(fabs(r.normal.z) > (qaws_scalar)0.9, "coons flat normal ~z");
 
 	/* Null args */
-	s = qaws_surface_create_coons(NULL, &surf);
+	s = qaws_surface_create_coons(&surf, NULL);
 	TEST_ASSERT(s != QAWS_STATUS_OK, "coons null desc rejected");
 
 	qaws_surface_destroy(surf);
@@ -152,13 +152,13 @@ static void test_coons_patch(void)
 		desc.c0 = c0; desc.c1 = c1;
 		desc.d0 = d0; desc.d1 = d1;
 		surf = NULL;
-		s = qaws_surface_create_coons(&desc, &surf);
+		s = qaws_surface_create_coons(&surf, &desc);
 		TEST_ASSERT_STATUS(s);
 
 		/* Center should be raised in z due to curved boundaries */
 		memset(&r, 0, sizeof(r));
-		qaws_surface_evaluate(surf, (qaws_scalar)0.5, (qaws_scalar)0.5,
-			QAWS_SURFACE_EVAL_POSITION, &r);
+		qaws_surface_evaluate(&r, surf, (qaws_scalar)0.5,
+			(qaws_scalar)0.5, QAWS_SURFACE_EVAL_POSITION);
 		TEST_ASSERT(r.position.z > (qaws_scalar)0.1, "curved coons center raised");
 
 		qaws_surface_destroy(surf);
@@ -189,7 +189,7 @@ static void test_extrusion_surface(void)
 		d.degree = 2;
 		d.control_points = pts;
 		d.control_point_count = 3;
-		qaws_curve_create_bezier(&d, &profile);
+		qaws_curve_create_bezier(&profile, &d);
 	}
 
 	{
@@ -197,7 +197,7 @@ static void test_extrusion_surface(void)
 		desc.profile = profile;
 		desc.direction.x = 0; desc.direction.y = 0; desc.direction.z = 1;
 		desc.length = (qaws_scalar)5.0;
-		s = qaws_surface_create_extrusion(&desc, &surf);
+		s = qaws_surface_create_extrusion(&surf, &desc);
 	}
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(surf != NULL, "extrusion surface created");
@@ -206,8 +206,8 @@ static void test_extrusion_surface(void)
 
 	/* At v=0, should be the profile at z=0 */
 	memset(&r, 0, sizeof(r));
-	s = qaws_surface_evaluate(surf, 0, 0,
-		QAWS_SURFACE_EVAL_POSITION, &r);
+	s = qaws_surface_evaluate(&r, surf, 0,
+		0, QAWS_SURFACE_EVAL_POSITION);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(fabs(r.position.x) < TOLERANCE_LOOSE, "extr (0,0) x");
 	TEST_ASSERT(fabs(r.position.y) < TOLERANCE_LOOSE, "extr (0,0) y");
@@ -215,24 +215,24 @@ static void test_extrusion_surface(void)
 
 	/* At v=1, should be the profile at z=5 */
 	memset(&r, 0, sizeof(r));
-	s = qaws_surface_evaluate(surf, 0, 1,
-		QAWS_SURFACE_EVAL_POSITION, &r);
+	s = qaws_surface_evaluate(&r, surf, 0,
+		1, QAWS_SURFACE_EVAL_POSITION);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(fabs(r.position.x) < TOLERANCE_LOOSE, "extr (0,1) x");
 	TEST_ASSERT(approx_eq_loose(r.position.z, (qaws_scalar)5.0), "extr (0,1) z=5");
 
 	/* At u=1, v=0, should be end of profile (4,0,0) */
 	memset(&r, 0, sizeof(r));
-	s = qaws_surface_evaluate(surf, 1, 0,
-		QAWS_SURFACE_EVAL_POSITION, &r);
+	s = qaws_surface_evaluate(&r, surf, 1,
+		0, QAWS_SURFACE_EVAL_POSITION);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(approx_eq_loose(r.position.x, (qaws_scalar)4.0), "extr (1,0) x=4");
 	TEST_ASSERT(fabs(r.position.z) < TOLERANCE_LOOSE, "extr (1,0) z=0");
 
 	/* dv should be the direction vector */
 	memset(&r, 0, sizeof(r));
-	s = qaws_surface_evaluate(surf, (qaws_scalar)0.5, (qaws_scalar)0.5,
-		QAWS_SURFACE_EVAL_DV | QAWS_SURFACE_EVAL_DU | QAWS_SURFACE_EVAL_NORMAL, &r);
+	s = qaws_surface_evaluate(&r, surf, (qaws_scalar)0.5,
+		(qaws_scalar)0.5, QAWS_SURFACE_EVAL_DV | QAWS_SURFACE_EVAL_DU | QAWS_SURFACE_EVAL_NORMAL);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(approx_eq_loose(r.dv.z, (qaws_scalar)5.0), "extr dv.z = length");
 	TEST_ASSERT(fabs(r.dv.x) < TOLERANCE_LOOSE, "extr dv.x = 0");
@@ -241,7 +241,7 @@ static void test_extrusion_surface(void)
 	/* Null args */
 	{
 		qaws_surface* tmp = NULL;
-		s = qaws_surface_create_extrusion(NULL, &tmp);
+		s = qaws_surface_create_extrusion(&tmp, NULL);
 		TEST_ASSERT(s != QAWS_STATUS_OK, "extrusion null desc rejected");
 	}
 
@@ -270,7 +270,7 @@ static void test_revolution_surface(void)
 		d.degree = 1;
 		d.control_points = pts;
 		d.control_point_count = 2;
-		qaws_curve_create_bezier(&d, &profile);
+		qaws_curve_create_bezier(&profile, &d);
 	}
 
 	{
@@ -279,7 +279,7 @@ static void test_revolution_surface(void)
 		desc.axis_origin.x = 0; desc.axis_origin.y = 0; desc.axis_origin.z = 0;
 		desc.axis_direction.x = 0; desc.axis_direction.y = 0; desc.axis_direction.z = 1;
 		desc.angle = 2 * pi;  /* full revolution */
-		s = qaws_surface_create_revolution(&desc, &surf);
+		s = qaws_surface_create_revolution(&surf, &desc);
 	}
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(surf != NULL, "revolution surface created");
@@ -288,8 +288,8 @@ static void test_revolution_surface(void)
 
 	/* At u=0, v=0: profile start at angle 0 -> (1, 0, 0) */
 	memset(&r, 0, sizeof(r));
-	s = qaws_surface_evaluate(surf, 0, 0,
-		QAWS_SURFACE_EVAL_POSITION, &r);
+	s = qaws_surface_evaluate(&r, surf, 0,
+		0, QAWS_SURFACE_EVAL_POSITION);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(approx_eq_loose(r.position.x, (qaws_scalar)1.0), "rev (0,0) x=1");
 	TEST_ASSERT(fabs(r.position.y) < TOLERANCE_LOOSE, "rev (0,0) y=0");
@@ -297,8 +297,8 @@ static void test_revolution_surface(void)
 
 	/* At u=0.25 (90 degrees), v=0: should be (0, 1, 0) */
 	memset(&r, 0, sizeof(r));
-	s = qaws_surface_evaluate(surf, (qaws_scalar)0.25, 0,
-		QAWS_SURFACE_EVAL_POSITION, &r);
+	s = qaws_surface_evaluate(&r, surf, (qaws_scalar)0.25,
+		0, QAWS_SURFACE_EVAL_POSITION);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(fabs(r.position.x) < TOLERANCE_LOOSE, "rev 90deg x~0");
 	TEST_ASSERT(approx_eq_loose(r.position.y, (qaws_scalar)1.0), "rev 90deg y=1");
@@ -306,8 +306,8 @@ static void test_revolution_surface(void)
 
 	/* At u=0, v=1: should be at height 2 -> (1, 0, 2) */
 	memset(&r, 0, sizeof(r));
-	s = qaws_surface_evaluate(surf, 0, 1,
-		QAWS_SURFACE_EVAL_POSITION, &r);
+	s = qaws_surface_evaluate(&r, surf, 0,
+		1, QAWS_SURFACE_EVAL_POSITION);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(approx_eq_loose(r.position.x, (qaws_scalar)1.0), "rev top x=1");
 	TEST_ASSERT(fabs(r.position.y) < TOLERANCE_LOOSE, "rev top y=0");
@@ -320,7 +320,7 @@ static void test_revolution_surface(void)
 		{
 			qaws_scalar u = (qaws_scalar)i / (qaws_scalar)8;
 			memset(&r, 0, sizeof(r));
-			qaws_surface_evaluate(surf, u, 0, QAWS_SURFACE_EVAL_POSITION, &r);
+			qaws_surface_evaluate(&r, surf, u, 0, QAWS_SURFACE_EVAL_POSITION);
 			{
 				qaws_scalar rad = (qaws_scalar)sqrt((double)(r.position.x * r.position.x +
 					r.position.y * r.position.y));
@@ -331,8 +331,8 @@ static void test_revolution_surface(void)
 
 	/* Normal should point outward (away from z axis) */
 	memset(&r, 0, sizeof(r));
-	s = qaws_surface_evaluate(surf, 0, (qaws_scalar)0.5,
-		QAWS_SURFACE_EVAL_NORMAL | QAWS_SURFACE_EVAL_DU | QAWS_SURFACE_EVAL_DV, &r);
+	s = qaws_surface_evaluate(&r, surf, 0,
+		(qaws_scalar)0.5, QAWS_SURFACE_EVAL_NORMAL | QAWS_SURFACE_EVAL_DU | QAWS_SURFACE_EVAL_DV);
 	TEST_ASSERT_STATUS(s);
 	/* At angle 0, normal should have significant x component */
 	TEST_ASSERT(fabs(r.normal.x) > (qaws_scalar)0.5 ||
@@ -342,7 +342,7 @@ static void test_revolution_surface(void)
 	/* Null args */
 	{
 		qaws_surface* tmp = NULL;
-		s = qaws_surface_create_revolution(NULL, &tmp);
+		s = qaws_surface_create_revolution(&tmp, NULL);
 		TEST_ASSERT(s != QAWS_STATUS_OK, "revolution null desc rejected");
 	}
 
@@ -360,25 +360,25 @@ static void test_revolution_surface(void)
 		d.control_points = pts;
 		d.control_point_count = 2;
 		profile = NULL;
-		qaws_curve_create_bezier(&d, &profile);
+		qaws_curve_create_bezier(&profile, &d);
 
 		rd.profile = profile;
 		rd.axis_origin.x = 0; rd.axis_origin.y = 0; rd.axis_origin.z = 0;
 		rd.axis_direction.x = 0; rd.axis_direction.y = 0; rd.axis_direction.z = 1;
 		rd.angle = pi;  /* half revolution */
 		surf = NULL;
-		s = qaws_surface_create_revolution(&rd, &surf);
+		s = qaws_surface_create_revolution(&surf, &rd);
 		TEST_ASSERT_STATUS(s);
 
 		/* At u=0.5 (90 degrees), v=0: should be (0, 2, 0) */
 		memset(&r, 0, sizeof(r));
-		qaws_surface_evaluate(surf, (qaws_scalar)0.5, 0,
-			QAWS_SURFACE_EVAL_POSITION, &r);
+		qaws_surface_evaluate(&r, surf, (qaws_scalar)0.5,
+			0, QAWS_SURFACE_EVAL_POSITION);
 		TEST_ASSERT(fabs(r.position.x) < TOLERANCE_LOOSE, "half rev 90 x~0");
 		/* At u=1 (180 degrees), should be (-2, 0, 0) */
 		memset(&r, 0, sizeof(r));
-		qaws_surface_evaluate(surf, 1, 0,
-			QAWS_SURFACE_EVAL_POSITION, &r);
+		qaws_surface_evaluate(&r, surf, 1,
+			0, QAWS_SURFACE_EVAL_POSITION);
 		TEST_ASSERT(approx_eq_loose(r.position.x, (qaws_scalar)-2.0), "half rev 180 x=-2");
 
 		qaws_surface_destroy(surf);
@@ -410,7 +410,7 @@ static void visual_obj_coons(void)
 	{
 		qaws_surface_coons_desc desc;
 		desc.c0 = c0; desc.c1 = c1; desc.d0 = d0; desc.d1 = d1;
-		qaws_surface_create_coons(&desc, &surf);
+		qaws_surface_create_coons(&surf, &desc);
 	}
 	if (!surf) goto cleanup_coons;
 
@@ -452,7 +452,7 @@ static void visual_obj_extrusion(void)
 		d.degree = 3;
 		d.control_points = pts;
 		d.control_point_count = 4;
-		qaws_curve_create_bezier(&d, &profile);
+		qaws_curve_create_bezier(&profile, &d);
 	}
 	if (!profile) return;
 
@@ -461,7 +461,7 @@ static void visual_obj_extrusion(void)
 		desc.profile = profile;
 		desc.direction.x = 0; desc.direction.y = 0; desc.direction.z = 1;
 		desc.length = (qaws_scalar)3.0;
-		qaws_surface_create_extrusion(&desc, &surf);
+		qaws_surface_create_extrusion(&surf, &desc);
 	}
 	if (!surf) { qaws_curve_destroy(profile); return; }
 
@@ -508,7 +508,7 @@ static void visual_obj_revolution(void)
 		d.degree = 3;
 		d.control_points = pts;
 		d.control_point_count = 4;
-		qaws_curve_create_bezier(&d, &profile);
+		qaws_curve_create_bezier(&profile, &d);
 	}
 	if (!profile) return;
 
@@ -518,7 +518,7 @@ static void visual_obj_revolution(void)
 		desc.axis_origin.x = 0; desc.axis_origin.y = 0; desc.axis_origin.z = 0;
 		desc.axis_direction.x = 0; desc.axis_direction.y = 0; desc.axis_direction.z = 1;
 		desc.angle = 2 * pi;
-		qaws_surface_create_revolution(&desc, &surf);
+		qaws_surface_create_revolution(&surf, &desc);
 	}
 	if (!surf) { qaws_curve_destroy(profile); return; }
 

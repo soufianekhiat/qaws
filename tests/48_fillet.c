@@ -31,7 +31,7 @@ static void test_fillet_two_planes(void)
 	desc_a.p10.x = 2; desc_a.p10.y = 0; desc_a.p10.z = 0;
 	desc_a.p01.x = 0; desc_a.p01.y = 2; desc_a.p01.z = 0;
 	desc_a.p11.x = 2; desc_a.p11.y = 2; desc_a.p11.z = 0;
-	status = qaws_surface_create_bilinear(&desc_a, &surf_a);
+	status = qaws_surface_create_bilinear(&surf_a, &desc_a);
 	TEST_ASSERT_STATUS(status);
 
 	/* Plane B: x=0 */
@@ -39,7 +39,7 @@ static void test_fillet_two_planes(void)
 	desc_b.p10.x = 0; desc_b.p10.y = 2; desc_b.p10.z = 0;
 	desc_b.p01.x = 0; desc_b.p01.y = 0; desc_b.p01.z = 2;
 	desc_b.p11.x = 0; desc_b.p11.y = 2; desc_b.p11.z = 2;
-	status = qaws_surface_create_bilinear(&desc_b, &surf_b);
+	status = qaws_surface_create_bilinear(&surf_b, &desc_b);
 	TEST_ASSERT_STATUS(status);
 
 	/* Create fillet */
@@ -49,7 +49,7 @@ static void test_fillet_two_planes(void)
 	fdesc.sample_count = 32;
 	fdesc.arc_segments = 8;
 
-	status = qaws_surface_create_fillet(&fdesc, &fillet);
+	status = qaws_surface_create_fillet(&fillet, &fdesc);
 	if (status == QAWS_STATUS_OK && fillet != NULL)
 	{
 		TEST_ASSERT(qaws_surface_get_kind(fillet) == QAWS_SURFACE_KIND_FILLET,
@@ -57,8 +57,8 @@ static void test_fillet_two_planes(void)
 
 		/* Evaluate at center */
 		memset(&r, 0, sizeof(r));
-		qaws_surface_evaluate(fillet, (qaws_scalar)0.5, (qaws_scalar)0.5,
-			QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL, &r);
+		qaws_surface_evaluate(&r, fillet, (qaws_scalar)0.5,
+			(qaws_scalar)0.5, QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL);
 		printf("    fillet center: (%.4f, %.4f, %.4f)\n",
 			(double)r.position.x, (double)r.position.y, (double)r.position.z);
 		printf("    fillet normal: (%.4f, %.4f, %.4f)\n",
@@ -126,13 +126,13 @@ static void test_fillet_with_trims(void)
 	desc_a.p10.x = 1;  desc_a.p10.y = -1; desc_a.p10.z = 0;
 	desc_a.p01.x = -1; desc_a.p01.y = 1;  desc_a.p01.z = 0;
 	desc_a.p11.x = 1;  desc_a.p11.y = 1;  desc_a.p11.z = 0;
-	qaws_surface_create_bilinear(&desc_a, &surf_a);
+	qaws_surface_create_bilinear(&surf_a, &desc_a);
 
 	desc_b.p00.x = 0; desc_b.p00.y = -1; desc_b.p00.z = -1;
 	desc_b.p10.x = 0; desc_b.p10.y = 1;  desc_b.p10.z = -1;
 	desc_b.p01.x = 0; desc_b.p01.y = -1; desc_b.p01.z = 1;
 	desc_b.p11.x = 0; desc_b.p11.y = 1;  desc_b.p11.z = 1;
-	qaws_surface_create_bilinear(&desc_b, &surf_b);
+	qaws_surface_create_bilinear(&surf_b, &desc_b);
 
 	fdesc.surface_a = surf_a;
 	fdesc.surface_b = surf_b;
@@ -140,7 +140,7 @@ static void test_fillet_with_trims(void)
 	fdesc.sample_count = 32;
 	fdesc.arc_segments = 8;
 
-	status = qaws_surface_create_fillet_with_trims(&fdesc, &fillet, &trim_a, &trim_b);
+	status = qaws_surface_create_fillet_with_trims(&fillet, &trim_a, &trim_b, &fdesc);
 	if (status == QAWS_STATUS_OK)
 	{
 		printf("    fillet with trims created successfully\n");

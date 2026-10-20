@@ -46,7 +46,7 @@ static void demo_orient2d(void)
 			a[1] = 0.5 + j * u;
 			det = (a[0] - c[0]) * (b[1] - c[1]) - (a[1] - c[1]) * (b[0] - c[0]);
 			naive[k] = (signed char)(det > 0 ? 1 : (det < 0 ? -1 : 0));
-			qaws_exact_orient2d(a, b, c, &sg, &p);
+			qaws_exact_orient2d(&sg, &p, a, b, c);
 			exact[k] = (signed char)sg;
 			wrong[k] = (signed char)(naive[k] != exact[k]);
 			path[k] = (signed char)(p == QAWS_EXACT_PATH_EXACT);

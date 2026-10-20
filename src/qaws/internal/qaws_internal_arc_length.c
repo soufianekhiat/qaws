@@ -28,7 +28,7 @@ static const double g7_weights[4] = {
 static double curve_speed(qaws_curve const* curve, qaws_scalar t)
 {
 	qaws_scalar local_t;
-	unsigned int span_index = qaws_internal_find_span(curve, t, &local_t);
+	unsigned int span_index = qaws_internal_find_span(&local_t, curve, t);
 	if (curve->dimension == QAWS_DIMENSION_2D) {
 		qaws_eval_result_2d res;
 		curve->vtable->eval_span_2d(curve, span_index, local_t, QAWS_EVAL_FLAG_D1, &res);
@@ -91,10 +91,10 @@ static qaws_scalar arc_length_segment(
 }
 
 qaws_status qaws_internal_arc_length(
+	qaws_scalar* out_length,
 	qaws_curve const* curve,
 	qaws_scalar t_min,
-	qaws_scalar t_max,
-	qaws_scalar* out_length)
+	qaws_scalar t_max)
 {
 	if (!curve || !out_length)
 		return QAWS_STATUS_INVALID_ARGUMENT;
@@ -124,10 +124,10 @@ qaws_status qaws_internal_arc_length(
 }
 
 qaws_status qaws_internal_build_arc_length_table(
-	qaws_curve const* curve,
-	unsigned int table_size,
 	qaws_scalar* table_params,
-	qaws_scalar* table_distances)
+	qaws_scalar* table_distances,
+	qaws_curve const* curve,
+	unsigned int table_size)
 {
 	if (!curve || !table_params || !table_distances || table_size < 2)
 		return QAWS_STATUS_INVALID_ARGUMENT;
@@ -144,7 +144,7 @@ qaws_status qaws_internal_build_arc_length_table(
 
 	for (unsigned int i = 1; i < table_size; i++) {
 		qaws_scalar seg_len;
-		qaws_internal_arc_length(curve, table_params[i - 1], table_params[i], &seg_len);
+		qaws_internal_arc_length(&seg_len, curve, table_params[i - 1], table_params[i]);
 		table_distances[i] = table_distances[i - 1] + seg_len;
 	}
 
@@ -230,7 +230,7 @@ qaws_status qaws_internal_parameter_at_arc_length(
 	t_end = curve->parameter_range.max_value;
 	if (!(t_start >= curve->parameter_range.min_value && t_start <= t_end) || !(length >= (qaws_scalar)0))
 		return QAWS_STATUS_OUT_OF_RANGE;
-	qaws_internal_arc_length(curve, t_start, t_end, &total);
+	qaws_internal_arc_length(&total, curve, t_start, t_end);
 	if (length > total * (1 + 4 * QAWS_EPSILON))
 		return QAWS_STATUS_OUT_OF_RANGE;
 	if (length >= total || length == (qaws_scalar)0) {
@@ -241,7 +241,7 @@ qaws_status qaws_internal_parameter_at_arc_length(
 	lo = t_start;
 	hi = t_end;
 	t = lo + (hi - lo) * ((double)length / (double)total);
-	qaws_internal_arc_length(curve, t_start, (qaws_scalar)t, &piece);
+	qaws_internal_arc_length(&piece, curve, t_start, (qaws_scalar)t);
 	s = piece;
 	step_old = hi - lo;
 	step = step_old;
@@ -265,10 +265,10 @@ qaws_status qaws_internal_parameter_at_arc_length(
 		}
 		step = t_next - t;
 		if (t_next > t) {
-			qaws_internal_arc_length(curve, (qaws_scalar)t, (qaws_scalar)t_next, &piece);
+			qaws_internal_arc_length(&piece, curve, (qaws_scalar)t, (qaws_scalar)t_next);
 			s += piece;
 		} else {
-			qaws_internal_arc_length(curve, (qaws_scalar)t_next, (qaws_scalar)t, &piece);
+			qaws_internal_arc_length(&piece, curve, (qaws_scalar)t_next, (qaws_scalar)t);
 			s -= piece;
 		}
 		t = t_next;

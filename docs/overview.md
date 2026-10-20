@@ -107,12 +107,12 @@ qaws_bezier_desc desc = {
 };
 
 qaws_curve* curve = NULL;
-qaws_curve_create_bezier(&desc, &curve);
+qaws_curve_create_bezier(&curve, &desc);
 
 // Evaluate at midpoint
 qaws_eval_result_2d result;
-qaws_curve_evaluate_2d(curve, 0.5f,
-    QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &result);
+qaws_curve_evaluate_2d(&result, curve,
+    0.5f, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1);
 
 // result.position = {0.5, 0.75}
 // result.d1       = first derivative at t=0.5

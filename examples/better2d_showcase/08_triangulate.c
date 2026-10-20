@@ -12,7 +12,7 @@ static void tr_draw(svg* s, viewport const* v, qaws_mesh_2d const* m, char const
 	for (i = 0; i < nq; i++)
 	{
 		unsigned int q[4];
-		qaws_mesh_2d_get_quad(m, i, q);
+		qaws_mesh_2d_get_quad(q, m, i);
 		for (k = 0; k < 4; k++)
 		{
 			qaws_vec2 p = qaws_mesh_2d_get_vertex(m, q[k]);
@@ -27,7 +27,7 @@ static void tr_draw(svg* s, viewport const* v, qaws_mesh_2d const* m, char const
 	for (i = 0; i < nt; i++)
 	{
 		unsigned int t[3];
-		qaws_mesh_2d_get_triangle(m, i, t);
+		qaws_mesh_2d_get_triangle(t, m, i);
 		for (k = 0; k < 3; k++)
 		{
 			qaws_vec2 p = qaws_mesh_2d_get_vertex(m, t[k]);
@@ -40,8 +40,8 @@ static void tr_draw(svg* s, viewport const* v, qaws_mesh_2d const* m, char const
 	{
 		unsigned int e[2];
 		qaws_vec2 a, b;
-		if (i < nb) qaws_mesh_2d_get_boundary_edge(m, i, e);
-		else qaws_mesh_2d_get_constraint_edge(m, i - nb, e);
+		if (i < nb) qaws_mesh_2d_get_boundary_edge(e, m, i);
+		else qaws_mesh_2d_get_constraint_edge(e, m, i - nb);
 		a = qaws_mesh_2d_get_vertex(m, e[0]);
 		b = qaws_mesh_2d_get_vertex(m, e[1]);
 		svg_line(s, vx(v, a.x), vy(v, a.y), vx(v, b.x), vy(v, b.y), i < nb ? "#24292f" : "#cf222e", i < nb ? 1.4 : 1.8, 0.95);
@@ -57,7 +57,7 @@ static double tr_min_angle(qaws_mesh_2d const* m)
 		unsigned int t[3];
 		qaws_vec2 p[3];
 		double l[3];
-		qaws_mesh_2d_get_triangle(m, i, t);
+		qaws_mesh_2d_get_triangle(t, m, i);
 		for (k = 0; k < 3; k++) p[k] = qaws_mesh_2d_get_vertex(m, t[k]);
 		for (k = 0; k < 3; k++) l[k] = hypot((double)p[(k + 2) % 3].x - p[(k + 1) % 3].x, (double)p[(k + 2) % 3].y - p[(k + 1) % 3].y);
 		for (k = 0; k < 3; k++)
@@ -90,17 +90,17 @@ static void demo_triangulate(void)
 	if (!svg_open(&s, "showcase/b2d8_triangulate.svg", W, H, "Meshing regions of curves",
 		"qaws_triangulate: constrained Delaunay with exact predicates, boundary vertices on the true curves, Ruppert refinement, remeshing, constraint curves (red), quadrangulation"))
 		return;
-	qaws_curve_create_ellipse_2d((qaws_scalar)-0.9, (qaws_scalar)0.4, (qaws_scalar)0.55, (qaws_scalar)0.35, 0, &h1);
-	qaws_curve_create_ellipse_2d((qaws_scalar)0.9, (qaws_scalar)-0.5, (qaws_scalar)0.4, (qaws_scalar)0.4, 0, &h2);
-	qaws_curve_reverse(h1, &h1r);
-	qaws_curve_reverse(h2, &h2r);
-	qaws_curve_create_ellipse_2d(0, 0, (qaws_scalar)3.2, (qaws_scalar)2.4, 0, &disc);
+	qaws_curve_create_ellipse_2d(&h1, (qaws_scalar)-0.9, (qaws_scalar)0.4, (qaws_scalar)0.55, (qaws_scalar)0.35, 0);
+	qaws_curve_create_ellipse_2d(&h2, (qaws_scalar)0.9, (qaws_scalar)-0.5, (qaws_scalar)0.4, (qaws_scalar)0.4, 0);
+	qaws_curve_reverse(&h1r, h1);
+	qaws_curve_reverse(&h2r, h2);
+	qaws_curve_create_ellipse_2d(&disc, 0, 0, (qaws_scalar)3.2, (qaws_scalar)2.4, 0);
 	{
 		/* a rounded box: a closed cubic B-spline through the corners' arcs */
 		static double const w[8] = { -3.2, -0.7, -1.1, 1.5, 1.1, -1.9, 3.2, 0.3 };
 		wave = co_bezier(w, 4);
 	}
-	qaws_curve_create_ellipse_2d((qaws_scalar)-1.1, (qaws_scalar)0.75, (qaws_scalar)0.8, (qaws_scalar)0.8, 0, &ring);
+	qaws_curve_create_ellipse_2d(&ring, (qaws_scalar)-1.1, (qaws_scalar)0.75, (qaws_scalar)0.8, (qaws_scalar)0.8, 0);
 	rbox = co_star(8, 2.95, 2.7, 0, -0.15);
 	t0 = (double)clock() / CLOCKS_PER_SEC;
 	for (k = 0; k < 9; k++)
@@ -146,7 +146,7 @@ static void demo_triangulate(void)
 		case 4:
 		{
 			static qaws_scalar const z[14] = { -3, -2, 3, 2, 3, -2, -3, 2, -1.5f, -2.6f, 0, 2.6f, 1.5f, -2.6f };
-			qaws_curve_create_polyline_2d(z, 7, 1, &poly);
+			qaws_curve_create_polyline_2d(&poly, z, 7, 1);
 			cs[0] = poly; n = 1;
 			d.fill_rule = QAWS_FILL_EVEN_ODD; d.min_angle = 25; d.tolerance = 0;
 			title = "a self-crossing polygon, even-odd, 25 degrees";
@@ -185,7 +185,7 @@ static void demo_triangulate(void)
 		for (i = 0; i < n; i++) { p[i].curves = &cs[i]; p[i].curve_count = 1; p[i].closed = 1; }
 		d.paths = p; d.path_count = n;
 		svg_panel(&s, &v, title);
-		if (qaws_triangulate_region_2d(&d, &m) == QAWS_STATUS_OK)
+		if (qaws_triangulate_region_2d(&m, &d) == QAWS_STATUS_OK)
 		{
 			if (remesh > 0) qaws_mesh_2d_remesh(m, (qaws_scalar)remesh, NULL, NULL, 6);
 			if (quads >= 0) qaws_mesh_2d_quadrangulate(m, quads, 4);

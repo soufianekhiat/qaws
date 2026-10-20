@@ -57,12 +57,12 @@ static void hs_ribbon(svg* s, projection const* pr, qaws_curve const* c, int fre
 	for (i = 0; i < HS_SAMPLES; i++)
 	{
 		qaws_eval_result_3d e;
-		qaws_curve_evaluate_3d(c, t[i], QAWS_EVAL_FLAG_POSITION, &e);
+		qaws_curve_evaluate_3d(&e, c, t[i], QAWS_EVAL_FLAG_POSITION);
 		pos[i] = e.position;
 		if (frenet)
 		{
 			qaws_vec3 tg, bn;
-			ok[i] = qaws_curve_compute_frenet_frame_3d(c, t[i], &tg, &nrm[i], &bn) == QAWS_STATUS_OK
+			ok[i] = qaws_curve_compute_frenet_frame_3d(&tg, &nrm[i], &bn, c, t[i]) == QAWS_STATUS_OK
 				&& isfinite((double)nrm[i].x) && (double)nrm[i].x * nrm[i].x + (double)nrm[i].y * nrm[i].y + (double)nrm[i].z * nrm[i].z > 0.5;
 		}
 		else
@@ -107,7 +107,7 @@ static void figure_frames(void)
 	d.control_point_count = 10;
 	d.knots = knots;
 	d.knot_count = 14;
-	if (qaws_curve_create_bspline(&d, &c) != QAWS_STATUS_OK)
+	if (qaws_curve_create_bspline(&c, &d) != QAWS_STATUS_OK)
 	{
 		printf("host1: curve not created\n");
 		return;
@@ -140,26 +140,26 @@ static void hs_dots(svg* s, viewport const* v, qaws_curve const* c, int by_lengt
 	for (i = 0; i < HS_SAMPLES; i++)
 	{
 		qaws_eval_result_2d e;
-		qaws_curve_evaluate_2d(c, r.min_value + (r.max_value - r.min_value) * (qaws_scalar)i / (HS_SAMPLES - 1), QAWS_EVAL_FLAG_POSITION, &e);
+		qaws_curve_evaluate_2d(&e, c, r.min_value + (r.max_value - r.min_value) * (qaws_scalar)i / (HS_SAMPLES - 1), QAWS_EVAL_FLAG_POSITION);
 		line[2 * i] = vx(v, e.position.x);
 		line[2 * i + 1] = vy(v, e.position.y);
 	}
 	svg_polyline(s, line, HS_SAMPLES, "#1b1f24", 1.6, 1, 0);
-	qaws_curve_compute_arc_length(c, r.min_value, r.max_value, &total);
+	qaws_curve_compute_arc_length(&total, c, r.min_value, r.max_value);
 	for (i = 0; i < HS_DOTS; i++)
 	{
 		qaws_eval_result_2d e;
 		t = r.min_value + (r.max_value - r.min_value) * (qaws_scalar)i / (HS_DOTS - 1);
 		if (by_length)
 			qaws_curve_compute_parameter_at_arc_length(c, r.min_value, total * (qaws_scalar)i / (HS_DOTS - 1), &t);
-		qaws_curve_evaluate_2d(c, t, QAWS_EVAL_FLAG_POSITION, &e);
+		qaws_curve_evaluate_2d(&e, c, t, QAWS_EVAL_FLAG_POSITION);
 		xy[2 * i] = e.position.x;
 		xy[2 * i + 1] = e.position.y;
 		if (i > 0)
 		{
 			qaws_scalar arc = 0;
 			double d;
-			qaws_curve_compute_arc_length(c, t_prev, t, &arc);
+			qaws_curve_compute_arc_length(&arc, c, t_prev, t);
 			d = arc;
 			dmin = d < dmin ? d : dmin;
 			dmax = d > dmax ? d : dmax;
@@ -188,7 +188,7 @@ static void figure_arc_length(void)
 	d.control_point_count = 8;
 	d.knots = knots;
 	d.knot_count = 12;
-	if (qaws_curve_create_bspline(&d, &c) != QAWS_STATUS_OK)
+	if (qaws_curve_create_bspline(&c, &d) != QAWS_STATUS_OK)
 	{
 		printf("host2: curve not created\n");
 		return;
@@ -217,7 +217,7 @@ static void hs_ring_curve(svg* s, viewport const* v, qaws_curve const* c)
 	for (i = 0; i < 1200; i++)
 	{
 		qaws_eval_result_2d e;
-		qaws_curve_evaluate_2d(c, r.min_value + (r.max_value - r.min_value) * (qaws_scalar)i / 1199, QAWS_EVAL_FLAG_POSITION, &e);
+		qaws_curve_evaluate_2d(&e, c, r.min_value + (r.max_value - r.min_value) * (qaws_scalar)i / 1199, QAWS_EVAL_FLAG_POSITION);
 		line[2 * i] = vx(v, e.position.x);
 		line[2 * i + 1] = vy(v, e.position.y);
 	}
@@ -251,7 +251,7 @@ static void figure_closest(void)
 	d.degree = 3;
 	d.control_points = p;
 	d.control_point_count = HS_RING;
-	if (qaws_curve_create_bspline(&d, &c) != QAWS_STATUS_OK)
+	if (qaws_curve_create_bspline(&c, &d) != QAWS_STATUS_OK)
 	{
 		printf("host3: curve not created\n");
 		return;
@@ -267,7 +267,7 @@ static void figure_closest(void)
 	for (i = 0; i < 32; i++)
 	{
 		double dd;
-		qaws_curve_evaluate_2d(c, r.min_value + (r.max_value - r.min_value) * (qaws_scalar)i / 31, QAWS_EVAL_FLAG_POSITION, &e);
+		qaws_curve_evaluate_2d(&e, c, r.min_value + (r.max_value - r.min_value) * (qaws_scalar)i / 31, QAWS_EVAL_FLAG_POSITION);
 		dd = hypot(e.position.x, e.position.y);
 		svg_circle(&s, vx(&vl, e.position.x), vy(&vl, e.position.y), 3.5, "#f4a261", "#1b1f24");
 		if (dd < best)
@@ -276,12 +276,12 @@ static void figure_closest(void)
 			ts = r.min_value + (r.max_value - r.min_value) * (qaws_scalar)i / 31;
 		}
 	}
-	qaws_curve_evaluate_2d(c, ts, QAWS_EVAL_FLAG_POSITION, &e);
+	qaws_curve_evaluate_2d(&e, c, ts, QAWS_EVAL_FLAG_POSITION);
 	svg_line(&s, vx(&vl, 0), vy(&vl, 0), vx(&vl, e.position.x), vy(&vl, e.position.y), "#f4a261", 2.5, 1);
 	snprintf(note, sizeof note, "distance %.6f", best);
 	svg_text(&s, vl.x0 + 16, vl.y0 + vl.h - 16, 13, "#57606a", "start", note);
 	qaws_curve_find_closest_point_certified_2d(c, q, &t, &dist, &gap);
-	qaws_curve_evaluate_2d(c, t, QAWS_EVAL_FLAG_POSITION, &e);
+	qaws_curve_evaluate_2d(&e, c, t, QAWS_EVAL_FLAG_POSITION);
 	svg_line(&s, vx(&vr, 0), vy(&vr, 0), vx(&vr, e.position.x), vy(&vr, e.position.y), "#2a9d8f", 2.5, 1);
 	svg_circle(&s, vx(&vr, e.position.x), vy(&vr, e.position.y), 5, "#2a9d8f", "#1b1f24");
 	snprintf(note, sizeof note, "distance %.12f, gap %.1e (the minimum is in [d - gap, d])", (double)dist, (double)gap);
@@ -304,7 +304,7 @@ static void hs_polyline(svg* s, viewport const* v, qaws_curve const* c, qaws_vec
 	for (i = 0; i < 600; i++)
 	{
 		qaws_eval_result_2d e;
-		qaws_curve_evaluate_2d(c, r.min_value + (r.max_value - r.min_value) * (qaws_scalar)i / 599, QAWS_EVAL_FLAG_POSITION, &e);
+		qaws_curve_evaluate_2d(&e, c, r.min_value + (r.max_value - r.min_value) * (qaws_scalar)i / 599, QAWS_EVAL_FLAG_POSITION);
 		line[2 * i] = vx(v, e.position.x);
 		line[2 * i + 1] = vy(v, e.position.y);
 	}
@@ -339,7 +339,7 @@ static void figure_tessellation(void)
 	d.degree = 3;
 	d.control_points = p;
 	d.control_point_count = 4;
-	if (qaws_curve_create_bezier(&d, &c) != QAWS_STATUS_OK)
+	if (qaws_curve_create_bezier(&c, &d) != QAWS_STATUS_OK)
 	{
 		printf("host4: curve not created\n");
 		return;
@@ -349,7 +349,7 @@ static void figure_tessellation(void)
 	sd.sample_count = 2;
 	sd.error_tolerance = (qaws_scalar)0.02;
 	sd.use_adaptive_sampling = 1;
-	qaws_curve_sample_2d(c, &sd, old_pts, HS_TESS, &old_n);
+	qaws_curve_sample_2d(old_pts, &old_n, c, HS_TESS, &sd);
 	memset(&td, 0, sizeof td);
 	td.chord_tolerance = (qaws_scalar)0.02;
 	td.angle_tolerance = (qaws_scalar)0.35;
@@ -377,7 +377,7 @@ static void figure_tessellation(void)
 static double hs_radius(void const* user, qaws_scalar u, qaws_scalar v)
 {
 	qaws_surface_eval_result r;
-	qaws_surface_evaluate((qaws_surface const*)user, u, v, QAWS_SURFACE_EVAL_POSITION, &r);
+	qaws_surface_evaluate(&r, (qaws_surface const*)user, u, v, QAWS_SURFACE_EVAL_POSITION);
 	return sqrt((double)r.position.x * r.position.x + (double)r.position.y * r.position.y + (double)r.position.z * r.position.z);
 }
 
@@ -420,7 +420,7 @@ static void figure_surface_closest(void)
 	d.control_points = p;
 	d.u_point_count = HS_CAP;
 	d.v_point_count = HS_CAP;
-	if (qaws_surface_create_bspline(&d, &c) != QAWS_STATUS_OK)
+	if (qaws_surface_create_bspline(&c, &d) != QAWS_STATUS_OK)
 	{
 		printf("host5: surface not created\n");
 		return;
@@ -437,7 +437,7 @@ static void figure_surface_closest(void)
 		{
 			qaws_surface_eval_result r;
 			double dd;
-			qaws_surface_evaluate(c, (qaws_scalar)(i / 7.0), (qaws_scalar)(j / 7.0), QAWS_SURFACE_EVAL_POSITION, &r);
+			qaws_surface_evaluate(&r, c, (qaws_scalar)(i / 7.0), (qaws_scalar)(j / 7.0), QAWS_SURFACE_EVAL_POSITION);
 			dd = sqrt((double)r.position.x * r.position.x + (double)r.position.y * r.position.y + (double)r.position.z * r.position.z);
 			project(&left, r.position.x, r.position.y, r.position.z, &lx, &ly);
 			svg_circle(&s, lx, ly, 3, "#f4a261", "#1b1f24");
@@ -538,7 +538,7 @@ static void figure_tessellation_surface(void)
 	d.control_points = p;
 	d.u_point_count = 24;
 	d.v_point_count = 24;
-	if (qaws_surface_create_bspline(&d, &c) != QAWS_STATUS_OK)
+	if (qaws_surface_create_bspline(&c, &d) != QAWS_STATUS_OK)
 	{
 		printf("host6: surface not created\n");
 		return;
@@ -551,7 +551,7 @@ static void figure_tessellation_surface(void)
 	memset(&od, 0, sizeof od);
 	od.max_depth = 6;
 	od.curvature_threshold = (qaws_scalar)0.02;
-	qaws_surface_tessellate(c, &od, v, HS_TV, &nv, idx, HS_TI, &ni);
+	qaws_surface_tessellate(v, &nv, idx, &ni, c, HS_TV, HS_TI, &od);
 	hs_mesh(&s, &left, v, idx, ni);
 	snprintf(note, sizeof note, "%u triangles", ni / 3);
 	svg_text(&s, vl.x0 + 16, vl.y0 + vl.h - 16, 13, "#57606a", "start", note);
@@ -582,7 +582,7 @@ static void hs_pipe(svg* s, projection const* pr, qaws_surface const* pipe)
 	for (k = 0; k < n; k++)
 	{
 		qaws_surface_eval_result r;
-		qaws_surface_evaluate(pipe, (qaws_scalar)((k / HS_PV + 0.5) / HS_PU), (qaws_scalar)((k % HS_PV + 0.5) / HS_PV), QAWS_SURFACE_EVAL_POSITION, &r);
+		qaws_surface_evaluate(&r, pipe, (qaws_scalar)((k / HS_PV + 0.5) / HS_PU), (qaws_scalar)((k % HS_PV + 0.5) / HS_PV), QAWS_SURFACE_EVAL_POSITION);
 		depth[k] = r.position.x + r.position.y - 0.4 * r.position.z;
 		order[k] = k;
 	}
@@ -602,10 +602,10 @@ static void hs_pipe(svg* s, projection const* pr, qaws_surface const* pipe)
 		int du[4] = { 0, 1, 1, 0 }, dv[4] = { 0, 0, 1, 1 };
 		for (c = 0; c < 4; c++)
 		{
-			qaws_surface_evaluate(pipe, (qaws_scalar)((double)(i + du[c]) / HS_PU), (qaws_scalar)((double)(j + dv[c]) / HS_PV), QAWS_SURFACE_EVAL_POSITION, &r[c]);
+			qaws_surface_evaluate(&r[c], pipe, (qaws_scalar)((double)(i + du[c]) / HS_PU), (qaws_scalar)((double)(j + dv[c]) / HS_PV), QAWS_SURFACE_EVAL_POSITION);
 			project(pr, r[c].position.x, r[c].position.y, r[c].position.z, &x[c], &y[c]);
 		}
-		qaws_surface_evaluate(pipe, (qaws_scalar)((i + 0.5) / HS_PU), (qaws_scalar)((j + 0.5) / HS_PV), QAWS_SURFACE_EVAL_NORMAL, &mid);
+		qaws_surface_evaluate(&mid, pipe, (qaws_scalar)((i + 0.5) / HS_PU), (qaws_scalar)((j + 0.5) / HS_PV), QAWS_SURFACE_EVAL_NORMAL);
 		lit = fabs(-0.5 * mid.normal.x + 0.3 * mid.normal.y + 0.81 * mid.normal.z);
 		lit = 0.25 + 0.75 * lit;
 		fprintf(s->f, "<polygon points=\"%.1f,%.1f %.1f,%.1f %.1f,%.1f %.1f,%.1f\" fill=\"rgb(%d,%d,%d)\" stroke=\"none\"/>\n",
@@ -638,12 +638,12 @@ static void figure_pipe(void)
 	d.degree = 3;
 	d.control_points = p;
 	d.control_point_count = 12;
-	if (qaws_curve_create_bspline(&d, &c) != QAWS_STATUS_OK)
+	if (qaws_curve_create_bspline(&c, &d) != QAWS_STATUS_OK)
 		return;
 	memset(&pd, 0, sizeof pd);
 	pd.path = c;
 	pd.radius_x = (qaws_scalar)0.45;
-	if (qaws_surface_create_pipe(&pd, &pipe) != QAWS_STATUS_OK)
+	if (qaws_surface_create_pipe(&pipe, &pd) != QAWS_STATUS_OK)
 	{
 		qaws_curve_destroy(c);
 		return;
@@ -686,12 +686,12 @@ static void figure_parameterization(void)
 		d.degree = 3;
 		d.control_point_count = 8;
 		d.parameterization = par[k];
-		if (qaws_curve_fit_bspline(&d, &c) != QAWS_STATUS_OK)
+		if (qaws_curve_fit_bspline(&c, &d) != QAWS_STATUS_OK)
 			continue;
 		for (i = 0; i < 400; i++)
 		{
 			qaws_eval_result_2d e;
-			qaws_curve_evaluate_2d(c, (qaws_scalar)(i / 399.0), QAWS_EVAL_FLAG_POSITION, &e);
+			qaws_curve_evaluate_2d(&e, c, (qaws_scalar)(i / 399.0), QAWS_EVAL_FLAG_POSITION);
 			line[2 * i] = vx(&v, e.position.x);
 			line[2 * i + 1] = vy(&v, e.position.y);
 		}

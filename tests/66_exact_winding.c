@@ -40,7 +40,7 @@ static qaws_exact_curve* ew_piece(qaws_scalar const* cps, qaws_scalar const* ws,
 		d.control_point_count = degree + 1;
 		d.weights = ws;
 		d.weight_count = degree + 1;
-		qaws_curve_create_rational_bezier(&d, &c);
+		qaws_curve_create_rational_bezier(&c, &d);
 	}
 	else
 	{
@@ -50,9 +50,9 @@ static qaws_exact_curve* ew_piece(qaws_scalar const* cps, qaws_scalar const* ws,
 		d.degree = degree;
 		d.control_points = cps;
 		d.control_point_count = degree + 1;
-		qaws_curve_create_bezier(&d, &c);
+		qaws_curve_create_bezier(&c, &d);
 	}
-	qaws_exact_curve_prepare(&desc, c, &e, NULL);
+	qaws_exact_curve_prepare(&e, NULL, c, &desc);
 	qaws_curve_destroy(c);
 	return e;
 }
@@ -80,7 +80,7 @@ static void test_conics(void)
 		int w = -99;
 		p[0] = ldexp((double)g_ref_wind[i].mx, g_ref_wind[i].ex);
 		p[1] = ldexp((double)g_ref_wind[i].my, g_ref_wind[i].ey);
-		ok &= qaws_exact_winding_2d((qaws_exact_curve const* const*)pieces, 4, p, &w) == QAWS_STATUS_OK && w == g_ref_wind[i].winding;
+		ok &= qaws_exact_winding_2d(&w, (qaws_exact_curve const* const*)pieces, p, 4) == QAWS_STATUS_OK && w == g_ref_wind[i].winding;
 	}
 	sprintf(msg, "conic loop: winding equals Mathematica for all %u points (2^-28 lattice units from the boundary)", n);
 	TEST_ASSERT(ok, msg);
@@ -90,10 +90,10 @@ static void test_conics(void)
 		int w;
 		p[0] = (double)g_ref_wind_pieces[1][0][0];
 		p[1] = (double)g_ref_wind_pieces[1][0][1];
-		TEST_ASSERT(qaws_exact_winding_2d((qaws_exact_curve const* const*)pieces, 4, p, &w) == QAWS_STATUS_CERTIFICATION_FAILED,
+		TEST_ASSERT(qaws_exact_winding_2d(&w, (qaws_exact_curve const* const*)pieces, p, 4) == QAWS_STATUS_CERTIFICATION_FAILED,
 			"a point on the conic loop is reported, not guessed");
 		/* an open chain is refused */
-		TEST_ASSERT(qaws_exact_winding_2d((qaws_exact_curve const* const*)pieces, 3, p, &w) == QAWS_STATUS_INVALID_ARGUMENT,
+		TEST_ASSERT(qaws_exact_winding_2d(&w, (qaws_exact_curve const* const*)pieces, p, 3) == QAWS_STATUS_INVALID_ARGUMENT,
 			"a loop that does not close is refused");
 	}
 	for (k = 0; k < 4; k++)
@@ -120,7 +120,7 @@ static int ew_polygon(double const* v, int n, double const* p)
 		double const* a = &v[2 * i];
 		double const* b = &v[2 * ((i + 1) % n)];
 		qaws_exact_sign s;
-		qaws_exact_orient2d(a, b, p, &s, NULL);
+		qaws_exact_orient2d(&s, NULL, a, b, p);
 		if (s == QAWS_EXACT_ZERO && fmin(a[0], b[0]) <= p[0] && p[0] <= fmax(a[0], b[0]) && fmin(a[1], b[1]) <= p[1] &&
 		    p[1] <= fmax(a[1], b[1]))
 			return 1000;
@@ -176,7 +176,7 @@ static void test_polygons(void)
 				p[1] = ew_rand(-1100, 1100) + 0.5 * ew_rand(0, 1);
 			}
 			expect = ew_polygon(v, n, p);
-			st = qaws_exact_winding_2d((qaws_exact_curve const* const*)pieces, (unsigned int)n, p, &w);
+			st = qaws_exact_winding_2d(&w, (qaws_exact_curve const* const*)pieces, p, (unsigned int)n);
 			cases++;
 			if (expect == 1000)
 			{

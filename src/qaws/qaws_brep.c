@@ -161,9 +161,9 @@ void qaws_brep_destroy(qaws_brep_shell* shell)
  * =================================================================== */
 
 qaws_status qaws_brep_add_vertex(
+	qaws_brep_vertex_id* out_id,
 	qaws_brep_shell* shell,
-	qaws_vec3 position,
-	qaws_brep_vertex_id* out_id)
+	qaws_vec3 position)
 {
 	brep_vertex* v;
 
@@ -182,9 +182,9 @@ qaws_status qaws_brep_add_vertex(
 }
 
 qaws_status qaws_brep_add_edge(
+	qaws_brep_edge_id* out_id,
 	qaws_brep_shell* shell,
-	qaws_brep_edge_desc const* desc,
-	qaws_brep_edge_id* out_id)
+	qaws_brep_edge_desc const* desc)
 {
 	brep_edge* e;
 
@@ -211,12 +211,12 @@ qaws_status qaws_brep_add_edge(
 }
 
 qaws_status qaws_brep_add_face(
+	qaws_brep_face_id* out_id,
 	qaws_brep_shell* shell,
-	qaws_brep_face_desc const* desc,
 	qaws_brep_edge_id const* edge_ids,
 	int const* edge_orientations,
 	unsigned int edge_count,
-	qaws_brep_face_id* out_id)
+	qaws_brep_face_desc const* desc)
 {
 	brep_face* f;
 	qaws_brep_face_id face_id;
@@ -310,9 +310,9 @@ unsigned int qaws_brep_get_face_count(qaws_brep_shell const* shell)
 }
 
 qaws_status qaws_brep_get_vertex_position(
+	qaws_vec3* out_position,
 	qaws_brep_shell const* shell,
-	qaws_brep_vertex_id id,
-	qaws_vec3* out_position)
+	qaws_brep_vertex_id id)
 {
 	if (!shell || !out_position)
 		return QAWS_STATUS_INVALID_ARGUMENT;
@@ -324,9 +324,9 @@ qaws_status qaws_brep_get_vertex_position(
 }
 
 qaws_status qaws_brep_get_face_surface(
+	qaws_surface const** out_surface,
 	qaws_brep_shell const* shell,
-	qaws_brep_face_id id,
-	qaws_surface const** out_surface)
+	qaws_brep_face_id id)
 {
 	if (!shell || !out_surface)
 		return QAWS_STATUS_INVALID_ARGUMENT;
@@ -338,10 +338,10 @@ qaws_status qaws_brep_get_face_surface(
 }
 
 qaws_status qaws_brep_get_edge_vertices(
-	qaws_brep_shell const* shell,
-	qaws_brep_edge_id id,
 	qaws_brep_vertex_id* out_v_start,
-	qaws_brep_vertex_id* out_v_end)
+	qaws_brep_vertex_id* out_v_end,
+	qaws_brep_shell const* shell,
+	qaws_brep_edge_id id)
 {
 	if (!shell || !out_v_start || !out_v_end)
 		return QAWS_STATUS_INVALID_ARGUMENT;
@@ -354,10 +354,10 @@ qaws_status qaws_brep_get_edge_vertices(
 }
 
 qaws_status qaws_brep_get_edge_faces(
-	qaws_brep_shell const* shell,
-	qaws_brep_edge_id id,
 	qaws_brep_face_id* out_face_left,
-	qaws_brep_face_id* out_face_right)
+	qaws_brep_face_id* out_face_right,
+	qaws_brep_shell const* shell,
+	qaws_brep_edge_id id)
 {
 	if (!shell || !out_face_left || !out_face_right)
 		return QAWS_STATUS_INVALID_ARGUMENT;
@@ -370,11 +370,11 @@ qaws_status qaws_brep_get_edge_faces(
 }
 
 qaws_status qaws_brep_get_face_edges(
-	qaws_brep_shell const* shell,
-	qaws_brep_face_id id,
 	qaws_brep_edge_id* out_edges,
+	unsigned int* out_count,
+	qaws_brep_shell const* shell,
 	unsigned int capacity,
-	unsigned int* out_count)
+	qaws_brep_face_id id)
 {
 	brep_face const* f;
 
@@ -401,11 +401,11 @@ qaws_status qaws_brep_get_face_edges(
  * =================================================================== */
 
 qaws_status qaws_brep_get_vertex_edges(
-	qaws_brep_shell const* shell,
-	qaws_brep_vertex_id id,
 	qaws_brep_edge_id* out_edges,
+	unsigned int* out_count,
+	qaws_brep_shell const* shell,
 	unsigned int capacity,
-	unsigned int* out_count)
+	qaws_brep_vertex_id id)
 {
 	unsigned int i;
 	unsigned int count;
@@ -433,11 +433,11 @@ qaws_status qaws_brep_get_vertex_edges(
 }
 
 qaws_status qaws_brep_get_vertex_faces(
-	qaws_brep_shell const* shell,
-	qaws_brep_vertex_id id,
 	qaws_brep_face_id* out_faces,
+	unsigned int* out_count,
+	qaws_brep_shell const* shell,
 	unsigned int capacity,
-	unsigned int* out_count)
+	qaws_brep_vertex_id id)
 {
 	unsigned int i;
 	unsigned int j;
@@ -504,8 +504,8 @@ qaws_status qaws_brep_get_vertex_faces(
  * =================================================================== */
 
 qaws_status qaws_brep_validate(
-	qaws_brep_shell const* shell,
-	unsigned int* out_flags)
+	unsigned int* out_flags,
+	qaws_brep_shell const* shell)
 {
 	unsigned int flags;
 	unsigned int i;
@@ -605,8 +605,8 @@ qaws_status qaws_brep_validate(
  * =================================================================== */
 
 qaws_status qaws_brep_euler_characteristic(
-	qaws_brep_shell const* shell,
-	int* out_chi)
+	int* out_chi,
+	qaws_brep_shell const* shell)
 {
 	if (!shell || !out_chi)
 		return QAWS_STATUS_INVALID_ARGUMENT;
@@ -622,8 +622,8 @@ qaws_status qaws_brep_euler_characteristic(
  * =================================================================== */
 
 qaws_status qaws_brep_compute_volume(
-	qaws_brep_shell const* shell,
-	qaws_scalar* out_volume)
+	qaws_scalar* out_volume,
+	qaws_brep_shell const* shell)
 {
 	unsigned int fi;
 	unsigned int i;
@@ -675,9 +675,9 @@ qaws_status qaws_brep_compute_volume(
 				qaws_scalar nx, ny, nz, area_elem, dot_val;
 
 				memset(&rc, 0, sizeof(rc));
-				s = qaws_surface_evaluate(surf, u_c, v_c,
-					QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_DU | QAWS_SURFACE_EVAL_DV,
-					&rc);
+				s = qaws_surface_evaluate(&rc, surf, u_c,
+					v_c,
+					QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_DU | QAWS_SURFACE_EVAL_DV);
 				if (s != QAWS_STATUS_OK) continue;
 
 				/* Surface element normal (unnormalized = du x dv, length = area element) */
@@ -709,8 +709,8 @@ qaws_status qaws_brep_compute_volume(
  * =================================================================== */
 
 qaws_status qaws_brep_compute_surface_area(
-	qaws_brep_shell const* shell,
-	qaws_scalar* out_area)
+	qaws_scalar* out_area,
+	qaws_brep_shell const* shell)
 {
 	unsigned int i;
 	qaws_scalar total_area;
@@ -728,7 +728,7 @@ qaws_status qaws_brep_compute_surface_area(
 		if (!surf)
 			continue;
 
-		s = qaws_surface_compute_area(surf, &face_area);
+		s = qaws_surface_compute_area(&face_area, surf);
 		if (s != QAWS_STATUS_OK)
 			return s;
 

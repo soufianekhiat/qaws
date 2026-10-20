@@ -25,7 +25,7 @@ static qaws_curve* fr_bezier(qaws_vec3 const* p, unsigned int n)
 	d.degree = n - 1;
 	d.control_points = p;
 	d.control_point_count = n;
-	qaws_curve_create_bezier(&d, &c);
+	qaws_curve_create_bezier(&c, &d);
 	return c;
 }
 
@@ -168,7 +168,7 @@ static void test_refusals(void)
 	qaws_curve *c = fr_bezier(p, 3), *c2 = NULL;
 	memset(&d, 0, sizeof d);
 	d.dimension = QAWS_DIMENSION_2D; d.degree = 2; d.control_points = p2; d.control_point_count = 3;
-	qaws_curve_create_bezier(&d, &c2);
+	qaws_curve_create_bezier(&c2, &d);
 	TEST_ASSERT(qaws_curve_compute_rotation_minimizing_frames_3d(c, t, 3, NULL, fr) == QAWS_STATUS_INVALID_ARGUMENT, "decreasing parameters refused");
 	t[2] = 1;
 	TEST_ASSERT(qaws_curve_compute_rotation_minimizing_frames_3d(c2, t, 3, NULL, fr) == QAWS_STATUS_INVALID_DIMENSION, "a 2D curve refused");

@@ -18,7 +18,7 @@ static void rsr_take(rsr* g, qaws_clip_result* r)
 	g->r = r;
 	g->n = r ? qaws_clip_result_get_path_count(r) : 0;
 	g->p = (qaws_path_2d*)malloc(sizeof(qaws_path_2d) * (g->n + 1));
-	for (i = 0; i < g->n; i++) qaws_clip_result_get_path(r, i, &g->p[i]);
+	for (i = 0; i < g->n; i++) qaws_clip_result_get_path(&g->p[i], r, i);
 }
 
 static void rsr_free(rsr* g)
@@ -33,7 +33,7 @@ static rsr rsr_op(qaws_clip_type op, qaws_path_2d const* a, unsigned int na, qaw
 {
 	rsr g;
 	qaws_clip_result* r = NULL;
-	qaws_clip_boolean(op, QAWS_FILL_NON_ZERO, a, na, b, nb, &r);
+	qaws_clip_boolean(&r, a, b, na, nb, op, QAWS_FILL_NON_ZERO);
 	rsr_take(&g, r);
 	return g;
 }
@@ -66,7 +66,7 @@ static qaws_curve const* rs_line(double x0, double y0, double x1, double y1)
 	p[0] = (qaws_scalar)x0; p[1] = (qaws_scalar)y0; p[2] = (qaws_scalar)x1; p[3] = (qaws_scalar)y1;
 	memset(&d, 0, sizeof(d));
 	d.dimension = QAWS_DIMENSION_2D; d.degree = 1; d.control_points = p; d.control_point_count = 2;
-	qaws_curve_create_bezier(&d, &c);
+	qaws_curve_create_bezier(&c, &d);
 	return rs_hold(c);
 }
 
@@ -79,7 +79,7 @@ static qaws_curve const* rs_cubic(double x0, double y0, double x1, double y1, do
 	p[4] = (qaws_scalar)x2; p[5] = (qaws_scalar)y2; p[6] = (qaws_scalar)x3; p[7] = (qaws_scalar)y3;
 	memset(&d, 0, sizeof(d));
 	d.dimension = QAWS_DIMENSION_2D; d.degree = 3; d.control_points = p; d.control_point_count = 4;
-	qaws_curve_create_bezier(&d, &c);
+	qaws_curve_create_bezier(&c, &d);
 	return rs_hold(c);
 }
 
@@ -94,7 +94,7 @@ static qaws_curve const* rs_arc(double cx, double cy, double r, double a0, doubl
 	g.angle_start = (qaws_scalar)a0; g.angle_end = (qaws_scalar)a1;
 	memset(&d, 0, sizeof(d));
 	d.dimension = QAWS_DIMENSION_2D; d.segments = &g; d.segment_count = 1;
-	qaws_curve_create_arc(&d, &c);
+	qaws_curve_create_arc(&c, &d);
 	return rs_hold(c);
 }
 
@@ -257,7 +257,7 @@ static rsr rs_cheese(void)
 	unsigned int i;
 	rsr g;
 	for (i = 0; i < 7; i++) holes[i] = rs_disc(hc[i][0], hc[i][1], hc[i][2]);
-	qaws_curve_create_ellipse_2d((qaws_scalar)1.0, (qaws_scalar)-0.1, (qaws_scalar)0.45, (qaws_scalar)0.25, (qaws_scalar)0.4, &e);
+	qaws_curve_create_ellipse_2d(&e, (qaws_scalar)1.0, (qaws_scalar)-0.1, (qaws_scalar)0.45, (qaws_scalar)0.25, (qaws_scalar)0.4);
 	{
 		qaws_curve const* ec = rs_hold(e);
 		ell = rs_path(&ec, 1);
@@ -390,7 +390,7 @@ static void rs_draw_region(svg* s, viewport const* v, rsr const* g)
 			for (j = (k == 0 ? 0 : 1); j <= m; j++)
 			{
 				qaws_eval_result_2d e;
-				qaws_curve_evaluate_2d(c, (qaws_scalar)(rg.min_value + (rg.max_value - rg.min_value) * j / m), QAWS_EVAL_FLAG_POSITION, &e);
+				qaws_curve_evaluate_2d(&e, c, (qaws_scalar)(rg.min_value + (rg.max_value - rg.min_value) * j / m), QAWS_EVAL_FLAG_POSITION);
 				fprintf(s->f, "%s%.2f,%.2f ", (j == 0 && k == 0) ? "M" : "L", vx(v, e.position.x), vy(v, e.position.y));
 			}
 		}
@@ -470,9 +470,9 @@ static void demo_region_sample(void)
 			}
 			d.density_user = &dd;
 			rs_draw_region(&s, &v, &g);
-			if (qaws_region_sampler_create(&d, &smp) == QAWS_STATUS_OK)
+			if (qaws_region_sampler_create(&smp, &d) == QAWS_STATUS_OK)
 			{
-				qaws_region_sampler_generate(smp, n, kinds[c], 7 + r, pts);
+				qaws_region_sampler_generate(pts, smp, n, kinds[c], 7 + r);
 				rs_draw_points(&s, &v, pts, n, "#cf222e");
 				qaws_region_sampler_destroy(smp);
 			}

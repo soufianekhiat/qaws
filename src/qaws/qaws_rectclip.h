@@ -28,27 +28,27 @@
 
 /* Each closed path clipped to the rectangle; results appended in path
    order into one result. */
-qaws_status qaws_rect_clip_2d(qaws_scalar const rect[4], qaws_path_2d const* paths, unsigned int path_count,
-	qaws_clip_result** out_result);
+qaws_status qaws_rect_clip_2d(qaws_clip_result** out_result, qaws_scalar const rect[4], qaws_path_2d const* paths,
+	unsigned int path_count);
 
 /* Open paths: the pieces inside the rectangle (open paths of the result). */
-qaws_status qaws_rect_clip_lines_2d(qaws_scalar const rect[4], qaws_path_2d const* paths, unsigned int path_count,
-	qaws_clip_result** out_result);
+qaws_status qaws_rect_clip_lines_2d(qaws_clip_result** out_result, qaws_scalar const rect[4], qaws_path_2d const* paths,
+	unsigned int path_count);
 
-qaws_status qaws_rect_clip64(int64_t const rect[4], qaws_path64 const* paths, unsigned int path_count,
-	qaws_clip64_result** out_result);
-qaws_status qaws_rect_clip_lines64(int64_t const rect[4], qaws_path64 const* paths, unsigned int path_count,
-	qaws_clip64_result** out_result);
+qaws_status qaws_rect_clip64(qaws_clip64_result** out_result, int64_t const rect[4], qaws_path64 const* paths,
+	unsigned int path_count);
+qaws_status qaws_rect_clip_lines64(qaws_clip64_result** out_result, int64_t const rect[4], qaws_path64 const* paths,
+	unsigned int path_count);
 
 /* Minkowski sum / difference of a pattern polygon (pattern_count points) and
    a polyline path (path_count points, closed or open). */
-qaws_status qaws_minkowski_sum_2d(qaws_scalar const* pattern, unsigned int pattern_count,
-	qaws_scalar const* path, unsigned int path_count, int closed, qaws_clip_result** out_result);
-qaws_status qaws_minkowski_diff_2d(qaws_scalar const* pattern, unsigned int pattern_count,
-	qaws_scalar const* path, unsigned int path_count, int closed, qaws_clip_result** out_result);
-qaws_status qaws_minkowski_sum64(int64_t const* pattern, unsigned int pattern_count,
-	int64_t const* path, unsigned int path_count, int closed, qaws_clip64_result** out_result);
-qaws_status qaws_minkowski_diff64(int64_t const* pattern, unsigned int pattern_count,
-	int64_t const* path, unsigned int path_count, int closed, qaws_clip64_result** out_result);
+qaws_status qaws_minkowski_sum_2d(qaws_clip_result** out_result, qaws_scalar const* pattern,
+	qaws_scalar const* path, unsigned int pattern_count, unsigned int path_count, int closed);
+qaws_status qaws_minkowski_diff_2d(qaws_clip_result** out_result, qaws_scalar const* pattern,
+	qaws_scalar const* path, unsigned int pattern_count, unsigned int path_count, int closed);
+qaws_status qaws_minkowski_sum64(qaws_clip64_result** out_result, int64_t const* pattern,
+	int64_t const* path, unsigned int pattern_count, unsigned int path_count, int closed);
+qaws_status qaws_minkowski_diff64(qaws_clip64_result** out_result, int64_t const* pattern,
+	int64_t const* path, unsigned int pattern_count, unsigned int path_count, int closed);
 
 #endif /* QAWS_RECTCLIP_H */

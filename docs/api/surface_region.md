@@ -9,18 +9,18 @@ planar shapes.
 
 ```c
 qaws_surface_curve* c;
-qaws_surface_curve_create_geodesic(surface, a_uv, b_uv, 0, &c);           /* shortest path a -> b */
-qaws_surface_curve_create_geodesic_ray(surface, p_uv, dir_uv, len, 0, &c); /* from p along dir */
-qaws_surface_curve_create_geodesic_arc(surface, centre_uv, r, a0, a1, 0, &c); /* geodesic circle arc */
-qaws_surface_curve_create_uv(surface, uv_curve, &c);                       /* a curve drawn in (u, v) */
+qaws_surface_curve_create_geodesic(&c, surface, a_uv, b_uv, 0);           /* shortest path a -> b */
+qaws_surface_curve_create_geodesic_ray(&c, surface, p_uv, dir_uv, len, 0); /* from p along dir */
+qaws_surface_curve_create_geodesic_arc(&c, surface, centre_uv, r, a0, a1, 0); /* geodesic circle arc */
+qaws_surface_curve_create_uv(&c, surface, uv_curve);                       /* a curve drawn in (u, v) */
 
 qaws_surface_curve_get_uv(c);              /* its (u, v) image: a qaws 2D curve */
-qaws_surface_curve_get_length(c, &len);    /* surface length */
-qaws_surface_curve_evaluate(c, t, &uv, &xyz);
+qaws_surface_curve_get_length(&len, c);    /* surface length */
+qaws_surface_curve_evaluate(&uv, &xyz, c, t);
 qaws_surface_curve_destroy(c);
 
-qaws_surface_get_metric(surface, u, v, g, christoffel);   /* E F G, G^k_ij */
-qaws_surface_exp(surface, p_uv, dir_uv, len, 0, &q, &vel); /* the exponential map */
+qaws_surface_get_metric(g, christoffel, surface, u, v);   /* E F G, G^k_ij */
+qaws_surface_exp(&q, &vel, surface, p_uv, dir_uv, len, 0); /* the exponential map */
 ```
 
 ## The geometry
@@ -116,14 +116,14 @@ under a stated contract or refused. Callers should know which is which:
 qaws_surface_curve const* edges[4] = { e0, e1, e2, e3 };
 qaws_surface_path square = { edges, 4, 1 }, circle = { &c, 1, 1 };
 qaws_surface_region* r;
-qaws_surface_clip(surface, QAWS_CLIP_UNION, QAWS_FILL_NON_ZERO, &square, 1, &circle, 1, &r);
+qaws_surface_clip(&r, surface, &square, &circle, 1, 1, QAWS_CLIP_UNION, QAWS_FILL_NON_ZERO);
 
-qaws_surface_region_get_area(r, &area);          /* surface area */
-qaws_surface_region_get_perimeter(r, &length);   /* boundary length on the surface */
-qaws_surface_region_integrate(r, f, user, dim, out);   /* integral of f dA */
-qaws_surface_region_contains(r, uv, &inside);    /* 1, 0, or -1 on the boundary */
-qaws_surface_region_get_path(r, i, &uv_path);    /* the loops in (u, v) */
-qaws_surface_region_create_trimmed(r, &trimmed); /* a trimmed surface */
+qaws_surface_region_get_area(&area, r);          /* surface area */
+qaws_surface_region_get_perimeter(&length, r);   /* boundary length on the surface */
+qaws_surface_region_integrate(out, r, dim, f, user);   /* integral of f dA */
+qaws_surface_region_contains(&inside, r, uv);    /* 1, 0, or -1 on the boundary */
+qaws_surface_region_get_path(&uv_path, r, i);    /* the loops in (u, v) */
+qaws_surface_region_create_trimmed(&trimmed, r); /* a trimmed surface */
 qaws_surface_region_destroy(r);
 ```
 
@@ -186,8 +186,8 @@ torus, and round the sphere's poles.
 ## Offsets
 
 ```c
-qaws_surface_offset(surface, QAWS_FILL_NON_ZERO, paths, n, distance, 0, &r);
-qaws_surface_curve_create_offset(curve, distance, 0, &offset_curve);
+qaws_surface_offset(&r, surface, paths, n, QAWS_FILL_NON_ZERO, distance, 0);
+qaws_surface_curve_create_offset(&offset_curve, curve, distance, 0);
 ```
 
 - **Offset curves.** Each point of the base is carried |distance| along
@@ -245,11 +245,11 @@ a wavy patch and a torus.
 
 ```c
 qaws_surface_sample_desc sd = { QAWS_REGION_SAMPLE_SOBOL, seed, NULL, NULL };
-qaws_surface_region_sample(region, &sd, count, uv, points);
+qaws_surface_region_sample(uv, points, region, count, &sd);
 
 qaws_surface_mesh_desc md = { edge_length, 0, 0, 3 };
 qaws_mesh_2d* mesh;
-qaws_surface_region_triangulate(region, &md, &mesh);
+qaws_surface_region_triangulate(&mesh, region, &md);
 ```
 
 - **Sampling.** The region's loops in (u, v) go through `qaws_region_sampler`
@@ -290,7 +290,7 @@ The same checks pass in f32. Figure 20 shows the points and the meshes.
 ## Exact topology
 
 ```c
-qaws_surface_clip_exact(surface, QAWS_CLIP_UNION, QAWS_FILL_NON_ZERO, a, na, b, nb, NULL, &r);
+qaws_surface_clip_exact(&r, surface, a, b, na, nb, NULL, QAWS_CLIP_UNION, QAWS_FILL_NON_ZERO);
 ```
 
 - **What is exact.** Every Boolean of the (u, v) images goes through
@@ -336,10 +336,10 @@ one band, checkerboards, and a lens.
 
 ```c
 qaws_geodesic_enclosure* e = NULL;
-qaws_surface_geodesic_enclose(surface, p, direction, length, 0, &e);   /* width 0 = 1e-6 of the domain */
-qaws_geodesic_enclosure_get_step(e, i, &t0, &t1, &lo, &hi);           /* a box proven to hold the geodesic over [t0, t1] */
-qaws_geodesic_enclosure_get_end(e, &lo, &hi, &vlo, &vhi);             /* boxes for the end and its unit velocity */
-qaws_geodesic_enclosure_cross(e, f, cap, lo, hi, &count);             /* crossings of two, certified */
+qaws_surface_geodesic_enclose(&e, surface, 0, p, direction, length);   /* width 0 = 1e-6 of the domain */
+qaws_geodesic_enclosure_get_step(&t0, &t1, &lo, &hi, e, i);           /* a box proven to hold the geodesic over [t0, t1] */
+qaws_geodesic_enclosure_get_end(&lo, &hi, &vlo, &vhi, e);             /* boxes for the end and its unit velocity */
+qaws_geodesic_enclosure_cross(lo, hi, &count, e, f, cap);             /* crossings of two, certified */
 ```
 
 On polynomial surfaces (Bezier, B-spline, bilinear, biquadratic) a
@@ -397,8 +397,8 @@ a tolerance.
 
 ```c
 qaws_geodesic_segment g[n];   /* start, (u, v) direction, length */
-qaws_surface_geodesics_certify(surface, g, n, next, 0, &crossings);   /* next[i]: the segment starting where i ends */
-qaws_surface_geodesic_polygon_area(surface, g, n, 0, 512, &lo, &hi);   /* g round a polygon */
+qaws_surface_geodesics_certify(&crossings, surface, g, next, n, 0);   /* next[i]: the segment starting where i ends */
+qaws_surface_geodesic_polygon_area(&lo, &hi, surface, g, n, 0, 512);   /* g round a polygon */
 ```
 
 - **Arrangements.** Every pair of segments' enclosures is crossed, and the
@@ -463,11 +463,11 @@ inside.
 ## Geodesic queries
 
 ```c
-qaws_surface_distance(surface, a, b, 0, &d);                                  /* along the surface */
-qaws_surface_curve_closest_point(curve, p, 0, &t, &q, &d);                   /* a curve's point nearest p */
-qaws_surface_curve_intersect(a, b, crossings, capacity, &count);             /* where two curves cross */
-qaws_surface_curve_closest_points(a, b, 0, &ta, &tb, &pa, &pb, &d);          /* two curves' nearest pair */
-qaws_surface_region_distance(region, p, 0, &d, &nearest);                    /* signed: negative inside */
+qaws_surface_distance(&d, surface, a, b, 0);                                  /* along the surface */
+qaws_surface_curve_closest_point(&t, &q, &d, curve, p, 0);                   /* a curve's point nearest p */
+qaws_surface_curve_intersect(crossings, &count, a, b, capacity);             /* where two curves cross */
+qaws_surface_curve_closest_points(&ta, &tb, &pa, &pb, &d, a, b, 0);          /* two curves' nearest pair */
+qaws_surface_region_distance(&d, &nearest, region, p, 0);                    /* signed: negative inside */
 ```
 
 The curves are any surface curves: geodesics, circles' arcs, offsets, or
@@ -536,10 +536,10 @@ that circle.
 ```c
 qaws_surface_medial_desc md = { 0.04 };          /* resolution on the surface */
 qaws_surface_medial_axis* m;
-qaws_surface_region_medial_axis(region, &md, &m);
-qaws_surface_medial_axis_get_segment(m, i, uv, radius);
-qaws_surface_medial_axis_get_junction(m, i, &uv, &radius);
-qaws_surface_medial_axis_get_max_inscribed(m, &centre, &radius);
+qaws_surface_region_medial_axis(&m, region, &md);
+qaws_surface_medial_axis_get_segment(uv, radius, m, i);
+qaws_surface_medial_axis_get_junction(&uv, &radius, m, i);
+qaws_surface_medial_axis_get_max_inscribed(&centre, &radius, m);
 ```
 
 - **What it is.** The axis is the set of points at the same geodesic
@@ -581,7 +581,7 @@ patch and a torus.
 ## Mitered skeletons
 
 ```c
-qaws_surface_region_mitered_skeleton(region, &desc, &axis);   /* the medial axis accessors */
+qaws_surface_region_mitered_skeleton(&axis, region, &desc);   /* the medial axis accessors */
 ```
 
 The straight skeleton's analogue on a surface. There are no lines to move,

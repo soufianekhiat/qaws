@@ -79,7 +79,7 @@ QAWS_INLINE void qaws_patch_rows(
 }
 
 /* Dual (S, S_u, S_v) at the dual point (u, v): jets along the path. */
-QAWS_INLINE void qaws_patch_jets(QAWS_PATCH_PARAMS, qaws_scalar dir, qaws_dual1 u, qaws_dual1 v, QAWS_OUT qaws_dual3 y[3])
+QAWS_INLINE void qaws_patch_jets(QAWS_OUT qaws_dual3 y[3], QAWS_PATCH_PARAMS, qaws_scalar dir, qaws_dual1 u, qaws_dual1 v)
 {
     qaws_scalar nu[(QAWS_CORE_MAX_DERIV + 1) * QAWS_CORE_MAX_POINTS];
     qaws_scalar nv[(QAWS_CORE_MAX_DERIV + 1) * QAWS_CORE_MAX_POINTS];
@@ -128,7 +128,7 @@ QAWS_INLINE void qaws_patch_jets(QAWS_PATCH_PARAMS, qaws_scalar dir, qaws_dual1 
 QAWS_INLINE qaws_dual1 qaws_patch_area_at(QAWS_PATCH_PARAMS, qaws_scalar dir, qaws_dual1 u, qaws_dual1 v)
 {
     qaws_dual3 y[3];
-    qaws_patch_jets(QAWS_PATCH_ARGS, dir, u, v, y);
+    qaws_patch_jets(y, QAWS_PATCH_ARGS, dir, u, v);
     return qaws_dual3_length(qaws_dual3_cross(y[1], y[2]));
 }
 
@@ -152,7 +152,7 @@ QAWS_INLINE qaws_dual1 qaws_patch_line(QAWS_PATCH_PARAMS, qaws_scalar dir, int c
     for (c = 0; c < QAWS_CORE_MAX_CELLS; c++) {
         if (c < k) {
             for (q = 0; q < 8; q++) {
-                qaws_gauss8(q, xw);
+                qaws_gauss8(xw, q);
                 f = qaws_patch_area_at(QAWS_PATCH_ARGS, dir, u, qaws_dual1_const(base + QAWS_LITERAL(0.5) * hv * (QAWS_ONE + xw[0])));
                 sum = qaws_dual1_add(sum, qaws_dual_affine(QAWS_LITERAL(0.5) * hv * xw[1], f, QAWS_ZERO));
             }
@@ -162,7 +162,7 @@ QAWS_INLINE qaws_dual1 qaws_patch_line(QAWS_PATCH_PARAMS, qaws_scalar dir, int c
     vk = base;
     len = qaws_dual_affine(QAWS_ONE, b, -vk);
     for (q = 0; q < 8; q++) {
-        qaws_gauss8(q, xw);
+        qaws_gauss8(xw, q);
         f = qaws_patch_area_at(QAWS_PATCH_ARGS, dir, u, qaws_dual_affine(QAWS_LITERAL(0.5) * (QAWS_ONE + xw[0]), len, vk));
         sum = qaws_dual1_add(sum, qaws_dual1_mul(qaws_dual_affine(QAWS_LITERAL(0.5) * xw[1], len, QAWS_ZERO), f));
     }
@@ -179,7 +179,7 @@ QAWS_INLINE qaws_dual1 qaws_patch_cell_mass(QAWS_PATCH_PARAMS, qaws_scalar dir, 
     qaws_dual1 sum = qaws_dual1_const(QAWS_ZERO), b;
     int q;
     for (q = 0; q < 8; q++) {
-        qaws_gauss8(q, xw);
+        qaws_gauss8(xw, q);
         b = qaws_patch_line(QAWS_PATCH_ARGS, dir, cells, qaws_dual1_const(lo + QAWS_LITERAL(0.5) * hu * (QAWS_ONE + xw[0])),
             qaws_dual1_const(v1));
         sum = qaws_dual1_add(sum, qaws_dual_affine(QAWS_LITERAL(0.5) * hu * xw[1], b, QAWS_ZERO));
@@ -188,9 +188,9 @@ QAWS_INLINE qaws_dual1 qaws_patch_cell_mass(QAWS_PATCH_PARAMS, qaws_scalar dir, 
 }
 
 /* A(u) = prefix[k] + the partial u cell moving with u. */
-QAWS_INLINE qaws_dual1 qaws_patch_marginal(QAWS_PATCH_PARAMS, qaws_scalar dir, int cells,
-    qaws_scalar prefix_v[QAWS_CORE_MAX_CELLS + 1], qaws_scalar prefix_t[QAWS_CORE_MAX_CELLS + 1],
-    qaws_scalar prefix_tt[QAWS_CORE_MAX_CELLS + 1], qaws_dual1 u)
+QAWS_INLINE qaws_dual1 qaws_patch_marginal(qaws_scalar prefix_v[QAWS_CORE_MAX_CELLS + 1], qaws_scalar prefix_t[QAWS_CORE_MAX_CELLS + 1], qaws_scalar prefix_tt[QAWS_CORE_MAX_CELLS + 1],
+    QAWS_PATCH_PARAMS, qaws_scalar dir,
+    int cells, qaws_dual1 u)
 {
     qaws_scalar u0 = u_knots[u_degree], u1 = u_knots[u_count], v1 = v_knots[v_count];
     qaws_scalar hu = (u1 - u0) / QAWS_ITOF(cells);
@@ -204,7 +204,7 @@ QAWS_INLINE qaws_dual1 qaws_patch_marginal(QAWS_PATCH_PARAMS, qaws_scalar dir, i
     sum = qaws_dual1_make(prefix_v[k], dir * prefix_t[k], dir * prefix_tt[k]);
     len = qaws_dual_affine(QAWS_ONE, u, -uk);
     for (q = 0; q < 8; q++) {
-        qaws_gauss8(q, xw);
+        qaws_gauss8(xw, q);
         b = qaws_patch_line(QAWS_PATCH_ARGS, dir, cells, qaws_dual_affine(QAWS_LITERAL(0.5) * (QAWS_ONE + xw[0]), len, uk),
             qaws_dual1_const(v1));
         sum = qaws_dual1_add(sum, qaws_dual1_mul(qaws_dual_affine(QAWS_LITERAL(0.5) * xw[1], len, QAWS_ZERO), b));
@@ -213,12 +213,12 @@ QAWS_INLINE qaws_dual1 qaws_patch_marginal(QAWS_PATCH_PARAMS, qaws_scalar dir, i
 }
 
 /* F(u) = A(u) - xi_u A_total. */
-QAWS_INLINE qaws_dual1 qaws_patch_F(QAWS_PATCH_PARAMS, qaws_scalar dir, int cells,
-    qaws_scalar prefix_v[QAWS_CORE_MAX_CELLS + 1], qaws_scalar prefix_t[QAWS_CORE_MAX_CELLS + 1],
-    qaws_scalar prefix_tt[QAWS_CORE_MAX_CELLS + 1], qaws_dual1 u, qaws_dual1 xi)
+QAWS_INLINE qaws_dual1 qaws_patch_F(qaws_scalar prefix_v[QAWS_CORE_MAX_CELLS + 1], qaws_scalar prefix_t[QAWS_CORE_MAX_CELLS + 1], qaws_scalar prefix_tt[QAWS_CORE_MAX_CELLS + 1],
+    QAWS_PATCH_PARAMS, qaws_scalar dir,
+    int cells, qaws_dual1 u, qaws_dual1 xi)
 {
     qaws_dual1 total = qaws_dual1_make(prefix_v[cells], dir * prefix_t[cells], dir * prefix_tt[cells]);
-    return qaws_dual1_sub(qaws_patch_marginal(QAWS_PATCH_ARGS, dir, cells, prefix_v, prefix_t, prefix_tt, u),
+    return qaws_dual1_sub(qaws_patch_marginal(prefix_v, prefix_t, prefix_tt, QAWS_PATCH_ARGS, dir, cells, u),
         qaws_dual1_mul(xi, total));
 }
 
@@ -232,8 +232,8 @@ QAWS_INLINE qaws_dual1 qaws_patch_G(QAWS_PATCH_PARAMS, qaws_scalar dir, int cell
 
 /* (u, v) of the point xi: safeguarded Newton in the cell holding the
    target, fixed iteration count. out_uv = (u, v). */
-QAWS_INLINE void qaws_patch_cdf_solve(QAWS_PATCH_PARAMS, int cells,
-    qaws_scalar prefix_v[QAWS_CORE_MAX_CELLS + 1], qaws_scalar xu, qaws_scalar xv, QAWS_OUT qaws_scalar out_uv[2])
+QAWS_INLINE void qaws_patch_cdf_solve(QAWS_OUT qaws_scalar out_uv[2], qaws_scalar prefix_v[QAWS_CORE_MAX_CELLS + 1],
+    QAWS_PATCH_PARAMS, int cells, qaws_scalar xu, qaws_scalar xv)
 {
     qaws_scalar u0 = u_knots[u_degree], u1 = u_knots[u_count], v0 = v_knots[v_degree], v1 = v_knots[v_count];
     qaws_scalar hu = (u1 - u0) / QAWS_ITOF(cells), hv = (v1 - v0) / QAWS_ITOF(cells);
@@ -253,7 +253,7 @@ QAWS_INLINE void qaws_patch_cdf_solve(QAWS_PATCH_PARAMS, int cells,
     hi = lo + hu;
     x = QAWS_LITERAL(0.5) * (lo + hi);
     for (it = 0; it < 40; it++) {
-        r = qaws_patch_F(QAWS_PATCH_ARGS, QAWS_ZERO, cells, prefix_v, zeros, zeros, qaws_dual1_make(x, QAWS_ONE, QAWS_ZERO),
+        r = qaws_patch_F(prefix_v, zeros, zeros, QAWS_PATCH_ARGS, QAWS_ZERO, cells, qaws_dual1_make(x, QAWS_ONE, QAWS_ZERO),
             qaws_dual1_const(xu));
         f = r.v;
         s = r.t;
@@ -294,23 +294,23 @@ QAWS_INLINE void qaws_patch_cdf_solve(QAWS_PATCH_PARAMS, int cells,
  *   u' = -F'/F_u,  u'' = -F''(u moving at u')/F_u, then v likewise with u
  * moving. result = (u', v', u'', v''), out_p = (position tangent, second).
  */
-QAWS_INLINE void qaws_patch_cdf_tangent(QAWS_PATCH_PARAMS, int cells,
+QAWS_INLINE void qaws_patch_cdf_tangent(QAWS_OUT qaws_scalar result[4], QAWS_OUT qaws_vec3 out_p[2],
     qaws_scalar prefix_v[QAWS_CORE_MAX_CELLS + 1], qaws_scalar prefix_t[QAWS_CORE_MAX_CELLS + 1],
-    qaws_scalar prefix_tt[QAWS_CORE_MAX_CELLS + 1], qaws_scalar xu, qaws_scalar xv, qaws_scalar xu_dot, qaws_scalar xv_dot,
-    qaws_scalar u, qaws_scalar v, QAWS_OUT qaws_scalar result[4], QAWS_OUT qaws_vec3 out_p[2])
+    qaws_scalar prefix_tt[QAWS_CORE_MAX_CELLS + 1], QAWS_PATCH_PARAMS, int cells, qaws_scalar xu, qaws_scalar xv,
+    qaws_scalar xu_dot, qaws_scalar xv_dot, qaws_scalar u, qaws_scalar v)
 {
     qaws_dual1 xiu = qaws_dual1_make(xu, xu_dot, QAWS_ZERO), xiv = qaws_dual1_make(xv, xv_dot, QAWS_ZERO);
     qaws_dual1 F, G, ud, vd;
     qaws_dual3 y[3];
     qaws_scalar Fu, Gv, u1, u2, v1, v2;
-    F = qaws_patch_F(QAWS_PATCH_ARGS, QAWS_ZERO, cells, prefix_v, prefix_t, prefix_tt, qaws_dual1_make(u, QAWS_ONE, QAWS_ZERO),
+    F = qaws_patch_F(prefix_v, prefix_t, prefix_tt, QAWS_PATCH_ARGS, QAWS_ZERO, cells, qaws_dual1_make(u, QAWS_ONE, QAWS_ZERO),
         qaws_dual1_const(xu));
     Fu = QAWS_SELECT(F.t > QAWS_ZERO, F.t, QAWS_ONE);
     G = qaws_patch_G(QAWS_PATCH_ARGS, QAWS_ZERO, cells, qaws_dual1_const(u), qaws_dual1_make(v, QAWS_ONE, QAWS_ZERO), qaws_dual1_const(xv));
     Gv = QAWS_SELECT(G.t > QAWS_ZERO, G.t, QAWS_ONE);
-    F = qaws_patch_F(QAWS_PATCH_ARGS, QAWS_ONE, cells, prefix_v, prefix_t, prefix_tt, qaws_dual1_const(u), xiu);
+    F = qaws_patch_F(prefix_v, prefix_t, prefix_tt, QAWS_PATCH_ARGS, QAWS_ONE, cells, qaws_dual1_const(u), xiu);
     u1 = -F.t / Fu;
-    F = qaws_patch_F(QAWS_PATCH_ARGS, QAWS_ONE, cells, prefix_v, prefix_t, prefix_tt, qaws_dual1_make(u, u1, QAWS_ZERO), xiu);
+    F = qaws_patch_F(prefix_v, prefix_t, prefix_tt, QAWS_PATCH_ARGS, QAWS_ONE, cells, qaws_dual1_make(u, u1, QAWS_ZERO), xiu);
     u2 = -F.tt / Fu;
     ud = qaws_dual1_make(u, u1, u2);
     G = qaws_patch_G(QAWS_PATCH_ARGS, QAWS_ONE, cells, ud, qaws_dual1_const(v), xiv);
@@ -318,7 +318,7 @@ QAWS_INLINE void qaws_patch_cdf_tangent(QAWS_PATCH_PARAMS, int cells,
     G = qaws_patch_G(QAWS_PATCH_ARGS, QAWS_ONE, cells, ud, qaws_dual1_make(v, v1, QAWS_ZERO), xiv);
     v2 = -G.tt / Gv;
     vd = qaws_dual1_make(v, v1, v2);
-    qaws_patch_jets(QAWS_PATCH_ARGS, QAWS_ONE, ud, vd, y);
+    qaws_patch_jets(y, QAWS_PATCH_ARGS, QAWS_ONE, ud, vd);
     result[0] = u1;
     result[1] = v1;
     result[2] = u2;
@@ -333,9 +333,9 @@ QAWS_INLINE void qaws_patch_cdf_tangent(QAWS_PATCH_PARAMS, int cells,
  *   u_bar = t_bar_u + p_bar . S_u - mu G_u,  lambda = u_bar / F_u.
  * result = (lambda, mu, xi_u adjoint lambda A_total, xi_v adjoint mu B(v1; u)).
  */
-QAWS_INLINE void qaws_patch_cdf_multipliers(QAWS_PATCH_PARAMS, int cells,
-    qaws_scalar prefix_v[QAWS_CORE_MAX_CELLS + 1], qaws_scalar xu, qaws_scalar xv, qaws_scalar u, qaws_scalar v,
-    qaws_scalar u_bar, qaws_scalar v_bar, qaws_vec3 p_bar, QAWS_OUT qaws_scalar result[4])
+QAWS_INLINE void qaws_patch_cdf_multipliers(QAWS_OUT qaws_scalar result[4], qaws_scalar prefix_v[QAWS_CORE_MAX_CELLS + 1],
+    QAWS_PATCH_PARAMS, int cells, qaws_scalar xu, qaws_scalar xv, qaws_scalar u,
+    qaws_scalar v, qaws_scalar u_bar, qaws_scalar v_bar, qaws_vec3 p_bar)
 {
     qaws_scalar zeros[QAWS_CORE_MAX_CELLS + 1];
     qaws_scalar v1 = v_knots[v_count];
@@ -345,11 +345,11 @@ QAWS_INLINE void qaws_patch_cdf_multipliers(QAWS_PATCH_PARAMS, int cells,
     int c;
     for (c = 0; c <= QAWS_CORE_MAX_CELLS; c++)
         zeros[c] = QAWS_ZERO;
-    F = qaws_patch_F(QAWS_PATCH_ARGS, QAWS_ZERO, cells, prefix_v, zeros, zeros, qaws_dual1_make(u, QAWS_ONE, QAWS_ZERO),
+    F = qaws_patch_F(prefix_v, zeros, zeros, QAWS_PATCH_ARGS, QAWS_ZERO, cells, qaws_dual1_make(u, QAWS_ONE, QAWS_ZERO),
         qaws_dual1_const(xu));
     Gv = qaws_patch_G(QAWS_PATCH_ARGS, QAWS_ZERO, cells, qaws_dual1_const(u), qaws_dual1_make(v, QAWS_ONE, QAWS_ZERO), qaws_dual1_const(xv));
     Gu = qaws_patch_G(QAWS_PATCH_ARGS, QAWS_ZERO, cells, qaws_dual1_make(u, QAWS_ONE, QAWS_ZERO), qaws_dual1_const(v), qaws_dual1_const(xv));
-    qaws_patch_jets(QAWS_PATCH_ARGS, QAWS_ZERO, qaws_dual1_const(u), qaws_dual1_const(v), y);
+    qaws_patch_jets(y, QAWS_PATCH_ARGS, QAWS_ZERO, qaws_dual1_const(u), qaws_dual1_const(v));
     vb = v_bar + qaws_v3_dot(p_bar, y[2].v);
     ub = u_bar + qaws_v3_dot(p_bar, y[1].v);
     mu = QAWS_SELECT(Gv.t > QAWS_ZERO, vb / QAWS_SELECT(Gv.t > QAWS_ZERO, Gv.t, QAWS_ONE), QAWS_ZERO);
@@ -404,7 +404,7 @@ QAWS_INLINE qaws_vec3 qaws_patch_line_adjoint_cp(QAWS_PATCH_PARAMS, int cells, q
     for (cc = 0; cc < QAWS_CORE_MAX_CELLS; cc++) {
         if (cc < k) {
             for (q = 0; q < 8; q++) {
-                qaws_gauss8(q, xw);
+                qaws_gauss8(xw, q);
                 g = qaws_v3_add(g, qaws_patch_area_adjoint_cp(QAWS_PATCH_ARGS, u, base + QAWS_LITERAL(0.5) * hv * (QAWS_ONE + xw[0]), i, j,
                     c * QAWS_LITERAL(0.5) * hv * xw[1]));
             }
@@ -413,7 +413,7 @@ QAWS_INLINE qaws_vec3 qaws_patch_line_adjoint_cp(QAWS_PATCH_PARAMS, int cells, q
     }
     len = b - base;
     for (q = 0; q < 8; q++) {
-        qaws_gauss8(q, xw);
+        qaws_gauss8(xw, q);
         g = qaws_v3_add(g, qaws_patch_area_adjoint_cp(QAWS_PATCH_ARGS, u, base + QAWS_LITERAL(0.5) * len * (QAWS_ONE + xw[0]), i, j,
             c * QAWS_LITERAL(0.5) * len * xw[1]));
     }

@@ -157,7 +157,7 @@ static void test_ldlt(void)
 			memcpy(A.row_ptr, rp, sizeof(unsigned int) * (n + 1));
 			memcpy(A.col_idx, col, sizeof(unsigned int) * nnz);
 			memcpy(A.values, val, sizeof(double) * nnz);
-			qaws_internal_cg_solve(&A, b, y, 20000, 1e-12);
+			qaws_internal_cg_solve(y, &A, b, 20000, 1e-12);
 			for (i = 0; i < n; i++)
 				y[i] -= x[i];
 			cg = cft_norm(y, n) / cft_norm(x, n);

@@ -20,7 +20,7 @@ typedef struct qaws_surface_extrusion_desc
 } qaws_surface_extrusion_desc;
 
 qaws_status qaws_surface_create_extrusion(
-	qaws_surface_extrusion_desc const* desc,
-	qaws_surface** out_surface);
+	qaws_surface** out_surface,
+	qaws_surface_extrusion_desc const* desc);
 
 #endif /* QAWS_SURFACE_EXTRUSION_H */

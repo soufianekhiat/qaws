@@ -17,12 +17,12 @@ static void test_inspect(void)
 	desc.control_point_count = 3;
 
 	qaws_curve* curve = NULL;
-	qaws_status s = qaws_curve_create_bezier(&desc, &curve);
+	qaws_status s = qaws_curve_create_bezier(&curve, &desc);
 	TEST_ASSERT_STATUS(s);
 
 	/* Bounds */
 	qaws_vec2 bmin, bmax;
-	s = qaws_curve_compute_bounds_2d(curve, &bmin, &bmax);
+	s = qaws_curve_compute_bounds_2d(&bmin, &bmax, curve);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(bmin.x >= (qaws_scalar)-0.1, "bounds min x reasonable");
 	TEST_ASSERT(bmax.x <= (qaws_scalar)3.1, "bounds max x reasonable");
@@ -30,7 +30,7 @@ static void test_inspect(void)
 	/* Get control points back */
 	qaws_vec2 out_pts[3];
 	unsigned int out_count = 0;
-	s = qaws_bezier_get_control_points(curve, out_pts, 3, &out_count);
+	s = qaws_bezier_get_control_points(out_pts, &out_count, curve, 3);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(out_count == 3, "got 3 control points");
 	TEST_ASSERT(approx_eq(out_pts[0].x, (qaws_scalar)0.0), "cp0 x");
@@ -51,12 +51,12 @@ static void test_closest_point(void)
 	desc.control_point_count = 2;
 
 	qaws_curve* curve = NULL;
-	qaws_status s = qaws_curve_create_bezier(&desc, &curve);
+	qaws_status s = qaws_curve_create_bezier(&curve, &desc);
 	TEST_ASSERT_STATUS(s);
 
 	qaws_vec2 target = { 5, 3 };
 	qaws_scalar param = 0;
-	s = qaws_curve_find_closest_parameter_2d(curve, target, &param);
+	s = qaws_curve_find_closest_parameter_2d(&param, curve, target);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(approx_eq(param, (qaws_scalar)0.5), "closest param == 0.5");
 
@@ -80,12 +80,12 @@ static void test_span_continuity(void)
 	desc.derivative_count = 3;
 
 	qaws_curve* curve = NULL;
-	qaws_status s = qaws_curve_create_hermite(&desc, &curve);
+	qaws_status s = qaws_curve_create_hermite(&curve, &desc);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(qaws_curve_get_span_count(curve) == 2, "hermite 3pt span_count == 2");
 
 	qaws_continuity cont;
-	s = qaws_curve_get_span_continuity(curve, 0, &cont);
+	s = qaws_curve_get_span_continuity(&cont, curve, 0);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(cont >= QAWS_CONTINUITY_C0, "span continuity >= C0");
 
@@ -110,12 +110,12 @@ static void test_family_inspection(void)
 		desc.is_closed = 0;
 
 		qaws_curve* curve = NULL;
-		qaws_status s = qaws_curve_create_bspline(&desc, &curve);
+		qaws_status s = qaws_curve_create_bspline(&curve, &desc);
 		TEST_ASSERT_STATUS(s);
 
 		qaws_scalar knots[16];
 		unsigned int knot_count = 0;
-		s = qaws_bspline_get_knots(curve, knots, 16, &knot_count);
+		s = qaws_bspline_get_knots(knots, &knot_count, curve, 16);
 		TEST_ASSERT_STATUS(s);
 		TEST_ASSERT(knot_count > 0, "bspline knot_count > 0");
 		/* Clamped: first degree+1 knots should be equal */
@@ -124,7 +124,7 @@ static void test_family_inspection(void)
 		/* Wrong family: bezier_get_control_points on bspline */
 		qaws_vec2 dummy[4];
 		unsigned int dummy_count = 0;
-		s = qaws_bezier_get_control_points(curve, dummy, 4, &dummy_count);
+		s = qaws_bezier_get_control_points(dummy, &dummy_count, curve, 4);
 		TEST_ASSERT(s == QAWS_STATUS_UNSUPPORTED_OPERATION, "bezier_get_cp on bspline => UNSUPPORTED");
 
 		qaws_curve_destroy(curve);
@@ -148,12 +148,12 @@ static void test_family_inspection(void)
 		desc.is_closed = 0;
 
 		qaws_curve* curve = NULL;
-		qaws_status s = qaws_curve_create_nurbs(&desc, &curve);
+		qaws_status s = qaws_curve_create_nurbs(&curve, &desc);
 		TEST_ASSERT_STATUS(s);
 
 		qaws_scalar out_w[3];
 		unsigned int w_count = 0;
-		s = qaws_nurbs_get_weights(curve, out_w, 3, &w_count);
+		s = qaws_nurbs_get_weights(out_w, &w_count, curve, 3);
 		TEST_ASSERT_STATUS(s);
 		TEST_ASSERT(w_count == 3, "nurbs weight_count == 3");
 		TEST_ASSERT(approx_eq(out_w[0], (qaws_scalar)1.0), "weight 0 == 1");
@@ -179,11 +179,11 @@ static void test_frenet_frame(void)
 		bdesc.control_points = pts;
 		bdesc.control_point_count = 2;
 
-		status = qaws_curve_create_bezier(&bdesc, &curve);
+		status = qaws_curve_create_bezier(&curve, &bdesc);
 		TEST_ASSERT_STATUS(status);
 
 		/* Horizontal line: tangent is (1,0), normal should be (0,1) */
-		status = qaws_curve_compute_normal_2d(curve, (qaws_scalar)0.5, &normal);
+		status = qaws_curve_compute_normal_2d(&normal, curve, (qaws_scalar)0.5);
 		TEST_ASSERT_STATUS(status);
 		TEST_ASSERT(approx_eq(normal.x, (qaws_scalar)0.0), "2D normal x=0 for horizontal");
 		TEST_ASSERT(approx_eq(normal.y, (qaws_scalar)1.0), "2D normal y=1 for horizontal");
@@ -204,11 +204,11 @@ static void test_frenet_frame(void)
 		bdesc.control_points = pts;
 		bdesc.control_point_count = 2;
 
-		status = qaws_curve_create_bezier(&bdesc, &curve);
+		status = qaws_curve_create_bezier(&curve, &bdesc);
 		TEST_ASSERT_STATUS(status);
 
 		/* Vertical line going up: tangent (0,1), normal (-1,0) */
-		status = qaws_curve_compute_normal_2d(curve, (qaws_scalar)0.5, &normal);
+		status = qaws_curve_compute_normal_2d(&normal, curve, (qaws_scalar)0.5);
 		TEST_ASSERT_STATUS(status);
 		TEST_ASSERT(approx_eq(normal.x, (qaws_scalar)-1.0), "2D normal x=-1 for vertical");
 		TEST_ASSERT(approx_eq(normal.y, (qaws_scalar)0.0), "2D normal y=0 for vertical");
@@ -231,11 +231,11 @@ static void test_frenet_frame(void)
 		bdesc.control_points = pts;
 		bdesc.control_point_count = 3;
 
-		status = qaws_curve_create_bezier(&bdesc, &curve);
+		status = qaws_curve_create_bezier(&curve, &bdesc);
 		TEST_ASSERT_STATUS(status);
 
 		status = qaws_curve_compute_frenet_frame_3d(
-			curve, (qaws_scalar)0.5, &T, &N, &B);
+			&T, &N, &B, curve, (qaws_scalar)0.5);
 		TEST_ASSERT_STATUS(status);
 
 		/* T, N, B should be orthonormal */
@@ -273,12 +273,12 @@ static void test_frenet_frame(void)
 		bdesc.control_points = pts;
 		bdesc.control_point_count = 2;
 
-		status = qaws_curve_create_bezier(&bdesc, &curve);
+		status = qaws_curve_create_bezier(&curve, &bdesc);
 		TEST_ASSERT_STATUS(status);
 
 		/* Straight line: D1xD2=0, should still produce valid frame */
 		status = qaws_curve_compute_frenet_frame_3d(
-			curve, (qaws_scalar)0.5, &T, &N, &B);
+			&T, &N, &B, curve, (qaws_scalar)0.5);
 		TEST_ASSERT_STATUS(status);
 		TEST_ASSERT(approx_eq(T.x, (qaws_scalar)1.0), "straight line T along X");
 
@@ -301,14 +301,14 @@ static void test_frenet_frame(void)
 		bdesc.degree = 1;
 		bdesc.control_points = pts;
 		bdesc.control_point_count = 2;
-		status = qaws_curve_create_bezier(&bdesc, &curve);
+		status = qaws_curve_create_bezier(&curve, &bdesc);
 		TEST_ASSERT_STATUS(status);
 
 		status = qaws_curve_compute_frenet_frame_3d(
-			curve, (qaws_scalar)0.5, &T, &N, &B);
+			&T, &N, &B, curve, (qaws_scalar)0.5);
 		TEST_ASSERT(status == QAWS_STATUS_INVALID_DIMENSION, "3D frame rejects 2D curve");
 
-		status = qaws_curve_compute_normal_2d(NULL, (qaws_scalar)0.5, &normal2d);
+		status = qaws_curve_compute_normal_2d(&normal2d, NULL, (qaws_scalar)0.5);
 		TEST_ASSERT(status == QAWS_STATUS_INVALID_ARGUMENT, "null curve");
 
 		qaws_curve_destroy(curve);
@@ -332,11 +332,11 @@ static void test_geometric_helpers(void)
 	bdesc.control_points = pts2d;
 	bdesc.control_point_count = 3;
 
-	status = qaws_curve_create_bezier(&bdesc, &curve2d);
+	status = qaws_curve_create_bezier(&curve2d, &bdesc);
 	TEST_ASSERT_STATUS(status);
 
 	/* Tangent at t=0 should point roughly toward (1,2), normalized */
-	status = qaws_curve_compute_tangent_2d(curve2d, (qaws_scalar)0.0, &tangent2d);
+	status = qaws_curve_compute_tangent_2d(&tangent2d, curve2d, (qaws_scalar)0.0);
 	TEST_ASSERT_STATUS(status);
 	{
 		qaws_scalar len = (qaws_scalar)sqrt(
@@ -347,18 +347,18 @@ static void test_geometric_helpers(void)
 	TEST_ASSERT(tangent2d.y > (qaws_scalar)0.0, "tangent2d y > 0 at t=0");
 
 	/* Tangent at t=0.5 should be horizontal (symmetric parabola) */
-	status = qaws_curve_compute_tangent_2d(curve2d, (qaws_scalar)0.5, &tangent2d);
+	status = qaws_curve_compute_tangent_2d(&tangent2d, curve2d, (qaws_scalar)0.5);
 	TEST_ASSERT_STATUS(status);
 	TEST_ASSERT(approx_eq(tangent2d.y, (qaws_scalar)0.0), "tangent horizontal at midpoint");
 
 	/* Curvature should be negative (concave down parabola) */
 	status = qaws_curve_compute_curvature_2d(
-		curve2d, (qaws_scalar)0.5, &curvature2d);
+		&curvature2d, curve2d, (qaws_scalar)0.5);
 	TEST_ASSERT_STATUS(status);
 	TEST_ASSERT(curvature2d < (qaws_scalar)0.0, "negative curvature for concave-down");
 
 	/* Speed at t=0 */
-	status = qaws_curve_compute_speed(curve2d, (qaws_scalar)0.0, &speed_val);
+	status = qaws_curve_compute_speed(&speed_val, curve2d, (qaws_scalar)0.0);
 	TEST_ASSERT_STATUS(status);
 	TEST_ASSERT(speed_val > (qaws_scalar)0.0, "speed > 0");
 
@@ -368,17 +368,17 @@ static void test_geometric_helpers(void)
 		qaws_scalar curvature3d, torsion;
 
 		status = qaws_curve_compute_tangent_3d(
-			curve2d, (qaws_scalar)0.5, &tangent3d);
+			&tangent3d, curve2d, (qaws_scalar)0.5);
 		TEST_ASSERT(status == QAWS_STATUS_INVALID_DIMENSION,
 			"tangent_3d rejects 2D curve");
 
 		status = qaws_curve_compute_curvature_3d(
-			curve2d, (qaws_scalar)0.5, &curvature3d);
+			&curvature3d, curve2d, (qaws_scalar)0.5);
 		TEST_ASSERT(status == QAWS_STATUS_INVALID_DIMENSION,
 			"curvature_3d rejects 2D curve");
 
 		status = qaws_curve_compute_torsion_3d(
-			curve2d, (qaws_scalar)0.5, &torsion);
+			&torsion, curve2d, (qaws_scalar)0.5);
 		TEST_ASSERT(status == QAWS_STATUS_INVALID_DIMENSION,
 			"torsion_3d rejects 2D curve");
 	}
@@ -397,11 +397,11 @@ static void test_geometric_helpers(void)
 		bdesc.control_points = pts3d;
 		bdesc.control_point_count = 3;
 
-		status = qaws_curve_create_bezier(&bdesc, &curve3d);
+		status = qaws_curve_create_bezier(&curve3d, &bdesc);
 		TEST_ASSERT_STATUS(status);
 
 		status = qaws_curve_compute_tangent_3d(
-			curve3d, (qaws_scalar)0.0, &tangent3d);
+			&tangent3d, curve3d, (qaws_scalar)0.0);
 		TEST_ASSERT_STATUS(status);
 		{
 			qaws_scalar len = (qaws_scalar)sqrt((double)(
@@ -412,19 +412,19 @@ static void test_geometric_helpers(void)
 		}
 
 		status = qaws_curve_compute_curvature_3d(
-			curve3d, (qaws_scalar)0.5, &curvature3d);
+			&curvature3d, curve3d, (qaws_scalar)0.5);
 		TEST_ASSERT_STATUS(status);
 		TEST_ASSERT(curvature3d > (qaws_scalar)0.0, "3D curvature > 0");
 
 		/* Planar curve has zero torsion */
 		status = qaws_curve_compute_torsion_3d(
-			curve3d, (qaws_scalar)0.5, &torsion);
+			&torsion, curve3d, (qaws_scalar)0.5);
 		TEST_ASSERT_STATUS(status);
 		TEST_ASSERT(approx_eq(torsion, (qaws_scalar)0.0),
 			"planar curve has zero torsion");
 
 		status = qaws_curve_compute_speed(
-			curve3d, (qaws_scalar)0.0, &speed3d);
+			&speed3d, curve3d, (qaws_scalar)0.0);
 		TEST_ASSERT_STATUS(status);
 		TEST_ASSERT(speed3d > (qaws_scalar)0.0, "3D speed > 0");
 
@@ -432,10 +432,10 @@ static void test_geometric_helpers(void)
 	}
 
 	/* NULL argument tests */
-	status = qaws_curve_compute_tangent_2d(NULL, (qaws_scalar)0.0, &tangent2d);
+	status = qaws_curve_compute_tangent_2d(&tangent2d, NULL, (qaws_scalar)0.0);
 	TEST_ASSERT(status == QAWS_STATUS_INVALID_ARGUMENT, "tangent null curve");
 
-	status = qaws_curve_compute_speed(NULL, (qaws_scalar)0.0, &speed_val);
+	status = qaws_curve_compute_speed(&speed_val, NULL, (qaws_scalar)0.0);
 	TEST_ASSERT(status == QAWS_STATUS_INVALID_ARGUMENT, "speed null curve");
 }
 
@@ -458,10 +458,10 @@ static void test_inflection_points(void)
 		desc.control_points = pts;
 		desc.control_point_count = 4;
 
-		s = qaws_curve_create_bezier(&desc, &curve);
+		s = qaws_curve_create_bezier(&curve, &desc);
 		TEST_ASSERT_STATUS(s);
 
-		s = qaws_curve_find_inflection_points(curve, params, 4, &count);
+		s = qaws_curve_find_inflection_points(params, &count, curve, 4);
 		TEST_ASSERT_STATUS(s);
 		TEST_ASSERT(count == 1, "S-curve has 1 inflection point");
 
@@ -473,7 +473,7 @@ static void test_inflection_points(void)
 			/* Curvature at inflection should be near 0 */
 			{
 				qaws_scalar curv = 0;
-				s = qaws_curve_compute_curvature_2d(curve, params[0], &curv);
+				s = qaws_curve_compute_curvature_2d(&curv, curve, params[0]);
 				TEST_ASSERT_STATUS(s);
 				if (curv < 0) curv = -curv;
 				TEST_ASSERT(curv < (qaws_scalar)0.1, "curvature ~0 at inflection");
@@ -497,10 +497,10 @@ static void test_inflection_points(void)
 		desc.control_points = pts;
 		desc.control_point_count = 4;
 
-		s = qaws_curve_create_bezier(&desc, &curve);
+		s = qaws_curve_create_bezier(&curve, &desc);
 		TEST_ASSERT_STATUS(s);
 
-		s = qaws_curve_find_inflection_points(curve, params, 4, &count);
+		s = qaws_curve_find_inflection_points(params, &count, curve, 4);
 		TEST_ASSERT(s == QAWS_STATUS_OK || s == QAWS_STATUS_DEGENERATE_CURVE,
 			"collinear inflection handled gracefully");
 		if (s == QAWS_STATUS_OK) {
@@ -524,10 +524,10 @@ static void test_inflection_points(void)
 		desc.control_points = pts;
 		desc.control_point_count = 3;
 
-		s = qaws_curve_create_bezier(&desc, &curve);
+		s = qaws_curve_create_bezier(&curve, &desc);
 		TEST_ASSERT_STATUS(s);
 
-		s = qaws_curve_find_inflection_points(curve, params, 4, &count);
+		s = qaws_curve_find_inflection_points(params, &count, curve, 4);
 		TEST_ASSERT_STATUS(s);
 		TEST_ASSERT(count == 0, "quadratic has 0 inflections");
 
@@ -547,10 +547,10 @@ static void test_inflection_points(void)
 		desc.control_points = pts;
 		desc.control_point_count = 4;
 
-		s = qaws_curve_create_bezier(&desc, &curve);
+		s = qaws_curve_create_bezier(&curve, &desc);
 		TEST_ASSERT_STATUS(s);
 
-		s = qaws_curve_find_inflection_points(curve, NULL, 0, &count);
+		s = qaws_curve_find_inflection_points(NULL, &count, curve, 0);
 		TEST_ASSERT(s == QAWS_STATUS_INVALID_ARGUMENT,
 			"null out_parameters => INVALID_ARGUMENT");
 
@@ -562,7 +562,7 @@ static void test_inflection_points(void)
 		qaws_status s;
 		unsigned int count = 0;
 
-		s = qaws_curve_find_inflection_points(NULL, NULL, 0, &count);
+		s = qaws_curve_find_inflection_points(NULL, &count, NULL, 0);
 		TEST_ASSERT(s == QAWS_STATUS_INVALID_ARGUMENT, "null curve => INVALID_ARGUMENT");
 
 		/* Null out_count */
@@ -577,10 +577,10 @@ static void test_inflection_points(void)
 			desc.control_points = pts;
 			desc.control_point_count = 4;
 
-			s = qaws_curve_create_bezier(&desc, &curve);
+			s = qaws_curve_create_bezier(&curve, &desc);
 			TEST_ASSERT_STATUS(s);
 
-			s = qaws_curve_find_inflection_points(curve, params, 4, NULL);
+			s = qaws_curve_find_inflection_points(params, NULL, curve, 4);
 			TEST_ASSERT(s == QAWS_STATUS_INVALID_ARGUMENT,
 				"null out_count => INVALID_ARGUMENT");
 
@@ -608,10 +608,10 @@ static void test_extrema(void)
 		desc.control_points = pts;
 		desc.control_point_count = 4;
 
-		s = qaws_curve_create_bezier(&desc, &curve);
+		s = qaws_curve_create_bezier(&curve, &desc);
 		TEST_ASSERT_STATUS(s);
 
-		s = qaws_curve_find_extrema(curve, 1, params, 4, &count);
+		s = qaws_curve_find_extrema(params, &count, curve, 4, 1);
 		TEST_ASSERT_STATUS(s);
 		TEST_ASSERT(count >= 1, "cubic has >=1 Y-extremum");
 
@@ -624,8 +624,8 @@ static void test_extrema(void)
 			/* D1.y should be ~0 at the extremum */
 			{
 				qaws_eval_result_2d r;
-				s = qaws_curve_evaluate_2d(curve, params[0],
-					QAWS_EVAL_FLAG_D1, &r);
+				s = qaws_curve_evaluate_2d(&r, curve,
+					params[0], QAWS_EVAL_FLAG_D1);
 				TEST_ASSERT_STATUS(s);
 				{
 					qaws_scalar d1y = r.d1.y;
@@ -653,10 +653,10 @@ static void test_extrema(void)
 		desc.control_points = pts;
 		desc.control_point_count = 4;
 
-		s = qaws_curve_create_bezier(&desc, &curve);
+		s = qaws_curve_create_bezier(&curve, &desc);
 		TEST_ASSERT_STATUS(s);
 
-		s = qaws_curve_find_extrema(curve, 0, params, 4, &count);
+		s = qaws_curve_find_extrema(params, &count, curve, 4, 0);
 		TEST_ASSERT_STATUS(s);
 		TEST_ASSERT(count >= 1, "S-curve has X-extrema");
 
@@ -677,10 +677,10 @@ static void test_extrema(void)
 		desc.control_points = pts;
 		desc.control_point_count = 3;
 
-		s = qaws_curve_create_bezier(&desc, &curve);
+		s = qaws_curve_create_bezier(&curve, &desc);
 		TEST_ASSERT_STATUS(s);
 
-		s = qaws_curve_find_extrema(curve, 2, params, 4, &count);
+		s = qaws_curve_find_extrema(params, &count, curve, 4, 2);
 		TEST_ASSERT(s == QAWS_STATUS_INVALID_ARGUMENT
 			|| s == QAWS_STATUS_OUT_OF_RANGE,
 			"axis=2 on 2D curve => error");
@@ -703,10 +703,10 @@ static void test_extrema(void)
 		desc.control_points = pts;
 		desc.control_point_count = 4;
 
-		s = qaws_curve_create_bezier(&desc, &curve);
+		s = qaws_curve_create_bezier(&curve, &desc);
 		TEST_ASSERT_STATUS(s);
 
-		s = qaws_curve_find_extrema(curve, 2, params, 4, &count);
+		s = qaws_curve_find_extrema(params, &count, curve, 4, 2);
 		TEST_ASSERT_STATUS(s);
 		TEST_ASSERT(count >= 1, "3D curve has z-extremum");
 
@@ -725,7 +725,7 @@ static void test_extrema(void)
 		qaws_status s;
 		unsigned int count = 0;
 
-		s = qaws_curve_find_extrema(NULL, 0, NULL, 0, &count);
+		s = qaws_curve_find_extrema(NULL, &count, NULL, 0, 0);
 		TEST_ASSERT(s == QAWS_STATUS_INVALID_ARGUMENT,
 			"null curve extrema => INVALID_ARGUMENT");
 	}
@@ -749,10 +749,10 @@ static void test_curvature_comb(void)
 		desc.control_points = pts;
 		desc.control_point_count = 3;
 
-		s = qaws_curve_create_bezier(&desc, &curve);
+		s = qaws_curve_create_bezier(&curve, &desc);
 		TEST_ASSERT_STATUS(s);
 
-		s = qaws_curve_compute_curvature_comb_2d(curve, 10, samples, 10);
+		s = qaws_curve_compute_curvature_comb_2d(samples, curve, 10, 10);
 		TEST_ASSERT_STATUS(s);
 
 		for (i = 0; i < 10; i++) {
@@ -789,10 +789,10 @@ static void test_curvature_comb(void)
 		desc.control_points = pts;
 		desc.control_point_count = 3;
 
-		s = qaws_curve_create_bezier(&desc, &curve);
+		s = qaws_curve_create_bezier(&curve, &desc);
 		TEST_ASSERT_STATUS(s);
 
-		s = qaws_curve_compute_curvature_comb_3d(curve, 10, samples, 10);
+		s = qaws_curve_compute_curvature_comb_3d(samples, curve, 10, 10);
 		TEST_ASSERT_STATUS(s);
 
 		for (i = 0; i < 10; i++) {
@@ -821,10 +821,10 @@ static void test_curvature_comb(void)
 		desc.control_points = pts;
 		desc.control_point_count = 3;
 
-		s = qaws_curve_create_bezier(&desc, &curve);
+		s = qaws_curve_create_bezier(&curve, &desc);
 		TEST_ASSERT_STATUS(s);
 
-		s = qaws_curve_compute_curvature_comb_2d(curve, 10, samples, 3);
+		s = qaws_curve_compute_curvature_comb_2d(samples, curve, 10, 3);
 		TEST_ASSERT(s == QAWS_STATUS_BUFFER_TOO_SMALL,
 			"comb buffer too small");
 
@@ -844,10 +844,10 @@ static void test_curvature_comb(void)
 		desc.control_points = pts;
 		desc.control_point_count = 3;
 
-		s = qaws_curve_create_bezier(&desc, &curve);
+		s = qaws_curve_create_bezier(&curve, &desc);
 		TEST_ASSERT_STATUS(s);
 
-		s = qaws_curve_compute_curvature_comb_2d(curve, 1, samples, 2);
+		s = qaws_curve_compute_curvature_comb_2d(samples, curve, 1, 2);
 		TEST_ASSERT(s == QAWS_STATUS_INVALID_ARGUMENT,
 			"sample_count < 2 => INVALID_ARGUMENT");
 
@@ -859,7 +859,7 @@ static void test_curvature_comb(void)
 		qaws_status s;
 		qaws_curvature_sample_2d samples[10];
 
-		s = qaws_curve_compute_curvature_comb_2d(NULL, 10, samples, 10);
+		s = qaws_curve_compute_curvature_comb_2d(samples, NULL, 10, 10);
 		TEST_ASSERT(s == QAWS_STATUS_INVALID_ARGUMENT,
 			"null curve comb => INVALID_ARGUMENT");
 	}
@@ -892,14 +892,14 @@ static void test_winding_number(void)
 		desc.parameterization = QAWS_PARAMETERIZATION_CENTRIPETAL;
 		desc.closed = 1;
 
-		s = qaws_curve_create_catmull_rom(&desc, &curve);
+		s = qaws_curve_create_catmull_rom(&curve, &desc);
 		TEST_ASSERT_STATUS(s);
 		TEST_ASSERT(qaws_curve_is_closed(curve) == 1, "circle is closed");
 
 		/* Inside point (origin): winding number should be +/-1 */
 		{
 			qaws_vec2 inside = { 0, 0 };
-			s = qaws_curve_compute_winding_number_2d(curve, inside, &winding);
+			s = qaws_curve_compute_winding_number_2d(&winding, curve, inside);
 			TEST_ASSERT_STATUS(s);
 			{
 				int abs_w = winding < 0 ? -winding : winding;
@@ -910,7 +910,7 @@ static void test_winding_number(void)
 		/* Outside point: winding number should be 0 */
 		{
 			qaws_vec2 outside = { 100, 100 };
-			s = qaws_curve_compute_winding_number_2d(curve, outside, &winding);
+			s = qaws_curve_compute_winding_number_2d(&winding, curve, outside);
 			TEST_ASSERT_STATUS(s);
 			TEST_ASSERT(winding == 0, "outside winding = 0");
 		}
@@ -933,10 +933,10 @@ static void test_winding_number(void)
 		desc.parameterization = QAWS_PARAMETERIZATION_CENTRIPETAL;
 		desc.closed = 0;
 
-		s = qaws_curve_create_catmull_rom(&desc, &curve);
+		s = qaws_curve_create_catmull_rom(&curve, &desc);
 		TEST_ASSERT_STATUS(s);
 
-		s = qaws_curve_compute_winding_number_2d(curve, pt, &winding);
+		s = qaws_curve_compute_winding_number_2d(&winding, curve, pt);
 		TEST_ASSERT(s != QAWS_STATUS_OK,
 			"open curve winding => error");
 
@@ -957,10 +957,10 @@ static void test_winding_number(void)
 		desc.control_points = pts;
 		desc.control_point_count = 4;
 
-		s = qaws_curve_create_bezier(&desc, &curve);
+		s = qaws_curve_create_bezier(&curve, &desc);
 		TEST_ASSERT_STATUS(s);
 
-		s = qaws_curve_compute_winding_number_2d(curve, pt, &winding);
+		s = qaws_curve_compute_winding_number_2d(&winding, curve, pt);
 		TEST_ASSERT(s == QAWS_STATUS_INVALID_DIMENSION,
 			"3D curve winding => INVALID_DIMENSION");
 
@@ -973,7 +973,7 @@ static void test_winding_number(void)
 		int winding = 0;
 		qaws_vec2 pt = { 0, 0 };
 
-		s = qaws_curve_compute_winding_number_2d(NULL, pt, &winding);
+		s = qaws_curve_compute_winding_number_2d(&winding, NULL, pt);
 		TEST_ASSERT(s == QAWS_STATUS_INVALID_ARGUMENT,
 			"null curve winding => INVALID_ARGUMENT");
 	}

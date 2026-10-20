@@ -861,7 +861,7 @@ static void test_patch(void)
 	d.control_points = cp;
 	d.u_point_count = 7;
 	d.v_point_count = 7;
-	qaws_surface_create_bspline(&d, &s);
+	qaws_surface_create_bspline(&s, &d);
 	memset(&gd, 0, sizeof gd);
 	gd.target_length = (qaws_scalar)0.15;
 	gd.elements = QAWS_ELEMENTS_QUADS;

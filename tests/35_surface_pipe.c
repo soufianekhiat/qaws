@@ -15,7 +15,7 @@ static qaws_curve* make_line_3d(qaws_vec3 a, qaws_vec3 b)
 	d.degree = 1;
 	d.control_points = pts;
 	d.control_point_count = 2;
-	qaws_curve_create_bezier(&d, &c);
+	qaws_curve_create_bezier(&c, &d);
 	return c;
 }
 
@@ -37,7 +37,7 @@ static qaws_curve* make_cubic_3d(qaws_vec3 a, qaws_vec3 b,
 	d.degree = 3;
 	d.control_points = pts;
 	d.control_point_count = 4;
-	qaws_curve_create_bezier(&d, &crv);
+	qaws_curve_create_bezier(&crv, &d);
 	return crv;
 }
 
@@ -70,7 +70,7 @@ static void test_circular_pipe(void)
 		desc.path = path;
 		desc.radius_x = (qaws_scalar)0.5;
 		desc.radius_y = 0;
-		s = qaws_surface_create_pipe(&desc, &surf);
+		s = qaws_surface_create_pipe(&surf, &desc);
 	}
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(surf != NULL, "pipe surface created");
@@ -80,13 +80,13 @@ static void test_circular_pipe(void)
 	/* Evaluate at u=0, v=0 and u=0, v=0.5: these should be at radius 0.5
 	   from the path start, in opposite directions */
 	memset(&r0, 0, sizeof(r0));
-	s = qaws_surface_evaluate(surf, 0, 0,
-		QAWS_SURFACE_EVAL_POSITION, &r0);
+	s = qaws_surface_evaluate(&r0, surf, 0,
+		0, QAWS_SURFACE_EVAL_POSITION);
 	TEST_ASSERT_STATUS(s);
 
 	memset(&r1, 0, sizeof(r1));
-	s = qaws_surface_evaluate(surf, 0, (qaws_scalar)0.5,
-		QAWS_SURFACE_EVAL_POSITION, &r1);
+	s = qaws_surface_evaluate(&r1, surf, 0,
+		(qaws_scalar)0.5, QAWS_SURFACE_EVAL_POSITION);
 	TEST_ASSERT_STATUS(s);
 
 	/* Distance between these two opposite points should be ~2*radius = 1.0 */
@@ -101,7 +101,7 @@ static void test_circular_pipe(void)
 	/* Null/invalid args */
 	{
 		qaws_surface* tmp = NULL;
-		s = qaws_surface_create_pipe(NULL, &tmp);
+		s = qaws_surface_create_pipe(&tmp, NULL);
 		TEST_ASSERT(s != QAWS_STATUS_OK, "pipe null desc rejected");
 	}
 
@@ -137,15 +137,15 @@ static void test_elliptical_pipe(void)
 		desc.path = path;
 		desc.radius_x = (qaws_scalar)0.5;
 		desc.radius_y = (qaws_scalar)0.3;
-		s = qaws_surface_create_pipe(&desc, &surf);
+		s = qaws_surface_create_pipe(&surf, &desc);
 	}
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(surf != NULL, "elliptical pipe surface created");
 
 	/* Check that eval at u=0.5, v=0.25 produces a valid point */
 	memset(&r, 0, sizeof(r));
-	s = qaws_surface_evaluate(surf, (qaws_scalar)0.5, (qaws_scalar)0.25,
-		QAWS_SURFACE_EVAL_POSITION, &r);
+	s = qaws_surface_evaluate(&r, surf, (qaws_scalar)0.5,
+		(qaws_scalar)0.25, QAWS_SURFACE_EVAL_POSITION);
 	TEST_ASSERT_STATUS(s);
 	/* Point should be somewhere in the vicinity of the path midpoint */
 	TEST_ASSERT(r.position.x > (qaws_scalar)-1.0 && r.position.x < (qaws_scalar)8.0,
@@ -184,7 +184,7 @@ static void visual_obj_circular_pipe(void)
 		desc.path = path;
 		desc.radius_x = (qaws_scalar)0.4;
 		desc.radius_y = 0;
-		qaws_surface_create_pipe(&desc, &surf);
+		qaws_surface_create_pipe(&surf, &desc);
 	}
 	if (!surf) { qaws_curve_destroy(path); return; }
 
@@ -232,7 +232,7 @@ static void visual_obj_elliptical_pipe(void)
 		desc.path = path;
 		desc.radius_x = (qaws_scalar)0.6;
 		desc.radius_y = (qaws_scalar)0.3;
-		qaws_surface_create_pipe(&desc, &surf);
+		qaws_surface_create_pipe(&surf, &desc);
 	}
 	if (!surf) { qaws_curve_destroy(path); return; }
 

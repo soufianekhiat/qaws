@@ -51,7 +51,7 @@ static qaws_status composite_eval_span_2d(
 	seg = impl->segments[span_index];
 	composite_map_parameter(seg, local_t, &seg_param, &scale);
 
-	status = qaws_curve_evaluate_2d(seg, seg_param, eval_flags, out_result);
+	status = qaws_curve_evaluate_2d(out_result, seg, seg_param, eval_flags);
 	if (status != QAWS_STATUS_OK)
 		return status;
 
@@ -91,7 +91,7 @@ static qaws_status composite_eval_span_3d(
 	seg = impl->segments[span_index];
 	composite_map_parameter(seg, local_t, &seg_param, &scale);
 
-	status = qaws_curve_evaluate_3d(seg, seg_param, eval_flags, out_result);
+	status = qaws_curve_evaluate_3d(out_result, seg, seg_param, eval_flags);
 	if (status != QAWS_STATUS_OK)
 		return status;
 
@@ -129,9 +129,9 @@ static void composite_destroy_impl(void* impl_ptr, qaws_allocator const* allocat
 	if (impl->segments) {
 		for (i = 0; i < impl->segment_count; i++)
 			qaws_curve_destroy(impl->segments[i]);
-		qaws_internal_dealloc(allocator, impl->segments);
+		qaws_internal_dealloc(impl->segments, allocator);
 	}
-	qaws_internal_dealloc(allocator, impl);
+	qaws_internal_dealloc(impl, allocator);
 }
 
 /* ------------------------------------------------------------------ */
@@ -153,20 +153,20 @@ static int composite_is_closed(qaws_curve const* curve)
 	last  = impl->segments[impl->segment_count - 1];
 
 	if (curve->dimension == QAWS_DIMENSION_2D) {
-		if (qaws_curve_evaluate_2d(first, first->parameter_range.min_value,
-				QAWS_EVAL_FLAG_POSITION, &r0) != QAWS_STATUS_OK)
+		if (qaws_curve_evaluate_2d(&r0, first,
+				first->parameter_range.min_value, QAWS_EVAL_FLAG_POSITION) != QAWS_STATUS_OK)
 			return 0;
-		if (qaws_curve_evaluate_2d(last, last->parameter_range.max_value,
-				QAWS_EVAL_FLAG_POSITION, &r1) != QAWS_STATUS_OK)
+		if (qaws_curve_evaluate_2d(&r1, last,
+				last->parameter_range.max_value, QAWS_EVAL_FLAG_POSITION) != QAWS_STATUS_OK)
 			return 0;
 		dist_sq = (r1.position.x - r0.position.x) * (r1.position.x - r0.position.x)
 		        + (r1.position.y - r0.position.y) * (r1.position.y - r0.position.y);
 	} else {
-		if (qaws_curve_evaluate_3d(first, first->parameter_range.min_value,
-				QAWS_EVAL_FLAG_POSITION, &r0_3d) != QAWS_STATUS_OK)
+		if (qaws_curve_evaluate_3d(&r0_3d, first,
+				first->parameter_range.min_value, QAWS_EVAL_FLAG_POSITION) != QAWS_STATUS_OK)
 			return 0;
-		if (qaws_curve_evaluate_3d(last, last->parameter_range.max_value,
-				QAWS_EVAL_FLAG_POSITION, &r1_3d) != QAWS_STATUS_OK)
+		if (qaws_curve_evaluate_3d(&r1_3d, last,
+				last->parameter_range.max_value, QAWS_EVAL_FLAG_POSITION) != QAWS_STATUS_OK)
 			return 0;
 		dist_sq = (r1_3d.position.x - r0_3d.position.x) * (r1_3d.position.x - r0_3d.position.x)
 		        + (r1_3d.position.y - r0_3d.position.y) * (r1_3d.position.y - r0_3d.position.y)
@@ -269,8 +269,8 @@ static qaws_status composite_tangent_span(
 	seg = impl->segments[span_index];
 	composite_map_parameter(seg, local_t, &seg_t, &scale);
 	/* Each composite span has unit width, so dt_segment = scale * dt. */
-	st = qaws_internal_curve_tangent_any(ctx, seg, seg_t, scale * t_dot, channels,
-		qaws_internal_child_views(views, span_index), primal, tangent, tangent2);
+	st = qaws_internal_curve_tangent_any(primal, tangent, tangent2, seg, qaws_internal_child_views(views, span_index),
+		seg_t, scale * t_dot, channels, ctx);
 	if (st != QAWS_STATUS_OK)
 		return st;
 	composite_scale_jet(primal, scale);
@@ -296,8 +296,8 @@ static qaws_status composite_adjoint_span(
 	seg = impl->segments[span_index];
 	composite_map_parameter(seg, local_t, &seg_t, &scale);
 	composite_scale_jet(&j, scale);
-	st = qaws_internal_curve_adjoint_any(ctx, seg, seg_t, channels, &j,
-		(qaws_diff_views*)qaws_internal_child_views(views, span_index), t_adjoint ? &seg_bar : NULL);
+	st = qaws_internal_curve_adjoint_any((qaws_diff_views*)qaws_internal_child_views(views, span_index), t_adjoint ? &seg_bar : NULL, seg, &j, seg_t,
+		channels, ctx);
 	if (st != QAWS_STATUS_OK)
 		return st;
 	if (t_adjoint)
@@ -378,16 +378,16 @@ qaws_status qaws_curve_create_composite_ex(
 		curve->span_boundaries[i] = (qaws_scalar)i;
 
 	/* Allocate impl */
-	impl = (qaws_composite_impl*)qaws_internal_alloc(allocator, sizeof(qaws_composite_impl));
+	impl = (qaws_composite_impl*)qaws_internal_alloc(sizeof(qaws_composite_impl), allocator);
 	if (!impl) {
 		qaws_curve_destroy(curve);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 
 	impl->segment_count = desc->segment_count;
-	impl->segments = (qaws_curve**)qaws_internal_alloc(allocator, qaws_internal_mul2(sizeof(qaws_curve*), (size_t)desc->segment_count));
+	impl->segments = (qaws_curve**)qaws_internal_alloc(qaws_internal_mul2(sizeof(qaws_curve*), (size_t)desc->segment_count), allocator);
 	if (!impl->segments) {
-		qaws_internal_dealloc(allocator, impl);
+		qaws_internal_dealloc(impl, allocator);
 		qaws_curve_destroy(curve);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
@@ -402,8 +402,8 @@ qaws_status qaws_curve_create_composite_ex(
 }
 
 qaws_status qaws_curve_create_composite(
-	qaws_composite_desc const* desc,
-	qaws_curve** out_curve)
+	qaws_curve** out_curve,
+	qaws_composite_desc const* desc)
 {
 	return qaws_curve_create_composite_ex(desc, NULL, out_curve);
 }

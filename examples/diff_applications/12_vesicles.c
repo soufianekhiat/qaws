@@ -55,7 +55,7 @@ static qaws_curve* vs_curve(qaws_scalar const* p)
 	d.control_point_count = VS_N + 3;
 	d.knots = g_vs_knots;
 	d.knot_count = VS_N + 7;
-	qaws_curve_create_bspline(&d, &c);
+	qaws_curve_create_bspline(&c, &d);
 	return c;
 }
 
@@ -91,9 +91,9 @@ static double vs_functional(qaws_curve const* c, qaws_curve_functional f, double
 	memset(ext, 0, sizeof(ext));
 	vg = one_field(&fv, QAWS_FIELD_CONTROL_POINTS, ext, VS_N + 3, 2);
 	if (grad || raw_grad)
-		qaws_curve_functional_gradient(NULL, c, f, VS_RULE, &vg, &value);
+		qaws_curve_functional_gradient(&value, &vg, c, f, VS_RULE, NULL);
 	else if (!(d && hv))
-		qaws_curve_functional_eval(NULL, c, f, VS_RULE, NULL, &value, NULL, NULL);
+		qaws_curve_functional_eval(&value, NULL, NULL, c, NULL, f, VS_RULE, NULL);
 	if (grad)
 		vs_fold_add(ext, scale, grad);
 	if (raw_grad)
@@ -108,7 +108,7 @@ static double vs_functional(qaws_curve const* c, qaws_curve_functional f, double
 		vs_unfold(dd, dext);
 		vd = one_field(&fd, QAWS_FIELD_CONTROL_POINTS, dext, VS_N + 3, 2);
 		memset(ext, 0, sizeof(ext));
-		qaws_curve_functional_hvp(NULL, c, f, VS_RULE, &vd, &vg);
+		qaws_curve_functional_hvp(&vg, c, &vd, f, VS_RULE, NULL);
 		vs_fold_add(ext, scale, hv);
 	}
 	return value;
@@ -140,7 +140,7 @@ static double vs_area(qaws_curve const* c, double const* d, double* grad, double
 			dd[k] = (qaws_scalar)d[k];
 		vs_unfold(dd, dext);
 	}
-	qaws_curve_eval_batch_tangent_2d(NULL, c, ts, NULL, m, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, d ? &vd : NULL, prim, tan);
+	qaws_curve_eval_batch_tangent_2d(prim, tan, c, ts, NULL, d ? &vd : NULL, m, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, NULL);
 	for (k = 0; k < m; k++)
 	{
 		qaws_vec2 p = prim[k].d[0], q = prim[k].d[1];
@@ -156,7 +156,7 @@ static double vs_area(qaws_curve const* c, double const* d, double* grad, double
 	if (grad)
 	{
 		memset(ext, 0, sizeof(ext));
-		qaws_curve_eval_batch_adjoint_2d(NULL, c, ts, m, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, bar, &vg, NULL);
+		qaws_curve_eval_batch_adjoint_2d(&vg, NULL, c, ts, bar, m, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, NULL);
 		memset(grad, 0, sizeof(double) * 2 * VS_N);
 		vs_fold_add(ext, 1, grad);
 	}
@@ -172,7 +172,7 @@ static double vs_area(qaws_curve const* c, double const* d, double* grad, double
 			bar[k].d[1].y = (qaws_scalar)(0.5 * ws[k] * p.x);
 		}
 		memset(ext, 0, sizeof(ext));
-		qaws_curve_eval_batch_adjoint_2d(NULL, c, ts, m, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, bar, &vg, NULL);
+		qaws_curve_eval_batch_adjoint_2d(&vg, NULL, c, ts, bar, m, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, NULL);
 		memset(hv, 0, sizeof(double) * 2 * VS_N);
 		vs_fold_add(ext, 1, hv);
 	}
@@ -212,7 +212,7 @@ static double vs_speed(qaws_curve const* c, double s2, double const* d, double* 
 			dd[k] = (qaws_scalar)d[k];
 		vs_unfold(dd, dext);
 	}
-	qaws_curve_eval_batch_tangent_2d(NULL, c, ts, NULL, m, QAWS_EVAL_FLAG_D1, d ? &vd : NULL, prim, tan);
+	qaws_curve_eval_batch_tangent_2d(prim, tan, c, ts, NULL, d ? &vd : NULL, m, QAWS_EVAL_FLAG_D1, NULL);
 	vg = one_field(&fv, QAWS_FIELD_CONTROL_POINTS, ext, VS_N + 3, 2);
 	for (k = 0; k < m; k++)
 	{
@@ -237,7 +237,7 @@ static double vs_speed(qaws_curve const* c, double s2, double const* d, double* 
 	if (grad || (d && hv))
 	{
 		memset(ext, 0, sizeof(ext));
-		qaws_curve_eval_batch_adjoint_2d(NULL, c, ts, m, QAWS_EVAL_FLAG_D1, bar, &vg, NULL);
+		qaws_curve_eval_batch_adjoint_2d(&vg, NULL, c, ts, bar, m, QAWS_EVAL_FLAG_D1, NULL);
 		vs_fold_add(ext, 1, (d && hv) ? hv : grad);
 	}
 	return R;
@@ -466,7 +466,7 @@ static void app_vesicles(void)
 		for (i = 0; i <= 400; i++)
 		{
 			qaws_eval_result_2d e;
-			qaws_curve_evaluate_2d(c, (qaws_scalar)(r.min_value + (r.max_value - r.min_value) * i / 400.0), QAWS_EVAL_FLAG_POSITION, &e);
+			qaws_curve_evaluate_2d(&e, c, (qaws_scalar)(r.min_value + (r.max_value - r.min_value) * i / 400.0), QAWS_EVAL_FLAG_POSITION);
 			xy[2 * i] = vx(&vp, e.position.x);
 			xy[2 * i + 1] = vy(&vp, e.position.y);
 			fprintf(s.f, "%s%.2f %.2f", i ? "L" : "M", xy[2 * i], xy[2 * i + 1]);

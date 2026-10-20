@@ -201,7 +201,7 @@ static qaws_status mv_add_spline(qaws_mean_value* m, double const* cp, double co
 			if (nk <= 256)
 			{
 				for (j = 0; j < nk; j++) kq[j] = (qaws_scalar)kn[j];
-				qaws_internal_bspline_basis(kq, nk, p, s, (qaws_scalar)(ka + u * (kb - ka)), nq);
+				qaws_internal_bspline_basis(nq, kq, nk, p, s, (qaws_scalar)(ka + u * (kb - ka)));
 				for (j = 0; j < nb; j++) nv[j] = (double)nq[j];
 			}
 			else
@@ -350,9 +350,9 @@ static qaws_status mv_add_curve(qaws_mean_value* m, qaws_curve const* c, unsigne
 		double *cp, *kn, *w = NULL;
 		qaws_range rg = qaws_curve_get_parameter_range(c);
 		qaws_scalar probe[2];
-		qaws_curve_get_control_points(c, probe, 0, &n);       /* the counts */
+		qaws_curve_get_control_points(probe, &n, c, 0);       /* the counts */
 		if (kind == QAWS_CURVE_KIND_BSPLINE || kind == QAWS_CURVE_KIND_NURBS)
-			qaws_bspline_get_knots(c, probe, 0, &nk);
+			qaws_bspline_get_knots(probe, &nk, c, 0);
 		else
 			nk = 2 * (deg + 1);
 		if (n == 0 || n > 100000 || nk > 200000)
@@ -365,11 +365,11 @@ static qaws_status mv_add_curve(qaws_mean_value* m, qaws_curve const* c, unsigne
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 		}
 		kn = cp + 2 * n;
-		st = qaws_curve_get_control_points(c, buf, n, &n);
+		st = qaws_curve_get_control_points(buf, &n, c, n);
 		for (i = 0; i < 2 * n; i++) cp[i] = (double)buf[i];
 		if (st == QAWS_STATUS_OK && (kind == QAWS_CURVE_KIND_BSPLINE || kind == QAWS_CURVE_KIND_NURBS))
 		{
-			st = qaws_bspline_get_knots(c, buf, nk, &nk);
+			st = qaws_bspline_get_knots(buf, &nk, c, nk);
 			for (i = 0; i < nk; i++) kn[i] = (double)buf[i];
 		}
 		else
@@ -384,7 +384,7 @@ static qaws_status mv_add_curve(qaws_mean_value* m, qaws_curve const* c, unsigne
 		if (st == QAWS_STATUS_OK && kind == QAWS_CURVE_KIND_NURBS)
 		{
 			w = kn + nk;
-			st = qaws_nurbs_get_weights(c, buf, n, &nw);
+			st = qaws_nurbs_get_weights(buf, &nw, c, n);
 			for (i = 0; i < nw && i < n; i++) w[i] = (double)buf[i];
 		}
 		else if (st == QAWS_STATUS_OK && kind == QAWS_CURVE_KIND_RATIONAL_BEZIER)
@@ -402,7 +402,7 @@ static qaws_status mv_add_curve(qaws_mean_value* m, qaws_curve const* c, unsigne
 		/* any other kind: a cubic B-spline fitted to it (exact for cubic spans) */
 		qaws_curve* fit = NULL;
 		qaws_range rg = qaws_curve_get_parameter_range(c);
-		st = qaws_internal_curve_fit_cubic(c, rg.min_value, rg.max_value, &fit);
+		st = qaws_internal_curve_fit_cubic(&fit, c, rg.min_value, rg.max_value);
 		if (st == QAWS_STATUS_OK)
 			st = mv_add_curve(m, fit, path, curve, loop_first);
 		qaws_curve_destroy(fit);
@@ -720,7 +720,7 @@ static qaws_status mv_coordinates(qaws_mean_value const* m, double const* x, dou
 /*  The API                                                                 */
 /* ------------------------------------------------------------------------ */
 
-qaws_status qaws_mean_value_create(qaws_mean_value_desc const* desc, qaws_mean_value** out_coords)
+qaws_status qaws_mean_value_create(qaws_mean_value** out_coords, qaws_mean_value_desc const* desc)
 {
 	qaws_mean_value* m;
 	unsigned int pi, ci, *loop_piece = NULL, nloops = 0;
@@ -747,7 +747,7 @@ qaws_status qaws_mean_value_create(qaws_mean_value_desc const* desc, qaws_mean_v
 		for (ci = 0; ci < desc->paths[pi].curve_count; ci++)
 		{
 			qaws_vec2 a, b;
-			if (qaws_curve_compute_bounds_2d(desc->paths[pi].curves[ci], &a, &b) == QAWS_STATUS_OK)
+			if (qaws_curve_compute_bounds_2d(&a, &b, desc->paths[pi].curves[ci]) == QAWS_STATUS_OK)
 			{
 				if (a.x < lo[0]) lo[0] = a.x;
 				if (a.y < lo[1]) lo[1] = a.y;
@@ -839,7 +839,7 @@ unsigned int qaws_mean_value_get_handle_count(qaws_mean_value const* coords)
 	return coords ? coords->nh : 0;
 }
 
-qaws_status qaws_mean_value_get_handle(qaws_mean_value const* coords, unsigned int index, qaws_vec2* out_point)
+qaws_status qaws_mean_value_get_handle(qaws_vec2* out_point, qaws_mean_value const* coords, unsigned int index)
 {
 	if (!coords || !out_point || index >= coords->nh)
 		return QAWS_STATUS_INVALID_ARGUMENT;
@@ -848,7 +848,7 @@ qaws_status qaws_mean_value_get_handle(qaws_mean_value const* coords, unsigned i
 	return QAWS_STATUS_OK;
 }
 
-qaws_status qaws_mean_value_coordinates(qaws_mean_value const* coords, qaws_vec2 point, qaws_scalar* out_weights)
+qaws_status qaws_mean_value_coordinates(qaws_scalar* out_weights, qaws_mean_value const* coords, qaws_vec2 point)
 {
 	double x[2], *w;
 	unsigned int i;
@@ -906,8 +906,8 @@ static void mv_deform_task(void* ctx_, unsigned int begin, unsigned int end)
 	qaws_internal_free(w);
 }
 
-qaws_status qaws_mean_value_deform(qaws_mean_value const* coords, qaws_vec2 const* moved_handles,
-	qaws_vec2 const* points, unsigned int count, qaws_vec2* out_points)
+qaws_status qaws_mean_value_deform(qaws_vec2* out_points, qaws_mean_value const* coords,
+	qaws_vec2 const* moved_handles, qaws_vec2 const* points, unsigned int count)
 {
 	mv_deform_ctx ctx;
 	if (!coords || !moved_handles || (!points && count) || (!out_points && count))
@@ -920,8 +920,8 @@ qaws_status qaws_mean_value_deform(qaws_mean_value const* coords, qaws_vec2 cons
 	return ctx.st;
 }
 
-qaws_status qaws_mean_value_interpolate(qaws_mean_value const* coords, qaws_vec2 point,
-	qaws_mean_value_boundary_fn fn, void* user, unsigned int dim, qaws_scalar* out_values)
+qaws_status qaws_mean_value_interpolate(qaws_scalar* out_values, qaws_mean_value const* coords,
+	unsigned int dim, qaws_vec2 point, qaws_mean_value_boundary_fn fn, void* user)
 {
 	double x[2], *acc, total, u, floor;
 	qaws_scalar* tmp;

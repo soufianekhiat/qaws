@@ -30,9 +30,9 @@ static qaws_status swept_du(qaws_surface_swept_impl const* impl, qaws_scalar u, 
 	double x[3], xl2, sp, kappa_s, tau;
 	qaws_status st;
 	memset(&c, 0, sizeof c);
-	if ((st = qaws_curve_evaluate_3d(impl->path, t_path, QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2 | QAWS_EVAL_FLAG_D3, &c)) != QAWS_STATUS_OK)
+	if ((st = qaws_curve_evaluate_3d(&c, impl->path, t_path, QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2 | QAWS_EVAL_FLAG_D3)) != QAWS_STATUS_OK)
 		return st;
-	if ((st = qaws_curve_compute_frenet_frame_3d(impl->path, t_path, &T, &N, &B)) != QAWS_STATUS_OK)
+	if ((st = qaws_curve_compute_frenet_frame_3d(&T, &N, &B, impl->path, t_path)) != QAWS_STATUS_OK)
 		return st;
 	x[0] = (double)c.d1.y * c.d2.z - (double)c.d1.z * c.d2.y;
 	x[1] = (double)c.d1.z * c.d2.x - (double)c.d1.x * c.d2.z;
@@ -91,15 +91,15 @@ static qaws_status swept_surface_eval(
 	/* Evaluate path position */
 	memset(&path_r, 0, sizeof(path_r));
 	{
-		qaws_status s = qaws_curve_evaluate_3d(impl->path, t_path,
-			QAWS_EVAL_FLAG_POSITION, &path_r);
+		qaws_status s = qaws_curve_evaluate_3d(&path_r, impl->path,
+			t_path, QAWS_EVAL_FLAG_POSITION);
 		if (s != QAWS_STATUS_OK) return s;
 	}
 
 	/* Get Frenet frame at path point */
 	{
 		qaws_status s = qaws_curve_compute_frenet_frame_3d(
-			impl->path, t_path, &T, &N, &B);
+			&T, &N, &B, impl->path, t_path);
 		if (s != QAWS_STATUS_OK) return s;
 	}
 
@@ -113,7 +113,7 @@ static qaws_status swept_surface_eval(
 			pf |= QAWS_EVAL_FLAG_D2;
 
 		memset(&prof_r, 0, sizeof(prof_r));
-		s = qaws_curve_evaluate_2d(impl->profile, t_prof, pf, &prof_r);
+		s = qaws_curve_evaluate_2d(&prof_r, impl->profile, t_prof, pf);
 		if (s != QAWS_STATUS_OK) return s;
 	}
 
@@ -198,7 +198,7 @@ static qaws_status swept_surface_eval(
 	/* Normal */
 	if (eval_flags & QAWS_SURFACE_EVAL_NORMAL)
 	{
-		qaws_internal_surface_normal(out_result->du, out_result->dv, &out_result->normal);
+		qaws_internal_surface_normal(&out_result->normal, out_result->du, out_result->dv);
 		out_result->valid_flags |= QAWS_SURFACE_EVAL_NORMAL;
 	}
 
@@ -207,7 +207,7 @@ static qaws_status swept_surface_eval(
 
 static void swept_surface_destroy(void* impl, qaws_allocator const* allocator)
 {
-	qaws_internal_dealloc(allocator, impl);
+	qaws_internal_dealloc(impl, allocator);
 }
 
 static int swept_surface_is_rational(qaws_surface const* s)
@@ -247,7 +247,7 @@ qaws_status qaws_surface_create_swept_ex(
 		&swept_surface_vtable, allocator);
 	if (!surface) return QAWS_STATUS_ALLOCATION_FAILURE;
 
-	impl = (qaws_surface_swept_impl*)qaws_internal_alloc(allocator, sizeof(qaws_surface_swept_impl));
+	impl = (qaws_surface_swept_impl*)qaws_internal_alloc(sizeof(qaws_surface_swept_impl), allocator);
 	if (!impl)
 	{
 		qaws_internal_surface_free(surface);
@@ -266,8 +266,8 @@ qaws_status qaws_surface_create_swept_ex(
 }
 
 qaws_status qaws_surface_create_swept(
-	qaws_surface_swept_desc const* desc,
-	qaws_surface** out_surface)
+	qaws_surface** out_surface,
+	qaws_surface_swept_desc const* desc)
 {
 	return qaws_surface_create_swept_ex(desc, NULL, out_surface);
 }

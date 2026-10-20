@@ -36,7 +36,7 @@ static qaws_surface* ssi_tube_surface(double k, int along_x, double h)
 	d.u_knot_count = 10;
 	d.v_knots = kv;
 	d.v_knot_count = 4;
-	qaws_surface_create_nurbs(&d, &s);
+	qaws_surface_create_nurbs(&s, &d);
 	return s;
 }
 
@@ -60,15 +60,15 @@ static void demo_ssi(void)
 	clock_t t0;
 	double secs;
 	svg sv;
-	qaws_exact_surface_prepare(NULL, sa, &a, NULL);
-	qaws_exact_surface_prepare(NULL, sb, &b, NULL);
+	qaws_exact_surface_prepare(&a, NULL, sa, NULL);
+	qaws_exact_surface_prepare(&b, NULL, sb, NULL);
 	t0 = clock();
-	st = qaws_exact_surface_surface_hits(a, b, 3, pts, 4096, &np, br, 16, &nb);
+	st = qaws_exact_surface_surface_hits(pts, &np, br, &nb, a, b, 4096, 16, 3);
 	secs = (double)(clock() - t0) / CLOCKS_PER_SEC;
 	memset(&fd, 0, sizeof(fd));
 	fd.surface_a = sa;
 	fd.surface_b = sb;
-	qaws_surface_intersect(&fd, fc, 16, &nf, fpts, 20000);
+	qaws_surface_intersect(fc, &nf, fpts, 16, 20000, &fd);
 
 	svg_open(&sv, "showcase/exact13_ssi.svg", 1180, 540, "Certified surface / surface intersection curves",
 		"Two elliptic tubes (rational NURBS conics, extruded): the thin one pierces the wide one. Each loop is a chain of certified points; between two of them lies exactly one smooth arc.");
@@ -82,7 +82,7 @@ static void demo_ssi(void)
 			double xy[2 * 2], p[3];
 			for (j = 0; j < 2; j++)
 			{
-				qaws_exact_surface_evaluate(s, 3.0 * i / 24, (double)j, 0, p, NULL);
+				qaws_exact_surface_evaluate(p, NULL, s, 3.0 * i / 24, (double)j, 0);
 				project(&pr, p[0], p[1], p[2], &xy[2 * j], &xy[2 * j + 1]);
 			}
 			svg_polyline(&sv, xy, 2, k == 0 ? "#8c959f" : "#0969da", 0.6, 0.6, 0);
@@ -92,7 +92,7 @@ static void demo_ssi(void)
 			double xy[2 * 97], p[3];
 			for (i = 0; i <= 96; i++)
 			{
-				qaws_exact_surface_evaluate(s, 3.0 * i / 96, j / 4.0, 0, p, NULL);
+				qaws_exact_surface_evaluate(p, NULL, s, 3.0 * i / 96, j / 4.0, 0);
 				project(&pr, p[0], p[1], p[2], &xy[2 * i], &xy[2 * i + 1]);
 			}
 			svg_polyline(&sv, xy, 97, k == 0 ? "#8c959f" : "#0969da", 0.8, 0.7, 0);
@@ -106,7 +106,7 @@ static void demo_ssi(void)
 		{
 			qaws_exact_ssi_point const* q = &pts[br[k].first + (m % br[k].count)];
 			double p[3];
-			qaws_exact_surface_evaluate(a, 0.5 * (q->u1_lo + q->u1_hi), 0.5 * (q->v1_lo + q->v1_hi), 0, p, NULL);
+			qaws_exact_surface_evaluate(p, NULL, a, 0.5 * (q->u1_lo + q->u1_hi), 0.5 * (q->v1_lo + q->v1_hi), 0);
 			project(&pr, p[0], p[1], p[2], &xy[2 * m], &xy[2 * m + 1]);
 		}
 		svg_polyline(&sv, xy, (int)m, loop_colors[k % 4], 2.6, 1, 0);

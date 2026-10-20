@@ -22,7 +22,7 @@
 static qaws_scalar al_length(qaws_curve const* c, double a, double b)
 {
 	qaws_scalar l = 0;
-	qaws_curve_compute_arc_length(c, (qaws_scalar)a, (qaws_scalar)b, &l);
+	qaws_curve_compute_arc_length(&l, c, (qaws_scalar)a, (qaws_scalar)b);
 	return l;
 }
 
@@ -38,7 +38,7 @@ static void test_reference(void)
 	unsigned int i;
 	memset(&d, 0, sizeof d);
 	d.dimension = QAWS_DIMENSION_3D; d.degree = 3; d.control_points = p; d.control_point_count = 6; d.knots = knots; d.knot_count = 10;
-	TEST_ASSERT(qaws_curve_create_bspline(&d, &c) == QAWS_STATUS_OK, "reference B-spline created");
+	TEST_ASSERT(qaws_curve_create_bspline(&c, &d) == QAWS_STATUS_OK, "reference B-spline created");
 	snprintf(msg, sizeof msg, "length = Mathematica's (relative error %.1e)", fabs(al_length(c, 0, 3) - total) / total);
 	printf("  %s\n", msg);
 	TEST_ASSERT(fabs(al_length(c, 0, 3) - total) <= fmax(1e-13, AL_ROUND) * total, msg);
@@ -73,7 +73,7 @@ static void test_circle(void)
 	memset(&d, 0, sizeof d);
 	d.dimension = QAWS_DIMENSION_2D; d.degree = 2; d.control_points = p; d.control_point_count = 3;
 	d.knots = knots; d.knot_count = 6; d.weights = w; d.weight_count = 3;
-	TEST_ASSERT(qaws_curve_create_nurbs(&d, &c) == QAWS_STATUS_OK, "quarter circle created");
+	TEST_ASSERT(qaws_curve_create_nurbs(&c, &d) == QAWS_STATUS_OK, "quarter circle created");
 	snprintf(msg, sizeof msg, "quarter circle of radius 2: pi (error %.1e)", fabs(al_length(c, 0, 1) - M_PI));
 	printf("  %s\n", msg);
 	TEST_ASSERT(fabs(al_length(c, 0, 1) - M_PI) <= fmax(1e-13, AL_ROUND * M_PI), msg);
@@ -81,7 +81,7 @@ static void test_circle(void)
 	{
 		qaws_eval_result_2d e;
 		qaws_curve_compute_parameter_at_arc_length(c, 0, (qaws_scalar)(M_PI / 3), &t);
-		qaws_curve_evaluate_2d(c, t, QAWS_EVAL_FLAG_POSITION, &e);
+		qaws_curve_evaluate_2d(&e, c, t, QAWS_EVAL_FLAG_POSITION);
 		snprintf(msg, sizeof msg, "a third of the arc: the point at 30 degrees (error %.1e)", fabs(e.position.x - sqrt(3.0)) + fabs(e.position.y - 1));
 		TEST_ASSERT(fabs(e.position.x - sqrt(3.0)) + fabs(e.position.y - 1) <= fmax(1e-11, AL_ROUND * 2), msg);
 	}
@@ -103,7 +103,7 @@ static void test_zero_speed(void)
 	unsigned int i;
 	memset(&bd, 0, sizeof bd);
 	bd.dimension = QAWS_DIMENSION_2D; bd.degree = 3; bd.control_points = b; bd.control_point_count = 4;
-	qaws_curve_create_bezier(&bd, &cusp);
+	qaws_curve_create_bezier(&cusp, &bd);
 	total = al_length(cusp, 0, 1);
 	for (i = 0; i <= 20; i++)
 	{
@@ -119,7 +119,7 @@ static void test_zero_speed(void)
 
 	memset(&qd, 0, sizeof qd);
 	qd.dimension = QAWS_DIMENSION_2D; qd.degree = 1; qd.control_points = q; qd.control_point_count = 4; qd.knots = knots; qd.knot_count = 6;
-	qaws_curve_create_bspline(&qd, &poly);
+	qaws_curve_create_bspline(&poly, &qd);
 	TEST_ASSERT(fabs(al_length(poly, 0, 3) - 2) <= 1e-14, "polyline with a stationary span: length 2");
 	qaws_curve_compute_parameter_at_arc_length(poly, 0, 1, &t);
 	TEST_ASSERT(t >= 1 - 1e-9 && t <= 2 + 1e-9, "length 1: in the stationary span");
@@ -138,7 +138,7 @@ static void test_ends_and_refusals(void)
 	qaws_scalar t = -1, total;
 	memset(&d, 0, sizeof d);
 	d.dimension = QAWS_DIMENSION_2D; d.degree = 2; d.control_points = p; d.control_point_count = 3;
-	qaws_curve_create_bezier(&d, &c);
+	qaws_curve_create_bezier(&c, &d);
 	total = al_length(c, 0, 1);
 	TEST_ASSERT(qaws_curve_compute_parameter_at_arc_length(c, (qaws_scalar)0.25, 0, &t) == QAWS_STATUS_OK && t == (qaws_scalar)0.25, "length 0: the start");
 	TEST_ASSERT(qaws_curve_compute_parameter_at_arc_length(c, 0, total, &t) == QAWS_STATUS_OK && t == 1, "the whole length: the end");

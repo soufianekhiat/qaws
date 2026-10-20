@@ -38,7 +38,7 @@ int main(void)
 	desc.control_points = control_points;
 	desc.control_point_count = 4;
 
-	status = qaws_curve_create_bezier(&desc, &curve);
+	status = qaws_curve_create_bezier(&curve, &desc);
 	if (status != QAWS_STATUS_OK)
 	{
 		printf("create failed: %s\n", qaws_status_to_string(status));
@@ -46,7 +46,7 @@ int main(void)
 	}
 
 	status = qaws_curve_evaluate_3d(
-		curve, (qaws_scalar)0.5, QAWS_EVAL_FLAG_POSITION, &result);
+		&result, curve, (qaws_scalar)0.5, QAWS_EVAL_FLAG_POSITION);
 	if (status != QAWS_STATUS_OK)
 	{
 		printf("evaluate failed: %s\n", qaws_status_to_string(status));

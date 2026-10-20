@@ -15,12 +15,12 @@ typedef qaws_exact_poly poly;
 
 static void* sh_alloc(size_t bytes)
 {
-	return qaws_internal_alloc(NULL, bytes);
+	return qaws_internal_alloc(bytes, NULL);
 }
 
 static void sh_free(void* p)
 {
-	qaws_internal_dealloc(NULL, p);
+	qaws_internal_dealloc(p, NULL);
 }
 
 /* ------------------------------------------------------------------ */
@@ -585,8 +585,8 @@ static void sort_by_t(qaws_exact_surface_hit* h, unsigned int count)
 	}
 }
 
-qaws_status qaws_exact_surface_line_hits(qaws_exact_surface const* surface, double const p0[3], double const p1[3], qaws_exact_surface_hit* out_hits,
-	unsigned int capacity, unsigned int* out_count)
+qaws_status qaws_exact_surface_line_hits(qaws_exact_surface_hit* out_hits, unsigned int* out_count, qaws_exact_surface const* surface, double const p0[3],
+	double const p1[3], unsigned int capacity)
 {
 	line_ctx L;
 	unsigned int iu, iv, count = 0;
@@ -782,8 +782,8 @@ static qaws_status er_chunk(void* ctx, unsigned int chunk, unsigned int begin, u
 	return st;
 }
 
-qaws_status qaws_exact_surface_batch_raycast(qaws_exact_ssi_batch_desc const* desc, double const* p0, double const* p1, unsigned int ray_count,
-	double max_t, qaws_exact_ray_hit* out_hits, qaws_exact_batch_stats* out_stats)
+qaws_status qaws_exact_surface_batch_raycast(qaws_exact_ray_hit* out_hits, qaws_exact_batch_stats* out_stats, double const* p0, double const* p1,
+	unsigned int ray_count, qaws_exact_ssi_batch_desc const* desc, double max_t)
 {
 	qaws_exact_batch_stats stats;
 	er_patch* patches = NULL;
@@ -843,7 +843,7 @@ qaws_status qaws_exact_surface_batch_raycast(qaws_exact_ssi_batch_desc const* de
 			}
 	}
 	stats.patch_count = npatch;
-	st = qaws_internal_grid_create(boxes, npatch, 3, &grid);
+	st = qaws_internal_grid_create(&grid, boxes, npatch, 3);
 	if (st == QAWS_STATUS_OK)
 	{
 		er_job J;
@@ -860,7 +860,7 @@ qaws_status qaws_exact_surface_batch_raycast(qaws_exact_ssi_batch_desc const* de
 		if (!J.chunk_stats)
 			st = QAWS_STATUS_ALLOCATION_FAILURE;
 		else
-			st = qaws_internal_parallel(desc->executor, ray_count, ER_GRAIN, er_chunk, &J);
+			st = qaws_internal_parallel(ray_count, ER_GRAIN, er_chunk, &J, desc->executor);
 		for (ch = 0; J.chunk_stats && ch < nchunk; ch++)
 		{
 			stats.candidate_count += J.chunk_stats[ch].candidate_count;

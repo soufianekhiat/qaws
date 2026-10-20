@@ -44,8 +44,8 @@ static double ptt_sampled_area(qaws_path_2d const* p)
 		for (j = 0; j <= 20000; j++)
 		{
 			qaws_eval_result_2d e;
-			qaws_curve_evaluate_2d(p->curves[i], (qaws_scalar)(r.min_value + (r.max_value - r.min_value) * j / 20000.0),
-				QAWS_EVAL_FLAG_POSITION, &e);
+			qaws_curve_evaluate_2d(&e, p->curves[i],
+				(qaws_scalar)(r.min_value + (r.max_value - r.min_value) * j / 20000.0), QAWS_EVAL_FLAG_POSITION);
 			if (first) { x0 = px = e.position.x; y0 = py = e.position.y; first = 0; continue; }
 			a += 0.5 * (px * e.position.y - e.position.x * py);
 			px = e.position.x; py = e.position.y;
@@ -65,11 +65,11 @@ static void test_area(void)
 		qaws_curve const* c;
 		qaws_path_2d p;
 		qaws_scalar aa = 0, ab = 0;
-		qaws_curve_create_polyline_2d(sq, 4, 1, &a);
-		qaws_curve_create_polyline_2d(rv, 4, 1, &b);
-		c = a; p = ptt_one(&c, 1); qaws_path_compute_area_2d(&p, &aa);
+		qaws_curve_create_polyline_2d(&a, sq, 4, 1);
+		qaws_curve_create_polyline_2d(&b, rv, 4, 1);
+		c = a; p = ptt_one(&c, 1); qaws_path_compute_area_2d(&aa, &p);
 		TEST_ASSERT(qaws_path_is_positive_2d(&p), "a counter-clockwise square is positive");
-		c = b; p = ptt_one(&c, 1); qaws_path_compute_area_2d(&p, &ab);
+		c = b; p = ptt_one(&c, 1); qaws_path_compute_area_2d(&ab, &p);
 		sprintf(msg, "square areas +4 / -4 (%.12g, %.12g)", (double)aa, (double)ab);
 		TEST_ASSERT(fabs(aa - 4) < 1e-12 && fabs(ab + 4) < 1e-12, msg);
 		TEST_ASSERT(qaws_curve_is_closed(a), "a closed polyline is closed");
@@ -82,9 +82,9 @@ static void test_area(void)
 		qaws_curve const* c;
 		qaws_path_2d p;
 		qaws_scalar a = 0;
-		qaws_curve_create_ellipse_2d(1, -2, 3, (qaws_scalar)1.5, (qaws_scalar)0.4, &e);
+		qaws_curve_create_ellipse_2d(&e, 1, -2, 3, (qaws_scalar)1.5, (qaws_scalar)0.4);
 		c = e; p = ptt_one(&c, 1);
-		qaws_path_compute_area_2d(&p, &a);
+		qaws_path_compute_area_2d(&a, &p);
 		sprintf(msg, "ellipse area pi 3 1.5 (%.15g vs %.15g)", (double)a, PTT_PI * 4.5);
 		TEST_ASSERT(fabs(a - PTT_PI * 4.5) < 4.5 * PTT_REL * 10, msg);
 		qaws_curve_destroy(e);
@@ -101,12 +101,12 @@ static void test_area(void)
 		s.radius = 2; s.angle_start = 0; s.angle_end = (qaws_scalar)PTT_PI;
 		memset(&ad, 0, sizeof(ad));
 		ad.dimension = QAWS_DIMENSION_2D; ad.segments = &s; ad.segment_count = 1;
-		qaws_curve_create_arc(&ad, &h[0]);
+		qaws_curve_create_arc(&h[0], &ad);
 		s.angle_start = (qaws_scalar)PTT_PI; s.angle_end = (qaws_scalar)(2 * PTT_PI);
-		qaws_curve_create_arc(&ad, &h[1]);
+		qaws_curve_create_arc(&h[1], &ad);
 		cs[0] = h[0]; cs[1] = h[1];
 		p.curves = cs; p.curve_count = 2; p.closed = 1;
-		qaws_path_compute_area_2d(&p, &a);
+		qaws_path_compute_area_2d(&a, &p);
 		sprintf(msg, "circle of two arcs: area 4 pi (%.15g)", (double)a);
 		TEST_ASSERT(fabs(a - 4 * PTT_PI) < 4 * PTT_REL * 10, msg);
 		qaws_curve_destroy(h[0]);
@@ -122,9 +122,9 @@ static void test_area(void)
 		qaws_scalar a = 0;
 		memset(&d, 0, sizeof(d));
 		d.dimension = QAWS_DIMENSION_2D; d.degree = 2; d.control_points = cp; d.control_point_count = 3;
-		qaws_curve_create_bezier(&d, &b);
+		qaws_curve_create_bezier(&b, &d);
 		c = b; p = ptt_one(&c, 0);
-		qaws_path_compute_area_2d(&p, &a);
+		qaws_path_compute_area_2d(&a, &p);
 		sprintf(msg, "open parabola closed by its chord: area -4/3 (%.15g)", (double)a);
 		TEST_ASSERT(fabs(a + 4.0 / 3.0) < 1e-12 + PTT_REL, msg);
 		qaws_curve_destroy(b);
@@ -139,18 +139,18 @@ static void test_area(void)
 		memset(&cd, 0, sizeof(cd));
 		cd.dimension = QAWS_DIMENSION_2D; cd.control_points = cr; cd.control_point_count = 5;
 		cd.parameterization = QAWS_PARAMETERIZATION_CHORDAL; cd.closed = 1;
-		qaws_curve_create_catmull_rom(&cd, &k[0]);
+		qaws_curve_create_catmull_rom(&k[0], &cd);
 		memset(&sd, 0, sizeof(sd));
 		sd.dimension = QAWS_DIMENSION_2D; sd.scheme = QAWS_SUBDIVISION_LANE_RIESENFELD_3;
 		sd.control_points = cr; sd.control_point_count = 5; sd.closed = 1; sd.refinement_levels = 3;
-		qaws_curve_create_subdivision(&sd, &k[1]);
+		qaws_curve_create_subdivision(&k[1], &sd);
 		for (i = 0; i < 2; i++)
 		{
 			qaws_curve const* c = k[i];
 			qaws_path_2d p = ptt_one(&c, 1);
 			qaws_scalar a = 0;
 			double ref = ptt_sampled_area(&p);
-			qaws_path_compute_area_2d(&p, &a);
+			qaws_path_compute_area_2d(&a, &p);
 			if (fabs(a - ref) > 1e-6 * fabs(ref) + PTT_REL * 10)
 			{
 				printf("    kind %d: area %.12g, sampled %.12g\n", (int)qaws_curve_get_kind(k[i]), (double)a, ref);
@@ -169,9 +169,9 @@ static void test_bounds(void)
 	qaws_curve const* c;
 	qaws_path_2d p;
 	qaws_vec2 lo, hi;
-	qaws_curve_create_ellipse_2d(1, 2, 3, 3, 0, &e);
+	qaws_curve_create_ellipse_2d(&e, 1, 2, 3, 3, 0);
 	c = e; p = ptt_one(&c, 1);
-	qaws_path_compute_bounds_2d(&p, &lo, &hi);
+	qaws_path_compute_bounds_2d(&lo, &hi, &p);
 	sprintf(msg, "circle bounds exact (%.15g %.15g %.15g %.15g)", (double)lo.x, (double)lo.y, (double)hi.x, (double)hi.y);
 	TEST_ASSERT(fabs(lo.x + 2) < 1e-12 + PTT_REL && fabs(hi.x - 4) < 1e-12 + PTT_REL &&
 		fabs(lo.y + 1) < 1e-12 + PTT_REL && fabs(hi.y - 5) < 1e-12 + PTT_REL, msg);
@@ -184,18 +184,18 @@ static void test_bounds(void)
 		unsigned int i;
 		memset(&d, 0, sizeof(d));
 		d.dimension = QAWS_DIMENSION_2D; d.degree = 3; d.control_points = cp; d.control_point_count = 4;
-		qaws_curve_create_bezier(&d, &b);
+		qaws_curve_create_bezier(&b, &d);
 		for (i = 0; i <= 100000; i++)
 		{
 			qaws_eval_result_2d r;
-			qaws_curve_evaluate_2d(b, (qaws_scalar)(i / 100000.0), QAWS_EVAL_FLAG_POSITION, &r);
+			qaws_curve_evaluate_2d(&r, b, (qaws_scalar)(i / 100000.0), QAWS_EVAL_FLAG_POSITION);
 			if (r.position.x < slo[0]) slo[0] = r.position.x;
 			if (r.position.y < slo[1]) slo[1] = r.position.y;
 			if (r.position.x > shi[0]) shi[0] = r.position.x;
 			if (r.position.y > shi[1]) shi[1] = r.position.y;
 		}
 		c = b; p = ptt_one(&c, 0);
-		qaws_path_compute_bounds_2d(&p, &lo, &hi);
+		qaws_path_compute_bounds_2d(&lo, &hi, &p);
 		sprintf(msg, "Bezier bounds tight (y %.12g..%.12g vs sampled %.12g..%.12g)", (double)lo.y, (double)hi.y, slo[1], shi[1]);
 		TEST_ASSERT(lo.y <= slo[1] + 1e-12 + PTT_REL && hi.y >= shi[1] - 1e-12 - PTT_REL && slo[1] - lo.y < 1e-8 + PTT_REL && hi.y - shi[1] < 1e-8 + PTT_REL, msg);
 		qaws_curve_destroy(b);
@@ -213,18 +213,18 @@ static void test_locate(void)
 		qaws_curve const* c;
 		qaws_path_2d p;
 		int okc;
-		qaws_curve_create_ellipse_2d(0, 0, 2, 2, 0, &e);
+		qaws_curve_create_ellipse_2d(&e, 0, 0, 2, 2, 0);
 		c = e; p = ptt_one(&c, 1);
-		q.x = 0; q.y = 0; qaws_region_locate_point_2d(&p, 1, QAWS_FILL_NON_ZERO, q, 0, &loc);
+		q.x = 0; q.y = 0; qaws_region_locate_point_2d(&loc, &p, 1, QAWS_FILL_NON_ZERO, q, 0);
 		okc = loc == QAWS_POINT_INSIDE;
-		q.x = 3; q.y = 0; qaws_region_locate_point_2d(&p, 1, QAWS_FILL_NON_ZERO, q, 0, &loc);
+		q.x = 3; q.y = 0; qaws_region_locate_point_2d(&loc, &p, 1, QAWS_FILL_NON_ZERO, q, 0);
 		okc = okc && loc == QAWS_POINT_OUTSIDE;
-		q.x = (qaws_scalar)sqrt(2.0); q.y = (qaws_scalar)sqrt(2.0); qaws_region_locate_point_2d(&p, 1, QAWS_FILL_NON_ZERO, q, 0, &loc);
+		q.x = (qaws_scalar)sqrt(2.0); q.y = (qaws_scalar)sqrt(2.0); qaws_region_locate_point_2d(&loc, &p, 1, QAWS_FILL_NON_ZERO, q, 0);
 		okc = okc && loc == QAWS_POINT_ON;
 #if !QAWS_SCALAR_IS_FLOAT
-		q.x = (qaws_scalar)(2 - 1e-7); q.y = 0; qaws_region_locate_point_2d(&p, 1, QAWS_FILL_NON_ZERO, q, 0, &loc);
+		q.x = (qaws_scalar)(2 - 1e-7); q.y = 0; qaws_region_locate_point_2d(&loc, &p, 1, QAWS_FILL_NON_ZERO, q, 0);
 		okc = okc && loc == QAWS_POINT_INSIDE;
-		q.x = (qaws_scalar)(2 + 1e-7); q.y = 0; qaws_region_locate_point_2d(&p, 1, QAWS_FILL_NON_ZERO, q, 0, &loc);
+		q.x = (qaws_scalar)(2 + 1e-7); q.y = 0; qaws_region_locate_point_2d(&loc, &p, 1, QAWS_FILL_NON_ZERO, q, 0);
 		okc = okc && loc == QAWS_POINT_OUTSIDE;
 #endif
 		TEST_ASSERT(okc, "circle: centre inside, far point outside, boundary point on, points 1e-7 off on the right side");
@@ -238,32 +238,32 @@ static void test_locate(void)
 		qaws_curve const *c0, *c1;
 		qaws_path_2d p[2];
 		int w = 0, okh;
-		qaws_curve_create_polyline_2d(outer, 4, 1, &o);
-		qaws_curve_create_polyline_2d(hole, 4, 1, &h);
-		qaws_curve_create_polyline_2d(same, 4, 1, &s);
+		qaws_curve_create_polyline_2d(&o, outer, 4, 1);
+		qaws_curve_create_polyline_2d(&h, hole, 4, 1);
+		qaws_curve_create_polyline_2d(&s, same, 4, 1);
 		c0 = o; c1 = h;
 		p[0] = ptt_one(&c0, 1); p[1] = ptt_one(&c1, 1);
 		q.x = 2; q.y = 2;
-		qaws_region_locate_point_2d(p, 2, QAWS_FILL_NON_ZERO, q, 0, &loc);
+		qaws_region_locate_point_2d(&loc, p, 2, QAWS_FILL_NON_ZERO, q, 0);
 		okh = loc == QAWS_POINT_OUTSIDE;
-		qaws_region_locate_point_2d(p, 2, QAWS_FILL_EVEN_ODD, q, 0, &loc);
+		qaws_region_locate_point_2d(&loc, p, 2, QAWS_FILL_EVEN_ODD, q, 0);
 		okh = okh && loc == QAWS_POINT_OUTSIDE;
 		q.x = (qaws_scalar)0.5;
-		qaws_region_locate_point_2d(p, 2, QAWS_FILL_NON_ZERO, q, 0, &loc);
+		qaws_region_locate_point_2d(&loc, p, 2, QAWS_FILL_NON_ZERO, q, 0);
 		okh = okh && loc == QAWS_POINT_INSIDE;
 		TEST_ASSERT(okh, "square with a hole: hole outside, ring inside");
 		/* same orientation: winding 2 in the overlap */
 		c1 = s; p[1] = ptt_one(&c1, 1);
 		q.x = 2; q.y = 2;
-		qaws_region_locate_point_2d(p, 2, QAWS_FILL_EVEN_ODD, q, 0, &loc);
+		qaws_region_locate_point_2d(&loc, p, 2, QAWS_FILL_EVEN_ODD, q, 0);
 		okh = loc == QAWS_POINT_OUTSIDE;
-		qaws_region_locate_point_2d(p, 2, QAWS_FILL_NON_ZERO, q, 0, &loc);
+		qaws_region_locate_point_2d(&loc, p, 2, QAWS_FILL_NON_ZERO, q, 0);
 		okh = okh && loc == QAWS_POINT_INSIDE;
-		qaws_region_locate_point_2d(p, 2, QAWS_FILL_POSITIVE, q, 0, &loc);
+		qaws_region_locate_point_2d(&loc, p, 2, QAWS_FILL_POSITIVE, q, 0);
 		okh = okh && loc == QAWS_POINT_INSIDE;
-		qaws_region_locate_point_2d(p, 2, QAWS_FILL_NEGATIVE, q, 0, &loc);
+		qaws_region_locate_point_2d(&loc, p, 2, QAWS_FILL_NEGATIVE, q, 0);
 		okh = okh && loc == QAWS_POINT_OUTSIDE;
-		qaws_path_compute_winding_2d(&p[0], q, &w);
+		qaws_path_compute_winding_2d(&w, &p[0], q);
 		sprintf(msg, "nested squares of one orientation: winding 2 in the overlap, each fill rule right (outer winding %d)", w);
 		TEST_ASSERT(okh && w == 1, msg);
 		qaws_curve_destroy(o);
@@ -287,17 +287,17 @@ static void test_transform(void)
 	s.center[0] = 1; s.center[1] = 1; s.radius = 2; s.angle_start = (qaws_scalar)0.3; s.angle_end = (qaws_scalar)2.9;
 	memset(&ad, 0, sizeof(ad));
 	ad.dimension = QAWS_DIMENSION_2D; ad.segments = &s; ad.segment_count = 1;
-	qaws_curve_create_arc(&ad, &arc);
-	qaws_curve_transform_2d(arc, mr, &rot);
-	qaws_curve_transform_2d(arc, ms, &shear);
+	qaws_curve_create_arc(&arc, &ad);
+	qaws_curve_transform_2d(&rot, arc, mr);
+	qaws_curve_transform_2d(&shear, arc, ms);
 	for (i = 0; i <= 64; i++)
 	{
 		qaws_range ra = qaws_curve_get_parameter_range(arc), rr = qaws_curve_get_parameter_range(rot), rs = qaws_curve_get_parameter_range(shear);
 		qaws_eval_result_2d a, b, c;
 		double f = i / 64.0, x, y;
-		qaws_curve_evaluate_2d(arc, (qaws_scalar)(ra.min_value + f * (ra.max_value - ra.min_value)), QAWS_EVAL_FLAG_POSITION, &a);
-		qaws_curve_evaluate_2d(rot, (qaws_scalar)(rr.min_value + f * (rr.max_value - rr.min_value)), QAWS_EVAL_FLAG_POSITION, &b);
-		qaws_curve_evaluate_2d(shear, (qaws_scalar)(rs.min_value + f * (rs.max_value - rs.min_value)), QAWS_EVAL_FLAG_POSITION, &c);
+		qaws_curve_evaluate_2d(&a, arc, (qaws_scalar)(ra.min_value + f * (ra.max_value - ra.min_value)), QAWS_EVAL_FLAG_POSITION);
+		qaws_curve_evaluate_2d(&b, rot, (qaws_scalar)(rr.min_value + f * (rr.max_value - rr.min_value)), QAWS_EVAL_FLAG_POSITION);
+		qaws_curve_evaluate_2d(&c, shear, (qaws_scalar)(rs.min_value + f * (rs.max_value - rs.min_value)), QAWS_EVAL_FLAG_POSITION);
 		x = mr[0] * a.position.x + mr[1] * a.position.y + mr[2];
 		y = mr[3] * a.position.x + mr[4] * a.position.y + mr[5];
 		if (hypot(x - b.position.x, y - b.position.y) > worst) worst = hypot(x - b.position.x, y - b.position.y);
@@ -316,8 +316,8 @@ static void test_transform(void)
 		qaws_curve const* c;
 		qaws_path_2d p;
 		qaws_scalar a0 = 0, a1 = 0;
-		c = arc; p = ptt_one(&c, 0); qaws_path_compute_area_2d(&p, &a0);
-		c = shear; p = ptt_one(&c, 0); qaws_path_compute_area_2d(&p, &a1);
+		c = arc; p = ptt_one(&c, 0); qaws_path_compute_area_2d(&a0, &p);
+		c = shear; p = ptt_one(&c, 0); qaws_path_compute_area_2d(&a1, &p);
 		sprintf(msg, "sheared arc area = det 2 x arc area (%.12g vs %.12g)", (double)a1, 2.0 * a0);
 		TEST_ASSERT(fabs(a1 - 2 * a0) < 1e-10 + PTT_REL * 10, msg);
 	}
@@ -333,26 +333,26 @@ static void test_polylines(void)
 	unsigned int n = 0;
 	{
 		qaws_scalar p[] = { 0, 0, 0, 0, 1, 0, 1, 1, 1, 1, 0, 0 };
-		qaws_polyline_strip_duplicates_2d(p, 6, 1, out, &n);
+		qaws_polyline_strip_duplicates_2d(out, &n, p, 6, 1);
 		TEST_ASSERT(n == 3, "strip duplicates: 6 points with repeats and a closing copy keep 3");
 	}
 	{
 		/* a square with midpoints and a spike */
 		qaws_scalar p[] = { 0, 0, 1, 0, 2, 0, 2, 1, 2, 2, 1, 2, 0, 2, 0, 1, 0, 3, 0, 1 };
-		qaws_polyline_trim_collinear_2d(p, 10, 1, out, &n);
+		qaws_polyline_trim_collinear_2d(out, &n, p, 10, 1);
 		sprintf(msg, "trim collinear: midpoints and a spike go, the 4 corners stay (%u)", n);
 		TEST_ASSERT(n == 4, msg);
 	}
 	{
 		/* Clipper2's TestSimplifyPath: an open zig-zag within epsilon of a line */
 		qaws_scalar p[] = { 0, 0, 1, (qaws_scalar)-0.1, 2, (qaws_scalar)0.1, 3, (qaws_scalar)-0.1, 4, (qaws_scalar)0.1, 100, 0 };
-		qaws_polyline_simplify_2d(p, 6, 0, 1, out, &n);
+		qaws_polyline_simplify_2d(out, &n, p, 6, 0, 1);
 		sprintf(msg, "simplify: an open zig-zag within epsilon keeps its 2 ends (%u)", n);
 		TEST_ASSERT(n == 2 && out[0] == 0 && out[2] == 100, msg);
 	}
 	{
 		qaws_scalar p[] = { 0, 0, 1, (qaws_scalar)0.05, 2, 0, 3, 5, 4, 0, 5, (qaws_scalar)0.02, 6, 0 };
-		qaws_polyline_rdp_2d(p, 7, (qaws_scalar)0.5, out, &n);
+		qaws_polyline_rdp_2d(out, &n, p, 7, (qaws_scalar)0.5);
 		sprintf(msg, "RDP keeps the ends, the peak and its feet (%u)", n);
 		TEST_ASSERT(n == 5 && out[4] == 3, msg);
 	}

@@ -21,14 +21,14 @@ static void test_rational_bezier(void)
 		desc.weights = w;
 		desc.weight_count = 3;
 
-		TEST_ASSERT_STATUS(qaws_curve_create_rational_bezier(&desc, &crv));
+		TEST_ASSERT_STATUS(qaws_curve_create_rational_bezier(&crv, &desc));
 		TEST_ASSERT(crv != NULL, "rational bezier created");
 		TEST_ASSERT(qaws_curve_get_kind(crv) == QAWS_CURVE_KIND_RATIONAL_BEZIER,
 			"rational bezier kind");
 		TEST_ASSERT(qaws_curve_get_degree(crv) == 2, "rational bezier degree");
 
 		/* At t=0: should be (1,0) */
-		qaws_curve_evaluate_2d(crv, 0, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &r);
+		qaws_curve_evaluate_2d(&r, crv, 0, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1);
 		TEST_ASSERT(approx_eq(r.position.x, 1) && approx_eq(r.position.y, 0),
 			"rational bezier start point");
 		/* D1 at start should be tangent to circle: direction (0,1) */
@@ -36,15 +36,15 @@ static void test_rational_bezier(void)
 		TEST_ASSERT(r.d1.y > (qaws_scalar)0.1, "rbez d1.y positive at start");
 
 		/* At t=1: should be (0,1) */
-		qaws_curve_evaluate_2d(crv, 1, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &r);
+		qaws_curve_evaluate_2d(&r, crv, 1, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1);
 		TEST_ASSERT(approx_eq(r.position.x, 0) && approx_eq(r.position.y, 1),
 			"rational bezier end point");
 		/* D1 at end: tangent direction (-1, 0) */
 		TEST_ASSERT(r.d1.x < (qaws_scalar)-0.1, "rbez d1.x negative at end");
 
 		/* At t=0.5: should be on unit circle */
-		qaws_curve_evaluate_2d(crv, (qaws_scalar)0.5,
-			QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2, &r);
+		qaws_curve_evaluate_2d(&r, crv,
+			(qaws_scalar)0.5, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2);
 		dist = (qaws_scalar)sqrt((double)(r.position.x * r.position.x + r.position.y * r.position.y));
 		TEST_ASSERT(approx_eq(dist, 1), "rational bezier midpoint on circle");
 		TEST_ASSERT(r.valid_flags & QAWS_EVAL_FLAG_D2, "rbez d2 valid");
@@ -56,7 +56,7 @@ static void test_rational_bezier(void)
 			for (i = 1; i < 10; ++i)
 			{
 				qaws_scalar t = (qaws_scalar)i / (qaws_scalar)10;
-				qaws_curve_evaluate_2d(crv, t, QAWS_EVAL_FLAG_POSITION, &r);
+				qaws_curve_evaluate_2d(&r, crv, t, QAWS_EVAL_FLAG_POSITION);
 				dist = (qaws_scalar)sqrt((double)(r.position.x * r.position.x + r.position.y * r.position.y));
 				if (!approx_eq(dist, 1)) all_on_circle = 0;
 			}
@@ -73,7 +73,7 @@ static void test_rational_bezier(void)
 	/* Error handling: NULL desc */
 	{
 		qaws_curve *crv = NULL;
-		TEST_ASSERT(qaws_curve_create_rational_bezier(NULL, &crv) != QAWS_STATUS_OK,
+		TEST_ASSERT(qaws_curve_create_rational_bezier(&crv, NULL) != QAWS_STATUS_OK,
 			"rbez null desc rejected");
 	}
 
@@ -93,12 +93,12 @@ static void test_rational_bezier(void)
 		desc3d.weights = w3d;
 		desc3d.weight_count = 3;
 
-		TEST_ASSERT_STATUS(qaws_curve_create_rational_bezier(&desc3d, &crv3d));
+		TEST_ASSERT_STATUS(qaws_curve_create_rational_bezier(&crv3d, &desc3d));
 		TEST_ASSERT(qaws_curve_get_dimension(crv3d) == QAWS_DIMENSION_3D,
 			"rbez 3d dimension");
 
-		qaws_curve_evaluate_3d(crv3d, (qaws_scalar)0.5,
-			QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2, &r3d);
+		qaws_curve_evaluate_3d(&r3d, crv3d,
+			(qaws_scalar)0.5, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2);
 		TEST_ASSERT(r3d.valid_flags & QAWS_EVAL_FLAG_POSITION, "rational bezier 3d pos");
 		TEST_ASSERT(r3d.valid_flags & QAWS_EVAL_FLAG_D1, "rational bezier 3d d1");
 		TEST_ASSERT(r3d.valid_flags & QAWS_EVAL_FLAG_D2, "rational bezier 3d d2");

@@ -35,8 +35,8 @@ static qaws_exact_surface* ssi_patch(double const* z, unsigned int deg, double x
 	d.control_points = cps;
 	d.u_point_count = deg + 1;
 	d.v_point_count = deg + 1;
-	qaws_surface_create_bezier(&d, &s);
-	qaws_exact_surface_prepare(NULL, s, &e, NULL);
+	qaws_surface_create_bezier(&s, &d);
+	qaws_exact_surface_prepare(&e, NULL, s, NULL);
 	qaws_surface_destroy(s);
 	return e;
 }
@@ -81,8 +81,8 @@ static qaws_exact_surface* ssi_tube(double k, int along_x, double h)
 	d.u_knot_count = 10;
 	d.v_knots = kv;
 	d.v_knot_count = 4;
-	qaws_surface_create_nurbs(&d, &s);
-	qaws_exact_surface_prepare(NULL, s, &e, NULL);
+	qaws_surface_create_nurbs(&s, &d);
+	qaws_exact_surface_prepare(&e, NULL, s, NULL);
 	qaws_surface_destroy(s);
 	return e;
 }
@@ -95,7 +95,7 @@ static qaws_status ssi_run(char const* name, qaws_exact_surface* a, qaws_exact_s
 {
 	qaws_exact_ssi_branch br[64];
 	unsigned int np = 0, nb = 0, i;
-	qaws_status st = qaws_exact_surface_surface_hits(a, b, min_depth, g_pts, 8192, &np, br, 64, &nb);
+	qaws_status st = qaws_exact_surface_surface_hits(g_pts, &np, br, &nb, a, b, 8192, 64, min_depth);
 	*open = *closed = 0;
 	*gap = 0;
 	for (i = 0; i < nb; i++)
@@ -106,8 +106,8 @@ static qaws_status ssi_run(char const* name, qaws_exact_surface* a, qaws_exact_s
 	for (i = 0; i < np; i++)
 	{
 		double pa[3], pb[3], g;
-		qaws_exact_surface_evaluate(a, 0.5 * (g_pts[i].u1_lo + g_pts[i].u1_hi), 0.5 * (g_pts[i].v1_lo + g_pts[i].v1_hi), 0, pa, NULL);
-		qaws_exact_surface_evaluate(b, 0.5 * (g_pts[i].u2_lo + g_pts[i].u2_hi), 0.5 * (g_pts[i].v2_lo + g_pts[i].v2_hi), 0, pb, NULL);
+		qaws_exact_surface_evaluate(pa, NULL, a, 0.5 * (g_pts[i].u1_lo + g_pts[i].u1_hi), 0.5 * (g_pts[i].v1_lo + g_pts[i].v1_hi), 0);
+		qaws_exact_surface_evaluate(pb, NULL, b, 0.5 * (g_pts[i].u2_lo + g_pts[i].u2_hi), 0.5 * (g_pts[i].v2_lo + g_pts[i].v2_hi), 0);
 		g = fabs(pa[0] - pb[0]) + fabs(pa[1] - pb[1]) + fabs(pa[2] - pb[2]);
 		if (g > *gap) *gap = g;
 	}

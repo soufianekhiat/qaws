@@ -34,7 +34,7 @@ static void test_svg_rational_bezier(void)
 			desc.weights = w;
 			desc.weight_count = 3;
 
-			if (qaws_curve_create_rational_bezier(&desc, &crv) == QAWS_STATUS_OK)
+			if (qaws_curve_create_rational_bezier(&crv, &desc) == QAWS_STATUS_OK)
 			{
 				qaws_vec2 buf[SVG_SAMPLES];
 				unsigned int n = svg_sample_curve(crv, buf, SVG_SAMPLES);
@@ -77,7 +77,7 @@ static void test_svg_composite(void)
 		bd.degree = 3;
 		bd.control_points = cp1;
 		bd.control_point_count = 4;
-		qaws_curve_create_bezier(&bd, &seg1);
+		qaws_curve_create_bezier(&seg1, &bd);
 
 		qaws_vec2 hp[] = { {2,0}, {4,2} };
 		qaws_vec2 ht[] = { {2,2}, {2,-2} };
@@ -90,7 +90,7 @@ static void test_svg_composite(void)
 		hd.derivatives = ht;
 		hd.point_count = 2;
 		hd.derivative_count = 2;
-		qaws_curve_create_hermite(&hd, &seg2);
+		qaws_curve_create_hermite(&seg2, &hd);
 
 		qaws_vec2 cp3[] = { {4,2}, {5,0} };
 		qaws_bezier_desc bd3;
@@ -100,7 +100,7 @@ static void test_svg_composite(void)
 		bd3.degree = 1;
 		bd3.control_points = cp3;
 		bd3.control_point_count = 2;
-		qaws_curve_create_bezier(&bd3, &seg3);
+		qaws_curve_create_bezier(&seg3, &bd3);
 
 		if (seg1 && seg2 && seg3)
 		{
@@ -114,7 +114,7 @@ static void test_svg_composite(void)
 			cd.segments = segs;
 			cd.segment_count = 3;
 
-			if (qaws_curve_create_composite(&cd, &comp) == QAWS_STATUS_OK)
+			if (qaws_curve_create_composite(&comp, &cd) == QAWS_STATUS_OK)
 			{
 				qaws_vec2 buf[SVG_SAMPLES];
 				unsigned int n = svg_sample_curve(comp, buf, SVG_SAMPLES);
@@ -123,13 +123,13 @@ static void test_svg_composite(void)
 				/* Mark segment boundaries */
 				{
 					qaws_eval_result_2d r;
-					qaws_curve_evaluate_2d(comp, 0, QAWS_EVAL_FLAG_POSITION, &r);
+					qaws_curve_evaluate_2d(&r, comp, 0, QAWS_EVAL_FLAG_POSITION);
 					svg_dot(&svg, r.position.x, r.position.y, "#50fa7b", (qaws_scalar)5);
-					qaws_curve_evaluate_2d(comp, 1, QAWS_EVAL_FLAG_POSITION, &r);
+					qaws_curve_evaluate_2d(&r, comp, 1, QAWS_EVAL_FLAG_POSITION);
 					svg_dot(&svg, r.position.x, r.position.y, "#f5a623", (qaws_scalar)5);
-					qaws_curve_evaluate_2d(comp, 2, QAWS_EVAL_FLAG_POSITION, &r);
+					qaws_curve_evaluate_2d(&r, comp, 2, QAWS_EVAL_FLAG_POSITION);
 					svg_dot(&svg, r.position.x, r.position.y, "#f5a623", (qaws_scalar)5);
-					qaws_curve_evaluate_2d(comp, 3, QAWS_EVAL_FLAG_POSITION, &r);
+					qaws_curve_evaluate_2d(&r, comp, 3, QAWS_EVAL_FLAG_POSITION);
 					svg_dot(&svg, r.position.x, r.position.y, "#50fa7b", (qaws_scalar)5);
 				}
 				qaws_curve_destroy(comp);
@@ -182,7 +182,7 @@ static void test_svg_arc(void)
 				desc.dimension = QAWS_DIMENSION_2D;
 				desc.segments = &seg;
 				desc.segment_count = 1;
-				if (qaws_curve_create_arc(&desc, &crv) == QAWS_STATUS_OK) {
+				if (qaws_curve_create_arc(&crv, &desc) == QAWS_STATUS_OK) {
 					qaws_vec2 buf[SVG_SAMPLES];
 					unsigned int n = svg_sample_curve(crv, buf, SVG_SAMPLES);
 					svg_polyline(&svg, buf, n, colors[ri], (qaws_scalar)2.0);
@@ -234,7 +234,7 @@ static void test_svg_arc(void)
 			desc.segments = segs;
 			desc.segment_count = 4;
 
-			if (qaws_curve_create_arc(&desc, &crv) == QAWS_STATUS_OK) {
+			if (qaws_curve_create_arc(&crv, &desc) == QAWS_STATUS_OK) {
 				qaws_vec2 buf[SVG_SAMPLES];
 				unsigned int n = svg_sample_curve(crv, buf, SVG_SAMPLES);
 				svg_polyline(&svg, buf, n, "#78dce8", (qaws_scalar)2.5);
@@ -277,7 +277,7 @@ static void test_svg_arc(void)
 				d1.dimension = QAWS_DIMENSION_2D;
 				d1.segments = &segs[i];
 				d1.segment_count = 1;
-				if (qaws_curve_create_arc(&d1, &seg_crv) == QAWS_STATUS_OK) {
+				if (qaws_curve_create_arc(&seg_crv, &d1) == QAWS_STATUS_OK) {
 					qaws_vec2 buf[SVG_SAMPLES];
 					unsigned int n = svg_sample_curve(seg_crv, buf, SVG_SAMPLES);
 					svg_polyline(&svg, buf, n, colors[i], (qaws_scalar)3.0);
@@ -329,7 +329,7 @@ static void test_svg_polynomial(void)
 		desc.t_min = 0;
 		desc.t_max = 2;
 
-		if (qaws_curve_create_polynomial(&desc, &crv) == QAWS_STATUS_OK)
+		if (qaws_curve_create_polynomial(&crv, &desc) == QAWS_STATUS_OK)
 		{
 			qaws_vec2 buf[SVG_SAMPLES];
 			unsigned int n = svg_sample_curve(crv, buf, SVG_SAMPLES);
@@ -352,7 +352,7 @@ static void test_svg_polynomial(void)
 		desc.t_min = -1;
 		desc.t_max = 1;
 
-		if (qaws_curve_create_polynomial(&desc, &crv) == QAWS_STATUS_OK)
+		if (qaws_curve_create_polynomial(&crv, &desc) == QAWS_STATUS_OK)
 		{
 			qaws_vec2 buf[SVG_SAMPLES];
 			unsigned int n = svg_sample_curve(crv, buf, SVG_SAMPLES);
@@ -390,7 +390,7 @@ static void test_svg_clothoid(void)
 		desc.end_curvature = 3;
 		desc.length = 4;
 
-		if (qaws_curve_create_clothoid(&desc, &crv) == QAWS_STATUS_OK)
+		if (qaws_curve_create_clothoid(&crv, &desc) == QAWS_STATUS_OK)
 		{
 			qaws_vec2 buf[SVG_SAMPLES];
 			unsigned int n = svg_sample_curve(crv, buf, SVG_SAMPLES);
@@ -414,7 +414,7 @@ static void test_svg_clothoid(void)
 		desc.end_curvature = 0;
 		desc.length = 4;
 
-		if (qaws_curve_create_clothoid(&desc, &crv) == QAWS_STATUS_OK)
+		if (qaws_curve_create_clothoid(&crv, &desc) == QAWS_STATUS_OK)
 		{
 			qaws_vec2 buf[SVG_SAMPLES];
 			unsigned int n = svg_sample_curve(crv, buf, SVG_SAMPLES);
@@ -457,7 +457,7 @@ static void test_svg_subdivision(void)
 		desc.closed = 0;
 		desc.refinement_levels = 6;
 
-		if (qaws_curve_create_subdivision(&desc, &crv) == QAWS_STATUS_OK)
+		if (qaws_curve_create_subdivision(&crv, &desc) == QAWS_STATUS_OK)
 		{
 			qaws_vec2 buf[SVG_SAMPLES];
 			unsigned int n = svg_sample_curve(crv, buf, SVG_SAMPLES);
@@ -478,7 +478,7 @@ static void test_svg_subdivision(void)
 		desc.closed = 0;
 		desc.refinement_levels = 6;
 
-		if (qaws_curve_create_subdivision(&desc, &crv) == QAWS_STATUS_OK)
+		if (qaws_curve_create_subdivision(&crv, &desc) == QAWS_STATUS_OK)
 		{
 			qaws_vec2 buf[SVG_SAMPLES];
 			unsigned int n = svg_sample_curve(crv, buf, SVG_SAMPLES);
@@ -499,7 +499,7 @@ static void test_svg_subdivision(void)
 		desc.closed = 0;
 		desc.refinement_levels = 6;
 
-		if (qaws_curve_create_subdivision(&desc, &crv) == QAWS_STATUS_OK)
+		if (qaws_curve_create_subdivision(&crv, &desc) == QAWS_STATUS_OK)
 		{
 			qaws_vec2 buf[SVG_SAMPLES];
 			unsigned int n = svg_sample_curve(crv, buf, SVG_SAMPLES);
@@ -537,7 +537,7 @@ static void test_svg_all_new_families(void)
 		desc.control_point_count = 3;
 		desc.weights = w;
 		desc.weight_count = 3;
-		if (qaws_curve_create_rational_bezier(&desc, &crv) == QAWS_STATUS_OK)
+		if (qaws_curve_create_rational_bezier(&crv, &desc) == QAWS_STATUS_OK)
 		{
 			qaws_vec2 buf[SVG_SAMPLES];
 			unsigned int n = svg_sample_curve(crv, buf, SVG_SAMPLES);
@@ -562,7 +562,7 @@ static void test_svg_all_new_families(void)
 		desc.dimension = QAWS_DIMENSION_2D;
 		desc.segments = &seg;
 		desc.segment_count = 1;
-		if (qaws_curve_create_arc(&desc, &crv) == QAWS_STATUS_OK)
+		if (qaws_curve_create_arc(&crv, &desc) == QAWS_STATUS_OK)
 		{
 			qaws_vec2 buf[SVG_SAMPLES];
 			unsigned int n = svg_sample_curve(crv, buf, SVG_SAMPLES);
@@ -583,7 +583,7 @@ static void test_svg_all_new_families(void)
 		desc.start_curvature = 0;
 		desc.end_curvature = 2;
 		desc.length = 3;
-		if (qaws_curve_create_clothoid(&desc, &crv) == QAWS_STATUS_OK)
+		if (qaws_curve_create_clothoid(&crv, &desc) == QAWS_STATUS_OK)
 		{
 			qaws_vec2 buf[SVG_SAMPLES];
 			unsigned int n = svg_sample_curve(crv, buf, SVG_SAMPLES);
@@ -605,7 +605,7 @@ static void test_svg_all_new_families(void)
 		desc.coefficient_count = 3;
 		desc.t_min = (qaws_scalar)-1.5;
 		desc.t_max = (qaws_scalar)1.5;
-		if (qaws_curve_create_polynomial(&desc, &crv) == QAWS_STATUS_OK)
+		if (qaws_curve_create_polynomial(&crv, &desc) == QAWS_STATUS_OK)
 		{
 			qaws_vec2 buf[SVG_SAMPLES];
 			unsigned int n = svg_sample_curve(crv, buf, SVG_SAMPLES);
@@ -627,7 +627,7 @@ static void test_svg_all_new_families(void)
 		desc.control_point_count = 4;
 		desc.closed = 0;
 		desc.refinement_levels = 6;
-		if (qaws_curve_create_subdivision(&desc, &crv) == QAWS_STATUS_OK)
+		if (qaws_curve_create_subdivision(&crv, &desc) == QAWS_STATUS_OK)
 		{
 			qaws_vec2 buf[SVG_SAMPLES];
 			unsigned int n = svg_sample_curve(crv, buf, SVG_SAMPLES);

@@ -74,15 +74,15 @@ static void test_surface_sampling_core(void)
 	d.u_knot_count = SW_NU + SW_DEG + 1;
 	d.v_knots = g_sw_vk;
 	d.v_knot_count = SW_NV + SW_DEG + 1;
-	TEST_ASSERT_STATUS(qaws_surface_create_bspline(&d, &s));
-	fd = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, dir, SW_NU * SW_NV, 3);
-	fg = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, grad, SW_NU * SW_NV, 3);
+	TEST_ASSERT_STATUS(qaws_surface_create_bspline(&s, &d));
+	fd = qaws_field_view_make(dir, SW_NU * SW_NV, QAWS_FIELD_CONTROL_POINTS, 3);
+	fg = qaws_field_view_make(grad, SW_NU * SW_NV, QAWS_FIELD_CONTROL_POINTS, 3);
 	vd.fields = &fd;
 	vg.fields = &fg;
 	vd.field_count = vg.field_count = 1;
 	vd.children = vg.children = NULL;
 	vd.child_count = vg.child_count = 0;
-	TEST_ASSERT_STATUS(qaws_surface_cdf_sample_tangent(NULL, s, NULL, g_sw_xi, xd, SW_N, SW_CELLS, 8, &vd, val, t1, t2, &total));
+	TEST_ASSERT_STATUS(qaws_surface_cdf_sample_tangent(val, t1, t2, &total, s, g_sw_xi, xd, &vd, SW_N, NULL, SW_CELLS, 8, NULL));
 
 	/* one thread per u cell, then an exclusive prefix sum */
 	pv[0] = pt[0] = ptt[0] = 0;
@@ -101,12 +101,12 @@ static void test_surface_sampling_core(void)
 	{
 		qaws_scalar uv[2], tg[4];
 		qaws_vec3 tp[2];
-		qaws_patch_cdf_solve(SW_ARGS(&P, P.dot), SW_CELLS, pv, g_sw_xi[2 * n], g_sw_xi[2 * n + 1], uv);
+		qaws_patch_cdf_solve(uv, pv, SW_ARGS(&P, P.dot), SW_CELLS, g_sw_xi[2 * n], g_sw_xi[2 * n + 1]);
 		su[n] = uv[0];
 		sv[n] = uv[1];
 		ok_s &= diff_close(uv[0], val[n].u, QAWS_SCALAR_IS_FLOAT ? 1e-3 : 1e-11) && diff_close(uv[1], val[n].v, QAWS_SCALAR_IS_FLOAT ? 1e-3 : 1e-11);
-		qaws_patch_cdf_tangent(SW_ARGS(&P, P.dot), SW_CELLS, pv, pt, ptt, g_sw_xi[2 * n], g_sw_xi[2 * n + 1], xd[2 * n], xd[2 * n + 1],
-			uv[0], uv[1], tg, tp);
+		qaws_patch_cdf_tangent(tg, tp, pv, pt, ptt, SW_ARGS(&P, P.dot), SW_CELLS, g_sw_xi[2 * n], g_sw_xi[2 * n + 1],
+			xd[2 * n], xd[2 * n + 1], uv[0], uv[1]);
 		ok_1 &= diff_close(tg[0], t1[n].u, tol) && diff_close(tg[1], t1[n].v, tol) && diff_close(tp[0].x, t1[n].position.x, tol) &&
 			diff_close(tp[0].y, t1[n].position.y, tol) && diff_close(tp[0].z, t1[n].position.z, tol);
 		ok_2 &= diff_close(tg[2], t2[n].u, tol) && diff_close(tg[3], t2[n].v, tol) && diff_close(tp[1].x, t2[n].position.x, tol) &&
@@ -125,15 +125,15 @@ static void test_surface_sampling_core(void)
 	}
 	memset(grad, 0, sizeof(grad));
 	memset(xadj, 0, sizeof(xadj));
-	TEST_ASSERT_STATUS(qaws_surface_cdf_sample_adjoint(NULL, s, NULL, g_sw_xi, SW_N, SW_CELLS, 8, adj, &vg, xadj));
+	TEST_ASSERT_STATUS(qaws_surface_cdf_sample_adjoint(&vg, xadj, s, g_sw_xi, adj, SW_N, NULL, SW_CELLS, 8, NULL));
 	for (c = 0; c < SW_CELLS; c++)
 		cellw[c] = 0;
 	for (n = 0; n < SW_N; n++)
 	{
 		qaws_scalar out[4];
 		int ku;
-		qaws_patch_cdf_multipliers(SW_ARGS(&P, P.zero), SW_CELLS, pv, g_sw_xi[2 * n], g_sw_xi[2 * n + 1], (qaws_scalar)su[n],
-			(qaws_scalar)sv[n], adj[n].u, adj[n].v, adj[n].position, out);
+		qaws_patch_cdf_multipliers(out, pv, SW_ARGS(&P, P.zero), SW_CELLS, g_sw_xi[2 * n], g_sw_xi[2 * n + 1],
+			(qaws_scalar)su[n], (qaws_scalar)sv[n], adj[n].u, adj[n].v, adj[n].position);
 		lam[n] = out[0];
 		mu[n] = out[1];
 		ok_x &= diff_close(out[2], xadj[2 * n], tol) && diff_close(out[3], xadj[2 * n + 1], tol);
@@ -175,7 +175,7 @@ static void test_surface_sampling_core(void)
 				{
 					qaws_scalar xw[2];
 					double len = su[n] - uk;
-					qaws_gauss8(q, xw);
+					qaws_gauss8(xw, q);
 					acc = qaws_v3_add(acc, qaws_patch_line_adjoint_cp(SW_ARGS(&P, P.zero), SW_CELLS, (qaws_scalar)(uk + 0.5 * (1 + xw[0]) * len), 1,
 						i, j, (qaws_scalar)(-lam[n] * 0.5 * xw[1] * len)));
 				}
@@ -186,7 +186,7 @@ static void test_surface_sampling_core(void)
 				{
 					qaws_scalar xw[2];
 					double hu = 1.0 / SW_CELLS;
-					qaws_gauss8(q, xw);
+					qaws_gauss8(xw, q);
 					acc = qaws_v3_add(acc, qaws_patch_line_adjoint_cp(SW_ARGS(&P, P.zero), SW_CELLS, (qaws_scalar)(hu * (c + 0.5 + 0.5 * xw[0])), 1,
 						i, j, (qaws_scalar)(cellw[c] * 0.5 * hu * xw[1])));
 				}

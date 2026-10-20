@@ -324,7 +324,7 @@ static unsigned int o64_strip(int64_t const* in, unsigned int n, int closed, int
 	return m;
 }
 
-qaws_status qaws_offset64_execute(qaws_offset64_desc const* d, qaws_clip64_result** out)
+qaws_status qaws_offset64_execute(qaws_clip64_result** out, qaws_offset64_desc const* d)
 {
 	o64_ctx c;
 	unsigned int g, i, total = 0;
@@ -482,7 +482,7 @@ qaws_status qaws_offset64_execute(qaws_offset64_desc const* d, qaws_clip64_resul
 			cd.fill_rule = first_reversed ? QAWS_FILL_NEGATIVE : QAWS_FILL_POSITIVE;
 			cd.flags = (d->flags & QAWS_CLIP_PRESERVE_COLLINEAR)
 				| (((d->flags & QAWS_CLIP_REVERSE_SOLUTION) != 0) != (first_reversed != 0) ? QAWS_CLIP_REVERSE_SOLUTION : 0u);
-			st = qaws_clip64_execute(&cd, out);
+			st = qaws_clip64_execute(out, &cd);
 			qaws_internal_free(paths);
 		}
 	}
@@ -498,8 +498,8 @@ qaws_status qaws_offset64_execute(qaws_offset64_desc const* d, qaws_clip64_resul
 	return st;
 }
 
-qaws_status qaws_offset64_paths(qaws_path64 const* paths, unsigned int path_count, double delta,
-	qaws_join_type join_type, qaws_end_type end_type, qaws_clip64_result** out)
+qaws_status qaws_offset64_paths(qaws_clip64_result** out, qaws_path64 const* paths, unsigned int path_count,
+	double delta, qaws_join_type join_type, qaws_end_type end_type)
 {
 	qaws_offset64_group g;
 	qaws_offset64_desc d;
@@ -511,5 +511,5 @@ qaws_status qaws_offset64_paths(qaws_path64 const* paths, unsigned int path_coun
 	d.groups = &g;
 	d.group_count = 1;
 	d.delta = delta;
-	return qaws_offset64_execute(&d, out);
+	return qaws_offset64_execute(out, &d);
 }

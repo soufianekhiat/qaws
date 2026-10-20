@@ -15,7 +15,7 @@ qaws_surface* qaws_internal_surface_alloc_ex(
 	/* a custom allocator is kept by value right after the surface (see qaws_internal_curve_alloc_ex) */
 	int custom = allocator && allocator->alloc;
 	size_t at = (sizeof(qaws_surface) + sizeof(void*) - 1) / sizeof(void*) * sizeof(void*);
-	qaws_surface* s = (qaws_surface*)qaws_internal_alloc(allocator, at + (custom ? sizeof(qaws_allocator) : 0));
+	qaws_surface* s = (qaws_surface*)qaws_internal_alloc(at + (custom ? sizeof(qaws_allocator) : 0), allocator);
 	if (!s) return NULL;
 	s->kind = kind;
 	s->u_degree = u_degree;
@@ -61,15 +61,15 @@ void qaws_internal_surface_free(qaws_surface* surface)
 	{
 		if (surface->vtable && surface->vtable->destroy_impl && surface->impl)
 			surface->vtable->destroy_impl(surface->impl, surface->allocator);
-		qaws_internal_dealloc(surface->allocator, surface);
+		qaws_internal_dealloc(surface, surface->allocator);
 	}
 }
 
 unsigned int qaws_internal_surface_uniform_knots(
-	unsigned int degree,
-	unsigned int num_cp,
 	qaws_scalar* out_knots,
-	unsigned int capacity)
+	unsigned int capacity,
+	unsigned int degree,
+	unsigned int num_cp)
 {
 	unsigned int knot_count = num_cp + degree + 1;
 	unsigned int i;
@@ -88,9 +88,9 @@ unsigned int qaws_internal_surface_uniform_knots(
 }
 
 void qaws_internal_surface_catmull_rom_blend(
+	qaws_vec3* out_pos, qaws_vec3* out_deriv,
 	qaws_vec3 const* pts, qaws_scalar const* params,
-	unsigned int n_pts, qaws_scalar t,
-	qaws_vec3* out_pos, qaws_vec3* out_deriv)
+	unsigned int n_pts, qaws_scalar t)
 {
 	unsigned int seg;
 	unsigned int i0, i1, i2, i3;
@@ -216,10 +216,10 @@ void qaws_internal_surface_catmull_rom_blend(
 }
 
 unsigned int qaws_internal_catmull_rom_weights(
+	unsigned int* out_index,
 	qaws_scalar const* params,
 	unsigned int n_pts,
 	qaws_scalar t,
-	unsigned int* out_index,
 	qaws_scalar (*out_w)[4])
 {
 	unsigned int seg = 0, i0, i1, i2, i3, r, k;

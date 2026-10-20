@@ -73,15 +73,15 @@ typedef struct qaws_stack_2d
 } qaws_stack_2d;
 
 /* The region of a stack at height z (nothing outside its levels). */
-qaws_status qaws_stack_section_2d(qaws_stack_2d const* stack, qaws_scalar z, qaws_clip_result** out_result);
+qaws_status qaws_stack_section_2d(qaws_clip_result** out_result, qaws_stack_2d const* stack, qaws_scalar z);
 
 /* A Boolean of two stacks: one level at every height either stack has a
    level at (sorted, repeats once), each the clip type of the two sections
    there, solved level by level (in parallel through the executor). */
 typedef struct qaws_stack_result qaws_stack_result;
 
-qaws_status qaws_stack_boolean_2d(qaws_clip_type clip_type, qaws_stack_2d const* a, qaws_stack_2d const* b,
-	qaws_batch_executor const* executor, qaws_stack_result** out_result);
+qaws_status qaws_stack_boolean_2d(qaws_stack_result** out_result, qaws_stack_2d const* a, qaws_stack_2d const* b,
+	qaws_clip_type clip_type, qaws_batch_executor const* executor);
 void qaws_stack_result_destroy(qaws_stack_result* result);
 unsigned int qaws_stack_result_get_level_count(qaws_stack_result const* result);
 qaws_scalar qaws_stack_result_get_z(qaws_stack_result const* result, unsigned int level);
@@ -114,6 +114,6 @@ typedef struct qaws_stack_mesh_desc
 	qaws_batch_executor const* executor;   /* optional: the sections in parallel */
 } qaws_stack_mesh_desc;
 
-qaws_status qaws_stack_mesh_3d(qaws_stack_mesh_desc const* desc, qaws_mesh_3d** out_mesh);
+qaws_status qaws_stack_mesh_3d(qaws_mesh_3d** out_mesh, qaws_stack_mesh_desc const* desc);
 
 #endif /* QAWS_STACK_H */

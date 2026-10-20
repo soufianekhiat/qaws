@@ -41,7 +41,7 @@ static void test_svg_circle(void)
 		desc.is_closed = 0;
 
 		qaws_curve* curve = NULL;
-		qaws_status s = qaws_curve_create_nurbs(&desc, &curve);
+		qaws_status s = qaws_curve_create_nurbs(&curve, &desc);
 		TEST_ASSERT_STATUS(s);
 
 		qaws_vec2 buf[SVG_SAMPLES];
@@ -129,7 +129,7 @@ static void test_svg_lemniscate(void)
 		desc.derivative_count = 3;
 
 		qaws_curve* curve = NULL;
-		qaws_status s = qaws_curve_create_hermite(&desc, &curve);
+		qaws_status s = qaws_curve_create_hermite(&curve, &desc);
 		TEST_ASSERT_STATUS(s);
 
 		qaws_vec2 buf[SVG_SAMPLES];
@@ -161,7 +161,7 @@ static void test_svg_lemniscate(void)
 		desc.derivative_count = 3;
 
 		qaws_curve* curve = NULL;
-		qaws_status s = qaws_curve_create_hermite(&desc, &curve);
+		qaws_status s = qaws_curve_create_hermite(&curve, &desc);
 		TEST_ASSERT_STATUS(s);
 
 		qaws_vec2 buf[SVG_SAMPLES];
@@ -195,7 +195,7 @@ static void test_svg_bezier_s(void)
 	desc.control_point_count = 4;
 
 	qaws_curve* curve = NULL;
-	qaws_status s = qaws_curve_create_bezier(&desc, &curve);
+	qaws_status s = qaws_curve_create_bezier(&curve, &desc);
 	TEST_ASSERT_STATUS(s);
 
 	qaws_vec2 buf[SVG_SAMPLES];
@@ -245,7 +245,7 @@ static void test_svg_catmull_rom_wave(void)
 	desc.closed = 0;
 
 	qaws_curve* curve = NULL;
-	qaws_status s = qaws_curve_create_catmull_rom(&desc, &curve);
+	qaws_status s = qaws_curve_create_catmull_rom(&curve, &desc);
 	TEST_ASSERT_STATUS(s);
 
 	qaws_vec2 buf[SVG_SAMPLES];
@@ -289,7 +289,7 @@ static void test_svg_bspline(void)
 	desc.is_closed = 0;
 
 	qaws_curve* curve = NULL;
-	qaws_status s = qaws_curve_create_bspline(&desc, &curve);
+	qaws_status s = qaws_curve_create_bspline(&curve, &desc);
 	TEST_ASSERT_STATUS(s);
 
 	qaws_vec2 buf[SVG_SAMPLES];
@@ -344,7 +344,7 @@ static void test_svg_nurbs_ellipse(void)
 		desc.is_closed = 0;
 
 		qaws_curve* curve = NULL;
-		qaws_status s = qaws_curve_create_nurbs(&desc, &curve);
+		qaws_status s = qaws_curve_create_nurbs(&curve, &desc);
 		TEST_ASSERT_STATUS(s);
 
 		qaws_vec2 buf[SVG_SAMPLES];
@@ -395,7 +395,7 @@ static void test_svg_hermite_figure8(void)
 	desc.derivative_count = 5;
 
 	qaws_curve* curve = NULL;
-	qaws_status s = qaws_curve_create_hermite(&desc, &curve);
+	qaws_status s = qaws_curve_create_hermite(&curve, &desc);
 	TEST_ASSERT_STATUS(s);
 
 	qaws_vec2 buf[SVG_SAMPLES];
@@ -456,7 +456,7 @@ static void test_svg_all_families(void)
 		desc.control_point_count = 4;
 
 		qaws_curve* curve = NULL;
-		qaws_curve_create_bezier(&desc, &curve);
+		qaws_curve_create_bezier(&curve, &desc);
 		n = svg_sample_curve(curve, buf, SVG_SAMPLES);
 		svg_polyline(&svg, buf, n, "#ff6188", (qaws_scalar)2);
 		qaws_curve_destroy(curve);
@@ -475,7 +475,7 @@ static void test_svg_all_families(void)
 		desc.derivative_count = 2;
 
 		qaws_curve* curve = NULL;
-		qaws_curve_create_hermite(&desc, &curve);
+		qaws_curve_create_hermite(&curve, &desc);
 		n = svg_sample_curve(curve, buf, SVG_SAMPLES);
 		svg_polyline(&svg, buf, n, "#f5a623", (qaws_scalar)2);
 		qaws_curve_destroy(curve);
@@ -495,7 +495,7 @@ static void test_svg_all_families(void)
 		desc.is_closed = 0;
 
 		qaws_curve* curve = NULL;
-		qaws_curve_create_bspline(&desc, &curve);
+		qaws_curve_create_bspline(&curve, &desc);
 		n = svg_sample_curve(curve, buf, SVG_SAMPLES);
 		svg_polyline(&svg, buf, n, "#78dce8", (qaws_scalar)2);
 		qaws_curve_destroy(curve);
@@ -527,7 +527,7 @@ static void test_svg_yuksel_bezier(void)
 	desc.closed = 0;
 
 	qaws_curve* curve = NULL;
-	qaws_curve_create_yuksel(&desc, &curve);
+	qaws_curve_create_yuksel(&curve, &desc);
 
 	svg_writer svg;
 	if (!svg_open(&svg, SVG_OUTPUT_DIR "/25_yuksel_bezier.svg",
@@ -586,7 +586,7 @@ static void test_svg_yuksel_modes(void)
 		desc.closed = 1;
 
 		qaws_curve* curve = NULL;
-		if (qaws_curve_create_yuksel(&desc, &curve) == QAWS_STATUS_OK) {
+		if (qaws_curve_create_yuksel(&curve, &desc) == QAWS_STATUS_OK) {
 			qaws_vec2 samples[SVG_SAMPLES];
 			unsigned int count = svg_sample_curve(curve, samples, SVG_SAMPLES);
 			svg_polyline(&svg, samples, count, colors[m], (qaws_scalar)1.5);
@@ -629,7 +629,7 @@ static void test_svg_yuksel_vs_catmull(void)
 		desc.closed = 0;
 
 		qaws_curve* curve = NULL;
-		if (qaws_curve_create_yuksel(&desc, &curve) == QAWS_STATUS_OK) {
+		if (qaws_curve_create_yuksel(&curve, &desc) == QAWS_STATUS_OK) {
 			qaws_vec2 samples[SVG_SAMPLES];
 			unsigned int count = svg_sample_curve(curve, samples, SVG_SAMPLES);
 			svg_polyline(&svg, samples, count, "#e94560", (qaws_scalar)2);
@@ -650,7 +650,7 @@ static void test_svg_yuksel_vs_catmull(void)
 		desc.closed = 0;
 
 		qaws_curve* curve = NULL;
-		if (qaws_curve_create_catmull_rom(&desc, &curve) == QAWS_STATUS_OK) {
+		if (qaws_curve_create_catmull_rom(&curve, &desc) == QAWS_STATUS_OK) {
 			qaws_vec2 samples[SVG_SAMPLES];
 			unsigned int count = svg_sample_curve(curve, samples, SVG_SAMPLES);
 			svg_polyline(&svg, samples, count, "#50fa7b", (qaws_scalar)2);

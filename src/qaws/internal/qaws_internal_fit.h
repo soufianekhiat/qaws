@@ -18,28 +18,28 @@
  */
 
 qaws_status qaws_internal_fit_bspline(
-	qaws_dimension dimension,
-	unsigned int degree,
+	qaws_curve** out_curve,
 	qaws_scalar const* sample_params,
 	qaws_scalar const* sample_coords,
+	qaws_dimension dimension,
 	unsigned int sample_count,
 	unsigned int control_point_count,
-	qaws_curve** out_curve);
+	unsigned int degree);
 
 /*
  * Fit a B-spline through sample points with specified parameter range.
  * Same as above but the knot vector endpoints are set to [t_min, t_max].
  */
 qaws_status qaws_internal_fit_bspline_range(
-	qaws_dimension dimension,
-	unsigned int degree,
+	qaws_curve** out_curve,
 	qaws_scalar const* sample_params,
 	qaws_scalar const* sample_coords,
+	qaws_dimension dimension,
 	unsigned int sample_count,
 	unsigned int control_point_count,
+	unsigned int degree,
 	qaws_scalar t_min,
-	qaws_scalar t_max,
-	qaws_curve** out_curve);
+	qaws_scalar t_max);
 
 /* The same, every allocation (scratch and the curve) through the allocator (NULL: malloc) */
 qaws_status qaws_internal_fit_bspline_ex(

@@ -57,7 +57,7 @@ static qaws_curve* pz_fit(qaws_vec2 const* p, qaws_parameterization param)
 	d.degree = 3;
 	d.control_point_count = PZ_M;
 	d.parameterization = param;
-	return qaws_curve_fit_bspline(&d, &c) == QAWS_STATUS_OK ? c : NULL;
+	return qaws_curve_fit_bspline(&c, &d) == QAWS_STATUS_OK ? c : NULL;
 }
 
 /* the largest distance from the curve at parameters t to the points */
@@ -68,7 +68,7 @@ static double pz_miss(qaws_curve const* c, qaws_vec2 const* p, double const* t)
 	for (i = 0; i < PZ_M; i++)
 	{
 		qaws_eval_result_2d e;
-		qaws_curve_evaluate_2d(c, (qaws_scalar)t[i], QAWS_EVAL_FLAG_POSITION, &e);
+		qaws_curve_evaluate_2d(&e, c, (qaws_scalar)t[i], QAWS_EVAL_FLAG_POSITION);
 		worst = fmax(worst, hypot((double)e.position.x - p[i].x, (double)e.position.y - p[i].y));
 	}
 	return worst;
@@ -109,15 +109,15 @@ static void test_default_and_refusal(void)
 	pz_points(p);
 	a = pz_fit(p, QAWS_PARAMETERIZATION_DEFAULT);
 	b = pz_fit(p, QAWS_PARAMETERIZATION_CHORDAL);
-	qaws_curve_read_field(a, QAWS_FIELD_CONTROL_POINTS, ca, PZ_M * 2, &got);
-	qaws_curve_read_field(b, QAWS_FIELD_CONTROL_POINTS, cb, PZ_M * 2, &got);
+	qaws_curve_read_field(ca, &got, a, PZ_M * 2, QAWS_FIELD_CONTROL_POINTS);
+	qaws_curve_read_field(cb, &got, b, PZ_M * 2, QAWS_FIELD_CONTROL_POINTS);
 	TEST_ASSERT(memcmp(ca, cb, sizeof ca) == 0, "DEFAULT is chord lengths, to the bit");
 	qaws_curve_destroy(a);
 	qaws_curve_destroy(b);
 	memset(&d, 0, sizeof d);
 	d.dimension = QAWS_DIMENSION_2D; d.data_points = p; d.data_point_count = PZ_M; d.degree = 3; d.control_point_count = PZ_M;
 	d.parameterization = (qaws_parameterization)7;
-	TEST_ASSERT(qaws_curve_fit_bspline(&d, &c) == QAWS_STATUS_INVALID_ARGUMENT, "an unknown parameterization refused");
+	TEST_ASSERT(qaws_curve_fit_bspline(&c, &d) == QAWS_STATUS_INVALID_ARGUMENT, "an unknown parameterization refused");
 }
 
 /* control points of the interpolating fit of the points moved by h along dir */
@@ -132,7 +132,7 @@ static void pz_fit_at(qaws_vec2 const* p, double const* dir, double h, qaws_para
 		q[i].y = (qaws_scalar)(p[i].y + h * dir[2 * i + 1]);
 	}
 	c = pz_fit(q, param);
-	qaws_curve_read_field(c, QAWS_FIELD_CONTROL_POINTS, cps, PZ_M * 2, &got);
+	qaws_curve_read_field(cps, &got, c, PZ_M * 2, QAWS_FIELD_CONTROL_POINTS);
 	qaws_curve_destroy(c);
 }
 
@@ -161,15 +161,15 @@ static void test_interpolation_map(void)
 		memset(&d, 0, sizeof d);
 		d.dimension = QAWS_DIMENSION_2D; d.data_points = p; d.data_point_count = PZ_M; d.degree = 3; d.control_point_count = PZ_M;
 		d.parameterization = param;
-		TEST_ASSERT(qaws_curve_fit_bspline_diff(&d, &c, &map) == QAWS_STATUS_OK, "interpolating fit with its map");
-		in_f = qaws_field_view_make(QAWS_FIELD_POINTS, vdir, PZ_M, 2);
+		TEST_ASSERT(qaws_curve_fit_bspline_diff(&c, &map, &d) == QAWS_STATUS_OK, "interpolating fit with its map");
+		in_f = qaws_field_view_make(vdir, PZ_M, QAWS_FIELD_POINTS, 2);
 		in_v.fields = &in_f; in_v.field_count = 1; in_v.children = NULL; in_v.child_count = 0;
-		out_f[0] = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, tq, PZ_M, 2);
-		out_f[1] = qaws_field_view_make(QAWS_FIELD_KNOTS, tk, PZ_M + 4, 1);
+		out_f[0] = qaws_field_view_make(tq, PZ_M, QAWS_FIELD_CONTROL_POINTS, 2);
+		out_f[1] = qaws_field_view_make(tk, PZ_M + 4, QAWS_FIELD_KNOTS, 1);
 		out_v.fields = out_f; out_v.field_count = 2; out_v.children = NULL; out_v.child_count = 0;
 		ins[0] = &in_v;
 		outs[0] = &out_v;
-		TEST_ASSERT(qaws_diff_map_tangent(map, NULL, ins, 1, outs, 1) == QAWS_STATUS_OK, "its tangent");
+		TEST_ASSERT(qaws_diff_map_tangent(outs, map, ins, 1, 1, NULL) == QAWS_STATUS_OK, "its tangent");
 		/* double: central differences with h = 1e-6. float: rounding eps |P| / h rules, so fourth-order differences
 		   (truncation h^4) with h = 0.01, a tenth of the shortest chord so the centripetal square roots stay smooth */
 		if (sizeof(qaws_scalar) == sizeof(double))

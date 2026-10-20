@@ -42,10 +42,10 @@ static qaws_surface* sxt_revolve(double cx, double r, double a0, double a1, qaws
 	g.center[0] = (qaws_scalar)cx; g.radius = (qaws_scalar)r; g.angle_start = (qaws_scalar)a0; g.angle_end = (qaws_scalar)a1;
 	memset(&ad, 0, sizeof(ad));
 	ad.dimension = QAWS_DIMENSION_2D; ad.segments = &g; ad.segment_count = 1;
-	qaws_curve_create_arc(&ad, prof);
+	qaws_curve_create_arc(prof, &ad);
 	memset(&rd, 0, sizeof(rd));
 	rd.profile = *prof; rd.axis_direction.z = 1;
-	qaws_surface_create_revolution(&rd, &s);
+	qaws_surface_create_revolution(&s, &rd);
 	return s;
 }
 
@@ -54,10 +54,10 @@ static double sxt_area(qaws_surface const* s, int exact, qaws_clip_type type, qa
 {
 	qaws_surface_region* r = NULL;
 	qaws_scalar area = 0;
-	*st = exact ? qaws_surface_clip_exact(s, type, QAWS_FILL_NON_ZERO, a, na, b, nb, NULL, &r)
-		: qaws_surface_clip(s, type, QAWS_FILL_NON_ZERO, a, na, b, nb, &r);
+	*st = exact ? qaws_surface_clip_exact(&r, s, a, b, na, nb, NULL, type, QAWS_FILL_NON_ZERO)
+		: qaws_surface_clip(&r, s, a, b, na, nb, type, QAWS_FILL_NON_ZERO);
 	if (*st == QAWS_STATUS_OK)
-		*st = qaws_surface_region_get_area(r, &area);
+		*st = qaws_surface_region_get_area(&area, r);
 	if (loops)
 		*loops = r ? qaws_surface_region_get_path_count(r) : 0;
 	qaws_surface_region_destroy(r);
@@ -85,8 +85,8 @@ static void sxt_square_make(sxt_square* q, qaws_surface const* s, double u0, dou
 		memset(&bz, 0, sizeof(bz));
 		bz.dimension = QAWS_DIMENSION_2D; bz.degree = 1; bz.control_points = cp; bz.control_point_count = 2;
 		q->k[i] = NULL; q->c[i] = NULL;
-		qaws_curve_create_bezier(&bz, &q->k[i]);
-		qaws_surface_curve_create_uv(s, q->k[i], &q->c[i]);
+		qaws_curve_create_bezier(&q->k[i], &bz);
+		qaws_surface_curve_create_uv(&q->c[i], s, q->k[i]);
 		q->pc[i] = q->c[i];
 	}
 	q->path.curves = q->pc; q->path.curve_count = 4; q->path.closed = 1;
@@ -110,9 +110,9 @@ static void test_against_float(void)
 	qaws_status st, bad = QAWS_STATUS_OK;
 	unsigned int k;
 	char msg[300];
-	qaws_surface_curve_create_geodesic_arc(s, sxt_uv(0.3, 0.55), (qaws_scalar)0.6, 0, (qaws_scalar)(2 * SXT_PI), 0, &ca);
-	qaws_surface_curve_create_geodesic_arc(s, sxt_uv(0.38, 0.5), (qaws_scalar)0.5, 0, (qaws_scalar)(2 * SXT_PI), 0, &cb);
-	qaws_surface_curve_create_geodesic_arc(s, sxt_uv(1.3, 0.5), (qaws_scalar)0.5, 0, (qaws_scalar)(2 * SXT_PI), 0, &cs);
+	qaws_surface_curve_create_geodesic_arc(&ca, s, sxt_uv(0.3, 0.55), (qaws_scalar)0.6, 0, (qaws_scalar)(2 * SXT_PI), 0);
+	qaws_surface_curve_create_geodesic_arc(&cb, s, sxt_uv(0.38, 0.5), (qaws_scalar)0.5, 0, (qaws_scalar)(2 * SXT_PI), 0);
+	qaws_surface_curve_create_geodesic_arc(&cs, s, sxt_uv(1.3, 0.5), (qaws_scalar)0.5, 0, (qaws_scalar)(2 * SXT_PI), 0);
 	pa[0] = ca; pb[0] = cb; ps[0] = cs;
 	A.curves = pa; A.curve_count = 1; A.closed = 1;
 	B.curves = pb; B.curve_count = 1; B.closed = 1;
@@ -138,7 +138,7 @@ static void test_against_float(void)
 		qaws_surface_curve const* pt[1];
 		qaws_surface_path T;
 		double af, ae;
-		qaws_surface_curve_create_geodesic_arc(tor, sxt_uv(0.4, 0.3), (qaws_scalar)0.3, 0, (qaws_scalar)(2 * SXT_PI), 0, &ct);
+		qaws_surface_curve_create_geodesic_arc(&ct, tor, sxt_uv(0.4, 0.3), (qaws_scalar)0.3, 0, (qaws_scalar)(2 * SXT_PI), 0);
 		pt[0] = ct;
 		T.curves = pt; T.curve_count = 1; T.closed = 1;
 		af = sxt_area(tor, 0, QAWS_CLIP_NONE, &T, 1, NULL, 0, NULL, &st);
@@ -168,8 +168,8 @@ static void test_against_float(void)
 			qaws_surface_path X, Y;
 			double af, ae, uf, ue;
 			qaws_status sf, se, tf, te;
-			qaws_surface_curve_create_geodesic_arc(s, sxt_uv(cs[z][0], cs[z][1]), (qaws_scalar)cs[z][2], 0, (qaws_scalar)(2 * SXT_PI), 0, &cx);
-			qaws_surface_curve_create_geodesic_arc(s, sxt_uv(cs[z][0] + 0.06, cs[z][1] + 0.03), (qaws_scalar)cs[z][2], 0, (qaws_scalar)(2 * SXT_PI), 0, &cy);
+			qaws_surface_curve_create_geodesic_arc(&cx, s, sxt_uv(cs[z][0], cs[z][1]), (qaws_scalar)cs[z][2], 0, (qaws_scalar)(2 * SXT_PI), 0);
+			qaws_surface_curve_create_geodesic_arc(&cy, s, sxt_uv(cs[z][0] + 0.06, cs[z][1] + 0.03), (qaws_scalar)cs[z][2], 0, (qaws_scalar)(2 * SXT_PI), 0);
 			px[0] = cx; py[0] = cy;
 			X.curves = px; X.curve_count = 1; X.closed = 1;
 			Y.curves = py; Y.curve_count = 1; Y.closed = 1;

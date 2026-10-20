@@ -435,7 +435,7 @@ static unsigned int* rp_weld(rp_work* w, unsigned char const* used, double tol)
 	c.id = id;
 	c.uf = uf;
 	c.tol2 = tol * tol;
-	if (n > 1 && qaws_internal_broadphase(box, n, 3, NULL, rp_weld_visit, &c, NULL) != QAWS_STATUS_OK)
+	if (n > 1 && qaws_internal_broadphase(NULL, box, n, 3, NULL, rp_weld_visit, &c) != QAWS_STATUS_OK)
 		goto fail;
 	w->r->welded_vertices += rp_merge(w, uf);
 	qaws_internal_free(id);
@@ -795,7 +795,7 @@ static void rp_stitch(rp_work* w, double tol)
 		c.bs = bs;
 		c.bd = bd;
 		c.tol = tol;
-		if (qaws_internal_broadphase(box, nbv + nbe, 3, rp_stitch_accept, rp_stitch_visit, &c, NULL) != QAWS_STATUS_OK)
+		if (qaws_internal_broadphase(NULL, box, nbv + nbe, 3, rp_stitch_accept, rp_stitch_visit, &c) != QAWS_STATUS_OK)
 			goto oom;
 		for (i = 0; i < nbv; i++)
 			if (best[i] != HM_NONE && !welded[bv[i]])

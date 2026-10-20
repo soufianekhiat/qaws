@@ -31,10 +31,10 @@ qaws_diff_class qaws_surface_get_diff_class(qaws_surface const* surface)
 }
 
 qaws_status qaws_surface_describe_fields(
-	qaws_surface const* surface,
 	qaws_field_desc* out_fields,
-	unsigned int capacity,
-	unsigned int* out_count)
+	unsigned int* out_count,
+	qaws_surface const* surface,
+	unsigned int capacity)
 {
 	qaws_surface_diff_vtable const* d = surface_diff(surface);
 	unsigned int n;
@@ -49,11 +49,11 @@ qaws_status qaws_surface_describe_fields(
 }
 
 qaws_status qaws_surface_read_field(
-	qaws_surface const* surface,
-	qaws_diff_field field,
 	qaws_scalar* out_values,
+	unsigned int* out_scalar_count,
+	qaws_surface const* surface,
 	unsigned int capacity,
-	unsigned int* out_scalar_count)
+	qaws_diff_field field)
 {
 	qaws_surface_diff_vtable const* d = surface_diff(surface);
 	qaws_scalar const* data = NULL;
@@ -216,7 +216,7 @@ static void surface_partial_tangent(
 		{
 			qaws_scalar w = wu * sp->v_weights[b][j];
 			qaws_scalar p[3];
-			qaws_internal_view_read(view, support_element(sp, i, j), 3, p);
+			qaws_internal_view_read(p, view, support_element(sp, i, j), 3);
 			out[0] += w * p[0];
 			out[1] += w * p[1];
 			out[2] += w * p[2];
@@ -253,7 +253,7 @@ static int surface_field_differentiable(qaws_surface const* surface, qaws_diff_f
 {
 	qaws_field_desc fields[8];
 	unsigned int n = 0, i;
-	if (qaws_surface_describe_fields(surface, fields, 8, &n) != QAWS_STATUS_OK)
+	if (qaws_surface_describe_fields(fields, &n, surface, 8) != QAWS_STATUS_OK)
 		return 0;
 	for (i = 0; i < n && i < 8; i++)
 		if (fields[i].field == field)
@@ -311,20 +311,20 @@ static qaws_status surface_knot_rows_make(qaws_surface const* surface, surface_s
 	for (i = 0; i < 2 * f.ud; i++)
 	{
 		ud[i] = QAWS_ZERO;
-		if (ukv) qaws_internal_view_read(ukv, f.uspan - f.ud + 1 + i, 1, &ud[i]);
+		if (ukv) qaws_internal_view_read(&ud[i], ukv, f.uspan - f.ud + 1 + i, 1);
 		any |= ud[i] != QAWS_ZERO;
 	}
 	for (i = 0; i < 2 * f.vd; i++)
 	{
 		vd[i] = QAWS_ZERO;
-		if (vkv) qaws_internal_view_read(vkv, f.vspan - f.vd + 1 + i, 1, &vd[i]);
+		if (vkv) qaws_internal_view_read(&vd[i], vkv, f.vspan - f.vd + 1 + i, 1);
 		any |= vd[i] != QAWS_ZERO;
 	}
 	if (!any)
 		return QAWS_STATUS_OK;
 	clamp_uv(surface, &u, &v);
-	qaws_internal_bspline_basis_derivs_knot(f.uk, f.ud, f.uspan, u, ud, order, rows->u);
-	qaws_internal_bspline_basis_derivs_knot(f.vk, f.vd, f.vspan, v, vd, order, rows->v);
+	qaws_internal_bspline_basis_derivs_knot(rows->u, f.uk, ud, f.ud, f.uspan, u, order);
+	qaws_internal_bspline_basis_derivs_knot(rows->v, f.vk, vd, f.vd, f.vspan, v, order);
 	rows->us = f.ud + 1;
 	rows->vs = f.vd + 1;
 	rows->active = 1;
@@ -377,7 +377,7 @@ static void surface_knot_tangent(surface_sample const* s, surface_knot_rows cons
 					qaws_scalar const* p = s->primal + (size_t)e * 3;
 					qaws_scalar pd[3] = { 0, 0, 0 };
 					qaws_dual1 n = knot_weight(r, a, i, b, j);
-					if (pview) qaws_internal_view_read(pview, e, 3, pd);
+					if (pview) qaws_internal_view_read(pd, pview, e, 3);
 					acc = qaws_v3_add(acc, qaws_v3(n.tt * p[0] + QAWS_LITERAL(2.0) * n.t * pd[0],
 					                               n.tt * p[1] + QAWS_LITERAL(2.0) * n.t * pd[1],
 					                               n.tt * p[2] + QAWS_LITERAL(2.0) * n.t * pd[2]));
@@ -424,9 +424,9 @@ static qaws_status surface_knot_adjoint(qaws_surface const* surface, surface_sam
 				return QAWS_STATUS_INTERNAL_ERROR;
 			kdot[q] = QAWS_ONE;
 			if (dir == 0)
-				qaws_internal_bspline_basis_derivs_knot(f.uk, f.ud, f.uspan, u, kdot, order, rows);
+				qaws_internal_bspline_basis_derivs_knot(rows, f.uk, kdot, f.ud, f.uspan, u, order);
 			else
-				qaws_internal_bspline_basis_derivs_knot(f.vk, f.vd, f.vspan, v, kdot, order, rows);
+				qaws_internal_bspline_basis_derivs_knot(rows, f.vk, kdot, f.vd, f.vspan, v, order);
 			kdot[q] = QAWS_ZERO;
 			for (ch = 0; ch < QAWS_SURFACE_JET_COUNT; ch++)
 			{
@@ -505,8 +505,8 @@ static void surface_hom(
 			qaws_scalar w = s->weights[e];
 			qaws_scalar const* p = s->primal + (size_t)e * 3;
 			qaws_scalar pd[3] = { 0, 0, 0 }, wd = 0;
-			if (pv) qaws_internal_view_read(pv, e, 3, pd);
-			if (wv) qaws_internal_view_read(wv, e, 1, &wd);
+			if (pv) qaws_internal_view_read(pd, pv, e, 3);
+			if (wv) qaws_internal_view_read(&wd, wv, e, 1);
 			out->W += n * w;
 			out->Wd += n * wd;
 			out->A = qaws_v3_add(out->A, qaws_v3(n * w * p[0], n * w * p[1], n * w * p[2]));
@@ -756,11 +756,11 @@ static void report_surface(
 	unsigned int index)
 {
 	qaws_surface_diff_vtable const* d = surface_diff(surface);
-	qaws_internal_diff_report_note(ctx,
-		has_coordinate ? d->diff_class : QAWS_DIFF_SMOOTH,
+	qaws_internal_diff_report_note(has_coordinate ? d->diff_class : QAWS_DIFF_SMOOTH,
 		(has_coordinate && s->support.on_boundary) ? QAWS_DIFF_AT_BOUNDARY : QAWS_DIFF_VALID,
 		(has_coordinate && d->diff_class == QAWS_DIFF_PIECEWISE_SMOOTH) ? (unsigned int)QAWS_FREEZE_SPAN : 0u,
-		index);
+		index,
+		ctx);
 }
 
 static qaws_status surface_tangent_sample(
@@ -868,11 +868,11 @@ static qaws_status surface_tangent_sample(
 /* ------------------------------------------------------------------ */
 
 qaws_status qaws_surface_eval_jet(
+	qaws_surface_jet* out_jet,
 	qaws_surface const* surface,
 	qaws_scalar u,
 	qaws_scalar v,
-	unsigned int channels,
-	qaws_surface_jet* out_jet)
+	unsigned int channels)
 {
 	qaws_surface_diff_vtable const* d = surface_diff(surface);
 	surface_sample s;
@@ -992,25 +992,25 @@ static qaws_status surface_batch_tangent(
 }
 
 qaws_status qaws_surface_eval_batch_tangent(
-	qaws_diff_context const* ctx, qaws_surface const* surface,
-	qaws_scalar const* u, qaws_scalar const* v,
-	qaws_scalar const* u_tangent, qaws_scalar const* v_tangent,
-	unsigned int count, unsigned int channels,
-	qaws_diff_views const* param_tangent,
-	qaws_surface_jet* out_primal, qaws_surface_jet* out_tangent)
+	qaws_surface_jet* out_primal, qaws_surface_jet* out_tangent,
+	qaws_surface const* surface, qaws_scalar const* u,
+	qaws_scalar const* v, qaws_scalar const* u_tangent,
+	qaws_scalar const* v_tangent, qaws_diff_views const* param_tangent,
+	unsigned int count,
+	unsigned int channels, qaws_diff_context const* ctx)
 {
 	return surface_batch_tangent(ctx, surface, u, v, u_tangent, v_tangent, count,
 		channels, param_tangent, out_primal, out_tangent, NULL);
 }
 
 qaws_status qaws_surface_eval_batch_tangent2(
-	qaws_diff_context const* ctx, qaws_surface const* surface,
+	qaws_surface_jet* out_primal, qaws_surface_jet* out_tangent,
+	qaws_surface_jet* out_tangent2, qaws_surface const* surface,
 	qaws_scalar const* u, qaws_scalar const* v,
 	qaws_scalar const* u_tangent, qaws_scalar const* v_tangent,
-	unsigned int count, unsigned int channels,
 	qaws_diff_views const* param_tangent,
-	qaws_surface_jet* out_primal, qaws_surface_jet* out_tangent,
-	qaws_surface_jet* out_tangent2)
+	unsigned int count, unsigned int channels,
+	qaws_diff_context const* ctx)
 {
 	if (!out_tangent2)
 		return QAWS_STATUS_INVALID_ARGUMENT;
@@ -1019,10 +1019,10 @@ qaws_status qaws_surface_eval_batch_tangent2(
 }
 
 qaws_status qaws_surface_eval_tangent(
-	qaws_diff_context const* ctx, qaws_surface const* surface,
-	qaws_scalar u, qaws_scalar v, qaws_scalar u_tangent, qaws_scalar v_tangent,
-	unsigned int channels, qaws_diff_views const* param_tangent,
-	qaws_surface_jet* out_primal, qaws_surface_jet* out_tangent)
+	qaws_surface_jet* out_primal, qaws_surface_jet* out_tangent,
+	qaws_surface const* surface, qaws_diff_views const* param_tangent, qaws_scalar u, qaws_scalar v,
+	qaws_scalar u_tangent, qaws_scalar v_tangent,
+	unsigned int channels, qaws_diff_context const* ctx)
 {
 	return surface_batch_tangent(ctx, surface, &u, &v, &u_tangent, &v_tangent, 1,
 		channels, param_tangent, out_primal, out_tangent, NULL);
@@ -1149,16 +1149,16 @@ static qaws_status surface_collect(
 }
 
 qaws_status qaws_surface_eval_batch_adjoint(
-	qaws_diff_context const* ctx,
+	qaws_diff_views* param_adjoint,
+	qaws_scalar* u_adjoint,
+	qaws_scalar* v_adjoint,
 	qaws_surface const* surface,
 	qaws_scalar const* u,
 	qaws_scalar const* v,
+	qaws_surface_jet const* out_adjoint,
 	unsigned int count,
 	unsigned int channels,
-	qaws_surface_jet const* out_adjoint,
-	qaws_diff_views* param_adjoint,
-	qaws_scalar* u_adjoint,
-	qaws_scalar* v_adjoint)
+	qaws_diff_context const* ctx)
 {
 	surface_adjoint_job job;
 	qaws_status st;
@@ -1201,19 +1201,19 @@ qaws_status qaws_surface_eval_batch_adjoint(
 	job.want_uk = surface_knot_view(surface, param_adjoint, QAWS_FIELD_U_KNOTS) != NULL;
 	job.want_vk = surface_knot_view(surface, param_adjoint, QAWS_FIELD_V_KNOTS) != NULL;
 
-	return qaws_internal_diff_accumulate(ctx, 3, count,
+	return qaws_internal_diff_accumulate(param_adjoint, &job, count,
 		2 * QAWS_DIFF_MAX_SUPPORT * QAWS_DIFF_MAX_SUPPORT + 4 * QAWS_INTERNAL_KNOT_MAX_DEGREE,
-		surface_collect, &job, param_adjoint);
+		3, surface_collect, ctx);
 }
 
 qaws_status qaws_surface_eval_adjoint(
-	qaws_diff_context const* ctx, qaws_surface const* surface,
-	qaws_scalar u, qaws_scalar v, unsigned int channels,
-	qaws_surface_jet const* out_adjoint, qaws_diff_views* param_adjoint,
-	qaws_scalar* u_adjoint, qaws_scalar* v_adjoint)
+	qaws_diff_views* param_adjoint, qaws_scalar* u_adjoint,
+	qaws_scalar* v_adjoint, qaws_surface const* surface, qaws_surface_jet const* out_adjoint,
+	qaws_scalar u, qaws_scalar v,
+	unsigned int channels, qaws_diff_context const* ctx)
 {
-	return qaws_surface_eval_batch_adjoint(ctx, surface, &u, &v, 1, channels,
-		out_adjoint, param_adjoint, u_adjoint, v_adjoint);
+	return qaws_surface_eval_batch_adjoint(param_adjoint, u_adjoint, v_adjoint, surface, &u, &v,
+		out_adjoint, 1, channels, ctx);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1221,11 +1221,11 @@ qaws_status qaws_surface_eval_adjoint(
 /* ------------------------------------------------------------------ */
 
 qaws_status qaws_surface_local_support(
+	qaws_surface_support* out_support,
 	qaws_surface const* surface,
 	qaws_scalar u,
 	qaws_scalar v,
-	unsigned int order,
-	qaws_surface_support* out_support)
+	unsigned int order)
 {
 	qaws_surface_diff_vtable const* d = surface_diff(surface);
 	if (!surface || !out_support)
@@ -1239,16 +1239,16 @@ qaws_status qaws_surface_local_support(
 }
 
 qaws_status qaws_surface_build_support_index(
+	unsigned int* out_offsets,
+	unsigned int* out_samples,
+	unsigned int* out_entry_count,
 	qaws_surface const* surface,
 	qaws_scalar const* u,
 	qaws_scalar const* v,
 	unsigned int count,
-	qaws_diff_field field,
-	unsigned int* out_offsets,
 	unsigned int offset_capacity,
-	unsigned int* out_samples,
 	unsigned int sample_capacity,
-	unsigned int* out_entry_count)
+	qaws_diff_field field)
 {
 	qaws_surface_diff_vtable const* d = surface_diff(surface);
 	qaws_scalar const* data = NULL;
@@ -1275,7 +1275,7 @@ qaws_status qaws_surface_build_support_index(
 		for (s = 0; s < count; s++)
 		{
 			qaws_surface_support sp;
-			st = qaws_surface_local_support(surface, u[s], v[s], 0, &sp);
+			st = qaws_surface_local_support(&sp, surface, u[s], v[s], 0);
 			if (st != QAWS_STATUS_OK)
 				break;
 			if (sp.field != field)
@@ -1303,8 +1303,8 @@ qaws_status qaws_surface_build_support_index(
 			*out_entry_count = total;
 			if (!out_samples || sample_capacity < total)
 				return QAWS_STATUS_BUFFER_TOO_SMALL;
-			cursor = (unsigned int*)qaws_internal_alloc(surface->allocator,
-				qaws_internal_mul2(sizeof(unsigned int), ((size_t)element_count + 1)));
+			cursor = (unsigned int*)qaws_internal_alloc(qaws_internal_mul2(sizeof(unsigned int), ((size_t)element_count + 1)),
+				surface->allocator);
 			if (!cursor)
 				return QAWS_STATUS_ALLOCATION_FAILURE;
 			memcpy(cursor, out_offsets, sizeof(unsigned int) * ((size_t)element_count + 1));
@@ -1312,15 +1312,15 @@ qaws_status qaws_surface_build_support_index(
 	}
 
 	if (cursor)
-		qaws_internal_dealloc(surface->allocator, cursor);
+		qaws_internal_dealloc(cursor, surface->allocator);
 	return st;
 }
 
 qaws_status qaws_surface_diff_children(
-	qaws_surface const* surface,
 	qaws_diff_child* out_children,
-	unsigned int capacity,
-	unsigned int* out_count)
+	unsigned int* out_count,
+	qaws_surface const* surface,
+	unsigned int capacity)
 {
 	qaws_surface_diff_vtable const* d = surface_diff(surface);
 	unsigned int n;

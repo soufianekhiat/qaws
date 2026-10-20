@@ -3,13 +3,13 @@
 #include <stdlib.h>
 #include <string.h>
 
-void* qaws_internal_alloc(qaws_allocator const* allocator, size_t size)
+void* qaws_internal_alloc(size_t size, qaws_allocator const* allocator)
 {
 	return qaws_internal_alloc_from(allocator, size);
 }
 
 /* the block knows its allocator (qaws_internal_memory.h) */
-void qaws_internal_dealloc(qaws_allocator const* allocator, void* ptr)
+void qaws_internal_dealloc(void* ptr, qaws_allocator const* allocator)
 {
 	(void)allocator;
 	qaws_internal_free(ptr);
@@ -17,13 +17,13 @@ void qaws_internal_dealloc(qaws_allocator const* allocator, void* ptr)
 
 void* qaws_internal_scratch(qaws_allocator const* allocator, void* stack, size_t stack_bytes, size_t bytes)
 {
-	return bytes <= stack_bytes ? stack : qaws_internal_alloc(allocator, bytes);
+	return bytes <= stack_bytes ? stack : qaws_internal_alloc(bytes, allocator);
 }
 
 void qaws_internal_scratch_release(qaws_allocator const* allocator, void* stack, void* scratch)
 {
 	if (scratch && scratch != stack)
-		qaws_internal_dealloc(allocator, scratch);
+		qaws_internal_dealloc(scratch, allocator);
 }
 
 void* qaws_internal_calloc(qaws_allocator const* allocator, size_t count, size_t size)
@@ -31,7 +31,7 @@ void* qaws_internal_calloc(qaws_allocator const* allocator, size_t count, size_t
 	void* p;
 	if (size && count > (size_t)-1 / size)
 		return NULL;
-	p = qaws_internal_alloc(allocator, qaws_internal_mul2(count, size));
+	p = qaws_internal_alloc(qaws_internal_mul2(count, size), allocator);
 	if (p)
 		memset(p, 0, count * size);
 	return p;
@@ -49,13 +49,13 @@ qaws_curve* qaws_internal_curve_alloc_ex(
 	/* a custom allocator is kept by value right after the curve: the caller's descriptor may be a short-lived local */
 	int custom = allocator && allocator->alloc;
 	size_t at = (sizeof(qaws_curve) + sizeof(void*) - 1) / sizeof(void*) * sizeof(void*);
-	qaws_curve* curve = (qaws_curve*)qaws_internal_alloc(allocator, at + (custom ? sizeof(qaws_allocator) : 0));
+	qaws_curve* curve = (qaws_curve*)qaws_internal_alloc(at + (custom ? sizeof(qaws_allocator) : 0), allocator);
 	if (!curve) return NULL;
 
 	curve->span_boundaries = (qaws_scalar*)qaws_internal_alloc(
-		allocator, qaws_internal_mul2(((size_t)(span_count + 1)), sizeof(qaws_scalar)));
+		qaws_internal_mul2(((size_t)(span_count + 1)), sizeof(qaws_scalar)), allocator);
 	if (!curve->span_boundaries) {
-		qaws_internal_dealloc(allocator, curve);
+		qaws_internal_dealloc(curve, allocator);
 		return NULL;
 	}
 
@@ -104,8 +104,8 @@ qaws_curve* qaws_internal_curve_alloc(
 void qaws_internal_curve_free(qaws_curve* curve)
 {
 	if (!curve) return;
-	qaws_internal_dealloc(curve->allocator, curve->span_boundaries);
-	qaws_internal_dealloc(curve->allocator, curve);
+	qaws_internal_dealloc(curve->span_boundaries, curve->allocator);
+	qaws_internal_dealloc(curve, curve->allocator);
 }
 
 #include "qaws_internal_kinds.h"
@@ -115,7 +115,7 @@ void qaws_internal_curve_free(qaws_curve* curve)
 static int ends_point(qaws_curve const* curve, qaws_scalar t, double out[3])
 {
 	qaws_scalar local_t;
-	unsigned int span = qaws_internal_find_span(curve, t, &local_t);
+	unsigned int span = qaws_internal_find_span(&local_t, curve, t);
 	out[0] = out[1] = out[2] = 0.0;
 	if (curve->dimension == QAWS_DIMENSION_2D)
 	{

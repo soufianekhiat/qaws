@@ -45,7 +45,7 @@ static qaws_curve* rst_circle(double cx, double cy, double r, int ccw)
 	g.angle_end = ccw ? (qaws_scalar)(2 * RST_PI) : 0;
 	memset(&d, 0, sizeof(d));
 	d.dimension = QAWS_DIMENSION_2D; d.segments = &g; d.segment_count = 1;
-	qaws_curve_create_arc(&d, &c);
+	qaws_curve_create_arc(&c, &d);
 	return c;
 }
 
@@ -58,7 +58,7 @@ static qaws_curve* rst_cubic(double const* xy)
 	for (i = 0; i < 8; i++) p[i] = (qaws_scalar)xy[i];
 	memset(&d, 0, sizeof(d));
 	d.dimension = QAWS_DIMENSION_2D; d.degree = 3; d.control_points = p; d.control_point_count = 4;
-	qaws_curve_create_bezier(&d, &c);
+	qaws_curve_create_bezier(&c, &d);
 	return c;
 }
 
@@ -119,7 +119,7 @@ static void rst_check(qaws_region_sampler const* s, rst_region const* rg)
 	for (i = 0; i < rg->nleft; i++)
 	{
 		qaws_scalar a = 0;
-		qaws_region_sampler_area_left(s, (qaws_scalar)rg->left[2 * i], &a);
+		qaws_region_sampler_area_left(&a, s, (qaws_scalar)rg->left[2 * i]);
 		if (fabs((double)a - rg->left[2 * i + 1]) > worst) worst = fabs((double)a - rg->left[2 * i + 1]);
 	}
 	sprintf(msg, "%s: area left of x at %u abscissas, worst error %.3g", rg->name, rg->nleft, worst);
@@ -131,8 +131,8 @@ static void rst_check(qaws_region_sampler const* s, rst_region const* rg)
 		qaws_vec2 p;
 		qaws_scalar a = 0;
 		double u = i / 64.0;
-		qaws_region_sampler_map(s, (qaws_scalar)u, (qaws_scalar)0.37, &p);
-		qaws_region_sampler_area_left(s, p.x, &a);
+		qaws_region_sampler_map(&p, s, (qaws_scalar)u, (qaws_scalar)0.37);
+		qaws_region_sampler_area_left(&a, s, p.x);
 		if (fabs((double)a - u * area) > worst) worst = fabs((double)a - u * area);
 	}
 	sprintf(msg, "%s: A(map(u, v).x) = u area at 65 u, worst error %.3g", rg->name, worst);
@@ -149,7 +149,7 @@ static void rst_check(qaws_region_sampler const* s, rst_region const* rg)
 			qaws_vec2 again;
 			memset(m, 0, sizeof(m));
 			outside = 0;
-			qaws_region_sampler_generate(s, n, kinds[kk], 7, pts);
+			qaws_region_sampler_generate(pts, s, n, kinds[kk], 7);
 			for (i = 0; i < n; i++)
 			{
 				double x = pts[i].x, y = pts[i].y;
@@ -162,7 +162,7 @@ static void rst_check(qaws_region_sampler const* s, rst_region const* rg)
 				double e = fabs(m[i] / n - rg->moments[i] / rg->moments[0]) / (i < 3 ? scale : scale * scale);
 				if (e > worst) worst = e;
 			}
-			qaws_region_sampler_generate(s, 1, kinds[kk], 7, &again);
+			qaws_region_sampler_generate(&again, s, 1, kinds[kk], 7);
 			sprintf(msg, "%s, %s: %u points, %u outside; centroid (%.5f, %.5f) (Mathematica (%.5f, %.5f)), worst moment error %.2g of the size",
 				rg->name, names[kk], n, outside, m[1] / n, m[2] / n, rg->moments[1] / rg->moments[0], rg->moments[2] / rg->moments[0], worst);
 			TEST_ASSERT(outside == 0 && worst < (kk == 0 ? 1.5e-2 : 2e-3) && (kk == 2 || (again.x == pts[0].x && again.y == pts[0].y)), msg);
@@ -175,7 +175,7 @@ static void rst_check(qaws_region_sampler const* s, rst_region const* rg)
 		double rmax = sqrt(rg->moments[0] / (2 * sqrt(3.0) * nb)), dmin = 1e300, dmin_random = 1e300;
 		memset(m, 0, sizeof(m));
 		outside = 0;
-		qaws_region_sampler_generate(s, nb, QAWS_REGION_SAMPLE_BLUE_NOISE, 11, pts);
+		qaws_region_sampler_generate(pts, s, nb, QAWS_REGION_SAMPLE_BLUE_NOISE, 11);
 		for (i = 0; i < nb; i++)
 		{
 			double x = pts[i].x, y = pts[i].y;
@@ -190,7 +190,7 @@ static void rst_check(qaws_region_sampler const* s, rst_region const* rg)
 		(void)closest;
 		worst = fabs(m[1] / nb - rg->moments[1] / rg->moments[0]) / scale;
 		if (fabs(m[2] / nb - rg->moments[2] / rg->moments[0]) / scale > worst) worst = fabs(m[2] / nb - rg->moments[2] / rg->moments[0]) / scale;
-		qaws_region_sampler_generate(s, nb, QAWS_REGION_SAMPLE_RANDOM, 11, pts);
+		qaws_region_sampler_generate(pts, s, nb, QAWS_REGION_SAMPLE_RANDOM, 11);
 		for (i = 0; i < nb; i++)
 			for (j = i + 1; j < nb; j++)
 			{
@@ -202,7 +202,7 @@ static void rst_check(qaws_region_sampler const* s, rst_region const* rg)
 		TEST_ASSERT(outside == 0 && worst < 1e-2 && dmin > 0.5 * rmax && dmin > 10 * dmin_random, msg);
 	}
 	/* random points: x against A(x) / area (the largest gap of the empirical distribution) */
-	qaws_region_sampler_generate(s, nr, QAWS_REGION_SAMPLE_RANDOM, 12345, pts);
+	qaws_region_sampler_generate(pts, s, nr, QAWS_REGION_SAMPLE_RANDOM, 12345);
 	for (i = 0; i < rg->nleft; i++)
 	{
 		unsigned int k, below = 0;
@@ -236,7 +236,7 @@ static void test_discs(void)
 		p[1].curves = &cv[1]; p[1].curve_count = 1; p[1].closed = 1;
 		memset(&d, 0, sizeof(d));
 		d.paths = p; d.path_count = 2; d.fill_rule = QAWS_FILL_POSITIVE;
-		st = qaws_region_sampler_create(&d, &s);
+		st = qaws_region_sampler_create(&s, &d);
 		memset(&rg, 0, sizeof(rg));
 		rg.name = k ? "a disc with a hole" : "a crescent";
 		rg.moments = k ? ref_holed_moments : ref_crescent_moments;
@@ -274,7 +274,7 @@ static void test_bean(void)
 	p.curves = cv; p.curve_count = 4; p.closed = 1;
 	memset(&d, 0, sizeof(d));
 	d.paths = &p; d.path_count = 1; d.fill_rule = QAWS_FILL_NON_ZERO;
-	st = qaws_region_sampler_create(&d, &s);
+	st = qaws_region_sampler_create(&s, &d);
 	memset(&rg, 0, sizeof(rg));
 	rg.name = "a bean of four cubics";
 	rg.moments = ref_bean_moments;
@@ -317,10 +317,10 @@ static void test_xor(void)
 	for (i = 0; i < 2; i++) { cv[i] = cs[i]; p[i].curves = &cv[i]; p[i].curve_count = 1; p[i].closed = 1; }
 	memset(&d, 0, sizeof(d));
 	d.paths = p; d.path_count = 2; d.fill_rule = QAWS_FILL_EVEN_ODD;
-	qaws_region_sampler_create(&d, &s);
+	qaws_region_sampler_create(&s, &d);
 	area = s ? (double)qaws_region_sampler_get_area(s) : 0;
 	pts = (qaws_vec2*)malloc(sizeof(qaws_vec2) * n);
-	if (s) qaws_region_sampler_generate(s, n, QAWS_REGION_SAMPLE_SOBOL, 5, pts);
+	if (s) qaws_region_sampler_generate(pts, s, n, QAWS_REGION_SAMPLE_SOBOL, 5);
 	for (i = 0; s && i < n; i++)
 	{
 		double d0 = hypot(pts[i].x, pts[i].y), d1 = hypot(pts[i].x - 0.45, pts[i].y - 0.1);
@@ -347,7 +347,7 @@ static qaws_curve* clt_rect_curve(double x0, double y0, double x1, double y1)
 	qaws_curve* c = NULL;
 	p[0] = (qaws_scalar)x0; p[1] = (qaws_scalar)y0; p[2] = (qaws_scalar)x1; p[3] = (qaws_scalar)y0;
 	p[4] = (qaws_scalar)x1; p[5] = (qaws_scalar)y1; p[6] = (qaws_scalar)x0; p[7] = (qaws_scalar)y1;
-	qaws_curve_create_polyline_2d(p, 4, 1, &c);
+	qaws_curve_create_polyline_2d(&c, p, 4, 1);
 	return c;
 }
 
@@ -396,7 +396,7 @@ static qaws_curve* rst_polar(unsigned int n, double r0, double a1, unsigned int 
 		p[2 * i] = (qaws_scalar)(r * cos(t));
 		p[2 * i + 1] = (qaws_scalar)(r * sin(t));
 	}
-	qaws_curve_create_polyline_2d(p, n, 1, &c);
+	qaws_curve_create_polyline_2d(&c, p, n, 1);
 	return c;
 }
 
@@ -410,7 +410,7 @@ static unsigned int rst_shapes(rst_shape* sh)
 	memset(sh, 0, sizeof(rst_shape) * 9);
 	/* an ellipse, NURBS, turned */
 	sh[n].name = "ellipse (NURBS)"; sh[n].rule = QAWS_FILL_NON_ZERO; sh[n].closed_form = RST_PI * 1.3 * 0.6;
-	{ qaws_curve* c = NULL; qaws_curve_create_ellipse_2d((qaws_scalar)0.2, (qaws_scalar)-0.1, (qaws_scalar)1.3, (qaws_scalar)0.6, (qaws_scalar)0.5, &c); rst_add(&sh[n], c); }
+	{ qaws_curve* c = NULL; qaws_curve_create_ellipse_2d(&c, (qaws_scalar)0.2, (qaws_scalar)-0.1, (qaws_scalar)1.3, (qaws_scalar)0.6, (qaws_scalar)0.5); rst_add(&sh[n], c); }
 	n++;
 	sh[n].name = "disc minus disc"; sh[n].rule = QAWS_FILL_POSITIVE; sh[n].closed_form = ref_crescent_moments[0];
 	rst_add(&sh[n], rst_circle(0, 0, 1, 1)); rst_add(&sh[n], rst_circle(0.45, 0.1, 0.7, 0));
@@ -437,7 +437,7 @@ static unsigned int rst_shapes(rst_shape* sh)
 			double r = (i % 2) ? 0.45 : 1.0, t = RST_PI / 2 + RST_PI * i / 5;
 			p[2 * i] = (qaws_scalar)(r * cos(t)); p[2 * i + 1] = (qaws_scalar)(r * sin(t));
 		}
-		qaws_curve_create_polyline_2d(p, 10, 1, &c);
+		qaws_curve_create_polyline_2d(&c, p, 10, 1);
 		rst_add(&sh[n], c);
 	}
 	n++;
@@ -451,7 +451,7 @@ static unsigned int rst_shapes(rst_shape* sh)
 	n++;
 	/* an ellipse with three holes */
 	sh[n].name = "ellipse with 3 holes"; sh[n].rule = QAWS_FILL_POSITIVE; sh[n].closed_form = RST_PI * (1.5 * 1.0 - 0.25 * 0.25 - 0.2 * 0.2 - 0.3 * 0.3);
-	{ qaws_curve* c = NULL; qaws_curve_create_ellipse_2d(0, 0, (qaws_scalar)1.5, (qaws_scalar)1.0, 0, &c); rst_add(&sh[n], c); }
+	{ qaws_curve* c = NULL; qaws_curve_create_ellipse_2d(&c, 0, 0, (qaws_scalar)1.5, (qaws_scalar)1.0, 0); rst_add(&sh[n], c); }
 	rst_add(&sh[n], rst_circle(-0.7, 0.1, 0.25, 0));
 	rst_add(&sh[n], rst_circle(0.1, 0.45, 0.2, 0));
 	rst_add(&sh[n], rst_circle(0.6, -0.2, 0.3, 0));
@@ -478,7 +478,7 @@ static double rst_green_mass(qaws_clip_result const* r)
 	for (i = 0; r && i < qaws_clip_result_get_path_count(r); i++)
 	{
 		qaws_path_2d p;
-		qaws_clip_result_get_path(r, i, &p);
+		qaws_clip_result_get_path(&p, r, i);
 		for (k = 0; k < p.curve_count; k++)
 		{
 			qaws_curve const* c = p.curves[k];
@@ -494,7 +494,7 @@ static double rst_green_mass(qaws_clip_result const* r)
 					{
 						qaws_eval_result_2d e;
 						double x, y;
-						qaws_curve_evaluate_2d(c, (qaws_scalar)(0.5 * (t0 + t1) + 0.5 * (t1 - t0) * gx[g]), QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &e);
+						qaws_curve_evaluate_2d(&e, c, (qaws_scalar)(0.5 * (t0 + t1) + 0.5 * (t1 - t0) * gx[g]), QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1);
 						x = e.position.x; y = e.position.y;
 						sum += gw[g] * 0.5 * (t1 - t0) * (2 * x + x * x * x / 3 + x * y) * e.d1.y;
 					}
@@ -537,17 +537,17 @@ static void test_sweep(void)
 		unsigned long long st = 99;
 		memset(&d, 0, sizeof(d));
 		d.paths = s->paths; d.path_count = s->npaths; d.fill_rule = s->rule;
-		qaws_region_sampler_create(&d, &smp);
+		qaws_region_sampler_create(&smp, &d);
 		if (!smp) { TEST_ASSERT(0, s->name); continue; }
 		area = (double)qaws_region_sampler_get_area(smp);
 		/* the region's area from the united paths (qaws_path_compute_area_2d) */
-		qaws_clip_boolean(QAWS_CLIP_UNION, s->rule, s->paths, s->npaths, NULL, 0, &region);
+		qaws_clip_boolean(&region, s->paths, NULL, s->npaths, 0, QAWS_CLIP_UNION, s->rule);
 		for (i = 0; region && i < qaws_clip_result_get_path_count(region); i++)
 		{
 			qaws_path_2d p;
 			qaws_scalar a = 0;
-			qaws_clip_result_get_path(region, i, &p);
-			qaws_path_compute_area_2d(&p, &a);
+			qaws_clip_result_get_path(&p, region, i);
+			qaws_path_compute_area_2d(&a, &p);
 			carea += a;
 		}
 		/* the box, and the exact area of the region in each cell of a G x G grid */
@@ -556,8 +556,8 @@ static void test_sweep(void)
 		{
 			qaws_path_2d p;
 			qaws_vec2 a, b;
-			qaws_clip_result_get_path(region, i, &p);
-			qaws_path_compute_bounds_2d(&p, &a, &b);
+			qaws_clip_result_get_path(&p, region, i);
+			qaws_path_compute_bounds_2d(&a, &b, &p);
 			if (a.x < lo.x) lo.x = a.x;
 			if (a.y < lo.y) lo.y = a.y;
 			if (b.x > hi.x) hi.x = b.x;
@@ -573,14 +573,14 @@ static void test_sweep(void)
 			qaws_path_2d rp;
 			qaws_clip_result* cut = NULL;
 			rp.curves = &rv; rp.curve_count = 1; rp.closed = 1;
-			qaws_clip_boolean(QAWS_CLIP_INTERSECTION, s->rule, s->paths, s->npaths, &rp, 1, &cut);
+			qaws_clip_boolean(&cut, s->paths, &rp, s->npaths, 1, QAWS_CLIP_INTERSECTION, s->rule);
 			cells[k] = 0;
 			for (i = 0; cut && i < qaws_clip_result_get_path_count(cut); i++)
 			{
 				qaws_path_2d p;
 				qaws_scalar a = 0;
-				qaws_clip_result_get_path(cut, i, &p);
-				qaws_path_compute_area_2d(&p, &a);
+				qaws_clip_result_get_path(&p, cut, i);
+				qaws_path_compute_area_2d(&a, &p);
 				cells[k] += a;
 			}
 			cmass[k] = rst_green_mass(cut);
@@ -594,13 +594,13 @@ static void test_sweep(void)
 			qaws_point_location loc = QAWS_POINT_OUTSIDE;
 			q.x = (qaws_scalar)(lo.x + (hi.x - lo.x) * rs_test_unit(&st));
 			q.y = (qaws_scalar)(lo.y + (hi.y - lo.y) * rs_test_unit(&st));
-			qaws_region_locate_point_2d(s->paths, s->npaths, s->rule, q, 0, &loc);
+			qaws_region_locate_point_2d(&loc, s->paths, s->npaths, s->rule, q, 0);
 			if (loc != QAWS_POINT_OUTSIDE) inside++;
 			/* the sampler's own inside test agrees, but within rounding of the boundary */
 			if (loc != QAWS_POINT_ON)
 			{
 				int in = 0;
-				qaws_region_sampler_contains(smp, q, &in);
+				qaws_region_sampler_contains(&in, smp, q);
 				if (in != (loc == QAWS_POINT_INSIDE)) disagree++;
 			}
 		}
@@ -613,12 +613,12 @@ static void test_sweep(void)
 			unsigned int counts[G * G];
 			memset(counts, 0, sizeof(counts));
 			outside[k] = 0;
-			qaws_region_sampler_generate(smp, n, kinds[k], 21, pts);
+			qaws_region_sampler_generate(pts, smp, n, kinds[k], 21);
 			for (i = 0; i < n; i++)
 			{
 				int cx = (int)((pts[i].x - lo.x) / (hi.x - lo.x) * G), cy = (int)((pts[i].y - lo.y) / (hi.y - lo.y) * G);
 				qaws_point_location loc = QAWS_POINT_OUTSIDE;
-				qaws_region_locate_point_2d(s->paths, s->npaths, s->rule, pts[i], 0, &loc);
+				qaws_region_locate_point_2d(&loc, s->paths, s->npaths, s->rule, pts[i], 0);
 				if (loc == QAWS_POINT_OUTSIDE) outside[k]++;
 				if (cx < 0) cx = 0;
 				if (cy < 0) cy = 0;
@@ -658,7 +658,7 @@ static void test_sweep(void)
 			double dmass, dtv[3];
 			unsigned int dout = 0;
 			d.density = rst_rho2;
-			qaws_region_sampler_create(&d, &ds);
+			qaws_region_sampler_create(&ds, &d);
 			d.density = NULL;
 			gmass = rst_green_mass(region);
 			dmass = ds ? (double)qaws_region_sampler_get_mass(ds) : 0;
@@ -667,12 +667,12 @@ static void test_sweep(void)
 				unsigned int nn = dk[k] == QAWS_REGION_SAMPLE_BLUE_NOISE ? nblue : m / 2, c;
 				unsigned int counts[G * G];
 				memset(counts, 0, sizeof(counts));
-				qaws_region_sampler_generate(ds, nn, dk[k], 23, pts);
+				qaws_region_sampler_generate(pts, ds, nn, dk[k], 23);
 				for (i = 0; i < nn; i++)
 				{
 					int cx = (int)((pts[i].x - lo.x) / (hi.x - lo.x) * G), cy = (int)((pts[i].y - lo.y) / (hi.y - lo.y) * G);
 					qaws_point_location loc = QAWS_POINT_OUTSIDE;
-					qaws_region_locate_point_2d(s->paths, s->npaths, s->rule, pts[i], 0, &loc);
+					qaws_region_locate_point_2d(&loc, s->paths, s->npaths, s->rule, pts[i], 0);
 					if (loc == QAWS_POINT_OUTSIDE) dout++;
 					if (cx < 0) cx = 0;
 					if (cy < 0) cy = 0;
@@ -769,12 +769,12 @@ static void test_density(void)
 		memset(&d, 0, sizeof(d));
 		d.paths = p; d.path_count = r < 2 ? 2 : 1; d.fill_rule = r < 2 ? QAWS_FILL_POSITIVE : QAWS_FILL_NON_ZERO;
 		d.density = rst_rho;
-		qaws_region_sampler_create(&d, &s);
+		qaws_region_sampler_create(&s, &d);
 		got_mass = s ? (double)qaws_region_sampler_get_mass(s) : 0;
 		for (i = 0; s && i < nml; i++)
 		{
 			qaws_scalar a = 0;
-			qaws_region_sampler_mass_left(s, (qaws_scalar)ml[2 * i], &a);
+			qaws_region_sampler_mass_left(&a, s, (qaws_scalar)ml[2 * i]);
 			if (fabs((double)a - ml[2 * i + 1]) > worst) worst = fabs((double)a - ml[2 * i + 1]);
 		}
 		sprintf(msg, "density 1 + x^2 + y over the %s: mass %.12f (Mathematica %.12f), mass left of x at %u abscissas, worst error %.3g",
@@ -786,8 +786,8 @@ static void test_density(void)
 		{
 			qaws_vec2 q;
 			qaws_scalar a = 0;
-			qaws_region_sampler_map(s, (qaws_scalar)(i / 32.0), (qaws_scalar)0.61, &q);
-			qaws_region_sampler_mass_left(s, q.x, &a);
+			qaws_region_sampler_map(&q, s, (qaws_scalar)(i / 32.0), (qaws_scalar)0.61);
+			qaws_region_sampler_mass_left(&a, s, q.x);
 			if (fabs((double)a - i / 32.0 * mass) > worst) worst = fabs((double)a - i / 32.0 * mass);
 		}
 		sprintf(msg, "density over the %s: mass left of map(u, v).x = u mass at 33 u, worst error %.3g", name, worst);
@@ -798,7 +798,7 @@ static void test_density(void)
 			unsigned int base = kinds[k] & ~QAWS_REGION_SAMPLE_BOX, outside = 0, nn = base == QAWS_REGION_SAMPLE_BLUE_NOISE ? 4096 : n;
 			double sx = 0, sy = 0, e, lim;
 			int exact = !(kinds[k] & QAWS_REGION_SAMPLE_BOX) && base != QAWS_REGION_SAMPLE_RANDOM && base != QAWS_REGION_SAMPLE_BLUE_NOISE;
-			qaws_region_sampler_generate(s, nn, kinds[k], 5, pts);
+			qaws_region_sampler_generate(pts, s, nn, kinds[k], 5);
 			for (i = 0; i < nn; i++)
 			{
 				if (!rst_inside(&rg, pts[i].x, pts[i].y, RST_F32 ? 1e-4 : 1e-9)) outside++;
@@ -928,20 +928,20 @@ static void test_executor(void)
 		memset(&desc, 0, sizeof(desc));
 		desc.paths = p; desc.path_count = 2; desc.fill_rule = QAWS_FILL_POSITIVE;
 		desc.density = d ? rst_rho : NULL;
-		if (qaws_region_sampler_create(&desc, &s0) != QAWS_STATUS_OK) { failed++; continue; }
+		if (qaws_region_sampler_create(&s0, &desc) != QAWS_STATUS_OK) { failed++; continue; }
 		for (e = 0; e < 2; e++)
 		{
 			qaws_region_sampler* s1 = NULL;
 			desc.executor = &ex[e];
-			if (qaws_region_sampler_create(&desc, &s1) != QAWS_STATUS_OK) { failed++; continue; }
+			if (qaws_region_sampler_create(&s1, &desc) != QAWS_STATUS_OK) { failed++; continue; }
 			if (qaws_region_sampler_get_mass(s1) != qaws_region_sampler_get_mass(s0)) differ++;
 			for (k = 0; k < 9; k++)
 			{
-				if (qaws_region_sampler_generate(s0, n, kinds[k], 11, a) != QAWS_STATUS_OK ||
-					qaws_region_sampler_generate(s1, n, kinds[k], 11, b) != QAWS_STATUS_OK) { failed++; continue; }
+				if (qaws_region_sampler_generate(a, s0, n, kinds[k], 11) != QAWS_STATUS_OK ||
+					qaws_region_sampler_generate(b, s1, n, kinds[k], 11) != QAWS_STATUS_OK) { failed++; continue; }
 				if (memcmp(a, b, sizeof(qaws_vec2) * n)) differ++;
 			}
-			if (qaws_region_sampler_map_many(s0, uv, n, a) != QAWS_STATUS_OK || qaws_region_sampler_map_many(s1, uv, n, b) != QAWS_STATUS_OK)
+			if (qaws_region_sampler_map_many(a, s0, uv, n) != QAWS_STATUS_OK || qaws_region_sampler_map_many(b, s1, uv, n) != QAWS_STATUS_OK)
 				failed++;
 			else if (memcmp(a, b, sizeof(qaws_vec2) * n))
 				differ++;

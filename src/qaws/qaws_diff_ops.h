@@ -41,23 +41,23 @@ typedef struct qaws_curve_closest_point
 /* Solves the closest point to `query` and returns its tangent for a query
    tangent and/or a parameter tangent (either may be NULL / zero). */
 qaws_status qaws_curve_closest_point_tangent(
-	qaws_diff_context const* ctx,
+	qaws_curve_closest_point* out_value,
+	qaws_curve_closest_point* out_tangent,
 	qaws_curve const* curve,
-	qaws_vec3 query,
 	qaws_vec3 const* query_tangent,
 	qaws_diff_views const* param_tangent,
-	qaws_curve_closest_point* out_value,
-	qaws_curve_closest_point* out_tangent);
+	qaws_vec3 query,
+	qaws_diff_context const* ctx);
 
 /* Solves the closest point and accumulates (+=) the pullback of an output
    adjoint (t, position, distance) into parameter and query adjoints. */
 qaws_status qaws_curve_closest_point_adjoint(
-	qaws_diff_context const* ctx,
-	qaws_curve const* curve,
-	qaws_vec3 query,
-	qaws_curve_closest_point const* adjoint,
 	qaws_diff_views* param_adjoint,
-	qaws_vec3* query_adjoint);
+	qaws_vec3* query_adjoint,
+	qaws_curve const* curve,
+	qaws_curve_closest_point const* adjoint,
+	qaws_vec3 query,
+	qaws_diff_context const* ctx);
 
 /* ===================================================================
  * Closest point on a surface
@@ -73,21 +73,21 @@ typedef struct qaws_surface_closest_point
 } qaws_surface_closest_point;
 
 qaws_status qaws_surface_closest_point_tangent(
-	qaws_diff_context const* ctx,
+	qaws_surface_closest_point* out_value,
+	qaws_surface_closest_point* out_tangent,
 	qaws_surface const* surface,
-	qaws_vec3 query,
 	qaws_vec3 const* query_tangent,
 	qaws_diff_views const* param_tangent,
-	qaws_surface_closest_point* out_value,
-	qaws_surface_closest_point* out_tangent);
+	qaws_vec3 query,
+	qaws_diff_context const* ctx);
 
 qaws_status qaws_surface_closest_point_adjoint(
-	qaws_diff_context const* ctx,
-	qaws_surface const* surface,
-	qaws_vec3 query,
-	qaws_surface_closest_point const* adjoint,
 	qaws_diff_views* param_adjoint,
-	qaws_vec3* query_adjoint);
+	qaws_vec3* query_adjoint,
+	qaws_surface const* surface,
+	qaws_surface_closest_point const* adjoint,
+	qaws_vec3 query,
+	qaws_diff_context const* ctx);
 
 /* ===================================================================
  * Roots seeded by the discrete finders
@@ -115,25 +115,25 @@ typedef struct qaws_curve_pair_point
 } qaws_curve_pair_point;
 
 qaws_status qaws_curve_pair_point_tangent(
-	qaws_diff_context const* ctx,
+	qaws_curve_pair_point* out_value,
+	qaws_curve_pair_point* out_tangent,
 	qaws_curve const* curve_a,
 	qaws_curve const* curve_b,
-	qaws_scalar t_a_seed,
-	qaws_scalar t_b_seed,
 	qaws_diff_views const* tangent_a,
 	qaws_diff_views const* tangent_b,
-	qaws_curve_pair_point* out_value,
-	qaws_curve_pair_point* out_tangent);
-
-qaws_status qaws_curve_pair_point_adjoint(
-	qaws_diff_context const* ctx,
-	qaws_curve const* curve_a,
-	qaws_curve const* curve_b,
 	qaws_scalar t_a_seed,
 	qaws_scalar t_b_seed,
-	qaws_curve_pair_point const* adjoint,
+	qaws_diff_context const* ctx);
+
+qaws_status qaws_curve_pair_point_adjoint(
 	qaws_diff_views* adjoint_a,
-	qaws_diff_views* adjoint_b);
+	qaws_diff_views* adjoint_b,
+	qaws_curve const* curve_a,
+	qaws_curve const* curve_b,
+	qaws_curve_pair_point const* adjoint,
+	qaws_scalar t_a_seed,
+	qaws_scalar t_b_seed,
+	qaws_diff_context const* ctx);
 
 /* Curve crossing a plane: n . (C(t) - p) = 0. The plane is an input with
    its own tangent / adjoint (point and normal). */
@@ -144,23 +144,23 @@ typedef struct qaws_curve_plane_point
 } qaws_curve_plane_point;
 
 qaws_status qaws_curve_plane_point_tangent(
-	qaws_diff_context const* ctx,
+	qaws_curve_plane_point* out_value,
+	qaws_curve_plane_point* out_tangent,
 	qaws_curve const* curve,
 	qaws_plane const* plane,
-	qaws_scalar t_seed,
 	qaws_plane const* plane_tangent,
 	qaws_diff_views const* param_tangent,
-	qaws_curve_plane_point* out_value,
-	qaws_curve_plane_point* out_tangent);
+	qaws_scalar t_seed,
+	qaws_diff_context const* ctx);
 
 qaws_status qaws_curve_plane_point_adjoint(
-	qaws_diff_context const* ctx,
+	qaws_diff_views* param_adjoint,
+	qaws_plane* plane_adjoint,
 	qaws_curve const* curve,
 	qaws_plane const* plane,
-	qaws_scalar t_seed,
 	qaws_curve_plane_point const* adjoint,
-	qaws_diff_views* param_adjoint,
-	qaws_plane* plane_adjoint);
+	qaws_scalar t_seed,
+	qaws_diff_context const* ctx);
 
 /* Curve piercing a surface: S(u, v) - C(t) = 0. */
 typedef struct qaws_surface_curve_point
@@ -170,27 +170,27 @@ typedef struct qaws_surface_curve_point
 } qaws_surface_curve_point;
 
 qaws_status qaws_surface_curve_point_tangent(
-	qaws_diff_context const* ctx,
+	qaws_surface_curve_point* out_value,
+	qaws_surface_curve_point* out_tangent,
 	qaws_surface const* surface,
 	qaws_curve const* curve,
-	qaws_scalar u_seed,
-	qaws_scalar v_seed,
-	qaws_scalar t_seed,
 	qaws_diff_views const* surface_tangent,
 	qaws_diff_views const* curve_tangent,
-	qaws_surface_curve_point* out_value,
-	qaws_surface_curve_point* out_tangent);
-
-qaws_status qaws_surface_curve_point_adjoint(
-	qaws_diff_context const* ctx,
-	qaws_surface const* surface,
-	qaws_curve const* curve,
 	qaws_scalar u_seed,
 	qaws_scalar v_seed,
 	qaws_scalar t_seed,
-	qaws_surface_curve_point const* adjoint,
+	qaws_diff_context const* ctx);
+
+qaws_status qaws_surface_curve_point_adjoint(
 	qaws_diff_views* surface_adjoint,
-	qaws_diff_views* curve_adjoint);
+	qaws_diff_views* curve_adjoint,
+	qaws_surface const* surface,
+	qaws_curve const* curve,
+	qaws_surface_curve_point const* adjoint,
+	qaws_scalar u_seed,
+	qaws_scalar v_seed,
+	qaws_scalar t_seed,
+	qaws_diff_context const* ctx);
 
 /* Extremum of the height e . C(t) along a direction: e . C'(t) = 0.
    value = e . C(t). The direction is an input (tangent / adjoint). */
@@ -202,23 +202,23 @@ typedef struct qaws_curve_extremum
 } qaws_curve_extremum;
 
 qaws_status qaws_curve_extremum_tangent(
-	qaws_diff_context const* ctx,
+	qaws_curve_extremum* out_value,
+	qaws_curve_extremum* out_tangent,
 	qaws_curve const* curve,
-	qaws_vec3 direction,
-	qaws_scalar t_seed,
 	qaws_vec3 const* direction_tangent,
 	qaws_diff_views const* param_tangent,
-	qaws_curve_extremum* out_value,
-	qaws_curve_extremum* out_tangent);
-
-qaws_status qaws_curve_extremum_adjoint(
-	qaws_diff_context const* ctx,
-	qaws_curve const* curve,
 	qaws_vec3 direction,
 	qaws_scalar t_seed,
-	qaws_curve_extremum const* adjoint,
+	qaws_diff_context const* ctx);
+
+qaws_status qaws_curve_extremum_adjoint(
 	qaws_diff_views* param_adjoint,
-	qaws_vec3* direction_adjoint);
+	qaws_vec3* direction_adjoint,
+	qaws_curve const* curve,
+	qaws_curve_extremum const* adjoint,
+	qaws_vec3 direction,
+	qaws_scalar t_seed,
+	qaws_diff_context const* ctx);
 
 /* Inflection of the xy projection: x'y'' - y'x'' = 0. */
 typedef struct qaws_curve_inflection
@@ -228,18 +228,18 @@ typedef struct qaws_curve_inflection
 } qaws_curve_inflection;
 
 qaws_status qaws_curve_inflection_tangent(
-	qaws_diff_context const* ctx,
-	qaws_curve const* curve,
-	qaws_scalar t_seed,
-	qaws_diff_views const* param_tangent,
 	qaws_curve_inflection* out_value,
-	qaws_curve_inflection* out_tangent);
+	qaws_curve_inflection* out_tangent,
+	qaws_curve const* curve,
+	qaws_diff_views const* param_tangent,
+	qaws_scalar t_seed,
+	qaws_diff_context const* ctx);
 
 qaws_status qaws_curve_inflection_adjoint(
-	qaws_diff_context const* ctx,
+	qaws_diff_views* param_adjoint,
 	qaws_curve const* curve,
-	qaws_scalar t_seed,
 	qaws_curve_inflection const* adjoint,
-	qaws_diff_views* param_adjoint);
+	qaws_scalar t_seed,
+	qaws_diff_context const* ctx);
 
 #endif /* QAWS_DIFF_OPS_H */

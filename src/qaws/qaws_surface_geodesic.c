@@ -54,7 +54,7 @@ static double sg_wrap(double x, double x0, double p)
 
 static qaws_status sg_eval(sg_ctx const* c, double u, double v, unsigned int flags, qaws_surface_eval_result* r)
 {
-	return qaws_surface_evaluate(c->s, (qaws_scalar)sg_wrap(u, c->u0, c->pu), (qaws_scalar)sg_wrap(v, c->v0, c->pv), flags, r);
+	return qaws_surface_evaluate(r, c->s, (qaws_scalar)sg_wrap(u, c->u0, c->pu), (qaws_scalar)sg_wrap(v, c->v0, c->pv), flags);
 }
 
 static double sg_dot(qaws_vec3 a, qaws_vec3 b)
@@ -117,8 +117,8 @@ static qaws_status sg_init(sg_ctx* c, qaws_surface const* s, double tol)
 		for (j = 0; j <= 6; j++)
 		{
 			qaws_surface_eval_result r;
-			if (qaws_surface_evaluate(s, (qaws_scalar)(c->u0 + (c->u1 - c->u0) * i / 6), (qaws_scalar)(c->v0 + (c->v1 - c->v0) * j / 6),
-				QAWS_SURFACE_EVAL_POSITION, &r) != QAWS_STATUS_OK)
+			if (qaws_surface_evaluate(&r, s, (qaws_scalar)(c->u0 + (c->u1 - c->u0) * i / 6),
+				(qaws_scalar)(c->v0 + (c->v1 - c->v0) * j / 6), QAWS_SURFACE_EVAL_POSITION) != QAWS_STATUS_OK)
 				continue;
 			if (r.position.x < lo[0]) lo[0] = r.position.x;
 			if (r.position.y < lo[1]) lo[1] = r.position.y;
@@ -138,13 +138,13 @@ static qaws_status sg_init(sg_ctx* c, qaws_surface const* s, double tol)
 #else
 		double close = 1e-9 * size;
 #endif
-		qaws_surface_evaluate(s, ru.min_value, (qaws_scalar)(c->v0 + (c->v1 - c->v0) * t), QAWS_SURFACE_EVAL_POSITION, &a);
-		qaws_surface_evaluate(s, ru.max_value, (qaws_scalar)(c->v0 + (c->v1 - c->v0) * t), QAWS_SURFACE_EVAL_POSITION, &b);
+		qaws_surface_evaluate(&a, s, ru.min_value, (qaws_scalar)(c->v0 + (c->v1 - c->v0) * t), QAWS_SURFACE_EVAL_POSITION);
+		qaws_surface_evaluate(&b, s, ru.max_value, (qaws_scalar)(c->v0 + (c->v1 - c->v0) * t), QAWS_SURFACE_EVAL_POSITION);
 		if (sqrt((a.position.x - b.position.x) * (a.position.x - b.position.x) + (a.position.y - b.position.y) * (a.position.y - b.position.y) +
 			(a.position.z - b.position.z) * (a.position.z - b.position.z)) > close)
 			cu = 0;
-		qaws_surface_evaluate(s, (qaws_scalar)(c->u0 + (c->u1 - c->u0) * t), rv.min_value, QAWS_SURFACE_EVAL_POSITION, &a);
-		qaws_surface_evaluate(s, (qaws_scalar)(c->u0 + (c->u1 - c->u0) * t), rv.max_value, QAWS_SURFACE_EVAL_POSITION, &b);
+		qaws_surface_evaluate(&a, s, (qaws_scalar)(c->u0 + (c->u1 - c->u0) * t), rv.min_value, QAWS_SURFACE_EVAL_POSITION);
+		qaws_surface_evaluate(&b, s, (qaws_scalar)(c->u0 + (c->u1 - c->u0) * t), rv.max_value, QAWS_SURFACE_EVAL_POSITION);
 		if (sqrt((a.position.x - b.position.x) * (a.position.x - b.position.x) + (a.position.y - b.position.y) * (a.position.y - b.position.y) +
 			(a.position.z - b.position.z) * (a.position.z - b.position.z)) > close)
 			cv = 0;
@@ -301,7 +301,7 @@ static qaws_status sg_hermite(double const* pts, double const* der, unsigned int
 	d.dimension = QAWS_DIMENSION_2D; d.degree = 3;
 	d.points = buf; d.point_count = n;
 	d.derivatives = buf + 2 * n; d.derivative_count = n;
-	st = qaws_curve_create_hermite(&d, out);
+	st = qaws_curve_create_hermite(out, &d);
 	qaws_internal_free(buf);
 	return st;
 }
@@ -347,7 +347,7 @@ static qaws_status sg_path(sg_ctx const* c, double const* y0, double L, qaws_cur
 			qaws_eval_result_2d e;
 			ym[0] = pts[2 * k]; ym[1] = pts[2 * k + 1]; ym[2] = der[2 * k] / h; ym[3] = der[2 * k + 1] / h;
 			st = sg_integrate(c, ym, 0.5 * h);
-			if (st == QAWS_STATUS_OK && qaws_curve_evaluate_2d(cv, (qaws_scalar)(k + 0.5), QAWS_EVAL_FLAG_POSITION, &e) == QAWS_STATUS_OK)
+			if (st == QAWS_STATUS_OK && qaws_curve_evaluate_2d(&e, cv, (qaws_scalar)(k + 0.5), QAWS_EVAL_FLAG_POSITION) == QAWS_STATUS_OK)
 			{
 				double d = hypot((double)e.position.x - ym[0], (double)e.position.y - ym[1]);
 				if (d > worst) worst = d;
@@ -468,8 +468,8 @@ static double sg_chord_length(sg_ctx const* c, double const* a, double const* b)
 /*  The API                                                                 */
 /* ------------------------------------------------------------------------ */
 
-qaws_status qaws_surface_get_metric(qaws_surface const* surface, qaws_scalar u, qaws_scalar v,
-	qaws_scalar* out_g, qaws_scalar* out_christoffel)
+qaws_status qaws_surface_get_metric(qaws_scalar* out_g, qaws_scalar* out_christoffel, qaws_surface const* surface,
+	qaws_scalar u, qaws_scalar v)
 {
 	sg_ctx c;
 	double g[3], gam[6];
@@ -487,8 +487,8 @@ qaws_status qaws_surface_get_metric(qaws_surface const* surface, qaws_scalar u, 
 	return QAWS_STATUS_OK;
 }
 
-qaws_status qaws_surface_exp(qaws_surface const* surface, qaws_vec2 p, qaws_vec2 direction, qaws_scalar length,
-	qaws_scalar tolerance, qaws_vec2* out_point, qaws_vec2* out_velocity)
+qaws_status qaws_surface_exp(qaws_vec2* out_point, qaws_vec2* out_velocity, qaws_surface const* surface, qaws_vec2 p,
+	qaws_vec2 direction, qaws_scalar length, qaws_scalar tolerance)
 {
 	sg_ctx c;
 	double y[4], d[2], un[2];
@@ -508,8 +508,8 @@ qaws_status qaws_surface_exp(qaws_surface const* surface, qaws_vec2 p, qaws_vec2
 	return QAWS_STATUS_OK;
 }
 
-qaws_status qaws_surface_curve_create_uv(qaws_surface const* surface, qaws_curve const* uv_curve,
-	qaws_surface_curve** out_curve)
+qaws_status qaws_surface_curve_create_uv(qaws_surface_curve** out_curve, qaws_surface const* surface,
+	qaws_curve const* uv_curve)
 {
 	qaws_surface_curve* c;
 	qaws_range rg;
@@ -528,7 +528,7 @@ qaws_status qaws_surface_curve_create_uv(qaws_surface const* surface, qaws_curve
 		return st;
 	}
 	rg = qaws_curve_get_parameter_range(uv_curve);
-	st = qaws_curve_extract(uv_curve, rg.min_value, rg.max_value, &c->uv);
+	st = qaws_curve_extract(&c->uv, uv_curve, rg.min_value, rg.max_value);
 	c->length = -1;
 	if (st != QAWS_STATUS_OK)
 	{
@@ -539,8 +539,8 @@ qaws_status qaws_surface_curve_create_uv(qaws_surface const* surface, qaws_curve
 	return QAWS_STATUS_OK;
 }
 
-qaws_status qaws_surface_curve_create_geodesic_ray(qaws_surface const* surface, qaws_vec2 p, qaws_vec2 direction,
-	qaws_scalar length, qaws_scalar tolerance, qaws_surface_curve** out_curve)
+qaws_status qaws_surface_curve_create_geodesic_ray(qaws_surface_curve** out_curve, qaws_surface const* surface, qaws_vec2 p,
+	qaws_vec2 direction, qaws_scalar length, qaws_scalar tolerance)
 {
 	sg_ctx ctx;
 	qaws_surface_curve* c;
@@ -570,15 +570,15 @@ qaws_status qaws_surface_curve_create_geodesic_ray(qaws_surface const* surface, 
 	{
 		qaws_eval_result_2d e;
 		qaws_range rg = qaws_curve_get_parameter_range(c->uv);
-		qaws_curve_evaluate_2d(c->uv, rg.max_value, QAWS_EVAL_FLAG_POSITION, &e);
+		qaws_curve_evaluate_2d(&e, c->uv, rg.max_value, QAWS_EVAL_FLAG_POSITION);
 		c->b[0] = (double)e.position.x; c->b[1] = (double)e.position.y;
 	}
 	*out_curve = c;
 	return QAWS_STATUS_OK;
 }
 
-qaws_status qaws_surface_curve_create_geodesic(qaws_surface const* surface, qaws_vec2 a, qaws_vec2 b,
-	qaws_scalar tolerance, qaws_surface_curve** out_curve)
+qaws_status qaws_surface_curve_create_geodesic(qaws_surface_curve** out_curve, qaws_surface const* surface, qaws_vec2 a,
+	qaws_vec2 b, qaws_scalar tolerance)
 {
 	sg_ctx ctx;
 	double pa[2], pb[2], d[2], th, L;
@@ -626,7 +626,7 @@ qaws_status qaws_surface_curve_create_geodesic(qaws_surface const* surface, qaws
 		qaws_surface_curve* c = NULL;
 		sg_dir(&ctx, pa[0], pa[1], th, dd);
 		dir.x = (qaws_scalar)dd[0]; dir.y = (qaws_scalar)dd[1];
-		st = qaws_surface_curve_create_geodesic_ray(surface, a, dir, (qaws_scalar)L, tolerance, &c);
+		st = qaws_surface_curve_create_geodesic_ray(&c, surface, a, dir, (qaws_scalar)L, tolerance);
 		if (st != QAWS_STATUS_OK)
 			return st;
 		/* the end exactly on b */
@@ -675,7 +675,7 @@ static int sg_pole(sg_ctx const* c, double const* p)
 	if (c->pu <= 0)
 		return 0;
 	if (sg_metric(c, p[0], p[1], g, NULL) != QAWS_STATUS_NUMERICAL_FAILURE &&
-		(qaws_internal_sg_first_form(c, p[0], p[1], g) != QAWS_STATUS_OK || !(g[0] <= small * small * g[2])))
+		(qaws_internal_sg_first_form(g, p[0], p[1], c) != QAWS_STATUS_OK || !(g[0] <= small * small * g[2])))
 		return 0;
 	if (fabs(p[1] - c->v1) <= 1e-9 * (c->v1 - c->v0)) return 1;
 	if (fabs(p[1] - c->v0) <= 1e-9 * (c->v1 - c->v0)) return -1;
@@ -728,8 +728,8 @@ static qaws_status sg_ray(sg_ctx const* c, double const* c0, int pole, double a,
 	}
 }
 
-qaws_status qaws_surface_curve_create_geodesic_arc(qaws_surface const* surface, qaws_vec2 centre, qaws_scalar radius,
-	qaws_scalar angle0, qaws_scalar angle1, qaws_scalar tolerance, qaws_surface_curve** out_curve)
+qaws_status qaws_surface_curve_create_geodesic_arc(qaws_surface_curve** out_curve, qaws_surface const* surface, qaws_vec2 centre,
+	qaws_scalar radius, qaws_scalar angle0, qaws_scalar angle1, qaws_scalar tolerance)
 {
 	sg_ctx ctx;
 	double c0[2], r = (double)radius, a0 = (double)angle0, a1 = (double)angle1, sweep;
@@ -797,7 +797,7 @@ qaws_status qaws_surface_curve_create_geodesic_arc(qaws_surface const* surface, 
 			double y[4];
 			qaws_eval_result_2d e;
 			st = sg_ray(&ctx, c0, pole, a0 + (k + 0.5) * dt, r, y);
-			if (st == QAWS_STATUS_OK && qaws_curve_evaluate_2d(cv, (qaws_scalar)(k + 0.5), QAWS_EVAL_FLAG_POSITION, &e) == QAWS_STATUS_OK)
+			if (st == QAWS_STATUS_OK && qaws_curve_evaluate_2d(&e, cv, (qaws_scalar)(k + 0.5), QAWS_EVAL_FLAG_POSITION) == QAWS_STATUS_OK)
 			{
 				double dd = hypot((double)e.position.x - y[0], (double)e.position.y - y[1]);
 				if (dd > worst) worst = dd;
@@ -863,7 +863,7 @@ qaws_curve const* qaws_surface_curve_get_uv(qaws_surface_curve const* curve)
 	return curve ? curve->uv : NULL;
 }
 
-qaws_status qaws_surface_curve_get_length(qaws_surface_curve const* curve, qaws_scalar* out_length)
+qaws_status qaws_surface_curve_get_length(qaws_scalar* out_length, qaws_surface_curve const* curve)
 {
 	if (!curve || !out_length)
 		return QAWS_STATUS_INVALID_ARGUMENT;
@@ -889,7 +889,7 @@ qaws_status qaws_surface_curve_get_length(qaws_surface_curve const* curve, qaws_
 				{
 					double t = 0.5 * (a + b) + (k ? 0.5 : -0.5) * (b - a) * x[i], g[3];
 					qaws_eval_result_2d e;
-					qaws_curve_evaluate_2d(curve->uv, (qaws_scalar)t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &e);
+					qaws_curve_evaluate_2d(&e, curve->uv, (qaws_scalar)t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1);
 					if (sg_metric(&curve->ctx, (double)e.position.x, (double)e.position.y, g, NULL) != QAWS_STATUS_OK)
 						return QAWS_STATUS_NUMERICAL_FAILURE;
 					s += 0.5 * (b - a) * w[i] * sqrt(g[0] * e.d1.x * e.d1.x + 2 * g[1] * e.d1.x * e.d1.y + g[2] * e.d1.y * e.d1.y);
@@ -900,14 +900,14 @@ qaws_status qaws_surface_curve_get_length(qaws_surface_curve const* curve, qaws_
 	}
 }
 
-qaws_status qaws_surface_curve_evaluate(qaws_surface_curve const* curve, qaws_scalar t, qaws_vec2* out_uv,
-	qaws_vec3* out_point)
+qaws_status qaws_surface_curve_evaluate(qaws_vec2* out_uv, qaws_vec3* out_point, qaws_surface_curve const* curve,
+	qaws_scalar t)
 {
 	qaws_eval_result_2d e;
 	qaws_status st;
 	if (!curve)
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	st = qaws_curve_evaluate_2d(curve->uv, t, QAWS_EVAL_FLAG_POSITION, &e);
+	st = qaws_curve_evaluate_2d(&e, curve->uv, t, QAWS_EVAL_FLAG_POSITION);
 	if (st != QAWS_STATUS_OK)
 		return st;
 	if (out_uv)
@@ -926,24 +926,24 @@ qaws_status qaws_surface_curve_evaluate(qaws_surface_curve const* curve, qaws_sc
 /*  Shared with the region code                                             */
 /* ------------------------------------------------------------------------ */
 
-qaws_status qaws_internal_sg_init(qaws_internal_sg_ctx* c, qaws_surface const* s, double tol)
+qaws_status qaws_internal_sg_init(qaws_surface const* s, double tol, qaws_internal_sg_ctx* c)
 {
 	return sg_init(c, s, tol);
 }
 
-qaws_status qaws_internal_sg_metric(qaws_internal_sg_ctx const* c, double u, double v, double* g, double* gam)
+qaws_status qaws_internal_sg_metric(double* g, double* gam, double u, double v, qaws_internal_sg_ctx const* c)
 {
 	return sg_metric(c, u, v, g, gam);
 }
 
-qaws_status qaws_internal_sg_eval(qaws_internal_sg_ctx const* c, double u, double v, unsigned int flags,
-	qaws_surface_eval_result* r)
+qaws_status qaws_internal_sg_eval(qaws_surface_eval_result* r, double u, double v, unsigned int flags,
+	qaws_internal_sg_ctx const* c)
 {
 	return sg_eval(c, u, v, flags, r);
 }
 
 /* E, F, G without the singular check (a pole's edge has zero length) */
-qaws_status qaws_internal_sg_first_form(qaws_internal_sg_ctx const* c, double u, double v, double* g)
+qaws_status qaws_internal_sg_first_form(double* g, double u, double v, qaws_internal_sg_ctx const* c)
 {
 	qaws_surface_eval_result r;
 	qaws_status st = sg_eval(c, u, v, QAWS_SURFACE_EVAL_DU | QAWS_SURFACE_EVAL_DV, &r);
@@ -956,10 +956,10 @@ qaws_status qaws_internal_sg_first_form(qaws_internal_sg_ctx const* c, double u,
 }
 
 /* sqrt(E G - F^2), zero at a pole */
-qaws_status qaws_internal_sg_area_element(qaws_internal_sg_ctx const* c, double u, double v, double* out)
+qaws_status qaws_internal_sg_area_element(double* out, double u, double v, qaws_internal_sg_ctx const* c)
 {
 	double g[3], det;
-	qaws_status st = qaws_internal_sg_first_form(c, u, v, g);
+	qaws_status st = qaws_internal_sg_first_form(g, u, v, c);
 	if (st != QAWS_STATUS_OK)
 		return st;
 	det = g[0] * g[2] - g[1] * g[1];
@@ -977,7 +977,7 @@ static qaws_status sg_conormal(sg_ctx const* c, qaws_curve const* base, double t
 {
 	qaws_eval_result_2d e;
 	double d[2], a;
-	qaws_status st = qaws_curve_evaluate_2d(base, (qaws_scalar)t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &e);
+	qaws_status st = qaws_curve_evaluate_2d(&e, base, (qaws_scalar)t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1);
 	if (st != QAWS_STATUS_OK)
 		return st;
 	d[0] = (double)e.d1.x; d[1] = (double)e.d1.y;
@@ -987,18 +987,18 @@ static qaws_status sg_conormal(sg_ctx const* c, qaws_curve const* base, double t
 	return sg_dir(c, y[0], y[1], a + (side > 0 ? 0.5 : -0.5) * SG_PI, y + 2);
 }
 
-qaws_status qaws_internal_sg_conormal(qaws_internal_sg_ctx const* c, qaws_curve const* base, double t, double side, double* y)
+qaws_status qaws_internal_sg_conormal(double* y, qaws_curve const* base, double t, double side, qaws_internal_sg_ctx const* c)
 {
 	return sg_conormal(c, base, t, side, y);
 }
 
-qaws_status qaws_internal_sg_integrate(qaws_internal_sg_ctx const* c, double* y, double len)
+qaws_status qaws_internal_sg_integrate(double* y, double len, qaws_internal_sg_ctx const* c)
 {
 	return sg_integrate(c, y, len);
 }
 
-qaws_status qaws_internal_sg_offset(qaws_internal_sg_ctx const* c, qaws_curve const* base, double dist,
-	qaws_curve** out_offset, qaws_curve** out_ray0, qaws_curve** out_ray1)
+qaws_status qaws_internal_sg_offset(qaws_curve** out_offset, qaws_curve** out_ray0, qaws_curve** out_ray1,
+	qaws_curve const* base, double dist, qaws_internal_sg_ctx const* c)
 {
 	qaws_range rg = qaws_curve_get_parameter_range(base);
 	double t0 = (double)rg.min_value, t1 = (double)rg.max_value, r = fabs(dist), y[4], q0[2], q1[2];
@@ -1023,9 +1023,9 @@ qaws_status qaws_internal_sg_offset(qaws_internal_sg_ctx const* c, qaws_curve co
 	{
 		qaws_eval_result_2d e;
 		qaws_range ra = qaws_curve_get_parameter_range(r0), rb = qaws_curve_get_parameter_range(r1);
-		qaws_curve_evaluate_2d(r0, ra.max_value, QAWS_EVAL_FLAG_POSITION, &e);
+		qaws_curve_evaluate_2d(&e, r0, ra.max_value, QAWS_EVAL_FLAG_POSITION);
 		q0[0] = (double)e.position.x; q0[1] = (double)e.position.y;
-		qaws_curve_evaluate_2d(r1, rb.max_value, QAWS_EVAL_FLAG_POSITION, &e);
+		qaws_curve_evaluate_2d(&e, r1, rb.max_value, QAWS_EVAL_FLAG_POSITION);
 		q1[0] = (double)e.position.x; q1[1] = (double)e.position.y;
 	}
 	while (st == QAWS_STATUS_OK)
@@ -1075,7 +1075,7 @@ qaws_status qaws_internal_sg_offset(qaws_internal_sg_ctx const* c, qaws_curve co
 			qaws_eval_result_2d e;
 			st = sg_conormal(c, base, t0 + (t1 - t0) * (k + 0.5) / n, dist, y);
 			if (st == QAWS_STATUS_OK) st = sg_integrate(c, y, r);
-			if (st == QAWS_STATUS_OK && qaws_curve_evaluate_2d(cv, (qaws_scalar)(k + 0.5), QAWS_EVAL_FLAG_POSITION, &e) == QAWS_STATUS_OK)
+			if (st == QAWS_STATUS_OK && qaws_curve_evaluate_2d(&e, cv, (qaws_scalar)(k + 0.5), QAWS_EVAL_FLAG_POSITION) == QAWS_STATUS_OK)
 			{
 				double dd = hypot((double)e.position.x - y[0], (double)e.position.y - y[1]);
 				if (dd > worst) worst = dd;
@@ -1101,8 +1101,8 @@ qaws_status qaws_internal_sg_offset(qaws_internal_sg_ctx const* c, qaws_curve co
 	return QAWS_STATUS_OK;
 }
 
-qaws_status qaws_surface_curve_create_offset(qaws_surface_curve const* base, qaws_scalar distance, qaws_scalar tolerance,
-	qaws_surface_curve** out_curve)
+qaws_status qaws_surface_curve_create_offset(qaws_surface_curve** out_curve, qaws_surface_curve const* base, qaws_scalar distance,
+	qaws_scalar tolerance)
 {
 	qaws_surface_curve* c;
 	qaws_status st;
@@ -1113,7 +1113,7 @@ qaws_status qaws_surface_curve_create_offset(qaws_surface_curve const* base, qaw
 	if (!c)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	if ((st = sg_init(&c->ctx, base->s, (double)tolerance)) == QAWS_STATUS_OK)
-		st = qaws_internal_sg_offset(&c->ctx, base->uv, (double)distance, &c->uv, NULL, NULL);
+		st = qaws_internal_sg_offset(&c->uv, NULL, NULL, base->uv, (double)distance, &c->ctx);
 	if (st != QAWS_STATUS_OK)
 	{
 		qaws_surface_curve_destroy(c);
@@ -1148,8 +1148,8 @@ static qaws_status sg_foot_shot(sg_ctx const* c, qaws_curve const* base, double 
 	return st;
 }
 
-int qaws_internal_sg_foot(qaws_internal_sg_ctx const* c, qaws_curve const* base, double side, double lo, double hi,
-	double const* x, double* s, double* t)
+int qaws_internal_sg_foot(double* s, double* t, qaws_curve const* base, double const* x, double side,
+	double lo, double hi, qaws_internal_sg_ctx const* c)
 {
 	unsigned int it;
 	double end[2], vel[2], tx[2], r, ds = 1e-6 * (hi - lo);
@@ -1205,7 +1205,7 @@ int qaws_internal_sg_foot(qaws_internal_sg_ctx const* c, qaws_curve const* base,
 	return r <= 0.05 * c->tol;
 }
 
-int qaws_internal_sg_reach(qaws_internal_sg_ctx const* c, double const* a, double const* x, double* th, double* L)
+int qaws_internal_sg_reach(double* th, double* L, double const* a, double const* x, qaws_internal_sg_ctx const* c)
 {
 	double end[2], tx[2];
 	if (sg_shoot(c, a, *th, *L, end, NULL) != QAWS_STATUS_OK)
@@ -1214,12 +1214,12 @@ int qaws_internal_sg_reach(qaws_internal_sg_ctx const* c, double const* a, doubl
 	return sg_newton(c, a, tx, th, L);
 }
 
-qaws_status qaws_internal_sg_angle(qaws_internal_sg_ctx const* c, double u, double v, double const* d, double* out)
+qaws_status qaws_internal_sg_angle(double* out, double const* d, double u, double v, qaws_internal_sg_ctx const* c)
 {
 	return sg_angle(c, u, v, d, out);
 }
 
-qaws_status qaws_internal_sg_shoot(qaws_internal_sg_ctx const* c, double const* a, double th, double L, double* end, double* vel)
+qaws_status qaws_internal_sg_shoot(double* end, double* vel, double const* a, double th, double L, qaws_internal_sg_ctx const* c)
 {
 	return sg_shoot(c, a, th, L, end, vel);
 }

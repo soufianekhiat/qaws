@@ -238,7 +238,7 @@ static qaws_status tspline_surface_eval(
 	/* Normal from cross product du x dv */
 	if (eval_flags & QAWS_SURFACE_EVAL_NORMAL)
 	{
-		qaws_internal_surface_normal(out_result->du, out_result->dv, &out_result->normal);
+		qaws_internal_surface_normal(&out_result->normal, out_result->du, out_result->dv);
 		out_result->valid_flags |= QAWS_SURFACE_EVAL_NORMAL;
 	}
 
@@ -250,11 +250,11 @@ static void tspline_surface_destroy(void* impl, qaws_allocator const* allocator)
 	qaws_surface_tspline_impl* ti = (qaws_surface_tspline_impl*)impl;
 	if (ti)
 	{
-		qaws_internal_dealloc(allocator, ti->positions);
-		qaws_internal_dealloc(allocator, ti->weights);
-		qaws_internal_dealloc(allocator, ti->u_knots_all);
-		qaws_internal_dealloc(allocator, ti->v_knots_all);
-		qaws_internal_dealloc(allocator, ti);
+		qaws_internal_dealloc(ti->positions, allocator);
+		qaws_internal_dealloc(ti->weights, allocator);
+		qaws_internal_dealloc(ti->u_knots_all, allocator);
+		qaws_internal_dealloc(ti->v_knots_all, allocator);
+		qaws_internal_dealloc(ti, allocator);
 	}
 }
 
@@ -315,7 +315,7 @@ qaws_status qaws_surface_create_tspline_ex(
 		&tspline_surface_vtable, allocator);
 	if (!surface) return QAWS_STATUS_ALLOCATION_FAILURE;
 
-	impl = (qaws_surface_tspline_impl*)qaws_internal_alloc(allocator, sizeof(qaws_surface_tspline_impl));
+	impl = (qaws_surface_tspline_impl*)qaws_internal_alloc(sizeof(qaws_surface_tspline_impl), allocator);
 	if (!impl)
 	{
 		qaws_internal_surface_free(surface);
@@ -337,18 +337,18 @@ qaws_status qaws_surface_create_tspline_ex(
 	uk_size = qaws_internal_mul3(sizeof(qaws_scalar), impl->cp_count, u_knot_len);
 	vk_size = qaws_internal_mul3(sizeof(qaws_scalar), impl->cp_count, v_knot_len);
 
-	impl->positions = (qaws_vec3*)qaws_internal_alloc(allocator, pos_size);
-	impl->weights = (qaws_scalar*)qaws_internal_alloc(allocator, wt_size);
-	impl->u_knots_all = (qaws_scalar*)qaws_internal_alloc(allocator, uk_size);
-	impl->v_knots_all = (qaws_scalar*)qaws_internal_alloc(allocator, vk_size);
+	impl->positions = (qaws_vec3*)qaws_internal_alloc(pos_size, allocator);
+	impl->weights = (qaws_scalar*)qaws_internal_alloc(wt_size, allocator);
+	impl->u_knots_all = (qaws_scalar*)qaws_internal_alloc(uk_size, allocator);
+	impl->v_knots_all = (qaws_scalar*)qaws_internal_alloc(vk_size, allocator);
 
 	if (!impl->positions || !impl->weights || !impl->u_knots_all || !impl->v_knots_all)
 	{
-		qaws_internal_dealloc(allocator, impl->positions);
-		qaws_internal_dealloc(allocator, impl->weights);
-		qaws_internal_dealloc(allocator, impl->u_knots_all);
-		qaws_internal_dealloc(allocator, impl->v_knots_all);
-		qaws_internal_dealloc(allocator, impl);
+		qaws_internal_dealloc(impl->positions, allocator);
+		qaws_internal_dealloc(impl->weights, allocator);
+		qaws_internal_dealloc(impl->u_knots_all, allocator);
+		qaws_internal_dealloc(impl->v_knots_all, allocator);
+		qaws_internal_dealloc(impl, allocator);
 		qaws_internal_surface_free(surface);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
@@ -372,8 +372,8 @@ qaws_status qaws_surface_create_tspline_ex(
 }
 
 qaws_status qaws_surface_create_tspline(
-	qaws_surface_tspline_desc const* desc,
-	qaws_surface** out_surface)
+	qaws_surface** out_surface,
+	qaws_surface_tspline_desc const* desc)
 {
 	return qaws_surface_create_tspline_ex(desc, NULL, out_surface);
 }

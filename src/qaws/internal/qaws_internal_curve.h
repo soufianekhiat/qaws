@@ -24,10 +24,10 @@ qaws_curve* qaws_internal_curve_alloc_ex(
 void qaws_internal_curve_free(qaws_curve* curve);
 
 /* Allocator-aware helpers for impl allocations. */
-void* qaws_internal_alloc(qaws_allocator const* allocator, size_t size);
+void* qaws_internal_alloc(size_t size, qaws_allocator const* allocator);
 /* qaws_internal_mul2..4 for allocation sizes */
 #include "qaws_internal_memory.h"
-void  qaws_internal_dealloc(qaws_allocator const* allocator, void* ptr);
+void  qaws_internal_dealloc(void* ptr, qaws_allocator const* allocator);
 /* count * size zeroed bytes (NULL on overflow or failure) */
 void* qaws_internal_calloc(qaws_allocator const* allocator, size_t count, size_t size);
 

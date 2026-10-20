@@ -40,7 +40,7 @@ static void demo_curve_surface(void)
 	d.u_knot_count = 7;
 	d.v_knots = kn;
 	d.v_knot_count = 7;
-	qaws_surface_create_nurbs(&d, &s);
+	qaws_surface_create_nurbs(&s, &d);
 	/* a spiral weaving up and down through it (a cubic B-spline, 10 spans) */
 	for (k = 0; k < 13; k++)
 	{
@@ -58,11 +58,11 @@ static void demo_curve_surface(void)
 	cd.control_point_count = 13;
 	cd.knots = ckn;
 	cd.knot_count = 17;
-	qaws_curve_create_bspline(&cd, &c);
-	qaws_exact_surface_prepare(NULL, s, &es, NULL);
-	qaws_exact_curve_prepare(NULL, c, &ec, NULL);
+	qaws_curve_create_bspline(&c, &cd);
+	qaws_exact_surface_prepare(&es, NULL, s, NULL);
+	qaws_exact_curve_prepare(&ec, NULL, c, NULL);
 	t0 = clock();
-	st = qaws_exact_curve_surface_hits(ec, es, hits, 64, &nh);
+	st = qaws_exact_curve_surface_hits(hits, &nh, ec, es, 64);
 	secs = (double)(clock() - t0) / CLOCKS_PER_SEC;
 	/* hits by curve parameter */
 	for (i = 1; i < nh; i++)
@@ -87,8 +87,8 @@ static void demo_curve_surface(void)
 		for (i = 0; i <= 40; i++)
 		{
 			double p[3], q[3];
-			qaws_exact_surface_evaluate(es, 2.0 * k / 16, 2.0 * i / 40, 0, p, NULL);
-			qaws_exact_surface_evaluate(es, 2.0 * i / 40, 2.0 * k / 16, 0, q, NULL);
+			qaws_exact_surface_evaluate(p, NULL, es, 2.0 * k / 16, 2.0 * i / 40, 0);
+			qaws_exact_surface_evaluate(q, NULL, es, 2.0 * i / 40, 2.0 * k / 16, 0);
 			project(&pr, p[0], p[1], p[2], &xy[2 * i], &xy[2 * i + 1]);
 			project(&pr, q[0], q[1], q[2], &xy2[2 * i], &xy2[2 * i + 1]);
 		}
@@ -104,7 +104,7 @@ static void demo_curve_surface(void)
 			for (i = 0; i <= 200; i++)
 			{
 				double p[3];
-				qaws_exact_curve_evaluate(ec, tprev + (tnext - tprev) * i / 200.0, 0, p, NULL);
+				qaws_exact_curve_evaluate(p, NULL, ec, tprev + (tnext - tprev) * i / 200.0, 0);
 				project(&pr, p[0], p[1], p[2], &xy[2 * i], &xy[2 * i + 1]);
 			}
 			svg_polyline(&sv, xy, 201, (k % 2) ? "#bc4c00" : "#0969da", 2.6, 1, 0);
@@ -114,7 +114,7 @@ static void demo_curve_surface(void)
 	for (k = 0; k < nh; k++)
 	{
 		double p[3], x, y;
-		qaws_exact_curve_evaluate(ec, 0.5 * (hits[k].t_lo + hits[k].t_hi), 0, p, NULL);
+		qaws_exact_curve_evaluate(p, NULL, ec, 0.5 * (hits[k].t_lo + hits[k].t_hi), 0);
 		project(&pr, p[0], p[1], p[2], &x, &y);
 		svg_circle(&sv, x, y, 5, "#ffffff", "#1a7f37");
 	}

@@ -16,12 +16,12 @@ static void fairing_energy(qaws_scalar const* cps, qaws_scalar const* ref, qaws_
 	double e = 0;
 	int i;
 
-	qaws_curve_eval_batch_tangent_2d(NULL, c, ts, NULL, FAIR_SAMPLES, 0x7, NULL, primal, tangent);
+	qaws_curve_eval_batch_tangent_2d(primal, tangent, c, ts, NULL, NULL, FAIR_SAMPLES, 0x7, NULL);
 	memset(ybar, 0, sizeof(ybar));
 	for (i = 0; i < FAIR_SAMPLES; i++)
 	{
 		qaws_curve_geometry_2d g, gbar;
-		qaws_curve_geometry_eval_2d(&primal[i], NULL, NULL, &g, NULL, NULL, NULL);
+		qaws_curve_geometry_eval_2d(&g, NULL, NULL, NULL, &primal[i], NULL, NULL);
 		if (kappa_out)
 			kappa_out[i] = g.curvature;
 		/* E = mean(kappa^2 * speed) + lambda * mean |C - C_ref|^2 */
@@ -29,7 +29,7 @@ static void fairing_energy(qaws_scalar const* cps, qaws_scalar const* ref, qaws_
 		memset(&gbar, 0, sizeof(gbar));
 		gbar.curvature = (qaws_scalar)(2 * g.curvature * g.speed / FAIR_SAMPLES);
 		gbar.speed = (qaws_scalar)(g.curvature * g.curvature / FAIR_SAMPLES);
-		qaws_curve_geometry_adjoint_2d(&primal[i], &gbar, &ybar[i], NULL);
+		qaws_curve_geometry_adjoint_2d(NULL, &ybar[i], &primal[i], &gbar);
 	}
 	{
 		qaws_curve* r = bspline_2d(ref, FAIR_CP);
@@ -37,7 +37,7 @@ static void fairing_energy(qaws_scalar const* cps, qaws_scalar const* ref, qaws_
 		{
 			qaws_eval_result_2d er;
 			double dx, dy;
-			qaws_curve_evaluate_2d(r, ts[i], QAWS_EVAL_FLAG_POSITION, &er);
+			qaws_curve_evaluate_2d(&er, r, ts[i], QAWS_EVAL_FLAG_POSITION);
 			dx = primal[i].d[0].x - er.position.x;
 			dy = primal[i].d[0].y - er.position.y;
 			e += lambda * (dx * dx + dy * dy) / FAIR_SAMPLES;
@@ -49,7 +49,7 @@ static void fairing_energy(qaws_scalar const* cps, qaws_scalar const* ref, qaws_
 	}
 	memset(grad, 0, sizeof(qaws_scalar) * FAIR_CP * 2);
 	views = one_field(&fv, QAWS_FIELD_CONTROL_POINTS, grad, FAIR_CP, 2);
-	qaws_curve_eval_batch_adjoint_2d(NULL, c, ts, FAIR_SAMPLES, 0x7, ybar, &views, NULL);
+	qaws_curve_eval_batch_adjoint_2d(&views, NULL, c, ts, ybar, FAIR_SAMPLES, 0x7, NULL);
 	qaws_curve_destroy(c);
 	*out_energy = e;
 }
@@ -64,8 +64,8 @@ static void draw_comb(svg* s, viewport const* v, qaws_scalar const* cps, qaws_sc
 		qaws_curve_jet_2d p, t;
 		qaws_curve_geometry_2d g;
 		double tipx, tipy;
-		qaws_curve_eval_tangent_2d(NULL, c, ts[i], 0, 0x7, NULL, &p, &t);
-		qaws_curve_geometry_eval_2d(&p, NULL, NULL, &g, NULL, NULL, NULL);
+		qaws_curve_eval_tangent_2d(&p, &t, c, NULL, ts[i], 0, 0x7, NULL);
+		qaws_curve_geometry_eval_2d(&g, NULL, NULL, NULL, &p, NULL, NULL);
 		xy[2 * i] = vx(v, p.d[0].x);
 		xy[2 * i + 1] = vy(v, p.d[0].y);
 		tipx = vx(v, p.d[0].x - 0.12 * g.curvature * g.normal.x);

@@ -30,12 +30,12 @@ typedef struct cs_ctx
 
 static void* cs_alloc(size_t b)
 {
-	return qaws_internal_alloc(NULL, b);
+	return qaws_internal_alloc(b, NULL);
 }
 
 static void cs_free(void* p)
 {
-	qaws_internal_dealloc(NULL, p);
+	qaws_internal_dealloc(p, NULL);
 }
 
 /* Divides one tensor by the gcd of its coefficients (a positive factor). */
@@ -886,8 +886,8 @@ int qaws_exact_curve_surface_hits_overlap(qaws_exact_curve_surface_hit const* a,
 	return overlap(a->t_lo, a->t_hi, b->t_lo, b->t_hi) && overlap(a->u_lo, a->u_hi, b->u_lo, b->u_hi) && overlap(a->v_lo, a->v_hi, b->v_lo, b->v_hi);
 }
 
-qaws_status qaws_exact_curve_surface_hits(qaws_exact_curve const* curve, qaws_exact_surface const* surface, qaws_exact_curve_surface_hit* out_hits,
-	unsigned int capacity, unsigned int* out_count)
+qaws_status qaws_exact_curve_surface_hits(qaws_exact_curve_surface_hit* out_hits, unsigned int* out_count, qaws_exact_curve const* curve,
+	qaws_exact_surface const* surface, unsigned int capacity)
 {
 	unsigned int ks, iu, iv, count = 0, k;
 	qaws_exact_curve_surface_hit tmp[64];

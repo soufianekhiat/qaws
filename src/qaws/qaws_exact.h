@@ -36,15 +36,15 @@ typedef enum qaws_exact_path
 } qaws_exact_path;
 
 /* Sign of (a - c) x (b - c): positive when a, b, c turn counterclockwise. */
-qaws_status qaws_exact_orient2d(double const a[2], double const b[2], double const c[2], qaws_exact_sign* out_sign,
-	qaws_exact_path* out_path);
+qaws_status qaws_exact_orient2d(qaws_exact_sign* out_sign, qaws_exact_path* out_path, double const a[2], double const b[2],
+	double const c[2]);
 
 /* Sign of the volume (a - d) . ((b - d) x (c - d)). */
-qaws_status qaws_exact_orient3d(double const a[3], double const b[3], double const c[3], double const d[3],
-	qaws_exact_sign* out_sign, qaws_exact_path* out_path);
+qaws_status qaws_exact_orient3d(qaws_exact_sign* out_sign, qaws_exact_path* out_path, double const a[3], double const b[3],
+	double const c[3], double const d[3]);
 
 /* Sign of a / b - c / d (b, d non-zero). */
-qaws_status qaws_exact_compare_ratio(double a, double b, double c, double d, qaws_exact_sign* out_sign, qaws_exact_path* out_path);
+qaws_status qaws_exact_compare_ratio(qaws_exact_sign* out_sign, qaws_exact_path* out_path, double a, double b, double c, double d);
 
 /* ===================================================================
  * Exact curves
@@ -103,8 +103,8 @@ typedef struct qaws_exact_report
 /* Defaults: 2^-20 world units, 26 coordinate bits, 24 parameter and weight bits. */
 void qaws_exact_desc_default(qaws_exact_desc* desc);
 
-qaws_status qaws_exact_curve_prepare(qaws_exact_desc const* desc, qaws_curve const* curve, qaws_exact_curve** out_curve,
-	qaws_exact_report* out_report);
+qaws_status qaws_exact_curve_prepare(qaws_exact_curve** out_curve, qaws_exact_report* out_report, qaws_curve const* curve,
+	qaws_exact_desc const* desc);
 void qaws_exact_curve_destroy(qaws_exact_curve* curve);
 
 /*
@@ -113,8 +113,8 @@ void qaws_exact_curve_destroy(qaws_exact_curve* curve);
  * `dimension` doubles, C, C', ..., C^(order), order <= 3. out_report (may be
  * NULL) receives the parameter quantization error.
  */
-qaws_status qaws_exact_curve_evaluate(qaws_exact_curve const* curve, double t, unsigned int order, double* out,
-	qaws_exact_report* out_report);
+qaws_status qaws_exact_curve_evaluate(double* out, qaws_exact_report* out_report, qaws_exact_curve const* curve, double t,
+	unsigned int order);
 
 /* Number of spans (one exact rational Bezier each). */
 unsigned int qaws_exact_curve_span_count(qaws_exact_curve const* curve);
@@ -125,8 +125,8 @@ unsigned int qaws_exact_curve_span_count(qaws_exact_curve const* curve);
  * units) and weights relative to the largest one (any of the outputs may
  * be NULL; points and weights hold degree + 1 entries).
  */
-qaws_status qaws_exact_curve_span_bezier(qaws_exact_curve const* curve, unsigned int s, unsigned int* out_degree, double* out_t0,
-	double* out_t1, double* out_points, double* out_weights);
+qaws_status qaws_exact_curve_span_bezier(unsigned int* out_degree, double* out_t0, double* out_t1, double* out_points,
+	double* out_weights, qaws_exact_curve const* curve, unsigned int s);
 
 /*
  * Certified winding number of a closed 2D loop of exact curves (each
@@ -138,7 +138,7 @@ qaws_status qaws_exact_curve_span_bezier(qaws_exact_curve const* curve, unsigned
  * 2^-max_depth of it in parameter, past the subdivision budget): the
  * winding number is then undefined, never guessed.
  */
-qaws_status qaws_exact_winding_2d(qaws_exact_curve const* const* pieces, unsigned int count, double const p[2], int* out_winding);
+qaws_status qaws_exact_winding_2d(int* out_winding, qaws_exact_curve const* const* pieces, double const p[2], unsigned int count);
 
 /* ===================================================================
  * Certified intersections
@@ -171,12 +171,12 @@ typedef struct qaws_exact_hit
  * told from two close crossings by signs), QAWS_STATUS_BUFFER_TOO_SMALL
  * past capacity (out_count holds the number found so far).
  */
-qaws_status qaws_exact_curve_line_hits(qaws_exact_curve const* curve, double const p0[2], double const p1[2], double width,
-	qaws_exact_hit* out_hits, unsigned int capacity, unsigned int* out_count);
+qaws_status qaws_exact_curve_line_hits(qaws_exact_hit* out_hits, unsigned int* out_count, qaws_exact_curve const* curve, double const p0[2],
+	double const p1[2], double width, unsigned int capacity);
 
 /* The same for a 3D exact curve and the plane through `point` with normal `normal` (doubles, taken exactly). */
-qaws_status qaws_exact_curve_plane_hits(qaws_exact_curve const* curve, double const point[3], double const normal[3], double width,
-	qaws_exact_hit* out_hits, unsigned int capacity, unsigned int* out_count);
+qaws_status qaws_exact_curve_plane_hits(qaws_exact_hit* out_hits, unsigned int* out_count, qaws_exact_curve const* curve, double const point[3],
+	double const normal[3], double width, unsigned int capacity);
 
 /*
  * An intersection of two curves: curve a's parameter in [a_lo, a_hi], curve
@@ -216,8 +216,8 @@ typedef struct qaws_exact_pair
  * of the implicitized span (both implicitizations tried); a hit on a span
  * end at an irrational root is decided by an exact gcd test.
  */
-qaws_status qaws_exact_curve_curve_hits(qaws_exact_curve const* a, qaws_exact_curve const* b, qaws_exact_pair* out_pairs, unsigned int capacity,
-	unsigned int* out_count);
+qaws_status qaws_exact_curve_curve_hits(qaws_exact_pair* out_pairs, unsigned int* out_count, qaws_exact_curve const* a, qaws_exact_curve const* b,
+	unsigned int capacity);
 
 /*
  * Certified self-intersections of a 2D or 3D exact curve: pairs a < b with
@@ -232,7 +232,7 @@ qaws_status qaws_exact_curve_curve_hits(qaws_exact_curve const* a, qaws_exact_cu
  * exactly. QAWS_STATUS_CERTIFICATION_FAILED for a contact through a
  * singular point, an irrational cusp or a span folding back on itself.
  */
-qaws_status qaws_exact_curve_self_hits(qaws_exact_curve const* curve, qaws_exact_pair* out_pairs, unsigned int capacity, unsigned int* out_count);
+qaws_status qaws_exact_curve_self_hits(qaws_exact_pair* out_pairs, unsigned int* out_count, qaws_exact_curve const* curve, unsigned int capacity);
 
 /*
  * Certified intersections of N exact curves at once (all 2D or all 3D, one
@@ -278,8 +278,8 @@ typedef struct qaws_exact_batch_stats
 	unsigned int patch_count;       /* surface patches (curve / surface batch) */
 } qaws_exact_batch_stats;
 
-qaws_status qaws_exact_curve_batch_hits(qaws_exact_batch_desc const* desc, qaws_exact_batch_hit* out_hits, unsigned int capacity,
-	unsigned int* out_count, qaws_exact_batch_stats* out_stats);
+qaws_status qaws_exact_curve_batch_hits(qaws_exact_batch_hit* out_hits, unsigned int* out_count, qaws_exact_batch_stats* out_stats,
+	unsigned int capacity, qaws_exact_batch_desc const* desc);
 
 /*
  * Certified closest points: for every query point (exact doubles, world
@@ -307,8 +307,8 @@ typedef struct qaws_exact_closest_point
 
 /* points: point_count points of the curves' dimension. stats: span_count,
    candidate_count (spans solved), hit_count, uncertified_count. */
-qaws_status qaws_exact_curve_batch_closest(qaws_exact_batch_desc const* desc, double const* points, unsigned int point_count,
-	qaws_exact_closest_point* out_points, qaws_exact_batch_stats* out_stats);
+qaws_status qaws_exact_curve_batch_closest(qaws_exact_closest_point* out_points, qaws_exact_batch_stats* out_stats, double const* points,
+	unsigned int point_count, qaws_exact_batch_desc const* desc);
 
 /* ===================================================================
  * Certified 2D Boolean operations
@@ -342,8 +342,8 @@ typedef struct qaws_exact_loop
  * QAWS_STATUS_CERTIFICATION_FAILED when a crossing cannot be certified
  * (a tangency, an overlap) or a boundary is not simple.
  */
-qaws_status qaws_exact_boolean_2d(qaws_exact_curve const* a, qaws_exact_curve const* b, unsigned int operation, qaws_exact_piece* out_pieces,
-	unsigned int piece_capacity, unsigned int* out_piece_count, qaws_exact_loop* out_loops, unsigned int loop_capacity, unsigned int* out_loop_count);
+qaws_status qaws_exact_boolean_2d(qaws_exact_piece* out_pieces, unsigned int* out_piece_count, qaws_exact_loop* out_loops, unsigned int* out_loop_count,
+	qaws_exact_curve const* a, qaws_exact_curve const* b, unsigned int piece_capacity, unsigned int loop_capacity, unsigned int operation);
 
 /* ===================================================================
  * Exact tensor-product surfaces
@@ -358,8 +358,8 @@ qaws_status qaws_exact_boolean_2d(qaws_exact_curve const* a, qaws_exact_curve co
 
 typedef struct qaws_exact_surface qaws_exact_surface;
 
-qaws_status qaws_exact_surface_prepare(qaws_exact_desc const* desc, qaws_surface const* surface, qaws_exact_surface** out_surface,
-	qaws_exact_report* out_report);
+qaws_status qaws_exact_surface_prepare(qaws_exact_surface** out_surface, qaws_exact_report* out_report, qaws_surface const* surface,
+	qaws_exact_desc const* desc);
 void qaws_exact_surface_destroy(qaws_exact_surface* surface);
 
 /*
@@ -368,8 +368,8 @@ void qaws_exact_surface_destroy(qaws_exact_surface* surface);
  * order 2 adds Suu, Suv, Svv (out holds 3, 9 or 18 doubles).
  * out_normal (may be NULL) receives Su x Sv, rounded once.
  */
-qaws_status qaws_exact_surface_evaluate(qaws_exact_surface const* surface, double u, double v, unsigned int order, double* out,
-	double* out_normal);
+qaws_status qaws_exact_surface_evaluate(double* out, double* out_normal, qaws_exact_surface const* surface, double u, double v,
+	unsigned int order);
 
 /* A line / surface intersection: patch parameters and the line parameter, enclosed. */
 typedef struct qaws_exact_surface_hit
@@ -392,8 +392,8 @@ typedef struct qaws_exact_surface_hit
  * lying on the surface, or a hit on a patch edge at an irrational
  * parameter.
  */
-qaws_status qaws_exact_surface_line_hits(qaws_exact_surface const* surface, double const p0[3], double const p1[3], qaws_exact_surface_hit* out_hits,
-	unsigned int capacity, unsigned int* out_count);
+qaws_status qaws_exact_surface_line_hits(qaws_exact_surface_hit* out_hits, unsigned int* out_count, qaws_exact_surface const* surface, double const p0[3],
+	double const p1[3], unsigned int capacity);
 
 /* A curve / surface intersection: the curve's parameter and the surface's, enclosed. */
 typedef struct qaws_exact_curve_surface_hit
@@ -419,8 +419,8 @@ typedef struct qaws_exact_curve_surface_hit
  * subdivision budget runs out (a tangency, the curve lying on the
  * surface, or crossings closer than the budget separates).
  */
-qaws_status qaws_exact_curve_surface_hits(qaws_exact_curve const* curve, qaws_exact_surface const* surface, qaws_exact_curve_surface_hit* out_hits,
-	unsigned int capacity, unsigned int* out_count);
+qaws_status qaws_exact_curve_surface_hits(qaws_exact_curve_surface_hit* out_hits, unsigned int* out_count, qaws_exact_curve const* curve,
+	qaws_exact_surface const* surface, unsigned int capacity);
 
 /*
  * Certified intersections of N 3D exact curves with M exact surfaces at
@@ -450,8 +450,8 @@ typedef struct qaws_exact_curve_surface_batch_hit
 	qaws_exact_curve_surface_hit hit;
 } qaws_exact_curve_surface_batch_hit;
 
-qaws_status qaws_exact_curve_surface_batch_hits(qaws_exact_surface_batch_desc const* desc, qaws_exact_curve_surface_batch_hit* out_hits,
-	unsigned int capacity, unsigned int* out_count, qaws_exact_batch_stats* out_stats);
+qaws_status qaws_exact_curve_surface_batch_hits(qaws_exact_curve_surface_batch_hit* out_hits, unsigned int* out_count,
+	qaws_exact_batch_stats* out_stats, unsigned int capacity, qaws_exact_surface_batch_desc const* desc);
 
 /* A point of a surface / surface intersection curve: (u1, v1) on a, (u2, v2) on b, enclosed. */
 typedef struct qaws_exact_ssi_point
@@ -484,9 +484,9 @@ typedef struct qaws_exact_ssi_branch
  * QAWS_STATUS_CERTIFICATION_FAILED for tangential contact, overlapping
  * surfaces or a singular intersection point (the budget runs out).
  */
-qaws_status qaws_exact_surface_surface_hits(qaws_exact_surface const* a, qaws_exact_surface const* b, unsigned int min_depth, qaws_exact_ssi_point* out_points,
-	unsigned int point_capacity, unsigned int* out_point_count, qaws_exact_ssi_branch* out_branches, unsigned int branch_capacity,
-	unsigned int* out_branch_count);
+qaws_status qaws_exact_surface_surface_hits(qaws_exact_ssi_point* out_points, unsigned int* out_point_count, qaws_exact_ssi_branch* out_branches, unsigned int* out_branch_count,
+	qaws_exact_surface const* a, qaws_exact_surface const* b, unsigned int point_capacity, unsigned int branch_capacity,
+	unsigned int min_depth);
 
 /*
  * Certified intersection curves of N exact surfaces at once (one exact
@@ -517,9 +517,9 @@ typedef struct qaws_exact_ssi_batch_branch
 	qaws_exact_ssi_branch branch;   /* first indexes the shared point buffer */
 } qaws_exact_ssi_batch_branch;
 
-qaws_status qaws_exact_surface_batch_hits(qaws_exact_ssi_batch_desc const* desc, qaws_exact_ssi_point* out_points, unsigned int point_capacity,
-	unsigned int* out_point_count, qaws_exact_ssi_batch_branch* out_branches, unsigned int branch_capacity, unsigned int* out_branch_count,
-	qaws_exact_batch_stats* out_stats);
+qaws_status qaws_exact_surface_batch_hits(qaws_exact_ssi_point* out_points, unsigned int* out_point_count, qaws_exact_ssi_batch_branch* out_branches,
+	unsigned int* out_branch_count, qaws_exact_batch_stats* out_stats, unsigned int point_capacity, unsigned int branch_capacity,
+	qaws_exact_ssi_batch_desc const* desc);
 
 /*
  * Certified closest points on surfaces: for every query point (exact
@@ -544,8 +544,8 @@ typedef struct qaws_exact_surface_closest_point
 } qaws_exact_surface_closest_point;
 
 /* stats: patch_count, candidate_count (patches solved), hit_count, uncertified_count */
-qaws_status qaws_exact_surface_batch_closest(qaws_exact_ssi_batch_desc const* desc, double const* points, unsigned int point_count,
-	qaws_exact_surface_closest_point* out_points, qaws_exact_batch_stats* out_stats);
+qaws_status qaws_exact_surface_batch_closest(qaws_exact_surface_closest_point* out_points, qaws_exact_batch_stats* out_stats, double const* points,
+	unsigned int point_count, qaws_exact_ssi_batch_desc const* desc);
 
 /*
  * Certified ray casting: the first hit of every ray x = p0 + t (p1 - p0),
@@ -567,18 +567,18 @@ typedef struct qaws_exact_ray_hit
 
 /* p0, p1: ray_count points of 3 doubles. stats: patch_count, candidate_count
    (patches solved), hit_count, uncertified_count. */
-qaws_status qaws_exact_surface_batch_raycast(qaws_exact_ssi_batch_desc const* desc, double const* p0, double const* p1, unsigned int ray_count,
-	double max_t, qaws_exact_ray_hit* out_hits, qaws_exact_batch_stats* out_stats);
+qaws_status qaws_exact_surface_batch_raycast(qaws_exact_ray_hit* out_hits, qaws_exact_batch_stats* out_stats, double const* p0, double const* p1,
+	unsigned int ray_count, qaws_exact_ssi_batch_desc const* desc, double max_t);
 
 /* Patches along u and v (one exact rational Bezier patch each). */
-void qaws_exact_surface_patch_count(qaws_exact_surface const* surface, unsigned int* out_u_count, unsigned int* out_v_count);
+void qaws_exact_surface_patch_count(unsigned int* out_u_count, unsigned int* out_v_count, qaws_exact_surface const* surface);
 
 /*
  * Patch (iu, iv) rounded once: degrees, parameter rectangle, control
  * points (row-major, (p + 1) (q + 1) vec3, u index major) and weights
  * relative to the largest (any output may be NULL).
  */
-qaws_status qaws_exact_surface_patch_bezier(qaws_exact_surface const* surface, unsigned int iu, unsigned int iv, unsigned int* out_p,
-	unsigned int* out_q, double out_rect[4], double* out_points, double* out_weights);
+qaws_status qaws_exact_surface_patch_bezier(unsigned int* out_p, unsigned int* out_q, double out_rect[4], double* out_points,
+	double* out_weights, qaws_exact_surface const* surface, unsigned int iu, unsigned int iv);
 
 #endif /* QAWS_EXACT_H */

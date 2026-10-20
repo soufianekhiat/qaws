@@ -29,11 +29,11 @@ A **region** is a list of closed paths read with a fill rule, as in Clipper2:
 ## Construction
 
 ```c
-qaws_status qaws_curve_create_polyline_2d(qaws_scalar const* points, unsigned int point_count, int closed,
-	qaws_curve** out_curve);
-qaws_status qaws_curve_create_ellipse_2d(qaws_scalar center_x, qaws_scalar center_y,
-	qaws_scalar radius_x, qaws_scalar radius_y, qaws_scalar rotation, qaws_curve** out_curve);
-qaws_status qaws_curve_transform_2d(qaws_curve const* curve, qaws_scalar const m[6], qaws_curve** out_curve);
+qaws_status qaws_curve_create_polyline_2d(qaws_curve** out_curve, qaws_scalar const* points, unsigned int point_count,
+	int closed);
+qaws_status qaws_curve_create_ellipse_2d(qaws_curve** out_curve, qaws_scalar center_x,
+	qaws_scalar center_y, qaws_scalar radius_x, qaws_scalar radius_y, qaws_scalar rotation);
+qaws_status qaws_curve_transform_2d(qaws_curve** out_curve, qaws_curve const* curve, qaws_scalar const m[6]);
 ```
 
 - **Polyline**: a degree-1 B-spline through the points, with parameter i at
@@ -55,11 +55,11 @@ qaws_status qaws_curve_transform_2d(qaws_curve const* curve, qaws_scalar const m
 ## Measures
 
 ```c
-qaws_status qaws_path_compute_area_2d(qaws_path_2d const* path, qaws_scalar* out_area);
-qaws_status qaws_region_compute_area_2d(qaws_path_2d const* paths, unsigned int path_count, qaws_scalar* out_area);
+qaws_status qaws_path_compute_area_2d(qaws_scalar* out_area, qaws_path_2d const* path);
+qaws_status qaws_region_compute_area_2d(qaws_scalar* out_area, qaws_path_2d const* paths, unsigned int path_count);
 int         qaws_path_is_positive_2d(qaws_path_2d const* path);
-qaws_status qaws_path_compute_length_2d(qaws_path_2d const* path, qaws_scalar* out_length);
-qaws_status qaws_path_compute_bounds_2d(qaws_path_2d const* path, qaws_vec2* out_min, qaws_vec2* out_max);
+qaws_status qaws_path_compute_length_2d(qaws_scalar* out_length, qaws_path_2d const* path);
+qaws_status qaws_path_compute_bounds_2d(qaws_vec2* out_min, qaws_vec2* out_max, qaws_path_2d const* path);
 ```
 
 - **Area** is the signed integral of x dy around the path. It is positive
@@ -74,9 +74,9 @@ qaws_status qaws_path_compute_bounds_2d(qaws_path_2d const* path, qaws_vec2* out
 ## Point location
 
 ```c
-qaws_status qaws_region_locate_point_2d(qaws_path_2d const* paths, unsigned int path_count,
-	qaws_fill_rule fill_rule, qaws_vec2 point, qaws_scalar tolerance, qaws_point_location* out_location);
-qaws_status qaws_path_compute_winding_2d(qaws_path_2d const* path, qaws_vec2 point, int* out_winding);
+qaws_status qaws_region_locate_point_2d(qaws_point_location* out_location, qaws_path_2d const* paths,
+	unsigned int path_count, qaws_fill_rule fill_rule, qaws_vec2 point, qaws_scalar tolerance);
+qaws_status qaws_path_compute_winding_2d(int* out_winding, qaws_path_2d const* path, qaws_vec2 point);
 ```
 
 The location is one of:
@@ -101,10 +101,10 @@ Test 83 resolves a point 1e-7 inside and 1e-7 outside a circle of radius 2.
 These are Clipper2's utilities, on arrays of 2D points:
 
 ```c
-qaws_status qaws_polyline_strip_duplicates_2d(points, count, closed, out, out_count);
-qaws_status qaws_polyline_trim_collinear_2d(points, count, closed, out, out_count);
-qaws_status qaws_polyline_simplify_2d(points, count, closed, epsilon, out, out_count);
-qaws_status qaws_polyline_rdp_2d(points, count, epsilon, out, out_count);
+qaws_status qaws_polyline_strip_duplicates_2d(out, out_count, points, count, closed);
+qaws_status qaws_polyline_trim_collinear_2d(out, out_count, points, count, closed);
+qaws_status qaws_polyline_simplify_2d(out, out_count, points, count, closed, epsilon);
+qaws_status qaws_polyline_rdp_2d(out, out_count, points, count, epsilon);
 ```
 
 - **Strip duplicates** removes consecutive repeated points. A closed

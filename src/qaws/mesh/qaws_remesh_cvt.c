@@ -1200,7 +1200,7 @@ static int rv_eval(rv_cvt* w, double const* z, qaws_mesh_location const* foot, d
 	for (i = 0; i < w->n; i++)
 		for (k = 0; k < 3; k++)
 			w->box[i].lo[k] = w->box[i].hi[k] = z[3 * (size_t)i + k];
-	if (qaws_internal_grid_create(w->box, w->n, 3, &w->grid) != QAWS_STATUS_OK)
+	if (qaws_internal_grid_create(&w->grid, w->box, w->n, 3) != QAWS_STATUS_OK)
 		return 0;
 	{
 		double lb = qaws_internal_grid_ring(w->grid, z, 2, rv_nothing, NULL);   /* (ring 2 is at least a cell away) */

@@ -26,7 +26,7 @@ static double cp_dense_2d(qaws_curve const* c, qaws_vec2 q, unsigned int n)
 	for (i = 0; i <= n; i++)
 	{
 		qaws_eval_result_2d e;
-		qaws_curve_evaluate_2d(c, r.min_value + (r.max_value - r.min_value) * (qaws_scalar)i / n, QAWS_EVAL_FLAG_POSITION, &e);
+		qaws_curve_evaluate_2d(&e, c, r.min_value + (r.max_value - r.min_value) * (qaws_scalar)i / n, QAWS_EVAL_FLAG_POSITION);
 		best = fmin(best, hypot(e.position.x - q.x, e.position.y - q.y));
 	}
 	return best;
@@ -72,7 +72,7 @@ static void test_spike(void)
 		ps[k] = (qaws_scalar)p[k];
 	memset(&d, 0, sizeof d);
 	d.dimension = QAWS_DIMENSION_2D; d.degree = 3; d.control_points = ps; d.control_point_count = CP_N;
-	TEST_ASSERT(qaws_curve_create_bspline(&d, &c) == QAWS_STATUS_OK, "spiked circle created");
+	TEST_ASSERT(qaws_curve_create_bspline(&c, &d) == QAWS_STATUS_OK, "spiked circle created");
 	/* sampling and Newton alone, from the 32 samples: they stop on the circle */
 	{
 		qaws_range r = qaws_curve_get_parameter_range(c);
@@ -81,7 +81,7 @@ static void test_spike(void)
 		for (i = 0; i < 32; i++)
 		{
 			qaws_eval_result_2d e;
-			qaws_curve_evaluate_2d(c, r.min_value + (r.max_value - r.min_value) * (qaws_scalar)i / 31, QAWS_EVAL_FLAG_POSITION, &e);
+			qaws_curve_evaluate_2d(&e, c, r.min_value + (r.max_value - r.min_value) * (qaws_scalar)i / 31, QAWS_EVAL_FLAG_POSITION);
 			best = fmin(best, hypot(e.position.x, e.position.y));
 		}
 		snprintf(msg, sizeof msg, "the 32 samples see no spike (nearest %.3f)", best);
@@ -94,7 +94,7 @@ static void test_spike(void)
 	printf("  %s\n", msg);
 	TEST_ASSERT(dist < 4 && dist <= dense + cp_round(5, 1e-12) && t > 64 && t < 68, msg);
 	TEST_ASSERT(gap >= 0 && gap <= CP_GAP * 10, "gap within the tolerance");
-	TEST_ASSERT(qaws_curve_find_closest_parameter_2d(c, q, &ts) == QAWS_STATUS_OK && ts == t, "find_closest_parameter gives the same");
+	TEST_ASSERT(qaws_curve_find_closest_parameter_2d(&ts, c, q) == QAWS_STATUS_OK && ts == t, "find_closest_parameter gives the same");
 
 	/* the same curve borrowed */
 	memset(&v, 0, sizeof v);
@@ -124,7 +124,7 @@ static void test_circle(void)
 	memset(&d, 0, sizeof d);
 	d.dimension = QAWS_DIMENSION_2D; d.degree = 2; d.control_points = p; d.control_point_count = 9;
 	d.knots = knots; d.knot_count = 12; d.weights = w; d.weight_count = 9;
-	TEST_ASSERT(qaws_curve_create_nurbs(&d, &c) == QAWS_STATUS_OK, "rational circle created");
+	TEST_ASSERT(qaws_curve_create_nurbs(&c, &d) == QAWS_STATUS_OK, "rational circle created");
 	qaws_curve_find_closest_point_certified_2d(c, q, &t, &dist, &gap);
 	snprintf(msg, sizeof msg, "rational circle: distance sqrt(10) - 2 (error %.1e, gap %.1e)", fabs(dist - (sqrt(10.0) - 2)), (double)gap);
 	printf("  %s\n", msg);
@@ -146,7 +146,7 @@ static void test_bezier_3d(void)
 	char msg[200];
 	memset(&d, 0, sizeof d);
 	d.dimension = QAWS_DIMENSION_3D; d.degree = 5; d.control_points = p; d.control_point_count = 6;
-	qaws_curve_create_bezier(&d, &c);
+	qaws_curve_create_bezier(&c, &d);
 	for (k = 0; k < 24; k++)
 	{
 		qaws_vec3 q;
@@ -157,7 +157,7 @@ static void test_bezier_3d(void)
 		for (i = 0; i <= 100000; i++)
 		{
 			qaws_eval_result_3d e;
-			qaws_curve_evaluate_3d(c, (qaws_scalar)i / 100000, QAWS_EVAL_FLAG_POSITION, &e);
+			qaws_curve_evaluate_3d(&e, c, (qaws_scalar)i / 100000, QAWS_EVAL_FLAG_POSITION);
 			dense = fmin(dense, sqrt((e.position.x - q.x) * (e.position.x - q.x) + (e.position.y - q.y) * (e.position.y - q.y)
 				+ (e.position.z - q.z) * (e.position.z - q.z)));
 		}
@@ -179,9 +179,9 @@ static void test_other_families(void)
 	qaws_scalar t = -1, dist, gap;
 	memset(&d, 0, sizeof d);
 	d.dimension = QAWS_DIMENSION_2D; d.degree = 3; d.points = pts; d.derivatives = der; d.point_count = 2; d.derivative_count = 2;
-	TEST_ASSERT(qaws_curve_create_hermite(&d, &c) == QAWS_STATUS_OK, "Hermite curve created");
+	TEST_ASSERT(qaws_curve_create_hermite(&c, &d) == QAWS_STATUS_OK, "Hermite curve created");
 	TEST_ASSERT(qaws_curve_find_closest_point_certified_2d(c, q, &t, &dist, &gap) == QAWS_STATUS_UNSUPPORTED_OPERATION, "Hermite: not certified");
-	TEST_ASSERT(qaws_curve_find_closest_parameter_2d(c, q, &t) == QAWS_STATUS_OK && fabs(t - 0.5) <= 1e-6, "Hermite: still answered (t = 0.5)");
+	TEST_ASSERT(qaws_curve_find_closest_parameter_2d(&t, c, q) == QAWS_STATUS_OK && fabs(t - 0.5) <= 1e-6, "Hermite: still answered (t = 0.5)");
 	TEST_ASSERT(qaws_curve_find_closest_point_certified_2d(c, q, &t, NULL, &gap) == QAWS_STATUS_INVALID_ARGUMENT, "no output refused");
 	qaws_curve_destroy(c);
 }
@@ -217,13 +217,13 @@ static void test_surfaces(void)
 	cp_cap_points(p);
 	memset(&d, 0, sizeof d);
 	d.u_degree = 3; d.v_degree = 3; d.control_points = p; d.u_point_count = CP_S; d.v_point_count = CP_S;
-	TEST_ASSERT(qaws_surface_create_bspline(&d, &s) == QAWS_STATUS_OK, "spiked cap created");
+	TEST_ASSERT(qaws_surface_create_bspline(&s, &d) == QAWS_STATUS_OK, "spiked cap created");
 	for (i = 0; i <= 600; i++)
 		for (j = 0; j <= 600; j++)
 		{
 			qaws_surface_eval_result e;
 			double r;
-			qaws_surface_evaluate(s, (qaws_scalar)i / 600, (qaws_scalar)j / 600, QAWS_SURFACE_EVAL_POSITION, &e);
+			qaws_surface_evaluate(&e, s, (qaws_scalar)i / 600, (qaws_scalar)j / 600, QAWS_SURFACE_EVAL_POSITION);
 			r = sqrt((double)e.position.x * e.position.x + (double)e.position.y * e.position.y + (double)e.position.z * e.position.z);
 			dense = fmin(dense, r);
 			if (i % 600 == 0 || (i * 7) % 600 == 0)
@@ -263,7 +263,7 @@ static void test_surfaces(void)
 			}
 		memset(&bd, 0, sizeof bd);
 		bd.u_degree = 3; bd.v_degree = 3; bd.control_points = n; bd.u_point_count = 4; bd.v_point_count = 4;
-		TEST_ASSERT(qaws_surface_create_bezier(&bd, &s) == QAWS_STATUS_OK, "bicubic patch created");
+		TEST_ASSERT(qaws_surface_create_bezier(&s, &bd) == QAWS_STATUS_OK, "bicubic patch created");
 		for (k = 0; k < 12; k++)
 		{
 			qaws_vec3 x;
@@ -274,7 +274,7 @@ static void test_surfaces(void)
 				for (j = 0; j <= 300; j++)
 				{
 					qaws_surface_eval_result e;
-					qaws_surface_evaluate(s, (qaws_scalar)i / 300, (qaws_scalar)j / 300, QAWS_SURFACE_EVAL_POSITION, &e);
+					qaws_surface_evaluate(&e, s, (qaws_scalar)i / 300, (qaws_scalar)j / 300, QAWS_SURFACE_EVAL_POSITION);
 					dense = fmin(dense, sqrt(((double)e.position.x - x.x) * ((double)e.position.x - x.x) + ((double)e.position.y - x.y)
 						* ((double)e.position.y - x.y) + ((double)e.position.z - x.z) * ((double)e.position.z - x.z)));
 				}
@@ -292,7 +292,7 @@ static void test_surfaces(void)
 		qaws_surface_bezier_desc bd;
 		memset(&bd, 0, sizeof bd);
 		bd.u_degree = 1; bd.v_degree = 1; bd.control_points = n; bd.u_point_count = 2; bd.v_point_count = 2;
-		qaws_surface_create_bezier(&bd, &s);
+		qaws_surface_create_bezier(&s, &bd);
 		qaws_surface_find_closest_point_certified(s, x1, &u, &w, &cl, &dist, &gap);
 		TEST_ASSERT(fabs(dist - 2) <= 1e-14 && fabs(u - (qaws_scalar)0.3) <= 1e-7 && fabs(w - (qaws_scalar)0.6) <= 1e-7, "square: above it");
 		qaws_surface_find_closest_point_certified(s, x2, &u, &w, &cl, &dist, &gap);

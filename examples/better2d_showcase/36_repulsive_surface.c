@@ -69,10 +69,10 @@ static void demo_repulsive_surface(void)
 		a.center[0] = 1; a.radius = (qaws_scalar)0.4; a.angle_end = (qaws_scalar)(2 * 3.14159265358979323846);
 		memset(&ad, 0, sizeof(ad));
 		ad.dimension = QAWS_DIMENSION_2D; ad.segments = &a; ad.segment_count = 1;
-		qaws_curve_create_arc(&ad, &profile);
+		qaws_curve_create_arc(&profile, &ad);
 		memset(&rd, 0, sizeof(rd));
 		rd.profile = profile; rd.axis_direction.z = 1;
-		qaws_surface_create_revolution(&rd, &torus);
+		qaws_surface_create_revolution(&torus, &rd);
 		ru = qaws_surface_get_u_range(torus); rv = qaws_surface_get_v_range(torus);
 		/* five small loops crowded near one spot, around the tube */
 		for (k = 0; k < K; k++)
@@ -85,15 +85,15 @@ static void demo_repulsive_surface(void)
 			}
 		memset(&sd, 0, sizeof(sd));
 		sd.surface = torus; sd.periodic_u = 1; sd.periodic_v = 1;
-		qaws_repulsive_surface_positions(&sd, uv, K * N, x0);
+		qaws_repulsive_surface_positions(x0, uv, K * N, &sd);
 		memset(&cd, 0, sizeof(cd));
 		cd.dimension = 3; cd.vertex_count = K * N; cd.edges = e; cd.edge_count = K * N;
-		qaws_repulsive_curves_create(&cd, &c);
+		qaws_repulsive_curves_create(&c, &cd);
 		memset(&d, 0, sizeof(d));
 		d.hold_edge_lengths = 1; d.max_iterations = 60;
 		memset(&r, 0, sizeof(r));
-		qaws_repulsive_surface_curves_solve(c, &sd, &d, uv, &r);
-		qaws_repulsive_surface_positions(&sd, uv, K * N, x);
+		qaws_repulsive_surface_curves_solve(&r, uv, c, &sd, &d);
+		qaws_repulsive_surface_positions(x, uv, K * N, &sd);
 		for (i = 0; i < 2; i++)
 		{
 			v.x0 = 24 + i * (pw + 12); v.y0 = 84; v.w = pw; v.h = ph; v.xmin = v.ymin = -1; v.xmax = v.ymax = 1;
@@ -133,17 +133,17 @@ static void demo_repulsive_surface(void)
 		{
 			memset(&bd, 0, sizeof(bd));
 			bd.dimension = QAWS_DIMENSION_3D; bd.degree = 3; bd.control_points = p[k]; bd.control_point_count = 10; bd.knots = knots; bd.knot_count = 14;
-			qaws_curve_create_bspline(&bd, &cv[k]);
+			qaws_curve_create_bspline(&cv[k], &bd);
 		}
 		memset(&cd, 0, sizeof(cd));
 		cd.polyline.curves = (qaws_curve const* const*)cv; cd.polyline.curve_count = 2; cd.polyline.dimension = 3; cd.polyline.edge_length = (qaws_scalar)0.06;
-		qaws_repulsive_controls_create(&cd, &ctl);
-		qaws_repulsive_controls_read(ctl, P0);
+		qaws_repulsive_controls_create(&ctl, &cd);
+		qaws_repulsive_controls_read(P0, ctl);
 		memcpy(P, P0, sizeof(P));
 		memset(&d, 0, sizeof(d));
 		d.hold_total_length = 1; d.max_iterations = 40; d.pinned = ends; d.pinned_count = 4;   /* (each end control pinned) */
 		memset(&r, 0, sizeof(r));
-		qaws_repulsive_controls_solve(ctl, &d, P, &r);
+		qaws_repulsive_controls_solve(&r, P, ctl, &d);
 		v.x0 = 24 + 2 * (pw + 12); v.y0 = 84; v.w = pw; v.h = ph;
 		pr.cx = v.x0 + pw / 2; pr.cy = v.y0 + ph / 2; pr.scale = 120; pr.zscale = 1;
 		sprintf(label, "two B-splines by their control points: E %.1f -> %.1f", (double)r.initial_energy, (double)r.energy);
@@ -156,11 +156,11 @@ static void demo_repulsive_surface(void)
 				qaws_curve* out = NULL;
 				double xy[2 * 121];
 				unsigned int m;
-				qaws_repulsive_controls_to_curve(ctl, Q, k, &out);
+				qaws_repulsive_controls_to_curve(&out, ctl, Q, k);
 				for (m = 0; out && m <= 120; m++)
 				{
 					qaws_eval_result_3d er;
-					qaws_curve_evaluate_3d(out, (qaws_scalar)(m / 120.0), QAWS_EVAL_FLAG_POSITION, &er);
+					qaws_curve_evaluate_3d(&er, out, (qaws_scalar)(m / 120.0), QAWS_EVAL_FLAG_POSITION);
 					project(&pr, er.position.x, er.position.y, er.position.z, &xy[2 * m], &xy[2 * m + 1]);
 				}
 				svg_polyline(&s, xy, 121, j ? colors[k] : "#afb8c1", j ? 2.2 : 1.4, 1, 0);

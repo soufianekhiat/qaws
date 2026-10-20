@@ -133,7 +133,7 @@ static void test_build(void)
 		/* a fan-triangulated face read back: the cube's first face */
 		unsigned int tri[3], fv[24], fs[6];
 		qaws_mesh_3d_get_faces(cube, fv, fs);
-		qaws_mesh_3d_get_triangle(cube, 1, tri);
+		qaws_mesh_3d_get_triangle(tri, cube, 1);
 		sprintf(msg, "cube: face 0 (%u %u %u %u), its second fan triangle (%u %u %u)", fv[0], fv[1], fv[2], fv[3], tri[0], tri[1], tri[2]);
 		TEST_ASSERT(fs[0] == 4 && tri[0] == fv[0] && tri[1] == fv[2] && tri[2] == fv[3], msg);
 	}

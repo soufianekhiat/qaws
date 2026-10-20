@@ -21,7 +21,7 @@ static qaws_surface* make_bilinear_surface(void)
 	desc.u_point_count = 2;
 	desc.v_point_count = 2;
 
-	qaws_surface_create_bezier(&desc, &surf);
+	qaws_surface_create_bezier(&surf, &desc);
 	return surf;
 }
 
@@ -51,7 +51,7 @@ static qaws_surface* make_dome_surface(void)
 	desc.u_point_count = 3;
 	desc.v_point_count = 3;
 
-	qaws_surface_create_bezier(&desc, &surf);
+	qaws_surface_create_bezier(&surf, &desc);
 	return surf;
 }
 
@@ -80,7 +80,7 @@ static qaws_surface* make_wavy_surface(qaws_curve** out_profile)
 	bd.degree = 4;
 	bd.control_points = pts;
 	bd.control_point_count = 5;
-	qaws_curve_create_bezier(&bd, &prof);
+	qaws_curve_create_bezier(&prof, &bd);
 	if (!prof) return NULL;
 
 	memset(&rd, 0, sizeof(rd));
@@ -88,7 +88,7 @@ static qaws_surface* make_wavy_surface(qaws_curve** out_profile)
 	rd.axis_origin.x = 0; rd.axis_origin.y = 0; rd.axis_origin.z = 0;
 	rd.axis_direction.x = 0; rd.axis_direction.y = 0; rd.axis_direction.z = 1;
 	rd.angle = 0;
-	qaws_surface_create_revolution(&rd, &surf);
+	qaws_surface_create_revolution(&surf, &rd);
 	*out_profile = prof;
 	return surf;
 }
@@ -144,7 +144,7 @@ static void visual_obj_export_api(void)
 	buf = (char*)malloc(262144);
 	if (!buf) { qaws_surface_destroy(surf); return; }
 
-	if (qaws_surface_export_obj(surf, 32, 32, 1, buf, 262144, &length)
+	if (qaws_surface_export_obj(buf, &length, surf, 262144, 32, 32, 1)
 		== QAWS_STATUS_OK)
 	{
 		fp = fopen(OBJ_OUTPUT_DIR "/31_dome_curvature_api.obj", "w");
@@ -186,7 +186,7 @@ static void visual_svg_hausdorff(void)
 		d.degree = 2;
 		d.control_points = pts_a;
 		d.control_point_count = 3;
-		qaws_curve_create_bezier(&d, &ca);
+		qaws_curve_create_bezier(&ca, &d);
 	}
 	{
 		qaws_vec2 pts_b[] = { {0, (qaws_scalar)3.5}, {3, (qaws_scalar)6.5}, {6, (qaws_scalar)3.5} };
@@ -195,10 +195,10 @@ static void visual_svg_hausdorff(void)
 		d.degree = 2;
 		d.control_points = pts_b;
 		d.control_point_count = 3;
-		qaws_curve_create_bezier(&d, &cb);
+		qaws_curve_create_bezier(&cb, &d);
 	}
 
-	qaws_curve_compute_hausdorff_distance_2d(ca, cb, n, &dist);
+	qaws_curve_compute_hausdorff_distance_2d(&dist, ca, cb, n);
 
 	/* view: x [-1,7], y [-1,8], SVG 700x500 */
 	if (!svg_open(&svg, OBJ_OUTPUT_DIR "/31_hausdorff_distance.svg",
@@ -223,9 +223,9 @@ static void visual_svg_hausdorff(void)
 		qaws_eval_result_2d ra, rb;
 		qaws_scalar closest_t;
 
-		qaws_curve_evaluate_2d(ca, t, QAWS_EVAL_FLAG_POSITION, &ra);
-		qaws_curve_find_closest_parameter_2d(cb, ra.position, &closest_t);
-		qaws_curve_evaluate_2d(cb, closest_t, QAWS_EVAL_FLAG_POSITION, &rb);
+		qaws_curve_evaluate_2d(&ra, ca, t, QAWS_EVAL_FLAG_POSITION);
+		qaws_curve_find_closest_parameter_2d(&closest_t, cb, ra.position);
+		qaws_curve_evaluate_2d(&rb, cb, closest_t, QAWS_EVAL_FLAG_POSITION);
 
 		svg_line(&svg, ra.position.x, ra.position.y,
 			rb.position.x, rb.position.y, "#888888", 1);
@@ -252,7 +252,7 @@ static void visual_obj_bounds(void)
 	printf("visual_obj_bounds\n");
 	if (!surf) return;
 
-	qaws_surface_compute_bounds(surf, &bmin, &bmax);
+	qaws_surface_compute_bounds(&bmin, &bmax, surf);
 
 	if (!obj_open(&w,
 		OBJ_OUTPUT_DIR "/31_surface_bounds.obj",
@@ -327,7 +327,7 @@ static void test_obj_export(void)
 	TEST_ASSERT(surf != NULL, "obj export surface created");
 
 	/* Export with normals */
-	s = qaws_surface_export_obj(surf, 4, 4, 1, buf, sizeof(buf), &length);
+	s = qaws_surface_export_obj(buf, &length, surf, sizeof(buf), 4, 4, 1);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(length > 0, "obj export produced output");
 
@@ -338,7 +338,7 @@ static void test_obj_export(void)
 
 	/* Export without normals */
 	length = 0;
-	s = qaws_surface_export_obj(surf, 4, 4, 0, buf, sizeof(buf), &length);
+	s = qaws_surface_export_obj(buf, &length, surf, sizeof(buf), 4, 4, 0);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(length > 0, "obj export no-normals produced output");
 	TEST_ASSERT(strstr(buf, "vn ") == NULL, "obj no-normals has no vn");
@@ -346,27 +346,27 @@ static void test_obj_export(void)
 
 	/* Minimum samples */
 	length = 0;
-	s = qaws_surface_export_obj(surf, 2, 2, 0, buf, sizeof(buf), &length);
+	s = qaws_surface_export_obj(buf, &length, surf, sizeof(buf), 2, 2, 0);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(strstr(buf, "f ") != NULL, "obj 2x2 has faces");
 
 	/* Error: invalid samples */
-	s = qaws_surface_export_obj(surf, 1, 4, 0, buf, sizeof(buf), &length);
+	s = qaws_surface_export_obj(buf, &length, surf, sizeof(buf), 1, 4, 0);
 	TEST_ASSERT(s != QAWS_STATUS_OK, "obj u_samples=1 rejected");
-	s = qaws_surface_export_obj(surf, 4, 1, 0, buf, sizeof(buf), &length);
+	s = qaws_surface_export_obj(buf, &length, surf, sizeof(buf), 4, 1, 0);
 	TEST_ASSERT(s != QAWS_STATUS_OK, "obj v_samples=1 rejected");
 
 	/* Error: null args */
-	s = qaws_surface_export_obj(NULL, 4, 4, 0, buf, sizeof(buf), &length);
+	s = qaws_surface_export_obj(buf, &length, NULL, sizeof(buf), 4, 4, 0);
 	TEST_ASSERT(s != QAWS_STATUS_OK, "obj null surface rejected");
-	s = qaws_surface_export_obj(surf, 4, 4, 0, NULL, sizeof(buf), &length);
+	s = qaws_surface_export_obj(NULL, &length, surf, sizeof(buf), 4, 4, 0);
 	TEST_ASSERT(s != QAWS_STATUS_OK, "obj null buffer rejected");
 
 	/* Buffer too small */
 	{
 		char tiny[16];
 		unsigned int tiny_len = 0;
-		s = qaws_surface_export_obj(surf, 4, 4, 1, tiny, sizeof(tiny), &tiny_len);
+		s = qaws_surface_export_obj(tiny, &tiny_len, surf, sizeof(tiny), 4, 4, 1);
 		/* Should either truncate or return buffer too small */
 		TEST_ASSERT(tiny_len > 0 || s == QAWS_STATUS_BUFFER_TOO_SMALL,
 			"obj tiny buffer handled");
@@ -390,7 +390,7 @@ static void test_surface_bounds(void)
 	surf = make_bilinear_surface();
 	TEST_ASSERT(surf != NULL, "bounds surface created");
 
-	s = qaws_surface_compute_bounds(surf, &bmin, &bmax);
+	s = qaws_surface_compute_bounds(&bmin, &bmax, surf);
 	TEST_ASSERT_STATUS(s);
 
 	/* x: [0, 2], y: [0, 3], z: 0 */
@@ -411,16 +411,16 @@ static void test_surface_bounds(void)
 	surf = make_dome_surface();
 	TEST_ASSERT(surf != NULL, "dome surface created");
 
-	s = qaws_surface_compute_bounds(surf, &bmin, &bmax);
+	s = qaws_surface_compute_bounds(&bmin, &bmax, surf);
 	TEST_ASSERT_STATUS(s);
 
 	TEST_ASSERT(bmin.z >= (qaws_scalar)-0.01, "dome min z >= 0");
 	TEST_ASSERT(bmax.z > (qaws_scalar)0.1, "dome max z > 0 (raised)");
 
 	/* Null args */
-	s = qaws_surface_compute_bounds(NULL, &bmin, &bmax);
+	s = qaws_surface_compute_bounds(&bmin, &bmax, NULL);
 	TEST_ASSERT(s != QAWS_STATUS_OK, "bounds null surface rejected");
-	s = qaws_surface_compute_bounds(surf, NULL, &bmax);
+	s = qaws_surface_compute_bounds(NULL, &bmax, surf);
 	TEST_ASSERT(s != QAWS_STATUS_OK, "bounds null min rejected");
 
 	qaws_surface_destroy(surf);
@@ -441,7 +441,7 @@ static void test_surface_area(void)
 	surf = make_bilinear_surface();
 	TEST_ASSERT(surf != NULL, "area surface created");
 
-	s = qaws_surface_compute_area(surf, &area);
+	s = qaws_surface_compute_area(&area, surf);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(approx_eq_loose(area, (qaws_scalar)6.0), "flat area ~6.0");
 
@@ -451,15 +451,15 @@ static void test_surface_area(void)
 	surf = make_dome_surface();
 	TEST_ASSERT(surf != NULL, "dome area surface created");
 
-	s = qaws_surface_compute_area(surf, &area);
+	s = qaws_surface_compute_area(&area, surf);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(area > (qaws_scalar)4.0, "dome area > 4.0");
 	TEST_ASSERT(area < (qaws_scalar)20.0, "dome area reasonable upper bound");
 
 	/* Null args */
-	s = qaws_surface_compute_area(NULL, &area);
+	s = qaws_surface_compute_area(&area, NULL);
 	TEST_ASSERT(s != QAWS_STATUS_OK, "area null surface rejected");
-	s = qaws_surface_compute_area(surf, NULL);
+	s = qaws_surface_compute_area(NULL, surf);
 	TEST_ASSERT(s != QAWS_STATUS_OK, "area null out rejected");
 
 	qaws_surface_destroy(surf);
@@ -481,18 +481,18 @@ static void test_surface_curvature(void)
 	surf = make_bilinear_surface();
 	TEST_ASSERT(surf != NULL, "curvature flat surface created");
 
-	s = qaws_surface_compute_gaussian_curvature(surf,
-		(qaws_scalar)0.5, (qaws_scalar)0.5, &K);
+	s = qaws_surface_compute_gaussian_curvature(&K,
+		surf, (qaws_scalar)0.5, (qaws_scalar)0.5);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(fabs(K) < TOLERANCE_LOOSE, "flat Gaussian curvature ~0");
 
-	s = qaws_surface_compute_mean_curvature(surf,
-		(qaws_scalar)0.5, (qaws_scalar)0.5, &H);
+	s = qaws_surface_compute_mean_curvature(&H,
+		surf, (qaws_scalar)0.5, (qaws_scalar)0.5);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(fabs(H) < TOLERANCE_LOOSE, "flat mean curvature ~0");
 
-	s = qaws_surface_compute_principal_curvatures(surf,
-		(qaws_scalar)0.5, (qaws_scalar)0.5, &cr);
+	s = qaws_surface_compute_principal_curvatures(&cr,
+		surf, (qaws_scalar)0.5, (qaws_scalar)0.5);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(fabs(cr.kappa1) < TOLERANCE_LOOSE, "flat kappa1 ~0");
 	TEST_ASSERT(fabs(cr.kappa2) < TOLERANCE_LOOSE, "flat kappa2 ~0");
@@ -505,20 +505,20 @@ static void test_surface_curvature(void)
 	surf = make_dome_surface();
 	TEST_ASSERT(surf != NULL, "curvature dome surface created");
 
-	s = qaws_surface_compute_gaussian_curvature(surf,
-		(qaws_scalar)0.5, (qaws_scalar)0.5, &K);
+	s = qaws_surface_compute_gaussian_curvature(&K,
+		surf, (qaws_scalar)0.5, (qaws_scalar)0.5);
 	TEST_ASSERT_STATUS(s);
 	/* Dome has positive Gaussian curvature at center */
 	TEST_ASSERT(K > (qaws_scalar)0.0, "dome Gaussian curvature > 0");
 
-	s = qaws_surface_compute_mean_curvature(surf,
-		(qaws_scalar)0.5, (qaws_scalar)0.5, &H);
+	s = qaws_surface_compute_mean_curvature(&H,
+		surf, (qaws_scalar)0.5, (qaws_scalar)0.5);
 	TEST_ASSERT_STATUS(s);
 	/* H can be positive or negative depending on normal direction */
 	TEST_ASSERT(fabs(H) > TOLERANCE, "dome mean curvature nonzero");
 
-	s = qaws_surface_compute_principal_curvatures(surf,
-		(qaws_scalar)0.5, (qaws_scalar)0.5, &cr);
+	s = qaws_surface_compute_principal_curvatures(&cr,
+		surf, (qaws_scalar)0.5, (qaws_scalar)0.5);
 	TEST_ASSERT_STATUS(s);
 	/* K = kappa1 * kappa2 */
 	TEST_ASSERT(approx_eq_loose(cr.gaussian, cr.kappa1 * cr.kappa2),
@@ -529,11 +529,11 @@ static void test_surface_curvature(void)
 		"H = (kappa1 + kappa2) / 2");
 
 	/* Null args */
-	s = qaws_surface_compute_gaussian_curvature(NULL,
-		(qaws_scalar)0.5, (qaws_scalar)0.5, &K);
+	s = qaws_surface_compute_gaussian_curvature(&K,
+		NULL, (qaws_scalar)0.5, (qaws_scalar)0.5);
 	TEST_ASSERT(s != QAWS_STATUS_OK, "gaussian null surface rejected");
-	s = qaws_surface_compute_mean_curvature(surf,
-		(qaws_scalar)0.5, (qaws_scalar)0.5, NULL);
+	s = qaws_surface_compute_mean_curvature(NULL,
+		surf, (qaws_scalar)0.5, (qaws_scalar)0.5);
 	TEST_ASSERT(s != QAWS_STATUS_OK, "mean null out rejected");
 
 	qaws_surface_destroy(surf);
@@ -559,7 +559,7 @@ static void test_hausdorff_2d(void)
 		d.degree = 1;
 		d.control_points = pts_a;
 		d.control_point_count = 2;
-		qaws_curve_create_bezier(&d, &ca);
+		qaws_curve_create_bezier(&ca, &d);
 	}
 	{
 		qaws_vec2 pts_b[] = { {0, 1}, {10, 1} };
@@ -568,10 +568,10 @@ static void test_hausdorff_2d(void)
 		d.degree = 1;
 		d.control_points = pts_b;
 		d.control_point_count = 2;
-		qaws_curve_create_bezier(&d, &cb);
+		qaws_curve_create_bezier(&cb, &d);
 	}
 
-	s = qaws_curve_compute_hausdorff_distance_2d(ca, cb, 64, &dist);
+	s = qaws_curve_compute_hausdorff_distance_2d(&dist, ca, cb, 64);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(approx_eq_loose(dist, (qaws_scalar)1.0), "parallel lines hausdorff ~1.0");
 
@@ -586,18 +586,18 @@ static void test_hausdorff_2d(void)
 		d.degree = 2;
 		d.control_points = pts;
 		d.control_point_count = 3;
-		qaws_curve_create_bezier(&d, &ca);
-		qaws_curve_create_bezier(&d, &cb);
+		qaws_curve_create_bezier(&ca, &d);
+		qaws_curve_create_bezier(&cb, &d);
 	}
 
-	s = qaws_curve_compute_hausdorff_distance_2d(ca, cb, 64, &dist);
+	s = qaws_curve_compute_hausdorff_distance_2d(&dist, ca, cb, 64);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(dist < TOLERANCE_LOOSE, "identical curves hausdorff ~0");
 
 	/* Null args */
-	s = qaws_curve_compute_hausdorff_distance_2d(NULL, cb, 64, &dist);
+	s = qaws_curve_compute_hausdorff_distance_2d(&dist, NULL, cb, 64);
 	TEST_ASSERT(s != QAWS_STATUS_OK, "hausdorff null curve_a rejected");
-	s = qaws_curve_compute_hausdorff_distance_2d(ca, cb, 64, NULL);
+	s = qaws_curve_compute_hausdorff_distance_2d(NULL, ca, cb, 64);
 	TEST_ASSERT(s != QAWS_STATUS_OK, "hausdorff null out rejected");
 
 	qaws_curve_destroy(ca);
@@ -622,7 +622,7 @@ static void test_hausdorff_3d(void)
 		d.degree = 1;
 		d.control_points = pts_a;
 		d.control_point_count = 2;
-		qaws_curve_create_bezier(&d, &ca);
+		qaws_curve_create_bezier(&ca, &d);
 	}
 	{
 		qaws_scalar pts_b[] = {0,0,2, 5,0,2};
@@ -632,10 +632,10 @@ static void test_hausdorff_3d(void)
 		d.degree = 1;
 		d.control_points = pts_b;
 		d.control_point_count = 2;
-		qaws_curve_create_bezier(&d, &cb);
+		qaws_curve_create_bezier(&cb, &d);
 	}
 
-	s = qaws_curve_compute_hausdorff_distance_3d(ca, cb, 64, &dist);
+	s = qaws_curve_compute_hausdorff_distance_3d(&dist, ca, cb, 64);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(approx_eq_loose(dist, (qaws_scalar)2.0), "3D parallel hausdorff ~2.0");
 

@@ -8,10 +8,10 @@
 /* Thread-safe: operates on immutable input curves. */
 
 qaws_status qaws_curve_split(
-	qaws_curve const* curve,
-	qaws_scalar parameter,
 	qaws_curve** out_left,
-	qaws_curve** out_right);
+	qaws_curve** out_right,
+	qaws_curve const* curve,
+	qaws_scalar parameter);
 
 /*
  * The piece of a curve between parameters t0 and t1, as a new curve that lies
@@ -31,15 +31,15 @@ qaws_status qaws_curve_split(
  * Parameters within rounding of the domain are clamped onto it.
  */
 qaws_status qaws_curve_extract(
+	qaws_curve** out_curve,
 	qaws_curve const* curve,
 	qaws_scalar t0,
-	qaws_scalar t1,
-	qaws_curve** out_curve);
+	qaws_scalar t1);
 
 qaws_status qaws_curve_join(
+	qaws_curve** out_joined,
 	qaws_curve const* curve_a,
-	qaws_curve const* curve_b,
-	qaws_curve** out_joined);
+	qaws_curve const* curve_b);
 
 /*
  * Compute the offset (parallel) curve at signed distance.
@@ -61,12 +61,12 @@ qaws_status qaws_curve_join(
  *      closed loops.
  */
 qaws_status qaws_curve_offset_2d(
-	qaws_curve const* curve,
-	qaws_scalar distance,
-	int trim,
 	qaws_curve** out_curves,
+	unsigned int* out_count,
+	qaws_curve const* curve,
 	unsigned int curve_capacity,
-	unsigned int* out_count);
+	qaws_scalar distance,
+	int trim);
 
 /*
  * Create an arc-length reparameterized wrapper curve.
@@ -77,9 +77,9 @@ qaws_status qaws_curve_offset_2d(
  * table_resolution controls the arc-length lookup table size (0 = default 256).
  */
 qaws_status qaws_curve_reparameterize_arc_length(
+	qaws_curve** out_curve,
 	qaws_curve const* curve,
-	unsigned int table_resolution,
-	qaws_curve** out_curve);
+	unsigned int table_resolution);
 
 /*
  * Offset a 3D curve by a distance along a direction field.
@@ -94,13 +94,13 @@ qaws_status qaws_curve_reparameterize_arc_length(
  * sample_count controls the output resolution (0 = default 256).
  */
 qaws_status qaws_curve_offset_3d(
+	qaws_curve** out_curve,
 	qaws_curve const* curve,
-	qaws_scalar distance,
-	int direction_mode,
-	qaws_vec3 const* direction,
 	qaws_surface const* surface,
+	qaws_vec3 const* direction,
 	unsigned int sample_count,
-	qaws_curve** out_curve);
+	qaws_scalar distance,
+	int direction_mode);
 
 /*
  * Merge a chain of curve segments into fewer, higher-quality curves.
@@ -110,13 +110,13 @@ qaws_status qaws_curve_offset_3d(
  * tolerance: maximum allowed deviation from original chain.
  */
 qaws_status qaws_curve_merge_chain(
+	qaws_curve** out_curves,
+	unsigned int* out_count,
 	qaws_curve const* const* curves,
 	unsigned int curve_count,
-	unsigned int target_degree,
-	qaws_scalar tolerance,
-	qaws_curve** out_curves,
 	unsigned int curve_capacity,
-	unsigned int* out_count);
+	unsigned int target_degree,
+	qaws_scalar tolerance);
 
 /*
  * Reparameterize curve_b so both curves traverse the same total arc length.
@@ -125,10 +125,10 @@ qaws_status qaws_curve_merge_chain(
  * table_resolution controls lookup table size (0 = default 256).
  */
 qaws_status qaws_curve_match_arc_length(
+	qaws_curve** out_curve,
 	qaws_curve const* curve_a,
 	qaws_curve const* curve_b,
-	unsigned int table_resolution,
-	qaws_curve** out_curve);
+	unsigned int table_resolution);
 
 /*
  * Insert circular arc fillets at sharp corners of a 2D composite curve.
@@ -136,9 +136,9 @@ qaws_status qaws_curve_match_arc_length(
  * The output is a new composite curve with smooth transitions.
  */
 qaws_status qaws_curve_fillet_2d(
+	qaws_curve** out_curve,
 	qaws_curve const* curve,
-	qaws_scalar radius,
-	qaws_curve** out_curve);
+	qaws_scalar radius);
 
 /*
  * Insert straight-line chamfers at sharp corners of a 2D composite curve.
@@ -146,8 +146,8 @@ qaws_status qaws_curve_fillet_2d(
  * The output is a new composite curve with chamfered corners.
  */
 qaws_status qaws_curve_chamfer_2d(
+	qaws_curve** out_curve,
 	qaws_curve const* curve,
-	qaws_scalar distance,
-	qaws_curve** out_curve);
+	qaws_scalar distance);
 
 #endif /* QAWS_OPERATIONS_H */

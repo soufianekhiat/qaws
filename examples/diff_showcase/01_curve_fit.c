@@ -48,7 +48,7 @@ static void demo_curve_fit(void)
 		double l = 0;
 
 		/* Forward: primal positions (no parameter tangent). */
-		qaws_curve_eval_batch_tangent_2d(NULL, c, ts, NULL, FIT_SAMPLES, QAWS_EVAL_FLAG_POSITION, NULL, primal, tangent);
+		qaws_curve_eval_batch_tangent_2d(primal, tangent, c, ts, NULL, NULL, FIT_SAMPLES, QAWS_EVAL_FLAG_POSITION, NULL);
 		memset(ybar, 0, sizeof(ybar));
 		for (i = 0; i < FIT_SAMPLES; i++)
 		{
@@ -64,7 +64,7 @@ static void demo_curve_fit(void)
 		/* Reverse: one batch adjoint gives dL/dP for every control point. */
 		memset(grad, 0, sizeof(grad));
 		views = one_field(&fv, QAWS_FIELD_CONTROL_POINTS, grad, FIT_CP, 2);
-		qaws_curve_eval_batch_adjoint_2d(NULL, c, ts, FIT_SAMPLES, QAWS_EVAL_FLAG_POSITION, ybar, &views, NULL);
+		qaws_curve_eval_batch_adjoint_2d(&views, NULL, c, ts, ybar, FIT_SAMPLES, QAWS_EVAL_FLAG_POSITION, NULL);
 		qaws_curve_destroy(c);
 		if (it < FIT_ITERS)
 			adam_step(&opt, cps, grad, FIT_CP * 2, 0.02);

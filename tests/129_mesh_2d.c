@@ -22,7 +22,7 @@ static double t2_area(qaws_mesh_2d const* m)
 	{
 		unsigned int t[3];
 		qaws_vec2 p, q, r;
-		qaws_mesh_2d_get_triangle(m, i, t);
+		qaws_mesh_2d_get_triangle(t, m, i);
 		p = qaws_mesh_2d_get_vertex(m, t[0]);
 		q = qaws_mesh_2d_get_vertex(m, t[1]);
 		r = qaws_mesh_2d_get_vertex(m, t[2]);
@@ -40,9 +40,9 @@ static void test_annulus(void)
 	qaws_mesh_2d* m = NULL;
 	unsigned int i;
 	char msg[300];
-	qaws_curve_create_ellipse_2d(0, 0, 2, 2, 0, &o);
-	qaws_curve_create_ellipse_2d((qaws_scalar)0.3, 0, 1, 1, 0, &h);
-	qaws_curve_reverse(h, &hr);
+	qaws_curve_create_ellipse_2d(&o, 0, 0, 2, 2, 0);
+	qaws_curve_create_ellipse_2d(&h, (qaws_scalar)0.3, 0, 1, 1, 0);
+	qaws_curve_reverse(&hr, h);
 	cs[0] = o;
 	cs[1] = hr;
 	for (i = 0; i < 2; i++)
@@ -57,7 +57,7 @@ static void test_annulus(void)
 	d.fill_rule = QAWS_FILL_NON_ZERO;
 	d.tolerance = (qaws_scalar)2e-3;
 	d.min_angle = 25;
-	qaws_triangulate_region_2d(&d, &m);
+	qaws_triangulate_region_2d(&m, &d);
 	if (!m)
 		TEST_ASSERT(0, "annulus: triangulated");
 	else
@@ -73,7 +73,7 @@ static void test_annulus(void)
 		for (i = 0; i < qaws_mesh_2d_get_triangle_count(m) && i < nf; i++)
 		{
 			unsigned int t[3];
-			qaws_mesh_2d_get_triangle(m, i, t);
+			qaws_mesh_2d_get_triangle(t, m, i);
 			same &= t[0] == fv[3 * i] && t[1] == fv[3 * i + 1] && t[2] == fv[3 * i + 2];
 		}
 		for (i = 0; i < nv; i++)

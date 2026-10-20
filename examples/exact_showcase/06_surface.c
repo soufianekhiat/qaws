@@ -47,10 +47,10 @@ static void demo_surface(void)
 	d.u_knot_count = 11;
 	d.v_knots = knots;
 	d.v_knot_count = 11;
-	qaws_surface_create_nurbs(&d, &surf);
+	qaws_surface_create_nurbs(&surf, &d);
 	qaws_exact_desc_default(&desc);
-	qaws_exact_surface_prepare(&desc, surf, &es, &rep);
-	qaws_exact_surface_patch_count(es, &pu, &pv);
+	qaws_exact_surface_prepare(&es, &rep, surf, &desc);
+	qaws_exact_surface_patch_count(&pu, &pv, es);
 
 	/* classify cell centers (u, v on the 2^-24 lattice) */
 	for (j = 0; j < ES_N; j++)
@@ -60,9 +60,9 @@ static void demo_surface(void)
 			double pos[3], nrm[3], nz;
 			qaws_surface_eval_result r;
 			int k = (int)(j * ES_N + i);
-			qaws_exact_surface_evaluate(es, u, v, 0, pos, nrm);
+			qaws_exact_surface_evaluate(pos, nrm, es, u, v, 0);
 			exact_map[k] = (signed char)(nrm[2] > 0 ? 1 : (nrm[2] < 0 ? -1 : 0));
-			qaws_surface_evaluate(surf, (qaws_scalar)u, (qaws_scalar)v, QAWS_SURFACE_EVAL_DU | QAWS_SURFACE_EVAL_DV, &r);
+			qaws_surface_evaluate(&r, surf, (qaws_scalar)u, (qaws_scalar)v, QAWS_SURFACE_EVAL_DU | QAWS_SURFACE_EVAL_DV);
 			nz = (double)r.du.x * r.dv.y - (double)r.du.y * r.dv.x;
 			f64_map[k] = (signed char)(nz > 0 ? 1 : (nz < 0 ? -1 : 0));
 			wrong_map[k] = (signed char)(f64_map[k] != exact_map[k] ? 1 : 0);
@@ -82,7 +82,7 @@ static void demo_surface(void)
 		for (k = 0; k < n * n; k++)
 		{
 			double pos[3];
-			qaws_exact_surface_evaluate(es, 6.0 * (k / n + 0.5) / n, 6.0 * (k % n + 0.5) / n, 0, pos, NULL);
+			qaws_exact_surface_evaluate(pos, NULL, es, 6.0 * (k / n + 0.5) / n, 6.0 * (k % n + 0.5) / n, 0);
 			depth[k] = pos[0] + pos[1] - 0.3 * pos[2];
 			order[k] = k;
 		}
@@ -100,10 +100,10 @@ static void demo_surface(void)
 			static int const du[4] = { 0, 1, 1, 0 }, dv[4] = { 0, 0, 1, 1 };
 			for (c = 0; c < 4; c++)
 			{
-				qaws_exact_surface_evaluate(es, 6.0 * (ci + du[c]) / n, 6.0 * (cj + dv[c]) / n, 0, pos, NULL);
+				qaws_exact_surface_evaluate(pos, NULL, es, 6.0 * (ci + du[c]) / n, 6.0 * (cj + dv[c]) / n, 0);
 				project(&pr, pos[0], pos[1], pos[2], &x[c], &y[c]);
 			}
-			qaws_exact_surface_evaluate(es, 6.0 * (ci + 0.5) / n, 6.0 * (cj + 0.5) / n, 0, pos, nrm);
+			qaws_exact_surface_evaluate(pos, nrm, es, 6.0 * (ci + 0.5) / n, 6.0 * (cj + 0.5) / n, 0);
 			cls = nrm[2] > 0 ? 2 : (nrm[2] < 0 ? 0 : 1);
 			fprintf(sv.f, "<polygon points=\"%.1f,%.1f %.1f,%.1f %.1f,%.1f %.1f,%.1f\" fill=\"%s\" fill-opacity=\"%s\" stroke=\"#ffffff\" stroke-width=\"0.4\"/>\n",
 				x[0], y[0], x[1], y[1], x[2], y[2], x[3], y[3], facing_colors[cls], cls == 1 ? "0.85" : "0.55");

@@ -83,13 +83,13 @@ static void rk_kernels(qaws_scalar const* x, unsigned int dim, unsigned int nv, 
 			if (k == 2 && shared)
 				continue;
 			rk_load(x, dim, idx, k, J, q);
-			if (k == 2) qaws_repulsive_curve_pair(p, q, (qaws_scalar)alpha, (qaws_scalar)beta, 0, e, g); else qaws_repulsive_mesh_pair(p, q, (qaws_scalar)alpha, 0, e, g);
+			if (k == 2) qaws_repulsive_curve_pair(e, g, p, q, (qaws_scalar)alpha, (qaws_scalar)beta, 0); else qaws_repulsive_mesh_pair(e, g, p, q, (qaws_scalar)alpha, 0);
 			eb[I] += (double)e[0];
 			for (c = 0; c < 3 * k; c++) blocks[9 * I + c] += g[c];
-			if (k == 2) qaws_repulsive_curve_pair(q, p, (qaws_scalar)alpha, (qaws_scalar)beta, 1, e, g); else qaws_repulsive_mesh_pair(q, p, (qaws_scalar)alpha, 1, e, g);
+			if (k == 2) qaws_repulsive_curve_pair(e, g, q, p, (qaws_scalar)alpha, (qaws_scalar)beta, 1); else qaws_repulsive_mesh_pair(e, g, q, p, (qaws_scalar)alpha, 1);
 			for (c = 0; c < 3 * k; c++) blocks[9 * I + c] += g[c];
 			/* the metric's row I */
-			if (k == 2) qaws_repulsive_curve_metric_pair(p, q, (qaws_scalar)ex, kw); else qaws_repulsive_mesh_metric_pair(p, q, (qaws_scalar)ex, kw);
+			if (k == 2) qaws_repulsive_curve_metric_pair(kw, p, q, (qaws_scalar)ex); else qaws_repulsive_mesh_metric_pair(kw, p, q, (qaws_scalar)ex);
 			{
 				qaws_scalar cJ2[9];
 				if (k == 2) qaws_repulsive_curve_coefficients(q, cJ2); else qaws_repulsive_mesh_coefficients(q, cJ2);
@@ -144,9 +144,9 @@ static void rk_check(char const* name, qaws_scalar const* x, unsigned int dim, u
 		qaws_repulsive_curves_desc d;
 		memset(&d, 0, sizeof(d));
 		d.dimension = dim; d.vertex_count = nv; d.edges = idx; d.edge_count = ne;
-		qaws_repulsive_curves_create(&d, &c);
-		qaws_repulsive_curves_gradient(c, x, 1, gl, &El);
-		qaws_internal_repulsive_curves_metric(c, xd, A);
+		qaws_repulsive_curves_create(&c, &d);
+		qaws_repulsive_curves_gradient(gl, &El, c, x, 1);
+		qaws_internal_repulsive_curves_metric(A, c, xd);
 		alpha = 3; beta = 6;
 	}
 	else
@@ -154,9 +154,9 @@ static void rk_check(char const* name, qaws_scalar const* x, unsigned int dim, u
 		qaws_repulsive_mesh_desc d;
 		memset(&d, 0, sizeof(d));
 		d.vertex_count = nv; d.triangles = idx; d.triangle_count = ne;
-		qaws_repulsive_mesh_create(&d, &m);
-		qaws_repulsive_mesh_gradient(m, x, 1, gl, &El);
-		qaws_internal_repulsive_mesh_metric(m, xd, A);
+		qaws_repulsive_mesh_create(&m, &d);
+		qaws_repulsive_mesh_gradient(gl, &El, m, x, 1);
+		qaws_internal_repulsive_mesh_metric(A, m, xd);
 		alpha = 6; beta = 12;
 	}
 	for (i = 0; i < nv; i++)

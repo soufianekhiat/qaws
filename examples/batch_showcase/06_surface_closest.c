@@ -39,11 +39,11 @@ static void demo_surface_closest(void)
 	memset(&d, 0, sizeof(d));
 	d.surfaces = (qaws_surface const* const*)&terrain;
 	d.surface_count = 1;
-	qaws_surface_set_create(&d, &set);
+	qaws_surface_set_create(&set, &d);
 	t0 = hf_now();
 	do
 	{
-		qaws_surface_set_find_closest(set, pts, SCL_POINTS, 0, cp, &st);
+		qaws_surface_set_find_closest(cp, &st, set, pts, SCL_POINTS, 0);
 		reps++;
 	} while (hf_now() - t0 < 0.05);
 	t_query = (hf_now() - t0) / reps;

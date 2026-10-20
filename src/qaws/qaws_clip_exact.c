@@ -379,7 +379,7 @@ static qaws_status cx_line(cx_ctx* x, double const* a, double const* b, qaws_cur
 	d.control_points = cp;
 	d.control_point_count = 2;
 	CX_GROW(x->temp, x->ntemp, x->captemp, qaws_curve*);
-	s = qaws_curve_create_bezier(&d, out);
+	s = qaws_curve_create_bezier(out, &d);
 	if (s == QAWS_STATUS_OK)
 		x->temp[x->ntemp++] = *out;
 	return s;
@@ -429,7 +429,7 @@ static qaws_status cx_add_curve(cx_ctx* x, qaws_curve const* c, unsigned int ope
 	s->scale = scale;
 	s->t0 = cx_tmin(c);
 	s->t1 = cx_tmax(c);
-	TRY(qaws_exact_curve_prepare(&x->ed, c, &s->e, NULL));
+	TRY(qaws_exact_curve_prepare(&s->e, NULL, c, &x->ed));
 	if (s->e->span_count == 1 && s->e->spans[0].degree == 1)
 	{
 		xint const* h = s->e->spans[0].h;
@@ -749,7 +749,7 @@ static qaws_status cx_hits(cx_ctx* x)
 		qaws_exact_batch_hit* g = (qaws_exact_batch_hit*)qaws_internal_realloc(x->hits, qaws_internal_mul2(sizeof(qaws_exact_batch_hit), cap));
 		if (!g) { qaws_internal_free(cs); return QAWS_STATUS_ALLOCATION_FAILURE; }
 		x->hits = g;
-		st = qaws_exact_curve_batch_hits(&bd, x->hits, cap, &n, &bs);
+		st = qaws_exact_curve_batch_hits(x->hits, &n, &bs, cap, &bd);
 		if (st != QAWS_STATUS_BUFFER_TOO_SMALL)
 			break;
 		cap = n + 16;
@@ -1979,7 +1979,7 @@ static double cx_half_area(cx_ctx const* x, cx_graph const* g, unsigned int h)
 		double const* q = g->v[(h & 1) ? e->v0 : e->v1].p;
 		return 0.5 * (p[0] + q[0]) * (q[1] - p[1]);
 	}
-	qaws_internal_curve_area_2d(c, (h & 1) ? e->t1 : e->t0, (h & 1) ? e->t0 : e->t1, x->ext * x->ext * 1e-12, &a);
+	qaws_internal_curve_area_2d(&a, c, (h & 1) ? e->t1 : e->t0, (h & 1) ? e->t0 : e->t1, x->ext * x->ext * 1e-12);
 	return a;
 }
 
@@ -2118,7 +2118,7 @@ static qaws_status cx_locate(cx_ctx* x, cx_graph* g, unsigned int comp, unsigned
 				for (;;)
 				{
 					/* a coarse enclosure is enough to find the edge and the distance */
-					ls = qaws_exact_curve_line_hits(sr->e, p, p1, 1e-9 * (sr->t1 - sr->t0), hk, capk, &nh);
+					ls = qaws_exact_curve_line_hits(hk, &nh, sr->e, p, p1, 1e-9 * (sr->t1 - sr->t0), capk);
 					if (ls != QAWS_STATUS_BUFFER_TOO_SMALL)
 						break;
 					capk *= 4;
@@ -2149,7 +2149,7 @@ static qaws_status cx_locate(cx_ctx* x, cx_graph* g, unsigned int comp, unsigned
 						pd[2] = sr->lb[0] - sr->la[0];
 						pd[3] = sr->lb[1] - sr->la[1];
 					}
-					else if (qaws_exact_curve_evaluate(sr->e, tm, 1, pd, NULL) != QAWS_STATUS_OK) { bad = 1; break; }
+					else if (qaws_exact_curve_evaluate(pd, NULL, sr->e, tm, 1) != QAWS_STATUS_OK) { bad = 1; break; }
 					dist = ((pd[0] - p[0]) * dir[0] + (pd[1] - p[1]) * dir[1]) / hypot(dir[0], dir[1]);
 					if (dist < -margin)
 						continue;
@@ -2338,7 +2338,7 @@ static qaws_status cx_build(cx_ctx* x, qaws_clip_result* result)
 		{
 			double pd[2] = { 0, 0 };
 			if (g.v[i].sa != CX_NONE)
-				qaws_exact_curve_evaluate(x->src[g.v[i].sa].e, g.v[i].ta, 0, pd, NULL);
+				qaws_exact_curve_evaluate(pd, NULL, x->src[g.v[i].sa].e, g.v[i].ta, 0);
 			g.v[i].p[0] = pd[0];
 			g.v[i].p[1] = pd[1];
 		}
@@ -2485,7 +2485,7 @@ static qaws_status cx_build(cx_ctx* x, qaws_clip_result* result)
 				sb[i].hi[0] = x->src[i].hi[0]; sb[i].hi[1] = x->src[i].hi[1];
 				sb[i].lo[2] = sb[i].hi[2] = 0;
 			}
-			if (st == QAWS_STATUS_OK && qaws_internal_grid_create(sb, x->nsrc, 2, &g.sgrid) != QAWS_STATUS_OK)
+			if (st == QAWS_STATUS_OK && qaws_internal_grid_create(&g.sgrid, sb, x->nsrc, 2) != QAWS_STATUS_OK)
 				g.sgrid = NULL;
 			qaws_internal_free(sb);
 		}
@@ -2581,7 +2581,7 @@ static void cx_free(cx_ctx* x)
 	qaws_internal_free(x->src); qaws_internal_free(x->temp); qaws_internal_free(x->pts); qaws_internal_free(x->ptf); qaws_internal_free(x->sev_first); qaws_internal_free(x->sev); qaws_internal_free(x->rats); qaws_internal_free(x->ev); qaws_internal_free(x->hits); qaws_internal_free(x->cuts); qaws_internal_free(x->e);
 }
 
-qaws_status qaws_clip_exact_execute(qaws_clip_exact_desc const* desc, qaws_clip_result** out_result, qaws_clip_exact_stats* out_stats)
+qaws_status qaws_clip_exact_execute(qaws_clip_result** out_result, qaws_clip_exact_stats* out_stats, qaws_clip_exact_desc const* desc)
 {
 	cx_ctx x;
 	qaws_clip_result* r = NULL;

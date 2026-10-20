@@ -65,7 +65,7 @@ static qaws_curve* groom_curve(qaws_scalar const* cps)
 	d.control_points = cps;
 	d.control_point_count = HG_CP;
 	d.is_uniform = 1;
-	qaws_curve_create_bspline(&d, &c);
+	qaws_curve_create_bspline(&c, &d);
 	return c;
 }
 
@@ -87,8 +87,8 @@ static double groom_energy(groom_strand const* s, qaws_scalar const* cps, qaws_s
 	memset(grad, 0, sizeof(qaws_scalar) * HG_CP * 3);
 	for (k = 0; k < HG_SAMPLES; k++)
 		ts[k] = (qaws_scalar)(r.min_value + (r.max_value - r.min_value) * (k + 0.5) / HG_SAMPLES);
-	qaws_curve_eval_batch_tangent_3d(NULL, c, ts, NULL, HG_SAMPLES, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2,
-		NULL, prim, tan);
+	qaws_curve_eval_batch_tangent_3d(prim, tan, c, ts, NULL, NULL,
+		HG_SAMPLES, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2, NULL);
 	memset(bar, 0, sizeof(bar));
 	for (k = 0; k < HG_SAMPLES; k++)
 	{
@@ -108,7 +108,7 @@ static double groom_energy(groom_strand const* s, qaws_scalar const* cps, qaws_s
 				hg_add(&bar[k].d[0], a, -(qaws_scalar)(w_col * 2 * pen * gphi[a] / HG_SAMPLES));
 		}
 		/* alignment of the unit tangent with the guide (outer half of the strand) */
-		qaws_curve_geometry_eval_3d(&prim[k], NULL, NULL, &geo, NULL, NULL, &validity);
+		qaws_curve_geometry_eval_3d(&geo, NULL, NULL, &validity, &prim[k], NULL, NULL);
 		groom_guide(x, g);
 		{
 			double wk = (k + 0.5) / HG_SAMPLES;
@@ -117,12 +117,12 @@ static double groom_energy(groom_strand const* s, qaws_scalar const* cps, qaws_s
 			memset(&gb, 0, sizeof(gb));
 			gb.tangent = v3((qaws_scalar)(-w_align * wk * g[0] / HG_SAMPLES), (qaws_scalar)(-w_align * wk * g[1] / HG_SAMPLES),
 				(qaws_scalar)(-w_align * wk * g[2] / HG_SAMPLES));
-			qaws_curve_geometry_adjoint_3d(&prim[k], &gb, &bar[k], &validity);
+			qaws_curve_geometry_adjoint_3d(&validity, &bar[k], &prim[k], &gb);
 		}
 		bar[k].channels |= QAWS_EVAL_FLAG_POSITION;
 	}
-	qaws_curve_eval_batch_adjoint_3d(NULL, c, ts, HG_SAMPLES, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2,
-		bar, &views, NULL);
+	qaws_curve_eval_batch_adjoint_3d(&views, NULL, c, ts, bar,
+		HG_SAMPLES, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2, NULL);
 	{
 		/* length and bending from the integral functionals */
 		qaws_scalar gl[HG_CP * 3], gbnd[HG_CP * 3], len = 0, bend = 0;
@@ -131,8 +131,8 @@ static double groom_energy(groom_strand const* s, qaws_scalar const* cps, qaws_s
 		qaws_diff_views v2 = one_field(&f2, QAWS_FIELD_CONTROL_POINTS, gbnd, HG_CP, 3);
 		memset(gl, 0, sizeof(gl));
 		memset(gbnd, 0, sizeof(gbnd));
-		qaws_curve_functional_gradient(NULL, c, QAWS_FUNCTIONAL_LENGTH, 0, &v1, &len);
-		qaws_curve_functional_gradient(NULL, c, QAWS_FUNCTIONAL_BENDING, 0, &v2, &bend);
+		qaws_curve_functional_gradient(&len, &v1, c, QAWS_FUNCTIONAL_LENGTH, 0, NULL);
+		qaws_curve_functional_gradient(&bend, &v2, c, QAWS_FUNCTIONAL_BENDING, 0, NULL);
 		e_len = (len - s->rest_len) * (len - s->rest_len);
 		e_bend = bend;
 		for (k = 0; k < HG_CP * 3; k++)
@@ -273,7 +273,7 @@ static void groom_render(svg* s, view3 const* v, groom_strand const* st, int ns,
 		{
 			qaws_eval_result_3d e;
 			double x[3], sx, sy, d;
-			qaws_curve_evaluate_3d(c, (qaws_scalar)(r.min_value + (r.max_value - r.min_value) * k / m), QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &e);
+			qaws_curve_evaluate_3d(&e, c, (qaws_scalar)(r.min_value + (r.max_value - r.min_value) * k / m), QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1);
 			x[0] = e.position.x; x[1] = e.position.y; x[2] = e.position.z;
 			view_xform(v, x, &sx, &sy, &d);
 			if (k > 0)

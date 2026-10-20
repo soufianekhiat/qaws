@@ -65,7 +65,7 @@ static qaws_status rbez_eval_span_2d(
 	memset(out_result, 0, sizeof(*out_result));
 
 	/* --- Position: evaluate homogeneous curve --- */
-	qaws_internal_decasteljau(wp, degree, hdim, local_t, hbuf);
+	qaws_internal_decasteljau(hbuf, wp, hdim, degree, local_t);
 
 	w0 = hbuf[dim_count]; /* last component is weight */
 	if (w0 < QAWS_LITERAL(1e-15) && w0 > -QAWS_LITERAL(1e-15))
@@ -85,8 +85,8 @@ static qaws_status rbez_eval_span_2d(
 	if ((eval_flags & (QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2 | QAWS_EVAL_FLAG_D3))
 		&& degree >= 1)
 	{
-		qaws_internal_bezier_derivative_points(wp, degree, hdim, d1p);
-		qaws_internal_decasteljau(d1p, degree - 1, hdim, local_t, hd1);
+		qaws_internal_bezier_derivative_points(d1p, wp, hdim, degree);
+		qaws_internal_decasteljau(hd1, d1p, hdim, degree - 1, local_t);
 
 		/* Quotient rule: C' = (P' - C * w') / w */
 		C1[0] = (hd1[0] - C[0] * hd1[dim_count]) * inv_w0;
@@ -107,8 +107,8 @@ static qaws_status rbez_eval_span_2d(
 	{
 		hd2[0] = hd2[1] = hd2[2] = QAWS_ZERO;
 		if (degree >= 2) {
-			qaws_internal_bezier_derivative_points(d1p, degree - 1, hdim, d2p);
-			qaws_internal_decasteljau(d2p, degree - 2, hdim, local_t, hd2);
+			qaws_internal_bezier_derivative_points(d2p, d1p, hdim, degree - 1);
+			qaws_internal_decasteljau(hd2, d2p, hdim, degree - 2, local_t);
 		}
 
 		/* C'' = (P'' - 2*C'*w' - C*w'') / w */
@@ -129,8 +129,8 @@ static qaws_status rbez_eval_span_2d(
 	{
 		hd3[0] = hd3[1] = hd3[2] = QAWS_ZERO;
 		if (degree >= 3) {
-			qaws_internal_bezier_derivative_points(d2p, degree - 2, hdim, d3p);
-			qaws_internal_decasteljau(d3p, degree - 3, hdim, local_t, hd3);
+			qaws_internal_bezier_derivative_points(d3p, d2p, hdim, degree - 2);
+			qaws_internal_decasteljau(hd3, d3p, hdim, degree - 3, local_t);
 		}
 
 		/* C''' = (P''' - 3*C''*w' - 3*C'*w'' - C*w''') / w */
@@ -176,7 +176,7 @@ static qaws_status rbez_eval_span_3d(
 	memset(out_result, 0, sizeof(*out_result));
 
 	/* --- Position: evaluate homogeneous curve --- */
-	qaws_internal_decasteljau(wp, degree, hdim, local_t, hbuf);
+	qaws_internal_decasteljau(hbuf, wp, hdim, degree, local_t);
 
 	w0 = hbuf[dim_count]; /* last component is weight */
 	if (w0 < QAWS_LITERAL(1e-15) && w0 > -QAWS_LITERAL(1e-15))
@@ -198,8 +198,8 @@ static qaws_status rbez_eval_span_3d(
 	if ((eval_flags & (QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2 | QAWS_EVAL_FLAG_D3))
 		&& degree >= 1)
 	{
-		qaws_internal_bezier_derivative_points(wp, degree, hdim, d1p);
-		qaws_internal_decasteljau(d1p, degree - 1, hdim, local_t, hd1);
+		qaws_internal_bezier_derivative_points(d1p, wp, hdim, degree);
+		qaws_internal_decasteljau(hd1, d1p, hdim, degree - 1, local_t);
 
 		/* Quotient rule: C' = (P' - C * w') / w */
 		C1[0] = (hd1[0] - C[0] * hd1[dim_count]) * inv_w0;
@@ -222,8 +222,8 @@ static qaws_status rbez_eval_span_3d(
 	{
 		hd2[0] = hd2[1] = hd2[2] = hd2[3] = QAWS_ZERO;
 		if (degree >= 2) {
-			qaws_internal_bezier_derivative_points(d1p, degree - 1, hdim, d2p);
-			qaws_internal_decasteljau(d2p, degree - 2, hdim, local_t, hd2);
+			qaws_internal_bezier_derivative_points(d2p, d1p, hdim, degree - 1);
+			qaws_internal_decasteljau(hd2, d2p, hdim, degree - 2, local_t);
 		}
 
 		/* C'' = (P'' - 2*C'*w' - C*w'') / w */
@@ -247,8 +247,8 @@ static qaws_status rbez_eval_span_3d(
 	{
 		hd3[0] = hd3[1] = hd3[2] = hd3[3] = QAWS_ZERO;
 		if (degree >= 3) {
-			qaws_internal_bezier_derivative_points(d2p, degree - 2, hdim, d3p);
-			qaws_internal_decasteljau(d3p, degree - 3, hdim, local_t, hd3);
+			qaws_internal_bezier_derivative_points(d3p, d2p, hdim, degree - 2);
+			qaws_internal_decasteljau(hd3, d3p, hdim, degree - 3, local_t);
 		}
 
 		/* C''' = (P''' - 3*C''*w' - 3*C'*w'' - C*w''') / w */
@@ -278,10 +278,10 @@ static void rbez_destroy_impl(void* impl, qaws_allocator const* allocator)
 {
 	qaws_rational_bezier_impl* ri = (qaws_rational_bezier_impl*)impl;
 	if (ri) {
-		qaws_internal_dealloc(allocator, ri->control_points);
-		qaws_internal_dealloc(allocator, ri->weights);
-		qaws_internal_dealloc(allocator, ri->weighted_points);
-		qaws_internal_dealloc(allocator, ri);
+		qaws_internal_dealloc(ri->control_points, allocator);
+		qaws_internal_dealloc(ri->weights, allocator);
+		qaws_internal_dealloc(ri->weighted_points, allocator);
+		qaws_internal_dealloc(ri, allocator);
 	}
 }
 
@@ -346,7 +346,7 @@ static qaws_status rbez_linear_support(qaws_curve const* curve, unsigned int spa
 	if (n + 1 > QAWS_DIFF_MAX_SUPPORT || order > QAWS_DIFF_MAX_ORDER)
 		return QAWS_STATUS_UNSUPPORTED_OPERATION;
 
-	qaws_internal_bernstein_derivs(n, local_t, order, b);
+	qaws_internal_bernstein_derivs(b, n, local_t, order);
 
 	out->kind = QAWS_SUPPORT_GLOBAL;
 	out->range_count = 1;
@@ -368,10 +368,10 @@ static qaws_status rbez_rebuild(qaws_curve const* curve, qaws_diff_views const* 
 	qaws_rational_bezier_desc d;
 	qaws_scalar const *cps = NULL, *w = NULL;
 	qaws_scalar *owned_cps = NULL, *owned_w = NULL;
-	qaws_status st = qaws_internal_field_override(values, QAWS_FIELD_CONTROL_POINTS, impl->control_points,
-		impl->control_point_count, (unsigned int)curve->dimension, &cps, &owned_cps);
+	qaws_status st = qaws_internal_field_override(&cps, &owned_cps, values,
+		impl->control_points, impl->control_point_count, QAWS_FIELD_CONTROL_POINTS, (unsigned int)curve->dimension);
 	if (st == QAWS_STATUS_OK)
-		st = qaws_internal_field_override(values, QAWS_FIELD_WEIGHTS, impl->weights, impl->control_point_count, 1, &w, &owned_w);
+		st = qaws_internal_field_override(&w, &owned_w, values, impl->weights, impl->control_point_count, QAWS_FIELD_WEIGHTS, 1);
 	if (st == QAWS_STATUS_OK) {
 		d.dimension = curve->dimension;
 		d.degree = curve->degree;
@@ -379,10 +379,10 @@ static qaws_status rbez_rebuild(qaws_curve const* curve, qaws_diff_views const* 
 		d.control_point_count = impl->control_point_count;
 		d.weights = w;
 		d.weight_count = impl->control_point_count;
-		st = qaws_curve_create_rational_bezier(&d, out_curve);
+		st = qaws_curve_create_rational_bezier(out_curve, &d);
 	}
-	qaws_internal_dealloc(NULL, owned_cps);
-	qaws_internal_dealloc(NULL, owned_w);
+	qaws_internal_dealloc(owned_cps, NULL);
+	qaws_internal_dealloc(owned_w, NULL);
 	return st;
 }
 
@@ -472,9 +472,9 @@ qaws_status qaws_curve_create_rational_bezier_ex(
 
 	/* Copy control points */
 	cp_size = qaws_internal_mul3((size_t)dim_count, n_pts, sizeof(qaws_scalar));
-	impl->control_points = (qaws_scalar*)qaws_internal_alloc(allocator, cp_size);
+	impl->control_points = (qaws_scalar*)qaws_internal_alloc(cp_size, allocator);
 	if (!impl->control_points) {
-		qaws_internal_dealloc(allocator, impl);
+		qaws_internal_dealloc(impl, allocator);
 		qaws_curve_destroy(curve);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
@@ -483,10 +483,10 @@ qaws_status qaws_curve_create_rational_bezier_ex(
 
 	/* Copy weights */
 	w_size = qaws_internal_mul2((size_t)n_pts, sizeof(qaws_scalar));
-	impl->weights = (qaws_scalar*)qaws_internal_alloc(allocator, w_size);
+	impl->weights = (qaws_scalar*)qaws_internal_alloc(w_size, allocator);
 	if (!impl->weights) {
-		qaws_internal_dealloc(allocator, impl->control_points);
-		qaws_internal_dealloc(allocator, impl);
+		qaws_internal_dealloc(impl->control_points, allocator);
+		qaws_internal_dealloc(impl, allocator);
 		qaws_curve_destroy(curve);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
@@ -496,25 +496,25 @@ qaws_status qaws_curve_create_rational_bezier_ex(
 	   for each point i, store (w_i * x, w_i * y, [w_i * z], w_i) */
 	hdim = dim_count + 1;
 	wp_size = qaws_internal_mul3((size_t)hdim, n_pts, sizeof(qaws_scalar));
-	impl->weighted_points = (qaws_scalar*)qaws_internal_alloc(allocator, wp_size);
+	impl->weighted_points = (qaws_scalar*)qaws_internal_alloc(wp_size, allocator);
 	if (!impl->weighted_points) {
-		qaws_internal_dealloc(allocator, impl->weights);
-		qaws_internal_dealloc(allocator, impl->control_points);
-		qaws_internal_dealloc(allocator, impl);
+		qaws_internal_dealloc(impl->weights, allocator);
+		qaws_internal_dealloc(impl->control_points, allocator);
+		qaws_internal_dealloc(impl, allocator);
 		qaws_curve_destroy(curve);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 
 	if (dim_count == 2) {
 		qaws_rational_bezier_prepare_2d(
-			(const qaws_vec2 *)desc->control_points,
-			desc->weights, desc->degree,
-			impl->weighted_points);
+			impl->weighted_points,
+			(const qaws_vec2 *)desc->control_points, desc->weights,
+			desc->degree);
 	} else {
 		qaws_rational_bezier_prepare_3d(
-			(const qaws_vec3 *)desc->control_points,
-			desc->weights, desc->degree,
-			impl->weighted_points);
+			impl->weighted_points,
+			(const qaws_vec3 *)desc->control_points, desc->weights,
+			desc->degree);
 	}
 
 	curve->impl = impl;
@@ -523,8 +523,8 @@ qaws_status qaws_curve_create_rational_bezier_ex(
 }
 
 qaws_status qaws_curve_create_rational_bezier(
-	qaws_rational_bezier_desc const* desc,
-	qaws_curve** out_curve)
+	qaws_curve** out_curve,
+	qaws_rational_bezier_desc const* desc)
 {
 	return qaws_curve_create_rational_bezier_ex(desc, NULL, out_curve);
 }

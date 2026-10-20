@@ -52,28 +52,28 @@ static qaws_status al_curve(unsigned int c, qaws_allocator const* al, qaws_curve
 		qaws_bezier_desc d;
 		memset(&d, 0, sizeof d);
 		d.dimension = QAWS_DIMENSION_3D; d.degree = 3; d.control_points = al_pts; d.control_point_count = 4;
-		return qaws_curve_create_bezier_ex(&d, al, out);
+		return qaws_curve_create_bezier_ex(out, &d, al);
 	}
 	case 1:
 	{
 		qaws_hermite_desc d;
 		memset(&d, 0, sizeof d);
 		d.dimension = QAWS_DIMENSION_3D; d.degree = 3; d.points = al_pts; d.derivatives = al_tan; d.point_count = 6; d.derivative_count = 6;
-		return qaws_curve_create_hermite_ex(&d, al, out);
+		return qaws_curve_create_hermite_ex(out, &d, al);
 	}
 	case 2:
 	{
 		qaws_catmull_rom_desc d;
 		memset(&d, 0, sizeof d);
 		d.dimension = QAWS_DIMENSION_3D; d.control_points = al_pts; d.control_point_count = 6;
-		return qaws_curve_create_catmull_rom_ex(&d, al, out);
+		return qaws_curve_create_catmull_rom_ex(out, &d, al);
 	}
 	case 3:
 	{
 		qaws_bspline_desc d;
 		memset(&d, 0, sizeof d);
 		d.dimension = QAWS_DIMENSION_3D; d.degree = 3; d.control_points = al_pts; d.control_point_count = 6;
-		return qaws_curve_create_bspline_ex(&d, al, out);
+		return qaws_curve_create_bspline_ex(out, &d, al);
 	}
 	case 4:
 	{
@@ -82,7 +82,7 @@ static qaws_status al_curve(unsigned int c, qaws_allocator const* al, qaws_curve
 		memset(&d, 0, sizeof d);
 		d.dimension = QAWS_DIMENSION_3D; d.degree = 3; d.control_points = al_pts; d.control_point_count = 6; d.weights = w; d.weight_count = 6;
 		d.knots = k; d.knot_count = 10;
-		return qaws_curve_create_nurbs_ex(&d, al, out);
+		return qaws_curve_create_nurbs_ex(out, &d, al);
 	}
 	case 5:
 	{
@@ -90,7 +90,7 @@ static qaws_status al_curve(unsigned int c, qaws_allocator const* al, qaws_curve
 		qaws_trajectory_desc d;
 		memset(&d, 0, sizeof d);
 		d.dimension = QAWS_DIMENSION_3D; d.degree = 3; d.key_positions = al_pts; d.key_count = 6; d.key_times = times; d.key_time_count = 6;
-		return qaws_curve_create_trajectory_ex(&d, al, out);
+		return qaws_curve_create_trajectory_ex(out, &d, al);
 	}
 	case 6:
 	{
@@ -184,20 +184,20 @@ static qaws_status al_surface(unsigned int c, qaws_allocator const* al, qaws_sur
 		qaws_surface_bezier_desc d;
 		memset(&d, 0, sizeof d);
 		d.u_degree = 3; d.v_degree = 3; d.control_points = grid; d.u_point_count = 4; d.v_point_count = 4;
-		return qaws_surface_create_bezier_ex(&d, al, out);
+		return qaws_surface_create_bezier_ex(out, &d, al);
 	}
 	if (c == 1)
 	{
 		qaws_surface_bspline_desc d;
 		memset(&d, 0, sizeof d);
 		d.u_degree = 2; d.v_degree = 3; d.control_points = grid; d.u_point_count = 4; d.v_point_count = 4;
-		return qaws_surface_create_bspline_ex(&d, al, out);
+		return qaws_surface_create_bspline_ex(out, &d, al);
 	}
 	{
 		qaws_surface_nurbs_desc d;
 		memset(&d, 0, sizeof d);
 		d.u_degree = 2; d.v_degree = 2; d.control_points = grid; d.u_point_count = 4; d.v_point_count = 4; d.weights = w;
-		return qaws_surface_create_nurbs_ex(&d, al, out);
+		return qaws_surface_create_nurbs_ex(out, &d, al);
 	}
 }
 
@@ -234,9 +234,9 @@ static void test_constructors(void)
 					qaws_eval_result_2d r2;
 					qaws_range r = qaws_curve_get_parameter_range(curve);
 					if (qaws_curve_get_dimension(curve) == QAWS_DIMENSION_3D)
-						qaws_curve_evaluate_3d(curve, (r.min_value + r.max_value) / 2, QAWS_EVAL_FLAG_POSITION, &r3);
+						qaws_curve_evaluate_3d(&r3, curve, (r.min_value + r.max_value) / 2, QAWS_EVAL_FLAG_POSITION);
 					else
-						qaws_curve_evaluate_2d(curve, (r.min_value + r.max_value) / 2, QAWS_EVAL_FLAG_POSITION, &r2);
+						qaws_curve_evaluate_2d(&r2, curve, (r.min_value + r.max_value) / 2, QAWS_EVAL_FLAG_POSITION);
 				}
 				qaws_curve_destroy(curve);
 				qaws_surface_destroy(surface);
@@ -284,7 +284,7 @@ static qaws_curve* al_line(qaws_dimension dim, double ax, double ay, double az, 
 		}
 	memset(&d, 0, sizeof d);
 	d.dimension = dim; d.degree = 3; d.control_points = p; d.control_point_count = 4;
-	qaws_curve_create_bezier(&d, &c);
+	qaws_curve_create_bezier(&c, &d);
 	return c;
 }
 
@@ -312,8 +312,8 @@ static int al_inputs_make(al_inputs* in)
 	/* (tilted, off the sampling grid: x = 0.137 + 0.21 z) */
 	b.p00.x = b.p10.x = (qaws_scalar)(0.137 - 0.21);
 	b.p01.x = b.p11.x = (qaws_scalar)(0.137 + 0.21);
-	qaws_surface_create_bilinear(&a, &in->plane_a);
-	qaws_surface_create_bilinear(&b, &in->plane_b);
+	qaws_surface_create_bilinear(&in->plane_a, &a);
+	qaws_surface_create_bilinear(&in->plane_b, &b);
 	return in->c0 && in->c1 && in->d0 && in->d1 && in->mid && in->path && in->profile2 && in->uv[0] && in->uv[1] && in->uv[2] && in->uv[3]
 		&& in->plane_a && in->plane_b;
 }
@@ -507,7 +507,7 @@ static void test_surface_constructors(void)
 				qaws_surface_eval_result r;
 				ok = k + 1;
 				/* an evaluation, so scratch past the stack buffers would be counted too */
-				qaws_surface_evaluate(surface, (qaws_scalar)0.4, (qaws_scalar)0.6, QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL, &r);
+				qaws_surface_evaluate(&r, surface, (qaws_scalar)0.4, (qaws_scalar)0.6, QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL);
 				qaws_surface_destroy(surface);
 				qaws_curve_destroy(ta);
 				qaws_curve_destroy(tb);
@@ -538,13 +538,13 @@ static qaws_status al_derive(unsigned int c, qaws_curve const* src, qaws_curve c
 {
 	switch (c)
 	{
-	case 0: return qaws_curve_reverse(src, a);
-	case 1: return qaws_curve_extract(src, (qaws_scalar)0.4, (qaws_scalar)2.1, a);
-	case 2: return qaws_curve_split(src, (qaws_scalar)1.3, a, b);
-	case 3: return qaws_curve_elevate_degree(bez, a);
-	case 4: return qaws_curve_convert_bspline_to_nurbs(src, a);
-	case 5: return qaws_curve_reparameterize_arc_length(src, 64, a);
-	default: return qaws_curve_match_arc_length(src2, src, 64, a);
+	case 0: return qaws_curve_reverse(a, src);
+	case 1: return qaws_curve_extract(a, src, (qaws_scalar)0.4, (qaws_scalar)2.1);
+	case 2: return qaws_curve_split(a, b, src, (qaws_scalar)1.3);
+	case 3: return qaws_curve_elevate_degree(a, bez);
+	case 4: return qaws_curve_convert_bspline_to_nurbs(a, src);
+	case 5: return qaws_curve_reparameterize_arc_length(a, src, 64);
+	default: return qaws_curve_match_arc_length(a, src2, src, 64);
 	}
 }
 

@@ -15,7 +15,7 @@ static void sof_outline(svg* s, qaws_surface_region const* r, qaws_surface const
 	for (pi = 0; pi < np; pi++)
 	{
 		qaws_path_2d p;
-		qaws_surface_region_get_path(r, pi, &p);
+		qaws_surface_region_get_path(&p, r, pi);
 		for (ci = 0; ci < p.curve_count; ci++)
 		{
 			qaws_range rg = qaws_curve_get_parameter_range(p.curves[ci]);
@@ -25,9 +25,9 @@ static void sof_outline(svg* s, qaws_surface_region const* r, qaws_surface const
 				   them): segment by segment, the cuts left out */
 				unsigned int nc = 0, seg;
 				qaws_scalar probe[2], *cp;
-				qaws_curve_get_control_points(p.curves[ci], probe, 0, &nc);
+				qaws_curve_get_control_points(probe, &nc, p.curves[ci], 0);
 				cp = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 2 * (nc + 1));
-				qaws_curve_get_control_points(p.curves[ci], cp, nc, &nc);
+				qaws_curve_get_control_points(cp, &nc, p.curves[ci], nc);
 				for (seg = 0; seg + 1 < nc; seg++)
 				{
 					double a0 = cp[2 * seg], a1 = cp[2 * seg + 1], b0 = cp[2 * seg + 2], b1 = cp[2 * seg + 3];
@@ -56,7 +56,7 @@ static void sof_outline(svg* s, qaws_surface_region const* r, qaws_surface const
 			for (k = 0; k <= n; k++)
 			{
 				qaws_eval_result_2d e;
-				qaws_curve_evaluate_2d(p.curves[ci], (qaws_scalar)(rg.min_value + (rg.max_value - rg.min_value) * k / n), QAWS_EVAL_FLAG_POSITION, &e);
+				qaws_curve_evaluate_2d(&e, p.curves[ci], (qaws_scalar)(rg.min_value + (rg.max_value - rg.min_value) * k / n), QAWS_EVAL_FLAG_POSITION);
 				uv[2 * k] = e.position.x; uv[2 * k + 1] = e.position.y;
 			}
 			{
@@ -100,7 +100,7 @@ static qaws_surface_region* sof_offset(qaws_surface const* s, qaws_surface_curve
 	qaws_status st;
 	for (i = 0; i < n; i++) pc[i] = cv[i];
 	P.curves = pc; P.curve_count = n; P.closed = closed;
-	st = qaws_surface_offset(s, QAWS_FILL_NON_ZERO, &P, 1, (qaws_scalar)d, 0, &r);
+	st = qaws_surface_offset(&r, s, &P, 1, QAWS_FILL_NON_ZERO, (qaws_scalar)d, 0);
 	if (st != QAWS_STATUS_OK) printf("figure 19: offset by %.3f: status %d\n", d, (int)st);
 	return r;
 }
@@ -124,12 +124,12 @@ static void demo_surface_offset(void)
 		qaws_curve* keep[2] = { 0 };
 		qaws_vec2 a[4];
 		a[0] = sgf_uv(0.92, 0.36); a[1] = sgf_uv(1.12, 0.40); a[2] = sgf_uv(1.0, 0.66);
-		for (i = 0; i < 3; i++) qaws_surface_curve_create_geodesic(sph, a[i], a[(i + 1) % 3], 0, &tri[i]);
+		for (i = 0; i < 3; i++) qaws_surface_curve_create_geodesic(&tri[i], sph, a[i], a[(i + 1) % 3], 0);
 		a[0] = sgf_uv(0.9, 0.36); a[1] = sgf_uv(1.06, 0.36); a[2] = sgf_uv(1.06, 0.6); a[3] = sgf_uv(0.9, 0.6);
-		for (i = 0; i < 4; i++) qaws_surface_curve_create_geodesic(sph, a[i], a[(i + 1) % 4], 0, &sq[i]);
-		qaws_surface_curve_create_geodesic_arc(sph, sgf_uv(1.08, 0.6), (qaws_scalar)0.3, 0, (qaws_scalar)(2 * pi), 0, &circ);
+		for (i = 0; i < 4; i++) qaws_surface_curve_create_geodesic(&sq[i], sph, a[i], a[(i + 1) % 4], 0);
+		qaws_surface_curve_create_geodesic_arc(&circ, sph, sgf_uv(1.08, 0.6), (qaws_scalar)0.3, 0, (qaws_scalar)(2 * pi), 0);
 		a[0] = sgf_uv(0.88, 0.3); a[1] = sgf_uv(0.98, 0.62); a[2] = sgf_uv(1.1, 0.42);
-		for (i = 0; i < 2; i++) qaws_surface_curve_create_geodesic(sph, a[i], a[i + 1], 0, &pl[i]);
+		for (i = 0; i < 2; i++) qaws_surface_curve_create_geodesic(&pl[i], sph, a[i], a[i + 1], 0);
 		lat[0] = ssf_line(sph, 0, 0.45, 1, 0.45, &keep[0]);
 		lat[1] = ssf_line(sph, 1, 0.55, 0, 0.55, &keep[1]);
 		for (k = 0; k < 4; k++)
@@ -152,7 +152,7 @@ static void demo_surface_offset(void)
 					qaws_surface_path P;
 					for (i = 0; i < 3; i++) pc[i] = tri[i];
 					ssf_path(&P, pc, 3);
-					qaws_surface_clip(sph, QAWS_CLIP_NONE, QAWS_FILL_NON_ZERO, &P, 1, NULL, 0, &base);
+					qaws_surface_clip(&base, sph, &P, NULL, 1, 0, QAWS_CLIP_NONE, QAWS_FILL_NON_ZERO);
 				}
 				name = "a geodesic triangle grown by 0.15";
 			}
@@ -164,8 +164,8 @@ static void demo_surface_offset(void)
 				for (i = 0; i < 4; i++) pa[i] = sq[i];
 				pb[0] = circ;
 				ssf_path(&A[0], pa, 4); ssf_path(&A[1], pb, 1);
-				qaws_surface_clip(sph, QAWS_CLIP_NONE, QAWS_FILL_NON_ZERO, A, 2, NULL, 0, &base);
-				if (qaws_surface_offset(sph, QAWS_FILL_NON_ZERO, A, 2, (qaws_scalar)-0.08, 0, &r) != QAWS_STATUS_OK) printf("figure 19: shrink failed\n");
+				qaws_surface_clip(&base, sph, A, NULL, 2, 0, QAWS_CLIP_NONE, QAWS_FILL_NON_ZERO);
+				if (qaws_surface_offset(&r, sph, A, 2, QAWS_FILL_NON_ZERO, (qaws_scalar)-0.08, 0) != QAWS_STATUS_OK) printf("figure 19: shrink failed\n");
 				name = "a square with a circle, shrunk by 0.08";
 			}
 			else if (k == 2)
@@ -179,14 +179,14 @@ static void demo_surface_offset(void)
 				qaws_surface_path B[2];
 				p0[0] = lat[0]; p1[0] = lat[1];
 				ssf_path(&B[0], p0, 1); ssf_path(&B[1], p1, 1);
-				qaws_surface_clip(sph, QAWS_CLIP_NONE, QAWS_FILL_NON_ZERO, B, 2, NULL, 0, &base);
-				if (qaws_surface_offset(sph, QAWS_FILL_NON_ZERO, B, 2, (qaws_scalar)0.25, 0, &r) != QAWS_STATUS_OK) printf("figure 19: band failed\n");
+				qaws_surface_clip(&base, sph, B, NULL, 2, 0, QAWS_CLIP_NONE, QAWS_FILL_NON_ZERO);
+				if (qaws_surface_offset(&r, sph, B, 2, QAWS_FILL_NON_ZERO, (qaws_scalar)0.25, 0) != QAWS_STATUS_OK) printf("figure 19: band failed\n");
 				view.pitch = 0.45;
 				sgf_view_init(&view, -pi / 2 + 0.2, 0.45, 108, v3.x0 + pw / 2, v3.y0 + ph / 2 + 8);
 				name = "a band round the sphere grown by 0.25";
 			}
-			if (r) qaws_surface_region_get_area(r, &area);
-			if (base) qaws_surface_region_get_area(base, &area0);
+			if (r) qaws_surface_region_get_area(&area, r);
+			if (base) qaws_surface_region_get_area(&area0, base);
 			svg_panel(&s, &v3, name);
 			if (base) sprintf(label, "(u, v): area %.4f from %.4f", (double)area, (double)area0);
 			else sprintf(label, "(u, v): area %.4f", (double)area);
@@ -228,10 +228,10 @@ static void demo_surface_offset(void)
 		for (i = 0; i < 16; i++) { cp[i].x = (qaws_scalar)((i / 4) / 3.0 * 2); cp[i].y = (qaws_scalar)((i % 4) / 3.0 * 2); cp[i].z = (qaws_scalar)z[i]; }
 		memset(&bd, 0, sizeof(bd));
 		bd.u_degree = 3; bd.v_degree = 3; bd.control_points = cp; bd.u_point_count = 4; bd.v_point_count = 4;
-		qaws_surface_create_bezier(&bd, &patch);
+		qaws_surface_create_bezier(&patch, &bd);
 		corner[0] = sgf_uv(0.25, 0.25); corner[1] = sgf_uv(0.6, 0.22); corner[2] = sgf_uv(0.62, 0.58); corner[3] = sgf_uv(0.28, 0.6);
-		for (i = 0; i < 4; i++) { qaws_surface_curve_create_geodesic(patch, corner[i], corner[(i + 1) % 4], 0, &sq[i]); pa[i] = sq[i]; }
-		qaws_surface_curve_create_geodesic_arc(patch, sgf_uv(0.63, 0.62), (qaws_scalar)0.36, 0, (qaws_scalar)(2 * pi), 0, &circ);
+		for (i = 0; i < 4; i++) { qaws_surface_curve_create_geodesic(&sq[i], patch, corner[i], corner[(i + 1) % 4], 0); pa[i] = sq[i]; }
+		qaws_surface_curve_create_geodesic_arc(&circ, patch, sgf_uv(0.63, 0.62), (qaws_scalar)0.36, 0, (qaws_scalar)(2 * pi), 0);
 		pb[0] = circ;
 		ssf_path(&A[0], pa, 4); ssf_path(&A[1], pb, 1);
 		v3.x0 = 24; v3.y0 = 104 + 2 * (ph + 44); v3.w = pw; v3.h = ph;
@@ -247,8 +247,8 @@ static void demo_surface_offset(void)
 		{
 			qaws_surface_region* r = NULL;
 			if (dist[k] == 0)
-				qaws_surface_clip(patch, QAWS_CLIP_NONE, QAWS_FILL_NON_ZERO, A, 2, NULL, 0, &r);
-			else if (qaws_surface_offset(patch, QAWS_FILL_NON_ZERO, A, 2, (qaws_scalar)dist[k], 0, &r) != QAWS_STATUS_OK)
+				qaws_surface_clip(&r, patch, A, NULL, 2, 0, QAWS_CLIP_NONE, QAWS_FILL_NON_ZERO);
+			else if (qaws_surface_offset(&r, patch, A, 2, QAWS_FILL_NON_ZERO, (qaws_scalar)dist[k], 0) != QAWS_STATUS_OK)
 				printf("figure 19: patch offset %.2f failed\n", dist[k]);
 			if (r)
 			{
@@ -276,9 +276,9 @@ static void demo_surface_offset(void)
 		viewport v3, vuv;
 		sgf_view view;
 		a[0] = sgf_uv(0.86, 0.2); a[1] = sgf_uv(0.97, 0.9); a[2] = sgf_uv(1.08, 1.12); a[3] = sgf_uv(1.16, 0.95);
-		for (i = 0; i < 3; i++) qaws_surface_curve_create_geodesic(tor, a[i], a[i + 1], 0, &pl[i]);
+		for (i = 0; i < 3; i++) qaws_surface_curve_create_geodesic(&pl[i], tor, a[i], a[i + 1], 0);
 		r = sof_offset(tor, pl, 3, 0, 0.09);
-		if (r) qaws_surface_region_get_area(r, &area);
+		if (r) qaws_surface_region_get_area(&area, r);
 		v3.x0 = 24 + 2 * (pw + 12); v3.y0 = 104 + 2 * (ph + 44); v3.w = pw; v3.h = ph;
 		vuv.x0 = v3.x0 + pw + 12; vuv.y0 = v3.y0; vuv.w = pw; vuv.h = ph;
 		vuv.xmin = -0.1; vuv.xmax = 1.1; vuv.ymin = 0.5 - 0.6 * ph / pw; vuv.ymax = 0.5 + 0.6 * ph / pw;

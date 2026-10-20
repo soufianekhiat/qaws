@@ -36,7 +36,7 @@ static void test_svg_batch_eval(void)
 		desc.degree = 3;
 		desc.control_points = cp;
 		desc.control_point_count = 4;
-		qaws_curve_create_bezier(&desc, &curve);
+		qaws_curve_create_bezier(&curve, &desc);
 
 		/* Draw curve via standard sampling */
 		n = svg_sample_curve(curve, curve_pts, SVG_SAMPLES);
@@ -51,8 +51,8 @@ static void test_svg_batch_eval(void)
 			params[i] = (qaws_scalar)i / (qaws_scalar)(batch_n - 1);
 
 		/* Batch evaluate with position + D1 */
-		qaws_curve_evaluate_batch_2d(curve, params, batch_n,
-			QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, results);
+		qaws_curve_evaluate_batch_2d(results, curve, params,
+			batch_n, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1);
 
 		/* Draw batch points as dots */
 		for (i = 0; i < batch_n; i++)
@@ -96,7 +96,7 @@ static void test_svg_batch_eval(void)
 		desc.control_point_count = 5;
 		desc.parameterization = QAWS_PARAMETERIZATION_CENTRIPETAL;
 		desc.closed = 0;
-		qaws_curve_create_catmull_rom(&desc, &curve);
+		qaws_curve_create_catmull_rom(&curve, &desc);
 
 		/* Draw curve */
 		n = svg_sample_curve(curve, curve_pts, SVG_SAMPLES);
@@ -108,8 +108,8 @@ static void test_svg_batch_eval(void)
 			params[i] = range.min_value +
 				(range.max_value - range.min_value) * (qaws_scalar)i / (qaws_scalar)(batch_n - 1);
 
-		qaws_curve_evaluate_batch_2d(curve, params, batch_n,
-			QAWS_EVAL_FLAG_POSITION, results);
+		qaws_curve_evaluate_batch_2d(results, curve, params,
+			batch_n, QAWS_EVAL_FLAG_POSITION);
 
 		for (i = 0; i < batch_n; i++)
 		{
@@ -149,18 +149,18 @@ static void test_batch_eval(void)
 		desc.degree = 3;
 		desc.control_points = pts;
 		desc.control_point_count = 4;
-		s = qaws_curve_create_bezier(&desc, &curve2d);
+		s = qaws_curve_create_bezier(&curve2d, &desc);
 		TEST_ASSERT(s == QAWS_STATUS_OK, "batch: create 2d bezier");
 
-		s = qaws_curve_evaluate_batch_2d(curve2d, params, 5,
-			QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, results);
+		s = qaws_curve_evaluate_batch_2d(results, curve2d, params,
+			5, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1);
 		TEST_ASSERT(s == QAWS_STATUS_OK, "batch: batch eval 2d");
 
 		/* Verify each result matches single eval */
 		for (i = 0; i < 5; i++)
 		{
-			qaws_curve_evaluate_2d(curve2d, params[i],
-				QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &single);
+			qaws_curve_evaluate_2d(&single, curve2d,
+				params[i], QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1);
 			TEST_ASSERT(
 				(float)fabs(results[i].position.x - single.position.x) < 1e-6f &&
 				(float)fabs(results[i].position.y - single.position.y) < 1e-6f,
@@ -186,17 +186,17 @@ static void test_batch_eval(void)
 		desc.degree = 3;
 		desc.control_points = pts;
 		desc.control_point_count = 4;
-		s = qaws_curve_create_bezier(&desc, &curve3d);
+		s = qaws_curve_create_bezier(&curve3d, &desc);
 		TEST_ASSERT(s == QAWS_STATUS_OK, "batch: create 3d bezier");
 
-		s = qaws_curve_evaluate_batch_3d(curve3d, params, 4,
-			QAWS_EVAL_FLAG_POSITION, results);
+		s = qaws_curve_evaluate_batch_3d(results, curve3d, params,
+			4, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT(s == QAWS_STATUS_OK, "batch: batch eval 3d");
 
 		for (i = 0; i < 4; i++)
 		{
-			qaws_curve_evaluate_3d(curve3d, params[i],
-				QAWS_EVAL_FLAG_POSITION, &single);
+			qaws_curve_evaluate_3d(&single, curve3d,
+				params[i], QAWS_EVAL_FLAG_POSITION);
 			TEST_ASSERT(
 				(float)fabs(results[i].position.x - single.position.x) < 1e-6f &&
 				(float)fabs(results[i].position.y - single.position.y) < 1e-6f &&
@@ -222,17 +222,17 @@ static void test_batch_eval(void)
 		sdesc.u_point_count = 2;
 		sdesc.v_point_count = 2;
 		sdesc.control_points = cps;
-		s = qaws_surface_create_bezier(&sdesc, &surf);
+		s = qaws_surface_create_bezier(&surf, &sdesc);
 		TEST_ASSERT(s == QAWS_STATUS_OK, "batch: create surface");
 
-		s = qaws_surface_evaluate_batch(surf, u_params, v_params, 3,
-			QAWS_SURFACE_EVAL_POSITION, sresults);
+		s = qaws_surface_evaluate_batch(sresults, surf, u_params, v_params,
+			3, QAWS_SURFACE_EVAL_POSITION);
 		TEST_ASSERT(s == QAWS_STATUS_OK, "batch: surface batch eval");
 
 		for (i = 0; i < 3; i++)
 		{
-			qaws_surface_evaluate(surf, u_params[i], v_params[i],
-				QAWS_SURFACE_EVAL_POSITION, &ssingle);
+			qaws_surface_evaluate(&ssingle, surf, u_params[i],
+				v_params[i], QAWS_SURFACE_EVAL_POSITION);
 			TEST_ASSERT(
 				(float)fabs(sresults[i].position.x - ssingle.position.x) < 1e-6f &&
 				(float)fabs(sresults[i].position.y - ssingle.position.y) < 1e-6f &&
@@ -246,12 +246,12 @@ static void test_batch_eval(void)
 	{
 		qaws_scalar params[2] = {0.0f, 1.0f};
 		qaws_eval_result_2d res[2];
-		s = qaws_curve_evaluate_batch_2d(NULL, params, 2,
-			QAWS_EVAL_FLAG_POSITION, res);
+		s = qaws_curve_evaluate_batch_2d(res, NULL, params,
+			2, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT(s == QAWS_STATUS_INVALID_ARGUMENT, "batch: null curve");
 
-		s = qaws_surface_evaluate_batch(NULL, params, params, 2,
-			QAWS_SURFACE_EVAL_POSITION, NULL);
+		s = qaws_surface_evaluate_batch(NULL, NULL, params, params,
+			2, QAWS_SURFACE_EVAL_POSITION);
 		TEST_ASSERT(s == QAWS_STATUS_INVALID_ARGUMENT, "batch: null surface");
 	}
 }
@@ -304,13 +304,13 @@ static void test_custom_allocator(void)
 		desc.control_points = pts;
 		desc.control_point_count = 4;
 
-		s = qaws_curve_create_bezier_ex(&desc, &alloc, &curve);
+		s = qaws_curve_create_bezier_ex(&curve, &desc, &alloc);
 		TEST_ASSERT(s == QAWS_STATUS_OK, "allocator: create bezier_ex");
 		TEST_ASSERT(stats.alloc_count > 0, "allocator: allocs happened");
 		TEST_ASSERT(stats.total_bytes > 0, "allocator: bytes tracked");
 
 		/* Evaluate should work normally */
-		s = qaws_curve_evaluate_3d(curve, 0.5f, QAWS_EVAL_FLAG_POSITION, &result);
+		s = qaws_curve_evaluate_3d(&result, curve, 0.5f, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT(s == QAWS_STATUS_OK, "allocator: eval works");
 		TEST_ASSERT(result.valid_flags & QAWS_EVAL_FLAG_POSITION,
 			"allocator: position valid");
@@ -343,7 +343,7 @@ static void test_custom_allocator(void)
 		desc.derivatives = der;
 		desc.derivative_count = 2;
 
-		s = qaws_curve_create_hermite_ex(&desc, &alloc, &curve);
+		s = qaws_curve_create_hermite_ex(&curve, &desc, &alloc);
 		TEST_ASSERT(s == QAWS_STATUS_OK, "allocator: create hermite_ex");
 		TEST_ASSERT(stats.alloc_count > 0, "allocator: hermite allocs");
 		qaws_curve_destroy(curve);
@@ -360,7 +360,7 @@ static void test_custom_allocator(void)
 		desc.control_points = pts;
 		desc.control_point_count = 3;
 
-		s = qaws_curve_create_bezier_ex(&desc, NULL, &curve);
+		s = qaws_curve_create_bezier_ex(&curve, &desc, NULL);
 		TEST_ASSERT(s == QAWS_STATUS_OK, "allocator: null allocator OK");
 		qaws_curve_destroy(curve);
 	}
@@ -385,29 +385,29 @@ static void test_inline_curves(void)
 		desc.control_points = pts;
 		desc.control_point_count = 4;
 
-		s = qaws_curve_init_bezier_inline(&desc, &ic);
+		s = qaws_curve_init_bezier_inline(&ic, &desc);
 		TEST_ASSERT(s == QAWS_STATUS_OK, "inline: init bezier 2d");
 
 		curve = qaws_curve_inline_get_curve(&ic);
 		TEST_ASSERT(curve != NULL, "inline: get_curve non-null");
 
-		s = qaws_curve_evaluate_2d(curve, 0.0f,
-			QAWS_EVAL_FLAG_POSITION, &result);
+		s = qaws_curve_evaluate_2d(&result, curve,
+			0.0f, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT(s == QAWS_STATUS_OK, "inline: eval at t=0");
 		TEST_ASSERT((float)fabs(result.position.x - 0.0f) < 1e-6f &&
 			(float)fabs(result.position.y - 0.0f) < 1e-6f,
 			"inline: 2d start point");
 
-		s = qaws_curve_evaluate_2d(curve, 1.0f,
-			QAWS_EVAL_FLAG_POSITION, &result);
+		s = qaws_curve_evaluate_2d(&result, curve,
+			1.0f, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT(s == QAWS_STATUS_OK, "inline: eval at t=1");
 		TEST_ASSERT((float)fabs(result.position.x - 4.0f) < 1e-6f &&
 			(float)fabs(result.position.y - 0.0f) < 1e-6f,
 			"inline: 2d end point");
 
 		/* Mid-point evaluation with D1 */
-		s = qaws_curve_evaluate_2d(curve, 0.5f,
-			QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &result);
+		s = qaws_curve_evaluate_2d(&result, curve,
+			0.5f, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1);
 		TEST_ASSERT(s == QAWS_STATUS_OK, "inline: eval at t=0.5 with d1");
 		TEST_ASSERT(result.valid_flags & QAWS_EVAL_FLAG_D1,
 			"inline: d1 valid at 0.5");
@@ -427,19 +427,19 @@ static void test_inline_curves(void)
 		desc.control_points = pts;
 		desc.control_point_count = 4;
 
-		s = qaws_curve_init_bezier_inline(&desc, &ic);
+		s = qaws_curve_init_bezier_inline(&ic, &desc);
 		TEST_ASSERT(s == QAWS_STATUS_OK, "inline: init bezier 3d");
 
 		curve = qaws_curve_inline_get_curve(&ic);
-		s = qaws_curve_evaluate_3d(curve, 0.0f,
-			QAWS_EVAL_FLAG_POSITION, &result);
+		s = qaws_curve_evaluate_3d(&result, curve,
+			0.0f, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT(s == QAWS_STATUS_OK, "inline: 3d eval");
 		TEST_ASSERT((float)fabs(result.position.x - 0.0f) < 1e-6f &&
 			(float)fabs(result.position.z - 0.0f) < 1e-6f,
 			"inline: 3d start point");
 
-		s = qaws_curve_evaluate_3d(curve, 1.0f,
-			QAWS_EVAL_FLAG_POSITION, &result);
+		s = qaws_curve_evaluate_3d(&result, curve,
+			1.0f, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT((float)fabs(result.position.x - 4.0f) < 1e-6f,
 			"inline: 3d end x");
 	}
@@ -459,19 +459,19 @@ static void test_inline_curves(void)
 		desc.coefficient_count = 3;
 		desc.t_min = 0; desc.t_max = 1;
 
-		s = qaws_curve_init_polynomial_inline(&desc, &ic);
+		s = qaws_curve_init_polynomial_inline(&ic, &desc);
 		TEST_ASSERT(s == QAWS_STATUS_OK, "inline: init polynomial 2d");
 
 		curve = qaws_curve_inline_get_curve(&ic);
-		s = qaws_curve_evaluate_2d(curve, 0.0f,
-			QAWS_EVAL_FLAG_POSITION, &result);
+		s = qaws_curve_evaluate_2d(&result, curve,
+			0.0f, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT(s == QAWS_STATUS_OK, "inline: poly eval t=0");
 		TEST_ASSERT((float)fabs(result.position.x - 1.0f) < 1e-6f &&
 			(float)fabs(result.position.y - 0.0f) < 1e-6f,
 			"inline: poly start point");
 
-		s = qaws_curve_evaluate_2d(curve, 1.0f,
-			QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &result);
+		s = qaws_curve_evaluate_2d(&result, curve,
+			1.0f, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1);
 		TEST_ASSERT(s == QAWS_STATUS_OK, "inline: poly eval t=1");
 		/* P(1) = (1+2+0, 0+3-1) = (3, 2) */
 		TEST_ASSERT((float)fabs(result.position.x - 3.0f) < 1e-6f &&
@@ -497,16 +497,16 @@ static void test_inline_curves(void)
 		desc.control_points = pts;
 		desc.control_point_count = 3;
 
-		qaws_curve_create_bezier(&desc, &heap_curve);
-		qaws_curve_init_bezier_inline(&desc, &ic);
+		qaws_curve_create_bezier(&heap_curve, &desc);
+		qaws_curve_init_bezier_inline(&ic, &desc);
 		inline_curve = qaws_curve_inline_get_curve(&ic);
 
-		qaws_curve_evaluate_3d(heap_curve, 0.3f,
-			QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2,
-			&r_heap);
-		qaws_curve_evaluate_3d(inline_curve, 0.3f,
-			QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2,
-			&r_inline);
+		qaws_curve_evaluate_3d(&r_heap, heap_curve,
+			0.3f,
+			QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2);
+		qaws_curve_evaluate_3d(&r_inline, inline_curve,
+			0.3f,
+			QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2);
 
 		TEST_ASSERT(
 			(float)fabs(r_heap.position.x - r_inline.position.x) < 1e-6f &&
@@ -537,10 +537,10 @@ static void test_inline_curves(void)
 		desc.control_points = NULL;
 		desc.control_point_count = 9;
 
-		s = qaws_curve_init_bezier_inline(&desc, &ic);
+		s = qaws_curve_init_bezier_inline(&ic, &desc);
 		TEST_ASSERT(s != QAWS_STATUS_OK, "inline: reject degree 8");
 
-		s = qaws_curve_init_bezier_inline(NULL, &ic);
+		s = qaws_curve_init_bezier_inline(&ic, NULL);
 		TEST_ASSERT(s == QAWS_STATUS_INVALID_ARGUMENT, "inline: null desc");
 
 		s = qaws_curve_inline_get_curve(NULL) == NULL ? QAWS_STATUS_OK : QAWS_STATUS_INTERNAL_ERROR;

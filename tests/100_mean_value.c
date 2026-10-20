@@ -42,7 +42,7 @@ static qaws_curve* mvt_bezier(double const* xy, unsigned int n)
 	for (i = 0; i < 2 * n; i++) p[i] = (qaws_scalar)xy[i];
 	memset(&d, 0, sizeof(d));
 	d.dimension = QAWS_DIMENSION_2D; d.degree = n - 1; d.control_points = p; d.control_point_count = n;
-	qaws_curve_create_bezier(&d, &c);
+	qaws_curve_create_bezier(&c, &d);
 	return c;
 }
 
@@ -57,7 +57,7 @@ static qaws_curve* mvt_circle(double cx, double cy, double r, int ccw)
 	g.angle_end = ccw ? (qaws_scalar)(2 * MVT_PI) : 0;
 	memset(&d, 0, sizeof(d));
 	d.dimension = QAWS_DIMENSION_2D; d.segments = &g; d.segment_count = 1;
-	qaws_curve_create_arc(&d, &c);
+	qaws_curve_create_arc(&c, &d);
 	return c;
 }
 
@@ -67,7 +67,7 @@ static qaws_curve* mvt_polyline(double const* xy, unsigned int n)
 	qaws_curve* c = NULL;
 	unsigned int i;
 	for (i = 0; i < 2 * n; i++) p[i] = (qaws_scalar)xy[i];
-	qaws_curve_create_polyline_2d(p, n, 1, &c);
+	qaws_curve_create_polyline_2d(&c, p, n, 1);
 	return c;
 }
 
@@ -80,7 +80,7 @@ static qaws_status mvt_make(qaws_path_2d* p, unsigned int np, qaws_mean_value** 
 	qaws_mean_value_desc d;
 	memset(&d, 0, sizeof(d));
 	d.paths = p; d.path_count = np;
-	return qaws_mean_value_create(&d, out);
+	return qaws_mean_value_create(out, &d);
 }
 
 /* the coordinates' sum less 1 and the reproduction error at x */
@@ -92,11 +92,11 @@ static qaws_status mvt_check(qaws_mean_value const* m, double x, double y, doubl
 	double s = 0, sx = 0, sy = 0;
 	qaws_status st;
 	pt.x = (qaws_scalar)x; pt.y = (qaws_scalar)y;
-	st = qaws_mean_value_coordinates(m, pt, w);
+	st = qaws_mean_value_coordinates(w, m, pt);
 	for (i = 0; i < n; i++)
 	{
 		qaws_vec2 h;
-		qaws_mean_value_get_handle(m, i, &h);
+		qaws_mean_value_get_handle(&h, m, i);
 		s += w[i];
 		sx += w[i] * h.x;
 		sy += w[i] * h.y;
@@ -144,7 +144,7 @@ static void test_reference(void)
 			qaws_scalar w[12];
 			qaws_vec2 pt;
 			pt.x = (qaws_scalar)ref_blob_points[2 * k]; pt.y = (qaws_scalar)ref_blob_points[2 * k + 1];
-			if (qaws_mean_value_coordinates(m, pt, w) != QAWS_STATUS_OK)
+			if (qaws_mean_value_coordinates(w, m, pt) != QAWS_STATUS_OK)
 				worst = 1e300;
 			for (i = 0; i < 12; i++)
 				if (fabs((double)w[i] - ref_blob_coords[12 * k + i]) > worst)
@@ -163,7 +163,7 @@ static void test_reference(void)
 		qaws_mean_value* m = NULL;
 		unsigned int k;
 		double worst = 0;
-		qaws_curve_create_ellipse_2d((qaws_scalar)0.1, (qaws_scalar)-0.2, (qaws_scalar)1.5, (qaws_scalar)0.8, (qaws_scalar)0.3, &c);
+		qaws_curve_create_ellipse_2d(&c, (qaws_scalar)0.1, (qaws_scalar)-0.2, (qaws_scalar)1.5, (qaws_scalar)0.8, (qaws_scalar)0.3);
 		cv = c;
 		p.curves = &cv; p.curve_count = 1; p.closed = 1;
 		mvt_make(&p, 1, &m);
@@ -172,7 +172,7 @@ static void test_reference(void)
 			qaws_vec2 pt;
 			qaws_scalar v = 0;
 			pt.x = (qaws_scalar)ref_ellipse_points[2 * k]; pt.y = (qaws_scalar)ref_ellipse_points[2 * k + 1];
-			if (qaws_mean_value_interpolate(m, pt, mvt_ell_fn, NULL, 1, &v) != QAWS_STATUS_OK)
+			if (qaws_mean_value_interpolate(&v, m, 1, pt, mvt_ell_fn, NULL) != QAWS_STATUS_OK)
 				worst = 1e300;
 			if (fabs((double)v - ref_ellipse_values[k]) > worst)
 				worst = fabs((double)v - ref_ellipse_values[k]);
@@ -201,7 +201,7 @@ static void test_reference(void)
 			qaws_vec2 pt;
 			qaws_scalar v = 0;
 			pt.x = (qaws_scalar)ref_disc_points[2 * k]; pt.y = (qaws_scalar)ref_disc_points[2 * k + 1];
-			if (qaws_mean_value_interpolate(m, pt, mvt_disc_fn, NULL, 1, &v) != QAWS_STATUS_OK)
+			if (qaws_mean_value_interpolate(&v, m, 1, pt, mvt_disc_fn, NULL) != QAWS_STATUS_OK)
 				worst = 1e300;
 			if (fabs((double)v - ref_disc_values[k]) > worst)
 				worst = fabs((double)v - ref_disc_values[k]);
@@ -293,8 +293,8 @@ static void test_polygons(void)
 			ref[9] = t;
 		}
 		for (i = 0; i < 10; i++) s += ref[i];
-		qaws_mean_value_coordinates(m, pt, w);
-		qaws_mean_value_coordinates(mq, pt, wq);
+		qaws_mean_value_coordinates(w, m, pt);
+		qaws_mean_value_coordinates(wq, mq, pt);
 		for (i = 0; i < 10; i++)
 		{
 			/* a corner of the quadratic edges: itself and half of each middle point beside it */
@@ -304,7 +304,7 @@ static void test_polygons(void)
 			if (fabs(quad - ref[i] / s) > worst_quad) worst_quad = fabs(quad - ref[i] / s);
 			comb += (double)w[i] * mvt_hv[i];
 		}
-		qaws_mean_value_interpolate(m, pt, mvt_pl_fn, NULL, 1, &v);
+		qaws_mean_value_interpolate(&v, m, 1, pt, mvt_pl_fn, NULL);
 		if (fabs((double)v - comb) > worst_int) worst_int = fabs((double)v - comb);
 	}
 	sprintf(msg, "an L with a hole: %u handles (10); against Floater's closed form %.2g; its edges as quadratic Beziers %.2g; the interpolant of piecewise linear data %.2g",
@@ -328,7 +328,7 @@ static void test_polygons(void)
 			qaws_vec2 pt;
 			pt.x = (qaws_scalar)(0.8 * cos(2.4 * k) * (k % 7) / 7.0);
 			pt.y = (qaws_scalar)(0.5 * sin(2.4 * k) * (k % 7) / 7.0);
-			qaws_mean_value_coordinates(mh, pt, w);
+			qaws_mean_value_coordinates(w, mh, pt);
 			for (i = 0; i < 6; i++) if (!(w[i] > 0)) neg++;
 		}
 		sprintf(msg, "a convex hexagon: coordinates positive at 50 points (%u not)", neg);
@@ -359,7 +359,7 @@ static unsigned int mvt_shape(unsigned int which, qaws_curve** cs, qaws_curve co
 		return 1;
 	case 1:
 		*name = "NURBS ellipse with a round hole";
-		qaws_curve_create_ellipse_2d((qaws_scalar)0.1, (qaws_scalar)-0.2, (qaws_scalar)1.5, (qaws_scalar)0.8, (qaws_scalar)0.3, &cs[(*nc)++]);
+		qaws_curve_create_ellipse_2d(&cs[(*nc)++], (qaws_scalar)0.1, (qaws_scalar)-0.2, (qaws_scalar)1.5, (qaws_scalar)0.8, (qaws_scalar)0.3);
 		cs[(*nc)++] = mvt_circle(0.5, -0.1, 0.3, 0);
 		cv[0] = cs[0]; cv[1] = cs[1];
 		p[0].curves = cv; p[0].curve_count = 1; p[0].closed = 1;
@@ -374,8 +374,8 @@ static unsigned int mvt_shape(unsigned int which, qaws_curve** cs, qaws_curve co
 		*name = "lens of rational Beziers";
 		memset(&d, 0, sizeof(d));
 		d.dimension = QAWS_DIMENSION_2D; d.degree = 2; d.control_point_count = 3; d.weights = w; d.weight_count = 3;
-		d.control_points = a; qaws_curve_create_rational_bezier(&d, &cs[(*nc)++]);
-		d.control_points = b; qaws_curve_create_rational_bezier(&d, &cs[(*nc)++]);
+		d.control_points = a; qaws_curve_create_rational_bezier(&cs[(*nc)++], &d);
+		d.control_points = b; qaws_curve_create_rational_bezier(&cs[(*nc)++], &d);
 		cv[0] = cs[0]; cv[1] = cs[1];
 		p[0].curves = cv; p[0].curve_count = 2; p[0].closed = 1;
 		return 1;
@@ -389,7 +389,7 @@ static unsigned int mvt_shape(unsigned int which, qaws_curve** cs, qaws_curve co
 		*name = "closed cubic B-spline";
 		memset(&d, 0, sizeof(d));
 		d.dimension = QAWS_DIMENSION_2D; d.degree = 3; d.control_points = cp; d.control_point_count = 9; d.knots = kn; d.knot_count = 13;
-		qaws_curve_create_bspline(&d, &cs[(*nc)++]);
+		qaws_curve_create_bspline(&cs[(*nc)++], &d);
 		cv[0] = cs[0];
 		p[0].curves = cv; p[0].curve_count = 1; p[0].closed = 1;
 		return 1;
@@ -406,10 +406,10 @@ static unsigned int mvt_shape(unsigned int which, qaws_curve** cs, qaws_curve co
 		g.radius = 1; g.angle_start = (qaws_scalar)(MVT_PI / 2); g.angle_end = (qaws_scalar)(3 * MVT_PI / 2);
 		memset(&ad, 0, sizeof(ad));
 		ad.dimension = QAWS_DIMENSION_2D; ad.segments = &g; ad.segment_count = 1;
-		qaws_curve_create_arc(&ad, &cs[(*nc)++]);
+		qaws_curve_create_arc(&cs[(*nc)++], &ad);
 		memset(&hd, 0, sizeof(hd));
 		hd.dimension = QAWS_DIMENSION_2D; hd.degree = 3; hd.points = hp; hd.derivatives = ht; hd.point_count = 2; hd.derivative_count = 2;
-		qaws_curve_create_hermite(&hd, &cs[(*nc)++]);
+		qaws_curve_create_hermite(&cs[(*nc)++], &hd);
 		cv[0] = cs[0]; cv[1] = cs[1];
 		p[0].curves = cv; p[0].curve_count = 2; p[0].closed = 1;
 		return 1;
@@ -439,9 +439,9 @@ static void test_kinds(void)
 		st = mvt_make(p, np, &m);
 		memset(&rd, 0, sizeof(rd));
 		rd.paths = p; rd.path_count = np; rd.fill_rule = QAWS_FILL_EVEN_ODD;
-		qaws_region_sampler_create(&rd, &rs);
+		qaws_region_sampler_create(&rs, &rd);
 		size = rs ? sqrt((double)qaws_region_sampler_get_area(rs)) : 1;
-		if (rs) qaws_region_sampler_generate(rs, 40, QAWS_REGION_SAMPLE_SOBOL, 7, pts);
+		if (rs) qaws_region_sampler_generate(pts, rs, 40, QAWS_REGION_SAMPLE_SOBOL, 7);
 		for (k = 0; k < 40 && m && rs; k++)
 		{
 			double se, re;
@@ -487,8 +487,8 @@ static void test_boundary(void)
 		qaws_scalar w[12], v0 = 0, f0 = 0;
 		double ds[4] = { 1e-2, 1e-4, 1e-6, 1e-8 };
 		b[0] = (1 - t) * (1 - t) * (1 - t); b[1] = 3 * t * (1 - t) * (1 - t); b[2] = 3 * t * t * (1 - t); b[3] = t * t * t;
-		qaws_curve_evaluate_2d(cs[1], (qaws_scalar)t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &e);
-		qaws_mean_value_coordinates(m, e.position, w);
+		qaws_curve_evaluate_2d(&e, cs[1], (qaws_scalar)t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1);
+		qaws_mean_value_coordinates(w, m, e.position);
 		for (i = 0; i < 12; i++)
 		{
 			double want = i >= 3 && i <= 6 ? b[i - 3] : 0;
@@ -498,7 +498,7 @@ static void test_boundary(void)
 		TEST_ASSERT(worst_on <= (MVT_F32 ? 1e-5 : 1e-13), msg);
 		/* from inside, along the inward normal: the interpolant tends to f there */
 		mvt_xy_fn(NULL, 0, 1, (qaws_scalar)t, e.position, &f0);
-		qaws_mean_value_interpolate(m, e.position, mvt_xy_fn, NULL, 1, &v0);
+		qaws_mean_value_interpolate(&v0, m, 1, e.position, mvt_xy_fn, NULL);
 		{
 			double l = hypot(e.d1.x, e.d1.y);
 			nrm.x = (qaws_scalar)(-e.d1.y / l); nrm.y = (qaws_scalar)(e.d1.x / l);
@@ -508,7 +508,7 @@ static void test_boundary(void)
 			qaws_scalar v = 0;
 			pt.x = (qaws_scalar)(e.position.x + ds[k] * nrm.x);
 			pt.y = (qaws_scalar)(e.position.y + ds[k] * nrm.y);
-			qaws_mean_value_interpolate(m, pt, mvt_xy_fn, NULL, 1, &v);
+			qaws_mean_value_interpolate(&v, m, 1, pt, mvt_xy_fn, NULL);
 			gaps[k] = fabs((double)v - (double)f0);
 		}
 		(void)e2;
@@ -548,7 +548,7 @@ static void test_orientation(void)
 			qaws_vec2 pt;
 			qaws_scalar val = 0;
 			pt.x = (qaws_scalar)pts[2 * k]; pt.y = (qaws_scalar)pts[2 * k + 1];
-			qaws_mean_value_interpolate(m, pt, mvt_disc_fn, NULL, 1, &val);
+			qaws_mean_value_interpolate(&val, m, 1, pt, mvt_disc_fn, NULL);
 			v[o][k] = (double)val;
 		}
 		qaws_mean_value_destroy(m);
@@ -592,20 +592,20 @@ static void test_deform(void)
 	mvt_make(p, np, &m);
 	memset(&rd, 0, sizeof(rd));
 	rd.paths = p; rd.path_count = np; rd.fill_rule = QAWS_FILL_EVEN_ODD;
-	qaws_region_sampler_create(&rd, &rs);
+	qaws_region_sampler_create(&rs, &rd);
 	if (m && rs)
 	{
 		n = qaws_mean_value_get_handle_count(m);
 		hv = (qaws_vec2*)malloc(sizeof(qaws_vec2) * n);
 		moved = (qaws_vec2*)malloc(sizeof(qaws_vec2) * n);
-		for (i = 0; i < n; i++) qaws_mean_value_get_handle(m, i, &hv[i]);
-		qaws_region_sampler_generate(rs, 30, QAWS_REGION_SAMPLE_R2, 3, pts);
+		for (i = 0; i < n; i++) qaws_mean_value_get_handle(&hv[i], m, i);
+		qaws_region_sampler_generate(pts, rs, 30, QAWS_REGION_SAMPLE_R2, 3);
 		/* unmoved */
-		qaws_mean_value_deform(m, hv, pts, 30, out);
+		qaws_mean_value_deform(out, m, hv, pts, 30);
 		for (k = 0; k < 30; k++) if (hypot(out[k].x - pts[k].x, out[k].y - pts[k].y) > we) we = hypot(out[k].x - pts[k].x, out[k].y - pts[k].y);
 		/* translated */
 		for (i = 0; i < n; i++) { moved[i].x = hv[i].x + (qaws_scalar)0.7; moved[i].y = hv[i].y - (qaws_scalar)0.2; }
-		qaws_mean_value_deform(m, moved, pts, 30, out);
+		qaws_mean_value_deform(out, m, moved, pts, 30);
 		for (k = 0; k < 30; k++) { double d = hypot(out[k].x - pts[k].x - 0.7, out[k].y - pts[k].y + 0.2); if (d > wt) wt = d; }
 		/* affine */
 		for (i = 0; i < n; i++)
@@ -613,7 +613,7 @@ static void test_deform(void)
 			moved[i].x = (qaws_scalar)(1.2 * hv[i].x - 0.4 * hv[i].y + 0.1);
 			moved[i].y = (qaws_scalar)(0.3 * hv[i].x + 0.9 * hv[i].y - 0.3);
 		}
-		qaws_mean_value_deform(m, moved, pts, 30, out);
+		qaws_mean_value_deform(out, m, moved, pts, 30);
 		for (k = 0; k < 30; k++)
 		{
 			double ex = 1.2 * pts[k].x - 0.4 * pts[k].y + 0.1, ey = 0.3 * pts[k].x + 0.9 * pts[k].y - 0.3, d = hypot(out[k].x - ex, out[k].y - ey);
@@ -633,13 +633,13 @@ static void test_deform(void)
 			moved[i].x = (qaws_scalar)(hv[i].x + 0.2 * hv[i].y * hv[i].y);
 			moved[i].y = (qaws_scalar)(hv[i].y + 0.1 * sin(2 * hv[i].x));
 		}
-		qaws_mean_value_deform(m, moved, pts, 30, out);
+		qaws_mean_value_deform(out, m, moved, pts, 30);
 		memset(&d, 0, sizeof(d));
 		d.paths = p; d.path_count = np;
 		ex.parallel_for = mvt_backwards; ex.user = NULL;
 		d.executor = &ex;
-		qaws_mean_value_create(&d, &me);
-		if (me) qaws_mean_value_deform(me, moved, pts, 30, out2);
+		qaws_mean_value_create(&me, &d);
+		if (me) qaws_mean_value_deform(out2, me, moved, pts, 30);
 		for (k = 0; k < 30 && me; k++) if (hypot(out[k].x - out2[k].x, out[k].y - out2[k].y) > wx) wx = hypot(out[k].x - out2[k].x, out[k].y - out2[k].y);
 		sprintf(msg, "a bend through an executor (chunks backwards): the serial points within %.2g", wx);
 		TEST_ASSERT(me && wx == 0, msg);

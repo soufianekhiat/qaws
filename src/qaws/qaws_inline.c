@@ -68,31 +68,31 @@ static qaws_status inline_bezier_eval_2d(
 	memset(out_result, 0, sizeof(*out_result));
 
 	if (eval_flags & QAWS_EVAL_FLAG_POSITION) {
-		qaws_internal_decasteljau(cp, degree, 2, local_t, buf);
+		qaws_internal_decasteljau(buf, cp, 2, degree, local_t);
 		out_result->position.x = buf[0]; out_result->position.y = buf[1];
 		out_result->valid_flags |= QAWS_EVAL_FLAG_POSITION;
 	}
 	if ((eval_flags & QAWS_EVAL_FLAG_D1) && degree >= 1) {
-		qaws_internal_bezier_derivative_points(cp, degree, 2, d1p);
-		qaws_internal_decasteljau(d1p, degree - 1, 2, local_t, buf);
+		qaws_internal_bezier_derivative_points(d1p, cp, 2, degree);
+		qaws_internal_decasteljau(buf, d1p, 2, degree - 1, local_t);
 		out_result->d1.x = buf[0]; out_result->d1.y = buf[1];
 		out_result->valid_flags |= QAWS_EVAL_FLAG_D1;
 	}
 	if ((eval_flags & QAWS_EVAL_FLAG_D2) && degree >= 2) {
 		if (!(out_result->valid_flags & QAWS_EVAL_FLAG_D1))
-			qaws_internal_bezier_derivative_points(cp, degree, 2, d1p);
-		qaws_internal_bezier_derivative_points(d1p, degree - 1, 2, d2p);
-		qaws_internal_decasteljau(d2p, degree - 2, 2, local_t, buf);
+			qaws_internal_bezier_derivative_points(d1p, cp, 2, degree);
+		qaws_internal_bezier_derivative_points(d2p, d1p, 2, degree - 1);
+		qaws_internal_decasteljau(buf, d2p, 2, degree - 2, local_t);
 		out_result->d2.x = buf[0]; out_result->d2.y = buf[1];
 		out_result->valid_flags |= QAWS_EVAL_FLAG_D2;
 	}
 	if ((eval_flags & QAWS_EVAL_FLAG_D3) && degree >= 3) {
 		if (!(out_result->valid_flags & QAWS_EVAL_FLAG_D1))
-			qaws_internal_bezier_derivative_points(cp, degree, 2, d1p);
+			qaws_internal_bezier_derivative_points(d1p, cp, 2, degree);
 		if (!(out_result->valid_flags & QAWS_EVAL_FLAG_D2))
-			qaws_internal_bezier_derivative_points(d1p, degree - 1, 2, d2p);
-		qaws_internal_bezier_derivative_points(d2p, degree - 2, 2, d3p);
-		qaws_internal_decasteljau(d3p, degree - 3, 2, local_t, buf);
+			qaws_internal_bezier_derivative_points(d2p, d1p, 2, degree - 1);
+		qaws_internal_bezier_derivative_points(d3p, d2p, 2, degree - 2);
+		qaws_internal_decasteljau(buf, d3p, 2, degree - 3, local_t);
 		out_result->d3.x = buf[0]; out_result->d3.y = buf[1];
 		out_result->valid_flags |= QAWS_EVAL_FLAG_D3;
 	}
@@ -111,31 +111,31 @@ static qaws_status inline_bezier_eval_3d(
 	memset(out_result, 0, sizeof(*out_result));
 
 	if (eval_flags & QAWS_EVAL_FLAG_POSITION) {
-		qaws_internal_decasteljau(cp, degree, 3, local_t, buf);
+		qaws_internal_decasteljau(buf, cp, 3, degree, local_t);
 		out_result->position.x = buf[0]; out_result->position.y = buf[1]; out_result->position.z = buf[2];
 		out_result->valid_flags |= QAWS_EVAL_FLAG_POSITION;
 	}
 	if ((eval_flags & QAWS_EVAL_FLAG_D1) && degree >= 1) {
-		qaws_internal_bezier_derivative_points(cp, degree, 3, d1p);
-		qaws_internal_decasteljau(d1p, degree - 1, 3, local_t, buf);
+		qaws_internal_bezier_derivative_points(d1p, cp, 3, degree);
+		qaws_internal_decasteljau(buf, d1p, 3, degree - 1, local_t);
 		out_result->d1.x = buf[0]; out_result->d1.y = buf[1]; out_result->d1.z = buf[2];
 		out_result->valid_flags |= QAWS_EVAL_FLAG_D1;
 	}
 	if ((eval_flags & QAWS_EVAL_FLAG_D2) && degree >= 2) {
 		if (!(out_result->valid_flags & QAWS_EVAL_FLAG_D1))
-			qaws_internal_bezier_derivative_points(cp, degree, 3, d1p);
-		qaws_internal_bezier_derivative_points(d1p, degree - 1, 3, d2p);
-		qaws_internal_decasteljau(d2p, degree - 2, 3, local_t, buf);
+			qaws_internal_bezier_derivative_points(d1p, cp, 3, degree);
+		qaws_internal_bezier_derivative_points(d2p, d1p, 3, degree - 1);
+		qaws_internal_decasteljau(buf, d2p, 3, degree - 2, local_t);
 		out_result->d2.x = buf[0]; out_result->d2.y = buf[1]; out_result->d2.z = buf[2];
 		out_result->valid_flags |= QAWS_EVAL_FLAG_D2;
 	}
 	if ((eval_flags & QAWS_EVAL_FLAG_D3) && degree >= 3) {
 		if (!(out_result->valid_flags & QAWS_EVAL_FLAG_D1))
-			qaws_internal_bezier_derivative_points(cp, degree, 3, d1p);
+			qaws_internal_bezier_derivative_points(d1p, cp, 3, degree);
 		if (!(out_result->valid_flags & QAWS_EVAL_FLAG_D2))
-			qaws_internal_bezier_derivative_points(d1p, degree - 1, 3, d2p);
-		qaws_internal_bezier_derivative_points(d2p, degree - 2, 3, d3p);
-		qaws_internal_decasteljau(d3p, degree - 3, 3, local_t, buf);
+			qaws_internal_bezier_derivative_points(d2p, d1p, 3, degree - 1);
+		qaws_internal_bezier_derivative_points(d3p, d2p, 3, degree - 2);
+		qaws_internal_decasteljau(buf, d3p, 3, degree - 3, local_t);
 		out_result->d3.x = buf[0]; out_result->d3.y = buf[1]; out_result->d3.z = buf[2];
 		out_result->valid_flags |= QAWS_EVAL_FLAG_D3;
 	}
@@ -161,8 +161,8 @@ static qaws_curve_vtable const inline_bezier_vtable = {
 };
 
 qaws_status qaws_curve_init_bezier_inline(
-	qaws_bezier_desc const* desc,
-	qaws_curve_inline* out)
+	qaws_curve_inline* out,
+	qaws_bezier_desc const* desc)
 {
 	unsigned int dim_count, n_scalars;
 	qaws_curve* curve;
@@ -348,8 +348,8 @@ static qaws_curve_vtable const inline_poly_vtable = {
 };
 
 qaws_status qaws_curve_init_polynomial_inline(
-	qaws_polynomial_desc const* desc,
-	qaws_curve_inline* out)
+	qaws_curve_inline* out,
+	qaws_polynomial_desc const* desc)
 {
 	unsigned int dim_count, n_scalars;
 	qaws_curve* curve;

@@ -40,7 +40,7 @@ static void cg_edge_uv(int e, double s, double* u, double* v)
 static void cg_eval(qaws_surface const* srf, double u, double v, double* p)
 {
 	qaws_surface_eval_result r;
-	qaws_surface_evaluate(srf, (qaws_scalar)u, (qaws_scalar)v, QAWS_SURFACE_EVAL_POSITION, &r);
+	qaws_surface_evaluate(&r, srf, (qaws_scalar)u, (qaws_scalar)v, QAWS_SURFACE_EVAL_POSITION);
 	p[0] = r.position.x;
 	p[1] = r.position.y;
 	p[2] = r.position.z;
@@ -104,8 +104,8 @@ static double cg_crease(qaws_surface const* sa, qaws_surface const* sb, cg_seam 
 	double ua, va, ub, vb, Na[3], Nb[3], la, lb, c;
 	cg_edge_uv(sm->ea, s, &ua, &va);
 	cg_edge_uv(sm->eb, sm->flip ? 1 - s : s, &ub, &vb);
-	qaws_surface_eval_jet(sa, (qaws_scalar)ua, (qaws_scalar)va, QAWS_SJET_ORDER1, &ja);
-	qaws_surface_eval_jet(sb, (qaws_scalar)ub, (qaws_scalar)vb, QAWS_SJET_ORDER1, &jb);
+	qaws_surface_eval_jet(&ja, sa, (qaws_scalar)ua, (qaws_scalar)va, QAWS_SJET_ORDER1);
+	qaws_surface_eval_jet(&jb, sb, (qaws_scalar)ub, (qaws_scalar)vb, QAWS_SJET_ORDER1);
 	cg_normal(&ja, Na, &la);
 	cg_normal(&jb, Nb, &lb);
 	c = fabs(Na[0] * Nb[0] + Na[1] * Nb[1] + Na[2] * Nb[2]) / (la * lb);
@@ -152,7 +152,7 @@ static double cg_g1_energy(qaws_surface* const* s, cg_seam const* seams, int ns,
 			cg_edge_uv(sm->eb, sm->flip ? 1 - sp : sp, &uv[1][0], &uv[1][1]);
 			for (side = 0; side < 2; side++)
 			{
-				qaws_surface_eval_jet(s[side ? sm->fb : sm->fa], (qaws_scalar)uv[side][0], (qaws_scalar)uv[side][1], QAWS_SJET_ORDER1, &j[side]);
+				qaws_surface_eval_jet(&j[side], s[side ? sm->fb : sm->fa], (qaws_scalar)uv[side][0], (qaws_scalar)uv[side][1], QAWS_SJET_ORDER1);
 				cg_normal(&j[side], N[side], &len[side]);
 				for (a = 0; a < 3; a++)
 					n[side][a] = N[side][a] / len[side];
@@ -182,8 +182,8 @@ static double cg_g1_energy(qaws_surface* const* s, cg_seam const* seams, int ns,
 				bar.d[2].z = (qaws_scalar)(Nbar[0] * su.y - Nbar[1] * su.x);
 				bar.channels = QAWS_SJET_U | QAWS_SJET_V;
 				views = one_field(&fv, QAWS_FIELD_CONTROL_POINTS, grad[side ? sm->fb : sm->fa], MP_CP, 3);
-				qaws_surface_eval_adjoint(NULL, s[side ? sm->fb : sm->fa], (qaws_scalar)uv[side][0], (qaws_scalar)uv[side][1],
-					QAWS_SJET_U | QAWS_SJET_V, &bar, &views, NULL, NULL);
+				qaws_surface_eval_adjoint(&views, NULL, NULL, s[side ? sm->fb : sm->fa],
+					&bar, (qaws_scalar)uv[side][0], (qaws_scalar)uv[side][1], QAWS_SJET_U | QAWS_SJET_V, NULL);
 			}
 		}
 	return e;
@@ -216,7 +216,7 @@ static double cg_energy(patch_fit* pf, mesh const* m, cg_seam const* seams, int 
 			double r[3];
 			us[i] = pf[f].uv[2 * i];
 			vs[i] = pf[f].uv[2 * i + 1];
-			qaws_surface_eval_jet(s[f], us[i], vs[i], QAWS_SJET_P, &j);
+			qaws_surface_eval_jet(&j, s[f], us[i], vs[i], QAWS_SJET_P);
 			r[0] = j.d[0].x - x[0];
 			r[1] = j.d[0].y - x[1];
 			r[2] = j.d[0].z - x[2];
@@ -227,7 +227,7 @@ static double cg_energy(patch_fit* pf, mesh const* m, cg_seam const* seams, int 
 			bars[i].d[0].z = (qaws_scalar)(2 * r[2] / npts);
 			bars[i].channels = QAWS_SJET_P;
 		}
-		qaws_surface_eval_batch_adjoint(NULL, s[f], us, vs, (unsigned int)i, QAWS_SJET_P, bars, &views, NULL, NULL);
+		qaws_surface_eval_batch_adjoint(&views, NULL, NULL, s[f], us, vs, bars, (unsigned int)i, QAWS_SJET_P, NULL);
 		{
 			/* thin plate, scaled into the gradient */
 			qaws_scalar tg[MP_CP * 3];
@@ -235,7 +235,7 @@ static double cg_energy(patch_fit* pf, mesh const* m, cg_seam const* seams, int 
 			qaws_diff_views vt = one_field(&ft, QAWS_FIELD_CONTROL_POINTS, tg, MP_CP, 3);
 			int k;
 			memset(tg, 0, sizeof(tg));
-			qaws_surface_functional_gradient(NULL, s[f], QAWS_FUNCTIONAL_THIN_PLATE, 4, &vt, &value);
+			qaws_surface_functional_gradient(&value, &vt, s[f], QAWS_FUNCTIONAL_THIN_PLATE, 4, NULL);
 			for (k = 0; k < MP_CP * 3; k++)
 				grad[f][k] += (qaws_scalar)(tp * tg[k]);
 			e += tp * value;
@@ -356,13 +356,13 @@ static void cg_render_zebra(svg* s, view3 const* v, patch_fit const* pf, int gri
 					(qaws_scalar)((j + 1) / (double)grid), (qaws_scalar)((j + 1) / (double)grid) };
 				for (c = 0; c < 4; c++)
 				{
-					qaws_surface_evaluate(srf, uu[c], vv[c], QAWS_SURFACE_EVAL_POSITION, &r[c]);
+					qaws_surface_evaluate(&r[c], srf, uu[c], vv[c], QAWS_SURFACE_EVAL_POSITION);
 					p[0] = r[c].position.x; p[1] = r[c].position.y; p[2] = r[c].position.z;
 					view_xform(v, p, &polys[n].xy[2 * c], &polys[n].xy[2 * c + 1], &d);
 					dsum += d;
 				}
-				qaws_surface_evaluate(srf, (qaws_scalar)((i + 0.5) / grid), (qaws_scalar)((j + 0.5) / grid),
-					QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL, &mid);
+				qaws_surface_evaluate(&mid, srf, (qaws_scalar)((i + 0.5) / grid),
+					(qaws_scalar)((j + 0.5) / grid), QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL);
 				nn[0] = mid.normal.x; nn[1] = mid.normal.y; nn[2] = mid.normal.z;
 				if (nn[0] * mid.position.x + nn[1] * mid.position.y + nn[2] * mid.position.z < 0)
 				{

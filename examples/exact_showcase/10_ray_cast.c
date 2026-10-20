@@ -42,9 +42,9 @@ static void demo_ray_cast(void)
 	d.u_knot_count = 7;
 	d.v_knots = kn;
 	d.v_knot_count = 7;
-	qaws_surface_create_nurbs(&d, &s);
+	qaws_surface_create_nurbs(&s, &d);
 	qaws_exact_desc_default(&desc);
-	qaws_exact_surface_prepare(&desc, s, &e, NULL);
+	qaws_exact_surface_prepare(&e, NULL, s, &desc);
 	/* the window: the control net projected on (ex, ey), with a margin */
 	for (i = 0; i < 16; i++)
 	{
@@ -73,7 +73,7 @@ static void demo_ray_cast(void)
 				p1[c] = p0[c] + dir[c];
 			}
 			nhit[k] = 0;
-			if (qaws_exact_surface_line_hits(e, p0, p1, hits, 8, &n) != QAWS_STATUS_OK)
+			if (qaws_exact_surface_line_hits(hits, &n, e, p0, p1, 8) != QAWS_STATUS_OK)
 			{
 				nhit[k] = -1;
 				failed++;

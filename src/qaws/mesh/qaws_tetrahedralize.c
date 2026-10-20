@@ -1562,7 +1562,7 @@ qaws_status qaws_volume_mesh_tetrahedralize(qaws_mesh_3d const* boundary, qaws_t
 		t.nbt = nlive;
 		t.capbt = nlive + 1;
 		memset(t.bdead, 0, nlive);
-		st = qaws_internal_grid_create(boxes, nlive, 3, &grid);
+		st = qaws_internal_grid_create(&grid, boxes, nlive, 3);
 		if (st != QAWS_STATUS_OK)
 			goto done;
 		st = QAWS_STATUS_ALLOCATION_FAILURE;

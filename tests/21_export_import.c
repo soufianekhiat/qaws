@@ -27,18 +27,18 @@ static void test_bspline_fitting(void)
 		desc.control_point_count = 8;
 		desc.parameters = NULL;
 
-		TEST_ASSERT_STATUS(qaws_curve_fit_bspline(&desc, &crv));
+		TEST_ASSERT_STATUS(qaws_curve_fit_bspline(&crv, &desc));
 		TEST_ASSERT(crv != NULL, "bspline fit created");
 		TEST_ASSERT(qaws_curve_get_kind(crv) == QAWS_CURVE_KIND_BSPLINE, "fit kind bspline");
 		TEST_ASSERT(qaws_curve_get_degree(crv) == 3, "fit degree 3");
 
 		/* Endpoints should match data endpoints */
 		rng = qaws_curve_get_parameter_range(crv);
-		qaws_curve_evaluate_2d(crv, rng.min_value, QAWS_EVAL_FLAG_POSITION, &r);
+		qaws_curve_evaluate_2d(&r, crv, rng.min_value, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT(approx_eq(r.position.x, pts[0].x) && approx_eq(r.position.y, pts[0].y),
 			"fit start matches data");
 
-		qaws_curve_evaluate_2d(crv, rng.max_value, QAWS_EVAL_FLAG_POSITION, &r);
+		qaws_curve_evaluate_2d(&r, crv, rng.max_value, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT(approx_eq(r.position.x, pts[20].x) && approx_eq(r.position.y, pts[20].y),
 			"fit end matches data");
 
@@ -46,7 +46,7 @@ static void test_bspline_fitting(void)
 		{
 			qaws_scalar mid = (rng.min_value + rng.max_value) * (qaws_scalar)0.5;
 			qaws_scalar radius;
-			qaws_curve_evaluate_2d(crv, mid, QAWS_EVAL_FLAG_POSITION, &r);
+			qaws_curve_evaluate_2d(&r, crv, mid, QAWS_EVAL_FLAG_POSITION);
 			radius = (qaws_scalar)sqrt((double)(r.position.x * r.position.x + r.position.y * r.position.y));
 			TEST_ASSERT(radius > (qaws_scalar)0.95 && radius < (qaws_scalar)1.05,
 				"fit mid-curve near unit circle");
@@ -77,7 +77,7 @@ static void test_bspline_fitting(void)
 		desc.control_point_count = 6;
 		desc.parameters = NULL;
 
-		TEST_ASSERT_STATUS(qaws_curve_fit_bspline(&desc, &crv));
+		TEST_ASSERT_STATUS(qaws_curve_fit_bspline(&crv, &desc));
 		TEST_ASSERT(crv != NULL, "bspline fit 3d created");
 		TEST_ASSERT(qaws_curve_get_dimension(crv) == QAWS_DIMENSION_3D, "fit 3d dimension");
 
@@ -99,12 +99,12 @@ static void test_bspline_fitting(void)
 		desc.parameters = NULL;
 
 		/* n > m should fail */
-		TEST_ASSERT(qaws_curve_fit_bspline(&desc, &crv) != QAWS_STATUS_OK,
+		TEST_ASSERT(qaws_curve_fit_bspline(&crv, &desc) != QAWS_STATUS_OK,
 			"fit n > m fails");
 		TEST_ASSERT(crv == NULL, "fit n > m null");
 
 		/* Null desc fails */
-		TEST_ASSERT(qaws_curve_fit_bspline(NULL, &crv) != QAWS_STATUS_OK,
+		TEST_ASSERT(qaws_curve_fit_bspline(&crv, NULL) != QAWS_STATUS_OK,
 			"fit null desc fails");
 	}
 }
@@ -127,8 +127,8 @@ static void test_arc_length_reparam(void)
 		desc.control_points = cp;
 		desc.control_point_count = 4;
 
-		TEST_ASSERT_STATUS(qaws_curve_create_bezier(&desc, &src));
-		TEST_ASSERT_STATUS(qaws_curve_reparameterize_arc_length(src, 512, &rep));
+		TEST_ASSERT_STATUS(qaws_curve_create_bezier(&src, &desc));
+		TEST_ASSERT_STATUS(qaws_curve_reparameterize_arc_length(&rep, src, 512));
 		TEST_ASSERT(rep != NULL, "reparam created");
 		TEST_ASSERT(qaws_curve_get_kind(rep) == QAWS_CURVE_KIND_REPARAMETERIZED,
 			"reparam kind");
@@ -138,11 +138,11 @@ static void test_arc_length_reparam(void)
 		TEST_ASSERT(rng.max_value > (qaws_scalar)0, "reparam range max > 0");
 
 		/* Start and end should match source */
-		qaws_curve_evaluate_2d(rep, rng.min_value, QAWS_EVAL_FLAG_POSITION, &r);
+		qaws_curve_evaluate_2d(&r, rep, rng.min_value, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT(approx_eq(r.position.x, (qaws_scalar)0) &&
 			approx_eq(r.position.y, (qaws_scalar)0), "reparam start");
 
-		qaws_curve_evaluate_2d(rep, rng.max_value, QAWS_EVAL_FLAG_POSITION, &r);
+		qaws_curve_evaluate_2d(&r, rep, rng.max_value, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT(approx_eq(r.position.x, (qaws_scalar)2) &&
 			approx_eq(r.position.y, (qaws_scalar)0), "reparam end");
 
@@ -156,13 +156,13 @@ static void test_arc_length_reparam(void)
 			unsigned int i;
 			qaws_scalar mean;
 
-			qaws_curve_evaluate_2d(rep, (qaws_scalar)0, QAWS_EVAL_FLAG_POSITION, &r);
+			qaws_curve_evaluate_2d(&r, rep, (qaws_scalar)0, QAWS_EVAL_FLAG_POSITION);
 			prev_pos = r.position;
 
 			for (i = 1; i <= 10; ++i) {
 				qaws_scalar s = total * (qaws_scalar)i / (qaws_scalar)10;
 				qaws_scalar dx, dy;
-				qaws_curve_evaluate_2d(rep, s, QAWS_EVAL_FLAG_POSITION, &r);
+				qaws_curve_evaluate_2d(&r, rep, s, QAWS_EVAL_FLAG_POSITION);
 				dx = r.position.x - prev_pos.x;
 				dy = r.position.y - prev_pos.y;
 				dists[i - 1] = (qaws_scalar)sqrt((double)(dx * dx + dy * dy));
@@ -183,8 +183,8 @@ static void test_arc_length_reparam(void)
 		}
 
 		/* D1 should be valid */
-		qaws_curve_evaluate_2d(rep, rng.max_value * (qaws_scalar)0.5,
-			QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &r);
+		qaws_curve_evaluate_2d(&r, rep,
+			rng.max_value * (qaws_scalar)0.5, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1);
 		TEST_ASSERT(r.valid_flags & QAWS_EVAL_FLAG_D1, "reparam d1 valid");
 
 		qaws_curve_destroy(rep);
@@ -194,7 +194,7 @@ static void test_arc_length_reparam(void)
 	/* Error: null curve */
 	{
 		qaws_curve *out = NULL;
-		TEST_ASSERT(qaws_curve_reparameterize_arc_length(NULL, 0, &out) != QAWS_STATUS_OK,
+		TEST_ASSERT(qaws_curve_reparameterize_arc_length(&out, NULL, 0) != QAWS_STATUS_OK,
 			"reparam null fails");
 	}
 }
@@ -245,7 +245,7 @@ static void test_svg_export_comparison(void)
 		desc.degree = 3;
 		desc.control_points = cp;
 		desc.control_point_count = 4;
-		qaws_curve_create_bezier(&desc, &curve);
+		qaws_curve_create_bezier(&curve, &desc);
 
 		/* LEFT: polyline sampling */
 		{
@@ -254,7 +254,7 @@ static void test_svg_export_comparison(void)
 			for (i = 0; i < low_samples; i++)
 			{
 				qaws_scalar t = (qaws_scalar)i / (qaws_scalar)(low_samples - 1);
-				qaws_curve_evaluate_2d(curve, t, QAWS_EVAL_FLAG_POSITION, &r);
+				qaws_curve_evaluate_2d(&r, curve, t, QAWS_EVAL_FLAG_POSITION);
 				pts[i].x = r.position.x + col_left;
 				pts[i].y = r.position.y + 12.0f;
 			}
@@ -265,7 +265,7 @@ static void test_svg_export_comparison(void)
 
 		/* RIGHT: SVG path export */
 		{
-			qaws_curve_export_svg_path(curve, path_buf, sizeof(path_buf), &path_len, 0);
+			qaws_curve_export_svg_path(path_buf, &path_len, curve, sizeof(path_buf), 0);
 			/* We need to transform the path coordinates. Since SVG path is absolute,
 			   we'll use a <g transform> group. */
 			{
@@ -316,7 +316,7 @@ static void test_svg_export_comparison(void)
 		desc.control_point_count = 5;
 		desc.parameterization = QAWS_PARAMETERIZATION_CENTRIPETAL;
 		desc.closed = 0;
-		qaws_curve_create_catmull_rom(&desc, &curve);
+		qaws_curve_create_catmull_rom(&curve, &desc);
 		range = qaws_curve_get_parameter_range(curve);
 
 		/* LEFT: polyline */
@@ -327,7 +327,7 @@ static void test_svg_export_comparison(void)
 			{
 				qaws_scalar t = range.min_value + (range.max_value - range.min_value)
 					* (qaws_scalar)i / (qaws_scalar)(low_samples - 1);
-				qaws_curve_evaluate_2d(curve, t, QAWS_EVAL_FLAG_POSITION, &r);
+				qaws_curve_evaluate_2d(&r, curve, t, QAWS_EVAL_FLAG_POSITION);
 				pts[i].x = r.position.x + col_left;
 				pts[i].y = r.position.y + 8.0f;
 			}
@@ -337,7 +337,7 @@ static void test_svg_export_comparison(void)
 
 		/* RIGHT: SVG path export */
 		{
-			qaws_curve_export_svg_path(curve, path_buf, sizeof(path_buf), &path_len, 0);
+			qaws_curve_export_svg_path(path_buf, &path_len, curve, sizeof(path_buf), 0);
 			{
 				qaws_scalar scale_x = (svg.svg_w - 2 * svg.padding) / svg.view_w;
 				qaws_scalar scale_y = (svg.svg_h - 2 * svg.padding) / svg.view_h;
@@ -387,7 +387,7 @@ static void test_svg_export_comparison(void)
 		desc.knot_count = 0;
 		desc.is_uniform = 1;
 		desc.is_closed = 0;
-		qaws_curve_create_bspline(&desc, &curve);
+		qaws_curve_create_bspline(&curve, &desc);
 		range = qaws_curve_get_parameter_range(curve);
 
 		/* LEFT: polyline */
@@ -398,7 +398,7 @@ static void test_svg_export_comparison(void)
 			{
 				qaws_scalar t = range.min_value + (range.max_value - range.min_value)
 					* (qaws_scalar)i / (qaws_scalar)(low_samples - 1);
-				qaws_curve_evaluate_2d(curve, t, QAWS_EVAL_FLAG_POSITION, &r);
+				qaws_curve_evaluate_2d(&r, curve, t, QAWS_EVAL_FLAG_POSITION);
 				pts[i].x = r.position.x + col_left;
 				pts[i].y = r.position.y + 4.0f;
 			}
@@ -408,7 +408,7 @@ static void test_svg_export_comparison(void)
 
 		/* RIGHT: SVG path export (sampled + Hermite-to-Bezier fit) */
 		{
-			qaws_curve_export_svg_path(curve, path_buf, sizeof(path_buf), &path_len, 16);
+			qaws_curve_export_svg_path(path_buf, &path_len, curve, sizeof(path_buf), 16);
 			{
 				qaws_scalar scale_x = (svg.svg_w - 2 * svg.padding) / svg.view_w;
 				qaws_scalar scale_y = (svg.svg_h - 2 * svg.padding) / svg.view_h;
@@ -457,7 +457,7 @@ static void test_svg_export_comparison(void)
 		desc.point_count = 3;
 		desc.derivatives = h_der;
 		desc.derivative_count = 3;
-		qaws_curve_create_hermite(&desc, &curve);
+		qaws_curve_create_hermite(&curve, &desc);
 		range = qaws_curve_get_parameter_range(curve);
 
 		/* LEFT: polyline */
@@ -468,7 +468,7 @@ static void test_svg_export_comparison(void)
 			{
 				qaws_scalar t = range.min_value + (range.max_value - range.min_value)
 					* (qaws_scalar)i / (qaws_scalar)(low_samples - 1);
-				qaws_curve_evaluate_2d(curve, t, QAWS_EVAL_FLAG_POSITION, &r);
+				qaws_curve_evaluate_2d(&r, curve, t, QAWS_EVAL_FLAG_POSITION);
 				pts[i].x = r.position.x + col_left;
 				pts[i].y = r.position.y + 0.0f;
 			}
@@ -478,7 +478,7 @@ static void test_svg_export_comparison(void)
 
 		/* RIGHT: SVG path export (exact per-span conversion) */
 		{
-			qaws_curve_export_svg_path(curve, path_buf, sizeof(path_buf), &path_len, 0);
+			qaws_curve_export_svg_path(path_buf, &path_len, curve, sizeof(path_buf), 0);
 			{
 				qaws_scalar scale_x = (svg.svg_w - 2 * svg.padding) / svg.view_w;
 				qaws_scalar scale_y = (svg.svg_h - 2 * svg.padding) / svg.view_h;
@@ -524,16 +524,16 @@ static void test_svg_export_comparison(void)
 		desc.degree = 2;
 		desc.control_points = cp;
 		desc.control_point_count = 3;
-		qaws_curve_create_bezier(&desc, &curve);
+		qaws_curve_create_bezier(&curve, &desc);
 
 		/* Quadratic bezier should produce M...Q... */
-		qaws_curve_export_svg_path(curve, path_buf, sizeof(path_buf), &path_len, 0);
+		qaws_curve_export_svg_path(path_buf, &path_len, curve, sizeof(path_buf), 0);
 		TEST_ASSERT(path_len > 0, "svg_export: non-empty path");
 		TEST_ASSERT(path_buf[0] == 'M', "svg_export: starts with M");
 		TEST_ASSERT(strstr(path_buf, "Q") != NULL, "svg_export: contains Q command");
 
 		/* Small buffer should truncate gracefully */
-		qaws_curve_export_svg_path(curve, small_buf, sizeof(small_buf), &len, 0);
+		qaws_curve_export_svg_path(small_buf, &len, curve, sizeof(small_buf), 0);
 		TEST_ASSERT(len > 0, "svg_export: truncated still writes");
 		TEST_ASSERT(small_buf[sizeof(small_buf) - 1] == '\0', "svg_export: null-terminated");
 
@@ -547,15 +547,15 @@ static void test_svg_export_comparison(void)
 			d3.degree = 1;
 			d3.control_points = cp3;
 			d3.control_point_count = 2;
-			qaws_curve_create_bezier(&d3, &c3);
-			s = qaws_curve_export_svg_path(c3, path_buf, sizeof(path_buf), &path_len, 0);
+			qaws_curve_create_bezier(&c3, &d3);
+			s = qaws_curve_export_svg_path(path_buf, &path_len, c3, sizeof(path_buf), 0);
 			TEST_ASSERT(s == QAWS_STATUS_INVALID_DIMENSION, "svg_export: reject 3D");
 			qaws_curve_destroy(c3);
 		}
 
 		/* Error: null args */
 		{
-			qaws_status s = qaws_curve_export_svg_path(NULL, path_buf, sizeof(path_buf), &path_len, 0);
+			qaws_status s = qaws_curve_export_svg_path(path_buf, &path_len, NULL, sizeof(path_buf), 0);
 			TEST_ASSERT(s == QAWS_STATUS_INVALID_ARGUMENT, "svg_export: null curve");
 		}
 
@@ -577,8 +577,8 @@ static void test_polyline_import(void)
 		qaws_eval_result_2d r;
 
 		TEST_ASSERT_STATUS(qaws_polyline_import_catmull_rom(
-			QAWS_DIMENSION_2D, pts, 5,
-			QAWS_PARAMETERIZATION_CENTRIPETAL, 0, &curve));
+			&curve, pts, QAWS_DIMENSION_2D,
+			5, QAWS_PARAMETERIZATION_CENTRIPETAL, 0));
 		TEST_ASSERT(curve != NULL, "polyline_catmull_rom: created");
 		TEST_ASSERT(qaws_curve_get_kind(curve) == QAWS_CURVE_KIND_CATMULL_ROM,
 			"polyline_catmull_rom: correct kind");
@@ -586,7 +586,7 @@ static void test_polyline_import(void)
 			"polyline_catmull_rom: correct dimension");
 
 		/* Evaluate at start — should be near first interior point */
-		qaws_curve_evaluate_2d(curve, (qaws_scalar)0.0, QAWS_EVAL_FLAG_POSITION, &r);
+		qaws_curve_evaluate_2d(&r, curve, (qaws_scalar)0.0, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT(fabs(r.position.x - pts[1].x) < 0.01 &&
 			fabs(r.position.y - pts[1].y) < 0.01,
 			"polyline_catmull_rom: t=0 near first interpolated point");
@@ -600,8 +600,8 @@ static void test_polyline_import(void)
 		qaws_curve* curve = NULL;
 
 		TEST_ASSERT_STATUS(qaws_polyline_import_catmull_rom(
-			QAWS_DIMENSION_3D, pts, 4,
-			QAWS_PARAMETERIZATION_CHORDAL, 0, &curve));
+			&curve, pts, QAWS_DIMENSION_3D,
+			4, QAWS_PARAMETERIZATION_CHORDAL, 0));
 		TEST_ASSERT(curve != NULL, "polyline_catmull_rom_3d: created");
 		TEST_ASSERT(qaws_curve_get_dimension(curve) == QAWS_DIMENSION_3D,
 			"polyline_catmull_rom_3d: correct dimension");
@@ -614,8 +614,8 @@ static void test_polyline_import(void)
 		qaws_curve* curve = NULL;
 
 		TEST_ASSERT_STATUS(qaws_polyline_import_catmull_rom(
-			QAWS_DIMENSION_2D, pts, 4,
-			QAWS_PARAMETERIZATION_CENTRIPETAL, 1, &curve));
+			&curve, pts, QAWS_DIMENSION_2D,
+			4, QAWS_PARAMETERIZATION_CENTRIPETAL, 1));
 		TEST_ASSERT(curve != NULL, "polyline_catmull_rom_closed: created");
 		qaws_curve_destroy(curve);
 	}
@@ -628,15 +628,15 @@ static void test_polyline_import(void)
 		qaws_range range;
 
 		TEST_ASSERT_STATUS(qaws_polyline_import_trajectory(
-			QAWS_DIMENSION_2D, pts, 4, 0, &curve));
+			&curve, pts, QAWS_DIMENSION_2D, 4, 0));
 		TEST_ASSERT(curve != NULL, "polyline_trajectory: created");
 		TEST_ASSERT(qaws_curve_get_kind(curve) == QAWS_CURVE_KIND_TRAJECTORY,
 			"polyline_trajectory: correct kind");
 
 		/* Endpoints should match first/last points */
 		range = qaws_curve_get_parameter_range(curve);
-		qaws_curve_evaluate_2d(curve, range.min_value, QAWS_EVAL_FLAG_POSITION, &r0);
-		qaws_curve_evaluate_2d(curve, range.max_value, QAWS_EVAL_FLAG_POSITION, &r1);
+		qaws_curve_evaluate_2d(&r0, curve, range.min_value, QAWS_EVAL_FLAG_POSITION);
+		qaws_curve_evaluate_2d(&r1, curve, range.max_value, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT(fabs(r0.position.x - pts[0].x) < 0.01 &&
 			fabs(r0.position.y - pts[0].y) < 0.01,
 			"polyline_trajectory: start matches first point");
@@ -653,7 +653,7 @@ static void test_polyline_import(void)
 		qaws_curve* curve = NULL;
 
 		TEST_ASSERT_STATUS(qaws_polyline_import_trajectory(
-			QAWS_DIMENSION_3D, pts, 3, 0, &curve));
+			&curve, pts, QAWS_DIMENSION_3D, 3, 0));
 		TEST_ASSERT(curve != NULL, "polyline_trajectory_3d: created");
 		qaws_curve_destroy(curve);
 	}
@@ -664,7 +664,7 @@ static void test_polyline_import(void)
 		qaws_curve* curve = NULL;
 
 		TEST_ASSERT_STATUS(qaws_polyline_import_trajectory(
-			QAWS_DIMENSION_2D, pts, 4, 1, &curve));
+			&curve, pts, QAWS_DIMENSION_2D, 4, 1));
 		TEST_ASSERT(curve != NULL, "polyline_trajectory_closed: created");
 		qaws_curve_destroy(curve);
 	}
@@ -676,12 +676,12 @@ static void test_polyline_import(void)
 		qaws_status s;
 
 		s = qaws_polyline_import_catmull_rom(
-			QAWS_DIMENSION_2D, pts, 1,
-			QAWS_PARAMETERIZATION_CENTRIPETAL, 0, &curve);
+			&curve, pts, QAWS_DIMENSION_2D,
+			1, QAWS_PARAMETERIZATION_CENTRIPETAL, 0);
 		TEST_ASSERT(s != QAWS_STATUS_OK, "polyline_catmull_rom: rejects 1 point");
 
 		s = qaws_polyline_import_trajectory(
-			QAWS_DIMENSION_2D, pts, 1, 0, &curve);
+			&curve, pts, QAWS_DIMENSION_2D, 1, 0);
 		TEST_ASSERT(s != QAWS_STATUS_OK, "polyline_trajectory: rejects 1 point");
 	}
 
@@ -691,12 +691,12 @@ static void test_polyline_import(void)
 		qaws_status s;
 
 		s = qaws_polyline_import_catmull_rom(
-			QAWS_DIMENSION_2D, NULL, 4,
-			QAWS_PARAMETERIZATION_CENTRIPETAL, 0, &curve);
+			&curve, NULL, QAWS_DIMENSION_2D,
+			4, QAWS_PARAMETERIZATION_CENTRIPETAL, 0);
 		TEST_ASSERT(s == QAWS_STATUS_INVALID_ARGUMENT, "polyline_catmull_rom: null points");
 
 		s = qaws_polyline_import_trajectory(
-			QAWS_DIMENSION_2D, NULL, 4, 0, &curve);
+			&curve, NULL, QAWS_DIMENSION_2D, 4, 0);
 		TEST_ASSERT(s == QAWS_STATUS_INVALID_ARGUMENT, "polyline_trajectory: null points");
 	}
 
@@ -714,9 +714,9 @@ static void test_polyline_import(void)
 		desc.degree = 3;
 		desc.control_points = cp;
 		desc.control_point_count = 4;
-		qaws_curve_create_bezier(&desc, &curve);
+		qaws_curve_create_bezier(&curve, &desc);
 
-		TEST_ASSERT_STATUS(qaws_polyline_export_2d(curve, 10, QAWS_POLYLINE_UNIFORM, pts, &count));
+		TEST_ASSERT_STATUS(qaws_polyline_export_2d(pts, &count, curve, 10, QAWS_POLYLINE_UNIFORM));
 		TEST_ASSERT(count == 10, "polyline_export_2d: correct count");
 		/* First point should be at curve start */
 		TEST_ASSERT(fabs(pts[0].x - 0.0) < 0.01 && fabs(pts[0].y - 0.0) < 0.01,
@@ -742,9 +742,9 @@ static void test_polyline_import(void)
 		desc.degree = 3;
 		desc.control_points = cp;
 		desc.control_point_count = 4;
-		qaws_curve_create_bezier(&desc, &curve);
+		qaws_curve_create_bezier(&curve, &desc);
 
-		TEST_ASSERT_STATUS(qaws_polyline_export_3d(curve, 8, QAWS_POLYLINE_UNIFORM, pts, &count));
+		TEST_ASSERT_STATUS(qaws_polyline_export_3d(pts, &count, curve, 8, QAWS_POLYLINE_UNIFORM));
 		TEST_ASSERT(count == 8, "polyline_export_3d: correct count");
 		TEST_ASSERT(fabs(pts[0].x - 0.0) < 0.01 && fabs(pts[0].y - 0.0) < 0.01 &&
 			fabs(pts[0].z - 0.0) < 0.01, "polyline_export_3d: start point");
@@ -768,21 +768,21 @@ static void test_polyline_import(void)
 		desc.degree = 3;
 		desc.control_points = cp;
 		desc.control_point_count = 4;
-		qaws_curve_create_bezier(&desc, &original);
+		qaws_curve_create_bezier(&original, &desc);
 
-		TEST_ASSERT_STATUS(qaws_polyline_export_2d(original, 20, QAWS_POLYLINE_UNIFORM, exported, &count));
+		TEST_ASSERT_STATUS(qaws_polyline_export_2d(exported, &count, original, 20, QAWS_POLYLINE_UNIFORM));
 		TEST_ASSERT_STATUS(qaws_polyline_import_catmull_rom(
-			QAWS_DIMENSION_2D, exported, count,
-			QAWS_PARAMETERIZATION_CENTRIPETAL, 0, &reimported));
+			&reimported, exported, QAWS_DIMENSION_2D,
+			count, QAWS_PARAMETERIZATION_CENTRIPETAL, 0));
 		TEST_ASSERT(reimported != NULL, "polyline_round_trip: reimported");
 
 		/* Compare midpoints — Catmull-Rom interpolates through points so
 		   with enough samples the reimported curve should be close */
-		qaws_curve_evaluate_2d(original, (qaws_scalar)0.5, QAWS_EVAL_FLAG_POSITION, &r_orig);
+		qaws_curve_evaluate_2d(&r_orig, original, (qaws_scalar)0.5, QAWS_EVAL_FLAG_POSITION);
 		{
 			qaws_range rng = qaws_curve_get_parameter_range(reimported);
 			qaws_scalar mid = (rng.min_value + rng.max_value) * (qaws_scalar)0.5;
-			qaws_curve_evaluate_2d(reimported, mid, QAWS_EVAL_FLAG_POSITION, &r_reimp);
+			qaws_curve_evaluate_2d(&r_reimp, reimported, mid, QAWS_EVAL_FLAG_POSITION);
 		}
 		TEST_ASSERT(fabs(r_orig.position.x - r_reimp.position.x) < 0.5 &&
 			fabs(r_orig.position.y - r_reimp.position.y) < 0.5,
@@ -808,17 +808,17 @@ static void test_polyline_import(void)
 		desc2.degree = 1;
 		desc2.control_points = cp;
 		desc2.control_point_count = 2;
-		qaws_curve_create_bezier(&desc2, &c2d);
+		qaws_curve_create_bezier(&c2d, &desc2);
 
 		desc3.dimension = QAWS_DIMENSION_3D;
 		desc3.degree = 1;
 		desc3.control_points = cp3;
 		desc3.control_point_count = 2;
-		qaws_curve_create_bezier(&desc3, &c3d);
+		qaws_curve_create_bezier(&c3d, &desc3);
 
-		s = qaws_polyline_export_3d(c2d, 4, QAWS_POLYLINE_UNIFORM, pts3, &count);
+		s = qaws_polyline_export_3d(pts3, &count, c2d, 4, QAWS_POLYLINE_UNIFORM);
 		TEST_ASSERT(s == QAWS_STATUS_INVALID_DIMENSION, "polyline_export: 2d curve to 3d fails");
-		s = qaws_polyline_export_2d(c3d, 4, QAWS_POLYLINE_UNIFORM, pts2, &count);
+		s = qaws_polyline_export_2d(pts2, &count, c3d, 4, QAWS_POLYLINE_UNIFORM);
 		TEST_ASSERT(s == QAWS_STATUS_INVALID_DIMENSION, "polyline_export: 3d curve to 2d fails");
 
 		qaws_curve_destroy(c2d);
@@ -838,12 +838,12 @@ static void test_polyline_import(void)
 		desc.degree = 1;
 		desc.control_points = cp;
 		desc.control_point_count = 2;
-		qaws_curve_create_bezier(&desc, &curve);
+		qaws_curve_create_bezier(&curve, &desc);
 
-		s = qaws_polyline_export_2d(curve, 1, QAWS_POLYLINE_UNIFORM, pts, &count);
+		s = qaws_polyline_export_2d(pts, &count, curve, 1, QAWS_POLYLINE_UNIFORM);
 		TEST_ASSERT(s == QAWS_STATUS_INVALID_ARGUMENT, "polyline_export: rejects 1 sample");
 
-		s = qaws_polyline_export_2d(curve, 0, QAWS_POLYLINE_UNIFORM, pts, &count);
+		s = qaws_polyline_export_2d(pts, &count, curve, 0, QAWS_POLYLINE_UNIFORM);
 		TEST_ASSERT(s == QAWS_STATUS_INVALID_ARGUMENT, "polyline_export: rejects 0 samples");
 
 		qaws_curve_destroy(curve);
@@ -855,10 +855,10 @@ static void test_polyline_import(void)
 		unsigned int count;
 		qaws_status s;
 
-		s = qaws_polyline_export_2d(NULL, 4, QAWS_POLYLINE_UNIFORM, pts, &count);
+		s = qaws_polyline_export_2d(pts, &count, NULL, 4, QAWS_POLYLINE_UNIFORM);
 		TEST_ASSERT(s == QAWS_STATUS_INVALID_ARGUMENT, "polyline_export: null curve");
 
-		s = qaws_polyline_export_2d(NULL, 4, QAWS_POLYLINE_UNIFORM, NULL, &count);
+		s = qaws_polyline_export_2d(NULL, &count, NULL, 4, QAWS_POLYLINE_UNIFORM);
 		TEST_ASSERT(s == QAWS_STATUS_INVALID_ARGUMENT, "polyline_export: null out_points");
 	}
 
@@ -878,10 +878,10 @@ static void test_polyline_import(void)
 		desc.degree = 3;
 		desc.control_points = cp;
 		desc.control_point_count = 4;
-		qaws_curve_create_bezier(&desc, &curve);
+		qaws_curve_create_bezier(&curve, &desc);
 
-		TEST_ASSERT_STATUS(qaws_polyline_export_2d(curve, 20, QAWS_POLYLINE_UNIFORM, uniform_pts, &u_count));
-		TEST_ASSERT_STATUS(qaws_polyline_export_2d(curve, 20, QAWS_POLYLINE_CURVATURE, curvature_pts, &c_count));
+		TEST_ASSERT_STATUS(qaws_polyline_export_2d(uniform_pts, &u_count, curve, 20, QAWS_POLYLINE_UNIFORM));
+		TEST_ASSERT_STATUS(qaws_polyline_export_2d(curvature_pts, &c_count, curve, 20, QAWS_POLYLINE_CURVATURE));
 		TEST_ASSERT(u_count == 20, "polyline_curvature_2d: uniform count");
 		TEST_ASSERT(c_count > 0 && c_count <= 20, "polyline_curvature_2d: curvature count valid");
 
@@ -919,9 +919,9 @@ static void test_polyline_import(void)
 		desc.degree = 3;
 		desc.control_points = cp;
 		desc.control_point_count = 4;
-		qaws_curve_create_bezier(&desc, &curve);
+		qaws_curve_create_bezier(&curve, &desc);
 
-		TEST_ASSERT_STATUS(qaws_polyline_export_3d(curve, 12, QAWS_POLYLINE_CURVATURE, pts, &count));
+		TEST_ASSERT_STATUS(qaws_polyline_export_3d(pts, &count, curve, 12, QAWS_POLYLINE_CURVATURE));
 		TEST_ASSERT(count > 0 && count <= 12, "polyline_curvature_3d: valid count");
 		/* Start and end should still be on the curve */
 		TEST_ASSERT(fabs(pts[0].x - 0.0) < 0.1, "polyline_curvature_3d: start near origin");

@@ -176,13 +176,13 @@ static double cl_point_distance(qaws_curve const* c, qaws_scalar t, double const
 	if (c->dimension == QAWS_DIMENSION_2D)
 	{
 		qaws_eval_result_2d e;
-		qaws_curve_evaluate_2d(c, t, QAWS_EVAL_FLAG_POSITION, &e);
+		qaws_curve_evaluate_2d(&e, c, t, QAWS_EVAL_FLAG_POSITION);
 		pos[0] = e.position.x; pos[1] = e.position.y;
 	}
 	else
 	{
 		qaws_eval_result_3d e;
-		qaws_curve_evaluate_3d(c, t, QAWS_EVAL_FLAG_POSITION, &e);
+		qaws_curve_evaluate_3d(&e, c, t, QAWS_EVAL_FLAG_POSITION);
 		pos[0] = e.position.x; pos[1] = e.position.y; pos[2] = e.position.z;
 	}
 	return cl_dist(pos, x, (unsigned int)c->dimension);
@@ -200,13 +200,13 @@ static qaws_scalar cl_polish(qaws_curve const* c, qaws_scalar t, double const* x
 		if (dim == 2)
 		{
 			qaws_eval_result_2d e;
-			qaws_curve_evaluate_2d(c, t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2, &e);
+			qaws_curve_evaluate_2d(&e, c, t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2);
 			v[0][0] = e.position.x; v[0][1] = e.position.y; v[1][0] = e.d1.x; v[1][1] = e.d1.y; v[2][0] = e.d2.x; v[2][1] = e.d2.y;
 		}
 		else
 		{
 			qaws_eval_result_3d e;
-			qaws_curve_evaluate_3d(c, t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2, &e);
+			qaws_curve_evaluate_3d(&e, c, t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2);
 			v[0][0] = e.position.x; v[0][1] = e.position.y; v[0][2] = e.position.z;
 			v[1][0] = e.d1.x; v[1][1] = e.d1.y; v[1][2] = e.d1.z; v[2][0] = e.d2.x; v[2][1] = e.d2.y; v[2][2] = e.d2.z;
 		}
@@ -553,7 +553,7 @@ static double sf_distance(qaws_surface const* s, qaws_scalar u, qaws_scalar v, d
 {
 	qaws_surface_eval_result r;
 	memset(&r, 0, sizeof r);
-	qaws_surface_evaluate(s, u, v, QAWS_SURFACE_EVAL_POSITION, &r);
+	qaws_surface_evaluate(&r, s, u, v, QAWS_SURFACE_EVAL_POSITION);
 	return sqrt(((double)r.position.x - x[0]) * ((double)r.position.x - x[0]) + ((double)r.position.y - x[1]) * ((double)r.position.y - x[1])
 		+ ((double)r.position.z - x[2]) * ((double)r.position.z - x[2]));
 }
@@ -569,8 +569,8 @@ static void sf_polish(qaws_surface const* s, double const* x, qaws_scalar* io_u,
 		qaws_surface_eval_result e;
 		double r[3], gu, gv, huu, huv, hvv, det, su, sv;
 		memset(&e, 0, sizeof e);
-		qaws_surface_evaluate(s, (qaws_scalar)u, (qaws_scalar)v, QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_DU | QAWS_SURFACE_EVAL_DV
-			| QAWS_SURFACE_EVAL_DUU | QAWS_SURFACE_EVAL_DUV | QAWS_SURFACE_EVAL_DVV, &e);
+		qaws_surface_evaluate(&e, s, (qaws_scalar)u, (qaws_scalar)v, QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_DU | QAWS_SURFACE_EVAL_DV
+			| QAWS_SURFACE_EVAL_DUU | QAWS_SURFACE_EVAL_DUV | QAWS_SURFACE_EVAL_DVV);
 		r[0] = e.position.x - x[0]; r[1] = e.position.y - x[1]; r[2] = e.position.z - x[2];
 		gu = r[0] * e.du.x + r[1] * e.du.y + r[2] * e.du.z;
 		gv = r[0] * e.dv.x + r[1] * e.dv.y + r[2] * e.dv.z;

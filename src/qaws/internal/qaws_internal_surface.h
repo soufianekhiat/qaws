@@ -91,14 +91,14 @@ void qaws_internal_surface_free(qaws_surface* surface);
 /* Generate uniform clamped knot vector into out_knots.
    knot_count = num_cp + degree + 1. Returns knot_count. */
 unsigned int qaws_internal_surface_uniform_knots(
-	unsigned int degree,
-	unsigned int num_cp,
 	qaws_scalar* out_knots,
-	unsigned int capacity);
+	unsigned int capacity,
+	unsigned int degree,
+	unsigned int num_cp);
 
 /* Normalize the cross product du x dv into out.
    Falls back to +Z when the cross product is degenerate. */
-QAWS_INLINE void qaws_internal_surface_normal(qaws_vec3 du, qaws_vec3 dv, qaws_vec3* out)
+QAWS_INLINE void qaws_internal_surface_normal(qaws_vec3* out, qaws_vec3 du, qaws_vec3 dv)
 {
 	qaws_scalar nx = du.y * dv.z - du.z * dv.y;
 	qaws_scalar ny = du.z * dv.x - du.x * dv.z;
@@ -121,20 +121,20 @@ QAWS_INLINE void qaws_internal_surface_normal(qaws_vec3 du, qaws_vec3 dv, qaws_v
    pts[out_index[k]] for the r-th derivative with respect to t (indices may
    repeat at the ends). Matches qaws_internal_surface_catmull_rom_blend. */
 unsigned int qaws_internal_catmull_rom_weights(
+	unsigned int* out_index,
 	qaws_scalar const* params,
 	unsigned int n_pts,
 	qaws_scalar t,
-	unsigned int* out_index,
 	qaws_scalar (*out_w)[4]);
 
 /* Non-uniform Catmull-Rom blend through n_pts points with the given
    parameter values. out_deriv may be NULL. */
 void qaws_internal_surface_catmull_rom_blend(
+	qaws_vec3* out_pos,
+	qaws_vec3* out_deriv,
 	qaws_vec3 const* pts,
 	qaws_scalar const* params,
 	unsigned int n_pts,
-	qaws_scalar t,
-	qaws_vec3* out_pos,
-	qaws_vec3* out_deriv);
+	qaws_scalar t);
 
 #endif /* QAWS_INTERNAL_SURFACE_H */

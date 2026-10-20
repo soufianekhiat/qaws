@@ -207,7 +207,7 @@ static qaws_curve* contour_curve(contour const* c, qaws_scalar const* pts)
 		y.control_point_count = (unsigned int)c->np;
 		y.mode = QAWS_YUKSEL_MODE_BEZIER;
 		y.closed = c->closed;
-		qaws_curve_create_yuksel(&y, &cr);
+		qaws_curve_create_yuksel(&cr, &y);
 		return cr;
 	}
 	memset(&d, 0, sizeof(d));
@@ -216,7 +216,7 @@ static qaws_curve* contour_curve(contour const* c, qaws_scalar const* pts)
 	d.control_point_count = (unsigned int)c->np;
 	d.parameterization = QAWS_PARAMETERIZATION_CENTRIPETAL;
 	d.closed = c->closed;
-	qaws_curve_create_catmull_rom(&d, &cr);
+	qaws_curve_create_catmull_rom(&cr, &d);
 	return cr;
 }
 
@@ -234,7 +234,7 @@ static double contour_energy(float const* f, int w, int h, contour const* c, qaw
 	if (m > MAXS) m = MAXS;
 	for (k = 0; k < m; k++)
 		ts[k] = (qaws_scalar)(r.max_value * (k + 0.5) / m);
-	qaws_curve_eval_batch_tangent_2d(NULL, cr, ts, NULL, m, QAWS_EVAL_FLAG_POSITION, NULL, prim, tan);
+	qaws_curve_eval_batch_tangent_2d(prim, tan, cr, ts, NULL, NULL, m, QAWS_EVAL_FLAG_POSITION, NULL);
 	for (k = 0; k < m; k++)
 	{
 		double gx, gy, v = sample(f, w, h, prim[k].d[0].x, prim[k].d[0].y, &gx, &gy) - c->level;
@@ -251,7 +251,7 @@ static double contour_energy(float const* f, int w, int h, contour const* c, qaw
 		qaws_diff_views views = one_field(&fv, QAWS_FIELD_POINTS, grad, (unsigned int)c->np, 2);
 		int i;
 		memset(grad, 0, sizeof(qaws_scalar) * 2 * (size_t)c->np);
-		qaws_curve_eval_batch_adjoint_2d(NULL, cr, ts, m, QAWS_EVAL_FLAG_POSITION, bar, &views, NULL);
+		qaws_curve_eval_batch_adjoint_2d(&views, NULL, cr, ts, bar, m, QAWS_EVAL_FLAG_POSITION, NULL);
 		/* keep the points from sliding: spring to their initial positions */
 		for (i = 0; i < 2 * c->np; i++)
 		{
@@ -274,7 +274,7 @@ static void contour_svg(svg* s, imgmap const* m, qaws_curve const* c, char const
 	for (k = 0; k < n; k++)
 	{
 		qaws_eval_result_2d e;
-		qaws_curve_evaluate_2d(c, (qaws_scalar)(r.max_value * k / (n - 1)), QAWS_EVAL_FLAG_POSITION, &e);
+		qaws_curve_evaluate_2d(&e, c, (qaws_scalar)(r.max_value * k / (n - 1)), QAWS_EVAL_FLAG_POSITION);
 		map_pt(m, e.position.x, e.position.y, &xy[2 * k], &xy[2 * k + 1]);
 	}
 	svg_polyline(s, xy, n, color, width, 1.0, 0);
@@ -286,7 +286,7 @@ static double curve_kappa(qaws_curve const* c, double t)
 {
 	qaws_eval_result_2d e;
 	double s;
-	qaws_curve_evaluate_2d(c, (qaws_scalar)t, QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2, &e);
+	qaws_curve_evaluate_2d(&e, c, (qaws_scalar)t, QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2);
 	s = sqrt(e.d1.x * e.d1.x + e.d1.y * e.d1.y);
 	return s > 1e-12 ? (e.d1.x * e.d2.y - e.d1.y * e.d2.x) / (s * s * s) : 0;
 }
@@ -316,7 +316,7 @@ static void comb_svg(svg* s, imgmap const* m, qaws_curve const* c, double comb_s
 	{
 		qaws_eval_result_2d e;
 		double t = r.max_value * k / (n - 1), sp, nx, ny, kap, x0, y0;
-		qaws_curve_evaluate_2d(c, (qaws_scalar)t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2, &e);
+		qaws_curve_evaluate_2d(&e, c, (qaws_scalar)t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2);
 		sp = sqrt(e.d1.x * e.d1.x + e.d1.y * e.d1.y) + 1e-12;
 		nx = -e.d1.y / sp;
 		ny = e.d1.x / sp;

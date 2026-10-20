@@ -7,71 +7,71 @@
 /* All sampling functions are thread-safe on immutable curves. */
 
 qaws_status qaws_curve_get_sample_count(
+	unsigned int* out_sample_count,
 	qaws_curve const* curve,
-	qaws_sampling_desc const* desc,
-	unsigned int* out_sample_count);
+	qaws_sampling_desc const* desc);
 
 qaws_status qaws_curve_sample_2d(
-	qaws_curve const* curve,
-	qaws_sampling_desc const* desc,
 	qaws_vec2* out_positions,
+	unsigned int* out_position_count,
+	qaws_curve const* curve,
 	unsigned int position_capacity,
-	unsigned int* out_position_count);
+	qaws_sampling_desc const* desc);
 
 qaws_status qaws_curve_sample_3d(
-	qaws_curve const* curve,
-	qaws_sampling_desc const* desc,
 	qaws_vec3* out_positions,
+	unsigned int* out_position_count,
+	qaws_curve const* curve,
 	unsigned int position_capacity,
-	unsigned int* out_position_count);
+	qaws_sampling_desc const* desc);
 
 qaws_status qaws_curve_sample_eval_2d(
-	qaws_curve const* curve,
-	qaws_sampling_desc const* desc,
 	qaws_eval_result_2d* out_samples,
+	unsigned int* out_sample_count,
+	qaws_curve const* curve,
 	unsigned int sample_capacity,
-	unsigned int* out_sample_count);
+	qaws_sampling_desc const* desc);
 
 qaws_status qaws_curve_sample_eval_3d(
-	qaws_curve const* curve,
-	qaws_sampling_desc const* desc,
 	qaws_eval_result_3d* out_samples,
+	unsigned int* out_sample_count,
+	qaws_curve const* curve,
 	unsigned int sample_capacity,
-	unsigned int* out_sample_count);
+	qaws_sampling_desc const* desc);
 
 /* Curvature-weighted sampling: distribute samples proportionally to
    curvature magnitude so high-curvature regions receive more points. */
 
 qaws_status qaws_curve_sample_curvature_weighted_2d(
+	qaws_vec2* out_positions,
+	unsigned int* out_position_count,
 	qaws_curve const* curve,
 	unsigned int sample_count,
-	qaws_vec2* out_positions,
-	unsigned int position_capacity,
-	unsigned int* out_position_count);
+	unsigned int position_capacity);
 
 qaws_status qaws_curve_sample_curvature_weighted_3d(
+	qaws_vec3* out_positions,
+	unsigned int* out_position_count,
 	qaws_curve const* curve,
 	unsigned int sample_count,
-	qaws_vec3* out_positions,
-	unsigned int position_capacity,
-	unsigned int* out_position_count);
+	unsigned int position_capacity);
 
 /* Feature-preserving sampling: inserts inflection points and extrema
    into a uniform parameter sample set. */
 
 qaws_status qaws_curve_sample_feature_preserving_2d(
+	qaws_vec2* out_positions,
+	unsigned int* out_position_count,
 	qaws_curve const* curve,
 	unsigned int base_sample_count,
-	qaws_vec2* out_positions,
-	unsigned int position_capacity,
-	unsigned int* out_position_count);
+	unsigned int position_capacity);
 
 qaws_status qaws_curve_sample_feature_preserving_3d(
+	qaws_vec3* out_positions,
+	unsigned int* out_position_count,
 	qaws_curve const* curve,
 	unsigned int base_sample_count,
-	qaws_vec3* out_positions,
-	unsigned int position_capacity,
-	unsigned int* out_position_count);
+	unsigned int position_capacity);
 
 /* Streaming / callback-based sampling.
    The callback is invoked for each sample point.  Return non-zero from

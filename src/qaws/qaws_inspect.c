@@ -92,16 +92,16 @@ qaws_continuity qaws_curve_get_continuity(qaws_curve const *curve)
 /* ------------------------------------------------------------------ */
 
 qaws_status qaws_curve_compute_arc_length(
+	qaws_scalar *out_length,
 	qaws_curve const *curve,
 	qaws_scalar parameter_min,
-	qaws_scalar parameter_max,
-	qaws_scalar *out_length)
+	qaws_scalar parameter_max)
 {
 	if (!curve || !out_length)
 		return QAWS_STATUS_INVALID_ARGUMENT;
 
 	return qaws_internal_arc_length(
-		curve, parameter_min, parameter_max, out_length);
+		out_length, curve, parameter_min, parameter_max);
 }
 
 qaws_status qaws_curve_compute_parameter_at_arc_length(
@@ -115,9 +115,9 @@ qaws_status qaws_curve_compute_parameter_at_arc_length(
 }
 
 qaws_status qaws_curve_compute_bounds_2d(
-	qaws_curve const *curve,
 	qaws_vec2 *out_min,
-	qaws_vec2 *out_max)
+	qaws_vec2 *out_max,
+	qaws_curve const *curve)
 {
 	unsigned int sample_count;
 	unsigned int i;
@@ -142,7 +142,7 @@ qaws_status qaws_curve_compute_bounds_2d(
 
 	/* Evaluate first point to initialize bounds */
 	status = qaws_curve_evaluate_2d(
-		curve, range_min, QAWS_EVAL_FLAG_POSITION, &result);
+		&result, curve, range_min, QAWS_EVAL_FLAG_POSITION);
 	if (status != QAWS_STATUS_OK)
 		return status;
 
@@ -157,7 +157,7 @@ qaws_status qaws_curve_compute_bounds_2d(
 			/ (qaws_scalar)(sample_count - 1);
 
 		status = qaws_curve_evaluate_2d(
-			curve, t, QAWS_EVAL_FLAG_POSITION, &result);
+			&result, curve, t, QAWS_EVAL_FLAG_POSITION);
 		if (status != QAWS_STATUS_OK)
 			return status;
 
@@ -175,9 +175,9 @@ qaws_status qaws_curve_compute_bounds_2d(
 }
 
 qaws_status qaws_curve_compute_bounds_3d(
-	qaws_curve const *curve,
 	qaws_vec3 *out_min,
-	qaws_vec3 *out_max)
+	qaws_vec3 *out_max,
+	qaws_curve const *curve)
 {
 	unsigned int sample_count;
 	unsigned int i;
@@ -202,7 +202,7 @@ qaws_status qaws_curve_compute_bounds_3d(
 
 	/* Evaluate first point to initialize bounds */
 	status = qaws_curve_evaluate_3d(
-		curve, range_min, QAWS_EVAL_FLAG_POSITION, &result);
+		&result, curve, range_min, QAWS_EVAL_FLAG_POSITION);
 	if (status != QAWS_STATUS_OK)
 		return status;
 
@@ -219,7 +219,7 @@ qaws_status qaws_curve_compute_bounds_3d(
 			/ (qaws_scalar)(sample_count - 1);
 
 		status = qaws_curve_evaluate_3d(
-			curve, t, QAWS_EVAL_FLAG_POSITION, &result);
+			&result, curve, t, QAWS_EVAL_FLAG_POSITION);
 		if (status != QAWS_STATUS_OK)
 			return status;
 
@@ -261,8 +261,8 @@ static void closest_eval_2d(
 
 	(void)dim_count;
 
-	qaws_curve_evaluate_2d(c->curve, t,
-		QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &result);
+	qaws_curve_evaluate_2d(&result, c->curve,
+		t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1);
 
 	out_pos[0] = result.position.x;
 	out_pos[1] = result.position.y;
@@ -307,7 +307,7 @@ static qaws_status closest_sampled_2d(
 		t = range_min + (qaws_scalar)i * (range_max - range_min) / (qaws_scalar)31.0;
 
 		status = qaws_curve_evaluate_2d(
-			curve, t, QAWS_EVAL_FLAG_POSITION, &result);
+			&result, curve, t, QAWS_EVAL_FLAG_POSITION);
 		if (status != QAWS_STATUS_OK)
 			return status;
 
@@ -328,8 +328,8 @@ static qaws_status closest_sampled_2d(
 	target_pos[1] = point.y;
 
 	best_t = qaws_internal_closest_point_newton(
-		closest_eval_2d, &ctx, target_pos, 2,
-		range_min, range_max, best_t, 32);
+		target_pos, 2, closest_eval_2d, range_min,
+		range_max, best_t, 32, &ctx);
 
 	*out_parameter = best_t;
 	return QAWS_STATUS_OK;
@@ -351,9 +351,9 @@ static qaws_status closest_2d(
 }
 
 qaws_status qaws_curve_find_closest_parameter_2d(
+	qaws_scalar *out_parameter,
 	qaws_curve const *curve,
-	qaws_vec2 point,
-	qaws_scalar *out_parameter)
+	qaws_vec2 point)
 {
 	double distance, gap;
 	qaws_status status = closest_2d(curve, point, out_parameter, &distance, &gap);
@@ -398,8 +398,8 @@ static void closest_eval_3d(
 
 	(void)dim_count;
 
-	qaws_curve_evaluate_3d(c->curve, t,
-		QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &result);
+	qaws_curve_evaluate_3d(&result, c->curve,
+		t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1);
 
 	out_pos[0] = result.position.x;
 	out_pos[1] = result.position.y;
@@ -447,7 +447,7 @@ static qaws_status closest_sampled_3d(
 		t = range_min + (qaws_scalar)i * (range_max - range_min) / (qaws_scalar)31.0;
 
 		status = qaws_curve_evaluate_3d(
-			curve, t, QAWS_EVAL_FLAG_POSITION, &result);
+			&result, curve, t, QAWS_EVAL_FLAG_POSITION);
 		if (status != QAWS_STATUS_OK)
 			return status;
 
@@ -470,8 +470,8 @@ static qaws_status closest_sampled_3d(
 	target_pos[2] = point.z;
 
 	best_t = qaws_internal_closest_point_newton(
-		closest_eval_3d, &ctx, target_pos, 3,
-		range_min, range_max, best_t, 32);
+		target_pos, 3, closest_eval_3d, range_min,
+		range_max, best_t, 32, &ctx);
 
 	*out_parameter = best_t;
 	return QAWS_STATUS_OK;
@@ -493,9 +493,9 @@ static qaws_status closest_3d(
 }
 
 qaws_status qaws_curve_find_closest_parameter_3d(
+	qaws_scalar *out_parameter,
 	qaws_curve const *curve,
-	qaws_vec3 point,
-	qaws_scalar *out_parameter)
+	qaws_vec3 point)
 {
 	double distance, gap;
 	qaws_status status = closest_3d(curve, point, out_parameter, &distance, &gap);
@@ -528,9 +528,9 @@ qaws_status qaws_curve_find_closest_point_certified_3d(
 /* ------------------------------------------------------------------ */
 
 qaws_status qaws_curve_get_span_continuity(
+	qaws_continuity *out_continuity,
 	qaws_curve const *curve,
-	unsigned int boundary_index,
-	qaws_continuity *out_continuity)
+	unsigned int boundary_index)
 {
 	if (!curve || !out_continuity)
 		return QAWS_STATUS_INVALID_ARGUMENT;
@@ -555,10 +555,10 @@ qaws_status qaws_curve_get_span_continuity(
 /* ------------------------------------------------------------------ */
 
 qaws_status qaws_bezier_get_control_points(
-	qaws_curve const *curve,
 	void *out_control_points,
-	unsigned int point_capacity,
-	unsigned int *out_point_count)
+	unsigned int *out_point_count,
+	qaws_curve const *curve,
+	unsigned int point_capacity)
 {
 	qaws_bezier_impl const *impl;
 	unsigned int count;
@@ -586,10 +586,10 @@ qaws_status qaws_bezier_get_control_points(
 }
 
 qaws_status qaws_curve_get_control_points(
-	qaws_curve const *curve,
 	void *out_control_points,
-	unsigned int point_capacity,
-	unsigned int *out_point_count)
+	unsigned int *out_point_count,
+	qaws_curve const *curve,
+	unsigned int point_capacity)
 {
 	qaws_scalar const *cps;
 	unsigned int count;
@@ -632,10 +632,10 @@ qaws_status qaws_curve_get_control_points(
 /* ------------------------------------------------------------------ */
 
 qaws_status qaws_bspline_get_knots(
-	qaws_curve const *curve,
 	qaws_scalar *out_knots,
-	unsigned int knot_capacity,
-	unsigned int *out_knot_count)
+	unsigned int *out_knot_count,
+	qaws_curve const *curve,
+	unsigned int knot_capacity)
 {
 	if (!curve || !out_knots || !out_knot_count)
 		return QAWS_STATUS_INVALID_ARGUMENT;
@@ -681,10 +681,10 @@ qaws_status qaws_bspline_get_knots(
 /* ------------------------------------------------------------------ */
 
 qaws_status qaws_nurbs_get_weights(
-	qaws_curve const *curve,
 	qaws_scalar *out_weights,
-	unsigned int weight_capacity,
-	unsigned int *out_weight_count)
+	unsigned int *out_weight_count,
+	qaws_curve const *curve,
+	unsigned int weight_capacity)
 {
 	qaws_nurbs_impl const *impl;
 	unsigned int weight_count;
@@ -714,9 +714,9 @@ qaws_status qaws_nurbs_get_weights(
 /* ------------------------------------------------------------------ */
 
 qaws_status qaws_curve_compute_tangent_2d(
+	qaws_vec2 *out_tangent,
 	qaws_curve const *curve,
-	qaws_scalar parameter,
-	qaws_vec2 *out_tangent)
+	qaws_scalar parameter)
 {
 	qaws_eval_result_2d result;
 	qaws_status status;
@@ -729,7 +729,7 @@ qaws_status qaws_curve_compute_tangent_2d(
 		return QAWS_STATUS_INVALID_DIMENSION;
 
 	status = qaws_curve_evaluate_2d(
-		curve, parameter, QAWS_EVAL_FLAG_D1, &result);
+		&result, curve, parameter, QAWS_EVAL_FLAG_D1);
 	if (status != QAWS_STATUS_OK)
 		return status;
 
@@ -749,9 +749,9 @@ qaws_status qaws_curve_compute_tangent_2d(
 }
 
 qaws_status qaws_curve_compute_tangent_3d(
+	qaws_vec3 *out_tangent,
 	qaws_curve const *curve,
-	qaws_scalar parameter,
-	qaws_vec3 *out_tangent)
+	qaws_scalar parameter)
 {
 	qaws_eval_result_3d result;
 	qaws_status status;
@@ -764,7 +764,7 @@ qaws_status qaws_curve_compute_tangent_3d(
 		return QAWS_STATUS_INVALID_DIMENSION;
 
 	status = qaws_curve_evaluate_3d(
-		curve, parameter, QAWS_EVAL_FLAG_D1, &result);
+		&result, curve, parameter, QAWS_EVAL_FLAG_D1);
 	if (status != QAWS_STATUS_OK)
 		return status;
 
@@ -788,9 +788,9 @@ qaws_status qaws_curve_compute_tangent_3d(
 }
 
 qaws_status qaws_curve_compute_curvature_2d(
+	qaws_scalar *out_curvature,
 	qaws_curve const *curve,
-	qaws_scalar parameter,
-	qaws_scalar *out_curvature)
+	qaws_scalar parameter)
 {
 	qaws_eval_result_2d result;
 	qaws_status status;
@@ -804,7 +804,7 @@ qaws_status qaws_curve_compute_curvature_2d(
 		return QAWS_STATUS_INVALID_DIMENSION;
 
 	status = qaws_curve_evaluate_2d(
-		curve, parameter, QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2, &result);
+		&result, curve, parameter, QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2);
 	if (status != QAWS_STATUS_OK)
 		return status;
 
@@ -824,9 +824,9 @@ qaws_status qaws_curve_compute_curvature_2d(
 }
 
 qaws_status qaws_curve_compute_curvature_3d(
+	qaws_scalar *out_curvature,
 	qaws_curve const *curve,
-	qaws_scalar parameter,
-	qaws_scalar *out_curvature)
+	qaws_scalar parameter)
 {
 	qaws_eval_result_3d result;
 	qaws_status status;
@@ -841,7 +841,7 @@ qaws_status qaws_curve_compute_curvature_3d(
 		return QAWS_STATUS_INVALID_DIMENSION;
 
 	status = qaws_curve_evaluate_3d(
-		curve, parameter, QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2, &result);
+		&result, curve, parameter, QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2);
 	if (status != QAWS_STATUS_OK)
 		return status;
 
@@ -867,9 +867,9 @@ qaws_status qaws_curve_compute_curvature_3d(
 }
 
 qaws_status qaws_curve_compute_torsion_3d(
+	qaws_scalar *out_torsion,
 	qaws_curve const *curve,
-	qaws_scalar parameter,
-	qaws_scalar *out_torsion)
+	qaws_scalar parameter)
 {
 	qaws_eval_result_3d result;
 	qaws_status status;
@@ -884,9 +884,9 @@ qaws_status qaws_curve_compute_torsion_3d(
 		return QAWS_STATUS_INVALID_DIMENSION;
 
 	status = qaws_curve_evaluate_3d(
-		curve, parameter,
-		QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2 | QAWS_EVAL_FLAG_D3,
-		&result);
+		&result, curve,
+		parameter,
+		QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2 | QAWS_EVAL_FLAG_D3);
 	if (status != QAWS_STATUS_OK)
 		return status;
 
@@ -908,9 +908,9 @@ qaws_status qaws_curve_compute_torsion_3d(
 }
 
 qaws_status qaws_curve_compute_speed(
+	qaws_scalar *out_speed,
 	qaws_curve const *curve,
-	qaws_scalar parameter,
-	qaws_scalar *out_speed)
+	qaws_scalar parameter)
 {
 	qaws_status status;
 
@@ -921,7 +921,7 @@ qaws_status qaws_curve_compute_speed(
 	{
 		qaws_eval_result_2d result;
 		status = qaws_curve_evaluate_2d(
-			curve, parameter, QAWS_EVAL_FLAG_D1, &result);
+			&result, curve, parameter, QAWS_EVAL_FLAG_D1);
 		if (status != QAWS_STATUS_OK)
 			return status;
 
@@ -933,7 +933,7 @@ qaws_status qaws_curve_compute_speed(
 	{
 		qaws_eval_result_3d result;
 		status = qaws_curve_evaluate_3d(
-			curve, parameter, QAWS_EVAL_FLAG_D1, &result);
+			&result, curve, parameter, QAWS_EVAL_FLAG_D1);
 		if (status != QAWS_STATUS_OK)
 			return status;
 
@@ -951,9 +951,9 @@ qaws_status qaws_curve_compute_speed(
 /* ------------------------------------------------------------------ */
 
 qaws_status qaws_curve_compute_normal_2d(
+	qaws_vec2 *out_normal,
 	qaws_curve const *curve,
-	qaws_scalar parameter,
-	qaws_vec2 *out_normal)
+	qaws_scalar parameter)
 {
 	qaws_eval_result_2d result;
 	qaws_status status;
@@ -966,7 +966,7 @@ qaws_status qaws_curve_compute_normal_2d(
 		return QAWS_STATUS_INVALID_DIMENSION;
 
 	status = qaws_curve_evaluate_2d(
-		curve, parameter, QAWS_EVAL_FLAG_D1, &result);
+		&result, curve, parameter, QAWS_EVAL_FLAG_D1);
 	if (status != QAWS_STATUS_OK)
 		return status;
 
@@ -987,11 +987,11 @@ qaws_status qaws_curve_compute_normal_2d(
 }
 
 qaws_status qaws_curve_compute_frenet_frame_3d(
-	qaws_curve const *curve,
-	qaws_scalar parameter,
 	qaws_vec3 *out_tangent,
 	qaws_vec3 *out_normal,
-	qaws_vec3 *out_binormal)
+	qaws_vec3 *out_binormal,
+	qaws_curve const *curve,
+	qaws_scalar parameter)
 {
 	qaws_eval_result_3d result;
 	qaws_status status;
@@ -1008,8 +1008,8 @@ qaws_status qaws_curve_compute_frenet_frame_3d(
 		return QAWS_STATUS_INVALID_DIMENSION;
 
 	status = qaws_curve_evaluate_3d(
-		curve, parameter,
-		QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2, &result);
+		&result, curve,
+		parameter, QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2);
 	if (status != QAWS_STATUS_OK)
 		return status;
 
@@ -1100,10 +1100,10 @@ qaws_status qaws_curve_compute_frenet_frame_3d(
 /* ------------------------------------------------------------------ */
 
 qaws_status qaws_curve_find_inflection_points(
-	qaws_curve const *curve,
 	qaws_scalar *out_parameters,
-	unsigned int parameter_capacity,
-	unsigned int *out_count)
+	unsigned int *out_count,
+	qaws_curve const *curve,
+	unsigned int parameter_capacity)
 {
 	unsigned int span_count;
 	unsigned int samples_per_span;
@@ -1139,8 +1139,8 @@ qaws_status qaws_curve_find_inflection_points(
 
 		/* Evaluate first sample */
 		status = qaws_curve_evaluate_2d(
-			curve, range_min,
-			QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2, &result);
+			&result, curve,
+			range_min, QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2);
 		if (status != QAWS_STATUS_OK)
 			return status;
 
@@ -1153,8 +1153,8 @@ qaws_status qaws_curve_find_inflection_points(
 				/ (qaws_scalar)total_samples;
 
 			status = qaws_curve_evaluate_2d(
-				curve, t,
-				QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2, &result);
+				&result, curve,
+				t, QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2);
 			if (status != QAWS_STATUS_OK)
 				return status;
 
@@ -1178,8 +1178,8 @@ qaws_status qaws_curve_find_inflection_points(
 						break;
 
 					status = qaws_curve_evaluate_2d(
-						curve, mid,
-						QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2, &result);
+						&result, curve,
+						mid, QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2);
 					if (status != QAWS_STATUS_OK)
 						return status;
 
@@ -1219,8 +1219,8 @@ qaws_status qaws_curve_find_inflection_points(
 
 		/* Evaluate first sample */
 		status = qaws_curve_evaluate_3d(
-			curve, range_min,
-			QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2, &result);
+			&result, curve,
+			range_min, QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2);
 		if (status != QAWS_STATUS_OK)
 			return status;
 
@@ -1236,8 +1236,8 @@ qaws_status qaws_curve_find_inflection_points(
 				/ (qaws_scalar)total_samples;
 
 			status = qaws_curve_evaluate_3d(
-				curve, t,
-				QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2, &result);
+				&result, curve,
+				t, QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2);
 			if (status != QAWS_STATUS_OK)
 				return status;
 
@@ -1267,8 +1267,8 @@ qaws_status qaws_curve_find_inflection_points(
 						break;
 
 					status = qaws_curve_evaluate_3d(
-						curve, mid,
-						QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2, &result);
+						&result, curve,
+						mid, QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2);
 					if (status != QAWS_STATUS_OK)
 						return status;
 
@@ -1315,11 +1315,11 @@ qaws_status qaws_curve_find_inflection_points(
 /* ------------------------------------------------------------------ */
 
 qaws_status qaws_curve_find_extrema(
-	qaws_curve const *curve,
-	unsigned int axis,
 	qaws_scalar *out_parameters,
+	unsigned int *out_count,
+	qaws_curve const *curve,
 	unsigned int parameter_capacity,
-	unsigned int *out_count)
+	unsigned int axis)
 {
 	unsigned int span_count;
 	unsigned int samples_per_span;
@@ -1358,7 +1358,7 @@ qaws_status qaws_curve_find_extrema(
 
 		/* Evaluate first sample */
 		status = qaws_curve_evaluate_2d(
-			curve, range_min, QAWS_EVAL_FLAG_D1, &result);
+			&result, curve, range_min, QAWS_EVAL_FLAG_D1);
 		if (status != QAWS_STATUS_OK)
 			return status;
 
@@ -1371,7 +1371,7 @@ qaws_status qaws_curve_find_extrema(
 				/ (qaws_scalar)total_samples;
 
 			status = qaws_curve_evaluate_2d(
-				curve, t, QAWS_EVAL_FLAG_D1, &result);
+				&result, curve, t, QAWS_EVAL_FLAG_D1);
 			if (status != QAWS_STATUS_OK)
 				return status;
 
@@ -1395,7 +1395,7 @@ qaws_status qaws_curve_find_extrema(
 						break;
 
 					status = qaws_curve_evaluate_2d(
-						curve, mid, QAWS_EVAL_FLAG_D1, &result);
+						&result, curve, mid, QAWS_EVAL_FLAG_D1);
 					if (status != QAWS_STATUS_OK)
 						return status;
 
@@ -1432,7 +1432,7 @@ qaws_status qaws_curve_find_extrema(
 
 		/* Evaluate first sample */
 		status = qaws_curve_evaluate_3d(
-			curve, range_min, QAWS_EVAL_FLAG_D1, &result);
+			&result, curve, range_min, QAWS_EVAL_FLAG_D1);
 		if (status != QAWS_STATUS_OK)
 			return status;
 
@@ -1447,7 +1447,7 @@ qaws_status qaws_curve_find_extrema(
 				/ (qaws_scalar)total_samples;
 
 			status = qaws_curve_evaluate_3d(
-				curve, t, QAWS_EVAL_FLAG_D1, &result);
+				&result, curve, t, QAWS_EVAL_FLAG_D1);
 			if (status != QAWS_STATUS_OK)
 				return status;
 
@@ -1473,7 +1473,7 @@ qaws_status qaws_curve_find_extrema(
 						break;
 
 					status = qaws_curve_evaluate_3d(
-						curve, mid, QAWS_EVAL_FLAG_D1, &result);
+						&result, curve, mid, QAWS_EVAL_FLAG_D1);
 					if (status != QAWS_STATUS_OK)
 						return status;
 
@@ -1517,9 +1517,9 @@ qaws_status qaws_curve_find_extrema(
 /* ------------------------------------------------------------------ */
 
 qaws_status qaws_curve_compute_curvature_comb_2d(
+	qaws_curvature_sample_2d *out_samples,
 	qaws_curve const *curve,
 	unsigned int sample_count,
-	qaws_curvature_sample_2d *out_samples,
 	unsigned int sample_capacity)
 {
 	unsigned int i;
@@ -1553,9 +1553,9 @@ qaws_status qaws_curve_compute_curvature_comb_2d(
 			/ (qaws_scalar)(sample_count - 1);
 
 		status = qaws_curve_evaluate_2d(
-			curve, t,
-			QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2,
-			&result);
+			&result, curve,
+			t,
+			QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2);
 		if (status != QAWS_STATUS_OK)
 			return status;
 
@@ -1586,9 +1586,9 @@ qaws_status qaws_curve_compute_curvature_comb_2d(
 }
 
 qaws_status qaws_curve_compute_curvature_comb_3d(
+	qaws_curvature_sample_3d *out_samples,
 	qaws_curve const *curve,
 	unsigned int sample_count,
-	qaws_curvature_sample_3d *out_samples,
 	unsigned int sample_capacity)
 {
 	unsigned int i;
@@ -1627,9 +1627,9 @@ qaws_status qaws_curve_compute_curvature_comb_3d(
 			/ (qaws_scalar)(sample_count - 1);
 
 		status = qaws_curve_evaluate_3d(
-			curve, t,
-			QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2,
-			&result);
+			&result, curve,
+			t,
+			QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2);
 		if (status != QAWS_STATUS_OK)
 			return status;
 
@@ -1711,9 +1711,9 @@ qaws_status qaws_curve_compute_curvature_comb_3d(
 /* ------------------------------------------------------------------ */
 
 qaws_status qaws_curve_compute_winding_number_2d(
+	int *out_winding_number,
 	qaws_curve const *curve,
-	qaws_vec2 point,
-	int *out_winding_number)
+	qaws_vec2 point)
 {
 	unsigned int sample_count;
 	unsigned int i;
@@ -1747,7 +1747,7 @@ qaws_status qaws_curve_compute_winding_number_2d(
 
 	/* Evaluate first sample */
 	status = qaws_curve_evaluate_2d(
-		curve, range_min, QAWS_EVAL_FLAG_POSITION, &result);
+		&result, curve, range_min, QAWS_EVAL_FLAG_POSITION);
 	if (status != QAWS_STATUS_OK)
 		return status;
 
@@ -1761,7 +1761,7 @@ qaws_status qaws_curve_compute_winding_number_2d(
 			/ (qaws_scalar)sample_count;
 
 		status = qaws_curve_evaluate_2d(
-			curve, t, QAWS_EVAL_FLAG_POSITION, &result);
+			&result, curve, t, QAWS_EVAL_FLAG_POSITION);
 		if (status != QAWS_STATUS_OK)
 			return status;
 
@@ -1882,11 +1882,11 @@ static int newton_refine_2d(
 		qaws_scalar det, inv_det;
 		qaws_scalar dta, dtb;
 
-		if (qaws_curve_evaluate_2d(curve_a, *ta,
-				QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &ra) != QAWS_STATUS_OK)
+		if (qaws_curve_evaluate_2d(&ra, curve_a,
+				*ta, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1) != QAWS_STATUS_OK)
 			return 0;
-		if (qaws_curve_evaluate_2d(curve_b, *tb,
-				QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &rb) != QAWS_STATUS_OK)
+		if (qaws_curve_evaluate_2d(&rb, curve_b,
+				*tb, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1) != QAWS_STATUS_OK)
 			return 0;
 
 		fx = ra.position.x - rb.position.x;
@@ -1924,9 +1924,9 @@ static int newton_refine_2d(
 	{
 		qaws_eval_result_2d ra, rb;
 		qaws_scalar dx, dy;
-		if (qaws_curve_evaluate_2d(curve_a, *ta, QAWS_EVAL_FLAG_POSITION, &ra) != QAWS_STATUS_OK)
+		if (qaws_curve_evaluate_2d(&ra, curve_a, *ta, QAWS_EVAL_FLAG_POSITION) != QAWS_STATUS_OK)
 			return 0;
-		if (qaws_curve_evaluate_2d(curve_b, *tb, QAWS_EVAL_FLAG_POSITION, &rb) != QAWS_STATUS_OK)
+		if (qaws_curve_evaluate_2d(&rb, curve_b, *tb, QAWS_EVAL_FLAG_POSITION) != QAWS_STATUS_OK)
 			return 0;
 		dx = ra.position.x - rb.position.x;
 		dy = ra.position.y - rb.position.y;
@@ -1951,11 +1951,11 @@ static int newton_refine_3d(
 		qaws_scalar ax, ay, az, bx, by, bz;
 		qaws_scalar ata, atb, dta, dtb;
 
-		if (qaws_curve_evaluate_3d(curve_a, *ta,
-				QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &ra) != QAWS_STATUS_OK)
+		if (qaws_curve_evaluate_3d(&ra, curve_a,
+				*ta, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1) != QAWS_STATUS_OK)
 			return 0;
-		if (qaws_curve_evaluate_3d(curve_b, *tb,
-				QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &rb) != QAWS_STATUS_OK)
+		if (qaws_curve_evaluate_3d(&rb, curve_b,
+				*tb, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1) != QAWS_STATUS_OK)
 			return 0;
 
 		fx = ra.position.x - rb.position.x;
@@ -2006,9 +2006,9 @@ static int newton_refine_3d(
 	{
 		qaws_eval_result_3d ra, rb;
 		qaws_scalar dx, dy, dz;
-		if (qaws_curve_evaluate_3d(curve_a, *ta, QAWS_EVAL_FLAG_POSITION, &ra) != QAWS_STATUS_OK)
+		if (qaws_curve_evaluate_3d(&ra, curve_a, *ta, QAWS_EVAL_FLAG_POSITION) != QAWS_STATUS_OK)
 			return 0;
-		if (qaws_curve_evaluate_3d(curve_b, *tb, QAWS_EVAL_FLAG_POSITION, &rb) != QAWS_STATUS_OK)
+		if (qaws_curve_evaluate_3d(&rb, curve_b, *tb, QAWS_EVAL_FLAG_POSITION) != QAWS_STATUS_OK)
 			return 0;
 		dx = ra.position.x - rb.position.x;
 		dy = ra.position.y - rb.position.y;
@@ -2026,10 +2026,10 @@ static int newton_refine_3d(
 /* ------------------------------------------------------------------ */
 
 qaws_status qaws_curve_find_self_intersections_2d(
-	qaws_curve const *curve,
 	qaws_intersection_2d *out_intersections,
-	unsigned int intersection_capacity,
-	unsigned int *out_count)
+	unsigned int *out_count,
+	qaws_curve const *curve,
+	unsigned int intersection_capacity)
 {
 	unsigned int i, j, n, found;
 	qaws_scalar range_min, range_max;
@@ -2059,7 +2059,7 @@ qaws_status qaws_curve_find_self_intersections_2d(
 	{
 		qaws_eval_result_2d r;
 		params[i] = range_min + (qaws_scalar)i * (range_max - range_min) / (qaws_scalar)(n - 1);
-		s = qaws_curve_evaluate_2d(curve, params[i], QAWS_EVAL_FLAG_POSITION, &r);
+		s = qaws_curve_evaluate_2d(&r, curve, params[i], QAWS_EVAL_FLAG_POSITION);
 		if (s != QAWS_STATUS_OK) { qaws_internal_free(params); qaws_internal_free(pts); return s; }
 		pts[i] = r.position;
 	}
@@ -2104,8 +2104,8 @@ qaws_status qaws_curve_find_self_intersections_2d(
 							if (!isect_2d_is_duplicate(out_intersections, found, intersection_capacity, ta, tb))
 							{
 								qaws_eval_result_2d rp;
-								qaws_curve_evaluate_2d(curve, ta,
-									QAWS_EVAL_FLAG_POSITION, &rp);
+								qaws_curve_evaluate_2d(&rp, curve,
+									ta, QAWS_EVAL_FLAG_POSITION);
 								/* Also check position-based dedup for multi-span curves */
 								if (!isect_2d_is_pos_duplicate(out_intersections, found, intersection_capacity, rp.position))
 								{
@@ -2132,10 +2132,10 @@ qaws_status qaws_curve_find_self_intersections_2d(
 }
 
 qaws_status qaws_curve_find_self_intersections_3d(
-	qaws_curve const *curve,
 	qaws_intersection_3d *out_intersections,
-	unsigned int intersection_capacity,
-	unsigned int *out_count)
+	unsigned int *out_count,
+	qaws_curve const *curve,
+	unsigned int intersection_capacity)
 {
 	unsigned int i, j, n, found;
 	qaws_scalar range_min, range_max;
@@ -2164,7 +2164,7 @@ qaws_status qaws_curve_find_self_intersections_3d(
 	{
 		qaws_eval_result_3d r;
 		params[i] = range_min + (qaws_scalar)i * (range_max - range_min) / (qaws_scalar)(n - 1);
-		s = qaws_curve_evaluate_3d(curve, params[i], QAWS_EVAL_FLAG_POSITION, &r);
+		s = qaws_curve_evaluate_3d(&r, curve, params[i], QAWS_EVAL_FLAG_POSITION);
 		if (s != QAWS_STATUS_OK) { qaws_internal_free(params); qaws_internal_free(pts); return s; }
 		pts[i] = r.position;
 	}
@@ -2204,8 +2204,8 @@ qaws_status qaws_curve_find_self_intersections_3d(
 								if (found < intersection_capacity)
 								{
 									qaws_eval_result_3d rp;
-									qaws_curve_evaluate_3d(curve, ta,
-										QAWS_EVAL_FLAG_POSITION, &rp);
+									qaws_curve_evaluate_3d(&rp, curve,
+										ta, QAWS_EVAL_FLAG_POSITION);
 									out_intersections[found].parameter_a = ta;
 									out_intersections[found].parameter_b = tb;
 									out_intersections[found].position = rp.position;
@@ -2230,11 +2230,11 @@ qaws_status qaws_curve_find_self_intersections_3d(
 /* ------------------------------------------------------------------ */
 
 qaws_status qaws_curve_find_intersections_2d(
+	qaws_intersection_2d *out_intersections,
+	unsigned int *out_count,
 	qaws_curve const *curve_a,
 	qaws_curve const *curve_b,
-	qaws_intersection_2d *out_intersections,
-	unsigned int intersection_capacity,
-	unsigned int *out_count)
+	unsigned int intersection_capacity)
 {
 	unsigned int na, nb, i, j, found;
 	qaws_scalar a_min, a_max, b_min, b_max;
@@ -2274,7 +2274,7 @@ qaws_status qaws_curve_find_intersections_2d(
 	{
 		qaws_eval_result_2d r;
 		params_a[i] = a_min + (qaws_scalar)i * (a_max - a_min) / (qaws_scalar)(na - 1);
-		s = qaws_curve_evaluate_2d(curve_a, params_a[i], QAWS_EVAL_FLAG_POSITION, &r);
+		s = qaws_curve_evaluate_2d(&r, curve_a, params_a[i], QAWS_EVAL_FLAG_POSITION);
 		if (s != QAWS_STATUS_OK) goto cleanup_2d;
 		pts_a[i] = r.position;
 	}
@@ -2282,7 +2282,7 @@ qaws_status qaws_curve_find_intersections_2d(
 	{
 		qaws_eval_result_2d r;
 		params_b[j] = b_min + (qaws_scalar)j * (b_max - b_min) / (qaws_scalar)(nb - 1);
-		s = qaws_curve_evaluate_2d(curve_b, params_b[j], QAWS_EVAL_FLAG_POSITION, &r);
+		s = qaws_curve_evaluate_2d(&r, curve_b, params_b[j], QAWS_EVAL_FLAG_POSITION);
 		if (s != QAWS_STATUS_OK) goto cleanup_2d;
 		pts_b[j] = r.position;
 	}
@@ -2309,8 +2309,8 @@ qaws_status qaws_curve_find_intersections_2d(
 					if (!isect_2d_is_duplicate(out_intersections, found, intersection_capacity, ta, tb))
 					{
 						qaws_eval_result_2d rp;
-						qaws_curve_evaluate_2d(curve_a, ta,
-							QAWS_EVAL_FLAG_POSITION, &rp);
+						qaws_curve_evaluate_2d(&rp, curve_a,
+							ta, QAWS_EVAL_FLAG_POSITION);
 						if (!isect_2d_is_pos_duplicate(out_intersections, found, intersection_capacity, rp.position))
 						{
 							if (found < intersection_capacity)
@@ -2336,11 +2336,11 @@ cleanup_2d:
 }
 
 qaws_status qaws_curve_find_intersections_3d(
+	qaws_intersection_3d *out_intersections,
+	unsigned int *out_count,
 	qaws_curve const *curve_a,
 	qaws_curve const *curve_b,
-	qaws_intersection_3d *out_intersections,
-	unsigned int intersection_capacity,
-	unsigned int *out_count)
+	unsigned int intersection_capacity)
 {
 	unsigned int na, nb, i, j, found;
 	qaws_scalar a_min, a_max, b_min, b_max;
@@ -2379,7 +2379,7 @@ qaws_status qaws_curve_find_intersections_3d(
 	{
 		qaws_eval_result_3d r;
 		params_a[i] = a_min + (qaws_scalar)i * (a_max - a_min) / (qaws_scalar)(na - 1);
-		s = qaws_curve_evaluate_3d(curve_a, params_a[i], QAWS_EVAL_FLAG_POSITION, &r);
+		s = qaws_curve_evaluate_3d(&r, curve_a, params_a[i], QAWS_EVAL_FLAG_POSITION);
 		if (s != QAWS_STATUS_OK) goto cleanup_3d;
 		pts_a[i] = r.position;
 	}
@@ -2387,7 +2387,7 @@ qaws_status qaws_curve_find_intersections_3d(
 	{
 		qaws_eval_result_3d r;
 		params_b[j] = b_min + (qaws_scalar)j * (b_max - b_min) / (qaws_scalar)(nb - 1);
-		s = qaws_curve_evaluate_3d(curve_b, params_b[j], QAWS_EVAL_FLAG_POSITION, &r);
+		s = qaws_curve_evaluate_3d(&r, curve_b, params_b[j], QAWS_EVAL_FLAG_POSITION);
 		if (s != QAWS_STATUS_OK) goto cleanup_3d;
 		pts_b[j] = r.position;
 	}
@@ -2416,8 +2416,8 @@ qaws_status qaws_curve_find_intersections_3d(
 						if (found < intersection_capacity)
 						{
 							qaws_eval_result_3d rp;
-							qaws_curve_evaluate_3d(curve_a, ta,
-								QAWS_EVAL_FLAG_POSITION, &rp);
+							qaws_curve_evaluate_3d(&rp, curve_a,
+								ta, QAWS_EVAL_FLAG_POSITION);
 							out_intersections[found].parameter_a = ta;
 							out_intersections[found].parameter_b = tb;
 							out_intersections[found].position = rp.position;
@@ -2442,9 +2442,9 @@ cleanup_3d:
 /* ------------------------------------------------------------------ */
 
 qaws_status qaws_surface_compute_bounds(
-	qaws_surface const *surface,
 	qaws_vec3 *out_min,
-	qaws_vec3 *out_max)
+	qaws_vec3 *out_max,
+	qaws_surface const *surface)
 {
 	unsigned int nu;
 	unsigned int nv;
@@ -2476,7 +2476,7 @@ qaws_status qaws_surface_compute_bounds(
 
 	/* Evaluate first point to initialize bounds */
 	status = qaws_surface_evaluate(
-		surface, u_min, v_min, QAWS_SURFACE_EVAL_POSITION, &result);
+		&result, surface, u_min, v_min, QAWS_SURFACE_EVAL_POSITION);
 	if (status != QAWS_STATUS_OK)
 		return status;
 
@@ -2502,7 +2502,7 @@ qaws_status qaws_surface_compute_bounds(
 				/ (qaws_scalar)(nv - 1);
 
 			status = qaws_surface_evaluate(
-				surface, u, v, QAWS_SURFACE_EVAL_POSITION, &result);
+				&result, surface, u, v, QAWS_SURFACE_EVAL_POSITION);
 			if (status != QAWS_STATUS_OK)
 				return status;
 
@@ -2525,8 +2525,8 @@ qaws_status qaws_surface_compute_bounds(
 }
 
 qaws_status qaws_surface_compute_area(
-	qaws_surface const *surface,
-	qaws_scalar *out_area)
+	qaws_scalar *out_area,
+	qaws_surface const *surface)
 {
 	unsigned int nu;
 	unsigned int nv;
@@ -2602,9 +2602,9 @@ qaws_status qaws_surface_compute_area(
 				wv = (qaws_scalar)2.0;
 
 			status = qaws_surface_evaluate(
-				surface, u, v,
-				QAWS_SURFACE_EVAL_DU | QAWS_SURFACE_EVAL_DV,
-				&result);
+				&result, surface, u,
+				v,
+				QAWS_SURFACE_EVAL_DU | QAWS_SURFACE_EVAL_DV);
 			if (status != QAWS_STATUS_OK)
 				return status;
 
@@ -2625,10 +2625,10 @@ qaws_status qaws_surface_compute_area(
 }
 
 qaws_status qaws_surface_compute_gaussian_curvature(
+	qaws_scalar *out_curvature,
 	qaws_surface const *surface,
 	qaws_scalar u,
-	qaws_scalar v,
-	qaws_scalar *out_curvature)
+	qaws_scalar v)
 {
 	qaws_surface_eval_result result;
 	qaws_status status;
@@ -2643,11 +2643,11 @@ qaws_status qaws_surface_compute_gaussian_curvature(
 		return QAWS_STATUS_INVALID_ARGUMENT;
 
 	status = qaws_surface_evaluate(
-		surface, u, v,
+		&result, surface, u,
+		v,
 		QAWS_SURFACE_EVAL_DU | QAWS_SURFACE_EVAL_DV
 		| QAWS_SURFACE_EVAL_DUU | QAWS_SURFACE_EVAL_DUV
-		| QAWS_SURFACE_EVAL_DVV,
-		&result);
+		| QAWS_SURFACE_EVAL_DVV);
 	if (status != QAWS_STATUS_OK)
 		return status;
 
@@ -2693,10 +2693,10 @@ qaws_status qaws_surface_compute_gaussian_curvature(
 }
 
 qaws_status qaws_surface_compute_mean_curvature(
+	qaws_scalar *out_curvature,
 	qaws_surface const *surface,
 	qaws_scalar u,
-	qaws_scalar v,
-	qaws_scalar *out_curvature)
+	qaws_scalar v)
 {
 	qaws_surface_eval_result result;
 	qaws_status status;
@@ -2711,11 +2711,11 @@ qaws_status qaws_surface_compute_mean_curvature(
 		return QAWS_STATUS_INVALID_ARGUMENT;
 
 	status = qaws_surface_evaluate(
-		surface, u, v,
+		&result, surface, u,
+		v,
 		QAWS_SURFACE_EVAL_DU | QAWS_SURFACE_EVAL_DV
 		| QAWS_SURFACE_EVAL_DUU | QAWS_SURFACE_EVAL_DUV
-		| QAWS_SURFACE_EVAL_DVV,
-		&result);
+		| QAWS_SURFACE_EVAL_DVV);
 	if (status != QAWS_STATUS_OK)
 		return status;
 
@@ -2762,10 +2762,10 @@ qaws_status qaws_surface_compute_mean_curvature(
 }
 
 qaws_status qaws_surface_compute_principal_curvatures(
+	qaws_surface_curvature_result *out_result,
 	qaws_surface const *surface,
 	qaws_scalar u,
-	qaws_scalar v,
-	qaws_surface_curvature_result *out_result)
+	qaws_scalar v)
 {
 	qaws_surface_eval_result result;
 	qaws_status status;
@@ -2782,11 +2782,11 @@ qaws_status qaws_surface_compute_principal_curvatures(
 		return QAWS_STATUS_INVALID_ARGUMENT;
 
 	status = qaws_surface_evaluate(
-		surface, u, v,
+		&result, surface, u,
+		v,
 		QAWS_SURFACE_EVAL_DU | QAWS_SURFACE_EVAL_DV
 		| QAWS_SURFACE_EVAL_DUU | QAWS_SURFACE_EVAL_DUV
-		| QAWS_SURFACE_EVAL_DVV,
-		&result);
+		| QAWS_SURFACE_EVAL_DVV);
 	if (status != QAWS_STATUS_OK)
 		return status;
 
@@ -2857,10 +2857,10 @@ qaws_status qaws_surface_compute_principal_curvatures(
 /* ------------------------------------------------------------------ */
 
 qaws_status qaws_curve_compute_hausdorff_distance_2d(
+	qaws_scalar *out_distance,
 	qaws_curve const *curve_a,
 	qaws_curve const *curve_b,
-	unsigned int sample_count,
-	qaws_scalar *out_distance)
+	unsigned int sample_count)
 {
 	unsigned int i;
 	qaws_scalar range_a_min;
@@ -2903,7 +2903,7 @@ qaws_status qaws_curve_compute_hausdorff_distance_2d(
 			/ (qaws_scalar)(sample_count - 1);
 
 		status = qaws_curve_evaluate_2d(
-			curve_a, t, QAWS_EVAL_FLAG_POSITION, &result_a);
+			&result_a, curve_a, t, QAWS_EVAL_FLAG_POSITION);
 		if (status != QAWS_STATUS_OK)
 			return status;
 
@@ -2911,12 +2911,12 @@ qaws_status qaws_curve_compute_hausdorff_distance_2d(
 
 		/* Find closest point on curve_b */
 		status = qaws_curve_find_closest_parameter_2d(
-			curve_b, pt, &param);
+			&param, curve_b, pt);
 		if (status != QAWS_STATUS_OK)
 			return status;
 
 		status = qaws_curve_evaluate_2d(
-			curve_b, param, QAWS_EVAL_FLAG_POSITION, &result_b);
+			&result_b, curve_b, param, QAWS_EVAL_FLAG_POSITION);
 		if (status != QAWS_STATUS_OK)
 			return status;
 
@@ -2939,7 +2939,7 @@ qaws_status qaws_curve_compute_hausdorff_distance_2d(
 			/ (qaws_scalar)(sample_count - 1);
 
 		status = qaws_curve_evaluate_2d(
-			curve_b, t, QAWS_EVAL_FLAG_POSITION, &result_b);
+			&result_b, curve_b, t, QAWS_EVAL_FLAG_POSITION);
 		if (status != QAWS_STATUS_OK)
 			return status;
 
@@ -2947,12 +2947,12 @@ qaws_status qaws_curve_compute_hausdorff_distance_2d(
 
 		/* Find closest point on curve_a */
 		status = qaws_curve_find_closest_parameter_2d(
-			curve_a, pt, &param);
+			&param, curve_a, pt);
 		if (status != QAWS_STATUS_OK)
 			return status;
 
 		status = qaws_curve_evaluate_2d(
-			curve_a, param, QAWS_EVAL_FLAG_POSITION, &result_a);
+			&result_a, curve_a, param, QAWS_EVAL_FLAG_POSITION);
 		if (status != QAWS_STATUS_OK)
 			return status;
 
@@ -2970,10 +2970,10 @@ qaws_status qaws_curve_compute_hausdorff_distance_2d(
 }
 
 qaws_status qaws_curve_compute_hausdorff_distance_3d(
+	qaws_scalar *out_distance,
 	qaws_curve const *curve_a,
 	qaws_curve const *curve_b,
-	unsigned int sample_count,
-	qaws_scalar *out_distance)
+	unsigned int sample_count)
 {
 	unsigned int i;
 	qaws_scalar range_a_min;
@@ -3016,7 +3016,7 @@ qaws_status qaws_curve_compute_hausdorff_distance_3d(
 			/ (qaws_scalar)(sample_count - 1);
 
 		status = qaws_curve_evaluate_3d(
-			curve_a, t, QAWS_EVAL_FLAG_POSITION, &result_a);
+			&result_a, curve_a, t, QAWS_EVAL_FLAG_POSITION);
 		if (status != QAWS_STATUS_OK)
 			return status;
 
@@ -3024,12 +3024,12 @@ qaws_status qaws_curve_compute_hausdorff_distance_3d(
 
 		/* Find closest point on curve_b */
 		status = qaws_curve_find_closest_parameter_3d(
-			curve_b, pt, &param);
+			&param, curve_b, pt);
 		if (status != QAWS_STATUS_OK)
 			return status;
 
 		status = qaws_curve_evaluate_3d(
-			curve_b, param, QAWS_EVAL_FLAG_POSITION, &result_b);
+			&result_b, curve_b, param, QAWS_EVAL_FLAG_POSITION);
 		if (status != QAWS_STATUS_OK)
 			return status;
 
@@ -3054,7 +3054,7 @@ qaws_status qaws_curve_compute_hausdorff_distance_3d(
 			/ (qaws_scalar)(sample_count - 1);
 
 		status = qaws_curve_evaluate_3d(
-			curve_b, t, QAWS_EVAL_FLAG_POSITION, &result_b);
+			&result_b, curve_b, t, QAWS_EVAL_FLAG_POSITION);
 		if (status != QAWS_STATUS_OK)
 			return status;
 
@@ -3062,12 +3062,12 @@ qaws_status qaws_curve_compute_hausdorff_distance_3d(
 
 		/* Find closest point on curve_a */
 		status = qaws_curve_find_closest_parameter_3d(
-			curve_a, pt, &param);
+			&param, curve_a, pt);
 		if (status != QAWS_STATUS_OK)
 			return status;
 
 		status = qaws_curve_evaluate_3d(
-			curve_a, param, QAWS_EVAL_FLAG_POSITION, &result_a);
+			&result_a, curve_a, param, QAWS_EVAL_FLAG_POSITION);
 		if (status != QAWS_STATUS_OK)
 			return status;
 
@@ -3144,7 +3144,7 @@ static qaws_status surface_closest_sampled(
 				/ QAWS_LITERAL(7.0);
 
 			status = qaws_surface_evaluate(
-				surface, u, v, QAWS_SURFACE_EVAL_POSITION, &result);
+				&result, surface, u, v, QAWS_SURFACE_EVAL_POSITION);
 			if (status != QAWS_STATUS_OK)
 				return status;
 
@@ -3171,11 +3171,11 @@ static qaws_status surface_closest_sampled(
 		qaws_vec3 r;
 
 		status = qaws_surface_evaluate(
-			surface, u, v,
+			&result, surface, u,
+			v,
 			QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_DU
 			| QAWS_SURFACE_EVAL_DV | QAWS_SURFACE_EVAL_DUU
-			| QAWS_SURFACE_EVAL_DUV | QAWS_SURFACE_EVAL_DVV,
-			&result);
+			| QAWS_SURFACE_EVAL_DUV | QAWS_SURFACE_EVAL_DVV);
 		if (status != QAWS_STATUS_OK)
 			return status;
 
@@ -3225,7 +3225,7 @@ static qaws_status surface_closest_sampled(
 
 	/* Evaluate final position */
 	status = qaws_surface_evaluate(
-		surface, u, v, QAWS_SURFACE_EVAL_POSITION, &result);
+		&result, surface, u, v, QAWS_SURFACE_EVAL_POSITION);
 	if (status != QAWS_STATUS_OK)
 		return status;
 
@@ -3253,18 +3253,18 @@ static qaws_status surface_closest(
 	status = qaws_internal_surface_closest_certify(surface, x, out_u, out_v, out_distance, out_gap);
 	if (status != QAWS_STATUS_OK)
 		return status;
-	status = qaws_surface_evaluate(surface, *out_u, *out_v, QAWS_SURFACE_EVAL_POSITION, &result);
+	status = qaws_surface_evaluate(&result, surface, *out_u, *out_v, QAWS_SURFACE_EVAL_POSITION);
 	if (status == QAWS_STATUS_OK)
 		*out_closest_point = result.position;
 	return status;
 }
 
 qaws_status qaws_surface_find_closest_point(
-	qaws_surface const *surface,
-	qaws_vec3 point,
 	qaws_scalar *out_u,
 	qaws_scalar *out_v,
-	qaws_vec3 *out_closest_point)
+	qaws_vec3 *out_closest_point,
+	qaws_surface const *surface,
+	qaws_vec3 point)
 {
 	double distance, gap;
 	qaws_status status = surface_closest(surface, point, out_u, out_v, out_closest_point, &distance, &gap);
@@ -3297,12 +3297,12 @@ qaws_status qaws_surface_find_closest_point_certified(
 /* ------------------------------------------------------------------ */
 
 qaws_status qaws_curve_find_plane_intersections(
-	qaws_curve const *curve,
-	qaws_plane const *plane,
 	qaws_scalar *out_parameters,
 	qaws_vec3 *out_positions,
-	unsigned int capacity,
-	unsigned int *out_count)
+	unsigned int *out_count,
+	qaws_curve const *curve,
+	qaws_plane const *plane,
+	unsigned int capacity)
 {
 	unsigned int i;
 	unsigned int count;
@@ -3338,7 +3338,7 @@ qaws_status qaws_curve_find_plane_intersections(
 	/* Evaluate first sample */
 	memset(&result, 0, sizeof(result));
 	status = qaws_curve_evaluate_3d(
-		curve, range_min, QAWS_EVAL_FLAG_POSITION, &result);
+		&result, curve, range_min, QAWS_EVAL_FLAG_POSITION);
 	if (status != QAWS_STATUS_OK)
 		return status;
 
@@ -3354,7 +3354,7 @@ qaws_status qaws_curve_find_plane_intersections(
 
 		memset(&result, 0, sizeof(result));
 		status = qaws_curve_evaluate_3d(
-			curve, t, QAWS_EVAL_FLAG_POSITION, &result);
+			&result, curve, t, QAWS_EVAL_FLAG_POSITION);
 		if (status != QAWS_STATUS_OK)
 			return status;
 
@@ -3392,7 +3392,7 @@ qaws_status qaws_curve_find_plane_intersections(
 				t_mid = QAWS_LITERAL(0.5) * (t_lo + t_hi);
 
 				status = qaws_curve_evaluate_3d(
-					curve, t_mid, QAWS_EVAL_FLAG_POSITION, &result);
+					&result, curve, t_mid, QAWS_EVAL_FLAG_POSITION);
 				if (status != QAWS_STATUS_OK)
 					return status;
 
@@ -3423,7 +3423,7 @@ qaws_status qaws_curve_find_plane_intersections(
 
 			/* Evaluate final position */
 			status = qaws_curve_evaluate_3d(
-				curve, t_mid, QAWS_EVAL_FLAG_POSITION, &result);
+				&result, curve, t_mid, QAWS_EVAL_FLAG_POSITION);
 			if (status != QAWS_STATUS_OK)
 				return status;
 
@@ -3447,11 +3447,11 @@ qaws_status qaws_curve_find_plane_intersections(
 /* ------------------------------------------------------------------ */
 
 qaws_status qaws_surface_find_curve_intersections(
+	qaws_surface_curve_intersection *out_intersections,
+	unsigned int *out_count,
 	qaws_surface const *surface,
 	qaws_curve const *curve,
-	qaws_surface_curve_intersection *out_intersections,
-	unsigned int capacity,
-	unsigned int *out_count)
+	unsigned int capacity)
 {
 	unsigned int i;
 	unsigned int gi, gj;
@@ -3514,7 +3514,7 @@ qaws_status qaws_surface_find_curve_intersections(
 			/ (qaws_scalar)(n_curve_samples - 1);
 
 		status = qaws_curve_evaluate_3d(
-			curve, t, QAWS_EVAL_FLAG_POSITION, &curve_result);
+			&curve_result, curve, t, QAWS_EVAL_FLAG_POSITION);
 		if (status != QAWS_STATUS_OK)
 			return status;
 
@@ -3534,8 +3534,8 @@ qaws_status qaws_surface_find_curve_intersections(
 					/ QAWS_LITERAL(7.0);
 
 				status = qaws_surface_evaluate(
-					surface, u, v, QAWS_SURFACE_EVAL_POSITION,
-					&surf_result);
+					&surf_result, surface, u, v,
+					QAWS_SURFACE_EVAL_POSITION);
 				if (status != QAWS_STATUS_OK)
 					return status;
 
@@ -3565,16 +3565,16 @@ qaws_status qaws_surface_find_curve_intersections(
 		for (iter = 0; iter < 20; ++iter)
 		{
 			status = qaws_surface_evaluate(
-				surface, u, v,
+				&surf_result, surface, u,
+				v,
 				QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_DU
-				| QAWS_SURFACE_EVAL_DV,
-				&surf_result);
+				| QAWS_SURFACE_EVAL_DV);
 			if (status != QAWS_STATUS_OK)
 				return status;
 
 			status = qaws_curve_evaluate_3d(
-				curve, t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1,
-				&curve_result);
+				&curve_result, curve, t,
+				QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1);
 			if (status != QAWS_STATUS_OK)
 				return status;
 
@@ -3639,12 +3639,12 @@ qaws_status qaws_surface_find_curve_intersections(
 
 		/* Check convergence */
 		status = qaws_surface_evaluate(
-			surface, u, v, QAWS_SURFACE_EVAL_POSITION, &surf_result);
+			&surf_result, surface, u, v, QAWS_SURFACE_EVAL_POSITION);
 		if (status != QAWS_STATUS_OK)
 			return status;
 
 		status = qaws_curve_evaluate_3d(
-			curve, t, QAWS_EVAL_FLAG_POSITION, &curve_result);
+			&curve_result, curve, t, QAWS_EVAL_FLAG_POSITION);
 		if (status != QAWS_STATUS_OK)
 			return status;
 
@@ -3740,8 +3740,8 @@ static unsigned int qaws_tess_eval_add(
 		return idx;
 
 	memset(&r, 0, sizeof(r));
-	*out_status = qaws_surface_evaluate(surface, u, v,
-		QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL, &r);
+	*out_status = qaws_surface_evaluate(&r, surface, u,
+		v, QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL);
 	if (*out_status != QAWS_STATUS_OK)
 		return 0;
 
@@ -3823,14 +3823,14 @@ static unsigned int qaws_tess_collect_v(
 }
 
 qaws_status qaws_surface_tessellate(
-	qaws_surface const *surface,
-	qaws_tessellation_desc const *desc,
 	qaws_tessellation_vertex *out_vertices,
-	unsigned int vertex_capacity,
 	unsigned int *out_vertex_count,
 	unsigned int *out_indices,
+	unsigned int *out_index_count,
+	qaws_surface const *surface,
+	unsigned int vertex_capacity,
 	unsigned int index_capacity,
-	unsigned int *out_index_count)
+	qaws_tessellation_desc const *desc)
 {
 	unsigned int max_depth;
 	qaws_scalar curv_thresh;
@@ -3911,41 +3911,41 @@ qaws_status qaws_surface_tessellate(
 		v_mid = QAWS_LITERAL(0.5) * (quad.v0 + quad.v1);
 
 		/* Evaluate 4 corners + center */
-		status = qaws_surface_evaluate(surface, quad.u0, quad.v0,
-			QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL,
-			&r00);
+		status = qaws_surface_evaluate(&r00, surface, quad.u0,
+			quad.v0,
+			QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL);
 		if (status != QAWS_STATUS_OK)
 		{
 			qaws_internal_free(stack); qaws_internal_free(leaves); return status;
 		}
 
-		status = qaws_surface_evaluate(surface, quad.u1, quad.v0,
-			QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL,
-			&r10);
+		status = qaws_surface_evaluate(&r10, surface, quad.u1,
+			quad.v0,
+			QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL);
 		if (status != QAWS_STATUS_OK)
 		{
 			qaws_internal_free(stack); qaws_internal_free(leaves); return status;
 		}
 
-		status = qaws_surface_evaluate(surface, quad.u0, quad.v1,
-			QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL,
-			&r01);
+		status = qaws_surface_evaluate(&r01, surface, quad.u0,
+			quad.v1,
+			QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL);
 		if (status != QAWS_STATUS_OK)
 		{
 			qaws_internal_free(stack); qaws_internal_free(leaves); return status;
 		}
 
-		status = qaws_surface_evaluate(surface, quad.u1, quad.v1,
-			QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL,
-			&r11);
+		status = qaws_surface_evaluate(&r11, surface, quad.u1,
+			quad.v1,
+			QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL);
 		if (status != QAWS_STATUS_OK)
 		{
 			qaws_internal_free(stack); qaws_internal_free(leaves); return status;
 		}
 
-		status = qaws_surface_evaluate(surface, u_mid, v_mid,
-			QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL,
-			&r_center);
+		status = qaws_surface_evaluate(&r_center, surface, u_mid,
+			v_mid,
+			QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL);
 		if (status != QAWS_STATUS_OK)
 		{
 			qaws_internal_free(stack); qaws_internal_free(leaves); return status;
@@ -4192,10 +4192,10 @@ qaws_status qaws_surface_tessellate(
 /* ========================================================================== */
 
 qaws_status qaws_surface_project_curve(
+	qaws_curve** out_uv_curve,
 	qaws_surface const* surface,
 	qaws_curve const* curve,
-	unsigned int sample_count,
-	qaws_curve** out_uv_curve)
+	unsigned int sample_count)
 {
 	unsigned int n_samples;
 	qaws_scalar* params = NULL;
@@ -4231,10 +4231,10 @@ qaws_status qaws_surface_project_curve(
 		qaws_vec3 closest;
 
 		memset(&er, 0, sizeof(er));
-		status = qaws_curve_evaluate_3d(curve, t, QAWS_EVAL_FLAG_POSITION, &er);
+		status = qaws_curve_evaluate_3d(&er, curve, t, QAWS_EVAL_FLAG_POSITION);
 		if (status != QAWS_STATUS_OK) { qaws_internal_free(params); qaws_internal_free(uv_coords); return status; }
 
-		status = qaws_surface_find_closest_point(surface, er.position, &u, &v, &closest);
+		status = qaws_surface_find_closest_point(&u, &v, &closest, surface, er.position);
 		if (status != QAWS_STATUS_OK) { qaws_internal_free(params); qaws_internal_free(uv_coords); return status; }
 
 		params[i] = t;
@@ -4286,7 +4286,7 @@ static void compute_christoffel(
 
 	memset(gamma, 0, sizeof(qaws_scalar) * 8);
 	memset(&r, 0, sizeof(r));
-	qaws_surface_evaluate(surface, u, v, eval_flags, &r);
+	qaws_surface_evaluate(&r, surface, u, v, eval_flags);
 
 	E = r.du.x * r.du.x + r.du.y * r.du.y + r.du.z * r.du.z;
 	F = r.du.x * r.dv.x + r.du.y * r.dv.y + r.du.z * r.dv.z;
@@ -4309,12 +4309,12 @@ static void compute_christoffel(
 		u_clamp = u + h;
 		if (u_clamp > QAWS_ONE) u_clamp = QAWS_ONE;
 		memset(&rp, 0, sizeof(rp));
-		qaws_surface_evaluate(surface, u_clamp, v, eval_flags, &rp);
+		qaws_surface_evaluate(&rp, surface, u_clamp, v, eval_flags);
 
 		u_clamp = u - h;
 		if (u_clamp < QAWS_ZERO) u_clamp = QAWS_ZERO;
 		memset(&rm, 0, sizeof(rm));
-		qaws_surface_evaluate(surface, u_clamp, v, eval_flags, &rm);
+		qaws_surface_evaluate(&rm, surface, u_clamp, v, eval_flags);
 
 		Ep = rp.du.x * rp.du.x + rp.du.y * rp.du.y + rp.du.z * rp.du.z;
 		Fp = rp.du.x * rp.dv.x + rp.du.y * rp.dv.y + rp.du.z * rp.dv.z;
@@ -4331,12 +4331,12 @@ static void compute_christoffel(
 		u_clamp = v + h;
 		if (u_clamp > QAWS_ONE) u_clamp = QAWS_ONE;
 		memset(&rp, 0, sizeof(rp));
-		qaws_surface_evaluate(surface, u, u_clamp, eval_flags, &rp);
+		qaws_surface_evaluate(&rp, surface, u, u_clamp, eval_flags);
 
 		u_clamp = v - h;
 		if (u_clamp < QAWS_ZERO) u_clamp = QAWS_ZERO;
 		memset(&rm, 0, sizeof(rm));
-		qaws_surface_evaluate(surface, u, u_clamp, eval_flags, &rm);
+		qaws_surface_evaluate(&rm, surface, u, u_clamp, eval_flags);
 
 		Ep = rp.du.x * rp.du.x + rp.du.y * rp.du.y + rp.du.z * rp.du.z;
 		Fp = rp.du.x * rp.dv.x + rp.du.y * rp.dv.y + rp.du.z * rp.dv.z;
@@ -4423,10 +4423,10 @@ static qaws_status create_path_bspline(
 		params[i] = (qaws_scalar)i / (qaws_scalar)(point_count - 1);
 
 	status = qaws_internal_fit_bspline(
-		QAWS_DIMENSION_3D, 3,
-		params, path_coords,
+		out_curve, params,
+		path_coords, QAWS_DIMENSION_3D,
 		point_count, n_cp,
-		out_curve);
+		3);
 	qaws_internal_free(params);
 
 	if (status != QAWS_STATUS_OK)
@@ -4516,14 +4516,14 @@ static void geodesic_rk4_step(
 }
 
 qaws_status qaws_surface_compute_geodesic(
+	qaws_curve** out_curve,
 	qaws_surface const* surface,
+	unsigned int step_count,
 	qaws_scalar start_u,
 	qaws_scalar start_v,
 	qaws_scalar end_u,
 	qaws_scalar end_v,
-	unsigned int max_iterations,
-	unsigned int step_count,
-	qaws_curve** out_curve)
+	unsigned int max_iterations)
 {
 	unsigned int max_iter;
 	unsigned int n_steps;
@@ -4676,9 +4676,9 @@ qaws_status qaws_surface_compute_geodesic(
 			qaws_scalar du2, dv2, d2;
 
 			memset(&sr, 0, sizeof(sr));
-			qaws_surface_evaluate(surface, qaws_clamp(u, QAWS_ZERO, QAWS_ONE),
-				qaws_clamp(v, QAWS_ZERO, QAWS_ONE),
-				QAWS_SURFACE_EVAL_POSITION, &sr);
+			qaws_surface_evaluate(&sr, surface,
+				qaws_clamp(u, QAWS_ZERO, QAWS_ONE),
+				qaws_clamp(v, QAWS_ZERO, QAWS_ONE), QAWS_SURFACE_EVAL_POSITION);
 			path_coords[actual_count * 3 + 0] = sr.position.x;
 			path_coords[actual_count * 3 + 1] = sr.position.y;
 			path_coords[actual_count * 3 + 2] = sr.position.z;
@@ -4701,8 +4701,8 @@ qaws_status qaws_surface_compute_geodesic(
 				{
 					qaws_surface_eval_result sr2;
 					memset(&sr2, 0, sizeof(sr2));
-					qaws_surface_evaluate(surface, u, v,
-						QAWS_SURFACE_EVAL_POSITION, &sr2);
+					qaws_surface_evaluate(&sr2, surface, u,
+						v, QAWS_SURFACE_EVAL_POSITION);
 					path_coords[actual_count * 3 + 0] = sr2.position.x;
 					path_coords[actual_count * 3 + 1] = sr2.position.y;
 					path_coords[actual_count * 3 + 2] = sr2.position.z;
@@ -4723,8 +4723,8 @@ qaws_status qaws_surface_compute_geodesic(
 		{
 			qaws_surface_eval_result end_sr;
 			memset(&end_sr, 0, sizeof(end_sr));
-			qaws_surface_evaluate(surface, end_u, end_v,
-				QAWS_SURFACE_EVAL_POSITION, &end_sr);
+			qaws_surface_evaluate(&end_sr, surface, end_u,
+				end_v, QAWS_SURFACE_EVAL_POSITION);
 			path_coords[actual_count * 3 + 0] = end_sr.position.x;
 			path_coords[actual_count * 3 + 1] = end_sr.position.y;
 			path_coords[actual_count * 3 + 2] = end_sr.position.z;
@@ -4809,8 +4809,8 @@ static qaws_status geodesic_tessellate_and_build(
 			unsigned int idx = i * (grid_n + 1) + j;
 
 			memset(&sr, 0, sizeof(sr));
-			status = qaws_surface_evaluate(surface, u, v,
-				QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL, &sr);
+			status = qaws_surface_evaluate(&sr, surface, u,
+				v, QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL);
 			if (status != QAWS_STATUS_OK)
 			{
 				qaws_internal_free(verts); qaws_internal_free(indices); qaws_internal_free(positions); qaws_internal_free(uvs);
@@ -4857,7 +4857,7 @@ static qaws_status geodesic_tessellate_and_build(
 
 	/* Build edge-adjacency mesh */
 	status = qaws_internal_mesh_build(out_mesh, positions, uvs,
-		vert_count, indices, idx_count);
+		indices, vert_count, idx_count);
 
 	if (status != QAWS_STATUS_OK)
 	{
@@ -4879,12 +4879,12 @@ static qaws_status geodesic_tessellate_and_build(
 /* ------------------------------------------------------------------ */
 
 qaws_status qaws_surface_compute_geodesic_flip(
-	qaws_surface const* surface,
+	qaws_curve** out_curve,
+	qaws_surface const* surface, qaws_tessellation_desc const* tessellation_desc,
 	qaws_scalar start_u, qaws_scalar start_v,
-	qaws_scalar end_u, qaws_scalar end_v,
-	qaws_tessellation_desc const* tessellation_desc,
-	unsigned int max_iterations,
-	qaws_curve** out_curve)
+	qaws_scalar end_u,
+	qaws_scalar end_v,
+	unsigned int max_iterations)
 {
 	qaws_tessellation_vertex* verts = NULL;
 	unsigned int* indices = NULL;
@@ -4933,7 +4933,7 @@ qaws_status qaws_surface_compute_geodesic_flip(
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 
-	status = qaws_internal_mesh_dijkstra(&mesh, src_v, dst_v, path, &path_count);
+	status = qaws_internal_mesh_dijkstra(path, &path_count, &mesh, src_v, dst_v);
 	if (status != QAWS_STATUS_OK || path_count < 2)
 	{
 		qaws_internal_free(path);
@@ -5252,8 +5252,8 @@ qaws_status qaws_surface_compute_geodesic_flip(
 							+ t_along * uv_pts[(pi + 1) * 2 + 1];
 
 						memset(&sr, 0, sizeof(sr));
-						qaws_surface_evaluate(surface, new_u, new_v,
-							QAWS_SURFACE_EVAL_POSITION, &sr);
+						qaws_surface_evaluate(&sr, surface, new_u,
+							new_v, QAWS_SURFACE_EVAL_POSITION);
 
 						/* Check if new position is closer to the line */
 						{
@@ -5296,14 +5296,14 @@ qaws_status qaws_surface_compute_geodesic_flip(
 		{
 			qaws_surface_eval_result sr;
 			memset(&sr, 0, sizeof(sr));
-			qaws_surface_evaluate(surface, start_u, start_v,
-				QAWS_SURFACE_EVAL_POSITION, &sr);
+			qaws_surface_evaluate(&sr, surface, start_u,
+				start_v, QAWS_SURFACE_EVAL_POSITION);
 			pts[0] = sr.position.x;
 			pts[1] = sr.position.y;
 			pts[2] = sr.position.z;
 			memset(&sr, 0, sizeof(sr));
-			qaws_surface_evaluate(surface, end_u, end_v,
-				QAWS_SURFACE_EVAL_POSITION, &sr);
+			qaws_surface_evaluate(&sr, surface, end_u,
+				end_v, QAWS_SURFACE_EVAL_POSITION);
 			pts[(out_count - 1) * 3 + 0] = sr.position.x;
 			pts[(out_count - 1) * 3 + 1] = sr.position.y;
 			pts[(out_count - 1) * 3 + 2] = sr.position.z;
@@ -5356,7 +5356,7 @@ static qaws_status heat_solve_distances(
 	mass_diag = (qaws_scalar*)qaws_internal_scratch_malloc(qaws_internal_mul2(vert_count, sizeof(qaws_scalar)));
 	if (!mass_diag) return QAWS_STATUS_ALLOCATION_FAILURE;
 
-	status = qaws_internal_build_laplacian(mesh, &L, mass_diag);
+	status = qaws_internal_build_laplacian(&L, mass_diag, mesh);
 	if (status != QAWS_STATUS_OK) { qaws_internal_free(mass_diag); return status; }
 
 	/* Compute mean edge length */
@@ -5412,7 +5412,7 @@ static qaws_status heat_solve_distances(
 
 	rhs[src_v] = QAWS_ONE;
 
-	status = qaws_internal_cg_solve(&A_minus_tL, rhs, heat, 0, QAWS_ZERO);
+	status = qaws_internal_cg_solve(heat, &A_minus_tL, rhs, 0, QAWS_ZERO);
 	if (status != QAWS_STATUS_OK) goto cleanup;
 
 	/* Step II: Per-triangle gradient X = -grad(u) / |grad(u)| */
@@ -5550,7 +5550,7 @@ static qaws_status heat_solve_distances(
 			div_X[vi] = -div_X[vi];
 
 		memset(heat, 0, vert_count * sizeof(qaws_scalar));
-		status = qaws_internal_cg_solve(&L_reg, div_X, heat, 0, QAWS_ZERO);
+		status = qaws_internal_cg_solve(heat, &L_reg, div_X, 0, QAWS_ZERO);
 		if (status != QAWS_STATUS_OK) goto cleanup;
 
 		min_phi = heat[0];
@@ -5583,14 +5583,14 @@ cleanup:
 /* ------------------------------------------------------------------ */
 
 qaws_status qaws_surface_compute_geodesic_distance(
-	qaws_surface const* surface,
-	qaws_scalar source_u, qaws_scalar source_v,
-	qaws_tessellation_desc const* tessellation_desc,
 	qaws_scalar* out_u,
-	qaws_scalar* out_v,
-	qaws_scalar* out_distances,
+	qaws_scalar* out_v, qaws_scalar* out_distances,
+	unsigned int* out_count,
+	qaws_surface const* surface,
 	unsigned int capacity,
-	unsigned int* out_count)
+	qaws_tessellation_desc const* tessellation_desc,
+	qaws_scalar source_u,
+	qaws_scalar source_v)
 {
 	qaws_tessellation_vertex* verts = NULL;
 	unsigned int* indices = NULL;
@@ -5652,11 +5652,11 @@ cleanup:
 /* ------------------------------------------------------------------ */
 
 qaws_status qaws_surface_compute_geodesic_heat(
-	qaws_surface const* surface,
+	qaws_curve** out_curve,
+	qaws_surface const* surface, qaws_tessellation_desc const* tessellation_desc,
 	qaws_scalar start_u, qaws_scalar start_v,
-	qaws_scalar end_u, qaws_scalar end_v,
-	qaws_tessellation_desc const* tessellation_desc,
-	qaws_curve** out_curve)
+	qaws_scalar end_u,
+	qaws_scalar end_v)
 {
 	qaws_tessellation_vertex* verts = NULL;
 	unsigned int* indices = NULL;
@@ -6000,13 +6000,13 @@ qaws_status qaws_surface_compute_geodesic_heat(
 		{
 			qaws_surface_eval_result sr;
 			memset(&sr, 0, sizeof(sr));
-			qaws_surface_evaluate(surface, start_u, start_v, QAWS_SURFACE_EVAL_POSITION, &sr);
+			qaws_surface_evaluate(&sr, surface, start_u, start_v, QAWS_SURFACE_EVAL_POSITION);
 			path_coords[0] = sr.position.x; path_coords[1] = sr.position.y; path_coords[2] = sr.position.z;
 		}
 		{
 			qaws_surface_eval_result sr;
 			memset(&sr, 0, sizeof(sr));
-			qaws_surface_evaluate(surface, end_u, end_v, QAWS_SURFACE_EVAL_POSITION, &sr);
+			qaws_surface_evaluate(&sr, surface, end_u, end_v, QAWS_SURFACE_EVAL_POSITION);
 			path_coords[(trace_count-1)*3+0] = sr.position.x;
 			path_coords[(trace_count-1)*3+1] = sr.position.y;
 			path_coords[(trace_count-1)*3+2] = sr.position.z;

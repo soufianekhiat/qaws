@@ -22,8 +22,8 @@ static double rct_area(qaws_clip_result const* r)
 	{
 		qaws_path_2d p;
 		qaws_scalar a = 0;
-		qaws_clip_result_get_path(r, i, &p);
-		qaws_path_compute_area_2d(&p, &a);
+		qaws_clip_result_get_path(&p, r, i);
+		qaws_path_compute_area_2d(&a, &p);
 		s += a;
 	}
 	return s;
@@ -37,7 +37,7 @@ static double rct_area64(qaws_clip64_result const* r)
 	{
 		int64_t const* p;
 		unsigned int m;
-		qaws_clip64_result_get_path(r, i, &p, &m);
+		qaws_clip64_result_get_path(&p, &m, r, i);
 		s += 0.5 * qaws_path64_area2(p, m);
 	}
 	return s;
@@ -53,12 +53,12 @@ static void test_rect(void)
 	qaws_clip_result* r = NULL;
 	char msg[256];
 	unsigned int i;
-	qaws_curve_create_polyline_2d(sa, 4, 1, &a);
-	qaws_curve_create_polyline_2d(sb, 4, 1, &b);
-	qaws_curve_create_ellipse_2d(10, 5, 2, 2, 0, &circle);
+	qaws_curve_create_polyline_2d(&a, sa, 4, 1);
+	qaws_curve_create_polyline_2d(&b, sb, 4, 1);
+	qaws_curve_create_ellipse_2d(&circle, 10, 5, 2, 2, 0);
 	cs[0] = a; cs[1] = b; cs[2] = circle;
 	for (i = 0; i < 3; i++) { p[i].curves = &cs[i]; p[i].curve_count = 1; p[i].closed = 1; }
-	qaws_rect_clip_2d(rect, p, 3, &r);
+	qaws_rect_clip_2d(&r, rect, p, 3);
 	/* a: [0,5]x[0,5] = 25; b: [2,8]x[2,5] = 18; circle at the corner: a quarter, pi */
 	sprintf(msg, "rect clip: 3 paths on their own (%u), areas 25 + 18 + pi (%.12g)", r ? qaws_clip_result_get_path_count(r) : 0, r ? rct_area(r) : 0);
 	TEST_ASSERT(r && qaws_clip_result_get_path_count(r) == 3 && fabs(rct_area(r) - (43 + 3.14159265358979323846)) < 1e-6, msg);
@@ -69,11 +69,11 @@ static void test_rect(void)
 		qaws_curve const* zc;
 		qaws_path_2d zp;
 		unsigned int n;
-		qaws_curve_create_polyline_2d(z, 6, 0, &zz);
+		qaws_curve_create_polyline_2d(&zz, z, 6, 0);
 		zc = zz;
 		zp.curves = &zc; zp.curve_count = 1; zp.closed = 0;
 		r = NULL;
-		qaws_rect_clip_lines_2d(rect, &zp, 1, &r);
+		qaws_rect_clip_lines_2d(&r, rect, &zp, 1);
 		n = r ? qaws_clip_result_get_open_path_count(r) : 0;
 		sprintf(msg, "rect clip lines: a zig-zag leaves one piece inside (%u)", n);
 		TEST_ASSERT(n == 1, msg);
@@ -87,7 +87,7 @@ static void test_rect(void)
 		qaws_clip64_result* x = NULL;
 		q[0].points = pa; q[0].point_count = 4;
 		q[1].points = pb; q[1].point_count = 4;
-		qaws_rect_clip64(r64, q, 2, &x);
+		qaws_rect_clip64(&x, r64, q, 2);
 		sprintf(msg, "int64 rect clip: 2 paths, area 43 (%u, %g)", x ? qaws_clip64_result_get_path_count(x) : 0, x ? rct_area64(x) : 0);
 		TEST_ASSERT(x && qaws_clip64_result_get_path_count(x) == 2 && rct_area64(x) == 43, msg);
 		qaws_clip64_result_destroy(x);
@@ -100,13 +100,13 @@ static void test_minkowski(void)
 	qaws_scalar pat[8] = { -1, -1, 1, -1, 1, 1, -1, 1 }, sq[8] = { 0, 0, 10, 0, 10, 10, 0, 10 }, seg[4] = { 0, 0, 10, 0 };
 	qaws_clip_result* r = NULL;
 	char msg[256];
-	qaws_minkowski_sum_2d(pat, 4, sq, 4, 1, &r);
+	qaws_minkowski_sum_2d(&r, pat, sq, 4, 4, 1);
 	sprintf(msg, "Minkowski sum of a square along a square path: the band 144 - 64 (%.12g), 2 paths (%u)",
 		r ? rct_area(r) : 0, r ? qaws_clip_result_get_path_count(r) : 0);
 	TEST_ASSERT(r && fabs(rct_area(r) - 80) < 1e-9 && qaws_clip_result_get_path_count(r) == 2, msg);
 	qaws_clip_result_destroy(r);
 	r = NULL;
-	qaws_minkowski_sum_2d(pat, 4, seg, 2, 0, &r);
+	qaws_minkowski_sum_2d(&r, pat, seg, 4, 2, 0);
 	sprintf(msg, "Minkowski sum of a square along a segment: 12 x 2 (%.12g)", r ? rct_area(r) : 0);
 	TEST_ASSERT(r && fabs(rct_area(r) - 24) < 1e-9, msg);
 	qaws_clip_result_destroy(r);
@@ -114,8 +114,8 @@ static void test_minkowski(void)
 		/* a triangle pattern: sum and difference are point reflections of each other */
 		qaws_scalar tri[6] = { 0, 0, 2, 0, 0, 1 };
 		qaws_clip_result *s1 = NULL, *s2 = NULL;
-		qaws_minkowski_sum_2d(tri, 3, seg, 2, 0, &s1);
-		qaws_minkowski_diff_2d(tri, 3, seg, 2, 0, &s2);
+		qaws_minkowski_sum_2d(&s1, tri, seg, 3, 2, 0);
+		qaws_minkowski_diff_2d(&s2, tri, seg, 3, 2, 0);
 		sprintf(msg, "Minkowski sum and difference of a triangle along a segment: equal areas (%.12g, %.12g)",
 			s1 ? rct_area(s1) : 0, s2 ? rct_area(s2) : 0);
 		TEST_ASSERT(s1 && s2 && fabs(rct_area(s1) - rct_area(s2)) < 1e-9 && rct_area(s1) > 0, msg);
@@ -125,7 +125,7 @@ static void test_minkowski(void)
 	{
 		int64_t p64[8] = { -1, -1, 1, -1, 1, 1, -1, 1 }, s64[8] = { 0, 0, 10, 0, 10, 10, 0, 10 };
 		qaws_clip64_result* x = NULL;
-		qaws_minkowski_sum64(p64, 4, s64, 4, 1, &x);
+		qaws_minkowski_sum64(&x, p64, s64, 4, 4, 1);
 		sprintf(msg, "int64 Minkowski band: area 80 exactly (%g)", x ? rct_area64(x) : 0);
 		TEST_ASSERT(x && rct_area64(x) == 80, msg);
 		qaws_clip64_result_destroy(x);

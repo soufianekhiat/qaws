@@ -46,7 +46,7 @@ static void test_brep_box(void)
 	/* Add vertices */
 	for (i = 0; i < 8; i++)
 	{
-		status = qaws_brep_add_vertex(shell, positions[i], &vids[i]);
+		status = qaws_brep_add_vertex(&vids[i], shell, positions[i]);
 		TEST_ASSERT_STATUS(status);
 	}
 	TEST_ASSERT(qaws_brep_get_vertex_count(shell) == 8, "8 vertices");
@@ -56,20 +56,20 @@ static void test_brep_box(void)
 		qaws_brep_edge_desc edesc;
 		/* Bottom face edges */
 		edesc.curve_3d = NULL;
-		edesc.v_start = 0; edesc.v_end = 1; qaws_brep_add_edge(shell, &edesc, &eids[0]);
-		edesc.v_start = 1; edesc.v_end = 2; qaws_brep_add_edge(shell, &edesc, &eids[1]);
-		edesc.v_start = 2; edesc.v_end = 3; qaws_brep_add_edge(shell, &edesc, &eids[2]);
-		edesc.v_start = 3; edesc.v_end = 0; qaws_brep_add_edge(shell, &edesc, &eids[3]);
+		edesc.v_start = 0; edesc.v_end = 1; qaws_brep_add_edge(&eids[0], shell, &edesc);
+		edesc.v_start = 1; edesc.v_end = 2; qaws_brep_add_edge(&eids[1], shell, &edesc);
+		edesc.v_start = 2; edesc.v_end = 3; qaws_brep_add_edge(&eids[2], shell, &edesc);
+		edesc.v_start = 3; edesc.v_end = 0; qaws_brep_add_edge(&eids[3], shell, &edesc);
 		/* Top face edges */
-		edesc.v_start = 4; edesc.v_end = 5; qaws_brep_add_edge(shell, &edesc, &eids[4]);
-		edesc.v_start = 5; edesc.v_end = 6; qaws_brep_add_edge(shell, &edesc, &eids[5]);
-		edesc.v_start = 6; edesc.v_end = 7; qaws_brep_add_edge(shell, &edesc, &eids[6]);
-		edesc.v_start = 7; edesc.v_end = 4; qaws_brep_add_edge(shell, &edesc, &eids[7]);
+		edesc.v_start = 4; edesc.v_end = 5; qaws_brep_add_edge(&eids[4], shell, &edesc);
+		edesc.v_start = 5; edesc.v_end = 6; qaws_brep_add_edge(&eids[5], shell, &edesc);
+		edesc.v_start = 6; edesc.v_end = 7; qaws_brep_add_edge(&eids[6], shell, &edesc);
+		edesc.v_start = 7; edesc.v_end = 4; qaws_brep_add_edge(&eids[7], shell, &edesc);
 		/* Vertical edges */
-		edesc.v_start = 0; edesc.v_end = 4; qaws_brep_add_edge(shell, &edesc, &eids[8]);
-		edesc.v_start = 1; edesc.v_end = 5; qaws_brep_add_edge(shell, &edesc, &eids[9]);
-		edesc.v_start = 2; edesc.v_end = 6; qaws_brep_add_edge(shell, &edesc, &eids[10]);
-		edesc.v_start = 3; edesc.v_end = 7; qaws_brep_add_edge(shell, &edesc, &eids[11]);
+		edesc.v_start = 0; edesc.v_end = 4; qaws_brep_add_edge(&eids[8], shell, &edesc);
+		edesc.v_start = 1; edesc.v_end = 5; qaws_brep_add_edge(&eids[9], shell, &edesc);
+		edesc.v_start = 2; edesc.v_end = 6; qaws_brep_add_edge(&eids[10], shell, &edesc);
+		edesc.v_start = 3; edesc.v_end = 7; qaws_brep_add_edge(&eids[11], shell, &edesc);
 	}
 	TEST_ASSERT(qaws_brep_get_edge_count(shell) == 12, "12 edges");
 
@@ -79,32 +79,32 @@ static void test_brep_box(void)
 		/* Bottom: z=0 */
 		bdesc.p00 = positions[0]; bdesc.p10 = positions[1];
 		bdesc.p01 = positions[3]; bdesc.p11 = positions[2];
-		qaws_surface_create_bilinear(&bdesc, &faces[0]);
+		qaws_surface_create_bilinear(&faces[0], &bdesc);
 
 		/* Top: z=1 */
 		bdesc.p00 = positions[4]; bdesc.p10 = positions[5];
 		bdesc.p01 = positions[7]; bdesc.p11 = positions[6];
-		qaws_surface_create_bilinear(&bdesc, &faces[1]);
+		qaws_surface_create_bilinear(&faces[1], &bdesc);
 
 		/* Front: y=0 */
 		bdesc.p00 = positions[0]; bdesc.p10 = positions[1];
 		bdesc.p01 = positions[4]; bdesc.p11 = positions[5];
-		qaws_surface_create_bilinear(&bdesc, &faces[2]);
+		qaws_surface_create_bilinear(&faces[2], &bdesc);
 
 		/* Back: y=1 */
 		bdesc.p00 = positions[3]; bdesc.p10 = positions[2];
 		bdesc.p01 = positions[7]; bdesc.p11 = positions[6];
-		qaws_surface_create_bilinear(&bdesc, &faces[3]);
+		qaws_surface_create_bilinear(&faces[3], &bdesc);
 
 		/* Left: x=0 */
 		bdesc.p00 = positions[0]; bdesc.p10 = positions[3];
 		bdesc.p01 = positions[4]; bdesc.p11 = positions[7];
-		qaws_surface_create_bilinear(&bdesc, &faces[4]);
+		qaws_surface_create_bilinear(&faces[4], &bdesc);
 
 		/* Right: x=1 */
 		bdesc.p00 = positions[1]; bdesc.p10 = positions[2];
 		bdesc.p01 = positions[5]; bdesc.p11 = positions[6];
-		qaws_surface_create_bilinear(&bdesc, &faces[5]);
+		qaws_surface_create_bilinear(&faces[5], &bdesc);
 	}
 
 	/* Add faces with edge references */
@@ -117,42 +117,42 @@ static void test_brep_box(void)
 		fdesc.surface = faces[0]; fdesc.is_reversed = 1;
 		fedges[0] = eids[0]; fedges[1] = eids[1]; fedges[2] = eids[2]; fedges[3] = eids[3];
 		foris[0] = 1; foris[1] = 1; foris[2] = 1; foris[3] = 1;
-		qaws_brep_add_face(shell, &fdesc, fedges, foris, 4, &fids[0]);
+		qaws_brep_add_face(&fids[0], shell, fedges, foris, 4, &fdesc);
 
 		/* Top face (z=max): du×dv points +z (outward), OK */
 		fdesc.surface = faces[1]; fdesc.is_reversed = 0;
 		fedges[0] = eids[4]; fedges[1] = eids[5]; fedges[2] = eids[6]; fedges[3] = eids[7];
 		foris[0] = 1; foris[1] = 1; foris[2] = 1; foris[3] = 1;
-		qaws_brep_add_face(shell, &fdesc, fedges, foris, 4, &fids[1]);
+		qaws_brep_add_face(&fids[1], shell, fedges, foris, 4, &fdesc);
 
 		/* Front face (y=min): du×dv points -y (outward), OK */
 		fdesc.surface = faces[2]; fdesc.is_reversed = 0;
 		fedges[0] = eids[0]; fedges[1] = eids[9]; fedges[2] = eids[4]; fedges[3] = eids[8];
 		foris[0] = -1; foris[1] = 1; foris[2] = -1; foris[3] = -1;
-		qaws_brep_add_face(shell, &fdesc, fedges, foris, 4, &fids[2]);
+		qaws_brep_add_face(&fids[2], shell, fedges, foris, 4, &fdesc);
 
 		/* Back face (y=max): du×dv points -y (inward), need flip */
 		fdesc.surface = faces[3]; fdesc.is_reversed = 1;
 		fedges[0] = eids[2]; fedges[1] = eids[11]; fedges[2] = eids[6]; fedges[3] = eids[10];
 		foris[0] = -1; foris[1] = 1; foris[2] = -1; foris[3] = -1;
-		qaws_brep_add_face(shell, &fdesc, fedges, foris, 4, &fids[3]);
+		qaws_brep_add_face(&fids[3], shell, fedges, foris, 4, &fdesc);
 
 		/* Left face (x=min): du×dv points +x (inward), need flip */
 		fdesc.surface = faces[4]; fdesc.is_reversed = 1;
 		fedges[0] = eids[3]; fedges[1] = eids[8]; fedges[2] = eids[7]; fedges[3] = eids[11];
 		foris[0] = -1; foris[1] = 1; foris[2] = -1; foris[3] = -1;
-		qaws_brep_add_face(shell, &fdesc, fedges, foris, 4, &fids[4]);
+		qaws_brep_add_face(&fids[4], shell, fedges, foris, 4, &fdesc);
 
 		/* Right face (x=max): du×dv points +x (outward), OK */
 		fdesc.surface = faces[5]; fdesc.is_reversed = 0;
 		fedges[0] = eids[1]; fedges[1] = eids[10]; fedges[2] = eids[5]; fedges[3] = eids[9];
 		foris[0] = -1; foris[1] = 1; foris[2] = -1; foris[3] = -1;
-		qaws_brep_add_face(shell, &fdesc, fedges, foris, 4, &fids[5]);
+		qaws_brep_add_face(&fids[5], shell, fedges, foris, 4, &fdesc);
 	}
 	TEST_ASSERT(qaws_brep_get_face_count(shell) == 6, "6 faces");
 
 	/* Euler characteristic: V - E + F = 8 - 12 + 6 = 2 (sphere topology) */
-	status = qaws_brep_euler_characteristic(shell, &chi);
+	status = qaws_brep_euler_characteristic(&chi, shell);
 	TEST_ASSERT_STATUS(status);
 	printf("    Euler characteristic: %d (expected 2)\n", chi);
 	TEST_ASSERT(chi == 2, "Euler V-E+F = 2");
@@ -160,7 +160,7 @@ static void test_brep_box(void)
 	/* Volume should be 1.0 for a unit cube */
 	{
 		qaws_scalar volume = 0;
-		status = qaws_brep_compute_volume(shell, &volume);
+		status = qaws_brep_compute_volume(&volume, shell);
 		TEST_ASSERT_STATUS(status);
 		printf("    Volume: %.4f (expected 1.0)\n", (double)volume);
 		{
@@ -173,7 +173,7 @@ static void test_brep_box(void)
 	/* Surface area should be 6.0 for a unit cube */
 	{
 		qaws_scalar area = 0;
-		status = qaws_brep_compute_surface_area(shell, &area);
+		status = qaws_brep_compute_surface_area(&area, shell);
 		TEST_ASSERT_STATUS(status);
 		printf("    Surface area: %.4f (expected 6.0)\n", (double)area);
 		{
@@ -184,7 +184,7 @@ static void test_brep_box(void)
 	}
 
 	/* Validation */
-	status = qaws_brep_validate(shell, &val_flags);
+	status = qaws_brep_validate(&val_flags, shell);
 	TEST_ASSERT_STATUS(status);
 	printf("    Validation flags: 0x%x\n", val_flags);
 
@@ -193,11 +193,11 @@ static void test_brep_box(void)
 		qaws_brep_vertex_id vs, ve;
 		qaws_brep_face_id fl, fr;
 
-		status = qaws_brep_get_edge_vertices(shell, eids[0], &vs, &ve);
+		status = qaws_brep_get_edge_vertices(&vs, &ve, shell, eids[0]);
 		TEST_ASSERT_STATUS(status);
 		printf("    Edge 0: v%u -> v%u\n", vs, ve);
 
-		status = qaws_brep_get_edge_faces(shell, eids[0], &fl, &fr);
+		status = qaws_brep_get_edge_faces(&fl, &fr, shell, eids[0]);
 		TEST_ASSERT_STATUS(status);
 		printf("    Edge 0 faces: f%u, f%u\n", fl, fr);
 	}
@@ -225,22 +225,22 @@ static void test_brep_adjacency(void)
 
 	/* Add 3 vertices forming a triangle */
 	pos.x = 0; pos.y = 0; pos.z = 0;
-	qaws_brep_add_vertex(shell, pos, &vid);
+	qaws_brep_add_vertex(&vid, shell, pos);
 	pos.x = 1;
-	qaws_brep_add_vertex(shell, pos, &vid);
+	qaws_brep_add_vertex(&vid, shell, pos);
 	pos.x = 0; pos.y = 1;
-	qaws_brep_add_vertex(shell, pos, &vid);
+	qaws_brep_add_vertex(&vid, shell, pos);
 
 	/* Add 3 edges */
 	{
 		qaws_brep_edge_desc edesc;
 		edesc.curve_3d = NULL;
 		edesc.v_start = 0; edesc.v_end = 1;
-		qaws_brep_add_edge(shell, &edesc, &eid);
+		qaws_brep_add_edge(&eid, shell, &edesc);
 		edesc.v_start = 1; edesc.v_end = 2;
-		qaws_brep_add_edge(shell, &edesc, &eid);
+		qaws_brep_add_edge(&eid, shell, &edesc);
 		edesc.v_start = 2; edesc.v_end = 0;
-		qaws_brep_add_edge(shell, &edesc, &eid);
+		qaws_brep_add_edge(&eid, shell, &edesc);
 	}
 
 	/* Add 1 face */
@@ -250,14 +250,14 @@ static void test_brep_adjacency(void)
 		int foris[3] = {1, 1, 1};
 		fdesc.surface = NULL;
 		fdesc.is_reversed = 0;
-		qaws_brep_add_face(shell, &fdesc, fedges, foris, 3, &fid);
+		qaws_brep_add_face(&fid, shell, fedges, foris, 3, &fdesc);
 	}
 
 	/* Query vertex edges */
 	{
 		qaws_brep_edge_id vedges[8];
 		unsigned int count = 0;
-		status = qaws_brep_get_vertex_edges(shell, 0, vedges, 8, &count);
+		status = qaws_brep_get_vertex_edges(vedges, &count, shell, 8, 0);
 		TEST_ASSERT_STATUS(status);
 		printf("    Vertex 0 has %u edges\n", count);
 		TEST_ASSERT(count == 2, "vertex 0 has 2 edges");
@@ -267,7 +267,7 @@ static void test_brep_adjacency(void)
 	{
 		qaws_brep_edge_id fedges[8];
 		unsigned int count = 0;
-		status = qaws_brep_get_face_edges(shell, 0, fedges, 8, &count);
+		status = qaws_brep_get_face_edges(fedges, &count, shell, 8, 0);
 		TEST_ASSERT_STATUS(status);
 		printf("    Face 0 has %u edges\n", count);
 		TEST_ASSERT(count == 3, "face 0 has 3 edges");
@@ -276,7 +276,7 @@ static void test_brep_adjacency(void)
 	/* Query vertex position */
 	{
 		qaws_vec3 vpos;
-		status = qaws_brep_get_vertex_position(shell, 1, &vpos);
+		status = qaws_brep_get_vertex_position(&vpos, shell, 1);
 		TEST_ASSERT_STATUS(status);
 		TEST_ASSERT(approx_eq(vpos.x, (qaws_scalar)1.0), "vertex 1 x=1");
 	}

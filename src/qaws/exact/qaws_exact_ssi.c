@@ -32,12 +32,12 @@ typedef struct ssi_pt
 
 static void* ss_alloc(size_t b)
 {
-	return qaws_internal_alloc(NULL, b);
+	return qaws_internal_alloc(b, NULL);
 }
 
 static void ss_free(void* p)
 {
-	qaws_internal_dealloc(NULL, p);
+	qaws_internal_dealloc(p, NULL);
 }
 
 /*
@@ -837,9 +837,9 @@ qaws_status qaws_exact_ssi_solve(qaws_exact_surface const* a, qaws_exact_surface
 	return st;
 }
 
-qaws_status qaws_exact_surface_surface_hits(qaws_exact_surface const* a, qaws_exact_surface const* b, unsigned int min_depth, qaws_exact_ssi_point* out_points,
-	unsigned int point_capacity, unsigned int* out_point_count, qaws_exact_ssi_branch* out_branches, unsigned int branch_capacity,
-	unsigned int* out_branch_count)
+qaws_status qaws_exact_surface_surface_hits(qaws_exact_ssi_point* out_points, unsigned int* out_point_count, qaws_exact_ssi_branch* out_branches, unsigned int* out_branch_count,
+	qaws_exact_surface const* a, qaws_exact_surface const* b, unsigned int point_capacity, unsigned int branch_capacity,
+	unsigned int min_depth)
 {
 	unsigned int na, nb, i, j, k, n = 0;
 	unsigned int* pairs;

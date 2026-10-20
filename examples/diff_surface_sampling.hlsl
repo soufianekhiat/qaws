@@ -98,9 +98,9 @@ void CSSample(uint3 id : SV_DispatchThreadID)
         pt[c] = c <= (int)cells ? prefix[c * 3 + 1] : 0.0;
         ptt[c] = c <= (int)cells ? prefix[c * 3 + 2] : 0.0;
     }
-    qaws_patch_cdf_solve(PATCH_ARGS(p), (int)cells, pv, points[n * 4 + 0], points[n * 4 + 1], uv);
-    qaws_patch_cdf_tangent(PATCH_ARGS(p), (int)cells, pv, pt, ptt, points[n * 4 + 0], points[n * 4 + 1], points[n * 4 + 2],
-        points[n * 4 + 3], uv[0], uv[1], tg, tp);
+    qaws_patch_cdf_solve(uv, pv, PATCH_ARGS(p), (int)cells, points[n * 4 + 0], points[n * 4 + 1]);
+    qaws_patch_cdf_tangent(tg, tp, pv, pt, ptt, PATCH_ARGS(p), (int)cells, points[n * 4 + 0],
+        points[n * 4 + 1], points[n * 4 + 2], points[n * 4 + 3], uv[0], uv[1]);
     samples[n * 14 + 0] = uv[0];
     samples[n * 14 + 1] = uv[1];
     for (c = 0; c < 4; c++)
@@ -122,9 +122,9 @@ void CSMultipliers(uint3 id : SV_DispatchThreadID)
     p = load_patch();
     for (c = 0; c <= QAWS_CORE_MAX_CELLS; c++)
         pv[c] = c <= (int)cells ? prefix[c * 3 + 0] : 0.0;
-    qaws_patch_cdf_multipliers(PATCH_ARGS(p), (int)cells, pv, points[n * 4 + 0], points[n * 4 + 1], samples[n * 14 + 0],
-        samples[n * 14 + 1], sample_adjoints[n * 5 + 0], sample_adjoints[n * 5 + 1],
-        qaws_v3(sample_adjoints[n * 5 + 2], sample_adjoints[n * 5 + 3], sample_adjoints[n * 5 + 4]), out_m);
+    qaws_patch_cdf_multipliers(out_m, pv, PATCH_ARGS(p), (int)cells, points[n * 4 + 0], points[n * 4 + 1],
+        samples[n * 14 + 0], samples[n * 14 + 1], sample_adjoints[n * 5 + 0],
+        sample_adjoints[n * 5 + 1], qaws_v3(sample_adjoints[n * 5 + 2], sample_adjoints[n * 5 + 3], sample_adjoints[n * 5 + 4]));
     for (c = 0; c < 4; c++)
         multipliers[n * 4 + c] = out_m[c];
 }

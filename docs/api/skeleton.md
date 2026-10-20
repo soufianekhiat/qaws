@@ -19,15 +19,15 @@ qaws_skeleton_desc d = { paths, path_count, QAWS_FILL_NON_ZERO };
 d.weight_fn = speed; d.weight_user = user;   /* optional: weighted (lines) */
 d.splice_angle = 3.14159265358979;           /* optional: the medial axis */
 qaws_skeleton* s;
-qaws_skeleton_create(&d, &s);
+qaws_skeleton_create(&s, &d);
 
-qaws_skeleton_get_node(s, i, &node);         /* position and time */
-qaws_skeleton_get_arc(s, i, &arc);           /* node_a -> node_b, faces, smooth, boundary */
-qaws_skeleton_evaluate_arc(s, i, u, &p, &t); /* exact point and time along it */
-qaws_skeleton_get_arc_curve(s, i, &curve);   /* a line, a circular arc, or the exact conic (NURBS) */
-qaws_skeleton_get_face(s, i, &face);         /* the edge, then the skeleton back; its support */
+qaws_skeleton_get_node(&node, s, i);         /* position and time */
+qaws_skeleton_get_arc(&arc, s, i);           /* node_a -> node_b, faces, smooth, boundary */
+qaws_skeleton_evaluate_arc(&p, &t, s, i, u); /* exact point and time along it */
+qaws_skeleton_get_arc_curve(&curve, s, i);   /* a line, a circular arc, or the exact conic (NURBS) */
+qaws_skeleton_get_face(&face, s, i);         /* the edge, then the skeleton back; its support */
 qaws_skeleton_get_max_time(s);               /* the roof's top */
-qaws_skeleton_offset(s, t, &result);         /* the wavefront at time t: lines and arcs */
+qaws_skeleton_offset(&result, s, t);         /* the wavefront at time t: lines and arcs */
 qaws_skeleton_destroy(s);
 ```
 

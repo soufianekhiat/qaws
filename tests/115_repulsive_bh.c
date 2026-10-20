@@ -32,7 +32,7 @@ static qaws_status rb_direct(rb_case const* k, qaws_scalar const* x, double* E, 
 	qaws_scalar e = 0;
 	qaws_status st;
 	memset(g, 0, sizeof(qaws_scalar) * k->n);
-	st = k->c ? qaws_repulsive_curves_gradient(k->c, x, 1, g, &e) : qaws_repulsive_mesh_gradient(k->m, x, 1, g, &e);
+	st = k->c ? qaws_repulsive_curves_gradient(g, &e, k->c, x, 1) : qaws_repulsive_mesh_gradient(g, &e, k->m, x, 1);
 	*E = (double)e;
 	return st;
 }
@@ -42,7 +42,7 @@ static qaws_status rb_bh(rb_case const* k, qaws_scalar const* x, double theta, d
 	qaws_scalar e = 0;
 	qaws_status st;
 	if (g) memset(g, 0, sizeof(qaws_scalar) * k->n);
-	st = k->c ? qaws_repulsive_curves_bh(k->c, x, (qaws_scalar)theta, 1, g, &e, stats) : qaws_repulsive_mesh_bh(k->m, x, (qaws_scalar)theta, 1, g, &e, stats);
+	st = k->c ? qaws_repulsive_curves_bh(g, &e, stats, k->c, x, (qaws_scalar)theta, 1) : qaws_repulsive_mesh_bh(g, &e, stats, k->m, x, (qaws_scalar)theta, 1);
 	*E = (double)e;
 	return st;
 }
@@ -107,7 +107,7 @@ static void test_curves(void)
 	rb_trefoil(x, e, N);
 	memset(&d, 0, sizeof(d));
 	d.dimension = 3; d.vertex_count = N; d.edges = e; d.edge_count = N;
-	qaws_repulsive_curves_create(&d, &k.c);
+	qaws_repulsive_curves_create(&k.c, &d);
 	k.n = 3 * N;
 	rb_check(&k, x, "trefoil (300 edges)");
 	qaws_repulsive_curves_destroy(k.c);
@@ -170,7 +170,7 @@ static void test_meshes(void)
 	rb_sphere(3, x, tris, &nv, &nf);
 	memset(&d, 0, sizeof(d));
 	d.vertex_count = nv; d.triangles = tris; d.triangle_count = nf;
-	qaws_repulsive_mesh_create(&d, &k.m);
+	qaws_repulsive_mesh_create(&k.m, &d);
 	k.n = 3 * nv;
 	rb_check(&k, x, "lumpy sphere (512 faces)");
 	qaws_repulsive_mesh_destroy(k.m);
@@ -193,7 +193,7 @@ static void test_timing(void)
 	rb_sphere(4, x, tris, &nv, &nf);
 	memset(&d, 0, sizeof(d));
 	d.vertex_count = nv; d.triangles = tris; d.triangle_count = nf;
-	qaws_repulsive_mesh_create(&d, &k.m);
+	qaws_repulsive_mesh_create(&k.m, &d);
 	k.n = 3 * nv;
 	c0 = clock(); rb_direct(&k, x, &E0, g); td = (double)(clock() - c0) / CLOCKS_PER_SEC;
 	c0 = clock(); rb_bh(&k, x, 0.25, &E1, g, NULL); tb = (double)(clock() - c0) / CLOCKS_PER_SEC;
@@ -224,13 +224,13 @@ static void test_executor(void)
 	rb_trefoil(x, e, N);
 	memset(&d, 0, sizeof(d));
 	d.dimension = 3; d.vertex_count = N; d.edges = e; d.edge_count = N;
-	qaws_repulsive_curves_create(&d, &c0);
+	qaws_repulsive_curves_create(&c0, &d);
 	ex.parallel_for = rb_backwards; ex.user = NULL;
 	d.executor = &ex;
-	qaws_repulsive_curves_create(&d, &c1);
+	qaws_repulsive_curves_create(&c1, &d);
 	memset(g0, 0, sizeof(g0)); memset(g1, 0, sizeof(g1));
-	qaws_repulsive_curves_bh(c0, x, (qaws_scalar)0.25, 1, g0, &E0, NULL);
-	qaws_repulsive_curves_bh(c1, x, (qaws_scalar)0.25, 1, g1, &E1, NULL);
+	qaws_repulsive_curves_bh(g0, &E0, NULL, c0, x, (qaws_scalar)0.25, 1);
+	qaws_repulsive_curves_bh(g1, &E1, NULL, c1, x, (qaws_scalar)0.25, 1);
 	for (i = 0; i < 3 * N; i++) same &= g0[i] == g1[i];
 	sprintf(msg, "an executor running the chunks backwards: energy and gradient identical %d (E %.17g, %.17g)", same && E0 == E1, (double)E0, (double)E1);
 	TEST_ASSERT(same && E0 == E1, msg);

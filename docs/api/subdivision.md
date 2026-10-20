@@ -50,8 +50,8 @@ typedef struct qaws_subdivision_desc {
 
 ```c
 qaws_status qaws_curve_create_subdivision(
-    qaws_subdivision_desc const* desc,
-    qaws_curve** out_curve);
+    qaws_curve** out_curve,
+    qaws_subdivision_desc const* desc);
 ```
 
 Creates a subdivision curve by iteratively refining a control polygon.

@@ -264,7 +264,7 @@ static qaws_status curve_job_knots(curve_job* job, qaws_diff_views const* views)
 	kv = qaws_diff_views_find(views, QAWS_FIELD_KNOTS);
 	if (!kv || !kv->data)
 		return QAWS_STATUS_OK;
-	if (qaws_curve_describe_fields(job->curve, fields, 8, &n) != QAWS_STATUS_OK)
+	if (qaws_curve_describe_fields(fields, &n, job->curve, 8) != QAWS_STATUS_OK)
 		return QAWS_STATUS_OK;
 	for (i = 0; i < n && i < 8; i++)
 	{
@@ -278,12 +278,12 @@ static qaws_status curve_job_knots(curve_job* job, qaws_diff_views const* views)
 	}
 	if (!ok)
 		return QAWS_STATUS_OK;
-	job->knots = (qaws_scalar*)qaws_internal_alloc(NULL, qaws_internal_mul2(sizeof(qaws_scalar), (job->knot_count + 1)));
+	job->knots = (qaws_scalar*)qaws_internal_alloc(qaws_internal_mul2(sizeof(qaws_scalar), (job->knot_count + 1)), NULL);
 	if (!job->knots)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
-	if (qaws_curve_read_field(job->curve, QAWS_FIELD_KNOTS, job->knots, job->knot_count, &got) != QAWS_STATUS_OK)
+	if (qaws_curve_read_field(job->knots, &got, job->curve, job->knot_count, QAWS_FIELD_KNOTS) != QAWS_STATUS_OK)
 	{
-		qaws_internal_dealloc(NULL, job->knots);
+		qaws_internal_dealloc(job->knots, NULL);
 		job->knots = NULL;
 		return QAWS_STATUS_OK;
 	}
@@ -299,8 +299,8 @@ static void curve_node_rates(curve_job const* job, double* t_dot, double* w_dot)
 	*w_dot = 0;
 	if (!job->knots || !job->knot_in)
 		return;
-	qaws_internal_view_read(job->knot_in, job->left_knot, 1, &da);
-	qaws_internal_view_read(job->knot_in, job->left_knot + 1, 1, &db);
+	qaws_internal_view_read(&da, job->knot_in, job->left_knot, 1);
+	qaws_internal_view_read(&db, job->knot_in, job->left_knot + 1, 1);
 	*t_dot = (1 - job->s) * da + job->s * db;
 	*w_dot = job->c * ((double)db - da);
 }
@@ -321,8 +321,8 @@ static qaws_status curve_eval_point(curve_job* job, qaws_scalar t, qaws_scalar w
 	double t_dot, w_dot;
 	qaws_status st;
 	curve_node_rates(job, &t_dot, &w_dot);
-	st = qaws_internal_curve_tangent_any(job->ctx, job->curve, t, (qaws_scalar)t_dot, CURVE_CHANNELS,
-		job->direction, &p, &tg, job->direction ? &tt : NULL);
+	st = qaws_internal_curve_tangent_any(&p, &tg, job->direction ? &tt : NULL, job->curve, job->direction,
+		t, (qaws_scalar)t_dot, CURVE_CHANNELS, job->ctx);
 	if (st != QAWS_STATUS_OK)
 		return st;
 	for (k = 0; k < 3; k++)
@@ -342,7 +342,7 @@ static qaws_status curve_gradient_point(curve_job* job, qaws_scalar t, qaws_scal
 	qaws_vec3 y[3], g[3];
 	qaws_scalar fv, t_adj = QAWS_ZERO;
 	unsigned int k;
-	qaws_status st = qaws_internal_curve_tangent_any(job->ctx, job->curve, t, QAWS_ZERO, CURVE_CHANNELS, NULL, &p, &tg, NULL);
+	qaws_status st = qaws_internal_curve_tangent_any(&p, &tg, NULL, job->curve, NULL, t, QAWS_ZERO, CURVE_CHANNELS, job->ctx);
 	if (st != QAWS_STATUS_OK)
 		return st;
 	curve_jet_values(&p, y);
@@ -358,8 +358,8 @@ static qaws_status curve_gradient_point(curve_job* job, qaws_scalar t, qaws_scal
 	for (k = 0; k < 3; k++)
 		bar.d[k] = qaws_v3_scale(g[k], weight);
 	bar.channels = CURVE_CHANNELS;
-	st = qaws_internal_curve_adjoint_any(job->ctx, job->curve, t, CURVE_CHANNELS, &bar, job->sink,
-		job->knot_out ? &t_adj : NULL);
+	st = qaws_internal_curve_adjoint_any(job->sink, job->knot_out ? &t_adj : NULL, job->curve, &bar, t, CURVE_CHANNELS,
+		job->ctx);
 	if (st != QAWS_STATUS_OK || !job->knot_out)
 		return st;
 	{
@@ -377,8 +377,8 @@ static qaws_status curve_hvp_point(curve_job* job, qaws_scalar t, qaws_scalar we
 	qaws_curve_jet_3d p, tg, bar;
 	qaws_vec3 y[3], yd[3], hv[3];
 	unsigned int k;
-	qaws_status st = qaws_internal_curve_tangent_any(job->ctx, job->curve, t, QAWS_ZERO, CURVE_CHANNELS,
-		job->direction, &p, &tg, NULL);
+	qaws_status st = qaws_internal_curve_tangent_any(&p, &tg, NULL, job->curve, job->direction,
+		t, QAWS_ZERO, CURVE_CHANNELS, job->ctx);
 	if (st != QAWS_STATUS_OK)
 		return st;
 	curve_jet_values(&p, y);
@@ -388,7 +388,7 @@ static qaws_status curve_hvp_point(curve_job* job, qaws_scalar t, qaws_scalar we
 	for (k = 0; k < 3; k++)
 		bar.d[k] = qaws_v3_scale(hv[k], weight);
 	bar.channels = CURVE_CHANNELS;
-	return qaws_internal_curve_adjoint_any(job->ctx, job->curve, t, CURVE_CHANNELS, &bar, job->sink, NULL);
+	return qaws_internal_curve_adjoint_any(job->sink, NULL, job->curve, &bar, t, CURVE_CHANNELS, job->ctx);
 }
 
 static qaws_status curve_job_init(curve_job* job, qaws_diff_context const* ctx, qaws_curve const* curve,
@@ -404,9 +404,9 @@ static qaws_status curve_job_init(curve_job* job, qaws_diff_context const* ctx, 
 }
 
 qaws_status qaws_curve_functional_eval(
-	qaws_diff_context const* ctx, qaws_curve const* curve, qaws_curve_functional functional,
-	unsigned int quadrature, qaws_diff_views const* direction,
-	qaws_scalar* out_value, qaws_scalar* out_tangent, qaws_scalar* out_tangent2)
+	qaws_scalar* out_value, qaws_scalar* out_tangent, qaws_scalar* out_tangent2,
+	qaws_curve const* curve, qaws_diff_views const* direction,
+	qaws_curve_functional functional, unsigned int quadrature, qaws_diff_context const* ctx)
 {
 	curve_job job;
 	qaws_status st = curve_job_init(&job, ctx, curve, functional);
@@ -416,7 +416,7 @@ qaws_status qaws_curve_functional_eval(
 	st = curve_job_knots(&job, direction);
 	if (st == QAWS_STATUS_OK)
 		st = curve_quadrature(&job, clamp_rule(quadrature, 6), curve_eval_point);
-	qaws_internal_dealloc(NULL, job.knots);
+	qaws_internal_dealloc(job.knots, NULL);
 	if (st != QAWS_STATUS_OK)
 		return st;
 	if (out_value) *out_value = (qaws_scalar)job.value;
@@ -426,8 +426,8 @@ qaws_status qaws_curve_functional_eval(
 }
 
 qaws_status qaws_curve_functional_gradient(
-	qaws_diff_context const* ctx, qaws_curve const* curve, qaws_curve_functional functional,
-	unsigned int quadrature, qaws_diff_views* gradient, qaws_scalar* out_value)
+	qaws_scalar* out_value, qaws_diff_views* gradient, qaws_curve const* curve,
+	qaws_curve_functional functional, unsigned int quadrature, qaws_diff_context const* ctx)
 {
 	curve_job job;
 	qaws_status st = curve_job_init(&job, ctx, curve, functional);
@@ -438,15 +438,15 @@ qaws_status qaws_curve_functional_gradient(
 	job.knot_out = (qaws_field_view*)job.knot_in;
 	if (st == QAWS_STATUS_OK)
 		st = curve_quadrature(&job, clamp_rule(quadrature, 6), curve_gradient_point);
-	qaws_internal_dealloc(NULL, job.knots);
+	qaws_internal_dealloc(job.knots, NULL);
 	if (st == QAWS_STATUS_OK && out_value)
 		*out_value = (qaws_scalar)job.value;
 	return st;
 }
 
 qaws_status qaws_curve_functional_hvp(
-	qaws_diff_context const* ctx, qaws_curve const* curve, qaws_curve_functional functional,
-	unsigned int quadrature, qaws_diff_views const* direction, qaws_diff_views* out_hv)
+	qaws_diff_views* out_hv, qaws_curve const* curve, qaws_diff_views const* direction,
+	qaws_curve_functional functional, unsigned int quadrature, qaws_diff_context const* ctx)
 {
 	curve_job job;
 	qaws_status st = curve_job_init(&job, ctx, curve, functional);
@@ -540,7 +540,7 @@ static void surface_job_knots(surface_job* job, qaws_diff_views const* views, in
 	unsigned int n = 0, i, nu = 0, nv = 0;
 	if (!uv && !vv)
 		return;
-	if (qaws_surface_describe_fields(job->surface, fields, 8, &n) != QAWS_STATUS_OK)
+	if (qaws_surface_describe_fields(fields, &n, job->surface, 8) != QAWS_STATUS_OK)
 		return;
 	for (i = 0; i < n && i < 8; i++)
 	{
@@ -557,13 +557,13 @@ static void surface_job_knots(surface_job* job, qaws_diff_views const* views, in
 		qaws_scalar r = QAWS_ZERO;
 		if (uv && nu)
 		{
-			qaws_internal_view_read(uv, job->u_lo, 1, &r); job->du0 = r;
-			qaws_internal_view_read(uv, job->u_hi, 1, &r); job->du1 = r;
+			qaws_internal_view_read(&r, uv, job->u_lo, 1); job->du0 = r;
+			qaws_internal_view_read(&r, uv, job->u_hi, 1); job->du1 = r;
 		}
 		if (vv && nv)
 		{
-			qaws_internal_view_read(vv, job->v_lo, 1, &r); job->dv0 = r;
-			qaws_internal_view_read(vv, job->v_hi, 1, &r); job->dv1 = r;
+			qaws_internal_view_read(&r, vv, job->v_lo, 1); job->dv0 = r;
+			qaws_internal_view_read(&r, vv, job->v_hi, 1); job->dv1 = r;
 		}
 	}
 	else
@@ -601,10 +601,10 @@ static qaws_status surface_eval_point(void* user, qaws_scalar u, qaws_scalar v, 
 		wdd = (double)weight * 2 * (job->du1 - job->du0) * (job->dv1 - job->dv0) / (lu * lv);
 	}
 	if (job->direction)
-		st = qaws_surface_eval_batch_tangent2(job->ctx, job->surface, &u, &v, &ut, &vt, 1, QAWS_SJET_ORDER2,
-			job->direction, &p, &tg, &tt);
+		st = qaws_surface_eval_batch_tangent2(&p, &tg, &tt, job->surface, &u, &v, &ut, &vt,
+			job->direction, 1, QAWS_SJET_ORDER2, job->ctx);
 	else
-		st = qaws_surface_eval_jet(job->surface, u, v, QAWS_SJET_ORDER2, &p);
+		st = qaws_surface_eval_jet(&p, job->surface, u, v, QAWS_SJET_ORDER2);
 	if (st != QAWS_STATUS_OK)
 		return st;
 	for (k = 0; k < 6; k++)
@@ -624,7 +624,7 @@ static qaws_status surface_gradient_point(void* user, qaws_scalar u, qaws_scalar
 	qaws_scalar ua = QAWS_ZERO, va = QAWS_ZERO;
 	double fv;
 	unsigned int k;
-	qaws_status st = qaws_surface_eval_jet(job->surface, u, v, QAWS_SJET_ORDER2, &p);
+	qaws_status st = qaws_surface_eval_jet(&p, job->surface, u, v, QAWS_SJET_ORDER2);
 	if (st != QAWS_STATUS_OK)
 		return st;
 	{
@@ -639,8 +639,8 @@ static qaws_status surface_gradient_point(void* user, qaws_scalar u, qaws_scalar
 	for (k = 0; k < 6; k++)
 		bar.d[k] = qaws_v3_scale(g[k], weight);
 	bar.channels = QAWS_SJET_ORDER2;
-	st = qaws_surface_eval_adjoint(job->ctx, job->surface, u, v, QAWS_SJET_ORDER2, &bar, job->sink,
-		job->knots ? &ua : NULL, job->knots ? &va : NULL);
+	st = qaws_surface_eval_adjoint(job->sink, job->knots ? &ua : NULL, job->knots ? &va : NULL, job->surface, &bar, u, v,
+		QAWS_SJET_ORDER2, job->ctx);
 	if (st != QAWS_STATUS_OK || !job->knots)
 		return st;
 	{
@@ -672,8 +672,8 @@ static qaws_status surface_hvp_point(void* user, qaws_scalar u, qaws_scalar v, q
 	qaws_surface_jet p, tg, bar;
 	qaws_vec3 hv[6];
 	unsigned int k;
-	qaws_status st = qaws_surface_eval_tangent(job->ctx, job->surface, u, v, QAWS_ZERO, QAWS_ZERO, QAWS_SJET_ORDER2,
-		job->direction, &p, &tg);
+	qaws_status st = qaws_surface_eval_tangent(&p, &tg, job->surface, job->direction, u, v, QAWS_ZERO,
+		QAWS_ZERO, QAWS_SJET_ORDER2, job->ctx);
 	if (st != QAWS_STATUS_OK)
 		return st;
 	integrand_hess_vec(job->f, p.d, tg.d, 6, hv);
@@ -681,7 +681,7 @@ static qaws_status surface_hvp_point(void* user, qaws_scalar u, qaws_scalar v, q
 	for (k = 0; k < 6; k++)
 		bar.d[k] = qaws_v3_scale(hv[k], weight);
 	bar.channels = QAWS_SJET_ORDER2;
-	return qaws_surface_eval_adjoint(job->ctx, job->surface, u, v, QAWS_SJET_ORDER2, &bar, job->sink, NULL, NULL);
+	return qaws_surface_eval_adjoint(job->sink, NULL, NULL, job->surface, &bar, u, v, QAWS_SJET_ORDER2, job->ctx);
 }
 
 static qaws_status surface_job_init(surface_job* job, qaws_diff_context const* ctx, qaws_surface const* surface,
@@ -704,9 +704,9 @@ static int surface_knot_terms(qaws_diff_views const* views)
 }
 
 qaws_status qaws_surface_functional_eval(
-	qaws_diff_context const* ctx, qaws_surface const* surface, qaws_surface_functional functional,
-	unsigned int quadrature, qaws_diff_views const* direction,
-	qaws_scalar* out_value, qaws_scalar* out_tangent, qaws_scalar* out_tangent2)
+	qaws_scalar* out_value, qaws_scalar* out_tangent, qaws_scalar* out_tangent2,
+	qaws_surface const* surface, qaws_diff_views const* direction,
+	qaws_surface_functional functional, unsigned int quadrature, qaws_diff_context const* ctx)
 {
 	surface_job job;
 	qaws_status st = surface_job_init(&job, ctx, surface, functional);
@@ -724,8 +724,8 @@ qaws_status qaws_surface_functional_eval(
 }
 
 qaws_status qaws_surface_functional_gradient(
-	qaws_diff_context const* ctx, qaws_surface const* surface, qaws_surface_functional functional,
-	unsigned int quadrature, qaws_diff_views* gradient, qaws_scalar* out_value)
+	qaws_scalar* out_value, qaws_diff_views* gradient, qaws_surface const* surface,
+	qaws_surface_functional functional, unsigned int quadrature, qaws_diff_context const* ctx)
 {
 	surface_job job;
 	qaws_status st = surface_job_init(&job, ctx, surface, functional);
@@ -740,8 +740,8 @@ qaws_status qaws_surface_functional_gradient(
 }
 
 qaws_status qaws_surface_functional_hvp(
-	qaws_diff_context const* ctx, qaws_surface const* surface, qaws_surface_functional functional,
-	unsigned int quadrature, qaws_diff_views const* direction, qaws_diff_views* out_hv)
+	qaws_diff_views* out_hv, qaws_surface const* surface, qaws_diff_views const* direction,
+	qaws_surface_functional functional, unsigned int quadrature, qaws_diff_context const* ctx)
 {
 	surface_job job;
 	qaws_status st = surface_job_init(&job, ctx, surface, functional);

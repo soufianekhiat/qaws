@@ -63,31 +63,31 @@ typedef struct qaws_region_sampler_desc
 #define QAWS_REGION_SAMPLE_BOX        0x100u
 
 /* 1 when the point is in the region (the winding of the boundary below it). */
-qaws_status qaws_region_sampler_contains(qaws_region_sampler const* sampler, qaws_vec2 point, int* out_inside);
+qaws_status qaws_region_sampler_contains(int* out_inside, qaws_region_sampler const* sampler, qaws_vec2 point);
 
-qaws_status qaws_region_sampler_create(qaws_region_sampler_desc const* desc, qaws_region_sampler** out_sampler);
+qaws_status qaws_region_sampler_create(qaws_region_sampler** out_sampler, qaws_region_sampler_desc const* desc);
 void qaws_region_sampler_destroy(qaws_region_sampler* sampler);
 
 /* The region's area, and the area of its part left of x (0 left of the
    region, the area right of it). */
 qaws_scalar qaws_region_sampler_get_area(qaws_region_sampler const* sampler);
-qaws_status qaws_region_sampler_area_left(qaws_region_sampler const* sampler, qaws_scalar x, qaws_scalar* out_area);
+qaws_status qaws_region_sampler_area_left(qaws_scalar* out_area, qaws_region_sampler const* sampler, qaws_scalar x);
 
 /* With a density: its integral over the region (the mass), and over the
    part left of x. Without one they are the areas. */
 qaws_scalar qaws_region_sampler_get_mass(qaws_region_sampler const* sampler);
-qaws_status qaws_region_sampler_mass_left(qaws_region_sampler const* sampler, qaws_scalar x, qaws_scalar* out_mass);
+qaws_status qaws_region_sampler_mass_left(qaws_scalar* out_mass, qaws_region_sampler const* sampler, qaws_scalar x);
 
 /* The area-keeping map of the unit square onto the region (mass-keeping
    with a density: u picks x by the mass left of it, v picks y by the mass
    along the chords at x); u, v in [0, 1]. Thread-safe. */
-qaws_status qaws_region_sampler_map(qaws_region_sampler const* sampler, qaws_scalar u, qaws_scalar v, qaws_vec2* out_point);
-qaws_status qaws_region_sampler_map_many(qaws_region_sampler const* sampler, qaws_vec2 const* uv, unsigned int count,
-	qaws_vec2* out_points);
+qaws_status qaws_region_sampler_map(qaws_vec2* out_point, qaws_region_sampler const* sampler, qaws_scalar u, qaws_scalar v);
+qaws_status qaws_region_sampler_map_many(qaws_vec2* out_points, qaws_region_sampler const* sampler, qaws_vec2 const* uv,
+	unsigned int count);
 
 /* count points uniform over the region: QAWS_REGION_SAMPLE_* through the
    map; the same seed gives the same points. */
-qaws_status qaws_region_sampler_generate(qaws_region_sampler const* sampler, unsigned int count, unsigned int kind,
-	unsigned long long seed, qaws_vec2* out_points);
+qaws_status qaws_region_sampler_generate(qaws_vec2* out_points, qaws_region_sampler const* sampler, unsigned int count,
+	unsigned int kind, unsigned long long seed);
 
 #endif /* QAWS_REGION_SAMPLE_H */

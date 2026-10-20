@@ -270,14 +270,14 @@ qaws_status qaws_repulsive_curves_create_ex(qaws_repulsive_curves_desc const* de
 	qaws_internal_rs_scope sc;
 	qaws_status st;
 	qaws_internal_rs_enter(&sc, allocator);
-	st = qaws_repulsive_curves_create(desc, out_curves);
+	st = qaws_repulsive_curves_create(out_curves, desc);
 	if (st == QAWS_STATUS_OK)
 		qaws_internal_rs_keep(&(*out_curves)->alloc, allocator);
 	qaws_internal_rs_leave(&sc);
 	return st;
 }
 
-qaws_status qaws_repulsive_curves_create(qaws_repulsive_curves_desc const* desc, qaws_repulsive_curves** out_curves)
+qaws_status qaws_repulsive_curves_create(qaws_repulsive_curves** out_curves, qaws_repulsive_curves_desc const* desc)
 {
 	qaws_repulsive_curves* c;
 	double alpha, beta;
@@ -321,8 +321,8 @@ void qaws_repulsive_curves_destroy(qaws_repulsive_curves* curves)
 	qaws_internal_free(curves);
 }
 
-qaws_status qaws_repulsive_curves_eval(qaws_repulsive_curves const* curves, qaws_scalar const* positions,
-	qaws_scalar const* direction, qaws_scalar* out_value, qaws_scalar* out_tangent, qaws_scalar* out_tangent2)
+qaws_status qaws_repulsive_curves_eval(qaws_scalar* out_value, qaws_scalar* out_tangent,
+	qaws_scalar* out_tangent2, qaws_repulsive_curves const* curves, qaws_scalar const* positions, qaws_scalar const* direction)
 {
 	double v, t, t2;
 	qaws_status st;
@@ -338,8 +338,8 @@ qaws_status qaws_repulsive_curves_eval(qaws_repulsive_curves const* curves, qaws
 	return QAWS_STATUS_OK;
 }
 
-qaws_status qaws_repulsive_curves_gradient(qaws_repulsive_curves const* curves, qaws_scalar const* positions, qaws_scalar seed,
-	qaws_scalar* gradient, qaws_scalar* out_value)
+qaws_status qaws_repulsive_curves_gradient(qaws_scalar* gradient, qaws_scalar* out_value, qaws_repulsive_curves const* curves,
+	qaws_scalar const* positions, qaws_scalar seed)
 {
 	double v;
 	qaws_status st;
@@ -351,8 +351,8 @@ qaws_status qaws_repulsive_curves_gradient(qaws_repulsive_curves const* curves, 
 	return st;
 }
 
-qaws_status qaws_repulsive_curves_hvp(qaws_repulsive_curves const* curves, qaws_scalar const* positions, qaws_scalar const* direction,
-	qaws_scalar* out_hv)
+qaws_status qaws_repulsive_curves_hvp(qaws_scalar* out_hv, qaws_repulsive_curves const* curves, qaws_scalar const* positions,
+	qaws_scalar const* direction)
 {
 	if (!curves)
 		return QAWS_STATUS_INVALID_ARGUMENT;
@@ -369,14 +369,14 @@ qaws_status qaws_repulsive_mesh_create_ex(qaws_repulsive_mesh_desc const* desc, 
 	qaws_internal_rs_scope sc;
 	qaws_status st;
 	qaws_internal_rs_enter(&sc, allocator);
-	st = qaws_repulsive_mesh_create(desc, out_mesh);
+	st = qaws_repulsive_mesh_create(out_mesh, desc);
 	if (st == QAWS_STATUS_OK)
 		qaws_internal_rs_keep(&(*out_mesh)->alloc, allocator);
 	qaws_internal_rs_leave(&sc);
 	return st;
 }
 
-qaws_status qaws_repulsive_mesh_create(qaws_repulsive_mesh_desc const* desc, qaws_repulsive_mesh** out_mesh)
+qaws_status qaws_repulsive_mesh_create(qaws_repulsive_mesh** out_mesh, qaws_repulsive_mesh_desc const* desc)
 {
 	qaws_repulsive_mesh* m;
 	double p;
@@ -419,8 +419,8 @@ void qaws_repulsive_mesh_destroy(qaws_repulsive_mesh* mesh)
 	qaws_internal_free(mesh);
 }
 
-qaws_status qaws_repulsive_mesh_eval(qaws_repulsive_mesh const* mesh, qaws_scalar const* positions,
-	qaws_scalar const* direction, qaws_scalar* out_value, qaws_scalar* out_tangent, qaws_scalar* out_tangent2)
+qaws_status qaws_repulsive_mesh_eval(qaws_scalar* out_value, qaws_scalar* out_tangent,
+	qaws_scalar* out_tangent2, qaws_repulsive_mesh const* mesh, qaws_scalar const* positions, qaws_scalar const* direction)
 {
 	double v, t, t2;
 	qaws_status st;
@@ -435,8 +435,8 @@ qaws_status qaws_repulsive_mesh_eval(qaws_repulsive_mesh const* mesh, qaws_scala
 	return QAWS_STATUS_OK;
 }
 
-qaws_status qaws_repulsive_mesh_gradient(qaws_repulsive_mesh const* mesh, qaws_scalar const* positions, qaws_scalar seed,
-	qaws_scalar* gradient, qaws_scalar* out_value)
+qaws_status qaws_repulsive_mesh_gradient(qaws_scalar* gradient, qaws_scalar* out_value, qaws_repulsive_mesh const* mesh,
+	qaws_scalar const* positions, qaws_scalar seed)
 {
 	double v;
 	qaws_status st;
@@ -447,8 +447,8 @@ qaws_status qaws_repulsive_mesh_gradient(qaws_repulsive_mesh const* mesh, qaws_s
 	return st;
 }
 
-qaws_status qaws_repulsive_mesh_hvp(qaws_repulsive_mesh const* mesh, qaws_scalar const* positions, qaws_scalar const* direction,
-	qaws_scalar* out_hv)
+qaws_status qaws_repulsive_mesh_hvp(qaws_scalar* out_hv, qaws_repulsive_mesh const* mesh, qaws_scalar const* positions,
+	qaws_scalar const* direction)
 {
 	if (!mesh)
 		return QAWS_STATUS_INVALID_ARGUMENT;
@@ -459,23 +459,23 @@ qaws_status qaws_repulsive_mesh_hvp(qaws_repulsive_mesh const* mesh, qaws_scalar
 /*  For the solver                                                          */
 /* ------------------------------------------------------------------------ */
 
-qaws_status qaws_internal_repulsive_curves_energy(qaws_repulsive_curves const* curves, double const* x, double* out_energy, double* grad)
+qaws_status qaws_internal_repulsive_curves_energy(double* out_energy, double* grad, qaws_repulsive_curves const* curves, double const* x)
 {
 	return rp_run_d(curves->dim, curves->edges, curves->ne, 2, rp_curve_term, curves, 1, x, NULL, grad ? RP_GRAD : RP_EVAL, 1,
 		out_energy, NULL, NULL, grad);
 }
 
-qaws_status qaws_internal_repulsive_mesh_energy(qaws_repulsive_mesh const* mesh, double const* x, double* out_energy, double* grad)
+qaws_status qaws_internal_repulsive_mesh_energy(double* out_energy, double* grad, qaws_repulsive_mesh const* mesh, double const* x)
 {
 	return rp_run_d(3, mesh->tris, mesh->nf, 3, rp_mesh_term, mesh, 0, x, NULL, grad ? RP_GRAD : RP_EVAL, 1, out_energy, NULL, NULL, grad);
 }
 
-qaws_status qaws_internal_repulsive_curves_hvp(qaws_repulsive_curves const* curves, double const* x, double const* v, double* hv)
+qaws_status qaws_internal_repulsive_curves_hvp(double* hv, qaws_repulsive_curves const* curves, double const* x, double const* v)
 {
 	return rp_run_d(curves->dim, curves->edges, curves->ne, 2, rp_curve_term, curves, 1, x, v, RP_HVP, 0, NULL, NULL, NULL, hv);
 }
 
-qaws_status qaws_internal_repulsive_mesh_hvp(qaws_repulsive_mesh const* mesh, double const* x, double const* v, double* hv)
+qaws_status qaws_internal_repulsive_mesh_hvp(double* hv, qaws_repulsive_mesh const* mesh, double const* x, double const* v)
 {
 	return rp_run_d(3, mesh->tris, mesh->nf, 3, rp_mesh_term, mesh, 0, x, v, RP_HVP, 0, NULL, NULL, NULL, hv);
 }

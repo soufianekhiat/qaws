@@ -47,7 +47,7 @@ qaws_status qaws_curve_compute_rotation_minimizing_frames_3d(qaws_curve const* c
 	{
 		qaws_eval_result_3d e;
 		qaws_vec3 t, r, b;
-		qaws_status st = qaws_curve_evaluate_3d(curve, parameters[i], QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &e);
+		qaws_status st = qaws_curve_evaluate_3d(&e, curve, parameters[i], QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1);
 		if (st != QAWS_STATUS_OK)
 			return st;
 		t = e.d1;

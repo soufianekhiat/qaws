@@ -18,8 +18,8 @@ static void sxf_square(qaws_surface const* s, double u0, double v0, double u1, d
 		memset(&bz, 0, sizeof(bz));
 		bz.dimension = QAWS_DIMENSION_2D; bz.degree = 1; bz.control_points = cp; bz.control_point_count = 2;
 		k[i] = NULL; c[i] = NULL;
-		qaws_curve_create_bezier(&bz, &k[i]);
-		qaws_surface_curve_create_uv(s, k[i], &c[i]);
+		qaws_curve_create_bezier(&k[i], &bz);
+		qaws_surface_curve_create_uv(&c[i], s, k[i]);
 	}
 }
 
@@ -64,7 +64,7 @@ static void demo_surface_exact(void)
 		if (k == 0)
 		{
 			/* the ring united: the band between latitudes -pi/8 and pi/8 */
-			st = qaws_surface_clip_exact(sph, QAWS_CLIP_NONE, QAWS_FILL_NON_ZERO, P, 16, NULL, 0, NULL, &r);
+			st = qaws_surface_clip_exact(&r, sph, P, NULL, 16, 0, NULL, QAWS_CLIP_NONE, QAWS_FILL_NON_ZERO);
 			name = "16 squares sharing sides, united";
 			expect = 2 * pi * (sin(pi / 8) - sin(-pi / 8));
 		}
@@ -74,7 +74,7 @@ static void demo_surface_exact(void)
 			qaws_surface_path even[8];
 			unsigned int n = 0;
 			for (i = 0; i < 16; i++) if (((i % 8) + i / 8) % 2 == 0) even[n++] = P[i];
-			st = qaws_surface_clip_exact(sph, QAWS_CLIP_XOR, QAWS_FILL_NON_ZERO, P, 16, even, n, NULL, &r);
+			st = qaws_surface_clip_exact(&r, sph, P, even, 16, n, NULL, QAWS_CLIP_XOR, QAWS_FILL_NON_ZERO);
 			name = "the ring xor a checkerboard of it";
 			expect = 0.5 * 2 * pi * (sin(pi / 8) - sin(-pi / 8));
 		}
@@ -84,7 +84,7 @@ static void demo_surface_exact(void)
 			qaws_surface_path even[8];
 			unsigned int n = 0;
 			for (i = 0; i < 16; i++) if (((i % 8) + i / 8) % 2 == 1) even[n++] = P[i];
-			st = qaws_surface_clip_exact(sph, QAWS_CLIP_NONE, QAWS_FILL_NON_ZERO, even, n, NULL, 0, NULL, &r);
+			st = qaws_surface_clip_exact(&r, sph, even, NULL, n, 0, NULL, QAWS_CLIP_NONE, QAWS_FILL_NON_ZERO);
 			name = "squares touching at corners only";
 			expect = 0.5 * 2 * pi * (sin(pi / 8) - sin(-pi / 8));
 		}
@@ -93,16 +93,16 @@ static void demo_surface_exact(void)
 			qaws_surface_curve *c1 = NULL, *c2 = NULL;
 			qaws_surface_curve const *p1[1], *p2[1];
 			qaws_surface_path A, B;
-			qaws_surface_curve_create_geodesic_arc(sph, sgf_uv(0.24, 0.52), (qaws_scalar)0.5, 0, (qaws_scalar)(2 * pi), 0, &c1);
-			qaws_surface_curve_create_geodesic_arc(sph, sgf_uv(0.32, 0.47), (qaws_scalar)0.45, 0, (qaws_scalar)(2 * pi), 0, &c2);
+			qaws_surface_curve_create_geodesic_arc(&c1, sph, sgf_uv(0.24, 0.52), (qaws_scalar)0.5, 0, (qaws_scalar)(2 * pi), 0);
+			qaws_surface_curve_create_geodesic_arc(&c2, sph, sgf_uv(0.32, 0.47), (qaws_scalar)0.45, 0, (qaws_scalar)(2 * pi), 0);
 			p1[0] = c1; p2[0] = c2;
 			ssf_path(&A, p1, 1); ssf_path(&B, p2, 1);
-			st = qaws_surface_clip_exact(sph, QAWS_CLIP_INTERSECTION, QAWS_FILL_NON_ZERO, &A, 1, &B, 1, NULL, &r);
+			st = qaws_surface_clip_exact(&r, sph, &A, &B, 1, 1, NULL, QAWS_CLIP_INTERSECTION, QAWS_FILL_NON_ZERO);
 			sgf_view_init(&view, -pi / 2 - 2 * pi * 0.28 + 0.2, 0.3, 108, v3.x0 + pw / 2, v3.y0 + ph / 2 + 8);
 			name = "two geodesic circles' lens";
 			qaws_surface_curve_destroy(c1); qaws_surface_curve_destroy(c2);
 		}
-		if (st == QAWS_STATUS_OK) qaws_surface_region_get_area(r, &area);
+		if (st == QAWS_STATUS_OK) qaws_surface_region_get_area(&area, r);
 		svg_panel(&s, &v3, name);
 		if (expect >= 0)
 			sprintf(label, "%u loops, area %.10f, exact %.10f", r ? qaws_surface_region_get_path_count(r) : 0, (double)area, expect);

@@ -73,7 +73,7 @@ struct qaws_region_sampler
 static qaws_status rs_eval(qaws_curve const* c, double t, double* p, double* d)
 {
 	qaws_eval_result_2d r;
-	qaws_status s = qaws_curve_evaluate_2d(c, (qaws_scalar)t, QAWS_EVAL_FLAG_POSITION | (d ? QAWS_EVAL_FLAG_D1 : 0), &r);
+	qaws_status s = qaws_curve_evaluate_2d(&r, c, (qaws_scalar)t, QAWS_EVAL_FLAG_POSITION | (d ? QAWS_EVAL_FLAG_D1 : 0));
 	if (s != QAWS_STATUS_OK)
 	{
 		/* (zeros: no caller reads garbage) */
@@ -121,7 +121,7 @@ static double rs_int(qaws_region_sampler const* s, rs_piece const* pc, double xa
 	rs_eval(pc->c, tb, pb, NULL);
 	if (yb) *yb = pb[1];
 	if (ta != tb)
-		qaws_internal_curve_area_2d(pc->c, ta, tb, s->tol, &a);
+		qaws_internal_curve_area_2d(&a, pc->c, ta, tb, s->tol);
 	return pb[0] * pb[1] - pa[0] * pa[1] - a;
 }
 
@@ -240,7 +240,7 @@ void qaws_region_sampler_destroy(qaws_region_sampler* s)
 	qaws_internal_free(s);
 }
 
-qaws_status qaws_region_sampler_create(qaws_region_sampler_desc const* desc, qaws_region_sampler** out)
+qaws_status qaws_region_sampler_create(qaws_region_sampler** out, qaws_region_sampler_desc const* desc)
 {
 	qaws_region_sampler* s;
 	qaws_status st;
@@ -253,13 +253,13 @@ qaws_status qaws_region_sampler_create(qaws_region_sampler_desc const* desc, qaw
 	if (!s)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	/* 1. the region, its boundary simple */
-	st = qaws_clip_boolean(QAWS_CLIP_UNION, desc->fill_rule, desc->paths, desc->path_count, NULL, 0, &s->region);
+	st = qaws_clip_boolean(&s->region, desc->paths, NULL, desc->path_count, 0, QAWS_CLIP_UNION, desc->fill_rule);
 	np = st == QAWS_STATUS_OK ? qaws_clip_result_get_path_count(s->region) : 0;
 	/* 2. x-monotone pieces */
 	for (i = 0; st == QAWS_STATUS_OK && i < np; i++)
 	{
 		qaws_path_2d p;
-		qaws_clip_result_get_path(s->region, i, &p);
+		qaws_clip_result_get_path(&p, s->region, i);
 		for (k = 0; k < p.curve_count && st == QAWS_STATUS_OK; k++)
 			st = rs_cut_curve(p.curves[k], &s->pieces, &s->npieces, &cap);
 	}
@@ -290,8 +290,8 @@ qaws_status qaws_region_sampler_create(qaws_region_sampler_desc const* desc, qaw
 				for (i = 0; i < np; i++)
 				{
 					qaws_path_2d p;
-					qaws_clip_result_get_path(s->region, i, &p);
-					if (qaws_path_compute_bounds_2d(&p, &blo, &bhi) == QAWS_STATUS_OK)
+					qaws_clip_result_get_path(&p, s->region, i);
+					if (qaws_path_compute_bounds_2d(&blo, &bhi, &p) == QAWS_STATUS_OK)
 					{
 						if ((double)blo.y < s->ylo) s->ylo = (double)blo.y;
 						if ((double)bhi.y > s->yhi) s->yhi = (double)bhi.y;
@@ -410,7 +410,7 @@ static double rs_area_in(qaws_region_sampler const* s, unsigned int k, double x,
 	return a;
 }
 
-qaws_status qaws_region_sampler_area_left(qaws_region_sampler const* s, qaws_scalar x, qaws_scalar* out)
+qaws_status qaws_region_sampler_area_left(qaws_scalar* out, qaws_region_sampler const* s, qaws_scalar x)
 {
 	double xd = (double)x;
 	if (!s || !out)
@@ -711,7 +711,7 @@ static qaws_status rs_build_density(qaws_region_sampler* s)
 	}
 	/* the panels in parallel, then their masses summed in order */
 	c->s = s;
-	st = qaws_internal_parallel(s->executor, total, 2, rs_build_job, c);
+	st = qaws_internal_parallel(total, 2, rs_build_job, c, s->executor);
 	for (k = 0; k < 256; k++)
 		if (c->rmax[k] > rmax) rmax = c->rmax[k];
 	qaws_internal_free(c);
@@ -751,14 +751,14 @@ qaws_scalar qaws_region_sampler_get_mass(qaws_region_sampler const* s)
 	return s ? (qaws_scalar)(s->rho ? s->mass : s->area) : 0;
 }
 
-qaws_status qaws_region_sampler_mass_left(qaws_region_sampler const* s, qaws_scalar x, qaws_scalar* out)
+qaws_status qaws_region_sampler_mass_left(qaws_scalar* out, qaws_region_sampler const* s, qaws_scalar x)
 {
 	double xd = (double)x;
 	unsigned int k;
 	if (!s || !out)
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	if (!s->rho)
-		return qaws_region_sampler_area_left(s, x, out);
+		return qaws_region_sampler_area_left(out, s, x);
 	if (xd <= s->xs[0]) { *out = 0; return QAWS_STATUS_OK; }
 	if (xd >= s->xs[s->nxs - 1]) { *out = (qaws_scalar)s->mass; return QAWS_STATUS_OK; }
 	k = rs_slab(s, xd);
@@ -892,7 +892,7 @@ static qaws_status rs_map_area(qaws_region_sampler const* s, qaws_scalar u, qaws
 	return QAWS_STATUS_OK;
 }
 
-qaws_status qaws_region_sampler_map(qaws_region_sampler const* s, qaws_scalar u, qaws_scalar v, qaws_vec2* out)
+qaws_status qaws_region_sampler_map(qaws_vec2* out, qaws_region_sampler const* s, qaws_scalar u, qaws_scalar v)
 {
 	if (!s || !out)
 		return QAWS_STATUS_INVALID_ARGUMENT;
@@ -1116,14 +1116,14 @@ static qaws_status rs_batch_job(void* ctx, unsigned int chunk, unsigned int b, u
 		if (c->keep)
 			c->keep[i] = (unsigned char)rs_keep(c->s, c->box[0] + c->box[1] * u, c->box[2] + c->box[3] * v, c->first + i, c->q->p);
 		else
-			st = qaws_region_sampler_map(c->s, (qaws_scalar)u, (qaws_scalar)v, &c->out[i]);
+			st = qaws_region_sampler_map(&c->out[i], c->s, (qaws_scalar)u, (qaws_scalar)v);
 	}
 	return st;
 }
 
 static qaws_status rs_batch_run(rs_batch const* c, unsigned int count)
 {
-	return qaws_internal_parallel(c->s->executor, count, RS_GRAIN, rs_batch_job, (void*)c);
+	return qaws_internal_parallel(count, RS_GRAIN, rs_batch_job, (void*)c, c->s->executor);
 }
 
 /* count pattern points (or given uv) through the map */
@@ -1138,7 +1138,7 @@ static qaws_status rs_map_batch(qaws_region_sampler const* s, rs_pattern const* 
 	return rs_batch_run(&c, count);
 }
 
-qaws_status qaws_region_sampler_map_many(qaws_region_sampler const* s, qaws_vec2 const* uv, unsigned int count, qaws_vec2* out)
+qaws_status qaws_region_sampler_map_many(qaws_vec2* out, qaws_region_sampler const* s, qaws_vec2 const* uv, unsigned int count)
 {
 	if (!s || (count && (!uv || !out)))
 		return QAWS_STATUS_INVALID_ARGUMENT;
@@ -1379,7 +1379,7 @@ static int rs_inside(qaws_region_sampler const* s, double x, double y)
 	return w > 0;
 }
 
-qaws_status qaws_region_sampler_contains(qaws_region_sampler const* s, qaws_vec2 point, int* out_inside)
+qaws_status qaws_region_sampler_contains(int* out_inside, qaws_region_sampler const* s, qaws_vec2 point)
 {
 	if (!s || !out_inside)
 		return QAWS_STATUS_INVALID_ARGUMENT;
@@ -1548,8 +1548,8 @@ static qaws_status rs_box(qaws_region_sampler const* s, unsigned int count, unsi
 	return st;
 }
 
-qaws_status qaws_region_sampler_generate(qaws_region_sampler const* s, unsigned int count, unsigned int kind,
-	unsigned long long seed, qaws_vec2* out)
+qaws_status qaws_region_sampler_generate(qaws_vec2* out, qaws_region_sampler const* s, unsigned int count,
+	unsigned int kind, unsigned long long seed)
 {
 	rs_pattern q;
 	unsigned int base = kind & ~QAWS_REGION_SAMPLE_BOX;

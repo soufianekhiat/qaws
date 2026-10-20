@@ -49,8 +49,8 @@ static double photo_energy(hair_photo const* hp, qaws_scalar const* cps, qaws_sc
 
 	for (k = 0; k < M; k++)
 		ts[k] = (qaws_scalar)(r.min_value + (r.max_value - r.min_value) * (k + 0.5) / M);
-	qaws_curve_eval_batch_tangent_3d(NULL, c, ts, NULL, M, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2,
-		NULL, prim, tan);
+	qaws_curve_eval_batch_tangent_3d(prim, tan, c, ts, NULL, NULL,
+		M, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2, NULL);
 	memset(bar, 0, sizeof(bar));
 	for (k = 0; k < M; k++)
 	{
@@ -75,7 +75,7 @@ static double photo_energy(hair_photo const* hp, qaws_scalar const* cps, qaws_sc
 		}
 		m = sample(hp->mask, W, H, px, py, NULL, NULL);
 		/* projected tangent against the orientation field, where there is hair */
-		qaws_curve_geometry_eval_3d(&prim[k], NULL, NULL, &geo, NULL, NULL, &validity);
+		qaws_curve_geometry_eval_3d(&geo, NULL, NULL, &validity, &prim[k], NULL, NULL);
 		t2[0] = hp->cam.P[0][0] * geo.tangent.x + hp->cam.P[0][1] * geo.tangent.y + hp->cam.P[0][2] * geo.tangent.z;
 		t2[1] = hp->cam.P[1][0] * geo.tangent.x + hp->cam.P[1][1] * geo.tangent.y + hp->cam.P[1][2] * geo.tangent.z;
 		len2 = sqrt(t2[0] * t2[0] + t2[1] * t2[1]);
@@ -96,7 +96,7 @@ static double photo_energy(hair_photo const* hp, qaws_scalar const* cps, qaws_sc
 			gb.tangent = v3((qaws_scalar)(hp->cam.P[0][0] * dt2[0] + hp->cam.P[1][0] * dt2[1]),
 				(qaws_scalar)(hp->cam.P[0][1] * dt2[0] + hp->cam.P[1][1] * dt2[1]),
 				(qaws_scalar)(hp->cam.P[0][2] * dt2[0] + hp->cam.P[1][2] * dt2[1]));
-			qaws_curve_geometry_adjoint_3d(&prim[k], &gb, &bar[k], &validity);
+			qaws_curve_geometry_adjoint_3d(&validity, &bar[k], &prim[k], &gb);
 			if (angle)
 			{
 				double ox, oy, d;
@@ -112,8 +112,8 @@ static double photo_energy(hair_photo const* hp, qaws_scalar const* cps, qaws_sc
 		bar[k].channels |= QAWS_EVAL_FLAG_POSITION;
 	}
 	memset(g, 0, sizeof(g));
-	qaws_curve_eval_batch_adjoint_3d(NULL, c, ts, M, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2,
-		bar, &views, NULL);
+	qaws_curve_eval_batch_adjoint_3d(&views, NULL, c, ts, bar,
+		M, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2, NULL);
 	if (grad)
 		for (k = 6; k < HG_CP * 3; k++)   /* roots fixed */
 			grad[k] += g[k];
@@ -140,7 +140,7 @@ static void photo_overlay(svg* s, hair_photo const* hp, groom_strand const* st, 
 		{
 			qaws_eval_result_3d e;
 			double x[3], px, py, d;
-			qaws_curve_evaluate_3d(c, (qaws_scalar)(r.min_value + (r.max_value - r.min_value) * k / 24), QAWS_EVAL_FLAG_POSITION, &e);
+			qaws_curve_evaluate_3d(&e, c, (qaws_scalar)(r.min_value + (r.max_value - r.min_value) * k / 24), QAWS_EVAL_FLAG_POSITION);
 			x[0] = e.position.x; x[1] = e.position.y; x[2] = e.position.z;
 			view_xform(&hp->cam.v, x, &px, &py, &d);
 			xy[2 * n] = x0 + px * sc;

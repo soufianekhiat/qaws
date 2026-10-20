@@ -31,7 +31,7 @@ typedef struct qaws_clothoid_desc
 } qaws_clothoid_desc;
 
 qaws_status qaws_curve_create_clothoid(
-	qaws_clothoid_desc const* desc,
-	qaws_curve** out_curve);
+	qaws_curve** out_curve,
+	qaws_clothoid_desc const* desc);
 
 #endif /* QAWS_CLOTHOID_H */

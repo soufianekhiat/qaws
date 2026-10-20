@@ -11,8 +11,8 @@ typedef struct qaws_clip_exact_desc {
 	qaws_clip_z_fn z_fn;  void* z_user;
 } qaws_clip_exact_desc;
 
-qaws_status qaws_clip_exact_execute(qaws_clip_exact_desc const* desc, qaws_clip_result** out_result,
-	qaws_clip_exact_stats* out_stats);
+qaws_status qaws_clip_exact_execute(qaws_clip_result** out_result, qaws_clip_exact_stats* out_stats,
+	qaws_clip_exact_desc const* desc);
 ```
 
 `qaws_clip_exact_execute` runs the same arrangement as `qaws_clip`, but decides every topological

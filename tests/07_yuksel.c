@@ -22,7 +22,7 @@ static void test_yuksel_bezier_mode(void)
 	desc.closed = 0;
 
 	qaws_curve* curve = NULL;
-	qaws_status s = qaws_curve_create_yuksel(&desc, &curve);
+	qaws_status s = qaws_curve_create_yuksel(&curve, &desc);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(curve != NULL, "yuksel bezier curve allocated");
 	TEST_ASSERT(qaws_curve_get_kind(curve) == QAWS_CURVE_KIND_YUKSEL, "kind == YUKSEL");
@@ -32,8 +32,8 @@ static void test_yuksel_bezier_mode(void)
 
 	/* Evaluate at parameter 0 (first span start) */
 	qaws_eval_result_2d r;
-	s = qaws_curve_evaluate_2d(curve, (qaws_scalar)0.0,
-		QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &r);
+	s = qaws_curve_evaluate_2d(&r, curve,
+		(qaws_scalar)0.0, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(r.valid_flags & QAWS_EVAL_FLAG_POSITION, "position valid");
 	TEST_ASSERT(r.valid_flags & QAWS_EVAL_FLAG_D1, "d1 valid");
@@ -46,7 +46,7 @@ static void test_yuksel_bezier_mode(void)
 		for (pi = 0; pi < 40; pi++) {
 			qaws_scalar t = range.min_value +
 				(qaws_scalar)pi * (range.max_value - range.min_value) / (qaws_scalar)39;
-			s = qaws_curve_evaluate_2d(curve, t, QAWS_EVAL_FLAG_POSITION, &r);
+			s = qaws_curve_evaluate_2d(&r, curve, t, QAWS_EVAL_FLAG_POSITION);
 			TEST_ASSERT(s == QAWS_STATUS_OK, "eval ok across range");
 		}
 	}
@@ -77,7 +77,7 @@ static void test_yuksel_closed(void)
 	desc.closed = 1;
 
 	qaws_curve* curve = NULL;
-	qaws_status s = qaws_curve_create_yuksel(&desc, &curve);
+	qaws_status s = qaws_curve_create_yuksel(&curve, &desc);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(qaws_curve_is_closed(curve) == 1, "closed");
 	TEST_ASSERT(qaws_curve_get_span_count(curve) == 5, "5 spans for closed pentagon");
@@ -85,9 +85,9 @@ static void test_yuksel_closed(void)
 	/* Closed curve: first and last points should match */
 	qaws_eval_result_2d r0, r1;
 	qaws_range range = qaws_curve_get_parameter_range(curve);
-	s = qaws_curve_evaluate_2d(curve, range.min_value, QAWS_EVAL_FLAG_POSITION, &r0);
+	s = qaws_curve_evaluate_2d(&r0, curve, range.min_value, QAWS_EVAL_FLAG_POSITION);
 	TEST_ASSERT_STATUS(s);
-	s = qaws_curve_evaluate_2d(curve, range.max_value, QAWS_EVAL_FLAG_POSITION, &r1);
+	s = qaws_curve_evaluate_2d(&r1, curve, range.max_value, QAWS_EVAL_FLAG_POSITION);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(approx_eq(r0.position.x, r1.position.x), "closed: start.x == end.x");
 	TEST_ASSERT(approx_eq(r0.position.y, r1.position.y), "closed: start.y == end.y");
@@ -111,7 +111,7 @@ static void test_yuksel_circular_mode(void)
 	desc.closed = 0;
 
 	qaws_curve* curve = NULL;
-	qaws_status s = qaws_curve_create_yuksel(&desc, &curve);
+	qaws_status s = qaws_curve_create_yuksel(&curve, &desc);
 	TEST_ASSERT_STATUS(s);
 
 	/* Sample throughout */
@@ -121,7 +121,7 @@ static void test_yuksel_circular_mode(void)
 	for (pi = 0; pi < 20; pi++) {
 		qaws_scalar t = range.min_value +
 			(qaws_scalar)pi * (range.max_value - range.min_value) / (qaws_scalar)19;
-		s = qaws_curve_evaluate_2d(curve, t, QAWS_EVAL_FLAG_POSITION, &r);
+		s = qaws_curve_evaluate_2d(&r, curve, t, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT(s == QAWS_STATUS_OK, "circular eval ok");
 	}
 
@@ -144,7 +144,7 @@ static void test_yuksel_elliptical_mode(void)
 	desc.closed = 0;
 
 	qaws_curve* curve = NULL;
-	qaws_status s = qaws_curve_create_yuksel(&desc, &curve);
+	qaws_status s = qaws_curve_create_yuksel(&curve, &desc);
 	TEST_ASSERT_STATUS(s);
 
 	qaws_eval_result_2d r;
@@ -153,7 +153,7 @@ static void test_yuksel_elliptical_mode(void)
 	for (pi = 0; pi < 20; pi++) {
 		qaws_scalar t = range.min_value +
 			(qaws_scalar)pi * (range.max_value - range.min_value) / (qaws_scalar)19;
-		s = qaws_curve_evaluate_2d(curve, t, QAWS_EVAL_FLAG_POSITION, &r);
+		s = qaws_curve_evaluate_2d(&r, curve, t, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT(s == QAWS_STATUS_OK, "elliptical eval ok");
 	}
 
@@ -176,7 +176,7 @@ static void test_yuksel_hybrid_mode(void)
 	desc.closed = 0;
 
 	qaws_curve* curve = NULL;
-	qaws_status s = qaws_curve_create_yuksel(&desc, &curve);
+	qaws_status s = qaws_curve_create_yuksel(&curve, &desc);
 	TEST_ASSERT_STATUS(s);
 
 	qaws_eval_result_2d r;
@@ -185,7 +185,7 @@ static void test_yuksel_hybrid_mode(void)
 	for (pi = 0; pi < 20; pi++) {
 		qaws_scalar t = range.min_value +
 			(qaws_scalar)pi * (range.max_value - range.min_value) / (qaws_scalar)19;
-		s = qaws_curve_evaluate_2d(curve, t, QAWS_EVAL_FLAG_POSITION, &r);
+		s = qaws_curve_evaluate_2d(&r, curve, t, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT(s == QAWS_STATUS_OK, "hybrid eval ok");
 	}
 
@@ -208,7 +208,7 @@ static void test_yuksel_3d(void)
 	desc.closed = 0;
 
 	qaws_curve* curve = NULL;
-	qaws_status s = qaws_curve_create_yuksel(&desc, &curve);
+	qaws_status s = qaws_curve_create_yuksel(&curve, &desc);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(qaws_curve_get_dimension(curve) == QAWS_DIMENSION_3D, "dim == 3D");
 
@@ -218,7 +218,7 @@ static void test_yuksel_3d(void)
 	for (pi = 0; pi < 20; pi++) {
 		qaws_scalar t = range.min_value +
 			(qaws_scalar)pi * (range.max_value - range.min_value) / (qaws_scalar)19;
-		s = qaws_curve_evaluate_3d(curve, t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &r);
+		s = qaws_curve_evaluate_3d(&r, curve, t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1);
 		TEST_ASSERT(s == QAWS_STATUS_OK, "3d eval ok");
 	}
 
@@ -238,7 +238,7 @@ static void test_yuksel_error_handling(void)
 	desc.closed = 0;
 
 	qaws_curve* curve = NULL;
-	qaws_status s = qaws_curve_create_yuksel(&desc, &curve);
+	qaws_status s = qaws_curve_create_yuksel(&curve, &desc);
 	TEST_ASSERT(s == QAWS_STATUS_INVALID_CONTROL_POINT_COUNT, "too few points");
 	TEST_ASSERT(curve == NULL, "curve is NULL on error");
 
@@ -249,13 +249,13 @@ static void test_yuksel_error_handling(void)
 		desc.control_points = pts3;
 		desc.control_point_count = 3;
 		desc.mode = QAWS_YUKSEL_MODE_CIRCULAR;
-		s = qaws_curve_create_yuksel(&desc, &curve);
+		s = qaws_curve_create_yuksel(&curve, &desc);
 		TEST_ASSERT(s == QAWS_STATUS_OK, "circular 3d accepted");
 		if (curve) {
 			/* Verify we can evaluate the curve */
 			qaws_eval_result_3d res3d;
-			qaws_status es = qaws_curve_evaluate_3d(curve, (qaws_scalar)0.5,
-				QAWS_EVAL_FLAG_POSITION, &res3d);
+			qaws_status es = qaws_curve_evaluate_3d(&res3d, curve,
+				(qaws_scalar)0.5, QAWS_EVAL_FLAG_POSITION);
 			TEST_ASSERT(es == QAWS_STATUS_OK, "circular 3d eval ok");
 			qaws_curve_destroy(curve);
 			curve = NULL;
@@ -263,7 +263,7 @@ static void test_yuksel_error_handling(void)
 	}
 
 	/* NULL desc */
-	s = qaws_curve_create_yuksel(NULL, &curve);
+	s = qaws_curve_create_yuksel(&curve, NULL);
 	TEST_ASSERT(s == QAWS_STATUS_INVALID_ARGUMENT, "null desc rejected");
 }
 
@@ -288,15 +288,15 @@ static void test_yuksel_3d_circular(void)
 		desc.mode = QAWS_YUKSEL_MODE_CIRCULAR;
 		desc.closed = 0;
 
-		s = qaws_curve_create_yuksel(&desc, &curve);
+		s = qaws_curve_create_yuksel(&curve, &desc);
 		TEST_ASSERT_STATUS(s);
 		TEST_ASSERT(curve != NULL, "3D circular yuksel created");
 
 		range = qaws_curve_get_parameter_range(curve);
 
 		/* Evaluate at start */
-		s = qaws_curve_evaluate_3d(curve, range.min_value,
-			QAWS_EVAL_FLAG_POSITION, &r);
+		s = qaws_curve_evaluate_3d(&r, curve,
+			range.min_value, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT_STATUS(s);
 		TEST_ASSERT(scalar_is_finite(r.position.x), "3d circ start x finite");
 		TEST_ASSERT(scalar_is_finite(r.position.y), "3d circ start y finite");
@@ -306,15 +306,15 @@ static void test_yuksel_3d_circular(void)
 		{
 			qaws_scalar tmid = (range.min_value + range.max_value)
 				* (qaws_scalar)0.5;
-			s = qaws_curve_evaluate_3d(curve, tmid,
-				QAWS_EVAL_FLAG_POSITION, &r);
+			s = qaws_curve_evaluate_3d(&r, curve,
+				tmid, QAWS_EVAL_FLAG_POSITION);
 			TEST_ASSERT_STATUS(s);
 			TEST_ASSERT(scalar_is_finite(r.position.x), "3d circ mid x finite");
 		}
 
 		/* Evaluate at end */
-		s = qaws_curve_evaluate_3d(curve, range.max_value,
-			QAWS_EVAL_FLAG_POSITION, &r);
+		s = qaws_curve_evaluate_3d(&r, curve,
+			range.max_value, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT_STATUS(s);
 		TEST_ASSERT(scalar_is_finite(r.position.x), "3d circ end x finite");
 
@@ -338,19 +338,19 @@ static void test_yuksel_3d_circular(void)
 		desc.mode = QAWS_YUKSEL_MODE_ELLIPTICAL;
 		desc.closed = 0;
 
-		s = qaws_curve_create_yuksel(&desc, &curve);
+		s = qaws_curve_create_yuksel(&curve, &desc);
 		TEST_ASSERT_STATUS(s);
 		TEST_ASSERT(curve != NULL, "3D elliptical yuksel created");
 
 		range = qaws_curve_get_parameter_range(curve);
 
-		s = qaws_curve_evaluate_3d(curve, range.min_value,
-			QAWS_EVAL_FLAG_POSITION, &r);
+		s = qaws_curve_evaluate_3d(&r, curve,
+			range.min_value, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT_STATUS(s);
 		TEST_ASSERT(scalar_is_finite(r.position.x), "3d ellip start finite");
 
-		s = qaws_curve_evaluate_3d(curve, range.max_value,
-			QAWS_EVAL_FLAG_POSITION, &r);
+		s = qaws_curve_evaluate_3d(&r, curve,
+			range.max_value, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT_STATUS(s);
 		TEST_ASSERT(scalar_is_finite(r.position.x), "3d ellip end finite");
 
@@ -374,19 +374,19 @@ static void test_yuksel_3d_circular(void)
 		desc.mode = QAWS_YUKSEL_MODE_HYBRID;
 		desc.closed = 0;
 
-		s = qaws_curve_create_yuksel(&desc, &curve);
+		s = qaws_curve_create_yuksel(&curve, &desc);
 		TEST_ASSERT_STATUS(s);
 		TEST_ASSERT(curve != NULL, "3D hybrid yuksel created");
 
 		range = qaws_curve_get_parameter_range(curve);
 
-		s = qaws_curve_evaluate_3d(curve, range.min_value,
-			QAWS_EVAL_FLAG_POSITION, &r);
+		s = qaws_curve_evaluate_3d(&r, curve,
+			range.min_value, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT_STATUS(s);
 		TEST_ASSERT(scalar_is_finite(r.position.x), "3d hybrid start finite");
 
-		s = qaws_curve_evaluate_3d(curve, range.max_value,
-			QAWS_EVAL_FLAG_POSITION, &r);
+		s = qaws_curve_evaluate_3d(&r, curve,
+			range.max_value, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT_STATUS(s);
 		TEST_ASSERT(scalar_is_finite(r.position.x), "3d hybrid end finite");
 
@@ -408,7 +408,7 @@ static void test_yuksel_3d_circular(void)
 		desc.mode = QAWS_YUKSEL_MODE_CIRCULAR;
 		desc.closed = 0;
 
-		s = qaws_curve_create_yuksel(&desc, &curve);
+		s = qaws_curve_create_yuksel(&curve, &desc);
 		/* Should succeed (fallback to bezier) or return degenerate */
 		TEST_ASSERT(s == QAWS_STATUS_OK || s == QAWS_STATUS_DEGENERATE_CURVE,
 			"collinear 3D yuksel handled");
@@ -423,8 +423,8 @@ static void test_yuksel_3d_circular(void)
 				qaws_scalar t = range.min_value +
 					(qaws_scalar)pi * (range.max_value - range.min_value)
 					/ (qaws_scalar)9;
-				qaws_status es = qaws_curve_evaluate_3d(curve, t,
-					QAWS_EVAL_FLAG_POSITION, &r);
+				qaws_status es = qaws_curve_evaluate_3d(&r, curve,
+					t, QAWS_EVAL_FLAG_POSITION);
 				TEST_ASSERT(es == QAWS_STATUS_OK, "collinear 3d eval ok");
 			}
 

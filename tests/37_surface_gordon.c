@@ -15,7 +15,7 @@ static qaws_curve* make_line_3d(qaws_vec3 a, qaws_vec3 b)
 	d.degree = 1;
 	d.control_points = pts;
 	d.control_point_count = 2;
-	qaws_curve_create_bezier(&d, &c);
+	qaws_curve_create_bezier(&c, &d);
 	return c;
 }
 
@@ -35,7 +35,7 @@ static qaws_curve* make_quad_3d(qaws_vec3 a, qaws_vec3 b, qaws_vec3 c_pt)
 	d.degree = 2;
 	d.control_points = pts;
 	d.control_point_count = 3;
-	qaws_curve_create_bezier(&d, &crv);
+	qaws_curve_create_bezier(&crv, &d);
 	return crv;
 }
 
@@ -88,15 +88,15 @@ static void test_gordon_2x2(void)
 		desc.v_curves = v_curves;
 		desc.v_curve_count = 2;
 		desc.u_params = u_params;
-		s = qaws_surface_create_gordon(&desc, &surf);
+		s = qaws_surface_create_gordon(&surf, &desc);
 	}
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(surf != NULL, "gordon 2x2 surface created");
 
 	/* Corner (0,0) ~ (0,0,0) */
 	memset(&r, 0, sizeof(r));
-	s = qaws_surface_evaluate(surf, 0, 0,
-		QAWS_SURFACE_EVAL_POSITION, &r);
+	s = qaws_surface_evaluate(&r, surf, 0,
+		0, QAWS_SURFACE_EVAL_POSITION);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(fabs(r.position.x) < TOLERANCE_LOOSE, "gordon2 (0,0) x");
 	TEST_ASSERT(fabs(r.position.y) < TOLERANCE_LOOSE, "gordon2 (0,0) y");
@@ -104,8 +104,8 @@ static void test_gordon_2x2(void)
 
 	/* Corner (1,1) ~ (4,3,0) */
 	memset(&r, 0, sizeof(r));
-	s = qaws_surface_evaluate(surf, 1, 1,
-		QAWS_SURFACE_EVAL_POSITION, &r);
+	s = qaws_surface_evaluate(&r, surf, 1,
+		1, QAWS_SURFACE_EVAL_POSITION);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(approx_eq_loose(r.position.x, (qaws_scalar)4.0), "gordon2 (1,1) x");
 	TEST_ASSERT(approx_eq_loose(r.position.y, (qaws_scalar)3.0), "gordon2 (1,1) y");
@@ -113,8 +113,8 @@ static void test_gordon_2x2(void)
 
 	/* Center (0.5,0.5) ~ (2,1.5,0) -- same as Coons on flat quad */
 	memset(&r, 0, sizeof(r));
-	s = qaws_surface_evaluate(surf, (qaws_scalar)0.5, (qaws_scalar)0.5,
-		QAWS_SURFACE_EVAL_POSITION, &r);
+	s = qaws_surface_evaluate(&r, surf, (qaws_scalar)0.5,
+		(qaws_scalar)0.5, QAWS_SURFACE_EVAL_POSITION);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(approx_eq_loose(r.position.x, (qaws_scalar)2.0), "gordon2 center x");
 	TEST_ASSERT(approx_eq_loose(r.position.y, (qaws_scalar)1.5), "gordon2 center y");
@@ -211,7 +211,7 @@ static void test_gordon_3x3(void)
 		desc.v_curves = v_curves;
 		desc.v_curve_count = 3;
 		desc.u_params = u_params;
-		s = qaws_surface_create_gordon(&desc, &surf);
+		s = qaws_surface_create_gordon(&surf, &desc);
 	}
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(surf != NULL, "gordon 3x3 surface created");
@@ -219,8 +219,8 @@ static void test_gordon_3x3(void)
 	/* Verify interpolation at grid intersections */
 	/* Corner (0,0) ~ (0,0,0) */
 	memset(&r, 0, sizeof(r));
-	s = qaws_surface_evaluate(surf, 0, 0,
-		QAWS_SURFACE_EVAL_POSITION, &r);
+	s = qaws_surface_evaluate(&r, surf, 0,
+		0, QAWS_SURFACE_EVAL_POSITION);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(fabs(r.position.x) < TOLERANCE_LOOSE, "gordon3 (0,0) x");
 	TEST_ASSERT(fabs(r.position.y) < TOLERANCE_LOOSE, "gordon3 (0,0) y");
@@ -228,8 +228,8 @@ static void test_gordon_3x3(void)
 
 	/* Center (0.5,0.5) ~ (2, 1.5, 1) -- interpolation at grid center */
 	memset(&r, 0, sizeof(r));
-	s = qaws_surface_evaluate(surf, (qaws_scalar)0.5, (qaws_scalar)0.5,
-		QAWS_SURFACE_EVAL_POSITION, &r);
+	s = qaws_surface_evaluate(&r, surf, (qaws_scalar)0.5,
+		(qaws_scalar)0.5, QAWS_SURFACE_EVAL_POSITION);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(approx_eq_loose(r.position.x, (qaws_scalar)2.0), "gordon3 center x");
 	TEST_ASSERT(approx_eq_loose(r.position.y, (qaws_scalar)1.5), "gordon3 center y");
@@ -237,8 +237,8 @@ static void test_gordon_3x3(void)
 
 	/* Corner (1,1) ~ (4,3,0) */
 	memset(&r, 0, sizeof(r));
-	s = qaws_surface_evaluate(surf, 1, 1,
-		QAWS_SURFACE_EVAL_POSITION, &r);
+	s = qaws_surface_evaluate(&r, surf, 1,
+		1, QAWS_SURFACE_EVAL_POSITION);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(approx_eq_loose(r.position.x, (qaws_scalar)4.0), "gordon3 (1,1) x");
 	TEST_ASSERT(approx_eq_loose(r.position.y, (qaws_scalar)3.0), "gordon3 (1,1) y");
@@ -326,7 +326,7 @@ static void visual_obj_gordon(void)
 		desc.v_curves = v_curves;
 		desc.v_curve_count = 3;
 		desc.u_params = u_params;
-		qaws_surface_create_gordon(&desc, &surf);
+		qaws_surface_create_gordon(&surf, &desc);
 	}
 	if (!surf) goto cleanup_gordon;
 

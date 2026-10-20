@@ -76,7 +76,7 @@ static void hf_add(hf_scene* sc, double const* pts, unsigned int n, unsigned int
 	d.control_point_count = m;
 	d.knots = kn;
 	d.knot_count = nk;
-	if (qaws_curve_create_bspline(&d, &c) == QAWS_STATUS_OK)
+	if (qaws_curve_create_bspline(&c, &d) == QAWS_STATUS_OK)
 	{
 		if (sc->count == sc->cap)
 		{
@@ -291,7 +291,7 @@ static void hf_time(hf_scene const* sc, int pairwise, double* tb, double* tp, un
 		t0 = hf_now();
 		do
 		{
-			qaws_curve_batch_find_intersections_2d(&d, *hits, cap, nb, st);
+			qaws_curve_batch_find_intersections_2d(*hits, nb, st, cap, &d);
 			reps++;
 		} while (hf_now() - t0 < 0.05);
 		*tb = (hf_now() - t0) / reps;
@@ -307,7 +307,7 @@ static void hf_time(hf_scene const* sc, int pairwise, double* tb, double* tp, un
 			{
 				qaws_intersection_2d buf[64];
 				unsigned int k = 0;
-				qaws_curve_find_intersections_2d(sc->curves[i], sc->curves[j], buf, 64, &k);
+				qaws_curve_find_intersections_2d(buf, &k, sc->curves[i], sc->curves[j], 64);
 				*np += k;
 			}
 	*tp = hf_now() - t0;
@@ -349,7 +349,7 @@ static void hf_levels_time(hf_scene const* sc, unsigned int n, double* t, unsign
 	t0 = hf_now();
 	do
 	{
-		qaws_curve_batch_find_level_crossings(&d, out, 1 << 16, count);
+		qaws_curve_batch_find_level_crossings(out, count, 1 << 16, &d);
 		reps++;
 	} while (hf_now() - t0 < 0.05);
 	*t = (hf_now() - t0) / reps;

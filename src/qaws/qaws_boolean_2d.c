@@ -17,7 +17,7 @@
 static qaws_status bo_copy(qaws_curve const* c, qaws_curve** out)
 {
 	qaws_range r = qaws_curve_get_parameter_range(c);
-	return qaws_curve_extract(c, r.min_value, r.max_value, out);
+	return qaws_curve_extract(out, c, r.min_value, r.max_value);
 }
 
 static qaws_status bo_path_curve(qaws_path_2d const* p, qaws_curve** out)
@@ -40,7 +40,7 @@ static qaws_status bo_path_curve(qaws_path_2d const* p, qaws_curve** out)
 		d.dimension = QAWS_DIMENSION_2D;
 		d.segments = seg;
 		d.segment_count = p->curve_count;
-		s = qaws_curve_create_composite(&d, out);
+		s = qaws_curve_create_composite(out, &d);
 	}
 	if (s != QAWS_STATUS_OK)
 		for (i = 0; i < made; i++)
@@ -50,12 +50,12 @@ static qaws_status bo_path_curve(qaws_path_2d const* p, qaws_curve** out)
 }
 
 qaws_status qaws_boolean_2d(
+	qaws_curve** out_boundaries,
+	unsigned int* out_count,
 	qaws_curve const* region_a,
 	qaws_curve const* region_b,
-	qaws_boolean_op operation,
-	qaws_curve** out_boundaries,
 	unsigned int boundary_capacity,
-	unsigned int* out_count)
+	qaws_boolean_op operation)
 {
 	qaws_path_2d pa, pb;
 	qaws_clip_result* r = NULL;
@@ -80,14 +80,14 @@ qaws_status qaws_boolean_2d(
 
 	pa.curves = &region_a; pa.curve_count = 1; pa.closed = 1;
 	pb.curves = &region_b; pb.curve_count = 1; pb.closed = 1;
-	s = qaws_clip_boolean(ct, QAWS_FILL_NON_ZERO, &pa, 1, &pb, 1, &r);
+	s = qaws_clip_boolean(&r, &pa, &pb, 1, 1, ct, QAWS_FILL_NON_ZERO);
 	if (s != QAWS_STATUS_OK)
 		return s;
 	n = qaws_clip_result_get_path_count(r);
 	for (i = 0; i < n && i < boundary_capacity && s == QAWS_STATUS_OK; i++)
 	{
 		qaws_path_2d p;
-		qaws_clip_result_get_path(r, i, &p);
+		qaws_clip_result_get_path(&p, r, i);
 		s = bo_path_curve(&p, &out_boundaries[i]);
 		if (s == QAWS_STATUS_OK)
 			(*out_count)++;

@@ -22,7 +22,7 @@ static qaws_surface* bspline_surface(qaws_scalar const* cps)
 	d.control_points = (qaws_vec3 const*)cps;
 	d.u_point_count = SN;
 	d.v_point_count = SN;
-	qaws_surface_create_bspline(&d, &s);
+	qaws_surface_create_bspline(&s, &d);
 	return s;
 }
 
@@ -46,10 +46,10 @@ static void draw_surface(svg* s, viewport const* v, qaws_surface const* surf, do
 			qaws_surface_eval_result r[4];
 			double x[4], y[4], zc = 0;
 			int k;
-			qaws_surface_evaluate(surf, u0, v0, QAWS_SURFACE_EVAL_POSITION, &r[0]);
-			qaws_surface_evaluate(surf, u1, v0, QAWS_SURFACE_EVAL_POSITION, &r[1]);
-			qaws_surface_evaluate(surf, u1, v1, QAWS_SURFACE_EVAL_POSITION, &r[2]);
-			qaws_surface_evaluate(surf, u0, v1, QAWS_SURFACE_EVAL_POSITION, &r[3]);
+			qaws_surface_evaluate(&r[0], surf, u0, v0, QAWS_SURFACE_EVAL_POSITION);
+			qaws_surface_evaluate(&r[1], surf, u1, v0, QAWS_SURFACE_EVAL_POSITION);
+			qaws_surface_evaluate(&r[2], surf, u1, v1, QAWS_SURFACE_EVAL_POSITION);
+			qaws_surface_evaluate(&r[3], surf, u0, v1, QAWS_SURFACE_EVAL_POSITION);
 			for (k = 0; k < 4; k++)
 			{
 				iso(v, r[k].position.x, r[k].position.y, r[k].position.z, &x[k], &y[k]);
@@ -108,7 +108,7 @@ static void demo_surface(void)
 		qaws_diff_views views;
 		double l = 0;
 
-		qaws_surface_eval_batch_tangent(NULL, sf, us, vs, NULL, NULL, SG * SG, QAWS_SJET_P, NULL, primal, tangent);
+		qaws_surface_eval_batch_tangent(primal, tangent, sf, us, vs, NULL, NULL, NULL, SG * SG, QAWS_SJET_P, NULL);
 		memset(ybar, 0, sizeof(ybar));
 		for (i = 0; i < SG * SG; i++)
 		{
@@ -124,7 +124,7 @@ static void demo_surface(void)
 		memset(grad, 0, sizeof(grad));
 		views = one_field(&fv, QAWS_FIELD_CONTROL_POINTS, grad, SN * SN, 3);
 		fv.component_mask = 1u << 2; /* z only */
-		qaws_surface_eval_batch_adjoint(NULL, sf, us, vs, SG * SG, QAWS_SJET_P, ybar, &views, NULL, NULL);
+		qaws_surface_eval_batch_adjoint(&views, NULL, NULL, sf, us, vs, ybar, SG * SG, QAWS_SJET_P, NULL);
 		qaws_surface_destroy(sf);
 		if (it < S_ITERS)
 			adam_step(&opt, cps, grad, SN * SN * 3, 0.01);
@@ -157,15 +157,15 @@ static void demo_surface(void)
 		double gmax = 0, x, y;
 		char col[32];
 
-		qaws_surface_eval_jet(s1, u0, v0, QAWS_SJET_ORDER2, &p);
-		qaws_surface_geometry_eval(&p, NULL, NULL, &g, NULL, NULL, NULL);
+		qaws_surface_eval_jet(&p, s1, u0, v0, QAWS_SJET_ORDER2);
+		qaws_surface_geometry_eval(&g, NULL, NULL, NULL, &p, NULL, NULL);
 		memset(&gbar, 0, sizeof(gbar));
 		gbar.gaussian = 1;
 		memset(&ybar, 0, sizeof(ybar));
-		qaws_surface_geometry_adjoint(&p, &gbar, &ybar, NULL);
+		qaws_surface_geometry_adjoint(NULL, &ybar, &p, &gbar);
 		memset(grad, 0, sizeof(grad));
 		views = one_field(&fv, QAWS_FIELD_CONTROL_POINTS, grad, SN * SN, 3);
-		qaws_surface_eval_adjoint(NULL, s1, u0, v0, ybar.channels, &ybar, &views, NULL, NULL);
+		qaws_surface_eval_adjoint(&views, NULL, NULL, s1, &ybar, u0, v0, ybar.channels, NULL);
 		for (i = 0; i < SN * SN; i++)
 			if (fabs(grad[i * 3 + 2]) > gmax) gmax = fabs(grad[i * 3 + 2]);
 

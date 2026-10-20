@@ -23,7 +23,7 @@ static qaws_curve* bo_conic_curve(double dx, double dy, double sx)
 	d.weight_count = 7;
 	d.knots = kn;
 	d.knot_count = 10;
-	qaws_curve_create_nurbs(&d, &c);
+	qaws_curve_create_nurbs(&c, &d);
 	return c;
 }
 
@@ -31,8 +31,8 @@ static void bo_draw_piece(svg* sv, viewport const* v, qaws_exact_curve const* c,
 {
 	double ts, te, span, t0 = 0.5 * (p->t0_lo + p->t0_hi), t1 = 0.5 * (p->t1_lo + p->t1_hi), xy[2 * 301];
 	unsigned int sc = qaws_exact_curve_span_count(c), i;
-	qaws_exact_curve_span_bezier(c, 0, NULL, &ts, NULL, NULL, NULL);
-	qaws_exact_curve_span_bezier(c, sc - 1, NULL, NULL, &te, NULL, NULL);
+	qaws_exact_curve_span_bezier(NULL, &ts, NULL, NULL, NULL, c, 0);
+	qaws_exact_curve_span_bezier(NULL, NULL, &te, NULL, NULL, c, sc - 1);
 	span = te - ts;
 	if (!p->reversed && t1 <= t0) t1 += span;
 	if (p->reversed && t1 >= t0) t1 -= span;
@@ -41,7 +41,7 @@ static void bo_draw_piece(svg* sv, viewport const* v, qaws_exact_curve const* c,
 		double t = t0 + (t1 - t0) * i / 300.0, q[2];
 		while (t > te) t -= span;
 		while (t < ts) t += span;
-		qaws_exact_curve_evaluate(c, t, 0, q, NULL);
+		qaws_exact_curve_evaluate(q, NULL, c, t, 0);
 		xy[2 * i] = vx(v, q[0]);
 		xy[2 * i + 1] = vy(v, q[1]);
 	}
@@ -60,11 +60,11 @@ static void demo_boolean(void)
 	unsigned int nx = 0, op, k;
 	char buf[300];
 	svg sv;
-	qaws_exact_curve_prepare(NULL, ca, &ea, NULL);
-	qaws_exact_curve_prepare(NULL, cb, &eb, NULL);
+	qaws_exact_curve_prepare(&ea, NULL, ca, NULL);
+	qaws_exact_curve_prepare(&eb, NULL, cb, NULL);
 	curves[0] = ea;
 	curves[1] = eb;
-	qaws_exact_curve_curve_hits(ea, eb, x, 16, &nx);
+	qaws_exact_curve_curve_hits(x, &nx, ea, eb, 16);
 	svg_open(&sv, "showcase/exact11_boolean.svg", 1260, 480, "Certified 2D Booleans from the source curves",
 		"Two NURBS conic regions (a in blue, b mirrored, in orange). Each result boundary is made of pieces of the inputs, cut at certified crossings.");
 	for (op = 0; op < 3; op++)
@@ -73,7 +73,7 @@ static void demo_boolean(void)
 		qaws_exact_piece pieces[32];
 		qaws_exact_loop loops[8];
 		unsigned int np = 0, nl = 0;
-		qaws_status st = qaws_exact_boolean_2d(ea, eb, op, pieces, 32, &np, loops, 8, &nl);
+		qaws_status st = qaws_exact_boolean_2d(pieces, &np, loops, &nl, ea, eb, 32, 8, op);
 		svg_panel(&sv, &v, names[op]);
 		/* the inputs, faint */
 		for (k = 0; k < 2; k++)
@@ -83,7 +83,7 @@ static void demo_boolean(void)
 			for (i = 0; i <= 300; i++)
 			{
 				double q[2];
-				qaws_exact_curve_evaluate(curves[k], 3.0 * i / 300.0, 0, q, NULL);
+				qaws_exact_curve_evaluate(q, NULL, curves[k], 3.0 * i / 300.0, 0);
 				xy[2 * i] = vx(&v, q[0]);
 				xy[2 * i + 1] = vy(&v, q[1]);
 			}
@@ -94,7 +94,7 @@ static void demo_boolean(void)
 		for (k = 0; k < nx; k++)
 		{
 			double q[2];
-			qaws_exact_curve_evaluate(ea, 0.5 * (x[k].a_lo + x[k].a_hi), 0, q, NULL);
+			qaws_exact_curve_evaluate(q, NULL, ea, 0.5 * (x[k].a_lo + x[k].a_hi), 0);
 			svg_circle(&sv, vx(&v, q[0]), vy(&v, q[1]), 5, "#ffffff", "#1a7f37");
 		}
 		sprintf(buf, "%u loop(s), %u pieces (status %d)", nl, np, (int)st);

@@ -169,8 +169,8 @@ static qaws_status push_piece(qaws_exact_piece* out, unsigned int capacity, unsi
 	return QAWS_STATUS_OK;
 }
 
-qaws_status qaws_exact_boolean_2d(qaws_exact_curve const* a, qaws_exact_curve const* b, unsigned int operation, qaws_exact_piece* out_pieces,
-	unsigned int piece_capacity, unsigned int* out_piece_count, qaws_exact_loop* out_loops, unsigned int loop_capacity, unsigned int* out_loop_count)
+qaws_status qaws_exact_boolean_2d(qaws_exact_piece* out_pieces, unsigned int* out_piece_count, qaws_exact_loop* out_loops, unsigned int* out_loop_count,
+	qaws_exact_curve const* a, qaws_exact_curve const* b, unsigned int piece_capacity, unsigned int loop_capacity, unsigned int operation)
 {
 	qaws_exact_pair* pairs;
 	bo_cross* x;
@@ -188,14 +188,14 @@ qaws_status qaws_exact_boolean_2d(qaws_exact_curve const* a, qaws_exact_curve co
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	pairs = NULL;
 	x = NULL;
-	sd = (bo_side*)qaws_internal_alloc(NULL, qaws_internal_mul2(sizeof(bo_side), 2));
+	sd = (bo_side*)qaws_internal_alloc(qaws_internal_mul2(sizeof(bo_side), 2), NULL);
 	if (!sd)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	/* both boundaries simple */
 	for (s = 0; s < 2 && st == QAWS_STATUS_OK; s++)
 	{
 		qaws_exact_pair one;
-		st = qaws_exact_curve_self_hits(s == 0 ? a : b, &one, 1, &np);
+		st = qaws_exact_curve_self_hits(&one, &np, s == 0 ? a : b, 1);
 		if ((st == QAWS_STATUS_OK && np > 0) || st == QAWS_STATUS_BUFFER_TOO_SMALL)
 			st = QAWS_STATUS_CERTIFICATION_FAILED;
 	}
@@ -204,14 +204,14 @@ qaws_status qaws_exact_boolean_2d(qaws_exact_curve const* a, qaws_exact_curve co
 	{
 		if (st != QAWS_STATUS_OK)
 			break;
-		qaws_internal_dealloc(NULL, pairs);
-		pairs = (qaws_exact_pair*)qaws_internal_alloc(NULL, qaws_internal_mul2(sizeof(qaws_exact_pair), cap));
+		qaws_internal_dealloc(pairs, NULL);
+		pairs = (qaws_exact_pair*)qaws_internal_alloc(qaws_internal_mul2(sizeof(qaws_exact_pair), cap), NULL);
 		if (!pairs)
 		{
 			st = QAWS_STATUS_ALLOCATION_FAILURE;
 			break;
 		}
-		st = qaws_exact_curve_curve_hits(a, b, pairs, cap, &np);
+		st = qaws_exact_curve_curve_hits(pairs, &np, a, b, cap);
 		if (st != QAWS_STATUS_BUFFER_TOO_SMALL)
 			break;
 		st = QAWS_STATUS_OK;
@@ -223,8 +223,8 @@ qaws_status qaws_exact_boolean_2d(qaws_exact_curve const* a, qaws_exact_curve co
 			st = QAWS_STATUS_CERTIFICATION_FAILED;
 	if (st == QAWS_STATUS_OK)
 	{
-		x = (bo_cross*)qaws_internal_alloc(NULL, qaws_internal_mul2(sizeof(bo_cross), (np + 1)));
-		ints = (int*)qaws_internal_alloc(NULL, qaws_internal_mul3(sizeof(int), 10, (np + 1)));
+		x = (bo_cross*)qaws_internal_alloc(qaws_internal_mul2(sizeof(bo_cross), (np + 1)), NULL);
+		ints = (int*)qaws_internal_alloc(qaws_internal_mul3(sizeof(int), 10, (np + 1)), NULL);
 		if (!x || !ints)
 			st = QAWS_STATUS_ALLOCATION_FAILURE;
 		for (s = 0; s < 2 && st == QAWS_STATUS_OK; s++)
@@ -372,10 +372,10 @@ qaws_status qaws_exact_boolean_2d(qaws_exact_curve const* a, qaws_exact_curve co
 				}
 			}
 	}
-	qaws_internal_dealloc(NULL, pairs);
-	qaws_internal_dealloc(NULL, x);
-	qaws_internal_dealloc(NULL, ints);
-	qaws_internal_dealloc(NULL, sd);
+	qaws_internal_dealloc(pairs, NULL);
+	qaws_internal_dealloc(x, NULL);
+	qaws_internal_dealloc(ints, NULL);
+	qaws_internal_dealloc(sd, NULL);
 	*out_piece_count = npieces;
 	*out_loop_count = nloops;
 	return st;

@@ -26,8 +26,8 @@ static void test_composite(void)
 		bd2.control_points = cp2;
 		bd2.control_point_count = 2;
 
-		TEST_ASSERT_STATUS(qaws_curve_create_bezier(&bd1, &seg1));
-		TEST_ASSERT_STATUS(qaws_curve_create_bezier(&bd2, &seg2));
+		TEST_ASSERT_STATUS(qaws_curve_create_bezier(&seg1, &bd1));
+		TEST_ASSERT_STATUS(qaws_curve_create_bezier(&seg2, &bd2));
 
 		segs[0] = seg1;
 		segs[1] = seg2;
@@ -37,7 +37,7 @@ static void test_composite(void)
 		cd.segments = segs;
 		cd.segment_count = 2;
 
-		TEST_ASSERT_STATUS(qaws_curve_create_composite(&cd, &comp));
+		TEST_ASSERT_STATUS(qaws_curve_create_composite(&comp, &cd));
 		TEST_ASSERT(comp != NULL, "composite created");
 		TEST_ASSERT(qaws_curve_get_kind(comp) == QAWS_CURVE_KIND_COMPOSITE,
 			"composite kind");
@@ -51,30 +51,30 @@ static void test_composite(void)
 		}
 
 		/* t=0: start of first segment = (0,0) */
-		qaws_curve_evaluate_2d(comp, 0, QAWS_EVAL_FLAG_POSITION, &r);
+		qaws_curve_evaluate_2d(&r, comp, 0, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT(approx_eq(r.position.x, 0) && approx_eq(r.position.y, 0),
 			"composite start");
 
 		/* t=1: end of first segment / start of second = (1,1) */
-		qaws_curve_evaluate_2d(comp, 1, QAWS_EVAL_FLAG_POSITION, &r);
+		qaws_curve_evaluate_2d(&r, comp, 1, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT(approx_eq(r.position.x, 1) && approx_eq(r.position.y, 1),
 			"composite junction");
 
 		/* t=2: end = (2,0) */
-		qaws_curve_evaluate_2d(comp, 2, QAWS_EVAL_FLAG_POSITION, &r);
+		qaws_curve_evaluate_2d(&r, comp, 2, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT(approx_eq(r.position.x, 2) && approx_eq(r.position.y, 0),
 			"composite end");
 
 		/* Derivatives: linear segments have constant D1 */
-		qaws_curve_evaluate_2d(comp, (qaws_scalar)0.5,
-			QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2, &r);
+		qaws_curve_evaluate_2d(&r, comp,
+			(qaws_scalar)0.5, QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2);
 		TEST_ASSERT(r.valid_flags & QAWS_EVAL_FLAG_D1, "composite d1 valid");
 		/* D1 of first segment (0,0)->(1,1) should be (1,1) scaled by chain rule */
 		TEST_ASSERT(approx_eq(r.d1.x, 1) && approx_eq(r.d1.y, 1),
 			"composite d1 first seg");
 
-		qaws_curve_evaluate_2d(comp, (qaws_scalar)1.5,
-			QAWS_EVAL_FLAG_D1, &r);
+		qaws_curve_evaluate_2d(&r, comp,
+			(qaws_scalar)1.5, QAWS_EVAL_FLAG_D1);
 		/* D1 of second segment (1,1)->(2,0) should be (1,-1) */
 		TEST_ASSERT(approx_eq(r.d1.x, 1) && approx_eq(r.d1.y, -1),
 			"composite d1 second seg");
@@ -89,7 +89,7 @@ static void test_composite(void)
 	/* Error handling: NULL desc */
 	{
 		qaws_curve *crv = NULL;
-		TEST_ASSERT(qaws_curve_create_composite(NULL, &crv) != QAWS_STATUS_OK,
+		TEST_ASSERT(qaws_curve_create_composite(&crv, NULL) != QAWS_STATUS_OK,
 			"composite null desc rejected");
 	}
 }

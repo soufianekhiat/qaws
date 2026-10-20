@@ -22,7 +22,7 @@ static qaws_curve* make_circle_2d(qaws_scalar cx, qaws_scalar cy, qaws_scalar r)
 	desc.segments = &seg;
 	desc.segment_count = 1;
 
-	qaws_curve_create_arc(&desc, &curve);
+	qaws_curve_create_arc(&curve, &desc);
 	return curve;
 }
 
@@ -46,8 +46,8 @@ static void test_boolean_union(void)
 	TEST_ASSERT(circle_b != NULL, "circle B created");
 
 	memset(result, 0, sizeof(result));
-	s = qaws_boolean_2d(circle_a, circle_b, QAWS_BOOLEAN_UNION,
-		result, 4, &result_count);
+	s = qaws_boolean_2d(result, &result_count, circle_a,
+		circle_b, 4, QAWS_BOOLEAN_UNION);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(result_count >= 1, "union produced at least 1 boundary");
 	TEST_ASSERT(result[0] != NULL, "union boundary is non-null");
@@ -78,8 +78,8 @@ static void test_boolean_intersection(void)
 	circle_b = make_circle_2d((qaws_scalar)0.8, 0, (qaws_scalar)1.0);
 
 	memset(result, 0, sizeof(result));
-	s = qaws_boolean_2d(circle_a, circle_b, QAWS_BOOLEAN_INTERSECTION,
-		result, 4, &result_count);
+	s = qaws_boolean_2d(result, &result_count, circle_a,
+		circle_b, 4, QAWS_BOOLEAN_INTERSECTION);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(result_count >= 1, "intersection produced at least 1 boundary");
 
@@ -109,8 +109,8 @@ static void test_boolean_difference(void)
 	circle_b = make_circle_2d((qaws_scalar)0.8, 0, (qaws_scalar)1.0);
 
 	memset(result, 0, sizeof(result));
-	s = qaws_boolean_2d(circle_a, circle_b, QAWS_BOOLEAN_DIFFERENCE,
-		result, 4, &result_count);
+	s = qaws_boolean_2d(result, &result_count, circle_a,
+		circle_b, 4, QAWS_BOOLEAN_DIFFERENCE);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(result_count >= 1, "difference produced at least 1 boundary");
 
@@ -141,8 +141,8 @@ static void test_boolean_disjoint(void)
 
 	/* Union of disjoint circles: should get 2 boundaries */
 	memset(result, 0, sizeof(result));
-	s = qaws_boolean_2d(circle_a, circle_b, QAWS_BOOLEAN_UNION,
-		result, 4, &result_count);
+	s = qaws_boolean_2d(result, &result_count, circle_a,
+		circle_b, 4, QAWS_BOOLEAN_UNION);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(result_count == 2, "disjoint union: 2 boundaries");
 
@@ -155,8 +155,8 @@ static void test_boolean_disjoint(void)
 	/* Intersection of disjoint circles: empty */
 	result_count = 0;
 	memset(result, 0, sizeof(result));
-	s = qaws_boolean_2d(circle_a, circle_b, QAWS_BOOLEAN_INTERSECTION,
-		result, 4, &result_count);
+	s = qaws_boolean_2d(result, &result_count, circle_a,
+		circle_b, 4, QAWS_BOOLEAN_INTERSECTION);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(result_count == 0, "disjoint intersection: empty");
 
@@ -235,7 +235,7 @@ static void visual_svg_boolean(void)
 	draw_input_circles(&svg, circle_a, circle_b, 0, 0);
 	memset(result, 0, sizeof(result));
 	result_count = 0;
-	qaws_boolean_2d(circle_a, circle_b, QAWS_BOOLEAN_UNION, result, 4, &result_count);
+	qaws_boolean_2d(result, &result_count, circle_a, circle_b, 4, QAWS_BOOLEAN_UNION);
 	draw_bool_result_svg(&svg, result, result_count, "#50fa7b", 0, 0);
 	for (ri = 0; ri < result_count; ri++) qaws_curve_destroy(result[ri]);
 	svg_label(&svg, (qaws_scalar)-0.2, (qaws_scalar)-1.3, "Union", "#50fa7b");
@@ -244,7 +244,7 @@ static void visual_svg_boolean(void)
 	draw_input_circles(&svg, circle_a, circle_b, (qaws_scalar)3.5, 0);
 	memset(result, 0, sizeof(result));
 	result_count = 0;
-	qaws_boolean_2d(circle_a, circle_b, QAWS_BOOLEAN_INTERSECTION, result, 4, &result_count);
+	qaws_boolean_2d(result, &result_count, circle_a, circle_b, 4, QAWS_BOOLEAN_INTERSECTION);
 	draw_bool_result_svg(&svg, result, result_count, "#e94560", (qaws_scalar)3.5, 0);
 	for (ri = 0; ri < result_count; ri++) qaws_curve_destroy(result[ri]);
 	svg_label(&svg, (qaws_scalar)3.3, (qaws_scalar)-1.3, "Intersection", "#e94560");
@@ -253,7 +253,7 @@ static void visual_svg_boolean(void)
 	draw_input_circles(&svg, circle_a, circle_b, (qaws_scalar)7.0, 0);
 	memset(result, 0, sizeof(result));
 	result_count = 0;
-	qaws_boolean_2d(circle_a, circle_b, QAWS_BOOLEAN_DIFFERENCE, result, 4, &result_count);
+	qaws_boolean_2d(result, &result_count, circle_a, circle_b, 4, QAWS_BOOLEAN_DIFFERENCE);
 	draw_bool_result_svg(&svg, result, result_count, "#6272a4", (qaws_scalar)7.0, 0);
 	for (ri = 0; ri < result_count; ri++) qaws_curve_destroy(result[ri]);
 	svg_label(&svg, (qaws_scalar)6.8, (qaws_scalar)-1.3, "Difference", "#6272a4");

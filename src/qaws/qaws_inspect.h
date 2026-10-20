@@ -20,10 +20,10 @@ qaws_continuity qaws_curve_get_continuity(qaws_curve const* curve);
 
 /* Analysis helpers */
 qaws_status qaws_curve_compute_arc_length(
+	qaws_scalar* out_length,
 	qaws_curve const* curve,
 	qaws_scalar parameter_min,
-	qaws_scalar parameter_max,
-	qaws_scalar* out_length);
+	qaws_scalar parameter_max);
 /* The parameter at arc length `length` after parameter_min (safeguarded Newton on the measure above); OUT_OF_RANGE for
    a negative length or one past the end of the range. */
 qaws_status qaws_curve_compute_parameter_at_arc_length(
@@ -33,24 +33,24 @@ qaws_status qaws_curve_compute_parameter_at_arc_length(
 	qaws_scalar* out_parameter);
 
 qaws_status qaws_curve_compute_bounds_2d(
-	qaws_curve const* curve,
 	qaws_vec2* out_min,
-	qaws_vec2* out_max);
+	qaws_vec2* out_max,
+	qaws_curve const* curve);
 
 qaws_status qaws_curve_compute_bounds_3d(
-	qaws_curve const* curve,
 	qaws_vec3* out_min,
-	qaws_vec3* out_max);
+	qaws_vec3* out_max,
+	qaws_curve const* curve);
 
 qaws_status qaws_curve_find_closest_parameter_2d(
+	qaws_scalar* out_parameter,
 	qaws_curve const* curve,
-	qaws_vec2 point,
-	qaws_scalar* out_parameter);
+	qaws_vec2 point);
 
 qaws_status qaws_curve_find_closest_parameter_3d(
+	qaws_scalar* out_parameter,
 	qaws_curve const* curve,
-	qaws_vec3 point,
-	qaws_scalar* out_parameter);
+	qaws_vec3 point);
 
 /* The closest point with a certificate, for curves with Bezier spans (Bezier, rational Bezier, B-spline, NURBS and borrowed
    splines; the two functions above use it too): branch and bound over the spans' Bezier forms with convex-hull and fat-line
@@ -72,53 +72,53 @@ qaws_status qaws_curve_find_closest_point_certified_3d(
 	qaws_scalar* out_gap);
 
 qaws_status qaws_curve_get_span_continuity(
+	qaws_continuity* out_continuity,
 	qaws_curve const* curve,
-	unsigned int boundary_index,
-	qaws_continuity* out_continuity);
+	unsigned int boundary_index);
 
 /* Derived geometric helpers */
 qaws_status qaws_curve_compute_tangent_2d(
+	qaws_vec2* out_tangent,
 	qaws_curve const* curve,
-	qaws_scalar parameter,
-	qaws_vec2* out_tangent);
+	qaws_scalar parameter);
 
 qaws_status qaws_curve_compute_tangent_3d(
+	qaws_vec3* out_tangent,
 	qaws_curve const* curve,
-	qaws_scalar parameter,
-	qaws_vec3* out_tangent);
+	qaws_scalar parameter);
 
 qaws_status qaws_curve_compute_curvature_2d(
+	qaws_scalar* out_curvature,
 	qaws_curve const* curve,
-	qaws_scalar parameter,
-	qaws_scalar* out_curvature);
+	qaws_scalar parameter);
 
 qaws_status qaws_curve_compute_curvature_3d(
+	qaws_scalar* out_curvature,
 	qaws_curve const* curve,
-	qaws_scalar parameter,
-	qaws_scalar* out_curvature);
+	qaws_scalar parameter);
 
 qaws_status qaws_curve_compute_torsion_3d(
+	qaws_scalar* out_torsion,
 	qaws_curve const* curve,
-	qaws_scalar parameter,
-	qaws_scalar* out_torsion);
+	qaws_scalar parameter);
 
 qaws_status qaws_curve_compute_speed(
+	qaws_scalar* out_speed,
 	qaws_curve const* curve,
-	qaws_scalar parameter,
-	qaws_scalar* out_speed);
+	qaws_scalar parameter);
 
 /* Frenet frame */
 qaws_status qaws_curve_compute_normal_2d(
+	qaws_vec2* out_normal,
 	qaws_curve const* curve,
-	qaws_scalar parameter,
-	qaws_vec2* out_normal);
+	qaws_scalar parameter);
 
 qaws_status qaws_curve_compute_frenet_frame_3d(
-	qaws_curve const* curve,
-	qaws_scalar parameter,
 	qaws_vec3* out_tangent,
 	qaws_vec3* out_normal,
-	qaws_vec3* out_binormal);
+	qaws_vec3* out_binormal,
+	qaws_curve const* curve,
+	qaws_scalar parameter);
 
 /* Rotation-minimizing (parallel-transport, Bishop) frames at count non-decreasing parameters: out_frames[9 i ..] = the unit tangent,
    the normal and the binormal (tangent x normal), row i for parameters[i]. Defined where the Frenet frame is not (straight pieces,
@@ -135,18 +135,18 @@ qaws_status qaws_curve_compute_rotation_minimizing_frames_3d(
 
 /* Inflection point detection */
 qaws_status qaws_curve_find_inflection_points(
-	qaws_curve const* curve,
 	qaws_scalar* out_parameters,
-	unsigned int parameter_capacity,
-	unsigned int* out_count);
+	unsigned int* out_count,
+	qaws_curve const* curve,
+	unsigned int parameter_capacity);
 
 /* Extrema detection */
 qaws_status qaws_curve_find_extrema(
-	qaws_curve const* curve,
-	unsigned int axis,
 	qaws_scalar* out_parameters,
+	unsigned int* out_count,
+	qaws_curve const* curve,
 	unsigned int parameter_capacity,
-	unsigned int* out_count);
+	unsigned int axis);
 
 /* Curvature comb data */
 typedef struct qaws_curvature_sample_2d {
@@ -162,22 +162,22 @@ typedef struct qaws_curvature_sample_3d {
 } qaws_curvature_sample_3d;
 
 qaws_status qaws_curve_compute_curvature_comb_2d(
+	qaws_curvature_sample_2d* out_samples,
 	qaws_curve const* curve,
 	unsigned int sample_count,
-	qaws_curvature_sample_2d* out_samples,
 	unsigned int sample_capacity);
 
 qaws_status qaws_curve_compute_curvature_comb_3d(
+	qaws_curvature_sample_3d* out_samples,
 	qaws_curve const* curve,
 	unsigned int sample_count,
-	qaws_curvature_sample_3d* out_samples,
 	unsigned int sample_capacity);
 
 /* Winding number */
 qaws_status qaws_curve_compute_winding_number_2d(
+	int* out_winding_number,
 	qaws_curve const* curve,
-	qaws_vec2 point,
-	int* out_winding_number);
+	qaws_vec2 point);
 
 /* Intersection results */
 typedef struct qaws_intersection_2d {
@@ -194,82 +194,82 @@ typedef struct qaws_intersection_3d {
 
 /* Self-intersection detection */
 qaws_status qaws_curve_find_self_intersections_2d(
-	qaws_curve const* curve,
 	qaws_intersection_2d* out_intersections,
-	unsigned int intersection_capacity,
-	unsigned int* out_count);
+	unsigned int* out_count,
+	qaws_curve const* curve,
+	unsigned int intersection_capacity);
 
 qaws_status qaws_curve_find_self_intersections_3d(
-	qaws_curve const* curve,
 	qaws_intersection_3d* out_intersections,
-	unsigned int intersection_capacity,
-	unsigned int* out_count);
+	unsigned int* out_count,
+	qaws_curve const* curve,
+	unsigned int intersection_capacity);
 
 /* Curve-curve intersection */
 qaws_status qaws_curve_find_intersections_2d(
+	qaws_intersection_2d* out_intersections,
+	unsigned int* out_count,
 	qaws_curve const* curve_a,
 	qaws_curve const* curve_b,
-	qaws_intersection_2d* out_intersections,
-	unsigned int intersection_capacity,
-	unsigned int* out_count);
+	unsigned int intersection_capacity);
 
 qaws_status qaws_curve_find_intersections_3d(
+	qaws_intersection_3d* out_intersections,
+	unsigned int* out_count,
 	qaws_curve const* curve_a,
 	qaws_curve const* curve_b,
-	qaws_intersection_3d* out_intersections,
-	unsigned int intersection_capacity,
-	unsigned int* out_count);
+	unsigned int intersection_capacity);
 
 /* Family-specific inspection */
 qaws_status qaws_bezier_get_control_points(
-	qaws_curve const* curve,
 	void* out_control_points,
-	unsigned int point_capacity,
-	unsigned int* out_point_count);
+	unsigned int* out_point_count,
+	qaws_curve const* curve,
+	unsigned int point_capacity);
 
 /* Control points of a Bezier, rational Bezier, B-spline or NURBS curve
    (Cartesian, dimension scalars each; weights through qaws_nurbs_get_weights
    or the rational Bezier desc). Other kinds: UNSUPPORTED_OPERATION. */
 qaws_status qaws_curve_get_control_points(
-	qaws_curve const* curve,
 	void* out_control_points,
-	unsigned int point_capacity,
-	unsigned int* out_point_count);
+	unsigned int* out_point_count,
+	qaws_curve const* curve,
+	unsigned int point_capacity);
 
 qaws_status qaws_bspline_get_knots(
-	qaws_curve const* curve,
 	qaws_scalar* out_knots,
-	unsigned int knot_capacity,
-	unsigned int* out_knot_count);
+	unsigned int* out_knot_count,
+	qaws_curve const* curve,
+	unsigned int knot_capacity);
 
 qaws_status qaws_nurbs_get_weights(
-	qaws_curve const* curve,
 	qaws_scalar* out_weights,
-	unsigned int weight_capacity,
-	unsigned int* out_weight_count);
+	unsigned int* out_weight_count,
+	qaws_curve const* curve,
+	unsigned int weight_capacity);
 
 /* Surface inspection */
 
 qaws_status qaws_surface_compute_bounds(
-	qaws_surface const* surface,
 	qaws_vec3* out_min,
-	qaws_vec3* out_max);
+	qaws_vec3* out_max,
+	qaws_surface const* surface);
 
 qaws_status qaws_surface_compute_area(
-	qaws_surface const* surface,
-	qaws_scalar* out_area);
+	qaws_scalar* out_area,
+	qaws_surface const* surface);
 
 qaws_status qaws_surface_compute_gaussian_curvature(
+	qaws_scalar* out_curvature,
 	qaws_surface const* surface,
 	qaws_scalar u,
-	qaws_scalar v,
-	qaws_scalar* out_curvature);
+	qaws_scalar v);
 
 qaws_status qaws_surface_compute_mean_curvature(
+	qaws_scalar* out_curvature,
 	qaws_surface const* surface,
 	qaws_scalar u,
-	qaws_scalar v,
-	qaws_scalar* out_curvature);
+	qaws_scalar v);
 
 typedef struct qaws_surface_curvature_result {
 	qaws_scalar gaussian;
@@ -279,24 +279,24 @@ typedef struct qaws_surface_curvature_result {
 } qaws_surface_curvature_result;
 
 qaws_status qaws_surface_compute_principal_curvatures(
+	qaws_surface_curvature_result* out_result,
 	qaws_surface const* surface,
 	qaws_scalar u,
-	qaws_scalar v,
-	qaws_surface_curvature_result* out_result);
+	qaws_scalar v);
 
 /* Hausdorff distance */
 
 qaws_status qaws_curve_compute_hausdorff_distance_2d(
+	qaws_scalar* out_distance,
 	qaws_curve const* curve_a,
 	qaws_curve const* curve_b,
-	unsigned int sample_count,
-	qaws_scalar* out_distance);
+	unsigned int sample_count);
 
 qaws_status qaws_curve_compute_hausdorff_distance_3d(
+	qaws_scalar* out_distance,
 	qaws_curve const* curve_a,
 	qaws_curve const* curve_b,
-	unsigned int sample_count,
-	qaws_scalar* out_distance);
+	unsigned int sample_count);
 
 /* Closest point on surface */
 
@@ -304,11 +304,11 @@ qaws_status qaws_curve_compute_hausdorff_distance_3d(
    An 8x8 grid and Newton on the distance function gradient, then certified as
    below where the surface has Bezier patches. */
 qaws_status qaws_surface_find_closest_point(
-	qaws_surface const* surface,
-	qaws_vec3 point,
 	qaws_scalar* out_u,
 	qaws_scalar* out_v,
-	qaws_vec3* out_closest_point);
+	qaws_vec3* out_closest_point,
+	qaws_surface const* surface,
+	qaws_vec3 point);
 
 /* The closest point with a certificate, for Bezier, B-spline, NURBS and borrowed surfaces of degree at most 15: branch and
    bound over the Bezier patches with bounds by their nets' boxes, axis-aligned and in each patch's own frame. The global
@@ -334,12 +334,12 @@ typedef struct qaws_plane {
 /* Find parameter values where a 3D curve crosses a plane.
    Uses bisection root-finding on the signed distance function dot(C(t) - plane.point, plane.normal). */
 qaws_status qaws_curve_find_plane_intersections(
-	qaws_curve const* curve,
-	qaws_plane const* plane,
 	qaws_scalar* out_parameters,
 	qaws_vec3* out_positions,
-	unsigned int capacity,
-	unsigned int* out_count);
+	unsigned int* out_count,
+	qaws_curve const* curve,
+	qaws_plane const* plane,
+	unsigned int capacity);
 
 /* Surface-curve intersection */
 
@@ -354,11 +354,11 @@ typedef struct qaws_surface_curve_intersection {
 } qaws_surface_curve_intersection;
 
 qaws_status qaws_surface_find_curve_intersections(
+	qaws_surface_curve_intersection* out_intersections,
+	unsigned int* out_count,
 	qaws_surface const* surface,
 	qaws_curve const* curve,
-	qaws_surface_curve_intersection* out_intersections,
-	unsigned int capacity,
-	unsigned int* out_count);
+	unsigned int capacity);
 
 /* Adaptive tessellation */
 
@@ -384,14 +384,14 @@ typedef struct qaws_tessellation_vertex {
 } qaws_tessellation_vertex;
 
 qaws_status qaws_surface_tessellate(
-	qaws_surface const* surface,
-	qaws_tessellation_desc const* desc,
 	qaws_tessellation_vertex* out_vertices,
-	unsigned int vertex_capacity,
 	unsigned int* out_vertex_count,
 	unsigned int* out_indices,
+	unsigned int* out_index_count,
+	qaws_surface const* surface,
+	unsigned int vertex_capacity,
 	unsigned int index_capacity,
-	unsigned int* out_index_count);
+	qaws_tessellation_desc const* desc);
 
 /* Adaptive tessellation by tolerances into caller buffers, without cracks and without allocation: a quadtree over (u, v)
    whose quads split until the surface at their 3 x 3 test points is within the chord tolerance of the bilinear patch of
@@ -423,10 +423,10 @@ qaws_status qaws_surface_tessellate_adaptive(
    sample_count controls the projection resolution (0 = default 128).
    The output is a B-spline curve in 2D with x=u, y=v. */
 qaws_status qaws_surface_project_curve(
+	qaws_curve** out_uv_curve,
 	qaws_surface const* surface,
 	qaws_curve const* curve,
-	unsigned int sample_count,
-	qaws_curve** out_uv_curve);
+	unsigned int sample_count);
 
 /* Geodesic curve on surface */
 
@@ -436,14 +436,14 @@ qaws_status qaws_surface_project_curve(
    step_count controls the integration resolution (0 = default 200).
    The output is a 3D B-spline curve lying on the surface. */
 qaws_status qaws_surface_compute_geodesic(
+	qaws_curve** out_curve,
 	qaws_surface const* surface,
+	unsigned int step_count,
 	qaws_scalar start_u,
 	qaws_scalar start_v,
 	qaws_scalar end_u,
 	qaws_scalar end_v,
-	unsigned int max_iterations,
-	unsigned int step_count,
-	qaws_curve** out_curve);
+	unsigned int max_iterations);
 
 /* Geodesic path via edge flipping (Sharp & Crane, SGP 2020).
    Tessellates the surface, finds the shortest discrete geodesic on the mesh
@@ -451,22 +451,22 @@ qaws_status qaws_surface_compute_geodesic(
    tessellation_desc: mesh resolution (NULL = defaults).
    max_iterations: flip iteration limit (0 = default 1000). */
 qaws_status qaws_surface_compute_geodesic_flip(
-	qaws_surface const* surface,
+	qaws_curve** out_curve,
+	qaws_surface const* surface, qaws_tessellation_desc const* tessellation_desc,
 	qaws_scalar start_u, qaws_scalar start_v,
-	qaws_scalar end_u, qaws_scalar end_v,
-	qaws_tessellation_desc const* tessellation_desc,
-	unsigned int max_iterations,
-	qaws_curve** out_curve);
+	qaws_scalar end_u,
+	qaws_scalar end_v,
+	unsigned int max_iterations);
 
 /* Geodesic path via heat method (Crane, Weischedel, Wardetzky 2017).
    Computes geodesic distance from start, traces shortest path to end
    by gradient descent on the distance field. Returns a 3D B-spline. */
 qaws_status qaws_surface_compute_geodesic_heat(
-	qaws_surface const* surface,
+	qaws_curve** out_curve,
+	qaws_surface const* surface, qaws_tessellation_desc const* tessellation_desc,
 	qaws_scalar start_u, qaws_scalar start_v,
-	qaws_scalar end_u, qaws_scalar end_v,
-	qaws_tessellation_desc const* tessellation_desc,
-	qaws_curve** out_curve);
+	qaws_scalar end_u,
+	qaws_scalar end_v);
 
 /* Geodesic distance field via heat method (Crane, Weischedel, Wardetzky 2017).
    Tessellates the surface, solves heat diffusion + Poisson on the mesh.
@@ -474,13 +474,13 @@ qaws_status qaws_surface_compute_geodesic_heat(
    out_distances[i] is the geodesic distance at vertex (out_u[i], out_v[i]).
    capacity is the size of the output buffers. out_count receives the actual count. */
 qaws_status qaws_surface_compute_geodesic_distance(
-	qaws_surface const* surface,
-	qaws_scalar source_u, qaws_scalar source_v,
-	qaws_tessellation_desc const* tessellation_desc,
 	qaws_scalar* out_u,
-	qaws_scalar* out_v,
-	qaws_scalar* out_distances,
+	qaws_scalar* out_v, qaws_scalar* out_distances,
+	unsigned int* out_count,
+	qaws_surface const* surface,
 	unsigned int capacity,
-	unsigned int* out_count);
+	qaws_tessellation_desc const* tessellation_desc,
+	qaws_scalar source_u,
+	qaws_scalar source_v);
 
 #endif /* QAWS_INSPECT_H */

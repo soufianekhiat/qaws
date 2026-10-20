@@ -118,7 +118,7 @@ static qaws_curve* cv_owned_bspline(double const* p, unsigned int n, double cons
 	d.control_point_count = n;
 	d.knots = knots ? k : NULL;
 	d.knot_count = knots ? n + CV_DEG + 1 : 0;
-	qaws_curve_create_bspline(&d, &c);
+	qaws_curve_create_bspline(&c, &d);
 	return c;
 }
 
@@ -132,7 +132,7 @@ static double cv_compare3(qaws_curve_prepared const* p, qaws_curve const* owned)
 	{
 		qaws_scalar t = r.min_value + (r.max_value - r.min_value) * (qaws_scalar)i / 40;
 		qaws_eval_result_3d a, b;
-		if (qaws_curve_prepared_evaluate_3d(p, t, CV_ALL, &a) != QAWS_STATUS_OK || qaws_curve_evaluate_3d(owned, t, CV_ALL, &b) != QAWS_STATUS_OK
+		if (qaws_curve_prepared_evaluate_3d(p, t, CV_ALL, &a) != QAWS_STATUS_OK || qaws_curve_evaluate_3d(&b, owned, t, CV_ALL) != QAWS_STATUS_OK
 			|| (b.valid_flags & ~a.valid_flags))
 			return 1e30;
 		e = cv_diff3(&a, &b);
@@ -185,8 +185,8 @@ static void test_parity_bspline(void)
 		{
 			qaws_scalar t = ro.min_value + (ro.max_value - ro.min_value) * (qaws_scalar)i / 40;
 			qaws_eval_result_3d a, b;
-			qaws_curve_evaluate_3d(borrowed, t, CV_ALL, &a);
-			qaws_curve_evaluate_3d(owned, t, CV_ALL, &b);
+			qaws_curve_evaluate_3d(&a, borrowed, t, CV_ALL);
+			qaws_curve_evaluate_3d(&b, owned, t, CV_ALL);
 			e = cv_diff3(&a, &b) > e ? cv_diff3(&a, &b) : e;
 			eb = cv_diff3(&a, &b) > eb ? cv_diff3(&a, &b) : eb;
 		}
@@ -235,7 +235,7 @@ static void test_parity_nurbs(void)
 	nd.knot_count = 10;
 	nd.weights = ws;
 	nd.weight_count = 7;
-	TEST_ASSERT(qaws_curve_create_nurbs(&nd, &owned) == QAWS_STATUS_OK, "owned NURBS created");
+	TEST_ASSERT(qaws_curve_create_nurbs(&owned, &nd) == QAWS_STATUS_OK, "owned NURBS created");
 	memset(&v, 0, sizeof v);
 	v.dimension = QAWS_DIMENSION_2D;
 	v.degree = 2;
@@ -254,7 +254,7 @@ static void test_parity_nurbs(void)
 		qaws_eval_result_2d a, b, c;
 		qaws_curve_prepared_evaluate_2d(pw, t, CV_ALL, &a);
 		qaws_curve_prepared_evaluate_2d(ph, t, CV_ALL, &b);
-		qaws_curve_evaluate_2d(owned, t, CV_ALL, &c);
+		qaws_curve_evaluate_2d(&c, owned, t, CV_ALL);
 		e = cv_diff2(&a, &c);
 		ew = e > ew ? e : ew;
 		e = cv_diff2(&b, &c);
@@ -627,27 +627,27 @@ static void test_operations(void)
 		TEST_ASSERT(0, "operations: curves created");
 		return;
 	}
-	qaws_curve_compute_arc_length(owned, 0, 4, &lo);
-	qaws_curve_compute_arc_length(borrowed, 0, 4, &lb);
+	qaws_curve_compute_arc_length(&lo, owned, 0, 4);
+	qaws_curve_compute_arc_length(&lb, borrowed, 0, 4);
 	sprintf(msg, "arc length: owned %.12g, borrowed %.12g", (double)lo, (double)lb);
 	TEST_ASSERT(fabs((double)lo - lb) <= CV_TOL * (1 + fabs((double)lo)), msg);
-	TEST_ASSERT(qaws_curve_extract(owned, (qaws_scalar)0.3, (qaws_scalar)3.1, &eo) == QAWS_STATUS_OK
-		&& qaws_curve_extract(borrowed, (qaws_scalar)0.3, (qaws_scalar)3.1, &eb) == QAWS_STATUS_OK, "extract: owned and borrowed");
-	TEST_ASSERT(qaws_curve_split(borrowed, (qaws_scalar)1.25, &l, &r) == QAWS_STATUS_OK, "split of a borrowed curve");
-	TEST_ASSERT(qaws_curve_reverse(borrowed, &rv) == QAWS_STATUS_OK, "reverse of a borrowed curve");
+	TEST_ASSERT(qaws_curve_extract(&eo, owned, (qaws_scalar)0.3, (qaws_scalar)3.1) == QAWS_STATUS_OK
+		&& qaws_curve_extract(&eb, borrowed, (qaws_scalar)0.3, (qaws_scalar)3.1) == QAWS_STATUS_OK, "extract: owned and borrowed");
+	TEST_ASSERT(qaws_curve_split(&l, &r, borrowed, (qaws_scalar)1.25) == QAWS_STATUS_OK, "split of a borrowed curve");
+	TEST_ASSERT(qaws_curve_reverse(&rv, borrowed) == QAWS_STATUS_OK, "reverse of a borrowed curve");
 	if (eo && eb && l && r && rv)
 	{
 		for (i = 0; i <= 20; i++)
 		{
 			qaws_scalar t = (qaws_scalar)(0.3 + 2.8 * i / 20);
 			qaws_eval_result_3d a, b, c;
-			qaws_curve_evaluate_3d(eo, t, QAWS_EVAL_FLAG_POSITION, &a);
-			qaws_curve_evaluate_3d(eb, t, QAWS_EVAL_FLAG_POSITION, &b);
+			qaws_curve_evaluate_3d(&a, eo, t, QAWS_EVAL_FLAG_POSITION);
+			qaws_curve_evaluate_3d(&b, eb, t, QAWS_EVAL_FLAG_POSITION);
 			e = cv_diff3(&a, &b) > e ? cv_diff3(&a, &b) : e;
-			qaws_curve_evaluate_3d(owned, t, QAWS_EVAL_FLAG_POSITION, &c);
-			qaws_curve_evaluate_3d(t < (qaws_scalar)1.25 ? l : r, t, QAWS_EVAL_FLAG_POSITION, &a);
+			qaws_curve_evaluate_3d(&c, owned, t, QAWS_EVAL_FLAG_POSITION);
+			qaws_curve_evaluate_3d(&a, t < (qaws_scalar)1.25 ? l : r, t, QAWS_EVAL_FLAG_POSITION);
 			e = cv_diff3(&a, &c) > e ? cv_diff3(&a, &c) : e;
-			qaws_curve_evaluate_3d(rv, 4 - t, QAWS_EVAL_FLAG_POSITION, &a);
+			qaws_curve_evaluate_3d(&a, rv, 4 - t, QAWS_EVAL_FLAG_POSITION);
 			e = cv_diff3(&a, &c) > e ? cv_diff3(&a, &c) : e;
 		}
 		sprintf(msg, "extract, split and reverse of the borrowed curve as of the owned one: %.2g", e);
@@ -681,8 +681,8 @@ static double cv_family_diff(qaws_curve_view const* v, qaws_curve const* owned)
 		qaws_scalar t = r.min_value + (r.max_value - r.min_value) * (qaws_scalar)i / 60;
 		qaws_eval_result_3d a, c, o;
 		qaws_curve_prepared_evaluate_3d(p, t, CV_ALL, &a);
-		qaws_curve_evaluate_3d(b, t, CV_ALL, &c);
-		qaws_curve_evaluate_3d(owned, t, CV_ALL, &o);
+		qaws_curve_evaluate_3d(&c, b, t, CV_ALL);
+		qaws_curve_evaluate_3d(&o, owned, t, CV_ALL);
 		e = cv_diff3(&a, &o) > cv_diff3(&c, &o) ? cv_diff3(&a, &o) : cv_diff3(&c, &o);
 		worst = e > worst ? e : worst;
 		if (o.valid_flags & ~a.valid_flags)
@@ -721,7 +721,7 @@ static void test_families(void)
 		d.derivatives = ts;
 		d.point_count = 8;
 		d.derivative_count = 8;
-		qaws_curve_create_hermite(&d, &owned);
+		qaws_curve_create_hermite(&owned, &d);
 		memset(&v, 0, sizeof v);
 		v.family = QAWS_VIEW_HERMITE;
 		v.dimension = QAWS_DIMENSION_3D;
@@ -734,7 +734,7 @@ static void test_families(void)
 		/* the tangents rewritten in place: a prepared object follows them */
 		for (i = 0; i < 8 * 3; i++)
 			ts[i] = (qaws_scalar)(tg[i] = -0.5 * tg[i] + 0.1);
-		qaws_curve_create_hermite(&d, &owned);
+		qaws_curve_create_hermite(&owned, &d);
 		eh2 = owned ? cv_family_diff(&v, owned) : 1e30;
 		qaws_curve_destroy(owned);
 		owned = NULL;
@@ -751,7 +751,7 @@ static void test_families(void)
 		d.closed = k == 3;
 		for (i = 0; i < 8 * 3; i++)
 			ps[i] = (qaws_scalar)p[i];
-		qaws_curve_create_catmull_rom(&d, &owned);
+		qaws_curve_create_catmull_rom(&owned, &d);
 		memset(&v, 0, sizeof v);
 		v.family = QAWS_VIEW_CATMULL_ROM;
 		v.dimension = QAWS_DIMENSION_3D;
@@ -773,7 +773,7 @@ static void test_families(void)
 		d.coefficient_count = 5;
 		d.t_min = -1;
 		d.t_max = 2;
-		qaws_curve_create_polynomial(&d, &owned);
+		qaws_curve_create_polynomial(&owned, &d);
 		memset(&v, 0, sizeof v);
 		v.family = QAWS_VIEW_POLYNOMIAL;
 		v.dimension = QAWS_DIMENSION_3D;
@@ -821,22 +821,22 @@ static void test_families(void)
 		d.control_points = ps;
 		d.control_point_count = 8;
 		d.parameterization = QAWS_PARAMETERIZATION_CENTRIPETAL;
-		qaws_curve_create_catmull_rom(&d, &owned);
+		qaws_curve_create_catmull_rom(&owned, &d);
 		memset(&v, 0, sizeof v);
 		v.family = QAWS_VIEW_CATMULL_ROM;
 		v.dimension = QAWS_DIMENSION_3D;
 		v.degree = 3;
 		v.points = cv_packed(p, QAWS_ELEMENT_F64, 3, 8, 0);
 		v.parameterization = QAWS_PARAMETERIZATION_CENTRIPETAL;
-		if (owned && qaws_curve_create_borrowed(&v, NULL, &b) == QAWS_STATUS_OK && qaws_curve_extract(owned, (qaws_scalar)0.6, (qaws_scalar)3.7, &eo) == QAWS_STATUS_OK
-			&& qaws_curve_extract(b, (qaws_scalar)0.6, (qaws_scalar)3.7, &eb) == QAWS_STATUS_OK)
+		if (owned && qaws_curve_create_borrowed(&v, NULL, &b) == QAWS_STATUS_OK && qaws_curve_extract(&eo, owned, (qaws_scalar)0.6, (qaws_scalar)3.7) == QAWS_STATUS_OK
+			&& qaws_curve_extract(&eb, b, (qaws_scalar)0.6, (qaws_scalar)3.7) == QAWS_STATUS_OK)
 		{
 			for (i = 0; i <= 20; i++)
 			{
 				qaws_scalar t = (qaws_scalar)(0.6 + 3.1 * i / 20);
 				qaws_eval_result_3d a, c;
-				qaws_curve_evaluate_3d(eo, t, QAWS_EVAL_FLAG_POSITION, &a);
-				qaws_curve_evaluate_3d(eb, t, QAWS_EVAL_FLAG_POSITION, &c);
+				qaws_curve_evaluate_3d(&a, eo, t, QAWS_EVAL_FLAG_POSITION);
+				qaws_curve_evaluate_3d(&c, eb, t, QAWS_EVAL_FLAG_POSITION);
 				e = cv_diff3(&a, &c) > e ? cv_diff3(&a, &c) : e;
 			}
 			sprintf(msg, "extract of a borrowed Catmull-Rom curve as of the owned: %.2g", e);
@@ -869,11 +869,11 @@ static unsigned int cv_eval_any(int how, qaws_curve_prepared const* p, qaws_curv
 	memset(&r2, 0, sizeof r2);
 	memset(&r3, 0, sizeof r3);
 	if (is3)
-		st = how == 0 ? qaws_curve_prepared_evaluate_3d(p, t, CV_ALL, &r3) : how == 1 ? qaws_curve_evaluate_3d(c, t, CV_ALL, &r3)
-			: qaws_curve_evaluate_span_3d(c, span, t, CV_ALL, &r3);
+		st = how == 0 ? qaws_curve_prepared_evaluate_3d(p, t, CV_ALL, &r3) : how == 1 ? qaws_curve_evaluate_3d(&r3, c, t, CV_ALL)
+			: qaws_curve_evaluate_span_3d(&r3, c, span, t, CV_ALL);
 	else
-		st = how == 0 ? qaws_curve_prepared_evaluate_2d(p, t, CV_ALL, &r2) : how == 1 ? qaws_curve_evaluate_2d(c, t, CV_ALL, &r2)
-			: qaws_curve_evaluate_span_2d(c, span, t, CV_ALL, &r2);
+		st = how == 0 ? qaws_curve_prepared_evaluate_2d(p, t, CV_ALL, &r2) : how == 1 ? qaws_curve_evaluate_2d(&r2, c, t, CV_ALL)
+			: qaws_curve_evaluate_span_2d(&r2, c, span, t, CV_ALL);
 	for (r = 0; r < 4; r++)
 	{
 		o[r * 3 + 0] = is3 ? (double)v3[r]->x : (double)v2[r]->x;
@@ -1001,7 +1001,7 @@ static qaws_curve* cv_owned_arc(double const* centers, double const* arcs, doubl
 	d.dimension = dim == 3 ? QAWS_DIMENSION_3D : QAWS_DIMENSION_2D;
 	d.segments = s;
 	d.segment_count = n;
-	qaws_curve_create_arc(&d, &c);
+	qaws_curve_create_arc(&c, &d);
 	return c;
 }
 
@@ -1026,7 +1026,7 @@ static qaws_curve* cv_owned_trajectory(double const* pts, double const* times, d
 	d.key_velocities = vel ? v : NULL;
 	d.key_velocity_count = vel ? CV_FAM_N : 0;
 	d.closed = closed;
-	qaws_curve_create_trajectory(&d, &c);
+	qaws_curve_create_trajectory(&c, &d);
 	return c;
 }
 
@@ -1042,7 +1042,7 @@ static qaws_curve* cv_owned_yuksel(double const* pts, unsigned int dim, unsigned
 	d.control_point_count = CV_FAM_N;
 	d.mode = (qaws_yuksel_mode)mode;
 	d.closed = closed;
-	qaws_curve_create_yuksel(&d, &c);
+	qaws_curve_create_yuksel(&c, &d);
 	return c;
 }
 
@@ -1059,7 +1059,7 @@ static qaws_curve* cv_owned_subdivision(double const* pts, unsigned int dim, uns
 	d.control_point_count = CV_FAM_N;
 	d.closed = closed;
 	d.refinement_levels = levels;
-	qaws_curve_create_subdivision(&d, &c);
+	qaws_curve_create_subdivision(&c, &d);
 	return c;
 }
 
@@ -1333,15 +1333,15 @@ static void test_composite_of_views(void)
 	d.dimension = QAWS_DIMENSION_3D;
 	d.segments = b;
 	d.segment_count = 2;
-	TEST_ASSERT(qaws_curve_create_composite(&d, &cb) == QAWS_STATUS_OK, "composite of two borrowed curves");
+	TEST_ASSERT(qaws_curve_create_composite(&cb, &d) == QAWS_STATUS_OK, "composite of two borrowed curves");
 	d.segments = o;
-	TEST_ASSERT(qaws_curve_create_composite(&d, &co) == QAWS_STATUS_OK, "composite of their owned copies");
+	TEST_ASSERT(qaws_curve_create_composite(&co, &d) == QAWS_STATUS_OK, "composite of their owned copies");
 	for (i = 0; i <= 64; i++)
 	{
 		qaws_eval_result_3d eb, eo;
 		qaws_scalar t = (qaws_scalar)(2.0 * i / 64);
-		qaws_curve_evaluate_3d(cb, t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2, &eb);
-		qaws_curve_evaluate_3d(co, t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2, &eo);
+		qaws_curve_evaluate_3d(&eb, cb, t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2);
+		qaws_curve_evaluate_3d(&eo, co, t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2);
 		worst = fmax(worst, cv_diff3(&eb, &eo));
 	}
 	TEST_ASSERT(worst == 0, "composite of views = composite of owned copies, to the bit");
@@ -1349,7 +1349,7 @@ static void test_composite_of_views(void)
 	p1[3 * 7] += 1;
 	{
 		qaws_eval_result_3d e;
-		qaws_curve_evaluate_3d(cb, 2, QAWS_EVAL_FLAG_POSITION, &e);
+		qaws_curve_evaluate_3d(&e, cb, 2, QAWS_EVAL_FLAG_POSITION);
 		/* (the end point is the host value converted to the scalar: one rounding) */
 		TEST_ASSERT(fabs(e.position.x - p1[3 * 7]) <= 1e-12 + fabs(p1[3 * 7]) * TEST_EPS, "the composite reads the moved host point");
 	}

@@ -29,7 +29,7 @@ static qaws_curve* sd_path(int twisted)
 	}
 	memset(&d, 0, sizeof d);
 	d.dimension = QAWS_DIMENSION_3D; d.degree = 3; d.control_points = p; d.control_point_count = 9;
-	qaws_curve_create_bspline(&d, &c);
+	qaws_curve_create_bspline(&c, &d);
 	return c;
 }
 
@@ -43,7 +43,7 @@ static qaws_curve* sd_path(int twisted)
 static qaws_vec3 sd_pos(qaws_surface const* s, double u, double v, unsigned int flag)
 {
 	qaws_surface_eval_result r;
-	qaws_surface_evaluate(s, (qaws_scalar)u, (qaws_scalar)v, flag | QAWS_SURFACE_EVAL_POSITION, &r);
+	qaws_surface_evaluate(&r, s, (qaws_scalar)u, (qaws_scalar)v, flag | QAWS_SURFACE_EVAL_POSITION);
 	return flag == QAWS_SURFACE_EVAL_DV ? r.dv : r.position;
 }
 
@@ -69,8 +69,8 @@ static void sd_check(qaws_surface const* s, char const* name, double* e_du, doub
 			qaws_surface_eval_result r;
 			qaws_vec3 a, b, c, dd, a2, b2, va, vb, va2, vb2;
 			unsigned int k;
-			qaws_surface_evaluate(s, (qaws_scalar)u, (qaws_scalar)v, QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_DU | QAWS_SURFACE_EVAL_DUU
-				| QAWS_SURFACE_EVAL_DUV | QAWS_SURFACE_EVAL_DV, &r);
+			qaws_surface_evaluate(&r, s, (qaws_scalar)u, (qaws_scalar)v, QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_DU | QAWS_SURFACE_EVAL_DUU
+				| QAWS_SURFACE_EVAL_DUV | QAWS_SURFACE_EVAL_DV);
 			a = sd_pos(s, u + h, v, 0); b = sd_pos(s, u - h, v, 0);
 			a2 = sd_pos(s, u + h / 2, v, 0); b2 = sd_pos(s, u - h / 2, v, 0);
 			c = r.position;
@@ -107,10 +107,10 @@ static void test_swept(void)
 	double e_du, e_duv, e_duu;
 	memset(&pd, 0, sizeof pd);
 	pd.dimension = QAWS_DIMENSION_2D; pd.degree = 3; pd.control_points = pp; pd.control_point_count = 5;
-	qaws_curve_create_bspline(&pd, &prof);
+	qaws_curve_create_bspline(&prof, &pd);
 	memset(&d, 0, sizeof d);
 	d.path = path; d.profile = prof;
-	TEST_ASSERT(qaws_surface_create_swept(&d, &s) == QAWS_STATUS_OK, "swept surface created");
+	TEST_ASSERT(qaws_surface_create_swept(&s, &d) == QAWS_STATUS_OK, "swept surface created");
 	sd_check(s, "swept (Frenet)", &e_du, &e_duv, &e_duu);
 	TEST_ASSERT(e_du <= (SD_F32 ? SD_DU : 1e-8), "swept: du analytic");
 	TEST_ASSERT(e_duv <= (SD_F32 ? SD_DUV : 1e-7), "swept: mixed derivative analytic");
@@ -130,7 +130,7 @@ static void test_pipe(void)
 	char msg[200];
 	memset(&d, 0, sizeof d);
 	d.path = path; d.radius_x = (qaws_scalar)0.35;
-	TEST_ASSERT(qaws_surface_create_pipe(&d, &s) == QAWS_STATUS_OK, "pipe created");
+	TEST_ASSERT(qaws_surface_create_pipe(&s, &d) == QAWS_STATUS_OK, "pipe created");
 	sd_check(s, "pipe (rotation-minimizing)", &e_du, &e_duv, &e_duu);
 	TEST_ASSERT(e_du <= (SD_F32 ? SD_DU : 1e-7), "pipe: du analytic");
 	TEST_ASSERT(e_duv <= (SD_F32 ? SD_DUV : 1e-6), "pipe: mixed derivative analytic");
@@ -141,7 +141,7 @@ static void test_pipe(void)
 		qaws_eval_result_3d c;
 		qaws_vec3 p = sd_pos(s, u, v, 0);
 		qaws_range r = qaws_curve_get_parameter_range(path);
-		qaws_curve_evaluate_3d(path, r.min_value + (qaws_scalar)u * (r.max_value - r.min_value), QAWS_EVAL_FLAG_POSITION, &c);
+		qaws_curve_evaluate_3d(&c, path, r.min_value + (qaws_scalar)u * (r.max_value - r.min_value), QAWS_EVAL_FLAG_POSITION);
 		radius = fmax(radius, fabs(sqrt(((double)p.x - c.position.x) * (p.x - c.position.x) + ((double)p.y - c.position.y) * (p.y - c.position.y)
 			+ ((double)p.z - c.position.z) * (p.z - c.position.z)) - 0.35));
 	}
@@ -153,8 +153,8 @@ static void test_pipe(void)
 	{
 		qaws_surface_eval_result a, b;
 		double u = i / 256.0;
-		qaws_surface_evaluate(s, (qaws_scalar)(u - 1e-12), (qaws_scalar)0.3, QAWS_SURFACE_EVAL_DU, &a);
-		qaws_surface_evaluate(s, (qaws_scalar)(u + 1e-12), (qaws_scalar)0.3, QAWS_SURFACE_EVAL_DU, &b);
+		qaws_surface_evaluate(&a, s, (qaws_scalar)(u - 1e-12), (qaws_scalar)0.3, QAWS_SURFACE_EVAL_DU);
+		qaws_surface_evaluate(&b, s, (qaws_scalar)(u + 1e-12), (qaws_scalar)0.3, QAWS_SURFACE_EVAL_DU);
 		jump = fmax(jump, sd_diff(a.du, b.du.x, b.du.y, b.du.z));
 	}
 	snprintf(msg, sizeof msg, "pipe: du continuous at the frame samples (jump %.1e)", jump);
@@ -164,7 +164,7 @@ static void test_pipe(void)
 	{
 		qaws_surface_eval_result r;
 		double tu, tv;
-		qaws_surface_evaluate(s, (qaws_scalar)0.41, (qaws_scalar)0.77, QAWS_SURFACE_EVAL_NORMAL | QAWS_SURFACE_EVAL_DU | QAWS_SURFACE_EVAL_DV, &r);
+		qaws_surface_evaluate(&r, s, (qaws_scalar)0.41, (qaws_scalar)0.77, QAWS_SURFACE_EVAL_NORMAL | QAWS_SURFACE_EVAL_DU | QAWS_SURFACE_EVAL_DV);
 		/* rounding: a few eps, relative to |du| and |dv| for the products with them */
 		tu = fmax(1e-12, 8 * TEST_EPS * sqrt((double)r.du.x * r.du.x + (double)r.du.y * r.du.y + (double)r.du.z * r.du.z));
 		tv = fmax(1e-12, 8 * TEST_EPS * sqrt((double)r.dv.x * r.dv.x + (double)r.dv.y * r.dv.y + (double)r.dv.z * r.dv.z));

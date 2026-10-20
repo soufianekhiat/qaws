@@ -22,7 +22,7 @@ The `qaws_curve_inline` is self-contained: it may be copied with `memcpy` or ass
 qaws_curve_inline ic;
 qaws_vec3 pts[] = {{0,0,0}, {1,2,3}, {4,5,6}, {7,8,9}};
 qaws_bezier_desc desc = { QAWS_DIMENSION_3D, 3, pts, 4 };
-qaws_curve_init_bezier_inline(&desc, &ic);
+qaws_curve_init_bezier_inline(&ic, &desc);
 // qaws_curve_evaluate_3d(qaws_curve_inline_get_curve(&ic), ...)
 ```
 
@@ -32,8 +32,8 @@ qaws_curve_init_bezier_inline(&desc, &ic);
 
 ```c
 qaws_status qaws_curve_init_bezier_inline(
-    qaws_bezier_desc const* desc,
-    qaws_curve_inline* out);
+    qaws_curve_inline* out,
+    qaws_bezier_desc const* desc);
 ```
 
 Initializes an inline Bezier curve on the stack.
@@ -50,8 +50,8 @@ Initializes an inline Bezier curve on the stack.
 
 ```c
 qaws_status qaws_curve_init_polynomial_inline(
-    qaws_polynomial_desc const* desc,
-    qaws_curve_inline* out);
+    qaws_curve_inline* out,
+    qaws_polynomial_desc const* desc);
 ```
 
 Initializes an inline Polynomial curve on the stack.

@@ -28,17 +28,17 @@ static double ec_gap(qaws_curve* c, qaws_exact_curve* e, double t0, double t1, u
 		qaws_eval_result_2d r2;
 		double ref[12];
 		unsigned int flags = QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2;
-		qaws_exact_curve_evaluate(e, t, 2, out, NULL);
+		qaws_exact_curve_evaluate(out, NULL, e, t, 2);
 		if (dim == 3)
 		{
-			qaws_curve_evaluate_3d(c, (qaws_scalar)t, flags, &r3);
+			qaws_curve_evaluate_3d(&r3, c, (qaws_scalar)t, flags);
 			ref[0] = r3.position.x; ref[1] = r3.position.y; ref[2] = r3.position.z;
 			ref[3] = r3.d1.x; ref[4] = r3.d1.y; ref[5] = r3.d1.z;
 			ref[6] = r3.d2.x; ref[7] = r3.d2.y; ref[8] = r3.d2.z;
 		}
 		else
 		{
-			qaws_curve_evaluate_2d(c, (qaws_scalar)t, flags, &r2);
+			qaws_curve_evaluate_2d(&r2, c, (qaws_scalar)t, flags);
 			ref[0] = r2.position.x; ref[1] = r2.position.y;
 			ref[2] = r2.d1.x; ref[3] = r2.d1.y;
 			ref[4] = r2.d2.x; ref[5] = r2.d2.y;
@@ -74,7 +74,7 @@ static void test_composite(void)
 	bd.degree = 3;
 	bd.control_points = bz;
 	bd.control_point_count = 4;
-	qaws_curve_create_bezier(&bd, &segs[0]);
+	qaws_curve_create_bezier(&segs[0], &bd);
 	memset(&nd, 0, sizeof(nd));
 	nd.dimension = QAWS_DIMENSION_2D;
 	nd.degree = 2;
@@ -84,17 +84,17 @@ static void test_composite(void)
 	nd.weight_count = 5;
 	nd.knots = nk;
 	nd.knot_count = 8;
-	qaws_curve_create_nurbs(&nd, &segs[1]);
+	qaws_curve_create_nurbs(&segs[1], &nd);
 	bd.degree = 1;
 	bd.control_points = sg;
 	bd.control_point_count = 2;
-	qaws_curve_create_bezier(&bd, &segs[2]);
+	qaws_curve_create_bezier(&segs[2], &bd);
 	memset(&cd, 0, sizeof(cd));
 	cd.dimension = QAWS_DIMENSION_2D;
 	cd.segments = segs;
 	cd.segment_count = 3;
-	qaws_curve_create_composite(&cd, &c);
-	st = qaws_exact_curve_prepare(NULL, c, &e, &rep);
+	qaws_curve_create_composite(&c, &cd);
+	st = qaws_exact_curve_prepare(&e, &rep, c, NULL);
 	TEST_ASSERT(st == QAWS_STATUS_OK && qaws_exact_curve_span_count(e) == 5, "a composite of three curves: one exact curve of 1 + 3 + 1 spans");
 	if (st != QAWS_STATUS_OK)
 	{
@@ -151,8 +151,8 @@ static void test_frozen(void)
 			d.control_point_count = 7;
 			d.parameterization = kinds[k];
 			d.closed = (int)closed;
-			qaws_curve_create_catmull_rom(&d, &c);
-			st = qaws_exact_curve_prepare(NULL, c, &e, &rep);
+			qaws_curve_create_catmull_rom(&c, &d);
+			st = qaws_exact_curve_prepare(&e, &rep, c, NULL);
 			if (st != QAWS_STATUS_OK)
 			{
 				sprintf(msg, "%s%s Catmull-Rom: frozen preparation", names[k], closed ? " closed" : "");

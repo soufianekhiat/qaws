@@ -108,13 +108,13 @@ static qaws_status sk_union(qaws_path_2d const* paths, unsigned int n, qaws_fill
 {
 	if (!n)
 		return qaws_internal_clip_result_empty(out);
-	return qaws_clip_boolean(QAWS_CLIP_UNION, fr, paths, n, NULL, 0, out);
+	return qaws_clip_boolean(out, paths, NULL, n, 0, QAWS_CLIP_UNION, fr);
 }
 
 static void sk_center(qaws_path_2d const* p, double* c, double* size)
 {
 	qaws_vec2 lo, hi;
-	if (qaws_path_compute_bounds_2d(p, &lo, &hi) != QAWS_STATUS_OK)
+	if (qaws_path_compute_bounds_2d(&lo, &hi, p) != QAWS_STATUS_OK)
 	{
 		c[0] = c[1] = 0;
 		*size = 0;
@@ -251,7 +251,7 @@ static qaws_status sk_blend_struct(sk_struct const* tpl, qaws_curve const* const
 		qaws_bezier_desc d;
 		memset(&d, 0, sizeof(d));
 		d.dimension = QAWS_DIMENSION_2D; d.degree = tpl->degree; d.control_points = cp; d.control_point_count = tpl->n;
-		s = qaws_curve_create_bezier(&d, out);
+		s = qaws_curve_create_bezier(out, &d);
 		break;
 	}
 	case QAWS_CURVE_KIND_RATIONAL_BEZIER:
@@ -260,7 +260,7 @@ static qaws_status sk_blend_struct(sk_struct const* tpl, qaws_curve const* const
 		memset(&d, 0, sizeof(d));
 		d.dimension = QAWS_DIMENSION_2D; d.degree = tpl->degree; d.control_points = cp; d.control_point_count = tpl->n;
 		d.weights = wt; d.weight_count = tpl->n;
-		s = qaws_curve_create_rational_bezier(&d, out);
+		s = qaws_curve_create_rational_bezier(out, &d);
 		break;
 	}
 	case QAWS_CURVE_KIND_BSPLINE:
@@ -269,7 +269,7 @@ static qaws_status sk_blend_struct(sk_struct const* tpl, qaws_curve const* const
 		memset(&d, 0, sizeof(d));
 		d.dimension = QAWS_DIMENSION_2D; d.degree = tpl->degree; d.control_points = cp; d.control_point_count = tpl->n;
 		d.knots = tpl->knots; d.knot_count = tpl->knot_count;
-		s = qaws_curve_create_bspline(&d, out);
+		s = qaws_curve_create_bspline(out, &d);
 		break;
 	}
 	default:
@@ -278,7 +278,7 @@ static qaws_status sk_blend_struct(sk_struct const* tpl, qaws_curve const* const
 		memset(&d, 0, sizeof(d));
 		d.dimension = QAWS_DIMENSION_2D; d.degree = tpl->degree; d.control_points = cp; d.control_point_count = tpl->n;
 		d.knots = tpl->knots; d.knot_count = tpl->knot_count; d.weights = wt; d.weight_count = tpl->n;
-		s = qaws_curve_create_nurbs(&d, out);
+		s = qaws_curve_create_nurbs(out, &d);
 		break;
 	}
 	}
@@ -301,7 +301,7 @@ static void sk_resample(qaws_curve const* c, unsigned int m, double* out)
 	for (i = 0; i <= DENSE; i++)
 	{
 		qaws_eval_result_2d e;
-		qaws_curve_evaluate_2d(c, (qaws_scalar)(r.min_value + (r.max_value - r.min_value) * i / DENSE), QAWS_EVAL_FLAG_POSITION, &e);
+		qaws_curve_evaluate_2d(&e, c, (qaws_scalar)(r.min_value + (r.max_value - r.min_value) * i / DENSE), QAWS_EVAL_FLAG_POSITION);
 		xy[2 * i] = e.position.x;
 		xy[2 * i + 1] = e.position.y;
 		acc[i] = i ? acc[i - 1] + hypot(xy[2 * i] - xy[2 * i - 2], xy[2 * i + 1] - xy[2 * i - 1]) : 0;
@@ -399,7 +399,7 @@ static qaws_status sk_blend_resampled(qaws_curve const* const* cs, double const*
 	memset(&d, 0, sizeof(d));
 	d.dimension = QAWS_DIMENSION_2D; d.control_points = sp; d.control_point_count = m;
 	d.parameterization = QAWS_PARAMETERIZATION_CENTRIPETAL; d.closed = 1;
-	s = qaws_curve_create_catmull_rom(&d, out);
+	s = qaws_curve_create_catmull_rom(out, &d);
 	qaws_internal_free(sp);
 	qaws_internal_free(all);
 	return s;
@@ -541,7 +541,7 @@ static qaws_status sk_level_signs(qaws_stack_level const* L, qaws_fill_rule fr, 
 	qaws_status s = QAWS_STATUS_OK;
 	for (i = 0; i < L->path_count && s == QAWS_STATUS_OK; i++)
 		for (c = 0; c < L->paths[i].curve_count && s == QAWS_STATUS_OK; c++)
-			s = qaws_internal_flatten_curve(L->paths[i].curves[c], 2, (qaws_scalar)flat, i, &segs, &ns, &cap);
+			s = qaws_internal_flatten_curve(&segs, &ns, &cap, L->paths[i].curves[c], 2, (qaws_scalar)flat, i);
 	if (s != QAWS_STATUS_OK) { qaws_internal_free(segs); return s; }
 	for (j = 0; j <= g->ny; j++)
 	{
@@ -607,7 +607,7 @@ static qaws_status sk_distance(qaws_stack_2d const* st, unsigned int const* idx,
 		for (j = 0; j < L->path_count; j++)
 		{
 			qaws_vec2 a, b;
-			if (L->paths[j].curve_count && qaws_path_compute_bounds_2d(&L->paths[j], &a, &b) == QAWS_STATUS_OK)
+			if (L->paths[j].curve_count && qaws_path_compute_bounds_2d(&a, &b, &L->paths[j]) == QAWS_STATUS_OK)
 			{
 				if (a.x < lo[0]) lo[0] = a.x;
 				if (a.y < lo[1]) lo[1] = a.y;
@@ -665,8 +665,8 @@ static qaws_status sk_distance(qaws_stack_2d const* st, unsigned int const* idx,
 		memset(&bd, 0, sizeof(bd));
 		bd.curves = curves;
 		bd.curve_count = nc;
-		s = qaws_curve_set_create(&bd, &set);
-		if (s == QAWS_STATUS_OK) s = qaws_curve_set_find_closest(set, pts, nn, 0, cp, NULL);
+		s = qaws_curve_set_create(&set, &bd);
+		if (s == QAWS_STATUS_OK) s = qaws_curve_set_find_closest(cp, NULL, set, pts, nn, 0);
 		if (s == QAWS_STATUS_OK) s = sk_level_signs(L, st->fill_rule, &g, ext / 4096, ins);
 		if (s == QAWS_STATUS_OK)
 			for (q = 0; q < nn; q++)
@@ -791,7 +791,7 @@ static qaws_status sk_distance(qaws_stack_2d const* st, unsigned int const* idx,
 					if (!gl) { qaws_internal_free(lp); s = QAWS_STATUS_ALLOCATION_FAILURE; break; }
 					loops = gl; caploops = nc2;
 				}
-				s = qaws_curve_create_polyline_2d(lp, m, 1, &c);
+				s = qaws_curve_create_polyline_2d(&c, lp, m, 1);
 				if (s == QAWS_STATUS_OK) loops[nloops++] = c;
 			}
 			qaws_internal_free(lp);
@@ -829,7 +829,7 @@ done:
 /*  Public                                                                  */
 /* ======================================================================== */
 
-qaws_status qaws_stack_section_2d(qaws_stack_2d const* st, qaws_scalar z, qaws_clip_result** out)
+qaws_status qaws_stack_section_2d(qaws_clip_result** out, qaws_stack_2d const* st, qaws_scalar z)
 {
 	unsigned int idx[4], n = 0, at = 0;
 	double w[4];
@@ -877,8 +877,8 @@ static qaws_status sk_level_job(void* ctx, unsigned int chunk, unsigned int begi
 	for (i = begin; i < end; i++)
 	{
 		qaws_clip_result *ra = NULL, *rb = NULL;
-		qaws_status s = qaws_stack_section_2d(j->a, (qaws_scalar)j->z[i], &ra);
-		if (s == QAWS_STATUS_OK) s = qaws_stack_section_2d(j->b, (qaws_scalar)j->z[i], &rb);
+		qaws_status s = qaws_stack_section_2d(&ra, j->a, (qaws_scalar)j->z[i]);
+		if (s == QAWS_STATUS_OK) s = qaws_stack_section_2d(&rb, j->b, (qaws_scalar)j->z[i]);
 		if (s == QAWS_STATUS_OK)
 		{
 			unsigned int na = qaws_clip_result_get_path_count(ra), nb = qaws_clip_result_get_path_count(rb), k;
@@ -888,9 +888,9 @@ static qaws_status sk_level_job(void* ctx, unsigned int chunk, unsigned int begi
 				s = QAWS_STATUS_ALLOCATION_FAILURE;
 			else
 			{
-				for (k = 0; k < na; k++) qaws_clip_result_get_path(ra, k, &pa[k]);
-				for (k = 0; k < nb; k++) qaws_clip_result_get_path(rb, k, &pb[k]);
-				s = qaws_clip_boolean(j->ct, QAWS_FILL_NON_ZERO, pa, na, pb, nb, &j->levels[i]);
+				for (k = 0; k < na; k++) qaws_clip_result_get_path(&pa[k], ra, k);
+				for (k = 0; k < nb; k++) qaws_clip_result_get_path(&pb[k], rb, k);
+				s = qaws_clip_boolean(&j->levels[i], pa, pb, na, nb, j->ct, QAWS_FILL_NON_ZERO);
 			}
 			qaws_internal_free(pa);
 			qaws_internal_free(pb);
@@ -903,8 +903,8 @@ static qaws_status sk_level_job(void* ctx, unsigned int chunk, unsigned int begi
 	return QAWS_STATUS_OK;
 }
 
-qaws_status qaws_stack_boolean_2d(qaws_clip_type ct, qaws_stack_2d const* a, qaws_stack_2d const* b,
-	qaws_batch_executor const* executor, qaws_stack_result** out)
+qaws_status qaws_stack_boolean_2d(qaws_stack_result** out, qaws_stack_2d const* a, qaws_stack_2d const* b,
+	qaws_clip_type ct, qaws_batch_executor const* executor)
 {
 	qaws_stack_result* r;
 	unsigned int i, ia = 0, ib = 0, n = 0;
@@ -936,7 +936,7 @@ qaws_status qaws_stack_boolean_2d(qaws_clip_type ct, qaws_stack_2d const* a, qaw
 	}
 	r->count = n;
 	job.ct = ct; job.a = a; job.b = b; job.z = r->z; job.levels = r->levels;
-	s = qaws_internal_parallel(executor, n, 1, sk_level_job, &job);
+	s = qaws_internal_parallel(n, 1, sk_level_job, &job, executor);
 	if (s != QAWS_STATUS_OK)
 	{
 		qaws_stack_result_destroy(r);

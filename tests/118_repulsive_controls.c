@@ -73,14 +73,14 @@ static void rc_curves(qaws_curve** c)
 	}
 	memset(&bd, 0, sizeof(bd));
 	bd.dimension = QAWS_DIMENSION_3D; bd.degree = 3; bd.control_points = p[0]; bd.control_point_count = 8; bd.knots = knots; bd.knot_count = 12;
-	qaws_curve_create_bspline(&bd, &c[0]);
+	qaws_curve_create_bspline(&c[0], &bd);
 	memset(&zd, 0, sizeof(zd));
 	zd.dimension = QAWS_DIMENSION_3D; zd.degree = 3; zd.control_points = p[1]; zd.control_point_count = 4;
-	qaws_curve_create_bezier(&zd, &c[1]);
+	qaws_curve_create_bezier(&c[1], &zd);
 	memset(&nd, 0, sizeof(nd));
 	nd.dimension = QAWS_DIMENSION_3D; nd.degree = 3; nd.control_points = p[2]; nd.control_point_count = 8; nd.knots = knots; nd.knot_count = 12;
 	nd.weights = w; nd.weight_count = 8;
-	qaws_curve_create_nurbs(&nd, &c[2]);
+	qaws_curve_create_nurbs(&c[2], &nd);
 }
 
 static void test_controls(void)
@@ -94,8 +94,8 @@ static void test_controls(void)
 	rc_curves(c);
 	memset(&d, 0, sizeof(d));
 	d.polyline.curves = (qaws_curve const* const*)c; d.polyline.curve_count = 3; d.polyline.dimension = 3; d.polyline.edge_length = (qaws_scalar)0.12;
-	st = qaws_repulsive_controls_create(&d, &ctl);
-	qaws_repulsive_controls_get_counts(ctl, &nc, &nv, &ne);
+	st = qaws_repulsive_controls_create(&ctl, &d);
+	qaws_repulsive_controls_get_counts(&nc, &nv, &ne, ctl);
 	sprintf(msg, "controls: created %d (%u control points, %u samples, %u edges)", (int)st, nc, nv, ne);
 	TEST_ASSERT(st == QAWS_STATUS_OK && nc == 20 && nv > 40, msg);
 	if (st != QAWS_STATUS_OK)
@@ -107,27 +107,27 @@ static void test_controls(void)
 		qaws_scalar *dir = (qaws_scalar*)malloc(sizeof(qaws_scalar) * n), E = 0, t = 0, t2 = 0;
 		double *fd = (double*)malloc(sizeof(double) * n), *ga = (double*)malloc(sizeof(double) * n), *hfd = (double*)malloc(sizeof(double) * n), *ha = (double*)malloc(sizeof(double) * n);
 		double h = RC_F32 ? 2e-3 : 1e-5, gdot = 0, eg, eh, et;
-		qaws_repulsive_controls_read(ctl, P);
+		qaws_repulsive_controls_read(P, ctl);
 		for (i = 0; i < n; i++) dir[i] = (qaws_scalar)sin(0.7 * i + 0.3);
-		qaws_repulsive_controls_gradient(ctl, P, 1, g, &E);
-		qaws_repulsive_controls_hvp(ctl, P, dir, hv);
-		qaws_repulsive_controls_eval(ctl, P, dir, NULL, &t, &t2);
+		qaws_repulsive_controls_gradient(g, &E, ctl, P, 1);
+		qaws_repulsive_controls_hvp(hv, ctl, P, dir);
+		qaws_repulsive_controls_eval(NULL, &t, &t2, ctl, P, dir);
 		for (i = 0; i < n; i++)
 		{
 			qaws_scalar ep = 0, em = 0;
 			memcpy(Q, P, sizeof(qaws_scalar) * n);
 			Q[i] = (qaws_scalar)((double)P[i] + h);
-			qaws_repulsive_controls_eval(ctl, Q, NULL, &ep, NULL, NULL);
+			qaws_repulsive_controls_eval(&ep, NULL, NULL, ctl, Q, NULL);
 			Q[i] = (qaws_scalar)((double)P[i] - h);
-			qaws_repulsive_controls_eval(ctl, Q, NULL, &em, NULL, NULL);
+			qaws_repulsive_controls_eval(&em, NULL, NULL, ctl, Q, NULL);
 			fd[i] = ((double)ep - em) / (2 * h);
 			ga[i] = (double)g[i];
 			gdot += (double)g[i] * dir[i];
 		}
 		for (i = 0; i < n; i++) { Q[i] = (qaws_scalar)((double)P[i] + h * dir[i]); gp[i] = gm[i] = 0; }
-		qaws_repulsive_controls_gradient(ctl, Q, 1, gp, NULL);
+		qaws_repulsive_controls_gradient(gp, NULL, ctl, Q, 1);
 		for (i = 0; i < n; i++) Q[i] = (qaws_scalar)((double)P[i] - h * dir[i]);
-		qaws_repulsive_controls_gradient(ctl, Q, 1, gm, NULL);
+		qaws_repulsive_controls_gradient(gm, NULL, ctl, Q, 1);
 		for (i = 0; i < n; i++) { hfd[i] = ((double)gp[i] - gm[i]) / (2 * h); ha[i] = (double)hv[i]; }
 		eg = rc_maxrel(ga, fd, n);
 		eh = rc_maxrel(ha, hfd, n);
@@ -150,29 +150,29 @@ static void test_controls(void)
 			memset(&sd, 0, sizeof(sd));
 			sd.hold_total_length = 1; sd.max_iterations = 15; sd.theta = (qaws_scalar)(k ? 0.25 : 0);
 			memset(&r, 0, sizeof(r));
-			st = qaws_repulsive_controls_solve(ctl, &sd, Q, &r);
-			qaws_repulsive_controls_positions(ctl, Q, x);
+			st = qaws_repulsive_controls_solve(&r, Q, ctl, &sd);
+			qaws_repulsive_controls_positions(x, ctl, Q);
 			{
 				/* the samples' sources, from the polyline again */
 				qaws_scalar* ts = (qaws_scalar*)malloc(sizeof(qaws_scalar) * nv);
 				unsigned int nv2, ne2, ci;
 				src = (unsigned int*)malloc(sizeof(unsigned int) * nv);
-				qaws_repulsive_polyline_from_curves(&d.polyline, NULL, 0, NULL, 0, NULL, NULL, &nv2, &ne2);
+				qaws_repulsive_polyline_from_curves(NULL, NULL, NULL, NULL, &nv2, &ne2, 0, 0, &d.polyline);
 				{
 					qaws_scalar* pos = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * nv2);
 					unsigned int* ed = (unsigned int*)malloc(sizeof(unsigned int) * 2 * ne2);
-					qaws_repulsive_polyline_from_curves(&d.polyline, pos, nv2, ed, ne2, src, ts, &nv2, &ne2);
+					qaws_repulsive_polyline_from_curves(pos, ed, src, ts, &nv2, &ne2, nv2, ne2, &d.polyline);
 					free(pos); free(ed);
 				}
 				for (ci = 0; ci < 3; ci++)
 				{
 					qaws_curve* cc = NULL;
-					qaws_repulsive_controls_to_curve(ctl, Q, ci, &cc);
+					qaws_repulsive_controls_to_curve(&cc, ctl, Q, ci);
 					for (i = 0; cc && i < nv; i++)
 						if (src[i] == ci)
 						{
 							qaws_eval_result_3d er;
-							qaws_curve_evaluate_3d(cc, ts[i], QAWS_EVAL_FLAG_POSITION, &er);
+							qaws_curve_evaluate_3d(&er, cc, ts[i], QAWS_EVAL_FLAG_POSITION);
 							rebuilt = fmax(rebuilt, fabs((double)er.position.x - x[3 * i]) + fabs((double)er.position.y - x[3 * i + 1]) + fabs((double)er.position.z - x[3 * i + 2]));
 						}
 					if (!cc) rebuilt = 1;
@@ -202,12 +202,12 @@ static qaws_repulsive_curves_solver* rc_converge(qaws_repulsive_curves const* c,
 	qaws_repulsive_curves_solver* s = NULL;
 	unsigned int it;
 	d.tolerance = (qaws_scalar)(RC_F32 ? 1e-4 : 1e-7);
-	if (qaws_repulsive_curves_solver_create(c, &d, x, &s) != QAWS_STATUS_OK)
+	if (qaws_repulsive_curves_solver_create(&s, c, x, &d) != QAWS_STATUS_OK)
 		return NULL;
 	memset(r, 0, sizeof(*r));
 	for (it = 0; it < 3000; it++)
 	{
-		qaws_repulsive_curves_solver_step(s, x, r);
+		qaws_repulsive_curves_solver_step(r, x, s);
 		if (r->reason != QAWS_REPULSIVE_RUNNING)
 			break;
 	}
@@ -276,7 +276,7 @@ static void test_curve_solution(void)
 	}
 	memset(&cd, 0, sizeof(cd));
 	cd.dimension = 3; cd.vertex_count = N; cd.edges = e; cd.edge_count = N - 1;
-	qaws_repulsive_curves_create(&cd, &c);
+	qaws_repulsive_curves_create(&c, &cd);
 	memset(&d, 0, sizeof(d));
 	d.pinned = pins; d.pinned_count = 2; d.hold_edge_lengths = 1;
 	/* before convergence: refused */
@@ -285,13 +285,13 @@ static void test_curve_solution(void)
 		qaws_repulsive_curves_solver* s0 = NULL;
 		qaws_status s1, s2;
 		memset(&t, 0, sizeof(t));
-		qaws_repulsive_curves_solver_create(c, &d, x, &s0);
-		s1 = qaws_repulsive_curves_solver_solution_jvp(s0, &t, dx, NULL);
+		qaws_repulsive_curves_solver_create(&s0, c, x, &d);
+		s1 = qaws_repulsive_curves_solver_solution_jvp(dx, NULL, s0, &t);
 		qaws_repulsive_curves_solver_destroy(s0);
 		s0 = NULL;
 		d.theta = (qaws_scalar)0.25;
-		qaws_repulsive_curves_solver_create(c, &d, x, &s0);
-		s2 = qaws_repulsive_curves_solver_solution_jvp(s0, &t, dx, NULL);
+		qaws_repulsive_curves_solver_create(&s0, c, x, &d);
+		s2 = qaws_repulsive_curves_solver_solution_jvp(dx, NULL, s0, &t);
 		qaws_repulsive_curves_solver_destroy(s0);
 		d.theta = 0;
 		sprintf(msg, "solution derivatives refused: not converged %d, hierarchical %d", (int)s1, (int)s2);
@@ -321,7 +321,7 @@ static void test_curve_solution(void)
 		memset(dpin, 0, sizeof(dpin));
 		dpin[4] = 1;
 		t.pinned = dpin; t.edge_lengths = dl;
-		st = qaws_repulsive_curves_solver_solution_jvp(s, &t, dx, &gauge);
+		st = qaws_repulsive_curves_solver_solution_jvp(dx, &gauge, s, &t);
 	}
 	for (i = 0; i < 3 * N; i++) { fd[i] = ((double)xp[i] - xm[i]) / (2 * h); an[i] = (double)dx[i]; }
 	{
@@ -350,13 +350,13 @@ static void test_curve_solution(void)
 		for (i = 0; i < 6; i++) dpin[i] = (qaws_scalar)cos(1.3 * i + 0.2);
 		for (i = 0; i + 1 < N; i++) dl[i] = (qaws_scalar)sin(2.1 * i + 0.5);
 		t.pinned = dpin; t.edge_lengths = dl;
-		qaws_repulsive_curves_solver_solution_jvp(s, &t, dx, NULL);
+		qaws_repulsive_curves_solver_solution_jvp(dx, NULL, s, &t);
 		for (i = 0; i < 3 * N; i++) { xbar[i] = (qaws_scalar)sin(0.9 * i + 0.4); lhs += (double)xbar[i] * dx[i]; }
 		{
 			qaws_scalar pb[6];
 			memset(&tb, 0, sizeof(tb));
 			tb.pinned = pb; tb.edge_lengths = lb;
-			st = qaws_repulsive_curves_solver_solution_vjp(s, xbar, &tb, NULL);
+			st = qaws_repulsive_curves_solver_solution_vjp(&tb, NULL, s, xbar);
 			for (i = 0; i < 6; i++) rhs += (double)pb[i] * dpin[i];
 			for (i = 0; i + 1 < N; i++) rhs += (double)lb[i] * dl[i];
 		}
@@ -389,7 +389,7 @@ static void test_loop_solution(void)
 	}
 	memset(&cd, 0, sizeof(cd));
 	cd.dimension = 3; cd.vertex_count = N; cd.edges = e; cd.edge_count = N;
-	qaws_repulsive_curves_create(&cd, &c);
+	qaws_repulsive_curves_create(&c, &cd);
 	memset(&d, 0, sizeof(d));
 	d.hold_edge_lengths = 1;
 	s = rc_converge(c, &d, x, &r);
@@ -421,7 +421,7 @@ static void test_loop_solution(void)
 			}
 			memset(&t, 0, sizeof(t));
 			t.edge_lengths = dl;
-			st = qaws_repulsive_curves_solver_solution_jvp(s, &t, dx, &gauge);
+			st = qaws_repulsive_curves_solver_solution_jvp(dx, &gauge, s, &t);
 		}
 	}
 	sp = rc_converge(c, &d, xp, &rp);
@@ -463,12 +463,12 @@ static qaws_repulsive_mesh_solver* rc_mesh_converge(qaws_repulsive_mesh const* m
 	unsigned int it;
 	memset(&d, 0, sizeof(d));
 	d.hold_area = 1; d.hold_volume = 1; d.tolerance = (qaws_scalar)(RC_F32 ? 1e-4 : 1e-6);
-	if (qaws_repulsive_mesh_solver_create(m, &d, x, &s) != QAWS_STATUS_OK)
+	if (qaws_repulsive_mesh_solver_create(&s, m, x, &d) != QAWS_STATUS_OK)
 		return NULL;
 	memset(r, 0, sizeof(*r));
 	for (it = 0; it < 3000; it++)
 	{
-		qaws_repulsive_mesh_solver_step(s, x, r);
+		qaws_repulsive_mesh_solver_step(r, x, s);
 		if (r->reason != QAWS_REPULSIVE_RUNNING)
 			break;
 	}
@@ -495,7 +495,7 @@ static void test_mesh_solution(void)
 	memcpy(tris, of, sizeof(of));
 	memset(&md, 0, sizeof(md));
 	md.vertex_count = nv; md.triangles = tris; md.triangle_count = nf;
-	qaws_repulsive_mesh_create(&md, &m);
+	qaws_repulsive_mesh_create(&m, &md);
 	s = rc_mesh_converge(m, x, &r);
 	rc_measures(x, tris, nf, &A, &V);
 	/* the re-solved difference: the solution pushed out along x - b, by +-h */
@@ -516,7 +516,7 @@ static void test_mesh_solution(void)
 	t.area = (qaws_scalar)((Ap - Am) / (2 * h)); t.volume = (qaws_scalar)((Vp - Vm) / (2 * h));
 	for (i = 0; i < nv; i++)
 		for (q = 0; q < 3; q++) t.barycenter[q] += (qaws_scalar)(((double)xp[3 * i + q] - xm[3 * i + q]) / (2 * h * nv));   /* (each re-solve holds its input's barycenter) */
-	st = qaws_repulsive_mesh_solver_solution_jvp(s, &t, dx, &gauge);
+	st = qaws_repulsive_mesh_solver_solution_jvp(dx, &gauge, s, &t);
 	for (i = 0; i < 3 * nv; i++) { fd[i] = ((double)xp[i] - xm[i]) / (2 * h); an[i] = (double)dx[i]; }
 	rc_unrotate(fd, x, nv);
 	err = rc_maxrel(an, fd, 3 * nv);
@@ -554,7 +554,7 @@ static void test_derivative_report(void)
 	}
 	memset(&cd, 0, sizeof(cd));
 	cd.dimension = 3; cd.vertex_count = N; cd.edges = e; cd.edge_count = N - 1;
-	qaws_repulsive_curves_create(&cd, &c);
+	qaws_repulsive_curves_create(&c, &cd);
 	memset(&d, 0, sizeof(d));
 	d.pinned = pins; d.pinned_count = 2; d.hold_edge_lengths = 1;
 	/* refused before convergence: the report zeroed */
@@ -563,7 +563,7 @@ static void test_derivative_report(void)
 	dpin[4] = 1;
 	t.pinned = dpin;
 	memcpy(x, x0, sizeof(x));
-	qaws_repulsive_curves_solver_create(c, &d, x, &s0);
+	qaws_repulsive_curves_solver_create(&s0, c, x, &d);
 	memset(&repn, 0x7f, sizeof(repn));
 	stn = qaws_repulsive_curves_solver_solution_jvp_checked(s0, &t, dx, NULL, &repn);
 	qaws_repulsive_curves_solver_destroy(s0);
@@ -577,7 +577,7 @@ static void test_derivative_report(void)
 		st[k] = s[k] ? qaws_repulsive_curves_solver_solution_jvp_checked(s[k], &t, dx, k ? NULL : &gauge, &rep[k]) : QAWS_STATUS_INVALID_ARGUMENT;
 		if (k == 0) memcpy(dx2, dx, sizeof(dx));
 	}
-	stu = s[0] ? qaws_repulsive_curves_solver_solution_jvp(s[0], &t, dx, NULL) : QAWS_STATUS_INVALID_ARGUMENT;
+	stu = s[0] ? qaws_repulsive_curves_solver_solution_jvp(dx, NULL, s[0], &t) : QAWS_STATUS_INVALID_ARGUMENT;
 	for (i = 0; i < 3 * N; i++) same &= dx[i] == dx2[i];
 	for (i = 0; i < 3 * N; i++) xbar[i] = (qaws_scalar)sin(0.9 * i + 0.4);
 	memset(&tb, 0, sizeof(tb));
@@ -690,13 +690,13 @@ static void test_mesh_vjp(void)
 	memcpy(tris, of, sizeof(of));
 	memset(&md, 0, sizeof(md));
 	md.vertex_count = NV; md.triangles = tris; md.triangle_count = NF;
-	qaws_repulsive_mesh_create(&md, &m);
+	qaws_repulsive_mesh_create(&m, &md);
 	memset(&d, 0, sizeof(d));
 	d.pinned = pins; d.pinned_count = 1; d.hold_barycenter = 1; d.hold_area = 1; d.hold_volume = 1;
 	d.tolerance = (qaws_scalar)(RC_F32 ? 1e-4 : 1e-6);
 	memset(&r, 0, sizeof(r));
-	if (qaws_repulsive_mesh_solver_create(m, &d, x, &s) == QAWS_STATUS_OK)
-		for (it = 0; it < 3000 && r.reason == QAWS_REPULSIVE_RUNNING; it++) qaws_repulsive_mesh_solver_step(s, x, &r);
+	if (qaws_repulsive_mesh_solver_create(&s, m, x, &d) == QAWS_STATUS_OK)
+		for (it = 0; it < 3000 && r.reason == QAWS_REPULSIVE_RUNNING; it++) qaws_repulsive_mesh_solver_step(&r, x, s);
 	/* the adjoint identity <VJP(xbar), dt> = <xbar, JVP(dt)> for random xbar and dt over every target */
 	for (k = 0; k < 3; k++)
 	{
@@ -710,10 +710,10 @@ static void test_mesh_vjp(void)
 		t.pinned = dpin;
 		t.area = (qaws_scalar)sin(3.1 * k + 0.7); t.volume = (qaws_scalar)cos(1.9 * k + 0.2);
 		for (i = 0; i < 3 * NV; i++) xbar[i] = (qaws_scalar)sin(0.77 * i + 1.3 * k + 0.1);
-		sj = s ? qaws_repulsive_mesh_solver_solution_jvp(s, &t, dx, &gauge) : QAWS_STATUS_INVALID_ARGUMENT;
+		sj = s ? qaws_repulsive_mesh_solver_solution_jvp(dx, &gauge, s, &t) : QAWS_STATUS_INVALID_ARGUMENT;
 		memset(&tb, 0, sizeof(tb));
 		tb.pinned = pb;
-		sv = s ? qaws_repulsive_mesh_solver_solution_vjp(s, xbar, &tb, NULL) : QAWS_STATUS_INVALID_ARGUMENT;
+		sv = s ? qaws_repulsive_mesh_solver_solution_vjp(&tb, NULL, s, xbar) : QAWS_STATUS_INVALID_ARGUMENT;
 		if (sj != QAWS_STATUS_OK) st = sj;
 		if (sv != QAWS_STATUS_OK) st = sv;
 		for (i = 0; i < 3 * NV; i++) lhs += (double)xbar[i] * dx[i];
@@ -742,10 +742,10 @@ static void test_mesh_vjp(void)
 		double hk = k ? h / 2 : h;
 		for (i = 0; i < 3 * NV; i++) { xp[i] = (qaws_scalar)((double)x[i] + hk * dx[i]); xm[i] = (qaws_scalar)((double)x[i] - hk * dx[i]); }
 		memset(&rp, 0, sizeof(rp)); memset(&rm, 0, sizeof(rm));
-		if (qaws_repulsive_mesh_solver_create(m, &d, xp, &sp) == QAWS_STATUS_OK && qaws_repulsive_mesh_solver_create(m, &d, xm, &sm) == QAWS_STATUS_OK)
+		if (qaws_repulsive_mesh_solver_create(&sp, m, xp, &d) == QAWS_STATUS_OK && qaws_repulsive_mesh_solver_create(&sm, m, xm, &d) == QAWS_STATUS_OK)
 		{
-			for (it = 0; it < 3000 && rp.reason == QAWS_REPULSIVE_RUNNING; it++) qaws_repulsive_mesh_solver_step(sp, xp, &rp);
-			for (it = 0; it < 3000 && rm.reason == QAWS_REPULSIVE_RUNNING; it++) qaws_repulsive_mesh_solver_step(sm, xm, &rm);
+			for (it = 0; it < 3000 && rp.reason == QAWS_REPULSIVE_RUNNING; it++) qaws_repulsive_mesh_solver_step(&rp, xp, sp);
+			for (it = 0; it < 3000 && rm.reason == QAWS_REPULSIVE_RUNNING; it++) qaws_repulsive_mesh_solver_step(&rm, xm, sm);
 		}
 		resolved += rp.reason == QAWS_REPULSIVE_CONVERGED && rm.reason == QAWS_REPULSIVE_CONVERGED;
 		for (i = 0; i < 3 * NV; i++) fdk[k][i] = ((double)xp[i] - xm[i]) / (2 * hk);
@@ -754,7 +754,7 @@ static void test_mesh_vjp(void)
 	}
 	memset(&t, 0, sizeof(t));
 	t.area = 1;
-	sj = s ? qaws_repulsive_mesh_solver_solution_jvp(s, &t, dx, NULL) : QAWS_STATUS_INVALID_ARGUMENT;
+	sj = s ? qaws_repulsive_mesh_solver_solution_jvp(dx, NULL, s, &t) : QAWS_STATUS_INVALID_ARGUMENT;
 	for (i = 0; i < 3 * NV; i++) { fd[i] = (4 * fdk[1][i] - fdk[0][i]) / 3; an[i] = (double)dx[i]; }
 	{
 		/* (less the rotation about the pin-barycenter line, free between the re-solves; the JVP is orthogonal to it) */

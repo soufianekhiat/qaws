@@ -36,8 +36,8 @@ Compute the distance along the curve between two parameters:
 
 ```c
 qaws_scalar length;
-qaws_curve_compute_arc_length(curve,
-    range.min_value, range.max_value, &length);
+qaws_curve_compute_arc_length(&length,
+    curve, range.min_value, range.max_value);
 ```
 
 Internally uses Gauss-Legendre quadrature for accuracy.
@@ -48,10 +48,10 @@ Compute an axis-aligned bounding box by sampling:
 
 ```c
 qaws_vec2 bbmin, bbmax;
-qaws_curve_compute_bounds_2d(curve, &bbmin, &bbmax);
+qaws_curve_compute_bounds_2d(&bbmin, &bbmax, curve);
 
 qaws_vec3 bbmin3, bbmax3;
-qaws_curve_compute_bounds_3d(curve, &bbmin3, &bbmax3);
+qaws_curve_compute_bounds_3d(&bbmin3, &bbmax3, curve);
 ```
 
 ## Closest point
@@ -63,16 +63,16 @@ qaws_scalar closest_t;
 
 // 2D
 qaws_vec2 target2 = { 1.5f, 0.5f };
-qaws_curve_find_closest_parameter_2d(curve, target2, &closest_t);
+qaws_curve_find_closest_parameter_2d(&closest_t, curve, target2);
 
 // 3D
 qaws_vec3 target3 = { 1.5f, 0.5f, 0.0f };
-qaws_curve_find_closest_parameter_3d(curve, target3, &closest_t);
+qaws_curve_find_closest_parameter_3d(&closest_t, curve, target3);
 
 // Evaluate at closest_t to get the actual closest point on the curve
 qaws_eval_result_2d result;
-qaws_curve_evaluate_2d(curve, closest_t,
-    QAWS_EVAL_FLAG_POSITION, &result);
+qaws_curve_evaluate_2d(&result, curve,
+    closest_t, QAWS_EVAL_FLAG_POSITION);
 ```
 
 Uses coarse sampling followed by Newton refinement.
@@ -83,7 +83,7 @@ Query continuity at a specific span boundary:
 
 ```c
 qaws_continuity cont;
-qaws_curve_get_span_continuity(curve, 0, &cont);
+qaws_curve_get_span_continuity(&cont, curve, 0);
 // boundary_index is 0 to span_count-2
 ```
 
@@ -95,7 +95,7 @@ Convenience functions that compute geometric quantities from derivatives:
 
 ```c
 qaws_vec2 tangent;
-qaws_curve_compute_tangent_2d(curve, t, &tangent);
+qaws_curve_compute_tangent_2d(&tangent, curve, t);
 // tangent is a unit vector in the direction of travel
 ```
 
@@ -103,7 +103,7 @@ qaws_curve_compute_tangent_2d(curve, t, &tangent);
 
 ```c
 qaws_vec2 normal;
-qaws_curve_compute_normal_2d(curve, t, &normal);
+qaws_curve_compute_normal_2d(&normal, curve, t);
 // Unit normal perpendicular to the tangent (rotated 90 degrees CCW)
 ```
 
@@ -113,8 +113,8 @@ Compute the full Frenet frame at a point on a 3D curve:
 
 ```c
 qaws_vec3 tangent, normal, binormal;
-qaws_curve_compute_frenet_frame_3d(curve, t,
-    &tangent, &normal, &binormal);
+qaws_curve_compute_frenet_frame_3d(&tangent, &normal,
+    &binormal, curve, t);
 // tangent  -- unit tangent vector (direction of travel)
 // normal   -- unit principal normal (points toward center of curvature)
 // binormal -- tangent x normal, completes the right-handed frame
@@ -124,7 +124,7 @@ qaws_curve_compute_frenet_frame_3d(curve, t,
 
 ```c
 qaws_scalar kappa;
-qaws_curve_compute_curvature_2d(curve, t, &kappa);
+qaws_curve_compute_curvature_2d(&kappa, curve, t);
 // 2D: signed curvature (positive = CCW)
 // 3D: unsigned curvature |d1 x d2| / |d1|^3
 ```
@@ -133,7 +133,7 @@ qaws_curve_compute_curvature_2d(curve, t, &kappa);
 
 ```c
 qaws_scalar tau;
-qaws_curve_compute_torsion_3d(curve, t, &tau);
+qaws_curve_compute_torsion_3d(&tau, curve, t);
 // Rate of change of the osculating plane
 ```
 
@@ -141,7 +141,7 @@ qaws_curve_compute_torsion_3d(curve, t, &tau);
 
 ```c
 qaws_scalar speed;
-qaws_curve_compute_speed(curve, t, &speed);
+qaws_curve_compute_speed(&speed, curve, t);
 // |d1| -- magnitude of the first derivative
 ```
 
@@ -152,8 +152,8 @@ Find parameter values where the curvature changes sign (inflection points):
 ```c
 qaws_scalar inflections[32];
 unsigned int inflection_count;
-qaws_curve_find_inflection_points(curve,
-    inflections, 32, &inflection_count);
+qaws_curve_find_inflection_points(inflections,
+    &inflection_count, curve, 32);
 // inflections[0..inflection_count-1] are the parameter values
 ```
 
@@ -165,8 +165,8 @@ Find parameter values where the curve reaches a minimum or maximum along a given
 qaws_scalar extrema[32];
 unsigned int extrema_count;
 unsigned int axis = 0; // 0 = x, 1 = y, 2 = z
-qaws_curve_find_extrema(curve, axis,
-    extrema, 32, &extrema_count);
+qaws_curve_find_extrema(extrema, &extrema_count,
+    curve, 32, axis);
 // extrema[0..extrema_count-1] are the parameter values
 ```
 
@@ -177,9 +177,9 @@ Sample curvature comb data along the curve for visualization. Each sample contai
 ```c
 // 2D
 qaws_curvature_sample_2d samples_2d[100];
-qaws_curve_compute_curvature_comb_2d(curve,
-    100,        // number of samples
-    samples_2d, // output buffer
+qaws_curve_compute_curvature_comb_2d(// number of samples
+    samples_2d,
+    curve,        100, // output buffer
     100);       // buffer capacity
 
 // Each sample has:
@@ -189,9 +189,9 @@ qaws_curve_compute_curvature_comb_2d(curve,
 
 // 3D
 qaws_curvature_sample_3d samples_3d[100];
-qaws_curve_compute_curvature_comb_3d(curve,
-    100,        // number of samples
-    samples_3d, // output buffer
+qaws_curve_compute_curvature_comb_3d(// number of samples
+    samples_3d,
+    curve,        100, // output buffer
     100);       // buffer capacity
 ```
 
@@ -218,7 +218,7 @@ Compute the winding number of a closed 2D curve around a point. The winding numb
 ```c
 int winding;
 qaws_vec2 point = { 0.5f, 0.5f };
-qaws_curve_compute_winding_number_2d(curve, point, &winding);
+qaws_curve_compute_winding_number_2d(&winding, curve, point);
 // winding == 0 means the point is outside the curve
 // winding != 0 means the point is inside
 ```
@@ -231,8 +231,8 @@ Find all intersection points between two curves:
 // 2D
 qaws_intersection_2d hits_2d[32];
 unsigned int hit_count;
-qaws_curve_find_intersections_2d(curve_a, curve_b,
-    hits_2d, 32, &hit_count);
+qaws_curve_find_intersections_2d(hits_2d, &hit_count,
+    curve_a, curve_b, 32);
 
 // Each intersection has:
 //   .parameter_a -- parameter on curve_a
@@ -241,8 +241,8 @@ qaws_curve_find_intersections_2d(curve_a, curve_b,
 
 // 3D
 qaws_intersection_3d hits_3d[32];
-qaws_curve_find_intersections_3d(curve_a, curve_b,
-    hits_3d, 32, &hit_count);
+qaws_curve_find_intersections_3d(hits_3d, &hit_count,
+    curve_a, curve_b, 32);
 ```
 
 The intersection result structs are defined as:
@@ -269,16 +269,16 @@ Find points where a curve crosses itself:
 // 2D
 qaws_intersection_2d self_hits_2d[32];
 unsigned int self_count;
-qaws_curve_find_self_intersections_2d(curve,
-    self_hits_2d, 32, &self_count);
+qaws_curve_find_self_intersections_2d(self_hits_2d,
+    &self_count, curve, 32);
 
 // parameter_a and parameter_b are the two distinct parameter values
 // where the curve passes through the same position
 
 // 3D
 qaws_intersection_3d self_hits_3d[32];
-qaws_curve_find_self_intersections_3d(curve,
-    self_hits_3d, 32, &self_count);
+qaws_curve_find_self_intersections_3d(self_hits_3d,
+    &self_count, curve, 32);
 ```
 
 ## Family-specific inspection
@@ -288,8 +288,8 @@ qaws_curve_find_self_intersections_3d(curve,
 ```c
 qaws_vec2 cps[10];
 unsigned int count;
-qaws_status s = qaws_bezier_get_control_points(curve,
-    cps, 10, &count);
+qaws_status s = qaws_bezier_get_control_points(cps,
+    &count, curve, 10);
 // Returns QAWS_STATUS_UNSUPPORTED_OPERATION if not a Bezier curve
 ```
 
@@ -298,7 +298,7 @@ qaws_status s = qaws_bezier_get_control_points(curve,
 ```c
 qaws_scalar knots[64];
 unsigned int knot_count;
-qaws_bspline_get_knots(curve, knots, 64, &knot_count);
+qaws_bspline_get_knots(knots, &knot_count, curve, 64);
 // Works for both B-Spline and NURBS curves
 ```
 
@@ -307,6 +307,6 @@ qaws_bspline_get_knots(curve, knots, 64, &knot_count);
 ```c
 qaws_scalar weights[32];
 unsigned int weight_count;
-qaws_nurbs_get_weights(curve, weights, 32, &weight_count);
+qaws_nurbs_get_weights(weights, &weight_count, curve, 32);
 // Returns QAWS_STATUS_UNSUPPORTED_OPERATION if not NURBS
 ```

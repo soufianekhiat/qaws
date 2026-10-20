@@ -21,11 +21,11 @@ static void s37_solve(qaws_scalar* x, unsigned int n, unsigned int const* e, uns
 	for (i = 0; i < nfix; i++) pins[i] = i;
 	memset(&cd, 0, sizeof(cd));
 	cd.dimension = 2; cd.vertex_count = n; cd.edges = e; cd.edge_count = ne;
-	qaws_repulsive_curves_create(&cd, &c);
+	qaws_repulsive_curves_create(&c, &cd);
 	memset(&d, 0, sizeof(d));
 	d.pinned = pins; d.pinned_count = nfix; d.hold_edge_lengths = 1; d.collision_checked = 1; d.max_iterations = steps;
 	memset(r, 0, sizeof(*r));
-	qaws_repulsive_curves_solve(c, &d, x, r);
+	qaws_repulsive_curves_solve(r, x, c, &d);
 	qaws_repulsive_curves_destroy(c);
 	free(pins);
 }

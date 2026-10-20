@@ -34,7 +34,7 @@ qaws_sampling_desc desc = {
     .use_adaptive_sampling = 0
 };
 
-qaws_curve_sample_2d(curve, &desc, positions, 256, &count);
+qaws_curve_sample_2d(positions, &count, curve, 256, &desc);
 // positions[0..count-1] now contain sampled points
 ```
 
@@ -46,7 +46,7 @@ When you need tangent or curvature information at each sample:
 qaws_eval_result_2d samples[256];
 unsigned int count = 0;
 
-qaws_curve_sample_eval_2d(curve, &desc, samples, 256, &count);
+qaws_curve_sample_eval_2d(samples, &count, curve, 256, &desc);
 // samples[i].position, samples[i].d1, etc.
 ```
 
@@ -54,7 +54,7 @@ qaws_curve_sample_eval_2d(curve, &desc, samples, 256, &count);
 
 ```c
 unsigned int count;
-qaws_curve_get_sample_count(curve, &desc, &count);
+qaws_curve_get_sample_count(&count, curve, &desc);
 // allocate buffer of size `count`, then call sample_2d/3d
 ```
 
@@ -74,7 +74,7 @@ qaws_vec2 positions[4096];
 unsigned int count = 0;
 
 qaws_status s = qaws_curve_sample_2d(
-    curve, &desc, positions, 4096, &count);
+    positions, &count, curve, 4096, &desc);
 // count may be larger than sample_count due to subdivision
 ```
 
@@ -92,11 +92,11 @@ qaws_vec2 positions[512];
 unsigned int count = 0;
 
 qaws_curve_sample_curvature_weighted_2d(
-    curve,
-    512,            // desired sample count
+    // desired sample count
     positions,
-    512,            // buffer capacity
-    &count);
+    // buffer capacity
+    &count,            curve,
+    512,            512);
 // count <= 512, concentrated in high-curvature areas
 ```
 
@@ -104,18 +104,18 @@ Signatures:
 
 ```c
 qaws_status qaws_curve_sample_curvature_weighted_2d(
+    qaws_vec2* out_positions,
+    unsigned int* out_position_count,
     qaws_curve const* curve,
     unsigned int sample_count,
-    qaws_vec2* out_positions,
-    unsigned int position_capacity,
-    unsigned int* out_position_count);
+    unsigned int position_capacity);
 
 qaws_status qaws_curve_sample_curvature_weighted_3d(
+    qaws_vec3* out_positions,
+    unsigned int* out_position_count,
     qaws_curve const* curve,
     unsigned int sample_count,
-    qaws_vec3* out_positions,
-    unsigned int position_capacity,
-    unsigned int* out_position_count);
+    unsigned int position_capacity);
 ```
 
 ## Feature-preserving sampling
@@ -127,11 +127,11 @@ qaws_vec2 positions[512];
 unsigned int count = 0;
 
 qaws_curve_sample_feature_preserving_2d(
-    curve,
-    64,             // base uniform sample count
+    // base uniform sample count
     positions,
-    512,            // buffer capacity (may exceed base count)
-    &count);
+    // buffer capacity (may exceed base count)
+    &count,             curve,
+    64,            512);
 // count >= 64, with inflection points and extrema injected
 ```
 
@@ -139,18 +139,18 @@ Signatures:
 
 ```c
 qaws_status qaws_curve_sample_feature_preserving_2d(
+    qaws_vec2* out_positions,
+    unsigned int* out_position_count,
     qaws_curve const* curve,
     unsigned int base_sample_count,
-    qaws_vec2* out_positions,
-    unsigned int position_capacity,
-    unsigned int* out_position_count);
+    unsigned int position_capacity);
 
 qaws_status qaws_curve_sample_feature_preserving_3d(
+    qaws_vec3* out_positions,
+    unsigned int* out_position_count,
     qaws_curve const* curve,
     unsigned int base_sample_count,
-    qaws_vec3* out_positions,
-    unsigned int position_capacity,
-    unsigned int* out_position_count);
+    unsigned int position_capacity);
 ```
 
 ## Streaming sampling

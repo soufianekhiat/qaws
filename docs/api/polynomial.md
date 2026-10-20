@@ -36,8 +36,8 @@ Each coefficient is a point (2 or 3 scalars depending on dimension).
 
 ```c
 qaws_status qaws_curve_create_polynomial(
-    qaws_polynomial_desc const* desc,
-    qaws_curve** out_curve);
+    qaws_curve** out_curve,
+    qaws_polynomial_desc const* desc);
 ```
 
 Creates a polynomial curve in monomial form.

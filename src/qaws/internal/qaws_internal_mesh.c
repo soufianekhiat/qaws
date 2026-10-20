@@ -27,8 +27,8 @@ qaws_status qaws_internal_mesh_build(
 	qaws_internal_mesh* mesh,
 	qaws_scalar const* positions,
 	qaws_scalar const* uvs,
-	unsigned int vertex_count,
 	unsigned int const* indices,
+	unsigned int vertex_count,
 	unsigned int index_count)
 {
 	unsigned int tri_count;
@@ -267,11 +267,11 @@ static dijk_entry heap_pop(dijk_entry* heap, unsigned int* size)
 }
 
 qaws_status qaws_internal_mesh_dijkstra(
+	unsigned int* out_path,
+	unsigned int* out_path_count,
 	qaws_internal_mesh const* mesh,
 	unsigned int src,
-	unsigned int dst,
-	unsigned int* out_path,
-	unsigned int* out_path_count)
+	unsigned int dst)
 {
 	unsigned int n = mesh->vertex_count;
 	qaws_scalar* dist = NULL;

@@ -15,7 +15,7 @@ static qaws_curve* make_line_3d(qaws_vec3 a, qaws_vec3 b)
 	d.degree = 1;
 	d.control_points = pts;
 	d.control_point_count = 2;
-	qaws_curve_create_bezier(&d, &c);
+	qaws_curve_create_bezier(&c, &d);
 	return c;
 }
 
@@ -37,7 +37,7 @@ static qaws_surface* make_flat_coons(
 
 	desc.c0 = *out_c0; desc.c1 = *out_c1;
 	desc.d0 = *out_d0; desc.d1 = *out_d1;
-	qaws_surface_create_coons(&desc, &surf);
+	qaws_surface_create_coons(&surf, &desc);
 	return surf;
 }
 
@@ -61,7 +61,7 @@ static void test_surface_offset(void)
 	/* Create offset surface, distance +1.0 */
 	odesc.base = base;
 	odesc.distance = (qaws_scalar)1.0;
-	s = qaws_surface_create_offset(&odesc, &offset);
+	s = qaws_surface_create_offset(&offset, &odesc);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(offset != NULL, "offset surface created");
 	TEST_ASSERT(qaws_surface_get_kind(offset) == QAWS_SURFACE_KIND_OFFSET,
@@ -69,8 +69,8 @@ static void test_surface_offset(void)
 
 	/* Center (0.5, 0.5): flat patch normal is +Z, so offset pushes z up by 1.0 */
 	memset(&r, 0, sizeof(r));
-	s = qaws_surface_evaluate(offset, (qaws_scalar)0.5, (qaws_scalar)0.5,
-		QAWS_SURFACE_EVAL_POSITION, &r);
+	s = qaws_surface_evaluate(&r, offset, (qaws_scalar)0.5,
+		(qaws_scalar)0.5, QAWS_SURFACE_EVAL_POSITION);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(approx_eq_loose(r.position.x, (qaws_scalar)2.0), "offset center x");
 	TEST_ASSERT(approx_eq_loose(r.position.y, (qaws_scalar)1.5), "offset center y");
@@ -78,8 +78,8 @@ static void test_surface_offset(void)
 
 	/* Corner (0,0): should be offset by 1.0 in Z */
 	memset(&r, 0, sizeof(r));
-	s = qaws_surface_evaluate(offset, 0, 0,
-		QAWS_SURFACE_EVAL_POSITION, &r);
+	s = qaws_surface_evaluate(&r, offset, 0,
+		0, QAWS_SURFACE_EVAL_POSITION);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(fabs(r.position.x) < TOLERANCE_LOOSE, "offset (0,0) x");
 	TEST_ASSERT(fabs(r.position.y) < TOLERANCE_LOOSE, "offset (0,0) y");
@@ -87,8 +87,8 @@ static void test_surface_offset(void)
 
 	/* Corner (1,1): should be (4, 3, 1.0) */
 	memset(&r, 0, sizeof(r));
-	s = qaws_surface_evaluate(offset, 1, 1,
-		QAWS_SURFACE_EVAL_POSITION, &r);
+	s = qaws_surface_evaluate(&r, offset, 1,
+		1, QAWS_SURFACE_EVAL_POSITION);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(approx_eq_loose(r.position.x, (qaws_scalar)4.0), "offset (1,1) x");
 	TEST_ASSERT(approx_eq_loose(r.position.y, (qaws_scalar)3.0), "offset (1,1) y");
@@ -96,8 +96,8 @@ static void test_surface_offset(void)
 
 	/* Corner (1,0): should be (4, 0, 1.0) */
 	memset(&r, 0, sizeof(r));
-	s = qaws_surface_evaluate(offset, 1, 0,
-		QAWS_SURFACE_EVAL_POSITION, &r);
+	s = qaws_surface_evaluate(&r, offset, 1,
+		0, QAWS_SURFACE_EVAL_POSITION);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(approx_eq_loose(r.position.x, (qaws_scalar)4.0), "offset (1,0) x");
 	TEST_ASSERT(fabs(r.position.y) < TOLERANCE_LOOSE, "offset (1,0) y");
@@ -106,7 +106,7 @@ static void test_surface_offset(void)
 	/* Null args rejected */
 	{
 		qaws_surface* tmp = NULL;
-		s = qaws_surface_create_offset(NULL, &tmp);
+		s = qaws_surface_create_offset(&tmp, NULL);
 		TEST_ASSERT(s != QAWS_STATUS_OK, "offset null desc rejected");
 	}
 
@@ -138,14 +138,14 @@ static void test_surface_offset_negative(void)
 	/* Offset by -0.5 */
 	odesc.base = base;
 	odesc.distance = (qaws_scalar)-0.5;
-	s = qaws_surface_create_offset(&odesc, &offset);
+	s = qaws_surface_create_offset(&offset, &odesc);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(offset != NULL, "negative offset surface created");
 
 	/* Center (0.5, 0.5): should be (2, 1.5, -0.5) */
 	memset(&r, 0, sizeof(r));
-	s = qaws_surface_evaluate(offset, (qaws_scalar)0.5, (qaws_scalar)0.5,
-		QAWS_SURFACE_EVAL_POSITION, &r);
+	s = qaws_surface_evaluate(&r, offset, (qaws_scalar)0.5,
+		(qaws_scalar)0.5, QAWS_SURFACE_EVAL_POSITION);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(approx_eq_loose(r.position.x, (qaws_scalar)2.0), "neg offset center x");
 	TEST_ASSERT(approx_eq_loose(r.position.y, (qaws_scalar)1.5), "neg offset center y");
@@ -181,7 +181,7 @@ static qaws_surface* make_hemisphere(qaws_curve** out_profile)
 	bd.degree = 2;
 	bd.control_points = pts;
 	bd.control_point_count = 3;
-	qaws_curve_create_bezier(&bd, &prof);
+	qaws_curve_create_bezier(&prof, &bd);
 	if (!prof) return NULL;
 
 	memset(&rd, 0, sizeof(rd));
@@ -189,7 +189,7 @@ static qaws_surface* make_hemisphere(qaws_curve** out_profile)
 	rd.axis_origin.x = 0; rd.axis_origin.y = 0; rd.axis_origin.z = 0;
 	rd.axis_direction.x = 0; rd.axis_direction.y = 0; rd.axis_direction.z = 1;
 	rd.angle = 0; /* full 2*PI */
-	qaws_surface_create_revolution(&rd, &surf);
+	qaws_surface_create_revolution(&surf, &rd);
 	*out_profile = prof;
 	return surf;
 }
@@ -215,11 +215,11 @@ static void visual_obj_offset(void)
 	/* Positive offset (+0.5) — larger shell outside */
 	odesc.base = base;
 	odesc.distance = (qaws_scalar)0.5;
-	qaws_surface_create_offset(&odesc, &off_pos);
+	qaws_surface_create_offset(&off_pos, &odesc);
 
 	/* Negative offset (-0.5) — smaller shell inside */
 	odesc.distance = (qaws_scalar)-0.5;
-	qaws_surface_create_offset(&odesc, &off_neg);
+	qaws_surface_create_offset(&off_neg, &odesc);
 
 	if (!off_pos || !off_neg) goto cleanup_offset;
 
@@ -285,7 +285,7 @@ static void visual_obj_offset_selfintersect(void)
 	bd.degree = 2;
 	bd.control_points = pts;
 	bd.control_point_count = 3;
-	qaws_curve_create_bezier(&bd, &prof);
+	qaws_curve_create_bezier(&prof, &bd);
 	if (!prof) return;
 
 	memset(&rd, 0, sizeof(rd));
@@ -293,7 +293,7 @@ static void visual_obj_offset_selfintersect(void)
 	rd.axis_origin.x = 0; rd.axis_origin.y = 0; rd.axis_origin.z = 0;
 	rd.axis_direction.x = 0; rd.axis_direction.y = 0; rd.axis_direction.z = 1;
 	rd.angle = 0;
-	qaws_surface_create_revolution(&rd, &base);
+	qaws_surface_create_revolution(&base, &rd);
 	if (!base) { qaws_curve_destroy(prof); return; }
 
 	/* Offset d=-1.0 (inward): waist at r=0.3 inverts to r=-0.7
@@ -302,7 +302,7 @@ static void visual_obj_offset_selfintersect(void)
 	   protrudes through the valid outer shell → self-intersection. */
 	odesc.base = base;
 	odesc.distance = (qaws_scalar)-1.0;
-	qaws_surface_create_offset(&odesc, &offset);
+	qaws_surface_create_offset(&offset, &odesc);
 	if (!offset) goto cleanup_si;
 
 	if (!obj_open(&w, OBJ_OUTPUT_DIR "/38_offset_selfintersect.obj",
@@ -344,8 +344,8 @@ static void visual_obj_offset_selfintersect(void)
 			qaws_scalar v = vr_b.min_value + (vr_b.max_value - vr_b.min_value)
 				* (qaws_scalar)bi / (qaws_scalar)(PROF_N - 1);
 			memset(&er, 0, sizeof(er));
-			qaws_surface_evaluate(base, (qaws_scalar)0.0, v,
-				QAWS_SURFACE_EVAL_POSITION, &er);
+			qaws_surface_evaluate(&er, base, (qaws_scalar)0.0,
+				v, QAWS_SURFACE_EVAL_POSITION);
 			base_r[bi] = er.position.x;
 			base_z[bi] = er.position.z;
 		}
@@ -357,8 +357,8 @@ static void visual_obj_offset_selfintersect(void)
 			qaws_scalar v = vr_o.min_value + (vr_o.max_value - vr_o.min_value)
 				* (qaws_scalar)oi / (qaws_scalar)(PROF_N - 1);
 			memset(&er, 0, sizeof(er));
-			qaws_surface_evaluate(offset, (qaws_scalar)0.0, v,
-				QAWS_SURFACE_EVAL_POSITION, &er);
+			qaws_surface_evaluate(&er, offset, (qaws_scalar)0.0,
+				v, QAWS_SURFACE_EVAL_POSITION);
 			off_inv[oi] = er.position.x < 0 ? 1 : 0;
 			off_r[oi] = er.position.x < 0 ? -er.position.x : er.position.x;
 			off_z[oi] = er.position.z;

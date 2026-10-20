@@ -16,7 +16,7 @@ typedef struct qaws_triangulate_desc {
 	unsigned int max_vertices;      /* 0 = 4 million */
 } qaws_triangulate_desc;
 
-qaws_status qaws_triangulate_region_2d(desc, qaws_mesh_2d** out_mesh);
+qaws_status qaws_triangulate_region_2d(qaws_mesh_2d** out_mesh, desc);
 qaws_status qaws_mesh_2d_remesh(mesh, target_length, size_fn, size_user, iterations);
 qaws_status qaws_mesh_2d_quadrangulate(mesh, all_quads, smoothing_iterations);
 void qaws_mesh_2d_destroy(mesh);

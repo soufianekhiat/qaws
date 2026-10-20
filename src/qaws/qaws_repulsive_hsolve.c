@@ -144,7 +144,7 @@ static void rh_apply(qaws_internal_rs_hsys const* H, rh_work* W, double const* u
 	unsigned int i;
 	memcpy(W->t3, u, sizeof(double) * s->nv);
 	rh_mask(s, W->t3);
-	qaws_internal_rbh_apply_with(H->h.A, W->sa, W->t3, y);
+	qaws_internal_rbh_apply_with(y, H->h.A, W->sa, W->t3);
 	rh_mask(s, y);
 	if (H->aug)
 	{
@@ -299,7 +299,7 @@ static void rh_precond(qaws_internal_rs_hsys const* H, rh_work* W, double const*
 	for (i = 0; i < s->nv; i++) c += tmp[i] / H->nfree;
 	for (i = 0; i < s->nv; i++) if (!s->fixed || !s->fixed[i]) tmp[i] -= c;
 	rh_chol_solve(H, W, tmp, z);
-	qaws_internal_rbh_apply_with(H->h.F, W->sf, z, tmp);
+	qaws_internal_rbh_apply_with(tmp, H->h.F, W->sf, z);
 	rh_mask(s, tmp);
 	rh_chol_solve(H, W, tmp, z);
 	for (i = 0; i < s->nv; i++) if (!s->fixed || !s->fixed[i]) z[i] += c / H->tau;
@@ -443,7 +443,7 @@ static int rh_solve_all(qaws_internal_rs_hsys const* H, double const* const* src
 	if (good)
 	{
 		b.H = H; b.rhs = rhs; b.sol = sol; b.ok = ok;
-		good = qaws_internal_parallel(s->executor, nuniq, 1, rh_batch_job, &b) == QAWS_STATUS_OK;
+		good = qaws_internal_parallel(nuniq, 1, rh_batch_job, &b, s->executor) == QAWS_STATUS_OK;
 	}
 	for (t = 0; good && t < nuniq; t++) good = ok[t];
 	for (j = 0, njob = 0; good && j < count; j++)
@@ -453,7 +453,7 @@ static int rh_solve_all(qaws_internal_rs_hsys const* H, double const* const* src
 	return good;
 }
 
-qaws_status qaws_internal_rs_hdirection(rs_core const* s, double const* x, double const* dE, double* g, qaws_internal_rs_hsys** out)
+qaws_status qaws_internal_rs_hdirection(qaws_internal_rs_hsys** out, double* g, rs_core const* s, double const* x, double const* dE)
 {
 	qaws_internal_rs_hsys* H;
 	unsigned int nv = s->nv, N = s->N, k = s->k, i, r, c, q;
@@ -535,12 +535,12 @@ qaws_status qaws_internal_rs_hdirection(rs_core const* s, double const* x, doubl
 			for (c = 0; c < k; c++) H->S[r * k + c] = rh_dot(H->C + (size_t)r * N, H->Y + (size_t)c * N, N);
 			H->phi[r] = rh_dot(H->C + (size_t)r * N, g, N);
 		}
-		if (!qaws_internal_rs_lu(H->S, k, H->piv))
+		if (!qaws_internal_rs_lu(H->S, H->piv, k))
 		{
 			qaws_internal_rs_hsys_free(H);
 			return QAWS_STATUS_NUMERICAL_FAILURE;
 		}
-		qaws_internal_rs_lu_solve(H->S, k, H->piv, H->phi);
+		qaws_internal_rs_lu_solve(H->phi, H->S, H->piv, k);
 		for (r = 0; r < k; r++)
 			for (i = 0; i < N; i++) g[i] -= H->phi[r] * H->Y[(size_t)r * N + i];
 	}
@@ -551,7 +551,7 @@ fail:
 	return QAWS_STATUS_NUMERICAL_FAILURE;
 }
 
-int qaws_internal_rs_hproject(qaws_internal_rs_hsys* H, double* y)
+int qaws_internal_rs_hproject(double* y, qaws_internal_rs_hsys* H)
 {
 	rs_core const* s = H->s;
 	unsigned int it, r, c, i, k = H->k, N = s->N;
@@ -567,9 +567,9 @@ int qaws_internal_rs_hproject(qaws_internal_rs_hsys* H, double* y)
 			return 1;
 		for (r = 0; r < k; r++)
 			for (c = 0; c < k; c++) H->S[r * k + c] = rh_dot(H->C + (size_t)r * N, H->Y + (size_t)c * N, N);
-		if (!qaws_internal_rs_lu(H->S, k, H->piv))
+		if (!qaws_internal_rs_lu(H->S, H->piv, k))
 			return 0;
-		qaws_internal_rs_lu_solve(H->S, k, H->piv, H->phi);
+		qaws_internal_rs_lu_solve(H->phi, H->S, H->piv, k);
 		for (r = 0; r < k; r++)
 			for (i = 0; i < N; i++) y[i] -= H->phi[r] * H->Y[(size_t)r * N + i];
 	}

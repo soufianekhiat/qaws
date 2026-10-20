@@ -74,23 +74,23 @@ static void demo_blue_noise(void)
 	d.control_points = (qaws_vec3 const*)cps;
 	d.u_point_count = 4;
 	d.v_point_count = 4;
-	qaws_surface_create_bezier(&d, &surf);
+	qaws_surface_create_bezier(&surf, &d);
 	for (i = 0; i < 2 * BN_N; i++)
 	{
 		rng = rng * 1664525u + 1013904223u;
 		xi[i] = (qaws_scalar)((rng >> 8) / 16777216.0);
 	}
-	qaws_surface_cdf_sample_tangent(NULL, surf, NULL, xi, NULL, BN_N, 4, 4, NULL, s0, NULL, NULL, &tot);
+	qaws_surface_cdf_sample_tangent(s0, NULL, NULL, &tot, surf, xi, NULL, NULL, BN_N, NULL, 4, 4, NULL);
 	total = tot;
 	sigma = 0.55 * sqrt(total / BN_N);
 	for (it = 0; it <= BN_ITERS; it++)
 	{
-		qaws_surface_cdf_sample_tangent(NULL, surf, NULL, xi, NULL, BN_N, 4, 4, NULL, s, NULL, NULL, NULL);
+		qaws_surface_cdf_sample_tangent(s, NULL, NULL, NULL, surf, xi, NULL, NULL, BN_N, NULL, 4, 4, NULL);
 		loss[it] = bn_energy(s, sigma, adj);
 		if (it == BN_ITERS)
 			break;
 		memset(g, 0, sizeof(g));
-		qaws_surface_cdf_sample_adjoint(NULL, surf, NULL, xi, BN_N, 4, 4, adj, NULL, g);
+		qaws_surface_cdf_sample_adjoint(NULL, g, surf, xi, adj, BN_N, NULL, 4, 4, NULL);
 		/* sign-like normalized steps on the points, shrinking over the run */
 		{
 			int k;

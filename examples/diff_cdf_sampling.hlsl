@@ -95,7 +95,7 @@ void CSSpanMeasure(uint3 id : SV_DispatchThreadID)
     if (k >= span_count)
         return;
     w = load_span(k);
-    m = qaws_bspline_integrate(integrand, curvature_floor, w.lcp, w.ldot, w.lk, (int)degree, (int)degree, w.a, w.b);
+    m = qaws_bspline_integrate(w.lcp, w.ldot, w.lk, integrand, curvature_floor, (int)degree, (int)degree, w.a, w.b);
     span_measures[k * 3 + 0] = m.v;
     span_measures[k * 3 + 1] = m.t;
     span_measures[k * 3 + 2] = m.tt;
@@ -119,13 +119,13 @@ void CSSample(uint3 id : SV_DispatchThreadID)
     while (k + 1 < span_count && prefix[(k + 1) * 3] <= sigma)
         k++;
     w = load_span(k);
-    t = qaws_bspline_cdf_solve(integrand, curvature_floor, w.lcp, w.lk, (int)degree, (int)degree, w.a, w.b, sigma - prefix[k * 3]);
-    part = qaws_bspline_integrate(integrand, curvature_floor, w.lcp, w.ldot, w.lk, (int)degree, (int)degree, w.a, t);
-    qaws_bspline_cdf_tangent(integrand, curvature_floor, w.lcp, w.ldot, w.lk, (int)degree, (int)degree, t,
-        targets[i * 4 + 2] + targets[i * 4 + 1] * prefix[span_count * 3 + 1],
-        targets[i * 4 + 3] + targets[i * 4 + 1] * prefix[span_count * 3 + 2],
-        prefix[k * 3 + 1] + part.t, prefix[k * 3 + 2] + part.tt, ot, op);
-    qaws_bspline_jet_rows(w.lcp, w.ldot, w.lk, (int)degree, (int)degree, t, c, cd);
+    t = qaws_bspline_cdf_solve(w.lcp, w.lk, integrand, curvature_floor, (int)degree, (int)degree, w.a, w.b, sigma - prefix[k * 3]);
+    part = qaws_bspline_integrate(w.lcp, w.ldot, w.lk, integrand, curvature_floor, (int)degree, (int)degree, w.a, t);
+    qaws_bspline_cdf_tangent(ot, op, w.lcp, w.ldot, w.lk, integrand, curvature_floor, (int)degree,
+        (int)degree,
+        t,
+        targets[i * 4 + 2] + targets[i * 4 + 1] * prefix[span_count * 3 + 1], targets[i * 4 + 3] + targets[i * 4 + 1] * prefix[span_count * 3 + 2], prefix[k * 3 + 1] + part.t, prefix[k * 3 + 2] + part.tt);
+    qaws_bspline_jet_rows(c, cd, w.lcp, w.ldot, w.lk, (int)degree, (int)degree, t);
     samples[i * 12 + 0] = t;
     samples[i * 12 + 1] = c[0].x; samples[i * 12 + 2] = c[0].y; samples[i * 12 + 3] = c[0].z;
     samples[i * 12 + 4] = ot[0];
@@ -145,7 +145,7 @@ void CSLambda(uint3 id : SV_DispatchThreadID)
         return;
     w = load_span(sample_spans[i]);
     pb = qaws_v3(sample_adjoints[i * 4 + 1], sample_adjoints[i * 4 + 2], sample_adjoints[i * 4 + 3]);
-    lambda_out[i] = qaws_bspline_cdf_lambda(integrand, curvature_floor, w.lcp, w.lk, (int)degree, (int)degree,
+    lambda_out[i] = qaws_bspline_cdf_lambda(w.lcp, w.lk, integrand, curvature_floor, (int)degree, (int)degree,
         samples[i * 12], sample_adjoints[i * 4], pb);
 }
 
@@ -166,8 +166,8 @@ void CSGather(uint3 id : SV_DispatchThreadID)
             continue;
         /* full span nodes */
         for (q = 0; q < 8 * QAWS_SAMPLING_PIECES; q++) {
-            qaws_gauss8((int)(q % 8), xw);
-            g = qaws_bspline_node_adjoint_cp(integrand, curvature_floor, w.lcp, w.lk, (int)degree, (int)degree,
+            qaws_gauss8(xw, (int)(q % 8));
+            g = qaws_bspline_node_adjoint_cp(w.lcp, w.lk, integrand, curvature_floor, (int)degree, (int)degree,
                 w.a + h * (float)(q / 8) + 0.5 * h * (1.0 + xw[0]), j, span_weights[k] * 0.5 * h * xw[1]);
             acc += float3(g.x, g.y, g.z);
         }
@@ -178,8 +178,8 @@ void CSGather(uint3 id : SV_DispatchThreadID)
             float hp = (t - w.a) / QAWS_SAMPLING_PIECES;
             qaws_eval_3d yb;
             for (q = 0; q < 8 * QAWS_SAMPLING_PIECES; q++) {
-                qaws_gauss8((int)(q % 8), xw);
-                g = qaws_bspline_node_adjoint_cp(integrand, curvature_floor, w.lcp, w.lk, (int)degree, (int)degree,
+                qaws_gauss8(xw, (int)(q % 8));
+                g = qaws_bspline_node_adjoint_cp(w.lcp, w.lk, integrand, curvature_floor, (int)degree, (int)degree,
                     w.a + hp * (float)(q / 8) + 0.5 * hp * (1.0 + xw[0]), j, -lambdas[i] * 0.5 * hp * xw[1]);
                 acc += float3(g.x, g.y, g.z);
             }

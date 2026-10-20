@@ -17,7 +17,7 @@ typedef struct qaws_clip64_desc {
 	unsigned int flags;               /* QAWS_CLIP_PRESERVE_COLLINEAR, QAWS_CLIP_REVERSE_SOLUTION */
 } qaws_clip64_desc;
 
-qaws_status qaws_clip64_execute(qaws_clip64_desc const* desc, qaws_clip64_result** out_result);
+qaws_status qaws_clip64_execute(qaws_clip64_result** out_result, qaws_clip64_desc const* desc);
 ```
 
 Closed paths are closed implicitly; don't repeat the first point.
@@ -53,8 +53,8 @@ and open subjects all work as in [clip.md](clip.md).
 ## Result
 
 ```c
-qaws_clip64_result_get_path(r, i, &points, &count);         /* rounded to the nearest integer */
-qaws_clip64_result_get_path_exact(r, i, &xy, &count);       /* exact vertices as the nearest doubles */
+qaws_clip64_result_get_path(&points, &count, r, i);         /* rounded to the nearest integer */
+qaws_clip64_result_get_path_exact(&xy, &count, r, i);       /* exact vertices as the nearest doubles */
 qaws_clip64_result_get_parent / is_hole / get_depth / get_open_path ...
 double qaws_path64_area2(int64_t const* points, unsigned int count);   /* exact 2 x area, rounded once */
 ```

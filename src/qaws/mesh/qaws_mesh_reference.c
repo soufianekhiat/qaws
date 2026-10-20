@@ -347,7 +347,7 @@ qaws_status qaws_mesh_reference_create(qaws_mesh_3d const* mesh, qaws_mesh_refer
 		}
 		r->nreg++;
 	}
-	st = nt ? qaws_internal_grid_create(r->box, nt, 3, &r->grid) : QAWS_STATUS_OK;
+	st = nt ? qaws_internal_grid_create(&r->grid, r->box, nt, 3) : QAWS_STATUS_OK;
 done:
 	qaws_internal_free(ce2t); qaws_internal_free(cn); qaws_internal_free(fnrm); qaws_internal_free(tan); qaws_internal_free(has);
 	if (st != QAWS_STATUS_OK)

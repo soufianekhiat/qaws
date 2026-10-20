@@ -49,10 +49,10 @@ static qaws_mesh_3d* th_box(qaws_shell_atlas** out_atlas, qaws_surface** f)
 			p[k]->z = (qaws_scalar)(th_h[2] * q[i][k][2]);
 		}
 		f[i] = NULL;
-		qaws_surface_create_bilinear(&bd, &f[i]);
+		qaws_surface_create_bilinear(&f[i], &bd);
 	}
 	*out_atlas = NULL;
-	if (qaws_shell_atlas_create((qaws_surface const* const*)f, 6, 0, out_atlas) != QAWS_STATUS_OK)
+	if (qaws_shell_atlas_create(out_atlas, (qaws_surface const* const*)f, 6, 0) != QAWS_STATUS_OK)
 		return NULL;
 	memset(&g, 0, sizeof g);
 	g.target_length = (qaws_scalar)(test_heavy() ? 0.1 : 0.2);
@@ -89,7 +89,7 @@ static qaws_surface* th_torus(double R, double r)
 	d.u_knot_count = 12;
 	d.v_knots = kn;
 	d.v_knot_count = 12;
-	qaws_surface_create_nurbs(&d, &s);
+	qaws_surface_create_nurbs(&s, &d);
 	return s;
 }
 

@@ -2,14 +2,14 @@
 #include <math.h>
 
 qaws_scalar qaws_internal_closest_point_newton(
-	qaws_eval_pos_d1_fn eval_fn,
-	void const* ctx,
 	qaws_scalar const* target,
 	unsigned int dim_count,
+	qaws_eval_pos_d1_fn eval_fn,
 	qaws_scalar t_min,
 	qaws_scalar t_max,
 	qaws_scalar t_initial,
-	unsigned int max_iterations)
+	unsigned int max_iterations,
+	void const* ctx)
 {
 	qaws_scalar t = t_initial;
 	qaws_scalar tolerance = (qaws_scalar)1e-7;

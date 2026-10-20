@@ -39,7 +39,7 @@ static qaws_curve* ef_curve(ref_exact_family const* r)
 		d.derivatives = b;
 		d.point_count = (unsigned int)r->n;
 		d.derivative_count = (unsigned int)r->n;
-		qaws_curve_create_hermite(&d, &c);
+		qaws_curve_create_hermite(&c, &d);
 	}
 	else if (r->family <= 2)
 	{
@@ -52,7 +52,7 @@ static qaws_curve* ef_curve(ref_exact_family const* r)
 		d.control_point_count = (unsigned int)r->n;
 		d.parameterization = QAWS_PARAMETERIZATION_UNIFORM;
 		d.closed = r->family == 2;
-		qaws_curve_create_catmull_rom(&d, &c);
+		qaws_curve_create_catmull_rom(&c, &d);
 	}
 	else
 	{
@@ -66,7 +66,7 @@ static qaws_curve* ef_curve(ref_exact_family const* r)
 		d.coefficient_count = (unsigned int)r->n;
 		d.t_min = (qaws_scalar)(r->t0n / 16.0);
 		d.t_max = (qaws_scalar)(r->t1n / 16.0);
-		qaws_curve_create_polynomial(&d, &c);
+		qaws_curve_create_polynomial(&c, &d);
 	}
 	return c;
 }
@@ -106,7 +106,7 @@ static void test_reference(void)
 		qaws_exact_int num[3], den;
 		int comp, ok = 1;
 		rows[r->family]++;
-		if (!c || qaws_exact_curve_prepare(&desc, c, &e, &rep) != QAWS_STATUS_OK || e->param_shift < 6 ||
+		if (!c || qaws_exact_curve_prepare(&e, &rep, c, &desc) != QAWS_STATUS_OK || e->param_shift < 6 ||
 		    qaws_exact_curve_eval_rational(e, r->T << (e->param_shift - 6), (unsigned int)r->k, num, &den) != QAWS_STATUS_OK)
 			ok = 0;
 		else
@@ -120,14 +120,14 @@ static void test_reference(void)
 				qaws_eval_result_3d f;
 				unsigned int flags = QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2 | QAWS_EVAL_FLAG_D3;
 				memset(&f, 0, sizeof(f));
-				qaws_exact_curve_evaluate(e, t, (unsigned int)r->k, out, NULL);
+				qaws_exact_curve_evaluate(out, NULL, e, t, (unsigned int)r->k);
 				if (r->dim == 3)
-					qaws_curve_evaluate_3d(c, (qaws_scalar)t, flags, &f);
+					qaws_curve_evaluate_3d(&f, c, (qaws_scalar)t, flags);
 				else
 				{
 					qaws_eval_result_2d f2;
 					memset(&f2, 0, sizeof(f2));
-					qaws_curve_evaluate_2d(c, (qaws_scalar)t, flags, &f2);
+					qaws_curve_evaluate_2d(&f2, c, (qaws_scalar)t, flags);
 					f.position.x = f2.position.x; f.position.y = f2.position.y;
 					f.d1.x = f2.d1.x; f.d1.y = f2.d1.y;
 					f.d2.x = f2.d2.x; f.d2.y = f2.d2.y;

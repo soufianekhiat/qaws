@@ -43,7 +43,7 @@ static void skf_draw(svg* s, viewport const* v, sk_fig* f)
 	{
 		qaws_scalar buf[2 * 400];
 		for (i = 0; i < 2 * f->count[l]; i++) buf[i] = (qaws_scalar)f->pts[2 * off + i];
-		qaws_curve_create_polyline_2d(buf, f->count[l], 1, &cs[l]);
+		qaws_curve_create_polyline_2d(&cs[l], buf, f->count[l], 1);
 		cv[l] = cs[l];
 		p[l].curves = &cv[l]; p[l].curve_count = 1; p[l].closed = 1;
 		off += f->count[l];
@@ -51,7 +51,7 @@ static void skf_draw(svg* s, viewport const* v, sk_fig* f)
 	memset(&d, 0, sizeof(d));
 	d.paths = p; d.path_count = f->nloops; d.fill_rule = QAWS_FILL_NON_ZERO;
 	d.weight_fn = skf_weight; d.weight_user = f;
-	if (qaws_skeleton_create(&d, &sk) != QAWS_STATUS_OK)
+	if (qaws_skeleton_create(&sk, &d) != QAWS_STATUS_OK)
 	{
 		svg_text(s, v->x0 + v->w / 2, v->y0 + v->h / 2, 12, "#cf222e", "middle", "failed");
 		for (l = 0; l < f->nloops; l++) qaws_curve_destroy(cs[l]);
@@ -66,9 +66,9 @@ static void skf_draw(svg* s, viewport const* v, sk_fig* f)
 		qaws_skeleton_node a, b;
 		double nx, ny, len, w, nz, lit;
 		int g;
-		qaws_skeleton_get_face(sk, i, &fc);
-		qaws_skeleton_get_node(sk, fc.nodes[0], &a);
-		qaws_skeleton_get_node(sk, fc.nodes[1], &b);
+		qaws_skeleton_get_face(&fc, sk, i);
+		qaws_skeleton_get_node(&a, sk, fc.nodes[0]);
+		qaws_skeleton_get_node(&b, sk, fc.nodes[1]);
 		len = hypot((double)b.position.x - a.position.x, (double)b.position.y - a.position.y);
 		nx = -((double)b.position.y - a.position.y) / len;
 		ny = ((double)b.position.x - a.position.x) / len;
@@ -83,7 +83,7 @@ static void skf_draw(svg* s, viewport const* v, sk_fig* f)
 		for (k = 0; k < fc.node_count; k++)
 		{
 			qaws_skeleton_node nd;
-			qaws_skeleton_get_node(sk, fc.nodes[k], &nd);
+			qaws_skeleton_get_node(&nd, sk, fc.nodes[k]);
 			fprintf(s->f, "%s%.2f,%.2f ", k ? "L" : "M", vx(v, nd.position.x), vy(v, nd.position.y));
 		}
 		fprintf(s->f, "Z\"/>\n");
@@ -95,7 +95,7 @@ static void skf_draw(svg* s, viewport const* v, sk_fig* f)
 		char col[32];
 		double t = tmax * k / 9;
 		heat((double)k / 9, col);
-		if (qaws_skeleton_offset(sk, (qaws_scalar)t, &r) == QAWS_STATUS_OK)
+		if (qaws_skeleton_offset(&r, sk, (qaws_scalar)t) == QAWS_STATUS_OK)
 		{
 			unsigned int pi, n = qaws_clip_result_get_path_count(r);
 			fprintf(s->f, "<path fill=\"none\" stroke=\"%s\" stroke-width=\"1\" d=\"", col);
@@ -103,12 +103,12 @@ static void skf_draw(svg* s, viewport const* v, sk_fig* f)
 			{
 				qaws_path_2d q;
 				unsigned int ci;
-				qaws_clip_result_get_path(r, pi, &q);
+				qaws_clip_result_get_path(&q, r, pi);
 				for (ci = 0; ci < q.curve_count; ci++)
 				{
 					qaws_scalar buf[2 * 512];
 					unsigned int m = 0, j;
-					qaws_curve_get_control_points(q.curves[ci], buf, 512, &m);
+					qaws_curve_get_control_points(buf, &m, q.curves[ci], 512);
 					for (j = 0; j < m && j < 512; j++)
 						fprintf(s->f, "%s%.2f,%.2f ", (ci == 0 && j == 0) ? "M" : "L", vx(v, buf[2 * j]), vy(v, buf[2 * j + 1]));
 				}
@@ -124,9 +124,9 @@ static void skf_draw(svg* s, viewport const* v, sk_fig* f)
 	{
 		qaws_skeleton_arc a;
 		qaws_skeleton_node x, y;
-		qaws_skeleton_get_arc(sk, i, &a);
-		qaws_skeleton_get_node(sk, a.node_a, &x);
-		qaws_skeleton_get_node(sk, a.node_b, &y);
+		qaws_skeleton_get_arc(&a, sk, i);
+		qaws_skeleton_get_node(&x, sk, a.node_a);
+		qaws_skeleton_get_node(&y, sk, a.node_b);
 		fprintf(s->f, "<line x1=\"%.2f\" y1=\"%.2f\" x2=\"%.2f\" y2=\"%.2f\"/>", vx(v, x.position.x), vy(v, x.position.y),
 			vx(v, y.position.x), vy(v, y.position.y));
 	}
@@ -137,9 +137,9 @@ static void skf_draw(svg* s, viewport const* v, sk_fig* f)
 	{
 		qaws_skeleton_face fc;
 		qaws_skeleton_node a, b;
-		qaws_skeleton_get_face(sk, i, &fc);
-		qaws_skeleton_get_node(sk, fc.nodes[0], &a);
-		qaws_skeleton_get_node(sk, fc.nodes[1], &b);
+		qaws_skeleton_get_face(&fc, sk, i);
+		qaws_skeleton_get_node(&a, sk, fc.nodes[0]);
+		qaws_skeleton_get_node(&b, sk, fc.nodes[1]);
 		fprintf(s->f, "<line x1=\"%.2f\" y1=\"%.2f\" x2=\"%.2f\" y2=\"%.2f\"/>", vx(v, a.position.x), vy(v, a.position.y),
 			vx(v, b.position.x), vy(v, b.position.y));
 	}

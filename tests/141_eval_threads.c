@@ -36,7 +36,7 @@ static void th_solve(void* p)
 		for (i = 0; i < TH_QUERIES; i++)
 		{
 			qaws_surface_closest_point v;
-			if (qaws_surface_closest_point_tangent(NULL, j->s, j->q[i], NULL, NULL, &v, NULL) != QAWS_STATUS_OK)
+			if (qaws_surface_closest_point_tangent(&v, NULL, j->s, NULL, NULL, j->q[i], NULL) != QAWS_STATUS_OK)
 				j->failures++;
 			else if (memcmp(&v, &j->serial[i], sizeof v) != 0)
 				j->mismatches++;
@@ -67,7 +67,7 @@ static void test_surface_closest_points(void)
 	d.control_points = grid;
 	d.u_point_count = 6;
 	d.v_point_count = 6;
-	if (qaws_surface_create_bezier(&d, &s) != QAWS_STATUS_OK)
+	if (qaws_surface_create_bezier(&s, &d) != QAWS_STATUS_OK)
 	{
 		TEST_ASSERT(0, "surface: created");
 		return;
@@ -77,7 +77,7 @@ static void test_surface_closest_points(void)
 		q[i].x = (qaws_scalar)(0.5 + 0.6 * sin(0.7 * i));
 		q[i].y = (qaws_scalar)(0.5 + 0.6 * cos(1.3 * i));
 		q[i].z = (qaws_scalar)(0.8 * sin(2.1 * i));
-		bad += qaws_surface_closest_point_tangent(NULL, s, q[i], NULL, NULL, &serial[i], NULL) != QAWS_STATUS_OK;
+		bad += qaws_surface_closest_point_tangent(&serial[i], NULL, s, NULL, NULL, q[i], NULL) != QAWS_STATUS_OK;
 	}
 	for (i = 0; i < TH_THREADS; i++)
 	{

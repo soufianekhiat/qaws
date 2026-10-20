@@ -666,7 +666,7 @@ static qaws_status bh_traverse(bh_ctx* c)
 		qaws_internal_free(p.chunk); qaws_internal_free(p.share); qaws_internal_free(p.blocks);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
-	st = qaws_internal_parallel(c->executor, c->nitems, GRAIN, bh_chunk, &p);
+	st = qaws_internal_parallel(c->nitems, GRAIN, bh_chunk, &p, c->executor);
 	if (st == QAWS_STATUS_OK)
 	{
 		c->E = 0;
@@ -930,22 +930,22 @@ qaws_status qaws_internal_obstacle_energy(qaws_internal_obstacle const* ob, qaws
 	return st;
 }
 
-qaws_status qaws_internal_repulsive_curves_bh(qaws_repulsive_curves const* curves, double const* x, double theta, double* E, double* grad)
+qaws_status qaws_internal_repulsive_curves_bh(double* E, double* grad, qaws_repulsive_curves const* curves, double const* x, double theta)
 {
 	bh_ctx c;
 	bh_curves_ctx(&c, curves, theta);
 	return bh_run(&c, x, grad, E, NULL);
 }
 
-qaws_status qaws_internal_repulsive_mesh_bh(qaws_repulsive_mesh const* mesh, double const* x, double theta, double* E, double* grad)
+qaws_status qaws_internal_repulsive_mesh_bh(double* E, double* grad, qaws_repulsive_mesh const* mesh, double const* x, double theta)
 {
 	bh_ctx c;
 	bh_mesh_ctx(&c, mesh, theta);
 	return bh_run(&c, x, grad, E, NULL);
 }
 
-qaws_status qaws_repulsive_curves_bh(qaws_repulsive_curves const* curves, qaws_scalar const* positions, qaws_scalar theta, qaws_scalar seed,
-	qaws_scalar* gradient, qaws_scalar* out_value, qaws_repulsive_bh_stats* out_stats)
+qaws_status qaws_repulsive_curves_bh(qaws_scalar* gradient, qaws_scalar* out_value, qaws_repulsive_bh_stats* out_stats, qaws_repulsive_curves const* curves,
+	qaws_scalar const* positions, qaws_scalar theta, qaws_scalar seed)
 {
 	bh_ctx c;
 	qaws_internal_rs_scope sc;
@@ -959,8 +959,8 @@ qaws_status qaws_repulsive_curves_bh(qaws_repulsive_curves const* curves, qaws_s
 	return st;
 }
 
-qaws_status qaws_repulsive_mesh_bh(qaws_repulsive_mesh const* mesh, qaws_scalar const* positions, qaws_scalar theta, qaws_scalar seed,
-	qaws_scalar* gradient, qaws_scalar* out_value, qaws_repulsive_bh_stats* out_stats)
+qaws_status qaws_repulsive_mesh_bh(qaws_scalar* gradient, qaws_scalar* out_value, qaws_repulsive_bh_stats* out_stats, qaws_repulsive_mesh const* mesh,
+	qaws_scalar const* positions, qaws_scalar theta, qaws_scalar seed)
 {
 	bh_ctx c;
 	qaws_internal_rs_scope sc;
@@ -1186,7 +1186,7 @@ static qaws_status rbh_finish(qaws_internal_rbh_op* op, double const* lo, double
 	p.chunk = (rbh_build*)qaws_internal_zalloc(chunks + 1, sizeof(rbh_build));
 	if (!p.chunk)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
-	st = qaws_internal_parallel(executor, op->nitems, GRAIN, rbh_chunk, &p);
+	st = qaws_internal_parallel(op->nitems, GRAIN, rbh_chunk, &p, executor);
 	for (i = 0; st == QAWS_STATUS_OK && i < chunks; i++) { op->nnear += p.chunk[i].nnear; op->nfar += p.chunk[i].nfar; }
 	if (st == QAWS_STATUS_OK)
 	{
@@ -1213,7 +1213,7 @@ static qaws_status rbh_finish(qaws_internal_rbh_op* op, double const* lo, double
 }
 
 /* y = A u with the caller's scratch: products with one scratch each may run at once */
-void qaws_internal_rbh_apply_with(qaws_internal_rbh_op const* op, qaws_internal_rbh_scratch* sc, double const* u, double* y)
+void qaws_internal_rbh_apply_with(double* y, qaws_internal_rbh_op const* op, qaws_internal_rbh_scratch* sc, double const* u)
 {
 	unsigned int I, a, q, gd = op->gdim, k = op->k, id;
 	size_t l;
@@ -1275,12 +1275,12 @@ void qaws_internal_rbh_apply_with(qaws_internal_rbh_op const* op, qaws_internal_
 		}
 }
 
-void qaws_internal_rbh_apply(qaws_internal_rbh_op* op, double const* u, double* y)
+void qaws_internal_rbh_apply(double* y, qaws_internal_rbh_op* op, double const* u)
 {
-	qaws_internal_rbh_apply_with(op, &op->sc, u, y);
+	qaws_internal_rbh_apply_with(y, op, &op->sc, u);
 }
 
-size_t qaws_internal_rbh_links(qaws_internal_rbh_op const* op, size_t* out_far)
+size_t qaws_internal_rbh_links(size_t* out_far, qaws_internal_rbh_op const* op)
 {
 	if (out_far) *out_far = op->nfar;
 	return op->nnear;
@@ -1397,7 +1397,7 @@ static int rbh_curve_weights(void const* user, unsigned int I, unsigned int J, b
 	return 1;
 }
 
-qaws_status qaws_internal_rbh_curves_metric(qaws_repulsive_curves const* c, double const* x, double theta, qaws_internal_rbh_op** out)
+qaws_status qaws_internal_rbh_curves_metric(qaws_internal_rbh_op** out, qaws_repulsive_curves const* c, double const* x, double theta)
 {
 	static unsigned int const ix[6][2] = { { 0, 0 }, { 0, 1 }, { 0, 2 }, { 1, 1 }, { 1, 2 }, { 2, 2 } };
 	double *lo, *hi, *ctr, *qp;
@@ -1487,7 +1487,7 @@ static int rbh_mesh_weights(void const* user, unsigned int S, unsigned int T, bh
 	return 1;
 }
 
-qaws_status qaws_internal_rbh_mesh_metric(qaws_repulsive_mesh const* m, double const* x, double theta, qaws_internal_rbh_op** out)
+qaws_status qaws_internal_rbh_mesh_metric(qaws_internal_rbh_op** out, qaws_repulsive_mesh const* m, double const* x, double theta)
 {
 	static unsigned int const ix[6][2] = { { 0, 0 }, { 0, 1 }, { 0, 2 }, { 1, 1 }, { 1, 2 }, { 2, 2 } };
 	double *lo, *hi, *ctr, *qp, *fa, *fN;
@@ -1572,8 +1572,8 @@ static int rbh_point_weights(void const* user, unsigned int i, unsigned int j, b
 	return 1;
 }
 
-qaws_status qaws_internal_rbh_fractional(double const* p, double const* mass, unsigned int nv, unsigned int dim, double ex, double theta,
-	qaws_internal_rbh_op** out, qaws_batch_executor const* executor)
+qaws_status qaws_internal_rbh_fractional(qaws_internal_rbh_op** out, double const* p, double const* mass, unsigned int nv, unsigned int dim, double ex,
+	double theta, qaws_batch_executor const* executor)
 {
 	double *lo, *hi, *ctr, *qp;
 	unsigned int i, q;

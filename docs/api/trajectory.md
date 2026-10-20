@@ -42,8 +42,8 @@ typedef struct qaws_trajectory_desc {
 
 ```c
 qaws_status qaws_curve_create_trajectory(
-    qaws_trajectory_desc const* desc,
-    qaws_curve** out_curve);
+    qaws_curve** out_curve,
+    qaws_trajectory_desc const* desc);
 ```
 
 Creates a time-keyed trajectory curve.

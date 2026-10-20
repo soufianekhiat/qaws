@@ -58,7 +58,7 @@ static qaws_status extrusion_surface_eval(
 			pf |= QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2;
 
 		memset(&pr, 0, sizeof(pr));
-		s = qaws_curve_evaluate_2d(impl->profile, t_prof, pf, &pr);
+		s = qaws_curve_evaluate_2d(&pr, impl->profile, t_prof, pf);
 		if (s != QAWS_STATUS_OK) return s;
 
 		/* Lift 2D to 3D: (x,y) -> (x, y, 0) */
@@ -82,7 +82,7 @@ static qaws_status extrusion_surface_eval(
 			pf |= QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2;
 
 		memset(&pr, 0, sizeof(pr));
-		s = qaws_curve_evaluate_3d(impl->profile, t_prof, pf, &pr);
+		s = qaws_curve_evaluate_3d(&pr, impl->profile, t_prof, pf);
 		if (s != QAWS_STATUS_OK) return s;
 
 		prof_pos = pr.position;
@@ -144,7 +144,7 @@ static qaws_status extrusion_surface_eval(
 	/* Normal */
 	if (eval_flags & QAWS_SURFACE_EVAL_NORMAL)
 	{
-		qaws_internal_surface_normal(out_result->du, out_result->dv, &out_result->normal);
+		qaws_internal_surface_normal(&out_result->normal, out_result->du, out_result->dv);
 		out_result->valid_flags |= QAWS_SURFACE_EVAL_NORMAL;
 	}
 
@@ -153,7 +153,7 @@ static qaws_status extrusion_surface_eval(
 
 static void extrusion_surface_destroy(void* impl, qaws_allocator const* allocator)
 {
-	qaws_internal_dealloc(allocator, impl);
+	qaws_internal_dealloc(impl, allocator);
 }
 
 static int extrusion_surface_is_rational(qaws_surface const* s)
@@ -233,12 +233,12 @@ static qaws_status extrusion_tangent(
 	if (ev)
 	{
 		qaws_scalar tmp[3];
-		qaws_internal_view_read(ev, 0, 3, tmp);
+		qaws_internal_view_read(tmp, ev, 0, 3);
 		e_dot = qaws_v3(tmp[0], tmp[1], tmp[2]);
 	}
 
-	st = qaws_internal_curve_tangent_any(ctx, impl->profile, t, s * u_dot, 0xFu,
-		qaws_internal_child_views(views, 0), &cp, &ct, tangent2 ? &ctt : NULL);
+	st = qaws_internal_curve_tangent_any(&cp, &ct, tangent2 ? &ctt : NULL, impl->profile, qaws_internal_child_views(views, 0),
+		t, s * u_dot, 0xFu, ctx);
 	if (st != QAWS_STATUS_OK)
 		return st;
 
@@ -316,8 +316,8 @@ static qaws_status extrusion_adjoint(
 			ebar = qaws_v3_add(ebar, ybar->d[ch]);
 	}
 
-	st = qaws_internal_curve_adjoint_any(ctx, impl->profile, t, cbar.channels, &cbar,
-		(qaws_diff_views*)qaws_internal_child_views(views, 0), u_adjoint ? &tbar : NULL);
+	st = qaws_internal_curve_adjoint_any((qaws_diff_views*)qaws_internal_child_views(views, 0), u_adjoint ? &tbar : NULL, impl->profile, &cbar, t,
+		cbar.channels, ctx);
 	if (st != QAWS_STATUS_OK)
 		return st;
 	if (u_adjoint)
@@ -382,7 +382,7 @@ qaws_status qaws_surface_create_extrusion_ex(
 		&extrusion_surface_vtable, allocator);
 	if (!surface) return QAWS_STATUS_ALLOCATION_FAILURE;
 
-	impl = (qaws_surface_extrusion_impl*)qaws_internal_alloc(allocator, sizeof(qaws_surface_extrusion_impl));
+	impl = (qaws_surface_extrusion_impl*)qaws_internal_alloc(sizeof(qaws_surface_extrusion_impl), allocator);
 	if (!impl)
 	{
 		qaws_internal_surface_free(surface);
@@ -410,8 +410,8 @@ qaws_status qaws_surface_create_extrusion_ex(
 }
 
 qaws_status qaws_surface_create_extrusion(
-	qaws_surface_extrusion_desc const* desc,
-	qaws_surface** out_surface)
+	qaws_surface** out_surface,
+	qaws_surface_extrusion_desc const* desc)
 {
 	return qaws_surface_create_extrusion_ex(desc, NULL, out_surface);
 }

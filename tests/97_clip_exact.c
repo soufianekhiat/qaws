@@ -44,7 +44,7 @@ static qaws_curve* cxt_poly(double const* xy, unsigned int n)
 	unsigned int i;
 	for (i = 0; i < 2 * n; i++)
 		p[i] = (qaws_scalar)xy[i];
-	qaws_curve_create_polyline_2d(p, n, 1, &c);
+	qaws_curve_create_polyline_2d(&c, p, n, 1);
 	return c;
 }
 
@@ -70,8 +70,8 @@ static double cxt_area(qaws_clip_result const* r)
 	{
 		qaws_path_2d p;
 		qaws_scalar s = 0;
-		qaws_clip_result_get_path(r, i, &p);
-		qaws_path_compute_area_2d(&p, &s);
+		qaws_clip_result_get_path(&p, r, i);
+		qaws_path_compute_area_2d(&s, &p);
 		a += (double)s;
 	}
 	return a;
@@ -100,7 +100,7 @@ static void cxt_do(cxt_run* o, qaws_path_2d const* subj, unsigned int ns, qaws_p
 	d.clip_type = ct;
 	d.fill_rule = fr;
 	o->r = NULL;
-	o->st = qaws_clip_exact_execute(&d, &o->r, &o->stats);
+	o->st = qaws_clip_exact_execute(&o->r, &o->stats, &d);
 	o->paths = o->r ? qaws_clip_result_get_path_count(o->r) : 0;
 	o->area = cxt_area(o->r);
 	memset(&fd, 0, sizeof(fd));
@@ -110,7 +110,7 @@ static void cxt_do(cxt_run* o, qaws_path_2d const* subj, unsigned int ns, qaws_p
 	fd.clip_count = nc;
 	fd.clip_type = ct;
 	fd.fill_rule = fr;
-	o->fst = qaws_clip_execute(&fd, &fr_res);
+	o->fst = qaws_clip_execute(&fr_res, &fd);
 	o->fpaths = fr_res ? qaws_clip_result_get_path_count(fr_res) : 0;
 	o->farea = cxt_area(fr_res);
 	qaws_clip_result_destroy(fr_res);
@@ -197,7 +197,7 @@ static void test_tangent(void)
 	bd.degree = 2;
 	bd.control_points = cp;
 	bd.control_point_count = 3;
-	qaws_curve_create_bezier(&bd, &pc);
+	qaws_curve_create_bezier(&pc, &bd);
 	lens = cxt_path(&s, pc);   /* the path closes with the line back from (2, 1) to (0, 1) */
 	for (k = 0; k < 3; k++)
 	{
@@ -304,12 +304,12 @@ static void test_ellipses(void)
 	for (k = 0; k < 4; k++)
 	{
 		e = NULL;
-		qaws_curve_create_ellipse_2d((qaws_scalar)(0.75 * k), (qaws_scalar)(0.25 * k), (qaws_scalar)1.5, (qaws_scalar)1.0, (qaws_scalar)(0.3 * k), &e);
+		qaws_curve_create_ellipse_2d(&e, (qaws_scalar)(0.75 * k), (qaws_scalar)(0.25 * k), (qaws_scalar)1.5, (qaws_scalar)1.0, (qaws_scalar)(0.3 * k));
 		cxt_path(&s, e);
 	}
 	/* the second one again */
 	e = NULL;
-	qaws_curve_create_ellipse_2d((qaws_scalar)0.75, (qaws_scalar)0.25, (qaws_scalar)1.5, (qaws_scalar)1.0, (qaws_scalar)0.3, &e);
+	qaws_curve_create_ellipse_2d(&e, (qaws_scalar)0.75, (qaws_scalar)0.25, (qaws_scalar)1.5, (qaws_scalar)1.0, (qaws_scalar)0.3);
 	cxt_path(&s, e);
 	p = &s.paths[0];
 	cxt_do(&o, p, 4, NULL, 0, QAWS_CLIP_UNION, QAWS_FILL_NON_ZERO);

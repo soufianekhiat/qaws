@@ -9,7 +9,7 @@ static void of_draw_result(svg* s, viewport const* v, qaws_clip_result const* r,
 	for (i = 0; i < qaws_clip_result_get_path_count(r); i++)
 	{
 		qaws_path_2d p;
-		qaws_clip_result_get_path(r, i, &p);
+		qaws_clip_result_get_path(&p, r, i);
 		for (k = 0; k < p.curve_count; k++)
 			bo_curve(s, v, p.curves[k], color, width, 0);
 	}
@@ -24,7 +24,7 @@ static void of_series(svg* s, viewport const* v, qaws_path_2d const* p, unsigned
 		qaws_clip_result* r = NULL;
 		char col[16];
 		heat(0.15 + 0.7 * i / (nd > 1 ? nd - 1 : 1), col);
-		if (qaws_offset_paths(p, n, (qaws_scalar)deltas[i], jt, et, &r) == QAWS_STATUS_OK)
+		if (qaws_offset_paths(&r, p, n, (qaws_scalar)deltas[i], jt, et) == QAWS_STATUS_OK)
 		{
 			if (i == 0 || deltas[i] * deltas[0] < 0)
 				bo_fill(s, v, r, "#c8e1ff");
@@ -52,19 +52,19 @@ static void demo_offset(void)
 		return;
 	{
 		qaws_scalar z[16] = { 0, 0, 4, 0, 4, 3, 2, 1, 1, 4, 3, (qaws_scalar)5.5, 0, 5, (qaws_scalar)-1.5, 2 };
-		qaws_curve_create_polyline_2d(z, 8, 1, &zig);
+		qaws_curve_create_polyline_2d(&zig, z, 8, 1);
 	}
 	{
 		qaws_scalar o[12] = { 0, 0, 2, 2, 4, 0, 6, 2, 8, 0, 9, (qaws_scalar)1.5 };
-		qaws_curve_create_polyline_2d(o, 6, 0, &open);
+		qaws_curve_create_polyline_2d(&open, o, 6, 0);
 	}
 	blob = bo_blob(0, 0, 2.0, 0.35, 3, 0.2);
-	qaws_curve_create_ellipse_2d(0, 0, 3, (qaws_scalar)1.4, (qaws_scalar)0.3, &ell);
+	qaws_curve_create_ellipse_2d(&ell, 0, 0, 3, (qaws_scalar)1.4, (qaws_scalar)0.3);
 	{
 		qaws_clothoid_desc cd;
 		memset(&cd, 0, sizeof(cd));
 		cd.start_curvature = 0; cd.end_curvature = (qaws_scalar)1.6; cd.length = 9;
-		qaws_curve_create_clothoid(&cd, &spiral);
+		qaws_curve_create_clothoid(&spiral, &cd);
 	}
 	t0 = (double)clock() / CLOCKS_PER_SEC;
 	for (k = 0; k < 12; k++)
@@ -131,8 +131,8 @@ static void demo_offset(void)
 				qaws_curve const* cs[2];
 				qaws_path_2d pp[2];
 				static double const dr[3] = { 0.25, 0.5, -0.35 };
-				qaws_curve_create_ellipse_2d(0, 0, (qaws_scalar)1.6, (qaws_scalar)1.0, (qaws_scalar)0.4, &inner_ccw);
-				qaws_curve_reverse(inner_ccw, &hole);
+				qaws_curve_create_ellipse_2d(&inner_ccw, 0, 0, (qaws_scalar)1.6, (qaws_scalar)1.0, (qaws_scalar)0.4);
+				qaws_curve_reverse(&hole, inner_ccw);
 				cs[0] = outer; cs[1] = hole;
 				pp[0].curves = &cs[0]; pp[0].curve_count = 1; pp[0].closed = 1;
 				pp[1].curves = &cs[1]; pp[1].curve_count = 1; pp[1].closed = 1;

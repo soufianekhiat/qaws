@@ -415,7 +415,7 @@ struct qaws_curve_prepared
 /* 16-byte aligned blocks from an allocator: one extra block, the object at the first aligned address, the raw pointer before it */
 static void* vw_alloc16(qaws_allocator const* allocator, size_t bytes)
 {
-	void* raw = qaws_internal_alloc(allocator, bytes + 16 + sizeof(void*));
+	void* raw = qaws_internal_alloc(bytes + 16 + sizeof(void*), allocator);
 	uintptr_t at;
 	if (!raw)
 		return NULL;
@@ -426,7 +426,7 @@ static void* vw_alloc16(qaws_allocator const* allocator, size_t bytes)
 
 static void vw_free16(qaws_allocator const* allocator, void* p)
 {
-	qaws_internal_dealloc(allocator, ((void**)p)[-1]);
+	qaws_internal_dealloc(((void**)p)[-1], allocator);
 }
 
 /* the prepared block's knots (kc, splines only) and span bounds (nb) for a valid view */
@@ -632,10 +632,10 @@ static void pr_eval_cubic(qaws_curve_prepared const* p, unsigned int span, qaws_
 	{
 		T[0] = pr_vec3(&p->view.tangents, idx[0], dim);
 		T[1] = pr_vec3(&p->view.tangents, idx[1], dim);
-		qaws_hermite_prepare_3d(P, T, 2, &a, &b, &c, &d);
+		qaws_hermite_prepare_3d(&a, &b, &c, &d, P, T, 2);
 	}
 	else
-		qaws_catmull_rom_prepare_3d(P, 4, p->view.parameterization, 0, &a, &b, &c, &d, &sc);
+		qaws_catmull_rom_prepare_3d(&a, &b, &c, &d, &sc, P, 4, p->view.parameterization, 0);
 	e = qaws_cubic_eval_3d(a, b, c, d, u, 7);
 	pr_put(out[0], e.position);
 	pr_put(out[1], e.d1);
@@ -977,7 +977,7 @@ static void pr_eval(qaws_curve_prepared const* p, qaws_scalar t, unsigned int km
 		return;
 	}
 	span = qaws_internal_find_knot_span(p->knots, p->kc, d, p->n, t);
-	qaws_internal_bspline_basis_derivs(p->knots, p->kc, d, span, t, kb, ders);
+	qaws_internal_bspline_basis_derivs(ders, p->knots, p->kc, d, span, t, kb);
 	memset(A, 0, sizeof A);
 	memset(W, 0, sizeof W);
 	for (j = 0; j <= d; j++)
@@ -1298,7 +1298,7 @@ static qaws_status pr_copy(qaws_curve_prepared const* p, qaws_allocator const* a
 	if (p->view.family == QAWS_VIEW_ARC)
 	{
 		qaws_arc_desc d;
-		qaws_arc_segment* segs = (qaws_arc_segment*)qaws_internal_alloc(allocator, qaws_internal_mul2(sizeof(qaws_arc_segment), (size_t)p->n));
+		qaws_arc_segment* segs = (qaws_arc_segment*)qaws_internal_alloc(qaws_internal_mul2(sizeof(qaws_arc_segment), (size_t)p->n), allocator);
 		if (!segs)
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 		for (i = 0; i < p->n; i++)
@@ -1308,10 +1308,10 @@ static qaws_status pr_copy(qaws_curve_prepared const* p, qaws_allocator const* a
 		d.segments = segs;
 		d.segment_count = p->n;
 		st = qaws_curve_create_arc_ex(&d, allocator, out_curve);
-		qaws_internal_dealloc(allocator, segs);
+		qaws_internal_dealloc(segs, allocator);
 		return st;
 	}
-	pts = (qaws_scalar*)qaws_internal_alloc(allocator, qaws_internal_mul3(sizeof(qaws_scalar), (size_t)p->n, (2 * dim + 1)));
+	pts = (qaws_scalar*)qaws_internal_alloc(qaws_internal_mul3(sizeof(qaws_scalar), (size_t)p->n, (2 * dim + 1)), allocator);
 	if (!pts)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	/* weights (trajectories: the key times) and tangents (Hermite, trajectory key velocities) */
@@ -1340,7 +1340,7 @@ static qaws_status pr_copy(qaws_curve_prepared const* p, qaws_allocator const* a
 		d.key_velocities = p->view.tangents.count ? tans : NULL;
 		d.key_velocity_count = p->view.tangents.count;
 		d.closed = p->view.closed;
-		st = qaws_curve_create_trajectory_ex(&d, allocator, out_curve);
+		st = qaws_curve_create_trajectory_ex(out_curve, &d, allocator);
 	}
 	else if (p->view.family == QAWS_VIEW_YUKSEL)
 	{
@@ -1375,7 +1375,7 @@ static qaws_status pr_copy(qaws_curve_prepared const* p, qaws_allocator const* a
 		d.derivatives = tans;
 		d.point_count = p->n;
 		d.derivative_count = p->n;
-		st = qaws_curve_create_hermite_ex(&d, allocator, out_curve);
+		st = qaws_curve_create_hermite_ex(out_curve, &d, allocator);
 	}
 	else if (p->view.family == QAWS_VIEW_CATMULL_ROM)
 	{
@@ -1386,7 +1386,7 @@ static qaws_status pr_copy(qaws_curve_prepared const* p, qaws_allocator const* a
 		d.control_point_count = p->n;
 		d.parameterization = p->view.parameterization;
 		d.closed = p->view.closed;
-		st = qaws_curve_create_catmull_rom_ex(&d, allocator, out_curve);
+		st = qaws_curve_create_catmull_rom_ex(out_curve, &d, allocator);
 	}
 	else if (p->view.family == QAWS_VIEW_POLYNOMIAL)
 	{
@@ -1412,7 +1412,7 @@ static qaws_status pr_copy(qaws_curve_prepared const* p, qaws_allocator const* a
 		d.knot_count = p->kc;
 		d.weights = wts;
 		d.weight_count = p->n;
-		st = qaws_curve_create_nurbs_ex(&d, allocator, out_curve);
+		st = qaws_curve_create_nurbs_ex(out_curve, &d, allocator);
 	}
 	else
 	{
@@ -1424,9 +1424,9 @@ static qaws_status pr_copy(qaws_curve_prepared const* p, qaws_allocator const* a
 		d.control_point_count = p->n;
 		d.knots = p->knots;
 		d.knot_count = p->kc;
-		st = qaws_curve_create_bspline_ex(&d, allocator, out_curve);
+		st = qaws_curve_create_bspline_ex(out_curve, &d, allocator);
 	}
-	qaws_internal_dealloc(allocator, pts);
+	qaws_internal_dealloc(pts, allocator);
 	return st;
 }
 
@@ -1577,8 +1577,8 @@ static void sp_eval(qaws_surface_prepared const* p, qaws_scalar u, qaws_scalar v
 	v = v < p->v_knots[vd] ? p->v_knots[vd] : v > p->v_knots[vc] ? p->v_knots[vc] : v;
 	us = qaws_internal_find_knot_span(p->u_knots, uc + ud + 1, ud, uc, u);
 	vs = qaws_internal_find_knot_span(p->v_knots, vc + vd + 1, vd, vc, v);
-	qaws_internal_bspline_basis_derivs(p->u_knots, uc + ud + 1, ud, us, u, bu, uders);
-	qaws_internal_bspline_basis_derivs(p->v_knots, vc + vd + 1, vd, vs, v, bv, vders);
+	qaws_internal_bspline_basis_derivs(uders, p->u_knots, uc + ud + 1, ud, us, u, bu);
+	qaws_internal_bspline_basis_derivs(vders, p->v_knots, vc + vd + 1, vd, vs, v, bv);
 	memset(S, 0, sizeof(qaws_scalar) * SP_ORDERS * SP_ORDERS * 3);
 	memset(W, 0, sizeof W);
 	for (i = 0; i <= ud; i++)
@@ -1681,7 +1681,7 @@ qaws_status qaws_surface_prepared_evaluate(qaws_surface_prepared const* prepared
 		}
 	if (eval_flags & QAWS_SURFACE_EVAL_NORMAL)
 	{
-		qaws_internal_surface_normal(out_result->du, out_result->dv, &out_result->normal);
+		qaws_internal_surface_normal(&out_result->normal, out_result->du, out_result->dv);
 		out_result->valid_flags |= QAWS_SURFACE_EVAL_NORMAL;
 	}
 	return QAWS_STATUS_OK;
@@ -1846,7 +1846,7 @@ qaws_status qaws_surface_create_from_view(qaws_surface_view const* view, qaws_al
 	if ((st = qaws_surface_prepare(view, allocator, &p)) != QAWS_STATUS_OK)
 		return st;
 	n = view->u_count * view->v_count;
-	pts = (qaws_vec3*)qaws_internal_alloc(allocator, qaws_internal_mul2(sizeof(qaws_vec3) + sizeof(qaws_scalar), (size_t)n));
+	pts = (qaws_vec3*)qaws_internal_alloc(qaws_internal_mul2(sizeof(qaws_vec3) + sizeof(qaws_scalar), (size_t)n), allocator);
 	if (!pts)
 	{
 		qaws_surface_prepared_destroy(p);
@@ -1876,7 +1876,7 @@ qaws_status qaws_surface_create_from_view(qaws_surface_view const* view, qaws_al
 		d.u_knot_count = view->u_count + view->u_degree + 1;
 		d.v_knots = p->v_knots;
 		d.v_knot_count = view->v_count + view->v_degree + 1;
-		st = qaws_surface_create_nurbs_ex(&d, allocator, out_surface);
+		st = qaws_surface_create_nurbs_ex(out_surface, &d, allocator);
 	}
 	else
 	{
@@ -1891,9 +1891,9 @@ qaws_status qaws_surface_create_from_view(qaws_surface_view const* view, qaws_al
 		d.u_knot_count = view->u_count + view->u_degree + 1;
 		d.v_knots = p->v_knots;
 		d.v_knot_count = view->v_count + view->v_degree + 1;
-		st = qaws_surface_create_bspline_ex(&d, allocator, out_surface);
+		st = qaws_surface_create_bspline_ex(out_surface, &d, allocator);
 	}
-	qaws_internal_dealloc(allocator, pts);
+	qaws_internal_dealloc(pts, allocator);
 	qaws_surface_prepared_destroy(p);
 	return st;
 }

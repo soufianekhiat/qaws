@@ -314,7 +314,7 @@ static qaws_mesh_3d* tq_wavy(tq_shape* s)
 	d.control_points = cp;
 	d.u_point_count = 7;
 	d.v_point_count = 7;
-	qaws_surface_create_bspline(&d, &srf);
+	qaws_surface_create_bspline(&srf, &d);
 	memset(&g, 0, sizeof g);
 	g.elements = QAWS_ELEMENTS_QUADS;
 	g.target_length = (qaws_scalar)0.1;

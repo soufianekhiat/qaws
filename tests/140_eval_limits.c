@@ -51,9 +51,9 @@ static double tl_derivatives(qaws_curve const* c, double t, double h)
 	/* the parameters as the scalar holds them, so the differences divide by the step actually taken */
 	t = (qaws_scalar)t;
 	h = (qaws_scalar)(t + h) - t;
-	if (qaws_curve_evaluate_3d(c, (qaws_scalar)t, all, &a) != QAWS_STATUS_OK || qaws_curve_evaluate_3d(c, (qaws_scalar)(t - h), all, &m) != QAWS_STATUS_OK
-		|| qaws_curve_evaluate_3d(c, (qaws_scalar)(t + h), all, &p) != QAWS_STATUS_OK || qaws_curve_evaluate_3d(c, (qaws_scalar)(t - 2 * h), all, &m2) != QAWS_STATUS_OK
-		|| qaws_curve_evaluate_3d(c, (qaws_scalar)(t + 2 * h), all, &p2) != QAWS_STATUS_OK || !(a.valid_flags & QAWS_EVAL_FLAG_D3))
+	if (qaws_curve_evaluate_3d(&a, c, (qaws_scalar)t, all) != QAWS_STATUS_OK || qaws_curve_evaluate_3d(&m, c, (qaws_scalar)(t - h), all) != QAWS_STATUS_OK
+		|| qaws_curve_evaluate_3d(&p, c, (qaws_scalar)(t + h), all) != QAWS_STATUS_OK || qaws_curve_evaluate_3d(&m2, c, (qaws_scalar)(t - 2 * h), all) != QAWS_STATUS_OK
+		|| qaws_curve_evaluate_3d(&p2, c, (qaws_scalar)(t + 2 * h), all) != QAWS_STATUS_OK || !(a.valid_flags & QAWS_EVAL_FLAG_D3))
 		return HUGE_VAL;
 	for (d = 1; d <= 3; d++)
 	{
@@ -98,7 +98,7 @@ static void test_refusals(void)
 		d.degree = 17;
 		d.control_points = p;
 		d.control_point_count = 18;
-		st[0] = qaws_curve_create_bezier(&d, &c);
+		st[0] = qaws_curve_create_bezier(&c, &d);
 	}
 	{
 		qaws_bspline_desc d;
@@ -107,7 +107,7 @@ static void test_refusals(void)
 		d.degree = 32;
 		d.control_points = p;
 		d.control_point_count = 40;
-		st[1] = qaws_curve_create_bspline(&d, &c);
+		st[1] = qaws_curve_create_bspline(&c, &d);
 	}
 	{
 		qaws_nurbs_desc d;
@@ -118,7 +118,7 @@ static void test_refusals(void)
 		d.control_point_count = 40;
 		d.weights = w;
 		d.weight_count = 40;
-		st[2] = qaws_curve_create_nurbs(&d, &c);
+		st[2] = qaws_curve_create_nurbs(&c, &d);
 	}
 	{
 		qaws_rational_bezier_desc d;
@@ -129,7 +129,7 @@ static void test_refusals(void)
 		d.control_point_count = 49;
 		d.weights = w;
 		d.weight_count = 49;
-		st[3] = qaws_curve_create_rational_bezier(&d, &c);
+		st[3] = qaws_curve_create_rational_bezier(&c, &d);
 	}
 	{
 		qaws_surface_bezier_desc d;
@@ -139,7 +139,7 @@ static void test_refusals(void)
 		d.control_points = grid;
 		d.u_point_count = 65;
 		d.v_point_count = 2;
-		st[4] = qaws_surface_create_bezier(&d, &s);
+		st[4] = qaws_surface_create_bezier(&s, &d);
 	}
 	{
 		qaws_surface_bspline_desc d;
@@ -149,7 +149,7 @@ static void test_refusals(void)
 		d.control_points = grid;
 		d.u_point_count = 2;
 		d.v_point_count = 33;
-		st[5] = qaws_surface_create_bspline(&d, &s);
+		st[5] = qaws_surface_create_bspline(&s, &d);
 	}
 	{
 		qaws_surface_nurbs_desc d;
@@ -160,7 +160,7 @@ static void test_refusals(void)
 		d.u_point_count = 33;
 		d.v_point_count = 2;
 		d.weights = w;
-		st[6] = qaws_surface_create_nurbs(&d, &s);
+		st[6] = qaws_surface_create_nurbs(&s, &d);
 	}
 	sprintf(msg, "refused past their limits: Bezier 17 %s, B-spline 32 %s, NURBS 32 %s, rational Bezier 48 %s, Bezier surface 64 %s, "
 		"B-spline surface 32 %s, NURBS surface 32 %s", qaws_status_to_string(st[0]), qaws_status_to_string(st[1]), qaws_status_to_string(st[2]),
@@ -191,7 +191,7 @@ static void test_largest(void)
 		d.degree = 16;
 		d.control_points = p;
 		d.control_point_count = 17;
-		st[0] = qaws_curve_create_bezier(&d, &b16);
+		st[0] = qaws_curve_create_bezier(&b16, &d);
 	}
 	{
 		qaws_bspline_desc d;
@@ -200,10 +200,10 @@ static void test_largest(void)
 		d.degree = 20;
 		d.control_points = p;
 		d.control_point_count = 26;
-		st[1] = qaws_curve_create_bspline(&d, &s20);
+		st[1] = qaws_curve_create_bspline(&s20, &d);
 		d.degree = 31;
 		d.control_point_count = 34;
-		st[2] = qaws_curve_create_bspline(&d, &s31);
+		st[2] = qaws_curve_create_bspline(&s31, &d);
 	}
 	{
 		qaws_rational_bezier_desc d;
@@ -214,7 +214,7 @@ static void test_largest(void)
 		d.control_point_count = 48;
 		d.weights = w;
 		d.weight_count = 48;
-		st[3] = qaws_curve_create_rational_bezier(&d, &r47);
+		st[3] = qaws_curve_create_rational_bezier(&r47, &d);
 	}
 	e[0] = b16 ? tl_derivatives(b16, 0.37, f32 ? 0.5 / 16 : 1e-5) : HUGE_VAL;
 	e[1] = s20 ? tl_derivatives(s20, 0.41, f32 ? 0.5 / 20 : 1e-5) : HUGE_VAL;

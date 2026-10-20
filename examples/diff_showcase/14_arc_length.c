@@ -40,7 +40,7 @@ static double al_energy(qaws_scalar const* cps, double const* q, qaws_scalar* g,
 	qaws_cdf_sample s[AL_N], adj[AL_N];
 	double e = 0;
 	int i;
-	qaws_curve_cdf_sample_tangent(NULL, c, NULL, g_al_targets, NULL, NULL, AL_N, 0, NULL, s, NULL, NULL, NULL);
+	qaws_curve_cdf_sample_tangent(s, NULL, NULL, NULL, c, g_al_targets, NULL, NULL, NULL, AL_N, NULL, 0, NULL);
 	for (i = 0; i < AL_N; i++)
 	{
 		double dx = s[i].position.x - q[2 * i], dy = s[i].position.y - q[2 * i + 1];
@@ -53,7 +53,7 @@ static double al_energy(qaws_scalar const* cps, double const* q, qaws_scalar* g,
 		qaws_field_view fv;
 		qaws_diff_views views = one_field(&fv, QAWS_FIELD_CONTROL_POINTS, g, AL_CP, 2);
 		memset(g, 0, sizeof(qaws_scalar) * AL_P);
-		qaws_curve_cdf_sample_adjoint(NULL, c, NULL, g_al_targets, AL_N, 0, adj, &views, NULL);
+		qaws_curve_cdf_sample_adjoint(&views, NULL, c, g_al_targets, adj, AL_N, NULL, 0, NULL);
 	}
 	if (adj_out)
 		memcpy(adj_out, adj, sizeof(adj));
@@ -76,14 +76,14 @@ static void al_hvp(qaws_scalar const* cps, qaws_cdf_sample const* adj, qaws_scal
 	vin = one_field(&fv, QAWS_FIELD_CONTROL_POINTS, vv, AL_CP, 2);
 	vout = one_field(&fo, QAWS_FIELD_CONTROL_POINTS, out, AL_CP, 2);
 	memset(out, 0, sizeof(qaws_scalar) * AL_P);
-	qaws_curve_cdf_sample_tangent(NULL, c, NULL, g_al_targets, NULL, NULL, AL_N, 0, &vin, NULL, jv, NULL, NULL);
+	qaws_curve_cdf_sample_tangent(NULL, jv, NULL, NULL, c, g_al_targets, NULL, NULL, &vin, AL_N, NULL, 0, NULL);
 	for (i = 0; i < AL_N; i++)
 	{
 		w[i].t = 0;
 		w[i].position = v3(2 * jv[i].position.x, 2 * jv[i].position.y, 0);
 	}
-	qaws_curve_cdf_sample_adjoint(NULL, c, NULL, g_al_targets, AL_N, 0, w, &vout, NULL);
-	qaws_curve_cdf_sample_hvp(NULL, c, NULL, g_al_targets, AL_N, 0, adj, &vin, &vout);
+	qaws_curve_cdf_sample_adjoint(&vout, NULL, c, g_al_targets, w, AL_N, NULL, 0, NULL);
+	qaws_curve_cdf_sample_hvp(&vout, c, g_al_targets, adj, &vin, AL_N, NULL, 0, NULL);
 	qaws_curve_destroy(c);
 }
 
@@ -162,14 +162,14 @@ static void demo_arc_length(void)
 		for (i = 0; i < AL_N; i++)
 		{
 			qaws_eval_result_2d e;
-			qaws_curve_evaluate_2d(c, (qaws_scalar)(r.min_value + (r.max_value - r.min_value) * i / (AL_N - 1)), QAWS_EVAL_FLAG_POSITION, &e);
+			qaws_curve_evaluate_2d(&e, c, (qaws_scalar)(r.min_value + (r.max_value - r.min_value) * i / (AL_N - 1)), QAWS_EVAL_FLAG_POSITION);
 			svg_circle(&s, vx(&a, e.position.x), vy(&a, e.position.y) + 26, 3.2, "#ffffff", "#8c959f");
 		}
 		/* constant-speed samples with first and second tangents for the control point moving right */
 		memset(dir, 0, sizeof(dir));
 		dir[2 * k_star] = 1;
 		views = one_field(&fv, QAWS_FIELD_CONTROL_POINTS, dir, AL_CP, 2);
-		qaws_curve_cdf_sample_tangent(NULL, c, NULL, g_al_targets, NULL, NULL, AL_N, 0, &views, val, t1, t2, NULL);
+		qaws_curve_cdf_sample_tangent(val, t1, t2, NULL, c, g_al_targets, NULL, NULL, &views, AL_N, NULL, 0, NULL);
 		for (i = 0; i < AL_N; i++)
 		{
 			double x0 = vx(&a, val[i].position.x), y0 = vy(&a, val[i].position.y);
@@ -274,7 +274,7 @@ static void demo_arc_length(void)
 		svg_polyline(&s, xy, 400, "#d4a72c", 2, 0.9, 1);
 		curve_polyline(cn, &b, xy, 400);
 		svg_polyline(&s, xy, 400, "#1a7f37", 2.4, 1, 0);
-		qaws_curve_cdf_sample_tangent(NULL, cn, NULL, g_al_targets, NULL, NULL, AL_N, 0, NULL, sn, NULL, NULL, NULL);
+		qaws_curve_cdf_sample_tangent(sn, NULL, NULL, NULL, cn, g_al_targets, NULL, NULL, NULL, AL_N, NULL, 0, NULL);
 		for (i = 0; i < AL_N; i++)
 		{
 			svg_line(&s, vx(&b, q[2 * i]), vy(&b, q[2 * i + 1]), vx(&b, sn[i].position.x), vy(&b, sn[i].position.y), "#cf222e", 1, 0.8);

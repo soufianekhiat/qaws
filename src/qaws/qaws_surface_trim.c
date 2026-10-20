@@ -59,7 +59,7 @@ static int loop_contains_point(
 			qaws_scalar x = QAWS_ZERO, y = QAWS_ZERO;
 
 			memset(&r2d, 0, sizeof(r2d));
-			if (qaws_curve_evaluate_2d(crv, t, QAWS_EVAL_FLAG_POSITION, &r2d) == QAWS_STATUS_OK)
+			if (qaws_curve_evaluate_2d(&r2d, crv, t, QAWS_EVAL_FLAG_POSITION) == QAWS_STATUS_OK)
 			{
 				x = r2d.position.x;
 				y = r2d.position.y;
@@ -91,7 +91,7 @@ static qaws_status trimmed_surface_eval(
 {
 	qaws_surface_trim_impl const* impl =
 		(qaws_surface_trim_impl const*)surface->impl;
-	return qaws_surface_evaluate(impl->base, u, v, eval_flags, out_result);
+	return qaws_surface_evaluate(out_result, impl->base, u, v, eval_flags);
 }
 
 static void trimmed_surface_destroy(void* impl_ptr, qaws_allocator const* allocator)
@@ -105,12 +105,12 @@ static void trimmed_surface_destroy(void* impl_ptr, qaws_allocator const* alloca
 			for (i = 0; i < impl->loop_count; ++i)
 			{
 				if (impl->loops[i].curves)
-					qaws_internal_dealloc(allocator, impl->loops[i].curves);
+					qaws_internal_dealloc(impl->loops[i].curves, allocator);
 			}
-			qaws_internal_dealloc(allocator, impl->loops);
+			qaws_internal_dealloc(impl->loops, allocator);
 		}
 	}
-	qaws_internal_dealloc(allocator, impl);
+	qaws_internal_dealloc(impl, allocator);
 }
 
 static int trimmed_surface_is_rational(qaws_surface const* s)
@@ -164,7 +164,7 @@ qaws_status qaws_surface_create_trimmed_ex(
 		&trimmed_surface_vtable, allocator);
 	if (!surface) return QAWS_STATUS_ALLOCATION_FAILURE;
 
-	impl = (qaws_surface_trim_impl*)qaws_internal_alloc(allocator, sizeof(qaws_surface_trim_impl));
+	impl = (qaws_surface_trim_impl*)qaws_internal_alloc(sizeof(qaws_surface_trim_impl), allocator);
 	if (!impl)
 	{
 		qaws_internal_surface_free(surface);
@@ -177,10 +177,10 @@ qaws_status qaws_surface_create_trimmed_ex(
 
 	if (desc->loop_count > 0)
 	{
-		impl->loops = (qaws_trim_loop_internal*)qaws_internal_alloc(allocator, qaws_internal_mul2(desc->loop_count, sizeof(qaws_trim_loop_internal)));
+		impl->loops = (qaws_trim_loop_internal*)qaws_internal_alloc(qaws_internal_mul2(desc->loop_count, sizeof(qaws_trim_loop_internal)), allocator);
 		if (!impl->loops)
 		{
-			qaws_internal_dealloc(allocator, impl);
+			qaws_internal_dealloc(impl, allocator);
 			qaws_internal_surface_free(surface);
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 		}
@@ -192,15 +192,15 @@ qaws_status qaws_surface_create_trimmed_ex(
 
 			impl->loops[i].curve_count = src->curve_count;
 			impl->loops[i].is_outer = src->is_outer;
-			impl->loops[i].curves = (qaws_curve const**)qaws_internal_alloc(allocator, qaws_internal_mul2(src->curve_count, sizeof(qaws_curve const*)));
+			impl->loops[i].curves = (qaws_curve const**)qaws_internal_alloc(qaws_internal_mul2(src->curve_count, sizeof(qaws_curve const*)), allocator);
 			if (!impl->loops[i].curves)
 			{
 				/* Clean up previously allocated loops */
 				unsigned int j;
 				for (j = 0; j < i; ++j)
-					qaws_internal_dealloc(allocator, impl->loops[j].curves);
-				qaws_internal_dealloc(allocator, impl->loops);
-				qaws_internal_dealloc(allocator, impl);
+					qaws_internal_dealloc(impl->loops[j].curves, allocator);
+				qaws_internal_dealloc(impl->loops, allocator);
+				qaws_internal_dealloc(impl, allocator);
 				qaws_internal_surface_free(surface);
 				return QAWS_STATUS_ALLOCATION_FAILURE;
 			}
@@ -215,16 +215,16 @@ qaws_status qaws_surface_create_trimmed_ex(
 }
 
 qaws_status qaws_surface_create_trimmed(
-	qaws_surface_trim_desc const* desc,
-	qaws_surface** out_surface)
+	qaws_surface** out_surface,
+	qaws_surface_trim_desc const* desc)
 {
 	return qaws_surface_create_trimmed_ex(desc, NULL, out_surface);
 }
 
 qaws_status qaws_surface_trim_contains(
-	qaws_surface const* trimmed_surface,
-	qaws_scalar u, qaws_scalar v,
-	int* out_inside)
+	int* out_inside,
+	qaws_surface const* trimmed_surface, qaws_scalar u,
+	qaws_scalar v)
 {
 	qaws_surface_trim_impl const* impl;
 	int inside = 1;

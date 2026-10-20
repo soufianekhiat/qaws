@@ -33,7 +33,7 @@ Derivatives are exchanged through **views** over caller storage. A `qaws_field_v
 
 ```c
 qaws_scalar cp_dot[7 * 3] = { 0 };
-qaws_field_view fv = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, cp_dot, 7, 3);
+qaws_field_view fv = qaws_field_view_make(cp_dot, 7, QAWS_FIELD_CONTROL_POINTS, 3);
 qaws_diff_views views = { &fv, 1, NULL, 0 };
 ```
 
@@ -62,12 +62,12 @@ A tangent jet is the derivative of every requested partial along one direction; 
 ```c
 qaws_curve_jet_3d p, dp;
 qaws_scalar cp_dot[7 * 3] = { 0 };
-qaws_field_view fv = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, cp_dot, 7, 3);
+qaws_field_view fv = qaws_field_view_make(cp_dot, 7, QAWS_FIELD_CONTROL_POINTS, 3);
 qaws_diff_views views = { &fv, 1, NULL, 0 };
 
 cp_dot[2 * 3 + 1] = 1;   /* move control point 2 along y */
-qaws_curve_eval_tangent_3d(NULL, curve, t, 0, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1,
-    &views, &p, &dp);
+qaws_curve_eval_tangent_3d(&p, &dp, curve, &views, t,
+    0, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, NULL);
 /* dp.d[0]: how C(t) moves, dp.d[1]: how C'(t) moves */
 ```
 
@@ -79,10 +79,10 @@ qaws_curve_eval_tangent_3d(NULL, curve, t, 0, QAWS_EVAL_FLAG_POSITION | QAWS_EVA
 qaws_curve_jet_3d bar[N];        /* d loss / d jet for every sample */
 qaws_scalar cp_bar[7 * 3] = { 0 };
 qaws_scalar t_bar[N] = { 0 };
-qaws_field_view fv = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, cp_bar, 7, 3);
+qaws_field_view fv = qaws_field_view_make(cp_bar, 7, QAWS_FIELD_CONTROL_POINTS, 3);
 qaws_diff_views grad = { &fv, 1, NULL, 0 };
 
-qaws_curve_eval_batch_adjoint_3d(&ctx, curve, ts, N, QAWS_EVAL_FLAG_POSITION, bar, &grad, t_bar);
+qaws_curve_eval_batch_adjoint_3d(&grad, t_bar, curve, ts, bar, N, QAWS_EVAL_FLAG_POSITION, &ctx);
 ```
 
 Adjoints are batch first. `qaws_diff_context.accumulation` selects how sample contributions reach the parameter buffers; all three give the same result:
@@ -152,10 +152,10 @@ Operations that build new geometry return, next to their outputs, a `qaws_diff_m
 ```c
 qaws_curve *left, *right;
 qaws_diff_map* map;
-qaws_curve_split_diff(curve, 0.4f, &left, &right, &map);
+qaws_curve_split_diff(&left, &right, &map, curve, 0.4f);
 /* inputs: 0 = curve, 1 = split parameter; outputs: 0 = left, 1 = right */
-qaws_diff_map_tangent(map, NULL, in_tangents, 2, out_tangents, 2);  /* out = J in */
-qaws_diff_map_adjoint(map, NULL, out_adjoints, 2, in_adjoints, 2);  /* in += J^T out */
+qaws_diff_map_tangent(out_tangents, map, in_tangents, 2, 2, NULL);  /* out = J in */
+qaws_diff_map_adjoint(in_adjoints, map, out_adjoints, 2, 2, NULL);  /* in += J^T out */
 qaws_diff_map_destroy(map);
 ```
 

@@ -25,7 +25,7 @@ static double ts_seg_error_2d(qaws_curve const* c, qaws_scalar const* t, qaws_ve
 		{
 			qaws_eval_result_2d e;
 			double ax = p[i + 1].x - p[i].x, ay = p[i + 1].y - p[i].y, l = ax * ax + ay * ay, f, dx, dy;
-			qaws_curve_evaluate_2d(c, t[i] + (t[i + 1] - t[i]) * (qaws_scalar)k / 64, QAWS_EVAL_FLAG_POSITION, &e);
+			qaws_curve_evaluate_2d(&e, c, t[i] + (t[i + 1] - t[i]) * (qaws_scalar)k / 64, QAWS_EVAL_FLAG_POSITION);
 			f = l > 0 ? ((e.position.x - p[i].x) * ax + (e.position.y - p[i].y) * ay) / l : 0;
 			f = f < 0 ? 0 : f > 1 ? 1 : f;
 			dx = e.position.x - p[i].x - f * ax;
@@ -48,7 +48,7 @@ static qaws_curve* ts_circle(void)
 	memset(&d, 0, sizeof d);
 	d.dimension = QAWS_DIMENSION_2D; d.degree = 2; d.control_points = p; d.control_point_count = 9;
 	d.knots = knots; d.knot_count = 12; d.weights = w; d.weight_count = 9;
-	qaws_curve_create_nurbs(&d, &c);
+	qaws_curve_create_nurbs(&c, &d);
 	return c;
 }
 
@@ -97,7 +97,7 @@ static void test_s_and_angle(void)
 	char msg[200];
 	memset(&bd, 0, sizeof bd);
 	bd.dimension = QAWS_DIMENSION_2D; bd.degree = 3; bd.control_points = s; bd.control_point_count = 4;
-	qaws_curve_create_bezier(&bd, &b);
+	qaws_curve_create_bezier(&b, &bd);
 	memset(&d, 0, sizeof d);
 	d.chord_tolerance = (qaws_scalar)1e-2;
 	qaws_curve_tessellate_2d(b, &d, t, p, TS_CAP, &n);
@@ -112,8 +112,8 @@ static void test_s_and_angle(void)
 	for (i = 0; i + 1 < n; i++)
 	{
 		qaws_eval_result_2d e0, e1;
-		qaws_curve_evaluate_2d(c, t[i] + (qaws_scalar)1e-9, QAWS_EVAL_FLAG_D1, &e0);
-		qaws_curve_evaluate_2d(c, t[i + 1] - (qaws_scalar)1e-9, QAWS_EVAL_FLAG_D1, &e1);
+		qaws_curve_evaluate_2d(&e0, c, t[i] + (qaws_scalar)1e-9, QAWS_EVAL_FLAG_D1);
+		qaws_curve_evaluate_2d(&e1, c, t[i + 1] - (qaws_scalar)1e-9, QAWS_EVAL_FLAG_D1);
 		worst = fmax(worst, fabs(atan2(e0.d1.x * e1.d1.y - e0.d1.y * e1.d1.x, e0.d1.x * e1.d1.x + e0.d1.y * e1.d1.y)));
 	}
 	snprintf(msg, sizeof msg, "circle at angle 0.1: %u vertices, largest turning %.4f", n, worst);
@@ -135,7 +135,7 @@ static void test_kink_and_line(void)
 	unsigned int n = 0, i, has_kink = 0, after = 0;
 	memset(&d, 0, sizeof d);
 	d.dimension = QAWS_DIMENSION_3D; d.degree = 3; d.control_points = p; d.control_point_count = 7; d.knots = knots; d.knot_count = 11;
-	TEST_ASSERT(qaws_curve_create_bspline(&d, &c) == QAWS_STATUS_OK, "kinked curve created");
+	TEST_ASSERT(qaws_curve_create_bspline(&c, &d) == QAWS_STATUS_OK, "kinked curve created");
 	memset(&td, 0, sizeof td);
 	td.chord_tolerance = (qaws_scalar)1e-3;
 	td.angle_tolerance = (qaws_scalar)0.2;

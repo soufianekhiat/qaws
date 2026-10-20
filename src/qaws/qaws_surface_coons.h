@@ -27,7 +27,7 @@ typedef struct qaws_surface_coons_desc
 } qaws_surface_coons_desc;
 
 qaws_status qaws_surface_create_coons(
-	qaws_surface_coons_desc const* desc,
-	qaws_surface** out_surface);
+	qaws_surface** out_surface,
+	qaws_surface_coons_desc const* desc);
 
 #endif /* QAWS_SURFACE_COONS_H */

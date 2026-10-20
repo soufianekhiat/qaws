@@ -134,7 +134,7 @@ static qaws_status polynomial_eval_span_3d(
 static void polynomial_destroy_impl(void* impl, qaws_allocator const* allocator)
 {
 	qaws_polynomial_impl* pi = (qaws_polynomial_impl*)impl;
-	if (pi) { qaws_internal_dealloc(allocator, pi->coefficients); qaws_internal_dealloc(allocator, pi); }
+	if (pi) { qaws_internal_dealloc(pi->coefficients, allocator); qaws_internal_dealloc(pi, allocator); }
 }
 
 static int polynomial_is_closed(qaws_curve const* c)    { return qaws_internal_curve_ends_meet(c); }
@@ -218,8 +218,8 @@ static qaws_status polynomial_rebuild(qaws_curve const* curve, qaws_diff_views c
 	qaws_polynomial_desc d;
 	qaws_scalar const* coeffs;
 	qaws_scalar* owned;
-	qaws_status st = qaws_internal_field_override(values, QAWS_FIELD_COEFFICIENTS, impl->coefficients,
-		impl->coefficient_count, (unsigned int)curve->dimension, &coeffs, &owned);
+	qaws_status st = qaws_internal_field_override(&coeffs, &owned, values,
+		impl->coefficients, impl->coefficient_count, QAWS_FIELD_COEFFICIENTS, (unsigned int)curve->dimension);
 	if (st != QAWS_STATUS_OK)
 		return st;
 	d.dimension = curve->dimension;
@@ -228,8 +228,8 @@ static qaws_status polynomial_rebuild(qaws_curve const* curve, qaws_diff_views c
 	d.coefficient_count = impl->coefficient_count;
 	d.t_min = curve->parameter_range.min_value;
 	d.t_max = curve->parameter_range.max_value;
-	st = qaws_curve_create_polynomial(&d, out_curve);
-	qaws_internal_dealloc(NULL, owned);
+	st = qaws_curve_create_polynomial(out_curve, &d);
+	qaws_internal_dealloc(owned, NULL);
 	return st;
 }
 
@@ -294,12 +294,12 @@ qaws_status qaws_curve_create_polynomial_ex(
 	curve->span_boundaries[0] = range.min_value;
 	curve->span_boundaries[1] = range.max_value;
 
-	impl = (qaws_polynomial_impl*)qaws_internal_alloc(allocator, sizeof(qaws_polynomial_impl));
+	impl = (qaws_polynomial_impl*)qaws_internal_alloc(sizeof(qaws_polynomial_impl), allocator);
 	if (!impl) { qaws_internal_curve_free(curve); return QAWS_STATUS_ALLOCATION_FAILURE; }
 
 	coeff_size = qaws_internal_mul3((size_t)dim_count, desc->coefficient_count, sizeof(qaws_scalar));
-	impl->coefficients = (qaws_scalar*)qaws_internal_alloc(allocator, coeff_size);
-	if (!impl->coefficients) { qaws_internal_dealloc(allocator, impl); qaws_internal_curve_free(curve); return QAWS_STATUS_ALLOCATION_FAILURE; }
+	impl->coefficients = (qaws_scalar*)qaws_internal_alloc(coeff_size, allocator);
+	if (!impl->coefficients) { qaws_internal_dealloc(impl, allocator); qaws_internal_curve_free(curve); return QAWS_STATUS_ALLOCATION_FAILURE; }
 	memcpy(impl->coefficients, desc->coefficients, coeff_size);
 	impl->coefficient_count = desc->coefficient_count;
 
@@ -309,8 +309,8 @@ qaws_status qaws_curve_create_polynomial_ex(
 }
 
 qaws_status qaws_curve_create_polynomial(
-	qaws_polynomial_desc const* desc,
-	qaws_curve** out_curve)
+	qaws_curve** out_curve,
+	qaws_polynomial_desc const* desc)
 {
 	return qaws_curve_create_polynomial_ex(desc, NULL, out_curve);
 }

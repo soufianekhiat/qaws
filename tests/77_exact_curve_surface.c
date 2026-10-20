@@ -42,7 +42,7 @@ static qaws_surface* ecs_surface(ref_exact_curve_surface const* r)
 	d.u_knot_count = (unsigned int)r->nku;
 	d.v_knots = kv;
 	d.v_knot_count = (unsigned int)r->nkv;
-	qaws_surface_create_nurbs(&d, &s);
+	qaws_surface_create_nurbs(&s, &d);
 	return s;
 }
 
@@ -63,7 +63,7 @@ static qaws_curve* ecs_curve(ref_exact_curve_surface const* r)
 	d.control_point_count = (unsigned int)r->m + 1;
 	d.weights = ws;
 	d.weight_count = (unsigned int)r->m + 1;
-	qaws_curve_create_rational_bezier(&d, &c);
+	qaws_curve_create_rational_bezier(&c, &d);
 	return c;
 }
 
@@ -92,9 +92,9 @@ static void test_reference(void)
 		unsigned int count = 0, k, q;
 		qaws_status st;
 		int ok;
-		qaws_exact_surface_prepare(&desc, s, &es, NULL);
-		qaws_exact_curve_prepare(&desc, c, &ec, NULL);
-		st = qaws_exact_curve_surface_hits(ec, es, hits, 16, &count);
+		qaws_exact_surface_prepare(&es, NULL, s, &desc);
+		qaws_exact_curve_prepare(&ec, NULL, c, &desc);
+		st = qaws_exact_curve_surface_hits(hits, &count, ec, es, 16);
 		ok = st == QAWS_STATUS_OK && count == (unsigned int)r->n;
 		/* hits are unordered: each reference hit inside exactly one enclosure */
 		for (k = 0; ok && k < (unsigned int)r->n; k++)
@@ -157,16 +157,16 @@ static void test_on_surface(void)
 	d.control_points = cps;
 	d.u_point_count = 2;
 	d.v_point_count = 2;
-	qaws_surface_create_bezier(&d, &s);
+	qaws_surface_create_bezier(&s, &d);
 	memset(&bd, 0, sizeof(bd));
 	bd.dimension = QAWS_DIMENSION_3D;
 	bd.degree = 1;
 	bd.control_points = seg;
 	bd.control_point_count = 2;
-	qaws_curve_create_bezier(&bd, &c);
-	qaws_exact_surface_prepare(NULL, s, &es, NULL);
-	qaws_exact_curve_prepare(NULL, c, &ec, NULL);
-	TEST_ASSERT(qaws_exact_curve_surface_hits(ec, es, hits, 4, &count) == QAWS_STATUS_CERTIFICATION_FAILED,
+	qaws_curve_create_bezier(&c, &bd);
+	qaws_exact_surface_prepare(&es, NULL, s, NULL);
+	qaws_exact_curve_prepare(&ec, NULL, c, NULL);
+	TEST_ASSERT(qaws_exact_curve_surface_hits(hits, &count, ec, es, 4) == QAWS_STATUS_CERTIFICATION_FAILED,
 		"a curve lying on the surface is refused (the subdivision budget runs out)");
 	qaws_exact_surface_destroy(es);
 	qaws_exact_curve_destroy(ec);

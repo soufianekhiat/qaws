@@ -58,13 +58,13 @@ static qaws_status ex_point(qaws_curve const* c, qaws_scalar t, qaws_scalar* out
 	if (c->dimension == QAWS_DIMENSION_2D)
 	{
 		qaws_eval_result_2d r;
-		s = qaws_curve_evaluate_2d(c, t, QAWS_EVAL_FLAG_POSITION, &r);
+		s = qaws_curve_evaluate_2d(&r, c, t, QAWS_EVAL_FLAG_POSITION);
 		out[0] = r.position.x; out[1] = r.position.y; out[2] = QAWS_ZERO;
 	}
 	else
 	{
 		qaws_eval_result_3d r;
-		s = qaws_curve_evaluate_3d(c, t, QAWS_EVAL_FLAG_POSITION, &r);
+		s = qaws_curve_evaluate_3d(&r, c, t, QAWS_EVAL_FLAG_POSITION);
 		out[0] = r.position.x; out[1] = r.position.y; out[2] = r.position.z;
 	}
 	return s;
@@ -132,7 +132,7 @@ static qaws_status ex_bezier(qaws_curve const* c, qaws_scalar t0, qaws_scalar t1
 	d.degree = c->degree;
 	d.control_points = cp;
 	d.control_point_count = n;
-	s = qaws_curve_create_bezier_ex(&d, c->allocator, out);
+	s = qaws_curve_create_bezier_ex(out, &d, c->allocator);
 	qaws_internal_free(cp);
 	return s;
 }
@@ -350,7 +350,7 @@ static qaws_status ex_spline_kind(qaws_curve const* c, qaws_scalar t0, qaws_scal
 		d.knot_count = res.knot_count;
 		d.weights = w;
 		d.weight_count = res.cp_count;
-		s = qaws_curve_create_nurbs_ex(&d, c->allocator, out);
+		s = qaws_curve_create_nurbs_ex(out, &d, c->allocator);
 		qaws_internal_free(cp);
 	}
 	else
@@ -363,7 +363,7 @@ static qaws_status ex_spline_kind(qaws_curve const* c, qaws_scalar t0, qaws_scal
 		d.control_point_count = res.cp_count;
 		d.knots = res.knots;
 		d.knot_count = res.knot_count;
-		s = qaws_curve_create_bspline_ex(&d, c->allocator, out);
+		s = qaws_curve_create_bspline_ex(out, &d, c->allocator);
 	}
 	qaws_internal_free(res.cp); qaws_internal_free(res.knots);
 	return s;
@@ -483,7 +483,7 @@ static qaws_status ex_cubics_curve(qaws_curve const* c, ex_cubics* q, qaws_curve
 		d.degree = 3;
 		d.control_points = cp;
 		d.control_point_count = 4;
-		s = qaws_curve_create_bezier_ex(&d, c->allocator, out);
+		s = qaws_curve_create_bezier_ex(out, &d, c->allocator);
 	}
 	else
 	{
@@ -501,7 +501,7 @@ static qaws_status ex_cubics_curve(qaws_curve const* c, ex_cubics* q, qaws_curve
 		d.control_point_count = n;
 		d.knots = knots;
 		d.knot_count = kc;
-		s = qaws_curve_create_bspline_ex(&d, c->allocator, out);
+		s = qaws_curve_create_bspline_ex(out, &d, c->allocator);
 	}
 	qaws_internal_free(cp);
 	return s;
@@ -529,8 +529,8 @@ static qaws_status ex_cubic_kind(qaws_curve const* c, qaws_scalar t0, qaws_scala
 {
 	ex_cubics q;
 	qaws_scalar u0, u1;
-	unsigned int s0 = qaws_internal_find_span(c, t0, &u0);
-	unsigned int s1 = qaws_internal_find_span(c, t1, &u1);
+	unsigned int s0 = qaws_internal_find_span(&u0, c, t0);
+	unsigned int s1 = qaws_internal_find_span(&u1, c, t1);
 	unsigned int s;
 	qaws_status st;
 
@@ -579,8 +579,8 @@ static qaws_status ex_arc(qaws_curve const* c, qaws_scalar t0, qaws_scalar t1, q
 {
 	qaws_arc_impl const* impl = (qaws_arc_impl const*)c->impl;
 	qaws_scalar u0, u1;
-	unsigned int s0 = qaws_internal_find_span(c, t0, &u0);
-	unsigned int s1 = qaws_internal_find_span(c, t1, &u1);
+	unsigned int s0 = qaws_internal_find_span(&u0, c, t0);
+	unsigned int s1 = qaws_internal_find_span(&u1, c, t1);
 	unsigned int s, n = 0;
 	qaws_arc_segment* seg;
 	qaws_arc_desc d;
@@ -633,8 +633,8 @@ static qaws_status ex_composite(qaws_curve const* c, qaws_scalar t0, qaws_scalar
 {
 	qaws_composite_impl const* impl = (qaws_composite_impl const*)c->impl;
 	qaws_scalar u0, u1;
-	unsigned int s0 = qaws_internal_find_span(c, t0, &u0);
-	unsigned int s1 = qaws_internal_find_span(c, t1, &u1);
+	unsigned int s0 = qaws_internal_find_span(&u0, c, t0);
+	unsigned int s1 = qaws_internal_find_span(&u1, c, t1);
 	unsigned int s, n = 0, i;
 	qaws_curve** parts;
 	qaws_composite_desc d;
@@ -649,7 +649,7 @@ static qaws_status ex_composite(qaws_curve const* c, qaws_scalar t0, qaws_scalar
 		qaws_scalar a = g->parameter_range.min_value, b = g->parameter_range.max_value;
 		qaws_scalar ua = s == s0 ? u0 : QAWS_ZERO, ub = s == s1 ? u1 : QAWS_ONE;
 		if (ub <= ua) continue;
-		st = qaws_curve_extract(g, a + (b - a) * ua, ub >= QAWS_ONE ? b : a + (b - a) * ub, &parts[n]);
+		st = qaws_curve_extract(&parts[n], g, a + (b - a) * ua, ub >= QAWS_ONE ? b : a + (b - a) * ub);
 		if (st == QAWS_STATUS_OK) n++;
 	}
 	if (st == QAWS_STATUS_OK && n == 0)
@@ -682,10 +682,10 @@ static qaws_status ex_composite(qaws_curve const* c, qaws_scalar t0, qaws_scalar
 /* -------------------------------------------------------------------------- */
 
 qaws_status qaws_curve_extract(
+	qaws_curve** out_curve,
 	qaws_curve const* curve,
 	qaws_scalar t0,
-	qaws_scalar t1,
-	qaws_curve** out_curve)
+	qaws_scalar t1)
 {
 	qaws_scalar a, b, tol;
 	qaws_status st;
@@ -709,10 +709,10 @@ qaws_status qaws_curve_extract(
 	if (t0 > t1)
 	{
 		qaws_curve* fwd = NULL;
-		st = qaws_curve_extract(curve, t1, t0, &fwd);
+		st = qaws_curve_extract(&fwd, curve, t1, t0);
 		if (st != QAWS_STATUS_OK)
 			return st;
-		st = qaws_curve_reverse(fwd, out_curve);
+		st = qaws_curve_reverse(out_curve, fwd);
 		qaws_curve_destroy(fwd);
 		return st;
 	}
@@ -746,17 +746,17 @@ qaws_status qaws_curve_extract(
 		qaws_curve const* src0 = NULL;
 		qaws_curve const* src1 = NULL;
 		qaws_scalar s0, s1;
-		if (!qaws_internal_reparam_source(curve, t0, &src0, &s0) ||
-		    !qaws_internal_reparam_source(curve, t1, &src1, &s1))
+		if (!qaws_internal_reparam_source(&src0, &s0, curve, t0) ||
+		    !qaws_internal_reparam_source(&src1, &s1, curve, t1))
 			return QAWS_STATUS_UNSUPPORTED_OPERATION;
-		return qaws_curve_extract(src0, s0, s1, out_curve);
+		return qaws_curve_extract(out_curve, src0, s0, s1);
 	}
 	case QAWS_CURVE_KIND_VIEW:
 	{
 		qaws_curve* owned = NULL;
 		if ((st = qaws_internal_curve_view_copy(curve, &owned)) != QAWS_STATUS_OK)
 			return st;
-		st = qaws_curve_extract(owned, t0, t1, out_curve);
+		st = qaws_curve_extract(out_curve, owned, t0, t1);
 		qaws_curve_destroy(owned);
 		return st;
 	}
@@ -765,7 +765,7 @@ qaws_status qaws_curve_extract(
 	}
 }
 
-qaws_status qaws_internal_curve_fit_cubic(qaws_curve const* curve, qaws_scalar t0, qaws_scalar t1, qaws_curve** out_curve)
+qaws_status qaws_internal_curve_fit_cubic(qaws_curve** out_curve, qaws_curve const* curve, qaws_scalar t0, qaws_scalar t1)
 {
 	return ex_cubic_kind(curve, t0, t1, 1, out_curve);
 }

@@ -19,21 +19,21 @@ static void test_polynomial(void)
 		desc.t_min = 0;
 		desc.t_max = 1;
 
-		TEST_ASSERT_STATUS(qaws_curve_create_polynomial(&desc, &crv));
+		TEST_ASSERT_STATUS(qaws_curve_create_polynomial(&crv, &desc));
 		TEST_ASSERT(qaws_curve_get_kind(crv) == QAWS_CURVE_KIND_POLYNOMIAL, "poly kind");
 		TEST_ASSERT(qaws_curve_is_rational(crv) == 0, "poly not rational");
 
-		qaws_curve_evaluate_2d(crv, (qaws_scalar)0.5, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &r);
+		qaws_curve_evaluate_2d(&r, crv, (qaws_scalar)0.5, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1);
 		TEST_ASSERT(approx_eq(r.position.x, (qaws_scalar)0.5) && approx_eq(r.position.y, 1),
 			"poly linear pos at 0.5");
 		TEST_ASSERT(approx_eq(r.d1.x, 1) && approx_eq(r.d1.y, 2),
 			"poly linear d1");
 
 		/* Endpoints */
-		qaws_curve_evaluate_2d(crv, 0, QAWS_EVAL_FLAG_POSITION, &r);
+		qaws_curve_evaluate_2d(&r, crv, 0, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT(approx_eq(r.position.x, 0) && approx_eq(r.position.y, 0),
 			"poly linear start");
-		qaws_curve_evaluate_2d(crv, 1, QAWS_EVAL_FLAG_POSITION, &r);
+		qaws_curve_evaluate_2d(&r, crv, 1, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT(approx_eq(r.position.x, 1) && approx_eq(r.position.y, 2),
 			"poly linear end");
 
@@ -55,14 +55,14 @@ static void test_polynomial(void)
 		desc.t_min = 0;
 		desc.t_max = 1;
 
-		TEST_ASSERT_STATUS(qaws_curve_create_polynomial(&desc, &crv));
+		TEST_ASSERT_STATUS(qaws_curve_create_polynomial(&crv, &desc));
 
-		qaws_curve_evaluate_2d(crv, 1, QAWS_EVAL_FLAG_POSITION, &r);
+		qaws_curve_evaluate_2d(&r, crv, 1, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT(approx_eq(r.position.x, 1) && approx_eq(r.position.y, 1),
 			"poly cubic at t=1");
 
-		qaws_curve_evaluate_2d(crv, (qaws_scalar)0.5,
-			QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2 | QAWS_EVAL_FLAG_D3, &r);
+		qaws_curve_evaluate_2d(&r, crv,
+			(qaws_scalar)0.5, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2 | QAWS_EVAL_FLAG_D3);
 		TEST_ASSERT(approx_eq(r.position.x, (qaws_scalar)0.125), "poly cubic x at 0.5");
 		TEST_ASSERT(approx_eq(r.position.y, (qaws_scalar)0.25), "poly cubic y at 0.5");
 		/* D1 of (t^3, t^2) = (3t^2, 2t), at t=0.5 => (0.75, 1.0) */
@@ -94,17 +94,17 @@ static void test_polynomial(void)
 		desc.t_min = -1;
 		desc.t_max = 1;
 
-		TEST_ASSERT_STATUS(qaws_curve_create_polynomial(&desc, &crv));
+		TEST_ASSERT_STATUS(qaws_curve_create_polynomial(&crv, &desc));
 
 		/* At global param -1 (start): should be (-1, 1) */
 		{
 			qaws_range rng = qaws_curve_get_parameter_range(crv);
-			qaws_curve_evaluate_2d(crv, rng.min_value, QAWS_EVAL_FLAG_POSITION, &r);
+			qaws_curve_evaluate_2d(&r, crv, rng.min_value, QAWS_EVAL_FLAG_POSITION);
 			TEST_ASSERT(approx_eq(r.position.x, -1), "poly parabola start x");
 			TEST_ASSERT(approx_eq(r.position.y, 1), "poly parabola start y");
 
 			/* At global param 1 (end): (1, 1) */
-			qaws_curve_evaluate_2d(crv, rng.max_value, QAWS_EVAL_FLAG_POSITION, &r);
+			qaws_curve_evaluate_2d(&r, crv, rng.max_value, QAWS_EVAL_FLAG_POSITION);
 			TEST_ASSERT(approx_eq(r.position.x, 1), "poly parabola end x");
 			TEST_ASSERT(approx_eq(r.position.y, 1), "poly parabola end y");
 		}
@@ -115,7 +115,7 @@ static void test_polynomial(void)
 	/* Error: NULL desc */
 	{
 		qaws_curve *crv = NULL;
-		TEST_ASSERT(qaws_curve_create_polynomial(NULL, &crv) != QAWS_STATUS_OK,
+		TEST_ASSERT(qaws_curve_create_polynomial(&crv, NULL) != QAWS_STATUS_OK,
 			"poly null desc rejected");
 	}
 }

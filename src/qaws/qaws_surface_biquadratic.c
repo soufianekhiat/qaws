@@ -205,7 +205,7 @@ static qaws_status biquadratic_surface_eval(
 	/* Normal */
 	if (eval_flags & QAWS_SURFACE_EVAL_NORMAL)
 	{
-		qaws_internal_surface_normal(out_result->du, out_result->dv, &out_result->normal);
+		qaws_internal_surface_normal(&out_result->normal, out_result->du, out_result->dv);
 		out_result->valid_flags |= QAWS_SURFACE_EVAL_NORMAL;
 	}
 
@@ -214,7 +214,7 @@ static qaws_status biquadratic_surface_eval(
 
 static void biquadratic_surface_destroy(void* impl, qaws_allocator const* allocator)
 {
-	qaws_internal_dealloc(allocator, impl);
+	qaws_internal_dealloc(impl, allocator);
 }
 
 static int biquadratic_surface_is_rational(qaws_surface const* s)
@@ -264,8 +264,8 @@ static qaws_status biquadratic_surface_linear_support(qaws_surface const* surfac
 	if (order > QAWS_DIFF_MAX_ORDER)
 		return QAWS_STATUS_UNSUPPORTED_OPERATION;
 
-	qaws_internal_bernstein_derivs(2, u, order, bu);
-	qaws_internal_bernstein_derivs(2, v, order, bv);
+	qaws_internal_bernstein_derivs(bu, 2, u, order);
+	qaws_internal_bernstein_derivs(bv, 2, v, order);
 
 	out->kind = QAWS_SUPPORT_GLOBAL;
 	out->field = QAWS_FIELD_CONTROL_POINTS;
@@ -326,7 +326,7 @@ qaws_status qaws_surface_create_biquadratic_ex(
 		&biquadratic_surface_vtable, allocator);
 	if (!surface) return QAWS_STATUS_ALLOCATION_FAILURE;
 
-	impl = (qaws_surface_biquadratic_impl*)qaws_internal_alloc(allocator, sizeof(qaws_surface_biquadratic_impl));
+	impl = (qaws_surface_biquadratic_impl*)qaws_internal_alloc(sizeof(qaws_surface_biquadratic_impl), allocator);
 	if (!impl)
 	{
 		qaws_internal_surface_free(surface);
@@ -341,8 +341,8 @@ qaws_status qaws_surface_create_biquadratic_ex(
 }
 
 qaws_status qaws_surface_create_biquadratic(
-	qaws_surface_biquadratic_desc const* desc,
-	qaws_surface** out_surface)
+	qaws_surface** out_surface,
+	qaws_surface_biquadratic_desc const* desc)
 {
 	return qaws_surface_create_biquadratic_ex(desc, NULL, out_surface);
 }

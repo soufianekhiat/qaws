@@ -16,12 +16,12 @@ typedef qaws_exact_poly poly;
 
 static void* cc_alloc(size_t bytes)
 {
-	return qaws_internal_alloc(NULL, bytes);
+	return qaws_internal_alloc(bytes, NULL);
 }
 
 static void cc_free(void* p)
 {
-	qaws_internal_dealloc(NULL, p);
+	qaws_internal_dealloc(p, NULL);
 }
 
 
@@ -1128,8 +1128,8 @@ unsigned int qaws_exact_merge_overlaps(qaws_exact_pair* p, unsigned int n)
 	return m;
 }
 
-qaws_status qaws_exact_curve_curve_hits(qaws_exact_curve const* a, qaws_exact_curve const* b, qaws_exact_pair* out_pairs, unsigned int capacity,
-	unsigned int* out_count)
+qaws_status qaws_exact_curve_curve_hits(qaws_exact_pair* out_pairs, unsigned int* out_count, qaws_exact_curve const* a, qaws_exact_curve const* b,
+	unsigned int capacity)
 {
 	unsigned int ia, ib, count = 0, dim;
 	double (*box)[2][3];
@@ -1186,7 +1186,7 @@ static int curve_closed(qaws_exact_curve const* c)
 	return 1;
 }
 
-qaws_status qaws_exact_curve_self_hits(qaws_exact_curve const* curve, qaws_exact_pair* out_pairs, unsigned int capacity, unsigned int* out_count)
+qaws_status qaws_exact_curve_self_hits(qaws_exact_pair* out_pairs, unsigned int* out_count, qaws_exact_curve const* curve, unsigned int capacity)
 {
 	unsigned int i, j, k, count = 0, dim;
 	span_hit* hits;

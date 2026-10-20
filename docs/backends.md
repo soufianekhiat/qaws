@@ -134,7 +134,7 @@ that a single source compiles on every backend:
 
 1. On the CPU, call prepare functions to build flat arrays:
    ```c
-   qaws_hermite_prepare_2d(points, tangents, count, a, b, c, d);
+   qaws_hermite_prepare_2d(a, b, c, d, points, tangents, count);
    ```
 2. Upload the flat arrays to a GPU buffer.
 3. In the shader, include the bootstrap header and the core eval header:

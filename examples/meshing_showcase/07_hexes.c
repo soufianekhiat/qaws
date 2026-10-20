@@ -106,7 +106,7 @@ static void demo_hexes(void)
 	if (!c || !torus)
 		return;
 	ms_box_faces(box, 1, 0.7, 0.5);
-	qaws_shell_atlas_create((qaws_surface const* const*)box, 6, 0, &atlas);
+	qaws_shell_atlas_create(&atlas, (qaws_surface const* const*)box, 6, 0);
 	bs = atlas ? ms_generate(NULL, atlas, QAWS_ELEMENTS_TRIANGLES, 0.1, 0, NULL) : NULL;
 	h1 = bs ? ms_hexes(bs, 0.15, sub, "box") : NULL;
 	if (h1)

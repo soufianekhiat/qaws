@@ -52,30 +52,30 @@ typedef struct qaws_clip64_desc
 
 typedef struct qaws_clip64_result qaws_clip64_result;
 
-qaws_status qaws_clip64_execute(qaws_clip64_desc const* desc, qaws_clip64_result** out_result);
+qaws_status qaws_clip64_execute(qaws_clip64_result** out_result, qaws_clip64_desc const* desc);
 /* Many independent clips in one call (see qaws_clip_execute_batch). */
-qaws_status qaws_clip64_execute_batch(qaws_clip64_desc const* descs, unsigned int count, qaws_batch_executor const* executor,
-	qaws_clip64_result** out_results);
+qaws_status qaws_clip64_execute_batch(qaws_clip64_result** out_results, qaws_clip64_desc const* descs, unsigned int count,
+	qaws_batch_executor const* executor);
 void qaws_clip64_result_destroy(qaws_clip64_result* result);
 
 /* Closed paths, rounded to integers (x, y pairs). */
 unsigned int qaws_clip64_result_get_path_count(qaws_clip64_result const* result);
-qaws_status qaws_clip64_result_get_path(qaws_clip64_result const* result, unsigned int index,
-	int64_t const** out_points, unsigned int* out_count);
+qaws_status qaws_clip64_result_get_path(int64_t const** out_points, unsigned int* out_count,
+	qaws_clip64_result const* result, unsigned int index);
 /* The same path's exact vertices before rounding (as the nearest doubles):
    every point where the exact boundary turns, so it may have more vertices
    than the rounded path. Paths that round to nothing (no area left) are
    dropped from both. */
-qaws_status qaws_clip64_result_get_path_exact(qaws_clip64_result const* result, unsigned int index,
-	double const** out_points, unsigned int* out_count);
+qaws_status qaws_clip64_result_get_path_exact(double const** out_points, unsigned int* out_count,
+	qaws_clip64_result const* result, unsigned int index);
 unsigned int qaws_clip64_result_get_parent(qaws_clip64_result const* result, unsigned int index);
 int qaws_clip64_result_is_hole(qaws_clip64_result const* result, unsigned int index);
 unsigned int qaws_clip64_result_get_depth(qaws_clip64_result const* result, unsigned int index);
 
 /* Open paths, rounded. */
 unsigned int qaws_clip64_result_get_open_path_count(qaws_clip64_result const* result);
-qaws_status qaws_clip64_result_get_open_path(qaws_clip64_result const* result, unsigned int index,
-	int64_t const** out_points, unsigned int* out_count);
+qaws_status qaws_clip64_result_get_open_path(int64_t const** out_points, unsigned int* out_count,
+	qaws_clip64_result const* result, unsigned int index);
 
 /* Twice the signed area of an int64 path, exactly as a double rounded once
    (Clipper2's Area times 2). */

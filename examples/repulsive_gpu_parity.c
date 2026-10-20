@@ -281,13 +281,13 @@ static void gp_case(gp_ctx* g, char const* name, double const* x0, unsigned int 
 		qaws_repulsive_curves_desc d;
 		memset(&d, 0, sizeof(d));
 		d.dimension = 3; d.vertex_count = nv; d.edges = idx; d.edge_count = ne;
-		qaws_repulsive_curves_create(&d, &c);
-		t0 = gp_now(); qaws_internal_repulsive_curves_energy(c, x, &Ec, gc); tc = gp_now() - t0;
-		t0 = gp_now(); qaws_internal_repulsive_curves_bh(c, x, 0.25, &Eb, gb); tb = gp_now() - t0;
+		qaws_repulsive_curves_create(&c, &d);
+		t0 = gp_now(); qaws_internal_repulsive_curves_energy(&Ec, gc, c, x); tc = gp_now() - t0;
+		t0 = gp_now(); qaws_internal_repulsive_curves_bh(&Eb, gb, c, x, 0.25); tb = gp_now() - t0;
 		{
 			/* how far that rounding alone moves the gradient (the problem's conditioning, in double) */
 			double E0, *g0 = (double*)calloc(3 * nv, 8);
-			qaws_internal_repulsive_curves_energy(c, x0, &E0, g0);
+			qaws_internal_repulsive_curves_energy(&E0, g0, c, x0);
 			sens = gp_rel(gc, g0, 3 * nv);
 			free(g0);
 		}
@@ -297,12 +297,12 @@ static void gp_case(gp_ctx* g, char const* name, double const* x0, unsigned int 
 		qaws_repulsive_mesh_desc d;
 		memset(&d, 0, sizeof(d));
 		d.vertex_count = nv; d.triangles = idx; d.triangle_count = ne;
-		qaws_repulsive_mesh_create(&d, &m);
-		t0 = gp_now(); qaws_internal_repulsive_mesh_energy(m, x, &Ec, gc); tc = gp_now() - t0;
-		t0 = gp_now(); qaws_internal_repulsive_mesh_bh(m, x, 0.25, &Eb, gb); tb = gp_now() - t0;
+		qaws_repulsive_mesh_create(&m, &d);
+		t0 = gp_now(); qaws_internal_repulsive_mesh_energy(&Ec, gc, m, x); tc = gp_now() - t0;
+		t0 = gp_now(); qaws_internal_repulsive_mesh_bh(&Eb, gb, m, x, 0.25); tb = gp_now() - t0;
 		{
 			double E0, *g0 = (double*)calloc(3 * nv, 8);
-			qaws_internal_repulsive_mesh_energy(m, x0, &E0, g0);
+			qaws_internal_repulsive_mesh_energy(&E0, g0, m, x0);
 			sens = gp_rel(gc, g0, 3 * nv);
 			free(g0);
 		}
@@ -311,7 +311,7 @@ static void gp_case(gp_ctx* g, char const* name, double const* x0, unsigned int 
 	if (dense)
 	{
 		double* A = (double*)malloc(8 * (size_t)nv * nv);
-		if (k == 2) qaws_internal_repulsive_curves_metric(c, x, A); else qaws_internal_repulsive_mesh_metric(m, x, A);
+		if (k == 2) qaws_internal_repulsive_curves_metric(A, c, x); else qaws_internal_repulsive_mesh_metric(A, m, x);
 		for (i = 0; i < nv; i++)
 			for (j = 0; j < nv; j++) yc[i] += A[(size_t)i * nv + j] * u[j];
 		printf(", metric product %.2g", gp_rel(yg, yc, nv));

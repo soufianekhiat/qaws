@@ -22,7 +22,7 @@ static qaws_surface* make_dome(void)
 	desc.u_degree = 2; desc.v_degree = 2;
 	desc.control_points = cp;
 	desc.u_point_count = 3; desc.v_point_count = 3;
-	qaws_surface_create_bezier(&desc, &surf);
+	qaws_surface_create_bezier(&surf, &desc);
 	return surf;
 }
 
@@ -43,7 +43,7 @@ static qaws_surface* make_flat_surface(void)
 	desc.u_degree = 1; desc.v_degree = 1;
 	desc.control_points = cp;
 	desc.u_point_count = 2; desc.v_point_count = 2;
-	qaws_surface_create_bezier(&desc, &surf);
+	qaws_surface_create_bezier(&surf, &desc);
 	return surf;
 }
 
@@ -65,7 +65,7 @@ static void test_closest_point_on_surface(void)
 	/* Point directly above center: closest should be center */
 	{
 		qaws_vec3 pt = {2, 2, 5};
-		s = qaws_surface_find_closest_point(surf, pt, &u, &v, &closest);
+		s = qaws_surface_find_closest_point(&u, &v, &closest, surf, pt);
 		TEST_ASSERT_STATUS(s);
 		TEST_ASSERT(approx_eq_loose(closest.x, (qaws_scalar)2.0), "flat closest x");
 		TEST_ASSERT(approx_eq_loose(closest.y, (qaws_scalar)2.0), "flat closest y");
@@ -77,7 +77,7 @@ static void test_closest_point_on_surface(void)
 	/* Point near a corner */
 	{
 		qaws_vec3 pt = {0, 0, 1};
-		s = qaws_surface_find_closest_point(surf, pt, &u, &v, &closest);
+		s = qaws_surface_find_closest_point(&u, &v, &closest, surf, pt);
 		TEST_ASSERT_STATUS(s);
 		TEST_ASSERT(fabs(closest.x) < TOLERANCE_LOOSE, "corner closest x");
 		TEST_ASSERT(fabs(closest.y) < TOLERANCE_LOOSE, "corner closest y");
@@ -91,7 +91,7 @@ static void test_closest_point_on_surface(void)
 
 	{
 		qaws_vec3 pt = {1, 1, 10};
-		s = qaws_surface_find_closest_point(surf, pt, &u, &v, &closest);
+		s = qaws_surface_find_closest_point(&u, &v, &closest, surf, pt);
 		TEST_ASSERT_STATUS(s);
 		/* Should converge near the dome peak (u~0.5, v~0.5) */
 		TEST_ASSERT(u > (qaws_scalar)0.2 && u < (qaws_scalar)0.8, "dome closest u mid");
@@ -102,9 +102,9 @@ static void test_closest_point_on_surface(void)
 	/* Null args */
 	{
 		qaws_vec3 pt = {0,0,0};
-		s = qaws_surface_find_closest_point(NULL, pt, &u, &v, &closest);
+		s = qaws_surface_find_closest_point(&u, &v, &closest, NULL, pt);
 		TEST_ASSERT(s != QAWS_STATUS_OK, "closest null surface rejected");
-		s = qaws_surface_find_closest_point(surf, pt, NULL, &v, &closest);
+		s = qaws_surface_find_closest_point(NULL, &v, &closest, surf, pt);
 		TEST_ASSERT(s != QAWS_STATUS_OK, "closest null u rejected");
 	}
 
@@ -133,15 +133,15 @@ static void test_curve_plane_intersection(void)
 		d.degree = 1;
 		d.control_points = pts;
 		d.control_point_count = 2;
-		qaws_curve_create_bezier(&d, &crv);
+		qaws_curve_create_bezier(&crv, &d);
 	}
 
 	{
 		qaws_plane plane;
 		plane.point.x = 0; plane.point.y = 0; plane.point.z = 1;
 		plane.normal.x = 0; plane.normal.y = 0; plane.normal.z = 1;
-		s = qaws_curve_find_plane_intersections(crv, &plane,
-			params, positions, 16, &count);
+		s = qaws_curve_find_plane_intersections(params, positions,
+			&count, crv, &plane, 16);
 	}
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(count == 1, "line-plane: 1 intersection");
@@ -159,7 +159,7 @@ static void test_curve_plane_intersection(void)
 		d.degree = 3;
 		d.control_points = pts;
 		d.control_point_count = 4;
-		qaws_curve_create_bezier(&d, &crv);
+		qaws_curve_create_bezier(&crv, &d);
 	}
 
 	{
@@ -167,8 +167,8 @@ static void test_curve_plane_intersection(void)
 		plane.point.x = 0; plane.point.y = 0; plane.point.z = 0;
 		plane.normal.x = 0; plane.normal.y = 0; plane.normal.z = 1;
 		count = 0;
-		s = qaws_curve_find_plane_intersections(crv, &plane,
-			params, positions, 16, &count);
+		s = qaws_curve_find_plane_intersections(params, positions,
+			&count, crv, &plane, 16);
 	}
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(count >= 2, "cubic-plane: >= 2 intersections");
@@ -193,13 +193,13 @@ static void test_curve_plane_intersection(void)
 		d.degree = 1;
 		d.control_points = pts;
 		d.control_point_count = 2;
-		qaws_curve_create_bezier(&d, &crv);
+		qaws_curve_create_bezier(&crv, &d);
 
 		plane.point.x = 0; plane.point.y = 0; plane.point.z = 0;
 		plane.normal.x = 0; plane.normal.y = 0; plane.normal.z = 1;
 		count = 0;
-		s = qaws_curve_find_plane_intersections(crv, &plane,
-			params, positions, 16, &count);
+		s = qaws_curve_find_plane_intersections(params, positions,
+			&count, crv, &plane, 16);
 		TEST_ASSERT_STATUS(s);
 		TEST_ASSERT(count == 0, "parallel: 0 intersections");
 		qaws_curve_destroy(crv);
@@ -210,8 +210,8 @@ static void test_curve_plane_intersection(void)
 		qaws_plane plane;
 		plane.point.x = 0; plane.point.y = 0; plane.point.z = 0;
 		plane.normal.x = 0; plane.normal.y = 0; plane.normal.z = 1;
-		s = qaws_curve_find_plane_intersections(NULL, &plane,
-			params, positions, 16, &count);
+		s = qaws_curve_find_plane_intersections(params, positions,
+			&count, NULL, &plane, 16);
 		TEST_ASSERT(s != QAWS_STATUS_OK, "plane null curve rejected");
 	}
 }
@@ -241,10 +241,10 @@ static void test_surface_curve_intersection(void)
 		d.degree = 1;
 		d.control_points = pts;
 		d.control_point_count = 2;
-		qaws_curve_create_bezier(&d, &crv);
+		qaws_curve_create_bezier(&crv, &d);
 	}
 
-	s = qaws_surface_find_curve_intersections(surf, crv, hits, 16, &count);
+	s = qaws_surface_find_curve_intersections(hits, &count, surf, crv, 16);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(count >= 1, "flat-line: >= 1 intersection");
 
@@ -276,11 +276,11 @@ static void test_surface_curve_intersection(void)
 		d.degree = 1;
 		d.control_points = pts;
 		d.control_point_count = 2;
-		qaws_curve_create_bezier(&d, &crv);
+		qaws_curve_create_bezier(&crv, &d);
 	}
 
 	count = 0;
-	s = qaws_surface_find_curve_intersections(surf, crv, hits, 16, &count);
+	s = qaws_surface_find_curve_intersections(hits, &count, surf, crv, 16);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(count >= 1, "dome-line: >= 1 intersection");
 
@@ -289,7 +289,7 @@ static void test_surface_curve_intersection(void)
 
 	/* Null args */
 	{
-		s = qaws_surface_find_curve_intersections(NULL, crv, hits, 16, &count);
+		s = qaws_surface_find_curve_intersections(hits, &count, NULL, crv, 16);
 		TEST_ASSERT(s != QAWS_STATUS_OK, "surf-curve null surface rejected");
 	}
 }
@@ -316,9 +316,9 @@ static void test_adaptive_tessellation(void)
 		desc.max_depth = 4;
 		desc.curvature_threshold = (qaws_scalar)(0.1);
 		desc.max_edge_length = 0;  /* disabled */
-		s = qaws_surface_tessellate(surf, &desc,
-			verts, 4096, &vert_count,
-			indices, 24576, &idx_count);
+		s = qaws_surface_tessellate(verts, &vert_count,
+			indices, &idx_count, surf,
+			4096, 24576, &desc);
 	}
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(vert_count > 0, "tess flat has vertices");
@@ -340,9 +340,9 @@ static void test_adaptive_tessellation(void)
 		desc.curvature_threshold = (qaws_scalar)(0.05);
 		desc.max_edge_length = 0;
 		vert_count = 0; idx_count = 0;
-		s = qaws_surface_tessellate(surf, &desc,
-			verts, 4096, &vert_count,
-			indices, 24576, &idx_count);
+		s = qaws_surface_tessellate(verts, &vert_count,
+			indices, &idx_count, surf,
+			4096, 24576, &desc);
 	}
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(vert_count > 0, "tess dome has vertices");
@@ -381,9 +381,9 @@ static void test_adaptive_tessellation(void)
 		desc.max_depth = 5;
 		desc.curvature_threshold = (qaws_scalar)10.0;  /* very loose - won't trigger */
 		desc.max_edge_length = (qaws_scalar)0.5;       /* force edge subdivision */
-		s = qaws_surface_tessellate(surf, &desc,
-			verts, 4096, &vert2,
-			indices, 24576, &idx2);
+		s = qaws_surface_tessellate(verts, &vert2,
+			indices, &idx2, surf,
+			4096, 24576, &desc);
 		TEST_ASSERT_STATUS(s);
 		TEST_ASSERT(vert2 > 0, "tess edge-len has vertices");
 	}
@@ -394,9 +394,9 @@ static void test_adaptive_tessellation(void)
 		desc.max_depth = 3;
 		desc.curvature_threshold = (qaws_scalar)(0.1);
 		desc.max_edge_length = 0;
-		s = qaws_surface_tessellate(NULL, &desc,
-			verts, 4096, &vert_count,
-			indices, 24576, &idx_count);
+		s = qaws_surface_tessellate(verts, &vert_count,
+			indices, &idx_count, NULL,
+			4096, 24576, &desc);
 		TEST_ASSERT(s != QAWS_STATUS_OK, "tess null surface rejected");
 	}
 
@@ -423,9 +423,9 @@ static void visual_obj_tessellation(void)
 		desc.max_depth = 5;
 		desc.curvature_threshold = (qaws_scalar)(0.05);
 		desc.max_edge_length = 0;
-		qaws_surface_tessellate(surf, &desc,
-			verts, 4096, &vert_count,
-			indices, 24576, &idx_count);
+		qaws_surface_tessellate(verts, &vert_count,
+			indices, &idx_count, surf,
+			4096, 24576, &desc);
 	}
 
 	fp = fopen(OBJ_OUTPUT_DIR "/33_adaptive_tessellation.obj", "w");
@@ -481,7 +481,7 @@ static void visual_svg_plane_intersection(void)
 		d.degree = 3;
 		d.control_points = pts;
 		d.control_point_count = 4;
-		qaws_curve_create_bezier(&d, &crv);
+		qaws_curve_create_bezier(&crv, &d);
 	}
 	if (!crv) return;
 
@@ -489,8 +489,8 @@ static void visual_svg_plane_intersection(void)
 		qaws_plane plane;
 		plane.point.x = 0; plane.point.y = 0; plane.point.z = 0;
 		plane.normal.x = 0; plane.normal.y = 0; plane.normal.z = 1;
-		qaws_curve_find_plane_intersections(crv, &plane,
-			params, positions, 16, &count);
+		qaws_curve_find_plane_intersections(params, positions,
+			&count, crv, &plane, 16);
 	}
 
 	/* Draw XZ projection */
@@ -512,7 +512,7 @@ static void visual_svg_plane_intersection(void)
 			qaws_scalar t = (qaws_scalar)n / (qaws_scalar)127;
 			qaws_eval_result_3d er;
 			memset(&er, 0, sizeof(er));
-			qaws_curve_evaluate_3d(crv, t, QAWS_EVAL_FLAG_POSITION, &er);
+			qaws_curve_evaluate_3d(&er, crv, t, QAWS_EVAL_FLAG_POSITION);
 			pts_2d[n].x = er.position.x;
 			pts_2d[n].y = er.position.z;
 		}
@@ -580,8 +580,8 @@ static void visual_obj_closest_point(void)
 	{
 		qaws_scalar u, v;
 		qaws_vec3 closest;
-		if (qaws_surface_find_closest_point(surf, queries[i],
-			&u, &v, &closest) == QAWS_STATUS_OK)
+		if (qaws_surface_find_closest_point(&u, &v,
+			&closest, surf, queries[i]) == QAWS_STATUS_OK)
 		{
 			unsigned int j;
 			qaws_surface_eval_result nr;
@@ -609,9 +609,9 @@ static void visual_obj_closest_point(void)
 
 			/* Surface normal arrow at closest point (shows orthogonality) */
 			memset(&nr, 0, sizeof(nr));
-			if (qaws_surface_evaluate(surf, u, v,
-				QAWS_SURFACE_EVAL_NORMAL | QAWS_SURFACE_EVAL_DU
-				| QAWS_SURFACE_EVAL_DV, &nr) == QAWS_STATUS_OK)
+			if (qaws_surface_evaluate(&nr, surf, u,
+				v, QAWS_SURFACE_EVAL_NORMAL | QAWS_SURFACE_EVAL_DU
+				| QAWS_SURFACE_EVAL_DV) == QAWS_STATUS_OK)
 			{
 				qaws_vec3 tip;
 				tip.x = closest.x + nr.normal.x * (qaws_scalar)0.5;
@@ -668,11 +668,11 @@ static void visual_obj_surface_curve_intersection(void)
 		d.degree = 3;
 		d.control_points = pts;
 		d.control_point_count = 4;
-		qaws_curve_create_bezier(&d, &crv);
+		qaws_curve_create_bezier(&crv, &d);
 	}
 	if (!crv) { qaws_surface_destroy(surf); return; }
 
-	qaws_surface_find_curve_intersections(surf, crv, hits, 16, &count);
+	qaws_surface_find_curve_intersections(hits, &count, surf, crv, 16);
 
 	if (!obj_open(&w, OBJ_OUTPUT_DIR "/33_surface_curve_intersection.obj",
 		OBJ_OUTPUT_DIR "/33_surface_curve_intersection.mtl"))
@@ -696,10 +696,10 @@ static void visual_obj_surface_curve_intersection(void)
 	{
 		qaws_eval_result_3d er;
 		memset(&er, 0, sizeof(er));
-		qaws_curve_evaluate_3d(crv, 0, QAWS_EVAL_FLAG_POSITION, &er);
+		qaws_curve_evaluate_3d(&er, crv, 0, QAWS_EVAL_FLAG_POSITION);
 		obj_sphere(&w, er.position, (qaws_scalar)0.04);
 		memset(&er, 0, sizeof(er));
-		qaws_curve_evaluate_3d(crv, 1, QAWS_EVAL_FLAG_POSITION, &er);
+		qaws_curve_evaluate_3d(&er, crv, 1, QAWS_EVAL_FLAG_POSITION);
 		obj_sphere(&w, er.position, (qaws_scalar)0.04);
 	}
 
@@ -752,11 +752,11 @@ static void visual_svg_surface_curve_intersection(void)
 		d.degree = 3;
 		d.control_points = pts;
 		d.control_point_count = 4;
-		qaws_curve_create_bezier(&d, &crv);
+		qaws_curve_create_bezier(&crv, &d);
 	}
 	if (!crv) { qaws_surface_destroy(surf); return; }
 
-	qaws_surface_find_curve_intersections(surf, crv, hits, 16, &count);
+	qaws_surface_find_curve_intersections(hits, &count, surf, crv, 16);
 
 	if (!svg_open(&svg, OBJ_OUTPUT_DIR "/33_surface_curve_intersection.svg",
 		(qaws_scalar)-0.5, (qaws_scalar)-1.0,
@@ -777,7 +777,7 @@ static void visual_svg_surface_curve_intersection(void)
 			qaws_scalar v = (qaws_scalar)vi / (qaws_scalar)32;
 			qaws_surface_eval_result r;
 			memset(&r, 0, sizeof(r));
-			qaws_surface_evaluate(surf, u, v, QAWS_SURFACE_EVAL_POSITION, &r);
+			qaws_surface_evaluate(&r, surf, u, v, QAWS_SURFACE_EVAL_POSITION);
 			pts_2d[vi].x = r.position.x + r.position.y * proj_cx;
 			pts_2d[vi].y = r.position.z + r.position.y * proj_cy;
 		}
@@ -794,7 +794,7 @@ static void visual_svg_surface_curve_intersection(void)
 			qaws_scalar u = (qaws_scalar)ui / (qaws_scalar)32;
 			qaws_surface_eval_result r;
 			memset(&r, 0, sizeof(r));
-			qaws_surface_evaluate(surf, u, v, QAWS_SURFACE_EVAL_POSITION, &r);
+			qaws_surface_evaluate(&r, surf, u, v, QAWS_SURFACE_EVAL_POSITION);
 			pts_2d[ui].x = r.position.x + r.position.y * proj_cx;
 			pts_2d[ui].y = r.position.z + r.position.y * proj_cy;
 		}
@@ -810,7 +810,7 @@ static void visual_svg_surface_curve_intersection(void)
 			qaws_eval_result_3d er;
 			qaws_scalar t = (qaws_scalar)ci / (qaws_scalar)63;
 			memset(&er, 0, sizeof(er));
-			qaws_curve_evaluate_3d(crv, t, QAWS_EVAL_FLAG_POSITION, &er);
+			qaws_curve_evaluate_3d(&er, crv, t, QAWS_EVAL_FLAG_POSITION);
 			pts_2d[ci].x = er.position.x + er.position.y * proj_cx;
 			pts_2d[ci].y = er.position.z + er.position.y * proj_cy;
 		}
@@ -874,7 +874,7 @@ static void visual_svg_closest_point(void)
 			qaws_scalar u = (qaws_scalar)ui / (qaws_scalar)32;
 			qaws_surface_eval_result r;
 			memset(&r, 0, sizeof(r));
-			qaws_surface_evaluate(surf, u, v, QAWS_SURFACE_EVAL_POSITION, &r);
+			qaws_surface_evaluate(&r, surf, u, v, QAWS_SURFACE_EVAL_POSITION);
 			pts_2d[ui].x = r.position.x;
 			pts_2d[ui].y = r.position.z;
 		}
@@ -886,8 +886,8 @@ static void visual_svg_closest_point(void)
 	{
 		qaws_scalar u, v;
 		qaws_vec3 closest;
-		if (qaws_surface_find_closest_point(surf, queries[i],
-			&u, &v, &closest) == QAWS_STATUS_OK)
+		if (qaws_surface_find_closest_point(&u, &v,
+			&closest, surf, queries[i]) == QAWS_STATUS_OK)
 		{
 			svg_dot(&svg, queries[i].x, queries[i].z, "#ff4444", 5);
 			svg_dot(&svg, closest.x, closest.z, "#44ff44", 5);
@@ -991,16 +991,16 @@ static void visual_obj_dual_tessellation(void)
 		memset(&r01, 0, sizeof(r01));
 		memset(&r11, 0, sizeof(r11));
 		memset(&rc, 0, sizeof(rc));
-		qaws_surface_evaluate(surf, su0, sv0,
-			QAWS_SURFACE_EVAL_POSITION, &r00);
-		qaws_surface_evaluate(surf, su1, sv0,
-			QAWS_SURFACE_EVAL_POSITION, &r10);
-		qaws_surface_evaluate(surf, su0, sv1,
-			QAWS_SURFACE_EVAL_POSITION, &r01);
-		qaws_surface_evaluate(surf, su1, sv1,
-			QAWS_SURFACE_EVAL_POSITION, &r11);
-		qaws_surface_evaluate(surf, u_mid, v_mid,
-			QAWS_SURFACE_EVAL_POSITION, &rc);
+		qaws_surface_evaluate(&r00, surf, su0,
+			sv0, QAWS_SURFACE_EVAL_POSITION);
+		qaws_surface_evaluate(&r10, surf, su1,
+			sv0, QAWS_SURFACE_EVAL_POSITION);
+		qaws_surface_evaluate(&r01, surf, su0,
+			sv1, QAWS_SURFACE_EVAL_POSITION);
+		qaws_surface_evaluate(&r11, surf, su1,
+			sv1, QAWS_SURFACE_EVAL_POSITION);
+		qaws_surface_evaluate(&rc, surf, u_mid,
+			v_mid, QAWS_SURFACE_EVAL_POSITION);
 
 		if (sdepth < 5)
 		{
@@ -1185,8 +1185,8 @@ static void visual_obj_dual_tessellation(void)
 			* (leaves[i].v0 + leaves[i].v1);
 		qaws_surface_eval_result r;
 		memset(&r, 0, sizeof(r));
-		qaws_surface_evaluate(surf, u_mid, v_mid,
-			QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL, &r);
+		qaws_surface_evaluate(&r, surf, u_mid,
+			v_mid, QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL);
 		obj_vertex(&w, r.position);
 		obj_normal(&w, r.normal);
 	}

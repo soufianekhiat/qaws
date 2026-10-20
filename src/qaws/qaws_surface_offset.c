@@ -30,7 +30,7 @@ static qaws_status offset_eval_position(
 		| QAWS_SURFACE_EVAL_DV | QAWS_SURFACE_EVAL_NORMAL;
 
 	memset(&base_r, 0, sizeof(base_r));
-	status = qaws_surface_evaluate(base, u, v, flags, &base_r);
+	status = qaws_surface_evaluate(&base_r, base, u, v, flags);
 	if (status != QAWS_STATUS_OK) return status;
 
 	out_pos->x = base_r.position.x + distance * base_r.normal.x;
@@ -194,7 +194,7 @@ static qaws_status offset_surface_eval_sampled(
 	/* Normal */
 	if (eval_flags & QAWS_SURFACE_EVAL_NORMAL)
 	{
-		qaws_internal_surface_normal(out_result->du, out_result->dv, &out_result->normal);
+		qaws_internal_surface_normal(&out_result->normal, out_result->du, out_result->dv);
 		out_result->valid_flags |= QAWS_SURFACE_EVAL_NORMAL;
 	}
 
@@ -220,17 +220,17 @@ static qaws_status offset_bijet(qaws_dual3 const* S, qaws_dual1 d, qaws_dual3* O
 	qaws_scalar scale;
 	unsigned int k;
 
-	qaws_bijet_shift_u(S, OFFSET_JET_ORDER, su);
-	qaws_bijet_shift_v(S, OFFSET_JET_ORDER, sv);
-	qaws_bijet_cross(su, sv, OFFSET_JET_ORDER, n);
-	qaws_bijet_dot(n, n, OFFSET_JET_ORDER, q);
+	qaws_bijet_shift_u(su, S, OFFSET_JET_ORDER);
+	qaws_bijet_shift_v(sv, S, OFFSET_JET_ORDER);
+	qaws_bijet_cross(n, su, sv, OFFSET_JET_ORDER);
+	qaws_bijet_dot(q, n, n, OFFSET_JET_ORDER);
 
 	scale = qaws_v3_dot(su[0].v, su[0].v) * qaws_v3_dot(sv[0].v, sv[0].v);
 	if (!(q[0].v > QAWS_EPSILON * QAWS_EPSILON * scale) || !(scale > QAWS_ZERO))
 		return QAWS_STATUS_DEGENERATE_CURVE;
 
-	qaws_bijet_sqrt(q, OFFSET_JET_ORDER, l);
-	qaws_bijet_div(n, l, OFFSET_JET_ORDER, N);
+	qaws_bijet_sqrt(l, q, OFFSET_JET_ORDER);
+	qaws_bijet_div(N, n, l, OFFSET_JET_ORDER);
 	for (k = 0; k < OFFSET_JET_COUNT; k++)
 		O[k] = qaws_dual3_add(S[k], qaws_dual3_scale(N[k], d));
 	return QAWS_STATUS_OK;
@@ -241,7 +241,7 @@ static qaws_status offset_base_jet(qaws_surface const* base, qaws_scalar u, qaws
 {
 	qaws_surface_jet j;
 	unsigned int k;
-	qaws_status st = qaws_surface_eval_jet(base, u, v, QAWS_SJET_ORDER3, &j);
+	qaws_status st = qaws_surface_eval_jet(&j, base, u, v, QAWS_SJET_ORDER3);
 	if (st != QAWS_STATUS_OK)
 		return st;
 	for (k = 0; k < QAWS_SURFACE_JET_COUNT; k++)
@@ -301,7 +301,7 @@ static qaws_status offset_surface_eval(
 	}
 	if (eval_flags & QAWS_SURFACE_EVAL_NORMAL)
 	{
-		qaws_internal_surface_normal(out_result->du, out_result->dv, &out_result->normal);
+		qaws_internal_surface_normal(&out_result->normal, out_result->du, out_result->dv);
 		out_result->valid_flags |= QAWS_SURFACE_EVAL_NORMAL;
 	}
 	return QAWS_STATUS_OK;
@@ -367,14 +367,14 @@ static qaws_status offset_tangent(
 	if (channels & ~(unsigned int)QAWS_SJET_ORDER2)
 		return QAWS_STATUS_UNSUPPORTED_OPERATION;
 	if (dv)
-		qaws_internal_view_read(dv, 0, 1, &d_dot);
+		qaws_internal_view_read(&d_dot, dv, 0, 1);
 
 	if (tangent2)
-		st = qaws_surface_eval_batch_tangent2(ctx, impl->base, &u, &v, &u_dot, &v_dot, 1, QAWS_SJET_ORDER3,
-			qaws_internal_child_views(views, 0), &bp, &bt, &btt);
+		st = qaws_surface_eval_batch_tangent2(&bp, &bt, &btt, impl->base, &u, &v, &u_dot, &v_dot,
+			qaws_internal_child_views(views, 0), 1, QAWS_SJET_ORDER3, ctx);
 	else
-		st = qaws_surface_eval_tangent(ctx, impl->base, u, v, u_dot, v_dot, QAWS_SJET_ORDER3,
-			qaws_internal_child_views(views, 0), &bp, &bt);
+		st = qaws_surface_eval_tangent(&bp, &bt, impl->base, qaws_internal_child_views(views, 0), u, v, u_dot,
+			v_dot, QAWS_SJET_ORDER3, ctx);
 	if (st != QAWS_STATUS_OK)
 		return st;
 
@@ -421,7 +421,7 @@ static qaws_status offset_adjoint(
 
 	if (channels & ~(unsigned int)QAWS_SJET_ORDER2)
 		return QAWS_STATUS_UNSUPPORTED_OPERATION;
-	st = qaws_surface_eval_jet(impl->base, u, v, QAWS_SJET_ORDER3, &bj);
+	st = qaws_surface_eval_jet(&bj, impl->base, u, v, QAWS_SJET_ORDER3);
 	if (st != QAWS_STATUS_OK)
 		return st;
 
@@ -457,8 +457,8 @@ static qaws_status offset_adjoint(
 	}
 	bbar.channels = QAWS_SJET_ORDER3;
 
-	st = qaws_surface_eval_adjoint(ctx, impl->base, u, v, QAWS_SJET_ORDER3, &bbar,
-		(qaws_diff_views*)qaws_internal_child_views(views, 0), u_adjoint, v_adjoint);
+	st = qaws_surface_eval_adjoint((qaws_diff_views*)qaws_internal_child_views(views, 0), u_adjoint, v_adjoint, impl->base, &bbar, u,
+		v, QAWS_SJET_ORDER3, ctx);
 	if (st != QAWS_STATUS_OK)
 		return st;
 	if (dv)
@@ -480,7 +480,7 @@ static qaws_surface_diff_vtable const offset_surface_diff_vtable = {
 
 static void offset_surface_destroy(void* impl, qaws_allocator const* allocator)
 {
-	qaws_internal_dealloc(allocator, impl);
+	qaws_internal_dealloc(impl, allocator);
 }
 
 static int offset_surface_is_rational(qaws_surface const* s)
@@ -518,7 +518,7 @@ qaws_status qaws_surface_create_offset_ex(
 		&offset_surface_vtable, allocator);
 	if (!surface) return QAWS_STATUS_ALLOCATION_FAILURE;
 
-	impl = (qaws_surface_offset_impl*)qaws_internal_alloc(allocator, sizeof(qaws_surface_offset_impl));
+	impl = (qaws_surface_offset_impl*)qaws_internal_alloc(sizeof(qaws_surface_offset_impl), allocator);
 	if (!impl)
 	{
 		qaws_internal_surface_free(surface);
@@ -534,8 +534,8 @@ qaws_status qaws_surface_create_offset_ex(
 }
 
 qaws_status qaws_surface_create_offset(
-	qaws_surface_offset_desc const* desc,
-	qaws_surface** out_surface)
+	qaws_surface** out_surface,
+	qaws_surface_offset_desc const* desc)
 {
 	return qaws_surface_create_offset_ex(desc, NULL, out_surface);
 }

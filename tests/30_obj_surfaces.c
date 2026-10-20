@@ -30,7 +30,7 @@ static void test_obj_surface_bezier(void)
 	desc.u_point_count = 4;
 	desc.v_point_count = 4;
 
-	if (qaws_surface_create_bezier(&desc, &surf) != QAWS_STATUS_OK) return;
+	if (qaws_surface_create_bezier(&surf, &desc) != QAWS_STATUS_OK) return;
 
 	if (!obj_open(&w,
 		OBJ_OUTPUT_DIR "/30_surface_bezier.obj",
@@ -89,7 +89,7 @@ static void test_obj_surface_bspline(void)
 	desc.u_knot_count = 0;
 	desc.v_knot_count = 0;
 
-	if (qaws_surface_create_bspline(&desc, &surf) != QAWS_STATUS_OK) return;
+	if (qaws_surface_create_bspline(&surf, &desc) != QAWS_STATUS_OK) return;
 
 	if (!obj_open(&w,
 		OBJ_OUTPUT_DIR "/30_surface_bspline.obj",
@@ -180,7 +180,7 @@ static void test_obj_surface_nurbs(void)
 	desc.v_knots = v_knots;
 	desc.v_knot_count = 12;
 
-	if (qaws_surface_create_nurbs(&desc, &surf) != QAWS_STATUS_OK)
+	if (qaws_surface_create_nurbs(&surf, &desc) != QAWS_STATUS_OK)
 	{
 		printf("  SKIP: nurbs surface create failed\n");
 		return;
@@ -248,7 +248,7 @@ static void test_obj_surface_gallery(void)
 		desc.control_points = cp;
 		desc.u_point_count = 4;
 		desc.v_point_count = 4;
-		if (qaws_surface_create_bezier(&desc, &bezier_surf) == QAWS_STATUS_OK)
+		if (qaws_surface_create_bezier(&bezier_surf, &desc) == QAWS_STATUS_OK)
 		{
 			obj_group(&w, "bezier_patch");
 			obj_use_material(&w, "bezier");
@@ -277,7 +277,7 @@ static void test_obj_surface_gallery(void)
 		desc.control_points = cp;
 		desc.u_point_count = 6;
 		desc.v_point_count = 6;
-		if (qaws_surface_create_bspline(&desc, &bspline_surf) == QAWS_STATUS_OK)
+		if (qaws_surface_create_bspline(&bspline_surf, &desc) == QAWS_STATUS_OK)
 		{
 			obj_group(&w, "bspline_surface");
 			obj_use_material(&w, "bspline");
@@ -309,7 +309,7 @@ static void test_obj_surface_gallery(void)
 		desc.u_point_count = 3;
 		desc.v_point_count = 3;
 		desc.weights = wt;
-		if (qaws_surface_create_nurbs(&desc, &nurbs_surf) == QAWS_STATUS_OK)
+		if (qaws_surface_create_nurbs(&nurbs_surf, &desc) == QAWS_STATUS_OK)
 		{
 			obj_group(&w, "nurbs_surface");
 			obj_use_material(&w, "nurbs");
@@ -346,7 +346,7 @@ static void test_obj_surface_ruled(void)
 		d.degree = 4;
 		d.control_points = pts;
 		d.control_point_count = 5;
-		qaws_curve_create_bezier(&d, &ca);
+		qaws_curve_create_bezier(&ca, &d);
 	}
 
 	/* Curve B: wavy line at z=3, different shape */
@@ -358,12 +358,12 @@ static void test_obj_surface_ruled(void)
 		d.degree = 4;
 		d.control_points = pts;
 		d.control_point_count = 5;
-		qaws_curve_create_bezier(&d, &cb);
+		qaws_curve_create_bezier(&cb, &d);
 	}
 
 	rdesc.curve_a = ca;
 	rdesc.curve_b = cb;
-	if (qaws_surface_create_ruled(&rdesc, &surf) != QAWS_STATUS_OK)
+	if (qaws_surface_create_ruled(&surf, &rdesc) != QAWS_STATUS_OK)
 	{
 		qaws_curve_destroy(ca);
 		qaws_curve_destroy(cb);
@@ -439,7 +439,7 @@ static void test_obj_surface_swept(void)
 		d.derivatives = der;
 		d.point_count = n;
 		d.derivative_count = n;
-		qaws_curve_create_hermite(&d, &path);
+		qaws_curve_create_hermite(&path, &d);
 	}
 
 	/* Profile: 5-pointed star cross-section */
@@ -469,7 +469,7 @@ static void test_obj_surface_swept(void)
 		d.derivatives = der;
 		d.point_count = n;
 		d.derivative_count = n;
-		qaws_curve_create_hermite(&d, &profile);
+		qaws_curve_create_hermite(&profile, &d);
 	}
 
 	memset(&sdesc, 0, sizeof(sdesc));
@@ -477,7 +477,7 @@ static void test_obj_surface_swept(void)
 	sdesc.profile = profile;
 	sdesc.scale = (qaws_scalar)0.3;
 
-	if (qaws_surface_create_swept(&sdesc, &surf) != QAWS_STATUS_OK)
+	if (qaws_surface_create_swept(&surf, &sdesc) != QAWS_STATUS_OK)
 	{
 		if (path) qaws_curve_destroy(path);
 		if (profile) qaws_curve_destroy(profile);

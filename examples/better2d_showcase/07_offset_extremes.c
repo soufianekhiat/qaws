@@ -50,13 +50,13 @@ static void demo_offset_extremes(void)
 		double span, w, h;
 		int x0 = gap + (k % cols) * (pw + gap), y0 = top + (k / cols) * (ph + gap);
 		p.curves = &cc; p.curve_count = 1; p.closed = 0;
-		qaws_path_compute_bounds_2d(&p, &lo, &hi);
+		qaws_path_compute_bounds_2d(&lo, &hi, &p);
 		w = (double)(hi.x - lo.x) + 2 * cs->delta;
 		h = (double)(hi.y - lo.y) + 2 * cs->delta;
 		span = 1.12 * (w > h * pw / (ph - 50) ? w : h * pw / (ph - 50));
 		co_view(&v, x0, y0, pw, ph, 0.5 * (lo.x + hi.x), 0.5 * (lo.y + hi.y) - 0.04 * span, span);
 		svg_panel(&s, &v, cs->name);
-		if (qaws_offset_paths(&p, 1, (qaws_scalar)cs->delta, QAWS_JOIN_ROUND, QAWS_END_ROUND, &r) == QAWS_STATUS_OK)
+		if (qaws_offset_paths(&r, &p, 1, (qaws_scalar)cs->delta, QAWS_JOIN_ROUND, QAWS_END_ROUND) == QAWS_STATUS_OK)
 			co_result(&s, &v, r, "#c8e1ff", "#0969da", &cub, 0);
 		for (side = 0; side < 2; side++)
 		{
@@ -64,7 +64,7 @@ static void demo_offset_extremes(void)
 			double d = side ? -cs->delta : cs->delta;
 			unsigned int nk = 0, q;
 			co_parallel(&s, &v, c, d);
-			qaws_internal_offset_curve(c, d, 1e-6 * span, ch, 64, &nk, NULL, 0, NULL);
+			qaws_internal_offset_curve(ch, &nk, NULL, NULL, c, 64, 0, d, 1e-6 * span);
 			for (q = 0; q < nk && q < 64; q++)
 			{
 				co_curve(&s, &v, ch[q], side ? "#0550ae" : "#cf222e", 1.0, 0.9, 0);
@@ -78,7 +78,7 @@ static void demo_offset_extremes(void)
 			for (i = 0; i < qaws_clip_result_get_path_count(r); i++)
 			{
 				qaws_path_2d q;
-				qaws_clip_result_get_path(r, i, &q);
+				qaws_clip_result_get_path(&q, r, i);
 				for (j = 0; j < q.curve_count; j++)
 					co_joints(&s, &v, q.curves[j], "#0969da", 2.2);
 			}

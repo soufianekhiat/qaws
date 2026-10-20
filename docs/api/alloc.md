@@ -63,7 +63,7 @@ void qaws_exchange_thread_allocator(qaws_allocator const* allocator, qaws_alloca
 ```c
 qaws_allocator previous;
 qaws_exchange_thread_allocator(&frame_arena.allocator, &previous);
-status = qaws_curve_offset_2d(curve, d, 1, out, cap, &count);   /* every return path below restores */
+status = qaws_curve_offset_2d(out, &count, curve, cap, d, 1);   /* every return path below restores */
 qaws_set_thread_allocator(&previous);
 ```
 
@@ -139,9 +139,9 @@ Curves and surfaces created with a custom allocator are destroyed with `qaws_cur
 
 ```c
 qaws_status qaws_curve_create_bezier_ex(
+    qaws_curve** out_curve,
     qaws_bezier_desc const* desc,
-    qaws_allocator const* allocator,
-    qaws_curve** out_curve);
+    qaws_allocator const* allocator);
 ```
 
 Allocator-aware variant of `qaws_curve_create_bezier`.
@@ -159,9 +159,9 @@ Allocator-aware variant of `qaws_curve_create_bezier`.
 
 ```c
 qaws_status qaws_curve_create_hermite_ex(
+    qaws_curve** out_curve,
     qaws_hermite_desc const* desc,
-    qaws_allocator const* allocator,
-    qaws_curve** out_curve);
+    qaws_allocator const* allocator);
 ```
 
 Allocator-aware variant of `qaws_curve_create_hermite`.
@@ -179,9 +179,9 @@ Allocator-aware variant of `qaws_curve_create_hermite`.
 
 ```c
 qaws_status qaws_curve_create_catmull_rom_ex(
+    qaws_curve** out_curve,
     qaws_catmull_rom_desc const* desc,
-    qaws_allocator const* allocator,
-    qaws_curve** out_curve);
+    qaws_allocator const* allocator);
 ```
 
 Allocator-aware variant of `qaws_curve_create_catmull_rom`.
@@ -199,9 +199,9 @@ Allocator-aware variant of `qaws_curve_create_catmull_rom`.
 
 ```c
 qaws_status qaws_curve_create_bspline_ex(
+    qaws_curve** out_curve,
     qaws_bspline_desc const* desc,
-    qaws_allocator const* allocator,
-    qaws_curve** out_curve);
+    qaws_allocator const* allocator);
 ```
 
 Allocator-aware variant of `qaws_curve_create_bspline`.
@@ -219,9 +219,9 @@ Allocator-aware variant of `qaws_curve_create_bspline`.
 
 ```c
 qaws_status qaws_curve_create_nurbs_ex(
+    qaws_curve** out_curve,
     qaws_nurbs_desc const* desc,
-    qaws_allocator const* allocator,
-    qaws_curve** out_curve);
+    qaws_allocator const* allocator);
 ```
 
 Allocator-aware variant of `qaws_curve_create_nurbs`.
@@ -239,9 +239,9 @@ Allocator-aware variant of `qaws_curve_create_nurbs`.
 
 ```c
 qaws_status qaws_curve_create_trajectory_ex(
+    qaws_curve** out_curve,
     qaws_trajectory_desc const* desc,
-    qaws_allocator const* allocator,
-    qaws_curve** out_curve);
+    qaws_allocator const* allocator);
 ```
 
 Allocator-aware variant of `qaws_curve_create_trajectory`.
@@ -284,9 +284,9 @@ allocated. A success, once destroyed, leaves nothing either.
 
 ```c
 qaws_status qaws_surface_create_bezier_ex(
+    qaws_surface** out_surface,
     qaws_surface_bezier_desc const* desc,
-    qaws_allocator const* allocator,
-    qaws_surface** out_surface);
+    qaws_allocator const* allocator);
 ```
 
 Allocator-aware variant of `qaws_surface_create_bezier`.
@@ -304,9 +304,9 @@ Allocator-aware variant of `qaws_surface_create_bezier`.
 
 ```c
 qaws_status qaws_surface_create_bspline_ex(
+    qaws_surface** out_surface,
     qaws_surface_bspline_desc const* desc,
-    qaws_allocator const* allocator,
-    qaws_surface** out_surface);
+    qaws_allocator const* allocator);
 ```
 
 Allocator-aware variant of `qaws_surface_create_bspline`.
@@ -324,9 +324,9 @@ Allocator-aware variant of `qaws_surface_create_bspline`.
 
 ```c
 qaws_status qaws_surface_create_nurbs_ex(
+    qaws_surface** out_surface,
     qaws_surface_nurbs_desc const* desc,
-    qaws_allocator const* allocator,
-    qaws_surface** out_surface);
+    qaws_allocator const* allocator);
 ```
 
 Allocator-aware variant of `qaws_surface_create_nurbs`.

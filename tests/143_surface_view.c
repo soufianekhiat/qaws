@@ -122,7 +122,7 @@ static qaws_surface* sv_owned(double const* p, double const* w, int knots)
 		d.u_knot_count = knots ? SV_U + SV_UD + 1 : 0;
 		d.v_knots = knots ? vk : NULL;
 		d.v_knot_count = knots ? SV_V + SV_VD + 1 : 0;
-		qaws_surface_create_nurbs(&d, &s);
+		qaws_surface_create_nurbs(&s, &d);
 	}
 	else
 	{
@@ -137,7 +137,7 @@ static qaws_surface* sv_owned(double const* p, double const* w, int knots)
 		d.u_knot_count = knots ? SV_U + SV_UD + 1 : 0;
 		d.v_knots = knots ? vk : NULL;
 		d.v_knot_count = knots ? SV_V + SV_VD + 1 : 0;
-		qaws_surface_create_bspline(&d, &s);
+		qaws_surface_create_bspline(&s, &d);
 	}
 	return s;
 }
@@ -173,7 +173,7 @@ static double sv_compare(qaws_surface_prepared const* p, qaws_surface const* bor
 			qaws_scalar u = ru.min_value + (ru.max_value - ru.min_value) * (qaws_scalar)i / 12;
 			qaws_scalar v = rv.min_value + (rv.max_value - rv.min_value) * (qaws_scalar)j / 10;
 			qaws_surface_eval_result a, b;
-			if (qaws_surface_evaluate(owned, u, v, SV_ALL, &b) != QAWS_STATUS_OK)
+			if (qaws_surface_evaluate(&b, owned, u, v, SV_ALL) != QAWS_STATUS_OK)
 				return 1e30;
 			if (qaws_surface_prepared_evaluate(p, u, v, SV_ALL, &a) != QAWS_STATUS_OK || (b.valid_flags & ~a.valid_flags))
 				return 1e30;
@@ -181,7 +181,7 @@ static double sv_compare(qaws_surface_prepared const* p, qaws_surface const* bor
 			worst = e > worst ? e : worst;
 			if (borrowed)
 			{
-				if (qaws_surface_evaluate(borrowed, u, v, SV_ALL, &a) != QAWS_STATUS_OK)
+				if (qaws_surface_evaluate(&a, borrowed, u, v, SV_ALL) != QAWS_STATUS_OK)
 					return 1e30;
 				e = sv_diff(&a, &b);
 				worst = e > worst ? e : worst;
@@ -501,7 +501,7 @@ static void test_operations(void)
 		TEST_ASSERT(0, "surface operations: created");
 		return;
 	}
-	TEST_ASSERT(qaws_surface_compute_area(owned, &ao) == QAWS_STATUS_OK && qaws_surface_compute_area(borrowed, &ab) == QAWS_STATUS_OK, "areas computed");
+	TEST_ASSERT(qaws_surface_compute_area(&ao, owned) == QAWS_STATUS_OK && qaws_surface_compute_area(&ab, borrowed) == QAWS_STATUS_OK, "areas computed");
 	sprintf(msg, "area: owned %.12g, borrowed %.12g", (double)ao, (double)ab);
 	TEST_ASSERT(fabs((double)ao - ab) <= SV_TOL * (1 + fabs((double)ao)), msg);
 	q.x = (qaws_scalar)0.42;
@@ -509,8 +509,8 @@ static void test_operations(void)
 	q.z = (qaws_scalar)0.6;
 	memset(&co, 0, sizeof co);
 	memset(&cb, 0, sizeof cb);
-	TEST_ASSERT(qaws_surface_closest_point_tangent(NULL, owned, q, NULL, NULL, &co, NULL) == QAWS_STATUS_OK
-		&& qaws_surface_closest_point_tangent(NULL, borrowed, q, NULL, NULL, &cb, NULL) == QAWS_STATUS_OK, "closest points found");
+	TEST_ASSERT(qaws_surface_closest_point_tangent(&co, NULL, owned, NULL, NULL, q, NULL) == QAWS_STATUS_OK
+		&& qaws_surface_closest_point_tangent(&cb, NULL, borrowed, NULL, NULL, q, NULL) == QAWS_STATUS_OK, "closest points found");
 	sprintf(msg, "closest point on the borrowed surface: (%.12g, %.12g), owned (%.12g, %.12g)", (double)cb.u, (double)cb.v, (double)co.u, (double)co.v);
 	TEST_ASSERT(fabs((double)co.u - cb.u) + fabs((double)co.v - cb.v) + fabs((double)co.distance - cb.distance) <= SV_TOL * 10, msg);
 	qaws_surface_destroy(borrowed);
@@ -539,8 +539,8 @@ static void test_jets(void)
 			for (j = 0; j <= 9; j++)
 			{
 				qaws_surface_jet a, o;
-				if (qaws_surface_eval_jet(borrowed, (qaws_scalar)(i / 9.0), (qaws_scalar)(j / 9.0), QAWS_SJET_ORDER3, &a) != QAWS_STATUS_OK
-					|| qaws_surface_eval_jet(owned, (qaws_scalar)(i / 9.0), (qaws_scalar)(j / 9.0), QAWS_SJET_ORDER3, &o) != QAWS_STATUS_OK)
+				if (qaws_surface_eval_jet(&a, borrowed, (qaws_scalar)(i / 9.0), (qaws_scalar)(j / 9.0), QAWS_SJET_ORDER3) != QAWS_STATUS_OK
+					|| qaws_surface_eval_jet(&o, owned, (qaws_scalar)(i / 9.0), (qaws_scalar)(j / 9.0), QAWS_SJET_ORDER3) != QAWS_STATUS_OK)
 				{
 					worst = 1e30;
 					continue;

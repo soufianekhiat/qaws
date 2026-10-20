@@ -21,19 +21,19 @@ static void test_nurbs(void)
 	desc.is_closed = 0;
 
 	qaws_curve* curve = NULL;
-	qaws_status s = qaws_curve_create_nurbs(&desc, &curve);
+	qaws_status s = qaws_curve_create_nurbs(&curve, &desc);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(qaws_curve_get_kind(curve) == QAWS_CURVE_KIND_NURBS, "kind == NURBS");
 	TEST_ASSERT(qaws_curve_is_rational(curve) == 1, "is_rational");
 
 	qaws_eval_result_2d r;
-	s = qaws_curve_evaluate_2d(curve, (qaws_scalar)0.0, QAWS_EVAL_FLAG_POSITION, &r);
+	s = qaws_curve_evaluate_2d(&r, curve, (qaws_scalar)0.0, QAWS_EVAL_FLAG_POSITION);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(approx_eq(r.position.x, (qaws_scalar)1.0), "start x");
 	TEST_ASSERT(approx_eq(r.position.y, (qaws_scalar)0.0), "start y");
 
 	/* Midpoint of quarter circle should be near (cos(45), sin(45)) */
-	s = qaws_curve_evaluate_2d(curve, (qaws_scalar)0.5, QAWS_EVAL_FLAG_POSITION, &r);
+	s = qaws_curve_evaluate_2d(&r, curve, (qaws_scalar)0.5, QAWS_EVAL_FLAG_POSITION);
 	TEST_ASSERT_STATUS(s);
 	qaws_scalar dist = (qaws_scalar)sqrt((double)(r.position.x * r.position.x + r.position.y * r.position.y));
 	TEST_ASSERT(approx_eq(dist, (qaws_scalar)1.0), "midpoint on unit circle");

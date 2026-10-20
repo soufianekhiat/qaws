@@ -15,7 +15,7 @@ static qaws_curve* net_curve(qaws_scalar const* p)
 	d.control_point_count = 6;
 	d.knots = g_net_knots;
 	d.knot_count = 10;
-	qaws_curve_create_bspline(&d, &c);
+	qaws_curve_create_bspline(&c, &d);
 	return c;
 }
 
@@ -34,7 +34,7 @@ static double affects_value(void const* user, qaws_scalar u, qaws_scalar v)
 {
 	affects_ctx const* a = (affects_ctx const*)user;
 	qaws_surface_jet p, t;
-	qaws_surface_eval_tangent(NULL, a->surface, u, v, 0, 0, QAWS_SJET_P, a->views, &p, &t);
+	qaws_surface_eval_tangent(&p, &t, a->surface, a->views, u, v, 0, 0, QAWS_SJET_P, NULL);
 	return sqrt(t.d[0].x * t.d[0].x + t.d[0].y * t.d[0].y + t.d[0].z * t.d[0].z);
 }
 
@@ -46,7 +46,7 @@ static void draw_curve3(svg* s, projection const* pr, qaws_curve const* c, char 
 	for (k = 0; k < 80; k++)
 	{
 		qaws_eval_result_3d e;
-		qaws_curve_evaluate_3d(c, r.min_value + (r.max_value - r.min_value) * k / (qaws_scalar)79, QAWS_EVAL_FLAG_POSITION, &e);
+		qaws_curve_evaluate_3d(&e, c, r.min_value + (r.max_value - r.min_value) * k / (qaws_scalar)79, QAWS_EVAL_FLAG_POSITION);
 		project(pr, e.position.x, e.position.y, e.position.z, &xy[2 * k], &xy[2 * k + 1]);
 	}
 	svg_polyline(s, xy, 80, color, width, 1, 0);
@@ -91,7 +91,7 @@ static void demo_networks(void)
 	gd.v_curves = vc;
 	gd.v_curve_count = 3;
 	gd.u_params = params;
-	qaws_surface_create_gordon(&gd, &gordon);
+	qaws_surface_create_gordon(&gordon, &gd);
 
 	svg_open(&s, "showcase/8_networks.svg", 1200, 600, "Curve networks: Gordon affects / loft affected by",
 		"Left: tangent of one control point of the middle v-curve -> |dS| over a Gordon surface. Right: adjoint of one loft point -> influence per section.");
@@ -158,7 +158,7 @@ static void demo_networks(void)
 		ld.sections = sp;
 		ld.section_count = 5;
 		ld.v_parameters = NULL;
-		qaws_surface_create_loft(&ld, &loft);
+		qaws_surface_create_loft(&loft, &ld);
 
 		memset(bars, 0, sizeof(bars));
 		for (i = 0; i < 5; i++)
@@ -171,7 +171,7 @@ static void demo_networks(void)
 		views.child_count = 5;
 		memset(&ybar, 0, sizeof(ybar));
 		ybar.d[0] = v3(0, 0, 1);  /* height of the marked point */
-		qaws_surface_eval_adjoint(NULL, loft, u0, v0, QAWS_SJET_P, &ybar, &views, NULL, NULL);
+		qaws_surface_eval_adjoint(&views, NULL, NULL, loft, &ybar, u0, v0, QAWS_SJET_P, NULL);
 		for (i = 0; i < 5; i++)
 		{
 			infl[i] = 0;
@@ -186,7 +186,7 @@ static void demo_networks(void)
 			heat(infl[i] / imax, col);
 			draw_curve3(&s, &pb, sections[i], col, 2 + 4 * infl[i] / imax);
 		}
-		qaws_surface_eval_tangent(NULL, loft, u0, v0, 0, 0, QAWS_SJET_P, NULL, &p, &t);
+		qaws_surface_eval_tangent(&p, &t, loft, NULL, u0, v0, 0, 0, QAWS_SJET_P, NULL);
 		project(&pb, p.d[0].x, p.d[0].y, p.d[0].z, &sx, &sy);
 		svg_circle(&s, sx, sy, 7, "#cf222e", "#ffffff");
 

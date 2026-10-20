@@ -53,7 +53,7 @@ static int rs_shared(unsigned int const* a, unsigned int const* b)
 
 /* LU with partial pivoting of the n x n row-major m, in place; 0 when a
    pivot is negligible against the matrix's largest entry (singular) */
-int qaws_internal_rs_lu(double* m, unsigned int n, unsigned int* piv)
+int qaws_internal_rs_lu(double* m, unsigned int* piv, unsigned int n)
 {
 	unsigned int i, j, k;
 	double big = 0;
@@ -80,7 +80,7 @@ int qaws_internal_rs_lu(double* m, unsigned int n, unsigned int* piv)
 	return 1;
 }
 
-void qaws_internal_rs_lu_solve(double const* m, unsigned int n, unsigned int const* piv, double* b)
+void qaws_internal_rs_lu_solve(double* b, double const* m, unsigned int const* piv, unsigned int n)
 {
 	unsigned int i, j, k;
 	for (k = 0; k < n; k++)
@@ -188,7 +188,7 @@ static int rs_dense_factor(rs_core const* s, rs_dense* D)
 				D->M[(N + r) * n + i] = D->C[(size_t)r * N + i];
 				D->M[i * n + N + r] = D->C[(size_t)r * N + i];
 			}
-		return qaws_internal_rs_lu(D->M, n, D->piv);
+		return qaws_internal_rs_lu(D->M, D->piv, n);
 	}
 	for (r = 0; r < k; r++)
 	{
@@ -206,7 +206,7 @@ static int rs_dense_factor(rs_core const* s, rs_dense* D)
 			D->S[(size_t)r * k + c] = v;
 		}
 	}
-	return qaws_internal_rs_lu(D->S, k, D->spiv);
+	return qaws_internal_rs_lu(D->S, D->spiv, k);
 }
 
 /* blocks: A's free block inverted (lifted with nothing pinned), Y from D->C */
@@ -235,13 +235,13 @@ static int rs_dense_blocks(rs_core const* s, double const* x, rs_dense* D)
 		tau = num > 0 && den > 0 ? num / den : 1;
 		for (i = 0; i < nv * nv; i++) D->M[i] += tau / nv;
 	}
-	if (!qaws_internal_rs_lu(D->M, nf, D->piv))
+	if (!qaws_internal_rs_lu(D->M, D->piv, nf))
 		return 0;
 	for (j = 0; j < nf; j++)
 	{
 		memset(col, 0, sizeof(double) * nf);
 		col[j] = 1;
-		qaws_internal_rs_lu_solve(D->M, nf, D->piv, col);
+		qaws_internal_rs_lu_solve(col, D->M, D->piv, nf);
 		memcpy(D->Ai + (size_t)j * nf, col, sizeof(double) * nf);
 	}
 	/* Y's rows: A~^-1 C_r^T from C_r's free entries */
@@ -285,7 +285,7 @@ static qaws_status rs_direction(rs_core const* s, double const* x, rs_dense* D, 
 		if (!rs_dense_factor(s, D))
 			return QAWS_STATUS_NUMERICAL_FAILURE;
 		for (i = 0; i < n; i++) g[i] = i < s->N ? dE[i] : 0;
-		qaws_internal_rs_lu_solve(D->M, n, D->piv, g);
+		qaws_internal_rs_lu_solve(g, D->M, D->piv, n);
 		return QAWS_STATUS_OK;
 	}
 	if (!rs_dense_blocks(s, x, D) || !rs_dense_factor(s, D))
@@ -305,7 +305,7 @@ static qaws_status rs_direction(rs_core const* s, double const* x, rs_dense* D, 
 		for (i = 0; i < N && D->live[r]; i++) v += D->C[(size_t)r * N + i] * g[i];
 		D->rhs[r] = v;
 	}
-	qaws_internal_rs_lu_solve(D->S, s->k, D->spiv, D->rhs);
+	qaws_internal_rs_lu_solve(D->rhs, D->S, D->spiv, s->k);
 	for (r = 0; r < s->k; r++)
 		for (i = 0; i < N && D->rhs[r] != 0; i++) g[i] -= D->rhs[r] * D->Y[(size_t)r * N + i];
 	return QAWS_STATUS_OK;
@@ -329,7 +329,7 @@ static qaws_status rs_direction_run(rs_core const* s, qaws_scalar const* positio
 		for (i = 0; i < s->N; i++) x[i] = (double)positions[i];
 		st = s->ops->energy(s, x, &E, dE);
 		if (st == QAWS_STATUS_OK)
-			st = qaws_internal_rs_hdirection(s, x, dE, g, &H);
+			st = qaws_internal_rs_hdirection(&H, g, s, x, dE);
 		if (st == QAWS_STATUS_OK && s->ops->translate)
 			s->ops->translate(s, x, dE, g);
 		for (i = 0; st == QAWS_STATUS_OK && i < s->N; i++) out_direction[i] = (qaws_scalar)g[i];
@@ -362,12 +362,12 @@ static void rs_correct(rs_core const* s, rs_dense* D, double* y)
 	if (s->full)
 	{
 		for (i = 0; i < n; i++) D->rhs[i] = i < N ? 0 : -D->phi[i - N];
-		qaws_internal_rs_lu_solve(D->M, n, D->piv, D->rhs);
+		qaws_internal_rs_lu_solve(D->rhs, D->M, D->piv, n);
 		for (i = 0; i < N; i++) y[i] += D->rhs[i];
 		return;
 	}
 	for (r = 0; r < s->k; r++) D->rhs[r] = D->live[r] ? D->phi[r] : 0;
-	qaws_internal_rs_lu_solve(D->S, s->k, D->spiv, D->rhs);
+	qaws_internal_rs_lu_solve(D->rhs, D->S, D->spiv, s->k);
 	for (r = 0; r < s->k; r++)
 		for (i = 0; i < N && D->rhs[r] != 0; i++) y[i] -= D->rhs[r] * D->Y[(size_t)r * N + i];
 }
@@ -453,7 +453,7 @@ static qaws_status rs_step_run(rs_core* s, qaws_scalar* positions, qaws_repulsiv
 		if (st == QAWS_STATUS_OK && QAWS_INTERNAL_RS_CANCELLED(s))
 			st = QAWS_STATUS_CANCELLED;
 		if (st == QAWS_STATUS_OK)
-			st = qaws_internal_rs_hdirection(s, s->x, dE, g, &H);
+			st = qaws_internal_rs_hdirection(&H, g, s, s->x, dE);
 	}
 	if (st == QAWS_STATUS_OK && QAWS_INTERNAL_RS_CANCELLED(s))
 		st = QAWS_STATUS_CANCELLED;
@@ -484,7 +484,7 @@ static qaws_status rs_step_run(rs_core* s, qaws_scalar* positions, qaws_repulsiv
 	{
 		double Eb;
 		memcpy(y, s->x, sizeof(double) * s->N);
-		if ((dense ? rs_project(s, &D, y) : qaws_internal_rs_hproject(H, y)) && s->ops->energy(s, y, &Eb, NULL) == QAWS_STATUS_OK)
+		if ((dense ? rs_project(s, &D, y) : qaws_internal_rs_hproject(y, H)) && s->ops->energy(s, y, &Eb, NULL) == QAWS_STATUS_OK)
 			E = Eb;
 	}
 	/* backtracking on the largest vertex move h */
@@ -495,7 +495,7 @@ static qaws_status rs_step_run(rs_core* s, qaws_scalar* positions, qaws_repulsiv
 		if (QAWS_INTERNAL_RS_CANCELLED(s))
 			goto cancelled;
 		for (i = 0; i < s->N; i++) y[i] = s->x[i] - tau * g[i];
-		if (dense ? !rs_project(s, &D, y) : !qaws_internal_rs_hproject(H, y))
+		if (dense ? !rs_project(s, &D, y) : !qaws_internal_rs_hproject(y, H))
 		{
 			s->rep.rejected_projection++;
 			last = 3;
@@ -561,7 +561,7 @@ qaws_status qaws_internal_rs_solve(rs_core* s, unsigned int max_steps, qaws_scal
 	for (it = 0; it < max_steps && st == QAWS_STATUS_OK; it++)
 	{
 		unsigned int before = s->rep.iterations;
-		st = qaws_internal_rs_step(s, positions, &rep);
+		st = qaws_internal_rs_step(&rep, positions, s);
 		if (st == QAWS_STATUS_OK && rep.iterations > before && s->progress.on_step)
 			s->progress.on_step(&rep, positions, s->progress.user_data);
 		if (rep.reason != QAWS_REPULSIVE_RUNNING)
@@ -594,7 +594,7 @@ static qaws_status rs_objective_run(rs_core const* s, qaws_scalar const* positio
 }
 
 /* the public calls on a solver: under its allocator (_ex) */
-qaws_status qaws_internal_rs_direction(rs_core const* s, qaws_scalar const* positions, qaws_scalar* out_direction)
+qaws_status qaws_internal_rs_direction(qaws_scalar* out_direction, rs_core const* s, qaws_scalar const* positions)
 {
 	qaws_internal_rs_scope sc;
 	qaws_status st;
@@ -606,7 +606,7 @@ qaws_status qaws_internal_rs_direction(rs_core const* s, qaws_scalar const* posi
 	return st;
 }
 
-qaws_status qaws_internal_rs_step(rs_core* s, qaws_scalar* positions, qaws_repulsive_report* out_report)
+qaws_status qaws_internal_rs_step(qaws_repulsive_report* out_report, qaws_scalar* positions, rs_core* s)
 {
 	qaws_internal_rs_scope sc;
 	qaws_status st;
@@ -653,8 +653,8 @@ int qaws_internal_rs_settings(rs_core* k, qaws_scalar armijo, qaws_scalar backtr
    f = integral from a to b of ds / (h^2 + s^2) = atan2(|h| (b - a), h^2 + a b) / |h|,
    df/da = -1 / (h^2 + a^2), df/db = 1 / (h^2 + b^2), and near the line,
    beside the wall (a b > 0), the series 1/a - 1/b - h^2 (1/a^3 - 1/b^3) / 3. */
-int qaws_internal_rs_room(double const* room, unsigned int count, double w, unsigned int dim, unsigned int u, unsigned int v,
-	double const* x, unsigned int nv, double* E, double* grad)
+int qaws_internal_rs_room(double* E, double* grad, double const* room, double const* x, unsigned int count, unsigned int dim,
+	double w, unsigned int u, unsigned int v, unsigned int nv)
 {
 	unsigned int i, j;
 	double sum = 0;
@@ -857,7 +857,7 @@ static qaws_status rs_c_energy(rs_core const* core, double const* x, double* E, 
 {
 	qaws_repulsive_curves_solver const* s = (qaws_repulsive_curves_solver const*)core;
 	unsigned int e, q, dim = core->dim;
-	qaws_status st = qaws_internal_repulsive_curves_bh(s->c, x, core->theta, E, grad);   /* (theta 0 opens every node: the direct terms, in closed form) */
+	qaws_status st = qaws_internal_repulsive_curves_bh(E, grad, s->c, x, core->theta);   /* (theta 0 opens every node: the direct terms, in closed form) */
 	if (st != QAWS_STATUS_OK)
 		return st;
 	for (e = 0; s->len_w > 0 && e < s->c->ne; e++)
@@ -869,7 +869,7 @@ static qaws_status rs_c_energy(rs_core const* core, double const* x, double* E, 
 		*E += s->len_w * l;
 		for (q = 0; grad && l > 0 && q < dim; q++) { grad[dim * I[1] + q] += s->len_w * d[q] / l; grad[dim * I[0] + q] -= s->len_w * d[q] / l; }
 	}
-	if (s->nroom && !qaws_internal_rs_room(s->room, s->nroom, s->room_w, dim, s->ru, s->rv, x, core->nv, E, grad))
+	if (s->nroom && !qaws_internal_rs_room(E, grad, s->room, x, s->nroom, dim, s->room_w, s->ru, s->rv, core->nv))
 		return QAWS_STATUS_NUMERICAL_FAILURE;   /* (a vertex out of the room: no energy, so a trial step there is refused) */
 	return QAWS_STATUS_OK;
 }
@@ -906,8 +906,8 @@ static qaws_status rs_c_hier(rs_core const* core, double const* x, qaws_internal
 		h->mass[c->edges[2 * e]] += 0.5 * l; h->mass[c->edges[2 * e + 1]] += 0.5 * l;
 	}
 	h->nl = c->ne;
-	if ((st = qaws_internal_rbh_curves_metric(c, x, core->theta, &h->A)) == QAWS_STATUS_OK)
-		st = qaws_internal_rbh_fractional(x, h->mass, c->nv, dim, 1 + 2 * (2 - s), core->theta, &h->F, core->executor);
+	if ((st = qaws_internal_rbh_curves_metric(&h->A, c, x, core->theta)) == QAWS_STATUS_OK)
+		st = qaws_internal_rbh_fractional(&h->F, x, h->mass, c->nv, dim, 1 + 2 * (2 - s), core->theta, core->executor);
 	if (st != QAWS_STATUS_OK)
 		qaws_internal_rs_hier_free(h);
 	return st;
@@ -1092,7 +1092,7 @@ static int rs_c_path_ok(rs_core const* core, double const* x0, double const* x1)
 
 static qaws_status rs_c_hvp(rs_core const* core, double const* x, double const* v, double* hv)
 {
-	return qaws_internal_repulsive_curves_hvp(((qaws_repulsive_curves_solver const*)core)->c, x, v, hv);
+	return qaws_internal_repulsive_curves_hvp(hv, ((qaws_repulsive_curves_solver const*)core)->c, x, v);
 }
 
 /* hv += sum_r lambda_r Hess(c_r) v: only the length rows are not linear;
@@ -1168,8 +1168,8 @@ static void rs_c_targets(qaws_repulsive_curves_solver const* s, qaws_repulsive_t
 	}
 }
 
-qaws_status qaws_repulsive_curves_solver_solution_jvp(qaws_repulsive_curves_solver const* s, qaws_repulsive_targets const* d, qaws_scalar* out_dx,
-	unsigned int* out_gauge)
+qaws_status qaws_repulsive_curves_solver_solution_jvp(qaws_scalar* out_dx, unsigned int* out_gauge, qaws_repulsive_curves_solver const* s,
+	qaws_repulsive_targets const* d)
 {
 	return qaws_repulsive_curves_solver_solution_jvp_checked(s, d, out_dx, out_gauge, NULL);
 }
@@ -1194,15 +1194,15 @@ qaws_status qaws_repulsive_curves_solver_solution_jvp_checked(qaws_repulsive_cur
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 	rs_c_targets(s, (qaws_repulsive_targets*)d, rows, 0);
-	st = qaws_internal_rs_sensitivity(&s->core, rows, NULL, dx, out_gauge, out_report);
+	st = qaws_internal_rs_sensitivity(dx, out_gauge, out_report, &s->core, rows, NULL);
 	for (i = 0; st == QAWS_STATUS_OK && i < s->core.N; i++) out_dx[i] = (qaws_scalar)dx[i];
 	qaws_internal_free(rows); qaws_internal_free(dx);
 	qaws_internal_rs_leave(&sc);
 	return st;
 }
 
-qaws_status qaws_repulsive_curves_solver_solution_vjp(qaws_repulsive_curves_solver const* s, qaws_scalar const* xbar, qaws_repulsive_targets* out_bar,
-	unsigned int* out_gauge)
+qaws_status qaws_repulsive_curves_solver_solution_vjp(qaws_repulsive_targets* out_bar, unsigned int* out_gauge, qaws_repulsive_curves_solver const* s,
+	qaws_scalar const* xbar)
 {
 	return qaws_repulsive_curves_solver_solution_vjp_checked(s, xbar, out_bar, out_gauge, NULL);
 }
@@ -1227,7 +1227,7 @@ qaws_status qaws_repulsive_curves_solver_solution_vjp_checked(qaws_repulsive_cur
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 	for (i = 0; i < s->core.N; i++) xb[i] = (double)xbar[i];
-	st = qaws_internal_rs_sensitivity(&s->core, NULL, xb, rows, out_gauge, out_report);
+	st = qaws_internal_rs_sensitivity(rows, out_gauge, out_report, &s->core, NULL, xb);
 	if (st == QAWS_STATUS_OK)
 		rs_c_targets(s, out_bar, rows, 1);
 	qaws_internal_free(rows); qaws_internal_free(xb);
@@ -1244,8 +1244,8 @@ void qaws_repulsive_curves_solver_destroy(qaws_repulsive_curves_solver* s)
 	qaws_internal_free(s);
 }
 
-qaws_status qaws_repulsive_curves_solver_create(qaws_repulsive_curves const* c, qaws_repulsive_curves_solve_desc const* desc,
-	qaws_scalar const* positions, qaws_repulsive_curves_solver** out_solver)
+qaws_status qaws_repulsive_curves_solver_create(qaws_repulsive_curves_solver** out_solver, qaws_repulsive_curves const* c,
+	qaws_scalar const* positions, qaws_repulsive_curves_solve_desc const* desc)
 {
 	qaws_repulsive_curves_solver* s;
 	rs_core* k;
@@ -1382,7 +1382,7 @@ qaws_status qaws_repulsive_curves_solver_create(qaws_repulsive_curves const* c, 
 	k->rep.reason = QAWS_REPULSIVE_RUNNING;
 	k->rep.stationarity = 1;
 	total = 0;
-	if (s->nroom && !qaws_internal_rs_room(s->room, s->nroom, 1, dim, s->ru, s->rv, k->x, k->nv, &total, NULL))
+	if (s->nroom && !qaws_internal_rs_room(&total, NULL, s->room, k->x, s->nroom, dim, 1, s->ru, s->rv, k->nv))
 	{
 		qaws_repulsive_curves_solver_destroy(s);   /* (a vertex not strictly inside the room) */
 		return QAWS_STATUS_INVALID_ARGUMENT;
@@ -1406,14 +1406,14 @@ qaws_status qaws_repulsive_curves_solver_create(qaws_repulsive_curves const* c, 
 	return QAWS_STATUS_OK;
 }
 
-qaws_status qaws_repulsive_curves_solver_direction(qaws_repulsive_curves_solver const* s, qaws_scalar const* positions, qaws_scalar* out_direction)
+qaws_status qaws_repulsive_curves_solver_direction(qaws_scalar* out_direction, qaws_repulsive_curves_solver const* s, qaws_scalar const* positions)
 {
-	return s ? qaws_internal_rs_direction(&s->core, positions, out_direction) : QAWS_STATUS_INVALID_ARGUMENT;
+	return s ? qaws_internal_rs_direction(out_direction, &s->core, positions) : QAWS_STATUS_INVALID_ARGUMENT;
 }
 
-qaws_status qaws_repulsive_curves_solver_step(qaws_repulsive_curves_solver* s, qaws_scalar* positions, qaws_repulsive_report* out_report)
+qaws_status qaws_repulsive_curves_solver_step(qaws_repulsive_report* out_report, qaws_scalar* positions, qaws_repulsive_curves_solver* s)
 {
-	return s ? qaws_internal_rs_step(&s->core, positions, out_report) : QAWS_STATUS_INVALID_ARGUMENT;
+	return s ? qaws_internal_rs_step(out_report, positions, &s->core) : QAWS_STATUS_INVALID_ARGUMENT;
 }
 
 qaws_status qaws_repulsive_curves_solver_objective(qaws_repulsive_curves_solver const* s, qaws_scalar const* positions, qaws_scalar* out_energy,
@@ -1422,8 +1422,8 @@ qaws_status qaws_repulsive_curves_solver_objective(qaws_repulsive_curves_solver 
 	return s ? qaws_internal_rs_objective(&s->core, positions, out_energy, out_gradient) : QAWS_STATUS_INVALID_ARGUMENT;
 }
 
-qaws_status qaws_repulsive_curves_solve(qaws_repulsive_curves const* curves, qaws_repulsive_curves_solve_desc const* desc,
-	qaws_scalar* positions, qaws_repulsive_report* out_report)
+qaws_status qaws_repulsive_curves_solve(qaws_repulsive_report* out_report, qaws_scalar* positions,
+	qaws_repulsive_curves const* curves, qaws_repulsive_curves_solve_desc const* desc)
 {
 	qaws_repulsive_curves_solver* s = NULL;
 	unsigned int max = desc && desc->max_iterations ? desc->max_iterations : 100;
@@ -1441,7 +1441,7 @@ qaws_status qaws_repulsive_curves_solver_create_ex(qaws_repulsive_curves const* 
 	qaws_internal_rs_scope sc;
 	qaws_status st;
 	qaws_internal_rs_enter(&sc, allocator);
-	st = qaws_repulsive_curves_solver_create(curves, desc, positions, out_solver);
+	st = qaws_repulsive_curves_solver_create(out_solver, curves, positions, desc);
 	if (st == QAWS_STATUS_OK)
 		qaws_internal_rs_keep(&(*out_solver)->core.alloc, allocator);
 	qaws_internal_rs_leave(&sc);
@@ -1452,7 +1452,7 @@ qaws_status qaws_repulsive_curves_solver_create_ex(qaws_repulsive_curves const* 
 /*  For tests                                                               */
 /* ------------------------------------------------------------------------ */
 
-qaws_status qaws_internal_repulsive_curves_metric(qaws_repulsive_curves const* curves, double const* x, double* A)
+qaws_status qaws_internal_repulsive_curves_metric(double* A, qaws_repulsive_curves const* curves, double const* x)
 {
 	return rs_metric(curves, x, A);
 }

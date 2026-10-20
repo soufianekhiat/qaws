@@ -42,19 +42,19 @@ static void demo_exact_terrain(void)
 	sd.surface_count = 1 + TR_LEVELS;
 	sd.families = fam;
 	t0 = hf_now();
-	qaws_surface_batch_find_intersections(&sd, cv, 1024, &nc, pt, 1 << 17, &np, NULL);
+	qaws_surface_batch_find_intersections(cv, &nc, pt, &np, NULL, 1024, 1 << 17, &sd);
 	t_float = hf_now() - t0;
 
 	qaws_exact_desc_default(&xd);
 	xd.space_exp2 = -20;
 	for (i = 0; i <= TR_LEVELS; i++)
-		qaws_exact_surface_prepare(&xd, sf[i], &es[i], NULL);
+		qaws_exact_surface_prepare(&es[i], NULL, sf[i], &xd);
 	memset(&ed, 0, sizeof(ed));
 	ed.surfaces = (qaws_exact_surface const* const*)es;
 	ed.surface_count = 1 + TR_LEVELS;
 	ed.families = fam;
 	t0 = hf_now();
-	st = qaws_exact_surface_batch_hits(&ed, ept, 1 << 16, &enp, ebr, 1024, &enb, &est);
+	st = qaws_exact_surface_batch_hits(ept, &enp, ebr, &enb, &est, 1 << 16, 1024, &ed);
 	t_exact = hf_now() - t0;
 	for (i = 0; i < enp; i++)
 		if (ept[i].u1_hi - ept[i].u1_lo > widest)
@@ -106,7 +106,7 @@ static void demo_exact_terrain(void)
 			qaws_exact_ssi_point const* p = &ept[ebr[i].branch.first + k];
 			qaws_surface_eval_result r;
 			double x, y;
-			qaws_surface_evaluate(sf[0], (qaws_scalar)((p->u1_lo + p->u1_hi) / 2), (qaws_scalar)((p->v1_lo + p->v1_hi) / 2), QAWS_SURFACE_EVAL_POSITION, &r);
+			qaws_surface_evaluate(&r, sf[0], (qaws_scalar)((p->u1_lo + p->u1_hi) / 2), (qaws_scalar)((p->v1_lo + p->v1_hi) / 2), QAWS_SURFACE_EVAL_POSITION);
 			project(&pr, r.position.x, r.position.y, r.position.z + 0.004, &x, &y);
 			svg_circle(&s, x, y, 2.4, ebr[i].branch.closed ? "#1a7f37" : "#8250df", "#ffffff");
 		}

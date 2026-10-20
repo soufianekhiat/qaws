@@ -573,9 +573,9 @@ static qaws_status build_custom_speed_table(
  * ------------------------------------------------------------------------- */
 
 qaws_status qaws_traversal_create(
+	qaws_traversal **out_traversal,
 	qaws_curve const *curve,
-	qaws_traversal_desc const *desc,
-	qaws_traversal **out_traversal)
+	qaws_traversal_desc const *desc)
 {
 	qaws_traversal *traversal;
 	unsigned int table_size;
@@ -624,7 +624,7 @@ qaws_status qaws_traversal_create(
 	}
 
 	status = qaws_internal_build_arc_length_table(
-		curve, table_size, traversal->table_params, traversal->table_distances);
+		traversal->table_params, traversal->table_distances, curve, table_size);
 	if (status != QAWS_STATUS_OK)
 	{
 		qaws_internal_free(traversal->table_distances);
@@ -651,10 +651,10 @@ qaws_status qaws_traversal_create(
 }
 
 qaws_status qaws_traversal_create_multi(
+	qaws_traversal **out_traversal,
 	qaws_curve const *const *curves,
 	unsigned int curve_count,
-	qaws_traversal_desc const *desc,
-	qaws_traversal **out_traversal)
+	qaws_traversal_desc const *desc)
 {
 	qaws_traversal *traversal;
 	unsigned int table_size;
@@ -809,7 +809,7 @@ qaws_status qaws_traversal_create_multi(
 				}
 
 				seg_len = (qaws_scalar)0.0;
-				qaws_internal_arc_length(curves[ci], local_start, local_end, &seg_len);
+				qaws_internal_arc_length(&seg_len, curves[ci], local_start, local_end);
 				seg_length += seg_len;
 			}
 		}
@@ -864,10 +864,10 @@ void qaws_traversal_destroy(qaws_traversal *traversal)
  * ------------------------------------------------------------------------- */
 
 qaws_status qaws_traversal_evaluate_2d(
+	qaws_eval_result_2d *out_result,
 	qaws_traversal const *traversal,
 	qaws_scalar input_value,
-	unsigned int eval_flags,
-	qaws_eval_result_2d *out_result)
+	unsigned int eval_flags)
 {
 	qaws_scalar parameter;
 	qaws_scalar distance;
@@ -950,7 +950,7 @@ qaws_status qaws_traversal_evaluate_2d(
 		}
 
 		return qaws_curve_evaluate_2d(
-			resolved_curve, local_param, eval_flags, out_result);
+			out_result, resolved_curve, local_param, eval_flags);
 	}
 
 	if (traversal->desc.clamp_to_domain)
@@ -963,14 +963,14 @@ qaws_status qaws_traversal_evaluate_2d(
 	}
 
 	return qaws_curve_evaluate_2d(
-		traversal->curve, parameter, eval_flags, out_result);
+		out_result, traversal->curve, parameter, eval_flags);
 }
 
 qaws_status qaws_traversal_evaluate_3d(
+	qaws_eval_result_3d *out_result,
 	qaws_traversal const *traversal,
 	qaws_scalar input_value,
-	unsigned int eval_flags,
-	qaws_eval_result_3d *out_result)
+	unsigned int eval_flags)
 {
 	qaws_scalar parameter;
 	qaws_scalar distance;
@@ -1053,7 +1053,7 @@ qaws_status qaws_traversal_evaluate_3d(
 		}
 
 		return qaws_curve_evaluate_3d(
-			resolved_curve, local_param, eval_flags, out_result);
+			out_result, resolved_curve, local_param, eval_flags);
 	}
 
 	if (traversal->desc.clamp_to_domain)
@@ -1066,7 +1066,7 @@ qaws_status qaws_traversal_evaluate_3d(
 	}
 
 	return qaws_curve_evaluate_3d(
-		traversal->curve, parameter, eval_flags, out_result);
+		out_result, traversal->curve, parameter, eval_flags);
 }
 
 /* ---------------------------------------------------------------------------
@@ -1074,9 +1074,9 @@ qaws_status qaws_traversal_evaluate_3d(
  * ------------------------------------------------------------------------- */
 
 qaws_status qaws_traversal_map_time_to_parameter(
+	qaws_scalar *out_parameter,
 	qaws_traversal const *traversal,
-	qaws_scalar time_value,
-	qaws_scalar *out_parameter)
+	qaws_scalar time_value)
 {
 	qaws_scalar distance;
 	qaws_scalar parameter;
@@ -1113,9 +1113,9 @@ qaws_status qaws_traversal_map_time_to_parameter(
 }
 
 qaws_status qaws_traversal_map_distance_to_parameter(
+	qaws_scalar *out_parameter,
 	qaws_traversal const *traversal,
-	qaws_scalar distance_value,
-	qaws_scalar *out_parameter)
+	qaws_scalar distance_value)
 {
 	qaws_scalar parameter;
 	qaws_range range;
@@ -1141,9 +1141,9 @@ qaws_status qaws_traversal_map_distance_to_parameter(
 }
 
 qaws_status qaws_traversal_map_parameter_to_distance(
+	qaws_scalar *out_distance,
 	qaws_traversal const *traversal,
-	qaws_scalar parameter,
-	qaws_scalar *out_distance)
+	qaws_scalar parameter)
 {
 	if (!traversal || !out_distance)
 		return QAWS_STATUS_INVALID_ARGUMENT;
@@ -1160,10 +1160,10 @@ qaws_status qaws_traversal_map_parameter_to_distance(
  * ------------------------------------------------------------------------- */
 
 qaws_status qaws_traversal_advance_2d(
+	qaws_eval_result_2d *out_result,
 	qaws_traversal *traversal,
 	qaws_scalar delta_time,
-	unsigned int eval_flags,
-	qaws_eval_result_2d *out_result)
+	unsigned int eval_flags)
 {
 	qaws_scalar distance;
 	qaws_scalar parameter;
@@ -1198,7 +1198,7 @@ qaws_status qaws_traversal_advance_2d(
 		}
 
 		return qaws_curve_evaluate_2d(
-			resolved_curve, local_param, eval_flags, out_result);
+			out_result, resolved_curve, local_param, eval_flags);
 	}
 
 	if (traversal->desc.clamp_to_domain)
@@ -1211,14 +1211,14 @@ qaws_status qaws_traversal_advance_2d(
 	}
 
 	return qaws_curve_evaluate_2d(
-		traversal->curve, parameter, eval_flags, out_result);
+		out_result, traversal->curve, parameter, eval_flags);
 }
 
 qaws_status qaws_traversal_advance_3d(
+	qaws_eval_result_3d *out_result,
 	qaws_traversal *traversal,
 	qaws_scalar delta_time,
-	unsigned int eval_flags,
-	qaws_eval_result_3d *out_result)
+	unsigned int eval_flags)
 {
 	qaws_scalar distance;
 	qaws_scalar parameter;
@@ -1253,7 +1253,7 @@ qaws_status qaws_traversal_advance_3d(
 		}
 
 		return qaws_curve_evaluate_3d(
-			resolved_curve, local_param, eval_flags, out_result);
+			out_result, resolved_curve, local_param, eval_flags);
 	}
 
 	if (traversal->desc.clamp_to_domain)
@@ -1266,7 +1266,7 @@ qaws_status qaws_traversal_advance_3d(
 	}
 
 	return qaws_curve_evaluate_3d(
-		traversal->curve, parameter, eval_flags, out_result);
+		out_result, traversal->curve, parameter, eval_flags);
 }
 
 qaws_status qaws_traversal_reset(qaws_traversal *traversal)
@@ -1396,12 +1396,12 @@ static double profile_eval(qaws_traversal const* traversal, qaws_scalar time, do
 }
 
 qaws_status qaws_traversal_cdf_targets(
-	qaws_traversal const* traversal,
-	qaws_scalar const* inputs,
-	unsigned int count,
 	qaws_cdf_target* out_targets,
 	qaws_scalar* out_rate,
-	qaws_scalar* out_rate2)
+	qaws_scalar* out_rate2,
+	qaws_traversal const* traversal,
+	qaws_scalar const* inputs,
+	unsigned int count)
 {
 	unsigned int i;
 	double L;

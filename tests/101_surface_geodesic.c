@@ -36,10 +36,10 @@ static qaws_surface* sgt_sphere(double R, qaws_curve** prof)
 	g.radius = (qaws_scalar)R; g.angle_start = (qaws_scalar)(-SGT_PI / 2); g.angle_end = (qaws_scalar)(SGT_PI / 2);
 	memset(&ad, 0, sizeof(ad));
 	ad.dimension = QAWS_DIMENSION_2D; ad.segments = &g; ad.segment_count = 1;
-	qaws_curve_create_arc(&ad, prof);
+	qaws_curve_create_arc(prof, &ad);
 	memset(&rd, 0, sizeof(rd));
 	rd.profile = *prof; rd.axis_direction.z = 1;
-	qaws_surface_create_revolution(&rd, &s);
+	qaws_surface_create_revolution(&s, &rd);
 	return s;
 }
 
@@ -49,7 +49,7 @@ static qaws_vec3 sgt_point(qaws_surface const* s, qaws_vec2 uv)
 	qaws_range ru = qaws_surface_get_u_range(s);
 	double p = (double)ru.max_value - (double)ru.min_value, u = fmod((double)uv.x - ru.min_value, p);
 	if (u < 0) u += p;
-	qaws_surface_evaluate(s, (qaws_scalar)(ru.min_value + u), uv.y, QAWS_SURFACE_EVAL_POSITION, &r);
+	qaws_surface_evaluate(&r, s, (qaws_scalar)(ru.min_value + u), uv.y, QAWS_SURFACE_EVAL_POSITION);
 	return r.position;
 }
 
@@ -64,7 +64,7 @@ static qaws_vec2 sgt_end(qaws_surface_curve const* c, int last)
 {
 	qaws_vec2 uv;
 	qaws_range rg = qaws_curve_get_parameter_range(qaws_surface_curve_get_uv(c));
-	qaws_surface_curve_evaluate(c, last ? rg.max_value : rg.min_value, &uv, NULL);
+	qaws_surface_curve_evaluate(&uv, NULL, c, last ? rg.max_value : rg.min_value);
 	return uv;
 }
 
@@ -82,20 +82,20 @@ static void test_plane(void)
 	d.p10.x = 3; d.p10.y = (qaws_scalar)0.4;
 	d.p01.x = (qaws_scalar)0.5; d.p01.y = 2;
 	d.p11.x = (qaws_scalar)2.2; d.p11.y = (qaws_scalar)2.6;
-	qaws_surface_create_bilinear(&d, &s);
+	qaws_surface_create_bilinear(&s, &d);
 	for (k = 0; k < 3; k++)
 	{
 		qaws_surface_curve* c = NULL;
 		qaws_scalar L = 0;
 		qaws_vec3 a, b, m;
 		qaws_range rg;
-		qaws_status st = qaws_surface_curve_create_geodesic(s, sgt_uv(pts[2 * k][0], pts[2 * k][1]), sgt_uv(pts[2 * k + 1][0], pts[2 * k + 1][1]), 0, &c);
+		qaws_status st = qaws_surface_curve_create_geodesic(&c, s, sgt_uv(pts[2 * k][0], pts[2 * k][1]), sgt_uv(pts[2 * k + 1][0], pts[2 * k + 1][1]), 0);
 		if (st != QAWS_STATUS_OK) { worst_len = 1e300; continue; }
-		qaws_surface_curve_get_length(c, &L);
+		qaws_surface_curve_get_length(&L, c);
 		rg = qaws_curve_get_parameter_range(qaws_surface_curve_get_uv(c));
-		qaws_surface_curve_evaluate(c, rg.min_value, NULL, &a);
-		qaws_surface_curve_evaluate(c, rg.max_value, NULL, &b);
-		qaws_surface_curve_evaluate(c, (qaws_scalar)(0.5 * (rg.min_value + rg.max_value)), NULL, &m);
+		qaws_surface_curve_evaluate(NULL, &a, c, rg.min_value);
+		qaws_surface_curve_evaluate(NULL, &b, c, rg.max_value);
+		qaws_surface_curve_evaluate(NULL, &m, c, (qaws_scalar)(0.5 * (rg.min_value + rg.max_value)));
 		{
 			double dl = fabs((double)L - sqrt((b.x - a.x) * (b.x - a.x) + (b.y - a.y) * (b.y - a.y) + (b.z - a.z) * (b.z - a.z)));
 			double dm = sqrt((m.x - 0.5 * (a.x + b.x)) * (m.x - 0.5 * (a.x + b.x)) + (m.y - 0.5 * (a.y + b.y)) * (m.y - 0.5 * (a.y + b.y)));
@@ -129,12 +129,12 @@ static void test_sphere(void)
 			qaws_surface_curve* c = NULL;
 			qaws_scalar L = 0;
 			qaws_vec3 a, b;
-			if (qaws_surface_curve_create_geodesic(s, sgt_uv(ab[k][0], ab[k][1]), sgt_uv(ab[k][2], ab[k][3]), 0, &c) != QAWS_STATUS_OK)
+			if (qaws_surface_curve_create_geodesic(&c, s, sgt_uv(ab[k][0], ab[k][1]), sgt_uv(ab[k][2], ab[k][3]), 0) != QAWS_STATUS_OK)
 			{
 				worst = 1e300;
 				continue;
 			}
-			qaws_surface_curve_get_length(c, &L);
+			qaws_surface_curve_get_length(&L, c);
 			a = sgt_point(s, sgt_uv(ab[k][0], ab[k][1]));
 			b = sgt_point(s, sgt_uv(ab[k][2], ab[k][3]));
 			{
@@ -153,7 +153,7 @@ static void test_sphere(void)
 		qaws_vec2 cc = sgt_uv(0.3, 0.55);
 		double r = 0.7, worst = 0, dl = 1e300;
 		qaws_vec3 pc = sgt_point(s, cc);
-		qaws_status st = qaws_surface_curve_create_geodesic_arc(s, cc, (qaws_scalar)r, 0, (qaws_scalar)(2 * SGT_PI), 0, &c);
+		qaws_status st = qaws_surface_curve_create_geodesic_arc(&c, s, cc, (qaws_scalar)r, 0, (qaws_scalar)(2 * SGT_PI), 0);
 		if (st == QAWS_STATUS_OK)
 		{
 			qaws_range rg = qaws_curve_get_parameter_range(qaws_surface_curve_get_uv(c));
@@ -163,12 +163,12 @@ static void test_sphere(void)
 			{
 				qaws_vec3 p;
 				double dot;
-				qaws_surface_curve_evaluate(c, (qaws_scalar)(rg.min_value + (rg.max_value - rg.min_value) * k / 100), NULL, &p);
+				qaws_surface_curve_evaluate(NULL, &p, c, (qaws_scalar)(rg.min_value + (rg.max_value - rg.min_value) * k / 100));
 				dot = ((double)p.x * pc.x + (double)p.y * pc.y + (double)p.z * pc.z) / (R * R);
 				if (dot > 1) dot = 1;
 				if (fabs(R * acos(dot) - r) > worst) worst = fabs(R * acos(dot) - r);
 			}
-			qaws_surface_curve_get_length(c, &L);
+			qaws_surface_curve_get_length(&L, c);
 			dl = fabs((double)L - 2 * SGT_PI * R * sin(r / R));
 		}
 		sprintf(msg, "sphere: a geodesic circle (r 0.7): its points at distance r within %.2g, its length against 2 pi R sin(r / R) within %.2g", worst, dl);
@@ -184,9 +184,9 @@ static void test_sphere(void)
 		qaws_scalar L = 0;
 		memset(&bd, 0, sizeof(bd));
 		bd.dimension = QAWS_DIMENSION_2D; bd.degree = 1; bd.control_points = cp; bd.control_point_count = 2;
-		qaws_curve_create_bezier(&bd, &line);
-		qaws_surface_curve_create_uv(s, line, &c);
-		qaws_surface_curve_get_length(c, &L);
+		qaws_curve_create_bezier(&line, &bd);
+		qaws_surface_curve_create_uv(&c, s, line);
+		qaws_surface_curve_get_length(&L, c);
 		sprintf(msg, "sphere: a meridian drawn in (u, v): length against R pi / 2 within %.2g", fabs((double)L - R * SGT_PI / 2));
 		TEST_ASSERT(c && qaws_surface_curve_get_kind(c) == QAWS_SURFACE_CURVE_UV && fabs((double)L - R * SGT_PI / 2) <= tol, msg);
 		qaws_surface_curve_destroy(c);
@@ -196,7 +196,7 @@ static void test_sphere(void)
 	{
 		qaws_scalar g[3], ch[6];
 		double v = 0.3, phi = -SGT_PI / 2 + SGT_PI * v, e1, e2, e3;
-		qaws_surface_get_metric(s, (qaws_scalar)0.4, (qaws_scalar)v, g, ch);
+		qaws_surface_get_metric(g, ch, s, (qaws_scalar)0.4, (qaws_scalar)v);
 		e1 = fabs((double)g[0] - pow(2 * SGT_PI * R * cos(phi), 2)) / pow(2 * SGT_PI * R, 2);
 		e2 = fabs((double)g[2] - pow(SGT_PI * R, 2)) / pow(SGT_PI * R, 2);
 		e3 = fabs((double)ch[1] + SGT_PI * tan(phi));
@@ -223,10 +223,10 @@ static void test_cylinder(void)
 	g.radius = (qaws_scalar)R; g.angle_start = 0; g.angle_end = (qaws_scalar)(2 * SGT_PI);
 	memset(&ad, 0, sizeof(ad));
 	ad.dimension = QAWS_DIMENSION_2D; ad.segments = &g; ad.segment_count = 1;
-	qaws_curve_create_arc(&ad, &circle);
+	qaws_curve_create_arc(&circle, &ad);
 	memset(&ed, 0, sizeof(ed));
 	ed.profile = circle; ed.direction.z = 1; ed.length = (qaws_scalar)H;
-	qaws_surface_create_extrusion(&ed, &s);
+	qaws_surface_create_extrusion(&s, &ed);
 	ru = qaws_surface_get_u_range(s);
 	for (k = 0; k < 3; k++)
 	{
@@ -236,11 +236,11 @@ static void test_cylinder(void)
 		qaws_surface_eval_result ra, rb;
 		qaws_vec2 a = sgt_uv(ab[k][0] * ru.max_value, ab[k][1]), b = sgt_uv(ab[k][2] * ru.max_value, ab[k][3]);
 		double du, dh;
-		if (qaws_surface_curve_create_geodesic(s, a, b, 0, &c) != QAWS_STATUS_OK) { worst = 1e300; continue; }
-		qaws_surface_curve_get_length(c, &L);
+		if (qaws_surface_curve_create_geodesic(&c, s, a, b, 0) != QAWS_STATUS_OK) { worst = 1e300; continue; }
+		qaws_surface_curve_get_length(&L, c);
 		/* unrolled: the arc length round (u is unwrapped in the covering plane) and the height */
-		qaws_surface_evaluate(s, (qaws_scalar)0, a.y, QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_DU, &ra);
-		qaws_surface_evaluate(s, (qaws_scalar)0, b.y, QAWS_SURFACE_EVAL_POSITION, &rb);
+		qaws_surface_evaluate(&ra, s, (qaws_scalar)0, a.y, QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_DU);
+		qaws_surface_evaluate(&rb, s, (qaws_scalar)0, b.y, QAWS_SURFACE_EVAL_POSITION);
 		du = ((double)b.x - a.x) * sqrt((double)ra.du.x * ra.du.x + (double)ra.du.y * ra.du.y + (double)ra.du.z * ra.du.z);
 		dh = (double)rb.position.z - ra.position.z;
 		if (fabs((double)L - hypot(du, dh)) > worst) worst = fabs((double)L - hypot(du, dh));
@@ -266,27 +266,27 @@ static void test_patch(void)
 	}
 	memset(&d, 0, sizeof(d));
 	d.u_degree = 3; d.v_degree = 3; d.control_points = cp; d.u_point_count = 4; d.v_point_count = 4;
-	qaws_surface_create_bezier(&d, &s);
+	qaws_surface_create_bezier(&s, &d);
 	/* the exponential map: the angle's direction (from S_u, a quarter turn about S_u x S_v) */
 	for (k = 0; k < 3 && s; k++)
 	{
 		qaws_vec2 p = sgt_uv(ref_exp_in[4 * k], ref_exp_in[4 * k + 1]), out, dir;
 		qaws_scalar g[3];
 		double a = ref_exp_in[4 * k + 2], L = ref_exp_in[4 * k + 3], E, F, G, det;
-		qaws_surface_get_metric(s, p.x, p.y, g, NULL);
+		qaws_surface_get_metric(g, NULL, s, p.x, p.y);
 		E = g[0]; F = g[1]; G = g[2]; det = E * G - F * F;
 		dir.x = (qaws_scalar)(cos(a) / sqrt(E) - sin(a) * F / sqrt(E * det));
 		dir.y = (qaws_scalar)(sin(a) * E / sqrt(E * det));
-		if (qaws_surface_exp(s, p, dir, (qaws_scalar)L, 0, &out, NULL) != QAWS_STATUS_OK) { worst_exp = 1e300; continue; }
+		if (qaws_surface_exp(&out, NULL, s, p, dir, (qaws_scalar)L, 0) != QAWS_STATUS_OK) { worst_exp = 1e300; continue; }
 		if (hypot(out.x - ref_exp_out[2 * k], out.y - ref_exp_out[2 * k + 1]) > worst_exp)
 			worst_exp = hypot(out.x - ref_exp_out[2 * k], out.y - ref_exp_out[2 * k + 1]);
 	}
 	{
 		qaws_surface_curve* c = NULL;
 		qaws_scalar L = 0;
-		if (qaws_surface_curve_create_geodesic(s, sgt_uv(ref_geodesic_ends[0], ref_geodesic_ends[1]), sgt_uv(ref_geodesic_ends[2], ref_geodesic_ends[3]), 0, &c) == QAWS_STATUS_OK)
+		if (qaws_surface_curve_create_geodesic(&c, s, sgt_uv(ref_geodesic_ends[0], ref_geodesic_ends[1]), sgt_uv(ref_geodesic_ends[2], ref_geodesic_ends[3]), 0) == QAWS_STATUS_OK)
 		{
-			qaws_surface_curve_get_length(c, &L);
+			qaws_surface_curve_get_length(&L, c);
 			dlen = fabs((double)L - ref_geodesic_length[0]);
 		}
 		qaws_surface_curve_destroy(c);
@@ -294,14 +294,14 @@ static void test_patch(void)
 	{
 		/* the circle: the arc's parameter is uniform in the angle, so angle k pi / 4 is at k / 8 of its range */
 		qaws_surface_curve* c = NULL;
-		if (qaws_surface_curve_create_geodesic_arc(s, sgt_uv(ref_circle_centre[0], ref_circle_centre[1]), (qaws_scalar)ref_circle_centre[2],
-			0, (qaws_scalar)(2 * SGT_PI), 0, &c) == QAWS_STATUS_OK)
+		if (qaws_surface_curve_create_geodesic_arc(&c, s, sgt_uv(ref_circle_centre[0], ref_circle_centre[1]),
+			(qaws_scalar)ref_circle_centre[2], 0, (qaws_scalar)(2 * SGT_PI), 0) == QAWS_STATUS_OK)
 		{
 			qaws_range rg = qaws_curve_get_parameter_range(qaws_surface_curve_get_uv(c));
 			for (k = 0; k < 8; k++)
 			{
 				qaws_vec2 uv;
-				qaws_surface_curve_evaluate(c, (qaws_scalar)(rg.min_value + (rg.max_value - rg.min_value) * k / 8), &uv, NULL);
+				qaws_surface_curve_evaluate(&uv, NULL, c, (qaws_scalar)(rg.min_value + (rg.max_value - rg.min_value) * k / 8));
 				if (hypot(uv.x - ref_circle_points[2 * k], uv.y - ref_circle_points[2 * k + 1]) > worst_circle)
 					worst_circle = hypot(uv.x - ref_circle_points[2 * k], uv.y - ref_circle_points[2 * k + 1]);
 			}

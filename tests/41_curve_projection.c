@@ -20,7 +20,7 @@ static void test_curve_projection(void)
 		bd.p10.x = 2; bd.p10.y = 0; bd.p10.z = 0;
 		bd.p01.x = 0; bd.p01.y = 2; bd.p01.z = 0;
 		bd.p11.x = 2; bd.p11.y = 2; bd.p11.z = 0;
-		s = qaws_surface_create_bilinear(&bd, &surf);
+		s = qaws_surface_create_bilinear(&surf, &bd);
 		TEST_ASSERT_STATUS(s);
 	}
 
@@ -35,12 +35,12 @@ static void test_curve_projection(void)
 		bd.degree = 1;
 		bd.control_points = pts;
 		bd.control_point_count = 2;
-		s = qaws_curve_create_bezier(&bd, &curve);
+		s = qaws_curve_create_bezier(&curve, &bd);
 		TEST_ASSERT_STATUS(s);
 	}
 
 	/* Project the curve onto the surface */
-	s = qaws_surface_project_curve(surf, curve, 64, &uv_curve);
+	s = qaws_surface_project_curve(&uv_curve, surf, curve, 64);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(uv_curve != NULL, "projection produced a curve");
 	TEST_ASSERT(qaws_curve_get_dimension(uv_curve) == QAWS_DIMENSION_2D,
@@ -54,8 +54,8 @@ static void test_curve_projection(void)
 
 		memset(&er_start, 0, sizeof(er_start));
 		memset(&er_end, 0, sizeof(er_end));
-		qaws_curve_evaluate_2d(uv_curve, range.min_value, QAWS_EVAL_FLAG_POSITION, &er_start);
-		qaws_curve_evaluate_2d(uv_curve, range.max_value, QAWS_EVAL_FLAG_POSITION, &er_end);
+		qaws_curve_evaluate_2d(&er_start, uv_curve, range.min_value, QAWS_EVAL_FLAG_POSITION);
+		qaws_curve_evaluate_2d(&er_end, uv_curve, range.max_value, QAWS_EVAL_FLAG_POSITION);
 
 		TEST_ASSERT(QAWS_FABS(er_start.position.x - (qaws_scalar)0.25) < (qaws_scalar)0.1,
 			"projection start u ~ 0.25");
@@ -91,15 +91,15 @@ static void test_geodesic_flat(void)
 		bd.p10.x = 2; bd.p10.y = 0; bd.p10.z = 0;
 		bd.p01.x = 0; bd.p01.y = 2; bd.p01.z = 0;
 		bd.p11.x = 2; bd.p11.y = 2; bd.p11.z = 0;
-		s = qaws_surface_create_bilinear(&bd, &surf);
+		s = qaws_surface_create_bilinear(&surf, &bd);
 		TEST_ASSERT_STATUS(s);
 	}
 
 	/* Geodesic from (0.2, 0.2) to (0.8, 0.8) on a flat surface should be a straight line */
-	s = qaws_surface_compute_geodesic(surf,
+	s = qaws_surface_compute_geodesic(&geo,
+		surf, 100,
 		(qaws_scalar)0.2, (qaws_scalar)0.2,
-		(qaws_scalar)0.8, (qaws_scalar)0.8,
-		20, 100, &geo);
+		(qaws_scalar)0.8, (qaws_scalar)0.8, 20);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(geo != NULL, "geodesic produced a curve");
 
@@ -112,7 +112,7 @@ static void test_geodesic_flat(void)
 			qaws_scalar t = range.min_value + (range.max_value - range.min_value) *
 				(qaws_scalar)i / (qaws_scalar)10;
 			memset(&er, 0, sizeof(er));
-			qaws_curve_evaluate_3d(geo, t, QAWS_EVAL_FLAG_POSITION, &er);
+			qaws_curve_evaluate_3d(&er, geo, t, QAWS_EVAL_FLAG_POSITION);
 			TEST_ASSERT(QAWS_FABS(er.position.z) < (qaws_scalar)0.1,
 				"geodesic point z ~ 0");
 		}
@@ -148,14 +148,14 @@ static void visual_obj_geodesic(void)
 		bd.control_points[6].x = -1; bd.control_points[6].y =  1; bd.control_points[6].z = 0;
 		bd.control_points[7].x =  0; bd.control_points[7].y =  1; bd.control_points[7].z = 0;
 		bd.control_points[8].x =  1; bd.control_points[8].y =  1; bd.control_points[8].z = 0;
-		s = qaws_surface_create_biquadratic(&bd, &surf);
+		s = qaws_surface_create_biquadratic(&surf, &bd);
 		if (s != QAWS_STATUS_OK) return;
 	}
 
-	s = qaws_surface_compute_geodesic(surf,
+	s = qaws_surface_compute_geodesic(&geo,
+		surf, 200,
 		(qaws_scalar)0.2, (qaws_scalar)0.2,
-		(qaws_scalar)0.8, (qaws_scalar)0.8,
-		20, 200, &geo);
+		(qaws_scalar)0.8, (qaws_scalar)0.8, 20);
 	if (s != QAWS_STATUS_OK) { qaws_surface_destroy(surf); return; }
 
 	if (!obj_open(&w, OBJ_OUTPUT_DIR "/41_geodesic.obj",
@@ -181,7 +181,7 @@ static void visual_obj_geodesic(void)
 			qaws_scalar t = range.min_value + (range.max_value - range.min_value) *
 				(qaws_scalar)i / (qaws_scalar)50;
 			memset(&er, 0, sizeof(er));
-			qaws_curve_evaluate_3d(geo, t, QAWS_EVAL_FLAG_POSITION, &er);
+			qaws_curve_evaluate_3d(&er, geo, t, QAWS_EVAL_FLAG_POSITION);
 			obj_sphere(&w, er.position, (qaws_scalar)0.03);
 		}
 	}
@@ -220,7 +220,7 @@ static void visual_obj_projection(void)
 		bd.control_points[6].x = -1; bd.control_points[6].y =  1; bd.control_points[6].z = 0;
 		bd.control_points[7].x =  0; bd.control_points[7].y =  1; bd.control_points[7].z = 0;
 		bd.control_points[8].x =  1; bd.control_points[8].y =  1; bd.control_points[8].z = 0;
-		s = qaws_surface_create_biquadratic(&bd, &surf);
+		s = qaws_surface_create_biquadratic(&surf, &bd);
 		if (s != QAWS_STATUS_OK) return;
 	}
 
@@ -237,12 +237,12 @@ static void visual_obj_projection(void)
 		bd.degree = 3;
 		bd.control_points = pts;
 		bd.control_point_count = 4;
-		s = qaws_curve_create_bezier(&bd, &curve);
+		s = qaws_curve_create_bezier(&curve, &bd);
 		if (s != QAWS_STATUS_OK) { qaws_surface_destroy(surf); return; }
 	}
 
 	/* Project curve onto surface */
-	s = qaws_surface_project_curve(surf, curve, 64, &uv_curve);
+	s = qaws_surface_project_curve(&uv_curve, surf, curve, 64);
 	if (s != QAWS_STATUS_OK || !uv_curve)
 	{
 		qaws_curve_destroy(curve); qaws_surface_destroy(surf); return;
@@ -275,7 +275,7 @@ static void visual_obj_projection(void)
 			qaws_scalar t = range.min_value + (range.max_value - range.min_value) *
 				(qaws_scalar)i / (qaws_scalar)50;
 			memset(&er, 0, sizeof(er));
-			qaws_curve_evaluate_3d(curve, t, QAWS_EVAL_FLAG_POSITION, &er);
+			qaws_curve_evaluate_3d(&er, curve, t, QAWS_EVAL_FLAG_POSITION);
 			obj_sphere(&w, er.position, (qaws_scalar)0.03);
 		}
 	}
@@ -292,10 +292,10 @@ static void visual_obj_projection(void)
 			qaws_scalar t = range.min_value + (range.max_value - range.min_value) *
 				(qaws_scalar)i / (qaws_scalar)50;
 			memset(&er_uv, 0, sizeof(er_uv));
-			qaws_curve_evaluate_2d(uv_curve, t, QAWS_EVAL_FLAG_POSITION, &er_uv);
+			qaws_curve_evaluate_2d(&er_uv, uv_curve, t, QAWS_EVAL_FLAG_POSITION);
 			memset(&ser, 0, sizeof(ser));
-			qaws_surface_evaluate(surf, er_uv.position.x, er_uv.position.y,
-				QAWS_SURFACE_EVAL_POSITION, &ser);
+			qaws_surface_evaluate(&ser, surf, er_uv.position.x,
+				er_uv.position.y, QAWS_SURFACE_EVAL_POSITION);
 			obj_sphere(&w, ser.position, (qaws_scalar)0.03);
 		}
 	}

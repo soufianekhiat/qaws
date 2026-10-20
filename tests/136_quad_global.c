@@ -254,7 +254,7 @@ static qaws_mesh_3d* tg_wavy(unsigned int n)
 	d.control_points = cp;
 	d.u_point_count = 7;
 	d.v_point_count = 7;
-	if (qaws_surface_create_bspline(&d, &srf) == QAWS_STATUS_OK && qaws_surface_sample(srf, n, n, s, n * n, &got) == QAWS_STATUS_OK && got == n * n)
+	if (qaws_surface_create_bspline(&srf, &d) == QAWS_STATUS_OK && qaws_surface_sample(s, &got, srf, n, n, n * n) == QAWS_STATUS_OK && got == n * n)
 	{
 		for (i = 0; i < n * n; i++)
 		{

@@ -14,19 +14,19 @@ static void test_catmull_rom(void)
 	desc.closed = 0;
 
 	qaws_curve* curve = NULL;
-	qaws_status s = qaws_curve_create_catmull_rom(&desc, &curve);
+	qaws_status s = qaws_curve_create_catmull_rom(&curve, &desc);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(qaws_curve_get_kind(curve) == QAWS_CURVE_KIND_CATMULL_ROM, "kind == CATMULL_ROM");
 	TEST_ASSERT(qaws_curve_get_span_count(curve) == 1, "span_count == 1");
 
 	/* The curve interpolates the interior points (P1 and P2) */
 	qaws_eval_result_2d r;
-	s = qaws_curve_evaluate_2d(curve, (qaws_scalar)0.0, QAWS_EVAL_FLAG_POSITION, &r);
+	s = qaws_curve_evaluate_2d(&r, curve, (qaws_scalar)0.0, QAWS_EVAL_FLAG_POSITION);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(approx_eq(r.position.x, (qaws_scalar)1.0), "interpolates P1 x");
 	TEST_ASSERT(approx_eq(r.position.y, (qaws_scalar)1.0), "interpolates P1 y");
 
-	s = qaws_curve_evaluate_2d(curve, (qaws_scalar)1.0, QAWS_EVAL_FLAG_POSITION, &r);
+	s = qaws_curve_evaluate_2d(&r, curve, (qaws_scalar)1.0, QAWS_EVAL_FLAG_POSITION);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(approx_eq(r.position.x, (qaws_scalar)2.0), "interpolates P2 x");
 	TEST_ASSERT(approx_eq(r.position.y, (qaws_scalar)0.0), "interpolates P2 y");
@@ -50,11 +50,11 @@ static void test_catmull_rom_variants(void)
 		desc.closed = 0;
 
 		qaws_curve* curve = NULL;
-		qaws_status s = qaws_curve_create_catmull_rom(&desc, &curve);
+		qaws_status s = qaws_curve_create_catmull_rom(&curve, &desc);
 		TEST_ASSERT_STATUS(s);
 
 		qaws_eval_result_2d r;
-		s = qaws_curve_evaluate_2d(curve, (qaws_scalar)0.0, QAWS_EVAL_FLAG_POSITION, &r);
+		s = qaws_curve_evaluate_2d(&r, curve, (qaws_scalar)0.0, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT_STATUS(s);
 		TEST_ASSERT(approx_eq(r.position.x, (qaws_scalar)1.0), "uniform interpolates P1 x");
 
@@ -71,11 +71,11 @@ static void test_catmull_rom_variants(void)
 		desc.closed = 0;
 
 		qaws_curve* curve = NULL;
-		qaws_status s = qaws_curve_create_catmull_rom(&desc, &curve);
+		qaws_status s = qaws_curve_create_catmull_rom(&curve, &desc);
 		TEST_ASSERT_STATUS(s);
 
 		qaws_eval_result_2d r;
-		s = qaws_curve_evaluate_2d(curve, (qaws_scalar)0.0, QAWS_EVAL_FLAG_POSITION, &r);
+		s = qaws_curve_evaluate_2d(&r, curve, (qaws_scalar)0.0, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT_STATUS(s);
 		TEST_ASSERT(approx_eq(r.position.x, (qaws_scalar)1.0), "chordal interpolates P1 x");
 

@@ -49,7 +49,7 @@ QAWS_INLINE qaws_eval_2d qaws_rational_bezier_eval_2d(
 
     /* D1 (also for D2: the quotient rule reads it) */
     if (((eval_flags & 0x6) != 0) && degree >= 1) {
-        qaws_bezier_deriv_points_3d(weighted_cp, degree, d1p);
+        qaws_bezier_deriv_points_3d(d1p, weighted_cp, degree);
         h_d1 = qaws_decasteljau_3d(d1p, degree - 1, t);
         C1x = (h_d1.x - Cx * h_d1.z) * inv_w0;
         C1y = (h_d1.y - Cy * h_d1.z) * inv_w0;
@@ -62,7 +62,7 @@ QAWS_INLINE qaws_eval_2d qaws_rational_bezier_eval_2d(
     /* D2 (the homogeneous second derivative vanishes below degree 2, the quotient's does not) */
     if (((eval_flags & 0x4) != 0) && degree >= 1) {
         if (degree >= 2) {
-            qaws_bezier_deriv_points_3d(d1p, degree - 1, d2p);
+            qaws_bezier_deriv_points_3d(d2p, d1p, degree - 1);
             h_d2 = qaws_decasteljau_3d(d2p, degree - 2, t);
         }
         C2x = (h_d2.x - QAWS_LITERAL(2.0) * C1x * h_d1.z - Cx * h_d2.z) * inv_w0;

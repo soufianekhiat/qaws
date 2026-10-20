@@ -42,7 +42,7 @@ static qaws_surface* tg_patch(void)
 	d.control_points = cp;
 	d.u_point_count = 7;
 	d.v_point_count = 7;
-	qaws_surface_create_bspline(&d, &s);
+	qaws_surface_create_bspline(&s, &d);
 	return s;
 }
 
@@ -76,7 +76,7 @@ static qaws_surface* tg_torus(double R, double r)
 	d.u_knot_count = 12;
 	d.v_knots = kn;
 	d.v_knot_count = 12;
-	qaws_surface_create_nurbs(&d, &s);
+	qaws_surface_create_nurbs(&s, &d);
 	return s;
 }
 
@@ -103,7 +103,7 @@ static void tg_box(qaws_surface** f, double const* h)
 			p[k]->z = (qaws_scalar)(h[2] * q[i][k][2]);
 		}
 		f[i] = NULL;
-		qaws_surface_create_bilinear(&d, &f[i]);
+		qaws_surface_create_bilinear(&f[i], &d);
 	}
 }
 
@@ -160,7 +160,7 @@ static double tg_foot_error(tg_mesh const* t, qaws_surface const* one, qaws_shel
 		if (t->foot[i].patch == QAWS_MESH_NONE || !s)
 			return HUGE_VAL;
 		memset(&e, 0, sizeof e);
-		qaws_surface_evaluate(s, t->foot[i].a, t->foot[i].b, QAWS_SURFACE_EVAL_POSITION, &e);
+		qaws_surface_evaluate(&e, s, t->foot[i].a, t->foot[i].b, QAWS_SURFACE_EVAL_POSITION);
 		y[0] = (double)e.position.x;
 		y[1] = (double)e.position.y;
 		y[2] = (double)e.position.z;
@@ -300,7 +300,7 @@ static void test_box(void)
 	double const L = test_heavy() ? 0.15 : 0.25;   /* (by default 0.25: 2.8 times fewer quads; the face count and the edge band follow) */
 	unsigned int i;
 	tg_box(box, h);
-	st = qaws_shell_atlas_create((qaws_surface const* const*)box, 6, 0, &atlas);
+	st = qaws_shell_atlas_create(&atlas, (qaws_surface const* const*)box, 6, 0);
 	memset(&d, 0, sizeof d);
 	d.elements = QAWS_ELEMENTS_QUADS;
 	d.target_length = (qaws_scalar)L;

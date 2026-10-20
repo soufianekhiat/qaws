@@ -36,7 +36,7 @@ static void sw_draw_patch(svg* s, projection const* pr, qaws_surface const* surf
 			{
 				qaws_surface_jet j;
 				qaws_scalar u = (qaws_scalar)(dirn ? i / 10.0 : k / 40.0), v = (qaws_scalar)(dirn ? k / 40.0 : i / 10.0);
-				qaws_surface_eval_jet(surf, u, v, QAWS_SJET_P, &j);
+				qaws_surface_eval_jet(&j, surf, u, v, QAWS_SJET_P);
 				project(pr, j.d[0].x, j.d[0].y, j.d[0].z, &xy[2 * k], &xy[2 * k + 1]);
 			}
 			svg_polyline(s, xy, 41, "#8c959f", 0.8, 0.8, 0);
@@ -72,7 +72,7 @@ static void demo_surface_cdf(void)
 	d.control_points = (qaws_vec3 const*)cps;
 	d.u_point_count = 4;
 	d.v_point_count = 4;
-	qaws_surface_create_bezier(&d, &surf);
+	qaws_surface_create_bezier(&surf, &d);
 	/* jittered stratified points */
 	for (i = 0; i < SW_GRID; i++)
 		for (j = 0; j < SW_GRID; j++)
@@ -101,7 +101,7 @@ static void demo_surface_cdf(void)
 			{
 				qaws_surface_jet jt;
 				double sx, sy;
-				qaws_surface_eval_jet(surf, xi[2 * i], xi[2 * i + 1], QAWS_SJET_P, &jt);
+				qaws_surface_eval_jet(&jt, surf, xi[2 * i], xi[2 * i + 1], QAWS_SJET_P);
 				project(&pr, jt.d[0].x, jt.d[0].y, jt.d[0].z, &sx, &sy);
 				svg_circle(&s, sx, sy, 2.1, "#cf222e", "#cf222e");
 			}
@@ -109,7 +109,7 @@ static void demo_surface_cdf(void)
 		else
 		{
 			qaws_scalar total = 0;
-			qaws_surface_cdf_sample_tangent(NULL, surf, ms[panel], xi, NULL, SW_N, 0, 0, NULL, out, NULL, NULL, &total);
+			qaws_surface_cdf_sample_tangent(out, NULL, NULL, &total, surf, xi, NULL, NULL, SW_N, ms[panel], 0, 0, NULL);
 			for (i = 0; i < SW_N; i++)
 			{
 				double sx, sy;

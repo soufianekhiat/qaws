@@ -10,12 +10,12 @@
 /* -------------------------------------------------------------------------- */
 
 qaws_status qaws_polyline_import_catmull_rom(
-	qaws_dimension dimension,
+	qaws_curve** out_curve,
 	void const* points,
+	qaws_dimension dimension,
 	unsigned int point_count,
 	qaws_parameterization parameterization,
-	int closed,
-	qaws_curve** out_curve)
+	int closed)
 {
 	qaws_catmull_rom_desc desc;
 
@@ -30,15 +30,15 @@ qaws_status qaws_polyline_import_catmull_rom(
 	desc.parameterization = parameterization;
 	desc.closed = closed;
 
-	return qaws_curve_create_catmull_rom(&desc, out_curve);
+	return qaws_curve_create_catmull_rom(out_curve, &desc);
 }
 
 qaws_status qaws_polyline_import_trajectory(
-	qaws_dimension dimension,
+	qaws_curve** out_curve,
 	void const* points,
+	qaws_dimension dimension,
 	unsigned int point_count,
-	int closed,
-	qaws_curve** out_curve)
+	int closed)
 {
 	qaws_trajectory_desc desc;
 	qaws_scalar times_stack[64];
@@ -72,7 +72,7 @@ qaws_status qaws_polyline_import_trajectory(
 	desc.key_time_count = point_count;
 	desc.closed = closed;
 
-	s = qaws_curve_create_trajectory(&desc, out_curve);
+	s = qaws_curve_create_trajectory(out_curve, &desc);
 
 	if (times != times_stack)
 		qaws_internal_free(times);

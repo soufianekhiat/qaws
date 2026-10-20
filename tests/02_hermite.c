@@ -16,16 +16,16 @@ static void test_hermite(void)
 	desc.derivative_count = 2;
 
 	qaws_curve* curve = NULL;
-	qaws_status s = qaws_curve_create_hermite(&desc, &curve);
+	qaws_status s = qaws_curve_create_hermite(&curve, &desc);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(qaws_curve_get_kind(curve) == QAWS_CURVE_KIND_HERMITE, "kind == HERMITE");
 
 	qaws_eval_result_2d r;
-	s = qaws_curve_evaluate_2d(curve, (qaws_scalar)0.0, QAWS_EVAL_FLAG_POSITION, &r);
+	s = qaws_curve_evaluate_2d(&r, curve, (qaws_scalar)0.0, QAWS_EVAL_FLAG_POSITION);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(approx_eq(r.position.x, (qaws_scalar)0.0), "start x");
 
-	s = qaws_curve_evaluate_2d(curve, (qaws_scalar)1.0, QAWS_EVAL_FLAG_POSITION, &r);
+	s = qaws_curve_evaluate_2d(&r, curve, (qaws_scalar)1.0, QAWS_EVAL_FLAG_POSITION);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(approx_eq(r.position.x, (qaws_scalar)1.0), "end x");
 	TEST_ASSERT(approx_eq(r.position.y, (qaws_scalar)0.0), "end y");
@@ -49,16 +49,16 @@ static void test_hermite_3d(void)
 	desc.derivative_count = 2;
 
 	qaws_curve* curve = NULL;
-	qaws_status s = qaws_curve_create_hermite(&desc, &curve);
+	qaws_status s = qaws_curve_create_hermite(&curve, &desc);
 	TEST_ASSERT_STATUS(s);
 
 	qaws_eval_result_3d r;
-	s = qaws_curve_evaluate_3d(curve, (qaws_scalar)0.0, QAWS_EVAL_FLAG_POSITION, &r);
+	s = qaws_curve_evaluate_3d(&r, curve, (qaws_scalar)0.0, QAWS_EVAL_FLAG_POSITION);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(approx_eq(r.position.x, (qaws_scalar)0.0), "hermite 3d start x");
 	TEST_ASSERT(approx_eq(r.position.z, (qaws_scalar)0.0), "hermite 3d start z");
 
-	s = qaws_curve_evaluate_3d(curve, (qaws_scalar)1.0, QAWS_EVAL_FLAG_POSITION, &r);
+	s = qaws_curve_evaluate_3d(&r, curve, (qaws_scalar)1.0, QAWS_EVAL_FLAG_POSITION);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(approx_eq(r.position.x, (qaws_scalar)1.0), "hermite 3d end x");
 

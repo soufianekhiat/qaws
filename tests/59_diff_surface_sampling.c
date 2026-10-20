@@ -49,7 +49,7 @@ static qaws_surface* ss_surface(int kind, qaws_scalar const* x)
 		d.control_points = (qaws_vec3 const*)x;
 		d.u_point_count = 4;
 		d.v_point_count = 4;
-		qaws_surface_create_bezier(&d, &s);
+		qaws_surface_create_bezier(&s, &d);
 	}
 	else
 	{
@@ -65,7 +65,7 @@ static qaws_surface* ss_surface(int kind, qaws_scalar const* x)
 		d.u_knot_count = 8;
 		d.v_knots = g_ss_knots;
 		d.v_knot_count = 8;
-		qaws_surface_create_nurbs(&d, &s);
+		qaws_surface_create_nurbs(&s, &d);
 	}
 	return s;
 }
@@ -78,11 +78,11 @@ static unsigned int ss_param_count(int kind)
 static qaws_diff_views ss_views(int kind, qaws_field_view* fv, qaws_scalar* data)
 {
 	qaws_diff_views v;
-	fv[0] = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, data, SS_CP, 3);
+	fv[0] = qaws_field_view_make(data, SS_CP, QAWS_FIELD_CONTROL_POINTS, 3);
 	v.field_count = 1;
 	if (kind == 1)
 	{
-		fv[1] = qaws_field_view_make(QAWS_FIELD_WEIGHTS, data + 48, SS_CP, 1);
+		fv[1] = qaws_field_view_make(data + 48, SS_CP, QAWS_FIELD_WEIGHTS, 1);
 		v.field_count = 2;
 	}
 	v.fields = fv;
@@ -136,15 +136,15 @@ static void test_flat(void)
 			x[3 * (i * 4 + j) + 2] = 0;
 		}
 	s = ss_surface(0, x);
-	TEST_ASSERT(qaws_surface_cdf_sample_tangent(NULL, s, NULL, g_ss_xi, NULL, SS_SAMPLES, SS_CELLS, SS_QUAD, NULL, out, NULL, NULL,
-		&total) == QAWS_STATUS_OK, "flat square: samples");
+	TEST_ASSERT(qaws_surface_cdf_sample_tangent(out, NULL, NULL, &total, s, g_ss_xi, NULL, NULL, SS_SAMPLES, NULL, SS_CELLS, SS_QUAD,
+		NULL) == QAWS_STATUS_OK, "flat square: samples");
 	TEST_ASSERT(diff_close(total, 9, 1e3 * DIFF_TOL), "flat square: area 9");
 	for (i = 0; i < SS_SAMPLES; i++)
 		ok &= diff_close(out[i].u, g_ss_xi[2 * i], 1e3 * DIFF_TOL) && diff_close(out[i].v, g_ss_xi[2 * i + 1], 1e3 * DIFF_TOL);
 	TEST_ASSERT(ok, "flat square: (u, v) are the points xi");
 	/* no curvature: the curvature measure is the floor times the area */
-	TEST_ASSERT(qaws_surface_cdf_sample_tangent(NULL, s, &g_ss_curvature, g_ss_xi, NULL, SS_SAMPLES, SS_CELLS, SS_QUAD, NULL, out,
-		NULL, NULL, &total) == QAWS_STATUS_OK, "flat square: curvature samples");
+	TEST_ASSERT(qaws_surface_cdf_sample_tangent(out, NULL, NULL, &total, s, g_ss_xi, NULL, NULL, SS_SAMPLES, &g_ss_curvature,
+		SS_CELLS, SS_QUAD, NULL) == QAWS_STATUS_OK, "flat square: curvature samples");
 	TEST_ASSERT(diff_close(total, 9 * 0.5, 1e3 * DIFF_TOL), "flat square: curvature measure 0.5 x 9");
 	qaws_surface_destroy(s);
 }
@@ -178,9 +178,9 @@ static void test_cylinder(void)
 	d.u_point_count = 3;
 	d.v_point_count = 3;
 	d.weights = w;
-	TEST_ASSERT_STATUS(qaws_surface_create_nurbs(&d, &s));
-	TEST_ASSERT(qaws_surface_cdf_sample_tangent(NULL, s, &g_ss_curvature, g_ss_xi, NULL, SS_SAMPLES, 8, 8, NULL, out, NULL, NULL,
-		&total) == QAWS_STATUS_OK, "quarter cylinder: curvature samples");
+	TEST_ASSERT_STATUS(qaws_surface_create_nurbs(&s, &d));
+	TEST_ASSERT(qaws_surface_cdf_sample_tangent(out, NULL, NULL, &total, s, g_ss_xi, NULL, NULL, SS_SAMPLES, &g_ss_curvature, 8, 8,
+		NULL) == QAWS_STATUS_OK, "quarter cylinder: curvature samples");
 	{
 		char msg[128];
 		sprintf(msg, "quarter cylinder: curvature measure sqrt(1/2) x 3 pi (%.12g vs %.12g)", (double)total, expect);
@@ -215,8 +215,8 @@ static void test_hvp_paths(qaws_sample_measure_desc const* m, char const* name)
 	}
 	sb = ss_surface(0, x);
 	sn = ss_surface(1, x);
-	fd = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, dir, SS_CP, 3);
-	fb = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, hb, SS_CP, 3);
+	fd = qaws_field_view_make(dir, SS_CP, QAWS_FIELD_CONTROL_POINTS, 3);
+	fb = qaws_field_view_make(hb, SS_CP, QAWS_FIELD_CONTROL_POINTS, 3);
 	vd.fields = &fd;
 	vb.fields = &fb;
 	vd.field_count = vb.field_count = 1;
@@ -225,8 +225,8 @@ static void test_hvp_paths(qaws_sample_measure_desc const* m, char const* name)
 	vn = ss_views(1, fn, hn);
 	memset(hb, 0, sizeof(hb));
 	memset(hn, 0, sizeof(hn));
-	TEST_ASSERT_STATUS(qaws_surface_cdf_sample_hvp(NULL, sb, m, g_ss_xi, SS_SAMPLES, SS_CELLS, SS_QUAD, adj, &vd, &vb));
-	TEST_ASSERT_STATUS(qaws_surface_cdf_sample_hvp(NULL, sn, m, g_ss_xi, SS_SAMPLES, SS_CELLS, SS_QUAD, adj, &vd, &vn));
+	TEST_ASSERT_STATUS(qaws_surface_cdf_sample_hvp(&vb, sb, g_ss_xi, adj, &vd, SS_SAMPLES, m, SS_CELLS, SS_QUAD, NULL));
+	TEST_ASSERT_STATUS(qaws_surface_cdf_sample_hvp(&vn, sn, g_ss_xi, adj, &vd, SS_SAMPLES, m, SS_CELLS, SS_QUAD, NULL));
 	for (i = 0; i < 48; i++)
 		ok &= diff_close(hb[i], hn[i], QAWS_SCALAR_IS_FLOAT ? 5e-3 : 1e-9);
 	sprintf(msg, "%s: forward-over-reverse HVP matches the polarized HVP", name);
@@ -264,15 +264,15 @@ static qaws_surface* sk_surface(qaws_scalar const* cps, double s)
 	d.u_knot_count = 9;
 	d.v_knots = vk;
 	d.v_knot_count = 9;
-	qaws_surface_create_bspline(&d, &srf);
+	qaws_surface_create_bspline(&srf, &d);
 	return srf;
 }
 
 static qaws_diff_views sk_views(qaws_field_view* fv, qaws_scalar* u, qaws_scalar* v)
 {
 	qaws_diff_views views;
-	fv[0] = qaws_field_view_make(QAWS_FIELD_U_KNOTS, u, 9, 1);
-	fv[1] = qaws_field_view_make(QAWS_FIELD_V_KNOTS, v, 9, 1);
+	fv[0] = qaws_field_view_make(u, 9, QAWS_FIELD_U_KNOTS, 1);
+	fv[1] = qaws_field_view_make(v, 9, QAWS_FIELD_V_KNOTS, 1);
 	views.fields = fv;
 	views.field_count = 2;
 	views.children = NULL;
@@ -315,10 +315,10 @@ static void test_knots(qaws_sample_measure_desc const* m, char const* name)
 	sp = sk_surface(cps, h);
 	sm = sk_surface(cps, -h);
 	sprintf(msg, "%s: knot tangents", name);
-	TEST_ASSERT(qaws_surface_cdf_sample_tangent(NULL, s, m, g_ss_xi, NULL, SS_SAMPLES, SS_CELLS, SS_QUAD, &vd, NULL, t1, t2, NULL) ==
+	TEST_ASSERT(qaws_surface_cdf_sample_tangent(NULL, t1, t2, NULL, s, g_ss_xi, NULL, &vd, SS_SAMPLES, m, SS_CELLS, SS_QUAD, NULL) ==
 		QAWS_STATUS_OK, msg);
-	qaws_surface_cdf_sample_tangent(NULL, sp, m, g_ss_xi, NULL, SS_SAMPLES, SS_CELLS, SS_QUAD, &vd, vp, t1p, NULL, NULL);
-	qaws_surface_cdf_sample_tangent(NULL, sm, m, g_ss_xi, NULL, SS_SAMPLES, SS_CELLS, SS_QUAD, &vd, vm, t1m, NULL, NULL);
+	qaws_surface_cdf_sample_tangent(vp, t1p, NULL, NULL, sp, g_ss_xi, NULL, &vd, SS_SAMPLES, m, SS_CELLS, SS_QUAD, NULL);
+	qaws_surface_cdf_sample_tangent(vm, t1m, NULL, NULL, sm, g_ss_xi, NULL, &vd, SS_SAMPLES, m, SS_CELLS, SS_QUAD, NULL);
 	for (i = 0; i < SS_SAMPLES; i++)
 	{
 		ok1 &= diff_close(t1[i].u, (vp[i].u - vm[i].u) / (2 * h), tol) && diff_close(t1[i].v, (vp[i].v - vm[i].v) / (2 * h), tol);
@@ -343,7 +343,7 @@ static void test_knots(qaws_sample_measure_desc const* m, char const* name)
 	}
 	memset(gu, 0, sizeof(gu));
 	memset(gv, 0, sizeof(gv));
-	TEST_ASSERT_STATUS(qaws_surface_cdf_sample_adjoint(NULL, s, m, g_ss_xi, SS_SAMPLES, SS_CELLS, SS_QUAD, adj, &vg, NULL));
+	TEST_ASSERT_STATUS(qaws_surface_cdf_sample_adjoint(&vg, NULL, s, g_ss_xi, adj, SS_SAMPLES, m, SS_CELLS, SS_QUAD, NULL));
 	{
 		double lhs = ss_dot(adj, t1, SS_SAMPLES), rhs = diff_dot(gu, du, 9) + diff_dot(gv, dv, 9);
 		sprintf(msg, "%s: knot adjoint identity (%.12g vs %.12g)", name, lhs, rhs);
@@ -357,9 +357,9 @@ static void test_knots(qaws_sample_measure_desc const* m, char const* name)
 	memset(gmu, 0, sizeof(gmu));
 	memset(gmv, 0, sizeof(gmv));
 	sprintf(msg, "%s: knot HVP", name);
-	TEST_ASSERT(qaws_surface_cdf_sample_hvp(NULL, s, m, g_ss_xi, SS_SAMPLES, SS_CELLS, SS_QUAD, adj, &vd, &vh) == QAWS_STATUS_OK, msg);
-	qaws_surface_cdf_sample_adjoint(NULL, sp, m, g_ss_xi, SS_SAMPLES, SS_CELLS, SS_QUAD, adj, &vgp, NULL);
-	qaws_surface_cdf_sample_adjoint(NULL, sm, m, g_ss_xi, SS_SAMPLES, SS_CELLS, SS_QUAD, adj, &vgm, NULL);
+	TEST_ASSERT(qaws_surface_cdf_sample_hvp(&vh, s, g_ss_xi, adj, &vd, SS_SAMPLES, m, SS_CELLS, SS_QUAD, NULL) == QAWS_STATUS_OK, msg);
+	qaws_surface_cdf_sample_adjoint(&vgp, NULL, sp, g_ss_xi, adj, SS_SAMPLES, m, SS_CELLS, SS_QUAD, NULL);
+	qaws_surface_cdf_sample_adjoint(&vgm, NULL, sm, g_ss_xi, adj, SS_SAMPLES, m, SS_CELLS, SS_QUAD, NULL);
 	for (i = 0; i < 9; i++)
 		okh &= diff_close(hu[i], (gpu[i] - gmu[i]) / (2 * h), QAWS_SCALAR_IS_FLOAT ? 5e-2 : 1e-5) &&
 			diff_close(hv[i], (gpv[i] - gmv[i]) / (2 * h), QAWS_SCALAR_IS_FLOAT ? 5e-2 : 1e-5);
@@ -375,7 +375,7 @@ static double ss_quadratic(qaws_surface const* s, qaws_sample_measure_desc const
 	qaws_diff_views const* x)
 {
 	qaws_surface_cdf_sample t2[SS_SAMPLES];
-	qaws_surface_cdf_sample_tangent(NULL, s, m, g_ss_xi, NULL, SS_SAMPLES, SS_CELLS, SS_QUAD, x, NULL, NULL, t2, NULL);
+	qaws_surface_cdf_sample_tangent(NULL, NULL, t2, NULL, s, g_ss_xi, NULL, x, SS_SAMPLES, m, SS_CELLS, SS_QUAD, NULL);
 	return ss_dot(adj, t2, SS_SAMPLES);
 }
 
@@ -409,7 +409,7 @@ static void test_rational_hvp(qaws_sample_measure_desc const* m, char const* nam
 	vde = ss_views(1, fde, de);
 	memset(hv, 0, sizeof(hv));
 	t0 = (double)clock();
-	TEST_ASSERT_STATUS(qaws_surface_cdf_sample_hvp(NULL, s, m, g_ss_xi, SS_SAMPLES, SS_CELLS, SS_QUAD, adj, &vd, &vh));
+	TEST_ASSERT_STATUS(qaws_surface_cdf_sample_hvp(&vh, s, g_ss_xi, adj, &vd, SS_SAMPLES, m, SS_CELLS, SS_QUAD, NULL));
 	t_fast = ((double)clock() - t0) / CLOCKS_PER_SEC;
 	t0 = (double)clock();
 	qd = ss_quadratic(s, m, adj, &vd);
@@ -438,7 +438,7 @@ static void ss_values(int kind, qaws_sample_measure_desc const* m, qaws_scalar c
 	qaws_diff_views const* dir, qaws_scalar const* xid, qaws_surface_cdf_sample* val, qaws_surface_cdf_sample* t1)
 {
 	qaws_surface* s = ss_surface(kind, x);
-	qaws_surface_cdf_sample_tangent(NULL, s, m, xi, xid, SS_SAMPLES, SS_CELLS, SS_QUAD, dir, val, t1, NULL, NULL);
+	qaws_surface_cdf_sample_tangent(val, t1, NULL, NULL, s, xi, xid, dir, SS_SAMPLES, m, SS_CELLS, SS_QUAD, NULL);
 	qaws_surface_destroy(s);
 }
 
@@ -465,7 +465,7 @@ static void test_surface(int kind, qaws_sample_measure_desc const* m, char const
 	vg = ss_views(kind, fg, grad);
 	vh = ss_views(kind, fh, hv);
 	s = ss_surface(kind, x);
-	TEST_ASSERT(qaws_surface_cdf_sample_tangent(NULL, s, m, g_ss_xi, xid, SS_SAMPLES, SS_CELLS, SS_QUAD, &vd, val, t1, t2, NULL) ==
+	TEST_ASSERT(qaws_surface_cdf_sample_tangent(val, t1, t2, NULL, s, g_ss_xi, xid, &vd, SS_SAMPLES, m, SS_CELLS, SS_QUAD, NULL) ==
 		QAWS_STATUS_OK, name);
 	for (i = 0; i < np; i++)
 	{
@@ -504,7 +504,7 @@ static void test_surface(int kind, qaws_sample_measure_desc const* m, char const
 	}
 	memset(grad, 0, sizeof(grad));
 	memset(xadj, 0, sizeof(xadj));
-	qaws_surface_cdf_sample_adjoint(NULL, s, m, g_ss_xi, SS_SAMPLES, SS_CELLS, SS_QUAD, adj, &vg, xadj);
+	qaws_surface_cdf_sample_adjoint(&vg, xadj, s, g_ss_xi, adj, SS_SAMPLES, m, SS_CELLS, SS_QUAD, NULL);
 	{
 		double lhs = ss_dot(adj, t1, SS_SAMPLES), rhs = diff_dot(grad, dir, np) + diff_dot(xadj, xid, 2 * SS_SAMPLES);
 		sprintf(msg, "%s: adjoint identity (%.12g vs %.12g)", name, lhs, rhs);
@@ -522,10 +522,10 @@ static void test_surface(int kind, qaws_sample_measure_desc const* m, char const
 		memset(hv, 0, sizeof(hv));
 		memset(gp, 0, sizeof(gp));
 		memset(gm, 0, sizeof(gm));
-		TEST_ASSERT(qaws_surface_cdf_sample_hvp(NULL, s, m, g_ss_xi, SS_SAMPLES, SS_CELLS, SS_QUAD, adj, &vd, &vh) == QAWS_STATUS_OK,
+		TEST_ASSERT(qaws_surface_cdf_sample_hvp(&vh, s, g_ss_xi, adj, &vd, SS_SAMPLES, m, SS_CELLS, SS_QUAD, NULL) == QAWS_STATUS_OK,
 			name);
-		qaws_surface_cdf_sample_adjoint(NULL, sp, m, g_ss_xi, SS_SAMPLES, SS_CELLS, SS_QUAD, adj, &vgp, NULL);
-		qaws_surface_cdf_sample_adjoint(NULL, sm, m, g_ss_xi, SS_SAMPLES, SS_CELLS, SS_QUAD, adj, &vgm, NULL);
+		qaws_surface_cdf_sample_adjoint(&vgp, NULL, sp, g_ss_xi, adj, SS_SAMPLES, m, SS_CELLS, SS_QUAD, NULL);
+		qaws_surface_cdf_sample_adjoint(&vgm, NULL, sm, g_ss_xi, adj, SS_SAMPLES, m, SS_CELLS, SS_QUAD, NULL);
 		for (k = 0; k < np; k++)
 			okh &= diff_close(hv[k], (gp[k] - gm[k]) / (2 * h), QAWS_SCALAR_IS_FLOAT ? 5e-2 : 1e-5);
 		sprintf(msg, "%s: HVP matches finite differences of the gradient", name);
@@ -538,7 +538,7 @@ static void test_surface(int kind, qaws_sample_measure_desc const* m, char const
 			qaws_diff_views vu = ss_views(kind, fu, u), vhu = ss_views(kind, fhu, hu);
 			diff_rand_fill(u, np);
 			memset(hu, 0, sizeof(hu));
-			qaws_surface_cdf_sample_hvp(NULL, s, m, g_ss_xi, SS_SAMPLES, SS_CELLS, SS_QUAD, adj, &vu, &vhu);
+			qaws_surface_cdf_sample_hvp(&vhu, s, g_ss_xi, adj, &vu, SS_SAMPLES, m, SS_CELLS, SS_QUAD, NULL);
 			sprintf(msg, "%s: HVP is symmetric", name);
 			TEST_ASSERT(diff_close(diff_dot(u, hv, np), diff_dot(dir, hu, np), QAWS_SCALAR_IS_FLOAT ? 5e-2 : 1e-6), msg);
 		}
@@ -631,10 +631,10 @@ static void ref_errors(ss_ref const* r, unsigned int cells, unsigned int quadrat
 	memset(e, 0, sizeof(double) * 5);
 	memset(grad, 0, sizeof(grad));
 	memset(hv, 0, sizeof(hv));
-	TEST_ASSERT_STATUS(qaws_surface_cdf_sample_tangent(NULL, s, r->measure, xi, NULL, SS_SAMPLES, cells, quadrature, &vd, val, t1, t2,
-		&total));
-	TEST_ASSERT_STATUS(qaws_surface_cdf_sample_adjoint(NULL, s, r->measure, xi, SS_SAMPLES, cells, quadrature, adj, &vg, NULL));
-	TEST_ASSERT_STATUS(qaws_surface_cdf_sample_hvp(NULL, s, r->measure, xi, SS_SAMPLES, cells, quadrature, adj, &vd, &vh));
+	TEST_ASSERT_STATUS(qaws_surface_cdf_sample_tangent(val, t1, t2, &total, s, xi, NULL, &vd, SS_SAMPLES, r->measure, cells, quadrature,
+		NULL));
+	TEST_ASSERT_STATUS(qaws_surface_cdf_sample_adjoint(&vg, NULL, s, xi, adj, SS_SAMPLES, r->measure, cells, quadrature, NULL));
+	TEST_ASSERT_STATUS(qaws_surface_cdf_sample_hvp(&vh, s, xi, adj, &vd, SS_SAMPLES, r->measure, cells, quadrature, NULL));
 	e[0] = ref_err(total, r->total[0]);
 	for (i = 0; i < SS_SAMPLES; i++)
 	{

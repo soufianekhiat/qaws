@@ -79,7 +79,7 @@ static void test_rational_core(void)
 			d.control_point_count = deg + 1;
 			d.weights = ws;
 			d.weight_count = deg + 1;
-			if (qaws_curve_create_rational_bezier(&d, &rc) != QAWS_STATUS_OK)
+			if (qaws_curve_create_rational_bezier(&rc, &d) != QAWS_STATUS_OK)
 			{
 				TEST_ASSERT(0, "rational Bezier created");
 				continue;
@@ -96,14 +96,14 @@ static void test_rational_core(void)
 					{
 						qaws_eval_result_2d r;
 						qaws_eval_2d core = qaws_rational_bezier_eval_2d(hom, (int)deg, t, flags);
-						qaws_curve_evaluate_2d(rc, t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2, &r);
+						qaws_curve_evaluate_2d(&r, rc, t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2);
 						e = ec_err2(core.d2, r.d2) + ec_err2(core.position, r.position) + (f ? ec_err2(core.d1, r.d1) : 0);
 					}
 					else
 					{
 						qaws_eval_result_3d r;
 						qaws_eval_3d core = qaws_rational_bezier_eval_3d(hom, (int)deg, t, flags);
-						qaws_curve_evaluate_3d(rc, t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2, &r);
+						qaws_curve_evaluate_3d(&r, rc, t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2);
 						e = ec_err3(core.d2, r.d2) + ec_err3(core.position, r.position) + (f ? ec_err3(core.d1, r.d1) : 0);
 					}
 					worst = e > worst ? e : worst;
@@ -145,7 +145,7 @@ static void test_surface_core_flags(void)
 	d.control_points = grid;
 	d.u_point_count = 4;
 	d.v_point_count = 4;
-	if (qaws_surface_create_bezier(&d, &s) != QAWS_STATUS_OK)
+	if (qaws_surface_create_bezier(&s, &d) != QAWS_STATUS_OK)
 	{
 		TEST_ASSERT(0, "Bezier surface created");
 		return;
@@ -156,8 +156,8 @@ static void test_surface_core_flags(void)
 		qaws_surface_eval_result r;
 		qaws_surface_eval_3d c;
 		double e;
-		qaws_surface_evaluate(s, u, v, QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_DU | QAWS_SURFACE_EVAL_DV | QAWS_SURFACE_EVAL_NORMAL
-			| QAWS_SURFACE_EVAL_DUU | QAWS_SURFACE_EVAL_DUV | QAWS_SURFACE_EVAL_DVV, &r);
+		qaws_surface_evaluate(&r, s, u, v, QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_DU | QAWS_SURFACE_EVAL_DV | QAWS_SURFACE_EVAL_NORMAL
+			| QAWS_SURFACE_EVAL_DUU | QAWS_SURFACE_EVAL_DUV | QAWS_SURFACE_EVAL_DVV);
 		c = qaws_surface_bezier_eval_3d(flat, 3, 3, 4, u, v, QAWS_SURFACE_EVAL_DUU | QAWS_SURFACE_EVAL_DUV | QAWS_SURFACE_EVAL_DVV);
 		e = ec_err3(c.duu, r.duu) + ec_err3(c.duv, r.duv) + ec_err3(c.dvv, r.dvv);
 		c = qaws_surface_bezier_eval_3d(flat, 3, 3, 4, u, v, QAWS_SURFACE_EVAL_NORMAL);
@@ -194,7 +194,7 @@ static void test_inline_copy(void)
 	pd.degree = 2;
 	pd.coefficients = coef;
 	pd.coefficient_count = 3;
-	TEST_ASSERT(qaws_curve_init_bezier_inline(&bd, &a) == QAWS_STATUS_OK && qaws_curve_init_polynomial_inline(&pd, &p) == QAWS_STATUS_OK,
+	TEST_ASSERT(qaws_curve_init_bezier_inline(&a, &bd) == QAWS_STATUS_OK && qaws_curve_init_polynomial_inline(&p, &pd) == QAWS_STATUS_OK,
 		"inline curves initialised");
 	b = a;
 	memcpy(&q, &p, sizeof q);
@@ -202,13 +202,13 @@ static void test_inline_copy(void)
 	{
 		qaws_eval_result_3d ra, rb, rp, rq;
 		qaws_scalar t = (qaws_scalar)(k / 8.0);
-		qaws_curve_evaluate_3d(qaws_curve_inline_get_curve(&a), t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &ra);
-		qaws_curve_evaluate_3d(qaws_curve_inline_get_curve(&p), t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &rp);
+		qaws_curve_evaluate_3d(&ra, qaws_curve_inline_get_curve(&a), t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1);
+		qaws_curve_evaluate_3d(&rp, qaws_curve_inline_get_curve(&p), t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1);
 		/* the originals overwritten: the copies must not read them */
 		memset(&a, 0x5a, sizeof a);
 		memset(&p, 0x5a, sizeof p);
-		qaws_curve_evaluate_3d(qaws_curve_inline_get_curve(&b), t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &rb);
-		qaws_curve_evaluate_3d(qaws_curve_inline_get_curve(&q), t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &rq);
+		qaws_curve_evaluate_3d(&rb, qaws_curve_inline_get_curve(&b), t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1);
+		qaws_curve_evaluate_3d(&rq, qaws_curve_inline_get_curve(&q), t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1);
 		bad += memcmp(&ra, &rb, sizeof ra) != 0 || memcmp(&rp, &rq, sizeof rp) != 0;
 		a = b;
 		p = q;
@@ -229,9 +229,9 @@ static double ec_wrapper_fd(qaws_curve const* c, double* unit)
 		qaws_scalar s = r.min_value + (r.max_value - r.min_value) * (qaws_scalar)k / 10;
 		qaws_eval_result_2d m, p, z;
 		qaws_vec2 fd1, fd2, fd3;
-		qaws_curve_evaluate_2d(c, s, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2 | QAWS_EVAL_FLAG_D3, &z);
-		qaws_curve_evaluate_2d(c, s - (qaws_scalar)h, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2, &m);
-		qaws_curve_evaluate_2d(c, s + (qaws_scalar)h, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2, &p);
+		qaws_curve_evaluate_2d(&z, c, s, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2 | QAWS_EVAL_FLAG_D3);
+		qaws_curve_evaluate_2d(&m, c, s - (qaws_scalar)h, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2);
+		qaws_curve_evaluate_2d(&p, c, s + (qaws_scalar)h, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2);
 		fd1.x = (qaws_scalar)(((double)p.position.x - m.position.x) / (2 * h));
 		fd1.y = (qaws_scalar)(((double)p.position.y - m.position.y) / (2 * h));
 		fd2.x = (qaws_scalar)(((double)p.d1.x - m.d1.x) / (2 * h));
@@ -266,18 +266,18 @@ static void test_arc_length_wrappers(void)
 	d.degree = 3;
 	d.control_points = pa;
 	d.control_point_count = 4;
-	qaws_curve_create_bezier(&d, &a);
+	qaws_curve_create_bezier(&a, &d);
 	d.degree = 2;
 	d.control_points = pb;
 	d.control_point_count = 3;
-	qaws_curve_create_bezier(&d, &b);
-	if (!a || !b || qaws_curve_reparameterize_arc_length(a, 2048, &ra) != QAWS_STATUS_OK || qaws_curve_match_arc_length(a, b, 2048, &mb) != QAWS_STATUS_OK)
+	qaws_curve_create_bezier(&b, &d);
+	if (!a || !b || qaws_curve_reparameterize_arc_length(&ra, a, 2048) != QAWS_STATUS_OK || qaws_curve_match_arc_length(&mb, a, b, 2048) != QAWS_STATUS_OK)
 	{
 		TEST_ASSERT(0, "arc-length wrappers created");
 		return;
 	}
-	qaws_curve_compute_arc_length(a, 0, 1, &la);
-	qaws_curve_compute_arc_length(b, 0, 1, &lb);
+	qaws_curve_compute_arc_length(&la, a, 0, 1);
+	qaws_curve_compute_arc_length(&lb, b, 0, 1);
 	ea = ec_wrapper_fd(ra, &ua);
 	ub = (double)lb / la;
 	eb = ec_wrapper_fd(mb, &ub);
@@ -340,7 +340,7 @@ static void test_spline_cores(void)
 	pd.coefficients = coef;
 	pd.coefficient_count = 4;
 	{
-		qaws_status s1 = qaws_curve_create_bspline(&bd, &bs), s2 = qaws_curve_create_nurbs(&nd, &nu), s3 = qaws_curve_create_polynomial(&pd, &po);
+		qaws_status s1 = qaws_curve_create_bspline(&bs, &bd), s2 = qaws_curve_create_nurbs(&nu, &nd), s3 = qaws_curve_create_polynomial(&po, &pd);
 		sprintf(msg, "spline curves created: B-spline %s, NURBS %s, polynomial %s", qaws_status_to_string(s1), qaws_status_to_string(s2),
 			qaws_status_to_string(s3));
 	}
@@ -370,10 +370,10 @@ static void test_spline_cores(void)
 			lw[j] = ws[span - 3 + (int)j];
 		}
 		c = qaws_bspline_eval_3d(lcp, lk, 3, 3, t, 7);
-		qaws_curve_evaluate_3d(bs, t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2, &r);
+		qaws_curve_evaluate_3d(&r, bs, t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2);
 		eb = fmax(eb, ec_err3(c.position, r.position) + ec_err3(c.d1, r.d1) + ec_err3(c.d2, r.d2));
 		c = qaws_nurbs_eval_3d(lcp, lk, lw, 3, 3, t, 7);
-		qaws_curve_evaluate_3d(nu, t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2, &r);
+		qaws_curve_evaluate_3d(&r, nu, t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2);
 		en = fmax(en, ec_err3(c.position, r.position) + ec_err3(c.d1, r.d1) + ec_err3(c.d2, r.d2));
 		/* the cubic core's a t^3 + b t^2 + c t + d against the monomial curve sum coef[i] t^i on [0, 1] */
 		if (s <= 10)
@@ -384,7 +384,7 @@ static void test_spline_cores(void)
 			cc.x = coef[3]; cc.y = coef[4]; cc.z = coef[5];
 			d.x = coef[0]; d.y = coef[1]; d.z = coef[2];
 			c = qaws_cubic_eval_3d(a, b, cc, d, u, 7);
-			qaws_curve_evaluate_3d(po, u, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2, &r);
+			qaws_curve_evaluate_3d(&r, po, u, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2);
 			ec = fmax(ec, ec_err3(c.position, r.position) + ec_err3(c.d1, r.d1) + ec_err3(c.d2, r.d2));
 		}
 	}
@@ -424,14 +424,14 @@ static void test_spline_cores(void)
 		sd.u_knot_count = 10;
 		sd.v_knots = vks;
 		sd.v_knot_count = 8;
-		if (qaws_surface_create_bspline(&sd, &sf) == QAWS_STATUS_OK)
+		if (qaws_surface_create_bspline(&sf, &sd) == QAWS_STATUS_OK)
 		{
 			for (s = 0; s < 49; s++)
 			{
 				qaws_scalar u = (qaws_scalar)((s % 7) / 6.0), v = (qaws_scalar)((s / 7) / 6.0);
 				qaws_surface_eval_result r;
 				qaws_surface_eval_3d c;
-				qaws_surface_evaluate(sf, u, v, 127, &r);
+				qaws_surface_evaluate(&r, sf, u, v, 127);
 				c = qaws_surface_bspline_eval_3d(flat, fu, fv, 3, 2, 6, 5, qaws_find_span(fu, 3, 6, u), qaws_find_span(fv, 2, 5, v), u, v, 127);
 				es = fmax(es, ec_err3(c.position, r.position) + ec_err3(c.du, r.du) + ec_err3(c.dv, r.dv) + ec_err3(c.normal, r.normal)
 					+ ec_err3(c.duu, r.duu) + ec_err3(c.duv, r.duv) + ec_err3(c.dvv, r.dvv));
@@ -487,7 +487,7 @@ static void test_curve_records(void)
 	memset(&nd, 0, sizeof nd);
 	nd.dimension = QAWS_DIMENSION_2D; nd.degree = 5; nd.control_points = ec_rec_points + 64 * 3; nd.control_point_count = 40;
 	nd.knots = ec_rec_knots + 68; nd.knot_count = 46; nd.weights = ec_rec_weights; nd.weight_count = 40;
-	if (qaws_curve_create_bspline(&bd, &bs) != QAWS_STATUS_OK || qaws_curve_create_nurbs(&nd, &nu) != QAWS_STATUS_OK)
+	if (qaws_curve_create_bspline(&bs, &bd) != QAWS_STATUS_OK || qaws_curve_create_nurbs(&nu, &nd) != QAWS_STATUS_OK)
 	{
 		TEST_ASSERT(0, "record curves created");
 		qaws_curve_destroy(bs);
@@ -502,10 +502,10 @@ static void test_curve_records(void)
 		qaws_vec2 p2, d12, d22;
 		qaws_scalar tb = (qaws_scalar)(61.0 * i / 300), tn = (qaws_scalar)(35.0 * i / 300);
 		c = qaws_record_eval_3d(rb, tb, 7);
-		qaws_curve_evaluate_3d(bs, tb, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2, &r3);
+		qaws_curve_evaluate_3d(&r3, bs, tb, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2);
 		eb = fmax(eb, ec_err3(c.position, r3.position) + ec_err3(c.d1, r3.d1) + ec_err3(c.d2, r3.d2));
 		c = qaws_record_eval_3d(rn, tn, 7);
-		qaws_curve_evaluate_2d(nu, tn, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2, &r2);
+		qaws_curve_evaluate_2d(&r2, nu, tn, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2);
 		p2.x = c.position.x; p2.y = c.position.y;
 		d12.x = c.d1.x; d12.y = c.d1.y;
 		d22.x = c.d2.x; d22.y = c.d2.y;
@@ -556,7 +556,7 @@ static void test_surface_records(void)
 	memset(&nd, 0, sizeof nd);
 	nd.u_degree = 2; nd.v_degree = 3; nd.control_points = gn; nd.u_point_count = 12; nd.v_point_count = 10; nd.weights = ec_rec_weights + 40;
 	nd.u_knots = ec_rec_knots + 156; nd.u_knot_count = 15; nd.v_knots = ec_rec_knots + 171; nd.v_knot_count = 14;
-	if (qaws_surface_create_bspline(&bd, &bs) != QAWS_STATUS_OK || qaws_surface_create_nurbs(&nd, &nu) != QAWS_STATUS_OK)
+	if (qaws_surface_create_bspline(&bs, &bd) != QAWS_STATUS_OK || qaws_surface_create_nurbs(&nu, &nd) != QAWS_STATUS_OK)
 	{
 		TEST_ASSERT(0, "record surfaces created");
 		qaws_surface_destroy(bs);
@@ -570,13 +570,13 @@ static void test_surface_records(void)
 			qaws_surface_eval_3d c;
 			qaws_scalar u = (qaws_scalar)(17.0 * i / 20), v = (qaws_scalar)(13.0 * j / 20);
 			c = qaws_surface_record_eval(rb, u, v, 127);
-			qaws_surface_evaluate(bs, u, v, 127, &o);
+			qaws_surface_evaluate(&o, bs, u, v, 127);
 			eb = fmax(eb, ec_err3(c.position, o.position) + ec_err3(c.du, o.du) + ec_err3(c.dv, o.dv) + ec_err3(c.normal, o.normal)
 				+ ec_err3(c.duu, o.duu) + ec_err3(c.duv, o.duv) + ec_err3(c.dvv, o.dvv));
 			u = (qaws_scalar)(10.0 * i / 20);
 			v = (qaws_scalar)(7.0 * j / 20);
 			c = qaws_surface_record_eval(rn, u, v, 127);
-			qaws_surface_evaluate(nu, u, v, 127, &o);
+			qaws_surface_evaluate(&o, nu, u, v, 127);
 			en = fmax(en, ec_err3(c.position, o.position) + ec_err3(c.du, o.du) + ec_err3(c.dv, o.dv) + ec_err3(c.normal, o.normal)
 				+ ec_err3(c.duu, o.duu) + ec_err3(c.duv, o.duv) + ec_err3(c.dvv, o.dvv));
 		}

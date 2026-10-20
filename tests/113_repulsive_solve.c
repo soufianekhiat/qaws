@@ -42,7 +42,7 @@ static qaws_repulsive_curves* rs_make(unsigned int dim, unsigned int nv, unsigne
 	memset(&d, 0, sizeof(d));
 	d.dimension = dim; d.vertex_count = nv; d.edges = edges; d.edge_count = ne;
 	d.alpha = (qaws_scalar)alpha; d.beta = (qaws_scalar)beta;
-	qaws_repulsive_curves_create(&d, &c);
+	qaws_repulsive_curves_create(&c, &d);
 	return c;
 }
 
@@ -59,7 +59,7 @@ static void test_metric(void)
 		double A[64], x[24], err = 0, m = 0, asym = 0, row = 0, psd = 1e300;
 		qaws_status st;
 		for (i = 0; i < k[t].nv * k[t].dim; i++) x[i] = (double)(qaws_scalar)k[t].x[i];
-		st = c ? qaws_internal_repulsive_curves_metric(c, x, A) : QAWS_STATUS_INVALID_ARGUMENT;
+		st = c ? qaws_internal_repulsive_curves_metric(A, c, x) : QAWS_STATUS_INVALID_ARGUMENT;
 		for (i = 0; i < k[t].nv * k[t].nv; i++) { err = fmax(err, fabs(A[i] - k[t].A[i])); m = fmax(m, fabs(k[t].A[i])); }
 		for (i = 0; i < k[t].nv; i++)
 		{
@@ -124,11 +124,11 @@ static void test_trefoil(void)
 	for (i = 0; i < N; i++) l0[i] = rs_len(x, 3, e[2 * i], e[2 * i + 1]);
 	memset(&sd, 0, sizeof(sd));
 	sd.hold_edge_lengths = 1;
-	st = qaws_repulsive_curves_solver_create(c, &sd, x, &s);
+	st = qaws_repulsive_curves_solver_create(&s, c, x, &sd);
 	/* the direction: each edge length's derivative along it is 0; it descends */
 	memset(dE, 0, sizeof(dE));
-	if (st == QAWS_STATUS_OK) st = qaws_repulsive_curves_solver_direction(s, x, g);
-	qaws_repulsive_curves_gradient(c, x, 1, dE, &E0);
+	if (st == QAWS_STATUS_OK) st = qaws_repulsive_curves_solver_direction(g, s, x);
+	qaws_repulsive_curves_gradient(dE, &E0, c, x, 1);
 	for (i = 0; i < N; i++)
 	{
 		unsigned int a = e[2 * i], b = e[2 * i + 1], q;
@@ -141,7 +141,7 @@ static void test_trefoil(void)
 	TEST_ASSERT(st == QAWS_STATUS_OK && tang <= (RS_F32 ? 1e-5 : 1e-12) * gn && gd > 0, msg);
 	for (it = 0; it < 100 && st == QAWS_STATUS_OK; it++)
 	{
-		st = qaws_repulsive_curves_solver_step(s, x, &r);
+		st = qaws_repulsive_curves_solver_step(&r, x, s);
 		if ((double)r.energy > prev) mono = 0;
 		prev = (double)r.energy;
 		if (r.reason != QAWS_REPULSIVE_RUNNING)
@@ -180,7 +180,7 @@ static void test_pinned(void)
 	memset(&sd, 0, sizeof(sd));
 	sd.pinned = pins; sd.pinned_count = 2; sd.tangent_edges = tans; sd.tangent_edge_count = 2;
 	sd.hold_total_length = 1; sd.collision_checked = 1; sd.max_iterations = 60;
-	st = qaws_repulsive_curves_solve(c, &sd, x, &r);
+	st = qaws_repulsive_curves_solve(&r, x, c, &sd);
 	for (i = 0; i + 1 < N; i++) L1 += rs_len(x, 2, i, i + 1);
 	perr = fmax(fmax(fabs((double)x[0] - x0[0]), fabs((double)x[1] - x0[1])), fmax(fabs((double)x[2 * N - 2] - x0[2 * N - 2]), fabs((double)x[2 * N - 1] - x0[2 * N - 1])));
 	for (i = 0; i < 2; i++)
@@ -247,7 +247,7 @@ static void test_hopf(void)
 	c = rs_make(3, 2 * M, e, 2 * M, 0, 0);
 	memset(&sd, 0, sizeof(sd));
 	sd.hold_edge_lengths = 1; sd.collision_checked = 1; sd.max_iterations = 60;
-	st = qaws_repulsive_curves_solve(c, &sd, x, &r);
+	st = qaws_repulsive_curves_solve(&r, x, c, &sd);
 	lk1 = rs_linking(x, M, x + 3 * M, M);
 	sprintf(msg, "Hopf link, collision-checked: reason %d after %u steps, E %.5f from %.5f, linking number %.4f -> %.4f",
 		(int)r.reason, r.iterations, (double)r.energy, (double)r.initial_energy, lk0, lk1);
@@ -300,20 +300,20 @@ static void test_adapter(void)
 	as.radius = 1; as.angle_end = (qaws_scalar)(2 * RS_PI);
 	memset(&ad, 0, sizeof(ad));
 	ad.dimension = QAWS_DIMENSION_2D; ad.segments = &as; ad.segment_count = 1;
-	qaws_curve_create_arc(&ad, &cv[0]);
+	qaws_curve_create_arc(&cv[0], &ad);
 	memset(&bd, 0, sizeof(bd));
 	bd.dimension = QAWS_DIMENSION_2D; bd.degree = 3; bd.control_points = bcp; bd.control_point_count = 4;
-	qaws_curve_create_bezier(&bd, &cv[1]);
+	qaws_curve_create_bezier(&cv[1], &bd);
 	memset(&pd, 0, sizeof(pd));
 	pd.curves = (qaws_curve const* const*)cv; pd.curve_count = 2; pd.dimension = 2; pd.edge_length = (qaws_scalar)0.15;
-	s0 = qaws_repulsive_polyline_from_curves(&pd, NULL, 0, NULL, 0, NULL, NULL, &nv, &ne);   /* sizing */
+	s0 = qaws_repulsive_polyline_from_curves(NULL, NULL, NULL, NULL, &nv, &ne, 0, 0, &pd);   /* sizing */
 	x = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 2 * (nv + 1)); t = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (nv + 1));
 	e = (unsigned int*)malloc(sizeof(unsigned int) * 2 * (ne + 1)); src = (unsigned int*)malloc(sizeof(unsigned int) * (nv + 1));
-	s1 = qaws_repulsive_polyline_from_curves(&pd, x, nv, e, ne, src, t, &nv, &ne);
+	s1 = qaws_repulsive_polyline_from_curves(x, e, src, t, &nv, &ne, nv, ne, &pd);
 	for (i = 0; s1 == QAWS_STATUS_OK && i < nv; i++)
 	{
 		qaws_eval_result_2d ev;
-		qaws_curve_evaluate_2d(cv[src[i]], t[i], QAWS_EVAL_FLAG_POSITION, &ev);
+		qaws_curve_evaluate_2d(&ev, cv[src[i]], t[i], QAWS_EVAL_FLAG_POSITION);
 		at = fmax(at, hypot((double)ev.position.x - x[2 * i], (double)ev.position.y - x[2 * i + 1]));
 		loop_v += src[i] == 0;
 	}
@@ -329,21 +329,21 @@ static void test_adapter(void)
 	{
 		memset(&sd, 0, sizeof(sd));
 		sd.hold_edge_lengths = 1; sd.collision_checked = 1; sd.max_iterations = 25;
-		s2 = qaws_repulsive_curves_solve(c, &sd, x, &r);
-		s3 = qaws_repulsive_polyline_to_curve(2, x, nv, src, t, 0, cv[0], &fit[0]);
-		if (s3 == QAWS_STATUS_OK) s3 = qaws_repulsive_polyline_to_curve(2, x, nv, src, t, 1, cv[1], &fit[1]);
+		s2 = qaws_repulsive_curves_solve(&r, x, c, &sd);
+		s3 = qaws_repulsive_polyline_to_curve(&fit[0], x, src, t, nv, 2, 0, cv[0]);
+		if (s3 == QAWS_STATUS_OK) s3 = qaws_repulsive_polyline_to_curve(&fit[1], x, src, t, nv, 2, 1, cv[1]);
 		/* the refits through the moved vertices at their source parameters */
 		for (i = 0; s3 == QAWS_STATUS_OK && i < nv; i++)
 		{
 			qaws_eval_result_2d ev;
-			qaws_curve_evaluate_2d(fit[src[i]], t[i], QAWS_EVAL_FLAG_POSITION, &ev);
+			qaws_curve_evaluate_2d(&ev, fit[src[i]], t[i], QAWS_EVAL_FLAG_POSITION);
 			back = fmax(back, hypot((double)ev.position.x - x[2 * i], (double)ev.position.y - x[2 * i + 1]));
 		}
 		if (s3 == QAWS_STATUS_OK)
 		{
 			/* the loop closes at the source's end parameter */
 			qaws_eval_result_2d ev;
-			qaws_curve_evaluate_2d(fit[0], qaws_curve_get_parameter_range(cv[0]).max_value, QAWS_EVAL_FLAG_POSITION, &ev);
+			qaws_curve_evaluate_2d(&ev, fit[0], qaws_curve_get_parameter_range(cv[0]).max_value, QAWS_EVAL_FLAG_POSITION);
 			back = fmax(back, hypot((double)ev.position.x - x[0], (double)ev.position.y - x[1]));
 		}
 	}
@@ -388,7 +388,7 @@ static void test_obstacle(void)
 	memset(&sd, 0, sizeof(sd));
 	sd.pinned = pins; sd.pinned_count = np; sd.hold_edge_lengths = 1; sd.collision_checked = 1; sd.max_iterations = 20;
 	memset(&r, 0, sizeof(r));
-	st = qaws_repulsive_curves_solve(c, &sd, x, &r);
+	st = qaws_repulsive_curves_solve(&r, x, c, &sd);
 	for (i = 2 * M; i < 2 * (M + O); i++) still = fmax(still, fabs((double)x[i] - x0[i]));
 	sprintf(msg, "obstacle: a pinned loop with its edge lengths held (redundant rows dropped): reason %d after %u steps, E %.4f from %.4f, the loop moved %.2g",
 		(int)r.reason, r.iterations, (double)r.energy, (double)r.initial_energy, still);
@@ -410,20 +410,20 @@ static void test_refusals(void)
 	memset(&sd, 0, sizeof(sd));
 	memset(&r, 0, sizeof(r));
 	sd.collision_checked = 1;
-	s1 = qaws_repulsive_curves_solver_create(c, &sd, x, &s);           /* touching input */
+	s1 = qaws_repulsive_curves_solver_create(&s, c, x, &sd);           /* touching input */
 	sd.collision_checked = 0; sd.hold_total_length = 1; sd.hold_edge_lengths = 1;
-	s2 = qaws_repulsive_curves_solver_create(c, &sd, y, &s);           /* redundant lengths */
+	s2 = qaws_repulsive_curves_solver_create(&s, c, y, &sd);           /* redundant lengths */
 	/* no barycenter and nothing pinned: translations free, the system singular */
 	sd.hold_total_length = 0; sd.hold_edge_lengths = 0; sd.hold_barycenter = -1;
-	s3 = qaws_repulsive_curves_solver_create(c, &sd, y, &s);
-	if (s3 == QAWS_STATUS_OK) qaws_repulsive_curves_solver_step(s, y, &r);
+	s3 = qaws_repulsive_curves_solver_create(&s, c, y, &sd);
+	if (s3 == QAWS_STATUS_OK) qaws_repulsive_curves_solver_step(&r, y, s);
 	qaws_repulsive_curves_solver_destroy(s);
 	/* the iteration budget */
 	sd.hold_barycenter = 0; sd.hold_total_length = 1; sd.max_iterations = 2;
 	{
 		qaws_repulsive_report r2;
 		memset(&r2, 0, sizeof(r2));
-		s4 = qaws_repulsive_curves_solve(c, &sd, y, &r2);
+		s4 = qaws_repulsive_curves_solve(&r2, y, c, &sd);
 		sprintf(msg, "refusals: touching input (collision-checked) %d, total and edge lengths %d; free translations: reason %d; a budget of 2: reason %d after %u",
 			(int)s1, (int)s2, (int)r.reason, (int)r2.reason, r2.iterations);
 		TEST_ASSERT(s1 == QAWS_STATUS_INVALID_ARGUMENT && s2 == QAWS_STATUS_INVALID_ARGUMENT && s3 == QAWS_STATUS_OK &&

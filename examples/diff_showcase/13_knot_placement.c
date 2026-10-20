@@ -31,7 +31,7 @@ static qaws_surface* kp_surface(qaws_scalar const* cps, qaws_scalar const* uk, q
 	d.u_knot_count = KP_UK;
 	d.v_knots = vk;
 	d.v_knot_count = KP_VK;
-	qaws_surface_create_bspline(&d, &s);
+	qaws_surface_create_bspline(&s, &d);
 	return s;
 }
 
@@ -70,7 +70,7 @@ static double kp_loss(qaws_scalar const* cps, qaws_scalar const* uk, qaws_scalar
 	{
 		qaws_surface_jet j;
 		double e;
-		qaws_surface_eval_jet(s, us[k], vs[k], QAWS_SJET_P, &j);
+		qaws_surface_eval_jet(&j, s, us[k], vs[k], QAWS_SJET_P);
 		jets[k] = j;
 		e = j.d[0].z - kp_target(us[k], vs[k]);
 		loss += e * e;
@@ -85,17 +85,17 @@ static double kp_loss(qaws_scalar const* cps, qaws_scalar const* uk, qaws_scalar
 		memset(g_vk, 0, sizeof(qaws_scalar) * KP_VK);
 		for (k = 0; k < KP_UK; k++) uact[k] = (unsigned char)(k > 3 && k < KP_UK - 4);
 		for (k = 0; k < KP_VK; k++) vact[k] = (unsigned char)(k > 3 && k < KP_VK - 4);
-		fv[0] = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, g_cp, KP_NU * KP_NV, 3);
+		fv[0] = qaws_field_view_make(g_cp, KP_NU * KP_NV, QAWS_FIELD_CONTROL_POINTS, 3);
 		fv[0].component_mask = 1u << 2;
-		fv[1] = qaws_field_view_make(QAWS_FIELD_U_KNOTS, g_uk, KP_UK, 1);
+		fv[1] = qaws_field_view_make(g_uk, KP_UK, QAWS_FIELD_U_KNOTS, 1);
 		fv[1].active = uact;
-		fv[2] = qaws_field_view_make(QAWS_FIELD_V_KNOTS, g_vk, KP_VK, 1);
+		fv[2] = qaws_field_view_make(g_vk, KP_VK, QAWS_FIELD_V_KNOTS, 1);
 		fv[2].active = vact;
 		views.fields = fv;
 		views.field_count = move_knots ? 3u : 1u;
 		views.children = NULL;
 		views.child_count = 0;
-		qaws_surface_eval_batch_adjoint(NULL, s, us, vs, (unsigned int)n, QAWS_SJET_P, bars, &views, NULL, NULL);
+		qaws_surface_eval_batch_adjoint(&views, NULL, NULL, s, us, vs, bars, (unsigned int)n, QAWS_SJET_P, NULL);
 	}
 	qaws_surface_destroy(s);
 	return loss / n;
@@ -166,7 +166,7 @@ static void kp_error_map(svg* s, viewport const* v, qaws_scalar const* cps, qaws
 			qaws_surface_jet jt;
 			double u = (i + 0.5) / 60.0, w = (j + 0.5) / 45.0, e;
 			char col[32];
-			qaws_surface_eval_jet(sf, (qaws_scalar)u, (qaws_scalar)w, QAWS_SJET_P, &jt);
+			qaws_surface_eval_jet(&jt, sf, (qaws_scalar)u, (qaws_scalar)w, QAWS_SJET_P);
 			e = fabs(jt.d[0].z - kp_target(u, w));
 			heat(e / vmax, col);
 			fprintf(s->f, "<rect x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" fill=\"%s\"/>\n",

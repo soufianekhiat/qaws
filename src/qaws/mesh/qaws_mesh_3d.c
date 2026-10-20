@@ -166,7 +166,7 @@ unsigned int qaws_mesh_3d_get_triangle_count(qaws_mesh_3d const* mesh)
 	return n;
 }
 
-void qaws_mesh_3d_get_triangle(qaws_mesh_3d const* mesh, unsigned int triangle, unsigned int out_vertices[3])
+void qaws_mesh_3d_get_triangle(unsigned int out_vertices[3], qaws_mesh_3d const* mesh, unsigned int triangle)
 {
 	qaws_hm const* m = &mesh->hm;
 	unsigned int f = 0, t = triangle, c;

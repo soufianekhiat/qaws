@@ -62,15 +62,15 @@ static void demo_shell_paths(void)
 		}
 		pa[0].curves = ol; pa[0].curve_count = 4; pa[0].closed = 1;
 		fd[0].surface = f[0]; fd[0].trims = pa; fd[0].trim_count = 5;
-		qaws_shell_atlas_create_trimmed(fd, 1, 0, &a);
+		qaws_shell_atlas_create_trimmed(&a, fd, 1, 0);
 		tr[0] = s25_trim_region(f[0], pa, 5);
 		for (i = 0; i < 7; i++) { tu[i][0] = (to[i][0] + 2) / 4; tu[i][1] = (to[i][1] + 2) / 4; }
 		for (i = 0; i < 7; i++)
 		{
 			qaws_shell_curve* g = NULL;
 			qaws_scalar L = 0;
-			if (qaws_shell_curve_create_shortest_path(a, shf_pt(0, (-1.3 + 2) / 4, 0.5), shf_pt(0, tu[i][0], tu[i][1]), 0, &g) == QAWS_STATUS_OK)
-				qaws_shell_curve_get_length(g, &L);
+			if (qaws_shell_curve_create_shortest_path(&g, a, shf_pt(0, (-1.3 + 2) / 4, 0.5), shf_pt(0, tu[i][0], tu[i][1]), 0) == QAWS_STATUS_OK)
+				qaws_shell_curve_get_length(&L, g);
 			total += (double)L;
 			qaws_shell_curve_destroy(g);
 		}
@@ -115,7 +115,7 @@ static void demo_shell_paths(void)
 			pa[2 + i].curves = &lh[i]; pa[2 + i].curve_count = 1; pa[2 + i].closed = 1;
 		}
 		fd[0].surface = f[0]; fd[0].trims = pa; fd[0].trim_count = 4;
-		qaws_shell_atlas_create_trimmed(fd, 1, 0, &a);
+		qaws_shell_atlas_create_trimmed(&a, fd, 1, 0);
 		memset(&sc, 0, sizeof(sc));
 		v3.x0 = 24 + (pw + 12); v3.y0 = 104; v3.w = pw; v3.h = ph;
 		sgf_view_init(&view, 0.5 * pi + 0.25, 0.25, 112, v3.x0 + pw / 2, v3.y0 + ph / 2 + 15);
@@ -159,7 +159,7 @@ static void demo_shell_paths(void)
 			pa[1 + i].curves = &hl[i]; pa[1 + i].curve_count = 1; pa[1 + i].closed = 1;
 		}
 		fd[0].surface = f[0]; fd[0].trims = pa; fd[0].trim_count = 6;
-		qaws_shell_atlas_create_trimmed(fd, 1, 0, &a);
+		qaws_shell_atlas_create_trimmed(&a, fd, 1, 0);
 		tr[0] = s25_trim_region(f[0], pa, 6);
 		/* rays at each hole's centre, and between them */
 		for (i = 0; i < 9; i++)

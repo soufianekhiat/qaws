@@ -58,7 +58,7 @@ static qaws_clip64_result* o93_inflate(o93_paths const* p, double delta, qaws_jo
 	g.paths = paths; g.path_count = p->count; g.join_type = jt; g.end_type = et;
 	memset(&d, 0, sizeof(d));
 	d.groups = &g; d.group_count = 1; d.delta = delta; d.miter_limit = miter; d.arc_tolerance = arc_tol; d.flags = flags;
-	qaws_offset64_execute(&d, &r);
+	qaws_offset64_execute(&r, &d);
 	return r;
 }
 
@@ -69,7 +69,7 @@ static unsigned int o93_size(qaws_clip64_result const* r, unsigned int i)
 	int64_t const* p;
 	unsigned int n = 0;
 	if (!r || i >= o93_count(r)) return 0;
-	qaws_clip64_result_get_path(r, i, &p, &n);
+	qaws_clip64_result_get_path(&p, &n, r, i);
 	return n;
 }
 
@@ -78,7 +78,7 @@ static double o93_area(qaws_clip64_result const* r, unsigned int i)
 {
 	int64_t const* p;
 	unsigned int n = 0;
-	qaws_clip64_result_get_path(r, i, &p, &n);
+	qaws_clip64_result_get_path(&p, &n, r, i);
 	return 0.5 * qaws_path64_area2(p, n);
 }
 
@@ -158,12 +158,12 @@ static void test_corpus(void)
 				unsigned int k;
 				for (k = 0; k < 2 * p.n[i]; k++) xy[k] = (qaws_scalar)p.xy[i][k];
 				cs[i] = NULL;
-				qaws_curve_create_polyline_2d(xy, p.n[i], 1, &cs[i]);
+				qaws_curve_create_polyline_2d(&cs[i], xy, p.n[i], 1);
 				free(xy);
 				cv[i] = cs[i];
 				pp[i].curves = &cv[i]; pp[i].curve_count = 1; pp[i].closed = 1;
 			}
-			qaws_offset_paths(pp, p.count, 1, QAWS_JOIN_ROUND, QAWS_END_POLYGON, &fr);
+			qaws_offset_paths(&fr, pp, p.count, 1, QAWS_JOIN_ROUND, QAWS_END_POLYGON);
 			for (i = 0; fr && i < qaws_clip_result_get_path_count(fr); i++)
 				if (qaws_clip_result_get_parent(fr, i) == QAWS_CLIP_NONE_INDEX) outer++;
 			sprintf(msg, "Offsets.txt %u on curves (qaws_offset, round, 1): one outer path (%u)", t, outer);
@@ -191,7 +191,7 @@ static void test_offsets2(void) /* #448, #456 */
 	{
 		int64_t const* q;
 		unsigned int n = 0, i, k;
-		qaws_clip64_result_get_path(r, 0, &q, &n);
+		qaws_clip64_result_get_path(&q, &n, r, 0);
 		for (k = 0; k < 5; k++)
 			for (i = 0; i < n; i++)
 			{
@@ -360,7 +360,7 @@ static void test_offsets8(void) /* #724 */
 	{
 		int64_t const* q;
 		unsigned int n = 0;
-		qaws_clip64_result_get_path(r, 0, &q, &n);
+		qaws_clip64_result_get_path(&q, &n, r, 0);
 		o93_quality(p.xy[0], p.n[0], q, n, &smallest, &largest);
 	}
 	offset = fabs(offset);

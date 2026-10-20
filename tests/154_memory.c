@@ -72,7 +72,7 @@ static qaws_curve* mm_square(double x, double y, double s)
 	p[4] = p[0];
 	memset(&d, 0, sizeof d);
 	d.dimension = QAWS_DIMENSION_2D; d.degree = 1; d.control_points = p; d.control_point_count = 5;
-	qaws_curve_create_bspline(&d, &c);
+	qaws_curve_create_bspline(&c, &d);
 	return c;
 }
 
@@ -104,7 +104,7 @@ static unsigned int mm_workload(void)
 	memset(&d, 0, sizeof d);
 	d.dimension = QAWS_DIMENSION_2D; d.degree = 3; d.control_points = wave; d.control_point_count = 6;
 	if (g_parts & (MM_SAMPLE | MM_OFFSET))
-		failures += qaws_curve_create_bspline(&d, &w) != QAWS_STATUS_OK;
+		failures += qaws_curve_create_bspline(&w, &d) != QAWS_STATUS_OK;
 	if (w)
 	{
 		memset(&sd, 0, sizeof sd);
@@ -112,10 +112,10 @@ static unsigned int mm_workload(void)
 		sd.error_tolerance = (qaws_scalar)1e-4;
 		sd.use_adaptive_sampling = 1;
 		if (g_parts & MM_SAMPLE)
-			failures += qaws_curve_sample_2d(w, &sd, samples, 4096, &n) != QAWS_STATUS_OK;
+			failures += qaws_curve_sample_2d(samples, &n, w, 4096, &sd) != QAWS_STATUS_OK;
 		n = 0;
 		if (g_parts & MM_OFFSET)
-			failures += qaws_curve_offset_2d(w, (qaws_scalar)0.3, 1, offs, 16, &n) != QAWS_STATUS_OK;
+			failures += qaws_curve_offset_2d(offs, &n, w, 16, (qaws_scalar)0.3, 1) != QAWS_STATUS_OK;
 		for (i = 0; i < n; i++)
 			qaws_curve_destroy(offs[i]);
 		qaws_curve_destroy(w);
@@ -129,7 +129,7 @@ static unsigned int mm_workload(void)
 		ca[0] = a; cb[0] = b;
 		pa.curves = ca; pa.curve_count = 1; pa.closed = 1;
 		pb.curves = cb; pb.curve_count = 1; pb.closed = 1;
-		failures += qaws_clip_boolean(QAWS_CLIP_UNION, QAWS_FILL_NON_ZERO, &pa, 1, &pb, 1, &r) != QAWS_STATUS_OK;
+		failures += qaws_clip_boolean(&r, &pa, &pb, 1, 1, QAWS_CLIP_UNION, QAWS_FILL_NON_ZERO) != QAWS_STATUS_OK;
 		qaws_clip_result_destroy(r);
 	}
 	else
@@ -146,13 +146,13 @@ static unsigned int mm_workload(void)
 	memset(&bd, 0, sizeof bd);
 	bd.u_degree = 3; bd.v_degree = 3; bd.control_points = net; bd.u_point_count = 4; bd.v_point_count = 4;
 	if (g_parts & (MM_TESS | MM_MESH))
-		failures += qaws_surface_create_bezier(&bd, &s) != QAWS_STATUS_OK;
+		failures += qaws_surface_create_bezier(&s, &bd) != QAWS_STATUS_OK;
 	if (s && (g_parts & MM_TESS))
 	{
 		memset(&td, 0, sizeof td);
 		td.max_depth = 4;
 		td.curvature_threshold = (qaws_scalar)0.01;
-		failures += qaws_surface_tessellate(s, &td, tv, 4096, &nv, ti, 24000, &ni) != QAWS_STATUS_OK;
+		failures += qaws_surface_tessellate(tv, &nv, ti, &ni, s, 4096, 24000, &td) != QAWS_STATUS_OK;
 	}
 	if (s && (g_parts & MM_MESH))
 	{
@@ -180,7 +180,7 @@ static unsigned int mm_workload(void)
 		memset(&cd, 0, sizeof cd);
 		cd.subjects = &pa64; cd.subject_count = 1; cd.open_subjects = &po64; cd.open_subject_count = 1;
 		cd.clips = &pb64; cd.clip_count = 1; cd.clip_type = QAWS_CLIP_UNION; cd.fill_rule = QAWS_FILL_NON_ZERO;
-		st = qaws_clip64_execute(&cd, &r64);
+		st = qaws_clip64_execute(&r64, &cd);
 		failures += st != QAWS_STATUS_OK;
 		g_published += st != QAWS_STATUS_OK && r64 != NULL;
 		qaws_clip64_result_destroy(r64);
@@ -204,14 +204,14 @@ static unsigned int mm_workload(void)
 		}
 		memset(&rd, 0, sizeof rd);
 		rd.dimension = 3; rd.vertex_count = 16; rd.edges = edges; rd.edge_count = 16;
-		st = qaws_repulsive_curves_create(&rd, &rc);
+		st = qaws_repulsive_curves_create(&rc, &rd);
 		failures += st != QAWS_STATUS_OK;
 		g_published += st != QAWS_STATUS_OK && rc != NULL;
 		if (rc)
 		{
 			memset(&sd, 0, sizeof sd);
 			sd.max_iterations = 2;
-			failures += qaws_repulsive_curves_solve(rc, &sd, pos, NULL) != QAWS_STATUS_OK;
+			failures += qaws_repulsive_curves_solve(NULL, pos, rc, &sd) != QAWS_STATUS_OK;
 			qaws_repulsive_curves_destroy(rc);
 		}
 	}
@@ -231,7 +231,7 @@ static qaws_curve* mm_make_scoped(void)
 	qaws_curve* c = NULL;
 	memset(&d, 0, sizeof d);
 	d.dimension = QAWS_DIMENSION_2D; d.degree = 3; d.control_points = p; d.control_point_count = 4;
-	qaws_curve_create_bezier_ex(&d, &local, &c);
+	qaws_curve_create_bezier_ex(&c, &d, &local);
 	return c;
 }
 
@@ -252,8 +252,8 @@ static void test_descriptor_lifetime(void)
 	mm_clobber();
 	TEST_ASSERT(c && g_scoped.allocs > 0, "a curve made with a stack-local descriptor");
 	/* allocating later through the object's allocator (a reversed copy) uses the object's copy too */
-	TEST_ASSERT(qaws_curve_reverse(c, &r) == QAWS_STATUS_OK, "derived from it after the descriptor's scope");
-	qaws_curve_evaluate_2d(r, (qaws_scalar)0.25, QAWS_EVAL_FLAG_POSITION, &e);
+	TEST_ASSERT(qaws_curve_reverse(&r, c) == QAWS_STATUS_OK, "derived from it after the descriptor's scope");
+	qaws_curve_evaluate_2d(&e, r, (qaws_scalar)0.25, QAWS_EVAL_FLAG_POSITION);
 	qaws_curve_destroy(r);
 	qaws_curve_destroy(c);
 	TEST_ASSERT(g_scoped.frees == g_scoped.allocs, "destroyed through the copy: every block back to its allocator");
@@ -469,17 +469,17 @@ static void test_scratch_split(void)
 	qaws_exchange_thread_scratch_allocator(&arena.allocator, &prev_scratch);
 	memset(&d, 0, sizeof d);
 	d.dimension = QAWS_DIMENSION_2D; d.degree = 3; d.control_points = wave; d.control_point_count = 6;
-	ok &= qaws_curve_create_bspline(&d, &w) == QAWS_STATUS_OK;
+	ok &= qaws_curve_create_bspline(&w, &d) == QAWS_STATUS_OK;
 	/* adaptive sampling */
 	{
 		qaws_sampling_desc sd;
 		memset(&sd, 0, sizeof sd);
 		sd.sample_count = 4; sd.error_tolerance = (qaws_scalar)1e-5; sd.use_adaptive_sampling = 1;
-		ok &= qaws_curve_sample_2d(w, &sd, samples, 4096, &n) == QAWS_STATUS_OK;
+		ok &= qaws_curve_sample_2d(samples, &n, w, 4096, &sd) == QAWS_STATUS_OK;
 		held += arena.live != 0; scratch_peak[0] = arena.peak; ok &= qaws_arena_reset(&arena) == QAWS_STATUS_OK; mm_poison(&arena, memory, sizeof memory);
 	}
 	/* offsets: curves kept past the reset */
-	ok &= qaws_curve_offset_2d(w, (qaws_scalar)0.3, 1, offs, 16, &noff) == QAWS_STATUS_OK;
+	ok &= qaws_curve_offset_2d(offs, &noff, w, 16, (qaws_scalar)0.3, 1) == QAWS_STATUS_OK;
 	held += arena.live != 0; scratch_peak[1] = arena.peak; ok &= qaws_arena_reset(&arena) == QAWS_STATUS_OK; mm_poison(&arena, memory, sizeof memory);
 	/* clipping: the result kept */
 	a = mm_square(0, 0, 2);
@@ -487,7 +487,7 @@ static void test_scratch_split(void)
 	ca[0] = a; cb[0] = b;
 	pa.curves = ca; pa.curve_count = 1; pa.closed = 1;
 	pb.curves = cb; pb.curve_count = 1; pb.closed = 1;
-	ok &= qaws_clip_boolean(QAWS_CLIP_UNION, QAWS_FILL_NON_ZERO, &pa, 1, &pb, 1, &r) == QAWS_STATUS_OK;
+	ok &= qaws_clip_boolean(&r, &pa, &pb, 1, 1, QAWS_CLIP_UNION, QAWS_FILL_NON_ZERO) == QAWS_STATUS_OK;
 	held += arena.live != 0; scratch_peak[2] = arena.peak; ok &= qaws_arena_reset(&arena) == QAWS_STATUS_OK; mm_poison(&arena, memory, sizeof memory);
 	/* tessellation */
 	for (i = 0; i < 4; i++)
@@ -502,10 +502,10 @@ static void test_scratch_split(void)
 		qaws_tessellation_desc td;
 		memset(&bd, 0, sizeof bd);
 		bd.u_degree = 3; bd.v_degree = 3; bd.control_points = net; bd.u_point_count = 4; bd.v_point_count = 4;
-		ok &= qaws_surface_create_bezier(&bd, &s) == QAWS_STATUS_OK;
+		ok &= qaws_surface_create_bezier(&s, &bd) == QAWS_STATUS_OK;
 		memset(&td, 0, sizeof td);
 		td.max_depth = 5; td.curvature_threshold = (qaws_scalar)0.003;
-		ok &= qaws_surface_tessellate(s, &td, tv, 8192, &nv, ti, 49152, &ni) == QAWS_STATUS_OK;
+		ok &= qaws_surface_tessellate(tv, &nv, ti, &ni, s, 8192, 49152, &td) == QAWS_STATUS_OK;
 		held += arena.live != 0; scratch_peak[3] = arena.peak; ok &= qaws_arena_reset(&arena) == QAWS_STATUS_OK; mm_poison(&arena, memory, sizeof memory);
 	}
 	/* meshing: the mesh kept */
@@ -543,11 +543,11 @@ static void test_scratch_split(void)
 		}
 		memset(&rd, 0, sizeof rd);
 		rd.dimension = 3; rd.vertex_count = 24; rd.edges = edges; rd.edge_count = 24;
-		ok &= qaws_repulsive_curves_create(&rd, &rc) == QAWS_STATUS_OK;
+		ok &= qaws_repulsive_curves_create(&rc, &rd) == QAWS_STATUS_OK;
 		memset(&sd, 0, sizeof sd);
 		sd.max_iterations = 3;
 		sd.hold_total_length = 1;
-		ok &= qaws_repulsive_curves_solve(rc, &sd, pos, NULL) == QAWS_STATUS_OK;
+		ok &= qaws_repulsive_curves_solve(NULL, pos, rc, &sd) == QAWS_STATUS_OK;
 		held += arena.live != 0; scratch_peak[5] = arena.peak; ok &= qaws_arena_reset(&arena) == QAWS_STATUS_OK; mm_poison(&arena, memory, sizeof memory);
 	}
 	qaws_exchange_thread_scratch_allocator(&prev_scratch, NULL);
@@ -563,7 +563,7 @@ static void test_scratch_split(void)
 		static qaws_scalar xyz[3 * 65536];
 		qaws_path_2d path;
 		ok &= qaws_mesh_3d_get_vertex_count(m) <= 65536 && qaws_mesh_3d_get_positions(m, xyz) == QAWS_STATUS_OK
-			&& qaws_clip_result_get_path(r, 0, &path) == QAWS_STATUS_OK && path.curve_count > 0;
+			&& qaws_clip_result_get_path(&path, r, 0) == QAWS_STATUS_OK && path.curve_count > 0;
 		/* the size field against one made without scratch, at the corners of the first triangles */
 		if (ok && ref && field)
 		{
@@ -802,7 +802,7 @@ static void test_sizes_and_alignment(void)
 		memset(net16, 0, sizeof net16);
 		memset(&sd, 0, sizeof sd);
 		sd.u_degree = 3; sd.v_degree = 3; sd.control_points = net16; sd.u_point_count = 0x10000; sd.v_point_count = 0x10000;
-		st = qaws_surface_create_bspline(&sd, &s);
+		st = qaws_surface_create_bspline(&s, &sd);
 		snprintf(msg, sizeof msg, "a 65536 x 65536 net (2^32 points, past unsigned int): %s", qaws_status_to_string(st));
 		TEST_ASSERT(st == QAWS_STATUS_INVALID_CONTROL_POINT_COUNT && !s, msg);
 		if (sizeof(size_t) == 4)
@@ -812,7 +812,7 @@ static void test_sizes_and_alignment(void)
 			qaws_curve* c = NULL;
 			memset(&bd, 0, sizeof bd);
 			bd.dimension = QAWS_DIMENSION_3D; bd.degree = 3; bd.control_points = net16; bd.control_point_count = 0x20000000;
-			st = qaws_curve_create_bspline(&bd, &c);
+			st = qaws_curve_create_bspline(&c, &bd);
 			snprintf(msg, sizeof msg, "32-bit: 2^29 control points of three scalars: %s", qaws_status_to_string(st));
 			TEST_ASSERT(st != QAWS_STATUS_OK && !c, msg);
 		}
@@ -903,10 +903,10 @@ static void test_arena(void)
 		qaws_eval_result_2d e;
 		memset(&bd, 0, sizeof bd);
 		bd.dimension = QAWS_DIMENSION_2D; bd.degree = 3; bd.control_points = p; bd.control_point_count = 4;
-		TEST_ASSERT(qaws_curve_create_bezier_ex(&bd, &arena.allocator, &c) == QAWS_STATUS_OK
+		TEST_ASSERT(qaws_curve_create_bezier_ex(&c, &bd, &arena.allocator) == QAWS_STATUS_OK
 			&& (unsigned char*)c >= (unsigned char*)big && (unsigned char*)c < (unsigned char*)big + sizeof big, "a curve inside the caller's buffer");
 		TEST_ASSERT(qaws_arena_reset(&arena) == QAWS_STATUS_INVALID_ARGUMENT, "reset refused while the curve lives");
-		qaws_curve_evaluate_2d(c, (qaws_scalar)0.5, QAWS_EVAL_FLAG_POSITION, &e);
+		qaws_curve_evaluate_2d(&e, c, (qaws_scalar)0.5, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT(fabs(e.position.x - 1.5) <= 1e-12, "and the curve still evaluates");
 		qaws_curve_destroy(c);
 		TEST_ASSERT(qaws_arena_reset(&arena) == QAWS_STATUS_OK, "reset once it is destroyed");

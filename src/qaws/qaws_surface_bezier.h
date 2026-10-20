@@ -15,7 +15,7 @@ typedef struct qaws_surface_bezier_desc
 } qaws_surface_bezier_desc;
 
 qaws_status qaws_surface_create_bezier(
-	qaws_surface_bezier_desc const* desc,
-	qaws_surface** out_surface);
+	qaws_surface** out_surface,
+	qaws_surface_bezier_desc const* desc);
 
 #endif /* QAWS_SURFACE_BEZIER_H */

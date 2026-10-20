@@ -39,7 +39,7 @@ static qaws_surface* sht_face(double const* p00, double const* p10, double const
 	d.p10.x = (qaws_scalar)p10[0]; d.p10.y = (qaws_scalar)p10[1]; d.p10.z = (qaws_scalar)p10[2];
 	d.p01.x = (qaws_scalar)p01[0]; d.p01.y = (qaws_scalar)p01[1]; d.p01.z = (qaws_scalar)p01[2];
 	d.p11.x = (qaws_scalar)p11[0]; d.p11.y = (qaws_scalar)p11[1]; d.p11.z = (qaws_scalar)p11[2];
-	qaws_surface_create_bilinear(&d, &s);
+	qaws_surface_create_bilinear(&s, &d);
 	return s;
 }
 
@@ -67,11 +67,11 @@ static double sht_circle_area(qaws_shell_atlas const* a, qaws_shell_point c, dou
 	qaws_shell_curve* k = NULL;
 	qaws_shell_region* g = NULL;
 	qaws_scalar A = 0, L = 0;
-	*st = qaws_shell_curve_create_geodesic_circle(a, c, (qaws_scalar)r, 0, &k);
+	*st = qaws_shell_curve_create_geodesic_circle(&k, a, c, (qaws_scalar)r, 0);
 	if (runs) *runs = k ? qaws_shell_curve_get_run_count(k) : 0;
-	if (*st == QAWS_STATUS_OK) *st = qaws_shell_region_create(a, (qaws_shell_curve const* const*)&k, 1, &g);
-	if (*st == QAWS_STATUS_OK) *st = qaws_shell_region_get_area(g, &A);
-	if (*st == QAWS_STATUS_OK && per) *st = qaws_shell_region_get_perimeter(g, &L);
+	if (*st == QAWS_STATUS_OK) *st = qaws_shell_region_create(&g, a, (qaws_shell_curve const* const*)&k, 1);
+	if (*st == QAWS_STATUS_OK) *st = qaws_shell_region_get_area(&A, g);
+	if (*st == QAWS_STATUS_OK && per) *st = qaws_shell_region_get_perimeter(&L, g);
 	if (per) *per = (double)L;
 	qaws_shell_region_destroy(g);
 	qaws_shell_curve_destroy(k);
@@ -87,7 +87,7 @@ static void test_cube(void)
 	unsigned int i;
 	char msg[300];
 	sht_cube(f);
-	st = qaws_shell_atlas_create((qaws_surface const* const*)f, 6, 0, &a);
+	st = qaws_shell_atlas_create(&a, (qaws_surface const* const*)f, 6, 0);
 	sprintf(msg, "cube: the atlas of six faces, %u shared edges", a ? qaws_shell_atlas_get_edge_count(a) : 0);
 	TEST_ASSERT(st == QAWS_STATUS_OK && qaws_shell_atlas_get_edge_count(a) == 12, msg);
 	/* a ray from (0.3, -0.2, 1) at 30 degrees from +x, run 1.5: over the
@@ -100,12 +100,12 @@ static void test_cube(void)
 		qaws_surface_eval_result e;
 		double x0 = 0.3, y0 = -0.2, th = SHT_PI / 6, L = 1.5, tx = (1 - x0) / cos(th), ex, ey, ez, err = 1e300;
 		d.x = (qaws_scalar)cos(th); d.y = (qaws_scalar)sin(th);
-		st = qaws_shell_exp(a, sht_pt(0, (x0 + 1) / 2, (y0 + 1) / 2), d, (qaws_scalar)L, &q, &vel, &cr);
+		st = qaws_shell_exp(&q, &vel, &cr, a, sht_pt(0, (x0 + 1) / 2, (y0 + 1) / 2), d, (qaws_scalar)L);
 		/* unfolded: the rest of the run goes down x = 1 */
 		ex = 1; ey = y0 + L * sin(th); ez = 1 - (L - tx) * cos(th);
 		if (st == QAWS_STATUS_OK)
 		{
-			qaws_surface_evaluate(f[q.face], q.uv.x, q.uv.y, QAWS_SURFACE_EVAL_POSITION, &e);
+			qaws_surface_evaluate(&e, f[q.face], q.uv.x, q.uv.y, QAWS_SURFACE_EVAL_POSITION);
 			err = fabs(e.position.x - ex) + fabs(e.position.y - ey) + fabs(e.position.z - ez);
 		}
 		sprintf(msg, "cube: a straightest ray over an edge (%u crossing) against the unfolded line within %.2g", cr, err);
@@ -129,16 +129,16 @@ static void test_cube(void)
 		qaws_shell_region *g1 = NULL, *g2 = NULL, *gu = NULL, *gi = NULL;
 		qaws_scalar A1 = 0, A2 = 0, AU = 0, AI = 0;
 		qaws_status s1;
-		s1 = qaws_shell_curve_create_geodesic_circle(a, sht_pt(0, 0.75, 0.5), (qaws_scalar)0.7, 0, &k1);
-		if (!s1) s1 = qaws_shell_curve_create_geodesic_circle(a, sht_pt(2, 0.6, 0.8), (qaws_scalar)0.6, 0, &k2);
-		if (!s1) s1 = qaws_shell_region_create(a, (qaws_shell_curve const* const*)&k1, 1, &g1);
-		if (!s1) s1 = qaws_shell_region_create(a, (qaws_shell_curve const* const*)&k2, 1, &g2);
-		if (!s1) s1 = qaws_shell_region_clip(g1, g2, QAWS_CLIP_UNION, &gu);
-		if (!s1) s1 = qaws_shell_region_clip(g1, g2, QAWS_CLIP_INTERSECTION, &gi);
+		s1 = qaws_shell_curve_create_geodesic_circle(&k1, a, sht_pt(0, 0.75, 0.5), (qaws_scalar)0.7, 0);
+		if (!s1) s1 = qaws_shell_curve_create_geodesic_circle(&k2, a, sht_pt(2, 0.6, 0.8), (qaws_scalar)0.6, 0);
+		if (!s1) s1 = qaws_shell_region_create(&g1, a, (qaws_shell_curve const* const*)&k1, 1);
+		if (!s1) s1 = qaws_shell_region_create(&g2, a, (qaws_shell_curve const* const*)&k2, 1);
+		if (!s1) s1 = qaws_shell_region_clip(&gu, g1, g2, QAWS_CLIP_UNION);
+		if (!s1) s1 = qaws_shell_region_clip(&gi, g1, g2, QAWS_CLIP_INTERSECTION);
 		if (!s1)
 		{
-			qaws_shell_region_get_area(g1, &A1); qaws_shell_region_get_area(g2, &A2);
-			qaws_shell_region_get_area(gu, &AU); qaws_shell_region_get_area(gi, &AI);
+			qaws_shell_region_get_area(&A1, g1); qaws_shell_region_get_area(&A2, g2);
+			qaws_shell_region_get_area(&AU, gu); qaws_shell_region_get_area(&AI, gi);
 		}
 		sprintf(msg, "cube: two circles over edges: union + intersection - both %.2g (intersection %.4f)", (double)(AU + AI - A1 - A2), (double)AI);
 		TEST_ASSERT(!s1 && fabs((double)(AU + AI - A1 - A2)) <= tol && AI > 0.05, msg);
@@ -162,10 +162,10 @@ static void test_cube(void)
 		}
 		back *= 0.5 * SHT_PI / n / 3;
 		A0 = SHT_PI * r * r - back;
-		s1 = qaws_shell_region_create_geodesic_disk(a, sht_pt(0, 1 - t / 2, 1 - t / 2), (qaws_scalar)r, 0, &g);
+		s1 = qaws_shell_region_create_geodesic_disk(&g, a, sht_pt(0, 1 - t / 2, 1 - t / 2), (qaws_scalar)r, 0);
 		if (s1 == QAWS_STATUS_OK)
 		{
-			qaws_shell_region_get_area(g, &A);
+			qaws_shell_region_get_area(&A, g);
 			for (q = 0; q < 6; q++) if (qaws_shell_region_get_face(g, q)) nf++;
 		}
 		sprintf(msg, "cube: a geodesic disk round a corner (on %u faces) against the unfolded cone's %.2g", nf, fabs((double)A - A0));
@@ -186,10 +186,10 @@ static qaws_surface* sht_hemi(double a0, double a1, qaws_curve** prof)
 	g.radius = 1; g.angle_start = (qaws_scalar)a0; g.angle_end = (qaws_scalar)a1;
 	memset(&ad, 0, sizeof(ad));
 	ad.dimension = QAWS_DIMENSION_2D; ad.segments = &g; ad.segment_count = 1;
-	qaws_curve_create_arc(&ad, prof);
+	qaws_curve_create_arc(prof, &ad);
 	memset(&rd, 0, sizeof(rd));
 	rd.profile = *prof; rd.axis_direction.z = 1;
-	qaws_surface_create_revolution(&rd, &s);
+	qaws_surface_create_revolution(&s, &rd);
 	return s;
 }
 
@@ -204,7 +204,7 @@ static void test_hemispheres(void)
 	char msg[300];
 	h[0] = sht_hemi(-SHT_PI / 2, 0, &p1);
 	h[1] = sht_hemi(0, SHT_PI / 2, &p2);
-	st = qaws_shell_atlas_create((qaws_surface const* const*)h, 2, 0, &a);
+	st = qaws_shell_atlas_create(&a, (qaws_surface const* const*)h, 2, 0);
 	A = sht_circle_area(a, sht_pt(1, 0.3, 0.1), r, &per, &n, &s1);
 	sprintf(msg, "hemispheres: one edge (the equator); a circle over it (%u runs) against the cap %.2g and 2 pi sin r %.2g",
 		n, fabs(A - 2 * SHT_PI * (1 - cos(r))), fabs(per - 2 * SHT_PI * sin(r)));
@@ -218,14 +218,14 @@ static void test_hemispheres(void)
 		unsigned int cr = 0;
 		double du, dv;
 		d.x = (qaws_scalar)0.1; d.y = (qaws_scalar)0.2;
-		st = qaws_shell_exp(a, sht_pt(1, 0.1, 0.02), d, (qaws_scalar)(2 * SHT_PI), &q, &vel, &cr);
+		st = qaws_shell_exp(&q, &vel, &cr, a, sht_pt(1, 0.1, 0.02), d, (qaws_scalar)(2 * SHT_PI));
 		du = fabs(q.uv.x - 0.1); du = fmin(du, 1 - du);
 		dv = fabs(q.uv.y - 0.02);
 		sprintf(msg, "hemispheres: a great circle over the equator (%u crossings) back at its start within %.2g", cr, du + dv);
 		TEST_ASSERT(st == QAWS_STATUS_OK && cr == 2 && q.face == 1 && du + dv <= tol, msg);
 		/* a meridian: through both poles, back after 2 pi */
 		d.x = 0; d.y = 1;
-		st = qaws_shell_exp(a, sht_pt(1, 0.1, 0.02), d, (qaws_scalar)(2 * SHT_PI), &q, &vel, &cr);
+		st = qaws_shell_exp(&q, &vel, &cr, a, sht_pt(1, 0.1, 0.02), d, (qaws_scalar)(2 * SHT_PI));
 		du = fabs(q.uv.x - 0.1); du = fmin(du, 1 - du);
 		dv = fabs(q.uv.y - 0.02);
 		sprintf(msg, "hemispheres: a meridian through both poles back at its start within %.2g", du + dv);
@@ -257,12 +257,12 @@ static void test_saddle(void)
 	qaws_status st, s1 = QAWS_STATUS_INVALID_ARGUMENT;
 	char msg[300];
 	for (i = 0; i < 5; i++) f[i] = sht_face(S[i][0], S[i][1], S[i][2], S[i][3]);
-	st = qaws_shell_atlas_create((qaws_surface const* const*)f, 5, 0, &a);
+	st = qaws_shell_atlas_create(&a, (qaws_surface const* const*)f, 5, 0);
 	if (st == QAWS_STATUS_OK)
-		s1 = qaws_shell_region_create_geodesic_disk(a, sht_pt(0, 0.2, 0.2), (qaws_scalar)r, 0, &g);
+		s1 = qaws_shell_region_create_geodesic_disk(&g, a, sht_pt(0, 0.2, 0.2), (qaws_scalar)r, 0);
 	if (s1 == QAWS_STATUS_OK)
 	{
-		qaws_shell_region_get_area(g, &A);
+		qaws_shell_region_get_area(&A, g);
 		for (i = 0; i < 5; i++) if (qaws_shell_region_get_face(g, i)) nf++;
 	}
 	sprintf(msg, "saddle (five squares round a vertex): a disk through it (on %u faces) against the plane disk and the sector behind %.2g",
@@ -299,10 +299,10 @@ static double sht_monkey_disk(double w, double tolerance, unsigned int* faces)
 	unsigned int i;
 	sht_monkey(f, w);
 	*faces = 0;
-	if (qaws_shell_atlas_create((qaws_surface const* const*)f, 6, 0, &a) == QAWS_STATUS_OK
-		&& qaws_shell_region_create_geodesic_disk(a, sht_pt(0, 0.3, 0.3), (qaws_scalar)0.6, (qaws_scalar)tolerance, &g) == QAWS_STATUS_OK)
+	if (qaws_shell_atlas_create(&a, (qaws_surface const* const*)f, 6, 0) == QAWS_STATUS_OK
+		&& qaws_shell_region_create_geodesic_disk(&g, a, sht_pt(0, 0.3, 0.3), (qaws_scalar)0.6, (qaws_scalar)tolerance) == QAWS_STATUS_OK)
 	{
-		qaws_shell_region_get_area(g, &A);
+		qaws_shell_region_get_area(&A, g);
 		for (i = 0; i < 6; i++) if (qaws_shell_region_get_face(g, i)) (*faces)++;
 	}
 	qaws_shell_region_destroy(g);
@@ -353,7 +353,7 @@ static void sht_bent_monkey(qaws_surface** f)
 		memset(&bd, 0, sizeof(bd));
 		bd.u_degree = 3; bd.v_degree = 3; bd.control_points = cp; bd.u_point_count = 4; bd.v_point_count = 4;
 		f[i] = NULL;
-		qaws_surface_create_bezier(&bd, &f[i]);
+		qaws_surface_create_bezier(&f[i], &bd);
 	}
 }
 
@@ -369,19 +369,19 @@ static void test_bent_monkey(void)
 	unsigned int i;
 	char msg[300];
 	sht_bent_monkey(f);
-	st = qaws_shell_atlas_create((qaws_surface const* const*)f, 6, 0, &a);
+	st = qaws_shell_atlas_create(&a, (qaws_surface const* const*)f, 6, 0);
 	if (st == QAWS_STATUS_OK)
 	{
-		s1 = qaws_shell_region_create_geodesic_disk(a, sht_pt(0, 0.2, 0.2), (qaws_scalar)0.6, (qaws_scalar)tol, &g);
-		s2 = qaws_shell_region_create_geodesic_disk(a, sht_pt(2, 0.22, 0.19), (qaws_scalar)0.55, (qaws_scalar)tol, &h);
+		s1 = qaws_shell_region_create_geodesic_disk(&g, a, sht_pt(0, 0.2, 0.2), (qaws_scalar)0.6, (qaws_scalar)tol);
+		s2 = qaws_shell_region_create_geodesic_disk(&h, a, sht_pt(2, 0.22, 0.19), (qaws_scalar)0.55, (qaws_scalar)tol);
 	}
 	if (s1 == QAWS_STATUS_OK && s2 == QAWS_STATUS_OK)
 	{
-		qaws_shell_region_get_area(g, &A);
-		qaws_shell_region_get_area(h, &B);
+		qaws_shell_region_get_area(&A, g);
+		qaws_shell_region_get_area(&B, h);
 		for (i = 0; i < 4 && sx == QAWS_STATUS_OK; i++)
-			if ((sx = qaws_shell_region_clip(g, h, T[i], &x[i])) == QAWS_STATUS_OK)
-				qaws_shell_region_get_area(x[i], &X[i]);
+			if ((sx = qaws_shell_region_clip(&x[i], g, h, T[i])) == QAWS_STATUS_OK)
+				qaws_shell_region_get_area(&X[i], x[i]);
 	}
 	e1 = fabs((double)X[0] + X[1] - A - B);
 	e2 = fabs((double)X[2] + X[1] - A);

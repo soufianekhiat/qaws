@@ -17,12 +17,12 @@ typedef struct qaws_bspline_desc
 } qaws_bspline_desc;
 
 qaws_status qaws_curve_create_bspline(
-	qaws_bspline_desc const* desc,
-	qaws_curve** out_curve);
+	qaws_curve** out_curve,
+	qaws_bspline_desc const* desc);
 
 qaws_status qaws_curve_create_bspline_ex(
+	qaws_curve** out_curve,
 	qaws_bspline_desc const* desc,
-	qaws_allocator const* allocator,
-	qaws_curve** out_curve);
+	qaws_allocator const* allocator);
 
 #endif /* QAWS_BSPLINE_H */

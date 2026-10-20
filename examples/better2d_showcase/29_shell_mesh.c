@@ -43,12 +43,12 @@ static void demo_shell_mesh(void)
 		"one mesh across the faces, conformal at their edges; samples shared out by area; offsets along the shell (qaws_shell_region_offset)"))
 		return;
 	for (i = 0; i < 6; i++) f[i] = shf_face(P[C[i][0]], P[C[i][1]], P[C[i][2]], P[C[i][3]]);
-	qaws_shell_atlas_create((qaws_surface const* const*)f, 6, 0, &a);
+	qaws_shell_atlas_create(&a, (qaws_surface const* const*)f, 6, 0);
 	c.face = 0; c.uv.x = (qaws_scalar)0.85; c.uv.y = (qaws_scalar)0.85;
-	qaws_shell_region_create_geodesic_disk(a, c, (qaws_scalar)0.75, 0, &g);
+	qaws_shell_region_create_geodesic_disk(&g, a, c, (qaws_scalar)0.75, 0);
 	memset(&md, 0, sizeof(md));
 	md.edge_length = (qaws_scalar)0.2;
-	if (g) qaws_shell_region_triangulate(g, &md, &m);
+	if (g) qaws_shell_region_triangulate(&m, g, &md);
 	for (k = 0; k < 2; k++)
 	{
 		viewport v3;
@@ -68,8 +68,8 @@ static void demo_shell_mesh(void)
 			{
 				unsigned int t[3], e;
 				qaws_vec3 x[3];
-				qaws_shell_mesh_get_triangle(m, i, t);
-				for (e = 0; e < 3; e++) qaws_shell_mesh_get_vertex(m, t[e], NULL, &x[e]);
+				qaws_shell_mesh_get_triangle(t, m, i);
+				for (e = 0; e < 3; e++) qaws_shell_mesh_get_vertex(NULL, &x[e], m, t[e]);
 				for (e = 0; e < 3; e++)
 					if (t[e] < t[(e + 1) % 3])
 						s29_seg(&sc, x[e], x[(e + 1) % 3], blue, 0.6);
@@ -82,7 +82,7 @@ static void demo_shell_mesh(void)
 			enum { N = 600 };
 			static qaws_shell_point pts[N];
 			unsigned int per[6] = { 0, 0, 0, 0, 0, 0 };
-			if (g && qaws_shell_region_sample(g, NULL, N, pts, NULL) == QAWS_STATUS_OK)
+			if (g && qaws_shell_region_sample(pts, NULL, g, N, NULL) == QAWS_STATUS_OK)
 				for (i = 0; i < N; i++)
 				{
 					ssd_dot(&sc, f[pts[i].face], pts[i].uv.x, pts[i].uv.y, red, 1.3);
@@ -104,11 +104,11 @@ static void demo_shell_mesh(void)
 		qaws_shell_region *gr = NULL, *sh = NULL;
 		qaws_scalar A0 = 0, A1 = 0, A2 = 0;
 		static int const green[3] = { 26, 127, 55 }, purple[3] = { 130, 80, 223 };
-		if (g) qaws_shell_region_offset(g, (qaws_scalar)0.25, 0, &gr);
-		if (g) qaws_shell_region_offset(g, (qaws_scalar)-0.25, 0, &sh);
-		if (g) qaws_shell_region_get_area(g, &A0);
-		if (gr) qaws_shell_region_get_area(gr, &A1);
-		if (sh) qaws_shell_region_get_area(sh, &A2);
+		if (g) qaws_shell_region_offset(&gr, g, (qaws_scalar)0.25, 0);
+		if (g) qaws_shell_region_offset(&sh, g, (qaws_scalar)-0.25, 0);
+		if (g) qaws_shell_region_get_area(&A0, g);
+		if (gr) qaws_shell_region_get_area(&A1, gr);
+		if (sh) qaws_shell_region_get_area(&A2, sh);
 		memset(&sc, 0, sizeof(sc));
 		v3.x0 = 24 + 2 * (pw + 12); v3.y0 = 104; v3.w = pw; v3.h = ph;
 		sgf_view_init(&view, -0.75 * pi, 0.6, 110, v3.x0 + pw / 2, v3.y0 + ph / 2 + 10);

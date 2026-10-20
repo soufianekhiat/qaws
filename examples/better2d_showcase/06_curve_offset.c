@@ -19,7 +19,7 @@ static void co_curve(svg* s, viewport const* v, qaws_curve const* c, char const*
 	for (j = 0; j <= m; j++)
 	{
 		qaws_eval_result_2d e;
-		qaws_curve_evaluate_2d(c, (qaws_scalar)(r.min_value + (r.max_value - r.min_value) * j / m), QAWS_EVAL_FLAG_POSITION, &e);
+		qaws_curve_evaluate_2d(&e, c, (qaws_scalar)(r.min_value + (r.max_value - r.min_value) * j / m), QAWS_EVAL_FLAG_POSITION);
 		xy[2 * j] = vx(v, e.position.x);
 		xy[2 * j + 1] = vy(v, e.position.y);
 	}
@@ -34,7 +34,7 @@ static unsigned int co_joints(svg* s, viewport const* v, qaws_curve const* c, ch
 	qaws_scalar* cp = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 2 * (n + 4));
 	if (qaws_curve_get_kind(c) == QAWS_CURVE_KIND_BSPLINE && qaws_curve_get_degree(c) == 3)
 	{
-		qaws_curve_get_control_points(c, cp, n + 4, &got);
+		qaws_curve_get_control_points(cp, &got, c, n + 4);
 		for (i = 0; i < got; i += 3)
 			svg_circle(s, vx(v, cp[2 * i]), vy(v, cp[2 * i + 1]), rad, fill, "#ffffff");
 	}
@@ -49,7 +49,7 @@ static void co_result(svg* s, viewport const* v, qaws_clip_result const* r, char
 	for (i = 0; i < qaws_clip_result_get_path_count(r); i++)
 	{
 		qaws_path_2d p;
-		qaws_clip_result_get_path(r, i, &p);
+		qaws_clip_result_get_path(&p, r, i);
 		for (k = 0; k < p.curve_count; k++)
 		{
 			co_curve(s, v, p.curves[k], line, 1.8, 0.95, 0);
@@ -71,7 +71,7 @@ static void co_parallel(svg* s, viewport const* v, qaws_curve const* c, double d
 	{
 		qaws_eval_result_2d e;
 		double t = r.min_value + (r.max_value - r.min_value) * j / N, sp, nx, ny, k;
-		qaws_curve_evaluate_2d(c, (qaws_scalar)t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2, &e);
+		qaws_curve_evaluate_2d(&e, c, (qaws_scalar)t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2);
 		sp = hypot(e.d1.x, e.d1.y);
 		nx = e.d1.y / sp; ny = -e.d1.x / sp;
 		k = (e.d1.x * e.d2.y - e.d1.y * e.d2.x) / (sp * sp * sp);
@@ -100,7 +100,7 @@ static void co_cusps(svg* s, viewport const* v, qaws_curve const* c, double delt
 	{
 		qaws_eval_result_2d e;
 		double sp;
-		qaws_curve_evaluate_2d(c, (qaws_scalar)t[i], QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &e);
+		qaws_curve_evaluate_2d(&e, c, (qaws_scalar)t[i], QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1);
 		sp = hypot(e.d1.x, e.d1.y);
 		svg_circle(s, vx(v, e.position.x + delta * e.d1.y / sp), vy(v, e.position.y - delta * e.d1.x / sp), 4.2, "#24292f", "#ffffff");
 	}
@@ -115,7 +115,7 @@ static qaws_curve* co_bezier(double const* xy, unsigned int n)
 	for (i = 0; i < 2 * n; i++) p[i] = (qaws_scalar)xy[i];
 	memset(&d, 0, sizeof(d));
 	d.dimension = QAWS_DIMENSION_2D; d.degree = n - 1; d.control_points = p; d.control_point_count = n;
-	qaws_curve_create_bezier(&d, &c);
+	qaws_curve_create_bezier(&c, &d);
 	return c;
 }
 
@@ -156,7 +156,7 @@ static qaws_curve* co_star(unsigned int m, double r0, double r1, double cx, doub
 	memset(&d, 0, sizeof(d));
 	d.dimension = QAWS_DIMENSION_2D; d.degree = 3; d.control_points = cp; d.control_point_count = n;
 	d.knots = kn; d.knot_count = kc;
-	qaws_curve_create_bspline(&d, &c);
+	qaws_curve_create_bspline(&c, &d);
 	return c;
 }
 
@@ -204,7 +204,7 @@ static void demo_curve_offset(void)
 			svg_panel(&s, &v, "parabola, offset 1 toward its focus");
 			co_parallel(&s, &v, parabola, -1);
 			co_curve(&s, &v, parabola, "#57606a", 2.0, 0.9, 0);
-			qaws_internal_offset_curve(parabola, -1, 2e-6, &ch, 1, &nk, cusps, 8, &nc);
+			qaws_internal_offset_curve(&ch, &nk, cusps, &nc, parabola, 1, 8, -1, 2e-6);
 			if (ch)
 			{
 				co_curve(&s, &v, ch, "#cf222e", 2.2, 0.95, 0);
@@ -228,7 +228,7 @@ static void demo_curve_offset(void)
 				double cusps[8], d = side ? -0.6 : 0.6;
 				unsigned int nk = 0;
 				co_parallel(&s, &v, scurve, d);
-				qaws_internal_offset_curve(scurve, d, 4e-6, &ch, 1, &nk, cusps, 8, &ncs[side]);
+				qaws_internal_offset_curve(&ch, &nk, cusps, &ncs[side], scurve, 1, 8, d, 4e-6);
 				if (ch)
 				{
 					co_curve(&s, &v, ch, side ? "#bc4c00" : "#0969da", 2.2, 0.95, 0);
@@ -254,8 +254,8 @@ static void demo_curve_offset(void)
 			p.curves = &cc; p.curve_count = 1; p.closed = 1;
 			co_view(&v, x0, y0, pw, ph, 0, 0, 9.2);
 			svg_panel(&s, &v, k == 2 ? "star grown by 1: raw chain, then the union" : "star shrunk by 0.45: raw chain, then the union");
-			qaws_internal_offset_curve(star, d, 1e-5, &ch, 1, &nk, cusps, 64, &nc);
-			if (qaws_offset_paths(&p, 1, (qaws_scalar)d, QAWS_JOIN_ROUND, QAWS_END_POLYGON, &r) == QAWS_STATUS_OK)
+			qaws_internal_offset_curve(&ch, &nk, cusps, &nc, star, 1, 64, d, 1e-5);
+			if (qaws_offset_paths(&r, &p, 1, (qaws_scalar)d, QAWS_JOIN_ROUND, QAWS_END_POLYGON) == QAWS_STATUS_OK)
 				co_result(&s, &v, r, k == 2 ? "#c8e1ff" : "#dafbe1", k == 2 ? "#0969da" : "#1a7f37", &cub, 0);
 			if (ch) co_curve(&s, &v, ch, "#cf222e", 0.9, 0.85, 0);
 			co_cusps(&s, &v, star, d, cusps, nc);
@@ -277,7 +277,7 @@ static void demo_curve_offset(void)
 			svg_panel(&s, &v, "the S stroked 0.6, round ends: cusps on both sides");
 			co_parallel(&s, &v, scurve, 0.6);
 			co_parallel(&s, &v, scurve, -0.6);
-			if (qaws_offset_paths(&p, 1, (qaws_scalar)0.6, QAWS_JOIN_ROUND, QAWS_END_ROUND, &r) == QAWS_STATUS_OK)
+			if (qaws_offset_paths(&r, &p, 1, (qaws_scalar)0.6, QAWS_JOIN_ROUND, QAWS_END_ROUND) == QAWS_STATUS_OK)
 				co_result(&s, &v, r, "#fff1e5", "#bc4c00", &cub, 1);
 			co_curve(&s, &v, scurve, "#57606a", 2.0, 0.9, 0);
 			sprintf(label, "one region, %u cubics and arcs; each point within 0.6 of the S (grid oracle, test 90)", cub);
@@ -305,9 +305,9 @@ static void demo_curve_offset(void)
 			g.paths = &pa; g.path_count = 1; g.join_type = QAWS_JOIN_ROUND; g.end_type = QAWS_END_POLYGON;
 			memset(&d, 0, sizeof(d));
 			d.groups = &g; d.group_count = 1; d.delta = delta; d.delta_fn = co_const; d.delta_user = &delta;
-			if (qaws_offset_execute(&d, &ra) == QAWS_STATUS_OK)
+			if (qaws_offset_execute(&ra, &d) == QAWS_STATUS_OK)
 				co_result(&s, &v, ra, NULL, "#bf8700", &na, 1);
-			if (qaws_offset_paths(&pb, 1, delta, QAWS_JOIN_ROUND, QAWS_END_POLYGON, &rb) == QAWS_STATUS_OK)
+			if (qaws_offset_paths(&rb, &pb, 1, delta, QAWS_JOIN_ROUND, QAWS_END_POLYGON) == QAWS_STATUS_OK)
 				co_result(&s, &v, rb, NULL, "#1a7f37", &nb, 1);
 			co_curve(&s, &v, a, "#57606a", 1.4, 0.9, 0);
 			co_curve(&s, &v, b, "#57606a", 1.4, 0.9, 0);

@@ -22,7 +22,7 @@ typedef struct qaws_yuksel_desc
 } qaws_yuksel_desc;
 
 qaws_status qaws_curve_create_yuksel(
-	qaws_yuksel_desc const* desc,
-	qaws_curve** out_curve);
+	qaws_curve** out_curve,
+	qaws_yuksel_desc const* desc);
 
 #endif /* QAWS_YUKSEL_H */

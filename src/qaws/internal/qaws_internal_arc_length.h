@@ -6,10 +6,10 @@
 /* Arc length between two global parameter values: adaptive Gauss-Kronrod (7-15)
    per span, relative error QAWS_EPSILON. */
 qaws_status qaws_internal_arc_length(
+	qaws_scalar* out_length,
 	qaws_curve const* curve,
 	qaws_scalar t_min,
-	qaws_scalar t_max,
-	qaws_scalar* out_length);
+	qaws_scalar t_max);
 
 /* The parameter t at arc length `length` from t_start (s(t) = length to QAWS_EPSILON of the length to the end):
    safeguarded Newton; OUT_OF_RANGE past the end or for a negative length. */
@@ -24,10 +24,10 @@ qaws_status qaws_internal_parameter_at_arc_length(
    table_params[i] are uniformly spaced parameters from min to max.
    table_distances[i] are cumulative arc lengths. */
 qaws_status qaws_internal_build_arc_length_table(
-	qaws_curve const* curve,
-	unsigned int table_size,
 	qaws_scalar* table_params,
-	qaws_scalar* table_distances);
+	qaws_scalar* table_distances,
+	qaws_curve const* curve,
+	unsigned int table_size);
 
 /* Map a distance value to a parameter using an arc-length table.
    Uses binary search + linear interpolation. */

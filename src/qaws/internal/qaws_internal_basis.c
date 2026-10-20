@@ -4,11 +4,11 @@
 #include <math.h>
 
 void qaws_internal_decasteljau(
+	qaws_scalar* out_point,
 	qaws_scalar const* control_points,
-	unsigned int degree,
 	unsigned int dim_count,
-	qaws_scalar t,
-	qaws_scalar* out_point)
+	unsigned int degree,
+	qaws_scalar t)
 {
 	qaws_scalar work[192]; /* max degree 64, max dim 3 */
 	unsigned int num_points = degree + 1;
@@ -32,10 +32,10 @@ void qaws_internal_decasteljau(
 }
 
 void qaws_internal_bezier_derivative_points(
+	qaws_scalar* out_deriv_points,
 	qaws_scalar const* control_points,
-	unsigned int degree,
 	unsigned int dim_count,
-	qaws_scalar* out_deriv_points)
+	unsigned int degree)
 {
 	qaws_scalar n = (qaws_scalar)degree;
 
@@ -49,11 +49,11 @@ void qaws_internal_bezier_derivative_points(
 }
 
 void qaws_internal_hermite_basis(
-	qaws_scalar t,
 	qaws_scalar* out_h,
 	qaws_scalar* out_dh,
 	qaws_scalar* out_d2h,
-	qaws_scalar* out_d3h)
+	qaws_scalar* out_d3h,
+	qaws_scalar t)
 {
 	qaws_scalar t2 = t * t;
 	qaws_scalar t3 = t2 * t;
@@ -129,12 +129,12 @@ unsigned int qaws_internal_find_knot_span(
 }
 
 void qaws_internal_bspline_basis(
+	qaws_scalar* out_basis,
 	qaws_scalar const* knots,
 	unsigned int knot_count,
 	unsigned int degree,
 	unsigned int span,
-	qaws_scalar t,
-	qaws_scalar* out_basis)
+	qaws_scalar t)
 {
 	qaws_scalar left[32];
 	qaws_scalar right[32];
@@ -160,13 +160,13 @@ void qaws_internal_bspline_basis(
 }
 
 void qaws_internal_bspline_basis_derivs(
+	qaws_scalar* out_ders,
 	qaws_scalar const* knots,
 	unsigned int knot_count,
 	unsigned int degree,
 	unsigned int span,
 	qaws_scalar t,
-	unsigned int k,
-	qaws_scalar* out_ders)
+	unsigned int k)
 {
 	unsigned int p = degree;
 	unsigned int order = p + 1;

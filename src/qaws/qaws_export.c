@@ -111,8 +111,8 @@ static qaws_status solve_linear_system(
 /* -------------------------------------------------------------------------- */
 
 qaws_status qaws_curve_fit_bspline(
-	qaws_bspline_fit_desc const* desc,
-	qaws_curve** out_curve)
+	qaws_curve** out_curve,
+	qaws_bspline_fit_desc const* desc)
 {
 	unsigned int m;            /* data_point_count */
 	unsigned int n;            /* control_point_count */
@@ -233,7 +233,7 @@ qaws_status qaws_curve_fit_bspline(
 				knots, knot_count, p, n, params[k]);
 
 			qaws_internal_bspline_basis(
-				knots, knot_count, p, span, params[k], basis);
+				basis, knots, knot_count, p, span, params[k]);
 
 			/* Compute R_k = D_k - N_{0,p}(t_k)*D_0 - N_{n-1,p}(t_k)*D_{m-1}
 			   for each dimension. */
@@ -314,7 +314,7 @@ qaws_status qaws_curve_fit_bspline(
 		bspline_desc.is_uniform = 0;
 		bspline_desc.is_closed = 0;
 
-		status = qaws_curve_create_bspline(&bspline_desc, out_curve);
+		status = qaws_curve_create_bspline(out_curve, &bspline_desc);
 	}
 
 cleanup:
@@ -406,7 +406,7 @@ static qaws_status svg_export_bezier(qaws_curve const* curve, svg_buf* b)
 	unsigned int n = 0;
 	qaws_status s;
 
-	s = qaws_bezier_get_control_points(curve, cp, 64, &n);
+	s = qaws_bezier_get_control_points(cp, &n, curve, 64);
 	if (s != QAWS_STATUS_OK) return s;
 
 	svg_emit_move(b, cp[0].x, cp[0].y);
@@ -432,7 +432,7 @@ static qaws_status svg_export_bezier(qaws_curve const* curve, svg_buf* b)
 		for (i = 1; i <= npts; i++)
 		{
 			qaws_scalar t = (qaws_scalar)i / (qaws_scalar)npts;
-			qaws_curve_evaluate_2d(curve, t, QAWS_EVAL_FLAG_POSITION, &r);
+			qaws_curve_evaluate_2d(&r, curve, t, QAWS_EVAL_FLAG_POSITION);
 			svg_emit_line(b, r.position.x, r.position.y);
 		}
 	}
@@ -453,10 +453,10 @@ static qaws_status svg_export_hermite(qaws_curve const* curve, svg_buf* b)
 		unsigned int n = 0;
 		qaws_status s;
 
-		s = qaws_curve_convert_hermite_to_bezier(curve, span, &bez);
+		s = qaws_curve_convert_hermite_to_bezier(&bez, curve, span);
 		if (s != QAWS_STATUS_OK) return s;
 
-		qaws_bezier_get_control_points(bez, cp, 4, &n);
+		qaws_bezier_get_control_points(cp, &n, bez, 4);
 
 		if (first)
 		{
@@ -483,10 +483,10 @@ static qaws_status svg_export_catmull_rom(qaws_curve const* curve, svg_buf* b)
 		unsigned int n = 0;
 		qaws_status s;
 
-		s = qaws_curve_convert_catmull_rom_to_bezier(curve, span, &bez);
+		s = qaws_curve_convert_catmull_rom_to_bezier(&bez, curve, span);
 		if (s != QAWS_STATUS_OK) return s;
 
-		qaws_bezier_get_control_points(bez, cp, 4, &n);
+		qaws_bezier_get_control_points(cp, &n, bez, 4);
 
 		if (first)
 		{
@@ -518,13 +518,13 @@ static qaws_status svg_export_rational_bezier(qaws_curve const* curve, svg_buf* 
 		unsigned int i;
 		qaws_eval_result_2d r;
 
-		qaws_curve_evaluate_2d(curve, range.min_value, QAWS_EVAL_FLAG_POSITION, &r);
+		qaws_curve_evaluate_2d(&r, curve, range.min_value, QAWS_EVAL_FLAG_POSITION);
 		svg_emit_move(b, r.position.x, r.position.y);
 
 		for (i = 1; i <= sample_count; i++)
 		{
 			qaws_scalar t = range.min_value + len * (qaws_scalar)i / (qaws_scalar)sample_count;
-			qaws_curve_evaluate_2d(curve, t, QAWS_EVAL_FLAG_POSITION, &r);
+			qaws_curve_evaluate_2d(&r, curve, t, QAWS_EVAL_FLAG_POSITION);
 			svg_emit_line(b, r.position.x, r.position.y);
 		}
 	}
@@ -553,8 +553,8 @@ static qaws_status svg_export_sampled(qaws_curve const* curve, svg_buf* b,
 	   a cubic Hermite segment that we convert to Bezier. */
 	seg_count = sample_count;
 
-	s = qaws_curve_evaluate_2d(curve, range.min_value,
-		QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &prev);
+	s = qaws_curve_evaluate_2d(&prev, curve,
+		range.min_value, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1);
 	if (s != QAWS_STATUS_OK) return s;
 
 	svg_emit_move(b, prev.position.x, prev.position.y);
@@ -565,8 +565,8 @@ static qaws_status svg_export_sampled(qaws_curve const* curve, svg_buf* b,
 		qaws_scalar dt = len / (qaws_scalar)seg_count;
 		qaws_vec2 b1, b2;
 
-		s = qaws_curve_evaluate_2d(curve, t,
-			QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &curr);
+		s = qaws_curve_evaluate_2d(&curr, curve,
+			t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1);
 		if (s != QAWS_STATUS_OK) return s;
 
 		/* Hermite-to-Bezier: B1 = P0 + M0/(3), B2 = P1 - M1/(3)
@@ -585,10 +585,10 @@ static qaws_status svg_export_sampled(qaws_curve const* curve, svg_buf* b,
 }
 
 qaws_status qaws_curve_export_svg_path(
-	qaws_curve const* curve,
 	char* out_path_data,
-	unsigned int capacity,
 	unsigned int* out_length,
+	qaws_curve const* curve,
+	unsigned int capacity,
 	unsigned int sample_count)
 {
 	svg_buf b;
@@ -646,11 +646,11 @@ qaws_status qaws_curve_export_svg_path(
 /* -------------------------------------------------------------------------- */
 
 qaws_status qaws_polyline_export_2d(
+	qaws_vec2* out_points,
+	unsigned int* out_count,
 	qaws_curve const* curve,
 	unsigned int sample_count,
-	qaws_polyline_sampling sampling,
-	qaws_vec2* out_points,
-	unsigned int* out_count)
+	qaws_polyline_sampling sampling)
 {
 	if (!curve || !out_points || !out_count)
 		return QAWS_STATUS_INVALID_ARGUMENT;
@@ -662,7 +662,7 @@ qaws_status qaws_polyline_export_2d(
 	if (sampling == QAWS_POLYLINE_CURVATURE)
 	{
 		return qaws_curve_sample_curvature_weighted_2d(
-			curve, sample_count, out_points, sample_count, out_count);
+			out_points, out_count, curve, sample_count, sample_count);
 	}
 	else
 	{
@@ -679,7 +679,7 @@ qaws_status qaws_polyline_export_2d(
 			qaws_status s;
 
 			t = (i == sample_count - 1) ? range.max_value : range.min_value + dt * (qaws_scalar)i;
-			s = qaws_curve_evaluate_2d(curve, t, QAWS_EVAL_FLAG_POSITION, &r);
+			s = qaws_curve_evaluate_2d(&r, curve, t, QAWS_EVAL_FLAG_POSITION);
 			if (s != QAWS_STATUS_OK)
 			{
 				*out_count = i;
@@ -694,11 +694,11 @@ qaws_status qaws_polyline_export_2d(
 }
 
 qaws_status qaws_polyline_export_3d(
+	qaws_vec3* out_points,
+	unsigned int* out_count,
 	qaws_curve const* curve,
 	unsigned int sample_count,
-	qaws_polyline_sampling sampling,
-	qaws_vec3* out_points,
-	unsigned int* out_count)
+	qaws_polyline_sampling sampling)
 {
 	if (!curve || !out_points || !out_count)
 		return QAWS_STATUS_INVALID_ARGUMENT;
@@ -710,7 +710,7 @@ qaws_status qaws_polyline_export_3d(
 	if (sampling == QAWS_POLYLINE_CURVATURE)
 	{
 		return qaws_curve_sample_curvature_weighted_3d(
-			curve, sample_count, out_points, sample_count, out_count);
+			out_points, out_count, curve, sample_count, sample_count);
 	}
 	else
 	{
@@ -727,7 +727,7 @@ qaws_status qaws_polyline_export_3d(
 			qaws_status s;
 
 			t = (i == sample_count - 1) ? range.max_value : range.min_value + dt * (qaws_scalar)i;
-			s = qaws_curve_evaluate_3d(curve, t, QAWS_EVAL_FLAG_POSITION, &r);
+			s = qaws_curve_evaluate_3d(&r, curve, t, QAWS_EVAL_FLAG_POSITION);
 			if (s != QAWS_STATUS_OK)
 			{
 				*out_count = i;
@@ -780,13 +780,13 @@ static void objbuf_append(obj_buf* b, char const* fmt, ...)
 }
 
 qaws_status qaws_surface_export_obj(
+	char* out_obj_data,
+	unsigned int* out_length,
 	qaws_surface const* surface,
+	unsigned int capacity,
 	unsigned int u_samples,
 	unsigned int v_samples,
-	int include_normals,
-	char* out_obj_data,
-	unsigned int capacity,
-	unsigned int* out_length)
+	int include_normals)
 {
 	obj_buf b;
 	qaws_range ur, vr;
@@ -835,26 +835,26 @@ qaws_status qaws_surface_export_obj(
 		memset(&rv0, 0, sizeof(rv0));
 		memset(&rv1, 0, sizeof(rv1));
 
-		qaws_surface_evaluate(surface,
+		qaws_surface_evaluate(&rc,
+			surface,
 			u_min + u_len * (qaws_scalar)0.5,
-			v_min + v_len * (qaws_scalar)0.5,
-			QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL, &rc);
-		qaws_surface_evaluate(surface, u_min, v_min,
-			QAWS_SURFACE_EVAL_POSITION, &r00);
-		qaws_surface_evaluate(surface, u_min + u_len, v_min,
-			QAWS_SURFACE_EVAL_POSITION, &r10);
-		qaws_surface_evaluate(surface, u_min, v_min + v_len,
-			QAWS_SURFACE_EVAL_POSITION, &r01);
-		qaws_surface_evaluate(surface, u_min + u_len, v_min + v_len,
-			QAWS_SURFACE_EVAL_POSITION, &r11);
+			v_min + v_len * (qaws_scalar)0.5, QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL);
+		qaws_surface_evaluate(&r00, surface, u_min,
+			v_min, QAWS_SURFACE_EVAL_POSITION);
+		qaws_surface_evaluate(&r10, surface, u_min + u_len,
+			v_min, QAWS_SURFACE_EVAL_POSITION);
+		qaws_surface_evaluate(&r01, surface, u_min,
+			v_min + v_len, QAWS_SURFACE_EVAL_POSITION);
+		qaws_surface_evaluate(&r11, surface, u_min + u_len,
+			v_min + v_len, QAWS_SURFACE_EVAL_POSITION);
 
 		/* V-closure: pipe/swept surfaces wrap in v */
-		qaws_surface_evaluate(surface,
-			u_min + u_len * (qaws_scalar)0.5, v_min,
-			QAWS_SURFACE_EVAL_POSITION, &rv0);
-		qaws_surface_evaluate(surface,
-			u_min + u_len * (qaws_scalar)0.5, v_min + v_len,
-			QAWS_SURFACE_EVAL_POSITION, &rv1);
+		qaws_surface_evaluate(&rv0,
+			surface, u_min + u_len * (qaws_scalar)0.5,
+			v_min, QAWS_SURFACE_EVAL_POSITION);
+		qaws_surface_evaluate(&rv1,
+			surface, u_min + u_len * (qaws_scalar)0.5,
+			v_min + v_len, QAWS_SURFACE_EVAL_POSITION);
 
 		dx = rv1.position.x - rv0.position.x;
 		dy = rv1.position.y - rv0.position.y;
@@ -898,7 +898,7 @@ qaws_status qaws_surface_export_obj(
 			qaws_scalar v = v_min + v_len * (qaws_scalar)vi / (qaws_scalar)(v_samples - 1);
 			qaws_surface_eval_result r;
 			memset(&r, 0, sizeof(r));
-			qaws_surface_evaluate(surface, u, v, eval_flags, &r);
+			qaws_surface_evaluate(&r, surface, u, v, eval_flags);
 			objbuf_append(&b, "v %.6g %.6g %.6g\n",
 				(double)r.position.x, (double)r.position.y, (double)r.position.z);
 		}
@@ -917,8 +917,8 @@ qaws_status qaws_surface_export_obj(
 				qaws_scalar v = v_min + v_len * (qaws_scalar)vi / (qaws_scalar)(v_samples - 1);
 				qaws_surface_eval_result r;
 				memset(&r, 0, sizeof(r));
-				qaws_surface_evaluate(surface, u, v,
-					QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL, &r);
+				qaws_surface_evaluate(&r, surface, u,
+					v, QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL);
 				objbuf_append(&b, "vn %.6g %.6g %.6g\n",
 					(double)(r.normal.x * sign),
 					(double)(r.normal.y * sign),

@@ -47,8 +47,8 @@ where `theta(s) = start_angle + kappa_0*s + (kappa_1 - kappa_0)*s^2 / (2*L)`.
 
 ```c
 qaws_status qaws_curve_create_clothoid(
-    qaws_clothoid_desc const* desc,
-    qaws_curve** out_curve);
+    qaws_curve** out_curve,
+    qaws_clothoid_desc const* desc);
 ```
 
 Creates a clothoid (Euler spiral) curve.

@@ -98,7 +98,7 @@ static qaws_status sm_section_job(void* ctx, unsigned int chunk, unsigned int be
 	(void)chunk;
 	for (i = begin; i < end; i++)
 	{
-		qaws_status s = qaws_stack_section_2d(j->st, (qaws_scalar)j->s[i].z, &j->s[i].r);
+		qaws_status s = qaws_stack_section_2d(&j->s[i].r, j->st, (qaws_scalar)j->s[i].z);
 		if (s != QAWS_STATUS_OK) return s;
 	}
 	return QAWS_STATUS_OK;
@@ -107,7 +107,7 @@ static qaws_status sm_section_job(void* ctx, unsigned int chunk, unsigned int be
 static void sm_eval(qaws_curve const* c, double t, double* p)
 {
 	qaws_eval_result_2d r;
-	qaws_curve_evaluate_2d(c, (qaws_scalar)t, QAWS_EVAL_FLAG_POSITION, &r);
+	qaws_curve_evaluate_2d(&r, c, (qaws_scalar)t, QAWS_EVAL_FLAG_POSITION);
 	p[0] = r.position.x;
 	p[1] = r.position.y;
 }
@@ -705,7 +705,7 @@ static int sm_cap(sm_mesh* m, sm_contour const* const* cs, unsigned int n, int u
 			xy[2 * k] = (qaws_scalar)m->v[3 * (cs[i]->first + k)];
 			xy[2 * k + 1] = (qaws_scalar)m->v[3 * (cs[i]->first + k) + 1];
 		}
-		if (qaws_curve_create_polyline_2d(xy, cs[i]->n, 1, &rings[i]) != QAWS_STATUS_OK) ok = 0;
+		if (qaws_curve_create_polyline_2d(&rings[i], xy, cs[i]->n, 1) != QAWS_STATUS_OK) ok = 0;
 		qaws_internal_free(xy);
 		views[i] = rings[i];
 		paths[i].curves = &views[i];
@@ -720,7 +720,7 @@ static int sm_cap(sm_mesh* m, sm_contour const* const* cs, unsigned int n, int u
 		d.path_count = n;
 		d.fill_rule = QAWS_FILL_EVEN_ODD;
 		d.tolerance = (qaws_scalar)1e300;
-		if (qaws_triangulate_region_2d(&d, &mesh) != QAWS_STATUS_OK) ok = 0;
+		if (qaws_triangulate_region_2d(&mesh, &d) != QAWS_STATUS_OK) ok = 0;
 	}
 	if (ok && mesh)
 	{
@@ -749,7 +749,7 @@ static int sm_cap(sm_mesh* m, sm_contour const* const* cs, unsigned int n, int u
 		for (i = 0; ok && i < nt; i++)
 		{
 			unsigned int t[3];
-			qaws_mesh_2d_get_triangle(mesh, i, t);
+			qaws_mesh_2d_get_triangle(t, mesh, i);
 			if (up) sm_cap_tri(m, cs, n, map[t[0]], map[t[1]], map[t[2]]);
 			else sm_cap_tri(m, cs, n, map[t[0]], map[t[2]], map[t[1]]);
 		}
@@ -766,7 +766,7 @@ static int sm_cap(sm_mesh* m, sm_contour const* const* cs, unsigned int n, int u
 /*  Public                                                                  */
 /* ======================================================================== */
 
-qaws_status qaws_stack_mesh_3d(qaws_stack_mesh_desc const* desc, qaws_mesh_3d** out)
+qaws_status qaws_stack_mesh_3d(qaws_mesh_3d** out, qaws_stack_mesh_desc const* desc)
 {
 	qaws_stack_2d const* st;
 	sm_mesh* m;
@@ -794,7 +794,7 @@ qaws_status qaws_stack_mesh_3d(qaws_stack_mesh_desc const* desc, qaws_mesh_3d** 
 	}
 	job.st = st;
 	job.s = s;
-	status = qaws_internal_parallel(desc->executor, ns, 1, sm_section_job, &job);
+	status = qaws_internal_parallel(ns, 1, sm_section_job, &job, desc->executor);
 	/* contours, measured */
 	for (i = 0; status == QAWS_STATUS_OK && i < ns; i++)
 	{
@@ -805,7 +805,7 @@ qaws_status qaws_stack_mesh_3d(qaws_stack_mesh_desc const* desc, qaws_mesh_3d** 
 		for (j = 0; j < nc; j++)
 		{
 			sm_contour* c = &s[i].c[j];
-			qaws_clip_result_get_path(s[i].r, j, &c->path);
+			qaws_clip_result_get_path(&c->path, s[i].r, j);
 			c->up = c->down = 0;
 			if (!sm_measure(c)) { status = QAWS_STATUS_ALLOCATION_FAILURE; break; }
 			if (c->hi[0] - c->lo[0] > ext) ext = c->hi[0] - c->lo[0];

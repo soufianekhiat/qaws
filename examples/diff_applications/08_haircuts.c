@@ -149,13 +149,13 @@ static void hair_fit_strands(tensor_field const* tf, strand* strands, int ns, do
 		d.degree = 3;
 		d.control_point_count = ncp;
 		st->fit = st->opt = NULL;
-		if (qaws_curve_fit_bspline(&d, &st->fit) != QAWS_STATUS_OK)
+		if (qaws_curve_fit_bspline(&st->fit, &d) != QAWS_STATUS_OK)
 		{
 			st->fit = NULL;
 			continue;
 		}
-		qaws_curve_read_field(st->fit, QAWS_FIELD_CONTROL_POINTS, cps, ncp * 2, &got);
-		qaws_curve_read_field(st->fit, QAWS_FIELD_KNOTS, st->knots, ncp + 4, &got);
+		qaws_curve_read_field(cps, &got, st->fit, ncp * 2, QAWS_FIELD_CONTROL_POINTS);
+		qaws_curve_read_field(st->knots, &got, st->fit, ncp + 4, QAWS_FIELD_KNOTS);
 		qaws_curve_destroy(st->fit);
 		st->fit = strand_curve(cps, ncp, st->knots);
 		strand_alignment(tf, st->fit, &ea, &aa);
@@ -190,8 +190,8 @@ static void strand_svg_hue(svg* s, imgmap const* m, qaws_curve const* c, double 
 	{
 		qaws_eval_result_2d e;
 		double sx, sy;
-		qaws_curve_evaluate_2d(c, (qaws_scalar)(r.min_value + (r.max_value - r.min_value) * k / n),
-			QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &e);
+		qaws_curve_evaluate_2d(&e, c,
+			(qaws_scalar)(r.min_value + (r.max_value - r.min_value) * k / n), QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1);
 		map_pt(m, e.position.x, e.position.y, &sx, &sy);
 		if (k > 0)
 		{

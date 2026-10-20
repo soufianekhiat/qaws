@@ -74,15 +74,15 @@ typedef struct qaws_offset_desc
 } qaws_offset_desc;
 
 /* The offset region as a qaws_clip result (paths, nesting). */
-qaws_status qaws_offset_execute(qaws_offset_desc const* desc, qaws_clip_result** out_result);
+qaws_status qaws_offset_execute(qaws_clip_result** out_result, qaws_offset_desc const* desc);
 
 /* Many independent offsets in one call (see qaws_clip_execute_batch). */
-qaws_status qaws_offset_execute_batch(qaws_offset_desc const* descs, unsigned int count, qaws_batch_executor const* executor,
-	qaws_clip_result** out_results);
+qaws_status qaws_offset_execute_batch(qaws_clip_result** out_results, qaws_offset_desc const* descs, unsigned int count,
+	qaws_batch_executor const* executor);
 
 /* One group, one delta (Clipper2's InflatePaths). */
-qaws_status qaws_offset_paths(qaws_path_2d const* paths, unsigned int path_count, qaws_scalar delta,
-	qaws_join_type join_type, qaws_end_type end_type, qaws_clip_result** out_result);
+qaws_status qaws_offset_paths(qaws_clip_result** out_result, qaws_path_2d const* paths, unsigned int path_count,
+	qaws_scalar delta, qaws_join_type join_type, qaws_end_type end_type);
 
 /*
  * Offsetting int64 polygons and polylines (Clipper2's ClipperOffset on
@@ -113,12 +113,12 @@ typedef struct qaws_offset64_desc
 	unsigned int flags;               /* QAWS_CLIP_PRESERVE_COLLINEAR, QAWS_CLIP_REVERSE_SOLUTION */
 } qaws_offset64_desc;
 
-qaws_status qaws_offset64_execute(qaws_offset64_desc const* desc, qaws_clip64_result** out_result);
-qaws_status qaws_offset64_execute_batch(qaws_offset64_desc const* descs, unsigned int count, qaws_batch_executor const* executor,
-	qaws_clip64_result** out_results);
+qaws_status qaws_offset64_execute(qaws_clip64_result** out_result, qaws_offset64_desc const* desc);
+qaws_status qaws_offset64_execute_batch(qaws_clip64_result** out_results, qaws_offset64_desc const* descs, unsigned int count,
+	qaws_batch_executor const* executor);
 
 /* One group, miter limit 2, the default arc tolerance (Clipper2's InflatePaths). */
-qaws_status qaws_offset64_paths(qaws_path64 const* paths, unsigned int path_count, double delta,
-	qaws_join_type join_type, qaws_end_type end_type, qaws_clip64_result** out_result);
+qaws_status qaws_offset64_paths(qaws_clip64_result** out_result, qaws_path64 const* paths, unsigned int path_count,
+	double delta, qaws_join_type join_type, qaws_end_type end_type);
 
 #endif /* QAWS_OFFSET_H */

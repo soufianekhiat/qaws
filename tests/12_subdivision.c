@@ -19,7 +19,7 @@ static void test_subdivision(void)
 		desc.closed = 0;
 		desc.refinement_levels = 5;
 
-		TEST_ASSERT_STATUS(qaws_curve_create_subdivision(&desc, &crv));
+		TEST_ASSERT_STATUS(qaws_curve_create_subdivision(&crv, &desc));
 		TEST_ASSERT(crv != NULL, "subdivision chaikin created");
 		TEST_ASSERT(qaws_curve_get_kind(crv) == QAWS_CURVE_KIND_SUBDIVISION,
 			"subdivision kind");
@@ -30,10 +30,10 @@ static void test_subdivision(void)
 		/* Endpoints should be near original endpoints */
 		{
 			qaws_range rng = qaws_curve_get_parameter_range(crv);
-			qaws_curve_evaluate_2d(crv, rng.min_value, QAWS_EVAL_FLAG_POSITION, &r);
+			qaws_curve_evaluate_2d(&r, crv, rng.min_value, QAWS_EVAL_FLAG_POSITION);
 			TEST_ASSERT(r.position.x >= -1 && r.position.x <= 1, "subdivision start x plausible");
 
-			qaws_curve_evaluate_2d(crv, rng.max_value, QAWS_EVAL_FLAG_POSITION, &r);
+			qaws_curve_evaluate_2d(&r, crv, rng.max_value, QAWS_EVAL_FLAG_POSITION);
 			TEST_ASSERT(r.position.x >= 3 && r.position.x <= 5, "subdivision end x plausible");
 		}
 
@@ -41,8 +41,8 @@ static void test_subdivision(void)
 		{
 			qaws_range rng = qaws_curve_get_parameter_range(crv);
 			qaws_scalar mid = (rng.min_value + rng.max_value) * (qaws_scalar)0.5;
-			qaws_curve_evaluate_2d(crv, mid,
-				QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2 | QAWS_EVAL_FLAG_D3, &r);
+			qaws_curve_evaluate_2d(&r, crv,
+				mid, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2 | QAWS_EVAL_FLAG_D3);
 			TEST_ASSERT(r.valid_flags & QAWS_EVAL_FLAG_D1, "subdivision d1 valid");
 			TEST_ASSERT(r.valid_flags & QAWS_EVAL_FLAG_D2, "subdivision d2 valid");
 			TEST_ASSERT(r.valid_flags & QAWS_EVAL_FLAG_D3, "subdivision d3 valid");
@@ -56,12 +56,12 @@ static void test_subdivision(void)
 			qaws_eval_result_2d prev, curr;
 			unsigned int i;
 			int smooth = 1;
-			qaws_curve_evaluate_2d(crv, rng.min_value, QAWS_EVAL_FLAG_POSITION, &prev);
+			qaws_curve_evaluate_2d(&prev, crv, rng.min_value, QAWS_EVAL_FLAG_POSITION);
 			for (i = 1; i <= 50; ++i)
 			{
 				qaws_scalar t = rng.min_value + (rng.max_value - rng.min_value) * (qaws_scalar)i / (qaws_scalar)50;
 				qaws_scalar dx, dy, jump;
-				qaws_curve_evaluate_2d(crv, t, QAWS_EVAL_FLAG_POSITION, &curr);
+				qaws_curve_evaluate_2d(&curr, crv, t, QAWS_EVAL_FLAG_POSITION);
 				dx = curr.position.x - prev.position.x;
 				dy = curr.position.y - prev.position.y;
 				jump = (qaws_scalar)sqrt((double)(dx * dx + dy * dy));
@@ -89,7 +89,7 @@ static void test_subdivision(void)
 		desc.closed = 1;
 		desc.refinement_levels = 5;
 
-		TEST_ASSERT_STATUS(qaws_curve_create_subdivision(&desc, &crv));
+		TEST_ASSERT_STATUS(qaws_curve_create_subdivision(&crv, &desc));
 		TEST_ASSERT(qaws_curve_is_closed(crv) == 1, "subdivision closed");
 		TEST_ASSERT(qaws_curve_get_continuity(crv) == QAWS_CONTINUITY_C2,
 			"subdivision lr3 continuity");
@@ -97,8 +97,8 @@ static void test_subdivision(void)
 		/* Closed: start and end should match */
 		{
 			qaws_range rng = qaws_curve_get_parameter_range(crv);
-			qaws_curve_evaluate_2d(crv, rng.min_value, QAWS_EVAL_FLAG_POSITION, &r_start);
-			qaws_curve_evaluate_2d(crv, rng.max_value, QAWS_EVAL_FLAG_POSITION, &r_end);
+			qaws_curve_evaluate_2d(&r_start, crv, rng.min_value, QAWS_EVAL_FLAG_POSITION);
+			qaws_curve_evaluate_2d(&r_end, crv, rng.max_value, QAWS_EVAL_FLAG_POSITION);
 			TEST_ASSERT(
 				approx_eq(r_start.position.x, r_end.position.x) &&
 				approx_eq(r_start.position.y, r_end.position.y),
@@ -122,7 +122,7 @@ static void test_subdivision(void)
 		desc.closed = 0;
 		desc.refinement_levels = 5;
 
-		TEST_ASSERT_STATUS(qaws_curve_create_subdivision(&desc, &crv));
+		TEST_ASSERT_STATUS(qaws_curve_create_subdivision(&crv, &desc));
 		TEST_ASSERT(qaws_curve_get_continuity(crv) == QAWS_CONTINUITY_C3,
 			"subdivision lr4 continuity C3");
 		qaws_curve_destroy(crv);
@@ -143,12 +143,12 @@ static void test_subdivision(void)
 		desc3d.closed = 0;
 		desc3d.refinement_levels = 4;
 
-		TEST_ASSERT_STATUS(qaws_curve_create_subdivision(&desc3d, &crv3d));
+		TEST_ASSERT_STATUS(qaws_curve_create_subdivision(&crv3d, &desc3d));
 		{
 			qaws_range rng = qaws_curve_get_parameter_range(crv3d);
 			qaws_scalar mid = (rng.min_value + rng.max_value) * (qaws_scalar)0.5;
-			qaws_curve_evaluate_3d(crv3d, mid,
-				QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &r3d);
+			qaws_curve_evaluate_3d(&r3d, crv3d,
+				mid, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1);
 			TEST_ASSERT(r3d.valid_flags & QAWS_EVAL_FLAG_POSITION, "subdivision 3d pos");
 			TEST_ASSERT(r3d.valid_flags & QAWS_EVAL_FLAG_D1, "subdivision 3d d1");
 		}

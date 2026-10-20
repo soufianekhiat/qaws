@@ -93,7 +93,7 @@ static void test_tspline_basic(void)
 	desc.v_range.min_value = 0;
 	desc.v_range.max_value = 1;
 
-	status = qaws_surface_create_tspline(&desc, &surface);
+	status = qaws_surface_create_tspline(&surface, &desc);
 	TEST_ASSERT_STATUS(status);
 	TEST_ASSERT(surface != NULL, "T-spline surface created");
 	TEST_ASSERT(qaws_surface_get_kind(surface) == QAWS_SURFACE_KIND_TSPLINE,
@@ -101,8 +101,8 @@ static void test_tspline_basic(void)
 
 	/* Evaluate at center */
 	memset(&r, 0, sizeof(r));
-	status = qaws_surface_evaluate(surface, (qaws_scalar)0.5, (qaws_scalar)0.5,
-		QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL, &r);
+	status = qaws_surface_evaluate(&r, surface, (qaws_scalar)0.5,
+		(qaws_scalar)0.5, QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL);
 	TEST_ASSERT_STATUS(status);
 	TEST_ASSERT(r.valid_flags & QAWS_SURFACE_EVAL_POSITION, "position computed");
 	TEST_ASSERT(r.valid_flags & QAWS_SURFACE_EVAL_NORMAL, "normal computed");
@@ -113,21 +113,21 @@ static void test_tspline_basic(void)
 
 	/* Evaluate at corners */
 	memset(&r, 0, sizeof(r));
-	qaws_surface_evaluate(surface, (qaws_scalar)0, (qaws_scalar)0,
-		QAWS_SURFACE_EVAL_POSITION, &r);
+	qaws_surface_evaluate(&r, surface, (qaws_scalar)0,
+		(qaws_scalar)0, QAWS_SURFACE_EVAL_POSITION);
 	printf("    corner(0,0): (%.4f, %.4f, %.4f)\n",
 		(double)r.position.x, (double)r.position.y, (double)r.position.z);
 
 	memset(&r, 0, sizeof(r));
-	qaws_surface_evaluate(surface, (qaws_scalar)1, (qaws_scalar)1,
-		QAWS_SURFACE_EVAL_POSITION, &r);
+	qaws_surface_evaluate(&r, surface, (qaws_scalar)1,
+		(qaws_scalar)1, QAWS_SURFACE_EVAL_POSITION);
 	printf("    corner(1,1): (%.4f, %.4f, %.4f)\n",
 		(double)r.position.x, (double)r.position.y, (double)r.position.z);
 
 	/* Derivatives should be non-zero at center */
 	memset(&r, 0, sizeof(r));
-	qaws_surface_evaluate(surface, (qaws_scalar)0.5, (qaws_scalar)0.5,
-		QAWS_SURFACE_EVAL_DU | QAWS_SURFACE_EVAL_DV, &r);
+	qaws_surface_evaluate(&r, surface, (qaws_scalar)0.5,
+		(qaws_scalar)0.5, QAWS_SURFACE_EVAL_DU | QAWS_SURFACE_EVAL_DV);
 	TEST_ASSERT(r.valid_flags & QAWS_SURFACE_EVAL_DU, "du computed");
 	TEST_ASSERT(r.valid_flags & QAWS_SURFACE_EVAL_DV, "dv computed");
 
@@ -171,14 +171,14 @@ static void test_tspline_rational(void)
 	desc.v_range.min_value = 0;
 	desc.v_range.max_value = 1;
 
-	status = qaws_surface_create_tspline(&desc, &surface);
+	status = qaws_surface_create_tspline(&surface, &desc);
 	TEST_ASSERT_STATUS(status);
 	TEST_ASSERT(qaws_surface_is_rational(surface) == 1, "is rational");
 
 	/* Center should be pulled toward (1,1,1) due to higher weight */
 	memset(&r, 0, sizeof(r));
-	qaws_surface_evaluate(surface, (qaws_scalar)0.5, (qaws_scalar)0.5,
-		QAWS_SURFACE_EVAL_POSITION, &r);
+	qaws_surface_evaluate(&r, surface, (qaws_scalar)0.5,
+		(qaws_scalar)0.5, QAWS_SURFACE_EVAL_POSITION);
 	printf("    center: (%.4f, %.4f, %.4f)\n",
 		(double)r.position.x, (double)r.position.y, (double)r.position.z);
 	/* Without weights center would be (0.5, 0.5, 0.25)
@@ -244,7 +244,7 @@ static void test_tspline_obj_export(void)
 	desc.v_range.min_value = 0;
 	desc.v_range.max_value = 1;
 
-	status = qaws_surface_create_tspline(&desc, &surface);
+	status = qaws_surface_create_tspline(&surface, &desc);
 	if (status != QAWS_STATUS_OK) return;
 
 	svg_ensure_output_dir();
@@ -265,9 +265,9 @@ static void test_tspline_obj_export(void)
 		obj_group(&obj, "tspline_dome");
 		obj_use_material(&obj, "tspline");
 
-		status = qaws_surface_tessellate(surface, &tdesc,
-			tverts, 8192, &tvert_count,
-			tindices, 49152, &tidx_count);
+		status = qaws_surface_tessellate(tverts, &tvert_count,
+			tindices, &tidx_count, surface,
+			8192, 49152, &tdesc);
 
 		if (status == QAWS_STATUS_OK && tvert_count > 0)
 		{

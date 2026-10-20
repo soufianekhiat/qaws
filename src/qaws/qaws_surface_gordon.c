@@ -62,19 +62,19 @@ static int tensor_product_eval(
 	for (i = 0; i < M; i++)
 	{
 		qaws_vec3 const* row = &impl->Q[i * N];
-		qaws_internal_surface_catmull_rom_blend(row, impl->u_params, N, u,
-			&row_blended[i], row_du ? &row_du[i] : NULL);
+		qaws_internal_surface_catmull_rom_blend(&row_blended[i], row_du ? &row_du[i] : NULL, row, impl->u_params,
+			N, u);
 	}
 
 	/* Blend the M results in v */
-	qaws_internal_surface_catmull_rom_blend(row_blended, impl->v_params, M, v,
-		out_pos, out_dv);
+	qaws_internal_surface_catmull_rom_blend(out_pos, out_dv, row_blended, impl->v_params,
+		M, v);
 
 	/* For dT/du: blend the M du-results in v */
 	if (out_du)
 	{
-		qaws_internal_surface_catmull_rom_blend(row_du, impl->v_params, M, v,
-			out_du, NULL);
+		qaws_internal_surface_catmull_rom_blend(out_du, NULL, row_du, impl->v_params,
+			M, v);
 	}
 
 	qaws_internal_scratch_release(allocator, stack_row_blended, row_blended);
@@ -160,7 +160,7 @@ static qaws_status gordon_surface_eval_sampled(
 			cf |= QAWS_EVAL_FLAG_D1;
 
 		memset(&cr, 0, sizeof(cr));
-		status = qaws_curve_evaluate_3d(impl->u_curves[i], t_curve, cf, &cr);
+		status = qaws_curve_evaluate_3d(&cr, impl->u_curves[i], t_curve, cf);
 		if (status != QAWS_STATUS_OK)
 		{
 			qaws_internal_scratch_release(surface->allocator, stack_u_pts, u_pts);
@@ -177,13 +177,13 @@ static qaws_status gordon_surface_eval_sampled(
 		}
 	}
 
-	qaws_internal_surface_catmull_rom_blend(u_pts, impl->v_params, M, v,
-		&Lu_pos, need_dv ? &Lu_dv : NULL);
+	qaws_internal_surface_catmull_rom_blend(&Lu_pos, need_dv ? &Lu_dv : NULL, u_pts, impl->v_params,
+		M, v);
 
 	if (need_du)
 	{
-		qaws_internal_surface_catmull_rom_blend(u_du, impl->v_params, M, v,
-			&Lu_du, NULL);
+		qaws_internal_surface_catmull_rom_blend(&Lu_du, NULL, u_du, impl->v_params,
+			M, v);
 	}
 
 	qaws_internal_scratch_release(surface->allocator, stack_u_pts, u_pts);
@@ -216,7 +216,7 @@ static qaws_status gordon_surface_eval_sampled(
 			cf |= QAWS_EVAL_FLAG_D1;
 
 		memset(&cr, 0, sizeof(cr));
-		status = qaws_curve_evaluate_3d(impl->v_curves[i], t_curve, cf, &cr);
+		status = qaws_curve_evaluate_3d(&cr, impl->v_curves[i], t_curve, cf);
 		if (status != QAWS_STATUS_OK)
 		{
 			qaws_internal_scratch_release(surface->allocator, stack_v_pts, v_pts);
@@ -233,13 +233,13 @@ static qaws_status gordon_surface_eval_sampled(
 		}
 	}
 
-	qaws_internal_surface_catmull_rom_blend(v_pts, impl->u_params, N, u,
-		&Lv_pos, need_du ? &Lv_du : NULL);
+	qaws_internal_surface_catmull_rom_blend(&Lv_pos, need_du ? &Lv_du : NULL, v_pts, impl->u_params,
+		N, u);
 
 	if (need_dv)
 	{
-		qaws_internal_surface_catmull_rom_blend(v_dv, impl->u_params, N, u,
-			&Lv_dv, NULL);
+		qaws_internal_surface_catmull_rom_blend(&Lv_dv, NULL, v_dv, impl->u_params,
+			N, u);
 	}
 
 	qaws_internal_scratch_release(surface->allocator, stack_v_pts, v_pts);
@@ -351,7 +351,7 @@ static qaws_status gordon_surface_eval_sampled(
 
 		if (eval_flags & QAWS_SURFACE_EVAL_NORMAL)
 		{
-			qaws_internal_surface_normal(out_result->du, out_result->dv, &out_result->normal);
+			qaws_internal_surface_normal(&out_result->normal, out_result->du, out_result->dv);
 			out_result->valid_flags |= QAWS_SURFACE_EVAL_NORMAL;
 		}
 	}
@@ -407,8 +407,8 @@ static qaws_status gordon_tangent(
 	qaws_curve_jet_3d p, t, tt;
 	qaws_status st;
 
-	qaws_internal_catmull_rom_weights(impl->v_params, M, v, iv, wv);
-	qaws_internal_catmull_rom_weights(impl->u_params, N, u, ju, wu);
+	qaws_internal_catmull_rom_weights(iv, impl->v_params, M, v, wv);
+	qaws_internal_catmull_rom_weights(ju, impl->u_params, N, u, wu);
 	for (ch = 0; ch < QAWS_SURFACE_JET_COUNT; ch++)
 		S[ch] = qaws_dual3_const(qaws_v3_zero());
 
@@ -420,8 +420,8 @@ static qaws_status gordon_tangent(
 		qaws_scalar s = r.max_value - r.min_value;
 		if (!gordon_slot_active(wv, k))
 			continue;
-		st = qaws_internal_curve_tangent_any(ctx, impl->u_curves[i], r.min_value + u * s, s * u_dot, 0xFu,
-			qaws_internal_child_views(views, i), &p, &t, tangent2 ? &tt : NULL);
+		st = qaws_internal_curve_tangent_any(&p, &t, tangent2 ? &tt : NULL, impl->u_curves[i], qaws_internal_child_views(views, i),
+			r.min_value + u * s, s * u_dot, 0xFu, ctx);
 		if (st != QAWS_STATUS_OK)
 			return st;
 		for (ch = 0; ch < QAWS_SURFACE_JET_COUNT; ch++)
@@ -438,8 +438,8 @@ static qaws_status gordon_tangent(
 			qaws_dual3 Q;
 			if (!gordon_slot_active(wu, l))
 				continue;
-			st = qaws_internal_curve_tangent_any(ctx, impl->u_curves[i], r.min_value + impl->u_params[j] * s,
-				QAWS_ZERO, QAWS_EVAL_FLAG_POSITION, qaws_internal_child_views(views, i), &p, &t, tangent2 ? &tt : NULL);
+			st = qaws_internal_curve_tangent_any(&p, &t, tangent2 ? &tt : NULL,
+				impl->u_curves[i], qaws_internal_child_views(views, i), r.min_value + impl->u_params[j] * s, QAWS_ZERO, QAWS_EVAL_FLAG_POSITION, ctx);
 			if (st != QAWS_STATUS_OK)
 				return st;
 			Q = qaws_dual3_make(p.d[0], t.d[0], tangent2 ? tt.d[0] : qaws_v3_zero());
@@ -460,8 +460,8 @@ static qaws_status gordon_tangent(
 		qaws_scalar s = r.max_value - r.min_value;
 		if (!gordon_slot_active(wu, l))
 			continue;
-		st = qaws_internal_curve_tangent_any(ctx, impl->v_curves[j], r.min_value + v * s, s * v_dot, 0xFu,
-			qaws_internal_child_views(views, M + j), &p, &t, tangent2 ? &tt : NULL);
+		st = qaws_internal_curve_tangent_any(&p, &t, tangent2 ? &tt : NULL, impl->v_curves[j], qaws_internal_child_views(views, M + j),
+			r.min_value + v * s, s * v_dot, 0xFu, ctx);
 		if (st != QAWS_STATUS_OK)
 			return st;
 		for (ch = 0; ch < QAWS_SURFACE_JET_COUNT; ch++)
@@ -507,8 +507,8 @@ static qaws_status gordon_adjoint(
 	qaws_status st;
 	(void)N;
 
-	qaws_internal_catmull_rom_weights(impl->v_params, M, v, iv, wv);
-	qaws_internal_catmull_rom_weights(impl->u_params, impl->v_curve_count, u, ju, wu);
+	qaws_internal_catmull_rom_weights(iv, impl->v_params, M, v, wv);
+	qaws_internal_catmull_rom_weights(ju, impl->u_params, impl->v_curve_count, u, wu);
 
 	for (k = 0; k < 4; k++)
 	{
@@ -531,7 +531,7 @@ static qaws_status gordon_adjoint(
 		jbar.channels = 0xFu;
 		if (v_adjoint)
 		{
-			st = qaws_internal_curve_tangent_any(ctx, impl->u_curves[i], r.min_value + u * s, QAWS_ZERO, 0xFu, NULL, &p, &t, NULL);
+			st = qaws_internal_curve_tangent_any(&p, &t, NULL, impl->u_curves[i], NULL, r.min_value + u * s, QAWS_ZERO, 0xFu, ctx);
 			if (st != QAWS_STATUS_OK)
 				return st;
 			for (ch = 0; ch < QAWS_SURFACE_JET_COUNT; ch++)
@@ -541,8 +541,8 @@ static qaws_status gordon_adjoint(
 					*v_adjoint += wv[b + 1][k] * gordon_power(s, a) * qaws_v3_dot(ybar->d[ch], p.d[a]);
 			}
 		}
-		st = qaws_internal_curve_adjoint_any(ctx, impl->u_curves[i], r.min_value + u * s, 0xFu, &jbar, cv,
-			u_adjoint ? &tbar : NULL);
+		st = qaws_internal_curve_adjoint_any(cv, u_adjoint ? &tbar : NULL, impl->u_curves[i], &jbar, r.min_value + u * s, 0xFu,
+			ctx);
 		if (st != QAWS_STATUS_OK)
 			return st;
 		if (u_adjoint)
@@ -566,7 +566,7 @@ static qaws_status gordon_adjoint(
 			qbar.channels = QAWS_EVAL_FLAG_POSITION;
 			if (u_adjoint || v_adjoint)
 			{
-				st = qaws_internal_curve_tangent_any(ctx, impl->u_curves[i], tq, QAWS_ZERO, QAWS_EVAL_FLAG_POSITION, NULL, &p, &t, NULL);
+				st = qaws_internal_curve_tangent_any(&p, &t, NULL, impl->u_curves[i], NULL, tq, QAWS_ZERO, QAWS_EVAL_FLAG_POSITION, ctx);
 				if (st != QAWS_STATUS_OK)
 					return st;
 				for (ch = 0; ch < QAWS_SURFACE_JET_COUNT; ch++)
@@ -581,7 +581,7 @@ static qaws_status gordon_adjoint(
 						*v_adjoint -= wv[b + 1][k] * wu[a][l] * d;
 				}
 			}
-			st = qaws_internal_curve_adjoint_any(ctx, impl->u_curves[i], tq, QAWS_EVAL_FLAG_POSITION, &qbar, cv, NULL);
+			st = qaws_internal_curve_adjoint_any(cv, NULL, impl->u_curves[i], &qbar, tq, QAWS_EVAL_FLAG_POSITION, ctx);
 			if (st != QAWS_STATUS_OK)
 				return st;
 		}
@@ -605,7 +605,7 @@ static qaws_status gordon_adjoint(
 		jbar.channels = 0xFu;
 		if (u_adjoint)
 		{
-			st = qaws_internal_curve_tangent_any(ctx, impl->v_curves[j], r.min_value + v * s, QAWS_ZERO, 0xFu, NULL, &p, &t, NULL);
+			st = qaws_internal_curve_tangent_any(&p, &t, NULL, impl->v_curves[j], NULL, r.min_value + v * s, QAWS_ZERO, 0xFu, ctx);
 			if (st != QAWS_STATUS_OK)
 				return st;
 			for (ch = 0; ch < QAWS_SURFACE_JET_COUNT; ch++)
@@ -615,8 +615,8 @@ static qaws_status gordon_adjoint(
 					*u_adjoint += wu[a + 1][l] * gordon_power(s, b) * qaws_v3_dot(ybar->d[ch], p.d[b]);
 			}
 		}
-		st = qaws_internal_curve_adjoint_any(ctx, impl->v_curves[j], r.min_value + v * s, 0xFu, &jbar,
-			(qaws_diff_views*)qaws_internal_child_views(views, M + j), v_adjoint ? &tbar : NULL);
+		st = qaws_internal_curve_adjoint_any((qaws_diff_views*)qaws_internal_child_views(views, M + j), v_adjoint ? &tbar : NULL, impl->v_curves[j], &jbar, r.min_value + v * s,
+			0xFu, ctx);
 		if (st != QAWS_STATUS_OK)
 			return st;
 		if (v_adjoint)
@@ -683,7 +683,7 @@ static qaws_status gordon_surface_eval(
 	if (eval_flags & QAWS_SURFACE_EVAL_DVV) { out_result->dvv = p.d[5]; out_result->valid_flags |= QAWS_SURFACE_EVAL_DVV; }
 	if (eval_flags & QAWS_SURFACE_EVAL_NORMAL)
 	{
-		qaws_internal_surface_normal(out_result->du, out_result->dv, &out_result->normal);
+		qaws_internal_surface_normal(&out_result->normal, out_result->du, out_result->dv);
 		out_result->valid_flags |= QAWS_SURFACE_EVAL_NORMAL;
 	}
 	return QAWS_STATUS_OK;
@@ -694,15 +694,15 @@ static void gordon_surface_destroy(void* impl, qaws_allocator const* allocator)
 	qaws_surface_gordon_impl* gi = (qaws_surface_gordon_impl*)impl;
 	if (gi)
 	{
-		if (gi->u_curves) qaws_internal_dealloc(allocator, gi->u_curves);
-		if (gi->v_params) qaws_internal_dealloc(allocator, gi->v_params);
-		if (gi->u_curve_ranges) qaws_internal_dealloc(allocator, gi->u_curve_ranges);
-		if (gi->v_curves) qaws_internal_dealloc(allocator, gi->v_curves);
-		if (gi->u_params) qaws_internal_dealloc(allocator, gi->u_params);
-		if (gi->v_curve_ranges) qaws_internal_dealloc(allocator, gi->v_curve_ranges);
-		if (gi->Q) qaws_internal_dealloc(allocator, gi->Q);
+		if (gi->u_curves) qaws_internal_dealloc(gi->u_curves, allocator);
+		if (gi->v_params) qaws_internal_dealloc(gi->v_params, allocator);
+		if (gi->u_curve_ranges) qaws_internal_dealloc(gi->u_curve_ranges, allocator);
+		if (gi->v_curves) qaws_internal_dealloc(gi->v_curves, allocator);
+		if (gi->u_params) qaws_internal_dealloc(gi->u_params, allocator);
+		if (gi->v_curve_ranges) qaws_internal_dealloc(gi->v_curve_ranges, allocator);
+		if (gi->Q) qaws_internal_dealloc(gi->Q, allocator);
 	}
-	qaws_internal_dealloc(allocator, impl);
+	qaws_internal_dealloc(impl, allocator);
 }
 
 static int gordon_surface_is_rational(qaws_surface const* s)
@@ -759,7 +759,7 @@ qaws_status qaws_surface_create_gordon_ex(
 		&gordon_surface_vtable, allocator);
 	if (!surface) return QAWS_STATUS_ALLOCATION_FAILURE;
 
-	impl = (qaws_surface_gordon_impl*)qaws_internal_alloc(allocator, sizeof(qaws_surface_gordon_impl));
+	impl = (qaws_surface_gordon_impl*)qaws_internal_alloc(sizeof(qaws_surface_gordon_impl), allocator);
 	if (!impl)
 	{
 		qaws_internal_surface_free(surface);
@@ -771,33 +771,33 @@ qaws_status qaws_surface_create_gordon_ex(
 	impl->v_curve_count = N;
 
 	/* Copy u_curves array */
-	impl->u_curves = (qaws_curve const**)qaws_internal_alloc(allocator, qaws_internal_mul2(M, sizeof(qaws_curve const*)));
+	impl->u_curves = (qaws_curve const**)qaws_internal_alloc(qaws_internal_mul2(M, sizeof(qaws_curve const*)), allocator);
 	if (!impl->u_curves) goto fail;
 	memcpy(impl->u_curves, desc->u_curves, M * sizeof(qaws_curve const*));
 
 	/* Copy v_params */
-	impl->v_params = (qaws_scalar*)qaws_internal_alloc(allocator, qaws_internal_mul2(M, sizeof(qaws_scalar)));
+	impl->v_params = (qaws_scalar*)qaws_internal_alloc(qaws_internal_mul2(M, sizeof(qaws_scalar)), allocator);
 	if (!impl->v_params) goto fail;
 	memcpy(impl->v_params, desc->v_params, M * sizeof(qaws_scalar));
 
 	/* Cache u-curve parameter ranges */
-	impl->u_curve_ranges = (qaws_range*)qaws_internal_alloc(allocator, qaws_internal_mul2(M, sizeof(qaws_range)));
+	impl->u_curve_ranges = (qaws_range*)qaws_internal_alloc(qaws_internal_mul2(M, sizeof(qaws_range)), allocator);
 	if (!impl->u_curve_ranges) goto fail;
 	for (i = 0; i < M; i++)
 		impl->u_curve_ranges[i] = qaws_curve_get_parameter_range(desc->u_curves[i]);
 
 	/* Copy v_curves array */
-	impl->v_curves = (qaws_curve const**)qaws_internal_alloc(allocator, qaws_internal_mul2(N, sizeof(qaws_curve const*)));
+	impl->v_curves = (qaws_curve const**)qaws_internal_alloc(qaws_internal_mul2(N, sizeof(qaws_curve const*)), allocator);
 	if (!impl->v_curves) goto fail;
 	memcpy(impl->v_curves, desc->v_curves, N * sizeof(qaws_curve const*));
 
 	/* Copy u_params */
-	impl->u_params = (qaws_scalar*)qaws_internal_alloc(allocator, qaws_internal_mul2(N, sizeof(qaws_scalar)));
+	impl->u_params = (qaws_scalar*)qaws_internal_alloc(qaws_internal_mul2(N, sizeof(qaws_scalar)), allocator);
 	if (!impl->u_params) goto fail;
 	memcpy(impl->u_params, desc->u_params, N * sizeof(qaws_scalar));
 
 	/* Cache v-curve parameter ranges */
-	impl->v_curve_ranges = (qaws_range*)qaws_internal_alloc(allocator, qaws_internal_mul2(N, sizeof(qaws_range)));
+	impl->v_curve_ranges = (qaws_range*)qaws_internal_alloc(qaws_internal_mul2(N, sizeof(qaws_range)), allocator);
 	if (!impl->v_curve_ranges) goto fail;
 	for (i = 0; i < N; i++)
 		impl->v_curve_ranges[i] = qaws_curve_get_parameter_range(desc->v_curves[i]);
@@ -806,7 +806,7 @@ qaws_status qaws_surface_create_gordon_ex(
 	   Q[i][j] = u_curve[i] evaluated at the u-parameter corresponding to u_params[j].
 	   u_curve[i] runs along u, so evaluate at:
 	     t = range.min + u_params[j] * (range.max - range.min) */
-	impl->Q = (qaws_vec3*)qaws_internal_alloc(allocator, qaws_internal_mul3(M, N, sizeof(qaws_vec3)));
+	impl->Q = (qaws_vec3*)qaws_internal_alloc(qaws_internal_mul3(M, N, sizeof(qaws_vec3)), allocator);
 	if (!impl->Q) goto fail;
 
 	for (i = 0; i < M; i++)
@@ -821,8 +821,8 @@ qaws_status qaws_surface_create_gordon_ex(
 			qaws_status status;
 
 			memset(&cr, 0, sizeof(cr));
-			status = qaws_curve_evaluate_3d(desc->u_curves[i], t_curve,
-				QAWS_EVAL_FLAG_POSITION, &cr);
+			status = qaws_curve_evaluate_3d(&cr, desc->u_curves[i],
+				t_curve, QAWS_EVAL_FLAG_POSITION);
 			if (status != QAWS_STATUS_OK)
 			{
 				gordon_surface_destroy(impl, allocator);
@@ -844,8 +844,8 @@ fail:
 }
 
 qaws_status qaws_surface_create_gordon(
-	qaws_surface_gordon_desc const* desc,
-	qaws_surface** out_surface)
+	qaws_surface** out_surface,
+	qaws_surface_gordon_desc const* desc)
 {
 	return qaws_surface_create_gordon_ex(desc, NULL, out_surface);
 }

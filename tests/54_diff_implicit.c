@@ -28,14 +28,14 @@ static qaws_curve* imp_curve(qaws_scalar const* p, unsigned int dim)
 	d.control_point_count = 6;
 	d.knots = g_imp_knots;
 	d.knot_count = 10;
-	qaws_curve_create_bspline(&d, &c);
+	qaws_curve_create_bspline(&c, &d);
 	return c;
 }
 
 static qaws_diff_views imp_views(qaws_field_view* fv, qaws_scalar* data, unsigned int count, unsigned int comps)
 {
 	qaws_diff_views v;
-	*fv = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, data, count, comps);
+	*fv = qaws_field_view_make(data, count, QAWS_FIELD_CONTROL_POINTS, comps);
 	v.fields = fv;
 	v.field_count = 1;
 	v.children = NULL;
@@ -79,7 +79,7 @@ static void check_curve_closest(unsigned int dim)
 		qaws_diff_context_init(&ctx);
 		qaws_diff_report_reset(&report);
 		ctx.report = &report;
-		TEST_ASSERT_STATUS(qaws_curve_closest_point_tangent(&ctx, c, q, &qd, &views, &val, &tan));
+		TEST_ASSERT_STATUS(qaws_curve_closest_point_tangent(&val, &tan, c, &qd, &views, q, &ctx));
 		if (report.validity != QAWS_DIFF_VALID)
 			ok_valid = 0;
 
@@ -90,8 +90,8 @@ static void check_curve_closest(unsigned int dim)
 		}
 		cp = imp_curve(pp, dim);
 		cm = imp_curve(pm, dim);
-		qaws_curve_closest_point_tangent(NULL, cp, qaws_v3_axpy(q, qd, (qaws_scalar)h), NULL, NULL, &vp, NULL);
-		qaws_curve_closest_point_tangent(NULL, cm, qaws_v3_axpy(q, qd, (qaws_scalar)-h), NULL, NULL, &vm, NULL);
+		qaws_curve_closest_point_tangent(&vp, NULL, cp, NULL, NULL, qaws_v3_axpy(q, qd, (qaws_scalar)h), NULL);
+		qaws_curve_closest_point_tangent(&vm, NULL, cm, NULL, NULL, qaws_v3_axpy(q, qd, (qaws_scalar)-h), NULL);
 		if (!diff_close((vp.t - vm.t) / (2 * h), tan.t, DIFF_TOL * 300) ||
 		    !diff_close((vp.position.y - vm.position.y) / (2 * h), tan.position.y, DIFF_TOL * 300) ||
 		    !diff_close((vp.distance - vm.distance) / (2 * h), tan.distance, DIFF_TOL * 300))
@@ -111,7 +111,7 @@ static void check_curve_closest(unsigned int dim)
 		lhs = (double)abar.t * tan.t + qaws_v3_dot(abar.position, tan.position) + (double)abar.distance * tan.distance;
 		memset(bar, 0, sizeof(bar));
 		views = imp_views(&fv, bar, 6, dim);
-		TEST_ASSERT_STATUS(qaws_curve_closest_point_adjoint(NULL, c, q, &abar, &views, &qbar));
+		TEST_ASSERT_STATUS(qaws_curve_closest_point_adjoint(&views, &qbar, c, &abar, q, NULL));
 		rhs = diff_dot(bar, dir, nc) + qaws_v3_dot(qbar, qd);
 		if (!diff_close(lhs, rhs, DIFF_TOL * 10))
 			ok_adj = 0;
@@ -135,7 +135,7 @@ static void test_curve_reports(void)
 	qaws_diff_context_init(&ctx);
 	qaws_diff_report_reset(&report);
 	ctx.report = &report;
-	qaws_curve_closest_point_tangent(&ctx, c, qaws_v3((qaws_scalar)2.5, (qaws_scalar)0.4, 0), NULL, NULL, &val, NULL);
+	qaws_curve_closest_point_tangent(&val, NULL, c, NULL, NULL, qaws_v3((qaws_scalar)2.5, (qaws_scalar)0.4, 0), &ctx);
 	TEST_ASSERT(report.validity == QAWS_DIFF_AMBIGUOUS, "competing closest points are reported as ambiguous");
 	TEST_ASSERT(report.branch_gap < (qaws_scalar)0.05, "branch gap is small for a symmetric query");
 
@@ -148,7 +148,7 @@ static void test_curve_reports(void)
 		diff_seed(5);
 		diff_rand_fill(dir, 18);
 		views = imp_views(&fv, dir, 6, 3);
-		qaws_curve_closest_point_tangent(&ctx, c, qaws_v3(-2, -1, 0), &qd, &views, &val, &tan);
+		qaws_curve_closest_point_tangent(&val, &tan, c, &qd, &views, qaws_v3(-2, -1, 0), &ctx);
 	}
 	TEST_ASSERT(approx_eq(val.t, 0), "query beyond the start projects onto the endpoint");
 	TEST_ASSERT(report.validity == QAWS_DIFF_VALID_LOCALLY && (report.frozen_used & QAWS_FREEZE_ACTIVE_SET),
@@ -175,7 +175,7 @@ static qaws_surface* imp_surface(qaws_scalar const* cps, qaws_scalar const* w)
 	d.u_knot_count = 8;
 	d.v_knots = g_imp_sknots;
 	d.v_knot_count = 8;
-	qaws_surface_create_nurbs(&d, &s);
+	qaws_surface_create_nurbs(&s, &d);
 	return s;
 }
 
@@ -209,20 +209,20 @@ static void test_surface_closest(void)
 		double lhs, rhs;
 
 		diff_rand_fill(dir, 64);
-		fv[0] = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, dir, 16, 3);
-		fv[1] = qaws_field_view_make(QAWS_FIELD_WEIGHTS, dir + 48, 16, 1);
+		fv[0] = qaws_field_view_make(dir, 16, QAWS_FIELD_CONTROL_POINTS, 3);
+		fv[1] = qaws_field_view_make(dir + 48, 16, QAWS_FIELD_WEIGHTS, 1);
 		views.fields = fv;
 		views.field_count = 2;
 		views.children = NULL;
 		views.child_count = 0;
-		TEST_ASSERT_STATUS(qaws_surface_closest_point_tangent(NULL, s, q, &qd, &views, &val, &tan));
+		TEST_ASSERT_STATUS(qaws_surface_closest_point_tangent(&val, &tan, s, &qd, &views, q, NULL));
 
 		for (n = 0; n < 48; n++) { pp[n] = (qaws_scalar)(cps[n] + h * dir[n]); pm[n] = (qaws_scalar)(cps[n] - h * dir[n]); }
 		for (n = 0; n < 16; n++) { wp[n] = (qaws_scalar)(w[n] + h * dir[48 + n]); wm[n] = (qaws_scalar)(w[n] - h * dir[48 + n]); }
 		sp = imp_surface(pp, wp);
 		sm = imp_surface(pm, wm);
-		qaws_surface_closest_point_tangent(NULL, sp, qaws_v3_axpy(q, qd, (qaws_scalar)h), NULL, NULL, &vp, NULL);
-		qaws_surface_closest_point_tangent(NULL, sm, qaws_v3_axpy(q, qd, (qaws_scalar)-h), NULL, NULL, &vm, NULL);
+		qaws_surface_closest_point_tangent(&vp, NULL, sp, NULL, NULL, qaws_v3_axpy(q, qd, (qaws_scalar)h), NULL);
+		qaws_surface_closest_point_tangent(&vm, NULL, sm, NULL, NULL, qaws_v3_axpy(q, qd, (qaws_scalar)-h), NULL);
 		if (!diff_close((vp.u - vm.u) / (2 * h), tan.u, DIFF_TOL * 300) ||
 		    !diff_close((vp.v - vm.v) / (2 * h), tan.v, DIFF_TOL * 300) ||
 		    !diff_close((vp.position.z - vm.position.z) / (2 * h), tan.position.z, DIFF_TOL * 300) ||
@@ -240,9 +240,9 @@ static void test_surface_closest(void)
 		abar.distance = diff_rand();
 		lhs = (double)abar.u * tan.u + (double)abar.v * tan.v + qaws_v3_dot(abar.position, tan.position) + (double)abar.distance * tan.distance;
 		memset(bar, 0, sizeof(bar));
-		fv[0] = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, bar, 16, 3);
-		fv[1] = qaws_field_view_make(QAWS_FIELD_WEIGHTS, bar + 48, 16, 1);
-		TEST_ASSERT_STATUS(qaws_surface_closest_point_adjoint(NULL, s, q, &abar, &views, &qbar));
+		fv[0] = qaws_field_view_make(bar, 16, QAWS_FIELD_CONTROL_POINTS, 3);
+		fv[1] = qaws_field_view_make(bar + 48, 16, QAWS_FIELD_WEIGHTS, 1);
+		TEST_ASSERT_STATUS(qaws_surface_closest_point_adjoint(&views, &qbar, s, &abar, q, NULL));
 		rhs = diff_dot(bar, dir, 64) + qaws_v3_dot(qbar, qd);
 		if (!diff_close(lhs, rhs, DIFF_TOL * 10))
 			ok_adj = 0;
@@ -259,7 +259,7 @@ static void test_surface_closest(void)
 		qaws_diff_context_init(&ctx);
 		qaws_diff_report_reset(&report);
 		ctx.report = &report;
-		qaws_surface_closest_point_tangent(&ctx, s, qaws_v3(-1, (qaws_scalar)1.5, 0), &qd, NULL, &val, &tan);
+		qaws_surface_closest_point_tangent(&val, &tan, s, &qd, NULL, qaws_v3(-1, (qaws_scalar)1.5, 0), &ctx);
 		TEST_ASSERT(approx_eq(val.u, 0), "query beyond the u = 0 edge lands on the boundary");
 		TEST_ASSERT((report.frozen_used & QAWS_FREEZE_ACTIVE_SET) && tan.u == 0, "boundary coordinate held fixed");
 	}
@@ -329,7 +329,7 @@ static void check_pair(unsigned int dim)
 	if (dim == 2)
 	{
 		qaws_intersection_2d hits[4];
-		qaws_curve_find_intersections_2d(A, B, hits, 4, &ns);
+		qaws_curve_find_intersections_2d(hits, &ns, A, B, 4);
 		for (i = 0; i < ns; i++)
 		{
 			seeds[i][0] = hits[i].parameter_a;
@@ -346,8 +346,8 @@ static void check_pair(unsigned int dim)
 			{
 				qaws_eval_result_3d ra, rb;
 				double d;
-				qaws_curve_evaluate_3d(A, (qaws_scalar)(3.0 * a / 40), QAWS_EVAL_FLAG_POSITION, &ra);
-				qaws_curve_evaluate_3d(B, (qaws_scalar)(3.0 * b / 40), QAWS_EVAL_FLAG_POSITION, &rb);
+				qaws_curve_evaluate_3d(&ra, A, (qaws_scalar)(3.0 * a / 40), QAWS_EVAL_FLAG_POSITION);
+				qaws_curve_evaluate_3d(&rb, B, (qaws_scalar)(3.0 * b / 40), QAWS_EVAL_FLAG_POSITION);
 				d = v3w(qaws_v3_sub(ra.position, rb.position), qaws_v3_sub(ra.position, rb.position));
 				if (d < best)
 				{
@@ -385,7 +385,7 @@ static void check_pair(unsigned int dim)
 		qaws_diff_context_init(&ctx);
 		qaws_diff_report_reset(&report);
 		ctx.report = &report;
-		TEST_ASSERT_STATUS(qaws_curve_pair_point_tangent(&ctx, A, B, seeds[i][0], seeds[i][1], &va, &vb, &val, &tan));
+		TEST_ASSERT_STATUS(qaws_curve_pair_point_tangent(&val, &tan, A, B, &va, &vb, seeds[i][0], seeds[i][1], &ctx));
 		if (report.validity != QAWS_DIFF_VALID)
 			ok_valid = 0;
 
@@ -397,8 +397,8 @@ static void check_pair(unsigned int dim)
 		Am = imp_curve(am, dim);
 		Bp = imp_curve(bp, dim);
 		Bm = imp_curve(bm, dim);
-		qaws_curve_pair_point_tangent(NULL, Ap, Bp, val.t_a, val.t_b, NULL, NULL, &vp, NULL);
-		qaws_curve_pair_point_tangent(NULL, Am, Bm, val.t_a, val.t_b, NULL, NULL, &vm, NULL);
+		qaws_curve_pair_point_tangent(&vp, NULL, Ap, Bp, NULL, NULL, val.t_a, val.t_b, NULL);
+		qaws_curve_pair_point_tangent(&vm, NULL, Am, Bm, NULL, NULL, val.t_a, val.t_b, NULL);
 		lhs = pair_dot(&tan, &w);
 		rhs = pair_diff(&vp, &vm, &w, h);
 		if (!diff_close(lhs, rhs, DIFF_TOL * 50))
@@ -410,7 +410,7 @@ static void check_pair(unsigned int dim)
 		memset(bb, 0, sizeof(bb));
 		va = imp_views(&fa, ba, 6, dim);
 		vb = imp_views(&fb, bb, 6, dim);
-		TEST_ASSERT_STATUS(qaws_curve_pair_point_adjoint(NULL, A, B, seeds[i][0], seeds[i][1], &w, &va, &vb));
+		TEST_ASSERT_STATUS(qaws_curve_pair_point_adjoint(&va, &vb, A, B, &w, seeds[i][0], seeds[i][1], NULL));
 		rhs = diff_dot(ba, da, nc) + diff_dot(bb, db, nc);
 		if (!diff_close(lhs, rhs, DIFF_TOL))
 			ok_adj = 0;
@@ -441,7 +441,7 @@ static void check_plane(void)
 	C = imp_curve(c, 3);
 	plane.point = qaws_v3((qaws_scalar)2.2, (qaws_scalar)0.3, (qaws_scalar)0.1);
 	plane.normal = qaws_v3((qaws_scalar)1, (qaws_scalar)0.3, (qaws_scalar)-0.2);
-	qaws_curve_find_plane_intersections(C, &plane, seeds, hits_pos, 8, &ns);
+	qaws_curve_find_plane_intersections(seeds, hits_pos, &ns, C, &plane, 8);
 	printf("    plane: %u crossings\n", ns);
 	TEST_ASSERT(ns >= 1, "plane crossing found");
 	for (i = 0; i < ns; i++)
@@ -459,7 +459,7 @@ static void check_plane(void)
 		w.t = diff_rand();
 		w.position = diff_rand_vec3();
 		v = imp_views(&fv, d, 6, 3);
-		TEST_ASSERT_STATUS(qaws_curve_plane_point_tangent(NULL, C, &plane, seeds[i], &pd, &v, &val, &tan));
+		TEST_ASSERT_STATUS(qaws_curve_plane_point_tangent(&val, &tan, C, &plane, &pd, &v, seeds[i], NULL));
 		root_shift(cp, c, d, 18, h);
 		root_shift(cm, c, d, 18, -h);
 		Cp = imp_curve(cp, 3);
@@ -468,8 +468,8 @@ static void check_plane(void)
 		pp.normal = qaws_v3_axpy(plane.normal, pd.normal, (qaws_scalar)h);
 		pm.point = qaws_v3_axpy(plane.point, pd.point, (qaws_scalar)-h);
 		pm.normal = qaws_v3_axpy(plane.normal, pd.normal, (qaws_scalar)-h);
-		qaws_curve_plane_point_tangent(NULL, Cp, &pp, val.t, NULL, NULL, &vp, NULL);
-		qaws_curve_plane_point_tangent(NULL, Cm, &pm, val.t, NULL, NULL, &vm, NULL);
+		qaws_curve_plane_point_tangent(&vp, NULL, Cp, &pp, NULL, NULL, val.t, NULL);
+		qaws_curve_plane_point_tangent(&vm, NULL, Cm, &pm, NULL, NULL, val.t, NULL);
 		lhs = tan.t * w.t + v3w(tan.position, w.position);
 		rhs = (((double)vp.t - vm.t) * w.t + v3w(qaws_v3_sub(vp.position, vm.position), w.position)) / (2 * h);
 		if (!diff_close(lhs, rhs, DIFF_TOL * 50))
@@ -479,7 +479,7 @@ static void check_plane(void)
 		memset(bar, 0, sizeof(bar));
 		memset(&pbar, 0, sizeof(pbar));
 		v = imp_views(&fv, bar, 6, 3);
-		TEST_ASSERT_STATUS(qaws_curve_plane_point_adjoint(NULL, C, &plane, seeds[i], &w, &v, &pbar));
+		TEST_ASSERT_STATUS(qaws_curve_plane_point_adjoint(&v, &pbar, C, &plane, &w, seeds[i], NULL));
 		rhs = diff_dot(bar, d, 18) + v3w(pbar.point, pd.point) + v3w(pbar.normal, pd.normal);
 		if (!diff_close(lhs, rhs, DIFF_TOL))
 			ok_adj = 0;
@@ -503,7 +503,7 @@ static void check_extremum_inflection(void)
 	root_curve_a(c, 2);
 	C = imp_curve(c, 2);
 
-	qaws_curve_find_extrema(C, 1, seeds, 8, &ns);
+	qaws_curve_find_extrema(seeds, &ns, C, 8, 1);
 	printf("    extrema in y: %u\n", ns);
 	TEST_ASSERT(ns >= 1, "extremum found");
 	for (i = 0; i < ns; i++)
@@ -522,13 +522,13 @@ static void check_extremum_inflection(void)
 		w.position.z = 0;
 		w.value = diff_rand();
 		v = imp_views(&fv, d, 6, 2);
-		TEST_ASSERT_STATUS(qaws_curve_extremum_tangent(NULL, C, e, seeds[i], &ed, &v, &val, &tan));
+		TEST_ASSERT_STATUS(qaws_curve_extremum_tangent(&val, &tan, C, &ed, &v, e, seeds[i], NULL));
 		root_shift(cp, c, d, 12, h);
 		root_shift(cm, c, d, 12, -h);
 		Cp = imp_curve(cp, 2);
 		Cm = imp_curve(cm, 2);
-		qaws_curve_extremum_tangent(NULL, Cp, qaws_v3_axpy(e, ed, (qaws_scalar)h), val.t, NULL, NULL, &vp, NULL);
-		qaws_curve_extremum_tangent(NULL, Cm, qaws_v3_axpy(e, ed, (qaws_scalar)-h), val.t, NULL, NULL, &vm, NULL);
+		qaws_curve_extremum_tangent(&vp, NULL, Cp, NULL, NULL, qaws_v3_axpy(e, ed, (qaws_scalar)h), val.t, NULL);
+		qaws_curve_extremum_tangent(&vm, NULL, Cm, NULL, NULL, qaws_v3_axpy(e, ed, (qaws_scalar)-h), val.t, NULL);
 		lhs = tan.t * w.t + v3w(tan.position, w.position) + tan.value * w.value;
 		rhs = (((double)vp.t - vm.t) * w.t + v3w(qaws_v3_sub(vp.position, vm.position), w.position) +
 			((double)vp.value - vm.value) * w.value) / (2 * h);
@@ -537,7 +537,7 @@ static void check_extremum_inflection(void)
 		printf("      extremum t %.4f: tangent %.8f fd %.8f\n", (double)val.t, lhs, rhs);
 		memset(bar, 0, sizeof(bar));
 		v = imp_views(&fv, bar, 6, 2);
-		TEST_ASSERT_STATUS(qaws_curve_extremum_adjoint(NULL, C, e, seeds[i], &w, &v, &ebar));
+		TEST_ASSERT_STATUS(qaws_curve_extremum_adjoint(&v, &ebar, C, &w, e, seeds[i], NULL));
 		rhs = diff_dot(bar, d, 12) + v3w(ebar, ed);
 		if (!diff_close(lhs, rhs, DIFF_TOL))
 			ok_adj = 0;
@@ -548,7 +548,7 @@ static void check_extremum_inflection(void)
 	TEST_ASSERT(ok_adj, "extremum adjoint identity");
 
 	ok_fd = ok_adj = 1;
-	qaws_curve_find_inflection_points(C, seeds, 8, &ns);
+	qaws_curve_find_inflection_points(seeds, &ns, C, 8);
 	printf("    inflections: %u\n", ns);
 	TEST_ASSERT(ns >= 1, "inflection found");
 	for (i = 0; i < ns; i++)
@@ -564,13 +564,13 @@ static void check_extremum_inflection(void)
 		w.position = diff_rand_vec3();
 		w.position.z = 0;
 		v = imp_views(&fv, d, 6, 2);
-		TEST_ASSERT_STATUS(qaws_curve_inflection_tangent(NULL, C, seeds[i], &v, &val, &tan));
+		TEST_ASSERT_STATUS(qaws_curve_inflection_tangent(&val, &tan, C, &v, seeds[i], NULL));
 		root_shift(cp, c, d, 12, h);
 		root_shift(cm, c, d, 12, -h);
 		Cp = imp_curve(cp, 2);
 		Cm = imp_curve(cm, 2);
-		qaws_curve_inflection_tangent(NULL, Cp, val.t, NULL, &vp, NULL);
-		qaws_curve_inflection_tangent(NULL, Cm, val.t, NULL, &vm, NULL);
+		qaws_curve_inflection_tangent(&vp, NULL, Cp, NULL, val.t, NULL);
+		qaws_curve_inflection_tangent(&vm, NULL, Cm, NULL, val.t, NULL);
 		lhs = tan.t * w.t + v3w(tan.position, w.position);
 		rhs = (((double)vp.t - vm.t) * w.t + v3w(qaws_v3_sub(vp.position, vm.position), w.position)) / (2 * h);
 		if (!diff_close(lhs, rhs, DIFF_TOL * 50))
@@ -578,7 +578,7 @@ static void check_extremum_inflection(void)
 		printf("      inflection t %.4f: tangent %.8f fd %.8f\n", (double)val.t, lhs, rhs);
 		memset(bar, 0, sizeof(bar));
 		v = imp_views(&fv, bar, 6, 2);
-		TEST_ASSERT_STATUS(qaws_curve_inflection_adjoint(NULL, C, seeds[i], &w, &v));
+		TEST_ASSERT_STATUS(qaws_curve_inflection_adjoint(&v, C, &w, seeds[i], NULL));
 		rhs = diff_dot(bar, d, 12);
 		if (!diff_close(lhs, rhs, DIFF_TOL))
 			ok_adj = 0;
@@ -619,7 +619,7 @@ static void check_pierce(void)
 	}
 	S = imp_surface(sc, sw);
 	C = imp_curve(c, 3);
-	qaws_surface_find_curve_intersections(S, C, hits, 4, &ns);
+	qaws_surface_find_curve_intersections(hits, &ns, S, C, 4);
 	printf("    surface-curve: %u piercings\n", ns);
 	TEST_ASSERT(ns >= 1, "piercing found");
 	for (i = 0; i < ns; i++)
@@ -639,7 +639,7 @@ static void check_pierce(void)
 		w.position = diff_rand_vec3();
 		vs = imp_views(&fs, sd, 16, 3);
 		vc = imp_views(&fc, d, 6, 3);
-		TEST_ASSERT_STATUS(qaws_surface_curve_point_tangent(NULL, S, C, hits[i].u, hits[i].v, hits[i].t, &vs, &vc, &val, &tan));
+		TEST_ASSERT_STATUS(qaws_surface_curve_point_tangent(&val, &tan, S, C, &vs, &vc, hits[i].u, hits[i].v, hits[i].t, NULL));
 		root_shift(sp, sc, sd, 48, h);
 		root_shift(sm, sc, sd, 48, -h);
 		root_shift(cp, c, d, 18, h);
@@ -648,8 +648,8 @@ static void check_pierce(void)
 		Sm = imp_surface(sm, sw);
 		Cp = imp_curve(cp, 3);
 		Cm = imp_curve(cm, 3);
-		qaws_surface_curve_point_tangent(NULL, Sp, Cp, val.u, val.v, val.t, NULL, NULL, &vp, NULL);
-		qaws_surface_curve_point_tangent(NULL, Sm, Cm, val.u, val.v, val.t, NULL, NULL, &vm, NULL);
+		qaws_surface_curve_point_tangent(&vp, NULL, Sp, Cp, NULL, NULL, val.u, val.v, val.t, NULL);
+		qaws_surface_curve_point_tangent(&vm, NULL, Sm, Cm, NULL, NULL, val.u, val.v, val.t, NULL);
 		lhs = tan.u * w.u + tan.v * w.v + tan.t * w.t + v3w(tan.position, w.position);
 		rhs = (((double)vp.u - vm.u) * w.u + ((double)vp.v - vm.v) * w.v + ((double)vp.t - vm.t) * w.t +
 			v3w(qaws_v3_sub(vp.position, vm.position), w.position)) / (2 * h);
@@ -660,7 +660,7 @@ static void check_pierce(void)
 		memset(bar, 0, sizeof(bar));
 		vs = imp_views(&fs, sbar, 16, 3);
 		vc = imp_views(&fc, bar, 6, 3);
-		TEST_ASSERT_STATUS(qaws_surface_curve_point_adjoint(NULL, S, C, hits[i].u, hits[i].v, hits[i].t, &w, &vs, &vc));
+		TEST_ASSERT_STATUS(qaws_surface_curve_point_adjoint(&vs, &vc, S, C, &w, hits[i].u, hits[i].v, hits[i].t, NULL));
 		rhs = diff_dot(sbar, sd, 48) + diff_dot(bar, d, 18);
 		if (!diff_close(lhs, rhs, DIFF_TOL))
 			ok_adj = 0;
@@ -797,7 +797,7 @@ static void ref_curve_closest(unsigned int k)
 	qd = ref_v3(dir + 18);
 	c = imp_curve(cps, 3);
 	views = imp_views(&fv, dir, 6, 3);
-	TEST_ASSERT_STATUS(qaws_curve_closest_point_tangent(NULL, c, q, &qd, &views, &val, &tan));
+	TEST_ASSERT_STATUS(qaws_curve_closest_point_tangent(&val, &tan, c, &qd, &views, q, NULL));
 	y[0] = val.t; ref_put_v3(y + 1, val.position); y[4] = val.distance;
 	yt[0] = tan.t; ref_put_v3(yt + 1, tan.position); yt[4] = tan.distance;
 	abar.t = ref_bar(0);
@@ -805,7 +805,7 @@ static void ref_curve_closest(unsigned int k)
 	abar.distance = ref_bar(4);
 	memset(bar, 0, sizeof(bar));
 	views = imp_views(&fv, bar, 6, 3);
-	TEST_ASSERT_STATUS(qaws_curve_closest_point_adjoint(NULL, c, q, &abar, &views, &qbar));
+	TEST_ASSERT_STATUS(qaws_curve_closest_point_adjoint(&views, &qbar, c, &abar, q, NULL));
 	for (n = 0; n < 18; n++)
 		adj[n] = bar[n];
 	ref_put_v3(adj + 18, qbar);
@@ -828,13 +828,13 @@ static void ref_surface_closest(void)
 	ref_dir(dir, 0, 67);
 	qd = ref_v3(dir + 64);
 	s = imp_surface(cps, w);
-	fv[0] = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, dir, 16, 3);
-	fv[1] = qaws_field_view_make(QAWS_FIELD_WEIGHTS, dir + 48, 16, 1);
+	fv[0] = qaws_field_view_make(dir, 16, QAWS_FIELD_CONTROL_POINTS, 3);
+	fv[1] = qaws_field_view_make(dir + 48, 16, QAWS_FIELD_WEIGHTS, 1);
 	views.fields = fv;
 	views.field_count = 2;
 	views.children = NULL;
 	views.child_count = 0;
-	TEST_ASSERT_STATUS(qaws_surface_closest_point_tangent(NULL, s, q, &qd, &views, &val, &tan));
+	TEST_ASSERT_STATUS(qaws_surface_closest_point_tangent(&val, &tan, s, &qd, &views, q, NULL));
 	y[0] = val.u; y[1] = val.v; ref_put_v3(y + 2, val.position); y[5] = val.distance;
 	yt[0] = tan.u; yt[1] = tan.v; ref_put_v3(yt + 2, tan.position); yt[5] = tan.distance;
 	abar.u = ref_bar(0);
@@ -842,9 +842,9 @@ static void ref_surface_closest(void)
 	abar.position = qaws_v3(ref_bar(2), ref_bar(3), ref_bar(4));
 	abar.distance = ref_bar(5);
 	memset(bar, 0, sizeof(bar));
-	fv[0] = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, bar, 16, 3);
-	fv[1] = qaws_field_view_make(QAWS_FIELD_WEIGHTS, bar + 48, 16, 1);
-	TEST_ASSERT_STATUS(qaws_surface_closest_point_adjoint(NULL, s, q, &abar, &views, &qbar));
+	fv[0] = qaws_field_view_make(bar, 16, QAWS_FIELD_CONTROL_POINTS, 3);
+	fv[1] = qaws_field_view_make(bar + 48, 16, QAWS_FIELD_WEIGHTS, 1);
+	TEST_ASSERT_STATUS(qaws_surface_closest_point_adjoint(&views, &qbar, s, &abar, q, NULL));
 	for (n = 0; n < 64; n++)
 		adj[n] = bar[n];
 	ref_put_v3(adj + 64, qbar);
@@ -874,7 +874,7 @@ static void ref_pair(void)
 	B = imp_curve(cb, 3);
 	va = imp_views(&fa, dir, 6, 3);
 	vb = imp_views(&fb, dir + 18, 6, 3);
-	TEST_ASSERT_STATUS(qaws_curve_pair_point_tangent(NULL, A, B, sa, sb, &va, &vb, &val, &tan));
+	TEST_ASSERT_STATUS(qaws_curve_pair_point_tangent(&val, &tan, A, B, &va, &vb, sa, sb, NULL));
 	y[0] = val.t_a; y[1] = val.t_b; ref_put_v3(y + 2, val.position_a); ref_put_v3(y + 5, val.position_b); y[8] = val.distance;
 	yt[0] = tan.t_a; yt[1] = tan.t_b; ref_put_v3(yt + 2, tan.position_a); ref_put_v3(yt + 5, tan.position_b);
 	yt[8] = tan.distance;
@@ -887,7 +887,7 @@ static void ref_pair(void)
 	memset(bb, 0, sizeof(bb));
 	va = imp_views(&fa, ba, 6, 3);
 	vb = imp_views(&fb, bb, 6, 3);
-	TEST_ASSERT_STATUS(qaws_curve_pair_point_adjoint(NULL, A, B, sa, sb, &w, &va, &vb));
+	TEST_ASSERT_STATUS(qaws_curve_pair_point_adjoint(&va, &vb, A, B, &w, sa, sb, NULL));
 	for (n = 0; n < 18; n++)
 	{
 		adj[n] = ba[n];
@@ -916,7 +916,7 @@ static void ref_plane(void)
 	pd.point = ref_v3(dir + 18);
 	pd.normal = ref_v3(dir + 21);
 	views = imp_views(&fv, dir, 6, 3);
-	TEST_ASSERT_STATUS(qaws_curve_plane_point_tangent(NULL, c, &plane, (qaws_scalar)ref_plane_value[0], &pd, &views, &val, &tan));
+	TEST_ASSERT_STATUS(qaws_curve_plane_point_tangent(&val, &tan, c, &plane, &pd, &views, (qaws_scalar)ref_plane_value[0], NULL));
 	y[0] = val.t; ref_put_v3(y + 1, val.position);
 	yt[0] = tan.t; ref_put_v3(yt + 1, tan.position);
 	w.t = ref_bar(0);
@@ -924,7 +924,7 @@ static void ref_plane(void)
 	memset(bar, 0, sizeof(bar));
 	memset(&pbar, 0, sizeof(pbar));
 	views = imp_views(&fv, bar, 6, 3);
-	TEST_ASSERT_STATUS(qaws_curve_plane_point_adjoint(NULL, c, &plane, (qaws_scalar)ref_plane_value[0], &w, &views, &pbar));
+	TEST_ASSERT_STATUS(qaws_curve_plane_point_adjoint(&views, &pbar, c, &plane, &w, (qaws_scalar)ref_plane_value[0], NULL));
 	for (n = 0; n < 18; n++)
 		adj[n] = bar[n];
 	ref_put_v3(adj + 18, pbar.point);
@@ -949,7 +949,7 @@ static void ref_extremum_inflection(void)
 		qaws_curve_extremum val, tan, w;
 		qaws_vec3 e = qaws_v3(0, 1, 0), ed = ref_v3(dir + 12), ebar = qaws_v3_zero();
 		views = imp_views(&fv, dir, 6, 2);
-		TEST_ASSERT_STATUS(qaws_curve_extremum_tangent(NULL, c, e, (qaws_scalar)ref_ext_value[0], &ed, &views, &val, &tan));
+		TEST_ASSERT_STATUS(qaws_curve_extremum_tangent(&val, &tan, c, &ed, &views, e, (qaws_scalar)ref_ext_value[0], NULL));
 		y[0] = val.t; y[1] = val.position.x; y[2] = val.position.y; y[3] = val.value;
 		yt[0] = tan.t; yt[1] = tan.position.x; yt[2] = tan.position.y; yt[3] = tan.value;
 		w.t = ref_bar(0);
@@ -957,7 +957,7 @@ static void ref_extremum_inflection(void)
 		w.value = ref_bar(3);
 		memset(bar, 0, sizeof(bar));
 		views = imp_views(&fv, bar, 6, 2);
-		TEST_ASSERT_STATUS(qaws_curve_extremum_adjoint(NULL, c, e, (qaws_scalar)ref_ext_value[0], &w, &views, &ebar));
+		TEST_ASSERT_STATUS(qaws_curve_extremum_adjoint(&views, &ebar, c, &w, e, (qaws_scalar)ref_ext_value[0], NULL));
 		for (n = 0; n < 12; n++)
 			adj[n] = bar[n];
 		ref_put_v3(adj + 12, ebar);
@@ -966,14 +966,14 @@ static void ref_extremum_inflection(void)
 	{
 		qaws_curve_inflection val, tan, w;
 		views = imp_views(&fv, dir, 6, 2);
-		TEST_ASSERT_STATUS(qaws_curve_inflection_tangent(NULL, c, (qaws_scalar)ref_infl_value[0], &views, &val, &tan));
+		TEST_ASSERT_STATUS(qaws_curve_inflection_tangent(&val, &tan, c, &views, (qaws_scalar)ref_infl_value[0], NULL));
 		y[0] = val.t; y[1] = val.position.x; y[2] = val.position.y;
 		yt[0] = tan.t; yt[1] = tan.position.x; yt[2] = tan.position.y;
 		w.t = ref_bar(0);
 		w.position = qaws_v3(ref_bar(1), ref_bar(2), 0);
 		memset(bar, 0, sizeof(bar));
 		views = imp_views(&fv, bar, 6, 2);
-		TEST_ASSERT_STATUS(qaws_curve_inflection_adjoint(NULL, c, (qaws_scalar)ref_infl_value[0], &w, &views));
+		TEST_ASSERT_STATUS(qaws_curve_inflection_adjoint(&views, c, &w, (qaws_scalar)ref_infl_value[0], NULL));
 		for (n = 0; n < 12; n++)
 			adj[n] = bar[n];
 		ref_check("inflection", y, yt, adj, 3, 12, ref_infl_value, ref_infl_tangent, ref_infl_adjoint);
@@ -1005,7 +1005,7 @@ static void ref_pierce(void)
 	C = imp_curve(c, 3);
 	vs = imp_views(&fs, dir, 16, 3);
 	vc = imp_views(&fc, dir + 48, 6, 3);
-	TEST_ASSERT_STATUS(qaws_surface_curve_point_tangent(NULL, S, C, su, sv, st, &vs, &vc, &val, &tan));
+	TEST_ASSERT_STATUS(qaws_surface_curve_point_tangent(&val, &tan, S, C, &vs, &vc, su, sv, st, NULL));
 	y[0] = val.u; y[1] = val.v; y[2] = val.t; ref_put_v3(y + 3, val.position);
 	yt[0] = tan.u; yt[1] = tan.v; yt[2] = tan.t; ref_put_v3(yt + 3, tan.position);
 	w.u = ref_bar(0);
@@ -1016,7 +1016,7 @@ static void ref_pierce(void)
 	memset(bar, 0, sizeof(bar));
 	vs = imp_views(&fs, sbar, 16, 3);
 	vc = imp_views(&fc, bar, 6, 3);
-	TEST_ASSERT_STATUS(qaws_surface_curve_point_adjoint(NULL, S, C, su, sv, st, &w, &vs, &vc));
+	TEST_ASSERT_STATUS(qaws_surface_curve_point_adjoint(&vs, &vc, S, C, &w, su, sv, st, NULL));
 	for (n = 0; n < 48; n++)
 		adj[n] = sbar[n];
 	for (n = 0; n < 18; n++)

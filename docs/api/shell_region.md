@@ -6,15 +6,15 @@ hemispheres, a network of NURBS faces.
 
 ```c
 qaws_shell_atlas* atlas;
-qaws_shell_atlas_create(surfaces, n, 0, &atlas);        /* or _create_from_brep, _create_trimmed */
+qaws_shell_atlas_create(&atlas, surfaces, n, 0);        /* or _create_from_brep, _create_trimmed */
 
 qaws_shell_curve* c;
-qaws_shell_curve_create_geodesic_circle(atlas, centre, r, 0, &c);
+qaws_shell_curve_create_geodesic_circle(&c, atlas, centre, r, 0);
 qaws_shell_region* region;
-qaws_shell_region_create(atlas, &c, 1, &region);
-qaws_shell_region_get_area(region, &area);
-qaws_shell_region_clip(a, b, QAWS_CLIP_UNION, &u);
-qaws_shell_exp(atlas, p, direction, length, &q, &velocity, &crossings);
+qaws_shell_region_create(&region, atlas, &c, 1);
+qaws_shell_region_get_area(&area, region);
+qaws_shell_region_clip(&u, a, b, QAWS_CLIP_UNION);
+qaws_shell_exp(&q, &velocity, &crossings, atlas, p, direction, length);
 ```
 
 ## The atlas
@@ -213,8 +213,8 @@ Limits:
 ## Sampling and meshing
 
 ```c
-qaws_shell_region_sample(region, &desc, count, points, xyz);   /* shell points (face, uv) and in space */
-qaws_shell_region_triangulate(region, &mesh_desc, &mesh);      /* one mesh across the faces */
+qaws_shell_region_sample(points, xyz, region, count, &desc);   /* shell points (face, uv) and in space */
+qaws_shell_region_triangulate(&mesh, region, &mesh_desc);      /* one mesh across the faces */
 ```
 
 - **Sampling.** The count is shared out between the faces by their parts'
@@ -245,7 +245,7 @@ Figure 29 shows the mesh and the samples.
 ## Offsets
 
 ```c
-qaws_shell_region_offset(region, distance, 0, &out);   /* > 0 grown, < 0 shrunk */
+qaws_shell_region_offset(&out, region, distance, 0);   /* > 0 grown, < 0 shrunk */
 ```
 
 The points within the distance of the region (grown), or its points

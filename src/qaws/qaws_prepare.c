@@ -9,13 +9,13 @@
  * =================================================================== */
 
 qaws_status qaws_hermite_prepare_2d(
-	const qaws_vec2* points,
-	const qaws_vec2* tangents,
-	unsigned int point_count,
 	qaws_vec2* out_a,
 	qaws_vec2* out_b,
 	qaws_vec2* out_c,
-	qaws_vec2* out_d)
+	qaws_vec2* out_d,
+	const qaws_vec2* points,
+	const qaws_vec2* tangents,
+	unsigned int point_count)
 {
 	unsigned int s;
 	if (!points || !tangents || !out_a || !out_b || !out_c || !out_d)
@@ -46,13 +46,13 @@ qaws_status qaws_hermite_prepare_2d(
 }
 
 qaws_status qaws_hermite_prepare_3d(
-	const qaws_vec3* points,
-	const qaws_vec3* tangents,
-	unsigned int point_count,
 	qaws_vec3* out_a,
 	qaws_vec3* out_b,
 	qaws_vec3* out_c,
-	qaws_vec3* out_d)
+	qaws_vec3* out_d,
+	const qaws_vec3* points,
+	const qaws_vec3* tangents,
+	unsigned int point_count)
 {
 	unsigned int s;
 	if (!points || !tangents || !out_a || !out_b || !out_c || !out_d)
@@ -136,15 +136,15 @@ static void cr_segment_coeffs(
 }
 
 qaws_status qaws_catmull_rom_prepare_2d(
-	const qaws_vec2* points,
-	unsigned int point_count,
-	qaws_parameterization param,
-	int closed,
 	qaws_vec2* out_a,
 	qaws_vec2* out_b,
 	qaws_vec2* out_c,
 	qaws_vec2* out_d,
-	unsigned int* out_span_count)
+	unsigned int* out_span_count,
+	const qaws_vec2* points,
+	unsigned int point_count,
+	qaws_parameterization param,
+	int closed)
 {
 	unsigned int const dim_count = 2;
 	unsigned int span_count, s;
@@ -235,15 +235,15 @@ qaws_status qaws_catmull_rom_prepare_2d(
 }
 
 qaws_status qaws_catmull_rom_prepare_3d(
-	const qaws_vec3* points,
-	unsigned int point_count,
-	qaws_parameterization param,
-	int closed,
 	qaws_vec3* out_a,
 	qaws_vec3* out_b,
 	qaws_vec3* out_c,
 	qaws_vec3* out_d,
-	unsigned int* out_span_count)
+	unsigned int* out_span_count,
+	const qaws_vec3* points,
+	unsigned int point_count,
+	qaws_parameterization param,
+	int closed)
 {
 	unsigned int const dim_count = 3;
 	unsigned int span_count, s;
@@ -352,16 +352,16 @@ static void traj_compute_velocities(
 }
 
 qaws_status qaws_trajectory_prepare_2d(
-	const qaws_vec2* positions,
-	const qaws_scalar* times,
-	unsigned int key_count,
-	unsigned int degree,
-	int closed,
 	qaws_vec2* out_a,
 	qaws_vec2* out_b,
 	qaws_vec2* out_c,
 	qaws_vec2* out_d,
-	unsigned int* out_span_count)
+	unsigned int* out_span_count,
+	const qaws_vec2* positions,
+	const qaws_scalar* times,
+	unsigned int key_count,
+	unsigned int degree,
+	int closed)
 {
 	unsigned int const dim_count = 2;
 	unsigned int span_count, s, d;
@@ -405,16 +405,16 @@ qaws_status qaws_trajectory_prepare_2d(
 }
 
 qaws_status qaws_trajectory_prepare_3d(
-	const qaws_vec3* positions,
-	const qaws_scalar* times,
-	unsigned int key_count,
-	unsigned int degree,
-	int closed,
 	qaws_vec3* out_a,
 	qaws_vec3* out_b,
 	qaws_vec3* out_c,
 	qaws_vec3* out_d,
-	unsigned int* out_span_count)
+	unsigned int* out_span_count,
+	const qaws_vec3* positions,
+	const qaws_scalar* times,
+	unsigned int key_count,
+	unsigned int degree,
+	int closed)
 {
 	unsigned int const dim_count = 3;
 	unsigned int span_count, s, d;
@@ -463,11 +463,11 @@ qaws_status qaws_trajectory_prepare_3d(
  * =================================================================== */
 
 qaws_status qaws_bezier_prepare_deriv_2d(
-	const qaws_vec2* control_points,
-	unsigned int degree,
 	qaws_vec2* out_d1_cp,
 	qaws_vec2* out_d2_cp,
-	qaws_vec2* out_d3_cp)
+	qaws_vec2* out_d3_cp,
+	const qaws_vec2* control_points,
+	unsigned int degree)
 {
 	unsigned int i;
 	qaws_scalar n;
@@ -512,11 +512,11 @@ qaws_status qaws_bezier_prepare_deriv_2d(
 }
 
 qaws_status qaws_bezier_prepare_deriv_3d(
-	const qaws_vec3* control_points,
-	unsigned int degree,
 	qaws_vec3* out_d1_cp,
 	qaws_vec3* out_d2_cp,
-	qaws_vec3* out_d3_cp)
+	qaws_vec3* out_d3_cp,
+	const qaws_vec3* control_points,
+	unsigned int degree)
 {
 	unsigned int i;
 	qaws_scalar n;
@@ -543,10 +543,10 @@ qaws_status qaws_bezier_prepare_deriv_3d(
  * =================================================================== */
 
 qaws_status qaws_rational_bezier_prepare_2d(
+	qaws_scalar* out_weighted_cp,
 	const qaws_vec2* control_points,
 	const qaws_scalar* weights,
-	unsigned int degree,
-	qaws_scalar* out_weighted_cp)
+	unsigned int degree)
 {
 	unsigned int i;
 	unsigned int n_pts = degree + 1;
@@ -565,10 +565,10 @@ qaws_status qaws_rational_bezier_prepare_2d(
 }
 
 qaws_status qaws_rational_bezier_prepare_3d(
+	qaws_scalar* out_weighted_cp,
 	const qaws_vec3* control_points,
 	const qaws_scalar* weights,
-	unsigned int degree,
-	qaws_scalar* out_weighted_cp)
+	unsigned int degree)
 {
 	unsigned int i;
 	unsigned int n_pts = degree + 1;
@@ -592,15 +592,15 @@ qaws_status qaws_rational_bezier_prepare_3d(
  * =================================================================== */
 
 qaws_status qaws_arc_prepare_2d(
+	qaws_vec2* out_axis_u,
+	qaws_vec2* out_axis_v,
+	qaws_scalar* out_theta_start,
+	qaws_scalar* out_theta_range,
 	qaws_vec2 center,
 	qaws_scalar radius_x,
 	qaws_scalar radius_y,
 	qaws_scalar start_angle,
-	qaws_scalar end_angle,
-	qaws_vec2* out_axis_u,
-	qaws_vec2* out_axis_v,
-	qaws_scalar* out_theta_start,
-	qaws_scalar* out_theta_range)
+	qaws_scalar end_angle)
 {
 	(void)center;
 	if (!out_axis_u || !out_axis_v || !out_theta_start || !out_theta_range)
@@ -617,16 +617,16 @@ qaws_status qaws_arc_prepare_2d(
 }
 
 qaws_status qaws_arc_prepare_3d(
+	qaws_vec3* out_axis_u,
+	qaws_vec3* out_axis_v,
+	qaws_scalar* out_theta_start,
+	qaws_scalar* out_theta_range,
 	qaws_vec3 center,
 	qaws_vec3 normal,
 	qaws_scalar radius_x,
 	qaws_scalar radius_y,
 	qaws_scalar start_angle,
-	qaws_scalar end_angle,
-	qaws_vec3* out_axis_u,
-	qaws_vec3* out_axis_v,
-	qaws_scalar* out_theta_start,
-	qaws_scalar* out_theta_range)
+	qaws_scalar end_angle)
 {
 	qaws_scalar nx, ny, nz, len;
 	qaws_vec3 up, u, v;

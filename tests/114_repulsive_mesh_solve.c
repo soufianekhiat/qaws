@@ -34,7 +34,7 @@ static qaws_repulsive_mesh* rm_make(unsigned int nv, unsigned int const* tris, u
 	qaws_repulsive_mesh* m = NULL;
 	memset(&d, 0, sizeof(d));
 	d.vertex_count = nv; d.triangles = tris; d.triangle_count = nf; d.p = (qaws_scalar)p;
-	qaws_repulsive_mesh_create(&d, &m);
+	qaws_repulsive_mesh_create(&m, &d);
 	return m;
 }
 
@@ -93,7 +93,7 @@ static void test_metric(void)
 		double A[36], x[18], err = 0, mx = 0, asym = 0, row = 0, psd = 1e300;
 		qaws_status st;
 		for (i = 0; i < 3 * k[t].nv; i++) x[i] = (double)(qaws_scalar)k[t].x[i];
-		st = m ? qaws_internal_repulsive_mesh_metric(m, x, A) : QAWS_STATUS_INVALID_ARGUMENT;
+		st = m ? qaws_internal_repulsive_mesh_metric(A, m, x) : QAWS_STATUS_INVALID_ARGUMENT;
 		for (i = 0; i < k[t].nv * k[t].nv; i++) { err = fmax(err, fabs(A[i] - k[t].A[i])); mx = fmax(mx, fabs(k[t].A[i])); }
 		for (i = 0; i < k[t].nv; i++)
 		{
@@ -135,8 +135,8 @@ static void test_preconditioner(void)
 	m = rm_make(nv, tris, nf, 6);
 	for (i = 0; i < nv; i++) { b[i] = sin(1.7 * i) + cos(0.3 * i * i); mean += b[i] / nv; }
 	for (i = 0; i < nv; i++) b[i] -= mean;
-	s0 = qaws_internal_repulsive_mesh_gmres(m, x, b, 0, 1e-10, u0, &it0);
-	s1 = qaws_internal_repulsive_mesh_gmres(m, x, b, 1, 1e-10, u1, &it1);
+	s0 = qaws_internal_repulsive_mesh_gmres(&it0, u0, m, x, b, 0, 1e-10);
+	s1 = qaws_internal_repulsive_mesh_gmres(&it1, u1, m, x, b, 1, 1e-10);
 	for (i = 0; i < nv; i++) { diff = fmax(diff, fabs(u0[i] - u1[i])); un = fmax(un, fabs(u0[i])); }
 	sprintf(msg, "preconditioner, a lumpy sphere (%u vertices, %u faces): GMRES to 1e-10 in %u iterations unpreconditioned, %u with (-L)^+ L^(2-s) (-L)^+; solutions %.2g apart",
 		nv, nf, it0, it1, diff / un);
@@ -178,7 +178,7 @@ static void test_sphere(void)
 	memset(&sd, 0, sizeof(sd));
 	sd.hold_area = 1; sd.hold_volume = 1; sd.max_iterations = 25;
 	memset(&r, 0, sizeof(r));
-	st = qaws_repulsive_mesh_solve(m, &sd, x, &r);
+	st = qaws_repulsive_mesh_solve(&r, x, m, &sd);
 	for (f = 0; f < nf; f++)
 	{
 		double a[3], b[3], c[3], n[3];
@@ -254,9 +254,9 @@ static void test_area_weight(void)
 	/* the same solve, weighted and not: unweighted the surface inflates, weighted it shrinks */
 	memset(&sd, 0, sizeof(sd));
 	sd.max_iterations = 20;
-	st = qaws_repulsive_mesh_solve(m, &sd, xp, &rp);
+	st = qaws_repulsive_mesh_solve(&rp, xp, m, &sd);
 	sd.area_weight = (qaws_scalar)2;
-	st = st == QAWS_STATUS_OK ? qaws_repulsive_mesh_solve(m, &sd, xw, &rw) : st;
+	st = st == QAWS_STATUS_OK ? qaws_repulsive_mesh_solve(&rw, xw, m, &sd) : st;
 	Aw = rm_area_of(xw, tris, nf);
 	Ap = rm_area_of(xp, tris, nf);
 	sprintf(msg, "area weighted (2): the energy at the input %.9g against the unweighted %.9g + 2 A %.9g; after 20 steps, area %.6f (unweighted %.6f, input %.6f), E %.5g from %.5g",
@@ -265,14 +265,14 @@ static void test_area_weight(void)
 		Aw < Ap && Aw < A0 && rw.energy < rw.initial_energy, msg);
 	/* no solution derivatives with it; a negative weight refused */
 	sd.max_iterations = 0;
-	st = qaws_repulsive_mesh_solver_create(m, &sd, x, &s);
+	st = qaws_repulsive_mesh_solver_create(&s, m, x, &sd);
 	memset(&t, 0, sizeof(t));
-	sj = s ? qaws_repulsive_mesh_solver_solution_jvp(s, &t, dx, NULL) : QAWS_STATUS_INVALID_ARGUMENT;
+	sj = s ? qaws_repulsive_mesh_solver_solution_jvp(dx, NULL, s, &t) : QAWS_STATUS_INVALID_ARGUMENT;
 	qaws_repulsive_mesh_solver_destroy(s);
 	s = NULL;
 	sd.area_weight = (qaws_scalar)-1;
 	sprintf(msg, "area weighted: solution derivatives refused (%d), a negative weight refused (%d)", (int)sj,
-		(int)qaws_repulsive_mesh_solver_create(m, &sd, x, &s));
+		(int)qaws_repulsive_mesh_solver_create(&s, m, x, &sd));
 	TEST_ASSERT(st == QAWS_STATUS_OK && sj == QAWS_STATUS_UNSUPPORTED_OPERATION && s == NULL, msg);
 	qaws_repulsive_mesh_solver_destroy(s);
 	s = NULL;
@@ -286,8 +286,8 @@ static void test_area_weight(void)
 		{
 			memcpy(xw, x, sizeof(x));
 			sd.initial_step = (qaws_scalar)caps[k];
-			st = st == QAWS_STATUS_OK ? qaws_repulsive_mesh_solver_create(m, &sd, xw, &s) : st;
-			st = st == QAWS_STATUS_OK ? qaws_repulsive_mesh_solver_step(s, xw, &rw) : st;
+			st = st == QAWS_STATUS_OK ? qaws_repulsive_mesh_solver_create(&s, m, xw, &sd) : st;
+			st = st == QAWS_STATUS_OK ? qaws_repulsive_mesh_solver_step(&rw, xw, s) : st;
 			moved[k] = (double)rw.last_step;
 			qaws_repulsive_mesh_solver_destroy(s);
 			s = NULL;
@@ -297,10 +297,10 @@ static void test_area_weight(void)
 			double most = 0;
 			memcpy(xw, x, sizeof(x));
 			sd.initial_step = 1; sd.max_step = (qaws_scalar)0.005;
-			st = st == QAWS_STATUS_OK ? qaws_repulsive_mesh_solver_create(m, &sd, xw, &s) : st;
+			st = st == QAWS_STATUS_OK ? qaws_repulsive_mesh_solver_create(&s, m, xw, &sd) : st;
 			for (k = 0; st == QAWS_STATUS_OK && k < 5; k++)
 			{
-				st = qaws_repulsive_mesh_solver_step(s, xw, &rw);
+				st = qaws_repulsive_mesh_solver_step(&rw, xw, s);
 				most = fmax(most, (double)rw.last_step);
 			}
 			qaws_repulsive_mesh_solver_destroy(s);
@@ -310,7 +310,7 @@ static void test_area_weight(void)
 			TEST_ASSERT(st == QAWS_STATUS_OK && most > 0 && most <= 0.005 * 1.001, msg);
 		}
 		sd.initial_step = (qaws_scalar)-1;
-		sn = qaws_repulsive_mesh_solver_create(m, &sd, x, &s);
+		sn = qaws_repulsive_mesh_solver_create(&s, m, x, &sd);
 		sprintf(msg, "initial step: the first move %.4g (cap 0.01), %.4g (cap 1), a negative one refused (%d)", moved[0], moved[1], (int)sn);
 		TEST_ASSERT(st == QAWS_STATUS_OK && moved[0] > 0 && moved[0] <= 0.01 * 1.001 && moved[1] > moved[0] && s == NULL, msg);
 		qaws_repulsive_mesh_solver_destroy(s);
@@ -343,9 +343,9 @@ static void test_translations(void)
 	sd.translations = 2;
 	/* the direction: each sphere's mean of g is its dual-area mean of dE, less their vertex-weighted mean (the overall barycenter kept) */
 	memset(dE, 0, sizeof(dE));
-	st = qaws_repulsive_mesh_solver_create(m, &sd, x, &s);
-	st = st == QAWS_STATUS_OK ? qaws_repulsive_mesh_solver_direction(s, x, g) : st;
-	st = st == QAWS_STATUS_OK ? qaws_repulsive_mesh_gradient(m, x, (qaws_scalar)1, dE, &E) : st;
+	st = qaws_repulsive_mesh_solver_create(&s, m, x, &sd);
+	st = st == QAWS_STATUS_OK ? qaws_repulsive_mesh_solver_direction(g, s, x) : st;
+	st = st == QAWS_STATUS_OK ? qaws_repulsive_mesh_gradient(dE, &E, m, x, (qaws_scalar)1) : st;
 	memset(w, 0, sizeof(w)); memset(t, 0, sizeof(t));
 	for (i = 0; i < 2 * nf; i++)
 	{
@@ -370,7 +370,7 @@ static void test_translations(void)
 			scale = fmax(scale, fabs(t[k][q]));
 		}
 	/* ten steps: the spheres part, the overall barycenter stays */
-	for (k = 0; st == QAWS_STATUS_OK && k < 10; k++) st = qaws_repulsive_mesh_solver_step(s, x, &r);
+	for (k = 0; st == QAWS_STATUS_OK && k < 10; k++) st = qaws_repulsive_mesh_solver_step(&r, x, s);
 	qaws_repulsive_mesh_solver_destroy(s);
 	s = NULL;
 	gap1 = 0;
@@ -387,12 +387,12 @@ static void test_translations(void)
 	memcpy(x, x0, sizeof(x));
 	for (i = 0; i < nv; i++) pins[i] = i;
 	sd.pinned = pins; sd.pinned_count = nv;
-	s1 = qaws_repulsive_mesh_solver_create(m, &sd, x, &s);
-	for (k = 0; s1 == QAWS_STATUS_OK && k < 5; k++) s1 = qaws_repulsive_mesh_solver_step(s, x, &r);
+	s1 = qaws_repulsive_mesh_solver_create(&s, m, x, &sd);
+	for (k = 0; s1 == QAWS_STATUS_OK && k < 5; k++) s1 = qaws_repulsive_mesh_solver_step(&r, x, s);
 	qaws_repulsive_mesh_solver_destroy(s);
 	s = NULL;
 	sd.translations = 1;
-	s2 = qaws_repulsive_mesh_solver_create(m, &sd, x, &s);
+	s2 = qaws_repulsive_mesh_solver_create(&s, m, x, &sd);
 	sprintf(msg, "translations: each sphere's mean direction against its dual-area mean of dE %.2g (of %.3g); 10 steps: the centres %.4f -> %.4f apart, the overall barycenter %.2g; a pinned sphere %s; the drift with pins refused (%d)",
 		err, scale, gap0, gap1, drift, memcmp(x, x0, sizeof(qaws_scalar) * 3 * nv) == 0 && memcmp(x + 3 * nv, x0 + 3 * nv, sizeof(qaws_scalar) * 3 * nv) != 0 ? "kept, the other moved" : "MOVED", (int)s2);
 	TEST_ASSERT(st == QAWS_STATUS_OK && s1 == QAWS_STATUS_OK && err <= (RM_F32 ? 1e-4 : 1e-10) * scale && gap1 > gap0 && drift <= (RM_F32 ? 1e-5 : 1e-12) &&
@@ -425,13 +425,13 @@ static void test_targets(void)
 	/* the area grown 1.5x over 10 steps, held at its input value: the area follows */
 	memset(&sd, 0, sizeof(sd));
 	sd.hold_area = 1;
-	st = qaws_repulsive_mesh_solver_create(m, &sd, x, &s);
+	st = qaws_repulsive_mesh_solver_create(&s, m, x, &sd);
 	for (k = 1; st == QAWS_STATUS_OK && k <= 10; k++)
 	{
 		target = A0 * (1 + 0.05 * k);
 		a = (qaws_scalar)target;
 		st = qaws_repulsive_mesh_solver_set_targets(s, &a, NULL);
-		st = st == QAWS_STATUS_OK ? qaws_repulsive_mesh_solver_step(s, x, &r) : st;
+		st = st == QAWS_STATUS_OK ? qaws_repulsive_mesh_solver_step(&r, x, s) : st;
 	}
 	A1 = rm_area_of(x, tris, nf);
 	v = 1;
@@ -444,15 +444,15 @@ static void test_targets(void)
 	memset(&sd, 0, sizeof(sd));
 	sd.max_iterations = 1;
 	memcpy(x, xv, sizeof(x));
-	st = st == QAWS_STATUS_OK ? qaws_repulsive_mesh_solve(m, &sd, x, &rp) : st;   /* (one step, for the unweighted energy at the input) */
+	st = st == QAWS_STATUS_OK ? qaws_repulsive_mesh_solve(&rp, x, m, &sd) : st;   /* (one step, for the unweighted energy at the input) */
 	sd.volume_weight = (qaws_scalar)3;
 	V0 = rm_volume_of(xv, tris, nf);
 	sd.volume_target = (qaws_scalar)(2 * V0);
 	sd.max_iterations = 20;
-	st = st == QAWS_STATUS_OK ? qaws_repulsive_mesh_solve(m, &sd, xv, &rw) : st;
+	st = st == QAWS_STATUS_OK ? qaws_repulsive_mesh_solve(&rw, xv, m, &sd) : st;
 	V1 = rm_volume_of(xv, tris, nf);
 	sd.volume_weight = (qaws_scalar)-1;
-	sn = qaws_repulsive_mesh_solver_create(m, &sd, x, &s);
+	sn = qaws_repulsive_mesh_solver_create(&s, m, x, &sd);
 	sprintf(msg, "targets: the area grown to %.6f (target %.6f, input %.6f); refused: a volume not held (%d), a negative area (%d); the volume's deviation: E at the input %.9g against %.9g + 3 (1/2)^2, the volume %.4f -> %.4f (target %.4f); a negative weight refused (%d)",
 		A1, target, A0, (int)sv, (int)sa, (double)rw.initial_energy, (double)rp.initial_energy, V0, V1, 2 * V0, (int)sn);
 	TEST_ASSERT(st == QAWS_STATUS_OK && fabs(A1 - target) <= (RM_F32 ? 1e-5 : 1e-8) * target && sv == QAWS_STATUS_INVALID_ARGUMENT && sa == QAWS_STATUS_INVALID_ARGUMENT &&
@@ -489,12 +489,12 @@ static void test_obstacles(void)
 	for (i = 0; i < 3 * nf; i++) tris[3 * nf + i] = tris[i] + nv;
 	mS = rm_make(nv, tris, nf, 6); mM = rm_make(2 * nv, tris, 2 * nf, 6);
 	memset(gS, 0, sizeof(gS)); memset(gM, 0, sizeof(gM)); memset(gO, 0, sizeof(gO)); memset(gob, 0, sizeof(gob));
-	st = qaws_internal_repulsive_mesh_bh(mS, xd, 0, &ES, gS);
-	st = st == QAWS_STATUS_OK ? qaws_internal_repulsive_mesh_bh(mM, xd, 0, &EM, gM) : st;
+	st = qaws_internal_repulsive_mesh_bh(&ES, gS, mS, xd, 0);
+	st = st == QAWS_STATUS_OK ? qaws_internal_repulsive_mesh_bh(&EM, gM, mM, xd, 0) : st;
 	{
 		/* the obstacle's own energy, on its own vertex numbering */
 		qaws_repulsive_mesh* m0 = rm_make(nv, tris, nf, 6);
-		st = st == QAWS_STATUS_OK ? qaws_internal_repulsive_mesh_bh(m0, xd + 3 * nv, 0, &EO, gO) : st;
+		st = st == QAWS_STATUS_OK ? qaws_internal_repulsive_mesh_bh(&EO, gO, m0, xd + 3 * nv, 0) : st;
 		qaws_repulsive_mesh_destroy(m0);
 	}
 	memset(&od, 0, sizeof(od));
@@ -531,16 +531,16 @@ static void test_obstacles(void)
 	od.triangles = tris; od.triangle_count = nf; od.weight = 1;
 	memset(&sd, 0, sizeof(sd));
 	sd.translations = 1; sd.hold_area = 1; sd.obstacles = &od; sd.obstacle_count = 1;
-	st = st == QAWS_STATUS_OK ? qaws_repulsive_mesh_solver_create(mS, &sd, x, &s) : st;
-	for (k = 0; st == QAWS_STATUS_OK && k < 10; k++) st = qaws_repulsive_mesh_solver_step(s, x, &r);
+	st = st == QAWS_STATUS_OK ? qaws_repulsive_mesh_solver_create(&s, mS, x, &sd) : st;
+	for (k = 0; st == QAWS_STATUS_OK && k < 10; k++) st = qaws_repulsive_mesh_solver_step(&r, x, s);
 	qaws_repulsive_mesh_solver_destroy(s);
 	s = NULL;
 	for (i = 0; i < nv; i++) cx1 += (double)x[3 * i] / nv;
 	/* refused: a weight not positive, a triangle index out of range */
 	od.weight = 0;
-	sw = qaws_repulsive_mesh_solver_create(mS, &sd, x, &s);
+	sw = qaws_repulsive_mesh_solver_create(&s, mS, x, &sd);
 	od.weight = 1; od.triangles = bad; od.triangle_count = 1;
-	si = s ? QAWS_STATUS_OK : qaws_repulsive_mesh_solver_create(mS, &sd, x, &s);
+	si = s ? QAWS_STATUS_OK : qaws_repulsive_mesh_solver_create(&s, mS, x, &sd);
 	sprintf(msg, "obstacles: the mesh obstacle (2) %.12g against 2 x the cross terms %.12g, its gradient %.2g of %.3g; hierarchical (0.25) %.6g; the point cloud (3) %.12g against %.12g; drifting free, the sphere's centre x %.4f -> %.4f; refused: weight 0 (%d), an index out of range (%d)",
 		Eob, 2 * (EM - ES - EO), gerr, gmax, Ebh, Epc, Ebrute, cx0, cx1, (int)sw, (int)si);
 	TEST_ASSERT(st == QAWS_STATUS_OK && fabs(Eob - 2 * (EM - ES - EO)) <= 1e-10 * Eob && gerr <= 1e-9 * gmax && fabs(Ebh - Eob) <= 0.05 * Eob &&
@@ -591,7 +591,7 @@ static void test_sheets(void)
 	memset(&sd, 0, sizeof(sd));
 	sd.pinned = pins; sd.pinned_count = np; sd.hold_area = 1; sd.collision_checked = 1; sd.max_iterations = 15;
 	memset(&r, 0, sizeof(r));
-	st = qaws_repulsive_mesh_solve(m, &sd, x, &r);
+	st = qaws_repulsive_mesh_solve(&r, x, m, &sd);
 	for (i = 3 * n * n; i < 3 * 2 * n * n; i++) still = fmax(still, fabs((double)x[i] - x0[i]));
 	sprintf(msg, "a sheet under a pinned one, area held, collision-checked: reason %d after %u steps, E %.4f from %.4f, the pinned sheet moved %.2g, rejections e%u c%u",
 		(int)r.reason, r.iterations, (double)r.energy, (double)r.initial_energy, still, r.rejected_energy, r.rejected_collision);
@@ -627,12 +627,12 @@ static void test_obstacle_checked(void)
 	memset(&sd, 0, sizeof(sd));
 	sd.hold_volume = 1; sd.collision_checked = 1; sd.obstacles = &od; sd.obstacle_count = 1;
 	memset(&r, 0, sizeof(r));
-	st = qaws_repulsive_mesh_solver_create(m, &sd, x, &s);
+	st = qaws_repulsive_mesh_solver_create(&s, m, x, &sd);
 	for (k = 1; st == QAWS_STATUS_OK && k <= 12 && r.reason == QAWS_REPULSIVE_RUNNING; k++)
 	{
 		v = (qaws_scalar)(V0 * (1 + 0.05 * k));
 		st = qaws_repulsive_mesh_solver_set_targets(s, NULL, &v);
-		st = st == QAWS_STATUS_OK ? qaws_repulsive_mesh_solver_step(s, x, &r) : st;
+		st = st == QAWS_STATUS_OK ? qaws_repulsive_mesh_solver_step(&r, x, s) : st;
 	}
 	qaws_repulsive_mesh_solver_destroy(s);
 	for (i = 0; i < nv; i++) top = fmax(top, (double)x[3 * i + 2]);
@@ -682,12 +682,12 @@ static void test_refusals(void)
 	memset(&sd, 0, sizeof(sd));
 	memset(&r, 0, sizeof(r));
 	sd.hold_volume = 1;
-	s1 = qaws_repulsive_mesh_solver_create(m, &sd, y, &s);           /* open: no volume */
+	s1 = qaws_repulsive_mesh_solver_create(&s, m, y, &sd);           /* open: no volume */
 	sd.hold_volume = 0; sd.collision_checked = 1;
-	s2 = qaws_repulsive_mesh_solver_create(m, &sd, x, &s);           /* touching */
+	s2 = qaws_repulsive_mesh_solver_create(&s, m, x, &sd);           /* touching */
 	sd.collision_checked = 0; sd.hold_barycenter = -1;
-	s3 = qaws_repulsive_mesh_solver_create(m, &sd, y, &s);
-	if (s3 == QAWS_STATUS_OK) qaws_repulsive_mesh_solver_step(s, y, &r);
+	s3 = qaws_repulsive_mesh_solver_create(&s, m, y, &sd);
+	if (s3 == QAWS_STATUS_OK) qaws_repulsive_mesh_solver_step(&r, y, s);
 	qaws_repulsive_mesh_solver_destroy(s);
 	sprintf(msg, "refusals: volume on an open mesh %d, touching input (collision-checked) %d; free translations: reason %d", (int)s1, (int)s2, (int)r.reason);
 	TEST_ASSERT(s1 == QAWS_STATUS_INVALID_ARGUMENT && s2 == QAWS_STATUS_INVALID_ARGUMENT && s3 == QAWS_STATUS_OK && r.reason == QAWS_REPULSIVE_NUMERICAL_FAILURE, msg);

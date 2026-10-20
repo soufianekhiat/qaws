@@ -48,9 +48,9 @@ static qaws_status bezier_eval_span_2d(
 	if ((eval_flags & QAWS_EVAL_FLAG_D3) && degree >= 3) {
 		qaws_scalar d1cp[QAWS_CORE_MAX_POINTS * 2], d2cp[QAWS_CORE_MAX_POINTS * 2], d3cp[QAWS_CORE_MAX_POINTS * 2];
 		qaws_vec2 d3val;
-		qaws_bezier_deriv_points_2d(local_cp, (int)degree, d1cp);
-		qaws_bezier_deriv_points_2d(d1cp, (int)degree - 1, d2cp);
-		qaws_bezier_deriv_points_2d(d2cp, (int)degree - 2, d3cp);
+		qaws_bezier_deriv_points_2d(d1cp, local_cp, (int)degree);
+		qaws_bezier_deriv_points_2d(d2cp, d1cp, (int)degree - 1);
+		qaws_bezier_deriv_points_2d(d3cp, d2cp, (int)degree - 2);
 		d3val = qaws_decasteljau_2d(d3cp, (int)degree - 3, local_t);
 		out_result->d3.x = d3val.x; out_result->d3.y = d3val.y;
 		out_result->valid_flags |= QAWS_EVAL_FLAG_D3;
@@ -98,9 +98,9 @@ static qaws_status bezier_eval_span_3d(
 	if ((eval_flags & QAWS_EVAL_FLAG_D3) && degree >= 3) {
 		qaws_scalar d1cp[QAWS_CORE_MAX_POINTS * 3], d2cp[QAWS_CORE_MAX_POINTS * 3], d3cp[QAWS_CORE_MAX_POINTS * 3];
 		qaws_vec3 d3val;
-		qaws_bezier_deriv_points_3d(local_cp, (int)degree, d1cp);
-		qaws_bezier_deriv_points_3d(d1cp, (int)degree - 1, d2cp);
-		qaws_bezier_deriv_points_3d(d2cp, (int)degree - 2, d3cp);
+		qaws_bezier_deriv_points_3d(d1cp, local_cp, (int)degree);
+		qaws_bezier_deriv_points_3d(d2cp, d1cp, (int)degree - 1);
+		qaws_bezier_deriv_points_3d(d3cp, d2cp, (int)degree - 2);
 		d3val = qaws_decasteljau_3d(d3cp, (int)degree - 3, local_t);
 		out_result->d3.x = d3val.x; out_result->d3.y = d3val.y; out_result->d3.z = d3val.z;
 		out_result->valid_flags |= QAWS_EVAL_FLAG_D3;
@@ -111,7 +111,7 @@ static qaws_status bezier_eval_span_3d(
 static void bezier_destroy_impl(void* impl, qaws_allocator const* allocator)
 {
 	qaws_bezier_impl* bi = (qaws_bezier_impl*)impl;
-	if (bi) { qaws_internal_dealloc(allocator, bi->control_points); qaws_internal_dealloc(allocator, bi); }
+	if (bi) { qaws_internal_dealloc(bi->control_points, allocator); qaws_internal_dealloc(bi, allocator); }
 }
 
 static int bezier_is_closed(qaws_curve const* c)   { return qaws_internal_curve_ends_meet(c); }
@@ -157,7 +157,7 @@ static qaws_status bezier_linear_support(qaws_curve const* curve, unsigned int s
 	if (n + 1 > QAWS_DIFF_MAX_SUPPORT || order > QAWS_DIFF_MAX_ORDER)
 		return QAWS_STATUS_UNSUPPORTED_OPERATION;
 
-	qaws_internal_bernstein_derivs(n, local_t, order, b);
+	qaws_internal_bernstein_derivs(b, n, local_t, order);
 
 	out->kind = QAWS_SUPPORT_LOCAL;
 	out->range_count = 1;
@@ -179,16 +179,16 @@ static qaws_status bezier_rebuild(qaws_curve const* curve, qaws_diff_views const
 	qaws_bezier_desc d;
 	qaws_scalar const* cps;
 	qaws_scalar* owned;
-	qaws_status st = qaws_internal_field_override(values, QAWS_FIELD_CONTROL_POINTS, impl->control_points,
-		impl->control_point_count, (unsigned int)curve->dimension, &cps, &owned);
+	qaws_status st = qaws_internal_field_override(&cps, &owned, values,
+		impl->control_points, impl->control_point_count, QAWS_FIELD_CONTROL_POINTS, (unsigned int)curve->dimension);
 	if (st != QAWS_STATUS_OK)
 		return st;
 	d.dimension = curve->dimension;
 	d.degree = curve->degree;
 	d.control_points = cps;
 	d.control_point_count = impl->control_point_count;
-	st = qaws_curve_create_bezier(&d, out_curve);
-	qaws_internal_dealloc(NULL, owned);
+	st = qaws_curve_create_bezier(out_curve, &d);
+	qaws_internal_dealloc(owned, NULL);
 	return st;
 }
 
@@ -211,9 +211,9 @@ static qaws_curve_vtable const bezier_vtable = {
 };
 
 qaws_status qaws_curve_create_bezier_ex(
+	qaws_curve** out_curve,
 	qaws_bezier_desc const* desc,
-	qaws_allocator const* allocator,
-	qaws_curve** out_curve)
+	qaws_allocator const* allocator)
 {
 	unsigned int dim_count;
 	size_t cp_size;
@@ -236,12 +236,12 @@ qaws_status qaws_curve_create_bezier_ex(
 	if (!curve) return QAWS_STATUS_ALLOCATION_FAILURE;
 	curve->span_boundaries[0] = 0; curve->span_boundaries[1] = 1;
 
-	impl = (qaws_bezier_impl*)qaws_internal_alloc(allocator, sizeof(qaws_bezier_impl));
+	impl = (qaws_bezier_impl*)qaws_internal_alloc(sizeof(qaws_bezier_impl), allocator);
 	if (!impl) { qaws_curve_destroy(curve); return QAWS_STATUS_ALLOCATION_FAILURE; }
 
 	cp_size = qaws_internal_mul3((size_t)dim_count, desc->control_point_count, sizeof(qaws_scalar));
-	impl->control_points = (qaws_scalar*)qaws_internal_alloc(allocator, cp_size);
-	if (!impl->control_points) { qaws_internal_dealloc(allocator, impl); qaws_curve_destroy(curve); return QAWS_STATUS_ALLOCATION_FAILURE; }
+	impl->control_points = (qaws_scalar*)qaws_internal_alloc(cp_size, allocator);
+	if (!impl->control_points) { qaws_internal_dealloc(impl, allocator); qaws_curve_destroy(curve); return QAWS_STATUS_ALLOCATION_FAILURE; }
 	memcpy(impl->control_points, desc->control_points, cp_size);
 	impl->control_point_count = desc->control_point_count;
 
@@ -251,7 +251,7 @@ qaws_status qaws_curve_create_bezier_ex(
 }
 
 qaws_status qaws_curve_create_bezier(
-	qaws_bezier_desc const* desc, qaws_curve** out_curve)
+	qaws_curve** out_curve, qaws_bezier_desc const* desc)
 {
-	return qaws_curve_create_bezier_ex(desc, NULL, out_curve);
+	return qaws_curve_create_bezier_ex(out_curve, desc, NULL);
 }

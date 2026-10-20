@@ -41,7 +41,7 @@ static qaws_curve* csk_curve(csk_seg const* g)
 		cp[0] = (qaws_scalar)g->a[0]; cp[1] = (qaws_scalar)g->a[1]; cp[2] = (qaws_scalar)g->a[2]; cp[3] = (qaws_scalar)g->a[3];
 		memset(&d, 0, sizeof(d));
 		d.dimension = QAWS_DIMENSION_2D; d.degree = 1; d.control_points = cp; d.control_point_count = 2;
-		qaws_curve_create_bezier(&d, &c);
+		qaws_curve_create_bezier(&c, &d);
 	}
 	else
 	{
@@ -52,7 +52,7 @@ static qaws_curve* csk_curve(csk_seg const* g)
 		s.angle_start = (qaws_scalar)g->a[3]; s.angle_end = (qaws_scalar)g->a[4];
 		memset(&d, 0, sizeof(d));
 		d.dimension = QAWS_DIMENSION_2D; d.segments = &s; d.segment_count = 1;
-		qaws_curve_create_arc(&d, &c);
+		qaws_curve_create_arc(&c, &d);
 	}
 	return c;
 }
@@ -71,7 +71,7 @@ static void csk_path_curves(svg* s, viewport const* v, qaws_path_2d const* p, un
 				/* a polyline (qaws_clip joins consecutive lines): its points */
 				qaws_scalar buf[2 * 256];
 				unsigned int m = 0;
-				qaws_curve_get_control_points(c, buf, 256, &m);
+				qaws_curve_get_control_points(buf, &m, c, 256);
 				for (j = (k == 0 ? 0 : 1); j < m && j < 256; j++)
 					fprintf(s->f, "%s%.2f,%.2f ", (j == 0 && k == 0) ? "M" : "L", vx(v, buf[2 * j]), vy(v, buf[2 * j + 1]));
 				continue;
@@ -81,7 +81,7 @@ static void csk_path_curves(svg* s, viewport const* v, qaws_path_2d const* p, un
 			for (j = (k == 0 ? 0 : 1); j <= m; j++)
 			{
 				qaws_eval_result_2d e;
-				qaws_curve_evaluate_2d(c, (qaws_scalar)(rg.min_value + (rg.max_value - rg.min_value) * j / m), QAWS_EVAL_FLAG_POSITION, &e);
+				qaws_curve_evaluate_2d(&e, c, (qaws_scalar)(rg.min_value + (rg.max_value - rg.min_value) * j / m), QAWS_EVAL_FLAG_POSITION);
 				fprintf(s->f, "%s%.2f,%.2f ", (j == 0 && k == 0) ? "M" : "L", vx(v, e.position.x), vy(v, e.position.y));
 			}
 		}
@@ -109,7 +109,7 @@ static void csk_draw(svg* s, viewport const* v, csk_shape const* sh, double sigm
 	csk_path_curves(s, v, p, sh->nloops, "none", 0, "#f6f8fa");
 	memset(&d, 0, sizeof(d));
 	d.paths = p; d.path_count = sh->nloops; d.fill_rule = QAWS_FILL_NON_ZERO; d.splice_angle = (qaws_scalar)sigma;
-	if (qaws_skeleton_create(&d, &sk) != QAWS_STATUS_OK)
+	if (qaws_skeleton_create(&sk, &d) != QAWS_STATUS_OK)
 	{
 		svg_text(s, v->x0 + v->w / 2, v->y0 + v->h / 2, 12, "#cf222e", "middle", "failed");
 		for (i = 0; i < off; i++) qaws_curve_destroy(cs[i]);
@@ -121,11 +121,11 @@ static void csk_draw(svg* s, viewport const* v, csk_shape const* sh, double sigm
 		qaws_clip_result* r = NULL;
 		char col[32];
 		heat((double)k / 9, col);
-		if (qaws_skeleton_offset(sk, (qaws_scalar)(tmax * k / 9), &r) == QAWS_STATUS_OK)
+		if (qaws_skeleton_offset(&r, sk, (qaws_scalar)(tmax * k / 9)) == QAWS_STATUS_OK)
 		{
 			unsigned int n = qaws_clip_result_get_path_count(r), pi;
 			qaws_path_2d* q = (qaws_path_2d*)malloc(sizeof(qaws_path_2d) * (n + 1));
-			for (pi = 0; pi < n; pi++) qaws_clip_result_get_path(r, pi, &q[pi]);
+			for (pi = 0; pi < n; pi++) qaws_clip_result_get_path(&q[pi], r, pi);
 			csk_path_curves(s, v, q, n, col, 1.0, "none");
 			free(q);
 		}
@@ -134,14 +134,14 @@ static void csk_draw(svg* s, viewport const* v, csk_shape const* sh, double sigm
 	for (i = 0; i < qaws_skeleton_get_arc_count(sk); i++)
 	{
 		qaws_skeleton_arc a;
-		qaws_skeleton_get_arc(sk, i, &a);
+		qaws_skeleton_get_arc(&a, sk, i);
 		fprintf(s->f, "<polyline fill=\"none\" stroke=\"%s\" stroke-width=\"%.1f\"%s points=\"",
 			a.smooth ? "#8c959f" : "#1b1f24", a.smooth ? 0.8 : (a.boundary ? 1.0 : 2.0), a.smooth ? " stroke-dasharray=\"3,2\"" : "");
 		for (k = 0; k <= 32; k++)
 		{
 			qaws_vec2 q;
 			qaws_scalar t;
-			qaws_skeleton_evaluate_arc(sk, i, (qaws_scalar)(k / 32.0), &q, &t);
+			qaws_skeleton_evaluate_arc(&q, &t, sk, i, (qaws_scalar)(k / 32.0));
 			fprintf(s->f, "%.2f,%.2f ", vx(v, q.x), vy(v, q.y));
 		}
 		fprintf(s->f, "\"/>\n");

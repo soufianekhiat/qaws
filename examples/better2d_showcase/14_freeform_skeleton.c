@@ -12,7 +12,7 @@ static qaws_curve* ffs_cubic(double x0, double y0, double x1, double y1, double 
 	cp[4] = (qaws_scalar)x2; cp[5] = (qaws_scalar)y2; cp[6] = (qaws_scalar)x3; cp[7] = (qaws_scalar)y3;
 	memset(&d, 0, sizeof(d));
 	d.dimension = QAWS_DIMENSION_2D; d.degree = 3; d.control_points = cp; d.control_point_count = 4;
-	qaws_curve_create_bezier(&d, &c);
+	qaws_curve_create_bezier(&c, &d);
 	return c;
 }
 
@@ -58,7 +58,7 @@ static void ffs_draw(svg* s, viewport const* v, ffs_shape const* sh, double sigm
 	csk_path_curves(s, v, p, sh->nloops, "none", 0, "#f6f8fa");
 	memset(&d, 0, sizeof(d));
 	d.paths = p; d.path_count = sh->nloops; d.fill_rule = QAWS_FILL_NON_ZERO; d.splice_angle = (qaws_scalar)sigma;
-	if (qaws_skeleton_create(&d, &sk) != QAWS_STATUS_OK)
+	if (qaws_skeleton_create(&sk, &d) != QAWS_STATUS_OK)
 	{
 		svg_text(s, v->x0 + v->w / 2, v->y0 + v->h / 2, 12, "#cf222e", "middle", "failed");
 		return;
@@ -69,11 +69,11 @@ static void ffs_draw(svg* s, viewport const* v, ffs_shape const* sh, double sigm
 		qaws_clip_result* r = NULL;
 		char col[32];
 		heat((double)k / 9, col);
-		if (qaws_skeleton_offset(sk, (qaws_scalar)(tmax * k / 9), &r) == QAWS_STATUS_OK)
+		if (qaws_skeleton_offset(&r, sk, (qaws_scalar)(tmax * k / 9)) == QAWS_STATUS_OK)
 		{
 			unsigned int n = qaws_clip_result_get_path_count(r), pi;
 			qaws_path_2d* q = (qaws_path_2d*)malloc(sizeof(qaws_path_2d) * (n + 1));
-			for (pi = 0; pi < n; pi++) qaws_clip_result_get_path(r, pi, &q[pi]);
+			for (pi = 0; pi < n; pi++) qaws_clip_result_get_path(&q[pi], r, pi);
 			csk_path_curves(s, v, q, n, col, 1.0, "none");
 			free(q);
 		}
@@ -82,7 +82,7 @@ static void ffs_draw(svg* s, viewport const* v, ffs_shape const* sh, double sigm
 	for (i = 0; i < qaws_skeleton_get_arc_count(sk); i++)
 	{
 		qaws_skeleton_arc a;
-		qaws_skeleton_get_arc(sk, i, &a);
+		qaws_skeleton_get_arc(&a, sk, i);
 		if (a.smooth)
 			continue;
 		fprintf(s->f, "<polyline fill=\"none\" stroke=\"#1b1f24\" stroke-width=\"%.1f\" points=\"", a.boundary ? 1.0 : 2.0);
@@ -90,7 +90,7 @@ static void ffs_draw(svg* s, viewport const* v, ffs_shape const* sh, double sigm
 		{
 			qaws_vec2 q;
 			qaws_scalar t;
-			qaws_skeleton_evaluate_arc(sk, i, (qaws_scalar)(k / 32.0), &q, &t);
+			qaws_skeleton_evaluate_arc(&q, &t, sk, i, (qaws_scalar)(k / 32.0));
 			fprintf(s->f, "%.2f,%.2f ", vx(v, q.x), vy(v, q.y));
 		}
 		fprintf(s->f, "\"/>\n");
@@ -111,7 +111,7 @@ static void demo_freeform_skeleton(void)
 	clock_t t0 = clock();
 	memset(sh, 0, sizeof(sh));
 	sh[0].name = "ellipse (rational NURBS)";
-	qaws_curve_create_ellipse_2d(0, 0, 1.5, 0.8, 0.35, &sh[0].cs[0]);
+	qaws_curve_create_ellipse_2d(&sh[0].cs[0], 0, 0, 1.5, 0.8, 0.35);
 	sh[0].count[0] = 1; sh[0].nloops = 1;
 	sh[0].box[0] = -1.55; sh[0].box[1] = 1.55; sh[0].box[2] = -1.1; sh[0].box[3] = 1.1;
 	sh[1].name = "blob of four cubics";
@@ -137,15 +137,15 @@ static void demo_freeform_skeleton(void)
 		qaws_arc_segment g;
 		qaws_arc_desc d;
 		sh[3].name = "ellipse with two round holes";
-		qaws_curve_create_ellipse_2d(0, 0, 1.6, 1.0, 0, &sh[3].cs[0]);
+		qaws_curve_create_ellipse_2d(&sh[3].cs[0], 0, 0, 1.6, 1.0, 0);
 		sh[3].count[0] = 1;
 		memset(&d, 0, sizeof(d));
 		d.dimension = QAWS_DIMENSION_2D; d.segments = &g; d.segment_count = 1;
 		memset(&g, 0, sizeof(g));
 		g.center[0] = (qaws_scalar)-0.6; g.center[1] = (qaws_scalar)0.1; g.radius = (qaws_scalar)0.3; g.angle_start = (qaws_scalar)(2 * pi); g.angle_end = 0;
-		qaws_curve_create_arc(&d, &sh[3].cs[1]);
+		qaws_curve_create_arc(&sh[3].cs[1], &d);
 		g.center[0] = (qaws_scalar)0.7; g.center[1] = (qaws_scalar)-0.2; g.radius = (qaws_scalar)0.22;
-		qaws_curve_create_arc(&d, &sh[3].cs[2]);
+		qaws_curve_create_arc(&sh[3].cs[2], &d);
 		sh[3].count[1] = 1; sh[3].count[2] = 1; sh[3].nloops = 3;
 		sh[3].box[0] = -1.65; sh[3].box[1] = 1.65; sh[3].box[2] = -1.05; sh[3].box[3] = 1.05;
 	}
@@ -156,10 +156,10 @@ static void demo_freeform_skeleton(void)
 		sh[4].name = "square with a wavy cubic edge";
 		memset(&bd, 0, sizeof(bd));
 		bd.dimension = QAWS_DIMENSION_2D; bd.degree = 1; bd.control_points = cp; bd.control_point_count = 2;
-		cp[0] = 0; cp[1] = 0; cp[2] = 2; cp[3] = 0; qaws_curve_create_bezier(&bd, &sh[4].cs[0]);
-		cp[0] = 2; cp[1] = 0; cp[2] = 2; cp[3] = 1.6; qaws_curve_create_bezier(&bd, &sh[4].cs[1]);
+		cp[0] = 0; cp[1] = 0; cp[2] = 2; cp[3] = 0; qaws_curve_create_bezier(&sh[4].cs[0], &bd);
+		cp[0] = 2; cp[1] = 0; cp[2] = 2; cp[3] = 1.6; qaws_curve_create_bezier(&sh[4].cs[1], &bd);
 		sh[4].cs[2] = ffs_cubic(2, 1.6, 1.4, 2.6, 0.6, 0.6, 0, 1.6);
-		cp[0] = 0; cp[1] = 1.6; cp[2] = 0; cp[3] = 0; qaws_curve_create_bezier(&bd, &sh[4].cs[3]);
+		cp[0] = 0; cp[1] = 1.6; cp[2] = 0; cp[3] = 0; qaws_curve_create_bezier(&sh[4].cs[3], &bd);
 		sh[4].count[0] = 4; sh[4].nloops = 1;
 		sh[4].box[0] = -0.05; sh[4].box[1] = 2.05; sh[4].box[2] = -0.05; sh[4].box[3] = 2.15;
 	}

@@ -33,8 +33,8 @@ void qaws_curve_destroy(qaws_curve *curve)
 		curve->vtable->destroy_impl(curve->impl, a);
 	}
 
-	qaws_internal_dealloc(a, curve->span_boundaries);
-	qaws_internal_dealloc(a, curve);
+	qaws_internal_dealloc(curve->span_boundaries, a);
+	qaws_internal_dealloc(curve, a);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -68,7 +68,7 @@ static qaws_status reverse_bezier(
 	desc.control_points = rev_cp;
 	desc.control_point_count = n;
 
-	status = qaws_curve_create_bezier_ex(&desc, curve->allocator, out_reversed);
+	status = qaws_curve_create_bezier_ex(out_reversed, &desc, curve->allocator);
 	qaws_internal_free(rev_cp);
 	return status;
 }
@@ -117,7 +117,7 @@ static qaws_status reverse_hermite(
 	desc.point_count = n;
 	desc.derivative_count = n;
 
-	status = qaws_curve_create_hermite_ex(&desc, curve->allocator, out_reversed);
+	status = qaws_curve_create_hermite_ex(out_reversed, &desc, curve->allocator);
 	qaws_internal_free(rev_pts);
 	qaws_internal_free(rev_der);
 	return status;
@@ -157,7 +157,7 @@ static qaws_status reverse_catmull_rom(
 	desc.parameterization = impl->parameterization;
 	desc.closed = impl->closed;
 
-	status = qaws_curve_create_catmull_rom_ex(&desc, curve->allocator, out_reversed);
+	status = qaws_curve_create_catmull_rom_ex(out_reversed, &desc, curve->allocator);
 	qaws_internal_free(rev_cp);
 	return status;
 }
@@ -212,7 +212,7 @@ static qaws_status reverse_bspline(
 	desc.is_uniform = 0;
 	desc.is_closed = 0;
 
-	status = qaws_curve_create_bspline_ex(&desc, curve->allocator, out_reversed);
+	status = qaws_curve_create_bspline_ex(out_reversed, &desc, curve->allocator);
 	qaws_internal_free(rev_cp);
 	qaws_internal_free(rev_knots);
 	return status;
@@ -281,7 +281,7 @@ static qaws_status reverse_nurbs(
 	desc.weight_count = wn;
 	desc.is_closed = 0;
 
-	status = qaws_curve_create_nurbs_ex(&desc, curve->allocator, out_reversed);
+	status = qaws_curve_create_nurbs_ex(out_reversed, &desc, curve->allocator);
 	qaws_internal_free(rev_cp);
 	qaws_internal_free(rev_knots);
 	qaws_internal_free(rev_weights);
@@ -377,7 +377,7 @@ static qaws_status reverse_trajectory(
 	desc.key_acceleration_count = acc_n;
 	desc.closed = impl->closed;
 
-	status = qaws_curve_create_trajectory_ex(&desc, curve->allocator, out_reversed);
+	status = qaws_curve_create_trajectory_ex(out_reversed, &desc, curve->allocator);
 	qaws_internal_free(rev_acc);
 	qaws_internal_free(rev_vel);
 	qaws_internal_free(rev_times);
@@ -405,10 +405,10 @@ static qaws_status reverse_yuksel(
 	/* only the quadratic mode traces the same curve with its points
 	   reversed; the arc modes pick their arcs from the point order */
 	if (impl->mode != QAWS_YUKSEL_MODE_BEZIER)
-		return qaws_curve_extract(curve,
+		return qaws_curve_extract(out_reversed,
+			curve,
 			curve->parameter_range.max_value,
-			curve->parameter_range.min_value,
-			out_reversed);
+			curve->parameter_range.min_value);
 
 	rev_cp = (qaws_scalar *)qaws_internal_malloc(qaws_internal_mul3(sizeof(qaws_scalar), n, dim));
 	if (!rev_cp)
@@ -553,7 +553,7 @@ static qaws_status reverse_clothoid(
 	qaws_clothoid_desc desc;
 	qaws_status status;
 
-	status = qaws_curve_evaluate_2d(curve, L, QAWS_EVAL_FLAG_POSITION, &end);
+	status = qaws_curve_evaluate_2d(&end, curve, L, QAWS_EVAL_FLAG_POSITION);
 	if (status != QAWS_STATUS_OK)
 		return status;
 
@@ -585,7 +585,7 @@ static qaws_status reverse_composite(
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 
 	for (i = 0; i < n && status == QAWS_STATUS_OK; i++) {
-		status = qaws_curve_reverse(impl->segments[n - 1 - i], &seg[i]);
+		status = qaws_curve_reverse(&seg[i], impl->segments[n - 1 - i]);
 		if (status == QAWS_STATUS_OK)
 			made++;
 	}
@@ -609,10 +609,10 @@ static qaws_status reverse_by_extract(
 	qaws_curve **out_reversed)
 {
 	/* no reversible description: the reversed exact piece of the whole curve */
-	return qaws_curve_extract(curve,
+	return qaws_curve_extract(out_reversed,
+		curve,
 		curve->parameter_range.max_value,
-		curve->parameter_range.min_value,
-		out_reversed);
+		curve->parameter_range.min_value);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -620,8 +620,8 @@ static qaws_status reverse_by_extract(
 /* -------------------------------------------------------------------------- */
 
 qaws_status qaws_curve_reverse(
-	qaws_curve const *curve,
-	qaws_curve **out_reversed)
+	qaws_curve **out_reversed,
+	qaws_curve const *curve)
 {
 	if (!curve || !out_reversed)
 		return QAWS_STATUS_INVALID_ARGUMENT;

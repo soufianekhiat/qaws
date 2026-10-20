@@ -8,9 +8,9 @@ Traversal creation, evaluation, and parameter mapping.
 
 ```c
 qaws_status qaws_traversal_create(
+    qaws_traversal** out_traversal,
     qaws_curve const* curve,
-    qaws_traversal_desc const* desc,
-    qaws_traversal** out_traversal);
+    qaws_traversal_desc const* desc);
 ```
 
 Creates a traversal object that wraps a curve with a motion profile.
@@ -42,10 +42,10 @@ Destroys a traversal object. May be NULL (no-op).
 
 ```c
 qaws_status qaws_traversal_evaluate_2d(
+    qaws_eval_result_2d* out_result,
     qaws_traversal const* traversal,
     qaws_scalar input_value,
-    unsigned int eval_flags,
-    qaws_eval_result_2d* out_result);
+    unsigned int eval_flags);
 ```
 
 Evaluates the traversal at the given input value.
@@ -61,10 +61,10 @@ Evaluates the traversal at the given input value.
 
 ```c
 qaws_status qaws_traversal_evaluate_3d(
+    qaws_eval_result_3d* out_result,
     qaws_traversal const* traversal,
     qaws_scalar input_value,
-    unsigned int eval_flags,
-    qaws_eval_result_3d* out_result);
+    unsigned int eval_flags);
 ```
 
 Same as `evaluate_2d` but for 3D curves.
@@ -75,9 +75,9 @@ Same as `evaluate_2d` but for 3D curves.
 
 ```c
 qaws_status qaws_traversal_map_time_to_parameter(
+    qaws_scalar* out_parameter,
     qaws_traversal const* traversal,
-    qaws_scalar time_value,
-    qaws_scalar* out_parameter);
+    qaws_scalar time_value);
 ```
 
 Converts a time value to a curve parameter using the traversal's motion profile.
@@ -88,9 +88,9 @@ Converts a time value to a curve parameter using the traversal's motion profile.
 
 ```c
 qaws_status qaws_traversal_map_distance_to_parameter(
+    qaws_scalar* out_parameter,
     qaws_traversal const* traversal,
-    qaws_scalar distance_value,
-    qaws_scalar* out_parameter);
+    qaws_scalar distance_value);
 ```
 
 Converts a distance-along-curve value to a curve parameter.
@@ -101,9 +101,9 @@ Converts a distance-along-curve value to a curve parameter.
 
 ```c
 qaws_status qaws_traversal_map_parameter_to_distance(
+    qaws_scalar* out_distance,
     qaws_traversal const* traversal,
-    qaws_scalar parameter,
-    qaws_scalar* out_distance);
+    qaws_scalar parameter);
 ```
 
 Converts a curve parameter to a distance-along-curve value.
@@ -114,10 +114,10 @@ Converts a curve parameter to a distance-along-curve value.
 
 ```c
 qaws_status qaws_traversal_create_multi(
+    qaws_traversal** out_traversal,
     qaws_curve const* const* curves,
     unsigned int curve_count,
-    qaws_traversal_desc const* desc,
-    qaws_traversal** out_traversal);
+    qaws_traversal_desc const* desc);
 ```
 
 Creates a traversal that spans multiple curves joined end-to-end.
@@ -140,10 +140,10 @@ Creates a traversal that spans multiple curves joined end-to-end.
 
 ```c
 qaws_status qaws_traversal_advance_2d(
+    qaws_eval_result_2d* out_result,
     qaws_traversal* traversal,
     qaws_scalar delta_time,
-    unsigned int eval_flags,
-    qaws_eval_result_2d* out_result);
+    unsigned int eval_flags);
 ```
 
 Advances the traversal by a time step and evaluates the curve at the new position. Mutates internal traversal state.
@@ -160,10 +160,10 @@ Advances the traversal by a time step and evaluates the curve at the new positio
 
 ```c
 qaws_status qaws_traversal_advance_3d(
+    qaws_eval_result_3d* out_result,
     qaws_traversal* traversal,
     qaws_scalar delta_time,
-    unsigned int eval_flags,
-    qaws_eval_result_3d* out_result);
+    unsigned int eval_flags);
 ```
 
 Same as `advance_2d` but for 3D curves.

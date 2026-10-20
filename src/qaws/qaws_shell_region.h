@@ -54,8 +54,8 @@ typedef struct qaws_shell_point
    the distance in space at which sides coincide; 0 = 1e-7 of the shell's
    size (1e-4 in float). INVALID_ARGUMENT when faces meet oriented
    oppositely. */
-qaws_status qaws_shell_atlas_create(qaws_surface const* const* surfaces, unsigned int surface_count, qaws_scalar tolerance,
-	qaws_shell_atlas** out_atlas);
+qaws_status qaws_shell_atlas_create(qaws_shell_atlas** out_atlas, qaws_surface const* const* surfaces, unsigned int surface_count,
+	qaws_scalar tolerance);
 /* A face of a trimmed shell: its surface and the loops in its (u, v)
    bounding it, each closed and each of its curves one side of the face
    (an edge is a side shared whole with another face's side). Loops are
@@ -76,10 +76,10 @@ typedef struct qaws_shell_face_desc
    in space, whatever their parametrisations; a side running through another
    side's end is split there (T-junctions). Rays, circles and disks from a
    point off its trimmed face: INVALID_ARGUMENT. */
-qaws_status qaws_shell_atlas_create_trimmed(qaws_shell_face_desc const* faces, unsigned int face_count, qaws_scalar tolerance,
-	qaws_shell_atlas** out_atlas);
+qaws_status qaws_shell_atlas_create_trimmed(qaws_shell_atlas** out_atlas, qaws_shell_face_desc const* faces, unsigned int face_count,
+	qaws_scalar tolerance);
 /* The atlas of a B-rep shell's faces. */
-qaws_status qaws_shell_atlas_create_from_brep(qaws_brep_shell const* shell, qaws_scalar tolerance, qaws_shell_atlas** out_atlas);
+qaws_status qaws_shell_atlas_create_from_brep(qaws_shell_atlas** out_atlas, qaws_brep_shell const* shell, qaws_scalar tolerance);
 void qaws_shell_atlas_destroy(qaws_shell_atlas* atlas);
 
 unsigned int qaws_shell_atlas_get_face_count(qaws_shell_atlas const* atlas);
@@ -91,19 +91,19 @@ unsigned int qaws_shell_atlas_get_edge_count(qaws_shell_atlas const* atlas);
    leaving it in the (u, v) direction of its face, for the surface length
    `length`, across edges; the faces crossed. OUT_OF_RANGE where it leaves
    the shell (a free side) or reaches a vertex. */
-qaws_status qaws_shell_exp(qaws_shell_atlas const* atlas, qaws_shell_point p, qaws_vec2 direction, qaws_scalar length,
-	qaws_shell_point* out_point, qaws_vec3* out_velocity, unsigned int* out_crossings);
+qaws_status qaws_shell_exp(qaws_shell_point* out_point, qaws_vec3* out_velocity, unsigned int* out_crossings, qaws_shell_atlas const* atlas,
+	qaws_shell_point p, qaws_vec2 direction, qaws_scalar length);
 
 /* That geodesic as a shell curve: one surface curve per face run. */
-qaws_status qaws_shell_curve_create_geodesic_ray(qaws_shell_atlas const* atlas, qaws_shell_point p, qaws_vec2 direction,
-	qaws_scalar length, qaws_scalar tolerance, qaws_shell_curve** out_curve);
+qaws_status qaws_shell_curve_create_geodesic_ray(qaws_shell_curve** out_curve, qaws_shell_atlas const* atlas, qaws_shell_point p,
+	qaws_vec2 direction, qaws_scalar length, qaws_scalar tolerance);
 
 /* The geodesic circle of radius r about the centre across faces, counter-
    clockwise: its runs on each face fitted as (u, v) Hermite curves through
    points of the exponential map, the edge crossings found by bisection on
    the angle. */
-qaws_status qaws_shell_curve_create_geodesic_circle(qaws_shell_atlas const* atlas, qaws_shell_point centre, qaws_scalar radius,
-	qaws_scalar tolerance, qaws_shell_curve** out_curve);
+qaws_status qaws_shell_curve_create_geodesic_circle(qaws_shell_curve** out_curve, qaws_shell_atlas const* atlas, qaws_shell_point centre,
+	qaws_scalar radius, qaws_scalar tolerance);
 
 /* The shortest path from p0 to p1 across faces: the geodesic between them
    (aimed by Gauss-Newton on its angle and length); where a hole (a free
@@ -114,24 +114,24 @@ qaws_status qaws_shell_curve_create_geodesic_circle(qaws_shell_atlas const* atla
    the rays grazing the one hole, joined along its rim. A geodesic aimed from
    a fan of first angles, clear of the holes and shorter, wins (over a
    torus's tube, past its hole). NUMERICAL_FAILURE when no path is found. */
-qaws_status qaws_shell_curve_create_shortest_path(qaws_shell_atlas const* atlas, qaws_shell_point p0, qaws_shell_point p1,
-	qaws_scalar tolerance, qaws_shell_curve** out_curve);
+qaws_status qaws_shell_curve_create_shortest_path(qaws_shell_curve** out_curve, qaws_shell_atlas const* atlas, qaws_shell_point p0,
+	qaws_shell_point p1, qaws_scalar tolerance);
 
 void qaws_shell_curve_destroy(qaws_shell_curve* curve);
 
 /* The runs, in order along the curve: the face and its surface curve
    (owned by the shell curve). */
 unsigned int qaws_shell_curve_get_run_count(qaws_shell_curve const* curve);
-qaws_status qaws_shell_curve_get_run(qaws_shell_curve const* curve, unsigned int index, unsigned int* out_face,
-	qaws_surface_curve const** out_curve);
+qaws_status qaws_shell_curve_get_run(unsigned int* out_face, qaws_surface_curve const** out_curve, qaws_shell_curve const* curve,
+	unsigned int index);
 int qaws_shell_curve_is_closed(qaws_shell_curve const* curve);
-qaws_status qaws_shell_curve_get_length(qaws_shell_curve const* curve, qaws_scalar* out_length);
+qaws_status qaws_shell_curve_get_length(qaws_scalar* out_length, qaws_shell_curve const* curve);
 
 /* The region bounded by closed shell curves (each counter-clockwise round
    what it encloses; curves inside one face may be any of that face's
    surface curves through qaws_shell_region_create_on_face). */
-qaws_status qaws_shell_region_create(qaws_shell_atlas const* atlas, qaws_shell_curve const* const* loops, unsigned int loop_count,
-	qaws_shell_region** out_region);
+qaws_status qaws_shell_region_create(qaws_shell_region** out_region, qaws_shell_atlas const* atlas, qaws_shell_curve const* const* loops,
+	unsigned int loop_count);
 /* The whole shell: every face whole (its trimmed domain). */
 qaws_status qaws_shell_region_create_whole(qaws_shell_atlas const* atlas, qaws_shell_region** out_region);
 
@@ -144,21 +144,21 @@ qaws_status qaws_shell_region_create_whole(qaws_shell_atlas const* atlas, qaws_s
    ray out, the circle's arc and a ray back. Behind a convex vertex (a cube's
    corner) the sectors overlap where the disk is reached both ways round,
    and the union is the disk. */
-qaws_status qaws_shell_region_create_geodesic_disk(qaws_shell_atlas const* atlas, qaws_shell_point centre, qaws_scalar radius,
-	qaws_scalar tolerance, qaws_shell_region** out_region);
+qaws_status qaws_shell_region_create_geodesic_disk(qaws_shell_region** out_region, qaws_shell_atlas const* atlas, qaws_shell_point centre,
+	qaws_scalar radius, qaws_scalar tolerance);
 
 /* The Boolean of two regions of one atlas, face by face. */
-qaws_status qaws_shell_region_clip(qaws_shell_region const* a, qaws_shell_region const* b, qaws_clip_type clip_type,
-	qaws_shell_region** out_region);
+qaws_status qaws_shell_region_clip(qaws_shell_region** out_region, qaws_shell_region const* a, qaws_shell_region const* b,
+	qaws_clip_type clip_type);
 
 void qaws_shell_region_destroy(qaws_shell_region* region);
 
 /* The region's part on a face: NULL when it has none. */
 qaws_surface_region const* qaws_shell_region_get_face(qaws_shell_region const* region, unsigned int face);
-qaws_status qaws_shell_region_get_area(qaws_shell_region const* region, qaws_scalar* out_area);
-qaws_status qaws_shell_region_get_perimeter(qaws_shell_region const* region, qaws_scalar* out_length);
+qaws_status qaws_shell_region_get_area(qaws_scalar* out_area, qaws_shell_region const* region);
+qaws_status qaws_shell_region_get_perimeter(qaws_scalar* out_length, qaws_shell_region const* region);
 /* 1 inside, 0 outside, -1 on the boundary. */
-qaws_status qaws_shell_region_contains(qaws_shell_region const* region, qaws_shell_point p, int* out_inside);
+qaws_status qaws_shell_region_contains(int* out_inside, qaws_shell_region const* region, qaws_shell_point p);
 
 /* The region grown by distance (> 0: the points within it of the region)
    or shrunk (< 0: the region's points farther than |distance| from its
@@ -168,15 +168,15 @@ qaws_status qaws_shell_region_contains(qaws_shell_region const* region, qaws_she
    geodesic disks at the pieces' starts for round joins; united with the
    region, or taken from it. Each boundary piece must curve less than
    1/|distance| towards the front (no cusps). */
-qaws_status qaws_shell_region_offset(qaws_shell_region const* region, qaws_scalar distance, qaws_scalar tolerance,
-	qaws_shell_region** out_region);
+qaws_status qaws_shell_region_offset(qaws_shell_region** out_region, qaws_shell_region const* region, qaws_scalar distance,
+	qaws_scalar tolerance);
 
 /* count points spread over the region: shared out between the faces by
    their parts' areas (largest remainders), each face's part sampled as
    qaws_surface_region_sample (desc's seed moved on per face; desc NULL:
    random, seed 0). out_points and out_xyz may be NULL. */
-qaws_status qaws_shell_region_sample(qaws_shell_region const* region, qaws_surface_sample_desc const* desc, unsigned int count,
-	qaws_shell_point* out_points, qaws_vec3* out_xyz);
+qaws_status qaws_shell_region_sample(qaws_shell_point* out_points, qaws_vec3* out_xyz, qaws_shell_region const* region,
+	unsigned int count, qaws_surface_sample_desc const* desc);
 
 /* One triangle mesh of the region across the faces, conformal where they
    meet: each face's part meshed as qaws_surface_region_triangulate with one
@@ -187,13 +187,13 @@ qaws_status qaws_shell_region_sample(qaws_shell_region const* region, qaws_surfa
    faces' S_u x S_v. */
 typedef struct qaws_shell_mesh qaws_shell_mesh;
 
-qaws_status qaws_shell_region_triangulate(qaws_shell_region const* region, qaws_surface_mesh_desc const* desc, qaws_shell_mesh** out_mesh);
+qaws_status qaws_shell_region_triangulate(qaws_shell_mesh** out_mesh, qaws_shell_region const* region, qaws_surface_mesh_desc const* desc);
 void qaws_shell_mesh_destroy(qaws_shell_mesh* mesh);
 unsigned int qaws_shell_mesh_get_vertex_count(qaws_shell_mesh const* mesh);
 /* a vertex: its point on (one of) its faces and in space */
-qaws_status qaws_shell_mesh_get_vertex(qaws_shell_mesh const* mesh, unsigned int index, qaws_shell_point* out_point, qaws_vec3* out_xyz);
+qaws_status qaws_shell_mesh_get_vertex(qaws_shell_point* out_point, qaws_vec3* out_xyz, qaws_shell_mesh const* mesh, unsigned int index);
 unsigned int qaws_shell_mesh_get_triangle_count(qaws_shell_mesh const* mesh);
-qaws_status qaws_shell_mesh_get_triangle(qaws_shell_mesh const* mesh, unsigned int index, unsigned int out_vertices[3]);
+qaws_status qaws_shell_mesh_get_triangle(unsigned int out_vertices[3], qaws_shell_mesh const* mesh, unsigned int index);
 /* the face a triangle lies on */
 unsigned int qaws_shell_mesh_get_triangle_face(qaws_shell_mesh const* mesh, unsigned int index);
 

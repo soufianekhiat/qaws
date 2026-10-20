@@ -77,14 +77,14 @@ typedef struct qaws_curve_batch_stats {
 
 ```c
 qaws_status qaws_curve_batch_find_intersections_2d(
-	qaws_curve_batch_desc const* desc,
-	qaws_curve_batch_hit_2d* out_hits, unsigned int hit_capacity,
-	unsigned int* out_count, qaws_curve_batch_stats* out_stats);
+	qaws_curve_batch_hit_2d* out_hits,
+	unsigned int* out_count, qaws_curve_batch_stats* out_stats,
+	unsigned int hit_capacity, qaws_curve_batch_desc const* desc);
 
 qaws_status qaws_curve_batch_find_intersections_3d(
-	qaws_curve_batch_desc const* desc,
-	qaws_curve_batch_hit_3d* out_hits, unsigned int hit_capacity,
-	unsigned int* out_count, qaws_curve_batch_stats* out_stats);
+	qaws_curve_batch_hit_3d* out_hits,
+	unsigned int* out_count, qaws_curve_batch_stats* out_stats,
+	unsigned int hit_capacity, qaws_curve_batch_desc const* desc);
 ```
 
 The functions write `min(count, hit_capacity)` hits. `*out_count` is the total
@@ -150,12 +150,12 @@ certifies every candidate span pair. On the 72-curve heightfield it takes
 ## Prepared sets
 
 ```c
-qaws_status qaws_curve_set_create(qaws_curve_batch_desc const* desc, qaws_curve_set** out_set);
+qaws_status qaws_curve_set_create(qaws_curve_set** out_set, qaws_curve_batch_desc const* desc);
 void qaws_curve_set_destroy(qaws_curve_set* set);
 unsigned int qaws_curve_set_get_segment_count(qaws_curve_set const* set);
 
-qaws_status qaws_curve_set_find_intersections_2d(qaws_curve_set const* set, qaws_curve_set const* other,
-	qaws_curve_batch_hit_2d* out_hits, unsigned int hit_capacity, unsigned int* out_count, qaws_curve_batch_stats* out_stats);
+qaws_status qaws_curve_set_find_intersections_2d(qaws_curve_batch_hit_2d* out_hits, unsigned int* out_count,
+	qaws_curve_batch_stats* out_stats, qaws_curve_set const* set, qaws_curve_set const* other, unsigned int hit_capacity);
 /* and _3d */
 ```
 
@@ -192,8 +192,8 @@ typedef struct qaws_level_crossing {
 	qaws_vec3 position;
 } qaws_level_crossing;            /* sorted by (curve, parameter) */
 
-qaws_status qaws_curve_batch_find_level_crossings(qaws_level_crossing_desc const* desc,
-	qaws_level_crossing* out_crossings, unsigned int capacity, unsigned int* out_count);
+qaws_status qaws_curve_batch_find_level_crossings(qaws_level_crossing* out_crossings,
+	unsigned int* out_count, unsigned int capacity, qaws_level_crossing_desc const* desc);
 ```
 
 This finds where curves cross the level sets h = L of a scalar field, for
@@ -235,10 +235,10 @@ typedef struct qaws_closest_point {
 	qaws_vec3 position;
 } qaws_closest_point;
 
-qaws_status qaws_curve_batch_find_closest(qaws_closest_desc const* desc, qaws_closest_point* out_points,
-	qaws_curve_batch_stats* out_stats);
-qaws_status qaws_curve_set_find_closest(qaws_curve_set const* set, qaws_scalar const* points, unsigned int point_count,
-	qaws_scalar max_distance, qaws_closest_point* out_points, qaws_curve_batch_stats* out_stats);
+qaws_status qaws_curve_batch_find_closest(qaws_closest_point* out_points, qaws_curve_batch_stats* out_stats,
+	qaws_closest_desc const* desc);
+qaws_status qaws_curve_set_find_closest(qaws_closest_point* out_points, qaws_curve_batch_stats* out_stats, qaws_curve_set const* set,
+	qaws_scalar const* points, unsigned int point_count, qaws_scalar max_distance);
 ```
 
 This returns, for every query point, the nearest point over all curves.

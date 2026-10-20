@@ -35,7 +35,7 @@ static void storage_layout(object_storage* s, qaws_curve const* c)
 	qaws_field_desc fd[8];
 	unsigned int n = 0, i;
 	memset(s, 0, sizeof(*s));
-	qaws_curve_describe_fields(c, fd, 8, &n);
+	qaws_curve_describe_fields(fd, &n, c, 8);
 	for (i = 0; i < n && s->field_count < MAP_FIELDS; i++)
 	{
 		/* knots are frozen by these operations */
@@ -52,7 +52,7 @@ static void storage_bind(object_storage* s)
 {
 	unsigned int f;
 	for (f = 0; f < s->field_count; f++)
-		s->views[f] = qaws_field_view_make(s->fields[f], s->data[f], s->counts[f], s->comps[f]);
+		s->views[f] = qaws_field_view_make(s->data[f], s->counts[f], s->fields[f], s->comps[f]);
 	s->dv.fields = s->views;
 	s->dv.field_count = s->field_count;
 	s->dv.children = NULL;
@@ -78,7 +78,7 @@ static void storage_read(object_storage* s, qaws_curve const* c)
 {
 	unsigned int f, n;
 	for (f = 0; f < s->field_count; f++)
-		qaws_curve_read_field(c, s->fields[f], s->data[f], MAP_MAX_SCALARS, &n);
+		qaws_curve_read_field(s->data[f], &n, c, MAP_MAX_SCALARS, s->fields[f]);
 }
 
 /* Curve with values + h * dir. */
@@ -93,7 +93,7 @@ static qaws_curve* shifted(qaws_curve const* c, object_storage const* dir, doubl
 		for (k = 0; k < storage_size(&v, f); k++)
 			v.data[f][k] = (qaws_scalar)(v.data[f][k] + h * dir->data[f][k]);
 	storage_bind(&v);
-	qaws_curve_clone_with_fields(c, &v.dv, &out);
+	qaws_curve_clone_with_fields(&out, c, &v.dv);
 	return out;
 }
 
@@ -101,37 +101,37 @@ typedef qaws_status (*op_fn)(qaws_curve const* const* in, qaws_scalar param, qaw
 
 static qaws_status op_split(qaws_curve const* const* in, qaws_scalar p, qaws_curve** out, qaws_diff_map** map)
 {
-	return qaws_curve_split_diff(in[0], p, &out[0], &out[1], map);
+	return qaws_curve_split_diff(&out[0], &out[1], map, in[0], p);
 }
 static qaws_status op_join(qaws_curve const* const* in, qaws_scalar p, qaws_curve** out, qaws_diff_map** map)
 {
 	(void)p;
-	return qaws_curve_join_diff(in[0], in[1], &out[0], map);
+	return qaws_curve_join_diff(&out[0], map, in[0], in[1]);
 }
 static qaws_status op_hermite_to_bezier(qaws_curve const* const* in, qaws_scalar p, qaws_curve** out, qaws_diff_map** map)
 {
 	(void)p;
-	return qaws_curve_convert_hermite_to_bezier_diff(in[0], 1, &out[0], map);
+	return qaws_curve_convert_hermite_to_bezier_diff(&out[0], map, in[0], 1);
 }
 static qaws_status op_bezier_to_bspline(qaws_curve const* const* in, qaws_scalar p, qaws_curve** out, qaws_diff_map** map)
 {
 	(void)p;
-	return qaws_curve_convert_bezier_to_bspline_diff(in[0], &out[0], map);
+	return qaws_curve_convert_bezier_to_bspline_diff(&out[0], map, in[0]);
 }
 static qaws_status op_bspline_to_nurbs(qaws_curve const* const* in, qaws_scalar p, qaws_curve** out, qaws_diff_map** map)
 {
 	(void)p;
-	return qaws_curve_convert_bspline_to_nurbs_diff(in[0], &out[0], map);
+	return qaws_curve_convert_bspline_to_nurbs_diff(&out[0], map, in[0]);
 }
 static qaws_status op_elevate(qaws_curve const* const* in, qaws_scalar p, qaws_curve** out, qaws_diff_map** map)
 {
 	(void)p;
-	return qaws_curve_elevate_degree_diff(in[0], &out[0], map);
+	return qaws_curve_elevate_degree_diff(&out[0], map, in[0]);
 }
 static qaws_status op_reduce(qaws_curve const* const* in, qaws_scalar p, qaws_curve** out, qaws_diff_map** map)
 {
 	(void)p;
-	return qaws_curve_reduce_degree_diff(in[0], &out[0], map);
+	return qaws_curve_reduce_degree_diff(&out[0], map, in[0]);
 }
 
 /* Checks one operation: tangent against finite differences and the
@@ -176,7 +176,7 @@ static void check_op(char const* name, op_fn op, qaws_curve const* const* in, un
 		storage_bind(&dir[i]);
 		in_views[i] = &dir[i].dv;
 	}
-	pview = qaws_field_view_make(QAWS_FIELD_PARAMETER, &pdot_storage, 1, 1);
+	pview = qaws_field_view_make(&pdot_storage, 1, QAWS_FIELD_PARAMETER, 1);
 	pviews.fields = &pview;
 	pviews.field_count = 1;
 	pviews.children = NULL;
@@ -190,7 +190,7 @@ static void check_op(char const* name, op_fn op, qaws_curve const* const* in, un
 		storage_bind(&tan[i]);
 		out_views[i] = &tan[i].dv;
 	}
-	TEST_ASSERT_STATUS(qaws_diff_map_tangent(map, NULL, in_views, n_in_views, out_views, n_out));
+	TEST_ASSERT_STATUS(qaws_diff_map_tangent(out_views, map, in_views, n_in_views, n_out, NULL));
 
 	/* Finite differences of the operation on rebuilt inputs. */
 	for (i = 0; i < n_in; i++)
@@ -248,20 +248,20 @@ static void check_op(char const* name, op_fn op, qaws_curve const* const* in, un
 		storage_bind(&bar[i]);
 		in_adj[i] = &bar[i].dv;
 	}
-	pbar_view = qaws_field_view_make(QAWS_FIELD_PARAMETER, &pbar_storage, 1, 1);
+	pbar_view = qaws_field_view_make(&pbar_storage, 1, QAWS_FIELD_PARAMETER, 1);
 	pbar_views.fields = &pbar_view;
 	pbar_views.field_count = 1;
 	pbar_views.children = NULL;
 	pbar_views.child_count = 0;
 	in_adj[n_in] = &pbar_views;
-	TEST_ASSERT_STATUS(qaws_diff_map_adjoint(map, NULL, out_adj, n_out, in_adj, n_in + 1));
+	TEST_ASSERT_STATUS(qaws_diff_map_adjoint(in_adj, map, out_adj, n_out, n_in + 1, NULL));
 	for (i = 0; i < n_in; i++)
 		rhs += storage_dot(&bar[i], &dir[i]);
 	rhs += (double)pbar_storage * param_tangent;
 
 	{
 		unsigned int entries = 0;
-		qaws_diff_map_get_entries(map, NULL, 0, &entries);
+		qaws_diff_map_get_entries(NULL, &entries, map, 0);
 		printf("    %s: %u sparse entries, tangent %s, adjoint %.9g vs %.9g\n", name, entries,
 			ok_fd ? "ok" : "NO", lhs, rhs);
 	}
@@ -287,7 +287,7 @@ static qaws_curve* make_bezier(unsigned int degree)
 	d.degree = degree;
 	d.control_points = cps;
 	d.control_point_count = degree + 1;
-	qaws_curve_create_bezier(&d, &c);
+	qaws_curve_create_bezier(&c, &d);
 	return c;
 }
 
@@ -304,7 +304,7 @@ static qaws_curve* make_bspline(void)
 	d.control_point_count = 7;
 	d.knots = g_map_knots;
 	d.knot_count = 11;
-	qaws_curve_create_bspline(&d, &c);
+	qaws_curve_create_bspline(&c, &d);
 	return c;
 }
 
@@ -326,7 +326,7 @@ static qaws_curve* make_nurbs(void)
 	d.knot_count = 11;
 	d.weights = w;
 	d.weight_count = 7;
-	qaws_curve_create_nurbs(&d, &c);
+	qaws_curve_create_nurbs(&c, &d);
 	return c;
 }
 
@@ -343,7 +343,7 @@ static qaws_curve* make_hermite(void)
 	d.derivatives = ders;
 	d.point_count = 4;
 	d.derivative_count = 4;
-	qaws_curve_create_hermite(&d, &c);
+	qaws_curve_create_hermite(&c, &d);
 	return c;
 }
 
@@ -354,19 +354,19 @@ static void test_clone(void)
 	qaws_scalar w[7] = { 1, 2, 1, 2, 1, 2, 1 };
 	qaws_scalar got[7];
 	unsigned int n = 0;
-	qaws_field_view v = qaws_field_view_make(QAWS_FIELD_WEIGHTS, w, 7, 1);
+	qaws_field_view v = qaws_field_view_make(w, 7, QAWS_FIELD_WEIGHTS, 1);
 	qaws_diff_views vs;
 	vs.fields = &v;
 	vs.field_count = 1;
 	vs.children = NULL;
 	vs.child_count = 0;
-	TEST_ASSERT_STATUS(qaws_curve_clone_with_fields(c, &vs, &clone));
-	qaws_curve_read_field(clone, QAWS_FIELD_WEIGHTS, got, 7, &n);
+	TEST_ASSERT_STATUS(qaws_curve_clone_with_fields(&clone, c, &vs));
+	qaws_curve_read_field(got, &n, clone, 7, QAWS_FIELD_WEIGHTS);
 	TEST_ASSERT(n == 7 && got[1] == 2 && got[2] == 1, "clone replaces the given field");
 	{
 		qaws_scalar a[21], b[21];
-		qaws_curve_read_field(c, QAWS_FIELD_CONTROL_POINTS, a, 21, &n);
-		qaws_curve_read_field(clone, QAWS_FIELD_CONTROL_POINTS, b, 21, &n);
+		qaws_curve_read_field(a, &n, c, 21, QAWS_FIELD_CONTROL_POINTS);
+		qaws_curve_read_field(b, &n, clone, 21, QAWS_FIELD_CONTROL_POINTS);
 		TEST_ASSERT(memcmp(a, b, sizeof(a)) == 0, "clone keeps absent fields");
 	}
 	qaws_curve_destroy(clone);
@@ -405,9 +405,9 @@ static void fit_at(qaws_dimension dim, qaws_scalar const* data, qaws_scalar cons
 	desc.control_point_count = FIT_N;
 	desc.parameters = params ? t : NULL;
 	desc.parameterization = g_fit_param;
-	qaws_curve_fit_bspline(&desc, &c);
-	qaws_curve_read_field(c, QAWS_FIELD_CONTROL_POINTS, cps, FIT_N * dc, &got);
-	qaws_curve_read_field(c, QAWS_FIELD_KNOTS, knots, FIT_KC, &got);
+	qaws_curve_fit_bspline(&c, &desc);
+	qaws_curve_read_field(cps, &got, c, FIT_N * dc, QAWS_FIELD_CONTROL_POINTS);
+	qaws_curve_read_field(knots, &got, c, FIT_KC, QAWS_FIELD_KNOTS);
 	qaws_curve_destroy(c);
 }
 
@@ -457,12 +457,12 @@ static void check_fit(char const* name, qaws_dimension dim, int with_params)
 	desc.control_point_count = FIT_N;
 	desc.parameters = with_params ? params : NULL;
 	desc.parameterization = g_fit_param;
-	TEST_ASSERT_STATUS(qaws_curve_fit_bspline_diff(&desc, &c, &map));
+	TEST_ASSERT_STATUS(qaws_curve_fit_bspline_diff(&c, &map, &desc));
 	TEST_ASSERT(qaws_diff_map_input_count(map) == (with_params ? 2u : 1u), "fit map input count");
 
 	/* tangent */
-	in_f[0] = qaws_field_view_make(QAWS_FIELD_POINTS, vdata, FIT_M, dc);
-	in_f[1] = qaws_field_view_make(QAWS_FIELD_PARAMETER, vparams, FIT_M, 1);
+	in_f[0] = qaws_field_view_make(vdata, FIT_M, QAWS_FIELD_POINTS, dc);
+	in_f[1] = qaws_field_view_make(vparams, FIT_M, QAWS_FIELD_PARAMETER, 1);
 	for (i = 0; i < 2; i++)
 	{
 		in_v[i].fields = &in_f[i];
@@ -471,14 +471,14 @@ static void check_fit(char const* name, qaws_dimension dim, int with_params)
 		in_v[i].child_count = 0;
 		ins[i] = &in_v[i];
 	}
-	out_f[0] = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, tq, FIT_N, dc);
-	out_f[1] = qaws_field_view_make(QAWS_FIELD_KNOTS, tk, FIT_KC, 1);
+	out_f[0] = qaws_field_view_make(tq, FIT_N, QAWS_FIELD_CONTROL_POINTS, dc);
+	out_f[1] = qaws_field_view_make(tk, FIT_KC, QAWS_FIELD_KNOTS, 1);
 	out_v.fields = out_f;
 	out_v.field_count = 2;
 	out_v.children = NULL;
 	out_v.child_count = 0;
 	outs[0] = &out_v;
-	TEST_ASSERT_STATUS(qaws_diff_map_tangent(map, NULL, ins, with_params ? 2u : 1u, outs, 1));
+	TEST_ASSERT_STATUS(qaws_diff_map_tangent(outs, map, ins, with_params ? 2u : 1u, 1, NULL));
 	tan_dot = diff_dot(tq, wq, FIT_N * dc) + diff_dot(tk, wk, FIT_KC);
 
 	/* central difference of the fit itself */
@@ -500,7 +500,7 @@ static void check_fit(char const* name, qaws_dimension dim, int with_params)
 	in_f[1].data = bparams;
 	ins_adj[0] = &in_v[0];
 	ins_adj[1] = &in_v[1];
-	TEST_ASSERT_STATUS(qaws_diff_map_adjoint(map, NULL, outs_adj, 1, ins_adj, with_params ? 2u : 1u));
+	TEST_ASSERT_STATUS(qaws_diff_map_adjoint(ins_adj, map, outs_adj, 1, with_params ? 2u : 1u, NULL));
 	adj_dot = diff_dot(bdata, vdata, FIT_M * dc) + diff_dot(bparams, vparams, FIT_M);
 
 	printf("    %-28s tangent %.9f  fd %.9f  adjoint %.9f\n", name, tan_dot, fd, adj_dot);
@@ -546,7 +546,7 @@ static qaws_curve* off_curve(qaws_scalar const* cps)
 	d.control_point_count = OFF_CP;
 	d.knots = k;
 	d.knot_count = OFF_CP + 4;
-	qaws_curve_create_bspline(&d, &c);
+	qaws_curve_create_bspline(&c, &d);
 	return c;
 }
 
@@ -555,8 +555,8 @@ static void off_points(qaws_scalar const* cps, qaws_scalar dist, int mode, qaws_
 	qaws_curve* c = off_curve(cps);
 	qaws_curve* o = NULL;
 	unsigned int got = 0;
-	qaws_curve_offset_3d(c, dist, mode, &dir, NULL, OFF_SAMPLES, &o);
-	qaws_curve_read_field(o, QAWS_FIELD_CONTROL_POINTS, out, OFF_OUT * 3, &got);
+	qaws_curve_offset_3d(&o, c, NULL, &dir, OFF_SAMPLES, dist, mode);
+	qaws_curve_read_field(out, &got, o, OFF_OUT * 3, QAWS_FIELD_CONTROL_POINTS);
 	qaws_curve_destroy(o);
 	qaws_curve_destroy(c);
 }
@@ -593,20 +593,20 @@ static void check_offset_map(int mode)
 	diff_rand_fill(w, OFF_OUT * 3);
 
 	c = off_curve(cps);
-	TEST_ASSERT_STATUS(qaws_curve_offset_3d_diff(c, dist, mode, &dir, NULL, OFF_SAMPLES, &o, &map));
+	TEST_ASSERT_STATUS(qaws_curve_offset_3d_diff(&o, &map, c, NULL, &dir, OFF_SAMPLES, dist, mode));
 
-	fin[0] = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, dcp, OFF_CP, 3);
-	fin[1] = qaws_field_view_make(QAWS_FIELD_PARAMETER, &dd, 1, 1);
-	fin[2] = qaws_field_view_make(QAWS_FIELD_DIRECTION, ddir, 1, 3);
+	fin[0] = qaws_field_view_make(dcp, OFF_CP, QAWS_FIELD_CONTROL_POINTS, 3);
+	fin[1] = qaws_field_view_make(&dd, 1, QAWS_FIELD_PARAMETER, 1);
+	fin[2] = qaws_field_view_make(ddir, 1, QAWS_FIELD_DIRECTION, 3);
 	for (i = 0; i < 3; i++)
 	{
 		vin[i].fields = &fin[i]; vin[i].field_count = 1; vin[i].children = NULL; vin[i].child_count = 0;
 		ins[i] = &vin[i];
 	}
-	fout = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, tq, OFF_OUT, 3);
+	fout = qaws_field_view_make(tq, OFF_OUT, QAWS_FIELD_CONTROL_POINTS, 3);
 	vout.fields = &fout; vout.field_count = 1; vout.children = NULL; vout.child_count = 0;
 	outs[0] = &vout;
-	TEST_ASSERT_STATUS(qaws_diff_map_tangent(map, NULL, ins, mode == 0 ? 3u : 2u, outs, 1));
+	TEST_ASSERT_STATUS(qaws_diff_map_tangent(outs, map, ins, mode == 0 ? 3u : 2u, 1, NULL));
 	lhs = diff_dot(tq, w, OFF_OUT * 3);
 
 	for (i = 0; i < OFF_CP * 3; i++)
@@ -623,9 +623,9 @@ static void check_offset_map(int mode)
 		fd += w[i] * ((double)op[i] - om[i]) / (2 * h);
 
 	memset(bar_cp, 0, sizeof(bar_cp));
-	fbar[0] = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, bar_cp, OFF_CP, 3);
-	fbar[1] = qaws_field_view_make(QAWS_FIELD_PARAMETER, &bar_d, 1, 1);
-	fbar[2] = qaws_field_view_make(QAWS_FIELD_DIRECTION, bar_dir, 1, 3);
+	fbar[0] = qaws_field_view_make(bar_cp, OFF_CP, QAWS_FIELD_CONTROL_POINTS, 3);
+	fbar[1] = qaws_field_view_make(&bar_d, 1, QAWS_FIELD_PARAMETER, 1);
+	fbar[2] = qaws_field_view_make(bar_dir, 1, QAWS_FIELD_DIRECTION, 3);
 	for (i = 0; i < 3; i++)
 	{
 		vbar[i].fields = &fbar[i]; vbar[i].field_count = 1; vbar[i].children = NULL; vbar[i].child_count = 0;
@@ -633,7 +633,7 @@ static void check_offset_map(int mode)
 	}
 	fout.data = w;
 	outs_c[0] = &vout;
-	TEST_ASSERT_STATUS(qaws_diff_map_adjoint(map, NULL, outs_c, 1, bars, mode == 0 ? 3u : 2u));
+	TEST_ASSERT_STATUS(qaws_diff_map_adjoint(bars, map, outs_c, 1, mode == 0 ? 3u : 2u, NULL));
 	adj = diff_dot(bar_cp, dcp, OFF_CP * 3) + bar_d * dd + diff_dot(bar_dir, ddir, 3);
 
 	printf("    offset %s: tangent %.8f fd %.8f adjoint %.8f\n", mode ? "frenet normal" : "constant direction", lhs, fd, adj);
@@ -655,7 +655,7 @@ static qaws_surface* off_patch(qaws_scalar const* p)
 	d.control_points = (qaws_vec3 const*)p;
 	d.u_point_count = 4;
 	d.v_point_count = 4;
-	qaws_surface_create_bezier(&d, &s);
+	qaws_surface_create_bezier(&s, &d);
 	return s;
 }
 
@@ -665,8 +665,8 @@ static void off_surface_points(qaws_scalar const* cps, qaws_scalar dist, qaws_sc
 	qaws_surface* s = off_patch(sp);
 	qaws_curve* o = NULL;
 	unsigned int got = 0;
-	qaws_curve_offset_3d(c, dist, 2, NULL, s, OFF_SAMPLES, &o);
-	qaws_curve_read_field(o, QAWS_FIELD_CONTROL_POINTS, out, OFF_OUT * 3, &got);
+	qaws_curve_offset_3d(&o, c, s, NULL, OFF_SAMPLES, dist, 2);
+	qaws_curve_read_field(out, &got, o, OFF_OUT * 3, QAWS_FIELD_CONTROL_POINTS);
 	qaws_curve_destroy(o);
 	qaws_surface_destroy(s);
 	qaws_curve_destroy(c);
@@ -715,27 +715,27 @@ static void check_offset_surface_map(void)
 
 	c = off_curve(cps);
 	s = off_patch(sp);
-	TEST_ASSERT_STATUS(qaws_curve_offset_3d_diff(c, dist, 2, NULL, s, OFF_SAMPLES, &o, &map));
+	TEST_ASSERT_STATUS(qaws_curve_offset_3d_diff(&o, &map, c, s, NULL, OFF_SAMPLES, dist, 2));
 	if (!map)
 	{
 		qaws_surface_destroy(s);
 		qaws_curve_destroy(c);
 		return;
 	}
-	fin[0] = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, dcp, OFF_CP, 3);
-	fin[1] = qaws_field_view_make(QAWS_FIELD_PARAMETER, &dd, 1, 1);
-	fin[2] = qaws_field_view_make(QAWS_FIELD_DIRECTION, ddir, 1, 3);
-	fin[3] = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, dsp, 16, 3);
+	fin[0] = qaws_field_view_make(dcp, OFF_CP, QAWS_FIELD_CONTROL_POINTS, 3);
+	fin[1] = qaws_field_view_make(&dd, 1, QAWS_FIELD_PARAMETER, 1);
+	fin[2] = qaws_field_view_make(ddir, 1, QAWS_FIELD_DIRECTION, 3);
+	fin[3] = qaws_field_view_make(dsp, 16, QAWS_FIELD_CONTROL_POINTS, 3);
 	for (i = 0; i < 4; i++)
 	{
 		vin[i].fields = &fin[i]; vin[i].field_count = 1; vin[i].children = NULL; vin[i].child_count = 0;
 		ins[i] = &vin[i];
 	}
 	ins[2] = NULL;   /* the direction input is frozen in mode 2 */
-	fout = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, tq, OFF_OUT, 3);
+	fout = qaws_field_view_make(tq, OFF_OUT, QAWS_FIELD_CONTROL_POINTS, 3);
 	vout.fields = &fout; vout.field_count = 1; vout.children = NULL; vout.child_count = 0;
 	outs[0] = &vout;
-	TEST_ASSERT_STATUS(qaws_diff_map_tangent(map, NULL, ins, 4u, outs, 1));
+	TEST_ASSERT_STATUS(qaws_diff_map_tangent(outs, map, ins, 4u, 1, NULL));
 	lhs = diff_dot(tq, w, OFF_OUT * 3);
 
 	for (i = 0; i < OFF_CP * 3; i++)
@@ -756,10 +756,10 @@ static void check_offset_surface_map(void)
 
 	memset(bar_cp, 0, sizeof(bar_cp));
 	memset(bar_sp, 0, sizeof(bar_sp));
-	fbar[0] = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, bar_cp, OFF_CP, 3);
-	fbar[1] = qaws_field_view_make(QAWS_FIELD_PARAMETER, &bar_d, 1, 1);
-	fbar[2] = qaws_field_view_make(QAWS_FIELD_DIRECTION, bar_dir, 1, 3);
-	fbar[3] = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, bar_sp, 16, 3);
+	fbar[0] = qaws_field_view_make(bar_cp, OFF_CP, QAWS_FIELD_CONTROL_POINTS, 3);
+	fbar[1] = qaws_field_view_make(&bar_d, 1, QAWS_FIELD_PARAMETER, 1);
+	fbar[2] = qaws_field_view_make(bar_dir, 1, QAWS_FIELD_DIRECTION, 3);
+	fbar[3] = qaws_field_view_make(bar_sp, 16, QAWS_FIELD_CONTROL_POINTS, 3);
 	for (i = 0; i < 4; i++)
 	{
 		vbar[i].fields = &fbar[i]; vbar[i].field_count = 1; vbar[i].children = NULL; vbar[i].child_count = 0;
@@ -767,7 +767,7 @@ static void check_offset_surface_map(void)
 	}
 	fout.data = w;
 	outs_c[0] = &vout;
-	TEST_ASSERT_STATUS(qaws_diff_map_adjoint(map, NULL, outs_c, 1, bars, 4u));
+	TEST_ASSERT_STATUS(qaws_diff_map_adjoint(bars, map, outs_c, 1, 4u, NULL));
 	adj = diff_dot(bar_cp, dcp, OFF_CP * 3) + bar_d * dd + diff_dot(bar_sp, dsp, 48);
 
 	printf("    offset surface normal: tangent %.8f fd %.8f adjoint %.8f\n", lhs, fd, adj);
@@ -875,37 +875,37 @@ static void ref_split(void)
 	d.degree = 5;
 	d.control_points = cps;
 	d.control_point_count = 6;
-	qaws_curve_create_bezier(&d, &c);
-	TEST_ASSERT_STATUS(qaws_curve_split_diff(c, (qaws_scalar)0.37, &l, &r, &map));
-	qaws_curve_read_field(l, QAWS_FIELD_CONTROL_POINTS, val, 18, &got);
-	qaws_curve_read_field(r, QAWS_FIELD_CONTROL_POINTS, val + 18, 18, &got);
+	qaws_curve_create_bezier(&c, &d);
+	TEST_ASSERT_STATUS(qaws_curve_split_diff(&l, &r, &map, c, (qaws_scalar)0.37));
+	qaws_curve_read_field(val, &got, l, 18, QAWS_FIELD_CONTROL_POINTS);
+	qaws_curve_read_field(val + 18, &got, r, 18, QAWS_FIELD_CONTROL_POINTS);
 
-	fin[0] = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, dir, 6, 3);
-	fin[1] = qaws_field_view_make(QAWS_FIELD_PARAMETER, &pdot, 1, 1);
+	fin[0] = qaws_field_view_make(dir, 6, QAWS_FIELD_CONTROL_POINTS, 3);
+	fin[1] = qaws_field_view_make(&pdot, 1, QAWS_FIELD_PARAMETER, 1);
 	vin[0] = ref_views(&fin[0], 1);
 	vin[1] = ref_views(&fin[1], 1);
 	ins[0] = &vin[0];
 	ins[1] = &vin[1];
-	fout[0] = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, tan, 6, 3);
-	fout[1] = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, tan + 18, 6, 3);
+	fout[0] = qaws_field_view_make(tan, 6, QAWS_FIELD_CONTROL_POINTS, 3);
+	fout[1] = qaws_field_view_make(tan + 18, 6, QAWS_FIELD_CONTROL_POINTS, 3);
 	vout[0] = ref_views(&fout[0], 1);
 	vout[1] = ref_views(&fout[1], 1);
 	outs[0] = &vout[0];
 	outs[1] = &vout[1];
-	TEST_ASSERT_STATUS(qaws_diff_map_tangent(map, NULL, ins, 2, outs, 2));
+	TEST_ASSERT_STATUS(qaws_diff_map_tangent(outs, map, ins, 2, 2, NULL));
 
-	fout[0] = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, wl, 6, 3);
-	fout[1] = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, wr, 6, 3);
+	fout[0] = qaws_field_view_make(wl, 6, QAWS_FIELD_CONTROL_POINTS, 3);
+	fout[1] = qaws_field_view_make(wr, 6, QAWS_FIELD_CONTROL_POINTS, 3);
 	outs_c[0] = &vout[0];
 	outs_c[1] = &vout[1];
 	memset(bar, 0, sizeof(bar));
-	fadj[0] = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, bar, 6, 3);
-	fadj[1] = qaws_field_view_make(QAWS_FIELD_PARAMETER, bar + 18, 1, 1);
+	fadj[0] = qaws_field_view_make(bar, 6, QAWS_FIELD_CONTROL_POINTS, 3);
+	fadj[1] = qaws_field_view_make(bar + 18, 1, QAWS_FIELD_PARAMETER, 1);
 	vadj[0] = ref_views(&fadj[0], 1);
 	vadj[1] = ref_views(&fadj[1], 1);
 	ins_m[0] = &vadj[0];
 	ins_m[1] = &vadj[1];
-	TEST_ASSERT_STATUS(qaws_diff_map_adjoint(map, NULL, outs_c, 2, ins_m, 2));
+	TEST_ASSERT_STATUS(qaws_diff_map_adjoint(ins_m, map, outs_c, 2, 2, NULL));
 	ref_report("Bezier split", ref_max_err(val, ref_split_value, 36), ref_max_err(tan, ref_split_tangent, 36),
 		ref_max_err(bar, ref_split_adjoint, 19));
 	qaws_diff_map_destroy(map);
@@ -956,32 +956,32 @@ static void ref_fit(unsigned int dim, int with_params)
 	desc.degree = 3;
 	desc.control_point_count = N;
 	desc.parameters = with_params ? params : NULL;
-	TEST_ASSERT_STATUS(qaws_curve_fit_bspline_diff(&desc, &c, &map));
-	qaws_curve_read_field(c, QAWS_FIELD_CONTROL_POINTS, val, nq, &got);
-	qaws_curve_read_field(c, QAWS_FIELD_KNOTS, val + nq, KC, &got);
+	TEST_ASSERT_STATUS(qaws_curve_fit_bspline_diff(&c, &map, &desc));
+	qaws_curve_read_field(val, &got, c, nq, QAWS_FIELD_CONTROL_POINTS);
+	qaws_curve_read_field(val + nq, &got, c, KC, QAWS_FIELD_KNOTS);
 
-	fin[0] = qaws_field_view_make(QAWS_FIELD_POINTS, ddata, M, dim);
-	fin[1] = qaws_field_view_make(QAWS_FIELD_PARAMETER, dparams, M, 1);
+	fin[0] = qaws_field_view_make(ddata, M, QAWS_FIELD_POINTS, dim);
+	fin[1] = qaws_field_view_make(dparams, M, QAWS_FIELD_PARAMETER, 1);
 	vin[0] = ref_views(&fin[0], 1);
 	vin[1] = ref_views(&fin[1], 1);
 	ins[0] = &vin[0];
 	ins[1] = &vin[1];
-	fout[0] = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, tan, N, dim);
-	fout[1] = qaws_field_view_make(QAWS_FIELD_KNOTS, tan + nq, KC, 1);
+	fout[0] = qaws_field_view_make(tan, N, QAWS_FIELD_CONTROL_POINTS, dim);
+	fout[1] = qaws_field_view_make(tan + nq, KC, QAWS_FIELD_KNOTS, 1);
 	vout = ref_views(fout, 2);
 	outs[0] = &vout;
-	TEST_ASSERT_STATUS(qaws_diff_map_tangent(map, NULL, ins, nin, outs, 1));
+	TEST_ASSERT_STATUS(qaws_diff_map_tangent(outs, map, ins, nin, 1, NULL));
 
-	fout[0] = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, wts, N, dim);
-	fout[1] = qaws_field_view_make(QAWS_FIELD_KNOTS, wts + nq, KC, 1);
+	fout[0] = qaws_field_view_make(wts, N, QAWS_FIELD_CONTROL_POINTS, dim);
+	fout[1] = qaws_field_view_make(wts + nq, KC, QAWS_FIELD_KNOTS, 1);
 	outs_c[0] = &vout;
 	memset(bdata, 0, sizeof(bdata));
 	memset(bparams, 0, sizeof(bparams));
-	fin[0] = qaws_field_view_make(QAWS_FIELD_POINTS, bdata, M, dim);
-	fin[1] = qaws_field_view_make(QAWS_FIELD_PARAMETER, bparams, M, 1);
+	fin[0] = qaws_field_view_make(bdata, M, QAWS_FIELD_POINTS, dim);
+	fin[1] = qaws_field_view_make(bparams, M, QAWS_FIELD_PARAMETER, 1);
 	ins_m[0] = &vin[0];
 	ins_m[1] = &vin[1];
-	TEST_ASSERT_STATUS(qaws_diff_map_adjoint(map, NULL, outs_c, 1, ins_m, nin));
+	TEST_ASSERT_STATUS(qaws_diff_map_adjoint(ins_m, map, outs_c, 1, nin, NULL));
 	if (with_params)
 	{
 		ea = fmax(ref_max_err(bdata, ref_fit3_adjoint_points, M * dim), ref_max_err(bparams, ref_fit3_adjoint_parameters, M));
@@ -1029,16 +1029,16 @@ int test_55_diff_maps_main(void)
 		qaws_curve *l = NULL, *r = NULL;
 		qaws_diff_map* map = NULL;
 		qaws_scalar pdot = 1;
-		qaws_field_view pv = qaws_field_view_make(QAWS_FIELD_PARAMETER, &pdot, 1, 1);
+		qaws_field_view pv = qaws_field_view_make(&pdot, 1, QAWS_FIELD_PARAMETER, 1);
 		qaws_diff_views pvs, empty;
 		qaws_diff_views const* ins[2];
 		qaws_diff_views* outs[2];
 		pvs.fields = &pv; pvs.field_count = 1; pvs.children = NULL; pvs.child_count = 0;
 		empty.fields = NULL; empty.field_count = 0; empty.children = NULL; empty.child_count = 0;
-		qaws_curve_split_diff(c[0], (qaws_scalar)1.7, &l, &r, &map);
+		qaws_curve_split_diff(&l, &r, &map, c[0], (qaws_scalar)1.7);
 		ins[0] = NULL; ins[1] = &pvs;
 		outs[0] = &empty; outs[1] = &empty;
-		TEST_ASSERT(qaws_diff_map_tangent(map, NULL, ins, 2, outs, 2) == QAWS_STATUS_UNSUPPORTED_OPERATION,
+		TEST_ASSERT(qaws_diff_map_tangent(outs, map, ins, 2, 2, NULL) == QAWS_STATUS_UNSUPPORTED_OPERATION,
 			"B-spline split parameter tangent is refused");
 		qaws_diff_map_destroy(map);
 		qaws_curve_destroy(l);

@@ -54,7 +54,7 @@ static qaws_status create_bezier(family const* f, qaws_scalar const* const* p, q
 	d.degree = f->counts[0] - 1;
 	d.control_points = p[0];
 	d.control_point_count = f->counts[0];
-	return qaws_curve_create_bezier(&d, out);
+	return qaws_curve_create_bezier(out, &d);
 }
 
 static qaws_status create_bspline(family const* f, qaws_scalar const* const* p, qaws_curve** out)
@@ -67,7 +67,7 @@ static qaws_status create_bspline(family const* f, qaws_scalar const* const* p, 
 	d.control_point_count = f->counts[0];
 	d.knots = f->knots;
 	d.knot_count = f->knot_count;
-	return qaws_curve_create_bspline(&d, out);
+	return qaws_curve_create_bspline(out, &d);
 }
 
 static qaws_status create_bspline_knots(family const* f, qaws_scalar const* const* p, qaws_curve** out)
@@ -80,7 +80,7 @@ static qaws_status create_bspline_knots(family const* f, qaws_scalar const* cons
 	d.control_point_count = f->counts[0];
 	d.knots = p[1];
 	d.knot_count = f->counts[1];
-	return qaws_curve_create_bspline(&d, out);
+	return qaws_curve_create_bspline(out, &d);
 }
 
 static qaws_status create_hermite(family const* f, qaws_scalar const* const* p, qaws_curve** out)
@@ -92,7 +92,7 @@ static qaws_status create_hermite(family const* f, qaws_scalar const* const* p, 
 	d.derivatives = p[1];
 	d.point_count = f->counts[0];
 	d.derivative_count = f->counts[1];
-	return qaws_curve_create_hermite(&d, out);
+	return qaws_curve_create_hermite(out, &d);
 }
 
 static qaws_status create_polynomial(family const* f, qaws_scalar const* const* p, qaws_curve** out)
@@ -104,7 +104,7 @@ static qaws_status create_polynomial(family const* f, qaws_scalar const* const* 
 	d.coefficient_count = f->counts[0];
 	d.t_min = f->t_min;
 	d.t_max = f->t_max;
-	return qaws_curve_create_polynomial(&d, out);
+	return qaws_curve_create_polynomial(out, &d);
 }
 
 static qaws_status create_nurbs(family const* f, qaws_scalar const* const* p, qaws_curve** out)
@@ -119,7 +119,7 @@ static qaws_status create_nurbs(family const* f, qaws_scalar const* const* p, qa
 	d.knot_count = f->knot_count;
 	d.weights = p[1];
 	d.weight_count = f->counts[1];
-	return qaws_curve_create_nurbs(&d, out);
+	return qaws_curve_create_nurbs(out, &d);
 }
 
 static qaws_status create_nurbs_knots(family const* f, qaws_scalar const* const* p, qaws_curve** out)
@@ -134,7 +134,7 @@ static qaws_status create_nurbs_knots(family const* f, qaws_scalar const* const*
 	d.weight_count = f->counts[1];
 	d.knots = p[2];
 	d.knot_count = f->counts[2];
-	return qaws_curve_create_nurbs(&d, out);
+	return qaws_curve_create_nurbs(out, &d);
 }
 
 static qaws_status create_catmull_rom(family const* f, qaws_scalar const* const* p, qaws_curve** out)
@@ -146,7 +146,7 @@ static qaws_status create_catmull_rom(family const* f, qaws_scalar const* const*
 	d.control_point_count = f->counts[0];
 	d.parameterization = f->cr_param;
 	d.closed = f->cr_closed;
-	return qaws_curve_create_catmull_rom(&d, out);
+	return qaws_curve_create_catmull_rom(out, &d);
 }
 
 static qaws_status create_yuksel(family const* f, qaws_scalar const* const* p, qaws_curve** out)
@@ -158,7 +158,7 @@ static qaws_status create_yuksel(family const* f, qaws_scalar const* const* p, q
 	d.control_point_count = f->counts[0];
 	d.mode = QAWS_YUKSEL_MODE_BEZIER;
 	d.closed = f->cr_closed;
-	return qaws_curve_create_yuksel(&d, out);
+	return qaws_curve_create_yuksel(out, &d);
 }
 
 static qaws_status create_rational_bezier(family const* f, qaws_scalar const* const* p, qaws_curve** out)
@@ -170,7 +170,7 @@ static qaws_status create_rational_bezier(family const* f, qaws_scalar const* co
 	d.control_point_count = f->counts[0];
 	d.weights = p[1];
 	d.weight_count = f->counts[1];
-	return qaws_curve_create_rational_bezier(&d, out);
+	return qaws_curve_create_rational_bezier(out, &d);
 }
 
 /* The length is the domain t_max; the curve at fixed s does not depend on it. */
@@ -184,7 +184,7 @@ static qaws_status create_clothoid(family const* f, qaws_scalar const* const* p,
 	d.start_curvature = p[2][0];
 	d.end_curvature = p[2][0] + p[3][0] * f->t_max;
 	d.length = f->t_max;
-	return qaws_curve_create_clothoid(&d, out);
+	return qaws_curve_create_clothoid(out, &d);
 }
 
 static void make_families(family* fams, unsigned int* count)
@@ -448,7 +448,7 @@ static void family_views(family const* f, qaws_scalar (*storage)[MAX_PARAMS],
 {
 	unsigned int r;
 	for (r = 0; r < f->field_count; r++)
-		views_storage[r] = qaws_field_view_make(f->fields[r], storage[r], f->counts[r], FIELD_COMPS(f, r));
+		views_storage[r] = qaws_field_view_make(storage[r], f->counts[r], f->fields[r], FIELD_COMPS(f, r));
 	views->fields = views_storage;
 	views->field_count = f->field_count;
 	views->children = NULL;
@@ -470,16 +470,16 @@ static qaws_status eval_jet(family const* f, qaws_curve const* c, qaws_scalar t,
 	if (f->dim == 3)
 	{
 		if (tangent2)
-			return qaws_curve_eval_batch_tangent2_3d(NULL, c, &t, &t_dot, 1, 0xF, tangent_views, primal, tangent, tangent2);
-		return qaws_curve_eval_tangent_3d(NULL, c, t, t_dot, 0xF, tangent_views, primal, tangent);
+			return qaws_curve_eval_batch_tangent2_3d(primal, tangent, tangent2, c, &t, &t_dot, tangent_views, 1, 0xF, NULL);
+		return qaws_curve_eval_tangent_3d(primal, tangent, c, tangent_views, t, t_dot, 0xF, NULL);
 	}
 	else
 	{
 		qaws_curve_jet_2d p2, t2, tt2;
 		if (tangent2)
-			st = qaws_curve_eval_batch_tangent2_2d(NULL, c, &t, &t_dot, 1, 0xF, tangent_views, &p2, &t2, &tt2);
+			st = qaws_curve_eval_batch_tangent2_2d(&p2, &t2, &tt2, c, &t, &t_dot, tangent_views, 1, 0xF, NULL);
 		else
-			st = qaws_curve_eval_tangent_2d(NULL, c, t, t_dot, 0xF, tangent_views, &p2, &t2);
+			st = qaws_curve_eval_tangent_2d(&p2, &t2, c, tangent_views, t, t_dot, 0xF, NULL);
 		for (k = 0; k < 4; k++)
 		{
 			if (primal) { primal->d[k].x = p2.d[k].x; primal->d[k].y = p2.d[k].y; primal->d[k].z = 0; }
@@ -518,13 +518,13 @@ static void check_primal(family const* f, qaws_curve const* c)
 		if (f->dim == 3)
 		{
 			qaws_eval_result_3d r;
-			qaws_curve_evaluate_3d(c, t, 0xF, &r);
+			qaws_curve_evaluate_3d(&r, c, t, 0xF);
 			ref.d[0] = r.position; ref.d[1] = r.d1; ref.d[2] = r.d2; ref.d[3] = r.d3;
 		}
 		else
 		{
 			qaws_eval_result_2d r;
-			qaws_curve_evaluate_2d(c, t, 0xF, &r);
+			qaws_curve_evaluate_2d(&r, c, t, 0xF);
 			ref.d[0].x = r.position.x; ref.d[0].y = r.position.y;
 			ref.d[1].x = r.d1.x; ref.d[1].y = r.d1.y;
 			ref.d[2].x = r.d2.x; ref.d[2].y = r.d2.y;
@@ -611,10 +611,10 @@ static qaws_status run_adjoint(family const* f, qaws_curve const* c, qaws_diff_a
 	memset(tbar, 0, sizeof(qaws_scalar) * SAMPLE_COUNT);
 	family_views(f, pbar, vs, &views);
 	if (f->dim == 3)
-		return qaws_curve_eval_batch_adjoint_3d(&ctx, c, ts, SAMPLE_COUNT, 0xF,
-			(qaws_curve_jet_3d const*)ybar, &views, tbar);
-	return qaws_curve_eval_batch_adjoint_2d(&ctx, c, ts, SAMPLE_COUNT, 0xF,
-		(qaws_curve_jet_2d const*)ybar, &views, tbar);
+		return qaws_curve_eval_batch_adjoint_3d(&views, tbar, c, ts, (qaws_curve_jet_3d const*)ybar,
+			SAMPLE_COUNT, 0xF, &ctx);
+	return qaws_curve_eval_batch_adjoint_2d(&views, tbar, c, ts, (qaws_curve_jet_2d const*)ybar,
+		SAMPLE_COUNT, 0xF, &ctx);
 }
 
 static void check_adjoint_identity(family const* f, qaws_curve const* c)
@@ -642,9 +642,9 @@ static void check_adjoint_identity(family const* f, qaws_curve const* c)
 	family_views(f, dir, vs, &views);
 
 	if (f->dim == 3)
-		st = qaws_curve_eval_batch_tangent_3d(NULL, c, ts, tdots, SAMPLE_COUNT, 0xF, &views, NULL, tan3);
+		st = qaws_curve_eval_batch_tangent_3d(NULL, tan3, c, ts, tdots, &views, SAMPLE_COUNT, 0xF, NULL);
 	else
-		st = qaws_curve_eval_batch_tangent_2d(NULL, c, ts, tdots, SAMPLE_COUNT, 0xF, &views, NULL, tan2);
+		st = qaws_curve_eval_batch_tangent_2d(NULL, tan2, c, ts, tdots, &views, SAMPLE_COUNT, 0xF, NULL);
 	TEST_ASSERT_STATUS(st);
 
 	for (i = 0; i < SAMPLE_COUNT; i++)
@@ -772,7 +772,7 @@ static qaws_curve* make_bspline(void)
 	d.control_point_count = 7;
 	d.knots = knots;
 	d.knot_count = 11;
-	qaws_curve_create_bspline(&d, &c);
+	qaws_curve_create_bspline(&c, &d);
 	return c;
 }
 
@@ -798,20 +798,20 @@ static void test_masks(void)
 	views.children = NULL;
 	views.child_count = 0;
 
-	v = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, dir, 7, 3);
+	v = qaws_field_view_make(dir, 7, QAWS_FIELD_CONTROL_POINTS, 3);
 	v.active = active;
-	qaws_curve_eval_tangent_3d(NULL, c, t, 0, 0xF, &views, &p, &tg_masked);
+	qaws_curve_eval_tangent_3d(&p, &tg_masked, c, &views, t, 0, 0xF, NULL);
 
-	v = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, dir_zeroed, 7, 3);
-	qaws_curve_eval_tangent_3d(NULL, c, t, 0, 0xF, &views, &p, &tg_ref);
+	v = qaws_field_view_make(dir_zeroed, 7, QAWS_FIELD_CONTROL_POINTS, 3);
+	qaws_curve_eval_tangent_3d(&p, &tg_ref, c, &views, t, 0, 0xF, NULL);
 	TEST_ASSERT(jet_close(&tg_masked, &tg_ref, 1e-6), "inactive element contributes no tangent");
 
 	memset(pbar, 0, sizeof(pbar));
-	v = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, pbar, 7, 3);
+	v = qaws_field_view_make(pbar, 7, QAWS_FIELD_CONTROL_POINTS, 3);
 	v.active = active;
 	v.component_mask = 1u | 4u; /* x and z only */
 	diff_rand_jet3(&ybar);
-	qaws_curve_eval_adjoint_3d(NULL, c, t, 0xF, &ybar, &views, NULL);
+	qaws_curve_eval_adjoint_3d(&views, NULL, c, &ybar, t, 0xF, NULL);
 	for (i = 0; i < 3; i++)
 		if (pbar[6 + i] != 0)
 			untouched = 0;
@@ -835,7 +835,7 @@ static void test_support(void)
 	for (i = 0; i < 5; i++)
 	{
 		qaws_scalar sum = 0;
-		TEST_ASSERT_STATUS(qaws_curve_local_support(c, ts[i], 1, &s));
+		TEST_ASSERT_STATUS(qaws_curve_local_support(&s, c, ts[i], 1));
 		for (j = 0; j < s.ranges[0].count; j++)
 			sum += s.weights[0][0][j];
 		if (!approx_eq_loose(sum, 1))
@@ -844,15 +844,15 @@ static void test_support(void)
 	TEST_ASSERT(partition, "basis weights form a partition of unity");
 	TEST_ASSERT(s.kind == QAWS_SUPPORT_LOCAL && s.ranges[0].count == 4, "cubic B-spline support is 4 local points");
 
-	TEST_ASSERT(qaws_curve_build_support_index(c, ts, 5, QAWS_FIELD_CONTROL_POINTS,
-		offsets, 8, NULL, 0, &entries) == QAWS_STATUS_BUFFER_TOO_SMALL, "size query");
+	TEST_ASSERT(qaws_curve_build_support_index(offsets, NULL, &entries, c,
+		ts, 5, 8, 0, QAWS_FIELD_CONTROL_POINTS) == QAWS_STATUS_BUFFER_TOO_SMALL, "size query");
 	TEST_ASSERT(entries == 20, "support index entry count");
-	TEST_ASSERT_STATUS(qaws_curve_build_support_index(c, ts, 5, QAWS_FIELD_CONTROL_POINTS,
-		offsets, 8, samples, 64, &entries));
+	TEST_ASSERT_STATUS(qaws_curve_build_support_index(offsets, samples, &entries, c,
+		ts, 5, 8, 64, QAWS_FIELD_CONTROL_POINTS));
 
 	for (i = 0; i < 5; i++)
 	{
-		qaws_curve_local_support(c, ts[i], 0, &s);
+		qaws_curve_local_support(&s, c, ts[i], 0);
 		for (j = 0; j < s.ranges[0].count; j++)
 		{
 			int found = 0;
@@ -879,10 +879,10 @@ static void test_report(void)
 	qaws_diff_report_reset(&report);
 	ctx.report = &report;
 
-	qaws_curve_eval_tangent_3d(&ctx, c, (qaws_scalar)0.8, 0, 0xF, NULL, &p, &tg);
+	qaws_curve_eval_tangent_3d(&p, &tg, c, NULL, (qaws_scalar)0.8, 0, 0xF, &ctx);
 	TEST_ASSERT(report.validity == QAWS_DIFF_VALID, "parameter-only tangent is valid");
 
-	qaws_curve_eval_tangent_3d(&ctx, c, (qaws_scalar)1.25, 1, 0xF, NULL, &p, &tg);
+	qaws_curve_eval_tangent_3d(&p, &tg, c, NULL, (qaws_scalar)1.25, 1, 0xF, &ctx);
 	TEST_ASSERT(report.validity == QAWS_DIFF_AT_BOUNDARY, "coordinate tangent at a knot is one-sided");
 	TEST_ASSERT(report.worst_index == 0, "worst index recorded");
 	TEST_ASSERT((report.frozen_used & QAWS_FREEZE_SPAN) != 0, "span selection recorded as frozen state");
@@ -899,17 +899,17 @@ static void test_schema(void)
 	qaws_scalar cps[21];
 	unsigned int got = 0;
 
-	TEST_ASSERT_STATUS(qaws_curve_describe_fields(c, fields, 4, &n));
+	TEST_ASSERT_STATUS(qaws_curve_describe_fields(fields, &n, c, 4));
 	TEST_ASSERT(n == 2, "B-spline exposes control points and knots");
 	TEST_ASSERT(fields[0].field == QAWS_FIELD_CONTROL_POINTS && fields[0].domain == QAWS_DOMAIN_POSITION &&
 		fields[0].count == 7 && fields[0].value_type == QAWS_VALUE_VEC3, "control point schema");
 	TEST_ASSERT(fields[1].field == QAWS_FIELD_KNOTS && fields[1].constraint == QAWS_CONSTRAINT_MONOTONIC &&
 		(fields[1].capabilities & QAWS_CAP_ADJOINT) && !(fields[1].capabilities & QAWS_CAP_LINEAR),
 		"knots are monotonic and differentiable (non-linear)");
-	TEST_ASSERT(qaws_curve_describe_fields(c, fields, 1, &n) == QAWS_STATUS_BUFFER_TOO_SMALL && n == 2,
+	TEST_ASSERT(qaws_curve_describe_fields(fields, &n, c, 1) == QAWS_STATUS_BUFFER_TOO_SMALL && n == 2,
 		"describe reports required capacity");
 
-	TEST_ASSERT_STATUS(qaws_curve_read_field(c, QAWS_FIELD_CONTROL_POINTS, cps, 21, &got));
+	TEST_ASSERT_STATUS(qaws_curve_read_field(cps, &got, c, 21, QAWS_FIELD_CONTROL_POINTS));
 	TEST_ASSERT(got == 21 && cps[3] == 1 && cps[4] == 2, "read_field returns primal values");
 	TEST_ASSERT(qaws_curve_get_coordinate_kind(c) == QAWS_COORDINATE_PARAMETRIC, "parametric coordinate");
 	qaws_curve_destroy(c);
@@ -927,10 +927,10 @@ static void test_schema(void)
 		d.dimension = QAWS_DIMENSION_2D;
 		d.segments = &seg;
 		d.segment_count = 1;
-		qaws_curve_create_arc(&d, &cl);
+		qaws_curve_create_arc(&cl, &d);
 		TEST_ASSERT(qaws_curve_get_diff_capabilities(cl) == 0, "no capabilities without rules");
 		TEST_ASSERT(qaws_curve_get_diff_class(cl) == QAWS_DIFF_UNSUPPORTED, "unsupported class");
-		TEST_ASSERT(qaws_curve_eval_tangent_2d(NULL, cl, (qaws_scalar)0.5, 0, 1, NULL, &p, &tg)
+		TEST_ASSERT(qaws_curve_eval_tangent_2d(&p, &tg, cl, NULL, (qaws_scalar)0.5, 0, 1, NULL)
 			== QAWS_STATUS_UNSUPPORTED_OPERATION, "tangent refused, never approximated");
 		qaws_curve_destroy(cl);
 	}
@@ -962,16 +962,16 @@ static void test_unit_tangent_composition(void)
 		double lhs, rhs;
 
 		diff_rand_fill(dir, 21);
-		v = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, dir, 7, 3);
-		qaws_curve_eval_tangent_3d(NULL, c, t, tdot, QAWS_EVAL_FLAG_D1, &views, &p, &tg);
+		v = qaws_field_view_make(dir, 7, QAWS_FIELD_CONTROL_POINTS, 3);
+		qaws_curve_eval_tangent_3d(&p, &tg, c, &views, t, tdot, QAWS_EVAL_FLAG_D1, NULL);
 		T = qaws_dual3_normalize(qaws_dual3_make(p.d[1], tg.d[1], qaws_v3_zero()));
 		lhs = qaws_v3_dot(Tbar, T.t);
 
 		memset(&ybar, 0, sizeof(ybar));
 		ybar.d[1] = qaws_normalize_adjoint(p.d[1], Tbar);
 		memset(pbar, 0, sizeof(pbar));
-		v = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, pbar, 7, 3);
-		qaws_curve_eval_adjoint_3d(NULL, c, t, QAWS_EVAL_FLAG_D1, &ybar, &views, &tbar);
+		v = qaws_field_view_make(pbar, 7, QAWS_FIELD_CONTROL_POINTS, 3);
+		qaws_curve_eval_adjoint_3d(&views, &tbar, c, &ybar, t, QAWS_EVAL_FLAG_D1, NULL);
 		rhs = diff_dot(pbar, dir, 21) + (double)tbar * tdot;
 
 		if (!diff_close(lhs, rhs, DIFF_TOL))
@@ -1006,7 +1006,7 @@ static qaws_curve* composite_build(composite_params const* p)
 	bd.degree = 3;
 	bd.control_points = p->bez;
 	bd.control_point_count = 4;
-	qaws_curve_create_bezier(&bd, &segs[0]);
+	qaws_curve_create_bezier(&segs[0], &bd);
 
 	memset(&nd, 0, sizeof(nd));
 	nd.dimension = QAWS_DIMENSION_3D;
@@ -1017,12 +1017,12 @@ static qaws_curve* composite_build(composite_params const* p)
 	nd.knot_count = 11;
 	nd.weights = p->w;
 	nd.weight_count = 7;
-	qaws_curve_create_nurbs(&nd, &segs[1]);
+	qaws_curve_create_nurbs(&segs[1], &nd);
 
 	cd.dimension = QAWS_DIMENSION_3D;
 	cd.segments = segs;
 	cd.segment_count = 2;
-	qaws_curve_create_composite(&cd, &c);
+	qaws_curve_create_composite(&c, &cd);
 	return c;
 }
 
@@ -1035,9 +1035,9 @@ typedef struct composite_storage
 
 static void composite_bind(composite_storage* s)
 {
-	s->v0 = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, s->data.bez, 4, 3);
-	s->v1[0] = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, s->data.nrb, 7, 3);
-	s->v1[1] = qaws_field_view_make(QAWS_FIELD_WEIGHTS, s->data.w, 7, 1);
+	s->v0 = qaws_field_view_make(s->data.bez, 4, QAWS_FIELD_CONTROL_POINTS, 3);
+	s->v1[0] = qaws_field_view_make(s->data.nrb, 7, QAWS_FIELD_CONTROL_POINTS, 3);
+	s->v1[1] = qaws_field_view_make(s->data.w, 7, QAWS_FIELD_WEIGHTS, 1);
 	s->child[0].fields = &s->v0;
 	s->child[0].field_count = 1;
 	s->child[0].children = NULL;
@@ -1074,7 +1074,7 @@ static void test_composite(void)
 		base.w[n] = (qaws_scalar)1.2 + (qaws_scalar)0.5 * diff_rand();
 	c = composite_build(&base);
 	TEST_ASSERT(c != NULL, "composite built");
-	TEST_ASSERT_STATUS(qaws_curve_diff_children(c, kids, 2, &nk));
+	TEST_ASSERT_STATUS(qaws_curve_diff_children(kids, &nk, c, 2));
 	TEST_ASSERT(nk == 2 && kids[0].curve && kids[1].curve, "composite exposes its segments as children");
 
 	for (i = 0; i < 8; i++)
@@ -1087,13 +1087,13 @@ static void test_composite(void)
 		qaws_curve *cp, *cm;
 		double lhs = 0, rhs;
 
-		qaws_curve_evaluate_3d(c, t, 0xF, &r);
+		qaws_curve_evaluate_3d(&r, c, t, 0xF);
 		memset(&dir, 0, sizeof(dir));
 		diff_rand_fill(dir.data.bez, 12);
 		diff_rand_fill(dir.data.nrb, 21);
 		diff_rand_fill(dir.data.w, 7);
 		composite_bind(&dir);
-		TEST_ASSERT_STATUS(qaws_curve_eval_batch_tangent2_3d(NULL, c, &t, &tdot, 1, 0xF, &dir.views, &p, &tg, &tt));
+		TEST_ASSERT_STATUS(qaws_curve_eval_batch_tangent2_3d(&p, &tg, &tt, c, &t, &tdot, &dir.views, 1, 0xF, NULL));
 		if (!diff_close(p.d[0].x, r.position.x, 1e-5) || !diff_close(p.d[1].y, r.d1.y, 1e-5) ||
 		    !diff_close(p.d[2].z, r.d2.z, 1e-5) || !diff_close(p.d[3].x, r.d3.x, 1e-4))
 			ok_jet = 0;
@@ -1105,8 +1105,8 @@ static void test_composite(void)
 		cm = composite_build(&pm);
 		{
 			qaws_curve_jet_3d jp, jm, tp, tm;
-			qaws_curve_eval_tangent_3d(NULL, cp, (qaws_scalar)(t + h * tdot), tdot, 0xF, &dir.views, &jp, &tp);
-			qaws_curve_eval_tangent_3d(NULL, cm, (qaws_scalar)(t - h * tdot), tdot, 0xF, &dir.views, &jm, &tm);
+			qaws_curve_eval_tangent_3d(&jp, &tp, cp, &dir.views, (qaws_scalar)(t + h * tdot), tdot, 0xF, NULL);
+			qaws_curve_eval_tangent_3d(&jm, &tm, cm, &dir.views, (qaws_scalar)(t - h * tdot), tdot, 0xF, NULL);
 			for (k = 0; k < 4; k++)
 			{
 				if (!diff_close((jp.d[k].x - jm.d[k].x) / (2 * h), tg.d[k].x, DIFF_TOL * 100) ||
@@ -1123,7 +1123,7 @@ static void test_composite(void)
 		lhs = diff_jet3_dot(&ybar, &tg, 0xF);
 		memset(&bar, 0, sizeof(bar));
 		composite_bind(&bar);
-		TEST_ASSERT_STATUS(qaws_curve_eval_adjoint_3d(NULL, c, t, 0xF, &ybar, &bar.views, &tbar));
+		TEST_ASSERT_STATUS(qaws_curve_eval_adjoint_3d(&bar.views, &tbar, c, &ybar, t, 0xF, NULL));
 		rhs = composite_dot(&bar.data, &dir.data) + (double)tbar * tdot;
 		if (!diff_close(lhs, rhs, DIFF_TOL * 10))
 			ok_adj = 0;
@@ -1247,7 +1247,7 @@ static void test_reference_knots(int nurbs)
 		d.weight_count = 7;
 		d.knots = knots;
 		d.knot_count = 11;
-		qaws_curve_create_nurbs(&d, &c);
+		qaws_curve_create_nurbs(&c, &d);
 	}
 	else
 	{
@@ -1259,7 +1259,7 @@ static void test_reference_knots(int nurbs)
 		d.control_point_count = 7;
 		d.knots = knots;
 		d.knot_count = 11;
-		qaws_curve_create_bspline(&d, &c);
+		qaws_curve_create_bspline(&c, &d);
 	}
 
 	for (i = 0; i < 3; i++)
@@ -1267,20 +1267,20 @@ static void test_reference_knots(int nurbs)
 		qaws_scalar t = (qaws_scalar)ts[i], tdot = (qaws_scalar)tdots[i], tbar = 0;
 		qaws_curve_jet_3d p, tg, tt;
 		unsigned int r = 0;
-		fv[r++] = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, dir, 7, dim);
+		fv[r++] = qaws_field_view_make(dir, 7, QAWS_FIELD_CONTROL_POINTS, dim);
 		if (nurbs)
-			fv[r++] = qaws_field_view_make(QAWS_FIELD_WEIGHTS, dir + np, 7, 1);
-		fv[r++] = qaws_field_view_make(QAWS_FIELD_KNOTS, dir + np + nw, 11, 1);
+			fv[r++] = qaws_field_view_make(dir + np, 7, QAWS_FIELD_WEIGHTS, 1);
+		fv[r++] = qaws_field_view_make(dir + np + nw, 11, QAWS_FIELD_KNOTS, 1);
 		views.fields = fv;
 		views.field_count = r;
 		views.children = NULL;
 		views.child_count = 0;
 		if (nurbs)
-			TEST_ASSERT_STATUS(qaws_curve_eval_batch_tangent2_3d(NULL, c, &t, &tdot, 1, 0x7, &views, &p, &tg, &tt));
+			TEST_ASSERT_STATUS(qaws_curve_eval_batch_tangent2_3d(&p, &tg, &tt, c, &t, &tdot, &views, 1, 0x7, NULL));
 		else
 		{
 			qaws_curve_jet_2d p2, tg2, tt2;
-			TEST_ASSERT_STATUS(qaws_curve_eval_batch_tangent2_2d(NULL, c, &t, &tdot, 1, 0x7, &views, &p2, &tg2, &tt2));
+			TEST_ASSERT_STATUS(qaws_curve_eval_batch_tangent2_2d(&p2, &tg2, &tt2, c, &t, &tdot, &views, 1, 0x7, NULL));
 			ref_jet_2d_to_3d(&p2, &p);
 			ref_jet_2d_to_3d(&tg2, &tg);
 			ref_jet_2d_to_3d(&tt2, &tt);
@@ -1295,10 +1295,10 @@ static void test_reference_knots(int nurbs)
 		/* ybar = (((3 ch + 2 c + i + 1) mod 5) - 2) / 5 for channel ch, component c */
 		memset(bar, 0, sizeof(bar));
 		r = 0;
-		fv[r++] = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, bar, 7, dim);
+		fv[r++] = qaws_field_view_make(bar, 7, QAWS_FIELD_CONTROL_POINTS, dim);
 		if (nurbs)
-			fv[r++] = qaws_field_view_make(QAWS_FIELD_WEIGHTS, bar + np, 7, 1);
-		fv[r++] = qaws_field_view_make(QAWS_FIELD_KNOTS, bar + np + nw, 11, 1);
+			fv[r++] = qaws_field_view_make(bar + np, 7, QAWS_FIELD_WEIGHTS, 1);
+		fv[r++] = qaws_field_view_make(bar + np + nw, 11, QAWS_FIELD_KNOTS, 1);
 		{
 			qaws_curve_jet_3d y3;
 			qaws_curve_jet_2d y2;
@@ -1318,9 +1318,9 @@ static void test_reference_knots(int nurbs)
 			y3.channels = 0x7;
 			y2.channels = 0x7;
 			if (nurbs)
-				TEST_ASSERT_STATUS(qaws_curve_eval_adjoint_3d(NULL, c, t, 0x7, &y3, &views, &tbar));
+				TEST_ASSERT_STATUS(qaws_curve_eval_adjoint_3d(&views, &tbar, c, &y3, t, 0x7, NULL));
 			else
-				TEST_ASSERT_STATUS(qaws_curve_eval_adjoint_2d(NULL, c, t, 0x7, &y2, &views, &tbar));
+				TEST_ASSERT_STATUS(qaws_curve_eval_adjoint_2d(&views, &tbar, c, &y2, t, 0x7, NULL));
 		}
 		for (n = 0; n + 1 < nall; n++)
 			a[n] = bar[n];

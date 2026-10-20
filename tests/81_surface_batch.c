@@ -42,7 +42,7 @@ static qaws_surface* sbt_paraboloid(double c)
 	d.control_points = cp;
 	d.u_point_count = 3;
 	d.v_point_count = 3;
-	qaws_surface_create_bezier(&d, &s);
+	qaws_surface_create_bezier(&s, &d);
 	return s;
 }
 
@@ -69,7 +69,7 @@ static qaws_curve* sbt_segment(double const* p, double const* q)
 	d.degree = 1;
 	d.control_points = cp;
 	d.control_point_count = 2;
-	qaws_curve_create_bezier(&d, &c);
+	qaws_curve_create_bezier(&c, &d);
 	return c;
 }
 
@@ -152,7 +152,7 @@ static void test_lines(void)
 	d.surfaces = (qaws_surface const* const*)sf;
 	d.surface_count = SBT_SURF;
 	t0 = sbt_now();
-	s = qaws_curve_surface_batch_find_intersections(&d, h, 4096, &n, &st);
+	s = qaws_curve_surface_batch_find_intersections(h, &n, &st, 4096, &d);
 	tb = sbt_now() - t0;
 	for (i = 0; i < SBT_LINES; i++)
 		for (k = 0; k < SBT_SURF; k++)
@@ -186,7 +186,7 @@ static void test_lines(void)
 		{
 			qaws_surface_curve_intersection buf[16];
 			unsigned int m = 0;
-			qaws_surface_find_curve_intersections(sf[k], cs[i], buf, 16, &m);
+			qaws_surface_find_curve_intersections(buf, &m, sf[k], cs[i], 16);
 			np += m;
 		}
 	tp = sbt_now() - t0;
@@ -226,20 +226,20 @@ static void test_cubics(void)
 		bd.control_points = cp;
 		bd.control_point_count = 4;
 		cs[i] = NULL;
-		qaws_curve_create_bezier(&bd, &cs[i]);
+		qaws_curve_create_bezier(&cs[i], &bd);
 	}
 	memset(&d, 0, sizeof(d));
 	d.curves = (qaws_curve const* const*)cs;
 	d.curve_count = SBT_CUBICS;
 	d.surfaces = (qaws_surface const* const*)sf;
 	d.surface_count = SBT_SURF;
-	qaws_curve_surface_batch_find_intersections(&d, h, 4096, &n, NULL);
+	qaws_curve_surface_batch_find_intersections(h, &n, NULL, 4096, &d);
 	for (i = 0; i < SBT_CUBICS; i++)
 		for (k = 0; k < SBT_SURF; k++)
 		{
 			qaws_surface_curve_intersection buf[16];
 			unsigned int m = 0, a;
-			qaws_surface_find_curve_intersections(sf[k], cs[i], buf, 16, &m);
+			qaws_surface_find_curve_intersections(buf, &m, sf[k], cs[i], 16);
 			for (a = 0; a < m && a < 16; a++)
 			{
 				total++;
@@ -285,7 +285,7 @@ static void test_exact(void)
 	for (k = 0; k < SBT_SURF; k++)
 	{
 		sf[k] = sbt_paraboloid(sbt_lift(k));
-		qaws_exact_surface_prepare(&ed, sf[k], &es[k], NULL);
+		qaws_exact_surface_prepare(&es[k], NULL, sf[k], &ed);
 	}
 	for (i = 0; i < SBT_EXACT_LINES; i++)
 	{
@@ -308,7 +308,7 @@ static void test_exact(void)
 				break;
 		}
 		cs[i] = sbt_segment(P[i], Q[i]);
-		qaws_exact_curve_prepare(&ed, cs[i], &ec[i], NULL);
+		qaws_exact_curve_prepare(&ec[i], NULL, cs[i], &ed);
 	}
 	memset(&d, 0, sizeof(d));
 	d.curves = (qaws_exact_curve const* const*)ec;
@@ -316,7 +316,7 @@ static void test_exact(void)
 	d.surfaces = (qaws_exact_surface const* const*)es;
 	d.surface_count = SBT_SURF;
 	t0 = sbt_now();
-	s = qaws_exact_curve_surface_batch_hits(&d, h, 1024, &n, &st);
+	s = qaws_exact_curve_surface_batch_hits(h, &n, &st, 1024, &d);
 	tb = sbt_now() - t0;
 	for (i = 0; i < SBT_EXACT_LINES; i++)
 		for (k = 0; k < SBT_SURF; k++)
@@ -339,7 +339,7 @@ static void test_exact(void)
 		for (k = 0; k < SBT_SURF; k++)
 		{
 			unsigned int m = 0;
-			qaws_exact_curve_surface_hits(ec[i], es[k], hp, 16, &m);
+			qaws_exact_curve_surface_hits(hp, &m, ec[i], es[k], 16);
 			np += m;
 		}
 	tp = sbt_now() - t0;
@@ -380,7 +380,7 @@ static qaws_surface* sbt_plane(double h, double s)
 	d.control_points = cp;
 	d.u_point_count = 2;
 	d.v_point_count = 2;
-	qaws_surface_create_bezier(&d, &out);
+	qaws_surface_create_bezier(&out, &d);
 	return out;
 }
 
@@ -416,7 +416,7 @@ static void test_ssi(void)
 	d.surface_count = SBT_SURF + SBT_PLANES;
 	d.families = fam;
 	t0 = sbt_now();
-	s = qaws_surface_batch_find_intersections(&d, cv, 256, &nc, pt, 1 << 16, &np, &st);
+	s = qaws_surface_batch_find_intersections(cv, &nc, pt, &np, &st, 256, 1 << 16, &d);
 	tb = sbt_now() - t0;
 	for (i = 0; i < SBT_SURF; i++)
 		for (k = 0; k < SBT_PLANES; k++)
@@ -484,7 +484,7 @@ static void test_ssi(void)
 				memset(&sd, 0, sizeof(sd));
 				sd.surface_a = sf[i];
 				sd.surface_b = sf[SBT_SURF + k];
-				qaws_surface_intersect(&sd, pc, 64, &n, pp, 1 << 14);
+				qaws_surface_intersect(pc, &n, pp, 64, 1 << 14, &sd);
 				pairs += n;
 			}
 		tp = sbt_now() - t0;
@@ -522,14 +522,14 @@ static void test_exact_ssi(void)
 	{
 		sf[k] = k < SBT_SURF ? sbt_paraboloid(sbt_lift(k)) : sbt_plane(ph[k - SBT_SURF], 0);
 		fam[k] = k >= SBT_SURF;
-		qaws_exact_surface_prepare(&ed, sf[k], &es[k], NULL);
+		qaws_exact_surface_prepare(&es[k], NULL, sf[k], &ed);
 	}
 	memset(&d, 0, sizeof(d));
 	d.surfaces = (qaws_exact_surface const* const*)es;
 	d.surface_count = SBT_SURF + SBT_EPLANES;
 	d.families = fam;
 	t0 = sbt_now();
-	s = qaws_exact_surface_batch_hits(&d, pts, 1 << 14, &np, br, 512, &nb, &st);
+	s = qaws_exact_surface_batch_hits(pts, &np, br, &nb, &st, 1 << 14, 512, &d);
 	tb = sbt_now() - t0;
 	for (i = 0; i < SBT_SURF; i++)
 		for (k = 0; k < SBT_EPLANES; k++)
@@ -565,7 +565,7 @@ static void test_exact_ssi(void)
 		for (k = 0; k < SBT_EPLANES; k++)
 		{
 			unsigned int n = 0, m = 0, c, bp = 0, bb = 0;
-			qaws_status s2 = qaws_exact_surface_surface_hits(es[i], es[SBT_SURF + k], 0, pp, 1 << 13, &n, pb, 64, &m);
+			qaws_status s2 = qaws_exact_surface_surface_hits(pp, &n, pb, &m, es[i], es[SBT_SURF + k], 1 << 13, 64, 0);
 			if (s2 != QAWS_STATUS_OK)
 				continue;
 			pair_points += n;
@@ -609,7 +609,7 @@ static void test_surface_sets(void)
 	d.surfaces = (qaws_surface const* const*)par;
 	d.surface_count = SBT_SURF;
 	d.flatness = (qaws_scalar)0.01;
-	qaws_surface_set_create(&d, &pset);
+	qaws_surface_set_create(&pset, &d);
 	for (f = 0; f < SBT_FRAMES; f++)
 	{
 		qaws_surface* pl[SBT_PLANES];
@@ -622,8 +622,8 @@ static void test_surface_sets(void)
 		qd.surfaces = (qaws_surface const* const*)pl;
 		qd.surface_count = SBT_PLANES;
 		qd.flatness = (qaws_scalar)0.01;
-		qaws_surface_set_create(&qd, &qset);
-		qaws_surface_set_find_intersections(pset, qset, cs1, 256, &n1, ps1, 1 << 15, &p1, NULL);
+		qaws_surface_set_create(&qset, &qd);
+		qaws_surface_set_find_intersections(cs1, &n1, ps1, &p1, NULL, pset, qset, 256, 1 << 15);
 		/* the one-shot call on everything, two families */
 		for (i = 0; i < SBT_SURF + SBT_PLANES; i++)
 		{
@@ -635,7 +635,7 @@ static void test_surface_sets(void)
 		qd.surface_count = SBT_SURF + SBT_PLANES;
 		qd.families = fam;
 		qd.flatness = (qaws_scalar)0.01;
-		qaws_surface_batch_find_intersections(&qd, cs2, 256, &n2, ps2, 1 << 15, &p2, NULL);
+		qaws_surface_batch_find_intersections(cs2, &n2, ps2, &p2, NULL, 256, 1 << 15, &qd);
 		same &= n1 == n2 && p1 == p2;
 		for (c = 0; c < n1 && c < n2 && same; c++)
 			same &= cs1[c].surface_a == cs2[c].surface_a && cs1[c].surface_b + SBT_SURF == cs2[c].surface_b && cs1[c].count == cs2[c].count
@@ -670,15 +670,15 @@ static void test_surface_sets(void)
 		cd.curves = (qaws_curve const* const*)ln;
 		cd.curve_count = 40;
 		cd.flatness = (qaws_scalar)0.01;
-		qaws_curve_set_create(&cd, &cset);
-		qaws_curve_set_find_surface_intersections(cset, pset, h1, 512, &n1, NULL);
+		qaws_curve_set_create(&cset, &cd);
+		qaws_curve_set_find_surface_intersections(h1, &n1, NULL, cset, pset, 512);
 		memset(&od, 0, sizeof(od));
 		od.curves = (qaws_curve const* const*)ln;
 		od.curve_count = 40;
 		od.surfaces = (qaws_surface const* const*)par;
 		od.surface_count = SBT_SURF;
 		od.flatness = (qaws_scalar)0.01;
-		qaws_curve_surface_batch_find_intersections(&od, h2, 512, &n2, NULL);
+		qaws_curve_surface_batch_find_intersections(h2, &n2, NULL, 512, &od);
 		same_cs = n1 == n2;
 		for (c = 0; c < n1 && c < n2; c++)
 			same_cs &= h1[c].curve == h2[c].curve && h1[c].surface == h2[c].surface && fabs(h1[c].t - h2[c].t) < 1e-12;
@@ -729,7 +729,7 @@ static void test_surface_closest(void)
 	d.points = pts;
 	d.point_count = SBT_CQ;
 	t0 = sbt_now();
-	qaws_surface_batch_find_closest(&d, out, &st);
+	qaws_surface_batch_find_closest(out, &st, &d);
 	tb = sbt_now() - t0;
 	for (i = 0; i < SBT_CQ; i++)
 	{
@@ -760,8 +760,8 @@ static void test_surface_closest(void)
 	memset(&sd, 0, sizeof(sd));
 	sd.surfaces = (qaws_surface const* const*)sf;
 	sd.surface_count = SBT_CS;
-	qaws_surface_set_create(&sd, &set);
-	qaws_surface_set_find_closest(set, pts, SBT_CQ, 0, outs, NULL);
+	qaws_surface_set_create(&set, &sd);
+	qaws_surface_set_find_closest(outs, NULL, set, pts, SBT_CQ, 0);
 	for (i = 0; i < SBT_CQ; i++)
 		same &= outs[i].surface == out[i].surface && fabs(outs[i].distance - out[i].distance) < 1e-12;
 	qaws_surface_set_destroy(set);
@@ -775,7 +775,7 @@ static void test_surface_closest(void)
 		for (k = 0; k < SBT_CS; k++)
 		{
 			qaws_scalar u = 0, v = 0;
-			if (qaws_surface_find_closest_point(sf[k], q, &u, &v, &c) == QAWS_STATUS_OK)
+			if (qaws_surface_find_closest_point(&u, &v, &c, sf[k], q) == QAWS_STATUS_OK)
 			{
 				double dd = sqrt((c.x - q.x) * (c.x - q.x) + (c.y - q.y) * (c.y - q.y) + (c.z - q.z) * (c.z - q.z));
 				if (dd < best)
@@ -820,7 +820,7 @@ static void test_exact_surface_closest(void)
 	qaws_exact_desc_default(&ed);
 	ed.space_exp2 = -16;
 	for (k = 0; k < n; k++)
-		qaws_exact_surface_prepare(&ed, sf[k], &es[k], NULL);
+		qaws_exact_surface_prepare(&es[k], NULL, sf[k], &ed);
 	for (i = 0; i < SBT_ECQ; i++)
 	{
 		pts[3 * i] = ldexp(nearbyint(ldexp(-1.1 + 2.2 * sbt_rand(), 10)), -10);
@@ -833,14 +833,14 @@ static void test_exact_surface_closest(void)
 	d.surfaces = (qaws_exact_surface const* const*)es;
 	d.surface_count = n;
 	t0 = sbt_now();
-	s = qaws_exact_surface_batch_closest(&d, pts, SBT_ECQ, eo, &st);
+	s = qaws_exact_surface_batch_closest(eo, &st, pts, SBT_ECQ, &d);
 	te = sbt_now() - t0;
 	memset(&fd, 0, sizeof(fd));
 	fd.surfaces = (qaws_surface const* const*)sf;
 	fd.surface_count = n;
 	fd.points = fpts;
 	fd.point_count = SBT_ECQ;
-	qaws_surface_batch_find_closest(&fd, fo, NULL);
+	qaws_surface_batch_find_closest(fo, NULL, &fd);
 	for (i = 0; i < SBT_ECQ; i++)
 	{
 		certified += eo[i].certified != 0;
@@ -862,7 +862,7 @@ static void test_exact_surface_closest(void)
 		planes[1] = es[SBT_SURF + 1];
 		d.surfaces = planes;
 		d.surface_count = 2;
-		s = qaws_exact_surface_batch_closest(&d, p, 1, &o, NULL);
+		s = qaws_exact_surface_batch_closest(&o, NULL, p, 1, &d);
 		TEST_ASSERT(s == QAWS_STATUS_OK && !o.certified && o.distance_lo <= 2.125 && o.distance_hi >= 2.125,
 			"a point midway between two planes: a tie, reported uncertified at the exact distance");
 	}
@@ -964,7 +964,7 @@ static void test_raycast(void)
 	d.directions = dir;
 	d.ray_count = SBT_RAYS;
 	t0 = sbt_now();
-	qaws_surface_batch_raycast(&d, h, &st);
+	qaws_surface_batch_raycast(h, &st, &d);
 	tb = sbt_now() - t0;
 	for (i = 0; i < SBT_RAYS; i++)
 	{
@@ -977,8 +977,8 @@ static void test_raycast(void)
 	memset(&sd, 0, sizeof(sd));
 	sd.surfaces = (qaws_surface const* const*)sf;
 	sd.surface_count = SBT_SURF + 1;
-	qaws_surface_set_create(&sd, &set);
-	qaws_surface_set_raycast(set, org, dir, SBT_RAYS, 0, hs, NULL);
+	qaws_surface_set_create(&set, &sd);
+	qaws_surface_set_raycast(hs, NULL, set, org, dir, SBT_RAYS, 0);
 	for (i = 0; i < SBT_RAYS; i++)
 		same &= hs[i].surface == h[i].surface && (h[i].surface == QAWS_CURVE_BATCH_NONE || fabs(hs[i].t - h[i].t) < 1e-12);
 	qaws_surface_set_destroy(set);
@@ -998,7 +998,7 @@ static void test_raycast(void)
 		{
 			qaws_surface_curve_intersection buf[8];
 			unsigned int m = 0, j;
-			qaws_surface_find_curve_intersections(sf[k], seg, buf, 8, &m);
+			qaws_surface_find_curve_intersections(buf, &m, sf[k], seg, 8);
 			for (j = 0; j < m && j < 8; j++)
 				if (10 * buf[j].t < best)
 					best = 10 * buf[j].t;
@@ -1040,7 +1040,7 @@ static void test_exact_raycast(void)
 	qaws_exact_desc_default(&ed);
 	ed.space_exp2 = -16;
 	for (k = 0; k <= SBT_SURF; k++)
-		qaws_exact_surface_prepare(&ed, sf[k], &es[k], NULL);
+		qaws_exact_surface_prepare(&es[k], NULL, sf[k], &ed);
 	for (i = 0; i < SBT_ERAYS; i++)
 		for (;;)
 		{
@@ -1064,7 +1064,7 @@ static void test_exact_raycast(void)
 	d.surfaces = (qaws_exact_surface const* const*)es;
 	d.surface_count = SBT_SURF + 1;
 	t0 = sbt_now();
-	s = qaws_exact_surface_batch_raycast(&d, p0, p1, SBT_ERAYS, 0, h, &st);
+	s = qaws_exact_surface_batch_raycast(h, &st, p0, p1, SBT_ERAYS, &d, 0);
 	tb = sbt_now() - t0;
 	for (i = 0; i < SBT_ERAYS; i++)
 	{
@@ -1085,7 +1085,7 @@ static void test_exact_raycast(void)
 		for (k = 0; k <= SBT_SURF; k++)
 		{
 			unsigned int n = 0, j;
-			qaws_exact_surface_line_hits(es[k], p0 + 3 * i, p1 + 3 * i, sh, 16, &n);
+			qaws_exact_surface_line_hits(sh, &n, es[k], p0 + 3 * i, p1 + 3 * i, 16);
 			for (j = 0; j < n && j < 16; j++)
 				if (sh[j].t_hi >= 0 && sh[j].t_lo < best)
 					best = sh[j].t_lo;
@@ -1122,8 +1122,8 @@ static void test_exact_raycast(void)
 		bd.control_points = cp;
 		bd.u_point_count = 12;
 		bd.v_point_count = 12;
-		qaws_surface_create_bspline(&bd, &hs);
-		qaws_exact_surface_prepare(&ed, hs, &ehs, NULL);
+		qaws_surface_create_bspline(&hs, &bd);
+		qaws_exact_surface_prepare(&ehs, NULL, hs, &ed);
 		for (i = 0; i < 100; i++)
 		{
 			r0[3 * i] = ldexp(nearbyint(ldexp(-1.2 + 2.4 * sbt_rand(), 10)), -10);
@@ -1137,14 +1137,14 @@ static void test_exact_raycast(void)
 		d.surfaces = one;
 		d.surface_count = 1;
 		t0 = sbt_now();
-		qaws_exact_surface_batch_raycast(&d, r0, r1, 100, 0, hr, &st);
+		qaws_exact_surface_batch_raycast(hr, &st, r0, r1, 100, &d, 0);
 		tb2 = sbt_now() - t0;
 		t0 = sbt_now();
 		for (i = 0; i < 100; i++)
 		{
 			unsigned int n = 0, j;
 			double best = 1e30;
-			qaws_exact_surface_line_hits(ehs, r0 + 3 * i, r1 + 3 * i, sh, 16, &n);
+			qaws_exact_surface_line_hits(sh, &n, ehs, r0 + 3 * i, r1 + 3 * i, 16);
 			for (j = 0; j < n && j < 16; j++)
 				if (sh[j].t_hi >= 0 && sh[j].t_lo < best)
 					best = sh[j].t_lo;
@@ -1165,7 +1165,7 @@ static void test_exact_raycast(void)
 	{
 		double q0[6] = { 0.25, -0.5, 4.5, -1.25, 0.75, 4.5 }, q1[6] = { 0.375, -0.5, 5.5, -1.25, 1.0, 5.5 };
 		qaws_exact_ray_hit m[2];
-		s = qaws_exact_surface_batch_raycast(&d, q0, q1, 2, 0, m, NULL);
+		s = qaws_exact_surface_batch_raycast(m, NULL, q0, q1, 2, &d, 0);
 		TEST_ASSERT(s == QAWS_STATUS_OK && m[0].surface == QAWS_EXACT_CLOSEST_NONE && m[1].surface == QAWS_EXACT_CLOSEST_NONE && m[0].certified && m[1].certified,
 			"rays leaving the surfaces: certified misses");
 	}
@@ -1315,7 +1315,7 @@ static void test_executors(void)
 		pd.t_min = -1.5;
 		pd.t_max = 1.5;
 		ring[k] = NULL;
-		qaws_curve_create_polynomial(&pd, &ring[k]);
+		qaws_curve_create_polynomial(&ring[k], &pd);
 	}
 	for (i = 0; i < 16; i++)
 		lv[i] = (qaws_scalar)(0.1 + 0.2 * i);
@@ -1351,7 +1351,7 @@ static void test_executors(void)
 		cd.points = pts;
 		cd.point_count = n;
 		cd.executor = x;
-		qaws_surface_batch_find_closest(&cd, sc[e], NULL);
+		qaws_surface_batch_find_closest(sc[e], NULL, &cd);
 		memset(&rd, 0, sizeof(rd));
 		rd.surfaces = (qaws_surface const* const*)sf;
 		rd.surface_count = SBT_SURF + 1;
@@ -1359,14 +1359,14 @@ static void test_executors(void)
 		rd.directions = dir;
 		rd.ray_count = n;
 		rd.executor = x;
-		qaws_surface_batch_raycast(&rd, rh[e], NULL);
+		qaws_surface_batch_raycast(rh[e], NULL, &rd);
 		memset(&kd, 0, sizeof(kd));
 		kd.curves = (qaws_curve const* const*)ring;
 		kd.curve_count = 24;
 		kd.points = pts2;
 		kd.point_count = n;
 		kd.executor = x;
-		qaws_curve_batch_find_closest(&kd, cc[e], NULL);
+		qaws_curve_batch_find_closest(cc[e], NULL, &kd);
 		memset(&ld, 0, sizeof(ld));
 		ld.curves = (qaws_curve const* const*)ring;
 		ld.curve_count = 24;
@@ -1374,7 +1374,7 @@ static void test_executors(void)
 		ld.levels = lv;
 		ld.level_count = 16;
 		ld.executor = x;
-		qaws_curve_batch_find_level_crossings(&ld, lc[e], 4096, &nlc[e]);
+		qaws_curve_batch_find_level_crossings(lc[e], &nlc[e], 4096, &ld);
 		if (e == 0) tser = sbt_now() - t0;
 		if (e == 2) tthr = sbt_now() - t0;
 		if (e > 0)
@@ -1425,7 +1425,7 @@ static qaws_curve* sbt_segment_2d(double const* p, double const* q)
 	d.degree = 1;
 	d.control_points = cp;
 	d.control_point_count = 2;
-	qaws_curve_create_bezier(&d, &c);
+	qaws_curve_create_bezier(&c, &d);
 	return c;
 }
 
@@ -1478,7 +1478,7 @@ static void test_executor_intersections(void)
 	{
 		sf[k] = k < SBT_SURF ? sbt_paraboloid(sbt_lift(k)) : sbt_plane(ph[k - SBT_SURF], 0);
 		fam[k] = k >= SBT_SURF;
-		qaws_exact_surface_prepare(&ed, sf[k], &es[k], NULL);
+		qaws_exact_surface_prepare(&es[k], NULL, sf[k], &ed);
 	}
 	for (i = 0; i < SBT_XLINES; i++)
 	{
@@ -1489,8 +1489,8 @@ static void test_executor_intersections(void)
 		}
 		l3[i] = sbt_segment(P[i], Q[i]);
 		l2[i] = sbt_segment_2d(P[i], Q[i]);
-		qaws_exact_curve_prepare(&ed, l3[i], &e3[i], NULL);
-		qaws_exact_curve_prepare(&ed, l2[i], &e2[i], NULL);
+		qaws_exact_curve_prepare(&e3[i], NULL, l3[i], &ed);
+		qaws_exact_curve_prepare(&e2[i], NULL, l2[i], &ed);
 	}
 	for (i = 0; i < NQ; i++)
 	{
@@ -1529,39 +1529,39 @@ static void test_executor_intersections(void)
 		fcs.surfaces = (qaws_surface const* const*)sf;
 		fcs.surface_count = NS;
 		fcs.executor = x;
-		bad += sbt_bad(qaws_curve_surface_batch_find_intersections(&fcs, fh[e], 4096, &n[e][0], NULL));
+		bad += sbt_bad(qaws_curve_surface_batch_find_intersections(fh[e], &n[e][0], NULL, 4096, &fcs));
 		memset(&fcb, 0, sizeof(fcb));
 		fcb.curves = (qaws_curve const* const*)l2;
 		fcb.curve_count = SBT_XLINES;
 		fcb.executor = x;
-		bad += sbt_bad(qaws_curve_batch_find_intersections_2d(&fcb, f2[e], 8192, &n[e][1], NULL));
+		bad += sbt_bad(qaws_curve_batch_find_intersections_2d(f2[e], &n[e][1], NULL, 8192, &fcb));
 		memset(&fss, 0, sizeof(fss));
 		fss.surfaces = (qaws_surface const* const*)sf;
 		fss.surface_count = NS;
 		fss.families = fam;
 		fss.executor = x;
-		bad += sbt_bad(qaws_surface_batch_find_intersections(&fss, fc[e], 256, &n[e][2], fp[e], 1 << 15, &n[e][3], NULL));
+		bad += sbt_bad(qaws_surface_batch_find_intersections(fc[e], &n[e][2], fp[e], &n[e][3], NULL, 256, 1 << 15, &fss));
 		memset(&xcb, 0, sizeof(xcb));
 		xcb.curves = (qaws_exact_curve const* const*)e2;
 		xcb.curve_count = SBT_XLINES;
 		xcb.executor = x;
-		bad += sbt_bad(qaws_exact_curve_batch_hits(&xcb, x2[e], 8192, &n[e][4], NULL));
+		bad += sbt_bad(qaws_exact_curve_batch_hits(x2[e], &n[e][4], NULL, 8192, &xcb));
 		memset(&xcs, 0, sizeof(xcs));
 		xcs.curves = (qaws_exact_curve const* const*)e3;
 		xcs.curve_count = SBT_XLINES;
 		xcs.surfaces = (qaws_exact_surface const* const*)es;
 		xcs.surface_count = NS;
 		xcs.executor = x;
-		bad += sbt_bad(qaws_exact_curve_surface_batch_hits(&xcs, x3[e], 2048, &n[e][5], NULL));
+		bad += sbt_bad(qaws_exact_curve_surface_batch_hits(x3[e], &n[e][5], NULL, 2048, &xcs));
 		memset(&xss, 0, sizeof(xss));
 		xss.surfaces = (qaws_exact_surface const* const*)es;
 		xss.surface_count = NS;
 		xss.families = fam;
 		xss.executor = x;
-		bad += sbt_bad(qaws_exact_surface_batch_hits(&xss, xp[e], 1 << 14, &n[e][6], xb[e], 512, &n[e][7], NULL));
+		bad += sbt_bad(qaws_exact_surface_batch_hits(xp[e], &n[e][6], xb[e], &n[e][7], NULL, 1 << 14, 512, &xss));
 		xss.families = NULL;
-		bad += sbt_bad(qaws_exact_surface_batch_closest(&xss, qp, NQ, xc[e], NULL));
-		bad += sbt_bad(qaws_exact_surface_batch_raycast(&xss, r0, r1, NQ, 0, xr[e], NULL));
+		bad += sbt_bad(qaws_exact_surface_batch_closest(xc[e], NULL, qp, NQ, &xss));
+		bad += sbt_bad(qaws_exact_surface_batch_raycast(xr[e], NULL, r0, r1, NQ, &xss, 0));
 		if (e == 0) tser = sbt_now() - t0;
 		if (e == 2) tthr = sbt_now() - t0;
 		if (e > 0)

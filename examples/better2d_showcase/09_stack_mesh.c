@@ -61,7 +61,7 @@ static void sm3_draw(svg* s, sm3_view const* w, qaws_mesh_3d const* m, double r0
 		double q[3][3], sx[3], sy[3], nrm[3], nl, sh, area;
 		unsigned char c[3];
 		int x0, x1, y0, y1;
-		qaws_mesh_3d_get_triangle(m, i, t);
+		qaws_mesh_3d_get_triangle(t, m, i);
 		for (k = 0; k < 3; k++)
 		{
 			qaws_vec3 v = qaws_mesh_3d_get_vertex(m, t[k]);
@@ -178,7 +178,7 @@ static qaws_curve* sm3_circle(double x, double y, double r, int hole)
 {
 	qaws_curve *c = sk_circ(x, y, r), *rv = NULL;
 	if (!hole) return c;
-	qaws_curve_reverse(c, &rv);
+	qaws_curve_reverse(&rv, c);
 	qaws_curve_destroy(c);
 	return rv;
 }
@@ -198,12 +198,12 @@ static void sm3_boolean(qaws_clip_type ct, qaws_stack_2d const* a, qaws_stack_2d
 	unsigned int i;
 	out->r = NULL;
 	out->count = 0;
-	if (qaws_stack_boolean_2d(ct, a, b, NULL, &out->r) != QAWS_STATUS_OK) return;
+	if (qaws_stack_boolean_2d(&out->r, a, b, ct, NULL) != QAWS_STATUS_OK) return;
 	for (i = 0; i < qaws_stack_result_get_level_count(out->r) && i < 96; i++)
 	{
 		qaws_clip_result const* lr = qaws_stack_result_get_level(out->r, i);
 		unsigned int j, np = qaws_clip_result_get_path_count(lr);
-		for (j = 0; j < np && j < 16; j++) qaws_clip_result_get_path(lr, j, &out->paths[i][j]);
+		for (j = 0; j < np && j < 16; j++) qaws_clip_result_get_path(&out->paths[i][j], lr, j);
 		out->levels[i].z = qaws_stack_result_get_z(out->r, i);
 		out->levels[i].paths = out->paths[i];
 		out->levels[i].path_count = np < 16 ? np : 16;
@@ -231,7 +231,7 @@ static qaws_curve* sm3_square(double cx, double cy, double h)
 	p[2] = (qaws_scalar)(cx + h); p[3] = (qaws_scalar)(cy - h);
 	p[4] = (qaws_scalar)(cx + h); p[5] = (qaws_scalar)(cy + h);
 	p[6] = (qaws_scalar)(cx - h); p[7] = (qaws_scalar)(cy + h);
-	qaws_curve_create_polyline_2d(p, 4, 1, &c);
+	qaws_curve_create_polyline_2d(&c, p, 4, 1);
 	return c;
 }
 
@@ -306,7 +306,7 @@ static void demo_stack_mesh(void)
 		case 3:
 		{
 			qaws_curve* e = NULL;
-			qaws_curve_create_ellipse_2d((qaws_scalar)0.2, 0, (qaws_scalar)2.2, (qaws_scalar)1.0, 0, &e);
+			qaws_curve_create_ellipse_2d(&e, (qaws_scalar)0.2, 0, (qaws_scalar)2.2, (qaws_scalar)1.0, 0);
 			cs[0] = e; sm3_level(&st, 0, cs, 1);
 			cs[0] = sm3_circle(-1.2, 0, 0.7, 0); cs[1] = sm3_circle(1.6, 0, 0.9, 0); sm3_level(&st, 2.2, cs, 2);
 			sd = sm3_make(&st, QAWS_STACK_LINEAR);
@@ -335,7 +335,7 @@ static void demo_stack_mesh(void)
 				qaws_scalar mtx[6];
 				mtx[0] = (qaws_scalar)cos(ang); mtx[1] = (qaws_scalar)-sin(ang); mtx[2] = 0;
 				mtx[3] = (qaws_scalar)sin(ang); mtx[4] = (qaws_scalar)cos(ang); mtx[5] = 0;
-				qaws_curve_transform_2d(star, mtx, &rot);
+				qaws_curve_transform_2d(&rot, star, mtx);
 				qaws_curve_destroy(star);
 				cs[0] = rot;
 				sm3_level(&st, 0.42 * i, cs, 1);
@@ -386,7 +386,7 @@ static void demo_stack_mesh(void)
 		memset(&d, 0, sizeof(d));
 		d.stack = &sd; d.sections = sections; d.caps = 1;
 		svg_panel(&s, &w.v, title);
-		if (sd.level_count && qaws_stack_mesh_3d(&d, &m) == QAWS_STATUS_OK)
+		if (sd.level_count && qaws_stack_mesh_3d(&m, &d) == QAWS_STATUS_OK)
 			sm3_draw(&s, &w, m, col[0], col[1], col[2]);
 		sprintf(label, "%u vertices, %u triangles, %u levels%s", m ? qaws_mesh_3d_get_vertex_count(m) : 0, m ? qaws_mesh_3d_get_triangle_count(m) : 0,
 			levels, sections ? ", sections between" : "");

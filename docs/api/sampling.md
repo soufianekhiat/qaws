@@ -8,9 +8,9 @@ Curve sampling functions.
 
 ```c
 qaws_status qaws_curve_get_sample_count(
+    unsigned int* out_sample_count,
     qaws_curve const* curve,
-    qaws_sampling_desc const* desc,
-    unsigned int* out_sample_count);
+    qaws_sampling_desc const* desc);
 ```
 
 Queries how many samples will be generated for a given sampling configuration. Use this to allocate a buffer before calling `sample_2d`/`sample_3d`.
@@ -21,11 +21,11 @@ Queries how many samples will be generated for a given sampling configuration. U
 
 ```c
 qaws_status qaws_curve_sample_2d(
-    qaws_curve const* curve,
-    qaws_sampling_desc const* desc,
     qaws_vec2* out_positions,
+    unsigned int* out_position_count,
+    qaws_curve const* curve,
     unsigned int position_capacity,
-    unsigned int* out_position_count);
+    qaws_sampling_desc const* desc);
 ```
 
 Samples a 2D curve into a caller-provided buffer of positions.
@@ -45,11 +45,11 @@ Samples a 2D curve into a caller-provided buffer of positions.
 
 ```c
 qaws_status qaws_curve_sample_3d(
-    qaws_curve const* curve,
-    qaws_sampling_desc const* desc,
     qaws_vec3* out_positions,
+    unsigned int* out_position_count,
+    qaws_curve const* curve,
     unsigned int position_capacity,
-    unsigned int* out_position_count);
+    qaws_sampling_desc const* desc);
 ```
 
 Same as `sample_2d` but for 3D curves.
@@ -60,11 +60,11 @@ Same as `sample_2d` but for 3D curves.
 
 ```c
 qaws_status qaws_curve_sample_eval_2d(
-    qaws_curve const* curve,
-    qaws_sampling_desc const* desc,
     qaws_eval_result_2d* out_samples,
+    unsigned int* out_sample_count,
+    qaws_curve const* curve,
     unsigned int sample_capacity,
-    unsigned int* out_sample_count);
+    qaws_sampling_desc const* desc);
 ```
 
 Samples a 2D curve into a buffer of full evaluation results (position + derivatives).
@@ -75,11 +75,11 @@ Samples a 2D curve into a buffer of full evaluation results (position + derivati
 
 ```c
 qaws_status qaws_curve_sample_eval_3d(
-    qaws_curve const* curve,
-    qaws_sampling_desc const* desc,
     qaws_eval_result_3d* out_samples,
+    unsigned int* out_sample_count,
+    qaws_curve const* curve,
     unsigned int sample_capacity,
-    unsigned int* out_sample_count);
+    qaws_sampling_desc const* desc);
 ```
 
 Same as `sample_eval_2d` but for 3D curves.
@@ -90,11 +90,11 @@ Same as `sample_eval_2d` but for 3D curves.
 
 ```c
 qaws_status qaws_curve_sample_curvature_weighted_2d(
+    qaws_vec2* out_positions,
+    unsigned int* out_position_count,
     qaws_curve const* curve,
     unsigned int sample_count,
-    qaws_vec2* out_positions,
-    unsigned int position_capacity,
-    unsigned int* out_position_count);
+    unsigned int position_capacity);
 ```
 
 Distributes samples proportionally to curvature magnitude so high-curvature regions receive more points.
@@ -112,11 +112,11 @@ Distributes samples proportionally to curvature magnitude so high-curvature regi
 
 ```c
 qaws_status qaws_curve_sample_curvature_weighted_3d(
+    qaws_vec3* out_positions,
+    unsigned int* out_position_count,
     qaws_curve const* curve,
     unsigned int sample_count,
-    qaws_vec3* out_positions,
-    unsigned int position_capacity,
-    unsigned int* out_position_count);
+    unsigned int position_capacity);
 ```
 
 Same as `curvature_weighted_2d` but for 3D curves.
@@ -127,11 +127,11 @@ Same as `curvature_weighted_2d` but for 3D curves.
 
 ```c
 qaws_status qaws_curve_sample_feature_preserving_2d(
+    qaws_vec2* out_positions,
+    unsigned int* out_position_count,
     qaws_curve const* curve,
     unsigned int base_sample_count,
-    qaws_vec2* out_positions,
-    unsigned int position_capacity,
-    unsigned int* out_position_count);
+    unsigned int position_capacity);
 ```
 
 Inserts inflection points and extrema into a uniform parameter sample set so that important geometric features are never missed.
@@ -149,11 +149,11 @@ Inserts inflection points and extrema into a uniform parameter sample set so tha
 
 ```c
 qaws_status qaws_curve_sample_feature_preserving_3d(
+    qaws_vec3* out_positions,
+    unsigned int* out_position_count,
     qaws_curve const* curve,
     unsigned int base_sample_count,
-    qaws_vec3* out_positions,
-    unsigned int position_capacity,
-    unsigned int* out_position_count);
+    unsigned int position_capacity);
 ```
 
 Same as `feature_preserving_2d` but for 3D curves.

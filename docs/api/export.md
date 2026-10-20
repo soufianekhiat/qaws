@@ -36,8 +36,8 @@ With `control_point_count` equal to `data_point_count` the fit interpolates the 
 
 ```c
 qaws_status qaws_curve_fit_bspline(
-    qaws_bspline_fit_desc const* desc,
-    qaws_curve** out_curve);
+    qaws_curve** out_curve,
+    qaws_bspline_fit_desc const* desc);
 ```
 
 Fits a B-spline curve to a set of data points using least-squares approximation.
@@ -54,10 +54,10 @@ Fits a B-spline curve to a set of data points using least-squares approximation.
 
 ```c
 qaws_status qaws_curve_export_svg_path(
-    qaws_curve const* curve,
     char* out_path_data,
-    unsigned int capacity,
     unsigned int* out_length,
+    qaws_curve const* curve,
+    unsigned int capacity,
     unsigned int sample_count);
 ```
 
@@ -100,11 +100,11 @@ typedef enum qaws_polyline_sampling {
 
 ```c
 qaws_status qaws_polyline_export_2d(
+    qaws_vec2* out_points,
+    unsigned int* out_count,
     qaws_curve const* curve,
     unsigned int sample_count,
-    qaws_polyline_sampling sampling,
-    qaws_vec2* out_points,
-    unsigned int* out_count);
+    qaws_polyline_sampling sampling);
 ```
 
 Samples a 2D curve and outputs positions as a flat point array (polyline).
@@ -124,11 +124,11 @@ Samples a 2D curve and outputs positions as a flat point array (polyline).
 
 ```c
 qaws_status qaws_polyline_export_3d(
+    qaws_vec3* out_points,
+    unsigned int* out_count,
     qaws_curve const* curve,
     unsigned int sample_count,
-    qaws_polyline_sampling sampling,
-    qaws_vec3* out_points,
-    unsigned int* out_count);
+    qaws_polyline_sampling sampling);
 ```
 
 Same as `qaws_polyline_export_2d` but for 3D curves. The `out_points` buffer holds `qaws_vec3` elements.

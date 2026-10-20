@@ -27,7 +27,7 @@ typedef struct qaws_arc_desc
 } qaws_arc_desc;
 
 qaws_status qaws_curve_create_arc(
-	qaws_arc_desc const* desc,
-	qaws_curve** out_curve);
+	qaws_curve** out_curve,
+	qaws_arc_desc const* desc);
 
 #endif /* QAWS_ARC_H */

@@ -68,17 +68,17 @@ static qaws_curve* smt_circle(double cx, double cy, double r)
 	if (r < 1e-12)
 	{
 		qaws_scalar p[4] = { (qaws_scalar)cx, (qaws_scalar)cy, (qaws_scalar)cx, (qaws_scalar)cy };
-		qaws_curve_create_polyline_2d(p, 2, 1, &c);
+		qaws_curve_create_polyline_2d(&c, p, 2, 1);
 	}
 	else
-		qaws_curve_create_ellipse_2d((qaws_scalar)cx, (qaws_scalar)cy, (qaws_scalar)r, (qaws_scalar)r, 0, &c);
+		qaws_curve_create_ellipse_2d(&c, (qaws_scalar)cx, (qaws_scalar)cy, (qaws_scalar)r, (qaws_scalar)r, 0);
 	return c;
 }
 
 static qaws_curve* smt_hole(double r)
 {
 	qaws_curve *c = smt_circle(0, 0, r), *rv = NULL;
-	qaws_curve_reverse(c, &rv);
+	qaws_curve_reverse(&rv, c);
 	qaws_curve_destroy(c);
 	return rv;
 }
@@ -93,7 +93,7 @@ static void smt_check(qaws_mesh_3d const* m, unsigned int* open, double* volume)
 	{
 		unsigned int t[3];
 		qaws_vec3 a, b, c;
-		qaws_mesh_3d_get_triangle(m, i, t);
+		qaws_mesh_3d_get_triangle(t, m, i);
 		a = qaws_mesh_3d_get_vertex(m, t[0]); b = qaws_mesh_3d_get_vertex(m, t[1]); c = qaws_mesh_3d_get_vertex(m, t[2]);
 		v += ((double)a.x * ((double)b.y * c.z - (double)b.z * c.y) - (double)a.y * ((double)b.x * c.z - (double)b.z * c.x)
 			+ (double)a.z * ((double)b.x * c.y - (double)b.y * c.x)) / 6;
@@ -128,7 +128,7 @@ static qaws_mesh_3d* smt_mesh(qaws_stack_2d const* st, unsigned int sections, qa
 	qaws_mesh_3d* m = NULL;
 	memset(&d, 0, sizeof(d));
 	d.stack = st; d.sections = sections; d.caps = 1; d.executor = ex;
-	qaws_stack_mesh_3d(&d, &m);
+	qaws_stack_mesh_3d(&m, &d);
 	return m;
 }
 
@@ -223,7 +223,7 @@ int test_92_stack_mesh_main(void)
 		unsigned int open = 0;
 		double vol = 0;
 		memset(&s, 0, sizeof(s));
-		qaws_curve_create_ellipse_2d(0, 0, 3, (qaws_scalar)1.2, 0, &e);
+		qaws_curve_create_ellipse_2d(&e, 0, 0, 3, (qaws_scalar)1.2, 0);
 		smt_level(&s, 0, e, NULL);
 		smt_level(&s, 1, smt_circle(-2, 0, 1), smt_circle(2, 0, 1));
 		smt_done(&s, QAWS_STACK_LINEAR, QAWS_STACK_BLEND_DISTANCE);
@@ -241,8 +241,8 @@ int test_92_stack_mesh_main(void)
 		qaws_scalar p[8] = { -1, -1, 1, -1, 1, 1, -1, 1 };
 		qaws_curve *a = NULL, *b = NULL;
 		memset(&s, 0, sizeof(s));
-		qaws_curve_create_polyline_2d(p, 4, 1, &a);
-		qaws_curve_create_polyline_2d(p, 4, 1, &b);
+		qaws_curve_create_polyline_2d(&a, p, 4, 1);
+		qaws_curve_create_polyline_2d(&b, p, 4, 1);
 		smt_level(&s, 0, a, NULL);
 		smt_level(&s, 2, b, NULL);
 		smt_done(&s, QAWS_STACK_LINEAR, QAWS_STACK_BLEND_AUTO);
@@ -265,7 +265,7 @@ int test_92_stack_mesh_main(void)
 			}
 			smt_done(&s[k], QAWS_STACK_CUBIC, QAWS_STACK_BLEND_AUTO);
 		}
-		if (qaws_stack_boolean_2d(QAWS_CLIP_UNION, &s[0].st, &s[1].st, NULL, &r) == QAWS_STATUS_OK && r)
+		if (qaws_stack_boolean_2d(&r, &s[0].st, &s[1].st, QAWS_CLIP_UNION, NULL) == QAWS_STATUS_OK && r)
 		{
 			static qaws_path_2d paths[64][4];
 			static qaws_stack_level levels[64];
@@ -278,7 +278,7 @@ int test_92_stack_mesh_main(void)
 			{
 				qaws_clip_result const* lr = qaws_stack_result_get_level(r, i);
 				unsigned int j, np = qaws_clip_result_get_path_count(lr);
-				for (j = 0; j < np && j < 4; j++) qaws_clip_result_get_path(lr, j, &paths[i][j]);
+				for (j = 0; j < np && j < 4; j++) qaws_clip_result_get_path(&paths[i][j], lr, j);
 				levels[i].z = qaws_stack_result_get_z(r, i);
 				levels[i].paths = paths[i];
 				levels[i].path_count = np < 4 ? np : 4;

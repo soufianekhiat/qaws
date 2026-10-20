@@ -181,21 +181,21 @@ paths, solved on the surface, so their (u, v) images are generally curved.
 /* qaws_surface_region.h */
 typedef struct qaws_surface_curve qaws_surface_curve;    /* a curve on a surface: (u, v) image + source */
 
-qaws_status qaws_surface_curve_create_uv(qaws_surface const* s, qaws_curve const* uv, qaws_surface_curve** out);
-qaws_status qaws_surface_curve_create_geodesic(qaws_surface const* s, qaws_vec2 a_uv, qaws_vec2 b_uv,
-    qaws_surface_geodesic_desc const* opt, qaws_surface_curve** out);
+qaws_status qaws_surface_curve_create_uv(qaws_surface_curve** out, qaws_surface const* s, qaws_curve const* uv);
+qaws_status qaws_surface_curve_create_geodesic(qaws_surface_curve** out, qaws_surface const* s, qaws_vec2 a_uv,
+    qaws_vec2 b_uv, qaws_surface_geodesic_desc const* opt);
 qaws_status qaws_surface_curve_create_geodesic_arc(qaws_surface const* s, qaws_vec2 centre_uv,
     qaws_scalar radius, qaws_scalar angle0, qaws_scalar angle1, qaws_surface_curve** out);
 qaws_status qaws_surface_curve_length(qaws_surface_curve const* c, qaws_scalar* out);
-qaws_status qaws_surface_curve_evaluate(qaws_surface_curve const* c, qaws_scalar t, qaws_vec2* uv, qaws_vec3* xyz);
+qaws_status qaws_surface_curve_evaluate(qaws_vec2* uv, qaws_vec3* xyz, qaws_surface_curve const* c, qaws_scalar t);
 
 typedef struct qaws_surface_path { qaws_surface_curve const* const* curves; unsigned int curve_count; int closed; } qaws_surface_path;
 
-qaws_status qaws_surface_clip(qaws_surface const* s, qaws_clip_type type, qaws_fill_rule rule,
-    qaws_surface_path const* subjects, unsigned int ns, qaws_surface_path const* clips, unsigned int nc,
-    qaws_surface_region** out);
+qaws_status qaws_surface_clip(qaws_surface_region** out, qaws_surface const* s, qaws_surface_path const* subjects,
+    qaws_surface_path const* clips, unsigned int ns, unsigned int nc, qaws_clip_type type,
+    qaws_fill_rule rule);
 qaws_status qaws_surface_region_area(qaws_surface_region const* r, qaws_scalar* out);
-qaws_status qaws_surface_region_contains(qaws_surface_region const* r, qaws_vec2 uv, int* out);
+qaws_status qaws_surface_region_contains(int* out, qaws_surface_region const* r, qaws_vec2 uv);
 qaws_status qaws_surface_region_trimmed(qaws_surface_region const* r, qaws_surface** out);
 qaws_status qaws_surface_offset(qaws_surface const* s, qaws_surface_path const* paths, unsigned int n,
     qaws_scalar distance, qaws_join_type join, qaws_surface_region** out);

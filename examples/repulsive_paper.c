@@ -225,13 +225,13 @@ static void rp_solve(rp_curve const* c, unsigned int dim, double alpha, double b
 		sd = *sd0;
 	else
 		sd.hold_edge_lengths = 1;   /* (the barycenter too: by default, nothing pinned) */
-	if (qaws_repulsive_curves_create(&cd, &rc) != QAWS_STATUS_OK || qaws_repulsive_curves_solver_create(rc, &sd, x, &s) != QAWS_STATUS_OK)
+	if (qaws_repulsive_curves_create(&rc, &cd) != QAWS_STATUS_OK || qaws_repulsive_curves_solver_create(&s, rc, x, &sd) != QAWS_STATUS_OK)
 		printf("  the scene was refused\n");
 	for (k = 0; k < nsnap; k++)
 	{
 		while (s && it < steps[k] && it < rp_cap && r.reason == QAWS_REPULSIVE_RUNNING)
 		{
-			qaws_repulsive_curves_solver_step(s, x, &r);
+			qaws_repulsive_curves_solver_step(&r, x, s);
 			it = r.iterations;
 			if (it % 50 == 0 && r.reason == QAWS_REPULSIVE_RUNNING)
 				printf("    %u steps: E %.6g, stationarity %.3g\n", it, (double)r.energy, (double)r.stationarity);
@@ -1411,7 +1411,7 @@ static void rp_solve_mesh(rp_mesh const* mesh, double p, qaws_repulsive_mesh_sol
 				md.vertex_count = cur.nv; md.triangles = cur.t; md.triangle_count = cur.nf;
 				if (it)
 					sd.initial_step = 2 * r.last_step;   /* (where the last solver would have tried next) */
-				if (qaws_repulsive_mesh_create(&md, &rm) != QAWS_STATUS_OK || qaws_repulsive_mesh_solver_create(rm, &sd, x, &s) != QAWS_STATUS_OK)
+				if (qaws_repulsive_mesh_create(&rm, &md) != QAWS_STATUS_OK || qaws_repulsive_mesh_solver_create(&s, rm, x, &sd) != QAWS_STATUS_OK)
 				{
 					printf("  the scene was refused\n");
 					r.reason = QAWS_REPULSIVE_NUMERICAL_FAILURE;
@@ -1425,7 +1425,7 @@ static void rp_solve_mesh(rp_mesh const* mesh, double p, qaws_repulsive_mesh_sol
 				qaws_scalar a = (qaws_scalar)(A0 * (1 + (o->area_mult - 1) * f)), v = (qaws_scalar)(V0 * (1 + (o->volume_mult - 1) * f));
 				qaws_repulsive_mesh_solver_set_targets(s, sd.hold_area && o->area_mult > 0 ? &a : NULL, sd.hold_volume && o->volume_mult > 0 ? &v : NULL);
 			}
-			qaws_repulsive_mesh_solver_step(s, x, &r);
+			qaws_repulsive_mesh_solver_step(&r, x, s);
 			if (it == 0)
 				e0 = r.initial_energy;
 			r.initial_energy = e0;
@@ -1781,7 +1781,7 @@ static void rp_vine_frame(rp_vines const* g, qaws_scalar const* uv, double* x, d
 	qaws_scalar q[6] = { uv[0], uv[1], (qaws_scalar)((double)uv[0] + h), uv[1], uv[0], (qaws_scalar)((double)uv[1] + dv) }, p[9];
 	double a[3], b[3], l;
 	unsigned int k;
-	qaws_repulsive_surface_positions(&g->sd, q, 3, p);
+	qaws_repulsive_surface_positions(p, q, 3, &g->sd);
 	for (k = 0; k < 3; k++) { x[k] = (double)p[k]; a[k] = (double)p[3 + k] - p[k]; b[k] = ((double)p[6 + k] - p[k]) * (dv > 0 ? 1 : -1); }
 	n[0] = a[1] * b[2] - a[2] * b[1]; n[1] = a[2] * b[0] - a[0] * b[2]; n[2] = a[0] * b[1] - a[1] * b[0];
 	l = sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
@@ -1974,13 +1974,13 @@ static void rp_vines_figure(void)
 	memset(&bd, 0, sizeof(bd));
 	bd.dimension = QAWS_DIMENSION_2D; bd.degree = 3; bd.control_points = prof; bd.control_point_count = 7; bd.knots = knots; bd.knot_count = 11;
 	memset(&rd, 0, sizeof(rd));
-	if (!g || qaws_curve_create_bspline(&bd, &profile) != QAWS_STATUS_OK)
+	if (!g || qaws_curve_create_bspline(&profile, &bd) != QAWS_STATUS_OK)
 	{
 		free(g);
 		return;
 	}
 	rd.profile = profile; rd.axis_direction.z = 1;
-	if (qaws_surface_create_revolution(&rd, &vase) != QAWS_STATUS_OK)
+	if (qaws_surface_create_revolution(&vase, &rd) != QAWS_STATUS_OK)
 	{
 		qaws_curve_destroy(profile);
 		free(g);
@@ -2024,8 +2024,8 @@ static void rp_vines_figure(void)
 		d.hold_total_length = 1; d.collision_checked = 1; d.max_iterations = 3; d.pinned = pins; d.pinned_count = np;
 		/* (the total length, one row: every edge's, hundreds of rows pulled back through the surface, stalled the projection once the vines filled out) */
 		memset(&r, 0, sizeof(r));
-		st = qaws_repulsive_curves_create(&cd, &c);
-		st = st == QAWS_STATUS_OK ? qaws_repulsive_surface_curves_solve(c, &g->sd, &d, g->uv, &r) : st;
+		st = qaws_repulsive_curves_create(&c, &cd);
+		st = st == QAWS_STATUS_OK ? qaws_repulsive_surface_curves_solve(&r, g->uv, c, &g->sd, &d) : st;
 		qaws_repulsive_curves_destroy(c);
 		if (st != QAWS_STATUS_OK)
 		{

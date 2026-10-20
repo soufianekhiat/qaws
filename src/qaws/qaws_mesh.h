@@ -110,7 +110,7 @@ qaws_status qaws_mesh_3d_get_edges(qaws_mesh_3d const* mesh, unsigned int* out_e
 /* The faces fan-triangulated from their first vertex, in face order (for a
    triangle mesh, the faces themselves). */
 unsigned int qaws_mesh_3d_get_triangle_count(qaws_mesh_3d const* mesh);
-void qaws_mesh_3d_get_triangle(qaws_mesh_3d const* mesh, unsigned int triangle, unsigned int out_vertices[3]);
+void qaws_mesh_3d_get_triangle(unsigned int out_vertices[3], qaws_mesh_3d const* mesh, unsigned int triangle);
 qaws_status qaws_mesh_3d_get_triangles(qaws_mesh_3d const* mesh, unsigned int* out_triangles);   /* 3 per triangle */
 
 /* The given vertex a copy was split from at creation (the vertex itself

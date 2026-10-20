@@ -42,10 +42,10 @@ static qaws_surface* sst_revolve(double cx, double r, double a0, double a1, qaws
 	g.center[0] = (qaws_scalar)cx; g.radius = (qaws_scalar)r; g.angle_start = (qaws_scalar)a0; g.angle_end = (qaws_scalar)a1;
 	memset(&ad, 0, sizeof(ad));
 	ad.dimension = QAWS_DIMENSION_2D; ad.segments = &g; ad.segment_count = 1;
-	qaws_curve_create_arc(&ad, prof);
+	qaws_curve_create_arc(prof, &ad);
 	memset(&rd, 0, sizeof(rd));
 	rd.profile = *prof; rd.axis_direction.z = 1;
-	qaws_surface_create_revolution(&rd, &s);
+	qaws_surface_create_revolution(&s, &rd);
 	return s;
 }
 
@@ -62,7 +62,7 @@ static qaws_surface_region* sst_region(qaws_surface const* s, qaws_surface_curve
 	}
 	else
 		for (i = 0; i < paths; i++) { P[i].curves = pc + i; P[i].curve_count = 1; P[i].closed = 1; }
-	qaws_surface_clip(s, QAWS_CLIP_NONE, QAWS_FILL_NON_ZERO, P, paths, NULL, 0, &r);
+	qaws_surface_clip(&r, s, P, NULL, paths, 0, QAWS_CLIP_NONE, QAWS_FILL_NON_ZERO);
 	return r;
 }
 
@@ -76,7 +76,7 @@ static void sst_mesh_measure(qaws_surface const* s, qaws_mesh_2d const* m, doubl
 		unsigned int v[3];
 		qaws_vec3 q[3];
 		double ax, ay, az, bx, by, bz, nx, ny, nz;
-		qaws_mesh_2d_get_triangle(m, t, v);
+		qaws_mesh_2d_get_triangle(v, m, t);
 		for (k = 0; k < 3; k++)
 		{
 			qaws_vec2 w = qaws_mesh_2d_get_vertex(m, v[k]);
@@ -88,7 +88,7 @@ static void sst_mesh_measure(qaws_surface const* s, qaws_mesh_2d const* m, doubl
 			if (uu > ru.max_value) uu = ru.max_value;
 			if (vv < rv.min_value) vv = rv.min_value;
 			if (vv > rv.max_value) vv = rv.max_value;
-			qaws_surface_evaluate(s, (qaws_scalar)uu, (qaws_scalar)vv, QAWS_SURFACE_EVAL_POSITION, &e);
+			qaws_surface_evaluate(&e, s, (qaws_scalar)uu, (qaws_scalar)vv, QAWS_SURFACE_EVAL_POSITION);
 			q[k] = e.position;
 		}
 		ax = q[1].x - q[0].x; ay = q[1].y - q[0].y; az = q[1].z - q[0].z;
@@ -126,7 +126,7 @@ static void test_sampling(void)
 	double cx[3], tol = 2e-3;
 	qaws_status s1, s2, s3, s4;
 	char msg[300];
-	qaws_surface_curve_create_geodesic_arc(s, sst_uv(0.02, 0.55), (qaws_scalar)rho, 0, (qaws_scalar)(2 * SST_PI), 0, &c);
+	qaws_surface_curve_create_geodesic_arc(&c, s, sst_uv(0.02, 0.55), (qaws_scalar)rho, 0, (qaws_scalar)(2 * SST_PI), 0);
 	rc = sst_region(s, &c, 1, 1);
 	{
 		double la = SST_PI * 0.55 - SST_PI / 2, lo = 2 * SST_PI * 0.02;
@@ -139,21 +139,21 @@ static void test_sampling(void)
 		memset(&bz, 0, sizeof(bz));
 		bz.dimension = QAWS_DIMENSION_2D; bz.degree = 1; bz.control_points = cp; bz.control_point_count = 2;
 		cp[0] = 0; cp[1] = (qaws_scalar)0.35; cp[2] = 1; cp[3] = (qaws_scalar)0.35;
-		qaws_curve_create_bezier(&bz, &k1);
+		qaws_curve_create_bezier(&k1, &bz);
 		cp[0] = 1; cp[1] = (qaws_scalar)0.7; cp[2] = 0; cp[3] = (qaws_scalar)0.7;
-		qaws_curve_create_bezier(&bz, &k2);
-		qaws_surface_curve_create_uv(s, k1, &lat[0]);
-		qaws_surface_curve_create_uv(s, k2, &lat[1]);
+		qaws_curve_create_bezier(&k2, &bz);
+		qaws_surface_curve_create_uv(&lat[0], s, k1);
+		qaws_surface_curve_create_uv(&lat[1], s, k2);
 		rb = sst_region(s, lat, 2, 2);
 	}
 	memset(&sd, 0, sizeof(sd));
 	sd.kind = QAWS_REGION_SAMPLE_SOBOL; sd.seed = 7;
-	s1 = qaws_surface_region_sample(rc, &sd, n, NULL, p);
+	s1 = qaws_surface_region_sample(NULL, p, rc, n, &sd);
 	{
 		double mean = 0;
 		for (i = 0; i < n; i++) mean += ((double)p[i].x * cx[0] + (double)p[i].y * cx[1] + (double)p[i].z * cx[2]) / R;
 		mean /= n;
-		s2 = qaws_surface_region_sample(rb, &sd, n, w, p);
+		s2 = qaws_surface_region_sample(w, p, rb, n, &sd);
 		{
 			double z1 = R * sin(SST_PI * 0.35 - SST_PI / 2), z2 = R * sin(SST_PI * 0.7 - SST_PI / 2), mz = 0, mz2 = 0;
 			int inside = 1;
@@ -170,7 +170,7 @@ static void test_sampling(void)
 			/* the density 1 + z / R: z's mean over the band becomes
 			   (int z (1 + z/R) dz) / (int (1 + z/R) dz) */
 			sd.density = sst_density;
-			s3 = qaws_surface_region_sample(rb, &sd, n, NULL, p);
+			s3 = qaws_surface_region_sample(NULL, p, rb, n, &sd);
 			sd.density = NULL;
 			{
 				double num = 0.5 * (z2 * z2 - z1 * z1) + (z2 * z2 * z2 - z1 * z1 * z1) / (3 * R), den = (z2 - z1) + 0.5 * (z2 * z2 - z1 * z1) / R, md = 0;
@@ -188,13 +188,13 @@ static void test_sampling(void)
 		double dmin = 1e30, rmax;
 		int inside = 1;
 		sd.kind = QAWS_REGION_SAMPLE_BLUE_NOISE;
-		s4 = qaws_surface_region_sample(rc, &sd, nb, w, p);
-		qaws_surface_region_get_area(rc, &a);
+		s4 = qaws_surface_region_sample(w, p, rc, nb, &sd);
+		qaws_surface_region_get_area(&a, rc);
 		rmax = sqrt((double)a / (2 * sqrt(3.0) * nb));
 		for (i = 0; i < nb; i++)
 		{
 			int in = 0;
-			qaws_surface_region_contains(rc, w[i], &in);
+			qaws_surface_region_contains(&in, rc, w[i]);
 			if (in == 0) inside = 0;
 			for (j = i + 1; j < nb; j++)
 			{
@@ -228,12 +228,12 @@ static void test_meshing(void)
 		qaws_mesh_2d* m = NULL;
 		qaws_scalar a = 0;
 		qaws_status st;
-		qaws_surface_curve_create_geodesic_arc(s, sst_uv(0.02, 0.55), (qaws_scalar)0.6, 0, (qaws_scalar)(2 * SST_PI), 0, &c);
+		qaws_surface_curve_create_geodesic_arc(&c, s, sst_uv(0.02, 0.55), (qaws_scalar)0.6, 0, (qaws_scalar)(2 * SST_PI), 0);
 		r = sst_region(s, &c, 1, 1);
-		qaws_surface_region_get_area(r, &a);
+		qaws_surface_region_get_area(&a, r);
 		memset(&md, 0, sizeof(md));
 		md.edge_length = (qaws_scalar)L;
-		st = qaws_surface_region_triangulate(r, &md, &m);
+		st = qaws_surface_region_triangulate(&m, r, &md);
 		if (st == QAWS_STATUS_OK) sst_mesh_measure(s, m, &am, &em);
 		sprintf(msg, "sphere: a circle across the seam meshed to 0.05: %u triangles, their area %.2g off (relative), longest edge %.4f",
 			m ? qaws_mesh_2d_get_triangle_count(m) : 0, st ? 1.0 : fabs(am - a) / a, st ? 0.0 : em);
@@ -258,13 +258,13 @@ static void test_meshing(void)
 		qaws_status st;
 		memset(&bd, 0, sizeof(bd));
 		bd.p10.x = 2; bd.p01.x = (qaws_scalar)0.6; bd.p01.y = 3; bd.p11.x = (qaws_scalar)2.6; bd.p11.y = 3;
-		qaws_surface_create_bilinear(&bd, &s);
+		qaws_surface_create_bilinear(&s, &bd);
 		corner[0] = sst_uv(0.3, 0.3); corner[1] = sst_uv(0.62, 0.3); corner[2] = sst_uv(0.62, 0.58); corner[3] = sst_uv(0.3, 0.58);
-		for (i = 0; i < 4; i++) qaws_surface_curve_create_geodesic(s, corner[i], corner[(i + 1) % 4], 0, &sq[i]);
+		for (i = 0; i < 4; i++) qaws_surface_curve_create_geodesic(&sq[i], s, corner[i], corner[(i + 1) % 4], 0);
 		r = sst_region(s, sq, 4, 1);
 		memset(&md, 0, sizeof(md));
 		md.edge_length = (qaws_scalar)0.05;
-		st = qaws_surface_region_triangulate(r, &md, &m);
+		st = qaws_surface_region_triangulate(&m, r, &md);
 		if (st == QAWS_STATUS_OK) sst_mesh_measure(s, m, &am, &em);
 		sprintf(msg, "flat sheared patch: a parallelogram's mesh, its area against 0.64 x 0.84 %.2g, longest edge %.4f", fabs(am - 0.64 * 0.84), em);
 		TEST_ASSERT(!st && fabs(am - 0.64 * 0.84) <= (SST_F32 ? 1e-5 : 1e-9) && em <= 0.0525, msg);
@@ -284,12 +284,12 @@ static void test_meshing(void)
 		qaws_scalar a = 0;
 		double am = 0, em = 0;
 		qaws_status st;
-		qaws_surface_curve_create_geodesic_arc(s, sst_uv(0.0, 0.0), (qaws_scalar)0.3, 0, (qaws_scalar)(2 * SST_PI), 0, &c);
+		qaws_surface_curve_create_geodesic_arc(&c, s, sst_uv(0.0, 0.0), (qaws_scalar)0.3, 0, (qaws_scalar)(2 * SST_PI), 0);
 		r = sst_region(s, &c, 1, 1);
-		qaws_surface_region_get_area(r, &a);
+		qaws_surface_region_get_area(&a, r);
 		memset(&md, 0, sizeof(md));
 		md.edge_length = (qaws_scalar)0.03;
-		st = qaws_surface_region_triangulate(r, &md, &m);
+		st = qaws_surface_region_triangulate(&m, r, &md);
 		if (st == QAWS_STATUS_OK) sst_mesh_measure(s, m, &am, &em);
 		sprintf(msg, "torus: a circle across both seams meshed to 0.03 (four pieces in (u, v)): area %.2g off (relative), longest edge %.4f",
 			st ? 1.0 : fabs(am - a) / a, em);

@@ -28,9 +28,9 @@ static void demo_nurbs_extraction(void)
 	d.knot_count = 13;
 	d.weights = ws;
 	d.weight_count = 9;
-	qaws_curve_create_nurbs(&d, &c);
+	qaws_curve_create_nurbs(&c, &d);
 	qaws_exact_desc_default(&desc);
-	qaws_exact_curve_prepare(&desc, c, &e, &rep);
+	qaws_exact_curve_prepare(&e, &rep, c, &desc);
 	svg_open(&sv, "showcase/exact4_nurbs.svg", 1280, 540, "Exact NURBS: local Bezier extraction and the integer budget",
 		"Left: a cubic NURBS (weights 1..6, a triple knot making a corner) split exactly into one integer rational Bezier per span (colored control polygons). Right: storage width at full precision.");
 	svg_panel(&sv, &vc, "NURBS control polygon (grey) and the exact Bezier spans");
@@ -49,7 +49,7 @@ static void demo_nurbs_extraction(void)
 	{
 		double pts[2 * 17], w[17], t0, t1, xy[2 * 101], pg[2 * 17];
 		unsigned int deg;
-		qaws_exact_curve_span_bezier(e, s, &deg, &t0, &t1, pts, w);
+		qaws_exact_curve_span_bezier(&deg, &t0, &t1, pts, w, e, s);
 		for (i = 0; i <= deg; i++)
 		{
 			pg[2 * i] = vx(&vc, pts[2 * i]);
@@ -61,7 +61,7 @@ static void demo_nurbs_extraction(void)
 		for (i = 0; i <= 100; i++)
 		{
 			double out[2];
-			qaws_exact_curve_evaluate(e, t0 + (t1 - t0) * i / 100.0, 0, out, NULL);
+			qaws_exact_curve_evaluate(out, NULL, e, t0 + (t1 - t0) * i / 100.0, 0);
 			xy[2 * i] = vx(&vc, out[0]);
 			xy[2 * i + 1] = vy(&vc, out[1]);
 		}
@@ -118,14 +118,14 @@ static void demo_nurbs_extraction(void)
 			rd.knot_count = nk;
 			rd.weights = rw;
 			rd.weight_count = n;
-			qaws_curve_create_nurbs(&rd, &rcu);
-			if (qaws_exact_curve_prepare(&desc, rcu, &re, &rr) == QAWS_STATUS_OK)
+			qaws_curve_create_nurbs(&rcu, &rd);
+			if (qaws_exact_curve_prepare(&re, &rr, rcu, &desc) == QAWS_STATUS_OK)
 			{
 				unsigned int k;
 				double out[8], x0 = vx(&vb, p - 0.38), x1 = vx(&vb, p + 0.38);
 				for (k = 0; k <= 3; k++)
 				{
-					if (qaws_exact_curve_evaluate(re, 0.37, k, out, NULL) != QAWS_STATUS_OK)
+					if (qaws_exact_curve_evaluate(out, NULL, re, 0.37, k) != QAWS_STATUS_OK)
 						break;
 					order = k + 1;
 				}

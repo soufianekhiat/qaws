@@ -30,7 +30,7 @@ static void test_traversal(void)
 	desc.control_point_count = 2;
 
 	qaws_curve* curve = NULL;
-	qaws_status s = qaws_curve_create_bezier(&desc, &curve);
+	qaws_status s = qaws_curve_create_bezier(&curve, &desc);
 	TEST_ASSERT_STATUS(s);
 
 	qaws_traversal_desc tdesc;
@@ -45,17 +45,17 @@ static void test_traversal(void)
 	tdesc.clamp_to_domain = 1;
 
 	qaws_traversal* traversal = NULL;
-	s = qaws_traversal_create(curve, &tdesc, &traversal);
+	s = qaws_traversal_create(&traversal, curve, &tdesc);
 	TEST_ASSERT_STATUS(s);
 
 	/* At t=0, distance=0, should be at start */
 	qaws_eval_result_2d r;
-	s = qaws_traversal_evaluate_2d(traversal, (qaws_scalar)0.0, QAWS_EVAL_FLAG_POSITION, &r);
+	s = qaws_traversal_evaluate_2d(&r, traversal, (qaws_scalar)0.0, QAWS_EVAL_FLAG_POSITION);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(approx_eq(r.position.x, (qaws_scalar)0.0), "traversal t=0 x");
 
 	/* At t=1, distance=5, should be at x=5 */
-	s = qaws_traversal_evaluate_2d(traversal, (qaws_scalar)1.0, QAWS_EVAL_FLAG_POSITION, &r);
+	s = qaws_traversal_evaluate_2d(&r, traversal, (qaws_scalar)1.0, QAWS_EVAL_FLAG_POSITION);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(approx_eq(r.position.x, (qaws_scalar)5.0), "traversal t=1 x");
 
@@ -76,7 +76,7 @@ static void test_traversal_mappings(void)
 	desc.control_point_count = 2;
 
 	qaws_curve* curve = NULL;
-	qaws_status s = qaws_curve_create_bezier(&desc, &curve);
+	qaws_status s = qaws_curve_create_bezier(&curve, &desc);
 	TEST_ASSERT_STATUS(s);
 
 	qaws_traversal_desc tdesc;
@@ -91,23 +91,23 @@ static void test_traversal_mappings(void)
 	tdesc.clamp_to_domain = 1;
 
 	qaws_traversal* traversal = NULL;
-	s = qaws_traversal_create(curve, &tdesc, &traversal);
+	s = qaws_traversal_create(&traversal, curve, &tdesc);
 	TEST_ASSERT_STATUS(s);
 
 	/* map_time_to_parameter: at t=1, distance=5, on length-10 line => param ~0.5 */
 	qaws_scalar param = 0;
-	s = qaws_traversal_map_time_to_parameter(traversal, (qaws_scalar)1.0, &param);
+	s = qaws_traversal_map_time_to_parameter(&param, traversal, (qaws_scalar)1.0);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(approx_eq(param, (qaws_scalar)0.5), "time_to_param t=1 => 0.5");
 
 	/* map_distance_to_parameter: distance 5 => param 0.5 */
-	s = qaws_traversal_map_distance_to_parameter(traversal, (qaws_scalar)5.0, &param);
+	s = qaws_traversal_map_distance_to_parameter(&param, traversal, (qaws_scalar)5.0);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(approx_eq(param, (qaws_scalar)0.5), "dist_to_param d=5 => 0.5");
 
 	/* map_parameter_to_distance: param 0.5 => distance 5 */
 	qaws_scalar dist = 0;
-	s = qaws_traversal_map_parameter_to_distance(traversal, (qaws_scalar)0.5, &dist);
+	s = qaws_traversal_map_parameter_to_distance(&dist, traversal, (qaws_scalar)0.5);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(approx_eq(dist, (qaws_scalar)5.0), "param_to_dist p=0.5 => 5");
 
@@ -128,7 +128,7 @@ static void test_traversal_arc_length_mode(void)
 	desc.control_point_count = 2;
 
 	qaws_curve* curve = NULL;
-	qaws_status s = qaws_curve_create_bezier(&desc, &curve);
+	qaws_status s = qaws_curve_create_bezier(&curve, &desc);
 	TEST_ASSERT_STATUS(s);
 
 	qaws_traversal_desc tdesc;
@@ -143,12 +143,12 @@ static void test_traversal_arc_length_mode(void)
 	tdesc.clamp_to_domain = 1;
 
 	qaws_traversal* traversal = NULL;
-	s = qaws_traversal_create(curve, &tdesc, &traversal);
+	s = qaws_traversal_create(&traversal, curve, &tdesc);
 	TEST_ASSERT_STATUS(s);
 
 	/* input_value is distance: 5.0 on a 10-length line => x=5 */
 	qaws_eval_result_2d r;
-	s = qaws_traversal_evaluate_2d(traversal, (qaws_scalar)5.0, QAWS_EVAL_FLAG_POSITION, &r);
+	s = qaws_traversal_evaluate_2d(&r, traversal, (qaws_scalar)5.0, QAWS_EVAL_FLAG_POSITION);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(approx_eq(r.position.x, (qaws_scalar)5.0), "arc-length eval at d=5 => x=5");
 
@@ -168,7 +168,7 @@ static void test_traversal_3d(void)
 	desc.control_point_count = 2;
 
 	qaws_curve* curve = NULL;
-	qaws_status s = qaws_curve_create_bezier(&desc, &curve);
+	qaws_status s = qaws_curve_create_bezier(&curve, &desc);
 	TEST_ASSERT_STATUS(s);
 
 	qaws_traversal_desc tdesc;
@@ -183,11 +183,11 @@ static void test_traversal_3d(void)
 	tdesc.clamp_to_domain = 1;
 
 	qaws_traversal* traversal = NULL;
-	s = qaws_traversal_create(curve, &tdesc, &traversal);
+	s = qaws_traversal_create(&traversal, curve, &tdesc);
 	TEST_ASSERT_STATUS(s);
 
 	qaws_eval_result_3d r;
-	s = qaws_traversal_evaluate_3d(traversal, (qaws_scalar)0.5, QAWS_EVAL_FLAG_POSITION, &r);
+	s = qaws_traversal_evaluate_3d(&r, traversal, (qaws_scalar)0.5, QAWS_EVAL_FLAG_POSITION);
 	TEST_ASSERT_STATUS(s);
 	TEST_ASSERT(approx_eq(r.position.x, (qaws_scalar)5.0), "3d traversal t=0.5 x");
 
@@ -210,7 +210,7 @@ static void test_easing(void)
 	bdesc.control_points = pts;
 	bdesc.control_point_count = 3;
 
-	status = qaws_curve_create_bezier(&bdesc, &curve);
+	status = qaws_curve_create_bezier(&curve, &bdesc);
 	TEST_ASSERT_STATUS(status);
 
 	/* Linear easing: same as no easing */
@@ -230,22 +230,22 @@ static void test_easing(void)
 		tdesc.easing = QAWS_EASING_LINEAR;
 		tdesc.wrap_mode = QAWS_WRAP_CLAMP;
 
-		status = qaws_traversal_create(curve, &tdesc, &trav);
+		status = qaws_traversal_create(&trav, curve, &tdesc);
 		TEST_ASSERT_STATUS(status);
 
 		status = qaws_traversal_evaluate_2d(
-			trav, (qaws_scalar)0.5, QAWS_EVAL_FLAG_POSITION, &r_linear);
+			&r_linear, trav, (qaws_scalar)0.5, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT_STATUS(status);
 
 		qaws_traversal_destroy(trav);
 
 		/* Quad ease-in: at t=0.5, eased_t = 0.25, so position should be earlier */
 		tdesc.easing = QAWS_EASING_QUAD_IN;
-		status = qaws_traversal_create(curve, &tdesc, &trav);
+		status = qaws_traversal_create(&trav, curve, &tdesc);
 		TEST_ASSERT_STATUS(status);
 
 		status = qaws_traversal_evaluate_2d(
-			trav, (qaws_scalar)0.5, QAWS_EVAL_FLAG_POSITION, &r_eased);
+			&r_eased, trav, (qaws_scalar)0.5, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT_STATUS(status);
 
 		/* Eased position should differ from linear */
@@ -274,13 +274,13 @@ static void test_easing(void)
 		tdesc.easing = QAWS_EASING_SINE_IN_OUT;
 		tdesc.wrap_mode = QAWS_WRAP_CLAMP;
 
-		status = qaws_traversal_create(curve, &tdesc, &trav);
+		status = qaws_traversal_create(&trav, curve, &tdesc);
 		TEST_ASSERT_STATUS(status);
 
 		qaws_traversal_evaluate_2d(
-			trav, (qaws_scalar)0.0, QAWS_EVAL_FLAG_POSITION, &r_start);
+			&r_start, trav, (qaws_scalar)0.0, QAWS_EVAL_FLAG_POSITION);
 		qaws_traversal_evaluate_2d(
-			trav, (qaws_scalar)1.0, QAWS_EVAL_FLAG_POSITION, &r_end);
+			&r_end, trav, (qaws_scalar)1.0, QAWS_EVAL_FLAG_POSITION);
 
 		/* Start should be near (0,0) */
 		TEST_ASSERT(approx_eq(r_start.position.x, (qaws_scalar)0.0),
@@ -310,16 +310,16 @@ static void test_easing(void)
 		qaws_eval_result_2d r_curve_start, r_curve_end;
 
 		/* Get the curve's actual start and end positions */
-		qaws_curve_evaluate_2d(curve, (qaws_scalar)0.0,
-			QAWS_EVAL_FLAG_POSITION, &r_curve_start);
-		qaws_curve_evaluate_2d(curve, (qaws_scalar)1.0,
-			QAWS_EVAL_FLAG_POSITION, &r_curve_end);
+		qaws_curve_evaluate_2d(&r_curve_start, curve,
+			(qaws_scalar)0.0, QAWS_EVAL_FLAG_POSITION);
+		qaws_curve_evaluate_2d(&r_curve_end, curve,
+			(qaws_scalar)1.0, QAWS_EVAL_FLAG_POSITION);
 
 		/* Compute arc length so speed covers the full curve in [0,1] */
 		{
 			qaws_range pr = qaws_curve_get_parameter_range(curve);
-			qaws_curve_compute_arc_length(curve,
-				pr.min_value, pr.max_value, &arc_len);
+			qaws_curve_compute_arc_length(&arc_len,
+				curve, pr.min_value, pr.max_value);
 		}
 
 		for (mi = 0; mi < mode_count; ++mi)
@@ -340,15 +340,15 @@ static void test_easing(void)
 			etdesc.easing = modes[mi];
 			etdesc.wrap_mode = QAWS_WRAP_CLAMP;
 
-			status = qaws_traversal_create(curve, &etdesc, &etrav);
+			status = qaws_traversal_create(&etrav, curve, &etdesc);
 			TEST_ASSERT_STATUS(status);
 
 			status = qaws_traversal_evaluate_2d(
-				etrav, (qaws_scalar)0.0, QAWS_EVAL_FLAG_POSITION, &r_t0);
+				&r_t0, etrav, (qaws_scalar)0.0, QAWS_EVAL_FLAG_POSITION);
 			TEST_ASSERT_STATUS(status);
 
 			status = qaws_traversal_evaluate_2d(
-				etrav, (qaws_scalar)1.0, QAWS_EVAL_FLAG_POSITION, &r_t1);
+				&r_t1, etrav, (qaws_scalar)1.0, QAWS_EVAL_FLAG_POSITION);
 			TEST_ASSERT_STATUS(status);
 
 			sprintf(msg, "%s t=0 start x", mode_names[mi]);
@@ -384,19 +384,19 @@ static void test_easing(void)
 		qdesc.easing = QAWS_EASING_LINEAR;
 		qdesc.wrap_mode = QAWS_WRAP_CLAMP;
 
-		status = qaws_traversal_create(curve, &qdesc, &ltrav);
+		status = qaws_traversal_create(&ltrav, curve, &qdesc);
 		TEST_ASSERT_STATUS(status);
 		qaws_traversal_evaluate_2d(
-			ltrav, (qaws_scalar)0.5, QAWS_EVAL_FLAG_POSITION, &r_linear_mid);
+			&r_linear_mid, ltrav, (qaws_scalar)0.5, QAWS_EVAL_FLAG_POSITION);
 		qaws_traversal_destroy(ltrav);
 
 		/* QUAD_IN_OUT at t=0.5 should be at the halfway position */
 		qdesc.easing = QAWS_EASING_QUAD_IN_OUT;
-		status = qaws_traversal_create(curve, &qdesc, &qtrav);
+		status = qaws_traversal_create(&qtrav, curve, &qdesc);
 		TEST_ASSERT_STATUS(status);
 
 		qaws_traversal_evaluate_2d(
-			qtrav, (qaws_scalar)0.5, QAWS_EVAL_FLAG_POSITION, &r_qio_mid);
+			&r_qio_mid, qtrav, (qaws_scalar)0.5, QAWS_EVAL_FLAG_POSITION);
 
 		TEST_ASSERT(approx_eq(r_qio_mid.position.x, r_linear_mid.position.x),
 			"QUAD_IN_OUT t=0.5 midpoint x");
@@ -423,7 +423,7 @@ static void test_wrap_modes(void)
 	bdesc.control_points = pts;
 	bdesc.control_point_count = 3;
 
-	status = qaws_curve_create_bezier(&bdesc, &curve);
+	status = qaws_curve_create_bezier(&curve, &bdesc);
 	TEST_ASSERT_STATUS(status);
 
 	/* Loop mode: going past end wraps around */
@@ -440,20 +440,20 @@ static void test_wrap_modes(void)
 		tdesc.clamp_to_domain = 1;
 		tdesc.wrap_mode = QAWS_WRAP_LOOP;
 
-		status = qaws_traversal_create(curve, &tdesc, &trav);
+		status = qaws_traversal_create(&trav, curve, &tdesc);
 		TEST_ASSERT_STATUS(status);
 
 		{
 			qaws_range pr = qaws_curve_get_parameter_range(curve);
-			qaws_curve_compute_arc_length(curve,
-				pr.min_value, pr.max_value, &total_len);
+			qaws_curve_compute_arc_length(&total_len,
+				curve, pr.min_value, pr.max_value);
 		}
 
 		/* distance=eps and distance=total_len+eps should map to same point */
 		qaws_traversal_evaluate_2d(
-			trav, eps, QAWS_EVAL_FLAG_POSITION, &r_a);
+			&r_a, trav, eps, QAWS_EVAL_FLAG_POSITION);
 		qaws_traversal_evaluate_2d(
-			trav, total_len + eps, QAWS_EVAL_FLAG_POSITION, &r_b);
+			&r_b, trav, total_len + eps, QAWS_EVAL_FLAG_POSITION);
 
 		TEST_ASSERT(approx_eq_loose(r_a.position.x, r_b.position.x),
 			"loop wraps to start x");
@@ -477,19 +477,19 @@ static void test_wrap_modes(void)
 		tdesc.clamp_to_domain = 1;
 		tdesc.wrap_mode = QAWS_WRAP_PING_PONG;
 
-		status = qaws_traversal_create(curve, &tdesc, &trav);
+		status = qaws_traversal_create(&trav, curve, &tdesc);
 		TEST_ASSERT_STATUS(status);
 
 		{
 			qaws_range pr = qaws_curve_get_parameter_range(curve);
-			qaws_curve_compute_arc_length(curve,
-				pr.min_value, pr.max_value, &total_len);
+			qaws_curve_compute_arc_length(&total_len,
+				curve, pr.min_value, pr.max_value);
 		}
 
 		qaws_traversal_evaluate_2d(
-			trav, eps, QAWS_EVAL_FLAG_POSITION, &r_a);
+			&r_a, trav, eps, QAWS_EVAL_FLAG_POSITION);
 		qaws_traversal_evaluate_2d(
-			trav, (qaws_scalar)2.0 * total_len + eps, QAWS_EVAL_FLAG_POSITION, &r_b);
+			&r_b, trav, (qaws_scalar)2.0 * total_len + eps, QAWS_EVAL_FLAG_POSITION);
 
 		TEST_ASSERT(approx_eq_loose(r_a.position.x, r_b.position.x),
 			"ping-pong returns to start x");
@@ -512,26 +512,26 @@ static void test_wrap_modes(void)
 		tdesc.clamp_to_domain = 1;
 		tdesc.wrap_mode = QAWS_WRAP_CLAMP;
 
-		status = qaws_traversal_create(curve, &tdesc, &trav);
+		status = qaws_traversal_create(&trav, curve, &tdesc);
 		TEST_ASSERT_STATUS(status);
 
 		{
 			qaws_range pr = qaws_curve_get_parameter_range(curve);
-			qaws_curve_compute_arc_length(curve,
-				pr.min_value, pr.max_value, &total_len);
+			qaws_curve_compute_arc_length(&total_len,
+				curve, pr.min_value, pr.max_value);
 		}
 
 		/* Position at distance=0 (start of curve) */
 		qaws_traversal_evaluate_2d(
-			trav, (qaws_scalar)0.0, QAWS_EVAL_FLAG_POSITION, &r_start);
+			&r_start, trav, (qaws_scalar)0.0, QAWS_EVAL_FLAG_POSITION);
 
 		/* Position at distance=total_len (end of curve) */
 		qaws_traversal_evaluate_2d(
-			trav, total_len, QAWS_EVAL_FLAG_POSITION, &r_end);
+			&r_end, trav, total_len, QAWS_EVAL_FLAG_POSITION);
 
 		/* Negative distance should clamp to start */
 		qaws_traversal_evaluate_2d(
-			trav, (qaws_scalar)-10.0, QAWS_EVAL_FLAG_POSITION, &r_neg);
+			&r_neg, trav, (qaws_scalar)-10.0, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT(approx_eq(r_neg.position.x, r_start.position.x),
 			"clamp negative dist x == start x");
 		TEST_ASSERT(approx_eq(r_neg.position.y, r_start.position.y),
@@ -539,7 +539,7 @@ static void test_wrap_modes(void)
 
 		/* Very large distance should clamp to end */
 		qaws_traversal_evaluate_2d(
-			trav, total_len * (qaws_scalar)100.0, QAWS_EVAL_FLAG_POSITION, &r_huge);
+			&r_huge, trav, total_len * (qaws_scalar)100.0, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT(approx_eq_loose(r_huge.position.x, r_end.position.x),
 			"clamp huge dist x == end x");
 		TEST_ASSERT(approx_eq_loose(r_huge.position.y, r_end.position.y),
@@ -562,20 +562,20 @@ static void test_wrap_modes(void)
 		tdesc.clamp_to_domain = 1;
 		tdesc.wrap_mode = QAWS_WRAP_LOOP;
 
-		status = qaws_traversal_create(curve, &tdesc, &trav);
+		status = qaws_traversal_create(&trav, curve, &tdesc);
 		TEST_ASSERT_STATUS(status);
 
 		{
 			qaws_range pr = qaws_curve_get_parameter_range(curve);
-			qaws_curve_compute_arc_length(curve,
-				pr.min_value, pr.max_value, &total_len);
+			qaws_curve_compute_arc_length(&total_len,
+				curve, pr.min_value, pr.max_value);
 		}
 
 		/* Negative distance -eps should wrap to total_len - eps */
 		qaws_traversal_evaluate_2d(
-			trav, -eps, QAWS_EVAL_FLAG_POSITION, &r_neg);
+			&r_neg, trav, -eps, QAWS_EVAL_FLAG_POSITION);
 		qaws_traversal_evaluate_2d(
-			trav, total_len - eps, QAWS_EVAL_FLAG_POSITION, &r_pos);
+			&r_pos, trav, total_len - eps, QAWS_EVAL_FLAG_POSITION);
 
 		TEST_ASSERT(approx_eq_loose(r_neg.position.x, r_pos.position.x),
 			"loop negative wrap x");
@@ -602,7 +602,7 @@ static void test_traversal_advance(void)
 	bdesc.control_points = pts;
 	bdesc.control_point_count = 3;
 
-	status = qaws_curve_create_bezier(&bdesc, &curve);
+	status = qaws_curve_create_bezier(&curve, &bdesc);
 	TEST_ASSERT_STATUS(status);
 
 	{
@@ -618,18 +618,18 @@ static void test_traversal_advance(void)
 		tdesc.clamp_to_domain = 1;
 		tdesc.wrap_mode = QAWS_WRAP_CLAMP;
 
-		status = qaws_traversal_create(curve, &tdesc, &trav);
+		status = qaws_traversal_create(&trav, curve, &tdesc);
 		TEST_ASSERT_STATUS(status);
 
 		/* First advance: should move forward from distance=0 */
 		status = qaws_traversal_advance_2d(
-			trav, (qaws_scalar)0.1, QAWS_EVAL_FLAG_POSITION, &r1);
+			&r1, trav, (qaws_scalar)0.1, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT_STATUS(status);
 		TEST_ASSERT(r1.position.x > (qaws_scalar)0.0, "advance moves forward x");
 
 		/* Second advance: should be further along */
 		status = qaws_traversal_advance_2d(
-			trav, (qaws_scalar)0.1, QAWS_EVAL_FLAG_POSITION, &r2);
+			&r2, trav, (qaws_scalar)0.1, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT_STATUS(status);
 		TEST_ASSERT(r2.position.x > r1.position.x, "second advance further");
 
@@ -638,7 +638,7 @@ static void test_traversal_advance(void)
 		TEST_ASSERT_STATUS(status);
 
 		status = qaws_traversal_advance_2d(
-			trav, (qaws_scalar)0.0, QAWS_EVAL_FLAG_POSITION, &r3);
+			&r3, trav, (qaws_scalar)0.0, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT_STATUS(status);
 		TEST_ASSERT(approx_eq(r3.position.x, (qaws_scalar)0.0),
 			"reset goes to start x");
@@ -648,19 +648,19 @@ static void test_traversal_advance(void)
 		/* Loop mode advance: should wrap around */
 		qaws_traversal_destroy(trav);
 		tdesc.wrap_mode = QAWS_WRAP_LOOP;
-		status = qaws_traversal_create(curve, &tdesc, &trav);
+		status = qaws_traversal_create(&trav, curve, &tdesc);
 		TEST_ASSERT_STATUS(status);
 
 		/* Advance a large amount */
 		status = qaws_traversal_advance_2d(
-			trav, (qaws_scalar)100.0, QAWS_EVAL_FLAG_POSITION, &r1);
+			&r1, trav, (qaws_scalar)100.0, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT_STATUS(status);
 		/* Should still be valid (not NaN) */
 		TEST_ASSERT(r1.position.x == r1.position.x, "loop advance valid x");
 
 		/* NULL checks */
-		status = qaws_traversal_advance_2d(NULL, (qaws_scalar)0.1,
-			QAWS_EVAL_FLAG_POSITION, &r1);
+		status = qaws_traversal_advance_2d(&r1, NULL,
+			(qaws_scalar)0.1, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT(status == QAWS_STATUS_INVALID_ARGUMENT, "advance null trav");
 
 		status = qaws_traversal_reset(NULL);
@@ -685,7 +685,7 @@ static void test_traversal_advance(void)
 		bdesc3d.control_points = pts3d;
 		bdesc3d.control_point_count = 3;
 
-		status = qaws_curve_create_bezier(&bdesc3d, &curve3d);
+		status = qaws_curve_create_bezier(&curve3d, &bdesc3d);
 		TEST_ASSERT_STATUS(status);
 
 		memset(&tdesc3d, 0, sizeof(tdesc3d));
@@ -695,18 +695,18 @@ static void test_traversal_advance(void)
 		tdesc3d.clamp_to_domain = 1;
 		tdesc3d.wrap_mode = QAWS_WRAP_CLAMP;
 
-		status = qaws_traversal_create(curve3d, &tdesc3d, &trav3d);
+		status = qaws_traversal_create(&trav3d, curve3d, &tdesc3d);
 		TEST_ASSERT_STATUS(status);
 
 		/* First advance */
 		status = qaws_traversal_advance_3d(
-			trav3d, (qaws_scalar)0.1, QAWS_EVAL_FLAG_POSITION, &r3d_1);
+			&r3d_1, trav3d, (qaws_scalar)0.1, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT_STATUS(status);
 		TEST_ASSERT(r3d_1.position.x > (qaws_scalar)0.0, "3d advance moves forward x");
 
 		/* Second advance should be further along */
 		status = qaws_traversal_advance_3d(
-			trav3d, (qaws_scalar)0.1, QAWS_EVAL_FLAG_POSITION, &r3d_2);
+			&r3d_2, trav3d, (qaws_scalar)0.1, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT_STATUS(status);
 		TEST_ASSERT(r3d_2.position.x > r3d_1.position.x, "3d second advance further x");
 
@@ -744,9 +744,9 @@ static void test_multi_curve_traversal(void)
 		bdesc2.control_points = pts2;
 		bdesc2.control_point_count = 3;
 
-		s = qaws_curve_create_bezier(&bdesc1, &c1);
+		s = qaws_curve_create_bezier(&c1, &bdesc1);
 		TEST_ASSERT_STATUS(s);
-		s = qaws_curve_create_bezier(&bdesc2, &c2);
+		s = qaws_curve_create_bezier(&c2, &bdesc2);
 		TEST_ASSERT_STATUS(s);
 
 		curves[0] = c1;
@@ -758,13 +758,13 @@ static void test_multi_curve_traversal(void)
 		tdesc.speed = (qaws_scalar)1.0;
 		tdesc.clamp_to_domain = 1;
 
-		s = qaws_traversal_create_multi(curves, 2, &tdesc, &trav);
+		s = qaws_traversal_create_multi(&trav, curves, 2, &tdesc);
 		TEST_ASSERT_STATUS(s);
 		TEST_ASSERT(trav != NULL, "multi-curve traversal created");
 
 		/* At distance=0 => near (0,0) */
-		s = qaws_traversal_evaluate_2d(trav, (qaws_scalar)0.0,
-			QAWS_EVAL_FLAG_POSITION, &r);
+		s = qaws_traversal_evaluate_2d(&r, trav,
+			(qaws_scalar)0.0, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT_STATUS(s);
 		TEST_ASSERT(approx_eq(r.position.x, (qaws_scalar)0.0),
 			"multi trav d=0 x~0");
@@ -772,25 +772,25 @@ static void test_multi_curve_traversal(void)
 			"multi trav d=0 y~0");
 
 		/* Compute total arc length of the chain */
-		s = qaws_curve_compute_arc_length(c1, (qaws_scalar)0.0,
-			(qaws_scalar)1.0, &len1);
+		s = qaws_curve_compute_arc_length(&len1, c1,
+			(qaws_scalar)0.0, (qaws_scalar)1.0);
 		TEST_ASSERT_STATUS(s);
-		s = qaws_curve_compute_arc_length(c2, (qaws_scalar)0.0,
-			(qaws_scalar)1.0, &len2);
+		s = qaws_curve_compute_arc_length(&len2, c2,
+			(qaws_scalar)0.0, (qaws_scalar)1.0);
 		TEST_ASSERT_STATUS(s);
 		total_len = len1 + len2;
 
 		/* At total distance => near (4,0) */
-		s = qaws_traversal_evaluate_2d(trav, total_len,
-			QAWS_EVAL_FLAG_POSITION, &r);
+		s = qaws_traversal_evaluate_2d(&r, trav,
+			total_len, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT_STATUS(s);
 		TEST_ASSERT(scalar_is_finite(r.position.x), "multi trav end x finite");
 		TEST_ASSERT(scalar_is_finite(r.position.y), "multi trav end y finite");
 
 		/* At midpoint distance => somewhere valid */
-		s = qaws_traversal_evaluate_2d(trav,
-			total_len * (qaws_scalar)0.5,
-			QAWS_EVAL_FLAG_POSITION, &r);
+		s = qaws_traversal_evaluate_2d(&r,
+			trav,
+			total_len * (qaws_scalar)0.5, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT_STATUS(s);
 		TEST_ASSERT(scalar_is_finite(r.position.x), "multi trav mid x finite");
 		TEST_ASSERT(scalar_is_finite(r.position.y), "multi trav mid y finite");
@@ -817,7 +817,7 @@ static void test_multi_curve_traversal(void)
 		bdesc.control_points = pts;
 		bdesc.control_point_count = 2;
 
-		s = qaws_curve_create_bezier(&bdesc, &c);
+		s = qaws_curve_create_bezier(&c, &bdesc);
 		TEST_ASSERT_STATUS(s);
 
 		curves[0] = c;
@@ -828,11 +828,11 @@ static void test_multi_curve_traversal(void)
 		tdesc.speed = (qaws_scalar)1.0;
 		tdesc.clamp_to_domain = 1;
 
-		s = qaws_traversal_create_multi(curves, 1, &tdesc, &trav);
+		s = qaws_traversal_create_multi(&trav, curves, 1, &tdesc);
 		TEST_ASSERT_STATUS(s);
 
-		s = qaws_traversal_evaluate_2d(trav, (qaws_scalar)2.5,
-			QAWS_EVAL_FLAG_POSITION, &r);
+		s = qaws_traversal_evaluate_2d(&r, trav,
+			(qaws_scalar)2.5, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT_STATUS(s);
 		TEST_ASSERT(approx_eq(r.position.x, (qaws_scalar)2.5),
 			"single-chain d=2.5 x~2.5");
@@ -857,7 +857,7 @@ static void test_multi_curve_traversal(void)
 		bdesc.control_points = pts;
 		bdesc.control_point_count = 2;
 
-		s = qaws_curve_create_bezier(&bdesc, &c);
+		s = qaws_curve_create_bezier(&c, &bdesc);
 		TEST_ASSERT_STATUS(s);
 
 		curves[0] = c;
@@ -868,17 +868,17 @@ static void test_multi_curve_traversal(void)
 		tdesc.clamp_to_domain = 1;
 
 		/* null curves array */
-		s = qaws_traversal_create_multi(NULL, 2, &tdesc, &trav);
+		s = qaws_traversal_create_multi(&trav, NULL, 2, &tdesc);
 		TEST_ASSERT(s == QAWS_STATUS_INVALID_ARGUMENT,
 			"multi null curves => INVALID_ARGUMENT");
 
 		/* null desc */
-		s = qaws_traversal_create_multi(curves, 1, NULL, &trav);
+		s = qaws_traversal_create_multi(&trav, curves, 1, NULL);
 		TEST_ASSERT(s == QAWS_STATUS_INVALID_ARGUMENT,
 			"multi null desc => INVALID_ARGUMENT");
 
 		/* null out */
-		s = qaws_traversal_create_multi(curves, 1, &tdesc, NULL);
+		s = qaws_traversal_create_multi(NULL, curves, 1, &tdesc);
 		TEST_ASSERT(s == QAWS_STATUS_INVALID_ARGUMENT,
 			"multi null out => INVALID_ARGUMENT");
 
@@ -907,7 +907,7 @@ static void test_scurve_profile(void)
 		bdesc.control_points = pts;
 		bdesc.control_point_count = 4;
 
-		s = qaws_curve_create_bezier(&bdesc, &curve);
+		s = qaws_curve_create_bezier(&curve, &bdesc);
 		TEST_ASSERT_STATUS(s);
 
 		memset(&tdesc, 0, sizeof(tdesc));
@@ -920,20 +920,20 @@ static void test_scurve_profile(void)
 		tdesc.end_time = (qaws_scalar)5.0;
 		tdesc.clamp_to_domain = 1;
 
-		s = qaws_traversal_create(curve, &tdesc, &trav);
+		s = qaws_traversal_create(&trav, curve, &tdesc);
 		TEST_ASSERT_STATUS(s);
 		TEST_ASSERT(trav != NULL, "S-curve traversal created");
 
 		/* At t=start_time => near curve start */
-		s = qaws_traversal_evaluate_2d(trav, (qaws_scalar)0.0,
-			QAWS_EVAL_FLAG_POSITION, &r);
+		s = qaws_traversal_evaluate_2d(&r, trav,
+			(qaws_scalar)0.0, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT_STATUS(s);
 		TEST_ASSERT(scalar_is_finite(r.position.x), "scurve t=0 x finite");
 		TEST_ASSERT(scalar_is_finite(r.position.y), "scurve t=0 y finite");
 
 		/* At t=end_time => somewhere along curve */
-		s = qaws_traversal_evaluate_2d(trav, (qaws_scalar)5.0,
-			QAWS_EVAL_FLAG_POSITION, &r);
+		s = qaws_traversal_evaluate_2d(&r, trav,
+			(qaws_scalar)5.0, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT_STATUS(s);
 		TEST_ASSERT(scalar_is_finite(r.position.x), "scurve t=end x finite");
 		TEST_ASSERT(scalar_is_finite(r.position.y), "scurve t=end y finite");
@@ -941,8 +941,8 @@ static void test_scurve_profile(void)
 		/* Intermediate positions are smooth (all finite) */
 		for (i = 1; i <= 4; i++) {
 			qaws_scalar t = (qaws_scalar)i;
-			s = qaws_traversal_evaluate_2d(trav, t,
-				QAWS_EVAL_FLAG_POSITION, &r);
+			s = qaws_traversal_evaluate_2d(&r, trav,
+				t, QAWS_EVAL_FLAG_POSITION);
 			TEST_ASSERT_STATUS(s);
 			TEST_ASSERT(scalar_is_finite(r.position.x),
 				"scurve intermediate x finite");
@@ -970,7 +970,7 @@ static void test_scurve_profile(void)
 		bdesc.control_points = pts;
 		bdesc.control_point_count = 2;
 
-		s = qaws_curve_create_bezier(&bdesc, &curve);
+		s = qaws_curve_create_bezier(&curve, &bdesc);
 		TEST_ASSERT_STATUS(s);
 
 		memset(&tdesc, 0, sizeof(tdesc));
@@ -983,11 +983,11 @@ static void test_scurve_profile(void)
 		tdesc.end_time = (qaws_scalar)2.0;
 		tdesc.clamp_to_domain = 1;
 
-		s = qaws_traversal_create(curve, &tdesc, &trav);
+		s = qaws_traversal_create(&trav, curve, &tdesc);
 		TEST_ASSERT_STATUS(s);
 
-		s = qaws_traversal_evaluate_2d(trav, (qaws_scalar)1.0,
-			QAWS_EVAL_FLAG_POSITION, &r);
+		s = qaws_traversal_evaluate_2d(&r, trav,
+			(qaws_scalar)1.0, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT_STATUS(s);
 		TEST_ASSERT(scalar_is_finite(r.position.x),
 			"high-jerk scurve mid x finite");
@@ -1017,7 +1017,7 @@ static void test_custom_speed(void)
 		bdesc.control_points = pts;
 		bdesc.control_point_count = 2;
 
-		s = qaws_curve_create_bezier(&bdesc, &curve);
+		s = qaws_curve_create_bezier(&curve, &bdesc);
 		TEST_ASSERT_STATUS(s);
 
 		memset(&tdesc, 0, sizeof(tdesc));
@@ -1029,27 +1029,27 @@ static void test_custom_speed(void)
 		tdesc.end_time = (qaws_scalar)5.0;
 		tdesc.clamp_to_domain = 1;
 
-		s = qaws_traversal_create(curve, &tdesc, &trav);
+		s = qaws_traversal_create(&trav, curve, &tdesc);
 		TEST_ASSERT_STATUS(s);
 		TEST_ASSERT(trav != NULL, "custom speed traversal created");
 
 		/* Evaluate at start */
-		s = qaws_traversal_evaluate_2d(trav, (qaws_scalar)0.0,
-			QAWS_EVAL_FLAG_POSITION, &r0);
+		s = qaws_traversal_evaluate_2d(&r0, trav,
+			(qaws_scalar)0.0, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT_STATUS(s);
 		TEST_ASSERT(scalar_is_finite(r0.position.x),
 			"custom speed t=0 x finite");
 
 		/* Evaluate at midpoint */
-		s = qaws_traversal_evaluate_2d(trav, (qaws_scalar)2.5,
-			QAWS_EVAL_FLAG_POSITION, &r1);
+		s = qaws_traversal_evaluate_2d(&r1, trav,
+			(qaws_scalar)2.5, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT_STATUS(s);
 		TEST_ASSERT(scalar_is_finite(r1.position.x),
 			"custom speed t=mid x finite");
 
 		/* Evaluate at end */
-		s = qaws_traversal_evaluate_2d(trav, (qaws_scalar)5.0,
-			QAWS_EVAL_FLAG_POSITION, &r2);
+		s = qaws_traversal_evaluate_2d(&r2, trav,
+			(qaws_scalar)5.0, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT_STATUS(s);
 		TEST_ASSERT(scalar_is_finite(r2.position.x),
 			"custom speed t=end x finite");
@@ -1080,7 +1080,7 @@ static void test_custom_speed(void)
 		bdesc.control_points = pts;
 		bdesc.control_point_count = 3;
 
-		s = qaws_curve_create_bezier(&bdesc, &curve);
+		s = qaws_curve_create_bezier(&curve, &bdesc);
 		TEST_ASSERT_STATUS(s);
 
 		memset(&tdesc, 0, sizeof(tdesc));
@@ -1092,13 +1092,13 @@ static void test_custom_speed(void)
 		tdesc.end_time = (qaws_scalar)3.0;
 		tdesc.clamp_to_domain = 1;
 
-		s = qaws_traversal_create(curve, &tdesc, &trav);
+		s = qaws_traversal_create(&trav, curve, &tdesc);
 		TEST_ASSERT_STATUS(s);
 
 		for (i = 0; i <= 6; i++) {
 			qaws_scalar t = (qaws_scalar)i * (qaws_scalar)0.5;
-			s = qaws_traversal_evaluate_2d(trav, t,
-				QAWS_EVAL_FLAG_POSITION, &r);
+			s = qaws_traversal_evaluate_2d(&r, trav,
+				t, QAWS_EVAL_FLAG_POSITION);
 			TEST_ASSERT_STATUS(s);
 			TEST_ASSERT(scalar_is_finite(r.position.x),
 				"accel speed eval x finite");
@@ -1128,7 +1128,7 @@ static void test_custom_speed(void)
 		bdesc.control_points = pts;
 		bdesc.control_point_count = 2;
 
-		s = qaws_curve_create_bezier(&bdesc, &curve);
+		s = qaws_curve_create_bezier(&curve, &bdesc);
 		TEST_ASSERT_STATUS(s);
 
 		memset(&tdesc, 0, sizeof(tdesc));
@@ -1139,12 +1139,12 @@ static void test_custom_speed(void)
 		tdesc.end_time = (qaws_scalar)1.0;
 		tdesc.clamp_to_domain = 1;
 
-		s = qaws_traversal_create(curve, &tdesc, &trav);
+		s = qaws_traversal_create(&trav, curve, &tdesc);
 		TEST_ASSERT_STATUS(s);
 
 		/* Should still evaluate without crash */
-		s = qaws_traversal_evaluate_2d(trav, (qaws_scalar)0.5,
-			QAWS_EVAL_FLAG_POSITION, &r);
+		s = qaws_traversal_evaluate_2d(&r, trav,
+			(qaws_scalar)0.5, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT_STATUS(s);
 		TEST_ASSERT(scalar_is_finite(r.position.x),
 			"null custom fn fallback x finite");

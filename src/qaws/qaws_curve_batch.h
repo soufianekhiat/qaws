@@ -84,18 +84,18 @@ typedef struct qaws_curve_batch_stats
 /* Writes min(count, capacity) hits; *out_count is the total found.
    out_stats may be NULL. */
 qaws_status qaws_curve_batch_find_intersections_2d(
-	qaws_curve_batch_desc const* desc,
 	qaws_curve_batch_hit_2d* out_hits,
-	unsigned int hit_capacity,
 	unsigned int* out_count,
-	qaws_curve_batch_stats* out_stats);
+	qaws_curve_batch_stats* out_stats,
+	unsigned int hit_capacity,
+	qaws_curve_batch_desc const* desc);
 
 qaws_status qaws_curve_batch_find_intersections_3d(
-	qaws_curve_batch_desc const* desc,
 	qaws_curve_batch_hit_3d* out_hits,
-	unsigned int hit_capacity,
 	unsigned int* out_count,
-	qaws_curve_batch_stats* out_stats);
+	qaws_curve_batch_stats* out_stats,
+	unsigned int hit_capacity,
+	qaws_curve_batch_desc const* desc);
 
 /*
  * Level crossings: where N curves cross the level sets h = L of a scalar
@@ -138,10 +138,10 @@ typedef struct qaws_level_crossing
 
 /* Writes min(count, capacity) crossings; *out_count is the total. */
 qaws_status qaws_curve_batch_find_level_crossings(
-	qaws_level_crossing_desc const* desc,
 	qaws_level_crossing* out_crossings,
+	unsigned int* out_count,
 	unsigned int capacity,
-	unsigned int* out_count);
+	qaws_level_crossing_desc const* desc);
 
 /*
  * Closest points: for every query point, the nearest point over N curves
@@ -176,9 +176,9 @@ typedef struct qaws_closest_point
 /* out_points receives point_count results. out_stats may be NULL
    (candidate_count: segments refined, hit_count: points with a curve). */
 qaws_status qaws_curve_batch_find_closest(
-	qaws_closest_desc const* desc,
 	qaws_closest_point* out_points,
-	qaws_curve_batch_stats* out_stats);
+	qaws_curve_batch_stats* out_stats,
+	qaws_closest_desc const* desc);
 
 /*
  * Prepared sets: the flattening (the costly part: curve evaluations) done
@@ -193,33 +193,33 @@ qaws_status qaws_curve_batch_find_closest(
  */
 typedef struct qaws_curve_set qaws_curve_set;
 
-qaws_status qaws_curve_set_create(qaws_curve_batch_desc const* desc, qaws_curve_set** out_set);
+qaws_status qaws_curve_set_create(qaws_curve_set** out_set, qaws_curve_batch_desc const* desc);
 void qaws_curve_set_destroy(qaws_curve_set* set);
 unsigned int qaws_curve_set_get_segment_count(qaws_curve_set const* set);
 
 qaws_status qaws_curve_set_find_intersections_2d(
+	qaws_curve_batch_hit_2d* out_hits,
+	unsigned int* out_count,
+	qaws_curve_batch_stats* out_stats,
 	qaws_curve_set const* set,
 	qaws_curve_set const* other,
-	qaws_curve_batch_hit_2d* out_hits,
-	unsigned int hit_capacity,
-	unsigned int* out_count,
-	qaws_curve_batch_stats* out_stats);
+	unsigned int hit_capacity);
 
 /* closest points of a prepared set (its own flatness) */
 qaws_status qaws_curve_set_find_closest(
+	qaws_closest_point* out_points,
+	qaws_curve_batch_stats* out_stats,
 	qaws_curve_set const* set,
 	qaws_scalar const* points,
 	unsigned int point_count,
-	qaws_scalar max_distance,
-	qaws_closest_point* out_points,
-	qaws_curve_batch_stats* out_stats);
+	qaws_scalar max_distance);
 
 qaws_status qaws_curve_set_find_intersections_3d(
+	qaws_curve_batch_hit_3d* out_hits,
+	unsigned int* out_count,
+	qaws_curve_batch_stats* out_stats,
 	qaws_curve_set const* set,
 	qaws_curve_set const* other,
-	qaws_curve_batch_hit_3d* out_hits,
-	unsigned int hit_capacity,
-	unsigned int* out_count,
-	qaws_curve_batch_stats* out_stats);
+	unsigned int hit_capacity);
 
 #endif /* QAWS_CURVE_BATCH_H */

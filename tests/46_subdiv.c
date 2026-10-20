@@ -20,8 +20,8 @@ static void obj_subdiv_mesh(obj_writer* obj, qaws_surface const* surface)
 	unsigned int first_v, first_n;
 	unsigned int i;
 
-	if (qaws_surface_subdiv_get_mesh(surface, &verts, &normals, &tris,
-		&vert_count, &tri_count) != QAWS_STATUS_OK)
+	if (qaws_surface_subdiv_get_mesh(&verts, &normals, &tris, &vert_count,
+		&tri_count, surface) != QAWS_STATUS_OK)
 		return;
 
 	first_v = obj->vertex_count + 1;
@@ -83,7 +83,7 @@ static void test_catmull_clark_cube(void)
 	desc.scheme = QAWS_SUBDIV_CATMULL_CLARK;
 	desc.subdivision_level = 3;
 
-	status = qaws_surface_create_subdiv(&desc, &surface);
+	status = qaws_surface_create_subdiv(&surface, &desc);
 	TEST_ASSERT_STATUS(status);
 	TEST_ASSERT(surface != NULL, "CC subdivision surface created");
 	TEST_ASSERT(qaws_surface_get_kind(surface) == QAWS_SURFACE_KIND_SUBDIV,
@@ -91,8 +91,8 @@ static void test_catmull_clark_cube(void)
 
 	/* Evaluate at center */
 	memset(&r, 0, sizeof(r));
-	status = qaws_surface_evaluate(surface, (qaws_scalar)0.5, (qaws_scalar)0.5,
-		QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL, &r);
+	status = qaws_surface_evaluate(&r, surface, (qaws_scalar)0.5,
+		(qaws_scalar)0.5, QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL);
 	TEST_ASSERT_STATUS(status);
 	printf("    center: (%.4f, %.4f, %.4f)\n",
 		(double)r.position.x, (double)r.position.y, (double)r.position.z);
@@ -101,8 +101,8 @@ static void test_catmull_clark_cube(void)
 
 	/* Check corners and edges */
 	memset(&r, 0, sizeof(r));
-	qaws_surface_evaluate(surface, (qaws_scalar)0, (qaws_scalar)0,
-		QAWS_SURFACE_EVAL_POSITION, &r);
+	qaws_surface_evaluate(&r, surface, (qaws_scalar)0,
+		(qaws_scalar)0, QAWS_SURFACE_EVAL_POSITION);
 	printf("    corner(0,0): (%.4f, %.4f, %.4f)\n",
 		(double)r.position.x, (double)r.position.y, (double)r.position.z);
 
@@ -112,7 +112,7 @@ static void test_catmull_clark_cube(void)
 		qaws_vec3 const* mn;
 		unsigned int const* mt;
 		unsigned int mvc, mtc;
-		status = qaws_surface_subdiv_get_mesh(surface, &mv, &mn, &mt, &mvc, &mtc);
+		status = qaws_surface_subdiv_get_mesh(&mv, &mn, &mt, &mvc, &mtc, surface);
 		TEST_ASSERT_STATUS(status);
 		printf("    mesh: %u vertices, %u triangles\n", mvc, mtc);
 		TEST_ASSERT(mvc > 0, "mesh has vertices");
@@ -173,14 +173,14 @@ static void test_loop_tetrahedron(void)
 	desc.scheme = QAWS_SUBDIV_LOOP;
 	desc.subdivision_level = 3;
 
-	status = qaws_surface_create_subdiv(&desc, &surface);
+	status = qaws_surface_create_subdiv(&surface, &desc);
 	TEST_ASSERT_STATUS(status);
 	TEST_ASSERT(surface != NULL, "Loop subdivision surface created");
 
 	/* Evaluate */
 	memset(&r, 0, sizeof(r));
-	qaws_surface_evaluate(surface, (qaws_scalar)0.5, (qaws_scalar)0.5,
-		QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL, &r);
+	qaws_surface_evaluate(&r, surface, (qaws_scalar)0.5,
+		(qaws_scalar)0.5, QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL);
 	printf("    center: (%.4f, %.4f, %.4f)\n",
 		(double)r.position.x, (double)r.position.y, (double)r.position.z);
 
@@ -227,13 +227,13 @@ static void test_subdiv_plane(void)
 	desc.scheme = QAWS_SUBDIV_CATMULL_CLARK;
 	desc.subdivision_level = 2;
 
-	status = qaws_surface_create_subdiv(&desc, &surface);
+	status = qaws_surface_create_subdiv(&surface, &desc);
 	TEST_ASSERT_STATUS(status);
 
 	/* Evaluate at center - z should be ~0 */
 	memset(&r, 0, sizeof(r));
-	qaws_surface_evaluate(surface, (qaws_scalar)0.5, (qaws_scalar)0.5,
-		QAWS_SURFACE_EVAL_POSITION, &r);
+	qaws_surface_evaluate(&r, surface, (qaws_scalar)0.5,
+		(qaws_scalar)0.5, QAWS_SURFACE_EVAL_POSITION);
 	printf("    center z: %.6f (should be ~0)\n", (double)r.position.z);
 	{
 		qaws_scalar abs_z = r.position.z < 0 ? -r.position.z : r.position.z;

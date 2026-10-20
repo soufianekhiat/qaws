@@ -41,8 +41,8 @@ static qaws_surface_curve* smt_line(qaws_surface const* s, double a, double b, d
 	memset(&bd, 0, sizeof(bd));
 	bd.dimension = QAWS_DIMENSION_2D; bd.degree = 1; bd.control_points = cp; bd.control_point_count = 2;
 	*k = NULL;
-	qaws_curve_create_bezier(&bd, k);
-	qaws_surface_curve_create_uv(s, *k, &r);
+	qaws_curve_create_bezier(k, &bd);
+	qaws_surface_curve_create_uv(&r, s, *k);
 	return r;
 }
 
@@ -56,10 +56,10 @@ static qaws_surface* smt_sphere(double R, qaws_curve** prof)
 	g.radius = (qaws_scalar)R; g.angle_start = (qaws_scalar)(-SMT_PI / 2); g.angle_end = (qaws_scalar)(SMT_PI / 2);
 	memset(&ad, 0, sizeof(ad));
 	ad.dimension = QAWS_DIMENSION_2D; ad.segments = &g; ad.segment_count = 1;
-	qaws_curve_create_arc(&ad, prof);
+	qaws_curve_create_arc(prof, &ad);
 	memset(&rd, 0, sizeof(rd));
 	rd.profile = *prof; rd.axis_direction.z = 1;
-	qaws_surface_create_revolution(&rd, &s);
+	qaws_surface_create_revolution(&s, &rd);
 	return s;
 }
 
@@ -86,15 +86,15 @@ static void test_sphere(void)
 		pa[0] = a; pb[0] = b;
 		B[0].curves = pa; B[0].curve_count = 1; B[0].closed = 1;
 		B[1].curves = pb; B[1].curve_count = 1; B[1].closed = 1;
-		qaws_surface_clip(s, QAWS_CLIP_NONE, QAWS_FILL_NON_ZERO, B, 2, NULL, 0, &r);
-		st = qaws_surface_region_medial_axis(r, &md, &m);
+		qaws_surface_clip(&r, s, B, NULL, 2, 0, QAWS_CLIP_NONE, QAWS_FILL_NON_ZERO);
+		st = qaws_surface_region_medial_axis(&m, r, &md);
 		if (st == QAWS_STATUS_OK)
 			for (i = 0; i < (n = qaws_surface_medial_axis_get_segment_count(m)); i++)
 			{
 				qaws_vec2 p[2];
 				qaws_scalar rr[2];
 				unsigned int k;
-				qaws_surface_medial_axis_get_segment(m, i, p, rr);
+				qaws_surface_medial_axis_get_segment(p, rr, m, i);
 				for (k = 0; k < 2; k++)
 				{
 					if (fabs(p[k].y - 0.5) * SMT_PI * R > worst) worst = fabs(p[k].y - 0.5) * SMT_PI * R;
@@ -124,21 +124,21 @@ static void test_sphere(void)
 		v[0] = smt_uv(0.3, 0.4); v[1] = smt_uv(0.45, 0.42); v[2] = smt_uv(0.37, 0.65);
 		for (i = 0; i < 3; i++)
 		{
-			qaws_surface_curve_create_geodesic(s, v[i], v[(i + 1) % 3], 0, &t[i]);
+			qaws_surface_curve_create_geodesic(&t[i], s, v[i], v[(i + 1) % 3], 0);
 			pt[i] = t[i];
-			qaws_surface_curve_get_length(t[i], &la[i]);
+			qaws_surface_curve_get_length(&la[i], t[i]);
 			a[i] = (double)la[i] / R;
 		}
 		T.curves = pt; T.curve_count = 3; T.closed = 1;
-		qaws_surface_clip(s, QAWS_CLIP_NONE, QAWS_FILL_NON_ZERO, &T, 1, NULL, 0, &r);
+		qaws_surface_clip(&r, s, &T, NULL, 1, 0, QAWS_CLIP_NONE, QAWS_FILL_NON_ZERO);
 		ss = 0.5 * (a[0] + a[1] + a[2]);
 		inr = R * atan(sqrt(sin(ss - a[0]) * sin(ss - a[1]) * sin(ss - a[2]) / sin(ss)));
-		st = qaws_surface_region_medial_axis(r, &md, &m);
+		st = qaws_surface_region_medial_axis(&m, r, &md);
 		if (st == QAWS_STATUS_OK)
 		{
 			nj = qaws_surface_medial_axis_get_junction_count(m);
-			if (nj) qaws_surface_medial_axis_get_junction(m, 0, &jp, &jr);
-			qaws_surface_medial_axis_get_max_inscribed(m, &bp, &br);
+			if (nj) qaws_surface_medial_axis_get_junction(&jp, &jr, m, 0);
+			qaws_surface_medial_axis_get_max_inscribed(&bp, &br, m);
 		}
 		sprintf(msg, "sphere: a geodesic triangle, %u junction at the inradius %.2g off, the largest inscribed circle %.2g off",
 			nj, fabs((double)jr - inr), fabs((double)br - inr));
@@ -196,10 +196,10 @@ static void test_cylinder(void)
 	g.radius = (qaws_scalar)Rc; g.angle_end = (qaws_scalar)(2 * SMT_PI);
 	memset(&ad, 0, sizeof(ad));
 	ad.dimension = QAWS_DIMENSION_2D; ad.segments = &g; ad.segment_count = 1;
-	qaws_curve_create_arc(&ad, &circle);
+	qaws_curve_create_arc(&circle, &ad);
 	memset(&ed, 0, sizeof(ed));
 	ed.profile = circle; ed.direction.z = 1; ed.length = (qaws_scalar)Hc;
-	qaws_surface_create_extrusion(&ed, &cy);
+	qaws_surface_create_extrusion(&cy, &ed);
 	ru = qaws_surface_get_u_range(cy);
 	P = (double)ru.max_value - ru.min_value;
 	u0 = ru.min_value + 0.2 * P; u1 = ru.min_value + 0.55 * P;
@@ -209,17 +209,17 @@ static void test_cylinder(void)
 	e[2] = smt_line(cy, u1, v1, u0, v1, &k[2]); e[3] = smt_line(cy, u0, v1, u0, v0, &k[3]);
 	for (i = 0; i < 4; i++) pe[i] = e[i];
 	Q.curves = pe; Q.curve_count = 4; Q.closed = 1;
-	qaws_surface_clip(cy, QAWS_CLIP_NONE, QAWS_FILL_NON_ZERO, &Q, 1, NULL, 0, &r);
+	qaws_surface_clip(&r, cy, &Q, NULL, 1, 0, QAWS_CLIP_NONE, QAWS_FILL_NON_ZERO);
 	memset(&md, 0, sizeof(md));
 	md.resolution = (qaws_scalar)0.05;
-	st = qaws_surface_region_medial_axis(r, &md, &m);
+	st = qaws_surface_region_medial_axis(&m, r, &md);
 	if (st == QAWS_STATUS_OK)
 		for (i = 0; i < (n = qaws_surface_medial_axis_get_segment_count(m)); i++)
 		{
 			qaws_vec2 p[2];
 			qaws_scalar rr[2];
 			unsigned int q;
-			qaws_surface_medial_axis_get_segment(m, i, p, rr);
+			qaws_surface_medial_axis_get_segment(p, rr, m, i);
 			for (q = 0; q < 2; q++)
 			{
 				double x = ((double)p[q].x - u0) / P * 2 * SMT_PI * Rc, y = ((double)p[q].y - v0) * Hc;
@@ -286,10 +286,10 @@ static void test_mitered(void)
 	g.radius = (qaws_scalar)Rc; g.angle_end = (qaws_scalar)(2 * SMT_PI);
 	memset(&ad, 0, sizeof(ad));
 	ad.dimension = QAWS_DIMENSION_2D; ad.segments = &g; ad.segment_count = 1;
-	qaws_curve_create_arc(&ad, &circle);
+	qaws_curve_create_arc(&circle, &ad);
 	memset(&ed, 0, sizeof(ed));
 	ed.profile = circle; ed.direction.z = 1; ed.length = (qaws_scalar)Hc;
-	qaws_surface_create_extrusion(&ed, &cy);
+	qaws_surface_create_extrusion(&cy, &ed);
 	ru = qaws_surface_get_u_range(cy);
 	P = (double)ru.max_value - ru.min_value;
 	u0 = ru.min_value + 0.2 * P;
@@ -302,17 +302,17 @@ static void test_mitered(void)
 		pe[i] = e[i];
 	}
 	Q.curves = pe; Q.curve_count = 6; Q.closed = 1;
-	qaws_surface_clip(cy, QAWS_CLIP_NONE, QAWS_FILL_NON_ZERO, &Q, 1, NULL, 0, &r);
+	qaws_surface_clip(&r, cy, &Q, NULL, 1, 0, QAWS_CLIP_NONE, QAWS_FILL_NON_ZERO);
 	memset(&md, 0, sizeof(md));
 	md.resolution = (qaws_scalar)0.04;
-	st = qaws_surface_region_mitered_skeleton(r, &md, &m);
+	st = qaws_surface_region_mitered_skeleton(&m, r, &md);
 	if (st == QAWS_STATUS_OK)
 		for (i = 0; i < (n = qaws_surface_medial_axis_get_segment_count(m)); i++)
 		{
 			qaws_vec2 p[2];
 			qaws_scalar rr[2];
 			unsigned int q;
-			qaws_surface_medial_axis_get_segment(m, i, p, rr);
+			qaws_surface_medial_axis_get_segment(p, rr, m, i);
 			for (q = 0; q < 2; q++)
 			{
 				double x = ((double)p[q].x - u0) / P * 2 * SMT_PI * Rc / w, y = ((double)p[q].y - v0) * Hc / w, t = 0, d = smt_l_skeleton(x, y, &t);
@@ -351,14 +351,14 @@ static void test_wavy(void)
 	for (i = 0; i < 16; i++) { cp[i].x = (qaws_scalar)((i / 4) / 3.0 * 2); cp[i].y = (qaws_scalar)((i % 4) / 3.0 * 2); cp[i].z = (qaws_scalar)z[i]; }
 	memset(&bd, 0, sizeof(bd));
 	bd.u_degree = 3; bd.v_degree = 3; bd.control_points = cp; bd.u_point_count = 4; bd.v_point_count = 4;
-	qaws_surface_create_bezier(&bd, &s);
+	qaws_surface_create_bezier(&s, &bd);
 	corner[0] = smt_uv(0.15, 0.2); corner[1] = smt_uv(0.85, 0.25); corner[2] = smt_uv(0.75, 0.7); corner[3] = smt_uv(0.2, 0.8);
-	for (i = 0; i < 4; i++) { qaws_surface_curve_create_geodesic(s, corner[i], corner[(i + 1) % 4], 0, &q[i]); pq[i] = q[i]; }
+	for (i = 0; i < 4; i++) { qaws_surface_curve_create_geodesic(&q[i], s, corner[i], corner[(i + 1) % 4], 0); pq[i] = q[i]; }
 	Q.curves = pq; Q.curve_count = 4; Q.closed = 1;
-	qaws_surface_clip(s, QAWS_CLIP_NONE, QAWS_FILL_NON_ZERO, &Q, 1, NULL, 0, &r);
+	qaws_surface_clip(&r, s, &Q, NULL, 1, 0, QAWS_CLIP_NONE, QAWS_FILL_NON_ZERO);
 	memset(&md, 0, sizeof(md));
 	md.resolution = (qaws_scalar)0.06;
-	st = qaws_surface_region_medial_axis(r, &md, &m);
+	st = qaws_surface_region_medial_axis(&m, r, &md);
 	if (st == QAWS_STATUS_OK)
 	{
 		n = qaws_surface_medial_axis_get_segment_count(m);
@@ -371,15 +371,15 @@ static void test_wavy(void)
 			qaws_surface_region *in = NULL, *out = NULL;
 			int c1 = 0, c2 = 1;
 			qaws_status s1, s2;
-			qaws_surface_medial_axis_get_segment(m, i, p, rr);
+			qaws_surface_medial_axis_get_segment(p, rr, m, i);
 			if (rr[0] < 1e-3)
 				continue;      /* (an end at a corner, on the boundary) */
-			s1 = qaws_surface_offset(s, QAWS_FILL_NON_ZERO, &Q, 1, -(rr[0] - (qaws_scalar)dlt), 0, &in);
-			s2 = qaws_surface_offset(s, QAWS_FILL_NON_ZERO, &Q, 1, -(rr[0] + (qaws_scalar)dlt), 0, &out);
+			s1 = qaws_surface_offset(&in, s, &Q, 1, QAWS_FILL_NON_ZERO, -(rr[0] - (qaws_scalar)dlt), 0);
+			s2 = qaws_surface_offset(&out, s, &Q, 1, QAWS_FILL_NON_ZERO, -(rr[0] + (qaws_scalar)dlt), 0);
 			if (s1 == QAWS_STATUS_OK && s2 == QAWS_STATUS_OK)
 			{
-				qaws_surface_region_contains(in, p[0], &c1);
-				if (out) qaws_surface_region_contains(out, p[0], &c2);
+				qaws_surface_region_contains(&c1, in, p[0]);
+				if (out) qaws_surface_region_contains(&c2, out, p[0]);
 				checked++;
 				if (c1 == 1 && c2 == 0) good++;
 			}
@@ -398,11 +398,11 @@ static void test_wavy(void)
 		qaws_status s1 = QAWS_STATUS_INVALID_ARGUMENT, s2 = QAWS_STATUS_INVALID_ARGUMENT;
 		if (st == QAWS_STATUS_OK)
 		{
-			qaws_surface_medial_axis_get_max_inscribed(m, &bc, &br);
-			s1 = qaws_surface_offset(s, QAWS_FILL_NON_ZERO, &Q, 1, -(br - (qaws_scalar)dlt), 0, &in);
-			s2 = qaws_surface_offset(s, QAWS_FILL_NON_ZERO, &Q, 1, -(br + (qaws_scalar)dlt), 0, &out);
-			if (in) qaws_surface_region_get_area(in, &a1);
-			if (out) qaws_surface_region_get_area(out, &a2);
+			qaws_surface_medial_axis_get_max_inscribed(&bc, &br, m);
+			s1 = qaws_surface_offset(&in, s, &Q, 1, QAWS_FILL_NON_ZERO, -(br - (qaws_scalar)dlt), 0);
+			s2 = qaws_surface_offset(&out, s, &Q, 1, QAWS_FILL_NON_ZERO, -(br + (qaws_scalar)dlt), 0);
+			if (in) qaws_surface_region_get_area(&a1, in);
+			if (out) qaws_surface_region_get_area(&a2, out);
 		}
 		sprintf(msg, "wavy patch: the region shrunk by the largest inscribed radius %.6f less %.0e keeps %.2g, by it plus %.0e keeps %.2g",
 			(double)br, dlt, (double)a1, dlt, (double)a2);

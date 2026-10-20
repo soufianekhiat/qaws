@@ -77,12 +77,12 @@ static void test_core_kernels(void)
 	d.control_point_count = CORE_CP;
 	d.knots = g_core_knots;
 	d.knot_count = CORE_KC;
-	TEST_ASSERT_STATUS(qaws_curve_create_bspline(&d, &c));
+	TEST_ASSERT_STATUS(qaws_curve_create_bspline(&c, &d));
 
 	/* tangents */
-	fv = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, dir, CORE_CP, 3);
+	fv = qaws_field_view_make(dir, CORE_CP, QAWS_FIELD_CONTROL_POINTS, 3);
 	views.fields = &fv; views.field_count = 1; views.children = NULL; views.child_count = 0;
-	TEST_ASSERT_STATUS(qaws_curve_eval_batch_tangent_3d(NULL, c, ts, tdots, CORE_SAMPLES, 0x7, &views, NULL, tan));
+	TEST_ASSERT_STATUS(qaws_curve_eval_batch_tangent_3d(NULL, tan, c, ts, tdots, &views, CORE_SAMPLES, 0x7, NULL));
 	for (i = 0; i < CORE_SAMPLES; i++)
 	{
 		int span = core_window(cps, dir, ts[i], lk, lcp, ldir);
@@ -96,12 +96,12 @@ static void test_core_kernels(void)
 	/* runtime adjoint */
 	memset(ref_bar, 0, sizeof(ref_bar));
 	memset(ref_tbar, 0, sizeof(ref_tbar));
-	fv = qaws_field_view_make(QAWS_FIELD_CONTROL_POINTS, ref_bar, CORE_CP, 3);
-	TEST_ASSERT_STATUS(qaws_curve_eval_batch_adjoint_3d(NULL, c, ts, CORE_SAMPLES, 0x7, ybar, &views, ref_tbar));
+	fv = qaws_field_view_make(ref_bar, CORE_CP, QAWS_FIELD_CONTROL_POINTS, 3);
+	TEST_ASSERT_STATUS(qaws_curve_eval_batch_adjoint_3d(&views, ref_tbar, c, ts, ybar, CORE_SAMPLES, 0x7, NULL));
 
 	/* gather: one pass per control point over its samples */
-	TEST_ASSERT_STATUS(qaws_curve_build_support_index(c, ts, CORE_SAMPLES, QAWS_FIELD_CONTROL_POINTS,
-		offsets, CORE_CP + 1, samples, CORE_SAMPLES * (CORE_DEG + 1), &entries));
+	TEST_ASSERT_STATUS(qaws_curve_build_support_index(offsets, samples, &entries, c,
+		ts, CORE_SAMPLES, CORE_CP + 1, CORE_SAMPLES * (CORE_DEG + 1), QAWS_FIELD_CONTROL_POINTS));
 	memset(gat_bar, 0, sizeof(gat_bar));
 	for (e = 0; e < CORE_CP; e++)
 	{

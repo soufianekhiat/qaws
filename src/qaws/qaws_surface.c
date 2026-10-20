@@ -39,11 +39,11 @@ int qaws_surface_is_rational(qaws_surface const* surface)
 }
 
 qaws_status qaws_surface_evaluate(
+	qaws_surface_eval_result* out_result,
 	qaws_surface const* surface,
 	qaws_scalar u,
 	qaws_scalar v,
-	unsigned int eval_flags,
-	qaws_surface_eval_result* out_result)
+	unsigned int eval_flags)
 {
 	if (!surface || !out_result) return QAWS_STATUS_INVALID_ARGUMENT;
 	if (!surface->vtable || !surface->vtable->eval_3d)
@@ -65,28 +65,28 @@ qaws_status qaws_surface_evaluate(
 }
 
 qaws_status qaws_surface_get_normal(
+	qaws_vec3* out_normal,
 	qaws_surface const* surface,
 	qaws_scalar u,
-	qaws_scalar v,
-	qaws_vec3* out_normal)
+	qaws_scalar v)
 {
 	qaws_surface_eval_result r;
 	qaws_status s;
 	if (!surface || !out_normal) return QAWS_STATUS_INVALID_ARGUMENT;
-	s = qaws_surface_evaluate(surface, u, v,
-		QAWS_SURFACE_EVAL_NORMAL, &r);
+	s = qaws_surface_evaluate(&r, surface, u,
+		v, QAWS_SURFACE_EVAL_NORMAL);
 	if (s != QAWS_STATUS_OK) return s;
 	*out_normal = r.normal;
 	return QAWS_STATUS_OK;
 }
 
 qaws_status qaws_surface_sample(
+	qaws_vec3* out_positions,
+	unsigned int* out_position_count,
 	qaws_surface const* surface,
 	unsigned int u_count,
 	unsigned int v_count,
-	qaws_vec3* out_positions,
-	unsigned int position_capacity,
-	unsigned int* out_position_count)
+	unsigned int position_capacity)
 {
 	unsigned int total, ui, vi, idx;
 	qaws_scalar u_min, u_len, v_min, v_len;
@@ -111,8 +111,8 @@ qaws_status qaws_surface_sample(
 		{
 			qaws_scalar v_val = v_min + v_len * (qaws_scalar)vi / (qaws_scalar)(v_count - 1);
 			qaws_surface_eval_result r;
-			qaws_status s = qaws_surface_evaluate(surface, u, v_val,
-				QAWS_SURFACE_EVAL_POSITION, &r);
+			qaws_status s = qaws_surface_evaluate(&r, surface, u,
+				v_val, QAWS_SURFACE_EVAL_POSITION);
 			if (s != QAWS_STATUS_OK) return s;
 			out_positions[idx++] = r.position;
 		}

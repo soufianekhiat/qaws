@@ -86,18 +86,18 @@ typedef struct qaws_clip_desc
 
 typedef struct qaws_clip_result qaws_clip_result;
 
-qaws_status qaws_clip_execute(qaws_clip_desc const* desc, qaws_clip_result** out_result);
+qaws_status qaws_clip_execute(qaws_clip_result** out_result, qaws_clip_desc const* desc);
 
 /* Many independent clips in one call, in parallel through the executor (each
    job's own executor is not used: the jobs are the parallel part); results
    in order, the same as one call each; on a failure none is kept. */
-qaws_status qaws_clip_execute_batch(qaws_clip_desc const* descs, unsigned int count, qaws_batch_executor const* executor,
-	qaws_clip_result** out_results);
+qaws_status qaws_clip_execute_batch(qaws_clip_result** out_results, qaws_clip_desc const* descs, unsigned int count,
+	qaws_batch_executor const* executor);
 void qaws_clip_result_destroy(qaws_clip_result* result);
 
 /* Closed paths. The views stay valid until the result is destroyed. */
 unsigned int qaws_clip_result_get_path_count(qaws_clip_result const* result);
-qaws_status qaws_clip_result_get_path(qaws_clip_result const* result, unsigned int index, qaws_path_2d* out_path);
+qaws_status qaws_clip_result_get_path(qaws_path_2d* out_path, qaws_clip_result const* result, unsigned int index);
 /* Nesting (Clipper2's PolyTree): the enclosing path, QAWS_CLIP_NONE_INDEX at
    the top; holes are the paths at odd depth. */
 unsigned int qaws_clip_result_get_parent(qaws_clip_result const* result, unsigned int index);
@@ -106,16 +106,16 @@ unsigned int qaws_clip_result_get_depth(qaws_clip_result const* result, unsigned
 
 /* Open paths (pieces of the open subjects). */
 unsigned int qaws_clip_result_get_open_path_count(qaws_clip_result const* result);
-qaws_status qaws_clip_result_get_open_path(qaws_clip_result const* result, unsigned int index, qaws_path_2d* out_path);
+qaws_status qaws_clip_result_get_open_path(qaws_path_2d* out_path, qaws_clip_result const* result, unsigned int index);
 
 /* The vertex at the start of each curve of a path (closed: open = 0). */
-qaws_status qaws_clip_result_get_vertices(qaws_clip_result const* result, int open, unsigned int index,
-	qaws_clip_vertex const** out_vertices, unsigned int* out_count);
+qaws_status qaws_clip_result_get_vertices(qaws_clip_vertex const** out_vertices, unsigned int* out_count, qaws_clip_result const* result,
+	int open, unsigned int index);
 
 /* One-call helpers (Clipper2's BooleanOp / Union / Intersect / Difference / Xor). */
-qaws_status qaws_clip_boolean(qaws_clip_type clip_type, qaws_fill_rule fill_rule,
-	qaws_path_2d const* subjects, unsigned int subject_count,
-	qaws_path_2d const* clips, unsigned int clip_count,
-	qaws_clip_result** out_result);
+qaws_status qaws_clip_boolean(qaws_clip_result** out_result, qaws_path_2d const* subjects,
+	qaws_path_2d const* clips, unsigned int subject_count,
+	unsigned int clip_count, qaws_clip_type clip_type,
+	qaws_fill_rule fill_rule);
 
 #endif /* QAWS_CLIP_H */

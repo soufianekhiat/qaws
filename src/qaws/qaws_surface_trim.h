@@ -29,14 +29,14 @@ typedef struct qaws_surface_trim_desc
 } qaws_surface_trim_desc;
 
 qaws_status qaws_surface_create_trimmed(
-	qaws_surface_trim_desc const* desc,
-	qaws_surface** out_surface);
+	qaws_surface** out_surface,
+	qaws_surface_trim_desc const* desc);
 
 /* Query whether a (u,v) point is inside the trimmed region.
    Returns QAWS_STATUS_OK and sets *out_inside to 1 (inside) or 0 (outside). */
 qaws_status qaws_surface_trim_contains(
-	qaws_surface const* trimmed_surface,
-	qaws_scalar u, qaws_scalar v,
-	int* out_inside);
+	int* out_inside,
+	qaws_surface const* trimmed_surface, qaws_scalar u,
+	qaws_scalar v);
 
 #endif /* QAWS_SURFACE_TRIM_H */

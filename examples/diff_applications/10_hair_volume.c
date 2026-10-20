@@ -393,7 +393,7 @@ static qaws_curve* hv_curve(hv_strand const* s, qaws_scalar const* cps)
 	d.control_point_count = (unsigned int)s->ncp;
 	d.knots = s->knots;
 	d.knot_count = (unsigned int)s->ncp + 4;
-	qaws_curve_create_bspline(&d, &c);
+	qaws_curve_create_bspline(&c, &d);
 	return c;
 }
 
@@ -429,7 +429,7 @@ static double hv_energy(hv_scene const* sc, hv_strand const* s, qaws_scalar cons
 
 	for (k = 0; k < m; k++)
 		ts[k] = (qaws_scalar)(r.min_value + (r.max_value - r.min_value) * (k + 0.5) / m);
-	qaws_curve_eval_batch_tangent_3d(NULL, c, ts, NULL, (unsigned int)m, QAWS_EVAL_FLAG_POSITION, NULL, prim, tan);
+	qaws_curve_eval_batch_tangent_3d(prim, tan, c, ts, NULL, NULL, (unsigned int)m, QAWS_EVAL_FLAG_POSITION, NULL);
 	memset(bar, 0, sizeof(qaws_curve_jet_3d) * (size_t)m);
 	memset(grad, 0, sizeof(qaws_scalar) * 3 * (size_t)s->ncp);
 	for (k = 0; k < m; k++)
@@ -472,7 +472,7 @@ static double hv_energy(hv_scene const* sc, hv_strand const* s, qaws_scalar cons
 		bar[k].d[0] = v3((qaws_scalar)g[0], (qaws_scalar)g[1], (qaws_scalar)g[2]);
 		bar[k].channels = QAWS_EVAL_FLAG_POSITION;
 	}
-	qaws_curve_eval_batch_adjoint_3d(NULL, c, ts, (unsigned int)m, QAWS_EVAL_FLAG_POSITION, bar, &views, NULL);
+	qaws_curve_eval_batch_adjoint_3d(&views, NULL, c, ts, bar, (unsigned int)m, QAWS_EVAL_FLAG_POSITION, NULL);
 	{
 		/* bending, scaled by the strand length so short strands may curl */
 		qaws_scalar bg[3 * HV_MAXCP], bend = 0;
@@ -480,7 +480,7 @@ static double hv_energy(hv_scene const* sc, hv_strand const* s, qaws_scalar cons
 		qaws_diff_views bv = one_field(&bf, QAWS_FIELD_CONTROL_POINTS, bg, (unsigned int)s->ncp, 3);
 		double L = s->src->n * 1.0 / S + 1e-3, scale = w_bend / (L * L * L);
 		memset(bg, 0, sizeof(bg));
-		qaws_curve_functional_gradient(NULL, c, QAWS_FUNCTIONAL_BENDING, 0, &bv, &bend);
+		qaws_curve_functional_gradient(&bend, &bv, c, QAWS_FUNCTIONAL_BENDING, 0, NULL);
 		e += scale * bend;
 		for (k = 0; k < 3 * s->ncp; k++)
 			grad[k] += (qaws_scalar)(scale * bg[k]);
@@ -1107,13 +1107,13 @@ static int hv_reconstruct(hv_scene* sc, hv_case const* hc, strand* traced, int* 
 			d.data_point_count = (unsigned int)st->n;
 			d.degree = 3;
 			d.control_point_count = (unsigned int)h->ncp;
-			if (qaws_curve_fit_bspline(&d, &c) != QAWS_STATUS_OK)
+			if (qaws_curve_fit_bspline(&c, &d) != QAWS_STATUS_OK)
 			{
 				free(pts);
 				continue;
 			}
-			qaws_curve_read_field(c, QAWS_FIELD_CONTROL_POINTS, h->cps, 3 * h->ncp, &got);
-			qaws_curve_read_field(c, QAWS_FIELD_KNOTS, h->knots, h->ncp + 4, &got);
+			qaws_curve_read_field(h->cps, &got, c, 3 * h->ncp, QAWS_FIELD_CONTROL_POINTS);
+			qaws_curve_read_field(h->knots, &got, c, h->ncp + 4, QAWS_FIELD_KNOTS);
 			qaws_curve_destroy(c);
 			free(pts);
 			memset(&opt, 0, sizeof(opt));
@@ -1147,7 +1147,7 @@ static int hv_reconstruct(hv_scene* sc, hv_case const* hc, strand* traced, int* 
 						qaws_eval_result_3d e;
 						double p[3], px, py, t, f = (k + 0.5) / 16 * (st->n - 1);
 						int i0 = (int)f;
-						qaws_curve_evaluate_3d(cc, (qaws_scalar)(rr.min_value + (rr.max_value - rr.min_value) * (k + 0.5) / 16), QAWS_EVAL_FLAG_POSITION, &e);
+						qaws_curve_evaluate_3d(&e, cc, (qaws_scalar)(rr.min_value + (rr.max_value - rr.min_value) * (k + 0.5) / 16), QAWS_EVAL_FLAG_POSITION);
 						p[0] = e.position.x; p[1] = e.position.y; p[2] = e.position.z;
 						hv_project(&sc->cam, p, &px, &py, &t);
 						err += (px - st->xy[2 * i0]) * (px - st->xy[2 * i0]) + (py - st->xy[2 * i0 + 1]) * (py - st->xy[2 * i0 + 1]);
@@ -1259,8 +1259,8 @@ static void hv_volume_build(hv_scene const* sc, hv_strand const* hs, int n, hv_v
 		{
 			qaws_eval_result_3d e;
 			double p[3], t[3], tl;
-			qaws_curve_evaluate_3d(cv, (qaws_scalar)(r.min_value + (r.max_value - r.min_value) * q / m),
-				QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &e);
+			qaws_curve_evaluate_3d(&e, cv,
+				(qaws_scalar)(r.min_value + (r.max_value - r.min_value) * q / m), QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1);
 			p[0] = e.position.x; p[1] = e.position.y; p[2] = e.position.z;
 			tl = sqrt(e.d1.x * e.d1.x + e.d1.y * e.d1.y + e.d1.z * e.d1.z) + 1e-12;
 			t[0] = e.d1.x / tl; t[1] = e.d1.y / tl; t[2] = e.d1.z / tl;

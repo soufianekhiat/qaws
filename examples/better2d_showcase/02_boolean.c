@@ -19,8 +19,8 @@ static void bo_path_points(qaws_path_2d const* p, viewport const* v, double** xy
 				*cap = *cap ? 2 * *cap : 1024;
 				*xy = (double*)realloc(*xy, sizeof(double) * 2 * *cap);
 			}
-			qaws_curve_evaluate_2d(p->curves[i], (qaws_scalar)(r.min_value + (r.max_value - r.min_value) * j / BO_SAMPLES),
-				QAWS_EVAL_FLAG_POSITION, &e);
+			qaws_curve_evaluate_2d(&e, p->curves[i],
+				(qaws_scalar)(r.min_value + (r.max_value - r.min_value) * j / BO_SAMPLES), QAWS_EVAL_FLAG_POSITION);
 			(*xy)[2 * *n] = vx(v, e.position.x);
 			(*xy)[2 * *n + 1] = vy(v, e.position.y);
 			(*n)++;
@@ -38,7 +38,7 @@ static void bo_fill(svg* s, viewport const* v, qaws_clip_result const* r, char c
 	for (i = 0; i < qaws_clip_result_get_path_count(r); i++)
 	{
 		qaws_path_2d p;
-		qaws_clip_result_get_path(r, i, &p);
+		qaws_clip_result_get_path(&p, r, i);
 		n = 0;
 		bo_path_points(&p, v, &xy, &n, &cap);
 		for (k = 0; k < n; k++)
@@ -57,7 +57,7 @@ static void bo_curve(svg* s, viewport const* v, qaws_curve const* c, char const*
 	for (j = 0; j <= BO_SAMPLES; j++)
 	{
 		qaws_eval_result_2d e;
-		qaws_curve_evaluate_2d(c, (qaws_scalar)(r.min_value + (r.max_value - r.min_value) * j / BO_SAMPLES), QAWS_EVAL_FLAG_POSITION, &e);
+		qaws_curve_evaluate_2d(&e, c, (qaws_scalar)(r.min_value + (r.max_value - r.min_value) * j / BO_SAMPLES), QAWS_EVAL_FLAG_POSITION);
 		xy[2 * j] = vx(v, e.position.x);
 		xy[2 * j + 1] = vy(v, e.position.y);
 	}
@@ -73,10 +73,10 @@ static void bo_boundaries(svg* s, viewport const* v, qaws_clip_result const* r)
 		qaws_path_2d p;
 		qaws_clip_vertex const* vt = NULL;
 		unsigned int nv = 0;
-		qaws_clip_result_get_path(r, i, &p);
+		qaws_clip_result_get_path(&p, r, i);
 		for (k = 0; k < p.curve_count; k++)
 			bo_curve(s, v, p.curves[k], cols[c++ & 1], 2.4, 0);
-		qaws_clip_result_get_vertices(r, 0, i, &vt, &nv);
+		qaws_clip_result_get_vertices(&vt, &nv, r, 0, i);
 		for (k = 0; k < nv; k++)
 			if (vt[k].operand_b != QAWS_CLIP_NONE_INDEX)
 				svg_circle(s, vx(v, vt[k].position.x), vy(v, vt[k].position.y), 3.2, "#1a7f37", "#ffffff");
@@ -84,7 +84,7 @@ static void bo_boundaries(svg* s, viewport const* v, qaws_clip_result const* r)
 	for (i = 0; i < qaws_clip_result_get_open_path_count(r); i++)
 	{
 		qaws_path_2d p;
-		qaws_clip_result_get_open_path(r, i, &p);
+		qaws_clip_result_get_open_path(&p, r, i);
 		for (k = 0; k < p.curve_count; k++)
 			bo_curve(s, v, p.curves[k], "#cf222e", 3.2, 0);
 	}
@@ -96,7 +96,7 @@ static qaws_curve* bo_polyline(double const* xy, unsigned int n)
 	qaws_curve* c = NULL;
 	unsigned int i;
 	for (i = 0; i < 2 * n; i++) p[i] = (qaws_scalar)xy[i];
-	qaws_curve_create_polyline_2d(p, n, 1, &c);
+	qaws_curve_create_polyline_2d(&c, p, n, 1);
 	return c;
 }
 
@@ -119,7 +119,7 @@ static qaws_curve* bo_blob(double cx, double cy, double r, double wobble, unsign
 	memset(&d, 0, sizeof(d));
 	d.dimension = QAWS_DIMENSION_2D; d.degree = 3; d.control_points = cp; d.control_point_count = N + 3;
 	d.knots = kn; d.knot_count = N + 3 + 4;
-	qaws_curve_create_bspline(&d, &c);
+	qaws_curve_create_bspline(&c, &d);
 	return c;
 }
 
@@ -140,8 +140,8 @@ static void demo_boolean(void)
 		sq_a = bo_polyline(a, 4);
 		sq_b = bo_polyline(b, 4);
 	}
-	qaws_curve_create_ellipse_2d(0, 0, (qaws_scalar)1.2, (qaws_scalar)1.2, 0, &circ_a);
-	qaws_curve_create_ellipse_2d((qaws_scalar)1.0, (qaws_scalar)0.3, (qaws_scalar)1.4, (qaws_scalar)0.8, (qaws_scalar)0.5, &circ_b);
+	qaws_curve_create_ellipse_2d(&circ_a, 0, 0, (qaws_scalar)1.2, (qaws_scalar)1.2, 0);
+	qaws_curve_create_ellipse_2d(&circ_b, (qaws_scalar)1.0, (qaws_scalar)0.3, (qaws_scalar)1.4, (qaws_scalar)0.8, (qaws_scalar)0.5);
 	blob_a = bo_blob(0, 0, 1.2, 0.25, 3, 0.0);
 	blob_b = bo_blob(0.9, 0.2, 1.0, 0.3, 4, 0.3);
 	{
@@ -155,15 +155,15 @@ static void demo_boolean(void)
 		}
 		star = bo_polyline(st, 5);
 	}
-	qaws_curve_create_ellipse_2d(0, 0, 2, 2, 0, &ring_o);
-	qaws_curve_create_ellipse_2d(0, 0, (qaws_scalar)1.3, (qaws_scalar)1.3, 0, &ring_h);
+	qaws_curve_create_ellipse_2d(&ring_o, 0, 0, 2, 2, 0);
+	qaws_curve_create_ellipse_2d(&ring_h, 0, 0, (qaws_scalar)1.3, (qaws_scalar)1.3, 0);
 	{
 		double sq[8] = { -0.6, -0.6, 0.6, -0.6, 0.6, 0.6, -0.6, 0.6 };
 		ring_i = bo_polyline(sq, 4);
 	}
 	{
 		qaws_scalar lp[8] = { -2.5f, -1.0f, -0.5f, 1.5f, 0.8f, -1.6f, 2.5f, 0.9f };
-		qaws_curve_create_polyline_2d(lp, 4, 0, &line);
+		qaws_curve_create_polyline_2d(&line, lp, 4, 0);
 	}
 	t0 = (double)clock() / CLOCKS_PER_SEC;
 	/* row 1: squares, every clip type; row 2: the same on curves; row 3: fill rules, nesting, open paths */
@@ -247,7 +247,7 @@ static void demo_boolean(void)
 				sprintf(label, "open polyline clipped by an ellipse");
 				svg_panel(&s, &v, label);
 				r = NULL;
-				qaws_clip_execute(&d, &r);
+				qaws_clip_execute(&r, &d);
 				bo_curve(&s, &v, circ_a, "#57606a", 1.2, 1);
 				bo_curve(&s, &v, line, "#8c959f", 1.2, 1);
 				if (r) bo_boundaries(&s, &v, r);
@@ -258,7 +258,7 @@ static void demo_boolean(void)
 				continue;
 			}
 			svg_panel(&s, &v, label);
-			qaws_clip_execute(&d, &r);
+			qaws_clip_execute(&r, &d);
 			if (r)
 			{
 				qaws_scalar a = 0;
@@ -266,8 +266,8 @@ static void demo_boolean(void)
 				for (i = 0; i < qaws_clip_result_get_path_count(r); i++)
 				{
 					qaws_path_2d p;
-					qaws_clip_result_get_path(r, i, &p);
-					qaws_path_compute_area_2d(&p, &a);
+					qaws_clip_result_get_path(&p, r, i);
+					qaws_path_compute_area_2d(&a, &p);
 					area += a;
 					holes += qaws_clip_result_is_hole(r, i);
 					curves += p.curve_count;

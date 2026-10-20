@@ -40,19 +40,19 @@ typedef struct qaws_surface_subdiv_desc
 } qaws_surface_subdiv_desc;
 
 qaws_status qaws_surface_create_subdiv(
-	qaws_surface_subdiv_desc const* desc,
-	qaws_surface** out_surface);
+	qaws_surface** out_surface,
+	qaws_surface_subdiv_desc const* desc);
 
 /* Retrieve the subdivided triangle mesh for direct rendering.
    Returns pointers into the surface's internal data (valid until destroy).
    Triangles are CCW-wound index triples into the vertex array.
    Normals are per-vertex smooth normals. */
 qaws_status qaws_surface_subdiv_get_mesh(
-	qaws_surface const* surface,
 	qaws_vec3 const** out_vertices,
 	qaws_vec3 const** out_normals,
 	unsigned int const** out_triangles,
 	unsigned int* out_vertex_count,
-	unsigned int* out_triangle_count);
+	unsigned int* out_triangle_count,
+	qaws_surface const* surface);
 
 #endif /* QAWS_SURFACE_SUBDIV_H */

@@ -276,8 +276,8 @@ qaws_status qaws_exact_bernstein_isolate(qaws_exact_int const* b, unsigned int n
 		TRY(push_root(out, capacity, &count, 0, 0, 1));
 	if (qaws_exact_int_is_zero(&b[n]))
 		TRY(push_root(out, capacity, &count, 1, 0, 1));
-	stack = (qaws_exact_int*)qaws_internal_alloc(NULL, qaws_internal_mul3(sizeof(qaws_exact_int), (n + 1), max_items));
-	items = (root_item*)qaws_internal_alloc(NULL, qaws_internal_mul2(sizeof(root_item), max_items));
+	stack = (qaws_exact_int*)qaws_internal_alloc(qaws_internal_mul3(sizeof(qaws_exact_int), (n + 1), max_items), NULL);
+	items = (root_item*)qaws_internal_alloc(qaws_internal_mul2(sizeof(root_item), max_items), NULL);
 	if (!stack || !items)
 		st = QAWS_STATUS_ALLOCATION_FAILURE;
 	if (st == QAWS_STATUS_OK)
@@ -333,8 +333,8 @@ qaws_status qaws_exact_bernstein_isolate(qaws_exact_int const* b, unsigned int n
 		items[top].depth = it.depth + 1;
 		top++;
 	}
-	qaws_internal_dealloc(NULL, stack);
-	qaws_internal_dealloc(NULL, items);
+	qaws_internal_dealloc(stack, NULL);
+	qaws_internal_dealloc(items, NULL);
 	if (st != QAWS_STATUS_OK)
 		return st;
 	/* sort (insertion: few roots) */

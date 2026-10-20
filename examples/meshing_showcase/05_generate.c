@@ -29,7 +29,7 @@ static qaws_surface* ms_wavy(void)
 	d.control_points = cp;
 	d.u_point_count = 7;
 	d.v_point_count = 7;
-	qaws_surface_create_bspline(&d, &s);
+	qaws_surface_create_bspline(&s, &d);
 	return s;
 }
 
@@ -64,7 +64,7 @@ static qaws_surface* ms_nurbs_torus(double R, double r)
 	d.u_knot_count = 12;
 	d.v_knots = kn;
 	d.v_knot_count = 12;
-	qaws_surface_create_nurbs(&d, &s);
+	qaws_surface_create_nurbs(&s, &d);
 	return s;
 }
 
@@ -88,7 +88,7 @@ static void ms_box_faces(qaws_surface** f, double a, double b, double c)
 			p[k]->z = (qaws_scalar)(c * q[i][k][2]);
 		}
 		f[i] = NULL;
-		qaws_surface_create_bilinear(&d, &f[i]);
+		qaws_surface_create_bilinear(&f[i], &d);
 	}
 }
 
@@ -126,7 +126,7 @@ static void demo_generate(void)
 	if (!c || !wavy || !torus)
 		return;
 	ms_box_faces(box, 1, 0.7, 0.5);
-	qaws_shell_atlas_create((qaws_surface const* const*)box, 6, 0, &atlas);
+	qaws_shell_atlas_create(&atlas, (qaws_surface const* const*)box, 6, 0);
 	g1 = ms_generate(wavy, NULL, QAWS_ELEMENTS_TRIANGLES, 0.1, 0, &rep);
 	if (g1)
 	{

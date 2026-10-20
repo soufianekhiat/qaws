@@ -36,8 +36,8 @@ typedef struct qaws_bspline_desc {
 
 ```c
 qaws_status qaws_curve_create_bspline(
-    qaws_bspline_desc const* desc,
-    qaws_curve** out_curve);
+    qaws_curve** out_curve,
+    qaws_bspline_desc const* desc);
 ```
 
 Creates a B-Spline curve.

@@ -80,12 +80,12 @@ static qaws_status split_by_extract(
 	qaws_curve const *curve, qaws_scalar t,
 	qaws_curve **out_left, qaws_curve **out_right)
 {
-	qaws_status status = qaws_curve_extract(curve,
-		curve->parameter_range.min_value, t, out_left);
+	qaws_status status = qaws_curve_extract(out_left,
+		curve, curve->parameter_range.min_value, t);
 	if (status != QAWS_STATUS_OK)
 		return status;
-	status = qaws_curve_extract(curve, t,
-		curve->parameter_range.max_value, out_right);
+	status = qaws_curve_extract(out_right, curve,
+		t, curve->parameter_range.max_value);
 	if (status != QAWS_STATUS_OK) {
 		qaws_curve_destroy(*out_left);
 		*out_left = NULL;
@@ -98,10 +98,10 @@ static qaws_status split_by_extract(
 /* ========================================================================== */
 
 qaws_status qaws_curve_split(
-	qaws_curve const *curve,
-	qaws_scalar parameter,
 	qaws_curve **out_left,
-	qaws_curve **out_right)
+	qaws_curve **out_right,
+	qaws_curve const *curve,
+	qaws_scalar parameter)
 {
 	if (!curve || !out_left || !out_right)
 		return QAWS_STATUS_INVALID_ARGUMENT;
@@ -168,9 +168,9 @@ qaws_status qaws_curve_split(
 /* ========================================================================== */
 
 qaws_status qaws_curve_join(
+	qaws_curve **out_joined,
 	qaws_curve const *curve_a,
-	qaws_curve const *curve_b,
-	qaws_curve **out_joined)
+	qaws_curve const *curve_b)
 {
 	if (!curve_a || !curve_b || !out_joined)
 		return QAWS_STATUS_INVALID_ARGUMENT;
@@ -313,7 +313,7 @@ static qaws_status split_bezier(
 	left_desc.control_points = left_cp;
 	left_desc.control_point_count = order;
 
-	status = qaws_curve_create_bezier_ex(&left_desc, curve->allocator, out_left);
+	status = qaws_curve_create_bezier_ex(out_left, &left_desc, curve->allocator);
 	if (status != QAWS_STATUS_OK)
 	{
 		qaws_internal_free(left_cp);
@@ -328,7 +328,7 @@ static qaws_status split_bezier(
 	right_desc.control_points = right_cp;
 	right_desc.control_point_count = order;
 
-	status = qaws_curve_create_bezier_ex(&right_desc, curve->allocator, out_right);
+	status = qaws_curve_create_bezier_ex(out_right, &right_desc, curve->allocator);
 	if (status != QAWS_STATUS_OK)
 	{
 		qaws_curve_destroy(*out_left);
@@ -402,8 +402,8 @@ static qaws_status split_hermite(
 	if (dim_count == 2)
 	{
 		qaws_eval_result_2d result;
-		status = qaws_curve_evaluate_2d(curve, t,
-			QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &result);
+		status = qaws_curve_evaluate_2d(&result, curve,
+			t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1);
 		if (status != QAWS_STATUS_OK)
 			return status;
 		split_pos[0] = result.position.x;
@@ -414,8 +414,8 @@ static qaws_status split_hermite(
 	else
 	{
 		qaws_eval_result_3d result;
-		status = qaws_curve_evaluate_3d(curve, t,
-			QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &result);
+		status = qaws_curve_evaluate_3d(&result, curve,
+			t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1);
 		if (status != QAWS_STATUS_OK)
 			return status;
 		split_pos[0] = result.position.x;
@@ -507,7 +507,7 @@ static qaws_status split_hermite(
 	left_desc.point_count = left_count;
 	left_desc.derivative_count = left_count;
 
-	status = qaws_curve_create_hermite_ex(&left_desc, curve->allocator, out_left);
+	status = qaws_curve_create_hermite_ex(out_left, &left_desc, curve->allocator);
 	if (status != QAWS_STATUS_OK)
 	{
 		qaws_internal_free(left_pts);
@@ -526,7 +526,7 @@ static qaws_status split_hermite(
 	right_desc.point_count = right_count;
 	right_desc.derivative_count = right_count;
 
-	status = qaws_curve_create_hermite_ex(&right_desc, curve->allocator, out_right);
+	status = qaws_curve_create_hermite_ex(out_right, &right_desc, curve->allocator);
 	if (status != QAWS_STATUS_OK)
 	{
 		qaws_curve_destroy(*out_left);
@@ -861,7 +861,7 @@ static qaws_status split_bspline(
 	left_desc.is_uniform = 0;
 	left_desc.is_closed = 0;
 
-	status = qaws_curve_create_bspline_ex(&left_desc, curve->allocator, out_left);
+	status = qaws_curve_create_bspline_ex(out_left, &left_desc, curve->allocator);
 	if (status != QAWS_STATUS_OK)
 	{
 		qaws_internal_free(left_knots);
@@ -882,7 +882,7 @@ static qaws_status split_bspline(
 	right_desc.is_uniform = 0;
 	right_desc.is_closed = 0;
 
-	status = qaws_curve_create_bspline_ex(&right_desc, curve->allocator, out_right);
+	status = qaws_curve_create_bspline_ex(out_right, &right_desc, curve->allocator);
 	if (status != QAWS_STATUS_OK)
 	{
 		qaws_curve_destroy(*out_left);
@@ -1161,7 +1161,7 @@ static qaws_status split_nurbs(
 	left_desc.weight_count = left_cp_count;
 	left_desc.is_closed = 0;
 
-	status = qaws_curve_create_nurbs_ex(&left_desc, curve->allocator, out_left);
+	status = qaws_curve_create_nurbs_ex(out_left, &left_desc, curve->allocator);
 	if (status != QAWS_STATUS_OK)
 	{
 		qaws_internal_free(left_knots);
@@ -1185,7 +1185,7 @@ static qaws_status split_nurbs(
 	right_desc.weight_count = right_cp_count;
 	right_desc.is_closed = 0;
 
-	status = qaws_curve_create_nurbs_ex(&right_desc, curve->allocator, out_right);
+	status = qaws_curve_create_nurbs_ex(out_right, &right_desc, curve->allocator);
 	if (status != QAWS_STATUS_OK)
 	{
 		qaws_curve_destroy(*out_left);
@@ -1320,7 +1320,7 @@ static qaws_status split_catmull_rom(
 	left_desc.parameterization = impl->parameterization;
 	left_desc.closed = 0;
 
-	status = qaws_curve_create_catmull_rom_ex(&left_desc, curve->allocator, out_left);
+	status = qaws_curve_create_catmull_rom_ex(out_left, &left_desc, curve->allocator);
 	if (status != QAWS_STATUS_OK)
 	{
 		qaws_internal_free(left_cp);
@@ -1336,7 +1336,7 @@ static qaws_status split_catmull_rom(
 	right_desc.parameterization = impl->parameterization;
 	right_desc.closed = 0;
 
-	status = qaws_curve_create_catmull_rom_ex(&right_desc, curve->allocator, out_right);
+	status = qaws_curve_create_catmull_rom_ex(out_right, &right_desc, curve->allocator);
 	if (status != QAWS_STATUS_OK)
 	{
 		qaws_curve_destroy(*out_left);
@@ -1422,8 +1422,8 @@ static qaws_status split_trajectory(
 	if (dim_count == 2)
 	{
 		qaws_eval_result_2d result;
-		status = qaws_curve_evaluate_2d(curve, t,
-			QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &result);
+		status = qaws_curve_evaluate_2d(&result, curve,
+			t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1);
 		if (status != QAWS_STATUS_OK)
 			return status;
 		split_pos[0] = result.position.x;
@@ -1434,8 +1434,8 @@ static qaws_status split_trajectory(
 	else
 	{
 		qaws_eval_result_3d result;
-		status = qaws_curve_evaluate_3d(curve, t,
-			QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &result);
+		status = qaws_curve_evaluate_3d(&result, curve,
+			t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1);
 		if (status != QAWS_STATUS_OK)
 			return status;
 		split_pos[0] = result.position.x;
@@ -1549,7 +1549,7 @@ static qaws_status split_trajectory(
 	left_desc.key_acceleration_count = 0;
 	left_desc.closed = 0;
 
-	status = qaws_curve_create_trajectory_ex(&left_desc, curve->allocator, out_left);
+	status = qaws_curve_create_trajectory_ex(out_left, &left_desc, curve->allocator);
 	if (status != QAWS_STATUS_OK)
 	{
 		qaws_internal_free(left_pos);
@@ -1575,7 +1575,7 @@ static qaws_status split_trajectory(
 	right_desc.key_acceleration_count = 0;
 	right_desc.closed = 0;
 
-	status = qaws_curve_create_trajectory_ex(&right_desc, curve->allocator, out_right);
+	status = qaws_curve_create_trajectory_ex(out_right, &right_desc, curve->allocator);
 	if (status != QAWS_STATUS_OK)
 	{
 		qaws_curve_destroy(*out_left);
@@ -1662,7 +1662,7 @@ static qaws_status join_hermite(
 	desc.point_count = joined_count;
 	desc.derivative_count = joined_count;
 
-	status = qaws_curve_create_hermite_ex(&desc, a->allocator, out_joined);
+	status = qaws_curve_create_hermite_ex(out_joined, &desc, a->allocator);
 
 	qaws_internal_free(joined_pts);
 	qaws_internal_free(joined_tan);
@@ -1766,7 +1766,7 @@ static qaws_status join_bspline(
 	desc.is_uniform = 0;
 	desc.is_closed = 0;
 
-	status = qaws_curve_create_bspline_ex(&desc, a->allocator, out_joined);
+	status = qaws_curve_create_bspline_ex(out_joined, &desc, a->allocator);
 
 	qaws_internal_free(joined_cps);
 	qaws_internal_free(joined_knots);
@@ -1863,7 +1863,7 @@ static qaws_status join_nurbs(
 	desc.weight_count = joined_cp_count;
 	desc.is_closed = 0;
 
-	status = qaws_curve_create_nurbs_ex(&desc, a->allocator, out_joined);
+	status = qaws_curve_create_nurbs_ex(out_joined, &desc, a->allocator);
 
 	qaws_internal_free(joined_cps);
 	qaws_internal_free(joined_knots);
@@ -1926,7 +1926,7 @@ static qaws_status join_catmull_rom(
 	desc.parameterization = impl_a->parameterization;
 	desc.closed = 0;
 
-	status = qaws_curve_create_catmull_rom_ex(&desc, a->allocator, out_joined);
+	status = qaws_curve_create_catmull_rom_ex(out_joined, &desc, a->allocator);
 
 	qaws_internal_free(joined_cp);
 	return status;
@@ -2012,7 +2012,7 @@ static qaws_status join_trajectory(
 	desc.key_acceleration_count = 0;
 	desc.closed = 0;
 
-	status = qaws_curve_create_trajectory_ex(&desc, a->allocator, out_joined);
+	status = qaws_curve_create_trajectory_ex(out_joined, &desc, a->allocator);
 
 	qaws_internal_free(joined_pos);
 	qaws_internal_free(joined_times);
@@ -2096,7 +2096,7 @@ static void offset_trunc_curve(
 	for (kk = 0; kk < n_trunc; ++kk)
 	{
 		qaws_scalar tt = t0 + (t1 - t0) * (qaws_scalar)kk / (qaws_scalar)(n_trunc - 1);
-		qaws_curve_evaluate_2d(out_curves[idx], tt, QAWS_EVAL_FLAG_POSITION, &er);
+		qaws_curve_evaluate_2d(&er, out_curves[idx], tt, QAWS_EVAL_FLAG_POSITION);
 		flat[(kk + 1) * 2]     = er.position.x;
 		flat[(kk + 1) * 2 + 1] = er.position.y;
 	}
@@ -2112,7 +2112,7 @@ static void offset_trunc_curve(
 	desc.parameterization = QAWS_PARAMETERIZATION_CENTRIPETAL;
 	desc.closed = 0;
 
-	st = qaws_curve_create_catmull_rom(&desc, &nc);
+	st = qaws_curve_create_catmull_rom(&nc, &desc);
 	qaws_internal_free(flat);
 
 	if (st == QAWS_STATUS_OK && nc)
@@ -2123,12 +2123,12 @@ static void offset_trunc_curve(
 }
 
 qaws_status qaws_curve_offset_2d(
-	qaws_curve const *curve,
-	qaws_scalar distance,
-	int trim,
 	qaws_curve **out_curves,
+	unsigned int *out_count,
+	qaws_curve const *curve,
 	unsigned int curve_capacity,
-	unsigned int *out_count)
+	qaws_scalar distance,
+	int trim)
 {
 	unsigned int i, j;
 	qaws_scalar range_min, range_max, t;
@@ -2171,9 +2171,9 @@ qaws_status qaws_curve_offset_2d(
 		t = range_min + (qaws_scalar)i * (range_max - range_min)
 			/ (qaws_scalar)(n_pts - 1);
 
-		status = qaws_curve_evaluate_2d(curve, t,
-			QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2,
-			&result);
+		status = qaws_curve_evaluate_2d(&result, curve,
+			t,
+			QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2);
 		if (status != QAWS_STATUS_OK) { qaws_internal_free(offset_pts); qaws_internal_free(fwd); return status; }
 
 		spd = (qaws_scalar)sqrt((double)(
@@ -2277,9 +2277,9 @@ qaws_status qaws_curve_offset_2d(
 			if (removed[i]) continue;
 			if (i == 0 || i == n_pts - 1) continue;
 
-			status = qaws_curve_find_closest_parameter_2d(curve, offset_pts[i], &closest_t);
+			status = qaws_curve_find_closest_parameter_2d(&closest_t, curve, offset_pts[i]);
 			if (status != QAWS_STATUS_OK) continue;
-			qaws_curve_evaluate_2d(curve, closest_t, QAWS_EVAL_FLAG_POSITION, &result);
+			qaws_curve_evaluate_2d(&result, curve, closest_t, QAWS_EVAL_FLAG_POSITION);
 			dx = offset_pts[i].x - result.position.x;
 			dy = offset_pts[i].y - result.position.y;
 			dist = (qaws_scalar)sqrt((double)(dx * dx + dy * dy));
@@ -2555,7 +2555,7 @@ qaws_status qaws_curve_offset_2d(
 					cr_desc.parameterization = QAWS_PARAMETERIZATION_CENTRIPETAL;
 					cr_desc.closed = 0;
 
-					status = qaws_curve_create_catmull_rom_ex(&cr_desc, curve->allocator, &out_crv);
+					status = qaws_curve_create_catmull_rom_ex(&out_crv, &cr_desc, curve->allocator);
 					qaws_internal_free(flat_pts);
 
 					if (status == QAWS_STATUS_OK && out_crv)
@@ -2608,13 +2608,13 @@ qaws_status qaws_curve_offset_2d(
 						{
 							qaws_scalar fa = (qaws_scalar)i / (qaws_scalar)(eval_n - 1);
 							qaws_scalar fb = fa;
-							qaws_curve_evaluate_2d(out_curves[ca],
-								ra2.min_value + fa * (ra2.max_value - ra2.min_value),
-								QAWS_EVAL_FLAG_POSITION, &result);
+							qaws_curve_evaluate_2d(&result,
+								out_curves[ca],
+								ra2.min_value + fa * (ra2.max_value - ra2.min_value), QAWS_EVAL_FLAG_POSITION);
 							pts_a[i] = result.position;
-							qaws_curve_evaluate_2d(out_curves[cb],
-								rb2.min_value + fb * (rb2.max_value - rb2.min_value),
-								QAWS_EVAL_FLAG_POSITION, &result);
+							qaws_curve_evaluate_2d(&result,
+								out_curves[cb],
+								rb2.min_value + fb * (rb2.max_value - rb2.min_value), QAWS_EVAL_FLAG_POSITION);
 							pts_b[i] = result.position;
 						}
 					}
@@ -2792,7 +2792,7 @@ static qaws_status reparam_eval_span_2d(
 	src_t = qaws_internal_distance_to_parameter(
 		impl->table_params, impl->table_distances,
 		impl->table_size, local_t * impl->total_arc_length);
-	status = qaws_curve_evaluate_2d(impl->source, src_t, arc_source_flags(eval_flags), &src);
+	status = qaws_curve_evaluate_2d(&src, impl->source, src_t, arc_source_flags(eval_flags));
 	if (status != QAWS_STATUS_OK)
 		return status;
 	arc_rescale_2d(&src, (qaws_scalar)1, eval_flags, out_result);
@@ -2813,7 +2813,7 @@ static qaws_status reparam_eval_span_3d(
 	src_t = qaws_internal_distance_to_parameter(
 		impl->table_params, impl->table_distances,
 		impl->table_size, local_t * impl->total_arc_length);
-	status = qaws_curve_evaluate_3d(impl->source, src_t, arc_source_flags(eval_flags), &src);
+	status = qaws_curve_evaluate_3d(&src, impl->source, src_t, arc_source_flags(eval_flags));
 	if (status != QAWS_STATUS_OK)
 		return status;
 	arc_rescale(&src, (qaws_scalar)1, eval_flags, out_result);
@@ -2828,9 +2828,9 @@ static void reparam_destroy_impl(void* impl_ptr, qaws_allocator const* allocator
 {
 	qaws_arc_reparam_impl* impl = (qaws_arc_reparam_impl*)impl_ptr;
 	if (!impl) return;
-	qaws_internal_dealloc(allocator, impl->table_params);
-	qaws_internal_dealloc(allocator, impl->table_distances);
-	qaws_internal_dealloc(allocator, impl);
+	qaws_internal_dealloc(impl->table_params, allocator);
+	qaws_internal_dealloc(impl->table_distances, allocator);
+	qaws_internal_dealloc(impl, allocator);
 }
 
 /* ------------------------------------------------------------------ */
@@ -2893,9 +2893,9 @@ static qaws_curve_vtable const reparam_vtable = {
 /* ------------------------------------------------------------------ */
 
 qaws_status qaws_curve_reparameterize_arc_length(
+	qaws_curve** out_curve,
 	qaws_curve const* curve,
-	unsigned int table_resolution,
-	qaws_curve** out_curve)
+	unsigned int table_resolution)
 {
 	qaws_allocator const* allocator = curve ? curve->allocator : NULL;   /* (the result lives in the source curve's allocator) */
 	qaws_arc_reparam_impl* impl = NULL;
@@ -2912,7 +2912,7 @@ qaws_status qaws_curve_reparameterize_arc_length(
 	tbl_size = table_resolution > 0 ? table_resolution : 256;
 
 	/* Allocate impl */
-	impl = (qaws_arc_reparam_impl*)qaws_internal_alloc(allocator, sizeof(qaws_arc_reparam_impl));
+	impl = (qaws_arc_reparam_impl*)qaws_internal_alloc(sizeof(qaws_arc_reparam_impl), allocator);
 	if (!impl)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 
@@ -2920,26 +2920,26 @@ qaws_status qaws_curve_reparameterize_arc_length(
 	impl->source = curve;
 	impl->table_size = tbl_size;
 
-	impl->table_params = (qaws_scalar*)qaws_internal_alloc(allocator, qaws_internal_mul2(sizeof(qaws_scalar), (size_t)tbl_size));
+	impl->table_params = (qaws_scalar*)qaws_internal_alloc(qaws_internal_mul2(sizeof(qaws_scalar), (size_t)tbl_size), allocator);
 	if (!impl->table_params) {
-		qaws_internal_dealloc(allocator, impl);
+		qaws_internal_dealloc(impl, allocator);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 
-	impl->table_distances = (qaws_scalar*)qaws_internal_alloc(allocator, qaws_internal_mul2(sizeof(qaws_scalar), (size_t)tbl_size));
+	impl->table_distances = (qaws_scalar*)qaws_internal_alloc(qaws_internal_mul2(sizeof(qaws_scalar), (size_t)tbl_size), allocator);
 	if (!impl->table_distances) {
-		qaws_internal_dealloc(allocator, impl->table_params);
-		qaws_internal_dealloc(allocator, impl);
+		qaws_internal_dealloc(impl->table_params, allocator);
+		qaws_internal_dealloc(impl, allocator);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 
 	/* Build arc-length table from the source curve */
 	status = qaws_internal_build_arc_length_table(
-		curve, tbl_size, impl->table_params, impl->table_distances);
+		impl->table_params, impl->table_distances, curve, tbl_size);
 	if (status != QAWS_STATUS_OK) {
-		qaws_internal_dealloc(allocator, impl->table_distances);
-		qaws_internal_dealloc(allocator, impl->table_params);
-		qaws_internal_dealloc(allocator, impl);
+		qaws_internal_dealloc(impl->table_distances, allocator);
+		qaws_internal_dealloc(impl->table_params, allocator);
+		qaws_internal_dealloc(impl, allocator);
 		return status;
 	}
 
@@ -2947,9 +2947,9 @@ qaws_status qaws_curve_reparameterize_arc_length(
 
 	/* Degenerate curve check */
 	if (impl->total_arc_length <= (qaws_scalar)0) {
-		qaws_internal_dealloc(allocator, impl->table_distances);
-		qaws_internal_dealloc(allocator, impl->table_params);
-		qaws_internal_dealloc(allocator, impl);
+		qaws_internal_dealloc(impl->table_distances, allocator);
+		qaws_internal_dealloc(impl->table_params, allocator);
+		qaws_internal_dealloc(impl, allocator);
 		return QAWS_STATUS_DEGENERATE_CURVE;
 	}
 
@@ -2965,9 +2965,9 @@ qaws_status qaws_curve_reparameterize_arc_length(
 		range,
 		&reparam_vtable, allocator);
 	if (!result) {
-		qaws_internal_dealloc(allocator, impl->table_distances);
-		qaws_internal_dealloc(allocator, impl->table_params);
-		qaws_internal_dealloc(allocator, impl);
+		qaws_internal_dealloc(impl->table_distances, allocator);
+		qaws_internal_dealloc(impl->table_params, allocator);
+		qaws_internal_dealloc(impl, allocator);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 
@@ -3031,7 +3031,7 @@ static qaws_status lm_eval_span_2d(
 
 	(void)span_index;
 	src_t = lm_source_parameter(curve, local_t, &k);
-	status = qaws_curve_evaluate_2d(impl->source_b, src_t, arc_source_flags(eval_flags), &src);
+	status = qaws_curve_evaluate_2d(&src, impl->source_b, src_t, arc_source_flags(eval_flags));
 	if (status != QAWS_STATUS_OK)
 		return status;
 	arc_rescale_2d(&src, k, eval_flags, out_result);
@@ -3050,7 +3050,7 @@ static qaws_status lm_eval_span_3d(
 
 	(void)span_index;
 	src_t = lm_source_parameter(curve, local_t, &k);
-	status = qaws_curve_evaluate_3d(impl->source_b, src_t, arc_source_flags(eval_flags), &src);
+	status = qaws_curve_evaluate_3d(&src, impl->source_b, src_t, arc_source_flags(eval_flags));
 	if (status != QAWS_STATUS_OK)
 		return status;
 	arc_rescale(&src, k, eval_flags, out_result);
@@ -3061,11 +3061,11 @@ static void lm_destroy_impl(void* impl_ptr, qaws_allocator const* allocator)
 {
 	qaws_length_match_impl* impl = (qaws_length_match_impl*)impl_ptr;
 	if (!impl) return;
-	qaws_internal_dealloc(allocator, impl->table_params_a);
-	qaws_internal_dealloc(allocator, impl->table_distances_a);
-	qaws_internal_dealloc(allocator, impl->table_params_b);
-	qaws_internal_dealloc(allocator, impl->table_distances_b);
-	qaws_internal_dealloc(allocator, impl);
+	qaws_internal_dealloc(impl->table_params_a, allocator);
+	qaws_internal_dealloc(impl->table_distances_a, allocator);
+	qaws_internal_dealloc(impl->table_params_b, allocator);
+	qaws_internal_dealloc(impl->table_distances_b, allocator);
+	qaws_internal_dealloc(impl, allocator);
 }
 
 static int lm_is_closed(qaws_curve const* curve)
@@ -3092,16 +3092,16 @@ static qaws_curve_vtable const lm_vtable = {
 };
 
 int qaws_internal_reparam_source(
-	qaws_curve const* curve,
-	qaws_scalar t,
 	qaws_curve const** out_source,
-	qaws_scalar* out_source_t)
+	qaws_scalar* out_source_t,
+	qaws_curve const* curve,
+	qaws_scalar t)
 {
 	qaws_scalar local_t;
 	if (curve->vtable == &reparam_vtable)
 	{
 		qaws_arc_reparam_impl const* impl = (qaws_arc_reparam_impl const*)curve->impl;
-		qaws_internal_find_span(curve, t, &local_t);
+		qaws_internal_find_span(&local_t, curve, t);
 		*out_source = impl->source;
 		*out_source_t = qaws_internal_distance_to_parameter(
 			impl->table_params, impl->table_distances, impl->table_size,
@@ -3112,7 +3112,7 @@ int qaws_internal_reparam_source(
 	{
 		qaws_length_match_impl const* impl = (qaws_length_match_impl const*)curve->impl;
 		qaws_scalar s, frac;
-		qaws_internal_find_span(curve, t, &local_t);
+		qaws_internal_find_span(&local_t, curve, t);
 		s = curve->parameter_range.min_value +
 			local_t * (curve->parameter_range.max_value - curve->parameter_range.min_value);
 		frac = (impl->total_arc_length_a > QAWS_ZERO) ? (s / impl->total_arc_length_a) : QAWS_ZERO;
@@ -3126,10 +3126,10 @@ int qaws_internal_reparam_source(
 }
 
 qaws_status qaws_curve_match_arc_length(
+	qaws_curve** out_curve,
 	qaws_curve const* curve_a,
 	qaws_curve const* curve_b,
-	unsigned int table_resolution,
-	qaws_curve** out_curve)
+	unsigned int table_resolution)
 {
 	qaws_allocator const* allocator = curve_b ? curve_b->allocator : NULL;   /* (the result lives in the source curve's allocator) */
 	qaws_length_match_impl* impl = NULL;
@@ -3144,7 +3144,7 @@ qaws_status qaws_curve_match_arc_length(
 	*out_curve = NULL;
 	tbl_size = table_resolution > 0 ? table_resolution : 256;
 
-	impl = (qaws_length_match_impl*)qaws_internal_alloc(allocator, sizeof(qaws_length_match_impl));
+	impl = (qaws_length_match_impl*)qaws_internal_alloc(sizeof(qaws_length_match_impl), allocator);
 	if (!impl) return QAWS_STATUS_ALLOCATION_FAILURE;
 	memset(impl, 0, sizeof(*impl));
 
@@ -3153,27 +3153,27 @@ qaws_status qaws_curve_match_arc_length(
 	impl->table_size_b = tbl_size;
 
 	/* Allocate tables */
-	impl->table_params_a = (qaws_scalar*)qaws_internal_alloc(allocator, qaws_internal_mul2(sizeof(qaws_scalar), (size_t)tbl_size));
-	impl->table_distances_a = (qaws_scalar*)qaws_internal_alloc(allocator, qaws_internal_mul2(sizeof(qaws_scalar), (size_t)tbl_size));
-	impl->table_params_b = (qaws_scalar*)qaws_internal_alloc(allocator, qaws_internal_mul2(sizeof(qaws_scalar), (size_t)tbl_size));
-	impl->table_distances_b = (qaws_scalar*)qaws_internal_alloc(allocator, qaws_internal_mul2(sizeof(qaws_scalar), (size_t)tbl_size));
+	impl->table_params_a = (qaws_scalar*)qaws_internal_alloc(qaws_internal_mul2(sizeof(qaws_scalar), (size_t)tbl_size), allocator);
+	impl->table_distances_a = (qaws_scalar*)qaws_internal_alloc(qaws_internal_mul2(sizeof(qaws_scalar), (size_t)tbl_size), allocator);
+	impl->table_params_b = (qaws_scalar*)qaws_internal_alloc(qaws_internal_mul2(sizeof(qaws_scalar), (size_t)tbl_size), allocator);
+	impl->table_distances_b = (qaws_scalar*)qaws_internal_alloc(qaws_internal_mul2(sizeof(qaws_scalar), (size_t)tbl_size), allocator);
 
 	if (!impl->table_params_a || !impl->table_distances_a ||
 		!impl->table_params_b || !impl->table_distances_b)
 	{
-		qaws_internal_dealloc(allocator, impl->table_params_a); qaws_internal_dealloc(allocator, impl->table_distances_a);
-		qaws_internal_dealloc(allocator, impl->table_params_b); qaws_internal_dealloc(allocator, impl->table_distances_b);
-		qaws_internal_dealloc(allocator, impl);
+		qaws_internal_dealloc(impl->table_params_a, allocator); qaws_internal_dealloc(impl->table_distances_a, allocator);
+		qaws_internal_dealloc(impl->table_params_b, allocator); qaws_internal_dealloc(impl->table_distances_b, allocator);
+		qaws_internal_dealloc(impl, allocator);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 
 	/* Build arc-length tables */
 	status = qaws_internal_build_arc_length_table(
-		curve_a, tbl_size, impl->table_params_a, impl->table_distances_a);
+		impl->table_params_a, impl->table_distances_a, curve_a, tbl_size);
 	if (status != QAWS_STATUS_OK) { lm_destroy_impl(impl, allocator); return status; }
 
 	status = qaws_internal_build_arc_length_table(
-		curve_b, tbl_size, impl->table_params_b, impl->table_distances_b);
+		impl->table_params_b, impl->table_distances_b, curve_b, tbl_size);
 	if (status != QAWS_STATUS_OK) { lm_destroy_impl(impl, allocator); return status; }
 
 	impl->total_arc_length_a = impl->table_distances_a[tbl_size - 1];
@@ -3209,13 +3209,13 @@ qaws_status qaws_curve_match_arc_length(
 /* ========================================================================== */
 
 qaws_status qaws_curve_offset_3d(
+	qaws_curve** out_curve,
 	qaws_curve const* curve,
-	qaws_scalar distance,
-	int direction_mode,
-	qaws_vec3 const* direction,
 	qaws_surface const* surface,
+	qaws_vec3 const* direction,
 	unsigned int sample_count,
-	qaws_curve** out_curve)
+	qaws_scalar distance,
+	int direction_mode)
 {
 	unsigned int n_samples;
 	qaws_scalar* params = NULL;
@@ -3252,8 +3252,8 @@ qaws_status qaws_curve_offset_3d(
 		qaws_scalar dir_len;
 
 		memset(&er, 0, sizeof(er));
-		status = qaws_curve_evaluate_3d(curve, t,
-			QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2, &er);
+		status = qaws_curve_evaluate_3d(&er, curve,
+			t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2);
 		if (status != QAWS_STATUS_OK) { qaws_internal_free(params); qaws_internal_free(coords); return status; }
 
 		params[i] = t;
@@ -3267,7 +3267,7 @@ qaws_status qaws_curve_offset_3d(
 		{
 			/* Frenet normal */
 			qaws_vec3 T_vec, N_vec, B_vec;
-			status = qaws_curve_compute_frenet_frame_3d(curve, t, &T_vec, &N_vec, &B_vec);
+			status = qaws_curve_compute_frenet_frame_3d(&T_vec, &N_vec, &B_vec, curve, t);
 			if (status != QAWS_STATUS_OK)
 			{
 				/* Fallback: use a perpendicular to the tangent */
@@ -3289,11 +3289,11 @@ qaws_status qaws_curve_offset_3d(
 			qaws_vec3 closest;
 			qaws_surface_eval_result sr;
 
-			status = qaws_surface_find_closest_point(surface, er.position, &su, &sv, &closest);
+			status = qaws_surface_find_closest_point(&su, &sv, &closest, surface, er.position);
 			if (status != QAWS_STATUS_OK) { qaws_internal_free(params); qaws_internal_free(coords); return status; }
 
 			memset(&sr, 0, sizeof(sr));
-			qaws_surface_evaluate(surface, su, sv, QAWS_SURFACE_EVAL_NORMAL, &sr);
+			qaws_surface_evaluate(&sr, surface, su, sv, QAWS_SURFACE_EVAL_NORMAL);
 			offset_dir = sr.normal;
 		}
 
@@ -3333,13 +3333,13 @@ qaws_status qaws_curve_offset_3d(
 /* ========================================================================== */
 
 qaws_status qaws_curve_merge_chain(
+	qaws_curve** out_curves,
+	unsigned int* out_count,
 	qaws_curve const* const* curves,
 	unsigned int curve_count,
-	unsigned int target_degree,
-	qaws_scalar tolerance,
-	qaws_curve** out_curves,
 	unsigned int curve_capacity,
-	unsigned int* out_count)
+	unsigned int target_degree,
+	qaws_scalar tolerance)
 {
 	unsigned int degree;
 	qaws_dimension dim;
@@ -3391,7 +3391,7 @@ qaws_status qaws_curve_merge_chain(
 			{
 				qaws_eval_result_3d er;
 				memset(&er, 0, sizeof(er));
-				qaws_curve_evaluate_3d(curves[ci], t, QAWS_EVAL_FLAG_POSITION, &er);
+				qaws_curve_evaluate_3d(&er, curves[ci], t, QAWS_EVAL_FLAG_POSITION);
 				coords[idx * dim_count + 0] = er.position.x;
 				coords[idx * dim_count + 1] = er.position.y;
 				coords[idx * dim_count + 2] = er.position.z;
@@ -3400,7 +3400,7 @@ qaws_status qaws_curve_merge_chain(
 			{
 				qaws_eval_result_2d er;
 				memset(&er, 0, sizeof(er));
-				qaws_curve_evaluate_2d(curves[ci], t, QAWS_EVAL_FLAG_POSITION, &er);
+				qaws_curve_evaluate_2d(&er, curves[ci], t, QAWS_EVAL_FLAG_POSITION);
 				coords[idx * dim_count + 0] = er.position.x;
 				coords[idx * dim_count + 1] = er.position.y;
 			}
@@ -3428,7 +3428,7 @@ qaws_status qaws_curve_merge_chain(
 		{
 			qaws_eval_result_3d er;
 			memset(&er, 0, sizeof(er));
-			qaws_curve_evaluate_3d(merged, params[idx], QAWS_EVAL_FLAG_POSITION, &er);
+			qaws_curve_evaluate_3d(&er, merged, params[idx], QAWS_EVAL_FLAG_POSITION);
 			err = QAWS_SQRT(
 				(er.position.x - coords[idx * dim_count + 0]) * (er.position.x - coords[idx * dim_count + 0]) +
 				(er.position.y - coords[idx * dim_count + 1]) * (er.position.y - coords[idx * dim_count + 1]) +
@@ -3438,7 +3438,7 @@ qaws_status qaws_curve_merge_chain(
 		{
 			qaws_eval_result_2d er;
 			memset(&er, 0, sizeof(er));
-			qaws_curve_evaluate_2d(merged, params[idx], QAWS_EVAL_FLAG_POSITION, &er);
+			qaws_curve_evaluate_2d(&er, merged, params[idx], QAWS_EVAL_FLAG_POSITION);
 			err = QAWS_SQRT(
 				(er.position.x - coords[idx * dim_count + 0]) * (er.position.x - coords[idx * dim_count + 0]) +
 				(er.position.y - coords[idx * dim_count + 1]) * (er.position.y - coords[idx * dim_count + 1]));
@@ -3483,9 +3483,9 @@ static qaws_scalar vec2_angle(qaws_vec2 a, qaws_vec2 b)
 }
 
 qaws_status qaws_curve_fillet_2d(
+	qaws_curve** out_curve,
 	qaws_curve const* curve,
-	qaws_scalar radius,
-	qaws_curve** out_curve)
+	qaws_scalar radius)
 {
 	qaws_curve_kind kind;
 	unsigned int seg_count, total_segs;
@@ -3533,7 +3533,7 @@ qaws_status qaws_curve_fillet_2d(
 			qaws_scalar t = range.min_value + (range.max_value - range.min_value) *
 				(qaws_scalar)i / (qaws_scalar)(n_samp - 1);
 			memset(&er, 0, sizeof(er));
-			qaws_curve_evaluate_2d(curve, t, QAWS_EVAL_FLAG_POSITION, &er);
+			qaws_curve_evaluate_2d(&er, curve, t, QAWS_EVAL_FLAG_POSITION);
 			params[i] = t;
 			coords[i * 2] = er.position.x;
 			coords[i * 2 + 1] = er.position.y;
@@ -3575,9 +3575,9 @@ qaws_status qaws_curve_fillet_2d(
 			memset(&er_end, 0, sizeof(er_end));
 			memset(&er_start, 0, sizeof(er_start));
 			memset(&er_corner, 0, sizeof(er_corner));
-			qaws_curve_evaluate_2d(curve, t_junc - QAWS_LITERAL(1e-6), QAWS_EVAL_FLAG_D1, &er_end);
-			qaws_curve_evaluate_2d(curve, t_junc + QAWS_LITERAL(1e-6), QAWS_EVAL_FLAG_D1, &er_start);
-			qaws_curve_evaluate_2d(curve, t_junc, QAWS_EVAL_FLAG_POSITION, &er_corner);
+			qaws_curve_evaluate_2d(&er_end, curve, t_junc - QAWS_LITERAL(1e-6), QAWS_EVAL_FLAG_D1);
+			qaws_curve_evaluate_2d(&er_start, curve, t_junc + QAWS_LITERAL(1e-6), QAWS_EVAL_FLAG_D1);
+			qaws_curve_evaluate_2d(&er_corner, curve, t_junc, QAWS_EVAL_FLAG_POSITION);
 
 			j_tan_out[ji] = er_end.d1;
 			j_tan_in[ji] = er_start.d1;
@@ -3624,8 +3624,8 @@ qaws_status qaws_curve_fillet_2d(
 
 			memset(&er_lo, 0, sizeof(er_lo));
 			memset(&er_hi, 0, sizeof(er_hi));
-			qaws_curve_evaluate_2d(curve, t_lo, QAWS_EVAL_FLAG_POSITION, &er_lo);
-			qaws_curve_evaluate_2d(curve, t_hi, QAWS_EVAL_FLAG_POSITION, &er_hi);
+			qaws_curve_evaluate_2d(&er_lo, curve, t_lo, QAWS_EVAL_FLAG_POSITION);
+			qaws_curve_evaluate_2d(&er_hi, curve, t_hi, QAWS_EVAL_FLAG_POSITION);
 			seg_len = QAWS_SQRT(
 				(er_hi.position.x - er_lo.position.x) * (er_hi.position.x - er_lo.position.x) +
 				(er_hi.position.y - er_lo.position.y) * (er_hi.position.y - er_lo.position.y));
@@ -3667,7 +3667,7 @@ qaws_status qaws_curve_fillet_2d(
 			qaws_eval_result_2d er;
 			qaws_scalar t = t_lo + (t_hi - t_lo) * (qaws_scalar)si / (qaws_scalar)(n_samp - 1);
 			memset(&er, 0, sizeof(er));
-			qaws_curve_evaluate_2d(curve, t, QAWS_EVAL_FLAG_POSITION, &er);
+			qaws_curve_evaluate_2d(&er, curve, t, QAWS_EVAL_FLAG_POSITION);
 			samp_params[si] = (qaws_scalar)si / (qaws_scalar)(n_samp - 1);
 			samp_coords[si * 2] = er.position.x;
 			samp_coords[si * 2 + 1] = er.position.y;
@@ -3773,9 +3773,9 @@ cleanup_fillet:
 }
 
 qaws_status qaws_curve_chamfer_2d(
+	qaws_curve** out_curve,
 	qaws_curve const* curve,
-	qaws_scalar distance,
-	qaws_curve** out_curve)
+	qaws_scalar distance)
 {
 	qaws_curve_kind kind;
 	unsigned int seg_count, total_segs;
@@ -3822,7 +3822,7 @@ qaws_status qaws_curve_chamfer_2d(
 			qaws_scalar t = range.min_value + (range.max_value - range.min_value) *
 				(qaws_scalar)i / (qaws_scalar)(n_samp - 1);
 			memset(&er, 0, sizeof(er));
-			qaws_curve_evaluate_2d(curve, t, QAWS_EVAL_FLAG_POSITION, &er);
+			qaws_curve_evaluate_2d(&er, curve, t, QAWS_EVAL_FLAG_POSITION);
 			params[i] = t;
 			coords[i * 2] = er.position.x;
 			coords[i * 2 + 1] = er.position.y;
@@ -3862,9 +3862,9 @@ qaws_status qaws_curve_chamfer_2d(
 			memset(&er_end, 0, sizeof(er_end));
 			memset(&er_start, 0, sizeof(er_start));
 			memset(&er_corner, 0, sizeof(er_corner));
-			qaws_curve_evaluate_2d(curve, t_junc - QAWS_LITERAL(1e-6), QAWS_EVAL_FLAG_D1, &er_end);
-			qaws_curve_evaluate_2d(curve, t_junc + QAWS_LITERAL(1e-6), QAWS_EVAL_FLAG_D1, &er_start);
-			qaws_curve_evaluate_2d(curve, t_junc, QAWS_EVAL_FLAG_POSITION, &er_corner);
+			qaws_curve_evaluate_2d(&er_end, curve, t_junc - QAWS_LITERAL(1e-6), QAWS_EVAL_FLAG_D1);
+			qaws_curve_evaluate_2d(&er_start, curve, t_junc + QAWS_LITERAL(1e-6), QAWS_EVAL_FLAG_D1);
+			qaws_curve_evaluate_2d(&er_corner, curve, t_junc, QAWS_EVAL_FLAG_POSITION);
 
 			j_tan_out[ji] = er_end.d1;
 			j_tan_in[ji] = er_start.d1;
@@ -3905,8 +3905,8 @@ qaws_status qaws_curve_chamfer_2d(
 
 			memset(&er_lo, 0, sizeof(er_lo));
 			memset(&er_hi, 0, sizeof(er_hi));
-			qaws_curve_evaluate_2d(curve, t_lo, QAWS_EVAL_FLAG_POSITION, &er_lo);
-			qaws_curve_evaluate_2d(curve, t_hi, QAWS_EVAL_FLAG_POSITION, &er_hi);
+			qaws_curve_evaluate_2d(&er_lo, curve, t_lo, QAWS_EVAL_FLAG_POSITION);
+			qaws_curve_evaluate_2d(&er_hi, curve, t_hi, QAWS_EVAL_FLAG_POSITION);
 			seg_len = QAWS_SQRT(
 				(er_hi.position.x - er_lo.position.x) * (er_hi.position.x - er_lo.position.x) +
 				(er_hi.position.y - er_lo.position.y) * (er_hi.position.y - er_lo.position.y));
@@ -3945,7 +3945,7 @@ qaws_status qaws_curve_chamfer_2d(
 			qaws_eval_result_2d er;
 			qaws_scalar t = t_lo + (t_hi - t_lo) * (qaws_scalar)si / (qaws_scalar)(n_samp - 1);
 			memset(&er, 0, sizeof(er));
-			qaws_curve_evaluate_2d(curve, t, QAWS_EVAL_FLAG_POSITION, &er);
+			qaws_curve_evaluate_2d(&er, curve, t, QAWS_EVAL_FLAG_POSITION);
 			samp_params[si] = (qaws_scalar)si / (qaws_scalar)(n_samp - 1);
 			samp_coords[si * 2] = er.position.x;
 			samp_coords[si * 2 + 1] = er.position.y;
@@ -3982,7 +3982,7 @@ qaws_status qaws_curve_chamfer_2d(
 			bdesc.control_points = pts;
 			bdesc.control_point_count = 2;
 
-			status = qaws_curve_create_bezier_ex(&bdesc, curve->allocator, &line);
+			status = qaws_curve_create_bezier_ex(&line, &bdesc, curve->allocator);
 			if (status == QAWS_STATUS_OK && line && new_count < total_segs)
 				new_segments[new_count++] = line;
 		}

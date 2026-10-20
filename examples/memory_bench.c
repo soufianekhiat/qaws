@@ -64,7 +64,7 @@ static qaws_curve* mb_wave(void)
 	}
 	memset(&d, 0, sizeof d);
 	d.dimension = QAWS_DIMENSION_2D; d.degree = 3; d.control_points = p; d.control_point_count = 40;
-	qaws_curve_create_bspline(&d, &c);
+	qaws_curve_create_bspline(&c, &d);
 	return c;
 }
 
@@ -83,7 +83,7 @@ static qaws_surface* mb_patch(void)
 		}
 	memset(&d, 0, sizeof d);
 	d.u_degree = 3; d.v_degree = 3; d.control_points = n; d.u_point_count = 12; d.v_point_count = 12;
-	qaws_surface_create_bspline(&d, &s);
+	qaws_surface_create_bspline(&s, &d);
 	return s;
 }
 
@@ -99,7 +99,7 @@ static qaws_curve* mb_square(double x, double y, double s)
 	p[4] = p[0];
 	memset(&d, 0, sizeof d);
 	d.dimension = QAWS_DIMENSION_2D; d.degree = 1; d.control_points = p; d.control_point_count = 5;
-	qaws_curve_create_bspline(&d, &c);
+	qaws_curve_create_bspline(&c, &d);
 	return c;
 }
 
@@ -118,7 +118,7 @@ static int op_sampling(void)
 	sd.sample_count = 8;
 	sd.error_tolerance = (qaws_scalar)1e-6;
 	sd.use_adaptive_sampling = 1;
-	return qaws_curve_sample_2d(g_wave, &sd, out, 200000, &n) == QAWS_STATUS_OK;
+	return qaws_curve_sample_2d(out, &n, g_wave, 200000, &sd) == QAWS_STATUS_OK;
 }
 
 static int op_tessellation(void)
@@ -130,7 +130,7 @@ static int op_tessellation(void)
 	memset(&td, 0, sizeof td);
 	td.max_depth = 7;
 	td.curvature_threshold = (qaws_scalar)1e-3;
-	return qaws_surface_tessellate(g_patch, &td, v, 200000, &nv, idx, 600000, &ni) == QAWS_STATUS_OK;
+	return qaws_surface_tessellate(v, &nv, idx, &ni, g_patch, 200000, 600000, &td) == QAWS_STATUS_OK;
 }
 
 static int op_meshing(void)
@@ -160,7 +160,7 @@ static int op_clipping(void)
 		paths[i].curve_count = 1;
 		paths[i].closed = 1;
 	}
-	ok = qaws_clip_boolean(QAWS_CLIP_UNION, QAWS_FILL_NON_ZERO, paths, 64, NULL, 0, &r) == QAWS_STATUS_OK;
+	ok = qaws_clip_boolean(&r, paths, NULL, 64, 0, QAWS_CLIP_UNION, QAWS_FILL_NON_ZERO) == QAWS_STATUS_OK;
 	qaws_clip_result_destroy(r);
 	return ok;
 }
@@ -169,7 +169,7 @@ static int op_offsets(void)
 {
 	qaws_curve* out[64];
 	unsigned int n = 0, i;
-	int ok = qaws_curve_offset_2d(g_wave, (qaws_scalar)0.4, 1, out, 64, &n) == QAWS_STATUS_OK;
+	int ok = qaws_curve_offset_2d(out, &n, g_wave, 64, (qaws_scalar)0.4, 1) == QAWS_STATUS_OK;
 	for (i = 0; i < n; i++)
 		qaws_curve_destroy(out[i]);
 	return ok;
@@ -195,12 +195,12 @@ static int op_repulsive(void)
 	}
 	memset(&d, 0, sizeof d);
 	d.dimension = 3; d.vertex_count = N; d.edges = edges; d.edge_count = N;
-	if (qaws_repulsive_curves_create(&d, &rc) != QAWS_STATUS_OK)
+	if (qaws_repulsive_curves_create(&rc, &d) != QAWS_STATUS_OK)
 		return 0;
 	memset(&sd, 0, sizeof sd);
 	sd.max_iterations = 5;
 	sd.hold_total_length = 1;
-	ok = qaws_repulsive_curves_solve(rc, &sd, pos, NULL) == QAWS_STATUS_OK;
+	ok = qaws_repulsive_curves_solve(NULL, pos, rc, &sd) == QAWS_STATUS_OK;
 	qaws_repulsive_curves_destroy(rc);
 	return ok;
 }

@@ -53,7 +53,7 @@ static qaws_curve* rg_curve(qaws_scalar const* pts)
 	d.control_point_count = RG_N;
 	d.parameterization = QAWS_PARAMETERIZATION_CENTRIPETAL;
 	d.closed = 1;
-	qaws_curve_create_catmull_rom(&d, &c);
+	qaws_curve_create_catmull_rom(&c, &d);
 	return c;
 }
 
@@ -70,7 +70,7 @@ static void rg_seed(reg_problem const* pb, reg_state* st)
 	c = rg_curve(pts);
 	for (j = 0; j < M; j++)
 		ts[j] = (qaws_scalar)(RG_N * (j + 0.5) / M);
-	qaws_curve_eval_batch_tangent_2d(NULL, c, ts, NULL, M, QAWS_EVAL_FLAG_POSITION, NULL, prim, tan);
+	qaws_curve_eval_batch_tangent_2d(prim, tan, c, ts, NULL, NULL, M, QAWS_EVAL_FLAG_POSITION, NULL);
 	for (k = 0; k < pb->nscan; k++)
 	{
 		double best = 1e300;
@@ -107,8 +107,8 @@ static double rg_energy(reg_problem const* pb, reg_state* st, reg_state* g, int 
 	{
 		for (k = 0; k < pb->nscan; k++)
 			ts[k] = (qaws_scalar)st->foot[k];
-		qaws_curve_eval_batch_tangent_2d(NULL, c, ts, NULL, (unsigned int)pb->nscan,
-			QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2, NULL, prim, tan);
+		qaws_curve_eval_batch_tangent_2d(prim, tan, c, ts, NULL,
+			NULL, (unsigned int)pb->nscan, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2, NULL);
 		if (it == 2)
 			break;
 		for (k = 0; k < pb->nscan; k++)
@@ -143,7 +143,7 @@ static double rg_energy(reg_problem const* pb, reg_state* st, reg_state* g, int 
 	{
 		double cth = cos(st->pose[0]), sth = sin(st->pose[0]), sc = exp(st->pose[1]);
 		memset(pbar, 0, sizeof(pbar));
-		qaws_curve_eval_batch_adjoint_2d(NULL, c, ts, (unsigned int)pb->nscan, QAWS_EVAL_FLAG_POSITION, bar, &views, NULL);
+		qaws_curve_eval_batch_adjoint_2d(&views, NULL, c, ts, bar, (unsigned int)pb->nscan, QAWS_EVAL_FLAG_POSITION, NULL);
 		memset(g->pose, 0, sizeof(g->pose));
 		memset(g->off, 0, sizeof(g->off));
 		for (i = 0; i < RG_N; i++)
@@ -414,7 +414,7 @@ static void rg_curve_svg(svg* s, viewport const* v, reg_problem const* pb, reg_s
 	for (k = 0; k < 200; k++)
 	{
 		qaws_eval_result_2d e;
-		qaws_curve_evaluate_2d(c, (qaws_scalar)(RG_N * k / 199.0), QAWS_EVAL_FLAG_POSITION, &e);
+		qaws_curve_evaluate_2d(&e, c, (qaws_scalar)(RG_N * k / 199.0), QAWS_EVAL_FLAG_POSITION);
 		xy[2 * k] = vx(v, e.position.x);
 		xy[2 * k + 1] = vy(v, e.position.y);
 	}

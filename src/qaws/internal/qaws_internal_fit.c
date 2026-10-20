@@ -190,15 +190,15 @@ qaws_status qaws_internal_fit_bspline_range_ex(
 	*out_curve = NULL;
 
 	/* Allocate working buffers */
-	knots = (qaws_scalar*)qaws_internal_alloc(allocator, qaws_internal_mul2(sizeof(qaws_scalar), (size_t)knot_count));
+	knots = (qaws_scalar*)qaws_internal_alloc(qaws_internal_mul2(sizeof(qaws_scalar), (size_t)knot_count), allocator);
 	ata_band = (qaws_scalar*)qaws_internal_calloc(allocator, qaws_internal_mul2(n, stride), sizeof(qaws_scalar));
 	atb = (qaws_scalar*)qaws_internal_calloc(allocator, qaws_internal_mul2(n, dim), sizeof(qaws_scalar));
-	basis_row = (qaws_scalar*)qaws_internal_alloc(allocator, qaws_internal_mul2(sizeof(qaws_scalar), (size_t)n));
-	cps = (qaws_scalar*)qaws_internal_alloc(allocator, qaws_internal_mul3(sizeof(qaws_scalar), n, dim));
+	basis_row = (qaws_scalar*)qaws_internal_alloc(qaws_internal_mul2(sizeof(qaws_scalar), (size_t)n), allocator);
+	cps = (qaws_scalar*)qaws_internal_alloc(qaws_internal_mul3(sizeof(qaws_scalar), n, dim), allocator);
 
 	if (!knots || !ata_band || !atb || !basis_row || !cps)
 	{
-		qaws_internal_dealloc(allocator, knots); qaws_internal_dealloc(allocator, ata_band); qaws_internal_dealloc(allocator, atb); qaws_internal_dealloc(allocator, basis_row); qaws_internal_dealloc(allocator, cps);
+		qaws_internal_dealloc(knots, allocator); qaws_internal_dealloc(ata_band, allocator); qaws_internal_dealloc(atb, allocator); qaws_internal_dealloc(basis_row, allocator); qaws_internal_dealloc(cps, allocator);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 
@@ -240,12 +240,12 @@ qaws_status qaws_internal_fit_bspline_range_ex(
 	for (d = 0; d < dim; d++)
 	{
 		/* Copy the band matrix (it gets overwritten by Cholesky) */
-		qaws_scalar* ata_copy = (qaws_scalar*)qaws_internal_alloc(allocator, qaws_internal_mul3(sizeof(qaws_scalar), n, stride));
-		qaws_scalar* rhs = (qaws_scalar*)qaws_internal_alloc(allocator, qaws_internal_mul2(sizeof(qaws_scalar), (size_t)n));
+		qaws_scalar* ata_copy = (qaws_scalar*)qaws_internal_alloc(qaws_internal_mul3(sizeof(qaws_scalar), n, stride), allocator);
+		qaws_scalar* rhs = (qaws_scalar*)qaws_internal_alloc(qaws_internal_mul2(sizeof(qaws_scalar), (size_t)n), allocator);
 		if (!ata_copy || !rhs)
 		{
-			qaws_internal_dealloc(allocator, ata_copy); qaws_internal_dealloc(allocator, rhs);
-			qaws_internal_dealloc(allocator, knots); qaws_internal_dealloc(allocator, ata_band); qaws_internal_dealloc(allocator, atb); qaws_internal_dealloc(allocator, basis_row); qaws_internal_dealloc(allocator, cps);
+			qaws_internal_dealloc(ata_copy, allocator); qaws_internal_dealloc(rhs, allocator);
+			qaws_internal_dealloc(knots, allocator); qaws_internal_dealloc(ata_band, allocator); qaws_internal_dealloc(atb, allocator); qaws_internal_dealloc(basis_row, allocator); qaws_internal_dealloc(cps, allocator);
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 		}
 
@@ -264,8 +264,8 @@ qaws_status qaws_internal_fit_bspline_range_ex(
 				rhs[ci] = atb[ci * dim + d];
 			if (!solve_banded_spd(ata_copy, rhs, n, bw))
 			{
-				qaws_internal_dealloc(allocator, ata_copy); qaws_internal_dealloc(allocator, rhs);
-				qaws_internal_dealloc(allocator, knots); qaws_internal_dealloc(allocator, ata_band); qaws_internal_dealloc(allocator, atb); qaws_internal_dealloc(allocator, basis_row); qaws_internal_dealloc(allocator, cps);
+				qaws_internal_dealloc(ata_copy, allocator); qaws_internal_dealloc(rhs, allocator);
+				qaws_internal_dealloc(knots, allocator); qaws_internal_dealloc(ata_band, allocator); qaws_internal_dealloc(atb, allocator); qaws_internal_dealloc(basis_row, allocator); qaws_internal_dealloc(cps, allocator);
 				return QAWS_STATUS_DEGENERATE_CURVE;
 			}
 		}
@@ -273,8 +273,8 @@ qaws_status qaws_internal_fit_bspline_range_ex(
 		for (ci = 0; ci < n; ci++)
 			cps[ci * dim + d] = rhs[ci];
 
-		qaws_internal_dealloc(allocator, ata_copy);
-		qaws_internal_dealloc(allocator, rhs);
+		qaws_internal_dealloc(ata_copy, allocator);
+		qaws_internal_dealloc(rhs, allocator);
 	}
 
 	/* Create B-spline curve from the computed control points */
@@ -288,13 +288,13 @@ qaws_status qaws_internal_fit_bspline_range_ex(
 	desc.is_uniform = 0;
 	desc.is_closed = 0;
 
-	status = qaws_curve_create_bspline_ex(&desc, allocator, out_curve);
+	status = qaws_curve_create_bspline_ex(out_curve, &desc, allocator);
 
-	qaws_internal_dealloc(allocator, knots);
-	qaws_internal_dealloc(allocator, ata_band);
-	qaws_internal_dealloc(allocator, atb);
-	qaws_internal_dealloc(allocator, basis_row);
-	qaws_internal_dealloc(allocator, cps);
+	qaws_internal_dealloc(knots, allocator);
+	qaws_internal_dealloc(ata_band, allocator);
+	qaws_internal_dealloc(atb, allocator);
+	qaws_internal_dealloc(basis_row, allocator);
+	qaws_internal_dealloc(cps, allocator);
 
 	return status;
 }
@@ -323,16 +323,16 @@ qaws_status qaws_internal_fit_bspline_ex(
 		t_min, t_max, out_curve);
 }
 
-qaws_status qaws_internal_fit_bspline_range(qaws_dimension dimension, unsigned int degree, qaws_scalar const* sample_params,
-	qaws_scalar const* sample_coords, unsigned int sample_count, unsigned int control_point_count, qaws_scalar t_min, qaws_scalar t_max,
-	qaws_curve** out_curve)
+qaws_status qaws_internal_fit_bspline_range(qaws_curve** out_curve, qaws_scalar const* sample_params, qaws_scalar const* sample_coords,
+	qaws_dimension dimension, unsigned int sample_count, unsigned int control_point_count, unsigned int degree, qaws_scalar t_min,
+	qaws_scalar t_max)
 {
 	return qaws_internal_fit_bspline_range_ex(NULL, dimension, degree, sample_params, sample_coords, sample_count, control_point_count, t_min, t_max,
 		out_curve);
 }
 
-qaws_status qaws_internal_fit_bspline(qaws_dimension dimension, unsigned int degree, qaws_scalar const* sample_params,
-	qaws_scalar const* sample_coords, unsigned int sample_count, unsigned int control_point_count, qaws_curve** out_curve)
+qaws_status qaws_internal_fit_bspline(qaws_curve** out_curve, qaws_scalar const* sample_params, qaws_scalar const* sample_coords,
+	qaws_dimension dimension, unsigned int sample_count, unsigned int control_point_count, unsigned int degree)
 {
 	return qaws_internal_fit_bspline_ex(NULL, dimension, degree, sample_params, sample_coords, sample_count, control_point_count, out_curve);
 }

@@ -236,7 +236,7 @@ static qaws_surface* tv_torus(double R, double r)
 	d.u_knot_count = 12;
 	d.v_knots = kn;
 	d.v_knot_count = 12;
-	qaws_surface_create_nurbs(&d, &s);
+	qaws_surface_create_nurbs(&s, &d);
 	return s;
 }
 
@@ -293,9 +293,9 @@ static void test_box(void)
 			p[k]->z = (qaws_scalar)(h[2] * q[i][k][2]);
 		}
 		f[i] = NULL;
-		qaws_surface_create_bilinear(&bd, &f[i]);
+		qaws_surface_create_bilinear(&f[i], &bd);
 	}
-	st = qaws_shell_atlas_create((qaws_surface const* const*)f, 6, 0, &atlas);
+	st = qaws_shell_atlas_create(&atlas, (qaws_surface const* const*)f, 6, 0);
 	memset(&g, 0, sizeof g);
 	g.target_length = (qaws_scalar)0.15;
 	if (st == QAWS_STATUS_OK)

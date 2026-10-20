@@ -47,7 +47,7 @@ static void ssd_fan(qaws_surface** f, double const (*d)[3], unsigned int n, doub
 			memset(&bd, 0, sizeof(bd));
 			bd.u_degree = 3; bd.v_degree = 3; bd.control_points = cp; bd.u_point_count = 4; bd.v_point_count = 4;
 			f[i] = NULL;
-			qaws_surface_create_bezier(&bd, &f[i]);
+			qaws_surface_create_bezier(&f[i], &bd);
 		}
 	}
 }
@@ -130,7 +130,7 @@ static void ssd_eval(qaws_surface const* f, double u, double v, unsigned int fla
 	double lu = ru.max_value - ru.min_value, lv = rv.max_value - rv.min_value;
 	if (lu > 0 && (u < ru.min_value - 1e-9 * lu || u > ru.max_value + 1e-9 * lu)) u -= lu * floor((u - ru.min_value) / lu);
 	if (lv > 0 && (v < rv.min_value - 1e-9 * lv || v > rv.max_value + 1e-9 * lv)) v -= lv * floor((v - rv.min_value) / lv);
-	qaws_surface_evaluate(f, (qaws_scalar)u, (qaws_scalar)v, flags, r);
+	qaws_surface_evaluate(r, f, (qaws_scalar)u, (qaws_scalar)v, flags);
 }
 
 /* a region painted on a face: its colour where the face is inside it */
@@ -169,7 +169,7 @@ static void ssd_surfaces(ssd_scene* sc, qaws_surface** f, unsigned int nf, ssd_p
 					qaws_vec2 q0;
 					q0.x = (qaws_scalar)(ru.min_value + (ru.max_value - ru.min_value) * (i + 0.5) / N);
 					q0.y = (qaws_scalar)(rv.min_value + (rv.max_value - rv.min_value) * (j + 0.5) / N);
-					qaws_surface_region_contains(sc->trims[k], q0, &in);
+					qaws_surface_region_contains(&in, sc->trims[k], q0);
 					if (in != 1)
 						continue;
 				}
@@ -209,7 +209,7 @@ static void ssd_surfaces(ssd_scene* sc, qaws_surface** f, unsigned int nf, ssd_p
 					qaws_vec2 q;
 					qaws_surface_region const* g = paint[m].r ? qaws_shell_region_get_face(paint[m].r, k) : NULL;
 					q.x = (qaws_scalar)cu; q.y = (qaws_scalar)cv;
-					if (g) qaws_surface_region_contains(g, q, &in);
+					if (g) qaws_surface_region_contains(&in, g, q);
 					if (in == 1)
 					{
 						unsigned int c;
@@ -260,7 +260,7 @@ static void ssd_curve_line(ssd_scene* sc, qaws_surface const* f, qaws_curve cons
 	for (k = 0; k <= 96; k++)
 	{
 		qaws_eval_result_2d e;
-		qaws_curve_evaluate_2d(cv, (qaws_scalar)(rg.min_value + (rg.max_value - rg.min_value) * k / 96.0), QAWS_EVAL_FLAG_POSITION, &e);
+		qaws_curve_evaluate_2d(&e, cv, (qaws_scalar)(rg.min_value + (rg.max_value - rg.min_value) * k / 96.0), QAWS_EVAL_FLAG_POSITION);
 		uv[2 * k] = e.position.x; uv[2 * k + 1] = e.position.y;
 	}
 	ssd_uv_line(sc, f, uv, 97, rgb, width);
@@ -298,7 +298,7 @@ static int ssd_on_seam(qaws_surface const* f, qaws_curve const* c)
 	qaws_surface_eval_result a, b;
 	unsigned int ax, i;
 	for (i = 0; i < 3; i++)
-		qaws_curve_evaluate_2d(c, rg.min_value + (rg.max_value - rg.min_value) * (qaws_scalar)(0.5 * i), QAWS_EVAL_FLAG_POSITION, &e[i]);
+		qaws_curve_evaluate_2d(&e[i], c, rg.min_value + (rg.max_value - rg.min_value) * (qaws_scalar)(0.5 * i), QAWS_EVAL_FLAG_POSITION);
 	for (ax = 0; ax < 2; ax++)
 	{
 		double w = ax ? e[1].position.y : e[1].position.x, q[2];
@@ -330,7 +330,7 @@ static void ssd_outline(ssd_scene* sc, qaws_shell_region const* g, qaws_surface*
 		for (p = 0; p < qaws_surface_region_get_path_count(r); p++)
 		{
 			qaws_path_2d path;
-			qaws_surface_region_get_path(r, p, &path);
+			qaws_surface_region_get_path(&path, r, p);
 			for (c = 0; c < path.curve_count; c++)
 				if (!ssd_on_seam(f[k], path.curves[c]))
 					ssd_curve_line(sc, f[k], path.curves[c], rgb, 2.0);
@@ -367,12 +367,12 @@ static void ssd_rays(ssd_scene* sc, qaws_shell_atlas const* a, qaws_surface** f,
 		qaws_vec2 d;
 		double th = th0 + 0.5 * pi * ((i + 0.5) / 24.0 - 0.5);
 		d.x = (qaws_scalar)cos(th); d.y = (qaws_scalar)sin(th);
-		if (qaws_shell_curve_create_geodesic_ray(a, c, d, (qaws_scalar)len, 0, &g) == QAWS_STATUS_OK)
+		if (qaws_shell_curve_create_geodesic_ray(&g, a, c, d, (qaws_scalar)len, 0) == QAWS_STATUS_OK)
 			for (w = 0; w < qaws_shell_curve_get_run_count(g); w++)
 			{
 				unsigned int fw;
 				qaws_surface_curve const* run;
-				qaws_shell_curve_get_run(g, w, &fw, &run);
+				qaws_shell_curve_get_run(&fw, &run, g, w);
 				ssd_curve_line(sc, f[fw], qaws_surface_curve_get_uv(run), i < 12 ? purple : red, 1.3);
 			}
 		qaws_shell_curve_destroy(g);
@@ -383,8 +383,8 @@ static qaws_shell_region* ssd_disk(qaws_shell_atlas const* a, qaws_shell_point c
 {
 	qaws_shell_region* g = NULL;
 	qaws_scalar A = 0;
-	qaws_shell_region_create_geodesic_disk(a, c, (qaws_scalar)r, 0, &g);
-	if (g) qaws_shell_region_get_area(g, &A);
+	qaws_shell_region_create_geodesic_disk(&g, a, c, (qaws_scalar)r, 0);
+	if (g) qaws_shell_region_get_area(&A, g);
 	if (area) *area = (double)A;
 	return g;
 }
@@ -430,7 +430,7 @@ static void demo_shell_saddle(void)
 		qaws_scalar X = 0;
 		memset(&sc, 0, sizeof(sc));
 		ssd_fan(f, six ? D6 : D5, n, bent ? 1.6 : 1, bent ? 1 : 0);
-		qaws_shell_atlas_create((qaws_surface const* const*)f, n, 0, &a);
+		qaws_shell_atlas_create(&a, (qaws_surface const* const*)f, n, 0);
 		v3.x0 = 24 + (k % 4) * (pw + 12); v3.y0 = 104 + (k / 4) * (ph + 44); v3.w = pw; v3.h = ph;
 		if (six)
 			sgf_view_init(&view, -0.25 * pi, 0.615, bent ? 92 : 125, v3.x0 + pw / 2, v3.y0 + ph / 2 + 18);
@@ -497,8 +497,8 @@ static void demo_shell_saddle(void)
 			}
 			else
 			{
-				if (g && h) qaws_shell_region_clip(g, h, T[k - 8], &x);
-				if (x) qaws_shell_region_get_area(x, &X);
+				if (g && h) qaws_shell_region_clip(&x, g, h, T[k - 8]);
+				if (x) qaws_shell_region_get_area(&X, x);
 				sprintf(label, "%s: area %.6f", TN[k - 8], (double)X);
 				ssd_panel(&s, &v3, label, "the result filled; A and B outlined");
 				paint[0].r = x; memcpy(paint[0].rgb, fpurple, sizeof(fpurple));

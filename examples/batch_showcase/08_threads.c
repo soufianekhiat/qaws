@@ -164,7 +164,7 @@ static unsigned long long th_op(th_scene* sc, unsigned int op, qaws_batch_execut
 		d.curve_count = sc->hf.count;
 		d.families = sc->hf.family;
 		d.executor = x;
-		qaws_curve_batch_find_intersections_2d(&d, ch, 1 << 16, &n, NULL);
+		qaws_curve_batch_find_intersections_2d(ch, &n, NULL, 1 << 16, &d);
 		return th_hash(h, ch, n * sizeof(ch[0]));
 	}
 	case 1:
@@ -177,7 +177,7 @@ static unsigned long long th_op(th_scene* sc, unsigned int op, qaws_batch_execut
 		d.levels = sc->levels;
 		d.level_count = 96;
 		d.executor = x;
-		qaws_curve_batch_find_level_crossings(&d, lc, 1 << 16, &n);
+		qaws_curve_batch_find_level_crossings(lc, &n, 1 << 16, &d);
 		for (i = 0; i < n; i++)
 		{
 			h = th_hash(h, &lc[i].curve, 2 * sizeof(unsigned int));
@@ -194,7 +194,7 @@ static unsigned long long th_op(th_scene* sc, unsigned int op, qaws_batch_execut
 		d.points = sc->pts2;
 		d.point_count = TH_POINTS;
 		d.executor = x;
-		qaws_curve_batch_find_closest(&d, cp, NULL);
+		qaws_curve_batch_find_closest(cp, NULL, &d);
 		for (i = 0; i < TH_POINTS; i++)
 		{
 			h = th_hash(h, &cp[i].curve, sizeof(unsigned int));
@@ -211,7 +211,7 @@ static unsigned long long th_op(th_scene* sc, unsigned int op, qaws_batch_execut
 		d.points = sc->pts3;
 		d.point_count = TH_POINTS;
 		d.executor = x;
-		qaws_surface_batch_find_closest(&d, sp, NULL);
+		qaws_surface_batch_find_closest(sp, NULL, &d);
 		for (i = 0; i < TH_POINTS; i++)
 		{
 			h = th_hash(h, &sp[i].surface, sizeof(unsigned int));
@@ -229,7 +229,7 @@ static unsigned long long th_op(th_scene* sc, unsigned int op, qaws_batch_execut
 		d.directions = sc->dir;
 		d.ray_count = TH_RAYS;
 		d.executor = x;
-		qaws_surface_batch_raycast(&d, rh, NULL);
+		qaws_surface_batch_raycast(rh, NULL, &d);
 		for (i = 0; i < TH_RAYS; i++)
 		{
 			h = th_hash(h, &rh[i].surface, sizeof(unsigned int));
@@ -245,7 +245,7 @@ static unsigned long long th_op(th_scene* sc, unsigned int op, qaws_batch_execut
 		d.surface_count = 1 + TR_LEVELS;
 		d.families = sc->fam;
 		d.executor = x;
-		qaws_surface_batch_find_intersections(&d, cv, 1024, &n, pt, 1 << 17, &m, NULL);
+		qaws_surface_batch_find_intersections(cv, &n, pt, &m, NULL, 1024, 1 << 17, &d);
 		return th_hash(th_hash(h, cv, n * sizeof(cv[0])), pt, m * sizeof(pt[0]));
 	}
 	case 6:
@@ -256,7 +256,7 @@ static unsigned long long th_op(th_scene* sc, unsigned int op, qaws_batch_execut
 		d.surface_count = 1 + TR_LEVELS;
 		d.families = sc->fam;
 		d.executor = x;
-		qaws_exact_surface_batch_hits(&d, ept, 1 << 16, &m, ebr, 1024, &n, NULL);
+		qaws_exact_surface_batch_hits(ept, &m, ebr, &n, NULL, 1 << 16, 1024, &d);
 		return th_hash(th_hash(h, ebr, n * sizeof(ebr[0])), ept, m * sizeof(ept[0]));
 	}
 	case 7:
@@ -266,7 +266,7 @@ static unsigned long long th_op(th_scene* sc, unsigned int op, qaws_batch_execut
 		d.surfaces = (qaws_exact_surface const* const*)sc->es;
 		d.surface_count = 1;
 		d.executor = x;
-		qaws_exact_surface_batch_closest(&d, sc->epts, TH_EXACT, ecp, NULL);
+		qaws_exact_surface_batch_closest(ecp, NULL, sc->epts, TH_EXACT, &d);
 		return th_hash(h, ecp, sizeof(ecp));
 	}
 	default:
@@ -276,7 +276,7 @@ static unsigned long long th_op(th_scene* sc, unsigned int op, qaws_batch_execut
 		d.surfaces = (qaws_exact_surface const* const*)sc->es;
 		d.surface_count = 1;
 		d.executor = x;
-		qaws_exact_surface_batch_raycast(&d, sc->ep0, sc->ep1, TH_EXACT, 0, erh, NULL);
+		qaws_exact_surface_batch_raycast(erh, NULL, sc->ep0, sc->ep1, TH_EXACT, &d, 0);
 		for (i = 0; i < TH_EXACT; i++)
 		{
 			h = th_hash(h, &erh[i].surface, sizeof(unsigned int));
@@ -328,7 +328,7 @@ static void th_build(th_scene* sc)
 	qaws_exact_desc_default(&xd);
 	xd.space_exp2 = -20;
 	for (i = 0; i <= TR_LEVELS; i++)
-		qaws_exact_surface_prepare(&xd, sc->sf[i], &sc->es[i], NULL);
+		qaws_exact_surface_prepare(&sc->es[i], NULL, sc->sf[i], &xd);
 	sc->pts2 = (qaws_scalar*)malloc(2 * TH_POINTS * sizeof(qaws_scalar));
 	sc->pts3 = (qaws_scalar*)malloc(3 * TH_POINTS * sizeof(qaws_scalar));
 	sc->org = (qaws_scalar*)malloc(3 * TH_RAYS * sizeof(qaws_scalar));

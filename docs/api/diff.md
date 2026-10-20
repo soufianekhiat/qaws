@@ -502,9 +502,9 @@ Resets a report to its best state: `diff_class = QAWS_DIFF_SMOOTH`, `validity = 
 
 ```c
 qaws_field_view qaws_field_view_make(
-	qaws_diff_field field,
 	qaws_scalar* data,
 	unsigned int count,
+	qaws_diff_field field,
 	unsigned int components);
 ```
 
@@ -566,8 +566,8 @@ Total order on keys. Returns -1, 0 or 1. Compares depth, then child indices, the
 
 ```c
 unsigned int qaws_param_key_to_string(
-	qaws_param_key const* key,
 	char* buffer,
+	qaws_param_key const* key,
 	unsigned int capacity);
 ```
 
@@ -577,8 +577,8 @@ Formats the key, e.g. `child[0]/control_points/4/z`. Components 0..2 print as `x
 
 ```c
 qaws_status qaws_param_key_parse(
-	char const* text,
-	qaws_param_key* out_key);
+	qaws_param_key* out_key,
+	char const* text);
 ```
 
 Parses the text form produced by `qaws_param_key_to_string`. Accepts zero or more `child[i]` segments, a field name, an element index, and an optional component (`x`/`y`/`z` or `0`/`1`/`2`). When a component is present, `components` is set to 3; otherwise to 1.
@@ -628,10 +628,10 @@ Returns the kind of the evaluation coordinate `t`: `QAWS_COORDINATE_ARC_LENGTH` 
 
 ```c
 qaws_status qaws_curve_describe_fields(
-	qaws_curve const* curve,
 	qaws_field_desc* out_fields,
-	unsigned int capacity,
-	unsigned int* out_count);
+	unsigned int* out_count,
+	qaws_curve const* curve,
+	unsigned int capacity);
 ```
 
 Writes the schema of the curve's differentiable fields. `*out_count` receives the number of fields. Pass `out_fields = NULL` to query the count only.
@@ -642,11 +642,11 @@ Writes the schema of the curve's differentiable fields. `*out_count` receives th
 
 ```c
 qaws_status qaws_curve_read_field(
-	qaws_curve const* curve,
-	qaws_diff_field field,
 	qaws_scalar* out_values,
+	unsigned int* out_scalar_count,
+	qaws_curve const* curve,
 	unsigned int capacity,
-	unsigned int* out_scalar_count);
+	qaws_diff_field field);
 ```
 
 Copies the primal values of one field (`count * components` scalars, element-major). `*out_scalar_count` receives the scalar count. Pass `out_values = NULL` to query the size only.
@@ -657,9 +657,9 @@ Copies the primal values of one field (`count * components` scalars, element-maj
 
 ```c
 qaws_status qaws_curve_clone_with_fields(
+	qaws_curve** out_curve,
 	qaws_curve const* curve,
-	qaws_diff_views const* values,
-	qaws_curve** out_curve);
+	qaws_diff_views const* values);
 ```
 
 Creates a new curve of the same family with fields replaced by the values in `values`; absent fields are copied unchanged. Typical use: apply an optimizer step. The caller owns the returned curve.
@@ -670,10 +670,10 @@ Creates a new curve of the same family with fields replaced by the values in `va
 
 ```c
 qaws_status qaws_curve_diff_children(
-	qaws_curve const* curve,
 	qaws_diff_child* out_children,
-	unsigned int capacity,
-	unsigned int* out_count);
+	unsigned int* out_count,
+	qaws_curve const* curve,
+	unsigned int capacity);
 ```
 
 Lists the objects a derived curve chains into (composite segments, ...). Child `i` matches `views->children[i]`. Curves without children return `QAWS_STATUS_OK` with `*out_count = 0`. Pass `out_children = NULL` to query the count only.
@@ -684,10 +684,10 @@ Lists the objects a derived curve chains into (composite segments, ...). Child `
 
 ```c
 qaws_status qaws_curve_local_support(
+	qaws_local_support* out_support,
 	qaws_curve const* curve,
 	qaws_scalar t,
-	unsigned int order,
-	qaws_local_support* out_support);
+	unsigned int order);
 ```
 
 Returns the parameters influencing the evaluation at `t`. For `QAWS_CAP_LINEAR` curves the weights are exact basis derivatives for orders `0..order`.
@@ -698,15 +698,15 @@ Returns the parameters influencing the evaluation at `t`. For `QAWS_CAP_LINEAR` 
 
 ```c
 qaws_status qaws_curve_build_support_index(
+	unsigned int* out_offsets,
+	unsigned int* out_samples,
+	unsigned int* out_entry_count,
 	qaws_curve const* curve,
 	qaws_scalar const* t,
 	unsigned int count,
-	qaws_diff_field field,
-	unsigned int* out_offsets,
 	unsigned int offset_capacity,
-	unsigned int* out_samples,
 	unsigned int sample_capacity,
-	unsigned int* out_entry_count);
+	qaws_diff_field field);
 ```
 
 Builds a support index for gather-style adjoint accumulation (CPU or GPU): for every element `e` of `field`, the samples influenced by it are `out_samples[out_offsets[e] .. out_offsets[e+1])`, in sample order. `out_offsets` needs `element_count + 1` entries.
@@ -717,26 +717,26 @@ Builds a support index for gather-style adjoint accumulation (CPU or GPU): for e
 
 ```c
 qaws_status qaws_curve_eval_batch_tangent_2d(
-	qaws_diff_context const* ctx,
+	qaws_curve_jet_2d* out_primal,
+	qaws_curve_jet_2d* out_tangent,
 	qaws_curve const* curve,
 	qaws_scalar const* t,
 	qaws_scalar const* t_tangent,
+	qaws_diff_views const* param_tangent,
 	unsigned int count,
 	unsigned int channels,
-	qaws_diff_views const* param_tangent,
-	qaws_curve_jet_2d* out_primal,
-	qaws_curve_jet_2d* out_tangent);
+	qaws_diff_context const* ctx);
 
 qaws_status qaws_curve_eval_batch_tangent_3d(
-	qaws_diff_context const* ctx,
+	qaws_curve_jet_3d* out_primal,
+	qaws_curve_jet_3d* out_tangent,
 	qaws_curve const* curve,
 	qaws_scalar const* t,
 	qaws_scalar const* t_tangent,
+	qaws_diff_views const* param_tangent,
 	unsigned int count,
 	unsigned int channels,
-	qaws_diff_views const* param_tangent,
-	qaws_curve_jet_3d* out_primal,
-	qaws_curve_jet_3d* out_tangent);
+	qaws_diff_context const* ctx);
 ```
 
 Evaluates `count` samples and their tangent along a combined coordinate and parameter direction.
@@ -759,28 +759,28 @@ Outputs are overwritten. The curve dimension must match the function suffix.
 
 ```c
 qaws_status qaws_curve_eval_batch_tangent2_2d(
-	qaws_diff_context const* ctx,
-	qaws_curve const* curve,
-	qaws_scalar const* t,
-	qaws_scalar const* t_tangent,
-	unsigned int count,
-	unsigned int channels,
-	qaws_diff_views const* param_tangent,
 	qaws_curve_jet_2d* out_primal,
 	qaws_curve_jet_2d* out_tangent,
-	qaws_curve_jet_2d* out_tangent2);
-
-qaws_status qaws_curve_eval_batch_tangent2_3d(
-	qaws_diff_context const* ctx,
+	qaws_curve_jet_2d* out_tangent2,
 	qaws_curve const* curve,
 	qaws_scalar const* t,
 	qaws_scalar const* t_tangent,
+	qaws_diff_views const* param_tangent,
 	unsigned int count,
 	unsigned int channels,
-	qaws_diff_views const* param_tangent,
+	qaws_diff_context const* ctx);
+
+qaws_status qaws_curve_eval_batch_tangent2_3d(
 	qaws_curve_jet_3d* out_primal,
 	qaws_curve_jet_3d* out_tangent,
-	qaws_curve_jet_3d* out_tangent2);
+	qaws_curve_jet_3d* out_tangent2,
+	qaws_curve const* curve,
+	qaws_scalar const* t,
+	qaws_scalar const* t_tangent,
+	qaws_diff_views const* param_tangent,
+	unsigned int count,
+	unsigned int channels,
+	qaws_diff_context const* ctx);
 ```
 
 Same as the tangent functions, and additionally writes the second directional derivative along the same direction into `out_tangent2` (required).
@@ -791,24 +791,24 @@ Same as the tangent functions, and additionally writes the second directional de
 
 ```c
 qaws_status qaws_curve_eval_batch_adjoint_2d(
-	qaws_diff_context const* ctx,
+	qaws_diff_views* param_adjoint,
+	qaws_scalar* t_adjoint,
 	qaws_curve const* curve,
 	qaws_scalar const* t,
+	qaws_curve_jet_2d const* out_adjoint,
 	unsigned int count,
 	unsigned int channels,
-	qaws_curve_jet_2d const* out_adjoint,
-	qaws_diff_views* param_adjoint,
-	qaws_scalar* t_adjoint);
+	qaws_diff_context const* ctx);
 
 qaws_status qaws_curve_eval_batch_adjoint_3d(
-	qaws_diff_context const* ctx,
+	qaws_diff_views* param_adjoint,
+	qaws_scalar* t_adjoint,
 	qaws_curve const* curve,
 	qaws_scalar const* t,
+	qaws_curve_jet_3d const* out_adjoint,
 	unsigned int count,
 	unsigned int channels,
-	qaws_curve_jet_3d const* out_adjoint,
-	qaws_diff_views* param_adjoint,
-	qaws_scalar* t_adjoint);
+	qaws_diff_context const* ctx);
 ```
 
 Pulls back `count` jet adjoints to parameter and coordinate adjoints.
@@ -828,24 +828,24 @@ Parameter accumulation follows `ctx->accumulation`. Knot adjoints are produced w
 
 ```c
 qaws_status qaws_curve_eval_tangent_2d(
-	qaws_diff_context const* ctx,
+	qaws_curve_jet_2d* out_primal,
+	qaws_curve_jet_2d* out_tangent,
 	qaws_curve const* curve,
+	qaws_diff_views const* param_tangent,
 	qaws_scalar t,
 	qaws_scalar t_tangent,
 	unsigned int channels,
-	qaws_diff_views const* param_tangent,
-	qaws_curve_jet_2d* out_primal,
-	qaws_curve_jet_2d* out_tangent);
+	qaws_diff_context const* ctx);
 
 qaws_status qaws_curve_eval_tangent_3d(
-	qaws_diff_context const* ctx,
+	qaws_curve_jet_3d* out_primal,
+	qaws_curve_jet_3d* out_tangent,
 	qaws_curve const* curve,
+	qaws_diff_views const* param_tangent,
 	qaws_scalar t,
 	qaws_scalar t_tangent,
 	unsigned int channels,
-	qaws_diff_views const* param_tangent,
-	qaws_curve_jet_3d* out_primal,
-	qaws_curve_jet_3d* out_tangent);
+	qaws_diff_context const* ctx);
 ```
 
 Single-sample wrapper around the batch tangent functions. Pass `t_tangent = 0` to hold the coordinate fixed.
@@ -854,22 +854,22 @@ Single-sample wrapper around the batch tangent functions. Pass `t_tangent = 0` t
 
 ```c
 qaws_status qaws_curve_eval_adjoint_2d(
-	qaws_diff_context const* ctx,
+	qaws_diff_views* param_adjoint,
+	qaws_scalar* t_adjoint,
 	qaws_curve const* curve,
+	qaws_curve_jet_2d const* out_adjoint,
 	qaws_scalar t,
 	unsigned int channels,
-	qaws_curve_jet_2d const* out_adjoint,
-	qaws_diff_views* param_adjoint,
-	qaws_scalar* t_adjoint);
+	qaws_diff_context const* ctx);
 
 qaws_status qaws_curve_eval_adjoint_3d(
-	qaws_diff_context const* ctx,
+	qaws_diff_views* param_adjoint,
+	qaws_scalar* t_adjoint,
 	qaws_curve const* curve,
+	qaws_curve_jet_3d const* out_adjoint,
 	qaws_scalar t,
 	unsigned int channels,
-	qaws_curve_jet_3d const* out_adjoint,
-	qaws_diff_views* param_adjoint,
-	qaws_scalar* t_adjoint);
+	qaws_diff_context const* ctx);
 ```
 
 Single-sample wrapper around the batch adjoint functions. Accumulates (`+=`) into `param_adjoint` and `*t_adjoint` (either may be NULL).
@@ -900,10 +900,10 @@ Returns the differentiability class of the surface, or `QAWS_DIFF_UNSUPPORTED`.
 
 ```c
 qaws_status qaws_surface_describe_fields(
-	qaws_surface const* surface,
 	qaws_field_desc* out_fields,
-	unsigned int capacity,
-	unsigned int* out_count);
+	unsigned int* out_count,
+	qaws_surface const* surface,
+	unsigned int capacity);
 ```
 
 Same contract as `qaws_curve_describe_fields`.
@@ -912,11 +912,11 @@ Same contract as `qaws_curve_describe_fields`.
 
 ```c
 qaws_status qaws_surface_read_field(
-	qaws_surface const* surface,
-	qaws_diff_field field,
 	qaws_scalar* out_values,
+	unsigned int* out_scalar_count,
+	qaws_surface const* surface,
 	unsigned int capacity,
-	unsigned int* out_scalar_count);
+	qaws_diff_field field);
 ```
 
 Same contract as `qaws_curve_read_field`.
@@ -925,10 +925,10 @@ Same contract as `qaws_curve_read_field`.
 
 ```c
 qaws_status qaws_surface_diff_children(
-	qaws_surface const* surface,
 	qaws_diff_child* out_children,
-	unsigned int capacity,
-	unsigned int* out_count);
+	unsigned int* out_count,
+	qaws_surface const* surface,
+	unsigned int capacity);
 ```
 
 Lists the objects the surface rules chain into; child `i` matches `views->children[i]`. Same contract as `qaws_curve_diff_children`.
@@ -937,11 +937,11 @@ Lists the objects the surface rules chain into; child `i` matches `views->childr
 
 ```c
 qaws_status qaws_surface_local_support(
+	qaws_surface_support* out_support,
 	qaws_surface const* surface,
 	qaws_scalar u,
 	qaws_scalar v,
-	unsigned int order,
-	qaws_surface_support* out_support);
+	unsigned int order);
 ```
 
 Returns the tensor-product support of the evaluation at `(u, v)` (clamped to the domain), with weights for orders `0..order` in each direction.
@@ -952,16 +952,16 @@ Returns the tensor-product support of the evaluation at `(u, v)` (clamped to the
 
 ```c
 qaws_status qaws_surface_build_support_index(
+	unsigned int* out_offsets,
+	unsigned int* out_samples,
+	unsigned int* out_entry_count,
 	qaws_surface const* surface,
 	qaws_scalar const* u,
 	qaws_scalar const* v,
 	unsigned int count,
-	qaws_diff_field field,
-	unsigned int* out_offsets,
 	unsigned int offset_capacity,
-	unsigned int* out_samples,
 	unsigned int sample_capacity,
-	unsigned int* out_entry_count);
+	qaws_diff_field field);
 ```
 
 Surface counterpart of `qaws_curve_build_support_index`, with samples given as `(u[i], v[i])`. Same buffer and status contract.
@@ -970,11 +970,11 @@ Surface counterpart of `qaws_curve_build_support_index`, with samples given as `
 
 ```c
 qaws_status qaws_surface_eval_jet(
+	qaws_surface_jet* out_jet,
 	qaws_surface const* surface,
 	qaws_scalar u,
 	qaws_scalar v,
-	unsigned int channels,
-	qaws_surface_jet* out_jet);
+	unsigned int channels);
 ```
 
 Evaluates the primal spatial jet analytically (no finite differences). Only the requested channels are filled; `out_jet->channels` is set to `channels` masked to `QAWS_SJET_ORDER3`.
@@ -983,17 +983,17 @@ Evaluates the primal spatial jet analytically (no finite differences). Only the 
 
 ```c
 qaws_status qaws_surface_eval_batch_tangent(
-	qaws_diff_context const* ctx,
+	qaws_surface_jet* out_primal,
+	qaws_surface_jet* out_tangent,
 	qaws_surface const* surface,
 	qaws_scalar const* u,
 	qaws_scalar const* v,
 	qaws_scalar const* u_tangent,
 	qaws_scalar const* v_tangent,
+	qaws_diff_views const* param_tangent,
 	unsigned int count,
 	unsigned int channels,
-	qaws_diff_views const* param_tangent,
-	qaws_surface_jet* out_primal,
-	qaws_surface_jet* out_tangent);
+	qaws_diff_context const* ctx);
 ```
 
 Evaluates `count` samples and their tangent along a combined coordinate and parameter direction.
@@ -1013,18 +1013,18 @@ Evaluates `count` samples and their tangent along a combined coordinate and para
 
 ```c
 qaws_status qaws_surface_eval_batch_tangent2(
-	qaws_diff_context const* ctx,
+	qaws_surface_jet* out_primal,
+	qaws_surface_jet* out_tangent,
+	qaws_surface_jet* out_tangent2,
 	qaws_surface const* surface,
 	qaws_scalar const* u,
 	qaws_scalar const* v,
 	qaws_scalar const* u_tangent,
 	qaws_scalar const* v_tangent,
+	qaws_diff_views const* param_tangent,
 	unsigned int count,
 	unsigned int channels,
-	qaws_diff_views const* param_tangent,
-	qaws_surface_jet* out_primal,
-	qaws_surface_jet* out_tangent,
-	qaws_surface_jet* out_tangent2);
+	qaws_diff_context const* ctx);
 ```
 
 Same as `qaws_surface_eval_batch_tangent`, and additionally writes the second directional derivative into `out_tangent2` (required).
@@ -1035,16 +1035,16 @@ Same as `qaws_surface_eval_batch_tangent`, and additionally writes the second di
 
 ```c
 qaws_status qaws_surface_eval_batch_adjoint(
-	qaws_diff_context const* ctx,
+	qaws_diff_views* param_adjoint,
+	qaws_scalar* u_adjoint,
+	qaws_scalar* v_adjoint,
 	qaws_surface const* surface,
 	qaws_scalar const* u,
 	qaws_scalar const* v,
+	qaws_surface_jet const* out_adjoint,
 	unsigned int count,
 	unsigned int channels,
-	qaws_surface_jet const* out_adjoint,
-	qaws_diff_views* param_adjoint,
-	qaws_scalar* u_adjoint,
-	qaws_scalar* v_adjoint);
+	qaws_diff_context const* ctx);
 ```
 
 Pulls back `count` jet adjoints. Only the channels in `channels` of each jet are read. Accumulates (`+=`) into `param_adjoint`, `u_adjoint` and `v_adjoint` (each may be NULL). Parameter accumulation follows `ctx->accumulation`. Knot adjoints are produced when `QAWS_FIELD_U_KNOTS` / `QAWS_FIELD_V_KNOTS` views are present and the family supports them.
@@ -1055,16 +1055,16 @@ Pulls back `count` jet adjoints. Only the channels in `channels` of each jet are
 
 ```c
 qaws_status qaws_surface_eval_tangent(
-	qaws_diff_context const* ctx,
+	qaws_surface_jet* out_primal,
+	qaws_surface_jet* out_tangent,
 	qaws_surface const* surface,
+	qaws_diff_views const* param_tangent,
 	qaws_scalar u,
 	qaws_scalar v,
 	qaws_scalar u_tangent,
 	qaws_scalar v_tangent,
 	unsigned int channels,
-	qaws_diff_views const* param_tangent,
-	qaws_surface_jet* out_primal,
-	qaws_surface_jet* out_tangent);
+	qaws_diff_context const* ctx);
 ```
 
 Single-sample wrapper around `qaws_surface_eval_batch_tangent`.
@@ -1073,15 +1073,15 @@ Single-sample wrapper around `qaws_surface_eval_batch_tangent`.
 
 ```c
 qaws_status qaws_surface_eval_adjoint(
-	qaws_diff_context const* ctx,
+	qaws_diff_views* param_adjoint,
+	qaws_scalar* u_adjoint,
+	qaws_scalar* v_adjoint,
 	qaws_surface const* surface,
+	qaws_surface_jet const* out_adjoint,
 	qaws_scalar u,
 	qaws_scalar v,
 	unsigned int channels,
-	qaws_surface_jet const* out_adjoint,
-	qaws_diff_views* param_adjoint,
-	qaws_scalar* u_adjoint,
-	qaws_scalar* v_adjoint);
+	qaws_diff_context const* ctx);
 ```
 
 Single-sample wrapper around `qaws_surface_eval_batch_adjoint`. Accumulates (`+=`).
@@ -1152,22 +1152,22 @@ Unit normal, fundamental forms, Gaussian and mean curvature, principal curvature
 
 ```c
 qaws_status qaws_curve_geometry_eval_2d(
-	qaws_curve_jet_2d const* primal,
-	qaws_curve_jet_2d const* tangent,
-	qaws_curve_jet_2d const* tangent2,
 	qaws_curve_geometry_2d* out_value,
 	qaws_curve_geometry_2d* out_tangent,
 	qaws_curve_geometry_2d* out_tangent2,
-	qaws_diff_validity* out_validity);
+	qaws_diff_validity* out_validity,
+	qaws_curve_jet_2d const* primal,
+	qaws_curve_jet_2d const* tangent,
+	qaws_curve_jet_2d const* tangent2);
 
 qaws_status qaws_curve_geometry_eval_3d(
-	qaws_curve_jet_3d const* primal,
-	qaws_curve_jet_3d const* tangent,
-	qaws_curve_jet_3d const* tangent2,
 	qaws_curve_geometry_3d* out_value,
 	qaws_curve_geometry_3d* out_tangent,
 	qaws_curve_geometry_3d* out_tangent2,
-	qaws_diff_validity* out_validity);
+	qaws_diff_validity* out_validity,
+	qaws_curve_jet_3d const* primal,
+	qaws_curve_jet_3d const* tangent,
+	qaws_curve_jet_3d const* tangent2);
 ```
 
 Forward evaluation of the curve quantities and, optionally, their tangent and second tangent. Required primal channels: D1, D2, and D3 for torsion in 3D. `tangent`, `tangent2`, `out_tangent`, `out_tangent2` and `out_validity` may be NULL; a tangent output needs a tangent input, a tangent2 output needs both. Outputs are overwritten.
@@ -1178,13 +1178,13 @@ Forward evaluation of the curve quantities and, optionally, their tangent and se
 
 ```c
 qaws_status qaws_surface_geometry_eval(
-	qaws_surface_jet const* primal,
-	qaws_surface_jet const* tangent,
-	qaws_surface_jet const* tangent2,
 	qaws_surface_geometry* out_value,
 	qaws_surface_geometry* out_tangent,
 	qaws_surface_geometry* out_tangent2,
-	qaws_diff_validity* out_validity);
+	qaws_diff_validity* out_validity,
+	qaws_surface_jet const* primal,
+	qaws_surface_jet const* tangent,
+	qaws_surface_jet const* tangent2);
 ```
 
 Surface counterpart. Required primal channels: U, V, UU, UV, VV. Same optional-argument and status contract as the curve functions.
@@ -1193,16 +1193,16 @@ Surface counterpart. Required primal channels: U, V, UU, UV, VV. Same optional-a
 
 ```c
 qaws_status qaws_curve_geometry_adjoint_2d(
-	qaws_curve_jet_2d const* primal,
-	qaws_curve_geometry_2d const* adjoint,
+	qaws_diff_validity* out_validity,
 	qaws_curve_jet_2d* inout_jet_adjoint,
-	qaws_diff_validity* out_validity);
+	qaws_curve_jet_2d const* primal,
+	qaws_curve_geometry_2d const* adjoint);
 
 qaws_status qaws_curve_geometry_adjoint_3d(
-	qaws_curve_jet_3d const* primal,
-	qaws_curve_geometry_3d const* adjoint,
+	qaws_diff_validity* out_validity,
 	qaws_curve_jet_3d* inout_jet_adjoint,
-	qaws_diff_validity* out_validity);
+	qaws_curve_jet_3d const* primal,
+	qaws_curve_geometry_3d const* adjoint);
 ```
 
 Reverse propagation: accumulates (`+=`) into `inout_jet_adjoint` the pullback of the quantity adjoint. Only the jet channels the quantities depend on are touched (D1, D2, plus D3 in 3D), and `inout_jet_adjoint->channels` is extended with them. Feed the result to `qaws_curve_eval_adjoint_*`. `out_validity` may be NULL.
@@ -1213,10 +1213,10 @@ Reverse propagation: accumulates (`+=`) into `inout_jet_adjoint` the pullback of
 
 ```c
 qaws_status qaws_surface_geometry_adjoint(
-	qaws_surface_jet const* primal,
-	qaws_surface_geometry const* adjoint,
+	qaws_diff_validity* out_validity,
 	qaws_surface_jet* inout_jet_adjoint,
-	qaws_diff_validity* out_validity);
+	qaws_surface_jet const* primal,
+	qaws_surface_geometry const* adjoint);
 ```
 
 Surface counterpart. Accumulates (`+=`) into channels U, V, UU, UV, VV and adds them to `inout_jet_adjoint->channels`.
@@ -1263,13 +1263,13 @@ Solution (or its tangent / adjoint): curve parameter, point on the curve, distan
 
 ```c
 qaws_status qaws_curve_closest_point_tangent(
-	qaws_diff_context const* ctx,
+	qaws_curve_closest_point* out_value,
+	qaws_curve_closest_point* out_tangent,
 	qaws_curve const* curve,
-	qaws_vec3 query,
 	qaws_vec3 const* query_tangent,
 	qaws_diff_views const* param_tangent,
-	qaws_curve_closest_point* out_value,
-	qaws_curve_closest_point* out_tangent);
+	qaws_vec3 query,
+	qaws_diff_context const* ctx);
 ```
 
 Solves the closest point to `query` and returns its tangent for a query tangent and/or a parameter tangent (either may be NULL). `out_value` is required; `out_tangent` may be NULL to solve only.
@@ -1280,12 +1280,12 @@ Solves the closest point to `query` and returns its tangent for a query tangent 
 
 ```c
 qaws_status qaws_curve_closest_point_adjoint(
-	qaws_diff_context const* ctx,
-	qaws_curve const* curve,
-	qaws_vec3 query,
-	qaws_curve_closest_point const* adjoint,
 	qaws_diff_views* param_adjoint,
-	qaws_vec3* query_adjoint);
+	qaws_vec3* query_adjoint,
+	qaws_curve const* curve,
+	qaws_curve_closest_point const* adjoint,
+	qaws_vec3 query,
+	qaws_diff_context const* ctx);
 ```
 
 Solves the closest point and accumulates (`+=`) the pullback of an output adjoint (`t`, `position`, `distance`) into `param_adjoint` and `query_adjoint` (either may be NULL).
@@ -1311,13 +1311,13 @@ typedef struct qaws_surface_closest_point
 
 ```c
 qaws_status qaws_surface_closest_point_tangent(
-	qaws_diff_context const* ctx,
+	qaws_surface_closest_point* out_value,
+	qaws_surface_closest_point* out_tangent,
 	qaws_surface const* surface,
-	qaws_vec3 query,
 	qaws_vec3 const* query_tangent,
 	qaws_diff_views const* param_tangent,
-	qaws_surface_closest_point* out_value,
-	qaws_surface_closest_point* out_tangent);
+	qaws_vec3 query,
+	qaws_diff_context const* ctx);
 ```
 
 Surface counterpart of `qaws_curve_closest_point_tangent`.
@@ -1326,12 +1326,12 @@ Surface counterpart of `qaws_curve_closest_point_tangent`.
 
 ```c
 qaws_status qaws_surface_closest_point_adjoint(
-	qaws_diff_context const* ctx,
-	qaws_surface const* surface,
-	qaws_vec3 query,
-	qaws_surface_closest_point const* adjoint,
 	qaws_diff_views* param_adjoint,
-	qaws_vec3* query_adjoint);
+	qaws_vec3* query_adjoint,
+	qaws_surface const* surface,
+	qaws_surface_closest_point const* adjoint,
+	qaws_vec3 query,
+	qaws_diff_context const* ctx);
 ```
 
 Surface counterpart of `qaws_curve_closest_point_adjoint`. Accumulates (`+=`).
@@ -1357,15 +1357,15 @@ Closest approach of two curves (an intersection when `distance = 0`). Stationari
 
 ```c
 qaws_status qaws_curve_pair_point_tangent(
-	qaws_diff_context const* ctx,
+	qaws_curve_pair_point* out_value,
+	qaws_curve_pair_point* out_tangent,
 	qaws_curve const* curve_a,
 	qaws_curve const* curve_b,
-	qaws_scalar t_a_seed,
-	qaws_scalar t_b_seed,
 	qaws_diff_views const* tangent_a,
 	qaws_diff_views const* tangent_b,
-	qaws_curve_pair_point* out_value,
-	qaws_curve_pair_point* out_tangent);
+	qaws_scalar t_a_seed,
+	qaws_scalar t_b_seed,
+	qaws_diff_context const* ctx);
 ```
 
 Refines the pair point from `(t_a_seed, t_b_seed)` and returns its tangent. `tangent_a` and `tangent_b` select the parameter tangents of A and of B (either may be NULL). `out_tangent` may be NULL.
@@ -1376,14 +1376,14 @@ Refines the pair point from `(t_a_seed, t_b_seed)` and returns its tangent. `tan
 
 ```c
 qaws_status qaws_curve_pair_point_adjoint(
-	qaws_diff_context const* ctx,
+	qaws_diff_views* adjoint_a,
+	qaws_diff_views* adjoint_b,
 	qaws_curve const* curve_a,
 	qaws_curve const* curve_b,
+	qaws_curve_pair_point const* adjoint,
 	qaws_scalar t_a_seed,
 	qaws_scalar t_b_seed,
-	qaws_curve_pair_point const* adjoint,
-	qaws_diff_views* adjoint_a,
-	qaws_diff_views* adjoint_b);
+	qaws_diff_context const* ctx);
 ```
 
 Refines the pair point and accumulates (`+=`) the pullback of `adjoint` into the parameter adjoints of A and B (either may be NULL).
@@ -1404,14 +1404,14 @@ Curve crossing a plane: `n . (C(t) - p) = 0`. The plane (`qaws_plane`, from `qaw
 
 ```c
 qaws_status qaws_curve_plane_point_tangent(
-	qaws_diff_context const* ctx,
+	qaws_curve_plane_point* out_value,
+	qaws_curve_plane_point* out_tangent,
 	qaws_curve const* curve,
 	qaws_plane const* plane,
-	qaws_scalar t_seed,
 	qaws_plane const* plane_tangent,
 	qaws_diff_views const* param_tangent,
-	qaws_curve_plane_point* out_value,
-	qaws_curve_plane_point* out_tangent);
+	qaws_scalar t_seed,
+	qaws_diff_context const* ctx);
 ```
 
 Refines the crossing from `t_seed` and returns its tangent for a plane tangent and/or a parameter tangent (either may be NULL). `out_tangent` may be NULL.
@@ -1422,13 +1422,13 @@ Refines the crossing from `t_seed` and returns its tangent for a plane tangent a
 
 ```c
 qaws_status qaws_curve_plane_point_adjoint(
-	qaws_diff_context const* ctx,
+	qaws_diff_views* param_adjoint,
+	qaws_plane* plane_adjoint,
 	qaws_curve const* curve,
 	qaws_plane const* plane,
-	qaws_scalar t_seed,
 	qaws_curve_plane_point const* adjoint,
-	qaws_diff_views* param_adjoint,
-	qaws_plane* plane_adjoint);
+	qaws_scalar t_seed,
+	qaws_diff_context const* ctx);
 ```
 
 Accumulates (`+=`) the pullback into `param_adjoint` and into the `point` and `normal` of `plane_adjoint` (either may be NULL).
@@ -1449,16 +1449,16 @@ Curve piercing a surface: `S(u, v) - C(t) = 0`.
 
 ```c
 qaws_status qaws_surface_curve_point_tangent(
-	qaws_diff_context const* ctx,
+	qaws_surface_curve_point* out_value,
+	qaws_surface_curve_point* out_tangent,
 	qaws_surface const* surface,
 	qaws_curve const* curve,
+	qaws_diff_views const* surface_tangent,
+	qaws_diff_views const* curve_tangent,
 	qaws_scalar u_seed,
 	qaws_scalar v_seed,
 	qaws_scalar t_seed,
-	qaws_diff_views const* surface_tangent,
-	qaws_diff_views const* curve_tangent,
-	qaws_surface_curve_point* out_value,
-	qaws_surface_curve_point* out_tangent);
+	qaws_diff_context const* ctx);
 ```
 
 Refines the piercing point from `(u_seed, v_seed, t_seed)` and returns its tangent for surface and/or curve parameter tangents (either may be NULL). `out_tangent` may be NULL.
@@ -1469,15 +1469,15 @@ Refines the piercing point from `(u_seed, v_seed, t_seed)` and returns its tange
 
 ```c
 qaws_status qaws_surface_curve_point_adjoint(
-	qaws_diff_context const* ctx,
+	qaws_diff_views* surface_adjoint,
+	qaws_diff_views* curve_adjoint,
 	qaws_surface const* surface,
 	qaws_curve const* curve,
+	qaws_surface_curve_point const* adjoint,
 	qaws_scalar u_seed,
 	qaws_scalar v_seed,
 	qaws_scalar t_seed,
-	qaws_surface_curve_point const* adjoint,
-	qaws_diff_views* surface_adjoint,
-	qaws_diff_views* curve_adjoint);
+	qaws_diff_context const* ctx);
 ```
 
 Accumulates (`+=`) the pullback into the surface and curve parameter adjoints (either may be NULL). Same statuses as the tangent function.
@@ -1499,14 +1499,14 @@ Extremum of the height `e . C(t)` along a direction: `e . C'(t) = 0`, `value = e
 
 ```c
 qaws_status qaws_curve_extremum_tangent(
-	qaws_diff_context const* ctx,
+	qaws_curve_extremum* out_value,
+	qaws_curve_extremum* out_tangent,
 	qaws_curve const* curve,
-	qaws_vec3 direction,
-	qaws_scalar t_seed,
 	qaws_vec3 const* direction_tangent,
 	qaws_diff_views const* param_tangent,
-	qaws_curve_extremum* out_value,
-	qaws_curve_extremum* out_tangent);
+	qaws_vec3 direction,
+	qaws_scalar t_seed,
+	qaws_diff_context const* ctx);
 ```
 
 Refines the extremum from `t_seed` and returns its tangent for a direction tangent and/or a parameter tangent (either may be NULL). `out_tangent` may be NULL.
@@ -1517,13 +1517,13 @@ Refines the extremum from `t_seed` and returns its tangent for a direction tange
 
 ```c
 qaws_status qaws_curve_extremum_adjoint(
-	qaws_diff_context const* ctx,
+	qaws_diff_views* param_adjoint,
+	qaws_vec3* direction_adjoint,
 	qaws_curve const* curve,
+	qaws_curve_extremum const* adjoint,
 	qaws_vec3 direction,
 	qaws_scalar t_seed,
-	qaws_curve_extremum const* adjoint,
-	qaws_diff_views* param_adjoint,
-	qaws_vec3* direction_adjoint);
+	qaws_diff_context const* ctx);
 ```
 
 Accumulates (`+=`) the pullback into `param_adjoint` and `direction_adjoint` (either may be NULL).
@@ -1544,12 +1544,12 @@ Inflection of the xy projection: `x'y'' - y'x'' = 0`.
 
 ```c
 qaws_status qaws_curve_inflection_tangent(
-	qaws_diff_context const* ctx,
-	qaws_curve const* curve,
-	qaws_scalar t_seed,
-	qaws_diff_views const* param_tangent,
 	qaws_curve_inflection* out_value,
-	qaws_curve_inflection* out_tangent);
+	qaws_curve_inflection* out_tangent,
+	qaws_curve const* curve,
+	qaws_diff_views const* param_tangent,
+	qaws_scalar t_seed,
+	qaws_diff_context const* ctx);
 ```
 
 Refines the inflection from `t_seed` and returns its tangent for a parameter tangent. `out_tangent` may be NULL.
@@ -1560,11 +1560,11 @@ Refines the inflection from `t_seed` and returns its tangent for a parameter tan
 
 ```c
 qaws_status qaws_curve_inflection_adjoint(
-	qaws_diff_context const* ctx,
+	qaws_diff_views* param_adjoint,
 	qaws_curve const* curve,
-	qaws_scalar t_seed,
 	qaws_curve_inflection const* adjoint,
-	qaws_diff_views* param_adjoint);
+	qaws_scalar t_seed,
+	qaws_diff_context const* ctx);
 ```
 
 Accumulates (`+=`) the pullback into `param_adjoint` (may be NULL).
@@ -1632,12 +1632,12 @@ Return the number of input and output objects (0 for NULL).
 
 ```c
 qaws_status qaws_diff_map_tangent(
+	qaws_diff_views* const* out_tangents,
 	qaws_diff_map const* map,
-	qaws_diff_context const* ctx,
 	qaws_diff_views const* const* in_tangents,
 	unsigned int in_count,
-	qaws_diff_views* const* out_tangents,
-	unsigned int out_count);
+	unsigned int out_count,
+	qaws_diff_context const* ctx);
 ```
 
 Applies `out = J in`. Every non-NULL output view set is cleared first, then filled. Entries whose input or output object is beyond the given counts, NULL, or missing the field are skipped.
@@ -1648,12 +1648,12 @@ Applies `out = J in`. Every non-NULL output view set is cleared first, then fill
 
 ```c
 qaws_status qaws_diff_map_adjoint(
+	qaws_diff_views* const* in_adjoints,
 	qaws_diff_map const* map,
-	qaws_diff_context const* ctx,
 	qaws_diff_views const* const* out_adjoints,
 	unsigned int out_count,
-	qaws_diff_views* const* in_adjoints,
-	unsigned int in_count);
+	unsigned int in_count,
+	qaws_diff_context const* ctx);
 ```
 
 Applies `in += J^T out`. Input adjoints are accumulated, not cleared.
@@ -1664,10 +1664,10 @@ Applies `in += J^T out`. Input adjoints are accumulated, not cleared.
 
 ```c
 qaws_status qaws_diff_map_get_entries(
-	qaws_diff_map const* map,
 	qaws_diff_map_entry* out_entries,
-	unsigned int capacity,
-	unsigned int* out_count);
+	unsigned int* out_count,
+	qaws_diff_map const* map,
+	unsigned int capacity);
 ```
 
 Copies the sparse entries of a `LINEAR_SPARSE` map. `*out_count` receives the entry count. Pass `out_entries = NULL` to query the count only.
@@ -1692,11 +1692,11 @@ All operations accept `out_map = NULL`, in which case only the geometry is built
 
 ```c
 qaws_status qaws_curve_split_diff(
-	qaws_curve const* curve,
-	qaws_scalar parameter,
 	qaws_curve** out_left,
 	qaws_curve** out_right,
-	qaws_diff_map** out_map);
+	qaws_diff_map** out_map,
+	qaws_curve const* curve,
+	qaws_scalar parameter);
 ```
 
 Splits `curve` at `parameter`. Inputs: 0 = curve, 1 = split parameter (`QAWS_FIELD_PARAMETER`, element 0). Outputs: 0 = left, 1 = right.
@@ -1705,10 +1705,10 @@ Splits `curve` at `parameter`. Inputs: 0 = curve, 1 = split parameter (`QAWS_FIE
 
 ```c
 qaws_status qaws_curve_join_diff(
-	qaws_curve const* curve_a,
-	qaws_curve const* curve_b,
 	qaws_curve** out_joined,
-	qaws_diff_map** out_map);
+	qaws_diff_map** out_map,
+	qaws_curve const* curve_a,
+	qaws_curve const* curve_b);
 ```
 
 Joins two curves. Inputs: 0 = `curve_a`, 1 = `curve_b`. Outputs: 0 = joined.
@@ -1717,10 +1717,10 @@ Joins two curves. Inputs: 0 = `curve_a`, 1 = `curve_b`. Outputs: 0 = joined.
 
 ```c
 qaws_status qaws_curve_convert_hermite_to_bezier_diff(
-	qaws_curve const* curve,
-	unsigned int span_index,
 	qaws_curve** out_bezier,
-	qaws_diff_map** out_map);
+	qaws_diff_map** out_map,
+	qaws_curve const* curve,
+	unsigned int span_index);
 ```
 
 Converts one Hermite span to a Bezier curve. Inputs: 0 = curve. Outputs: 0 = converted curve.
@@ -1729,9 +1729,9 @@ Converts one Hermite span to a Bezier curve. Inputs: 0 = curve. Outputs: 0 = con
 
 ```c
 qaws_status qaws_curve_convert_bezier_to_bspline_diff(
-	qaws_curve const* curve,
 	qaws_curve** out_bspline,
-	qaws_diff_map** out_map);
+	qaws_diff_map** out_map,
+	qaws_curve const* curve);
 ```
 
 Inputs: 0 = curve. Outputs: 0 = converted curve.
@@ -1740,9 +1740,9 @@ Inputs: 0 = curve. Outputs: 0 = converted curve.
 
 ```c
 qaws_status qaws_curve_convert_bspline_to_nurbs_diff(
-	qaws_curve const* curve,
 	qaws_curve** out_nurbs,
-	qaws_diff_map** out_map);
+	qaws_diff_map** out_map,
+	qaws_curve const* curve);
 ```
 
 Inputs: 0 = curve. Outputs: 0 = converted curve.
@@ -1751,9 +1751,9 @@ Inputs: 0 = curve. Outputs: 0 = converted curve.
 
 ```c
 qaws_status qaws_curve_elevate_degree_diff(
-	qaws_curve const* curve,
 	qaws_curve** out_elevated,
-	qaws_diff_map** out_map);
+	qaws_diff_map** out_map,
+	qaws_curve const* curve);
 ```
 
 Inputs: 0 = curve. Outputs: 0 = elevated curve.
@@ -1762,9 +1762,9 @@ Inputs: 0 = curve. Outputs: 0 = elevated curve.
 
 ```c
 qaws_status qaws_curve_reduce_degree_diff(
-	qaws_curve const* curve,
 	qaws_curve** out_reduced,
-	qaws_diff_map** out_map);
+	qaws_diff_map** out_map,
+	qaws_curve const* curve);
 ```
 
 Inputs: 0 = curve. Outputs: 0 = reduced curve.
@@ -1775,9 +1775,9 @@ Inputs: 0 = curve. Outputs: 0 = reduced curve.
 struct qaws_bspline_fit_desc;
 
 qaws_status qaws_curve_fit_bspline_diff(
-	struct qaws_bspline_fit_desc const* desc,
 	qaws_curve** out_curve,
-	qaws_diff_map** out_map);
+	qaws_diff_map** out_map,
+	struct qaws_bspline_fit_desc const* desc);
 ```
 
 Least-squares B-spline fit (`qaws_curve_fit_bspline`, descriptor in `qaws_export.h`) with the exact Jacobian of its normal equations.
@@ -1795,14 +1795,14 @@ The derivative follows every smooth stage of the fit: chord-length parameters (w
 
 ```c
 qaws_status qaws_curve_offset_3d_diff(
-	qaws_curve const* curve,
-	qaws_scalar distance,
-	int direction_mode,
-	qaws_vec3 const* direction,
-	qaws_surface const* surface,
-	unsigned int sample_count,
 	qaws_curve** out_curve,
-	qaws_diff_map** out_map);
+	qaws_diff_map** out_map,
+	qaws_curve const* curve,
+	qaws_surface const* surface,
+	qaws_vec3 const* direction,
+	unsigned int sample_count,
+	qaws_scalar distance,
+	int direction_mode);
 ```
 
 Runs `qaws_curve_offset_3d` and returns its exact map. The offset samples `C(t_i) + distance * n(t_i)` at fixed parameters (the sample set is frozen, `QAWS_FREEZE_SAMPLE_SET`) and fits a B-spline through them; the fit is linear in the samples, so each map column is the fit of the sample tangents.
@@ -1852,14 +1852,14 @@ typedef enum qaws_surface_functional
 
 ```c
 qaws_status qaws_curve_functional_eval(
-	qaws_diff_context const* ctx,
-	qaws_curve const* curve,
-	qaws_curve_functional functional,
-	unsigned int quadrature,
-	qaws_diff_views const* direction,
 	qaws_scalar* out_value,
 	qaws_scalar* out_tangent,
-	qaws_scalar* out_tangent2);
+	qaws_scalar* out_tangent2,
+	qaws_curve const* curve,
+	qaws_diff_views const* direction,
+	qaws_curve_functional functional,
+	unsigned int quadrature,
+	qaws_diff_context const* ctx);
 ```
 
 Evaluates the functional and its first and second derivatives along the parameter direction `direction` (NULL = zero direction). Each output may be NULL; outputs are overwritten. A `QAWS_FIELD_KNOTS` direction is differentiated when the curve's knot field has `QAWS_CAP_TANGENT`.
@@ -1870,12 +1870,12 @@ Evaluates the functional and its first and second derivatives along the paramete
 
 ```c
 qaws_status qaws_curve_functional_gradient(
-	qaws_diff_context const* ctx,
+	qaws_scalar* out_value,
+	qaws_diff_views* gradient,
 	qaws_curve const* curve,
 	qaws_curve_functional functional,
 	unsigned int quadrature,
-	qaws_diff_views* gradient,
-	qaws_scalar* out_value);
+	qaws_diff_context const* ctx);
 ```
 
 Accumulates (`+=`) the gradient of the functional into `gradient` and writes the value to `*out_value` (may be NULL). Knot gradients are produced under the same condition as `qaws_curve_functional_eval`.
@@ -1884,12 +1884,12 @@ Accumulates (`+=`) the gradient of the functional into `gradient` and writes the
 
 ```c
 qaws_status qaws_curve_functional_hvp(
-	qaws_diff_context const* ctx,
+	qaws_diff_views* out_hv,
 	qaws_curve const* curve,
+	qaws_diff_views const* direction,
 	qaws_curve_functional functional,
 	unsigned int quadrature,
-	qaws_diff_views const* direction,
-	qaws_diff_views* out_hv);
+	qaws_diff_context const* ctx);
 ```
 
 Accumulates (`+=`) the Hessian-vector product `H * direction` into `out_hv`.
@@ -1900,14 +1900,14 @@ Accumulates (`+=`) the Hessian-vector product `H * direction` into `out_hv`.
 
 ```c
 qaws_status qaws_surface_functional_eval(
-	qaws_diff_context const* ctx,
-	qaws_surface const* surface,
-	qaws_surface_functional functional,
-	unsigned int quadrature,
-	qaws_diff_views const* direction,
 	qaws_scalar* out_value,
 	qaws_scalar* out_tangent,
-	qaws_scalar* out_tangent2);
+	qaws_scalar* out_tangent2,
+	qaws_surface const* surface,
+	qaws_diff_views const* direction,
+	qaws_surface_functional functional,
+	unsigned int quadrature,
+	qaws_diff_context const* ctx);
 ```
 
 Surface counterpart of `qaws_curve_functional_eval`. The quadrature runs on a cell grid over the domain; `U_KNOTS` / `V_KNOTS` directions change the integrand at fixed nodes, and the domain end knots also move every node and scale the weights.
@@ -1918,12 +1918,12 @@ Surface counterpart of `qaws_curve_functional_eval`. The quadrature runs on a ce
 
 ```c
 qaws_status qaws_surface_functional_gradient(
-	qaws_diff_context const* ctx,
+	qaws_scalar* out_value,
+	qaws_diff_views* gradient,
 	qaws_surface const* surface,
 	qaws_surface_functional functional,
 	unsigned int quadrature,
-	qaws_diff_views* gradient,
-	qaws_scalar* out_value);
+	qaws_diff_context const* ctx);
 ```
 
 Accumulates (`+=`) the gradient into `gradient` and writes the value to `*out_value` (may be NULL). Returns `QAWS_STATUS_UNSUPPORTED_OPERATION` if `gradient` contains a knot view.
@@ -1932,12 +1932,12 @@ Accumulates (`+=`) the gradient into `gradient` and writes the value to `*out_va
 
 ```c
 qaws_status qaws_surface_functional_hvp(
-	qaws_diff_context const* ctx,
+	qaws_diff_views* out_hv,
 	qaws_surface const* surface,
+	qaws_diff_views const* direction,
 	qaws_surface_functional functional,
 	unsigned int quadrature,
-	qaws_diff_views const* direction,
-	qaws_diff_views* out_hv);
+	qaws_diff_context const* ctx);
 ```
 
 Accumulates (`+=`) the Hessian-vector product into `out_hv`.
@@ -2011,19 +2011,19 @@ typedef struct qaws_cdf_sample
 
 ```c
 qaws_status qaws_curve_cdf_sample_tangent(
-	qaws_diff_context const* ctx,
-	qaws_curve const* curve,
-	qaws_sample_measure_desc const* measure,
-	qaws_cdf_target const* targets,
-	qaws_scalar const* distance_tangent,
-	qaws_scalar const* distance_tangent2,
-	unsigned int count,
-	unsigned int quadrature,
-	qaws_diff_views const* param_tangent,
 	qaws_cdf_sample* out_value,
 	qaws_cdf_sample* out_tangent,
 	qaws_cdf_sample* out_tangent2,
-	qaws_scalar* out_total);
+	qaws_scalar* out_total,
+	qaws_curve const* curve,
+	qaws_cdf_target const* targets,
+	qaws_scalar const* distance_tangent,
+	qaws_scalar const* distance_tangent2,
+	qaws_diff_views const* param_tangent,
+	unsigned int count,
+	qaws_sample_measure_desc const* measure,
+	unsigned int quadrature,
+	qaws_diff_context const* ctx);
 ```
 
 Solves every target and writes the samples (`out_value`), their first (`out_tangent`) and second (`out_tangent2`) directional derivatives along `param_tangent` and the per-target distance rates `distance_tangent` and `distance_tangent2` (first and second derivative of the target distance along the same path), and the total measure. Any of the rates, `param_tangent` and the outputs may be NULL.
@@ -2034,15 +2034,15 @@ Solves every target and writes the samples (`out_value`), their first (`out_tang
 
 ```c
 qaws_status qaws_curve_cdf_sample_adjoint(
-	qaws_diff_context const* ctx,
-	qaws_curve const* curve,
-	qaws_sample_measure_desc const* measure,
-	qaws_cdf_target const* targets,
-	unsigned int count,
-	unsigned int quadrature,
-	qaws_cdf_sample const* adjoint,
 	qaws_diff_views* param_adjoint,
-	qaws_scalar* distance_adjoint);
+	qaws_scalar* distance_adjoint,
+	qaws_curve const* curve,
+	qaws_cdf_target const* targets,
+	qaws_cdf_sample const* adjoint,
+	unsigned int count,
+	qaws_sample_measure_desc const* measure,
+	unsigned int quadrature,
+	qaws_diff_context const* ctx);
 ```
 
 Accumulates (`+=`) the pullback of the sample adjoints `(t_bar, p_bar)`: `J^T p_bar + lambda (fraction grad M_total - grad M(t))` into `param_adjoint`, `lambda = (t_bar + p_bar . C') / m` into `distance_adjoint`. The measure gradients of the whole batch are one quadrature pass with suffix-summed weights, pulling `dm/d(C, C', C'')` back through the curve jets.
@@ -2051,15 +2051,15 @@ Accumulates (`+=`) the pullback of the sample adjoints `(t_bar, p_bar)`: `J^T p_
 
 ```c
 qaws_status qaws_curve_cdf_sample_hvp(
-	qaws_diff_context const* ctx,
+	qaws_diff_views* out_hv,
 	qaws_curve const* curve,
-	qaws_sample_measure_desc const* measure,
 	qaws_cdf_target const* targets,
-	unsigned int count,
-	unsigned int quadrature,
 	qaws_cdf_sample const* adjoint,
 	qaws_diff_views const* direction,
-	qaws_diff_views* out_hv);
+	unsigned int count,
+	qaws_sample_measure_desc const* measure,
+	unsigned int quadrature,
+	qaws_diff_context const* ctx);
 ```
 
 Accumulates (`+=`) `H * direction`, `H` the Hessian with respect to the parameters of `sum_i (t_bar_i t_i + p_bar_i . p_i)`. For families linear in their fields (`QAWS_CAP_LINEAR`) it differentiates the adjoint along the direction (forward over reverse); the integrand's Hessian enters by polarization of its dual second derivative. When `direction` or `out_hv` holds knots, or the family is rational, it polarizes the exact second order forward pass instead: `e_j^T H d = (q(d + e_j) - q(d) - q(e_j)) / 2` with `q(x)` the second derivative of the objective along `x`, about two forward passes per parameter of `out_hv`.
@@ -2070,12 +2070,12 @@ Accumulates (`+=`) `H * direction`, `H` the Hessian with respect to the paramete
 
 ```c
 qaws_status qaws_traversal_cdf_targets(
-	qaws_traversal const* traversal,
-	qaws_scalar const* inputs,
-	unsigned int count,
 	qaws_cdf_target* out_targets,
 	qaws_scalar* out_rate,
-	qaws_scalar* out_rate2);
+	qaws_scalar* out_rate2,
+	qaws_traversal const* traversal,
+	qaws_scalar const* inputs,
+	unsigned int count);
 ```
 
 Turns traversal inputs (time through easing and motion profile, or arc length) into arc-length targets after the wrap mode, written as `distance + fraction * L_total` so that the derivatives of the total length are carried: loop gives fraction `-k`, ping-pong `(s, -2k)` going out and `(-s, 2k + 2)` coming back, clamp `(0, 1)` past the end. `out_rate` / `out_rate2` (may be NULL) receive the first and second derivatives of the target distance with respect to the input: the profile speed and acceleration through the easing. Passed (scaled by the input rate) as `distance_tangent` / `distance_tangent2` of `qaws_curve_cdf_sample_tangent` with a NULL measure, they give exact first and second time derivatives of the traversal samples; the adjoint and the HVP of `qaws_curve_cdf_sample_*` apply unchanged. The samples match `qaws_traversal_evaluate_*` to the accuracy of the traversal's table.
@@ -2095,21 +2095,21 @@ typedef struct qaws_surface_cdf_sample
 } qaws_surface_cdf_sample;
 
 qaws_status qaws_surface_cdf_sample_tangent(
-	qaws_diff_context const* ctx, qaws_surface const* surface, qaws_sample_measure_desc const* measure,
-	qaws_scalar const* xi, qaws_scalar const* xi_tangent, unsigned int count,
-	unsigned int cells, unsigned int quadrature, qaws_diff_views const* param_tangent,
-	qaws_surface_cdf_sample* out_value, qaws_surface_cdf_sample* out_tangent,
-	qaws_surface_cdf_sample* out_tangent2, qaws_scalar* out_total);
+	qaws_surface_cdf_sample* out_value, qaws_surface_cdf_sample* out_tangent, qaws_surface_cdf_sample* out_tangent2,
+	qaws_scalar* out_total, qaws_surface const* surface, qaws_scalar const* xi,
+	qaws_scalar const* xi_tangent, qaws_diff_views const* param_tangent, unsigned int count,
+	qaws_sample_measure_desc const* measure, unsigned int cells,
+	unsigned int quadrature, qaws_diff_context const* ctx);
 
 qaws_status qaws_surface_cdf_sample_adjoint(
-	qaws_diff_context const* ctx, qaws_surface const* surface, qaws_sample_measure_desc const* measure,
-	qaws_scalar const* xi, unsigned int count, unsigned int cells, unsigned int quadrature,
-	qaws_surface_cdf_sample const* adjoint, qaws_diff_views* param_adjoint, qaws_scalar* xi_adjoint);
+	qaws_diff_views* param_adjoint, qaws_scalar* xi_adjoint, qaws_surface const* surface,
+	qaws_scalar const* xi, qaws_surface_cdf_sample const* adjoint, unsigned int count, qaws_sample_measure_desc const* measure,
+	unsigned int cells, unsigned int quadrature, qaws_diff_context const* ctx);
 
 qaws_status qaws_surface_cdf_sample_hvp(
-	qaws_diff_context const* ctx, qaws_surface const* surface, qaws_sample_measure_desc const* measure,
-	qaws_scalar const* xi, unsigned int count, unsigned int cells, unsigned int quadrature,
-	qaws_surface_cdf_sample const* adjoint, qaws_diff_views const* direction, qaws_diff_views* out_hv);
+	qaws_diff_views* out_hv, qaws_surface const* surface, qaws_scalar const* xi,
+	qaws_surface_cdf_sample const* adjoint, qaws_diff_views const* direction, unsigned int count, qaws_sample_measure_desc const* measure,
+	unsigned int cells, unsigned int quadrature, qaws_diff_context const* ctx);
 ```
 
 Warps points `xi` of the unit square (stratified, blue noise, low discrepancy...) onto a surface by the inverse CDFs of the measure `w = rho(S) |S_u x S_v|` (`QAWS_MEASURE_AREA`, `QAWS_MEASURE_DENSITY`, or `QAWS_MEASURE_CURVATURE` with `rho = sqrt(floor^2 + k1^2 + k2^2)` from the principal curvatures, `k1^2 + k2^2 = 4 H^2 - 2 K`; its rates read the third and, at second order, the fourth derivatives of the patch): `u` solves the marginal `A(u) = xi_u A_total`, `v` the conditional `B(v; u) = xi_v B(v1; u)`, so samples follow the measure and keep the stratification of `xi`. The integrals use a grid of `cells x cells` cells (0 = 6) with `quadrature` Gauss points per cell and direction (0 = 8).

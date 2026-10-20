@@ -19,7 +19,7 @@ typedef struct qaws_surface_ruled_desc
 } qaws_surface_ruled_desc;
 
 qaws_status qaws_surface_create_ruled(
-	qaws_surface_ruled_desc const* desc,
-	qaws_surface** out_surface);
+	qaws_surface** out_surface,
+	qaws_surface_ruled_desc const* desc);
 
 #endif /* QAWS_SURFACE_RULED_H */

@@ -133,7 +133,7 @@ static void demo_tets(void)
 		ms_cutaway(c, v1, ms_keep_half, green, wire);
 	}
 	ms_box_faces(box, 1, 0.7, 0.5);
-	qaws_shell_atlas_create((qaws_surface const* const*)box, 6, 0, &atlas);
+	qaws_shell_atlas_create(&atlas, (qaws_surface const* const*)box, 6, 0);
 	bs = atlas ? ms_generate(NULL, atlas, QAWS_ELEMENTS_TRIANGLES, 0.15, 0, NULL) : NULL;
 	v2 = bs ? ms_tets(bs, sub, "box") : NULL;
 	if (v2)

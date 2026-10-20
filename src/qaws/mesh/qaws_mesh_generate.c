@@ -39,7 +39,7 @@ static void mg_newton(qaws_surface const* s, double const* p, double* u, double*
 		double S[3], Su[3], Sv[3], r[3], a, b, c, g0, g1, det, du, dv;
 		unsigned int k;
 		memset(&e, 0, sizeof e);
-		if (qaws_surface_evaluate(s, (qaws_scalar)*u, (qaws_scalar)*v, QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_DU | QAWS_SURFACE_EVAL_DV, &e) != QAWS_STATUS_OK)
+		if (qaws_surface_evaluate(&e, s, (qaws_scalar)*u, (qaws_scalar)*v, QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_DU | QAWS_SURFACE_EVAL_DV) != QAWS_STATUS_OK)
 			break;
 		mg_v3(e.position, S);
 		mg_v3(e.du, Su);
@@ -91,7 +91,7 @@ static void mg_snap(qaws_surface const* s, double const* p, double* u, double* v
 	{
 		qaws_surface_eval_result e;
 		memset(&e, 0, sizeof e);
-		qaws_surface_evaluate(s, (qaws_scalar)*u, (qaws_scalar)*v, QAWS_SURFACE_EVAL_POSITION, &e);
+		qaws_surface_evaluate(&e, s, (qaws_scalar)*u, (qaws_scalar)*v, QAWS_SURFACE_EVAL_POSITION);
 		mg_v3(e.position, x);
 	}
 }
@@ -145,7 +145,7 @@ static void mg_start(qaws_surface const* s, qaws_shell_point const* dv, unsigned
 				qaws_surface_eval_result e;
 				double q[3], d, uu = (double)ur.min_value + su * i / 8, vv = (double)vr.min_value + sv * j / 8;
 				memset(&e, 0, sizeof e);
-				qaws_surface_evaluate(s, (qaws_scalar)uu, (qaws_scalar)vv, QAWS_SURFACE_EVAL_POSITION, &e);
+				qaws_surface_evaluate(&e, s, (qaws_scalar)uu, (qaws_scalar)vv, QAWS_SURFACE_EVAL_POSITION);
 				mg_v3(e.position, q);
 				d = (q[0] - p[0]) * (q[0] - p[0]) + (q[1] - p[1]) * (q[1] - p[1]) + (q[2] - p[2]) * (q[2] - p[2]);
 				if (d < best)
@@ -347,7 +347,7 @@ qaws_status qaws_mesh_generate_shell(qaws_shell_atlas const* shell, qaws_generat
 	st = qaws_shell_region_create_whole(shell, &whole);
 	if (st != QAWS_STATUS_OK)
 		return st;
-	qaws_shell_region_get_area(whole, &area);
+	qaws_shell_region_get_area(&area, whole);
 	L = desc->target_length > 0 ? (double)desc->target_length : desc->max_length > 0 ? (double)desc->max_length : sqrt((double)area) / 30;
 	if (!(L > 0))
 	{
@@ -357,7 +357,7 @@ qaws_status qaws_mesh_generate_shell(qaws_shell_atlas const* shell, qaws_generat
 	/* the dense conformal mesh of the whole shell */
 	memset(&smd, 0, sizeof smd);
 	smd.edge_length = (qaws_scalar)mg_dense_length(desc, L);
-	st = qaws_shell_region_triangulate(whole, &smd, &sm);
+	st = qaws_shell_region_triangulate(&sm, whole, &smd);
 	if (st != QAWS_STATUS_OK)
 		goto done;
 	nv = qaws_shell_mesh_get_vertex_count(sm);
@@ -374,12 +374,12 @@ qaws_status qaws_mesh_generate_shell(qaws_shell_atlas const* shell, qaws_generat
 	for (i = 0; i < nv; i++)
 	{
 		qaws_vec3 p;
-		qaws_shell_mesh_get_vertex(sm, i, &dvp[i], &p);
+		qaws_shell_mesh_get_vertex(&dvp[i], &p, sm, i);
 		mg_v3(p, x + 3 * (size_t)i);
 	}
 	for (i = 0; i < nt; i++)
 	{
-		qaws_shell_mesh_get_triangle(sm, i, tri + 3 * (size_t)i);
+		qaws_shell_mesh_get_triangle(tri + 3 * (size_t)i, sm, i);
 		tface[i] = qaws_shell_mesh_get_triangle_face(sm, i);
 	}
 	src.shell = shell;
@@ -420,7 +420,7 @@ static qaws_status mg_grid(qaws_surface const* s, double Ld, double** ox, qaws_s
 		{
 			qaws_surface_eval_result e;
 			memset(&e, 0, sizeof e);
-			qaws_surface_evaluate(s, (qaws_scalar)(u0 + (u1 - u0) * i / G), (qaws_scalar)(v0 + (v1 - v0) * j / G), QAWS_SURFACE_EVAL_POSITION, &e);
+			qaws_surface_evaluate(&e, s, (qaws_scalar)(u0 + (u1 - u0) * i / G), (qaws_scalar)(v0 + (v1 - v0) * j / G), QAWS_SURFACE_EVAL_POSITION);
 			mg_v3(e.position, coarse + 3 * (i * (G + 1) + j));
 			for (k = 0; k < 3; k++)
 			{
@@ -468,7 +468,7 @@ static qaws_status mg_grid(qaws_surface const* s, double Ld, double** ox, qaws_s
 			unsigned int q, found = HM_NONE;
 			int dx, dy, dz;
 			memset(&e, 0, sizeof e);
-			qaws_surface_evaluate(s, (qaws_scalar)u, (qaws_scalar)v, QAWS_SURFACE_EVAL_POSITION, &e);
+			qaws_surface_evaluate(&e, s, (qaws_scalar)u, (qaws_scalar)v, QAWS_SURFACE_EVAL_POSITION);
 			mg_v3(e.position, p);
 			for (dx = -1; dx <= 1 && found == HM_NONE; dx++)
 				for (dy = -1; dy <= 1 && found == HM_NONE; dy++)

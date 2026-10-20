@@ -692,8 +692,8 @@ static int tm_cross_split(qaws_mesh_2d* m, unsigned int s, unsigned int o)
 		{
 			qaws_eval_result_2d es, eo;
 			double fx, fy, det, dts, dto;
-			qaws_curve_evaluate_2d(cs, (qaws_scalar)ts, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &es);
-			qaws_curve_evaluate_2d(co, (qaws_scalar)to, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &eo);
+			qaws_curve_evaluate_2d(&es, cs, (qaws_scalar)ts, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1);
+			qaws_curve_evaluate_2d(&eo, co, (qaws_scalar)to, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1);
 			fx = (double)es.position.x - eo.position.x;
 			fy = (double)es.position.y - eo.position.y;
 			/* [Cs' -Co'] (dts, dto) = -f */
@@ -710,7 +710,7 @@ static int tm_cross_split(qaws_mesh_2d* m, unsigned int s, unsigned int o)
 		}
 		{
 			qaws_eval_result_2d es;
-			qaws_curve_evaluate_2d(cs, (qaws_scalar)ts, QAWS_EVAL_FLAG_POSITION, &es);
+			qaws_curve_evaluate_2d(&es, cs, (qaws_scalar)ts, QAWS_EVAL_FLAG_POSITION);
 			if (hypot((double)es.position.x - x[0], (double)es.position.y - x[1]) < 4 * hypot(B[0] - A[0], B[1] - A[1]) + 4 * hypot(Q[0] - P[0], Q[1] - P[1]))
 			{
 				x[0] = es.position.x; x[1] = es.position.y;
@@ -902,7 +902,7 @@ static int tm_classify(qaws_mesh_2d* m)
 static void tm_eval(qaws_curve const* c, double t, double* p)
 {
 	qaws_eval_result_2d r;
-	qaws_curve_evaluate_2d(c, (qaws_scalar)t, QAWS_EVAL_FLAG_POSITION, &r);
+	qaws_curve_evaluate_2d(&r, c, (qaws_scalar)t, QAWS_EVAL_FLAG_POSITION);
 	p[0] = r.position.x;
 	p[1] = r.position.y;
 }
@@ -1496,7 +1496,7 @@ qaws_status qaws_mesh_2d_remove_attribute(qaws_mesh_2d* mesh, unsigned int attri
 	return mesh ? qaws_mesh_3d_remove_attribute(mesh->core, attribute) : QAWS_STATUS_INVALID_ARGUMENT;
 }
 
-qaws_status qaws_triangulate_region_2d(qaws_triangulate_desc const* d, qaws_mesh_2d** out)
+qaws_status qaws_triangulate_region_2d(qaws_mesh_2d** out, qaws_triangulate_desc const* d)
 {
 	qaws_mesh_2d* m;
 	qaws_clip_desc cd;
@@ -1515,16 +1515,16 @@ qaws_status qaws_triangulate_region_2d(qaws_triangulate_desc const* d, qaws_mesh
 	cd.subject_count = d->path_count;
 	cd.clip_type = QAWS_CLIP_UNION;
 	cd.fill_rule = d->fill_rule;
-	st = qaws_clip_execute(&cd, &m->region);
+	st = qaws_clip_execute(&m->region, &cd);
 	if (st != QAWS_STATUS_OK) { qaws_mesh_2d_destroy(m); return st; }
 	np = qaws_clip_result_get_path_count(m->region);
 	for (i = 0; i < np; i++)
 	{
 		qaws_path_2d p;
 		qaws_vec2 a, b;
-		qaws_clip_result_get_path(m->region, i, &p);
+		qaws_clip_result_get_path(&p, m->region, i);
 		m->ncurves += p.curve_count;
-		if (qaws_path_compute_bounds_2d(&p, &a, &b) == QAWS_STATUS_OK)
+		if (qaws_path_compute_bounds_2d(&a, &b, &p) == QAWS_STATUS_OK)
 		{
 			if (a.x < lo[0]) lo[0] = a.x;
 			if (a.y < lo[1]) lo[1] = a.y;
@@ -1538,7 +1538,7 @@ qaws_status qaws_triangulate_region_2d(qaws_triangulate_desc const* d, qaws_mesh
 		qaws_clip_desc kd;
 		qaws_path_2d* rp = (qaws_path_2d*)qaws_internal_malloc(qaws_internal_mul2(sizeof(qaws_path_2d), (np + 1)));
 		if (!rp) { qaws_mesh_2d_destroy(m); return QAWS_STATUS_ALLOCATION_FAILURE; }
-		for (i = 0; i < np; i++) qaws_clip_result_get_path(m->region, i, &rp[i]);
+		for (i = 0; i < np; i++) qaws_clip_result_get_path(&rp[i], m->region, i);
 		memset(&kd, 0, sizeof(kd));
 		kd.open_subjects = d->constraints;
 		kd.open_subject_count = d->constraint_count;
@@ -1546,14 +1546,14 @@ qaws_status qaws_triangulate_region_2d(qaws_triangulate_desc const* d, qaws_mesh
 		kd.clip_count = np;
 		kd.clip_type = QAWS_CLIP_INTERSECTION;
 		kd.fill_rule = QAWS_FILL_NON_ZERO;
-		st = qaws_clip_execute(&kd, &m->cons);
+		st = qaws_clip_execute(&m->cons, &kd);
 		qaws_internal_free(rp);
 		if (st != QAWS_STATUS_OK) { qaws_mesh_2d_destroy(m); return st; }
 		ncons = qaws_clip_result_get_open_path_count(m->cons);
 		for (i = 0; i < ncons; i++)
 		{
 			qaws_path_2d p;
-			qaws_clip_result_get_open_path(m->cons, i, &p);
+			qaws_clip_result_get_open_path(&p, m->cons, i);
 			ncc += p.curve_count;
 		}
 	}
@@ -1566,13 +1566,13 @@ qaws_status qaws_triangulate_region_2d(qaws_triangulate_desc const* d, qaws_mesh
 		for (i = 0; i < np; i++)
 		{
 			qaws_path_2d p;
-			qaws_clip_result_get_path(m->region, i, &p);
+			qaws_clip_result_get_path(&p, m->region, i);
 			for (k = 0; k < p.curve_count; k++) m->curves[ci++] = p.curves[k];
 		}
 		for (i = 0; i < ncons; i++)
 		{
 			qaws_path_2d p;
-			qaws_clip_result_get_open_path(m->cons, i, &p);
+			qaws_clip_result_get_open_path(&p, m->cons, i);
 			for (k = 0; k < p.curve_count; k++) m->curves[ci++] = p.curves[k];
 		}
 	}
@@ -1612,7 +1612,7 @@ qaws_status qaws_triangulate_region_2d(qaws_triangulate_desc const* d, qaws_mesh
 		{
 			qaws_path_2d p;
 			double a[2], b[2];
-			qaws_clip_result_get_open_path(m->cons, i, &p);
+			qaws_clip_result_get_open_path(&p, m->cons, i);
 			tm_eval(p.curves[0], p.curves[0]->parameter_range.min_value, a);
 			tm_eval(p.curves[p.curve_count - 1], p.curves[p.curve_count - 1]->parameter_range.max_value, b);
 			pts[4 * i] = (qaws_scalar)a[0]; pts[4 * i + 1] = (qaws_scalar)a[1];
@@ -1624,7 +1624,7 @@ qaws_status qaws_triangulate_region_2d(qaws_triangulate_desc const* d, qaws_mesh
 		qd.points = pts;
 		qd.point_count = 2 * ncons;
 		qd.max_distance = (qaws_scalar)(sizeof(qaws_scalar) == 4 ? 1e-4 * m->ext : 1e-8 * m->ext);
-		if (qaws_curve_batch_find_closest(&qd, cl, NULL) == QAWS_STATUS_OK)
+		if (qaws_curve_batch_find_closest(cl, NULL, &qd) == QAWS_STATUS_OK)
 			for (i = 0; i < 2 * ncons; i++)
 				if (cl[i].curve != QAWS_CURVE_BATCH_NONE)
 				{
@@ -1646,14 +1646,14 @@ qaws_status qaws_triangulate_region_2d(qaws_triangulate_desc const* d, qaws_mesh
 		for (i = 0; i < np && !m->failed; i++)
 		{
 			qaws_path_2d p;
-			qaws_clip_result_get_path(m->region, i, &p);
+			qaws_clip_result_get_path(&p, m->region, i);
 			if (!tm_chain(m, d, &p, ci, 1, 0, forced, nforced, &s)) m->failed = 1;
 			ci += p.curve_count;
 		}
 		for (i = 0; i < ncons && !m->failed; i++)
 		{
 			qaws_path_2d p;
-			qaws_clip_result_get_open_path(m->cons, i, &p);
+			qaws_clip_result_get_open_path(&p, m->cons, i);
 			if (!tm_chain(m, d, &p, ci, 0, 1, forced, nforced, &s)) m->failed = 1;
 			ci += p.curve_count;
 		}
@@ -1693,14 +1693,14 @@ qaws_vec2 qaws_mesh_2d_get_vertex(qaws_mesh_2d const* m, unsigned int i)
 
 unsigned int qaws_mesh_2d_get_triangle_count(qaws_mesh_2d const* m) { return m ? m->ont : 0; }
 
-void qaws_mesh_2d_get_triangle(qaws_mesh_2d const* m, unsigned int t, unsigned int out[3])
+void qaws_mesh_2d_get_triangle(unsigned int out[3], qaws_mesh_2d const* m, unsigned int t)
 {
 	out[0] = m->otri[3 * t];
 	out[1] = m->otri[3 * t + 1];
 	out[2] = m->otri[3 * t + 2];
 }
 
-int qaws_mesh_2d_get_vertex_source(qaws_mesh_2d const* m, unsigned int i, unsigned int* curve, qaws_scalar* t)
+int qaws_mesh_2d_get_vertex_source(unsigned int* curve, qaws_scalar* t, qaws_mesh_2d const* m, unsigned int i)
 {
 	if (m->ovc[i] == TM_NONE) return 0;
 	if (curve) *curve = m->ovc[i];
@@ -1712,7 +1712,7 @@ unsigned int qaws_mesh_2d_get_boundary_curve_count(qaws_mesh_2d const* m) { retu
 qaws_curve const* qaws_mesh_2d_get_boundary_curve(qaws_mesh_2d const* m, unsigned int c) { return m->curves[c]; }
 unsigned int qaws_mesh_2d_get_boundary_edge_count(qaws_mesh_2d const* m) { return m ? m->onbe : 0; }
 
-void qaws_mesh_2d_get_boundary_edge(qaws_mesh_2d const* m, unsigned int e, unsigned int out[2])
+void qaws_mesh_2d_get_boundary_edge(unsigned int out[2], qaws_mesh_2d const* m, unsigned int e)
 {
 	out[0] = m->obe[2 * e];
 	out[1] = m->obe[2 * e + 1];
@@ -2823,7 +2823,7 @@ qaws_status qaws_mesh_2d_quadrangulate(qaws_mesh_2d* mesh, int all_quads, unsign
 
 unsigned int qaws_mesh_2d_get_quad_count(qaws_mesh_2d const* m) { return m ? m->onq : 0; }
 
-void qaws_mesh_2d_get_quad(qaws_mesh_2d const* m, unsigned int q, unsigned int out[4])
+void qaws_mesh_2d_get_quad(unsigned int out[4], qaws_mesh_2d const* m, unsigned int q)
 {
 	out[0] = m->oquad[4 * q];
 	out[1] = m->oquad[4 * q + 1];
@@ -2833,7 +2833,7 @@ void qaws_mesh_2d_get_quad(qaws_mesh_2d const* m, unsigned int q, unsigned int o
 
 unsigned int qaws_mesh_2d_get_constraint_edge_count(qaws_mesh_2d const* m) { return m ? m->once : 0; }
 
-void qaws_mesh_2d_get_constraint_edge(qaws_mesh_2d const* m, unsigned int e, unsigned int out[2])
+void qaws_mesh_2d_get_constraint_edge(unsigned int out[2], qaws_mesh_2d const* m, unsigned int e)
 {
 	out[0] = m->obe[2 * (m->onbe + e)];
 	out[1] = m->obe[2 * (m->onbe + e) + 1];

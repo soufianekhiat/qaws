@@ -11,12 +11,12 @@
 typedef qaws_exact_poly poly;
 static void* sv_alloc(size_t bytes)
 {
-	return qaws_internal_alloc(NULL, bytes);
+	return qaws_internal_alloc(bytes, NULL);
 }
 
 static void sv_free(void* p)
 {
-	qaws_internal_dealloc(NULL, p);
+	qaws_internal_dealloc(p, NULL);
 }
 
 /* ------------------------------------------------------------------ */

@@ -927,7 +927,7 @@ static qaws_mesh_3d* rq_generated(unsigned int which, double L)
 	d.control_points = cp;
 	memset(&b, 0, sizeof b);
 	b.p10.x = b.p11.x = b.p01.y = b.p11.y = 2;
-	if ((which == 1 ? qaws_surface_create_bilinear(&b, &srf) : qaws_surface_create_bspline(&d, &srf)) != QAWS_STATUS_OK)
+	if ((which == 1 ? qaws_surface_create_bilinear(&srf, &b) : qaws_surface_create_bspline(&srf, &d)) != QAWS_STATUS_OK)
 		return NULL;
 	memset(&g, 0, sizeof g);
 	g.elements = QAWS_ELEMENTS_TRIANGLES;

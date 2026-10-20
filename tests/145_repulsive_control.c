@@ -84,7 +84,7 @@ static qaws_repulsive_curves* rc_curves(unsigned int* edges)
 	d.vertex_count = RC_N;
 	d.edges = edges;
 	d.edge_count = RC_N;
-	qaws_repulsive_curves_create(&d, &c);
+	qaws_repulsive_curves_create(&c, &d);
 	return c;
 }
 
@@ -116,13 +116,13 @@ static void test_cancel_step(void)
 			d.progress.cancel = rc_cancel;
 			d.progress.user_data = &st;
 			rc_loop(x, edges);
-			if (qaws_repulsive_curves_solver_create(c, &d, x, &s) != QAWS_STATUS_OK)
+			if (qaws_repulsive_curves_solver_create(&s, c, x, &d) != QAWS_STATUS_OK)
 			{
 				wrong++;
 				continue;
 			}
 			memcpy(x0, x, sizeof x);
-			res = qaws_repulsive_curves_solver_step(s, x, &r);
+			res = qaws_repulsive_curves_solver_step(&r, x, s);
 			/* k at or past the step's poll count: the step completes */
 			if (res == QAWS_STATUS_CANCELLED)
 			{
@@ -133,7 +133,7 @@ static void test_cancel_step(void)
 				wrong += res != QAWS_STATUS_OK;
 			/* the solver steps on once the host stops cancelling */
 			st.cancel_at = -1;
-			wrong += qaws_repulsive_curves_solver_step(s, x, &r) != QAWS_STATUS_OK || r.reason == QAWS_REPULSIVE_CANCELLED;
+			wrong += qaws_repulsive_curves_solver_step(&r, x, s) != QAWS_STATUS_OK || r.reason == QAWS_REPULSIVE_CANCELLED;
 			qaws_repulsive_curves_solver_destroy(s);
 		}
 	sprintf(msg, "steps cancelled at each poll point (dense and hierarchical): %u cancelled, %u moved or misreported, %u other failures", cases,
@@ -165,7 +165,7 @@ static void test_solve_progress(void)
 	d.progress.cancel = rc_cancel;
 	d.progress.on_step = rc_on_step;
 	d.progress.user_data = &st;
-	res = qaws_repulsive_curves_solve(c, &d, x, &r);
+	res = qaws_repulsive_curves_solve(&r, x, c, &d);
 	sprintf(msg, "solve reports each accepted step: %u calls for %u iterations, %u rising energies, %u other arrays (%s)", st.steps, r.iterations,
 		st.rising, st.wrong_array, qaws_status_to_string(res));
 	TEST_ASSERT(res == QAWS_STATUS_OK && st.steps == r.iterations && st.steps > 0 && st.rising == 0 && st.wrong_array == 0, msg);
@@ -176,7 +176,7 @@ static void test_solve_progress(void)
 	st.cancel_after_steps = 3;
 	st.positions = x;
 	st.count = 3 * RC_N;
-	res = qaws_repulsive_curves_solve(c, &d, x, &r);
+	res = qaws_repulsive_curves_solve(&r, x, c, &d);
 	sprintf(msg, "solve cancelled after 3 steps: %s, reason %d, %u steps reported, positions those of the last reported step: %d",
 		qaws_status_to_string(res), (int)r.reason, st.steps, memcmp(st.last, x, sizeof x) == 0);
 	TEST_ASSERT(res == QAWS_STATUS_CANCELLED && r.reason == QAWS_REPULSIVE_CANCELLED && st.steps == 3 && memcmp(st.last, x, sizeof x) == 0, msg);
@@ -200,8 +200,8 @@ static void test_objective(void)
 		return;
 	memset(&d, 0, sizeof d);
 	memset(gref, 0, sizeof gref);
-	qaws_repulsive_curves_gradient(c, x, 1, gref, &Eref);
-	if (qaws_repulsive_curves_solver_create(c, &d, x, &s) == QAWS_STATUS_OK && qaws_repulsive_curves_solver_objective(s, x, &E, g) == QAWS_STATUS_OK)
+	qaws_repulsive_curves_gradient(gref, &Eref, c, x, 1);
+	if (qaws_repulsive_curves_solver_create(&s, c, x, &d) == QAWS_STATUS_OK && qaws_repulsive_curves_solver_objective(s, x, &E, g) == QAWS_STATUS_OK)
 	{
 		for (i = 0; i < 3 * RC_N; i++)
 			worst = fabs((double)g[i] - gref[i]) > worst ? fabs((double)g[i] - gref[i]) : worst;
@@ -219,7 +219,7 @@ static void test_objective(void)
 		double dx = x[3 * ((i + 1) % RC_N)] - x[3 * i], dy = x[3 * ((i + 1) % RC_N) + 1] - x[3 * i + 1], dz = x[3 * ((i + 1) % RC_N) + 2] - x[3 * i + 2];
 		len += sqrt(dx * dx + dy * dy + dz * dz);
 	}
-	if (qaws_repulsive_curves_solver_create(c, &d, x, &s) == QAWS_STATUS_OK && qaws_repulsive_curves_solver_objective(s, x, &El, g) == QAWS_STATUS_OK)
+	if (qaws_repulsive_curves_solver_create(&s, c, x, &d) == QAWS_STATUS_OK && qaws_repulsive_curves_solver_objective(s, x, &El, g) == QAWS_STATUS_OK)
 	{
 		for (i = 0; i < 3 * RC_N; i += 5)
 		{
@@ -280,7 +280,7 @@ static void test_mesh_cancel(void)
 	md.vertex_count = 6;
 	md.triangles = tris;
 	md.triangle_count = 8;
-	if (qaws_repulsive_mesh_create(&md, &m) != QAWS_STATUS_OK)
+	if (qaws_repulsive_mesh_create(&m, &md) != QAWS_STATUS_OK)
 	{
 		TEST_ASSERT(0, "repulsive mesh created");
 		return;
@@ -296,7 +296,7 @@ static void test_mesh_cancel(void)
 	d.progress.cancel = rc_cancel;
 	d.progress.on_step = rc_on_step;
 	d.progress.user_data = &st;
-	res = qaws_repulsive_mesh_solve(m, &d, x, &r);
+	res = qaws_repulsive_mesh_solve(&r, x, m, &d);
 	sprintf(msg, "mesh solve cancelled after 2 steps: %s, %u steps reported, positions those of the last: %d", qaws_status_to_string(res), st.steps,
 		memcmp(st.last, x, sizeof x) == 0);
 	TEST_ASSERT(res == QAWS_STATUS_CANCELLED && r.reason == QAWS_REPULSIVE_CANCELLED && st.steps == 2 && memcmp(st.last, x, sizeof x) == 0, msg);
@@ -342,10 +342,10 @@ static void test_settings(void)
 		d.theta = mode ? (qaws_scalar)0.5 : 0;
 		rc_loop(xa, edges);
 		rc_loop(xb, edges);
-		sa = qaws_repulsive_curves_solve(c, &d, xa, &ra);
+		sa = qaws_repulsive_curves_solve(&ra, xa, c, &d);
 		d.armijo = (qaws_scalar)0.1; d.backtrack = (qaws_scalar)0.5; d.max_trials = 40;
 		d.gmres_max_iterations = 1000; d.gmres_restart = 40; d.gmres_tolerance = (qaws_scalar)1e-8;
-		sb = qaws_repulsive_curves_solve(c, &d, xb, &rb);
+		sb = qaws_repulsive_curves_solve(&rb, xb, c, &d);
 		sprintf(msg, "%s curves, the settings' defaults given explicitly: %u and %u steps, positions bit for bit %d, reports equal %d",
 			mode ? "hierarchical" : "dense", ra.iterations, rb.iterations, memcmp(xa, xb, sizeof xa) == 0, memcmp(&ra, &rb, sizeof ra) == 0);
 		TEST_ASSERT(sa == QAWS_STATUS_OK && sb == QAWS_STATUS_OK && ra.iterations > 0 && memcmp(xa, xb, sizeof xa) == 0 && memcmp(&ra, &rb, sizeof ra) == 0, msg);
@@ -362,15 +362,15 @@ static void test_settings(void)
 		d.gmres_max_iterations = 1;
 		rc_loop(xa, edges);
 		memset(&r1, 0, sizeof r1); memset(&r2, 0, sizeof r2);
-		if (qaws_repulsive_curves_solver_create(c, &d, xa, &s) == QAWS_STATUS_OK)
-			s1 = qaws_repulsive_curves_solver_step(s, xa, &r1);
+		if (qaws_repulsive_curves_solver_create(&s, c, xa, &d) == QAWS_STATUS_OK)
+			s1 = qaws_repulsive_curves_solver_step(&r1, xa, s);
 		qaws_repulsive_curves_solver_destroy(s);
 		s = NULL;
 		d.max_iterations = 8;
 		d.gmres_max_iterations = 0;
 		d.gmres_tolerance = (qaws_scalar)1e-3;
 		rc_loop(xa, edges);
-		s2 = qaws_repulsive_curves_solve(c, &d, xa, &r2);
+		s2 = qaws_repulsive_curves_solve(&r2, xa, c, &d);
 		sprintf(msg, "hierarchical, gmres_max_iterations 1: step status %d, reason %d (NUMERICAL_FAILURE); gmres_tolerance 1e-3: %u steps, "
 			"energy %.10g (default %.10g), positions differ %d", (int)s1, (int)r1.reason, r2.iterations, (double)r2.energy, (double)ra.energy,
 			memcmp(xa, xb, sizeof xa) != 0);
@@ -391,9 +391,9 @@ static void test_settings(void)
 		if (k == 2) d.max_trials = 2;
 		memcpy(m1, m0, sizeof m0);
 		memset(&rm[k], 0, sizeof rm[k]);
-		sm[k] = qaws_repulsive_mesh_solver_create(m, &d, m1, &s);
+		sm[k] = qaws_repulsive_mesh_solver_create(&s, m, m1, &d);
 		if (sm[k] == QAWS_STATUS_OK)
-			sm[k] = qaws_repulsive_mesh_solver_step(s, m1, &rm[k]);
+			sm[k] = qaws_repulsive_mesh_solver_step(&rm[k], m1, s);
 		rej[k] = rm[k].rejected_energy + rm[k].rejected_collision + rm[k].rejected_projection;
 		if (k == 2) refused = memcmp(m1, m0, sizeof m0) == 0;
 		qaws_repulsive_mesh_solver_destroy(s);
@@ -419,8 +419,8 @@ static void test_settings(void)
 		if (k == 2 || k == 3) d.backtrack = dm.backtrack = bad[k];
 		if (k == 4) d.gmres_tolerance = dm.gmres_tolerance = bad[k];
 		rc_loop(xa, edges);
-		refused += qaws_repulsive_curves_solver_create(c, &d, xa, &s) == QAWS_STATUS_INVALID_ARGUMENT && !s;
-		refused += m && qaws_repulsive_mesh_solver_create(m, &dm, m0, &sv) == QAWS_STATUS_INVALID_ARGUMENT && !sv;
+		refused += qaws_repulsive_curves_solver_create(&s, c, xa, &d) == QAWS_STATUS_INVALID_ARGUMENT && !s;
+		refused += m && qaws_repulsive_mesh_solver_create(&sv, m, m0, &dm) == QAWS_STATUS_INVALID_ARGUMENT && !sv;
 		qaws_repulsive_curves_solver_destroy(s);
 		qaws_repulsive_mesh_solver_destroy(sv);
 	}
@@ -497,37 +497,37 @@ static void test_allocator(void)
 			break;
 		memset(g, 0, sizeof g);
 		for (i = 0; i < 3 * RC_N; i++) dir[i] = (qaws_scalar)sin(0.3 * i);
-		RC_CALL(qaws_repulsive_curves_gradient(c, x, 1, g, &E));
-		RC_CALL(qaws_repulsive_curves_eval(c, x, dir, &E, NULL, NULL));
-		RC_CALL(qaws_repulsive_curves_hvp(c, x, dir, g));
-		RC_CALL(qaws_repulsive_curves_bh(c, x, (qaws_scalar)0.5, 1, g, &E, NULL));
+		RC_CALL(qaws_repulsive_curves_gradient(g, &E, c, x, 1));
+		RC_CALL(qaws_repulsive_curves_eval(&E, NULL, NULL, c, x, dir));
+		RC_CALL(qaws_repulsive_curves_hvp(g, c, x, dir));
+		RC_CALL(qaws_repulsive_curves_bh(g, &E, NULL, c, x, (qaws_scalar)0.5, 1));
 		memset(&d, 0, sizeof d);
 		d.collision_checked = 1;
 		RC_CALL(qaws_repulsive_curves_solver_create_ex(c, &d, x, &oa, &s));
-		for (it = 0; s && it < 3; it++) RC_CALL(qaws_repulsive_curves_solver_step(s, x, &r));
-		RC_CALL(qaws_repulsive_curves_solver_direction(s, x, dir));
+		for (it = 0; s && it < 3; it++) RC_CALL(qaws_repulsive_curves_solver_step(&r, x, s));
+		RC_CALL(qaws_repulsive_curves_solver_direction(dir, s, x));
 		RC_CALL(qaws_repulsive_curves_solver_objective(s, x, &E, g));
 		d.collision_checked = 0;
 		d.theta = (qaws_scalar)0.5;
 		RC_CALL(qaws_repulsive_curves_solver_create_ex(c, &d, x, &oa, &sh));
-		for (it = 0; sh && it < 2; it++) RC_CALL(qaws_repulsive_curves_solver_step(sh, x, &r));
+		for (it = 0; sh && it < 2; it++) RC_CALL(qaws_repulsive_curves_solver_step(&r, x, sh));
 		d.theta = 0;
 		d.max_iterations = 3;
-		RC_CALL(qaws_repulsive_curves_solve(c, &d, x, &r));   /* (a solver in the curves' allocator) */
+		RC_CALL(qaws_repulsive_curves_solve(&r, x, c, &d));   /* (a solver in the curves' allocator) */
 		/* a mesh converged, its derivatives */
 		rc_octahedron(mx, &md, &oa, &m);
 		memset(&dm, 0, sizeof dm);
 		dm.hold_area = 1; dm.hold_volume = 1;
 		RC_CALL(m ? qaws_repulsive_mesh_solver_create_ex(m, &dm, mx, &oa, &ms) : QAWS_STATUS_INVALID_ARGUMENT);
 		memset(&r, 0, sizeof r);
-		for (it = 0; ms && it < 500 && r.reason == QAWS_REPULSIVE_RUNNING; it++) RC_CALL(qaws_repulsive_mesh_solver_step(ms, mx, &r));
+		for (it = 0; ms && it < 500 && r.reason == QAWS_REPULSIVE_RUNNING; it++) RC_CALL(qaws_repulsive_mesh_solver_step(&r, mx, ms));
 		memset(&t, 0, sizeof t);
 		t.area = 1;
 		RC_CALL(qaws_repulsive_mesh_solver_solution_jvp_checked(ms, &t, dx, NULL, &rep));
 		for (i = 0; i < 18; i++) xbar[i] = (qaws_scalar)cos(0.4 * i);
 		memset(&tb, 0, sizeof tb);
-		RC_CALL(qaws_repulsive_mesh_solver_solution_vjp(ms, xbar, &tb, NULL));
-		RC_CALL(qaws_repulsive_mesh_eval(m, mx, NULL, &E, NULL, NULL));
+		RC_CALL(qaws_repulsive_mesh_solver_solution_vjp(&tb, NULL, ms, xbar));
+		RC_CALL(qaws_repulsive_mesh_eval(&E, NULL, NULL, m, mx, NULL));
 		qaws_repulsive_mesh_solver_destroy(ms);
 		qaws_repulsive_mesh_destroy(m);
 		qaws_repulsive_curves_solver_destroy(s);

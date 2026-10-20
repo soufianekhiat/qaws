@@ -2772,11 +2772,11 @@ static unsigned int sk_span(qaws_curve const* c, double t)
 	if (c->kind != QAWS_CURVE_KIND_BSPLINE && c->kind != QAWS_CURVE_KIND_NURBS)
 		return 0;
 	deg = c->degree;
-	if (qaws_bspline_get_knots(c, buf, 256, &n) == QAWS_STATUS_BUFFER_TOO_SMALL)
+	if (qaws_bspline_get_knots(buf, &n, c, 256) == QAWS_STATUS_BUFFER_TOO_SMALL)
 	{
 		k = (qaws_scalar*)qaws_internal_malloc(qaws_internal_mul2(sizeof(qaws_scalar), n));
 		if (!k) return 0;
-		qaws_bspline_get_knots(c, k, n, &n);
+		qaws_bspline_get_knots(k, &n, c, n);
 	}
 	for (i = deg + 1; i + 1 + deg < n; i++)
 		if ((double)k[i] > (double)k[i - 1] && (double)k[i] <= t)
@@ -3026,14 +3026,14 @@ static int sk_point_tangent(qaws_curve const* c, double t, double tother, double
 {
 	qaws_eval_result_2d e, f;
 	double l;
-	if (qaws_curve_evaluate_2d(c, (qaws_scalar)t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &e) != QAWS_STATUS_OK)
+	if (qaws_curve_evaluate_2d(&e, c, (qaws_scalar)t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1) != QAWS_STATUS_OK)
 		return 0;
 	p[0] = (double)e.position.x; p[1] = (double)e.position.y;
 	tg[0] = (double)e.d1.x; tg[1] = (double)e.d1.y;
 	l = hypot(tg[0], tg[1]);
 	if (!(l > 1e-300))
 	{
-		if (qaws_curve_evaluate_2d(c, (qaws_scalar)(t + 1e-6 * (tother - t)), QAWS_EVAL_FLAG_POSITION, &f) != QAWS_STATUS_OK)
+		if (qaws_curve_evaluate_2d(&f, c, (qaws_scalar)(t + 1e-6 * (tother - t)), QAWS_EVAL_FLAG_POSITION) != QAWS_STATUS_OK)
 			return 0;
 		tg[0] = (double)f.position.x - p[0]; tg[1] = (double)f.position.y - p[1];
 		if (tother < t) { tg[0] = -tg[0]; tg[1] = -tg[1]; }
@@ -3100,7 +3100,7 @@ static qaws_status sk_fit(qaws_curve const* c, double ta, double tb, double tol,
 		{
 			qaws_eval_result_2d e;
 			double q[2], d0, d1;
-			if (qaws_curve_evaluate_2d(c, (qaws_scalar)(ta + (tb - ta) * k / 16), QAWS_EVAL_FLAG_POSITION, &e) != QAWS_STATUS_OK)
+			if (qaws_curve_evaluate_2d(&e, c, (qaws_scalar)(ta + (tb - ta) * k / 16), QAWS_EVAL_FLAG_POSITION) != QAWS_STATUS_OK)
 				return QAWS_STATUS_NUMERICAL_FAILURE;
 			q[0] = (double)e.position.x; q[1] = (double)e.position.y;
 			d0 = sk_prim_dist(&g[0], q);
@@ -3187,7 +3187,7 @@ static qaws_status sk_edge_curve(sk_sup const* e, qaws_skeleton_node const* a, q
 		cp[0] = a->position.x; cp[1] = a->position.y; cp[2] = b->position.x; cp[3] = b->position.y;
 		memset(&d, 0, sizeof(d));
 		d.dimension = QAWS_DIMENSION_2D; d.degree = 1; d.control_points = cp; d.control_point_count = 2;
-		return qaws_curve_create_bezier(&d, out);
+		return qaws_curve_create_bezier(out, &d);
 	}
 	{
 		qaws_arc_segment g;
@@ -3199,11 +3199,11 @@ static qaws_status sk_edge_curve(sk_sup const* e, qaws_skeleton_node const* a, q
 		g.angle_end = (qaws_scalar)(e->a0 + e->sweep);
 		memset(&d, 0, sizeof(d));
 		d.dimension = QAWS_DIMENSION_2D; d.segments = &g; d.segment_count = 1;
-		return qaws_curve_create_arc(&d, out);
+		return qaws_curve_create_arc(out, &d);
 	}
 }
 
-qaws_status qaws_skeleton_create(qaws_skeleton_desc const* desc, qaws_skeleton** out)
+qaws_status qaws_skeleton_create(qaws_skeleton** out, qaws_skeleton_desc const* desc)
 {
 	qaws_skeleton* s;
 	qaws_clip_result* region = NULL;
@@ -3217,7 +3217,7 @@ qaws_status qaws_skeleton_create(qaws_skeleton_desc const* desc, qaws_skeleton**
 	if (desc->splice_angle != 0 && !((double)desc->splice_angle >= SK_PI - 1e-12 && (double)desc->splice_angle <= 2 * SK_PI + 1e-12))
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	*out = NULL;
-	st = qaws_clip_boolean(QAWS_CLIP_UNION, desc->fill_rule, desc->paths, desc->path_count, NULL, 0, &region);
+	st = qaws_clip_boolean(&region, desc->paths, NULL, desc->path_count, 0, QAWS_CLIP_UNION, desc->fill_rule);
 	if (st != QAWS_STATUS_OK)
 		return st;
 	s = (qaws_skeleton*)qaws_internal_zalloc(1, sizeof(qaws_skeleton));
@@ -3235,8 +3235,8 @@ qaws_status qaws_skeleton_create(qaws_skeleton_desc const* desc, qaws_skeleton**
 		{
 			qaws_path_2d path;
 			qaws_vec2 a, b;
-			qaws_clip_result_get_path(region, pi, &path);
-			if (qaws_path_compute_bounds_2d(&path, &a, &b) == QAWS_STATUS_OK && hypot((double)b.x - a.x, (double)b.y - a.y) > ext0)
+			qaws_clip_result_get_path(&path, region, pi);
+			if (qaws_path_compute_bounds_2d(&a, &b, &path) == QAWS_STATUS_OK && hypot((double)b.x - a.x, (double)b.y - a.y) > ext0)
 				ext0 = hypot((double)b.x - a.x, (double)b.y - a.y);
 		}
 		fit_tol = desc->curve_tolerance > 0 ? (double)desc->curve_tolerance : 1e-4 * (ext0 > 0 ? ext0 : 1);
@@ -3250,8 +3250,8 @@ qaws_status qaws_skeleton_create(qaws_skeleton_desc const* desc, qaws_skeleton**
 		qaws_path_2d path;
 		qaws_clip_vertex const* vx = NULL;
 		unsigned int nv = 0, ci, first = s->nsup, first_node = s->nnodes, k;
-		qaws_clip_result_get_path(region, pi, &path);
-		qaws_clip_result_get_vertices(region, 0, pi, &vx, &nv);
+		qaws_clip_result_get_path(&path, region, pi);
+		qaws_clip_result_get_vertices(&vx, &nv, region, 0, pi);
 		s->loop_first[s->nloops] = first;
 		for (ci = 0; ci < path.curve_count && st == QAWS_STATUS_OK; ci++)
 		{
@@ -3263,11 +3263,11 @@ qaws_status qaws_skeleton_create(qaws_skeleton_desc const* desc, qaws_skeleton**
 			{
 				qaws_scalar buf[2 * 64], *cp = buf;
 				unsigned int n = 0, j;
-				if (qaws_curve_get_control_points(c, buf, 64, &n) == QAWS_STATUS_BUFFER_TOO_SMALL)
+				if (qaws_curve_get_control_points(buf, &n, c, 64) == QAWS_STATUS_BUFFER_TOO_SMALL)
 				{
 					cp = (qaws_scalar*)qaws_internal_malloc(qaws_internal_mul3(sizeof(qaws_scalar), 2, n));
 					if (!cp) { st = QAWS_STATUS_ALLOCATION_FAILURE; break; }
-					qaws_curve_get_control_points(c, cp, n, &n);
+					qaws_curve_get_control_points(cp, &n, c, n);
 				}
 				for (j = 0; j + 1 < n && st == QAWS_STATUS_OK; j++)
 				{
@@ -3293,7 +3293,7 @@ qaws_status qaws_skeleton_create(qaws_skeleton_desc const* desc, qaws_skeleton**
 						qaws_scalar t = 0;
 						mid.x = (qaws_scalar)(0.5 * (a[0] + b[0]));
 						mid.y = (qaws_scalar)(0.5 * (a[1] + b[1]));
-						if (qaws_curve_find_closest_parameter_2d(src, mid, &t) == QAWS_STATUS_OK)
+						if (qaws_curve_find_closest_parameter_2d(&t, src, mid) == QAWS_STATUS_OK)
 							e.span = sk_span(src, (double)t);
 					}
 					if (desc->weight_fn)
@@ -3539,7 +3539,7 @@ unsigned int qaws_skeleton_get_arc_count(qaws_skeleton const* s) { return s ? s-
 unsigned int qaws_skeleton_get_face_count(qaws_skeleton const* s) { return s ? s->nsup : 0; }
 qaws_scalar qaws_skeleton_get_max_time(qaws_skeleton const* s) { return s ? (qaws_scalar)s->tmax : 0; }
 
-qaws_status qaws_skeleton_get_node(qaws_skeleton const* s, unsigned int i, qaws_skeleton_node* out)
+qaws_status qaws_skeleton_get_node(qaws_skeleton_node* out, qaws_skeleton const* s, unsigned int i)
 {
 	if (!s || !out || i >= s->nnodes)
 		return QAWS_STATUS_INVALID_ARGUMENT;
@@ -3547,7 +3547,7 @@ qaws_status qaws_skeleton_get_node(qaws_skeleton const* s, unsigned int i, qaws_
 	return QAWS_STATUS_OK;
 }
 
-qaws_status qaws_skeleton_get_arc(qaws_skeleton const* s, unsigned int i, qaws_skeleton_arc* out)
+qaws_status qaws_skeleton_get_arc(qaws_skeleton_arc* out, qaws_skeleton const* s, unsigned int i)
 {
 	if (!s || !out || i >= s->narcs)
 		return QAWS_STATUS_INVALID_ARGUMENT;
@@ -3555,7 +3555,7 @@ qaws_status qaws_skeleton_get_arc(qaws_skeleton const* s, unsigned int i, qaws_s
 	return QAWS_STATUS_OK;
 }
 
-qaws_status qaws_skeleton_get_face(qaws_skeleton const* s, unsigned int i, qaws_skeleton_face* out)
+qaws_status qaws_skeleton_get_face(qaws_skeleton_face* out, qaws_skeleton const* s, unsigned int i)
 {
 	if (!s || !out || i >= s->nsup)
 		return QAWS_STATUS_INVALID_ARGUMENT;
@@ -3607,7 +3607,7 @@ static void sk_arc_eval(qaws_skeleton const* s, unsigned int i, double u, double
 	*t = (double)a->time + ((double)b->time - a->time) * u;
 }
 
-qaws_status qaws_skeleton_evaluate_arc(qaws_skeleton const* s, unsigned int i, qaws_scalar u, qaws_vec2* point, qaws_scalar* time)
+qaws_status qaws_skeleton_evaluate_arc(qaws_vec2* point, qaws_scalar* time, qaws_skeleton const* s, unsigned int i, qaws_scalar u)
 {
 	double p[2], t;
 	if (!s || i >= s->narcs || !point)
@@ -3671,7 +3671,7 @@ static int sk_conic_piece(qaws_skeleton const* s, unsigned int i, double u0, dou
 	return *w > 0;
 }
 
-qaws_status qaws_skeleton_get_arc_curve(qaws_skeleton const* s, unsigned int i, qaws_curve** out)
+qaws_status qaws_skeleton_get_arc_curve(qaws_curve** out, qaws_skeleton const* s, unsigned int i)
 {
 	sk_geo const* g;
 	if (!s || i >= s->narcs || !out)
@@ -3688,7 +3688,7 @@ qaws_status qaws_skeleton_get_arc_curve(qaws_skeleton const* s, unsigned int i, 
 		a.angle_end = (qaws_scalar)(g->a0 + g->sweep);
 		memset(&d, 0, sizeof(d));
 		d.dimension = QAWS_DIMENSION_2D; d.segments = &a; d.segment_count = 1;
-		return qaws_curve_create_arc(&d, out);
+		return qaws_curve_create_arc(out, &d);
 	}
 	if (g->kind == SK_GEO_CONIC)
 	{
@@ -3730,7 +3730,7 @@ qaws_status qaws_skeleton_get_arc_curve(qaws_skeleton const* s, unsigned int i, 
 			d.control_points = cp; d.control_point_count = j;
 			d.knots = kn; d.knot_count = j + 3;
 			d.weights = kw; d.weight_count = j;
-			return qaws_curve_create_nurbs(&d, out);
+			return qaws_curve_create_nurbs(out, &d);
 		}
 	}
 	{
@@ -3741,7 +3741,7 @@ qaws_status qaws_skeleton_get_arc_curve(qaws_skeleton const* s, unsigned int i, 
 		cp[0] = a->position.x; cp[1] = a->position.y; cp[2] = b->position.x; cp[3] = b->position.y;
 		memset(&d, 0, sizeof(d));
 		d.dimension = QAWS_DIMENSION_2D; d.degree = 1; d.control_points = cp; d.control_point_count = 2;
-		return qaws_curve_create_bezier(&d, out);
+		return qaws_curve_create_bezier(out, &d);
 	}
 }
 
@@ -3749,7 +3749,7 @@ qaws_status qaws_skeleton_get_arc_curve(qaws_skeleton const* s, unsigned int i, 
 /*  Offsets                                                                 */
 /* ------------------------------------------------------------------------ */
 
-qaws_status qaws_skeleton_offset(qaws_skeleton const* s, qaws_scalar time, qaws_clip_result** out)
+qaws_status qaws_skeleton_offset(qaws_clip_result** out, qaws_skeleton const* s, qaws_scalar time)
 {
 	sk_run r;
 	qaws_status st;
@@ -3793,7 +3793,7 @@ qaws_status qaws_skeleton_offset(qaws_skeleton const* s, qaws_scalar time, qaws_
 						cp[0] = (qaws_scalar)a[0]; cp[1] = (qaws_scalar)a[1]; cp[2] = (qaws_scalar)b[0]; cp[3] = (qaws_scalar)b[1];
 						memset(&d, 0, sizeof(d));
 						d.dimension = QAWS_DIMENSION_2D; d.degree = 1; d.control_points = cp; d.control_point_count = 2;
-						st = qaws_curve_create_bezier(&d, &curves[ncur]);
+						st = qaws_curve_create_bezier(&curves[ncur], &d);
 						if (st == QAWS_STATUS_OK) ncur++;
 					}
 					area += a[0] * b[1] - b[0] * a[1];
@@ -3812,7 +3812,7 @@ qaws_status qaws_skeleton_offset(qaws_skeleton const* s, qaws_scalar time, qaws_
 						g.angle_end = (qaws_scalar)((double)g.angle_start + e->s * sw);
 						memset(&d, 0, sizeof(d));
 						d.dimension = QAWS_DIMENSION_2D; d.segments = &g; d.segment_count = 1;
-						st = qaws_curve_create_arc(&d, &curves[ncur]);
+						st = qaws_curve_create_arc(&curves[ncur], &d);
 						if (st == QAWS_STATUS_OK) ncur++;
 						area += e->s * sw * rho * rho + (a[0] * b[1] - b[0] * a[1]);
 					}
@@ -3845,7 +3845,7 @@ qaws_status qaws_skeleton_offset(qaws_skeleton const* s, qaws_scalar time, qaws_
 			paths[i].closed = 1;
 		}
 		if (st == QAWS_STATUS_OK)
-			st = qaws_clip_boolean(QAWS_CLIP_UNION, QAWS_FILL_POSITIVE, paths, nloops, NULL, 0, out);
+			st = qaws_clip_boolean(out, paths, NULL, nloops, 0, QAWS_CLIP_UNION, QAWS_FILL_POSITIVE);
 	}
 	for (i = 0; curves && i < ncur; i++)
 		if (curves[i]) qaws_curve_destroy(curves[i]);

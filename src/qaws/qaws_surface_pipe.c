@@ -80,8 +80,8 @@ static void pipe_path(qaws_surface_pipe_impl const* impl, qaws_scalar u, qaws_ve
 {
 	qaws_scalar s_path = impl->path_range.max_value - impl->path_range.min_value;
 	memset(c, 0, sizeof *c);
-	qaws_curve_evaluate_3d(impl->path, impl->path_range.min_value + u * s_path,
-		QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2, c);
+	qaws_curve_evaluate_3d(c, impl->path,
+		impl->path_range.min_value + u * s_path, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2);
 	*T = c->d1;
 	if (v3_len(*T) > QAWS_LITERAL(1e-15))
 		v3_norm(T);
@@ -265,7 +265,7 @@ static qaws_status pipe_surface_eval(
 	/* Normal */
 	if (eval_flags & QAWS_SURFACE_EVAL_NORMAL)
 	{
-		qaws_internal_surface_normal(out_result->du, out_result->dv, &out_result->normal);
+		qaws_internal_surface_normal(&out_result->normal, out_result->du, out_result->dv);
 		out_result->valid_flags |= QAWS_SURFACE_EVAL_NORMAL;
 	}
 
@@ -274,7 +274,7 @@ static qaws_status pipe_surface_eval(
 
 static void pipe_surface_destroy(void* impl, qaws_allocator const* allocator)
 {
-	qaws_internal_dealloc(allocator, impl);
+	qaws_internal_dealloc(impl, allocator);
 }
 
 static int pipe_surface_is_rational(qaws_surface const* s)
@@ -316,7 +316,7 @@ qaws_status qaws_surface_create_pipe_ex(
 		&pipe_surface_vtable, allocator);
 	if (!surface) return QAWS_STATUS_ALLOCATION_FAILURE;
 
-	impl = (qaws_surface_pipe_impl*)qaws_internal_alloc(allocator, sizeof(qaws_surface_pipe_impl));
+	impl = (qaws_surface_pipe_impl*)qaws_internal_alloc(sizeof(qaws_surface_pipe_impl), allocator);
 	if (!impl)
 	{
 		qaws_internal_surface_free(surface);
@@ -337,8 +337,8 @@ qaws_status qaws_surface_create_pipe_ex(
 }
 
 qaws_status qaws_surface_create_pipe(
-	qaws_surface_pipe_desc const* desc,
-	qaws_surface** out_surface)
+	qaws_surface** out_surface,
+	qaws_surface_pipe_desc const* desc)
 {
 	return qaws_surface_create_pipe_ex(desc, NULL, out_surface);
 }

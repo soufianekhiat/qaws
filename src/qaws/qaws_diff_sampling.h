@@ -92,45 +92,45 @@ typedef struct qaws_cdf_sample
    them, see qaws_traversal_cdf_targets). out_tangent and out_tangent2 may be
    NULL; out_total (may be NULL) receives M_total. */
 qaws_status qaws_curve_cdf_sample_tangent(
-	qaws_diff_context const* ctx,
-	qaws_curve const* curve,
-	qaws_sample_measure_desc const* measure,
-	qaws_cdf_target const* targets,
-	qaws_scalar const* distance_tangent,
-	qaws_scalar const* distance_tangent2,
-	unsigned int count,
-	unsigned int quadrature,
-	qaws_diff_views const* param_tangent,
 	qaws_cdf_sample* out_value,
 	qaws_cdf_sample* out_tangent,
 	qaws_cdf_sample* out_tangent2,
-	qaws_scalar* out_total);
+	qaws_scalar* out_total,
+	qaws_curve const* curve,
+	qaws_cdf_target const* targets,
+	qaws_scalar const* distance_tangent,
+	qaws_scalar const* distance_tangent2,
+	qaws_diff_views const* param_tangent,
+	unsigned int count,
+	qaws_sample_measure_desc const* measure,
+	unsigned int quadrature,
+	qaws_diff_context const* ctx);
 
 /* Accumulates (+=) the pullback of per-sample adjoints into param_adjoint
    (may be NULL) and distance_adjoint (per target, may be NULL). */
 qaws_status qaws_curve_cdf_sample_adjoint(
-	qaws_diff_context const* ctx,
-	qaws_curve const* curve,
-	qaws_sample_measure_desc const* measure,
-	qaws_cdf_target const* targets,
-	unsigned int count,
-	unsigned int quadrature,
-	qaws_cdf_sample const* adjoint,
 	qaws_diff_views* param_adjoint,
-	qaws_scalar* distance_adjoint);
+	qaws_scalar* distance_adjoint,
+	qaws_curve const* curve,
+	qaws_cdf_target const* targets,
+	qaws_cdf_sample const* adjoint,
+	unsigned int count,
+	qaws_sample_measure_desc const* measure,
+	unsigned int quadrature,
+	qaws_diff_context const* ctx);
 
 /* Accumulates (+=) H direction, H the Hessian with respect to the
    parameters of sum_i (adjoint_i.t t_i + adjoint_i.position . p_i). */
 qaws_status qaws_curve_cdf_sample_hvp(
-	qaws_diff_context const* ctx,
+	qaws_diff_views* out_hv,
 	qaws_curve const* curve,
-	qaws_sample_measure_desc const* measure,
 	qaws_cdf_target const* targets,
-	unsigned int count,
-	unsigned int quadrature,
 	qaws_cdf_sample const* adjoint,
 	qaws_diff_views const* direction,
-	qaws_diff_views* out_hv);
+	unsigned int count,
+	qaws_sample_measure_desc const* measure,
+	unsigned int quadrature,
+	qaws_diff_context const* ctx);
 
 /* Traversal inputs as arc-length targets: the distance of each input (time
    through easing and motion profile, or arc length) after the wrap mode,
@@ -145,12 +145,12 @@ qaws_status qaws_curve_cdf_sample_hvp(
    arc length, where the traversal itself reads a table). Parameter-mode and
    multi-curve traversals are refused (QAWS_STATUS_UNSUPPORTED_OPERATION). */
 qaws_status qaws_traversal_cdf_targets(
-	qaws_traversal const* traversal,
-	qaws_scalar const* inputs,
-	unsigned int count,
 	qaws_cdf_target* out_targets,
 	qaws_scalar* out_rate,
-	qaws_scalar* out_rate2);
+	qaws_scalar* out_rate2,
+	qaws_traversal const* traversal,
+	qaws_scalar const* inputs,
+	unsigned int count);
 
 /* ===================================================================
  * Surfaces: inverse-CDF warping of the unit square
@@ -198,47 +198,47 @@ typedef struct qaws_surface_cdf_sample
    tangents along param_tangent (may be NULL) and xi_tangent (2 per point,
    may be NULL). out_tangent / out_tangent2 / out_total may be NULL. */
 qaws_status qaws_surface_cdf_sample_tangent(
-	qaws_diff_context const* ctx,
-	qaws_surface const* surface,
-	qaws_sample_measure_desc const* measure,
-	qaws_scalar const* xi,
-	qaws_scalar const* xi_tangent,
-	unsigned int count,
-	unsigned int cells,
-	unsigned int quadrature,
-	qaws_diff_views const* param_tangent,
 	qaws_surface_cdf_sample* out_value,
 	qaws_surface_cdf_sample* out_tangent,
 	qaws_surface_cdf_sample* out_tangent2,
-	qaws_scalar* out_total);
+	qaws_scalar* out_total,
+	qaws_surface const* surface,
+	qaws_scalar const* xi,
+	qaws_scalar const* xi_tangent,
+	qaws_diff_views const* param_tangent,
+	unsigned int count,
+	qaws_sample_measure_desc const* measure,
+	unsigned int cells,
+	unsigned int quadrature,
+	qaws_diff_context const* ctx);
 
 /* Accumulates (+=) the pullback of per-sample adjoints into param_adjoint
    (may be NULL) and xi_adjoint (2 per point, may be NULL). */
 qaws_status qaws_surface_cdf_sample_adjoint(
-	qaws_diff_context const* ctx,
+	qaws_diff_views* param_adjoint,
+	qaws_scalar* xi_adjoint,
 	qaws_surface const* surface,
-	qaws_sample_measure_desc const* measure,
 	qaws_scalar const* xi,
+	qaws_surface_cdf_sample const* adjoint,
 	unsigned int count,
+	qaws_sample_measure_desc const* measure,
 	unsigned int cells,
 	unsigned int quadrature,
-	qaws_surface_cdf_sample const* adjoint,
-	qaws_diff_views* param_adjoint,
-	qaws_scalar* xi_adjoint);
+	qaws_diff_context const* ctx);
 
 /* Accumulates (+=) H direction for the parameters present in out_hv (top
    level fields; views with children are refused), H the Hessian of
    sum_i (adjoint_i.u u_i + adjoint_i.v v_i + adjoint_i.position . p_i). */
 qaws_status qaws_surface_cdf_sample_hvp(
-	qaws_diff_context const* ctx,
+	qaws_diff_views* out_hv,
 	qaws_surface const* surface,
-	qaws_sample_measure_desc const* measure,
 	qaws_scalar const* xi,
-	unsigned int count,
-	unsigned int cells,
-	unsigned int quadrature,
 	qaws_surface_cdf_sample const* adjoint,
 	qaws_diff_views const* direction,
-	qaws_diff_views* out_hv);
+	unsigned int count,
+	qaws_sample_measure_desc const* measure,
+	unsigned int cells,
+	unsigned int quadrature,
+	qaws_diff_context const* ctx);
 
 #endif /* QAWS_DIFF_SAMPLING_H */

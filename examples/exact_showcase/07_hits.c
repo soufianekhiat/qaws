@@ -26,9 +26,9 @@ static void demo_hits(void)
 	d.degree = 4;
 	d.control_points = cps;
 	d.control_point_count = 5;
-	qaws_curve_create_bezier(&d, &c);
+	qaws_curve_create_bezier(&c, &d);
 	qaws_exact_desc_default(&desc);
-	qaws_exact_curve_prepare(&desc, c, &e, NULL);
+	qaws_exact_curve_prepare(&e, NULL, c, &desc);
 	for (k = 1; k <= EH_K; k++)
 	{
 		double h = 0.75 - ldexp(1.0, -k), p0[2] = { -1, h }, p1[2] = { 5, h };
@@ -40,7 +40,7 @@ static void demo_hits(void)
 		qaws_bezier_desc ld;
 		qaws_curve* line = NULL;
 		double prev = 0;
-		qaws_exact_curve_line_hits(e, p0, p1, 0, hits, 8, &n);
+		qaws_exact_curve_line_hits(hits, &n, e, p0, p1, 0, 8);
 		exact_n[k] = (int)n;
 		sep[k] = n == 2 ? hits[1].t_lo - hits[0].t_hi : 0;
 		wid[k] = n == 2 ? (hits[0].t_hi - hits[0].t_lo > hits[1].t_hi - hits[1].t_lo ? hits[0].t_hi - hits[0].t_lo : hits[1].t_hi - hits[1].t_lo) : 0;
@@ -49,8 +49,8 @@ static void demo_hits(void)
 		ld.degree = 1;
 		ld.control_points = seg;
 		ld.control_point_count = 2;
-		qaws_curve_create_bezier(&ld, &line);
-		qaws_curve_find_intersections_2d(c, line, ix, 16, &nf);
+		qaws_curve_create_bezier(&line, &ld);
+		qaws_curve_find_intersections_2d(ix, &nf, c, line, 16);
 		f64_n[k] = (int)nf;
 		qaws_curve_destroy(line);
 		/* sign changes of y(t) - h over 100000 samples */
@@ -67,7 +67,7 @@ static void demo_hits(void)
 	}
 	{
 		double p0[2] = { -1, 0.75 }, p1[2] = { 5, 0.75 };
-		qaws_exact_curve_line_hits(e, p0, p1, 0, th, 4, &tangent_count);
+		qaws_exact_curve_line_hits(th, &tangent_count, e, p0, p1, 0, 4);
 	}
 
 	svg_open(&sv, "showcase/exact7_hits.svg", 1260, 520, "Certified intersections near a tangency",
@@ -78,7 +78,7 @@ static void demo_hits(void)
 		for (i = 0; i <= 200; i++)
 		{
 			double out[2];
-			qaws_exact_curve_evaluate(e, i / 200.0, 0, out, NULL);
+			qaws_exact_curve_evaluate(out, NULL, e, i / 200.0, 0);
 			xy[2 * i] = vx(&vc, out[0]);
 			xy[2 * i + 1] = vy(&vc, out[1]);
 		}

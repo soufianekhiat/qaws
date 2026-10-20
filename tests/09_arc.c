@@ -24,7 +24,7 @@ static void test_arc(void)
 		desc.segments = &seg;
 		desc.segment_count = 1;
 
-		TEST_ASSERT_STATUS(qaws_curve_create_arc(&desc, &crv));
+		TEST_ASSERT_STATUS(qaws_curve_create_arc(&crv, &desc));
 		TEST_ASSERT(crv != NULL, "arc created");
 		TEST_ASSERT(qaws_curve_get_kind(crv) == QAWS_CURVE_KIND_ARC, "arc kind");
 
@@ -34,18 +34,18 @@ static void test_arc(void)
 			"arc parameter range = arc length");
 
 		/* t=0 (local_t=0): (1, 0) */
-		qaws_curve_evaluate_2d(crv, 0, QAWS_EVAL_FLAG_POSITION, &r);
+		qaws_curve_evaluate_2d(&r, crv, 0, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT(approx_eq(r.position.x, 1) && approx_eq(r.position.y, 0),
 			"arc start point");
 
 		/* t=max (local_t=1): (0, 1) */
-		qaws_curve_evaluate_2d(crv, rng.max_value, QAWS_EVAL_FLAG_POSITION, &r);
+		qaws_curve_evaluate_2d(&r, crv, rng.max_value, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT(approx_eq(r.position.x, 0) && approx_eq(r.position.y, 1),
 			"arc end point");
 
 		/* Midpoint should be on unit circle */
-		qaws_curve_evaluate_2d(crv, rng.max_value * (qaws_scalar)0.5,
-			QAWS_EVAL_FLAG_POSITION, &r);
+		qaws_curve_evaluate_2d(&r, crv,
+			rng.max_value * (qaws_scalar)0.5, QAWS_EVAL_FLAG_POSITION);
 		dist = (qaws_scalar)sqrt((double)(r.position.x * r.position.x + r.position.y * r.position.y));
 		TEST_ASSERT(approx_eq(dist, 1), "arc midpoint on circle");
 
@@ -56,7 +56,7 @@ static void test_arc(void)
 			for (i = 0; i <= 20; ++i)
 			{
 				qaws_scalar t = rng.max_value * (qaws_scalar)i / (qaws_scalar)20;
-				qaws_curve_evaluate_2d(crv, t, QAWS_EVAL_FLAG_POSITION, &r);
+				qaws_curve_evaluate_2d(&r, crv, t, QAWS_EVAL_FLAG_POSITION);
 				dist = (qaws_scalar)sqrt((double)(r.position.x * r.position.x + r.position.y * r.position.y));
 				if (!approx_eq(dist, 1)) all_on = 0;
 			}
@@ -64,8 +64,8 @@ static void test_arc(void)
 		}
 
 		/* Derivatives at start: D1 should be tangent (0, sweep*r) direction */
-		qaws_curve_evaluate_2d(crv, 0,
-			QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2 | QAWS_EVAL_FLAG_D3, &r);
+		qaws_curve_evaluate_2d(&r, crv,
+			0, QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2 | QAWS_EVAL_FLAG_D3);
 		TEST_ASSERT(r.valid_flags & QAWS_EVAL_FLAG_D1, "arc d1 valid");
 		TEST_ASSERT(r.valid_flags & QAWS_EVAL_FLAG_D2, "arc d2 valid");
 		TEST_ASSERT(r.valid_flags & QAWS_EVAL_FLAG_D3, "arc d3 valid");
@@ -106,7 +106,7 @@ static void test_arc(void)
 		desc.segments = segs;
 		desc.segment_count = 2;
 
-		TEST_ASSERT_STATUS(qaws_curve_create_arc(&desc, &crv));
+		TEST_ASSERT_STATUS(qaws_curve_create_arc(&crv, &desc));
 		TEST_ASSERT(qaws_curve_get_span_count(crv) == 2, "arc 2-span count");
 
 		rng = qaws_curve_get_parameter_range(crv);
@@ -114,7 +114,7 @@ static void test_arc(void)
 		TEST_ASSERT(approx_eq(rng.max_value, pi_half * 2), "arc half-circle length");
 
 		/* End point should be (-1, 0) */
-		qaws_curve_evaluate_2d(crv, rng.max_value, QAWS_EVAL_FLAG_POSITION, &r);
+		qaws_curve_evaluate_2d(&r, crv, rng.max_value, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT(approx_eq(r.position.x, -1), "arc half end x");
 		TEST_ASSERT(approx_eq(r.position.y, 0), "arc half end y");
 
@@ -134,7 +134,7 @@ static void test_arc(void)
 		desc.dimension = QAWS_DIMENSION_2D;
 		desc.segments = &seg;
 		desc.segment_count = 1;
-		TEST_ASSERT(qaws_curve_create_arc(&desc, &crv) != QAWS_STATUS_OK,
+		TEST_ASSERT(qaws_curve_create_arc(&crv, &desc) != QAWS_STATUS_OK,
 			"arc zero radius rejected");
 	}
 
@@ -159,16 +159,16 @@ static void test_arc(void)
 		desc3d.segments = &seg3d;
 		desc3d.segment_count = 1;
 
-		TEST_ASSERT_STATUS(qaws_curve_create_arc(&desc3d, &crv3d));
-		qaws_curve_evaluate_3d(crv3d, 0, QAWS_EVAL_FLAG_POSITION, &r3d);
+		TEST_ASSERT_STATUS(qaws_curve_create_arc(&crv3d, &desc3d));
+		qaws_curve_evaluate_3d(&r3d, crv3d, 0, QAWS_EVAL_FLAG_POSITION);
 		TEST_ASSERT(approx_eq(r3d.position.x, 1) && approx_eq(r3d.position.z, 0),
 			"3d arc start");
 
 		/* End: (0, 0, 1) in XZ plane */
 		{
 			qaws_range rng = qaws_curve_get_parameter_range(crv3d);
-			qaws_curve_evaluate_3d(crv3d, rng.max_value,
-				QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &r3d);
+			qaws_curve_evaluate_3d(&r3d, crv3d,
+				rng.max_value, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1);
 			TEST_ASSERT(approx_eq(r3d.position.x, 0), "3d arc end x");
 			TEST_ASSERT(approx_eq(r3d.position.z, 1), "3d arc end z");
 			TEST_ASSERT(approx_eq(r3d.position.y, 0), "3d arc y=0 plane");
@@ -209,11 +209,11 @@ static void test_arc_derivatives(void)
 	desc.dimension = QAWS_DIMENSION_2D;
 	desc.segments = &seg;
 	desc.segment_count = 1;
-	TEST_ASSERT_STATUS(qaws_curve_create_arc(&desc, &crv));
+	TEST_ASSERT_STATUS(qaws_curve_create_arc(&crv, &desc));
 
-	qaws_curve_evaluate_2d(crv, t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2, &e);
-	qaws_curve_evaluate_2d(crv, (qaws_scalar)(t + h), QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &ep);
-	qaws_curve_evaluate_2d(crv, (qaws_scalar)(t - h), QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1, &em);
+	qaws_curve_evaluate_2d(&e, crv, t, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2);
+	qaws_curve_evaluate_2d(&ep, crv, (qaws_scalar)(t + h), QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1);
+	qaws_curve_evaluate_2d(&em, crv, (qaws_scalar)(t - h), QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1);
 	speed = sqrt((double)e.d1.x * e.d1.x + (double)e.d1.y * e.d1.y);
 	fd1x = (ep.position.x - em.position.x) / (2 * h);
 	fd1y = (ep.position.y - em.position.y) / (2 * h);
@@ -224,7 +224,7 @@ static void test_arc_derivatives(void)
 	TEST_ASSERT(approx_eq_loose(e.d2.x, (qaws_scalar)fd2x) && approx_eq_loose(e.d2.y, (qaws_scalar)fd2y), "arc d2 matches differences");
 	TEST_ASSERT(approx_eq_loose((qaws_scalar)sqrt((double)e.d2.x * e.d2.x + (double)e.d2.y * e.d2.y), 1 / r), "arc |d2| = 1/r");
 	range = qaws_curve_get_parameter_range(crv);
-	qaws_curve_compute_arc_length(crv, range.min_value, range.max_value, &len);
+	qaws_curve_compute_arc_length(&len, crv, range.min_value, range.max_value);
 	TEST_ASSERT(approx_eq_loose(len, (qaws_scalar)(r * 2.6)), "arc length = r * sweep");
 	qaws_curve_destroy(crv);
 }

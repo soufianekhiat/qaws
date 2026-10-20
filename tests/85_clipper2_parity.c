@@ -184,7 +184,7 @@ static qaws_curve** c2_curves(c2_paths const* p, int closed, qaws_path_2d* paths
 		unsigned int a = p->start[i], b = p->start[i + 1];
 		if (b - a < (closed ? 3u : 2u))
 			continue;
-		if (qaws_curve_create_polyline_2d(&p->xy[2 * a], b - a, closed, &cs[m]) != QAWS_STATUS_OK)
+		if (qaws_curve_create_polyline_2d(&cs[m], &p->xy[2 * a], b - a, closed) != QAWS_STATUS_OK)
 			continue;
 		views[m] = cs[m];
 		paths[m].curves = &views[m];
@@ -265,7 +265,7 @@ static int c2_in_set(qaws_path_2d const* p, unsigned int n, qaws_fill_rule fr, q
 		unsigned int m = 0, c;
 		for (c = 0; c < p[i].curve_count; c++)
 		{
-			if (qaws_curve_get_control_points(p[i].curves[c], buf, 2048, &m) != QAWS_STATUS_OK)
+			if (qaws_curve_get_control_points(buf, &m, p[i].curves[c], 2048) != QAWS_STATUS_OK)
 				continue;
 			for (k = 0; k + 1 < m; k++)
 			{
@@ -297,9 +297,9 @@ static void c2_oracle(qaws_path_2d const* sp, unsigned int ns, qaws_path_2d cons
 	qaws_path_2d* rp = (qaws_path_2d*)malloc(sizeof(qaws_path_2d) * (n + 1));
 	double box[4] = { 1e300, 1e300, -1e300, -1e300 };
 	for (k = 0; k < n; k++)
-		qaws_clip_result_get_path(r, k, &rp[k]);
+		qaws_clip_result_get_path(&rp[k], r, k);
 	for (k = 0; k < ns + nc; k++)
-		if (qaws_path_compute_bounds_2d(k < ns ? &sp[k] : &cp[k - ns], &lo, &hi) == QAWS_STATUS_OK)
+		if (qaws_path_compute_bounds_2d(&lo, &hi, k < ns ? &sp[k] : &cp[k - ns]) == QAWS_STATUS_OK)
 		{
 			if (lo.x < box[0]) box[0] = lo.x;
 			if (lo.y < box[1]) box[1] = lo.y;
@@ -343,8 +343,8 @@ static long long c2_merged_count(qaws_clip_result const* r)
 			qaws_clip_vertex const *vi = NULL, *vj = NULL;
 			unsigned int ni = 0, nj = 0;
 			int touch = 0;
-			qaws_clip_result_get_vertices(r, 0, i, &vi, &ni);
-			qaws_clip_result_get_vertices(r, 0, j, &vj, &nj);
+			qaws_clip_result_get_vertices(&vi, &ni, r, 0, i);
+			qaws_clip_result_get_vertices(&vj, &nj, r, 0, j);
 			for (a = 0; a < ni && !touch; a++)
 				for (b = 0; b < nj && !touch; b++)
 					touch = fabs(vi[a].position.x - vj[b].position.x) < 1e-6 && fabs(vi[a].position.y - vj[b].position.y) < 1e-6;
@@ -365,9 +365,9 @@ static long long c2_merged_count(qaws_clip_result const* r)
 			qaws_vec2 lo, hi;
 			unsigned int ri = i;
 			double diag;
-			qaws_clip_result_get_path(r, i, &p);
-			qaws_path_compute_area_2d(&p, &ar);
-			qaws_path_compute_bounds_2d(&p, &lo, &hi);
+			qaws_clip_result_get_path(&p, r, i);
+			qaws_path_compute_area_2d(&ar, &p);
+			qaws_path_compute_bounds_2d(&lo, &hi, &p);
 			diag = hypot(hi.x - lo.x, hi.y - lo.y);
 			while (par[ri] != ri) ri = par[ri];
 			/* thicker than one unit of Clipper2's grid: area over length */
@@ -401,7 +401,7 @@ static void c2_execute(c2_test const* t, c2_run* out)
 	d.open_subjects = op; d.open_subject_count = no;
 	d.clips = cp; d.clip_count = nc;
 	d.clip_type = t->ct; d.fill_rule = t->fr;
-	out->status = qaws_clip_execute(&d, &r);
+	out->status = qaws_clip_execute(&r, &d);
 	if (out->status == QAWS_STATUS_OK)
 	{
 		qaws_scalar a = 0;
@@ -409,8 +409,8 @@ static void c2_execute(c2_test const* t, c2_run* out)
 		for (k = 0; k < n; k++)
 		{
 			qaws_path_2d p;
-			qaws_clip_result_get_path(r, k, &p);
-			if (qaws_path_compute_area_2d(&p, &a) == QAWS_STATUS_OK)
+			qaws_clip_result_get_path(&p, r, k);
+			if (qaws_path_compute_area_2d(&a, &p) == QAWS_STATUS_OK)
 				out->area += a;
 		}
 		out->closed_count = n;
@@ -431,9 +431,9 @@ static void c2_execute(c2_test const* t, c2_run* out)
 			unsigned int nv = 0, q;
 			qaws_path_2d p;
 			qaws_scalar a = 0;
-			qaws_clip_result_get_path(r, k, &p);
-			qaws_path_compute_area_2d(&p, &a);
-			qaws_clip_result_get_vertices(r, 0, k, &v, &nv);
+			qaws_clip_result_get_path(&p, r, k);
+			qaws_path_compute_area_2d(&a, &p);
+			qaws_clip_result_get_vertices(&v, &nv, r, 0, k);
 			printf("      result %u (area %.3f, parent %d):", k, (double)a, (int)qaws_clip_result_get_parent(r, k));
 			for (q = 0; q < nv; q++)
 				printf(" %.3f,%.3f", (double)v[q].position.x, (double)v[q].position.y);
@@ -642,7 +642,7 @@ static void test_polygons64(void)
 		d.clips = cp; d.clip_count = t.clip.count;
 		d.open_subjects = op; d.open_subject_count = t.open.count;
 		d.clip_type = t.ct; d.fill_rule = t.fr;
-		st = qaws_clip64_execute(&d, &r);
+		st = qaws_clip64_execute(&r, &d);
 		total++;
 		if (st != QAWS_STATUS_OK)
 		{
@@ -662,9 +662,9 @@ static void test_polygons64(void)
 			{
 				int64_t const* p;
 				unsigned int m;
-				qaws_clip64_result_get_path(r, k, &p, &m);
+				qaws_clip64_result_get_path(&p, &m, r, k);
 				area += 0.5 * qaws_path64_area2(p, m);
-				qaws_clip64_result_get_path_exact(r, k, &ex[k], &exn[k]);
+				qaws_clip64_result_get_path_exact(&ex[k], &exn[k], r, k);
 			}
 			for (k = 0; k < t.subj.count + t.clip.count; k++)
 			{
@@ -725,8 +725,8 @@ static void test_polygons64(void)
 						int64_t const *pa, *pb;
 						unsigned int ma, mb;
 						int touch = 0;
-						qaws_clip64_result_get_path(r, a, &pa, &ma);
-						qaws_clip64_result_get_path(r, b, &pb, &mb);
+						qaws_clip64_result_get_path(&pa, &ma, r, a);
+						qaws_clip64_result_get_path(&pb, &mb, r, b);
 						for (u = 0; u < ma && !touch; u++)
 							for (v = 0; v < mb && !touch; v++)
 								touch = pa[2 * u] == pb[2 * v] && pa[2 * u + 1] == pb[2 * v + 1];
@@ -743,7 +743,7 @@ static void test_polygons64(void)
 					int64_t const* p;
 					unsigned int m, ra = k;
 					double lx = 1e300, ly = 1e300, hx = -1e300, hy = -1e300, ar;
-					qaws_clip64_result_get_path(r, k, &p, &m);
+					qaws_clip64_result_get_path(&p, &m, r, k);
 					for (u = 0; u < m; u++)
 					{
 						if (p[2 * u] < lx) lx = (double)p[2 * u];
@@ -777,7 +777,7 @@ static void test_polygons64(void)
 				{
 					int64_t const* p;
 					unsigned int m;
-					qaws_clip64_result_get_path(r, k, &p, &m);
+					qaws_clip64_result_get_path(&p, &m, r, k);
 					for (i = 0; i < m; i++)
 						perim += hypot((double)(p[2 * ((i + 1) % m)] - p[2 * i]), (double)(p[2 * ((i + 1) % m) + 1] - p[2 * i + 1]));
 				}
@@ -796,7 +796,7 @@ static void test_polygons64(void)
 				{
 					int64_t const* p;
 					unsigned int m;
-					qaws_clip64_result_get_path(r, k, &p, &m);
+					qaws_clip64_result_get_path(&p, &m, r, k);
 					printf("      int64 result %u (exact):", k);
 					for (i = 0; i < exn[k]; i++)
 						printf(" %.4f,%.4f", ex[k][2 * i], ex[k][2 * i + 1]);
@@ -866,12 +866,12 @@ static void test_polygons_exact_curves(void)
 			d.clips = cp; d.clip_count = nc;
 			d.clip_type = t.ct; d.fill_rule = t.fr;
 			d.exact = &ed;
-			st = qaws_clip_exact_execute(&d, &r, NULL);
+			st = qaws_clip_exact_execute(&r, NULL, &d);
 			memset(&d64, 0, sizeof(d64));
 			d64.subjects = sp64; d64.subject_count = t.subj.count;
 			d64.clips = cp64; d64.clip_count = t.clip.count;
 			d64.clip_type = t.ct; d64.fill_rule = t.fr;
-			qaws_clip64_execute(&d64, &r64);
+			qaws_clip64_execute(&r64, &d64);
 			total++;
 			/* qaws_clip64 drops paths that round to nothing (slivers under a
 			   unit): the float engine keeps them, so it is the second reference */
@@ -882,13 +882,13 @@ static void test_polygons_exact_curves(void)
 				fd.subjects = sp; fd.subject_count = ns;
 				fd.clips = cp; fd.clip_count = nc;
 				fd.clip_type = t.ct; fd.fill_rule = t.fr;
-				if (qaws_clip_execute(&fd, &fr) == QAWS_STATUS_OK)
+				if (qaws_clip_execute(&fr, &fd) == QAWS_STATUS_OK)
 					for (k = 0; k < qaws_clip_result_get_path_count(fr); k++)
 					{
 						qaws_path_2d p;
 						qaws_scalar a = 0;
-						qaws_clip_result_get_path(fr, k, &p);
-						qaws_path_compute_area_2d(&p, &a);
+						qaws_clip_result_get_path(&p, fr, k);
+						qaws_path_compute_area_2d(&a, &p);
 						fwant += (double)a;
 					}
 				qaws_clip_result_destroy(fr);
@@ -897,7 +897,7 @@ static void test_polygons_exact_curves(void)
 			{
 				double const* p;
 				unsigned int m;
-				qaws_clip64_result_get_path_exact(r64, k, &p, &m);
+				qaws_clip64_result_get_path_exact(&p, &m, r64, k);
 				for (i = 0; i < m; i++)
 					want += 0.5 * (p[2 * i] * p[2 * ((i + 1) % m) + 1] - p[2 * ((i + 1) % m)] * p[2 * i + 1]);
 			}
@@ -907,8 +907,8 @@ static void test_polygons_exact_curves(void)
 				{
 					qaws_path_2d p;
 					qaws_scalar a = 0;
-					qaws_clip_result_get_path(r, k, &p);
-					qaws_path_compute_area_2d(&p, &a);
+					qaws_clip_result_get_path(&p, r, k);
+					qaws_path_compute_area_2d(&a, &p);
 					area += (double)a;
 				}
 				if (getenv("QAWS_C2_DUMPX") && atoi(getenv("QAWS_C2_DUMPX")) == t.number)
@@ -920,13 +920,13 @@ static void test_polygons_exact_curves(void)
 					{
 						qaws_path_2d p;
 						unsigned int j;
-						qaws_clip_result_get_path(r, k, &p);
+						qaws_clip_result_get_path(&p, r, k);
 						printf("      exact-curve result %u:", k);
 						for (j = 0; j < p.curve_count; j++)
 						{
 							qaws_scalar cpt[512];
 							unsigned int m = 0, q;
-							qaws_curve_get_control_points(p.curves[j], cpt, 256, &m);
+							qaws_curve_get_control_points(cpt, &m, p.curves[j], 256);
 							for (q = 0; q < m; q++) printf(" %.4f,%.4f", (double)cpt[2 * q], (double)cpt[2 * q + 1]);
 							printf(" |");
 						}
@@ -936,7 +936,7 @@ static void test_polygons_exact_curves(void)
 					{
 						double const* p;
 						unsigned int m, j;
-						qaws_clip64_result_get_path_exact(r64, k, &p, &m);
+						qaws_clip64_result_get_path_exact(&p, &m, r64, k);
 						printf("      clip64 result %u:", k);
 						for (j = 0; j < m; j++) printf(" %.4f,%.4f", p[2 * j], p[2 * j + 1]);
 						printf("\n");
