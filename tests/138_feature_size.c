@@ -443,7 +443,7 @@ static void test_sphere(void)
 	sprintf(msg, "a sphere of radius 1 at 3 cells across: %.4f..%.4f (2 / 3); capped at 0.3: %.4f..%.4f; min with the curvature field off by %.1e",
 		lo, up, clo, cup, worst);
 	printf("  %s\n", msg);
-	TEST_ASSERT(lo > 0.97 * 2 / 3.0 && up < 1.03 * 2 / 3.0 && fabs(clo - 0.3) < 1e-9 && fabs(cup - 0.3) < 1e-9 && worst < 1e-12
+	TEST_ASSERT(lo > 0.97 * 2 / 3.0 && up < 1.03 * 2 / 3.0 && fabs(clo - 0.3) < TEST_BOUND(1e-9, 32) && fabs(cup - 0.3) < TEST_BOUND(1e-9, 32) && worst < TEST_BOUND(1e-12, 32)
 		&& qaws_size_field_get_reference(both) == r, msg);
 done:
 	free(pos); free(h); free(hc); free(hm); free(hk); free(l);

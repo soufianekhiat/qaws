@@ -549,12 +549,12 @@ static void test_nested(void)
 	s = mr_repair(x, 16, t, NULL, 24, NULL, &m, &r);
 	sprintf(msg, "a box with a cavity: volume %.6f (0.936), %u nested", m ? mr_volume(m) : 0, r.nested_shells);
 	printf("  %s\n", msg);
-	TEST_ASSERT(s == QAWS_STATUS_OK && mr_closed(m, &r) && fabs(mr_volume(m) - 0.936) < 1e-9 && r.nested_shells == 1, msg);
+	TEST_ASSERT(s == QAWS_STATUS_OK && mr_closed(m, &r) && fabs(mr_volume(m) - 0.936) < TEST_BOUND(1e-9, 32) && r.nested_shells == 1, msg);
 	qaws_mesh_3d_destroy(m);
 	s = mr_repair(x, nv, t, NULL, nt, NULL, &m, &r);
 	sprintf(msg, "and an island in the cavity: volume %.6f (0.944), %u nested", m ? mr_volume(m) : 0, r.nested_shells);
 	printf("  %s\n", msg);
-	TEST_ASSERT(s == QAWS_STATUS_OK && mr_closed(m, &r) && fabs(mr_volume(m) - 0.944) < 1e-9 && r.nested_shells == 2, msg);
+	TEST_ASSERT(s == QAWS_STATUS_OK && mr_closed(m, &r) && fabs(mr_volume(m) - 0.944) < TEST_BOUND(1e-9, 32) && r.nested_shells == 2, msg);
 	qaws_mesh_3d_destroy(m);
 	memset(&d, 0, sizeof d);
 	d.nested_shells = QAWS_NESTED_SHELLS_REMOVE;

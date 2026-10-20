@@ -280,7 +280,7 @@ static void test_torus(void)
 		sprintf(msg, "torus quads: %u faces (%u quads), %u irregular vertices, closed %d genus %u, off the torus %.2e, footpoints to %.2e", t.nf,
 			t.q.quads, t.q.irregular, t.top.closed, t.top.genus, off, err);
 		TEST_ASSERT(qaws_mesh_3d_validate(m) == QAWS_STATUS_OK && t.q.quads == t.nf && t.nf > 300 * pow(0.25 / L, 2) && t.q.irregular == 0 && t.top.closed
-			&& t.top.genus == 1 && off < 1e-9 && err < 1e-9, msg);
+			&& t.top.genus == 1 && off < TEST_BOUND(1e-9, 32) && err < TEST_BOUND(1e-9, 32), msg);
 		tg_free(&t);
 	}
 	qaws_mesh_3d_destroy(m);
@@ -325,7 +325,7 @@ static void test_box(void)
 			{
 				unsigned int F = (unsigned int)fid[f];
 				for (k = 0; k < t.fs[f]; k++)
-					offface += F >= 6 || fabs(t.x[3 * t.fv[c0 + k] + tg_axis[F]] - tg_side[F] * h[tg_axis[F]]) > 1e-9;
+					offface += F >= 6 || fabs(t.x[3 * t.fv[c0 + k] + tg_axis[F]] - tg_side[F] * h[tg_axis[F]]) > TEST_BOUND(1e-9, 32);
 			}
 			free(fid);
 		}
@@ -334,7 +334,7 @@ static void test_box(void)
 			for (i = 0; i < t.nv; i++)
 			{
 				double const* p = t.x + 3 * i;
-				if (fabs(p[0] - (a & 1 ? h[0] : -h[0])) + fabs(p[1] - (a & 2 ? h[1] : -h[1])) + fabs(p[2] - (a & 4 ? h[2] : -h[2])) < 1e-12)
+				if (fabs(p[0] - (a & 1 ? h[0] : -h[0])) + fabs(p[1] - (a & 2 ? h[1] : -h[1])) + fabs(p[2] - (a & 4 ? h[2] : -h[2])) < TEST_BOUND(1e-12, 32))
 				{
 					corners++;
 					break;
@@ -346,7 +346,7 @@ static void test_box(void)
 			for (k = 0; k < 3; k++)
 			{
 				double gap = h[k] - fabs(t.x[3 * i + k]);
-				on += gap < 1e-9;
+				on += gap < TEST_BOUND(1e-9, 32);
 				close += gap < 0.3 * L;
 			}
 			near += close >= 2 && on < 2;
@@ -354,7 +354,7 @@ static void test_box(void)
 		sprintf(msg, "box quads: %u faces (%u quads), %u irregular vertices, closed %d genus %u, %u corners of 8, %u vertices off their face, "
 			"%u near an edge but off it, footpoints to %.2e", t.nf, t.q.quads, t.q.irregular, t.top.closed, t.top.genus, corners, offface, near, err);
 		TEST_ASSERT(qaws_mesh_3d_validate(m) == QAWS_STATUS_OK && t.q.quads == t.nf && t.nf > 200 * pow(0.15 / L, 2) && t.q.irregular == 8 && t.top.closed && t.top.genus == 0
-			&& fa != QAWS_MESH_NONE && offface == 0 && corners == 8 && near == 0 && err < 1e-9, msg);
+			&& fa != QAWS_MESH_NONE && offface == 0 && corners == 8 && near == 0 && err < TEST_BOUND(1e-9, 32), msg);
 		tg_free(&t);
 	}
 	qaws_mesh_3d_destroy(m);

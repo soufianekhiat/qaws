@@ -259,7 +259,7 @@ static void test_sphere(void)
 		}
 	}
 	sprintf(msg, "icosphere: vertices interpolated (%.2g), patches meet along edges (positions %.2g, normals %.2g)", vmax, cmax, nmax);
-	TEST_ASSERT(okv && vmax < 1e-12 && cmax < 1e-12 && nmax < 1e-12, msg);
+	TEST_ASSERT(okv && vmax < TEST_BOUND(1e-12, 32) && cmax < TEST_BOUND(1e-12, 32) && nmax < TEST_BOUND(1e-12, 32), msg);
 	/* closer to the sphere than the flat triangles; curvatures near 1 */
 	for (i = 0; i < 2000; i++)
 	{
@@ -400,7 +400,7 @@ static void test_projection(void)
 		}
 	}
 	sprintf(msg, "projection of 300 points against brute force: PN %.2g, LINEAR %.2g (distances up to %.3g)", emax[0], emax[1], smax);
-	TEST_ASSERT(emax[0] < 1e-9 && emax[1] < 1e-12, msg);
+	TEST_ASSERT(emax[0] < TEST_BOUND(1e-9, 32) && emax[1] < TEST_BOUND(1e-12, 32), msg);
 	/* two sheets: the hint's, not the nearer one */
 	{
 		static qaws_scalar const x[24] = { 0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 0, 0.1f, 1, 0, 0.1f, 1, 1, 0.1f, 0, 1, 0.1f };
@@ -471,7 +471,7 @@ static void test_walk(void)
 		}
 	}
 	sprintf(msg, "walking straight on a plane across triangles: 20 directions, error %.2g", e1);
-	TEST_ASSERT(r && e1 < 1e-12, msg);
+	TEST_ASSERT(r && e1 < TEST_BOUND(1e-12, 32), msg);
 	/* round a 12-sided prism: against the prism unrolled */
 	ts_free(&t);
 	ts_prism(&t, n, 5, 1, 4);
@@ -513,7 +513,7 @@ static void test_walk(void)
 		}
 	}
 	sprintf(msg, "walking round a 12-sided prism, 12 helical paths over several faces: against the prism unrolled %.2g", e2);
-	TEST_ASSERT(rp && e2 < 1e-9, msg);
+	TEST_ASSERT(rp && e2 < TEST_BOUND(1e-9, 32), msg);
 	qaws_mesh_reference_destroy(r);
 	qaws_mesh_reference_destroy(rp);
 	qaws_mesh_3d_destroy(m);
@@ -556,7 +556,7 @@ static void test_attributes_and_refusals(void)
 		ef = fmax(ef, fabs(id - (double)l.patch));
 	}
 	sprintf(msg, "attributes at 500 locations of the flat reference: a linear vertex attribute %.2g, the face ids %.2g", ev, ef);
-	TEST_ASSERT(r && ev < 1e-12 && ef == 0, msg);
+	TEST_ASSERT(r && ev < TEST_BOUND(1e-12, 32) && ef == 0, msg);
 	{
 		qaws_mesh_reference_desc dd;
 		qaws_mesh_reference* bad = NULL;

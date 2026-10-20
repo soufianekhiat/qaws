@@ -60,6 +60,13 @@ All notable changes to Qaws are documented here.
 - Tests: a fast default tier and `QAWS_TEST_HEAVY=1` for the slow checks
   (docs/building.md); the runner reports each suite's time. The default run
   takes 360 s serially instead of 783 s.
+- Tests: `TEST_BOUND(bound, n)`, a double bound that rounding sets in float
+  (at least n roundings of the scalar); the mesh suites 114 and 122 to 139
+  pass with `QAWS_SCALAR_IS_FLOAT` but for five quality checks against
+  baselines measured in double (126 box, 134 torus, 135 blob, 136 can, 137
+  density, stroke and attractor), which the f64 build fails too with its
+  input rounded to float: the quad meshers are sensitive to input noise of
+  1e-7 (open).
 
 ## [1.0.0] - 2026-03-12
 

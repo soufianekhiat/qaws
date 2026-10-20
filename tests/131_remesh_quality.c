@@ -547,7 +547,7 @@ static int rq_invariants(qaws_mesh_3d const* in, qaws_mesh_3d const* out, qaws_m
 		{
 			int found = 0;
 			for (j = 0; j < nvi && !found; j++)
-				found = fabs(x[3 * i] - xi[3 * j]) + fabs(x[3 * i + 1] - xi[3 * j + 1]) + fabs(x[3 * i + 2] - xi[3 * j + 2]) < 1e-12;
+				found = fabs(x[3 * i] - xi[3 * j]) + fabs(x[3 * i + 1] - xi[3 * j + 1]) + fabs(x[3 * i + 2] - xi[3 * j + 2]) < TEST_BOUND(1e-12, 32);
 			corners &= found;
 		}
 	}
@@ -558,7 +558,7 @@ static int rq_invariants(qaws_mesh_3d const* in, qaws_mesh_3d const* out, qaws_m
 			int found = 0;
 			for (i = 0; i < nv && !found; i++)
 				found = qaws_mesh_3d_is_feature_corner(out, i)
-					&& fabs(x[3 * i] - xi[3 * j]) + fabs(x[3 * i + 1] - xi[3 * j + 1]) + fabs(x[3 * i + 2] - xi[3 * j + 2]) < 1e-12;
+					&& fabs(x[3 * i] - xi[3 * j]) + fabs(x[3 * i + 1] - xi[3 * j + 1]) + fabs(x[3 * i + 2] - xi[3 * j + 2]) < TEST_BOUND(1e-12, 32);
 			corners &= found;
 		}
 	/* each end of a feature edge: its footpoint on a crease edge of its reference triangle (or at a vertex on one) */
@@ -574,16 +574,16 @@ static int rq_invariants(qaws_mesh_3d const* in, qaws_mesh_3d const* out, qaws_m
 		for (k = 0; k < 3; k++)
 		{
 			unsigned long long key = rq_key(tv[k], tv[(k + 1) % 3]);
-			if (b[(k + 2) % 3] <= 1e-9 && nk && bsearch(&key, keys, nk, sizeof *keys, rq_key_cmp))
+			if (b[(k + 2) % 3] <= TEST_BOUND(1e-9, 32) && nk && bsearch(&key, keys, nk, sizeof *keys, rq_key_cmp))
 				on = 1;
-			if (b[k] >= 1 - 1e-9 && onf[tv[k]])
+			if (b[k] >= 1 - TEST_BOUND(1e-9, 32) && onf[tv[k]])
 				on = 1;
 		}
 		crease &= on;
 	}
 	qaws_mesh_3d_get_topology(&t0, in);
 	qaws_mesh_3d_get_topology(&t1, out);
-	ok = qaws_mesh_3d_validate(out) == QAWS_STATUS_OK && t0.closed == t1.closed && t0.genus == t1.genus && foot <= 1e-9 && corners && crease;
+	ok = qaws_mesh_3d_validate(out) == QAWS_STATUS_OK && t0.closed == t1.closed && t0.genus == t1.genus && foot <= TEST_BOUND(1e-9, 32) && corners && crease;
 	sprintf(why, "valid %d, closed %d genus %u (input %d, %u), footpoints %.1e, corners kept %d, crease vertices on creases %d",
 		qaws_mesh_3d_validate(out) == QAWS_STATUS_OK, t1.closed, t1.genus, t0.closed, t0.genus, foot, corners, crease);
 	free(x); free(y); free(xi); free(l); free(fe); free(fi); free(keys); free(onf); free(tv);

@@ -140,7 +140,7 @@ static void test_fields(void)
 	}
 	sprintf(msg, "cross fields: indices on an icosphere sum to %d quarter turns (4 chi = 8), on a torus to %d (0); unit %.2g, tangent %.2g",
 		ss, st, unit, tang);
-	TEST_ASSERT(ss == 8 && st == 0 && unit < 1e-9 && tang < 1e-9, msg);
+	TEST_ASSERT(ss == 8 && st == 0 && unit < TEST_BOUND(1e-9, 32) && tang < TEST_BOUND(1e-9, 32), msg);
 	free(is); free(it); free(dir); free(p);
 	qaws_mesh_3d_destroy(s);
 	qaws_mesh_3d_destroy(t);
@@ -304,7 +304,7 @@ static void test_can_and_cube(void)
 			free(v);
 		}
 		sprintf(msg, "cube with a linear attribute, all quads: %u quads, attribute error %.2g", qc ? rep.quality.quads : 0, ev);
-		TEST_ASSERT(st2 == QAWS_STATUS_OK && qc && ev < 1e-9, msg);
+		TEST_ASSERT(st2 == QAWS_STATUS_OK && qc && ev < TEST_BOUND(1e-9, 32), msg);
 	}
 done:
 	qaws_mesh_3d_destroy(can);

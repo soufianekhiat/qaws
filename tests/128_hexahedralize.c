@@ -125,13 +125,13 @@ static void test_box(void)
 		{
 			unsigned int on = 0, k;
 			for (k = 0; k < 3; k++)
-				on += fabs(fabs((double)x[3 * i + k]) - th_h[k]) < 1e-9;
+				on += fabs(fabs((double)x[3 * i + k]) - th_h[k]) < TEST_BOUND(1e-9, 32);
 			off += on == 0;
 		}
 		for (a = 0; a < 8; a++)
 			for (i = 0; i < nb; i++)
 				if (fabs((double)x[3 * i] - (a & 1 ? 1 : -1) * th_h[0]) + fabs((double)x[3 * i + 1] - (a & 2 ? 1 : -1) * th_h[1])
-					+ fabs((double)x[3 * i + 2] - (a & 4 ? 1 : -1) * th_h[2]) < 1e-9)
+					+ fabs((double)x[3 * i + 2] - (a & 4 ? 1 : -1) * th_h[2]) < TEST_BOUND(1e-9, 32))
 				{
 					corners++;
 					break;
@@ -140,7 +140,7 @@ static void test_box(void)
 			q.hexahedra, qaws_volume_mesh_get_cell_count(v), qaws_status_to_string(qaws_volume_mesh_validate(v)), (double)q.volume, (double)q.min_scaled_jacobian,
 			top.closed, top.genus, off, corners);
 		TEST_ASSERT(qaws_volume_mesh_validate(v) == QAWS_STATUS_OK && q.hexahedra == qaws_volume_mesh_get_cell_count(v) && q.hexahedra > 300
-			&& fabs((double)q.volume - 2.8) < 1e-9 && (double)q.min_scaled_jacobian > 0.3 && top.closed && top.genus == 0 && off == 0 && corners == 8, msg);
+			&& fabs((double)q.volume - 2.8) < TEST_BOUND(1e-9, 96) && (double)q.min_scaled_jacobian > 0.3 && top.closed && top.genus == 0 && off == 0 && corners == 8, msg);
 		free(x);
 		qaws_mesh_3d_destroy(b);
 	}
@@ -258,7 +258,7 @@ static void test_torus(void)
 				}
 			}
 			sprintf(msg, "torus frame field: %s, orthonormal to %.1e, %u border cells, an axis along the normal to %.1e", qaws_status_to_string(st), orth, nborder, along);
-			TEST_ASSERT(st == QAWS_STATUS_OK && orth < 1e-9 && nborder > 100 && along < 1e-9, msg);
+			TEST_ASSERT(st == QAWS_STATUS_OK && orth < TEST_BOUND(1e-9, 32) && nborder > 100 && along < TEST_BOUND(1e-9, 32), msg);
 			free(fr); free(x); free(cv); free(adj);
 		}
 		else
@@ -375,7 +375,7 @@ static void test_frame_field(void)
 		qaws_status_to_string(s1), q1.hexahedra, v1 ? qaws_status_to_string(qaws_volume_mesh_validate(v1)) : "-", (double)q1.min_scaled_jacobian,
 		(double)q1.volume, (double)q1.min_edge, (double)q1.max_edge);
 	TEST_ASSERT(s1 == QAWS_STATUS_OK && v1 && qaws_volume_mesh_validate(v1) == QAWS_STATUS_OK && q1.hexahedra == qaws_volume_mesh_get_cell_count(v1)
-		&& q1.hexahedra > 500 * pow(0.15 / c, 3) && (double)q1.min_scaled_jacobian > 0.99 && fabs((double)q1.volume - 2.8) < 1e-9 && (double)q1.min_edge > 0.8 * c
+		&& q1.hexahedra > 500 * pow(0.15 / c, 3) && (double)q1.min_scaled_jacobian > 0.99 && fabs((double)q1.volume - 2.8) < TEST_BOUND(1e-9, 96) && (double)q1.min_edge > 0.8 * c
 		&& (double)q1.max_edge < 1.2 * c, msg);
 	sprintf(msg, "bent bar along its field: %s, %u hexahedra, validate %s, scaled Jacobian from %.4f, volume %.5f for 3 pi / 4", qaws_status_to_string(s2),
 		q2.hexahedra, v2 ? qaws_status_to_string(qaws_volume_mesh_validate(v2)) : "-", (double)q2.min_scaled_jacobian, (double)q2.volume);

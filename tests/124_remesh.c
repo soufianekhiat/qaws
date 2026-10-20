@@ -237,8 +237,8 @@ static void test_cube(void)
 	}
 	sprintf(msg, "cube remeshed to 0.25: %u vertices, valid %d, on the cube %.2g, its corners kept %u, %u crease edges of total length %.12g (off the cube's edges %.0f), linear attribute %.2g, sides per corner %u, min angle %.3g",
 		nv, qaws_mesh_3d_validate(out) == QAWS_STATUS_OK, onc, corners, nfe, flen, fon, ev, ok_seam, (double)rep.quality.min_angle);
-	TEST_ASSERT(st == QAWS_STATUS_OK && qaws_mesh_3d_validate(out) == QAWS_STATUS_OK && onc < 1e-9 && corners && fabs(flen - 24) < 1e-9 && fon == 0
-		&& ev < 1e-9 && ok_seam && rep.quality.min_angle > 20, msg);
+	TEST_ASSERT(st == QAWS_STATUS_OK && qaws_mesh_3d_validate(out) == QAWS_STATUS_OK && onc < TEST_BOUND(1e-9, 32) && corners && fabs(flen - 24) < TEST_BOUND(1e-9, 32 * 24) && fon == 0
+		&& ev < TEST_BOUND(1e-9, 32) && ok_seam && rep.quality.min_angle > 20, msg);
 done:
 	qaws_mesh_3d_destroy(m);
 	qaws_mesh_3d_destroy(out);

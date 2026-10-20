@@ -533,8 +533,8 @@ static void test_pinned(void)
 	sprintf(msg, "pinned: quads %s, nearest vertex %.2g, corners %u of 4; LOCAL %s %.2g %u; CVT %s %.2g %u", qaws_status_to_string(sts[0]), worst[0],
 		corner[0], qaws_status_to_string(sts[1]), worst[1], corner[1], qaws_status_to_string(sts[2]), worst[2], corner[2]);
 	printf("  %s\n", msg);
-	TEST_ASSERT(sts[0] == QAWS_STATUS_OK && sts[1] == QAWS_STATUS_OK && sts[2] == QAWS_STATUS_OK && worst[0] < 1e-12 && worst[1] < 1e-12
-		&& worst[2] < 1e-12 && corner[0] == 4 && corner[1] == 4 && corner[2] == 4, msg);
+	TEST_ASSERT(sts[0] == QAWS_STATUS_OK && sts[1] == QAWS_STATUS_OK && sts[2] == QAWS_STATUS_OK && worst[0] < TEST_BOUND(1e-12, 32) && worst[1] < TEST_BOUND(1e-12, 32)
+		&& worst[2] < TEST_BOUND(1e-12, 32) && corner[0] == 4 && corner[1] == 4 && corner[2] == 4, msg);
 	free(x0);
 	qaws_mesh_3d_destroy(s);
 }
@@ -765,7 +765,7 @@ static void test_cones(void)
 		else
 			sprintf(msg, "cube-sphere %s: %s", j ? "GLOBAL" : "INSTANT", qaws_status_to_string(st));
 		printf("  %s\n", msg);
-		TEST_ASSERT(st == QAWS_STATUS_OK && n == 8 && worst < 1e-12 && at == 8 && corners == 0 && nonq == 0 && sj > 0.3, msg);
+		TEST_ASSERT(st == QAWS_STATUS_OK && n == 8 && worst < TEST_BOUND(1e-12, 32) && at == 8 && corners == 0 && nonq == 0 && sj > 0.3, msg);
 		gd_free(&a);
 		qaws_mesh_3d_destroy(q);
 	}
@@ -827,7 +827,7 @@ static void test_cones(void)
 			sprintf(msg, "square quads %s with the pair: %s, %u faces, %u irregular inside; cones: nearest vertex %.2g, valences %u and %u; map %u",
 				j ? "GLOBAL" : "INSTANT", qaws_status_to_string(st), a.nf, n, worst, val[0], val[1], (unsigned int)rep.iterations);
 			printf("  %s\n", msg);
-			TEST_ASSERT(st == QAWS_STATUS_OK && n == 2 && worst < 1e-12 && val[0] == 3 && val[1] == 5, msg);
+			TEST_ASSERT(st == QAWS_STATUS_OK && n == 2 && worst < TEST_BOUND(1e-12, 32) && val[0] == 3 && val[1] == 5, msg);
 			gd_free(&a);
 			qaws_mesh_3d_destroy(q);
 		}

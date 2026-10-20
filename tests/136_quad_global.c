@@ -447,7 +447,7 @@ static void test_shapes(void)
 		sprintf(msg, "%s at %.2f: by the map %u, valid %d, %u of %u quads, footpoints to %.1e, SJ min %.3f; irregular %u (INSTANT %u), "
 			"AD %.2f (INSTANT %.2f)", name[i], L[i], g[i].made, g[i].valid, g[i].quads, g[i].faces, g[i].foot, (double)g[i].s.min_jacobian,
 			g[i].s.irregular, q[i].s.irregular, (double)g[i].s.angle_deviation, (double)q[i].s.angle_deviation);
-		TEST_ASSERT(g[i].made == 1 && g[i].valid && g[i].quads == g[i].faces && g[i].foot < 1e-9 && g[i].s.min_jacobian > 0
+		TEST_ASSERT(g[i].made == 1 && g[i].valid && g[i].quads == g[i].faces && g[i].foot < TEST_BOUND(1e-9, 32) && g[i].s.min_jacobian > 0
 			&& g[i].s.irregular <= q[i].s.irregular && g[i].s.angle_deviation <= 1.02 * q[i].s.angle_deviation + 0.01, msg);
 	}
 	/* the shapes' own counts: the torus a grid, the box's faces grids (its corners regular by the feature-aware measure), the

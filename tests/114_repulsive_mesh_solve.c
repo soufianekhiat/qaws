@@ -543,8 +543,8 @@ static void test_obstacles(void)
 	si = s ? QAWS_STATUS_OK : qaws_repulsive_mesh_solver_create(&s, mS, x, &sd);
 	sprintf(msg, "obstacles: the mesh obstacle (2) %.12g against 2 x the cross terms %.12g, its gradient %.2g of %.3g; hierarchical (0.25) %.6g; the point cloud (3) %.12g against %.12g; drifting free, the sphere's centre x %.4f -> %.4f; refused: weight 0 (%d), an index out of range (%d)",
 		Eob, 2 * (EM - ES - EO), gerr, gmax, Ebh, Epc, Ebrute, cx0, cx1, (int)sw, (int)si);
-	TEST_ASSERT(st == QAWS_STATUS_OK && fabs(Eob - 2 * (EM - ES - EO)) <= 1e-10 * Eob && gerr <= 1e-9 * gmax && fabs(Ebh - Eob) <= 0.05 * Eob &&
-		fabs(Epc - Ebrute) <= 1e-10 * Ebrute && cx1 < cx0 - 1e-3 && sw == QAWS_STATUS_INVALID_ARGUMENT && si == QAWS_STATUS_INVALID_ARGUMENT && s == NULL, msg);
+	TEST_ASSERT(st == QAWS_STATUS_OK && fabs(Eob - 2 * (EM - ES - EO)) <= TEST_BOUND(1e-10, 64) * Eob && gerr <= TEST_BOUND(1e-9, 64) * gmax && fabs(Ebh - Eob) <= 0.05 * Eob &&
+		fabs(Epc - Ebrute) <= TEST_BOUND(1e-10, 64) * Ebrute && cx1 < cx0 - 1e-3 && sw == QAWS_STATUS_INVALID_ARGUMENT && si == QAWS_STATUS_INVALID_ARGUMENT && s == NULL, msg);
 	qaws_internal_obstacle_destroy(ob); qaws_internal_obstacle_destroy(pc);
 	qaws_repulsive_mesh_destroy(mS); qaws_repulsive_mesh_destroy(mM);
 }

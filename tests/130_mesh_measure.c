@@ -190,14 +190,14 @@ static void test_shapes(void)
 	qaws_mesh_3d_measure_shape(&s, NULL, b);
 	sprintf(msg, "30-60-90: Q %.15g (want %.15g), angles %.12g..%.12g, a share over 90 %g", (double)s.min_quality, (3 - s3) / 2,
 		(double)s.min_angle, (double)s.max_angle, (double)s.above_90);
-	TEST_ASSERT(fabs(s.min_quality - (3 - s3) / 2) < 1e-12 && fabs(s.min_angle - 30) < 1e-12 && fabs(s.max_angle - 90) < 1e-12, msg);
+	TEST_ASSERT(fabs(s.min_quality - (3 - s3) / 2) < TEST_BOUND(1e-12, 64) && fabs(s.min_angle - 30) < TEST_BOUND(1e-12, 64 * 90) && fabs(s.max_angle - 90) < TEST_BOUND(1e-12, 64 * 90), msg);
 	qaws_mesh_3d_measure_shape(&s, NULL, c);
 	sprintf(msg, "unit square: Jacobian %.15g / %.15g, AD %g, ED %g", (double)s.min_jacobian, (double)s.mean_jacobian, (double)s.angle_deviation,
 		(double)s.edge_deviation);
 	TEST_ASSERT(fabs(s.min_jacobian - 1) < 1e-12 && fabs(s.mean_jacobian - 1) < 1e-12 && fabs(s.angle_deviation) < 1e-12 && fabs(s.edge_deviation) < 1e-12, msg);
 	qaws_mesh_3d_measure_shape(&s, NULL, d);
 	sprintf(msg, "60-degree rhombus: Jacobian %.15g (want %.15g), AD %.15g", (double)s.min_jacobian, s3 / 2, (double)s.angle_deviation);
-	TEST_ASSERT(fabs(s.min_jacobian - s3 / 2) < 1e-12 && fabs(s.angle_deviation - 30) < 1e-12, msg);
+	TEST_ASSERT(fabs(s.min_jacobian - s3 / 2) < TEST_BOUND(1e-12, 64) && fabs(s.angle_deviation - 30) < TEST_BOUND(1e-12, 64 * 90), msg);
 	qaws_mesh_3d_destroy(a);
 	qaws_mesh_3d_destroy(b);
 	qaws_mesh_3d_destroy(c);
@@ -331,8 +331,8 @@ static void test_exact(void)
 	tol = 1e-4 * d.diagonal;
 	sprintf(msg, "a flat grid lifted by 0.01 against its LINEAR reference: to [%.12g, %.12g], from [%.12g, %.12g], converged %d", (double)d.to_reference[0],
 		(double)d.to_reference[1], (double)d.from_reference[0], (double)d.from_reference[1], d.converged);
-	TEST_ASSERT(st == QAWS_STATUS_OK && d.converged == 1 && d.to_reference[0] >= 0.01 - 1e-9 && d.to_reference[1] <= 0.01 + tol
-		&& d.from_reference[0] >= 0.01 - 1e-9 && d.from_reference[1] <= 0.01 + tol && fabs(d.rms - 0.01) < 1e-9, msg);
+	TEST_ASSERT(st == QAWS_STATUS_OK && d.converged == 1 && d.to_reference[0] >= 0.01 - TEST_BOUND(1e-9, 32) && d.to_reference[1] <= 0.01 + tol
+		&& d.from_reference[0] >= 0.01 - TEST_BOUND(1e-9, 32) && d.from_reference[1] <= 0.01 + tol && fabs(d.rms - 0.01) < TEST_BOUND(1e-9, 32), msg);
 	qaws_mesh_reference_destroy(r);
 	qaws_mesh_3d_destroy(flat);
 	qaws_mesh_3d_destroy(up);

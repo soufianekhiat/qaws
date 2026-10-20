@@ -255,7 +255,7 @@ static void test_gradation(void)
 	free(e);
 	sprintf(msg, "gradation 0.3 on a bumped sphere: growth past it along the edges %.2g; sizes %.3g on the bump, %.3g far from it, smallest %.3g",
 		worst, hbump, hfar, hmin);
-	TEST_ASSERT(worst < 1e-9 && hbump < 0.5 * hfar && hmin < hbump + 1e-12, msg);
+	TEST_ASSERT(worst < TEST_BOUND(1e-9, 32) && hbump < 0.5 * hfar && hmin < hbump + TEST_BOUND(1e-12, 32), msg);
 done:
 	qaws_size_field_destroy(f);
 	qaws_size_field_destroy(g);

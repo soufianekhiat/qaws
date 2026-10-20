@@ -54,6 +54,9 @@ static int g_fail = 0;
 /* the scalar's machine epsilon: bounds that come from rounding (host data converted to the scalar, sums of n terms) scale
    with it, bounds that come from truncation (difference steps, sampling) do not */
 #define TEST_EPS (sizeof(qaws_scalar) == sizeof(double) ? DBL_EPSILON : (double)FLT_EPSILON)
+/* a bound set for double that rounding sets in float: the double bound, at least n roundings of the scalar (n * TEST_EPS,
+   relative to the quantity's scale); double bounds are unchanged while n * DBL_EPSILON is below them */
+#define TEST_BOUND(bound, n) fmax((double)(bound), (double)(n) * TEST_EPS)
 
 static int approx_eq_loose(qaws_scalar a, qaws_scalar b)
 {

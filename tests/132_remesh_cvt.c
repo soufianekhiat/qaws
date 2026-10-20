@@ -305,8 +305,8 @@ static void test_cube(void)
 		nv, qaws_mesh_3d_validate(out) == QAWS_STATUS_OK, onc, corners, nfe, qaws_mesh_3d_get_feature_edge_count(loc), flen, fon, ev,
 		(double)rep.quality.min_angle, (double)rep.quality.max_angle);
 	printf("  %s\n", msg);
-	TEST_ASSERT(st == QAWS_STATUS_OK && ls == QAWS_STATUS_OK && qaws_mesh_3d_validate(out) == QAWS_STATUS_OK && onc < 1e-9 && corners >= 8
-		&& fabs(flen - 24) < 1e-9 && fon == 0 && nfe == 96 && ev < 1e-9 && rep.quality.min_angle >= 30, msg);
+	TEST_ASSERT(st == QAWS_STATUS_OK && ls == QAWS_STATUS_OK && qaws_mesh_3d_validate(out) == QAWS_STATUS_OK && onc < TEST_BOUND(1e-9, 32) && corners >= 8
+		&& fabs(flen - 24) < TEST_BOUND(1e-9, 32 * 24) && fon == 0 && nfe == 96 && ev < TEST_BOUND(1e-9, 32) && rep.quality.min_angle >= 30, msg);
 done:
 	qaws_mesh_3d_destroy(m);
 	qaws_mesh_3d_destroy(out);

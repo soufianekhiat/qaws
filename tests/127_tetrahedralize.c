@@ -179,7 +179,7 @@ static void tv_check(char const* name, qaws_mesh_3d const* surface, qaws_volume_
 		name, q.tetrahedra, qaws_status_to_string(qaws_volume_mesh_validate(v)), (double)q.volume, encl, qaws_mesh_3d_get_vertex_count(b),
 		qaws_mesh_3d_get_vertex_count(surface), top.closed, top.genus, (double)q.min_dihedral, (double)q.max_dihedral);
 	TEST_ASSERT(qaws_volume_mesh_validate(v) == QAWS_STATUS_OK && q.tetrahedra == qaws_volume_mesh_get_cell_count(v)
-		&& fabs((double)q.volume - encl) < 1e-10 * fabs(encl) && qaws_mesh_3d_get_vertex_count(b) >= qaws_mesh_3d_get_vertex_count(surface) && top.closed
+		&& fabs((double)q.volume - encl) < TEST_BOUND(1e-10, 64) * fabs(encl) && qaws_mesh_3d_get_vertex_count(b) >= qaws_mesh_3d_get_vertex_count(surface) && top.closed
 		&& top.genus == genus && (double)q.min_dihedral >= min_dihedral, msg);
 	qaws_mesh_3d_destroy(b);
 }
@@ -304,7 +304,7 @@ static void test_box(void)
 	if (st == QAWS_STATUS_OK)
 		st = qaws_volume_mesh_tetrahedralize(&v, NULL, s, &d);
 	tv_check("a box filled", s, v, st, 0, 5);
-	TEST_ASSERT(!v || fabs(tv_enclosed(s) - 2.8) < 1e-12, "a box filled: its surface encloses 2 x 1.4 x 1");
+	TEST_ASSERT(!v || fabs(tv_enclosed(s) - 2.8) < TEST_BOUND(1e-12, 96), "a box filled: its surface encloses 2 x 1.4 x 1");
 	qaws_volume_mesh_destroy(v);
 	qaws_mesh_3d_destroy(s);
 	qaws_shell_atlas_destroy(atlas);
