@@ -228,7 +228,7 @@ file(GLOB _QAWS_MESH_HEADERS "${_QAWS_SRC}/mesh/*.h")
 file(GLOB _QAWS_CORE_HEADERS "${_QAWS_SRC}/core/*.h")
 file(GLOB _QAWS_OTHER_HEADERS "${_QAWS_SRC}/exact/*.h" "${_QAWS_SRC}/simd/*.h")
 set(_QAWS_ONCE_HEADERS "${_QAWS_SRC}/qaws_status.h" "${_QAWS_SRC}/qaws_batch_executor.h" "${_QAWS_SRC}/qaws_allocator.h"
-  "${_QAWS_SRC}/internal/qaws_internal_memory.h")
+  "${_QAWS_SRC}/internal/qaws_internal_memory.h" "${_QAWS_SRC}/internal/qaws_internal_cpu.h")
 set(_QAWS_NAMED_HEADERS ${_QAWS_PUBLIC_HEADERS})
 list(REMOVE_ITEM _QAWS_NAMED_HEADERS ${_QAWS_ONCE_HEADERS})
 set(_QAWS_NAMED_INTERNAL_HEADERS ${_QAWS_INTERNAL_HEADERS})
