@@ -1045,7 +1045,7 @@ qaws_deform_desc d = { QAWS_DEFORM_ARAP };
 qaws_mesh_3d_deform(mesh, handles, targets, handle_count, &d);
 ```
 
-- **ARAP** (Sorkine and Alexa 2007): each vertex's ring turns as one; rotations (Müller et al.'s quaternion fit, robust on flat rings) and positions are found in turn on one factored system, started from the biharmonic solution, until no vertex moves by 1e-6 of the box's diagonal (200 rounds at most). Details turn with the shape: a bar's rings turn as it bends.
+- **ARAP** (Sorkine and Alexa 2007): each vertex's ring turns as one; rotations (Müller et al.'s quaternion fit, robust on flat rings) and positions are found in turn on one factored system, started from the biharmonic solution, until no vertex moves by 1e-6 of the box's diagonal (200 rounds at most); negative cotangent weights (stretched or obtuse triangles) are clamped at 0, where the rotation fit goes wrong. Details turn with the shape: a bar's rings turn as it bends, bumps on a lifted plate stay upright on it (0.9% edge-length change against 5.2% for Laplacian editing). A large turn given at once (half a turn of a bar's end) can settle in the pinched shape of its linear start: give it in steps.
 - **LAPLACIAN** (Sorkine et al. 2004): the rest's Laplacian coordinates kept; linear, details kept but not turned (the bar's rings shear).
 - **BIHARMONIC** (Botsch and Kobbelt 2004): the smoothest displacement; linear, the region bends like a thin plate.
 
@@ -1065,7 +1065,7 @@ The report gives the charts, the triangles turned over, the mean corner angle er
 - **Seams:** a closed sphere is refused, and cut from pole to pole gives one chart, nothing turned; two grids give two charts side by side.
 - **Refusals:** a seam that is not an edge; BFF.
 
-Figure 30 (key u) shows a bar bent by ARAP and by Laplacian editing, and a hill flattened by ARAP with its (u, v) grid and its layout.
+Figure 30 (key u) shows a bar bent by ARAP and by Laplacian editing, and a hill flattened by ARAP with its (u, v) grid and its layout. Figure 31 (key v) repeats the ARAP paper's own tests (its figures 2 and 6): a plate with 4 × 4 bumps held on one side and lifted on the other, and a square bar twisted a quarter turn, by ARAP, Laplacian editing and the biharmonic bend.
 
 ## Spatial queries: qaws_mesh_bvh
 

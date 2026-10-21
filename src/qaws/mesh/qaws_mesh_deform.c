@@ -105,7 +105,8 @@ qaws_status qaws_mesh_3d_deform(qaws_mesh_3d* mesh, unsigned int const* handles,
 		for (k = 0; k < 3; k++)
 			x[3 * (size_t)handles[i] + k] = (double)targets[3 * (size_t)i + k];
 	}
-	if (!sm_laplacian(&K, mass, x0, nv, t, nt, uniform, 0))
+	/* (ARAP's rotations fit badly on negative weights, from stretched or obtuse triangles: clamped at 0 there) */
+	if (!sm_laplacian(&K, mass, x0, nv, t, nt, uniform, method == QAWS_DEFORM_ARAP))
 		goto done;
 	if (method == QAWS_DEFORM_LAPLACIAN)
 	{

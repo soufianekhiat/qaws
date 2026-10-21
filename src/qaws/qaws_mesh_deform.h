@@ -25,7 +25,9 @@
  *                ring turns as one, the rotations and the positions found
  *                in turn (local-global); details turn with the shape.
  *                Started from the BIHARMONIC solution; large turns take
- *                tens of rounds.
+ *                tens of rounds, and one given at once (half a turn) can
+ *                settle in the pinched shape of that start: give it in
+ *                steps. Negative cotangent weights are clamped at 0.
  *   LAPLACIAN    the rest's Laplacian coordinates kept (Sorkine et al.
  *                2004): linear, details kept but not turned.
  *   BIHARMONIC   the displacement as smooth as possible (Botsch, Kobbelt
