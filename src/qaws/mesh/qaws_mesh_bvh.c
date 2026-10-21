@@ -11,6 +11,7 @@
 #include <string.h>
 #include <math.h>
 #include <stdint.h>
+#include <stddef.h>
 #include "../simd/qaws_simd.h"
 
 #if defined(__SSE2__) || defined(_M_X64) || defined(_M_AMD64) || defined(__AVX2__)
@@ -27,7 +28,7 @@ typedef struct bv_node
 {
 	double lo[3], hi[3];
 	unsigned int a, b;   /* interior: the children; leaf: the first entry of ord and the count */
-	unsigned int leaf, first, cnt;   /* (first, cnt: its entries, contiguous in ord) */
+	unsigned int leaf, first, cnt, lf;   /* (first, cnt: its entries, contiguous in ord; lf: a leaf in the 4-wide tree) */
 } bv_node;
 
 /* Queries run on 4-wide nodes collapsed from the binary SAH tree: per slot a float box relative to the scene's centre,
@@ -643,6 +644,30 @@ static qaws_status bv_collapse(qaws_mesh_bvh* b)
 	b->depth = 0;
 	if (!b->nn)
 		return QAWS_STATUS_OK;
+	/* the leaves: a subtree of at most leaf simplices becomes one where its surface area costs no more than its split
+	   (a leaf screened 4 simplices at a time: its area per 4; a split: half its area for the node, plus its children) */
+	{
+		double* cost = (double*)qaws_internal_scratch_malloc(qaws_internal_mul2(b->nn, sizeof(double)));
+		if (!cost)
+			return QAWS_STATUS_ALLOCATION_FAILURE;
+		for (i = b->nn; i-- > 0;)
+		{
+			bv_node* nd = b->nodes + i;
+			double A = bv_area(nd->lo, nd->hi, b->dim), as_leaf = A * ((nd->cnt + 3) / 4);
+			if (nd->leaf)
+			{
+				nd->lf = 1;
+				cost[i] = as_leaf;
+			}
+			else
+			{
+				double split = 0.5 * A + cost[nd->a] + cost[nd->b];
+				nd->lf = nd->cnt <= b->leaf && as_leaf <= split;
+				cost[i] = nd->lf ? as_leaf : split;
+			}
+		}
+		qaws_internal_free(cost);
+	}
 	/* the nodes on cache lines (two each) */
 	b->nodes4_mem = qaws_internal_malloc(qaws_internal_add2(qaws_internal_mul2((size_t)b->nn + 1, sizeof(bv_node4)), 64));
 	b->nodes4 = b->nodes4_mem ? (bv_node4*)(((uintptr_t)b->nodes4_mem + 63) & ~(uintptr_t)63) : NULL;
@@ -679,7 +704,7 @@ static qaws_status bv_collapse(qaws_mesh_bvh* b)
 		bv_node4* n = b->nodes4 + n4;
 		if (depth > b->depth)
 			b->depth = depth;
-		if (b->nodes[bin].cnt <= b->leaf)
+		if (b->nodes[bin].lf)
 			list[cnt++] = bin;
 		else
 		{
@@ -691,7 +716,7 @@ static qaws_status bv_collapse(qaws_mesh_bvh* b)
 			unsigned int best = 4;
 			double ba = -1;
 			for (s = 0; s < cnt; s++)
-				if (b->nodes[list[s]].cnt > b->leaf && bv_area(b->nodes[list[s]].lo, b->nodes[list[s]].hi, 3) > ba)
+				if (!b->nodes[list[s]].lf && bv_area(b->nodes[list[s]].lo, b->nodes[list[s]].hi, 3) > ba)
 				{
 					ba = bv_area(b->nodes[list[s]].lo, b->nodes[list[s]].hi, 3);
 					best = s;
@@ -712,7 +737,7 @@ static qaws_status bv_collapse(qaws_mesh_bvh* b)
 			}
 			c = b->nodes + list[s];
 			bv_slot_set(b, n, s, c->lo, c->hi);
-			if (c->cnt <= b->leaf)
+			if (c->lf)
 			{
 				n->child[s] = c->first;
 				n->count[s] = c->cnt;
@@ -745,19 +770,6 @@ static void bv_pack_moment(qaws_mesh_bvh const* b, double const* m, float* p)
 		for (j = 0; j < 3; j++)
 			for (k = j; k < 3; k++)
 				p[n++] = (float)m[17 + 9 * i + 3 * j + k];
-}
-
-static void bv_unpack_moment(qaws_mesh_bvh const* b, float const* p, double* m)
-{
-	unsigned int i, j, k, n = 16;
-	for (i = 0; i < 3; i++)
-		m[i] = (double)p[i] + b->c[i];
-	for (i = 3; i < 16; i++)
-		m[i] = p[i];
-	for (i = 0; i < 3; i++)
-		for (j = 0; j < 3; j++)
-			for (k = j; k < 3; k++)
-				m[17 + 9 * i + 3 * j + k] = m[17 + 9 * i + 3 * k + j] = p[n++];
 }
 
 /* the leaf-ordered positions, then the boxes (and moments) from the leaves up */
@@ -878,7 +890,7 @@ static qaws_status bv_make(qaws_mesh_bvh** out, double* x, unsigned int nv, unsi
 	b->ns = ns;
 	b->beta = beta;
 	b->leaf = leaf;
-	st = bv_build(b, leaf);
+	st = bv_build(b, 1);   /* (to single simplices: the collapse forms the leaves by cost) */
 	if (st == QAWS_STATUS_OK)
 		st = bv_collapse(b);
 	if (st == QAWS_STATUS_OK && bv_winds(b) && b->n4)
@@ -1381,20 +1393,28 @@ static void bv_slots_d2(bv_node4 const* n, float const* q, float* out)
 #endif
 }
 
-/* a node's 4 slots against a ray: the entry distances into tn and the hit slots as a mask; near and far planes picked by the
-   direction's signs (nf: per axis 0 when it is positive), so no min or max per axis. Same arithmetic with or without SSE. */
-static unsigned int bv_slots_ray(bv_node4 const* n, float const* o, float const* id, unsigned int const* nf, float tmax, float* tn)
+/* a ray as the node tests read it: origin (relative to the centre) and inverse direction, broadcast once, and the byte
+   offsets of each axis' near and far planes in a node (picked by the direction's signs, so no min or max per axis) */
+typedef struct bv_rq
 {
+#if BV_SSE
+	__m128 o4[3], i4[3];
+#endif
+	float o[3], id[3];
+	size_t nr[3], fr[3];
+} bv_rq;
+
+/* a node's 4 slots against a ray: the entry distances into tn and the hit slots as a mask. Same arithmetic with or without SSE. */
+static unsigned int bv_slots_ray(bv_node4 const* n, bv_rq const* q, float tmax, float* tn)
+{
+	char const* p = (char const*)n;
 #if BV_SSE
 	__m128 t0 = _mm_setzero_ps(), t1 = _mm_set1_ps(tmax);
 	unsigned int a;
 	for (a = 0; a < 3; a++)
 	{
-		float const* nr = nf[a] ? n->hi[a] : n->lo[a];
-		float const* fr = nf[a] ? n->lo[a] : n->hi[a];
-		__m128 oa = _mm_set1_ps(o[a]), ia = _mm_set1_ps(id[a]);
-		t0 = _mm_max_ps(t0, _mm_mul_ps(_mm_sub_ps(_mm_loadu_ps(nr), oa), ia));
-		t1 = _mm_min_ps(t1, _mm_mul_ps(_mm_sub_ps(_mm_loadu_ps(fr), oa), ia));
+		t0 = _mm_max_ps(t0, _mm_mul_ps(_mm_sub_ps(_mm_load_ps((float const*)(p + q->nr[a])), q->o4[a]), q->i4[a]));
+		t1 = _mm_min_ps(t1, _mm_mul_ps(_mm_sub_ps(_mm_load_ps((float const*)(p + q->fr[a])), q->o4[a]), q->i4[a]));
 	}
 	_mm_storeu_ps(tn, t0);
 	return (unsigned int)_mm_movemask_ps(_mm_cmple_ps(t0, t1));
@@ -1405,7 +1425,7 @@ static unsigned int bv_slots_ray(bv_node4 const* n, float const* o, float const*
 		float t0 = 0, t1 = tmax;
 		for (a = 0; a < 3; a++)
 		{
-			float tl = ((nf[a] ? n->hi[a][s] : n->lo[a][s]) - o[a]) * id[a], th = ((nf[a] ? n->lo[a][s] : n->hi[a][s]) - o[a]) * id[a];
+			float tl = (((float const*)(p + q->nr[a]))[s] - q->o[a]) * q->id[a], th = (((float const*)(p + q->fr[a]))[s] - q->o[a]) * q->id[a];
 			t0 = t0 > tl ? t0 : tl;
 			t1 = t1 < th ? t1 : th;
 		}
@@ -1413,6 +1433,16 @@ static unsigned int bv_slots_ray(bv_node4 const* n, float const* o, float const*
 		m |= (unsigned int)(t0 <= t1) << s;
 	}
 	return m;
+#endif
+}
+
+/* a node's leaf slots as a mask */
+static unsigned int bv_leaves(bv_node4 const* n)
+{
+#if BV_SSE
+	return (unsigned int)_mm_movemask_ps(_mm_castsi128_ps(_mm_cmpgt_epi32(_mm_load_si128((__m128i const*)n->count), _mm_setzero_si128())));
+#else
+	return (n->count[0] != 0) | (n->count[1] != 0) << 1 | (n->count[2] != 0) << 2 | (n->count[3] != 0) << 3;
 #endif
 }
 
@@ -1629,14 +1659,20 @@ static unsigned int bv_ray_one(qaws_mesh_bvh const* b, double const* o, double c
 	bv_stk* stk)
 {
 	double sh[3] = { 0, 0, 0 };
-	unsigned int ax[3] = { 0, 1, 2 }, nf[3], top = 0, found = QAWS_MESH_NONE, i, cand = 0, node = 0;
-	float of[3], id[3], df[3], tf;
+	unsigned int ax[3] = { 0, 1, 2 }, top = 0, found = QAWS_MESH_NONE, i, cand = 0, node = 0;
+	float of[3], df[3], tf;
+	bv_rq q;
 	for (i = 0; i < 3; i++)
 	{
-		of[i] = (float)(o[i] - b->c[i]);
+		of[i] = q.o[i] = (float)(o[i] - b->c[i]);
 		df[i] = (float)d[i];
-		id[i] = d[i] != 0 ? (float)(1 / d[i]) : 1e38f;
-		nf[i] = id[i] < 0;
+		q.id[i] = d[i] != 0 ? (float)(1 / d[i]) : 1e38f;
+		q.nr[i] = q.id[i] < 0 ? offsetof(bv_node4, hi) + 16 * i : offsetof(bv_node4, lo) + 16 * i;
+		q.fr[i] = q.id[i] < 0 ? offsetof(bv_node4, lo) + 16 * i : offsetof(bv_node4, hi) + 16 * i;
+#if BV_SSE
+		q.o4[i] = _mm_set1_ps(q.o[i]);
+		q.i4[i] = _mm_set1_ps(q.id[i]);
+#endif
 	}
 	if (b->k == 3)
 	{
@@ -1663,9 +1699,9 @@ static unsigned int bv_ray_one(qaws_mesh_bvh const* b, double const* o, double c
 	{
 		bv_node4 const* n = b->nodes4 + node;
 		float tn[4], near = HUGE_VALF;
-		unsigned int m = bv_slots_ray(n, of, id, nf, tf, tn), s, next = QAWS_MESH_NONE;
+		unsigned int m = bv_slots_ray(n, &q, tf, tn), s, next = QAWS_MESH_NONE;
 		/* the leaves now, nearest first (any hit: in slot order) */
-		unsigned int lm = m & ((n->count[0] != 0) | (n->count[1] != 0) << 1 | (n->count[2] != 0) << 2 | (n->count[3] != 0) << 3), im = m & ~lm;
+		unsigned int lm = m & bv_leaves(n), im = m & ~lm;
 		while (lm)
 		{
 			unsigned int sl = bv_low[lm], c;
@@ -1704,6 +1740,11 @@ static unsigned int bv_ray_one(qaws_mesh_bvh const* b, double const* o, double c
 			s = bv_low[im];
 			if (tn[s] > tf)
 				continue;
+#if BV_SSE
+			/* (the child on its way while this node's others are sorted out) */
+			_mm_prefetch((char const*)(b->nodes4 + n->child[s]), _MM_HINT_T0);
+			_mm_prefetch((char const*)(b->nodes4 + n->child[s]) + 64, _MM_HINT_T0);
+#endif
 			if (tn[s] < near)
 			{
 				if (next != QAWS_MESH_NONE)
@@ -1756,19 +1797,14 @@ static double bv_entry_winding(qaws_mesh_bvh const* b, unsigned int e, double co
 	return atan2(A[0] * B[1] - A[1] * B[0], A[0] * B[0] + A[1] * B[1]) / (2 * BV_PI);
 }
 
-/* the expansion of moments m at q when q is far from them (beyond beta times their radius): adds it to *w and returns 1 */
-static int bv_far(qaws_mesh_bvh const* b, double const* m, double const* q, double* w)
+/* the expansion to second order at r = centre - q (R2 = |r|^2): g . N + J : C + H : T / 2, g(r) = r / (4 pi R^3) (2D: r / (2 pi R^2)),
+   J_ij = a1 d_ij + a2 r_i r_j and H_ijk = a2 (d_ij r_k + d_ik r_j + d_jk r_i) + a3 r_i r_j r_k contracted in closed form;
+   Ts: T's 6 entries (j <= k) per i */
+static double bv_expand(unsigned int dim, double const* rv, double R2, double const* N, double const* C, double const* Ts)
 {
-	double rv[3], R2, R, g, a1, a2, a3, t = 0, h = 0;
-	unsigned int r, c, k3;
-	bv_sub(m, q, rv);
-	R2 = bv_dot(rv, rv);
-	R = sqrt(R2);
-	if (!(R > b->beta * m[15]))
-		return 0;
-	/* the expansion to second order: g . N + J : C + H : T / 2, g(r) = r / (4 pi R^3) (2D: r / (2 pi R^2)),
-	   J and H its first and second derivatives */
-	if (b->dim == 3)
+	double R = sqrt(R2), g, a1, a2, a3, rCr = 0, trC = C[0] + C[4] + C[8], diag = 0, rtr = 0, rTr = 0;
+	unsigned int i, j;
+	if (dim == 3)
 	{
 		double R3 = R2 * R, R5 = R3 * R2, R7 = R5 * R2;
 		g = 1 / (4 * BV_PI * R3);
@@ -1784,16 +1820,55 @@ static int bv_far(qaws_mesh_bvh const* b, double const* m, double const* q, doub
 		a2 = -2 / R4 / (2 * BV_PI);
 		a3 = 8 / R6 / (2 * BV_PI);
 	}
-	/* J_ij = a1 d_ij + a2 r_i r_j; H_ijk = a2 (d_ij r_k + d_ik r_j + d_jk r_i) + a3 r_i r_j r_k */
-	for (r = 0; r < 3; r++)
-		for (c = 0; c < 3; c++)
-		{
-			t += ((r == c ? a1 : 0) + a2 * rv[r] * rv[c]) * m[6 + 3 * r + c];
-			for (k3 = 0; k3 < 3; k3++)
-				h += (a2 * ((r == c ? rv[k3] : 0) + (r == k3 ? rv[c] : 0) + (c == k3 ? rv[r] : 0)) + a3 * rv[r] * rv[c] * rv[k3])
-					* m[17 + 9 * r + 3 * c + k3];
-		}
-	*w += g * bv_dot(rv, m + 3) + t + 0.5 * h;
+	for (i = 0; i < 3; i++)
+		for (j = 0; j < 3; j++)
+			rCr += rv[i] * C[3 * i + j] * rv[j];
+	for (i = 0; i < 3; i++)
+	{
+		double const* t = Ts + 6 * i;   /* (00, 01, 02, 11, 12, 22) */
+		double u0 = t[0] * rv[0] + t[1] * rv[1] + t[2] * rv[2], u1 = t[1] * rv[0] + t[3] * rv[1] + t[4] * rv[2],
+			u2 = t[2] * rv[0] + t[4] * rv[1] + t[5] * rv[2], u[3] = { u0, u1, u2 };
+		diag += u[i];
+		rtr += rv[i] * (t[0] + t[3] + t[5]);
+		rTr += rv[i] * (rv[0] * u0 + rv[1] * u1 + rv[2] * u2);
+	}
+	return g * bv_dot(rv, N) + (a1 * trC + a2 * rCr) + 0.5 * (a2 * (2 * diag + rtr) + a3 * rTr);
+}
+
+/* node moments m (BV_WM, T whole) at q: when q is far (beyond beta times the radius), adds the expansion to *w and returns 1 */
+static int bv_far(qaws_mesh_bvh const* b, double const* m, double const* q, double* w)
+{
+	double rv[3], R2, Ts[18];
+	unsigned int i, j, k, n = 0;
+	bv_sub(m, q, rv);
+	R2 = bv_dot(rv, rv);
+	if (!(R2 > b->beta * b->beta * m[15] * m[15]))
+		return 0;
+	for (i = 0; i < 3; i++)
+		for (j = 0; j < 3; j++)
+			for (k = j; k < 3; k++)
+				Ts[n++] = m[17 + 9 * i + 3 * j + k];
+	*w += bv_expand(b->dim, rv, R2, m + 3, m + 6, Ts);
+	return 1;
+}
+
+/* the same on a leaf slot's packed moments (BV_LM floats) */
+static int bv_far_leaf(qaws_mesh_bvh const* b, float const* p, double const* q, double* w)
+{
+	double rv[3], R2, N[3], C[9], Ts[18];
+	unsigned int i;
+	for (i = 0; i < 3; i++)
+		rv[i] = ((double)p[i] + b->c[i]) - q[i];
+	R2 = bv_dot(rv, rv);
+	if (!(R2 > b->beta * b->beta * (double)p[15] * (double)p[15]))
+		return 0;
+	for (i = 0; i < 3; i++)
+		N[i] = p[3 + i];
+	for (i = 0; i < 9; i++)
+		C[i] = p[6 + i];
+	for (i = 0; i < 18; i++)
+		Ts[i] = p[16 + i];
+	*w += bv_expand(b->dim, rv, R2, N, C, Ts);
 	return 1;
 }
 
@@ -1816,9 +1891,7 @@ static double bv_winding_one(qaws_mesh_bvh const* b, double const* q, bv_stk* st
 				continue;
 			if (n->count[s])
 			{
-				double m[BV_WM];
-				bv_unpack_moment(b, b->lm + BV_LM * (4 * (size_t)id + s), m);
-				if (!bv_far(b, m, q, &w))
+				if (!bv_far_leaf(b, b->lm + BV_LM * (4 * (size_t)id + s), q, &w))
 					for (i = 0; i < n->count[s]; i++)
 						w += bv_entry_winding(b, n->child[s] + i, q);
 			}
