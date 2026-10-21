@@ -349,6 +349,21 @@ static unsigned int sx_cut(sx_ctx* c, unsigned int f, unsigned int g)
 	return id;
 }
 
+/* edge a b through the plane of face f (p kept when the edge is parallel to it) */
+static void sx_lpi_pos(sx_ctx const* c, unsigned int ia, unsigned int ib, unsigned int f, double* p)
+{
+	double const *a = c->X + 3 * (size_t)ia, *b = c->X + 3 * (size_t)ib;
+	sx_face const* F = c->F + f;
+	double da = sx_dot(F->n, a) - F->d, db = sx_dot(F->n, b) - F->d;
+	if (fabs(da - db) > 0)
+	{
+		double t = fmin(fmax(da / (da - db), 0.0), 1.0);
+		p[0] = a[0] + t * (b[0] - a[0]);
+		p[1] = a[1] + t * (b[1] - a[1]);
+		p[2] = a[2] + t * (b[2] - a[2]);
+	}
+}
+
 /* the point keyed by k: computed once (canonically from the key), else the fallback position */
 static unsigned int sx_keyed(sx_ctx* c, unsigned int const* k, double const* fallback)
 {
@@ -361,19 +376,7 @@ static unsigned int sx_keyed(sx_ctx* c, unsigned int const* k, double const* fal
 		return s->id;
 	memcpy(p, fallback, sizeof p);
 	if (k[0] == SX_LPI)
-	{
-		/* edge k1 k2 through the plane of face k3 */
-		double const *a = c->X + 3 * (size_t)k[1], *b = c->X + 3 * (size_t)k[2];
-		sx_face const* F = c->F + k[3];
-		double da = sx_dot(F->n, a) - F->d, db = sx_dot(F->n, b) - F->d;
-		if (fabs(da - db) > 0)
-		{
-			double t = fmin(fmax(da / (da - db), 0.0), 1.0);
-			p[0] = a[0] + t * (b[0] - a[0]);
-			p[1] = a[1] + t * (b[1] - a[1]);
-			p[2] = a[2] + t * (b[2] - a[2]);
-		}
-	}
+		sx_lpi_pos(c, k[1], k[2], k[3], p);
 	else if (k[0] == SX_TPI)
 	{
 		sx_face const *A = c->F + k[1], *B = c->F + k[2], *C = c->F + k[3];
@@ -477,18 +480,79 @@ static void sx_add_cut(sx_ctx* c, unsigned int f, unsigned int k, unsigned int p
 	sx_queue(c, f);
 }
 
-/* where face g's boundary meets the plane of face f (signs of g's corners s): up to two points */
-static unsigned int sx_section(sx_ctx* c, unsigned int g, unsigned int f, int const* s, unsigned int* out)
+/* a point where a face's boundary meets another's plane, not made yet: a corner, or an edge through the plane */
+typedef struct sx_cand
+{
+	unsigned int vertex, edge, face;   /* vertex SX_NONE: edge (a carrier) through face's plane */
+	double x[3];
+	double s;                          /* along the two planes' line */
+} sx_cand;
+
+/* where face g's boundary meets the plane of face f (signs of g's corners s): up to two candidates; nothing is
+   made until the pair is known to meet (an edge through the plane beside the other face is no point) */
+static unsigned int sx_section(sx_ctx const* c, unsigned int g, unsigned int f, int const* s, sx_cand* out)
 {
 	sx_face const* G = c->F + g;
 	unsigned int n = 0, k;
 	for (k = 0; k < 3; k++)
 		if (!s[k] && n < 2)
-			out[n++] = G->c[k];
+		{
+			out[n].vertex = G->c[k];
+			out[n].edge = SX_NONE;
+			memcpy(out[n].x, c->X + 3 * (size_t)G->c[k], sizeof out[n].x);
+			n++;
+		}
 	for (k = 0; k < 3; k++)
 		if (s[k] * s[(k + 1) % 3] < 0 && n < 2)
-			out[n++] = sx_lpi(c, G->e[k], f);
+		{
+			sx_carrier const* E = c->car + G->e[k];
+			out[n].vertex = SX_NONE;
+			out[n].edge = G->e[k];
+			out[n].face = f;
+			sx_lpi_pos(c, E->a, E->b, f, out[n].x);
+			n++;
+		}
 	return n;
+}
+
+static unsigned int sx_make(sx_ctx* c, sx_cand const* a)
+{
+	return a->vertex != SX_NONE ? a->vertex : sx_lpi(c, a->edge, a->face);
+}
+
+/* coplanar faces f and g kept apart by a line through an edge of either, within the tolerance (their interiors overlap
+   by less than it: neighbours touching at a corner or along an edge are not cut) */
+static int sx_separated(sx_ctx const* c, unsigned int f, unsigned int g)
+{
+	sx_face const* T[2] = { c->F + f, c->F + g };
+	double const* n = T[0]->n;
+	unsigned int ax = fabs(n[0]) > fabs(n[1]) ? (fabs(n[0]) > fabs(n[2]) ? 0 : 2) : (fabs(n[1]) > fabs(n[2]) ? 1 : 2);
+	unsigned int x = ax == 0 ? 1 : 0, y = ax == 2 ? 1 : 2, s, j, k;
+	for (s = 0; s < 2; s++)
+	{
+		sx_face const *A = T[s], *B = T[1 - s];
+		double a2[3][2], o;
+		for (k = 0; k < 3; k++)
+		{
+			a2[k][0] = c->X[3 * (size_t)A->c[k] + x];
+			a2[k][1] = c->X[3 * (size_t)A->c[k] + y];
+		}
+		o = (a2[1][0] - a2[0][0]) * (a2[2][1] - a2[0][1]) - (a2[1][1] - a2[0][1]) * (a2[2][0] - a2[0][0]) > 0 ? 1 : -1;
+		for (j = 0; j < 3; j++)
+		{
+			double const *u = a2[j], *v = a2[(j + 1) % 3];
+			double ex = v[0] - u[0], ey = v[1] - u[1], el = sqrt(ex * ex + ey * ey);
+			int out = el > 0;
+			for (k = 0; k < 3 && out; k++)
+			{
+				double const* q = c->X + 3 * (size_t)B->c[k];
+				out = o * (ex * (q[y] - u[1]) - ey * (q[x] - u[0])) / el <= c->eps;
+			}
+			if (out)
+				return 1;
+		}
+	}
+	return 0;
 }
 
 /* the edges of face g clipped to face f, in their common plane: cuts of f */
@@ -636,6 +700,8 @@ static qaws_status sx_pair(void* user, unsigned int f, unsigned int g)
 			if (s0 * s1 <= 0)
 				return QAWS_STATUS_OK;
 		}
+		if (sx_separated(c, f, g))
+			return QAWS_STATUS_OK;
 		hit = sx_coplanar(c, f, g);
 		hit |= sx_coplanar(c, g, f);
 		if (hit)
@@ -648,12 +714,11 @@ static qaws_status sx_pair(void* user, unsigned int f, unsigned int g)
 	if (shared == 2)
 		return QAWS_STATUS_OK;   /* two planes through a shared edge meet only along it */
 	{
-		unsigned int ia[2], ib[2], n0, n1, P, Q;
-		double dir[3], l, s[4], sP, sQ;
+		sx_cand ia[2], ib[2], t;
+		unsigned int n0, n1, P, Q;
+		double dir[3], l, sP, sQ;
 		n0 = sx_section(c, f, g, sa, ia);
 		n1 = sx_section(c, g, f, sb, ib);
-		if (c->oom)
-			return QAWS_STATUS_ALLOCATION_FAILURE;
 		if (!n0 || !n1)
 			return QAWS_STATUS_OK;
 		if (n0 == 1)
@@ -664,34 +729,32 @@ static qaws_status sx_pair(void* user, unsigned int f, unsigned int g)
 		l = sqrt(sx_dot(dir, dir));
 		if (!(l > 0))
 			return QAWS_STATUS_OK;
-		s[0] = sx_dot(c->X + 3 * (size_t)ia[0], dir) / l;
-		s[1] = sx_dot(c->X + 3 * (size_t)ia[1], dir) / l;
-		s[2] = sx_dot(c->X + 3 * (size_t)ib[0], dir) / l;
-		s[3] = sx_dot(c->X + 3 * (size_t)ib[1], dir) / l;
-		if (s[0] > s[1])
+		for (i = 0; i < 2; i++)
 		{
-			unsigned int t = ia[0];
-			double u = s[0];
+			ia[i].s = sx_dot(ia[i].x, dir) / l;
+			ib[i].s = sx_dot(ib[i].x, dir) / l;
+		}
+		if (ia[0].s > ia[1].s)
+		{
+			t = ia[0];
 			ia[0] = ia[1];
 			ia[1] = t;
-			s[0] = s[1];
-			s[1] = u;
 		}
-		if (s[2] > s[3])
+		if (ib[0].s > ib[1].s)
 		{
-			unsigned int t = ib[0];
-			double u = s[2];
+			t = ib[0];
 			ib[0] = ib[1];
 			ib[1] = t;
-			s[2] = s[3];
-			s[3] = u;
 		}
-		P = s[0] >= s[2] ? ia[0] : ib[0];
-		sP = fmax(s[0], s[2]);
-		Q = s[1] <= s[3] ? ia[1] : ib[1];
-		sQ = fmin(s[1], s[3]);
+		sP = fmax(ia[0].s, ib[0].s);
+		sQ = fmin(ia[1].s, ib[1].s);
 		if (sP > sQ + c->eps)
 			return QAWS_STATUS_OK;
+		/* they meet: only now the two ends are made */
+		P = sx_make(c, ia[0].s >= ib[0].s ? ia : ib);
+		Q = sx_make(c, ia[1].s <= ib[1].s ? ia + 1 : ib + 1);
+		if (c->oom)
+			return QAWS_STATUS_ALLOCATION_FAILURE;
 		if (P == Q || sQ - sP <= c->eps)
 		{
 			/* touching at a point (a shared corner touching is no meeting) */
@@ -1738,6 +1801,193 @@ static int sx_closed(unsigned int const* t, unsigned int nt)
 	return closed;
 }
 
+/* an edge set (open addressing; 0 empty, ~0 removed) */
+static unsigned long long* sx_eset_slot(unsigned long long* s, unsigned int cap, unsigned long long k, int insert)
+{
+	unsigned int h = (unsigned int)((k * 0x9E3779B97F4A7C15ull) >> 32) & (cap - 1);
+	unsigned long long* tomb = NULL;
+	while (s[h])
+	{
+		if (s[h] == k)
+			return s + h;
+		if (s[h] == ~0ull && !tomb)
+			tomb = s + h;
+		h = (h + 1) & (cap - 1);
+	}
+	return insert ? (tomb ? tomb : s + h) : NULL;
+}
+
+static unsigned long long sx_ekey(unsigned int p, unsigned int q)
+{
+	return p < q ? ((unsigned long long)p << 32 | q) + 1 : ((unsigned long long)q << 32 | p) + 1;
+}
+
+static double sx_angle(double const* o, double const* p, double const* q)
+{
+	double u[3] = { p[0] - o[0], p[1] - o[1], p[2] - o[2] }, v[3] = { q[0] - o[0], q[1] - o[1], q[2] - o[2] }, w[3];
+	sx_cross(u, v, w);
+	return atan2(sqrt(sx_dot(w, w)), sx_dot(u, v));
+}
+
+/* triangle corner positions as doubles */
+static void sx_tri_x(qaws_scalar const* pos, unsigned int const* t, unsigned int f, double (*P)[3])
+{
+	unsigned int k, j;
+	for (k = 0; k < 3; k++)
+		for (j = 0; j < 3; j++)
+			P[k][j] = (double)pos[3 * (size_t)t[3 * (size_t)f + k] + j];
+}
+
+/* edge e = 3 f + i (f's corners a b c, the neighbour's d) worth turning: both faces in one plane, the quad convex, the
+   opposite angles over pi, both faces of one operand, the edge c d new */
+static int sx_flat_flip_ok(unsigned int const* t, qaws_scalar const* src, unsigned int const* nb, qaws_scalar const* pos, unsigned int e, double eps,
+	unsigned int split, unsigned long long* set, unsigned int cap)
+{
+	unsigned int f = e / 3, i = e % 3, g, j;
+	double P[3][3], Q[3][3], n1[3], n2[3], u[3], v[3], l, a[3], b[3], c[3], d[3], s1, s2, w[3];
+	unsigned int k;
+	if (nb[e] == SX_NONE)
+		return 0;
+	g = nb[e] / 3;
+	j = nb[e] % 3;
+	if (((unsigned int)src[f] < split) != ((unsigned int)src[g] < split))
+		return 0;
+	sx_tri_x(pos, t, f, P);
+	sx_tri_x(pos, t, g, Q);
+	for (k = 0; k < 3; k++)
+	{
+		a[k] = P[i][k];
+		b[k] = P[(i + 1) % 3][k];
+		c[k] = P[(i + 2) % 3][k];
+		d[k] = Q[(j + 2) % 3][k];
+		u[k] = P[1][k] - P[0][k];
+		v[k] = P[2][k] - P[0][k];
+	}
+	sx_cross(u, v, n1);
+	l = sqrt(sx_dot(n1, n1));
+	if (!(l > 0))
+		return 0;
+	for (k = 0; k < 3; k++)
+	{
+		n1[k] /= l;
+		u[k] = Q[1][k] - Q[0][k];
+		v[k] = Q[2][k] - Q[0][k];
+		w[k] = d[k] - a[k];
+	}
+	sx_cross(u, v, n2);
+	if (sx_dot(n1, n2) <= 0 || fabs(sx_dot(n1, w)) > eps)
+		return 0;
+	/* convex: c d separates a and b */
+	for (k = 0; k < 3; k++)
+	{
+		u[k] = d[k] - c[k];
+		v[k] = a[k] - c[k];
+	}
+	sx_cross(u, v, w);
+	s1 = sx_dot(n1, w);
+	for (k = 0; k < 3; k++)
+		v[k] = b[k] - c[k];
+	sx_cross(u, v, w);
+	s2 = sx_dot(n1, w);
+	if (!(s1 * s2 < 0) || fabs(s1) <= eps * sqrt(sx_dot(u, u)) || fabs(s2) <= eps * sqrt(sx_dot(u, u)))
+		return 0;
+	if (sx_angle(c, a, b) + sx_angle(d, a, b) <= 3.14159265358979323846 + 1e-9)
+		return 0;
+	return !sx_eset_slot(set, cap, sx_ekey(t[3 * (size_t)f + (i + 2) % 3], t[3 * (size_t)g + (j + 2) % 3]), 0);
+}
+
+/* edges inside flat regions turned toward Delaunay: a planar region's pieces were triangulated face by face, its
+   input faces' edges kept; the shape does not change. Returns the edges turned. */
+static unsigned int sx_flatten(unsigned int* t, qaws_scalar* src, unsigned int nt, qaws_scalar const* pos, double eps, unsigned int split, int* oom)
+{
+	unsigned int n = 3 * nt, cap = 16, i, j, top = 0, flips = 0, guard = 10 * nt + 64;
+	unsigned int* nb = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)n + 1));
+	unsigned int* stack;
+	unsigned long long *key, *set;
+	while (cap < 4 * n)
+		cap *= 2;
+	key = (unsigned long long*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned long long), 2 * (size_t)n + 1));
+	set = (unsigned long long*)qaws_internal_zalloc(cap, sizeof(unsigned long long));
+	stack = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)n + 4 * (size_t)guard + 1));
+	if (!nb || !key || !set || !stack)
+	{
+		*oom = 1;
+		goto out;
+	}
+	/* neighbours across edges of exactly two faces turned opposite ways */
+	for (i = 0; i < n; i++)
+	{
+		unsigned int p = t[i], q = t[3 * (i / 3) + (i % 3 + 1) % 3];
+		nb[i] = SX_NONE;
+		key[2 * (size_t)i] = (sx_ekey(p, q) - 1) << 1 | (p > q);
+		key[2 * (size_t)i + 1] = i;
+		*sx_eset_slot(set, cap, sx_ekey(p, q), 1) = sx_ekey(p, q);
+	}
+	qsort(key, n, 2 * sizeof(unsigned long long), sx_cmp_edge);
+	for (i = 0; i < n; i = j)
+	{
+		for (j = i + 1; j < n && key[2 * (size_t)j] >> 1 == key[2 * (size_t)i] >> 1; j++)
+			;
+		if (j == i + 2 && (key[2 * (size_t)i] & 1) != (key[2 * (size_t)i + 2] & 1))
+		{
+			nb[key[2 * (size_t)i + 1]] = (unsigned int)key[2 * (size_t)i + 3];
+			nb[key[2 * (size_t)i + 3]] = (unsigned int)key[2 * (size_t)i + 1];
+		}
+	}
+	for (i = 0; i < n; i++)
+		if (nb[i] != SX_NONE && nb[i] > i)
+			stack[top++] = i;
+	while (top && flips < guard)
+	{
+		unsigned int e = stack[--top], f, g, a, b, c, d, nbc, nca, nad, ndb;
+		unsigned int ei, ej;
+		if (!sx_flat_flip_ok(t, src, nb, pos, e, eps, split, set, cap))
+			continue;
+		f = e / 3;
+		ei = e % 3;
+		g = nb[e] / 3;
+		ej = nb[e] % 3;
+		a = t[3 * (size_t)f + ei];
+		b = t[3 * (size_t)f + (ei + 1) % 3];
+		c = t[3 * (size_t)f + (ei + 2) % 3];
+		d = t[3 * (size_t)g + (ej + 2) % 3];
+		nbc = nb[3 * f + (ei + 1) % 3];
+		nca = nb[3 * f + (ei + 2) % 3];
+		nad = nb[3 * g + (ej + 1) % 3];
+		ndb = nb[3 * g + (ej + 2) % 3];
+		/* f = a d c, g = d b c */
+		t[3 * (size_t)f] = a;
+		t[3 * (size_t)f + 1] = d;
+		t[3 * (size_t)f + 2] = c;
+		t[3 * (size_t)g] = d;
+		t[3 * (size_t)g + 1] = b;
+		t[3 * (size_t)g + 2] = c;
+		nb[3 * f] = nad;
+		nb[3 * f + 1] = 3 * g + 2;
+		nb[3 * f + 2] = nca;
+		nb[3 * g] = ndb;
+		nb[3 * g + 1] = nbc;
+		nb[3 * g + 2] = 3 * f + 1;
+		if (nad != SX_NONE) nb[nad] = 3 * f;
+		if (nca != SX_NONE) nb[nca] = 3 * f + 2;
+		if (ndb != SX_NONE) nb[ndb] = 3 * g;
+		if (nbc != SX_NONE) nb[nbc] = 3 * g + 1;
+		*sx_eset_slot(set, cap, sx_ekey(a, b), 0) = ~0ull;
+		*sx_eset_slot(set, cap, sx_ekey(c, d), 1) = sx_ekey(c, d);
+		stack[top++] = 3 * f;
+		stack[top++] = 3 * f + 2;
+		stack[top++] = 3 * g;
+		stack[top++] = 3 * g + 1;
+		flips++;
+	}
+out:
+	qaws_internal_free(nb);
+	qaws_internal_free(key);
+	qaws_internal_free(set);
+	qaws_internal_free(stack);
+	return flips;
+}
+
 qaws_status qaws_mesh_boolean(qaws_mesh_3d** out, qaws_boolean_report* report, qaws_mesh_3d_desc const* a, qaws_mesh_3d_desc const* b,
 	qaws_boolean_op op, qaws_intersect_desc const* desc)
 {
@@ -1949,6 +2199,12 @@ qaws_status qaws_mesh_boolean(qaws_mesh_3d** out, qaws_boolean_report* report, q
 				used[keep[i]] = m++;
 			}
 			keep[i] = used[keep[i]];
+		}
+		{
+			int bad = 0;
+			report->flat_flips = sx_flatten(keep, keep_src, nk, kpos, o.eps, a->face_count, &bad);
+			if (bad)
+				goto oom;
 		}
 		report->closed = sx_closed(keep, nk);
 		st = nk ? sx_mesh(out, kpos, m, keep, keep_src, nk) : QAWS_STATUS_OK;

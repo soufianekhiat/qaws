@@ -8,7 +8,8 @@
  *     result's directed edges cancel, vertices matched by position), the
  *     area unchanged, every face's source an input face;
  *     (and nearly sharing them, 1e-12 off: snapped together);
- *   - a cube alone: unchanged;
+ *   - a cube, a sphere and a flat grid alone: unchanged (neighbours
+ *     touching at corners and edges, in one plane or not, are not cut);
  *   - refusals: no faces, an index out of range, a negative tolerance.
  */
 
@@ -258,6 +259,43 @@ static void test_alone(void)
 	printf("  %s\n", msg);
 	TEST_ASSERT(s == QAWS_STATUS_OK && m && r.pairs == 0 && r.points == 0 && qaws_mesh_3d_get_triangle_count(m) == 12, msg);
 	qaws_mesh_3d_destroy(m);
+	/* a sphere and a flat grid: neighbours touching at corners and edges (in one plane or not) are not cut */
+	{
+		static double const c0[3] = { 0, 0, 0 };
+		unsigned int na = 24, nb = 12, n = 8, i, j, k = 0;
+		qaws_scalar* sx = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * (2 + na * nb + (n + 1) * (n + 1)));
+		unsigned int* st = (unsigned int*)malloc(sizeof(unsigned int) * (6 * na * nb + 6 * n * n));
+		unsigned int sv = 0, sn = 0;
+		ix_sphere(c0, 1, na, nb, sx, &sv, st, &sn);
+		m = NULL;
+		s = qaws_mesh_resolve_intersections(&m, &r, sx, st, NULL, sv, sn, NULL);
+		sprintf(msg, "a sphere alone: %u pairs, %u points added, %u faces cut", r.pairs, r.points, r.split_faces);
+		printf("  %s\n", msg);
+		TEST_ASSERT(s == QAWS_STATUS_OK && m && r.pairs == 0 && r.points == 0 && r.split_faces == 0, msg);
+		qaws_mesh_3d_destroy(m);
+		for (j = 0; j <= n; j++)
+			for (i = 0; i <= n; i++, k++)
+			{
+				sx[3 * k] = (qaws_scalar)((double)i / n);
+				sx[3 * k + 1] = (qaws_scalar)((double)j / n);
+				sx[3 * k + 2] = 0;
+			}
+		for (j = 0, k = 0; j < n; j++)
+			for (i = 0; i < n; i++)
+			{
+				unsigned int a = j * (n + 1) + i;
+				st[k++] = a; st[k++] = a + 1; st[k++] = a + n + 2;
+				st[k++] = a; st[k++] = a + n + 2; st[k++] = a + n + 1;
+			}
+		m = NULL;
+		s = qaws_mesh_resolve_intersections(&m, &r, sx, st, NULL, (n + 1) * (n + 1), 2 * n * n, NULL);
+		sprintf(msg, "a flat grid: %u pairs, %u points added, %u faces cut", r.pairs, r.points, r.split_faces);
+		printf("  %s\n", msg);
+		TEST_ASSERT(s == QAWS_STATUS_OK && m && r.pairs == 0 && r.points == 0 && r.split_faces == 0, msg);
+		qaws_mesh_3d_destroy(m);
+		free(sx);
+		free(st);
+	}
 }
 
 static void test_refusals(void)

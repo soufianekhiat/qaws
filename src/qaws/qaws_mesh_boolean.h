@@ -34,6 +34,11 @@
  * inside, operands that are not quite closed (small holes, soups,
  * overlapping parts) still give a sensible result.
  *
+ * Each input face was triangulated on its own, so a flat region keeps its
+ * input faces' edges (a cube's face diagonal through a cut); edges inside
+ * flat regions (two faces of one operand in one plane within the
+ * tolerance) are then turned toward Delaunay. The shape does not change.
+ *
  * Face attribute "source": the face of the soup A then B (A's faces first,
  * B's from a's face_count) each triangle came from. report.closed: the
  * result's directed edges all cancel; it is not checked for being a
@@ -48,6 +53,7 @@ typedef struct qaws_boolean_report
 	unsigned int kept;                 /* pieces in the result */
 	unsigned int flipped;              /* of them, turned (B's pieces facing into A - B) */
 	unsigned int dropped;              /* pieces inside or outside the result */
+	unsigned int flat_flips;           /* edges inside flat regions turned toward Delaunay */
 	int closed;                        /* every directed edge of the result cancels */
 } qaws_boolean_report;
 

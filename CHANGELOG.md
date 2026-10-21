@@ -27,6 +27,16 @@ All notable changes to Qaws are documented here.
   wrappers), and `QAWS_UNITY_BUILD` builds one translation unit per
   precision.
 
+### Fixed
+
+- Self-intersection resolution: points where a face's edge crosses another's
+  plane were made before the pair was known to meet, splitting edges beside
+  the other face; coplanar neighbours touching at a corner or along an edge
+  were clipped against each other within the tolerance. A clean mesh now comes
+  back unchanged, and a chain of Booleans no longer grows stray vertices (the
+  CSG emblem of figure 27: 3784 faces instead of 7918). Boolean results have the
+  edges inside flat regions turned toward Delaunay.
+
 ### Added
 
 - Mesh Booleans (`qaws_mesh_boolean`): union, intersection, difference and

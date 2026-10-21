@@ -7,6 +7,7 @@
  *     spheres: closed, V(A u B) + V(A n B) = V(A) + V(B) and
  *     V(A - B) = V(A) - V(A n B) to rounding;
  *   - the self-union of the two cubes given as one soup: the union's volume;
+ *     the union resolved again: nothing cut;
  *   - a cube inside another: the union is the outer cube, the difference a
  *     hollow cube (its inner faces turned); disjoint cubes: an empty
  *     intersection; cubes touching face to face: one solid;
@@ -180,6 +181,24 @@ static void test_cubes(void)
 		sprintf(msg, "self-union of the soup: closed %d, volume %.15f (union %.15f)", r.closed, vs, 2 - w);
 		printf("  %s\n", msg);
 		TEST_ASSERT(s == QAWS_STATUS_OK && m && r.closed && fabs(vs - (2 - w)) < 1e-12, msg);
+		/* the result resolved again: nothing to cut */
+		if (m)
+		{
+			unsigned int rn = qaws_mesh_3d_get_vertex_count(m), rt = qaws_mesh_3d_get_triangle_count(m);
+			qaws_scalar* rp = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * (rn + 1));
+			unsigned int* rtri = (unsigned int*)malloc(sizeof(unsigned int) * 3 * (rt + 1));
+			qaws_intersect_report ir;
+			qaws_mesh_3d* again = NULL;
+			qaws_mesh_3d_get_positions(rp, m);
+			qaws_mesh_3d_get_triangles(rtri, m);
+			s = qaws_mesh_resolve_intersections(&again, &ir, rp, rtri, NULL, rn, rt, NULL);
+			sprintf(msg, "the union resolved again: %u pairs, %u points added, %u faces cut", ir.pairs, ir.points, ir.split_faces);
+			printf("  %s\n", msg);
+			TEST_ASSERT(s == QAWS_STATUS_OK && ir.pairs == 0 && ir.points == 0 && ir.split_faces == 0, msg);
+			qaws_mesh_3d_destroy(again);
+			free(rp);
+			free(rtri);
+		}
 		qaws_mesh_3d_destroy(m);
 	}
 }
