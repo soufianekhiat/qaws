@@ -132,48 +132,92 @@ static void bv_prim_box(qaws_mesh_bvh const* b, unsigned int p, double* lo, doub
 
 /* ---- build ---- */
 
+/* the float next to f toward +inf (up) or -inf, by its bits */
+static float bv_step(float f, int up)
+{
+	unsigned int u;
+	if (f == 0)
+		return up ? 1.4e-45f : -1.4e-45f;
+	memcpy(&u, &f, sizeof u);
+	u = (f > 0) == (up != 0) ? u + 1 : u - 1;
+	memcpy(&f, &u, sizeof u);
+	return f;
+}
+
+/* doubles to floats rounded outward */
+static float bv_down(double v)
+{
+	float f = (float)v;
+	return (double)f > v ? bv_step(f, 0) : f;
+}
+
+static float bv_up(double v)
+{
+	float f = (float)v;
+	return (double)f < v ? bv_step(f, 1) : f;
+}
+
+/* a simplex while building: its box in floats (rounded outward; the tree only groups, refit takes the exact boxes) and its index,
+   moved with the partitions so every pass reads in order; lo and hi each 4 floats for SSE (lane 3 unused) */
+typedef struct bv_ref
+{
+	float lo[3];
+	unsigned int id;
+	float hi[3];
+	unsigned int pad;
+} bv_ref;
+
+/* a node to split: its refs and its bounds (box, and centroids doubled: lo + hi) */
 typedef struct bv_task
 {
 	unsigned int node, begin, end, depth;
+	float lo[4], hi[4], clo[4], chi[4];
 } bv_task;
 
-/* the entries of ord[begin, end) with centroid along axis below `split` first; returns the first of the rest */
-static unsigned int bv_partition(unsigned int* ord, double const* cen, unsigned int axis, double split, unsigned int begin, unsigned int end)
+static void bv_ref_swap(bv_ref* r, unsigned int i, unsigned int j)
+{
+	bv_ref t = r[i];
+	r[i] = r[j];
+	r[j] = t;
+}
+
+static int bv_bin(bv_ref const* r, unsigned int axis, float clo, float scale)
+{
+	int bin = (int)((r->lo[axis] + r->hi[axis] - clo) * scale);
+	return bin < 0 ? 0 : bin >= BV_BINS ? BV_BINS - 1 : bin;
+}
+
+/* refs [begin, end) whose bin along axis is at most `last` first; returns the first of the rest */
+static unsigned int bv_partition(bv_ref* r, unsigned int axis, float clo, float scale, int last, unsigned int begin, unsigned int end)
 {
 	unsigned int i = begin, j = end;
 	while (i < j)
 	{
-		if (cen[3 * (size_t)ord[i] + axis] < split)
+		if (bv_bin(r + i, axis, clo, scale) <= last)
 			i++;
 		else
-		{
-			unsigned int t = ord[--j];
-			ord[j] = ord[i];
-			ord[i] = t;
-		}
+			bv_ref_swap(r, i, --j);
 	}
 	return i;
 }
 
-/* ord[begin, end) arranged so its middle entry has the median centroid along axis (quickselect) */
-static void bv_median(unsigned int* ord, double const* cen, unsigned int axis, unsigned int begin, unsigned int end)
+/* refs [begin, end) arranged so the middle one has the median centroid along axis (quickselect) */
+static void bv_median(bv_ref* r, unsigned int axis, unsigned int begin, unsigned int end)
 {
 	unsigned int lo = begin, hi = end - 1, mid = begin + (end - begin) / 2;
 	while (lo < hi)
 	{
-		double pv = cen[3 * (size_t)ord[lo + (hi - lo) / 2] + axis];
+		float pv = r[lo + (hi - lo) / 2].lo[axis] + r[lo + (hi - lo) / 2].hi[axis];
 		unsigned int i = lo, j = hi;
 		while (i <= j)
 		{
-			while (cen[3 * (size_t)ord[i] + axis] < pv)
+			while (r[i].lo[axis] + r[i].hi[axis] < pv)
 				i++;
-			while (cen[3 * (size_t)ord[j] + axis] > pv)
+			while (r[j].lo[axis] + r[j].hi[axis] > pv)
 				j--;
 			if (i <= j)
 			{
-				unsigned int t = ord[i];
-				ord[i] = ord[j];
-				ord[j] = t;
+				bv_ref_swap(r, i, j);
 				i++;
 				if (j == 0)
 					break;
@@ -189,56 +233,106 @@ static void bv_median(unsigned int* ord, double const* cen, unsigned int axis, u
 	}
 }
 
+static float bv_farea(float const* lo, float const* hi, unsigned int dim)
+{
+	float dx = hi[0] - lo[0], dy = hi[1] - lo[1], dz = hi[2] - lo[2];
+	if (dx < 0)
+		return 0;
+	return dim == 2 ? dx + dy : dx * dy + dy * dz + dz * dx;
+}
+
+/* a 4-float min / max accumulation; the same arithmetic with or without SSE */
+static void bv_acc(float* lo, float* hi, float const* plo, float const* phi)
+{
+#if BV_SSE
+	_mm_storeu_ps(lo, _mm_min_ps(_mm_loadu_ps(lo), _mm_loadu_ps(plo)));
+	_mm_storeu_ps(hi, _mm_max_ps(_mm_loadu_ps(hi), _mm_loadu_ps(phi)));
+#else
+	unsigned int i;
+	for (i = 0; i < 4; i++)
+	{
+		lo[i] = lo[i] < plo[i] ? lo[i] : plo[i];
+		hi[i] = hi[i] > phi[i] ? hi[i] : phi[i];
+	}
+#endif
+}
+
+static void bv_fempty4(float* lo, float* hi)
+{
+	lo[0] = lo[1] = lo[2] = lo[3] = HUGE_VALF;
+	hi[0] = hi[1] = hi[2] = hi[3] = -HUGE_VALF;
+}
+
+/* bounds of refs [begin, end) into t (the median's children) */
+static void bv_task_bounds(bv_ref const* r, bv_task* t)
+{
+	unsigned int i;
+	bv_fempty4(t->lo, t->hi);
+	bv_fempty4(t->clo, t->chi);
+	for (i = t->begin; i < t->end; i++)
+	{
+		float c[4] = { r[i].lo[0] + r[i].hi[0], r[i].lo[1] + r[i].hi[1], r[i].lo[2] + r[i].hi[2], 0 };
+		bv_acc(t->lo, t->hi, r[i].lo, r[i].hi);
+		bv_acc(t->clo, t->chi, c, c);
+	}
+}
+
 static qaws_status bv_build(qaws_mesh_bvh* b, unsigned int leaf_size)
 {
-	double* box = (double*)qaws_internal_scratch_malloc(qaws_internal_mul2((size_t)b->ns, 6 * sizeof(double)));
-	double* cen = (double*)qaws_internal_scratch_malloc(qaws_internal_mul2((size_t)b->ns, 3 * sizeof(double)));
-	bv_task* stack = (bv_task*)qaws_internal_scratch_malloc(qaws_internal_mul2((size_t)b->ns + 1, sizeof(bv_task)));
-	unsigned int top = 0, i, cap = b->ns ? 2 * b->ns - 1 : 0;
+	bv_ref* r = (bv_ref*)qaws_internal_scratch_malloc(qaws_internal_mul2((size_t)b->ns + 1, sizeof(bv_ref)));
+	unsigned int top = 0, scap = 64, i, cap = b->ns ? 2 * b->ns - 1 : 0;
+	bv_task* stack = (bv_task*)qaws_internal_malloc(scap * sizeof(bv_task));
 	b->ord = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2((size_t)b->ns + 1, sizeof(unsigned int)));
 	b->nodes = (bv_node*)qaws_internal_malloc(qaws_internal_mul2((size_t)cap + 1, sizeof(bv_node)));
-	if (!box || !cen || !stack || !b->ord || !b->nodes)
+	if (!r || !stack || !b->ord || !b->nodes)
 	{
-		qaws_internal_free(box);
-		qaws_internal_free(cen);
+		qaws_internal_free(r);
 		qaws_internal_free(stack);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 	for (i = 0; i < b->ns; i++)
 	{
-		bv_prim_box(b, i, box + 6 * (size_t)i, box + 6 * (size_t)i + 3);
-		cen[3 * (size_t)i] = 0.5 * (box[6 * (size_t)i] + box[6 * (size_t)i + 3]);
-		cen[3 * (size_t)i + 1] = 0.5 * (box[6 * (size_t)i + 1] + box[6 * (size_t)i + 4]);
-		cen[3 * (size_t)i + 2] = 0.5 * (box[6 * (size_t)i + 2] + box[6 * (size_t)i + 5]);
-		b->ord[i] = i;
+		double lo[3], hi[3];
+		unsigned int a;
+		bv_prim_box(b, i, lo, hi);
+		for (a = 0; a < 3; a++)
+		{
+			r[i].lo[a] = bv_down(lo[a]);
+			r[i].hi[a] = bv_up(hi[a]);
+		}
+		r[i].id = i;
+		r[i].pad = 0;
 	}
 	b->nn = 0;
 	b->depth = 0;
 	if (b->ns)
 	{
 		b->nn = 1;
-		stack[top].node = 0;
-		stack[top].begin = 0;
-		stack[top].end = b->ns;
-		stack[top++].depth = 1;
+		stack[0].node = 0;
+		stack[0].begin = 0;
+		stack[0].end = b->ns;
+		stack[0].depth = 1;
+		bv_task_bounds(r, stack);
+		top = 1;
 	}
 	while (top)
 	{
 		bv_task t = stack[--top];
 		bv_node* nd = b->nodes + t.node;
+		unsigned int n = t.end - t.begin, axis, best_axis = 3, mid, j, k;
+		int best_bin = 0;
+		float best = HUGE_VALF, scale[3];
+		float blo[3][BV_BINS][4], bhi[3][BV_BINS][4];
+		unsigned int bcount[3][BV_BINS];
+		bv_task kid[2];
 		nd->first = t.begin;
-		nd->cnt = t.end - t.begin;
-		unsigned int n = t.end - t.begin, axis, best_axis = 3, best_bin = 0, mid;
-		double clo[3], chi[3], best = HUGE_VAL;
+		nd->cnt = n;
 		if (t.depth > b->depth)
 			b->depth = t.depth;
-		bv_empty(nd->lo, nd->hi);
-		bv_empty(clo, chi);
-		for (i = t.begin; i < t.end; i++)
+		for (axis = 0; axis < 3; axis++)
 		{
-			unsigned int p = b->ord[i];
-			bv_grow(nd->lo, nd->hi, box + 6 * (size_t)p, box + 6 * (size_t)p + 3);
-			bv_grow(clo, chi, cen + 3 * (size_t)p, cen + 3 * (size_t)p);
+			nd->lo[axis] = t.lo[axis];
+			nd->hi[axis] = t.hi[axis];
 		}
 		if (n <= leaf_size)
 		{
@@ -247,87 +341,125 @@ static qaws_status bv_build(qaws_mesh_bvh* b, unsigned int leaf_size)
 			nd->b = n;
 			continue;
 		}
-		/* binned SAH over each axis the centroids spread along */
-		for (axis = 0; axis < b->dim; axis++)
+		/* binned SAH, every axis the centroids spread along binned in one pass, each bin with its box and centroids' box */
+		for (axis = 0; axis < 3; axis++)
 		{
-			double blo[BV_BINS][3], bhi[BV_BINS][3], ext = chi[axis] - clo[axis], scale, rlo[3], rhi[3], rarea[BV_BINS];
-			unsigned int bcount[BV_BINS], rcount[BV_BINS], j, left = 0;
-			double llo[3], lhi[3];
-			if (!(ext > 0))
-				continue;
-			scale = BV_BINS / ext;
+			scale[axis] = axis < b->dim && t.chi[axis] > t.clo[axis] ? BV_BINS / (t.chi[axis] - t.clo[axis]) : 0;
 			for (j = 0; j < BV_BINS; j++)
 			{
-				bv_empty(blo[j], bhi[j]);
-				bcount[j] = 0;
+				bv_fempty4(blo[axis][j], bhi[axis][j]);
+				bcount[axis][j] = 0;
 			}
-			for (i = t.begin; i < t.end; i++)
-			{
-				unsigned int p = b->ord[i], bin = (unsigned int)((cen[3 * (size_t)p + axis] - clo[axis]) * scale);
-				if (bin >= BV_BINS)
-					bin = BV_BINS - 1;
-				bcount[bin]++;
-				bv_grow(blo[bin], bhi[bin], box + 6 * (size_t)p, box + 6 * (size_t)p + 3);
-			}
+		}
+		for (i = t.begin; i < t.end; i++)
+		{
+			for (axis = 0; axis < b->dim; axis++)
+				if (scale[axis] > 0)
+				{
+					int bin = bv_bin(r + i, axis, t.clo[axis], scale[axis]);
+					bcount[axis][bin]++;
+					bv_acc(blo[axis][bin], bhi[axis][bin], r[i].lo, r[i].hi);
+				}
+		}
+		for (axis = 0; axis < b->dim; axis++)
+		{
+			float rlo[4], rhi[4], llo[4], lhi[4], rarea[BV_BINS];
+			unsigned int rcount[BV_BINS], left = 0;
+			if (!(scale[axis] > 0))
+				continue;
 			/* the right side of the plane after bin j - 1: bins j.. */
-			bv_empty(rlo, rhi);
+			bv_fempty4(rlo, rhi);
 			for (j = BV_BINS - 1; j > 0; j--)
 			{
-				bv_grow(rlo, rhi, blo[j], bhi[j]);
-				rcount[j - 1] = (j + 1 < BV_BINS ? rcount[j] : 0) + bcount[j];
-				rarea[j - 1] = bv_area(rlo, rhi, b->dim);
+				bv_acc(rlo, rhi, blo[axis][j], bhi[axis][j]);
+				rcount[j - 1] = (j + 1 < BV_BINS ? rcount[j] : 0) + bcount[axis][j];
+				rarea[j - 1] = bv_farea(rlo, rhi, b->dim);
 			}
-			bv_empty(llo, lhi);
+			bv_fempty4(llo, lhi);
 			for (j = 0; j + 1 < BV_BINS; j++)
 			{
-				double cost;
-				left += bcount[j];
-				bv_grow(llo, lhi, blo[j], bhi[j]);
+				float cost;
+				left += bcount[axis][j];
+				bv_acc(llo, lhi, blo[axis][j], bhi[axis][j]);
 				if (!left || !rcount[j])
 					continue;
-				cost = bv_area(llo, lhi, b->dim) * left + rarea[j] * rcount[j];
+				cost = bv_farea(llo, lhi, b->dim) * left + rarea[j] * rcount[j];
 				if (cost < best)
 				{
 					best = cost;
 					best_axis = axis;
-					best_bin = j;
+					best_bin = (int)j;
 				}
 			}
 		}
+		for (k = 0; k < 2; k++)
+			kid[k].depth = t.depth + 1;
 		mid = t.begin;
 		if (best_axis < 3)
 		{
-			double split = clo[best_axis] + (chi[best_axis] - clo[best_axis]) * (best_bin + 1) / BV_BINS;
-			mid = bv_partition(b->ord, cen, best_axis, split, t.begin, t.end);
+			/* the children's bounds from the bins on each side */
+			mid = bv_partition(r, best_axis, t.clo[best_axis], scale[best_axis], best_bin, t.begin, t.end);
+			for (k = 0; k < 2; k++)
+			{
+				bv_fempty4(kid[k].lo, kid[k].hi);
+				bv_fempty4(kid[k].clo, kid[k].chi);
+			}
+			for (j = 0; j < BV_BINS; j++)
+			{
+				k = (int)j <= best_bin ? 0 : 1;
+				bv_acc(kid[k].lo, kid[k].hi, blo[best_axis][j], bhi[best_axis][j]);
+			}
+			/* the centroids (doubled) within the box, doubled */
+			for (k = 0; k < 2; k++)
+				for (j = 0; j < 4; j++)
+				{
+					kid[k].clo[j] = 2 * kid[k].lo[j];
+					kid[k].chi[j] = 2 * kid[k].hi[j];
+				}
 		}
+		kid[0].begin = t.begin;
+		kid[1].end = t.end;
 		if (mid == t.begin || mid == t.end)
 		{
-			/* no split by the bins (centroids together): the median along the widest spread, or a leaf when they coincide */
-			double w = -1;
+			/* no split by the bins (centroids together): the median along the widest spread */
+			float w = -1;
 			for (axis = 0, best_axis = 0; axis < b->dim; axis++)
-				if (chi[axis] - clo[axis] > w)
+				if (t.chi[axis] - t.clo[axis] > w)
 				{
-					w = chi[axis] - clo[axis];
+					w = t.chi[axis] - t.clo[axis];
 					best_axis = axis;
 				}
-			bv_median(b->ord, cen, best_axis, t.begin, t.end);
+			bv_median(r, best_axis, t.begin, t.end);
 			mid = t.begin + n / 2;
+			kid[0].end = kid[1].begin = mid;
+			bv_task_bounds(r, kid);
+			bv_task_bounds(r, kid + 1);
 		}
+		kid[0].end = kid[1].begin = mid;
 		nd->leaf = 0;
 		nd->a = b->nn;
 		nd->b = b->nn + 1;
+		kid[0].node = nd->a;
+		kid[1].node = nd->b;
 		b->nn += 2;
-		stack[top].node = nd->b;
-		stack[top].begin = mid;
-		stack[top].end = t.end;
-		stack[top++].depth = t.depth + 1;
-		stack[top].node = nd->a;
-		stack[top].begin = t.begin;
-		stack[top].end = mid;
-		stack[top++].depth = t.depth + 1;
+		if (top + 2 > scap)
+		{
+			bv_task* grown = (bv_task*)qaws_internal_realloc(stack, 2 * (size_t)scap * sizeof(bv_task));
+			if (!grown)
+			{
+				qaws_internal_free(r);
+				qaws_internal_free(stack);
+				return QAWS_STATUS_ALLOCATION_FAILURE;
+			}
+			stack = grown;
+			scap *= 2;
+		}
+		stack[top++] = kid[1];
+		stack[top++] = kid[0];
 	}
-	qaws_internal_free(box);
-	qaws_internal_free(cen);
+	for (i = 0; i < b->ns; i++)
+		b->ord[i] = r[i].id;
+	qaws_internal_free(r);
 	qaws_internal_free(stack);
 	return QAWS_STATUS_OK;
 }
@@ -367,16 +499,21 @@ static void bv_entry_moment(qaws_mesh_bvh const* b, unsigned int e, double* av, 
 	}
 }
 
-/* the moments of entries [first, first + count) into m (BV_WM) */
+/* the moments of entries [first, first + count) into m (BV_WM); T's lower half (k < j) left to bv_mirror */
 static void bv_leaf_moment(qaws_mesh_bvh const* b, unsigned int first, unsigned int count, double* m)
 {
-	double area = 0, cs[3] = { 0, 0, 0 }, mean[3] = { 0, 0, 0 };
+	double area = 0, cs[3] = { 0, 0, 0 }, mean[3] = { 0, 0, 0 }, avs[8][3], cen[8][3], sw = b->k == 3 ? 1.0 / 12 : 1.0 / 6;
 	unsigned int j, q, r, c2, c3;
 	memset(m, 0, sizeof(double) * BV_WM);
 	for (j = 0; j < count; j++)
 	{
 		double av[3], c[3], ar;
 		bv_entry_moment(b, first + j, av, c);
+		if (j < 8)
+		{
+			memcpy(avs[j], av, sizeof av);
+			memcpy(cen[j], c, sizeof c);
+		}
 		ar = sqrt(bv_dot(av, av));
 		area += ar;
 		for (q = 0; q < 3; q++)
@@ -390,33 +527,54 @@ static void bv_leaf_moment(qaws_mesh_bvh const* b, unsigned int first, unsigned 
 		m[q] = area > 0 ? cs[q] / area : mean[q];
 	for (j = 0; j < count; j++)
 	{
-		double av[3], c[3], d[3], S[9] = { 0, 0, 0, 0, 0, 0, 0, 0, 0 }, sw = b->k == 3 ? 1.0 / 12 : 1.0 / 6;
-		bv_entry_moment(b, first + j, av, c);
+		double av[3], c[3], d[3], S[9] = { 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+		if (j < 8)
+		{
+			memcpy(av, avs[j], sizeof av);
+			memcpy(c, cen[j], sizeof c);
+		}
+		else
+			bv_entry_moment(b, first + j, av, c);
 		bv_sub(c, m, d);
 		for (r = 0; r < 3; r++)
 			for (c2 = 0; c2 < 3; c2++)
 				m[6 + 3 * r + c2] += av[r] * d[c2];
 		for (r = 0; r < b->k; r++)
 		{
-			double e[3], v[3];
+			double e[3], v[3], l;
 			bv_sub(bv_pv(b, first + j, r), m, e);
-			if (sqrt(bv_dot(e, e)) > m[15])
-				m[15] = sqrt(bv_dot(e, e));
+			l = bv_dot(e, e);
+			if (l > m[15] * m[15])
+				m[15] = sqrt(l);
 			/* the simplex's own spread: its second moment about its centroid per unit measure */
 			bv_sub(bv_pv(b, first + j, r), c, v);
 			for (c2 = 0; c2 < 3; c2++)
-				for (c3 = 0; c3 < 3; c3++)
+				for (c3 = c2; c3 < 3; c3++)
 					S[3 * c2 + c3] += sw * v[c2] * v[c3];
 		}
-		for (r = 0; r < 3; r++)
-			for (c2 = 0; c2 < 3; c2++)
-				for (c3 = 0; c3 < 3; c3++)
-					m[17 + 9 * r + 3 * c2 + c3] += av[r] * (d[c2] * d[c3] + S[3 * c2 + c3]);
+		for (c2 = 0; c2 < 3; c2++)
+			for (c3 = c2; c3 < 3; c3++)
+			{
+				double dd = d[c2] * d[c3] + S[3 * c2 + c3];
+				for (r = 0; r < 3; r++)
+					m[17 + 9 * r + 3 * c2 + c3] += av[r] * dd;
+			}
 	}
 	m[16] = area;
 }
 
-/* the moments of up to 4 parts merged into m: centre by area, C and T carried to it (T + C_ij s_k + C_ik s_j + N_i s_j s_k, s the shift) */
+/* T's lower half (k < j) from its upper one */
+static void bv_mirror(double* m)
+{
+	unsigned int r, j, k;
+	for (r = 0; r < 3; r++)
+		for (j = 0; j < 3; j++)
+			for (k = 0; k < j; k++)
+				m[17 + 9 * r + 3 * j + k] = m[17 + 9 * r + 3 * k + j];
+}
+
+/* the moments of up to 4 parts merged into m: centre by area, C and T carried to it (T + C_ij s_k + C_ik s_j + N_i s_j s_k, s the shift);
+   reads the parts' T upper halves, writes m's whole */
 static void bv_merge_moments(double const* const* part, unsigned int n, double* m)
 {
 	double area = 0;
@@ -435,31 +593,20 @@ static void bv_merge_moments(double const* const* part, unsigned int n, double* 
 		for (q = 0; q < 3; q++)
 			m[3 + q] += p[3 + q];
 		for (r = 0; r < 3; r++)
+		{
 			for (c2 = 0; c2 < 3; c2++)
-			{
 				m[6 + 3 * r + c2] += p[6 + 3 * r + c2] + p[3 + r] * s[c2];
-				for (c3 = 0; c3 < 3; c3++)
+			for (c2 = 0; c2 < 3; c2++)
+				for (c3 = c2; c3 < 3; c3++)
 					m[17 + 9 * r + 3 * c2 + c3] += p[17 + 9 * r + 3 * c2 + c3] + p[6 + 3 * r + c2] * s[c3] + p[6 + 3 * r + c3] * s[c2]
 						+ p[3 + r] * s[c2] * s[c3];
-			}
+		}
 		rad = p[15] + sqrt(bv_dot(s, s));
 		if (rad > m[15])
 			m[15] = rad;
 	}
 	m[16] = area;
-}
-
-/* a double box to floats relative to the centre, rounded outward and widened by pad */
-static float bv_down(double v)
-{
-	float f = (float)v;
-	return (double)f > v ? nextafterf(f, -HUGE_VALF) : f;
-}
-
-static float bv_up(double v)
-{
-	float f = (float)v;
-	return (double)f < v ? nextafterf(f, HUGE_VALF) : f;
+	bv_mirror(m);
 }
 
 static void bv_slot_set(qaws_mesh_bvh* b, bv_node4* n, unsigned int s, double const* lo, double const* hi)
