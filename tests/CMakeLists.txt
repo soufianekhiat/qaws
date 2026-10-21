@@ -158,6 +158,7 @@ add_executable(
 154_memory.c
 155_precision_both.c
 156_boundary_layers.c
+157_curved_elements.c
 )
 
 # The amalgamated library exports exactly the same symbols, so the tests can

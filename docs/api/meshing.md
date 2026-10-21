@@ -13,7 +13,7 @@ enters and leaves as arrays; qaws reads and writes no files.
 | `qaws_mesh_field.h` | size fields; cross fields on surfaces; frame fields in volumes |
 | `qaws_remesh.h` | surface remeshing (LOCAL) |
 | `qaws_quadrangulate.h` | quad meshes (INSTANT) |
-| `qaws_mesh_generate.h` | meshes of surfaces and shells (REMESH) |
+| `qaws_mesh_generate.h` | meshes of surfaces and shells (REMESH); curved elements (P2, P3, Q2, Q3 nodes) |
 | `qaws_mesh_repair.h` | repair for farq: soups and broken meshes made closed and outward |
 | `qaws_volume_mesh.h` | `qaws_volume_mesh`: tetrahedra, hexahedra, prisms, pyramids |
 | `qaws_tetrahedralize.h` | tetrahedra filling a closed surface (DELAUNAY) |
@@ -686,6 +686,33 @@ element's face. Border and crease vertices are held on their domain's side,
 corners on its corners. `PARAMETRIC`, `RESTRICTED_DELAUNAY` and
 `STRUCTURED` are reserved.
 
+### Curved elements
+
+```c
+qaws_status qaws_mesh_generate_node_counts(unsigned int* out_node_count, unsigned int* out_element_node_count, qaws_mesh_3d const* mesh,
+	unsigned int order);
+qaws_status qaws_mesh_generate_nodes_surface(qaws_scalar* out_positions, qaws_mesh_location* out_locations, unsigned int* out_element_nodes,
+	qaws_mesh_3d const* mesh, qaws_surface const* surface, unsigned int order);
+qaws_status qaws_mesh_generate_nodes_shell(qaws_scalar* out_positions, qaws_mesh_location* out_locations, unsigned int* out_element_nodes,
+	qaws_mesh_3d const* mesh, qaws_shell_atlas const* shell, unsigned int order);
+```
+
+A generated mesh's elements at order 2 or 3 (P2, P3 triangles; Q2, Q3
+quads) for a solver: the nodes on the exact geometry. The node list is the
+mesh's vertices, then order - 1 per edge (shared by the faces either
+side), then the inner nodes: a cubic triangle's centroid, a quad's
+(order - 1)^2 (none in a polygon). Each element lists its corners, its
+edges' nodes from corner k toward corner k + 1, then its inner nodes
+(i fastest, along its sides 0-1 and 0-3). A new node is its element's
+straight point snapped onto the element's face from its corners' (u, v);
+nodes of feature and border edges are held on the domain's side as the
+vertices are. The torus of test 157 at 0.4: the elements' distance to the
+surface between their nodes 4.2e-2 (P1), 8.8e-4 (P2), 7.4e-4 (P3);
+5.6e-2, 4.0e-4, 7.5e-4 in quads. Interpolation's distance to the surface is
+O(h^4) at order 2 and 3 alike (an even order gains one by symmetry), so
+order 3 pays off in the nodes' places along the surface, not in that
+distance. Figure 20 (key k).
+
 ## Repair for farq
 
 ```c
@@ -913,7 +940,11 @@ those alone (1 to 9, then a to i for figures 10 to 18: `5c` draws 5 and
   above a side's next vertex) is thinned by the rim's spacing, not the
   wall's thickness; no layers on a vertex no direction serves (a spike).
 - Generation: vertices on a trimmed face's trim curve are snapped onto the
-  surface, not the curve.
+  surface, not the curve. Curved elements: nodes by the closest point of
+  the straight element's (not equally spaced along the curve; no check of
+  the curved element's Jacobian); a node on an edge between two faces lies
+  on the face of the element that numbered it; meshes on a mesh reference
+  (remeshed, not generated) get none; volume elements are not curved.
 - Tetrahedra: improvement by flips and smoothing only (no edge removal or
   sliver exudation); no protection of sharp angles between border
   triangles, where recovery may stop (`QAWS_STATUS_NOT_CONVERGED`).

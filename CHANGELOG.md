@@ -45,6 +45,13 @@ All notable changes to Qaws are documented here.
   inward or outward, at a first height and a growth ratio, thinned where
   they would meet the surface or each other; every corner's Jacobian
   positive (test 156).
+- Curved elements: `qaws_mesh_generate_nodes_surface` / `_shell` (with
+  `qaws_mesh_generate_node_counts`) give a generated mesh's nodes at order 2
+  or 3 (P2, P3 triangles; Q2, Q3 quads) on the exact geometry: order - 1 per
+  edge shared by both faces, a cubic triangle's centroid, a quad's
+  (order - 1)^2 inside, each snapped onto its element's face. A torus at
+  0.4 comes 50 to 140 times closer to the surface than its straight
+  elements (test 157, showcase figure 20).
 - Halide evaluates the curve and surface records (`qaws_curve_record_core.h`,
   `qaws_surface_record_core.h`) with the knot span found at run time, an
   `Expr` per element; `qaws_index` (an `int`, an `Expr` in Halide) for the

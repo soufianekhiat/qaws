@@ -83,13 +83,13 @@ User guidance (what a modelling tool's user steers with):
 
 Quality and reach:
 
-1. Curved high-order elements (P2, P3): edge and face nodes on the exact surface from the footpoints every vertex already carries.
+1. Curved high-order elements (P2, P3): landed for surfaces. `qaws_mesh_generate_nodes_surface` / `_shell`: a generated mesh's nodes at order 2 or 3, edge nodes shared, a cubic triangle's centroid and a quad's inner grid, each the straight element's point snapped onto its face. Test 157 (a torus 50 to 140 times closer to the surface than straight; a box's edge nodes on its edges), figure 20 (key k). Next: curved tetrahedra and hexahedra at the border, a Jacobian check, nodes on a mesh reference.
 2. Boundary layers: landed. `qaws_volume_mesh_grow_layers` (`qaws_boundary_layers.h`): layers of prisms (triangles) and hexahedra (quads) at a first height and a growth ratio, inward or outward, along each vertex's angle-weighted normal turned until all its faces see it and stretched to keep the thickness across them; stacks thinned before the surface ahead and converging neighbours, graded, halved until every corner's Jacobian is positive. Test 156 (a box's layers exact to rounding, a sphere, a thin slab, an L-shaped block).
 3. Metric-driven adaptation: remeshing to an anisotropic metric per vertex (as Mmg), for a solution field rather than curvature.
 4. Sizing by local feature size: landed. `qaws_size_field_create_feature_size`: the width across thin parts and gaps over `cells_across`, from medial balls by shrinking (Ma et al. 2012) on two passes of per-triangle samples (a k-d tree pruned by box and normal cone), contacts carried onto the patches, faces across creases excluded by their normals, graded and combinable by min. Test 138: a fin 0.02 thick at 3 cells across 0.00667 on its top, no edge alone across its narrow sides (uniform 0.05: one), LOCAL at 30..110 degrees, the far end back at 0.05, growth 1.11 of the gradation, field in 0.5 s; two plates 0.03 apart sized 0.0100 across the gap; a sphere 0.6667 (2r / 3). Figure 17 (key h). Limits: a thin part's narrow side (a strip between creases) is refined only by the gradation from the faces beside it; sizes are held on a grid per triangle, so a large triangle next to a thin part is sampled finely throughout; the field is sampled on the reference (generation and other references need their own).
 5. Input repair: landed. `qaws_mesh_repair`: welding, degenerate faces, duplicates, gaps, small parts, orientation, hole filling (Liepa), cavities; a closed, outward surface for farq (decision 9), self-intersections and non-manifold edges left to it. Test 139, figure 18 (key i); the As built table.
 6. Scale: benchmarks past 10^6 elements, parallel field solves and local operations.
-7. Faster tests: a fast default per suite and a heavy tier apart (test 131 alone takes about 100 s).
+7. Faster tests: landed. A default tier and a heavy one (`QAWS_TEST_HEAVY=1`), the trim boxes in the shell code; 783 s to 360 s serial, 95 s under `ctest -j 4`.
 
 Suggested order: GLOBAL quads, the user guidance above, local feature size sizing, faster tests.
 

@@ -78,4 +78,33 @@ qaws_status qaws_mesh_generate_surface(qaws_mesh_3d** out_mesh, qaws_mesh_report
 qaws_status qaws_mesh_generate_shell(qaws_mesh_3d** out_mesh, qaws_mesh_report* out_report, qaws_shell_atlas const* shell,
 	qaws_generate_desc const* desc);
 
+/*
+ * Curved elements: the nodes of a generated mesh's faces at order 2 or 3
+ * (P2, P3 triangles; Q2, Q3 quads), on the exact geometry it came from.
+ *
+ * Nodes: the mesh's vertices first (positions and footpoints as they are),
+ * then order - 1 per edge, shared by the faces either side, then the faces'
+ * inner nodes: a cubic triangle's centroid, a quad's (order - 1)^2; none in
+ * a polygon of five corners or more. Each new node is its element's
+ * straight point (the edge's at j / order, the triangle's barycentre, the
+ * quad's bilinear point at (i / order, j / order) along its sides 0-1 and
+ * 0-3) snapped onto the element's face (its "face" attribute), started from
+ * its corners' (u, v); a node of a feature or border edge held on the
+ * domain's side as its vertices are.
+ *
+ * Elements: per face in turn, its corners, then its edges' nodes from
+ * corner k toward corner k + 1, then its inner nodes, i fastest: k * order
+ * + inner per face of k corners (qaws_mesh_generate_node_counts).
+ * out_locations (may be NULL): each node's face and (u, v).
+ * The mesh must come from qaws_mesh_generate_surface on that surface, or
+ * qaws_mesh_generate_shell on that shell (INVALID_ARGUMENT without its
+ * "face" attribute). Order 1: the vertices and faces as they are.
+ */
+qaws_status qaws_mesh_generate_node_counts(unsigned int* out_node_count, unsigned int* out_element_node_count, qaws_mesh_3d const* mesh,
+	unsigned int order);
+qaws_status qaws_mesh_generate_nodes_surface(qaws_scalar* out_positions, qaws_mesh_location* out_locations, unsigned int* out_element_nodes,
+	qaws_mesh_3d const* mesh, qaws_surface const* surface, unsigned int order);
+qaws_status qaws_mesh_generate_nodes_shell(qaws_scalar* out_positions, qaws_mesh_location* out_locations, unsigned int* out_element_nodes,
+	qaws_mesh_3d const* mesh, qaws_shell_atlas const* shell, unsigned int order);
+
 #endif /* QAWS_MESH_GENERATE_H */

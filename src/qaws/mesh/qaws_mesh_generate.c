@@ -96,15 +96,15 @@ static void mg_snap(qaws_surface const* s, double const* p, double* u, double* v
 	}
 }
 
-/* a start for the snap onto face F from reference triangle t's corners (those on F, their u and v
+/* a start for the snap onto face F from n corners tv weighted by w (those on F, their u and v
    unwrapped across a seam); none on F: the nearest point of a coarse grid of F's domain */
-static void mg_start(qaws_surface const* s, qaws_shell_point const* dv, unsigned int const* tv, double const* w, unsigned int F,
+static void mg_start(qaws_surface const* s, qaws_shell_point const* dv, unsigned int const* tv, double const* w, unsigned int n_corner, unsigned int F,
 	double const* p, double* u, double* v)
 {
 	qaws_range ur = qaws_surface_get_u_range(s), vr = qaws_surface_get_v_range(s);
 	double su = (double)ur.max_value - (double)ur.min_value, sv = (double)vr.max_value - (double)vr.min_value, wu = 0, ref_u = 0, ref_v = 0, acc_u = 0, acc_v = 0;
 	unsigned int k, n = 0;
-	for (k = 0; k < 3; k++)
+	for (k = 0; k < n_corner; k++)
 	{
 		double cu, cv;
 		if (dv[tv[k]].face != F)
@@ -280,7 +280,7 @@ static qaws_status mg_finish(mg_src const* src, double const* x, qaws_shell_poin
 			w[1] = (double)l.a;
 			w[2] = (double)l.b;
 			w[0] = 1 - w[1] - w[2];
-			mg_start(s, dvp, tv, w, F, m->x + 3 * (size_t)i, &u, &v);
+			mg_start(s, dvp, tv, w, 3, F, m->x + 3 * (size_t)i, &u, &v);
 			mg_snap(s, m->x + 3 * (size_t)i, &u, &v, (m->vflag[i] & HM_CORNER) ? 2 : hm_feature_degree(m, i) || hm_is_border_vertex(m, i) ? 1 : 0, y);
 			d = sqrt((y[0] - m->x[3 * (size_t)i]) * (y[0] - m->x[3 * (size_t)i]) + (y[1] - m->x[3 * (size_t)i + 1]) * (y[1] - m->x[3 * (size_t)i + 1])
 				+ (y[2] - m->x[3 * (size_t)i + 2]) * (y[2] - m->x[3 * (size_t)i + 2]));
@@ -607,4 +607,187 @@ qaws_status qaws_mesh_generate_surface(qaws_mesh_3d** out_mesh, qaws_mesh_report
 	if (st == QAWS_STATUS_OK && out_report)
 		*out_report = rep;
 	return st;
+}
+
+/* ---- curved elements: nodes of order 2 and 3 ------------------------- */
+
+/* nodes inside a face of k corners at order o: (o-1)(o-2)/2 in a triangle, (o-1)^2 in a quad, none in a polygon */
+static unsigned int mg_inner(unsigned int k, unsigned int o)
+{
+	return k == 3 ? (o - 1) * (o - 2) / 2 : k == 4 ? (o - 1) * (o - 1) : 0;
+}
+
+qaws_status qaws_mesh_generate_node_counts(unsigned int* out_node_count, unsigned int* out_element_node_count, qaws_mesh_3d const* mesh,
+	unsigned int order)
+{
+	qaws_hm const* m;
+	unsigned int f, n, e = 0;
+	if (!mesh || order < 1 || order > 3)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	m = &mesh->hm;
+	n = m->nv + hm_edge_count(m) * (order - 1);
+	for (f = 0; f < m->nf; f++)
+	{
+		n += mg_inner(m->fn[f], order);
+		e += m->fn[f] * order + mg_inner(m->fn[f], order);
+	}
+	if (out_node_count)
+		*out_node_count = n;
+	if (out_element_node_count)
+		*out_element_node_count = e;
+	return QAWS_STATUS_OK;
+}
+
+/* the node at weights w of vertices vi (n of them): their straight point snapped onto the element's face F,
+   started from their (u, v) on F; on: held on the domain's side (a feature or border edge) */
+static void mg_node(mg_src const* src, qaws_hm const* m, unsigned int F, unsigned int const* vi, double const* w, unsigned int n, int on,
+	qaws_scalar* out_x, qaws_mesh_location* out_loc)
+{
+	qaws_shell_point cp[4];
+	unsigned int tv[4] = { 0, 1, 2, 3 }, k;
+	double p[3] = { 0, 0, 0 }, x[3], u = 0, v = 0;
+	qaws_surface const* s = mg_face(src, F);
+	qaws_mesh_location loc;
+	loc.patch = QAWS_MESH_NONE;
+	loc.a = loc.b = 0;
+	for (k = 0; k < n; k++)
+	{
+		p[0] += w[k] * m->x[3 * (size_t)vi[k]];
+		p[1] += w[k] * m->x[3 * (size_t)vi[k] + 1];
+		p[2] += w[k] * m->x[3 * (size_t)vi[k] + 2];
+		memset(&cp[k], 0, sizeof cp[k]);
+		cp[k].face = m->foot ? m->foot[vi[k]].patch : QAWS_MESH_NONE;
+		cp[k].uv.x = m->foot ? m->foot[vi[k]].a : 0;
+		cp[k].uv.y = m->foot ? m->foot[vi[k]].b : 0;
+	}
+	memcpy(x, p, sizeof p);
+	if (s)
+	{
+		mg_start(s, cp, tv, w, n, F, p, &u, &v);
+		mg_snap(s, p, &u, &v, on, x);
+		loc.patch = F;
+		loc.a = (qaws_scalar)u;
+		loc.b = (qaws_scalar)v;
+	}
+	for (k = 0; k < 3; k++)
+		out_x[k] = (qaws_scalar)x[k];
+	if (out_loc)
+		*out_loc = loc;
+}
+
+static qaws_status mg_nodes(qaws_scalar* out_positions, qaws_mesh_location* out_locations, unsigned int* out_element_nodes,
+	qaws_mesh_3d const* mesh, mg_src const* src, unsigned int o)
+{
+	qaws_hm const* m;
+	unsigned int *base = NULL, fa = HM_NONE, f, c, k, i, j, next, e = 0;
+	unsigned char* rev = NULL;
+	if (!mesh || !out_positions || !out_element_nodes || o < 1 || o > 3)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	m = &mesh->hm;
+	if (qaws_mesh_3d_find_attribute(&fa, mesh, "face") != QAWS_STATUS_OK)
+	{
+		if (src->shell)
+			return QAWS_STATUS_INVALID_ARGUMENT;
+		fa = HM_NONE;
+	}
+	/* per corner: its edge's first node, and whether the edge was numbered from its other end */
+	base = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (size_t)m->nc + 1));
+	rev = (unsigned char*)qaws_internal_scratch_zalloc((size_t)m->nc + 1, 1);
+	if (!base || !rev)
+	{
+		qaws_internal_free(base);
+		qaws_internal_free(rev);
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	}
+	for (c = 0; c < m->nc; c++)
+		base[c] = HM_NONE;
+	for (i = 0; i < m->nv; i++)
+	{
+		for (k = 0; k < 3; k++)
+			out_positions[3 * (size_t)i + k] = (qaws_scalar)m->x[3 * (size_t)i + k];
+		if (out_locations)
+		{
+			out_locations[i].patch = m->foot ? m->foot[i].patch : QAWS_MESH_NONE;
+			out_locations[i].a = m->foot ? m->foot[i].a : 0;
+			out_locations[i].b = m->foot ? m->foot[i].b : 0;
+		}
+	}
+	next = m->nv;
+	for (f = 0; f < m->nf; f++)
+	{
+		unsigned int n = m->fn[f], c0 = m->fc[f], F = fa != HM_NONE ? (unsigned int)hm_attr_at(m, fa, f)[0] : 0;
+		for (k = 0; k < n; k++)
+			out_element_nodes[e++] = m->cv[c0 + k];
+		/* edge nodes, from corner k toward corner k + 1 */
+		for (k = 0; o > 1 && k < n; k++)
+		{
+			c = c0 + k;
+			if (base[c] == HM_NONE)
+			{
+				unsigned int ab[2];
+				int on = m->co[c] == HM_NONE || (m->cflag[c] & HM_FEATURE);
+				ab[0] = m->cv[c];
+				ab[1] = hm_to(m, c);
+				base[c] = next;
+				if (m->co[c] != HM_NONE)
+				{
+					base[m->co[c]] = next;
+					rev[m->co[c]] = 1;
+				}
+				for (j = 1; j < o; j++, next++)
+				{
+					double w[2];
+					w[1] = (double)j / o;
+					w[0] = 1 - w[1];
+					mg_node(src, m, F, ab, w, 2, on, out_positions + 3 * (size_t)next, out_locations ? out_locations + next : NULL);
+				}
+			}
+			for (j = 1; j < o; j++)
+				out_element_nodes[e++] = base[c] + (rev[c] ? o - 1 - j : j - 1);
+		}
+		/* inner nodes: a cubic triangle's centroid; a quad's at (i/o, j/o) along its sides 0-1 and 0-3, i fastest */
+		if (n == 3 && o == 3)
+		{
+			double w[3] = { 1.0 / 3, 1.0 / 3, 1.0 / 3 };
+			mg_node(src, m, F, m->cv + c0, w, 3, 0, out_positions + 3 * (size_t)next, out_locations ? out_locations + next : NULL);
+			out_element_nodes[e++] = next++;
+		}
+		if (n == 4)
+			for (j = 1; j < o; j++)
+				for (i = 1; i < o; i++)
+				{
+					double s = (double)i / o, t = (double)j / o, w[4];
+					w[0] = (1 - s) * (1 - t);
+					w[1] = s * (1 - t);
+					w[2] = s * t;
+					w[3] = (1 - s) * t;
+					mg_node(src, m, F, m->cv + c0, w, 4, 0, out_positions + 3 * (size_t)next, out_locations ? out_locations + next : NULL);
+					out_element_nodes[e++] = next++;
+				}
+	}
+	qaws_internal_free(base);
+	qaws_internal_free(rev);
+	return QAWS_STATUS_OK;
+}
+
+qaws_status qaws_mesh_generate_nodes_surface(qaws_scalar* out_positions, qaws_mesh_location* out_locations, unsigned int* out_element_nodes,
+	qaws_mesh_3d const* mesh, qaws_surface const* surface, unsigned int order)
+{
+	mg_src src;
+	if (!surface)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	src.shell = NULL;
+	src.one = surface;
+	return mg_nodes(out_positions, out_locations, out_element_nodes, mesh, &src, order);
+}
+
+qaws_status qaws_mesh_generate_nodes_shell(qaws_scalar* out_positions, qaws_mesh_location* out_locations, unsigned int* out_element_nodes,
+	qaws_mesh_3d const* mesh, qaws_shell_atlas const* shell, unsigned int order)
+{
+	mg_src src;
+	if (!shell)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	src.shell = shell;
+	src.one = NULL;
+	return mg_nodes(out_positions, out_locations, out_element_nodes, mesh, &src, order);
 }
