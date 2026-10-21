@@ -51,6 +51,12 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- Smoothing and fairing (`qaws_mesh_3d_smooth`, `qaws_mesh_3d_fair`):
+  Laplacian, Taubin, implicit mean curvature and bi-Laplacian smoothing,
+  cotangent or uniform weights, border, held vertices and feature corners
+  kept, feature lines smoothed along themselves, the volume kept on request;
+  fairing of free vertices as a membrane, thin plate or curvature-continuous
+  surface. Test 165, figure 29 (key t).
 - Geodesics on meshes (`qaws_mesh_geodesic`): distances by the heat method
   (Crane et al. 2013) on the intrinsic Delaunay triangulation (stretched and
   obtuse triangles handled), its matrices factored once by the sparse LDL^T so each

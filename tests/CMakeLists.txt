@@ -166,6 +166,7 @@ add_executable(
 162_intersect.c
 163_boolean.c
 164_mesh_geodesic.c
+165_mesh_smooth.c
 )
 
 # The amalgamated library exports exactly the same symbols, so the tests can

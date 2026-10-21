@@ -1004,6 +1004,38 @@ The object copies what it needs, and concurrent queries are safe. Accuracy is th
 
 Figure 28 (key s) shows a torus's distance from one point with paths back to it, a bumpy sphere's distance to the nearest of three sources, and paths going round a hill.
 
+## Smoothing and fairing
+
+`qaws_mesh_3d_smooth` and `qaws_mesh_3d_fair` (`qaws_mesh_smooth.h`) move a mesh's vertices in place; the connectivity and attributes stay.
+
+```c
+qaws_smooth_desc d = { QAWS_SMOOTH_TAUBIN };          /* 10 steps, cotangent weights */
+qaws_mesh_3d_smooth(mesh, &d);
+qaws_fair_desc f = { 2 };                             /* a thin plate */
+qaws_mesh_3d_fair(mesh, free_vertices, &f);
+```
+
+**Smoothing methods:**
+- **LAPLACIAN:** explicit steps toward the neighbours' weighted mean. Simple, but the mesh shrinks (a noisy torus loses 21% of its volume in 30 steps).
+- **TAUBIN:** a step forward then a step back (Taubin 1995), a low-pass filter that does not shrink (+1.3% on the torus).
+- **IMPLICIT:** the mean curvature flow by backward Euler (Desbrun et al. 1999), `(M + tL) x' = M x`: stable for any step; one solve smooths at the scale √t, t a multiple of the mean edge length squared.
+- **BILAPLACIAN:** the fourth order flow `(M + t L M⁻¹ L) x' = M x`: smooths while keeping more of the shape's curvature (−0.3% on the torus).
+
+L is the cotangent Laplacian with lumped masses, or the uniform graph Laplacian (`QAWS_SMOOTH_WEIGHTS_UNIFORM`, which also evens out the triangles). With `QAWS_SMOOTH_KEEP_VOLUME`, a closed mesh with nothing held is scaled back to its volume after each step.
+
+**What stays:** vertices marked held, the border (unless `QAWS_SMOOTH_MOVE_BORDER`, which smooths it along itself) and the mesh's feature corners. Vertices on feature lines (`qaws_mesh_3d_set_feature_edges` or `qaws_mesh_3d_detect_features`) move along their line only, from their two line neighbours, so creases stay sharp.
+
+**Fairing** makes a region as smooth as possible given the rest: the free vertices solve Lᵏx = 0, the others held. Order 1 is a membrane (least area), 2 a thin plate (tangent to the surface round it: the default, as hole fills use), 3 continuous in curvature. Cotangent weights read the free vertices' own positions, however disturbed, so the system is solved with uniform weights first, then twice with the cotangents of the last solution. A free part touching no held vertex is left as it was.
+
+**Test 165 checks:**
+- **Noisy sphere** (2562 vertices, radial noise): every method lowers the radii's spread below half; Laplacian steps shrink the volume, Taubin's keep it within 2%, `QAWS_SMOOTH_KEEP_VOLUME` to 1e-12.
+- **Border:** a noisy grid smoothed by Taubin then implicit keeps its border bit for bit, its height noise cut tenfold.
+- **Crease:** on a noisy roof, with the crease a feature line its vertices stay exactly on the crease's plane and it stays sharp; without, it rounds.
+- **Fairing:** a disturbed disk in a flat grid comes back flat to rounding at orders 1 to 3; a disturbed cap of a sphere (a quarter of it) comes back within 0.48 of the sphere as a membrane, 0.086 as a thin plate, 0.002 at order 3.
+- **Refusals:** no mesh, an unknown method, order 4.
+
+Figure 29 (key t) shows a noisy torus smoothed by Laplacian, Taubin and bi-Laplacian steps, a roof's crease kept as a feature line, and a sphere's cap faired as a membrane and as a thin plate.
+
 ## Spatial queries: qaws_mesh_bvh
 
 `qaws_mesh_bvh.h` answers point and ray queries on any mesh, broken or not.
