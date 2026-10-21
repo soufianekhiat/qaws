@@ -37,6 +37,8 @@
  *                      through the BVH, its winding number and signed distance
  *   mesh23_quality.png quality reports: a 2D mesh by shape, a surface by smallest
  *                      angle, tetrahedra by smallest dihedral, with histograms
+ *   mesh24_repair_more.png  repair completed: a box's hole filled along its
+ *                      creases (the corner back), crossing faces found exactly
  *
  * Each figure lives in meshing_showcase/NN_*.c, compiled as one translation
  * unit with the rasterizer in example_raster.h.
@@ -190,14 +192,15 @@ static void ms_panel(er_canvas* c, int x, int y, int w, int h, qaws_mesh_3d cons
 #include "meshing_showcase/21_metric.c"
 #include "meshing_showcase/22_bvh.c"
 #include "meshing_showcase/23_quality.c"
+#include "meshing_showcase/24_repair_more.c"
 
-/* the figures to draw: all, or those whose keys the first argument lists ("58"; figures 10 to 23 are a to n) */
+/* the figures to draw: all, or those whose keys the first argument lists ("58"; figures 10 to 24 are a to o) */
 int main(int argc, char** argv)
 {
 	static void (*const demo[])(void) = { demo_core, demo_reference, demo_remesh, demo_quads, demo_generate, demo_tets, demo_hexes, demo_frame_hexes,
 		demo_measures, demo_remesh_angles, demo_remesh_cvt, demo_cross_field, demo_quad_flow, demo_quad_improve,
-		demo_quad_global, demo_guidance, demo_feature_size, demo_repair, demo_layers, demo_curved, demo_metric, demo_bvh, demo_quality };
-	static char const key[] = "123456789abcdefghijklmn";
+		demo_quad_global, demo_guidance, demo_feature_size, demo_repair, demo_layers, demo_curved, demo_metric, demo_bvh, demo_quality, demo_repair_more };
+	static char const key[] = "123456789abcdefghijklmno";
 	unsigned int i;
 	setvbuf(stdout, NULL, _IONBF, 0);
 	MAKE_DIR("showcase");
