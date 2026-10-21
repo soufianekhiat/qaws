@@ -182,6 +182,7 @@ src/qaws/internal/qaws_internal_ldlt.c
 src/qaws/internal/qaws_internal_flow.c
   src/qaws/internal/qaws_internal_flatten.c
   src/qaws/internal/qaws_internal_parallel.c
+  src/qaws/internal/qaws_internal_cpu.c
 )
 
 if(QAWS_ENABLE_SIMD)

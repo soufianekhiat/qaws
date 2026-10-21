@@ -17,11 +17,15 @@
  *     at its distance from the block;
  *   - refusals: a bad dimension, tetrahedra in 2D, an index out of range,
  *     a position not finite, rays and winding numbers where they do not
- *     apply.
+ *     apply;
+ *   - the processor's paths: a BVH built with AVX2 masked off answers as
+ *     the default one (closest distances, first and any hits, winding
+ *     numbers within both expansions' error).
  */
 
 #include "test_common.h"
 #include "qaws_mesh_bvh.h"
+#include "internal/qaws_internal_cpu.h"
 #include <math.h>
 #include <string.h>
 #include <stdlib.h>
@@ -684,6 +688,78 @@ static void test_scale(void)
 	free(h);
 }
 
+/* the processor's paths (AVX2 with 8-wide nodes where it has it, SSE2 with 4) give the same answers: a BVH built with AVX2
+   masked off against the default one */
+static void test_paths(void)
+{
+	qaws_scalar *x, *pts, *dir, *w0, *w1;
+	unsigned int nv, nt, *f, i, n = 2000, bad_c = 0, bad_r = 0, bad_a = 0;
+	double worst_w = 0;
+	qaws_mesh_bvh_desc d;
+	qaws_mesh_bvh *b0 = NULL, *b1 = NULL;
+	qaws_mesh_hit *h0, *h1;
+	bt_sphere(96, 48, &x, &nv, &f, &nt);
+	memset(&d, 0, sizeof d);
+	d.positions = x;
+	d.vertex_count = nv;
+	d.dimension = 3;
+	d.simplices = f;
+	d.simplex_size = 3;
+	d.simplex_count = nt;
+	qaws_internal_cpu_override(~QAWS_CPU_AVX2);
+	TEST_ASSERT(qaws_mesh_bvh_create(&b0, &d) == QAWS_STATUS_OK, "paths: built without AVX2");
+	qaws_internal_cpu_override(~0u);
+	TEST_ASSERT(qaws_mesh_bvh_create(&b1, &d) == QAWS_STATUS_OK, "paths: built on the processor's path");
+	pts = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * n);
+	dir = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * n);
+	w0 = (qaws_scalar*)malloc(sizeof(qaws_scalar) * n);
+	w1 = (qaws_scalar*)malloc(sizeof(qaws_scalar) * n);
+	h0 = (qaws_mesh_hit*)malloc(sizeof(qaws_mesh_hit) * n);
+	h1 = (qaws_mesh_hit*)malloc(sizeof(qaws_mesh_hit) * n);
+	for (i = 0; i < 3 * n; i++)
+	{
+		pts[i] = (qaws_scalar)(3 * bt_rand() - 1.5);
+		dir[i] = (qaws_scalar)(2 * bt_rand() - 1);
+	}
+	qaws_mesh_bvh_closest(h0, b0, pts, n, 0, NULL);
+	qaws_mesh_bvh_closest(h1, b1, pts, n, 0, NULL);
+	for (i = 0; i < n; i++)
+		if (fabs(h0[i].distance - h1[i].distance) > bt_tol() * (1 + h0[i].distance))
+			bad_c++;
+	qaws_mesh_bvh_ray(h0, b0, pts, dir, n, 0, 0, NULL);
+	qaws_mesh_bvh_ray(h1, b1, pts, dir, n, 0, 0, NULL);
+	for (i = 0; i < n; i++)
+		if ((h0[i].element == QAWS_MESH_NONE) != (h1[i].element == QAWS_MESH_NONE)
+			|| (h0[i].element != QAWS_MESH_NONE && fabs(h0[i].distance - h1[i].distance) > bt_tol() * (1 + h0[i].distance)))
+			bad_r++;
+	qaws_mesh_bvh_ray(h0, b0, pts, dir, n, 1, 1, NULL);
+	qaws_mesh_bvh_ray(h1, b1, pts, dir, n, 1, 1, NULL);
+	for (i = 0; i < n; i++)
+		if ((h0[i].element == QAWS_MESH_NONE) != (h1[i].element == QAWS_MESH_NONE))
+			bad_a++;
+	qaws_mesh_bvh_winding_number(w0, b0, pts, n, NULL);
+	qaws_mesh_bvh_winding_number(w1, b1, pts, n, NULL);
+	for (i = 0; i < n; i++)
+		if (fabs(w0[i] - w1[i]) > worst_w)
+			worst_w = fabs(w0[i] - w1[i]);
+	printf("  paths: %s against SSE2, %u triangles, worst winding difference %.2e\n",
+		(qaws_internal_cpu_features() & QAWS_CPU_AVX2) ? "AVX2" : "SSE2 (no AVX2 here)", nt, worst_w);
+	TEST_ASSERT(bad_c == 0, "paths: the same closest distances");
+	TEST_ASSERT(bad_r == 0, "paths: the same first hits");
+	TEST_ASSERT(bad_a == 0, "paths: the same any-hit answers");
+	TEST_ASSERT(worst_w < 4e-3, "paths: winding numbers within both expansions' error");
+	qaws_mesh_bvh_destroy(b0);
+	qaws_mesh_bvh_destroy(b1);
+	free(x);
+	free(f);
+	free(pts);
+	free(dir);
+	free(w0);
+	free(w1);
+	free(h0);
+	free(h1);
+}
+
 int test_159_mesh_bvh_main(void)
 {
 	g_pass = 0;
@@ -694,6 +770,7 @@ int test_159_mesh_bvh_main(void)
 	test_2d();
 	test_volume();
 	test_refusals();
+	test_paths();
 	test_scale();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;

@@ -30,9 +30,10 @@
  * Soups are welcome: nothing is assumed of the topology.
  *
  * Build: binned SAH (8 bins per axis, as tinyBVH's default), leaves of at
- * most `leaf_size` simplices, collapsed into 4-wide nodes (the largest
- * child opened first) whose float boxes, rounded outward, are tested 4 at a
- * time. Positions are held in double whatever the precision of the caller,
+ * most `leaf_size` simplices, collapsed into wide nodes (the largest child
+ * opened first) whose float boxes, rounded outward, are tested together:
+ * 8 per node with AVX2, 4 with SSE2, the path chosen once at creation from
+ * what the processor has. Positions are held in double whatever the precision of the caller,
  * and every answer comes from the double tests: rays first screen a leaf's
  * triangles in float with a margin that only lets more through.
  *

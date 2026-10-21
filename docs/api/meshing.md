@@ -1001,6 +1001,8 @@ A `qaws_mesh_hit` holds:
 
 **Build.** Binned SAH with 8 bins per axis, as tinyBVH's default, and leaves of up to 4 simplices. Positions are held in double whatever the caller's precision. Building 199,200 triangles takes 0.15 s.
 
+**Processor paths.** The binary tree is collapsed into wide nodes whose float boxes are tested together: 8 per node with AVX2, 4 with SSE2, otherwise scalar. The path is chosen once, when the BVH is created, from what the processor and the operating system support (CPUID and XGETBV). The AVX2 kernels are compiled per function, so the library keeps its baseline flags. Every path returns the same distances and hits, because the exact tests run in double. Winding numbers differ between paths only within the expansion's error, since the clusters differ.
+
 **Rays.** Triangles in 3D use the watertight test of Woop, Benthin and Wald (2013): a ray through a shared edge or vertex never slips between triangles. Segments in 2D decide each vertex's side by the same rule in both segments that share it.
 
 **Winding numbers.** These are generalized winding numbers (Jacobson et al. 2013): solid angles over 4π in 3D, angles over 2π in 2D.

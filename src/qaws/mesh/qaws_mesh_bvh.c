@@ -13,6 +13,10 @@
 #include <stdint.h>
 #include <stddef.h>
 #include "../simd/qaws_simd.h"
+#include "../internal/qaws_internal_cpu.h"
+#if defined(_MSC_VER)
+#include <intrin.h>
+#endif
 
 #if defined(__SSE2__) || defined(_M_X64) || defined(_M_AMD64) || defined(__AVX2__)
 #define BV_SSE 1
@@ -20,26 +24,36 @@
 #define BV_SSE 0
 #endif
 
+/* AVX2 kernels, compiled per function (the library keeps its baseline flags) and chosen at creation by CPUID */
+#if BV_SSE && (defined(_MSC_VER) || defined(__GNUC__) || defined(__clang__))
+#include <immintrin.h>
+#define BV_AVX2 1
+#if defined(_MSC_VER) && !defined(__clang__)
+#define BV_AVX2_FN
+#else
+#define BV_AVX2_FN __attribute__((target("avx2,fma")))
+#endif
+#else
+#define BV_AVX2 0
+#endif
+
 #define BV_BINS 8
 #define BV_CHUNK 64
 #define BV_PI 3.14159265358979323846
+#define BV_WMAX 8
 
 typedef struct bv_node
 {
 	double lo[3], hi[3];
 	unsigned int a, b;   /* interior: the children; leaf: the first entry of ord and the count */
-	unsigned int leaf, first, cnt, lf;   /* (first, cnt: its entries, contiguous in ord; lf: a leaf in the 4-wide tree) */
+	unsigned int leaf, first, cnt, lf;   /* (first, cnt: its entries, contiguous in ord; lf: a leaf in the wide tree) */
 } bv_node;
 
-/* Queries run on 4-wide nodes collapsed from the binary SAH tree: per slot a float box relative to the scene's centre,
-   rounded outward and widened (so the floats' rounding of rays and points never loses a hit), tested 4 at a time.
+/* Queries run on w-wide nodes (w 8 on the AVX2 path, else 4) collapsed from the binary SAH tree: per slot a float box
+   relative to the scene's centre, rounded outward and widened (so the floats' rounding of rays and points never loses a
+   hit), tested w at a time. A node is 8 w floats: lo per axis (w each), hi per axis, then w children and w counts
+   (inner slot: a node and 0; leaf slot: its first entry of ord and its entries; empty: QAWS_MESH_NONE and 0).
    Empty slots have lo +inf and hi -inf. */
-typedef struct bv_node4
-{
-	float lo[3][4], hi[3][4];   /* per axis, per slot */
-	unsigned int child[4];      /* inner slot: a node; leaf slot: its first entry of ord; QAWS_MESH_NONE: empty */
-	unsigned int count[4];      /* 0: inner slot; else the leaf's entries */
-} bv_node4;
 
 typedef struct bv_stk
 {
@@ -47,7 +61,7 @@ typedef struct bv_stk
 	float t;                    /* the node's entry distance (rays) or squared distance (points) */
 } bv_stk;
 
-/* per 4-wide node: centre (3), area vector sum (3), first moment C_ij = sum a_i d_j (9), radius, area, second moment T_ijk = sum a_i d_j d_k (27) */
+/* per wide node: centre (3), area vector sum (3), first moment C_ij = sum a_i d_j (9), radius, area, second moment T_ijk = sum a_i d_j d_k (27) */
 #define BV_WM 44
 /* per leaf slot, in floats: centre (relative to the scene's), N, C, radius, T symmetric (18) */
 #define BV_LM 34
@@ -55,6 +69,7 @@ typedef struct bv_stk
 struct qaws_mesh_bvh
 {
 	unsigned int dim, k, nv, ns, nn, n4, depth, leaf;
+	unsigned int simd, w, nst;   /* the path (0 scalar, 1 SSE2, 2 AVX2), the node width, the floats per node */
 	double* x;            /* 3 per vertex (z 0 in 2D) */
 	unsigned int* s;      /* k per simplex */
 	unsigned int* el;     /* per simplex */
@@ -62,15 +77,53 @@ struct qaws_mesh_bvh
 	unsigned int* ee;     /* per entry its element */
 	unsigned int* ev;     /* per entry its k vertices */
 	double* px;           /* per entry its k vertices' positions, contiguous */
-	float* scr;           /* triangles in 3D: per entry (ns + 4) 12 floats, v0 - c, e1, e2 each padded to 4, for the rays' screen */
+	float* scr;           /* triangles in 3D, for the rays' screen: per entry (ns + 8) 12 floats, v0 - c, e1, e2 each padded by its L1 norm */
 	bv_node* nodes;       /* the binary tree (build only) */
-	bv_node4* nodes4;     /* in nodes4_mem, aligned to 64 bytes */
-	void* nodes4_mem;
+	float* nf;            /* the wide nodes, nst floats each, in nf_mem aligned to 64 bytes */
+	void* nf_mem;
 	double c[3], pad;     /* the scene's centre, the boxes' widening */
 	double beta;
-	double* wm;           /* BV_WM per 4-wide node when the winding number applies */
-	float* lm;            /* BV_LM per slot (4 per node; leaf slots only filled) */
+	double* wm;           /* BV_WM per wide node when the winding number applies */
+	float* lm;            /* BV_LM per slot (w per node; leaf slots only filled) */
 };
+
+/* node i: its slots' lower bounds along axis a, upper bounds, children, counts */
+static float* bv_nlo(qaws_mesh_bvh const* b, unsigned int i, unsigned int a)
+{
+	return b->nf + (size_t)i * b->nst + a * b->w;
+}
+
+static float* bv_nhi(qaws_mesh_bvh const* b, unsigned int i, unsigned int a)
+{
+	return b->nf + (size_t)i * b->nst + (3 + a) * b->w;
+}
+
+static unsigned int* bv_nch(qaws_mesh_bvh const* b, unsigned int i)
+{
+	return (unsigned int*)(b->nf + (size_t)i * b->nst + 6 * b->w);
+}
+
+static unsigned int* bv_ncnt(qaws_mesh_bvh const* b, unsigned int i)
+{
+	return (unsigned int*)(b->nf + (size_t)i * b->nst + 7 * b->w);
+}
+
+/* the lowest set bit of a nonzero mask */
+static unsigned int bv_ctz(unsigned int m)
+{
+#if defined(_MSC_VER)
+	unsigned long r;
+	_BitScanForward(&r, m);
+	return (unsigned int)r;
+#elif defined(__GNUC__) || defined(__clang__)
+	return (unsigned int)__builtin_ctz(m);
+#else
+	unsigned int r = 0;
+	while (!(m >> r & 1))
+		r++;
+	return r;
+#endif
+}
 
 static int bv_winds(qaws_mesh_bvh const* b)
 {
@@ -280,6 +333,52 @@ static void bv_task_bounds(bv_ref const* r, bv_task* t)
 	}
 }
 
+#if BV_AVX2
+/* refs [begin, end) into the bins of every axis with scale > 0, one 8-float max per ref and axis on (-lo, id, hi, pad):
+   the same bins as bv_acc's (min and max are exact), lane 3 of each bound left 0 */
+BV_AVX2_FN static void bv_bin_avx2(bv_ref const* r, unsigned int begin, unsigned int end, unsigned int dim, float const* clo, float const* scale,
+	float (*blo)[BV_BINS][4], float (*bhi)[BV_BINS][4], unsigned int (*bcount)[BV_BINS])
+{
+	__m256 acc[3][BV_BINS], neg = _mm256_setr_ps(-0.0f, -0.0f, -0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f), none = _mm256_set1_ps(-HUGE_VALF);
+	unsigned int i, a, j, c;
+	for (a = 0; a < 3; a++)
+		for (j = 0; j < BV_BINS; j++)
+			acc[a][j] = none;
+	/* the bins of the 3 axes at once, as bv_bin: (lo + hi - clo) scale truncated, clamped to [0, BV_BINS - 1] */
+	__m128 c4 = _mm_setr_ps(clo[0], clo[1], clo[2], 0), s4 = _mm_setr_ps(scale[0], scale[1], scale[2], 0);
+	__m128i top = _mm_set1_epi32(BV_BINS - 1), zero = _mm_setzero_si128();
+	for (i = begin; i < end; i++)
+	{
+		__m256 v = _mm256_loadu_ps((float const*)(r + i));
+		__m128 lo = _mm256_castps256_ps128(v), hi = _mm256_extractf128_ps(v, 1);
+		__m128i bi = _mm_cvttps_epi32(_mm_mul_ps(_mm_sub_ps(_mm_add_ps(lo, hi), c4), s4));
+		int bins[4];
+		bi = _mm_min_epi32(_mm_max_epi32(bi, zero), top);
+		_mm_storeu_si128((__m128i*)bins, bi);
+		v = _mm256_xor_ps(v, neg);
+		for (a = 0; a < dim; a++)
+			if (scale[a] > 0)
+			{
+				bcount[a][bins[a]]++;
+				acc[a][bins[a]] = _mm256_max_ps(acc[a][bins[a]], v);
+			}
+	}
+	for (a = 0; a < 3; a++)
+		for (j = 0; j < BV_BINS; j++)
+		{
+			float o[8];
+			_mm256_storeu_ps(o, acc[a][j]);
+			for (c = 0; c < 3; c++)
+			{
+				blo[a][j][c] = -o[c];
+				bhi[a][j][c] = o[4 + c];
+			}
+			blo[a][j][3] = bhi[a][j][3] = 0;
+		}
+	_mm256_zeroupper();
+}
+#endif
+
 static qaws_status bv_build(qaws_mesh_bvh* b, unsigned int leaf_size)
 {
 	bv_ref* r = (bv_ref*)qaws_internal_scratch_malloc(qaws_internal_mul2((size_t)b->ns + 1, sizeof(bv_ref)));
@@ -347,22 +446,28 @@ static qaws_status bv_build(qaws_mesh_bvh* b, unsigned int leaf_size)
 		/* binned SAH, every axis the centroids spread along binned in one pass, each bin with its box and centroids' box */
 		for (axis = 0; axis < 3; axis++)
 		{
-			scale[axis] = axis < b->dim && t.chi[axis] > t.clo[axis] ? BV_BINS / (t.chi[axis] - t.clo[axis]) : 0;
+			scale[axis] = n > 4 && axis < b->dim && t.chi[axis] > t.clo[axis] ? BV_BINS / (t.chi[axis] - t.clo[axis]) : 0;
 			for (j = 0; j < BV_BINS; j++)
 			{
 				bv_fempty4(blo[axis][j], bhi[axis][j]);
 				bcount[axis][j] = 0;
 			}
 		}
-		for (i = t.begin; i < t.end; i++)
+		if (n > 4)
 		{
-			for (axis = 0; axis < b->dim; axis++)
-				if (scale[axis] > 0)
-				{
-					int bin = bv_bin(r + i, axis, t.clo[axis], scale[axis]);
-					bcount[axis][bin]++;
-					bv_acc(blo[axis][bin], bhi[axis][bin], r[i].lo, r[i].hi);
-				}
+#if BV_AVX2
+			if (b->simd == 2)
+				bv_bin_avx2(r, t.begin, t.end, b->dim, t.clo, scale, blo, bhi, bcount);
+			else
+#endif
+				for (i = t.begin; i < t.end; i++)
+					for (axis = 0; axis < b->dim; axis++)
+						if (scale[axis] > 0)
+						{
+							int bin = bv_bin(r + i, axis, t.clo[axis], scale[axis]);
+							bcount[axis][bin]++;
+							bv_acc(blo[axis][bin], bhi[axis][bin], r[i].lo, r[i].hi);
+						}
 		}
 		for (axis = 0; axis < b->dim; axis++)
 		{
@@ -612,33 +717,33 @@ static void bv_merge_moments(double const* const* part, unsigned int n, double* 
 	bv_mirror(m);
 }
 
-static void bv_slot_set(qaws_mesh_bvh* b, bv_node4* n, unsigned int s, double const* lo, double const* hi)
+static void bv_slot_set(qaws_mesh_bvh* b, unsigned int i, unsigned int s, double const* lo, double const* hi)
 {
 	unsigned int a;
 	for (a = 0; a < 3; a++)
 	{
-		n->lo[a][s] = bv_down(lo[a] - b->c[a] - b->pad);
-		n->hi[a][s] = bv_up(hi[a] - b->c[a] + b->pad);
+		bv_nlo(b, i, a)[s] = bv_down(lo[a] - b->c[a] - b->pad);
+		bv_nhi(b, i, a)[s] = bv_up(hi[a] - b->c[a] + b->pad);
 	}
 }
 
-static void bv_slot_clear(bv_node4* n, unsigned int s)
+static void bv_slot_clear(qaws_mesh_bvh* b, unsigned int i, unsigned int s)
 {
 	unsigned int a;
 	for (a = 0; a < 3; a++)
 	{
 		/* (lo +inf, hi -inf: every slab test, whatever the signs, and every box distance miss it) */
-		n->lo[a][s] = HUGE_VALF;
-		n->hi[a][s] = -HUGE_VALF;
+		bv_nlo(b, i, a)[s] = HUGE_VALF;
+		bv_nhi(b, i, a)[s] = -HUGE_VALF;
 	}
-	n->child[s] = QAWS_MESH_NONE;
-	n->count[s] = 0;
+	bv_nch(b, i)[s] = QAWS_MESH_NONE;
+	bv_ncnt(b, i)[s] = 0;
 }
 
-/* the binary tree collapsed into 4-wide nodes (the largest inner child opened first), parents before children; the binary nodes freed */
+/* the binary tree collapsed into w-wide nodes (the largest inner child opened first), parents before children; the binary nodes freed */
 static qaws_status bv_collapse(qaws_mesh_bvh* b)
 {
-	unsigned int *stk = NULL, top = 0, i;
+	unsigned int *stk = NULL, top = 0, i, sw = 4;
 	double lo[3], hi[3];
 	b->n4 = 0;
 	b->depth = 0;
@@ -653,7 +758,7 @@ static qaws_status bv_collapse(qaws_mesh_bvh* b)
 		for (i = b->nn; i-- > 0;)
 		{
 			bv_node* nd = b->nodes + i;
-			double A = bv_area(nd->lo, nd->hi, b->dim), as_leaf = A * ((nd->cnt + 3) / 4);
+			double A = bv_area(nd->lo, nd->hi, b->dim), as_leaf = A * ((nd->cnt + sw - 1) / sw);
 			if (nd->leaf)
 			{
 				nd->lf = 1;
@@ -668,16 +773,16 @@ static qaws_status bv_collapse(qaws_mesh_bvh* b)
 		}
 		qaws_internal_free(cost);
 	}
-	/* the nodes on cache lines (two each) */
-	b->nodes4_mem = qaws_internal_malloc(qaws_internal_add2(qaws_internal_mul2((size_t)b->nn + 1, sizeof(bv_node4)), 64));
-	b->nodes4 = b->nodes4_mem ? (bv_node4*)(((uintptr_t)b->nodes4_mem + 63) & ~(uintptr_t)63) : NULL;
+	/* the nodes on cache lines */
+	b->nf_mem = qaws_internal_malloc(qaws_internal_add2(qaws_internal_mul3((size_t)b->nn + 1, b->nst, sizeof(float)), 64));
+	b->nf = b->nf_mem ? (float*)(((uintptr_t)b->nf_mem + 63) & ~(uintptr_t)63) : NULL;
 	stk = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul3((size_t)b->nn + 1, 3, sizeof(unsigned int)));
 	b->px = (double*)qaws_internal_malloc(qaws_internal_mul3((size_t)b->ns + 1, 3 * (size_t)b->k, sizeof(double)));
 	if (b->k == 3 && b->dim == 3)
-		b->scr = (float*)qaws_internal_zalloc(qaws_internal_mul2((size_t)b->ns + 4, 12), sizeof(float));
+		b->scr = (float*)qaws_internal_zalloc(qaws_internal_mul2((size_t)b->ns + 8, 12), sizeof(float));
 	b->ee = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2((size_t)b->ns + 1, sizeof(unsigned int)));
 	b->ev = (unsigned int*)qaws_internal_malloc(qaws_internal_mul3((size_t)b->ns + 1, b->k, sizeof(unsigned int)));
-	if (!b->nodes4 || !stk || !b->px || !b->ee || !b->ev || (b->k == 3 && b->dim == 3 && !b->scr))
+	if (!b->nf || !stk || !b->px || !b->ee || !b->ev || (b->k == 3 && b->dim == 3 && !b->scr))
 	{
 		qaws_internal_free(stk);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
@@ -700,8 +805,7 @@ static qaws_status bv_collapse(qaws_mesh_bvh* b)
 	top = 3;
 	while (top)
 	{
-		unsigned int depth = stk[--top], n4 = stk[--top], bin = stk[--top], list[4], cnt = 0, s;
-		bv_node4* n = b->nodes4 + n4;
+		unsigned int depth = stk[--top], n4 = stk[--top], bin = stk[--top], list[BV_WMAX], cnt = 0, s;
 		if (depth > b->depth)
 			b->depth = depth;
 		if (b->nodes[bin].lf)
@@ -711,9 +815,9 @@ static qaws_status bv_collapse(qaws_mesh_bvh* b)
 			list[cnt++] = b->nodes[bin].a;
 			list[cnt++] = b->nodes[bin].b;
 		}
-		while (cnt < 4)
+		while (cnt < b->w)
 		{
-			unsigned int best = 4;
+			unsigned int best = BV_WMAX;
 			double ba = -1;
 			for (s = 0; s < cnt; s++)
 				if (!b->nodes[list[s]].lf && bv_area(b->nodes[list[s]].lo, b->nodes[list[s]].hi, 3) > ba)
@@ -721,33 +825,33 @@ static qaws_status bv_collapse(qaws_mesh_bvh* b)
 					ba = bv_area(b->nodes[list[s]].lo, b->nodes[list[s]].hi, 3);
 					best = s;
 				}
-			if (best == 4)
+			if (best == BV_WMAX)
 				break;
 			s = list[best];
 			list[best] = b->nodes[s].a;
 			list[cnt++] = b->nodes[s].b;
 		}
-		for (s = 0; s < 4; s++)
+		for (s = 0; s < b->w; s++)
 		{
 			bv_node const* c;
 			if (s >= cnt)
 			{
-				bv_slot_clear(n, s);
+				bv_slot_clear(b, n4, s);
 				continue;
 			}
 			c = b->nodes + list[s];
-			bv_slot_set(b, n, s, c->lo, c->hi);
+			bv_slot_set(b, n4, s, c->lo, c->hi);
 			if (c->lf)
 			{
-				n->child[s] = c->first;
-				n->count[s] = c->cnt;
+				bv_nch(b, n4)[s] = c->first;
+				bv_ncnt(b, n4)[s] = c->cnt;
 			}
 			else
 			{
-				n->child[s] = b->n4++;
-				n->count[s] = 0;
+				bv_nch(b, n4)[s] = b->n4++;
+				bv_ncnt(b, n4)[s] = 0;
 				stk[top++] = list[s];
-				stk[top++] = n->child[s];
+				stk[top++] = bv_nch(b, n4)[s];
 				stk[top++] = depth + 1;
 			}
 		}
@@ -776,7 +880,7 @@ static void bv_pack_moment(qaws_mesh_bvh const* b, double const* m, float* p)
 static void bv_refit_nodes(qaws_mesh_bvh* b)
 {
 	unsigned int i, j, s, a, w = bv_winds(b) && b->wm;
-	double leafm[4][BV_WM];
+	double leafm[BV_WMAX][BV_WM];
 	for (i = 0; i < b->ns; i++)
 		for (j = 0; j < b->k; j++)
 			memcpy(b->px + 3 * ((size_t)b->k * i + j), b->x + 3 * (size_t)b->s[(size_t)b->k * b->ord[i] + j], 3 * sizeof(double));
@@ -784,61 +888,59 @@ static void bv_refit_nodes(qaws_mesh_bvh* b)
 		for (i = 0; i < b->ns; i++)
 		{
 			double const* v = b->px + 9 * (size_t)i;
+			float e[12];
 			for (a = 0; a < 3; a++)
 			{
-				b->scr[12 * (size_t)i + a] = (float)(v[a] - b->c[a]);
-				b->scr[12 * (size_t)i + 4 + a] = (float)(v[3 + a] - v[a]);
-				b->scr[12 * (size_t)i + 8 + a] = (float)(v[6 + a] - v[a]);
+				e[a] = (float)(v[a] - b->c[a]);
+				e[4 + a] = (float)(v[3 + a] - v[a]);
+				e[8 + a] = (float)(v[6 + a] - v[a]);
 			}
-			/* the pads: the three rows' L1 norms (the screen's bounds) */
+			/* the three vectors' L1 norms (the screen's bounds) */
 			for (a = 0; a < 3; a++)
-			{
-				float const* r = b->scr + 12 * (size_t)i + 4 * a;
-				b->scr[12 * (size_t)i + 4 * a + 3] = (fabsf(r[0]) + fabsf(r[1])) + fabsf(r[2]);
-			}
+				e[4 * a + 3] = (fabsf(e[4 * a]) + fabsf(e[4 * a + 1])) + fabsf(e[4 * a + 2]);
+			memcpy(b->scr + 12 * (size_t)i, e, sizeof e);
 		}
 	for (i = b->n4; i-- > 0;)
 	{
-		bv_node4* n = b->nodes4 + i;
-		double const* part[4];
+		unsigned int* ch = bv_nch(b, i), *cn = bv_ncnt(b, i);
+		double const* part[BV_WMAX];
 		unsigned int np = 0;
-		for (s = 0; s < 4; s++)
+		for (s = 0; s < b->w; s++)
 		{
-			if (n->child[s] == QAWS_MESH_NONE)
+			if (ch[s] == QAWS_MESH_NONE)
 				continue;
-			if (n->count[s])
+			if (cn[s])
 			{
 				double lo[3], hi[3];
 				bv_empty(lo, hi);
-				for (j = 0; j < n->count[s] * b->k; j++)
-					bv_grow(lo, hi, b->px + 3 * ((size_t)b->k * n->child[s] + j), b->px + 3 * ((size_t)b->k * n->child[s] + j));
-				bv_slot_set(b, n, s, lo, hi);
+				for (j = 0; j < cn[s] * b->k; j++)
+					bv_grow(lo, hi, b->px + 3 * ((size_t)b->k * ch[s] + j), b->px + 3 * ((size_t)b->k * ch[s] + j));
+				bv_slot_set(b, i, s, lo, hi);
 				if (w)
 				{
-					bv_leaf_moment(b, n->child[s], n->count[s], leafm[s]);
-					bv_pack_moment(b, leafm[s], b->lm + BV_LM * (4 * (size_t)i + s));
+					bv_leaf_moment(b, ch[s], cn[s], leafm[s]);
+					bv_pack_moment(b, leafm[s], b->lm + BV_LM * ((size_t)b->w * i + s));
 					part[np++] = leafm[s];
 				}
 			}
 			else
 			{
 				/* the child's slots' union (its floats already rounded outward) */
-				bv_node4 const* c = b->nodes4 + n->child[s];
-				unsigned int t;
+				unsigned int t, c = ch[s];
 				for (a = 0; a < 3; a++)
 				{
 					float l = HUGE_VALF, h = -HUGE_VALF;
-					for (t = 0; t < 4; t++)
-						if (c->child[t] != QAWS_MESH_NONE)
+					for (t = 0; t < b->w; t++)
+						if (bv_nch(b, c)[t] != QAWS_MESH_NONE)
 						{
-							l = c->lo[a][t] < l ? c->lo[a][t] : l;
-							h = c->hi[a][t] > h ? c->hi[a][t] : h;
+							l = bv_nlo(b, c, a)[t] < l ? bv_nlo(b, c, a)[t] : l;
+							h = bv_nhi(b, c, a)[t] > h ? bv_nhi(b, c, a)[t] : h;
 						}
-					n->lo[a][s] = l;
-					n->hi[a][s] = h;
+					bv_nlo(b, i, a)[s] = l;
+					bv_nhi(b, i, a)[s] = h;
 				}
 				if (w)
-					part[np++] = b->wm + BV_WM * (size_t)n->child[s];
+					part[np++] = b->wm + BV_WM * (size_t)c;
 			}
 		}
 		if (w)
@@ -849,11 +951,11 @@ static void bv_refit_nodes(qaws_mesh_bvh* b)
 			for (a = 0; a < 3; a++)
 			{
 				double l = HUGE_VAL, h = -HUGE_VAL, e;
-				for (s = 0; s < 4; s++)
-					if (n->child[s] != QAWS_MESH_NONE)
+				for (s = 0; s < b->w; s++)
+					if (ch[s] != QAWS_MESH_NONE)
 					{
-						l = fmin(l, (double)n->lo[a][s] + b->c[a]);
-						h = fmax(h, (double)n->hi[a][s] + b->c[a]);
+						l = fmin(l, (double)bv_nlo(b, i, a)[s] + b->c[a]);
+						h = fmax(h, (double)bv_nhi(b, i, a)[s] + b->c[a]);
 					}
 				e = fmax(fabs(m[a] - l), fabs(h - m[a]));
 				r2 += e * e;
@@ -872,7 +974,7 @@ static qaws_status bv_make(qaws_mesh_bvh** out, double* x, unsigned int nv, unsi
 {
 	qaws_mesh_bvh* b = (qaws_mesh_bvh*)qaws_internal_zalloc(1, sizeof *b);
 	qaws_status st;
-	unsigned int leaf = desc && desc->leaf_size ? desc->leaf_size : 4;
+	unsigned int leaf;
 	double beta = desc && desc->winding_accuracy > 0 ? (double)desc->winding_accuracy : 2.25;
 	if (!b)
 	{
@@ -889,6 +991,15 @@ static qaws_status bv_make(qaws_mesh_bvh** out, double* x, unsigned int nv, unsi
 	b->k = k;
 	b->ns = ns;
 	b->beta = beta;
+	/* the path, once: AVX2 with 8-wide nodes, else SSE2 (or scalar) with 4 */
+	b->simd = BV_SSE ? 1 : 0;
+#if BV_AVX2
+	if ((qaws_internal_cpu_features() & QAWS_CPU_AVX2) == QAWS_CPU_AVX2)
+		b->simd = 2;
+#endif
+	b->w = b->simd == 2 ? 8 : 4;
+	b->nst = 8 * b->w;
+	leaf = desc && desc->leaf_size ? desc->leaf_size : 4;
 	b->leaf = leaf;
 	st = bv_build(b, 1);   /* (to single simplices: the collapse forms the leaves by cost) */
 	if (st == QAWS_STATUS_OK)
@@ -896,7 +1007,7 @@ static qaws_status bv_make(qaws_mesh_bvh** out, double* x, unsigned int nv, unsi
 	if (st == QAWS_STATUS_OK && bv_winds(b) && b->n4)
 	{
 		b->wm = (double*)qaws_internal_malloc(qaws_internal_mul3((size_t)b->n4, BV_WM, sizeof(double)));
-		b->lm = (float*)qaws_internal_malloc(qaws_internal_mul3((size_t)b->n4, 4 * BV_LM, sizeof(float)));
+		b->lm = (float*)qaws_internal_malloc(qaws_internal_mul3((size_t)b->n4, (size_t)b->w * BV_LM, sizeof(float)));
 		if (!b->wm || !b->lm)
 			st = QAWS_STATUS_ALLOCATION_FAILURE;
 	}
@@ -1137,7 +1248,7 @@ void qaws_mesh_bvh_destroy(qaws_mesh_bvh* b)
 	qaws_internal_free(b->el);
 	qaws_internal_free(b->ord);
 	qaws_internal_free(b->nodes);
-	qaws_internal_free(b->nodes4_mem);
+	qaws_internal_free(b->nf_mem);
 	qaws_internal_free(b->px);
 	qaws_internal_free(b->scr);
 	qaws_internal_free(b->ee);
@@ -1364,68 +1475,96 @@ static double bv_entry_closest(qaws_mesh_bvh const* b, unsigned int e, double co
 	return bv_tet_closest(q, v, w);
 }
 
-/* a node's 4 slots against a point (squared distances) or a ray (entry distances, misses at +inf); same arithmetic with or without SSE */
-static void bv_slots_d2(bv_node4 const* n, float const* q, float* out)
+/* A node's slots against a point (squared distances) or a ray (entry distances and a mask of the hit slots), on the
+   path's width: SSE2 for 4, AVX2 for 8, scalar for either. Every path does the same float operations in the same order,
+   so they agree lane for lane. The AVX2 kernels clear the upper halves before returning (no AVX to SSE transitions). */
+
+static void bv_slots_d2_any(float const* n, unsigned int w, float const* q, float* out)
 {
-#if BV_SSE
-	__m128 d2 = _mm_setzero_ps(), z = _mm_setzero_ps();
-	unsigned int a;
-	for (a = 0; a < 3; a++)
-	{
-		__m128 qa = _mm_set1_ps(q[a]), dl = _mm_sub_ps(_mm_loadu_ps(n->lo[a]), qa), dh = _mm_sub_ps(qa, _mm_loadu_ps(n->hi[a]));
-		__m128 m = _mm_max_ps(_mm_max_ps(dl, dh), z);
-		d2 = _mm_add_ps(d2, _mm_mul_ps(m, m));
-	}
-	_mm_storeu_ps(out, d2);
-#else
 	unsigned int a, s;
-	for (s = 0; s < 4; s++)
+	for (s = 0; s < w; s++)
 	{
 		float d2 = 0;
 		for (a = 0; a < 3; a++)
 		{
-			float dl = n->lo[a][s] - q[a], dh = q[a] - n->hi[a][s], m = dl > dh ? dl : dh;
+			float dl = n[a * w + s] - q[a], dh = q[a] - n[(3 + a) * w + s], m = dl > dh ? dl : dh;
 			m = m > 0 ? m : 0;
 			d2 = d2 + m * m;
 		}
 		out[s] = d2;
 	}
-#endif
 }
 
-/* a ray as the node tests read it: origin (relative to the centre) and inverse direction, broadcast once, and the byte
-   offsets of each axis' near and far planes in a node (picked by the direction's signs, so no min or max per axis) */
-typedef struct bv_rq
-{
 #if BV_SSE
-	__m128 o4[3], i4[3];
-#endif
-	float o[3], id[3];
-	size_t nr[3], fr[3];
-} bv_rq;
-
-/* a node's 4 slots against a ray: the entry distances into tn and the hit slots as a mask. Same arithmetic with or without SSE. */
-static unsigned int bv_slots_ray(bv_node4 const* n, bv_rq const* q, float tmax, float* tn)
+static void bv_slots_d2_sse(float const* n, float const* q, float* out)
 {
-	char const* p = (char const*)n;
-#if BV_SSE
-	__m128 t0 = _mm_setzero_ps(), t1 = _mm_set1_ps(tmax);
+	__m128 d2 = _mm_setzero_ps(), z = _mm_setzero_ps();
 	unsigned int a;
 	for (a = 0; a < 3; a++)
 	{
-		t0 = _mm_max_ps(t0, _mm_mul_ps(_mm_sub_ps(_mm_load_ps((float const*)(p + q->nr[a])), q->o4[a]), q->i4[a]));
-		t1 = _mm_min_ps(t1, _mm_mul_ps(_mm_sub_ps(_mm_load_ps((float const*)(p + q->fr[a])), q->o4[a]), q->i4[a]));
+		__m128 qa = _mm_set1_ps(q[a]), dl = _mm_sub_ps(_mm_load_ps(n + 4 * a), qa), dh = _mm_sub_ps(qa, _mm_load_ps(n + 12 + 4 * a));
+		__m128 m = _mm_max_ps(_mm_max_ps(dl, dh), z);
+		d2 = _mm_add_ps(d2, _mm_mul_ps(m, m));
 	}
-	_mm_storeu_ps(tn, t0);
-	return (unsigned int)_mm_movemask_ps(_mm_cmple_ps(t0, t1));
-#else
-	unsigned int a, s, m = 0;
-	for (s = 0; s < 4; s++)
+	_mm_storeu_ps(out, d2);
+}
+#endif
+
+#if BV_AVX2
+BV_AVX2_FN static void bv_slots_d2_avx2(float const* n, float const* q, float* out)
+{
+	__m256 d2 = _mm256_setzero_ps(), z = _mm256_setzero_ps();
+	unsigned int a;
+	for (a = 0; a < 3; a++)
 	{
+		__m256 qa = _mm256_set1_ps(q[a]), dl = _mm256_sub_ps(_mm256_load_ps(n + 8 * a), qa), dh = _mm256_sub_ps(qa, _mm256_load_ps(n + 24 + 8 * a));
+		__m256 m = _mm256_max_ps(_mm256_max_ps(dl, dh), z);
+		d2 = _mm256_add_ps(d2, _mm256_mul_ps(m, m));
+	}
+	_mm256_storeu_ps(out, d2);
+	_mm256_zeroupper();
+}
+#endif
+
+static void bv_slots_d2(qaws_mesh_bvh const* b, float const* n, float const* q, float* out)
+{
+#if BV_AVX2
+	if (b->simd == 2)
+	{
+		bv_slots_d2_avx2(n, q, out);
+		return;
+	}
+#endif
+#if BV_SSE
+	if (b->simd == 1)
+	{
+		bv_slots_d2_sse(n, q, out);
+		return;
+	}
+#endif
+	bv_slots_d2_any(n, b->w, q, out);
+}
+
+/* a ray as the node tests read it: origin (relative to the centre) and inverse direction, and the float offsets of each
+   axis' near and far rows in a node (picked by the direction's signs, so no min or max per axis) */
+typedef struct bv_rq
+{
+	float o[3], id[3];
+	unsigned int nr[3], fr[3];
+} bv_rq;
+
+static unsigned int bv_slots_ray_any(float const* n, unsigned int w, bv_rq const* q, float tmax, float* tn, unsigned int* lf)
+{
+	unsigned int a, s, m = 0;
+	unsigned int const* cn = (unsigned int const*)(n + 7 * w);
+	*lf = 0;
+	for (s = 0; s < w; s++)
+	{
+		*lf |= (unsigned int)(cn[s] != 0) << s;
 		float t0 = 0, t1 = tmax;
 		for (a = 0; a < 3; a++)
 		{
-			float tl = (((float const*)(p + q->nr[a]))[s] - q->o[a]) * q->id[a], th = (((float const*)(p + q->fr[a]))[s] - q->o[a]) * q->id[a];
+			float tl = (n[q->nr[a] + s] - q->o[a]) * q->id[a], th = (n[q->fr[a] + s] - q->o[a]) * q->id[a];
 			t0 = t0 > tl ? t0 : tl;
 			t1 = t1 < th ? t1 : th;
 		}
@@ -1433,24 +1572,63 @@ static unsigned int bv_slots_ray(bv_node4 const* n, bv_rq const* q, float tmax, 
 		m |= (unsigned int)(t0 <= t1) << s;
 	}
 	return m;
+}
+
+#if BV_SSE
+static unsigned int bv_slots_ray_sse(float const* n, bv_rq const* q, float tmax, float* tn, unsigned int* lf)
+{
+	__m128 t0 = _mm_setzero_ps(), t1 = _mm_set1_ps(tmax);
+	unsigned int a;
+	for (a = 0; a < 3; a++)
+	{
+		__m128 oa = _mm_set1_ps(q->o[a]), ia = _mm_set1_ps(q->id[a]);
+		t0 = _mm_max_ps(t0, _mm_mul_ps(_mm_sub_ps(_mm_load_ps(n + q->nr[a]), oa), ia));
+		t1 = _mm_min_ps(t1, _mm_mul_ps(_mm_sub_ps(_mm_load_ps(n + q->fr[a]), oa), ia));
+	}
+	_mm_storeu_ps(tn, t0);
+	*lf = (unsigned int)_mm_movemask_ps(_mm_castsi128_ps(_mm_cmpgt_epi32(_mm_load_si128((__m128i const*)(n + 28)), _mm_setzero_si128())));
+	return (unsigned int)_mm_movemask_ps(_mm_cmple_ps(t0, t1));
+}
 #endif
+
+#if BV_AVX2
+BV_AVX2_FN static unsigned int bv_slots_ray_avx2(float const* n, bv_rq const* q, float tmax, float* tn, unsigned int* lf)
+{
+	__m256 t0 = _mm256_setzero_ps(), t1 = _mm256_set1_ps(tmax);
+	unsigned int a, m;
+	for (a = 0; a < 3; a++)
+	{
+		__m256 oa = _mm256_set1_ps(q->o[a]), ia = _mm256_set1_ps(q->id[a]);
+		t0 = _mm256_max_ps(t0, _mm256_mul_ps(_mm256_sub_ps(_mm256_load_ps(n + q->nr[a]), oa), ia));
+		t1 = _mm256_min_ps(t1, _mm256_mul_ps(_mm256_sub_ps(_mm256_load_ps(n + q->fr[a]), oa), ia));
+	}
+	_mm256_storeu_ps(tn, t0);
+	m = (unsigned int)_mm256_movemask_ps(_mm256_cmp_ps(t0, t1, _CMP_LE_OQ));
+	*lf = (unsigned int)_mm256_movemask_ps(_mm256_castsi256_ps(_mm256_cmpgt_epi32(_mm256_load_si256((__m256i const*)(n + 56)), _mm256_setzero_si256())));
+	_mm256_zeroupper();
+	return m;
+}
+#endif
+
+static unsigned int bv_slots_ray(qaws_mesh_bvh const* b, float const* n, bv_rq const* q, float tmax, float* tn, unsigned int* lf)
+{
+#if BV_AVX2
+	if (b->simd == 2)
+		return bv_slots_ray_avx2(n, q, tmax, tn, lf);
+#endif
+#if BV_SSE
+	if (b->simd == 1)
+		return bv_slots_ray_sse(n, q, tmax, tn, lf);
+#endif
+	return bv_slots_ray_any(n, b->w, q, tmax, tn, lf);
 }
 
 /* a node's leaf slots as a mask */
-static unsigned int bv_leaves(bv_node4 const* n)
-{
-#if BV_SSE
-	return (unsigned int)_mm_movemask_ps(_mm_castsi128_ps(_mm_cmpgt_epi32(_mm_load_si128((__m128i const*)n->count), _mm_setzero_si128())));
-#else
-	return (n->count[0] != 0) | (n->count[1] != 0) << 1 | (n->count[2] != 0) << 2 | (n->count[3] != 0) << 3;
-#endif
-}
-
-/* the slots with a finite key, nearest first */
-static unsigned int bv_order(float const* key, unsigned int* slot)
+/* the w slots with a finite key, nearest first */
+static unsigned int bv_order(float const* key, unsigned int w, unsigned int* slot)
 {
 	unsigned int n = 0, s, i;
-	for (s = 0; s < 4; s++)
+	for (s = 0; s < w; s++)
 		if (key[s] < HUGE_VALF)
 		{
 			for (i = n; i > 0 && key[slot[i - 1]] > key[s]; i--)
@@ -1471,7 +1649,7 @@ static float bv_fbound(double v)
 	return (double)f >= v ? f : bv_up(v);
 }
 
-/* the closest entry to q with squared distance within *best2 (updated); its weights into bw. Returns the simplex. */
+/* the closest entry to q with squared distance within *best2 (updated); its weights into bw. Returns the entry. */
 static unsigned int bv_closest_one(qaws_mesh_bvh const* b, double const* q, double* best2, double* bw, bv_stk* stk)
 {
 	unsigned int top = 0, found = QAWS_MESH_NONE, i, s;
@@ -1483,29 +1661,32 @@ static unsigned int bv_closest_one(qaws_mesh_bvh const* b, double const* q, doub
 	while (top)
 	{
 		bv_stk e = stk[--top];
-		bv_node4 const* n;
-		float key[4];
-		unsigned int slot[4], ns;
+		float const* n;
+		unsigned int const *ch, *cn;
+		float key[BV_WMAX];
+		unsigned int slot[BV_WMAX], ns;
 		if (e.t > bf)
 			continue;
-		n = b->nodes4 + e.node;
-		bv_slots_d2(n, qf, key);
-		for (s = 0; s < 4; s++)
+		n = b->nf + (size_t)e.node * b->nst;
+		ch = (unsigned int const*)(n + 6 * b->w);
+		cn = ch + b->w;
+		bv_slots_d2(b, n, qf, key);
+		for (s = 0; s < b->w; s++)
 			if (key[s] > bf)
 				key[s] = HUGE_VALF;
-		ns = bv_order(key, slot);
+		ns = bv_order(key, b->w, slot);
 		for (i = 0; i < ns; i++)
 		{
 			unsigned int sl = slot[i], c;
-			if (!n->count[sl] || key[sl] > bf)
+			if (!cn[sl] || key[sl] > bf)
 				continue;
-			for (c = 0; c < n->count[sl]; c++)
+			for (c = 0; c < cn[sl]; c++)
 			{
-				double w[4], d = bv_entry_closest(b, n->child[sl] + c, q, w);
+				double w[4], d = bv_entry_closest(b, ch[sl] + c, q, w);
 				if (d <= *best2 && (found == QAWS_MESH_NONE || d < *best2))
 				{
 					*best2 = d;
-					found = n->child[sl] + c;
+					found = ch[sl] + c;
 					memcpy(bw, w, sizeof w);
 					bf = bv_fbound(d);
 				}
@@ -1514,9 +1695,9 @@ static unsigned int bv_closest_one(qaws_mesh_bvh const* b, double const* q, doub
 				return found;
 		}
 		for (i = ns; i-- > 0;)
-			if (!n->count[slot[i]] && key[slot[i]] <= bf)
+			if (!cn[slot[i]] && key[slot[i]] <= bf)
 			{
-				stk[top].node = n->child[slot[i]];
+				stk[top].node = ch[slot[i]];
 				stk[top++].t = key[slot[i]];
 			}
 	}
@@ -1652,14 +1833,11 @@ static int bv_ray_seg(double const* o, double const* d, double const* a, double 
 	return 1;
 }
 
-/* the lowest set bit of a 4-bit mask */
-static unsigned char const bv_low[16] = { 0, 0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0 };
-
 static unsigned int bv_ray_one(qaws_mesh_bvh const* b, double const* o, double const* d, double tmax, int any, double* t_best, double* bw,
 	bv_stk* stk)
 {
 	double sh[3] = { 0, 0, 0 };
-	unsigned int ax[3] = { 0, 1, 2 }, top = 0, found = QAWS_MESH_NONE, i, cand = 0, node = 0;
+	unsigned int ax[3] = { 0, 1, 2 }, top = 0, found = QAWS_MESH_NONE, i, cand = 0, node = 0, w = b->w;
 	float of[3], df[3], tf;
 	bv_rq q;
 	for (i = 0; i < 3; i++)
@@ -1667,12 +1845,8 @@ static unsigned int bv_ray_one(qaws_mesh_bvh const* b, double const* o, double c
 		of[i] = q.o[i] = (float)(o[i] - b->c[i]);
 		df[i] = (float)d[i];
 		q.id[i] = d[i] != 0 ? (float)(1 / d[i]) : 1e38f;
-		q.nr[i] = q.id[i] < 0 ? offsetof(bv_node4, hi) + 16 * i : offsetof(bv_node4, lo) + 16 * i;
-		q.fr[i] = q.id[i] < 0 ? offsetof(bv_node4, lo) + 16 * i : offsetof(bv_node4, hi) + 16 * i;
-#if BV_SSE
-		q.o4[i] = _mm_set1_ps(q.o[i]);
-		q.i4[i] = _mm_set1_ps(q.id[i]);
-#endif
+		q.nr[i] = (q.id[i] < 0 ? 3 + i : i) * w;
+		q.fr[i] = (q.id[i] < 0 ? i : 3 + i) * w;
 	}
 	if (b->k == 3)
 	{
@@ -1697,37 +1871,38 @@ static unsigned int bv_ray_one(qaws_mesh_bvh const* b, double const* o, double c
 		return found;
 	for (;;)
 	{
-		bv_node4 const* n = b->nodes4 + node;
-		float tn[4], near = HUGE_VALF;
-		unsigned int m = bv_slots_ray(n, &q, tf, tn), s, next = QAWS_MESH_NONE;
+		float const* n = b->nf + (size_t)node * b->nst;
+		unsigned int const* ch = (unsigned int const*)(n + 6 * w), *cn = ch + w;
+		float tn[BV_WMAX], near = HUGE_VALF;
+		unsigned int lf, m = bv_slots_ray(b, n, &q, tf, tn, &lf), s, next = QAWS_MESH_NONE;
 		/* the leaves now, nearest first (any hit: in slot order) */
-		unsigned int lm = m & bv_leaves(n), im = m & ~lm;
+		unsigned int lm = m & lf, im = m & ~lm;
 		while (lm)
 		{
-			unsigned int sl = bv_low[lm], c;
+			unsigned int sl = bv_ctz(lm), c;
 			if (!any && (lm & (lm - 1)))
 				for (s = lm & (lm - 1); s; s &= s - 1)
-					if (tn[bv_low[s]] < tn[sl])
-						sl = bv_low[s];
+					if (tn[bv_ctz(s)] < tn[sl])
+						sl = bv_ctz(s);
 			lm &= ~(1u << sl);
 			if (tn[sl] > tf)
 				continue;
-			for (c = 0; c < n->count[sl]; c++)
+			for (c = 0; c < cn[sl]; c++)
 			{
-				unsigned int en = n->child[sl] + c;
-				double t, w[4] = { 0, 0, 0, 0 };
+				unsigned int en = ch[sl] + c;
+				double t, wt[4] = { 0, 0, 0, 0 };
 				int hit;
 				if (b->scr && !(c & 3))
-					cand = bv_screen(b, en, n->count[sl] - c < 4 ? n->count[sl] - c : 4, of, df, tf);
+					cand = bv_screen(b, en, cn[sl] - c < 4 ? cn[sl] - c : 4, of, df, tf);
 				if (b->scr && !(cand >> (c & 3) & 1))
 					continue;
-				hit = b->k == 3 ? bv_ray_tri(o, ax, sh, bv_pv(b, en, 0), bv_pv(b, en, 1), bv_pv(b, en, 2), *t_best, &t, w)
-				                : bv_ray_seg(o, d, bv_pv(b, en, 0), bv_pv(b, en, 1), *t_best, &t, w);
+				hit = b->k == 3 ? bv_ray_tri(o, ax, sh, bv_pv(b, en, 0), bv_pv(b, en, 1), bv_pv(b, en, 2), *t_best, &t, wt)
+				                : bv_ray_seg(o, d, bv_pv(b, en, 0), bv_pv(b, en, 1), *t_best, &t, wt);
 				if (hit && (found == QAWS_MESH_NONE || t < *t_best))
 				{
 					*t_best = t;
 					found = en;
-					memcpy(bw, w, sizeof w);
+					memcpy(bw, wt, sizeof wt);
 					tf = bv_fbound(t);
 					if (any)
 						return found;
@@ -1737,13 +1912,21 @@ static unsigned int bv_ray_one(qaws_mesh_bvh const* b, double const* o, double c
 		/* the inner slots: on into the nearest, the others pushed */
 		for (; im; im &= im - 1)
 		{
-			s = bv_low[im];
+			s = bv_ctz(im);
 			if (tn[s] > tf)
 				continue;
 #if BV_SSE
 			/* (the child on its way while this node's others are sorted out) */
-			_mm_prefetch((char const*)(b->nodes4 + n->child[s]), _MM_HINT_T0);
-			_mm_prefetch((char const*)(b->nodes4 + n->child[s]) + 64, _MM_HINT_T0);
+			{
+				char const* cp = (char const*)(b->nf + (size_t)ch[s] * b->nst);
+				_mm_prefetch(cp, _MM_HINT_T0);
+				_mm_prefetch(cp + 64, _MM_HINT_T0);
+				if (w == 8)
+				{
+					_mm_prefetch(cp + 128, _MM_HINT_T0);
+					_mm_prefetch(cp + 192, _MM_HINT_T0);
+				}
+			}
 #endif
 			if (tn[s] < near)
 			{
@@ -1752,12 +1935,12 @@ static unsigned int bv_ray_one(qaws_mesh_bvh const* b, double const* o, double c
 					stk[top].node = next;
 					stk[top++].t = near;
 				}
-				next = n->child[s];
+				next = ch[s];
 				near = tn[s];
 			}
 			else
 			{
-				stk[top].node = n->child[s];
+				stk[top].node = ch[s];
 				stk[top++].t = tn[s];
 			}
 		}
@@ -1881,22 +2064,21 @@ static double bv_winding_one(qaws_mesh_bvh const* b, double const* q, bv_stk* st
 	stk[top++].node = 0;
 	while (top)
 	{
-		unsigned int id = stk[--top].node;
-		bv_node4 const* n = b->nodes4 + id;
+		unsigned int id = stk[--top].node, *ch = bv_nch(b, id), *cn = bv_ncnt(b, id);
 		if (bv_far(b, b->wm + BV_WM * (size_t)id, q, &w))
 			continue;
-		for (s = 0; s < 4; s++)
+		for (s = 0; s < b->w; s++)
 		{
-			if (n->child[s] == QAWS_MESH_NONE)
+			if (ch[s] == QAWS_MESH_NONE)
 				continue;
-			if (n->count[s])
+			if (cn[s])
 			{
-				if (!bv_far_leaf(b, b->lm + BV_LM * (4 * (size_t)id + s), q, &w))
-					for (i = 0; i < n->count[s]; i++)
-						w += bv_entry_winding(b, n->child[s] + i, q);
+				if (!bv_far_leaf(b, b->lm + BV_LM * ((size_t)b->w * id + s), q, &w))
+					for (i = 0; i < cn[s]; i++)
+						w += bv_entry_winding(b, ch[s] + i, q);
 			}
 			else
-				stk[top++].node = n->child[s];
+				stk[top++].node = ch[s];
 		}
 	}
 	return w;
@@ -1914,7 +2096,7 @@ typedef struct bv_job
 	int kind, any;            /* 0 closest, 1 ray, 2 winding, 3 signed */
 	qaws_mesh_hit* hits;
 	qaws_scalar* values;
-	bv_stk* stacks;           /* 3 depth + 2 per chunk */
+	bv_stk* stacks;           /* (w - 1) depth + 2 per chunk */
 } bv_job;
 
 static void bv_read(qaws_mesh_bvh const* b, qaws_scalar const* p, unsigned int i, double* q)
@@ -1931,7 +2113,7 @@ static void bv_task_run(void* ctx, unsigned int begin, unsigned int end)
 	unsigned int ch, i;
 	for (ch = begin; ch < end; ch++)
 	{
-		bv_stk* stack = j->stacks + (size_t)ch * (3 * (size_t)b->depth + 2);
+		bv_stk* stack = j->stacks + (size_t)ch * ((b->w - 1) * (size_t)b->depth + 2);
 		unsigned int last = (ch + 1) * BV_CHUNK < j->count ? (ch + 1) * BV_CHUNK : j->count;
 		for (i = ch * BV_CHUNK; i < last; i++)
 		{
@@ -1984,7 +2166,7 @@ static qaws_status bv_run(bv_job* j, qaws_batch_executor const* executor)
 	unsigned int chunks = (j->count + BV_CHUNK - 1) / BV_CHUNK;
 	if (!j->count)
 		return QAWS_STATUS_OK;
-	j->stacks = (bv_stk*)qaws_internal_scratch_malloc(qaws_internal_mul3(chunks, 3 * (size_t)j->b->depth + 2, sizeof(bv_stk)));
+	j->stacks = (bv_stk*)qaws_internal_scratch_malloc(qaws_internal_mul3(chunks, (j->b->w - 1) * (size_t)j->b->depth + 2, sizeof(bv_stk)));
 	if (!j->stacks)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	if (executor && executor->parallel_for)
