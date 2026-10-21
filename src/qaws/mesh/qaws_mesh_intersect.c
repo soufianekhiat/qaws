@@ -14,6 +14,7 @@
 #include "../qaws_mesh_repair.h"
 #include "../qaws_exact.h"
 #include "qaws_mesh_internal.h"
+#include "../internal/qaws_internal_parallel.h"
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -2062,6 +2063,220 @@ qaws_status qaws_mesh_resolve_intersections(qaws_mesh_3d** out, qaws_intersect_r
 
 /* ---- Booleans on the arrangement ---- */
 
+/* ---- winding numbers summed directly (few points): exact solid angles over an operand's triangles ---- */
+
+/* squared distance from p to triangle abc (Ericson's regions) */
+static double sx_tri_d2(double const* p, double const* a, double const* b, double const* c)
+{
+	double ab[3], ac[3], ap[3], bp[3], cp[3], q[3], d1, d2, d3, d4, d5, d6, va, vb, vc, v, w, den;
+	unsigned int k;
+	for (k = 0; k < 3; k++)
+	{
+		ab[k] = b[k] - a[k];
+		ac[k] = c[k] - a[k];
+		ap[k] = p[k] - a[k];
+		bp[k] = p[k] - b[k];
+		cp[k] = p[k] - c[k];
+	}
+	d1 = sx_dot(ab, ap);
+	d2 = sx_dot(ac, ap);
+	if (d1 <= 0 && d2 <= 0)
+		return sx_dist2(p, a);
+	d3 = sx_dot(ab, bp);
+	d4 = sx_dot(ac, bp);
+	if (d3 >= 0 && d4 <= d3)
+		return sx_dist2(p, b);
+	vc = d1 * d4 - d3 * d2;
+	if (vc <= 0 && d1 >= 0 && d3 <= 0)
+	{
+		v = d1 / (d1 - d3);
+		for (k = 0; k < 3; k++)
+			q[k] = a[k] + v * ab[k];
+		return sx_dist2(p, q);
+	}
+	d5 = sx_dot(ab, cp);
+	d6 = sx_dot(ac, cp);
+	if (d6 >= 0 && d5 <= d6)
+		return sx_dist2(p, c);
+	vb = d5 * d2 - d1 * d6;
+	if (vb <= 0 && d2 >= 0 && d6 <= 0)
+	{
+		w = d2 / (d2 - d6);
+		for (k = 0; k < 3; k++)
+			q[k] = a[k] + w * ac[k];
+		return sx_dist2(p, q);
+	}
+	va = d3 * d6 - d5 * d4;
+	if (va <= 0 && d4 - d3 >= 0 && d5 - d6 >= 0)
+	{
+		w = (d4 - d3) / ((d4 - d3) + (d5 - d6));
+		for (k = 0; k < 3; k++)
+			q[k] = b[k] + w * (c[k] - b[k]);
+		return sx_dist2(p, q);
+	}
+	den = 1 / (va + vb + vc);
+	v = vb * den;
+	w = vc * den;
+	for (k = 0; k < 3; k++)
+		q[k] = a[k] + ab[k] * v + ac[k] * w;
+	return sx_dist2(p, q);
+}
+
+typedef struct sx_direct
+{
+	qaws_scalar const* x;              /* the operand's positions */
+	unsigned int const* t;             /* its triangles */
+	double const* p;                   /* points, 3 each */
+	unsigned int np;
+	double r2;                         /* near: within sqrt(r2) of a triangle (0: not asked) */
+	double* w;                         /* per chunk, np solid-angle sums */
+	unsigned char* near;               /* per chunk, np flags */
+} sx_direct;
+
+static qaws_status sx_direct_job(void* user, unsigned int chunk, unsigned int begin, unsigned int end)
+{
+	sx_direct const* D = (sx_direct const*)user;
+	double* w = D->w + (size_t)chunk * D->np;
+	unsigned char* nr = D->near + (size_t)chunk * D->np;
+	unsigned int f, i, k;
+	for (f = begin; f < end; f++)
+	{
+		double A[3], B[3], C[3];
+		for (k = 0; k < 3; k++)
+		{
+			A[k] = (double)D->x[3 * (size_t)D->t[3 * (size_t)f] + k];
+			B[k] = (double)D->x[3 * (size_t)D->t[3 * (size_t)f + 1] + k];
+			C[k] = (double)D->x[3 * (size_t)D->t[3 * (size_t)f + 2] + k];
+		}
+		for (i = 0; i < D->np; i++)
+		{
+			double const* q = D->p + 3 * (size_t)i;
+			double a[3], b[3], c[3], bc[3], la, lb, lc, num, den;
+			for (k = 0; k < 3; k++)
+			{
+				a[k] = A[k] - q[k];
+				b[k] = B[k] - q[k];
+				c[k] = C[k] - q[k];
+			}
+			/* the triangle's solid angle (Van Oosterom and Strackee) */
+			sx_cross(b, c, bc);
+			la = sqrt(sx_dot(a, a));
+			lb = sqrt(sx_dot(b, b));
+			lc = sqrt(sx_dot(c, c));
+			num = sx_dot(a, bc);
+			den = la * lb * lc + sx_dot(a, b) * lc + sx_dot(b, c) * la + sx_dot(c, a) * lb;
+			w[i] += 2 * atan2(num, den);
+			if (D->r2 > 0 && !nr[i] && sx_tri_d2(q, A, B, C) <= D->r2)
+				nr[i] = 1;
+		}
+	}
+	return QAWS_STATUS_OK;
+}
+
+#define SX_DIRECT_GRAIN 4096
+
+/* winding numbers of the triangles t (n) at the points p (np; out_w may be NULL), and which points are within r of
+   them (out_near may be NULL); the chunks' sums added in order, so the result does not depend on the executor */
+static qaws_status sx_direct_winding(qaws_scalar* out_w, unsigned char* out_near, qaws_scalar const* x, unsigned int const* t, unsigned int n,
+	double const* p, unsigned int np, double r, qaws_batch_executor const* executor)
+{
+	sx_direct D;
+	unsigned int nch = qaws_internal_chunk_count(n, SX_DIRECT_GRAIN), c, i;
+	qaws_status st;
+	D.x = x;
+	D.t = t;
+	D.p = p;
+	D.np = np;
+	D.r2 = out_near ? r * r : 0;
+	D.w = (double*)qaws_internal_zalloc(qaws_internal_mul2((size_t)nch + 1, np), sizeof(double));
+	D.near = (unsigned char*)qaws_internal_zalloc(qaws_internal_mul2((size_t)nch + 1, np), 1);
+	if (!D.w || !D.near)
+	{
+		qaws_internal_free(D.w);
+		qaws_internal_free(D.near);
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	}
+	st = qaws_internal_parallel(n, SX_DIRECT_GRAIN, sx_direct_job, &D, executor);
+	for (i = 0; i < np; i++)
+	{
+		double s = 0;
+		unsigned char nr = 0;
+		for (c = 0; c < nch; c++)
+		{
+			s += D.w[(size_t)c * np + i];
+			nr |= D.near[(size_t)c * np + i];
+		}
+		if (out_w)
+			out_w[i] = (qaws_scalar)(s / (4 * 3.14159265358979323846));
+		if (out_near)
+			out_near[i] = nr;
+	}
+	qaws_internal_free(D.w);
+	qaws_internal_free(D.near);
+	return st;
+}
+
+/* LSD radix sort of n records of stride 64-bit words by their first word (stable); 0 when out of memory */
+static int sx_radix(unsigned long long* a, unsigned int n, unsigned int stride)
+{
+	unsigned long long *tmp, *src = a, *dst, top = 0;
+	unsigned int i, shift;
+	if (n < 2)
+		return 1;
+	tmp = (unsigned long long*)qaws_internal_malloc(qaws_internal_mul3(sizeof(unsigned long long), stride, n));
+	if (!tmp)
+		return 0;
+	dst = tmp;
+	for (i = 0; i < n; i++)
+		top |= a[(size_t)i * stride];
+	for (shift = 0; shift < 64 && (top >> shift); shift += 8)
+	{
+		unsigned int count[257];
+		unsigned long long* sw;
+		memset(count, 0, sizeof count);
+		for (i = 0; i < n; i++)
+			count[((src[(size_t)i * stride] >> shift) & 255) + 1]++;
+		for (i = 1; i < 257; i++)
+			count[i] += count[i - 1];
+		for (i = 0; i < n; i++)
+		{
+			unsigned int d = count[(src[(size_t)i * stride] >> shift) & 255]++;
+			memcpy(dst + (size_t)d * stride, src + (size_t)i * stride, stride * sizeof(unsigned long long));
+		}
+		sw = src;
+		src = dst;
+		dst = sw;
+	}
+	if (src != a)
+		memcpy(a, src, qaws_internal_mul3(sizeof(unsigned long long), stride, n));
+	qaws_internal_free(tmp);
+	return 1;
+}
+
+/* a mesh's faces fanned into triangles (caller frees) */
+static qaws_status sx_fan(qaws_mesh_3d_desc const* m, unsigned int** tri, unsigned int* count)
+{
+	unsigned int f, k, off = 0, n = 0;
+	for (f = 0; f < m->face_count; f++)
+		n += (m->face_sizes ? m->face_sizes[f] : 3) - 2;
+	*tri = (unsigned int*)qaws_internal_malloc(qaws_internal_mul3(sizeof(unsigned int), 3, (size_t)n + 1));
+	if (!*tri)
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	for (f = 0, n = 0; f < m->face_count; f++)
+	{
+		unsigned int s = m->face_sizes ? m->face_sizes[f] : 3;
+		for (k = 1; k + 1 < s; k++, n++)
+		{
+			(*tri)[3 * (size_t)n] = m->face_vertices[off];
+			(*tri)[3 * (size_t)n + 1] = m->face_vertices[off + k];
+			(*tri)[3 * (size_t)n + 2] = m->face_vertices[off + k + 1];
+		}
+		off += s;
+	}
+	*count = n;
+	return QAWS_STATUS_OK;
+}
+
 /* a mesh's faces fanned into triangles, for its BVH */
 static qaws_status sx_bvh(qaws_mesh_bvh** out, qaws_mesh_3d_desc const* m, unsigned int** tri)
 {
@@ -2128,7 +2343,8 @@ static int sx_closed(unsigned int const* t, unsigned int nt)
 			/* low bit: the direction */
 			e[3 * (size_t)i + j] = p < q ? ((p << 32 | q) << 1) : ((q << 32 | p) << 1 | 1);
 		}
-	qsort(e, n, sizeof *e, sx_cmp_edge);
+	if (!sx_radix(e, n, 1))
+		qsort(e, n, sizeof *e, sx_cmp_edge);
 	for (i = 0; i < n && closed; i = j)
 	{
 		long s = 0;
@@ -2262,7 +2478,8 @@ static unsigned int sx_flatten(unsigned int* t, qaws_scalar* src, unsigned int n
 		key[2 * (size_t)i + 1] = i;
 		*sx_eset_slot(set, cap, sx_ekey(p, q), 1) = sx_ekey(p, q);
 	}
-	qsort(key, n, 2 * sizeof(unsigned long long), sx_cmp_edge);
+	if (!sx_radix(key, n, 2))
+		qsort(key, n, 2 * sizeof(unsigned long long), sx_cmp_edge);
 	for (i = 0; i < n; i = j)
 	{
 		for (j = i + 1; j < n && key[2 * (size_t)j] >> 1 == key[2 * (size_t)i] >> 1; j++)
@@ -2337,7 +2554,8 @@ qaws_status qaws_mesh_boolean(qaws_mesh_3d** out, qaws_boolean_report* report, q
 	qaws_mesh_hit* hits = NULL;
 	unsigned int *par = NULL, *rep = NULL, *pid = NULL, npatch = 0;
 	unsigned long long* ek = NULL;
-	double* fat = NULL;
+	double *fat = NULL, *mid = NULL;
+	unsigned char* near = NULL;
 	sx_out o;
 	qaws_status st;
 	unsigned int na = 0, nb = 0, nv, nf, i, j, k, nk = 0, two = b != NULL;
@@ -2379,11 +2597,6 @@ qaws_status qaws_mesh_boolean(qaws_mesh_3d** out, qaws_boolean_report* report, q
 	st = sx_resolve(&o, &report->intersect, x, fv, fs, nv, nf, desc);
 	if (st != QAWS_STATUS_OK)
 		goto done;
-	st = sx_bvh(&ba, a, &ta);
-	if (st == QAWS_STATUS_OK && two)
-		st = sx_bvh(&bb, b, &tb);
-	if (st != QAWS_STATUS_OK)
-		goto done;
 	/* patches: pieces joined across edges of two faces turned opposite ways are on the same sides of everything */
 	par = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)o.nt + 1));
 	pid = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)o.nt + 1));
@@ -2417,6 +2630,8 @@ qaws_status qaws_mesh_boolean(qaws_mesh_3d** out, qaws_boolean_report* report, q
 			key[2 * (size_t)j] = ek[j];
 			key[2 * (size_t)j + 1] = j / 3;
 		}
+		if (!sx_radix(key, n, 2))
+			if (!sx_radix(key, n, 2))
 		qsort(key, n, 2 * sizeof(unsigned long long), sx_cmp_edge);
 		for (i = 0; i < n; i = j)
 		{
@@ -2492,16 +2707,59 @@ qaws_status qaws_mesh_boolean(qaws_mesh_3d** out, qaws_boolean_report* report, q
 			pts[6 * (size_t)i + 3 + k] = (qaws_scalar)(g[k] - dl * n[k]);
 		}
 	}
-	st = qaws_mesh_bvh_winding_number(wa, ba, pts, 2 * npatch, desc ? desc->executor : NULL);
-	if (st == QAWS_STATUS_OK && two)
-		st = qaws_mesh_bvh_winding_number(wb, bb, pts, 2 * npatch, desc ? desc->executor : NULL);
-	/* B's patches lying on A (coplanar overlaps): A's pieces stand for both */
-	if (st == QAWS_STATUS_OK && two)
+	/* the operands' winding numbers there, and B's patches lying on A (coplanar overlaps: A's pieces stand for both) */
 	{
-		for (i = 0; i < npatch; i++)
-			for (k = 0; k < 3; k++)
-				pts[3 * (size_t)i + k] = (qaws_scalar)(0.5 * ((double)pts[6 * (size_t)i + k] + (double)pts[6 * (size_t)i + 3 + k]));
-		st = qaws_mesh_bvh_closest(hits, ba, pts, npatch, (qaws_scalar)(4 * o.eps), desc ? desc->executor : NULL);
+		qaws_batch_executor const* ex = desc ? desc->executor : NULL;
+		unsigned int nta = 0, ntb = 0;
+		double work;
+		for (i = 0; i < a->face_count; i++)
+			nta += (a->face_sizes ? a->face_sizes[i] : 3) - 2;
+		for (i = 0; two && i < b->face_count; i++)
+			ntb += (b->face_sizes ? b->face_sizes[i] : 3) - 2;
+		work = 2.0 * npatch * ((double)nta + ntb) + (double)npatch * nta;
+		near = (unsigned char*)qaws_internal_zalloc((size_t)npatch + 1, 1);
+		mid = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), 6, (size_t)npatch + 1));
+		if (!near || !mid)
+			goto oom;
+		for (i = 0; i < 6 * npatch; i++)
+			mid[i] = (double)pts[i];
+		if (work <= 3.2e7)
+		{
+			/* few patches: the solid angles summed over the triangles, no BVH built */
+			st = sx_fan(a, &ta, &nta);
+			if (st == QAWS_STATUS_OK)
+				st = sx_direct_winding(wa, NULL, a->positions, ta, nta, mid, 2 * npatch, 0, ex);
+			if (st == QAWS_STATUS_OK && two)
+				st = sx_fan(b, &tb, &ntb);
+			if (st == QAWS_STATUS_OK && two)
+				st = sx_direct_winding(wb, NULL, b->positions, tb, ntb, mid, 2 * npatch, 0, ex);
+			if (st == QAWS_STATUS_OK && two)
+			{
+				for (i = 0; i < npatch; i++)
+					for (k = 0; k < 3; k++)
+						mid[3 * (size_t)i + k] = 0.5 * (mid[6 * (size_t)i + k] + mid[6 * (size_t)i + 3 + k]);
+				st = sx_direct_winding(NULL, near, a->positions, ta, nta, mid, npatch, 4 * o.eps, ex);
+			}
+		}
+		else
+		{
+			st = sx_bvh(&ba, a, &ta);
+			if (st == QAWS_STATUS_OK && two)
+				st = sx_bvh(&bb, b, &tb);
+			if (st == QAWS_STATUS_OK)
+				st = qaws_mesh_bvh_winding_number(wa, ba, pts, 2 * npatch, ex);
+			if (st == QAWS_STATUS_OK && two)
+				st = qaws_mesh_bvh_winding_number(wb, bb, pts, 2 * npatch, ex);
+			if (st == QAWS_STATUS_OK && two)
+			{
+				for (i = 0; i < npatch; i++)
+					for (k = 0; k < 3; k++)
+						pts[3 * (size_t)i + k] = (qaws_scalar)(0.5 * ((double)pts[6 * (size_t)i + k] + (double)pts[6 * (size_t)i + 3 + k]));
+				st = qaws_mesh_bvh_closest(hits, ba, pts, npatch, (qaws_scalar)(4 * o.eps), ex);
+				for (i = 0; st == QAWS_STATUS_OK && i < npatch; i++)
+					near[i] = hits[i].element != QAWS_MESH_NONE;
+			}
+		}
 	}
 	if (st != QAWS_STATUS_OK)
 		goto done;
@@ -2512,7 +2770,7 @@ qaws_status qaws_mesh_boolean(qaws_mesh_3d** out, qaws_boolean_report* report, q
 		int fb = two && wb[2 * (size_t)z] >= 0.5, kb = two && wb[2 * (size_t)z + 1] >= 0.5;
 		int front = sx_region(op, fa, fb, (int)two), back = sx_region(op, ka, kb, (int)two);
 		unsigned int s = (unsigned int)o.src[i];
-		if (front == back || (two && s >= a->face_count && hits[z].element != QAWS_MESH_NONE))
+		if (front == back || (two && s >= a->face_count && near[z]))
 		{
 			report->dropped++;
 			continue;
@@ -2558,6 +2816,6 @@ done:
 	qaws_internal_free(x); qaws_internal_free(fv); qaws_internal_free(fs); qaws_internal_free(ta); qaws_internal_free(tb);
 	qaws_internal_free(pts); qaws_internal_free(wa); qaws_internal_free(wb); qaws_internal_free(hits); qaws_internal_free(keep);
 	qaws_internal_free(keep_src); qaws_internal_free(used); qaws_internal_free(kpos);
-	qaws_internal_free(par); qaws_internal_free(rep); qaws_internal_free(pid); qaws_internal_free(ek); qaws_internal_free(fat);
+	qaws_internal_free(par); qaws_internal_free(rep); qaws_internal_free(pid); qaws_internal_free(ek); qaws_internal_free(fat); qaws_internal_free(near); qaws_internal_free(mid);
 	return st;
 }

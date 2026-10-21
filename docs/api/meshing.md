@@ -956,7 +956,7 @@ What makes it fast:
 - **Lazy setup.** Edge records are made only for faces that meet something.
 - **A narrow check.** Only the cut faces' pieces of different input faces are checked.
 
-Still serial: the vertex weld, the face records, the grid build, and, in a Boolean, the operands' BVHs and the result's mesh.
+A Boolean with few patches (most) sums its winding numbers directly, exact solid angles over the operands' triangles through the executor, without building BVHs; edge records are sorted by radix. Still serial: the vertex weld, the face records, the grid build and the result's mesh.
 
 **Tests and figure.** Test 163:
 - **Exact cube volumes:** two axis-aligned cubes give union, intersection and difference volumes exact to 2e-16.
