@@ -11,6 +11,7 @@
 #include "../qaws_mesh_field.h"
 #include "../qaws_volume_mesh.h"
 #include "../internal/qaws_internal_broadphase.h"
+#include "../internal/qaws_internal_ldlt.h"
 
 /* ---- interpolants ------------------------------------------------------
  *
@@ -211,5 +212,36 @@ qaws_status ff_frames(qaws_volume_mesh const* m, unsigned int sweeps, double* R,
 /* the frames combed into one gauge (each cell's axes permuted onto its neighbour's, breadth first); 1 when every facet
    then agrees without a permutation (no singular edge, no turn round a hole), 0 else or on allocation failure */
 int ff_comb(qaws_volume_mesh const* m, double* R);
+
+/* ---- sparse Laplacians (qaws_mesh_smooth.c), shared by smoothing, fairing, deformation and parameterization ---- */
+
+/* a sparse matrix by rows, columns sorted in each */
+typedef struct sm_csr
+{
+	unsigned int n;
+	unsigned int *rp, *ci;
+	double* v;
+} sm_csr;
+
+/* a symmetric system restricted to the rows that move (the others held: their columns go to the right-hand side), factored */
+typedef struct sm_system
+{
+	sm_csr const* A;
+	unsigned int* row;          /* per row of A its row here, 0xFFFFFFFF: held */
+	unsigned int m;
+	qaws_internal_ldlt L;
+} sm_system;
+
+void sm_csr_free(sm_csr* A);
+/* K (K_ii the sum of the weights, K_ij minus the weight: half the cotangents facing the edge, clamped at 0 with clamp; 1 with
+   uniform) over triangles t (3 each) of positions x (dim 3), and the lumped masses (1 with uniform); 0 on allocation failure */
+int sm_laplacian(sm_csr* K, double* mass, double const* x, unsigned int nv, unsigned int const* t, unsigned int nt, int uniform, int clamp);
+/* C = A diag(d) B (d NULL: the identity) */
+int sm_mul(sm_csr* C, sm_csr const* A, double const* d, sm_csr const* B);
+/* the system over the rows where move is nonzero; xyz: 3 per row of A for the ordering (NULL: natural) */
+qaws_status sm_system_factor(sm_system* S, sm_csr const* A, double const* xyz, unsigned char const* move);
+/* x (dim per row of A) solved on the moving rows from rhs, the held rows' x read; its own workspace */
+qaws_status sm_system_solve(sm_system const* S, double* x, double const* rhs, unsigned int dim);
+void sm_system_free(sm_system* S);
 
 #endif /* QAWS_MESH_INTERNAL_H */

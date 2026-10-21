@@ -8,21 +8,14 @@
 #include "../internal/qaws_internal_memory.h"
 #include "../internal/qaws_internal_ldlt.h"
 #include "../qaws_mesh_smooth.h"
+#include "qaws_mesh_internal.h"
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
 
 #define SM_NONE 0xFFFFFFFFu
 
-/* a sparse matrix by rows, columns sorted in each */
-typedef struct sm_csr
-{
-	unsigned int n;
-	unsigned int *rp, *ci;
-	double* v;
-} sm_csr;
-
-static void sm_csr_free(sm_csr* A)
+void sm_csr_free(sm_csr* A)
 {
 	qaws_internal_free(A->rp);
 	qaws_internal_free(A->ci);
@@ -39,7 +32,7 @@ static int sm_cmp_key(void const* p, void const* q)
 /* K (symmetric, positive semi-definite: K_ii the sum of the weights, K_ij minus the weight) and the lumped masses (a third of
    the areas round each vertex; 1 for uniform weights). Cotangent weights are half the cotangents facing each edge, clamped
    at 0 with clamp; uniform ones 1 per edge */
-static int sm_laplacian(sm_csr* K, double* mass, double const* x, unsigned int nv, unsigned int const* t, unsigned int nt, int uniform,
+int sm_laplacian(sm_csr* K, double* mass, double const* x, unsigned int nv, unsigned int const* t, unsigned int nt, int uniform,
 	int clamp)
 {
 	unsigned long long* he = (unsigned long long*)qaws_internal_malloc(qaws_internal_mul3(2 * sizeof(unsigned long long), 3, (size_t)nt + 1));
@@ -158,7 +151,7 @@ fail:
 }
 
 /* C = A diag(d) B (all n x n; d NULL: the identity), columns sorted */
-static int sm_mul(sm_csr* C, sm_csr const* A, double const* d, sm_csr const* B)
+int sm_mul(sm_csr* C, sm_csr const* A, double const* d, sm_csr const* B)
 {
 	unsigned int n = A->n, i, p, q, cap = 0, nnz = 0;
 	unsigned int* mark = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)n + 1));
@@ -225,72 +218,104 @@ fail:
 	return 0;
 }
 
-/* A x = rhs on the rows where move[v] (the others' x held, their columns into the right-hand side), 3 coordinates; x updated.
-   QAWS_STATUS_OK, or the factor's failure */
-static qaws_status sm_solve(sm_csr const* A, double* x, double const* rhs, unsigned char const* move)
+qaws_status sm_system_factor(sm_system* S, sm_csr const* A, double const* xyz, unsigned char const* move)
 {
-	unsigned int n = A->n, i, p, k, m = 0;
-	unsigned int *row = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)n + 1)), *rp = NULL, *ci = NULL;
-	double *v = NULL, *b = NULL, *xyz = NULL;
-	qaws_internal_ldlt L;
+	unsigned int n = A->n, i, p, k, *rp = NULL, *ci = NULL;
+	double *v = NULL, *pt = NULL;
 	qaws_status st = QAWS_STATUS_ALLOCATION_FAILURE;
-	memset(&L, 0, sizeof L);
-	if (!row)
+	memset(S, 0, sizeof *S);
+	S->A = A;
+	S->row = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)n + 1));
+	if (!S->row)
 		return st;
 	for (i = 0; i < n; i++)
-		row[i] = move[i] ? m++ : SM_NONE;
-	if (!m)
-	{
-		qaws_internal_free(row);
+		S->row[i] = move[i] ? S->m++ : SM_NONE;
+	if (!S->m)
 		return QAWS_STATUS_OK;
-	}
-	rp = (unsigned int*)qaws_internal_zalloc((size_t)m + 1, sizeof(unsigned int));
+	rp = (unsigned int*)qaws_internal_zalloc((size_t)S->m + 1, sizeof(unsigned int));
 	ci = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)A->rp[n] + 1));
 	v = (double*)qaws_internal_malloc(sizeof(double) * ((size_t)A->rp[n] + 1));
-	b = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), 3, (size_t)m));
-	xyz = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), 3, (size_t)m));
-	if (!rp || !ci || !v || !b || !xyz)
+	pt = xyz ? (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), 3, (size_t)S->m)) : NULL;
+	if (!rp || !ci || !v || (xyz && !pt))
 		goto done;
 	for (i = 0; i < n; i++)
 	{
-		unsigned int r = row[i];
+		unsigned int r = S->row[i];
 		if (r == SM_NONE)
 			continue;
 		rp[r + 1] = rp[r];
-		for (k = 0; k < 3; k++)
-		{
-			b[3 * (size_t)r + k] = rhs[3 * (size_t)i + k];
-			xyz[3 * (size_t)r + k] = x[3 * (size_t)i + k];
-		}
+		if (pt)
+			for (k = 0; k < 3; k++)
+				pt[3 * (size_t)r + k] = xyz[3 * (size_t)i + k];
 		for (p = A->rp[i]; p < A->rp[i + 1]; p++)
 		{
-			unsigned int c = row[A->ci[p]];
+			unsigned int c = S->row[A->ci[p]];
 			if (c != SM_NONE)
 			{
 				ci[rp[r + 1]] = c;
 				v[rp[r + 1]++] = A->v[p];
 			}
-			else
-				for (k = 0; k < 3; k++)
-					b[3 * (size_t)r + k] -= A->v[p] * x[3 * (size_t)A->ci[p] + k];
 		}
 	}
-	st = qaws_internal_ldlt_factor(&L, rp, ci, v, xyz, m, 0);
-	if (st != QAWS_STATUS_OK)
-		goto done;
-	for (k = 0; k < 3; k++)
-	{
-		for (i = 0; i < m; i++)
-			xyz[i] = b[3 * (size_t)i + k];
-		qaws_internal_ldlt_solve(xyz, &L, xyz);
-		for (i = 0; i < n; i++)
-			if (row[i] != SM_NONE)
-				x[3 * (size_t)i + k] = xyz[row[i]];
-	}
+	st = qaws_internal_ldlt_factor(&S->L, rp, ci, v, pt, S->m, 0);
 done:
-	qaws_internal_ldlt_free(&L);
-	qaws_internal_free(row); qaws_internal_free(rp); qaws_internal_free(ci); qaws_internal_free(v); qaws_internal_free(b);
-	qaws_internal_free(xyz);
+	qaws_internal_free(rp); qaws_internal_free(ci); qaws_internal_free(v); qaws_internal_free(pt);
+	return st;
+}
+
+qaws_status sm_system_solve(sm_system const* S, double* x, double const* rhs, unsigned int dim)
+{
+	sm_csr const* A = S->A;
+	qaws_internal_ldlt local = S->L;
+	unsigned int n = A->n, i, p, k;
+	double* b;
+	if (!S->m)
+		return QAWS_STATUS_OK;
+	b = (double*)qaws_internal_malloc(sizeof(double) * ((size_t)S->m + 1));
+	local.w = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), 2 * (size_t)S->m + 1));
+	if (!b || !local.w)
+	{
+		qaws_internal_free(b);
+		qaws_internal_free(local.w);
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	}
+	for (k = 0; k < dim; k++)
+	{
+		for (i = 0; i < n; i++)
+		{
+			unsigned int r = S->row[i];
+			if (r == SM_NONE)
+				continue;
+			b[r] = rhs[(size_t)dim * i + k];
+			for (p = A->rp[i]; p < A->rp[i + 1]; p++)
+				if (S->row[A->ci[p]] == SM_NONE)
+					b[r] -= A->v[p] * x[(size_t)dim * A->ci[p] + k];
+		}
+		qaws_internal_ldlt_solve(b, &local, b);
+		for (i = 0; i < n; i++)
+			if (S->row[i] != SM_NONE)
+				x[(size_t)dim * i + k] = b[S->row[i]];
+	}
+	qaws_internal_free(b);
+	qaws_internal_free(local.w);
+	return QAWS_STATUS_OK;
+}
+
+void sm_system_free(sm_system* S)
+{
+	qaws_internal_ldlt_free(&S->L);
+	qaws_internal_free(S->row);
+	memset(S, 0, sizeof *S);
+}
+
+/* A x = rhs on the rows where move (3 coordinates), factored for this one solve */
+static qaws_status sm_solve(sm_csr const* A, double* x, double const* rhs, unsigned char const* move)
+{
+	sm_system S;
+	qaws_status st = sm_system_factor(&S, A, x, move);
+	if (st == QAWS_STATUS_OK)
+		st = sm_system_solve(&S, x, rhs, 3);
+	sm_system_free(&S);
 	return st;
 }
 

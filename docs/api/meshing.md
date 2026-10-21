@@ -1036,6 +1036,37 @@ L is the cotangent Laplacian with lumped masses, or the uniform graph Laplacian 
 
 Figure 29 (key t) shows a noisy torus smoothed by Laplacian, Taubin and bi-Laplacian steps, a roof's crease kept as a feature line, and a sphere's cap faired as a membrane and as a thin plate.
 
+## Deformation and parameterization
+
+`qaws_mesh_3d_deform` (`qaws_mesh_deform.h`) moves handle vertices to targets in place; the rest of the region follows and the vertices outside it stay. The mesh's positions are the rest shape.
+
+```c
+qaws_deform_desc d = { QAWS_DEFORM_ARAP };
+qaws_mesh_3d_deform(mesh, handles, targets, handle_count, &d);
+```
+
+- **ARAP** (Sorkine and Alexa 2007): each vertex's ring turns as one; rotations (Müller et al.'s quaternion fit, robust on flat rings) and positions are found in turn on one factored system, started from the biharmonic solution, until no vertex moves by 1e-6 of the box's diagonal (200 rounds at most). Details turn with the shape: a bar's rings turn as it bends.
+- **LAPLACIAN** (Sorkine et al. 2004): the rest's Laplacian coordinates kept; linear, details kept but not turned (the bar's rings shear).
+- **BIHARMONIC** (Botsch and Kobbelt 2004): the smoothest displacement; linear, the region bends like a thin plate.
+
+`qaws_mesh_3d_parameterize` (`qaws_mesh_param.h`) flattens a mesh: (u, v) per triangle corner. Seams (edges given by their two vertices) are cut open, so a vertex on a seam gets one (u, v) per side. Each connected piece of the cut mesh (a chart) is flattened on its own; the charts are laid side by side along u. A chart without a border is `INVALID_TOPOLOGY`.
+
+- **LSCM** (Lévy et al. 2002), as the conformal energy E_D − A (Mullen et al. 2008) with two border vertices pinned: angles kept as well as the triangles allow, free border, one solve.
+- **ARAP** (Liu et al. 2008): each triangle's map nearest a rotation, by local-global rounds from LSCM's: lengths and areas kept better, at the cost of some angle.
+- **BFF** (Sawhney and Crane 2017) is reserved (`UNSUPPORTED_OPERATION`).
+
+The report gives the charts, the triangles turned over, the mean corner angle error and the area distortion (the sum of |each triangle's share of the plane's area − of the mesh's|).
+
+**Test 166 checks** (small meshes):
+- **Bend:** a 12 × 12 plate held on one side and raised on the other: handles exact for every method; ARAP keeps the edge lengths better than its biharmonic start.
+- **Rigid turn:** both sides turned 60° as one: ARAP turns the whole plate (2.6e-6 off), Laplacian editing does not (0.46 off); a vertex outside the region stays.
+- **Flat grid:** flattened without distortion (1e-14).
+- **Sphere cap:** nothing turned over; ARAP's area distortion 0.13 against LSCM's 0.28, LSCM's angles 0.045 against ARAP's 0.082.
+- **Seams:** a closed sphere is refused, and cut from pole to pole gives one chart, nothing turned; two grids give two charts side by side.
+- **Refusals:** a seam that is not an edge; BFF.
+
+Figure 30 (key u) shows a bar bent by ARAP and by Laplacian editing, and a hill flattened by ARAP with its (u, v) grid and its layout.
+
 ## Spatial queries: qaws_mesh_bvh
 
 `qaws_mesh_bvh.h` answers point and ray queries on any mesh, broken or not.

@@ -51,6 +51,8 @@
  *   mesh29_smooth.png  smoothing and fairing: a noisy torus by Laplacian, Taubin
  *                      and bi-Laplacian steps, a roof's crease kept as a feature,
  *                      a sphere's cap faired as a membrane and a thin plate
+ *   mesh30_deform.png  deformation and parameterization: a bar bent by ARAP and
+ *                      by Laplacian editing, a hill flattened with its (u, v) grid
  *
  * Each figure lives in meshing_showcase/NN_*.c, compiled as one translation
  * unit with the rasterizer in example_raster.h.
@@ -211,15 +213,16 @@ static void ms_panel(er_canvas* c, int x, int y, int w, int h, qaws_mesh_3d cons
 #include "meshing_showcase/27_boolean.c"
 #include "meshing_showcase/28_geodesic.c"
 #include "meshing_showcase/29_smooth.c"
+#include "meshing_showcase/30_deform.c"
 
-/* the figures to draw: all, or those whose keys the first argument lists ("58"; figures 10 to 29 are a to t) */
+/* the figures to draw: all, or those whose keys the first argument lists ("58"; figures 10 to 30 are a to u) */
 int main(int argc, char** argv)
 {
 	static void (*const demo[])(void) = { demo_core, demo_reference, demo_remesh, demo_quads, demo_generate, demo_tets, demo_hexes, demo_frame_hexes,
 		demo_measures, demo_remesh_angles, demo_remesh_cvt, demo_cross_field, demo_quad_flow, demo_quad_improve,
 		demo_quad_global, demo_guidance, demo_feature_size, demo_repair, demo_layers, demo_curved, demo_metric, demo_bvh, demo_quality, demo_repair_more, demo_watertight,
-		demo_intersect, demo_boolean, demo_geodesic, demo_smooth };
-	static char const key[] = "123456789abcdefghijklmnopqrst";
+		demo_intersect, demo_boolean, demo_geodesic, demo_smooth, demo_deform };
+	static char const key[] = "123456789abcdefghijklmnopqrstu";
 	unsigned int i;
 	setvbuf(stdout, NULL, _IONBF, 0);
 	MAKE_DIR("showcase");

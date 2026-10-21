@@ -89,6 +89,8 @@
 #include "qaws_mesh_watertight.h"
 #include "qaws_mesh_geodesic.h"
 #include "qaws_mesh_smooth.h"
+#include "qaws_mesh_deform.h"
+#include "qaws_mesh_param.h"
 #include "qaws_mesh_intersect.h"
 #include "qaws_mesh_boolean.h"
 #include "qaws_volume_mesh.h"

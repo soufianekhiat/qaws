@@ -51,6 +51,12 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- Deformation and parameterization (`qaws_mesh_3d_deform`,
+  `qaws_mesh_3d_parameterize`): ARAP, Laplacian and biharmonic editing by
+  handles in a region; LSCM and ARAP flattening with seams cut open, charts
+  laid side by side, distortion reported (BFF reserved). The smoothing
+  module's sparse Laplacian and factored systems shared. Test 166, figure 30
+  (key u).
 - Smoothing and fairing (`qaws_mesh_3d_smooth`, `qaws_mesh_3d_fair`):
   Laplacian, Taubin, implicit mean curvature and bi-Laplacian smoothing,
   cotangent or uniform weights, border, held vertices and feature corners
