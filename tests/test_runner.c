@@ -177,6 +177,7 @@ extern int test_160_quality_report_main(void);
 extern int test_161_watertight_main(void);
 extern int test_162_intersect_main(void);
 extern int test_163_boolean_main(void);
+extern int test_164_mesh_geodesic_main(void);
 
 /* Test registry */
 typedef struct {
@@ -349,6 +350,7 @@ static test_suite const g_test_suites[] = {
 {"161_watertight", test_161_watertight_main},
 {"162_intersect", test_162_intersect_main},
 {"163_boolean", test_163_boolean_main},
+	{"164_mesh_geodesic", test_164_mesh_geodesic_main},
 };
 
 int main(void) {

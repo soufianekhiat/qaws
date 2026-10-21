@@ -45,6 +45,9 @@
  *                      their seam (union and lens by picking faces), three cubes
  *   mesh27_boolean.png mesh Booleans: two spheres united, intersected, one taken
  *                      from the other; the CSG emblem from five Booleans
+ *   mesh28_geodesic.png  geodesics by the heat method: a torus's distance and
+ *                      paths, a bumpy sphere's nearest of three sources, paths
+ *                      round a hill
  *
  * Each figure lives in meshing_showcase/NN_*.c, compiled as one translation
  * unit with the rasterizer in example_raster.h.
@@ -55,6 +58,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #ifdef _WIN32
 #include <direct.h>
@@ -202,15 +206,16 @@ static void ms_panel(er_canvas* c, int x, int y, int w, int h, qaws_mesh_3d cons
 #include "meshing_showcase/25_watertight.c"
 #include "meshing_showcase/26_intersect.c"
 #include "meshing_showcase/27_boolean.c"
+#include "meshing_showcase/28_geodesic.c"
 
-/* the figures to draw: all, or those whose keys the first argument lists ("58"; figures 10 to 27 are a to r) */
+/* the figures to draw: all, or those whose keys the first argument lists ("58"; figures 10 to 28 are a to s) */
 int main(int argc, char** argv)
 {
 	static void (*const demo[])(void) = { demo_core, demo_reference, demo_remesh, demo_quads, demo_generate, demo_tets, demo_hexes, demo_frame_hexes,
 		demo_measures, demo_remesh_angles, demo_remesh_cvt, demo_cross_field, demo_quad_flow, demo_quad_improve,
 		demo_quad_global, demo_guidance, demo_feature_size, demo_repair, demo_layers, demo_curved, demo_metric, demo_bvh, demo_quality, demo_repair_more, demo_watertight,
-		demo_intersect, demo_boolean };
-	static char const key[] = "123456789abcdefghijklmnopqr";
+		demo_intersect, demo_boolean, demo_geodesic };
+	static char const key[] = "123456789abcdefghijklmnopqrs";
 	unsigned int i;
 	setvbuf(stdout, NULL, _IONBF, 0);
 	MAKE_DIR("showcase");

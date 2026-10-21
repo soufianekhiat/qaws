@@ -970,6 +970,38 @@ A Boolean with few patches (most) sums its winding numbers directly, exact solid
 
 Figure 27 (key r) shows two spheres' union, intersection and difference (seen from the bite), and the CSG emblem: a cube and a sphere intersected, then three cylinders taken away, five Booleans in a row.
 
+## Geodesics on meshes
+
+`qaws_mesh_geodesic` (`qaws_mesh_geodesic.h`) gives geodesic distances and shortest paths on a mesh by the heat method (Crane, Weischedel, Wardetzky 2013). The object is made once per mesh; every query after that is a few solves.
+
+```c
+qaws_mesh_geodesic_create(&geo, mesh, NULL);
+qaws_mesh_geodesic_distance(distances, geo, sources, source_count);
+qaws_mesh_geodesic_path(points, locations, &count, geo, distances, sources, source_count, from, capacity);
+```
+
+**How it works:**
+1. **Factor once.** At creation the cotangent Laplacian L and the lumped masses M are built over the mesh's triangles (polygons fanned), and M + tL and L are factored by the sparse LDL^T. The time is t = factor h², h the mean edge length; `desc.time` sets the factor (1 by default, as in the paper).
+2. **Heat.** Each query puts a unit of heat at each source (a location: a triangle and barycentric coordinates, spread over its corners) and diffuses it for time t.
+3. **Direction.** The heat's gradient, normalized and turned away from the sources, gives the direction of growing distance in each triangle.
+4. **Distance.** The function whose gradient best matches it solves a Poisson equation. Each connected part is shifted so its nearest source is at 0; vertices no source reaches get `HUGE_VAL`.
+5. **Borders.** On a mesh with a border, the heat step averages its Neumann and Dirichlet solutions, as the paper advises (`QAWS_GEODESIC_BOUNDARY_MEAN`); either one alone can be asked for.
+
+**Paths.** `qaws_mesh_geodesic_path` follows the distance down from a location to the nearest source: across triangles, along an edge where both sides lead onto it, through a vertex where the flow meets one. The traced path is then shortened: the triangles it crosses are unfolded into the plane and the shortest way through them is taken (the funnel algorithm), passing round vertices on the side of the smaller angle. The result is the shortest path within those triangles, with a point on every edge it crosses and at every vertex it bends at, each with its location.
+
+The object copies what it needs, and concurrent queries are safe. Accuracy is that of the heat method: errors near the mean edge length's order in the worst places, much less on fine, well-shaped meshes.
+
+**Speed** (one thread, f64, i7-12700H): factoring 10k to 15k vertices takes 50 to 110 ms; each query then takes 3 to 5 ms.
+
+**Test 164 checks:**
+- **Sphere:** on an icosphere of 2562 vertices with the source at a vertex, the distances against the great-circle arcs: at most 0.03 off, 0.013 on average. With two sources at the poles, the nearer one's distance.
+- **Plane:** on a 40 × 40 square grid with the source at the centre, the Euclidean distance within 0.03 (mean border), 0.07 (Neumann or Dirichlet alone); a source inside a triangle within 0.05.
+- **Paths:** from the grid's corner to a source inside a triangle, every point nearer than the last, ending at the source, 0.15% longer than the straight segment; round the sphere from near one pole to the other, its length matching the arc.
+- **Parts:** on two separate squares, the one without a source is unreached.
+- **Repeat and refusals:** a second query gives the same distances; no mesh, sources outside the triangles and a short buffer are refused.
+
+Figure 28 (key s) shows a torus's distance from one point with paths back to it, a bumpy sphere's distance to the nearest of three sources, and paths going round a hill.
+
 ## Spatial queries: qaws_mesh_bvh
 
 `qaws_mesh_bvh.h` answers point and ray queries on any mesh, broken or not.

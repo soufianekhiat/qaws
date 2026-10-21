@@ -1,0 +1,85 @@
+#include "qaws_platform.h"   /* (QAWS_SCALAR_IS_FLOAT: the precision this pass declares) */
+#if QAWS_SCALAR_IS_FLOAT
+#ifndef QAWS_MESH_GEODESIC_H_F32
+#define QAWS_MESH_GEODESIC_H_F32
+#define QAWS_MESH_GEODESIC_H_BODY
+#endif
+#else
+#ifndef QAWS_MESH_GEODESIC_H_F64
+#define QAWS_MESH_GEODESIC_H_F64
+#define QAWS_MESH_GEODESIC_H_BODY
+#endif
+#endif
+#ifdef QAWS_MESH_GEODESIC_H_BODY
+#undef QAWS_MESH_GEODESIC_H_BODY
+#define QAWS_MESH_GEODESIC_H
+
+#include "qaws_mesh.h"
+
+/*
+ * Geodesic distances and paths on a mesh, by the heat method (Crane,
+ * Weischedel, Wardetzky 2013): heat diffused from the sources for a short
+ * time, its gradient normalized, and the distance the function whose
+ * gradient best matches it (a Poisson equation). The two matrices (the
+ * heat step's M + t L, the cotangent Laplacian L) are factored once at
+ * creation by the sparse LDL^T; each distance query is then a few solves,
+ * so many sources or many queries cost little.
+ *
+ * The mesh is read as its triangles (polygons fanned from their first
+ * vertex, as qaws_mesh_3d_get_triangle): locations name those triangles.
+ * The time is t = factor h^2, h the mean edge length (factor 1, the
+ * paper's choice, by default: larger smooths the distance, smaller
+ * follows the mesh more closely but grows noisier). On a mesh with a
+ * border, the heat step averages its Neumann and Dirichlet solutions
+ * (the paper's advice: the first bends isolines toward the border, the
+ * second away from it).
+ *
+ * Distances are per vertex, from the nearest source, each connected part
+ * shifted so its nearest source is at 0; vertices no source reaches
+ * (another part) get HUGE_VAL. The accuracy is that of the triangles: about
+ * the mean edge length's order in the worst places, much better on
+ * fine, well-shaped meshes.
+ *
+ * Paths go down the distance's gradient (constant in each triangle) from a
+ * location to the nearest source, across triangles, along an edge where
+ * both sides lead onto it and through a vertex where the flow meets one,
+ * ending straight at the source once in its triangle.
+ *
+ * The object copies what it needs: the mesh may change or go after
+ * creation. Thread-safe for concurrent queries.
+ */
+
+#ifndef QAWS_ENUM_QAWS_GEODESIC_BOUNDARY
+#define QAWS_ENUM_QAWS_GEODESIC_BOUNDARY
+typedef enum qaws_geodesic_boundary
+{
+	QAWS_GEODESIC_BOUNDARY_MEAN = 0,    /* the mean of the two below */
+	QAWS_GEODESIC_BOUNDARY_NEUMANN,     /* no heat through the border */
+	QAWS_GEODESIC_BOUNDARY_DIRICHLET    /* no heat on the border */
+} qaws_geodesic_boundary;
+#endif
+
+typedef struct qaws_mesh_geodesic_desc
+{
+	qaws_scalar time;                   /* the heat's time over the mean edge length squared; 0: 1 */
+	qaws_geodesic_boundary boundary;    /* on meshes with a border */
+} qaws_mesh_geodesic_desc;
+
+typedef struct qaws_mesh_geodesic qaws_mesh_geodesic;
+
+/* desc NULL: the defaults. INVALID_ARGUMENT for a mesh without a triangle of area */
+qaws_status qaws_mesh_geodesic_create(qaws_mesh_geodesic** out_geodesic, qaws_mesh_3d const* mesh, qaws_mesh_geodesic_desc const* desc);
+void qaws_mesh_geodesic_destroy(qaws_mesh_geodesic* geodesic);
+
+/* the distance at every vertex (vertex count) to the nearest of the sources */
+qaws_status qaws_mesh_geodesic_distance(qaws_scalar* out_distances, qaws_mesh_geodesic const* geodesic, qaws_mesh_location const* sources,
+	unsigned int source_count);
+
+/* the path from a location down the distances (from qaws_mesh_geodesic_distance with these sources) to the nearest source: its
+   points (3 each) and locations, from the start to the source; either output may be NULL. BUFFER_TOO_SMALL with the count when
+   capacity is short */
+qaws_status qaws_mesh_geodesic_path(qaws_scalar* out_points, qaws_mesh_location* out_locations, unsigned int* out_count,
+	qaws_mesh_geodesic const* geodesic, qaws_scalar const* distances, qaws_mesh_location const* sources, unsigned int source_count,
+	qaws_mesh_location from, unsigned int capacity);
+
+#endif /* QAWS_MESH_GEODESIC_H */
