@@ -162,6 +162,7 @@ add_executable(
 158_metric_remesh.c
 159_mesh_bvh.c
 160_quality_report.c
+161_watertight.c
 )
 
 # The amalgamated library exports exactly the same symbols, so the tests can

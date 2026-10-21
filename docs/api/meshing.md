@@ -15,6 +15,7 @@ enters and leaves as arrays; qaws reads and writes no files.
 | `qaws_quadrangulate.h` | quad meshes (INSTANT) |
 | `qaws_mesh_generate.h` | meshes of surfaces and shells (REMESH); curved elements (P2, P3, Q2, Q3 nodes) |
 | `qaws_mesh_repair.h` | repair for farq: soups and broken meshes made closed and outward |
+| `qaws_mesh_watertight.h` | watertight surfaces from any input: winding-number inside, dual contouring, offsets |
 | `qaws_mesh_bvh.h` | spatial queries: closest points, point location, rays, winding numbers, signed distance |
 | `qaws_quality_report.h` | quality reports: a measure per element of 2D, surface or volume meshes, histograms, worst elements, thresholds |
 | `qaws_volume_mesh.h` | `qaws_volume_mesh`: tetrahedra, hexahedra, prisms, pyramids |
@@ -844,6 +845,49 @@ Test 139 checks:
 - a 600-vertex hole is filled closed.
 
 Figure 24 (key o): a box with a hole round its corner, filled along its creases, and two crossing cubes with their intersecting faces.
+
+## Watertight surfaces
+
+`qaws_mesh_make_watertight` (`qaws_mesh_watertight.h`) makes a new closed, manifold, outward surface from any triangle input:
+- soups;
+- scans with holes;
+- overlapping or self-intersecting parts;
+- open sheets.
+
+It follows the input rather than keeping its faces. To keep the input's faces, use `qaws_mesh_repair`.
+
+```c
+qaws_watertight_desc d = { 64, 0 };      /* resolution: cells along the longest side; offset */
+qaws_mesh_make_watertight(&mesh, &report, positions, faces, NULL, vertex_count, face_count, &d);
+```
+
+**Inside.** A point is inside where the generalized winding number (through `qaws_mesh_bvh`) is at least ½: holes close smoothly, overlaps are united and inner faces drop out. With an offset, points within it of the input count as inside too, so an open sheet or a thin part becomes a closed shell (an envelope).
+
+**Which grid points are evaluated:**
+- points near the input, each one;
+- every other point elsewhere;
+- a 2×2×2 block of cells with no near point, whose corners agree by more than 0.1, takes their side;
+- any other block has all its points evaluated, because the inside can turn far from the input, across a hole.
+
+On the test sphere, about a third of the grid is evaluated.
+
+**Surface.** Dual contouring (Ju et al. 2002) puts one vertex per crossed cell, at the least squares point of the crossings' tangent planes. Rank-truncated, it stays within the cell (or falls back to the mass point), so sharp edges and corners are kept.
+
+Each crossing comes from one of two sources:
+- a ray along the grid edge onto the input, which gives the input triangle's own point and normal;
+- across a hole or on an offset, bisection, with the normal from the winding number's gradient or from the closest point.
+
+The quads are split along their shorter diagonal. The result then goes through `qaws_mesh_repair`, which splits non-manifold places and drops slivers.
+
+Detail below the cell size is lost, and the face count follows the grid; remesh the result to the size you want.
+
+**Tests and figure.** Test 161:
+- a sphere soup with three holes: closed, within 0.006 of the sphere away from the holes, volume 4.12;
+- two crossing cubes: their exact union, every vertex on its surface (5e-17), the volume to 1e-6, no face crossing another;
+- an open sheet wrapped at 0.05: closed, within 0.0033 of the offset;
+- refusals.
+
+Figure 25 (key p) shows the holed sphere and its watertight surface, the crossing cubes' union, and a wavy sheet wrapped at 0.06.
 
 ## Spatial queries: qaws_mesh_bvh
 

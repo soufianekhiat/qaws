@@ -29,6 +29,10 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- Watertight surfaces from any triangle input (`qaws_mesh_make_watertight`): the
+  generalized winding number's inside (or within an offset) contoured on a grid by
+  dual contouring with Hermite data from rays against the input (sharp features
+  kept), holes closed, overlaps united, sheets wrapped. Test 161, meshing figure 25.
 - Repair completed: holes filled along creases (crease ends joined across the hole,
   corners recovered, each part faired on its own), long holes halved by short
   diagonals, unused vertices reported, small closed parts removed by volume,

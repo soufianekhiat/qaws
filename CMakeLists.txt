@@ -123,6 +123,7 @@ src/qaws/mesh/qaws_quad_global.c
 src/qaws/mesh/qaws_mesh_repair.c
 src/qaws/mesh/qaws_mesh_bvh.c
 src/qaws/mesh/qaws_quality_report.c
+src/qaws/mesh/qaws_mesh_watertight.c
   src/qaws/qaws_convert.c
   src/qaws/qaws_export.c
   src/qaws/qaws_import.c
