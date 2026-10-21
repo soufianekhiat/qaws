@@ -175,6 +175,7 @@ extern int test_158_metric_remesh_main(void);
 extern int test_159_mesh_bvh_main(void);
 extern int test_160_quality_report_main(void);
 extern int test_161_watertight_main(void);
+extern int test_162_intersect_main(void);
 
 /* Test registry */
 typedef struct {
@@ -345,6 +346,7 @@ static test_suite const g_test_suites[] = {
 {"159_mesh_bvh", test_159_mesh_bvh_main},
 {"160_quality_report", test_160_quality_report_main},
 {"161_watertight", test_161_watertight_main},
+{"162_intersect", test_162_intersect_main},
 };
 
 int main(void) {

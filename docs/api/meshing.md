@@ -16,6 +16,7 @@ enters and leaves as arrays; qaws reads and writes no files.
 | `qaws_mesh_generate.h` | meshes of surfaces and shells (REMESH); curved elements (P2, P3, Q2, Q3 nodes) |
 | `qaws_mesh_repair.h` | repair for farq: soups and broken meshes made closed and outward |
 | `qaws_mesh_watertight.h` | watertight surfaces from any input: winding-number inside, dual contouring, offsets |
+| `qaws_mesh_intersect.h` | self-intersections resolved numerically: a conforming arrangement of the input's triangles |
 | `qaws_mesh_bvh.h` | spatial queries: closest points, point location, rays, winding numbers, signed distance |
 | `qaws_quality_report.h` | quality reports: a measure per element of 2D, surface or volume meshes, histograms, worst elements, thresholds |
 | `qaws_volume_mesh.h` | `qaws_volume_mesh`: tetrahedra, hexahedra, prisms, pyramids |
@@ -890,6 +891,31 @@ Detail below the cell size is lost, and the face count follows the grid; remesh 
 - refusals.
 
 Figure 25 (key p) shows the holed sphere and its watertight surface, the crossing cubes' union, and a wavy sheet wrapped at 0.06.
+
+## Self-intersections resolved
+
+`qaws_mesh_resolve_intersections` (`qaws_mesh_intersect.h`) cuts every pair of triangles that meet beyond their shared corners and edges along their intersection. The result's triangles meet only at shared vertices and edges: the curves where the input crossed itself become edges held by the faces of both sides (a conforming arrangement). Nothing is removed; deciding what is inside is left to Booleans and winding numbers.
+
+```c
+qaws_intersect_desc d = { 0 };          /* tolerance; 0: 1e-9 of the box's diagonal */
+qaws_mesh_resolve_intersections(&mesh, &report, positions, faces, NULL, vertex_count, face_count, &d);
+```
+
+It is numerical, not exact (farq makes exact arrangements), and robust by construction:
+- **Snapping.** Distances under the tolerance count as zero, so coplanar and nearly coplanar pairs are handled together (each overlap is cut along the other's edges), and a new point is snapped to the input feature near it: a vertex before an edge before a face.
+- **Keyed points.** Every new point is keyed by what made it: an edge through a triangle's plane, three triangles' planes (where three cuts meet), or two edges of coplanar triangles. It is computed once, so every face holding it takes the same vertex.
+- **Carriers.** Each input edge and each cut (the line where two faces cross) keeps its points sorted along it. Faces settle until no carrier gains a point: points lying on a piece are added to it, and pieces crossing inside a face are cut at their keyed point. Both sides of a cut therefore split it identically.
+- **Triangulation.** Each cut face is triangulated again in its plane, constrained Delaunay through its cuts and the points on its edges. Points on an edge sit exactly on it, and orientations are exact.
+
+The result is checked by exact predicates (`qaws_mesh_repair`'s test). `report.remaining` counts pairs still crossing, and `report.unresolved` counts cuts the triangulation could not keep. The face attribute `"source"` gives each triangle's input face. Where an intersection curve holds four faces, the mesh gives its vertices copies (`qaws_mesh_3d_get_vertex_source` gives the shared vertex).
+
+**Tests and figure.** Test 162 covers five inputs: two cubes crossing at an angle, three cubes crossing (cuts meeting at triple points), two cubes sharing two planes, the same pair 1e-12 off and tilted, and two spheres crossing. In every case:
+- no faces cross;
+- nothing is unresolved;
+- the directed edges cancel (vertices matched by position);
+- the area is unchanged to 1e-12.
+
+A cube alone comes back unchanged, and invalid input is refused. Figure 26 (key q) shows two spheres crossing, their faces outside the other sphere kept (the union) and inside (the lens), and three cubes resolved.
 
 ## Spatial queries: qaws_mesh_bvh
 

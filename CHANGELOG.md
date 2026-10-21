@@ -29,6 +29,12 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- Self-intersections resolved numerically (`qaws_mesh_resolve_intersections`):
+  crossing triangles cut along their intersections into a conforming arrangement,
+  points keyed by what made them (edge-plane, three planes, edge-edge) and snapped
+  to the input's features within a tolerance, coplanar overlaps cut along each
+  other's edges, cut faces triangulated again (constrained Delaunay), the result
+  checked by exact predicates. Test 162, meshing figure 26.
 - Watertight surfaces from any triangle input (`qaws_mesh_make_watertight`): the
   generalized winding number's inside (or within an offset) contoured on a grid by
   dual contouring with Hermite data from rays against the input (sharp features

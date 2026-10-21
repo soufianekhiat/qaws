@@ -102,7 +102,7 @@ Foundations:
 
 Robust numerical Booleans (decision 10):
 
-5. **Self-intersections resolved numerically.** Triangle-triangle intersections by filtered predicates with a consistent fallback (no rational arithmetic), coplanar and near-coplanar pairs handled together, the arrangement made conforming, the result snapped and checked.
+5. **Self-intersections resolved numerically: landed** (`qaws_mesh_resolve_intersections`, test 162, figure 26 key q); next: the face triangulation's point location and cut recovery are quadratic per face (fine for the cuts of a face, to revisit at scale, item 7). Planned as: Triangle-triangle intersections by filtered predicates with a consistent fallback (no rational arithmetic), coplanar and near-coplanar pairs handled together, the arrangement made conforming, the result snapped and checked.
 6. **Mesh Booleans.** Union, intersection, difference and self-union on closed meshes, by winding numbers on the resolved arrangement; output closed and manifold so farq can take it when an exact result is needed. A benchmark corpus (Thingi10K and the trueform cases) from the first commit, measuring time, failures and output quality.
 7. **Scale.** Benchmarks past 10^6 elements, parallel field solves and local operations, on the executor interface the batches use. Placed here because the Booleans compete on speed.
 

@@ -87,6 +87,7 @@
 #include "qaws_mesh_bvh.h"
 #include "qaws_quality_report.h"
 #include "qaws_mesh_watertight.h"
+#include "qaws_mesh_intersect.h"
 #include "qaws_volume_mesh.h"
 #include "qaws_tetrahedralize.h"
 #include "qaws_hexahedralize.h"
