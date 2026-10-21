@@ -40,6 +40,12 @@ and an order of work; the questions it raised are kept in section 13.
    volume cells. So qaws's repair only has to make a surface closed: it does
    not resolve self-intersections (farq's self-union does, exactly). Neither
    library links the other; the caller composes them through arrays.
+10. **Numerical Booleans in qaws (2026-10-21).** farq keeps exact Booleans
+   (against Solidean); qaws adds fast, robust numerical ones (against
+   trueform): filtered predicates with consistent fallbacks, no rational
+   arithmetic, self-intersections resolved the same way. Decision 9 holds
+   for repair's tolerances; qaws's Boolean output stays closed and
+   manifold so the two compose.
 
 ## As built (2026-10-18)
 
@@ -81,17 +87,42 @@ User guidance (what a modelling tool's user steers with):
 | Edge loops | `guide_edges` in quads: segments the quads' edges run along (one lattice line, quad vertices on them) | crossings pinned, loops through cones |
 | Pinned vertices | `pinned` in quads and in LOCAL and CVT remeshing: kept where they are, as corners | pins that may slide |
 
-Quality and reach:
+Landed (quality and reach): curved elements for surfaces (`qaws_mesh_generate_nodes_surface` / `_shell`, test 157, figure 20), boundary layers (`qaws_volume_mesh_grow_layers`, test 156, figure 19), metric-driven adaptation (`qaws_remesh_desc.metric`, `qaws_metric_field_create_hessian`, test 158, figure 21), sizing by local feature size (`qaws_size_field_create_feature_size`, test 138, figure 17), input repair (`qaws_mesh_repair`, test 139, figure 18), faster tests (a default tier and `QAWS_TEST_HEAVY=1`). Their details are in the As built table and in [api/meshing.md](api/meshing.md).
 
-1. Curved high-order elements (P2, P3): landed for surfaces. `qaws_mesh_generate_nodes_surface` / `_shell`: a generated mesh's nodes at order 2 or 3, edge nodes shared, a cubic triangle's centroid and a quad's inner grid, each the straight element's point snapped onto its face. Test 157 (a torus 50 to 140 times closer to the surface than straight; a box's edge nodes on its edges), figure 20 (key k). Next: curved tetrahedra and hexahedra at the border, a Jacobian check, nodes on a mesh reference.
-2. Boundary layers: landed. `qaws_volume_mesh_grow_layers` (`qaws_boundary_layers.h`): layers of prisms (triangles) and hexahedra (quads) at a first height and a growth ratio, inward or outward, along each vertex's angle-weighted normal turned until all its faces see it and stretched to keep the thickness across them; stacks thinned before the surface ahead and converging neighbours, graded, halved until every corner's Jacobian is positive. Test 156 (a box's layers exact to rounding, a sphere, a thin slab, an L-shaped block).
-3. Metric-driven adaptation: landed. `qaws_remesh_desc.metric`: LOCAL with every length, angle and shape measured in an anisotropic metric (as Mmgs), each vertex's in its tangent plane; metric fields per reference vertex or from a solution's Hessian (`qaws_metric_field_create_hessian`, M = (2/9) |H| / error). Test 158 (a constant metric: every edge of unit length; a tanh layer: 133 vertices, the interpolation within 1.3 times the error), figure 21 (key l). Collapses along straight feature lines fixed on the way (they were refused). Next: metric gradation, metric intersection of several fields, metric CVT.
-4. Sizing by local feature size: landed. `qaws_size_field_create_feature_size`: the width across thin parts and gaps over `cells_across`, from medial balls by shrinking (Ma et al. 2012) on two passes of per-triangle samples (a k-d tree pruned by box and normal cone), contacts carried onto the patches, faces across creases excluded by their normals, graded and combinable by min. Test 138: a fin 0.02 thick at 3 cells across 0.00667 on its top, no edge alone across its narrow sides (uniform 0.05: one), LOCAL at 30..110 degrees, the far end back at 0.05, growth 1.11 of the gradation, field in 0.5 s; two plates 0.03 apart sized 0.0100 across the gap; a sphere 0.6667 (2r / 3). Figure 17 (key h). Limits: a thin part's narrow side (a strip between creases) is refined only by the gradation from the faces beside it; sizes are held on a grid per triangle, so a large triangle next to a thin part is sampled finely throughout; the field is sampled on the reference (generation and other references need their own).
-5. Input repair: landed. `qaws_mesh_repair`: welding, degenerate faces, duplicates, gaps, small parts, orientation, hole filling (Liepa), cavities; a closed, outward surface for farq (decision 9), self-intersections and non-manifold edges left to it. Test 139, figure 18 (key i); the As built table.
-6. Scale: benchmarks past 10^6 elements, parallel field solves and local operations.
-7. Faster tests: landed. A default tier and a heavy one (`QAWS_TEST_HEAVY=1`), the trim boxes in the shell code; 783 s to 360 s serial, 95 s under `ctest -j 4`.
+### Roadmap (2026-10-21)
 
-Suggested order: GLOBAL quads, the user guidance above, local feature size sizing, faster tests.
+In order of work. Each item says what it unblocks; the order follows those dependencies first, then what users ask for first.
+
+Foundations:
+
+1. **Spatial queries on meshes.** A public BVH over `qaws_mesh_3d`, `qaws_mesh_2d` and `qaws_volume_mesh`: closest point, ray casting, signed distance, inside tests, and the generalized winding number as a query (fast winding numbers, Barill et al. 2018, for soups and point clouds). The repair, watertight, Boolean, connector and offset items all build on it.
+2. **Quality report.** One entry for 2D, 3D and volume meshes over the measures that exist (`qaws_mesh_measure.h`, `qaws_mesh_3d_measure_quality`, `qaws_volume_mesh_measure_quality`): histograms, the worst elements with their indices, and checks against a solver's thresholds (minimum angle, scaled Jacobian, aspect ratio). Cheap, and every later item reports through it.
+3. **Repair, completed.** On top of `qaws_mesh_repair`: non-manifold edges and vertices split (or reported), isolated and floating vertices removed, small floating parts by volume as well as count, self-intersections detected and reported (resolved by item 5), holes filled along features, gaps bridged by strips past the tolerance, loops past 500 vertices.
+4. **Watertight from any input.** A closed manifold surface from soups, scans and point clouds: the generalized winding number field (item 1) or a signed distance contoured by dual contouring (sharp features kept), and an envelope-bounded variant (as fTetWild's) when the result must stay within a distance of the input.
+
+Robust numerical Booleans (decision 10):
+
+5. **Self-intersections resolved numerically.** Triangle-triangle intersections by filtered predicates with a consistent fallback (no rational arithmetic), coplanar and near-coplanar pairs handled together, the arrangement made conforming, the result snapped and checked.
+6. **Mesh Booleans.** Union, intersection, difference and self-union on closed meshes, by winding numbers on the resolved arrangement; output closed and manifold so farq can take it when an exact result is needed. A benchmark corpus (Thingi10K and the trueform cases) from the first commit, measuring time, failures and output quality.
+7. **Scale.** Benchmarks past 10^6 elements, parallel field solves and local operations, on the executor interface the batches use. Placed here because the Booleans compete on speed.
+
+Mesh processing:
+
+8. **Geodesics on meshes.** The heat method (Crane et al. 2013) on the sparse LDL^T, then exact polyhedral geodesics where needed; geodesic paths traced with `qaws_mesh_reference_walk`. Needed by items 12, 13 and 14.
+9. **Smoothing and fairing.** Laplacian, Taubin and bi-Laplacian smoothing with features held; fair patches for holes and bridges (the repair's fairing made public).
+10. **Deformation and parameterization.** ARAP deformation with handles, Laplacian and biharmonic editing; ARAP, LSCM and BFF parameterization with seams cut. One local-global solver serves both.
+11. **Decimation.** Quadric error metrics (Garland-Heckbert) with attributes, seams and features, and the certified deviation of item 2's report; a target count or error.
+12. **Remeshing from attributes.** Isolines of an attribute kept as feature lines; metrics from several attributes combined by metric intersection; metric gradation; metric CVT (the follow-ups of metric adaptation).
+13. **Mesh connector.** Two meshes (2D, 3D surfaces, volumes), a boundary selected on each, joined by a bridge: boundaries matched by arc length, a strip or a tube meshed between them (quads, triangles, or prisms and hexahedra for volumes), faired (item 9), graded to the sizes on both sides, checked by item 2.
+14. **Repulsive curves on surfaces with geodesic distances.** The surface curve solver measuring the tangent-point energy along geodesics (patches, shells, and meshes through item 8), curves moving across faces by walks.
+15. **Offsets of meshes.** Thickening, shelling and offset surfaces from the signed distance (item 1), contoured or by moving vertices with self-intersections resolved (item 5).
+16. **Subdivision on `qaws_mesh_3d`.** Loop and Catmull-Clark as mesh operations with features, creases and attributes (today only `qaws_surface_create_subdiv`, which samples the limit).
+
+Volumes and reserved methods:
+
+17. **Volume improvement.** Sliver removal, tetrahedral smoothing and flips (Klingner-Shewchuk), CDT boundary recovery (Diazzi et al. 2023); curved tetrahedra and hexahedra at the border with a Jacobian check, nodes on a mesh reference.
+18. **Hexahedra.** FRAME_FIELD through singular edges (HexEx extraction), meshable frame fields, POLYCUBE.
+19. **Quads.** GLOBAL's quantization of crease isovalues and torus periods, LAYOUT (QuadWild), the cone budget and other guidance follow-ups of the table above.
 
 ## 0. Scope
 
@@ -118,9 +149,8 @@ Out:
 - File input and output (OBJ, STL, PLY, STEP, ...): the caller's role.
   Meshes enter and leave as arrays.
 - Rendering.
-- Resolving self-intersections: farq's, exactly (decision 9). Repair up to
-  a closed, outward surface is in (`qaws_mesh_repair`: welding, degenerate
-  faces, gaps, holes, orientation).
+- Exact Booleans and exact intersection resolution: farq's (decision 9).
+  Numerical ones are in (decision 10, roadmap items 5 and 6).
 
 ## 1. What qaws has today
 
