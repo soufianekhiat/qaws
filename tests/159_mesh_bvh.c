@@ -748,6 +748,18 @@ static void test_paths(void)
 	TEST_ASSERT(bad_r == 0, "paths: the same first hits");
 	TEST_ASSERT(bad_a == 0, "paths: the same any-hit answers");
 	TEST_ASSERT(worst_w < 4e-3, "paths: winding numbers within both expansions' error");
+	/* refit to scaled positions (every tree's boxes moved): the same first hits again */
+	for (i = 0; i < 3 * nv; i++)
+		x[i] = (qaws_scalar)(1.5 * x[i]);
+	TEST_ASSERT(qaws_mesh_bvh_refit(b0, x) == QAWS_STATUS_OK && qaws_mesh_bvh_refit(b1, x) == QAWS_STATUS_OK, "paths: refit");
+	qaws_mesh_bvh_ray(h0, b0, pts, dir, n, 0, 0, NULL);
+	qaws_mesh_bvh_ray(h1, b1, pts, dir, n, 0, 0, NULL);
+	bad_r = 0;
+	for (i = 0; i < n; i++)
+		if ((h0[i].element == QAWS_MESH_NONE) != (h1[i].element == QAWS_MESH_NONE)
+			|| (h0[i].element != QAWS_MESH_NONE && fabs(h0[i].distance - h1[i].distance) > bt_tol() * (1 + h0[i].distance)))
+			bad_r++;
+	TEST_ASSERT(bad_r == 0, "paths: the same first hits after a refit");
 	qaws_mesh_bvh_destroy(b0);
 	qaws_mesh_bvh_destroy(b1);
 	free(x);
