@@ -56,6 +56,8 @@
  *   mesh31_deform_2.png  the ARAP paper's tests: a plate with 4 x 4 bumps lifted
  *                      on one side, a square bar twisted half a turn; ARAP against
  *                      Laplacian and biharmonic editing
+ *   mesh32_decimate.png  decimation by quadric error: a rippled torus at 20%, 5% and
+ *                      1.5% with its certified deviation, a fine cube with its creases
  *
  * Each figure lives in meshing_showcase/NN_*.c, compiled as one translation
  * unit with the rasterizer in example_raster.h.
@@ -218,15 +220,16 @@ static void ms_panel(er_canvas* c, int x, int y, int w, int h, qaws_mesh_3d cons
 #include "meshing_showcase/29_smooth.c"
 #include "meshing_showcase/30_deform.c"
 #include "meshing_showcase/31_deform_2.c"
+#include "meshing_showcase/32_decimate.c"
 
-/* the figures to draw: all, or those whose keys the first argument lists ("58"; figures 10 to 31 are a to v) */
+/* the figures to draw: all, or those whose keys the first argument lists ("58"; figures 10 to 32 are a to w) */
 int main(int argc, char** argv)
 {
 	static void (*const demo[])(void) = { demo_core, demo_reference, demo_remesh, demo_quads, demo_generate, demo_tets, demo_hexes, demo_frame_hexes,
 		demo_measures, demo_remesh_angles, demo_remesh_cvt, demo_cross_field, demo_quad_flow, demo_quad_improve,
 		demo_quad_global, demo_guidance, demo_feature_size, demo_repair, demo_layers, demo_curved, demo_metric, demo_bvh, demo_quality, demo_repair_more, demo_watertight,
-		demo_intersect, demo_boolean, demo_geodesic, demo_smooth, demo_deform, demo_deform_2 };
-	static char const key[] = "123456789abcdefghijklmnopqrstuv";
+		demo_intersect, demo_boolean, demo_geodesic, demo_smooth, demo_deform, demo_deform_2, demo_decimate };
+	static char const key[] = "123456789abcdefghijklmnopqrstuvw";
 	unsigned int i;
 	setvbuf(stdout, NULL, _IONBF, 0);
 	MAKE_DIR("showcase");

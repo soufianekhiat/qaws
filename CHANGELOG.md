@@ -51,6 +51,10 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- Decimation by quadric error metrics (`qaws_mesh_3d_decimate`): a target
+  count or an error bound, border and feature lines held by constraint
+  planes, feature corners kept, folds refused, attributes carried, the
+  certified deviation from the input on request. Test 167, figure 32 (key w).
 - Deformation and parameterization (`qaws_mesh_3d_deform`,
   `qaws_mesh_3d_parameterize`): ARAP, Laplacian and biharmonic editing by
   handles in a region; LSCM and ARAP flattening with seams cut open, charts

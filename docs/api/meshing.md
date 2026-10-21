@@ -1067,6 +1067,29 @@ The report gives the charts, the triangles turned over, the mean corner angle er
 
 Figure 30 (key u) shows a bar bent by ARAP and by Laplacian editing, and a hill flattened by ARAP with its (u, v) grid and its layout. Figure 31 (key v) repeats the ARAP paper's own tests (its figures 2 and 6): a plate with 4 × 4 bumps held on one side and lifted on the other, and a square bar twisted a quarter turn, by ARAP, Laplacian editing and the biharmonic bend.
 
+## Decimation
+
+`qaws_mesh_3d_decimate` (`qaws_mesh_decimate.h`) reduces a mesh in place by quadric error metrics (Garland and Heckbert 1997): edges are collapsed cheapest first, each merged vertex placed where the sum of its two ends' quadrics (the planes of the faces they had, weighted by area) is least.
+
+```c
+qaws_decimate_desc d = { 1000 };                       /* down to 1000 faces */
+qaws_mesh_3d_decimate(&report, mesh, &d);
+```
+
+- **Error:** read as a distance, the root of the area-weighted mean squared distance to those planes. `max_error` stops before a collapse past it; `target_faces` stops at a count.
+- **What stays:** feature corners; feature lines and the border, held near their place by planes standing on their edges (`QAWS_DECIMATE_LOCK_BORDER` holds the border's vertices still); collapses that would turn a face over (by more than about 78°) or move a feature vertex off its line are refused. Attributes follow the collapses by their rules.
+- **Certified deviation:** with `QAWS_DECIMATE_MEASURE` the report holds the result's two-sided Hausdorff bounds from the input (`qaws_mesh_3d_measure_deviation` against the input as a LINEAR reference).
+
+The collapses run on the corner store without compacting until the end, from a heap whose stale entries are skipped by the vertices' stamps.
+
+**Test 167 checks** (small meshes):
+- **Sphere:** an icosphere of 1280 triangles down to 320: still closed, genus 0, certified 0.016 from the input; an error bound 0.004 is never passed.
+- **Plane:** a flat 16 × 16 grid down to 2 triangles, area and box exact; with the border locked, its 64 border vertices stay, unmoved.
+- **Cube:** in 6 × 6 grids with its creases as features, down to 16 triangles, volume and area exact.
+- **Refusals:** no mesh, a negative bound.
+
+Figure 32 (key w) shows a rippled torus at 20%, 5% and 1.5% of its triangles with the certified deviation of each (0.004, 0.014, 0.062 on a torus of radius 1.4), and a fine cube down to 12 triangles with its creases kept.
+
 ## Spatial queries: qaws_mesh_bvh
 
 `qaws_mesh_bvh.h` answers point and ray queries on any mesh, broken or not.

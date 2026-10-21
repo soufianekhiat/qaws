@@ -91,6 +91,7 @@
 #include "qaws_mesh_smooth.h"
 #include "qaws_mesh_deform.h"
 #include "qaws_mesh_param.h"
+#include "qaws_mesh_decimate.h"
 #include "qaws_mesh_intersect.h"
 #include "qaws_mesh_boolean.h"
 #include "qaws_volume_mesh.h"
