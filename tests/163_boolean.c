@@ -140,11 +140,13 @@ static int bo_ops(char const* name, qaws_mesh_3d_desc const* A, qaws_mesh_3d_des
 		qaws_mesh_3d* m = NULL;
 		qaws_status s = qaws_mesh_boolean(&m, &r, A, B, (qaws_boolean_op)k, NULL);
 		char msg[300];
+		/* (one sphere each: an edge made twice by the turning in flat regions would split vertices) */
+		int chi = m ? (int)qaws_mesh_3d_get_vertex_count(m) - (int)qaws_mesh_3d_get_edge_count(m) + (int)qaws_mesh_3d_get_face_count(m) : 0;
 		vol[k] = bo_volume(m);
-		sprintf(msg, "%s, %s: %u pieces kept (%u turned), %u dropped, closed %d, %u crossing left, volume %.15f", name, op_name[k], r.kept, r.flipped,
-			r.dropped, r.closed, r.intersect.remaining, vol[k]);
+		sprintf(msg, "%s, %s: %u pieces kept (%u turned), %u dropped, %u edges turned flat, closed %d, V - E + F = %d, %u crossing left, volume %.15f",
+			name, op_name[k], r.kept, r.flipped, r.dropped, r.flat_flips, r.closed, chi, r.intersect.remaining, vol[k]);
 		printf("  %s\n", msg);
-		TEST_ASSERT(s == QAWS_STATUS_OK && m && r.closed && r.intersect.remaining == 0 && r.intersect.unresolved == 0, msg);
+		TEST_ASSERT(s == QAWS_STATUS_OK && m && r.closed && chi == 2 && r.intersect.remaining == 0 && r.intersect.unresolved == 0, msg);
 		ok &= s == QAWS_STATUS_OK && m != NULL;
 		qaws_mesh_3d_destroy(m);
 	}
