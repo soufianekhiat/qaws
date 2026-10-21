@@ -28,20 +28,25 @@
  *   |T_I x (x_i - x_j)|^alpha / |x_i - x_j|^beta  becomes
  *   (r^2 - (T_I . (x_i - x_j))^2)^(alpha / 2) / r^beta,
  *
- * r the larger of the chord |x_i - x_j| and the geodesic distance, by the
- * heat method (qaws_mesh_geodesic.h) from each vertex's location, the two
- * ways averaged. The geodesic is never shorter than the chord, so where the
- * heat method falls short (near its source) the chord is kept; where the
- * surface is flat the energy is the curves' own. Curves on two sheets close
+ * r the larger of the chord |x_i - x_j| and the geodesic distance D, by the
+ * heat method (qaws_mesh_geodesic.h) from each vertex's location. The
+ * geodesic is never shorter than the chord, so where the heat method falls
+ * short the chord is kept; where the surface is flat the energy is the
+ * curves' own. Pairs within two mesh edges of each other along the surface
+ * (D, the heat method's poorest range) take the chord alone, the geodesic
+ * blended in (smoothstep) up to four: r = c + b(D) (D - c) when D > c. Curves on two sheets close
  * in space but far apart along the surface (the two sides of a thin shell,
  * the folds of a sheet) hardly repel each other. With euclidean set r is
  * the chord: the curves' energy, the vertices kept on the mesh.
  *
- * The gradient: exact for the chord's terms and the edges' tangents and
- * lengths; a geodesic distance's gradient at x_i is the gradient of the
- * distance field from x_j in x_i's triangle (the field from x_i moving
- * with x_i taken by symmetry: the same), so it carries the heat method's
- * errors.
+ * Within a step the distance fields are those from the step's start
+ * (taken again after each accepted step): there the geodesic distance is
+ * D_j(x_i) + D_i(x_j) - C_ij, D_j the field from vertex j's starting
+ * location and C_ij the two ways' mean at the start: that mean at the
+ * start, first order in both ends as they move. The energy the line search
+ * sees then has an exact gradient (the fields' gradients in the vertices'
+ * triangles); recomputing the fields at each trial instead (their sources
+ * moving) left the gradient inexact enough to stall descents.
  *
  * Moves: each step is taken in each vertex's tangent plane (its triangle's)
  * and the vertex walked there along the triangles, straight across each

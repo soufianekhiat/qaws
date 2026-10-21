@@ -68,6 +68,8 @@
  *                      carried, two hexahedral blocks joined by hexahedra
  *   mesh37_repulsive_mesh_curves.png  repulsive curves on a mesh: loops across a fold
  *                      by chords and along the surface, a star on a sphere smoothed
+ *   mesh38_repulsive_mesh_curves_2.png  repulsive curves on a terrain of Gaussian
+ *                      hills: a branching tree spreading, a flower loop opening
  *
  * Each figure lives in meshing_showcase/NN_*.c, compiled as one translation
  * unit with the rasterizer in example_raster.h.
@@ -236,16 +238,17 @@ static void ms_panel(er_canvas* c, int x, int y, int w, int h, qaws_mesh_3d cons
 #include "meshing_showcase/35_connect.c"
 #include "meshing_showcase/36_connect_more.c"
 #include "meshing_showcase/37_repulsive_mesh_curves.c"
+#include "meshing_showcase/38_repulsive_mesh_curves_2.c"
 
-/* the figures to draw: all, or those whose keys the first argument lists ("58"; figures 10 to 35 are a to z, 36 and 37 are A and B) */
+/* the figures to draw: all, or those whose keys the first argument lists ("58"; figures 10 to 35 are a to z, 36 to 38 are A to C) */
 int main(int argc, char** argv)
 {
 	static void (*const demo[])(void) = { demo_core, demo_reference, demo_remesh, demo_quads, demo_generate, demo_tets, demo_hexes, demo_frame_hexes,
 		demo_measures, demo_remesh_angles, demo_remesh_cvt, demo_cross_field, demo_quad_flow, demo_quad_improve,
 		demo_quad_global, demo_guidance, demo_feature_size, demo_repair, demo_layers, demo_curved, demo_metric, demo_bvh, demo_quality, demo_repair_more, demo_watertight,
 		demo_intersect, demo_boolean, demo_geodesic, demo_smooth, demo_deform, demo_deform_2, demo_decimate, demo_decimate_views, demo_remesh_attributes, demo_connect, demo_connect_more,
-		demo_repulsive_mesh_curves };
-	static char const key[] = "123456789abcdefghijklmnopqrstuvwxyzAB";
+		demo_repulsive_mesh_curves, demo_repulsive_mesh_curves_2 };
+	static char const key[] = "123456789abcdefghijklmnopqrstuvwxyzABC";
 	unsigned int i;
 	setvbuf(stdout, NULL, _IONBF, 0);
 	MAKE_DIR("showcase");

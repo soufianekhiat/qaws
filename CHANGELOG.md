@@ -59,7 +59,8 @@ All notable changes to Qaws are documented here.
 - Repulsive curves on a mesh (`qaws_repulsive_mesh_curves.h`): curve
   vertices as locations on a mesh's triangles, the tangent-point energy with
   each pair's distance the larger of the chord and the geodesic (heat
-  method), steps walked across the triangles. Test 170, figure 37 (key B).
+  method), steps walked across the triangles. Test 170, figures 37 and 38
+  (keys B, C).
 - The mesh connector (`qaws_mesh_3d_connect`): two border loops (on two
   meshes or one) joined by a bridge matched by arc length, Hermite-blended
   along both surfaces (tangent to both), rows and counts graded, quads or

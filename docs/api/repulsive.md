@@ -663,10 +663,10 @@ geodesic distance enters the published energy.
 
 `qaws_repulsive_mesh_curves.h`: a 3D curve set whose vertices are locations on a mesh's triangles (`qaws_mesh_location`, triangles as `qaws_mesh_3d_get_triangle` fans them).
 
-- **Energy:** the curves' (Eq. 17), each pair's distance r taken along the surface: the kernel becomes (r^2 - (T_I . (x_i - x_j))^2)^(alpha/2) / r^beta. r is the larger of the chord and the geodesic distance by the heat method (`qaws_mesh_geodesic.h`) from each vertex's location, the two ways averaged. The geodesic is never shorter than the chord, so where the heat method falls short (near its source) the chord is kept; on a flat mesh the energy is the curves' own. With `euclidean` set r is the chord: the curves' energy with the vertices kept on the mesh.
-- **Gradient:** exact for the chords, tangents and lengths; a geodesic distance's gradient at x_i is the gradient of the distance field from x_j in x_i's triangle (the field from x_i moving with it taken by symmetry), so it carries the heat method's errors.
+- **Energy:** the curves' (Eq. 17), each pair's distance r taken along the surface: the kernel becomes (r^2 - (T_I . (x_i - x_j))^2)^(alpha/2) / r^beta. r is the larger of the chord and the geodesic distance D by the heat method (`qaws_mesh_geodesic.h`) from each vertex's location. The geodesic is never shorter than the chord, so where the heat method falls short the chord is kept; on a flat mesh the energy is the curves' own. Pairs within two mesh edges of each other along the surface (the heat method's poorest range) take the chord alone, the geodesic blended in (smoothstep in D) up to four edges. With `euclidean` set r is the chord: the curves' energy with the vertices kept on the mesh.
+- **Gradient:** within a step the distance fields are those from the step's start (taken again after each accepted step), and the distance D_j(x_i) + D_i(x_j) - C_ij (C_ij the two ways' mean at the start) is first order in both ends: the energy the line search sees has an exact gradient. Recomputing the fields at every trial (their sources moving) left the gradient inexact enough to stall descents on curved meshes.
 - **Moves:** each step is taken in each vertex's tangent plane (its triangle's), then the vertex is walked there along the triangles, straight across each edge (`qaws_mesh_reference_walk`): curves cross faces and stay on the mesh without projecting; a walk stops at a border. The descent is the curves' dense one, its metric (the chords') pulled back to the tangent planes; pins, lengths and held directions as for curves (measured in 3D); `hold_barycenter` and `theta` must be 0. Collision-checked: each vertex's motion is checked as its chord.
-- **Cost:** per energy, one distance query per curve vertex (two prefactored sparse solves on the mesh) and the all-pairs sum; the n x n distances are stored.
+- **Cost:** per step, one distance query per curve vertex (two prefactored sparse solves on the mesh); per energy, the all-pairs sum. The fields (n x the mesh's vertices) and the n x n distances are stored.
 - **Patches and shells** reach this through a triangulation of them.
 
 | Check (test 170) | Result |
@@ -678,7 +678,7 @@ geodesic distance enters the published energy.
 | An ellipse on a flat grid, length held, 30 steps: energy, aspect, vertices walked, off the plane | 31.5 -> 13.3, 2.20 -> 0.99, 16 of 16, 0 |
 | Refusals: theta set, a location off the triangles | INVALID_ARGUMENT |
 
-Figure 37 (key B of the meshing showcase): the folded strip's two loops by chords (pushed apart through the gap, the top one toward the fold) and along the surface (far apart round the fold, both sliding away from it), and a star-shaped loop on a sphere, its length held, made round.
+Figure 37 (key B of the meshing showcase): the folded strip's two loops by chords (pushed apart through the gap, the top one toward the fold) and along the surface (far apart round the fold, both sliding away from it), and a star-shaped loop on a sphere, its length held, made round. Figure 38 (key C): a terrain of five Gaussian hills and a pit; a tree (six branches forking in two, 109 vertices) crumpled at the start spreads over the hills, and a seven-petalled loop opens over them, edge lengths held.
 
 ## Native control points (R5)
 

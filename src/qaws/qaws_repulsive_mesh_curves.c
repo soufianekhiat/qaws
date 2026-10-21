@@ -19,6 +19,7 @@
 #include <math.h>
 
 #define RMC_REG 1e-10   /* the diagonal blocks' lift, relative (as on surfaces) */
+#define RMC_NEAR 2      /* pairs within this many mesh edges along the surface: the chord alone (the heat method's poorest range), the geodesic blended in over as many again */
 
 typedef qaws_internal_rs_core rs_core;
 
@@ -30,13 +31,16 @@ struct qaws_repulsive_mesh_curves_solver
 	qaws_mesh_geodesic* geo;        /* NULL: the chords only */
 	qaws_repulsive_curves_solver* inner;   /* the curves' constraints in 3D (pins and barycenter aside) */
 	unsigned int nt, nmv, kin, npin;
+	double h;                       /* the mesh's mean edge length */
 	unsigned int *tri, *pin;
 	unsigned char* fixed;
 	double* P;                      /* the mesh's positions */
 	qaws_mesh_location *loc, *wl;   /* the vertices' locations; walked ones (scratch) */
 	double *F;                      /* frames at loc: e1, e2 (6 per vertex) */
 	double *x, *x1, *A, *gx, *Cx;
-	double *Dv, *Dg;                /* the distance from vertex j at vertex i (n x n) and its gradient at i (3 each) */
+	double *Fl;                     /* the distance fields from loc (n x the mesh's vertices), fresh while loc holds */
+	double *Dv, *Dg, *Cm;           /* the field from vertex j at vertex i (n x n) and its gradient at i (3 each); the mean at loc */
+	int fresh;
 	qaws_scalar *xs, *ds, *q;
 };
 
@@ -104,46 +108,64 @@ static qaws_status rmc_walk(qaws_repulsive_mesh_curves_solver const* s, double c
 /*  The energy                                                              */
 /* ------------------------------------------------------------------------ */
 
-/* Dv, Dg from the distance fields of the locations wl */
+/* a field (per mesh vertex) at a location: its linear interpolation in the triangle, and (g may be NULL) its gradient there */
+static double rmc_interp(qaws_repulsive_mesh_curves_solver const* s, double const* f, qaws_mesh_location const* l, double* g)
+{
+	unsigned int const* c = s->tri + 3 * (size_t)l->patch;
+	double const* p[3];
+	double a = (double)l->a, b = (double)l->b, d[3], N[3], u[3], w[3], e[3], A2;
+	unsigned int k, r;
+	for (k = 0; k < 3; k++) d[k] = f[c[k]];
+	if (!g)
+		return (1 - a - b) * d[0] + a * d[1] + b * d[2];
+	g[0] = g[1] = g[2] = 0;
+	rmc_corners(s, l->patch, p);
+	for (k = 0; k < 3; k++) { u[k] = p[1][k] - p[0][k]; w[k] = p[2][k] - p[0][k]; }
+	rmc_cross(N, u, w);
+	A2 = sqrt(N[0] * N[0] + N[1] * N[1] + N[2] * N[2]);
+	if (A2 > 0)
+	{
+		for (k = 0; k < 3; k++) N[k] /= A2;
+		/* grad phi_r = N x (the edge opposite r, counterclockwise) / 2A */
+		for (r = 0; r < 3; r++)
+		{
+			double const *pa = p[(r + 1) % 3], *pb = p[(r + 2) % 3];
+			double ed[3];
+			for (k = 0; k < 3; k++) ed[k] = pb[k] - pa[k];
+			rmc_cross(e, N, ed);
+			for (k = 0; k < 3; k++) g[k] += d[r] * e[k] / A2;
+		}
+	}
+	return (1 - a - b) * d[0] + a * d[1] + b * d[2];
+}
+
+/* The distance fields from the locations loc, frozen for a step (taken
+   again when loc changes), and Dv, Dg from them at the locations wl. A
+   step's distance D_ij = D_j(x_i) + D_i(x_j) - C_ij, C_ij the two ways'
+   mean at loc: the mean at the step's start and, as the vertices move,
+   first order in both ends, its gradient exact. */
 static qaws_status rmc_distances(qaws_repulsive_mesh_curves_solver const* s)
 {
 	qaws_repulsive_mesh_curves_solver* m = (qaws_repulsive_mesh_curves_solver*)s;
-	unsigned int n = s->core.nv, i, j, k;
+	unsigned int n = s->core.nv, nm = s->nmv, i, j, k;
 	qaws_status st;
-	for (j = 0; j < n; j++)
+	if (!s->fresh)
 	{
-		if ((st = qaws_mesh_geodesic_distance(m->ds, s->geo, s->wl + j, 1)) != QAWS_STATUS_OK)
-			return st;
-		for (i = 0; i < n; i++)
+		for (j = 0; j < n; j++)
 		{
-			/* the field's linear interpolation in i's triangle and its gradient there */
-			unsigned int const* c = s->tri + 3 * (size_t)s->wl[i].patch;
-			double const* p[3];
-			double a = (double)s->wl[i].a, b = (double)s->wl[i].b, d[3], N[3], u[3], w[3], e[3], g[3] = { 0, 0, 0 }, A2;
-			double* out = m->Dg + 3 * ((size_t)j * n + i);
-			for (k = 0; k < 3; k++) d[k] = (double)s->ds[c[k]];
-			m->Dv[(size_t)j * n + i] = (1 - a - b) * d[0] + a * d[1] + b * d[2];
-			rmc_corners(s, s->wl[i].patch, p);
-			for (k = 0; k < 3; k++) { u[k] = p[1][k] - p[0][k]; w[k] = p[2][k] - p[0][k]; }
-			rmc_cross(N, u, w);
-			A2 = sqrt(N[0] * N[0] + N[1] * N[1] + N[2] * N[2]);
-			if (A2 > 0)
-			{
-				unsigned int r;
-				for (k = 0; k < 3; k++) N[k] /= A2;
-				/* grad phi_r = N x (the edge opposite r, counterclockwise) / 2A */
-				for (r = 0; r < 3; r++)
-				{
-					double const *pa = p[(r + 1) % 3], *pb = p[(r + 2) % 3];
-					double ed[3];
-					for (k = 0; k < 3; k++) ed[k] = pb[k] - pa[k];
-					rmc_cross(e, N, ed);
-					for (k = 0; k < 3; k++) g[k] += d[r] * e[k] / A2;
-				}
-			}
-			for (k = 0; k < 3; k++) out[k] = g[k];
+			if ((st = qaws_mesh_geodesic_distance(m->ds, s->geo, s->loc + j, 1)) != QAWS_STATUS_OK)
+				return st;
+			for (k = 0; k < nm; k++) m->Fl[(size_t)j * nm + k] = (double)s->ds[k];
 		}
+		for (j = 0; j < n; j++)
+			for (i = 0; i < n; i++) m->Dv[(size_t)j * n + i] = rmc_interp(s, s->Fl + (size_t)j * nm, s->loc + i, NULL);
+		for (j = 0; j < n; j++)
+			for (i = 0; i < n; i++) m->Cm[(size_t)j * n + i] = 0.5 * (s->Dv[(size_t)j * n + i] + s->Dv[(size_t)i * n + j]);
+		m->fresh = 1;
 	}
+	for (j = 0; j < n; j++)
+		for (i = 0; i < n; i++)
+			m->Dv[(size_t)j * n + i] = rmc_interp(s, s->Fl + (size_t)j * nm, s->wl + i, m->Dg + 3 * ((size_t)j * n + i));
 	return QAWS_STATUS_OK;
 }
 
@@ -191,13 +213,20 @@ static qaws_status rmc_sum(qaws_repulsive_mesh_curves_solver const* s, double co
 					for (k = 0; k < 3; k++) { ri[k] = v[k] / e; rj[k] = -v[k] / e; }
 					if (s->geo)
 					{
-						double D = 0.5 * (s->Dv[(size_t)j * n + i] + s->Dv[(size_t)i * n + j]);
+						double D = s->Dv[(size_t)j * n + i] + s->Dv[(size_t)i * n + j] - s->Cm[(size_t)j * n + i];
 						if (!(D < HUGE_VAL))
 							continue;   /* (another part of the mesh: no interaction) */
-						if (D > e)
+						if (D > e && D > RMC_NEAR * s->h)
 						{
-							r = D;
-							for (k = 0; k < 3; k++) { ri[k] = s->Dg[3 * ((size_t)j * n + i) + k]; rj[k] = s->Dg[3 * ((size_t)i * n + j) + k]; }
+							/* r = e + b (D - e), b from 0 at D = RMC_NEAR mesh edges to 1 at twice that (smoothstep) */
+							double t = D / (RMC_NEAR * s->h) - 1, bl = t >= 1 ? 1 : t * t * (3 - 2 * t), db = t >= 1 ? 0 : 6 * t * (1 - t) / (RMC_NEAR * s->h);
+							double cd = bl + db * (D - e);
+							r = e + bl * (D - e);
+							for (k = 0; k < 3; k++)
+							{
+								ri[k] = (1 - bl) * v[k] / e + cd * s->Dg[3 * ((size_t)j * n + i) + k];
+								rj[k] = -(1 - bl) * v[k] / e + cd * s->Dg[3 * ((size_t)i * n + j) + k];
+							}
 						}
 					}
 					P = r * r - a * a;
@@ -321,7 +350,7 @@ void qaws_repulsive_mesh_curves_solver_destroy(qaws_repulsive_mesh_curves_solver
 	qaws_mesh_geodesic_destroy(s->geo);
 	qaws_internal_free(s->core.x); qaws_internal_free(s->tri); qaws_internal_free(s->pin); qaws_internal_free(s->fixed); qaws_internal_free(s->P);
 	qaws_internal_free(s->loc); qaws_internal_free(s->wl); qaws_internal_free(s->F); qaws_internal_free(s->x); qaws_internal_free(s->x1);
-	qaws_internal_free(s->A); qaws_internal_free(s->gx); qaws_internal_free(s->Cx); qaws_internal_free(s->Dv); qaws_internal_free(s->Dg);
+	qaws_internal_free(s->A); qaws_internal_free(s->gx); qaws_internal_free(s->Cx); qaws_internal_free(s->Dv); qaws_internal_free(s->Dg); qaws_internal_free(s->Fl); qaws_internal_free(s->Cm);
 	qaws_internal_free(s->xs); qaws_internal_free(s->ds); qaws_internal_free(s->q);
 	qaws_internal_free(s);
 }
@@ -394,9 +423,11 @@ qaws_status qaws_repulsive_mesh_curves_solver_create(qaws_repulsive_mesh_curves_
 		s->Dv = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), (size_t)n * n + 1));
 		s->Dg = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), 3 * (size_t)n * n + 1));
 		s->ds = (qaws_scalar*)qaws_internal_malloc(qaws_internal_mul2(sizeof(qaws_scalar), (size_t)s->nmv + 1));
+		s->Fl = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), (size_t)n * s->nmv + 1));
+		s->Cm = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), (size_t)n * n + 1));
 	}
 	if (!k->x || !s->tri || !s->pin || !s->fixed || !s->P || !s->loc || !s->wl || !s->F || !s->x || !s->x1 || !s->A || !s->gx || !s->xs || !s->q || !ps ||
-		(s->geo && (!s->Dv || !s->Dg || !s->ds)))
+		(s->geo && (!s->Dv || !s->Dg || !s->ds || !s->Fl || !s->Cm)))
 	{
 		st = QAWS_STATUS_ALLOCATION_FAILURE;
 		goto fail;
@@ -404,6 +435,12 @@ qaws_status qaws_repulsive_mesh_curves_solver_create(qaws_repulsive_mesh_curves_
 	qaws_mesh_3d_get_triangles(s->tri, md->mesh);
 	qaws_mesh_3d_get_positions(ps, md->mesh);
 	for (i = 0; i < 3 * s->nmv; i++) s->P[i] = (double)ps[i];
+	for (i = 0; i < 3 * s->nt; i++)
+	{
+		double const *a = s->P + 3 * (size_t)s->tri[i], *b = s->P + 3 * (size_t)s->tri[i - i % 3 + (i + 1) % 3];
+		s->h += sqrt((a[0] - b[0]) * (a[0] - b[0]) + (a[1] - b[1]) * (a[1] - b[1]) + (a[2] - b[2]) * (a[2] - b[2]));
+	}
+	s->h /= 3.0 * s->nt;
 	for (i = 0; i < n; i++)
 	{
 		if (!rmc_location_ok(s, locations + i))
@@ -475,6 +512,8 @@ static qaws_status rmc_step_run(qaws_repulsive_report* out_report, qaws_mesh_loc
 			moved = 1;
 		}
 	}
+	if (moved)
+		s->fresh = 0;
 	if (moved && !rmc_frames(s))
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	/* each step from the locations themselves: the moves start at 0 */
@@ -488,6 +527,7 @@ static qaws_status rmc_step_run(qaws_repulsive_report* out_report, qaws_mesh_loc
 		if ((st = rmc_walk(s, s->core.x, s->x)) != QAWS_STATUS_OK)
 			return st;
 		memcpy(s->loc, s->wl, sizeof(qaws_mesh_location) * n);
+		s->fresh = 0;
 		memset(s->core.x, 0, sizeof(double) * 2 * n);
 		if (!rmc_frames(s))
 			return QAWS_STATUS_INVALID_ARGUMENT;
