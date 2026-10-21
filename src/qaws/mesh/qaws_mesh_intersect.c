@@ -86,6 +86,7 @@ typedef struct sx_ctx
 	unsigned int nw, capw;
 	double eps, inv;
 	qaws_intersect_report* r;
+	unsigned char* copl;               /* per input face: in a coplanar overlap */
 	int oom;
 } sx_ctx;
 
@@ -782,6 +783,7 @@ static qaws_status sx_pair(void* user, unsigned int f, unsigned int g)
 		{
 			c->r->pairs++;
 			c->r->coplanar_pairs++;
+			c->copl[c->F[f].src] = c->copl[c->F[g].src] = 1;
 		}
 		return c->oom ? QAWS_STATUS_ALLOCATION_FAILURE : QAWS_STATUS_OK;
 	}
@@ -1896,6 +1898,7 @@ typedef struct sx_out
 	qaws_scalar* pos;
 	unsigned int* tri;
 	qaws_scalar* src;                  /* input face per triangle */
+	unsigned char* copl;               /* per input face: in a coplanar overlap with another */
 	unsigned int nv, nt;
 	double eps, diag;
 } sx_out;
@@ -1980,11 +1983,12 @@ static qaws_status sx_resolve(sx_out* o, qaws_intersect_report* report, qaws_sca
 	o->diag = diag;
 	c.inv = 1 / (64 * c.eps);   /* cells of 64 tolerances: a point's neighbours within it mostly in its own cell */
 	c.r = report;
+	c.copl = (unsigned char*)qaws_internal_zalloc((size_t)face_count + 1, 1);
 	c.ncell = 1024;
 	c.cell = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * c.ncell);
 	alias = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)vertex_count + 1));
 	box = (qaws_bp_box*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(qaws_bp_box), (size_t)nt + 1));
-	if (!c.cell || !alias || !box || !sx_reserve((void**)&c.X, &c.capx, 3 * ((size_t)vertex_count + 1), sizeof(double))
+	if (!c.copl || !c.cell || !alias || !box || !sx_reserve((void**)&c.X, &c.capx, 3 * ((size_t)vertex_count + 1), sizeof(double))
 		|| !sx_reserve((void**)&c.chain, &c.capc, (size_t)vertex_count + 1, sizeof(unsigned int))
 		|| !sx_reserve((void**)&c.hash, &c.caph, (size_t)vertex_count + 1, sizeof(unsigned int)))
 		goto oom;
@@ -2278,6 +2282,8 @@ static qaws_status sx_resolve(sx_out* o, qaws_intersect_report* report, qaws_sca
 		o->pos = opos;
 		o->tri = otri;
 		o->src = osrc;
+		o->copl = c.copl;
+		c.copl = NULL;
 		o->nv = nv;
 		o->nt = ntri;
 		opos = NULL;
@@ -2288,6 +2294,7 @@ static qaws_status sx_resolve(sx_out* o, qaws_intersect_report* report, qaws_sca
 oom:
 	st = QAWS_STATUS_ALLOCATION_FAILURE;
 fail:
+	qaws_internal_free(c.copl);
 	qaws_internal_free(c.X); qaws_internal_free(c.chain); qaws_internal_free(c.hash); qaws_internal_free(c.cell); qaws_internal_free(c.keys); qaws_internal_free(c.nodes);
 	qaws_internal_free(c.car); qaws_internal_free(c.F); qaws_internal_free(c.vf_start); qaws_internal_free(c.vf); qaws_internal_free(c.geo); qaws_internal_free(c.work); qaws_internal_free(b.s); qaws_internal_free(b.p);
 	qaws_internal_free(T.P); qaws_internal_free(T.Q); qaws_internal_free(T.t); qaws_internal_free(alias); qaws_internal_free(loc); qaws_internal_free(used);
@@ -2358,6 +2365,7 @@ static void sx_out_free(sx_out* o)
 	qaws_internal_free(o->pos);
 	qaws_internal_free(o->tri);
 	qaws_internal_free(o->src);
+	qaws_internal_free(o->copl);
 	memset(o, 0, sizeof *o);
 }
 
@@ -2709,6 +2717,43 @@ static int sx_cmp_edge(void const* p, void const* q)
 {
 	unsigned long long a = *(unsigned long long const*)p, b = *(unsigned long long const*)q;
 	return a < b ? -1 : a > b;
+}
+
+static int sx_cmp_quad(void const* p, void const* q)
+{
+	unsigned int const *a = (unsigned int const*)p, *b = (unsigned int const*)q;
+	unsigned int k;
+	for (k = 0; k < 4; k++)
+		if (a[k] != b[k])
+			return a[k] < b[k] ? -1 : 1;
+	return 0;
+}
+
+/* dup[i] = 1 for every triangle with the same vertices in the same cyclic order as one from a lower input face (a coincident copy
+   facing the same way: an operand lying on itself); 0 on allocation failure */
+static int sx_dup_mark(unsigned char* dup, unsigned int const* tri, qaws_scalar const* src, unsigned int nt)
+{
+	unsigned int* q = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(unsigned int), 5, (size_t)nt + 1));
+	unsigned int i, r;
+	if (!q)
+		return 0;
+	for (i = 0; i < nt; i++)
+	{
+		unsigned int const* t = tri + 3 * (size_t)i;
+		r = t[0] < t[1] ? (t[0] < t[2] ? 0 : 2) : (t[1] < t[2] ? 1 : 2);   /* (rotated to its smallest index first) */
+		q[5 * (size_t)i] = t[r];
+		q[5 * (size_t)i + 1] = t[(r + 1) % 3];
+		q[5 * (size_t)i + 2] = t[(r + 2) % 3];
+		q[5 * (size_t)i + 3] = (unsigned int)src[i];
+		q[5 * (size_t)i + 4] = i;
+	}
+	qsort(q, nt, 5 * sizeof(unsigned int), sx_cmp_quad);
+	memset(dup, 0, nt);
+	for (i = 1; i < nt; i++)
+		if (q[5 * (size_t)i] == q[5 * (size_t)i - 5] && q[5 * (size_t)i + 1] == q[5 * (size_t)i - 4] && q[5 * (size_t)i + 2] == q[5 * (size_t)i - 3])
+			dup[q[5 * (size_t)i + 4]] = 1;
+	qaws_internal_free(q);
+	return 1;
 }
 
 /* an edge set (open addressing; 0 empty, ~0 removed) */
@@ -3071,7 +3116,7 @@ qaws_status qaws_mesh_boolean(qaws_mesh_3d** out, qaws_boolean_report* report, q
 	unsigned int *par = NULL, *rep = NULL, *pid = NULL, *kmap = NULL, *kopp = NULL, npatch = 0;
 	unsigned long long* grp = NULL;
 	double *fat = NULL, *mid = NULL;
-	unsigned char* near = NULL;
+	unsigned char *near = NULL, *dup = NULL;
 	sx_out o;
 	qaws_status st;
 	unsigned int na = 0, nb = 0, nv, nf, i, j, k, nk = 0, two = b != NULL;
@@ -3267,6 +3312,72 @@ qaws_status qaws_mesh_boolean(qaws_mesh_3d** out, qaws_boolean_report* report, q
 	}
 	if (st != QAWS_STATUS_OK)
 		goto done;
+	/* coincident pieces (an operand overlapping itself in a plane) kept once: identical pieces from the lowest input face, and
+	   in a self-union a patch lying on a lower input face of its plane (either way round) dropped: the lowest face's pieces stand
+	   for the overlap, their windings deciding which way it faces */
+	dup = (unsigned char*)qaws_internal_malloc((size_t)o.nt + (size_t)npatch + 1);
+	if (!dup || !sx_dup_mark(dup, o.tri, o.src, o.nt))
+		goto oom;
+	memset(dup + o.nt, 0, npatch);
+	if (!two && ta)
+	{
+		unsigned int f, tri = 0, nta = 0, *tf;
+		for (f = 0; f < a->face_count; f++)
+			nta += (a->face_sizes ? a->face_sizes[f] : 3) - 2;
+		tf = (unsigned int*)qaws_internal_scratch_malloc(sizeof(unsigned int) * ((size_t)nta + 1));
+		if (!tf)
+			goto oom;
+		for (f = 0; f < a->face_count; f++)
+			for (k = 2; k < (a->face_sizes ? a->face_sizes[f] : 3); k++)
+				tf[tri++] = f;
+		for (i = 0; i < npatch; i++)
+		{
+			unsigned int t = rep[i], src = (unsigned int)o.src[t], q;
+			double P[3][3], u[3], v[3], n[3], g[3];
+			if (!o.copl[src])
+				continue;
+			for (k = 0; k < 3; k++)
+				for (j = 0; j < 3; j++)
+					P[k][j] = (double)o.pos[3 * (size_t)o.tri[3 * (size_t)t + k] + j];
+			for (k = 0; k < 3; k++)
+			{
+				u[k] = P[1][k] - P[0][k];
+				v[k] = P[2][k] - P[0][k];
+				g[k] = (P[0][k] + P[1][k] + P[2][k]) / 3;
+			}
+			sx_cross(u, v, n);
+			for (q = 0; q < nta && !dup[o.nt + i]; q++)
+			{
+				double Q[3][3], e1[3], e2[3], m[3], w[3], mm, d, b1, b2, d11, d12, d22, w1, w2, den;
+				if (tf[q] >= src || !o.copl[tf[q]])
+					continue;
+				for (k = 0; k < 3; k++)
+					for (j = 0; j < 3; j++)
+						Q[k][j] = (double)a->positions[3 * (size_t)ta[3 * (size_t)q + k] + j];
+				for (k = 0; k < 3; k++)
+				{
+					e1[k] = Q[1][k] - Q[0][k];
+					e2[k] = Q[2][k] - Q[0][k];
+					w[k] = g[k] - Q[0][k];
+				}
+				sx_cross(e1, e2, m);
+				mm = sqrt(sx_dot(m, m));
+				if (!(mm > 0) || fabs(sx_dot(m, n)) < 0.999 * mm * sqrt(sx_dot(n, n)))
+					continue;
+				d = sx_dot(w, m) / mm;
+				if (fabs(d) > 4 * o.eps)
+					continue;
+				d11 = sx_dot(e1, e1); d12 = sx_dot(e1, e2); d22 = sx_dot(e2, e2);
+				w1 = sx_dot(w, e1); w2 = sx_dot(w, e2);
+				den = d11 * d22 - d12 * d12;
+				b1 = (w1 * d22 - w2 * d12) / den;
+				b2 = (w2 * d11 - w1 * d12) / den;
+				if (b1 > -1e-9 && b2 > -1e-9 && b1 + b2 < 1 + 1e-9)
+					dup[o.nt + i] = 1;
+			}
+		}
+		qaws_internal_free(tf);
+	}
 	for (i = 0; i < o.nt; i++)
 	{
 		unsigned int z = pid[i];
@@ -3274,7 +3385,7 @@ qaws_status qaws_mesh_boolean(qaws_mesh_3d** out, qaws_boolean_report* report, q
 		int fb = two && wb[2 * (size_t)z] >= 0.5, kb = two && wb[2 * (size_t)z + 1] >= 0.5;
 		int front = sx_region(op, fa, fb, (int)two), back = sx_region(op, ka, kb, (int)two);
 		unsigned int s = (unsigned int)o.src[i];
-		if (front == back || (two && s >= a->face_count && near[z]))
+		if (front == back || dup[i] || dup[o.nt + z] || (two && s >= a->face_count && near[z]))
 		{
 			kmap[i] = SX_NONE;
 			report->dropped++;
@@ -3328,5 +3439,6 @@ done:
 	qaws_internal_free(pts); qaws_internal_free(wa); qaws_internal_free(wb); qaws_internal_free(hits); qaws_internal_free(keep);
 	qaws_internal_free(keep_src); qaws_internal_free(used); qaws_internal_free(kpos);
 	qaws_internal_free(par); qaws_internal_free(rep); qaws_internal_free(pid); qaws_internal_free(grp); qaws_internal_free(kmap); qaws_internal_free(kopp); qaws_internal_free(fat); qaws_internal_free(near); qaws_internal_free(mid);
+	qaws_internal_free(dup);
 	return st;
 }
