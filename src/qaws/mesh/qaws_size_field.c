@@ -903,3 +903,249 @@ qaws_status sf_create_scaled(qaws_size_field const* a, double factor, qaws_size_
 	(*out)->length = factor;
 	return QAWS_STATUS_OK;
 }
+
+/* ---- metric fields ------------------------------------------------------ */
+
+void mf_eval(qaws_metric_field const* f, qaws_mesh_location const* l, double* M)
+{
+	unsigned int const* tv = f->ref->tv + 3 * (size_t)l->patch;
+	double b1 = (double)l->a, b2 = (double)l->b, b0 = 1 - b1 - b2;
+	unsigned int k;
+	for (k = 0; k < 6; k++)
+		M[k] = b0 * f->m[6 * (size_t)tv[0] + k] + b1 * f->m[6 * (size_t)tv[1] + k] + b2 * f->m[6 * (size_t)tv[2] + k];
+}
+
+void mf_basis(double const* n, double* t1, double* t2)
+{
+	double a[3] = { 0, 0, 0 }, l;
+	a[fabs(n[0]) < fabs(n[1]) ? (fabs(n[0]) < fabs(n[2]) ? 0 : 2) : (fabs(n[1]) < fabs(n[2]) ? 1 : 2)] = 1;
+	t1[0] = n[1] * a[2] - n[2] * a[1];
+	t1[1] = n[2] * a[0] - n[0] * a[2];
+	t1[2] = n[0] * a[1] - n[1] * a[0];
+	l = sqrt(t1[0] * t1[0] + t1[1] * t1[1] + t1[2] * t1[2]);
+	t1[0] /= l; t1[1] /= l; t1[2] /= l;
+	t2[0] = n[1] * t1[2] - n[2] * t1[1];
+	t2[1] = n[2] * t1[0] - n[0] * t1[2];
+	t2[2] = n[0] * t1[1] - n[1] * t1[0];
+}
+
+double mf_lift(double* M, double const* g, double const* t1, double const* t2, double const* n, double lo, double hi)
+{
+	double mean = 0.5 * (g[0] + g[2]), r = sqrt(0.25 * (g[0] - g[2]) * (g[0] - g[2]) + g[1] * g[1]), th = 0.5 * atan2(2 * g[1], g[0] - g[2]);
+	double mu[2], e[2][3], c = cos(th), s = sin(th), nn;
+	unsigned int k, i, j, at = 0;
+	mu[0] = fmin(fmax(fabs(mean + r), lo), hi);
+	mu[1] = fmin(fmax(fabs(mean - r), lo), hi);
+	for (k = 0; k < 3; k++)
+	{
+		e[0][k] = c * t1[k] + s * t2[k];
+		e[1][k] = -s * t1[k] + c * t2[k];
+	}
+	nn = fmin(mu[0], mu[1]);
+	for (i = 0; i < 3; i++)
+		for (j = i; j < 3; j++)
+			M[at++] = mu[0] * e[0][i] * e[0][j] + mu[1] * e[1][i] * e[1][j] + nn * n[i] * n[j];
+	return mu[0] * mu[1];
+}
+
+static qaws_status mf_new(qaws_metric_field** out, qaws_mesh_reference const* r, double* m)
+{
+	*out = (qaws_metric_field*)qaws_internal_zalloc(1, sizeof **out);
+	if (!*out)
+	{
+		qaws_internal_free(m);
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	}
+	(*out)->ref = r;
+	(*out)->m = m;
+	return QAWS_STATUS_OK;
+}
+
+qaws_status qaws_metric_field_create_vertices(qaws_metric_field** out, qaws_mesh_reference const* r, qaws_scalar const* metrics)
+{
+	unsigned int nv, i, k;
+	double* m;
+	if (!out)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	*out = NULL;
+	if (!r || !metrics)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	nv = r->mesh->hm.nv;
+	m = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), 6 * (size_t)nv + 1));
+	if (!m)
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	for (i = 0; i < nv; i++)
+	{
+		double* M = m + 6 * (size_t)i;
+		for (k = 0; k < 6; k++)
+			M[k] = (double)metrics[6 * (size_t)i + k];
+		/* positive definite: the leading minors positive (Sylvester) */
+		if (!(M[0] > 0) || !(M[0] * M[3] - M[1] * M[1] > 0)
+			|| !(M[0] * (M[3] * M[5] - M[4] * M[4]) - M[1] * (M[1] * M[5] - M[4] * M[2]) + M[2] * (M[1] * M[4] - M[3] * M[2]) > 0))
+		{
+			qaws_internal_free(m);
+			return QAWS_STATUS_INVALID_ARGUMENT;
+		}
+	}
+	return mf_new(out, r, m);
+}
+
+/* vertex v's two rings (v aside) into out, at most cap */
+static unsigned int mf_rings(qaws_hm const* h, unsigned int v, unsigned int* out, unsigned int cap)
+{
+	unsigned int one[64], two[64], n1 = hm_ring(h, v, one, 64), n = 0, i, j, k;
+	n1 = n1 < 64 ? n1 : 64;
+	for (i = 0; i < n1 && n < cap; i++)
+		out[n++] = one[i];
+	for (i = 0; i < n1; i++)
+	{
+		unsigned int n2 = hm_ring(h, one[i], two, 64);
+		n2 = n2 < 64 ? n2 : 64;
+		for (j = 0; j < n2 && n < cap; j++)
+		{
+			for (k = 0; k < n && out[k] != two[j]; k++)
+				;
+			if (k == n && two[j] != v)
+				out[n++] = two[j];
+		}
+	}
+	return n;
+}
+
+/* the least-squares Hessian (hxx, hxy, hyy) of the values round v in its tangent plane (t1, t2): the fit of
+   f(p) - f(v) = g . d + d^T H d / 2 over its two rings, d the offset in the plane; 0 when they do not fix it */
+static void mf_hessian(qaws_hm const* h, unsigned int v, qaws_scalar const* f, double const* t1, double const* t2, double* H)
+{
+	unsigned int ring[256], n = mf_rings(h, v, ring, 256), i, j, k, p;
+	double A[5][6], s = 0;
+	H[0] = H[1] = H[2] = 0;
+	if (n < 5)
+		return;
+	for (i = 0; i < n; i++)
+	{
+		double const *a = h->x + 3 * (size_t)v, *b = h->x + 3 * (size_t)ring[i];
+		s += sqrt((a[0] - b[0]) * (a[0] - b[0]) + (a[1] - b[1]) * (a[1] - b[1]) + (a[2] - b[2]) * (a[2] - b[2]));
+	}
+	s /= n;   /* (the offsets in units of their mean, for the conditioning) */
+	if (!(s > 0))
+		return;
+	memset(A, 0, sizeof A);
+	for (i = 0; i < n; i++)
+	{
+		double d[3], x, y, row[6];
+		for (k = 0; k < 3; k++)
+			d[k] = h->x[3 * (size_t)ring[i] + k] - h->x[3 * (size_t)v + k];
+		x = (d[0] * t1[0] + d[1] * t1[1] + d[2] * t1[2]) / s;
+		y = (d[0] * t2[0] + d[1] * t2[1] + d[2] * t2[2]) / s;
+		row[0] = x; row[1] = y; row[2] = 0.5 * x * x; row[3] = x * y; row[4] = 0.5 * y * y;
+		row[5] = (double)f[ring[i]] - (double)f[v];
+		for (j = 0; j < 5; j++)
+			for (k = 0; k < 6; k++)
+				A[j][k] += row[j] * row[k];
+	}
+	/* Gaussian elimination, partial pivoting */
+	for (j = 0; j < 5; j++)
+	{
+		double big = 0;
+		p = j;
+		for (i = j; i < 5; i++)
+			if (fabs(A[i][j]) > big)
+			{
+				big = fabs(A[i][j]);
+				p = i;
+			}
+		if (big < 1e-12 * (fabs(A[0][0]) + fabs(A[1][1]) + fabs(A[2][2])))
+			return;
+		for (k = 0; k < 6; k++)
+		{
+			double t = A[j][k];
+			A[j][k] = A[p][k];
+			A[p][k] = t;
+		}
+		for (i = j + 1; i < 5; i++)
+		{
+			double q = A[i][j] / A[j][j];
+			for (k = j; k < 6; k++)
+				A[i][k] -= q * A[j][k];
+		}
+	}
+	for (j = 5; j-- > 0;)
+	{
+		double t = A[j][5];
+		for (k = j + 1; k < 5; k++)
+			t -= A[j][k] * A[k][5];
+		A[j][5] = t / A[j][j];
+	}
+	H[0] = A[2][5] / (s * s);
+	H[1] = A[3][5] / (s * s);
+	H[2] = A[4][5] / (s * s);
+}
+
+qaws_status qaws_metric_field_create_hessian(qaws_metric_field** out, qaws_mesh_reference const* r, qaws_scalar const* values,
+	qaws_hessian_metric_desc const* desc)
+{
+	unsigned int nv, i;
+	double *m, lo, hi, c;
+	if (!out)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	*out = NULL;
+	if (!r || !values || !desc || !(desc->error > 0) || desc->min_length < 0 || desc->max_length < 0)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	lo = desc->min_length > 0 ? (double)desc->min_length : 1e-3 * r->extent;
+	hi = desc->max_length > 0 ? (double)desc->max_length : 0.1 * r->extent;
+	if (!(lo <= hi) || !(lo > 0))
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	nv = r->mesh->hm.nv;
+	for (i = 0; i < nv; i++)
+		if (!isfinite((double)values[i]))
+			return QAWS_STATUS_INVALID_ARGUMENT;
+	m = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), 6 * (size_t)nv + 1));
+	if (!m)
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	c = (2.0 / 9) / (double)desc->error;
+	for (i = 0; i < nv; i++)
+	{
+		qaws_mesh_location l;
+		double x[3], n[3], t1[3], t2[3], H[3] = { 0, 0, 0 };
+		if (qaws_mesh_reference_get_vertex_location(&l, r, i) == QAWS_STATUS_OK)
+		{
+			mr_eval(r, &l, x, n);
+			mf_basis(n, t1, t2);
+			mf_hessian(&r->mesh->hm, i, values, t1, t2, H);
+		}
+		else
+		{
+			n[0] = 0; n[1] = 0; n[2] = 1;
+			mf_basis(n, t1, t2);
+		}
+		H[0] *= c; H[1] *= c; H[2] *= c;
+		mf_lift(m + 6 * (size_t)i, H, t1, t2, n, 1 / (hi * hi), 1 / (lo * lo));
+	}
+	return mf_new(out, r, m);
+}
+
+void qaws_metric_field_destroy(qaws_metric_field* f)
+{
+	if (!f)
+		return;
+	qaws_internal_free(f->m);
+	qaws_internal_free(f);
+}
+
+qaws_status qaws_metric_field_evaluate(qaws_scalar* out, qaws_metric_field const* f, qaws_mesh_location const* loc, unsigned int count)
+{
+	unsigned int i, k;
+	if (!f || (count && (!out || !loc)))
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	for (i = 0; i < count; i++)
+		if (loc[i].patch >= f->ref->nt)
+			return QAWS_STATUS_INVALID_ARGUMENT;
+	for (i = 0; i < count; i++)
+	{
+		double M[6];
+		mf_eval(f, &loc[i], M);
+		for (k = 0; k < 6; k++)
+			out[6 * (size_t)i + k] = (qaws_scalar)M[k];
+	}
+	return QAWS_STATUS_OK;
+}

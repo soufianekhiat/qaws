@@ -42,6 +42,9 @@ typedef struct rmsh
 	double moved;                   /* the longest move since it was cleared */
 	unsigned int* chg;              /* the vertices the angle pass changed */
 	unsigned int nchg, cchg;
+	qaws_metric_field const* metric;   /* anisotropic: lengths and angles in it (NULL: none) */
+	unsigned int ma;                /* with a metric: per vertex, its metric in its tangent plane (six) */
+	double M[6];                    /* with a metric: the one the current operation measures in (rm_use) */
 	int ready, failed;
 } rmsh;
 
@@ -60,25 +63,104 @@ static double rm_size_of(rmsh const* w, unsigned int v)
 	return hm_attr_at(w->m, w->sa, v)[0];
 }
 
-static double rm_target(rmsh const* w, unsigned int a, unsigned int b)
+/* u^T M t (M NULL: u . t) */
+static double rm_mdot(double const* M, double const* u, double const* t)
 {
+	if (!M)
+		return u[0] * t[0] + u[1] * t[1] + u[2] * t[2];
+	return u[0] * (M[0] * t[0] + M[1] * t[1] + M[2] * t[2]) + u[1] * (M[1] * t[0] + M[3] * t[1] + M[4] * t[2])
+		+ u[2] * (M[2] * t[0] + M[4] * t[1] + M[5] * t[2]);
+}
+
+/* the metric the current operation measures in, NULL without one */
+static double const* rm_M(rmsh const* w)
+{
+	return w->metric ? w->M : NULL;
+}
+
+/* the current operation's metric: the mean of a's and b's */
+static void rm_use(rmsh* w, unsigned int a, unsigned int b)
+{
+	unsigned int k;
+	for (k = 0; w->metric && k < 6; k++)
+		w->M[k] = 0.5 * (hm_attr_at(w->m, w->ma, a)[k] + hm_attr_at(w->m, w->ma, b)[k]);
+}
+
+/* the target length between vertices a and b; with a metric, along direction e: its length over its length in the mean of
+   a's and b's metrics */
+static double rm_target_along(rmsh const* w, unsigned int a, unsigned int b, double const* e)
+{
+	if (w->metric)
+	{
+		double M[6], q;
+		unsigned int k;
+		for (k = 0; k < 6; k++)
+			M[k] = 0.5 * (hm_attr_at(w->m, w->ma, a)[k] + hm_attr_at(w->m, w->ma, b)[k]);
+		q = rm_mdot(M, e, e);
+		if (q > 0)
+			return sqrt(rm_mdot(NULL, e, e) / q);
+	}
 	return 0.5 * (rm_size_of(w, a) + rm_size_of(w, b));
 }
 
-/* the size at v from its footpoint */
+/* the target length of edge (a, b) */
+static double rm_target(rmsh const* w, unsigned int a, unsigned int b)
+{
+	double e[3];
+	unsigned int k;
+	for (k = 0; k < 3; k++)
+		e[k] = rm_x(w->m, b)[k] - rm_x(w->m, a)[k];
+	return rm_target_along(w, a, b, e);
+}
+
+/* the size at v from its footpoint; with a metric, also v's metric in its tangent plane (capped by the sizes when a size
+   field or tolerance gives them), the size its mean (so the relaxation's weights are metric areas) */
 static void rm_set_size(rmsh* w, unsigned int v)
 {
 	double h = w->size ? sf_eval(w->size, &w->m->foot[v], rm_x(w->m, v)) : w->L;
 	if (w->tsize)
 		h = fmin(h, sf_eval(w->tsize, &w->m->foot[v], rm_x(w->m, v)));
+	if (w->metric)
+	{
+		double M[6], x[3], n[3], t1[3], t2[3], g[3], ln;
+		mf_eval(w->metric, &w->m->foot[v], M);
+		mr_eval(w->r, &w->m->foot[v], x, n);
+		ln = sqrt(rm_mdot(NULL, n, n));
+		if (ln > 0)
+		{
+			n[0] /= ln; n[1] /= ln; n[2] /= ln;
+			mf_basis(n, t1, t2);
+			g[0] = rm_mdot(M, t1, t1);
+			g[1] = rm_mdot(M, t1, t2);
+			g[2] = rm_mdot(M, t2, t2);
+			h = pow(mf_lift(hm_attr_at(w->m, w->ma, v), g, t1, t2, n, w->size || w->tsize ? 1 / (h * h) : 0, HUGE_VAL), -0.25);
+		}
+		else
+			memcpy(hm_attr_at(w->m, w->ma, v), M, sizeof M);
+	}
 	hm_attr_at(w->m, w->sa, v)[0] = h;
 }
 
-/* a triangle's shape: 4 sqrt(3) area over the sum of its squared edges (1 equilateral, 0 flat) */
-static double rm_quality(double const* A, double const* B, double const* C)
+/* a triangle's shape: 4 sqrt(3) area over the sum of its squared edges (1 equilateral, 0 flat); in metric M (NULL: none) */
+static double rm_quality(double const* M, double const* A, double const* B, double const* C)
 {
 	double u[3], t[3], n[3], s = 0;
 	unsigned int k;
+	if (M)
+	{
+		double uu, tt, ut, r[3];
+		for (k = 0; k < 3; k++)
+		{
+			u[k] = B[k] - A[k];
+			t[k] = C[k] - A[k];
+			r[k] = C[k] - B[k];
+		}
+		uu = rm_mdot(M, u, u);
+		tt = rm_mdot(M, t, t);
+		ut = rm_mdot(M, u, t);
+		s = uu + tt + rm_mdot(M, r, r);
+		return s > 0 ? 2 * sqrt(3.0) * sqrt(fmax(uu * tt - ut * ut, 0)) / s : 0;
+	}
 	for (k = 0; k < 3; k++)
 	{
 		u[k] = B[k] - A[k];
@@ -89,33 +171,50 @@ static double rm_quality(double const* A, double const* B, double const* C)
 	return s > 0 ? 2 * sqrt(3.0) * sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]) / s : 0;
 }
 
-/* the cosine of the angle at P of triangle (P, A, B) */
-static double rm_cos(double const* P, double const* A, double const* B)
+/* the cosine of the angle at P of triangle (P, A, B), in metric M (NULL: none) */
+static double rm_cos(double const* M, double const* P, double const* A, double const* B)
 {
-	double u[3], t[3], uu = 0, tt = 0, ut = 0;
+	double u[3], t[3], uu, tt, ut;
 	unsigned int k;
 	for (k = 0; k < 3; k++)
 	{
 		u[k] = A[k] - P[k];
 		t[k] = B[k] - P[k];
-		uu += u[k] * u[k];
-		tt += t[k] * t[k];
-		ut += u[k] * t[k];
 	}
+	uu = rm_mdot(M, u, u);
+	tt = rm_mdot(M, t, t);
+	ut = rm_mdot(M, u, t);
 	return uu > 0 && tt > 0 ? ut / sqrt(uu * tt) : 1;
 }
 
-/* the angle at P of triangle (P, A, B) */
-static double rm_angle(double const* P, double const* A, double const* B)
+/* the angle at P of triangle (P, A, B), in metric M (NULL: none) */
+static double rm_angle(double const* M, double const* P, double const* A, double const* B)
 {
-	double c = rm_cos(P, A, B);
+	double c = rm_cos(M, P, A, B);
 	return acos(c < -1 ? -1 : c > 1 ? 1 : c);
 }
 
-/* the angle at corner c of its triangle */
-static double rm_corner(qaws_hm const* m, unsigned int c)
+/* the angle at corner c of its triangle; with a metric, in the mean of its corners' */
+static double rm_corner(rmsh const* w, unsigned int c)
 {
-	return rm_angle(rm_x(m, m->cv[c]), rm_x(m, hm_to(m, c)), rm_x(m, m->cv[hm_prev(m, c)]));
+	qaws_hm const* m = w->m;
+	unsigned int p = m->cv[c], a = hm_to(m, c), b = m->cv[hm_prev(m, c)], k;
+	double M[6];
+	for (k = 0; w->metric && k < 6; k++)
+		M[k] = (hm_attr_at(m, w->ma, p)[k] + hm_attr_at(m, w->ma, a)[k] + hm_attr_at(m, w->ma, b)[k]) / 3;
+	return rm_angle(w->metric ? M : NULL, rm_x(m, p), rm_x(m, a), rm_x(m, b));
+}
+
+/* edge c's length; with a metric, in the current operation's */
+static double rm_len(rmsh const* w, unsigned int c)
+{
+	double e[3];
+	unsigned int k;
+	if (!w->metric)
+		return hm_length(w->m, c);
+	for (k = 0; k < 3; k++)
+		e[k] = rm_x(w->m, hm_to(w->m, c))[k] - rm_x(w->m, w->m->cv[c])[k];
+	return sqrt(rm_mdot(w->M, e, e));
 }
 
 /* face f's longest edge */
@@ -129,17 +228,18 @@ static unsigned int rm_longest(qaws_hm const* m, unsigned int f)
 }
 
 /* a triangle's smallest angle */
-static double rm_tri_min(double const* A, double const* B, double const* C)
+static double rm_tri_min(double const* M, double const* A, double const* B, double const* C)
 {
-	return fmin(rm_angle(A, B, C), fmin(rm_angle(B, C, A), rm_angle(C, A, B)));
+	return fmin(rm_angle(M, A, B, C), fmin(rm_angle(M, B, C, A), rm_angle(M, C, A, B)));
 }
 
 #define RM_FAIR 0.3   /* below this a triangle is poor: no operation may leave the poorest one round it poorer */
 
 /* would moving v to y turn over a face round v (faces holding `skip` aside), or
    leave the poorest face poorer than before and than fair? */
-static int rm_folds(qaws_hm const* m, unsigned int v, double const* y, unsigned int skip)
+static int rm_folds(rmsh const* w, unsigned int v, double const* y, unsigned int skip)
 {
+	qaws_hm const* m = w->m;
 	unsigned int c;
 	double qb = 1, qa = 1;
 	for (c = m->vc[v]; c != HM_NONE; c = hm_round(m, v, c))
@@ -158,8 +258,8 @@ static int rm_folds(qaws_hm const* m, unsigned int v, double const* y, unsigned 
 		dd = n0[0] * n1[0] + n0[1] * n1[1] + n0[2] * n1[2];
 		if (dd <= 0.2 * sqrt(d0 * d1) || d1 < 1e-12 * d0)
 			return 1;   /* turned by more than about 78 degrees, or flattened */
-		qb = fmin(qb, rm_quality(p, A, B));
-		qa = fmin(qa, rm_quality(y, A, B));
+		qb = fmin(qb, rm_quality(rm_M(w), p, A, B));
+		qa = fmin(qa, rm_quality(rm_M(w), y, A, B));
 	}
 	return qa < qb && qa < RM_FAIR;
 }
@@ -276,7 +376,7 @@ static double rm_sector(qaws_hm const* m, unsigned int c, unsigned int* faces)
 	}
 	for (n = 0; n < 256; n++)
 	{
-		th += rm_corner(m, k);
+		th += rm_angle(NULL, rm_x(m, m->cv[k]), rm_x(m, hm_to(m, k)), rm_x(m, m->cv[hm_prev(m, k)]));
 		f++;
 		if (m->cflag[hm_prev(m, k)] & HM_FEATURE)
 			break;
@@ -382,11 +482,11 @@ static unsigned int rm_star(rmsh const* w, unsigned int v, unsigned int u, doubl
 			for (k = 0; k < 3; k++)
 			{
 				int ex = bounded && rm_exempt(w, cc[k]);
-				double a0 = rm_angle(p0[k], p0[(k + 1) % 3], p0[(k + 2) % 3]), a1;
+				double a0 = rm_angle(rm_M(w), p0[k], p0[(k + 1) % 3], p0[(k + 2) % 3]), a1;
 				rm_stat_add(w, b, a0, ex);
 				if (gone)
 					continue;
-				a1 = rm_angle(p1[k], p1[(k + 1) % 3], p1[(k + 2) % 3]);
+				a1 = rm_angle(rm_M(w), p1[k], p1[(k + 1) % 3], p1[(k + 2) % 3]);
 				rm_stat_add(w, a, a1, ex);
 				left += bounded && !ex && rm_viol(w, a0) <= 0 && rm_viol(w, a1) > 0;
 			}
@@ -412,7 +512,7 @@ static void rm_patch_stat(rmsh const* w, unsigned int const* vs, unsigned int n,
 				continue;
 			fs[nf++] = f;
 			for (k = m->fc[f]; k < m->fc[f] + 3; k++)
-				rm_stat_add(w, s, rm_corner(m, k), rm_exempt(w, k));
+				rm_stat_add(w, s, rm_corner(w, k), rm_exempt(w, k));
 		}
 }
 
@@ -661,7 +761,8 @@ static int rm_place(rmsh* w, unsigned int c, double* y, qaws_mesh_location* l)
 static int rm_can_remove(rmsh* w, unsigned int x, unsigned int y, double const* dst, qaws_mesh_location const* ldst)
 {
 	qaws_hm const* m = w->m;
-	unsigned int ring[256], n, i, j, left;
+	unsigned int ring[256], n, i, j, k, left;
+	double e[3];
 	int moved = rm_d2(dst, rm_x(m, y)) > 0;
 	rm_stat b, a;
 	for (j = 0; j < 1u + (unsigned int)moved; j++)
@@ -674,15 +775,17 @@ static int rm_can_remove(rmsh* w, unsigned int x, unsigned int y, double const* 
 			double hi;
 			if (ring[i] == y || ring[i] == x)
 				continue;
-			hi = (4.0 / 3) * rm_target(w, y, ring[i]);
+			for (k = 0; k < 3; k++)
+				e[k] = rm_x(m, ring[i])[k] - dst[k];
+			hi = (4.0 / 3) * rm_target_along(w, y, ring[i], e);
 			if (rm_d2(dst, rm_x(m, ring[i])) > hi * hi)
 				return 0;
-			/* no new edge along a crease over its own vertices */
-			if (!j && hm_find_edge(m, y, ring[i]) == HM_NONE && rm_along_crease(w, y, ring[i]))
+			/* no new edge along a crease over its own vertices (but x's feature edge, which goes on as y's) */
+			if (!j && hm_find_edge(m, y, ring[i]) == HM_NONE && !(m->cflag[hm_find_edge(m, x, ring[i])] & HM_FEATURE) && rm_along_crease(w, y, ring[i]))
 				return 0;
 		}
 	}
-	if (rm_folds(m, x, dst, y) || (moved && rm_folds(m, y, dst, x)))
+	if (rm_folds(w, x, dst, y) || (moved && rm_folds(w, y, dst, x)))
 		return 0;
 	/* no corner past 120 degrees, or past the largest there was (Zheng and Lv 2025) */
 	left = rm_star(w, x, y, dst, &b, &a);
@@ -696,7 +799,8 @@ static int rm_can_remove(rmsh* w, unsigned int x, unsigned int y, double const* 
 static int rm_reach(rmsh* w, unsigned int x, unsigned int y, double const* dst, double slack)
 {
 	qaws_hm const* m = w->m;
-	unsigned int ring[256], n, i, j;
+	unsigned int ring[256], n, i, j, k;
+	double e[3];
 	for (j = 0; j < 2; j++)
 	{
 		n = hm_ring(m, j ? y : x, ring, 256);
@@ -707,7 +811,9 @@ static int rm_reach(rmsh* w, unsigned int x, unsigned int y, double const* dst, 
 			double hi;
 			if (ring[i] == y || ring[i] == x)
 				continue;
-			hi = (4.0 / 3) * rm_target(w, y, ring[i]) + slack;
+			for (k = 0; k < 3; k++)
+				e[k] = rm_x(m, ring[i])[k] - dst[k];
+			hi = (4.0 / 3) * rm_target_along(w, y, ring[i], e) + slack;
 			if (rm_d2(dst, rm_x(m, ring[i])) > hi * hi)
 				return 0;
 		}
@@ -725,6 +831,7 @@ static int rm_try_collapse(rmsh* w, unsigned int c, unsigned int x, unsigned int
 	int placed;
 	if ((m->vflag[x] & HM_CORNER) || (hm_feature_degree(m, x) && !(m->cflag[c] & HM_FEATURE)) || !hm_can_collapse(m, c, x))
 		return 0;
+	rm_use(w, x, y);
 	for (k = 0; k < 3; k++)
 		p[k] = 0.5 * (rm_x(m, x)[k] + rm_x(m, y)[k]);
 	l = m->foot[y];
@@ -806,8 +913,9 @@ static void rm_needles(rmsh* w)
 			double l;
 			if (e == HM_NONE)
 				continue;
-			l = hm_length(m, e);
-			if (l > hm_length(m, hm_next(m, e)) || l > hm_length(m, hm_prev(m, e)) || rm_corner(m, hm_prev(m, e)) >= 15 * RM_DEG)
+			rm_use(w, m->cv[c], hm_to(m, c));
+			l = rm_len(w, e);
+			if (l > rm_len(w, hm_next(m, e)) || l > rm_len(w, hm_prev(m, e)) || rm_corner(w, hm_prev(m, e)) >= 15 * RM_DEG)
 				continue;
 			rm_pick(m, c, &x, &y);
 			if (!rm_try_collapse(w, c, x, y) && !w->failed)
@@ -877,7 +985,7 @@ static int rm_flip_ok(rmsh* w, unsigned int c)
 		|| n1[0] * n2[0] + n1[1] * n2[1] + n1[2] * n2[2] <= 0)
 		return 0;
 	{
-		double qo = fmin(rm_quality(A, B, P), rm_quality(B, A, Q)), qn = fmin(rm_quality(A, Q, P), rm_quality(Q, B, P));
+		double qo = fmin(rm_quality(rm_M(w), A, B, P), rm_quality(rm_M(w), B, A, Q)), qn = fmin(rm_quality(rm_M(w), A, Q, P), rm_quality(rm_M(w), Q, B, P));
 		if (qn < qo && qn < RM_FAIR)
 			return 0;
 	}
@@ -901,10 +1009,10 @@ static int rm_flip_better(rmsh const* w, unsigned int c)
 	rm_stat b, a;
 	rm_stat_init(&b);
 	rm_stat_init(&a);
-	rm_stat_add(w, &b, rm_angle(A, B, P), ea); rm_stat_add(w, &b, rm_angle(B, P, A), eb); rm_stat_add(w, &b, rm_angle(P, A, B), ep);
-	rm_stat_add(w, &b, rm_angle(B, A, Q), eb); rm_stat_add(w, &b, rm_angle(A, Q, B), ea); rm_stat_add(w, &b, rm_angle(Q, B, A), eq);
-	rm_stat_add(w, &a, rm_angle(A, Q, P), ea); rm_stat_add(w, &a, rm_angle(Q, P, A), eq); rm_stat_add(w, &a, rm_angle(P, A, Q), ep);
-	rm_stat_add(w, &a, rm_angle(Q, B, P), eq); rm_stat_add(w, &a, rm_angle(B, P, Q), eb); rm_stat_add(w, &a, rm_angle(P, Q, B), ep);
+	rm_stat_add(w, &b, rm_angle(rm_M(w), A, B, P), ea); rm_stat_add(w, &b, rm_angle(rm_M(w), B, P, A), eb); rm_stat_add(w, &b, rm_angle(rm_M(w), P, A, B), ep);
+	rm_stat_add(w, &b, rm_angle(rm_M(w), B, A, Q), eb); rm_stat_add(w, &b, rm_angle(rm_M(w), A, Q, B), ea); rm_stat_add(w, &b, rm_angle(rm_M(w), Q, B, A), eq);
+	rm_stat_add(w, &a, rm_angle(rm_M(w), A, Q, P), ea); rm_stat_add(w, &a, rm_angle(rm_M(w), Q, P, A), eq); rm_stat_add(w, &a, rm_angle(rm_M(w), P, A, Q), ep);
+	rm_stat_add(w, &a, rm_angle(rm_M(w), Q, B, P), eq); rm_stat_add(w, &a, rm_angle(rm_M(w), B, P, Q), eb); rm_stat_add(w, &a, rm_angle(rm_M(w), P, Q, B), ep);
 	return rm_better(&b, &a, 0);
 }
 
@@ -923,6 +1031,7 @@ static void rm_flip(rmsh* w)
 		a = m->cv[c]; b = hm_to(m, c); p = m->cv[hm_prev(m, c)]; q = m->cv[hm_prev(m, d)];
 		if (p == q)
 			continue;
+		rm_use(w, a, b);
 		va = rm_off(m, c);
 		vb = rm_off(m, hm_next(m, c));
 		vp = rm_off(m, hm_prev(m, c));
@@ -932,7 +1041,7 @@ static void rm_flip(rmsh* w)
 		if (after >= before)
 			continue;
 		A = rm_x(m, a); B = rm_x(m, b); P = rm_x(m, p); Q = rm_x(m, q);
-		if (fmin(rm_tri_min(A, Q, P), rm_tri_min(Q, B, P)) < fmin(fmin(rm_tri_min(A, B, P), rm_tri_min(B, A, Q)), 30 * RM_DEG))
+		if (fmin(rm_tri_min(rm_M(w), A, Q, P), rm_tri_min(rm_M(w), Q, B, P)) < fmin(fmin(rm_tri_min(rm_M(w), A, B, P), rm_tri_min(rm_M(w), B, A, Q)), 30 * RM_DEG))
 			continue;
 		if (!rm_flip_ok(w, c) || (w->bounded && !rm_flip_better(w, c)))
 			continue;
@@ -959,10 +1068,11 @@ static void rm_caps(rmsh* w)
 		if (c == HM_NONE || (d = m->co[c]) == HM_NONE || (m->cflag[c] & HM_FEATURE) || !hm_can_flip(m, c)
 			|| rm_along_crease(w, m->cv[hm_prev(m, c)], m->cv[hm_prev(m, d)]))
 			continue;
+		rm_use(w, m->cv[c], hm_to(m, c));
 		A = rm_x(m, m->cv[c]); B = rm_x(m, hm_to(m, c)); P = rm_x(m, m->cv[hm_prev(m, c)]); Q = rm_x(m, m->cv[hm_prev(m, d)]);
-		if (rm_cos(P, A, B) > lim && rm_cos(Q, B, A) > lim)
+		if (rm_cos(rm_M(w), P, A, B) > lim && rm_cos(rm_M(w), Q, B, A) > lim)
 			continue;
-		if (fmin(rm_quality(A, Q, P), rm_quality(Q, B, P)) <= fmin(rm_quality(A, B, P), rm_quality(B, A, Q)))
+		if (fmin(rm_quality(rm_M(w), A, Q, P), rm_quality(rm_M(w), Q, B, P)) <= fmin(rm_quality(rm_M(w), A, B, P), rm_quality(rm_M(w), B, A, Q)))
 			continue;
 		if (w->tol > 0)
 		{
@@ -997,7 +1107,8 @@ static void rm_delaunay(rmsh* w)
 		if (c == HM_NONE || (d = m->co[c]) == HM_NONE || (m->cflag[c] & HM_FEATURE))
 			continue;
 		a = m->cv[c]; b = hm_to(m, c); p = m->cv[hm_prev(m, c)]; q = m->cv[hm_prev(m, d)];
-		if (rm_angle(rm_x(m, p), rm_x(m, a), rm_x(m, b)) + rm_angle(rm_x(m, q), rm_x(m, b), rm_x(m, a)) <= RM_PI + 1e-12 || !rm_flip_ok(w, c))
+		rm_use(w, a, b);
+		if (rm_angle(rm_M(w), rm_x(m, p), rm_x(m, a), rm_x(m, b)) + rm_angle(rm_M(w), rm_x(m, q), rm_x(m, b), rm_x(m, a)) <= RM_PI + 1e-12 || !rm_flip_ok(w, c))
 			continue;
 		if (!hm_flip(m, c))
 		{
@@ -1029,6 +1140,7 @@ static int rm_smooth_vertex(rmsh* w, unsigned int v)
 	fd = hm_feature_degree(m, v);
 	if (fd != 0 && fd != 2)
 		return 0;
+	rm_use(w, v, v);
 	if (fd == 0)
 	{
 		unsigned int c;
@@ -1070,7 +1182,7 @@ static int rm_smooth_vertex(rmsh* w, unsigned int v)
 		if (nf != 2)
 			return 0;
 		for (c = 0; c < 2; c++)
-			wt[c] = sqrt(rm_d2(rm_x(m, v), rm_x(m, f[c]))) / (0.5 * (rm_size_of(w, v) + rm_size_of(w, f[c])));
+			wt[c] = sqrt(rm_d2(rm_x(m, v), rm_x(m, f[c]))) / rm_target(w, v, f[c]);
 		if (wt[0] + wt[1] <= 0)
 			return 0;
 		for (k = 0; k < 3; k++)
@@ -1104,7 +1216,7 @@ static int rm_smooth_vertex(rmsh* w, unsigned int v)
 				return 0;
 		}
 		mr_eval(w->r, &l, x, NULL);
-		if (rm_folds(m, v, x, HM_NONE) || !rm_star_within(w, v, HM_NONE, x, &l))
+		if (rm_folds(w, v, x, HM_NONE) || !rm_star_within(w, v, HM_NONE, x, &l))
 			continue;
 		if (w->bounded)
 		{
@@ -1189,7 +1301,7 @@ static unsigned int rm_worst(rmsh const* w, unsigned int f, int large, double* o
 		return HM_NONE;
 	for (c = m->fc[f]; c < m->fc[f] + 3; c++)
 	{
-		double a = rm_corner(m, c), x = large ? a - w->hi : w->lo - a;
+		double a = rm_corner(w, c), x = large ? a - w->hi : w->lo - a;
 		if (x > e && !rm_exempt(w, c))
 		{
 			e = x;
@@ -1252,7 +1364,7 @@ static double rm_census(rmsh const* w, unsigned int* bad)
 		if (!(m->fflag[f] & HM_DELETED))
 			for (c = m->fc[f]; c < m->fc[f] + 3; c++)
 			{
-				double v = rm_viol(w, rm_corner(m, c));
+				double v = rm_viol(w, rm_corner(w, c));
 				if (v > 0 && !rm_exempt(w, c))
 				{
 					worst = fmax(worst, v);
@@ -1303,6 +1415,7 @@ static int rm_split_large(rmsh* w, unsigned int e, unsigned int apex, int need)
 	qaws_mesh_location l, sl[16];
 	qaws_mesh_report rep = w->rep;
 	rm_stat sb, sa;
+	rm_use(w, a, hm_to(m, e));
 	/* the region judged: the faces round the quad's corners and round the corners across its sides */
 	side[0] = e;
 	side[1] = m->co[e];
@@ -1429,6 +1542,7 @@ static int rm_relocate(rmsh* w, unsigned int v)
 	int found = 0;
 	if ((m->vflag[v] & (HM_DELETED | HM_CORNER)) || m->vc[v] == HM_NONE)
 		return 0;
+	rm_use(w, v, v);
 	fd = hm_feature_degree(m, v);
 	if (fd != 0 && fd != 2)
 		return 0;
@@ -1498,7 +1612,7 @@ static int rm_relocate(rmsh* w, unsigned int v)
 			else
 				mr_walk(w->r, cl, d, 1, &l);
 			mr_eval(w->r, &l, y, NULL);
-			if (rm_folds(m, v, y, HM_NONE))
+			if (rm_folds(w, v, y, HM_NONE))
 				continue;
 			left = rm_star(w, v, HM_NONE, y, &b, &a);
 			if (left || a.bad > b.bad || a.worst >= cur - 1e-12 || !rm_star_within(w, v, HM_NONE, y, &l))
@@ -1555,6 +1669,7 @@ static int rm_relocate_face(rmsh* w, rm_bad const* t, unsigned int c, int large)
 static int rm_flip_bounded(rmsh* w, unsigned int c)
 {
 	qaws_hm* m = w->m;
+	rm_use(w, m->cv[c], hm_to(m, c));
 	if (!rm_flip_ok(w, c) || !rm_flip_better(w, c))
 		return 0;
 	rm_touch(w, m->cv[c]); rm_touch(w, hm_to(m, c)); rm_touch(w, m->cv[hm_prev(m, c)]); rm_touch(w, m->cv[hm_prev(m, m->co[c])]);
@@ -1815,7 +1930,8 @@ static qaws_status rm_begin(rmsh* w, qaws_mesh_3d const* in, qaws_mesh_3d** out)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	w->sa = hm_attr_add(m, "qaws.size", QAWS_MESH_VERTEX, QAWS_ATTRIBUTE_LINEAR, 1);
 	w->ra = hm_attr_add(m, "qaws.region", QAWS_MESH_FACE, QAWS_ATTRIBUTE_NEAREST, 1);
-	if (w->sa == HM_NONE || w->ra == HM_NONE)
+	w->ma = w->metric ? hm_attr_add(m, "qaws.metric", QAWS_MESH_VERTEX, QAWS_ATTRIBUTE_LINEAR, 6) : 0;
+	if (w->sa == HM_NONE || w->ra == HM_NONE || w->ma == HM_NONE)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	/* each face's region: its own triangle's when the reference is the input's fan, else under its centre */
 	for (i = 0; i < m->nf; i++)
@@ -1976,6 +2092,8 @@ static qaws_status rm_end(rmsh* w, int report)
 		dmax = d > dmax ? d : dmax;
 		dsum += d;
 	}
+	if (w->metric)
+		hm_attr_remove(m, w->ma);   /* (added last: its removal leaves the others where they are) */
 	hm_attr_remove(m, w->ra > w->sa ? w->ra : w->sa);
 	hm_attr_remove(m, w->ra > w->sa ? w->sa : w->ra);
 	w->rep.max_deviation = (qaws_scalar)dmax;
@@ -1999,7 +2117,7 @@ qaws_status qaws_mesh_remesh(qaws_mesh_3d** out_mesh, qaws_mesh_report* out_repo
 	*out_mesh = NULL;
 	if (!mesh || !desc || (unsigned int)desc->method > QAWS_REMESH_FIELD_ALIGNED || desc->target_length < 0)
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	if (desc->method == QAWS_REMESH_FIELD_ALIGNED)
+	if (desc->method == QAWS_REMESH_FIELD_ALIGNED || (desc->metric && desc->method == QAWS_REMESH_CVT))
 		return QAWS_STATUS_UNSUPPORTED_OPERATION;
 	/* the angle bounds about 60 degrees, below one another; the tolerance not negative */
 	if (desc->min_angle < 0 || desc->max_angle < 0 || desc->tolerance < 0 || (desc->min_angle > 0 && (double)desc->min_angle >= RM_PI / 3)
@@ -2023,6 +2141,12 @@ qaws_status qaws_mesh_remesh(qaws_mesh_3d** out_mesh, qaws_mesh_report* out_repo
 		qaws_mesh_reference_destroy(own);
 		return QAWS_STATUS_INVALID_ARGUMENT;   /* (a field sampled on another reference) */
 	}
+	if (desc->metric && desc->metric->ref != w.r)
+	{
+		qaws_mesh_reference_destroy(own);
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	}
+	w.metric = desc->metric;
 	if (!w.r->nt)
 	{
 		qaws_mesh_reference_destroy(own);
@@ -2051,8 +2175,8 @@ qaws_status qaws_mesh_remesh(qaws_mesh_3d** out_mesh, qaws_mesh_report* out_repo
 		}
 	}
 	/* (three relaxation sweeps in the last third only for graded or bounded meshes: INSTANT's dense mesh does better with one) */
-	relax = desc->size || w.tol > 0 || desc->min_angle > 0 || desc->max_angle > 0 ? 3 : 1;
-	iterations = desc->method == QAWS_REMESH_CVT ? 10 : desc->iterations ? desc->iterations : 10;
+	relax = desc->size || desc->metric || w.tol > 0 || desc->min_angle > 0 || desc->max_angle > 0 ? 3 : 1;
+	iterations = desc->method == QAWS_REMESH_CVT ? 10 : desc->iterations ? desc->iterations : desc->metric ? 30 : 10;
 	st = rm_begin(&w, mesh, &out);
 	/* pinned vertices: corners (never moved or collapsed away) */
 	for (it = 0; st == QAWS_STATUS_OK && it < desc->pinned_count; it++)

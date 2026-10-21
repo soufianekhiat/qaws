@@ -94,6 +94,22 @@ double sf_eval(qaws_size_field const* f, qaws_mesh_location const* l, double con
 /* a times factor (a must outlive it) */
 qaws_status sf_create_scaled(qaws_size_field const* a, double factor, qaws_size_field** out);
 
+/* ---- metric fields ------------------------------------------------------ */
+
+struct qaws_metric_field
+{
+	qaws_mesh_reference const* ref;
+	double* m;                      /* six per vertex of the reference's mesh: xx, xy, xz, yy, yz, zz */
+};
+
+/* the metric at l (six values) */
+void mf_eval(qaws_metric_field const* f, qaws_mesh_location const* l, double* M);
+/* a symmetric 2x2 g (g00, g01, g11) in the tangent basis (t1, t2) of normal n, its eigenvalues made positive and clamped to
+   [lo, hi], as a 3x3 metric M (six values) that measures the normal by the smaller one; returns their product */
+double mf_lift(double* M, double const* g, double const* t1, double const* t2, double const* n, double lo, double hi);
+/* a tangent basis of unit normal n */
+void mf_basis(double const* n, double* t1, double* t2);
+
 /* the reference mesh's attributes onto m, at its vertices' footpoints and its faces' centre locations fl (remeshing, quads) */
 qaws_status mx_transfer(qaws_hm* m, qaws_mesh_reference const* r, qaws_mesh_location const* fl);
 

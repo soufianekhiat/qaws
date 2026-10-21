@@ -89,6 +89,15 @@
  *          edges on target; about five times slower than LOCAL.
  *   FIELD_ALIGNED  reserved (UNSUPPORTED_OPERATION today).
  *
+ * Metric (LOCAL; as Mmgs): with a metric field every length, angle and
+ * shape LOCAL weighs is measured in the metric, each vertex's taken in its
+ * tangent plane: edges split past 4/3 and collapsed under 4/5 of unit
+ * length, the angle guards, the valence flips, the Delaunay flips, the
+ * relaxation's weights (metric areas); so the edges come out near unit
+ * length in it, stretched where it asks. A size field and the tolerance's
+ * sizes cap its lengths (each eigenvalue at least 1 / size^2);
+ * target_length is then unused. UNSUPPORTED_OPERATION with CVT.
+ *
  * Pinned vertices (`pinned`, indices of the input's vertices) are kept as
  * feature corners are: never moved or collapsed away, at their input
  * positions, and they come out flagged as corners
@@ -120,12 +129,13 @@ typedef struct qaws_remesh_desc
 	qaws_mesh_reference const* reference;   /* NULL: the input's own, PN */
 	qaws_scalar target_length;              /* 0: the input's mean edge length */
 	qaws_size_field const* size;            /* adaptive, over target_length; on `reference` when sampled on one */
-	unsigned int iterations;                /* 0: 10 */
+	unsigned int iterations;                /* 0: 10 (30 with a metric) */
 	qaws_scalar min_angle;                  /* radians, below 60 degrees; > 0: the angle-bounded pass lifts angles to it */
 	qaws_scalar max_angle;                  /* radians, above 60 degrees; > 0: the angle-bounded pass brings angles under it */
 	qaws_scalar tolerance;                  /* > 0: the distance from the reference no face's sampled points pass */
 	unsigned int const* pinned;             /* input vertices kept where they are, as feature corners (LOCAL and CVT) */
 	unsigned int pinned_count;
+	qaws_metric_field const* metric;        /* anisotropic (LOCAL): lengths and angles measured in it; on `reference` */
 } qaws_remesh_desc;
 
 /* out_report may be NULL */

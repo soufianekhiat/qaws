@@ -10,8 +10,8 @@ enters and leaves as arrays; qaws reads and writes no files.
 | `qaws_mesh.h` | `qaws_mesh_3d`: polygon meshes in space, edits, features, attributes, footpoints, quality |
 | `qaws_triangulate.h` | `qaws_mesh_2d`: planar meshes, the same store at z = 0 ([triangulate](triangulate.md)) |
 | `qaws_mesh_reference.h` | `qaws_mesh_reference`: the smooth surface a mesh with normals implies (PN) |
-| `qaws_mesh_field.h` | size fields; cross fields on surfaces; frame fields in volumes |
-| `qaws_remesh.h` | surface remeshing (LOCAL) |
+| `qaws_mesh_field.h` | size fields; metric fields; cross fields on surfaces; frame fields in volumes |
+| `qaws_remesh.h` | surface remeshing (LOCAL, CVT), isotropic or to a metric |
 | `qaws_quadrangulate.h` | quad meshes (INSTANT) |
 | `qaws_mesh_generate.h` | meshes of surfaces and shells (REMESH); curved elements (P2, P3, Q2, Q3 nodes) |
 | `qaws_mesh_repair.h` | repair for farq: soups and broken meshes made closed and outward |
@@ -278,6 +278,45 @@ tolerance costs 5 to 10 times the default at the same density (the guard
 on every move). Figure 3 runs about 1.05 times as long as before. Not
 reached: a strip narrower than the target (its border corners stay near 26
 degrees), and the faces next to a 20-degree corner.
+### Metric remeshing
+
+```c
+qaws_status qaws_metric_field_create_vertices(qaws_metric_field** out_field, qaws_mesh_reference const* reference, qaws_scalar const* metrics);
+qaws_status qaws_metric_field_create_hessian(qaws_metric_field** out_field, qaws_mesh_reference const* reference, qaws_scalar const* values,
+	qaws_hessian_metric_desc const* desc);
+
+qaws_remesh_desc d;
+memset(&d, 0, sizeof d);                       /* LOCAL */
+d.reference = reference;                       /* the metric's */
+d.metric = metric;
+```
+
+A metric field is a symmetric positive definite tensor M per reference
+vertex (six values: xx, xy, xz, yy, yz, zz), interpolated linearly: an edge
+e is of unit length where e^T M e = 1, so R diag(1/h1^2, 1/h2^2, 1/h3^2)
+R^T asks for lengths h1, h2, h3 along R's columns. For adaptation to a
+solution, `qaws_metric_field_create_hessian` takes one value per vertex
+and an error: the Hessian H fitted by least squares on each vertex's two
+rings in its tangent plane, M = (2/9) |H| / error (Frey and Alauzet 2005),
+its sizes clamped to [min_length, max_length], so the linear interpolation
+of the values stays within about the error.
+
+With `metric` set, LOCAL measures everything in the metric (each vertex's
+restricted to its tangent plane): the split and collapse lengths (4/3 and
+4/5 of unit length), the guards' angles and shapes, the Delaunay flips and
+the relaxation's weights (metric areas). A size field or the tolerance caps
+its sizes; `target_length` is unused; 30 iterations by default (it stops
+when nothing changes). CVT refuses a metric (UNSUPPORTED_OPERATION).
+
+Test 158: a constant metric of 0.02 by 0.15 on the unit square gives 723
+triangles (the metric area over a unit triangle: 770), every edge within
+[1/sqrt 2, sqrt 2] of unit length, mean shape 0.97 in the metric; the
+Hessian metric of tanh(12 (x - 1/2)) at an error of 0.01 on a 64 x 64 grid
+(recovered to 8% along x), 133 vertices, 92% of the edges of unit length
+(6% shorter), the interpolation within 0.0126, the triangles of the layer
+6.2 times longer along it than across; an open cylinder at 0.08 around and
+0.4 along, 99.6% of unit length. About 0.3 s each. Figure 21 (key l).
+
 ### CVT remeshing
 `QAWS_REMESH_CVT` places the vertices at a centroidal Voronoi tessellation
 of the reference (Du, Faber, Gunzburger 1999), on its restricted Voronoi
@@ -912,7 +951,10 @@ those alone (1 to 9, then a to i for figures 10 to 18: `5c` draws 5 and
   target or next to sharp corners (exempt sectors aside), and on very
   coarse meshes the angle pass can end worse than the default; the
   distance guard is sampled (a face may bulge past it between samples);
-  CVT keeps the crease spacing LOCAL gave it.
+  CVT keeps the crease spacing LOCAL gave it. To a metric: the metric is
+  taken as given (no gradation of its sizes), the Hessian of a border
+  vertex is fitted on one side, and a metric bent across a crease is
+  measured in each vertex's tangent plane only.
 - Quads: a cone that no vertex of its face can reach cheaply stays off
   its vertices (a 3-5 pair beside it); positions are refitted by sweeps,
   not a global solve; the field's singularities are those of a smooth field

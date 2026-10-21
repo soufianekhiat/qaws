@@ -52,6 +52,19 @@ All notable changes to Qaws are documented here.
   (order - 1)^2 inside, each snapped onto its element's face. A torus at
   0.4 comes 50 to 140 times closer to the surface than its straight
   elements (test 157, showcase figure 20).
+- Metric remeshing: `qaws_remesh_desc.metric` remeshes (LOCAL) to an
+  anisotropic metric field (as Mmgs): every length, angle and shape it
+  weighs measured in the metric, each vertex's taken in its tangent plane.
+  Metric fields (`qaws_mesh_field.h`) are given per reference vertex
+  (`qaws_metric_field_create_vertices`) or built from a solution's values
+  for its linear interpolation to stay within an error
+  (`qaws_metric_field_create_hessian`: the Hessian fitted on two rings,
+  M = (2/9) |H| / error, Frey and Alauzet 2005). A tanh layer on a 64 x 64
+  grid comes out in 133 vertices, interpolated within 1.3 times the error,
+  its triangles six times longer along the layer than across (isotropic at
+  the smallest size, the layer alone would take about 2300); a constant
+  metric gives every edge within [1/sqrt 2, sqrt 2] of unit length (test
+  158, showcase figure 21).
 - Halide evaluates the curve and surface records (`qaws_curve_record_core.h`,
   `qaws_surface_record_core.h`) with the knot span found at run time, an
   `Expr` per element; `qaws_index` (an `int`, an `Expr` in Halide) for the
@@ -59,6 +72,12 @@ All notable changes to Qaws are documented here.
   against the C cores by hand (1.5e-15 relative).
 
 ### Changed
+
+- LOCAL remeshing collapses along straight feature lines and borders: the
+  feature edge a collapse carries on was refused as a chord over the crease
+  (its midpoint on it), so a straight border never coarsened. A 64 x 64
+  grid of the unit square remeshed to 0.2 now has 42 vertices (338 before);
+  generated boxes come out coarser along their edges.
 
 - Deduplicated `compute_normal` (16 identical copies) and `catmull_rom_blend`
   (2 identical copies) across the surface sources into

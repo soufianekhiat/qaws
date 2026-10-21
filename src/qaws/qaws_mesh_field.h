@@ -104,6 +104,48 @@ qaws_status qaws_size_field_evaluate(qaws_scalar* out_sizes, qaws_size_field con
 	qaws_scalar const* points, unsigned int count);
 
 /*
+ * Metric fields: a symmetric positive definite tensor M at each point of a
+ * surface, for anisotropic meshing (as Mmg's): an edge e is of unit length
+ * where e^T M e = 1, so R diag(1/h1^2, 1/h2^2, 1/h3^2) R^T asks for edges of
+ * length h1, h2, h3 along R's columns. Six values each: xx, xy, xz, yy, yz,
+ * zz. Meshing reads only its part along the surface (in each point's
+ * tangent plane).
+ *
+ *   vertices  given at a reference's mesh vertices (each positive
+ *             definite), interpolated linearly across its triangles;
+ *   hessian   for a field given at the reference's vertices (a solution:
+ *             one value each) to be interpolated linearly within `error`:
+ *             its Hessian H recovered at each vertex (a quadratic fit by
+ *             least squares to the values of its two rings, in its tangent
+ *             plane), M = (2/9) |H| / error (Frey and Alauzet 2005; |H|: H
+ *             with its eigenvalues made positive), its sizes clamped to
+ *             [min_length, max_length], interpolated as above. A linear
+ *             field gets max_length everywhere.
+ *
+ * Evaluated at the reference's locations; immutable; the reference must
+ * outlive it.
+ */
+
+typedef struct qaws_metric_field qaws_metric_field;
+
+typedef struct qaws_hessian_metric_desc
+{
+	qaws_scalar error;                  /* the largest gap between the field and its linear interpolation (> 0) */
+	qaws_scalar min_length;             /* 0: a thousandth of the reference's size */
+	qaws_scalar max_length;             /* 0: a tenth of the reference's size */
+} qaws_hessian_metric_desc;
+
+/* metrics: six per vertex of the reference's mesh */
+qaws_status qaws_metric_field_create_vertices(qaws_metric_field** out_field, qaws_mesh_reference const* reference, qaws_scalar const* metrics);
+/* values: one per vertex of the reference's mesh */
+qaws_status qaws_metric_field_create_hessian(qaws_metric_field** out_field, qaws_mesh_reference const* reference, qaws_scalar const* values,
+	qaws_hessian_metric_desc const* desc);
+void qaws_metric_field_destroy(qaws_metric_field* field);
+/* six values per location, on the field's reference */
+qaws_status qaws_metric_field_evaluate(qaws_scalar* out_metrics, qaws_metric_field const* field, qaws_mesh_location const* locations,
+	unsigned int count);
+
+/*
  * Direction fields: an n-direction field on a mesh's vertices (a direction
  * and its turns by 1/n of a turn are one; crosses for n = 4), along feature
  * edges and the border.
