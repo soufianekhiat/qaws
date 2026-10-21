@@ -29,6 +29,8 @@
  *                      turned, duplicates) made closed and outward, the fills tinted
  *   mesh19_layers.png  boundary layers: prisms grown into a blob, hexahedra into a
  *                      box in quads, the blob's layers with tetrahedra inside
+ *   mesh20_curved.png  curved elements: a coarse torus in quads straight and at
+ *                      order 2 through its nodes on the torus, a patch in cubic triangles
  *
  * Each figure lives in meshing_showcase/NN_*.c, compiled as one translation
  * unit with the rasterizer in example_raster.h.
@@ -178,14 +180,15 @@ static void ms_panel(er_canvas* c, int x, int y, int w, int h, qaws_mesh_3d cons
 #include "meshing_showcase/17_feature_size.c"
 #include "meshing_showcase/18_repair.c"
 #include "meshing_showcase/19_layers.c"
+#include "meshing_showcase/20_curved.c"
 
-/* the figures to draw: all, or those whose keys the first argument lists ("58"; figures 10 to 19 are a to j) */
+/* the figures to draw: all, or those whose keys the first argument lists ("58"; figures 10 to 20 are a to k) */
 int main(int argc, char** argv)
 {
 	static void (*const demo[])(void) = { demo_core, demo_reference, demo_remesh, demo_quads, demo_generate, demo_tets, demo_hexes, demo_frame_hexes,
 		demo_measures, demo_remesh_angles, demo_remesh_cvt, demo_cross_field, demo_quad_flow, demo_quad_improve,
-		demo_quad_global, demo_guidance, demo_feature_size, demo_repair, demo_layers };
-	static char const key[] = "123456789abcdefghij";
+		demo_quad_global, demo_guidance, demo_feature_size, demo_repair, demo_layers, demo_curved };
+	static char const key[] = "123456789abcdefghijk";
 	unsigned int i;
 	setvbuf(stdout, NULL, _IONBF, 0);
 	MAKE_DIR("showcase");
