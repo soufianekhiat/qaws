@@ -30,8 +30,11 @@
  * Soups are welcome: nothing is assumed of the topology.
  *
  * Build: binned SAH (8 bins per axis, as tinyBVH's default), leaves of at
- * most `leaf_size` simplices, nodes in depth-first order. Positions are
- * held in double whatever the precision of the caller.
+ * most `leaf_size` simplices, collapsed into 4-wide nodes (the largest
+ * child opened first) whose float boxes, rounded outward, are tested 4 at a
+ * time. Positions are held in double whatever the precision of the caller,
+ * and every answer comes from the double tests: rays first screen a leaf's
+ * triangles in float with a margin that only lets more through.
  *
  * Queries, each over a batch of points or rays, in chunks through the
  * caller's executor (NULL: the calling thread; the results do not depend on
@@ -73,7 +76,7 @@ typedef struct qaws_mesh_bvh_desc
 	unsigned int simplex_count;
 	unsigned int const* elements;      /* per simplex its element; NULL: the simplex's own index */
 	unsigned int leaf_size;            /* 0: 4 */
-	qaws_scalar winding_accuracy;      /* 0: 2 (Barill et al.'s beta) */
+	qaws_scalar winding_accuracy;      /* 0: 2.25 (Barill et al.'s beta) */
 } qaws_mesh_bvh_desc;
 
 /* A query's answer. element QAWS_MESH_NONE: nothing within reach. */

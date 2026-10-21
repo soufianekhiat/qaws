@@ -999,8 +999,8 @@ A `qaws_mesh_hit` holds:
 
 **Winding numbers.** These are generalized winding numbers (Jacobson et al. 2013): solid angles over 4π in 3D, angles over 2π in 2D.
 - Far nodes use their expansion to second order (Barill et al. 2018). The expansion uses each node's area vector, first moment and second moment, the second moment including each triangle's own spread.
-- `winding_accuracy` (β, default 2) decides when a node is far: when the point lies beyond β times the node's radius.
-- Worst error against the exact sum on a closed sphere: 2.2e-3 at the default, 1.3e-5 at β = 6.
+- `winding_accuracy` (β, default 2.25) decides when a node is far: when the point lies beyond β times the node's radius.
+- Worst error against the exact sum on a closed sphere: 2.1e-3 at the default, 1.3e-5 at β = 6.
 
 **Signed distance.** The closest distance, negative where the winding number is at least 1/2. Its sign therefore holds on soups, with holes and with overlaps.
 

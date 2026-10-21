@@ -306,7 +306,7 @@ static void test_sphere(void)
 		if (fabs(fabs(sd[i]) - h[i].distance) > bt_tol() || (r < 0.95 && !(sd[i] < 0)) || (r > 1.05 && !(sd[i] > 0)) || h2[i].simplex != h[i].simplex)
 			bad_sd++;
 	}
-	printf("  winding: worst difference from the exact sum %.2e (accuracy 2), %.2e (accuracy 6)\n", worst_wn, worst_wn6);
+	printf("  winding: worst difference from the exact sum %.2e (default accuracy), %.2e (accuracy 6)\n", worst_wn, worst_wn6);
 	TEST_ASSERT(worst_wn < 5e-3 && worst_wn6 < 1e-4, "sphere: winding numbers within 5e-3 of the exact sum by default, 1e-4 at accuracy 6");
 	TEST_ASSERT(bad_wn == 0, "sphere: winding numbers 1 inside, 0 outside");
 	TEST_ASSERT(bad_sd == 0, "sphere: signed distances negative inside, their size the closest distance");
