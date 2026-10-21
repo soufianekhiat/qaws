@@ -23,10 +23,38 @@
  * weighted by area). The error is read as a distance: the root of the
  * area-weighted mean squared distance to those planes.
  *
- * What stays: feature corners, and the mesh's feature lines and border,
- * held near their place by planes standing on their edges (the border's
- * vertices held still with QAWS_DECIMATE_LOCK_BORDER); collapses that would
- * turn a face over or move a feature vertex off its line are refused.
+ * What stays:
+ *   features   the mesh's feature lines and border, held near their place
+ *              by planes standing on their edges, and its feature corners;
+ *              a vertex on a line moves only along it. With crease_angle,
+ *              the edges whose faces turn by more are added to the mesh's
+ *              features first (and stay so), their corners found as
+ *              qaws_mesh_3d_set_feature_edges finds them.
+ *   silhouettes  an edge whose two faces turn opposite ways to a view is on
+ *              its silhouette. For the given views (directions, or eye points
+ *              with QAWS_DECIMATE_VIEW_POINTS) the plane through the edge and
+ *              the view's ray is added to its ends' quadrics: moving in that
+ *              plane keeps the outline, moving out of it costs (averaged
+ *              over the views: one or a few views hold their outlines
+ *              closely).
+ *   views      octahedral_views^2 directions toward eyes all round, on an
+ *              octahedral map's grid (as octahedral impostors sample the
+ *              sphere; from the upper +z hemisphere only with
+ *              QAWS_DECIMATE_HEMISPHERE): each face's plane weighs the share
+ *              of the views it faces (a fiftieth at least), and 1 +
+ *              silhouette_weight times its corner's share of the views it
+ *              is on a silhouette of. Parts no view sees go first; the
+ *              outlines get the faces. (Over the whole sphere every face
+ *              faces half the views and every vertex is on some outline:
+ *              the result is near plain decimation's. An outline seen along
+ *              d is the one seen along -d, so for outlines alone the upper
+ *              half is the whole sphere: the faces' facing makes the
+ *              difference.)
+ *   importance  per vertex, a factor on its quadric (above 1: kept
+ *              longer); 0 or less: never removed nor moved. The border's
+ *              vertices are held still with QAWS_DECIMATE_LOCK_BORDER.
+ *   shape      a collapse turning a face by more than max_normal_angle is
+ *              refused.
  * Attributes follow the collapses by their rules (qaws_mesh.h).
  *
  * It stops at the target face count, before a collapse whose error passes
@@ -38,12 +66,23 @@
 
 #define QAWS_DECIMATE_LOCK_BORDER 1u        /* the border's vertices are neither removed nor moved */
 #define QAWS_DECIMATE_MEASURE 2u            /* the report's deviation measured */
+#define QAWS_DECIMATE_VIEW_POINTS 4u        /* views are eye points (perspective), not directions */
+#define QAWS_DECIMATE_HEMISPHERE 8u         /* the octahedral views over the +z hemisphere only */
 
 typedef struct qaws_decimate_desc
 {
 	unsigned int target_faces;          /* stop at this many faces; 0: no count */
 	qaws_scalar max_error;              /* stop before an error past this distance; 0: no bound */
 	unsigned int flags;                 /* QAWS_DECIMATE_* */
+	qaws_scalar crease_angle;           /* radians: sharper edges become features; 0: the mesh's features only */
+	qaws_scalar max_normal_angle;       /* radians: a collapse turning a face by more is refused; 0: 1.37 (about 78 degrees) */
+	qaws_scalar const* importance;      /* per vertex; NULL: 1 */
+	qaws_scalar const* views;           /* 3 each: directions, or eye points with QAWS_DECIMATE_VIEW_POINTS (the octahedral ones directions) */
+	unsigned int view_count;
+	unsigned int octahedral_views;      /* N: N x N directions on an octahedral map; 0: none */
+	qaws_scalar silhouette_weight;      /* the given views' planes against the faces' (per squared edge length), the octahedral
+	                                       views' factor; 0: 100 */
+	qaws_scalar feature_weight;         /* the border's and features' planes, the same way; 0: 100 */
 } qaws_decimate_desc;
 
 typedef struct qaws_decimate_report
@@ -51,6 +90,8 @@ typedef struct qaws_decimate_report
 	unsigned int faces_before, faces_after;
 	unsigned int collapses;
 	qaws_scalar max_error;              /* the largest error of a collapse made */
+	unsigned int creases;               /* edges made features by crease_angle */
+	unsigned int silhouette_edges;      /* silhouette edges, summed over the views */
 	qaws_mesh_deviation deviation;      /* with QAWS_DECIMATE_MEASURE */
 } qaws_decimate_report;
 

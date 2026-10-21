@@ -9,6 +9,12 @@
  *     border vertices stay, unmoved;
  *   - a cube in 6 x 6 grids per side with its creases as features: down to
  *     a few triangles per side, its volume exact;
+ *   - silhouettes: a sphere rippled round z decimated seen along z or from an
+ *     eye on z keeps that outline far better than without; 4 x 4 octahedral
+ *     views from above put the faces on the upper half (the lower one
+ *     unseen);
+ *   - creases found by angle on a cube without features; importance 0 keeps
+ *     vertices; a tight bound on the faces' turn stops earlier;
  *   - refusals: no mesh, a negative error bound.
  */
 
@@ -296,6 +302,232 @@ static void test_cube(void)
 	qaws_mesh_3d_destroy(m);
 }
 
+/* the icosphere rippled round z (its outline along z wavy) */
+static qaws_mesh_3d* dm_rippled(void)
+{
+	qaws_mesh_3d* m = dm_icosphere(3);
+	unsigned int nv = qaws_mesh_3d_get_vertex_count(m), i;
+	qaws_scalar* x = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * nv);
+	qaws_mesh_3d_get_positions(x, m);
+	for (i = 0; i < nv; i++)
+	{
+		double r = 1 + 0.08 * sin(6 * atan2((double)x[3 * i + 1], (double)x[3 * i]));
+		x[3 * i] = (qaws_scalar)(r * x[3 * i]);
+		x[3 * i + 1] = (qaws_scalar)(r * x[3 * i + 1]);
+		x[3 * i + 2] = (qaws_scalar)(r * x[3 * i + 2]);
+	}
+	qaws_mesh_3d_set_positions(m, x);
+	free(x);
+	return m;
+}
+
+/* the outline seen along axis ax: the largest gap between the two meshes' support functions in the other two axes' plane */
+static double dm_outline_gap(qaws_mesh_3d const* a, qaws_mesh_3d const* b, unsigned int ax)
+{
+	unsigned int s, i, u = (ax + 1) % 3, w = (ax + 2) % 3;
+	double gap = 0;
+	for (s = 0; s < 180; s++)
+	{
+		double th = 2 * 3.14159265358979323846 * s / 180, h[2] = { -1e300, -1e300 };
+		unsigned int k;
+		for (k = 0; k < 2; k++)
+		{
+			qaws_mesh_3d const* m = k ? b : a;
+			for (i = 0; i < qaws_mesh_3d_get_vertex_count(m); i++)
+			{
+				qaws_vec3 p = qaws_mesh_3d_get_vertex(m, i);
+				double c[3] = { p.x, p.y, p.z }, d = c[u] * cos(th) + c[w] * sin(th);
+				h[k] = d > h[k] ? d : h[k];
+			}
+		}
+		gap = fmax(gap, fabs(h[0] - h[1]));
+	}
+	return gap;
+}
+
+/* the outline gap seen along direction d (support functions over 90 angles in the plane across d) */
+static double dm_outline_gap_dir(qaws_mesh_3d const* a, qaws_mesh_3d const* b, double const* d)
+{
+	double u[3], w[3], l, gap = 0;
+	unsigned int s, i, k;
+	u[0] = fabs(d[0]) < 0.9 ? 0 : -d[2];
+	u[1] = fabs(d[0]) < 0.9 ? -d[2] : 0;
+	u[2] = fabs(d[0]) < 0.9 ? d[1] : d[0];
+	l = sqrt(u[0] * u[0] + u[1] * u[1] + u[2] * u[2]);
+	for (k = 0; k < 3; k++)
+		u[k] /= l;
+	w[0] = d[1] * u[2] - d[2] * u[1];
+	w[1] = d[2] * u[0] - d[0] * u[2];
+	w[2] = d[0] * u[1] - d[1] * u[0];
+	for (s = 0; s < 90; s++)
+	{
+		double th = 2 * 3.14159265358979323846 * s / 90, h2[2] = { -1e300, -1e300 }, e[3];
+		for (k = 0; k < 3; k++)
+			e[k] = u[k] * cos(th) + w[k] * sin(th);
+		for (k = 0; k < 2; k++)
+		{
+			qaws_mesh_3d const* m = k ? b : a;
+			for (i = 0; i < qaws_mesh_3d_get_vertex_count(m); i++)
+			{
+				qaws_vec3 p = qaws_mesh_3d_get_vertex(m, i);
+				double v = p.x * e[0] + p.y * e[1] + p.z * e[2];
+				h2[k] = v > h2[k] ? v : h2[k];
+			}
+		}
+		gap = fmax(gap, fabs(h2[0] - h2[1]));
+	}
+	return gap;
+}
+
+/* the mean outline gap over the 26 directions of a cube's faces, edges and corners: those with z > 0 (side 1), z < 0 (-1), or all (0) */
+static double dm_outline_mean(qaws_mesh_3d const* a, qaws_mesh_3d const* b, int side)
+{
+	int x, y, z;
+	double s = 0;
+	unsigned int n = 0;
+	for (x = -1; x <= 1; x++)
+		for (y = -1; y <= 1; y++)
+			for (z = -1; z <= 1; z++)
+				if ((x || y || z) && (side == 0 || side * z > 0))
+				{
+					double d[3] = { x, y, z }, l = sqrt((double)(x * x + y * y + z * z));
+					d[0] /= l; d[1] /= l; d[2] /= l;
+					s += dm_outline_gap_dir(a, b, d);
+					n++;
+				}
+	return s / n;
+}
+
+static void test_silhouette(void)
+{
+	qaws_mesh_3d* in = dm_rippled();
+	unsigned int k;
+	double gap[4], up[2] = { 0, 0 };
+	unsigned int above[2] = { 0, 0 };
+	char msg[600];
+	qaws_scalar const zdir[3] = { 0, 0, 1 }, eye[3] = { 0, 0, 6 };
+	for (k = 0; k < 4; k++)
+	{
+		/* 0: plain, 1: along z, 2: from an eye on z, 3: octahedral 4 x 4 */
+		qaws_mesh_3d* m = dm_rippled();
+		qaws_decimate_desc d;
+		qaws_decimate_report r;
+		qaws_status st;
+		memset(&d, 0, sizeof d);
+		d.target_faces = 200;
+		if (k == 1 || k == 2)
+		{
+			d.views = k == 1 ? zdir : eye;
+			d.view_count = 1;
+			d.flags = k == 2 ? QAWS_DECIMATE_VIEW_POINTS : 0;
+		}
+		if (k == 3)
+		{
+			d.octahedral_views = 4;
+			d.flags = QAWS_DECIMATE_HEMISPHERE;
+		}
+		st = qaws_mesh_3d_decimate(&r, m, &d);
+		gap[k] = dm_outline_gap(in, m, 2);
+		if (k == 0 || k == 3)
+		{
+			/* the outlines all round, and where the faces went: above (seen) or below */
+			unsigned int f, c3[3];
+			up[k ? 1 : 0] = dm_outline_mean(in, m, 0);
+			for (f = 0; f < qaws_mesh_3d_get_triangle_count(m); f++)
+			{
+				qaws_mesh_3d_get_triangle(c3, m, f);
+				above[k ? 1 : 0] += qaws_mesh_3d_get_vertex(m, c3[0]).z + qaws_mesh_3d_get_vertex(m, c3[1]).z + qaws_mesh_3d_get_vertex(m, c3[2]).z > 0;
+			}
+		}
+		TEST_ASSERT(st == QAWS_STATUS_OK && r.faces_after <= 200 && (k == 0 || r.silhouette_edges > 0), "rippled sphere decimated");
+		qaws_mesh_3d_destroy(m);
+	}
+	sprintf(msg, "rippled sphere to 200 faces, its outline along z off by %.4f (plain), %.4f (seen along z), %.4f (from an eye on z); the three axes' "
+		"outlines all round (26 directions) off by %.4f on average plainly, %.4f with 4 x 4 octahedral views from above; faces in the upper half "
+		"%u of 200 plainly, %u with those views", gap[0], gap[1], gap[2], up[0], up[1], above[0], above[1]);
+	printf("  %s\n", msg);
+	TEST_ASSERT(gap[1] < 0.7 * gap[0] && gap[2] < 0.7 * gap[0] && above[1] > above[0] + 20 && up[1] < up[0], msg);
+	qaws_mesh_3d_destroy(in);
+}
+
+static void test_options(void)
+{
+	char msg[240];
+	{
+		/* creases found by angle on a cube without features */
+		qaws_mesh_3d* m = dm_cube(6);
+		qaws_decimate_desc d;
+		qaws_decimate_report r;
+		double area, vol;
+		qaws_status st;
+		memset(&d, 0, sizeof d);
+		d.target_faces = 12;
+		d.crease_angle = (qaws_scalar)0.5;
+		st = qaws_mesh_3d_decimate(&r, m, &d);
+		vol = dm_volume(m, &area);
+		sprintf(msg, "a cube without features, creases by angle: %u creases found, %u -> %u faces, %u feature edges left, volume %.12f", r.creases,
+			r.faces_before, r.faces_after, qaws_mesh_3d_get_feature_edge_count(m), vol);
+		printf("  %s\n", msg);
+		TEST_ASSERT(st == QAWS_STATUS_OK && r.creases == 72 && r.faces_after <= 16 && qaws_mesh_3d_get_feature_edge_count(m) >= 12
+			&& fabs(vol - 1) < 1e-12, msg);
+		qaws_mesh_3d_destroy(m);
+	}
+	{
+		/* importance 0 on the cap z > 0.5: its vertices stay where they were */
+		qaws_mesh_3d* m = dm_icosphere(3);
+		unsigned int nv = qaws_mesh_3d_get_vertex_count(m), i, j, kept = 0, locked = 0, nv2;
+		qaws_scalar* imp = (qaws_scalar*)malloc(sizeof(qaws_scalar) * nv);
+		qaws_scalar* x0 = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * nv);
+		qaws_decimate_desc d;
+		qaws_decimate_report r;
+		qaws_mesh_3d_get_positions(x0, m);
+		for (i = 0; i < nv; i++)
+		{
+			imp[i] = (qaws_scalar)(x0[3 * i + 2] > 0.5 ? 0 : 1);
+			locked += x0[3 * i + 2] > 0.5;
+		}
+		memset(&d, 0, sizeof d);
+		d.target_faces = 200;
+		d.importance = imp;
+		qaws_mesh_3d_decimate(&r, m, &d);
+		nv2 = qaws_mesh_3d_get_vertex_count(m);
+		for (i = 0; i < nv; i++)
+			if (x0[3 * i + 2] > 0.5)
+				for (j = 0; j < nv2; j++)
+				{
+					qaws_vec3 p = qaws_mesh_3d_get_vertex(m, j);
+					if (p.x == x0[3 * i] && p.y == x0[3 * i + 1] && p.z == x0[3 * i + 2])
+					{
+						kept++;
+						break;
+					}
+				}
+		sprintf(msg, "importance 0 on a cap: %u of its %u vertices still there, unmoved; %u -> %u faces", kept, locked, r.faces_before, r.faces_after);
+		printf("  %s\n", msg);
+		TEST_ASSERT(kept == locked && r.faces_after < r.faces_before, msg);
+		qaws_mesh_3d_destroy(m);
+		free(imp);
+		free(x0);
+	}
+	{
+		/* a tight bound on the faces' turn stops earlier */
+		qaws_mesh_3d* a = dm_rippled();
+		qaws_mesh_3d* b = dm_rippled();
+		qaws_decimate_desc d;
+		qaws_decimate_report ra, rb;
+		memset(&d, 0, sizeof d);
+		d.target_faces = 60;
+		qaws_mesh_3d_decimate(&ra, a, &d);
+		d.max_normal_angle = (qaws_scalar)0.15;
+		qaws_mesh_3d_decimate(&rb, b, &d);
+		sprintf(msg, "faces turning at most 0.15 rad: stops at %u faces (%u with the default bound)", rb.faces_after, ra.faces_after);
+		printf("  %s\n", msg);
+		TEST_ASSERT(rb.faces_after > ra.faces_after, msg);
+		qaws_mesh_3d_destroy(a);
+		qaws_mesh_3d_destroy(b);
+	}
+}
+
 static void test_refusals(void)
 {
 	qaws_mesh_3d* m = dm_grid(2);
@@ -315,6 +547,8 @@ int test_167_mesh_decimate_main(void)
 	test_sphere();
 	test_plane();
 	test_cube();
+	test_silhouette();
+	test_options();
 	test_refusals();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;

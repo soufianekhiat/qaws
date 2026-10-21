@@ -99,7 +99,8 @@ typedef struct dc_work
 	double *Q, *W;
 	unsigned int* stamp;
 	unsigned char* border;
-	int lock;
+	unsigned char* locked;          /* neither removed nor moved: a locked border, an importance of 0 or less */
+	double cosmax;                  /* the cosine of the largest turn of a face a collapse may make */
 } dc_work;
 
 /* a merged into b: allowed, and where b goes and the error there; 0 when refused */
@@ -109,13 +110,13 @@ static int dc_candidate(dc_work const* w, unsigned int a, unsigned int b, double
 	unsigned int c = hm_find_edge(m, a, b), k;
 	double Q[10], best = HUGE_VAL, tries[4][3], wsum = w->W[a] + w->W[b];
 	int fixed, nt = 0, i;
-	if (c == HM_NONE || (m->vflag[a] & HM_CORNER) || (hm_feature_degree(m, a) && !(m->cflag[c] & HM_FEATURE)) || (w->lock && w->border[a])
+	if (c == HM_NONE || (m->vflag[a] & HM_CORNER) || (hm_feature_degree(m, a) && !(m->cflag[c] & HM_FEATURE)) || w->locked[a]
 		|| !hm_can_collapse(m, c, a))
 		return 0;
 	for (k = 0; k < 10; k++)
 		Q[k] = w->Q[10 * (size_t)a + k] + w->Q[10 * (size_t)b + k];
 	/* b stays where it is when it may not leave its place: a corner, a locked border vertex, a feature vertex the edge leaves */
-	fixed = (m->vflag[b] & HM_CORNER) || (w->lock && w->border[b]) || (hm_feature_degree(m, b) && !(m->cflag[c] & HM_FEATURE));
+	fixed = (m->vflag[b] & HM_CORNER) || w->locked[b] || (hm_feature_degree(m, b) && !(m->cflag[c] & HM_FEATURE));
 	memcpy(tries[nt++], m->x + 3 * (size_t)b, 3 * sizeof(double));
 	if (!fixed)
 	{
@@ -139,8 +140,8 @@ static int dc_candidate(dc_work const* w, unsigned int a, unsigned int b, double
 	return 1;
 }
 
-/* no face round a or b (but the edge's) turned over or flattened by a and b moving to x */
-static int dc_no_fold(qaws_hm const* m, unsigned int a, unsigned int b, double const* x)
+/* no face round a or b (but the edge's) turned by more than the bound, or flattened, by a and b moving to x */
+static int dc_no_fold(qaws_hm const* m, unsigned int a, unsigned int b, double const* x, double cosmax)
 {
 	unsigned int s, v, c;
 	for (s = 0; s < 2; s++)
@@ -171,8 +172,7 @@ static int dc_no_fold(qaws_hm const* m, unsigned int a, unsigned int b, double c
 			}
 			l0 = sqrt(n0[0] * n0[0] + n0[1] * n0[1] + n0[2] * n0[2]);
 			l1 = sqrt(n1[0] * n1[0] + n1[1] * n1[1] + n1[2] * n1[2]);
-			/* (turned by more than about 78 degrees, or shrunk to a sliver) */
-			if (!(l1 > 1e-6 * l0) || n0[0] * n1[0] + n0[1] * n1[1] + n0[2] * n1[2] < 0.2 * l0 * l1)
+			if (!(l1 > 1e-6 * l0) || n0[0] * n1[0] + n0[1] * n1[1] + n0[2] * n1[2] < cosmax * l0 * l1)
 				return 0;
 		}
 	}
@@ -211,6 +211,157 @@ static int dc_push_edges(dc_work const* w, dc_heap* H, unsigned int v, unsigned 
 	return 1;
 }
 
+/* the edges sharper than the angle made features, both corners; the corners recounted (1 or more than 2 feature edges);
+   returns how many were made */
+static unsigned int dc_creases(qaws_hm* m, double angle)
+{
+	unsigned int c, v, n = 0;
+	double cosd = cos(angle);
+	for (c = 0; c < m->nc; c++)
+	{
+		unsigned int o = m->co[c];
+		double n0[3], n1[3], l0, l1;
+		if (m->cf[c] == HM_NONE || o == HM_NONE || o < c || (m->cflag[c] & HM_FEATURE))
+			continue;
+		hm_face_normal(m, m->cf[c], n0);
+		hm_face_normal(m, m->cf[o], n1);
+		l0 = sqrt(n0[0] * n0[0] + n0[1] * n0[1] + n0[2] * n0[2]);
+		l1 = sqrt(n1[0] * n1[0] + n1[1] * n1[1] + n1[2] * n1[2]);
+		if (l0 > 0 && l1 > 0 && n0[0] * n1[0] + n0[1] * n1[1] + n0[2] * n1[2] < cosd * l0 * l1)
+		{
+			m->cflag[c] |= HM_FEATURE;
+			m->cflag[o] |= HM_FEATURE;
+			n++;
+		}
+	}
+	for (v = 0; v < m->nv; v++)
+	{
+		unsigned int d = (m->vflag[v] & HM_DELETED) ? 0 : hm_feature_degree(m, v);
+		if (d && d != 2)
+			m->vflag[v] |= HM_CORNER;
+	}
+	return n;
+}
+
+/* the view directions: given, and N x N on an octahedral map (cell centres; the hemisphere's map turned 45 degrees) */
+static double* dc_views(qaws_decimate_desc const* d, unsigned int* out_n)
+{
+	unsigned int n = d->octahedral_views, given = d->views ? d->view_count : 0, i, j, k = 0;
+	double* v = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), 3, (size_t)given + (size_t)n * n + 1));
+	if (!v)
+		return NULL;
+	for (i = 0; i < given; i++, k++)
+		for (j = 0; j < 3; j++)
+			v[3 * (size_t)k + j] = (double)d->views[3 * (size_t)i + j];
+	for (j = 0; j < n; j++)
+		for (i = 0; i < n; i++, k++)
+		{
+			double u = 2 * (i + 0.5) / n - 1, w = 2 * (j + 0.5) / n - 1, x, y, z, l;
+			if (d->flags & QAWS_DECIMATE_HEMISPHERE)
+			{
+				x = 0.5 * (u + w);
+				y = 0.5 * (u - w);
+				z = 1 - fabs(x) - fabs(y);
+			}
+			else
+			{
+				x = u;
+				y = w;
+				z = 1 - fabs(u) - fabs(w);
+				if (z < 0)
+				{
+					x = (1 - fabs(w)) * (u < 0 ? -1 : 1);
+					y = (1 - fabs(u)) * (w < 0 ? -1 : 1);
+				}
+			}
+			l = sqrt(x * x + y * y + z * z);
+			v[3 * (size_t)k] = x / l;
+			v[3 * (size_t)k + 1] = y / l;
+			v[3 * (size_t)k + 2] = z / l;
+		}
+	*out_n = k;
+	return v;
+}
+
+/* views s0 to s1's silhouette edges (the first npoints views are eye points, the others directions): with share, each counted
+   on its two ends; else the plane through the edge and the view's ray added to its ends' quadrics, weight over the views' count */
+static unsigned int dc_silhouettes(dc_work* w, double const* views, unsigned int s0, unsigned int s1, unsigned int npoints, double weight,
+	double* share, double* seen)
+{
+	qaws_hm const* m = w->m;
+	unsigned int s, c, k, n = 0, nviews = s1 - s0;
+	for (s = s0; s < s1; s++)
+	{
+		double const* view = views + 3 * (size_t)s;
+		int points = s < npoints;
+		if (seen)
+		{
+			/* (the faces turned toward the view: its direction points from the mesh to the eye) */
+			unsigned int f;
+			for (f = 0; f < m->nf; f++)
+				if (!(m->fflag[f] & HM_DELETED))
+				{
+					double nf[3];
+					hm_face_normal(m, f, nf);
+					seen[f] += nf[0] * view[0] + nf[1] * view[1] + nf[2] * view[2] > 0;
+				}
+		}
+		for (c = 0; c < m->nc; c++)
+		{
+			unsigned int o = m->co[c], f, g, q, e;
+			double nf[3], ng[3], cf[3] = { 0, 0, 0 }, cg[3] = { 0, 0, 0 }, df[3], dg[3], sf, sg;
+			if (m->cf[c] == HM_NONE || o == HM_NONE || o < c)
+				continue;
+			f = m->cf[c];
+			g = m->cf[o];
+			hm_face_normal(m, f, nf);
+			hm_face_normal(m, g, ng);
+			for (q = m->fc[f], e = m->fc[f] + m->fn[f]; q < e; q++)
+				for (k = 0; k < 3; k++)
+					cf[k] += m->x[3 * (size_t)m->cv[q] + k] / m->fn[f];
+			for (q = m->fc[g], e = m->fc[g] + m->fn[g]; q < e; q++)
+				for (k = 0; k < 3; k++)
+					cg[k] += m->x[3 * (size_t)m->cv[q] + k] / m->fn[g];
+			for (k = 0; k < 3; k++)
+			{
+				df[k] = points ? cf[k] - view[k] : view[k];
+				dg[k] = points ? cg[k] - view[k] : view[k];
+			}
+			sf = nf[0] * df[0] + nf[1] * df[1] + nf[2] * df[2];
+			sg = ng[0] * dg[0] + ng[1] * dg[1] + ng[2] * dg[2];
+			if ((sf > 0) == (sg > 0))
+				continue;
+			if (share)
+			{
+				share[m->cv[c]] += 1;
+				share[hm_to(m, c)] += 1;
+				n++;
+				continue;
+			}
+			{
+				unsigned int a = m->cv[c], b = hm_to(m, c);
+				double const *pa = m->x + 3 * (size_t)a, *pb = m->x + 3 * (size_t)b;
+				double u[3] = { pb[0] - pa[0], pb[1] - pa[1], pb[2] - pa[2] }, ray[3], pl[3], l2 = u[0] * u[0] + u[1] * u[1] + u[2] * u[2], ls, d;
+				for (k = 0; k < 3; k++)
+					ray[k] = points ? 0.5 * (pa[k] + pb[k]) - view[k] : view[k];
+				pl[0] = u[1] * ray[2] - u[2] * ray[1];
+				pl[1] = u[2] * ray[0] - u[0] * ray[2];
+				pl[2] = u[0] * ray[1] - u[1] * ray[0];
+				ls = sqrt(pl[0] * pl[0] + pl[1] * pl[1] + pl[2] * pl[2]);
+				if (!(ls > 0))
+					continue;
+				for (k = 0; k < 3; k++)
+					pl[k] /= ls;
+				d = -(pl[0] * pa[0] + pl[1] * pa[1] + pl[2] * pa[2]);
+				dc_plane(w->Q + 10 * (size_t)a, pl, d, weight * l2 / nviews);
+				dc_plane(w->Q + 10 * (size_t)b, pl, d, weight * l2 / nviews);
+				n++;
+			}
+		}
+	}
+	return n;
+}
+
 static unsigned int dc_faces(qaws_hm const* m)
 {
 	unsigned int f, n = 0;
@@ -227,13 +378,15 @@ qaws_status qaws_mesh_3d_decimate(qaws_decimate_report* report, qaws_mesh_3d* me
 	dc_work w;
 	dc_heap H;
 	unsigned int *ring = NULL, rcap = 64, f, v, k, c, live, target;
-	double bound2;
+	double bound2, *views = NULL, *share = NULL, *seen = NULL, sweight = desc && desc->silhouette_weight > 0 ? (double)desc->silhouette_weight : 100;
+	unsigned int nviews = 0;
 	int failed = 0;
 	qaws_status st = QAWS_STATUS_ALLOCATION_FAILURE;
 	if (!report)
 		report = &local;
 	memset(report, 0, sizeof *report);
-	if (!mesh || (desc && !(desc->max_error >= 0)))
+	if (!mesh || (desc && (!(desc->max_error >= 0) || !(desc->crease_angle >= 0) || !(desc->max_normal_angle >= 0) || !(desc->silhouette_weight >= 0)
+		|| !(desc->feature_weight >= 0) || (desc->view_count && !desc->views))))
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	m = &mesh->hm;
 	memset(&w, 0, sizeof w);
@@ -258,16 +411,47 @@ qaws_status qaws_mesh_3d_decimate(qaws_decimate_report* report, qaws_mesh_3d* me
 		st = QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 	w.m = m;
-	w.lock = desc && (desc->flags & QAWS_DECIMATE_LOCK_BORDER);
+	w.cosmax = desc && desc->max_normal_angle > 0 ? cos((double)desc->max_normal_angle) : 0.2;
+	if (desc && desc->crease_angle > 0)
+		report->creases = dc_creases(m, (double)desc->crease_angle);
 	w.Q = (double*)qaws_internal_zalloc(qaws_internal_mul2(10, (size_t)m->nv + 1), sizeof(double));
 	w.W = (double*)qaws_internal_zalloc((size_t)m->nv + 1, sizeof(double));
 	w.stamp = (unsigned int*)qaws_internal_zalloc((size_t)m->nv + 1, sizeof(unsigned int));
 	w.border = (unsigned char*)qaws_internal_zalloc((size_t)m->nv + 1, 1);
+	w.locked = (unsigned char*)qaws_internal_zalloc((size_t)m->nv + 1, 1);
 	ring = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * rcap);
-	if (!w.Q || !w.W || !w.stamp || !w.border || !ring)
+	if (!w.Q || !w.W || !w.stamp || !w.border || !w.locked || !ring)
 		goto done;
 	for (v = 0; v < m->nv; v++)
+	{
 		w.border[v] = !(m->vflag[v] & HM_DELETED) && hm_is_border_vertex(m, v);
+		w.locked[v] = (w.border[v] && desc && (desc->flags & QAWS_DECIMATE_LOCK_BORDER)) || (desc && desc->importance && !(desc->importance[v] > 0));
+	}
+	{
+		/* the views: given (exact planes, below) and octahedral (each vertex's share of their silhouettes weighs its faces' planes) */
+		unsigned int given = desc && desc->views ? desc->view_count : 0;
+		if (desc && (given || desc->octahedral_views))
+		{
+			views = dc_views(desc, &nviews);
+			if (!views)
+				goto done;
+		}
+		if (nviews > given)
+		{
+			share = (double*)qaws_internal_zalloc((size_t)m->nv + 1, sizeof(double));
+			if (!share)
+				goto done;
+			seen = (double*)qaws_internal_zalloc((size_t)m->nf + 1, sizeof(double));
+			if (!seen)
+				goto done;
+			report->silhouette_edges += dc_silhouettes(&w, views, given, nviews, 0, 0, share, seen);
+			for (v = 0; v < m->nv; v++)
+				share[v] = 1 + sweight * share[v] / (nviews - given);
+			/* (a face no view sees keeps a fiftieth of its weight: hidden parts go first, still in one piece) */
+			for (f = 0; f < m->nf; f++)
+				seen[f] = 0.02 + seen[f] / (nviews - given);
+		}
+	}
 	/* each face's plane on its corners, by area; planes standing on the border's and the features' edges, heavier */
 	for (f = 0; f < m->nf; f++)
 	{
@@ -285,7 +469,8 @@ qaws_status qaws_mesh_3d_decimate(qaws_decimate_report* report, qaws_mesh_3d* me
 		e = m->fc[f] + m->fn[f];
 		for (c = m->fc[f]; c < e; c++)
 		{
-			dc_plane(w.Q + 10 * (size_t)m->cv[c], n, d, a);
+			dc_plane(w.Q + 10 * (size_t)m->cv[c], n, d, a * (desc && desc->importance && desc->importance[m->cv[c]] > 0 ? (double)desc->importance[m->cv[c]] : 1)
+				* (share ? share[m->cv[c]] * seen[f] : 1));
 			w.W[m->cv[c]] += a;
 			if (m->co[c] == HM_NONE || (m->cflag[c] & HM_FEATURE))
 			{
@@ -301,13 +486,17 @@ qaws_status qaws_mesh_3d_decimate(qaws_decimate_report* report, qaws_mesh_3d* me
 						s[k] /= ls;
 					{
 					double ds = -(s[0] * p[0] + s[1] * p[1] + s[2] * p[2]);
-					dc_plane(w.Q + 10 * (size_t)m->cv[c], s, ds, 100 * l2);
-					dc_plane(w.Q + 10 * (size_t)hm_to(m, c), s, ds, 100 * l2);
+					double fw = desc && desc->feature_weight > 0 ? (double)desc->feature_weight : 100;
+					dc_plane(w.Q + 10 * (size_t)m->cv[c], s, ds, fw * l2);
+					dc_plane(w.Q + 10 * (size_t)hm_to(m, c), s, ds, fw * l2);
 					}
 				}
 			}
 		}
 	}
+	if (desc && desc->views && desc->view_count)
+		report->silhouette_edges += dc_silhouettes(&w, views, 0, desc->view_count, (desc->flags & QAWS_DECIMATE_VIEW_POINTS) ? desc->view_count : 0,
+			sweight, NULL, NULL);
 	for (v = 0; v < m->nv; v++)
 		if (!(m->vflag[v] & HM_DELETED) && !dc_push_edges(&w, &H, v, &ring, &rcap))
 			goto done;
@@ -323,7 +512,7 @@ qaws_status qaws_mesh_3d_decimate(qaws_decimate_report* report, qaws_mesh_3d* me
 			continue;   /* (stale) */
 		if (e.cost > bound2)
 			break;
-		if (!dc_candidate(&w, a, b, x, &cost) || !dc_no_fold(m, a, b, x))
+		if (!dc_candidate(&w, a, b, x, &cost) || !dc_no_fold(m, a, b, x, w.cosmax))
 			continue;
 		/* the faces of the edge that go: its triangles */
 		for (c = m->vc[a]; c != HM_NONE; c = hm_round(m, a, c))
@@ -370,7 +559,7 @@ qaws_status qaws_mesh_3d_decimate(qaws_decimate_report* report, qaws_mesh_3d* me
 		st = qaws_mesh_3d_measure_deviation(&report->deviation, ref, mesh, NULL);
 done:
 	qaws_mesh_reference_destroy(ref);
-	qaws_internal_free(w.Q); qaws_internal_free(w.W); qaws_internal_free(w.stamp); qaws_internal_free(w.border);
+	qaws_internal_free(w.Q); qaws_internal_free(w.W); qaws_internal_free(w.stamp); qaws_internal_free(w.border); qaws_internal_free(w.locked); qaws_internal_free(views); qaws_internal_free(share); qaws_internal_free(seen);
 	qaws_internal_free(ring); qaws_internal_free(H.e);
 	return st;
 }

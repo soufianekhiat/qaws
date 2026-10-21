@@ -1078,6 +1078,11 @@ qaws_mesh_3d_decimate(&report, mesh, &d);
 
 - **Error:** read as a distance, the root of the area-weighted mean squared distance to those planes. `max_error` stops before a collapse past it; `target_faces` stops at a count.
 - **What stays:** feature corners; feature lines and the border, held near their place by planes standing on their edges (`QAWS_DECIMATE_LOCK_BORDER` holds the border's vertices still); collapses that would turn a face over (by more than about 78°) or move a feature vertex off its line are refused. Attributes follow the collapses by their rules.
+- **Creases:** `crease_angle` adds the edges whose faces turn by more to the mesh's features first (they stay so); their vertices then move only along them and their corners stay.
+- **Silhouettes from given views** (directions, or eye points with `QAWS_DECIMATE_VIEW_POINTS`): an edge whose faces turn opposite ways to a view is on its silhouette; the plane through it and the view's ray goes into its ends' quadrics (`silhouette_weight` per squared edge length, 100 by default), so moving within it keeps the outline. One view holds its outline closely: a rippled sphere at 200 faces keeps its outline seen down its axis within 0.0016, against 0.042 plainly.
+- **Octahedral views:** `octahedral_views` N gives N × N directions on an octahedral map's grid, as octahedral impostors sample the sphere (`QAWS_DECIMATE_HEMISPHERE`: from the upper +z half only). Each face's plane weighs the share of the views it faces (a fiftieth at least), and 1 + `silhouette_weight` times its corner's share of the views' silhouettes. Parts no view sees go first and the outlines get the faces: from above, 127 of 200 faces stay on the upper half against 97 plainly. Over the whole sphere it is near plain decimation, as it should be: every face faces half the views and every vertex is on some outline (and an outline seen along d is the one seen along −d).
+- **Importance:** a per-vertex factor on its quadric (above 1: kept longer); 0 or less: never removed nor moved.
+- **Faces' turn:** `max_normal_angle` refuses a collapse turning a face by more (78° by default).
 - **Certified deviation:** with `QAWS_DECIMATE_MEASURE` the report holds the result's two-sided Hausdorff bounds from the input (`qaws_mesh_3d_measure_deviation` against the input as a LINEAR reference).
 
 The collapses run on the corner store without compacting until the end, from a heap whose stale entries are skipped by the vertices' stamps.
@@ -1086,7 +1091,11 @@ The collapses run on the corner store without compacting until the end, from a h
 - **Sphere:** an icosphere of 1280 triangles down to 320: still closed, genus 0, certified 0.016 from the input; an error bound 0.004 is never passed.
 - **Plane:** a flat 16 × 16 grid down to 2 triangles, area and box exact; with the border locked, its 64 border vertices stay, unmoved.
 - **Cube:** in 6 × 6 grids with its creases as features, down to 16 triangles, volume and area exact.
+- **Silhouettes:** the rippled sphere's outline down its axis 0.0016 off seen along it, 0.025 from an eye on it, 0.042 plainly; 4 × 4 views from above put 127 of 200 faces on the upper half (97 plainly).
+- **Options:** creases found by angle on a cube without features (72), its volume exact; importance 0 on a cap keeps its 161 vertices unmoved; a 0.15 rad bound on the faces' turn stops at 228 faces instead of 60.
 - **Refusals:** no mesh, a negative bound.
+
+Figure 33 (key x) shows what decimation keeps: the rippled sphere's outline from above held by one view, the faces kept on top by views from above, a can's rims kept as creases found by angle, and a torus's detail kept on its important half.
 
 Figure 32 (key w) shows a rippled torus at 20%, 5% and 1.5% of its triangles with the certified deviation of each (0.004, 0.014, 0.062 on a torus of radius 1.4), and a fine cube down to 12 triangles with its creases kept.
 
