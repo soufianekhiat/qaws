@@ -16,7 +16,11 @@
  *   - an open cylinder, a constant metric across the axis 0.08 and along it
  *     0.4: edges near unit length in the metric, the vertices on the
  *     cylinder, the elements longer along the axis;
- *   - refusals: CVT with a metric, a metric on another reference, a metric
+ *   - CVT with a metric against LOCAL on a unit square, 0.2 along y and
+ *     across x 0.02 or graded 0.02 to 0.08: edges near unit length in the
+ *     metric (their mean and spread printed), triangles well shaped in it,
+ *     their count near the metric area's, stretched along y;
+ *   - refusals: a metric on another reference, a metric
  *     not positive definite, a Hessian desc's error 0 or sizes crossed, a
  *     location off the reference.
  */
@@ -26,6 +30,7 @@
 #include <math.h>
 #include <string.h>
 #include <stdlib.h>
+#include <time.h>
 
 /* an n x n grid of the unit square in z = 0, each cell two triangles */
 static qaws_mesh_3d* mt_square(unsigned int n)
@@ -104,12 +109,13 @@ static double mt_mlen(double const* M, double const* e)
 		+ e[2] * (M[2] * e[0] + M[4] * e[1] + M[5] * e[2]));
 }
 
-/* a remeshed mesh's measures in the metric: the share of edges in [1/sqrt 2, sqrt 2], the triangles' mean shape, the mean
+/* a remeshed mesh's measures in the metric: the share of edges in [1/sqrt 2, sqrt 2], the edges' mean length and its
+   standard deviation, the triangles' mean shape, their smallest angle and the share of angles under 30 degrees, the mean
    extents of the edges along axis `along` and across it (the other two axes' length) */
 typedef struct mt_stats
 {
 	unsigned int nv, nt;
-	double unit, shorter, longer, quality, along, across;
+	double unit, shorter, longer, quality, along, across, mean, spread, min_angle, under30;
 } mt_stats;
 
 static int mt_measure(mt_stats* s, qaws_mesh_3d const* m, qaws_metric_field const* mf, unsigned int along)
@@ -126,6 +132,7 @@ static int mt_measure(mt_stats* s, qaws_mesh_3d const* m, qaws_metric_field cons
 	memset(s, 0, sizeof *s);
 	s->nv = nv;
 	s->nt = nt;
+	s->min_angle = 180;
 	for (i = 0; ok && i < ne; i++)
 	{
 		double d[3], A[6], len;
@@ -138,6 +145,8 @@ static int mt_measure(mt_stats* s, qaws_mesh_3d const* m, qaws_metric_field cons
 		in += len >= sqrt(0.5) && len <= sqrt(2.0);
 		s->shorter += len < sqrt(0.5);
 		s->longer += len > sqrt(2.0);
+		s->mean += len;
+		s->spread += len * len;
 		s->along += fabs(d[along]);
 		s->across += sqrt(d[(along + 1) % 3] * d[(along + 1) % 3] + d[(along + 2) % 3] * d[(along + 2) % 3]);
 	}
@@ -158,10 +167,26 @@ static int mt_measure(mt_stats* s, qaws_mesh_3d const* m, qaws_metric_field cons
 		ww = mt_mlen(A, w) * mt_mlen(A, w);
 		uv = 0.5 * (uu + vv - ww);
 		s->quality += 2 * sqrt(3.0) * sqrt(fmax(uu * vv - uv * uv, 0)) / (uu + vv + ww);
+		{
+			/* the angles by the law of cosines on the metric lengths */
+			double sq[3], cs;
+			sq[0] = uu; sq[1] = vv; sq[2] = ww;
+			for (k = 0; k < 3; k++)
+			{
+				double a2 = sq[k], b2 = sq[(k + 1) % 3], c2 = sq[(k + 2) % 3], ang;
+				cs = (b2 + c2 - a2) / (2 * sqrt(b2 * c2));
+				ang = acos(cs < -1 ? -1 : cs > 1 ? 1 : cs) * 180 / 3.14159265358979323846;
+				s->min_angle = fmin(s->min_angle, ang);
+				s->under30 += ang < 30;
+			}
+		}
 	}
 	if (ok && ne && nt)
 	{
 		s->unit = (double)in / ne;
+		s->mean /= ne;
+		s->spread = sqrt(fmax(s->spread / ne - s->mean * s->mean, 0));
+		s->under30 /= 3.0 * nt;
 		s->shorter /= ne;
 		s->longer /= ne;
 		s->along /= ne;
@@ -172,13 +197,14 @@ static int mt_measure(mt_stats* s, qaws_mesh_3d const* m, qaws_metric_field cons
 	return ok;
 }
 
-static qaws_mesh_3d* mt_remesh(qaws_mesh_3d const* m, qaws_mesh_reference const* r, qaws_metric_field const* mf, qaws_status* st)
+static qaws_mesh_3d* mt_remesh(qaws_mesh_3d const* m, qaws_mesh_reference const* r, qaws_metric_field const* mf, qaws_remesh_method method, qaws_status* st)
 {
 	qaws_remesh_desc d;
 	qaws_mesh_report rep;
 	qaws_mesh_3d* out = NULL;
 	memset(&d, 0, sizeof d);
 	memset(&rep, 0, sizeof rep);
+	d.method = method;
 	d.reference = r;
 	d.metric = mf;
 	*st = qaws_mesh_remesh(&out, &rep, m, &d);
@@ -208,7 +234,7 @@ static void test_constant(void)
 	if (r && M)
 		qaws_metric_field_create_vertices(&mf, r, M);
 	if (mf)
-		out = mt_remesh(m, r, mf, &st);
+		out = mt_remesh(m, r, mf, QAWS_REMESH_LOCAL, &st);
 	if (!out || !mt_measure(&s, out, mf, 1))
 	{
 		TEST_ASSERT(0, "constant metric: remeshed");
@@ -227,6 +253,67 @@ done:
 	qaws_mesh_reference_destroy(r);
 	qaws_mesh_3d_destroy(m);
 	free(M);
+}
+
+/* CVT against LOCAL on the unit square, 0.2 along y and across x 0.02 (constant) or 0.02 + 0.06 x (graded) */
+static void test_cvt(void)
+{
+	unsigned int c, method;
+	for (c = 0; c < 2; c++)
+		for (method = 0; method < 2; method++)
+		{
+			qaws_mesh_3d *m = mt_square(20), *out = NULL;
+			qaws_mesh_reference* r = NULL;
+			qaws_metric_field* mf = NULL;
+			qaws_scalar *M = NULL, *x = NULL;
+			qaws_status st = QAWS_STATUS_INTERNAL_ERROR;
+			unsigned int nv = m ? qaws_mesh_3d_get_vertex_count(m) : 0, i;
+			double hy = 0.2, expect = 0, t0, secs;
+			mt_stats s;
+			char msg[600];
+			qaws_mesh_reference_create(&r, m, NULL);
+			M = (qaws_scalar*)calloc(6 * (size_t)nv + 1, sizeof(qaws_scalar));
+			x = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * (nv + 1));
+			if (!r || !M || !x || qaws_mesh_3d_get_positions(x, m) != QAWS_STATUS_OK)
+			{
+				TEST_ASSERT(0, "cvt: set up");
+				goto next;
+			}
+			for (i = 0; i < nv; i++)
+			{
+				double hx = c ? 0.02 + 0.06 * (double)x[3 * i] : 0.02;
+				M[6 * i] = (qaws_scalar)(1 / (hx * hx));
+				M[6 * i + 3] = (qaws_scalar)(1 / (hy * hy));
+				M[6 * i + 5] = 1;
+			}
+			/* the metric area over a unit triangle's: the integral of 1 / (hx hy) */
+			expect = (c ? log(0.08 / 0.02) / 0.06 : 1 / 0.02) / hy / (sqrt(3.0) / 4);
+			qaws_metric_field_create_vertices(&mf, r, M);
+			t0 = (double)clock();
+			if (mf)
+				out = mt_remesh(m, r, mf, method ? QAWS_REMESH_CVT : QAWS_REMESH_LOCAL, &st);
+			secs = ((double)clock() - t0) / CLOCKS_PER_SEC;
+			if (!out || !mt_measure(&s, out, mf, 1))
+			{
+				TEST_ASSERT(0, "cvt: remeshed");
+				goto next;
+			}
+			sprintf(msg, "%s, %s metric (0.02%s x 0.2): %u triangles (metric area: %.0f), edges in the metric %.3f +- %.3f (%.3f in [1/sqrt 2, "
+				"sqrt 2]), mean shape %.3f, smallest angle %.1f, %.3f of the angles under 30, extent along y over across %.2f, %.2f s", method ? "CVT" : "LOCAL",
+				c ? "graded" : "constant", c ? "..0.08" : "", s.nt, expect, s.mean, s.spread, s.unit, s.quality, s.min_angle, s.under30, s.along / s.across, secs);
+			printf("  %s\n", msg);
+			TEST_ASSERT(st == QAWS_STATUS_OK && s.unit >= 0.85 && s.quality >= 0.8, msg);
+			TEST_ASSERT(s.nt >= 0.7 * expect && s.nt <= 1.3 * expect, "cvt: triangle count near the metric area's");
+			TEST_ASSERT(s.along >= 3 * s.across, "cvt: edges stretched along y");
+			TEST_ASSERT(!method || (fabs(s.mean - 1) <= 0.05 && s.spread <= 0.15), "cvt: CVT's edges within 5% of unit length on average, spread under 0.15");
+		next:
+			qaws_mesh_3d_destroy(out);
+			qaws_metric_field_destroy(mf);
+			qaws_mesh_reference_destroy(r);
+			qaws_mesh_3d_destroy(m);
+			free(M);
+			free(x);
+		}
 }
 
 static double mt_f(double x)
@@ -289,7 +376,7 @@ static void test_hessian(void)
 	TEST_ASSERT(worst_xx <= 0.08, msg);
 	/* (the fit's cross term tilts the axes by a few thousandths: the large x term leaks that, squared, into y) */
 	TEST_ASSERT(worst_yy <= 0.01, "hessian: along y, the largest size to a percent (f linear there)");
-	out = mt_remesh(m, r, mf, &st);
+	out = mt_remesh(m, r, mf, QAWS_REMESH_LOCAL, &st);
 	if (!out || !mt_measure(&s, out, mf, 1))
 	{
 		TEST_ASSERT(0, "hessian: remeshed");
@@ -382,7 +469,7 @@ static void test_cylinder(void)
 	if (r && M)
 		qaws_metric_field_create_vertices(&mf, r, M);
 	if (mf)
-		out = mt_remesh(m, r, mf, &st);
+		out = mt_remesh(m, r, mf, QAWS_REMESH_LOCAL, &st);
 	if (!out || !mt_measure(&s, out, mf, 2))
 	{
 		TEST_ASSERT(0, "cylinder: remeshed");
@@ -434,9 +521,6 @@ static void test_refusals(void)
 	memset(&d, 0, sizeof d);
 	d.reference = r;
 	d.metric = mf;
-	d.method = QAWS_REMESH_CVT;
-	TEST_ASSERT(qaws_mesh_remesh(&out, NULL, m, &d) == QAWS_STATUS_UNSUPPORTED_OPERATION && !out, "refusals: CVT with a metric");
-	d.method = QAWS_REMESH_LOCAL;
 	d.reference = r2;
 	TEST_ASSERT(qaws_mesh_remesh(&out, NULL, m, &d) == QAWS_STATUS_INVALID_ARGUMENT && !out, "refusals: a metric on another reference");
 	M[6 * 7 + 1] = 5;   /* (xy 5 against xx = yy = 4: indefinite) */
@@ -464,6 +548,7 @@ int test_158_metric_remesh_main(void)
 	test_constant();
 	test_hessian();
 	test_cylinder();
+	test_cvt();
 	test_refusals();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;

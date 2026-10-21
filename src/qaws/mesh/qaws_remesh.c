@@ -2149,7 +2149,7 @@ qaws_status qaws_mesh_remesh(qaws_mesh_3d** out_mesh, qaws_mesh_report* out_repo
 	*out_mesh = NULL;
 	if (!mesh || !desc || (unsigned int)desc->method > QAWS_REMESH_FIELD_ALIGNED || desc->target_length < 0)
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	if (desc->method == QAWS_REMESH_FIELD_ALIGNED || (desc->metric && desc->method == QAWS_REMESH_CVT))
+	if (desc->method == QAWS_REMESH_FIELD_ALIGNED)
 		return QAWS_STATUS_UNSUPPORTED_OPERATION;
 	/* the angle bounds about 60 degrees, below one another; the tolerance not negative */
 	if (desc->min_angle < 0 || desc->max_angle < 0 || desc->tolerance < 0 || (desc->min_angle > 0 && (double)desc->min_angle >= RM_PI / 3)
@@ -2238,7 +2238,7 @@ qaws_status qaws_mesh_remesh(qaws_mesh_3d** out_mesh, qaws_mesh_report* out_repo
 		if (ops == w.rep.splits + w.rep.collapses + w.rep.flips && w.moved <= 1e-3 * w.L)
 			break;
 	}
-	if (st == QAWS_STATUS_OK && !w.failed && desc->method == QAWS_REMESH_CVT && !rv_optimize(w.m, w.r, w.size, w.L, w.sa, w.ra, &w.s, desc->iterations ? desc->iterations : 30, &w.rep))
+	if (st == QAWS_STATUS_OK && !w.failed && desc->method == QAWS_REMESH_CVT && !rv_optimize(w.m, w.r, w.size, w.metric, w.L, w.sa, w.ra, w.ma, &w.s,desc->iterations ? desc->iterations : 30, &w.rep))
 		w.failed = 1;
 	rm_post(&w, desc);
 	if (w.failed && st == QAWS_STATUS_OK)

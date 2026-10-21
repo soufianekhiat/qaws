@@ -311,7 +311,27 @@ restricted to its tangent plane): the split and collapse lengths (4/3 and
 4/5 of unit length), the guards' angles and shapes, the Delaunay flips and
 the relaxation's weights (metric areas). A size field or the tolerance caps
 its sizes; `target_length` is unused; 30 iterations by default (it stops
-when nothing changes). CVT refuses a metric (UNSUPPORTED_OPERATION).
+when nothing changes).
+
+CVT takes a metric too (after LOCAL's 10 iterations in it), as an
+anisotropic CVT (Du and Wang 2005) with each cell measured in its seed's
+metric: the bisectors are the planes nearer the seed in its own metric, the
+energy the integral of the density times the squared distance in it, the
+density sqrt det M (unit cells in the metric), the vertex count the metric
+area over a unit hexagon's (the border's vertices counted half), the feature
+lines spaced at unit metric length, the Delaunay flips by metric angles, the
+L-BFGS preconditioned by each seed's metric and its steps at most half a
+unit in it. It does not use the exact anisotropic Voronoi diagram: the cells
+of two seeds with different metrics overlap or leave gaps along their
+border (they tile where the metric is constant), and the metric's change
+with the seed's position is left out of the gradient.
+
+Test 158, the unit square at 0.02 across x by 0.2 along y: CVT 574
+triangles (the metric area over a unit triangle: 577), edges 1.009 +- 0.076
+in the metric (LOCAL: 538, 1.059 +- 0.122), mean shape 0.983 (LOCAL
+0.962), smallest angle 34 degrees; graded 0.02 to 0.08 across x: 266
+triangles (267), 1.017 +- 0.112 (LOCAL 1.008 +- 0.125); about 1 s each,
+five to ten times LOCAL.
 
 Test 158: a constant metric of 0.02 by 0.15 on the unit square gives 723
 triangles (the metric area over a unit triangle: 770), every edge within

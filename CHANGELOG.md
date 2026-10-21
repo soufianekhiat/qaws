@@ -60,6 +60,12 @@ All notable changes to Qaws are documented here.
   meshes or one) joined by a bridge matched by arc length, Hermite-blended
   along both surfaces (tangent to both), rows and counts graded, quads or
   zipped triangles, optional smoothing. Test 169, figure 35 (key z).
+- Metric CVT: `QAWS_REMESH_CVT` takes `qaws_remesh_desc.metric` (it was
+  UNSUPPORTED_OPERATION): an anisotropic CVT with each Voronoi cell
+  measured in its seed's metric (Du and Wang 2005), density sqrt det M, the
+  count from the metric area, Delaunay flips in the metric. On a square at
+  0.02 by 0.2, edges 1.009 +- 0.076 in the metric (LOCAL 1.059 +- 0.122).
+  Test 158.
 - Remeshing from attributes: `qaws_mesh_3d_cut_isolines` (an attribute's
   isolines cut in as feature lines, kept through remeshing),
   `qaws_metric_field_create_intersection` (several attributes' metrics

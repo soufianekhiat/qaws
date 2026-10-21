@@ -96,7 +96,12 @@
  * relaxation's weights (metric areas); so the edges come out near unit
  * length in it, stretched where it asks. A size field and the tolerance's
  * sizes cap its lengths (each eigenvalue at least 1 / size^2);
- * target_length is then unused. UNSUPPORTED_OPERATION with CVT.
+ * target_length is then unused. CVT with a metric measures each Voronoi
+ * cell in its seed's metric (Du and Wang 2005): its bisectors, energy and
+ * step, density sqrt det M, the vertex count the metric area over a unit
+ * hexagon's, the feature lines spaced and the Delaunay flips judged in the
+ * metric. Not the exact anisotropic diagram: cells of seeds with different
+ * metrics overlap or leave gaps (they tile where it is constant).
  *
  * Pinned vertices (`pinned`, indices of the input's vertices) are kept as
  * feature corners are: never moved or collapsed away, at their input
@@ -138,7 +143,7 @@ typedef struct qaws_remesh_desc
 	qaws_scalar tolerance;                  /* > 0: the distance from the reference no face's sampled points pass */
 	unsigned int const* pinned;             /* input vertices kept where they are, as feature corners (LOCAL and CVT) */
 	unsigned int pinned_count;
-	qaws_metric_field const* metric;        /* anisotropic (LOCAL): lengths and angles measured in it; on `reference` */
+	qaws_metric_field const* metric;        /* anisotropic (LOCAL and CVT): lengths and angles measured in it; on `reference` */
 } qaws_remesh_desc;
 
 /* out_report may be NULL */

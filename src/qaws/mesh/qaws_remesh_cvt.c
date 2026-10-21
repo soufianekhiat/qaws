@@ -33,6 +33,16 @@
  * share drops about fourfold for about twice the time. Where the split
  * folds faces (a part curved tighter than twice the size) the coarse level
  * is dropped. Below 200 seeds, a single level.
+ *
+ * With a metric (Du and Wang 2005, each cell measured in its seed's metric,
+ * that metric held through a line search): the bisectors are planes nearer
+ * the seed in its metric, the energy its squared distance in it, density
+ * sqrt det (unit cells in the metric), the gradient 2 m M (z - centroid)
+ * and L-BFGS preconditioned by M^-1, the count the metric area over a unit
+ * hexagon's, lengths (lines, count, splits) and the Delaunay flips' angles
+ * in the metric. Not the exact anisotropic diagram: two seeds' cells overlap
+ * or leave a gap between them where their metrics differ, and the metric's
+ * change with the seed is not in the gradient.
  */
 
 #include "qaws_remesh_cvt.h"
@@ -64,8 +74,9 @@ typedef struct rv_cvt
 	qaws_hm* m;
 	qaws_mesh_reference const* r;
 	qaws_size_field const* size;
+	qaws_metric_field const* metric;   /* anisotropic (NULL: none) */
 	double L;
-	unsigned int sa, ra;
+	unsigned int sa, ra, ma;        /* ma: with a metric, per vertex its metric lifted from its tangent plane, over the scale squared */
 	mr_scratch* s;
 	qaws_mesh_report* rep;
 	/* the integration mesh: per reference triangle its grid, its first sub-vertex and sub-triangle */
@@ -117,16 +128,164 @@ static double* rv_x(qaws_hm const* m, unsigned int v)
 	return m->x + 3 * (size_t)v;
 }
 
-/* the size at a location */
-static double rv_size(rv_cvt const* w, qaws_mesh_location const* l, double const* x)
+/* u^T M t, M symmetric (six values; NULL: u . t) */
+static double rv_mdot(double const* M, double const* u, double const* t)
+{
+	if (!M)
+		return rv_dot(u, t);
+	return u[0] * (M[0] * t[0] + M[1] * t[1] + M[2] * t[2]) + u[1] * (M[1] * t[0] + M[3] * t[1] + M[4] * t[2])
+		+ u[2] * (M[2] * t[0] + M[4] * t[1] + M[5] * t[2]);
+}
+
+/* v = M v, M symmetric (six values) */
+static void rv_mv(double const* M, double* v)
+{
+	double e[3];
+	memcpy(e, v, sizeof e);
+	v[0] = M[0] * e[0] + M[1] * e[1] + M[2] * e[2];
+	v[1] = M[1] * e[0] + M[3] * e[1] + M[4] * e[2];
+	v[2] = M[2] * e[0] + M[4] * e[1] + M[5] * e[2];
+}
+
+/* |a - b|^2 in metric M (NULL: none) */
+static double rv_md2(double const* M, double const* a, double const* b)
+{
+	double e[3];
+	if (!M)
+		return rv_d2(a, b);
+	e[0] = a[0] - b[0];
+	e[1] = a[1] - b[1];
+	e[2] = a[2] - b[2];
+	return rv_mdot(M, e, e);
+}
+
+/* x with M x = b (x may be b), M symmetric positive definite (six values; else x = b) */
+static void rv_unmetric(double const* M, double const* b, double* x)
+{
+	double c00 = M[3] * M[5] - M[4] * M[4], c01 = M[2] * M[4] - M[1] * M[5], c02 = M[1] * M[4] - M[2] * M[3];
+	double c11 = M[0] * M[5] - M[2] * M[2], c12 = M[1] * M[2] - M[0] * M[4], c22 = M[0] * M[3] - M[1] * M[1];
+	double det = M[0] * c00 + M[1] * c01 + M[2] * c02, p[3];
+	if (!(det > 0))
+	{
+		memmove(x, b, sizeof p);
+		return;
+	}
+	p[0] = (c00 * b[0] + c01 * b[1] + c02 * b[2]) / det;
+	p[1] = (c01 * b[0] + c11 * b[1] + c12 * b[2]) / det;
+	p[2] = (c02 * b[0] + c12 * b[1] + c22 * b[2]) / det;
+	memcpy(x, p, sizeof p);
+}
+
+/* the smallest eigenvalue of symmetric M (six values; Smith's closed form) */
+static double rv_lmin(double const* M)
+{
+	double q = (M[0] + M[3] + M[5]) / 3, p1 = M[1] * M[1] + M[2] * M[2] + M[4] * M[4], p, B[6], r;
+	unsigned int k;
+	p = sqrt(((M[0] - q) * (M[0] - q) + (M[3] - q) * (M[3] - q) + (M[5] - q) * (M[5] - q) + 2 * p1) / 6);
+	if (!(p > 0))
+		return q;
+	for (k = 0; k < 6; k++)
+		B[k] = (M[k] - (k == 0 || k == 3 || k == 5 ? q : 0)) / p;
+	r = 0.5 * (B[0] * (B[3] * B[5] - B[4] * B[4]) - B[1] * (B[1] * B[5] - B[4] * B[2]) + B[2] * (B[1] * B[4] - B[3] * B[2]));
+	r = r < -1 ? -1 : r > 1 ? 1 : r;
+	return q + 2 * p * cos(acos(r) / 3 + 2 * RV_PI / 3);
+}
+
+/* the size at a location from the size field (or the target) */
+static double rv_iso(rv_cvt const* w, qaws_mesh_location const* l, double const* x)
 {
 	double h = w->size ? sf_eval(w->size, l, x) : w->L;
 	return h > 1e-12 * w->L ? h : 1e-12 * w->L;
 }
 
+/* the metric at l in its tangent plane, lifted to 3x3 as LOCAL's (each eigenvalue at least 1 / size^2 with a size field)
+   into M over the scale squared (M may be NULL), its larger eigenvalue into top (may be NULL); the eigenvalues' product */
+static double rv_metric(rv_cvt const* w, qaws_mesh_location const* l, double* M, double* top)
+{
+	double G[6], own[6], x[3], n[3], t1[3], t2[3], g[3], ln, lo = 0, det, big;
+	double* out = M ? M : own;
+	unsigned int k;
+	mf_eval(w->metric, l, G);
+	mr_eval(w->r, l, x, n);
+	ln = sqrt(rv_dot(n, n));
+	if (w->size)
+	{
+		double h = rv_iso(w, l, x);
+		lo = 1 / (h * h);
+	}
+	if (ln > 0)
+	{
+		for (k = 0; k < 3; k++)
+			n[k] /= ln;
+		mf_basis(n, t1, t2);
+		g[0] = rv_mdot(G, t1, t1);
+		g[1] = rv_mdot(G, t1, t2);
+		g[2] = rv_mdot(G, t2, t2);
+		det = mf_lift(out, g, t1, t2, n, lo, HUGE_VAL);
+		big = fmax(fabs(0.5 * (g[0] + g[2])) + sqrt(0.25 * (g[0] - g[2]) * (g[0] - g[2]) + g[1] * g[1]), lo);
+	}
+	else
+	{
+		memcpy(out, G, sizeof G);
+		big = 1 / (w->L * w->L);
+		det = big * big;
+	}
+	for (k = 0; k < 6; k++)
+		out[k] /= w->scale * w->scale;
+	if (top)
+		*top = big;
+	return det;
+}
+
+/* the size at a location: with a metric, its eigenvalues' geometric mean */
+static double rv_size(rv_cvt const* w, qaws_mesh_location const* l, double const* x)
+{
+	if (w->metric)
+		return pow(rv_metric(w, l, NULL, NULL), -0.25);
+	return rv_iso(w, l, x);
+}
+
+/* v's size attribute from its footpoint, times the scale; with a metric, its metric attribute too */
+static void rv_set(rv_cvt const* w, unsigned int v)
+{
+	qaws_mesh_location const* l = &w->m->foot[v];
+	if (w->metric)
+		hm_attr_at(w->m, w->sa, v)[0] = w->scale * pow(rv_metric(w, l, hm_attr_at(w->m, w->ma, v), NULL), -0.25);
+	else
+		hm_attr_at(w->m, w->sa, v)[0] = w->scale * rv_size(w, l, w->m->x + 3 * (size_t)v);
+}
+
+/* v's metric (NULL without one) */
+static double const* rv_vm(rv_cvt const* w, unsigned int v)
+{
+	return w->metric ? hm_attr_at(w->m, w->ma, v) : NULL;
+}
+
+/* with a metric, each seed's part of v (three per seed) times its metric's inverse */
+static void rv_precondition(rv_cvt const* w, double* v)
+{
+	unsigned int i;
+	for (i = 0; w->metric && i < w->n; i++)
+		rv_unmetric(rv_vm(w, i), v + 3 * (size_t)i, v + 3 * (size_t)i);
+}
+
 static double rv_h(rv_cvt const* w, unsigned int v)
 {
 	return hm_attr_at(w->m, w->sa, v)[0];
+}
+
+/* edge (a, b)'s length over the size; with a metric, in the mean of a's and b's */
+static double rv_ratio(rv_cvt const* w, unsigned int a, unsigned int b)
+{
+	double M[6], e[3];
+	unsigned int k;
+	if (!w->metric)
+		return sqrt(rv_d2(w->m->x + 3 * (size_t)a, w->m->x + 3 * (size_t)b)) / (0.5 * (rv_h(w, a) + rv_h(w, b)));
+	for (k = 0; k < 6; k++)
+		M[k] = 0.5 * (rv_vm(w, a)[k] + rv_vm(w, b)[k]);
+	for (k = 0; k < 3; k++)
+		e[k] = w->m->x[3 * (size_t)b + k] - w->m->x[3 * (size_t)a + k];
+	return sqrt(rv_mdot(M, e, e));
 }
 
 static unsigned int rv_region(rv_cvt const* w, unsigned int f)
@@ -339,7 +498,14 @@ static int rv_build(rv_cvt* w, double* nstar)
 			l.a = (qaws_scalar)ca[q];
 			l.b = (qaws_scalar)cb[q];
 			mi_eval(P, ca[q], cb[q], x, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
-			h = rv_size(w, &l, x);
+			if (w->metric)
+			{
+				double top;
+				rv_metric(w, &l, NULL, &top);
+				h = 1 / sqrt(top);   /* (the metric's shortest length: the cells' width) */
+			}
+			else
+				h = rv_size(w, &l, x);
 			hmin = h < hmin ? h : hmin;
 		}
 		for (q = 0; q < 9; q++)
@@ -383,8 +549,13 @@ static int rv_build(rv_cvt* w, double* nstar)
 				l.a = (qaws_scalar)((double)i / k);
 				l.b = (qaws_scalar)((double)j / k);
 				mi_eval(&r->patch[t], (double)l.a, (double)l.b, o, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
-				h = rv_size(w, &l, o);
-				o[3] = pow(w->L / h, 4);
+				if (w->metric)
+					o[3] = pow(w->L, 4) * sqrt(rv_metric(w, &l, NULL, NULL));   /* (sqrt det: unit cells in the metric) */
+				else
+				{
+					h = rv_size(w, &l, o);
+					o[3] = pow(w->L / h, 4);
+				}
 			}
 	}
 	/* the sub-triangles and their neighbours: counted, then stored */
@@ -431,7 +602,10 @@ static int rv_build(rv_cvt* w, double* nstar)
 		for (c = 0; c < 3; c++) { u[c] = B[c] - A[c]; v[c] = C[c] - A[c]; }
 		rv_cross(u, v, n);
 		a = 0.5 * sqrt(rv_dot(n, n));
-		total += a * (sqrt(A[3]) + sqrt(B[3]) + sqrt(C[3])) / 3;
+		if (w->metric)
+			total += a * (A[3] + B[3] + C[3]) / (3 * w->L * w->L);
+		else
+			total += a * (sqrt(A[3]) + sqrt(B[3]) + sqrt(C[3])) / 3;
 		w->mass += a * (A[3] + B[3] + C[3]) / 3;
 	}
 	*nstar = total * 2 / (sqrt(3.0) * w->L * w->L);
@@ -506,7 +680,7 @@ static int rv_count(rv_cvt* w, double nstar, int lines)
 			if (m->cf[c] != HM_NONE && (m->co[c] == HM_NONE || c < m->co[c]))
 			{
 				unsigned int a = m->cv[c], b = hm_to(m, c);
-				double l = sqrt(rv_d2(rv_x(m, a), rv_x(m, b))) / (0.5 * (rv_h(w, a) + rv_h(w, b)));
+				double l = rv_ratio(w, a, b);
 				if ((m->cflag[c] & HM_FEATURE) || (!lines && (hm_feature_degree(m, a) || hm_feature_degree(m, b))))
 					continue;
 				e[2 * ne] = a;
@@ -539,7 +713,7 @@ static int rv_count(rv_cvt* w, double nstar, int lines)
 					return 0;
 				}
 				m->foot[v] = l;
-				hm_attr_at(m, w->sa, v)[0] = w->scale * rv_size(w, &l, p);
+				rv_set(w, v);
 				touched[a] = touched[b] = 1;
 				w->rep->splits++;
 				done++;
@@ -610,7 +784,7 @@ static int rv_subdivide(rv_cvt* w)
 		qaws_mesh_location l;
 		if (cc == HM_NONE || (!(m->cflag[cc] & HM_FEATURE) && hm_feature_degree(m, a) && hm_feature_degree(m, b)))
 			continue;   /* (across a part narrower than twice the size: no vertex inside it) */
-		if ((m->cflag[cc] & HM_FEATURE) && rv_d2(rv_x(m, a), rv_x(m, b)) <= (4.0 / 9) * (rv_h(w, a) + rv_h(w, b)) * (rv_h(w, a) + rv_h(w, b)))
+		if ((m->cflag[cc] & HM_FEATURE) && rv_ratio(w, a, b) <= 4.0 / 3)
 			continue;   /* (a feature edge no longer than 4/3 of its size: one the coarse line left short) */
 		for (k = 0; k < 3; k++)
 			mid[k] = 0.5 * (rv_x(m, a)[k] + rv_x(m, b)[k]);
@@ -631,7 +805,7 @@ static int rv_subdivide(rv_cvt* w)
 			return 0;
 		}
 		m->foot[v] = l;
-		hm_attr_at(m, w->sa, v)[0] = w->scale * rv_size(w, &l, p);
+		rv_set(w, v);
 		src[2 * (v - nv0)] = a;
 		src[2 * (v - nv0) + 1] = b;
 	}
@@ -689,7 +863,7 @@ static double rv_arc(rv_cvt const* w, unsigned int const* ch, unsigned int n, do
 	unsigned int i;
 	s[0] = 0;
 	for (i = 0; i < n; i++)
-		s[i + 1] = s[i] + sqrt(rv_d2(rv_x(w->m, ch[i]), rv_x(w->m, ch[i + 1]))) / (0.5 * (rv_h(w, ch[i]) + rv_h(w, ch[i + 1])));
+		s[i + 1] = s[i] + rv_ratio(w, ch[i], ch[i + 1]);
 	return s[n];
 }
 
@@ -723,7 +897,7 @@ static unsigned int rv_chain(rv_cvt* w, unsigned int* ch, unsigned int n, unsign
 		if ((v = hm_split_edge(m, c, 0.5, p, 1)) == HM_NONE)
 			return 0;
 		m->foot[v] = l;
-		hm_attr_at(m, w->sa, v)[0] = w->scale * rv_size(w, &l, p);
+		rv_set(w, v);
 		w->rep->splits++;
 		memmove(ch + best + 2, ch + best + 1, sizeof(unsigned int) * (n - best));
 		ch[best + 1] = v;
@@ -795,7 +969,7 @@ static unsigned int rv_chain(rv_cvt* w, unsigned int* ch, unsigned int n, unsign
 					continue;
 				memcpy(rv_x(m, v), x, sizeof x);
 				m->foot[v] = l;
-				hm_attr_at(m, w->sa, v)[0] = w->scale * rv_size(w, &l, x);
+				rv_set(w, v);
 				w->rep->moves++;
 				break;
 			}
@@ -906,17 +1080,23 @@ static int rv_lines(rv_cvt* w)
 
 /* ---- flips -------------------------------------------------------------- */
 
-/* the angle at P of triangle (P, A, B) */
-static double rv_angle(double const* P, double const* A, double const* B)
+/* the angle at P of triangle (P, A, B), in metric M (NULL: none) */
+static double rv_angle(double const* M, double const* P, double const* A, double const* B)
 {
-	double u[3], t[3], n[3];
+	double u[3], t[3], n[3], ut;
 	unsigned int k;
 	for (k = 0; k < 3; k++) { u[k] = A[k] - P[k]; t[k] = B[k] - P[k]; }
+	if (M)
+	{
+		ut = rv_mdot(M, u, t);
+		return atan2(sqrt(fmax(rv_mdot(M, u, u) * rv_mdot(M, t, t) - ut * ut, 0)), ut);
+	}
 	rv_cross(u, t, n);
 	return atan2(sqrt(rv_dot(n, n)), rv_dot(u, t));
 }
 
-/* Lawson's flips to extrinsic Delaunay over the edges off the features (at most 10 per vertex): never a chord along a crease,
+/* Lawson's flips to extrinsic Delaunay (with a metric, by angles in the mean of the four corners') over the edges off the
+   features (at most 10 per vertex): never a chord along a crease,
    never a face turned by more than 60 degrees from the pair it replaces; 0 on allocation failure */
 static int rv_delaunay(rv_cvt* w)
 {
@@ -943,7 +1123,7 @@ static int rv_delaunay(rv_cvt* w)
 	{
 		unsigned int a = w->eq[2 * head], b = w->eq[2 * head + 1], d, p, q, k;
 		double const *A, *B, *P, *Q;
-		double n0[3], n1[3], n2[3], g[3], u[3], t[3];
+		double n0[3], n1[3], n2[3], g[3], u[3], t[3], M[6];
 		head++;
 		c = hm_find(m, a, b);
 		if (c == HM_NONE)
@@ -952,7 +1132,9 @@ static int rv_delaunay(rv_cvt* w)
 			continue;
 		a = m->cv[c]; b = hm_to(m, c); p = m->cv[hm_prev(m, c)]; q = m->cv[hm_prev(m, d)];
 		A = rv_x(m, a); B = rv_x(m, b); P = rv_x(m, p); Q = rv_x(m, q);
-		if (rv_angle(P, A, B) + rv_angle(Q, B, A) <= RV_PI + 1e-12 || rv_chord(w, p, q))
+		for (k = 0; w->metric && k < 6; k++)
+			M[k] = 0.25 * (rv_vm(w, a)[k] + rv_vm(w, b)[k] + rv_vm(w, p)[k] + rv_vm(w, q)[k]);   /* (Delaunay in the metric: its Voronoi's dual) */
+		if (rv_angle(w->metric ? M : NULL, P, A, B) + rv_angle(w->metric ? M : NULL, Q, B, A) <= RV_PI + 1e-12 || rv_chord(w, p, q))
 			continue;
 		hm_face_normal(m, m->cf[c], n0);
 		hm_face_normal(m, m->cf[d], g);
@@ -994,6 +1176,7 @@ typedef struct rv_near
 	rv_cvt* w;
 	double const* z;
 	double const* p;
+	double const* M;
 	unsigned int self, region;
 } rv_near;
 
@@ -1003,7 +1186,7 @@ static void rv_near_visit(void* user, unsigned int j)
 	rv_cvt* w = q->w;
 	if (j == q->self || !rv_in(w, j, q->region))
 		return;
-	w->cand[w->ncand].d2 = rv_d2(q->z + 3 * (size_t)j, q->p);
+	w->cand[w->ncand].d2 = rv_md2(q->M, q->z + 3 * (size_t)j, q->p);
 	w->cand[w->ncand].j = j;
 	w->ncand++;
 }
@@ -1014,14 +1197,18 @@ static void rv_nothing(void* user, unsigned int j)
 	(void)j;
 }
 
-/* at least the k seeds of region g nearest seed i, by distance; reach2: how far every other one is at least */
+/* at least the k seeds of region g nearest seed i, by distance (squared; with a metric, in seed i's: at least lmin times the
+   squared distance in space); reach2: how far every other one is at least */
 static void rv_neighbours(rv_cvt* w, double const* z, unsigned int i, unsigned int g, unsigned int k)
 {
 	rv_near q;
 	unsigned int ring, a, b;
+	double lmin;
 	q.w = w;
 	q.z = z;
 	q.p = z + 3 * (size_t)i;
+	q.M = rv_vm(w, i);
+	lmin = q.M ? rv_lmin(q.M) : 1;
 	q.self = i;
 	q.region = g;
 	w->ncand = 0;
@@ -1036,6 +1223,8 @@ static void rv_neighbours(rv_cvt* w, double const* z, unsigned int i, unsigned i
 		}
 		/* the seeds not visited are in the rings past this one, at least ring cells away */
 		w->reach2 = (ring * w->hcell) * (ring * w->hcell);
+		if (q.M)
+			w->reach2 *= lmin;
 		for (a = 0; a < w->ncand; a++)
 			in += w->cand[a].d2 <= w->reach2;
 		if (in >= k)
@@ -1051,8 +1240,8 @@ static void rv_neighbours(rv_cvt* w, double const* z, unsigned int i, unsigned i
 	}
 }
 
-/* polygon `in` cut by the half-space nearer zi than zj */
-static unsigned int rv_clip(rv_pt const* in, unsigned int n, rv_pt* out, double const* zi, double const* zj)
+/* polygon `in` cut by the half-space nearer zi than zj, in metric M (NULL: none; a plane still, through the midpoint) */
+static unsigned int rv_clip(rv_pt const* in, unsigned int n, rv_pt* out, double const* zi, double const* zj, double const* M)
 {
 	double mid[3], dir[3], dp, dq;
 	unsigned int a, k, o = 0;
@@ -1061,6 +1250,8 @@ static unsigned int rv_clip(rv_pt const* in, unsigned int n, rv_pt* out, double 
 		mid[k] = 0.5 * (zi[k] + zj[k]);
 		dir[k] = zj[k] - zi[k];
 	}
+	if (M)
+		rv_mv(M, dir);
 	dq = (in[0].x[0] - mid[0]) * dir[0] + (in[0].x[1] - mid[1]) * dir[1] + (in[0].x[2] - mid[2]) * dir[2];
 	for (a = 0; a < n; a++)
 	{
@@ -1081,8 +1272,8 @@ static unsigned int rv_clip(rv_pt const* in, unsigned int n, rv_pt* out, double 
 	return o;
 }
 
-/* a cut polygon's mass, moment about z and energy (exact for a density linear over it) */
-static void rv_accumulate(rv_pt const* p, unsigned int n, double const* z, double* acc)
+/* a cut polygon's mass, moment about z and energy, distances in metric M (NULL: none; exact for a density linear over it) */
+static void rv_accumulate(rv_pt const* p, unsigned int n, double const* z, double const* M, double* acc)
 {
 	unsigned int f, k;
 	for (f = 1; f + 1 < n; f++)
@@ -1108,7 +1299,7 @@ static void rv_accumulate(rv_pt const* p, unsigned int n, double const* z, doubl
 		}
 		for (a = 0; a < 3; a++)
 			for (b = 0; b < 3; b++)
-				G[a][b] = rv_dot(u[a], u[b]);
+				G[a][b] = rv_mdot(M, u[a], u[b]);
 		acc[0] += A * (r[0] + r[1] + r[2]) / 3;
 		for (k = 0; k < 3; k++)
 			acc[1 + k] += A / 12 * ((2 * r[0] + r[1] + r[2]) * u[0][k] + (r[0] + 2 * r[1] + r[2]) * u[1][k] + (r[0] + r[1] + 2 * r[2]) * u[2][k]);
@@ -1121,11 +1312,14 @@ static void rv_accumulate(rv_pt const* p, unsigned int n, double const* z, doubl
 }
 
 /* seed i's cell in region g = ereg[e], breadth first over the sub-triangles it reaches from where it starts (a free seed's
-   footpoint; a locked one's entries in g, either side of its creases): acc gets its mass, moment about z_i and energy */
+   footpoint; a locked one's entries in g, either side of its creases): acc gets its mass, moment about z_i and energy. With a
+   metric, the distances in the seed's own (Du and Wang 2005's cell metric at its generator): the bisectors still planes
+   (through the midpoints), the cells no longer tiling exactly; a seed farther than 2 R in it (R the cell's reach in it)
+   cuts nothing */
 static void rv_cell(rv_cvt* w, double const* z, qaws_mesh_location const* foot, unsigned int i, unsigned int e, double* acc)
 {
 	rv_pt buf[2][RV_POLY];
-	double const* zi = z + 3 * (size_t)i;
+	double const *zi = z + 3 * (size_t)i, *M = rv_vm(w, i);
 	unsigned int head = 0, tail = 0, k = 8, g = w->ereg[e], nstart, q;
 	rv_neighbours(w, z, i, g, k);
 	if (++w->gen == 0)
@@ -1153,7 +1347,7 @@ static void rv_cell(rv_cvt* w, double const* z, qaws_mesh_location const* foot, 
 			double const* s = w->sv + 4 * (size_t)w->tri[3 * u + a];
 			memcpy(buf[0][a].x, s, sizeof(double) * 3);
 			buf[0][a].rho = s[3];
-			R2 = fmax(R2, rv_d2(s, zi));
+			R2 = fmax(R2, rv_md2(M, s, zi));
 		}
 		for (c = 0; c < w->ncand && n >= 3; c++)
 		{
@@ -1162,11 +1356,11 @@ static void rv_cell(rv_cvt* w, double const* z, qaws_mesh_location const* foot, 
 				sure = w->reach2 > 4 * R2;
 				break;
 			}
-			n = rv_clip(buf[cur], n, buf[1 - cur], zi, z + 3 * (size_t)w->cand[c].j);
+			n = rv_clip(buf[cur], n, buf[1 - cur], zi, z + 3 * (size_t)w->cand[c].j, M);
 			cur = 1 - cur;
 			R2 = 0;
 			for (a = 0; a < n; a++)
-				R2 = fmax(R2, rv_d2(buf[cur][a].x, zi));
+				R2 = fmax(R2, rv_md2(M, buf[cur][a].x, zi));
 		}
 		if (n >= 3 && c == w->ncand)
 			sure = w->reach2 > 4 * R2;
@@ -1181,7 +1375,7 @@ static void rv_cell(rv_cvt* w, double const* z, qaws_mesh_location const* foot, 
 		if (n < 3 && head > nstart)
 			continue;
 		if (n >= 3)
-			rv_accumulate(buf[cur], n, zi, acc);
+			rv_accumulate(buf[cur], n, zi, M, acc);
 		for (a = w->a0[u]; a < w->a0[u + 1]; a++)
 			if (w->stamp[w->adj[a]] != w->gen)
 			{
@@ -1231,7 +1425,8 @@ static int rv_eval(rv_cvt* w, double const* z, qaws_mesh_location const* foot, d
 	return 1;
 }
 
-/* the energy's gradient 2 m (z - centroid), in each free seed's tangent plane; its norm */
+/* the energy's gradient 2 m (z - centroid) (with a metric 2 m M (z - centroid), M held as the seed's), in each free seed's
+   tangent plane; its norm */
 static double rv_gradient(rv_cvt const* w, double const* z, qaws_mesh_location const* foot, double const* mass, double const* cen, double* g)
 {
 	unsigned int i, k;
@@ -1240,6 +1435,7 @@ static double rv_gradient(rv_cvt const* w, double const* z, qaws_mesh_location c
 	{
 		double* gi = g + 3 * (size_t)i;
 		double x[3], nr[3], gn;
+		double const* M = rv_vm(w, i);
 		if (w->locked[i])
 		{
 			gi[0] = gi[1] = gi[2] = 0;
@@ -1247,6 +1443,8 @@ static double rv_gradient(rv_cvt const* w, double const* z, qaws_mesh_location c
 		}
 		for (k = 0; k < 3; k++)
 			gi[k] = 2 * mass[i] * (z[3 * (size_t)i + k] - cen[3 * (size_t)i + k]);
+		if (M)
+			rv_mv(M, gi);
 		mr_eval(w->r, &foot[i], x, nr);
 		gn = rv_dot(gi, nr);
 		for (k = 0; k < 3; k++)
@@ -1329,7 +1527,7 @@ static void rv_lloyd(rv_cvt* w, double const* mass, double const* cen)
 		for (k = 0; k < 3; k++)
 			rv_x(m, i)[k] = x[k];
 		m->foot[i] = l;
-		hm_attr_at(m, w->sa, i)[0] = w->scale * rv_size(w, &l, x);
+		rv_set(w, i);
 		w->rep->moves++;
 	}
 }
@@ -1455,6 +1653,7 @@ static int rv_solve(rv_cvt* w, unsigned int steps)
 		}
 		for (i = 0; i < n3; i++)
 			d[i] = mass[i / 3] > 0 ? (hn ? gam : 1) * d[i] / (2 * mass[i / 3]) : 0;
+		rv_precondition(w, d);
 		for (k = hn; k > 0; k--)
 		{
 			unsigned int h = (hhead + RV_HISTORY - k) % RV_HISTORY;
@@ -1476,12 +1675,14 @@ static int rv_solve(rv_cvt* w, unsigned int steps)
 			hn = 0;
 			for (i = 0; i < n3; i++)
 				d[i] = w->locked[i / 3] || mass[i / 3] <= 0 ? 0 : -g[i] / (2 * mass[i / 3]);
+			rv_precondition(w, d);
 		}
-		/* each seed's step at most half its size */
+		/* each seed's step at most half its size (half a unit in its metric) */
 		gd = 0;
 		for (i = 0; i < w->n; i++)
 		{
-			double l = sqrt(rv_dot(d + 3 * (size_t)i, d + 3 * (size_t)i)), hm = 0.5 * rv_h(w, i);
+			double const* M = rv_vm(w, i);
+			double l = sqrt(rv_mdot(M, d + 3 * (size_t)i, d + 3 * (size_t)i)), hm = M ? 0.5 : 0.5 * rv_h(w, i);
 			for (k = 0; k < 3; k++)
 			{
 				if (l > hm)
@@ -1538,6 +1739,19 @@ static int rv_solve(rv_cvt* w, unsigned int steps)
 				ss += si * si;
 				yy += mt[i / 3] > 0 ? yi * yi / (2 * mt[i / 3]) : 0;
 			}
+			if (w->metric)
+			{
+				/* (y.H0.y with H0's metric part) */
+				yy = 0;
+				for (i = 0; i < w->n; i++)
+				{
+					double yv[3], hy[3];
+					for (k = 0; k < 3; k++)
+						yv[k] = gt[3 * (size_t)i + k] - g[3 * (size_t)i + k];
+					rv_unmetric(rv_vm(w, i), yv, hy);
+					yy += mt[i] > 0 ? rv_dot(yv, hy) / (2 * mt[i]) : 0;
+				}
+			}
 			if (far > 0.1)
 				hn = 0;   /* (the projection bent the step: the history no longer holds) */
 			else if (sy > 1e-12 * ss)
@@ -1555,12 +1769,20 @@ static int rv_solve(rv_cvt* w, unsigned int steps)
 			}
 			for (i = 0; i < w->n; i++)
 				if (!w->locked[i])
-					hm_attr_at(m, w->sa, i)[0] = w->scale * rv_size(w, &m->foot[i], rv_x(m, i));
+					rv_set(w, i);
 			w->rep->moves += moved;
 			E = Et;
 			memcpy(mass, mt, sizeof(double) * w->n);
 			memcpy(cen, ct, sizeof(double) * n3);
 			memcpy(g, gt, sizeof(double) * n3);
+			if (w->metric)
+			{
+				/* (the seeds' metrics moved with them, held through the search: the energy and gradient again in the new ones) */
+				ok = rv_eval(w, m->x, m->foot, mass, cen, &E);
+				if (!ok)
+					break;
+				rv_gradient(w, m->x, m->foot, mass, cen, g);
+			}
 		}
 		else
 		{
@@ -1605,13 +1827,19 @@ static void rv_resize(rv_cvt* w, double s)
 	w->scale = s;
 	for (v = 0; v < m->nv; v++)
 		if (m->foot[v].patch < w->r->nt)
-			hm_attr_at(m, w->sa, v)[0] = s * rv_size(w, &m->foot[v], rv_x(m, v));
+			rv_set(w, v);
 }
 
-/* one level: the feature lines from the size, the count, Delaunay, the seeds solved */
+/* one level: the feature lines from the size, the count, Delaunay, the seeds solved. With a metric the border's vertices
+   count half (each holds half a cell): a stretched metric makes the border long against the area, edges 10% long else;
+   shortcut: without one the count keeps the whole cells (a few percent on an open mesh), to change with its tests */
 static int rv_level(rv_cvt* w, double nstar, int coarse, unsigned int steps)
 {
-	int ok = rv_lines(w) && rv_count(w, nstar, coarse);
+	int ok = rv_lines(w);
+	unsigned int v;
+	for (v = 0; ok && w->metric && v < w->m->nv; v++)
+		nstar += 0.5 * (w->m->vc[v] != HM_NONE && hm_is_border_vertex(w->m, v));
+	ok = ok && rv_count(w, nstar, coarse);
 	ok = ok && rv_delaunay(w) && rv_seeds(w) && rv_solve(w, steps);
 	rv_seeds_free(w);
 	return ok;
@@ -1626,8 +1854,8 @@ static void rv_unbuild(rv_cvt* w)
 	w->gen = 0;
 }
 
-int rv_optimize(qaws_hm* m, qaws_mesh_reference const* r, qaws_size_field const* size, double L, unsigned int size_attr, unsigned int region_attr,
-	mr_scratch* s, unsigned int steps, qaws_mesh_report* rep)
+int rv_optimize(qaws_hm* m, qaws_mesh_reference const* r, qaws_size_field const* size, qaws_metric_field const* metric, double L, unsigned int size_attr,
+	unsigned int region_attr, unsigned int metric_attr, mr_scratch* s, unsigned int steps, qaws_mesh_report* rep)
 {
 	rv_cvt w;
 	double nstar = 0;
@@ -1636,9 +1864,11 @@ int rv_optimize(qaws_hm* m, qaws_mesh_reference const* r, qaws_size_field const*
 	w.m = m;
 	w.r = r;
 	w.size = size;
+	w.metric = metric;
 	w.L = L;
 	w.sa = size_attr;
 	w.ra = region_attr;
+	w.ma = metric_attr;
 	w.s = s;
 	w.rep = rep;
 	w.scale = 2;
