@@ -29,6 +29,11 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- Quality reports (`qaws_quality_report.h`): angles, dihedral angles, shape (mean
+  ratio), aspect ratio, scaled Jacobian, edge ratio and size per element of 2D,
+  surface and volume meshes (inverted elements negative), and a summary
+  (statistics, histogram, worst elements, threshold counts). Test 160, meshing
+  figure 23.
 - Spatial queries on meshes (`qaws_mesh_bvh.h`): a BVH over segments, triangles or
   tetrahedra (binned SAH), from arrays, soups, `qaws_mesh_3d`, `qaws_mesh_2d` or
   `qaws_volume_mesh`; closest points and point location, watertight rays (closest

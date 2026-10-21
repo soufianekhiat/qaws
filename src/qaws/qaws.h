@@ -85,6 +85,7 @@
 #include "qaws_mesh_measure.h"
 #include "qaws_mesh_repair.h"
 #include "qaws_mesh_bvh.h"
+#include "qaws_quality_report.h"
 #include "qaws_volume_mesh.h"
 #include "qaws_tetrahedralize.h"
 #include "qaws_hexahedralize.h"

@@ -161,6 +161,7 @@ add_executable(
 157_curved_elements.c
 158_metric_remesh.c
 159_mesh_bvh.c
+160_quality_report.c
 )
 
 # The amalgamated library exports exactly the same symbols, so the tests can

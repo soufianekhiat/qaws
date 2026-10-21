@@ -16,6 +16,7 @@ enters and leaves as arrays; qaws reads and writes no files.
 | `qaws_mesh_generate.h` | meshes of surfaces and shells (REMESH); curved elements (P2, P3, Q2, Q3 nodes) |
 | `qaws_mesh_repair.h` | repair for farq: soups and broken meshes made closed and outward |
 | `qaws_mesh_bvh.h` | spatial queries: closest points, point location, rays, winding numbers, signed distance |
+| `qaws_quality_report.h` | quality reports: a measure per element of 2D, surface or volume meshes, histograms, worst elements, thresholds |
 | `qaws_volume_mesh.h` | `qaws_volume_mesh`: tetrahedra, hexahedra, prisms, pyramids |
 | `qaws_tetrahedralize.h` | tetrahedra filling a closed surface (DELAUNAY) |
 | `qaws_hexahedralize.h` | hexahedra filling a closed surface (GRID) |
@@ -876,6 +877,50 @@ Figure 22 (key m) is a torus soup with three holes:
 - ray traced, with camera and shadow rays;
 - its winding number on a plane;
 - its signed distance on the same plane.
+
+## Quality reports
+
+`qaws_quality_report.h` measures every element of a 2D, surface or volume mesh, then summarizes those values in the forms a solver checks.
+
+```c
+qaws_scalar* v = malloc(sizeof(qaws_scalar) * face_count);
+qaws_mesh_3d_measure_elements(v, mesh, QAWS_MEASURE_MIN_ANGLE);   /* or _mesh_2d_, _volume_mesh_ */
+qaws_quality_summary_desc d = { QAWS_MEASURE_MIN_ANGLE, 1, 30, 24, { 0, 60 }, 10 };
+unsigned int hist[24], worst[10];
+qaws_quality_summary s;
+qaws_quality_summarize(&s, hist, worst, v, face_count, &d);       /* s.failing: corners under 30 degrees */
+```
+
+Measures (1 is ideal where the measure is a ratio):
+
+| Measure | Faces | Cells |
+|---|---|---|
+| `MIN_ANGLE`, `MAX_ANGLE` | corner angles, in degrees | dihedral angles between facets |
+| `SHAPE` | triangles: mean ratio 4√3 A / Σl² | tetrahedra: 12 (3V)^(2/3) / Σl² |
+| `ASPECT_RATIO` | triangles: R / 2r | tetrahedra: R / 3r |
+| `SCALED_JACOBIAN` | smallest corner (triangles scaled by sin 60°, quads by the square) | smallest corner (scaled by the regular tetrahedron, cube, prism, and equal-edged pyramid; a pyramid's base corners) |
+| `EDGE_RATIO` | longest over shortest | the same |
+| `SIZE` | area | volume |
+
+NaN marks a measure that does not apply to an element: SHAPE and ASPECT_RATIO on quads, polygons and non-tetrahedral cells, and SCALED_JACOBIAN on faces of more than four sides.
+
+**Inverted elements.** A 2D mesh is measured in its plane, and cells by their orientation. So turned elements show as a negative SHAPE, SCALED_JACOBIAN or SIZE, and their angles pass 180°. A surface face's corners are measured along its Newell normal.
+
+**Summary.** `qaws_quality_summarize` takes any array of values and returns:
+- min, max, mean and median;
+- a histogram over a given span, or over the values' own span when none is given;
+- the worst elements in order;
+- the count past a threshold.
+
+The measure in the summary's description says which way is worse: higher for MAX_ANGLE, ASPECT_RATIO and EDGE_RATIO, lower for the others. NaN values are skipped and counted.
+
+**Tests and figure.** Test 160 checks:
+- the closed forms for regular and right triangles, the square, the regular tetrahedron, the cube, the prism and the pyramid, and inverted 2D faces;
+- that the smallest angle and Jacobian agree with `qaws_mesh_3d_measure_shape` on a wavy quad grid;
+- that the smallest scaled Jacobian agrees with `qaws_volume_mesh_measure_quality` on a sheared block;
+- the summary's statistics, histogram, worst order and thresholds.
+
+Figure 23 (key n) shows a jittered 2D mesh by shape, the blob by smallest angle, and its tetrahedra by smallest dihedral, each with its histogram.
 
 ## Volume meshes: qaws_volume_mesh
 
