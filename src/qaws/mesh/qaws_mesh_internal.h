@@ -244,4 +244,20 @@ qaws_status sm_system_factor(sm_system* S, sm_csr const* A, double const* xyz, u
 qaws_status sm_system_solve(sm_system const* S, double* x, double const* rhs, unsigned int dim);
 void sm_system_free(sm_system* S);
 
+/* the symmetric 3 x 3 A (row major) diagonalized in place by Jacobi rotations, its eigenvectors the columns of V (qaws_mesh_watertight.c) */
+void wt_sym_eigen3(double* A, double* V);
+
+/* a grid edge the contoured boundary crosses (qaws_mesh_watertight.c, qaws_mesh_offset.c) */
+typedef struct wt_cross
+{
+	size_t p;                  /* the edge's lower grid point */
+	unsigned int axis;
+	double x[3], nrm[3];       /* the crossing and its normal, from inside to outside */
+} wt_cross;
+
+/* dual contouring of the crossings X on a grid (lo, cell h, n points per axis; in per point: 1 inside) into a mesh through
+   qaws_mesh_repair (non-manifold places split); *out_sharp += its vertices on edges or corners */
+qaws_status wt_dual_contour(qaws_mesh_3d** out, unsigned int* out_sharp, int* out_closed, double const* lo, double h, unsigned int const* n,
+	unsigned char const* in, wt_cross const* X, size_t nc);
+
 #endif /* QAWS_MESH_INTERNAL_H */

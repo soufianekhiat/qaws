@@ -8,6 +8,7 @@
 #include "../qaws_mesh_watertight.h"
 #include "../qaws_mesh_bvh.h"
 #include "../qaws_mesh_repair.h"
+#include "qaws_mesh_internal.h"
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -47,7 +48,7 @@ static int wtg_inside(wtg_grid const* g, double const* x)
 }
 
 /* the symmetric 3 x 3 A's eigenvalues and eigenvectors (columns of V) by Jacobi rotations */
-static void wtg_eigen(double* A, double* V)
+void wt_sym_eigen3(double* A, double* V)
 {
 	unsigned int it, p, q, k;
 	for (k = 0; k < 9; k++)
@@ -91,12 +92,198 @@ static void wtg_eigen(double* A, double* V)
 	}
 }
 
-typedef struct wtg_cross
+/* Dual contouring of the crossings on a grid (lo, cell h, n points per axis; in per point: 1 inside): a vertex per crossed cell at
+   the least squares point of its crossings' planes (Ju et al.), kept within the cell; a quad per crossing round its edge's four
+   cells, turned toward the outside, split along its shorter diagonal; then qaws_mesh_repair (identical points only, non-manifold
+   places split, slivers dropped). *out_sharp += the vertices on an edge or a corner. */
+qaws_status wt_dual_contour(qaws_mesh_3d** out, unsigned int* out_sharp, int* out_closed, double const* lo, double h, unsigned int const* n,
+	unsigned char const* in, wt_cross const* X, size_t nc)
 {
-	size_t p;                  /* the edge's lower grid point */
-	unsigned int axis;
-	double x[3], nrm[3];       /* the crossing and its normal, from inside to outside */
-} wtg_cross;
+	unsigned int *cellv = NULL, *ftri = NULL, nfv = 0, nft = 0, i, k;
+	qaws_scalar* fx = NULL;
+	size_t q, e, ncell;
+	qaws_status st = QAWS_STATUS_OK;
+	/* a vertex per crossed cell: the least squares point of its crossings' planes (Ju et al.), kept within the cell */
+	ncell = (size_t)(n[0] - 1) * (n[1] - 1) * (n[2] - 1);
+	cellv = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), ncell));
+	{
+		double* acc = (double*)qaws_internal_scratch_zalloc(qaws_internal_mul2(ncell, 13), sizeof(double));   /* A (6), b (3), mass (3), count */
+		if (!cellv || !acc)
+		{
+			qaws_internal_free(acc);
+			goto oom;
+		}
+		for (q = 0; q < ncell; q++)
+			cellv[q] = QAWS_MESH_NONE;
+		for (e = 0; e < nc; e++)
+		{
+			wt_cross const* x = X + e;
+			unsigned int ci = (unsigned int)(x->p % n[0]), cj = (unsigned int)(x->p / n[0] % n[1]), ck = (unsigned int)(x->p / ((size_t)n[0] * n[1]));
+			int s, t;
+			for (s = -1; s <= 0; s++)
+				for (t = -1; t <= 0; t++)
+				{
+					int c3[3];
+					size_t cell;
+					double const* nr = x->nrm;
+					double dn;
+					c3[0] = (int)ci;
+					c3[1] = (int)cj;
+					c3[2] = (int)ck;
+					c3[(x->axis + 1) % 3] += s;
+					c3[(x->axis + 2) % 3] += t;
+					if (c3[0] < 0 || c3[1] < 0 || c3[2] < 0 || c3[0] >= (int)n[0] - 1 || c3[1] >= (int)n[1] - 1 || c3[2] >= (int)n[2] - 1)
+						continue;
+					cell = (size_t)c3[0] + (size_t)(n[0] - 1) * ((size_t)c3[1] + (size_t)(n[1] - 1) * (size_t)c3[2]);
+					dn = nr[0] * x->x[0] + nr[1] * x->x[1] + nr[2] * x->x[2];
+					acc[13 * cell] += nr[0] * nr[0];
+					acc[13 * cell + 1] += nr[0] * nr[1];
+					acc[13 * cell + 2] += nr[0] * nr[2];
+					acc[13 * cell + 3] += nr[1] * nr[1];
+					acc[13 * cell + 4] += nr[1] * nr[2];
+					acc[13 * cell + 5] += nr[2] * nr[2];
+					for (i = 0; i < 3; i++)
+					{
+						acc[13 * cell + 6 + i] += nr[i] * dn;
+						acc[13 * cell + 9 + i] += x->x[i];
+					}
+					acc[13 * cell + 12] += 1;
+				}
+		}
+		for (q = 0, e = 0; q < ncell; q++)
+			e += acc[13 * q + 12] > 0;
+		fx = (qaws_scalar*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(qaws_scalar), 3, e + 1));
+		if (!fx)
+		{
+			qaws_internal_free(acc);
+			goto oom;
+		}
+		for (q = 0; q < ncell; q++)
+		{
+			double const* c = acc + 13 * q;
+			double A[9], V[9], m[3], r[3], y[3] = { 0, 0, 0 }, lmax = 0, cl[3];
+			unsigned int rank = 0;
+			if (c[12] == 0)
+				continue;
+			for (i = 0; i < 3; i++)
+				m[i] = c[9 + i] / c[12];
+			A[0] = c[0]; A[1] = c[1]; A[2] = c[2];
+			A[3] = c[1]; A[4] = c[3]; A[5] = c[4];
+			A[6] = c[2]; A[7] = c[4]; A[8] = c[5];
+			/* the right-hand side about the mass point: b - A m */
+			for (i = 0; i < 3; i++)
+				r[i] = c[6 + i] - (A[3 * i] * m[0] + A[3 * i + 1] * m[1] + A[3 * i + 2] * m[2]);
+			wt_sym_eigen3(A, V);
+			for (i = 0; i < 3; i++)
+				lmax = fmax(lmax, fabs(A[4 * i]));
+			for (k = 0; k < 3; k++)
+			{
+				double l = A[4 * k], proj;
+				if (!(fabs(l) > 0.1 * lmax))
+					continue;
+				rank++;
+				proj = (V[k] * r[0] + V[3 + k] * r[1] + V[6 + k] * r[2]) / l;
+				for (i = 0; i < 3; i++)
+					y[i] += proj * V[3 * i + k];
+			}
+			*out_sharp += rank >= 2;
+			{
+				unsigned int ci = (unsigned int)(q % (n[0] - 1)), cj = (unsigned int)(q / (n[0] - 1) % (n[1] - 1)),
+					ck = (unsigned int)(q / ((size_t)(n[0] - 1) * (n[1] - 1)));
+				cl[0] = lo[0] + h * ci;
+				cl[1] = lo[1] + h * cj;
+				cl[2] = lo[2] + h * ck;
+			}
+			for (i = 0; i < 3; i++)
+			{
+				y[i] += m[i];
+				if (y[i] < cl[i] - 0.5 * h || y[i] > cl[i] + 1.5 * h)
+				{
+					memcpy(y, m, sizeof y);   /* past the cell: the mass point */
+					break;
+				}
+			}
+			cellv[q] = nfv;
+			fx[3 * (size_t)nfv] = (qaws_scalar)y[0];
+			fx[3 * (size_t)nfv + 1] = (qaws_scalar)y[1];
+			fx[3 * (size_t)nfv + 2] = (qaws_scalar)y[2];
+			nfv++;
+		}
+		qaws_internal_free(acc);
+	}
+	/* a quad per crossing round its edge's four cells, turned toward the outside, split along its shorter diagonal */
+	ftri = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(unsigned int), 6, nc + 1));
+	if (!ftri)
+		goto oom;
+	for (e = 0; e < nc; e++)
+	{
+		wt_cross const* x = X + e;
+		unsigned int ci = (unsigned int)(x->p % n[0]), cj = (unsigned int)(x->p / n[0] % n[1]), ck = (unsigned int)(x->p / ((size_t)n[0] * n[1])), v[4];
+		static int const ds[4][2] = { { -1, -1 }, { 0, -1 }, { 0, 0 }, { -1, 0 } };
+		int ok = 1;
+		for (k = 0; k < 4; k++)
+		{
+			int c3[3];
+			c3[0] = (int)ci;
+			c3[1] = (int)cj;
+			c3[2] = (int)ck;
+			c3[(x->axis + 1) % 3] += ds[k][0];
+			c3[(x->axis + 2) % 3] += ds[k][1];
+			if (c3[0] < 0 || c3[1] < 0 || c3[2] < 0 || c3[0] >= (int)n[0] - 1 || c3[1] >= (int)n[1] - 1 || c3[2] >= (int)n[2] - 1)
+			{
+				ok = 0;
+				break;
+			}
+			v[k] = cellv[(size_t)c3[0] + (size_t)(n[0] - 1) * ((size_t)c3[1] + (size_t)(n[1] - 1) * (size_t)c3[2])];
+		}
+		if (!ok)
+			continue;
+		if (in[x->p] != 1)
+		{
+			unsigned int t = v[1];
+			v[1] = v[3];
+			v[3] = t;
+		}
+		{
+			double d02 = 0, d13 = 0;
+			for (i = 0; i < 3; i++)
+			{
+				double u = (double)fx[3 * (size_t)v[0] + i] - (double)fx[3 * (size_t)v[2] + i], w = (double)fx[3 * (size_t)v[1] + i] - (double)fx[3 * (size_t)v[3] + i];
+				d02 += u * u;
+				d13 += w * w;
+			}
+			if (d02 <= d13)
+			{
+				unsigned int t6[6] = { v[0], v[1], v[2], v[0], v[2], v[3] };
+				memcpy(ftri + 3 * (size_t)nft, t6, sizeof t6);
+			}
+			else
+			{
+				unsigned int t6[6] = { v[0], v[1], v[3], v[1], v[2], v[3] };
+				memcpy(ftri + 3 * (size_t)nft, t6, sizeof t6);
+			}
+			nft += 2;
+		}
+	}
+	/* through the repair: identical points only, non-manifold places split, slivers dropped, nothing filled */
+	{
+		qaws_mesh_repair_desc rd;
+		qaws_mesh_repair_report rr;
+		memset(&rd, 0, sizeof rd);
+		rd.weld_tolerance = -1;
+		rd.gap_tolerance = -1;
+		rd.hole_perimeter = -1;
+		rd.flags = QAWS_MESH_REPAIR_SPLIT_NON_MANIFOLD;
+		st = qaws_mesh_repair(out, &rr, fx, ftri, NULL, nfv, nft, &rd);
+		*out_closed = rr.closed;
+	}
+	goto done;
+oom:
+	st = QAWS_STATUS_ALLOCATION_FAILURE;
+done:
+	qaws_internal_free(cellv); qaws_internal_free(fx); qaws_internal_free(ftri);
+	return st;
+}
 
 qaws_status qaws_mesh_make_watertight(qaws_mesh_3d** out, qaws_watertight_report* report, qaws_scalar const* positions,
 	unsigned int const* face_vertices, unsigned int const* face_sizes, unsigned int vertex_count, unsigned int face_count,
@@ -105,15 +292,15 @@ qaws_status qaws_mesh_make_watertight(qaws_mesh_3d** out, qaws_watertight_report
 	qaws_watertight_report local;
 	wtg_grid g;
 	qaws_mesh_bvh_desc bd;
-	unsigned int *tri = NULL, nt = 0, f, k, res, i, a, *cellv = NULL, *ftri = NULL, nfv = 0, nft = 0;
-	size_t off = 0, N = 0, q, nc = 0, cc = 0, ncell, e;
+	unsigned int *tri = NULL, nt = 0, f, k, res, i, a;
+	size_t off = 0, N = 0, q, nc = 0, cc = 0, e;
 	double lo[3] = { HUGE_VAL, HUGE_VAL, HUGE_VAL }, hi[3] = { -HUGE_VAL, -HUGE_VAL, -HUGE_VAL }, ext = 0;
 	unsigned char* in = NULL;     /* per grid point: 0 unknown, 1 inside, 2 outside */
 	unsigned char* near = NULL;
-	qaws_scalar *gp = NULL, *gv = NULL, *fx = NULL;
+	qaws_scalar *gp = NULL, *gv = NULL;
 	qaws_mesh_hit* hits = NULL;
 	size_t* queue = NULL;
-	wtg_cross* X = NULL;
+	wt_cross* X = NULL;
 	qaws_status st = QAWS_STATUS_OK;
 	qaws_scalar const* pos = positions;
 	qaws_scalar* ppos = NULL;
@@ -349,7 +536,7 @@ qaws_status qaws_mesh_make_watertight(qaws_mesh_3d** out, qaws_watertight_report
 			if (nc == cc)
 			{
 				size_t cap = cc ? 2 * cc : 1024;
-				wtg_cross* t = (wtg_cross*)qaws_internal_realloc(X, qaws_internal_mul2(sizeof(wtg_cross), cap));
+				wt_cross* t = (wt_cross*)qaws_internal_realloc(X, qaws_internal_mul2(sizeof(wt_cross), cap));
 				if (!t)
 					goto oom;
 				X = t;
@@ -363,7 +550,7 @@ qaws_status qaws_mesh_make_watertight(qaws_mesh_3d** out, qaws_watertight_report
 	/* their Hermite data: a ray along the edge from the inside end onto the input, else bisection; normals from inside out */
 	for (e = 0; e < nc; e++)
 	{
-		wtg_cross* x = X + e;
+		wt_cross* x = X + e;
 		double p0[3], p1[3], pin[3], pout[3], d[3], l;
 		size_t q1 = x->p + (x->axis == 0 ? 1 : x->axis == 1 ? g.n[0] : (size_t)g.n[0] * g.n[1]);
 		int found = 0;
@@ -462,186 +649,13 @@ qaws_status qaws_mesh_make_watertight(qaws_mesh_3d** out, qaws_watertight_report
 			for (i = 0; i < 3; i++)
 				x->nrm[i] = -x->nrm[i];
 	}
-	/* a vertex per crossed cell: the least squares point of its crossings' planes (Ju et al.), kept within the cell */
-	ncell = (size_t)(g.n[0] - 1) * (g.n[1] - 1) * (g.n[2] - 1);
-	cellv = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), ncell));
-	{
-		double* acc = (double*)qaws_internal_scratch_zalloc(qaws_internal_mul2(ncell, 13), sizeof(double));   /* A (6), b (3), mass (3), count */
-		if (!cellv || !acc)
-		{
-			qaws_internal_free(acc);
-			goto oom;
-		}
-		for (q = 0; q < ncell; q++)
-			cellv[q] = QAWS_MESH_NONE;
-		for (e = 0; e < nc; e++)
-		{
-			wtg_cross const* x = X + e;
-			unsigned int ci = (unsigned int)(x->p % g.n[0]), cj = (unsigned int)(x->p / g.n[0] % g.n[1]), ck = (unsigned int)(x->p / ((size_t)g.n[0] * g.n[1]));
-			int s, t;
-			for (s = -1; s <= 0; s++)
-				for (t = -1; t <= 0; t++)
-				{
-					int c3[3];
-					size_t cell;
-					double const* n = x->nrm;
-					double dn;
-					c3[0] = (int)ci;
-					c3[1] = (int)cj;
-					c3[2] = (int)ck;
-					c3[(x->axis + 1) % 3] += s;
-					c3[(x->axis + 2) % 3] += t;
-					if (c3[0] < 0 || c3[1] < 0 || c3[2] < 0 || c3[0] >= (int)g.n[0] - 1 || c3[1] >= (int)g.n[1] - 1 || c3[2] >= (int)g.n[2] - 1)
-						continue;
-					cell = (size_t)c3[0] + (size_t)(g.n[0] - 1) * ((size_t)c3[1] + (size_t)(g.n[1] - 1) * (size_t)c3[2]);
-					dn = n[0] * x->x[0] + n[1] * x->x[1] + n[2] * x->x[2];
-					acc[13 * cell] += n[0] * n[0];
-					acc[13 * cell + 1] += n[0] * n[1];
-					acc[13 * cell + 2] += n[0] * n[2];
-					acc[13 * cell + 3] += n[1] * n[1];
-					acc[13 * cell + 4] += n[1] * n[2];
-					acc[13 * cell + 5] += n[2] * n[2];
-					for (i = 0; i < 3; i++)
-					{
-						acc[13 * cell + 6 + i] += n[i] * dn;
-						acc[13 * cell + 9 + i] += x->x[i];
-					}
-					acc[13 * cell + 12] += 1;
-				}
-		}
-		for (q = 0, e = 0; q < ncell; q++)
-			e += acc[13 * q + 12] > 0;
-		fx = (qaws_scalar*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(qaws_scalar), 3, e + 1));
-		if (!fx)
-		{
-			qaws_internal_free(acc);
-			goto oom;
-		}
-		for (q = 0; q < ncell; q++)
-		{
-			double const* c = acc + 13 * q;
-			double A[9], V[9], m[3], r[3], y[3] = { 0, 0, 0 }, lmax = 0, cl[3];
-			unsigned int rank = 0;
-			if (c[12] == 0)
-				continue;
-			for (i = 0; i < 3; i++)
-				m[i] = c[9 + i] / c[12];
-			A[0] = c[0]; A[1] = c[1]; A[2] = c[2];
-			A[3] = c[1]; A[4] = c[3]; A[5] = c[4];
-			A[6] = c[2]; A[7] = c[4]; A[8] = c[5];
-			/* the right-hand side about the mass point: b - A m */
-			for (i = 0; i < 3; i++)
-				r[i] = c[6 + i] - (A[3 * i] * m[0] + A[3 * i + 1] * m[1] + A[3 * i + 2] * m[2]);
-			wtg_eigen(A, V);
-			for (i = 0; i < 3; i++)
-				lmax = fmax(lmax, fabs(A[4 * i]));
-			for (k = 0; k < 3; k++)
-			{
-				double l = A[4 * k], proj;
-				if (!(fabs(l) > 0.1 * lmax))
-					continue;
-				rank++;
-				proj = (V[k] * r[0] + V[3 + k] * r[1] + V[6 + k] * r[2]) / l;
-				for (i = 0; i < 3; i++)
-					y[i] += proj * V[3 * i + k];
-			}
-			report->sharp += rank >= 2;
-			{
-				unsigned int ci = (unsigned int)(q % (g.n[0] - 1)), cj = (unsigned int)(q / (g.n[0] - 1) % (g.n[1] - 1)),
-					ck = (unsigned int)(q / ((size_t)(g.n[0] - 1) * (g.n[1] - 1)));
-				cl[0] = g.lo[0] + g.h * ci;
-				cl[1] = g.lo[1] + g.h * cj;
-				cl[2] = g.lo[2] + g.h * ck;
-			}
-			for (i = 0; i < 3; i++)
-			{
-				y[i] += m[i];
-				if (y[i] < cl[i] - 0.5 * g.h || y[i] > cl[i] + 1.5 * g.h)
-				{
-					memcpy(y, m, sizeof y);   /* past the cell: the mass point */
-					break;
-				}
-			}
-			cellv[q] = nfv;
-			fx[3 * (size_t)nfv] = (qaws_scalar)y[0];
-			fx[3 * (size_t)nfv + 1] = (qaws_scalar)y[1];
-			fx[3 * (size_t)nfv + 2] = (qaws_scalar)y[2];
-			nfv++;
-		}
-		qaws_internal_free(acc);
-	}
-	/* a quad per crossing round its edge's four cells, turned toward the outside, split along its shorter diagonal */
-	ftri = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(unsigned int), 6, nc + 1));
-	if (!ftri)
-		goto oom;
-	for (e = 0; e < nc; e++)
-	{
-		wtg_cross const* x = X + e;
-		unsigned int ci = (unsigned int)(x->p % g.n[0]), cj = (unsigned int)(x->p / g.n[0] % g.n[1]), ck = (unsigned int)(x->p / ((size_t)g.n[0] * g.n[1])), v[4];
-		static int const ds[4][2] = { { -1, -1 }, { 0, -1 }, { 0, 0 }, { -1, 0 } };
-		int ok = 1;
-		for (k = 0; k < 4; k++)
-		{
-			int c3[3];
-			c3[0] = (int)ci;
-			c3[1] = (int)cj;
-			c3[2] = (int)ck;
-			c3[(x->axis + 1) % 3] += ds[k][0];
-			c3[(x->axis + 2) % 3] += ds[k][1];
-			if (c3[0] < 0 || c3[1] < 0 || c3[2] < 0 || c3[0] >= (int)g.n[0] - 1 || c3[1] >= (int)g.n[1] - 1 || c3[2] >= (int)g.n[2] - 1)
-			{
-				ok = 0;
-				break;
-			}
-			v[k] = cellv[(size_t)c3[0] + (size_t)(g.n[0] - 1) * ((size_t)c3[1] + (size_t)(g.n[1] - 1) * (size_t)c3[2])];
-		}
-		if (!ok)
-			continue;
-		if (in[x->p] != 1)
-		{
-			unsigned int t = v[1];
-			v[1] = v[3];
-			v[3] = t;
-		}
-		{
-			double d02 = 0, d13 = 0;
-			for (i = 0; i < 3; i++)
-			{
-				double u = (double)fx[3 * (size_t)v[0] + i] - (double)fx[3 * (size_t)v[2] + i], w = (double)fx[3 * (size_t)v[1] + i] - (double)fx[3 * (size_t)v[3] + i];
-				d02 += u * u;
-				d13 += w * w;
-			}
-			if (d02 <= d13)
-			{
-				unsigned int t6[6] = { v[0], v[1], v[2], v[0], v[2], v[3] };
-				memcpy(ftri + 3 * (size_t)nft, t6, sizeof t6);
-			}
-			else
-			{
-				unsigned int t6[6] = { v[0], v[1], v[3], v[1], v[2], v[3] };
-				memcpy(ftri + 3 * (size_t)nft, t6, sizeof t6);
-			}
-			nft += 2;
-		}
-	}
-	/* through the repair: identical points only, non-manifold places split, slivers dropped, nothing filled */
-	{
-		qaws_mesh_repair_desc rd;
-		qaws_mesh_repair_report rr;
-		memset(&rd, 0, sizeof rd);
-		rd.weld_tolerance = -1;
-		rd.gap_tolerance = -1;
-		rd.hole_perimeter = -1;
-		rd.flags = QAWS_MESH_REPAIR_SPLIT_NON_MANIFOLD;
-		st = qaws_mesh_repair(out, &rr, fx, ftri, NULL, nfv, nft, &rd);
-		report->closed = rr.closed;
-	}
+	st = wt_dual_contour(out, &report->sharp, &report->closed, g.lo, g.h, g.n, in, X, nc);
 	goto done;
 oom:
 	st = QAWS_STATUS_ALLOCATION_FAILURE;
 done:
 	qaws_mesh_bvh_destroy(g.b);
 	qaws_internal_free(tri); qaws_internal_free(in); qaws_internal_free(near); qaws_internal_free(gp); qaws_internal_free(gv); qaws_internal_free(hits);
-	qaws_internal_free(queue); qaws_internal_free(X); qaws_internal_free(cellv); qaws_internal_free(fx); qaws_internal_free(ftri); qaws_internal_free(ppos);
+	qaws_internal_free(queue); qaws_internal_free(X); qaws_internal_free(ppos);
 	return st;
 }

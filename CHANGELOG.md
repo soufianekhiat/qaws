@@ -41,6 +41,9 @@ All notable changes to Qaws are documented here.
 
 ### Fixed
 
+- Mesh Booleans: a self-union of parts overlapping in a plane (copies facing
+  the same way or folded back) kept every copy, leaving the result open; the
+  lowest input face's pieces now stand for the overlap.
 - Remeshing against a reference with input feature lines that are not its
   creases (cut isolines against the uncut mesh): the lines were snapped
   toward the reference's nearest crease (the border), splitting without end
@@ -56,6 +59,11 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- Offsets of meshes (`qaws_mesh_3d_offset`, `qaws_mesh_offset.h`): the surface
+  at a signed distance, shells and thickened sheets, by contouring the exact
+  distance (dual contouring, shared with the watertight surfaces) or by
+  moving the vertices along mitred directions with the self-intersections
+  resolved by the self-union. Test 171, figure 39 (key D).
 - Repulsive curves on a mesh (`qaws_repulsive_mesh_curves.h`): curve
   vertices as locations on a mesh's triangles, the tangent-point energy with
   each pair's distance the larger of the chord and the geodesic (heat

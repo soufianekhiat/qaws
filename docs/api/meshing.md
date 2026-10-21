@@ -955,7 +955,7 @@ qaws_mesh_boolean(&mesh, &report, &a, &b, QAWS_BOOLEAN_DIFFERENCE, NULL);
 2. **Patches.** Pieces joined across edges held by exactly two faces, turned opposite ways, form patches. Patches are bounded by the cuts, so every piece of a patch lies on the same sides of everything.
 3. **Sample.** Each patch is sampled once, just in front of and just behind its fattest piece, at a tenth of the piece's inradius and at most 1e-6 of the box's diagonal. The generalized winding numbers of A and B there (`qaws_mesh_bvh` over the operands' own triangles) say whether each side is in the result.
 4. **Keep.** A patch between inside and outside is kept, turned so its front faces out. The others are dropped.
-5. **Coplanar overlaps.** Where B lies on A, A's pieces stand for both.
+5. **Coplanar overlaps.** Where B lies on A, A's pieces stand for both. Where an operand lies on itself, as a self-union of overlapping parts or an offset folding over does, the pieces lying on a lower input face of their plane (facing either way) are dropped: the lowest face's pieces stand for the overlap, their windings deciding which way it faces. Identical pieces are kept once.
 6. **Flat regions.** Each input face was triangulated on its own, so a flat region keeps its input faces' edges, such as a cube face's diagonal running through a cut. Edges inside flat regions (two faces of one operand in one plane, within the tolerance) are turned toward Delaunay. The shape does not change.
 
 Because winding numbers decide what is inside, operands that are not quite closed (small holes, soups, overlapping parts) still give a sensible result.
@@ -1171,6 +1171,31 @@ qaws_mesh_3d_connect(&joined, &report, a, a_border_vertex, b, b_border_vertex, &
 - **Volumes:** two blocks of 2 × 2 hexahedra a unit apart joined by hexahedra, valid, cubes (scaled Jacobian 1); patches of 2 × 2 and 3 × 3 facets refused; two prisms joined by prisms.
 
 Figure 35 (key z) shows two tubes at an angle joined in quads and smoothed, and a funnel between tubes of 32 and 12 sides. Figure 36 (key A) shows a planar strip from 8 to 3 edges, an attribute blended across a bridge, and two hexahedral blocks, one turned, joined by hexahedra.
+
+## Offsets of meshes
+
+`qaws_mesh_3d_offset` (`qaws_mesh_offset.h`) makes offsets of a mesh; d is the desc's distance.
+
+- **Kinds:**
+  - `SURFACE`: the surface at signed distance d from a closed mesh (outward for d > 0).
+  - `SHELL`: a closed mesh hollowed. The result is the mesh and its inward offset by |d|, turned inward, so the wall is |d| thick.
+  - `THICKEN`: any surface, open sheets too, made a solid |d| thick (the points within |d|/2 of it).
+- **CONTOUR:** the offset is a level set of the exact distance to the input (the BVH's, signed by winding numbers), contoured on a grid by dual contouring. Crossings along the grid's edges are found by regula falsi on the distance, and their normals are the distance's gradient (from the closest point). This is the true offset: rounded about convex edges and corners and a sheet's border, sharp where it meets itself (concave edges, inward corners). Detail below the cell is lost; `resolution` sets the cells along the longest side. The contouring is the watertight surfaces' (`wt_dual_contour`, shared).
+- **MOVE:** the vertices are moved. Each moves along the direction m that moves its faces' planes by one (the least squares solution of n_f . m = 1, weighted by the faces' angles there), times d, so flat faces offset exactly and edges and corners are mitred: a cube stays a cube. `THICKEN` joins the two sides along the border by quads. Overlaps and folds (inward offsets past the thickness, outward ones closing a gap) are resolved by the self-union. At convex corners the mitre lies farther from the input than d (up to |m| |d|).
+- **Report:** the offset surface's vertices' distances to the input (for MOVE, as moved), the grid, the crossings and sharp vertices (CONTOUR), the self-intersections resolved (MOVE), and whether the result is closed. An inward offset past the input's thickness gives OK and no mesh.
+
+| Check (test 171) | Result |
+|---|---|
+| Unit cube contoured out by 0.1 (40 cells): volume against the rounded offset's 1.6984; distances | 1.6995; 0.100 to 0.1025 (cell 0.030) |
+| Contoured in by 0.1: volume against 0.512; sharp vertices | 0.51186; 512 |
+| Moved out and in by 0.1: volumes against 1.728 and 0.512; corners 0.1 sqrt 3 away | exact (1e-12); 0.173205 |
+| A sphere's shell 0.2 thick (contoured): volume against the wall's; inner distances | 2.0215 against 2.0200; 0.195 to 0.200 |
+| A unit square sheet thickened by 0.2: moved, the box's volume; contoured, the slab with round rims (0.2670) | 0.2 exact; 0.2676 |
+| A U moved out by 0.25 across its 0.4 slot: crossings resolved, closed, the slot's middle's winding | 83 pairs; closed; 1.000 |
+| A slab 0.1 thick offset in by 0.1 (both methods) | nothing left |
+| Refusals: distance 0, an unknown kind | INVALID_ARGUMENT |
+
+Figure 39 (key D): a U offset outward by contouring (rounded, the slot narrowed), moved outward past half its slot (mitred, the slot shut), a sphere's shell cut open, and a wavy sheet thickened.
 
 ## Spatial queries: qaws_mesh_bvh
 
