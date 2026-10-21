@@ -52,7 +52,8 @@ All notable changes to Qaws are documented here.
 ### Added
 
 - Geodesics on meshes (`qaws_mesh_geodesic`): distances by the heat method
-  (Crane et al. 2013), its matrices factored once by the sparse LDL^T so each
+  (Crane et al. 2013) on the intrinsic Delaunay triangulation (stretched and
+  obtuse triangles handled), its matrices factored once by the sparse LDL^T so each
   query is a few solves; sources anywhere on the triangles; Neumann,
   Dirichlet or mean border conditions; paths down the distance shortened
   through the triangles they cross (unfolded, funnel algorithm). Test 164,

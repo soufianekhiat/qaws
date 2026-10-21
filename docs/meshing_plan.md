@@ -108,7 +108,7 @@ Robust numerical Booleans (decision 10):
 
 Mesh processing:
 
-8. **Geodesics on meshes: landed** (`qaws_mesh_geodesic`, test 164, figure 28 key s): the heat method factored once, paths shortened through their triangles. Next: exact polyhedral geodesics (MMP or ICH) where needed, intrinsic Delaunay for bad meshes. Planned as: The heat method (Crane et al. 2013) on the sparse LDL^T, then exact polyhedral geodesics where needed; geodesic paths traced with `qaws_mesh_reference_walk`. Needed by items 12, 13 and 14.
+8. **Geodesics on meshes: landed** (`qaws_mesh_geodesic`, test 164, figure 28 key s): the heat method factored once, paths shortened through their triangles, the intrinsic Delaunay triangulation for stretched and obtuse triangles. Next: exact polyhedral geodesics (MMP or ICH) where needed. Planned as: The heat method (Crane et al. 2013) on the sparse LDL^T, then exact polyhedral geodesics where needed; geodesic paths traced with `qaws_mesh_reference_walk`. Needed by items 12, 13 and 14.
 9. **Smoothing and fairing.** Laplacian, Taubin and bi-Laplacian smoothing with features held; fair patches for holes and bridges (the repair's fairing made public).
 10. **Deformation and parameterization.** ARAP deformation with handles, Laplacian and biharmonic editing; ARAP, LSCM and BFF parameterization with seams cut. One local-global solver serves both.
 11. **Decimation.** Quadric error metrics (Garland-Heckbert) with attributes, seams and features, and the certified deviation of item 2's report; a target count or error.

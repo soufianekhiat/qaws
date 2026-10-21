@@ -344,6 +344,43 @@ static void test_plane(void)
 	free(d);
 }
 
+/* a grid sheared along x (most of its triangles obtuse, negative cotangent weights): through the intrinsic Delaunay
+   triangulation the distances stay those of the plane */
+static void test_sheared(void)
+{
+	unsigned int n = 40, nv = (n + 1) * (n + 1), v;
+	qaws_mesh_3d* m = gd_grids(n, 1);
+	qaws_mesh_geodesic* g = NULL;
+	qaws_scalar* d = (qaws_scalar*)malloc(sizeof(qaws_scalar) * nv);
+	qaws_scalar* x = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * nv);
+	qaws_mesh_location src;
+	double emax = 0, sx, sy;
+	char msg[200];
+	qaws_status st;
+	qaws_mesh_3d_get_positions(x, m);
+	for (v = 0; v < nv; v++)
+		x[3 * v] = (qaws_scalar)(x[3 * v] - 2.5 * x[3 * v + 1]);
+	qaws_mesh_3d_set_positions(m, x);
+	src = gd_at_vertex(m, (n / 2) * (n + 1) + n / 2);
+	sx = x[3 * ((n / 2) * (n + 1) + n / 2)];
+	sy = x[3 * ((n / 2) * (n + 1) + n / 2) + 1];
+	st = qaws_mesh_geodesic_create(&g, m, NULL);
+	if (st == QAWS_STATUS_OK)
+		st = qaws_mesh_geodesic_distance(d, g, &src, 1);
+	for (v = 0; v < nv && st == QAWS_STATUS_OK; v++)
+	{
+		double e = fabs((double)d[v] - sqrt((x[3 * v] - sx) * (x[3 * v] - sx) + (x[3 * v + 1] - sy) * (x[3 * v + 1] - sy)));
+		emax = e > emax ? e : emax;
+	}
+	sprintf(msg, "a grid sheared 2.5 to 1 (obtuse triangles): error max %.4f over a width of 3.5", emax);
+	printf("  %s\n", msg);
+	TEST_ASSERT(st == QAWS_STATUS_OK && emax < 0.06, msg);
+	qaws_mesh_geodesic_destroy(g);
+	qaws_mesh_3d_destroy(m);
+	free(d);
+	free(x);
+}
+
 static void test_parts(void)
 {
 	unsigned int n = 8, nv = (n + 1) * (n + 1), v, far = 1, near = 1;
@@ -390,6 +427,7 @@ int test_164_mesh_geodesic_main(void)
 	printf("Test 164: geodesics on meshes\n");
 	test_sphere();
 	test_plane();
+	test_sheared();
 	test_parts();
 	test_refusals();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);

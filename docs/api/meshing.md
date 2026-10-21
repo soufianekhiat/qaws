@@ -981,11 +981,12 @@ qaws_mesh_geodesic_path(points, locations, &count, geo, distances, sources, sour
 ```
 
 **How it works:**
-1. **Factor once.** At creation the cotangent Laplacian L and the lumped masses M are built over the mesh's triangles (polygons fanned), and M + tL and L are factored by the sparse LDL^T. The time is t = factor h², h the mean edge length; `desc.time` sets the factor (1 by default, as in the paper).
-2. **Heat.** Each query puts a unit of heat at each source (a location: a triangle and barycentric coordinates, spread over its corners) and diffuses it for time t.
-3. **Direction.** The heat's gradient, normalized and turned away from the sources, gives the direction of growing distance in each triangle.
-4. **Distance.** The function whose gradient best matches it solves a Poisson equation. Each connected part is shifted so its nearest source is at 0; vertices no source reaches get `HUGE_VAL`.
-5. **Borders.** On a mesh with a border, the heat step averages its Neumann and Dirichlet solutions, as the paper advises (`QAWS_GEODESIC_BOUNDARY_MEAN`); either one alone can be asked for.
+1. **Intrinsic Delaunay.** The mesh's edges are first flipped by their lengths alone, the surface unchanged, until the angles facing each edge sum to at most π (Bobenko and Springborn; the robust heat method of Sharp and Crane). The Laplacian's weights are then non-negative and the heat stays positive, however stretched or obtuse the triangles: on a grid sheared 2.5 to 1 the error drops from 1.78 to 0.013.
+2. **Factor once.** At creation the cotangent Laplacian L and the lumped masses M are built over the mesh's triangles (polygons fanned), and M + tL and L are factored by the sparse LDL^T. The time is t = factor h², h the mean edge length; `desc.time` sets the factor (1 by default, as in the paper).
+3. **Heat.** Each query puts a unit of heat at each source (a location: a triangle and barycentric coordinates, spread over its corners) and diffuses it for time t.
+4. **Direction.** The heat's gradient, normalized and turned away from the sources, gives the direction of growing distance in each triangle.
+5. **Distance.** The function whose gradient best matches it solves a Poisson equation. Each connected part is shifted so its nearest source is at 0; vertices no source reaches get `HUGE_VAL`.
+6. **Borders.** On a mesh with a border, the heat step averages its Neumann and Dirichlet solutions, as the paper advises (`QAWS_GEODESIC_BOUNDARY_MEAN`); either one alone can be asked for.
 
 **Paths.** `qaws_mesh_geodesic_path` follows the distance down from a location to the nearest source: across triangles, along an edge where both sides lead onto it, through a vertex where the flow meets one. The traced path is then shortened: the triangles it crosses are unfolded into the plane and the shortest way through them is taken (the funnel algorithm), passing round vertices on the side of the smaller angle. The result is the shortest path within those triangles, with a point on every edge it crosses and at every vertex it bends at, each with its location.
 
@@ -997,6 +998,7 @@ The object copies what it needs, and concurrent queries are safe. Accuracy is th
 - **Sphere:** on an icosphere of 2562 vertices with the source at a vertex, the distances against the great-circle arcs: at most 0.03 off, 0.013 on average. With two sources at the poles, the nearer one's distance.
 - **Plane:** on a 40 × 40 square grid with the source at the centre, the Euclidean distance within 0.03 (mean border), 0.07 (Neumann or Dirichlet alone); a source inside a triangle within 0.05.
 - **Paths:** from the grid's corner to a source inside a triangle, every point nearer than the last, ending at the source, 0.15% longer than the straight segment; round the sphere from near one pole to the other, its length matching the arc.
+- **Obtuse triangles:** on a grid sheared 2.5 to 1, the Euclidean distance within 0.013 (1.78 without the intrinsic Delaunay flips).
 - **Parts:** on two separate squares, the one without a source is unreached.
 - **Repeat and refusals:** a second query gives the same distances; no mesh, sources outside the triangles and a short buffer are refused.
 

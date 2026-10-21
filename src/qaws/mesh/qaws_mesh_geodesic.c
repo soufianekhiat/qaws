@@ -19,8 +19,10 @@ struct qaws_mesh_geodesic
 	double* x;                        /* 3 per vertex */
 	unsigned int* t;                  /* 3 per triangle */
 	unsigned int* adj;                /* per triangle edge (corner k to k + 1): the neighbour's edge 3 g + j, GD_NONE on the border */
-	double* cot;                      /* per corner: the cotangent of its angle (0 on a triangle without area) */
-	double* mass;                     /* per vertex: a third of its triangles' areas */
+	unsigned int* it;                 /* the intrinsic Delaunay triangles (3 each, as many as t) the heat and Poisson steps use */
+	double* il;                       /* per intrinsic triangle edge (corner k to k + 1): its length */
+	double* cot;                      /* per intrinsic corner: the cotangent of its angle (0 on a triangle without area) */
+	double* mass;                     /* per vertex: a third of its intrinsic triangles' areas */
 	unsigned int* part;               /* per vertex: its connected part (GD_NONE: on no triangle) */
 	unsigned int *vt_start, *vt;      /* the corners (3 t + k) round each vertex */
 	unsigned int *hrow, *drow, *prow; /* per vertex its row in the heat, Dirichlet heat and Poisson systems (GD_NONE: none) */
@@ -35,6 +37,12 @@ static void gd_sub(double const* a, double const* b, double* o)
 	o[0] = a[0] - b[0];
 	o[1] = a[1] - b[1];
 	o[2] = a[2] - b[2];
+}
+
+static double gd_dist2c(double const* a, double const* b)
+{
+	double x = a[0] - b[0], y = a[1] - b[1], z = a[2] - b[2];
+	return x * x + y * y + z * z;
 }
 
 static double gd_dot(double const* a, double const* b)
@@ -88,6 +96,183 @@ static int gd_bary_grad(qaws_mesh_geodesic const* g, unsigned int f, double (*gl
 		gl[k][1] /= nn;
 		gl[k][2] /= nn;
 	}
+	return 1;
+}
+
+/* intrinsic triangle f laid out in the plane from its edge lengths, counter-clockwise; its area */
+static double gd_layout(qaws_mesh_geodesic const* g, unsigned int f, double (*P)[2])
+{
+	double l0 = g->il[3 * (size_t)f], l1 = g->il[3 * (size_t)f + 1], l2 = g->il[3 * (size_t)f + 2], x;
+	P[0][0] = P[0][1] = 0;
+	P[1][0] = l0;
+	P[1][1] = 0;
+	x = l0 > 0 ? (l0 * l0 + l2 * l2 - l1 * l1) / (2 * l0) : 0;
+	P[2][0] = x;
+	P[2][1] = l2 * l2 - x * x > 0 ? sqrt(l2 * l2 - x * x) : 0;
+	return 0.5 * l0 * P[2][1];
+}
+
+/* the cotangent at corner c of intrinsic triangle f */
+static double gd_cot_at(qaws_mesh_geodesic const* g, unsigned int f, unsigned int c)
+{
+	double P[3][2], a = gd_layout(g, f, P), u[2], w[2];
+	unsigned int k;
+	if (!(a > 0))
+		return 0;
+	for (k = 0; k < 2; k++)
+	{
+		u[k] = P[(c + 1) % 3][k] - P[c][k];
+		w[k] = P[(c + 2) % 3][k] - P[c][k];
+	}
+	return (u[0] * w[0] + u[1] * w[1]) / (2 * a);
+}
+
+static int gd_cmp_edge_w(void const* p, void const* q)
+{
+	unsigned long long a = *(unsigned long long const*)p, b = *(unsigned long long const*)q;
+	return a < b ? -1 : a > b;
+}
+
+/* The intrinsic Delaunay triangulation (Bobenko, Springborn 2007; the robust heat method of Sharp, Crane 2020): the mesh's
+   edges flipped by their lengths alone, the surface unchanged, until the angles facing each edge sum to at most pi. Its
+   Laplacian's weights are then non-negative, so the heat stays positive however stretched or obtuse the triangles are.
+   Then the corners' cotangents, the masses and the edges' weights (ek, ew; ne of them) from it. */
+static int gd_intrinsic(qaws_mesh_geodesic* g, unsigned long long** out_ek, double** out_ew, unsigned int* out_ne)
+{
+	unsigned int n = 3 * g->nt, i, j, k, f, top = 0, flips = 0, guard = 64 * g->nt + 64, ne = 0;
+	unsigned int *adj = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)n + 1)), *stack;
+	unsigned char* queued = (unsigned char*)qaws_internal_zalloc((size_t)n + 1, 1);
+	unsigned long long* he;
+	g->it = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)n + 1));
+	g->il = (double*)qaws_internal_malloc(sizeof(double) * ((size_t)n + 1));
+	stack = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)n + 1));
+	if (!adj || !queued || !g->it || !g->il || !stack)
+	{
+		qaws_internal_free(adj); qaws_internal_free(queued); qaws_internal_free(stack);
+		return 0;
+	}
+	memcpy(g->it, g->t, sizeof(unsigned int) * n);
+	memcpy(adj, g->adj, sizeof(unsigned int) * n);
+	for (i = 0; i < n; i++)
+	{
+		g->il[i] = sqrt(gd_dist2c(g->x + 3 * (size_t)g->t[i], g->x + 3 * (size_t)g->t[3 * (i / 3) + (i % 3 + 1) % 3]));
+		if (adj[i] != GD_NONE && adj[i] > i)
+		{
+			stack[top++] = i;
+			queued[i] = 1;
+		}
+	}
+	while (top && flips < guard)
+	{
+		unsigned int e = stack[--top], o = adj[e], ff, gg, kk, jj, A, B, C, D, nbc, nca, nad, ndb, q[4];
+		double lAB, lBC, lCA, lAD, lDB, cx, cy, dx, dy, lCD;
+		queued[e] = 0;
+		if (o == GD_NONE)
+			continue;
+		ff = e / 3;
+		kk = e % 3;
+		gg = o / 3;
+		jj = o % 3;
+		if (gd_cot_at(g, ff, (kk + 2) % 3) + gd_cot_at(g, gg, (jj + 2) % 3) >= -1e-12)
+			continue;
+		A = g->it[e];
+		B = g->it[3 * ff + (kk + 1) % 3];
+		C = g->it[3 * ff + (kk + 2) % 3];
+		D = g->it[3 * gg + (jj + 2) % 3];
+		nbc = adj[3 * ff + (kk + 1) % 3];
+		nca = adj[3 * ff + (kk + 2) % 3];
+		nad = adj[3 * gg + (jj + 1) % 3];
+		ndb = adj[3 * gg + (jj + 2) % 3];
+		/* (a quad folded onto itself, round a vertex of two or three triangles: left as it is) */
+		if (C == D || (nbc != GD_NONE && (nbc / 3 == ff || nbc / 3 == gg)) || (nca != GD_NONE && (nca / 3 == ff || nca / 3 == gg))
+			|| (nad != GD_NONE && (nad / 3 == ff || nad / 3 == gg)) || (ndb != GD_NONE && (ndb / 3 == ff || ndb / 3 == gg)))
+			continue;
+		lAB = g->il[e];
+		lBC = g->il[3 * ff + (kk + 1) % 3];
+		lCA = g->il[3 * ff + (kk + 2) % 3];
+		lAD = g->il[3 * gg + (jj + 1) % 3];
+		lDB = g->il[3 * gg + (jj + 2) % 3];
+		/* the quad unfolded: A at 0, B on the x axis, C above, D below */
+		cx = (lAB * lAB + lCA * lCA - lBC * lBC) / (2 * lAB);
+		cy = lCA * lCA - cx * cx > 0 ? sqrt(lCA * lCA - cx * cx) : 0;
+		dx = (lAB * lAB + lAD * lAD - lDB * lDB) / (2 * lAB);
+		dy = lAD * lAD - dx * dx > 0 ? -sqrt(lAD * lAD - dx * dx) : 0;
+		lCD = sqrt((cx - dx) * (cx - dx) + (cy - dy) * (cy - dy));
+		if (!(lCD > 0) || !(lAB > 0))
+			continue;
+		/* ff = A D C, gg = D B C */
+		g->it[3 * ff] = A; g->it[3 * ff + 1] = D; g->it[3 * ff + 2] = C;
+		g->it[3 * gg] = D; g->it[3 * gg + 1] = B; g->it[3 * gg + 2] = C;
+		g->il[3 * ff] = lAD; g->il[3 * ff + 1] = lCD; g->il[3 * ff + 2] = lCA;
+		g->il[3 * gg] = lDB; g->il[3 * gg + 1] = lBC; g->il[3 * gg + 2] = lCD;
+		adj[3 * ff] = nad; adj[3 * ff + 1] = 3 * gg + 2; adj[3 * ff + 2] = nca;
+		adj[3 * gg] = ndb; adj[3 * gg + 1] = nbc; adj[3 * gg + 2] = 3 * ff + 1;
+		if (nad != GD_NONE) adj[nad] = 3 * ff;
+		if (nca != GD_NONE) adj[nca] = 3 * ff + 2;
+		if (ndb != GD_NONE) adj[ndb] = 3 * gg;
+		if (nbc != GD_NONE) adj[nbc] = 3 * gg + 1;
+		q[0] = 3 * ff;
+		q[1] = 3 * ff + 2;
+		q[2] = 3 * gg;
+		q[3] = 3 * gg + 1;
+		for (k = 0; k < 4; k++)
+		{
+			/* (an edge queued once, by its lower half) */
+			unsigned int x = adj[q[k]] != GD_NONE && adj[q[k]] < q[k] ? adj[q[k]] : q[k];
+			if (adj[x] != GD_NONE && !queued[x])
+			{
+				queued[x] = 1;
+				stack[top++] = x;
+			}
+		}
+		flips++;
+	}
+	qaws_internal_free(adj);
+	qaws_internal_free(queued);
+	qaws_internal_free(stack);
+	/* cotangents, masses, and each pair of vertices' weight (half the cotangents facing its edges) */
+	memset(g->mass, 0, sizeof(double) * g->nv);
+	for (f = 0; f < g->nt; f++)
+	{
+		double P[3][2], a = gd_layout(g, f, P);
+		for (k = 0; k < 3; k++)
+		{
+			g->cot[3 * (size_t)f + k] = gd_cot_at(g, f, k);
+			g->mass[g->it[3 * (size_t)f + k]] += a / 3;
+		}
+	}
+	he = (unsigned long long*)qaws_internal_malloc(qaws_internal_mul3(2 * sizeof(unsigned long long), 3, (size_t)g->nt + 1));
+	*out_ek = (unsigned long long*)qaws_internal_malloc(qaws_internal_mul3(sizeof(unsigned long long), 3, (size_t)g->nt + 1));
+	*out_ew = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), 3, (size_t)g->nt + 1));
+	if (!he || !*out_ek || !*out_ew)
+	{
+		qaws_internal_free(he);
+		return 0;
+	}
+	for (i = 0; i < n; i++)
+	{
+		unsigned long long p = g->it[i], q = g->it[3 * (i / 3) + (i % 3 + 1) % 3];
+		double w = 0.5 * g->cot[3 * (i / 3) + (i % 3 + 2) % 3];
+		he[2 * (size_t)i] = p < q ? (p << 32 | q) : (q << 32 | p);
+		memcpy(he + 2 * (size_t)i + 1, &w, sizeof w);
+	}
+	qsort(he, n, 2 * sizeof(unsigned long long), gd_cmp_edge_w);
+	for (i = 0; i < n; i = j)
+	{
+		double w = 0;
+		for (j = i; j < n && he[2 * (size_t)j] == he[2 * (size_t)i]; j++)
+		{
+			double wj;
+			memcpy(&wj, he + 2 * (size_t)j + 1, sizeof wj);
+			w += wj;
+		}
+		if ((unsigned int)(he[2 * (size_t)i] >> 32) == (unsigned int)he[2 * (size_t)i])
+			continue;   /* (an edge from a vertex to itself weighs nothing) */
+		(*out_ek)[ne] = he[2 * (size_t)i];
+		(*out_ew)[ne++] = w;
+	}
+	qaws_internal_free(he);
+	*out_ne = ne;
 	return 1;
 }
 
@@ -185,6 +370,7 @@ void qaws_mesh_geodesic_destroy(qaws_mesh_geodesic* g)
 	qaws_internal_ldlt_free(&g->heat);
 	qaws_internal_ldlt_free(&g->heat_d);
 	qaws_internal_ldlt_free(&g->poisson);
+	qaws_internal_free(g->it); qaws_internal_free(g->il);
 	qaws_internal_free(g->x); qaws_internal_free(g->t); qaws_internal_free(g->adj); qaws_internal_free(g->cot); qaws_internal_free(g->mass);
 	qaws_internal_free(g->part); qaws_internal_free(g->vt_start); qaws_internal_free(g->vt); qaws_internal_free(g->hrow);
 	qaws_internal_free(g->drow); qaws_internal_free(g->prow);
@@ -318,6 +504,23 @@ qaws_status qaws_mesh_geodesic_create(qaws_mesh_geodesic** out, qaws_mesh_3d con
 		unsigned int a = gd_find(par, (unsigned int)(ek[i] >> 32)), b = gd_find(par, (unsigned int)ek[i]);
 		if (a != b)
 			par[a < b ? b : a] = a < b ? a : b;
+	}
+	{
+		/* (the parts and the border from the mesh's own edges; the systems from the intrinsic Delaunay ones) */
+		unsigned long long* iek = NULL;
+		double* iew = NULL;
+		unsigned int ine = 0;
+		if (!gd_intrinsic(g, &iek, &iew, &ine))
+		{
+			qaws_internal_free(iek);
+			qaws_internal_free(iew);
+			goto fail;
+		}
+		qaws_internal_free(ek);
+		qaws_internal_free(ew);
+		ek = iek;
+		ew = iew;
+		ne = ine;
 	}
 	pin = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)g->nv + 1));
 	zero = (double*)qaws_internal_zalloc((size_t)g->nv + 1, sizeof(double));
@@ -466,33 +669,31 @@ qaws_status qaws_mesh_geodesic_distance(qaws_scalar* out, qaws_mesh_geodesic con
 		goto done;
 	for (v = 0; v < g->nv; v++)
 		u[v] = g->neumann && g->dirichlet ? 0.5 * (u[v] + ud[v]) : g->neumann ? u[v] : ud[v];
-	/* the heat's unit descent per triangle, its integrated divergence at the corners */
+	/* the heat's unit descent per intrinsic triangle (laid out in its plane), its integrated divergence at the corners */
 	for (f = 0; f < g->nt; f++)
 	{
-		double gl[3][3], X[3] = { 0, 0, 0 }, l;
-		unsigned int const* c = g->t + 3 * (size_t)f;
-		if (!gd_bary_grad(g, f, gl))
+		double P[3][2], X[2] = { 0, 0 }, l, a = gd_layout(g, f, P);
+		unsigned int const* c = g->it + 3 * (size_t)f;
+		if (!(a > 0))
 			continue;
 		for (k = 0; k < 3; k++)
 		{
-			X[0] -= u[c[k]] * gl[k][0];
-			X[1] -= u[c[k]] * gl[k][1];
-			X[2] -= u[c[k]] * gl[k][2];
+			/* grad l_k: the edge opposite k turned a quarter left, over twice the area */
+			double ex = P[(k + 2) % 3][0] - P[(k + 1) % 3][0], ey = P[(k + 2) % 3][1] - P[(k + 1) % 3][1];
+			X[0] += u[c[k]] * ey / (2 * a);
+			X[1] -= u[c[k]] * ex / (2 * a);
 		}
-		l = sqrt(gd_dot(X, X));
+		l = sqrt(X[0] * X[0] + X[1] * X[1]);
 		if (!(l > 0))
 			continue;
 		X[0] /= l;
 		X[1] /= l;
-		X[2] /= l;
 		for (k = 0; k < 3; k++)
 		{
-			double e1[3], e2[3];
 			unsigned int k1 = (k + 1) % 3, k2 = (k + 2) % 3;
-			gd_sub(g->x + 3 * (size_t)c[k1], g->x + 3 * (size_t)c[k], e1);
-			gd_sub(g->x + 3 * (size_t)c[k2], g->x + 3 * (size_t)c[k], e2);
+			double e1 = (P[k1][0] - P[k][0]) * X[0] + (P[k1][1] - P[k][1]) * X[1], e2 = (P[k2][0] - P[k][0]) * X[0] + (P[k2][1] - P[k][1]) * X[1];
 			/* cot of the angle opposite e1 (at k2) and opposite e2 (at k1) */
-			b[c[k]] += 0.5 * (g->cot[3 * (size_t)f + k2] * gd_dot(e1, X) + g->cot[3 * (size_t)f + k1] * gd_dot(e2, X));
+			b[c[k]] += 0.5 * (g->cot[3 * (size_t)f + k2] * e1 + g->cot[3 * (size_t)f + k1] * e2);
 		}
 	}
 	/* Poisson: L phi = div X with L the cotangent Laplacian (-K); the divergence's mean taken out per part (on a closed part it
