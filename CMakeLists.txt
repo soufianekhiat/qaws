@@ -96,6 +96,7 @@ src/qaws/qaws_repulsive_bh.c
 src/qaws/qaws_repulsive_hsolve.c
 src/qaws/qaws_repulsive_surface.c
 src/qaws/qaws_repulsive_controls.c
+src/qaws/qaws_repulsive_mesh_curves.c
 src/qaws/qaws_repulsive_sens.c
 src/qaws/qaws_surface_query.c
 src/qaws/qaws_shell_region.c

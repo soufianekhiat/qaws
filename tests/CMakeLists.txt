@@ -171,6 +171,7 @@ add_executable(
 167_mesh_decimate.c
 168_remesh_attributes.c
 169_mesh_connect.c
+170_repulsive_mesh_curves.c
 )
 
 # The amalgamated library exports exactly the same symbols, so the tests can

@@ -104,6 +104,7 @@
 #include "qaws_mean_value.h"
 #include "qaws_surface_region.h"
 #include "qaws_repulsive.h"
+#include "qaws_repulsive_mesh_curves.h"
 #include "qaws_shell_region.h"
 #include "qaws_skeleton.h"
 #include "qaws_alloc.h"

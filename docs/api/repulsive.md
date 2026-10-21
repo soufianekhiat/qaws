@@ -659,6 +659,27 @@ geodesic distance enters the published energy.
 | Patch (not periodic), an open polyline growing: the energy falls, every parameter stays in [0, 1] | yes | yes |
 | Refusals: outside the range, in a trimmed hole, at a sphere's pole | OUT_OF_RANGE | OUT_OF_RANGE |
 
+## Curves on a mesh, distances along it
+
+`qaws_repulsive_mesh_curves.h`: a 3D curve set whose vertices are locations on a mesh's triangles (`qaws_mesh_location`, triangles as `qaws_mesh_3d_get_triangle` fans them).
+
+- **Energy:** the curves' (Eq. 17), each pair's distance r taken along the surface: the kernel becomes (r^2 - (T_I . (x_i - x_j))^2)^(alpha/2) / r^beta. r is the larger of the chord and the geodesic distance by the heat method (`qaws_mesh_geodesic.h`) from each vertex's location, the two ways averaged. The geodesic is never shorter than the chord, so where the heat method falls short (near its source) the chord is kept; on a flat mesh the energy is the curves' own. With `euclidean` set r is the chord: the curves' energy with the vertices kept on the mesh.
+- **Gradient:** exact for the chords, tangents and lengths; a geodesic distance's gradient at x_i is the gradient of the distance field from x_j in x_i's triangle (the field from x_i moving with it taken by symmetry), so it carries the heat method's errors.
+- **Moves:** each step is taken in each vertex's tangent plane (its triangle's), then the vertex is walked there along the triangles, straight across each edge (`qaws_mesh_reference_walk`): curves cross faces and stay on the mesh without projecting; a walk stops at a border. The descent is the curves' dense one, its metric (the chords') pulled back to the tangent planes; pins, lengths and held directions as for curves (measured in 3D); `hold_barycenter` and `theta` must be 0. Collision-checked: each vertex's motion is checked as its chord.
+- **Cost:** per energy, one distance query per curve vertex (two prefactored sparse solves on the mesh) and the all-pairs sum; the n x n distances are stored.
+- **Patches and shells** reach this through a triangulation of them.
+
+| Check (test 170) | Result |
+|---|---|
+| Euclidean: the energy and gradient against the curves' own at the same positions | equal; 2.2e-14 of 9 |
+| Geodesic on a flat grid: the energy against the curves' | equal (the chord kept) |
+| A strip folded over, a loop on each sheet 0.15 apart: euclidean against geodesic energy | 297 against 35 |
+| There, the geodesic gradient against central differences of moves inside the triangles | 1.8% |
+| An ellipse on a flat grid, length held, 30 steps: energy, aspect, vertices walked, off the plane | 31.5 -> 13.3, 2.20 -> 0.99, 16 of 16, 0 |
+| Refusals: theta set, a location off the triangles | INVALID_ARGUMENT |
+
+Figure 37 (key B of the meshing showcase): the folded strip's two loops by chords (pushed apart through the gap, the top one toward the fold) and along the surface (far apart round the fold, both sliding away from it), and a star-shaped loop on a sphere, its length held, made round.
+
 ## Native control points (R5)
 
 ```c
