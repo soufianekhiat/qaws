@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <stdint.h>
 #include "../simd/qaws_simd.h"
 
 #if defined(__SSE2__) || defined(_M_X64) || defined(_M_AMD64) || defined(__AVX2__)
@@ -60,9 +61,10 @@ struct qaws_mesh_bvh
 	unsigned int* ee;     /* per entry its element */
 	unsigned int* ev;     /* per entry its k vertices */
 	double* px;           /* per entry its k vertices' positions, contiguous */
-	float* scr;           /* triangles in 3D: 9 arrays of ns + 4 floats (v0 - c, e1, e2 per axis) for the rays' screen */
+	float* scr;           /* triangles in 3D: per entry (ns + 4) 12 floats, v0 - c, e1, e2 each padded to 4, for the rays' screen */
 	bv_node* nodes;       /* the binary tree (build only) */
-	bv_node4* nodes4;
+	bv_node4* nodes4;     /* in nodes4_mem, aligned to 64 bytes */
+	void* nodes4_mem;
 	double c[3], pad;     /* the scene's centre, the boxes' widening */
 	double beta;
 	double* wm;           /* BV_WM per 4-wide node when the winding number applies */
@@ -641,11 +643,13 @@ static qaws_status bv_collapse(qaws_mesh_bvh* b)
 	b->depth = 0;
 	if (!b->nn)
 		return QAWS_STATUS_OK;
-	b->nodes4 = (bv_node4*)qaws_internal_malloc(qaws_internal_mul2((size_t)b->nn + 1, sizeof(bv_node4)));
+	/* the nodes on cache lines (two each) */
+	b->nodes4_mem = qaws_internal_malloc(qaws_internal_add2(qaws_internal_mul2((size_t)b->nn + 1, sizeof(bv_node4)), 64));
+	b->nodes4 = b->nodes4_mem ? (bv_node4*)(((uintptr_t)b->nodes4_mem + 63) & ~(uintptr_t)63) : NULL;
 	stk = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul3((size_t)b->nn + 1, 3, sizeof(unsigned int)));
 	b->px = (double*)qaws_internal_malloc(qaws_internal_mul3((size_t)b->ns + 1, 3 * (size_t)b->k, sizeof(double)));
 	if (b->k == 3 && b->dim == 3)
-		b->scr = (float*)qaws_internal_zalloc(qaws_internal_mul2((size_t)b->ns + 4, 9), sizeof(float));
+		b->scr = (float*)qaws_internal_zalloc(qaws_internal_mul2((size_t)b->ns + 4, 12), sizeof(float));
 	b->ee = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2((size_t)b->ns + 1, sizeof(unsigned int)));
 	b->ev = (unsigned int*)qaws_internal_malloc(qaws_internal_mul3((size_t)b->ns + 1, b->k, sizeof(unsigned int)));
 	if (!b->nodes4 || !stk || !b->px || !b->ee || !b->ev || (b->k == 3 && b->dim == 3 && !b->scr))
@@ -767,13 +771,18 @@ static void bv_refit_nodes(qaws_mesh_bvh* b)
 	if (b->scr)
 		for (i = 0; i < b->ns; i++)
 		{
-			size_t st = (size_t)b->ns + 4;
 			double const* v = b->px + 9 * (size_t)i;
 			for (a = 0; a < 3; a++)
 			{
-				b->scr[a * st + i] = (float)(v[a] - b->c[a]);
-				b->scr[(3 + a) * st + i] = (float)(v[3 + a] - v[a]);
-				b->scr[(6 + a) * st + i] = (float)(v[6 + a] - v[a]);
+				b->scr[12 * (size_t)i + a] = (float)(v[a] - b->c[a]);
+				b->scr[12 * (size_t)i + 4 + a] = (float)(v[3 + a] - v[a]);
+				b->scr[12 * (size_t)i + 8 + a] = (float)(v[6 + a] - v[a]);
+			}
+			/* the pads: the three rows' L1 norms (the screen's bounds) */
+			for (a = 0; a < 3; a++)
+			{
+				float const* r = b->scr + 12 * (size_t)i + 4 * a;
+				b->scr[12 * (size_t)i + 4 * a + 3] = (fabsf(r[0]) + fabsf(r[1])) + fabsf(r[2]);
 			}
 		}
 	for (i = b->n4; i-- > 0;)
@@ -821,7 +830,25 @@ static void bv_refit_nodes(qaws_mesh_bvh* b)
 			}
 		}
 		if (w)
-			bv_merge_moments(part, np, b->wm + BV_WM * (size_t)i);
+		{
+			/* the radius also bounded by the node's box: its farthest corner from the centre */
+			double* m = b->wm + BV_WM * (size_t)i, r2 = 0;
+			bv_merge_moments(part, np, m);
+			for (a = 0; a < 3; a++)
+			{
+				double l = HUGE_VAL, h = -HUGE_VAL, e;
+				for (s = 0; s < 4; s++)
+					if (n->child[s] != QAWS_MESH_NONE)
+					{
+						l = fmin(l, (double)n->lo[a][s] + b->c[a]);
+						h = fmax(h, (double)n->hi[a][s] + b->c[a]);
+					}
+				e = fmax(fabs(m[a] - l), fabs(h - m[a]));
+				r2 += e * e;
+			}
+			if (sqrt(r2) < m[15])
+				m[15] = sqrt(r2);
+		}
 	}
 }
 
@@ -1098,7 +1125,7 @@ void qaws_mesh_bvh_destroy(qaws_mesh_bvh* b)
 	qaws_internal_free(b->el);
 	qaws_internal_free(b->ord);
 	qaws_internal_free(b->nodes);
-	qaws_internal_free(b->nodes4);
+	qaws_internal_free(b->nodes4_mem);
 	qaws_internal_free(b->px);
 	qaws_internal_free(b->scr);
 	qaws_internal_free(b->ee);
@@ -1472,15 +1499,19 @@ static unsigned int bv_closest_one(qaws_mesh_bvh const* b, double const* q, doub
 static unsigned int bv_screen(qaws_mesh_bvh const* b, unsigned int first, unsigned int n, float const* o, float const* d, float tmax)
 {
 	float const* tf = b->scr;
-	size_t st = (size_t)b->ns + 4;
 #if BV_SSE
 	__m128 sign = _mm_set1_ps(-0.0f), tol = _mm_set1_ps(1e-5f), z = _mm_setzero_ps();
 	__m128 dx = _mm_set1_ps(d[0]), dy = _mm_set1_ps(d[1]), dz = _mm_set1_ps(d[2]);
 	__m128 ox = _mm_set1_ps(o[0]), oy = _mm_set1_ps(o[1]), oz = _mm_set1_ps(o[2]);
 	__m128 da = _mm_set1_ps(fabsf(d[0]) + fabsf(d[1]) + fabsf(d[2])), oa = _mm_set1_ps(fabsf(o[0]) + fabsf(o[1]) + fabsf(o[2]));
-	__m128 vx = _mm_loadu_ps(tf + first), vy = _mm_loadu_ps(tf + st + first), vz = _mm_loadu_ps(tf + 2 * st + first);
-	__m128 ax = _mm_loadu_ps(tf + 3 * st + first), ay = _mm_loadu_ps(tf + 4 * st + first), az = _mm_loadu_ps(tf + 5 * st + first);
-	__m128 bx = _mm_loadu_ps(tf + 6 * st + first), by = _mm_loadu_ps(tf + 7 * st + first), bz = _mm_loadu_ps(tf + 8 * st + first);
+	/* 4 entries of 12 floats (v0, e1, e2, each padded to 4), transposed to lanes */
+	float const* p0 = tf + 12 * (size_t)first;
+	__m128 vx = _mm_loadu_ps(p0), vy = _mm_loadu_ps(p0 + 12), vz = _mm_loadu_ps(p0 + 24), vw = _mm_loadu_ps(p0 + 36);
+	__m128 ax = _mm_loadu_ps(p0 + 4), ay = _mm_loadu_ps(p0 + 16), az = _mm_loadu_ps(p0 + 28), aw = _mm_loadu_ps(p0 + 40);
+	__m128 bx = _mm_loadu_ps(p0 + 8), by = _mm_loadu_ps(p0 + 20), bz = _mm_loadu_ps(p0 + 32), bw = _mm_loadu_ps(p0 + 44);
+	_MM_TRANSPOSE4_PS(vx, vy, vz, vw);
+	_MM_TRANSPOSE4_PS(ax, ay, az, aw);
+	_MM_TRANSPOSE4_PS(bx, by, bz, bw);
 	/* pvec = d x e2, det = e1 . pvec, tvec = o - v0, u = tvec . pvec, qvec = tvec x e1, v = d . qvec, t = e2 . qvec */
 	__m128 px = _mm_sub_ps(_mm_mul_ps(dy, bz), _mm_mul_ps(dz, by)), py = _mm_sub_ps(_mm_mul_ps(dz, bx), _mm_mul_ps(dx, bz)),
 		pz = _mm_sub_ps(_mm_mul_ps(dx, by), _mm_mul_ps(dy, bx));
@@ -1493,9 +1524,7 @@ static unsigned int bv_screen(qaws_mesh_bvh const* b, unsigned int first, unsign
 	__m128 t = _mm_add_ps(_mm_add_ps(_mm_mul_ps(bx, qx), _mm_mul_ps(by, qy)), _mm_mul_ps(bz, qz));
 	/* the bounds: |tvec| with the rounding of o and v0, |e1|, |e2| (L1) */
 	__m128 tn = _mm_add_ps(_mm_add_ps(_mm_andnot_ps(sign, tx), _mm_andnot_ps(sign, ty)), _mm_add_ps(_mm_andnot_ps(sign, tz), oa));
-	__m128 e1n = _mm_add_ps(_mm_add_ps(_mm_andnot_ps(sign, ax), _mm_andnot_ps(sign, ay)), _mm_andnot_ps(sign, az));
-	__m128 e2n = _mm_add_ps(_mm_add_ps(_mm_andnot_ps(sign, bx), _mm_andnot_ps(sign, by)), _mm_andnot_ps(sign, bz));
-	__m128 vn = _mm_add_ps(_mm_add_ps(_mm_andnot_ps(sign, vx), _mm_andnot_ps(sign, vy)), _mm_andnot_ps(sign, vz));
+	__m128 e1n = aw, e2n = bw, vn = vw;   /* (the norms, stored in the pads) */
 	__m128 tu, tt, s, m;
 	tn = _mm_add_ps(tn, vn);
 	tu = _mm_mul_ps(tol, _mm_mul_ps(_mm_add_ps(tn, e1n), _mm_mul_ps(da, _mm_add_ps(e1n, e2n))));
@@ -1516,16 +1545,14 @@ static unsigned int bv_screen(qaws_mesh_bvh const* b, unsigned int first, unsign
 	float da = fabsf(d[0]) + fabsf(d[1]) + fabsf(d[2]), oa = fabsf(o[0]) + fabsf(o[1]) + fabsf(o[2]);
 	for (l = 0; l < n; l++)
 	{
-		size_t e = first + l;
-		float vx = tf[e], vy = tf[st + e], vz = tf[2 * st + e], ax = tf[3 * st + e], ay = tf[4 * st + e], az = tf[5 * st + e];
-		float bx = tf[6 * st + e], by = tf[7 * st + e], bz = tf[8 * st + e];
+		float const* p0 = tf + 12 * ((size_t)first + l);
+		float vx = p0[0], vy = p0[1], vz = p0[2], ax = p0[4], ay = p0[5], az = p0[6], bx = p0[8], by = p0[9], bz = p0[10];
 		float px = d[1] * bz - d[2] * by, py = d[2] * bx - d[0] * bz, pz = d[0] * by - d[1] * bx;
 		float det = ax * px + ay * py + az * pz, tx = o[0] - vx, ty = o[1] - vy, tz = o[2] - vz;
 		float u = tx * px + ty * py + tz * pz;
 		float qx = ty * az - tz * ay, qy = tz * ax - tx * az, qz = tx * ay - ty * ax;
 		float v = d[0] * qx + d[1] * qy + d[2] * qz, t = bx * qx + by * qy + bz * qz;
-		float tn = fabsf(tx) + fabsf(ty) + fabsf(tz) + oa + (fabsf(vx) + fabsf(vy) + fabsf(vz));
-		float e1n = fabsf(ax) + fabsf(ay) + fabsf(az), e2n = fabsf(bx) + fabsf(by) + fabsf(bz);
+		float tn = (fabsf(tx) + fabsf(ty)) + (fabsf(tz) + oa) + p0[3], e1n = p0[7], e2n = p0[11];
 		float tu = 1e-5f * ((tn + e1n) * (da * (e1n + e2n))), tt = 1e-5f * (tn * (e1n * e2n));
 		if (det < 0)
 		{
@@ -1595,6 +1622,9 @@ static int bv_ray_seg(double const* o, double const* d, double const* a, double 
 	return 1;
 }
 
+/* the lowest set bit of a 4-bit mask */
+static unsigned char const bv_low[16] = { 0, 0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0 };
+
 static unsigned int bv_ray_one(qaws_mesh_bvh const* b, double const* o, double const* d, double tmax, int any, double* t_best, double* bw,
 	bv_stk* stk)
 {
@@ -1634,20 +1664,16 @@ static unsigned int bv_ray_one(qaws_mesh_bvh const* b, double const* o, double c
 		bv_node4 const* n = b->nodes4 + node;
 		float tn[4], near = HUGE_VALF;
 		unsigned int m = bv_slots_ray(n, of, id, nf, tf, tn), s, next = QAWS_MESH_NONE;
-		/* the leaves now, nearest first */
-		while (m)
+		/* the leaves now, nearest first (any hit: in slot order) */
+		unsigned int lm = m & ((n->count[0] != 0) | (n->count[1] != 0) << 1 | (n->count[2] != 0) << 2 | (n->count[3] != 0) << 3), im = m & ~lm;
+		while (lm)
 		{
-			unsigned int sl = 4, c;
-			float best = HUGE_VALF;
-			for (s = 0; s < 4; s++)
-				if ((m >> s & 1) && n->count[s] && tn[s] <= best)
-				{
-					best = tn[s];
-					sl = s;
-				}
-			if (sl == 4)
-				break;
-			m &= ~(1u << sl);
+			unsigned int sl = bv_low[lm], c;
+			if (!any && (lm & (lm - 1)))
+				for (s = lm & (lm - 1); s; s &= s - 1)
+					if (tn[bv_low[s]] < tn[sl])
+						sl = bv_low[s];
+			lm &= ~(1u << sl);
 			if (tn[sl] > tf)
 				continue;
 			for (c = 0; c < n->count[sl]; c++)
@@ -1673,25 +1699,27 @@ static unsigned int bv_ray_one(qaws_mesh_bvh const* b, double const* o, double c
 			}
 		}
 		/* the inner slots: on into the nearest, the others pushed */
-		for (s = 0; s < 4; s++)
-			if ((m >> s & 1) && tn[s] <= tf)
+		for (; im; im &= im - 1)
+		{
+			s = bv_low[im];
+			if (tn[s] > tf)
+				continue;
+			if (tn[s] < near)
 			{
-				if (tn[s] < near)
+				if (next != QAWS_MESH_NONE)
 				{
-					if (next != QAWS_MESH_NONE)
-					{
-						stk[top].node = next;
-						stk[top++].t = near;
-					}
-					next = n->child[s];
-					near = tn[s];
+					stk[top].node = next;
+					stk[top++].t = near;
 				}
-				else
-				{
-					stk[top].node = n->child[s];
-					stk[top++].t = tn[s];
-				}
+				next = n->child[s];
+				near = tn[s];
 			}
+			else
+			{
+				stk[top].node = n->child[s];
+				stk[top++].t = tn[s];
+			}
+		}
 		if (next == QAWS_MESH_NONE)
 		{
 			do
