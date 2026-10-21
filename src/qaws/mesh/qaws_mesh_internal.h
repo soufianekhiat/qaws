@@ -113,6 +113,10 @@ void mf_basis(double const* n, double* t1, double* t2);
 /* the reference mesh's attributes onto m, at its vertices' footpoints and its faces' centre locations fl (remeshing, quads) */
 qaws_status mx_transfer(qaws_hm* m, qaws_mesh_reference const* r, qaws_mesh_location const* fl);
 
+/* qaws_mesh_repair.c: triangles P and Q (vertex ids ip, iq) intersect beyond their shared corners and edge, by exact
+   predicates */
+int rp_tri_tri_at(double const (*P)[3], double const (*Q)[3], unsigned int const* ip, unsigned int const* iq);
+
 /* ---- direction and position fields (Instant Meshes) ---------------------
  *
  * A hierarchy of a mesh's vertices, pairs merged level by level; per vertex

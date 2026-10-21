@@ -49,6 +49,9 @@ qaws_status qaws_internal_broadphase(
 typedef struct qaws_bp_grid qaws_bp_grid;
 
 qaws_status qaws_internal_grid_create(qaws_bp_grid** out_grid, qaws_bp_box const* boxes, unsigned int count, unsigned int dim);
+/* cells sized by the boxes' mean size (surfaces, whose boxes fill little of their box): the pair walk goes
+   straight through the grid */
+qaws_status qaws_internal_grid_create_fit(qaws_bp_grid** out_grid, qaws_bp_box const* boxes, unsigned int count, unsigned int dim);
 void qaws_internal_grid_destroy(qaws_bp_grid* grid);
 double qaws_internal_grid_ring(qaws_bp_grid const* grid, double const* p, unsigned int r, void (*visit)(void* user, unsigned int item), void* user);
 

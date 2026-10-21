@@ -13,6 +13,7 @@
 #include "../qaws_mesh_bvh.h"
 #include "../qaws_mesh_repair.h"
 #include "../qaws_exact.h"
+#include "qaws_mesh_internal.h"
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -39,13 +40,22 @@ typedef struct sx_carrier
 typedef struct sx_face
 {
 	unsigned int c[3];                 /* corner points */
-	unsigned int e[3];                 /* carriers of the edges c0 c1, c1 c2, c2 c0 */
+	unsigned int e[3];                 /* carriers of the edges c0 c1, c1 c2, c2 c0; SX_NONE until the face meets something */
 	unsigned int src;
 	unsigned int cuts;                 /* list: node.a carrier, node.b and node.c its ends in the face */
 	unsigned int touch;                /* isolated points: node.a */
 	double n[3], d;                    /* unit normal and offset; n zero: degenerate */
 	int queued;
+	int touched;                       /* triangulated through a carrier (its own edges' carriers made on demand) */
 } sx_face;
+
+/* a face as the pair filter reads it, in one place (128 bytes) */
+typedef struct sx_geo
+{
+	double x[3][3];                    /* corners */
+	double n[3], d;                    /* the face's plane (n zero: degenerate) */
+	unsigned int c[3], pad;
+} sx_geo;
 
 typedef struct sx_key
 {
@@ -68,6 +78,8 @@ typedef struct sx_ctx
 	unsigned int ncar, capcar;
 	sx_face* F;
 	unsigned int nf;
+	unsigned int *vf_start, *vf;       /* faces round each point */
+	sx_geo* geo;
 	unsigned int* work;
 	unsigned int nw, capw;
 	double eps, inv;
@@ -148,12 +160,19 @@ static void sx_rehash(sx_ctx* c)
 /* the first point within the tolerance of p, else a new one */
 static unsigned int sx_point(sx_ctx* c, double const* p)
 {
-	int dx, dy, dz;
-	unsigned int id, h;
+	int dx, dy, dz, lo[3], hi[3];
+	unsigned int id, h, k;
 	double e2 = c->eps * c->eps;
-	for (dx = -1; dx <= 1; dx++)
-		for (dy = -1; dy <= 1; dy++)
-			for (dz = -1; dz <= 1; dz++)
+	/* the neighbouring cells only on the sides the point is within the tolerance of */
+	for (k = 0; k < 3; k++)
+	{
+		double f = p[k] * c->inv - floor(p[k] * c->inv);
+		lo[k] = f < 1.0 / 64 ? -1 : 0;
+		hi[k] = f > 1 - 1.0 / 64 ? 1 : 0;
+	}
+	for (dx = lo[0]; dx <= hi[0]; dx++)
+		for (dy = lo[1]; dy <= hi[1]; dy++)
+			for (dz = lo[2]; dz <= hi[2]; dz++)
 				for (id = c->cell[sx_cell_of(c, p, dx, dy, dz)]; id != SX_NONE; id = c->chain[id])
 					if (sx_dist2(c->X + 3 * (size_t)id, p) <= e2)
 						return id;
@@ -252,6 +271,7 @@ static void sx_use(sx_ctx* c, unsigned int k, unsigned int f)
 			return;
 	i = sx_node_new(c, f, 0, 0, c->car[k].faces);
 	c->car[k].faces = i;
+	c->F[f].touched = 1;
 }
 
 /* point p on carrier k, sorted along it; its faces queued when new */
@@ -322,6 +342,27 @@ static unsigned int sx_edge(sx_ctx* c, unsigned int p, unsigned int q)
 	sx_on(c, id, k[1]);
 	sx_on(c, id, k[2]);
 	return id;
+}
+
+/* face f's edge carriers, made when it first meets something; every face on each edge is triangulated through it */
+static void sx_face_edges(sx_ctx* c, unsigned int f)
+{
+	unsigned int i, j;
+	if (c->F[f].e[0] != SX_NONE)
+		return;
+	for (i = 0; i < 3 && !c->oom; i++)
+	{
+		unsigned int p = c->F[f].c[i], q = c->F[f].c[(i + 1) % 3], e = sx_edge(c, p, q);
+		if (c->oom)
+			return;
+		c->F[f].e[i] = e;
+		for (j = c->vf_start[p]; j < c->vf_start[p + 1]; j++)
+		{
+			sx_face const* G = c->F + c->vf[j];
+			if (G->c[0] == q || G->c[1] == q || G->c[2] == q)
+				sx_use(c, e, c->vf[j]);
+		}
+	}
 }
 
 static unsigned int sx_cut(sx_ctx* c, unsigned int f, unsigned int g)
@@ -666,6 +707,10 @@ static qaws_status sx_pair(void* user, unsigned int f, unsigned int g)
 	}
 	if (pa == 3 || na == 3 || pb == 3 || nb == 3)
 		return QAWS_STATUS_OK;
+	sx_face_edges(c, f);
+	sx_face_edges(c, g);
+	if (c->oom)
+		return QAWS_STATUS_ALLOCATION_FAILURE;
 	if (za == 3 || zb == 3)
 	{
 		int hit;
@@ -850,7 +895,20 @@ static void sx_expand(sx_ctx* c, sx_buf* b, unsigned int k, unsigned int p, unsi
 	}
 }
 
-static void sx_gather(sx_ctx* c, sx_buf* b, unsigned int f)
+/* the carriers of face f's edges that exist (SX_NONE: an edge nothing reached, its end points only) */
+static void sx_edges_found(sx_ctx* c, unsigned int f, unsigned int* e)
+{
+	unsigned int k;
+	for (k = 0; k < 3; k++)
+	{
+		unsigned int p = c->F[f].c[k], q = c->F[f].c[(k + 1) % 3];
+		unsigned int key[5] = { SX_EDGE, p < q ? p : q, p < q ? q : p, 0, 0 };
+		sx_key const* s = c->F[f].e[k] != SX_NONE ? NULL : sx_find(c, key);
+		e[k] = c->F[f].e[k] != SX_NONE ? c->F[f].e[k] : s ? s->id : SX_NONE;
+	}
+}
+
+static void sx_gather(sx_ctx* c, sx_buf* b, unsigned int f, unsigned int const* e)
 {
 	sx_face const* F = c->F + f;
 	unsigned int k, i;
@@ -859,7 +917,8 @@ static void sx_gather(sx_ctx* c, sx_buf* b, unsigned int f)
 	for (k = 0; k < 3; k++)
 		sx_add_point(c, b, F->c[k]);
 	for (k = 0; k < 3; k++)
-		sx_expand(c, b, F->e[k], F->c[k], F->c[(k + 1) % 3]);
+		if (e[k] != SX_NONE)
+			sx_expand(c, b, e[k], F->c[k], F->c[(k + 1) % 3]);
 	for (i = F->cuts; i != SX_NONE; i = c->nodes[i].next)
 		sx_expand(c, b, c->nodes[i].a, c->nodes[i].b, c->nodes[i].c);
 	for (i = F->touch; i != SX_NONE; i = c->nodes[i].next)
@@ -884,7 +943,8 @@ static int sx_settle(sx_ctx* c, sx_buf* b, unsigned int f)
 	unsigned int i, j;
 	double e2 = c->eps * c->eps;
 	int changed = 0;
-	sx_gather(c, b, f);
+	sx_face_edges(c, f);
+	sx_gather(c, b, f, c->F[f].e);
 	if (c->oom)
 		return 0;
 	for (i = 0; i < b->npt; i++)
@@ -1286,10 +1346,272 @@ static void sx_relax(sx_cdt* T)
 
 /* ---- the whole ---- */
 
-static qaws_status sx_bp_visit(void* user, unsigned int i, unsigned int j)
+typedef struct sx_chk
 {
-	return sx_pair(user, i, j);
+	qaws_scalar const* x;
+	unsigned int const *t, *cut;
+	qaws_scalar const* src;
+	unsigned int* found;               /* per chunk */
+} sx_chk;
+
+static qaws_status sx_chk_visit(void* user, unsigned int chunk, unsigned int i, unsigned int j)
+{
+	sx_chk const* C = (sx_chk const*)user;
+	unsigned int const *ip = C->t + 3 * (size_t)C->cut[i], *iq = C->t + 3 * (size_t)C->cut[j];
+	double P[3][3], Q[3][3];
+	unsigned int k, l;
+	if (C->src[C->cut[i]] == C->src[C->cut[j]])
+		return QAWS_STATUS_OK;
+	for (k = 0; k < 3; k++)
+		for (l = 0; l < 3; l++)
+		{
+			P[k][l] = (double)C->x[3 * (size_t)ip[k] + l];
+			Q[k][l] = (double)C->x[3 * (size_t)iq[k] + l];
+		}
+	C->found[chunk] += (unsigned int)rp_tri_tri_at((double const(*)[3])P, (double const(*)[3])Q, ip, iq);
+	return QAWS_STATUS_OK;
 }
+
+/* pairs of pieces (triangles cut[0 .. n)) crossing, by exact predicates; pieces of one face skipped */
+static qaws_status sx_check(unsigned int* out, qaws_scalar const* x, unsigned int const* t, qaws_scalar const* src, unsigned int const* cut,
+	unsigned int n, double eps, qaws_batch_executor const* executor)
+{
+	qaws_bp_box* box = (qaws_bp_box*)qaws_internal_malloc(qaws_internal_mul2(sizeof(qaws_bp_box), (size_t)n + 1));
+	qaws_bp_grid* grid = NULL;
+	sx_chk C;
+	unsigned int i, k, nch;
+	qaws_status st;
+	*out = 0;
+	if (!box)
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	for (i = 0; i < n; i++)
+		for (k = 0; k < 3; k++)
+		{
+			double a = (double)x[3 * (size_t)t[3 * (size_t)cut[i]] + k], b = (double)x[3 * (size_t)t[3 * (size_t)cut[i] + 1] + k],
+				c = (double)x[3 * (size_t)t[3 * (size_t)cut[i] + 2] + k];
+			box[i].lo[k] = fmin(fmin(a, b), c) - eps;
+			box[i].hi[k] = fmax(fmax(a, b), c) + eps;
+		}
+	st = n > 1 ? qaws_internal_grid_create_fit(&grid, box, n, 3) : QAWS_STATUS_OK;
+	if (st == QAWS_STATUS_OK && grid)
+	{
+		nch = qaws_internal_grid_pair_chunks(grid);
+		C.x = x;
+		C.t = t;
+		C.cut = cut;
+		C.src = src;
+		C.found = (unsigned int*)qaws_internal_zalloc((size_t)nch + 1, sizeof(unsigned int));
+		if (!C.found)
+			st = QAWS_STATUS_ALLOCATION_FAILURE;
+		else
+		{
+			st = qaws_internal_grid_pairs(NULL, grid, box, NULL, NULL, sx_chk_visit, &C, executor);
+			for (k = 0; k < nch; k++)
+				*out += C.found[k];
+		}
+		qaws_internal_free(C.found);
+	}
+	qaws_internal_grid_destroy(grid);
+	qaws_internal_free(box);
+	return st;
+}
+
+static int sx_cmp_u64(void const* p, void const* q)
+{
+	unsigned long long a = *(unsigned long long const*)p, b = *(unsigned long long const*)q;
+	return a < b ? -1 : a > b;
+}
+
+/* ---- the pairs, filtered in parallel (read only), then cut in order ---- */
+
+/* face g's boundary through face f's plane: up to two points, positions only */
+static unsigned int sx_section_at(sx_ctx const* c, unsigned int g, unsigned int f, int const* s, double (*out)[3])
+{
+	sx_face const* G = c->F + g;
+	unsigned int n = 0, k;
+	for (k = 0; k < 3; k++)
+		if (!s[k] && n < 2)
+			memcpy(out[n++], c->X + 3 * (size_t)G->c[k], 3 * sizeof(double));
+	for (k = 0; k < 3; k++)
+		if (s[k] * s[(k + 1) % 3] < 0 && n < 2)
+		{
+			unsigned int p = G->c[k], q = G->c[(k + 1) % 3];
+			memcpy(out[n], c->X + 3 * (size_t)p, 3 * sizeof(double));
+			sx_lpi_pos(c, p < q ? p : q, p < q ? q : p, f, out[n]);
+			n++;
+		}
+	return n;
+}
+
+/* faces f and g may meet beyond their shared corners and edges (the tests of sx_pair, nothing made) */
+/* the corners of b not shared with a all strictly on one side of a's plane */
+static int sx_geo_aside(sx_geo const* a, sx_geo const* b, double eps)
+{
+	int pos = 0, neg = 0, k;
+	for (k = 0; k < 3; k++)
+	{
+		double d;
+		if (b->c[k] == a->c[0] || b->c[k] == a->c[1] || b->c[k] == a->c[2])
+			continue;
+		d = sx_dot(a->n, b->x[k]) - a->d;
+		if (d > eps)
+			pos = 1;
+		else if (d < -eps)
+			neg = 1;
+		else
+			return 0;
+	}
+	return pos != neg;
+}
+
+static int sx_may_meet(sx_ctx const* c, unsigned int f, unsigned int g)
+{
+	sx_face const *A = c->F + f, *B = c->F + g;
+	int sa[3], sb[3], za = 0, zb = 0, pa = 0, pb = 0, na = 0, nb = 0;
+	unsigned int shared = 0, i, j, n0, n1;
+	double xa[2][3], xb[2][3], dir[3], l, s[4];
+	{
+		/* quick: from the compact records, either face's free corners on one side of the other's plane (with a shared
+		   corner, they then meet at most there) */
+		sx_geo const *ga = c->geo + f, *gb = c->geo + g;
+		if ((ga->n[0] == 0 && ga->n[1] == 0 && ga->n[2] == 0) || (gb->n[0] == 0 && gb->n[1] == 0 && gb->n[2] == 0))
+			return 0;
+		if (sx_geo_aside(ga, gb, c->eps) || sx_geo_aside(gb, ga, c->eps))
+			return 0;
+	}
+	if ((A->n[0] == 0 && A->n[1] == 0 && A->n[2] == 0) || (B->n[0] == 0 && B->n[1] == 0 && B->n[2] == 0))
+		return 0;
+	for (i = 0; i < 3; i++)
+		for (j = 0; j < 3; j++)
+			shared += A->c[i] == B->c[j];
+	if (shared >= 3)
+		return 0;
+	for (i = 0; i < 3; i++)
+	{
+		double da = sx_dot(B->n, c->X + 3 * (size_t)A->c[i]) - B->d, db = sx_dot(A->n, c->X + 3 * (size_t)B->c[i]) - A->d;
+		sa[i] = da > c->eps ? 1 : da < -c->eps ? -1 : 0;
+		sb[i] = db > c->eps ? 1 : db < -c->eps ? -1 : 0;
+		for (j = 0; j < 3; j++)
+		{
+			if (A->c[i] == B->c[j])
+				sa[i] = 0;
+			if (B->c[i] == A->c[j])
+				sb[i] = 0;
+		}
+		za += !sa[i];
+		zb += !sb[i];
+		pa += sa[i] > 0;
+		na += sa[i] < 0;
+		pb += sb[i] > 0;
+		nb += sb[i] < 0;
+	}
+	if (pa == 3 || na == 3 || pb == 3 || nb == 3)
+		return 0;
+	if (za == 3 || zb == 3)
+		return !sx_separated(c, f, g);   /* (the fold test of sx_pair stays there) */
+	if (shared == 2)
+		return 0;
+	n0 = sx_section_at(c, f, g, sa, xa);
+	n1 = sx_section_at(c, g, f, sb, xb);
+	if (!n0 || !n1)
+		return 0;
+	sx_cross(A->n, B->n, dir);
+	l = sqrt(sx_dot(dir, dir));
+	if (!(l > 0))
+		return 0;
+	s[0] = sx_dot(xa[0], dir) / l;
+	s[1] = sx_dot(xa[n0 - 1], dir) / l;
+	s[2] = sx_dot(xb[0], dir) / l;
+	s[3] = sx_dot(xb[n1 - 1], dir) / l;
+	{
+		/* the two intervals along the planes' line overlap (within the tolerance) */
+		double lo = fmax(fmin(s[0], s[1]), fmin(s[2], s[3])), hi = fmin(fmax(s[0], s[1]), fmax(s[2], s[3]));
+		double const* x;
+		if (lo > hi + 2 * c->eps)
+			return 0;
+		if (hi - lo > c->eps || !shared)
+			return 1;
+		/* touching at a point: no meeting when it is a shared corner (neighbours round a vertex) */
+		x = fmin(s[0], s[1]) >= fmin(s[2], s[3]) ? xa[s[0] <= s[1] ? 0 : n0 - 1] : xb[s[2] <= s[3] ? 0 : n1 - 1];
+		for (i = 0; i < 3; i++)
+			for (j = 0; j < 3; j++)
+				if (A->c[i] == B->c[j] && sx_dist2(x, c->X + 3 * (size_t)A->c[i]) <= 4 * c->eps * c->eps)
+					return 0;
+		return 1;
+	}
+}
+
+typedef struct sx_found
+{
+	unsigned long long* p;            /* f << 32 | g */
+	unsigned int n, cap;
+} sx_found;
+
+typedef struct sx_filter
+{
+	sx_ctx const* c;
+	sx_found* chunk;
+} sx_filter;
+
+static qaws_status sx_filter_visit(void* user, unsigned int chunk, unsigned int i, unsigned int j)
+{
+	sx_filter* F = (sx_filter*)user;
+	sx_found* o = F->chunk + chunk;
+	if (!sx_may_meet(F->c, i, j))
+		return QAWS_STATUS_OK;
+	if (!sx_reserve((void**)&o->p, &o->cap, (size_t)o->n + 1, sizeof(unsigned long long)))
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	o->p[o->n++] = (unsigned long long)(i < j ? i : j) << 32 | (i < j ? j : i);
+	return QAWS_STATUS_OK;
+}
+
+/* every pair of boxes overlapping, filtered through the executor; the survivors cut in order (results the same
+   whatever the executor) */
+static qaws_status sx_pairs(sx_ctx* c, qaws_bp_box const* box, qaws_batch_executor const* executor)
+{
+	qaws_bp_grid* grid = NULL;
+	sx_filter F;
+	unsigned int nch, k, i, n = 0;
+	unsigned long long* all = NULL;
+	qaws_status st = qaws_internal_grid_create_fit(&grid, box, c->nf, 3);
+	if (st != QAWS_STATUS_OK)
+		return st;
+	nch = qaws_internal_grid_pair_chunks(grid);
+	F.c = c;
+	F.chunk = (sx_found*)qaws_internal_zalloc((size_t)nch + 1, sizeof(sx_found));
+	if (!F.chunk)
+	{
+		qaws_internal_grid_destroy(grid);
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	}
+	st = qaws_internal_grid_pairs(NULL, grid, box, NULL, NULL, sx_filter_visit, &F, executor);
+	for (k = 0; k < nch; k++)
+		n += F.chunk[k].n;
+	if (st == QAWS_STATUS_OK)
+	{
+		all = (unsigned long long*)qaws_internal_malloc(sizeof(unsigned long long) * ((size_t)n + 1));
+		if (!all)
+			st = QAWS_STATUS_ALLOCATION_FAILURE;
+	}
+	if (st == QAWS_STATUS_OK)
+	{
+		for (k = 0, n = 0; k < nch; k++)
+		{
+			memcpy(all + n, F.chunk[k].p, sizeof(unsigned long long) * F.chunk[k].n);
+			n += F.chunk[k].n;
+		}
+		qsort(all, n, sizeof *all, sx_cmp_u64);
+		for (i = 0; i < n && st == QAWS_STATUS_OK; i++)
+			st = sx_pair(c, (unsigned int)(all[i] >> 32), (unsigned int)all[i]);
+	}
+	for (k = 0; k < nch; k++)
+		qaws_internal_free(F.chunk[k].p);
+	qaws_internal_free(F.chunk);
+	qaws_internal_free(all);
+	qaws_internal_grid_destroy(grid);
+	return st;
+}
+
 
 static double sx_snap52(double t)
 {
@@ -1359,7 +1681,7 @@ static qaws_status sx_resolve(sx_out* o, qaws_intersect_report* report, qaws_sca
 	report->tolerance = (qaws_scalar)c.eps;
 	o->eps = c.eps;
 	o->diag = diag;
-	c.inv = 1 / c.eps;
+	c.inv = 1 / (64 * c.eps);   /* cells of 64 tolerances: a point's neighbours within it mostly in its own cell */
 	c.r = report;
 	c.ncell = 1024;
 	c.cell = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * c.ncell);
@@ -1414,14 +1736,7 @@ static qaws_status sx_resolve(sx_out* o, qaws_intersect_report* report, qaws_sca
 			else
 				F->n[0] = F->n[1] = F->n[2] = 0;
 			F->d = sx_dot(F->n, c.X + 3 * (size_t)F->c[0]);
-			for (i = 0; i < 3; i++)
-			{
-				unsigned int p = F->c[i], q = F->c[(i + 1) % 3];
-				F->e[i] = sx_edge(&c, p, q);
-				if (c.oom)
-					goto oom;
-				sx_use(&c, F->e[i], c.nf);
-			}
+			F->e[0] = F->e[1] = F->e[2] = SX_NONE;
 			for (i = 0; i < 3; i++)
 			{
 				box[c.nf].lo[i] = fmin(fmin(c.X[3 * (size_t)F->c[0] + i], c.X[3 * (size_t)F->c[1] + i]), c.X[3 * (size_t)F->c[2] + i]) - c.eps;
@@ -1433,9 +1748,38 @@ static qaws_status sx_resolve(sx_out* o, qaws_intersect_report* report, qaws_sca
 	}
 	if (c.oom)
 		goto oom;
+	/* the compact records of the pair filter */
+	c.geo = (sx_geo*)qaws_internal_malloc(qaws_internal_mul2(sizeof(sx_geo), (size_t)c.nf + 1));
+	if (!c.geo)
+		goto oom;
+	for (f = 0; f < c.nf; f++)
+	{
+		sx_geo* G = c.geo + f;
+		for (k = 0; k < 3; k++)
+		{
+			memcpy(G->x[k], c.X + 3 * (size_t)c.F[f].c[k], 3 * sizeof(double));
+			G->c[k] = c.F[f].c[k];
+		}
+		memcpy(G->n, c.F[f].n, sizeof G->n);
+		G->d = c.F[f].d;
+		G->pad = 0;
+	}
+	/* the faces round each point (counting sort) */
+	c.vf_start = (unsigned int*)qaws_internal_zalloc((size_t)c.np + 2, sizeof(unsigned int));
+	c.vf = (unsigned int*)qaws_internal_malloc(qaws_internal_mul3(sizeof(unsigned int), 3, (size_t)c.nf + 1));
+	if (!c.vf_start || !c.vf)
+		goto oom;
+	for (f = 0; f < c.nf; f++)
+		for (k = 0; k < 3; k++)
+			c.vf_start[c.F[f].c[k] + 2]++;
+	for (i = 2; i < c.np + 2; i++)
+		c.vf_start[i] += c.vf_start[i - 1];
+	for (f = 0; f < c.nf; f++)
+		for (k = 0; k < 3; k++)
+			c.vf[c.vf_start[c.F[f].c[k] + 1]++] = f;
 	/* the pairs cut each other */
-	if (c.nf)
-		st = qaws_internal_broadphase(NULL, box, c.nf, 3, NULL, sx_bp_visit, &c);
+	if (c.nf > 1)
+		st = sx_pairs(&c, box, desc ? desc->executor : NULL);
 	if (st != QAWS_STATUS_OK || c.oom)
 		goto fail;
 	/* faces settled until no carrier gains a point */
@@ -1471,10 +1815,21 @@ static qaws_status sx_resolve(sx_out* o, qaws_intersect_report* report, qaws_sca
 	for (f = 0; f < c.nf; f++)
 	{
 		sx_face const* F = c.F + f;
-		unsigned int np, need;
+		unsigned int np, need, le[3];
 		if (F->c[0] == F->c[1] || F->c[1] == F->c[2] || F->c[2] == F->c[0])
 			continue;
-		sx_gather(&c, &b, f);
+		if (!F->touched)
+		{
+			/* met nothing, nothing on its edges: as given */
+			if (!sx_reserve((void**)&otri, &capt, 3 * ((size_t)ntri + 1), sizeof(unsigned int))
+				|| !sx_reserve((void**)&osrc, &caps, (size_t)ntri + 1, sizeof(qaws_scalar)))
+				goto oom;
+			memcpy(otri + 3 * (size_t)ntri, F->c, 3 * sizeof(unsigned int));
+			osrc[ntri++] = (qaws_scalar)F->src;
+			continue;
+		}
+		sx_edges_found(&c, f, le);   /* (none made here: a face's edges would reach its neighbours in turn) */
+		sx_gather(&c, &b, f, le);
 		if (c.oom)
 			goto oom;
 		np = b.npt;
@@ -1520,7 +1875,7 @@ static qaws_status sx_resolve(sx_out* o, qaws_intersect_report* report, qaws_sca
 			for (k = 0; k < 3; k++)
 			{
 				unsigned int j;
-				for (j = c.car[F->e[k]].points; j != SX_NONE; j = c.nodes[j].next)
+				for (j = le[k] == SX_NONE ? SX_NONE : c.car[le[k]].points; j != SX_NONE; j = c.nodes[j].next)
 				{
 					unsigned int v = c.nodes[j].a, li = loc[v];
 					double d2, t;
@@ -1584,7 +1939,7 @@ static qaws_status sx_resolve(sx_out* o, qaws_intersect_report* report, qaws_sca
 		for (i = 0; i < b.ns; i++)
 		{
 			unsigned int pa = loc[b.s[i].p], pb = loc[b.s[i].q];
-			if (pa == pb || b.s[i].k == F->e[0] || b.s[i].k == F->e[1] || b.s[i].k == F->e[2])
+			if (pa == pb || b.s[i].k == le[0] || b.s[i].k == le[1] || b.s[i].k == le[2])
 				continue;   /* the face's own edges are its border */
 			if (!sx_recover(&T, pa, pb, 0))
 				report->unresolved++;
@@ -1623,29 +1978,13 @@ static qaws_status sx_resolve(sx_out* o, qaws_intersect_report* report, qaws_sca
 			if (used[i] != SX_NONE)
 				for (k = 0; k < 3; k++)
 					opos[3 * (size_t)used[i] + k] = (qaws_scalar)c.X[3 * (size_t)i + k];
-		/* the cut faces' pieces checked by exact predicates (the others are input faces the pairs tested) */
+		/* the cut faces' pieces checked by exact predicates (the others are input faces the pairs tested; pieces of
+		   one face are one planar triangulation) */
 		if (ncut)
 		{
-			unsigned int* ct = (unsigned int*)qaws_internal_malloc(qaws_internal_mul3(sizeof(unsigned int), 3, (size_t)ncut));
-			qaws_mesh_repair_desc rd;
-			qaws_mesh_repair_report rr;
-			qaws_mesh_3d* chk = NULL;
-			memset(&rd, 0, sizeof rd);
-			rd.weld_tolerance = -1;
-			rd.degenerate_tolerance = -1;
-			rd.gap_tolerance = -1;
-			rd.hole_perimeter = -1;
-			rd.flags = QAWS_MESH_REPAIR_FIND_INTERSECTIONS;
-			if (!ct)
-				goto oom;
-			for (i = 0; i < ncut; i++)
-				memcpy(ct + 3 * (size_t)i, otri + 3 * (size_t)ocut[i], 3 * sizeof(unsigned int));
-			st = qaws_mesh_repair(&chk, &rr, opos, ct, NULL, nv, ncut, &rd);
-			qaws_mesh_3d_destroy(chk);
-			qaws_internal_free(ct);
+			st = sx_check(&report->remaining, opos, otri, osrc, ocut, ncut, c.eps, desc ? desc->executor : NULL);
 			if (st != QAWS_STATUS_OK)
 				goto fail;
-			report->remaining = rr.self_intersections;
 		}
 		o->pos = opos;
 		o->tri = otri;
@@ -1661,7 +2000,7 @@ oom:
 	st = QAWS_STATUS_ALLOCATION_FAILURE;
 fail:
 	qaws_internal_free(c.X); qaws_internal_free(c.chain); qaws_internal_free(c.cell); qaws_internal_free(c.keys); qaws_internal_free(c.nodes);
-	qaws_internal_free(c.car); qaws_internal_free(c.F); qaws_internal_free(c.work); qaws_internal_free(b.s); qaws_internal_free(b.p);
+	qaws_internal_free(c.car); qaws_internal_free(c.F); qaws_internal_free(c.vf_start); qaws_internal_free(c.vf); qaws_internal_free(c.geo); qaws_internal_free(c.work); qaws_internal_free(b.s); qaws_internal_free(b.p);
 	qaws_internal_free(T.P); qaws_internal_free(T.Q); qaws_internal_free(T.t); qaws_internal_free(alias); qaws_internal_free(loc); qaws_internal_free(used);
 	qaws_internal_free(otri); qaws_internal_free(ocut); qaws_internal_free(stack); qaws_internal_free(opos); qaws_internal_free(osrc);
 	qaws_internal_free(box);
@@ -2153,16 +2492,16 @@ qaws_status qaws_mesh_boolean(qaws_mesh_3d** out, qaws_boolean_report* report, q
 			pts[6 * (size_t)i + 3 + k] = (qaws_scalar)(g[k] - dl * n[k]);
 		}
 	}
-	st = qaws_mesh_bvh_winding_number(wa, ba, pts, 2 * npatch, NULL);
+	st = qaws_mesh_bvh_winding_number(wa, ba, pts, 2 * npatch, desc ? desc->executor : NULL);
 	if (st == QAWS_STATUS_OK && two)
-		st = qaws_mesh_bvh_winding_number(wb, bb, pts, 2 * npatch, NULL);
+		st = qaws_mesh_bvh_winding_number(wb, bb, pts, 2 * npatch, desc ? desc->executor : NULL);
 	/* B's patches lying on A (coplanar overlaps): A's pieces stand for both */
 	if (st == QAWS_STATUS_OK && two)
 	{
 		for (i = 0; i < npatch; i++)
 			for (k = 0; k < 3; k++)
 				pts[3 * (size_t)i + k] = (qaws_scalar)(0.5 * ((double)pts[6 * (size_t)i + k] + (double)pts[6 * (size_t)i + 3 + k]));
-		st = qaws_mesh_bvh_closest(hits, ba, pts, npatch, (qaws_scalar)(4 * o.eps), NULL);
+		st = qaws_mesh_bvh_closest(hits, ba, pts, npatch, (qaws_scalar)(4 * o.eps), desc ? desc->executor : NULL);
 	}
 	if (st != QAWS_STATUS_OK)
 		goto done;

@@ -68,9 +68,11 @@ struct qaws_bp_grid
 	unsigned int* start;        /* ncell + 1 */
 	unsigned int* items;
 	double hmin;                /* smallest cell side over the axes with extent */
+	int fit;                    /* cells sized by the boxes (no sweep needed) */
 };
 
-static qaws_status bp_build(qaws_bp_box const* boxes, unsigned int count, unsigned int dim, struct qaws_bp_grid* B)
+/* fit: cells about the boxes' mean size (surfaces: the volume rule makes cells far bigger than their boxes) */
+static qaws_status bp_build(qaws_bp_box const* boxes, unsigned int count, unsigned int dim, struct qaws_bp_grid* B, int fit)
 {
 	bp_grid G;
 	double hi[3], h = 0;
@@ -121,6 +123,22 @@ static qaws_status bp_build(qaws_bp_box const* boxes, unsigned int count, unsign
 				axes++;
 			}
 		h = axes ? pow(vol / (bounded ? bounded : 1), 1.0 / axes) : 0;
+		if (fit && bounded)
+		{
+			/* the boxes' mean widest side, made a little bigger: a box spans about two cells an axis */
+			double mean = 0;
+			for (i = 0; i < count; i++)
+				if (!bp_unbounded(&boxes[i], dim))
+				{
+					double w = 0;
+					for (k = 0; k < dim; k++)
+						w = fmax(w, boxes[i].hi[k] - boxes[i].lo[k]);
+					mean += w;
+				}
+			mean = 1.5 * mean / bounded;
+			if (mean > 0 && mean < h)
+				h = mean;
+		}
 	}
 	for (k = 0; k < 3; k++)
 	{
@@ -179,6 +197,7 @@ static qaws_status bp_build(qaws_bp_box const* boxes, unsigned int count, unsign
 	B->ncell = ncell;
 	B->start = start;
 	B->items = items;
+	B->fit = fit;
 	/* (over the axes the rings advance along: a flat axis of one cell, its
 	   side a rounding, would make the ring bound crawl) */
 	B->hmin = HUGE_VAL;
@@ -195,6 +214,8 @@ done:
 	return QAWS_STATUS_ALLOCATION_FAILURE;
 }
 
+#define BP_LOCAL 32
+
 /* the pairs of cells [c0, c1), each in the cell holding the low corner of the overlap */
 static qaws_status bp_cells(struct qaws_bp_grid const* GR, qaws_bp_box const* boxes, qaws_bp_accept accept, void* accept_user,
 	qaws_status (*visit)(void* user, unsigned int chunk, unsigned int i, unsigned int j), void* user, unsigned int chunk, unsigned int c0,
@@ -202,10 +223,71 @@ static qaws_status bp_cells(struct qaws_bp_grid const* GR, qaws_bp_box const* bo
 {
 	unsigned int i, k, dim = GR->dim;
 	qaws_status s = QAWS_STATUS_OK;
+	qaws_bp_box stack_box[BP_LOCAL], *local = stack_box;   /* a cell's boxes read once, not once per pair */
+	unsigned int stack_cell[BP_LOCAL][3], (*lcell)[3] = stack_cell, most = 0;
+	for (i = c0; i < c1; i++)
+		if (GR->start[i + 1] - GR->start[i] > most)
+			most = GR->start[i + 1] - GR->start[i];
+	if (most > BP_LOCAL)
+	{
+		/* crowded cells (fans round a vertex): one buffer for the largest */
+		local = (qaws_bp_box*)qaws_internal_malloc(qaws_internal_mul2(sizeof(qaws_bp_box), most));
+		lcell = (unsigned int(*)[3])qaws_internal_malloc(qaws_internal_mul3(sizeof(unsigned int), 3, most));
+		if (!local || !lcell)
+		{
+			qaws_internal_free(local == stack_box ? NULL : local);
+			qaws_internal_free(lcell == stack_cell ? NULL : lcell);
+			local = stack_box;
+			lcell = stack_cell;
+			most = BP_LOCAL;   /* (the general path for the larger cells) */
+		}
+	}
+	else
+		most = BP_LOCAL;
 	for (i = c0; i < c1 && s == QAWS_STATUS_OK; i++)
 	{
-		unsigned int e, f;
-		for (e = GR->start[i]; e < GR->start[i + 1] && s == QAWS_STATUS_OK; e++)
+		unsigned int e, f, b0 = GR->start[i], n = GR->start[i + 1] - b0;
+		int near = n <= most;
+		for (e = 0; near && e < n; e++)
+		{
+			local[e] = boxes[GR->items[b0 + e]];
+			if (bp_unbounded(&local[e], dim))
+				near = 0;   /* (the general path below) */
+			else
+				for (k = 0; k < 3; k++)
+					lcell[e][k] = k < dim ? bp_cell(&GR->G, local[e].lo[k], k) : 0;
+		}
+		if (near)
+		{
+			/* bounded boxes: the overlap's low corner is in the cell of the larger low cells (cells grow with the
+			   coordinate) */
+			for (e = 0; e < n && s == QAWS_STATUS_OK; e++)
+				for (f = e + 1; f < n && s == QAWS_STATUS_OK; f++)
+				{
+					qaws_bp_box const *A = &local[e], *B = &local[f];
+					unsigned int p, q, lo_i, hi_i, cx, cy, cz;
+					for (k = 0; k < dim; k++)
+						if (!(A->lo[k] <= B->hi[k] && B->lo[k] <= A->hi[k]))
+							break;
+					if (k < dim)
+						continue;
+					cx = lcell[e][0] > lcell[f][0] ? lcell[e][0] : lcell[f][0];
+					cy = lcell[e][1] > lcell[f][1] ? lcell[e][1] : lcell[f][1];
+					cz = lcell[e][2] > lcell[f][2] ? lcell[e][2] : lcell[f][2];
+					if ((cz * GR->G.g[1] + cy) * GR->G.g[0] + cx != i)
+						continue;
+					p = GR->items[b0 + e];
+					q = GR->items[b0 + f];
+					lo_i = p < q ? p : q;
+					hi_i = p < q ? q : p;
+					if (accept && !accept(accept_user, lo_i, hi_i))
+						continue;
+					(*candidates)++;
+					s = visit(user, chunk, lo_i, hi_i);
+				}
+			continue;
+		}
+		for (e = b0; e < GR->start[i + 1] && s == QAWS_STATUS_OK; e++)
 			for (f = e + 1; f < GR->start[i + 1] && s == QAWS_STATUS_OK; f++)
 			{
 				unsigned int p = GR->items[e], q = GR->items[f], lo_i = p < q ? p : q, hi_i = p < q ? q : p;
@@ -244,6 +326,10 @@ static qaws_status bp_cells(struct qaws_bp_grid const* GR, qaws_bp_box const* bo
 				s = visit(user, chunk, lo_i, hi_i);
 			}
 	}
+	if (local != stack_box)
+		qaws_internal_free(local);
+	if (lcell != stack_cell)
+		qaws_internal_free(lcell);
 	return s;
 }
 
@@ -412,7 +498,7 @@ qaws_status qaws_internal_broadphase(
 		memset(out_stats, 0, sizeof(*out_stats));
 	if (count < 2)
 		return QAWS_STATUS_OK;
-	s = bp_build(boxes, count, dim, &GR);
+	s = bp_build(boxes, count, dim, &GR, 0);
 	if (s != QAWS_STATUS_OK)
 		return s;
 	if (out_stats)
@@ -444,7 +530,25 @@ qaws_status qaws_internal_grid_create(qaws_bp_grid** out_grid, qaws_bp_box const
 	g = (struct qaws_bp_grid*)qaws_internal_malloc(sizeof(struct qaws_bp_grid));
 	if (!g)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
-	s = bp_build(boxes, count, dim, g);
+	s = bp_build(boxes, count, dim, g, 0);
+	if (s != QAWS_STATUS_OK)
+	{
+		qaws_internal_free(g);
+		return s;
+	}
+	*out_grid = g;
+	return QAWS_STATUS_OK;
+}
+
+qaws_status qaws_internal_grid_create_fit(qaws_bp_grid** out_grid, qaws_bp_box const* boxes, unsigned int count, unsigned int dim)
+{
+	struct qaws_bp_grid* g;
+	qaws_status s;
+	*out_grid = NULL;
+	g = (struct qaws_bp_grid*)qaws_internal_malloc(sizeof(struct qaws_bp_grid));
+	if (!g)
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	s = bp_build(boxes, count, dim, g, 1);
 	if (s != QAWS_STATUS_OK)
 	{
 		qaws_internal_free(g);
@@ -627,7 +731,7 @@ qaws_status qaws_internal_grid_pairs(unsigned int* out_candidates, qaws_bp_grid 
 	{
 		/* the sweep (serial, chunk 0) when it tests fewer pairs than the grid */
 		unsigned int axis = bp_axis(boxes, grid->count, grid->dim), nk = 0;
-		bp_key* keys = bp_sorted(boxes, grid->count, grid->dim, axis, &nk);
+		bp_key* keys = grid->fit ? NULL : bp_sorted(boxes, grid->count, grid->dim, axis, &nk);
 		if (keys && bp_sweep_cost(boxes, keys, nk, axis) < bp_grid_cost(grid))
 			s = bp_sweep(boxes, grid->count, grid->dim, axis, keys, nk, accept, accept_user, visit, visit_user, &P.candidates[0]);
 		else

@@ -942,15 +942,21 @@ Because winding numbers decide what is inside, operands that are not quite close
 
 The face attribute `"source"` gives each triangle's face in the soup of A then B: A's faces first, then B's from `a->face_count`. `report.closed` says whether every directed edge cancels. Where touching operands meet at an edge or a vertex, the mesh splits that place (`qaws_mesh.h`). An empty result returns OK with no mesh.
 
-**Speed.** For two crossing UV spheres on one thread:
+**Speed.** `desc.executor` (`qaws_batch_executor.h`) runs the pair tests, the exact check and the Booleans' samples on the caller's threads, with the same results as without it. Timings for two crossing UV spheres:
 
-| Triangles | Resolution | Union |
-|---|---|---|
-| 4,416 | 0.03 s | 0.07 s |
-| 32,256 | 0.14 s | 0.22 s |
-| 130,048 | 0.51 s | 0.86 s |
+| Triangles | Resolution, 1 thread | Resolution, 8 threads | Union, 1 thread | Union, 8 threads |
+|---|---|---|---|---|
+| 32,256 | 0.06 s | 0.04 s | 0.12 s | 0.09 s |
+| 130,048 | 0.23 s | 0.13 s | 0.49 s | 0.40 s |
+| 522,240 | 0.77 s | 0.55 s | 1.79 s | 1.59 s |
 
-Most of that time is setup for every input face, cut or not. Making that local and parallel is the scale item.
+What makes it fast:
+- **Fitted grid.** The pairs come from a grid whose cells are fitted to the triangles (`qaws_internal_grid_create_fit`). The usual one-box-per-cell rule makes a surface's cells far too big.
+- **Cheap rejection.** Neighbours whose free corners lie on one side of each other's plane are rejected at once.
+- **Lazy setup.** Edge records are made only for faces that meet something.
+- **A narrow check.** Only the cut faces' pieces of different input faces are checked.
+
+Still serial: the vertex weld, the face records, the grid build, and, in a Boolean, the operands' BVHs and the result's mesh.
 
 **Tests and figure.** Test 163:
 - **Exact cube volumes:** two axis-aligned cubes give union, intersection and difference volumes exact to 2e-16.

@@ -2271,20 +2271,14 @@ static int rp_coplanar(double const (*P)[3], double const (*Q)[3], unsigned int 
 	return 0;
 }
 
-/* triangles f and g intersect beyond their shared corners and edge */
-static int rp_tri_tri(rp_mesh const* m, unsigned int f, unsigned int g)
+/* triangles P and Q (vertex ids ip, iq) intersect beyond their shared corners and edge, by exact predicates */
+int rp_tri_tri_at(double const (*P)[3], double const (*Q)[3], unsigned int const* ip, unsigned int const* iq)
 {
-	unsigned int const *ip = m->t + 3 * (size_t)f, *iq = m->t + 3 * (size_t)g;
-	double P[3][3], Q[3][3];
 	unsigned int shared = 0, i, j;
 	int sq[3], cop;
 	for (i = 0; i < 3; i++)
-	{
-		memcpy(P[i], RP_X(m, ip[i]), sizeof P[i]);
-		memcpy(Q[i], RP_X(m, iq[i]), sizeof Q[i]);
 		for (j = 0; j < 3; j++)
 			shared += ip[i] == iq[j];
-	}
 	if (shared == 3)
 		return 0;
 	for (i = 0; i < 3; i++)   /* (a shared corner is on the plane: no exact zero to grind out) */
@@ -2313,6 +2307,19 @@ static int rp_tri_tri(rp_mesh const* m, unsigned int f, unsigned int g)
 	return 0;
 }
 
+static int rp_tri_tri(rp_mesh const* m, unsigned int f, unsigned int g)
+{
+	unsigned int const *ip = m->t + 3 * (size_t)f, *iq = m->t + 3 * (size_t)g;
+	double P[3][3], Q[3][3];
+	unsigned int i;
+	for (i = 0; i < 3; i++)
+	{
+		memcpy(P[i], RP_X(m, ip[i]), sizeof P[i]);
+		memcpy(Q[i], RP_X(m, iq[i]), sizeof Q[i]);
+	}
+	return rp_tri_tri_at((double const(*)[3])P, (double const(*)[3])Q, ip, iq);
+}
+
 typedef struct rp_hit_ctx
 {
 	rp_mesh const* m;
@@ -2330,6 +2337,12 @@ static qaws_status rp_hit_visit(void* user, unsigned int i, unsigned int j)
 		c->hits[j]++;
 	}
 	return QAWS_STATUS_OK;
+}
+
+static qaws_status rp_hit_visit_chunk(void* user, unsigned int chunk, unsigned int i, unsigned int j)
+{
+	(void)chunk;
+	return rp_hit_visit(user, i, j);
 }
 
 /* every pair of triangles that cross (beyond shared corners and edges), counted per triangle into w's hits */
@@ -2359,8 +2372,15 @@ static void rp_intersections(rp_work* w, unsigned int** out_hits)
 				box[f].hi[j] = k ? fmax(box[f].hi[j], p[j]) : p[j];
 			}
 		}
-	if (m->nt)
-		w->st = qaws_internal_broadphase(NULL, box, m->nt, 3, NULL, rp_hit_visit, &c);
+	if (m->nt > 1)
+	{
+		/* cells fitted to the triangles: a surface (or a seam of pieces) fills little of its box */
+		qaws_bp_grid* grid = NULL;
+		w->st = qaws_internal_grid_create_fit(&grid, box, m->nt, 3);
+		if (w->st == QAWS_STATUS_OK)
+			w->st = qaws_internal_grid_pairs(NULL, grid, box, NULL, NULL, rp_hit_visit_chunk, &c, NULL);
+		qaws_internal_grid_destroy(grid);
+	}
 	w->r->self_intersections = c.pairs;
 	for (f = 0; f < m->nt; f++)
 		w->r->intersecting_faces += c.hits[f] > 0;

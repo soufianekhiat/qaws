@@ -15,6 +15,7 @@
 #define QAWS_MESH_INTERSECT_H
 
 #include "qaws_mesh.h"
+#include "qaws_batch_executor.h"
 
 /*
  * Self-intersections resolved numerically: every pair of triangles meeting
@@ -52,6 +53,7 @@
 typedef struct qaws_intersect_desc
 {
 	qaws_scalar tolerance;             /* distances under it count as zero; 0: 1e-9 D (D the diagonal of the input's box) */
+	qaws_batch_executor const* executor;   /* the pair tests and the Booleans' samples run through it; NULL: this thread */
 } qaws_intersect_desc;
 
 typedef struct qaws_intersect_report

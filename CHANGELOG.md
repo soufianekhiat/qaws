@@ -27,6 +27,18 @@ All notable changes to Qaws are documented here.
   wrappers), and `QAWS_UNITY_BUILD` builds one translation unit per
   precision.
 
+### Changed
+
+- Self-intersections and Booleans scale: pairs from a grid fitted to the triangles
+  (`qaws_internal_grid_create_fit`; the volume rule made a surface's cells hold
+  dozens of boxes), filtered read-only through `qaws_intersect_desc.executor` and
+  cut in a fixed order (results independent of threads), neighbours rejected by
+  their free corners' sides, edge records made only for faces that meet
+  something, the check limited to pieces of different faces. A 522k-triangle
+  resolution: 4.05 s to 0.77 s on one thread, 0.55 s on 8. The grid walk reads
+  each cell's boxes once and compares cell indices instead of coordinates; the
+  repair's intersection search uses the fitted grid.
+
 ### Fixed
 
 - Self-intersection resolution: points where a face's edge crosses another's
