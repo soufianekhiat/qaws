@@ -2216,33 +2216,54 @@ static qaws_status sx_direct_winding(qaws_scalar* out_w, unsigned char* out_near
 	return st;
 }
 
-/* LSD radix sort of n records of stride 64-bit words by their first word (stable); 0 when out of memory */
+#define SX_RADIX_BITS 11
+#define SX_RADIX_DIGITS 6   /* (64 bits in 11-bit digits) */
+
+/* LSD radix sort of n records of stride (1 or 2) 64-bit words by their first word (stable); digits all keys share
+   (the zero bits between an edge key's two vertices) are skipped; 0 when out of memory */
 static int sx_radix(unsigned long long* a, unsigned int n, unsigned int stride)
 {
-	unsigned long long *tmp, *src = a, *dst, top = 0;
-	unsigned int i, shift;
+	unsigned long long *tmp, *src = a, *dst;
+	unsigned int *count, i, d;
 	if (n < 2)
 		return 1;
 	tmp = (unsigned long long*)qaws_internal_malloc(qaws_internal_mul3(sizeof(unsigned long long), stride, n));
-	if (!tmp)
+	count = (unsigned int*)qaws_internal_zalloc((size_t)SX_RADIX_DIGITS << SX_RADIX_BITS, sizeof(unsigned int));
+	if (!tmp || !count)
+	{
+		qaws_internal_free(tmp);
+		qaws_internal_free(count);
 		return 0;
+	}
 	dst = tmp;
 	for (i = 0; i < n; i++)
-		top |= a[(size_t)i * stride];
-	for (shift = 0; shift < 64 && (top >> shift); shift += 8)
 	{
-		unsigned int count[257];
+		unsigned long long k = a[(size_t)i * stride];
+		for (d = 0; d < SX_RADIX_DIGITS; d++)
+			count[(d << SX_RADIX_BITS) + ((k >> (d * SX_RADIX_BITS)) & ((1u << SX_RADIX_BITS) - 1))]++;
+	}
+	for (d = 0; d < SX_RADIX_DIGITS; d++)
+	{
+		unsigned int *c = count + ((size_t)d << SX_RADIX_BITS), sum = 0, shift = d * SX_RADIX_BITS;
 		unsigned long long* sw;
-		memset(count, 0, sizeof count);
-		for (i = 0; i < n; i++)
-			count[((src[(size_t)i * stride] >> shift) & 255) + 1]++;
-		for (i = 1; i < 257; i++)
-			count[i] += count[i - 1];
-		for (i = 0; i < n; i++)
+		if (c[(a[0] >> shift) & ((1u << SX_RADIX_BITS) - 1)] == n)
+			continue;   /* (one value for all) */
+		for (i = 0; i < 1u << SX_RADIX_BITS; i++)
 		{
-			unsigned int d = count[(src[(size_t)i * stride] >> shift) & 255]++;
-			memcpy(dst + (size_t)d * stride, src + (size_t)i * stride, stride * sizeof(unsigned long long));
+			unsigned int t = c[i];
+			c[i] = sum;
+			sum += t;
 		}
+		if (stride == 1)
+			for (i = 0; i < n; i++)
+				dst[c[(src[i] >> shift) & ((1u << SX_RADIX_BITS) - 1)]++] = src[i];
+		else
+			for (i = 0; i < n; i++)
+			{
+				unsigned int o = c[(src[2 * (size_t)i] >> shift) & ((1u << SX_RADIX_BITS) - 1)]++;
+				dst[2 * (size_t)o] = src[2 * (size_t)i];
+				dst[2 * (size_t)o + 1] = src[2 * (size_t)i + 1];
+			}
 		sw = src;
 		src = dst;
 		dst = sw;
@@ -2250,6 +2271,7 @@ static int sx_radix(unsigned long long* a, unsigned int n, unsigned int stride)
 	if (src != a)
 		memcpy(a, src, qaws_internal_mul3(sizeof(unsigned long long), stride, n));
 	qaws_internal_free(tmp);
+	qaws_internal_free(count);
 	return 1;
 }
 
@@ -2394,9 +2416,9 @@ static void sx_tri_x(qaws_scalar const* pos, unsigned int const* t, unsigned int
 }
 
 /* edge e = 3 f + i (f's corners a b c, the neighbour's d) worth turning: both faces in one plane, the quad convex, the
-   opposite angles over pi, both faces of one operand, the edge c d new */
+   opposite angles over pi, both faces of one operand (the caller checks the edge c d is new) */
 static int sx_flat_flip_ok(unsigned int const* t, qaws_scalar const* src, unsigned int const* nb, qaws_scalar const* pos, unsigned int e, double eps,
-	unsigned int split, unsigned long long* set, unsigned int cap)
+	unsigned int split)
 {
 	unsigned int f = e / 3, i = e % 3, g, j;
 	double P[3][3], Q[3][3], n1[3], n2[3], u[3], v[3], l, a[3], b[3], c[3], d[3], s1, s2, w[3];
@@ -2446,9 +2468,7 @@ static int sx_flat_flip_ok(unsigned int const* t, qaws_scalar const* src, unsign
 	s2 = sx_dot(n1, w);
 	if (!(s1 * s2 < 0) || fabs(s1) <= eps * sqrt(sx_dot(u, u)) || fabs(s2) <= eps * sqrt(sx_dot(u, u)))
 		return 0;
-	if (sx_angle(c, a, b) + sx_angle(d, a, b) <= 3.14159265358979323846 + 1e-9)
-		return 0;
-	return !sx_eset_slot(set, cap, sx_ekey(t[3 * (size_t)f + (i + 2) % 3], t[3 * (size_t)g + (j + 2) % 3]), 0);
+	return sx_angle(c, a, b) + sx_angle(d, a, b) > 3.14159265358979323846 + 1e-9;
 }
 
 /* edges inside flat regions turned toward Delaunay: a planar region's pieces were triangulated face by face, its
@@ -2458,13 +2478,12 @@ static unsigned int sx_flatten(unsigned int* t, qaws_scalar* src, unsigned int n
 	unsigned int n = 3 * nt, cap = 16, i, j, top = 0, flips = 0, guard = 10 * nt + 64;
 	unsigned int* nb = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)n + 1));
 	unsigned int* stack;
-	unsigned long long *key, *set;
+	unsigned long long *key, *set = NULL;
 	while (cap < 4 * n)
 		cap *= 2;
 	key = (unsigned long long*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned long long), 2 * (size_t)n + 1));
-	set = (unsigned long long*)qaws_internal_zalloc(cap, sizeof(unsigned long long));
 	stack = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)n + 4 * (size_t)guard + 1));
-	if (!nb || !key || !set || !stack)
+	if (!nb || !key || !stack)
 	{
 		*oom = 1;
 		goto out;
@@ -2476,7 +2495,6 @@ static unsigned int sx_flatten(unsigned int* t, qaws_scalar* src, unsigned int n
 		nb[i] = SX_NONE;
 		key[2 * (size_t)i] = (sx_ekey(p, q) - 1) << 1 | (p > q);
 		key[2 * (size_t)i + 1] = i;
-		*sx_eset_slot(set, cap, sx_ekey(p, q), 1) = sx_ekey(p, q);
 	}
 	if (!sx_radix(key, n, 2))
 		qsort(key, n, 2 * sizeof(unsigned long long), sx_cmp_edge);
@@ -2497,7 +2515,7 @@ static unsigned int sx_flatten(unsigned int* t, qaws_scalar* src, unsigned int n
 	{
 		unsigned int e = stack[--top], f, g, a, b, c, d, nbc, nca, nad, ndb;
 		unsigned int ei, ej;
-		if (!sx_flat_flip_ok(t, src, nb, pos, e, eps, split, set, cap))
+		if (!sx_flat_flip_ok(t, src, nb, pos, e, eps, split))
 			continue;
 		f = e / 3;
 		ei = e % 3;
@@ -2507,6 +2525,23 @@ static unsigned int sx_flatten(unsigned int* t, qaws_scalar* src, unsigned int n
 		b = t[3 * (size_t)f + (ei + 1) % 3];
 		c = t[3 * (size_t)f + (ei + 2) % 3];
 		d = t[3 * (size_t)g + (ej + 2) % 3];
+		if (!set)
+		{
+			/* the mesh's edges, made when first needed (most meshes have no flat region) */
+			set = (unsigned long long*)qaws_internal_zalloc(cap, sizeof(unsigned long long));
+			if (!set)
+			{
+				*oom = 1;
+				goto out;
+			}
+			for (i = 0; i < n; i++)
+			{
+				unsigned long long k = sx_ekey(t[i], t[3 * (i / 3) + (i % 3 + 1) % 3]);
+				*sx_eset_slot(set, cap, k, 1) = k;
+			}
+		}
+		if (sx_eset_slot(set, cap, sx_ekey(c, d), 0))
+			continue;   /* (the edge c d is there already) */
 		nbc = nb[3 * f + (ei + 1) % 3];
 		nca = nb[3 * f + (ei + 2) % 3];
 		nad = nb[3 * g + (ej + 1) % 3];
@@ -2631,8 +2666,7 @@ qaws_status qaws_mesh_boolean(qaws_mesh_3d** out, qaws_boolean_report* report, q
 			key[2 * (size_t)j + 1] = j / 3;
 		}
 		if (!sx_radix(key, n, 2))
-			if (!sx_radix(key, n, 2))
-		qsort(key, n, 2 * sizeof(unsigned long long), sx_cmp_edge);
+			qsort(key, n, 2 * sizeof(unsigned long long), sx_cmp_edge);
 		for (i = 0; i < n; i = j)
 		{
 			for (j = i + 1; j < n && key[2 * (size_t)j] >> 1 == key[2 * (size_t)i] >> 1; j++)

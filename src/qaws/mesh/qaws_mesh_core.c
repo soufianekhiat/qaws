@@ -9,6 +9,14 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#if defined(_MSC_VER) && (defined(_M_X64) || defined(_M_AMD64))
+#include <xmmintrin.h>
+#define HM_PREFETCH(p) _mm_prefetch((char const*)(p), _MM_HINT_T0)
+#elif defined(__GNUC__) || defined(__clang__)
+#define HM_PREFETCH(p) __builtin_prefetch(p)
+#else
+#define HM_PREFETCH(p) ((void)(p))
+#endif
 
 static int hm_re(void** p, size_t bytes)
 {
@@ -310,34 +318,45 @@ unsigned int hm_edge_count(qaws_hm const* m)
 /*  Building                                                                */
 /* ======================================================================== */
 
+/* a half-edge in the table: its corner and the vertex it leaves (read without going through the corner) */
+typedef struct hm_slot
+{
+	unsigned int v, c;
+} hm_slot;
+
+/* both directions of an edge hash alike, so one probe finds both */
 static unsigned int hm_hkey(unsigned int a, unsigned int b)
 {
-	return a * 2654435761u ^ (b * 40503u + (b >> 7));
+	unsigned long long k = (unsigned long long)(a < b ? a : b) << 32 | (a < b ? b : a);
+	k ^= k >> 33;
+	k *= 0xff51afd7ed558ccdull;
+	k ^= k >> 33;
+	return (unsigned int)k;
 }
 
-/* the corner of half-edge a -> b in the table, with the free slot where it would go */
-static unsigned int hm_lookup(qaws_hm const* m, unsigned int const* slot, unsigned int mask, unsigned int a, unsigned int b,
-	unsigned int* out_pos)
+/* the corners of half-edges a -> b and b -> a in the table, with the free slot where a -> b would go */
+static void hm_lookup(qaws_hm const* m, hm_slot const* slot, unsigned int mask, unsigned int a, unsigned int b, unsigned int* out_ab,
+	unsigned int* out_ba, unsigned int* out_pos)
 {
 	unsigned int i = hm_hkey(a, b) & mask;
-	while (slot[i] != HM_NONE)
+	*out_ab = *out_ba = HM_NONE;
+	for (; slot[i].c != HM_NONE; i = (i + 1) & mask)
 	{
-		unsigned int c = slot[i];
-		if (m->cv[c] == a && hm_to(m, c) == b)
-			return c;
-		i = (i + 1) & mask;
+		if (slot[i].v == a && hm_to(m, slot[i].c) == b)
+			*out_ab = slot[i].c;
+		else if (slot[i].v == b && hm_to(m, slot[i].c) == a)
+			*out_ba = slot[i].c;
 	}
-	if (out_pos)
-		*out_pos = i;
-	return HM_NONE;
+	*out_pos = i;
 }
 
 qaws_status hm_build(qaws_hm* m, unsigned int dim, double const* x, unsigned int nv, unsigned int const* fv,
 	unsigned int const* fs, unsigned int nf)
 {
 	size_t total = 0;
-	unsigned int f, i, j, off, mask, v, n, c, smax = 3;
-	unsigned int *stamp = NULL, *slot = NULL, *vn = NULL, *vl = NULL, *rep = NULL;
+	unsigned int f, i, j, off, mask, v, n, c, smax = 3, fa = 0, offa = 0;
+	unsigned int *stamp = NULL, *vn = NULL, *vl = NULL, *rep = NULL;
+	hm_slot* slot = NULL;
 	unsigned char* seen = NULL;
 	qaws_status st = QAWS_STATUS_OK;
 	memset(m, 0, sizeof *m);
@@ -373,11 +392,11 @@ qaws_status hm_build(qaws_hm* m, unsigned int dim, double const* x, unsigned int
 	}
 	qaws_internal_free(stamp);
 	for (mask = 1; mask < 2 * total; mask <<= 1) {}
-	slot = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), mask));
+	slot = (hm_slot*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(hm_slot), mask));
 	rep = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), smax));
 	if (!slot || !rep || !hm_reserve(m, nv, (unsigned int)total, nf))
 		goto oom;
-	memset(slot, 0xFF, sizeof(unsigned int) * mask);
+	memset(slot, 0xFF, sizeof(hm_slot) * mask);
 	mask -= 1;
 	for (i = 0; i < nv; i++)
 	{
@@ -387,6 +406,14 @@ qaws_status hm_build(qaws_hm* m, unsigned int dim, double const* x, unsigned int
 	for (f = 0, off = 0; f < nf; f++)
 	{
 		unsigned int s = fs ? fs[f] : 3, first = m->nc;
+		/* the table is read at random: its slots for a face ahead are fetched while this one is linked */
+		for (; fa < nf && fa < f + 8; fa++)
+		{
+			unsigned int sa = fs ? fs[fa] : 3;
+			for (i = 0; i < sa; i++)
+				HM_PREFETCH(&slot[hm_hkey(fv[offa + i], fv[offa + (i + 1) % sa]) & mask]);
+			offa += sa;
+		}
 		m->fc[f] = first;
 		m->fn[f] = s;
 		m->fflag[f] = 0;
@@ -404,8 +431,9 @@ qaws_status hm_build(qaws_hm* m, unsigned int dim, double const* x, unsigned int
 		   face gets its own copies of the edge's ends */
 		for (i = 0; i < s; i++)
 		{
-			unsigned int a = m->cv[first + i], b = m->cv[first + (i + 1) % s], o = hm_lookup(m, slot, mask, b, a, NULL);
-			if (hm_lookup(m, slot, mask, a, b, NULL) != HM_NONE || (o != HM_NONE && m->co[o] != HM_NONE))
+			unsigned int a = m->cv[first + i], b = m->cv[first + (i + 1) % s], ab, o, pos;
+			hm_lookup(m, slot, mask, a, b, &ab, &o, &pos);
+			if (ab != HM_NONE || (o != HM_NONE && m->co[o] != HM_NONE))
 				m->cflag[first + i] |= HM_MARK;
 		}
 		for (i = 0; i < s; i++)
@@ -427,11 +455,12 @@ qaws_status hm_build(qaws_hm* m, unsigned int dim, double const* x, unsigned int
 		}
 		for (i = 0; i < s; i++)
 		{
-			unsigned int a = m->cv[first + i], b = m->cv[first + (i + 1) % s], pos = 0, o;
-			if (hm_lookup(m, slot, mask, a, b, &pos) != HM_NONE)
+			unsigned int a = m->cv[first + i], b = m->cv[first + (i + 1) % s], pos, ab, o;
+			hm_lookup(m, slot, mask, a, b, &ab, &o, &pos);
+			if (ab != HM_NONE)
 				continue;   /* (not after the copies) */
-			slot[pos] = first + i;
-			o = hm_lookup(m, slot, mask, b, a, NULL);
+			slot[pos].v = a;
+			slot[pos].c = first + i;
 			if (o != HM_NONE && m->co[o] == HM_NONE)
 			{
 				m->co[first + i] = o;
