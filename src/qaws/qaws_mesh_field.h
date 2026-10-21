@@ -140,6 +140,17 @@ qaws_status qaws_metric_field_create_vertices(qaws_metric_field** out_field, qaw
 /* values: one per vertex of the reference's mesh */
 qaws_status qaws_metric_field_create_hessian(qaws_metric_field** out_field, qaws_mesh_reference const* reference, qaws_scalar const* values,
 	qaws_hessian_metric_desc const* desc);
+/* the intersection of fields on one reference (each vertex's metrics
+   simultaneously reduced, the larger of each pair kept): the largest unit
+   ball inside all of theirs, so edges as short as any of them asks in every
+   direction (several attributes' Hessian metrics, a size field's, made one) */
+qaws_status qaws_metric_field_create_intersection(qaws_metric_field** out_field, qaws_metric_field const* const* fields, unsigned int count);
+/* the field graded (H-gradation, Alauzet 2010): each vertex's metric spread
+   along its edges, its sizes grown by the factor 1 + l ln(gradation) over
+   an edge of metric length l, and intersected at the other end, until no
+   metric changes: sizes then grow by at most about gradation per unit of
+   length. gradation > 1 (1.3 is common) */
+qaws_status qaws_metric_field_create_graded(qaws_metric_field** out_field, qaws_metric_field const* field, qaws_scalar gradation);
 void qaws_metric_field_destroy(qaws_metric_field* field);
 /* six values per location, on the field's reference */
 qaws_status qaws_metric_field_evaluate(qaws_scalar* out_metrics, qaws_metric_field const* field, qaws_mesh_location const* locations,

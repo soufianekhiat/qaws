@@ -51,6 +51,11 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- Remeshing from attributes: `qaws_mesh_3d_cut_isolines` (an attribute's
+  isolines cut in as feature lines, kept through remeshing),
+  `qaws_metric_field_create_intersection` (several attributes' metrics
+  made one) and `qaws_metric_field_create_graded` (H-gradation). Test 168,
+  figure 34 (key y).
 - Decimation by quadric error metrics (`qaws_mesh_3d_decimate`): a target
   count or an error bound, border and feature lines held by constraint
   planes, feature corners kept, folds refused, attributes carried, the

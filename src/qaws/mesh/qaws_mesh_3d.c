@@ -695,6 +695,132 @@ qaws_status qaws_mesh_3d_detect_features(qaws_mesh_3d* mesh, qaws_scalar dihedra
 	return QAWS_STATUS_OK;
 }
 
+/* the corners of face f whose vertex's value is the level, up to 8 */
+static unsigned int m3_iso_corners(qaws_hm const* m, unsigned int f, double const* val, unsigned int stride, double level, unsigned int* out)
+{
+	unsigned int c, e = m->fc[f] + m->fn[f], n = 0;
+	for (c = m->fc[f]; c < e && n < 8; c++)
+		if (val[(size_t)stride * m->cv[c]] == level)
+			out[n++] = c;
+	return n;
+}
+
+qaws_status qaws_mesh_3d_cut_isolines(unsigned int* out_edge_count, qaws_mesh_3d* mesh, unsigned int attribute, qaws_scalar const* levels,
+	unsigned int level_count)
+{
+	qaws_hm* m;
+	unsigned int l, i, n, ne;
+	unsigned int* pairs = NULL;
+	if (out_edge_count)
+		*out_edge_count = 0;
+	if (!mesh || (level_count && !levels))
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	m = &mesh->hm;
+	if (attribute >= m->na || m->attr[attribute].element != QAWS_MESH_VERTEX)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	for (l = 0; l < level_count; l++)
+		if (!isfinite((double)levels[l]))
+			return QAWS_STATUS_INVALID_ARGUMENT;
+	for (l = 0; l < level_count; l++)
+	{
+		double L = (double)levels[l];
+		unsigned int stride = m->attr[attribute].n, c, f, nf0;
+		/* the edges the level crosses, as their vertex pairs (each split once; splits leave the others' ends alone) */
+		pairs = (unsigned int*)qaws_internal_malloc(qaws_internal_mul3(sizeof(unsigned int), 2, (size_t)m->nc + 1));
+		if (!pairs)
+			return QAWS_STATUS_ALLOCATION_FAILURE;
+		for (c = 0, ne = 0; c < m->nc; c++)
+		{
+			double const* val = m->attr[attribute].v;
+			double va, vb;
+			if (m->cf[c] == HM_NONE || (m->co[c] != HM_NONE && m->co[c] < c))
+				continue;
+			va = val[(size_t)stride * m->cv[c]];
+			vb = val[(size_t)stride * hm_to(m, c)];
+			if ((va - L) * (vb - L) < 0)
+			{
+				pairs[2 * (size_t)ne] = m->cv[c];
+				pairs[2 * (size_t)ne++ + 1] = hm_to(m, c);
+			}
+		}
+		for (i = 0; i < ne; i++)
+		{
+			unsigned int a = pairs[2 * (size_t)i], b = pairs[2 * (size_t)i + 1], k, v;
+			double const* val = m->attr[attribute].v;
+			double t = (L - val[(size_t)stride * a]) / (val[(size_t)stride * b] - val[(size_t)stride * a]), x[3];
+			c = hm_find(m, a, b);
+			if (c == HM_NONE)
+			{
+				c = hm_find(m, b, a);
+				t = 1 - t;
+			}
+			if (c == HM_NONE)
+				continue;
+			for (k = 0; k < 3; k++)
+				x[k] = m->x[3 * (size_t)m->cv[c] + k] + t * (m->x[3 * (size_t)hm_to(m, c) + k] - m->x[3 * (size_t)m->cv[c] + k]);
+			v = hm_split_edge(m, c, t, x, 0);
+			if (v == HM_NONE)
+			{
+				qaws_internal_free(pairs);
+				return QAWS_STATUS_ALLOCATION_FAILURE;
+			}
+			m->attr[attribute].v[(size_t)stride * v] = L;   /* (exactly on the level, whatever the rounding) */
+		}
+		qaws_internal_free(pairs);
+		pairs = NULL;
+		/* each face with two corners on the level: cut between them (or its edge between them marked); quads left in two */
+		nf0 = m->nf;
+		for (f = 0; f < nf0; f++)
+		{
+			unsigned int on[8], k;
+			if (m->fflag[f] & HM_DELETED)
+				continue;
+			k = m3_iso_corners(m, f, m->attr[attribute].v, stride, L, on);
+			if (k != 2)
+				continue;
+			{
+				unsigned int a = m->cv[on[0]], b = m->cv[on[1]], e;
+				if (hm_next(m, on[0]) != on[1] && hm_next(m, on[1]) != on[0] && !hm_cut_face(m, on[0], on[1]))
+					return QAWS_STATUS_ALLOCATION_FAILURE;
+				e = hm_find_edge(m, a, b);
+				if (e != HM_NONE && !(m->cflag[e] & HM_FEATURE))
+				{
+					m3_set_feature(m, e, 1);
+					if (out_edge_count)
+						(*out_edge_count)++;
+				}
+			}
+		}
+		for (f = 0, n = m->nf; f < n; f++)
+			if (!(m->fflag[f] & HM_DELETED) && m->fn[f] == 4)
+			{
+				/* (by its shorter diagonal) */
+				unsigned int c0 = m->fc[f];
+				double d0 = 0, d1 = 0;
+				unsigned int k;
+				for (k = 0; k < 3; k++)
+				{
+					double u = m->x[3 * (size_t)m->cv[c0] + k] - m->x[3 * (size_t)m->cv[c0 + 2] + k];
+					double w = m->x[3 * (size_t)m->cv[c0 + 1] + k] - m->x[3 * (size_t)m->cv[c0 + 3] + k];
+					d0 += u * u;
+					d1 += w * w;
+				}
+				if (!hm_cut_face(m, d0 <= d1 ? c0 : c0 + 1, d0 <= d1 ? c0 + 2 : c0 + 3))
+					return QAWS_STATUS_ALLOCATION_FAILURE;
+			}
+	}
+	/* (corners added: 1 or more than 2 feature edges; those found before by angle stay) */
+	for (i = 0; i < m->nv; i++)
+	{
+		unsigned int d = (m->vflag[i] & HM_DELETED) ? 0 : hm_feature_degree(m, i);
+		if (d && d != 2)
+			m->vflag[i] |= HM_CORNER;
+	}
+	hm_compact(m);
+	return QAWS_STATUS_OK;
+}
+
+
 unsigned int qaws_mesh_3d_get_feature_edge_count(qaws_mesh_3d const* mesh)
 {
 	unsigned int c, n = 0;

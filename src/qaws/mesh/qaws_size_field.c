@@ -1149,3 +1149,200 @@ qaws_status qaws_metric_field_evaluate(qaws_scalar* out, qaws_metric_field const
 	}
 	return QAWS_STATUS_OK;
 }
+
+/* ---- metric intersection and gradation ---------------------------------- */
+
+static void mf_full(double const* s, double (*A)[3])
+{
+	A[0][0] = s[0]; A[0][1] = A[1][0] = s[1]; A[0][2] = A[2][0] = s[2];
+	A[1][1] = s[3]; A[1][2] = A[2][1] = s[4]; A[2][2] = s[5];
+}
+
+/* the symmetric 3 x 3 A diagonalized by Jacobi rotations: A = Q diag(d) Q^T */
+static void mf_jacobi(double (*A)[3], double (*Q)[3], double* d)
+{
+	unsigned int it, p, q, k;
+	for (p = 0; p < 3; p++)
+		for (q = 0; q < 3; q++)
+			Q[p][q] = p == q;
+	for (it = 0; it < 50; it++)
+	{
+		double off = fabs(A[0][1]) + fabs(A[0][2]) + fabs(A[1][2]);
+		if (off < 1e-15 * (fabs(A[0][0]) + fabs(A[1][1]) + fabs(A[2][2])))
+			break;
+		for (p = 0; p < 2; p++)
+			for (q = p + 1; q < 3; q++)
+			{
+				double th, t, c, s;
+				if (A[p][q] == 0)
+					continue;
+				th = (A[q][q] - A[p][p]) / (2 * A[p][q]);
+				t = (th >= 0 ? 1 : -1) / (fabs(th) + sqrt(th * th + 1));
+				c = 1 / sqrt(t * t + 1);
+				s = t * c;
+				for (k = 0; k < 3; k++)
+				{
+					double a = A[k][p], b = A[k][q];
+					A[k][p] = c * a - s * b;
+					A[k][q] = s * a + c * b;
+				}
+				for (k = 0; k < 3; k++)
+				{
+					double a = A[p][k], b = A[q][k];
+					A[p][k] = c * a - s * b;
+					A[q][k] = s * a + c * b;
+				}
+				for (k = 0; k < 3; k++)
+				{
+					double a = Q[k][p], b = Q[k][q];
+					Q[k][p] = c * a - s * b;
+					Q[k][q] = s * a + c * b;
+				}
+			}
+	}
+	for (k = 0; k < 3; k++)
+		d[k] = A[k][k];
+}
+
+/* the intersection of metrics a and b (six values each): the largest unit ball inside both, by their simultaneous reduction
+   (a = L L^T, b seen as L^-1 b L^-T = Q diag(c) Q^T, the result L Q diag(max(1, c)) Q^T L^T); returns whether b was finer
+   than a somewhere (by more than rounding) */
+static int mf_intersect(double const* a, double const* b, double* out)
+{
+	double A[3][3], B[3][3], L[3][3] = { { 0, 0, 0 }, { 0, 0, 0 }, { 0, 0, 0 } }, X[3][3], C[3][3], Q[3][3], c[3], R[3][3];
+	unsigned int i, j, k, at = 0;
+	int finer = 0;
+	mf_full(a, A);
+	mf_full(b, B);
+	/* Cholesky of a */
+	for (j = 0; j < 3; j++)
+	{
+		double s = A[j][j];
+		for (k = 0; k < j; k++)
+			s -= L[j][k] * L[j][k];
+		if (!(s > 0))
+		{
+			memcpy(out, b, 6 * sizeof(double));
+			return 1;
+		}
+		L[j][j] = sqrt(s);
+		for (i = j + 1; i < 3; i++)
+		{
+			double t = A[i][j];
+			for (k = 0; k < j; k++)
+				t -= L[i][k] * L[j][k];
+			L[i][j] = t / L[j][j];
+		}
+	}
+	/* X = L^-1 B, then C = L^-1 X^T (= L^-1 B L^-T, symmetric) */
+	for (j = 0; j < 3; j++)
+		for (i = 0; i < 3; i++)
+		{
+			double t = B[i][j];
+			for (k = 0; k < i; k++)
+				t -= L[i][k] * X[k][j];
+			X[i][j] = t / L[i][i];
+		}
+	for (j = 0; j < 3; j++)
+		for (i = 0; i < 3; i++)
+		{
+			double t = X[j][i];
+			for (k = 0; k < i; k++)
+				t -= L[i][k] * C[k][j];
+			C[i][j] = t / L[i][i];
+		}
+	mf_jacobi(C, Q, c);
+	for (k = 0; k < 3; k++)
+	{
+		finer |= c[k] > 1 + 1e-9;
+		c[k] = c[k] > 1 ? c[k] : 1;
+	}
+	/* R = L Q, out = R diag(c) R^T */
+	for (i = 0; i < 3; i++)
+		for (j = 0; j < 3; j++)
+		{
+			R[i][j] = 0;
+			for (k = 0; k <= i; k++)
+				R[i][j] += L[i][k] * Q[k][j];
+		}
+	for (i = 0; i < 3; i++)
+		for (j = i; j < 3; j++)
+			out[at++] = R[i][0] * c[0] * R[j][0] + R[i][1] * c[1] * R[j][1] + R[i][2] * c[2] * R[j][2];
+	return finer;
+}
+
+qaws_status qaws_metric_field_create_intersection(qaws_metric_field** out, qaws_metric_field const* const* fields, unsigned int count)
+{
+	unsigned int nv, i, k;
+	double* m;
+	if (!out)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	*out = NULL;
+	if (!fields || !count || !fields[0])
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	for (k = 1; k < count; k++)
+		if (!fields[k] || fields[k]->ref != fields[0]->ref)
+			return QAWS_STATUS_INVALID_ARGUMENT;
+	nv = fields[0]->ref->mesh->hm.nv;
+	m = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), 6 * (size_t)nv + 1));
+	if (!m)
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	memcpy(m, fields[0]->m, sizeof(double) * 6 * nv);
+	for (k = 1; k < count; k++)
+		for (i = 0; i < nv; i++)
+		{
+			double r[6];
+			mf_intersect(m + 6 * (size_t)i, fields[k]->m + 6 * (size_t)i, r);
+			memcpy(m + 6 * (size_t)i, r, sizeof r);
+		}
+	return mf_new(out, fields[0]->ref, m);
+}
+
+qaws_status qaws_metric_field_create_graded(qaws_metric_field** out, qaws_metric_field const* field, qaws_scalar gradation)
+{
+	qaws_hm const* h;
+	unsigned int nv, c, pass, k;
+	double* m, lb;
+	if (!out)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	*out = NULL;
+	if (!field || !(gradation > 1))
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	h = &field->ref->mesh->hm;
+	nv = h->nv;
+	lb = log((double)gradation);
+	m = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), 6 * (size_t)nv + 1));
+	if (!m)
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	memcpy(m, field->m, sizeof(double) * 6 * nv);
+	/* each edge's ends: a vertex's metric spread to the other, its sizes grown along the edge, intersected there, until still */
+	for (pass = 0; pass < 64; pass++)
+	{
+		int changed = 0;
+		for (c = 0; c < h->nc; c++)
+		{
+			unsigned int s;
+			if (h->cf[c] == HM_NONE || (h->co[c] != HM_NONE && h->co[c] < c))
+				continue;
+			for (s = 0; s < 2; s++)
+			{
+				unsigned int i = s ? hm_to(h, c) : h->cv[c], j = s ? h->cv[c] : hm_to(h, c);
+				double const *Mi = m + 6 * (size_t)i, *xi = h->x + 3 * (size_t)i, *xj = h->x + 3 * (size_t)j;
+				double e[3] = { xj[0] - xi[0], xj[1] - xi[1], xj[2] - xi[2] }, l, eta, G[6], r[6];
+				l = sqrt(Mi[0] * e[0] * e[0] + 2 * Mi[1] * e[0] * e[1] + 2 * Mi[2] * e[0] * e[2] + Mi[3] * e[1] * e[1] + 2 * Mi[4] * e[1] * e[2]
+					+ Mi[5] * e[2] * e[2]);
+				eta = 1 / ((1 + l * lb) * (1 + l * lb));
+				for (k = 0; k < 6; k++)
+					G[k] = eta * Mi[k];
+				if (mf_intersect(m + 6 * (size_t)j, G, r))
+				{
+					memcpy(m + 6 * (size_t)j, r, sizeof r);
+					changed = 1;
+				}
+			}
+		}
+		if (!changed)
+			break;
+	}
+	return mf_new(out, field->ref, m);
+}

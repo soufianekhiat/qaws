@@ -222,6 +222,18 @@ qaws_status qaws_mesh_3d_detect_features(qaws_mesh_3d* mesh, qaws_scalar dihedra
 unsigned int qaws_mesh_3d_get_feature_edge_count(qaws_mesh_3d const* mesh);
 qaws_status qaws_mesh_3d_get_feature_edges(unsigned int* out_edge_vertices, qaws_mesh_3d const* mesh);
 int qaws_mesh_3d_is_feature_corner(qaws_mesh_3d const* mesh, unsigned int vertex);
+/* The isolines of a vertex attribute (its first component) at the levels
+   cut into the mesh as feature edges: each edge a level crosses split where
+   the attribute, linear along it, meets the level (the new vertex takes the
+   level exactly, its other attributes by their rules), each face cut
+   between its two corners on the level and the quads this leaves cut by
+   their shorter diagonal; edges already on a level marked. Remeshed
+   (qaws_mesh_remesh, the cut mesh its own reference: the lines are its
+   creases) the lines stay, the attribute on them still the level. out_edge_count (may
+   be NULL): the feature edges made. INVALID_ARGUMENT for an attribute not
+   per vertex. */
+qaws_status qaws_mesh_3d_cut_isolines(unsigned int* out_edge_count, qaws_mesh_3d* mesh, unsigned int attribute, qaws_scalar const* levels,
+	unsigned int level_count);
 
 /* ---- attributes -------------------------------------------------------- */
 
