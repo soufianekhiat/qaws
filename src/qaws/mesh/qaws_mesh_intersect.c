@@ -68,7 +68,8 @@ typedef struct sx_ctx
 {
 	double* X;                         /* points */
 	unsigned int* chain;               /* next point in the same spatial cell */
-	unsigned int np, capx, capc;
+	unsigned int* hash;                /* each point's cell hash */
+	unsigned int np, capx, capc, caph;
 	unsigned int* cell;                /* spatial hash heads */
 	unsigned int ncell;                /* power of two */
 	sx_key* keys;
@@ -135,6 +136,7 @@ static unsigned int sx_hash(unsigned int const* k, unsigned int n)
 	return h ^ (h >> 15);
 }
 
+/* the hash of a point's cell (masked to the table at use) */
 static unsigned int sx_cell_of(sx_ctx const* c, double const* p, int dx, int dy, int dz)
 {
 	long long q[3];
@@ -148,7 +150,7 @@ static unsigned int sx_cell_of(sx_ctx const* c, double const* p, int dx, int dy,
 	k[3] = (unsigned int)(q[1] >> 32);
 	k[4] = (unsigned int)q[2];
 	k[5] = (unsigned int)(q[2] >> 32);
-	return sx_hash(k, 6) & (c->ncell - 1);
+	return sx_hash(k, 6);
 }
 
 static void sx_rehash(sx_ctx* c)
@@ -158,7 +160,7 @@ static void sx_rehash(sx_ctx* c)
 		c->cell[i] = SX_NONE;
 	for (i = 0; i < c->np; i++)
 	{
-		unsigned int h = sx_cell_of(c, c->X + 3 * (size_t)i, 0, 0, 0);
+		unsigned int h = c->hash[i] & (c->ncell - 1);
 		c->chain[i] = c->cell[h];
 		c->cell[h] = i;
 	}
@@ -168,7 +170,7 @@ static void sx_rehash(sx_ctx* c)
 static unsigned int sx_point(sx_ctx* c, double const* p)
 {
 	int dx, dy, dz, lo[3], hi[3];
-	unsigned int id, h, k;
+	unsigned int id, h, k, own = sx_cell_of(c, p, 0, 0, 0);
 	double e2 = c->eps * c->eps;
 	/* the neighbouring cells only on the sides the point is within the tolerance of */
 	for (k = 0; k < 3; k++)
@@ -180,17 +182,19 @@ static unsigned int sx_point(sx_ctx* c, double const* p)
 	for (dx = lo[0]; dx <= hi[0]; dx++)
 		for (dy = lo[1]; dy <= hi[1]; dy++)
 			for (dz = lo[2]; dz <= hi[2]; dz++)
-				for (id = c->cell[sx_cell_of(c, p, dx, dy, dz)]; id != SX_NONE; id = c->chain[id])
+				for (id = c->cell[((dx | dy | dz) ? sx_cell_of(c, p, dx, dy, dz) : own) & (c->ncell - 1)]; id != SX_NONE; id = c->chain[id])
 					if (sx_dist2(c->X + 3 * (size_t)id, p) <= e2)
 						return id;
 	if (!sx_reserve((void**)&c->X, &c->capx, 3 * ((size_t)c->np + 1), sizeof(double))
-		|| !sx_reserve((void**)&c->chain, &c->capc, (size_t)c->np + 1, sizeof(unsigned int)))
+		|| !sx_reserve((void**)&c->chain, &c->capc, (size_t)c->np + 1, sizeof(unsigned int))
+		|| !sx_reserve((void**)&c->hash, &c->caph, (size_t)c->np + 1, sizeof(unsigned int)))
 	{
 		c->oom = 1;
 		return 0;
 	}
 	memcpy(c->X + 3 * (size_t)c->np, p, 3 * sizeof(double));
-	h = sx_cell_of(c, p, 0, 0, 0);
+	c->hash[c->np] = own;   /* (kept for the rehash as the table grows) */
+	h = own & (c->ncell - 1);
 	c->chain[c->np] = c->cell[h];
 	c->cell[h] = c->np;
 	c->np++;
@@ -1750,6 +1754,7 @@ static qaws_status sx_load_fill(void* user, unsigned int chunk, unsigned int beg
 			F->src = f;
 			F->cuts = SX_NONE;
 			F->touch = SX_NONE;
+			F->queued = F->touched = 0;
 			for (i = 0; i < 3; i++)
 			{
 				u[i] = c->X[3 * (size_t)p1 + i] - c->X[3 * (size_t)p0 + i];
@@ -1883,9 +1888,10 @@ static qaws_status sx_resolve(sx_out* o, qaws_intersect_report* report, qaws_sca
 	c.ncell = 1024;
 	c.cell = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * c.ncell);
 	alias = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)vertex_count + 1));
-	c.F = (sx_face*)qaws_internal_zalloc((size_t)nt + 1, sizeof(sx_face));
 	box = (qaws_bp_box*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(qaws_bp_box), (size_t)nt + 1));
-	if (!c.cell || !alias || !c.F || !box)
+	if (!c.cell || !alias || !box || !sx_reserve((void**)&c.X, &c.capx, 3 * ((size_t)vertex_count + 1), sizeof(double))
+		|| !sx_reserve((void**)&c.chain, &c.capc, (size_t)vertex_count + 1, sizeof(unsigned int))
+		|| !sx_reserve((void**)&c.hash, &c.caph, (size_t)vertex_count + 1, sizeof(unsigned int)))
 		goto oom;
 	for (i = 0; i < c.ncell; i++)
 		c.cell[i] = SX_NONE;
@@ -1913,9 +1919,11 @@ static qaws_status sx_resolve(sx_out* o, qaws_intersect_report* report, qaws_sca
 		L.tri[k] = c.nf;
 		c.nf += n;
 	}
+	c.F = (sx_face*)qaws_internal_malloc(qaws_internal_mul2(sizeof(sx_face), (size_t)c.nf + 1));
 	c.geo = (sx_geo*)qaws_internal_malloc(qaws_internal_mul2(sizeof(sx_geo), (size_t)c.nf + 1));
-	if (!c.geo)
+	if (!c.F || !c.geo)
 		goto oom;
+	memset(c.F + c.nf, 0, sizeof(sx_face));
 	st = qaws_internal_parallel(face_count, SX_LOAD_GRAIN, sx_load_fill, &L, ex);
 	if (st != QAWS_STATUS_OK)
 		goto fail;
@@ -2154,7 +2162,7 @@ static qaws_status sx_resolve(sx_out* o, qaws_intersect_report* report, qaws_sca
 oom:
 	st = QAWS_STATUS_ALLOCATION_FAILURE;
 fail:
-	qaws_internal_free(c.X); qaws_internal_free(c.chain); qaws_internal_free(c.cell); qaws_internal_free(c.keys); qaws_internal_free(c.nodes);
+	qaws_internal_free(c.X); qaws_internal_free(c.chain); qaws_internal_free(c.hash); qaws_internal_free(c.cell); qaws_internal_free(c.keys); qaws_internal_free(c.nodes);
 	qaws_internal_free(c.car); qaws_internal_free(c.F); qaws_internal_free(c.vf_start); qaws_internal_free(c.vf); qaws_internal_free(c.geo); qaws_internal_free(c.work); qaws_internal_free(b.s); qaws_internal_free(b.p);
 	qaws_internal_free(T.P); qaws_internal_free(T.Q); qaws_internal_free(T.t); qaws_internal_free(alias); qaws_internal_free(loc); qaws_internal_free(used);
 	qaws_internal_free(otri); qaws_internal_free(ocut); qaws_internal_free(stack); qaws_internal_free(opos); qaws_internal_free(osrc);
@@ -2163,8 +2171,10 @@ fail:
 	return st;
 }
 
-/* triangles and their source faces as a mesh with the "source" attribute */
-static qaws_status sx_mesh(qaws_mesh_3d** out, qaws_scalar const* pos, unsigned int nv, unsigned int const* tri, qaws_scalar const* src, unsigned int nt)
+/* triangles and their source faces as a mesh with the "source" attribute; opposite (may be NULL): every corner's
+   opposite, known (the mesh made without looking its edges up) */
+static qaws_status sx_mesh(qaws_mesh_3d** out, qaws_scalar const* pos, unsigned int nv, unsigned int const* tri, unsigned int const* opposite,
+	qaws_scalar const* src, unsigned int nt)
 {
 	qaws_mesh_3d_desc md;
 	qaws_attribute_desc ad;
@@ -2175,7 +2185,31 @@ static qaws_status sx_mesh(qaws_mesh_3d** out, qaws_scalar const* pos, unsigned 
 	md.vertex_count = nv;
 	md.face_vertices = tri;
 	md.face_count = nt;
-	st = qaws_mesh_3d_create(out, &md);
+	if (opposite)
+	{
+		double* x = (double*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(double), 3, (size_t)nv + 1));
+		qaws_mesh_3d* m = (qaws_mesh_3d*)qaws_internal_zalloc(1, sizeof *m);
+		unsigned int i;
+		*out = NULL;
+		if (!x || !m)
+		{
+			qaws_internal_free(x);
+			qaws_internal_free(m);
+			return QAWS_STATUS_ALLOCATION_FAILURE;
+		}
+		for (i = 0; i < 3 * nv; i++)
+			x[i] = (double)pos[i];
+		st = hm_build_paired(&m->hm, 3, x, nv, tri, opposite, nt);
+		qaws_internal_free(x);
+		if (st != QAWS_STATUS_OK)
+		{
+			qaws_internal_free(m);
+			return st;
+		}
+		*out = m;
+	}
+	else
+		st = qaws_mesh_3d_create(out, &md);
 	if (st != QAWS_STATUS_OK)
 		return st;
 	memset(&ad, 0, sizeof ad);
@@ -2198,22 +2232,6 @@ static void sx_out_free(sx_out* o)
 	qaws_internal_free(o->tri);
 	qaws_internal_free(o->src);
 	memset(o, 0, sizeof *o);
-}
-
-qaws_status qaws_mesh_resolve_intersections(qaws_mesh_3d** out, qaws_intersect_report* report, qaws_scalar const* positions,
-	unsigned int const* face_vertices, unsigned int const* face_sizes, unsigned int vertex_count, unsigned int face_count,
-	qaws_intersect_desc const* desc)
-{
-	sx_out o;
-	qaws_status st;
-	if (!out)
-		return QAWS_STATUS_INVALID_ARGUMENT;
-	*out = NULL;
-	st = sx_resolve(&o, report, positions, face_vertices, face_sizes, vertex_count, face_count, desc);
-	if (st == QAWS_STATUS_OK)
-		st = sx_mesh(out, o.pos, o.nv, o.tri, o.src, o.nt);
-	sx_out_free(&o);
-	return st;
 }
 
 /* ---- Booleans on the arrangement ---- */
@@ -2294,21 +2312,20 @@ static qaws_status sx_direct_job(void* user, unsigned int chunk, unsigned int be
 	double* w = D->w + (size_t)chunk * D->np;
 	unsigned char* nr = D->near + (size_t)chunk * D->np;
 	unsigned int f, i, k;
-	for (f = begin; f < end; f++)
+	/* point by point, summed locally: the chunks' sums share cache lines */
+	for (i = 0; i < D->np; i++)
 	{
-		double A[3], B[3], C[3];
-		for (k = 0; k < 3; k++)
+		double const* q = D->p + 3 * (size_t)i;
+		double s = 0;
+		unsigned char hit = 0;
+		for (f = begin; f < end; f++)
 		{
-			A[k] = (double)D->x[3 * (size_t)D->t[3 * (size_t)f] + k];
-			B[k] = (double)D->x[3 * (size_t)D->t[3 * (size_t)f + 1] + k];
-			C[k] = (double)D->x[3 * (size_t)D->t[3 * (size_t)f + 2] + k];
-		}
-		for (i = 0; i < D->np; i++)
-		{
-			double const* q = D->p + 3 * (size_t)i;
-			double a[3], b[3], c[3], bc[3], la, lb, lc, num, den;
+			double A[3], B[3], C[3], a[3], b[3], c[3], bc[3], la, lb, lc, num, den;
 			for (k = 0; k < 3; k++)
 			{
+				A[k] = (double)D->x[3 * (size_t)D->t[3 * (size_t)f] + k];
+				B[k] = (double)D->x[3 * (size_t)D->t[3 * (size_t)f + 1] + k];
+				C[k] = (double)D->x[3 * (size_t)D->t[3 * (size_t)f + 2] + k];
 				a[k] = A[k] - q[k];
 				b[k] = B[k] - q[k];
 				c[k] = C[k] - q[k];
@@ -2320,10 +2337,12 @@ static qaws_status sx_direct_job(void* user, unsigned int chunk, unsigned int be
 			lc = sqrt(sx_dot(c, c));
 			num = sx_dot(a, bc);
 			den = la * lb * lc + sx_dot(a, b) * lc + sx_dot(b, c) * la + sx_dot(c, a) * lb;
-			w[i] += 2 * atan2(num, den);
-			if (D->r2 > 0 && !nr[i] && sx_tri_d2(q, A, B, C) <= D->r2)
-				nr[i] = 1;
+			s += 2 * atan2(num, den);
+			if (D->r2 > 0 && !hit && sx_tri_d2(q, A, B, C) <= D->r2)
+				hit = 1;
 		}
+		w[i] = s;
+		nr[i] = hit;
 	}
 	return QAWS_STATUS_OK;
 }
@@ -2681,53 +2700,123 @@ static qaws_status sx_flat_scan_job(void* user, unsigned int chunk, unsigned int
 	return QAWS_STATUS_OK;
 }
 
-/* edges inside flat regions turned toward Delaunay: a planar region's pieces were triangulated face by face, its
-   input faces' edges kept; the shape does not change. Returns the edges turned, and whether every directed edge is
-   cancelled by one turned the other way (closed; turning keeps that). */
-static unsigned int sx_flatten(unsigned int* t, qaws_scalar* src, unsigned int nt, qaws_scalar const* pos, double eps, unsigned int split, int* closed,
-	qaws_batch_executor const* executor, int* oom)
+#define SX_FLAT_GRAIN 65536
+
+/* the kept faces' neighbours from the arrangement's edge uses: a use kept is corner 3 k + i of kept face k, i turned
+   with the face (its direction too) */
+typedef struct sx_flat_pair
 {
-	unsigned int n = 3 * nt, cap = 16, i, j, top = 0, flips = 0, guard = 10 * nt + 64, nv = 0;
-	unsigned int* nb = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)n + 1));
+	unsigned long long const* grp;     /* per use: edge key << 1 | direction, corner; by key */
+	unsigned int n;
+	unsigned int const* kmap;          /* per piece: 2 k + turned (k its kept face), SX_NONE when dropped; NULL: all kept */
+	unsigned int* nb;
+	int* open;                         /* per chunk: an edge whose kept uses do not cancel */
+} sx_flat_pair;
+
+static qaws_status sx_flat_pair_job(void* user, unsigned int chunk, unsigned int begin, unsigned int end)
+{
+	sx_flat_pair const* P = (sx_flat_pair const*)user;
+	unsigned int i = begin, j;
+	int open = 0;
+	while (i > 0 && i < P->n && P->grp[2 * (size_t)i] >> 1 == P->grp[2 * (size_t)i - 2] >> 1)
+		i++;   /* (an edge's uses are the chunk's where they start) */
+	for (; i < end; i = j)
+	{
+		long s = 0;
+		unsigned int m = 0, use[2] = { 0, 0 };
+		int dir[2] = { 0, 0 };
+		for (j = i; j < P->n && P->grp[2 * (size_t)j] >> 1 == P->grp[2 * (size_t)i] >> 1; j++)
+		{
+			unsigned int c = (unsigned int)P->grp[2 * (size_t)j + 1], f = P->kmap ? P->kmap[c / 3] : c / 3 * 2;
+			int d;
+			if (f == SX_NONE)
+				continue;
+			d = (int)(P->grp[2 * (size_t)j] & 1) ^ (int)(f & 1);
+			s += d ? -1 : 1;
+			if (m < 2)
+			{
+				use[m] = 3 * (f >> 1) + ((f & 1) ? 2 - c % 3 : c % 3);
+				dir[m] = d;
+			}
+			m++;
+		}
+		open |= s != 0;
+		if (m == 2 && dir[0] != dir[1])
+		{
+			P->nb[use[0]] = use[1];
+			P->nb[use[1]] = use[0];
+		}
+	}
+	P->open[chunk] = open;
+	return QAWS_STATUS_OK;
+}
+
+/* triangles' edge uses: the edge's key << 1 | direction, the corner */
+typedef struct sx_uses
+{
+	unsigned int const* tri;
+	unsigned long long* grp;
+} sx_uses;
+
+static qaws_status sx_uses_job(void* user, unsigned int chunk, unsigned int begin, unsigned int end)
+{
+	sx_uses const* U = (sx_uses const*)user;
+	unsigned int j;
+	(void)chunk;
+	for (j = begin; j < end; j++)
+	{
+		unsigned long long p = U->tri[j], q = U->tri[3 * (j / 3) + (j % 3 + 1) % 3];
+		U->grp[2 * (size_t)j] = (p < q ? (p << 32 | q) : (q << 32 | p)) << 1 | (p > q);
+		U->grp[2 * (size_t)j + 1] = j;
+	}
+	return QAWS_STATUS_OK;
+}
+
+/* edges inside flat regions turned toward Delaunay: a planar region's pieces were triangulated face by face, its
+   input faces' edges kept; the shape does not change. The kept faces t come from the arrangement's pieces through
+   kmap, whose edge uses grp (ngrp) give the neighbours nb (3 nt, SX_NONE across an edge not of exactly two faces turned
+   opposite ways; as turned at the end). Returns the edges turned, and whether every directed edge is cancelled by one
+   turned the other way (closed; turning keeps that). */
+static unsigned int sx_flatten(unsigned int* t, qaws_scalar* src, unsigned int nt, qaws_scalar const* pos, double eps, unsigned int split,
+	unsigned long long const* grp, unsigned int ngrp, unsigned int const* kmap, unsigned int* nb, int* closed, qaws_batch_executor const* executor,
+	int* oom)
+{
+	unsigned int n = 3 * nt, cap = 16, i, top = 0, flips = 0, guard = 10 * nt + 64, nv = 0;
 	unsigned int *stack, *deg;
-	unsigned long long *key, *set = NULL;
+	unsigned long long* set = NULL;
+	sx_flat_pair P;
 	while (cap < 4 * n)
 		cap *= 2;
 	for (i = 0; i < n; i++)
 		nv = t[i] >= nv ? t[i] + 1 : nv;
-	key = (unsigned long long*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned long long), 2 * (size_t)n + 1));
 	stack = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)n + 4 * (size_t)guard + 1));
 	deg = (unsigned int*)qaws_internal_zalloc((size_t)nv + 1, sizeof(unsigned int));   /* (faces on each vertex) */
-	if (!nb || !key || !stack || !deg)
+	P.grp = grp;
+	P.n = ngrp;
+	P.kmap = kmap;
+	P.nb = nb;
+	P.open = (int*)qaws_internal_malloc(sizeof(int) * ((size_t)qaws_internal_chunk_count(ngrp, SX_FLAT_GRAIN) + 1));
+	if (!stack || !deg || !P.open)
 	{
 		*oom = 1;
 		goto out;
 	}
-	/* neighbours across edges of exactly two faces turned opposite ways */
+	/* neighbours across edges of exactly two faces turned opposite ways, by the arrangement's edge uses (sorted for
+	   the patches) kept */
 	for (i = 0; i < n; i++)
 	{
-		unsigned int p = t[i], q = t[3 * (i / 3) + (i % 3 + 1) % 3];
 		nb[i] = SX_NONE;
-		key[2 * (size_t)i] = (sx_ekey(p, q) - 1) << 1 | (p > q);
-		key[2 * (size_t)i + 1] = i;
-		deg[p]++;
+		deg[t[i]]++;
 	}
-	if (!sx_radix(key, n, 2, executor))
-		qsort(key, n, 2 * sizeof(unsigned long long), sx_cmp_edge);
-	*closed = 1;
-	for (i = 0; i < n; i = j)
+	if (qaws_internal_parallel(ngrp, SX_FLAT_GRAIN, sx_flat_pair_job, &P, executor) != QAWS_STATUS_OK)
 	{
-		long s = (key[2 * (size_t)i] & 1) ? -1 : 1;
-		for (j = i + 1; j < n && key[2 * (size_t)j] >> 1 == key[2 * (size_t)i] >> 1; j++)
-			s += (key[2 * (size_t)j] & 1) ? -1 : 1;
-		if (s)
-			*closed = 0;
-		if (j == i + 2 && (key[2 * (size_t)i] & 1) != (key[2 * (size_t)i + 2] & 1))
-		{
-			nb[key[2 * (size_t)i + 1]] = (unsigned int)key[2 * (size_t)i + 3];
-			nb[key[2 * (size_t)i + 3]] = (unsigned int)key[2 * (size_t)i + 1];
-		}
+		*oom = 1;
+		goto out;
 	}
+	*closed = 1;
+	for (i = 0; i < qaws_internal_chunk_count(ngrp, SX_FLAT_GRAIN); i++)
+		if (P.open[i])
+			*closed = 0;
 	{
 		/* the edges worth turning as given, found in parallel (most meshes have none) */
 		sx_flat_scan S;
@@ -2821,12 +2910,70 @@ static unsigned int sx_flatten(unsigned int* t, qaws_scalar* src, unsigned int n
 		flips++;
 	}
 out:
-	qaws_internal_free(nb);
 	qaws_internal_free(deg);
-	qaws_internal_free(key);
+	qaws_internal_free(P.open);
 	qaws_internal_free(set);
 	qaws_internal_free(stack);
 	return flips;
+}
+
+/* each corner of triangles tri (nt) paired with the corner across its edge, when every edge is of exactly two turned
+   opposite ways (else, or out of memory, NULL; the caller frees) */
+static unsigned int* sx_opposites(unsigned int const* tri, unsigned int nt, qaws_batch_executor const* executor)
+{
+	unsigned int n = 3 * nt, i, nch = qaws_internal_chunk_count(n, SX_FLAT_GRAIN);
+	unsigned long long* grp = (unsigned long long*)qaws_internal_malloc(qaws_internal_mul3(sizeof(unsigned long long), 2, (size_t)n + 1));
+	unsigned int* opp = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)n + 1));
+	sx_uses U;
+	sx_flat_pair P;
+	int ok;
+	P.open = (int*)qaws_internal_malloc(sizeof(int) * ((size_t)nch + 1));
+	U.tri = tri;
+	U.grp = grp;
+	P.grp = grp;
+	P.n = n;
+	P.kmap = NULL;
+	P.nb = opp;
+	ok = n && grp && opp && P.open && qaws_internal_parallel(n, SX_FLAT_GRAIN, sx_uses_job, &U, executor) == QAWS_STATUS_OK;
+	if (ok)
+	{
+		if (!sx_radix(grp, n, 2, executor))
+			qsort(grp, n, 2 * sizeof(unsigned long long), sx_cmp_edge);
+		for (i = 0; i < n; i++)
+			opp[i] = SX_NONE;
+		ok = qaws_internal_parallel(n, SX_FLAT_GRAIN, sx_flat_pair_job, &P, executor) == QAWS_STATUS_OK;
+	}
+	for (i = 0; ok && i < n; i++)
+		ok = opp[i] != SX_NONE;
+	qaws_internal_free(grp);
+	qaws_internal_free(P.open);
+	if (!ok)
+	{
+		qaws_internal_free(opp);
+		return NULL;
+	}
+	return opp;
+}
+
+qaws_status qaws_mesh_resolve_intersections(qaws_mesh_3d** out, qaws_intersect_report* report, qaws_scalar const* positions,
+	unsigned int const* face_vertices, unsigned int const* face_sizes, unsigned int vertex_count, unsigned int face_count,
+	qaws_intersect_desc const* desc)
+{
+	sx_out o;
+	qaws_status st;
+	if (!out)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	*out = NULL;
+	st = sx_resolve(&o, report, positions, face_vertices, face_sizes, vertex_count, face_count, desc);
+	if (st == QAWS_STATUS_OK)
+	{
+		/* a closed arrangement made from its edges' pairs (else looked up) */
+		unsigned int* opp = sx_opposites(o.tri, o.nt, desc ? desc->executor : NULL);
+		st = sx_mesh(out, o.pos, o.nv, o.tri, opp, o.src, o.nt);
+		qaws_internal_free(opp);
+	}
+	sx_out_free(&o);
+	return st;
 }
 
 qaws_status qaws_mesh_boolean(qaws_mesh_3d** out, qaws_boolean_report* report, qaws_mesh_3d_desc const* a, qaws_mesh_3d_desc const* b,
@@ -2837,8 +2984,8 @@ qaws_status qaws_mesh_boolean(qaws_mesh_3d** out, qaws_boolean_report* report, q
 	unsigned int *fv = NULL, *fs = NULL, *ta = NULL, *tb = NULL, *keep = NULL, *used = NULL;
 	qaws_mesh_bvh *ba = NULL, *bb = NULL;
 	qaws_mesh_hit* hits = NULL;
-	unsigned int *par = NULL, *rep = NULL, *pid = NULL, npatch = 0;
-	unsigned long long* ek = NULL;
+	unsigned int *par = NULL, *rep = NULL, *pid = NULL, *kmap = NULL, *kopp = NULL, npatch = 0;
+	unsigned long long* grp = NULL;
 	double *fat = NULL, *mid = NULL;
 	unsigned char* near = NULL;
 	sx_out o;
@@ -2887,48 +3034,37 @@ qaws_status qaws_mesh_boolean(qaws_mesh_3d** out, qaws_boolean_report* report, q
 	pid = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)o.nt + 1));
 	rep = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)o.nt + 1));
 	fat = (double*)qaws_internal_malloc(sizeof(double) * ((size_t)o.nt + 1));
-	ek = (unsigned long long*)qaws_internal_malloc(qaws_internal_mul3(sizeof(unsigned long long), 3, (size_t)o.nt + 1));
+	grp = (unsigned long long*)qaws_internal_malloc(qaws_internal_mul3(sizeof(unsigned long long), 6, (size_t)o.nt + 1));
+	kmap = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)o.nt + 1));
 	keep = (unsigned int*)qaws_internal_malloc(qaws_internal_mul3(sizeof(unsigned int), 3, (size_t)o.nt + 1));
 	keep_src = (qaws_scalar*)qaws_internal_malloc(qaws_internal_mul2(sizeof(qaws_scalar), (size_t)o.nt + 1));
 	used = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)o.nv + 1));
 	kpos = (qaws_scalar*)qaws_internal_malloc(qaws_internal_mul3(sizeof(qaws_scalar), 3, (size_t)o.nv + 1));
-	if (!par || !pid || !rep || !fat || !ek || !keep || !keep_src || !used || !kpos)
+	if (!par || !pid || !rep || !fat || !grp || !kmap || !keep || !keep_src || !used || !kpos)
 		goto oom;
-	for (i = 0; i < o.nt; i++)
 	{
-		par[i] = i;
-		for (k = 0; k < 3; k++)
-		{
-			unsigned long long p = o.tri[3 * (size_t)i + k], q = o.tri[3 * (size_t)i + (k + 1) % 3];
-			/* key: the edge, then the direction bit; the face in a side array by position */
-			ek[3 * (size_t)i + k] = (p < q ? (p << 32 | q) : (q << 32 | p)) << 1 | (p > q);
-		}
-	}
-	{
-		/* sort edge uses with their faces: (key, face) pairs packed through an index sort */
+		/* the edge uses sorted with their corners (kept for the flat regions): key the edge, then the direction bit */
 		unsigned int n = 3 * o.nt;
-		unsigned long long* key = (unsigned long long*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned long long), 2 * (size_t)n + 1));
-		if (!key)
+		sx_uses U;
+		U.tri = o.tri;
+		U.grp = grp;
+		if (qaws_internal_parallel(n, SX_FLAT_GRAIN, sx_uses_job, &U, desc ? desc->executor : NULL) != QAWS_STATUS_OK)
 			goto oom;
-		for (j = 0; j < n; j++)
-		{
-			key[2 * (size_t)j] = ek[j];
-			key[2 * (size_t)j + 1] = j / 3;
-		}
-		if (!sx_radix(key, n, 2, desc ? desc->executor : NULL))
-			qsort(key, n, 2 * sizeof(unsigned long long), sx_cmp_edge);
+		if (!sx_radix(grp, n, 2, desc ? desc->executor : NULL))
+			qsort(grp, n, 2 * sizeof(unsigned long long), sx_cmp_edge);
+		for (i = 0; i < o.nt; i++)
+			par[i] = i;
 		for (i = 0; i < n; i = j)
 		{
-			for (j = i + 1; j < n && key[2 * (size_t)j] >> 1 == key[2 * (size_t)i] >> 1; j++)
+			for (j = i + 1; j < n && grp[2 * (size_t)j] >> 1 == grp[2 * (size_t)i] >> 1; j++)
 				;
-			if (j == i + 2 && (key[2 * (size_t)i] & 1) != (key[2 * (size_t)i + 2] & 1))
+			if (j == i + 2 && (grp[2 * (size_t)i] & 1) != (grp[2 * (size_t)i + 2] & 1))
 			{
-				unsigned int x0 = sx_root(par, (unsigned int)key[2 * (size_t)i + 1]), x1 = sx_root(par, (unsigned int)key[2 * (size_t)i + 3]);
+				unsigned int x0 = sx_root(par, (unsigned int)grp[2 * (size_t)i + 1] / 3), x1 = sx_root(par, (unsigned int)grp[2 * (size_t)i + 3] / 3);
 				if (x0 != x1)
 					par[x0 < x1 ? x1 : x0] = x0 < x1 ? x0 : x1;
 			}
 		}
-		qaws_internal_free(key);
 	}
 	/* each patch's fattest piece stands for it */
 	for (i = 0; i < o.nt; i++)
@@ -3056,10 +3192,12 @@ qaws_status qaws_mesh_boolean(qaws_mesh_3d** out, qaws_boolean_report* report, q
 		unsigned int s = (unsigned int)o.src[i];
 		if (front == back || (two && s >= a->face_count && near[z]))
 		{
+			kmap[i] = SX_NONE;
 			report->dropped++;
 			continue;
 		}
 		/* the region behind: turned when it is in front */
+		kmap[i] = nk << 1 | (unsigned int)front;
 		keep[3 * (size_t)nk] = o.tri[3 * (size_t)i];
 		keep[3 * (size_t)nk + 1] = o.tri[3 * (size_t)i + (front ? 2 : 1)];
 		keep[3 * (size_t)nk + 2] = o.tri[3 * (size_t)i + (front ? 1 : 2)];
@@ -3083,11 +3221,17 @@ qaws_status qaws_mesh_boolean(qaws_mesh_3d** out, qaws_boolean_report* report, q
 		}
 		{
 			int bad = 0;
-			report->flat_flips = sx_flatten(keep, keep_src, nk, kpos, o.eps, a->face_count, &report->closed, desc ? desc->executor : NULL, &bad);
+			kopp = (unsigned int*)qaws_internal_malloc(qaws_internal_mul3(sizeof(unsigned int), 3, (size_t)nk + 1));
+			if (!kopp)
+				goto oom;
+			report->flat_flips = sx_flatten(keep, keep_src, nk, kpos, o.eps, a->face_count, grp, 3 * o.nt, kmap, kopp, &report->closed,
+				desc ? desc->executor : NULL, &bad);
 			if (bad)
 				goto oom;
 		}
-		st = nk ? sx_mesh(out, kpos, m, keep, keep_src, nk) : QAWS_STATUS_OK;
+		/* every edge of exactly two kept faces turned opposite ways: they are the mesh's pairs */
+		for (i = 0; i < 3 * nk && kopp[i] != SX_NONE; i++) {}
+		st = nk ? sx_mesh(out, kpos, m, keep, i == 3 * nk ? kopp : NULL, keep_src, nk) : QAWS_STATUS_OK;
 	}
 	goto done;
 oom:
@@ -3099,6 +3243,6 @@ done:
 	qaws_internal_free(x); qaws_internal_free(fv); qaws_internal_free(fs); qaws_internal_free(ta); qaws_internal_free(tb);
 	qaws_internal_free(pts); qaws_internal_free(wa); qaws_internal_free(wb); qaws_internal_free(hits); qaws_internal_free(keep);
 	qaws_internal_free(keep_src); qaws_internal_free(used); qaws_internal_free(kpos);
-	qaws_internal_free(par); qaws_internal_free(rep); qaws_internal_free(pid); qaws_internal_free(ek); qaws_internal_free(fat); qaws_internal_free(near); qaws_internal_free(mid);
+	qaws_internal_free(par); qaws_internal_free(rep); qaws_internal_free(pid); qaws_internal_free(grp); qaws_internal_free(kmap); qaws_internal_free(kopp); qaws_internal_free(fat); qaws_internal_free(near); qaws_internal_free(mid);
 	return st;
 }

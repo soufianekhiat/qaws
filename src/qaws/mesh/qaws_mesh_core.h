@@ -90,6 +90,10 @@ struct qaws_mesh_3d
 
 qaws_status hm_build(qaws_hm* m, unsigned int dim, double const* x, unsigned int nv, unsigned int const* fv,
 	unsigned int const* fs, unsigned int nf);
+/* triangles whose corners' opposites are known (opposite[3 f + i]: the corner across the edge from corner i of f to
+   the next, every one paired with one turned the other way): what hm_build makes of them, without its edge table */
+qaws_status hm_build_paired(qaws_hm* m, unsigned int dim, double const* x, unsigned int nv, unsigned int const* tri,
+	unsigned int const* opposite, unsigned int nt);
 void hm_free(qaws_hm* m);
 qaws_status hm_copy(qaws_hm* dst, qaws_hm const* src);
 /* room for dv more vertices, dc corners, df faces; 0 on allocation failure (nothing changed) */

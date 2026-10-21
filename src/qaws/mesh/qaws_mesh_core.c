@@ -318,10 +318,10 @@ unsigned int hm_edge_count(qaws_hm const* m)
 /*  Building                                                                */
 /* ======================================================================== */
 
-/* a half-edge in the table: its corner and the vertex it leaves (read without going through the corner) */
+/* a half-edge in the table: its corner and the vertices it leaves and reaches (read without going through the corner) */
 typedef struct hm_slot
 {
-	unsigned int v, c;
+	unsigned int v, w, c;
 } hm_slot;
 
 /* both directions of an edge hash alike, so one probe finds both */
@@ -335,29 +335,118 @@ static unsigned int hm_hkey(unsigned int a, unsigned int b)
 }
 
 /* the corners of half-edges a -> b and b -> a in the table, with the free slot where a -> b would go */
-static void hm_lookup(qaws_hm const* m, hm_slot const* slot, unsigned int mask, unsigned int a, unsigned int b, unsigned int* out_ab,
-	unsigned int* out_ba, unsigned int* out_pos)
+static void hm_lookup(hm_slot const* slot, unsigned int mask, unsigned int a, unsigned int b, unsigned int* out_ab, unsigned int* out_ba,
+	unsigned int* out_pos)
 {
 	unsigned int i = hm_hkey(a, b) & mask;
 	*out_ab = *out_ba = HM_NONE;
 	for (; slot[i].c != HM_NONE; i = (i + 1) & mask)
 	{
-		if (slot[i].v == a && hm_to(m, slot[i].c) == b)
+		if (slot[i].v == a && slot[i].w == b)
 			*out_ab = slot[i].c;
-		else if (slot[i].v == b && hm_to(m, slot[i].c) == a)
+		else if (slot[i].v == b && slot[i].w == a)
 			*out_ba = slot[i].c;
 	}
 	*out_pos = i;
+}
+
+/* every face's vertices in range and distinct */
+static qaws_status hm_faces_ok(unsigned int const* fv, unsigned int const* fs, unsigned int nf, unsigned int nv)
+{
+	unsigned int f, i, off, *stamp = (unsigned int*)qaws_internal_scratch_zalloc(nv ? nv : 1, sizeof(unsigned int));
+	if (!stamp)
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	for (f = 0, off = 0; f < nf; f++)
+	{
+		unsigned int s = fs ? fs[f] : 3;
+		for (i = 0; i < s; i++)
+		{
+			unsigned int v = fv[off + i];
+			if (v >= nv || stamp[v] == f + 1)
+			{
+				qaws_internal_free(stamp);
+				return QAWS_STATUS_INVALID_ARGUMENT;
+			}
+			stamp[v] = f + 1;
+		}
+		off += s;
+	}
+	qaws_internal_free(stamp);
+	return QAWS_STATUS_OK;
+}
+
+/* each vertex's fans: a vertex on several gets a copy per fan past the first */
+static qaws_status hm_fans(qaws_hm* m)
+{
+	unsigned int v, c, j, n = m->nv;
+	unsigned int* vn = (unsigned int*)qaws_internal_scratch_zalloc((size_t)n + 1, sizeof(unsigned int));
+	unsigned int* vl = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (m->nc + 1)));
+	unsigned char* seen = (unsigned char*)qaws_internal_scratch_zalloc((size_t)m->nc + 1, 1);
+	qaws_status st = QAWS_STATUS_OK;
+	if (!vn || !vl || !seen)
+		goto oom;
+	for (c = 0; c < m->nc; c++)
+		vn[m->cv[c] + 1]++;
+	for (v = 0; v < n; v++)
+		vn[v + 1] += vn[v];
+	for (c = 0; c < m->nc; c++)
+		vl[vn[m->cv[c]]++] = c;
+	for (v = n; v > 0; v--)
+		vn[v] = vn[v - 1];
+	vn[0] = 0;
+	for (v = 0; v < n; v++)
+	{
+		unsigned int fans = 0;
+		for (j = vn[v]; j < vn[v + 1]; j++)
+		{
+			unsigned int k0 = vl[j], k, nk = HM_NONE, start, w = v;
+			if (seen[k0])
+				continue;
+			if (fans++)
+			{
+				if (!hm_reserve(m, 1, 0, 0))
+					goto oom;
+				w = hm_new_vertex(m, m->x + (size_t)m->dim * v);
+				m->vsrc[w] = m->vsrc[v];
+			}
+			/* the fan from its clockwise end, counter-clockwise (navigation
+			   does not read the corners' vertices: renaming on the way is safe) */
+			for (k = k0;;)
+			{
+				nk = hm_cw(m, k);
+				if (nk == HM_NONE || nk == k0)
+					break;
+				k = nk;
+			}
+			start = nk == HM_NONE ? k : k0;
+			for (k = start;;)
+			{
+				seen[k] = 1;
+				m->cv[k] = w;
+				nk = hm_ccw(m, k);
+				if (nk == HM_NONE || nk == start)
+					break;
+				k = nk;
+			}
+			m->vc[w] = start;
+		}
+	}
+	goto done;
+oom:
+	st = QAWS_STATUS_ALLOCATION_FAILURE;
+done:
+	qaws_internal_free(vn); qaws_internal_free(vl); qaws_internal_free(seen);
+	return st;
 }
 
 qaws_status hm_build(qaws_hm* m, unsigned int dim, double const* x, unsigned int nv, unsigned int const* fv,
 	unsigned int const* fs, unsigned int nf)
 {
 	size_t total = 0;
-	unsigned int f, i, j, off, mask, v, n, c, smax = 3, fa = 0, offa = 0;
-	unsigned int *stamp = NULL, *vn = NULL, *vl = NULL, *rep = NULL;
+	unsigned int f, i, off, mask, smax = 3, fa = 0, offa = 0;
+	unsigned int *rep = NULL, *hab, *hba, *hpos;
+	int marks;
 	hm_slot* slot = NULL;
-	unsigned char* seen = NULL;
 	qaws_status st = QAWS_STATUS_OK;
 	memset(m, 0, sizeof *m);
 	m->dim = dim;
@@ -372,30 +461,17 @@ qaws_status hm_build(qaws_hm* m, unsigned int dim, double const* x, unsigned int
 	}
 	if (total > 0x3FFFFFFFu)
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	stamp = (unsigned int*)qaws_internal_scratch_zalloc(nv ? nv : 1, sizeof(unsigned int));
-	if (!stamp)
-		return QAWS_STATUS_ALLOCATION_FAILURE;
-	for (f = 0, off = 0; f < nf; f++)
-	{
-		unsigned int s = fs ? fs[f] : 3;
-		for (i = 0; i < s; i++)
-		{
-			v = fv[off + i];
-			if (v >= nv || stamp[v] == f + 1)
-			{
-				qaws_internal_free(stamp);
-				return QAWS_STATUS_INVALID_ARGUMENT;
-			}
-			stamp[v] = f + 1;
-		}
-		off += s;
-	}
-	qaws_internal_free(stamp);
+	st = hm_faces_ok(fv, fs, nf, nv);
+	if (st != QAWS_STATUS_OK)
+		return st;
 	for (mask = 1; mask < 2 * total; mask <<= 1) {}
 	slot = (hm_slot*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(hm_slot), mask));
-	rep = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), smax));
+	rep = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(unsigned int), 4, smax));
 	if (!slot || !rep || !hm_reserve(m, nv, (unsigned int)total, nf))
 		goto oom;
+	hab = rep + smax;   /* (a face's lookups: the corners of a -> b and b -> a, the free slot) */
+	hba = hab + smax;
+	hpos = hba + smax;
 	memset(slot, 0xFF, sizeof(hm_slot) * mask);
 	mask -= 1;
 	for (i = 0; i < nv; i++)
@@ -429,14 +505,18 @@ qaws_status hm_build(qaws_hm* m, unsigned int dim, double const* x, unsigned int
 		m->nf++;
 		/* an edge used the same way already, or by two faces already: this
 		   face gets its own copies of the edge's ends */
+		marks = 0;
 		for (i = 0; i < s; i++)
 		{
-			unsigned int a = m->cv[first + i], b = m->cv[first + (i + 1) % s], ab, o, pos;
-			hm_lookup(m, slot, mask, a, b, &ab, &o, &pos);
-			if (ab != HM_NONE || (o != HM_NONE && m->co[o] != HM_NONE))
+			unsigned int a = m->cv[first + i], b = m->cv[first + (i + 1) % s];
+			hm_lookup(slot, mask, a, b, &hab[i], &hba[i], &hpos[i]);
+			if (hab[i] != HM_NONE || (hba[i] != HM_NONE && m->co[hba[i]] != HM_NONE))
+			{
 				m->cflag[first + i] |= HM_MARK;
+				marks = 1;
+			}
 		}
-		for (i = 0; i < s; i++)
+		for (i = 0; marks && i < s; i++)
 		{
 			unsigned int src = m->cv[first + i];
 			rep[i] = src;
@@ -448,7 +528,7 @@ qaws_status hm_build(qaws_hm* m, unsigned int dim, double const* x, unsigned int
 				m->vsrc[rep[i]] = m->vsrc[src];
 			}
 		}
-		for (i = 0; i < s; i++)
+		for (i = 0; marks && i < s; i++)
 		{
 			m->cv[first + i] = rep[i];
 			m->cflag[first + i] = 0;
@@ -456,10 +536,20 @@ qaws_status hm_build(qaws_hm* m, unsigned int dim, double const* x, unsigned int
 		for (i = 0; i < s; i++)
 		{
 			unsigned int a = m->cv[first + i], b = m->cv[first + (i + 1) % s], pos, ab, o;
-			hm_lookup(m, slot, mask, a, b, &ab, &o, &pos);
+			if (marks)
+				hm_lookup(slot, mask, a, b, &ab, &o, &pos);
+			else
+			{
+				/* the face's vertices as looked up: the same answers (its edges are distinct), the free slot past
+				   those its earlier edges took */
+				ab = hab[i];
+				o = hba[i];
+				for (pos = hpos[i]; slot[pos].c != HM_NONE; pos = (pos + 1) & mask) {}
+			}
 			if (ab != HM_NONE)
 				continue;   /* (not after the copies) */
 			slot[pos].v = a;
+			slot[pos].w = b;
 			slot[pos].c = first + i;
 			if (o != HM_NONE && m->co[o] == HM_NONE)
 			{
@@ -468,64 +558,55 @@ qaws_status hm_build(qaws_hm* m, unsigned int dim, double const* x, unsigned int
 			}
 		}
 	}
-	/* each vertex's fans: a vertex on several gets a copy per fan past the first */
-	n = m->nv;
-	vn = (unsigned int*)qaws_internal_scratch_zalloc((size_t)n + 1, sizeof(unsigned int));
-	vl = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (m->nc + 1)));
-	seen = (unsigned char*)qaws_internal_scratch_zalloc((size_t)m->nc + 1, 1);
-	if (!vn || !vl || !seen)
-		goto oom;
-	for (c = 0; c < m->nc; c++)
-		vn[m->cv[c] + 1]++;
-	for (v = 0; v < n; v++)
-		vn[v + 1] += vn[v];
-	for (c = 0; c < m->nc; c++)
-		vl[vn[m->cv[c]]++] = c;
-	for (v = n; v > 0; v--)
-		vn[v] = vn[v - 1];
-	vn[0] = 0;
-	for (v = 0; v < n; v++)
-	{
-		unsigned int fans = 0;
-		for (j = vn[v]; j < vn[v + 1]; j++)
-		{
-			unsigned int k0 = vl[j], k, nk = HM_NONE, start, w = v;
-			if (seen[k0])
-				continue;
-			if (fans++)
-			{
-				if (!hm_reserve(m, 1, 0, 0))
-					goto oom;
-				w = hm_new_vertex(m, m->x + (size_t)dim * v);
-				m->vsrc[w] = m->vsrc[v];
-			}
-			/* the fan from its clockwise end, counter-clockwise (navigation
-			   does not read the corners' vertices: renaming on the way is safe) */
-			for (k = k0;;)
-			{
-				nk = hm_cw(m, k);
-				if (nk == HM_NONE || nk == k0)
-					break;
-				k = nk;
-			}
-			start = nk == HM_NONE ? k : k0;
-			for (k = start;;)
-			{
-				seen[k] = 1;
-				m->cv[k] = w;
-				nk = hm_ccw(m, k);
-				if (nk == HM_NONE || nk == start)
-					break;
-				k = nk;
-			}
-			m->vc[w] = start;
-		}
-	}
+	st = hm_fans(m);
 	goto done;
 oom:
 	st = QAWS_STATUS_ALLOCATION_FAILURE;
 done:
-	qaws_internal_free(slot); qaws_internal_free(rep); qaws_internal_free(vn); qaws_internal_free(vl); qaws_internal_free(seen);
+	qaws_internal_free(slot); qaws_internal_free(rep);
+	if (st != QAWS_STATUS_OK)
+		hm_free(m);
+	return st;
+}
+
+qaws_status hm_build_paired(qaws_hm* m, unsigned int dim, double const* x, unsigned int nv, unsigned int const* tri,
+	unsigned int const* opposite, unsigned int nt)
+{
+	unsigned int i;
+	qaws_status st;
+	memset(m, 0, sizeof *m);
+	m->dim = dim;
+	if (3 * (size_t)nt > 0x3FFFFFFFu)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	st = hm_faces_ok(tri, NULL, nt, nv);
+	if (st != QAWS_STATUS_OK)
+		return st;
+	if (!hm_reserve(m, nv, 3 * nt, nt))
+	{
+		hm_free(m);
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	}
+	for (i = 0; i < nv; i++)
+	{
+		hm_new_vertex(m, x + (size_t)dim * i);
+		m->vsrc[i] = i;
+	}
+	for (i = 0; i < nt; i++)
+	{
+		m->fc[i] = 3 * i;
+		m->fn[i] = 3;
+		m->fflag[i] = 0;
+	}
+	for (i = 0; i < 3 * nt; i++)
+	{
+		m->cv[i] = tri[i];
+		m->co[i] = opposite[i];
+		m->cf[i] = i / 3;
+		m->cflag[i] = 0;
+	}
+	m->nc = 3 * nt;
+	m->nf = nt;
+	st = hm_fans(m);
 	if (st != QAWS_STATUS_OK)
 		hm_free(m);
 	return st;
