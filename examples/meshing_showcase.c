@@ -62,6 +62,8 @@
  *                      view, its top from views above, a can's rims as creases, importance
  *   mesh34_remesh_attributes.png  remeshing from attributes: isolines kept as lines,
  *                      two attributes' Hessian metrics intersected, graded
+ *   mesh35_connect.png the mesh connector: two tubes at an angle joined (faired too),
+ *                      a funnel between tubes of 32 and 12 sides
  *
  * Each figure lives in meshing_showcase/NN_*.c, compiled as one translation
  * unit with the rasterizer in example_raster.h.
@@ -227,15 +229,16 @@ static void ms_panel(er_canvas* c, int x, int y, int w, int h, qaws_mesh_3d cons
 #include "meshing_showcase/32_decimate.c"
 #include "meshing_showcase/33_decimate_views.c"
 #include "meshing_showcase/34_remesh_attributes.c"
+#include "meshing_showcase/35_connect.c"
 
-/* the figures to draw: all, or those whose keys the first argument lists ("58"; figures 10 to 34 are a to y) */
+/* the figures to draw: all, or those whose keys the first argument lists ("58"; figures 10 to 35 are a to z) */
 int main(int argc, char** argv)
 {
 	static void (*const demo[])(void) = { demo_core, demo_reference, demo_remesh, demo_quads, demo_generate, demo_tets, demo_hexes, demo_frame_hexes,
 		demo_measures, demo_remesh_angles, demo_remesh_cvt, demo_cross_field, demo_quad_flow, demo_quad_improve,
 		demo_quad_global, demo_guidance, demo_feature_size, demo_repair, demo_layers, demo_curved, demo_metric, demo_bvh, demo_quality, demo_repair_more, demo_watertight,
-		demo_intersect, demo_boolean, demo_geodesic, demo_smooth, demo_deform, demo_deform_2, demo_decimate, demo_decimate_views, demo_remesh_attributes };
-	static char const key[] = "123456789abcdefghijklmnopqrstuvwxy";
+		demo_intersect, demo_boolean, demo_geodesic, demo_smooth, demo_deform, demo_deform_2, demo_decimate, demo_decimate_views, demo_remesh_attributes, demo_connect };
+	static char const key[] = "123456789abcdefghijklmnopqrstuvwxyz";
 	unsigned int i;
 	setvbuf(stdout, NULL, _IONBF, 0);
 	MAKE_DIR("showcase");

@@ -182,6 +182,7 @@ extern int test_165_mesh_smooth_main(void);
 extern int test_166_mesh_deform_main(void);
 extern int test_167_mesh_decimate_main(void);
 extern int test_168_remesh_attributes_main(void);
+extern int test_169_mesh_connect_main(void);
 
 /* Test registry */
 typedef struct {
@@ -359,6 +360,7 @@ static test_suite const g_test_suites[] = {
 	{"166_mesh_deform", test_166_mesh_deform_main},
 	{"167_mesh_decimate", test_167_mesh_decimate_main},
 	{"168_remesh_attributes", test_168_remesh_attributes_main},
+	{"169_mesh_connect", test_169_mesh_connect_main},
 };
 
 int main(void) {

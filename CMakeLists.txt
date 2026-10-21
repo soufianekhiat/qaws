@@ -129,6 +129,7 @@ src/qaws/mesh/qaws_mesh_smooth.c
 src/qaws/mesh/qaws_mesh_deform.c
 src/qaws/mesh/qaws_mesh_param.c
 src/qaws/mesh/qaws_mesh_decimate.c
+src/qaws/mesh/qaws_mesh_connect.c
 src/qaws/mesh/qaws_mesh_intersect.c
   src/qaws/qaws_convert.c
   src/qaws/qaws_export.c

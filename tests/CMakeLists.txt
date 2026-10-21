@@ -170,6 +170,7 @@ add_executable(
 166_mesh_deform.c
 167_mesh_decimate.c
 168_remesh_attributes.c
+169_mesh_connect.c
 )
 
 # The amalgamated library exports exactly the same symbols, so the tests can

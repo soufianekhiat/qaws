@@ -56,6 +56,10 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- The mesh connector (`qaws_mesh_3d_connect`): two border loops (on two
+  meshes or one) joined by a bridge matched by arc length, Hermite-blended
+  along both surfaces (tangent to both), rows and counts graded, quads or
+  zipped triangles, optional smoothing. Test 169, figure 35 (key z).
 - Remeshing from attributes: `qaws_mesh_3d_cut_isolines` (an attribute's
   isolines cut in as feature lines, kept through remeshing),
   `qaws_metric_field_create_intersection` (several attributes' metrics
