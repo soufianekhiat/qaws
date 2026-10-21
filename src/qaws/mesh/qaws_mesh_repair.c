@@ -10,6 +10,7 @@
 #include "../qaws_mesh_repair.h"
 #include "../internal/qaws_internal_broadphase.h"
 #include "../internal/qaws_internal_ldlt.h"
+#include "../qaws_exact.h"
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -1123,6 +1124,10 @@ typedef struct rp_fill_ctx
 	double* sigma;              /* per vertex: the length its edges should have */
 	unsigned int scap;
 	unsigned int* O;            /* scratch: per loop edge the third vertex of its face */
+	unsigned char* lock;        /* per vertex (as sigma): on a crease path across a fill, its edges never flipped, never faired */
+	unsigned int* crease;       /* per vertex before the fills: the far end of its one crease edge (HM_NONE: none or several) */
+	unsigned char* crease_used; /* per vertex before the fills: its crease continued already */
+	unsigned int ncrease;
 } rp_fill_ctx;
 
 static int rp_sigma_room(rp_fill_ctx* c, unsigned int nv)
@@ -1131,9 +1136,15 @@ static int rp_sigma_room(rp_fill_ctx* c, unsigned int nv)
 	{
 		unsigned int cap = qaws_internal_grow(c->scap, nv, 16);
 		double* s = cap ? (double*)qaws_internal_realloc(c->sigma, qaws_internal_mul2(sizeof(double), cap)) : NULL;
+		unsigned char* l;
 		if (!s)
 			return 0;
 		c->sigma = s;
+		l = (unsigned char*)qaws_internal_realloc(c->lock, cap);
+		if (!l)
+			return 0;
+		memset(l + c->scap, 0, cap - c->scap);
+		c->lock = l;
 		c->scap = cap;
 	}
 	return 1;
@@ -1142,7 +1153,10 @@ static int rp_sigma_room(rp_fill_ctx* c, unsigned int nv)
 /* the cosine of the angle between unit normals; -1 (the worst) when one is degenerate */
 static double rp_cos(double const* a, double const* b)
 {
-	double d = mrp_dot(a, b);
+	double d;
+	if (b[0] == HUGE_VAL)
+		return 1;
+	d = mrp_dot(a, b);
 	return mrp_dot(a, a) > 0 && mrp_dot(b, b) > 0 ? d : -1;
 }
 
@@ -1167,8 +1181,14 @@ static void rp_fill_dp(rp_work* w, rp_fill_ctx const* c, unsigned int const* L, 
 	}
 	for (i = 0; i < n; i++)
 	{
-		rp_normal(RP_X(m, L[i]), RP_X(m, L[(i + 1) % n]), RP_X(m, O[i]), Ne + 3 * i);
-		rp_unit(Ne + 3 * i);
+		/* an edge with no face beside it (a crease path, a halving diagonal): its neighbour judged level with the new face */
+		if (O[i] == HM_NONE)
+			Ne[3 * i] = Ne[3 * i + 1] = Ne[3 * i + 2] = HUGE_VAL;
+		else
+		{
+			rp_normal(RP_X(m, L[i]), RP_X(m, L[(i + 1) % n]), RP_X(m, O[i]), Ne + 3 * i);
+			rp_unit(Ne + 3 * i);
+		}
 		if (i + 1 < n)
 		{
 			A[i * (size_t)n + i + 1] = 1;
@@ -1230,6 +1250,279 @@ done:
 	qaws_internal_free(stack);
 }
 
+/* loop L (third vertices O) filled: by the programme up to RP_DP_MAX vertices, else halved by its shortest diagonal between
+   vertices a third to a half of the loop apart (sampled), the diagonal an edge with no face beside it in each half,
+   recursively */
+static void rp_fill_long(rp_work* w, rp_fill_ctx const* c, unsigned int const* L, unsigned int const* O, unsigned int n)
+{
+	rp_mesh* m = &w->m;
+	unsigned int step = n / 256 + 1, i, j, bi = 0, bj = n / 2, na, nb, k;
+	double best = HUGE_VAL;
+	unsigned int *A, *B;
+	if (n <= RP_DP_MAX)
+	{
+		rp_fill_dp(w, c, L, O, n);
+		return;
+	}
+	for (i = 0; i < n; i += step)
+		for (j = i + n / 3; j <= i + n / 2; j += step)
+		{
+			double d = rp_dist(RP_X(m, L[i]), RP_X(m, L[j % n]));
+			if (d < best)
+			{
+				best = d;
+				bi = i;
+				bj = j % n;
+			}
+		}
+	if (bj < bi)
+	{
+		unsigned int t = bi;
+		bi = bj;
+		bj = t;
+	}
+	na = bj - bi + 1;
+	nb = n - na + 2;
+	A = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(unsigned int), 2, (size_t)na));
+	B = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(unsigned int), 2, (size_t)nb));
+	if (!A || !B)
+	{
+		w->st = QAWS_STATUS_ALLOCATION_FAILURE;
+		qaws_internal_free(A);
+		qaws_internal_free(B);
+		return;
+	}
+	/* A: L[bi..bj], closed by bj -> bi; B: L[bj..bi + n], closed by bi -> bj */
+	for (k = 0; k < na; k++)
+	{
+		A[k] = L[bi + k];
+		A[na + k] = O[bi + k];
+	}
+	A[na + na - 1] = HM_NONE;
+	for (k = 0; k < nb; k++)
+	{
+		B[k] = L[(bj + k) % n];
+		B[nb + k] = O[(bj + k) % n];
+	}
+	B[nb + nb - 1] = HM_NONE;
+	rp_fill_long(w, c, A, A + na, na);
+	if (w->st == QAWS_STATUS_OK)
+		rp_fill_long(w, c, B, B + nb, nb);
+	qaws_internal_free(A);
+	qaws_internal_free(B);
+}
+
+/* a new vertex on a crease path: its length wanted, locked */
+static unsigned int rp_path_vertex(rp_work* w, rp_fill_ctx* c, double const* p, double sigma)
+{
+	unsigned int v = rp_add_v(&w->m, p);
+	if (v == HM_NONE || !rp_sigma_room(c, w->m.nv))
+	{
+		w->st = QAWS_STATUS_ALLOCATION_FAILURE;
+		return HM_NONE;
+	}
+	c->sigma[v] = sigma;
+	c->lock[v] = 1;
+	return v;
+}
+
+/* the inner vertices of a path from vertex a to point q (b: its vertex, or HM_NONE for a point not made yet): a cubic Hermite
+   leaving a along da and arriving along -db (straight when da or db is NULL), one vertex per wanted length; into P, the count
+   returned (at most cap) */
+static unsigned int rp_path(rp_work* w, rp_fill_ctx* c, unsigned int a, double const* q, double sq, double const* da, double const* db, unsigned int* P,
+	unsigned int cap)
+{
+	double p[3], len, sg, x[3];
+	unsigned int s, i, k;
+	memcpy(p, RP_X(&w->m, a), sizeof p);
+	len = rp_dist(p, q);
+	sg = 0.5 * (c->sigma[a] + sq);
+	s = sg > 0 ? (unsigned int)floor(len / sg + 0.5) : 1;
+	s = s < 1 ? 1 : s > cap + 1 ? cap + 1 : s;
+	for (i = 1; i < s; i++)
+	{
+		double t = (double)i / s, h00 = 2 * t * t * t - 3 * t * t + 1, h10 = t * t * t - 2 * t * t + t, h01 = -2 * t * t * t + 3 * t * t, h11 = t * t * t - t * t;
+		for (k = 0; k < 3; k++)
+			x[k] = da && db ? h00 * p[k] + h10 * len * da[k] + h01 * q[k] - h11 * len * db[k] : p[k] + t * (q[k] - p[k]);
+		P[i - 1] = rp_path_vertex(w, c, x, sg);
+		if (P[i - 1] == HM_NONE)
+			return 0;
+	}
+	return s - 1;
+}
+
+/* a sub-loop: L[i0..i1] along the loop (indices mod n) with its third vertices, then the k vertices of Q, its edges after the
+   loop's free */
+static void rp_sub_loop(unsigned int const* L, unsigned int const* O, unsigned int n, unsigned int i0, unsigned int i1, unsigned int const* Q,
+	unsigned int k, unsigned int* S, unsigned int* SO, unsigned int* out_n)
+{
+	unsigned int j = 0, i;
+	for (i = i0;; i = (i + 1) % n)
+	{
+		S[j] = L[i];
+		SO[j++] = i == i1 ? HM_NONE : O[i];
+		if (i == i1)
+			break;
+	}
+	for (i = 0; i < k; i++)
+	{
+		S[j] = Q[i];
+		SO[j++] = HM_NONE;
+	}
+	*out_n = j;
+}
+
+static void rp_fill_feature(rp_work* w, rp_fill_ctx* c, unsigned int const* L, unsigned int const* O, unsigned int n, unsigned int depth);
+
+/* the loop split along crease paths inside it: two crease ends facing each other joined, or three and more meeting at a point
+   (a corner), and each part filled on its own; otherwise filled whole */
+static void rp_fill_feature(rp_work* w, rp_fill_ctx* c, unsigned int const* L, unsigned int const* O, unsigned int n, unsigned int depth)
+{
+	rp_mesh* m = &w->m;
+	unsigned int ent[16], ne = 0, i, j, k, ba = 0, bb = 0, *S = NULL, *SO = NULL, *P = NULL;
+	double dir[16][3], best = HUGE_VAL;
+	for (i = 0; i < n && ne < 16 && depth < 8; i++)
+		if (L[i] < c->ncrease && c->crease[L[i]] != HM_NONE && !c->crease_used[L[i]])
+		{
+			mrp_sub(RP_X(m, L[i]), RP_X(m, c->crease[L[i]]), dir[ne]);
+			if (rp_unit(dir[ne]) > 0)
+				ent[ne++] = i;
+		}
+	if (ne < 2)
+	{
+		rp_fill_long(w, c, L, O, n);
+		return;
+	}
+	/* the pair facing each other best (each end's crease within 37 degrees of the chord), at least two loop steps apart both ways */
+	for (i = 0; i < ne; i++)
+		for (j = i + 1; j < ne; j++)
+		{
+			double ch[3], l, ci, cj;
+			unsigned int gap = ent[j] - ent[i];
+			if (gap < 2 || n - gap < 2)
+				continue;
+			mrp_sub(RP_X(m, L[ent[j]]), RP_X(m, L[ent[i]]), ch);
+			l = rp_unit(ch);
+			if (!(l > 0))
+				continue;
+			ci = mrp_dot(dir[i], ch);
+			cj = -mrp_dot(dir[j], ch);
+			if (ci > 0.8 && cj > 0.8 && 2 - ci - cj < best)
+			{
+				best = 2 - ci - cj;
+				ba = i;
+				bb = j;
+			}
+		}
+	S = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (size_t)n + 4096));
+	SO = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (size_t)n + 4096));
+	P = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), 4096));
+	if (!S || !SO || !P)
+	{
+		w->st = QAWS_STATUS_ALLOCATION_FAILURE;
+		goto done;
+	}
+	if (best < HUGE_VAL)
+	{
+		unsigned int a = L[ent[ba]], b = L[ent[bb]], np, ns;
+		double q[3];
+		memcpy(q, RP_X(m, b), sizeof q);
+		c->crease_used[a] = c->crease_used[b] = 1;
+		c->lock[a] = c->lock[b] = 1;
+		np = rp_path(w, c, a, q, c->sigma[b], dir[ba], dir[bb], P, 2048);
+		if (w->st != QAWS_STATUS_OK)
+			goto done;
+		/* the side from a to b along the loop, back over the path reversed; then the other side, forward over the path */
+		for (k = 0; k < np; k++)
+			P[2048 + k] = P[np - 1 - k];
+		rp_sub_loop(L, O, n, ent[ba], ent[bb], P + 2048, np, S, SO, &ns);
+		rp_fill_feature(w, c, S, SO, ns, depth + 1);
+		if (w->st == QAWS_STATUS_OK)
+		{
+			rp_sub_loop(L, O, n, ent[bb], ent[ba], P, np, S, SO, &ns);
+			rp_fill_feature(w, c, S, SO, ns, depth + 1);
+		}
+		goto done;
+	}
+	if (ne >= 3)
+	{
+		/* a corner: the point nearest every crease line, ahead of each end and within a quarter of its distance of each line */
+		double A[9] = { 0, 0, 0, 0, 0, 0, 0, 0, 0 }, rhs[3] = { 0, 0, 0 }, C[3], det, sg = 0;
+		int ok = 1;
+		unsigned int cv, np[16], off[16], tot = 0, ns;
+		for (i = 0; i < ne; i++)
+		{
+			double const* p = RP_X(m, L[ent[i]]);
+			for (j = 0; j < 3; j++)
+				for (k = 0; k < 3; k++)
+				{
+					double e = (j == k) - dir[i][j] * dir[i][k];
+					A[3 * j + k] += e;
+					rhs[j] += e * p[k];
+				}
+			sg += c->sigma[L[ent[i]]] / ne;
+		}
+		det = A[0] * (A[4] * A[8] - A[5] * A[7]) - A[1] * (A[3] * A[8] - A[5] * A[6]) + A[2] * (A[3] * A[7] - A[4] * A[6]);
+		if (fabs(det) < 1e-12)
+			ok = 0;
+		else
+			for (j = 0; j < 3; j++)
+			{
+				double M[9];
+				memcpy(M, A, sizeof M);
+				M[j] = rhs[0];
+				M[3 + j] = rhs[1];
+				M[6 + j] = rhs[2];
+				C[j] = (M[0] * (M[4] * M[8] - M[5] * M[7]) - M[1] * (M[3] * M[8] - M[5] * M[6]) + M[2] * (M[3] * M[7] - M[4] * M[6])) / det;
+			}
+		for (i = 0; i < ne && ok; i++)
+		{
+			double v[3], t, off2[3];
+			mrp_sub(C, RP_X(m, L[ent[i]]), v);
+			t = mrp_dot(v, dir[i]);
+			off2[0] = v[0] - t * dir[i][0];
+			off2[1] = v[1] - t * dir[i][1];
+			off2[2] = v[2] - t * dir[i][2];
+			ok = t > 0 && sqrt(mrp_dot(off2, off2)) < 0.25 * t;
+		}
+		if (ok)
+		{
+			cv = rp_path_vertex(w, c, C, sg);
+			if (cv == HM_NONE)
+				goto done;
+			for (i = 0; i < ne; i++)
+			{
+				unsigned int e = L[ent[i]];
+				c->crease_used[e] = 1;
+				c->lock[e] = 1;
+				off[i] = tot;
+				np[i] = rp_path(w, c, e, C, sg, NULL, NULL, P + tot, (2048 - tot) / 2);
+				if (w->st != QAWS_STATUS_OK)
+					goto done;
+				tot += np[i];
+			}
+			/* each sector: the loop from one end to the next, in over the next end's path, the corner, out over this end's path */
+			for (i = 0; i < ne && w->st == QAWS_STATUS_OK; i++)
+			{
+				unsigned int nx = (i + 1) % ne, q = 0;
+				for (k = 0; k < np[nx]; k++)
+					P[2048 + q++] = P[off[nx] + k];
+				P[2048 + q++] = cv;
+				for (k = np[i]; k-- > 0;)
+					P[2048 + q++] = P[off[i] + k];
+				rp_sub_loop(L, O, n, ent[i], ent[nx], P + 2048, q, S, SO, &ns);
+				rp_fill_feature(w, c, S, SO, ns, depth + 1);
+			}
+			goto done;
+		}
+	}
+	rp_fill_long(w, c, L, O, n);
+done:
+	qaws_internal_free(S);
+	qaws_internal_free(SO);
+	qaws_internal_free(P);
+}
+
 /* one boundary loop (pv: its vertices, pr: its boundary records' indices into be) filled, or counted as left */
 static void rp_fill_loop(rp_work* w, rp_fill_ctx* c, unsigned int const* be, unsigned int const* pv, unsigned int const* pr, unsigned int n)
 {
@@ -1247,32 +1540,7 @@ static void rp_fill_loop(rp_work* w, rp_fill_ctx* c, unsigned int const* be, uns
 		w->r->holes_left++;
 		return;
 	}
-	if (n <= RP_DP_MAX)
-		rp_fill_dp(w, c, pv, c->O, n);
-	else
-	{
-		/* shortcut: a fan from the centroid past RP_DP_MAX vertices, folded where the loop is far from star-shaped round it;
-		   upgrade to halving the loop by its shortest diagonal if such holes come up */
-		double C[3] = { 0, 0, 0 }, sg = 0;
-		unsigned int v;
-		for (i = 0; i < n; i++)
-		{
-			C[0] += RP_X(m, pv[i])[0] / n;
-			C[1] += RP_X(m, pv[i])[1] / n;
-			C[2] += RP_X(m, pv[i])[2] / n;
-			sg += c->sigma[pv[i]] / n;
-		}
-		v = rp_add_v(m, C);
-		if (v == HM_NONE || !rp_sigma_room(c, m->nv))
-		{
-			w->st = QAWS_STATUS_ALLOCATION_FAILURE;
-			return;
-		}
-		c->sigma[v] = sg;
-		for (i = 0; i < n && w->st == QAWS_STATUS_OK; i++)
-			if (!rp_add_t(m, pv[(i + 1) % n], pv[i], v, -1, 0))
-				w->st = QAWS_STATUS_ALLOCATION_FAILURE;
-	}
+	rp_fill_feature(w, c, pv, c->O, n, 0);
 	w->r->holes_filled++;
 }
 
@@ -1306,7 +1574,7 @@ static void rp_relax(rp_work* w, rp_fill_ctx const* c, unsigned int t0)
 			if (m->t[3 * (size_t)g + F[r + 1].k] != b)
 				continue;
 			q = m->t[3 * (size_t)g + (F[r + 1].k + 2) % 3];
-			if (p == q || rp_has_edge(F, nf, p, q) || rp_has_edge(c->E, c->ne, p, q))
+			if (p == q || rp_has_edge(F, nf, p, q) || rp_has_edge(c->E, c->ne, p, q) || (c->lock && c->lock[a] && c->lock[b]))
 				continue;
 			mrp_sub(RP_X(m, a), RP_X(m, p), u);
 			mrp_sub(RP_X(m, b), RP_X(m, p), v);
@@ -1403,10 +1671,12 @@ static int rp_trip_cmp(void const* p, void const* q)
 /* the fills' new vertices (from v0) faired: the Laplacian (Liepa's scale-dependent umbrella, neighbours weighted by
    1 / length) at them and at the vertices next to them made least in the sum of squares (the bi-Laplacian's normal
    equations, one LDL^T), every other vertex held */
-static void rp_fair(rp_work* w, unsigned int v0)
+#define RP_FREE(v) ((v) >= v0 && fi[(v) - v0] != HM_NONE)
+static void rp_fair(rp_work* w, unsigned int v0, unsigned char const* lock)
 {
 	rp_mesh* m = &w->m;
-	unsigned int nv = m->nv, nfree = nv - v0, ne, r, k, v, i, j, maxd = 0, nt = 0, ct = 0;
+	unsigned int nv = m->nv, nfree = 0, ne, r, k, v, i, j, maxd = 0, nt = 0, ct = 0;
+	unsigned int* fi = NULL;   /* per vertex from v0: its unknown, or HM_NONE when locked */
 	rp_he* E = NULL;
 	unsigned int *deg = NULL, *off = NULL, *adj = NULL, *rp = NULL, *col = NULL, *fc = NULL;
 	double *val = NULL, *b = NULL, *xyz = NULL, *sol = NULL, *fw = NULL;
@@ -1414,8 +1684,15 @@ static void rp_fair(rp_work* w, unsigned int v0)
 	qaws_internal_ldlt L;
 	qaws_status st;
 	memset(&L, 0, sizeof L);
-	if (!nfree)
+	if (nv <= v0)
 		return;
+	fi = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), nv - v0));
+	if (!fi)
+		goto oom;
+	for (v = v0; v < nv; v++)
+		fi[v - v0] = lock && lock[v] ? HM_NONE : nfree++;
+	if (!nfree)
+		goto done;
 	E = rp_edges(m, 0, m->nt, &ne);
 	deg = (unsigned int*)qaws_internal_scratch_zalloc(nv, sizeof(unsigned int));
 	off = (unsigned int*)qaws_internal_scratch_zalloc(nv + 1, sizeof(unsigned int));
@@ -1450,25 +1727,26 @@ static void rp_fair(rp_work* w, unsigned int v0)
 	{
 		unsigned int nfc = 0;
 		double rh[3] = { 0, 0, 0 }, inv;
-		int row = v >= v0;
+		int row = RP_FREE(v);
 		for (i = off[v]; i < off[v + 1] && !row; i++)
-			row = adj[i] >= v0;
-		if (!row || !deg[v])
+			row = RP_FREE(adj[i]);
+		/* (no row at a crease path's vertex: its neighbours lie on both sides) */
+		if (!row || !deg[v] || (lock && lock[v]))
 			continue;
 		for (i = off[v], inv = 0; i < off[v + 1]; i++)
 			inv += 1 / fmax(rp_dist(RP_X(m, v), RP_X(m, adj[i])), 1e-300);
-		if (v >= v0)
+		if (RP_FREE(v))
 		{
-			fc[nfc] = v - v0;
+			fc[nfc] = fi[v - v0];
 			fw[nfc++] = -1;
 		}
 		else
 			for (k = 0; k < 3; k++)
 				rh[k] -= RP_X(m, v)[k];
 		for (i = off[v]; i < off[v + 1]; i++)
-			if (adj[i] >= v0)
+			if (RP_FREE(adj[i]))
 			{
-				fc[nfc] = adj[i] - v0;
+				fc[nfc] = fi[adj[i] - v0];
 				fw[nfc++] = 1 / (fmax(rp_dist(RP_X(m, v), RP_X(m, adj[i])), 1e-300) * inv);
 			}
 			else
@@ -1516,7 +1794,9 @@ static void rp_fair(rp_work* w, unsigned int v0)
 	}
 	for (i = 0; i < nfree; i++)
 		rp[i + 1] += rp[i];
-	memcpy(xyz, RP_X(m, v0), sizeof(double) * 3 * (size_t)nfree);
+	for (v = v0; v < nv; v++)
+		if (RP_FREE(v))
+			memcpy(xyz + 3 * (size_t)fi[v - v0], RP_X(m, v), sizeof(double) * 3);
 	st = qaws_internal_ldlt_factor(&L, rp, col, val, xyz, nfree, 0);
 	if (st == QAWS_STATUS_ALLOCATION_FAILURE)
 		goto oom;
@@ -1526,16 +1806,18 @@ static void rp_fair(rp_work* w, unsigned int v0)
 			for (i = 0; i < nfree; i++)
 				sol[i] = b[3 * (size_t)i + k];
 			qaws_internal_ldlt_solve(sol, &L, sol);
-			for (i = 0; i < nfree; i++)
-				RP_X(m, v0 + i)[k] = sol[i];
+			for (v = v0; v < nv; v++)
+				if (RP_FREE(v))
+					RP_X(m, v)[k] = sol[fi[v - v0]];
 		}
 	goto done;
 oom:
 	w->st = QAWS_STATUS_ALLOCATION_FAILURE;
 done:
 	qaws_internal_ldlt_free(&L);
-	qaws_internal_free(E); qaws_internal_free(deg); qaws_internal_free(off); qaws_internal_free(adj); qaws_internal_free(rp); qaws_internal_free(col); qaws_internal_free(fc); qaws_internal_free(val); qaws_internal_free(b); qaws_internal_free(xyz); qaws_internal_free(sol); qaws_internal_free(fw); qaws_internal_free(T);
+	qaws_internal_free(E); qaws_internal_free(deg); qaws_internal_free(off); qaws_internal_free(adj); qaws_internal_free(rp); qaws_internal_free(col); qaws_internal_free(fc); qaws_internal_free(val); qaws_internal_free(b); qaws_internal_free(xyz); qaws_internal_free(sol); qaws_internal_free(fw); qaws_internal_free(T); qaws_internal_free(fi);
 }
+#undef RP_FREE
 
 /* boundary loops traced over the half-edges alone on their edges (a loop meeting itself at a vertex cut there) and filled */
 static void rp_fill(rp_work* w, double perimeter, unsigned int flags, unsigned int const* shell, unsigned char const* bad)
@@ -1548,10 +1830,41 @@ static void rp_fill(rp_work* w, double perimeter, unsigned int flags, unsigned i
 	unsigned char* used = NULL;
 	memset(&c, 0, sizeof c);
 	c.sigma = (double*)qaws_internal_zalloc(nv0 ? nv0 : 1, sizeof(double));
+	c.lock = (unsigned char*)qaws_internal_zalloc(nv0 ? nv0 : 1, 1);
+	c.crease = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (nv0 ? nv0 : 1)));
+	c.crease_used = (unsigned char*)qaws_internal_scratch_zalloc(nv0 ? nv0 : 1, 1);
+	c.ncrease = nv0;
 	c.scap = nv0 ? nv0 : 1;
 	cnt = (unsigned int*)qaws_internal_scratch_zalloc(nv0 ? nv0 : 1, sizeof(unsigned int));
-	if (!E || !c.sigma || !cnt)
+	if (!E || !c.sigma || !cnt || !c.lock || !c.crease || !c.crease_used)
 		goto oom;
+	for (v = 0; v < nv0; v++)
+		c.crease[v] = HM_NONE;
+	/* creases: edges of two faces whose normals part by more than 40 degrees; a vertex on one keeps its far end, on several none */
+	for (r = 0; r < ne; r = k)
+	{
+		k = rp_group_end(E, ne, r);
+		if (k - r == 2)
+		{
+			unsigned int a = (unsigned int)(E[r].key >> 32), b = (unsigned int)E[r].key, f0 = E[r].f, f1 = E[r + 1].f, e;
+			double n0[3], n1[3];
+			rp_normal(RP_X(m, m->t[3 * (size_t)f0]), RP_X(m, m->t[3 * (size_t)f0 + 1]), RP_X(m, m->t[3 * (size_t)f0 + 2]), n0);
+			rp_normal(RP_X(m, m->t[3 * (size_t)f1]), RP_X(m, m->t[3 * (size_t)f1 + 1]), RP_X(m, m->t[3 * (size_t)f1 + 2]), n1);
+			if (rp_unit(n0) > 0 && rp_unit(n1) > 0 && mrp_dot(n0, n1) < 0.766)
+				for (e = 0; e < 2; e++)
+				{
+					unsigned int p = e ? b : a, q = e ? a : b;
+					if (!c.crease_used[p])
+					{
+						c.crease[p] = q;
+						c.crease_used[p] = 1;
+					}
+					else
+						c.crease[p] = HM_NONE;
+				}
+		}
+	}
+	memset(c.crease_used, 0, nv0 ? nv0 : 1);
 	c.E = E;
 	c.ne = ne;
 	c.perimeter = perimeter;
@@ -1655,7 +1968,7 @@ static void rp_fill(rp_work* w, double perimeter, unsigned int flags, unsigned i
 	{
 		rp_refine(w, &c, nt0);
 		if (w->st == QAWS_STATUS_OK && !(flags & QAWS_MESH_REPAIR_FLAT_FILLS))
-			rp_fair(w, nv0);
+			rp_fair(w, nv0, c.lock);
 	}
 	w->r->fill_faces += m->nt - nt0;
 	goto done;
@@ -1663,7 +1976,395 @@ oom:
 	w->st = QAWS_STATUS_ALLOCATION_FAILURE;
 done:
 	qaws_internal_free(E); qaws_internal_free(be); qaws_internal_free(start); qaws_internal_free(cur); qaws_internal_free(ord); qaws_internal_free(inpath); qaws_internal_free(pv); qaws_internal_free(pr); qaws_internal_free(used); qaws_internal_free(cnt);
-	qaws_internal_free(c.sigma); qaws_internal_free(c.O);
+	qaws_internal_free(c.sigma); qaws_internal_free(c.O); qaws_internal_free(c.lock); qaws_internal_free(c.crease); qaws_internal_free(c.crease_used);
+}
+
+/* ---- closed parts by volume ---------------------------------------------- */
+
+/* closed parts (every edge's directed uses cancel) holding less volume than min_volume removed */
+static void rp_small_volumes(rp_work* w, double min_volume)
+{
+	rp_mesh* m = &w->m;
+	unsigned int ne, r, k, i, v, f;
+	rp_he* E = rp_edges(m, 0, m->nt, &ne);
+	unsigned int* uf = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (m->nv ? m->nv : 1)));
+	unsigned int* cnt = (unsigned int*)qaws_internal_scratch_zalloc(m->nv ? m->nv : 1, sizeof(unsigned int));
+	double* vol = (double*)qaws_internal_scratch_zalloc(m->nv ? m->nv : 1, sizeof(double));
+	unsigned char* open = (unsigned char*)qaws_internal_scratch_zalloc(m->nv ? m->nv : 1, 1);
+	unsigned char* del = (unsigned char*)qaws_internal_scratch_zalloc(m->nt ? m->nt : 1, 1);
+	if (!E || !uf || !cnt || !vol || !open || !del)
+	{
+		w->st = QAWS_STATUS_ALLOCATION_FAILURE;
+		goto done;
+	}
+	for (v = 0; v < m->nv; v++)
+		uf[v] = v;
+	for (f = 0; f < m->nt; f++)
+	{
+		rp_union(uf, m->t[3 * (size_t)f], m->t[3 * (size_t)f + 1]);
+		rp_union(uf, m->t[3 * (size_t)f], m->t[3 * (size_t)f + 2]);
+	}
+	for (f = 0; f < m->nt; f++)
+	{
+		double const *a = RP_X(m, m->t[3 * (size_t)f]), *b = RP_X(m, m->t[3 * (size_t)f + 1]), *c = RP_X(m, m->t[3 * (size_t)f + 2]);
+		double n[3];
+		unsigned int root = rp_find(uf, m->t[3 * (size_t)f]);
+		rp_cross(b, c, n);
+		vol[root] += mrp_dot(a, n) / 6;
+		cnt[root]++;
+	}
+	for (r = 0; r < ne; r = k)
+	{
+		int net = 0;
+		k = rp_group_end(E, ne, r);
+		for (i = r; i < k; i++)
+			net += rp_dir(m, E + i) ? 1 : -1;
+		if (net)
+			open[rp_find(uf, m->t[3 * (size_t)E[r].f])] = 1;
+	}
+	for (v = 0; v < m->nv; v++)
+		if (cnt[v] && !open[v] && fabs(vol[v]) < min_volume)
+		{
+			w->r->removed_components++;
+			w->r->removed_faces += cnt[v];
+		}
+	for (f = 0; f < m->nt; f++)
+	{
+		unsigned int root = rp_find(uf, m->t[3 * (size_t)f]);
+		del[f] = !open[root] && fabs(vol[root]) < min_volume;
+	}
+	rp_compact(m, del, m->nt);
+done:
+	qaws_internal_free(E); qaws_internal_free(uf); qaws_internal_free(cnt); qaws_internal_free(vol); qaws_internal_free(open); qaws_internal_free(del);
+}
+
+/* ---- non-manifold edges and vertices split ------------------------------- */
+
+typedef struct rp_round
+{
+	double angle;
+	unsigned int r;             /* the half-edge record */
+} rp_round;
+
+static int rp_round_cmp(void const* p, void const* q)
+{
+	rp_round const *a = (rp_round const*)p, *b = (rp_round const*)q;
+	if (a->angle != b->angle)
+		return a->angle < b->angle ? -1 : 1;
+	return a->r < b->r ? -1 : a->r > b->r;
+}
+
+/* the corner of triangle f at vertex v */
+static unsigned int rp_corner_at(rp_mesh const* m, unsigned int f, unsigned int v)
+{
+	unsigned int k;
+	for (k = 0; k < 3; k++)
+		if (m->t[3 * (size_t)f + k] == v)
+			return 3 * f + k;
+	return 3 * f;
+}
+
+/* Faces paired across each edge: two faces as they are; more, sorted by angle round the edge and paired with the next one
+   round where the wedge between them is inside (the first face's normal pointing away from it), so solids touching along an
+   edge come apart. Corners joined through the pairs; each vertex's corners in more than one set get a copy per extra set
+   (non-manifold edges and vertices both). */
+static void rp_split_non_manifold(rp_work* w)
+{
+	rp_mesh* m = &w->m;
+	unsigned int ne, r, k, i, f, v, nv0 = m->nv;
+	rp_he* E = rp_edges(m, 0, m->nt, &ne);
+	unsigned int* uf = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(unsigned int), 3, (m->nt ? m->nt : 1)));
+	unsigned int* first = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (nv0 ? nv0 : 1)));
+	unsigned int* copy = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(unsigned int), 3, (m->nt ? m->nt : 1)));
+	rp_round* ring = NULL;
+	unsigned int rcap = 0;
+	if (!E || !uf || !first || !copy)
+		goto oom;
+	for (i = 0; i < 3 * m->nt; i++)
+		uf[i] = i;
+	for (r = 0; r < ne; r = k)
+	{
+		unsigned int a = (unsigned int)(E[r].key >> 32), b = (unsigned int)E[r].key, n, o, s, best = 0, score[2] = { 0, 0 };
+		double u[3], ref[3], ln;
+		k = rp_group_end(E, ne, r);
+		n = k - r;
+		if (n < 2)
+			continue;
+		if (n > rcap)
+		{
+			rp_round* g = (rp_round*)qaws_internal_realloc(ring, qaws_internal_mul2(sizeof(rp_round), n));
+			if (!g)
+				goto oom;
+			ring = g;
+			rcap = n;
+		}
+		mrp_sub(RP_X(m, b), RP_X(m, a), u);
+		ln = rp_unit(u);
+		for (i = 0; i < n; i++)
+		{
+			unsigned int g = E[r + i].f, c = m->t[3 * (size_t)g + (E[r + i].k + 2) % 3];
+			double q[3], t[3], d;
+			mrp_sub(RP_X(m, c), RP_X(m, a), q);
+			d = mrp_dot(q, u);
+			q[0] -= d * u[0];
+			q[1] -= d * u[1];
+			q[2] -= d * u[2];
+			if (!i)
+			{
+				memcpy(ref, q, sizeof ref);
+				rp_unit(ref);
+			}
+			rp_cross(u, ref, t);
+			ring[i].angle = atan2(mrp_dot(q, t), mrp_dot(q, ref));
+			ring[i].r = r + i;
+		}
+		qsort(ring, n, sizeof *ring, rp_round_cmp);
+		/* the offset whose pairs open inward: face i's normal against the turn toward face i + 1 */
+		for (o = 0; o < 2 && n > 2; o++)
+			for (s = o; s + 1 < n + o; s += 2)
+			{
+				rp_he const* e = E + ring[s % n].r;
+				unsigned int g = e->f, c = m->t[3 * (size_t)g + (e->k + 2) % 3];
+				double nr[3], q[3], t[3];
+				rp_normal(RP_X(m, m->t[3 * (size_t)g]), RP_X(m, m->t[3 * (size_t)g + 1]), RP_X(m, m->t[3 * (size_t)g + 2]), nr);
+				mrp_sub(RP_X(m, c), RP_X(m, a), q);
+				rp_cross(u, q, t);
+				score[o] += mrp_dot(nr, t) < 0 && rp_dir(m, e) != rp_dir(m, E + ring[(s + 1) % n].r);
+			}
+		best = score[1] > score[0];
+		(void)ln;
+		for (s = n == 2 ? 0 : best; s + 1 < (n == 2 ? 2 : n + best); s += 2)
+		{
+			rp_he const *e1 = E + ring[s % n].r, *e2 = E + ring[(s + 1) % n].r;
+			rp_union(uf, rp_corner_at(m, e1->f, a), rp_corner_at(m, e2->f, a));
+			rp_union(uf, rp_corner_at(m, e1->f, b), rp_corner_at(m, e2->f, b));
+		}
+	}
+	/* each vertex's first corner set keeps it; every further set gets a copy */
+	for (v = 0; v < nv0; v++)
+		first[v] = HM_NONE;
+	for (i = 0; i < 3 * m->nt; i++)
+		copy[i] = HM_NONE;
+	for (f = 0; f < m->nt; f++)
+		for (k = 0; k < 3; k++)
+		{
+			unsigned int c = 3 * f + k, root = rp_find(uf, c), vv = m->t[c];
+			if (copy[root] == HM_NONE)
+			{
+				if (first[vv] == HM_NONE)
+				{
+					first[vv] = root;
+					copy[root] = vv;
+				}
+				else
+				{
+					double p[3];
+					memcpy(p, RP_X(m, vv), sizeof p);
+					copy[root] = rp_add_v(m, p);
+					if (copy[root] == HM_NONE)
+						goto oom;
+					w->r->split_vertices++;
+				}
+			}
+		}
+	for (i = 0; i < 3 * m->nt; i++)
+		m->t[i] = copy[rp_find(uf, i)];
+	goto done;
+oom:
+	w->st = QAWS_STATUS_ALLOCATION_FAILURE;
+done:
+	qaws_internal_free(E); qaws_internal_free(uf); qaws_internal_free(first); qaws_internal_free(copy); qaws_internal_free(ring);
+}
+
+/* ---- self-intersections, by exact predicates ------------------------------ */
+
+static int rp_o3(double const* a, double const* b, double const* c, double const* d)
+{
+	qaws_exact_sign s = QAWS_EXACT_ZERO;
+	qaws_exact_orient3d(&s, NULL, a, b, c, d);
+	return (int)s;
+}
+
+static int rp_o2(double const* a, double const* b, double const* c)
+{
+	qaws_exact_sign s = QAWS_EXACT_ZERO;
+	qaws_exact_orient2d(&s, NULL, a, b, c);
+	return (int)s;
+}
+
+/* segment ab against triangle pqr (closed), not coplanar */
+static int rp_seg_tri(double const* a, double const* b, double const* p, double const* q, double const* r)
+{
+	int sa = rp_o3(p, q, r, a), sb = rp_o3(p, q, r, b), s1, s2, s3;
+	if ((sa > 0 && sb > 0) || (sa < 0 && sb < 0) || (!sa && !sb))
+		return 0;
+	s1 = rp_o3(a, b, p, q);
+	s2 = rp_o3(a, b, q, r);
+	s3 = rp_o3(a, b, r, p);
+	return (s1 >= 0 && s2 >= 0 && s3 >= 0) || (s1 <= 0 && s2 <= 0 && s3 <= 0);
+}
+
+/* 2D: segments ab and cd meet (closed, collinear overlaps included) */
+static int rp_seg_seg2(double const* a, double const* b, double const* c, double const* d)
+{
+	int o1 = rp_o2(a, b, c), o2 = rp_o2(a, b, d), o3 = rp_o2(c, d, a), o4 = rp_o2(c, d, b);
+	if (!o1 && !o2 && !o3 && !o4)
+	{
+		unsigned int k = fabs(b[0] - a[0]) + fabs(d[0] - c[0]) >= fabs(b[1] - a[1]) + fabs(d[1] - c[1]) ? 0 : 1;
+		return fmax(fmin(a[k], b[k]), fmin(c[k], d[k])) <= fmin(fmax(a[k], b[k]), fmax(c[k], d[k]));
+	}
+	return o1 * o2 <= 0 && o3 * o4 <= 0;
+}
+
+/* 2D: p in triangle abc (closed, either turn) */
+static int rp_in_tri2(double const* p, double const* a, double const* b, double const* c)
+{
+	int s1 = rp_o2(a, b, p), s2 = rp_o2(b, c, p), s3 = rp_o2(c, a, p);
+	return (s1 >= 0 && s2 >= 0 && s3 >= 0) || (s1 <= 0 && s2 <= 0 && s3 <= 0);
+}
+
+/* two triangles in one plane, projected along its dominant axis; shared corners matched by index (s: shared count) */
+static int rp_coplanar(double const (*P)[3], double const (*Q)[3], unsigned int const* ip, unsigned int const* iq)
+{
+	double n[3], p2[3][2], q2[3][2];
+	unsigned int ax, i, j, k, x, y;
+	rp_normal(P[0], P[1], P[2], n);
+	ax = fabs(n[0]) > fabs(n[1]) ? (fabs(n[0]) > fabs(n[2]) ? 0 : 2) : (fabs(n[1]) > fabs(n[2]) ? 1 : 2);
+	x = ax == 0 ? 1 : 0;
+	y = ax == 2 ? 1 : 2;
+	for (k = 0; k < 3; k++)
+	{
+		p2[k][0] = P[k][x];
+		p2[k][1] = P[k][y];
+		q2[k][0] = Q[k][x];
+		q2[k][1] = Q[k][y];
+	}
+	/* a corner of one strictly inside the other (shared corners skipped), or edges crossing away from shared corners */
+	for (i = 0; i < 3; i++)
+	{
+		int shared_p = ip[i] == iq[0] || ip[i] == iq[1] || ip[i] == iq[2];
+		int shared_q = iq[i] == ip[0] || iq[i] == ip[1] || iq[i] == ip[2];
+		if (!shared_p && rp_in_tri2(p2[i], q2[0], q2[1], q2[2]))
+			return 1;
+		if (!shared_q && rp_in_tri2(q2[i], p2[0], p2[1], p2[2]))
+			return 1;
+	}
+	for (i = 0; i < 3; i++)
+		for (j = 0; j < 3; j++)
+		{
+			unsigned int a = ip[i], b = ip[(i + 1) % 3], c = iq[j], d = iq[(j + 1) % 3];
+			if ((a == c || a == d) && (b == c || b == d))
+				continue;   /* the shared edge itself */
+			if (a == c || a == d || b == c || b == d)
+			{
+				/* edges from a shared corner: they overlap only when collinear and pointing the same way */
+				unsigned int sh = (a == c || a == d) ? i : (i + 1) % 3, op = sh == i ? (i + 1) % 3 : i;
+				unsigned int sq = (iq[j] == ip[sh]) ? j : (j + 1) % 3, oq = sq == j ? (j + 1) % 3 : j;
+				if (!rp_o2(p2[sh], p2[op], q2[oq])
+					&& (p2[op][0] - p2[sh][0]) * (q2[oq][0] - q2[sq][0]) + (p2[op][1] - p2[sh][1]) * (q2[oq][1] - q2[sq][1]) > 0)
+					return 1;
+				continue;
+			}
+			if (rp_seg_seg2(p2[i], p2[(i + 1) % 3], q2[j], q2[(j + 1) % 3]))
+				return 1;
+		}
+	return 0;
+}
+
+/* triangles f and g intersect beyond their shared corners and edge */
+static int rp_tri_tri(rp_mesh const* m, unsigned int f, unsigned int g)
+{
+	unsigned int const *ip = m->t + 3 * (size_t)f, *iq = m->t + 3 * (size_t)g;
+	double P[3][3], Q[3][3];
+	unsigned int shared = 0, i, j;
+	int sq[3], cop;
+	for (i = 0; i < 3; i++)
+	{
+		memcpy(P[i], RP_X(m, ip[i]), sizeof P[i]);
+		memcpy(Q[i], RP_X(m, iq[i]), sizeof Q[i]);
+		for (j = 0; j < 3; j++)
+			shared += ip[i] == iq[j];
+	}
+	if (shared == 3)
+		return 0;
+	for (i = 0; i < 3; i++)
+		sq[i] = rp_o3(P[0], P[1], P[2], Q[i]);
+	cop = !sq[0] && !sq[1] && !sq[2];
+	if (cop)
+		return rp_coplanar((double const(*)[3])P, (double const(*)[3])Q, ip, iq);
+	if (shared == 2)
+		return 0;   /* two faces on an edge meet only along it unless they lie in one plane */
+	if ((sq[0] > 0 && sq[1] > 0 && sq[2] > 0) || (sq[0] < 0 && sq[1] < 0 && sq[2] < 0))
+		return 0;
+	/* the edges of each against the other; with a shared corner, only the edges away from it */
+	for (i = 0; i < 3; i++)
+	{
+		unsigned int a = ip[i], b = ip[(i + 1) % 3];
+		int sa = a == iq[0] || a == iq[1] || a == iq[2], sb = b == iq[0] || b == iq[1] || b == iq[2];
+		if (!sa && !sb && rp_seg_tri(P[i], P[(i + 1) % 3], Q[0], Q[1], Q[2]))
+			return 1;
+		a = iq[i];
+		b = iq[(i + 1) % 3];
+		sa = a == ip[0] || a == ip[1] || a == ip[2];
+		sb = b == ip[0] || b == ip[1] || b == ip[2];
+		if (!sa && !sb && rp_seg_tri(Q[i], Q[(i + 1) % 3], P[0], P[1], P[2]))
+			return 1;
+	}
+	return 0;
+}
+
+typedef struct rp_hit_ctx
+{
+	rp_mesh const* m;
+	unsigned int* hits;         /* per triangle */
+	unsigned int pairs;
+} rp_hit_ctx;
+
+static qaws_status rp_hit_visit(void* user, unsigned int i, unsigned int j)
+{
+	rp_hit_ctx* c = (rp_hit_ctx*)user;
+	if (rp_tri_tri(c->m, i, j))
+	{
+		c->pairs++;
+		c->hits[i]++;
+		c->hits[j]++;
+	}
+	return QAWS_STATUS_OK;
+}
+
+/* every pair of triangles that cross (beyond shared corners and edges), counted per triangle into w's hits */
+static void rp_intersections(rp_work* w, unsigned int** out_hits)
+{
+	rp_mesh* m = &w->m;
+	qaws_bp_box* box = (qaws_bp_box*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(qaws_bp_box), (m->nt ? m->nt : 1)));
+	rp_hit_ctx c;
+	unsigned int f, k, j;
+	c.m = m;
+	c.pairs = 0;
+	c.hits = (unsigned int*)qaws_internal_zalloc(m->nt ? m->nt : 1, sizeof(unsigned int));
+	*out_hits = c.hits;
+	if (!box || !c.hits)
+	{
+		w->st = QAWS_STATUS_ALLOCATION_FAILURE;
+		qaws_internal_free(box);
+		return;
+	}
+	for (f = 0; f < m->nt; f++)
+		for (k = 0; k < 3; k++)
+		{
+			double const* p = RP_X(m, m->t[3 * (size_t)f + k]);
+			for (j = 0; j < 3; j++)
+			{
+				box[f].lo[j] = k ? fmin(box[f].lo[j], p[j]) : p[j];
+				box[f].hi[j] = k ? fmax(box[f].hi[j], p[j]) : p[j];
+			}
+		}
+	if (m->nt)
+		w->st = qaws_internal_broadphase(NULL, box, m->nt, 3, NULL, rp_hit_visit, &c);
+	w->r->self_intersections = c.pairs;
+	for (f = 0; f < m->nt; f++)
+		w->r->intersecting_faces += c.hits[f] > 0;
+	qaws_internal_free(box);
 }
 
 /* ---- the call ----------------------------------------------------------- */
@@ -1696,7 +2397,7 @@ static void rp_measure(rp_work* w)
 }
 
 /* the used vertices renumbered in order, the store built with the source_face attribute */
-static qaws_status rp_output(rp_work* w, qaws_mesh_3d** out)
+static qaws_status rp_output(rp_work* w, qaws_mesh_3d** out, unsigned int const* hits)
 {
 	rp_mesh* m = &w->m;
 	unsigned int* map = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (m->nv ? m->nv : 1)));
@@ -1731,6 +2432,19 @@ static qaws_status rp_output(rp_work* w, qaws_mesh_3d** out)
 	}
 	for (v = 0; v < m->nt; v++)
 		*hm_attr_at(&(*out)->hm, a, v) = m->src[v];
+	if (hits)
+	{
+		a = hm_attr_add(&(*out)->hm, "intersecting", QAWS_MESH_FACE, QAWS_ATTRIBUTE_NEAREST, 1);
+		if (a == HM_NONE)
+		{
+			qaws_mesh_3d_destroy(*out);
+			*out = NULL;
+			st = QAWS_STATUS_ALLOCATION_FAILURE;
+			goto done;
+		}
+		for (v = 0; v < m->nt; v++)
+			*hm_attr_at(&(*out)->hm, a, v) = hits[v];
+	}
 done:
 	qaws_internal_free(map);
 	qaws_internal_free(x);
@@ -1745,7 +2459,7 @@ qaws_status qaws_mesh_repair(qaws_mesh_3d** out_mesh, qaws_mesh_repair_report* r
 	qaws_mesh_repair_report local;
 	rp_work w;
 	rp_mesh* m = &w.m;
-	unsigned int *uf = NULL, *poly = NULL, *stamp = NULL, *shell = NULL;
+	unsigned int *uf = NULL, *poly = NULL, *stamp = NULL, *shell = NULL, *hits = NULL;
 	unsigned char *used = NULL, *bad = NULL;
 	double lo[3] = { HUGE_VAL, HUGE_VAL, HUGE_VAL }, hi[3] = { -HUGE_VAL, -HUGE_VAL, -HUGE_VAL }, D = 0, weld, degen, gap, perim;
 	size_t off, i;
@@ -1765,7 +2479,7 @@ qaws_status qaws_mesh_repair(qaws_mesh_3d** out_mesh, qaws_mesh_repair_report* r
 		memset(&d, 0, sizeof d);
 	if ((unsigned int)d.nested_shells > QAWS_NESTED_SHELLS_REMOVE || d.weld_tolerance != d.weld_tolerance
 		|| d.degenerate_tolerance != d.degenerate_tolerance || d.gap_tolerance != d.gap_tolerance || d.hole_perimeter != d.hole_perimeter
-		|| d.min_component_area != d.min_component_area)
+		|| d.min_component_area != d.min_component_area || d.min_component_volume != d.min_component_volume)
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	for (i = 0; i < 3 * (size_t)vertex_count; i++)
 		if (!rp_finite((double)positions[i]))
@@ -1811,6 +2525,8 @@ qaws_status qaws_mesh_repair(qaws_mesh_3d** out_mesh, qaws_mesh_repair_report* r
 			hi[k] = fmax(hi[k], p[k]);
 		}
 	}
+	for (v = 0; v < vertex_count; v++)
+		report->unused_vertices += !used[v];
 	if (off)
 		D = sqrt((hi[0] - lo[0]) * (hi[0] - lo[0]) + (hi[1] - lo[1]) * (hi[1] - lo[1]) + (hi[2] - lo[2]) * (hi[2] - lo[2]));
 	weld = d.weld_tolerance > 0 ? (double)d.weld_tolerance : d.weld_tolerance == 0 ? 1e-6 * D : 0;
@@ -1877,15 +2593,21 @@ qaws_status qaws_mesh_repair(qaws_mesh_3d** out_mesh, qaws_mesh_repair_report* r
 	}
 	if (w.st == QAWS_STATUS_OK)
 		rp_outward(&w, d.nested_shells == QAWS_NESTED_SHELLS_REMOVE);
+	if (w.st == QAWS_STATUS_OK && d.min_component_volume > 0)
+		rp_small_volumes(&w, (double)d.min_component_volume);
+	if (w.st == QAWS_STATUS_OK && (d.flags & QAWS_MESH_REPAIR_SPLIT_NON_MANIFOLD))
+		rp_split_non_manifold(&w);
+	if (w.st == QAWS_STATUS_OK && (d.flags & QAWS_MESH_REPAIR_FIND_INTERSECTIONS))
+		rp_intersections(&w, &hits);
 	if (w.st == QAWS_STATUS_OK)
 		rp_measure(&w);
 	if (w.st == QAWS_STATUS_OK)
-		w.st = rp_output(&w, out_mesh);
+		w.st = rp_output(&w, out_mesh, hits);
 	goto done;
 oom:
 	w.st = QAWS_STATUS_ALLOCATION_FAILURE;
 done:
 	qaws_internal_free(m->x); qaws_internal_free(m->t); qaws_internal_free(m->src); qaws_internal_free(m->fl);
-	qaws_internal_free(uf); qaws_internal_free(poly); qaws_internal_free(stamp); qaws_internal_free(used); qaws_internal_free(shell); qaws_internal_free(bad);
+	qaws_internal_free(uf); qaws_internal_free(poly); qaws_internal_free(stamp); qaws_internal_free(used); qaws_internal_free(shell); qaws_internal_free(bad); qaws_internal_free(hits);
 	return w.st;
 }

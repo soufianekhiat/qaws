@@ -64,8 +64,8 @@
  *   holes       boundary loops of perimeter up to hole_perimeter (default
  *               all) filled: the triangulation least in its largest
  *               dihedral angle, then in area, by dynamic programming (Liepa
- *               2003) for loops up to 500 vertices, a fan from the
- *               centroid for longer ones; then refined toward the
+ *               2003) for loops up to 500 vertices, longer ones halved by
+ *               their shortest diagonal first (recursively); then refined toward the
  *               surrounding edge lengths (Liepa's centroid splits and
  *               Delaunay flips) and faired (the bi-Laplacian with Liepa's
  *               scale-dependent weights, solved with the hole's border and
@@ -77,9 +77,23 @@
  *               generalized winding number at its vertices): at an odd
  *               depth it is a cavity and turned inward, or removed with
  *               QAWS_NESTED_SHELLS_REMOVE.
+ *   volumes     closed parts holding less than min_component_volume
+ *               removed (0: none).
+ *   non-manifold  with QAWS_MESH_REPAIR_SPLIT_NON_MANIFOLD: the faces round
+ *               an edge of three or more paired with their angular
+ *               neighbour across the inside wedge (solids touching along an
+ *               edge come apart, each closed), and every vertex whose faces
+ *               form separate fans given a copy per fan (split_vertices).
+ *   intersections  with QAWS_MESH_REPAIR_FIND_INTERSECTIONS: every pair of
+ *               faces crossing beyond their shared corners and edge, by
+ *               exact orientation predicates (coplanar overlaps included),
+ *               counted and marked in a face attribute "intersecting" (the
+ *               pairs each face is in). Resolving them is the Booleans'
+ *               (decision 10) or farq's.
  *
- * Left for farq, and reported: non-manifold edges (three faces or more),
- * self-intersections (not looked for), boundary edges of holes not filled.
+ * Left, and reported: non-manifold edges (three faces or more; split on
+ * request), self-intersections (found on request), boundary edges of holes
+ * not filled.
  * `closed` says every directed edge cancels: what farq needs.
  *
  * The result is a qaws_mesh_3d of triangles, the given vertices welded,
@@ -103,6 +117,8 @@ typedef enum qaws_nested_shells
 
 #define QAWS_MESH_REPAIR_FLAT_FILLS 1u      /* fills refined, not faired */
 #define QAWS_MESH_REPAIR_COARSE_FILLS 2u    /* fills left as the minimal triangulation */
+#define QAWS_MESH_REPAIR_SPLIT_NON_MANIFOLD 4u   /* non-manifold edges and vertices split into manifold sheets */
+#define QAWS_MESH_REPAIR_FIND_INTERSECTIONS 8u   /* self-intersections looked for (exact predicates), counted and marked */
 
 typedef struct qaws_mesh_repair_desc
 {
@@ -113,7 +129,8 @@ typedef struct qaws_mesh_repair_desc
 	qaws_scalar min_component_area;     /* 0: none removed */
 	unsigned int min_component_faces;   /* 0: none removed */
 	qaws_nested_shells nested_shells;
-	unsigned int flags;                 /* QAWS_MESH_REPAIR_*_FILLS */
+	unsigned int flags;                 /* QAWS_MESH_REPAIR_* */
+	qaws_scalar min_component_volume;   /* closed parts holding less volume removed (after orientation); 0: none */
 } qaws_mesh_repair_desc;
 
 typedef struct qaws_mesh_repair_report
@@ -135,6 +152,10 @@ typedef struct qaws_mesh_repair_report
 	unsigned int boundary_edges;        /* edges of one face left */
 	unsigned int open_edges;            /* edges whose directed uses do not cancel */
 	int closed;                         /* every directed edge cancels (open_edges 0, at least one face) */
+	unsigned int unused_vertices;       /* given vertices no face uses (dropped) */
+	unsigned int split_vertices;        /* copies made by QAWS_MESH_REPAIR_SPLIT_NON_MANIFOLD */
+	unsigned int self_intersections;    /* pairs of faces crossing (QAWS_MESH_REPAIR_FIND_INTERSECTIONS) */
+	unsigned int intersecting_faces;    /* faces in at least one such pair */
 } qaws_mesh_repair_report;
 
 /* face_sizes NULL: triangles; desc NULL: the defaults; report may be NULL */

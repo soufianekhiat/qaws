@@ -687,6 +687,210 @@ static void test_moebius_and_non_manifold(void)
 	}
 }
 
+/* an attribute's sum over the faces */
+static double mr_attr_sum(qaws_mesh_3d const* m, char const* name)
+{
+	unsigned int a = QAWS_MESH_NONE, n = qaws_mesh_3d_get_face_count(m), i;
+	qaws_scalar* v;
+	double s = 0;
+	if (qaws_mesh_3d_find_attribute(&a, m, name) != QAWS_STATUS_OK || a == QAWS_MESH_NONE)
+		return -1;
+	v = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (n ? n : 1));
+	qaws_mesh_3d_get_attribute(v, m, a);
+	for (i = 0; i < n; i++)
+		s += v[i];
+	free(v);
+	return s;
+}
+
+static void test_completed(void)
+{
+	static double const lo[4][3] = { { 0, 0, 0 }, { 1, 1, 0 }, { 1, 1, 1 }, { 0.5, 0.5, 0.5 } }, hi[4][3] = { { 1, 1, 1 }, { 2, 2, 1 }, { 2, 2, 2 }, { 1.5, 1.5, 1.5 } };
+	static double const tlo[3] = { 3, 0, 0 }, thi[3] = { 3.01, 0.01, 0.01 };
+	double x[3 * 64], sx[3 * 72];
+	unsigned int t[3 * 64], st[72], nv, nt;
+	qaws_mesh_3d* m = NULL;
+	qaws_mesh_repair_report r;
+	qaws_mesh_repair_desc d;
+	qaws_status s;
+	char msg[256];
+	memset(&d, 0, sizeof d);
+	d.flags = QAWS_MESH_REPAIR_SPLIT_NON_MANIFOLD;
+	/* two cubes on an edge, then on a corner: split into two closed cubes */
+	nv = nt = 0;
+	mr_box(lo[0], hi[0], x, &nv, t, &nt);
+	mr_box(lo[1], hi[1], x, &nv, t, &nt);
+	mr_soup(x, t, nt, 0, sx, st);
+	s = mr_repair(sx, 72, st, NULL, nt, &d, &m, &r);
+	sprintf(msg, "split: two cubes on an edge: %u non-manifold, %u split, %u vertices, closed %d, volume %.6f", r.non_manifold_edges, r.split_vertices,
+		m ? qaws_mesh_3d_get_vertex_count(m) : 0, r.closed, m ? mr_volume(m) : 0);
+	printf("  %s\n", msg);
+	TEST_ASSERT(s == QAWS_STATUS_OK && mr_closed(m, &r) && r.non_manifold_edges == 0 && r.split_vertices == 2 && qaws_mesh_3d_get_vertex_count(m) == 16
+		&& fabs(mr_volume(m) - 2) < 1e-12, msg);
+	qaws_mesh_3d_destroy(m);
+	nv = nt = 0;
+	mr_box(lo[0], hi[0], x, &nv, t, &nt);
+	mr_box(lo[2], hi[2], x, &nv, t, &nt);
+	mr_soup(x, t, nt, 0, sx, st);
+	s = mr_repair(sx, 72, st, NULL, nt, &d, &m, &r);
+	sprintf(msg, "split: two cubes on a corner: %u split, %u vertices, closed %d", r.split_vertices, m ? qaws_mesh_3d_get_vertex_count(m) : 0, r.closed);
+	printf("  %s\n", msg);
+	TEST_ASSERT(s == QAWS_STATUS_OK && mr_closed(m, &r) && r.split_vertices == 1 && qaws_mesh_3d_get_vertex_count(m) == 16, msg);
+	qaws_mesh_3d_destroy(m);
+	/* floating vertices and a tiny closed part */
+	nv = nt = 0;
+	mr_box(lo[0], hi[0], x, &nv, t, &nt);
+	mr_box(tlo, thi, x, &nv, t, &nt);
+	x[3 * nv] = 5; x[3 * nv + 1] = 5; x[3 * nv + 2] = 5;
+	x[3 * nv + 3] = 6; x[3 * nv + 4] = 5; x[3 * nv + 5] = 5;
+	memset(&d, 0, sizeof d);
+	d.min_component_volume = (qaws_scalar)1e-3;
+	s = mr_repair(x, nv + 2, t, NULL, nt, &d, &m, &r);
+	sprintf(msg, "volumes: %u unused vertices, %u parts removed (%u faces), %u faces left, closed %d", r.unused_vertices, r.removed_components,
+		r.removed_faces, m ? qaws_mesh_3d_get_face_count(m) : 0, r.closed);
+	printf("  %s\n", msg);
+	TEST_ASSERT(s == QAWS_STATUS_OK && r.unused_vertices == 2 && r.removed_components == 1 && r.removed_faces == 12 && qaws_mesh_3d_get_face_count(m) == 12
+		&& mr_closed(m, &r), msg);
+	qaws_mesh_3d_destroy(m);
+	/* intersections: two cubes overlapping; a clean sphere; a fold of two faces on one edge */
+	memset(&d, 0, sizeof d);
+	d.flags = QAWS_MESH_REPAIR_FIND_INTERSECTIONS;
+	nv = nt = 0;
+	mr_box(lo[0], hi[0], x, &nv, t, &nt);
+	mr_box(lo[3], hi[3], x, &nv, t, &nt);
+	s = mr_repair(x, nv, t, NULL, nt, &d, &m, &r);
+	sprintf(msg, "intersections: two cubes overlapping: %u pairs, %u faces, marked %.0f", r.self_intersections, r.intersecting_faces,
+		m ? mr_attr_sum(m, "intersecting") : -1);
+	printf("  %s\n", msg);
+	/* each cube's 3 faces round the far corner cross 3 faces of the other: corners' 2 triangles each, the crossings exact */
+	TEST_ASSERT(s == QAWS_STATUS_OK && r.self_intersections > 0 && m && mr_attr_sum(m, "intersecting") == 2.0 * r.self_intersections
+		&& r.intersecting_faces > 0 && r.intersecting_faces <= 12, msg);
+	qaws_mesh_3d_destroy(m);
+	{
+		double* sp = (double*)malloc(sizeof(double) * 3 * 2562);
+		unsigned int* stt = (unsigned int*)malloc(sizeof(unsigned int) * 3 * 5120), snv, snt = mr_icosphere(4, sp, stt, &snv);
+		s = mr_repair(sp, snv, stt, NULL, snt, &d, &m, &r);
+		sprintf(msg, "intersections: a clean sphere of %u faces: %u pairs", snt, r.self_intersections);
+		printf("  %s\n", msg);
+		TEST_ASSERT(s == QAWS_STATUS_OK && r.self_intersections == 0 && mr_attr_sum(m, "intersecting") == 0, msg);
+		qaws_mesh_3d_destroy(m);
+		free(sp);
+		free(stt);
+	}
+	{
+		static double const fx[12] = { 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.6, 0.3, 0 };
+		static unsigned int const ft[6] = { 0, 1, 2, 1, 0, 3 };
+		d.hole_perimeter = -1;
+		s = mr_repair(fx, 4, ft, NULL, 2, &d, &m, &r);
+		sprintf(msg, "intersections: two faces folded flat on their edge: %u pairs", r.self_intersections);
+		printf("  %s\n", msg);
+		TEST_ASSERT(s == QAWS_STATUS_OK && r.self_intersections == 1, msg);
+		qaws_mesh_3d_destroy(m);
+	}
+	/* a unit box of 20 x 20 grids with a hole across an edge, then across a corner: the creases continued through the fill */
+	{
+		static double const O6[6][3] = { { 0, 0, 0 }, { 0, 0, 1 }, { 0, 0, 0 }, { 0, 1, 0 }, { 0, 0, 0 }, { 1, 0, 0 } };
+		static double const U6[6][3] = { { 0, 1, 0 }, { 1, 0, 0 }, { 1, 0, 0 }, { 0, 0, 1 }, { 0, 0, 1 }, { 0, 1, 0 } };
+		static double const V6[6][3] = { { 1, 0, 0 }, { 0, 1, 0 }, { 0, 0, 1 }, { 1, 0, 0 }, { 0, 1, 0 }, { 0, 0, 1 } };
+		static double const zero[3] = { 0, 0, 0 }, centre[2][3] = { { 1, 0.5, 1 }, { 1, 1, 1 } };
+		static char const* const what[2] = { "an edge", "a corner" };
+		double* bx = (double*)malloc(sizeof(double) * 3 * 6 * 441);
+		unsigned int* bt = (unsigned int*)malloc(sizeof(unsigned int) * 3 * 6 * 800);
+		unsigned int* kt = (unsigned int*)malloc(sizeof(unsigned int) * 3 * 6 * 800);
+		unsigned int c, f, i, kn;
+		for (c = 0; c < 2; c++)
+		{
+			double worst = 0;
+			qaws_scalar* p;
+			nv = nt = kn = 0;
+			for (f = 0; f < 6; f++)
+				mr_patch(O6[f], U6[f], V6[f], 20, zero, bx, &nv, bt, &nt);
+			for (f = 0; f < nt; f++)
+			{
+				double g[3] = { 0, 0, 0 }, dd = 0;
+				unsigned int k;
+				for (k = 0; k < 3; k++)
+					for (i = 0; i < 3; i++)
+						g[i] += bx[3 * bt[3 * f + k] + i] / 3;
+				for (i = 0; i < 3; i++)
+					dd += (g[i] - centre[c][i]) * (g[i] - centre[c][i]);
+				if (dd > 0.3 * 0.3)
+				{
+					memcpy(kt + 3 * kn, bt + 3 * f, sizeof(unsigned int) * 3);
+					kn++;
+				}
+			}
+			memset(&d, 0, sizeof d);
+			s = mr_repair(bx, nv, kt, NULL, kn, &d, &m, &r);
+			if (s == QAWS_STATUS_OK && m)
+			{
+				unsigned int n = qaws_mesh_3d_get_vertex_count(m);
+				p = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * n);
+				qaws_mesh_3d_get_positions(p, m);
+				for (i = 0; i < n; i++)
+				{
+					/* the distance to the box's surface */
+					double q[3] = { p[3 * i], p[3 * i + 1], p[3 * i + 2] }, out = 0, in = HUGE_VAL;
+					unsigned int k;
+					for (k = 0; k < 3; k++)
+					{
+						double e = q[k] < 0 ? -q[k] : q[k] > 1 ? q[k] - 1 : 0;
+						out += e * e;
+						in = fmin(in, fmin(fabs(q[k]), fabs(1 - q[k])));
+					}
+					worst = fmax(worst, out > 0 ? sqrt(out) : in);
+				}
+				free(p);
+			}
+			sprintf(msg, "creases: a box with a hole across %s: filled %u, closed %d, %u fill faces, farthest vertex %.2e from the box", what[c], r.holes_filled,
+				r.closed, r.fill_faces, worst);
+			printf("  %s\n", msg);
+			TEST_ASSERT(s == QAWS_STATUS_OK && r.holes_filled == 1 && mr_closed(m, &r) && worst < 2e-3, msg);
+			qaws_mesh_3d_destroy(m);
+		}
+		free(bx);
+		free(bt);
+		free(kt);
+	}
+	/* a hole of 600 vertices: halved by short diagonals, then filled and faired */
+	{
+		unsigned int na = 600, nb = 12, i, j, k = 0, vv;
+		double* hx = (double*)malloc(sizeof(double) * 3 * (na * nb + 1));
+		unsigned int* ht = (unsigned int*)malloc(sizeof(unsigned int) * 6 * na * nb);
+		hx[0] = 0; hx[1] = 0; hx[2] = 1;
+		for (j = 1; j <= nb; j++)
+			for (i = 0; i < na; i++)
+			{
+				double th = 0.5 * M_PI * j / nb, ph = 2 * M_PI * i / na;
+				vv = 1 + (j - 1) * na + i;
+				hx[3 * vv] = sin(th) * cos(ph);
+				hx[3 * vv + 1] = sin(th) * sin(ph);
+				hx[3 * vv + 2] = cos(th);
+			}
+		for (i = 0; i < na; i++)
+		{
+			ht[k++] = 0; ht[k++] = 1 + i; ht[k++] = 1 + (i + 1) % na;
+		}
+		for (j = 1; j < nb; j++)
+			for (i = 0; i < na; i++)
+			{
+				unsigned int a = 1 + (j - 1) * na + i, b = 1 + (j - 1) * na + (i + 1) % na, c = b + na, e = a + na;
+				ht[k++] = a; ht[k++] = e; ht[k++] = c;
+				ht[k++] = a; ht[k++] = c; ht[k++] = b;
+			}
+		memset(&d, 0, sizeof d);
+		s = mr_repair(hx, 1 + na * nb, ht, NULL, k / 3, &d, &m, &r);
+		sprintf(msg, "a hole of %u vertices: filled %u, closed %d, %u fill faces, volume %.4f (hemisphere %.4f, sphere %.4f)", na, r.holes_filled, r.closed,
+			r.fill_faces, m ? mr_volume(m) : 0, 2 * M_PI / 3, 4 * M_PI / 3);
+		printf("  %s\n", msg);
+		TEST_ASSERT(s == QAWS_STATUS_OK && r.holes_filled == 1 && mr_closed(m, &r) && qaws_mesh_3d_validate(m) == QAWS_STATUS_OK
+			&& mr_volume(m) > 2 * M_PI / 3 && mr_volume(m) < 4 * M_PI / 3 + 0.1, msg);
+		qaws_mesh_3d_destroy(m);
+		free(hx);
+		free(ht);
+	}
+}
+
 static void test_refusals(void)
 {
 	static double const x[9] = { 0, 0, 0, 1, 0, 0, 0, 1, 0 };
@@ -731,6 +935,7 @@ int test_139_mesh_repair_main(void)
 	test_degenerate();
 	test_duplicates();
 	test_moebius_and_non_manifold();
+	test_completed();
 	test_refusals();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;

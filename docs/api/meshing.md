@@ -815,6 +815,36 @@ holes; a Moebius strip reported; two cubes on one edge closed with the edge
 left non-manifold. Figure 18 (key i): a broken torus soup (holes, a gap,
 three faces in ten turned, duplicates) repaired in 0.02 s.
 
+### Repair, completed
+
+- **Holes along creases.** Before a hole is filled, every crease edge that runs into it is followed (normals parting by more than 40°):
+  - two crease ends facing each other across the hole (each within 37° of the chord) are joined by a cubic Hermite path;
+  - three or more crease lines that meet at a point (a corner) are carried straight to it.
+
+  The hole is split along these paths and each part is filled, refined and faired on its own. Path vertices are never flipped or faired, so a box's lost edge or corner comes back sharp.
+- **Long holes.** Borders past 500 vertices are halved by their shortest diagonal, between vertices a third to a half of the loop apart, recursively, instead of fanned.
+- **Floating vertices.** Given vertices that no face uses are dropped and counted (`unused_vertices`).
+- **Small parts by volume.** `min_component_volume` removes closed parts holding less volume, after orientation.
+- **Non-manifold edges and vertices.** With `QAWS_MESH_REPAIR_SPLIT_NON_MANIFOLD`, each sheet gets its own vertices:
+  - the faces round an edge are sorted by angle and paired across the wedge inside the solid;
+  - each vertex gets one copy per fan of faces (`split_vertices`).
+
+  Two cubes on one edge, or on one corner, come out as two closed cubes.
+- **Self-intersections.** With `QAWS_MESH_REPAIR_FIND_INTERSECTIONS`:
+  - every pair of faces crossing beyond their shared corners and edge is found, using exact `orient3d` and `orient2d` (coplanar overlaps and folds included);
+  - the pairs are counted (`self_intersections`, `intersecting_faces`) and marked in a face attribute `intersecting`.
+
+  Resolving them belongs to the numerical Booleans (decision 10) or to farq.
+
+Test 139 checks:
+- two cubes on an edge are split into 16 vertices, closed, with a volume of 2; on a corner, one vertex is split;
+- 2 floating vertices are reported, and a 0.01 cube is removed by volume;
+- two overlapping cubes give 18 crossing pairs; a clean 5,120-face sphere gives 0; two faces folded flat give 1;
+- a box with a hole across an edge, or across a corner, is filled with every vertex on the box (within 1e-14);
+- a 600-vertex hole is filled closed.
+
+Figure 24 (key o): a box with a hole round its corner, filled along its creases, and two crossing cubes with their intersecting faces.
+
 ## Spatial queries: qaws_mesh_bvh
 
 `qaws_mesh_bvh.h` answers point and ray queries on any mesh, broken or not.

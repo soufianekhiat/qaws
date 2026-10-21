@@ -29,6 +29,13 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- Repair completed: holes filled along creases (crease ends joined across the hole,
+  corners recovered, each part faired on its own), long holes halved by short
+  diagonals, unused vertices reported, small closed parts removed by volume,
+  non-manifold edges and vertices split into manifold sheets
+  (`QAWS_MESH_REPAIR_SPLIT_NON_MANIFOLD`), self-intersections found with exact
+  predicates and marked (`QAWS_MESH_REPAIR_FIND_INTERSECTIONS`). Test 139,
+  meshing figure 24.
 - Quality reports (`qaws_quality_report.h`): angles, dihedral angles, shape (mean
   ratio), aspect ratio, scaled Jacobian, edge ratio and size per element of 2D,
   surface and volume meshes (inverted elements negative), and a summary
