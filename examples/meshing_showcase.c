@@ -31,6 +31,10 @@
  *                      box in quads, the blob's layers with tetrahedra inside
  *   mesh20_curved.png  curved elements: a coarse torus in quads straight and at
  *                      order 2 through its nodes on the torus, a patch in cubic triangles
+ *   mesh21_metric.png  metric remeshing: a tanh layer remeshed to its Hessian, a
+ *                      cylinder stretched along its axis
+ *   mesh22_bvh.png     spatial queries on a torus soup with holes: ray traced
+ *                      through the BVH, its winding number and signed distance
  *
  * Each figure lives in meshing_showcase/NN_*.c, compiled as one translation
  * unit with the rasterizer in example_raster.h.
@@ -182,14 +186,15 @@ static void ms_panel(er_canvas* c, int x, int y, int w, int h, qaws_mesh_3d cons
 #include "meshing_showcase/19_layers.c"
 #include "meshing_showcase/20_curved.c"
 #include "meshing_showcase/21_metric.c"
+#include "meshing_showcase/22_bvh.c"
 
-/* the figures to draw: all, or those whose keys the first argument lists ("58"; figures 10 to 21 are a to l) */
+/* the figures to draw: all, or those whose keys the first argument lists ("58"; figures 10 to 22 are a to m) */
 int main(int argc, char** argv)
 {
 	static void (*const demo[])(void) = { demo_core, demo_reference, demo_remesh, demo_quads, demo_generate, demo_tets, demo_hexes, demo_frame_hexes,
 		demo_measures, demo_remesh_angles, demo_remesh_cvt, demo_cross_field, demo_quad_flow, demo_quad_improve,
-		demo_quad_global, demo_guidance, demo_feature_size, demo_repair, demo_layers, demo_curved, demo_metric };
-	static char const key[] = "123456789abcdefghijkl";
+		demo_quad_global, demo_guidance, demo_feature_size, demo_repair, demo_layers, demo_curved, demo_metric, demo_bvh };
+	static char const key[] = "123456789abcdefghijklm";
 	unsigned int i;
 	setvbuf(stdout, NULL, _IONBF, 0);
 	MAKE_DIR("showcase");
