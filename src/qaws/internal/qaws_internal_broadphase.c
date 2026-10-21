@@ -76,6 +76,7 @@ struct qaws_bp_grid
 #define BP_PAIR_GRAIN 64   /* cells per chunk */
 #define BP_BOX_GRAIN 16384 /* boxes per chunk of the build */
 #define BP_SLABS 16        /* layers of cells filled apart through an executor */
+#define BP_FIT_CELLS 16    /* a fitted grid's cells per box at most */
 
 /* the pair walk cut into nchunk runs of about equal work: a cell weighs one, and each of its rows (its boxes in order)
    one per box after it; rows of g0 cells (row_work: their weights) skipped whole when no run starts in them */
@@ -323,9 +324,16 @@ static qaws_status bp_build(qaws_bp_box const* boxes, unsigned int count, unsign
 		if (fit && bounded)
 		{
 			/* the boxes' mean widest side, made a little bigger: a box spans about two cells an axis */
+			double cells = 1;
 			mean = 1.5 * mean / bounded;
 			if (mean > 0 && mean < h)
 				h = mean;
+			/* boxes along a curve fill few cells: not past BP_FIT_CELLS a box (the empty ones walked for nothing) */
+			for (k = 0; k < dim; k++)
+				if (hi[k] - M.G.lo[k] > ext * BP_FLAT)
+					cells *= (hi[k] - M.G.lo[k]) / h;
+			if (h > 0 && cells > BP_FIT_CELLS * (double)bounded)
+				h *= pow(cells / (BP_FIT_CELLS * (double)bounded), 1.0 / axes);
 		}
 	}
 	for (k = 0; k < 3; k++)
