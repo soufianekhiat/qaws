@@ -705,7 +705,10 @@ typedef struct bp_par
 static qaws_status bp_par_job(void* ctx, unsigned int chunk, unsigned int begin, unsigned int end)
 {
 	bp_par const* P = (bp_par const*)ctx;
-	return bp_cells(P->GR, P->boxes, P->accept, P->accept_user, P->visit, P->visit_user, chunk, begin, end, &P->candidates[chunk]);
+	unsigned int n = 0;   /* (counted here: the chunks' counters share cache lines) */
+	qaws_status s = bp_cells(P->GR, P->boxes, P->accept, P->accept_user, P->visit, P->visit_user, chunk, begin, end, &n);
+	P->candidates[chunk] = n;
+	return s;
 }
 
 qaws_status qaws_internal_grid_pairs(unsigned int* out_candidates, qaws_bp_grid const* grid, qaws_bp_box const* boxes, qaws_bp_accept accept,
