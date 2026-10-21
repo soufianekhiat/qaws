@@ -1,7 +1,7 @@
 /*
  * Figure 27: mesh Booleans (qaws_mesh_boolean).
- *   - two spheres: their union, intersection and difference (the
- *     difference cut open to show the bite, its faces from B turned);
+ *   - two spheres: their union, intersection and difference (seen from
+ *     the bite, its faces from B turned inward);
  *   - the CSG emblem: a cube and a sphere intersected, three cylinders
  *     taken away, each step a Boolean of the last result.
  */
@@ -59,16 +59,10 @@ static qaws_mesh_3d_desc ms_bo_desc(qaws_mesh_3d const* m, qaws_scalar** x, unsi
 	return d;
 }
 
-static int ms_bo_front(double const* g, int part)
-{
-	(void)part;
-	return g[1] < 0.15;   /* the difference cut open: the half facing the viewer removed */
-}
-
 static void demo_boolean(void)
 {
 	static double const col[3][3] = { { 150, 178, 220 }, { 236, 176, 110 }, { 150, 205, 150 } }, wire[3] = { 50, 55, 70 };
-	static char const* const title[3] = { "union", "intersection", "difference, cut open" };
+	static char const* const title[3] = { "union", "intersection", "difference: the bite" };
 	er_canvas* c = er_create(2200, 700, 3, 252, 252, 250);
 	unsigned int na = 48, nb = 24, nv = 0, nt = 0, nv0, nt0, i, k, split[2];
 	qaws_scalar* x = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 6 * (2 + na * nb));
@@ -103,11 +97,11 @@ static void demo_boolean(void)
 		qaws_mesh_boolean(&m, &r, &A, &B, (qaws_boolean_op)k, NULL);
 		if (!m)
 			continue;
-		pick = ms_ix_pick(m, k == 2 ? ms_bo_front : NULL, split, col, &rgb);
+		pick = ms_ix_pick(m, NULL, split, col, &rgb);
 		if (pick)
 		{
 			sprintf(sub, "%u faces, closed %d", qaws_mesh_3d_get_triangle_count(m), r.closed);
-			ms_panel(c, 550 * (int)k, 0, 550, 700, pick, -1.2, 0.5, title[k], sub);
+			ms_panel(c, 550 * (int)k, 0, 550, 700, pick, k == 2 ? -2.2 : -1.2, k == 2 ? 0.35 : 0.5, title[k], sub);
 			ms_draw_faces(c, pick, rgb);
 			ms_draw(c, pick, NULL, NULL, 0, wire, 0.3);
 			printf("  spheres, %s: %s\n", title[k], sub);
