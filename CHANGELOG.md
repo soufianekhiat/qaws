@@ -41,6 +41,11 @@ All notable changes to Qaws are documented here.
 
 ### Fixed
 
+- Remeshing against a reference with input feature lines that are not its
+  creases (cut isolines against the uncut mesh): the lines were snapped
+  toward the reference's nearest crease (the border), splitting without end
+  (13k faces where 2k were due). They are now kept as lines across the
+  surface.
 - Self-intersection resolution: points where a face's edge crosses another's
   plane were made before the pair was known to meet, splitting edges beside
   the other face; coplanar neighbours touching at a corner or along an edge

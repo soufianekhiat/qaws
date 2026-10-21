@@ -211,6 +211,36 @@ static void test_isoline_remesh(void)
 	sprintf(msg, "icosphere cut at z = 0.3 (%u edges), remeshed: %u feature edges, their vertices at f = 0.3 %d", ne, nfe, ok);
 	printf("  %s\n", msg);
 	TEST_ASSERT(st == QAWS_STATUS_OK && out && nfe >= 10 && ok, msg);
+	{
+		/* against the uncut sphere's reference: its line not one of the reference's creases, kept across its smooth surface */
+		qaws_mesh_3d* out2 = NULL;
+		unsigned int nfe2 = 0, ok2 = 1, oa2 = 0;
+		d.reference = ref;
+		st = qaws_mesh_remesh(&out2, NULL, cut, &d);
+		if (out2)
+		{
+			unsigned int nv = qaws_mesh_3d_get_vertex_count(out2);
+			qaws_scalar* val = (qaws_scalar*)malloc(sizeof(qaws_scalar) * nv);
+			unsigned int* fe;
+			nfe2 = qaws_mesh_3d_get_feature_edge_count(out2);
+			fe = (unsigned int*)malloc(sizeof(unsigned int) * 2 * (nfe2 + 1));
+			qaws_mesh_3d_find_attribute(&oa2, out2, "f");
+			qaws_mesh_3d_get_attribute(val, out2, oa2);
+			qaws_mesh_3d_get_feature_edges(fe, out2);
+			/* (the cut polyline's chords projected onto the curved uncut surface: some 1e-4 off the level) */
+			for (i = 0; i < 2 * nfe2; i++)
+			{
+				ok2 &= fabs(val[fe[i]] - level) < 5e-4;
+			}
+			free(val);
+			free(fe);
+		}
+		sprintf(msg, "the same against the uncut sphere: %u faces (%u with its own), %u feature edges at f = 0.3 (5e-4) %d", out2 ? qaws_mesh_3d_get_face_count(out2) : 0,
+			out ? qaws_mesh_3d_get_face_count(out) : 0, nfe2, ok2);
+		printf("  %s\n", msg);
+		TEST_ASSERT(st == QAWS_STATUS_OK && out2 && out && qaws_mesh_3d_get_face_count(out2) < 1.3 * qaws_mesh_3d_get_face_count(out) && nfe2 >= 10 && ok2, msg);
+		qaws_mesh_3d_destroy(out2);
+	}
 	qaws_mesh_3d_destroy(out);
 	qaws_mesh_3d_destroy(cut);
 	qaws_mesh_reference_destroy(ref);

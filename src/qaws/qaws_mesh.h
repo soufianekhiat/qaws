@@ -228,8 +228,9 @@ int qaws_mesh_3d_is_feature_corner(qaws_mesh_3d const* mesh, unsigned int vertex
    level exactly, its other attributes by their rules), each face cut
    between its two corners on the level and the quads this leaves cut by
    their shorter diagonal; edges already on a level marked. Remeshed
-   (qaws_mesh_remesh, the cut mesh its own reference: the lines are its
-   creases) the lines stay, the attribute on them still the level. out_edge_count (may
+   (qaws_mesh_remesh) the lines stay: as creases of the cut mesh's own
+   reference, or as lines across the uncut mesh's reference, the attribute
+   on them the level (to the chords' sagitta in the second case). out_edge_count (may
    be NULL): the feature edges made. INVALID_ARGUMENT for an attribute not
    per vertex. */
 qaws_status qaws_mesh_3d_cut_isolines(unsigned int* out_edge_count, qaws_mesh_3d* mesh, unsigned int attribute, qaws_scalar const* levels,

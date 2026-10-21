@@ -664,6 +664,33 @@ static int rm_star_within(rmsh* w, unsigned int v, unsigned int u, double const*
 
 /* ---- splits ------------------------------------------------------------- */
 
+/* vertices: on a feature line the input draws across a smooth part of the reference (cut isolines), not on one of its creases */
+#define RM_ON_SURFACE 0x40u
+
+/* p onto the place of a feature line: the reference's creases, or its surface for a line across a smooth part; the squared
+   distance */
+static double rm_project_line(rmsh* w, double const* p, unsigned int hint, int surface, qaws_mesh_location* l)
+{
+	return surface ? mr_project(w->r, p, hint, &w->s, l) : mr_project_crease(w->r, p, hint, &w->s, l);
+}
+
+/* an input feature vertex placed: onto the creases when one is about as near as the surface, else onto the surface, its
+   line then marked as one across a smooth part; 0 when nothing is found */
+static int rm_feature_place(rmsh* w, unsigned int v, qaws_mesh_location* l)
+{
+	qaws_hm* m = w->m;
+	qaws_mesh_location ls;
+	double dc = mr_project_crease(w->r, m->x + 3 * (size_t)v, HM_NONE, &w->s, l), ds = mr_project(w->r, m->x + 3 * (size_t)v, HM_NONE, &w->s, &ls);
+	double e = 1e-6 * w->r->extent;
+	if (dc != HUGE_VAL && l->patch != HM_NONE && dc <= 4 * ds + e * e)
+		return 1;
+	if (ls.patch == HM_NONE)
+		return 0;
+	*l = ls;
+	m->vflag[v] |= RM_ON_SURFACE;
+	return 1;
+}
+
 /* c's edge's midpoint on the reference: on the creases for a feature edge, in the edge's region otherwise (0: none found) */
 static int rm_mid(rmsh* w, unsigned int c, double* x, qaws_mesh_location* l)
 {
@@ -673,7 +700,7 @@ static int rm_mid(rmsh* w, unsigned int c, double* x, qaws_mesh_location* l)
 	for (k = 0; k < 3; k++)
 		mid[k] = 0.5 * (rm_x(m, a)[k] + rm_x(m, b)[k]);
 	if (m->cflag[c] & HM_FEATURE)
-		d = mr_project_crease(w->r, mid, m->foot[a].patch, &w->s, l);
+		d = rm_project_line(w, mid, m->foot[a].patch, (m->vflag[a] & m->vflag[b] & RM_ON_SURFACE) != 0, l);
 	else
 	{
 		unsigned int reg = rm_region(w, m->cf[c]);
@@ -701,12 +728,15 @@ static int rm_near_mid(rmsh const* w, unsigned int a, unsigned int b)
 /* c's edge split at x, its footpoint l */
 static unsigned int rm_split_at(rmsh* w, unsigned int c, double const* x, qaws_mesh_location const* l)
 {
+	int surface = (w->m->cflag[c] & HM_FEATURE) && (w->m->vflag[w->m->cv[c]] & w->m->vflag[hm_to(w->m, c)] & RM_ON_SURFACE);
 	unsigned int v = hm_split_edge(w->m, c, 0.5, x, 1);
 	if (v == HM_NONE)
 	{
 		w->failed = 1;
 		return HM_NONE;
 	}
+	if (surface)
+		w->m->vflag[v] |= RM_ON_SURFACE;
 	w->m->foot[v] = *l;
 	rm_set_size(w, v);
 	w->rep.splits++;
@@ -956,7 +986,7 @@ static int rm_along_crease(rmsh* w, unsigned int p, unsigned int q)
 		mid[k] = 0.5 * (rm_x(m, p)[k] + rm_x(m, q)[k]);
 		d2 += (rm_x(m, p)[k] - rm_x(m, q)[k]) * (rm_x(m, p)[k] - rm_x(m, q)[k]);
 	}
-	return mr_project_crease(w->r, mid, m->foot[p].patch, &w->s, &l) < 1e-6 * d2;
+	return rm_project_line(w, mid, m->foot[p].patch, (m->vflag[p] & m->vflag[q] & RM_ON_SURFACE) != 0, &l) < 1e-6 * d2;
 }
 
 /* may c's edge flip: inside and off the features, the new edge off the creases, the new pair (a, q, p) and (q, b, p) facing
@@ -1135,7 +1165,8 @@ static int rm_smooth_vertex(rmsh* w, unsigned int v)
 	unsigned int fd, k, half;
 	double d[3], x[3], nrm[3], dd;
 	qaws_mesh_location l;
-	if ((m->vflag[v] & (HM_DELETED | HM_CORNER)) || m->vc[v] == HM_NONE)
+	/* (a vertex of a line across the reference's smooth part stays: sliding it along the line's chords would leave the line) */
+	if ((m->vflag[v] & (HM_DELETED | HM_CORNER | RM_ON_SURFACE)) || m->vc[v] == HM_NONE)
 		return 0;
 	fd = hm_feature_degree(m, v);
 	if (fd != 0 && fd != 2)
@@ -1212,7 +1243,7 @@ static int rm_smooth_vertex(rmsh* w, unsigned int v)
 			double y[3];
 			for (k = 0; k < 3; k++)
 				y[k] = rm_x(m, v)[k] + d[k];
-			if (mr_project_crease(w->r, y, m->foot[v].patch, &w->s, &l) == HUGE_VAL || l.patch == HM_NONE)
+			if (rm_project_line(w, y, m->foot[v].patch, (m->vflag[v] & RM_ON_SURFACE) != 0, &l) == HUGE_VAL || l.patch == HM_NONE)
 				return 0;
 		}
 		mr_eval(w->r, &l, x, NULL);
@@ -1540,7 +1571,8 @@ static int rm_relocate(rmsh* w, unsigned int v)
 	qaws_mesh_location cl, bl = { 0, 0, 0 };
 	rm_stat b0, a0;
 	int found = 0;
-	if ((m->vflag[v] & (HM_DELETED | HM_CORNER)) || m->vc[v] == HM_NONE)
+	/* (a vertex of a line across the reference's smooth part stays: sliding it along the line's chords would leave the line) */
+	if ((m->vflag[v] & (HM_DELETED | HM_CORNER | RM_ON_SURFACE)) || m->vc[v] == HM_NONE)
 		return 0;
 	rm_use(w, v, v);
 	fd = hm_feature_degree(m, v);
@@ -1606,7 +1638,7 @@ static int rm_relocate(rmsh* w, unsigned int v)
 			{
 				for (j = 0; j < 3; j++)
 					y[j] = cx[j] + d[j];
-				if (mr_project_crease(w->r, y, cl.patch, &w->s, &l) == HUGE_VAL || l.patch == HM_NONE)
+				if (rm_project_line(w, y, cl.patch, (m->vflag[v] & RM_ON_SURFACE) != 0, &l) == HUGE_VAL || l.patch == HM_NONE)
 					continue;
 			}
 			else
@@ -1963,7 +1995,7 @@ static qaws_status rm_begin(rmsh* w, qaws_mesh_3d const* in, qaws_mesh_3d** out)
 		if (in->hm.foot && src < in->hm.nv && in->hm.foot[src].patch < w->r->nt
 			&& (mr_eval(w->r, &in->hm.foot[src], x, NULL), fabs(x[0] - rm_x(m, i)[0]) + fabs(x[1] - rm_x(m, i)[1]) + fabs(x[2] - rm_x(m, i)[2]) <= 1e-6 * w->r->extent))
 			l = in->hm.foot[src];
-		else if (hm_feature_degree(m, i) && mr_project_crease(w->r, rm_x(m, i), HM_NONE, &w->s, &l) != HUGE_VAL && l.patch != HM_NONE)
+		else if (hm_feature_degree(m, i) && rm_feature_place(w, i, &l))
 		{
 		}
 		else if (m->vc[i] != HM_NONE)

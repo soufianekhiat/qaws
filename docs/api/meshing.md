@@ -1103,7 +1103,7 @@ Figure 32 (key w) shows a rippled torus at 20%, 5% and 1.5% of its triangles wit
 
 Three tools turn a mesh's attributes into what remeshing keeps and how fine it goes.
 
-- **Isolines as lines:** `qaws_mesh_3d_cut_isolines` cuts the isolines of a vertex attribute (its first component) at given levels into the mesh, in place, as feature edges. Each edge a level crosses is split where the attribute (linear along it) meets the level, and the new vertex takes the level exactly; each face is cut between its two corners on the level and the quads this leaves are cut by their shorter diagonal. Remeshed (`qaws_mesh_remesh` with the cut mesh as its own reference, the lines its creases), the lines stay and the attribute on them is still the level.
+- **Isolines as lines:** `qaws_mesh_3d_cut_isolines` cuts the isolines of a vertex attribute (its first component) at given levels into the mesh, in place, as feature edges. Each edge a level crosses is split where the attribute (linear along it) meets the level, and the new vertex takes the level exactly; each face is cut between its two corners on the level and the quads this leaves are cut by their shorter diagonal. Remeshed (`qaws_mesh_remesh`), the lines stay: as creases of the cut mesh's own reference (the attribute on them exactly the level), or against the uncut mesh's reference as lines across its smooth surface (to some 1e-4 of the level on a unit sphere: the chords' sagitta).
 - **Metric intersection:** `qaws_metric_field_create_intersection` makes one field from several on one reference (each attribute's Hessian metric, a size field's): each vertex's metrics are simultaneously reduced and the larger of each pair kept, giving the largest unit ball inside all of theirs, so edges as short as any field asks in every direction.
 - **Metric gradation:** `qaws_metric_field_create_graded` limits how fast sizes change (H-gradation, Alauzet 2010): each vertex's metric is spread along its edges, its sizes grown by 1 + l ln(gradation) over an edge of metric length l, and intersected at the other end, until no metric changes. A sharp local demand then fades out instead of leaving a jump.
 
@@ -1115,7 +1115,7 @@ qaws_metric_field_create_graded(&graded, both, 1.3);
 
 **Test 168 checks** (small meshes):
 - **Flat isolines:** a grid with f = x + 0.3 y cut at two levels: 44 feature edges, every one of their vertices exactly on its level in value and position, all faces triangles, the mesh valid.
-- **Through remeshing:** an icosphere cut at z = 0.3 and remeshed keeps the line, its vertices at f = 0.3 to 1e-9.
+- **Through remeshing:** an icosphere cut at z = 0.3 and remeshed keeps the line, its vertices at f = 0.3 to 1e-9; against the uncut sphere's reference, the same face count (1316 against 1290) and the line within 5e-4.
 - **Intersection:** an isotropic field (0.2) with an anisotropic one (0.05 along x, 0.4 across) gives sizes 0.05 and 0.2, exact to 1e-16; turned by 0.5 rad, the result is as fine as both in every direction and as fine as one of them in some; a field with itself is unchanged.
 - **Gradation:** a size of 0.01 at a corner in 0.2 elsewhere, graded by 1.3, grows at most about ln 1.3 per unit of distance from it (within the mesh paths' extra length) and stays 0.2 far away.
 

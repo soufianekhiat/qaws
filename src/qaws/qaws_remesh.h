@@ -105,7 +105,10 @@
  * input's vertices.
  *
  * The reference is the surface: by default the input's own (PN, its
- * features as creases). Every output vertex keeps its location on the
+ * features as creases). An input feature line that is not one of the
+ * reference's creases (cut isolines remeshed against the uncut mesh's
+ * reference) is kept as a line across its surface: split and collapsed
+ * along itself, its vertices not slid. Every output vertex keeps its location on the
  * reference (qaws_mesh_3d_get_footpoints), and every attribute of the
  * reference's mesh is evaluated there by its rule: vertex attributes at the
  * vertex, corner attributes at the vertex as seen from the face's side (a
