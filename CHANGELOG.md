@@ -29,6 +29,12 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- Spatial queries on meshes (`qaws_mesh_bvh.h`): a BVH over segments, triangles or
+  tetrahedra (binned SAH), from arrays, soups, `qaws_mesh_3d`, `qaws_mesh_2d` or
+  `qaws_volume_mesh`; closest points and point location, watertight rays (closest
+  or any hit), generalized winding numbers (second-order far field), signed
+  distances signed by them, refit; batches through the executor. Test 159,
+  meshing figure 22.
 - Single-file amalgamation: `buildsystem/amalgamate.py` collapses the tree into
   one `qaws.h` and one `qaws.c`, for consumers with no build system. Exposed as
   the CMake `amalgamate` target and the `QAWS_AMALGAMATION` /

@@ -160,6 +160,7 @@ add_executable(
 156_boundary_layers.c
 157_curved_elements.c
 158_metric_remesh.c
+159_mesh_bvh.c
 )
 
 # The amalgamated library exports exactly the same symbols, so the tests can

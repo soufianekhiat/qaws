@@ -15,6 +15,7 @@ enters and leaves as arrays; qaws reads and writes no files.
 | `qaws_quadrangulate.h` | quad meshes (INSTANT) |
 | `qaws_mesh_generate.h` | meshes of surfaces and shells (REMESH); curved elements (P2, P3, Q2, Q3 nodes) |
 | `qaws_mesh_repair.h` | repair for farq: soups and broken meshes made closed and outward |
+| `qaws_mesh_bvh.h` | spatial queries: closest points, point location, rays, winding numbers, signed distance |
 | `qaws_volume_mesh.h` | `qaws_volume_mesh`: tetrahedra, hexahedra, prisms, pyramids |
 | `qaws_tetrahedralize.h` | tetrahedra filling a closed surface (DELAUNAY) |
 | `qaws_hexahedralize.h` | hexahedra filling a closed surface (GRID) |
@@ -812,6 +813,69 @@ island in it outward; a cap, needles and a zero-area face removed without
 holes; a Moebius strip reported; two cubes on one edge closed with the edge
 left non-manifold. Figure 18 (key i): a broken torus soup (holes, a gap,
 three faces in ten turned, duplicates) repaired in 0.02 s.
+
+## Spatial queries: qaws_mesh_bvh
+
+`qaws_mesh_bvh.h` answers point and ray queries on any mesh, broken or not.
+A BVH holds simplices of one kind, in 2D or 3D:
+
+- segments: curves, or a 2D mesh's border;
+- triangles: surfaces, or a 2D mesh's faces;
+- tetrahedra: volumes.
+
+Each simplex belongs to an input element, which is what a hit reports:
+- a polygon is fanned from its first vertex;
+- a cell is split into tetrahedra from its first vertex (a hexahedron 6, a prism 3, a pyramid 2).
+
+```c
+qaws_mesh_bvh* bvh = NULL;
+qaws_mesh_bvh_create_mesh_3d(&bvh, mesh, NULL);            /* or _create (arrays, soups), _create_mesh_2d, _create_volume */
+qaws_mesh_bvh_closest(hits, bvh, points, n, 0, NULL);      /* nearest point; inside a 2D face or a cell: located, distance 0 */
+qaws_mesh_bvh_ray(hits, bvh, origins, dirs, n, 0, 0, NULL);/* first hit; any_hit 1 for shadow rays */
+qaws_mesh_bvh_winding_number(w, bvh, points, n, NULL);     /* 1 inside, 0 outside, between for open input */
+qaws_mesh_bvh_signed_distance(d, NULL, bvh, points, n, NULL);
+qaws_mesh_bvh_refit(bvh, moved_positions);                 /* same simplices, new positions */
+```
+
+A `qaws_mesh_hit` holds:
+- the element and the simplex;
+- the simplex's vertices with barycentric weights, for interpolating attributes;
+- the point;
+- the distance (for rays, the parameter t).
+
+**Build.** Binned SAH with 8 bins per axis, as tinyBVH's default, and leaves of up to 4 simplices. Positions are held in double whatever the caller's precision. Building 199,200 triangles takes 0.15 s.
+
+**Rays.** Triangles in 3D use the watertight test of Woop, Benthin and Wald (2013): a ray through a shared edge or vertex never slips between triangles. Segments in 2D decide each vertex's side by the same rule in both segments that share it.
+
+**Winding numbers.** These are generalized winding numbers (Jacobson et al. 2013): solid angles over 4π in 3D, angles over 2π in 2D.
+- Far nodes use their expansion to second order (Barill et al. 2018). The expansion uses each node's area vector, first moment and second moment, the second moment including each triangle's own spread.
+- `winding_accuracy` (β, default 2) decides when a node is far: when the point lies beyond β times the node's radius.
+- Worst error against the exact sum on a closed sphere: 2.2e-3 at the default, 1.3e-5 at β = 6.
+
+**Signed distance.** The closest distance, negative where the winding number is at least 1/2. Its sign therefore holds on soups, with holes and with overlaps.
+
+**Threads.** Queries run in chunks of 64 through the caller's `qaws_batch_executor`, and the results do not depend on it.
+
+**Status.** `UNSUPPORTED_OPERATION` for rays or winding numbers except on triangles in 3D or segments in 2D. `INVALID_ARGUMENT` for:
+- a dimension other than 2 or 3;
+- tetrahedra in 2D;
+- an index out of range;
+- a position that is not finite.
+
+**Tests and figure.** Test 159:
+- closest points and rays equal a brute-force loop;
+- winding numbers within 5e-3 of the exact sum;
+- 1089 rays through a warped grid's vertices and edges, none missed;
+- 2D location and border queries;
+- points located in a block of hexahedra;
+- refit equal to a new build;
+- an executor running chunks backwards gives the same results;
+- 100k closest points within 0.1 of a 200k-triangle sphere take 0.5 s.
+
+Figure 22 (key m) is a torus soup with three holes:
+- ray traced, with camera and shadow rays;
+- its winding number on a plane;
+- its signed distance on the same plane.
 
 ## Volume meshes: qaws_volume_mesh
 
