@@ -1143,28 +1143,34 @@ Figure 34 (key y) shows a hill's attribute isolines kept through remeshing, and 
 
 ## The mesh connector
 
-`qaws_mesh_3d_connect` (`qaws_mesh_connect.h`) joins two border loops, one on each of two meshes or two on one mesh, by a bridge; the result is one mesh.
+`qaws_mesh_3d_connect` (`qaws_mesh_connect.h`) joins two borders, one on each of two meshes or two on one mesh, by a bridge; the result is one mesh. `qaws_mesh_2d_connect` does the same for planar meshes, and `qaws_volume_mesh_connect` joins two patches of border facets of volume meshes by layers of cells.
 
 ```c
 qaws_connect_desc d = { 0, 1 };                        /* rows from the gap, quads where the counts allow */
 qaws_mesh_3d_connect(&joined, &report, a, a_border_vertex, b, b_border_vertex, &d);
 ```
 
+- **Borders:** whole loops, or with `QAWS_CONNECT_CHAINS` chains of them: from `a_vertex` to `a_end` along a's border and from `b_vertex` to `b_end` against b's (`a_vertex` meets `b_vertex`): a strip instead of a tube.
 - **Matching:** each loop is named by a vertex on it. The second is turned the other way, so the bridge's faces agree with both meshes' orientations, and started where the matched points are nearest (the least twist); the loops are matched by arc length.
 - **Shape:** each ring of the bridge is a Hermite blend of the loops' points at its arc length, leaving each loop along its mesh's surface (across the border in the vertex's tangent plane, away from the mesh), so the bridge meets both meshes tangent to them. Between two coaxial tubes it lies exactly on their cylinder.
 - **Grading:** the rows follow the gap over the loops' mean edge length (or `rows`); their spacing grades from one side's edge length to the other's, and the rings' vertex counts from one loop's to the other's.
 - **Faces:** quads between rings of equal counts (with `quads`), else triangles zipped by arc length.
 - **Smoothing:** `QAWS_CONNECT_FAIR` smooths the bridge's inner vertices by three bi-Laplacian flow steps with both meshes held, evening out the zipped triangles while keeping the shape. A thin plate is not used: spanning two loops far apart it pinches like a soap film (a tube bridge's round section decays as e^(−distance/radius) toward its middle).
-- **Result:** a's vertices, then b's, then the bridge's; a face attribute `"part"` says 0 (a), 1 (bridge) or 2 (b). Other attributes and features are not carried. The report gives the rows, the bridge's faces, the loops' sizes, the gap and the bridge's smallest angle.
-- **Reserved:** planar meshes and volume bridges (prisms, hexahedra).
+- **Result:** a's vertices, then b's, then the bridge's; a face attribute `"part"` says 0 (a), 1 (bridge) or 2 (b). Both meshes' feature edges are kept. The attributes both meshes have (by name, element and components) are carried: on the bridge a vertex's or corner's value blends the two borders' values at its arc length by its Hermite weight (NEAREST: the nearer's; NORMALIZED: renormalized), a face's is the nearer border's face's.
+- **Quality:** the report measures the bridge with the quality report's measures: its smallest and largest angles and smallest scaled Jacobian (and the rows, faces, borders' sizes, gap).
+- **Planar meshes:** the same in their plane (their surfaces at z = 0); attributes and features are not carried there.
+- **Volumes:** two patches of border facets (numbered as `qaws_volume_mesh_get_cell_adjacency` numbers facets) are joined by layers of prisms (on triangles) or hexahedra (on quads), Hermite-blended along the patches' normals. The bridge conforms to both meshes, so the patches must be the same triangulation up to placement: each a disk, matched vertex for vertex and facet for facet through its Tutte embedding (borders by arc length with the least twist); patches that differ are refused.
 
 **Test 169 checks** (small meshes):
 - **Coaxial tubes:** two tubes 0.6 apart joined in quads: one valid piece with the two far loops left, the bridge on the cylinder to 1e-16.
 - **Different counts:** tubes of 24 and 16 sides joined in triangles, valid, one piece, smallest angle 40° (37° smoothed).
 - **Handle:** a sphere without its caps, its two holes joined through it: closed, genus 1.
 - **Refusals:** a vertex off the border, one loop named twice.
+- **Strip:** two unit squares joined between their facing sides (chains): the area 2.5 exact, the bridge's quads square (scaled Jacobian 1); the same as planar meshes.
+- **Carried:** a vertex attribute 1 on one tube and 3 on the other kept on each and between them on the bridge; the 16 feature edges kept.
+- **Volumes:** two blocks of 2 × 2 hexahedra a unit apart joined by hexahedra, valid, cubes (scaled Jacobian 1); patches of 2 × 2 and 3 × 3 facets refused; two prisms joined by prisms.
 
-Figure 35 (key z) shows two tubes at an angle joined in quads and smoothed, and a funnel between tubes of 32 and 12 sides.
+Figure 35 (key z) shows two tubes at an angle joined in quads and smoothed, and a funnel between tubes of 32 and 12 sides. Figure 36 (key A) shows a planar strip from 8 to 3 edges, an attribute blended across a bridge, and two hexahedral blocks, one turned, joined by hexahedra.
 
 ## Spatial queries: qaws_mesh_bvh
 

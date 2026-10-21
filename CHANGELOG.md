@@ -59,7 +59,11 @@ All notable changes to Qaws are documented here.
 - The mesh connector (`qaws_mesh_3d_connect`): two border loops (on two
   meshes or one) joined by a bridge matched by arc length, Hermite-blended
   along both surfaces (tangent to both), rows and counts graded, quads or
-  zipped triangles, optional smoothing. Test 169, figure 35 (key z).
+  zipped triangles, optional smoothing; chains of borders (strips), the
+  attributes and features carried, the bridge measured by the quality
+  report; planar meshes (`qaws_mesh_2d_connect`); volume patches joined by
+  prisms and hexahedra (`qaws_volume_mesh_connect`). Test 169, figures 35
+  and 36 (keys z, A).
 - Metric CVT: `QAWS_REMESH_CVT` takes `qaws_remesh_desc.metric` (it was
   UNSUPPORTED_OPERATION): an anisotropic CVT with each Voronoi cell
   measured in its seed's metric (Du and Wang 2005), density sqrt det M, the
