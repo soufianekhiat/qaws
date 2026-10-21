@@ -2376,7 +2376,7 @@ static void rp_intersections(rp_work* w, unsigned int** out_hits)
 	{
 		/* cells fitted to the triangles: a surface (or a seam of pieces) fills little of its box */
 		qaws_bp_grid* grid = NULL;
-		w->st = qaws_internal_grid_create_fit(&grid, box, m->nt, 3);
+		w->st = qaws_internal_grid_create_fit(&grid, box, m->nt, 3, NULL);
 		if (w->st == QAWS_STATUS_OK)
 			w->st = qaws_internal_grid_pairs(NULL, grid, box, NULL, NULL, rp_hit_visit_chunk, &c, NULL);
 		qaws_internal_grid_destroy(grid);

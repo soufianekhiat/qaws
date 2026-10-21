@@ -69,41 +69,238 @@ struct qaws_bp_grid
 	unsigned int* items;
 	double hmin;                /* smallest cell side over the axes with extent */
 	int fit;                    /* cells sized by the boxes (no sweep needed) */
+	unsigned int nchunk;        /* the pair walk's chunks, about equal work */
+	unsigned int* chunk;        /* nchunk + 1 starts: cell, row (a crowded cell's rows split among chunks) */
 };
 
-/* fit: cells about the boxes' mean size (surfaces: the volume rule makes cells far bigger than their boxes) */
-static qaws_status bp_build(qaws_bp_box const* boxes, unsigned int count, unsigned int dim, struct qaws_bp_grid* B, int fit)
+#define BP_PAIR_GRAIN 64   /* cells per chunk */
+#define BP_BOX_GRAIN 16384 /* boxes per chunk of the build */
+#define BP_SLABS 16        /* layers of cells filled apart through an executor */
+
+/* the pair walk cut into nchunk runs of about equal work: a cell weighs one, and each of its rows (its boxes in order)
+   one per box after it; rows of g0 cells (row_work: their weights) skipped whole when no run starts in them */
+static unsigned int* bp_chunks(unsigned int const* start, unsigned int g0, unsigned int nrow, double const* row_work, unsigned int nchunk,
+	double total)
 {
-	bp_grid G;
-	double hi[3], h = 0;
-	unsigned int i, k, ncell, total = 0, bounded = 0;
-	unsigned int *start = NULL, *fill = NULL, *items = NULL;
-	memset(B, 0, sizeof(*B));
-	/* scene box of the bounded boxes */
-	for (k = 0; k < 3; k++)
+	unsigned int* at = (unsigned int*)qaws_internal_malloc(qaws_internal_mul3(sizeof(unsigned int), 2, (size_t)nchunk + 1));
+	double step = total / (nchunk ? nchunk : 1), acc = 0;
+	unsigned int r, c, e, k = 1;
+	if (!at)
+		return NULL;
+	at[0] = at[1] = 0;
+	for (r = 0; r < nrow && k < nchunk; r++)
 	{
-		G.lo[k] = HUGE_VAL;
-		hi[k] = -HUGE_VAL;
-	}
-	for (i = 0; i < count; i++)
-		if (!bp_unbounded(&boxes[i], dim))
+		if (acc + row_work[r] < k * step)
 		{
-			bounded++;
-			for (k = 0; k < dim; k++)
+			acc += row_work[r];
+			continue;
+		}
+		for (c = r * g0; c < (r + 1) * g0; c++)
+		{
+			unsigned int n = start[c + 1] - start[c];
+			for (; k < nchunk && acc >= k * step; k++)
 			{
-				if (boxes[i].lo[k] < G.lo[k]) G.lo[k] = boxes[i].lo[k];
-				if (boxes[i].hi[k] > hi[k]) hi[k] = boxes[i].hi[k];
+				at[2 * k] = c;
+				at[2 * k + 1] = 0;
+			}
+			acc += 1;
+			for (e = 0; e < n; e++)
+			{
+				for (; k < nchunk && acc >= k * step; k++)
+				{
+					at[2 * k] = c;
+					at[2 * k + 1] = e;
+				}
+				acc += n - 1 - e;
 			}
 		}
+	}
+	for (; k <= nchunk; k++)
+	{
+		at[2 * k] = nrow * g0;
+		at[2 * k + 1] = 0;
+	}
+	return at;
+}
+
+/* the build's state: boxes in chunks for the bounds and cell ranges, then cells in slabs of whole layers (each slab
+   counts and fills its own cells, its boxes in order: the same grid whatever the slabs) */
+typedef struct bp_make
+{
+	qaws_bp_box const* boxes;
+	unsigned int count, dim, nslab;
+	bp_grid G;
+	double* part;                      /* per box chunk: lo[3], hi[3], widest sides summed, bounded boxes */
+	unsigned short* range;             /* per box: first and last cells on x, y, z */
+	unsigned int* start;
+	unsigned int* items;
+	unsigned int* slab;                /* per slab: its items, then the items before it */
+	double* row_work;                  /* per row of cells along x: the pair walk's work */
+} bp_make;
+
+static qaws_status bp_bounds_job(void* user, unsigned int chunk, unsigned int begin, unsigned int end)
+{
+	bp_make const* M = (bp_make const*)user;
+	double* p = M->part + 8 * (size_t)chunk;
+	unsigned int i, k;
+	for (k = 0; k < 3; k++)
+	{
+		p[k] = HUGE_VAL;
+		p[3 + k] = -HUGE_VAL;
+	}
+	p[6] = p[7] = 0;
+	for (i = begin; i < end; i++)
+		if (!bp_unbounded(&M->boxes[i], M->dim))
+		{
+			double w = 0;
+			for (k = 0; k < M->dim; k++)
+			{
+				if (M->boxes[i].lo[k] < p[k]) p[k] = M->boxes[i].lo[k];
+				if (M->boxes[i].hi[k] > p[3 + k]) p[3 + k] = M->boxes[i].hi[k];
+				w = fmax(w, M->boxes[i].hi[k] - M->boxes[i].lo[k]);
+			}
+			p[6] += w;
+			p[7] += 1;
+		}
+	return QAWS_STATUS_OK;
+}
+
+static qaws_status bp_range_job(void* user, unsigned int chunk, unsigned int begin, unsigned int end)
+{
+	bp_make const* M = (bp_make const*)user;
+	unsigned int i, k;
+	(void)chunk;
+	for (i = begin; i < end; i++)
+	{
+		unsigned int c0[3], c1[3];
+		bp_range(&M->G, &M->boxes[i], M->dim, c0, c1);
+		for (k = 0; k < 3; k++)
+		{
+			M->range[6 * (size_t)i + 2 * k] = (unsigned short)c0[k];
+			M->range[6 * (size_t)i + 2 * k + 1] = (unsigned short)c1[k];
+		}
+	}
+	return QAWS_STATUS_OK;
+}
+
+/* slab s: its layers [z0, z1) */
+static void bp_slab(bp_make const* M, unsigned int s, unsigned int* z0, unsigned int* z1)
+{
+	*z0 = (unsigned int)((unsigned long long)M->G.g[2] * s / M->nslab);
+	*z1 = (unsigned int)((unsigned long long)M->G.g[2] * (s + 1) / M->nslab);
+}
+
+/* a slab's cells counted, then their starts from the slab's first item, and its rows' work */
+static qaws_status bp_count_job(void* user, unsigned int chunk, unsigned int begin, unsigned int end)
+{
+	bp_make const* M = (bp_make const*)user;
+	unsigned int s, i, a, b, c, z0, z1, g0 = M->G.g[0], g1 = M->G.g[1];
+	(void)chunk;
+	for (s = begin; s < end; s++)
+	{
+		unsigned int sum = 0;
+		bp_slab(M, s, &z0, &z1);
+		for (i = 0; i < M->count; i++)
+		{
+			unsigned short const* r = M->range + 6 * (size_t)i;
+			unsigned int lo = r[4] > z0 ? r[4] : z0, hi = r[5] + 1u < z1 ? r[5] + 1u : z1;
+			for (c = lo; c < hi; c++)
+				for (b = r[2]; b <= r[3]; b++)
+					for (a = r[0]; a <= r[1]; a++)
+						M->start[(c * g1 + b) * g0 + a]++;
+		}
+		for (b = z0 * g1; b < z1 * g1; b++)
+		{
+			double w = 0;
+			for (a = b * g0; a < (b + 1) * g0; a++)
+			{
+				unsigned int n = M->start[a];
+				M->start[a] = sum;
+				sum += n;
+				w += 1 + 0.5 * n * ((double)n - 1);
+			}
+			M->row_work[b] = w;
+		}
+		M->slab[s] = sum;
+	}
+	return QAWS_STATUS_OK;
+}
+
+/* a slab's items, its boxes in order (each cell's start moved on as it fills, then put back) */
+static qaws_status bp_fill_job(void* user, unsigned int chunk, unsigned int begin, unsigned int end)
+{
+	bp_make const* M = (bp_make const*)user;
+	unsigned int s, i, a, b, c, z0, z1, g0 = M->G.g[0], g1 = M->G.g[1];
+	(void)chunk;
+	for (s = begin; s < end; s++)
+	{
+		bp_slab(M, s, &z0, &z1);
+		if (z0 == z1)
+			continue;
+		for (c = z0 * g1 * g0; c < z1 * g1 * g0; c++)
+			M->start[c] += M->slab[s];
+		for (i = 0; i < M->count; i++)
+		{
+			unsigned short const* r = M->range + 6 * (size_t)i;
+			unsigned int lo = r[4] > z0 ? r[4] : z0, hi = r[5] + 1u < z1 ? r[5] + 1u : z1;
+			for (c = lo; c < hi; c++)
+				for (b = r[2]; b <= r[3]; b++)
+					for (a = r[0]; a <= r[1]; a++)
+						M->items[M->start[(c * g1 + b) * g0 + a]++] = i;
+		}
+		for (c = z1 * g1 * g0 - 1; c > z0 * g1 * g0; c--)
+			M->start[c] = M->start[c - 1];
+		M->start[z0 * g1 * g0] = M->slab[s];
+	}
+	return QAWS_STATUS_OK;
+}
+
+/* fit: cells about the boxes' mean size (surfaces: the volume rule makes cells far bigger than their boxes) */
+static qaws_status bp_build(qaws_bp_box const* boxes, unsigned int count, unsigned int dim, struct qaws_bp_grid* B, int fit,
+	qaws_batch_executor const* executor)
+{
+	bp_make M;
+	double hi[3], h = 0, work = 0, mean = 0;
+	unsigned int i, k, s, ncell, total = 0, bounded = 0, nch = qaws_internal_chunk_count(count, BP_BOX_GRAIN);
+	unsigned int* chunk = NULL;
+	qaws_status st;
+	memset(B, 0, sizeof(*B));
+	memset(&M, 0, sizeof M);
+	M.boxes = boxes;
+	M.count = count;
+	M.dim = dim;
+	/* scene box of the bounded boxes (and their mean widest side), by chunks summed in order */
+	M.part = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), 8, (size_t)nch + 1));
+	if (!M.part)
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	st = qaws_internal_parallel(count, BP_BOX_GRAIN, bp_bounds_job, &M, executor);
+	if (st != QAWS_STATUS_OK)
+		goto done;
+	for (k = 0; k < 3; k++)
+	{
+		M.G.lo[k] = HUGE_VAL;
+		hi[k] = -HUGE_VAL;
+	}
+	for (i = 0; i < nch; i++)
+	{
+		double const* p = M.part + 8 * (size_t)i;
+		for (k = 0; k < dim; k++)
+		{
+			if (p[k] < M.G.lo[k]) M.G.lo[k] = p[k];
+			if (p[3 + k] > hi[k]) hi[k] = p[3 + k];
+		}
+		mean += p[6];
+		bounded += (unsigned int)p[7];
+	}
 	if (!bounded)
 		for (k = 0; k < 3; k++)
 		{
-			G.lo[k] = 0;
+			M.G.lo[k] = 0;
 			hi[k] = 0;
 		}
 	for (k = dim; k < 3; k++)
 	{
-		G.lo[k] = 0;
+		M.G.lo[k] = 0;
 		hi[k] = 0;
 	}
 
@@ -112,29 +309,20 @@ static qaws_status bp_build(qaws_bp_box const* boxes, unsigned int count, unsign
 		double vol = 1, ext = 0;
 		unsigned int axes = 0;
 		for (k = 0; k < dim; k++)
-			if (hi[k] - G.lo[k] > ext)
-				ext = hi[k] - G.lo[k];
+			if (hi[k] - M.G.lo[k] > ext)
+				ext = hi[k] - M.G.lo[k];
 		/* (an extent within the boxes' rounding is flat: float boxes of a
 		   curve on a line are a rounding thick) */
 		for (k = 0; k < dim; k++)
-			if (hi[k] - G.lo[k] > ext * BP_FLAT)
+			if (hi[k] - M.G.lo[k] > ext * BP_FLAT)
 			{
-				vol *= hi[k] - G.lo[k];
+				vol *= hi[k] - M.G.lo[k];
 				axes++;
 			}
 		h = axes ? pow(vol / (bounded ? bounded : 1), 1.0 / axes) : 0;
 		if (fit && bounded)
 		{
 			/* the boxes' mean widest side, made a little bigger: a box spans about two cells an axis */
-			double mean = 0;
-			for (i = 0; i < count; i++)
-				if (!bp_unbounded(&boxes[i], dim))
-				{
-					double w = 0;
-					for (k = 0; k < dim; k++)
-						w = fmax(w, boxes[i].hi[k] - boxes[i].lo[k]);
-					mean += w;
-				}
 			mean = 1.5 * mean / bounded;
 			if (mean > 0 && mean < h)
 				h = mean;
@@ -142,97 +330,96 @@ static qaws_status bp_build(qaws_bp_box const* boxes, unsigned int count, unsign
 	}
 	for (k = 0; k < 3; k++)
 	{
-		double n = k < dim && h > 0 ? ceil((hi[k] - G.lo[k]) / h) : 1;
-		G.g[k] = n < 1 ? 1 : (n > BP_MAX_AXIS ? BP_MAX_AXIS : (unsigned int)n);
+		double n = k < dim && h > 0 ? ceil((hi[k] - M.G.lo[k]) / h) : 1;
+		M.G.g[k] = n < 1 ? 1 : (n > BP_MAX_AXIS ? BP_MAX_AXIS : (unsigned int)n);
 	}
-	while ((double)G.g[0] * G.g[1] * G.g[2] > BP_MAX_CELLS)
+	while ((double)M.G.g[0] * M.G.g[1] * M.G.g[2] > BP_MAX_CELLS)
 		for (k = 0; k < 3; k++)
-			G.g[k] = (G.g[k] + 1) / 2;
+			M.G.g[k] = (M.G.g[k] + 1) / 2;
 	for (k = 0; k < 3; k++)
-		G.inv[k] = hi[k] > G.lo[k] ? (double)G.g[k] / (hi[k] - G.lo[k]) : 0;
-	ncell = G.g[0] * G.g[1] * G.g[2];
+		M.G.inv[k] = hi[k] > M.G.lo[k] ? (double)M.G.g[k] / (hi[k] - M.G.lo[k]) : 0;
+	ncell = M.G.g[0] * M.G.g[1] * M.G.g[2];
 
-	/* count, prefix, fill */
-	start = (unsigned int*)qaws_internal_zalloc((size_t)ncell + 1, sizeof(unsigned int));
-	fill = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(((size_t)ncell + 1), sizeof(unsigned int)));
-	if (!start || !fill)
-	{
+	/* count, prefix, fill: whole layers per slab */
+	M.nslab = executor && M.G.g[2] > 1 ? (M.G.g[2] < BP_SLABS ? M.G.g[2] : BP_SLABS) : 1;
+	M.range = (unsigned short*)qaws_internal_malloc(qaws_internal_mul3(sizeof(unsigned short), 6, (size_t)count + 1));
+	M.start = (unsigned int*)qaws_internal_zalloc((size_t)ncell + 1, sizeof(unsigned int));
+	M.slab = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * M.nslab);
+	M.row_work = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), (size_t)M.G.g[1] * M.G.g[2]));
+	st = !M.range || !M.start || !M.slab || !M.row_work ? QAWS_STATUS_ALLOCATION_FAILURE : QAWS_STATUS_OK;
+	if (st == QAWS_STATUS_OK)
+		st = qaws_internal_parallel(count, BP_BOX_GRAIN, bp_range_job, &M, executor);
+	if (st == QAWS_STATUS_OK)
+		st = qaws_internal_parallel(M.nslab, 1, bp_count_job, &M, executor);
+	if (st != QAWS_STATUS_OK)
 		goto done;
-	}
-	for (i = 0; i < count; i++)
+	for (s = 0; s < M.nslab; s++)
 	{
-		unsigned int c0[3], c1[3], a, b, c;
-		bp_range(&G, &boxes[i], dim, c0, c1);
-		for (c = c0[2]; c <= c1[2]; c++)
-			for (b = c0[1]; b <= c1[1]; b++)
-				for (a = c0[0]; a <= c1[0]; a++)
-					start[(c * G.g[1] + b) * G.g[0] + a]++;
-	}
-	for (i = 0; i < ncell; i++)
-	{
-		unsigned int n = start[i];
-		start[i] = total;
+		unsigned int n = M.slab[s];
+		M.slab[s] = total;
 		total += n;
 	}
-	start[ncell] = total;
-	memcpy(fill, start, ((size_t)ncell + 1) * sizeof(unsigned int));
-	items = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(((size_t)(total ? total : 1)), sizeof(unsigned int)));
-	if (!items)
+	M.start[ncell] = total;
+	for (i = 0; i < M.G.g[1] * M.G.g[2]; i++)
+		work += M.row_work[i];
+	M.items = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(((size_t)(total ? total : 1)), sizeof(unsigned int)));
+	st = M.items ? qaws_internal_parallel(M.nslab, 1, bp_fill_job, &M, executor) : QAWS_STATUS_ALLOCATION_FAILURE;
+	if (st != QAWS_STATUS_OK)
+		goto done;
+	B->nchunk = qaws_internal_chunk_count(ncell, BP_PAIR_GRAIN);
+	chunk = bp_chunks(M.start, M.G.g[0], M.G.g[1] * M.G.g[2], M.row_work, B->nchunk, work);
+	if (!chunk)
 	{
+		st = QAWS_STATUS_ALLOCATION_FAILURE;
 		goto done;
 	}
-	for (i = 0; i < count; i++)
-	{
-		unsigned int c0[3], c1[3], a, b, c;
-		bp_range(&G, &boxes[i], dim, c0, c1);
-		for (c = c0[2]; c <= c1[2]; c++)
-			for (b = c0[1]; b <= c1[1]; b++)
-				for (a = c0[0]; a <= c1[0]; a++)
-					items[fill[(c * G.g[1] + b) * G.g[0] + a]++] = i;
-	}
-	qaws_internal_free(fill);
-	B->G = G;
+	B->G = M.G;
 	B->dim = dim;
 	B->count = count;
 	B->ncell = ncell;
-	B->start = start;
-	B->items = items;
+	B->start = M.start;
+	B->items = M.items;
+	B->chunk = chunk;
 	B->fit = fit;
+	M.start = M.items = NULL;
 	/* (over the axes the rings advance along: a flat axis of one cell, its
 	   side a rounding, would make the ring bound crawl) */
 	B->hmin = HUGE_VAL;
 	for (k = 0; k < dim; k++)
-		if (G.inv[k] > 0 && G.g[k] > 1 && 1 / G.inv[k] < B->hmin)
-			B->hmin = 1 / G.inv[k];
+		if (M.G.inv[k] > 0 && M.G.g[k] > 1 && 1 / M.G.inv[k] < B->hmin)
+			B->hmin = 1 / M.G.inv[k];
 	if (!(B->hmin < HUGE_VAL))
 		B->hmin = 0;
-	return QAWS_STATUS_OK;
 done:
-	qaws_internal_free(start);
-	qaws_internal_free(fill);
-	qaws_internal_free(items);
-	return QAWS_STATUS_ALLOCATION_FAILURE;
+	qaws_internal_free(M.part);
+	qaws_internal_free(M.range);
+	qaws_internal_free(M.start);
+	qaws_internal_free(M.items);
+	qaws_internal_free(M.slab);
+	qaws_internal_free(M.row_work);
+	return st;
 }
 
 #define BP_LOCAL 32
 
-/* the pairs of cells [c0, c1), each in the cell holding the low corner of the overlap */
+/* the pairs from row `from` to row `to` (cell, row: a cell's rows are its boxes in order, each paired with those after
+   it), each in the cell holding the low corner of the overlap */
 static qaws_status bp_cells(struct qaws_bp_grid const* GR, qaws_bp_box const* boxes, qaws_bp_accept accept, void* accept_user,
-	qaws_status (*visit)(void* user, unsigned int chunk, unsigned int i, unsigned int j), void* user, unsigned int chunk, unsigned int c0,
-	unsigned int c1, unsigned int* candidates)
+	qaws_status (*visit)(void* user, unsigned int chunk, unsigned int i, unsigned int j), void* user, unsigned int chunk,
+	unsigned int const* from, unsigned int const* to, unsigned int* candidates)
 {
-	unsigned int i, k, dim = GR->dim;
+	unsigned int i, k, dim = GR->dim, c1 = to[0] + (to[1] > 0);
 	qaws_status s = QAWS_STATUS_OK;
 	qaws_bp_box stack_box[BP_LOCAL], *local = stack_box;   /* a cell's boxes read once, not once per pair */
-	unsigned int stack_cell[BP_LOCAL][3], (*lcell)[3] = stack_cell, most = 0;
-	for (i = c0; i < c1; i++)
+	unsigned int stack_cell[2 * BP_LOCAL], *lcell = stack_cell, *pick, most = 0;
+	for (i = from[0]; i < c1; i++)
 		if (GR->start[i + 1] - GR->start[i] > most)
 			most = GR->start[i + 1] - GR->start[i];
 	if (most > BP_LOCAL)
 	{
 		/* crowded cells (fans round a vertex): one buffer for the largest */
 		local = (qaws_bp_box*)qaws_internal_malloc(qaws_internal_mul2(sizeof(qaws_bp_box), most));
-		lcell = (unsigned int(*)[3])qaws_internal_malloc(qaws_internal_mul3(sizeof(unsigned int), 3, most));
+		lcell = (unsigned int*)qaws_internal_malloc(qaws_internal_mul3(sizeof(unsigned int), 2, most));
 		if (!local || !lcell)
 		{
 			qaws_internal_free(local == stack_box ? NULL : local);
@@ -244,40 +431,47 @@ static qaws_status bp_cells(struct qaws_bp_grid const* GR, qaws_bp_box const* bo
 	}
 	else
 		most = BP_LOCAL;
-	for (i = c0; i < c1 && s == QAWS_STATUS_OK; i++)
+	pick = lcell + most;
+	for (i = from[0]; i < c1 && s == QAWS_STATUS_OK; i++)
 	{
-		unsigned int e, f, b0 = GR->start[i], n = GR->start[i + 1] - b0;
+		unsigned int e, f, b0 = GR->start[i], n = GR->start[i + 1] - b0, here[3];
+		unsigned int r0 = i == from[0] ? from[1] : 0, r1 = i == to[0] ? to[1] : n;
 		int near = n <= most;
+		if (n < 2 || r0 >= r1)
+			continue;
+		here[0] = i % GR->G.g[0];
+		here[1] = i / GR->G.g[0] % GR->G.g[1];
+		here[2] = i / GR->G.g[0] / GR->G.g[1];
 		for (e = 0; near && e < n; e++)
 		{
 			local[e] = boxes[GR->items[b0 + e]];
 			if (bp_unbounded(&local[e], dim))
 				near = 0;   /* (the general path below) */
 			else
-				for (k = 0; k < 3; k++)
-					lcell[e][k] = k < dim ? bp_cell(&GR->G, local[e].lo[k], k) : 0;
+				for (k = 0, lcell[e] = 0; k < 3; k++)
+					lcell[e] |= (unsigned int)((k < dim ? bp_cell(&GR->G, local[e].lo[k], k) : 0) == here[k]) << k;
 		}
 		if (near)
 		{
 			/* bounded boxes: the overlap's low corner is in the cell of the larger low cells (cells grow with the
-			   coordinate) */
-			for (e = 0; e < n && s == QAWS_STATUS_OK; e++)
-				for (f = e + 1; f < n && s == QAWS_STATUS_OK; f++)
+			   coordinate, a box's low cell is at most this one): on each axis, one of the two starts here (the
+			   axes it does, bit by bit in lcell). The partners of e picked without branches, then visited in order. */
+			for (e = r0; e < r1 && s == QAWS_STATUS_OK; e++)
+			{
+				qaws_bp_box const* A = &local[e];
+				unsigned int m = 0, j;
+				for (f = e + 1; f < n; f++)
 				{
-					qaws_bp_box const *A = &local[e], *B = &local[f];
-					unsigned int p, q, lo_i, hi_i, cx, cy, cz;
+					qaws_bp_box const* B = &local[f];
+					int over = (lcell[e] | lcell[f]) == 7;
 					for (k = 0; k < dim; k++)
-						if (!(A->lo[k] <= B->hi[k] && B->lo[k] <= A->hi[k]))
-							break;
-					if (k < dim)
-						continue;
-					cx = lcell[e][0] > lcell[f][0] ? lcell[e][0] : lcell[f][0];
-					cy = lcell[e][1] > lcell[f][1] ? lcell[e][1] : lcell[f][1];
-					cz = lcell[e][2] > lcell[f][2] ? lcell[e][2] : lcell[f][2];
-					if ((cz * GR->G.g[1] + cy) * GR->G.g[0] + cx != i)
-						continue;
-					p = GR->items[b0 + e];
-					q = GR->items[b0 + f];
+						over &= (A->lo[k] <= B->hi[k]) & (B->lo[k] <= A->hi[k]);
+					pick[m] = f;
+					m += (unsigned int)over;
+				}
+				for (j = 0; j < m && s == QAWS_STATUS_OK; j++)
+				{
+					unsigned int p = GR->items[b0 + e], q = GR->items[b0 + pick[j]], lo_i, hi_i;
 					lo_i = p < q ? p : q;
 					hi_i = p < q ? q : p;
 					if (accept && !accept(accept_user, lo_i, hi_i))
@@ -285,9 +479,10 @@ static qaws_status bp_cells(struct qaws_bp_grid const* GR, qaws_bp_box const* bo
 					(*candidates)++;
 					s = visit(user, chunk, lo_i, hi_i);
 				}
+			}
 			continue;
 		}
-		for (e = b0; e < GR->start[i + 1] && s == QAWS_STATUS_OK; e++)
+		for (e = b0 + r0; e < b0 + r1 && s == QAWS_STATUS_OK; e++)
 			for (f = e + 1; f < GR->start[i + 1] && s == QAWS_STATUS_OK; f++)
 			{
 				unsigned int p = GR->items[e], q = GR->items[f], lo_i = p < q ? p : q, hi_i = p < q ? q : p;
@@ -498,7 +693,7 @@ qaws_status qaws_internal_broadphase(
 		memset(out_stats, 0, sizeof(*out_stats));
 	if (count < 2)
 		return QAWS_STATUS_OK;
-	s = bp_build(boxes, count, dim, &GR, 0);
+	s = bp_build(boxes, count, dim, &GR, 0, NULL);
 	if (s != QAWS_STATUS_OK)
 		return s;
 	if (out_stats)
@@ -512,13 +707,14 @@ qaws_status qaws_internal_broadphase(
 		if (keys && bp_sweep_cost(boxes, keys, n, axis) < bp_grid_cost(&GR))
 			s = bp_sweep(boxes, count, dim, axis, keys, n, accept, user, bp_serial_visit, &b, &candidates);
 		else
-			s = bp_cells(&GR, boxes, accept, user, bp_serial_visit, &b, 0, 0, GR.ncell, &candidates);
+			s = bp_cells(&GR, boxes, accept, user, bp_serial_visit, &b, 0, GR.chunk, GR.chunk + 2 * GR.nchunk, &candidates);
 		qaws_internal_free(keys);
 	}
 	if (out_stats)
 		out_stats->candidate_count = candidates;
 	qaws_internal_free(GR.start);
 	qaws_internal_free(GR.items);
+	qaws_internal_free(GR.chunk);
 	return s;
 }
 
@@ -530,7 +726,7 @@ qaws_status qaws_internal_grid_create(qaws_bp_grid** out_grid, qaws_bp_box const
 	g = (struct qaws_bp_grid*)qaws_internal_malloc(sizeof(struct qaws_bp_grid));
 	if (!g)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
-	s = bp_build(boxes, count, dim, g, 0);
+	s = bp_build(boxes, count, dim, g, 0, NULL);
 	if (s != QAWS_STATUS_OK)
 	{
 		qaws_internal_free(g);
@@ -540,7 +736,8 @@ qaws_status qaws_internal_grid_create(qaws_bp_grid** out_grid, qaws_bp_box const
 	return QAWS_STATUS_OK;
 }
 
-qaws_status qaws_internal_grid_create_fit(qaws_bp_grid** out_grid, qaws_bp_box const* boxes, unsigned int count, unsigned int dim)
+qaws_status qaws_internal_grid_create_fit(qaws_bp_grid** out_grid, qaws_bp_box const* boxes, unsigned int count, unsigned int dim,
+	qaws_batch_executor const* executor)
 {
 	struct qaws_bp_grid* g;
 	qaws_status s;
@@ -548,7 +745,7 @@ qaws_status qaws_internal_grid_create_fit(qaws_bp_grid** out_grid, qaws_bp_box c
 	g = (struct qaws_bp_grid*)qaws_internal_malloc(sizeof(struct qaws_bp_grid));
 	if (!g)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
-	s = bp_build(boxes, count, dim, g, 1);
+	s = bp_build(boxes, count, dim, g, 1, executor);
 	if (s != QAWS_STATUS_OK)
 	{
 		qaws_internal_free(g);
@@ -564,6 +761,7 @@ void qaws_internal_grid_destroy(qaws_bp_grid* grid)
 		return;
 	qaws_internal_free(grid->start);
 	qaws_internal_free(grid->items);
+	qaws_internal_free(grid->chunk);
 	qaws_internal_free(grid);
 }
 
@@ -684,11 +882,9 @@ int qaws_internal_grid_ray(qaws_bp_grid const* g, double const* o, double const*
 	}
 }
 
-#define BP_PAIR_GRAIN 64   /* cells per chunk */
-
 unsigned int qaws_internal_grid_pair_chunks(qaws_bp_grid const* grid)
 {
-	return qaws_internal_chunk_count(grid->ncell, BP_PAIR_GRAIN);
+	return grid->nchunk;
 }
 
 typedef struct bp_par
@@ -702,11 +898,13 @@ typedef struct bp_par
 	unsigned int* candidates;    /* one per chunk */
 } bp_par;
 
+/* one chunk of the grid's (one item each) */
 static qaws_status bp_par_job(void* ctx, unsigned int chunk, unsigned int begin, unsigned int end)
 {
 	bp_par const* P = (bp_par const*)ctx;
 	unsigned int n = 0;   /* (counted here: the chunks' counters share cache lines) */
-	qaws_status s = bp_cells(P->GR, P->boxes, P->accept, P->accept_user, P->visit, P->visit_user, chunk, begin, end, &n);
+	qaws_status s = bp_cells(P->GR, P->boxes, P->accept, P->accept_user, P->visit, P->visit_user, chunk, P->GR->chunk + 2 * (size_t)begin,
+		P->GR->chunk + 2 * (size_t)end, &n);
 	P->candidates[chunk] = n;
 	return s;
 }
@@ -733,12 +931,12 @@ qaws_status qaws_internal_grid_pairs(unsigned int* out_candidates, qaws_bp_grid 
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	{
 		/* the sweep (serial, chunk 0) when it tests fewer pairs than the grid */
-		unsigned int axis = bp_axis(boxes, grid->count, grid->dim), nk = 0;
+		unsigned int axis = grid->fit ? 0 : bp_axis(boxes, grid->count, grid->dim), nk = 0;
 		bp_key* keys = grid->fit ? NULL : bp_sorted(boxes, grid->count, grid->dim, axis, &nk);
 		if (keys && bp_sweep_cost(boxes, keys, nk, axis) < bp_grid_cost(grid))
 			s = bp_sweep(boxes, grid->count, grid->dim, axis, keys, nk, accept, accept_user, visit, visit_user, &P.candidates[0]);
 		else
-			s = qaws_internal_parallel(grid->ncell, BP_PAIR_GRAIN, bp_par_job, &P, executor);
+			s = qaws_internal_parallel(n, 1, bp_par_job, &P, executor);
 		qaws_internal_free(keys);
 	}
 	for (k = 0; k < n && out_candidates; k++)

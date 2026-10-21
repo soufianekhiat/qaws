@@ -1399,7 +1399,7 @@ static qaws_status sx_check(unsigned int* out, qaws_scalar const* x, unsigned in
 			box[i].lo[k] = fmin(fmin(a, b), c) - eps;
 			box[i].hi[k] = fmax(fmax(a, b), c) + eps;
 		}
-	st = n > 1 ? qaws_internal_grid_create_fit(&grid, box, n, 3) : QAWS_STATUS_OK;
+	st = n > 1 ? qaws_internal_grid_create_fit(&grid, box, n, 3, executor) : QAWS_STATUS_OK;
 	if (st == QAWS_STATUS_OK && grid)
 	{
 		nch = qaws_internal_grid_pair_chunks(grid);
@@ -1580,7 +1580,7 @@ static qaws_status sx_pairs(sx_ctx* c, qaws_bp_box const* box, qaws_batch_execut
 	sx_filter F;
 	unsigned int nch, k, i, n = 0;
 	unsigned long long* all = NULL;
-	qaws_status st = qaws_internal_grid_create_fit(&grid, box, c->nf, 3);
+	qaws_status st = qaws_internal_grid_create_fit(&grid, box, c->nf, 3, executor);
 	if (st != QAWS_STATUS_OK)
 		return st;
 	nch = qaws_internal_grid_pair_chunks(grid);
@@ -1626,6 +1626,170 @@ static double sx_snap52(double t)
 	return floor(t * 4503599627370496.0 + 0.5) / 4503599627370496.0;
 }
 
+/* ---- the input read by chunks of faces (vertices for the finite check): checked and bounded, then, once welded, its
+   triangles laid out at each chunk's first ---- */
+
+#define SX_LOAD_GRAIN 16384
+
+typedef struct sx_load
+{
+	qaws_scalar const* x;
+	unsigned int const *fv, *fs;
+	unsigned int nv;
+	unsigned int* corner;              /* per chunk: its corners, then its first */
+	unsigned int* tri;                 /* per chunk: its triangles (those kept once welded), then its first kept */
+	double* lohi;                      /* per chunk: its corners' bounds */
+	int* bad;                          /* per chunk */
+	sx_ctx* c;
+	unsigned int const* alias;
+	qaws_bp_box* box;
+} sx_load;
+
+static qaws_status sx_load_finite(void* user, unsigned int chunk, unsigned int begin, unsigned int end)
+{
+	sx_load const* L = (sx_load const*)user;
+	unsigned int i;
+	int bad = 0;
+	for (i = 3 * begin; i < 3 * end; i++)
+		bad |= !isfinite((double)L->x[i]);
+	L->bad[chunk] = bad;
+	return QAWS_STATUS_OK;
+}
+
+static qaws_status sx_load_sizes(void* user, unsigned int chunk, unsigned int begin, unsigned int end)
+{
+	sx_load const* L = (sx_load const*)user;
+	unsigned int f, n = 0, t = 0;
+	int bad = 0;
+	for (f = begin; f < end; f++)
+	{
+		unsigned int s = L->fs ? L->fs[f] : 3;
+		bad |= s < 3;
+		n += s;
+		t += s - 2;
+	}
+	L->corner[chunk] = n;
+	L->tri[chunk] = t;
+	L->bad[chunk] = bad;
+	return QAWS_STATUS_OK;
+}
+
+static qaws_status sx_load_check(void* user, unsigned int chunk, unsigned int begin, unsigned int end)
+{
+	sx_load const* L = (sx_load const*)user;
+	double* b = L->lohi + 6 * (size_t)chunk;
+	unsigned int f, k, i, off = L->corner[chunk];
+	for (i = 0; i < 3; i++)
+	{
+		b[i] = HUGE_VAL;
+		b[3 + i] = -HUGE_VAL;
+	}
+	L->bad[chunk] = 0;
+	for (f = begin; f < end; f++)
+	{
+		unsigned int s = L->fs ? L->fs[f] : 3;
+		for (k = 0; k < s; k++)
+		{
+			unsigned int v = L->fv[off + k];
+			if (v >= L->nv)
+			{
+				L->bad[chunk] = 1;
+				return QAWS_STATUS_OK;
+			}
+			for (i = 0; i < 3; i++)
+			{
+				double x = (double)L->x[3 * (size_t)v + i];
+				b[i] = x < b[i] ? x : b[i];
+				b[3 + i] = x > b[3 + i] ? x : b[3 + i];
+			}
+		}
+		off += s;
+	}
+	return QAWS_STATUS_OK;
+}
+
+/* the triangles of a chunk's faces left once welded (polygons fanned) */
+static qaws_status sx_load_count(void* user, unsigned int chunk, unsigned int begin, unsigned int end)
+{
+	sx_load const* L = (sx_load const*)user;
+	unsigned int f, k, off = L->corner[chunk], n = 0;
+	for (f = begin; f < end; f++)
+	{
+		unsigned int s = L->fs ? L->fs[f] : 3;
+		for (k = 1; k + 1 < s; k++)
+		{
+			unsigned int a = L->alias[L->fv[off]], b = L->alias[L->fv[off + k]], d = L->alias[L->fv[off + k + 1]];
+			n += a != b && b != d && d != a;
+		}
+		off += s;
+	}
+	L->tri[chunk] = n;
+	return QAWS_STATUS_OK;
+}
+
+/* a chunk's triangles with their planes, boxes and the compact records of the pair filter */
+static qaws_status sx_load_fill(void* user, unsigned int chunk, unsigned int begin, unsigned int end)
+{
+	sx_load const* L = (sx_load const*)user;
+	sx_ctx* c = L->c;
+	unsigned int f, k, i, off = L->corner[chunk], nf = L->tri[chunk];
+	for (f = begin; f < end; f++)
+	{
+		unsigned int s = L->fs ? L->fs[f] : 3;
+		for (k = 1; k + 1 < s; k++)
+		{
+			sx_face* F = c->F + nf;
+			sx_geo* G = c->geo + nf;
+			double u[3], v[3], l;
+			unsigned int p0 = L->alias[L->fv[off]], p1 = L->alias[L->fv[off + k]], p2 = L->alias[L->fv[off + k + 1]];
+			if (p0 == p1 || p1 == p2 || p2 == p0)
+				continue;   /* welded away */
+			F->c[0] = p0;
+			F->c[1] = p1;
+			F->c[2] = p2;
+			F->src = f;
+			F->cuts = SX_NONE;
+			F->touch = SX_NONE;
+			for (i = 0; i < 3; i++)
+			{
+				u[i] = c->X[3 * (size_t)p1 + i] - c->X[3 * (size_t)p0 + i];
+				v[i] = c->X[3 * (size_t)p2 + i] - c->X[3 * (size_t)p0 + i];
+			}
+			sx_cross(u, v, F->n);
+			l = sqrt(sx_dot(F->n, F->n));
+			/* lower than the tolerance over its longest edge: no plane, cut by nothing */
+			if (l > c->eps * sqrt(sx_max3(sx_dot(u, u), sx_dot(v, v), sx_dist2(c->X + 3 * (size_t)p1, c->X + 3 * (size_t)p2))))
+			{
+				F->n[0] /= l;
+				F->n[1] /= l;
+				F->n[2] /= l;
+			}
+			else
+				F->n[0] = F->n[1] = F->n[2] = 0;
+			F->d = sx_dot(F->n, c->X + 3 * (size_t)p0);
+			F->e[0] = F->e[1] = F->e[2] = SX_NONE;
+			for (i = 0; i < 3; i++)
+			{
+				double x0 = c->X[3 * (size_t)p0 + i], x1 = c->X[3 * (size_t)p1 + i], x2 = c->X[3 * (size_t)p2 + i];
+				double l0 = x0 < x1 ? x0 : x1, h0 = x0 < x1 ? x1 : x0;
+				L->box[nf].lo[i] = (l0 < x2 ? l0 : x2) - c->eps;
+				L->box[nf].hi[i] = (h0 > x2 ? h0 : x2) + c->eps;
+			}
+			for (i = 0; i < 3; i++)
+			{
+				memcpy(G->x[i], c->X + 3 * (size_t)F->c[i], 3 * sizeof(double));
+				G->c[i] = F->c[i];
+			}
+			memcpy(G->n, F->n, sizeof G->n);
+			G->d = F->d;
+			G->pad = 0;
+			nf++;
+		}
+		off += s;
+	}
+	return QAWS_STATUS_OK;
+}
+
 /* the arrangement as arrays (owned by the caller) */
 typedef struct sx_out
 {
@@ -1648,8 +1812,11 @@ static qaws_status sx_resolve(sx_out* o, qaws_intersect_report* report, qaws_sca
 	unsigned int *alias = NULL, *loc = NULL, *otri = NULL, *stack = NULL, *used = NULL, *ocut = NULL, ncut = 0, capcut = 0;
 	qaws_scalar *opos = NULL, *osrc = NULL;
 	qaws_bp_box* box = NULL;
-	unsigned int nt = 0, off = 0, f, k, i, ntri = 0, capt = 0, caps = 0, caps2 = 0, onv = 0;
+	qaws_batch_executor const* ex = desc ? desc->executor : NULL;
+	sx_load L;
+	unsigned int nt = 0, off = 0, f, k, i, ntri = 0, capt = 0, caps = 0, caps2 = 0, onv = 0, nchf, nchv;
 	double lo[3] = { HUGE_VAL, HUGE_VAL, HUGE_VAL }, hi[3] = { -HUGE_VAL, -HUGE_VAL, -HUGE_VAL }, diag;
+	memset(&L, 0, sizeof L);
 	memset(&c, 0, sizeof c);
 	memset(&b, 0, sizeof b);
 	memset(&T, 0, sizeof T);
@@ -1659,29 +1826,51 @@ static qaws_status sx_resolve(sx_out* o, qaws_intersect_report* report, qaws_sca
 	memset(o, 0, sizeof *o);
 	if (!face_count || !face_vertices || (vertex_count && !positions) || (desc && !(desc->tolerance >= 0)))
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	for (i = 0; i < 3 * vertex_count; i++)
-		if (!isfinite((double)positions[i]))
-			return QAWS_STATUS_INVALID_ARGUMENT;
-	for (f = 0; f < face_count; f++)
+	/* the input checked by chunks: finite, sizes, indices (bounds alongside) */
+	nchf = qaws_internal_chunk_count(face_count, SX_LOAD_GRAIN);
+	nchv = qaws_internal_chunk_count(vertex_count, SX_LOAD_GRAIN);
+	L.x = positions;
+	L.fv = face_vertices;
+	L.fs = face_sizes;
+	L.nv = vertex_count;
+	L.corner = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)nchf + 1));
+	L.tri = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)nchf + 1));
+	L.lohi = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), 6, (size_t)nchf + 1));
+	L.bad = (int*)qaws_internal_zalloc((size_t)(nchf > nchv ? nchf : nchv) + 1, sizeof(int));
+	L.c = &c;
+	L.alias = NULL;
+	L.box = NULL;
+	if (!L.corner || !L.tri || !L.lohi || !L.bad)
+		goto oom;
+	st = qaws_internal_parallel(vertex_count, SX_LOAD_GRAIN, sx_load_finite, &L, ex);
+	for (k = 0; st == QAWS_STATUS_OK && k < nchv; k++)
+		if (L.bad[k])
+			st = QAWS_STATUS_INVALID_ARGUMENT;
+	if (st == QAWS_STATUS_OK)
+		st = qaws_internal_parallel(face_count, SX_LOAD_GRAIN, sx_load_sizes, &L, ex);
+	for (k = 0; st == QAWS_STATUS_OK && k < nchf; k++)
 	{
-		unsigned int s = face_sizes ? face_sizes[f] : 3;
-		if (s < 3)
-			return QAWS_STATUS_INVALID_ARGUMENT;
-		for (k = 0; k < s; k++)
-		{
-			unsigned int v = face_vertices[off + k];
-			if (v >= vertex_count)
-				return QAWS_STATUS_INVALID_ARGUMENT;
-			for (i = 0; i < 3; i++)
-			{
-				double x = (double)positions[3 * (size_t)v + i];
-				lo[i] = x < lo[i] ? x : lo[i];
-				hi[i] = x > hi[i] ? x : hi[i];
-			}
-		}
-		nt += s - 2;
-		off += s;
+		unsigned int n = L.corner[k];
+		if (L.bad[k])
+			st = QAWS_STATUS_INVALID_ARGUMENT;
+		L.corner[k] = off;
+		off += n;
+		nt += L.tri[k];
 	}
+	if (st == QAWS_STATUS_OK)
+		st = qaws_internal_parallel(face_count, SX_LOAD_GRAIN, sx_load_check, &L, ex);
+	for (k = 0; st == QAWS_STATUS_OK && k < nchf; k++)
+	{
+		if (L.bad[k])
+			st = QAWS_STATUS_INVALID_ARGUMENT;
+		for (i = 0; i < 3; i++)
+		{
+			lo[i] = L.lohi[6 * (size_t)k + i] < lo[i] ? L.lohi[6 * (size_t)k + i] : lo[i];
+			hi[i] = L.lohi[6 * (size_t)k + 3 + i] > hi[i] ? L.lohi[6 * (size_t)k + 3 + i] : hi[i];
+		}
+	}
+	if (st != QAWS_STATUS_OK)
+		goto fail;
 	diag = sqrt((hi[0] - lo[0]) * (hi[0] - lo[0]) + (hi[1] - lo[1]) * (hi[1] - lo[1]) + (hi[2] - lo[2]) * (hi[2] - lo[2]));
 	c.eps = desc && desc->tolerance > 0 ? (double)desc->tolerance : 1e-9 * diag;
 	if (!(c.eps > 0))
@@ -1711,69 +1900,25 @@ static qaws_status sx_resolve(sx_out* o, qaws_intersect_report* report, qaws_sca
 		report->welded_vertices += c.np == before;
 	}
 	onv = c.np;
-	/* triangles (polygons fanned) with their planes and edge carriers */
-	for (f = 0, off = 0; f < face_count; f++)
+	/* triangles (polygons fanned) with their planes, boxes and the compact records of the pair filter, by chunks
+	   laid out in order */
+	L.alias = alias;
+	L.box = box;
+	st = qaws_internal_parallel(face_count, SX_LOAD_GRAIN, sx_load_count, &L, ex);
+	if (st != QAWS_STATUS_OK)
+		goto fail;
+	for (k = 0; k < nchf; k++)
 	{
-		unsigned int s = face_sizes ? face_sizes[f] : 3;
-		for (k = 1; k + 1 < s; k++)
-		{
-			sx_face* F = c.F + c.nf;
-			double u[3], v[3], l;
-			F->c[0] = alias[face_vertices[off]];
-			F->c[1] = alias[face_vertices[off + k]];
-			F->c[2] = alias[face_vertices[off + k + 1]];
-			F->src = f;
-			F->cuts = SX_NONE;
-			F->touch = SX_NONE;
-			if (F->c[0] == F->c[1] || F->c[1] == F->c[2] || F->c[2] == F->c[0])
-				continue;   /* welded away */
-			for (i = 0; i < 3; i++)
-			{
-				u[i] = c.X[3 * (size_t)F->c[1] + i] - c.X[3 * (size_t)F->c[0] + i];
-				v[i] = c.X[3 * (size_t)F->c[2] + i] - c.X[3 * (size_t)F->c[0] + i];
-			}
-			sx_cross(u, v, F->n);
-			l = sqrt(sx_dot(F->n, F->n));
-			/* lower than the tolerance over its longest edge: no plane, cut by nothing */
-			if (l > c.eps * sqrt(sx_max3(sx_dot(u, u), sx_dot(v, v), sx_dist2(c.X + 3 * (size_t)F->c[1], c.X + 3 * (size_t)F->c[2]))))
-			{
-				F->n[0] /= l;
-				F->n[1] /= l;
-				F->n[2] /= l;
-			}
-			else
-				F->n[0] = F->n[1] = F->n[2] = 0;
-			F->d = sx_dot(F->n, c.X + 3 * (size_t)F->c[0]);
-			F->e[0] = F->e[1] = F->e[2] = SX_NONE;
-			for (i = 0; i < 3; i++)
-			{
-				double x0 = c.X[3 * (size_t)F->c[0] + i], x1 = c.X[3 * (size_t)F->c[1] + i], x2 = c.X[3 * (size_t)F->c[2] + i];
-				double l0 = x0 < x1 ? x0 : x1, h0 = x0 < x1 ? x1 : x0;
-				box[c.nf].lo[i] = (l0 < x2 ? l0 : x2) - c.eps;
-				box[c.nf].hi[i] = (h0 > x2 ? h0 : x2) + c.eps;
-			}
-			c.nf++;
-		}
-		off += s;
+		unsigned int n = L.tri[k];
+		L.tri[k] = c.nf;
+		c.nf += n;
 	}
-	if (c.oom)
-		goto oom;
-	/* the compact records of the pair filter */
 	c.geo = (sx_geo*)qaws_internal_malloc(qaws_internal_mul2(sizeof(sx_geo), (size_t)c.nf + 1));
 	if (!c.geo)
 		goto oom;
-	for (f = 0; f < c.nf; f++)
-	{
-		sx_geo* G = c.geo + f;
-		for (k = 0; k < 3; k++)
-		{
-			memcpy(G->x[k], c.X + 3 * (size_t)c.F[f].c[k], 3 * sizeof(double));
-			G->c[k] = c.F[f].c[k];
-		}
-		memcpy(G->n, c.F[f].n, sizeof G->n);
-		G->d = c.F[f].d;
-		G->pad = 0;
-	}
+	st = qaws_internal_parallel(face_count, SX_LOAD_GRAIN, sx_load_fill, &L, ex);
+	if (st != QAWS_STATUS_OK)
+		goto fail;
 	/* the faces round each point (counting sort) */
 	c.vf_start = (unsigned int*)qaws_internal_zalloc((size_t)c.np + 2, sizeof(unsigned int));
 	c.vf = (unsigned int*)qaws_internal_malloc(qaws_internal_mul3(sizeof(unsigned int), 3, (size_t)c.nf + 1));
@@ -2014,6 +2159,7 @@ fail:
 	qaws_internal_free(T.P); qaws_internal_free(T.Q); qaws_internal_free(T.t); qaws_internal_free(alias); qaws_internal_free(loc); qaws_internal_free(used);
 	qaws_internal_free(otri); qaws_internal_free(ocut); qaws_internal_free(stack); qaws_internal_free(opos); qaws_internal_free(osrc);
 	qaws_internal_free(box);
+	qaws_internal_free(L.corner); qaws_internal_free(L.tri); qaws_internal_free(L.lohi); qaws_internal_free(L.bad);
 	return st;
 }
 
@@ -2226,62 +2372,106 @@ static qaws_status sx_direct_winding(qaws_scalar* out_w, unsigned char* out_near
 }
 
 #define SX_RADIX_BITS 11
-#define SX_RADIX_DIGITS 6   /* (64 bits in 11-bit digits) */
+#define SX_RADIX_SIZE (1u << SX_RADIX_BITS)
+#define SX_RADIX_GRAIN 65536
 
-/* LSD radix sort of n records of stride (1 or 2) 64-bit words by their first word (stable); digits all keys share
-   (the zero bits between an edge key's two vertices) are skipped; 0 when out of memory */
-static int sx_radix(unsigned long long* a, unsigned int n, unsigned int stride)
+typedef struct sx_sort
 {
-	unsigned long long *tmp, *src = a, *dst;
-	unsigned int *count, i, d;
+	unsigned long long *src, *dst;
+	unsigned long long* diff;          /* per chunk: the bits where its keys differ from the first */
+	unsigned int* count;               /* per chunk: the digit's buckets, then where its records go */
+	unsigned int stride, shift;
+} sx_sort;
+
+static qaws_status sx_sort_diff(void* user, unsigned int chunk, unsigned int begin, unsigned int end)
+{
+	sx_sort const* S = (sx_sort const*)user;
+	unsigned long long first = S->src[0], d = 0;
+	unsigned int i;
+	for (i = begin; i < end; i++)
+		d |= S->src[(size_t)i * S->stride] ^ first;
+	S->diff[chunk] = d;
+	return QAWS_STATUS_OK;
+}
+
+static qaws_status sx_sort_count(void* user, unsigned int chunk, unsigned int begin, unsigned int end)
+{
+	sx_sort const* S = (sx_sort const*)user;
+	unsigned int *c = S->count + (size_t)chunk * SX_RADIX_SIZE, i;
+	memset(c, 0, sizeof(unsigned int) * SX_RADIX_SIZE);
+	for (i = begin; i < end; i++)
+		c[(S->src[(size_t)i * S->stride] >> S->shift) & (SX_RADIX_SIZE - 1)]++;
+	return QAWS_STATUS_OK;
+}
+
+static qaws_status sx_sort_scatter(void* user, unsigned int chunk, unsigned int begin, unsigned int end)
+{
+	sx_sort const* S = (sx_sort const*)user;
+	unsigned int *c = S->count + (size_t)chunk * SX_RADIX_SIZE, i;
+	unsigned long long const* src = S->src;
+	unsigned long long* dst = S->dst;
+	if (S->stride == 1)
+		for (i = begin; i < end; i++)
+			dst[c[(src[i] >> S->shift) & (SX_RADIX_SIZE - 1)]++] = src[i];
+	else
+		for (i = begin; i < end; i++)
+		{
+			unsigned int o = c[(src[2 * (size_t)i] >> S->shift) & (SX_RADIX_SIZE - 1)]++;
+			dst[2 * (size_t)o] = src[2 * (size_t)i];
+			dst[2 * (size_t)o + 1] = src[2 * (size_t)i + 1];
+		}
+	return QAWS_STATUS_OK;
+}
+
+/* LSD radix sort of n records of stride (1 or 2) 64-bit words by their first word (stable, so the same whatever the
+   executor): digits only over the bits where keys differ (an edge key's zero bits between its vertices skipped), each
+   pass counted and scattered by chunks; 0 when out of memory */
+static int sx_radix(unsigned long long* a, unsigned int n, unsigned int stride, qaws_batch_executor const* executor)
+{
+	sx_sort S;
+	unsigned long long *tmp, mask = 0;
+	unsigned int nch = qaws_internal_chunk_count(n, SX_RADIX_GRAIN), i, k;
+	int ok = 1;
 	if (n < 2)
 		return 1;
 	tmp = (unsigned long long*)qaws_internal_malloc(qaws_internal_mul3(sizeof(unsigned long long), stride, n));
-	count = (unsigned int*)qaws_internal_zalloc((size_t)SX_RADIX_DIGITS << SX_RADIX_BITS, sizeof(unsigned int));
-	if (!tmp || !count)
+	S.count = (unsigned int*)qaws_internal_malloc(qaws_internal_mul3(sizeof(unsigned int), nch, SX_RADIX_SIZE));
+	S.diff = (unsigned long long*)qaws_internal_malloc(sizeof(unsigned long long) * nch);
+	S.src = a;
+	S.dst = tmp;
+	S.stride = stride;
+	S.shift = 0;
+	ok = tmp && S.count && S.diff && qaws_internal_parallel(n, SX_RADIX_GRAIN, sx_sort_diff, &S, executor) == QAWS_STATUS_OK;
+	for (k = 0; ok && k < nch; k++)
+		mask |= S.diff[k];
+	while (ok && mask)
 	{
-		qaws_internal_free(tmp);
-		qaws_internal_free(count);
-		return 0;
-	}
-	dst = tmp;
-	for (i = 0; i < n; i++)
-	{
-		unsigned long long k = a[(size_t)i * stride];
-		for (d = 0; d < SX_RADIX_DIGITS; d++)
-			count[(d << SX_RADIX_BITS) + ((k >> (d * SX_RADIX_BITS)) & ((1u << SX_RADIX_BITS) - 1))]++;
-	}
-	for (d = 0; d < SX_RADIX_DIGITS; d++)
-	{
-		unsigned int *c = count + ((size_t)d << SX_RADIX_BITS), sum = 0, shift = d * SX_RADIX_BITS;
 		unsigned long long* sw;
-		if (c[(a[0] >> shift) & ((1u << SX_RADIX_BITS) - 1)] == n)
-			continue;   /* (one value for all) */
-		for (i = 0; i < 1u << SX_RADIX_BITS; i++)
-		{
-			unsigned int t = c[i];
-			c[i] = sum;
-			sum += t;
-		}
-		if (stride == 1)
-			for (i = 0; i < n; i++)
-				dst[c[(src[i] >> shift) & ((1u << SX_RADIX_BITS) - 1)]++] = src[i];
-		else
-			for (i = 0; i < n; i++)
+		unsigned int sum = 0;
+		while (!((mask >> S.shift) & 1))
+			S.shift++;
+		ok = qaws_internal_parallel(n, SX_RADIX_GRAIN, sx_sort_count, &S, executor) == QAWS_STATUS_OK;
+		/* bucket by bucket, chunk by chunk: each chunk's records of a digit after the earlier chunks' */
+		for (i = 0; ok && i < SX_RADIX_SIZE; i++)
+			for (k = 0; k < nch; k++)
 			{
-				unsigned int o = c[(src[2 * (size_t)i] >> shift) & ((1u << SX_RADIX_BITS) - 1)]++;
-				dst[2 * (size_t)o] = src[2 * (size_t)i];
-				dst[2 * (size_t)o + 1] = src[2 * (size_t)i + 1];
+				unsigned int t = S.count[(size_t)k * SX_RADIX_SIZE + i];
+				S.count[(size_t)k * SX_RADIX_SIZE + i] = sum;
+				sum += t;
 			}
-		sw = src;
-		src = dst;
-		dst = sw;
+		ok = ok && qaws_internal_parallel(n, SX_RADIX_GRAIN, sx_sort_scatter, &S, executor) == QAWS_STATUS_OK;
+		sw = S.src;
+		S.src = S.dst;
+		S.dst = sw;
+		mask = S.shift + SX_RADIX_BITS < 64 ? mask >> (S.shift + SX_RADIX_BITS) << (S.shift + SX_RADIX_BITS) : 0;
+		S.shift += SX_RADIX_BITS;
 	}
-	if (src != a)
-		memcpy(a, src, qaws_internal_mul3(sizeof(unsigned long long), stride, n));
+	if (ok && S.src != a)
+		memcpy(a, S.src, qaws_internal_mul3(sizeof(unsigned long long), stride, n));
 	qaws_internal_free(tmp);
-	qaws_internal_free(count);
-	return 1;
+	qaws_internal_free(S.count);
+	qaws_internal_free(S.diff);
+	return ok;
 }
 
 /* a mesh's faces fanned into triangles (caller frees) */
@@ -2522,7 +2712,7 @@ static unsigned int sx_flatten(unsigned int* t, qaws_scalar* src, unsigned int n
 		key[2 * (size_t)i + 1] = i;
 		deg[p]++;
 	}
-	if (!sx_radix(key, n, 2))
+	if (!sx_radix(key, n, 2, executor))
 		qsort(key, n, 2 * sizeof(unsigned long long), sx_cmp_edge);
 	*closed = 1;
 	for (i = 0; i < n; i = j)
@@ -2725,7 +2915,7 @@ qaws_status qaws_mesh_boolean(qaws_mesh_3d** out, qaws_boolean_report* report, q
 			key[2 * (size_t)j] = ek[j];
 			key[2 * (size_t)j + 1] = j / 3;
 		}
-		if (!sx_radix(key, n, 2))
+		if (!sx_radix(key, n, 2, desc ? desc->executor : NULL))
 			qsort(key, n, 2 * sizeof(unsigned long long), sx_cmp_edge);
 		for (i = 0; i < n; i = j)
 		{

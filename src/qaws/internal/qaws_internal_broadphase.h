@@ -50,8 +50,10 @@ typedef struct qaws_bp_grid qaws_bp_grid;
 
 qaws_status qaws_internal_grid_create(qaws_bp_grid** out_grid, qaws_bp_box const* boxes, unsigned int count, unsigned int dim);
 /* cells sized by the boxes' mean size (surfaces, whose boxes fill little of their box): the pair walk goes
-   straight through the grid */
-qaws_status qaws_internal_grid_create_fit(qaws_bp_grid** out_grid, qaws_bp_box const* boxes, unsigned int count, unsigned int dim);
+   straight through the grid; built through the executor (may be NULL), the same grid either way */
+struct qaws_batch_executor;
+qaws_status qaws_internal_grid_create_fit(qaws_bp_grid** out_grid, qaws_bp_box const* boxes, unsigned int count, unsigned int dim,
+	struct qaws_batch_executor const* executor);
 void qaws_internal_grid_destroy(qaws_bp_grid* grid);
 double qaws_internal_grid_ring(qaws_bp_grid const* grid, double const* p, unsigned int r, void (*visit)(void* user, unsigned int item), void* user);
 
@@ -66,11 +68,12 @@ int qaws_internal_grid_ray(qaws_bp_grid const* grid, double const* o, double con
 
 /*
  * The pair walk of qaws_internal_broadphase over a built grid, its cells in
- * chunks run through the executor (any order, any thread): visit gets the
- * chunk of the cell it runs in, one of qaws_internal_grid_pair_chunks(grid),
- * for per-chunk storage. out_candidates (may be NULL): the pairs visited.
+ * chunks of about equal work (a crowded cell's pairs split among several)
+ * run through the executor (any order, any thread): visit gets the chunk it
+ * runs in, one of qaws_internal_grid_pair_chunks(grid), for per-chunk
+ * storage; the chunks in order visit the pairs in the serial walk's order.
+ * out_candidates (may be NULL): the pairs visited.
  */
-struct qaws_batch_executor;
 unsigned int qaws_internal_grid_cells(qaws_bp_grid const* grid);
 unsigned int qaws_internal_grid_pair_chunks(qaws_bp_grid const* grid);
 qaws_status qaws_internal_grid_pairs(unsigned int* out_candidates, qaws_bp_grid const* grid, qaws_bp_box const* boxes, qaws_bp_accept accept,
