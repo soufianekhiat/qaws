@@ -3,7 +3,8 @@
  *
  *   - a sphere soup with three holes: closed, every vertex within a cell of
  *     the sphere, the volume near the ball's; only grid points near the
- *     input evaluated one by one;
+ *     input evaluated one by one; the holes filled first (tangent to the
+ *     sphere) at under half the winding number's own caps' distance;
  *   - two cubes crossing (a self-intersecting soup): their union, closed,
  *     its vertices on the union's surface (sharp edges and corners kept by
  *     the crossings' planes), the volume the union's, no face crossing
@@ -54,6 +55,11 @@ static double wt_volume(qaws_mesh_3d const* m, double* far_out, double (*dist)(d
 }
 
 static double const wt_holes[3][3] = { { 1, 0, 0 }, { 0, 0.7071, 0.7071 }, { -0.6, -0.8, 0 } };
+
+static double wt_sphere_dist_all(double const* q)
+{
+	return fabs(sqrt(q[0] * q[0] + q[1] * q[1] + q[2] * q[2]) - 1);
+}
 
 /* the distance to the sphere, away from the holes (their caps close them inside it) */
 static double wt_sphere_dist(double const* q)
@@ -167,6 +173,23 @@ static void test_sphere(void)
 	printf("  %s\n", msg);
 	TEST_ASSERT(s == QAWS_STATUS_OK && m && r.closed && far < r.cell && fabs(vol - 4 * WT_PI / 3) < 0.05 * 4 * WT_PI / 3
 		&& r.evaluated < r.grid[0] * r.grid[1] * r.grid[2] / 2 && qaws_mesh_3d_validate(m) == QAWS_STATUS_OK, msg);
+	/* the caps: the fills (tangent to the sphere round the holes) against the winding number's own caps */
+	{
+		double far_fill = 0, far_cap = 0;
+		qaws_watertight_desc d;
+		qaws_mesh_3d* mc = NULL;
+		memset(&d, 0, sizeof d);
+		d.flags = QAWS_WATERTIGHT_WINDING_CAPS;
+		qaws_mesh_make_watertight(&mc, NULL, x, k2, NULL, nv, kept, &d);
+		if (m)
+			wt_volume(m, &far_fill, wt_sphere_dist_all);
+		if (mc)
+			wt_volume(mc, &far_cap, wt_sphere_dist_all);
+		sprintf(msg, "sphere with holes, holes included: %u filled first, farthest %.4f from the sphere (winding caps %.4f)", r.holes_filled, far_fill, far_cap);
+		printf("  %s\n", msg);
+		TEST_ASSERT(r.holes_filled == 3 && far_fill < 0.5 * far_cap && far_fill < 0.02, msg);
+		qaws_mesh_3d_destroy(mc);
+	}
 	qaws_mesh_3d_destroy(m);
 	free(x);
 	free(f);

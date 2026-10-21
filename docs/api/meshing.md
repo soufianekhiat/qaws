@@ -861,6 +861,8 @@ qaws_watertight_desc d = { 64, 0 };      /* resolution: cells along the longest 
 qaws_mesh_make_watertight(&mesh, &report, positions, faces, NULL, vertex_count, face_count, &d);
 ```
 
+**Holes first.** Holes are filled by `qaws_mesh_repair`'s fills before anything else: Liepa's triangulation, refined, then faired by the bi-Laplacian with the border's ring held. The caps are tangent to the surface round them and continue its curvature. On the test sphere they come within 0.017 of it, against 0.063 for the winding number's own ½-level caps, which are close to a minimal surface and leave a ridge at the rim. `QAWS_WATERTIGHT_WINDING_CAPS` keeps those caps. With an offset, nothing is filled first, since a sheet's border is not a hole. Input without holes is used as given.
+
 **Inside.** A point is inside where the generalized winding number (through `qaws_mesh_bvh`) is at least ½: holes close smoothly, overlaps are united and inner faces drop out. With an offset, points within it of the input count as inside too, so an open sheet or a thin part becomes a closed shell (an envelope).
 
 **Which grid points are evaluated:**

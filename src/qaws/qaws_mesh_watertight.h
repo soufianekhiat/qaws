@@ -22,9 +22,16 @@
  * new closed, manifold, outward triangle surface that follows the input,
  * not a repair of it (qaws_mesh_repair keeps the input's faces).
  *
- * The inside is where the input's generalized winding number is at least
- * 1/2 (qaws_mesh_bvh.h): holes are closed smoothly, overlaps united,
- * inner faces dropped. With an offset, points within it of the input are
+ * Holes are first filled by qaws_mesh_repair's fills (Liepa's triangulation,
+ * refined, faired by the bi-Laplacian with the border's ring held: tangent
+ * to the surface round them, continuing its curvature), unless
+ * QAWS_WATERTIGHT_WINDING_CAPS asks for the winding number's own caps (its
+ * 1/2 level across a hole: nearer a minimal surface, a ridge at the rim) or
+ * an offset is given (a sheet's border is no hole there).
+ *
+ * The inside is where the generalized winding number is at least 1/2
+ * (qaws_mesh_bvh.h): holes left are closed, overlaps united, inner faces
+ * dropped. With an offset, points within it of the input are
  * inside too: open sheets and thin parts become closed shells of that
  * thickness (an envelope of the input).
  *
@@ -44,10 +51,13 @@
  * the longest side of the input's box.
  */
 
+#define QAWS_WATERTIGHT_WINDING_CAPS 1u     /* holes capped by the winding number's 1/2 level, not filled first */
+
 typedef struct qaws_watertight_desc
 {
 	unsigned int resolution;           /* cells along the box's longest side; 0: 64 */
 	qaws_scalar offset;                /* points within it of the input count as inside; 0: none */
+	unsigned int flags;                /* QAWS_WATERTIGHT_* */
 } qaws_watertight_desc;
 
 typedef struct qaws_watertight_report
@@ -57,6 +67,7 @@ typedef struct qaws_watertight_report
 	unsigned int crossings;            /* grid edges the boundary crosses */
 	unsigned int sharp;                /* cell vertices whose crossings' planes span 2 or 3 directions (on an edge or a corner) */
 	qaws_scalar cell;                  /* the cell size */
+	unsigned int holes_filled;         /* by the fills before contouring */
 	int closed;                        /* the result's directed edges all cancel */
 } qaws_watertight_report;
 

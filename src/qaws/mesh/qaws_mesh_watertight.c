@@ -115,6 +115,9 @@ qaws_status qaws_mesh_make_watertight(qaws_mesh_3d** out, qaws_watertight_report
 	size_t* queue = NULL;
 	wtg_cross* X = NULL;
 	qaws_status st = QAWS_STATUS_OK;
+	qaws_scalar const* pos = positions;
+	qaws_scalar* ppos = NULL;
+	unsigned int pnv = vertex_count;
 	memset(&g, 0, sizeof g);
 	if (!report)
 		report = &local;
@@ -145,13 +148,6 @@ qaws_status qaws_mesh_make_watertight(qaws_mesh_3d** out, qaws_watertight_report
 	for (f = 0, off = 0, nt = 0; f < face_count; f++)
 	{
 		unsigned int s = face_sizes ? face_sizes[f] : 3;
-		for (k = 0; k < s; k++)
-			for (i = 0; i < 3; i++)
-			{
-				double v = (double)positions[3 * (size_t)face_vertices[off + k] + i];
-				lo[i] = fmin(lo[i], v);
-				hi[i] = fmax(hi[i], v);
-			}
 		for (k = 1; k + 1 < s; k++, nt++)
 		{
 			tri[3 * (size_t)nt] = face_vertices[off];
@@ -160,9 +156,45 @@ qaws_status qaws_mesh_make_watertight(qaws_mesh_3d** out, qaws_watertight_report
 		}
 		off += s;
 	}
+	/* holes filled first, tangent to the surface round them (not with an offset: a sheet's border is no hole there) */
+	if (!(desc && (desc->flags & QAWS_WATERTIGHT_WINDING_CAPS)) && !(desc && desc->offset > 0))
+	{
+		qaws_mesh_repair_report rr;
+		qaws_mesh_3d* pre = NULL;
+		st = qaws_mesh_repair(&pre, &rr, positions, face_vertices, face_sizes, vertex_count, face_count, NULL);
+		if (st != QAWS_STATUS_OK)
+			goto done;
+		report->holes_filled = rr.holes_filled;
+		if (!rr.holes_filled)
+			qaws_mesh_3d_destroy(pre);   /* (no hole: the input as given, its faces exact) */
+		else
+		{
+		pnv = qaws_mesh_3d_get_vertex_count(pre);
+		nt = qaws_mesh_3d_get_triangle_count(pre);
+		ppos = (qaws_scalar*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(qaws_scalar), 3, (size_t)pnv + 1));
+		qaws_internal_free(tri);
+		tri = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(unsigned int), 3, (size_t)nt + 1));
+		if (!ppos || !tri)
+		{
+			qaws_mesh_3d_destroy(pre);
+			goto oom;
+		}
+		qaws_mesh_3d_get_positions(ppos, pre);
+		qaws_mesh_3d_get_triangles(tri, pre);
+		qaws_mesh_3d_destroy(pre);
+		pos = ppos;
+		}
+	}
+	for (f = 0; f < 3 * nt; f++)
+		for (i = 0; i < 3; i++)
+		{
+			double v = (double)pos[3 * (size_t)tri[f] + i];
+			lo[i] = fmin(lo[i], v);
+			hi[i] = fmax(hi[i], v);
+		}
 	memset(&bd, 0, sizeof bd);
-	bd.positions = positions;
-	bd.vertex_count = vertex_count;
+	bd.positions = pos;
+	bd.vertex_count = pnv;
 	bd.dimension = 3;
 	bd.simplices = tri;
 	bd.simplex_size = 3;
@@ -351,7 +383,7 @@ qaws_status qaws_mesh_make_watertight(qaws_mesh_3d** out, qaws_watertight_report
 				double e1[3], e2[3], P[3][3];
 				for (k = 0; k < 3; k++)
 					for (i = 0; i < 3; i++)
-						P[k][i] = (double)positions[3 * (size_t)h.vertices[k] + i];
+						P[k][i] = (double)pos[3 * (size_t)h.vertices[k] + i];
 				A = P[0];
 				for (i = 0; i < 3; i++)
 				{
@@ -393,6 +425,19 @@ qaws_status qaws_mesh_make_watertight(qaws_mesh_3d** out, qaws_watertight_report
 				&& h.distance > 0.5 * g.off)
 				for (i = 0; i < 3; i++)
 					x->nrm[i] = x->x[i] - (double)h.point[i];
+			else if (qaws_mesh_bvh_closest(&h, g.b, mp, 1, (qaws_scalar)(1e-3 * g.h), NULL) == QAWS_STATUS_OK && h.element != QAWS_MESH_NONE)
+			{
+				/* on the input (a grid point on a face's plane, the ray missed it): that triangle's normal */
+				double e1[3], e2[3];
+				for (i = 0; i < 3; i++)
+				{
+					e1[i] = (double)pos[3 * (size_t)h.vertices[1] + i] - (double)pos[3 * (size_t)h.vertices[0] + i];
+					e2[i] = (double)pos[3 * (size_t)h.vertices[2] + i] - (double)pos[3 * (size_t)h.vertices[0] + i];
+				}
+				x->nrm[0] = e1[1] * e2[2] - e1[2] * e2[1];
+				x->nrm[1] = e1[2] * e2[0] - e1[0] * e2[2];
+				x->nrm[2] = e1[0] * e2[1] - e1[1] * e2[0];
+			}
 			else
 			{
 				/* across a hole: down the winding number's gradient (central differences at a quarter cell) */
@@ -597,6 +642,6 @@ oom:
 done:
 	qaws_mesh_bvh_destroy(g.b);
 	qaws_internal_free(tri); qaws_internal_free(in); qaws_internal_free(near); qaws_internal_free(gp); qaws_internal_free(gv); qaws_internal_free(hits);
-	qaws_internal_free(queue); qaws_internal_free(X); qaws_internal_free(cellv); qaws_internal_free(fx); qaws_internal_free(ftri);
+	qaws_internal_free(queue); qaws_internal_free(X); qaws_internal_free(cellv); qaws_internal_free(fx); qaws_internal_free(ftri); qaws_internal_free(ppos);
 	return st;
 }
