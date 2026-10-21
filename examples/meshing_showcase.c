@@ -181,14 +181,15 @@ static void ms_panel(er_canvas* c, int x, int y, int w, int h, qaws_mesh_3d cons
 #include "meshing_showcase/18_repair.c"
 #include "meshing_showcase/19_layers.c"
 #include "meshing_showcase/20_curved.c"
+#include "meshing_showcase/21_metric.c"
 
-/* the figures to draw: all, or those whose keys the first argument lists ("58"; figures 10 to 20 are a to k) */
+/* the figures to draw: all, or those whose keys the first argument lists ("58"; figures 10 to 21 are a to l) */
 int main(int argc, char** argv)
 {
 	static void (*const demo[])(void) = { demo_core, demo_reference, demo_remesh, demo_quads, demo_generate, demo_tets, demo_hexes, demo_frame_hexes,
 		demo_measures, demo_remesh_angles, demo_remesh_cvt, demo_cross_field, demo_quad_flow, demo_quad_improve,
-		demo_quad_global, demo_guidance, demo_feature_size, demo_repair, demo_layers, demo_curved };
-	static char const key[] = "123456789abcdefghijk";
+		demo_quad_global, demo_guidance, demo_feature_size, demo_repair, demo_layers, demo_curved, demo_metric };
+	static char const key[] = "123456789abcdefghijkl";
 	unsigned int i;
 	setvbuf(stdout, NULL, _IONBF, 0);
 	MAKE_DIR("showcase");
