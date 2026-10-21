@@ -164,6 +164,7 @@ add_executable(
 160_quality_report.c
 161_watertight.c
 162_intersect.c
+163_boolean.c
 )
 
 # The amalgamated library exports exactly the same symbols, so the tests can

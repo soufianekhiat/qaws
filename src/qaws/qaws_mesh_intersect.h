@@ -37,7 +37,8 @@
  * triangulated again in its plane (constrained Delaunay) through its cuts
  * and the points on its edges.
  *
- * The result is checked by exact predicates (qaws_mesh_repair's test):
+ * The cut faces' pieces are checked by exact predicates (qaws_mesh_repair's
+ * test; the faces not cut are input faces the pairs already tested):
  * report.remaining counts the pairs of faces still crossing, which only
  * snapping (vertices moved by up to the tolerance) or a cut the
  * triangulation could not keep (report.unresolved) leave.

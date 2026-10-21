@@ -1,0 +1,323 @@
+/*
+ * Test 163: mesh Booleans (qaws_mesh_boolean)
+ *
+ *   - two axis-aligned cubes crossing: union, intersection and difference
+ *     closed, their volumes exact (2 - 0.336, 0.336, 0.664);
+ *   - a turned cube, two cubes sharing two planes (coplanar faces), two
+ *     spheres: closed, V(A u B) + V(A n B) = V(A) + V(B) and
+ *     V(A - B) = V(A) - V(A n B) to rounding;
+ *   - the self-union of the two cubes given as one soup: the union's volume;
+ *   - a cube inside another: the union is the outer cube, the difference a
+ *     hollow cube (its inner faces turned); disjoint cubes: an empty
+ *     intersection; cubes touching face to face: one solid;
+ *   - refusals: no faces, an unknown operation.
+ */
+
+#include "test_common.h"
+#include "qaws_mesh_boolean.h"
+#include <math.h>
+#include <string.h>
+#include <stdlib.h>
+
+static void bo_box(double const* lo, double const* hi, double const* axis, double angle, qaws_scalar* x, unsigned int* nv, unsigned int* t,
+	unsigned int* nt)
+{
+	static unsigned int const bt[36] = { 0, 2, 1, 0, 3, 2, 4, 5, 6, 4, 6, 7, 0, 1, 5, 0, 5, 4, 2, 3, 7, 2, 7, 6, 0, 4, 7, 0, 7, 3, 1, 2, 6, 1, 6, 5 };
+	static int const bx[24] = { 0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 0, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1 };
+	double c[3], co = cos(angle), si = sin(angle);
+	unsigned int i, k;
+	for (k = 0; k < 3; k++)
+		c[k] = 0.5 * (lo[k] + hi[k]);
+	for (i = 0; i < 8; i++)
+	{
+		double p[3], q[3], d;
+		for (k = 0; k < 3; k++)
+			p[k] = (bx[3 * i + k] ? hi[k] : lo[k]) - c[k];
+		d = axis[0] * p[0] + axis[1] * p[1] + axis[2] * p[2];
+		q[0] = p[0] * co + (axis[1] * p[2] - axis[2] * p[1]) * si + axis[0] * d * (1 - co);
+		q[1] = p[1] * co + (axis[2] * p[0] - axis[0] * p[2]) * si + axis[1] * d * (1 - co);
+		q[2] = p[2] * co + (axis[0] * p[1] - axis[1] * p[0]) * si + axis[2] * d * (1 - co);
+		for (k = 0; k < 3; k++)
+			x[3 * (*nv + i) + k] = (qaws_scalar)(q[k] + c[k]);
+	}
+	for (i = 0; i < 36; i++)
+		t[3 * *nt + i] = *nv + bt[i];
+	*nv += 8;
+	*nt += 12;
+}
+
+static void bo_sphere(double const* c, double rad, unsigned int na, unsigned int nb, qaws_scalar* x, unsigned int* nv, unsigned int* t, unsigned int* nt)
+{
+	unsigned int i, j, v0 = *nv;
+	for (i = 0; i < 2; i++)
+	{
+		x[3 * (v0 + i)] = (qaws_scalar)c[0];
+		x[3 * (v0 + i) + 1] = (qaws_scalar)c[1];
+		x[3 * (v0 + i) + 2] = (qaws_scalar)(c[2] + (i ? -rad : rad));
+	}
+	for (j = 1; j < nb; j++)
+		for (i = 0; i < na; i++)
+		{
+			double th = M_PI * j / nb, ph = 2 * M_PI * i / na;
+			unsigned int v = v0 + 2 + (j - 1) * na + i;
+			x[3 * v] = (qaws_scalar)(c[0] + rad * sin(th) * cos(ph));
+			x[3 * v + 1] = (qaws_scalar)(c[1] + rad * sin(th) * sin(ph));
+			x[3 * v + 2] = (qaws_scalar)(c[2] + rad * cos(th));
+		}
+	for (i = 0; i < na; i++)
+	{
+		unsigned int* f = t + 3 * *nt;
+		f[0] = v0; f[1] = v0 + 2 + i; f[2] = v0 + 2 + (i + 1) % na;
+		f[3] = v0 + 1; f[4] = v0 + 2 + (nb - 2) * na + (i + 1) % na; f[5] = v0 + 2 + (nb - 2) * na + i;
+		*nt += 2;
+	}
+	for (j = 0; j + 2 < nb; j++)
+		for (i = 0; i < na; i++)
+		{
+			unsigned int a = v0 + 2 + j * na + i, b = v0 + 2 + j * na + (i + 1) % na, cc = a + na, d = b + na;
+			unsigned int* f = t + 3 * *nt;
+			f[0] = a; f[1] = cc; f[2] = d;
+			f[3] = a; f[4] = d; f[5] = b;
+			*nt += 2;
+		}
+	*nv += 2 + na * (nb - 1);
+}
+
+static double bo_volume_arrays(qaws_scalar const* p, unsigned int const* t, unsigned int nt)
+{
+	double v = 0;
+	unsigned int i;
+	for (i = 0; i < nt; i++)
+	{
+		double const a[3] = { p[3 * t[3 * i]], p[3 * t[3 * i] + 1], p[3 * t[3 * i] + 2] };
+		double const b[3] = { p[3 * t[3 * i + 1]], p[3 * t[3 * i + 1] + 1], p[3 * t[3 * i + 1] + 2] };
+		double const c[3] = { p[3 * t[3 * i + 2]], p[3 * t[3 * i + 2] + 1], p[3 * t[3 * i + 2] + 2] };
+		v += (a[0] * (b[1] * c[2] - b[2] * c[1]) + a[1] * (b[2] * c[0] - b[0] * c[2]) + a[2] * (b[0] * c[1] - b[1] * c[0])) / 6;
+	}
+	return v;
+}
+
+static double bo_volume(qaws_mesh_3d const* m)
+{
+	unsigned int nv, nt;
+	qaws_scalar* p;
+	unsigned int* t;
+	double v;
+	if (!m)
+		return 0;
+	nv = qaws_mesh_3d_get_vertex_count(m);
+	nt = qaws_mesh_3d_get_triangle_count(m);
+	p = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * (nv + 1));
+	t = (unsigned int*)malloc(sizeof(unsigned int) * 3 * (nt + 1));
+	qaws_mesh_3d_get_positions(p, m);
+	qaws_mesh_3d_get_triangles(t, m);
+	v = bo_volume_arrays(p, t, nt);
+	free(p);
+	free(t);
+	return v;
+}
+
+static qaws_mesh_3d_desc bo_desc(qaws_scalar const* x, unsigned int nv, unsigned int const* t, unsigned int nt)
+{
+	qaws_mesh_3d_desc d;
+	memset(&d, 0, sizeof d);
+	d.positions = x;
+	d.vertex_count = nv;
+	d.face_vertices = t;
+	d.face_count = nt;
+	return d;
+}
+
+/* the three operations on A and B: closed, nothing left crossing; their volumes out */
+static int bo_ops(char const* name, qaws_mesh_3d_desc const* A, qaws_mesh_3d_desc const* B, double* vol)
+{
+	static char const* const op_name[3] = { "union", "intersection", "difference" };
+	int ok = 1, k;
+	for (k = 0; k < 3; k++)
+	{
+		qaws_boolean_report r;
+		qaws_mesh_3d* m = NULL;
+		qaws_status s = qaws_mesh_boolean(&m, &r, A, B, (qaws_boolean_op)k, NULL);
+		char msg[300];
+		vol[k] = bo_volume(m);
+		sprintf(msg, "%s, %s: %u pieces kept (%u turned), %u dropped, closed %d, %u crossing left, volume %.15f", name, op_name[k], r.kept, r.flipped,
+			r.dropped, r.closed, r.intersect.remaining, vol[k]);
+		printf("  %s\n", msg);
+		TEST_ASSERT(s == QAWS_STATUS_OK && m && r.closed && r.intersect.remaining == 0 && r.intersect.unresolved == 0, msg);
+		ok &= s == QAWS_STATUS_OK && m != NULL;
+		qaws_mesh_3d_destroy(m);
+	}
+	return ok;
+}
+
+static double const bo_z[3] = { 0, 0, 1 };
+
+static void test_cubes(void)
+{
+	static double const lo0[3] = { 0, 0, 0 }, hi0[3] = { 1, 1, 1 }, lo1[3] = { 0.4, 0.3, 0.2 }, hi1[3] = { 1.4, 1.3, 1.2 };
+	qaws_scalar x[48];
+	unsigned int t[72], nv = 0, nt = 0;
+	qaws_mesh_3d_desc A, B;
+	double v[3], w = 0.6 * 0.7 * 0.8;
+	char msg[200];
+	bo_box(lo0, hi0, bo_z, 0, x, &nv, t, &nt);
+	bo_box(lo1, hi1, bo_z, 0, x, &nv, t, &nt);
+	A = bo_desc(x, 8, t, 12);
+	B = bo_desc(x + 24, 8, t, 12);   /* (B's indices are 0 to 7 too: its own vertices) */
+	if (bo_ops("two cubes", &A, &B, v))
+	{
+		sprintf(msg, "two cubes: volumes %.2e, %.2e, %.2e off", v[0] - (2 - w), v[1] - w, v[2] - (1 - w));
+		printf("  %s\n", msg);
+		TEST_ASSERT(fabs(v[0] - (2 - w)) < 1e-12 && fabs(v[1] - w) < 1e-12 && fabs(v[2] - (1 - w)) < 1e-12, msg);
+	}
+	/* the self-union of both as one soup */
+	{
+		qaws_mesh_3d_desc S = bo_desc(x, 16, t, 24);
+		qaws_boolean_report r;
+		qaws_mesh_3d* m = NULL;
+		qaws_status s = qaws_mesh_boolean(&m, &r, &S, NULL, QAWS_BOOLEAN_UNION, NULL);
+		double vs = bo_volume(m);
+		sprintf(msg, "self-union of the soup: closed %d, volume %.15f (union %.15f)", r.closed, vs, 2 - w);
+		printf("  %s\n", msg);
+		TEST_ASSERT(s == QAWS_STATUS_OK && m && r.closed && fabs(vs - (2 - w)) < 1e-12, msg);
+		qaws_mesh_3d_destroy(m);
+	}
+}
+
+static void bo_identities(char const* name, qaws_mesh_3d_desc const* A, qaws_mesh_3d_desc const* B)
+{
+	double v[3], va = bo_volume_arrays(A->positions, A->face_vertices, A->face_count), vb = bo_volume_arrays(B->positions, B->face_vertices, B->face_count);
+	char msg[300];
+	if (!bo_ops(name, A, B, v))
+		return;
+	sprintf(msg, "%s: V(A u B) + V(A n B) - V(A) - V(B) = %.2e, V(A - B) - V(A) + V(A n B) = %.2e, V(A n B) = %.6f", name, v[0] + v[1] - va - vb,
+		v[2] - va + v[1], v[1]);
+	printf("  %s\n", msg);
+	TEST_ASSERT(fabs(v[0] + v[1] - va - vb) < 1e-12 * (va + vb) && fabs(v[2] - va + v[1]) < 1e-12 * va && v[1] > 0, msg);
+}
+
+static void test_turned(void)
+{
+	static double const lo0[3] = { 0, 0, 0 }, hi0[3] = { 1, 1, 1 }, lo1[3] = { 0.45, 0.35, 0.25 }, hi1[3] = { 1.45, 1.35, 1.25 };
+	static double const lo2[3] = { 0.5, 0.25, 0 }, hi2[3] = { 1.5, 1.25, 1 };
+	double ax[3] = { 1 / sqrt(3.0), 1 / sqrt(3.0), 1 / sqrt(3.0) };
+	qaws_scalar x[48];
+	unsigned int t[72], nv = 0, nt = 0;
+	qaws_mesh_3d_desc A, B;
+	bo_box(lo0, hi0, bo_z, 0, x, &nv, t, &nt);
+	bo_box(lo1, hi1, ax, 0.3, x, &nv, t, &nt);
+	A = bo_desc(x, 8, t, 12);
+	B = bo_desc(x + 24, 8, t, 12);
+	bo_identities("a turned cube", &A, &B);
+	nv = 8;
+	nt = 12;
+	bo_box(lo2, hi2, bo_z, 0.4, x, &nv, t, &nt);
+	bo_identities("cubes sharing two planes", &A, &B);
+}
+
+static void test_spheres(void)
+{
+	static double const c0[3] = { 0, 0, 0 }, c1[3] = { 0.7, 0.25, 0.15 };
+	unsigned int na = 24, nb = 12, nv = 0, nt = 0, nv0, nt0;
+	qaws_scalar* x = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 6 * (2 + na * nb));
+	unsigned int* t = (unsigned int*)malloc(sizeof(unsigned int) * 12 * na * nb);
+	qaws_mesh_3d_desc A, B;
+	bo_sphere(c0, 1, na, nb, x, &nv, t, &nt);
+	nv0 = nv;
+	nt0 = nt;
+	bo_sphere(c0, 0.8, na, nb, x, &nv, t, &nt);
+	{
+		unsigned int i;
+		for (i = nv0; i < nv; i++)   /* moved: B's vertices from 0 */
+		{
+			x[3 * i] += (qaws_scalar)c1[0];
+			x[3 * i + 1] += (qaws_scalar)c1[1];
+			x[3 * i + 2] += (qaws_scalar)c1[2];
+		}
+		for (i = 3 * nt0; i < 3 * nt; i++)
+			t[i] -= nv0;
+	}
+	A = bo_desc(x, nv0, t, nt0);
+	B = bo_desc(x + 3 * nv0, nv - nv0, t + 3 * nt0, nt - nt0);
+	bo_identities("two spheres", &A, &B);
+	free(x);
+	free(t);
+}
+
+static void test_nested(void)
+{
+	static double const lo0[3] = { 0, 0, 0 }, hi0[3] = { 1, 1, 1 }, lo1[3] = { 0.25, 0.25, 0.25 }, hi1[3] = { 0.75, 0.75, 0.75 };
+	static double const lo2[3] = { 2, 0, 0 }, hi2[3] = { 3, 1, 1 };
+	qaws_scalar x[48];
+	unsigned int t[72], nv = 0, nt = 0;
+	qaws_mesh_3d_desc A, B;
+	qaws_boolean_report r;
+	qaws_mesh_3d* m = NULL;
+	qaws_status s;
+	char msg[200];
+	double v;
+	bo_box(lo0, hi0, bo_z, 0, x, &nv, t, &nt);
+	bo_box(lo1, hi1, bo_z, 0, x, &nv, t, &nt);
+	A = bo_desc(x, 8, t, 12);
+	B = bo_desc(x + 24, 8, t, 12);
+	s = qaws_mesh_boolean(&m, &r, &A, &B, QAWS_BOOLEAN_UNION, NULL);
+	v = bo_volume(m);
+	sprintf(msg, "a cube inside another, union: %u faces, volume %.15f", m ? qaws_mesh_3d_get_triangle_count(m) : 0, v);
+	printf("  %s\n", msg);
+	TEST_ASSERT(s == QAWS_STATUS_OK && m && r.closed && qaws_mesh_3d_get_triangle_count(m) == 12 && fabs(v - 1) < 1e-14, msg);
+	qaws_mesh_3d_destroy(m);
+	m = NULL;
+	s = qaws_mesh_boolean(&m, &r, &A, &B, QAWS_BOOLEAN_DIFFERENCE, NULL);
+	v = bo_volume(m);
+	sprintf(msg, "a cube inside another, difference: %u faces (%u turned), volume %.15f", m ? qaws_mesh_3d_get_triangle_count(m) : 0, r.flipped, v);
+	printf("  %s\n", msg);
+	TEST_ASSERT(s == QAWS_STATUS_OK && m && r.closed && r.flipped == 12 && fabs(v - 0.875) < 1e-14, msg);
+	qaws_mesh_3d_destroy(m);
+	m = NULL;
+	nv = 8;
+	nt = 12;
+	bo_box(lo2, hi2, bo_z, 0, x, &nv, t, &nt);
+	s = qaws_mesh_boolean(&m, &r, &A, &B, QAWS_BOOLEAN_INTERSECTION, NULL);
+	sprintf(msg, "disjoint cubes, intersection: status %d, %s", (int)s, m ? "a mesh" : "empty");
+	printf("  %s\n", msg);
+	TEST_ASSERT(s == QAWS_STATUS_OK && !m && r.kept == 0, msg);
+	qaws_mesh_3d_destroy(m);
+	/* touching face to face: the union one solid, the faces between gone */
+	{
+		static double const lo3[3] = { 1, 0.2, 0.3 }, hi3[3] = { 2, 0.8, 0.7 };
+		m = NULL;
+		nv = 8;
+		nt = 12;
+		bo_box(lo3, hi3, bo_z, 0, x, &nv, t, &nt);
+		s = qaws_mesh_boolean(&m, &r, &A, &B, QAWS_BOOLEAN_UNION, NULL);
+		v = bo_volume(m);
+		sprintf(msg, "cubes touching face to face, union: closed %d, volume %.15f (1.24)", r.closed, v);
+		printf("  %s\n", msg);
+		TEST_ASSERT(s == QAWS_STATUS_OK && m && r.closed && fabs(v - 1.24) < 1e-14, msg);
+		qaws_mesh_3d_destroy(m);
+	}
+}
+
+static void test_refusals(void)
+{
+	qaws_scalar x[9] = { 0, 0, 0, 1, 0, 0, 0, 1, 0 };
+	unsigned int t[3] = { 0, 1, 2 };
+	qaws_mesh_3d_desc A = bo_desc(x, 3, t, 1), E = bo_desc(x, 3, t, 0);
+	qaws_mesh_3d* m = NULL;
+	TEST_ASSERT(qaws_mesh_boolean(&m, NULL, &E, &A, QAWS_BOOLEAN_UNION, NULL) == QAWS_STATUS_INVALID_ARGUMENT && !m, "no faces refused");
+	TEST_ASSERT(qaws_mesh_boolean(&m, NULL, &A, &A, (qaws_boolean_op)7, NULL) == QAWS_STATUS_INVALID_ARGUMENT && !m, "unknown operation refused");
+}
+
+int test_163_boolean_main(void)
+{
+	g_pass = 0;
+	g_fail = 0;
+	printf("Test 163: mesh Booleans\n");
+	test_cubes();
+	test_turned();
+	test_spheres();
+	test_nested();
+	test_refusals();
+	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
+	return g_fail;
+}

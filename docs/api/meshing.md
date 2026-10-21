@@ -17,6 +17,7 @@ enters and leaves as arrays; qaws reads and writes no files.
 | `qaws_mesh_repair.h` | repair for farq: soups and broken meshes made closed and outward |
 | `qaws_mesh_watertight.h` | watertight surfaces from any input: winding-number inside, dual contouring, offsets |
 | `qaws_mesh_intersect.h` | self-intersections resolved numerically: a conforming arrangement of the input's triangles |
+| `qaws_mesh_boolean.h` | mesh Booleans: union, intersection, difference, self-union, by winding numbers on the arrangement |
 | `qaws_mesh_bvh.h` | spatial queries: closest points, point location, rays, winding numbers, signed distance |
 | `qaws_quality_report.h` | quality reports: a measure per element of 2D, surface or volume meshes, histograms, worst elements, thresholds |
 | `qaws_volume_mesh.h` | `qaws_volume_mesh`: tetrahedra, hexahedra, prisms, pyramids |
@@ -916,6 +917,50 @@ The result is checked by exact predicates (`qaws_mesh_repair`'s test). `report.r
 - the area is unchanged to 1e-12.
 
 A cube alone comes back unchanged, and invalid input is refused. Figure 26 (key q) shows two spheres crossing, their faces outside the other sphere kept (the union) and inside (the lens), and three cubes resolved.
+
+Only the cut faces' pieces are checked: faces that were not cut are input faces the pair tests already passed.
+
+## Mesh Booleans
+
+`qaws_mesh_boolean` (`qaws_mesh_boolean.h`) computes the union, intersection or difference of two closed triangle meshes. With `b` NULL it computes the self-union of one mesh: the region its winding number covers by at least ½, with overlaps and inner faces removed. It is numerical and robust; farq makes exact Booleans.
+
+```c
+qaws_mesh_3d_desc a = { positions_a, nv_a, faces_a, NULL, nf_a }, b = { positions_b, nv_b, faces_b, NULL, nf_b };
+qaws_mesh_boolean(&mesh, &report, &a, &b, QAWS_BOOLEAN_DIFFERENCE, NULL);
+```
+
+**How it works:**
+1. **Resolve.** The operands are resolved together (`qaws_mesh_resolve_intersections`).
+2. **Patches.** Pieces joined across edges held by exactly two faces, turned opposite ways, form patches. Patches are bounded by the cuts, so every piece of a patch lies on the same sides of everything.
+3. **Sample.** Each patch is sampled once, just in front of and just behind its fattest piece, at a tenth of the piece's inradius and at most 1e-6 of the box's diagonal. The generalized winding numbers of A and B there (`qaws_mesh_bvh` over the operands' own triangles) say whether each side is in the result.
+4. **Keep.** A patch between inside and outside is kept, turned so its front faces out. The others are dropped.
+5. **Coplanar overlaps.** Where B lies on A, A's pieces stand for both.
+
+Because winding numbers decide what is inside, operands that are not quite closed (small holes, soups, overlapping parts) still give a sensible result.
+
+The face attribute `"source"` gives each triangle's face in the soup of A then B: A's faces first, then B's from `a->face_count`. `report.closed` says whether every directed edge cancels. Where touching operands meet at an edge or a vertex, the mesh splits that place (`qaws_mesh.h`). An empty result returns OK with no mesh.
+
+**Speed.** For two crossing UV spheres on one thread:
+
+| Triangles | Resolution | Union |
+|---|---|---|
+| 4,416 | 0.06 s | 0.07 s |
+| 32,256 | 0.22 s | 0.33 s |
+| 130,048 | 0.69 s | 0.98 s |
+
+Most of that time is setup for every input face, cut or not. Making that local and parallel is the scale item.
+
+**Tests and figure.** Test 163:
+- **Exact cube volumes:** two axis-aligned cubes give union, intersection and difference volumes exact to 2e-16.
+- **Volume identities:** for a turned cube, two cubes sharing two planes, and two spheres, V(A ∪ B) + V(A ∩ B) = V(A) + V(B) and V(A − B) = V(A) − V(A ∩ B), to 4e-15.
+- **Self-union:** the two cubes given as one soup give the union's volume.
+- **Nesting and contact:**
+  - a cube inside another: the union is the outer cube, and the difference is hollow, its 12 inner faces turned;
+  - disjoint cubes: an empty intersection;
+  - cubes touching face to face: one solid.
+- **Closed and resolved:** every result is closed with nothing left crossing.
+
+Figure 27 (key r) shows two spheres' union, intersection and difference (cut open), and the CSG emblem: a cube and a sphere intersected, then three cylinders taken away, five Booleans in a row.
 
 ## Spatial queries: qaws_mesh_bvh
 

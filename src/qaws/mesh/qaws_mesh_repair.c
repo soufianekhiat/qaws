@@ -2287,8 +2287,8 @@ static int rp_tri_tri(rp_mesh const* m, unsigned int f, unsigned int g)
 	}
 	if (shared == 3)
 		return 0;
-	for (i = 0; i < 3; i++)
-		sq[i] = rp_o3(P[0], P[1], P[2], Q[i]);
+	for (i = 0; i < 3; i++)   /* (a shared corner is on the plane: no exact zero to grind out) */
+		sq[i] = iq[i] == ip[0] || iq[i] == ip[1] || iq[i] == ip[2] ? 0 : rp_o3(P[0], P[1], P[2], Q[i]);
 	cop = !sq[0] && !sq[1] && !sq[2];
 	if (cop)
 		return rp_coplanar((double const(*)[3])P, (double const(*)[3])Q, ip, iq);

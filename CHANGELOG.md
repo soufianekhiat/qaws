@@ -29,6 +29,13 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- Mesh Booleans (`qaws_mesh_boolean`): union, intersection, difference and
+  self-union of closed triangle meshes, on the resolved arrangement: patches
+  bounded by the cuts, each sampled once in front of and behind it by the
+  operands' winding numbers, kept and turned outward where they separate the
+  result; coplanar overlaps kept once. Test 163, meshing figure 27. The repair's
+  exact pair test skips shared corners (no exact zero ground out), and the
+  resolution checks only the cut faces' pieces.
 - Self-intersections resolved numerically (`qaws_mesh_resolve_intersections`):
   crossing triangles cut along their intersections into a conforming arrangement,
   points keyed by what made them (edge-plane, three planes, edge-edge) and snapped

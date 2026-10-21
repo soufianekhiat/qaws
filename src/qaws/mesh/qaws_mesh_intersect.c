@@ -9,6 +9,8 @@
 #include "../internal/qaws_internal_memory.h"
 #include "../internal/qaws_internal_broadphase.h"
 #include "../qaws_mesh_intersect.h"
+#include "../qaws_mesh_boolean.h"
+#include "../qaws_mesh_bvh.h"
 #include "../qaws_mesh_repair.h"
 #include "../qaws_exact.h"
 #include <stdlib.h>
@@ -1232,7 +1234,17 @@ static double sx_snap52(double t)
 	return floor(t * 4503599627370496.0 + 0.5) / 4503599627370496.0;
 }
 
-qaws_status qaws_mesh_resolve_intersections(qaws_mesh_3d** out, qaws_intersect_report* report, qaws_scalar const* positions,
+/* the arrangement as arrays (owned by the caller) */
+typedef struct sx_out
+{
+	qaws_scalar* pos;
+	unsigned int* tri;
+	qaws_scalar* src;                  /* input face per triangle */
+	unsigned int nv, nt;
+	double eps, diag;
+} sx_out;
+
+static qaws_status sx_resolve(sx_out* o, qaws_intersect_report* report, qaws_scalar const* positions,
 	unsigned int const* face_vertices, unsigned int const* face_sizes, unsigned int vertex_count, unsigned int face_count,
 	qaws_intersect_desc const* desc)
 {
@@ -1241,7 +1253,7 @@ qaws_status qaws_mesh_resolve_intersections(qaws_mesh_3d** out, qaws_intersect_r
 	sx_buf b;
 	sx_cdt T;
 	qaws_status st = QAWS_STATUS_OK;
-	unsigned int *alias = NULL, *loc = NULL, *otri = NULL, *stack = NULL, *used = NULL;
+	unsigned int *alias = NULL, *loc = NULL, *otri = NULL, *stack = NULL, *used = NULL, *ocut = NULL, ncut = 0, capcut = 0;
 	qaws_scalar *opos = NULL, *osrc = NULL;
 	qaws_bp_box* box = NULL;
 	unsigned int nt = 0, off = 0, f, k, i, ntri = 0, capt = 0, caps = 0, caps2 = 0, onv = 0;
@@ -1252,9 +1264,7 @@ qaws_status qaws_mesh_resolve_intersections(qaws_mesh_3d** out, qaws_intersect_r
 	if (!report)
 		report = &local;
 	memset(report, 0, sizeof *report);
-	if (!out)
-		return QAWS_STATUS_INVALID_ARGUMENT;
-	*out = NULL;
+	memset(o, 0, sizeof *o);
 	if (!face_count || !face_vertices || (vertex_count && !positions) || (desc && !(desc->tolerance >= 0)))
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	for (i = 0; i < 3 * vertex_count; i++)
@@ -1284,6 +1294,8 @@ qaws_status qaws_mesh_resolve_intersections(qaws_mesh_3d** out, qaws_intersect_r
 	if (!(c.eps > 0))
 		c.eps = 1e-300;
 	report->tolerance = (qaws_scalar)c.eps;
+	o->eps = c.eps;
+	o->diag = diag;
 	c.inv = 1 / c.eps;
 	c.r = report;
 	c.ncell = 1024;
@@ -1515,8 +1527,11 @@ qaws_status qaws_mesh_resolve_intersections(qaws_mesh_3d** out, qaws_intersect_r
 				report->unresolved++;
 		}
 		sx_relax(&T);
+		if (!sx_reserve((void**)&ocut, &capcut, (size_t)ncut + T.nt, sizeof(unsigned int)))
+			goto oom;
 		for (i = 0; i < T.nt; i++)
 		{
+			ocut[ncut++] = ntri;
 			otri[3 * (size_t)ntri] = b.p[T.t[i].v[0]];
 			otri[3 * (size_t)ntri + 1] = b.p[T.t[i].v[1]];
 			otri[3 * (size_t)ntri + 2] = b.p[T.t[i].v[2]];
@@ -1545,8 +1560,10 @@ qaws_status qaws_mesh_resolve_intersections(qaws_mesh_3d** out, qaws_intersect_r
 			if (used[i] != SX_NONE)
 				for (k = 0; k < 3; k++)
 					opos[3 * (size_t)used[i] + k] = (qaws_scalar)c.X[3 * (size_t)i + k];
-		/* checked by exact predicates */
+		/* the cut faces' pieces checked by exact predicates (the others are input faces the pairs tested) */
+		if (ncut)
 		{
+			unsigned int* ct = (unsigned int*)qaws_internal_malloc(qaws_internal_mul3(sizeof(unsigned int), 3, (size_t)ncut));
 			qaws_mesh_repair_desc rd;
 			qaws_mesh_repair_report rr;
 			qaws_mesh_3d* chk = NULL;
@@ -1556,36 +1573,25 @@ qaws_status qaws_mesh_resolve_intersections(qaws_mesh_3d** out, qaws_intersect_r
 			rd.gap_tolerance = -1;
 			rd.hole_perimeter = -1;
 			rd.flags = QAWS_MESH_REPAIR_FIND_INTERSECTIONS;
-			st = qaws_mesh_repair(&chk, &rr, opos, otri, NULL, nv, ntri, &rd);
+			if (!ct)
+				goto oom;
+			for (i = 0; i < ncut; i++)
+				memcpy(ct + 3 * (size_t)i, otri + 3 * (size_t)ocut[i], 3 * sizeof(unsigned int));
+			st = qaws_mesh_repair(&chk, &rr, opos, ct, NULL, nv, ncut, &rd);
 			qaws_mesh_3d_destroy(chk);
+			qaws_internal_free(ct);
 			if (st != QAWS_STATUS_OK)
 				goto fail;
 			report->remaining = rr.self_intersections;
 		}
-		{
-			qaws_mesh_3d_desc md;
-			qaws_attribute_desc ad;
-			unsigned int attr;
-			memset(&md, 0, sizeof md);
-			md.positions = opos;
-			md.vertex_count = nv;
-			md.face_vertices = otri;
-			md.face_count = ntri;
-			st = qaws_mesh_3d_create(out, &md);
-			if (st != QAWS_STATUS_OK)
-				goto fail;
-			memset(&ad, 0, sizeof ad);
-			ad.name = "source";
-			ad.element = QAWS_MESH_FACE;
-			ad.components = 1;
-			ad.rule = QAWS_ATTRIBUTE_NEAREST;
-			st = qaws_mesh_3d_add_attribute(&attr, *out, osrc, &ad);
-			if (st != QAWS_STATUS_OK)
-			{
-				qaws_mesh_3d_destroy(*out);
-				*out = NULL;
-			}
-		}
+		o->pos = opos;
+		o->tri = otri;
+		o->src = osrc;
+		o->nv = nv;
+		o->nt = ntri;
+		opos = NULL;
+		otri = NULL;
+		osrc = NULL;
 	}
 	goto fail;
 oom:
@@ -1594,7 +1600,369 @@ fail:
 	qaws_internal_free(c.X); qaws_internal_free(c.chain); qaws_internal_free(c.cell); qaws_internal_free(c.keys); qaws_internal_free(c.nodes);
 	qaws_internal_free(c.car); qaws_internal_free(c.F); qaws_internal_free(c.work); qaws_internal_free(b.s); qaws_internal_free(b.p);
 	qaws_internal_free(T.P); qaws_internal_free(T.Q); qaws_internal_free(T.t); qaws_internal_free(alias); qaws_internal_free(loc); qaws_internal_free(used);
-	qaws_internal_free(otri); qaws_internal_free(stack); qaws_internal_free(opos); qaws_internal_free(osrc);
+	qaws_internal_free(otri); qaws_internal_free(ocut); qaws_internal_free(stack); qaws_internal_free(opos); qaws_internal_free(osrc);
 	qaws_internal_free(box);
+	return st;
+}
+
+/* triangles and their source faces as a mesh with the "source" attribute */
+static qaws_status sx_mesh(qaws_mesh_3d** out, qaws_scalar const* pos, unsigned int nv, unsigned int const* tri, qaws_scalar const* src, unsigned int nt)
+{
+	qaws_mesh_3d_desc md;
+	qaws_attribute_desc ad;
+	unsigned int attr;
+	qaws_status st;
+	memset(&md, 0, sizeof md);
+	md.positions = pos;
+	md.vertex_count = nv;
+	md.face_vertices = tri;
+	md.face_count = nt;
+	st = qaws_mesh_3d_create(out, &md);
+	if (st != QAWS_STATUS_OK)
+		return st;
+	memset(&ad, 0, sizeof ad);
+	ad.name = "source";
+	ad.element = QAWS_MESH_FACE;
+	ad.components = 1;
+	ad.rule = QAWS_ATTRIBUTE_NEAREST;
+	st = qaws_mesh_3d_add_attribute(&attr, *out, src, &ad);
+	if (st != QAWS_STATUS_OK)
+	{
+		qaws_mesh_3d_destroy(*out);
+		*out = NULL;
+	}
+	return st;
+}
+
+static void sx_out_free(sx_out* o)
+{
+	qaws_internal_free(o->pos);
+	qaws_internal_free(o->tri);
+	qaws_internal_free(o->src);
+	memset(o, 0, sizeof *o);
+}
+
+qaws_status qaws_mesh_resolve_intersections(qaws_mesh_3d** out, qaws_intersect_report* report, qaws_scalar const* positions,
+	unsigned int const* face_vertices, unsigned int const* face_sizes, unsigned int vertex_count, unsigned int face_count,
+	qaws_intersect_desc const* desc)
+{
+	sx_out o;
+	qaws_status st;
+	if (!out)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	*out = NULL;
+	st = sx_resolve(&o, report, positions, face_vertices, face_sizes, vertex_count, face_count, desc);
+	if (st == QAWS_STATUS_OK)
+		st = sx_mesh(out, o.pos, o.nv, o.tri, o.src, o.nt);
+	sx_out_free(&o);
+	return st;
+}
+
+/* ---- Booleans on the arrangement ---- */
+
+/* a mesh's faces fanned into triangles, for its BVH */
+static qaws_status sx_bvh(qaws_mesh_bvh** out, qaws_mesh_3d_desc const* m, unsigned int** tri)
+{
+	qaws_mesh_bvh_desc d;
+	unsigned int f, k, off = 0, n = 0;
+	for (f = 0; f < m->face_count; f++)
+		n += (m->face_sizes ? m->face_sizes[f] : 3) - 2;
+	*tri = (unsigned int*)qaws_internal_malloc(qaws_internal_mul3(sizeof(unsigned int), 3, (size_t)n + 1));
+	if (!*tri)
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	for (f = 0, n = 0; f < m->face_count; f++)
+	{
+		unsigned int s = m->face_sizes ? m->face_sizes[f] : 3;
+		for (k = 1; k + 1 < s; k++, n++)
+		{
+			(*tri)[3 * (size_t)n] = m->face_vertices[off];
+			(*tri)[3 * (size_t)n + 1] = m->face_vertices[off + k];
+			(*tri)[3 * (size_t)n + 2] = m->face_vertices[off + k + 1];
+		}
+		off += s;
+	}
+	memset(&d, 0, sizeof d);
+	d.positions = m->positions;
+	d.vertex_count = m->vertex_count;
+	d.dimension = 3;
+	d.simplices = *tri;
+	d.simplex_size = 3;
+	d.simplex_count = n;
+	return qaws_mesh_bvh_create(out, &d);
+}
+
+static unsigned int sx_root(unsigned int* par, unsigned int i)
+{
+	while (par[i] != i)
+		i = par[i] = par[par[i]];
+	return i;
+}
+
+static int sx_region(qaws_boolean_op op, int a, int b, int two)
+{
+	if (!two)
+		return a;
+	return op == QAWS_BOOLEAN_UNION ? (a || b) : op == QAWS_BOOLEAN_INTERSECTION ? (a && b) : (a && !b);
+}
+
+static int sx_cmp_edge(void const* p, void const* q)
+{
+	unsigned long long a = *(unsigned long long const*)p, b = *(unsigned long long const*)q;
+	return a < b ? -1 : a > b;
+}
+
+/* every directed edge cancelled by one turned the other way */
+static int sx_closed(unsigned int const* t, unsigned int nt)
+{
+	unsigned long long* e = (unsigned long long*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned long long), 3 * (size_t)nt + 1));
+	unsigned int i, j, n = 3 * nt;
+	int closed = 1;
+	if (!e)
+		return 0;
+	for (i = 0; i < nt; i++)
+		for (j = 0; j < 3; j++)
+		{
+			unsigned long long p = t[3 * (size_t)i + j], q = t[3 * (size_t)i + (j + 1) % 3];
+			/* low bit: the direction */
+			e[3 * (size_t)i + j] = p < q ? ((p << 32 | q) << 1) : ((q << 32 | p) << 1 | 1);
+		}
+	qsort(e, n, sizeof *e, sx_cmp_edge);
+	for (i = 0; i < n && closed; i = j)
+	{
+		long s = 0;
+		for (j = i; j < n && e[j] >> 1 == e[i] >> 1; j++)
+			s += (e[j] & 1) ? -1 : 1;
+		closed = s == 0;
+	}
+	qaws_internal_free(e);
+	return closed;
+}
+
+qaws_status qaws_mesh_boolean(qaws_mesh_3d** out, qaws_boolean_report* report, qaws_mesh_3d_desc const* a, qaws_mesh_3d_desc const* b,
+	qaws_boolean_op op, qaws_intersect_desc const* desc)
+{
+	qaws_boolean_report local;
+	qaws_scalar *x = NULL, *kpos = NULL, *keep_src = NULL, *pts = NULL, *wa = NULL, *wb = NULL;
+	unsigned int *fv = NULL, *fs = NULL, *ta = NULL, *tb = NULL, *keep = NULL, *used = NULL;
+	qaws_mesh_bvh *ba = NULL, *bb = NULL;
+	qaws_mesh_hit* hits = NULL;
+	unsigned int *par = NULL, *rep = NULL, *pid = NULL, npatch = 0;
+	unsigned long long* ek = NULL;
+	double* fat = NULL;
+	sx_out o;
+	qaws_status st;
+	unsigned int na = 0, nb = 0, nv, nf, i, j, k, nk = 0, two = b != NULL;
+	memset(&o, 0, sizeof o);
+	if (!report)
+		report = &local;
+	memset(report, 0, sizeof *report);
+	if (!out)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	*out = NULL;
+	if (!a || !a->face_count || !a->face_vertices || !a->positions || (b && (!b->face_count || !b->face_vertices || !b->positions))
+		|| (unsigned int)op > (unsigned int)QAWS_BOOLEAN_DIFFERENCE)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	/* the operands as one soup: B's vertices and faces after A's */
+	for (i = 0; i < a->face_count; i++)
+		na += a->face_sizes ? a->face_sizes[i] : 3;
+	for (i = 0; two && i < b->face_count; i++)
+		nb += b->face_sizes ? b->face_sizes[i] : 3;
+	nv = a->vertex_count + (two ? b->vertex_count : 0);
+	nf = a->face_count + (two ? b->face_count : 0);
+	x = (qaws_scalar*)qaws_internal_malloc(qaws_internal_mul3(sizeof(qaws_scalar), 3, (size_t)nv + 1));
+	fv = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)na + nb + 1));
+	fs = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)nf + 1));
+	if (!x || !fv || !fs)
+		goto oom;
+	memcpy(x, a->positions, sizeof(qaws_scalar) * 3 * (size_t)a->vertex_count);
+	for (i = 0; i < na; i++)
+		fv[i] = a->face_vertices[i] < a->vertex_count ? a->face_vertices[i] : nv;   /* (out of range: refused by the resolution) */
+	for (i = 0; i < a->face_count; i++)
+		fs[i] = a->face_sizes ? a->face_sizes[i] : 3;
+	if (two)
+	{
+		memcpy(x + 3 * (size_t)a->vertex_count, b->positions, sizeof(qaws_scalar) * 3 * (size_t)b->vertex_count);
+		for (i = 0; i < nb; i++)
+			fv[na + i] = b->face_vertices[i] < b->vertex_count ? b->face_vertices[i] + a->vertex_count : nv;
+		for (i = 0; i < b->face_count; i++)
+			fs[a->face_count + i] = b->face_sizes ? b->face_sizes[i] : 3;
+	}
+	st = sx_resolve(&o, &report->intersect, x, fv, fs, nv, nf, desc);
+	if (st != QAWS_STATUS_OK)
+		goto done;
+	st = sx_bvh(&ba, a, &ta);
+	if (st == QAWS_STATUS_OK && two)
+		st = sx_bvh(&bb, b, &tb);
+	if (st != QAWS_STATUS_OK)
+		goto done;
+	/* patches: pieces joined across edges of two faces turned opposite ways are on the same sides of everything */
+	par = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)o.nt + 1));
+	pid = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)o.nt + 1));
+	rep = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)o.nt + 1));
+	fat = (double*)qaws_internal_malloc(sizeof(double) * ((size_t)o.nt + 1));
+	ek = (unsigned long long*)qaws_internal_malloc(qaws_internal_mul3(sizeof(unsigned long long), 3, (size_t)o.nt + 1));
+	keep = (unsigned int*)qaws_internal_malloc(qaws_internal_mul3(sizeof(unsigned int), 3, (size_t)o.nt + 1));
+	keep_src = (qaws_scalar*)qaws_internal_malloc(qaws_internal_mul2(sizeof(qaws_scalar), (size_t)o.nt + 1));
+	used = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)o.nv + 1));
+	kpos = (qaws_scalar*)qaws_internal_malloc(qaws_internal_mul3(sizeof(qaws_scalar), 3, (size_t)o.nv + 1));
+	if (!par || !pid || !rep || !fat || !ek || !keep || !keep_src || !used || !kpos)
+		goto oom;
+	for (i = 0; i < o.nt; i++)
+	{
+		par[i] = i;
+		for (k = 0; k < 3; k++)
+		{
+			unsigned long long p = o.tri[3 * (size_t)i + k], q = o.tri[3 * (size_t)i + (k + 1) % 3];
+			/* key: the edge, then the direction bit; the face in a side array by position */
+			ek[3 * (size_t)i + k] = (p < q ? (p << 32 | q) : (q << 32 | p)) << 1 | (p > q);
+		}
+	}
+	{
+		/* sort edge uses with their faces: (key, face) pairs packed through an index sort */
+		unsigned int n = 3 * o.nt;
+		unsigned long long* key = (unsigned long long*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned long long), 2 * (size_t)n + 1));
+		if (!key)
+			goto oom;
+		for (j = 0; j < n; j++)
+		{
+			key[2 * (size_t)j] = ek[j];
+			key[2 * (size_t)j + 1] = j / 3;
+		}
+		qsort(key, n, 2 * sizeof(unsigned long long), sx_cmp_edge);
+		for (i = 0; i < n; i = j)
+		{
+			for (j = i + 1; j < n && key[2 * (size_t)j] >> 1 == key[2 * (size_t)i] >> 1; j++)
+				;
+			if (j == i + 2 && (key[2 * (size_t)i] & 1) != (key[2 * (size_t)i + 2] & 1))
+			{
+				unsigned int x0 = sx_root(par, (unsigned int)key[2 * (size_t)i + 1]), x1 = sx_root(par, (unsigned int)key[2 * (size_t)i + 3]);
+				if (x0 != x1)
+					par[x0 < x1 ? x1 : x0] = x0 < x1 ? x0 : x1;
+			}
+		}
+		qaws_internal_free(key);
+	}
+	/* each patch's fattest piece stands for it */
+	for (i = 0; i < o.nt; i++)
+	{
+		double P[3][3], u[3], v[3], n[3], per = 0, l;
+		unsigned int z = sx_root(par, i);
+		for (k = 0; k < 3; k++)
+			for (j = 0; j < 3; j++)
+				P[k][j] = (double)o.pos[3 * (size_t)o.tri[3 * (size_t)i + k] + j];
+		for (k = 0; k < 3; k++)
+		{
+			u[k] = P[1][k] - P[0][k];
+			v[k] = P[2][k] - P[0][k];
+			per += sqrt(sx_dist2(P[k], P[(k + 1) % 3]));
+		}
+		sx_cross(u, v, n);
+		l = sqrt(sx_dot(n, n));
+		fat[i] = per > 0 ? l / per : 0;   /* twice the inradius */
+		if (z == i)
+		{
+			pid[i] = npatch++;
+			rep[pid[i]] = i;
+		}
+	}
+	for (i = 0; i < o.nt; i++)
+	{
+		unsigned int z = pid[sx_root(par, i)];
+		pid[i] = z;
+		if (fat[i] > fat[rep[z]])
+			rep[z] = i;
+	}
+	report->patches = npatch;
+	/* each patch sampled just in front of and behind its piece */
+	pts = (qaws_scalar*)qaws_internal_malloc(qaws_internal_mul3(sizeof(qaws_scalar), 6, (size_t)npatch + 1));
+	wa = (qaws_scalar*)qaws_internal_malloc(qaws_internal_mul2(sizeof(qaws_scalar), 2 * (size_t)npatch + 1));
+	wb = (qaws_scalar*)qaws_internal_malloc(qaws_internal_mul2(sizeof(qaws_scalar), 2 * (size_t)npatch + 1));
+	hits = (qaws_mesh_hit*)qaws_internal_malloc(qaws_internal_mul2(sizeof(qaws_mesh_hit), (size_t)npatch + 1));
+	if (!pts || !wa || !wb || !hits)
+		goto oom;
+	for (i = 0; i < npatch; i++)
+	{
+		unsigned int t = rep[i];
+		double P[3][3], u[3], v[3], n[3], g[3], l, dl;
+		for (k = 0; k < 3; k++)
+			for (j = 0; j < 3; j++)
+				P[k][j] = (double)o.pos[3 * (size_t)o.tri[3 * (size_t)t + k] + j];
+		for (k = 0; k < 3; k++)
+		{
+			u[k] = P[1][k] - P[0][k];
+			v[k] = P[2][k] - P[0][k];
+			g[k] = (P[0][k] + P[1][k] + P[2][k]) / 3;
+		}
+		sx_cross(u, v, n);
+		l = sqrt(sx_dot(n, n));
+		/* off the piece by a tenth of its inradius, at most 1e-6 D: nearer than any other surface */
+		dl = l > 0 ? fmin(0.1 * fat[t], 1e-6 * o.diag) / l : 0;
+		for (k = 0; k < 3; k++)
+		{
+			pts[6 * (size_t)i + k] = (qaws_scalar)(g[k] + dl * n[k]);
+			pts[6 * (size_t)i + 3 + k] = (qaws_scalar)(g[k] - dl * n[k]);
+		}
+	}
+	st = qaws_mesh_bvh_winding_number(wa, ba, pts, 2 * npatch, NULL);
+	if (st == QAWS_STATUS_OK && two)
+		st = qaws_mesh_bvh_winding_number(wb, bb, pts, 2 * npatch, NULL);
+	/* B's patches lying on A (coplanar overlaps): A's pieces stand for both */
+	if (st == QAWS_STATUS_OK && two)
+	{
+		for (i = 0; i < npatch; i++)
+			for (k = 0; k < 3; k++)
+				pts[3 * (size_t)i + k] = (qaws_scalar)(0.5 * ((double)pts[6 * (size_t)i + k] + (double)pts[6 * (size_t)i + 3 + k]));
+		st = qaws_mesh_bvh_closest(hits, ba, pts, npatch, (qaws_scalar)(4 * o.eps), NULL);
+	}
+	if (st != QAWS_STATUS_OK)
+		goto done;
+	for (i = 0; i < o.nt; i++)
+	{
+		unsigned int z = pid[i];
+		int fa = wa[2 * (size_t)z] >= 0.5, ka = wa[2 * (size_t)z + 1] >= 0.5;
+		int fb = two && wb[2 * (size_t)z] >= 0.5, kb = two && wb[2 * (size_t)z + 1] >= 0.5;
+		int front = sx_region(op, fa, fb, (int)two), back = sx_region(op, ka, kb, (int)two);
+		unsigned int s = (unsigned int)o.src[i];
+		if (front == back || (two && s >= a->face_count && hits[z].element != QAWS_MESH_NONE))
+		{
+			report->dropped++;
+			continue;
+		}
+		/* the region behind: turned when it is in front */
+		keep[3 * (size_t)nk] = o.tri[3 * (size_t)i];
+		keep[3 * (size_t)nk + 1] = o.tri[3 * (size_t)i + (front ? 2 : 1)];
+		keep[3 * (size_t)nk + 2] = o.tri[3 * (size_t)i + (front ? 1 : 2)];
+		keep_src[nk++] = o.src[i];
+		report->flipped += (unsigned int)front;
+	}
+	report->kept = nk;
+	/* the vertices kept, compacted */
+	{
+		unsigned int m = 0;
+		for (i = 0; i < o.nv; i++)
+			used[i] = SX_NONE;
+		for (i = 0; i < 3 * nk; i++)
+		{
+			if (used[keep[i]] == SX_NONE)
+			{
+				memcpy(kpos + 3 * (size_t)m, o.pos + 3 * (size_t)keep[i], 3 * sizeof(qaws_scalar));
+				used[keep[i]] = m++;
+			}
+			keep[i] = used[keep[i]];
+		}
+		report->closed = sx_closed(keep, nk);
+		st = nk ? sx_mesh(out, kpos, m, keep, keep_src, nk) : QAWS_STATUS_OK;
+	}
+	goto done;
+oom:
+	st = QAWS_STATUS_ALLOCATION_FAILURE;
+done:
+	qaws_mesh_bvh_destroy(ba);
+	qaws_mesh_bvh_destroy(bb);
+	sx_out_free(&o);
+	qaws_internal_free(x); qaws_internal_free(fv); qaws_internal_free(fs); qaws_internal_free(ta); qaws_internal_free(tb);
+	qaws_internal_free(pts); qaws_internal_free(wa); qaws_internal_free(wb); qaws_internal_free(hits); qaws_internal_free(keep);
+	qaws_internal_free(keep_src); qaws_internal_free(used); qaws_internal_free(kpos);
+	qaws_internal_free(par); qaws_internal_free(rep); qaws_internal_free(pid); qaws_internal_free(ek); qaws_internal_free(fat);
 	return st;
 }
