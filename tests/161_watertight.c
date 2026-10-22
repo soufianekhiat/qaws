@@ -291,6 +291,95 @@ static void test_refusals(void)
 	TEST_ASSERT(qaws_mesh_make_watertight(&m, NULL, x, t, NULL, 3, 1, &d) == QAWS_STATUS_INVALID_ARGUMENT && !m, "refusals: a negative offset");
 }
 
+/* the enclosed volume of a closed mesh */
+static double wt_points_volume(qaws_mesh_3d const* m)
+{
+	unsigned int nt = qaws_mesh_3d_get_triangle_count(m), i;
+	double v = 0;
+	for (i = 0; i < nt; i++)
+	{
+		unsigned int t[3];
+		qaws_vec3 a, b, c;
+		qaws_mesh_3d_get_triangle(t, m, i);
+		a = qaws_mesh_3d_get_vertex(m, t[0]);
+		b = qaws_mesh_3d_get_vertex(m, t[1]);
+		c = qaws_mesh_3d_get_vertex(m, t[2]);
+		v += ((double)a.x * ((double)b.y * c.z - (double)b.z * c.y) - (double)a.y * ((double)b.x * c.z - (double)b.z * c.x) +
+			(double)a.z * ((double)b.x * c.y - (double)b.y * c.x)) / 6;
+	}
+	return v;
+}
+
+/* oriented point clouds: a sphere (Fibonacci points), a cube sampled on its faces; normals turned inward refused */
+static void test_points(void)
+{
+	unsigned int n = 2000, i, k, nc = 0;
+	qaws_scalar *x = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * n), *nr = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * n);
+	qaws_scalar *cx = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * 6 * 400), *cn = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * 6 * 400);
+	qaws_mesh_3d *s = NULL, *c = NULL, *z = NULL;
+	qaws_watertight_report rs, rc;
+	qaws_watertight_desc d;
+	qaws_status st, sc, sz, s3;
+	double vs = 0, vc = 0, rmin = 1e30, rmax = 0;
+	char msg[400];
+	for (i = 0; i < n; i++)
+	{
+		double zz = 1 - 2 * (i + 0.5) / n, r = sqrt(1 - zz * zz), ph = 2.399963229728653 * i;
+		x[3 * i] = nr[3 * i] = (qaws_scalar)(r * cos(ph));
+		x[3 * i + 1] = nr[3 * i + 1] = (qaws_scalar)(r * sin(ph));
+		x[3 * i + 2] = nr[3 * i + 2] = (qaws_scalar)zz;
+	}
+	for (k = 0; k < 6; k++)
+	{
+		unsigned int a = k / 2, u = (a + 1) % 3, w = (a + 2) % 3, j;
+		double sg = k % 2 ? 0.5 : -0.5;
+		for (i = 0; i < 20; i++)
+			for (j = 0; j < 20; j++)
+			{
+				cx[3 * nc + a] = (qaws_scalar)sg;
+				cx[3 * nc + u] = (qaws_scalar)((i + 0.5) / 20 - 0.5);
+				cx[3 * nc + w] = (qaws_scalar)((j + 0.5) / 20 - 0.5);
+				cn[3 * nc] = cn[3 * nc + 1] = cn[3 * nc + 2] = 0;
+				cn[3 * nc + a] = (qaws_scalar)(sg > 0 ? 1 : -1);
+				nc++;
+			}
+	}
+	memset(&d, 0, sizeof d);
+	d.resolution = 32;
+	memset(&rs, 0, sizeof rs);
+	memset(&rc, 0, sizeof rc);
+	st = qaws_mesh_make_watertight_points(&s, &rs, x, nr, n, &d);
+	sc = qaws_mesh_make_watertight_points(&c, &rc, cx, cn, nc, &d);
+	if (s)
+	{
+		unsigned int nv = qaws_mesh_3d_get_vertex_count(s);
+		vs = wt_points_volume(s);
+		for (i = 0; i < nv; i++)
+		{
+			qaws_vec3 q = qaws_mesh_3d_get_vertex(s, i);
+			double r = sqrt((double)q.x * q.x + (double)q.y * q.y + (double)q.z * q.z);
+			rmin = fmin(rmin, r);
+			rmax = fmax(rmax, r);
+		}
+	}
+	if (c)
+		vc = wt_points_volume(c);
+	for (i = 0; i < 3 * n; i++) nr[i] = -nr[i];
+	sz = qaws_mesh_make_watertight_points(&z, NULL, x, nr, n, &d);
+	s3 = qaws_mesh_make_watertight_points(&z, NULL, x, nr, 3, &d);
+	sprintf(msg, "point clouds: a sphere's %u points: closed %d, volume %.4f (4.1888), radii %.4f..%.4f (cell %.3f); a cube's %u: closed %d, volume %.4f (1), %u sharp vertices; inward normals %d, 3 points %d",
+		n, rs.closed, vs, rmin, rmax, (double)rs.cell, nc, rc.closed, vc, rc.sharp, (int)sz, (int)s3);
+	printf("  %s\n", msg);
+	TEST_ASSERT(st == QAWS_STATUS_OK && s && rs.closed && fabs(vs - 4.18879) < 0.03 * 4.18879 && rmin > 1 - (double)rs.cell && rmax < 1 + (double)rs.cell &&
+		sc == QAWS_STATUS_OK && c && rc.closed && fabs(vc - 1) < 0.03 && rc.sharp > 0 && sz == QAWS_STATUS_INVALID_TOPOLOGY && s3 == QAWS_STATUS_INVALID_ARGUMENT && !z, msg);
+	qaws_mesh_3d_destroy(s);
+	qaws_mesh_3d_destroy(c);
+	free(x);
+	free(nr);
+	free(cx);
+	free(cn);
+}
+
 int test_161_watertight_main(void)
 {
 	g_pass = 0;
@@ -299,6 +388,7 @@ int test_161_watertight_main(void)
 	test_sphere();
 	test_union();
 	test_sheet();
+	test_points();
 	test_refusals();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;

@@ -77,4 +77,20 @@ qaws_status qaws_mesh_make_watertight(qaws_mesh_3d** out_mesh, qaws_watertight_r
 	unsigned int const* face_vertices, unsigned int const* face_sizes, unsigned int vertex_count, unsigned int face_count,
 	qaws_watertight_desc const* desc);
 
+/* A watertight surface from an oriented point cloud (positions and normals,
+   3 each; normals outward, any length): the inside is where the points'
+   winding number is at least 1/2, each point a dipole of its share of the
+   surface (Barill et al. 2018: pi r^2 / K, r the distance to its K = 10th
+   neighbour), summed by the BVH's fast winding numbers; contoured on the
+   grid by dual contouring, crossings by regula falsi on the winding number,
+   their normals the nearest point's (the winding number's gradient there is
+   all near field; the nearest, not a mean, keeps sampled edges sharp). desc's offset
+   must be 0; its flags are not
+   read. INVALID_ARGUMENT for fewer than 4 points, a value not finite;
+   INVALID_TOPOLOGY for normals turned inward (sum of area n . (p - centre),
+   three times the volume, not positive) or when nothing comes out inside.
+   The report's holes_filled is 0, evaluated the grid's points. */
+qaws_status qaws_mesh_make_watertight_points(qaws_mesh_3d** out_mesh, qaws_watertight_report* report, qaws_scalar const* positions,
+	qaws_scalar const* normals, unsigned int count, qaws_watertight_desc const* desc);
+
 #endif /* QAWS_MESH_WATERTIGHT_H */

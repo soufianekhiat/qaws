@@ -77,8 +77,17 @@ static qaws_status ofs_eval(ofs_field const* f, double const* x, size_t n, doubl
 	return st;
 }
 
-/* the level set phi = 0 contoured on a grid over the box lo..hi grown by margin; *out NULL when it is empty */
-static qaws_status ofs_contour(qaws_mesh_3d** out, qaws_mesh_offset_report* report, ofs_field const* f, double const* lo, double const* hi,
+/* the field's evaluation for wt_contour_field */
+static qaws_status ofs_field_eval(void* ctx, double const* x, size_t n, double* phi, double* grad)
+{
+	return ofs_eval((ofs_field const*)ctx, x, n, phi, grad);
+}
+
+/* The level set phi = 0 of a field (f: phi, negative inside, and its gradient at points) contoured on a grid over the box
+   lo..hi grown by margin, res cells along its longest side: grid points evaluated, each grid edge whose ends lie on two
+   sides a crossing found by regula falsi on phi, its normal phi's gradient there, then dual contouring (wt_dual_contour).
+   *out NULL when it is empty. */
+qaws_status wt_contour_field(qaws_mesh_3d** out, wt_contour_info* report, wt_field_fn fe, void* ctx, double const* lo, double const* hi,
 	double margin, unsigned int res)
 {
 	double glo[3], h, ext = 0, *gx = NULL, *phi = NULL, *A = NULL, *B = NULL, *pa = NULL, *pb = NULL, *xm = NULL, *fm = NULL, *gm = NULL;
@@ -96,7 +105,7 @@ static qaws_status ofs_contour(qaws_mesh_3d** out, qaws_mesh_offset_report* repo
 		n[i] = (unsigned int)ceil((hi[i] - lo[i] + 2 * margin + 4 * h) / h) + 1;
 		report->grid[i] = n[i];
 	}
-	report->cell = (qaws_scalar)h;
+	report->cell = h;
 	N = (size_t)n[0] * n[1] * n[2];
 	gx = (double*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(double), 3, N));
 	phi = (double*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(double), N));
@@ -109,7 +118,7 @@ static qaws_status ofs_contour(qaws_mesh_3d** out, qaws_mesh_offset_report* repo
 		gx[3 * q + 1] = glo[1] + h * (double)(q / n[0] % n[1]);
 		gx[3 * q + 2] = glo[2] + h * (double)(q / ((size_t)n[0] * n[1]));
 	}
-	if ((st = ofs_eval(f, gx, N, phi, NULL)) != QAWS_STATUS_OK)
+	if ((st = fe(ctx, gx, N, phi, NULL)) != QAWS_STATUS_OK)
 		goto done;
 	for (q = 0; q < N; q++) in[q] = phi[q] < 0 ? 1 : 2;
 	/* the crossings: grid edges whose ends lie on two sides */
@@ -170,7 +179,7 @@ static qaws_status ofs_contour(qaws_mesh_3d** out, qaws_mesh_offset_report* repo
 		}
 		if (it == OFS_FALSI)
 			break;
-		if ((st = ofs_eval(f, xm, nc, fm, NULL)) != QAWS_STATUS_OK)
+		if ((st = fe(ctx, xm, nc, fm, NULL)) != QAWS_STATUS_OK)
 			goto done;
 		for (e = 0; e < nc; e++)
 		{
@@ -178,7 +187,7 @@ static qaws_status ofs_contour(qaws_mesh_3d** out, qaws_mesh_offset_report* repo
 			else { memcpy(B + 3 * e, xm + 3 * e, sizeof(double) * 3); pb[e] = fm[e]; }
 		}
 	}
-	if ((st = ofs_eval(f, xm, nc, fm, gm)) != QAWS_STATUS_OK)
+	if ((st = fe(ctx, xm, nc, fm, gm)) != QAWS_STATUS_OK)
 		goto done;
 	for (e = 0; e < nc; e++)
 	{
@@ -389,9 +398,16 @@ qaws_status qaws_mesh_3d_offset(qaws_mesh_3d** out, qaws_mesh_offset_report* rep
 	{
 		unsigned int res = desc->resolution ? desc->resolution : 64;
 		qaws_mesh_3d* c = NULL;
+		wt_contour_info ci;
 		/* SURFACE: phi = s - d; SHELL: the inner surface s = -|d|; THICKEN: |dist| = |d| / 2 */
 		f.level = desc->kind == QAWS_MESH_OFFSET_SURFACE ? d : desc->kind == QAWS_MESH_OFFSET_SHELL ? -fabs(d) : 0.5 * fabs(d);
-		st = ofs_contour(&c, report, &f, lo, hi, f.level > 0 ? f.level : 0, res);
+		memset(&ci, 0, sizeof ci);
+		st = wt_contour_field(&c, &ci, ofs_field_eval, &f, lo, hi, f.level > 0 ? f.level : 0, res);
+		memcpy(report->grid, ci.grid, sizeof ci.grid);
+		report->cell = (qaws_scalar)ci.cell;
+		report->crossings = ci.crossings;
+		report->sharp = ci.sharp;
+		report->closed = ci.closed;
 		if (st == QAWS_STATUS_OK && c)
 			st = ofs_measure_mesh(report, &f, c);
 		if (st != QAWS_STATUS_OK || !c || desc->kind != QAWS_MESH_OFFSET_SHELL)

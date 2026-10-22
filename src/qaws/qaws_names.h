@@ -986,6 +986,7 @@
 #define qaws_mesh_hit QAWS_SFX(qaws_mesh_hit)
 #define qaws_mesh_location QAWS_SFX(qaws_mesh_location)
 #define qaws_mesh_make_watertight QAWS_SFX(qaws_mesh_make_watertight)
+#define qaws_mesh_make_watertight_points QAWS_SFX(qaws_mesh_make_watertight_points)
 #define qaws_mesh_offset_desc QAWS_SFX(qaws_mesh_offset_desc)
 #define qaws_mesh_offset_report QAWS_SFX(qaws_mesh_offset_report)
 #define qaws_mesh_quadrangulate QAWS_SFX(qaws_mesh_quadrangulate)
@@ -1647,6 +1648,7 @@
 #define vm_facet QAWS_SFX(vm_facet)
 #define vm_facets QAWS_SFX(vm_facets)
 #define vm_hex_quality QAWS_SFX(vm_hex_quality)
+#define wt_contour_field QAWS_SFX(wt_contour_field)
 #define wt_dual_contour QAWS_SFX(wt_dual_contour)
 #define wt_sym_eigen3 QAWS_SFX(wt_sym_eigen3)
 

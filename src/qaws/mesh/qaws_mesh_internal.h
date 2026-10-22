@@ -259,6 +259,22 @@ typedef struct wt_cross
 	double x[3], nrm[3];       /* the crossing and its normal, from inside to outside */
 } wt_cross;
 
+/* a field to contour (wt_contour_field, qaws_mesh_offset.c): phi at n points (3 each), negative inside, and when grad is
+   not NULL its gradient (3 each) */
+typedef qaws_status (*wt_field_fn)(void* ctx, double const* x, size_t n, double* phi, double* grad);
+
+typedef struct wt_contour_info
+{
+	unsigned int grid[3];      /* grid points per axis */
+	double cell;
+	unsigned int crossings, sharp;
+	int closed;
+} wt_contour_info;
+
+/* phi = 0 contoured on a grid over lo..hi grown by margin, res cells along the longest side (*out NULL when empty) */
+qaws_status wt_contour_field(qaws_mesh_3d** out, wt_contour_info* info, wt_field_fn f, void* ctx, double const* lo, double const* hi, double margin,
+	unsigned int res);
+
 /* dual contouring of the crossings X on a grid (lo, cell h, n points per axis; in per point: 1 inside) into a mesh through
    qaws_mesh_repair (non-manifold places split); *out_sharp += its vertices on edges or corners */
 qaws_status wt_dual_contour(qaws_mesh_3d** out, unsigned int* out_sharp, int* out_closed, double const* lo, double h, unsigned int const* n,

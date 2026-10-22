@@ -925,6 +925,15 @@ Detail below the cell size is lost, and the face count follows the grid; remesh 
 
 Figure 25 (key p) shows the holed sphere and its watertight surface, the crossing cubes' union, and a wavy sheet wrapped at 0.06.
 
+**From oriented point clouds** (`qaws_mesh_make_watertight_points`), following Barill et al. 2018:
+
+- **Inside:** where the points' winding number is at least 1/2. Each point is a dipole of its share of the surface (pi r^2 / K, r its 10th neighbour's distance), summed by the BVH's fast winding numbers.
+- **Crossings:** contoured as above, found by regula falsi on the winding number.
+- **Normals:** each crossing takes the nearest point's normal, since near the samples the winding number's own gradient is noise. The nearest one, not a mean, keeps sampled edges sharp.
+- **Refusals:** inward normals (the divergence sum is not positive) are refused.
+
+Test 161: a sphere's 2,000 Fibonacci points give a closed surface with radii 0.9997 to 1.0050 and volume 4.204 (against 4.189); a cube's 2,400 face samples give volume 1.0007 with sharp edges. Figure 48 (key M) shows the ring of figure 40 rebuilt from its points, noisy points still closed, and a cube rebuilt from its points.
+
 ## Self-intersections resolved
 
 `qaws_mesh_resolve_intersections` (`qaws_mesh_intersect.h`) cuts every pair of triangles that meet beyond their shared corners and edges along their intersection. The result's triangles meet only at shared vertices and edges: the curves where the input crossed itself become edges held by the faces of both sides (a conforming arrangement). Nothing is removed; deciding what is inside is left to Booleans and winding numbers.

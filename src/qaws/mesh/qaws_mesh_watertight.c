@@ -659,3 +659,299 @@ done:
 	qaws_internal_free(queue); qaws_internal_free(X); qaws_internal_free(ppos);
 	return st;
 }
+
+/* ---- point clouds ------------------------------------------------------- */
+
+#define WTP_K 10u          /* neighbours a point's area is measured to */
+#define WTP_CHUNK 4096u    /* winding numbers per batch */
+
+typedef struct wtp_field
+{
+	qaws_mesh_bvh* b;
+	double const* nrm;     /* per disk (point) its normal */
+} wtp_field;
+
+/* phi = 1/2 - the winding number of the points' disks (negative inside); its gradient's direction the nearest point's
+   normal (the winding number's own gradient is all near field there: the 1/2 level hugs the disks; the nearest, not a
+   mean, keeps a sampled edge sharp) */
+static qaws_status wtp_eval(void* ctx, double const* x, size_t n, double* phi, double* grad)
+{
+	wtp_field const* f = (wtp_field const*)ctx;
+	unsigned int per = 1u, k;
+	qaws_scalar *q = (qaws_scalar*)qaws_internal_scratch_malloc(sizeof(qaws_scalar) * 3 * (size_t)WTP_CHUNK * per), *w = (qaws_scalar*)qaws_internal_scratch_malloc(sizeof(qaws_scalar) * (size_t)WTP_CHUNK * per);
+	size_t c0, i;
+	qaws_status st = QAWS_STATUS_OK;
+	if (!q || !w)
+	{
+		qaws_internal_free(q);
+		qaws_internal_free(w);
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	}
+	for (c0 = 0; c0 < n && st == QAWS_STATUS_OK; c0 += WTP_CHUNK)
+	{
+		unsigned int m = (unsigned int)(n - c0 < WTP_CHUNK ? n - c0 : WTP_CHUNK), s;
+		for (i = 0; i < m; i++)
+			for (s = 0; s < per; s++)
+				for (k = 0; k < 3; k++)
+					q[3 * ((size_t)i * per + s) + k] = (qaws_scalar)x[3 * (c0 + i) + k];
+		st = qaws_mesh_bvh_winding_number(w, f->b, q, m * per, NULL);
+		for (i = 0; st == QAWS_STATUS_OK && i < m; i++)
+			phi[c0 + i] = 0.5 - (double)w[(size_t)i * per];
+		if (st == QAWS_STATUS_OK && grad)
+		{
+			qaws_mesh_hit* hit = (qaws_mesh_hit*)qaws_internal_scratch_malloc(sizeof(qaws_mesh_hit) * m);
+			if (!hit)
+			{
+				st = QAWS_STATUS_ALLOCATION_FAILURE;
+				break;
+			}
+			st = qaws_mesh_bvh_closest(hit, f->b, q, m, 0, NULL);
+			for (i = 0; st == QAWS_STATUS_OK && i < m; i++)
+				for (k = 0; k < 3; k++)
+					grad[3 * (c0 + i) + k] = hit[i].element != QAWS_MESH_NONE ? f->nrm[3 * (size_t)hit[i].element + k] : 0;   /* (any length: its direction is read) */
+			qaws_internal_free(hit);
+		}
+	}
+	qaws_internal_free(q);
+	qaws_internal_free(w);
+	return st;
+}
+
+static int wtp_dcmp(void const* p, void const* q)
+{
+	double a = *(double const*)p, b = *(double const*)q;
+	return a < b ? -1 : a > b ? 1 : 0;
+}
+
+qaws_status qaws_mesh_make_watertight_points(qaws_mesh_3d** out, qaws_watertight_report* report, qaws_scalar const* positions,
+	qaws_scalar const* normals, unsigned int count, qaws_watertight_desc const* desc)
+{
+	qaws_watertight_report local;
+	wtp_field f;
+	wt_contour_info ci;
+	double lo[3] = { HUGE_VAL, HUGE_VAL, HUGE_VAL }, hi[3] = { -HUGE_VAL, -HUGE_VAL, -HUGE_VAL }, ext = 0, cs, *area = NULL, *d2 = NULL, spacing = 0;
+	unsigned int res = desc && desc->resolution ? desc->resolution : 64, i, k, g[3], *cell0 = NULL, *cellp = NULL, *tri = NULL, nt = 0;
+	qaws_scalar* tx = NULL;
+	double* dn = NULL;
+	qaws_mesh_bvh_desc bd;
+	qaws_status st = QAWS_STATUS_ALLOCATION_FAILURE;
+	if (!report)
+		report = &local;
+	memset(report, 0, sizeof *report);
+	if (!out)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	*out = NULL;
+	if (!positions || !normals || count < 4 || (desc && desc->offset != 0))
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	for (i = 0; i < 3 * count; i++)
+		if (!isfinite((double)positions[i]) || !isfinite((double)normals[i]))
+			return QAWS_STATUS_INVALID_ARGUMENT;
+	memset(&f, 0, sizeof f);
+	for (i = 0; i < count; i++)
+		for (k = 0; k < 3; k++)
+		{
+			lo[k] = fmin(lo[k], (double)positions[3 * (size_t)i + k]);
+			hi[k] = fmax(hi[k], (double)positions[3 * (size_t)i + k]);
+		}
+	for (k = 0; k < 3; k++) ext = fmax(ext, hi[k] - lo[k]);
+	if (!(ext > 0))
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	/* each point's area: pi r^2 / K, r its K-th neighbour's distance, found on a grid of about one point per cell */
+	cs = ext / fmax(1, cbrt((double)count));
+	for (k = 0; k < 3; k++) g[k] = (unsigned int)fmin(1024, floor((hi[k] - lo[k]) / cs) + 1);
+	area = (double*)qaws_internal_scratch_malloc(sizeof(double) * ((size_t)count + 1));
+	d2 = (double*)qaws_internal_scratch_malloc(sizeof(double) * ((size_t)count + 1));
+	cell0 = (unsigned int*)qaws_internal_scratch_zalloc((size_t)g[0] * g[1] * g[2] + 2, sizeof(unsigned int));
+	cellp = (unsigned int*)qaws_internal_scratch_malloc(sizeof(unsigned int) * ((size_t)count + 1));
+	tri = (unsigned int*)qaws_internal_scratch_malloc(sizeof(unsigned int) * (3 * (size_t)count + 1));
+	tx = (qaws_scalar*)qaws_internal_scratch_malloc(sizeof(qaws_scalar) * (9 * (size_t)count + 1));
+	if (!area || !d2 || !cell0 || !cellp || !tri || !tx)
+		goto done;
+	{
+		size_t nc = (size_t)g[0] * g[1] * g[2], cc;
+		unsigned int* fill;
+		for (i = 0; i < count; i++)
+		{
+			unsigned int c3[3];
+			for (k = 0; k < 3; k++) c3[k] = (unsigned int)fmin(g[k] - 1, floor(((double)positions[3 * (size_t)i + k] - lo[k]) / cs));
+			cell0[c3[0] + (size_t)g[0] * (c3[1] + (size_t)g[1] * c3[2]) + 1]++;
+		}
+		for (cc = 0; cc < nc; cc++) cell0[cc + 1] += cell0[cc];
+		fill = (unsigned int*)qaws_internal_scratch_malloc(sizeof(unsigned int) * (nc + 1));
+		if (!fill)
+			goto done;
+		memcpy(fill, cell0, sizeof(unsigned int) * nc);
+		for (i = 0; i < count; i++)
+		{
+			unsigned int c3[3];
+			for (k = 0; k < 3; k++) c3[k] = (unsigned int)fmin(g[k] - 1, floor(((double)positions[3 * (size_t)i + k] - lo[k]) / cs));
+			cellp[fill[c3[0] + (size_t)g[0] * (c3[1] + (size_t)g[1] * c3[2])]++] = i;
+		}
+		qaws_internal_free(fill);
+	}
+	for (i = 0; i < count; i++)
+	{
+		/* rings of cells round the point until K neighbours are found and the ring's distance passes the K-th */
+		double best[WTP_K];
+		unsigned int nb = 0, ring, c3[3];
+		double pp[3];
+		for (k = 0; k < 3; k++)
+		{
+			pp[k] = (double)positions[3 * (size_t)i + k];
+			c3[k] = (unsigned int)fmin(g[k] - 1, floor((pp[k] - lo[k]) / cs));
+		}
+		for (ring = 0; ring < 1024; ring++)
+		{
+			long a0, b0, e0;
+			for (a0 = (long)c3[0] - (long)ring; a0 <= (long)c3[0] + (long)ring; a0++)
+				for (b0 = (long)c3[1] - (long)ring; b0 <= (long)c3[1] + (long)ring; b0++)
+					for (e0 = (long)c3[2] - (long)ring; e0 <= (long)c3[2] + (long)ring; e0++)
+					{
+						size_t id;
+						unsigned int j;
+						if (a0 < 0 || b0 < 0 || e0 < 0 || a0 >= (long)g[0] || b0 >= (long)g[1] || e0 >= (long)g[2])
+							continue;
+						if (labs(a0 - (long)c3[0]) != (long)ring && labs(b0 - (long)c3[1]) != (long)ring && labs(e0 - (long)c3[2]) != (long)ring)
+							continue;   /* (the ring's shell only) */
+						id = (size_t)a0 + (size_t)g[0] * ((size_t)b0 + (size_t)g[1] * (size_t)e0);
+						for (j = cell0[id]; j < cell0[id + 1]; j++)
+						{
+							unsigned int o = cellp[j], s;
+							double dd = 0;
+							if (o == i)
+								continue;
+							for (k = 0; k < 3; k++) dd += ((double)positions[3 * (size_t)o + k] - pp[k]) * ((double)positions[3 * (size_t)o + k] - pp[k]);
+							if (nb < WTP_K)
+								best[nb++] = dd;
+							else
+							{
+								double worst = best[0];
+								unsigned int wi = 0;
+								for (s = 1; s < WTP_K; s++)
+									if (best[s] > worst) { worst = best[s]; wi = s; }
+								if (dd < worst)
+									best[wi] = dd;
+							}
+						}
+					}
+			if (nb == WTP_K)
+			{
+				double worst = 0;
+				unsigned int s;
+				for (s = 0; s < WTP_K; s++) worst = fmax(worst, best[s]);
+				if (worst <= (ring * cs) * (ring * cs))
+					break;   /* (nothing past this ring can be nearer) */
+			}
+		}
+		{
+			double worst = 0;
+			unsigned int s;
+			for (s = 0; s < nb; s++) worst = fmax(worst, best[s]);
+			d2[i] = worst;
+			area[i] = nb ? 3.14159265358979323846 * worst / nb : 0;
+		}
+	}
+	/* the spacing: the median K-th distance */
+	{
+		double* tmp = (double*)qaws_internal_scratch_malloc(sizeof(double) * ((size_t)count + 1));
+		if (!tmp)
+			goto done;
+		memcpy(tmp, d2, sizeof(double) * count);
+		qsort(tmp, count, sizeof(double), wtp_dcmp);
+		spacing = sqrt(tmp[count / 2] / WTP_K) * 1.7724538509;   /* (sqrt pi r^2 / K: a point's share of the surface, its side) */
+		qaws_internal_free(tmp);
+	}
+	{
+		/* outward normals: sum a n . (p - centre) is three times the volume they bound (the divergence theorem), positive */
+		double cen[3] = { 0, 0, 0 }, s = 0;
+		for (i = 0; i < count; i++)
+			for (k = 0; k < 3; k++) cen[k] += (double)positions[3 * (size_t)i + k] / count;
+		for (i = 0; i < count; i++)
+		{
+			double l = 0, dp = 0;
+			for (k = 0; k < 3; k++)
+			{
+				l += (double)normals[3 * (size_t)i + k] * (double)normals[3 * (size_t)i + k];
+				dp += (double)normals[3 * (size_t)i + k] * ((double)positions[3 * (size_t)i + k] - cen[k]);
+			}
+			s += l > 0 ? area[i] * dp / sqrt(l) : 0;
+		}
+		if (!(s > 0))
+		{
+			st = QAWS_STATUS_INVALID_TOPOLOGY;
+			goto done;
+		}
+	}
+	/* each point a triangle of its area in its tangent plane, turned by its normal: its dipole as the winding number sees it */
+	for (i = 0; i < count; i++)
+	{
+		double n[3], l = 0, t1[3], t2[3], R;
+		unsigned int c;
+		for (k = 0; k < 3; k++) { n[k] = (double)normals[3 * (size_t)i + k]; l += n[k] * n[k]; }
+		l = sqrt(l);
+		if (!(l > 0) || !(area[i] > 0))
+			continue;
+		for (k = 0; k < 3; k++) n[k] /= l;
+		if (fabs(n[0]) < 0.9) { t1[0] = 0; t1[1] = -n[2]; t1[2] = n[1]; }
+		else { t1[0] = n[2]; t1[1] = 0; t1[2] = -n[0]; }
+		l = sqrt(t1[0] * t1[0] + t1[1] * t1[1] + t1[2] * t1[2]);
+		for (k = 0; k < 3; k++) t1[k] /= l;
+		t2[0] = n[1] * t1[2] - n[2] * t1[1];
+		t2[1] = n[2] * t1[0] - n[0] * t1[2];
+		t2[2] = n[0] * t1[1] - n[1] * t1[0];
+		R = sqrt(4 * area[i] / (3 * 1.7320508075688772));
+		for (c = 0; c < 3; c++)
+		{
+			double an = 2.0943951023931953 * c;
+			for (k = 0; k < 3; k++)
+				tx[9 * (size_t)nt + 3 * c + k] = (qaws_scalar)((double)positions[3 * (size_t)i + k] + R * (cos(an) * t1[k] + sin(an) * t2[k]));
+			tri[3 * nt + c] = 3 * nt + c;
+		}
+		nt++;
+	}
+	if (!nt)
+	{
+		st = QAWS_STATUS_INVALID_ARGUMENT;
+		goto done;
+	}
+	memset(&bd, 0, sizeof bd);
+	bd.positions = tx;
+	bd.vertex_count = 3 * nt;
+	bd.dimension = 3;
+	bd.simplices = tri;
+	bd.simplex_size = 3;
+	bd.simplex_count = nt;
+	if ((st = qaws_mesh_bvh_create(&f.b, &bd)) != QAWS_STATUS_OK)
+		goto done;
+	st = QAWS_STATUS_ALLOCATION_FAILURE;
+	dn = (double*)qaws_internal_scratch_malloc(sizeof(double) * (3 * (size_t)nt + 1));
+	if (!dn)
+		goto done;
+	for (i = 0; i < nt; i++)
+	{
+		/* each disk's normal weighted by its area: the triangle's cross product halved */
+		double const u[3] = { (double)tx[9 * (size_t)i + 3] - (double)tx[9 * (size_t)i], (double)tx[9 * (size_t)i + 4] - (double)tx[9 * (size_t)i + 1],
+			(double)tx[9 * (size_t)i + 5] - (double)tx[9 * (size_t)i + 2] };
+		double const w2[3] = { (double)tx[9 * (size_t)i + 6] - (double)tx[9 * (size_t)i], (double)tx[9 * (size_t)i + 7] - (double)tx[9 * (size_t)i + 1],
+			(double)tx[9 * (size_t)i + 8] - (double)tx[9 * (size_t)i + 2] };
+		dn[3 * (size_t)i] = 0.5 * (u[1] * w2[2] - u[2] * w2[1]);
+		dn[3 * (size_t)i + 1] = 0.5 * (u[2] * w2[0] - u[0] * w2[2]);
+		dn[3 * (size_t)i + 2] = 0.5 * (u[0] * w2[1] - u[1] * w2[0]);
+	}
+	f.nrm = dn;
+	memset(&ci, 0, sizeof ci);
+	st = wt_contour_field(out, &ci, wtp_eval, &f, lo, hi, 2 * spacing, res);
+	memcpy(report->grid, ci.grid, sizeof ci.grid);
+	report->cell = (qaws_scalar)ci.cell;
+	report->crossings = ci.crossings;
+	report->sharp = ci.sharp;
+	report->closed = ci.closed;
+	report->evaluated = report->grid[0] * report->grid[1] * report->grid[2];
+	if (st == QAWS_STATUS_OK && !*out)
+		st = QAWS_STATUS_INVALID_TOPOLOGY;   /* (nothing inside: normals turned inward, or no surface the points sample) */
+done:
+	qaws_mesh_bvh_destroy(f.b);
+	qaws_internal_free(area); qaws_internal_free(d2); qaws_internal_free(cell0); qaws_internal_free(cellp); qaws_internal_free(tri); qaws_internal_free(tx);
+	qaws_internal_free(dn);
+	return st;
+}
