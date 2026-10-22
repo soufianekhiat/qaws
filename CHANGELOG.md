@@ -64,6 +64,8 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- The butterfly's extraordinary crease and border rule (Zorin): an edge next to a crease or border vertex whose side
+  holds n != 3 triangles takes the valence 2 n ring reflected oddly across the crease. Test 172.
 - Weights on every skeleton: `qaws_skeleton`'s arcs and the circles opened at reflex vertices move at their weights
   (a vertex's the faster edge's), so sigma = pi gives the weighted medial axis; events between cones of different
   speeds by a quartic. `qaws_surface_medial_desc` gains `weight_fn` for the surface medial axis and mitered skeleton.

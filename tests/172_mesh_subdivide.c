@@ -615,6 +615,61 @@ static void test_butterfly_border(void)
 	qaws_mesh_3d_destroy(o);
 }
 
+/* Zorin's extraordinary border rule: a half disc whose border vertex at the origin has n triangles (2, 4, 5, 7), two rings
+   deep (its inner neighbours regular, valence 6), laid out as the rule's characteristic map (p_j at angle j pi / n): the
+   new point on each inner spoke exactly halfway, as Zorin's coefficients put it (the reflected regular rule does not) */
+static void test_butterfly_extraordinary_border(void)
+{
+	static unsigned int const ns[4] = { 2, 4, 5, 7 };
+	double worst = 0;
+	unsigned int z, bad = 0;
+	char msg[300];
+	for (z = 0; z < 4; z++)
+	{
+		unsigned int n = ns[z], j, i, nv = 1 + (n + 1) + (n + 1) + n, t = 0;
+		qaws_scalar x[3 * 32];
+		unsigned int fv[3 * 4 * 8];
+		qaws_mesh_3d *m, *o;
+		double th = 3.14159265358979323846 / n;
+		/* 0 the origin, 1 + j p_j, 2 + n + j q_j = 2 p_j, 3 + 2 n + j the middle of q_j q_j+1 (p_j + p_j+1) */
+		memset(x, 0, sizeof x);
+		for (j = 0; j <= n; j++)
+		{
+			x[3 * (1 + j)] = (qaws_scalar)cos(j * th); x[3 * (1 + j) + 1] = (qaws_scalar)sin(j * th);
+			x[3 * (2 + n + j)] = (qaws_scalar)(2 * cos(j * th)); x[3 * (2 + n + j) + 1] = (qaws_scalar)(2 * sin(j * th));
+		}
+		for (j = 0; j < n; j++)
+		{
+			unsigned int pa = 1 + j, pb = 2 + j, qa = 2 + n + j, qb = 3 + n + j, mm = 3 + 2 * n + j;
+			x[3 * mm] = (qaws_scalar)(cos(j * th) + cos((j + 1) * th)); x[3 * mm + 1] = (qaws_scalar)(sin(j * th) + sin((j + 1) * th));
+			fv[t++] = 0; fv[t++] = pa; fv[t++] = pb;
+			fv[t++] = pa; fv[t++] = qa; fv[t++] = mm;
+			fv[t++] = pa; fv[t++] = mm; fv[t++] = pb;
+			fv[t++] = pb; fv[t++] = mm; fv[t++] = qb;
+		}
+		m = sd_make(x, nv, fv, NULL, t / 3);
+		o = m ? sd_run(m, QAWS_MESH_SUBDIVIDE_BUTTERFLY, 1, NULL) : NULL;
+		if (!o)
+			bad++;
+		for (i = 1; o && i < n; i++)
+		{
+			double best = 1e300;
+			unsigned int k;
+			for (k = 0; k < qaws_mesh_3d_get_vertex_count(o); k++)
+			{
+				qaws_vec3 q = qaws_mesh_3d_get_vertex(o, k);
+				best = fmin(best, sqrt(((double)q.x - 0.5 * cos(i * th)) * ((double)q.x - 0.5 * cos(i * th)) + ((double)q.y - 0.5 * sin(i * th)) * ((double)q.y - 0.5 * sin(i * th)) + (double)q.z * q.z));
+			}
+			worst = fmax(worst, best);
+		}
+		qaws_mesh_3d_destroy(m);
+		qaws_mesh_3d_destroy(o);
+	}
+	sprintf(msg, "butterfly, extraordinary border vertices (2, 4, 5, 7 triangles): the inner spokes' new points halfway within %.1e", worst);
+	printf("  %s\n", msg);
+	TEST_ASSERT(!bad && worst < 1e-14, msg);
+}
+
 static void test_butterfly(void)
 {
 	enum { N = 8 };
@@ -858,6 +913,7 @@ int test_172_mesh_subdivide_main(void)
 	test_limit_normals();
 	test_butterfly();
 	test_butterfly_border();
+	test_butterfly_extraordinary_border();
 	test_sqrt3();
 	test_adaptive();
 	test_refusals();

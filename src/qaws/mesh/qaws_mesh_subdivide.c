@@ -158,6 +158,47 @@ static unsigned int sdv_ring(unsigned int* out, sdv_mesh const* m, unsigned int 
 	return c == c0 ? n : 0;
 }
 
+/* v's sector holding the smooth edge to w: its neighbours from one sharp edge (es > 0, a border's too) round to the other,
+   into out (p_0 .. p_n, n triangles), *iw w's place; 0 when none (a ring closed without a sharp edge, not a manifold) */
+static unsigned int sdv_sector(unsigned int* out, sdv_mesh const* m, unsigned int const* co, unsigned int const* cv, unsigned int const* cf,
+	unsigned int const* ev, unsigned int ne, double const* es, unsigned int v, unsigned int w, unsigned int* iw)
+{
+	unsigned int n = co[v + 1] - co[v], nb = 0, nf = 0, d, q, x, guard;
+	unsigned int* back = out + n + 2;   /* (the backward walk, reversed in after) */
+	for (d = 0; d < 2; d++)
+	{
+		/* d 0: forward (w's corner's previous vertex), 1: backward */
+		x = w;
+		for (guard = 0; guard <= n; guard++)
+		{
+			unsigned int c = HM_NONE, y, e;
+			for (q = co[v]; q < co[v + 1]; q++)
+				if (SDV_TRI(m, cf, cv[q], d ? 2 : 1) == x)
+					c = cv[q];
+			if (c == HM_NONE)
+				return 0;   /* (a border without its edge marked) */
+			y = SDV_TRI(m, cf, c, d ? 1 : 2);
+			if (y == w)
+				return 0;   /* (round the whole ring: no sharp edge) */
+			if (d) back[nb++] = y; else out[1 + nf++] = y;
+			e = sdv_find_edge(ev, ne, v, y);
+			if (e == HM_NONE)
+				return 0;
+			if (es[e] > 0)
+				break;
+			x = y;
+		}
+		if (guard > n)
+			return 0;
+	}
+	/* p_0 .. p_n: the backward walk reversed, w, the forward walk */
+	memmove(out + nb + 1, out + 1, sizeof(unsigned int) * nf);
+	for (q = 0; q < nb; q++) out[q] = back[nb - 1 - q];
+	out[nb] = w;
+	*iw = nb;
+	return nb + nf + 1;
+}
+
 /* one level of m into o (loop: 1 Loop, 2 the modified butterfly, 0 Catmull-Clark); limit: o is m with its vertices moved
    onto the limit surface instead */
 static qaws_status sdv_step(sdv_mesh* o, sdv_mesh const* m, int loop, sdv_cols const* k, int limit)
@@ -422,8 +463,30 @@ static qaws_status sdv_step(sdv_mesh* o, sdv_mesh const* m, int loop, sdv_cols c
 			for (j = 0; j < kv; j++) sm[j] = 0;
 			for (s = 0; s < 2; s++)
 			{
-				unsigned int nr = sdv_ring(ring, m, co, cv, cf, ends[s], ends[1 - s]);
+				unsigned int nr = sdv_ring(ring, m, co, cv, cf, ends[s], ends[1 - s]), np, iw = 0;
 				double const* xv = m->X + (size_t)ends[s] * kv;
+				if (!nr && es[e] == 0 && nsh[ends[s]] == 2 && !m->vk[ends[s]] &&
+					(np = sdv_sector(ring, m, co, cv, cf, ev, ne, es, ends[s], ends[1 - s], &iw)) >= 3 && np != 4)
+				{
+					/* an extraordinary crease or border end (n triangles in its sector, not 3): Zorin's rule (Zorin and
+					   Schroeder, SIGGRAPH 2000 course notes, figure 4.7), the valence 2 n ring reflected oddly across the
+					   crease: theta = pi / n, the other end p_i, c_j = (sin i theta sin j theta + sin 2 i theta sin 2 j
+					   theta / 2) / n inside, the end 1 - sin theta sin i theta / (n (1 - cos theta)), p_0 and p_n
+					   +-(cos i theta / 4 - sin 2 theta sin 2 i theta / (4 n (cos theta - cos 2 theta))) */
+					unsigned int nt = np - 1;
+					double th = 3.14159265358979323846 / nt, si = sin(iw * th), s2 = sin(2 * iw * th);
+					double c0 = 1 - sin(th) * si / (nt * (1 - cos(th)));
+					double cb = 0.25 * cos(iw * th) - sin(2 * th) * s2 / (4 * nt * (cos(th) - cos(2 * th)));
+					for (j = 0; j < kv; j++)
+						sm[j] += c0 * xv[j] + cb * (m->X[(size_t)ring[0] * kv + j] - m->X[(size_t)ring[nt] * kv + j]);
+					for (r = 1; r < nt; r++)
+					{
+						double cj = (si * sin(r * th) + 0.5 * s2 * sin(2 * r * th)) / nt;
+						for (j = 0; j < kv; j++) sm[j] += cj * m->X[(size_t)ring[r] * kv + j];
+					}
+					ext++;
+					continue;
+				}
 				if (!nr || nr == 6)
 					continue;
 				for (j = 0; j < kv; j++) sm[j] += 0.75 * xv[j];

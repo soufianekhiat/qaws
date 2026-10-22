@@ -62,7 +62,14 @@
  * reflected); next to an extraordinary vertex of valence n its ring, 3/4
  * the vertex and s_j its j-th neighbour from the edge (n = 3: 5/12, -1/12,
  * -1/12; n = 4: 3/8, 0, -1/8, 0; else (1/4 + cos(2 pi j / n) +
- * 1/2 cos(4 pi j / n)) / n), two such ends averaged. A crease or border
+ * 1/2 cos(4 pi j / n)) / n), two such ends averaged; next to a crease or
+ * border vertex whose side holds n != 3 triangles (neighbours p_0 .. p_n
+ * from one crease edge round to the other, the edge's other end p_i)
+ * Zorin's extraordinary crease rule, the valence 2 n ring reflected oddly:
+ * with theta = pi / n, p_j (0 < j < n) takes (sin i theta sin j theta +
+ * sin 2 i theta sin 2 j theta / 2) / n, the vertex 1 - sin theta sin i theta
+ * / (n (1 - cos theta)), p_0 and p_n +-(cos i theta / 4 - sin 2 theta
+ * sin 2 i theta / (4 n (cos theta - cos 2 theta))). A crease or border
  * edge takes the four points along it (-1/16, 9/16, 9/16, -1/16, an end
  * where the crease stops reflected). Cubic polynomials are reproduced on
  * regular parts. limit leaves the vertices (they are on the surface);
