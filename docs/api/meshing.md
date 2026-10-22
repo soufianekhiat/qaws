@@ -1100,6 +1100,8 @@ The report gives the charts, the triangles turned over, the mean corner angle er
 
 Figure 30 (key u) shows a bar bent by ARAP and by Laplacian editing, and a hill flattened by ARAP with its (u, v) grid and its layout. Figure 31 (key v) repeats the ARAP paper's own tests (its figures 2 and 6): a plate with 4 × 4 bumps held on one side and lifted on the other, and a square bar twisted a quarter turn, by ARAP, Laplacian editing and the biharmonic bend.
 
+**A prepared deformer** (`qaws_mesh_deformer_create`, `_solve`, `_destroy`) keeps the factored systems for many targets: an interactive drag pays one back substitution per step for LAPLACIAN and BIHARMONIC. ARAP starts each step from its last pose plus the biharmonic spread of the handles' moves. Test 166 drags a plate's side up in 8 steps: it ends within 1.3e-5 of the one-shot result, at 68 rounds a step against 90 from rest. `qaws_mesh_3d_deform` is a deformer used once.
+
 ## Decimation
 
 `qaws_mesh_3d_decimate` (`qaws_mesh_decimate.h`) reduces a mesh in place by quadric error metrics (Garland and Heckbert 1997): edges are collapsed cheapest first, each merged vertex placed where the sum of its two ends' quadrics (the planes of the faces they had, weighted by area) is least.

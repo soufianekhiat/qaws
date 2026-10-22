@@ -60,4 +60,18 @@ typedef struct qaws_deform_desc
 qaws_status qaws_mesh_3d_deform(qaws_mesh_3d* mesh, unsigned int const* handles, qaws_scalar const* targets, unsigned int handle_count,
 	qaws_deform_desc const* desc);
 
+/* A prepared deformer for interactive edits: the rest shape, the handles and
+   the region fixed, the systems factored once; each solve puts the handles
+   at new targets and gives the positions (3 per vertex), the mesh untouched.
+   ARAP starts each solve from the last one (its rotations too) plus the
+   biharmonic spread of the handles' moves since: a drag in small steps
+   takes fewer rounds per step than a solve from rest; out_rounds (may be NULL): ARAP's
+   rounds this time. */
+typedef struct qaws_mesh_deformer qaws_mesh_deformer;
+
+qaws_status qaws_mesh_deformer_create(qaws_mesh_deformer** out_deformer, qaws_mesh_3d const* mesh, unsigned int const* handles,
+	unsigned int handle_count, qaws_deform_desc const* desc);
+qaws_status qaws_mesh_deformer_solve(qaws_scalar* out_positions, unsigned int* out_rounds, qaws_mesh_deformer* deformer, qaws_scalar const* targets);
+void qaws_mesh_deformer_destroy(qaws_mesh_deformer* deformer);
+
 #endif /* QAWS_MESH_DEFORM_H */

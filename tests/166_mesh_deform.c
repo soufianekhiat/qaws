@@ -268,6 +268,62 @@ static void test_turn(void)
 	}
 }
 
+/* a prepared deformer: the plate's right side dragged up by 0.4 in 8 steps */
+static void test_deformer(void)
+{
+	unsigned int n = 12, nv = (n + 1) * (n + 1), i, j, h[26], k, cold = 0, warm = 0;
+	qaws_scalar tg[3 * 26], x0[3 * 169], *a = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * 169), *b = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * 169);
+	double off = 0, lin = 0;
+	char msg[300];
+	for (k = 0; k < 2; k++)
+	{
+		qaws_mesh_3d *m = dt_grid(n, 1), *one = dt_grid(n, 1);
+		qaws_mesh_deformer *d = NULL, *c = NULL;
+		qaws_deform_desc desc;
+		unsigned int step, r;
+		qaws_mesh_3d_get_positions(x0, m);
+		for (j = 0; j <= n; j++)
+		{
+			h[j] = j * (n + 1);
+			h[n + 1 + j] = j * (n + 1) + n;
+			memcpy(tg + 3 * j, x0 + 3 * h[j], 3 * sizeof(qaws_scalar));
+			memcpy(tg + 3 * (n + 1 + j), x0 + 3 * h[n + 1 + j], 3 * sizeof(qaws_scalar));
+		}
+		memset(&desc, 0, sizeof desc);
+		desc.method = k ? QAWS_DEFORM_LAPLACIAN : QAWS_DEFORM_ARAP;
+		qaws_mesh_deformer_create(&d, m, h, 2 * (n + 1), &desc);
+		for (step = 1; d && step <= 8; step++)
+		{
+			for (j = 0; j <= n; j++) tg[3 * (n + 1 + j) + 2] = (qaws_scalar)(x0[3 * h[n + 1 + j] + 2] + 0.05 * step);
+			qaws_mesh_deformer_solve(a, &r, d, tg);
+			if (step > 1)
+				warm += r;
+		}
+		/* the same final target at once: by qaws_mesh_3d_deform, and by a fresh deformer (cold) */
+		qaws_mesh_3d_deform(one, h, tg, 2 * (n + 1), &desc);
+		qaws_mesh_3d_get_positions(b, one);
+		qaws_mesh_deformer_create(&c, m, h, 2 * (n + 1), &desc);
+		if (c)
+			(void)qaws_mesh_deformer_solve(b, k ? NULL : &cold, c, tg);
+		qaws_mesh_3d_get_positions(b, one);
+		for (i = 0; i < 3 * nv; i++)
+			if (k)
+				lin = fmax(lin, fabs((double)a[i] - (double)b[i]));
+			else
+				off = fmax(off, fabs((double)a[i] - (double)b[i]));
+		qaws_mesh_deformer_destroy(d);
+		qaws_mesh_deformer_destroy(c);
+		qaws_mesh_3d_destroy(m);
+		qaws_mesh_3d_destroy(one);
+	}
+	sprintf(msg, "a deformer dragging the plate's side up in 8 steps: ARAP %.1e from the one-shot result, %.1f rounds a step against %u cold; Laplacian %.1e",
+		off, warm / 7.0, cold, lin);
+	printf("  %s\n", msg);
+	TEST_ASSERT(off < 1e-3 && warm < 7 * cold && lin < 1e-12, msg);
+	free(a);
+	free(b);
+}
+
 static void test_param(void)
 {
 	char msg[240];
@@ -379,6 +435,7 @@ int test_166_mesh_deform_main(void)
 	printf("Test 166: deformation and parameterization\n");
 	test_bend();
 	test_turn();
+	test_deformer();
 	test_param();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
