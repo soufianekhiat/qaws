@@ -43,12 +43,11 @@
  * Jacobian is checked relative to the straight element's: a tetrahedron's
  * bounded from below over the whole element (its determinant, cubic, in the
  * Bernstein basis: the least of its 20 coefficients; Johnen, Remacle,
- * Geuzaine 2013), so a tetrahedron that passes is certified valid; a
- * hexahedron's sampled at its 27 nodes. An element below min_jacobian has
- * its nodes' displacements halved, until it passes (straight at worst,
- * valid when the straight element is).
- * shortcut: a hexahedron's Jacobian is sampled, not bounded; its
- * triquintic determinant's Bernstein coefficients (216) would certify it.
+ * Geuzaine 2013); a hexahedron's, of degree 5 in each axis, by its 216
+ * tensor Bernstein coefficients, each over the straight hexahedron's in the
+ * same basis. An element that passes is certified valid. An element below
+ * min_jacobian has its nodes' displacements halved, until it passes
+ * (straight at worst, valid when the straight element is).
  *
  * The vertices stay where they are: the reference should pass through the
  * border's vertices (a reference made from the volume's border, or a finer
@@ -65,7 +64,7 @@ typedef struct qaws_volume_curve_report
 {
 	unsigned int border_nodes;          /* nodes placed on the reference */
 	unsigned int relaxed;               /* elements whose nodes were pulled back toward straight */
-	qaws_scalar min_jacobian;           /* the smallest sampled Jacobian, relative to the straight elements' */
+	qaws_scalar min_jacobian;           /* the smallest Jacobian (a lower bound), relative to the straight elements' */
 	qaws_scalar max_sagitta;            /* the border nodes' largest distance to the reference, straight */
 	qaws_scalar max_distance;           /* and placed (0 unless relaxed) */
 } qaws_volume_curve_report;

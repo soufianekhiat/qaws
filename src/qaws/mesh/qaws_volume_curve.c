@@ -2,7 +2,7 @@
  * Curved volume elements (qaws_volume_curve.h): quadratic nodes numbered
  * from the cells' edges and faces, the border's projected onto a mesh
  * reference, the displacement spread inside, elements relaxed toward
- * straight until their sampled Jacobians pass.
+ * straight until their Jacobians, bounded in the Bernstein basis, pass.
  */
 
 #include "../internal/qaws_internal_memory.h"
@@ -158,7 +158,85 @@ static double vcu_tet_bound(double const (*x)[3])
 	return lo;
 }
 
-/* an element's smallest Jacobian over its straight self's (a tetrahedron's bounded, a hexahedron's sampled) (nodes en, positions X straight + D) */
+/* A triquadratic hexahedron's Jacobian determinant is of degree 5 in each of s, t, u: in the tensor Bernstein basis of
+   degree 5 its 216 coefficients come from its values at the 6 x 6 x 6 points (i, j, k) / 5 (on [-1, 1]), one 6 x 6 solve
+   along each axis. The straight hexahedron's (degree 2, raised to 5) in the same basis: where all its coefficients s_i are
+   positive, the curved one's c_i >= r s_i for r the least c_i / s_i, so the ratio of determinants is >= r everywhere. */
+static double vcu_hex_bound(double const (*xc)[3], double const (*xs)[3])
+{
+	double A[6][12], c[216], s[216], r = HUGE_VAL, cmin = HUGE_VAL;
+	unsigned int p, q, i, j, k, ax;
+	int straight = 1;
+	/* the 1D collocation matrix B_q(p / 5), inverted (Gauss-Jordan, the inverse in columns 6 to 11) */
+	for (p = 0; p < 6; p++)
+		for (q = 0; q < 6; q++)
+		{
+			static double const binom[6] = { 1, 5, 10, 10, 5, 1 };
+			double x = p / 5.0;
+			A[p][q] = binom[q] * pow(x, (double)q) * pow(1 - x, (double)(5 - q));
+			A[p][6 + q] = p == q;
+		}
+	for (q = 0; q < 6; q++)
+	{
+		unsigned int piv = q;
+		double f;
+		for (p = q + 1; p < 6; p++)
+			if (fabs(A[p][q]) > fabs(A[piv][q]))
+				piv = p;
+		for (i = 0; i < 12; i++)
+		{
+			f = A[q][i];
+			A[q][i] = A[piv][i];
+			A[piv][i] = f;
+		}
+		f = A[q][q];
+		for (i = 0; i < 12; i++) A[q][i] /= f;
+		for (p = 0; p < 6; p++)
+			if (p != q)
+			{
+				f = A[p][q];
+				for (i = 0; i < 12; i++) A[p][i] -= f * A[q][i];
+			}
+	}
+	for (k = 0; k < 6; k++)
+		for (j = 0; j < 6; j++)
+			for (i = 0; i < 6; i++)
+			{
+				double ss = -1 + 0.4 * i, tt = -1 + 0.4 * j, uu = -1 + 0.4 * k;
+				c[i + 6 * (j + 6 * k)] = vcu_hex_det(xc, ss, tt, uu);
+				s[i + 6 * (j + 6 * k)] = vcu_hex_det(xs, ss, tt, uu);
+			}
+	/* values to coefficients, one axis at a time (stride 1, 6, 36) */
+	for (ax = 0; ax < 3; ax++)
+	{
+		unsigned int st = ax == 0 ? 1 : ax == 1 ? 6 : 36, line;
+		for (line = 0; line < 36; line++)
+		{
+			/* (the line's first index: the other two axes' digits) */
+			unsigned int b = ax == 0 ? 6 * line : ax == 1 ? line % 6 + 36 * (line / 6) : line;
+			double fc[6], fs[6];
+			for (p = 0; p < 6; p++) { fc[p] = c[b + st * p]; fs[p] = s[b + st * p]; }
+			for (q = 0; q < 6; q++)
+			{
+				double vc = 0, vs = 0;
+				for (p = 0; p < 6; p++) { vc += A[q][6 + p] * fc[p]; vs += A[q][6 + p] * fs[p]; }
+				c[b + st * q] = vc;
+				s[b + st * q] = vs;
+			}
+		}
+	}
+	for (i = 0; i < 216; i++)
+	{
+		cmin = fmin(cmin, c[i]);
+		if (s[i] > 0)
+			r = fmin(r, c[i] / s[i]);
+		else
+			straight = 0;
+	}
+	return straight ? r : (cmin > 0 ? 1 : -1);
+}
+
+/* an element's smallest Jacobian over its straight self's, bounded below over the whole element (nodes en, positions X straight + D) */
 static double vcu_ratio(unsigned int const* en, unsigned int nn, double const* X, double const* D)
 {
 	double xc[27][3], xs[27][3], r = HUGE_VAL;
@@ -177,12 +255,7 @@ static double vcu_ratio(unsigned int const* en, unsigned int nn, double const* X
 		r = ds > 0 ? dc / ds : (dc > 0 ? 1 : -1);
 	}
 	else
-		for (n = 0; n < 27; n++)
-		{
-			double s = vcu_hex_at[n][0], t = vcu_hex_at[n][1], u = vcu_hex_at[n][2];
-			double ds = vcu_hex_det((double const(*)[3])xs, s, t, u), dc = vcu_hex_det((double const(*)[3])xc, s, t, u);
-			r = fmin(r, ds > 0 ? dc / ds : (dc > 0 ? 1 : -1));
-		}
+		r = vcu_hex_bound((double const(*)[3])xc, (double const(*)[3])xs);
 	return r;
 }
 

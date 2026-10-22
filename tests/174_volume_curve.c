@@ -9,7 +9,8 @@
  *     only), every element's Jacobian above the bound,
  *     the counts (vertices plus edges; 10 per tetrahedron);
  *   - a cube's one hexahedron curved on the sphere through its corners: 27
- *     nodes, the edges' and faces' on the sphere, the centre at the centre;
+ *     nodes, the edges' and faces' on the sphere, the centre at the centre,
+ *     its Jacobian's Bernstein bound under the sampled determinant;
  *   - a tetrahedron on a small sphere inside it: its nodes pulled in until
  *     the element folds, relaxed back (its Jacobian kept above the bound);
  *   - no reference: the straight middles, Jacobian 1;
@@ -171,6 +172,34 @@ static void test_sphere(void)
 	qaws_mesh_3d_destroy(fine);
 }
 
+/* a triquadratic hexahedron's Jacobian determinant at (s, t, u) (nodes x: 27, VTK's order) */
+static double vc_hex_det(double const (*x)[3], double s, double t, double u)
+{
+	static signed char const at[27][3] = { { -1, -1, -1 }, { 1, -1, -1 }, { 1, 1, -1 }, { -1, 1, -1 }, { -1, -1, 1 }, { 1, -1, 1 }, { 1, 1, 1 }, { -1, 1, 1 },
+		{ 0, -1, -1 }, { 1, 0, -1 }, { 0, 1, -1 }, { -1, 0, -1 }, { 0, -1, 1 }, { 1, 0, 1 }, { 0, 1, 1 }, { -1, 0, 1 }, { -1, -1, 0 }, { 1, -1, 0 }, { 1, 1, 0 },
+		{ -1, 1, 0 }, { -1, 0, 0 }, { 1, 0, 0 }, { 0, -1, 0 }, { 0, 1, 0 }, { 0, 0, -1 }, { 0, 0, 1 }, { 0, 0, 0 } };
+	double q[3] = { s, t, u }, v[3][3], dv[3][3], col[3][3];
+	unsigned int n, a, d;
+	for (a = 0; a < 3; a++)
+	{
+		v[a][0] = 0.5 * q[a] * (q[a] - 1); v[a][1] = 1 - q[a] * q[a]; v[a][2] = 0.5 * q[a] * (q[a] + 1);
+		dv[a][0] = q[a] - 0.5; dv[a][1] = -2 * q[a]; dv[a][2] = q[a] + 0.5;
+	}
+	memset(col, 0, sizeof col);
+	for (n = 0; n < 27; n++)
+	{
+		unsigned int i = (unsigned int)(at[n][0] + 1), j = (unsigned int)(at[n][1] + 1), k = (unsigned int)(at[n][2] + 1);
+		double w[3];
+		w[0] = dv[0][i] * v[1][j] * v[2][k];
+		w[1] = v[0][i] * dv[1][j] * v[2][k];
+		w[2] = v[0][i] * v[1][j] * dv[2][k];
+		for (a = 0; a < 3; a++)
+			for (d = 0; d < 3; d++) col[a][d] += w[a] * x[n][d];
+	}
+	return col[0][0] * (col[1][1] * col[2][2] - col[1][2] * col[2][1]) - col[0][1] * (col[1][0] * col[2][2] - col[1][2] * col[2][0]) +
+		col[0][2] * (col[1][0] * col[2][1] - col[1][1] * col[2][0]);
+}
+
 static void test_hex(void)
 {
 	static unsigned int const h[8] = { 0, 1, 2, 3, 4, 5, 6, 7 };
@@ -182,7 +211,7 @@ static void test_hex(void)
 	qaws_mesh_reference_desc rd;
 	qaws_volume_curve_report r;
 	unsigned int en[27], nn = 0, nen = 0, i;
-	double off = 0;
+	double off = 0, worst = HUGE_VAL;
 	qaws_status st;
 	char msg[300];
 	for (i = 0; i < 8; i++)
@@ -199,11 +228,21 @@ static void test_hex(void)
 	qaws_volume_mesh_quadratic_node_counts(&nn, &nen, v);
 	st = qaws_volume_mesh_quadratic_nodes(p, en, &r, v, ref, NULL);
 	for (i = 8; i < 26; i++) off = fmax(off, fabs(vc_norm(p + 3 * en[i]) - sqrt(3.0)));
-	sprintf(msg, "a cube's hexahedron curved on the sphere through its corners: %u nodes, %u border nodes, edges' and faces' off the sphere %.1e, centre at %.1e, min Jacobian %.3f",
-		nn, r.border_nodes, off, vc_norm(p + 3 * en[26]), (double)r.min_jacobian);
+	{
+		/* the bound under the determinant (the straight cube's is 1): sampled at 11^3 points, never below it, nor far above */
+		double xn[27][3];
+		unsigned int a, b, c;
+		for (i = 0; i < 27; i++)
+			for (a = 0; a < 3; a++) xn[i][a] = (double)p[3 * en[i] + a];
+		for (a = 0; a <= 10; a++)
+			for (b = 0; b <= 10; b++)
+				for (c = 0; c <= 10; c++) worst = fmin(worst, vc_hex_det((double const(*)[3])xn, -1 + 0.2 * a, -1 + 0.2 * b, -1 + 0.2 * c));
+	}
+	sprintf(msg, "a cube's hexahedron curved on the sphere through its corners: %u nodes, %u border nodes, edges' and faces' off the sphere %.1e, centre at %.1e, min Jacobian bounded at %.3f (sampled %.3f)",
+		nn, r.border_nodes, off, vc_norm(p + 3 * en[26]), (double)r.min_jacobian, worst);
 	printf("  %s\n", msg);
 	TEST_ASSERT(st == QAWS_STATUS_OK && nn == 27 && nen == 27 && r.border_nodes == 18 && off < 1e-3 && vc_norm(p + 3 * en[26]) < 1e-6 &&
-		r.min_jacobian > 0.1 && r.relaxed == 0, msg);
+		r.min_jacobian > 0.1 && r.relaxed == 0 && worst >= (double)r.min_jacobian - 1e-12 && (double)r.min_jacobian > 0.5 * worst, msg);
 	qaws_volume_mesh_destroy(v);
 	qaws_mesh_reference_destroy(ref);
 	qaws_mesh_3d_destroy(sph);

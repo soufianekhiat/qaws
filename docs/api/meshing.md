@@ -1474,7 +1474,7 @@ Placement:
 
 1. **Border nodes:** a border edge's node goes to the reference's closest point to its middle. A border face's node goes to the closest point to its Coons point (the curved edges' blend).
 2. **Inside nodes:** the border's displacement is spread inside by Jacobi averaging over the elements, with the vertices' displacement held at zero.
-3. **Jacobian check:** each element's Jacobian is checked relative to the straight element's. A tetrahedron's is bounded from below over the whole element (its cubic determinant's 20 Bernstein coefficients, Johnen et al. 2013), so a tetrahedron that passes is certified valid; a hexahedron's is sampled at its 27 nodes. An element below `min_jacobian` (default 0.1) has its nodes' displacements halved until it passes, down to straight at worst.
+3. **Jacobian check:** each element's Jacobian is checked relative to the straight element's. A tetrahedron's is bounded from below over the whole element (its cubic determinant's 20 Bernstein coefficients, Johnen et al. 2013). A hexahedron's determinant is of degree 5 in each axis; its 216 tensor Bernstein coefficients are each divided by the straight hexahedron's in the same basis, and the least of these bounds the ratio. An element that passes is certified valid. An element below `min_jacobian` (default 0.1) has its nodes' displacements halved until it passes, down to straight at worst.
 
 The report gives the border nodes, the relaxed elements, the smallest Jacobian, and the border nodes' largest distance to the reference, straight (the sagitta) and placed.
 
@@ -1483,7 +1483,7 @@ A cell with two or three border facets meeting at a flat angle cannot be curved.
 | Check (test 174) | Result |
 |---|---|
 | A sphere's 692 tetrahedra on a PN reference of a finer sphere: border edge nodes within 2e-3 of the sphere | 354 of 384 (straight: 3.7e-2 off); 6 flat cells relaxed; Jacobian >= 0.176 |
-| A cube's hexahedron on the sphere through its corners: 27 nodes, edges' and faces' on the sphere, centre | 4.5e-7 off; centre 7e-10 |
+| A cube's hexahedron on the sphere through its corners: 27 nodes, edges' and faces' on the sphere, centre | 4.5e-7 off; centre 7e-10; Jacobian bound 0.212, the least of 11³ samples 0.212 |
 | A tetrahedron round a small sphere inside it | relaxed, Jacobian 0.105 >= 0.1 |
 | No reference: the middles exactly, Jacobian 1; a prism | exact; UNSUPPORTED_OPERATION |
 
