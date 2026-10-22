@@ -1175,7 +1175,77 @@ static void hx_polar(double const* J, double* R)
    (harmonic per vertex), and solves for the positions whose gradients are the cells' turned ones (one vertex pinned).
    R: the final gradients (rows: the polycube's axes, 9 per cell); flab: per facet slot 4 c + f its axis and side
    (2 k + positive), 0xFF inside. */
-static qaws_status hx_polycube_frames(qaws_volume_mesh const* t, double* R, unsigned char* flab)
+/* the label patches (facets of one label joined across edges) smaller than 3 h^2, too small for hexahedra (a spike's
+   walls), merged into the label of the patch they share most border with; until none is left (8 rounds at most) */
+static int hx_merge_patches(unsigned char* lab, unsigned int nb, unsigned int const* nbr, double const* area, double const* ew, double h)
+{
+	unsigned int *uf = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (size_t)nb + 1)), i, k, r;
+	double *pa = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), (size_t)nb + 1));
+	double* sh = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), 6, (size_t)nb + 1));
+	int ok = uf && pa && sh;
+	for (r = 0; ok && r < 8; r++)
+	{
+		unsigned int merged = 0;
+		for (i = 0; i < nb; i++)
+		{
+			uf[i] = i;
+			pa[i] = 0;
+		}
+		for (i = 0; i < nb; i++)
+			for (k = 0; k < 3; k++)
+			{
+				unsigned int o = nbr[3 * i + k], ra, rb;
+				if (o == HM_NONE || lab[o] != lab[i])
+					continue;
+				ra = hx_uf(uf, i);
+				rb = hx_uf(uf, o);
+				if (ra != rb)
+					uf[ra] = rb;
+			}
+		for (i = 0; i < nb; i++)
+			pa[hx_uf(uf, i)] += area[i];
+		/* per small patch (at its root) the border it shares with each label */
+		memset(sh, 0, sizeof(double) * 6 * nb);
+		for (i = 0; i < nb; i++)
+		{
+			unsigned int ri = hx_uf(uf, i);
+			if (pa[ri] >= 3 * h * h)
+				continue;
+			for (k = 0; k < 3; k++)
+			{
+				unsigned int o = nbr[3 * i + k];
+				if (o != HM_NONE && lab[o] != lab[i])
+					sh[6 * (size_t)ri + lab[o]] += ew[3 * (size_t)i + k];
+			}
+		}
+		for (i = 0; i < nb; i++)
+		{
+			unsigned int ri = hx_uf(uf, i), best = lab[i];
+			double bs = 0;
+			if (pa[ri] >= 3 * h * h)
+				continue;
+			for (k = 0; k < 6; k++)
+				if (sh[6 * (size_t)ri + k] > bs)
+				{
+					bs = sh[6 * (size_t)ri + k];
+					best = k;
+				}
+			if (best != lab[i])
+			{
+				lab[i] = (unsigned char)best;
+				merged++;
+			}
+		}
+		if (!merged)
+			break;
+	}
+	qaws_internal_free(uf);
+	qaws_internal_free(pa);
+	qaws_internal_free(sh);
+	return ok;
+}
+
+static qaws_status hx_polycube_frames(qaws_volume_mesh const* t, double* R, unsigned char* flab, double h)
 {
 	hx_mat K;
 	hx_pmap em;
@@ -1296,7 +1366,7 @@ static qaws_status hx_polycube_frames(qaws_volume_mesh const* t, double* R, unsi
 					cost[6 * (size_t)i + k] = area[i] * (1 - (k % 2 ? n[k / 2] : -n[k / 2]) + (old != 0xFF && k != old ? 0.1 : 0));
 				lab[i] = (unsigned char)(old != 0xFF ? old : best);
 			}
-			if (!sm_label_cut(lab, cost, nb, 6, nbr, ew, vpair, 4))
+			if (!sm_label_cut(lab, cost, nb, 6, nbr, ew, vpair, 4) || !hx_merge_patches(lab, nb, nbr, area, ew, h))
 				goto done;
 			for (i = 0; i < nb; i++) flab[bf[i]] = lab[i];
 		}
@@ -1416,7 +1486,7 @@ static qaws_status hx_polycube(qaws_mesh_3d const* boundary, double h, qaws_volu
 	R = (double*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(double), (9 * (size_t)t->nc + 1)));
 	flab = (unsigned char*)qaws_internal_scratch_malloc(4 * (size_t)t->nc + 1);
 	if (R && flab)
-		st = hx_polycube_frames(t, R, flab);
+		st = hx_polycube_frames(t, R, flab, h);
 	if (st == QAWS_STATUS_OK)
 		st = hx_map(t, R, flab, h, out_mesh, rep);
 	qaws_internal_free(R);

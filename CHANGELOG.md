@@ -64,6 +64,9 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- Polycube labels: patches too small for hexahedra (under 3 h^2, a spike's walls) merged into a neighbour's label (a
+  spike 0.6 high from 0.025 to 0.62); the atlas groups by the same graph cut (a blob's fill 0.52 to 0.57). Tests
+  176, 166.
 - GLOBAL quads: the curvature-aligned field kept on a tie on closed surfaces with a handle (thin tori no longer
   spiral); the handles' cuts quantized with the cones on any genus. Test 136.
 - FRAME_FIELD through singular edges, sturdier: rounding that undoes rounds turning cells over, the

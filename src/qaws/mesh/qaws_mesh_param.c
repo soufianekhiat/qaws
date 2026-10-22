@@ -436,15 +436,18 @@ static qaws_status pm_parameterize(qaws_scalar* out_uv, qaws_param_report* repor
 					cls[i] = (unsigned char)(2 * k + (nr[k] < 0));
 				}
 		}
-		/* the groups' borders smoothed (iterated conditional modes): each triangle the group maximizing its normal's
-		   component along the group's axis + 0.5 per neighbour in it, among the groups its normal faces (component > 0.3) */
+		/* the groups by a graph cut (sm_label_cut, as the polycube labels): a triangle's cost for a group its area times 1 - its
+		   normal's component along the group's axis (three times its area where that is under 0.3), a shared edge's its
+		   length times a quarter of the mean edge between two groups (twice between the two sides of one axis) */
 		{
-			unsigned int* tn = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)n + 1)), r;
-			if (!tn)
-				goto done;
-			for (i = 0; i < n; i++)
+			unsigned int* tn = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)n + 1));
+			double* cost = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), 6, (size_t)nt + 1));
+			double* ew = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), (size_t)n + 1));
+			double V[36], le = 0;
+			int okc = tn && cost && ew;
+			for (i = 0; okc && i < n; i++)
 				tn[i] = PM_NONE;
-			for (i = 0; i + 1 < n; i++)
+			for (i = 0; okc && i + 1 < n; i++)
 				if (he[2 * (size_t)i] == he[2 * (size_t)i + 2] && (i + 2 >= n || he[2 * (size_t)i + 4] != he[2 * (size_t)i]) &&
 					(i == 0 || he[2 * (size_t)i - 2] != he[2 * (size_t)i]))
 				{
@@ -452,32 +455,39 @@ static qaws_status pm_parameterize(qaws_scalar* out_uv, qaws_param_report* repor
 					tn[c0] = c1 / 3;
 					tn[c1] = c0 / 3;
 				}
-			for (r = 0; r < 8; r++)
-				for (i = 0; i < nt; i++)
+			for (i = 0; okc && i < n; i++)
+			{
+				double const *a = x + 3 * (size_t)t[i], *b = x + 3 * (size_t)t[3 * (i / 3) + (i % 3 + 1) % 3];
+				ew[i] = sqrt((b[0] - a[0]) * (b[0] - a[0]) + (b[1] - a[1]) * (b[1] - a[1]) + (b[2] - a[2]) * (b[2] - a[2]));
+				le += ew[i];
+			}
+			le = n ? le / n : 1;
+			for (i = 0; okc && i < n; i++)
+				ew[i] *= 0.25 * le;
+			for (i = 0; okc && i < nt; i++)
+			{
+				double const *a = x + 3 * (size_t)t[3 * i], *b = x + 3 * (size_t)t[3 * i + 1], *c = x + 3 * (size_t)t[3 * i + 2];
+				double u[3], w[3], nr[3], l;
+				unsigned int g;
+				for (k = 0; k < 3; k++) { u[k] = b[k] - a[k]; w[k] = c[k] - a[k]; }
+				nr[0] = u[1] * w[2] - u[2] * w[1];
+				nr[1] = u[2] * w[0] - u[0] * w[2];
+				nr[2] = u[0] * w[1] - u[1] * w[0];
+				l = sqrt(nr[0] * nr[0] + nr[1] * nr[1] + nr[2] * nr[2]);
+				for (g = 0; g < 6; g++)
 				{
-					double const *a = x + 3 * (size_t)t[3 * i], *b = x + 3 * (size_t)t[3 * i + 1], *c = x + 3 * (size_t)t[3 * i + 2];
-					double u[3], w[3], nr[3], l, best = -HUGE_VAL;
-					unsigned int g;
-					for (k = 0; k < 3; k++) { u[k] = b[k] - a[k]; w[k] = c[k] - a[k]; }
-					nr[0] = u[1] * w[2] - u[2] * w[1];
-					nr[1] = u[2] * w[0] - u[0] * w[2];
-					nr[2] = u[0] * w[1] - u[1] * w[0];
-					l = sqrt(nr[0] * nr[0] + nr[1] * nr[1] + nr[2] * nr[2]);
-					if (l <= 0)
-						continue;
-					for (g = 0; g < 6; g++)
-					{
-						double s = (g & 1 ? -nr[g / 2] : nr[g / 2]) / l;
-						for (k = 0; k < 3; k++)
-							s += tn[3 * i + k] != PM_NONE && cls[tn[3 * i + k]] == g ? 0.5 : 0;
-						if ((g & 1 ? -nr[g / 2] : nr[g / 2]) > 0.3 * l && s > best)
-						{
-							best = s;
-							cls[i] = (unsigned char)g;
-						}
-					}
+					double s = l > 0 ? (g & 1 ? -nr[g / 2] : nr[g / 2]) / l : 0;
+					cost[6 * (size_t)i + g] = 0.5 * l * (s > 0.3 ? 1 - s : 3);
 				}
+			}
+			for (i = 0; i < 36; i++)
+				V[i] = i / 6 == i % 6 ? 0 : i / 12 == (i % 6) / 2 ? 2 : 1;
+			okc = okc && sm_label_cut(cls, cost, nt, 6, tn, ew, V, 4);
 			qaws_internal_free(tn);
+			qaws_internal_free(cost);
+			qaws_internal_free(ew);
+			if (!okc)
+				goto done;
 		}
 	}
 	/* edges of exactly two triangles turned opposite ways, not seams, join the corners at their ends and the triangles; the

@@ -184,6 +184,10 @@ Larger:
    (the fat torus).
 3. **Polycube labels, further:** spikes (bumps past half the height) given their own patches; the atlas groups by the
    same cut. Check: the bump at 0.6 valid; atlas borders from the cut.
+   Done (2026-10-22): the cut gives a spike its own wall patches, too small for hexahedra (two cell faces each), so the
+   patches under 3 h^2 are merged into the label they share most border with: the 0.6 bump at 0.62 (0.025 before),
+   the bent bar and the L unchanged (test 176); the atlas groups by the same cut (sm_label_cut), the blob's fill 0.52
+   to 0.57, borders cleaner (test 166, figure 56).
 4. **Atlas, further:** splits along the distortion's level lines, a skyline packing, groups by the graph cut. Check:
    stretch bound met with fewer charts, fill above 0.6.
 5. **BFF, further:** prescribed border angles (cone points), the inside by the conjugate harmonic. Check: a square

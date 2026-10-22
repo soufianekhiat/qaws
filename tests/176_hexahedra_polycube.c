@@ -9,8 +9,10 @@
  *   - a bent bar: its inner and outer faces labelled by their nearest axes,
  *     so its polycube turns a corner at 45 degrees (a polycube's limit: the
  *     hexahedra there are poorer), the grid following it;
- *   - a box with a bump on its top: the labels by a graph cut keep the bump's
- *     steep sides in the top's patch, the hexahedra near cubes;
+ *   - a box with a bump on its top (0.3, 0.4, 0.6 high): the labels by a
+ *     graph cut keep the bump's steep sides in the top's patch, a spike's
+ *     walls too small for hexahedra (under 3 h^2) merged into it, the
+ *     hexahedra near cubes;
  *   - a sphere: deformed into a cube, filled, valid, its volume near the
  *     ball's (FRAME_FIELD follows its field's singular edges instead: test
  *     128).
@@ -219,17 +221,18 @@ static void test_boxes(void)
 }
 
 /* a box with a bump on its top: the bump's steep sides kept in the top's label by the graph cut (nearest axes cut them off
-   as small patches: scaled Jacobians 0.36 and 0.29), the hexahedra near cubes */
+   as small patches: scaled Jacobians 0.36 and 0.29); at 0.6 a spike whose walls get patches of their own, too small for
+   hexahedra, merged back (0.025 without), the hexahedra near cubes */
 static void test_bump(void)
 {
 	static unsigned int const n[3] = { 24, 12, 6 };
 	char msg[300];
 	unsigned int k;
-	for (k = 0; k < 2; k++)
+	for (k = 0; k < 3; k++)
 	{
 		qaws_mesh_3d* m;
 		pc_out a;
-		g_pc_amp = 0.3 + 0.1 * k;
+		g_pc_amp = k == 2 ? 0.6 : 0.3 + 0.1 * k;
 		m = pc_block(n, pc_all, pc_bump);
 		a = pc_run(m, QAWS_HEXES_POLYCUBE, 0.25);
 		sprintf(msg, "a box with a bump of %.1f: %s, %u hexahedra, scaled Jacobian from %.3f, volume %.4f, valid %d", g_pc_amp,
