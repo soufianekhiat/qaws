@@ -76,6 +76,8 @@
  *                      with a crease and a colour carried
  *   mesh41_volume_improve.png  tetrahedra improved: slivers smoothed and flipped away,
  *                      the border kept; a blob's cells; dihedral histograms
+ *   mesh42_volume_curve.png  curved volume elements: a sphere's tetrahedra and a ball's
+ *                      hexahedra, straight and quadratic on a sphere
  *
  * Each figure lives in meshing_showcase/NN_*.c, compiled as one translation
  * unit with the rasterizer in example_raster.h.
@@ -248,16 +250,17 @@ static void ms_panel(er_canvas* c, int x, int y, int w, int h, qaws_mesh_3d cons
 #include "meshing_showcase/39_offset.c"
 #include "meshing_showcase/40_subdivide.c"
 #include "meshing_showcase/41_volume_improve.c"
+#include "meshing_showcase/42_volume_curve.c"
 
-/* the figures to draw: all, or those whose keys the first argument lists ("58"; figures 10 to 35 are a to z, 36 to 41 are A to F) */
+/* the figures to draw: all, or those whose keys the first argument lists ("58"; figures 10 to 35 are a to z, 36 to 42 are A to G) */
 int main(int argc, char** argv)
 {
 	static void (*const demo[])(void) = { demo_core, demo_reference, demo_remesh, demo_quads, demo_generate, demo_tets, demo_hexes, demo_frame_hexes,
 		demo_measures, demo_remesh_angles, demo_remesh_cvt, demo_cross_field, demo_quad_flow, demo_quad_improve,
 		demo_quad_global, demo_guidance, demo_feature_size, demo_repair, demo_layers, demo_curved, demo_metric, demo_bvh, demo_quality, demo_repair_more, demo_watertight,
 		demo_intersect, demo_boolean, demo_geodesic, demo_smooth, demo_deform, demo_deform_2, demo_decimate, demo_decimate_views, demo_remesh_attributes, demo_connect, demo_connect_more,
-		demo_repulsive_mesh_curves, demo_repulsive_mesh_curves_2, demo_offset, demo_subdivide, demo_volume_improve };
-	static char const key[] = "123456789abcdefghijklmnopqrstuvwxyzABCDEF";
+		demo_repulsive_mesh_curves, demo_repulsive_mesh_curves_2, demo_offset, demo_subdivide, demo_volume_improve, demo_volume_curve };
+	static char const key[] = "123456789abcdefghijklmnopqrstuvwxyzABCDEFG";
 	unsigned int i;
 	setvbuf(stdout, NULL, _IONBF, 0);
 	MAKE_DIR("showcase");

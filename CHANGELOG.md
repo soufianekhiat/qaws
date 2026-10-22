@@ -59,6 +59,10 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- Curved volume elements (`qaws_volume_mesh_quadratic_nodes`,
+  `qaws_volume_curve.h`): P2 tetrahedra and triquadratic hexahedra, the
+  border's nodes on a mesh reference, the displacement spread inside, elements
+  relaxed until their sampled Jacobians pass. Test 174, figure 42 (key G).
 - Improvement of tetrahedral meshes (`qaws_volume_mesh_improve`,
   `qaws_volume_improve.h`): smoothing up the worst quality's gradient, edge
   removal by the ring's best triangulation and face removal (Klingner and

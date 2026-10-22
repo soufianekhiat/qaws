@@ -1412,6 +1412,34 @@ Border facets, their vertices and the other cells (and their vertices) do not mo
 
 Figure 41 (key F) shows a shaken grid (worst dihedral 1.6 -> 35.0 degrees), the blob's tetrahedra from `qaws_volume_mesh_tetrahedralize` improved further (18.7 -> 37.9), and the histograms of the smallest dihedral angle per cell.
 
+## Curved volume elements
+
+`qaws_volume_mesh_quadratic_nodes` (`qaws_volume_curve.h`) gives a tetrahedral or hexahedral mesh's quadratic nodes for a solver, in VTK's numbering: P2 tetrahedra (10 nodes) and triquadratic hexahedra (27). Border nodes lie on a mesh reference, and every element's Jacobian stays above a bound. `qaws_volume_mesh_quadratic_node_counts` gives the sizes. The node list is:
+
+1. the vertices;
+2. one node per edge, by sorted vertices;
+3. one per hexahedron's face;
+4. one per hexahedron.
+
+Placement:
+
+1. **Border nodes:** a border edge's node goes to the reference's closest point to its middle. A border face's node goes to the closest point to its Coons point (the curved edges' blend).
+2. **Inside nodes:** the border's displacement is spread inside by Jacobi averaging over the elements, with the vertices' displacement held at zero.
+3. **Jacobian check:** each element's Jacobian is sampled relative to the straight element's at the same points: a tetrahedron at its corners and the middles of its edges, its faces and itself, a hexahedron at its 27 nodes. An element below `min_jacobian` (default 0.1) has its nodes' displacements halved until it passes, down to straight at worst.
+
+The report gives the border nodes, the relaxed elements, the smallest Jacobian, and the border nodes' largest distance to the reference, straight (the sagitta) and placed.
+
+A cell with two or three border facets meeting at a flat angle cannot be curved. At their shared corner its Jacobian depends only on border nodes, and curving makes those facets coplanar. Such cells are relaxed, so meshes made for curving should avoid them (an O-grid ball rather than a cube's grid mapped onto it).
+
+| Check (test 174) | Result |
+|---|---|
+| A sphere's 692 tetrahedra on a PN reference of a finer sphere: border edge nodes within 2e-3 of the sphere | 354 of 384 (straight: 3.7e-2 off); 6 flat cells relaxed; Jacobian >= 0.176 |
+| A cube's hexahedron on the sphere through its corners: 27 nodes, edges' and faces' on the sphere, centre | 4.5e-7 off; centre 7e-10 |
+| A tetrahedron round a small sphere inside it | relaxed, Jacobian 0.105 >= 0.1 |
+| No reference: the middles exactly, Jacobian 1; a prism | exact; UNSUPPORTED_OPERATION |
+
+Figure 42 (key G) shows a sphere's tetrahedra straight and P2, and an O-grid ball of hexahedra straight and triquadratic (Jacobian >= 0.75, none relaxed), cut open.
+
 ## Hexahedra
 
 ```c
@@ -1532,9 +1560,11 @@ those alone (1 to 9, then a to i for figures 10 to 18: `5c` draws 5 and
   the straight element's (not equally spaced along the curve; no check of
   the curved element's Jacobian); a node on an edge between two faces lies
   on the face of the element that numbered it; meshes on a mesh reference
-  (remeshed, not generated) get none; volume elements are not curved.
-- Tetrahedra: improvement by flips and smoothing only (no edge removal or
-  sliver exudation); no protection of sharp angles between border
+  (remeshed, not generated) get none. Volume elements: quadratic only, the
+  Jacobian sampled (not bounded), cells with two border facets at a flat
+  angle relaxed toward straight.
+- Tetrahedra: improvement (`qaws_volume_mesh_improve`) keeps the border, so
+  cells with two border facets stay; no vertex insertion or sliver exudation; no protection of sharp angles between border
   triangles, where recovery may stop (`QAWS_STATUS_NOT_CONVERGED`).
 - Hexahedra: GRID is a uniform grid (no octree), features kept only where
   the staircase turns near them; FRAME_FIELD needs a field without singular

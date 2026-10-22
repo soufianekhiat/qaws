@@ -120,7 +120,7 @@ Mesh processing:
 
 Volumes and reserved methods:
 
-17. **Volume improvement: started.** Landed: `qaws_volume_mesh_improve` (test 173, figure 41 key F): smoothing, edge removal (rings of 3 to 10) and face removal, the border kept; a shaken grid from 0.8 to 40 degrees. Planned as: Sliver removal, tetrahedral smoothing and flips (Klingner-Shewchuk), CDT boundary recovery (Diazzi et al. 2023); curved tetrahedra and hexahedra at the border with a Jacobian check, nodes on a mesh reference.
+17. **Volume improvement: started.** Landed: `qaws_volume_mesh_improve` (test 173, figure 41 key F): smoothing, edge removal (rings of 3 to 10) and face removal, the border kept; a shaken grid from 0.8 to 40 degrees. Landed: `qaws_volume_mesh_quadratic_nodes` (test 174, figure 42 key G): P2 tetrahedra and Q2 hexahedra on a mesh reference, Jacobians sampled and relaxed. Next: CDT boundary recovery, Bezier Jacobian bounds, cubic nodes. Planned as: Sliver removal, tetrahedral smoothing and flips (Klingner-Shewchuk), CDT boundary recovery (Diazzi et al. 2023); curved tetrahedra and hexahedra at the border with a Jacobian check, nodes on a mesh reference.
 18. **Hexahedra.** FRAME_FIELD through singular edges (HexEx extraction), meshable frame fields, POLYCUBE.
 19. **Quads.** GLOBAL's quantization of crease isovalues and torus periods, LAYOUT (QuadWild), the cone budget and other guidance follow-ups of the table above.
 
