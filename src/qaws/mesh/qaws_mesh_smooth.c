@@ -423,6 +423,133 @@ static int sm_line_laplacian(sm_csr* K, unsigned int const* ln, unsigned char co
 	return 1;
 }
 
+/* BILATERAL: the triangles' normals filtered (Zheng, Fu, Au, Tai 2011), each the mean of the normals of the triangles
+   sharing a vertex with it weighted by their areas, by a Gaussian of the distance between centroids (sigma: their mean
+   spacing) and by a Gaussian of the normals' difference (sigma_r: the range), iters times; then the vertices moved to the
+   filtered triangles' planes (Sun et al. 2007: each by the mean of n (n . (c - x)) over its triangles), 20 times. Held
+   vertices stay, a line vertex moves along its line. 0 on allocation failure. */
+static int sm_bilateral(double* x, unsigned int nv, unsigned int const* t, unsigned int nt, unsigned char const* cls, unsigned int const* ln,
+	unsigned int iters, double sigma_r)
+{
+	unsigned int *v0 = (unsigned int*)qaws_internal_zalloc((size_t)nv + 2, sizeof(unsigned int)), *vf = (unsigned int*)qaws_internal_malloc(qaws_internal_mul3(sizeof(unsigned int), 3, (size_t)nt + 1));
+	unsigned int* stamp = (unsigned int*)qaws_internal_zalloc((size_t)nt + 1, sizeof(unsigned int));
+	double *n = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), 3, (size_t)nt + 1)), *n2 = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), 3, (size_t)nt + 1));
+	double *c = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), 3, (size_t)nt + 1)), *A = (double*)qaws_internal_malloc(sizeof(double) * ((size_t)nt + 1));
+	double ss = 0;
+	unsigned int i, k, it, cnt = 0, mark = 0;
+	int ok = v0 && vf && stamp && n && n2 && c && A;
+	if (!ok)
+		goto done;
+	for (i = 0; i < 3 * nt; i++) v0[t[i] + 1]++;
+	for (i = 0; i < nv; i++) v0[i + 1] += v0[i];
+	{
+		unsigned int* fill = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)nv + 1));
+		if (!fill)
+		{
+			ok = 0;
+			goto done;
+		}
+		memcpy(fill, v0, sizeof(unsigned int) * nv);
+		for (i = 0; i < 3 * nt; i++) vf[fill[t[i]]++] = i / 3;
+		qaws_internal_free(fill);
+	}
+	/* the triangles' normals, centroids and areas */
+	for (i = 0; i < nt; i++)
+	{
+		double const *a = x + 3 * (size_t)t[3 * i], *b = x + 3 * (size_t)t[3 * i + 1], *d = x + 3 * (size_t)t[3 * i + 2];
+		double u[3], w[3], l;
+		for (k = 0; k < 3; k++) { u[k] = b[k] - a[k]; w[k] = d[k] - a[k]; c[3 * (size_t)i + k] = (a[k] + b[k] + d[k]) / 3; }
+		n[3 * (size_t)i] = u[1] * w[2] - u[2] * w[1];
+		n[3 * (size_t)i + 1] = u[2] * w[0] - u[0] * w[2];
+		n[3 * (size_t)i + 2] = u[0] * w[1] - u[1] * w[0];
+		l = sqrt(n[3 * (size_t)i] * n[3 * (size_t)i] + n[3 * (size_t)i + 1] * n[3 * (size_t)i + 1] + n[3 * (size_t)i + 2] * n[3 * (size_t)i + 2]);
+		A[i] = 0.5 * l;
+		for (k = 0; k < 3; k++) n[3 * (size_t)i + k] = l > 0 ? n[3 * (size_t)i + k] / l : 0;
+	}
+	/* sigma: the mean distance between the centroids of triangles sharing a vertex */
+	for (i = 0; i < nt; i++)
+	{
+		unsigned int q, j;
+		mark++;
+		stamp[i] = mark;
+		for (q = 0; q < 3; q++)
+			for (j = v0[t[3 * i + q]]; j < v0[t[3 * i + q] + 1]; j++)
+			{
+				unsigned int g = vf[j];
+				if (stamp[g] == mark)
+					continue;
+				stamp[g] = mark;
+				ss += sqrt((c[3 * (size_t)g] - c[3 * (size_t)i]) * (c[3 * (size_t)g] - c[3 * (size_t)i]) + (c[3 * (size_t)g + 1] - c[3 * (size_t)i + 1]) * (c[3 * (size_t)g + 1] - c[3 * (size_t)i + 1]) +
+					(c[3 * (size_t)g + 2] - c[3 * (size_t)i + 2]) * (c[3 * (size_t)g + 2] - c[3 * (size_t)i + 2]));
+				cnt++;
+			}
+	}
+	ss = cnt ? ss / cnt : 1;
+	for (it = 0; it < iters; it++)
+	{
+		for (i = 0; i < nt; i++)
+		{
+			double s[3] = { 0, 0, 0 }, l;
+			unsigned int q, j;
+			mark++;
+			for (q = 0; q < 3; q++)
+				for (j = v0[t[3 * i + q]]; j < v0[t[3 * i + q] + 1]; j++)
+				{
+					unsigned int g = vf[j];
+					double dc = 0, dn = 0, w;
+					if (stamp[g] == mark)
+						continue;
+					stamp[g] = mark;
+					for (k = 0; k < 3; k++)
+					{
+						dc += (c[3 * (size_t)g + k] - c[3 * (size_t)i + k]) * (c[3 * (size_t)g + k] - c[3 * (size_t)i + k]);
+						dn += (n[3 * (size_t)g + k] - n[3 * (size_t)i + k]) * (n[3 * (size_t)g + k] - n[3 * (size_t)i + k]);
+					}
+					w = A[g] * exp(-dc / (2 * ss * ss)) * exp(-dn / (2 * sigma_r * sigma_r));
+					for (k = 0; k < 3; k++) s[k] += w * n[3 * (size_t)g + k];
+				}
+			l = sqrt(s[0] * s[0] + s[1] * s[1] + s[2] * s[2]);
+			for (k = 0; k < 3; k++) n2[3 * (size_t)i + k] = l > 0 ? s[k] / l : n[3 * (size_t)i + k];
+		}
+		memcpy(n, n2, sizeof(double) * 3 * nt);
+	}
+	/* the vertices onto the filtered planes */
+	for (it = 0; it < 20; it++)
+	{
+		for (i = 0; i < nt; i++)
+			for (k = 0; k < 3; k++)
+				c[3 * (size_t)i + k] = (x[3 * (size_t)t[3 * i] + k] + x[3 * (size_t)t[3 * i + 1] + k] + x[3 * (size_t)t[3 * i + 2] + k]) / 3;
+		for (i = 0; i < nv; i++)
+		{
+			double d[3] = { 0, 0, 0 };
+			unsigned int j;
+			if (cls[i] == 2 || v0[i] == v0[i + 1])
+				continue;
+			for (j = v0[i]; j < v0[i + 1]; j++)
+			{
+				unsigned int g = vf[j];
+				double const* nn = n + 3 * (size_t)g;
+				double e = 0;
+				for (k = 0; k < 3; k++) e += nn[k] * (c[3 * (size_t)g + k] - x[3 * (size_t)i + k]);
+				for (k = 0; k < 3; k++) d[k] += nn[k] * e / (v0[i + 1] - v0[i]);
+			}
+			if (cls[i] == 1)
+			{
+				/* along the line: the move's part along the line's chord through the vertex */
+				double u[3], l = 0, dd = 0;
+				for (k = 0; k < 3; k++) { u[k] = x[3 * (size_t)ln[2 * (size_t)i] + k] - x[3 * (size_t)ln[2 * (size_t)i + 1] + k]; l += u[k] * u[k]; }
+				l = sqrt(l);
+				for (k = 0; k < 3; k++) { u[k] = l > 0 ? u[k] / l : 0; dd += d[k] * u[k]; }
+				for (k = 0; k < 3; k++) d[k] = dd * u[k];
+			}
+			for (k = 0; k < 3; k++) x[3 * (size_t)i + k] += d[k];
+		}
+	}
+done:
+	qaws_internal_free(v0); qaws_internal_free(vf); qaws_internal_free(stamp); qaws_internal_free(n); qaws_internal_free(n2); qaws_internal_free(c); qaws_internal_free(A);
+	return ok;
+}
+
 qaws_status qaws_mesh_3d_smooth(qaws_mesh_3d* mesh, qaws_smooth_desc const* desc)
 {
 	qaws_smooth_desc D;
@@ -440,11 +567,11 @@ qaws_status qaws_mesh_3d_smooth(qaws_mesh_3d* mesh, qaws_smooth_desc const* desc
 	memset(&D, 0, sizeof D);
 	if (desc)
 		D = *desc;
-	if ((unsigned int)D.method > (unsigned int)QAWS_SMOOTH_BILAPLACIAN || (unsigned int)D.weights > (unsigned int)QAWS_SMOOTH_WEIGHTS_UNIFORM
+	if ((unsigned int)D.method > (unsigned int)QAWS_SMOOTH_BILATERAL || (unsigned int)D.weights > (unsigned int)QAWS_SMOOTH_WEIGHTS_UNIFORM
 		|| !(D.step >= 0) || !isfinite((double)D.mu))
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	iters = D.iterations ? D.iterations : D.method <= QAWS_SMOOTH_TAUBIN ? 10 : 1;
-	step = D.step > 0 ? (double)D.step : D.method <= QAWS_SMOOTH_TAUBIN ? 0.5 : 1;
+	iters = D.iterations ? D.iterations : D.method == QAWS_SMOOTH_BILATERAL ? 20 : D.method <= QAWS_SMOOTH_TAUBIN ? 10 : 1;
+	step = D.step > 0 ? (double)D.step : D.method == QAWS_SMOOTH_BILATERAL ? 0.2 : D.method <= QAWS_SMOOTH_TAUBIN ? 0.5 : 1;
 	st = sm_read(mesh, &x, &t, &nv, &nt);
 	if (st != QAWS_STATUS_OK)
 		goto done;
@@ -539,6 +666,11 @@ qaws_status qaws_mesh_3d_smooth(qaws_mesh_3d* mesh, qaws_smooth_desc const* desc
 		h += sqrt((a[0] - b[0]) * (a[0] - b[0]) + (a[1] - b[1]) * (a[1] - b[1]) + (a[2] - b[2]) * (a[2] - b[2]));
 	}
 	h = nt ? h / (3.0 * nt) : 1;
+	if (D.method == QAWS_SMOOTH_BILATERAL)
+	{
+		st = sm_bilateral(x, nv, t, nt, cls, ln, iters, step) ? sm_write(mesh, x, nv) : QAWS_STATUS_ALLOCATION_FAILURE;
+		goto done;
+	}
 	if (nothing_held && (D.flags & QAWS_SMOOTH_KEEP_VOLUME))
 		vol0 = sm_volume(x, t, nt);
 	for (it = 0; it < iters; it++)

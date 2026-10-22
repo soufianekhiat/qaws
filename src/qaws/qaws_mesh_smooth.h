@@ -29,7 +29,16 @@
  *                Meyer, Schroder, Barr 1999): (M + t L) x' = M x, stable
  *                for any step, one solve smooths at the scale sqrt(t);
  *   BILAPLACIAN  the fourth order flow (M + t L M^-1 L) x' = M x: smooths
- *                while keeping more of the shape's curvature.
+ *                while keeping more of the shape's curvature;
+ *   BILATERAL    feature-preserving denoising (Zheng, Fu, Au, Tai 2011): the
+ *                triangles' normals filtered, each the mean of the normals
+ *                of the triangles sharing a vertex with it weighted by area,
+ *                by the distance between centroids and by how far the
+ *                normals differ (step: that range, 0: 0.2; iterations: the
+ *                filter's passes, 0: 20), then the vertices moved onto the
+ *                filtered planes (Sun et al. 2007): noise goes, sharp edges
+ *                the input does not mark stay sharp. KEEP_VOLUME and the
+ *                weights do not apply.
  * L is the cotangent Laplacian with lumped masses M (or the uniform graph
  * Laplacian with M = I); the explicit steps clamp negative cotangents.
  *
@@ -60,7 +69,8 @@ typedef enum qaws_smooth_method
 	QAWS_SMOOTH_LAPLACIAN = 0,
 	QAWS_SMOOTH_TAUBIN,
 	QAWS_SMOOTH_IMPLICIT,
-	QAWS_SMOOTH_BILAPLACIAN
+	QAWS_SMOOTH_BILAPLACIAN,
+	QAWS_SMOOTH_BILATERAL
 } qaws_smooth_method;
 #endif
 

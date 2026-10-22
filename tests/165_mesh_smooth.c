@@ -277,6 +277,48 @@ static void test_crease(void)
 	}
 }
 
+/* the roof's grid (its crease not marked) smoothed: the rms height error against the exact roof, and the worst on the crease */
+static void st_roof_error(qaws_mesh_3d const* m, unsigned int n, double roof, double* rms, double* crease)
+{
+	unsigned int i, j;
+	double s = 0;
+	*crease = 0;
+	for (j = 0; j <= n; j++)
+		for (i = 0; i <= n; i++)
+		{
+			qaws_vec3 p = qaws_mesh_3d_get_vertex(m, j * (n + 1) + i);
+			double e = (double)p.z - roof * fabs((double)p.x - 0.5);
+			s += e * e;
+			if (i == n / 2)
+				*crease = fmax(*crease, fabs(e));
+		}
+	*rms = sqrt(s / ((n + 1) * (n + 1)));
+}
+
+static void test_bilateral(void)
+{
+	unsigned int n = 24;
+	qaws_mesh_3d *a = st_grid(n, 0.5, 0.01, 11), *b = st_grid(n, 0.5, 0.01, 11), *c = st_grid(n, 0.5, 0.01, 11);
+	qaws_smooth_desc d;
+	double r0, c0, r1, c1, r2, c2;
+	qaws_status s1, s2;
+	char msg[300];
+	st_roof_error(a, n, 0.5, &r0, &c0);
+	memset(&d, 0, sizeof d);
+	s1 = qaws_mesh_3d_smooth(b, &d);
+	d.method = QAWS_SMOOTH_BILATERAL;
+	s2 = qaws_mesh_3d_smooth(c, &d);
+	st_roof_error(b, n, 0.5, &r1, &c1);
+	st_roof_error(c, n, 0.5, &r2, &c2);
+	sprintf(msg, "a noisy roof, its crease not marked: height error rms %.5f (crease %.5f); Laplacian %.5f (crease %.5f); bilateral %.5f (crease %.5f)",
+		r0, c0, r1, c1, r2, c2);
+	printf("  %s\n", msg);
+	TEST_ASSERT(s1 == QAWS_STATUS_OK && s2 == QAWS_STATUS_OK && r2 < 0.5 * r0 && c2 < 0.5 * c1 && r2 < r1, msg);
+	qaws_mesh_3d_destroy(a);
+	qaws_mesh_3d_destroy(b);
+	qaws_mesh_3d_destroy(c);
+}
+
 static void test_fair_plane(void)
 {
 	unsigned int n = 24, nv = (n + 1) * (n + 1), i, order;
@@ -381,6 +423,7 @@ int test_165_mesh_smooth_main(void)
 	test_sphere();
 	test_border();
 	test_crease();
+	test_bilateral();
 	test_fair_plane();
 	test_fair_cap();
 	test_refusals();
