@@ -64,6 +64,8 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- sqrt(3) subdivision: Kobbelt's ternary rule on borders and creases every second level (the ternary cubic
+  B-spline; chain ends interpolated). Test 172.
 - The butterfly's extraordinary crease and border rule (Zorin): an edge next to a crease or border vertex whose side
   holds n != 3 triangles takes the valence 2 n ring reflected oddly across the crease. Test 172.
 - Weights on every skeleton: `qaws_skeleton`'s arcs and the circles opened at reflex vertices move at their weights

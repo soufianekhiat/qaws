@@ -824,7 +824,8 @@ static void test_sqrt3(void)
 	qaws_mesh_3d *oc = sd_octahedron(), *o1 = sd_run(oc, QAWS_MESH_SUBDIVIDE_SQRT3, 1, NULL), *o2 = sd_run(oc, QAWS_MESH_SUBDIVIDE_SQRT3, 2, NULL), *s = NULL, *s2 = NULL, *bad = NULL;
 	qaws_mesh_subdivide_desc d;
 	qaws_status sl;
-	double v0 = 1, c0 = 1, lin = 1, flat = 1, border = 1;
+	double v0 = 1, c0 = 1, lin = 1, flat = 1, border = 1, near = 1;
+	unsigned int n2 = 0;
 	char msg[400];
 	{
 		/* a 4 x 4 sheet, a colour 0.3 x - 0.7 y + 2 */
@@ -857,7 +858,7 @@ static void test_sqrt3(void)
 		s2 = sd_run(s, QAWS_MESH_SUBDIVIDE_SQRT3, 2, NULL);
 		if (s2 && qaws_mesh_3d_find_attribute(&id, s2, "colour") == QAWS_STATUS_OK)
 		{
-			unsigned int n2 = qaws_mesh_3d_get_vertex_count(s2);
+			n2 = qaws_mesh_3d_get_vertex_count(s2);
 			qaws_scalar* c2 = (qaws_scalar*)malloc(sizeof(qaws_scalar) * n2);
 			qaws_mesh_3d_get_attribute(c2, s2, id);
 			lin = flat = border = 0;
@@ -867,12 +868,25 @@ static void test_sqrt3(void)
 				lin = fmax(lin, fabs((double)c2[i] - (0.3 * (double)p.x - 0.7 * (double)p.y + 2)));
 				flat = fmax(flat, fabs((double)p.z));
 			}
+			/* the second level's ternary border rule: an old border vertex at (4 a + 19 v + 4 b) / 27 (the corners move in, the
+			   sides' stay), a new point by the corner (0, 0) at (10, 1) / 108 */
 			for (i = 0; i < (N + 1) * (N + 1); i++)
 				if (i % (N + 1) == 0 || i % (N + 1) == N || i / (N + 1) == 0 || i / (N + 1) == N)
 				{
 					qaws_vec3 p = qaws_mesh_3d_get_vertex(s2, i);
-					border = fmax(border, fabs((double)p.x - x[3 * i]) + fabs((double)p.y - x[3 * i + 1]));
+					double ex = x[3 * i], ey = x[3 * i + 1];
+					if ((i % (N + 1) == 0 || i % (N + 1) == N) && (i / (N + 1) == 0 || i / (N + 1) == N))
+					{
+						ex += (ex < 0.5 ? 1.0 : -1.0) / 27;
+						ey += (ey < 0.5 ? 1.0 : -1.0) / 27;
+					}
+					border = fmax(border, fabs((double)p.x - ex) + fabs((double)p.y - ey));
 				}
+			for (i = 0; i < n2; i++)
+			{
+				qaws_vec3 p = qaws_mesh_3d_get_vertex(s2, i);
+				near = fmin(near, fabs((double)p.x - 10.0 / 108) + fabs((double)p.y - 1.0 / 108));
+			}
 			free(c2);
 		}
 	}
@@ -886,17 +900,44 @@ static void test_sqrt3(void)
 		v0 = fabs((double)p.x - 5.0 / 9) + fabs((double)p.y) + fabs((double)p.z);
 		c0 = fabs((double)q.x - 1.0 / 3) + fabs((double)q.y - 1.0 / 3) + fabs((double)q.z - 1.0 / 3);
 	}
-	sprintf(msg, "sqrt(3): the octahedron to %u vertices, %u triangles; vertex 0 off 5/9 by %.1e, a centroid off by %.1e; two levels %u, %u; a sheet flat to %.1e, a linear colour to %.1e, its border moved %.1e; limit refused (%d)",
+	sprintf(msg, "sqrt(3): the octahedron to %u vertices, %u triangles; vertex 0 off 5/9 by %.1e, a centroid off by %.1e; two levels %u, %u; a sheet flat to %.1e, a linear colour to %.1e, %u vertices (185: its border cut in three), its old border off the ternary rule by %.1e, a new point by a corner off by %.1e; limit refused (%d)",
 		o1 ? qaws_mesh_3d_get_vertex_count(o1) : 0, o1 ? qaws_mesh_3d_get_face_count(o1) : 0, v0, c0, o2 ? qaws_mesh_3d_get_vertex_count(o2) : 0,
-		o2 ? qaws_mesh_3d_get_face_count(o2) : 0, flat, lin, border, (int)sl);
+		o2 ? qaws_mesh_3d_get_face_count(o2) : 0, flat, lin, n2, border, near, (int)sl);
 	printf("  %s\n", msg);
 	TEST_ASSERT(o1 && o2 && qaws_mesh_3d_get_vertex_count(o1) == 14 && qaws_mesh_3d_get_face_count(o1) == 24 && v0 < 1e-15 && c0 < 1e-15 &&
-		qaws_mesh_3d_get_vertex_count(o2) == 38 && qaws_mesh_3d_get_face_count(o2) == 72 && flat == 0 && lin < 1e-14 && border == 0 && sl == QAWS_STATUS_INVALID_ARGUMENT && !bad, msg);
+		qaws_mesh_3d_get_vertex_count(o2) == 38 && qaws_mesh_3d_get_face_count(o2) == 72 && flat == 0 && lin < 1e-14 && n2 == 185 && border < 1e-15 && near < 1e-15 && sl == QAWS_STATUS_INVALID_ARGUMENT && !bad, msg);
 	qaws_mesh_3d_destroy(oc);
 	qaws_mesh_3d_destroy(o1);
 	qaws_mesh_3d_destroy(o2);
 	qaws_mesh_3d_destroy(s);
 	qaws_mesh_3d_destroy(s2);
+}
+
+/* sqrt(3) on creases: the octahedron with its twelve edges features (its vertices corners), two levels: each crease
+   cut in three on both sides (36 feature edges), closed (V - F / 2 = 2), every face in its plane (the volume 4 / 3) */
+static void test_sqrt3_creases(void)
+{
+	qaws_mesh_3d *oc = sd_octahedron(), *o = NULL;
+	unsigned int nfe = 0, v = 0, f = 0;
+	double vol = 0;
+	char msg[300];
+	if (oc)
+	{
+		qaws_mesh_3d_detect_features(oc, (qaws_scalar)0.5, 0, 0);
+		o = sd_run(oc, QAWS_MESH_SUBDIVIDE_SQRT3, 2, NULL);
+	}
+	if (o)
+	{
+		nfe = qaws_mesh_3d_get_feature_edge_count(o);
+		v = qaws_mesh_3d_get_vertex_count(o);
+		f = qaws_mesh_3d_get_face_count(o);
+		vol = sd_volume(o);
+	}
+	sprintf(msg, "sqrt(3) on the octahedron's creases, two levels: %u feature edges (36), %u vertices and %u triangles (V - F / 2 = 2), volume %.15f (4 / 3)", nfe, v, f, vol);
+	printf("  %s\n", msg);
+	TEST_ASSERT(o && nfe == 36 && 2 * v == f + 4 && fabs(vol - 4.0 / 3) < 1e-14, msg);
+	qaws_mesh_3d_destroy(oc);
+	qaws_mesh_3d_destroy(o);
 }
 
 int test_172_mesh_subdivide_main(void)
@@ -915,6 +956,7 @@ int test_172_mesh_subdivide_main(void)
 	test_butterfly_border();
 	test_butterfly_extraordinary_border();
 	test_sqrt3();
+	test_sqrt3_creases();
 	test_adaptive();
 	test_refusals();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);

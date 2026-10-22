@@ -82,8 +82,12 @@
  * a = (4 - 2 cos(2 pi / n)) / 9) and flips every old edge between two
  * triangles to join their centroids: three triangles for one each level,
  * nine every two, a gentler refinement than Loop's four. Border and feature
- * edges are not flipped and their vertices stay (Kobbelt's ternary border
- * rule is not used: the border keeps its polyline); sharpness is ignored
+ * edges are not flipped; every second level they take Kobbelt's ternary
+ * rule: each is cut in three by the ternary cubic B-spline (1, 4, 10, 16,
+ * 19, 16, 10, 4, 1) / 27 (a vertex inside a border or crease chain to
+ * (4 a + 19 v + 4 b) / 27, the new points (a + 16 u + 10 w) / 27, a corner
+ * or a chain's end fixed, its missing neighbour reflected), the triangle on
+ * it fanned in three from its centroid; sharpness is ignored
  * (features stay sharp); limit and limit_normals are refused. The new
  * faces follow their parent, one per half-edge.
  *
