@@ -680,6 +680,56 @@ static void test_exact_saddles(void)
 	qaws_mesh_3d_destroy(m);
 }
 
+/* two sources on a flat grid: the regions parted along their bisector, from the exact distances and from the heat method's */
+static void test_nearest(void)
+{
+	unsigned int n = 12, nv = (n + 1) * (n + 1), i, r, wrong[2] = { 0, 0 }, far = 0;
+	qaws_mesh_3d* m = gd_grids(n, 1);
+	qaws_mesh_location src[2];
+	qaws_scalar* d = (qaws_scalar*)malloc(sizeof(qaws_scalar) * nv);
+	unsigned int* lab = (unsigned int*)malloc(sizeof(unsigned int) * nv);
+	qaws_mesh_geodesic* g = NULL;
+	double sp[2][3];
+	qaws_status st[3];
+	char msg[300];
+	src[0] = gd_at_vertex(m, 2 * (n + 1) + 3);
+	src[1] = gd_at_vertex(m, 9 * (n + 1) + 8);
+	for (i = 0; i < 2; i++)
+	{
+		qaws_vec3 q = qaws_mesh_3d_get_vertex(m, i ? 9 * (n + 1) + 8 : 2 * (n + 1) + 3);
+		sp[i][0] = q.x;
+		sp[i][1] = q.y;
+		sp[i][2] = q.z;
+	}
+	qaws_mesh_geodesic_create(&g, m, NULL);
+	for (r = 0; r < 2; r++)
+	{
+		st[r] = r ? qaws_mesh_geodesic_distance(d, g, src, 2) : qaws_mesh_3d_geodesic_exact(d, m, src, 2, (qaws_scalar)HUGE_VAL);
+		if (st[r] == QAWS_STATUS_OK)
+			st[r] = qaws_mesh_3d_geodesic_nearest(lab, m, d, src, 2);
+		for (i = 0; i < nv && st[r] == QAWS_STATUS_OK; i++)
+		{
+			qaws_vec3 q = qaws_mesh_3d_get_vertex(m, i);
+			double d0 = sqrt((q.x - sp[0][0]) * (q.x - sp[0][0]) + (q.y - sp[0][1]) * (q.y - sp[0][1])),
+				d1 = sqrt((q.x - sp[1][0]) * (q.x - sp[1][0]) + (q.y - sp[1][1]) * (q.y - sp[1][1]));
+			/* (beyond an edge's length from the bisector) */
+			if (fabs(d0 - d1) < 2.0 / n)
+				continue;
+			far += r == 0;
+			wrong[r] += lab[i] != (d0 < d1 ? 0u : 1u);
+		}
+	}
+	st[2] = qaws_mesh_3d_geodesic_nearest(lab, m, d, NULL, 2);
+	sprintf(msg, "nearest sources on a grid from two: %u vertices off the bisector, %u labelled wrong from the exact distances, %u from the heat method's; no sources refused (%d)",
+		far, wrong[0], wrong[1], (int)st[2]);
+	printf("  %s\n", msg);
+	TEST_ASSERT(st[0] == QAWS_STATUS_OK && st[1] == QAWS_STATUS_OK && st[2] == QAWS_STATUS_INVALID_ARGUMENT && far > 100 && wrong[0] == 0 && wrong[1] == 0, msg);
+	qaws_mesh_geodesic_destroy(g);
+	qaws_mesh_3d_destroy(m);
+	free(d);
+	free(lab);
+}
+
 int test_164_mesh_geodesic_main(void)
 {
 	g_pass = 0;
@@ -690,6 +740,7 @@ int test_164_mesh_geodesic_main(void)
 	test_sheared();
 	test_exact();
 	test_exact_saddles();
+	test_nearest();
 	test_parts();
 	test_refusals();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);

@@ -4,7 +4,8 @@
  *     to the point from round the torus (some over the top, some through
  *     the hole);
  *   - a bumpy sphere with three sources: each vertex's distance to the
- *     nearest, the isolines meeting where two sources are as near;
+ *     nearest, the isolines meeting where two sources are as near, the
+ *     regions' borders (qaws_mesh_3d_geodesic_nearest) in red;
  *   - a sheet with a hill, the source at its left side: paths from the right
  *     side go round the hill, not over it.
  * Printed: the factoring and query times.
@@ -205,6 +206,30 @@ static void demo_geodesic(void)
 		g = ms_gd_solve(m, src, 3, d, sub);
 		ms_panel(c, 750, 0, 750, 720, m, 0.4, 0.35, "a bumpy sphere: the nearest of three", sub);
 		ms_gd_draw(c, m, g, d, ms_gd_top(d, nv), src, 3, NULL, 0);
+		{
+			/* the regions' borders (qaws_mesh_3d_geodesic_nearest): across each triangle whose vertices' sources differ */
+			static double const red[3] = { 210, 40, 40 };
+			unsigned int* lab = (unsigned int*)malloc(sizeof(unsigned int) * nv), ntr = qaws_mesh_3d_get_triangle_count(m), f, k;
+			if (lab && qaws_mesh_3d_geodesic_nearest(lab, m, d, src, 3) == QAWS_STATUS_OK)
+				for (f = 0; f < ntr; f++)
+				{
+					unsigned int tv[3], nm = 0;
+					double mid[2][3];
+					qaws_mesh_3d_get_triangle(tv, m, f);
+					for (k = 0; k < 3 && nm < 2; k++)
+						if (lab[tv[k]] != lab[tv[(k + 1) % 3]])
+						{
+							qaws_vec3 a = qaws_mesh_3d_get_vertex(m, tv[k]), b = qaws_mesh_3d_get_vertex(m, tv[(k + 1) % 3]);
+							mid[nm][0] = 0.5 * ((double)a.x + b.x);
+							mid[nm][1] = 0.5 * ((double)a.y + b.y);
+							mid[nm][2] = 0.5 * ((double)a.z + b.z);
+							nm++;
+						}
+					if (nm == 2)
+						er_line(c, mid[0], mid[1], red, 2.4);
+				}
+			free(lab);
+		}
 		printf("  bumpy sphere: %s\n", sub);
 		qaws_mesh_geodesic_destroy(g);
 		qaws_mesh_3d_destroy(m);

@@ -427,3 +427,123 @@ done:
 	qaws_internal_free(p); qaws_internal_free(ang);
 	return st;
 }
+
+typedef struct gx_order
+{
+	double d;
+	unsigned int v;
+} gx_order;
+
+static int gx_cmp_order(void const* a, void const* b)
+{
+	gx_order const *x = (gx_order const*)a, *y = (gx_order const*)b;
+	if (x->d != y->d)
+		return x->d < y->d ? -1 : 1;
+	return x->v < y->v ? -1 : (x->v > y->v ? 1 : 0);
+}
+
+qaws_status qaws_mesh_3d_geodesic_nearest(unsigned int* out_sources, qaws_mesh_3d const* mesh, qaws_scalar const* distances,
+	qaws_mesh_location const* sources, unsigned int source_count)
+{
+	unsigned int nv, nt, ne, i, k, s, *e = NULL, *co = NULL, *nb = NULL;
+	qaws_scalar* p = NULL;
+	double* best = NULL;
+	gx_order* order = NULL;
+	unsigned char* done = NULL;
+	qaws_status st = QAWS_STATUS_ALLOCATION_FAILURE;
+	if (!out_sources || !mesh || !distances || (source_count && !sources))
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	nv = qaws_mesh_3d_get_vertex_count(mesh);
+	nt = qaws_mesh_3d_get_triangle_count(mesh);
+	ne = qaws_mesh_3d_get_edge_count(mesh);
+	for (s = 0; s < source_count; s++)
+		if (sources[s].patch >= nt || !isfinite((double)sources[s].a) || !isfinite((double)sources[s].b))
+			return QAWS_STATUS_INVALID_ARGUMENT;
+	e = (unsigned int*)qaws_internal_scratch_malloc(sizeof(unsigned int) * (2 * (size_t)ne + 1));
+	co = (unsigned int*)qaws_internal_scratch_zalloc((size_t)nv + 2, sizeof(unsigned int));
+	nb = (unsigned int*)qaws_internal_scratch_malloc(sizeof(unsigned int) * (2 * (size_t)ne + 1));
+	p = (qaws_scalar*)qaws_internal_scratch_malloc(sizeof(qaws_scalar) * (3 * (size_t)nv + 1));
+	best = (double*)qaws_internal_scratch_malloc(sizeof(double) * ((size_t)nv + 1));
+	order = (gx_order*)qaws_internal_scratch_malloc(sizeof(gx_order) * ((size_t)nv + 1));
+	done = (unsigned char*)qaws_internal_scratch_zalloc((size_t)nv + 1, 1);
+	if (!e || !co || !nb || !p || !best || !order || !done)
+		goto done;
+	qaws_mesh_3d_get_edges(e, mesh);
+	qaws_mesh_3d_get_positions(p, mesh);
+	/* the edge graph's neighbours */
+	for (i = 0; i < 2 * ne; i++) co[e[i] + 1]++;
+	for (i = 0; i < nv; i++) co[i + 1] += co[i];
+	{
+		unsigned int* fill = (unsigned int*)qaws_internal_scratch_zalloc((size_t)nv + 1, sizeof(unsigned int));
+		if (!fill)
+			goto done;
+		for (i = 0; i < ne; i++)
+		{
+			nb[co[e[2 * i]] + fill[e[2 * i]]++] = e[2 * i + 1];
+			nb[co[e[2 * i + 1]] + fill[e[2 * i + 1]]++] = e[2 * i];
+		}
+		qaws_internal_free(fill);
+	}
+	/* the sources' triangles' vertices, straight */
+	for (i = 0; i < nv; i++)
+	{
+		out_sources[i] = QAWS_MESH_NONE;
+		best[i] = HUGE_VAL;
+		order[i].d = (double)distances[i];
+		order[i].v = i;
+	}
+	for (s = 0; s < source_count; s++)
+	{
+		unsigned int c[3];
+		double a = (double)sources[s].a, b = (double)sources[s].b, S[3];
+		qaws_mesh_3d_get_triangle(c, mesh, sources[s].patch);
+		for (k = 0; k < 3; k++)
+			S[k] = (1 - a - b) * (double)p[3 * (size_t)c[0] + k] + a * (double)p[3 * (size_t)c[1] + k] + b * (double)p[3 * (size_t)c[2] + k];
+		for (k = 0; k < 3; k++)
+		{
+			double const dv = sqrt(((double)p[3 * (size_t)c[k]] - S[0]) * ((double)p[3 * (size_t)c[k]] - S[0]) +
+				((double)p[3 * (size_t)c[k] + 1] - S[1]) * ((double)p[3 * (size_t)c[k] + 1] - S[1]) +
+				((double)p[3 * (size_t)c[k] + 2] - S[2]) * ((double)p[3 * (size_t)c[k] + 2] - S[2]));
+			if (dv < best[c[k]])
+			{
+				best[c[k]] = dv;
+				out_sources[c[k]] = s;
+			}
+		}
+	}
+	/* nearest first, each vertex the source of what explains its distance best: a source straight, or a neighbour already
+	   labelled plus the edge (Dijkstra's parent) */
+	qsort(order, nv, sizeof(gx_order), gx_cmp_order);
+	for (i = 0; i < nv; i++)
+	{
+		unsigned int v = order[i].v, q;
+		if (!isfinite(order[i].d))
+			break;
+		for (q = co[v]; q < co[v + 1]; q++)
+		{
+			unsigned int u = nb[q];
+			double l;
+			if (!done[u] || out_sources[u] == QAWS_MESH_NONE)
+				continue;
+			l = (double)distances[u] + sqrt(((double)p[3 * (size_t)u] - (double)p[3 * (size_t)v]) * ((double)p[3 * (size_t)u] - (double)p[3 * (size_t)v]) +
+				((double)p[3 * (size_t)u + 1] - (double)p[3 * (size_t)v + 1]) * ((double)p[3 * (size_t)u + 1] - (double)p[3 * (size_t)v + 1]) +
+				((double)p[3 * (size_t)u + 2] - (double)p[3 * (size_t)v + 2]) * ((double)p[3 * (size_t)u + 2] - (double)p[3 * (size_t)v + 2]));
+			if (l < best[v])
+			{
+				best[v] = l;
+				out_sources[v] = out_sources[u];
+			}
+		}
+		done[v] = 1;
+	}
+	st = QAWS_STATUS_OK;
+done:
+	qaws_internal_free(e);
+	qaws_internal_free(co);
+	qaws_internal_free(nb);
+	qaws_internal_free(p);
+	qaws_internal_free(best);
+	qaws_internal_free(order);
+	qaws_internal_free(done);
+	return st;
+}

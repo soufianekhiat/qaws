@@ -100,4 +100,15 @@ qaws_status qaws_mesh_geodesic_path(qaws_scalar* out_points, qaws_mesh_location*
 qaws_status qaws_mesh_3d_geodesic_exact(qaws_scalar* out_distances, qaws_mesh_3d const* mesh, qaws_mesh_location const* sources,
 	unsigned int source_count, qaws_scalar max_distance);
 
+/* The nearest source of every vertex (an index into sources; QAWS_MESH_NONE
+   where the distance is not finite), from the distances to the nearest of
+   them (the heat method's or the exact ones): the geodesic Voronoi regions.
+   Vertices go nearest first, each taking the source of what explains its
+   distance best: a source in its triangle straight, or a neighbour already
+   labelled plus their edge (Dijkstra's parent). Vertices farther than an
+   edge from the regions' borders are labelled as the distances say; along
+   the borders a vertex may take either side. */
+qaws_status qaws_mesh_3d_geodesic_nearest(unsigned int* out_sources, qaws_mesh_3d const* mesh, qaws_scalar const* distances,
+	qaws_mesh_location const* sources, unsigned int source_count);
+
 #endif /* QAWS_MESH_GEODESIC_H */
